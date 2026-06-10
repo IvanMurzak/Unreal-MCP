@@ -13,7 +13,6 @@
 #include "Misc/CoreDelegates.h"
 #include "Misc/Paths.h"
 #include "Misc/EngineVersion.h"
-#include "HAL/PlatformMisc.h"
 #include "Interfaces/IPluginManager.h"
 
 void FUnrealMcpRuntime::Startup()
