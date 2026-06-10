@@ -115,6 +115,8 @@ namespace FUnrealMcpObjectRef
 		if (UObject* Loaded = FSoftObjectPath(ObjectRef).TryLoad())
 			return Loaded;
 
+		// Last-resort fallback for refs that FSoftObjectPath's strict parsing rejects (e.g. legacy
+		// `Package.Object` short forms). Overlaps TryLoad for well-formed paths; kept for that long tail.
 		return StaticLoadObject(UObject::StaticClass(), nullptr, *ObjectRef);
 	}
 

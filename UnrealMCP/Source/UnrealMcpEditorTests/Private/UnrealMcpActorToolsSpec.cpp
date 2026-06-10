@@ -9,6 +9,8 @@
 #include "UnrealMcpToolRegistry.h"
 #include "Dom/JsonObject.h"
 #include "Editor.h"
+#include "EngineUtils.h"            // TActorIterator
+#include "Engine/World.h"
 #include "GameFramework/Actor.h"
 
 /**
@@ -130,6 +132,19 @@ void FUnrealMcpActorToolsSpec::Define()
 				TestTrue(TEXT("modify success"), R.bSuccess);
 				double Applied = 0; if (R.Structured.IsValid()) R.Structured->TryGetNumberField(TEXT("applied"), Applied);
 				TestTrue(TEXT("at least one property applied"), Applied >= 1.0);
+
+				// Read the location back: a silent transform-routing no-op would still report applied>=1,
+				// so confirm the actor actually moved to the requested world location.
+				UWorld* World = GEditor->GetEditorWorldContext().World();
+				AActor* Moved = nullptr;
+				for (TActorIterator<AActor> It(World); It; ++It)
+				{
+					if (It->GetActorLabel() == Label) { Moved = *It; break; }
+				}
+				TestNotNull(TEXT("modified actor found"), Moved);
+				if (Moved)
+					TestTrue(TEXT("location write took effect"),
+						Moved->GetActorLocation().Equals(FVector(100.0, 200.0, 50.0), 0.5));
 			}
 
 			// add a component

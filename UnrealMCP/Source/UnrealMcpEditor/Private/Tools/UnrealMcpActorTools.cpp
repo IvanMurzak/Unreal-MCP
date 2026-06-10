@@ -15,6 +15,7 @@
 #include "Components/ActorComponent.h"
 #include "Components/SceneComponent.h"
 #include "UObject/UObjectIterator.h"
+#include "UObject/UObjectGlobals.h"   // StaticFindObjectFast
 
 /**
  * The actor & component tool family (docs/ARCHITECTURE.md §10 "actor family", declared via §3.3).
@@ -171,6 +172,21 @@ namespace UnrealMcpActorTools
 				const FVector Location = Call.GetVector(TEXT("location"), FVector::ZeroVector);
 				const FRotator Rotation = Call.GetRotator(TEXT("rotation"), FRotator::ZeroRotator);
 
+				// Resolve the parent (if requested) BEFORE spawning: resolving after the spawn would leak an
+				// orphan actor on a bad ref and the error would carry no identity for the leaked actor.
+				AActor* Parent = nullptr;
+				if (Call.Has(TEXT("parentActor")))
+				{
+					const FString ParentRef = Call.GetString(TEXT("parentActor"));
+					if (!ParentRef.IsEmpty())
+					{
+						Parent = FUnrealMcpObjectRef::ResolveActor(ParentRef);
+						if (!Parent)
+							return FUnrealMcpToolResult::Error(FString::Printf(
+								TEXT("Parent actor '%s' was not found; nothing was spawned."), *ParentRef));
+					}
+				}
+
 				// Spawn through the engine UWorld path (not UEditorActorSubsystem): the actor still lands in
 				// the editor world (outliner-visible), and this avoids the editor viewport-snapping code that
 				// is unsafe under headless -nullrhi automation. SpawnParameters get a transactional, dirtyable actor.
@@ -187,18 +203,8 @@ namespace UnrealMcpActorTools
 						Actor->SetActorLabel(Label);
 				}
 
-				if (Call.Has(TEXT("parentActor")))
-				{
-					const FString ParentRef = Call.GetString(TEXT("parentActor"));
-					if (!ParentRef.IsEmpty())
-					{
-						if (AActor* Parent = FUnrealMcpObjectRef::ResolveActor(ParentRef))
-							Actor->AttachToActor(Parent, FAttachmentTransformRules::KeepWorldTransform);
-						else
-							return FUnrealMcpToolResult::Error(FString::Printf(
-								TEXT("Actor spawned but parent '%s' was not found for attachment."), *ParentRef));
-					}
-				}
+				if (Parent)
+					Actor->AttachToActor(Parent, FAttachmentTransformRules::KeepWorldTransform);
 
 				return FUnrealMcpToolResult::Success(
 					FString::Printf(TEXT("Spawned %s '%s'."), *Class->GetName(), *Actor->GetActorLabel()),
@@ -262,11 +268,16 @@ namespace UnrealMcpActorTools
 				if (!Dup)
 					return FUnrealMcpToolResult::Error(FString::Printf(TEXT("Failed to duplicate actor '%s'."), *Source->GetActorLabel()));
 
-				if (Call.Has(TEXT("name")))
+				const FString NameArg = Call.GetString(TEXT("name"));
+				if (!NameArg.IsEmpty())
 				{
-					const FString Label = Call.GetString(TEXT("name"));
-					if (!Label.IsEmpty())
-						Dup->SetActorLabel(Label);
+					Dup->SetActorLabel(NameArg);
+				}
+				else
+				{
+					// The spawn template copies the source's label verbatim, so two actors would share a
+					// label and ResolveActor could not disambiguate them. Give the duplicate a unique label.
+					FActorLabelUtilities::SetActorLabelUnique(Dup, Source->GetActorLabel());
 				}
 				return FUnrealMcpToolResult::Success(
 					FString::Printf(TEXT("Duplicated '%s' as '%s'."), *Source->GetActorLabel(), *Dup->GetActorLabel()),
@@ -395,12 +406,23 @@ namespace UnrealMcpActorTools
 					return FUnrealMcpToolResult::Error(FString::Printf(TEXT("No parent actor matched '%s'."), *ParentRef));
 				if (Parent == Child)
 					return FUnrealMcpToolResult::Error(TEXT("An actor cannot be parented to itself."));
+				// Reject a cycle up front: attaching to a descendant would be silently dropped by the engine.
+				if (Parent->IsAttachedTo(Child))
+					return FUnrealMcpToolResult::Error(FString::Printf(
+						TEXT("Cannot attach '%s' to '%s': '%s' is already a descendant (would create a cycle)."),
+						*Child->GetActorLabel(), *Parent->GetActorLabel(), *Parent->GetActorLabel()));
 
 				const FAttachmentTransformRules Rules = bKeepWorld
 					? FAttachmentTransformRules::KeepWorldTransform
 					: FAttachmentTransformRules::KeepRelativeTransform;
 				const FName Socket(*Call.GetString(TEXT("socket")));
 				Child->AttachToActor(Parent, Rules, Socket);
+				// AttachToActor returns void and silently no-ops on rejection (e.g. missing root component);
+				// verify the attachment actually took rather than reporting a false success.
+				if (Child->GetAttachParentActor() != Parent)
+					return FUnrealMcpToolResult::Error(FString::Printf(
+						TEXT("Engine rejected attaching '%s' to '%s' (missing root component or invalid attachment)."),
+						*Child->GetActorLabel(), *Parent->GetActorLabel()));
 				return FUnrealMcpToolResult::Success(
 					FString::Printf(TEXT("Attached '%s' to '%s'."), *Child->GetActorLabel(), *Parent->GetActorLabel()));
 			});
@@ -430,9 +452,22 @@ namespace UnrealMcpActorTools
 					return FUnrealMcpToolResult::Error(FString::Printf(TEXT("'%s' is abstract and cannot be instantiated."), *ClassRef));
 
 				const FString NameArg = Call.GetString(TEXT("name"));
-				const FName CompName = NameArg.IsEmpty()
-					? MakeUniqueObjectName(Actor, CompClass, CompClass->GetFName())
-					: FName(*NameArg);
+				FName CompName;
+				if (NameArg.IsEmpty())
+				{
+					CompName = MakeUniqueObjectName(Actor, CompClass, CompClass->GetFName());
+				}
+				else
+				{
+					CompName = FName(*NameArg);
+					// Reject a name collision BEFORE NewObject: reusing an existing subobject name under the
+					// actor re-allocates it in place — a different class triggers a StaticAllocateObject fatal
+					// assert (editor crash); the same class silently clobbers. Surface a structured error.
+					if (StaticFindObjectFast(nullptr, Actor, CompName))
+						return FUnrealMcpToolResult::Error(FString::Printf(
+							TEXT("A component named '%s' already exists on '%s'; choose a different name."),
+							*NameArg, *Actor->GetActorLabel()));
+				}
 
 				Actor->Modify();
 				UActorComponent* NewComp = NewObject<UActorComponent>(Actor, CompClass, CompName, RF_Transactional);
@@ -475,6 +510,14 @@ namespace UnrealMcpActorTools
 				UActorComponent* Comp = FUnrealMcpObjectRef::ResolveComponent(Actor, CompRef);
 				if (!Comp)
 					return FUnrealMcpToolResult::Error(FString::Printf(TEXT("No component matched '%s' on '%s'."), *CompRef, *Actor->GetActorLabel()));
+
+				// Only instance components can be destroyed cleanly: a native/inherited component would no-op
+				// RemoveInstanceComponent yet still proceed to DestroyComponent, leaving a broken (possibly
+				// rootless) actor while reporting success. Reject it explicitly instead.
+				if (!Actor->GetInstanceComponents().Contains(Comp))
+					return FUnrealMcpToolResult::Error(FString::Printf(
+						TEXT("Component '%s' on '%s' is not an instance component (native/inherited components cannot be destroyed this way)."),
+						*CompRef, *Actor->GetActorLabel()));
 
 				const FString CompName = Comp->GetName();
 				Actor->Modify();

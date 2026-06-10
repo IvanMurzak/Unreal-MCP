@@ -13,30 +13,34 @@
 
 namespace
 {
-	/** Read a {x,y,z} object into an FVector; returns false when the value is not such an object. */
+	/** Read a {x,y,z} object into an FVector; returns true only when ≥1 recognized axis key was present
+	 *  (an empty or typo'd object must NOT count as an applied no-op write). */
 	bool JsonToVector(const TSharedPtr<FJsonValue>& Value, FVector& Out)
 	{
 		const TSharedPtr<FJsonObject>* Obj;
 		if (!Value.IsValid() || !Value->TryGetObject(Obj) || !Obj->IsValid())
 			return false;
+		bool bAny = false;
 		double C;
-		if ((*Obj)->TryGetNumberField(TEXT("x"), C)) Out.X = C;
-		if ((*Obj)->TryGetNumberField(TEXT("y"), C)) Out.Y = C;
-		if ((*Obj)->TryGetNumberField(TEXT("z"), C)) Out.Z = C;
-		return true;
+		if ((*Obj)->TryGetNumberField(TEXT("x"), C)) { Out.X = C; bAny = true; }
+		if ((*Obj)->TryGetNumberField(TEXT("y"), C)) { Out.Y = C; bAny = true; }
+		if ((*Obj)->TryGetNumberField(TEXT("z"), C)) { Out.Z = C; bAny = true; }
+		return bAny;
 	}
 
-	/** Read a {pitch,yaw,roll} object into an FRotator; returns false when not such an object. */
+	/** Read a {pitch,yaw,roll} object into an FRotator; returns true only when ≥1 recognized key was
+	 *  present (an empty or typo'd object must NOT count as an applied no-op write). */
 	bool JsonToRotator(const TSharedPtr<FJsonValue>& Value, FRotator& Out)
 	{
 		const TSharedPtr<FJsonObject>* Obj;
 		if (!Value.IsValid() || !Value->TryGetObject(Obj) || !Obj->IsValid())
 			return false;
+		bool bAny = false;
 		double C;
-		if ((*Obj)->TryGetNumberField(TEXT("pitch"), C)) Out.Pitch = C;
-		if ((*Obj)->TryGetNumberField(TEXT("yaw"),   C)) Out.Yaw = C;
-		if ((*Obj)->TryGetNumberField(TEXT("roll"),  C)) Out.Roll = C;
-		return true;
+		if ((*Obj)->TryGetNumberField(TEXT("pitch"), C)) { Out.Pitch = C; bAny = true; }
+		if ((*Obj)->TryGetNumberField(TEXT("yaw"),   C)) { Out.Yaw = C; bAny = true; }
+		if ((*Obj)->TryGetNumberField(TEXT("roll"),  C)) { Out.Roll = C; bAny = true; }
+		return bAny;
 	}
 
 	/** Find a reflected property by its JSON key (case-insensitive — keys are lower-first-cased, §3.2). */
@@ -150,6 +154,10 @@ namespace FUnrealMcpPropertyJson
 		AActor* AsActor = Cast<AActor>(Object);
 		USceneComponent* AsScene = Cast<USceneComponent>(Object);
 
+		// Snapshot the pre-change state for the transaction buffer BEFORE mutating. Calling Modify() after
+		// the writes (as before) records the already-changed values, making undo a no-op.
+		Object->Modify();
+
 		int32 Applied = 0;
 		for (const TPair<FString, TSharedPtr<FJsonValue>>& Field : Properties->Values)
 		{
@@ -204,10 +212,13 @@ namespace FUnrealMcpPropertyJson
 				OutErrors.Add(FString::Printf(TEXT("unknown property '%s'"), *Key));
 				continue;
 			}
-			if (Prop->HasAnyPropertyFlags(CPF_EditConst) || !Prop->HasAnyPropertyFlags(CPF_Edit | CPF_BlueprintVisible))
+			// Writable iff editable-and-not-const, OR blueprint-visible-and-not-blueprint-read-only. The old
+			// gate admitted BlueprintReadOnly props (CPF_BlueprintVisible set, no CPF_Edit, no CPF_EditConst).
+			const bool bEditable = Prop->HasAnyPropertyFlags(CPF_Edit) && !Prop->HasAnyPropertyFlags(CPF_EditConst);
+			const bool bBlueprintWritable = Prop->HasAnyPropertyFlags(CPF_BlueprintVisible) && !Prop->HasAnyPropertyFlags(CPF_BlueprintReadOnly);
+			if (!bEditable && !bBlueprintWritable)
 			{
-				// Allow editable / blueprint-visible properties only; reject read-only ones explicitly so
-				// the caller gets a clear reason rather than a silent no-op.
+				// Reject read-only properties explicitly so the caller gets a clear reason, not a silent no-op.
 				OutErrors.Add(FString::Printf(TEXT("property '%s' is not writable"), *Key));
 				continue;
 			}
@@ -225,7 +236,6 @@ namespace FUnrealMcpPropertyJson
 
 		if (Applied > 0)
 		{
-			Object->Modify();
 			Object->PostEditChange();
 			Object->MarkPackageDirty();
 		}
