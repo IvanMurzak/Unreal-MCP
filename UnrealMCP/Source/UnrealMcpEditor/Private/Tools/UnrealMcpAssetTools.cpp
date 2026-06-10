@@ -98,7 +98,14 @@ namespace UnrealMcpAssetTools
 	 */
 	static bool IsWritableContentRoot(const FString& InPath)
 	{
-		return !(InPath.StartsWith(TEXT("/Engine")) || InPath.StartsWith(TEXT("/Script")) || InPath.StartsWith(TEXT("/Temp")));
+		// Reject the exact reserved root ("/Engine") or any path under it ("/Engine/..."), but NOT a
+		// sibling mount whose name merely begins with the string (e.g. a "/EngineExtras" plugin root
+		// is writable). Matching the trailing slash (plus exact equality) avoids that false reject.
+		auto IsReservedRoot = [&InPath](const TCHAR* Root)
+		{
+			return InPath.Equals(Root) || InPath.StartsWith(FString(Root) + TEXT("/"));
+		};
+		return !(IsReservedRoot(TEXT("/Engine")) || IsReservedRoot(TEXT("/Script")) || IsReservedRoot(TEXT("/Temp")));
 	}
 
 	/** Read a string-array argument (returns empty when absent or not an array). */
@@ -227,7 +234,7 @@ namespace UnrealMcpAssetTools
 				if (Filter.IsEmpty())
 				{
 					Filter.PackagePaths.Add(FName(TEXT("/Game")));
-					Filter.bRecursivePaths = true;
+					Filter.bRecursivePaths = bRecursive;
 				}
 
 				TArray<FAssetData> Assets;
@@ -376,6 +383,11 @@ namespace UnrealMcpAssetTools
 					return FUnrealMcpToolResult::Error(
 						FString::Printf(TEXT("'%s' is not a valid destination package path."), *Destination));
 				}
+				if (!IsWritableContentRoot(Destination))
+				{
+					return FUnrealMcpToolResult::Error(
+						FString::Printf(TEXT("Refusing to copy into '%s' under an engine content root; use a project root like '/Game'."), *Destination));
+				}
 				if (UEditorAssetLibrary::DoesAssetExist(Destination))
 				{
 					return FUnrealMcpToolResult::Error(
@@ -419,6 +431,11 @@ namespace UnrealMcpAssetTools
 				{
 					return FUnrealMcpToolResult::Error(
 						FString::Printf(TEXT("'%s' is not a valid destination package path."), *Destination));
+				}
+				if (!IsWritableContentRoot(Destination))
+				{
+					return FUnrealMcpToolResult::Error(
+						FString::Printf(TEXT("Refusing to move into '%s' under an engine content root; use a project root like '/Game'."), *Destination));
 				}
 				if (UEditorAssetLibrary::DoesAssetExist(Destination))
 				{
@@ -576,6 +593,11 @@ namespace UnrealMcpAssetTools
 				{
 					return FUnrealMcpToolResult::Error(
 						FString::Printf(TEXT("'%s' is not a valid destination package path."), *Destination));
+				}
+				if (!IsWritableContentRoot(Destination))
+				{
+					return FUnrealMcpToolResult::Error(
+						FString::Printf(TEXT("Refusing to create '%s' under an engine content root; use a project root like '/Game'."), *Destination));
 				}
 				if (UEditorAssetLibrary::DoesAssetExist(Destination))
 				{
@@ -738,11 +760,28 @@ namespace UnrealMcpAssetTools
 					}
 				}
 
+				// Nothing applied → leave the package untouched. Cancel the transaction AND skip
+				// UpdateMaterialInstance/MarkPackageDirty entirely: MarkPackageDirty is NOT undone by
+				// Transaction.Cancel(), so dirtying here would leave a no-op edit on disk. This fires for
+				// both the all-failed case (Failed > 0) and the all-empty case (every supplied parameter
+				// object was empty, e.g. {"scalars":{}}, yielding Applied == Failed == 0) — the latter
+				// previously slipped through, committing an empty transaction and reporting false success.
+				if (Applied.Num() == 0)
+				{
+					Transaction.Cancel();
+					const FString Reason = Failed.Num() > 0
+						? FString::Printf(TEXT("%d failed — unknown parameter names or missing textures"), Failed.Num())
+						: TEXT("no applicable parameters supplied");
+					return FUnrealMcpToolResult::Error(
+						FString::Printf(TEXT("No parameters applied to '%s' (%s)."), *Instance->GetName(), *Reason));
+				}
+
+				// At least one parameter applied → commit it to the instance and dirty the package.
 				UMaterialEditingLibrary::UpdateMaterialInstance(Instance);
 				Instance->MarkPackageDirty();
 
 				bool bSaved = false;
-				if (bSave && Applied.Num() > 0)
+				if (bSave)
 				{
 					bSaved = UEditorAssetLibrary::SaveLoadedAsset(Instance, /*bOnlyIfIsDirty*/ false);
 				}
@@ -757,14 +796,6 @@ namespace UnrealMcpAssetTools
 				Structured->SetArrayField(TEXT("failed"), FailedJson);
 				Structured->SetBoolField(TEXT("saved"), bSaved);
 
-				if (Applied.Num() == 0 && Failed.Num() > 0)
-				{
-					// Nothing applied — cancel the (empty) transaction so it doesn't pollute the undo stack.
-					Transaction.Cancel();
-					return FUnrealMcpToolResult::Error(
-						FString::Printf(TEXT("No parameters applied to '%s' (%d failed — unknown parameter names or missing textures)."),
-							*Instance->GetName(), Failed.Num()));
-				}
 				return FUnrealMcpToolResult::Success(
 					FString::Printf(TEXT("Applied %d parameter(s) to '%s' (%d failed%s)."),
 						Applied.Num(), *Instance->GetName(), Failed.Num(), bSaved ? TEXT(", saved") : TEXT("")),
@@ -864,16 +895,19 @@ namespace UnrealMcpAssetTools
 			                  "the Content Browser via an AssetImportTask. 'file' is an absolute filesystem "
 			                  "path; 'destination' is the target package path (e.g. '/Game/Imported', must be "
 			                  "under a project / plugin content root, not /Engine); 'name' optionally overrides "
-			                  "the imported asset name. The import is in-memory unless 'save':true."))
+			                  "the imported asset name. Refuses to overwrite an existing asset at the destination "
+			                  "unless 'replaceExisting':true. The import is in-memory unless 'save':true."))
 			.ParamString(TEXT("file"), TEXT("Absolute filesystem path of the source file to import."), EUnrealMcpParamRequirement::Required)
 			.ParamString(TEXT("destination"), TEXT("Destination package path, e.g. '/Game/Imported'."), EUnrealMcpParamRequirement::Required)
 			.ParamString(TEXT("name"), TEXT("Optional imported asset name override."))
+			.ParamBool(TEXT("replaceExisting"), TEXT("Overwrite an existing asset at the destination. Default false (re-import is opt-in)."))
 			.ParamBool(TEXT("save"), TEXT("Save the imported package(s) to disk. Default false (in-memory only)."))
 			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
 			{
 				const FString File = Call.GetString(TEXT("file"));
 				const FString Destination = Call.GetString(TEXT("destination"));
 				const FString NameOverride = Call.GetString(TEXT("name"));
+				const bool bReplaceExisting = Call.GetBool(TEXT("replaceExisting"), false);
 				const bool bSave = Call.GetBool(TEXT("save"), false);
 				if (File.IsEmpty() || Destination.IsEmpty())
 				{
@@ -900,7 +934,7 @@ namespace UnrealMcpAssetTools
 					Task->DestinationName = NameOverride;
 				}
 				Task->bAutomated = true;
-				Task->bReplaceExisting = true;
+				Task->bReplaceExisting = bReplaceExisting;
 				Task->bSave = bSave;
 				Task->bAsync = false;
 
