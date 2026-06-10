@@ -1,0 +1,30 @@
+{
+  "FileVersion": 3,
+  "Version": 1,
+  "VersionName": "0.1.0",
+  "FriendlyName": "Unreal MCP (AI Game Developer)",
+  "Description": "Model Context Protocol (MCP) integration for the Unreal Editor. Exposes editor operations as AI Tools so MCP-aware AI assistants (Claude, Cursor, Copilot, ...) can inspect and drive your Unreal project.",
+  "Category": "AI",
+  "CreatedBy": "Ivan Murzak",
+  "CreatedByURL": "https://github.com/IvanMurzak",
+  "DocsURL": "https://github.com/IvanMurzak/Unreal-MCP",
+  "MarketplaceURL": "",
+  "SupportURL": "https://github.com/IvanMurzak/Unreal-MCP/issues",
+  "EngineVersion": "5.5.0",
+  "CanContainContent": false,
+  "IsBetaVersion": true,
+  "IsExperimentalVersion": false,
+  "Installed": false,
+  "Modules": [
+    {
+      "Name": "UnrealMcpEditor",
+      "Type": "Editor",
+      "LoadingPhase": "Default"
+    },
+    {
+      "Name": "UnrealMcpEditorTests",
+      "Type": "Editor",
+      "LoadingPhase": "Default"
+    }
+  ]
+}
