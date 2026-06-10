@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>com.IvanMurzak.Unreal.MCP.Bridge</RootNamespace>
+    <AssemblyName>unreal-mcp-bridge</AssemblyName>
+    <Version>0.1.0</Version>
+    <Authors>Ivan Murzak</Authors>
+    <Company>Ivan Murzak</Company>
+    <Copyright>Copyright © 2026 Ivan Murzak</Copyright>
+    <Description>Unreal MCP Bridge — the .NET sidecar the UnrealMCP editor plugin spawns. Hosts the McpPlugin SignalR client and relays IPC tool calls to the Unreal Editor (plugin listens on localhost TCP; this sidecar dials).</Description>
+    <RepositoryUrl>https://github.com/IvanMurzak/Unreal-MCP</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/IvanMurzak/Unreal-MCP</PackageProjectUrl>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <!--
+    Frozen reused NuGet pins, kept in lockstep with Godot-MCP (Godot-MCP.csproj):
+    McpPlugin 6.7.0 + ReflectorNet 5.3.1. The MCP/reflection stack is NOT forked —
+    pins are owned by the upstream release pipelines. Do NOT bump here.
+    The §2.3 ProxyTool additive API will arrive as an upstream minor bump (6.8.0);
+    until then the sidecar-bridge task may use a UseLocalMcpPlugin=true local-ref
+    switch (AI-Game-Dev-Server pattern).
+  -->
+  <ItemGroup>
+    <PackageReference Include="com.IvanMurzak.ReflectorNet" Version="5.3.1" />
+    <PackageReference Include="com.IvanMurzak.McpPlugin" Version="6.7.0" />
+  </ItemGroup>
+
+</Project>
