@@ -29,6 +29,7 @@ namespace
 	const FString TypeToolCall = TEXT("tool-call");
 	const FString TypeToolResponse = TEXT("tool-response");
 	const FString TypeToolCancel = TEXT("tool-cancel");
+	const FString TypeConfig = TEXT("config");
 	const FString TypePing = TEXT("ping");
 	const FString TypePong = TEXT("pong");
 	const FString TypeShutdown = TEXT("shutdown");
@@ -79,12 +80,17 @@ int32 FUnrealMcpBridgeServer::ComputeDeterministicPort(const FString& InProjectP
 	return 30000 + static_cast<int32>(Value % 10000);
 }
 
-int32 FUnrealMcpBridgeServer::Start(const FString& InToken, const FString& InProjectPath, const FString& InPluginVersion, const FString& InEngineVersion)
+int32 FUnrealMcpBridgeServer::Start(const FString& InToken, const FString& InProjectPath, const FString& InPluginVersion, const FString& InEngineVersion,
+	const TSharedPtr<FJsonObject>& InEffectiveConfig)
 {
 	Token = InToken;
 	ProjectPath = InProjectPath;
 	PluginVersion = InPluginVersion;
 	EngineVersion = InEngineVersion;
+	{
+		FScopeLock Lock(&ConfigMutex);
+		EffectiveConfig = InEffectiveConfig;
+	}
 
 	const int32 BasePort = ComputeDeterministicPort(ProjectPath);
 
@@ -344,10 +350,14 @@ void FUnrealMcpBridgeServer::HandleHandshake(const TSharedPtr<FJsonObject>& Mess
 	UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] handshake accepted."));
 	SendHandshakeAck();
 
-	// §1.5: on Ready immediately push the manifest (config push lands with the connection-config task).
+	// §1.5: on Ready immediately push the manifest AND the effective connection config (§1.3 `config`, §8).
+	// The handshake-ack already carries the config for the sidecar's initial SignalR connect; the standalone
+	// `config` message satisfies the §8 "on Ready and on change" contract and is the channel a later UI edit
+	// re-pushes through (SetEffectiveConfig → PushConfig).
 	{
 		FScopeLock Lock(&WriteMutex);
 		SendManifestLocked();
+		SendConfigLocked();
 	}
 
 	StartHeartbeat();
@@ -525,6 +535,16 @@ void FUnrealMcpBridgeServer::SendHandshakeAck()
 	Ack->SetStringField(TEXT("pluginVersion"), PluginVersion);
 	Ack->SetStringField(TEXT("engineVersion"), EngineVersion);
 	Ack->SetStringField(TEXT("projectPath"), ProjectPath);
+
+	// §1.3/§1.5: the ack carries the effective connection config so the sidecar's FIRST SignalR connect uses
+	// the plugin-resolved mode/host/cloudUrl/token (the sidecar never re-resolves §8). Tokens are part of the
+	// payload but are NEVER logged here (§8) — only the message shape is.
+	{
+		FScopeLock Lock(&ConfigMutex);
+		if (EffectiveConfig.IsValid())
+			Ack->SetObjectField(TEXT("config"), EffectiveConfig);
+	}
+
 	SendMessage(Ack);
 }
 
@@ -560,6 +580,59 @@ void FUnrealMcpBridgeServer::PushManifest()
 		return;
 	FScopeLock Lock(&WriteMutex);
 	SendManifestLocked();
+}
+
+void FUnrealMcpBridgeServer::SendConfigLocked()
+{
+	// Caller holds WriteMutex. Build a fresh `config` envelope wrapping the effective §8 connection config.
+	TSharedPtr<FJsonObject> ConfigCopy;
+	{
+		FScopeLock Lock(&ConfigMutex);
+		ConfigCopy = EffectiveConfig;
+	}
+	if (!ConfigCopy.IsValid())
+		return; // no config to push (the sidecar keeps its env fallback)
+
+	TSharedPtr<FJsonObject> Message = MakeShared<FJsonObject>();
+	Message->SetStringField(TEXT("type"), TypeConfig);
+	// Spread the effective config fields (mode/host/cloudUrl/token/keepConnected) onto the envelope so the
+	// §1.3 `config` message is flat (the sidecar reads them off the top level, like the handshake-ack does).
+	for (const TPair<FString, TSharedPtr<FJsonValue>>& Field : ConfigCopy->Values)
+		Message->SetField(Field.Key, Field.Value);
+
+	const FString Json = SerializeCondensed(Message);
+	const TArray<uint8> Framed = FUnrealMcpNdjsonAccumulator::Encode(Json);
+
+	FScopeLock ConnLock(&ConnectionMutex);
+	if (ClientSocket == nullptr)
+		return;
+
+	if (!TrySendFramedLocked(Framed))
+	{
+		UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] config send failed mid-frame; dropping connection."));
+		SocketsPendingDestroy.Add(ClientSocket);
+		ClientSocket = nullptr;
+		bClientConnected = false;
+		bHandshakeOk = false;
+		bHeartbeatStop = true;
+	}
+}
+
+void FUnrealMcpBridgeServer::PushConfig()
+{
+	if (!bClientConnected || !bHandshakeOk)
+		return;
+	FScopeLock Lock(&WriteMutex);
+	SendConfigLocked();
+}
+
+void FUnrealMcpBridgeServer::SetEffectiveConfig(const TSharedPtr<FJsonObject>& InEffectiveConfig)
+{
+	{
+		FScopeLock Lock(&ConfigMutex);
+		EffectiveConfig = InEffectiveConfig;
+	}
+	PushConfig(); // "on change" (§8) — no-op when no sidecar is connected
 }
 
 void FUnrealMcpBridgeServer::CloseActiveConnection()

@@ -10,6 +10,7 @@
 
 using System;
 using System.Threading;
+using System.Text.Json.Nodes;
 using com.IvanMurzak.McpPlugin;
 using com.IvanMurzak.McpPlugin.Common;
 using com.IvanMurzak.ReflectorNet;
@@ -112,21 +113,17 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             // Wire the registrar BEFORE the IPC loop can deliver a manifest.
             _ipc.Registrar = _registrar;
             _ipc.HandshakeAccepted += OnHandshakeAccepted;
+            _ipc.ConfigReceived += OnConfigReceived;
+            _ipc.AuthMessageReceived += HandleAuthMessage;
 
             _logger?.LogInformation("Sidecar host built (version {Version}); awaiting IPC handshake.", _sidecarVersion);
         }
 
         private void OnHandshakeAccepted(HandshakeAckMessage ack)
         {
-            // Apply the effective connection config the plugin sent in the handshake-ack (§1.5). The plugin
-            // resolves Cloud/Custom host, token and mode (§8) and hands the sidecar the result; the sidecar
-            // never re-resolves it. Falls back to the values seeded in Build() when a field is absent.
-            var host = ack.Config?["host"]?.GetValue<string>();
-            var token = ack.Config?["token"]?.GetValue<string>();
-            if (!string.IsNullOrWhiteSpace(host))
-                _config.Host = host!;
-            if (token != null)
-                _config.Token = string.IsNullOrEmpty(token) ? null : token;
+            // Apply the effective connection config the plugin sent in the handshake-ack (§1.5, §8) — the
+            // mode-aware host/token/keepConnected selection lives in ApplyConnectionConfig.
+            ApplyConnectionConfig(ack.Config);
 
             _logger?.LogInformation("Handshake accepted (plugin {PluginVersion}, engine {Engine}); connecting SignalR to {Host}.",
                 ack.PluginVersion, ack.EngineVersion, _config.Host);
@@ -138,6 +135,74 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
                 _ = ConnectSignalRAsync();
             else
                 _logger?.LogDebug("Handshake re-accepted; SignalR connect already initiated (KeepConnected handles reconnection).");
+        }
+
+        private void OnConfigReceived(JsonObject config)
+        {
+            // §8 "on change": the plugin re-pushed the effective connection config. Apply it. A live mode/host
+            // change that requires re-dialling SignalR is deferred to the UI task — for now KeepConnected
+            // covers transient reconnects and the next reconnect epoch picks up the applied values.
+            ApplyConnectionConfig(config);
+            _logger?.LogInformation("Applied updated connection config (mode-aware host {Host}).", _config.Host);
+        }
+
+        /// <summary>
+        /// Apply the plugin-resolved effective connection config (§1.3 / §8) onto <see cref="Config"/> with
+        /// mode-aware routing: <c>Cloud</c> → <c>cloudUrl</c>, <c>Custom</c> → <c>host</c>; the token and
+        /// <c>keepConnected</c> are taken verbatim (the plugin already resolved them — the sidecar never
+        /// re-resolves §8). Absent/blank fields leave the existing value (e.g. the Build()-time env fallback)
+        /// intact. Public so the bridge xUnit suite can assert the routing without a live plugin.
+        /// </summary>
+        public void ApplyConnectionConfig(JsonObject? config)
+        {
+            if (config == null)
+                return;
+
+            var mode = config["mode"]?.GetValue<string>();
+            var host = config["host"]?.GetValue<string>();
+            var cloudUrl = config["cloudUrl"]?.GetValue<string>();
+            var token = config["token"]?.GetValue<string>();
+
+            // Mode-aware host selection: Cloud connects to cloudUrl, Custom to host (§8). Fall back to the
+            // other field only when the mode's own field is blank, so a partial message still resolves a host.
+            var isCloud = string.Equals(mode, "Cloud", StringComparison.OrdinalIgnoreCase);
+            var selected = isCloud ? cloudUrl : host;
+            if (string.IsNullOrWhiteSpace(selected))
+                selected = isCloud ? host : cloudUrl;
+            if (!string.IsNullOrWhiteSpace(selected))
+                _config.Host = selected!;
+
+            // Token: the plugin already applied mode+auth resolution (empty in Custom+None). An absent key
+            // leaves the existing token; an explicit empty value clears it (anonymous connection).
+            if (token != null)
+                _config.Token = string.IsNullOrEmpty(token) ? null : token;
+
+            if (config["keepConnected"] is JsonValue keepNode && keepNode.TryGetValue<bool>(out var keepConnected))
+                _config.KeepConnected = keepConnected;
+        }
+
+        /// <summary>
+        /// Handle a §1.3 auth message (<c>auth-start</c> / <c>auth-cancel</c> / <c>auth-revoke</c>) as a
+        /// graceful stub pending the full device-code UI flow (§8). <c>auth-revoke</c> clears the stored
+        /// cloud bearer. Public so the bridge xUnit suite can assert the stub behavior directly.
+        /// </summary>
+        public void HandleAuthMessage(string type)
+        {
+            // §8 auth plumbing — graceful stubs until the device-code UI flow lands.
+            switch (type)
+            {
+                case IpcProtocol.Type.AuthRevoke:
+                    // Clear the stored cloud bearer so a subsequent (re)connect is anonymous until re-authorized.
+                    _config.Token = null;
+                    _logger?.LogInformation("Cloud token revoked (auth-revoke); cleared the in-memory bearer.");
+                    break;
+                case IpcProtocol.Type.AuthStart:
+                    _logger?.LogInformation("auth-start received; the device-code flow is not implemented in the sidecar-bridge MVP (pending the UI task).");
+                    break;
+                case IpcProtocol.Type.AuthCancel:
+                    _logger?.LogInformation("auth-cancel received; no in-progress device-code flow to cancel (pending the UI task).");
+                    break;
+            }
         }
 
         private async System.Threading.Tasks.Task ConnectSignalRAsync()
@@ -159,6 +224,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         public void Dispose()
         {
             _ipc.HandshakeAccepted -= OnHandshakeAccepted;
+            _ipc.ConfigReceived -= OnConfigReceived;
+            _ipc.AuthMessageReceived -= HandleAuthMessage;
             try { _plugin?.Dispose(); } catch { /* ignore */ }
             _plugin = null;
         }
