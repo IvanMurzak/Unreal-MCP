@@ -28,7 +28,7 @@ enum class EUnrealMcpParamRequirement : uint8
 struct UNREALMCPEDITOR_API FUnrealMcpParamSpec
 {
 	FString Name;
-	FString JsonType;        // "string" | "integer" | "number" | "boolean" | "object"
+	FString JsonType;        // "string" | "integer" | "number" | "boolean" | "object" | "array"
 	FString Description;
 	EUnrealMcpParamRequirement Requirement = EUnrealMcpParamRequirement::Optional;
 	TSharedPtr<FJsonObject> ObjectSchema; // verbatim custom schema for object/array/exotic params (e.g. FVector → {x,y,z}, paths → array of string); null for plain scalars

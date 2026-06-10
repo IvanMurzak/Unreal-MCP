@@ -77,10 +77,24 @@ void FUnrealMcpActorToolsSpec::Define()
 		{
 			FUnrealMcpToolRegistry Registry;
 			UnrealMcpActorTools::Register(Registry);
-			TestTrue(TEXT("actor-destroy destructive"), Registry.Find(TEXT("actor-destroy"))->bDestructiveHint);
-			TestTrue(TEXT("actor-find read-only"), Registry.Find(TEXT("actor-find"))->bReadOnlyHint);
-			TestTrue(TEXT("actor-component-list-all read-only"), Registry.Find(TEXT("actor-component-list-all"))->bReadOnlyHint);
-			TestFalse(TEXT("actor-create not read-only"), Registry.Find(TEXT("actor-create"))->bReadOnlyHint);
+
+			// Resolve each tool through a null-guarded lookup so a renamed/missing tool fails the assertion
+			// instead of crashing the whole automation run on a null deref.
+			auto Lookup = [this, &Registry](const TCHAR* ToolId) -> const FUnrealMcpRegisteredTool*
+			{
+				const FUnrealMcpRegisteredTool* Tool = Registry.Find(ToolId);
+				TestTrue(FString::Printf(TEXT("%s found"), ToolId), Tool != nullptr);
+				return Tool;
+			};
+
+			if (const FUnrealMcpRegisteredTool* Tool = Lookup(TEXT("actor-destroy")))
+				TestTrue(TEXT("actor-destroy destructive"), Tool->bDestructiveHint);
+			if (const FUnrealMcpRegisteredTool* Tool = Lookup(TEXT("actor-find")))
+				TestTrue(TEXT("actor-find read-only"), Tool->bReadOnlyHint);
+			if (const FUnrealMcpRegisteredTool* Tool = Lookup(TEXT("actor-component-list-all")))
+				TestTrue(TEXT("actor-component-list-all read-only"), Tool->bReadOnlyHint);
+			if (const FUnrealMcpRegisteredTool* Tool = Lookup(TEXT("actor-create")))
+				TestFalse(TEXT("actor-create not read-only"), Tool->bReadOnlyHint);
 		});
 	});
 

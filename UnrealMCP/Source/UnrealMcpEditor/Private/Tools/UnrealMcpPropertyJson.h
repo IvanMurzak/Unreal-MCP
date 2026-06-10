@@ -31,7 +31,8 @@ namespace FUnrealMcpPropertyJson
 	 */
 	UNREALMCPEDITOR_API TSharedPtr<FJsonObject> SerializeObject(const UObject* Object, const TArray<FString>& Paths);
 
-	/** Filter @p Source down to the requested dotted @p Paths, preserving nesting. Empty Paths → a clone of Source. */
+	/** Filter @p Source down to the requested dotted @p Paths, preserving nesting. Empty Paths → @p Source
+	 *  returned as-is (no copy — callers must not mutate the result in that case). */
 	UNREALMCPEDITOR_API TSharedPtr<FJsonObject> FilterByPaths(const TSharedPtr<FJsonObject>& Source, const TArray<FString>& Paths);
 
 	/**

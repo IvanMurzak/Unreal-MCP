@@ -165,43 +165,60 @@ namespace FUnrealMcpPropertyJson
 			const TSharedPtr<FJsonValue>& Value = Field.Value;
 
 			// --- Actor transform special-cases (not single FProperties) ---
+			// Each transform key is handled TERMINALLY: on a parse success we apply and count it; on a
+			// parse failure (empty {} or all-typo'd keys) we record an error and `continue`. Falling through
+			// to the generic FProperty path would either count an empty-object no-op as applied (the scene
+			// component RelativeLocation/etc. FProperties exist and JsonObjectToUStruct returns true for {})
+			// or emit a misleading "unknown property" error for the actor pseudo-keys.
 			if (AsActor)
 			{
 				if (Key.Equals(TEXT("location"), ESearchCase::IgnoreCase))
 				{
 					FVector V = AsActor->GetActorLocation();
-					if (JsonToVector(Value, V)) { AsActor->SetActorLocation(V); ++Applied; continue; }
+					if (JsonToVector(Value, V)) { AsActor->SetActorLocation(V); ++Applied; }
+					else OutErrors.Add(FString::Printf(TEXT("'%s' expects a {x,y,z} object with at least one numeric axis"), *Key));
+					continue;
 				}
-				else if (Key.Equals(TEXT("rotation"), ESearchCase::IgnoreCase))
+				if (Key.Equals(TEXT("rotation"), ESearchCase::IgnoreCase))
 				{
 					FRotator R = AsActor->GetActorRotation();
-					if (JsonToRotator(Value, R)) { AsActor->SetActorRotation(R); ++Applied; continue; }
+					if (JsonToRotator(Value, R)) { AsActor->SetActorRotation(R); ++Applied; }
+					else OutErrors.Add(FString::Printf(TEXT("'%s' expects a {pitch,yaw,roll} object with at least one numeric key"), *Key));
+					continue;
 				}
-				else if (Key.Equals(TEXT("scale"), ESearchCase::IgnoreCase))
+				if (Key.Equals(TEXT("scale"), ESearchCase::IgnoreCase))
 				{
 					FVector S = AsActor->GetActorScale3D();
-					if (JsonToVector(Value, S)) { AsActor->SetActorScale3D(S); ++Applied; continue; }
+					if (JsonToVector(Value, S)) { AsActor->SetActorScale3D(S); ++Applied; }
+					else OutErrors.Add(FString::Printf(TEXT("'%s' expects a {x,y,z} object with at least one numeric axis"), *Key));
+					continue;
 				}
 			}
 
-			// --- Scene-component relative-transform special-cases ---
+			// --- Scene-component relative-transform special-cases (also handled terminally) ---
 			if (AsScene)
 			{
 				if (Key.Equals(TEXT("relativeLocation"), ESearchCase::IgnoreCase))
 				{
 					FVector V = AsScene->GetRelativeLocation();
-					if (JsonToVector(Value, V)) { AsScene->SetRelativeLocation(V); ++Applied; continue; }
+					if (JsonToVector(Value, V)) { AsScene->SetRelativeLocation(V); ++Applied; }
+					else OutErrors.Add(FString::Printf(TEXT("'%s' expects a {x,y,z} object with at least one numeric axis"), *Key));
+					continue;
 				}
-				else if (Key.Equals(TEXT("relativeRotation"), ESearchCase::IgnoreCase))
+				if (Key.Equals(TEXT("relativeRotation"), ESearchCase::IgnoreCase))
 				{
 					FRotator R = AsScene->GetRelativeRotation();
-					if (JsonToRotator(Value, R)) { AsScene->SetRelativeRotation(R); ++Applied; continue; }
+					if (JsonToRotator(Value, R)) { AsScene->SetRelativeRotation(R); ++Applied; }
+					else OutErrors.Add(FString::Printf(TEXT("'%s' expects a {pitch,yaw,roll} object with at least one numeric key"), *Key));
+					continue;
 				}
-				else if (Key.Equals(TEXT("relativeScale3D"), ESearchCase::IgnoreCase)
+				if (Key.Equals(TEXT("relativeScale3D"), ESearchCase::IgnoreCase)
 					|| Key.Equals(TEXT("relativeScale"), ESearchCase::IgnoreCase))
 				{
 					FVector S = AsScene->GetRelativeScale3D();
-					if (JsonToVector(Value, S)) { AsScene->SetRelativeScale3D(S); ++Applied; continue; }
+					if (JsonToVector(Value, S)) { AsScene->SetRelativeScale3D(S); ++Applied; }
+					else OutErrors.Add(FString::Printf(TEXT("'%s' expects a {x,y,z} object with at least one numeric axis"), *Key));
+					continue;
 				}
 			}
 

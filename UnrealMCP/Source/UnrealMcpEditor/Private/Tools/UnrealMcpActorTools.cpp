@@ -9,6 +9,7 @@
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
 #include "Editor.h"
+#include "ScopedTransaction.h"      // FScopedTransaction — gives the per-handler Modify() snapshots an open transaction to record into
 #include "EngineUtils.h"            // TActorIterator
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
@@ -190,6 +191,7 @@ namespace UnrealMcpActorTools
 				// Spawn through the engine UWorld path (not UEditorActorSubsystem): the actor still lands in
 				// the editor world (outliner-visible), and this avoids the editor viewport-snapping code that
 				// is unsafe under headless -nullrhi automation. SpawnParameters get a transactional, dirtyable actor.
+				const FScopedTransaction Transaction(NSLOCTEXT("UnrealMcp", "ActorCreate", "MCP: Create Actor"));
 				FActorSpawnParameters SpawnParams;
 				SpawnParams.ObjectFlags |= RF_Transactional;
 				AActor* Actor = World->SpawnActor<AActor>(Class, Location, Rotation, SpawnParams);
@@ -199,8 +201,10 @@ namespace UnrealMcpActorTools
 				if (Call.Has(TEXT("name")))
 				{
 					const FString Label = Call.GetString(TEXT("name"));
+					// SetActorLabelUnique (not SetActorLabel): a user-supplied label that collides with an
+					// existing actor's label would otherwise make both ambiguous to ResolveActor.
 					if (!Label.IsEmpty())
-						Actor->SetActorLabel(Label);
+						FActorLabelUtilities::SetActorLabelUnique(Actor, Label);
 				}
 
 				if (Parent)
@@ -230,6 +234,7 @@ namespace UnrealMcpActorTools
 				if (!World)
 					return FUnrealMcpToolResult::Error(TEXT("Actor has no world."));
 
+				const FScopedTransaction Transaction(NSLOCTEXT("UnrealMcp", "ActorDestroy", "MCP: Destroy Actor"));
 				const FString Label = Actor->GetActorLabel();
 				if (!World->EditorDestroyActor(Actor, /*bShouldModifyLevel*/ true))
 					return FUnrealMcpToolResult::Error(FString::Printf(TEXT("Failed to destroy actor '%s'."), *Label));
@@ -259,6 +264,7 @@ namespace UnrealMcpActorTools
 
 				// Duplicate by spawning the same class with the source as a property template (engine path,
 				// headless-safe), then apply the requested location offset.
+				const FScopedTransaction Transaction(NSLOCTEXT("UnrealMcp", "ActorDuplicate", "MCP: Duplicate Actor"));
 				const FVector Offset = Call.GetVector(TEXT("offset"), FVector::ZeroVector);
 				FActorSpawnParameters SpawnParams;
 				SpawnParams.Template = Source;
@@ -269,16 +275,10 @@ namespace UnrealMcpActorTools
 					return FUnrealMcpToolResult::Error(FString::Printf(TEXT("Failed to duplicate actor '%s'."), *Source->GetActorLabel()));
 
 				const FString NameArg = Call.GetString(TEXT("name"));
-				if (!NameArg.IsEmpty())
-				{
-					Dup->SetActorLabel(NameArg);
-				}
-				else
-				{
-					// The spawn template copies the source's label verbatim, so two actors would share a
-					// label and ResolveActor could not disambiguate them. Give the duplicate a unique label.
-					FActorLabelUtilities::SetActorLabelUnique(Dup, Source->GetActorLabel());
-				}
+				// The spawn template copies the source's label verbatim, so two actors would share a label and
+				// ResolveActor could not disambiguate them. SetActorLabelUnique guarantees a unique label whether
+				// the caller supplied one explicitly or we fall back to the source's label.
+				FActorLabelUtilities::SetActorLabelUnique(Dup, NameArg.IsEmpty() ? Source->GetActorLabel() : NameArg);
 				return FUnrealMcpToolResult::Success(
 					FString::Printf(TEXT("Duplicated '%s' as '%s'."), *Source->GetActorLabel(), *Dup->GetActorLabel()),
 					FUnrealMcpObjectRef::ActorIdentity(Dup));
@@ -367,6 +367,7 @@ namespace UnrealMcpActorTools
 				if (!Props.IsValid())
 					return FUnrealMcpToolResult::Error(TEXT("Missing required 'properties' object."));
 
+				const FScopedTransaction Transaction(NSLOCTEXT("UnrealMcp", "ActorModify", "MCP: Modify Actor"));
 				TArray<FString> Errors;
 				const int32 Applied = FUnrealMcpPropertyJson::ApplyProperties(Actor, Props, Errors);
 				return MakeModifyResult(FString::Printf(TEXT("actor '%s'"), *Actor->GetActorLabel()), Applied, Errors);
@@ -390,6 +391,7 @@ namespace UnrealMcpActorTools
 				AActor* Child = ResolveActorOrError(Call.GetString(TEXT("actor")), Err, bFailed);
 				if (bFailed) return Err;
 
+				const FScopedTransaction Transaction(NSLOCTEXT("UnrealMcp", "ActorSetParent", "MCP: Set Actor Parent"));
 				const bool bKeepWorld = Call.GetBool(TEXT("keepWorldTransform"), true);
 				const FString ParentRef = Call.GetString(TEXT("parent"));
 
@@ -469,6 +471,7 @@ namespace UnrealMcpActorTools
 							*NameArg, *Actor->GetActorLabel()));
 				}
 
+				const FScopedTransaction Transaction(NSLOCTEXT("UnrealMcp", "ComponentAdd", "MCP: Add Component"));
 				Actor->Modify();
 				UActorComponent* NewComp = NewObject<UActorComponent>(Actor, CompClass, CompName, RF_Transactional);
 				if (!NewComp)
@@ -519,6 +522,7 @@ namespace UnrealMcpActorTools
 						TEXT("Component '%s' on '%s' is not an instance component (native/inherited components cannot be destroyed this way)."),
 						*CompRef, *Actor->GetActorLabel()));
 
+				const FScopedTransaction Transaction(NSLOCTEXT("UnrealMcp", "ComponentDestroy", "MCP: Destroy Component"));
 				const FString CompName = Comp->GetName();
 				Actor->Modify();
 				Actor->RemoveInstanceComponent(Comp);
@@ -581,6 +585,7 @@ namespace UnrealMcpActorTools
 				if (!Props.IsValid())
 					return FUnrealMcpToolResult::Error(TEXT("Missing required 'properties' object."));
 
+				const FScopedTransaction Transaction(NSLOCTEXT("UnrealMcp", "ComponentModify", "MCP: Modify Component"));
 				TArray<FString> Errors;
 				const int32 Applied = FUnrealMcpPropertyJson::ApplyProperties(Comp, Props, Errors);
 				return MakeModifyResult(FString::Printf(TEXT("component '%s'"), *Comp->GetName()), Applied, Errors);
@@ -690,6 +695,7 @@ namespace UnrealMcpActorTools
 				if (!Props.IsValid())
 					return FUnrealMcpToolResult::Error(TEXT("Missing required 'properties' object."));
 
+				const FScopedTransaction Transaction(NSLOCTEXT("UnrealMcp", "ObjectModify", "MCP: Modify Object"));
 				TArray<FString> Errors;
 				const int32 Applied = FUnrealMcpPropertyJson::ApplyProperties(Object, Props, Errors);
 				return MakeModifyResult(FString::Printf(TEXT("object '%s'"), *Object->GetName()), Applied, Errors);

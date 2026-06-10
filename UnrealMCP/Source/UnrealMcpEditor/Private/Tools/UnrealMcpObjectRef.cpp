@@ -33,7 +33,9 @@ namespace FUnrealMcpObjectRef
 
 		// 2. Load as a generic object: the ref may point at a UClass directly, or at a UBlueprint asset
 		//    (`/Game/BP/BP_Foo.BP_Foo`) whose GeneratedClass is what callers actually want to spawn.
-		if (UObject* Loaded = StaticLoadObject(UObject::StaticClass(), nullptr, *ClassRef))
+		//    LOAD_NoWarn | LOAD_Quiet: short, unqualified names (`PointLight`) reach here and fail this load
+		//    before succeeding at step 3 — without the flags each emits a spurious LogUObjectGlobals warning.
+		if (UObject* Loaded = StaticLoadObject(UObject::StaticClass(), nullptr, *ClassRef, nullptr, LOAD_NoWarn | LOAD_Quiet))
 		{
 			if (UClass* AsClass = Cast<UClass>(Loaded))
 				return AsClass;
@@ -57,13 +59,15 @@ namespace FUnrealMcpObjectRef
 		if (!World)
 			return nullptr;
 
-		// Exact match on label / name / full path first (deterministic).
+		// Exact (case-SENSITIVE) match on label / name / full path first (deterministic). FString::operator==
+		// is case-INSENSITIVE in UE, so an explicit ESearchCase::CaseSensitive Equals is required to make the
+		// exact-first preference real and keep the case-insensitive fallback below reachable.
 		for (TActorIterator<AActor> It(World); It; ++It)
 		{
 			AActor* Actor = *It;
-			if (Actor->GetActorLabel() == ActorRef
-				|| Actor->GetName() == ActorRef
-				|| Actor->GetPathName() == ActorRef)
+			if (Actor->GetActorLabel().Equals(ActorRef, ESearchCase::CaseSensitive)
+				|| Actor->GetName().Equals(ActorRef, ESearchCase::CaseSensitive)
+				|| Actor->GetPathName().Equals(ActorRef, ESearchCase::CaseSensitive))
 			{
 				return Actor;
 			}
@@ -88,9 +92,10 @@ namespace FUnrealMcpObjectRef
 		{
 			if (!Component)
 				continue;
+			// FString::operator== is case-insensitive in UE, so this already matches loosely-cased component
+			// names — no separate IgnoreCase clause is needed.
 			if (Component->GetName() == ComponentRef
-				|| Component->GetReadableName() == ComponentRef
-				|| Component->GetName().Equals(ComponentRef, ESearchCase::IgnoreCase))
+				|| Component->GetReadableName() == ComponentRef)
 			{
 				return Component;
 			}
