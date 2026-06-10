@@ -2,6 +2,12 @@
 // `status` and `wait-for-ready`. The `ping` system tool echoes back —
 // a 2xx means the server (and the plugin behind it) is reachable.
 
+// NOTE (doc/code reconciliation): docs/ARCHITECTURE.md's headless-e2e runbook
+// line still cites `POST /api/tools/ping` (the Godot testbed route). This
+// client deliberately uses `/api/system-tools/ping` to match unity-mcp-cli and
+// the `run-system-tool` route. The Unreal server does not exist yet, so the
+// discrepancy is unfalsifiable today; whoever lands the server reconciles it —
+// the doc line should move to `/api/system-tools/ping`.
 export const PING_ENDPOINT = '/api/system-tools/ping';
 
 export interface ProbeSuccess {

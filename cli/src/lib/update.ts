@@ -80,7 +80,19 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
       message: `Updating plugin (installed=${fromVersion ?? 'none'}, source=${toVersion ?? 'unknown'})`,
     });
 
-    const needsUpdate = opts.force === true || fromVersion !== toVersion;
+    // An unreadable source `.uplugin` (e.g. a typo'd `--plugin-source`) reads
+    // back as `toVersion === null`; surface that rather than silently treating
+    // it as a no-op.
+    if (toVersion === null) {
+      warnings.push(
+        'Could not read VersionName from the plugin source UnrealMCP.uplugin; proceeding with install.',
+      );
+    }
+    // A plugin that is NOT installed (`fromVersion === null`) must always be
+    // installed: `null !== null` is `false`, so without the explicit
+    // `fromVersion === null` clause an uninstalled plugin against an unreadable
+    // source would short-circuit to "already up to date" and never install.
+    const needsUpdate = opts.force === true || fromVersion === null || fromVersion !== toVersion;
     if (!needsUpdate) {
       emitProgress(opts.onProgress, { phase: 'done', message: 'Plugin already up to date.' });
       return { kind: 'success', success: true, fromVersion, toVersion, updated: false, installedPath, warnings };

@@ -88,7 +88,7 @@ export async function login(opts: LoginOptions = {}): Promise<LoginResult> {
         `and enter code ${code.user_code}`,
     });
 
-    const intervalMs = Math.max(1, code.interval ?? 5) * 1000;
+    let intervalMs = Math.max(1, code.interval ?? 5) * 1000;
     const start = now();
     const deadline = start + timeoutMs;
 
@@ -121,7 +121,11 @@ export async function login(opts: LoginOptions = {}): Promise<LoginResult> {
       const error = errBody.error ?? `http-${tokenResp.status}`;
       if (error === 'authorization_pending') continue;
       if (error === 'slow_down') {
-        await sleep(intervalMs); // back off an extra interval
+        // RFC 8628 §3.5: on `slow_down` the poll interval MUST be increased by
+        // 5 seconds for this and ALL subsequent requests — a persistent
+        // back-off, not a one-shot extra sleep. The next loop iteration sleeps
+        // the new interval at the top before polling again.
+        intervalMs += 5000;
         continue;
       }
       // access_denied, expired_token, or anything else terminal.

@@ -74,6 +74,23 @@ describe('openProject', () => {
     expect(spawnedWith!.env['UNREAL_MCP_HOST']).toBe('http://localhost:5220');
   });
 
+  it('warns that connection options are ignored under --no-connect', async () => {
+    const dir = tmp();
+    writeUProject(dir, 'MyGame', '5.7');
+    const r = await openProject({
+      projectDir: dir,
+      noConnect: true,
+      host: 'http://h',
+      auth: 'required',
+      enginesImpl: () => [fakeEngine('5.7')],
+      spawnImpl: () => ({ pid: 7 }),
+    });
+    expect(r.kind).toBe('success');
+    if (r.kind !== 'success') return;
+    expect(r.envVars).toEqual({}); // nothing propagated under --no-connect
+    expect(r.warnings.some((w) => /ignored under --no-connect/.test(w))).toBe(true);
+  });
+
   it('fails when no .uproject is present', async () => {
     const dir = tmp();
     const r = await openProject({ projectDir: dir, enginesImpl: () => [fakeEngine('5.7')] });

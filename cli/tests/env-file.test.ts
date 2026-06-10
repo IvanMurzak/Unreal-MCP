@@ -88,6 +88,19 @@ describe('writeEnvFile', () => {
     expect(readEnvFile(envPath)['UNREAL_MCP_TOOLS']).toBe('a"b');
   });
 
+  it('collapses duplicate key lines and counts the update once', () => {
+    // Regression: a file with the same known key twice used to rewrite BOTH
+    // lines and push the key into `updated` twice, leaving a duplicate behind.
+    const dir = tmp();
+    const envPath = path.join(dir, '.env');
+    fs.writeFileSync(envPath, 'UNREAL_MCP_HOST=old1\nMY_OWN_VAR=1\nUNREAL_MCP_HOST=old2\n', 'utf-8');
+    const r = writeEnvFile(envPath, { UNREAL_MCP_HOST: 'new' });
+    expect(r.updated).toEqual(['UNREAL_MCP_HOST']);
+    const lines = fs.readFileSync(envPath, 'utf-8').split(/\r?\n/).filter(Boolean);
+    expect(lines.filter((l) => l.startsWith('UNREAL_MCP_HOST='))).toEqual(['UNREAL_MCP_HOST=new']);
+    expect(lines).toContain('MY_OWN_VAR=1');
+  });
+
   it('removes a key when the value is null', () => {
     const dir = tmp();
     const envPath = path.join(dir, '.env');

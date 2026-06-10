@@ -50,6 +50,24 @@ describe('update', () => {
     if (r.kind === 'success') expect(r.updated).toBe(false);
   });
 
+  it('installs when not present even if the source version is unreadable', async () => {
+    // Regression: a not-installed plugin (fromVersion === null) against a
+    // source whose UnrealMCP.uplugin is unreadable (toVersion === null) must
+    // still install — `null !== null` is false, so the old guard short-
+    // circuited to "already up to date" and never copied anything.
+    const project = tmp();
+    const source = tmp(); // a real dir, but with no UnrealMCP.uplugin
+    fs.writeFileSync(path.join(source, 'README.md'), 'plugin contents', 'utf-8');
+    const r = await update({ projectDir: project, pluginSourceDir: source });
+    expect(r.kind).toBe('success');
+    if (r.kind !== 'success') return;
+    expect(r.fromVersion).toBeNull();
+    expect(r.toVersion).toBeNull();
+    expect(r.updated).toBe(true);
+    expect(r.warnings.some((w) => /could not read versionname/i.test(w))).toBe(true);
+    expect(fs.existsSync(path.join(project, 'Plugins', 'UnrealMCP', 'README.md'))).toBe(true);
+  });
+
   it('re-installs when versions differ', async () => {
     const project = tmp();
     await update({ projectDir: project, pluginSourceDir: makeSource('0.1.0') });

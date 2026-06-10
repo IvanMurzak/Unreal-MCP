@@ -140,6 +140,11 @@ export function writeEnvFile(
     const eq = trimmed.indexOf('=');
     const key = eq >= 0 ? trimmed.slice(0, eq).trim() : '';
     if (isKnownEnvKey(key) && key in updates) {
+      // A key may appear more than once in the file. Only the FIRST occurrence
+      // is rewritten with the new value; later duplicates are dropped so the
+      // result holds a single line per key and `updated`/`removed` are not
+      // double-counted.
+      if (handled.has(key)) continue;
       handled.add(key);
       const value = updates[key];
       if (value === null || value === undefined) {

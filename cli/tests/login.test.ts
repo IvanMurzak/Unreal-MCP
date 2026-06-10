@@ -69,6 +69,27 @@ describe('login (device flow)', () => {
     expect(fs.readFileSync(path.join(dir, '.gitignore'), 'utf-8')).toContain('.env');
   });
 
+  it('increases the poll interval persistently after slow_down (RFC 8628)', async () => {
+    let tokenCalls = 0;
+    const fetchImpl = (async (url: string) => {
+      if (String(url).endsWith('/code')) {
+        return fakeResponse({ ok: true, status: 200, body: JSON.stringify({ device_code: 'd', user_code: 'u', verification_uri: 'v', interval: 1 }) });
+      }
+      tokenCalls += 1;
+      if (tokenCalls === 1) {
+        return fakeResponse({ ok: false, status: 400, body: JSON.stringify({ error: 'slow_down' }) });
+      }
+      return fakeResponse({ ok: true, status: 200, body: JSON.stringify({ access_token: 'final-token' }) });
+    }) as unknown as typeof fetch;
+    const sleeps: number[] = [];
+    const r = await login({ fetchImpl, sleepImpl: async (ms) => { sleeps.push(ms); }, nowImpl: () => 0, timeoutMs: 100000 });
+    expect(r.kind).toBe('success');
+    // One sleep per poll (at the top of the loop): 1000ms before the first
+    // (slow_down) poll, then a PERSISTENTLY increased 6000ms before the retry —
+    // not a one-shot extra sleep at the old 1000ms cadence.
+    expect(sleeps).toEqual([1000, 6000]);
+  });
+
   it('fails on access_denied', async () => {
     const fetchImpl = (async (url: string) => {
       if (String(url).endsWith('/code')) {

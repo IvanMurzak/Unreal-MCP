@@ -74,6 +74,24 @@ export async function openProject(opts: OpenProjectOptions): Promise<OpenProject
     // Validate enum options up-front (before engine discovery I/O).
     const env = buildOpenEnv(opts);
 
+    // `buildOpenEnv` returns early under `--no-connect`, so connection-related
+    // flags are silently dropped (and their enum values never validated). Tell
+    // the caller their flags had no effect rather than letting e.g.
+    // `open --no-connect --auth bogus` look accepted.
+    if (opts.noConnect === true) {
+      const ignored: string[] = [];
+      if (opts.host !== undefined) ignored.push('host');
+      if (opts.token !== undefined) ignored.push('token');
+      if (opts.auth !== undefined) ignored.push('auth');
+      if (opts.transport !== undefined) ignored.push('transport');
+      if (opts.keepConnected) ignored.push('keepConnected');
+      if (opts.tools !== undefined) ignored.push('tools');
+      if (opts.startServer !== undefined) ignored.push('startServer');
+      if (ignored.length > 0) {
+        warnings.push(`Connection options are ignored under --no-connect: ${ignored.join(', ')}.`);
+      }
+    }
+
     const engines = opts.enginesImpl
       ? opts.enginesImpl()
       : (() => {
