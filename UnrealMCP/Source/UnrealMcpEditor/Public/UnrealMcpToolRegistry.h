@@ -6,6 +6,7 @@
 #include "CoreMinimal.h"
 #include "Dom/JsonObject.h"
 #include "HAL/ThreadSafeBool.h"
+#include "Templates/Function.h"
 
 /**
  * Core tool-registration types for the Unreal-MCP plugin (docs/ARCHITECTURE.md §2, §3.3).
@@ -109,6 +110,15 @@ struct UNREALMCPEDITOR_API FUnrealMcpRegisteredTool
 
 class FUnrealMcpToolRegistry;
 
+/** Outcome of registering one extension provider's tools (docs/ARCHITECTURE.md §5). */
+struct UNREALMCPEDITOR_API FUnrealMcpExtensionRegistrationResult
+{
+	/** Number of tools that passed validation + dedup and were committed under the extension's id. */
+	int32 ToolsRegistered = 0;
+	/** One human-readable line per dropped (invalid) or rejected (duplicate) entry; empty when healthy. */
+	TArray<FString> Errors;
+};
+
 /** Fluent declaration builder (docs/ARCHITECTURE.md §3.3). One per tool; commits on destruction-free Handle(). */
 class UNREALMCPEDITOR_API FUnrealMcpToolBuilder
 {
@@ -151,8 +161,31 @@ public:
 	/** Begin declaring a tool (docs/ARCHITECTURE.md §3.3 fluent API). */
 	FUnrealMcpToolBuilder Tool(const FString& Name);
 
-	/** Commit a fully-built tool (called by the builder's Handle()). Replaces any same-named tool. */
+	/**
+	 * Commit a fully-built tool (called by the builder's Handle()).
+	 * - Core path (default): replaces any same-named tool — core families are trusted.
+	 * - Extension scope (inside RegisterExtension): the tool is stamped with the scope's ExtensionId,
+	 *   validated (§5 — name pattern / schema well-formedness / handler bound), and deduped against
+	 *   already-registered tools. An invalid entry is DROPPED and a duplicate is REJECTED (first-wins),
+	 *   each recording a line in the scope's error list; neither affects other tools or extensions.
+	 */
 	void Commit(FUnrealMcpRegisteredTool&& InTool);
+
+	/**
+	 * Register an extension provider's tools (docs/ARCHITECTURE.md §5). Opens an "extension scope":
+	 * every Commit during @p RegisterFn is stamped with @p ExtensionId, validated, and deduped, with
+	 * invalid/duplicate entries dropped/rejected and recorded in the returned result. Scopes never nest.
+	 */
+	FUnrealMcpExtensionRegistrationResult RegisterExtension(const FString& ExtensionId, TFunctionRef<void(FUnrealMcpToolRegistry&)> RegisterFn);
+
+	/** Remove every tool stamped with @p ExtensionId (hot-unload / rebuild, §5). Bumps revision if any removed. Returns count removed. */
+	int32 RemoveToolsForExtension(const FString& ExtensionId);
+
+	/** True iff @p Name is a valid kebab-case tool id (non-empty; lowercase letters/digits with single internal hyphens). */
+	static bool IsValidToolName(const FString& Name);
+
+	/** Validate a tool descriptor for the §5 isolation contract. Returns false + a reason on the first problem. */
+	static bool ValidateTool(const FUnrealMcpRegisteredTool& InTool, FString& OutError);
 
 	bool HasTool(const FString& Name) const { return Tools.Contains(Name); }
 	int32 Num() const { return Tools.Num(); }
@@ -176,4 +209,10 @@ public:
 private:
 	TMap<FString, FUnrealMcpRegisteredTool> Tools;
 	int32 Revision = 0;
+
+	// --- Extension-scope state (active only inside RegisterExtension; scopes never nest) ----------
+	bool bExtensionScope = false;
+	FString ScopeExtensionId;
+	int32 ScopeToolsRegistered = 0;
+	TArray<FString> ScopeErrors;
 };

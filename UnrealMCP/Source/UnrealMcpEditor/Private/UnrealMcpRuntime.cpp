@@ -9,11 +9,17 @@
 #include "Dispatch/UnrealMcpGameThreadDispatcher.h"
 #include "Bridge/UnrealMcpBridgeServer.h"
 #include "Sidecar/UnrealMcpSidecarManager.h"
+#include "Extensions/UnrealMcpExtensionManager.h"
 
 #include "Misc/CoreDelegates.h"
 #include "Misc/Paths.h"
 #include "Misc/EngineVersion.h"
 #include "Interfaces/IPluginManager.h"
+
+// Defined here (where every subsystem type is complete) so the TUniquePtr member deleters instantiate
+// correctly regardless of unity-build grouping. See the header comment.
+FUnrealMcpRuntime::FUnrealMcpRuntime() = default;
+FUnrealMcpRuntime::~FUnrealMcpRuntime() = default;
 
 void FUnrealMcpRuntime::Startup()
 {
@@ -26,6 +32,14 @@ void FUnrealMcpRuntime::Startup()
 
 	Dispatcher = MakeUnique<FUnrealMcpGameThreadDispatcher>();
 	BridgeServer = MakeUnique<FUnrealMcpBridgeServer>(*Registry, *Dispatcher);
+
+	// Discover 3rd-party extension tool providers (§5) and merge them into the registry BEFORE the bridge
+	// starts accepting, so the first manifest a sidecar reads on handshake already includes them. Late
+	// register/unregister events rebuild the registry and re-push the manifest via the OnChanged callback.
+	ExtensionManager = MakeUnique<FUnrealMcpExtensionManager>(
+		*Registry,
+		[this]() { if (BridgeServer.IsValid()) BridgeServer->PushManifest(); });
+	ExtensionManager->Startup();
 
 	const FString ProjectPath = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir());
 	const FString EngineVersion = FEngineVersion::Current().ToString();
@@ -103,6 +117,13 @@ void FUnrealMcpRuntime::Shutdown()
 		SidecarManager->WaitForExit(FTimespan::FromSeconds(3)); // bounded grace for a clean self-exit
 		SidecarManager->Stop();                                 // backstop: TerminateProc if still alive
 		SidecarManager.Reset();
+	}
+
+	// Unsubscribe from modular-feature events before the registry it mutates is torn down.
+	if (ExtensionManager.IsValid())
+	{
+		ExtensionManager->Shutdown();
+		ExtensionManager.Reset();
 	}
 
 	Dispatcher.Reset();

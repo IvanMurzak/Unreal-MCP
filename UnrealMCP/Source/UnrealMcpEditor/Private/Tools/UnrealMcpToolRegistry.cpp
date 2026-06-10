@@ -223,13 +223,176 @@ FString FUnrealMcpToolRegistry::ComputeSchemaHash(const FUnrealMcpRegisteredTool
 	return FString(TEXT("sha1:")) + BytesToHex(Digest, 20).ToLower();
 }
 
+bool FUnrealMcpToolRegistry::IsValidToolName(const FString& Name)
+{
+	if (Name.IsEmpty())
+		return false;
+
+	bool bPrevHyphen = false;
+	const int32 Len = Name.Len();
+	for (int32 i = 0; i < Len; ++i)
+	{
+		const TCHAR C = Name[i];
+		const bool bLower = (C >= TEXT('a') && C <= TEXT('z'));
+		const bool bDigit = (C >= TEXT('0') && C <= TEXT('9'));
+		const bool bHyphen = (C == TEXT('-'));
+		if (!bLower && !bDigit && !bHyphen)
+			return false;
+		if (bHyphen && (i == 0 || i == Len - 1 || bPrevHyphen))
+			return false; // no leading, trailing, or doubled hyphen
+		bPrevHyphen = bHyphen;
+	}
+	return true;
+}
+
+bool FUnrealMcpToolRegistry::ValidateTool(const FUnrealMcpRegisteredTool& InTool, FString& OutError)
+{
+	if (!IsValidToolName(InTool.Name))
+	{
+		OutError = FString::Printf(
+			TEXT("invalid tool name '%s' (must be non-empty kebab-case: lowercase letters, digits, single internal hyphens)"),
+			*InTool.Name);
+		return false;
+	}
+
+	if (!InTool.Handler)
+	{
+		OutError = FString::Printf(TEXT("tool '%s' has no bound handler"), *InTool.Name);
+		return false;
+	}
+
+	static const TCHAR* const KnownTypes[] = { TEXT("string"), TEXT("integer"), TEXT("number"), TEXT("boolean"), TEXT("object") };
+	TSet<FString> SeenParams;
+	for (const FUnrealMcpParamSpec& Param : InTool.Params)
+	{
+		if (Param.Name.IsEmpty())
+		{
+			OutError = FString::Printf(TEXT("tool '%s' has a parameter with an empty name (malformed schema)"), *InTool.Name);
+			return false;
+		}
+
+		bool bKnown = false;
+		for (const TCHAR* const Known : KnownTypes)
+		{
+			if (Param.JsonType == Known) { bKnown = true; break; }
+		}
+		if (!bKnown)
+		{
+			OutError = FString::Printf(TEXT("tool '%s' parameter '%s' has unknown JSON type '%s' (malformed schema)"),
+				*InTool.Name, *Param.Name, *Param.JsonType);
+			return false;
+		}
+
+		if (Param.JsonType == TEXT("object") && !Param.ObjectSchema.IsValid())
+		{
+			OutError = FString::Printf(TEXT("tool '%s' object parameter '%s' has no schema (malformed schema)"),
+				*InTool.Name, *Param.Name);
+			return false;
+		}
+
+		bool bAlreadyPresent = false;
+		SeenParams.Add(Param.Name, &bAlreadyPresent);
+		if (bAlreadyPresent)
+		{
+			OutError = FString::Printf(TEXT("tool '%s' declares duplicate parameter '%s' (malformed schema)"),
+				*InTool.Name, *Param.Name);
+			return false;
+		}
+	}
+	return true;
+}
+
 void FUnrealMcpToolRegistry::Commit(FUnrealMcpRegisteredTool&& InTool)
 {
+	if (bExtensionScope)
+	{
+		// Extensions are untrusted: stamp the owning id, validate, and dedup (§5). A dropped/rejected
+		// entry never touches the committed set, so other tools and extensions are unaffected.
+		InTool.ExtensionId = ScopeExtensionId;
+
+		FString Error;
+		if (!ValidateTool(InTool, Error))
+		{
+			ScopeErrors.Add(Error);
+			UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] extension '%s': %s — entry dropped."), *ScopeExtensionId, *Error);
+			return;
+		}
+
+		if (const FUnrealMcpRegisteredTool* Existing = Tools.Find(InTool.Name))
+		{
+			// Tailor the reason to the kind of collision so the recorded error is not misleading:
+			// a core-tool clash, a clash with a different extension (first-wins by ExtensionId sort),
+			// or two tools sharing a name WITHIN this same provider (an authoring error, no sort involved).
+			FString Rejection;
+			if (Existing->ExtensionId == TEXT("core"))
+			{
+				Rejection = FString::Printf(
+					TEXT("tool '%s' rejected: name collides with a built-in core tool (extensions may not shadow core)"),
+					*InTool.Name);
+			}
+			else if (Existing->ExtensionId == ScopeExtensionId)
+			{
+				Rejection = FString::Printf(
+					TEXT("tool '%s' rejected: this extension already declared a tool with that name (duplicate within the extension)"),
+					*InTool.Name);
+			}
+			else
+			{
+				Rejection = FString::Printf(
+					TEXT("tool '%s' rejected: name already registered by extension '%s' (first-wins by ExtensionId sort)"),
+					*InTool.Name, *Existing->ExtensionId);
+			}
+			ScopeErrors.Add(Rejection);
+			UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] extension '%s': %s"), *ScopeExtensionId, *Rejection);
+			return;
+		}
+
+		++ScopeToolsRegistered;
+	}
+
 	InTool.SchemaHash = ComputeSchemaHash(InTool);
 	const FString Name = InTool.Name;
 	Tools.Add(Name, MoveTemp(InTool));
 	++Revision;
 	UE_LOG(LogUnrealMcp, Verbose, TEXT("[Unreal-MCP] registered tool '%s' (revision %d)."), *Name, Revision);
+}
+
+FUnrealMcpExtensionRegistrationResult FUnrealMcpToolRegistry::RegisterExtension(
+	const FString& ExtensionId, TFunctionRef<void(FUnrealMcpToolRegistry&)> RegisterFn)
+{
+	checkf(!bExtensionScope, TEXT("FUnrealMcpToolRegistry::RegisterExtension does not support nested scopes."));
+
+	bExtensionScope = true;
+	ScopeExtensionId = ExtensionId;
+	ScopeToolsRegistered = 0;
+	ScopeErrors.Reset();
+
+	RegisterFn(*this);
+
+	FUnrealMcpExtensionRegistrationResult Result;
+	Result.ToolsRegistered = ScopeToolsRegistered;
+	Result.Errors = MoveTemp(ScopeErrors);
+
+	bExtensionScope = false;
+	ScopeExtensionId.Empty();
+	ScopeToolsRegistered = 0;
+	ScopeErrors.Reset();
+	return Result;
+}
+
+int32 FUnrealMcpToolRegistry::RemoveToolsForExtension(const FString& ExtensionId)
+{
+	TArray<FString> ToRemove;
+	for (const TPair<FString, FUnrealMcpRegisteredTool>& Pair : Tools)
+	{
+		if (Pair.Value.ExtensionId == ExtensionId)
+			ToRemove.Add(Pair.Key);
+	}
+	for (const FString& Name : ToRemove)
+		Tools.Remove(Name);
+	if (ToRemove.Num() > 0)
+		++Revision;
+	return ToRemove.Num();
 }
 
 TSharedPtr<FJsonObject> FUnrealMcpToolRegistry::BuildManifestJson() const
