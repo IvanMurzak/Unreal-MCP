@@ -1,0 +1,51 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-07-09/server.schema.json",
+  "name": "io.github.IvanMurzak/Unreal-MCP",
+  "description": "Make games in Unreal Engine with AI. MCP Server + editor plugin for the Unreal Editor and Unreal games.",
+  "status": "active",
+  "repository": {
+    "url": "https://github.com/IvanMurzak/Unreal-MCP",
+    "source": "github",
+    "subfolder": "Unreal-MCP-Server"
+  },
+  "version": "0.1.0",
+  "packages": [
+    {
+      "registry_type": "oci",
+      "registry_base_url": "https://docker.io",
+      "identifier": "ivanmurzakdev/unreal-mcp-server",
+      "version": "0.1.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "environment_variables": [
+        {
+          "name": "MCP_PLUGIN_PORT",
+          "description": "Client -> Server <- Plugin connection port (default: 8080)",
+          "format": "number",
+          "is_required": false,
+          "is_secret": false
+        },
+        {
+          "name": "MCP_PLUGIN_CLIENT_TIMEOUT",
+          "description": "Plugin -> Server connection timeout (ms) (default: 10000)",
+          "format": "number",
+          "is_required": false,
+          "is_secret": false
+        },
+        {
+          "name": "MCP_PLUGIN_CLIENT_TRANSPORT",
+          "description": "Client -> Server transport type: stdio or streamableHttp (default: stdio)",
+          "format": "string",
+          "default": "stdio",
+          "enum": [
+            "streamableHttp",
+            "stdio"
+          ],
+          "is_required": false,
+          "is_secret": false
+        }
+      ]
+    }
+  ]
+}
