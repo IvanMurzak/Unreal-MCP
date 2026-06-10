@@ -15,9 +15,9 @@ public class UnrealMcpEditorTests : ModuleRules
 			"Core",
 			"CoreUObject",
 			"Engine",
+			"UnrealEd",       // GEditor / editor world for actor-family + blueprint-spawn round-trip specs (§10)
 			"Json",
 			"UnrealMcpEditor",
-			"UnrealEd", // GEditor / editor world for the blueprint-spawn round-trip spec (§10)
 			"BlueprintGraph", // UK2Node_Event — asserting add-event produced an ENABLED node (§10)
 		});
 
