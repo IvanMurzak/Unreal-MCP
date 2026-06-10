@@ -5,7 +5,7 @@
 // the project's `.env`. fetch + sleep + clock are injectable for tests.
 // Library-safe: never throws past the boundary.
 
-import { writeEnvFile } from '../utils/env-file.js';
+import { writeEnvFile, ensureEnvGitignored } from '../utils/env-file.js';
 import * as path from 'path';
 import { emitProgress } from './progress.js';
 import type { ProgressCallback } from './types.js';
@@ -13,6 +13,8 @@ import type { ProgressCallback } from './types.js';
 const DEFAULT_BASE_URL = 'https://ai-game.dev';
 const DEFAULT_DEVICE_PATH = '/api/auth/device/code';
 const DEFAULT_TOKEN_PATH = '/api/auth/device/token';
+/** Per-request deadline so a hung endpoint can't stall the flow forever. */
+const PER_REQUEST_TIMEOUT_MS = 30_000;
 
 export interface LoginOptions {
   baseUrl?: string;
@@ -66,7 +68,7 @@ export async function login(opts: LoginOptions = {}): Promise<LoginResult> {
   try {
     emitProgress(opts.onProgress, { phase: 'start', message: 'Requesting device authorization' });
 
-    const codeResp = await fetchImpl(`${baseUrl}${DEFAULT_DEVICE_PATH}`, {
+    const codeResp = await fetchWithTimeout(fetchImpl, `${baseUrl}${DEFAULT_DEVICE_PATH}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: '{}',
@@ -92,7 +94,7 @@ export async function login(opts: LoginOptions = {}): Promise<LoginResult> {
 
     while (now() < deadline) {
       await sleep(intervalMs);
-      const tokenResp = await fetchImpl(`${baseUrl}${DEFAULT_TOKEN_PATH}`, {
+      const tokenResp = await fetchWithTimeout(fetchImpl, `${baseUrl}${DEFAULT_TOKEN_PATH}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ device_code: code.device_code }),
@@ -135,9 +137,33 @@ export async function login(opts: LoginOptions = {}): Promise<LoginResult> {
 
 function persistToken(projectDir: string | undefined, token: string): string | null {
   if (!projectDir) return null;
-  const envPath = path.join(path.resolve(projectDir), '.env');
+  const dir = path.resolve(projectDir);
+  const envPath = path.join(dir, '.env');
   writeEnvFile(envPath, { UNREAL_MCP_TOKEN: token, UNREAL_MCP_CONNECTION_MODE: 'Cloud' });
+  // The token is a secret — make sure `.env` is gitignored before it lands
+  // on disk (mirrors `configure`'s §8 guard so `login -p .` can't leave a
+  // committable token file behind).
+  ensureEnvGitignored(dir);
   return envPath;
+}
+
+/**
+ * `fetch` with a per-request abort deadline so a hung endpoint cannot stall
+ * the device flow indefinitely (the overall poll deadline only fires between
+ * polls). Honors the injected `fetchImpl` for tests.
+ */
+async function fetchWithTimeout(
+  fetchImpl: typeof fetch,
+  url: string,
+  init: RequestInit,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), PER_REQUEST_TIMEOUT_MS);
+  try {
+    return await fetchImpl(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function fail(reason: string, message: string): LoginFailure {

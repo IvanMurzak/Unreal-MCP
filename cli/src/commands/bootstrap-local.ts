@@ -25,9 +25,13 @@ export const bootstrapLocalCommand = new Command('bootstrap-local')
       repoRoot,
       // --plan: don't actually build, just report the steps.
       buildImpl: opts.plan ? async () => {} : undefined,
-      onProgress: (e) => {
-        if (e.phase === 'info' || e.phase === 'file-written') ui.info(e.message);
-      },
+      // Suppress the per-step "Building/Published" progress under --plan —
+      // nothing is built, so printing build progress would be misleading.
+      onProgress: opts.plan
+        ? undefined
+        : (e) => {
+            if (e.phase === 'info' || e.phase === 'file-written') ui.info(e.message);
+          },
     });
     if (result.kind === 'failure') {
       ui.printWarnings(result.warnings);
@@ -40,5 +44,12 @@ export const bootstrapLocalCommand = new Command('bootstrap-local')
       for (const s of result.steps) ui.label(s.label, `${s.projectFile} -> ${s.outputDir} (${s.rid})`);
     } else {
       ui.success(`Bootstrapped bridge + server into ${result.outputRoot}`);
+      // A bootstrapped build writes no `version` file, so the plugin's §6
+      // version-match would treat it as mismatched. The supported way to
+      // consume a local build is the UNREAL_MCP_BRIDGE_PATH dev override,
+      // which skips the download + version check entirely.
+      ui.info(
+        `Set UNREAL_MCP_BRIDGE_PATH to the bridge binary under ${result.outputRoot} to use this local build (skips download + version check, §6).`,
+      );
     }
   });

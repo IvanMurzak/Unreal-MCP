@@ -62,8 +62,25 @@ export function selectEditorProcesses(
     const cmd = norm(p.commandLine);
     if (!cmd.includes('unrealeditor')) return false;
     if (fileNeedle && cmd.includes(fileNeedle)) return true;
-    return cmd.includes(dirNeedle);
+    return containsDirBounded(cmd, dirNeedle);
   });
+}
+
+/**
+ * True when `cmd` references `dirNeedle` at a path-segment boundary — i.e.
+ * the needle is followed by a `/` or the end of the string. Prevents a bare
+ * substring match where `/work/MyGame` would also match `/work/MyGame2`.
+ * Both inputs are already normalized (lowercased, forward slashes).
+ */
+function containsDirBounded(cmd: string, dirNeedle: string): boolean {
+  let from = 0;
+  for (;;) {
+    const idx = cmd.indexOf(dirNeedle, from);
+    if (idx < 0) return false;
+    const after = cmd.charAt(idx + dirNeedle.length);
+    if (after === '' || after === '/') return true;
+    from = idx + 1;
+  }
 }
 
 export async function close(opts: CloseOptions = {}): Promise<CloseResult> {
@@ -72,6 +89,14 @@ export async function close(opts: CloseOptions = {}): Promise<CloseResult> {
     const os = opts.os ?? (platform() as NodeJS.Platform);
     const projectDir = path.resolve(opts.projectDir ?? process.cwd());
     const uprojectPath = findUProjectFile(projectDir);
+    if (!uprojectPath) {
+      // Without a `.uproject` we'd be forced to match editors by directory
+      // alone — and running from an ancestor dir would then terminate every
+      // editor under it. Refuse instead of guessing.
+      throw new Error(
+        `No .uproject found in ${projectDir}; refusing to match editors by directory alone.`,
+      );
+    }
 
     emitProgress(opts.onProgress, { phase: 'start', message: `Closing Unreal Editor for ${projectDir}` });
 

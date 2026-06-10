@@ -6,6 +6,11 @@
 // The build PLAN (which csproj, which RID, which output dir) is computed
 // purely so it is unit-testable; the actual `dotnet publish` is delegated
 // to an injectable `buildImpl` (defaults to spawning `dotnet`).
+//
+// No `version` file is emitted beside the binaries: a bootstrapped build is
+// meant to be consumed via the `UNREAL_MCP_BRIDGE_PATH` dev override (§6),
+// which skips the download + version-match entirely, so the absence of a
+// version file is intentional (not the §6 mismatch hazard).
 
 import * as path from 'path';
 import { spawn } from 'child_process';

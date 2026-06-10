@@ -40,9 +40,10 @@ export interface ResolveConnectionOptions {
  */
 export function resolveConnection(opts: ResolveConnectionOptions): ResolvedConnection {
   const env = opts.processEnv ?? process.env;
+  const envToken = nonEmpty(env['UNREAL_MCP_TOKEN']);
 
   if (opts.url && opts.url.trim().length > 0) {
-    return { url: stripTrailingSlash(opts.url), token: opts.token, source: 'override' };
+    return { url: stripTrailingSlash(opts.url), token: opts.token ?? envToken, source: 'override' };
   }
 
   if (!opts.projectDir) {
@@ -50,40 +51,35 @@ export function resolveConnection(opts: ResolveConnectionOptions): ResolvedConne
   }
   const projectDir = path.resolve(opts.projectDir);
 
+  const fileEnv = readEnvFile(path.join(projectDir, '.env'));
+  const fileToken = nonEmpty(fileEnv['UNREAL_MCP_TOKEN']);
+
+  // Token precedence is layered independently of which layer supplied the
+  // URL (§8: explicit override -> process env -> project `.env`). Resolving
+  // it once here avoids the asymmetry of, e.g., a process-env HOST ignoring a
+  // `.env` token or a `.env` HOST ignoring a process-env token.
+  const token = opts.token ?? envToken ?? fileToken;
+
   // Process env beats the file (live override, never persisted — §8).
-  const envHost = env['UNREAL_MCP_HOST'];
-  const envToken = env['UNREAL_MCP_TOKEN'];
-  if (envHost && envHost.trim().length > 0) {
-    return {
-      url: stripTrailingSlash(envHost),
-      token: opts.token ?? (envToken && envToken.length > 0 ? envToken : undefined),
-      source: 'process-env',
-    };
+  const envHost = nonEmpty(env['UNREAL_MCP_HOST']);
+  if (envHost) {
+    return { url: stripTrailingSlash(envHost), token, source: 'process-env' };
   }
 
-  const fileEnv = readEnvFile(path.join(projectDir, '.env'));
-  const fileHost = fileEnv['UNREAL_MCP_HOST'];
-  const fileToken = fileEnv['UNREAL_MCP_TOKEN'];
-  if (fileHost && fileHost.length > 0) {
-    return {
-      url: stripTrailingSlash(fileHost),
-      token: opts.token ?? (fileToken && fileToken.length > 0 ? fileToken : undefined),
-      source: 'env-file',
-    };
+  const fileHost = nonEmpty(fileEnv['UNREAL_MCP_HOST']);
+  if (fileHost) {
+    return { url: stripTrailingSlash(fileHost), token, source: 'env-file' };
   }
 
   const port = generatePortFromDirectory(projectDir);
-  return {
-    url: `http://localhost:${port}`,
-    token:
-      opts.token ??
-      (envToken && envToken.length > 0
-        ? envToken
-        : fileToken && fileToken.length > 0
-          ? fileToken
-          : undefined),
-    source: 'deterministic-port',
-  };
+  return { url: `http://localhost:${port}`, token, source: 'deterministic-port' };
+}
+
+/** Trim a value and return `undefined` when it is absent or blank. */
+function nonEmpty(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
 }
 
 export function stripTrailingSlash(url: string): string {

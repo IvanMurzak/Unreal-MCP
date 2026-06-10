@@ -25,9 +25,27 @@ describe('buildServerEntry', () => {
     const e = buildServerEntry('http', 'http://localhost:5220', 'tok');
     expect(e).toMatchObject({ type: 'http', url: 'http://localhost:5220/mcp', headers: { Authorization: 'Bearer tok' } });
   });
-  it('builds a stdio entry launching unreal-mcp-server', () => {
-    const e = buildServerEntry('stdio', 'http://x', undefined);
-    expect(e).toMatchObject({ type: 'stdio', command: 'unreal-mcp-server' });
+  it('builds a stdio entry launching the absolute server binary with port + auth args', () => {
+    const e = buildServerEntry('stdio', 'http://x', 'tok', {
+      serverPath: '/abs/Intermediate/UnrealMCP/server/win-x64/unreal-mcp-server.exe',
+      port: 5220,
+    });
+    expect(e).toMatchObject({
+      type: 'stdio',
+      command: '/abs/Intermediate/UnrealMCP/server/win-x64/unreal-mcp-server.exe',
+    });
+    expect(e.args).toEqual(
+      expect.arrayContaining(['port=5220', 'client-transport=stdio', 'authorization=required', 'token=tok']),
+    );
+  });
+
+  it('stdio uses authorization=none when there is no token', () => {
+    const e = buildServerEntry('stdio', 'http://x', undefined, { serverPath: '/abs/srv', port: 1 });
+    expect(e.args).toEqual(expect.arrayContaining(['authorization=none', 'token=']));
+  });
+
+  it('stdio without resolved server params throws (a bare PATH command would not launch)', () => {
+    expect(() => buildServerEntry('stdio', 'http://x', undefined)).toThrow();
   });
 });
 
@@ -41,6 +59,20 @@ describe('setupMcp', () => {
     const written = JSON.parse(fs.readFileSync(r.configPath, 'utf-8'));
     expect(written.mcpServers.other).toBeDefined();
     expect(written.mcpServers['unreal-mcp'].url).toBe('http://localhost:5220/mcp');
+  });
+
+  it('writes a stdio entry with an absolute §6 server path and a port arg', async () => {
+    const dir = tmp();
+    const r = await setupMcp({ agentId: 'claude-code', projectDir: dir, transport: 'stdio' });
+    expect(r.kind).toBe('success');
+    if (r.kind !== 'success') return;
+    const written = JSON.parse(fs.readFileSync(r.configPath, 'utf-8'));
+    const entry = written.mcpServers['unreal-mcp'];
+    expect(entry.type).toBe('stdio');
+    expect(path.isAbsolute(entry.command)).toBe(true);
+    expect(entry.command).toContain(path.join('Intermediate', 'UnrealMCP', 'server'));
+    expect(entry.command).toMatch(/unreal-mcp-server(\.exe)?$/);
+    expect(entry.args.some((a: string) => /^port=\d+$/.test(a))).toBe(true);
   });
 
   it('dry-run returns the snippet without writing', async () => {

@@ -56,6 +56,23 @@ describe('runTool', () => {
     if (r.kind === 'failure') expect(r.reason).toBe('invalid-input');
   });
 
+  it('reports reason "aborted" (not "timeout") when the caller aborts', async () => {
+    const ac = new AbortController();
+    const fetchImpl = (async (_url: string, init: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        init.signal?.addEventListener('abort', () => {
+          const e = new Error('aborted');
+          e.name = 'AbortError';
+          reject(e);
+        });
+      })) as unknown as typeof fetch;
+    const p = runTool({ toolName: 'ping', url: 'http://h', fetchImpl, signal: ac.signal, timeoutMs: 10000 });
+    ac.abort();
+    const r = await p;
+    expect(r.kind).toBe('failure');
+    if (r.kind === 'failure') expect(r.reason).toBe('aborted');
+  });
+
   it('classifies a connection-refused cause', async () => {
     const fetchImpl = (async () => {
       const err = new Error('fetch failed');

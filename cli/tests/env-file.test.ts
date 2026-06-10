@@ -79,6 +79,15 @@ describe('writeEnvFile', () => {
     expect(fs.readFileSync(envPath, 'utf-8')).toContain('UNREAL_MCP_TOOLS="a b c"');
   });
 
+  it('round-trips a value containing a double-quote without corruption', () => {
+    const dir = tmp();
+    const envPath = path.join(dir, '.env');
+    writeEnvFile(envPath, { UNREAL_MCP_TOOLS: 'a"b' });
+    // No backslash escaping is emitted, so the plugin parser reads it back verbatim.
+    expect(fs.readFileSync(envPath, 'utf-8')).not.toContain('\\"');
+    expect(readEnvFile(envPath)['UNREAL_MCP_TOOLS']).toBe('a"b');
+  });
+
   it('removes a key when the value is null', () => {
     const dir = tmp();
     const envPath = path.join(dir, '.env');

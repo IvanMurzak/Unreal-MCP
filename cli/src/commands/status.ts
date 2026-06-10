@@ -29,6 +29,11 @@ export const statusCommand = new Command('status')
       ui.label('url', report.connection.url);
       ui.label('source', report.connection.source);
       ui.label('token', report.connection.hasToken ? 'present' : 'none');
+    } else if (report.connection.source === 'unresolved') {
+      // A connection could not be resolved at all — surface why instead of
+      // printing nothing (the reason is carried on probeReason).
+      ui.heading('Connection:');
+      ui.label('status', `could not resolve${report.probeReason ? ` (${report.probeReason})` : ''}`);
     }
     if (report.reachable !== undefined) {
       ui.heading('MCP server:');

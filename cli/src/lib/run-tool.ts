@@ -54,7 +54,11 @@ async function invokeTool(routePrefix: string, opts: RunToolOptions): Promise<Ru
   const timeoutMs = typeof opts.timeoutMs === 'number' && opts.timeoutMs > 0 ? opts.timeoutMs : DEFAULT_TIMEOUT_MS;
 
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
   const externalAbort = (): void => controller.abort();
   if (opts.signal) {
     if (opts.signal.aborted) controller.abort();
@@ -84,7 +88,7 @@ async function invokeTool(routePrefix: string, opts: RunToolOptions): Promise<Ru
     }
     return { kind: 'success', success: true, endpoint, httpStatus: response.status, data };
   } catch (err) {
-    return classifyFetchError(err, endpoint, timeoutMs);
+    return classifyFetchError(err, endpoint, timeoutMs, timedOut);
   } finally {
     clearTimeout(timer);
     opts.signal?.removeEventListener('abort', externalAbort);
@@ -143,9 +147,13 @@ function parseJsonOrText(text: string): unknown {
   }
 }
 
-function classifyFetchError(err: unknown, endpoint: string, timeoutMs: number): RunToolFailure {
+function classifyFetchError(err: unknown, endpoint: string, timeoutMs: number, timedOut: boolean): RunToolFailure {
   if (err instanceof Error && err.name === 'AbortError') {
-    return makeFailure({ endpoint, reason: 'timeout', message: `Tool call timed out after ${timeoutMs}ms.`, error: err });
+    // An AbortError from our own timer is a timeout; one from a caller-
+    // supplied signal is a deliberate cancellation — don't conflate them.
+    return timedOut
+      ? makeFailure({ endpoint, reason: 'timeout', message: `Tool call timed out after ${timeoutMs}ms.`, error: err })
+      : makeFailure({ endpoint, reason: 'aborted', message: 'Tool call was aborted by the caller.', error: err });
   }
   const error = err instanceof Error ? err : new Error(String(err));
   const cause = err instanceof Error && 'cause' in err ? (err.cause as { code?: string } | undefined) : undefined;

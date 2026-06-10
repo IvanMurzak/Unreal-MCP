@@ -7,11 +7,33 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { platform } from 'os';
 import { resolveConnection } from '../utils/config.js';
+import { generatePortFromDirectory } from '../utils/port.js';
+import { ridForPlatform } from './bootstrap-local.js';
 import { emitProgress } from './progress.js';
 import type { McpTransport, SetupMcpOptions, SetupMcpResult } from './types.js';
 
 const SERVER_KEY = 'unreal-mcp';
+
+/** Stdio launch parameters for the local `unreal-mcp-server` binary (§6). */
+interface StdioServer {
+  /** Absolute path to the published server binary. */
+  serverPath: string;
+  /** Deterministic localhost port for the project's editor (§1.1). */
+  port: number;
+}
+
+/**
+ * Absolute path to the local server binary under the §6 install layout:
+ * `<project>/Intermediate/UnrealMCP/server/<platform>/unreal-mcp-server(.exe)`.
+ * Pure.
+ */
+export function resolveServerBinaryPath(projectDir: string, os: NodeJS.Platform): string {
+  const rid = ridForPlatform(os);
+  const ext = os === 'win32' ? '.exe' : '';
+  return path.join(projectDir, 'Intermediate', 'UnrealMCP', 'server', rid, `unreal-mcp-server${ext}`);
+}
 
 interface AgentDef {
   id: string;
@@ -35,26 +57,37 @@ export function listAgentIds(): string[] {
 /**
  * Build the `mcpServers` entry for the given transport. HTTP points the
  * client at the running server; stdio launches the local `unreal-mcp-server`
- * binary on demand. Pure — exported for tests.
+ * binary (the §6 install path) on demand, passing the deterministic port,
+ * auth mode, and token as args (the thin host's CLI contract, shared with
+ * unity-mcp-server). Pure — exported for tests.
  */
 export function buildServerEntry(
   transport: McpTransport,
   url: string,
   token: string | undefined,
+  stdio?: StdioServer,
 ): Record<string, unknown> {
   if (transport === 'http') {
     const entry: Record<string, unknown> = { type: 'http', url: `${url}/mcp` };
     if (token) entry['headers'] = { Authorization: `Bearer ${token}` };
     return entry;
   }
-  // stdio
-  const entry: Record<string, unknown> = {
+  // stdio — a bare binary name is not on PATH (the server lands under the
+  // project's Intermediate/ per §6), so an absolute command + port/token
+  // args are required for the entry to actually launch a working server.
+  if (!stdio) {
+    throw new Error('stdio transport requires a resolved server path + port.');
+  }
+  return {
     type: 'stdio',
-    command: 'unreal-mcp-server',
-    args: [],
+    command: stdio.serverPath,
+    args: [
+      `port=${stdio.port}`,
+      'client-transport=stdio',
+      `authorization=${token ? 'required' : 'none'}`,
+      `token=${token ?? ''}`,
+    ],
   };
-  if (token) entry['env'] = { UNREAL_MCP_TOKEN: token };
-  return entry;
 }
 
 export async function setupMcp(opts: SetupMcpOptions): Promise<SetupMcpResult> {
@@ -71,7 +104,14 @@ export async function setupMcp(opts: SetupMcpOptions): Promise<SetupMcpResult> {
     const projectDir = path.resolve(opts.projectDir ?? process.cwd());
 
     const conn = resolveConnection({ projectDir, url: opts.url, token: opts.token });
-    const serverEntry = buildServerEntry(transport, conn.url, conn.token);
+    const stdio: StdioServer | undefined =
+      transport === 'stdio'
+        ? {
+            serverPath: resolveServerBinaryPath(projectDir, platform() as NodeJS.Platform),
+            port: generatePortFromDirectory(projectDir),
+          }
+        : undefined;
+    const serverEntry = buildServerEntry(transport, conn.url, conn.token, stdio);
 
     const configPath = path.join(projectDir, agent.relConfigPath);
     emitProgress(opts.onProgress, {

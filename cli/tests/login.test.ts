@@ -1,4 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
+import * as fs from 'fs';
 import * as path from 'path';
 import { login } from '../src/lib/login.js';
 import { readEnvFile } from '../src/utils/env-file.js';
@@ -64,6 +65,8 @@ describe('login (device flow)', () => {
     const env = readEnvFile(path.join(dir, '.env'));
     expect(env['UNREAL_MCP_TOKEN']).toBe('final-token');
     expect(env['UNREAL_MCP_CONNECTION_MODE']).toBe('Cloud');
+    // The persisted token must be gitignored (§8) so it can't be committed.
+    expect(fs.readFileSync(path.join(dir, '.gitignore'), 'utf-8')).toContain('.env');
   });
 
   it('fails on access_denied', async () => {

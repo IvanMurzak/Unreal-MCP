@@ -55,19 +55,24 @@ export async function configure(opts: ConfigureOptions): Promise<ConfigureResult
     if (opts.transport !== undefined) updates['UNREAL_MCP_TRANSPORT'] = opts.transport;
     if (opts.logLevel !== undefined) updates['UNREAL_MCP_LOG_LEVEL'] = opts.logLevel;
 
-    if (Object.keys(updates).length === 0) {
-      warnings.push('No configuration values supplied — .env left unchanged.');
-    }
-
     const envPath = path.join(projectDir, '.env');
-    const { added, updated } = writeEnvFile(envPath, updates);
+    const hasUpdates = Object.keys(updates).length > 0;
+    // Only touch `.env` when there is something to write — otherwise the
+    // "left unchanged" warning would contradict an actual (no-op) rewrite.
+    const { added, updated } = hasUpdates
+      ? writeEnvFile(envPath, updates)
+      : { added: [], updated: [] };
     const keysWritten = [...added, ...updated];
 
-    emitProgress(opts.onProgress, {
-      phase: 'file-written',
-      message: `Wrote ${keysWritten.length} key(s) to ${envPath}`,
-      filePath: envPath,
-    });
+    if (!hasUpdates) {
+      warnings.push('No configuration values supplied — .env left unchanged.');
+    } else {
+      emitProgress(opts.onProgress, {
+        phase: 'file-written',
+        message: `Wrote ${keysWritten.length} key(s) to ${envPath}`,
+        filePath: envPath,
+      });
+    }
 
     // Token-commit hazard mitigation (§8): ensure `.env` is gitignored.
     let gitignorePath: string | undefined;

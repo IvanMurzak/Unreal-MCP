@@ -63,7 +63,7 @@ export function stripMatchingQuotes(value: string): string {
  * sides, keep only {@link KNOWN_ENV_KEYS}, strip matching quotes from the
  * value. Later duplicates win. Pure / no I/O.
  */
-export function parseEnvContent(content: string): Record<KnownEnvKey, string> {
+export function parseEnvContent(content: string): Partial<Record<KnownEnvKey, string>> {
   const out: Partial<Record<KnownEnvKey, string>> = {};
   for (const rawLine of content.split(/\r?\n/)) {
     const line = rawLine.trim();
@@ -75,17 +75,17 @@ export function parseEnvContent(content: string): Record<KnownEnvKey, string> {
     const value = stripMatchingQuotes(line.slice(eq + 1).trim());
     out[key] = value;
   }
-  return out as Record<KnownEnvKey, string>;
+  return out;
 }
 
 /** Read + parse `<file>` if present; returns `{}` when absent or unreadable. */
-export function readEnvFile(envPath: string): Record<KnownEnvKey, string> {
-  if (!fs.existsSync(envPath)) return {} as Record<KnownEnvKey, string>;
+export function readEnvFile(envPath: string): Partial<Record<KnownEnvKey, string>> {
+  if (!fs.existsSync(envPath)) return {};
   let raw: string;
   try {
     raw = fs.readFileSync(envPath, 'utf-8');
   } catch {
-    return {} as Record<KnownEnvKey, string>;
+    return {};
   }
   return parseEnvContent(raw);
 }
@@ -94,11 +94,17 @@ export function readEnvFile(envPath: string): Record<KnownEnvKey, string> {
  * Quote a value for `.env` only when it needs it — i.e. it contains
  * whitespace, `#`, or a quote character. Bare tokens stay bare so a
  * human-edited `.env` reads cleanly. Pure.
+ *
+ * The value is NOT backslash-escaped: the plugin's GodotMcpEnvFile parser
+ * (and {@link stripMatchingQuotes}) only strips a single surrounding quote
+ * pair and never unescapes, so emitting `\"` would read back corrupted.
+ * Wrapping-without-escaping round-trips correctly for embedded quotes
+ * (`a"b` -> `"a"b"` -> `a"b`).
  */
 export function quoteEnvValueIfNeeded(value: string): string {
   if (value.length === 0) return '""';
   if (/[\s#"']/.test(value)) {
-    return `"${value.replace(/"/g, '\\"')}"`;
+    return `"${value}"`;
   }
   return value;
 }

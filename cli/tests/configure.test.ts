@@ -70,6 +70,16 @@ describe('configure', () => {
     expect(env['UNREAL_MCP_TOKEN']).toBe('tok');
   });
 
+  it('leaves .env unwritten and warns when no values are supplied', async () => {
+    const dir = tmp();
+    const result = await configure({ projectDir: dir, ensureGitignore: false });
+    expect(result.kind).toBe('success');
+    if (result.kind !== 'success') return;
+    expect(result.keysWritten).toEqual([]);
+    expect(fs.existsSync(path.join(dir, '.env'))).toBe(false);
+    expect(result.warnings.join(' ')).toContain('left unchanged');
+  });
+
   it('fails (no throw) for a missing project dir', async () => {
     const result = await configure({ projectDir: path.join(makeTempDir(), 'does-not-exist') });
     expect(result.kind).toBe('failure');

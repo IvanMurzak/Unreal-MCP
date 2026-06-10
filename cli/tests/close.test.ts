@@ -31,6 +31,14 @@ describe('selectEditorProcesses', () => {
     expect(pids).not.toContain(2);
     expect(pids).not.toContain(4); // not an UnrealEditor process
   });
+
+  it('does not match a sibling directory sharing a prefix', () => {
+    const sibling: RunningProcess[] = [
+      { pid: 7, commandLine: `UnrealEditor.exe "${path.join(projectDir + '2', 'Other.uproject')}"` },
+    ];
+    const matched = selectEditorProcesses(sibling, projectDir, uproject);
+    expect(matched.map((p) => p.pid)).not.toContain(7);
+  });
 });
 
 describe('close', () => {
@@ -55,5 +63,18 @@ describe('close', () => {
     const r = await close({ projectDir: dir, listProcessesImpl: () => [], killImpl: () => {} });
     expect(r.kind).toBe('success');
     if (r.kind === 'success') expect(r.wasRunning).toBe(false);
+  });
+
+  it('refuses (no kill) when the directory has no .uproject', async () => {
+    const dir = tmp(); // empty — not an Unreal project
+    const killed: number[] = [];
+    const r = await close({
+      projectDir: dir,
+      listProcessesImpl: () => [{ pid: 1, commandLine: `UnrealEditor.exe "${dir}"` }],
+      killImpl: (pid) => killed.push(pid),
+    });
+    expect(r.kind).toBe('failure');
+    if (r.kind === 'failure') expect(r.error.message).toContain('.uproject');
+    expect(killed).toEqual([]);
   });
 });

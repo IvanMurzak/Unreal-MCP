@@ -233,6 +233,7 @@ export type RunToolFailureReason =
   | 'connection-reset'
   | 'network-error'
   | 'timeout'
+  | 'aborted'
   | 'http-error'
   | 'unknown';
 

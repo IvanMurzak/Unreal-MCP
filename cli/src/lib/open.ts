@@ -8,7 +8,7 @@ import { spawn } from 'child_process';
 import { platform } from 'os';
 import { getDefaultLauncherManifestPath, readLauncherManifest } from '../utils/launcher.js';
 import { resolveEngine } from '../utils/engine.js';
-import { findUProjectFile, readUProject } from '../utils/project.js';
+import { readUProject } from '../utils/project.js';
 import { emitProgress } from './progress.js';
 import type {
   AuthOption,
@@ -54,19 +54,20 @@ export async function openProject(opts: OpenProjectOptions): Promise<OpenProject
   let projectDir: string | undefined;
   try {
     const os = platform() as NodeJS.Platform;
-    projectDir = path.resolve(opts.projectDir ?? process.cwd());
+    // Accept either a project directory or a `.uproject` file path (the doc
+    // on OpenProjectOptions.projectDir promises both); `readUProject`
+    // resolves both shapes.
+    const inputPath = path.resolve(opts.projectDir ?? process.cwd());
+    projectDir = inputPath;
 
-    if (!fs.existsSync(projectDir)) {
-      throw new Error(`Project path does not exist: ${projectDir}`);
+    if (!fs.existsSync(inputPath)) {
+      throw new Error(`Project path does not exist: ${inputPath}`);
     }
-    const uprojectPath = findUProjectFile(projectDir);
-    if (!uprojectPath) {
-      throw new Error(`No .uproject found in ${projectDir}`);
-    }
-    const uproject = readUProject(uprojectPath);
+    const uproject = readUProject(inputPath);
     if (!uproject) {
-      throw new Error(`Failed to read .uproject at ${uprojectPath}`);
+      throw new Error(`No .uproject found at ${inputPath}`);
     }
+    projectDir = uproject.projectDir;
 
     emitProgress(opts.onProgress, { phase: 'start', message: `Opening ${uproject.projectName}` });
 
