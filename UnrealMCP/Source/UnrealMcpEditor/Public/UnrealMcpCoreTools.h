@@ -16,3 +16,16 @@ namespace UnrealMcpPingTool
 {
 	UNREALMCPEDITOR_API void Register(FUnrealMcpToolRegistry& Registry);
 }
+
+/**
+ * The actor & component tool family (docs/ARCHITECTURE.md §10 "actor family"): actor lifecycle
+ * (create/destroy/duplicate), scoped reads + FProperty writes (find/modify), parent/attachment,
+ * component management (add/destroy/get/modify/list-all), and generic UObject access
+ * (object-get-data/object-modify). ~13 native C++ tools, all declared via the §3.3 builder and run
+ * on the GameThread dispatcher. Exported so the runtime wires it on boot AND the Automation specs
+ * can register + exercise it in isolation.
+ */
+namespace UnrealMcpActorTools
+{
+	UNREALMCPEDITOR_API void Register(FUnrealMcpToolRegistry& Registry);
+}

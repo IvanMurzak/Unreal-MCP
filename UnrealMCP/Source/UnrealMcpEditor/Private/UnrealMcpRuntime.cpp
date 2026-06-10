@@ -29,6 +29,7 @@ void FUnrealMcpRuntime::Startup()
 
 	Registry = MakeUnique<FUnrealMcpToolRegistry>();
 	UnrealMcpPingTool::Register(*Registry);
+	UnrealMcpActorTools::Register(*Registry);
 
 	Dispatcher = MakeUnique<FUnrealMcpGameThreadDispatcher>();
 	BridgeServer = MakeUnique<FUnrealMcpBridgeServer>(*Registry, *Dispatcher);

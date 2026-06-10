@@ -15,6 +15,7 @@ public class UnrealMcpEditorTests : ModuleRules
 			"Core",
 			"CoreUObject",
 			"Engine",
+			"UnrealEd",       // GEditor + UEditorActorSubsystem for the actor-family specs (§10)
 			"Json",
 			"UnrealMcpEditor",
 		});
