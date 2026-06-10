@@ -29,6 +29,7 @@ void FUnrealMcpRuntime::Startup()
 
 	Registry = MakeUnique<FUnrealMcpToolRegistry>();
 	UnrealMcpPingTool::Register(*Registry);
+	UnrealMcpAssetTools::Register(*Registry); // §10 asset / Content-Browser family (issue #10)
 
 	Dispatcher = MakeUnique<FUnrealMcpGameThreadDispatcher>();
 	BridgeServer = MakeUnique<FUnrealMcpBridgeServer>(*Registry, *Dispatcher);

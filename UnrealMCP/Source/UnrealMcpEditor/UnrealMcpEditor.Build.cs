@@ -35,6 +35,15 @@ public class UnrealMcpEditor : ModuleRules
 			"Projects",
 			"EditorSubsystem",
 			"DeveloperSettings",
+			// Asset / Content-Browser tool family (docs/ARCHITECTURE.md §10, issue #10):
+			//  - AssetRegistry            -> asset-find / asset-get-data / asset-refresh queries
+			//  - AssetTools               -> CreateAsset (material instance) + ImportAssetTasks
+			//  - MaterialEditor           -> UMaterialEditingLibrary (instance param read/write)
+			//  - EditorScriptingUtilities -> UEditorAssetLibrary (copy/move/delete/folder/load)
+			"AssetRegistry",
+			"AssetTools",
+			"MaterialEditor",
+			"EditorScriptingUtilities",
 		});
 	}
 }
