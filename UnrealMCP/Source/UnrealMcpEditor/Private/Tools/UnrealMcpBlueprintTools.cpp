@@ -16,8 +16,10 @@
 #include "Kismet2/KismetEditorUtilities.h"
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "Kismet2/CompilerResultsLog.h"
+#include "Kismet2/Kismet2NameValidators.h"
 #include "EdGraphSchema_K2.h"
 #include "EdGraph/EdGraph.h"
+#include "EdGraph/EdGraphNode.h"
 #include "K2Node_Event.h"
 
 #include "Editor.h"
@@ -66,6 +68,20 @@ namespace
 		if (UBlueprint* Found = FindObject<UBlueprint>(nullptr, *Path))
 			return Found;
 		return LoadObject<UBlueprint>(nullptr, *Path);
+	}
+
+	/** Reject names that are empty, too long, or contain invalid characters, using the same validator the
+	 *  Blueprint editor applies. Name COLLISIONS are intentionally NOT rejected here — each caller owns a
+	 *  collision check with a tool-specific message — so the in-use results pass through as well-formed. */
+	bool IsNameWellFormed(UBlueprint* Blueprint, const FString& Name, FString& OutError)
+	{
+		const EValidatorResult Result = FKismetNameValidator(Blueprint).IsValid(Name);
+		if (Result == EValidatorResult::Ok || Result == EValidatorResult::AlreadyInUse
+			|| Result == EValidatorResult::ExistingName || Result == EValidatorResult::LocallyInUse)
+			return true;
+		OutError = FString::Printf(TEXT("invalid name '%s': %s"), *Name,
+			*INameValidatorInterface::GetErrorString(Name, Result));
+		return false;
 	}
 
 	// ---- §3.2 pin-type mapping (forward: type string -> FEdGraphPinType) --------------------------
@@ -140,9 +156,7 @@ namespace
 		else if (Cat == UEdGraphSchema_K2::PC_Int) Base = TEXT("int");
 		else if (Cat == UEdGraphSchema_K2::PC_Int64) Base = TEXT("int64");
 		else if (Cat == UEdGraphSchema_K2::PC_Byte) Base = TEXT("byte");
-		else if (Cat == UEdGraphSchema_K2::PC_Real) Base = TEXT("float");
-		else if (Cat == UEdGraphSchema_K2::PC_Float) Base = TEXT("float");
-		else if (Cat == UEdGraphSchema_K2::PC_Double) Base = TEXT("float");
+		else if (Cat == UEdGraphSchema_K2::PC_Real) Base = TEXT("float"); // float/double both map to PC_Real (PC_Float/PC_Double are legacy-unreachable here)
 		else if (Cat == UEdGraphSchema_K2::PC_String) Base = TEXT("string");
 		else if (Cat == UEdGraphSchema_K2::PC_Name) Base = TEXT("name");
 		else if (Cat == UEdGraphSchema_K2::PC_Text) Base = TEXT("text");
@@ -183,11 +197,12 @@ namespace UnrealMcpBlueprintTools
 		Registry.Tool(TEXT("blueprint-create"))
 			.Title(TEXT("Create Blueprint"))
 			.Description(TEXT("Create a new Blueprint class from a parent UClass path via the public "
-			                  "FKismetEditorUtilities::CreateBlueprint. 'path' is the full asset object path "
-			                  "(e.g. '/Game/MCP/BP_Thing'); 'parentClass' is a native class path or short name "
+			                  "FKismetEditorUtilities::CreateBlueprint. 'path' is the /Game package path for the "
+			                  "asset (e.g. '/Game/MCP/BP_Thing'); the object-path form ('/Game/MCP/BP_Thing.BP_Thing') "
+			                  "is also accepted and normalised. 'parentClass' is a native class path or short name "
 			                  "(e.g. '/Script/Engine.Actor' or 'Actor'). The asset is registered in-session; "
 			                  "saving to disk is out of scope for the MVP."))
-			.ParamString(TEXT("path"), TEXT("Full /Game object path for the new Blueprint asset."), EUnrealMcpParamRequirement::Required)
+			.ParamString(TEXT("path"), TEXT("/Game package path for the new Blueprint asset (object-path form also accepted)."), EUnrealMcpParamRequirement::Required)
 			.ParamString(TEXT("parentClass"), TEXT("Parent UClass path or short name. Defaults to Actor."))
 			.DestructiveHint(false).ReadOnlyHint(false)
 			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
@@ -203,13 +218,24 @@ namespace UnrealMcpBlueprintTools
 				if (!FKismetEditorUtilities::CanCreateBlueprintOfClass(ParentClass))
 					return FUnrealMcpToolResult::Error(FString::Printf(TEXT("'%s' cannot be used as a Blueprint parent class."), *ParentPath));
 
-				const FString PackageName = Path;
-				const FString AssetName = FPackageName::GetShortName(Path);
+				// Accept either a package path ("/Game/MCP/BP_Thing") or the object-path form
+				// ("/Game/MCP/BP_Thing.BP_Thing"); normalise to the package path before validating.
+				FString PackageName = Path;
+				int32 DotIndex = INDEX_NONE;
+				if (Path.FindChar(TEXT('.'), DotIndex))
+					PackageName = Path.Left(DotIndex);
+
+				FText PackageError;
+				if (!FPackageName::IsValidLongPackageName(PackageName, /*bIncludeReadOnlyRoots*/ false, &PackageError))
+					return FUnrealMcpToolResult::Error(FString::Printf(TEXT("invalid Blueprint package path '%s': %s"), *PackageName, *PackageError.ToString()));
+
+				const FString AssetName = FPackageName::GetShortName(PackageName);
 				if (AssetName.IsEmpty())
 					return FUnrealMcpToolResult::Error(FString::Printf(TEXT("invalid Blueprint path '%s'."), *Path));
 
-				if (FindObject<UBlueprint>(nullptr, *(PackageName + TEXT(".") + AssetName)) != nullptr)
-					return FUnrealMcpToolResult::Error(FString::Printf(TEXT("a Blueprint already exists at '%s'."), *Path));
+				const FString ObjectPath = PackageName + TEXT(".") + AssetName;
+				if (FindObject<UBlueprint>(nullptr, *ObjectPath) != nullptr || LoadObject<UBlueprint>(nullptr, *ObjectPath) != nullptr)
+					return FUnrealMcpToolResult::Error(FString::Printf(TEXT("a Blueprint already exists at '%s'."), *ObjectPath));
 
 				UPackage* Package = CreatePackage(*PackageName);
 				if (!Package)
@@ -278,6 +304,12 @@ namespace UnrealMcpBlueprintTools
 						TSharedPtr<FJsonObject> C = MakeShared<FJsonObject>();
 						C->SetStringField(TEXT("name"), Node->GetVariableName().ToString());
 						C->SetStringField(TEXT("class"), Node->ComponentClass ? Node->ComponentClass->GetName() : TEXT(""));
+						// 'parent' is the SCS attach parent (empty for a root node); the LLM needs it to drive
+						// blueprint-add-component's 'parentComponent'.
+						if (USCS_Node* ParentNode = Blueprint->SimpleConstructionScript->FindParentNode(Node))
+							C->SetStringField(TEXT("parent"), ParentNode->GetVariableName().ToString());
+						else
+							C->SetStringField(TEXT("parent"), TEXT(""));
 						Components.Add(MakeShared<FJsonValueObject>(C));
 					}
 				}
@@ -361,19 +393,35 @@ namespace UnrealMcpBlueprintTools
 				UClass* CompClass = ResolveClass(Call.GetString(TEXT("componentClass")));
 				if (!CompClass || !CompClass->IsChildOf(UActorComponent::StaticClass()))
 					return FUnrealMcpToolResult::Error(FString::Printf(TEXT("'%s' is not a UActorComponent subclass."), *Call.GetString(TEXT("componentClass"))));
+				// SCS CreateNode calls NewObject on the class; an abstract/deprecated class fatally asserts there
+				// (e.g. '/Script/Engine.LightComponentBase'). Reject up front with a structured error.
+				if (CompClass->HasAnyClassFlags(CLASS_Abstract | CLASS_Deprecated | CLASS_NewerVersionExists))
+					return FUnrealMcpToolResult::Error(FString::Printf(TEXT("'%s' is abstract/deprecated and cannot be instantiated as a component."), *CompClass->GetName()));
 				if (CompName.IsEmpty())
 					return FUnrealMcpToolResult::Error(TEXT("'name' is required."));
+				FString NameError;
+				if (!IsNameWellFormed(Blueprint, CompName, NameError))
+					return FUnrealMcpToolResult::Error(NameError);
 				if (Blueprint->SimpleConstructionScript->FindSCSNode(FName(*CompName)) != nullptr)
 					return FUnrealMcpToolResult::Error(FString::Printf(TEXT("a component named '%s' already exists."), *CompName));
-
-				USCS_Node* NewNode = Blueprint->SimpleConstructionScript->CreateNode(CompClass, FName(*CompName));
-				if (!NewNode)
-					return FUnrealMcpToolResult::Error(TEXT("USimpleConstructionScript::CreateNode returned null."));
 
 				const FString ParentName = Call.GetString(TEXT("parentComponent"));
 				USCS_Node* ParentNode = ParentName.IsEmpty() ? nullptr : Blueprint->SimpleConstructionScript->FindSCSNode(FName(*ParentName));
 				if (!ParentName.IsEmpty() && !ParentNode)
 					return FUnrealMcpToolResult::Error(FString::Printf(TEXT("parent component '%s' not found."), *ParentName));
+				// Attachment is a scene-graph operation: both the new component and its parent must be
+				// USceneComponents, otherwise AddChildNode produces an invalid (non-attachable) hierarchy.
+				if (ParentNode)
+				{
+					if (!CompClass->IsChildOf(USceneComponent::StaticClass()))
+						return FUnrealMcpToolResult::Error(FString::Printf(TEXT("'%s' is not a USceneComponent, so it cannot be attached under a parent component."), *CompClass->GetName()));
+					if (!ParentNode->ComponentClass || !ParentNode->ComponentClass->IsChildOf(USceneComponent::StaticClass()))
+						return FUnrealMcpToolResult::Error(FString::Printf(TEXT("parent component '%s' is not a USceneComponent and cannot host child components."), *ParentName));
+				}
+
+				USCS_Node* NewNode = Blueprint->SimpleConstructionScript->CreateNode(CompClass, FName(*CompName));
+				if (!NewNode)
+					return FUnrealMcpToolResult::Error(TEXT("USimpleConstructionScript::CreateNode returned null."));
 
 				if (ParentNode)
 					ParentNode->AddChildNode(NewNode);
@@ -439,6 +487,9 @@ namespace UnrealMcpBlueprintTools
 				const FString VarName = Call.GetString(TEXT("name"));
 				if (VarName.IsEmpty())
 					return FUnrealMcpToolResult::Error(TEXT("'name' is required."));
+				FString NameError;
+				if (!IsNameWellFormed(Blueprint, VarName, NameError))
+					return FUnrealMcpToolResult::Error(NameError);
 				if (FBlueprintEditorUtils::FindNewVariableIndex(Blueprint, FName(*VarName)) != INDEX_NONE)
 					return FUnrealMcpToolResult::Error(FString::Printf(TEXT("a variable named '%s' already exists."), *VarName));
 
@@ -494,6 +545,13 @@ namespace UnrealMcpBlueprintTools
 				}
 				if (!NewName.IsEmpty())
 				{
+					// RenameMemberVariable is void and does no validity/collision check — renaming onto an
+					// existing name silently produces duplicate member names that break a later compile.
+					FString NameError;
+					if (!IsNameWellFormed(Blueprint, NewName, NameError))
+						return FUnrealMcpToolResult::Error(NameError);
+					if (FBlueprintEditorUtils::FindNewVariableIndex(Blueprint, FName(*NewName)) != INDEX_NONE)
+						return FUnrealMcpToolResult::Error(FString::Printf(TEXT("cannot rename to '%s': a variable with that name already exists."), *NewName));
 					FBlueprintEditorUtils::RenameMemberVariable(Blueprint, EffectiveName, FName(*NewName));
 					EffectiveName = FName(*NewName);
 				}
@@ -510,7 +568,9 @@ namespace UnrealMcpBlueprintTools
 			.Title(TEXT("Set Blueprint Default"))
 			.Description(TEXT("Set a default property value on the Blueprint's Class Default Object (CDO). 'value' is "
 			                  "parsed with the property's own text importer, so it accepts the same text format the "
-			                  "editor uses (numbers, '(X=1,Y=2,Z=3)' for structs, asset paths for object refs)."))
+			                  "editor uses (numbers, '(X=1,Y=2,Z=3)' for structs, asset paths for object refs). This "
+			                  "changes the class default, so it affects newly-spawned instances only — not actors "
+			                  "already placed in a level."))
 			.ParamString(TEXT("path"), TEXT("Blueprint asset object path."), EUnrealMcpParamRequirement::Required)
 			.ParamString(TEXT("property"), TEXT("CDO property name."), EUnrealMcpParamRequirement::Required)
 			.ParamString(TEXT("value"), TEXT("Value in UE text format."), EUnrealMcpParamRequirement::Required)
@@ -530,7 +590,7 @@ namespace UnrealMcpBlueprintTools
 				const FString PropName = Call.GetString(TEXT("property"));
 				FProperty* Prop = FindFProperty<FProperty>(Blueprint->GeneratedClass, FName(*PropName));
 				if (!Prop)
-					return FUnrealMcpToolResult::Error(FString::Printf(TEXT("property '%s' not found on '%s'."), *PropName, *Blueprint->GeneratedClass->GetName()));
+					return FUnrealMcpToolResult::Error(FString::Printf(TEXT("property '%s' not found on '%s' (if you just added it via blueprint-add-variable, run blueprint-compile first so it lands on the generated class)."), *PropName, *Blueprint->GeneratedClass->GetName()));
 
 				const FString Value = Call.GetString(TEXT("value"));
 				void* ValuePtr = Prop->ContainerPtrToValuePtr<void>(CDO);
@@ -546,7 +606,7 @@ namespace UnrealMcpBlueprintTools
 				Out->SetStringField(TEXT("property"), PropName);
 				Out->SetStringField(TEXT("value"), Value);
 				return FUnrealMcpToolResult::Success(
-					FString::Printf(TEXT("Set %s.%s = %s."), *Blueprint->GetName(), *PropName, *Value), Out);
+					FString::Printf(TEXT("Set %s.%s = %s (affects new instances only)."), *Blueprint->GetName(), *PropName, *Value), Out);
 			});
 	}
 
@@ -570,6 +630,9 @@ namespace UnrealMcpBlueprintTools
 				const FString FuncName = Call.GetString(TEXT("name"));
 				if (FuncName.IsEmpty())
 					return FUnrealMcpToolResult::Error(TEXT("'name' is required."));
+				FString NameError;
+				if (!IsNameWellFormed(Blueprint, FuncName, NameError))
+					return FUnrealMcpToolResult::Error(NameError);
 				for (const UEdGraph* Graph : Blueprint->FunctionGraphs)
 					if (Graph && Graph->GetFName() == FName(*FuncName))
 						return FUnrealMcpToolResult::Error(FString::Printf(TEXT("a function named '%s' already exists."), *FuncName));
@@ -609,12 +672,32 @@ namespace UnrealMcpBlueprintTools
 				UFunction* EventFunc = Blueprint->ParentClass->FindFunctionByName(FName(*EventName));
 				if (!EventFunc)
 					return FUnrealMcpToolResult::Error(FString::Printf(TEXT("'%s' is not a function on parent class '%s' (overridable events are named e.g. ReceiveBeginPlay/ReceiveTick)."), *EventName, *Blueprint->ParentClass->GetName()));
+				// FindFunctionByName matches ANY parent UFunction (e.g. K2_DestroyActor, which is BlueprintCallable
+				// but not a BlueprintEvent); only blueprint-overridable events may be placed as event nodes,
+				// otherwise we'd seed a nonsense node and report success. Use the K2 schema's own canonical check
+				// (it requires FUNC_BlueprintEvent and excludes static/const/deprecated/thread-safe functions).
+				if (!UEdGraphSchema_K2::FunctionCanBePlacedAsEvent(EventFunc))
+					return FUnrealMcpToolResult::Error(FString::Printf(TEXT("'%s' is not an overridable Blueprint event on '%s'."), *EventName, *Blueprint->ParentClass->GetName()));
 
-				int32 NodePosY = 0;
-				UK2Node_Event* EventNode = FKismetEditorUtilities::AddDefaultEventNode(
-					Blueprint, EventGraph, FName(*EventName), EventFunc->GetOwnerClass(), NodePosY);
+				// A fresh Actor event graph is pre-seeded with DISABLED ghost nodes for the common events
+				// (ReceiveBeginPlay/ReceiveTick), and AddDefaultEventNode returns that ghost rather than minting a
+				// second node. So an ENABLED existing node is a real duplicate (reject), but a disabled ghost is
+				// exactly the node we want to ENABLE — enabling the ghost IS the "add event" operation.
+				UK2Node_Event* EventNode = FBlueprintEditorUtils::FindOverrideForFunction(Blueprint, EventFunc->GetOwnerClass(), FName(*EventName));
+				if (EventNode && EventNode->IsNodeEnabled())
+					return FUnrealMcpToolResult::Error(FString::Printf(TEXT("event '%s' already exists on '%s'."), *EventName, *Blueprint->GetName()));
+				if (!EventNode)
+				{
+					int32 NodePosY = 0;
+					EventNode = FKismetEditorUtilities::AddDefaultEventNode(
+						Blueprint, EventGraph, FName(*EventName), EventFunc->GetOwnerClass(), NodePosY);
+				}
 				if (!EventNode)
 					return FUnrealMcpToolResult::Error(FString::Printf(TEXT("could not add event node for '%s'."), *EventName));
+				// The auto-placed ghost node is EnabledState=Disabled and excluded from compilation; enable it so
+				// the event actually fires.
+				EventNode->SetEnabledState(ENodeEnabledState::Enabled, /*bUserAction*/ false);
+				FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
 
 				return FUnrealMcpToolResult::Success(
 					FString::Printf(TEXT("Added event '%s' to '%s'."), *EventName, *Blueprint->GetName()));
@@ -695,7 +778,8 @@ namespace UnrealMcpBlueprintTools
 		Registry.Tool(TEXT("blueprint-spawn"))
 			.Title(TEXT("Spawn Blueprint"))
 			.Description(TEXT("Instance a Blueprint's generated Actor class into the current editor level — closing the "
-			                  "create -> edit -> compile -> verify loop. Optionally set world location/rotation and a label."))
+			                  "create -> edit -> compile -> verify loop. Optionally set a world location and a label "
+			                  "(spawn rotation is fixed at identity in the MVP)."))
 			.ParamString(TEXT("path"), TEXT("Blueprint asset object path."), EUnrealMcpParamRequirement::Required)
 			.ParamVector(TEXT("location"), TEXT("World location. Defaults to origin."))
 			.ParamString(TEXT("name"), TEXT("Optional actor label."))

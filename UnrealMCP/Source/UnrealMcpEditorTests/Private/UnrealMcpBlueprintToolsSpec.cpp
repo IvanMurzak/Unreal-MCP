@@ -13,6 +13,9 @@
 
 #include "Engine/Blueprint.h"
 #include "Editor.h"
+#include "Kismet2/BlueprintEditorUtils.h"
+#include "EdGraph/EdGraph.h"
+#include "K2Node_Event.h"
 
 /**
  * Blueprint tool family specs (docs/ARCHITECTURE.md §10, issue #11). Two layers:
@@ -30,6 +33,17 @@ BEGIN_DEFINE_SPEC(FUnrealMcpBlueprintToolsSpec, "UnrealMcp.Tools.Blueprint",
 	}
 
 	static TSharedPtr<FJsonObject> Args() { return MakeShared<FJsonObject>(); }
+
+	// Create a uniquely-named Actor Blueprint and return its object path (package + '.' + short name).
+	static FString CreateBlueprint(const FUnrealMcpToolRegistry& Registry)
+	{
+		const FString PackagePath = FString::Printf(TEXT("/Game/UnrealMcpTests/BP_%s"), *FGuid::NewGuid().ToString(EGuidFormats::Short));
+		TSharedPtr<FJsonObject> Create = Args();
+		Create->SetStringField(TEXT("path"), PackagePath);
+		Create->SetStringField(TEXT("parentClass"), TEXT("/Script/Engine.Actor"));
+		Run(Registry, TEXT("blueprint-create"), Create);
+		return PackagePath + TEXT(".") + FPackageName::GetShortName(PackagePath);
+	}
 
 END_DEFINE_SPEC(FUnrealMcpBlueprintToolsSpec)
 
@@ -104,6 +118,60 @@ void FUnrealMcpBlueprintToolsSpec::Define()
 			AddVar->SetStringField(TEXT("name"), TEXT("Bogus"));
 			AddVar->SetStringField(TEXT("type"), TEXT("/Game/Nope.NotAType"));
 			TestFalse(TEXT("rejected unresolvable type"), Run(Registry, TEXT("blueprint-add-variable"), AddVar).bSuccess);
+		});
+
+		It("rejects an abstract component class instead of crashing", [this]()
+		{
+			FUnrealMcpToolRegistry Registry;
+			UnrealMcpBlueprintTools::Register(Registry);
+			const FString ObjectPath = CreateBlueprint(Registry);
+
+			// LightComponentBase is abstract; SCS CreateNode -> NewObject would otherwise fatally assert.
+			TSharedPtr<FJsonObject> AddComp = Args();
+			AddComp->SetStringField(TEXT("path"), ObjectPath);
+			AddComp->SetStringField(TEXT("componentClass"), TEXT("/Script/Engine.LightComponentBase"));
+			AddComp->SetStringField(TEXT("name"), TEXT("BadLight"));
+			TestFalse(TEXT("abstract component rejected"), Run(Registry, TEXT("blueprint-add-component"), AddComp).bSuccess);
+		});
+
+		It("rejects a non-overridable event function and removing a missing component", [this]()
+		{
+			FUnrealMcpToolRegistry Registry;
+			UnrealMcpBlueprintTools::Register(Registry);
+			const FString ObjectPath = CreateBlueprint(Registry);
+
+			// K2_DestroyActor exists on AActor but is not a blueprint-overridable event.
+			TSharedPtr<FJsonObject> BadEvent = Args();
+			BadEvent->SetStringField(TEXT("path"), ObjectPath);
+			BadEvent->SetStringField(TEXT("name"), TEXT("K2_DestroyActor"));
+			TestFalse(TEXT("non-overridable event rejected"), Run(Registry, TEXT("blueprint-add-event"), BadEvent).bSuccess);
+
+			TSharedPtr<FJsonObject> RemoveMissing = Args();
+			RemoveMissing->SetStringField(TEXT("path"), ObjectPath);
+			RemoveMissing->SetStringField(TEXT("name"), TEXT("NoSuchComponent"));
+			TestFalse(TEXT("removing a missing component rejected"), Run(Registry, TEXT("blueprint-remove-component"), RemoveMissing).bSuccess);
+		});
+
+		It("rejects set-default on a missing property", [this]()
+		{
+			if (!GEditor)
+			{
+				AddWarning(TEXT("GEditor unavailable; skipping set-default negative test (needs a compiled CDO)."));
+				return;
+			}
+			FUnrealMcpToolRegistry Registry;
+			UnrealMcpBlueprintTools::Register(Registry);
+			const FString ObjectPath = CreateBlueprint(Registry);
+
+			TSharedPtr<FJsonObject> Compile = Args();
+			Compile->SetStringField(TEXT("path"), ObjectPath);
+			TestTrue(TEXT("compiled"), Run(Registry, TEXT("blueprint-compile"), Compile).bSuccess);
+
+			TSharedPtr<FJsonObject> SetMissing = Args();
+			SetMissing->SetStringField(TEXT("path"), ObjectPath);
+			SetMissing->SetStringField(TEXT("property"), TEXT("NoSuchProperty"));
+			SetMissing->SetStringField(TEXT("value"), TEXT("1"));
+			TestFalse(TEXT("missing property rejected"), Run(Registry, TEXT("blueprint-set-default"), SetMissing).bSuccess);
 		});
 	});
 
@@ -208,6 +276,107 @@ void FUnrealMcpBlueprintToolsSpec::Define()
 			RemoveComp->SetStringField(TEXT("path"), ObjectPath);
 			RemoveComp->SetStringField(TEXT("name"), TEXT("Mesh"));
 			TestTrue(TEXT("blueprint-remove-component"), Run(Registry, TEXT("blueprint-remove-component"), RemoveComp).bSuccess);
+		});
+	});
+
+	Describe("structure edits", [this]()
+	{
+		It("modify-variable renames and retypes, reflected in blueprint-get", [this]()
+		{
+			FUnrealMcpToolRegistry Registry;
+			UnrealMcpBlueprintTools::Register(Registry);
+			const FString ObjectPath = CreateBlueprint(Registry);
+
+			TSharedPtr<FJsonObject> AddVar = Args();
+			AddVar->SetStringField(TEXT("path"), ObjectPath);
+			AddVar->SetStringField(TEXT("name"), TEXT("Speed"));
+			AddVar->SetStringField(TEXT("type"), TEXT("int"));
+			TestTrue(TEXT("added Speed:int"), Run(Registry, TEXT("blueprint-add-variable"), AddVar).bSuccess);
+
+			TSharedPtr<FJsonObject> Modify = Args();
+			Modify->SetStringField(TEXT("path"), ObjectPath);
+			Modify->SetStringField(TEXT("name"), TEXT("Speed"));
+			Modify->SetStringField(TEXT("newName"), TEXT("Velocity"));
+			Modify->SetStringField(TEXT("newType"), TEXT("float"));
+			TestTrue(TEXT("renamed+retyped"), Run(Registry, TEXT("blueprint-modify-variable"), Modify).bSuccess);
+
+			TSharedPtr<FJsonObject> Get = Args();
+			Get->SetStringField(TEXT("path"), ObjectPath);
+			const FUnrealMcpToolResult GetResult = Run(Registry, TEXT("blueprint-get"), Get);
+			TestTrue(TEXT("get ok"), GetResult.bSuccess);
+			bool bFoundVelocity = false;
+			if (GetResult.Structured.IsValid())
+			{
+				const TArray<TSharedPtr<FJsonValue>>* Vars = nullptr;
+				if (GetResult.Structured->TryGetArrayField(TEXT("variables"), Vars))
+				{
+					for (const TSharedPtr<FJsonValue>& V : *Vars)
+					{
+						const TSharedPtr<FJsonObject> Obj = V->AsObject();
+						if (Obj && Obj->GetStringField(TEXT("name")) == TEXT("Velocity"))
+						{
+							bFoundVelocity = true;
+							TestEqual(TEXT("retyped to float"), Obj->GetStringField(TEXT("type")), FString(TEXT("float")));
+						}
+					}
+				}
+			}
+			TestTrue(TEXT("renamed variable present"), bFoundVelocity);
+		});
+
+		It("rejects renaming a variable onto an existing name", [this]()
+		{
+			FUnrealMcpToolRegistry Registry;
+			UnrealMcpBlueprintTools::Register(Registry);
+			const FString ObjectPath = CreateBlueprint(Registry);
+
+			for (const TCHAR* Name : { TEXT("Alpha"), TEXT("Beta") })
+			{
+				TSharedPtr<FJsonObject> AddVar = Args();
+				AddVar->SetStringField(TEXT("path"), ObjectPath);
+				AddVar->SetStringField(TEXT("name"), Name);
+				AddVar->SetStringField(TEXT("type"), TEXT("int"));
+				TestTrue(TEXT("added"), Run(Registry, TEXT("blueprint-add-variable"), AddVar).bSuccess);
+			}
+
+			TSharedPtr<FJsonObject> Collide = Args();
+			Collide->SetStringField(TEXT("path"), ObjectPath);
+			Collide->SetStringField(TEXT("name"), TEXT("Alpha"));
+			Collide->SetStringField(TEXT("newName"), TEXT("Beta"));
+			TestFalse(TEXT("rename onto existing name rejected"), Run(Registry, TEXT("blueprint-modify-variable"), Collide).bSuccess);
+		});
+
+		It("add-event yields an ENABLED node and rejects a duplicate", [this]()
+		{
+			FUnrealMcpToolRegistry Registry;
+			UnrealMcpBlueprintTools::Register(Registry);
+			const FString ObjectPath = CreateBlueprint(Registry);
+
+			TSharedPtr<FJsonObject> AddEvent = Args();
+			AddEvent->SetStringField(TEXT("path"), ObjectPath);
+			AddEvent->SetStringField(TEXT("name"), TEXT("ReceiveBeginPlay"));
+			TestTrue(TEXT("event added"), Run(Registry, TEXT("blueprint-add-event"), AddEvent).bSuccess);
+
+			// The node must be ENABLED (not the disabled ghost AddDefaultEventNode seeds by default).
+			UBlueprint* Blueprint = FindObject<UBlueprint>(nullptr, *ObjectPath);
+			TestNotNull(TEXT("blueprint resolved"), Blueprint);
+			bool bFoundEnabledEvent = false;
+			if (Blueprint)
+			{
+				if (UEdGraph* EventGraph = FBlueprintEditorUtils::FindEventGraph(Blueprint))
+				{
+					for (const UEdGraphNode* Node : EventGraph->Nodes)
+					{
+						const UK2Node_Event* EventNode = Cast<UK2Node_Event>(Node);
+						if (EventNode && EventNode->EventReference.GetMemberName() == FName(TEXT("ReceiveBeginPlay")))
+							bFoundEnabledEvent = EventNode->IsNodeEnabled();
+					}
+				}
+			}
+			TestTrue(TEXT("event node is enabled"), bFoundEnabledEvent);
+
+			// A second add for the same event must be rejected (no duplicate ghost node).
+			TestFalse(TEXT("duplicate event rejected"), Run(Registry, TEXT("blueprint-add-event"), AddEvent).bSuccess);
 		});
 	});
 }
