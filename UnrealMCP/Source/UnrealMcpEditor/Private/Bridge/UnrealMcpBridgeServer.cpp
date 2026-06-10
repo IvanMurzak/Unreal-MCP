@@ -154,11 +154,17 @@ bool FUnrealMcpBridgeServer::HandleConnectionAccepted(FSocket* InSocket, const F
 		ClientSocket = InSocket;
 		++ConnectionGeneration;
 		ConnectionAcceptedSeconds = FPlatformTime::Seconds();
+
+		// Reset the connection flags INSIDE the lock so the socket swap, the generation bump, and the flag
+		// reset are one atomic step. If these writes happened after releasing the lock, the reader could
+		// observe the bumped generation and a freshly-arrived handshake could flip bHandshakeOk=true
+		// (HandleHandshake sets it under this SAME lock) before the delayed bHandshakeOk=false landed —
+		// clobbering a just-authenticated connection back to pre-handshake until the 10 s deadline recycled it.
+		bHandshakeOk = false;
+		bClientConnected = true;
+		bHeartbeatStop = true; // retire any heartbeat tied to the prior connection; a fresh one starts on handshake
 	}
 
-	bHandshakeOk = false;
-	bClientConnected = true;
-	bHeartbeatStop = true; // retire any heartbeat tied to the prior connection; a fresh one starts on handshake
 	LastActivitySeconds.Set(static_cast<int32>(FPlatformTime::Seconds()));
 	UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] sidecar connected from %s; awaiting handshake."), *Endpoint.ToString());
 	return true; // keep the socket — we own it now

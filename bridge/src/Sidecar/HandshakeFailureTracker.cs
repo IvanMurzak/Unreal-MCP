@@ -30,6 +30,12 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Sidecar
         public static readonly TimeSpan NoSuccessDeadline = TimeSpan.FromSeconds(60);
 
         private readonly TimeSpan _deadline;
+
+        // Guards the two mutable fields below: they are written on the IPC reader thread (via the
+        // HandshakeAccepted / HandshakeRejected events) and read on the watchdog task thread (which polls
+        // IsNoSuccessDeadlineExceeded / HasEverSucceeded every 2 s). Without it the Nullable<DateTime> read is
+        // a torn read and the int increment is non-atomic.
+        private readonly object _gate = new();
         private int _consecutiveRejections;
         private DateTime? _lastSuccessUtc;
 
@@ -43,14 +49,17 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Sidecar
         }
 
         public DateTime BootUtc { get; }
-        public int ConsecutiveRejections => _consecutiveRejections;
-        public bool HasEverSucceeded => _lastSuccessUtc.HasValue;
+        public int ConsecutiveRejections { get { lock (_gate) return _consecutiveRejections; } }
+        public bool HasEverSucceeded { get { lock (_gate) return _lastSuccessUtc.HasValue; } }
 
         /// <summary>Record a successful handshake — clears the rejection count and the no-success deadline.</summary>
         public void RecordSuccess(DateTime nowUtc)
         {
-            _consecutiveRejections = 0;
-            _lastSuccessUtc = nowUtc;
+            lock (_gate)
+            {
+                _consecutiveRejections = 0;
+                _lastSuccessUtc = nowUtc;
+            }
         }
 
         /// <summary>
@@ -59,8 +68,11 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Sidecar
         /// </summary>
         public bool RecordRejection()
         {
-            _consecutiveRejections++;
-            return _consecutiveRejections >= MaxConsecutiveRejections;
+            lock (_gate)
+            {
+                _consecutiveRejections++;
+                return _consecutiveRejections >= MaxConsecutiveRejections;
+            }
         }
 
         /// <summary>
@@ -70,8 +82,11 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Sidecar
         /// </summary>
         public bool IsNoSuccessDeadlineExceeded(DateTime nowUtc)
         {
-            if (_lastSuccessUtc.HasValue)
-                return false;
+            lock (_gate)
+            {
+                if (_lastSuccessUtc.HasValue)
+                    return false;
+            }
             return nowUtc - BootUtc >= _deadline;
         }
     }

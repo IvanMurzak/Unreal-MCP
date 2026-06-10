@@ -37,6 +37,14 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
         /// <summary>Default per-tool-call timeout when the message omits one (§4).</summary>
         public const int DefaultToolTimeoutMs = 30000;
 
+        /// <summary>
+        /// Grace added to a tool-call's <c>timeoutMs</c> for the sidecar-side local backstop. The plugin
+        /// honours <c>timeoutMs</c> and should answer with a terminal tool-response first; the local
+        /// deadline is slightly longer so that response normally wins, and only fires when no response ever
+        /// arrives (e.g. a call silently dropped pre-handshake) so the pending call cannot hang forever.
+        /// </summary>
+        public const int CallTimeoutGraceMs = 5000;
+
         /// <summary>Message <c>type</c> discriminator values (§1.3).</summary>
         public static class Type
         {

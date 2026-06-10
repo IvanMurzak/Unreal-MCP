@@ -44,6 +44,9 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
         private TcpClient? _tcp;
         private NetworkStream? _stream;
         private volatile bool _shutdownRequested;
+        // True only between a received handshake-ack and the connection's teardown. CallToolAsync gates on
+        // this (not merely an open socket) so a call cannot win the write race against the handshake.
+        private volatile bool _ackAccepted;
         private long _lastActivityTicks;
 
         /// <summary>Routes applied tool manifests; set by the host before <see cref="RunAsync"/>.</summary>
@@ -140,6 +143,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
                 if (first == ackTcs.Task && ackTcs.Task.IsCompletedSuccessfully)
                 {
                     _backoff.Reset();
+                    _ackAccepted = true; // open the gate: tool-calls may now hit the wire (§1.4)
                     HandshakeAccepted?.Invoke(ackTcs.Task.Result);
                     using var heartbeat = StartHeartbeat(connCts);
                     await readTask.ConfigureAwait(false); // serve until the link drops
@@ -304,8 +308,13 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
 
         public async Task<ToolResponseMessage> CallToolAsync(string tool, JsonObject? arguments, int timeoutMs, CancellationToken cancellationToken)
         {
+            // Gate on a COMPLETED handshake, not merely an open socket: _stream/_tcp are published right after
+            // the dial — BEFORE the handshake-ack — and on a reconnect epoch the ProxyTools from the prior
+            // epoch are still registered. A SignalR-driven call landing in that pre-ack window would win the
+            // write race against the handshake, hit the wire first, and be silently dropped by the plugin's
+            // pre-handshake auth gate, with no tool-response ever returning. Fail fast pre-ack instead.
             var stream = _stream;
-            if (stream == null || _tcp is not { Connected: true })
+            if (stream == null || !_ackAccepted || _tcp is not { Connected: true })
                 throw new IpcDisconnectedException();
 
             var requestId = Guid.NewGuid().ToString("N");
@@ -334,6 +343,24 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
             {
                 _pending.TryFail(requestId, new IpcDisconnectedException());
                 throw new IpcDisconnectedException();
+            }
+
+            // Local timeout backstop: timeoutMs is also embedded in the message for the plugin to honour, but
+            // a silently-dropped call (or a peer that never answers) must still fail this task rather than
+            // hang forever on a healthy link. Arm a local deadline slightly beyond the request timeout so the
+            // plugin's own terminal response normally wins the race; only fire when nothing comes back.
+            if (timeoutMs > 0)
+            {
+                using var backstopCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                var completed = await Task.WhenAny(task, Task.Delay(timeoutMs + IpcProtocol.CallTimeoutGraceMs, backstopCts.Token)).ConfigureAwait(false);
+                backstopCts.Cancel(); // stop the backstop timer whichever side won
+                if (completed != task && !cancellationToken.IsCancellationRequested)
+                {
+                    var timeout = new TimeoutException($"Tool '{tool}' call timed out after {timeoutMs + IpcProtocol.CallTimeoutGraceMs} ms with no IPC response.");
+                    _ = SafeAwait(SendAsync(new ToolCancelMessage { RequestId = requestId }, CancellationToken.None));
+                    _pending.TryFail(requestId, timeout);
+                    throw timeout;
+                }
             }
 
             return await task.ConfigureAwait(false);
@@ -366,6 +393,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
 
         private void CloseConnection(TcpClient tcp)
         {
+            _ackAccepted = false; // close the gate: the next epoch must re-handshake before any tool-call
             try { _stream?.Dispose(); } catch { /* ignore */ }
             try { tcp.Close(); } catch { /* ignore */ }
             _stream = null;
@@ -380,6 +408,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
         public ValueTask DisposeAsync()
         {
             _shutdownRequested = true;
+            _ackAccepted = false;
             try { _stream?.Dispose(); } catch { /* ignore */ }
             try { _tcp?.Close(); } catch { /* ignore */ }
             _writeLock.Dispose();
