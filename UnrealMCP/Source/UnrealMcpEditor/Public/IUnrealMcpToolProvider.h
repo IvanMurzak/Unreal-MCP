@@ -9,8 +9,9 @@
 class FUnrealMcpToolRegistry;
 
 /**
- * The Unreal-MCP extension contract (docs/ARCHITECTURE.md §5) — the ONLY header a third-party
- * extension author needs to include.
+ * The Unreal-MCP extension contract (docs/ARCHITECTURE.md §5) — the only Unreal-MCP-specific contract
+ * header. To declare tools you also include UnrealMcpToolRegistry.h, and to register the provider as a
+ * modular feature you include Features/IModularFeatures.h (see Step 2/3 in docs/EXTENSIONS.md).
  *
  * An extension is any UE plugin that implements this interface and registers an instance as a
  * modular feature under GetModularFeatureName():

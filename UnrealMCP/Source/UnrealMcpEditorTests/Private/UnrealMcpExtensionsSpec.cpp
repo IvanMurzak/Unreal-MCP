@@ -287,6 +287,105 @@ void FUnrealMcpExtensionsSpec::Define()
 
 			IFileManager::Get().Delete(*ConfigPath, /*RequireExists*/ false, /*EvenReadOnly*/ true);
 		});
+
+		It("ignores a corrupt config file and starts every extension enabled", [this]()
+		{
+			const FString ConfigPath = MakeTempConfigPath();
+
+			// Write malformed JSON to the config path before the manager loads it.
+			IFileManager::Get().MakeDirectory(*FPaths::GetPath(ConfigPath), /*Tree*/ true);
+			FFileHelper::SaveStringToFile(TEXT("{ this is not valid json"), *ConfigPath);
+
+			FMockToolProvider P(TEXT("p.ext"), [](FUnrealMcpToolRegistry& R) { AddSimpleTool(R, TEXT("p-tool")); });
+			auto Source = [&P]() { return TArray<IUnrealMcpToolProvider*>{ &P }; };
+
+			FUnrealMcpToolRegistry Registry;
+			FUnrealMcpExtensionManager Manager(Registry, nullptr, ConfigPath);
+			Manager.SetProviderSourceForTesting(Source);
+
+			// LoadConfig logs an Error for the malformed file (a deliberately loud signal). Whitelist it
+			// so the Automation framework does not treat the expected log as a failure — and so this test
+			// also asserts that the loud error actually fired.
+			AddExpectedError(TEXT("malformed and was ignored"), EAutomationExpectedErrorFlags::Contains);
+			Manager.Startup(); // must not crash on the malformed file
+
+			// A corrupt file is discarded, so the persisted disabled set is empty => P is enabled.
+			TestTrue(TEXT("extension enabled despite corrupt config"), Manager.IsExtensionEnabled(TEXT("p.ext")));
+			TestTrue(TEXT("p-tool present despite corrupt config"), Registry.HasTool(TEXT("p-tool")));
+
+			IFileManager::Get().Delete(*ConfigPath, /*RequireExists*/ false, /*EvenReadOnly*/ true);
+		});
+	});
+
+	Describe("extension id validation", [this]()
+	{
+		It("skips a provider whose id collides with the reserved 'core' scope and preserves core tools", [this]()
+		{
+			FUnrealMcpToolRegistry Registry;
+			FUnrealMcpExtensionManager Manager(Registry, nullptr);
+
+			// A core tool registered on the default (non-extension) path — ExtensionId defaults to "core".
+			AddSimpleTool(Registry, TEXT("core-tool"));
+			TestTrue(TEXT("core-tool registered"), Registry.HasTool(TEXT("core-tool")));
+
+			// A malicious/buggy provider claiming the reserved "core" id.
+			FMockToolProvider Evil(TEXT("core"), [](FUnrealMcpToolRegistry& R) { AddSimpleTool(R, TEXT("evil-tool")); });
+
+			Manager.RebuildFromProviders({ &Evil }, false);
+
+			TestFalse(TEXT("evil-tool not registered"), Registry.HasTool(TEXT("evil-tool")));
+			TestTrue(TEXT("core-tool survives the rebuild"), Registry.HasTool(TEXT("core-tool")));
+			const FUnrealMcpExtensionRecord* Rec = Manager.FindExtension(TEXT("core"));
+			TestTrue(TEXT("core-id record exists"), Rec != nullptr);
+			TestTrue(TEXT("core-id record has an error"), Rec->HasError());
+			TestEqual(TEXT("core-id record registered nothing"), Rec->ToolCount, 0);
+
+			// Regression guard: a SECOND rebuild must not delete the core tools under the "core" key.
+			Manager.RebuildFromProviders({ &Evil }, false);
+			TestTrue(TEXT("core-tool still present after a second rebuild"), Registry.HasTool(TEXT("core-tool")));
+		});
+
+		It("skips a provider with an empty id and records the failure", [this]()
+		{
+			FUnrealMcpToolRegistry Registry;
+			FUnrealMcpExtensionManager Manager(Registry, nullptr);
+
+			FMockToolProvider Empty(TEXT(""), [](FUnrealMcpToolRegistry& R) { AddSimpleTool(R, TEXT("orphan-tool")); });
+
+			Manager.RebuildFromProviders({ &Empty }, false);
+
+			TestFalse(TEXT("orphan-tool not registered"), Registry.HasTool(TEXT("orphan-tool")));
+			const FUnrealMcpExtensionRecord* Rec = Manager.FindExtension(TEXT(""));
+			TestTrue(TEXT("empty-id record exists"), Rec != nullptr);
+			TestTrue(TEXT("empty-id record has an error"), Rec->HasError());
+			TestEqual(TEXT("empty-id record registered nothing"), Rec->ToolCount, 0);
+		});
+
+		It("keeps the first provider when two share an ExtensionId and records an error on the later", [this]()
+		{
+			FUnrealMcpToolRegistry Registry;
+			FUnrealMcpExtensionManager Manager(Registry, nullptr);
+
+			// Two providers with the SAME id; each declares a distinct tool.
+			FMockToolProvider First(TEXT("dup.ext"), [](FUnrealMcpToolRegistry& R) { AddSimpleTool(R, TEXT("tool-1")); });
+			FMockToolProvider Second(TEXT("dup.ext"), [](FUnrealMcpToolRegistry& R) { AddSimpleTool(R, TEXT("tool-2")); });
+
+			// StableSort tie-breaks on input order, so First (passed first) wins deterministically.
+			Manager.RebuildFromProviders({ &First, &Second }, false);
+
+			TestTrue(TEXT("first provider's tool registered"), Registry.HasTool(TEXT("tool-1")));
+			TestFalse(TEXT("second provider's tool skipped"), Registry.HasTool(TEXT("tool-2")));
+			TestEqual(TEXT("both providers produced a record"), Manager.GetExtensions().Num(), 2);
+
+			int32 HealthyCount = 0;
+			int32 ErroredCount = 0;
+			for (const FUnrealMcpExtensionRecord& Rec : Manager.GetExtensions())
+			{
+				if (Rec.HasError()) ++ErroredCount; else ++HealthyCount;
+			}
+			TestEqual(TEXT("exactly one healthy record"), HealthyCount, 1);
+			TestEqual(TEXT("exactly one errored record"), ErroredCount, 1);
+		});
 	});
 }
 

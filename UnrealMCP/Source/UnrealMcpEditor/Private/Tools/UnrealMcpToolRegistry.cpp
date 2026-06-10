@@ -320,9 +320,28 @@ void FUnrealMcpToolRegistry::Commit(FUnrealMcpRegisteredTool&& InTool)
 
 		if (const FUnrealMcpRegisteredTool* Existing = Tools.Find(InTool.Name))
 		{
-			const FString Rejection = FString::Printf(
-				TEXT("tool '%s' rejected: name already registered by '%s' (first-wins by ExtensionId sort)"),
-				*InTool.Name, *Existing->ExtensionId);
+			// Tailor the reason to the kind of collision so the recorded error is not misleading:
+			// a core-tool clash, a clash with a different extension (first-wins by ExtensionId sort),
+			// or two tools sharing a name WITHIN this same provider (an authoring error, no sort involved).
+			FString Rejection;
+			if (Existing->ExtensionId == TEXT("core"))
+			{
+				Rejection = FString::Printf(
+					TEXT("tool '%s' rejected: name collides with a built-in core tool (extensions may not shadow core)"),
+					*InTool.Name);
+			}
+			else if (Existing->ExtensionId == ScopeExtensionId)
+			{
+				Rejection = FString::Printf(
+					TEXT("tool '%s' rejected: this extension already declared a tool with that name (duplicate within the extension)"),
+					*InTool.Name);
+			}
+			else
+			{
+				Rejection = FString::Printf(
+					TEXT("tool '%s' rejected: name already registered by extension '%s' (first-wins by ExtensionId sort)"),
+					*InTool.Name, *Existing->ExtensionId);
+			}
 			ScopeErrors.Add(Rejection);
 			UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] extension '%s': %s"), *ScopeExtensionId, *Rejection);
 			return;

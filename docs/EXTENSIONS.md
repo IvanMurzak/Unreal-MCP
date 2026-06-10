@@ -14,7 +14,8 @@ A complete, buildable example accompanies this guide:
 
 Implement a single interface —
 [`IUnrealMcpToolProvider`](../UnrealMCP/Source/UnrealMcpEditor/Public/IUnrealMcpToolProvider.h), the
-**only** Unreal-MCP header you need to include:
+**only Unreal-MCP-specific contract header** (to declare tools you also include `UnrealMcpToolRegistry.h`,
+and to register the provider you include `Features/IModularFeatures.h` — see Steps 2–3 below):
 
 ```cpp
 class IUnrealMcpToolProvider : public IModularFeature
@@ -162,6 +163,9 @@ UE is built without C++ exceptions, so isolation is **descriptor-level**, not bo
   other valid tools, and every other extension, are unaffected.
 - A **duplicate tool name** across providers is **rejected** for the later-sorted provider (first-wins
   by the `ExtensionId` sort), again recorded on that extension's record.
+- A **duplicate `GetExtensionId()`** across two providers is an authoring error: the first-registered
+  provider keeps the id and the later one contributes **no tools**, with the conflict recorded on its
+  record. An **empty** or **reserved (`core`)** id is likewise skipped with a recorded error.
 - A crash **inside a tool body** is an editor crash like any other plugin code — that is outside the
   isolation contract. Validate inputs and fail gracefully (`FUnrealMcpToolResult::Error(...)`).
 

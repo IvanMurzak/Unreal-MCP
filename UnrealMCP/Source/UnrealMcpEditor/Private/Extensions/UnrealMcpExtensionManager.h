@@ -103,4 +103,13 @@ private:
 	FDelegateHandle RegisteredHandle;
 	FDelegateHandle UnregisteredHandle;
 	bool bSubscribed = false;
+
+	// Re-entrancy guard (§5): a provider's RegisterTools may synchronously (un)register a modular feature,
+	// which fires OnFeatureRegistered → Rebuild while we are still mid-rebuild. Rather than recurse (which
+	// would re-enter the registry's extension scope, trip its no-nested-scope check, and could free a
+	// provider the outer Sorted loop still iterates), we DEFER: the nested call records a pending rebuild
+	// and returns immediately; the outer rebuild re-runs once after it completes against the fresh source.
+	bool bRebuilding = false;
+	bool bPendingRebuild = false;
+	bool bPendingNotify = false;
 };
