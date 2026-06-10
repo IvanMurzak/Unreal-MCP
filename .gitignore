@@ -1,0 +1,60 @@
+# ----------------------------------------------------------------------------
+# Unreal Engine (plugin build artifacts + any generated host-project artifacts)
+# ----------------------------------------------------------------------------
+Binaries/
+Intermediate/
+Saved/
+DerivedDataCache/
+.vs/
+.vscode/
+.idea/
+*.sln
+# The .NET sub-projects keep hand-authored solution files (UE only ever
+# generates a .sln at a .uproject root, never here) — un-ignore them.
+!bridge/*.sln
+!Unreal-MCP-Server/*.sln
+*.VC.db
+*.VC.VC.opendb
+*.opensdf
+*.opendb
+*.sdf
+*.suo
+*.user
+*.xcodeproj
+*.xcworkspace
+
+# ----------------------------------------------------------------------------
+# .NET (bridge/, Unreal-MCP-Server/)
+# ----------------------------------------------------------------------------
+bin/
+obj/
+publish/
+TestResults/
+# cli/bin holds the committed npm bin entry script — not a .NET build output.
+!cli/bin/
+
+# ----------------------------------------------------------------------------
+# Node (cli/)
+# ----------------------------------------------------------------------------
+node_modules/
+dist/
+*.tsbuildinfo
+
+# ----------------------------------------------------------------------------
+# Secrets — NEVER commit. A project-root .env can hold UNREAL_MCP_TOKEN
+# (see docs/ARCHITECTURE.md §8 — token commit hazard).
+# ----------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+
+# ----------------------------------------------------------------------------
+# Logs / OS / misc
+# ----------------------------------------------------------------------------
+logs/
+*.log
+.DS_Store
+Thumbs.db
+
+# Agent memory (infra workspace convention — never commit nested agent-memory dirs)
+**/.claude/agent-memory/

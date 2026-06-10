@@ -1,0 +1,49 @@
+# EditorConfig — https://editorconfig.org
+# Top-most EditorConfig file for the Unreal-MCP mono-repo.
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+# Unreal C++ (UE convention: tabs)
+[*.{h,hpp,cpp,inl}]
+indent_style = tab
+indent_size = 4
+
+# C# (.NET sidecar + server; UE Build.cs/Target.cs also follow tabs like engine code)
+[*.cs]
+indent_style = space
+indent_size = 4
+csharp_new_line_before_open_brace = all
+
+[*.{Build.cs,Target.cs}]
+indent_style = tab
+
+# TypeScript / JavaScript (cli)
+[*.{ts,tsx,js,mjs,cjs}]
+indent_size = 2
+
+# JSON / YAML / config
+[*.{json,uplugin,yml,yaml}]
+indent_size = 2
+
+# XML-ish project files
+[*.{csproj,props,targets,config,nuspec}]
+indent_size = 2
+
+# Markdown — trailing whitespace is meaningful (hard line breaks)
+[*.md]
+trim_trailing_whitespace = false
+
+# PowerShell
+[*.ps1]
+indent_size = 4
+
+# Windows batch files require CRLF
+[*.{bat,cmd}]
+end_of_line = crlf
