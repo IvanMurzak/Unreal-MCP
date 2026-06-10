@@ -28,10 +28,10 @@ enum class EUnrealMcpParamRequirement : uint8
 struct UNREALMCPEDITOR_API FUnrealMcpParamSpec
 {
 	FString Name;
-	FString JsonType;        // "string" | "integer" | "number" | "boolean" | "object"
+	FString JsonType;        // "string" | "integer" | "number" | "boolean" | "object" | "array"
 	FString Description;
 	EUnrealMcpParamRequirement Requirement = EUnrealMcpParamRequirement::Optional;
-	TSharedPtr<FJsonObject> ObjectSchema; // for "object" params (e.g. FVector → {x,y,z})
+	TSharedPtr<FJsonObject> ObjectSchema; // verbatim custom schema for object/array/exotic params (e.g. FVector → {x,y,z}, paths → array of string); null for plain scalars
 };
 
 /**
@@ -132,6 +132,13 @@ public:
 	FUnrealMcpToolBuilder& ParamNumber(const FString& Name, const FString& Desc, EUnrealMcpParamRequirement Req = EUnrealMcpParamRequirement::Optional);
 	FUnrealMcpToolBuilder& ParamBool(const FString& Name, const FString& Desc, EUnrealMcpParamRequirement Req = EUnrealMcpParamRequirement::Optional);
 	FUnrealMcpToolBuilder& ParamVector(const FString& Name, const FString& Desc, EUnrealMcpParamRequirement Req = EUnrealMcpParamRequirement::Optional);
+	/**
+	 * Generic escape hatch for params whose JSON Schema the typed helpers above do not cover (e.g.
+	 * `{pitch,yaw,roll}` rotators, free-form `object` property bags, `array` lists). Pass the fully
+	 * built schema in @p CustomSchema; it is used verbatim as the param's schema. Families build their
+	 * own schemas locally so the shared builder surface stays small (one method, not one per math type).
+	 */
+	FUnrealMcpToolBuilder& Param(const FString& Name, const FString& JsonType, const FString& Desc, EUnrealMcpParamRequirement Req, TSharedPtr<FJsonObject> CustomSchema = nullptr);
 	FUnrealMcpToolBuilder& ReadOnlyHint(bool bValue);
 	FUnrealMcpToolBuilder& DestructiveHint(bool bValue);
 	FUnrealMcpToolBuilder& IdempotentHint(bool bValue);

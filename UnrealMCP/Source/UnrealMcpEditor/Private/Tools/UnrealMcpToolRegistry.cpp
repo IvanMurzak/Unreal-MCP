@@ -113,7 +113,9 @@ TSharedPtr<FJsonObject> FUnrealMcpRegisteredTool::BuildInputSchema() const
 
 	for (const FUnrealMcpParamSpec& Param : Params)
 	{
-		TSharedPtr<FJsonObject> ParamSchema = Param.JsonType == TEXT("object") && Param.ObjectSchema.IsValid()
+		// A custom schema (object/array/exotic types built via the generic Param()) is used verbatim;
+		// the simple scalar types fall back to a {type,description} schema.
+		TSharedPtr<FJsonObject> ParamSchema = Param.ObjectSchema.IsValid()
 			? Param.ObjectSchema
 			: MakeTypedSchema(Param.JsonType, Param.Description);
 
@@ -182,6 +184,11 @@ FUnrealMcpToolBuilder& FUnrealMcpToolBuilder::ParamVector(const FString& Name, c
 {
 	FUnrealMcpParamSpec Spec{ Name, TEXT("object"), Desc, Req, MakeVectorSchema(Desc) };
 	Tool.Params.Add(Spec);
+	return *this;
+}
+FUnrealMcpToolBuilder& FUnrealMcpToolBuilder::Param(const FString& Name, const FString& JsonType, const FString& Desc, EUnrealMcpParamRequirement Req, TSharedPtr<FJsonObject> CustomSchema)
+{
+	Tool.Params.Add(FUnrealMcpParamSpec{ Name, JsonType, Desc, Req, CustomSchema });
 	return *this;
 }
 FUnrealMcpToolBuilder& FUnrealMcpToolBuilder::ReadOnlyHint(bool bValue) { Tool.bReadOnlyHint = bValue; return *this; }
@@ -261,7 +268,7 @@ bool FUnrealMcpToolRegistry::ValidateTool(const FUnrealMcpRegisteredTool& InTool
 		return false;
 	}
 
-	static const TCHAR* const KnownTypes[] = { TEXT("string"), TEXT("integer"), TEXT("number"), TEXT("boolean"), TEXT("object") };
+	static const TCHAR* const KnownTypes[] = { TEXT("string"), TEXT("integer"), TEXT("number"), TEXT("boolean"), TEXT("object"), TEXT("array") };
 	TSet<FString> SeenParams;
 	for (const FUnrealMcpParamSpec& Param : InTool.Params)
 	{
@@ -283,10 +290,10 @@ bool FUnrealMcpToolRegistry::ValidateTool(const FUnrealMcpRegisteredTool& InTool
 			return false;
 		}
 
-		if (Param.JsonType == TEXT("object") && !Param.ObjectSchema.IsValid())
+		if ((Param.JsonType == TEXT("object") || Param.JsonType == TEXT("array")) && !Param.ObjectSchema.IsValid())
 		{
-			OutError = FString::Printf(TEXT("tool '%s' object parameter '%s' has no schema (malformed schema)"),
-				*InTool.Name, *Param.Name);
+			OutError = FString::Printf(TEXT("tool '%s' %s parameter '%s' has no schema (malformed schema)"),
+				*InTool.Name, *Param.JsonType, *Param.Name);
 			return false;
 		}
 
