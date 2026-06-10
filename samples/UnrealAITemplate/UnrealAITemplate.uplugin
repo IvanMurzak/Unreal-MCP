@@ -1,0 +1,29 @@
+{
+  "FileVersion": 3,
+  "Version": 1,
+  "VersionName": "1.0.0",
+  "FriendlyName": "Unreal AI Template (MCP extension sample)",
+  "Description": "Minimal standalone sample demonstrating the Unreal-MCP extensions contract (IUnrealMcpToolProvider, registered through IModularFeatures under the feature name 'UnrealMcpToolProvider'). Registers a single 'hello-extension' tool, proving the contract end-to-end. Doubles as the extension-author documentation's working example and the error-isolation test fixture (flip UNREAL_AI_TEMPLATE_INVALID_SCHEMA to 1 to emit an invalid descriptor).",
+  "Category": "AI",
+  "CreatedBy": "Ivan Murzak",
+  "CreatedByURL": "https://github.com/IvanMurzak",
+  "DocsURL": "https://github.com/IvanMurzak/Unreal-MCP/blob/main/docs/EXTENSIONS.md",
+  "SupportURL": "https://github.com/IvanMurzak/Unreal-MCP/issues",
+  "CanContainContent": false,
+  "IsBetaVersion": true,
+  "IsExperimentalVersion": false,
+  "Installed": false,
+  "Modules": [
+    {
+      "Name": "UnrealAITemplate",
+      "Type": "Editor",
+      "LoadingPhase": "Default"
+    }
+  ],
+  "Plugins": [
+    {
+      "Name": "UnrealMCP",
+      "Enabled": true
+    }
+  ]
+}
