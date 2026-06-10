@@ -148,7 +148,7 @@ void FUnrealMcpConfig::LoadFromJson(const TSharedPtr<FJsonObject>& Json)
 	}
 
 	// Snapshot the (defaults + disk) baseline AFTER loading — this is what Save() restores for any key an
-	// env/.env layer later overrides. Re-parsing makes a deep, independent copy.
+	// env/.env layer later overrides. ToJson() builds a fresh object, so the baseline is a deep, independent copy.
 	OverriddenKeys.Reset();
 	DiskBaselineJson = ToJson();
 }

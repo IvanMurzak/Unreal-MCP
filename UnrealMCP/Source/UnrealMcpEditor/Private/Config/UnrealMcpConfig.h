@@ -110,7 +110,7 @@ public:
 	 */
 	UNREALMCPEDITOR_API void LoadFromFile(const FString& Path);
 
-	/** Set the disk baseline directly from a parsed JSON object (or defaults when null). For tests. */
+	/** Set the disk baseline directly from a parsed JSON object (or defaults when null). LoadFromFile delegates here; also the injectable seam for tests. */
 	UNREALMCPEDITOR_API void LoadFromJson(const TSharedPtr<FJsonObject>& Json);
 
 	/**
