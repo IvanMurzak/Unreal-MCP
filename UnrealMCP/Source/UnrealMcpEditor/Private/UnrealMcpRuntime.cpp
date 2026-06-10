@@ -30,6 +30,7 @@ void FUnrealMcpRuntime::Startup()
 	Registry = MakeUnique<FUnrealMcpToolRegistry>();
 	UnrealMcpPingTool::Register(*Registry);
 	UnrealMcpActorTools::Register(*Registry);
+	UnrealMcpBlueprintTools::Register(*Registry); // §10 flagship Blueprint family (CORE)
 
 	Dispatcher = MakeUnique<FUnrealMcpGameThreadDispatcher>();
 	BridgeServer = MakeUnique<FUnrealMcpBridgeServer>(*Registry, *Dispatcher);

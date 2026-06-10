@@ -29,3 +29,14 @@ namespace UnrealMcpActorTools
 {
 	UNREALMCPEDITOR_API void Register(FUnrealMcpToolRegistry& Registry);
 }
+
+/**
+ * The Blueprint tool family (docs/ARCHITECTURE.md §10 — FLAGSHIP, Unreal-unique). MVP floor: a closed
+ * read -> structure-edit -> compile -> spawn loop (~11 kebab-case CORE tools). Every edit is pinned to
+ * the public FKismetEditorUtilities / FBlueprintEditorUtils (+ the public SCS surface) and runs on the
+ * game-thread dispatcher. Exported so the runtime wires it on boot AND specs exercise it in isolation.
+ */
+namespace UnrealMcpBlueprintTools
+{
+	UNREALMCPEDITOR_API void Register(FUnrealMcpToolRegistry& Registry);
+}
