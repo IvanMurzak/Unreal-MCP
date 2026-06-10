@@ -476,6 +476,14 @@ namespace UnrealMcpAssetTools
 				{
 					return FUnrealMcpToolResult::Error(FString::Printf(TEXT("No asset at '%s'."), *Path));
 				}
+				// Engine-root guard: this is the family's most destructive write, so it must refuse
+				// /Engine, /Script and /Temp content like create-folder/copy/move/material-create do —
+				// otherwise force:true on '/Engine/...' would DeleteAsset engine content.
+				if (!IsWritableContentRoot(Path))
+				{
+					return FUnrealMcpToolResult::Error(
+						FString::Printf(TEXT("Refusing to delete '%s' under an engine content root; use a project root like '/Game'."), *Path));
+				}
 
 				// Referencer guard: UEditorAssetLibrary::DeleteAsset force-deletes WITHOUT confirmation,
 				// silently dangling inbound references. Query the registry for on-disk referencers first
@@ -662,6 +670,15 @@ namespace UnrealMcpAssetTools
 					return FUnrealMcpToolResult::Error(TEXT("Provide at least one of 'scalars', 'vectors', or 'textures'."));
 				}
 
+				// Engine-root guard: this is the other in-place write in the family. Even with
+				// save:false the change dirties the package (and save:true would persist it to disk),
+				// so refuse /Engine, /Script and /Temp consistently with the rest of the family.
+				if (!IsWritableContentRoot(Path))
+				{
+					return FUnrealMcpToolResult::Error(
+						FString::Printf(TEXT("Refusing to modify '%s' under an engine content root; use a project root like '/Game'."), *Path));
+				}
+
 				UMaterialInstanceConstant* Instance = Cast<UMaterialInstanceConstant>(UEditorAssetLibrary::LoadAsset(Path));
 				if (!Instance)
 				{
@@ -695,14 +712,18 @@ namespace UnrealMcpAssetTools
 					{
 						const FName ParamName(*Pair.Key);
 						double Value;
-						if (KnownScalars.Contains(ParamName) && Pair.Value.IsValid() && Pair.Value->TryGetNumber(Value))
+						if (!KnownScalars.Contains(ParamName))
+						{
+							Failed.Add(FString::Printf(TEXT("scalar:%s (unknown parameter)"), *Pair.Key));
+						}
+						else if (Pair.Value.IsValid() && Pair.Value->TryGetNumber(Value))
 						{
 							UMaterialEditingLibrary::SetMaterialInstanceScalarParameterValue(Instance, ParamName, (float)Value);
 							Applied.Add(FString::Printf(TEXT("scalar:%s"), *Pair.Key));
 						}
 						else
 						{
-							Failed.Add(FString::Printf(TEXT("scalar:%s"), *Pair.Key));
+							Failed.Add(FString::Printf(TEXT("scalar:%s (not a number)"), *Pair.Key));
 						}
 					}
 				}
@@ -713,9 +734,15 @@ namespace UnrealMcpAssetTools
 					{
 						const FName ParamName(*Pair.Key);
 						const TSharedPtr<FJsonObject>* ColorObj;
-						if (KnownVectors.Contains(ParamName) && Pair.Value.IsValid() && Pair.Value->TryGetObject(ColorObj))
+						if (!KnownVectors.Contains(ParamName))
 						{
-							FLinearColor Color(FLinearColor::Black);
+							Failed.Add(FString::Printf(TEXT("vector:%s (unknown parameter)"), *Pair.Key));
+						}
+						else if (Pair.Value.IsValid() && Pair.Value->TryGetObject(ColorObj))
+						{
+							// Seed from the instance's CURRENT value so a partial object (e.g. {"r":1})
+							// preserves the other components instead of zeroing them to Black.
+							FLinearColor Color = UMaterialEditingLibrary::GetMaterialInstanceVectorParameterValue(Instance, ParamName);
 							double Component;
 							if ((*ColorObj)->TryGetNumberField(TEXT("r"), Component)) Color.R = (float)Component;
 							if ((*ColorObj)->TryGetNumberField(TEXT("g"), Component)) Color.G = (float)Component;
@@ -726,7 +753,7 @@ namespace UnrealMcpAssetTools
 						}
 						else
 						{
-							Failed.Add(FString::Printf(TEXT("vector:%s"), *Pair.Key));
+							Failed.Add(FString::Printf(TEXT("vector:%s (expected {r,g,b,a} object)"), *Pair.Key));
 						}
 					}
 				}
@@ -796,9 +823,13 @@ namespace UnrealMcpAssetTools
 				Structured->SetArrayField(TEXT("failed"), FailedJson);
 				Structured->SetBoolField(TEXT("saved"), bSaved);
 
+				// Surface a requested-but-failed save in the human message — otherwise a caller that
+				// asked to persist sees a bare Success and the failure is buried in the "saved" field.
+				const TCHAR* SaveSuffix = !bSave ? TEXT("")
+					: (bSaved ? TEXT(", saved") : TEXT(", SAVE FAILED"));
 				return FUnrealMcpToolResult::Success(
 					FString::Printf(TEXT("Applied %d parameter(s) to '%s' (%d failed%s)."),
-						Applied.Num(), *Instance->GetName(), Failed.Num(), bSaved ? TEXT(", saved") : TEXT("")),
+						Applied.Num(), *Instance->GetName(), Failed.Num(), SaveSuffix),
 					Structured);
 			});
 
@@ -958,9 +989,13 @@ namespace UnrealMcpAssetTools
 				TSharedPtr<FJsonObject> Structured = MakeShared<FJsonObject>();
 				Structured->SetStringField(TEXT("file"), File);
 				Structured->SetArrayField(TEXT("imported"), Paths);
-				Structured->SetBoolField(TEXT("saved"), bSave);
+				// The AssetImportTask API returns no per-object save result, so this reports what was
+				// REQUESTED (best-effort), not a verified on-disk outcome — name it accordingly.
+				Structured->SetBoolField(TEXT("saveRequested"), bSave);
+				// Count the listed (non-null) paths, not raw GetObjects() — the two can differ when the
+				// task yields null entries, and the reported number must match the 'imported' array.
 				return FUnrealMcpToolResult::Success(
-					FString::Printf(TEXT("Imported %d asset(s) from '%s'%s."), Imported.Num(), *File, bSave ? TEXT(" (saved)") : TEXT("")), Structured);
+					FString::Printf(TEXT("Imported %d asset(s) from '%s'%s."), Paths.Num(), *File, bSave ? TEXT(" (save requested)") : TEXT("")), Structured);
 			});
 	}
 }
