@@ -155,8 +155,12 @@ namespace FUnrealMcpPropertyJson
 		USceneComponent* AsScene = Cast<USceneComponent>(Object);
 
 		// Snapshot the pre-change state for the transaction buffer BEFORE mutating. Calling Modify() after
-		// the writes (as before) records the already-changed values, making undo a no-op.
+		// the writes (as before) records the already-changed values, making undo a no-op. PreEditChange(nullptr)
+		// completes the standard editor edit protocol (PreEditChange -> write -> PostEditChange at line ~256):
+		// properties whose edit hooks tear down state up front (component render-state/registration guards,
+		// cached-data invalidation) can misbehave when raw memory is written without the pre-notify.
 		Object->Modify();
+		Object->PreEditChange(nullptr);
 
 		int32 Applied = 0;
 		for (const TPair<FString, TSharedPtr<FJsonValue>>& Field : Properties->Values)
@@ -251,11 +255,13 @@ namespace FUnrealMcpPropertyJson
 			}
 		}
 
+		// PostEditChange MUST pair the PreEditChange(nullptr) above on every path (it re-registers a component
+		// and re-runs the edit hooks that the pre-notify tore down) — calling it only when Applied>0 would
+		// leave a zero-applied object stranded mid-edit (e.g. an unregistered component). Only dirty the
+		// package when something actually changed.
+		Object->PostEditChange();
 		if (Applied > 0)
-		{
-			Object->PostEditChange();
 			Object->MarkPackageDirty();
-		}
 		return Applied;
 	}
 }

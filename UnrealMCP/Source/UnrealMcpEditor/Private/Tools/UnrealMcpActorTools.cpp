@@ -75,8 +75,13 @@ namespace
 
 	// --- Small argument helpers ---
 
-	/** Read a string array argument (the scoped-read `paths` filter); empty when absent or not an array. */
-	TArray<FString> GetStringArray(const FUnrealMcpToolCall& Call, const FString& Key)
+	/**
+	 * Read a string array argument (the scoped-read `paths` filter); empty when absent or not an array.
+	 * A non-string entry is reported via OutError (and the array is left empty) rather than silently
+	 * dropped — a dropped entry would otherwise flip the scoped read to "identity only" / "full object"
+	 * (the opposite extremes of the requested scope) with no signal to the caller.
+	 */
+	TArray<FString> GetStringArray(const FUnrealMcpToolCall& Call, const FString& Key, FString& OutError)
 	{
 		TArray<FString> Out;
 		const TArray<TSharedPtr<FJsonValue>>* Arr = nullptr;
@@ -86,7 +91,15 @@ namespace
 			{
 				FString S;
 				if (V.IsValid() && V->TryGetString(S))
+				{
 					Out.Add(S);
+				}
+				else
+				{
+					OutError = FString::Printf(TEXT("'%s' must be an array of strings; a non-string entry was provided."), *Key);
+					Out.Reset();
+					return Out;
+				}
 			}
 		}
 		return Out;
@@ -207,11 +220,23 @@ namespace UnrealMcpActorTools
 						FActorLabelUtilities::SetActorLabelUnique(Actor, Label);
 				}
 
+				FString AttachNote;
 				if (Parent)
+				{
 					Actor->AttachToActor(Parent, FAttachmentTransformRules::KeepWorldTransform);
+					// AttachToActor returns void and silently no-ops when the freshly spawned actor has no root
+					// component (e.g. a rootless class), so the parentActor request would otherwise be dropped
+					// while we report plain success. Verify it took (the same GetAttachParentActor() check
+					// actor-set-parent uses); since the spawn itself succeeded, surface a warning in the message
+					// rather than failing the whole call and leaking the spawned actor.
+					if (Actor->GetAttachParentActor() != Parent)
+						AttachNote = FString::Printf(
+							TEXT(" (warning: could not attach to parent '%s' — the spawned actor has no root component)"),
+							*Parent->GetActorLabel());
+				}
 
 				return FUnrealMcpToolResult::Success(
-					FString::Printf(TEXT("Spawned %s '%s'."), *Class->GetName(), *Actor->GetActorLabel()),
+					FString::Printf(TEXT("Spawned %s '%s'.%s"), *Class->GetName(), *Actor->GetActorLabel(), *AttachNote),
 					FUnrealMcpObjectRef::ActorIdentity(Actor));
 			});
 
@@ -234,10 +259,13 @@ namespace UnrealMcpActorTools
 				if (!World)
 					return FUnrealMcpToolResult::Error(TEXT("Actor has no world."));
 
-				const FScopedTransaction Transaction(NSLOCTEXT("UnrealMcp", "ActorDestroy", "MCP: Destroy Actor"));
+				FScopedTransaction Transaction(NSLOCTEXT("UnrealMcp", "ActorDestroy", "MCP: Destroy Actor"));
 				const FString Label = Actor->GetActorLabel();
 				if (!World->EditorDestroyActor(Actor, /*bShouldModifyLevel*/ true))
+				{
+					Transaction.Cancel(); // do not leave a dangling no-op entry on the undo stack
 					return FUnrealMcpToolResult::Error(FString::Printf(TEXT("Failed to destroy actor '%s'."), *Label));
+				}
 				return FUnrealMcpToolResult::Success(FString::Printf(TEXT("Destroyed actor '%s'."), *Label));
 			});
 
@@ -307,7 +335,10 @@ namespace UnrealMcpActorTools
 				const FString LabelFilter = Call.GetString(TEXT("labelFilter"));
 				const FString PathFilter = Call.GetString(TEXT("pathFilter"));
 				const FString ClassFilter = Call.GetString(TEXT("classFilter"));
-				const TArray<FString> Paths = GetStringArray(Call, TEXT("paths"));
+				FString PathsError;
+				const TArray<FString> Paths = GetStringArray(Call, TEXT("paths"), PathsError);
+				if (!PathsError.IsEmpty())
+					return FUnrealMcpToolResult::Error(PathsError);
 				const int32 Limit = static_cast<int32>(Call.GetInt(TEXT("limit"), 100));
 
 				UClass* FilterClass = ClassFilter.IsEmpty() ? nullptr : FUnrealMcpObjectRef::ResolveClass(ClassFilter);
@@ -391,12 +422,12 @@ namespace UnrealMcpActorTools
 				AActor* Child = ResolveActorOrError(Call.GetString(TEXT("actor")), Err, bFailed);
 				if (bFailed) return Err;
 
-				const FScopedTransaction Transaction(NSLOCTEXT("UnrealMcp", "ActorSetParent", "MCP: Set Actor Parent"));
 				const bool bKeepWorld = Call.GetBool(TEXT("keepWorldTransform"), true);
 				const FString ParentRef = Call.GetString(TEXT("parent"));
 
 				if (ParentRef.IsEmpty())
 				{
+					const FScopedTransaction Transaction(NSLOCTEXT("UnrealMcp", "ActorDetach", "MCP: Detach Actor"));
 					Child->DetachFromActor(bKeepWorld
 						? FDetachmentTransformRules::KeepWorldTransform
 						: FDetachmentTransformRules::KeepRelativeTransform);
@@ -414,17 +445,24 @@ namespace UnrealMcpActorTools
 						TEXT("Cannot attach '%s' to '%s': '%s' is already a descendant (would create a cycle)."),
 						*Child->GetActorLabel(), *Parent->GetActorLabel(), *Parent->GetActorLabel()));
 
+				// Open the transaction only AFTER validation: the resolve/self/cycle error paths above would
+				// otherwise leave an empty "MCP: Set Actor Parent" entry on the editor undo stack.
+				FScopedTransaction Transaction(NSLOCTEXT("UnrealMcp", "ActorSetParent", "MCP: Set Actor Parent"));
 				const FAttachmentTransformRules Rules = bKeepWorld
 					? FAttachmentTransformRules::KeepWorldTransform
 					: FAttachmentTransformRules::KeepRelativeTransform;
 				const FName Socket(*Call.GetString(TEXT("socket")));
 				Child->AttachToActor(Parent, Rules, Socket);
 				// AttachToActor returns void and silently no-ops on rejection (e.g. missing root component);
-				// verify the attachment actually took rather than reporting a false success.
+				// verify the attachment actually took rather than reporting a false success. Cancel the
+				// transaction so the rejected attach does not commit a dangling/partial entry to the undo buffer.
 				if (Child->GetAttachParentActor() != Parent)
+				{
+					Transaction.Cancel();
 					return FUnrealMcpToolResult::Error(FString::Printf(
 						TEXT("Engine rejected attaching '%s' to '%s' (missing root component or invalid attachment)."),
 						*Child->GetActorLabel(), *Parent->GetActorLabel()));
+				}
 				return FUnrealMcpToolResult::Success(
 					FString::Printf(TEXT("Attached '%s' to '%s'."), *Child->GetActorLabel(), *Parent->GetActorLabel()));
 			});
@@ -471,11 +509,14 @@ namespace UnrealMcpActorTools
 							*NameArg, *Actor->GetActorLabel()));
 				}
 
-				const FScopedTransaction Transaction(NSLOCTEXT("UnrealMcp", "ComponentAdd", "MCP: Add Component"));
+				FScopedTransaction Transaction(NSLOCTEXT("UnrealMcp", "ComponentAdd", "MCP: Add Component"));
 				Actor->Modify();
 				UActorComponent* NewComp = NewObject<UActorComponent>(Actor, CompClass, CompName, RF_Transactional);
 				if (!NewComp)
+				{
+					Transaction.Cancel(); // roll back the Actor->Modify() snapshot rather than leave a no-op entry
 					return FUnrealMcpToolResult::Error(FString::Printf(TEXT("Failed to construct component '%s'."), *ClassRef));
+				}
 
 				Actor->AddInstanceComponent(NewComp);
 				if (USceneComponent* SceneComp = Cast<USceneComponent>(NewComp))
@@ -552,7 +593,10 @@ namespace UnrealMcpActorTools
 				if (!Comp)
 					return FUnrealMcpToolResult::Error(FString::Printf(TEXT("No component matched '%s' on '%s'."), *CompRef, *Actor->GetActorLabel()));
 
-				const TArray<FString> Paths = GetStringArray(Call, TEXT("paths"));
+				FString PathsError;
+				const TArray<FString> Paths = GetStringArray(Call, TEXT("paths"), PathsError);
+				if (!PathsError.IsEmpty())
+					return FUnrealMcpToolResult::Error(PathsError);
 				TSharedPtr<FJsonObject> Data = FUnrealMcpObjectRef::ComponentIdentity(Comp);
 				Data->SetObjectField(TEXT("data"), FUnrealMcpPropertyJson::SerializeObject(Comp, Paths));
 				return FUnrealMcpToolResult::Success(FString::Printf(TEXT("Read component '%s'."), *Comp->GetName()), Data);
@@ -662,7 +706,10 @@ namespace UnrealMcpActorTools
 				if (!Object)
 					return FUnrealMcpToolResult::Error(FString::Printf(TEXT("No object matched '%s'."), *Ref));
 
-				const TArray<FString> Paths = GetStringArray(Call, TEXT("paths"));
+				FString PathsError;
+				const TArray<FString> Paths = GetStringArray(Call, TEXT("paths"), PathsError);
+				if (!PathsError.IsEmpty())
+					return FUnrealMcpToolResult::Error(PathsError);
 				TSharedPtr<FJsonObject> Structured = MakeShared<FJsonObject>();
 				Structured->SetStringField(TEXT("name"), Object->GetName());
 				Structured->SetStringField(TEXT("class"), Object->GetClass() ? Object->GetClass()->GetPathName() : FString());

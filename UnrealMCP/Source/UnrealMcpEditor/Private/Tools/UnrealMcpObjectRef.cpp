@@ -122,7 +122,9 @@ namespace FUnrealMcpObjectRef
 
 		// Last-resort fallback for refs that FSoftObjectPath's strict parsing rejects (e.g. legacy
 		// `Package.Object` short forms). Overlaps TryLoad for well-formed paths; kept for that long tail.
-		return StaticLoadObject(UObject::StaticClass(), nullptr, *ObjectRef);
+		// LOAD_NoWarn | LOAD_Quiet (matching ResolveClass): every object-get-data/object-modify miss funnels
+		// through here, so without the flags a legitimate "not found" emits a spurious LogUObjectGlobals warning.
+		return StaticLoadObject(UObject::StaticClass(), nullptr, *ObjectRef, nullptr, LOAD_NoWarn | LOAD_Quiet);
 	}
 
 	TSharedPtr<FJsonObject> ActorIdentity(const AActor* Actor)
