@@ -1,0 +1,71 @@
+{
+  "name": "unreal-cli",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cross-platform CLI tool for Unreal-MCP (Skills & MCP). Pre-alpha scaffold — will resolve and launch the Unreal editor with MCP connection env vars, run MCP/system tools over HTTP, probe server health, configure AI agents (Claude Code, Cursor, VS Code, ...), and manage the UnrealMCP plugin. Works with Claude Code, Cursor, Copilot, and any MCP client.",
+  "type": "module",
+  "main": "dist/lib.js",
+  "types": "dist/lib.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/lib.d.ts",
+      "import": "./dist/lib.js"
+    },
+    "./cli": {
+      "types": "./dist/cli.d.ts",
+      "import": "./dist/cli.js"
+    }
+  },
+  "bin": {
+    "unreal-cli": "bin/unreal-cli.js"
+  },
+  "files": [
+    "dist",
+    "bin",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "pretest": "npm run build",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepublishOnly": "npm run build",
+    "prepack": "npm run build"
+  },
+  "keywords": [
+    "cli",
+    "unreal",
+    "unreal-engine",
+    "unreal ai",
+    "unreal skills",
+    "unreal mcp",
+    "ai skills",
+    "ai mcp",
+    "ai",
+    "mcp",
+    "model-context-protocol",
+    "gamedev",
+    "game-dev"
+  ],
+  "author": {
+    "name": "Ivan Murzak",
+    "url": "https://github.com/IvanMurzak"
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/IvanMurzak/Unreal-MCP.git",
+    "directory": "cli"
+  },
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  },
+  "dependencies": {
+    "commander": "^13.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "typescript": "^5.8.0",
+    "vitest": "^3.1.0"
+  }
+}
