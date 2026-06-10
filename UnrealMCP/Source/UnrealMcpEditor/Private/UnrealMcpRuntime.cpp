@@ -31,6 +31,7 @@ void FUnrealMcpRuntime::Startup()
 	UnrealMcpPingTool::Register(*Registry);
 	UnrealMcpActorTools::Register(*Registry);
 	UnrealMcpBlueprintTools::Register(*Registry); // §10 flagship Blueprint family (CORE)
+	UnrealMcpAssetTools::Register(*Registry); // §10 asset / Content-Browser family (issue #10)
 
 	Dispatcher = MakeUnique<FUnrealMcpGameThreadDispatcher>();
 	BridgeServer = MakeUnique<FUnrealMcpBridgeServer>(*Registry, *Dispatcher);

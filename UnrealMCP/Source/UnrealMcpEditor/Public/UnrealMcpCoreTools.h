@@ -40,3 +40,13 @@ namespace UnrealMcpBlueprintTools
 {
 	UNREALMCPEDITOR_API void Register(FUnrealMcpToolRegistry& Registry);
 }
+
+/**
+ * The asset / Content-Browser tool family (docs/ARCHITECTURE.md §10, issue #10): ~11 kebab-case
+ * tools over the AssetRegistry, UEditorAssetLibrary, AssetTools and the editor material APIs.
+ * Registered in the boot path alongside `ping`; also exercised in isolation by Automation specs.
+ */
+namespace UnrealMcpAssetTools
+{
+	UNREALMCPEDITOR_API void Register(FUnrealMcpToolRegistry& Registry);
+}
