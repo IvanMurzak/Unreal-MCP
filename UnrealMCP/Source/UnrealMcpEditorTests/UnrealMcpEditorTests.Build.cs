@@ -17,6 +17,7 @@ public class UnrealMcpEditorTests : ModuleRules
 			"Engine",
 			"Json",
 			"UnrealMcpEditor",
+			"UnrealEd", // GEditor / editor world for the blueprint-spawn round-trip spec (§10)
 		});
 
 		// Reach the sibling editor module's PRIVATE headers (FUnrealMcpNdjsonAccumulator §1.2,

@@ -35,6 +35,13 @@ public class UnrealMcpEditor : ModuleRules
 			"Projects",
 			"EditorSubsystem",
 			"DeveloperSettings",
+			// Blueprint tool family (§10): FKismetEditorUtilities / FBlueprintEditorUtils / FCompilerResultsLog
+			// live in UnrealEd; the K2 pin-type schema + event/function K2 nodes live in BlueprintGraph; the
+			// compiler backend (EBlueprintCompileOptions) in KismetCompiler. AssetRegistry registers freshly
+			// created Blueprint assets so later tools resolve them by path within the session.
+			"BlueprintGraph",
+			"KismetCompiler",
+			"AssetRegistry",
 		});
 	}
 }
