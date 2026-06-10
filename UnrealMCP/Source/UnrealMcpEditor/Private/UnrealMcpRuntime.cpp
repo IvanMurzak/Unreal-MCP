@@ -5,6 +5,7 @@
 #include "UnrealMcpLog.h"
 #include "UnrealMcpCoreTools.h"
 #include "UnrealMcpToolRegistry.h"
+#include "Config/UnrealMcpConfig.h"
 #include "Dispatch/UnrealMcpGameThreadDispatcher.h"
 #include "Bridge/UnrealMcpBridgeServer.h"
 #include "Sidecar/UnrealMcpSidecarManager.h"
@@ -47,11 +48,31 @@ void FUnrealMcpRuntime::Startup()
 	if (TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("UnrealMCP")))
 		PluginVersion = Plugin->GetDescriptor().VersionName;
 
+	// §8 connection config: parse the project-root .env once, export UNREAL_MCP_BRIDGE_PATH into the process
+	// env (only-if-absent, so process env still wins) so a GUI-launched editor's .env can feed the dev
+	// sidecar binary path. Then resolve the config (process env > .env > file > defaults) from that same
+	// parsed .env. The resolved EFFECTIVE connection config (incl. host/cloudUrl/token) is handed to the
+	// bridge for the §1.3 `config` push — the sidecar never re-resolves it (§1.5), so HOST/CLOUD_URL/TOKEN
+	// are deliberately NOT exported to the process env.
+	const TMap<FString, FString> DotEnv = FUnrealMcpConfig::LoadEnvFile(FUnrealMcpConfig::DefaultEnvFilePath());
+	FUnrealMcpConfig::ExportDotEnvToProcessEnv(DotEnv);
+
+	const FUnrealMcpConfig Config = FUnrealMcpConfig::LoadAndResolve(DotEnv);
+
+	const TSharedPtr<FJsonObject> EffectiveConfig = Config.BuildEffectiveConnectionConfig();
+	// Token is NEVER logged at any level (§8) — log the shape with the bearer masked.
+	UE_LOG(LogUnrealMcp, Log,
+		TEXT("[Unreal-MCP] connection config resolved (mode=%s, host=%s, cloudUrl=%s, token=%s, keepConnected=%s)."),
+		Config.ConnectionMode == EUnrealMcpConnectionMode::Cloud ? TEXT("Cloud") : TEXT("Custom"),
+		*Config.ResolveCustomHost(), *Config.ResolveCloudBaseUrl(),
+		*FUnrealMcpConfig::MaskSecret(Config.ResolveEffectiveToken()),
+		Config.bKeepConnected ? TEXT("true") : TEXT("false"));
+
 	// Generate the one-shot IPC token ONCE; both the server (validates the handshake) and the sidecar
 	// manager (delivers it over stdin) must agree on it (§1.4).
 	const FString Token = FUnrealMcpSidecarManager::GenerateToken();
 
-	const int32 BoundPort = BridgeServer->Start(Token, ProjectPath, PluginVersion, EngineVersion);
+	const int32 BoundPort = BridgeServer->Start(Token, ProjectPath, PluginVersion, EngineVersion, EffectiveConfig);
 	if (BoundPort <= 0)
 	{
 		UE_LOG(LogUnrealMcp, Error, TEXT("[Unreal-MCP] bridge server failed to start; sidecar not launched."));

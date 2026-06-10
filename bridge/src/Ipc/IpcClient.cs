@@ -61,6 +61,20 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
         /// <summary>Raised when the plugin sends <c>shutdown</c> (editor quitting, §1.5).</summary>
         public event Action? ShutdownRequested;
 
+        /// <summary>
+        /// Raised when the plugin pushes a §1.3 <c>config</c> message (effective connection config changed,
+        /// §8). The argument is the parsed message object (flat: <c>mode</c>/<c>host</c>/<c>cloudUrl</c>/
+        /// <c>token</c>/<c>keepConnected</c> at the top level).
+        /// </summary>
+        public event Action<JsonObject>? ConfigReceived;
+
+        /// <summary>
+        /// Raised when the plugin pushes a §1.3 auth message (<c>auth-start</c> / <c>auth-cancel</c> /
+        /// <c>auth-revoke</c>). The argument is the message <c>type</c>. The full device-code flow lands with
+        /// the UI task; the sidecar handles these gracefully as stubs today (§8).
+        /// </summary>
+        public event Action<string>? AuthMessageReceived;
+
         public IpcClient(string host, int port, string token, string sidecarVersion, ILogger? logger = null)
         {
             _host = host;
@@ -245,12 +259,22 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
                     ShutdownRequested?.Invoke();
                     break;
                 case IpcProtocol.Type.Config:
-                case IpcProtocol.Type.Status:
-                case IpcProtocol.Type.Log:
+                {
+                    // §8: the plugin pushed the effective connection config. Hand the flat object to the host,
+                    // which applies mode-aware host/token/keepConnected. Never log the token (§8).
+                    if (node is JsonObject configObj)
+                        ConfigReceived?.Invoke(configObj);
+                    break;
+                }
                 case IpcProtocol.Type.AuthStart:
                 case IpcProtocol.Type.AuthCancel:
                 case IpcProtocol.Type.AuthRevoke:
-                    // Wired in later UI/config/auth tasks; logged for now.
+                    // §8 auth plumbing — handled gracefully as stubs pending the full device-code UI flow.
+                    AuthMessageReceived?.Invoke(type);
+                    break;
+                case IpcProtocol.Type.Status:
+                case IpcProtocol.Type.Log:
+                    // Wired in the later UI task; logged for now.
                     _logger?.LogDebug("IPC received '{Type}' (not handled in the sidecar-bridge MVP).", type);
                     break;
                 default:
