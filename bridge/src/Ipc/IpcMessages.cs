@@ -1,0 +1,110 @@
+/*
+┌───────────────────────────────────────────────────────────────────┐
+│  Author: Ivan Murzak (https://github.com/IvanMurzak)              │
+│  Repository: GitHub (https://github.com/IvanMurzak/Unreal-MCP)    │
+│  Copyright (c) 2026 Ivan Murzak                                   │
+│  Licensed under the Apache License, Version 2.0.                  │
+│  See the LICENSE file in the project root for more information.   │
+└───────────────────────────────────────────────────────────────────┘
+*/
+
+using System.Collections.Generic;
+using System.Text.Json.Nodes;
+using System.Text.Json.Serialization;
+
+namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
+{
+    /// <summary>
+    /// Strongly-typed IPC message payloads (docs/ARCHITECTURE.md §1.3). Every message carries a
+    /// <c>type</c> discriminator (<see cref="IpcProtocol.Type"/>). Inbound messages are routed by
+    /// reading <c>type</c> off the parsed JSON, then deserializing the line into the matching record.
+    /// </summary>
+
+    /// <summary>sidecar → plugin: first message after connect. Carries the one-shot auth token (§1.4).</summary>
+    public sealed class HandshakeMessage
+    {
+        [JsonPropertyName("type")] public string Type { get; set; } = IpcProtocol.Type.Handshake;
+        [JsonPropertyName("ipcVersion")] public int IpcVersion { get; set; } = IpcProtocol.IpcVersion;
+        [JsonPropertyName("sidecarVersion")] public string? SidecarVersion { get; set; }
+        [JsonPropertyName("token")] public string? Token { get; set; }
+    }
+
+    /// <summary>plugin → sidecar: handshake acknowledgement + effective environment/config (§1.3).</summary>
+    public sealed class HandshakeAckMessage
+    {
+        [JsonPropertyName("type")] public string Type { get; set; } = IpcProtocol.Type.HandshakeAck;
+        [JsonPropertyName("ipcVersion")] public int IpcVersion { get; set; }
+        [JsonPropertyName("pluginVersion")] public string? PluginVersion { get; set; }
+        [JsonPropertyName("engineVersion")] public string? EngineVersion { get; set; }
+        [JsonPropertyName("projectPath")] public string? ProjectPath { get; set; }
+        [JsonPropertyName("config")] public JsonObject? Config { get; set; }
+    }
+
+    /// <summary>One entry in <see cref="ToolManifestMessage.Tools"/> — shaped to fill <c>IRunTool</c> 1:1 (§2.2).</summary>
+    public sealed class ToolDescriptor
+    {
+        [JsonPropertyName("name")] public string Name { get; set; } = string.Empty;
+        [JsonPropertyName("title")] public string? Title { get; set; }
+        [JsonPropertyName("description")] public string? Description { get; set; }
+        [JsonPropertyName("skillDescription")] public string? SkillDescription { get; set; }
+        [JsonPropertyName("skillBody")] public string? SkillBody { get; set; }
+        [JsonPropertyName("inputSchema")] public JsonNode? InputSchema { get; set; }
+        [JsonPropertyName("outputSchema")] public JsonNode? OutputSchema { get; set; }
+        [JsonPropertyName("readOnlyHint")] public bool? ReadOnlyHint { get; set; }
+        [JsonPropertyName("destructiveHint")] public bool? DestructiveHint { get; set; }
+        [JsonPropertyName("idempotentHint")] public bool? IdempotentHint { get; set; }
+        [JsonPropertyName("openWorldHint")] public bool? OpenWorldHint { get; set; }
+        [JsonPropertyName("enabled")] public bool Enabled { get; set; } = true;
+        [JsonPropertyName("extensionId")] public string? ExtensionId { get; set; }
+        [JsonPropertyName("schemaHash")] public string? SchemaHash { get; set; }
+    }
+
+    /// <summary>plugin → sidecar: full tool-set snapshot. The sidecar diffs it against the last applied (§2.2).</summary>
+    public sealed class ToolManifestMessage
+    {
+        [JsonPropertyName("type")] public string Type { get; set; } = IpcProtocol.Type.ToolManifest;
+        [JsonPropertyName("revision")] public int Revision { get; set; }
+        [JsonPropertyName("tools")] public List<ToolDescriptor> Tools { get; set; } = new();
+    }
+
+    /// <summary>sidecar → plugin: invoke a tool. The plugin runs the body on the game thread (§4).</summary>
+    public sealed class ToolCallMessage
+    {
+        [JsonPropertyName("type")] public string Type { get; set; } = IpcProtocol.Type.ToolCall;
+        [JsonPropertyName("requestId")] public string RequestId { get; set; } = string.Empty;
+        [JsonPropertyName("tool")] public string Tool { get; set; } = string.Empty;
+        [JsonPropertyName("arguments")] public JsonObject? Arguments { get; set; }
+        [JsonPropertyName("timeoutMs")] public int TimeoutMs { get; set; } = IpcProtocol.DefaultToolTimeoutMs;
+    }
+
+    /// <summary>plugin → sidecar: terminal tool result, mirroring <c>ResponseCallTool</c> (§1.3).</summary>
+    public sealed class ToolResponseMessage
+    {
+        [JsonPropertyName("type")] public string Type { get; set; } = IpcProtocol.Type.ToolResponse;
+        [JsonPropertyName("requestId")] public string RequestId { get; set; } = string.Empty;
+        [JsonPropertyName("status")] public string Status { get; set; } = IpcProtocol.Status.Success;
+        [JsonPropertyName("content")] public JsonArray? Content { get; set; }
+        [JsonPropertyName("structured")] public JsonNode? Structured { get; set; }
+    }
+
+    /// <summary>sidecar → plugin: cooperative cancellation of an in-flight call (§4).</summary>
+    public sealed class ToolCancelMessage
+    {
+        [JsonPropertyName("type")] public string Type { get; set; } = IpcProtocol.Type.ToolCancel;
+        [JsonPropertyName("requestId")] public string RequestId { get; set; } = string.Empty;
+    }
+
+    /// <summary>Either direction: heartbeat probe / reply (§1.3).</summary>
+    public sealed class HeartbeatMessage
+    {
+        [JsonPropertyName("type")] public string Type { get; set; } = IpcProtocol.Type.Ping;
+    }
+
+    /// <summary>Either direction: structured log forwarding for unified output (§1.3). Never carries a secret.</summary>
+    public sealed class LogMessage
+    {
+        [JsonPropertyName("type")] public string Type { get; set; } = IpcProtocol.Type.Log;
+        [JsonPropertyName("level")] public string? Level { get; set; }
+        [JsonPropertyName("message")] public string? Message { get; set; }
+    }
+}

@@ -1,0 +1,18 @@
+// Copyright (c) 2026 Ivan Murzak. Licensed under the Apache License, Version 2.0.
+// See the LICENSE file in the repository root for more information.
+
+#pragma once
+
+#include "CoreMinimal.h"
+
+class FUnrealMcpToolRegistry;
+
+/**
+ * Registration entry points for the core tool families (docs/ARCHITECTURE.md §10). Exported so the
+ * runtime coordinator wires them on boot AND the Automation specs can register + exercise them in
+ * isolation. `ping` ships with the sidecar-bridge task; later families add their own Register here.
+ */
+namespace UnrealMcpPingTool
+{
+	UNREALMCPEDITOR_API void Register(FUnrealMcpToolRegistry& Registry);
+}
