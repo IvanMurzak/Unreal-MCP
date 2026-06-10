@@ -131,7 +131,25 @@ void FUnrealMcpAssetToolsSpec::Define()
 			FUnrealMcpToolRegistry Registry; UnrealMcpAssetTools::Register(Registry);
 			TSharedPtr<FJsonObject> A = Args();
 			A->SetStringField(TEXT("path"), TEXT("/Engine/EngineMaterials/DefaultMaterial"));
+			A->SetObjectField(TEXT("scalars"), MakeShared<FJsonObject>());
 			TestFalse(TEXT("base material is not a MIC"), Run(Registry, TEXT("asset-material-modify"), A).bSuccess);
+		});
+
+		It("asset-material-modify errors when no parameter objects are supplied", [this]()
+		{
+			FUnrealMcpToolRegistry Registry; UnrealMcpAssetTools::Register(Registry);
+			TSharedPtr<FJsonObject> A = Args();
+			A->SetStringField(TEXT("path"), TEXT("/Engine/EngineMaterials/DefaultMaterial"));
+			// No scalars/vectors/textures — must be rejected before any package is touched.
+			TestFalse(TEXT("no params -> error"), Run(Registry, TEXT("asset-material-modify"), A).bSuccess);
+		});
+
+		It("asset-find errors when tagValue is given without tagKey", [this]()
+		{
+			FUnrealMcpToolRegistry Registry; UnrealMcpAssetTools::Register(Registry);
+			TSharedPtr<FJsonObject> A = Args();
+			A->SetStringField(TEXT("tagValue"), TEXT("SomeValue"));
+			TestFalse(TEXT("tagValue without tagKey -> error"), Run(Registry, TEXT("asset-find"), A).bSuccess);
 		});
 	});
 
@@ -148,6 +166,18 @@ void FUnrealMcpAssetToolsSpec::Define()
 			const FString CopyPath = Folder + TEXT("/MI_RoundTrip_Copy");
 			const FString MovedPath = Folder + TEXT("/MI_RoundTrip_Moved");
 			const FString Parent = TEXT("/Engine/EngineMaterials/DefaultMaterial");
+
+			// Spec hygiene: tolerate pre-existing state from a prior crashed run by force-deleting any
+			// leftovers through the asset-delete tool (succeeds-or-no-ops; routed through the registry so
+			// the test module needs no extra editor-library dependency). DoesAssetExist guards keep these
+			// from logging engine Errors when the asset is absent.
+			for (const FString& Stale : { MiPath, CopyPath, MovedPath })
+			{
+				TSharedPtr<FJsonObject> Del = Args();
+				Del->SetStringField(TEXT("path"), Stale);
+				Del->SetBoolField(TEXT("force"), true);
+				Run(Registry, TEXT("asset-delete"), Del); // ignore result — best-effort pre-clean
+			}
 
 			// create-folder (idempotent)
 			{
@@ -231,12 +261,18 @@ void FUnrealMcpAssetToolsSpec::Define()
 				TestTrue(TEXT("move ok"), Run(Registry, TEXT("asset-move"), A).bSuccess);
 			}
 
-			// asset-delete both assets (cleanup + delete coverage)
+			// asset-delete both assets (cleanup + delete coverage). The moved copy is unreferenced, so
+			// the default (no-force) delete succeeds; the original is removed with force:true to exercise
+			// the force path. (The referencer-refusal guard keys off ON-DISK referencers — see
+			// IAssetRegistry::GetReferencers "(On disk references ONLY)" — so it cannot trigger for these
+			// in-memory, never-saved packages; that branch is proven in the live bridge e2e instead.)
 			{
 				TSharedPtr<FJsonObject> A = Args(); A->SetStringField(TEXT("path"), MovedPath);
-				TestTrue(TEXT("delete moved ok"), Run(Registry, TEXT("asset-delete"), A).bSuccess);
-				TSharedPtr<FJsonObject> B = Args(); B->SetStringField(TEXT("path"), MiPath);
-				TestTrue(TEXT("delete original ok"), Run(Registry, TEXT("asset-delete"), B).bSuccess);
+				TestTrue(TEXT("delete moved (unforced) ok"), Run(Registry, TEXT("asset-delete"), A).bSuccess);
+				TSharedPtr<FJsonObject> B = Args();
+				B->SetStringField(TEXT("path"), MiPath);
+				B->SetBoolField(TEXT("force"), true);
+				TestTrue(TEXT("delete original (force) ok"), Run(Registry, TEXT("asset-delete"), B).bSuccess);
 			}
 		});
 	});

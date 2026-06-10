@@ -10,7 +10,9 @@
 #include "Dom/JsonValue.h"
 #include "Modules/ModuleManager.h"
 #include "UObject/TopLevelAssetPath.h"
+#include "UObject/GCObjectScopeGuard.h"
 #include "Misc/Paths.h"
+#include "ScopedTransaction.h"
 
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetRegistry/IAssetRegistry.h"
@@ -24,6 +26,7 @@
 #include "Factories/MaterialInstanceConstantFactoryNew.h"
 
 #include "MaterialEditingLibrary.h"
+#include "Materials/Material.h"
 #include "Materials/MaterialInterface.h"
 #include "Materials/MaterialInstanceConstant.h"
 #include "Engine/Texture.h"
@@ -44,6 +47,9 @@
  * Per the implement-task brief, asset-path resolution and the scoped-read helper are kept LOCAL to
  * this family rather than touching a shared FUnrealMcpObjectRef the concurrent actor chain may be
  * introducing; consolidation can happen post-merge.
+ *
+ * Mutating tools operate on IN-MEMORY packages by default — nothing is written to disk unless a
+ * tool explicitly exposes a `save` flag and the caller sets it (asset-import, asset-material-modify).
  */
 namespace UnrealMcpAssetTools
 {
@@ -83,6 +89,16 @@ namespace UnrealMcpAssetTools
 		OutPackagePath = Work.Left(SlashIndex);
 		OutAssetName = Work.Mid(SlashIndex + 1);
 		return !OutAssetName.IsEmpty() && !OutPackagePath.IsEmpty();
+	}
+
+	/**
+	 * Reject the engine/script content roots for WRITE operations (create-folder, import). The
+	 * editor APIs would otherwise happily scribble into /Engine; constrain writes to project /
+	 * plugin-mounted roots and return a clean, LLM-actionable error instead of a generic failure.
+	 */
+	static bool IsWritableContentRoot(const FString& InPath)
+	{
+		return !(InPath.StartsWith(TEXT("/Engine")) || InPath.StartsWith(TEXT("/Script")) || InPath.StartsWith(TEXT("/Temp")));
 	}
 
 	/** Read a string-array argument (returns empty when absent or not an array). */
@@ -142,15 +158,17 @@ namespace UnrealMcpAssetTools
 			                  "(case-insensitive substring of the asset name), 'classPath' (full class "
 			                  "path e.g. '/Script/Engine.Material', subclasses included), 'path' (package "
 			                  "path to search under, e.g. '/Game/Materials'), 'tagKey'/'tagValue' (asset "
-			                  "registry tag filter). Paginated via 'offset'/'limit'."))
+			                  "registry tag filter). When no 'path'/'classPath'/'tagKey' is given the search "
+			                  "is scoped to '/Game' (not the whole registry incl. /Engine). Paginated via "
+			                  "'offset'/'limit' (limit is clamped to 1000)."))
 			.ParamString(TEXT("name"), TEXT("Case-insensitive substring filter on the asset name."))
 			.ParamString(TEXT("classPath"), TEXT("Full class path filter, e.g. '/Script/Engine.Material'."))
 			.ParamString(TEXT("path"), TEXT("Package path to search under, e.g. '/Game/Materials'."))
 			.ParamString(TEXT("tagKey"), TEXT("Asset-registry tag name to filter on."))
-			.ParamString(TEXT("tagValue"), TEXT("Required value for 'tagKey' (omit to match any value)."))
+			.ParamString(TEXT("tagValue"), TEXT("Required value for 'tagKey' (omit to match any value). Requires 'tagKey'."))
 			.ParamBool(TEXT("recursive"), TEXT("Recurse sub-paths of 'path'. Default true."))
 			.ParamInt(TEXT("offset"), TEXT("Pagination offset into the result set. Default 0."))
-			.ParamInt(TEXT("limit"), TEXT("Maximum results to return. Default 100."))
+			.ParamInt(TEXT("limit"), TEXT("Maximum results to return (1-1000). Default 100."))
 			.ReadOnlyHint(true)
 			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
 			{
@@ -161,7 +179,15 @@ namespace UnrealMcpAssetTools
 				const FString TagValue = Call.GetString(TEXT("tagValue"));
 				const bool bRecursive = Call.GetBool(TEXT("recursive"), true);
 				const int32 Offset = FMath::Max(0, (int32)Call.GetInt(TEXT("offset"), 0));
-				const int32 Limit = FMath::Max(1, (int32)Call.GetInt(TEXT("limit"), 100));
+				// Clamp the page size to a sane upper bound so a caller can't ask for an unbounded page.
+				const int32 Limit = FMath::Clamp((int32)Call.GetInt(TEXT("limit"), 100), 1, 1000);
+
+				// A bare 'tagValue' with no 'tagKey' is a no-op in the registry filter; surface it as a
+				// clear error rather than silently ignoring the caller's intent.
+				if (TagKey.IsEmpty() && !TagValue.IsEmpty())
+				{
+					return FUnrealMcpToolResult::Error(TEXT("'tagValue' requires 'tagKey'."));
+				}
 
 				FARFilter Filter;
 				if (!PackagePath.IsEmpty())
@@ -195,16 +221,18 @@ namespace UnrealMcpAssetTools
 						TagValue.IsEmpty() ? TOptional<FString>() : TOptional<FString>(TagValue));
 				}
 
-				TArray<FAssetData> Assets;
-				IAssetRegistry& Registry = GetAssetRegistry();
+				// With no path/class/tag the filter would be empty, forcing GetAllAssets to materialize
+				// the ENTIRE registry (incl. /Engine). Default the scope to /Game instead — a name-only
+				// query is still served, but bounded to project content.
 				if (Filter.IsEmpty())
 				{
-					Registry.GetAllAssets(Assets);
+					Filter.PackagePaths.Add(FName(TEXT("/Game")));
+					Filter.bRecursivePaths = true;
 				}
-				else
-				{
-					Registry.GetAssets(Filter, Assets);
-				}
+
+				TArray<FAssetData> Assets;
+				IAssetRegistry& AssetRegistry = GetAssetRegistry();
+				AssetRegistry.GetAssets(Filter, Assets);
 
 				// Post-filter by name substring (the registry has no substring filter primitive).
 				if (!NameFilter.IsEmpty())
@@ -215,17 +243,25 @@ namespace UnrealMcpAssetTools
 					});
 				}
 
-				// Deterministic ordering so pagination is stable across calls.
-				Assets.Sort([](const FAssetData& A, const FAssetData& B)
+				// Deterministic ordering so pagination is stable across calls. Precompute the object-path
+				// sort key ONCE per asset (the comparator runs O(n log n) times — recomputing the string
+				// in the comparator was the hot path on large result sets).
+				TArray<TPair<FString, const FAssetData*>> Sortable;
+				Sortable.Reserve(Assets.Num());
+				for (const FAssetData& Data : Assets)
 				{
-					return A.GetObjectPathString() < B.GetObjectPathString();
+					Sortable.Emplace(Data.GetObjectPathString(), &Data);
+				}
+				Sortable.Sort([](const TPair<FString, const FAssetData*>& A, const TPair<FString, const FAssetData*>& B)
+				{
+					return A.Key < B.Key;
 				});
 
-				const int32 Total = Assets.Num();
+				const int32 Total = Sortable.Num();
 				TArray<TSharedPtr<FJsonValue>> Page;
 				for (int32 Index = Offset; Index < Total && Page.Num() < Limit; ++Index)
 				{
-					Page.Add(MakeShared<FJsonValueObject>(AssetDataToJson(Assets[Index])));
+					Page.Add(MakeShared<FJsonValueObject>(AssetDataToJson(*Sortable[Index].Value)));
 				}
 
 				TSharedPtr<FJsonObject> Structured = MakeShared<FJsonObject>();
@@ -279,7 +315,8 @@ namespace UnrealMcpAssetTools
 		Registry.Tool(TEXT("asset-create-folder"))
 			.Title(TEXT("Create Content Folder"))
 			.Description(TEXT("Create a Content Browser folder (directory) at the given package path, "
-			                  "e.g. '/Game/MyNewFolder'. Idempotent — succeeds if the folder already exists."))
+			                  "e.g. '/Game/MyNewFolder'. Must be under a project / plugin content root "
+			                  "(not /Engine). Idempotent — succeeds if the folder already exists."))
 			.ParamString(TEXT("path"), TEXT("Package path of the folder to create, e.g. '/Game/MyFolder'."), EUnrealMcpParamRequirement::Required)
 			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
 			{
@@ -287,6 +324,11 @@ namespace UnrealMcpAssetTools
 				if (Path.IsEmpty())
 				{
 					return FUnrealMcpToolResult::Error(TEXT("'path' is required."));
+				}
+				if (!IsWritableContentRoot(Path))
+				{
+					return FUnrealMcpToolResult::Error(
+						FString::Printf(TEXT("Refusing to create '%s' under an engine content root; use a project root like '/Game'."), *Path));
 				}
 				if (UEditorAssetLibrary::DoesDirectoryExist(Path))
 				{
@@ -310,7 +352,7 @@ namespace UnrealMcpAssetTools
 			.Title(TEXT("Copy Asset"))
 			.Description(TEXT("Duplicate an asset to a new package path. 'source' and 'destination' use the "
 			                  "§3.2 path-or-name convention; 'destination' is the full package path of the copy "
-			                  "(e.g. '/Game/Mat/M_Foo_Copy')."))
+			                  "(e.g. '/Game/Mat/M_Foo_Copy'). Errors if 'destination' already exists."))
 			.ParamString(TEXT("source"), TEXT("Source asset path-or-name."), EUnrealMcpParamRequirement::Required)
 			.ParamString(TEXT("destination"), TEXT("Destination package path for the duplicate."), EUnrealMcpParamRequirement::Required)
 			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
@@ -324,6 +366,20 @@ namespace UnrealMcpAssetTools
 				if (!UEditorAssetLibrary::DoesAssetExist(Source))
 				{
 					return FUnrealMcpToolResult::Error(FString::Printf(TEXT("No source asset at '%s'."), *Source));
+				}
+				// Pre-validate the destination (consistent with the family's guard discipline) so a
+				// malformed path or a collision returns a specific error instead of a logged engine
+				// Error + a generic "failed" message.
+				FString DestPackagePath, DestAssetName;
+				if (!SplitObjectPath(Destination, DestPackagePath, DestAssetName))
+				{
+					return FUnrealMcpToolResult::Error(
+						FString::Printf(TEXT("'%s' is not a valid destination package path."), *Destination));
+				}
+				if (UEditorAssetLibrary::DoesAssetExist(Destination))
+				{
+					return FUnrealMcpToolResult::Error(
+						FString::Printf(TEXT("Destination '%s' already exists."), *Destination));
 				}
 				if (!UEditorAssetLibrary::DuplicateAsset(Source, Destination))
 				{
@@ -341,7 +397,9 @@ namespace UnrealMcpAssetTools
 		Registry.Tool(TEXT("asset-move"))
 			.Title(TEXT("Move / Rename Asset"))
 			.Description(TEXT("Move or rename an asset. 'source' and 'destination' use the §3.2 path-or-name "
-			                  "convention; 'destination' is the full target package path."))
+			                  "convention; 'destination' is the full target package path. Errors if "
+			                  "'destination' already exists. Note: a move may leave a redirector at the old "
+			                  "path (fix up references separately)."))
 			.ParamString(TEXT("source"), TEXT("Source asset path-or-name."), EUnrealMcpParamRequirement::Required)
 			.ParamString(TEXT("destination"), TEXT("Destination package path."), EUnrealMcpParamRequirement::Required)
 			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
@@ -356,6 +414,17 @@ namespace UnrealMcpAssetTools
 				{
 					return FUnrealMcpToolResult::Error(FString::Printf(TEXT("No source asset at '%s'."), *Source));
 				}
+				FString DestPackagePath, DestAssetName;
+				if (!SplitObjectPath(Destination, DestPackagePath, DestAssetName))
+				{
+					return FUnrealMcpToolResult::Error(
+						FString::Printf(TEXT("'%s' is not a valid destination package path."), *Destination));
+				}
+				if (UEditorAssetLibrary::DoesAssetExist(Destination))
+				{
+					return FUnrealMcpToolResult::Error(
+						FString::Printf(TEXT("Destination '%s' already exists."), *Destination));
+				}
 				if (!UEditorAssetLibrary::RenameAsset(Source, Destination))
 				{
 					return FUnrealMcpToolResult::Error(
@@ -364,6 +433,7 @@ namespace UnrealMcpAssetTools
 				TSharedPtr<FJsonObject> Structured = MakeShared<FJsonObject>();
 				Structured->SetStringField(TEXT("source"), Source);
 				Structured->SetStringField(TEXT("destination"), Destination);
+				Structured->SetStringField(TEXT("note"), TEXT("A redirector may remain at the source path."));
 				return FUnrealMcpToolResult::Success(
 					FString::Printf(TEXT("Moved '%s' to '%s'."), *Source, *Destination), Structured);
 			});
@@ -371,12 +441,16 @@ namespace UnrealMcpAssetTools
 		// asset-delete -----------------------------------------------------------------------------
 		Registry.Tool(TEXT("asset-delete"))
 			.Title(TEXT("Delete Asset"))
-			.Description(TEXT("Delete an asset by path-or-name (§3.2). Destructive and not undoable from MCP."))
+			.Description(TEXT("Delete an asset by path-or-name (§3.2). Destructive and not undoable from MCP. "
+			                  "By default refuses if other on-disk packages reference the asset (deleting "
+			                  "would dangle those references); pass 'force':true to delete anyway."))
 			.ParamString(TEXT("path"), TEXT("Asset path-or-name to delete."), EUnrealMcpParamRequirement::Required)
+			.ParamBool(TEXT("force"), TEXT("Delete even when the asset is referenced by other packages. Default false."))
 			.DestructiveHint(true)
 			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
 			{
 				const FString Path = Call.GetString(TEXT("path"));
+				const bool bForce = Call.GetBool(TEXT("force"), false);
 				if (Path.IsEmpty())
 				{
 					return FUnrealMcpToolResult::Error(TEXT("'path' is required."));
@@ -385,6 +459,38 @@ namespace UnrealMcpAssetTools
 				{
 					return FUnrealMcpToolResult::Error(FString::Printf(TEXT("No asset at '%s'."), *Path));
 				}
+
+				// Referencer guard: UEditorAssetLibrary::DeleteAsset force-deletes WITHOUT confirmation,
+				// silently dangling inbound references. Query the registry for on-disk referencers first
+				// and refuse (unless 'force') with the referencer list so the caller can decide.
+				if (!bForce)
+				{
+					const FAssetData Data = UEditorAssetLibrary::FindAssetData(Path);
+					if (!Data.PackageName.IsNone())
+					{
+						TArray<FName> Referencers;
+						GetAssetRegistry().GetReferencers(Data.PackageName, Referencers);
+						Referencers.Remove(Data.PackageName); // never count the asset itself
+						if (Referencers.Num() > 0)
+						{
+							FString List;
+							const int32 Shown = FMath::Min(Referencers.Num(), 10);
+							for (int32 Index = 0; Index < Shown; ++Index)
+							{
+								List += (Index == 0 ? TEXT("") : TEXT(", "));
+								List += Referencers[Index].ToString();
+							}
+							if (Referencers.Num() > Shown)
+							{
+								List += FString::Printf(TEXT(", (+%d more)"), Referencers.Num() - Shown);
+							}
+							return FUnrealMcpToolResult::Error(FString::Printf(
+								TEXT("Refusing to delete '%s': referenced by %d package(s) [%s]. Pass 'force':true to delete anyway."),
+								*Path, Referencers.Num(), *List));
+						}
+					}
+				}
+
 				if (!UEditorAssetLibrary::DeleteAsset(Path))
 				{
 					return FUnrealMcpToolResult::Error(FString::Printf(TEXT("Failed to delete '%s'."), *Path));
@@ -392,21 +498,25 @@ namespace UnrealMcpAssetTools
 				TSharedPtr<FJsonObject> Structured = MakeShared<FJsonObject>();
 				Structured->SetStringField(TEXT("path"), Path);
 				Structured->SetBoolField(TEXT("deleted"), true);
+				Structured->SetBoolField(TEXT("forced"), bForce);
 				return FUnrealMcpToolResult::Success(FString::Printf(TEXT("Deleted '%s'."), *Path), Structured);
 			});
 
 		// asset-refresh ----------------------------------------------------------------------------
 		Registry.Tool(TEXT("asset-refresh"))
 			.Title(TEXT("Refresh / Rescan Assets"))
-			.Description(TEXT("Force the AssetRegistry to rescan one or more package paths so newly added "
+			.Description(TEXT("Ask the AssetRegistry to rescan one or more package paths so newly added "
 			                  "files on disk become visible. Pass 'paths' (array of package paths); defaults "
-			                  "to ['/Game'] when omitted."))
+			                  "to ['/Game'] when omitted. 'force':true does a full blocking rescan on the game "
+			                  "thread (slow for large trees) — leave false to rescan only modified files."))
 			.ParamString(TEXT("path"), TEXT("Single package path to rescan (alternative to 'paths')."))
+			.ParamBool(TEXT("force"), TEXT("Force a full rescan (slow). Default false."))
 			.IdempotentHint(true)
 			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
 			{
 				TArray<FString> Paths = GetStringArray(Call, TEXT("paths"));
 				const FString SinglePath = Call.GetString(TEXT("path"));
+				const bool bForce = Call.GetBool(TEXT("force"), false);
 				if (!SinglePath.IsEmpty())
 				{
 					Paths.AddUnique(SinglePath);
@@ -416,7 +526,7 @@ namespace UnrealMcpAssetTools
 					Paths.Add(TEXT("/Game"));
 				}
 
-				GetAssetRegistry().ScanPathsSynchronous(Paths, /*bForceRescan*/ true);
+				GetAssetRegistry().ScanPathsSynchronous(Paths, /*bForceRescan*/ bForce);
 
 				TArray<TSharedPtr<FJsonValue>> Scanned;
 				for (const FString& Path : Paths)
@@ -425,8 +535,9 @@ namespace UnrealMcpAssetTools
 				}
 				TSharedPtr<FJsonObject> Structured = MakeShared<FJsonObject>();
 				Structured->SetArrayField(TEXT("paths"), Scanned);
+				Structured->SetBoolField(TEXT("force"), bForce);
 				return FUnrealMcpToolResult::Success(
-					FString::Printf(TEXT("Rescanned %d path(s)."), Paths.Num()), Structured);
+					FString::Printf(TEXT("Rescanned %d path(s)%s."), Paths.Num(), bForce ? TEXT(" (forced)") : TEXT("")), Structured);
 			});
 
 		// asset-material-create --------------------------------------------------------------------
@@ -473,6 +584,9 @@ namespace UnrealMcpAssetTools
 				}
 
 				UMaterialInstanceConstantFactoryNew* Factory = NewObject<UMaterialInstanceConstantFactoryNew>();
+				// Root the factory for the duration of CreateAsset — a GC pass mid-create would otherwise
+				// collect the unreferenced factory and crash.
+				FGCObjectScopeGuard FactoryGuard(Factory);
 				Factory->InitialParent = Parent;
 
 				UObject* Created = GetAssetTools().CreateAsset(
@@ -496,11 +610,14 @@ namespace UnrealMcpAssetTools
 			.Title(TEXT("Modify Material Instance"))
 			.Description(TEXT("Set parameters on a UMaterialInstanceConstant. Pass 'scalars' (object of "
 			                  "name->number), 'vectors' (object of name->{r,g,b,a}), and/or 'textures' "
-			                  "(object of name->texture path-or-name). The instance is updated and marked dirty."))
+			                  "(object of name->texture path-or-name). Changes are in-memory (the package is "
+			                  "marked dirty); pass 'save':true to also write the package to disk."))
 			.ParamString(TEXT("path"), TEXT("Material instance path-or-name."), EUnrealMcpParamRequirement::Required)
+			.ParamBool(TEXT("save"), TEXT("Save the package to disk after applying. Default false (in-memory only)."))
 			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
 			{
 				const FString Path = Call.GetString(TEXT("path"));
+				const bool bSave = Call.GetBool(TEXT("save"), false);
 				if (Path.IsEmpty())
 				{
 					return FUnrealMcpToolResult::Error(TEXT("'path' is required."));
@@ -509,6 +626,20 @@ namespace UnrealMcpAssetTools
 				{
 					return FUnrealMcpToolResult::Error(FString::Printf(TEXT("No asset at '%s'."), *Path));
 				}
+
+				// Require at least one parameter object — a no-op modify would needlessly dirty the
+				// package (and open/close a transaction) for nothing.
+				const TSharedPtr<FJsonObject>* Scalars = nullptr;
+				const TSharedPtr<FJsonObject>* Vectors = nullptr;
+				const TSharedPtr<FJsonObject>* Textures = nullptr;
+				const bool bHasScalars = Call.Arguments->TryGetObjectField(TEXT("scalars"), Scalars);
+				const bool bHasVectors = Call.Arguments->TryGetObjectField(TEXT("vectors"), Vectors);
+				const bool bHasTextures = Call.Arguments->TryGetObjectField(TEXT("textures"), Textures);
+				if (!bHasScalars && !bHasVectors && !bHasTextures)
+				{
+					return FUnrealMcpToolResult::Error(TEXT("Provide at least one of 'scalars', 'vectors', or 'textures'."));
+				}
+
 				UMaterialInstanceConstant* Instance = Cast<UMaterialInstanceConstant>(UEditorAssetLibrary::LoadAsset(Path));
 				if (!Instance)
 				{
@@ -531,8 +662,12 @@ namespace UnrealMcpAssetTools
 				TArray<FString> Applied;
 				TArray<FString> Failed;
 
-				const TSharedPtr<FJsonObject>* Scalars;
-				if (Call.Arguments->TryGetObjectField(TEXT("scalars"), Scalars))
+				// Wrap the parameter writes in a transaction + Modify() so the change is undoable in the
+				// editor (Ctrl+Z), matching how editor-driven material edits behave.
+				FScopedTransaction Transaction(NSLOCTEXT("UnrealMcp", "AssetMaterialModify", "Modify Material Instance (MCP)"));
+				Instance->Modify();
+
+				if (bHasScalars)
 				{
 					for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : (*Scalars)->Values)
 					{
@@ -550,8 +685,7 @@ namespace UnrealMcpAssetTools
 					}
 				}
 
-				const TSharedPtr<FJsonObject>* Vectors;
-				if (Call.Arguments->TryGetObjectField(TEXT("vectors"), Vectors))
+				if (bHasVectors)
 				{
 					for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : (*Vectors)->Values)
 					{
@@ -575,15 +709,15 @@ namespace UnrealMcpAssetTools
 					}
 				}
 
-				const TSharedPtr<FJsonObject>* Textures;
-				if (Call.Arguments->TryGetObjectField(TEXT("textures"), Textures))
+				if (bHasTextures)
 				{
 					for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : (*Textures)->Values)
 					{
 						const FName ParamName(*Pair.Key);
 						FString TexturePath;
 						UTexture* Texture = nullptr;
-						if (Pair.Value.IsValid() && Pair.Value->TryGetString(TexturePath) && UEditorAssetLibrary::DoesAssetExist(TexturePath))
+						const bool bGaveTexturePath = Pair.Value.IsValid() && Pair.Value->TryGetString(TexturePath) && !TexturePath.IsEmpty();
+						if (bGaveTexturePath && UEditorAssetLibrary::DoesAssetExist(TexturePath))
 						{
 							Texture = Cast<UTexture>(UEditorAssetLibrary::LoadAsset(TexturePath));
 						}
@@ -592,15 +726,26 @@ namespace UnrealMcpAssetTools
 							UMaterialEditingLibrary::SetMaterialInstanceTextureParameterValue(Instance, ParamName, Texture);
 							Applied.Add(FString::Printf(TEXT("texture:%s"), *Pair.Key));
 						}
+						else if (!KnownTextures.Contains(ParamName))
+						{
+							Failed.Add(FString::Printf(TEXT("texture:%s (unknown parameter)"), *Pair.Key));
+						}
 						else
 						{
-							Failed.Add(FString::Printf(TEXT("texture:%s"), *Pair.Key));
+							// Known parameter, but the supplied texture path was missing / not a texture.
+							Failed.Add(FString::Printf(TEXT("texture:%s (texture not found: '%s')"), *Pair.Key, *TexturePath));
 						}
 					}
 				}
 
 				UMaterialEditingLibrary::UpdateMaterialInstance(Instance);
 				Instance->MarkPackageDirty();
+
+				bool bSaved = false;
+				if (bSave && Applied.Num() > 0)
+				{
+					bSaved = UEditorAssetLibrary::SaveLoadedAsset(Instance, /*bOnlyIfIsDirty*/ false);
+				}
 
 				TSharedPtr<FJsonObject> Structured = MakeShared<FJsonObject>();
 				Structured->SetStringField(TEXT("path"), Instance->GetPathName());
@@ -610,15 +755,19 @@ namespace UnrealMcpAssetTools
 				TArray<TSharedPtr<FJsonValue>> FailedJson;
 				for (const FString& Item : Failed) FailedJson.Add(MakeShared<FJsonValueString>(Item));
 				Structured->SetArrayField(TEXT("failed"), FailedJson);
+				Structured->SetBoolField(TEXT("saved"), bSaved);
 
 				if (Applied.Num() == 0 && Failed.Num() > 0)
 				{
+					// Nothing applied — cancel the (empty) transaction so it doesn't pollute the undo stack.
+					Transaction.Cancel();
 					return FUnrealMcpToolResult::Error(
-						FString::Printf(TEXT("No parameters applied to '%s' (%d failed — unknown parameter names?)."),
+						FString::Printf(TEXT("No parameters applied to '%s' (%d failed — unknown parameter names or missing textures)."),
 							*Instance->GetName(), Failed.Num()));
 				}
 				return FUnrealMcpToolResult::Success(
-					FString::Printf(TEXT("Applied %d parameter(s) to '%s' (%d failed)."), Applied.Num(), *Instance->GetName(), Failed.Num()),
+					FString::Printf(TEXT("Applied %d parameter(s) to '%s' (%d failed%s)."),
+						Applied.Num(), *Instance->GetName(), Failed.Num(), bSaved ? TEXT(", saved") : TEXT("")),
 					Structured);
 			});
 
@@ -626,8 +775,8 @@ namespace UnrealMcpAssetTools
 		Registry.Tool(TEXT("asset-material-get-data"))
 			.Title(TEXT("Get Material Parameters"))
 			.Description(TEXT("Read parameter info for a material or material instance (the 'shader' analog): "
-			                  "scalar/vector/texture parameter names, plus current values when the asset is a "
-			                  "material instance, plus the parent. Supports §3.2 scoped reads via 'paths'."))
+			                  "scalar/vector/texture parameter names, plus current values (instance override "
+			                  "or base-material default), plus the parent. Supports §3.2 scoped reads via 'paths'."))
 			.ParamString(TEXT("path"), TEXT("Material or material-instance path-or-name."), EUnrealMcpParamRequirement::Required)
 			.ReadOnlyHint(true)
 			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
@@ -648,6 +797,9 @@ namespace UnrealMcpAssetTools
 						FString::Printf(TEXT("'%s' is not a material/material-interface."), *Path));
 				}
 				UMaterialInstanceConstant* Instance = Cast<UMaterialInstanceConstant>(Material);
+				// When the asset is a base material we can still report each parameter's DEFAULT value
+				// (rather than null) via the GetMaterialDefault* family.
+				UMaterial* BaseMaterial = Instance ? nullptr : Cast<UMaterial>(Material);
 
 				TArray<FName> ScalarNames, VectorNames, TextureNames;
 				UMaterialEditingLibrary::GetScalarParameterNames(Material, ScalarNames);
@@ -659,6 +811,8 @@ namespace UnrealMcpAssetTools
 				{
 					if (Instance)
 						Scalars->SetNumberField(Name.ToString(), UMaterialEditingLibrary::GetMaterialInstanceScalarParameterValue(Instance, Name));
+					else if (BaseMaterial)
+						Scalars->SetNumberField(Name.ToString(), UMaterialEditingLibrary::GetMaterialDefaultScalarParameterValue(BaseMaterial, Name));
 					else
 						Scalars->SetField(Name.ToString(), MakeShared<FJsonValueNull>());
 				}
@@ -667,14 +821,24 @@ namespace UnrealMcpAssetTools
 				{
 					if (Instance)
 						Vectors->SetField(Name.ToString(), LinearColorToJson(UMaterialEditingLibrary::GetMaterialInstanceVectorParameterValue(Instance, Name)));
+					else if (BaseMaterial)
+						Vectors->SetField(Name.ToString(), LinearColorToJson(UMaterialEditingLibrary::GetMaterialDefaultVectorParameterValue(BaseMaterial, Name)));
 					else
 						Vectors->SetField(Name.ToString(), MakeShared<FJsonValueNull>());
 				}
 				TSharedPtr<FJsonObject> Textures = MakeShared<FJsonObject>();
 				for (const FName& Name : TextureNames)
 				{
-					UTexture* Texture = Instance ? UMaterialEditingLibrary::GetMaterialInstanceTextureParameterValue(Instance, Name) : nullptr;
-					Textures->SetStringField(Name.ToString(), Texture ? Texture->GetPathName() : FString());
+					UTexture* Texture = nullptr;
+					if (Instance)
+						Texture = UMaterialEditingLibrary::GetMaterialInstanceTextureParameterValue(Instance, Name);
+					else if (BaseMaterial)
+						Texture = UMaterialEditingLibrary::GetMaterialDefaultTextureParameterValue(BaseMaterial, Name);
+					// Unify the no-value representation with scalars/vectors: null when unset.
+					if (Texture)
+						Textures->SetStringField(Name.ToString(), Texture->GetPathName());
+					else
+						Textures->SetField(Name.ToString(), MakeShared<FJsonValueNull>());
 				}
 
 				TSharedPtr<FJsonObject> Full = MakeShared<FJsonObject>();
@@ -698,19 +862,27 @@ namespace UnrealMcpAssetTools
 			.Title(TEXT("Import Asset"))
 			.Description(TEXT("Import a source file (FBX, texture/PNG, etc.) from the local filesystem into "
 			                  "the Content Browser via an AssetImportTask. 'file' is an absolute filesystem "
-			                  "path; 'destination' is the target package path (e.g. '/Game/Imported'); 'name' "
-			                  "optionally overrides the imported asset name."))
+			                  "path; 'destination' is the target package path (e.g. '/Game/Imported', must be "
+			                  "under a project / plugin content root, not /Engine); 'name' optionally overrides "
+			                  "the imported asset name. The import is in-memory unless 'save':true."))
 			.ParamString(TEXT("file"), TEXT("Absolute filesystem path of the source file to import."), EUnrealMcpParamRequirement::Required)
 			.ParamString(TEXT("destination"), TEXT("Destination package path, e.g. '/Game/Imported'."), EUnrealMcpParamRequirement::Required)
 			.ParamString(TEXT("name"), TEXT("Optional imported asset name override."))
+			.ParamBool(TEXT("save"), TEXT("Save the imported package(s) to disk. Default false (in-memory only)."))
 			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
 			{
 				const FString File = Call.GetString(TEXT("file"));
 				const FString Destination = Call.GetString(TEXT("destination"));
 				const FString NameOverride = Call.GetString(TEXT("name"));
+				const bool bSave = Call.GetBool(TEXT("save"), false);
 				if (File.IsEmpty() || Destination.IsEmpty())
 				{
 					return FUnrealMcpToolResult::Error(TEXT("'file' and 'destination' are required."));
+				}
+				if (!IsWritableContentRoot(Destination))
+				{
+					return FUnrealMcpToolResult::Error(
+						FString::Printf(TEXT("Refusing to import into '%s' under an engine content root; use a project root like '/Game'."), *Destination));
 				}
 				if (!FPaths::FileExists(File))
 				{
@@ -718,6 +890,9 @@ namespace UnrealMcpAssetTools
 				}
 
 				UAssetImportTask* Task = NewObject<UAssetImportTask>();
+				// Root the task (and its results) for the duration of the import — a heavy FBX/Interchange
+				// import can trigger a GC pass mid-flight that would otherwise collect the unrooted task.
+				FGCObjectScopeGuard TaskGuard(Task);
 				Task->Filename = File;
 				Task->DestinationPath = Destination;
 				if (!NameOverride.IsEmpty())
@@ -726,7 +901,7 @@ namespace UnrealMcpAssetTools
 				}
 				Task->bAutomated = true;
 				Task->bReplaceExisting = true;
-				Task->bSave = false;
+				Task->bSave = bSave;
 				Task->bAsync = false;
 
 				GetAssetTools().ImportAssetTasks({ Task });
@@ -749,8 +924,9 @@ namespace UnrealMcpAssetTools
 				TSharedPtr<FJsonObject> Structured = MakeShared<FJsonObject>();
 				Structured->SetStringField(TEXT("file"), File);
 				Structured->SetArrayField(TEXT("imported"), Paths);
+				Structured->SetBoolField(TEXT("saved"), bSave);
 				return FUnrealMcpToolResult::Success(
-					FString::Printf(TEXT("Imported %d asset(s) from '%s'."), Imported.Num(), *File), Structured);
+					FString::Printf(TEXT("Imported %d asset(s) from '%s'%s."), Imported.Num(), *File, bSave ? TEXT(" (saved)") : TEXT("")), Structured);
 			});
 	}
 }
