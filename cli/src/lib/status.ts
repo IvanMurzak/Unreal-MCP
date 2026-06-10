@@ -29,9 +29,13 @@ export async function getStatus(opts: StatusOptions = {}): Promise<StatusReport>
     projectDir = path.resolve(opts.projectDir);
     const uproject = readUProject(projectDir);
     if (uproject) {
-      const pluginInstalled =
-        fs.existsSync(path.join(projectDir, 'Plugins', 'UnrealMCP', 'UnrealMCP.uplugin')) ||
-        fs.existsSync(path.join(projectDir, 'Plugins', 'UnrealMCP'));
+      // Key on the `.uplugin` descriptor, not the directory: a bare
+      // `Plugins/UnrealMCP/` folder without the descriptor is not a usable
+      // install (the OR'd dir-exists check was a strict superset and so
+      // degenerated to dir-exists).
+      const pluginInstalled = fs.existsSync(
+        path.join(projectDir, 'Plugins', 'UnrealMCP', 'UnrealMCP.uplugin'),
+      );
       report.project = {
         projectDir: uproject.projectDir,
         projectName: uproject.projectName,

@@ -141,7 +141,13 @@ export function matchEngineForAssociation(
 ): EngineInstallation | null {
   const assoc = engineAssociation.trim();
   if (assoc.length === 0) {
-    return engines.length > 0 ? engines[0] : null;
+    // Highest installed engine. `parseLauncherManifest` already sorts, but
+    // `open`'s injectable `enginesImpl` may feed an unsorted list — so sort
+    // here too rather than relying on the caller's ordering.
+    if (engines.length === 0) return null;
+    return [...engines].sort((a, b) =>
+      compareEngineVersions(b.engineAssociation, a.engineAssociation),
+    )[0];
   }
   if (assoc.startsWith('{')) {
     // GUID — a registered source build; not in the launcher manifest.

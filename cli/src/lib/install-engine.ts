@@ -17,11 +17,14 @@ import type {
 } from './types.js';
 
 /**
- * Build the `com.epicgames.launcher://` deep link that opens the install
- * page for an engine version. Pure.
+ * Build the `com.epicgames.launcher://` deep link that opens the Epic Games
+ * Launcher on its Unreal Engine page so the user can install/manage engines.
+ * A version-specific install path is not a documented launcher URL, so we use
+ * the plain, known-good `ue/` link and surface the desired version in the
+ * accompanying message instead. Pure.
  */
-export function launcherInstallUrl(version: string): string {
-  return `com.epicgames.launcher://ue/launcher/install?version=${encodeURIComponent(version)}`;
+export function launcherInstallUrl(): string {
+  return 'com.epicgames.launcher://ue/';
 }
 
 /**
@@ -47,7 +50,7 @@ export function planEngineInstall(opts: PlanEngineInstallOptions): PlanEngineIns
   const engines = manifestPath ? readLauncherManifest(manifestPath) : [];
 
   const existing = matchEngineForAssociation(version, engines);
-  const launcherUrl = launcherInstallUrl(version);
+  const launcherUrl = launcherInstallUrl();
 
   if (existing && existing.engineAssociation === version) {
     return {

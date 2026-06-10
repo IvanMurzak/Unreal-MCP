@@ -40,6 +40,15 @@ export interface UpdateFailure {
 
 export type UpdateResult = UpdateSuccess | UpdateFailure;
 
+/** True when `p` is an existing symlink/junction (vs a real directory). */
+function isJunction(p: string): boolean {
+  try {
+    return fs.lstatSync(p).isSymbolicLink();
+  } catch {
+    return false;
+  }
+}
+
 /** Read `VersionName` from a `UnrealMCP.uplugin`. Pure. Returns null on miss. */
 export function readPluginVersion(upluginPath: string): string | null {
   if (!fs.existsSync(upluginPath)) return null;
@@ -77,10 +86,13 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
       return { kind: 'success', success: true, fromVersion, toVersion, updated: false, installedPath, warnings };
     }
 
+    // Preserve the existing install mode: a dev junction install must stay a
+    // junction across `update --force` rather than being silently replaced
+    // with a copy (which would detach the project from the live source).
     const installResult = await installPlugin({
       projectDir,
       pluginSourceDir,
-      junction: false,
+      junction: isJunction(installedPath),
       onProgress: opts.onProgress,
     });
     if (installResult.kind === 'failure') {

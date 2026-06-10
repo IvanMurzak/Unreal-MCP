@@ -33,7 +33,7 @@ describe('planEngineInstall', () => {
 });
 
 describe('launcherInstallUrl', () => {
-  it('builds an encoded deep link', () => {
-    expect(launcherInstallUrl('5.7')).toBe('com.epicgames.launcher://ue/launcher/install?version=5.7');
+  it('builds the plain, known-good Unreal Engine launcher deep link', () => {
+    expect(launcherInstallUrl()).toBe('com.epicgames.launcher://ue/');
   });
 });

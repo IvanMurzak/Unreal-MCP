@@ -2,8 +2,10 @@
 // so it can reach the project's local Unreal MCP server. Library-safe.
 //
 // Each agent has a project-relative config file and a merge strategy that
-// preserves any existing `mcpServers` entries. The snippet shape follows
-// the MCP client convention shared by the Unity/Godot CLIs.
+// preserves any existing server entries under the agent's top-level key
+// (`mcpServers` for Claude Code / Cursor, `servers` for VS Code). The
+// snippet shape follows the MCP client convention shared by the Unity/Godot
+// CLIs.
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -41,12 +43,18 @@ interface AgentDef {
   relConfigPath: string;
   /** Display label. */
   label: string;
+  /**
+   * Top-level key the agent nests its MCP servers under. Claude Code and
+   * Cursor use `mcpServers`; VS Code's `.vscode/mcp.json` uses `servers`
+   * (writing `mcpServers` there is silently ignored by VS Code).
+   */
+  bodyKey: 'mcpServers' | 'servers';
 }
 
 const AGENTS: AgentDef[] = [
-  { id: 'claude-code', relConfigPath: '.mcp.json', label: 'Claude Code' },
-  { id: 'cursor', relConfigPath: path.join('.cursor', 'mcp.json'), label: 'Cursor' },
-  { id: 'vscode', relConfigPath: path.join('.vscode', 'mcp.json'), label: 'VS Code' },
+  { id: 'claude-code', relConfigPath: '.mcp.json', label: 'Claude Code', bodyKey: 'mcpServers' },
+  { id: 'cursor', relConfigPath: path.join('.cursor', 'mcp.json'), label: 'Cursor', bodyKey: 'mcpServers' },
+  { id: 'vscode', relConfigPath: path.join('.vscode', 'mcp.json'), label: 'VS Code', bodyKey: 'servers' },
 ];
 
 /** Valid agent ids accepted by `setupMcp`. Pure. */
@@ -129,11 +137,11 @@ export async function setupMcp(opts: SetupMcpOptions): Promise<SetupMcpResult> {
         warnings.push(`Existing ${configPath} is not valid JSON — it will be replaced.`);
       }
     }
-    const servers = (config['mcpServers'] && typeof config['mcpServers'] === 'object'
-      ? (config['mcpServers'] as Record<string, unknown>)
+    const servers = (config[agent.bodyKey] && typeof config[agent.bodyKey] === 'object'
+      ? (config[agent.bodyKey] as Record<string, unknown>)
       : {});
     servers[SERVER_KEY] = serverEntry;
-    config['mcpServers'] = servers;
+    config[agent.bodyKey] = servers;
 
     const snippet = JSON.stringify(config, null, 2) + '\n';
 

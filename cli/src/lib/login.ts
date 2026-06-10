@@ -131,7 +131,10 @@ export async function login(opts: LoginOptions = {}): Promise<LoginResult> {
     return fail('timeout', `Login timed out after ${timeoutMs}ms.`);
   } catch (err) {
     const error = err instanceof Error ? err : new Error(String(err));
-    return { kind: 'failure', success: false, reason: 'network-error', error };
+    // A per-request `fetchWithTimeout` deadline surfaces as an AbortError;
+    // classify that as a timeout rather than a generic network error.
+    const reason = error.name === 'AbortError' ? 'timeout' : 'network-error';
+    return { kind: 'failure', success: false, reason, error };
   }
 }
 
@@ -139,11 +142,12 @@ function persistToken(projectDir: string | undefined, token: string): string | n
   if (!projectDir) return null;
   const dir = path.resolve(projectDir);
   const envPath = path.join(dir, '.env');
-  writeEnvFile(envPath, { UNREAL_MCP_TOKEN: token, UNREAL_MCP_CONNECTION_MODE: 'Cloud' });
-  // The token is a secret — make sure `.env` is gitignored before it lands
-  // on disk (mirrors `configure`'s §8 guard so `login -p .` can't leave a
-  // committable token file behind).
+  // The token is a secret — make sure `.env` is gitignored BEFORE it lands on
+  // disk (mirrors `configure`'s §8 guard so `login -p .` can't leave a
+  // committable token file behind even if the process dies between the two
+  // writes).
   ensureEnvGitignored(dir);
+  writeEnvFile(envPath, { UNREAL_MCP_TOKEN: token, UNREAL_MCP_CONNECTION_MODE: 'Cloud' });
   return envPath;
 }
 

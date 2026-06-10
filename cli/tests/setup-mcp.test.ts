@@ -75,6 +75,17 @@ describe('setupMcp', () => {
     expect(entry.args.some((a: string) => /^port=\d+$/.test(a))).toBe(true);
   });
 
+  it('writes vscode config under the top-level `servers` key (not `mcpServers`)', async () => {
+    const dir = tmp();
+    const r = await setupMcp({ agentId: 'vscode', projectDir: dir, transport: 'http', url: 'http://localhost:5220' });
+    expect(r.kind).toBe('success');
+    if (r.kind !== 'success') return;
+    const written = JSON.parse(fs.readFileSync(r.configPath, 'utf-8'));
+    // VS Code's .vscode/mcp.json uses `servers`; `mcpServers` is ignored.
+    expect(written.servers['unreal-mcp'].url).toBe('http://localhost:5220/mcp');
+    expect(written.mcpServers).toBeUndefined();
+  });
+
   it('dry-run returns the snippet without writing', async () => {
     const dir = tmp();
     const r = await setupMcp({ agentId: 'cursor', projectDir: dir, dryRun: true, url: 'http://h' });

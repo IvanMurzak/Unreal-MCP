@@ -147,6 +147,11 @@ function spawnDetached(
   env: NodeJS.ProcessEnv,
 ): { pid?: number } {
   const child = spawn(editorPath, args, { detached: true, stdio: 'ignore', env });
+  // A detached spawn can fail asynchronously (EACCES, ENOENT) AFTER we have
+  // already returned success; without an 'error' listener that emits an
+  // unhandled 'error' event which crashes the CLI. Swallow it — the editor
+  // simply did not launch, and `status` will report it unreachable.
+  child.on('error', () => {});
   child.unref();
   return { pid: child.pid };
 }

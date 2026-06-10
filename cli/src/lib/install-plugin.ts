@@ -7,6 +7,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { isUnrealProjectDir } from '../utils/project.js';
 import { emitProgress } from './progress.js';
 import type {
   InstallPluginOptions,
@@ -35,6 +36,13 @@ export async function installPlugin(opts: InstallPluginOptions): Promise<Install
     const projectDir = path.resolve(opts.projectDir);
     const pluginSourceDir = path.resolve(opts.pluginSourceDir);
     if (!fs.existsSync(projectDir)) throw new Error(`Project directory does not exist: ${projectDir}`);
+    // Guard against a wrong-cwd run silently scaffolding Plugins/UnrealMCP in
+    // an arbitrary directory (consistent with `close`/`status`, which key on
+    // a `.uproject`). Warn rather than refuse — installing into a not-yet-
+    // initialised project tree is a valid, if rarer, flow.
+    if (!isUnrealProjectDir(projectDir)) {
+      warnings.push(`No .uproject found in ${projectDir} — is this an Unreal project directory?`);
+    }
     if (!fs.existsSync(pluginSourceDir))
       throw new Error(`Plugin source directory does not exist: ${pluginSourceDir}`);
     if (!fs.existsSync(path.join(pluginSourceDir, 'UnrealMCP.uplugin'))) {
