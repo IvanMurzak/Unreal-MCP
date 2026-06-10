@@ -207,9 +207,14 @@ void FUnrealMcpExtensionsSpec::Define()
 	{
 		It("rebuilds the registry and bumps the revision on register and unregister", [this]()
 		{
+			// A throwaway config path so Startup() does not read the developer's real
+			// <ProjectSaved>/Config/UnrealMCP/Extensions.json (whose persisted disabled set could
+			// otherwise make this live-discovery spec fail non-locally).
+			const FString ConfigPath = MakeTempConfigPath();
+
 			FUnrealMcpToolRegistry Registry;
 			int32 OnChangedCount = 0;
-			FUnrealMcpExtensionManager Manager(Registry, [&OnChangedCount]() { ++OnChangedCount; });
+			FUnrealMcpExtensionManager Manager(Registry, [&OnChangedCount]() { ++OnChangedCount; }, ConfigPath);
 
 			// Default provider source = live discovery; subscribe to modular-feature events.
 			Manager.Startup();
@@ -238,6 +243,8 @@ void FUnrealMcpExtensionsSpec::Define()
 			TestTrue(TEXT("OnChanged fired on unregister"), OnChangedCount > OnAfterReg);
 
 			Manager.Shutdown();
+
+			IFileManager::Get().Delete(*ConfigPath, /*RequireExists*/ false, /*EvenReadOnly*/ true);
 		});
 	});
 

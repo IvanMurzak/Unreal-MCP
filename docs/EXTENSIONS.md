@@ -43,6 +43,8 @@ public:
 In your module's `*.Build.cs`:
 
 ```csharp
+PublicDependencyModuleNames.AddRange(new string[] { "Core" });
+
 PrivateDependencyModuleNames.AddRange(new string[]
 {
     "CoreUObject", "Engine", "Projects",
