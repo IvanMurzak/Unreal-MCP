@@ -64,14 +64,17 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Sidecar
         /// </summary>
         public bool IsParentAlive()
         {
+            // Without a captured start time we cannot distinguish the real parent from a PID-reuse imposter,
+            // so we treat "unverifiable" as dead — matching the documented contract (the parent we never
+            // identified is reported gone) and erring toward self-exit rather than outliving a stranger.
+            if (_expectedStartTimeUtc is not { } expected)
+                return false;
             try
             {
                 using var parent = Process.GetProcessById(_parentPid);
                 if (parent.HasExited)
                     return false;
-                if (_expectedStartTimeUtc is { } expected)
-                    return parent.StartTime.ToUniversalTime() == expected;
-                return true;
+                return parent.StartTime.ToUniversalTime() == expected;
             }
             catch
             {

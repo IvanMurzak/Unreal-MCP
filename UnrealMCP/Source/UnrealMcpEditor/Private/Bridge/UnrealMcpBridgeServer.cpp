@@ -140,21 +140,25 @@ bool FUnrealMcpBridgeServer::HandleConnectionAccepted(FSocket* InSocket, const F
 	if (InSocket == nullptr)
 		return false;
 
-	// One connection at a time: a fresh dial replaces a stale one (§1.5 re-dial after reconnect).
+	InSocket->SetNonBlocking(true);
+
+	// One connection at a time: a fresh dial replaces a stale one (§1.5 re-dial after reconnect). We run
+	// on the FTcpListener's accept thread, which must NEVER free the old socket: the reader thread may be
+	// mid-Recv on it (the second-connection use-after-free). Park the old socket for the reader to destroy
+	// and bump the connection generation so the reader resets its NDJSON accumulator and discards any bytes
+	// it reads from the now-superseded socket.
 	{
 		FScopeLock Lock(&ConnectionMutex);
 		if (ClientSocket != nullptr)
-		{
-			ClientSocket->Close();
-			ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM)->DestroySocket(ClientSocket);
-			ClientSocket = nullptr;
-		}
-		InSocket->SetNonBlocking(true);
+			SocketsPendingDestroy.Add(ClientSocket);
 		ClientSocket = InSocket;
+		++ConnectionGeneration;
+		ConnectionAcceptedSeconds = FPlatformTime::Seconds();
 	}
 
 	bHandshakeOk = false;
 	bClientConnected = true;
+	bHeartbeatStop = true; // retire any heartbeat tied to the prior connection; a fresh one starts on handshake
 	LastActivitySeconds.Set(static_cast<int32>(FPlatformTime::Seconds()));
 	UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] sidecar connected from %s; awaiting handshake."), *Endpoint.ToString());
 	return true; // keep the socket — we own it now
@@ -164,22 +168,49 @@ bool FUnrealMcpBridgeServer::Init() { return true; }
 
 uint32 FUnrealMcpBridgeServer::Run()
 {
+	// Pre-handshake connections must not hold the single slot indefinitely (a silent dialer that never
+	// sends the handshake). Drop them after this deadline (§6 — the heartbeat only guards POST-handshake
+	// silence). 10 s comfortably covers the sidecar's own 10 s ack timeout on the other side.
+	constexpr double PreHandshakeDeadlineSeconds = 10.0;
+
 	FUnrealMcpNdjsonAccumulator Accumulator;
-	int32 ServedGenerationSocket = 0;
+	int32 ServedGeneration = -1;
 	uint8 Buffer[64 * 1024];
 
 	while (!bStopRequested)
 	{
+		// Only the reader frees sockets (see SocketsPendingDestroy) — do it at a point where we are not
+		// inside a Recv on any of them.
+		DrainPendingDestroy();
+
 		FSocket* Sock;
+		int32 CurrentGeneration;
+		double AcceptedAt;
 		{
 			FScopeLock Lock(&ConnectionMutex);
 			Sock = ClientSocket;
+			CurrentGeneration = ConnectionGeneration;
+			AcceptedAt = ConnectionAcceptedSeconds;
+		}
+
+		// A new connection (or a replacement) resets the framer so a partial line from the OLD socket can
+		// never prepend the new handshake (the stale-accumulator corruption).
+		if (CurrentGeneration != ServedGeneration)
+		{
+			Accumulator = FUnrealMcpNdjsonAccumulator();
+			ServedGeneration = CurrentGeneration;
 		}
 
 		if (Sock == nullptr)
 		{
 			FPlatformProcess::Sleep(0.05f);
-			Accumulator = FUnrealMcpNdjsonAccumulator();
+			continue;
+		}
+
+		if (!bHandshakeOk && (FPlatformTime::Seconds() - AcceptedAt) > PreHandshakeDeadlineSeconds)
+		{
+			UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] connection sent no valid handshake within %.0fs; dropping."), PreHandshakeDeadlineSeconds);
+			CloseActiveConnection();
 			continue;
 		}
 
@@ -188,11 +219,20 @@ uint32 FUnrealMcpBridgeServer::Run()
 
 		int32 BytesRead = 0;
 		const bool bRecvOk = Sock->Recv(Buffer, sizeof(Buffer), BytesRead);
+
+		// The socket may have been superseded by a new accept while we were in Wait/Recv. If so, discard
+		// what we read: it belongs to a connection that is already being torn down (and is about to be
+		// freed by the next DrainPendingDestroy()).
+		{
+			FScopeLock Lock(&ConnectionMutex);
+			if (ConnectionGeneration != CurrentGeneration)
+				continue;
+		}
+
 		if (!bRecvOk || BytesRead == 0)
 		{
 			// Peer closed or errored — drop the connection and wait for a re-dial.
 			CloseActiveConnection();
-			Accumulator = FUnrealMcpNdjsonAccumulator();
 			continue;
 		}
 
@@ -203,7 +243,6 @@ uint32 FUnrealMcpBridgeServer::Run()
 		{
 			UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] IPC line exceeded the frame cap; dropping connection."));
 			CloseActiveConnection();
-			Accumulator = FUnrealMcpNdjsonAccumulator();
 			continue;
 		}
 
@@ -237,6 +276,15 @@ void FUnrealMcpBridgeServer::HandleLine(const FString& Line)
 	if (!Message->TryGetStringField(TEXT("type"), Type))
 		return;
 
+	// §1.4 auth gate: until the handshake is validated with the stdin token, the ONLY message we honour is
+	// the handshake itself. Drop every other type (tool-call/tool-cancel/ping/...) — a local process that
+	// guessed the deterministic loopback port must never invoke tools or drive the bridge without the token.
+	if (!bHandshakeOk && Type != TypeHandshake)
+	{
+		UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] dropping pre-handshake IPC message of type '%s'."), *Type);
+		return;
+	}
+
 	if (Type == TypeHandshake)        HandleHandshake(Message);
 	else if (Type == TypeToolCall)    HandleToolCall(Message);
 	else if (Type == TypeToolCancel)  HandleToolCancel(Message);
@@ -261,7 +309,9 @@ void FUnrealMcpBridgeServer::HandleHandshake(const TSharedPtr<FJsonObject>& Mess
 	FString IncomingToken;
 	Message->TryGetStringField(TEXT("token"), IncomingToken);
 
-	if (Token.IsEmpty() || IncomingToken != Token)
+	// Case-SENSITIVE compare: the token is a hex secret, so a case-folding match (FString operator==)
+	// would needlessly widen the accepted set.
+	if (Token.IsEmpty() || !IncomingToken.Equals(Token, ESearchCase::CaseSensitive))
 	{
 		UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] handshake rejected (token mismatch); closing connection."));
 		CloseActiveConnection();
@@ -283,6 +333,11 @@ void FUnrealMcpBridgeServer::HandleHandshake(const TSharedPtr<FJsonObject>& Mess
 
 void FUnrealMcpBridgeServer::HandleToolCall(const TSharedPtr<FJsonObject>& Message)
 {
+	// Do not start new work once teardown has begun — the continuation captures `this` and the body the
+	// registry, both of which the runtime frees right after Shutdown() (see DrainInFlightCalls).
+	if (bStopRequested)
+		return;
+
 	FString RequestId, ToolName;
 	Message->TryGetStringField(TEXT("requestId"), RequestId);
 	Message->TryGetStringField(TEXT("tool"), ToolName);
@@ -297,24 +352,42 @@ void FUnrealMcpBridgeServer::HandleToolCall(const TSharedPtr<FJsonObject>& Messa
 	if (Message->TryGetObjectField(TEXT("arguments"), ArgsPtr) && ArgsPtr->IsValid())
 		Arguments = *ArgsPtr;
 
-	// Per-call cancel flag (§4), kept alive until the response is sent.
+	// Per-call cancel flag (§4). Shared ownership keeps it alive for the lifetime of the dispatched call
+	// even after we drop the map entry below — the dispatcher's captured copy of FUnrealMcpToolCall holds
+	// a reference, so a late IsCancelled() can never deref freed memory.
 	TSharedRef<FThreadSafeBool, ESPMode::ThreadSafe> CancelFlag = MakeShared<FThreadSafeBool, ESPMode::ThreadSafe>(false);
+
+	// Never trust the sidecar's requestId for map uniqueness: an empty or duplicate id would collide and
+	// silently drop a prior in-flight call's flag. Only correlate cancellation for a non-empty, unique id.
+	bool bTrackCancel = false;
+	if (!RequestId.IsEmpty())
 	{
 		FScopeLock Lock(&CancelMutex);
-		CancelFlags.Add(RequestId, CancelFlag);
+		if (CancelFlags.Contains(RequestId))
+		{
+			UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] duplicate tool-call requestId '%s'; not tracking cancellation for it."), *RequestId);
+		}
+		else
+		{
+			CancelFlags.Add(RequestId, CancelFlag);
+			bTrackCancel = true;
+		}
 	}
 
 	FUnrealMcpToolCall Call(Arguments);
-	Call.CancelRequested = &CancelFlag.Get();
+	Call.CancelRequested = CancelFlag;
 
 	const FString CapturedTool = ToolName;
 	const FString CapturedRequestId = RequestId;
+	const bool bRemoveOnDone = bTrackCancel;
+
+	InFlightCalls.Increment();
 
 	Dispatcher.Dispatch(
 		Call,
 		[this, CapturedTool](const FUnrealMcpToolCall& C) { return Registry.Execute(CapturedTool, C); },
 		FTimespan::FromMilliseconds(TimeoutMs))
-		.Next([this, CapturedRequestId](FUnrealMcpToolResult Result)
+		.Next([this, CapturedRequestId, bRemoveOnDone](FUnrealMcpToolResult Result)
 		{
 			TSharedPtr<FJsonObject> Response = MakeShared<FJsonObject>();
 			Response->SetStringField(TEXT("type"), TypeToolResponse);
@@ -337,8 +410,12 @@ void FUnrealMcpBridgeServer::HandleToolCall(const TSharedPtr<FJsonObject>& Messa
 
 			SendMessage(Response);
 
-			FScopeLock Lock(&CancelMutex);
-			CancelFlags.Remove(CapturedRequestId);
+			if (bRemoveOnDone)
+			{
+				FScopeLock Lock(&CancelMutex);
+				CancelFlags.Remove(CapturedRequestId);
+			}
+			InFlightCalls.Decrement();
 		});
 }
 
@@ -368,7 +445,19 @@ bool FUnrealMcpBridgeServer::SendMessage(const TSharedPtr<FJsonObject>& Message)
 	{
 		int32 JustSent = 0;
 		if (!ClientSocket->Send(Framed.GetData() + TotalSent, Framed.Num() - TotalSent, JustSent) || JustSent <= 0)
+		{
+			// A failed/partial mid-frame send corrupts the stream — the peer would see a truncated line
+			// with the next frame concatenated, and a lost tool-response hangs the pending call until the
+			// heartbeat. Drop the connection so the sidecar reconnects cleanly. We hold ConnectionMutex, so
+			// just park the socket for the reader to free (never DestroySocket from here) and clear flags.
+			UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] socket send failed mid-frame; dropping connection."));
+			SocketsPendingDestroy.Add(ClientSocket);
+			ClientSocket = nullptr;
+			bClientConnected = false;
+			bHandshakeOk = false;
+			bHeartbeatStop = true;
 			return false;
+		}
 		TotalSent += JustSent;
 	}
 	return true;
@@ -387,8 +476,10 @@ void FUnrealMcpBridgeServer::SendHandshakeAck()
 
 void FUnrealMcpBridgeServer::SendManifestLocked()
 {
-	// Caller holds WriteMutex. Build under the game/registry-stable assumption (registry mutates only at
-	// startup). Send the manifest line directly (we already hold the write lock).
+	// Caller holds WriteMutex. Reading the registry here from the IPC reader thread is safe ONLY because
+	// the registry is mutated exclusively at startup (UnrealMcpPingTool::Register runs before the bridge
+	// accepts), so the manifest is stable by the time any handshake arrives. Dynamic re-registration (the
+	// §2.2 hot-reload path) MUST instead marshal the manifest build through the game-thread dispatcher.
 	const TSharedPtr<FJsonObject> Manifest = Registry.BuildManifestJson();
 	const FString Json = SerializeCondensed(Manifest);
 	const TArray<uint8> Framed = FUnrealMcpNdjsonAccumulator::Encode(Json);
@@ -402,7 +493,15 @@ void FUnrealMcpBridgeServer::SendManifestLocked()
 	{
 		int32 JustSent = 0;
 		if (!ClientSocket->Send(Framed.GetData() + TotalSent, Framed.Num() - TotalSent, JustSent) || JustSent <= 0)
+		{
+			UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] manifest send failed mid-frame; dropping connection."));
+			SocketsPendingDestroy.Add(ClientSocket);
+			ClientSocket = nullptr;
+			bClientConnected = false;
+			bHandshakeOk = false;
+			bHeartbeatStop = true;
 			return;
+		}
 		TotalSent += JustSent;
 	}
 }
@@ -417,50 +516,98 @@ void FUnrealMcpBridgeServer::PushManifest()
 
 void FUnrealMcpBridgeServer::CloseActiveConnection()
 {
-	StopHeartbeat();
+	// Signal the heartbeat to stop but NEVER join it here: this method is itself called on the heartbeat
+	// thread (the silent-peer drop path), and joining our own future would self-deadlock — which would
+	// wedge the heartbeat thread permanently and hang the editor on quit. The join happens only in
+	// StartHeartbeat()/Shutdown(), both off the heartbeat thread (and guarded against self-join anyway).
+	bHeartbeatStop = true;
+
 	FScopeLock Lock(&ConnectionMutex);
 	if (ClientSocket != nullptr)
 	{
-		ClientSocket->Close();
-		ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM)->DestroySocket(ClientSocket);
+		// Defer the actual Close+DestroySocket to the reader thread (DrainPendingDestroy): the reader may
+		// be mid-Recv on this very socket on another thread, and freeing it here would be a use-after-free.
+		SocketsPendingDestroy.Add(ClientSocket);
 		ClientSocket = nullptr;
 	}
 	bClientConnected = false;
 	bHandshakeOk = false;
 }
 
+void FUnrealMcpBridgeServer::DrainPendingDestroy()
+{
+	TArray<FSocket*> ToDestroy;
+	{
+		FScopeLock Lock(&ConnectionMutex);
+		if (SocketsPendingDestroy.Num() == 0)
+			return;
+		ToDestroy = MoveTemp(SocketsPendingDestroy);
+		SocketsPendingDestroy.Reset();
+	}
+
+	// Only ever reached on the reader thread (per loop iteration) or in Shutdown() after the reader is
+	// dead — i.e. a single-owner context — so closing+freeing here cannot race a concurrent Recv.
+	ISocketSubsystem* SocketSub = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM);
+	for (FSocket* S : ToDestroy)
+	{
+		if (S != nullptr)
+		{
+			S->Close();
+			SocketSub->DestroySocket(S);
+		}
+	}
+}
+
 void FUnrealMcpBridgeServer::StartHeartbeat()
 {
-	if (HeartbeatFuture.IsValid())
-		return;
+	// Join any prior heartbeat before launching a fresh one. Safe: StartHeartbeat runs on the reader
+	// thread (via HandleHandshake), never on the heartbeat thread, so the join cannot self-deadlock.
+	StopHeartbeat();
 
 	bHeartbeatStop = false;
 	HeartbeatFuture = Async(EAsyncExecution::Thread, [this]()
 	{
+		HeartbeatThreadId.store(FPlatformTLS::GetCurrentThreadId());
+		double LastPingSeconds = FPlatformTime::Seconds();
+
+		// Poll on a short tick (not a full interval sleep) so StopHeartbeat()/connection replacement can
+		// retire this thread promptly instead of blocking a join for up to a whole heartbeat interval.
 		while (!bHeartbeatStop && !bStopRequested)
 		{
-			FPlatformProcess::Sleep(static_cast<float>(HeartbeatIntervalSeconds));
-			if (bHeartbeatStop || bStopRequested || !bClientConnected || !bHandshakeOk)
+			FPlatformProcess::Sleep(0.5f);
+			if (bHeartbeatStop || bStopRequested)
+				break;
+			if (!bClientConnected || !bHandshakeOk)
 				continue;
 
 			const int32 Now = static_cast<int32>(FPlatformTime::Seconds());
 			if (Now - LastActivitySeconds.GetValue() > HeartbeatTimeoutSeconds)
 			{
 				UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] sidecar silent > %ds; dropping connection."), HeartbeatTimeoutSeconds);
-				CloseActiveConnection();
-				return;
+				CloseActiveConnection(); // sets bHeartbeatStop (no self-join) and parks the socket for the reader
+				break;
 			}
 
-			TSharedPtr<FJsonObject> Ping = MakeShared<FJsonObject>();
-			Ping->SetStringField(TEXT("type"), TypePing);
-			SendMessage(Ping);
+			if (FPlatformTime::Seconds() - LastPingSeconds >= static_cast<double>(HeartbeatIntervalSeconds))
+			{
+				LastPingSeconds = FPlatformTime::Seconds();
+				TSharedPtr<FJsonObject> Ping = MakeShared<FJsonObject>();
+				Ping->SetStringField(TEXT("type"), TypePing);
+				SendMessage(Ping);
+			}
 		}
+		HeartbeatThreadId.store(0);
 	});
 }
 
 void FUnrealMcpBridgeServer::StopHeartbeat()
 {
 	bHeartbeatStop = true;
+
+	// Defence in depth against the self-deadlock: never block-join from the heartbeat thread itself.
+	if (HeartbeatThreadId.load() == FPlatformTLS::GetCurrentThreadId())
+		return;
+
 	if (HeartbeatFuture.IsValid())
 	{
 		HeartbeatFuture.Wait();
@@ -485,6 +632,14 @@ void FUnrealMcpBridgeServer::Shutdown()
 
 	StopHeartbeat();
 
+	// Stop accepting (no more connection swaps) and stop the reader (no more socket Recv/destroy) BEFORE we
+	// free any client socket — after this, this thread is the sole owner of the connection state.
+	if (Listener != nullptr)
+	{
+		delete Listener;
+		Listener = nullptr;
+	}
+
 	if (ReaderThread != nullptr)
 	{
 		ReaderThread->Kill(true);
@@ -492,13 +647,16 @@ void FUnrealMcpBridgeServer::Shutdown()
 		ReaderThread = nullptr;
 	}
 
-	if (Listener != nullptr)
-	{
-		delete Listener;
-		Listener = nullptr;
-	}
+	// Drain in-flight dispatched calls before returning (the runtime frees this server, the dispatcher and
+	// the registry right after Shutdown()): each .Next continuation captures `this` and each body captures
+	// the registry, so a call still in flight would fire on freed objects. Cancel cooperatively, then wait
+	// a bounded grace for the in-flight counter to reach zero. (The only core tool today is `ping`, which
+	// drains in microseconds; the bound guarantees we never hang the editor on a misbehaving tool.)
+	CancelAllInFlight();
+	DrainInFlightCalls(FTimespan::FromSeconds(5));
 
 	CloseActiveConnection();
+	DrainPendingDestroy(); // reader is dead — safe to free here
 
 	if (ListenSocket != nullptr)
 	{
@@ -506,4 +664,21 @@ void FUnrealMcpBridgeServer::Shutdown()
 		ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM)->DestroySocket(ListenSocket);
 		ListenSocket = nullptr;
 	}
+}
+
+void FUnrealMcpBridgeServer::CancelAllInFlight()
+{
+	FScopeLock Lock(&CancelMutex);
+	for (TPair<FString, TSharedRef<FThreadSafeBool, ESPMode::ThreadSafe>>& Pair : CancelFlags)
+		Pair.Value.Get() = true;
+}
+
+void FUnrealMcpBridgeServer::DrainInFlightCalls(FTimespan Grace)
+{
+	const double Deadline = FPlatformTime::Seconds() + Grace.GetTotalSeconds();
+	while (InFlightCalls.GetValue() > 0 && FPlatformTime::Seconds() < Deadline)
+		FPlatformProcess::Sleep(0.02f);
+
+	if (InFlightCalls.GetValue() > 0)
+		UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] %d tool call(s) still in flight at shutdown after grace; proceeding."), InFlightCalls.GetValue());
 }

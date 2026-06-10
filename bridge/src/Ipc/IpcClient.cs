@@ -103,7 +103,19 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
             try
             {
                 _logger?.LogInformation("IPC dialing {Host}:{Port} ...", _host, _port);
-                await tcp.ConnectAsync(_host, _port, connCts.Token).ConfigureAwait(false);
+                try
+                {
+                    await tcp.ConnectAsync(_host, _port, connCts.Token).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    // A failed DIAL is a liveness event (plugin not listening yet / port not up), NOT a
+                    // handshake rejection (§6). It must NOT count toward MaxConsecutiveRejections — otherwise
+                    // 3 transient connect failures would be fatal. Just reconnect; the 60 s no-success
+                    // deadline + the parent-process monitor are what bound a truly dead link.
+                    _logger?.LogDebug("IPC dial failed: {Message}", ex.Message);
+                    return false;
+                }
                 tcp.NoDelay = true;
 
                 _tcp = tcp;
@@ -147,8 +159,10 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
             }
             catch (Exception ex)
             {
+                // Post-dial I/O error (e.g. the peer reset the socket mid-handshake). Treat it as liveness
+                // and reconnect WITHOUT counting a rejection — only a socket the plugin closed pre-ack after
+                // a completed dial (the no-ack branch above) is a genuine §1.4 handshake rejection.
                 _logger?.LogWarning("IPC connection attempt failed: {Message}", ex.Message);
-                HandshakeRejected?.Invoke();
                 return false;
             }
             finally
@@ -215,7 +229,9 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
                     break;
                 }
                 case IpcProtocol.Type.Ping:
-                    _ = SendAsync(new HeartbeatMessage { Type = IpcProtocol.Type.Pong }, ct);
+                    // Fire-and-forget pong, but observe the task so a send fault on a dropped link does not
+                    // surface as an unobserved TaskException on the finalizer thread.
+                    _ = SafeAwait(SendAsync(new HeartbeatMessage { Type = IpcProtocol.Type.Pong }, ct));
                     break;
                 case IpcProtocol.Type.Pong:
                     break; // liveness already refreshed by Touch()

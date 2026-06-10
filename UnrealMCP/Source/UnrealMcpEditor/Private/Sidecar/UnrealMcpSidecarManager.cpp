@@ -113,7 +113,9 @@ bool FUnrealMcpSidecarManager::SpawnProcess()
 	}
 
 	// Write exactly one token line; the sidecar reads one line from stdin before dialing (§1.4).
-	FPlatformProcess::WritePipe(WritePipe, Token + TEXT("\n"));
+	// FPlatformProcess::WritePipe(const FString&) appends its own trailing '\n', so we pass the bare token
+	// (adding another would send a spurious blank second line).
+	FPlatformProcess::WritePipe(WritePipe, Token);
 
 	// Close the parent's pipe copies. The child keeps its inherited stdin handle; closing the write end
 	// sends EOF after the single token line (the sidecar only reads one line).

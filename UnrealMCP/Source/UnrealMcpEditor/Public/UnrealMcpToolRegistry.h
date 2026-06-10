@@ -43,14 +43,17 @@ struct UNREALMCPEDITOR_API FUnrealMcpToolCall
 	TSharedPtr<FJsonObject> Arguments;
 
 	/** Cooperative cancellation flag (set by a tool-cancel or a timeout, §4). May be null in tests. */
-	const FThreadSafeBool* CancelRequested = nullptr;
+	// Held by shared ownership so the flag outlives the bridge's CancelFlags map entry: a copy of this
+	// call object (the dispatcher captures one for the game-thread body) keeps the flag alive even after
+	// the response is sent and the map entry is removed — IsCancelled() can never deref freed memory.
+	TSharedPtr<const FThreadSafeBool, ESPMode::ThreadSafe> CancelRequested;
 
 	FUnrealMcpToolCall() : Arguments(MakeShared<FJsonObject>()) {}
 	explicit FUnrealMcpToolCall(const TSharedPtr<FJsonObject>& InArgs)
 		: Arguments(InArgs.IsValid() ? InArgs : MakeShared<FJsonObject>()) {}
 
 	bool Has(const FString& Key) const { return Arguments->HasField(Key); }
-	bool IsCancelled() const { return CancelRequested != nullptr && *CancelRequested; }
+	bool IsCancelled() const { return CancelRequested.IsValid() && *CancelRequested; }
 
 	FString GetString(const FString& Key, const FString& Default = FString()) const;
 	int64 GetInt(const FString& Key, int64 Default = 0) const;
@@ -137,7 +140,10 @@ private:
  * The plugin-owned tool registry (docs/ARCHITECTURE.md §2.2). Holds the compiled tool set, produces
  * the JSON manifest snapshot for the bridge, and dispatches tool-calls by name. A monotonic Revision
  * bumps on every registry change so the sidecar's manifest diff can reason about ordering (§2.2 step 3).
- * Not thread-safe: all mutation + manifest reads happen on the game thread; the bridge marshals there.
+ * Not thread-safe. All mutation happens at startup (core families Register before the bridge accepts), so
+ * the bridge may read BuildManifestJson() directly from its IPC reader thread on handshake without a race.
+ * Any DYNAMIC re-registration (the §2.2 hot-reload path) MUST marshal both the mutation and the manifest
+ * read through the game-thread dispatcher (§4) — the reader thread must never observe a half-mutated set.
  */
 class UNREALMCPEDITOR_API FUnrealMcpToolRegistry
 {

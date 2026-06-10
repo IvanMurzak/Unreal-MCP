@@ -6,7 +6,10 @@
 #include "CoreMinimal.h"
 #include "HAL/Runnable.h"
 #include "HAL/ThreadSafeBool.h"
+#include "HAL/PlatformTLS.h"
 #include "Dom/JsonObject.h"
+
+#include <atomic>
 
 class FUnrealMcpToolRegistry;
 class FUnrealMcpGameThreadDispatcher;
@@ -67,16 +70,27 @@ private:
 	void SendHandshakeAck();
 	void SendManifestLocked();
 	void CloseActiveConnection();
+	void DrainPendingDestroy();    // reader-/shutdown-owned: actually frees sockets parked for teardown
 	void StartHeartbeat();
 	void StopHeartbeat();
+	void CancelAllInFlight();                      // set every in-flight call's cancel flag (shutdown)
+	void DrainInFlightCalls(FTimespan Grace);      // wait (bounded) for in-flight continuations to finish
 
 	FUnrealMcpToolRegistry& Registry;
 	FUnrealMcpGameThreadDispatcher& Dispatcher;
 
 	FTcpListener* Listener = nullptr;
 	FSocket* ListenSocket = nullptr;       // owned by this (FTcpListener uses it but does not delete it)
-	FSocket* ClientSocket = nullptr;       // the accepted sidecar connection (owned by this)
+	FSocket* ClientSocket = nullptr;       // the accepted sidecar connection (owned by this; guarded by ConnectionMutex)
 	FRunnableThread* ReaderThread = nullptr;
+
+	// Sockets parked for teardown. The accept thread / a failed send / a heartbeat drop only PARK the old
+	// socket here (under ConnectionMutex); the actual Close+DestroySocket happens on the reader thread (or
+	// in Shutdown after the reader is dead) via DrainPendingDestroy() — never while another thread might
+	// still be mid-Recv on it. This is the generation-based fix for the second-connection use-after-free.
+	TArray<FSocket*> SocketsPendingDestroy;
+	int32 ConnectionGeneration = 0;        // bumps on every accepted connection (guarded by ConnectionMutex)
+	double ConnectionAcceptedSeconds = 0.0; // wall-clock of the current accept (for the pre-handshake deadline)
 
 	FString Token;
 	FString ProjectPath;
@@ -95,7 +109,9 @@ private:
 	// In-flight cancellation flags, keyed by requestId (§4).
 	FCriticalSection CancelMutex;
 	TMap<FString, TSharedRef<FThreadSafeBool, ESPMode::ThreadSafe>> CancelFlags;
+	FThreadSafeCounter InFlightCalls;      // dispatched calls whose continuation has not yet completed
 
 	TFuture<void> HeartbeatFuture;
 	FThreadSafeBool bHeartbeatStop = false;
+	std::atomic<uint32> HeartbeatThreadId{ 0 }; // id of the live heartbeat thread, for the self-join guard
 };

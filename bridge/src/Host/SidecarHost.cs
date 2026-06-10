@@ -9,6 +9,7 @@
 */
 
 using System;
+using System.Threading;
 using com.IvanMurzak.McpPlugin;
 using com.IvanMurzak.McpPlugin.Common;
 using com.IvanMurzak.ReflectorNet;
@@ -49,6 +50,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         private IMcpPlugin? _plugin;
         private ManifestRegistrar? _registrar;
         private Reflector? _reflector;
+        private int _signalRConnectStarted;
 
         public SidecarHost(
             IpcClient ipc,
@@ -129,8 +131,13 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             _logger?.LogInformation("Handshake accepted (plugin {PluginVersion}, engine {Engine}); connecting SignalR to {Host}.",
                 ack.PluginVersion, ack.EngineVersion, _config.Host);
 
-            // Fire-and-forget connect; KeepConnected drives reconnection inside the client.
-            _ = ConnectSignalRAsync();
+            // Connect SignalR only on the FIRST accepted handshake. A re-dial's ack (after an IPC drop and
+            // reconnect) must NOT kick a second connect — KeepConnected already drives SignalR reconnection
+            // inside the client, so connecting again would spin up a duplicate connection.
+            if (Interlocked.CompareExchange(ref _signalRConnectStarted, 1, 0) == 0)
+                _ = ConnectSignalRAsync();
+            else
+                _logger?.LogDebug("Handshake re-accepted; SignalR connect already initiated (KeepConnected handles reconnection).");
         }
 
         private async System.Threading.Tasks.Task ConnectSignalRAsync()

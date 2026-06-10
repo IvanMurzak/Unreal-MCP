@@ -89,6 +89,50 @@ void FUnrealMcpDispatcherSpec::Define()
 				Done.Execute();
 			});
 		});
+
+		// The single-completion guard (§4) must hold even when the slow body finishes AFTER the timeout has
+		// already delivered the error — the late body value must never overwrite the timeout result, and the
+		// second Complete() must be a no-op (no crash on the shared promise/event).
+		LatentIt("keeps the timeout result when the body completes late (single-completion guard)", FTimespan::FromSeconds(15), [this](const FDoneDelegate& Done)
+		{
+			Async(EAsyncExecution::Thread, [this, Done]()
+			{
+				FUnrealMcpGameThreadDispatcher Dispatcher;
+				TFuture<FUnrealMcpToolResult> Future = Dispatcher.Dispatch(
+					FUnrealMcpToolCall(),
+					[](const FUnrealMcpToolCall&)
+					{
+						FPlatformProcess::Sleep(1.0f); // finishes well after the 100 ms timeout
+						return FUnrealMcpToolResult::Success(TEXT("late-body-value"));
+					},
+					FTimespan::FromMilliseconds(100));
+
+				const FUnrealMcpToolResult Result = Future.Get();
+				TestFalse(TEXT("timed out -> error"), Result.bSuccess);
+				TestNotEqual(TEXT("late body did not overwrite the timeout result"), Result.Message, FString(TEXT("late-body-value")));
+
+				// Give the late body time to run and (attempt to) complete the promise a second time; the
+				// guard must absorb it without altering the already-delivered result or faulting.
+				FPlatformProcess::Sleep(1.5f);
+				Done.Execute();
+			});
+		});
+
+		// HandleToolCancel flips the shared cancel flag that the bridge stores; assert FUnrealMcpToolCall
+		// observes that flip (and stays false with no flag / a clear flag).
+		It("reflects the shared cancel flag through IsCancelled()", [this]()
+		{
+			FUnrealMcpToolCall NoFlagCall;
+			TestFalse(TEXT("no flag -> not cancelled"), NoFlagCall.IsCancelled());
+
+			TSharedRef<FThreadSafeBool, ESPMode::ThreadSafe> Flag = MakeShared<FThreadSafeBool, ESPMode::ThreadSafe>(false);
+			FUnrealMcpToolCall Call;
+			Call.CancelRequested = Flag;
+			TestFalse(TEXT("flag clear -> not cancelled"), Call.IsCancelled());
+
+			Flag.Get() = true;
+			TestTrue(TEXT("flag set -> cancelled"), Call.IsCancelled());
+		});
 	});
 }
 
