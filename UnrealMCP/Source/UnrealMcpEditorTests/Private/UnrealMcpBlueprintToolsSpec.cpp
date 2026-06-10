@@ -35,13 +35,15 @@ BEGIN_DEFINE_SPEC(FUnrealMcpBlueprintToolsSpec, "UnrealMcp.Tools.Blueprint",
 	static TSharedPtr<FJsonObject> Args() { return MakeShared<FJsonObject>(); }
 
 	// Create a uniquely-named Actor Blueprint and return its object path (package + '.' + short name).
-	static FString CreateBlueprint(const FUnrealMcpToolRegistry& Registry)
+	// Non-static so it can assert its own precondition: a discarded blueprint-create failure would
+	// otherwise surface as a confusing "Blueprint not found" in whichever downstream tool call runs first.
+	FString CreateBlueprint(const FUnrealMcpToolRegistry& Registry)
 	{
 		const FString PackagePath = FString::Printf(TEXT("/Game/UnrealMcpTests/BP_%s"), *FGuid::NewGuid().ToString(EGuidFormats::Short));
 		TSharedPtr<FJsonObject> Create = Args();
 		Create->SetStringField(TEXT("path"), PackagePath);
 		Create->SetStringField(TEXT("parentClass"), TEXT("/Script/Engine.Actor"));
-		Run(Registry, TEXT("blueprint-create"), Create);
+		TestTrue(TEXT("CreateBlueprint helper: blueprint-create succeeded"), Run(Registry, TEXT("blueprint-create"), Create).bSuccess);
 		return PackagePath + TEXT(".") + FPackageName::GetShortName(PackagePath);
 	}
 

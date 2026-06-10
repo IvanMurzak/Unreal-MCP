@@ -52,9 +52,11 @@ namespace
 			return nullptr;
 		if (UClass* Found = UClass::TryFindTypeSlow<UClass>(Path))
 			return Found;
-		if (UClass* Loaded = LoadObject<UClass>(nullptr, *Path))
+		// LOAD_NoWarn|LOAD_Quiet: these are speculative probes run on every tool call with a fresh path;
+		// a miss is expected and must not spam the editor log with LoadPackage failure warnings.
+		if (UClass* Loaded = LoadObject<UClass>(nullptr, *Path, nullptr, LOAD_NoWarn | LOAD_Quiet))
 			return Loaded;
-		if (UBlueprint* BP = LoadObject<UBlueprint>(nullptr, *Path))
+		if (UBlueprint* BP = LoadObject<UBlueprint>(nullptr, *Path, nullptr, LOAD_NoWarn | LOAD_Quiet))
 			return BP->GeneratedClass;
 		return nullptr;
 	}
@@ -67,7 +69,9 @@ namespace
 			return nullptr;
 		if (UBlueprint* Found = FindObject<UBlueprint>(nullptr, *Path))
 			return Found;
-		return LoadObject<UBlueprint>(nullptr, *Path);
+		// LOAD_NoWarn|LOAD_Quiet: a missing asset is an expected outcome here (the caller turns it into a
+		// structured "not found" error); don't let the speculative load warn-spam the editor log.
+		return LoadObject<UBlueprint>(nullptr, *Path, nullptr, LOAD_NoWarn | LOAD_Quiet);
 	}
 
 	/** Reject names that are empty, too long, or contain invalid characters, using the same validator the
@@ -133,7 +137,7 @@ namespace
 			// Object / class / struct path: resolve to a UClass (object ref) or a UScriptStruct.
 			if (UClass* Class = ResolveClass(Type))
 				Set(UEdGraphSchema_K2::PC_Object, NAME_None, Class);
-			else if (UScriptStruct* Struct = LoadObject<UScriptStruct>(nullptr, *Type))
+			else if (UScriptStruct* Struct = LoadObject<UScriptStruct>(nullptr, *Type, nullptr, LOAD_NoWarn | LOAD_Quiet))
 				Set(UEdGraphSchema_K2::PC_Struct, NAME_None, Struct);
 			else
 			{
@@ -234,7 +238,10 @@ namespace UnrealMcpBlueprintTools
 					return FUnrealMcpToolResult::Error(FString::Printf(TEXT("invalid Blueprint path '%s'."), *Path));
 
 				const FString ObjectPath = PackageName + TEXT(".") + AssetName;
-				if (FindObject<UBlueprint>(nullptr, *ObjectPath) != nullptr || LoadObject<UBlueprint>(nullptr, *ObjectPath) != nullptr)
+				// LOAD_NoWarn|LOAD_Quiet: this is the expected-miss path (we WANT no asset here); without it
+				// the probe warn-spams the editor log on every successful create.
+				if (FindObject<UBlueprint>(nullptr, *ObjectPath) != nullptr
+					|| LoadObject<UBlueprint>(nullptr, *ObjectPath, nullptr, LOAD_NoWarn | LOAD_Quiet) != nullptr)
 					return FUnrealMcpToolResult::Error(FString::Printf(TEXT("a Blueprint already exists at '%s'."), *ObjectPath));
 
 				UPackage* Package = CreatePackage(*PackageName);
@@ -245,7 +252,13 @@ namespace UnrealMcpBlueprintTools
 					ParentClass, Package, FName(*AssetName), BPTYPE_Normal,
 					UBlueprint::StaticClass(), UBlueprintGeneratedClass::StaticClass(), FName(TEXT("UnrealMcpBlueprintCreate")));
 				if (!Blueprint)
+				{
+					// CreateBlueprint failed after the package was minted; drop the now-empty package so the
+					// path isn't left half-claimed in memory (FindObject<UBlueprint> won't match it, so retry
+					// would otherwise be blocked only by the stale package) for the rest of the session.
+					Package->MarkAsGarbage();
 					return FUnrealMcpToolResult::Error(TEXT("FKismetEditorUtilities::CreateBlueprint returned null."));
+				}
 
 				FAssetRegistryModule::AssetCreated(Blueprint);
 				Package->MarkPackageDirty();
@@ -340,6 +353,12 @@ namespace UnrealMcpBlueprintTools
 						{
 							TSharedPtr<FJsonObject> E = MakeShared<FJsonObject>();
 							E->SetStringField(TEXT("name"), EventNode->EventReference.GetMemberName().ToString());
+							// Fresh Actor Blueprints are pre-seeded with DISABLED ghost event nodes
+							// (ReceiveBeginPlay/ReceiveTick/...). Emit 'enabled' so the read surface matches
+							// blueprint-add-event's write semantics: a disabled ghost is inert (the event does NOT
+							// fire) until add-event enables it. Without this flag an agent reads the ghost names and
+							// wrongly concludes the events already run, skipping the add and shipping a dead BeginPlay.
+							E->SetBoolField(TEXT("enabled"), EventNode->IsNodeEnabled());
 							Events.Add(MakeShared<FJsonValueObject>(E));
 						}
 					}
@@ -404,6 +423,14 @@ namespace UnrealMcpBlueprintTools
 					return FUnrealMcpToolResult::Error(NameError);
 				if (Blueprint->SimpleConstructionScript->FindSCSNode(FName(*CompName)) != nullptr)
 					return FUnrealMcpToolResult::Error(FString::Printf(TEXT("a component named '%s' already exists."), *CompName));
+				// SCS component names, member-variable names, and inherited parent properties all share the
+				// generated class's property namespace, so a component named after an existing variable or an
+				// inherited property collides — but only fails later at blueprint-compile. Reject up front with
+				// the same structured-error style, since FindSCSNode alone covers only the component namespace.
+				if (FBlueprintEditorUtils::FindNewVariableIndex(Blueprint, FName(*CompName)) != INDEX_NONE)
+					return FUnrealMcpToolResult::Error(FString::Printf(TEXT("a variable named '%s' already exists, so a component cannot reuse that name."), *CompName));
+				if (Blueprint->ParentClass && FindFProperty<FProperty>(Blueprint->ParentClass, FName(*CompName)) != nullptr)
+					return FUnrealMcpToolResult::Error(FString::Printf(TEXT("'%s' is already a property on parent class '%s', so a component cannot reuse that name."), *CompName, *Blueprint->ParentClass->GetName()));
 
 				const FString ParentName = Call.GetString(TEXT("parentComponent"));
 				USCS_Node* ParentNode = ParentName.IsEmpty() ? nullptr : Blueprint->SimpleConstructionScript->FindSCSNode(FName(*ParentName));
@@ -492,6 +519,10 @@ namespace UnrealMcpBlueprintTools
 					return FUnrealMcpToolResult::Error(NameError);
 				if (FBlueprintEditorUtils::FindNewVariableIndex(Blueprint, FName(*VarName)) != INDEX_NONE)
 					return FUnrealMcpToolResult::Error(FString::Printf(TEXT("a variable named '%s' already exists."), *VarName));
+				// Symmetric with blueprint-add-component: a variable named after an existing SCS component
+				// collides in the shared generated-class property namespace and would only fail at compile.
+				if (Blueprint->SimpleConstructionScript && Blueprint->SimpleConstructionScript->FindSCSNode(FName(*VarName)) != nullptr)
+					return FUnrealMcpToolResult::Error(FString::Printf(TEXT("a component named '%s' already exists, so a variable cannot reuse that name."), *VarName));
 
 				FEdGraphPinType PinType;
 				FString PinError;
@@ -594,8 +625,14 @@ namespace UnrealMcpBlueprintTools
 
 				const FString Value = Call.GetString(TEXT("value"));
 				void* ValuePtr = Prop->ContainerPtrToValuePtr<void>(CDO);
+				// Bracket the CDO write with Pre/PostEditChange so any open Details panel or property-change
+				// observers refresh — ImportText_Direct alone mutates the memory silently. PostEditChange runs
+				// on both paths because a parse failure can still leave the value partially written.
+				CDO->PreEditChange(Prop);
 				FStringOutputDevice ImportError;
 				const TCHAR* Result = Prop->ImportText_Direct(*Value, ValuePtr, CDO, PPF_None, &ImportError);
+				FPropertyChangedEvent ChangeEvent(Prop);
+				CDO->PostEditChangeProperty(ChangeEvent);
 				if (Result == nullptr || !ImportError.IsEmpty())
 					return FUnrealMcpToolResult::Error(FString::Printf(TEXT("failed to parse value '%s' for property '%s': %s"), *Value, *PropName, *ImportError));
 
