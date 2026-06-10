@@ -1,0 +1,28 @@
+{
+	"InstallationList": [
+		{
+			"InstallLocation": "C:\\Program Files\\Epic Games\\UE_5.7",
+			"NamespaceId": "ue",
+			"ItemId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			"ArtifactId": "UE_5.7",
+			"AppVersion": "5.7.4-40574608+++UE5+Release-5.7",
+			"AppName": "UE_5.7"
+		},
+		{
+			"InstallLocation": "D:\\Epic\\UE_5.5",
+			"NamespaceId": "ue",
+			"ItemId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+			"ArtifactId": "UE_5.5",
+			"AppVersion": "5.5.4-12345678+++UE5+Release-5.5",
+			"AppName": "UE_5.5"
+		},
+		{
+			"InstallLocation": "C:\\Marketplace\\SomeContentPack",
+			"NamespaceId": "ue",
+			"ItemId": "cccccccccccccccccccccccccccccccc",
+			"ArtifactId": "SomeContentPack",
+			"AppVersion": "1.0.0",
+			"AppName": "SomeContentPack"
+		}
+	]
+}
