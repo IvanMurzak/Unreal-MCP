@@ -6,8 +6,26 @@
 #include "CoreMinimal.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/Paths.h"
+#include "Misc/OutputDevice.h"
+#include "Misc/OutputDeviceRedirector.h"
 #include "HAL/FileManager.h"
 #include "Config/UnrealMcpConfig.h"
+#include "UnrealMcpLog.h"
+
+namespace
+{
+	// Captures everything routed through GLog while installed, so a test can assert what reached the log.
+	class FUnrealMcpLogCapture : public FOutputDevice
+	{
+	public:
+		FString Captured;
+		virtual void Serialize(const TCHAR* Message, ELogVerbosity::Type, const FName&) override
+		{
+			Captured += Message;
+			Captured += TEXT("\n");
+		}
+	};
+}
 
 /**
  * Config store specs (docs/ARCHITECTURE.md §8): the .env parser rules, the process-env > .env > file >
@@ -234,6 +252,33 @@ void FUnrealMcpConfigSpec::Define()
 			TestNotEqual(TEXT("masked != raw"), Masked, Secret);
 			TestFalse(TEXT("masked does not contain the secret"), Masked.Contains(Secret));
 			TestEqual(TEXT("unset marker"), FUnrealMcpConfig::MaskSecret(TEXT("")), FString(TEXT("<unset>")));
+		});
+
+		It("a representative resolved-config log line never emits the raw token", [this]()
+		{
+			const FString RawToken = TEXT("super-secret-bearer-value");
+
+			// Resolve a Cloud-mode config so ResolveEffectiveToken() returns the raw bearer.
+			FUnrealMcpConfig Config;
+			Config.ApplyOverrides({}, MakeEnvReader({
+				{ TEXT("UNREAL_MCP_CONNECTION_MODE"), TEXT("Cloud") },
+				{ TEXT("UNREAL_MCP_TOKEN"), RawToken },
+			}));
+			TestEqual(TEXT("token resolved for the test"), Config.ResolveEffectiveToken(), RawToken);
+
+			// Emit the SAME masked-config log shape the runtime uses, captured through GLog.
+			FUnrealMcpLogCapture Capture;
+			GLog->AddOutputDevice(&Capture);
+			UE_LOG(LogUnrealMcp, Log,
+				TEXT("[Unreal-MCP] connection config resolved (mode=%s, host=%s, cloudUrl=%s, token=%s, keepConnected=%s)."),
+				TEXT("Cloud"), *Config.ResolveCustomHost(), *Config.ResolveCloudBaseUrl(),
+				*FUnrealMcpConfig::MaskSecret(Config.ResolveEffectiveToken()),
+				Config.bKeepConnected ? TEXT("true") : TEXT("false"));
+			GLog->Flush();
+			GLog->RemoveOutputDevice(&Capture);
+
+			TestTrue(TEXT("masked marker reached the log"), Capture.Captured.Contains(TEXT("***")));
+			TestFalse(TEXT("raw token never reached the log"), Capture.Captured.Contains(RawToken));
 		});
 	});
 }

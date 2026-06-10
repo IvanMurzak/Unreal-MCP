@@ -158,10 +158,15 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             if (config == null)
                 return;
 
-            var mode = config["mode"]?.GetValue<string>();
-            var host = config["host"]?.GetValue<string>();
-            var cloudUrl = config["cloudUrl"]?.GetValue<string>();
-            var token = config["token"]?.GetValue<string>();
+            // Read each field defensively: a non-string JSON node (e.g. a number/bool from a malformed
+            // message) must not throw out of Dispatch and tear down the read loop — treat it as absent.
+            static string? ReadString(JsonObject config, string key) =>
+                config[key] is JsonValue v && v.TryGetValue<string>(out var s) ? s : null;
+
+            var mode = ReadString(config, "mode");
+            var host = ReadString(config, "host");
+            var cloudUrl = ReadString(config, "cloudUrl");
+            var token = ReadString(config, "token");
 
             // Mode-aware host selection: Cloud connects to cloudUrl, Custom to host (§8). Fall back to the
             // other field only when the mode's own field is blank, so a partial message still resolves a host.

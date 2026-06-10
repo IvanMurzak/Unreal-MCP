@@ -47,6 +47,22 @@ namespace
 		FJsonSerializer::Serialize(Object.ToSharedRef(), Writer);
 		return Out;
 	}
+
+	// Deep-copy a JSON object via a serialize/parse round-trip so the stored EffectiveConfig is fully
+	// independent of the caller's object (the reader thread serializes it without holding the caller still).
+	// Falls back to the original pointer if the round-trip fails (a flat config object never does).
+	TSharedPtr<FJsonObject> CloneJsonObject(const TSharedPtr<FJsonObject>& In)
+	{
+		if (!In.IsValid())
+			return nullptr;
+
+		const FString Serialized = SerializeCondensed(In);
+		TSharedPtr<FJsonObject> Out;
+		const TSharedRef<TJsonReader<TCHAR>> Reader = TJsonReaderFactory<TCHAR>::Create(Serialized);
+		if (FJsonSerializer::Deserialize(Reader, Out) && Out.IsValid())
+			return Out;
+		return In;
+	}
 }
 
 FUnrealMcpBridgeServer::FUnrealMcpBridgeServer(FUnrealMcpToolRegistry& InRegistry, FUnrealMcpGameThreadDispatcher& InDispatcher)
@@ -89,7 +105,7 @@ int32 FUnrealMcpBridgeServer::Start(const FString& InToken, const FString& InPro
 	EngineVersion = InEngineVersion;
 	{
 		FScopeLock Lock(&ConfigMutex);
-		EffectiveConfig = InEffectiveConfig;
+		EffectiveConfig = CloneJsonObject(InEffectiveConfig);
 	}
 
 	const int32 BasePort = ComputeDeterministicPort(ProjectPath);
@@ -630,7 +646,7 @@ void FUnrealMcpBridgeServer::SetEffectiveConfig(const TSharedPtr<FJsonObject>& I
 {
 	{
 		FScopeLock Lock(&ConfigMutex);
-		EffectiveConfig = InEffectiveConfig;
+		EffectiveConfig = CloneJsonObject(InEffectiveConfig);
 	}
 	PushConfig(); // "on change" (§8) — no-op when no sidecar is connected
 }

@@ -74,10 +74,13 @@ FString FUnrealMcpConfig::DefaultEnvFilePath()
 
 FUnrealMcpConfig FUnrealMcpConfig::LoadAndResolve()
 {
+	return LoadAndResolve(LoadEnvFile(DefaultEnvFilePath()));
+}
+
+FUnrealMcpConfig FUnrealMcpConfig::LoadAndResolve(const TMap<FString, FString>& DotEnv)
+{
 	FUnrealMcpConfig Config;
 	Config.LoadFromFile(DefaultConfigFilePath());
-
-	const TMap<FString, FString> DotEnv = LoadEnvFile(DefaultEnvFilePath());
 	Config.ApplyOverrides(DotEnv, [](const FString& Name, FString& Out) -> bool
 	{
 		const FString Value = FPlatformMisc::GetEnvironmentVariable(*Name);
@@ -260,11 +263,12 @@ void FUnrealMcpConfig::ApplyOne(const FString& EnvName, const FString& Source)
 	}
 	else if (EnvName == EnvTools)
 	{
-		// Accept comma- or semicolon-separated tool ids.
+		// Accept comma- or semicolon-separated tool ids: normalize ';' → ',' first, then split once so a
+		// mixed/single separator can never corrupt an id (e.g. "a," must yield ["a"], not ["a,"]).
+		FString Normalized = Source;
+		Normalized.ReplaceInline(TEXT(";"), TEXT(","));
 		TArray<FString> Parts;
-		Source.ParseIntoArray(Parts, TEXT(","), true);
-		if (Parts.Num() == 1)
-			Source.ParseIntoArray(Parts, TEXT(";"), true);
+		Normalized.ParseIntoArray(Parts, TEXT(","), true);
 
 		EnabledTools.Reset();
 		for (FString& Part : Parts)
@@ -439,11 +443,16 @@ TMap<FString, FString> FUnrealMcpConfig::LoadEnvFile(const FString& Path)
 
 void FUnrealMcpConfig::ExportDotEnvToProcessEnv(const TMap<FString, FString>& DotEnv)
 {
-	for (const TPair<FString, FString>& Pair : DotEnv)
+	// Export ONLY the bridge-path key into the process env. That is the single var the editor process itself
+	// must read out-of-band (FUnrealMcpSidecarManager::ResolveBridgeBinaryPath, §6), and it is not a secret.
+	// HOST/CLOUD_URL/TOKEN are deliberately NOT exported: the sidecar receives them via the authoritative
+	// §1.3 `config` push, so exporting them here would only (a) leak the bearer token into EVERY child the
+	// editor spawns and (b) pin a now-stale .env value at process-env precedence on any later re-resolve.
+	if (const FString* BridgePath = DotEnv.Find(EnvBridgePath))
 	{
 		// Only set when the process env is currently empty for this key — process env wins over .env (§8).
-		if (FPlatformMisc::GetEnvironmentVariable(*Pair.Key).IsEmpty() && !Pair.Value.IsEmpty())
-			FPlatformMisc::SetEnvironmentVar(*Pair.Key, *Pair.Value);
+		if (FPlatformMisc::GetEnvironmentVariable(EnvBridgePath).IsEmpty() && !BridgePath->IsEmpty())
+			FPlatformMisc::SetEnvironmentVar(EnvBridgePath, **BridgePath);
 	}
 }
 

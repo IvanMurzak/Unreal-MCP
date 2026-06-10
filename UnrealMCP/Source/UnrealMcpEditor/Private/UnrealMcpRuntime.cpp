@@ -35,25 +35,16 @@ void FUnrealMcpRuntime::Startup()
 	if (TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("UnrealMCP")))
 		PluginVersion = Plugin->GetDescriptor().VersionName;
 
-	// §8 connection config: parse the project-root .env, export recognized keys into the process env
-	// (only-if-absent, so process env still wins) so a GUI-launched editor's .env can feed the dev
-	// UNREAL_MCP_BRIDGE_PATH and the spawned sidecar's HOST/CLOUD_URL/TOKEN env fallback. Then load the
-	// persisted on-disk config and apply env/.env overrides with full precedence (process env > .env >
-	// file > defaults). The resolved EFFECTIVE connection config is handed to the bridge for the §1.3
-	// `config` push — the sidecar never re-resolves it (§1.5).
+	// §8 connection config: parse the project-root .env once, export UNREAL_MCP_BRIDGE_PATH into the process
+	// env (only-if-absent, so process env still wins) so a GUI-launched editor's .env can feed the dev
+	// sidecar binary path. Then resolve the config (process env > .env > file > defaults) from that same
+	// parsed .env. The resolved EFFECTIVE connection config (incl. host/cloudUrl/token) is handed to the
+	// bridge for the §1.3 `config` push — the sidecar never re-resolves it (§1.5), so HOST/CLOUD_URL/TOKEN
+	// are deliberately NOT exported to the process env.
 	const TMap<FString, FString> DotEnv = FUnrealMcpConfig::LoadEnvFile(FUnrealMcpConfig::DefaultEnvFilePath());
 	FUnrealMcpConfig::ExportDotEnvToProcessEnv(DotEnv);
 
-	FUnrealMcpConfig Config;
-	Config.LoadFromFile(FUnrealMcpConfig::DefaultConfigFilePath());
-	Config.ApplyOverrides(DotEnv, [](const FString& Name, FString& Out) -> bool
-	{
-		const FString Value = FPlatformMisc::GetEnvironmentVariable(*Name);
-		if (Value.IsEmpty())
-			return false;
-		Out = Value;
-		return true;
-	});
+	const FUnrealMcpConfig Config = FUnrealMcpConfig::LoadAndResolve(DotEnv);
 
 	const TSharedPtr<FJsonObject> EffectiveConfig = Config.BuildEffectiveConnectionConfig();
 	// Token is NEVER logged at any level (§8) — log the shape with the bearer masked.

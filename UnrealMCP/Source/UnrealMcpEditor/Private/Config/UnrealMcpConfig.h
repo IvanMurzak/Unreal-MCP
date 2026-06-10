@@ -97,6 +97,12 @@ public:
 	static UNREALMCPEDITOR_API FUnrealMcpConfig LoadAndResolve();
 
 	/**
+	 * Same as LoadAndResolve() but with an already-parsed @p DotEnv map, so a caller that needs the parsed
+	 * .env for another purpose (e.g. ExportDotEnvToProcessEnv) does not parse the file twice.
+	 */
+	static UNREALMCPEDITOR_API FUnrealMcpConfig LoadAndResolve(const TMap<FString, FString>& DotEnv);
+
+	/**
 	 * Load the persisted config JSON at @p Path into the backing fields, and snapshot the result as the
 	 * disk baseline (used by Save() to round-trip env/.env overrides away). A missing/empty/corrupt file
 	 * is the common first-run case — fields keep their defaults and the baseline is the default snapshot.
@@ -157,13 +163,12 @@ public:
 	static UNREALMCPEDITOR_API TMap<FString, FString> LoadEnvFile(const FString& Path);
 
 	/**
-	 * Export recognized .env values into the editor's process environment, but ONLY for keys not already set
-	 * in the process env (so the §8 precedence "process env > .env" is preserved). This is the bridge for the
-	 * env-consuming code OUTSIDE this config store: UNREAL_MCP_BRIDGE_PATH (FUnrealMcpSidecarManager resolves
-	 * the binary from it, §6) and the spawned sidecar child's HOST/CLOUD_URL/TOKEN env fallback — both of
-	 * which a GUI-launched editor would otherwise never see from a project-root .env. The connection config
-	 * the sidecar actually uses still flows via the §1.3 `config` message; this only feeds the binary-path /
-	 * child-inheritance paths.
+	 * Export the UNREAL_MCP_BRIDGE_PATH .env value into the editor's process environment (and ONLY that key),
+	 * set-if-absent so the §8 precedence "process env > .env" is preserved. That is the single var the editor
+	 * process itself must read out-of-band (FUnrealMcpSidecarManager resolves the sidecar binary from it, §6),
+	 * and it is not a secret. HOST/CLOUD_URL/TOKEN are intentionally NOT exported: the sidecar gets them via
+	 * the authoritative §1.3 `config` push, so process-env export would only leak the bearer token into every
+	 * editor child and pin stale .env values at process-env precedence on a later re-resolve.
 	 */
 	static UNREALMCPEDITOR_API void ExportDotEnvToProcessEnv(const TMap<FString, FString>& DotEnv);
 
