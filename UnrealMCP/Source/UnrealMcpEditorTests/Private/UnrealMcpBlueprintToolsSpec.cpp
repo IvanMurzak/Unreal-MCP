@@ -109,14 +109,10 @@ void FUnrealMcpBlueprintToolsSpec::Define()
 			FUnrealMcpToolRegistry Registry;
 			UnrealMcpBlueprintTools::Register(Registry);
 
-			const FString Path = FString::Printf(TEXT("/Game/UnrealMcpTests/BP_BadType_%s"), *FGuid::NewGuid().ToString(EGuidFormats::Short));
-			TSharedPtr<FJsonObject> Create = Args();
-			Create->SetStringField(TEXT("path"), Path);
-			Create->SetStringField(TEXT("parentClass"), TEXT("/Script/Engine.Actor"));
-			TestTrue(TEXT("created"), Run(Registry, TEXT("blueprint-create"), Create).bSuccess);
+			const FString ObjectPath = CreateBlueprint(Registry);
 
 			TSharedPtr<FJsonObject> AddVar = Args();
-			AddVar->SetStringField(TEXT("path"), Path + TEXT(".") + FPackageName::GetShortName(Path));
+			AddVar->SetStringField(TEXT("path"), ObjectPath);
 			AddVar->SetStringField(TEXT("name"), TEXT("Bogus"));
 			AddVar->SetStringField(TEXT("type"), TEXT("/Game/Nope.NotAType"));
 			TestFalse(TEXT("rejected unresolvable type"), Run(Registry, TEXT("blueprint-add-variable"), AddVar).bSuccess);

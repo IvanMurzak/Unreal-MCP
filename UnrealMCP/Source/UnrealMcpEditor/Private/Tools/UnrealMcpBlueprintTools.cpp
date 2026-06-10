@@ -238,11 +238,15 @@ namespace UnrealMcpBlueprintTools
 					return FUnrealMcpToolResult::Error(FString::Printf(TEXT("invalid Blueprint path '%s'."), *Path));
 
 				const FString ObjectPath = PackageName + TEXT(".") + AssetName;
-				// LOAD_NoWarn|LOAD_Quiet: this is the expected-miss path (we WANT no asset here); without it
-				// the probe warn-spams the editor log on every successful create.
-				if (FindObject<UBlueprint>(nullptr, *ObjectPath) != nullptr
-					|| LoadObject<UBlueprint>(nullptr, *ObjectPath, nullptr, LOAD_NoWarn | LOAD_Quiet) != nullptr)
-					return FUnrealMcpToolResult::Error(FString::Printf(TEXT("a Blueprint already exists at '%s'."), *ObjectPath));
+				// Probe for ANY UObject, not just UBlueprint: a non-Blueprint asset (e.g. an on-disk UStaticMesh)
+				// at this path slips past a UBlueprint-scoped probe (class mismatch -> null), CreatePackage then
+				// returns the existing package, and CreateBlueprint -> NewObject<UBlueprint> hits the engine's
+				// fatal "same fully qualified name, different class" allocation check instead of a structured error.
+				// LOAD_NoWarn|LOAD_Quiet: this is the expected-miss path (we WANT no asset here); without it the
+				// probe warn-spams the editor log on every successful create.
+				if (FindObject<UObject>(nullptr, *ObjectPath) != nullptr
+					|| LoadObject<UObject>(nullptr, *ObjectPath, nullptr, LOAD_NoWarn | LOAD_Quiet) != nullptr)
+					return FUnrealMcpToolResult::Error(FString::Printf(TEXT("an asset already exists at '%s'."), *ObjectPath));
 
 				UPackage* Package = CreatePackage(*PackageName);
 				if (!Package)
@@ -566,6 +570,21 @@ namespace UnrealMcpBlueprintTools
 					return FUnrealMcpToolResult::Error(TEXT("provide at least one of 'newName' or 'newType'."));
 
 				FName EffectiveName = FName(*VarName);
+
+				// Validate the rename BEFORE any mutation: the retype below (ChangeMemberVariableType) commits
+				// immediately, so if a colliding/ill-formed newName were checked afterwards the tool would report
+				// failure while the type change had already landed — the agent's model and the asset disagree.
+				// RenameMemberVariable is void and does no validity/collision check of its own — renaming onto an
+				// existing name silently produces duplicate member names that break a later compile.
+				if (!NewName.IsEmpty())
+				{
+					FString NameError;
+					if (!IsNameWellFormed(Blueprint, NewName, NameError))
+						return FUnrealMcpToolResult::Error(NameError);
+					if (FBlueprintEditorUtils::FindNewVariableIndex(Blueprint, FName(*NewName)) != INDEX_NONE)
+						return FUnrealMcpToolResult::Error(FString::Printf(TEXT("cannot rename to '%s': a variable with that name already exists."), *NewName));
+				}
+
 				if (!NewType.IsEmpty())
 				{
 					FEdGraphPinType PinType;
@@ -576,13 +595,6 @@ namespace UnrealMcpBlueprintTools
 				}
 				if (!NewName.IsEmpty())
 				{
-					// RenameMemberVariable is void and does no validity/collision check — renaming onto an
-					// existing name silently produces duplicate member names that break a later compile.
-					FString NameError;
-					if (!IsNameWellFormed(Blueprint, NewName, NameError))
-						return FUnrealMcpToolResult::Error(NameError);
-					if (FBlueprintEditorUtils::FindNewVariableIndex(Blueprint, FName(*NewName)) != INDEX_NONE)
-						return FUnrealMcpToolResult::Error(FString::Printf(TEXT("cannot rename to '%s': a variable with that name already exists."), *NewName));
 					FBlueprintEditorUtils::RenameMemberVariable(Blueprint, EffectiveName, FName(*NewName));
 					EffectiveName = FName(*NewName);
 				}
@@ -673,6 +685,11 @@ namespace UnrealMcpBlueprintTools
 				for (const UEdGraph* Graph : Blueprint->FunctionGraphs)
 					if (Graph && Graph->GetFName() == FName(*FuncName))
 						return FUnrealMcpToolResult::Error(FString::Printf(TEXT("a function named '%s' already exists."), *FuncName));
+				// CreateNewGraph resolves an outer-name clash by renaming the EXISTING object aside, so a name
+				// colliding with the ubergraph (EventGraph) or any other graph object outered to the Blueprint
+				// would silently hijack it and report success. Reject up front whenever the name is already taken.
+				if (FindObject<UObject>(Blueprint, *FuncName) != nullptr)
+					return FUnrealMcpToolResult::Error(FString::Printf(TEXT("a graph or object named '%s' already exists on this Blueprint."), *FuncName));
 
 				UEdGraph* NewGraph = FBlueprintEditorUtils::CreateNewGraph(
 					Blueprint, FName(*FuncName), UEdGraph::StaticClass(), UEdGraphSchema_K2::StaticClass());
