@@ -3,32 +3,39 @@
 
 #include "Modules/ModuleManager.h"
 #include "UnrealMcpLog.h"
+#include "UnrealMcpRuntime.h"
 
 /**
- * Editor module for the Unreal-MCP plugin.
- *
- * Scaffold stage: only proves the plugin compiles and loads. The real wiring
- * (docs/ARCHITECTURE.md) lands in later tasks:
- *  - FUnrealMcpToolRegistry        — core tool families + extension providers (§2, §5)
- *  - FUnrealMcpSchemaGenerator     — FProperty -> JSON Schema (§3)
- *  - FUnrealMcpGameThreadDispatcher— AsyncTask + TPromise (§4)
- *  - FUnrealMcpBridgeServer        — localhost TCP listener, NDJSON framing (§1)
- *  - FUnrealMcpSidecarManager      — download / spawn / watchdog / kill (§6)
- *  - Slate UI                      — main window + 4 aux tabs (§7)
+ * Editor module for the Unreal-MCP plugin (docs/ARCHITECTURE.md §0). Owns the plugin-lifetime
+ * FUnrealMcpRuntime, which wires the tool registry (§2), the game-thread dispatcher (§4), the IPC
+ * bridge server (§1) and the sidecar manager (§6). The remaining subsystems (schema generator §3,
+ * extensions §5, Slate UI §7, config §8) land in later tasks.
  */
 class FUnrealMcpEditorModule : public IModuleInterface
 {
 public:
 	virtual void StartupModule() override
 	{
-		// The canonical boot line — the headless smoke test greps for it.
+		// The canonical boot line — the headless smoke test greps for it. Logged FIRST so a runtime
+		// startup hiccup never hides the proof that the module itself loaded.
 		UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] plugin loaded"));
+
+		Runtime = MakeUnique<FUnrealMcpRuntime>();
+		Runtime->Startup();
 	}
 
 	virtual void ShutdownModule() override
 	{
+		if (Runtime.IsValid())
+		{
+			Runtime->Shutdown();
+			Runtime.Reset();
+		}
 		UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] plugin shutting down"));
 	}
+
+private:
+	TUniquePtr<FUnrealMcpRuntime> Runtime;
 };
 
 IMPLEMENT_MODULE(FUnrealMcpEditorModule, UnrealMcpEditor)

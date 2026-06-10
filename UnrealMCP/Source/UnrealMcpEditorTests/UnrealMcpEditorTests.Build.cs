@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Ivan Murzak. Licensed under the Apache License, Version 2.0.
 // See the LICENSE file in the repository root for more information.
 
+using System.IO;
 using UnrealBuildTool;
 
 public class UnrealMcpEditorTests : ModuleRules
@@ -14,7 +15,13 @@ public class UnrealMcpEditorTests : ModuleRules
 			"Core",
 			"CoreUObject",
 			"Engine",
+			"Json",
 			"UnrealMcpEditor",
 		});
+
+		// Reach the sibling editor module's PRIVATE headers (FUnrealMcpNdjsonAccumulator §1.2,
+		// FUnrealMcpGameThreadDispatcher §4) so the Automation specs can drive them directly. The
+		// types are UNREALMCPEDITOR_API-exported, so symbols link via the module dependency above.
+		PrivateIncludePaths.Add(Path.Combine(ModuleDirectory, "..", "UnrealMcpEditor", "Private"));
 	}
 }

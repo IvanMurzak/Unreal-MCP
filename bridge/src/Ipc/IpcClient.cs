@@ -1,0 +1,355 @@
+/*
+┌───────────────────────────────────────────────────────────────────┐
+│  Author: Ivan Murzak (https://github.com/IvanMurzak)              │
+│  Repository: GitHub (https://github.com/IvanMurzak/Unreal-MCP)    │
+│  Copyright (c) 2026 Ivan Murzak                                   │
+│  Licensed under the Apache License, Version 2.0.                  │
+│  See the LICENSE file in the project root for more information.   │
+└───────────────────────────────────────────────────────────────────┘
+*/
+
+using System;
+using System.Net.Sockets;
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using System.Threading;
+using System.Threading.Tasks;
+using com.IvanMurzak.Unreal.MCP.Bridge.Sidecar;
+using com.IvanMurzak.Unreal.MCP.Bridge.Tools;
+using Microsoft.Extensions.Logging;
+
+namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
+{
+    /// <summary>
+    /// The sidecar's IPC client (docs/ARCHITECTURE.md §1): dials the plugin's localhost TCP listener,
+    /// performs the stdin-token handshake (§1.4), reads NDJSON messages (§1.2), routes them, sends
+    /// heartbeats (§1.3), and reconnects with backoff (§1.5). Implements <see cref="IToolCallChannel"/>
+    /// so <see cref="ProxyTool"/>s round-trip calls through it. The reader loop never executes tool
+    /// bodies — it completes the pending-call task and the proxy/handler continuation runs off the
+    /// reader thread (RunContinuationsAsynchronously). One mutex-guarded writer serializes every send so
+    /// messages never interleave (§1.2).
+    /// </summary>
+    public sealed class IpcClient : IToolCallChannel, IAsyncDisposable
+    {
+        private readonly string _host;
+        private readonly int _port;
+        private readonly string _token;
+        private readonly string _sidecarVersion;
+        private readonly ILogger? _logger;
+
+        private readonly PendingCallRegistry _pending = new();
+        private readonly ReconnectBackoff _backoff = new();
+        private readonly SemaphoreSlim _writeLock = new(1, 1);
+
+        private TcpClient? _tcp;
+        private NetworkStream? _stream;
+        private volatile bool _shutdownRequested;
+        private long _lastActivityTicks;
+
+        /// <summary>Routes applied tool manifests; set by the host before <see cref="RunAsync"/>.</summary>
+        public ManifestRegistrar? Registrar { get; set; }
+
+        /// <summary>Raised when a <c>handshake-ack</c> is received (the link is established, §1.5).</summary>
+        public event Action<HandshakeAckMessage>? HandshakeAccepted;
+
+        /// <summary>Raised when a connection attempt's handshake was rejected (socket closed pre-ack, §1.4).</summary>
+        public event Action? HandshakeRejected;
+
+        /// <summary>Raised when the plugin sends <c>shutdown</c> (editor quitting, §1.5).</summary>
+        public event Action? ShutdownRequested;
+
+        public IpcClient(string host, int port, string token, string sidecarVersion, ILogger? logger = null)
+        {
+            _host = host;
+            _port = port;
+            _token = token ?? throw new ArgumentNullException(nameof(token));
+            _sidecarVersion = sidecarVersion;
+            _logger = logger;
+        }
+
+        public bool IsConnected => _stream != null && _tcp is { Connected: true };
+
+        /// <summary>
+        /// Connect → serve → reconnect until <paramref name="ct"/> is cancelled or the plugin requests
+        /// shutdown. Each iteration: dial, handshake, and (on accept) serve the read+heartbeat loop until
+        /// the link drops; then back off and retry (§1.5).
+        /// </summary>
+        public async Task RunAsync(CancellationToken ct)
+        {
+            while (!ct.IsCancellationRequested && !_shutdownRequested)
+            {
+                var accepted = await TryConnectAndServeAsync(ct).ConfigureAwait(false);
+
+                if (_shutdownRequested || ct.IsCancellationRequested)
+                    break;
+
+                // On a rejected handshake we do NOT reset the backoff; on an accepted-then-dropped link the
+                // serve loop already reset it on accept, so the next reconnect starts from 1 s.
+                var delay = _backoff.Next();
+                _logger?.LogInformation("IPC reconnecting in {DelayMs} ms (accepted={Accepted}).",
+                    (int)delay.TotalMilliseconds, accepted);
+                try { await Task.Delay(delay, ct).ConfigureAwait(false); }
+                catch (OperationCanceledException) { break; }
+            }
+            _logger?.LogInformation("IPC client run loop exited (shutdown={Shutdown}).", _shutdownRequested);
+        }
+
+        private async Task<bool> TryConnectAndServeAsync(CancellationToken ct)
+        {
+            using var connCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            var tcp = new TcpClient();
+            var ackTcs = new TaskCompletionSource<HandshakeAckMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            try
+            {
+                _logger?.LogInformation("IPC dialing {Host}:{Port} ...", _host, _port);
+                await tcp.ConnectAsync(_host, _port, connCts.Token).ConfigureAwait(false);
+                tcp.NoDelay = true;
+
+                _tcp = tcp;
+                _stream = tcp.GetStream();
+                Touch();
+
+                // §1.4: send the handshake carrying the one-shot token as the FIRST message.
+                await SendAsync(new HandshakeMessage
+                {
+                    IpcVersion = IpcProtocol.IpcVersion,
+                    SidecarVersion = _sidecarVersion,
+                    Token = _token,
+                }, connCts.Token).ConfigureAwait(false);
+
+                // Serve the read loop; it completes ackTcs on handshake-ack.
+                var readTask = ReadLoopAsync(_stream, ackTcs, connCts.Token);
+
+                // Wait for the ack (or the read loop ending first = socket closed pre-ack = rejection, §1.4).
+                var acceptTimeout = Task.Delay(TimeSpan.FromSeconds(10), connCts.Token);
+                var first = await Task.WhenAny(ackTcs.Task, readTask, acceptTimeout).ConfigureAwait(false);
+
+                if (first == ackTcs.Task && ackTcs.Task.IsCompletedSuccessfully)
+                {
+                    _backoff.Reset();
+                    HandshakeAccepted?.Invoke(ackTcs.Task.Result);
+                    using var heartbeat = StartHeartbeat(connCts);
+                    await readTask.ConfigureAwait(false); // serve until the link drops
+                    return true;
+                }
+
+                // No ack: timeout or socket closed first → treat as a rejected/failed handshake (§1.4).
+                _logger?.LogWarning("IPC handshake not acknowledged (timeout or socket closed pre-ack).");
+                HandshakeRejected?.Invoke();
+                connCts.Cancel();
+                await SafeAwait(readTask).ConfigureAwait(false);
+                return false;
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested || _shutdownRequested)
+            {
+                return false;
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning("IPC connection attempt failed: {Message}", ex.Message);
+                HandshakeRejected?.Invoke();
+                return false;
+            }
+            finally
+            {
+                CloseConnection(tcp);
+                _pending.FailAll(); // every in-flight proxy call fails fast (§2.2 step 4)
+                Registrar?.ResetForReconnect(); // §1.5: next handshake-ack re-applies the manifest
+            }
+        }
+
+        private async Task ReadLoopAsync(NetworkStream stream, TaskCompletionSource<HandshakeAckMessage> ackTcs, CancellationToken ct)
+        {
+            var framer = new NdjsonFramer();
+            var buffer = new byte[64 * 1024];
+            try
+            {
+                while (!ct.IsCancellationRequested)
+                {
+                    var read = await stream.ReadAsync(buffer.AsMemory(0, buffer.Length), ct).ConfigureAwait(false);
+                    if (read == 0)
+                        break; // peer closed
+
+                    Touch();
+                    foreach (var line in framer.Push(buffer.AsSpan(0, read)))
+                    {
+                        if (!string.IsNullOrWhiteSpace(line))
+                            Dispatch(line, ackTcs, ct);
+                    }
+                }
+            }
+            catch (OperationCanceledException) { /* expected on teardown */ }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning("IPC read loop ended: {Message}", ex.Message);
+            }
+        }
+
+        private void Dispatch(string line, TaskCompletionSource<HandshakeAckMessage> ackTcs, CancellationToken ct)
+        {
+            JsonNode? node;
+            try { node = JsonNode.Parse(line); }
+            catch (Exception ex) { _logger?.LogWarning("IPC dropped malformed line: {Message}", ex.Message); return; }
+
+            var type = node?["type"]?.GetValue<string>();
+            switch (type)
+            {
+                case IpcProtocol.Type.HandshakeAck:
+                {
+                    var ack = node!.Deserialize<HandshakeAckMessage>(IpcProtocol.JsonOptions) ?? new HandshakeAckMessage();
+                    ackTcs.TrySetResult(ack);
+                    break;
+                }
+                case IpcProtocol.Type.ToolManifest:
+                {
+                    var manifest = node!.Deserialize<ToolManifestMessage>(IpcProtocol.JsonOptions);
+                    if (manifest != null) Registrar?.Apply(manifest);
+                    break;
+                }
+                case IpcProtocol.Type.ToolResponse:
+                {
+                    var response = node!.Deserialize<ToolResponseMessage>(IpcProtocol.JsonOptions);
+                    if (response != null && !_pending.TryComplete(response.RequestId, response))
+                        _logger?.LogDebug("Dropped tool-response for unknown/completed requestId {Id}.", response.RequestId);
+                    break;
+                }
+                case IpcProtocol.Type.Ping:
+                    _ = SendAsync(new HeartbeatMessage { Type = IpcProtocol.Type.Pong }, ct);
+                    break;
+                case IpcProtocol.Type.Pong:
+                    break; // liveness already refreshed by Touch()
+                case IpcProtocol.Type.Shutdown:
+                    _logger?.LogInformation("IPC received shutdown from plugin; exiting.");
+                    _shutdownRequested = true;
+                    ShutdownRequested?.Invoke();
+                    break;
+                case IpcProtocol.Type.Config:
+                case IpcProtocol.Type.Status:
+                case IpcProtocol.Type.Log:
+                case IpcProtocol.Type.AuthStart:
+                case IpcProtocol.Type.AuthCancel:
+                case IpcProtocol.Type.AuthRevoke:
+                    // Wired in later UI/config/auth tasks; logged for now.
+                    _logger?.LogDebug("IPC received '{Type}' (not handled in the sidecar-bridge MVP).", type);
+                    break;
+                default:
+                    _logger?.LogDebug("IPC received unknown message type '{Type}'.", type);
+                    break;
+            }
+        }
+
+        private IDisposable StartHeartbeat(CancellationTokenSource connCts)
+        {
+            var cts = CancellationTokenSource.CreateLinkedTokenSource(connCts.Token);
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    while (!cts.IsCancellationRequested)
+                    {
+                        await Task.Delay(IpcProtocol.HeartbeatIntervalMs, cts.Token).ConfigureAwait(false);
+
+                        var silentMs = (DateTime.UtcNow - new DateTime(Interlocked.Read(ref _lastActivityTicks), DateTimeKind.Utc)).TotalMilliseconds;
+                        if (silentMs > IpcProtocol.HeartbeatTimeoutMs)
+                        {
+                            _logger?.LogWarning("IPC peer silent for {SilentMs} ms (> {Timeout} ms); treating as dead.",
+                                (int)silentMs, IpcProtocol.HeartbeatTimeoutMs);
+                            connCts.Cancel(); // drop the link → reconnect
+                            break;
+                        }
+                        await SendAsync(new HeartbeatMessage { Type = IpcProtocol.Type.Ping }, cts.Token).ConfigureAwait(false);
+                    }
+                }
+                catch (OperationCanceledException) { /* teardown */ }
+                catch (Exception ex) { _logger?.LogDebug("IPC heartbeat ended: {Message}", ex.Message); }
+            }, cts.Token);
+            return cts;
+        }
+
+        // --- IToolCallChannel -------------------------------------------------------------------------
+
+        public async Task<ToolResponseMessage> CallToolAsync(string tool, JsonObject? arguments, int timeoutMs, CancellationToken cancellationToken)
+        {
+            var stream = _stream;
+            if (stream == null || _tcp is not { Connected: true })
+                throw new IpcDisconnectedException();
+
+            var requestId = Guid.NewGuid().ToString("N");
+            var task = _pending.Register(requestId);
+
+            // Cancellation: forward the caller's token as tool-cancel and fail the pending call (§4).
+            using var registration = cancellationToken.Register(() =>
+            {
+                _ = SendAsync(new ToolCancelMessage { RequestId = requestId }, CancellationToken.None);
+                _pending.TryFail(requestId, new OperationCanceledException(cancellationToken));
+            });
+
+            try
+            {
+                await SendAsync(new ToolCallMessage
+                {
+                    RequestId = requestId,
+                    Tool = tool,
+                    Arguments = arguments,
+                    TimeoutMs = timeoutMs,
+                }, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _pending.TryFail(requestId, new IpcDisconnectedException());
+                throw new IpcDisconnectedException();
+            }
+
+            return await task.ConfigureAwait(false);
+        }
+
+        // --- writer (single mutex-guarded path, §1.2) -------------------------------------------------
+
+        private async Task SendAsync<T>(T message, CancellationToken ct)
+        {
+            var stream = _stream;
+            if (stream == null)
+                throw new IpcDisconnectedException();
+
+            var json = JsonSerializer.Serialize(message, IpcProtocol.JsonOptions);
+            var framed = NdjsonFramer.Encode(json);
+
+            await _writeLock.WaitAsync(ct).ConfigureAwait(false);
+            try
+            {
+                await stream.WriteAsync(framed.AsMemory(), ct).ConfigureAwait(false);
+                await stream.FlushAsync(ct).ConfigureAwait(false);
+            }
+            finally
+            {
+                _writeLock.Release();
+            }
+        }
+
+        private void Touch() => Interlocked.Exchange(ref _lastActivityTicks, DateTime.UtcNow.Ticks);
+
+        private void CloseConnection(TcpClient tcp)
+        {
+            try { _stream?.Dispose(); } catch { /* ignore */ }
+            try { tcp.Close(); } catch { /* ignore */ }
+            _stream = null;
+            if (ReferenceEquals(_tcp, tcp)) _tcp = null;
+        }
+
+        private static async Task SafeAwait(Task task)
+        {
+            try { await task.ConfigureAwait(false); } catch { /* swallow on teardown */ }
+        }
+
+        public ValueTask DisposeAsync()
+        {
+            _shutdownRequested = true;
+            try { _stream?.Dispose(); } catch { /* ignore */ }
+            try { _tcp?.Close(); } catch { /* ignore */ }
+            _writeLock.Dispose();
+            _pending.FailAll();
+            return ValueTask.CompletedTask;
+        }
+    }
+}

@@ -30,4 +30,9 @@
     <PackageReference Include="com.IvanMurzak.McpPlugin" Version="6.7.0" />
   </ItemGroup>
 
+  <!-- The xUnit suite exercises a couple of internal helpers (e.g. ProxyTool.CalculateTokenCount). -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="Unreal-MCP-Bridge.Tests" />
+  </ItemGroup>
+
 </Project>
