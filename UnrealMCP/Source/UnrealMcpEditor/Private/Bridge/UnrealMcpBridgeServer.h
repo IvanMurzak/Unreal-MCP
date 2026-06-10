@@ -37,9 +37,13 @@ public:
 	/**
 	 * Bind + listen on the deterministic port for @p ProjectPath (probing forward on conflict, §1.1) and
 	 * begin accepting. Returns the bound port, or -1 if every probed port failed. @p Token is the secret
-	 * the handshake must carry (§1.4); the other args are echoed in the handshake-ack.
+	 * the handshake must carry (§1.4); the other args are echoed in the handshake-ack. @p InEffectiveConfig
+	 * is the resolved connection config (§8 — mode/host/cloudUrl/token/keepConnected) the plugin pushes to
+	 * the sidecar in the handshake-ack and the §1.3 `config` message; may be null (the sidecar then keeps
+	 * its env fallback).
 	 */
-	int32 Start(const FString& InToken, const FString& InProjectPath, const FString& InPluginVersion, const FString& InEngineVersion);
+	int32 Start(const FString& InToken, const FString& InProjectPath, const FString& InPluginVersion, const FString& InEngineVersion,
+		const TSharedPtr<FJsonObject>& InEffectiveConfig = nullptr);
 
 	/** Stop accepting, send the connected sidecar a graceful shutdown, and tear down all threads/sockets. */
 	void Shutdown();
@@ -49,6 +53,16 @@ public:
 
 	/** Re-push the manifest (call after the registry changes, §2.2 hot reload). No-op when disconnected. */
 	void PushManifest();
+
+	/**
+	 * Replace the effective connection config and, if a sidecar is connected, push the §1.3 `config` message
+	 * to it (the "on change" path — e.g. a future UI mode/host/token edit). Thread-safe; no-op send when
+	 * disconnected (the next handshake-ack carries the latest config anyway).
+	 */
+	void SetEffectiveConfig(const TSharedPtr<FJsonObject>& InEffectiveConfig);
+
+	/** Push the current §1.3 `config` message to the connected sidecar. No-op when disconnected. */
+	void PushConfig();
 
 	/** Deterministic IPC port for a project path (§1.1): 30000 + sha(path) % 10000. */
 	static int32 ComputeDeterministicPort(const FString& ProjectPath);
@@ -69,6 +83,7 @@ private:
 	bool SendMessage(const TSharedPtr<FJsonObject>& Message);
 	void SendHandshakeAck();
 	void SendManifestLocked();
+	void SendConfigLocked(); // WriteMutex held: frame + send the §1.3 `config` message (no-op when no config)
 	bool TrySendFramedLocked(const TArray<uint8>& Framed); // WriteMutex+ConnectionMutex held, ClientSocket valid
 	void CloseActiveConnection();
 	void DrainPendingDestroy();    // reader-/shutdown-owned: actually frees sockets parked for teardown
@@ -98,6 +113,12 @@ private:
 	FString PluginVersion;
 	FString EngineVersion;
 	int32 BoundPort = -1;
+
+	// The resolved §8 connection config pushed to the sidecar (handshake-ack + §1.3 `config`). Read on the
+	// reader thread (SendHandshakeAck/SendConfigLocked), replaced on the game thread (SetEffectiveConfig);
+	// guarded by ConfigMutex. A deep copy is stored so the caller's object can change without racing a send.
+	mutable FCriticalSection ConfigMutex;
+	TSharedPtr<FJsonObject> EffectiveConfig;
 
 	FThreadSafeBool bStopRequested = false;
 	FThreadSafeBool bClientConnected = false;
