@@ -63,17 +63,27 @@ void FUnrealMcpRuntime::Shutdown()
 		PreExitHandle.Reset();
 	}
 
-	// §6 layer 1: stop the sidecar (terminate + stop restarting) BEFORE tearing down the bridge.
+	// §1.5 graceful teardown ordering. Doing SidecarManager->Stop() (TerminateProc KillTree) BEFORE the
+	// bridge sends its `shutdown` Bye would mean the graceful path only ever worked for a MANUALLY launched
+	// sidecar — a spawned one would be killed before the Bye. So: (1) stop auto-restarts (the bridge's Bye
+	// must not be undone by a relaunch), (2) let the bridge send `shutdown` to the connected sidecar, (3)
+	// give the child a bounded grace to self-exit, (4) terminate as a backstop.
 	if (SidecarManager.IsValid())
-	{
-		SidecarManager->Stop();
-		SidecarManager.Reset();
-	}
+		SidecarManager->StopRestarts();
+
 	if (BridgeServer.IsValid())
 	{
-		BridgeServer->Shutdown();
+		BridgeServer->Shutdown(); // sends the §1.5 `shutdown` Bye to the connected sidecar, then tears down
 		BridgeServer.Reset();
 	}
+
+	if (SidecarManager.IsValid())
+	{
+		SidecarManager->WaitForExit(FTimespan::FromSeconds(3)); // bounded grace for a clean self-exit
+		SidecarManager->Stop();                                 // backstop: TerminateProc if still alive
+		SidecarManager.Reset();
+	}
+
 	Dispatcher.Reset();
 	Registry.Reset();
 }

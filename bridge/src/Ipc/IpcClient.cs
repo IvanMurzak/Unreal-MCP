@@ -280,7 +280,24 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
                 catch (OperationCanceledException) { /* teardown */ }
                 catch (Exception ex) { _logger?.LogDebug("IPC heartbeat ended: {Message}", ex.Message); }
             }, cts.Token);
-            return cts;
+
+            // Disposing the heartbeat MUST cancel it, not just dispose the CTS: a plain Dispose() of a linked
+            // CTS does not cancel its token, so the heartbeat loop would survive into the next reconnect epoch
+            // (writing a stray ping into the new connection's stream) until it happened to throw
+            // ObjectDisposedException. Cancel first, then dispose.
+            return new CancelOnDispose(cts);
+        }
+
+        /// <summary>Cancels the wrapped <see cref="CancellationTokenSource"/> on dispose, then disposes it.</summary>
+        private sealed class CancelOnDispose : IDisposable
+        {
+            private readonly CancellationTokenSource _cts;
+            public CancelOnDispose(CancellationTokenSource cts) => _cts = cts;
+            public void Dispose()
+            {
+                try { _cts.Cancel(); } catch (ObjectDisposedException) { /* already torn down */ }
+                _cts.Dispose();
+            }
         }
 
         // --- IToolCallChannel -------------------------------------------------------------------------
@@ -297,7 +314,9 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
             // Cancellation: forward the caller's token as tool-cancel and fail the pending call (§4).
             using var registration = cancellationToken.Register(() =>
             {
-                _ = SendAsync(new ToolCancelMessage { RequestId = requestId }, CancellationToken.None);
+                // Observe the send like the pong path: if the link is down this fire-and-forget faults, and an
+                // un-awaited faulted Task surfaces as an unobserved TaskException on the finalizer thread.
+                _ = SafeAwait(SendAsync(new ToolCancelMessage { RequestId = requestId }, CancellationToken.None));
                 _pending.TryFail(requestId, new OperationCanceledException(cancellationToken));
             });
 

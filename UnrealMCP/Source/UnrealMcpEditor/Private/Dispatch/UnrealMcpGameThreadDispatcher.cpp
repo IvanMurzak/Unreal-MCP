@@ -78,9 +78,19 @@ TFuture<FUnrealMcpToolResult> FUnrealMcpGameThreadDispatcher::Dispatch(
 	const uint32 TimeoutMs = static_cast<uint32>(
 		FMath::Clamp<int64>(static_cast<int64>(Timeout.GetTotalMilliseconds()), 1, static_cast<int64>(MAX_uint32)));
 
-	Async(EAsyncExecution::ThreadPool, [State, Done, TimeoutMs]()
+	Async(EAsyncExecution::ThreadPool, [State, Done, TimeoutMs, Call]()
 	{
-		Done->Event->Wait(TimeoutMs);
+		if (Done->Event->Wait(TimeoutMs))
+			return; // the body finished first and already completed the promise — nothing to time out.
+
+		// Timed out before the body finished. Signal cooperative cancellation so a still-running game-thread
+		// body can observe IsCancelled() and bail (§4 — the registry header documents CancelRequested as
+		// "set by a tool-cancel OR a timeout"; until now only tool-cancel set it). The captured Call copy
+		// holds the shared cancel flag alive, so this stays valid even after the bridge drops its CancelFlags
+		// map entry. Then complete the future with the timeout error; if the body completes in the meantime,
+		// its Complete() is a no-op (single-completion guard).
+		if (Call.CancelRequested.IsValid())
+			const_cast<FThreadSafeBool&>(*Call.CancelRequested) = true;
 		State->Complete(FUnrealMcpToolResult::Error(TEXT("Tool call timed out.")));
 	});
 

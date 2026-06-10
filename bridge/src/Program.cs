@@ -55,6 +55,11 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge
             if (!tokenPresent)
                 logger.LogWarning("No IPC token on stdin; the plugin will reject the handshake (orphan layer 3 will then exit the sidecar).");
 
+            // Distinguish a clean exit (plugin `shutdown`, Ctrl+C, parent-editor-gone orphan avoidance) from a
+            // layer-3 GIVE-UP (handshake rejected repeatedly / no successful handshake within the deadline) via
+            // the process exit code, so the launcher/watchdog can tell "gave up" from "clean exit".
+            var exit = new ExitState();
+
             using var cts = new CancellationTokenSource();
             Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
 
@@ -86,6 +91,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge
                 {
                     logger.LogError("Handshake rejected {Count} times consecutively; exiting (orphan layer 3).",
                         HandshakeFailureTracker.MaxConsecutiveRejections);
+                    exit.Code = ExitCodes.GaveUp;
                     cts.Cancel();
                 }
             };
@@ -96,15 +102,15 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge
             };
 
             var ipcRun = ipc.RunAsync(cts.Token);
-            var watchdog = RunWatchdogAsync(parentMonitor, handshakeTracker, logger, cts);
+            var watchdog = RunWatchdogAsync(parentMonitor, handshakeTracker, logger, cts, exit);
 
             await Task.WhenAny(ipcRun, watchdog).ConfigureAwait(false);
             cts.Cancel();
             await SafeAwait(ipcRun).ConfigureAwait(false);
             await SafeAwait(watchdog).ConfigureAwait(false);
 
-            logger.LogInformation("Sidecar exiting cleanly.");
-            return 0;
+            logger.LogInformation("Sidecar exiting (code {Code}).", exit.Code);
+            return exit.Code;
         }
 
         /// <summary>
@@ -115,7 +121,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge
             ParentProcessMonitor? parentMonitor,
             HandshakeFailureTracker handshakeTracker,
             ILogger logger,
-            CancellationTokenSource cts)
+            CancellationTokenSource cts,
+            ExitState exit)
         {
             try
             {
@@ -134,6 +141,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge
                     {
                         logger.LogError("No successful handshake within {Seconds} s; exiting (orphan layer 3).",
                             (int)HandshakeFailureTracker.NoSuccessDeadline.TotalSeconds);
+                        exit.Code = ExitCodes.GaveUp;
                         cts.Cancel();
                         return;
                     }
@@ -159,6 +167,19 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge
         private static async Task SafeAwait(Task task)
         {
             try { await task.ConfigureAwait(false); } catch { /* swallow on teardown */ }
+        }
+
+        /// <summary>Process exit codes (§6). 0 = clean; non-zero distinguishes a layer-3 give-up.</summary>
+        private static class ExitCodes
+        {
+            public const int Clean = 0;
+            public const int GaveUp = 3; // handshake rejected repeatedly, or no successful handshake by the deadline
+        }
+
+        /// <summary>Mutable holder for the terminal exit code, shared between Main and the watchdog loop.</summary>
+        private sealed class ExitState
+        {
+            public int Code = ExitCodes.Clean;
         }
     }
 }

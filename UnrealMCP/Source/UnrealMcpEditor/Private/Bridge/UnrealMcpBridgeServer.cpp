@@ -249,7 +249,7 @@ uint32 FUnrealMcpBridgeServer::Run()
 		for (const FString& Line : Lines)
 		{
 			if (!Line.IsEmpty())
-				HandleLine(Line);
+				HandleLine(Line, CurrentGeneration);
 		}
 	}
 	return 0;
@@ -262,7 +262,7 @@ void FUnrealMcpBridgeServer::Stop()
 
 void FUnrealMcpBridgeServer::Exit() {}
 
-void FUnrealMcpBridgeServer::HandleLine(const FString& Line)
+void FUnrealMcpBridgeServer::HandleLine(const FString& Line, int32 Generation)
 {
 	TSharedPtr<FJsonObject> Message;
 	const TSharedRef<TJsonReader<TCHAR>> Reader = TJsonReaderFactory<TCHAR>::Create(Line);
@@ -285,7 +285,7 @@ void FUnrealMcpBridgeServer::HandleLine(const FString& Line)
 		return;
 	}
 
-	if (Type == TypeHandshake)        HandleHandshake(Message);
+	if (Type == TypeHandshake)        HandleHandshake(Message, Generation);
 	else if (Type == TypeToolCall)    HandleToolCall(Message);
 	else if (Type == TypeToolCancel)  HandleToolCancel(Message);
 	else if (Type == TypePing)
@@ -304,7 +304,7 @@ void FUnrealMcpBridgeServer::HandleLine(const FString& Line)
 	}
 }
 
-void FUnrealMcpBridgeServer::HandleHandshake(const TSharedPtr<FJsonObject>& Message)
+void FUnrealMcpBridgeServer::HandleHandshake(const TSharedPtr<FJsonObject>& Message, int32 Generation)
 {
 	FString IncomingToken;
 	Message->TryGetStringField(TEXT("token"), IncomingToken);
@@ -318,7 +318,23 @@ void FUnrealMcpBridgeServer::HandleHandshake(const TSharedPtr<FJsonObject>& Mess
 		return;
 	}
 
-	bHandshakeOk = true;
+	// Close the check-to-flip race (§1.4): the accept thread can swap in a NEW connection — bumping the
+	// generation and parking the old socket — between the reader's post-Recv generation check and here. If
+	// this handshake line came off a now-superseded socket, flipping bHandshakeOk and sending the ack +
+	// manifest would authenticate (and write to) the CURRENT, still-unauthenticated connection. Re-verify
+	// the generation we read this batch at, under the connection lock, and bail if it has moved on.
+	{
+		FScopeLock Lock(&ConnectionMutex);
+		if (ConnectionGeneration != Generation)
+		{
+			UE_LOG(LogUnrealMcp, Warning,
+				TEXT("[Unreal-MCP] handshake arrived for a superseded connection (gen %d != %d); ignoring."),
+				Generation, ConnectionGeneration);
+			return;
+		}
+		bHandshakeOk = true;
+	}
+
 	UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] handshake accepted."));
 	SendHandshakeAck();
 
@@ -440,25 +456,57 @@ bool FUnrealMcpBridgeServer::SendMessage(const TSharedPtr<FJsonObject>& Message)
 	if (ClientSocket == nullptr)
 		return false;
 
+	if (!TrySendFramedLocked(Framed))
+	{
+		// A genuine (non-would-block) failure mid-frame corrupts the stream — the peer would see a truncated
+		// line with the next frame concatenated, and a lost tool-response hangs the pending call until the
+		// heartbeat. Drop the connection so the sidecar reconnects cleanly. We hold ConnectionMutex, so just
+		// park the socket for the reader to free (never DestroySocket from here) and clear flags.
+		UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] socket send failed mid-frame; dropping connection."));
+		SocketsPendingDestroy.Add(ClientSocket);
+		ClientSocket = nullptr;
+		bClientConnected = false;
+		bHandshakeOk = false;
+		bHeartbeatStop = true;
+		return false;
+	}
+	return true;
+}
+
+bool FUnrealMcpBridgeServer::TrySendFramedLocked(const TArray<uint8>& Framed)
+{
+	// Caller holds WriteMutex AND ConnectionMutex and has verified ClientSocket != nullptr. Sends the whole
+	// frame, tolerating EWOULDBLOCK on the non-blocking client socket: a full kernel send buffer (a large
+	// frame on a slow reader) makes FSocket::Send return false with SE_EWOULDBLOCK — that is transient, not
+	// fatal, so we wait (bounded) for writability and retry the same offset rather than dropping a healthy
+	// connection mid-frame. Returns false only on a genuine send error or the per-frame deadline.
+	// We deliberately keep ConnectionMutex held across the bounded wait so the reader cannot free the socket
+	// under us (the pass-1 second-connection use-after-free); the wait is bounded, so accepts are only
+	// briefly stalled — and only on the (currently unreachable, all outbound frames are tiny) large-frame
+	// path. Releasing the lock during the wait is the connection-replacement/socket-lifetime redesign that
+	// is tracked separately.
+	ISocketSubsystem* SocketSub = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM);
+	const double Deadline = FPlatformTime::Seconds() + 2.0;
+
 	int32 TotalSent = 0;
 	while (TotalSent < Framed.Num())
 	{
 		int32 JustSent = 0;
-		if (!ClientSocket->Send(Framed.GetData() + TotalSent, Framed.Num() - TotalSent, JustSent) || JustSent <= 0)
+		const bool bSendOk = ClientSocket->Send(Framed.GetData() + TotalSent, Framed.Num() - TotalSent, JustSent);
+		if (JustSent > 0)
 		{
-			// A failed/partial mid-frame send corrupts the stream — the peer would see a truncated line
-			// with the next frame concatenated, and a lost tool-response hangs the pending call until the
-			// heartbeat. Drop the connection so the sidecar reconnects cleanly. We hold ConnectionMutex, so
-			// just park the socket for the reader to free (never DestroySocket from here) and clear flags.
-			UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] socket send failed mid-frame; dropping connection."));
-			SocketsPendingDestroy.Add(ClientSocket);
-			ClientSocket = nullptr;
-			bClientConnected = false;
-			bHandshakeOk = false;
-			bHeartbeatStop = true;
-			return false;
+			TotalSent += JustSent;
+			continue;
 		}
-		TotalSent += JustSent;
+
+		// No bytes moved: distinguish a transient full send buffer (EWOULDBLOCK / EAGAIN) from a real error.
+		const ESocketErrors Err = SocketSub != nullptr ? SocketSub->GetLastErrorCode() : SE_NO_ERROR;
+		const bool bWouldBlock = bSendOk || Err == SE_EWOULDBLOCK || Err == SE_TRY_AGAIN;
+		if (!bWouldBlock || FPlatformTime::Seconds() >= Deadline)
+			return false;
+
+		// Wait (bounded) for the socket to become writable, then retry from the same offset.
+		ClientSocket->Wait(ESocketWaitConditions::WaitForWrite, FTimespan::FromMilliseconds(100));
 	}
 	return true;
 }
@@ -488,21 +536,15 @@ void FUnrealMcpBridgeServer::SendManifestLocked()
 	if (ClientSocket == nullptr)
 		return;
 
-	int32 TotalSent = 0;
-	while (TotalSent < Framed.Num())
+	if (!TrySendFramedLocked(Framed))
 	{
-		int32 JustSent = 0;
-		if (!ClientSocket->Send(Framed.GetData() + TotalSent, Framed.Num() - TotalSent, JustSent) || JustSent <= 0)
-		{
-			UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] manifest send failed mid-frame; dropping connection."));
-			SocketsPendingDestroy.Add(ClientSocket);
-			ClientSocket = nullptr;
-			bClientConnected = false;
-			bHandshakeOk = false;
-			bHeartbeatStop = true;
-			return;
-		}
-		TotalSent += JustSent;
+		UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] manifest send failed mid-frame; dropping connection."));
+		SocketsPendingDestroy.Add(ClientSocket);
+		ClientSocket = nullptr;
+		bClientConnected = false;
+		bHandshakeOk = false;
+		bHeartbeatStop = true;
+		return;
 	}
 }
 

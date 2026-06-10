@@ -33,6 +33,24 @@ public:
 	/** Terminate the sidecar and stop the watchdog (editor shutdown / module teardown). */
 	void Stop();
 
+	/**
+	 * Graceful-shutdown step 1 (§1.5): stop the auto-restart watchdog WITHOUT terminating the process, so
+	 * the bridge can send the sidecar a graceful `shutdown` and the watchdog will not relaunch it. Pair with
+	 * WaitForExit() then Stop() (terminate backstop). Idempotent.
+	 */
+	void StopRestarts();
+
+	/**
+	 * Wait (bounded) for the sidecar to exit on its own after a graceful `shutdown`. Returns true if it has
+	 * exited (or was never spawned), false if it is still running at the deadline (caller then terminates).
+	 */
+	bool WaitForExit(FTimespan Grace);
+
+	/**
+	 * Whether the sidecar process is currently running. Threading: call only from the game thread / the
+	 * Stop path. The watchdog thread owns ProcHandle's mutation (spawn/CloseProc) otherwise, and this read
+	 * is intentionally unsynchronized — a concurrent call racing a watchdog restart is not a supported use.
+	 */
 	bool IsRunning() const;
 	int32 GetRestartCount() const { return RestartCount.GetValue(); }
 

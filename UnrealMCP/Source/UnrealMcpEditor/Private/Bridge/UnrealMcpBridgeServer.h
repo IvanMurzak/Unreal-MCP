@@ -61,14 +61,15 @@ public:
 
 private:
 	bool HandleConnectionAccepted(FSocket* InSocket, const FIPv4Endpoint& Endpoint);
-	void HandleLine(const FString& Line);
-	void HandleHandshake(const TSharedPtr<FJsonObject>& Message);
+	void HandleLine(const FString& Line, int32 Generation);
+	void HandleHandshake(const TSharedPtr<FJsonObject>& Message, int32 Generation);
 	void HandleToolCall(const TSharedPtr<FJsonObject>& Message);
 	void HandleToolCancel(const TSharedPtr<FJsonObject>& Message);
 
 	bool SendMessage(const TSharedPtr<FJsonObject>& Message);
 	void SendHandshakeAck();
 	void SendManifestLocked();
+	bool TrySendFramedLocked(const TArray<uint8>& Framed); // WriteMutex+ConnectionMutex held, ClientSocket valid
 	void CloseActiveConnection();
 	void DrainPendingDestroy();    // reader-/shutdown-owned: actually frees sockets parked for teardown
 	void StartHeartbeat();

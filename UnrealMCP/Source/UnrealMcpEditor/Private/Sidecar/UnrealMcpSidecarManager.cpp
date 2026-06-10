@@ -165,7 +165,12 @@ void FUnrealMcpSidecarManager::StartWatchdog()
 			UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] sidecar exited; restarting in %ds (restart #%d)."),
 				DelaySeconds, RestartCount.GetValue() + 1);
 
-			FPlatformProcess::Sleep(static_cast<float>(DelaySeconds));
+			// Chunk the backoff on a short tick (not one uninterruptible Sleep of up to 30 s): StopWatchdog()
+			// joins this thread on the game thread at editor shutdown, so a single long sleep would stall the
+			// editor's quit for the remainder of the backoff. Poll bStopRequested like the bridge heartbeat.
+			const double BackoffUntil = FPlatformTime::Seconds() + DelaySeconds;
+			while (!bStopRequested && FPlatformTime::Seconds() < BackoffUntil)
+				FPlatformProcess::Sleep(0.5f);
 			if (bStopRequested)
 				break;
 
@@ -208,6 +213,19 @@ void FUnrealMcpSidecarManager::TerminateProcess()
 bool FUnrealMcpSidecarManager::IsRunning() const
 {
 	return ProcHandle.IsValid() && FPlatformProcess::IsProcRunning(const_cast<FProcHandle&>(ProcHandle));
+}
+
+void FUnrealMcpSidecarManager::StopRestarts()
+{
+	StopWatchdog();
+}
+
+bool FUnrealMcpSidecarManager::WaitForExit(FTimespan Grace)
+{
+	const double Deadline = FPlatformTime::Seconds() + Grace.GetTotalSeconds();
+	while (ProcHandle.IsValid() && FPlatformProcess::IsProcRunning(ProcHandle) && FPlatformTime::Seconds() < Deadline)
+		FPlatformProcess::Sleep(0.05f);
+	return !(ProcHandle.IsValid() && FPlatformProcess::IsProcRunning(ProcHandle));
 }
 
 void FUnrealMcpSidecarManager::Stop()
