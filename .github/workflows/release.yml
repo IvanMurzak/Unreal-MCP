@@ -36,7 +36,7 @@
 #
 # SAFETY: publish jobs are gated on `should_release == 'true' && dry_run !=
 # 'true'`. The npm publish uses OIDC Trusted Publishing (no NPM_TOKEN secret);
-# until the owner configures a Trusted Publisher for `unreal-cli`, that step
+# until the owner configures a Trusted Publisher for `unreal-mcp-cli`, that step
 # fails auth and nothing is published. The self-hosted plugin artifact leg is
 # gated on UNREAL_RUNNER_READY exactly like test_pull_request.yml.
 
@@ -485,11 +485,11 @@ jobs:
         id: mark
         run: echo "published=true" >> "$GITHUB_OUTPUT"
 
-  # Publish unreal-cli to npm via OIDC Trusted Publishing (no NPM_TOKEN secret).
+  # Publish unreal-mcp-cli to npm via OIDC Trusted Publishing (no NPM_TOKEN secret).
   # Gated on the GitHub Release having been created (i.e. a real, non-dry-run
   # release). The cli version is aligned to the release version at publish time.
   publish-npm:
-    name: publish unreal-cli to npm
+    name: publish unreal-mcp-cli to npm
     needs: [check-version, publish-release]
     if: needs.publish-release.outputs.published == 'true'
     runs-on: ubuntu-latest

@@ -46,9 +46,9 @@ description: Drive the Unreal Editor for this project through the Unreal-MCP ser
 
 This project is wired to a local Unreal-MCP server at \`${url}\`.
 
-- Probe readiness: \`unreal-cli status\`
-- Invoke a tool: \`unreal-cli run-tool <tool-name> --input '{...}'\`
-- The editor must be running with the UnrealMCP plugin enabled (see \`unreal-cli open\`).
+- Probe readiness: \`unreal-mcp-cli status\`
+- Invoke a tool: \`unreal-mcp-cli run-tool <tool-name> --input '{...}'\`
+- The editor must be running with the UnrealMCP plugin enabled (see \`unreal-mcp-cli open\`).
 `;
 }
 

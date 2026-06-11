@@ -4,7 +4,7 @@
 // (docs/ARCHITECTURE.md §8): skip blanks and `#` comments, split on the
 // first `=`, trim, recognize only known keys, strip a single pair of
 // matching surrounding quotes. These helpers stay 1:1 with that parser so
-// what `unreal-cli configure` writes is exactly what the plugin reads.
+// what `unreal-mcp-cli configure` writes is exactly what the plugin reads.
 //
 // Pure where possible; the read/write functions touch the filesystem but
 // never throw past their callers' try/catch — the lib boundary owns error
@@ -197,7 +197,7 @@ export function ensureEnvGitignored(
     fs.mkdirSync(gitignoreDir, { recursive: true });
     fs.writeFileSync(
       gitignorePath,
-      `# Added by unreal-cli configure — never commit local MCP secrets.${EOL}.env${EOL}`,
+      `# Added by unreal-mcp-cli configure — never commit local MCP secrets.${EOL}.env${EOL}`,
       'utf-8',
     );
     return { gitignorePath, action: 'created' };

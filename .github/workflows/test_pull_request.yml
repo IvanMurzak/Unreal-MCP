@@ -11,7 +11,7 @@
 # disabled so every leg reports independently:
 #   (a) bridge  — dotnet build + xUnit on hosted ubuntu-latest + windows-latest
 #   (b) server  — dotnet build on hosted ubuntu-latest (thin host, no tests yet)
-#   (c) cli     — unreal-cli node 20/22 tests via the reusable test_cli.yml
+#   (c) cli     — unreal-mcp-cli node 20/22 tests via the reusable test_cli.yml
 #   (d) plugin  — UE 5.7 BuildPlugin + Automation specs (UnrealMcp. filter) on a
 #                 SELF-HOSTED windows runner labelled `unreal-5-7`
 #
@@ -90,7 +90,7 @@ jobs:
       - name: Build
         run: dotnet build Unreal-MCP-Server/Unreal-MCP-Server.sln --configuration Debug --no-restore
 
-  # (c) cli — unreal-cli node tests (Node 20 & 22) via the reusable workflow.
+  # (c) cli — unreal-mcp-cli node tests (Node 20 & 22) via the reusable workflow.
   test-cli:
     uses: ./.github/workflows/test_cli.yml
 

@@ -3,7 +3,7 @@
 Unreal-MCP bridges LLMs (Claude, Cursor, Copilot, …) with the [Unreal Engine](https://www.unrealengine.com/)
 editor via the [Model Context Protocol](https://modelcontextprotocol.io/) — the Unreal-engine sibling of
 Unity-MCP and Godot-MCP. **Status: beta** — the plugin, the .NET sidecar, the local server, the
-`unreal-cli`, the AI Game Developer editor UI, and **62 built-in tools across 8 families** have shipped
+`unreal-mcp-cli`, the AI Game Developer editor UI, and **62 built-in tools across 8 families** have shipped
 and are covered by CI; nothing is published to a package registry yet.
 
 **The authoritative design is [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).** Read the relevant
@@ -24,7 +24,7 @@ user-facing entry point is [`README.md`](README.md); the release runbook is
 | `UnrealMCP/Source/UnrealMcpEditorTests/` | Automation specs behind `WITH_DEV_AUTOMATION_TESTS`, names under the **`UnrealMcp.`** filter prefix. **No top-level test folder** — tests live per-leg |
 | `bridge/` | .NET 9 **sidecar** `com.IvanMurzak.Unreal.MCP.Bridge` (binary `unreal-mcp-bridge`) — the McpPlugin host the plugin spawns; IPC ⇄ SignalR relay. xUnit tests in `bridge/tests/`. Hand-authored, TRACKED solution `bridge/Unreal-MCP-Bridge.sln` |
 | `Unreal-MCP-Server/` | Thin ASP.NET Core host around `com.IvanMurzak.McpPlugin.Server` (binary `unreal-mcp-server`) — clone of Godot-MCP-Server, **no Unreal-specific server code**. Tracked solution `Unreal-MCP-Server/Unreal-MCP-Server.sln` |
-| `cli/` | `unreal-cli` npm package (TypeScript, commander, vitest) — 16 commands. Publish-ready (metadata complete); the first version is published manually by the owner, then CI takes over — see `docs/RELEASING.md` |
+| `cli/` | `unreal-mcp-cli` npm package (TypeScript, commander, vitest) — 16 commands. Publish-ready (metadata complete); the first version is published manually by the owner, then CI takes over — see `docs/RELEASING.md` |
 | `samples/UnrealAITemplate/` | The §5 extension template plugin (a `hello-extension` tool + an invalid-schema switch) |
 | `commands/bump-version.ps1` | Rewrites the version across `.uplugin` / both csproj / `server.json` / `cli/package.json`. **Release-pipeline-owned — never run from a feature task** |
 

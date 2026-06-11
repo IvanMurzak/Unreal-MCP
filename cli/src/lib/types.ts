@@ -1,6 +1,6 @@
-// Shared public types for the `unreal-cli` library API.
+// Shared public types for the `unreal-mcp-cli` library API.
 //
-// Re-exported from `lib.ts` — consumers import from `unreal-cli` (the
+// Re-exported from `lib.ts` — consumers import from `unreal-mcp-cli` (the
 // package root), never from deep paths.
 //
 // Contract (same as unity-mcp-cli / godot-cli):

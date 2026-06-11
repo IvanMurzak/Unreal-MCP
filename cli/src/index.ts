@@ -21,7 +21,7 @@ import { waitForReadyCommand } from './commands/wait-for-ready.js';
 const program = new Command();
 
 program
-  .name('unreal-cli')
+  .name('unreal-mcp-cli')
   .description('Cross-platform CLI tool for Unreal-MCP operations')
   .version(PACKAGE_VERSION)
   .option('-v, --verbose', 'Enable verbose diagnostic output');

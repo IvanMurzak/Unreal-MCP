@@ -113,7 +113,7 @@ export function resolveEngine(input: ResolveEngineInput): ResolveEngineResult {
       reason: 'no-engines-installed',
       message:
         'No Unreal Engine installations found in the Epic launcher manifest. ' +
-        'Install an engine (unreal-cli install-engine) or pass --engine-root for a source build.',
+        'Install an engine (unreal-mcp-cli install-engine) or pass --engine-root for a source build.',
     };
   }
 
@@ -135,7 +135,7 @@ export function resolveEngine(input: ResolveEngineInput): ResolveEngineResult {
       reason: 'association-not-installed',
       message:
         `EngineAssociation "${assoc}" is not among the installed engines (${installed}). ` +
-        'Install it (unreal-cli install-engine) or pass --engine-root.',
+        'Install it (unreal-mcp-cli install-engine) or pass --engine-root.',
     };
   }
 

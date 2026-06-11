@@ -212,12 +212,12 @@ try {
 
     if ($changes -and $changes.Count -gt 0) {
         # Update CLI package-lock.json — only the two root-level version fields
-        # that follow "name": "unreal-cli". Dependency versions are not touched.
+        # that follow "name": "unreal-mcp-cli". Dependency versions are not touched.
         $lockFilePath = "cli/package-lock.json"
         if (Test-Path $lockFilePath) {
             Write-ColorText "`nUpdating CLI package-lock.json..." "Cyan"
             $lockContent = Get-Content $lockFilePath -Raw
-            $pattern = '("name":\s*"unreal-cli",\s+"version":\s*")[\d\.]+(-[a-zA-Z0-9\-\.]+)?(\+[a-zA-Z0-9\-\.]+)?'
+            $pattern = '("name":\s*"unreal-mcp-cli",\s+"version":\s*")[\d\.]+(-[a-zA-Z0-9\-\.]+)?(\+[a-zA-Z0-9\-\.]+)?'
             $replacement = "`${1}$NewVersion"
             $newLockContent = [regex]::Replace($lockContent, $pattern, $replacement)
             if ($newLockContent -ne $lockContent) {

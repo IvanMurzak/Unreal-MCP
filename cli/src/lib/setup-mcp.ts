@@ -159,7 +159,7 @@ export async function setupMcp(opts: SetupMcpOptions): Promise<SetupMcpResult> {
 
     nextSteps.push(`Restart ${agent.label} to pick up the new MCP server.`);
     if (transport === 'http') {
-      nextSteps.push('Ensure the Unreal Editor (and its MCP server) is running — see `unreal-cli status`.');
+      nextSteps.push('Ensure the Unreal Editor (and its MCP server) is running — see `unreal-mcp-cli status`.');
     }
 
     return {

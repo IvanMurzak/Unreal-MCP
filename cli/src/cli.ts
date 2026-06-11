@@ -1,8 +1,8 @@
-// CLI entry-point re-exports (`unreal-cli/cli`).
+// CLI entry-point re-exports (`unreal-mcp-cli/cli`).
 //
 // Exposes the commander Command instances so a consumer can compose them
 // into their own program. The runnable program lives in `index.ts`
-// (imported by `bin/unreal-cli.js`); importing THIS file has no side
+// (imported by `bin/unreal-mcp-cli.js`); importing THIS file has no side
 // effects (it does not parse argv or exit).
 
 export { bootstrapLocalCommand } from './commands/bootstrap-local.js';

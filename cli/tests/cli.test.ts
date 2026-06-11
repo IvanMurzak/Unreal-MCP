@@ -4,7 +4,7 @@ import * as path from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const CLI_PATH = path.resolve(__dirname, '..', 'bin', 'unreal-cli.js');
+const CLI_PATH = path.resolve(__dirname, '..', 'bin', 'unreal-mcp-cli.js');
 
 function runCli(args: string[]): { stdout: string; exitCode: number } {
   try {
@@ -39,7 +39,7 @@ describe('CLI integration', () => {
   it('--help lists every one of the 16 commands', () => {
     const { stdout, exitCode } = runCli(['--help']);
     expect(exitCode).toBe(0);
-    expect(stdout).toContain('unreal-cli');
+    expect(stdout).toContain('unreal-mcp-cli');
     for (const cmd of ALL_COMMANDS) {
       expect(stdout, `help should list ${cmd}`).toContain(cmd);
     }
@@ -62,7 +62,7 @@ describe('CLI integration', () => {
   it('status runs and prints the package identity', () => {
     const { stdout, exitCode } = runCli(['status', '--no-probe']);
     expect(exitCode).toBe(0);
-    expect(stdout).toMatch(/unreal-cli v\d+\.\d+\.\d+/);
+    expect(stdout).toMatch(/unreal-mcp-cli v\d+\.\d+\.\d+/);
   });
 
   it('install-engine with no version lists installed engines (no crash)', () => {

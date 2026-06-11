@@ -27,7 +27,7 @@ delivered it. Identifiers below (tool ids, command names, env vars, paths) were 
 | §6 Sidecar lifecycle | **partial** | #4 (spawn / crash auto-restart / orphan-prevention / stdin-token); auto-download + version-skew re-download are TODO stubs (see drift below) |
 | §7 Slate UI | implemented | #24 (AI Game Developer main window) + #29 (MCP Tools/Prompts/Resources/Settings aux windows) |
 | §8 Config & env | implemented | #8 (`UNREAL_MCP_*`, `.env`, on-disk config) |
-| §9.1 cli (`unreal-cli`, 16 commands) | implemented | #3 |
+| §9.1 cli (`unreal-mcp-cli`, 16 commands) | implemented | #3 |
 | §9.2 Versioning | implemented | `commands/bump-version.ps1` single-sources `VersionName` across plugin/bridge/server/cli (the "≥ 6.8.0 w/ ProxyTool" pin is forward-looking — see §2.3 drift below) |
 | §9.3 Test strategy | implemented | bridge xUnit + cli vitest + plugin Automation specs (#13–#25), CI wiring #28 |
 | §9.4 CI (`test_pull_request` / `release` / `test_cli`) | implemented | #28 |
@@ -76,7 +76,7 @@ Prompts/Resources ship empty-but-wired (§10), as designed.
   the sidecar, hands it the one-shot IPC token over **stdin** (§1.4), **crash auto-restarts** it (the
   Connection section reports `Running (restarts: N)` / `Stopped`), and prevents orphans (the sidecar
   self-exits when its parent editor vanishes). The sidecar binary is resolved **only** from
-  `UNREAL_MCP_BRIDGE_PATH` (env/`.env`); `unreal-cli bootstrap-local` builds one from source. What is
+  `UNREAL_MCP_BRIDGE_PATH` (env/`.env`); `unreal-mcp-cli bootstrap-local` builds one from source. What is
   **not yet wired**: the §6 **download-on-first-run** from GitHub Releases and the **version-skew
   re-download/alert** flow are TODO stubs. The §6 download prose is retained as the plan of record,
   not the shipped state.
@@ -133,7 +133,7 @@ Unreal sidecar from a Unity editor.
 C++ prefixes `FUnrealMcp*` / `UUnrealMcp*` / `SUnrealMcp*` (Slate) / `IUnrealMcp*` (interfaces).
 Sidecar assembly/namespace `com.IvanMurzak.Unreal.MCP.Bridge`, binary `unreal-mcp-bridge`.
 Local server host `com.IvanMurzak.Unreal.MCP.Server`, binary `unreal-mcp-server`. npm package
-`unreal-cli`. Tool ids are kebab-case (`actor-create`, `blueprint-compile`) matching Unity/Godot.
+`unreal-mcp-cli`. Tool ids are kebab-case (`actor-create`, `blueprint-compile`) matching Unity/Godot.
 
 Two distinct child processes must not be conflated:
 
@@ -555,7 +555,7 @@ mechanism already shipped and debugged twice (Unity, Godot server downloads).
 - **Dev override:** `UNREAL_MCP_BRIDGE_PATH` env/`.env` var points at a locally built sidecar
   (skips download + version check) — required for the bridge task's inner dev loop and CI.
 - **Offline/air-gapped:** download failure surfaces a main-window alert with the manual unzip path;
-  `unreal-cli bootstrap-local` (§9) automates a from-source build into the same location.
+  `unreal-mcp-cli bootstrap-local` (§9) automates a from-source build into the same location.
 
 ---
 
@@ -636,7 +636,7 @@ the connection-config task).
   inherit no shell exports; UE launched from the Epic launcher has the same problem.
   **Commit hazard mitigation:** a project-root `.env` can hold `UNREAL_MCP_TOKEN`, and UE project
   templates ship no `.gitignore` — so (a) the Unreal-MCP repo's own scaffold `.gitignore`
-  includes `.env`; (b) `unreal-cli configure` appends `.env` to the **target project's**
+  includes `.env`; (b) `unreal-mcp-cli configure` appends `.env` to the **target project's**
   `.gitignore`, creating that file if absent; (c) the docs carry an explicit "never commit
   `.env`" warning.
 - **On-disk config:** **`<Project>/Saved/Config/UnrealMcp/ai-game-developer-config.json`**.
@@ -673,7 +673,7 @@ Unreal-MCP/
 │   ├── src/  publish.(sh|ps1)          # self-contained single-file per RID
 │   └── tests/                          # xUnit (IPC framing, manifest diff, proxy tools, lifecycle)
 ├── Unreal-MCP-Server/                  # thin McpPlugin.Server host (clone of Godot-MCP-Server)
-├── cli/                                # npm `unreal-cli` (TypeScript, vitest, dist/lib.js export)
+├── cli/                                # npm `unreal-mcp-cli` (TypeScript, vitest, dist/lib.js export)
 │                                       #   commands (port of unity-mcp-cli's set, cli/src/commands/):
 │                                       #   create-project, open, close, install-plugin, remove-plugin,
 │                                       #   configure (UNREAL_MCP_* env/.env), setup-mcp, login (device code),
@@ -824,7 +824,7 @@ Prompts and resources ship empty-but-wired in MVP (the framework relays them alr
    timeout always completes the future, and `source-compile`/`blueprint-compile` are async-chained.
 3. **Sidecar/plugin pairing skew or download failure** (offline studios, GitHub throttling,
    antivirus quarantining a fresh exe). *Mitigation:* version handshake hard-check + single
-   auto-redownload; `UNREAL_MCP_BRIDGE_PATH` escape hatch; `unreal-cli bootstrap-local` from-source
+   auto-redownload; `UNREAL_MCP_BRIDGE_PATH` escape hatch; `unreal-mcp-cli bootstrap-local` from-source
    path; clear main-window alert with manual instructions.
 4. **MCP-Plugin-dotnet ProxyTool PR cadence** blocks the sidecar task. *Mitigation:* verified the
    PR is additive-only against current source (§2.3); `UseLocalMcpPlugin=true` local-ref pattern

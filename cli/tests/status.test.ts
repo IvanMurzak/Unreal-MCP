@@ -17,7 +17,7 @@ function tmp(): string {
 describe('getStatus', () => {
   it('returns package identity with no project', async () => {
     const r = await getStatus({ noProbe: true });
-    expect(r.name).toBe('unreal-cli');
+    expect(r.name).toBe('unreal-mcp-cli');
     expect(r.version).toMatch(/^\d+\.\d+\.\d+$/);
     expect(r.project).toBeUndefined();
   });
