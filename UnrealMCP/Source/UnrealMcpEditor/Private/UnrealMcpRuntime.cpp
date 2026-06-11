@@ -32,6 +32,7 @@ void FUnrealMcpRuntime::Startup()
 	UnrealMcpActorTools::Register(*Registry);
 	UnrealMcpBlueprintTools::Register(*Registry); // §10 flagship Blueprint family (CORE)
 	UnrealMcpAssetTools::Register(*Registry); // §10 asset / Content-Browser family (issue #10)
+	UnrealMcpSourceTools::Register(*Registry); // §10 C++ source / script family (issue #18)
 
 	Dispatcher = MakeUnique<FUnrealMcpGameThreadDispatcher>();
 	BridgeServer = MakeUnique<FUnrealMcpBridgeServer>(*Registry, *Dispatcher);
