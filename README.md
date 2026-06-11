@@ -61,8 +61,9 @@ the plugin spawns and talks to over a localhost IPC channel. The full design liv
 # From a clone of this repo (see "unreal-cli" below for the npm story once published):
 cd cli && npm install && npm run build
 
-# Copy or junction the plugin into <YourProject>/Plugins/UnrealMCP, then build the editor target:
-node bin/unreal-cli.js install-plugin --project <YourProject> --junction
+# Copy or junction the plugin into <YourProject>/Plugins/UnrealMCP, then build the editor target.
+# install-plugin takes the project directory as a positional argument:
+node bin/unreal-cli.js install-plugin <YourProject> --junction
 ```
 
 ### Option B — manual
@@ -73,25 +74,32 @@ node bin/unreal-cli.js install-plugin --project <YourProject> --junction
 3. On editor boot the Output Log prints **`[Unreal-MCP] plugin loaded`** — that confirms the plugin
    and its game-thread dispatcher started.
 
-The sidecar binary (`unreal-mcp-bridge`) is **not** bundled: on first connect the plugin downloads
-the matching release into `<YourProject>/Intermediate/UnrealMCP/` (gitignored), or — for local
-development — `unreal-cli bootstrap-local` builds it from source into the same location.
+The sidecar binary (`unreal-mcp-bridge`) is **not** bundled. Today the plugin resolves it from the
+`UNREAL_MCP_BRIDGE_PATH` environment variable: point that at a sidecar binary, or run
+`unreal-cli bootstrap-local` to build the bridge + server from source into
+`<YourProject>/Intermediate/UnrealMCP/` and set the var to the result. With no path resolved, the
+plugin's TCP listener still starts but logs `[Unreal-MCP] no sidecar binary resolved (set
+UNREAL_MCP_BRIDGE_PATH)` and spawns nothing — launch the sidecar manually for the live e2e.
+Automatic download-on-first-connect from GitHub Releases is **planned** (ARCHITECTURE §6) but **not
+yet shipped**.
 
 ## First run
 
-1. Open **Window → AI Game Developer** (or click the toolbar button) to open the main window.
+1. Open the **AI Game Developer** main window from the editor's **Tools** menu (the tab is
+   registered under the Tools menu category).
 2. **Choose a connection mode:**
    - **Cloud** (default) — connects to [ai-game.dev](https://ai-game.dev). Click **Authorize** to
      start the OAuth **device-code flow**: the window shows a verification URL and a short user
      code; open the URL, enter the code, approve, and the editor finishes authorizing. Use
      **Revoke** to clear the stored cloud token.
    - **Custom** — connects to a local `unreal-mcp-server` you run (or any compatible server). Enter
-     the server URL, optionally start the bundled local server from the **MCP server** section, and
-     point your AI client at it.
-3. Watch the **connection timeline** (Unreal → MCP server → AI agent) and the **Bridge status**
-   panel (sidecar state, PID, version, restart count) to confirm everything is live.
+     the server URL and point your AI client at it. (The plugin does not start the local server for
+     you — run `unreal-cli` or your own process; see Troubleshooting.)
+3. The **Connection** section shows a status dot, a status label, and a Connect / Disconnect / Stop
+   button; the bridge status reads `Running (restarts: N)` or `Stopped`. Use them to confirm the
+   sidecar is live.
 4. Point your AI client (Claude Code, Cursor, the AI Game Developer app, …) at the server. The
-   **AI agents** section can auto-write client config for supported agents, or use
+   **AI agents** section lists the agents currently connected; to write an MCP client config use
    `unreal-cli setup-mcp`.
 
 Connection settings persist to `<Project>/Saved/Config/UnrealMcp/ai-game-developer-config.json`
@@ -217,9 +225,9 @@ editor; under headless `-nullrhi` these tools return a structured error.
 
 ## Per-tool enable / disable & Settings
 
-Every tool can be individually enabled or disabled from the **MCP Tools** window
-(**Window → AI Game Developer → Features → Tools**, or the aux **MCP Tools** tab), which also shows
-each tool's token-count estimate. Disabling a tool:
+Every tool can be individually enabled or disabled from the **MCP Tools** window — the standalone
+**MCP Tools** tab (registered under the editor's **Tools** menu). The window shows each tool's
+title, family, and description, plus an "N / M tools enabled" summary line. Disabling a tool:
 
 - **removes it from the served manifest entirely** — it never appears in the MCP `tools/list`; and
 - is **enforced at the execution boundary too** — even if a stale `tools/list` is dispatched, a
@@ -237,7 +245,8 @@ the retained toggle, so a rebuild can never silently re-enable a tool you disabl
 
 The **Settings** page is reachable both as an aux tab and via
 **Project Settings → Plugins → AI Game Developer** (`ISettingsModule`). The **MCP Prompts** and
-**MCP Resources** windows are wired but ship empty in this release (counts show 0).
+**MCP Resources** windows are wired but ship empty in this release — each renders a subdued
+empty-state message (the "N / M enabled" summary is unique to the Tools window).
 
 ## `unreal-cli`
 
@@ -305,8 +314,9 @@ IModularFeatures::Get().RegisterModularFeature(
 
 Unreal-MCP discovers every registered provider on boot (and on late-load / hot-unload), merges
 their tools in deterministic `ExtensionId` order, and surfaces the merged manifest to the sidecar.
-Invalid or duplicate tools are dropped/rejected per-extension without affecting others; each
-extension can be toggled in the **Extensions** UI section.
+Invalid or duplicate tools are dropped/rejected per-extension without affecting others. Individual
+tools (including those contributed by extensions) are toggled in the **MCP Tools** window; there is
+no separate per-extension UI toggle in this release.
 
 - **Full author guide:** [`docs/EXTENSIONS.md`](docs/EXTENSIONS.md)
 - **Working sample:** [`samples/UnrealAITemplate/`](samples/UnrealAITemplate) — a complete,
@@ -328,10 +338,10 @@ The plugin reads configuration with the precedence **process env → `<Project>/
 | `UNREAL_MCP_AUTH_OPTION` | `none` or `required` (local server auth) |
 | `UNREAL_MCP_KEEP_CONNECTED` | Persist/restore the connected state |
 | `UNREAL_MCP_TOOLS` | Enabled-tools override (whitelist; empty = no filter) |
-| `UNREAL_MCP_START_SERVER` | Auto-start the local `unreal-mcp-server` (Custom mode) |
+| `UNREAL_MCP_START_SERVER` | Parsed and persisted as the `startServer` config flag (Custom mode); auto-spawning the local `unreal-mcp-server` is **planned, not yet wired** — no code consumes this flag today, so start the server yourself (e.g. `unreal-cli`). |
 | `UNREAL_MCP_TRANSPORT` | `stdio` or `http` |
 | `UNREAL_MCP_LOG_LEVEL` | Log verbosity |
-| `UNREAL_MCP_BRIDGE_PATH` | **Dev-only.** Path to a locally built sidecar (skips download + version check) |
+| `UNREAL_MCP_BRIDGE_PATH` | Path to a sidecar binary. **Currently the only way the plugin resolves a sidecar** (auto-download is planned §6, not yet shipped). |
 
 > **Never commit `.env`.** A project-root `.env` can hold `UNREAL_MCP_TOKEN`, and UE project
 > templates ship no `.gitignore`. `unreal-cli configure` appends `.env` to the target project's
@@ -349,9 +359,11 @@ The plugin reads configuration with the precedence **process env → `<Project>/
   `-H "Content-Type: application/json"`; without it the server drops the JSON body.
 - **Screenshot tools return a structured error.** Pixel capture needs a GPU-backed editor — they
   cannot render under headless `-nullrhi`.
-- **Sidecar keeps restarting / version mismatch.** Check the **Bridge status** panel; a
-  plugin↔sidecar version skew triggers a single auto-redownload, then a hard-fail alert. Use
-  `UNREAL_MCP_BRIDGE_PATH` or `unreal-cli bootstrap-local` to point at a from-source build.
+- **No sidecar / sidecar keeps restarting.** Check the bridge status in the **Connection** section
+  (`Running (restarts: N)` / `Stopped`). If the log shows `no sidecar binary resolved (set
+  UNREAL_MCP_BRIDGE_PATH)`, no sidecar path was resolved — set `UNREAL_MCP_BRIDGE_PATH` or run
+  `unreal-cli bootstrap-local` to build one from source. (Automatic download and the version-skew
+  redownload/alert are planned §6 behavior, not yet shipped.)
 - **Ports.** IPC uses a deterministic per-project port in `30000–39999`; the local server uses
   `20000–29999`. Both probe forward on a collision, so the exact number is a debugging nicety, not a
   requirement.

@@ -69,6 +69,15 @@ Prompts/Resources ship empty-but-wired (§10), as designed.
 - **Device-code auth (#24).** The cloud OAuth device-code flow shipped in the main window (Authorize
   → `auth-start` → `device-auth` events render the verification URL + user code; Cancel/Revoke wired),
   per §1.3 / §7 item 4.
+- **§7 UI — shipped with partial coverage.** The §7 Slate UI shipped (#24/#29), but three §7 design
+  affordances did **not** make this release: the **toolbar button** (design line 544) — the main
+  window is opened from its nomad tab only, registered under the editor's **Tools** menu category
+  (`WorkspaceMenu::GetMenuStructure().GetToolsCategory()`), not the **Window** menu (design line 571);
+  and the **connection timeline** (Unreal → MCP server → AI agent) — the Connection section ships a
+  single status dot / label / button instead. The bridge status string is `Running (restarts: N)` /
+  `Stopped` (no PID/version), the AI agents section lists connected agents only (no config writing),
+  and there is no in-UI start-local-server control. The status table marks §7 "implemented" for the
+  window + 4 aux windows; these affordances are deferred.
 - **§9.1 `.uplugin` `EngineVersion`.** The §9.1 tree comment reads "EngineVersion floor 5.5.0", but
   the shipped `UnrealMCP.uplugin` carries **no `EngineVersion` field at all** — UE treats it as an
   exact-build match (not a floor) and would refuse to load on newer engines. The 5.5+ floor is a

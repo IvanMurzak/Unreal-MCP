@@ -140,8 +140,12 @@ local copy through its own pipeline.
 - **Game-thread / no-modal-UI tool-handler contract:** all Unreal API calls from tool handlers run on
   the game thread via the dispatcher (§4); the IPC reader thread never executes tool bodies. **A tool
   handler must not pump modal UI and must not synchronously wait on bridge state** — doing either can
-  wedge the editor (ARCHITECTURE §11 risk 2). Long-running work (`source-compile`, `blueprint-compile`)
-  returns a `TFuture` the dispatcher chains; the per-call timeout always completes the future.
+  wedge the editor (ARCHITECTURE §11 risk 2). Tool handlers are **synchronous**
+  (`FUnrealMcpToolHandler = TFunction<FUnrealMcpToolResult(const FUnrealMcpToolCall&)>`): long-running
+  work (`source-compile`, `blueprint-compile`) runs inline on the game thread and blocks it for the
+  duration (ARCHITECTURE §4 envisions an async-chaining `TFuture` handler surface once the registry
+  grows one; until then a compile blocks). Only the dispatcher's `Dispatch()` returns a `TFuture` to
+  the bridge, and the per-call timeout always completes it.
 - **Disabled tools are gated at `Execute()`**, not merely excluded from the manifest — a disabled tool
   is rejected even if a stale `tools/list` dispatches it (`UnrealMcpToolRegistry::Execute`).
 - **Secrets:** `.env` is gitignored and must stay that way (it can hold `UNREAL_MCP_TOKEN`); the sidecar
