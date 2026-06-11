@@ -3,6 +3,7 @@
 **Model Context Protocol (MCP) integration for [Unreal Engine](https://www.unrealengine.com/).**
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![test-pull-request](https://github.com/IvanMurzak/Unreal-MCP/actions/workflows/test_pull_request.yml/badge.svg)](https://github.com/IvanMurzak/Unreal-MCP/actions/workflows/test_pull_request.yml)
 
 > **Status: pre-alpha.** This repository is a scaffold under active development — the plugin
 > compiles and loads, but no MCP tools are implemented yet. Nothing here is released or

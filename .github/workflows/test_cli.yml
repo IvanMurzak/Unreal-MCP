@@ -1,0 +1,48 @@
+# ┌──────────────────────────────────────────────────────────────────┐
+# │  Author: Ivan Murzak (https://github.com/IvanMurzak)             │
+# │  Repository: GitHub (https://github.com/IvanMurzak/Unreal-MCP)   │
+# │  Copyright (c) 2026 Ivan Murzak                                  │
+# │  Licensed under the Apache License, Version 2.0.                 │
+# │  See the LICENSE file in the project root for more information.  │
+# └──────────────────────────────────────────────────────────────────┘
+
+# Reusable workflow: build + test the unreal-cli npm package (cli/) on a
+# Node 20 & 22 matrix. Mirrors Unity-MCP / Godot-MCP test_cli.yml. Called by
+# both test_pull_request.yml (PR signal) and release.yml (pre-publish gate).
+name: test-cli
+
+on:
+  workflow_call:
+
+# Least-privilege: this workflow only reads the checked-out source.
+permissions:
+  contents: read
+
+jobs:
+  test-cli:
+    name: cli (node ${{ matrix.node-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ["20", "22"]
+    defaults:
+      run:
+        working-directory: ./cli
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build TypeScript
+        run: npm run build
+
+      - name: Run tests
+        run: npm test
