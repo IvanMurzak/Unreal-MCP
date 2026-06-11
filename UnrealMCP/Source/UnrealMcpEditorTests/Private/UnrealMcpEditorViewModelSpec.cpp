@@ -199,6 +199,27 @@ void FUnrealMcpEditorViewModelSpec::Define()
 			TestTrue("auth-start attempted", Rec->AuthSent.Contains(TEXT("auth-start")));
 			// Must NOT wedge in a code-less Pending state — fall to Failed so the UI does not show an empty code.
 			TestEqual("not pending when send failed", static_cast<int32>(VM->GetDeviceAuthState()), static_cast<int32>(EUnrealMcpDeviceAuthState::Failed));
+			// And surface a reason so the window shows feedback rather than silently collapsing.
+			TestEqual("no-sidecar reason surfaced", VM->GetDeviceAuthError(), FString(TEXT("No sidecar connected.")));
+		});
+
+		It("surfaces a failed device-auth message and clears it on a fresh Authorize", [this]()
+		{
+			TSharedRef<FRecording> Rec = MakeShared<FRecording>();
+			TSharedRef<FUnrealMcpEditorViewModel> VM = MakeViewModel(Rec);
+
+			// A terminal failed device-auth carries the sidecar's human-readable reason (DeviceAuthMessage.Message)
+			// the UI must surface — without it the pending instructions collapse and the window shows nothing.
+			TSharedPtr<FJsonObject> Failed = MakeShared<FJsonObject>();
+			Failed->SetStringField(TEXT("state"), TEXT("failed"));
+			Failed->SetStringField(TEXT("message"), TEXT("Authorization was denied."));
+			VM->ApplyDeviceAuth(Failed);
+			TestEqual("failed state", static_cast<int32>(VM->GetDeviceAuthState()), static_cast<int32>(EUnrealMcpDeviceAuthState::Failed));
+			TestEqual("failure reason surfaced", VM->GetDeviceAuthError(), FString(TEXT("Authorization was denied.")));
+
+			// A fresh Authorize clears the stale failure reason before starting the new flow.
+			VM->Authorize();
+			TestTrue("error cleared on re-authorize", VM->GetDeviceAuthError().IsEmpty());
 		});
 
 		It("Revoke clears the cloud token, sends auth-revoke and pushes the now-anonymous config", [this]()

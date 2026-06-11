@@ -91,11 +91,15 @@ void FUnrealMcpEditorViewModel::Authorize()
 {
 	DeviceVerificationUrl.Reset();
 	DeviceUserCode.Reset();
+	DeviceAuthError.Reset();
 	// Only enter Pending if the auth-start frame actually reached the sidecar. SendAuthMessage returns false
 	// when no sidecar is connected/handshaken; entering Pending regardless would wedge the UI showing
 	// "Complete authorization in your browser…" with an empty user code until the user manually cancels.
 	const bool bSent = OnSendAuth ? OnSendAuth(TEXT("auth-start")) : false;
 	DeviceAuthState = bSent ? EUnrealMcpDeviceAuthState::Pending : EUnrealMcpDeviceAuthState::Failed;
+	// Surface a reason for the Failed state so the window does not silently collapse the pending instructions.
+	if (!bSent)
+		DeviceAuthError = TEXT("No sidecar connected.");
 }
 
 void FUnrealMcpEditorViewModel::CancelAuth()
@@ -103,6 +107,7 @@ void FUnrealMcpEditorViewModel::CancelAuth()
 	DeviceAuthState = EUnrealMcpDeviceAuthState::Idle;
 	DeviceVerificationUrl.Reset();
 	DeviceUserCode.Reset();
+	DeviceAuthError.Reset();
 	if (OnSendAuth)
 		OnSendAuth(TEXT("auth-cancel"));
 }
@@ -113,6 +118,7 @@ void FUnrealMcpEditorViewModel::Revoke()
 	DeviceAuthState = EUnrealMcpDeviceAuthState::Idle;
 	DeviceVerificationUrl.Reset();
 	DeviceUserCode.Reset();
+	DeviceAuthError.Reset();
 	if (OnSendAuth)
 		OnSendAuth(TEXT("auth-revoke"));
 	// CloudToken changed — persist (Save restores env/.env overrides) and push the now-anonymous config.
@@ -181,6 +187,7 @@ void FUnrealMcpEditorViewModel::ApplyDeviceAuth(const TSharedPtr<FJsonObject>& D
 		if (StateRaw.Equals(TEXT("authorized"), ESearchCase::IgnoreCase) || StateRaw.Equals(TEXT("success"), ESearchCase::IgnoreCase))
 		{
 			DeviceAuthState = EUnrealMcpDeviceAuthState::Authorized;
+			DeviceAuthError.Reset();
 			// The sidecar stored the token; mirror its presence so the UI flips to the Revoke affordance, and
 			// PERSIST + PUSH it (like Revoke does): without this the bearer is lost on editor restart (never
 			// written to the §8 config store) and the bridge's effective config never learns it, so a "Restart
@@ -196,10 +203,19 @@ void FUnrealMcpEditorViewModel::ApplyDeviceAuth(const TSharedPtr<FJsonObject>& D
 		else if (StateRaw.Equals(TEXT("failed"), ESearchCase::IgnoreCase) || StateRaw.Equals(TEXT("denied"), ESearchCase::IgnoreCase) || StateRaw.Equals(TEXT("expired"), ESearchCase::IgnoreCase))
 		{
 			DeviceAuthState = EUnrealMcpDeviceAuthState::Failed;
+			// Surface the sidecar's human-readable reason (DeviceAuthMessage.Message — "Authorization was
+			// denied." / "The authorization request expired." / "Could not start authorization.") so the
+			// window shows feedback instead of silently collapsing the pending instructions.
+			FString Message;
+			if (DeviceAuth->TryGetStringField(TEXT("message"), Message) && !Message.IsEmpty())
+				DeviceAuthError = Message;
+			else if (DeviceAuthError.IsEmpty())
+				DeviceAuthError = TEXT("Authorization failed.");
 		}
 		else if (StateRaw.Equals(TEXT("pending"), ESearchCase::IgnoreCase))
 		{
 			DeviceAuthState = EUnrealMcpDeviceAuthState::Pending;
+			DeviceAuthError.Reset();
 		}
 	}
 

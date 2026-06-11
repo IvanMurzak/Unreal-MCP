@@ -15,6 +15,7 @@ using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 using com.IvanMurzak.Unreal.MCP.Bridge.Auth;
+using com.IvanMurzak.Unreal.MCP.Bridge.Host;
 using com.IvanMurzak.Unreal.MCP.Bridge.Ipc;
 using Xunit;
 
@@ -182,6 +183,42 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             var result = await auth.AuthorizeAsync("", null, _ => Task.CompletedTask, CancellationToken.None);
             Assert.False(result.Success);
             Assert.Equal(0, handler.AuthorizeCalls);
+        }
+
+        [Fact]
+        public async Task CommitAuthorizedSession_CancelledFlow_DoesNotResurrectToken()
+        {
+            // The cancel race (docs/ARCHITECTURE.md §7 item 4): an auth-cancel/auth-revoke can land between the
+            // device-code flow's final successful poll and the commit. The commit MUST NOT resurrect a bearer the
+            // user just cancelled/revoked. (Port 39998 is never dialed — the guard returns before SignalR.)
+            var ipc = new IpcClient("127.0.0.1", 39998, token: "ipc-token", sidecarVersion: "0.1.0");
+            using var host = new SidecarHost(ipc, "0.1.0");
+
+            using var cts = new CancellationTokenSource();
+            cts.Cancel();
+            await host.CommitAuthorizedSessionAsync("cloud-bearer-abc", cts.Token);
+            Assert.Null(host.Config.Token); // the guard bailed — the just-cancelled bearer is NOT stored
+
+            // Control: an uncancelled commit DOES store the bearer, proving the guard (not a no-op) blocks it.
+            await host.CommitAuthorizedSessionAsync("cloud-bearer-abc", CancellationToken.None);
+            Assert.Equal("cloud-bearer-abc", host.Config.Token);
+        }
+
+        [Theory]
+        // expected uses ConfigTransition's underlying values (None=0, Disconnect=1, Reconnect=2) — the internal
+        // enum cannot appear in this public xUnit signature, so it is cast to int inside the body.
+        // keepConnected edges: armed→disarmed tears down; disarmed→armed (re)connects.
+        [InlineData(true, false, false, (int)SidecarHost.ConfigTransition.Disconnect)]
+        [InlineData(false, true, false, (int)SidecarHost.ConfigTransition.Reconnect)]
+        // Still armed + host/token changed → re-dial so SignalR leaves the stale endpoint (the §7 medium fix).
+        [InlineData(true, true, true, (int)SidecarHost.ConfigTransition.Reconnect)]
+        // Still armed, nothing changed → no churn; not armed + host changed → no connect.
+        [InlineData(true, true, false, (int)SidecarHost.ConfigTransition.None)]
+        [InlineData(false, false, true, (int)SidecarHost.ConfigTransition.None)]
+        public void DecideConfigTransition_CoversTheKeepConnectedAndEndpointChangeMatrix(
+            bool wasKeepConnected, bool nowKeepConnected, bool hostOrTokenChanged, int expected)
+        {
+            Assert.Equal(expected, (int)SidecarHost.DecideConfigTransition(wasKeepConnected, nowKeepConnected, hostOrTokenChanged));
         }
     }
 }

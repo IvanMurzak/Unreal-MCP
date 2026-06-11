@@ -8,8 +8,6 @@
 #include "Widgets/DeclarativeSyntaxSupport.h"
 #include "UI/UnrealMcpEditorViewModel.h"
 
-class SEditableTextBox;
-
 /**
  * The "AI Game Developer" main window (docs/ARCHITECTURE.md §7), a pure-Slate compound widget — NO UMG /
  * editor-utility dependency. Hosted in the nomad dockable tab registered by FUnrealMcpMainWindowTab. Every
@@ -45,7 +43,6 @@ private:
 
 	// Whether the masked Custom-mode token field is currently revealed (reveal-on-hold, §8).
 	bool bRevealToken = false;
-	TSharedPtr<SEditableTextBox> CustomHostBox;
 
 	// Section builders (each returns a Slate widget; kept separate so §7's ordering reads top-to-bottom).
 	TSharedRef<SWidget> BuildHeaderSection();

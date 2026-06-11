@@ -161,15 +161,49 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         {
             // §8 "on change": the plugin re-pushed the effective connection config. Apply it, then honour a
             // keepConnected transition: false → genuinely tear down SignalR (the §7 / Godot M9b Disconnect
-            // lesson — not merely drop one link); false→true → (re)connect.
+            // lesson — not merely drop one link); false→true → (re)connect. A host/token change WHILE still
+            // armed must also re-dial (below) — otherwise SignalR stays bound to the stale endpoint.
             var wasKeepConnected = _config.KeepConnected;
+            var priorHost = _config.Host;
+            var priorToken = _config.Token;
             ApplyConnectionConfig(config);
             _logger?.LogInformation("Applied updated connection config (mode-aware host {Host}).", _config.Host);
 
-            if (wasKeepConnected && !_config.KeepConnected)
-                _ = RunConnectionTransition(HandleDisconnectAsync);
-            else if (!wasKeepConnected && _config.KeepConnected)
-                _ = RunConnectionTransition(() => ReconnectAsync());
+            var hostOrTokenChanged =
+                !string.Equals(priorHost, _config.Host, StringComparison.Ordinal) ||
+                !string.Equals(priorToken, _config.Token, StringComparison.Ordinal);
+
+            switch (DecideConfigTransition(wasKeepConnected, _config.KeepConnected, hostOrTokenChanged))
+            {
+                case ConfigTransition.Disconnect:
+                    _ = RunConnectionTransition(HandleDisconnectAsync);
+                    break;
+                case ConfigTransition.Reconnect:
+                    _ = RunConnectionTransition(() => ReconnectAsync());
+                    break;
+            }
+        }
+
+        internal enum ConfigTransition { None, Disconnect, Reconnect }
+
+        /// <summary>
+        /// Decide how a §8 config push affects the live SignalR link. A keepConnected edge drives a full
+        /// disconnect (true→false, the §7 / Godot M9b Disconnect lesson — not merely drop one link) or a
+        /// reconnect (false→true). A host/token change WHILE still armed ALSO forces a reconnect: otherwise the
+        /// user switching Cloud↔Custom, editing the Server URL, or changing/generating the token while connected
+        /// leaves SignalR bound to the stale endpoint while the UI still reports "Connected". Pure so the bridge
+        /// xUnit suite locks the matrix without a live plugin; the serialized-transition queue keeps the issued
+        /// reconnect last-write-wins safe.
+        /// </summary>
+        internal static ConfigTransition DecideConfigTransition(bool wasKeepConnected, bool nowKeepConnected, bool hostOrTokenChanged)
+        {
+            if (wasKeepConnected && !nowKeepConnected)
+                return ConfigTransition.Disconnect;
+            if (!wasKeepConnected && nowKeepConnected)
+                return ConfigTransition.Reconnect;
+            if (nowKeepConnected && hostOrTokenChanged)
+                return ConfigTransition.Reconnect;
+            return ConfigTransition.None;
         }
 
         /// <summary>
@@ -264,19 +298,31 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
                     ct).ConfigureAwait(false);
 
                 if (result.Success && result.Token != null)
-                {
-                    _config.Token = result.Token; // the issued cloud bearer is NEVER logged (§8)
-                    // Reconnect through the serialized transition queue and surface the ACTUAL connect outcome —
-                    // do not claim "Connected" if SignalR is still establishing (mirrors ConnectSignalRAsync).
-                    var connected = false;
-                    await RunConnectionTransition(async () => connected = await ReconnectAsync().ConfigureAwait(false)).ConfigureAwait(false);
-                    await EmitStatusAsync(connected ? "Connected" : "Connecting", cloudAuthState: "Authorized").ConfigureAwait(false);
-                }
+                    await CommitAuthorizedSessionAsync(result.Token, ct).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
                 _logger?.LogWarning("Device-code flow ended with an error: {Message}", ex.Message);
             }
+        }
+
+        /// <summary>
+        /// Store the issued cloud bearer and reconnect SignalR so it takes effect. Guards the success-to-store
+        /// window: an auth-cancel/auth-revoke can land between the flow's final successful poll and here, and
+        /// (for revoke) already cleared the token — storing it now would resurrect a bearer the user just
+        /// cancelled/revoked. Bail before storing/reconnecting/emitting when the flow was cancelled. Internal so
+        /// the bridge xUnit suite can assert the guard without driving the whole HTTP flow.
+        /// </summary>
+        internal async Task CommitAuthorizedSessionAsync(string token, CancellationToken ct)
+        {
+            if (ct.IsCancellationRequested)
+                return;
+            _config.Token = token; // the issued cloud bearer is NEVER logged (§8)
+            // Reconnect through the serialized transition queue and surface the ACTUAL connect outcome —
+            // do not claim "Connected" if SignalR is still establishing (mirrors ConnectSignalRAsync).
+            var connected = false;
+            await RunConnectionTransition(async () => connected = await ReconnectAsync().ConfigureAwait(false)).ConfigureAwait(false);
+            await EmitStatusAsync(connected ? "Connected" : "Connecting", cloudAuthState: "Authorized").ConfigureAwait(false);
         }
 
         /// <summary>Fully disconnect SignalR (auth-revoke / Disconnect), then surface a Disconnected status.</summary>

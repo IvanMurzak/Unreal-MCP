@@ -166,7 +166,7 @@ TSharedRef<SWidget> SUnrealMcpMainWindow::BuildConnectionSection()
 				]
 				+ SVerticalBox::Slot().AutoHeight().Padding(0, 2, 0, 0)
 				[
-					SAssignNew(CustomHostBox, SEditableTextBox)
+					SNew(SEditableTextBox)
 					.Text_Lambda([this]()
 					{
 						return IsViewModelValid() ? FText::FromString(ViewModel->GetCustomHost()) : FText::GetEmpty();
@@ -354,6 +354,23 @@ TSharedRef<SWidget> SUnrealMcpMainWindow::BuildCloudAuthSection()
 						? EVisibility::Visible : EVisibility::Collapsed;
 				})
 				.Text(LOCTEXT("Authorized", "Authorized — cloud token stored."))
+			]
+			// Failure reason (denial / expiry / no sidecar) — without this the pending instructions just
+			// collapse on failure and the window shows no feedback for an AC-level flow.
+			+ SVerticalBox::Slot().AutoHeight().Padding(0, 6, 0, 0)
+			[
+				SNew(STextBlock)
+				.AutoWrapText(true)
+				.ColorAndOpacity(FLinearColor(0.95f, 0.4f, 0.4f))
+				.Visibility_Lambda([this]()
+				{
+					return IsViewModelValid() && ViewModel->GetDeviceAuthState() == EUnrealMcpDeviceAuthState::Failed
+						? EVisibility::Visible : EVisibility::Collapsed;
+				})
+				.Text_Lambda([this]()
+				{
+					return IsViewModelValid() ? FText::FromString(ViewModel->GetDeviceAuthError()) : FText::GetEmpty();
+				})
 			]
 		];
 

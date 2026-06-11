@@ -114,6 +114,8 @@ public:
 	EUnrealMcpDeviceAuthState GetDeviceAuthState() const { return DeviceAuthState; }
 	const FString& GetDeviceVerificationUrl() const { return DeviceVerificationUrl; }
 	const FString& GetDeviceUserCode() const { return DeviceUserCode; }
+	/** The human-readable failure reason surfaced while the device-code flow is Failed (empty otherwise). */
+	const FString& GetDeviceAuthError() const { return DeviceAuthError; }
 
 	/** Authorize: begin the device-code flow (sends `auth-start`; the sidecar drives the real flow). */
 	UNREALMCPEDITOR_API void Authorize();
@@ -171,6 +173,7 @@ private:
 	EUnrealMcpDeviceAuthState DeviceAuthState = EUnrealMcpDeviceAuthState::Idle;
 	FString DeviceVerificationUrl;
 	FString DeviceUserCode;
+	FString DeviceAuthError;
 	TArray<FString> AiAgents;
 
 	// Persist (if a sink is wired) then push the §1.3 config to the sidecar (if a sink is wired).
