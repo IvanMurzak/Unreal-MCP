@@ -10,6 +10,35 @@ The authoritative design is [`docs/ARCHITECTURE.md`](ARCHITECTURE.md) §9
 keep the two in lockstep, and keep the CI command surface 1:1 with the
 implement-task profile `test.md` (infra repo).
 
+## Release checklist — operator-gated leaves (NONE fired automatically)
+
+The following actions are **deliberately operator-gated** and are **not** performed by a normal
+merge, by CI on a feature/docs PR, or by any automated task. As of this writing **none of them has
+fired** — Unreal-MCP has no GitHub Release, no `v*` tag, no published npm package, and no Fab
+listing. Each requires a deliberate human decision (and, for the first release, one-time setup):
+
+- [ ] **First GitHub Release + `v<version>` tag.** Fires only when a deliberate `VersionName` bump
+      lands on `main` (run `commands/bump-version.ps1`, commit, merge) on an untagged version — or a
+      manual `workflow_dispatch` with `dry_run=false`. `release.yml`'s `check-version` gate keeps
+      this inert otherwise. Verify with `gh release list` (expect empty) and
+      `git ls-remote --tags` (expect no `v*` tags) until you intend to publish.
+- [ ] **npm `unreal-cli` publish.** Two one-time prerequisites, both owner actions, must be done
+      **before** the first release or `publish-npm` fails auth and nothing is published:
+      1. **Flip `cli/package.json` `"private": true` → remove it** (or set `false`) in the same bump
+         commit that cuts the first release. While `private: true` stands, npm refuses to publish.
+      2. **Configure an npm Trusted Publisher** for the `unreal-cli` package on npmjs.com authorizing
+         this repository + the `release.yml` workflow. Publishing uses OIDC Trusted Publishing
+         (`id-token: write`), **not** a stored `NPM_TOKEN`. See
+         <https://docs.npmjs.com/trusted-publishers>.
+- [ ] **Fab (Epic marketplace) submission.** Entirely manual and **out of scope of every CI
+      workflow** — the release pipeline produces an engine-agnostic source-plugin zip
+      (BuildPlugin output), but no job submits to Fab. Fab carries its own metadata/screenshot
+      requirements and an Epic review; do it by hand when the listing is ready.
+
+A normal merge to `main` publishes nothing; the version gate keeps `release.yml` inert. The safe
+rehearsal is a `dry_run=true` dispatch (below), which exercises the test + artifact jobs and
+hard-skips every tag/Release/npm-publish job.
+
 ## Workflows at a glance
 
 | Workflow | Trigger | What it does |
