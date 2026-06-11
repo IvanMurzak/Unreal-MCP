@@ -470,8 +470,12 @@ bool FUnrealMcpToolRegistry::ShouldToolBeEnabled(const FString& Name) const
 	// name is NOT in the §7 blocklist. Both sets are retained members, so this is the single source of truth
 	// shared by Commit (per-registration) and RecomputeEnablement (per-filter-change) — neither can clobber the
 	// other's intent.
-	const bool bPassesWhitelist = EnabledToolsWhitelist.IsEmpty() || EnabledToolsWhitelist.Contains(Name);
-	return bPassesWhitelist && !DisabledToolNames.Contains(Name);
+	return PassesEnabledToolsWhitelist(Name) && !DisabledToolNames.Contains(Name);
+}
+
+bool FUnrealMcpToolRegistry::PassesEnabledToolsWhitelist(const FString& Name) const
+{
+	return EnabledToolsWhitelist.IsEmpty() || EnabledToolsWhitelist.Contains(Name);
 }
 
 void FUnrealMcpToolRegistry::RecomputeEnablement()
@@ -507,6 +511,13 @@ FUnrealMcpToolResult FUnrealMcpToolRegistry::Execute(const FString& Name, const 
 	const FUnrealMcpRegisteredTool* Found = Tools.Find(Name);
 	if (Found == nullptr || !Found->Handler)
 		return FUnrealMcpToolResult::Error(FString::Printf(TEXT("Unknown tool '%s'."), *Name));
+
+	// The §7 blocklist / §8 whitelist are authoritative at the execution boundary, not merely advisory via
+	// manifest exclusion: a disabled tool is DROPPED from BuildManifestJson, but a sidecar that has not yet
+	// applied a re-pushed manifest (toggle → push race) — or any non-conforming caller — could still dispatch
+	// it by name. Gate here so a disabled tool can never run, even if it leaked into a stale tools/list.
+	if (!Found->bEnabled)
+		return FUnrealMcpToolResult::Error(FString::Printf(TEXT("Tool '%s' is disabled."), *Name));
 
 	return Found->Handler(Call);
 }

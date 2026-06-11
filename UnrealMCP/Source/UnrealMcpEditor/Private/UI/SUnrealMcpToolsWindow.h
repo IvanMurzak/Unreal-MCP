@@ -16,6 +16,10 @@ struct FUnrealMcpToolListEntry
 	FString Title;
 	FString Description;
 	FString ExtensionId; // "core" or an extension id (§5) — surfaced as the family label.
+	// Whether the tool passes the §8 EnabledTools whitelist gate (static, env-driven). A non-whitelisted tool is
+	// served-disabled regardless of the §7 blocklist toggle, so the window renders its row gated rather than
+	// pretending the per-tool checkbox controls it. Defaults true (the common "no whitelist" case).
+	bool bWhitelisted = true;
 };
 
 /**
@@ -23,9 +27,10 @@ struct FUnrealMcpToolListEntry
  * — NO UMG / editor-utility dependency. Lists every registered tool (across all families, enabled or not) with a
  * per-tool enable/disable checkbox. Toggling routes through the shared FUnrealMcpEditorViewModel, which persists
  * the choice to the §8 config store and asks the runtime to exclude/restore the tool in the served manifest
- * (so the sidecar's tools/list drops/restores it over the wire). The tool set is snapshotted at Construct (it is
- * static after boot); each row's checkbox binds live to the view-model so the rendered state always reflects the
- * persisted blocklist.
+ * (so the sidecar's tools/list drops/restores it over the wire). The tool set is snapshotted at Construct; each
+ * row's checkbox binds live to the view-model so a blocklist edit renders immediately. A tool that fails the §8
+ * EnabledTools whitelist gate is rendered gated (row disabled + annotated) and excluded from the "N / M enabled"
+ * count, so the window matches the registry's effective served manifest rather than the blocklist alone.
  */
 class SUnrealMcpToolsWindow : public SCompoundWidget
 {

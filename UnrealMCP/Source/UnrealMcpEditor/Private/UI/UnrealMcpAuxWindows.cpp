@@ -81,9 +81,10 @@ void FUnrealMcpAuxWindows::Register(
 		.SetGroup(Group)
 		.SetIcon(FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Toolbar.Settings"));
 
-	// Also register the Settings page as a Project Settings section rendering the SAME widget (§7) — UE users
-	// expect Project Settings discoverability. The nomad tab satisfies the 4-aux-windows mandate; this is the
-	// additional, conventional entry point. Both read/write the same view-model, so they stay consistent.
+	// Also register the Settings page as a Project Settings section rendering a SECOND SUnrealMcpSettingsWindow
+	// instance (§7) — UE users expect Project Settings discoverability. The nomad tab satisfies the 4-aux-windows
+	// mandate; this is the additional, conventional entry point. Both instances bind the same view-model, so they
+	// read/write identical state and stay consistent.
 	if (ISettingsModule* Settings = FModuleManager::GetModulePtr<ISettingsModule>("Settings"))
 	{
 		Settings->RegisterSettings(

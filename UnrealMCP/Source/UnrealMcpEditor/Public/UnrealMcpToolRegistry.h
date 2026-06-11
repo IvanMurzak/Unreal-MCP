@@ -227,6 +227,13 @@ public:
 	int32 NumEnabled() const;
 
 	/**
+	 * True iff @p Name passes the §8 EnabledTools whitelist gate (the whitelist is empty, or the name is listed) —
+	 * the STATIC env-driven dimension of the served predicate, independent of the §7 runtime blocklist. The §7
+	 * MCP Tools window reads this to surface whitelist-gated tools, which the per-tool UI toggle cannot re-enable.
+	 */
+	bool PassesEnabledToolsWhitelist(const FString& Name) const;
+
+	/**
 	 * Set one tool's enabled flag directly — a GRANULAR helper, NOT the production §7 toggle. The Tools-window
 	 * path is view-model → OnToolEnablementChanged → ApplyDisabledTools (a whole-blocklist re-apply); this method
 	 * is the single-name primitive used by tests and any future single-tool caller. It does NOT update the

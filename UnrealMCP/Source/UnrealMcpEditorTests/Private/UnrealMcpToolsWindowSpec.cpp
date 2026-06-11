@@ -300,6 +300,60 @@ void FUnrealMcpToolsWindowSpec::Define()
 			RegisterExtensionTool(Registry, TEXT("com.example.ext"), TEXT("ext-tool"));
 			TestFalse("non-whitelisted ext-tool STILL excluded after rebuild", ManifestToolNames(Registry).Contains(TEXT("ext-tool")));
 		});
+
+		It("reports the whitelist gate independently of the blocklist (the §7 window's data source)", [this]()
+		{
+			// SUnrealMcpToolsWindow snapshots PassesEnabledToolsWhitelist() to render whitelist-gated rows; it is the
+			// STATIC env dimension, so it must NOT react to the §7 blocklist (which ApplyDisabledTools drives).
+			FUnrealMcpToolRegistry Registry;
+			SeedTools(Registry);
+			TestTrue("empty whitelist → every tool passes", Registry.PassesEnabledToolsWhitelist(TEXT("beta")));
+
+			Registry.SetEnabledToolsFilter({ TEXT("alpha") });
+			TestTrue("whitelisted name passes", Registry.PassesEnabledToolsWhitelist(TEXT("alpha")));
+			TestFalse("non-whitelisted name fails", Registry.PassesEnabledToolsWhitelist(TEXT("beta")));
+
+			// Blocklisting alpha must not change its whitelist verdict — the two dimensions are orthogonal.
+			Registry.ApplyDisabledTools({ TEXT("alpha") });
+			TestTrue("blocklist does not flip the whitelist verdict", Registry.PassesEnabledToolsWhitelist(TEXT("alpha")));
+		});
+	});
+
+	Describe("Execute enablement gate (§7/§8 execution boundary)", [this]()
+	{
+		It("refuses to dispatch a blocklisted tool and serves an enabled one", [this]()
+		{
+			FUnrealMcpToolRegistry Registry;
+			SeedTools(Registry);
+			Registry.ApplyDisabledTools({ TEXT("beta") }); // beta blocklisted (§7)
+
+			const FUnrealMcpToolResult Disabled = Registry.Execute(TEXT("beta"), FUnrealMcpToolCall{});
+			TestFalse("blocklisted tool does not execute", Disabled.bSuccess);
+			TestTrue("error names the disabled tool", Disabled.Message.Contains(TEXT("disabled")));
+
+			const FUnrealMcpToolResult Enabled = Registry.Execute(TEXT("alpha"), FUnrealMcpToolCall{});
+			TestTrue("enabled tool still executes", Enabled.bSuccess);
+
+			const FUnrealMcpToolResult Unknown = Registry.Execute(TEXT("does-not-exist"), FUnrealMcpToolCall{});
+			TestFalse("unknown tool still errors", Unknown.bSuccess);
+			TestTrue("unknown-tool error is distinct from the disabled error", Unknown.Message.Contains(TEXT("Unknown")));
+		});
+
+		It("refuses to dispatch a non-whitelisted tool (§8 stale-manifest race guard)", [this]()
+		{
+			// The gate is authoritative even when the manifest exclusion has not yet propagated to the sidecar: a
+			// tool the §8 whitelist excludes must never run, regardless of any stale tools/list the caller holds.
+			FUnrealMcpToolRegistry Registry;
+			SeedTools(Registry);
+			Registry.SetEnabledToolsFilter({ TEXT("alpha") }); // only alpha whitelisted; beta/gamma gated off
+
+			const FUnrealMcpToolResult Gated = Registry.Execute(TEXT("gamma"), FUnrealMcpToolCall{});
+			TestFalse("non-whitelisted tool does not execute", Gated.bSuccess);
+			TestTrue("error names the disabled tool", Gated.Message.Contains(TEXT("disabled")));
+
+			const FUnrealMcpToolResult Served = Registry.Execute(TEXT("alpha"), FUnrealMcpToolCall{});
+			TestTrue("whitelisted tool executes", Served.bSuccess);
+		});
 	});
 }
 

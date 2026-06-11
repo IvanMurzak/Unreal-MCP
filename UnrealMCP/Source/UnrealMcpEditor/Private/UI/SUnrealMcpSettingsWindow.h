@@ -14,9 +14,10 @@ class FUnrealMcpEditorViewModel;
  * compound widget — NO UMG. Reads and writes the §8 config (connection mode, Custom-mode server host, auth
  * option + masked token) through the shared FUnrealMcpEditorViewModel, which persists every edit to the §8
  * store and pushes it over IPC. The bound IPC port is surfaced read-only via a provider (the port is
- * deterministic per project / chosen at bind time — not a user-editable field). The SAME widget instance is
- * hosted by both the nomad "Settings" tab AND the "Project → Plugins → AI Game Developer" ISettingsModule
- * section, so UE users find it where they expect (§7).
+ * deterministic per project / chosen at bind time — not a user-editable field). TWO instances of this widget are
+ * hosted — one by the nomad "Settings" tab, one by the "Project → Plugins → AI Game Developer" ISettingsModule
+ * section — so UE users find it where they expect (§7). Both bind the SAME shared view-model, so the two views
+ * read and write identical state and stay consistent.
  */
 class SUnrealMcpSettingsWindow : public SCompoundWidget
 {

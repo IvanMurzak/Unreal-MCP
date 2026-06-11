@@ -211,7 +211,8 @@ void FUnrealMcpRuntime::Startup()
 				for (const FString& Name : RegistryPtr->GetToolNamesSorted())
 				{
 					if (const FUnrealMcpRegisteredTool* Tool = RegistryPtr->Find(Name))
-						Entries.Add(FUnrealMcpToolListEntry{ Tool->Name, Tool->Title, Tool->Description, Tool->ExtensionId });
+						Entries.Add(FUnrealMcpToolListEntry{ Tool->Name, Tool->Title, Tool->Description, Tool->ExtensionId,
+							RegistryPtr->PassesEnabledToolsWhitelist(Name) });
 				}
 			}
 			return Entries;

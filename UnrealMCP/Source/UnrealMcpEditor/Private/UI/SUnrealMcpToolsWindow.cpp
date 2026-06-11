@@ -66,7 +66,9 @@ FText SUnrealMcpToolsWindow::GetSummaryText() const
 	{
 		for (const FUnrealMcpToolListEntry& Entry : Tools)
 		{
-			if (!ViewModel->IsToolDisabled(Entry.Name))
+			// Count the EFFECTIVE served state (§8): served iff it passes the env whitelist gate AND the user has
+			// not blocklisted it — matching the registry's manifest, not the §7 blocklist alone.
+			if (Entry.bWhitelisted && !ViewModel->IsToolDisabled(Entry.Name))
 				++Enabled;
 		}
 	}
@@ -77,6 +79,7 @@ FText SUnrealMcpToolsWindow::GetSummaryText() const
 TSharedRef<SWidget> SUnrealMcpToolsWindow::BuildToolRow(const FUnrealMcpToolListEntry& Entry)
 {
 	const FString ToolName = Entry.Name;
+	const bool bWhitelisted = Entry.bWhitelisted;
 	const FString Family = Entry.ExtensionId.IsEmpty() ? TEXT("core") : Entry.ExtensionId;
 	const FText Heading = Entry.Title.IsEmpty()
 		? FText::FromString(Entry.Name)
@@ -87,12 +90,16 @@ TSharedRef<SWidget> SUnrealMcpToolsWindow::BuildToolRow(const FUnrealMcpToolList
 		.Padding(8.0f)
 		[
 			SNew(SHorizontalBox)
-			// Per-tool enable/disable checkbox.
+			// Per-tool enable/disable checkbox. A whitelist-gated tool (§8) is served-disabled regardless of the
+			// §7 blocklist, so its checkbox is forced unchecked + disabled — toggling it would have no wire effect.
 			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Top).Padding(0, 0, 8, 0)
 			[
 				SNew(SCheckBox)
-				.IsChecked_Lambda([this, ToolName]()
+				.IsEnabled(bWhitelisted)
+				.IsChecked_Lambda([this, ToolName, bWhitelisted]()
 				{
+					if (!bWhitelisted)
+						return ECheckBoxState::Unchecked; // never served — the §8 whitelist excludes it
 					const bool bEnabled = ViewModel.IsValid() ? !ViewModel->IsToolDisabled(ToolName) : true;
 					return bEnabled ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
 				})
@@ -116,6 +123,15 @@ TSharedRef<SWidget> SUnrealMcpToolsWindow::BuildToolRow(const FUnrealMcpToolList
 					[
 						SNew(STextBlock)
 						.Text(FText::FromString(Family))
+						.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+					]
+					// Whitelist-gate annotation (§8): the tool is excluded by the EnabledTools filter and cannot be
+					// re-enabled from this window — make that explicit instead of showing an inert checked row.
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(8, 0, 0, 0)
+					[
+						SNew(STextBlock)
+						.Visibility(bWhitelisted ? EVisibility::Collapsed : EVisibility::Visible)
+						.Text(LOCTEXT("ToolWhitelistGated", "disabled by the EnabledTools filter"))
 						.ColorAndOpacity(FSlateColor::UseSubduedForeground())
 					]
 				]
