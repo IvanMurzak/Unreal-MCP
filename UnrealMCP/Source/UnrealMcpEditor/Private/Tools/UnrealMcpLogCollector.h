@@ -30,10 +30,11 @@ struct FUnrealMcpLogEntry
  * guarded by a critical section and `CanBeUsedOnAnyThread()` returns true. The capture path NEVER logs
  * (that would recurse through `GLog` back into `Serialize`).
  *
- * Lifecycle: a function-local singleton (lives until program exit, i.e. strictly longer than `GLog`).
- * `Startup()`/`Shutdown()` register/deregister with `GLog` and are idempotent — `Shutdown()` MUST run
- * at module teardown so no dangling listener remains on `GLog` (an orphaned device crashes the editor
- * on exit).
+ * Lifecycle: a function-local singleton constructed during module startup (after `GLog` already
+ * exists) and destroyed in reverse construction order — i.e. BEFORE `GLog` — so the destructor can
+ * safely deregister itself from a still-live `GLog`. `Startup()`/`Shutdown()` register/deregister and
+ * are idempotent — `Shutdown()` MUST still run at module teardown so no dangling listener lingers on
+ * `GLog` while the editor keeps running (an orphaned device crashes the editor on exit).
  */
 class UNREALMCPEDITOR_API FUnrealMcpLogCollector : public FOutputDevice
 {

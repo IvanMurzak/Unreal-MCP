@@ -292,6 +292,45 @@ void FUnrealMcpEditorToolsSpec::Define()
 			BadMethod->SetStringField(TEXT("method"), TEXT("NoSuchMethod_zzz"));
 			TestFalse(TEXT("unknown method is an error"), Run(Registry, TEXT("reflection-method-call"), BadMethod).bSuccess);
 		});
+
+		It("rejects an ambiguous target+class pair instead of silently preferring one", [this]()
+		{
+			FUnrealMcpToolRegistry Registry; UnrealMcpEditorTools::Register(Registry);
+			TSharedPtr<FJsonObject> Both = Args();
+			Both->SetStringField(TEXT("class"), TEXT("KismetMathLibrary"));
+			Both->SetStringField(TEXT("target"), TEXT("AnyObject"));
+			Both->SetStringField(TEXT("method"), TEXT("Add_IntInt"));
+			TestFalse(TEXT("both target and class is an error"), Run(Registry, TEXT("reflection-method-call"), Both).bSuccess);
+		});
+
+		It("refuses an instance method on the class CDO path (steer to 'target')", [this]()
+		{
+			FUnrealMcpToolRegistry Registry; UnrealMcpEditorTools::Register(Registry);
+
+			// Find a BlueprintCallable, non-static, non-CallInEditor UFunction on AActor — exactly the
+			// case the CDO path must refuse (it would mutate the shared class defaults / need a world).
+			UClass* ActorClass = AActor::StaticClass();
+			FString InstanceName;
+			for (TFieldIterator<UFunction> It(ActorClass, EFieldIteratorFlags::IncludeSuper); It; ++It)
+			{
+				UFunction* Fn = *It;
+				if (!Fn->HasAnyFunctionFlags(FUNC_BlueprintCallable) || Fn->HasAnyFunctionFlags(FUNC_Static))
+					continue;
+#if WITH_EDITORONLY_DATA
+				if (Fn->GetBoolMetaData(TEXT("CallInEditor")))
+					continue;
+#endif
+				InstanceName = Fn->GetName();
+				break;
+			}
+			TestTrue(TEXT("found a BlueprintCallable instance method to probe the CDO gate"), !InstanceName.IsEmpty());
+			if (InstanceName.IsEmpty()) return;
+
+			TSharedPtr<FJsonObject> A = Args();
+			A->SetStringField(TEXT("class"), TEXT("Actor"));
+			A->SetStringField(TEXT("method"), InstanceName);
+			TestFalse(TEXT("instance method via 'class' is rejected"), Run(Registry, TEXT("reflection-method-call"), A).bSuccess);
+		});
 	});
 }
 

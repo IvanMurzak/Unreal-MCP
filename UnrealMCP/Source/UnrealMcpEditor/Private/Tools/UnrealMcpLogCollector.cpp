@@ -3,11 +3,15 @@
 
 #include "UnrealMcpLogCollector.h"
 
+#include "Algo/Reverse.h"
+
 FUnrealMcpLogCollector& FUnrealMcpLogCollector::Get()
 {
-	// Function-local static: constructed on first use, destroyed at program exit — strictly after GLog,
-	// so a missed Shutdown() can never leave GLog holding a freed pointer (Shutdown() still runs in the
-	// normal module-teardown path; this only bounds the worst case).
+	// Function-local static: constructed on first use during module startup, AFTER GLog's
+	// FOutputDeviceRedirector singleton already exists. Statics are destroyed in reverse construction
+	// order, so this collector is torn down BEFORE GLog — which is exactly why the destructor's
+	// Shutdown() -> GLog->RemoveOutputDevice(this) is safe (GLog is still alive when we deregister).
+	// Shutdown() still runs in the normal module-teardown path; the destructor only bounds the worst case.
 	static FUnrealMcpLogCollector Instance;
 	return Instance;
 }
@@ -93,8 +97,12 @@ TArray<FUnrealMcpLogEntry> FUnrealMcpLogCollector::Snapshot(ELogVerbosity::Type 
 	TArray<FUnrealMcpLogEntry> Out;
 
 	FScopeLock ScopeLock(&Lock);
-	for (const FUnrealMcpLogEntry& Entry : Entries)
+	// Walk newest-first so we can stop as soon as the requested Limit is satisfied — this bounds both
+	// the copy work and the lock-hold time (a full 10k buffer with limit=100 copies 100 entries, not
+	// 10k). Entries is oldest-first, so reverse the result below to restore the newest-last contract.
+	for (int32 Idx = Entries.Num() - 1; Idx >= 0; --Idx)
 	{
+		const FUnrealMcpLogEntry& Entry = Entries[Idx];
 		// Lower numeric verbosity == more severe (Fatal=1 … VeryVerbose=7). Keep at-or-more-severe.
 		if (MinVerbosity != ELogVerbosity::All && Entry.Verbosity > MinVerbosity)
 			continue;
@@ -103,12 +111,12 @@ TArray<FUnrealMcpLogEntry> FUnrealMcpLogCollector::Snapshot(ELogVerbosity::Type 
 		if (!Search.IsEmpty() && !Entry.Message.Contains(Search, ESearchCase::IgnoreCase))
 			continue;
 		Out.Add(Entry);
+		if (Limit > 0 && Out.Num() >= Limit)
+			break;
 	}
 
-	// Keep the most-recent Limit after filtering (the buffer is oldest-first, so trim the front).
-	if (Limit > 0 && Out.Num() > Limit)
-		Out.RemoveAt(0, Out.Num() - Limit, EAllowShrinking::No);
-
+	// Out is currently newest-first; the documented contract is newest-last, so reverse in place.
+	Algo::Reverse(Out);
 	return Out;
 }
 

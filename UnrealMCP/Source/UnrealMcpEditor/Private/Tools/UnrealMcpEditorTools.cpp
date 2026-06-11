@@ -127,6 +127,25 @@ namespace
 		return false;
 	}
 
+	/**
+	 * Whether @p Function may be invoked on a class CDO (the 'class' path of reflection-method-call).
+	 * Only static or CallInEditor functions are safe there: a plain instance method run on the default
+	 * object mutates the shared class defaults (CDO pollution that serializes into new instances) and a
+	 * world-dependent instance method can crash on a world-less CDO. Instance methods must go via 'target'.
+	 */
+	bool IsCdoCallableFunction(const UFunction* Function)
+	{
+		if (!Function)
+			return false;
+		if (Function->HasAnyFunctionFlags(FUNC_Static))
+			return true;
+#if WITH_EDITORONLY_DATA
+		if (Function->GetBoolMetaData(TEXT("CallInEditor")))
+			return true;
+#endif
+		return false;
+	}
+
 	/** JSON identity for one selected actor (§3.2 ref shape; reuses the actor-family identity block). */
 	TSharedPtr<FJsonObject> SelectionIdentity(const AActor* Actor)
 	{
@@ -483,9 +502,16 @@ namespace UnrealMcpEditorTools
 
 				TArray<TSharedPtr<FJsonValue>> Methods;
 				int32 Matched = 0;
+				TSet<FName> SeenNames;
 				for (TFieldIterator<UFunction> It(Class, EFieldIteratorFlags::IncludeSuper); It; ++It)
 				{
 					UFunction* Function = *It;
+					// IncludeSuper walks most-derived first, so an override appears once per declaring class
+					// in the hierarchy. Keep only the first (most-derived) occurrence of each name.
+					bool bAlreadySeen = false;
+					SeenNames.Add(Function->GetFName(), &bAlreadySeen);
+					if (bAlreadySeen)
+						continue;
 					if (!NameFilter.IsEmpty() && !Function->GetName().Contains(NameFilter, ESearchCase::IgnoreCase))
 						continue;
 					++Matched;
@@ -512,7 +538,10 @@ namespace UnrealMcpEditorTools
 			                  "the function is resolved and called on it) OR 'class' (the function is called on "
 			                  "that class's CDO — use for static/CallInEditor functions). 'args' is a JSON object "
 			                  "mapping parameter names to values (§3.2). SAFETY: only BlueprintCallable or "
-			                  "CallInEditor functions may be called; anything else is rejected. Returns the "
+			                  "CallInEditor functions may be called; anything else is rejected — and the 'class' "
+			                  "(CDO) path additionally requires static/CallInEditor (instance methods must use "
+			                  "'target'). ACCEPTED RISK: callable functions can still be destructive (QuitGame, "
+			                  "console exec, DestroyActor), consistent with console-run-command. Returns the "
 			                  "function's return value and any out-params."))
 			.ParamString(TEXT("target"), TEXT("Object/actor ref to call the method on (instance methods)."))
 			.ParamString(TEXT("class"), TEXT("Class ref whose CDO to call on (static/CallInEditor methods)."))
@@ -528,8 +557,12 @@ namespace UnrealMcpEditorTools
 				const FString ClassRef = Call.GetString(TEXT("class"));
 				if (TargetRef.IsEmpty() && ClassRef.IsEmpty())
 					return FUnrealMcpToolResult::Error(TEXT("Provide either 'target' (instance) or 'class' (CDO/static)."));
+				// The receiver is EITHER/OR — reject an ambiguous pair instead of silently preferring one.
+				if (!TargetRef.IsEmpty() && !ClassRef.IsEmpty())
+					return FUnrealMcpToolResult::Error(TEXT("Provide EITHER 'target' (instance) OR 'class' (CDO/static), not both."));
 
 				// Resolve the receiving object: an explicit instance ref, else the class CDO.
+				const bool bViaCDO = TargetRef.IsEmpty();
 				UObject* Target = nullptr;
 				if (!TargetRef.IsEmpty())
 				{
@@ -554,9 +587,21 @@ namespace UnrealMcpEditorTools
 
 				// SAFETY GATE (§10): reject anything that is not explicitly callable. An unguarded ProcessEvent
 				// surface would let an agent invoke arbitrary native engine functions — a security finding.
+				// ACCEPTED RISK: BlueprintCallable/CallInEditor still includes destructive functions
+				// (UKismetSystemLibrary::QuitGame, ExecuteConsoleCommand, AActor::K2_DestroyActor, the editor
+				// scripting libraries). console-run-command already grants equivalent power, so this is in
+				// keeping with the family's purpose rather than a separate escalation — gated by intent, not
+				// by an allow-list of individual functions.
 				if (!IsCallableFunction(Function))
 					return FUnrealMcpToolResult::Error(FString::Printf(
 						TEXT("Method '%s' is not BlueprintCallable or CallInEditor; refusing to call it."), *MethodName));
+
+				// The 'class' path runs on the CDO, which is only safe for static / CallInEditor functions
+				// (see IsCdoCallableFunction). Reject a plain instance method here and steer it to 'target'.
+				if (bViaCDO && !IsCdoCallableFunction(Function))
+					return FUnrealMcpToolResult::Error(FString::Printf(
+						TEXT("Method '%s' is an instance method; call it via 'target' (an instance), not 'class' "
+						     "(whose CDO is only for static/CallInEditor functions)."), *MethodName));
 
 				const TSharedPtr<FJsonObject>* ArgsPtr = nullptr;
 				TSharedPtr<FJsonObject> Args = (Call.Arguments->TryGetObjectField(TEXT("args"), ArgsPtr) && ArgsPtr) ? *ArgsPtr : MakeShared<FJsonObject>();
