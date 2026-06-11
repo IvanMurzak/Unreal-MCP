@@ -50,5 +50,19 @@ public class UnrealMcpEditor : ModuleRules
 			"BlueprintGraph",
 			"KismetCompiler",
 		});
+
+		// C++ source / script tool family (docs/ARCHITECTURE.md §10, issue #18): source-compile prefers
+		// Live Coding to patch a running editor when interactive. The LiveCoding module is Windows-only
+		// (Engine/Source/Developer/Windows/LiveCoding); gate the dependency + the WITH_UNREAL_MCP_LIVE_CODING
+		// guard so non-Windows builds (and the UBT fallback path) compile cleanly without it.
+		if (Target.Platform == UnrealTargetPlatform.Win64)
+		{
+			PrivateDependencyModuleNames.Add("LiveCoding");
+			PublicDefinitions.Add("WITH_UNREAL_MCP_LIVE_CODING=1");
+		}
+		else
+		{
+			PublicDefinitions.Add("WITH_UNREAL_MCP_LIVE_CODING=0");
+		}
 	}
 }
