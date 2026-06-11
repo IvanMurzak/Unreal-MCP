@@ -56,6 +56,26 @@ public class UnrealMcpEditor : ModuleRules
 			// compiler backend (EBlueprintCompileOptions) in KismetCompiler. (AssetRegistry shared above.)
 			"BlueprintGraph",
 			"KismetCompiler",
+			// Screenshot / viewport-capture tool family (docs/ARCHITECTURE.md §10, issue #17):
+			//  - ImageWrapper -> PNG encode of the captured FColor buffer (FImageUtils::PNGCompressImageArray)
+			//  - RenderCore / RHI -> FViewport::ReadPixels + render-target read-back for SceneCapture2D
+			"ImageWrapper",
+			"RenderCore",
+			"RHI",
 		});
+
+		// C++ source / script tool family (docs/ARCHITECTURE.md §10, issue #18): source-compile prefers
+		// Live Coding to patch a running editor when interactive. The LiveCoding module is Windows-only
+		// (Engine/Source/Developer/Windows/LiveCoding); gate the dependency + the WITH_UNREAL_MCP_LIVE_CODING
+		// guard so non-Windows builds (and the UBT fallback path) compile cleanly without it.
+		if (Target.Platform == UnrealTargetPlatform.Win64)
+		{
+			PrivateDependencyModuleNames.Add("LiveCoding");
+			PublicDefinitions.Add("WITH_UNREAL_MCP_LIVE_CODING=1");
+		}
+		else
+		{
+			PublicDefinitions.Add("WITH_UNREAL_MCP_LIVE_CODING=0");
+		}
 	}
 }

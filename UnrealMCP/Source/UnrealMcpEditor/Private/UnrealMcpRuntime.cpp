@@ -12,6 +12,7 @@
 #include "Extensions/UnrealMcpExtensionManager.h"
 #include "UI/UnrealMcpEditorViewModel.h"
 #include "UI/UnrealMcpMainWindowTab.h"
+#include "Tools/UnrealMcpLogCollector.h"
 
 #include "Misc/CoreDelegates.h"
 #include "Misc/Paths.h"
@@ -31,11 +32,19 @@ void FUnrealMcpRuntime::Startup()
 		return;
 	bStarted = true;
 
+	// §10 editor/reflection family: start the GLog ring-buffer collector BEFORE anything else so the
+	// earliest startup log lines are already captured for console-get-logs. Shutdown() deregisters it.
+	FUnrealMcpLogCollector::Get().Startup();
+
 	Registry = MakeUnique<FUnrealMcpToolRegistry>();
 	UnrealMcpPingTool::Register(*Registry);
 	UnrealMcpActorTools::Register(*Registry);
 	UnrealMcpBlueprintTools::Register(*Registry); // §10 flagship Blueprint family (CORE)
 	UnrealMcpAssetTools::Register(*Registry); // §10 asset / Content-Browser family (issue #10)
+	UnrealMcpEditorTools::Register(*Registry); // §10 editor / console / reflection family (issue #19)
+	UnrealMcpLevelTools::Register(*Registry); // §10 level / map family (issue #16, Unity Scene.* analog)
+	UnrealMcpScreenshotTools::Register(*Registry); // §10 screenshot / viewport-capture family (issue #17)
+	UnrealMcpSourceTools::Register(*Registry); // §10 C++ source / script family (issue #18)
 
 	Dispatcher = MakeUnique<FUnrealMcpGameThreadDispatcher>();
 	BridgeServer = MakeUnique<FUnrealMcpBridgeServer>(*Registry, *Dispatcher);
@@ -227,4 +236,8 @@ void FUnrealMcpRuntime::Shutdown()
 
 	Dispatcher.Reset();
 	Registry.Reset();
+
+	// §10 editor/reflection family: deregister the GLog listener LAST so no dangling FOutputDevice remains
+	// on GLog — an orphaned device crashes the editor on exit. Idempotent (safe if Startup never ran).
+	FUnrealMcpLogCollector::Get().Shutdown();
 }
