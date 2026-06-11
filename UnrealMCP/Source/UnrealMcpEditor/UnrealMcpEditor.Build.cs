@@ -49,6 +49,12 @@ public class UnrealMcpEditor : ModuleRules
 			// compiler backend (EBlueprintCompileOptions) in KismetCompiler. (AssetRegistry shared above.)
 			"BlueprintGraph",
 			"KismetCompiler",
+			// Screenshot / viewport-capture tool family (docs/ARCHITECTURE.md §10, issue #17):
+			//  - ImageWrapper -> PNG encode of the captured FColor buffer (FImageUtils::PNGCompressImageArray)
+			//  - RenderCore / RHI -> FViewport::ReadPixels + render-target read-back for SceneCapture2D
+			"ImageWrapper",
+			"RenderCore",
+			"RHI",
 		});
 	}
 }
