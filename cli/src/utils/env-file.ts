@@ -31,6 +31,7 @@ export const KNOWN_ENV_KEYS = [
   'UNREAL_MCP_TRANSPORT',
   'UNREAL_MCP_LOG_LEVEL',
   'UNREAL_MCP_BRIDGE_PATH',
+  'UNREAL_MCP_SERVER_PATH',
 ] as const;
 
 export type KnownEnvKey = (typeof KNOWN_ENV_KEYS)[number];

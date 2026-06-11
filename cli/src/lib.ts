@@ -18,6 +18,17 @@ export { createProject, renderProjectTemplate, validateModuleName } from './lib/
 export { installPlugin, removePlugin } from './lib/install-plugin.js';
 export { runTool, runSystemTool } from './lib/run-tool.js';
 export { setupMcp, listAgentIds, buildServerEntry } from './lib/setup-mcp.js';
+export {
+  downloadServer,
+  serverDownloadUrl,
+  serverExecutableName,
+  serverInstallDir,
+  resolveServerBinaryPath,
+  resolveServerOverride,
+  SERVER_BINARY_BASENAME,
+  SERVER_PATH_ENV_VAR,
+} from './lib/download-server.js';
+export { SERVER_VERSION } from './lib/server-version.js';
 export { login } from './lib/login.js';
 export { getStatus } from './lib/status.js';
 export { waitForReady } from './lib/wait-for-ready.js';
@@ -88,6 +99,10 @@ export type {
   SetupMcpResult,
   SetupMcpSuccess,
   SetupMcpFailure,
+  DownloadServerOptions,
+  DownloadServerResult,
+  DownloadServerSuccess,
+  DownloadServerFailure,
   DetectEnginesOptions,
   DetectEnginesResult,
   PlanEngineInstallOptions,

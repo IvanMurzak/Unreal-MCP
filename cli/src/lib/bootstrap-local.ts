@@ -1,13 +1,19 @@
-// `bootstrap-local` — build the bridge + server from source into the
-// project's `Intermediate/UnrealMCP/<leg>/<platform>/` layout
-// (docs/ARCHITECTURE.md §6), the offline/dev alternative to the
-// download-on-first-run flow. Library-safe.
+// `bootstrap-local` — build the BRIDGE from source into the project's
+// `Intermediate/UnrealMCP/bridge/<platform>/` layout (docs/ARCHITECTURE.md
+// §6), the offline/dev alternative to the download-on-first-run flow.
+// Library-safe.
+//
+// The MCP server is NOT built here: it lives in its own shared repo
+// (https://github.com/IvanMurzak/GameDev-MCP-Server) and is downloaded as a
+// release binary by `download-server.ts` (or pointed at via the
+// UNREAL_MCP_SERVER_PATH override). Local server source dev happens in the
+// GameDev-MCP-Server repo itself.
 //
 // The build PLAN (which csproj, which RID, which output dir) is computed
 // purely so it is unit-testable; the actual `dotnet publish` is delegated
 // to an injectable `buildImpl` (defaults to spawning `dotnet`).
 //
-// No `version` file is emitted beside the binaries: a bootstrapped build is
+// No `version` file is emitted beside the binary: a bootstrapped build is
 // meant to be consumed via the `UNREAL_MCP_BRIDGE_PATH` dev override (§6),
 // which skips the download + version-match entirely, so the absence of a
 // version file is intentional (not the §6 mismatch hazard).
@@ -19,7 +25,6 @@ import { emitProgress } from './progress.js';
 import type { BootstrapLocalOptions, BootstrapLocalResult, BuildStep } from './types.js';
 
 const BRIDGE_CSPROJ = path.join('bridge', 'src', 'com.IvanMurzak.Unreal.MCP.Bridge.csproj');
-const SERVER_CSPROJ = path.join('Unreal-MCP-Server', 'com.IvanMurzak.Unreal.MCP.Server.csproj');
 
 /** Map a platform to the .NET RID + the §6 platform folder name. Pure. */
 export function ridForPlatform(os: NodeJS.Platform, arch: string = process.arch): string {
@@ -34,8 +39,9 @@ export function ridForPlatform(os: NodeJS.Platform, arch: string = process.arch)
 }
 
 /**
- * Compute the two build steps (bridge, server) for a project. Pure —
- * exported for tests so the path math is asserted without a real build.
+ * Compute the build steps (bridge only — the server is downloaded, not
+ * built) for a project. Pure — exported for tests so the path math is
+ * asserted without a real build.
  */
 export function planBuildSteps(
   repoRoot: string,
@@ -51,12 +57,6 @@ export function planBuildSteps(
       label: 'bridge',
       projectFile: path.join(repo, BRIDGE_CSPROJ),
       outputDir: path.join(outputRoot, 'bridge', rid),
-      rid,
-    },
-    {
-      label: 'server',
-      projectFile: path.join(repo, SERVER_CSPROJ),
-      outputDir: path.join(outputRoot, 'server', rid),
       rid,
     },
   ];
@@ -75,7 +75,7 @@ export async function bootstrapLocal(opts: BootstrapLocalOptions): Promise<Boots
 
     emitProgress(opts.onProgress, {
       phase: 'start',
-      message: `Bootstrapping bridge + server into ${outputRoot}`,
+      message: `Bootstrapping bridge into ${outputRoot}`,
     });
 
     for (const step of steps) {

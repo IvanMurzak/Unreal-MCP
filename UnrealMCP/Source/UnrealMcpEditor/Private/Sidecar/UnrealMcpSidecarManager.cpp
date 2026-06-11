@@ -29,8 +29,11 @@ FString FUnrealMcpSidecarManager::ResolveBridgeBinaryPath()
 	if (!Override.IsEmpty() && FPaths::FileExists(Override))
 		return Override;
 
-	// TODO(§6 download task): download-on-first-run from GitHub Releases into
-	// <Project>/Intermediate/UnrealMCP/bridge/<platform>/unreal-mcp-bridge(.exe). Stubbed here.
+	// TODO(§6 download task): download-on-first-run of the BRIDGE from this repo's GitHub Releases
+	// into <Project>/Intermediate/UnrealMCP/bridge/<platform>/unreal-mcp-bridge(.exe). Stubbed here.
+	// Note: only the bridge is C++-managed. The local MCP server (gamedev-mcp-server, the shared
+	// IvanMurzak/GameDev-MCP-Server release) is acquired by the CLI (`unreal-mcp-cli` download-server
+	// module, §6) — do NOT implement server download here.
 	return FString();
 }
 

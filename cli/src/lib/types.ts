@@ -285,6 +285,16 @@ export interface SetupMcpOptions {
   token?: string;
   /** Return the snippet instead of writing it. Default `false` (write). */
   dryRun?: boolean;
+  /**
+   * Env source for the `UNREAL_MCP_SERVER_PATH` override (stdio transport).
+   * Defaults to `process.env`. Test injection.
+   */
+  env?: NodeJS.ProcessEnv;
+  /**
+   * Inject the stdio server-binary acquisition (defaults to the real
+   * `downloadServer`). Test injection.
+   */
+  downloadServerImpl?: (opts: DownloadServerOptions) => Promise<DownloadServerResult>;
   onProgress?: ProgressCallback;
 }
 
@@ -310,6 +320,49 @@ export interface SetupMcpFailure {
 }
 
 export type SetupMcpResult = SetupMcpSuccess | SetupMcpFailure;
+
+// ---------------------------------------------------------------------------
+// download-server
+// ---------------------------------------------------------------------------
+
+export interface DownloadServerOptions {
+  /** Project root — the server lands under `Intermediate/UnrealMCP/server/<rid>/`. */
+  projectDir: string;
+  os?: NodeJS.Platform;
+  arch?: string;
+  /** Server version to download. Defaults to the pinned `SERVER_VERSION`. */
+  version?: string;
+  /** Env source for the `UNREAL_MCP_SERVER_PATH` override (test injection). */
+  env?: NodeJS.ProcessEnv;
+  /** Inject the HTTP client (defaults to global `fetch`). */
+  fetchImpl?: typeof fetch;
+  /** Re-download even when the cached `version` marker matches. Default `false`. */
+  force?: boolean;
+  onProgress?: ProgressCallback;
+}
+
+export interface DownloadServerSuccess {
+  kind: 'success';
+  success: true;
+  /** Absolute path to the resolved server binary. */
+  serverPath: string;
+  /** How the binary was resolved. */
+  source: 'override' | 'cache' | 'download';
+  /** Installed server version (`null` for an override — version unknown/unchecked). */
+  version: string | null;
+  warnings: string[];
+}
+
+export interface DownloadServerFailure {
+  kind: 'failure';
+  success: false;
+  /** The release-asset URL involved, when the failure happened at/after download. */
+  url?: string;
+  warnings: string[];
+  error: Error;
+}
+
+export type DownloadServerResult = DownloadServerSuccess | DownloadServerFailure;
 
 // ---------------------------------------------------------------------------
 // install-engine
@@ -439,9 +492,9 @@ export interface StatusReport {
 // ---------------------------------------------------------------------------
 
 export interface BootstrapLocalOptions {
-  /** Project root — the bridge/server land under `Intermediate/UnrealMCP/`. */
+  /** Project root — the bridge lands under `Intermediate/UnrealMCP/bridge/<rid>/`. */
   projectDir: string;
-  /** Path to the Unreal-MCP repo root holding `bridge/` + `Unreal-MCP-Server/`. */
+  /** Path to the Unreal-MCP repo root holding `bridge/`. */
   repoRoot: string;
   os?: NodeJS.Platform;
   /** Inject the build runner (defaults to spawning `dotnet`). */

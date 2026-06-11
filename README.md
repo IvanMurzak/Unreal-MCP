@@ -5,7 +5,7 @@
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![test-pull-request](https://github.com/IvanMurzak/Unreal-MCP/actions/workflows/test_pull_request.yml/badge.svg)](https://github.com/IvanMurzak/Unreal-MCP/actions/workflows/test_pull_request.yml)
 
-> **Status: beta.** The plugin, the .NET sidecar, the local server, the `unreal-mcp-cli`, the AI Game
+> **Status: beta.** The plugin, the .NET sidecar, the `unreal-mcp-cli`, the AI Game
 > Developer editor UI, and **62 built-in tools across 8 families** have shipped and are exercised by
 > CI. Nothing is published to a package registry yet — install from source (below). Pixel-capture
 > (screenshot) tools need a GPU-backed editor; everything else runs headless.
@@ -17,7 +17,10 @@ Editor operations as **AI Tools** and connects them to an MCP server, so an AI a
 (Claude, Cursor, Copilot, …) can inspect and drive your Unreal project — spawn actors, edit levels,
 author Blueprints, manage assets, edit and compile C++, capture screenshots, and more — through the
 same cloud backend ([ai-game.dev](https://ai-game.dev)) that powers Unity-MCP and Godot-MCP, or
-through a local server you run yourself.
+through a local server you run yourself. The local server is the shared, engine-agnostic
+[GameDev-MCP-Server](https://github.com/IvanMurzak/GameDev-MCP-Server) (binary
+`gamedev-mcp-server`) — one server consumed by Unity-MCP, Godot-MCP, and Unreal-MCP; no server
+source lives in this repo.
 
 Unlike Unity and Godot (C# engines that host the .NET `McpPlugin` in-process), Unreal's editor is
 C++ — so the .NET MCP host runs as an auto-managed **sidecar process** (`unreal-mcp-bridge`) that
@@ -44,8 +47,10 @@ the plugin spawns and talks to over a localhost IPC channel. The full design liv
 - **Unreal Engine 5.5+** (developed and CI-tested against **5.7**). The plugin deliberately ships
   **no `EngineVersion` pin** — UE treats that field as an exact-build match, not a floor, and would
   refuse to load on newer engines.
-- **.NET 9 SDK** to build the bridge sidecar; **.NET 8 SDK** to build the local server. (End users
-  who download release binaries need neither — they ship self-contained.)
+- **.NET 9 SDK** to build the bridge sidecar. (End users who download release binaries do not
+  need it — they ship self-contained. The local MCP server is downloaded as a prebuilt
+  [GameDev-MCP-Server](https://github.com/IvanMurzak/GameDev-MCP-Server) release binary, never
+  built here.)
 - **Node.js** `^20.19.0 || >=22.12.0` for the optional `unreal-mcp-cli`.
 - A C++ Unreal project (the plugin builds an Editor module, so the host project must be able to
   compile C++).
@@ -76,7 +81,7 @@ node bin/unreal-mcp-cli.js install-plugin <YourProject> --junction
 
 The sidecar binary (`unreal-mcp-bridge`) is **not** bundled. Today the plugin resolves it from the
 `UNREAL_MCP_BRIDGE_PATH` environment variable: point that at a sidecar binary, or run
-`unreal-mcp-cli bootstrap-local` to build the bridge + server from source into
+`unreal-mcp-cli bootstrap-local` to build the bridge from source into
 `<YourProject>/Intermediate/UnrealMCP/` and set the var to the result. With no path resolved, the
 plugin's TCP listener still starts but logs `[Unreal-MCP] no sidecar binary resolved (set
 UNREAL_MCP_BRIDGE_PATH)` and spawns nothing — launch the sidecar manually for the live e2e.
@@ -92,7 +97,7 @@ yet shipped**.
      start the OAuth **device-code flow**: the window shows a verification URL and a short user
      code; open the URL, enter the code, approve, and the editor finishes authorizing. Use
      **Revoke** to clear the stored cloud token.
-   - **Custom** — connects to a local `unreal-mcp-server` you run (or any compatible server). Enter
+   - **Custom** — connects to a local `gamedev-mcp-server` you run (or any compatible server). Enter
      the server URL and point your AI client at it. (The plugin does not start the local server for
      you — run `unreal-mcp-cli` or your own process; see Troubleshooting.)
 3. The **Connection** section shows a status dot, a status label, and a Connect / Disconnect / Stop
@@ -273,7 +278,7 @@ The full 16-command surface:
 | `wait-for-ready` | Block until the project's MCP server responds to a ping |
 | `run-tool` | Invoke an MCP tool via the project's local MCP server (HTTP) |
 | `run-system-tool` | Invoke a system tool via the project's local MCP server (HTTP) |
-| `bootstrap-local` | Build the bridge + server from source into `<project>/Intermediate/UnrealMCP` |
+| `bootstrap-local` | Build the bridge from source into `<project>/Intermediate/UnrealMCP` (the server is downloaded by `setup-mcp`, not built) |
 | `update` | Update the UnrealMCP plugin installed in a project from the repo source |
 | `install-engine` | Detect installed Unreal engines; for a missing version, link to the Epic launcher |
 | `setup-skills` | Write a Claude-Code skill stub that drives this project's Unreal MCP server |
@@ -338,10 +343,11 @@ The plugin reads configuration with the precedence **process env → `<Project>/
 | `UNREAL_MCP_AUTH_OPTION` | `none` or `required` (local server auth) |
 | `UNREAL_MCP_KEEP_CONNECTED` | Persist/restore the connected state |
 | `UNREAL_MCP_TOOLS` | Enabled-tools override (whitelist; empty = no filter) |
-| `UNREAL_MCP_START_SERVER` | Parsed and persisted as the `startServer` config flag (Custom mode); auto-spawning the local `unreal-mcp-server` is **planned, not yet wired** — no code consumes this flag today, so start the server yourself (e.g. `unreal-mcp-cli`). |
+| `UNREAL_MCP_START_SERVER` | Parsed and persisted as the `startServer` config flag (Custom mode); auto-spawning the local `gamedev-mcp-server` is **planned, not yet wired** — no code consumes this flag today, so start the server yourself (e.g. `unreal-mcp-cli`). |
 | `UNREAL_MCP_TRANSPORT` | `stdio` or `http` |
 | `UNREAL_MCP_LOG_LEVEL` | Log verbosity |
 | `UNREAL_MCP_BRIDGE_PATH` | Path to a sidecar binary. **Currently the only way the plugin resolves a sidecar** (auto-download is planned §6, not yet shipped). |
+| `UNREAL_MCP_SERVER_PATH` | Path to a local `gamedev-mcp-server` binary (read by `unreal-mcp-cli`, not the plugin) — skips the server download + version check (§6). |
 
 > **Never commit `.env`.** A project-root `.env` can hold `UNREAL_MCP_TOKEN`, and UE project
 > templates ship no `.gitignore`. `unreal-mcp-cli configure` appends `.env` to the target project's
@@ -377,7 +383,6 @@ The plugin reads configuration with the precedence **process env → `<Project>/
 | --- | --- |
 | [`UnrealMCP/`](UnrealMCP/) | The UE editor plugin (C++, module `UnrealMcpEditor`, UE 5.5+ floor, developed against 5.7) |
 | [`bridge/`](bridge/) | The .NET 9 sidecar (`unreal-mcp-bridge`) — McpPlugin host, IPC ⇄ SignalR relay |
-| [`Unreal-MCP-Server/`](Unreal-MCP-Server/) | Thin local MCP server host (`unreal-mcp-server`), analog of Godot-MCP-Server |
 | [`cli/`](cli/) | `unreal-mcp-cli` npm package (TypeScript) — 16 commands |
 | [`samples/UnrealAITemplate/`](samples/UnrealAITemplate/) | Extension template plugin (`hello-extension`) |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | The authoritative architecture design |
@@ -388,6 +393,7 @@ The plugin reads configuration with the precedence **process env → `<Project>/
 
 - [Unity-MCP](https://github.com/IvanMurzak/Unity-MCP) — the Unity sibling
 - [Godot-MCP](https://github.com/IvanMurzak/Godot-MCP) — the Godot sibling
+- [GameDev-MCP-Server](https://github.com/IvanMurzak/GameDev-MCP-Server) — the shared local MCP server (`gamedev-mcp-server`)
 - [MCP-Plugin-dotnet](https://github.com/IvanMurzak/MCP-Plugin-dotnet) — the shared .NET MCP plugin/server core (`com.IvanMurzak.McpPlugin`)
 - [ReflectorNet](https://github.com/IvanMurzak/ReflectorNet) — the shared reflection/serialization core
 - [ai-game.dev](https://ai-game.dev) — the cloud backend

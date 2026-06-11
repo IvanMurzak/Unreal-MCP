@@ -2,9 +2,11 @@
 
 Unreal-MCP bridges LLMs (Claude, Cursor, Copilot, …) with the [Unreal Engine](https://www.unrealengine.com/)
 editor via the [Model Context Protocol](https://modelcontextprotocol.io/) — the Unreal-engine sibling of
-Unity-MCP and Godot-MCP. **Status: beta** — the plugin, the .NET sidecar, the local server, the
+Unity-MCP and Godot-MCP. **Status: beta** — the plugin, the .NET sidecar, the
 `unreal-mcp-cli`, the AI Game Developer editor UI, and **62 built-in tools across 8 families** have shipped
-and are covered by CI; nothing is published to a package registry yet.
+and are covered by CI; nothing is published to a package registry yet. The local MCP server is the
+shared, engine-agnostic [GameDev-MCP-Server](https://github.com/IvanMurzak/GameDev-MCP-Server)
+(binary `gamedev-mcp-server`) — no server source lives in this repo.
 
 **The authoritative design is [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).** Read the relevant
 section before implementing anything non-trivial — it locks the IPC protocol (§1), dynamic tool
@@ -23,19 +25,20 @@ user-facing entry point is [`README.md`](README.md); the release runbook is
 | `UnrealMCP/Source/UnrealMcpEditor/Private/` | `Tools/` (the 8 families), `Config/`, `UI/`, plus Bridge/Schema/Dispatch/Sidecar code per ARCHITECTURE §9.1 |
 | `UnrealMCP/Source/UnrealMcpEditorTests/` | Automation specs behind `WITH_DEV_AUTOMATION_TESTS`, names under the **`UnrealMcp.`** filter prefix. **No top-level test folder** — tests live per-leg |
 | `bridge/` | .NET 9 **sidecar** `com.IvanMurzak.Unreal.MCP.Bridge` (binary `unreal-mcp-bridge`) — the McpPlugin host the plugin spawns; IPC ⇄ SignalR relay. xUnit tests in `bridge/tests/`. Hand-authored, TRACKED solution `bridge/Unreal-MCP-Bridge.sln` |
-| `Unreal-MCP-Server/` | Thin ASP.NET Core host around `com.IvanMurzak.McpPlugin.Server` (binary `unreal-mcp-server`) — clone of Godot-MCP-Server, **no Unreal-specific server code**. Tracked solution `Unreal-MCP-Server/Unreal-MCP-Server.sln` |
 | `cli/` | `unreal-mcp-cli` npm package (TypeScript, commander, vitest) — 16 commands. Publish-ready (metadata complete); the first version is published manually by the owner, then CI takes over — see `docs/RELEASING.md` |
 | `samples/UnrealAITemplate/` | The §5 extension template plugin (a `hello-extension` tool + an invalid-schema switch) |
-| `commands/bump-version.ps1` | Rewrites the version across `.uplugin` / both csproj / `server.json` / `cli/package.json`. **Release-pipeline-owned — never run from a feature task** |
+| `commands/bump-version.ps1` | Rewrites the version across `.uplugin` / bridge csproj / `cli/package.json`. **Release-pipeline-owned — never run from a feature task**. It does NOT touch the consumed server pin (`cli/src/lib/server-version.ts` `SERVER_VERSION`) |
 
 Unlike Unity/Godot, the editor is C++: the .NET `McpPlugin` host lives in the **sidecar process**, not
 in-process. The plugin **listens** on a localhost TCP port; the sidecar **dials**, authenticating with a
 one-shot token delivered over **stdin** (never argv — §1.4). Two child processes must not be conflated:
-`unreal-mcp-bridge` (always required) and `unreal-mcp-server` (Custom/local mode only).
+`unreal-mcp-bridge` (always required) and `gamedev-mcp-server` (Custom/local mode only — downloaded
+by the CLI from GameDev-MCP-Server releases, pinned by `cli/src/lib/server-version.ts`
+`SERVER_VERSION`; `UNREAL_MCP_SERVER_PATH` overrides the path for local builds).
 
 ## Build / test (per leg)
 
-The repo is a four-leg mono-repo. Run only the legs your change touches.
+The repo is a three-leg mono-repo (plugin, bridge, cli). Run only the legs your change touches.
 
 ### UE plugin (`UnrealMCP/**`)
 
@@ -74,15 +77,11 @@ dotnet build   bridge/Unreal-MCP-Bridge.sln --configuration Debug --no-restore
 dotnet test    bridge/Unreal-MCP-Bridge.sln --configuration Debug --no-build
 ```
 
-### server (.NET 8) — `Unreal-MCP-Server/**`
+### server — none in this repo
 
-```bash
-dotnet restore Unreal-MCP-Server/Unreal-MCP-Server.sln
-dotnet build   Unreal-MCP-Server/Unreal-MCP-Server.sln --configuration Debug --no-restore
-```
-
-No server test project exists (thin host). **Never add Unreal-specific server code** — re-read
-ARCHITECTURE §0 if a task seems to require it.
+The MCP server lives in the shared [GameDev-MCP-Server](https://github.com/IvanMurzak/GameDev-MCP-Server)
+repo and is built/tested/released there. **Never add Unreal-specific server code** — re-read
+ARCHITECTURE §0 if a task seems to require it; server-side changes go to the shared repo.
 
 ### cli (Node 20.19+/22.12+) — `cli/**`
 
@@ -101,20 +100,21 @@ the `content[]` image array). `/api/tools/<name>` calls **require** `-H "Content
 
 ## Versioning
 
-Single semver shared by plugin / bridge / server / cli, starting at **0.1.0**. The
+Single semver shared by plugin / bridge / cli, starting at **0.1.0**. The
 `UnrealMCP/UnrealMCP.uplugin` `VersionName` is the **single source of truth**. Bump with:
 
 ```powershell
 .\commands\bump-version.ps1 -NewVersion "0.2.0"        # add -WhatIf to preview
 ```
 
-It rewrites the `.uplugin` `VersionName`, both csproj `<Version>`s, `Unreal-MCP-Server/server.json`, and
+It rewrites the `.uplugin` `VersionName`, the bridge csproj `<Version>`, and
 `cli/package.json` (+ lock). **Never hand-edit one of them alone, and never bump from a feature task** —
-the release pipeline owns version changes.
+the release pipeline owns version changes. The consumed GameDev-MCP-Server version is pinned
+separately in `cli/src/lib/server-version.ts` (`SERVER_VERSION`); bumping it requires the
+corresponding shared release to already exist (see `docs/RELEASING.md`).
 
 **Frozen NuGet pins** (lockstep with Godot-MCP; owned by the upstream release pipelines — NEVER bump
-here): `com.IvanMurzak.ReflectorNet` **5.3.1**, `com.IvanMurzak.McpPlugin` **6.7.0** (bridge),
-`com.IvanMurzak.McpPlugin.Server` **6.7.0** (server). The §2.3 `ProxyTool` lives in `bridge/`
+here): `com.IvanMurzak.ReflectorNet` **5.3.1**, `com.IvanMurzak.McpPlugin` **6.7.0** (bridge). The §2.3 `ProxyTool` lives in `bridge/`
 (`bridge/src/Tools/ProxyTool.cs` + `ProxyToolFactory.cs`) — `IRunTool` + `ToolManager.AddTool` are
 already public, so no upstream API bump was required; a future upstream 6.8.0 ProxyTool can replace the
 local copy through its own pipeline.
@@ -122,8 +122,8 @@ local copy through its own pipeline.
 ## Conventions
 
 - **Naming:** plugin `UnrealMCP`, module `UnrealMcpEditor`; C++ prefixes `FUnrealMcp*` / `UUnrealMcp*` /
-  `SUnrealMcp*` (Slate) / `IUnrealMcp*` (interfaces). .NET root namespaces
-  `com.IvanMurzak.Unreal.MCP.Bridge` / `.Server`. **Tool ids are kebab-case** (`actor-create`,
+  `SUnrealMcp*` (Slate) / `IUnrealMcp*` (interfaces). .NET root namespace
+  `com.IvanMurzak.Unreal.MCP.Bridge`. **Tool ids are kebab-case** (`actor-create`,
   `blueprint-compile`); the registry validates the pattern `^[a-z0-9]+(-[a-z0-9]+)*$`.
 - **C++ style:** Unreal — **tabs**, braces on new lines, UE types (`FString`, `TArray`, `TSharedPtr`).
   Log via the dedicated `LogUnrealMcp` category. File header: the
@@ -150,18 +150,17 @@ local copy through its own pipeline.
   is rejected even if a stale `tools/list` dispatches it (`UnrealMcpToolRegistry::Execute`).
 - **Secrets:** `.env` is gitignored and must stay that way (it can hold `UNREAL_MCP_TOKEN`); the sidecar
   IPC token travels via stdin, never argv, and is never logged.
-- **Commits:** `<type>(<scope>): <description>` conventional commits (scopes: plugin, bridge, server,
+- **Commits:** `<type>(<scope>): <description>` conventional commits (scopes: plugin, bridge,
   cli, ipc, tools, dispatcher, schema, ui, sidecar, config, samples, ci, docs). Reference issues with
   `Closes #N`. Never `git add -A`. Never commit `Binaries/`/`Intermediate/`/`Saved/`/`bin/`/`obj/`/
   `node_modules/`/`dist/`. The `.sln` at a `.uproject` root is generated — never commit it; the
-  hand-authored `bridge/` and `Unreal-MCP-Server/` `.sln`s are the un-ignored exception.
+  hand-authored `bridge/Unreal-MCP-Bridge.sln` is the un-ignored exception.
 
 ## CI
 
 CI runs on every PR via **`test_pull_request.yml`** (workflow name `test-pull-request`):
 
 - bridge build + xUnit on `ubuntu-latest` **and** `windows-latest`
-- server build (.NET 8)
 - `test-cli / cli` on Node 20 **and** Node 22 (reusable `test_cli.yml`)
 - `plugin BuildPlugin + Automation (UE 5.7)` — runs on a **self-hosted Windows runner** labelled
   `unreal-5-7`, and is **gated on the repository variable `UNREAL_RUNNER_READY == 'true'`**. While that
