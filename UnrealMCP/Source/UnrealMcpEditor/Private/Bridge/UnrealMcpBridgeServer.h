@@ -64,6 +64,22 @@ public:
 	/** Push the current §1.3 `config` message to the connected sidecar. No-op when disconnected. */
 	void PushConfig();
 
+	/**
+	 * Send a §1.3 auth message (`auth-start` / `auth-cancel` / `auth-revoke`) to the connected sidecar
+	 * (the §7 Cloud device-code controls). Thread-safe; no-op (returns false) when disconnected. The UI
+	 * calls this on the game thread; the frame is serialized through the shared WriteMutex like any other.
+	 */
+	bool SendAuthMessage(const FString& AuthType);
+
+	/**
+	 * Register a sink for the inbound sidecar→plugin `status` and `device-auth` feed (§1.3 / §7). The sink
+	 * is invoked ON THE IPC READER THREAD with the message type and parsed object — the caller (the §7
+	 * view-model) MUST marshal onto the game thread (AsyncTask(GameThread)) before touching any Slate state
+	 * (the M9b main-thread-marshalled-subscriptions rule). Pass an unbound TFunction to clear it (window
+	 * close). Thread-safe; the previous sink is replaced.
+	 */
+	void SetStatusSink(TFunction<void(const FString& /*Type*/, TSharedPtr<FJsonObject> /*Message*/)> InSink);
+
 	/** Deterministic IPC port for a project path (§1.1): 30000 + sha(path) % 10000. */
 	static int32 ComputeDeterministicPort(const FString& ProjectPath);
 
@@ -119,6 +135,11 @@ private:
 	// guarded by ConfigMutex. A deep copy is stored so the caller's object can change without racing a send.
 	mutable FCriticalSection ConfigMutex;
 	TSharedPtr<FJsonObject> EffectiveConfig;
+
+	// Sink for the inbound `status` / `device-auth` feed (§1.3 / §7). Set/cleared on the game thread (window
+	// open/close), invoked on the reader thread; guarded so a window-close clear cannot race a reader invoke.
+	mutable FCriticalSection StatusSinkMutex;
+	TFunction<void(const FString&, TSharedPtr<FJsonObject>)> StatusSink;
 
 	FThreadSafeBool bStopRequested = false;
 	FThreadSafeBool bClientConnected = false;

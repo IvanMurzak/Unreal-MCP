@@ -10,6 +10,8 @@ class FUnrealMcpGameThreadDispatcher;
 class FUnrealMcpBridgeServer;
 class FUnrealMcpSidecarManager;
 class FUnrealMcpExtensionManager;
+class FUnrealMcpEditorViewModel;
+class FUnrealMcpMainWindowTab;
 
 /**
  * Plugin-lifetime coordinator (docs/ARCHITECTURE.md §0). Wires the four subsystems together: the tool
@@ -40,6 +42,10 @@ private:
 	TUniquePtr<FUnrealMcpBridgeServer> BridgeServer;
 	TUniquePtr<FUnrealMcpSidecarManager> SidecarManager;
 	TUniquePtr<FUnrealMcpExtensionManager> ExtensionManager;
+
+	// §7 UI: the main-window view-model (shared so the nomad tab's widget binds to it) and its tab spawner.
+	TSharedPtr<FUnrealMcpEditorViewModel> ViewModel;
+	TUniquePtr<FUnrealMcpMainWindowTab> MainWindowTab;
 
 	FDelegateHandle PreExitHandle;
 	bool bStarted = false;
