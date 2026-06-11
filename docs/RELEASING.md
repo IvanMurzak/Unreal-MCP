@@ -22,14 +22,12 @@ listing. Each requires a deliberate human decision (and, for the first release, 
       manual `workflow_dispatch` with `dry_run=false`. `release.yml`'s `check-version` gate keeps
       this inert otherwise. Verify with `gh release list` (expect empty) and
       `git ls-remote --tags` (expect no `v*` tags) until you intend to publish.
-- [ ] **npm `unreal-cli` publish.** Two one-time prerequisites, both owner actions, must be done
-      **before** the first release or `publish-npm` fails auth and nothing is published:
-      1. **Flip `cli/package.json` `"private": true` → remove it** (or set `false`) in the same bump
-         commit that cuts the first release. While `private: true` stands, npm refuses to publish.
-      2. **Configure an npm Trusted Publisher** for the `unreal-cli` package on npmjs.com authorizing
-         this repository + the `release.yml` workflow. Publishing uses OIDC Trusted Publishing
-         (`id-token: write`), **not** a stored `NPM_TOKEN`. See
-         <https://docs.npmjs.com/trusted-publishers>.
+- [ ] **First npm `unreal-cli` publish (one-time, manual — operator only).** The first publish of a
+      brand-new package **cannot** use OIDC Trusted Publishing — npm requires the package to already
+      exist on the registry before a Trusted Publisher can be configured for it. So the first publish
+      is a **manual operator step from a clean checkout**; CI takes over for every subsequent version.
+      The `cli/package.json` `private` flag has already been removed and the publish metadata
+      completed (issue #33 prep). The runbook is **[First npm publish](#first-npm-publish-one-time-manual)** below — do NOT run it from CI.
 - [ ] **Fab (Epic marketplace) submission.** Entirely manual and **out of scope of every CI
       workflow** — the release pipeline produces an engine-agnostic source-plugin zip
       (BuildPlugin output), but no job submits to Fab. Fab carries its own metadata/screenshot
@@ -110,6 +108,52 @@ gh release list --repo IvanMurzak/Unreal-MCP     # expect: empty
 git ls-remote --tags https://github.com/IvanMurzak/Unreal-MCP   # expect: no v* tags
 ```
 
+## First npm publish (one-time, manual)
+
+> **Why manual?** npm's OIDC Trusted Publishing can only be configured for a
+> package that **already exists** on the registry. The very first publish of
+> `unreal-cli` therefore cannot run through `release.yml`'s `publish-npm` job
+> (which is OIDC-only, no `NPM_TOKEN`). The owner publishes the first version by
+> hand from a clean checkout; afterwards a Trusted Publisher is configured and
+> CI handles every subsequent version automatically.
+
+The package name `unreal-cli` was verified free on the registry. The
+`cli/package.json` is already publish-ready (`private` removed, full metadata,
+`publishConfig: { access: "public", provenance: true }`). Publish the first
+version from a **clean checkout of `main`** (not a dev worktree), authenticated
+as the package owner (`baizor`):
+
+```bash
+# 1. Authenticate as the npm package owner (interactive; opens a browser).
+npm login                       # user: baizor
+
+# 2. From a clean checkout, build and publish the cli package.
+cd cli
+npm ci
+npm run build
+npm publish                     # publishConfig already sets access=public + provenance
+```
+
+`npm publish` reads `publishConfig` from `cli/package.json`, so `--access public`
+and `--provenance` need not be passed explicitly. Confirm with
+`npm view unreal-cli version` (expect `0.1.0`).
+
+Then, **one-time**, configure the Trusted Publisher so all future versions
+publish from CI without a token:
+
+1. On npmjs.com → the `unreal-cli` package → **Settings → Trusted Publisher**.
+2. Add a GitHub Actions publisher authorizing:
+   - **Repository**: `IvanMurzak/Unreal-MCP`
+   - **Workflow**: `release.yml`
+   - **Environment**: none (leave blank — `publish-npm` runs without a GitHub
+     Environment).
+3. See <https://docs.npmjs.com/trusted-publishers>.
+
+After that, every subsequent version is published by `release.yml`'s
+`publish-npm` job over OIDC (`id-token: write`, npm ≥ 11.5.1) on a real version
+bump — no manual `npm publish` and no stored `NPM_TOKEN`. Do **not** hand-publish
+again unless recovering a post-tag failure (see "Re-running a release" below).
+
 ## Self-hosted UE 5.7 runner
 
 The plugin leg (compile + Automation specs) needs Unreal Engine 5.7, which is
@@ -117,13 +161,21 @@ not available on GitHub-hosted runners. It runs on a **self-hosted Windows
 runner** labelled `unreal-5-7` — deliberately distinct from any M1/M4
 release-runner label so PR compiles do not starve release capacity.
 
+> **Status (2026-06-11): the runner is LIVE.** A self-hosted Windows runner
+> (labels `self-hosted`, `Windows`, `X64`, `unreal-5-7`) is registered against
+> `IvanMurzak/Unreal-MCP`, and the repository variable `UNREAL_RUNNER_READY` is
+> set to `true`. The `plugin BuildPlugin + Automation (UE 5.7)` leg now **runs**
+> on every same-repo PR and on real releases — it is no longer skipped. The
+> registration steps below are retained for re-provisioning the runner.
+
 ### Never red-by-absence
 
 Both plugin jobs (`plugin` in `test_pull_request.yml`/`release.yml` and
 `build-plugin-zip` in `release.yml`) are gated on the repository variable
-`UNREAL_RUNNER_READY == 'true'`. **While that variable is unset, the plugin jobs
-are SKIPPED** — a skipped job does not fail a PR, so an unregistered runner never
-reds the hosted legs. The bridge / server / cli legs always provide PR signal.
+`UNREAL_RUNNER_READY == 'true'`. That variable is currently **`true`**, so the
+plugin jobs run. (If it is ever unset — e.g. while re-provisioning the runner —
+the plugin jobs are SKIPPED rather than failing, so an absent runner never reds
+the hosted legs; the bridge / server / cli legs always provide PR signal.)
 
 ### Fork-PR safety (untrusted code never runs on the self-hosted runner)
 
@@ -166,7 +218,7 @@ Set via `gh variable set --repo IvanMurzak/Unreal-MCP <NAME> --body <VALUE>`
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
-| `UNREAL_RUNNER_READY` | to enable the plugin legs | Set to `true` once a `unreal-5-7` runner is registered. Unset/anything-else → plugin legs skip. |
+| `UNREAL_RUNNER_READY` | to enable the plugin legs | **Currently `true`** — a `unreal-5-7` runner is registered (2026-06-11), so the plugin legs run. Unset/anything-else → plugin legs skip. |
 | `UNREAL_ENGINE_PATH` | optional | UE 5.7 install root on the runner. Defaults to `C:\Program Files\Epic Games\UE_5.7`. |
 | `UNREAL_HOST_PROJECT` | for the Automation pass | Absolute path on the runner to the host `.uproject` (with the UnrealMCP plugin) the Automation specs run against. |
 
@@ -183,10 +235,13 @@ The workflows use **no long-lived publish secrets**:
 
 **npm first-publish prerequisite (owner action):** OIDC Trusted Publishing
 requires a Trusted Publisher for the `unreal-cli` package configured on
-npmjs.com that authorizes this repository + the `release.yml` workflow. Until
-that is set up — and `cli/package.json`'s `private: true` flag is removed in the
-bump commit that cuts the first release — `npm publish` fails auth and nothing is
-published. See <https://docs.npmjs.com/trusted-publishers>.
+npmjs.com that authorizes this repository + the `release.yml` workflow — and a
+Trusted Publisher can only be configured for a package that already exists. The
+`cli/package.json` `private` flag has already been removed and the package is
+publish-ready; the very first version is therefore published **manually** by the
+owner (see [First npm publish](#first-npm-publish-one-time-manual)), and only
+afterwards does the Trusted Publisher get configured so CI's `publish-npm`
+handles every subsequent version. See <https://docs.npmjs.com/trusted-publishers>.
 
 No secret is ever echoed to logs; the sidecar IPC token (`UNREAL_MCP_TOKEN`)
 travels via stdin and is unrelated to CI.
