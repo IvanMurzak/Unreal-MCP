@@ -1,0 +1,8 @@
+# actionlint configuration (https://github.com/rhysd/actionlint).
+# Declare the custom self-hosted runner label used by the UE 5.7 plugin legs so
+# actionlint does not flag it as unknown. The runner is registered by the owner
+# (see docs/RELEASING.md) and is gated on vars.UNREAL_RUNNER_READY so its absence
+# never reds a PR.
+self-hosted-runner:
+  labels:
+    - unreal-5-7

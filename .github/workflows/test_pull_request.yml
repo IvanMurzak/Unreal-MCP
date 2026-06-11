@@ -1,0 +1,190 @@
+# ┌──────────────────────────────────────────────────────────────────┐
+# │  Author: Ivan Murzak (https://github.com/IvanMurzak)             │
+# │  Repository: GitHub (https://github.com/IvanMurzak/Unreal-MCP)   │
+# │  Copyright (c) 2026 Ivan Murzak                                  │
+# │  Licensed under the Apache License, Version 2.0.                 │
+# │  See the LICENSE file in the project root for more information.  │
+# └──────────────────────────────────────────────────────────────────┘
+
+# Pull-request CI aggregator (Unity-MCP / Godot-MCP parity, adapted for the UE
+# four-leg mono-repo — docs/ARCHITECTURE.md §9.3/§9.4). Fans out with fail-fast
+# disabled so every leg reports independently:
+#   (a) bridge  — dotnet build + xUnit on hosted ubuntu-latest + windows-latest
+#   (b) server  — dotnet build on hosted ubuntu-latest (thin host, no tests yet)
+#   (c) cli     — unreal-cli node 20/22 tests via the reusable test_cli.yml
+#   (d) plugin  — UE 5.7 BuildPlugin + Automation specs (UnrealMcp. filter) on a
+#                 SELF-HOSTED windows runner labelled `unreal-5-7`
+#
+# Self-hosted runner is NEVER red-by-absence: job (d) is gated on the repository
+# variable `vars.UNREAL_RUNNER_READY == 'true'`. While that variable is unset
+# (no runner registered), job (d) is SKIPPED — a skipped job does not fail the
+# PR, and the hosted legs (a)/(b)/(c) still give full PR signal. Once the owner
+# registers the runner they set the variable to `true` (see docs/RELEASING.md)
+# and the plugin leg becomes a live required-when-available check. The label
+# `unreal-5-7` is deliberately distinct from any M1/M4 release-runner label so
+# PR compiles do not starve release capacity (§9.4 constraint).
+name: test-pull-request
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+# Least-privilege: PR test jobs only read the checked-out source.
+permissions:
+  contents: read
+
+# Auto-cancel superseded runs when a new commit is pushed to the same PR so
+# intermediate pushes don't pile up runner time (§03-implement push-early note).
+concurrency:
+  group: test-pr-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # (a) bridge — .NET 9 sidecar build + xUnit on BOTH hosted OSes (the sidecar
+  # ships per-RID binaries, so cross-OS test coverage matters). 0 errors / 0
+  # failures required.
+  bridge:
+    name: bridge build + xUnit (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 9
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "9.0.x"
+
+      - name: Restore
+        run: dotnet restore bridge/Unreal-MCP-Bridge.sln
+
+      - name: Build
+        run: dotnet build bridge/Unreal-MCP-Bridge.sln --configuration Debug --no-restore
+
+      - name: Test
+        run: dotnet test bridge/Unreal-MCP-Bridge.sln --configuration Debug --no-build --verbosity normal
+
+  # (b) server — .NET 8 thin host build (clone of Godot-MCP-Server, no
+  # Unreal-specific code, no test project today). 0 errors required.
+  server:
+    name: server build (.NET 8)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Restore
+        run: dotnet restore Unreal-MCP-Server/Unreal-MCP-Server.sln
+
+      - name: Build
+        run: dotnet build Unreal-MCP-Server/Unreal-MCP-Server.sln --configuration Debug --no-restore
+
+  # (c) cli — unreal-cli node tests (Node 20 & 22) via the reusable workflow.
+  test-cli:
+    uses: ./.github/workflows/test_cli.yml
+
+  # (d) plugin — UE 5.7 BuildPlugin (also validates marketplace packaging) +
+  # Automation specs on the self-hosted runner. Gated on UNREAL_RUNNER_READY so
+  # it never reds a PR by runner absence (see header). The job parses the
+  # exported Automation index.json (NOT the editor exit code, which is
+  # unreliable for test failures — test.md Suite 3) and fails on any failed
+  # test or a missing report.
+  plugin:
+    name: plugin BuildPlugin + Automation (UE 5.7)
+    # Gated on the runner being registered AND — for pull_request events — the PR
+    # originating from THIS repo, never a fork. A fork PR must never execute its
+    # checked-out code on the self-hosted runner (see docs/RELEASING.md). Manual
+    # dispatches (trusted) are unaffected by the fork clause.
+    if: ${{ vars.UNREAL_RUNNER_READY == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    runs-on: [self-hosted, windows, unreal-5-7]
+    env:
+      # Overridable per-runner via repository variables (docs/RELEASING.md).
+      UE_ROOT: ${{ vars.UNREAL_ENGINE_PATH || 'C:\Program Files\Epic Games\UE_5.7' }}
+      # Absolute path on the runner to a host .uproject with the UnrealMCP plugin
+      # available (the runner's local Unreal-Test-Project analog). Required for
+      # the Automation pass; BuildPlugin alone does not need it.
+      HOST_UPROJECT: ${{ vars.UNREAL_HOST_PROJECT }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          # Self-hosted runner persists between jobs; don't leave this job's
+          # GITHUB_TOKEN in the worktree's .git config after checkout.
+          persist-credentials: false
+
+      - name: BuildPlugin (compile + marketplace packaging validation)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $runUAT = Join-Path $env:UE_ROOT 'Engine\Build\BatchFiles\RunUAT.bat'
+          if (-not (Test-Path $runUAT)) { throw "RunUAT.bat not found at $runUAT — set the UNREAL_ENGINE_PATH repo variable." }
+          $uplugin = Join-Path $env:GITHUB_WORKSPACE 'UnrealMCP\UnrealMCP.uplugin'
+          $package = Join-Path $env:RUNNER_TEMP 'UnrealMCP-Package'
+          if (Test-Path $package) { Remove-Item $package -Recurse -Force }
+          & $runUAT BuildPlugin -Plugin="$uplugin" -Package="$package" -TargetPlatforms=Win64 -Rocket
+          if ($LASTEXITCODE -ne 0) { throw "BuildPlugin failed with exit code $LASTEXITCODE" }
+
+      - name: Run Automation specs (UnrealMcp. filter)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ([string]::IsNullOrWhiteSpace($env:HOST_UPROJECT)) {
+            throw "UNREAL_HOST_PROJECT repo variable is not set — the Automation pass needs a host .uproject with the UnrealMCP plugin enabled (see docs/RELEASING.md)."
+          }
+          $editorCmd = Join-Path $env:UE_ROOT 'Engine\Binaries\Win64\UnrealEditor-Cmd.exe'
+          $reportDir = Join-Path $env:RUNNER_TEMP 'AutomationReport'
+          if (Test-Path $reportDir) { Remove-Item $reportDir -Recurse -Force }
+          & $editorCmd "$env:HOST_UPROJECT" -nullrhi -nosplash -unattended `
+            -ExecCmds="Automation RunTests UnrealMcp.; Quit" `
+            -ReportExportPath="$reportDir" -log
+          # The editor's exit code is unreliable for test verdicts (test.md
+          # Suite 3); the parsed index.json below is authoritative. Clear the
+          # exit code so pwsh's auto-appended `exit $LASTEXITCODE` does not red
+          # the step on a nonzero editor exit unrelated to a test failure.
+          $global:LASTEXITCODE = 0
+          echo "REPORT_DIR=$reportDir" >> $env:GITHUB_ENV
+
+      - name: Parse Automation report (index.json is authoritative)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $index = Join-Path $env:REPORT_DIR 'index.json'
+          if (-not (Test-Path $index)) {
+            throw "Automation index.json is MISSING at $index — the run crashed or produced no report (treat as FAILURE, not the 0/0 no-specs case)."
+          }
+          # The report is UTF-8 with BOM (utf-8-sig); ConvertFrom-Json handles the BOM.
+          $report = Get-Content $index -Raw | ConvertFrom-Json
+          $failed = [int]$report.failed
+          $succeeded = [int]$report.succeeded
+          # UE counts specs that pass while emitting a warning under a SEPARATE
+          # succeededWithWarnings field; fold it into the pass tally so a
+          # clean-but-warned suite is not misread as the 0-specs case below.
+          $succeededWithWarnings = [int]$report.succeededWithWarnings
+          $passed = $succeeded + $succeededWithWarnings
+          Write-Host "Automation results: succeeded=$succeeded succeededWithWarnings=$succeededWithWarnings failed=$failed"
+          if ($failed -gt 0) { throw "$failed Automation test(s) failed." }
+          if ($passed -lt 1) { throw "No Automation tests succeeded (succeeded=$succeeded succeededWithWarnings=$succeededWithWarnings) — expected at least one UnrealMcp. spec." }
+          Write-Host "Plugin Automation: all specs passed."
+
+      - name: Upload Automation report on failure
+        # REPORT_DIR is exported only at the END of the Automation step; an
+        # earlier failure (BuildPlugin, missing editor) leaves it unset, so guard
+        # the upload to avoid a second confusing failure on an empty path.
+        if: ${{ failure() && env.REPORT_DIR != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: automation-report
+          path: ${{ env.REPORT_DIR }}
+          if-no-files-found: ignore
+          retention-days: 7
