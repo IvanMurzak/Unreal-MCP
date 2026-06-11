@@ -43,6 +43,24 @@ namespace
 	const TCHAR* KeyTransport      = TEXT("transport");
 	const TCHAR* KeyStartServer    = TEXT("startServer");
 	const TCHAR* KeyEnabledTools   = TEXT("enabledTools");
+	const TCHAR* KeyDisabledTools  = TEXT("disabledTools");
+
+	// Read a JSON array field into a string array (skipping empty/non-string entries). Shared by the
+	// enabledTools / disabledTools list fields so their parsing stays identical.
+	void ReadStringArrayField(const TSharedPtr<FJsonObject>& Json, const TCHAR* Key, TArray<FString>& Out)
+	{
+		const TArray<TSharedPtr<FJsonValue>>* Values = nullptr;
+		if (Json->TryGetArrayField(Key, Values) && Values != nullptr)
+		{
+			Out.Reset();
+			for (const TSharedPtr<FJsonValue>& Value : *Values)
+			{
+				FString Item;
+				if (Value.IsValid() && Value->TryGetString(Item) && !Item.IsEmpty())
+					Out.Add(Item);
+			}
+		}
+	}
 
 	FString TrimSlash(const FString& In)
 	{
@@ -134,17 +152,8 @@ void FUnrealMcpConfig::LoadFromJson(const TSharedPtr<FJsonObject>& Json)
 		if (Json->TryGetStringField(KeyTransport, Str)) Transport = Str;
 		if (Json->TryGetBoolField(KeyStartServer, bFlag)) bStartServer = bFlag;
 
-		const TArray<TSharedPtr<FJsonValue>>* Tools = nullptr;
-		if (Json->TryGetArrayField(KeyEnabledTools, Tools) && Tools != nullptr)
-		{
-			EnabledTools.Reset();
-			for (const TSharedPtr<FJsonValue>& Value : *Tools)
-			{
-				FString Tool;
-				if (Value.IsValid() && Value->TryGetString(Tool) && !Tool.IsEmpty())
-					EnabledTools.Add(Tool);
-			}
-		}
+		ReadStringArrayField(Json, KeyEnabledTools, EnabledTools);
+		ReadStringArrayField(Json, KeyDisabledTools, DisabledTools);
 	}
 
 	// Snapshot the (defaults + disk) baseline AFTER loading — this is what Save() restores for any key an
@@ -316,6 +325,11 @@ TSharedPtr<FJsonObject> FUnrealMcpConfig::ToJson() const
 	for (const FString& Tool : EnabledTools)
 		Tools.Add(MakeShared<FJsonValueString>(Tool));
 	Obj->SetArrayField(KeyEnabledTools, Tools);
+
+	TArray<TSharedPtr<FJsonValue>> Disabled;
+	for (const FString& Tool : DisabledTools)
+		Disabled.Add(MakeShared<FJsonValueString>(Tool));
+	Obj->SetArrayField(KeyDisabledTools, Disabled);
 
 	return Obj;
 }

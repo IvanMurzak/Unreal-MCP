@@ -81,6 +81,13 @@ public:
 	FString Transport;         // "transport"
 	bool bStartServer = false; // "startServer"
 	TArray<FString> EnabledTools; // "enabledTools" (UNREAL_MCP_TOOLS override; empty = no override)
+	// "disabledTools" — the per-tool enable-map persisted by the §7 MCP Tools window. Names listed here are
+	// hidden from the served manifest (excluded by the registry on boot + on every UI toggle). A blocklist,
+	// NOT a whitelist: default-empty means every tool is enabled, and a tool added by a later plugin update is
+	// enabled unless the user explicitly turns it off. Orthogonal to EnabledTools (the env power-user filter):
+	// a tool is served iff (EnabledTools empty OR it is in EnabledTools) AND it is NOT in DisabledTools. This
+	// field has no env override — it is pure UI persistence, so Save() always round-trips the live value.
+	TArray<FString> DisabledTools; // "disabledTools"
 
 	UNREALMCPEDITOR_API FUnrealMcpConfig();
 
