@@ -41,8 +41,23 @@ void FUnrealMcpAuxWindows::Register(
 		return;
 
 	ViewModel = InViewModel;
-	ToolListProvider = MoveTemp(InToolListProvider);
-	PortStatusProvider = MoveTemp(InPortStatusProvider);
+
+	// The Tools/Settings providers close over the runtime-owned registry/bridge (raw, non-owning). A widget can
+	// outlive Unregister() — a deferred RequestCloseTab still queued when the runtime frees those subsystems — and
+	// paint once more, dereferencing freed memory. Guard both providers with a shared alive-flag that
+	// NeutralizeProviders() (from Unregister(), ahead of the runtime's BridgeServer/Registry resets) flips off, so
+	// every surviving widget copy short-circuits to a safe empty result. Mirrors the runtime's view-model
+	// side-effect-sink nulling: same teardown race, same defense, for the widget-held providers.
+	ProvidersAlive = MakeShared<bool>(true);
+	TSharedPtr<bool> Alive = ProvidersAlive;
+	ToolListProvider = [Alive, Inner = MoveTemp(InToolListProvider)]() -> TArray<FUnrealMcpToolListEntry>
+	{
+		return (Alive.IsValid() && *Alive && Inner) ? Inner() : TArray<FUnrealMcpToolListEntry>();
+	};
+	PortStatusProvider = [Alive, Inner = MoveTemp(InPortStatusProvider)]() -> FString
+	{
+		return (Alive.IsValid() && *Alive && Inner) ? Inner() : FString();
+	};
 	PromptProvider = MoveTemp(InPromptProvider);
 	ResourceProvider = MoveTemp(InResourceProvider);
 
@@ -106,6 +121,12 @@ void FUnrealMcpAuxWindows::Unregister()
 	if (!bRegistered)
 		return;
 
+	// Neutralize the widget-held providers FIRST: a tab closed via the deferred RequestCloseTab below (or any
+	// queued widget event) could otherwise paint once more after the runtime frees the registry/bridge. Runtime
+	// Shutdown calls Unregister() ahead of the BridgeServer/Registry resets, so flipping the alive-flag here makes
+	// every surviving provider copy return a safe empty result.
+	NeutralizeProviders();
+
 	if (FSlateApplication::IsInitialized())
 	{
 		FGlobalTabmanager& TabManager = *FGlobalTabmanager::Get();
@@ -127,6 +148,12 @@ void FUnrealMcpAuxWindows::Unregister()
 	}
 
 	bRegistered = false;
+}
+
+void FUnrealMcpAuxWindows::NeutralizeProviders()
+{
+	if (ProvidersAlive.IsValid())
+		*ProvidersAlive = false;
 }
 
 TSharedRef<SDockTab> FUnrealMcpAuxWindows::SpawnToolsTab(const FSpawnTabArgs& Args)

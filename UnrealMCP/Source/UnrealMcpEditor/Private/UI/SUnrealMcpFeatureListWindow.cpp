@@ -11,8 +11,6 @@
 #include "Widgets/Text/STextBlock.h"
 #include "Styling/AppStyle.h"
 
-#define LOCTEXT_NAMESPACE "UnrealMcp"
-
 void SUnrealMcpFeatureListWindow::Construct(const FArguments& InArgs)
 {
 	TArray<FUnrealMcpFeatureEntry> Entries;
@@ -76,5 +74,3 @@ TSharedRef<SWidget> SUnrealMcpFeatureListWindow::BuildEntryRow(const FUnrealMcpF
 			]
 		];
 }
-
-#undef LOCTEXT_NAMESPACE

@@ -223,7 +223,7 @@ public:
 	/** Every registered tool name, sorted (the §7 MCP Tools window enumerates the full set, enabled or not). */
 	TArray<FString> GetToolNamesSorted() const;
 
-	/** Count of tools whose bEnabled flag is set (the "N / M Tools" §7 Features line). */
+	/** Count of tools whose bEnabled flag is set (backs the boot-time enable-map log line). */
 	int32 NumEnabled() const;
 
 	/**

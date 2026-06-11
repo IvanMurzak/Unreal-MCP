@@ -51,8 +51,16 @@ public:
 		TFunction<TArray<FUnrealMcpFeatureEntry>()> InPromptProvider,
 		TFunction<TArray<FUnrealMcpFeatureEntry>()> InResourceProvider);
 
-	/** Unregister the tab spawners + the settings section (Shutdown). Idempotent. */
+	/** Unregister the tab spawners + the settings section (Shutdown). Idempotent. Neutralizes the providers first. */
 	void Unregister();
+
+	/**
+	 * Flip the shared alive-flag the Tools/Settings providers close over, so any widget that outlives Unregister()
+	 * (a deferred RequestCloseTab still queued when the runtime frees the registry/bridge) short-circuits its
+	 * provider to a safe empty result instead of dereferencing freed memory. Called from Unregister(), which the
+	 * runtime invokes BEFORE the BridgeServer/Registry resets. Idempotent; safe before Register(). Game-thread only.
+	 */
+	void NeutralizeProviders();
 
 private:
 	TSharedRef<SDockTab> SpawnToolsTab(const FSpawnTabArgs& Args);
@@ -65,6 +73,9 @@ private:
 	TFunction<FString()> PortStatusProvider;
 	TFunction<TArray<FUnrealMcpFeatureEntry>()> PromptProvider;
 	TFunction<TArray<FUnrealMcpFeatureEntry>()> ResourceProvider;
+	// Shared with every widget-held copy of the registry/bridge-touching providers; NeutralizeProviders() flips it
+	// false during teardown so a surviving widget's next paint returns empty rather than dereferencing freed memory.
+	TSharedPtr<bool> ProvidersAlive;
 	bool bRegistered = false;
 	bool bSettingsRegistered = false;
 };

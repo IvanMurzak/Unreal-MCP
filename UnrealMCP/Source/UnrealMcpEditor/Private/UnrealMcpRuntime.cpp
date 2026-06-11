@@ -254,7 +254,7 @@ void FUnrealMcpRuntime::Shutdown()
 	// down so a reader-thread invoke cannot race the reset.
 	if (AuxWindows.IsValid())
 	{
-		AuxWindows->Unregister(); // closes live aux tabs + unregisters the ISettingsModule section before view-model teardown
+		AuxWindows->Unregister(); // neutralizes the widget-held providers + closes live aux tabs + unregisters the ISettingsModule section, all before the bridge/registry below are freed
 		AuxWindows.Reset();
 	}
 	if (MainWindowTab.IsValid())
