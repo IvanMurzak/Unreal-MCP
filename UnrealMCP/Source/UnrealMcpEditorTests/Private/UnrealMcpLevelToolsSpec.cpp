@@ -145,6 +145,7 @@ void FUnrealMcpLevelToolsSpec::Define()
 
 			// level-create with no 'path' -> GEditor->NewMap(): a fresh in-memory world, nothing saved.
 			FString LevelName;
+			FString PersistentPackage;
 			{
 				const FUnrealMcpToolResult R = RunLevel(Registry, TEXT("level-create"), Args());
 				if (!R.bSuccess)
@@ -160,6 +161,7 @@ void FUnrealMcpLevelToolsSpec::Define()
 				TestTrue(TEXT("create reports not-saved"), !R.Structured->GetBoolField(TEXT("saved")));
 				TestTrue(TEXT("create reports a persistent level"), R.Structured->GetBoolField(TEXT("isPersistent")));
 				LevelName = R.Structured->GetStringField(TEXT("name"));
+				PersistentPackage = R.Structured->GetStringField(TEXT("package"));
 				TestTrue(TEXT("create returns a level name"), !LevelName.IsEmpty());
 			}
 
@@ -223,6 +225,28 @@ void FUnrealMcpLevelToolsSpec::Define()
 				TSharedPtr<FJsonObject> A = Args();
 				A->SetStringField(TEXT("name"), TEXT("__NoSuchSublevel__"));
 				TestFalse(TEXT("unload missing sublevel -> error"), RunLevel(Registry, TEXT("level-unload-sublevel"), A).bSuccess);
+			}
+
+			// level-unload-sublevel on the PERSISTENT level: rejected with the persistent-level explanation
+			// both by its short name AND by its full package path (the disambiguation form the param doc
+			// recommends — the package-path branch is the simplify finding under test).
+			{
+				TSharedPtr<FJsonObject> A = Args();
+				A->SetStringField(TEXT("name"), LevelName);
+				const FUnrealMcpToolResult R = RunLevel(Registry, TEXT("level-unload-sublevel"), A);
+				TestFalse(TEXT("unload persistent by short name -> error"), R.bSuccess);
+				TestTrue(TEXT("short-name error explains persistent level"), R.Message.Contains(TEXT("persistent level")));
+
+				// Guard the package-path assertion on a non-empty package (an in-memory NewMap world's persistent
+				// level normally has a transient package name, but skip rather than assert vacuously if it is empty).
+				if (!PersistentPackage.IsEmpty())
+				{
+					TSharedPtr<FJsonObject> B = Args();
+					B->SetStringField(TEXT("name"), PersistentPackage);
+					const FUnrealMcpToolResult RP = RunLevel(Registry, TEXT("level-unload-sublevel"), B);
+					TestFalse(TEXT("unload persistent by package path -> error"), RP.bSuccess);
+					TestTrue(TEXT("package-path error explains persistent level"), RP.Message.Contains(TEXT("persistent level")));
+				}
 			}
 
 			// level-save in place on the transient world -> error (never saved; no path).

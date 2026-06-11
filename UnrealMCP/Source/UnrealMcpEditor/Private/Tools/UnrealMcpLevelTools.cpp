@@ -278,8 +278,25 @@ namespace UnrealMcpLevelTools
 				{
 					bSaved = UEditorLoadingAndSavingUtils::SaveMap(NewWorld, SavedPackage);
 					if (!bSaved)
+					{
+						// The world was already replaced (and the previous world's unsaved edits discarded) before this
+						// save attempt; an Error result carries no structured payload, so name the discarded packages in
+						// the message text rather than dropping that signal silently.
+						FString DiscardedSuffix;
+						if (DiscardedDirty.Num() > 0)
+						{
+							TArray<FString> DiscardedNames;
+							for (const TSharedPtr<FJsonValue>& V : DiscardedDirty)
+								if (V.IsValid())
+									DiscardedNames.Add(V->AsString());
+							DiscardedSuffix = FString::Printf(
+								TEXT(" Unsaved edits from the previous world were already discarded: %s."),
+								*FString::Join(DiscardedNames, TEXT(", ")));
+						}
 						return FUnrealMcpToolResult::Error(FString::Printf(
-							TEXT("Created the level but failed to save it to '%s' (invalid path or save was declined)."), *SavedPackage));
+							TEXT("Created the level but failed to save it to '%s' (invalid path or save was declined).%s"),
+							*SavedPackage, *DiscardedSuffix));
+					}
 				}
 
 				ULevel* Persistent = NewWorld->PersistentLevel;
@@ -313,6 +330,12 @@ namespace UnrealMcpLevelTools
 			.DestructiveHint(true)
 			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
 			{
+				// UEditorLoadingAndSavingUtils::LoadMap dereferences GEditor internally; guard it the same way
+				// level-create guards GEditor->NewMap. The other tools reach the editor via GetWorldOrNull, but
+				// level-open REPLACES the world, so there is no current world to probe — check GEditor directly.
+				if (!GEditor)
+					return FUnrealMcpToolResult::Error(TEXT("No editor available (not running in the editor)."));
+
 				const FString Path = Call.GetString(TEXT("path"));
 				if (Path.IsEmpty())
 					return FUnrealMcpToolResult::Error(TEXT("Missing required 'path' (asset path of the level to open)."));
@@ -636,7 +659,9 @@ namespace UnrealMcpLevelTools
 				if (!Match)
 				{
 					// Not a sublevel: explain the persistent-level case specifically, else a plain not-found.
-					if (World->PersistentLevel && LevelShortName(World->PersistentLevel).Equals(Name, ESearchCase::IgnoreCase))
+					if (World->PersistentLevel &&
+						(LevelShortName(World->PersistentLevel).Equals(Name, ESearchCase::IgnoreCase) ||
+						 LevelPackageName(World->PersistentLevel).Equals(Name, ESearchCase::IgnoreCase)))
 						return FUnrealMcpToolResult::Error(FString::Printf(
 							TEXT("'%s' is the persistent level and cannot be unloaded."), *Name));
 					return FUnrealMcpToolResult::Error(FString::Printf(
@@ -648,10 +673,21 @@ namespace UnrealMcpLevelTools
 					return FUnrealMcpToolResult::Error(FString::Printf(
 						TEXT("Sublevel '%s' is not currently loaded; nothing to unload."), *Name));
 
+				// Capture the sublevel's unsaved state BEFORE removing it: RemoveLevelFromWorld discards a dirty
+				// sublevel's edits with no prompt under -unattended, so surface `wasDirty` to complete the family's
+				// discarded-edits convention (mirrors `discardedDirtyLevels` on level-create / level-open).
+				const UPackage* LoadedPackage = Loaded->GetOutermost();
+				const bool bWasDirty = LoadedPackage && LoadedPackage->IsDirty();
+
 				if (!UEditorLevelUtils::RemoveLevelFromWorld(Loaded))
 					return FUnrealMcpToolResult::Error(FString::Printf(TEXT("Failed to unload sublevel '%s'."), *Name));
 
-				return FUnrealMcpToolResult::Success(FString::Printf(TEXT("Unloaded sublevel '%s'."), *Name));
+				TSharedPtr<FJsonObject> Structured = MakeShared<FJsonObject>();
+				Structured->SetBoolField(TEXT("wasDirty"), bWasDirty);
+				return FUnrealMcpToolResult::Success(
+					FString::Printf(TEXT("Unloaded sublevel '%s'%s."), *Name,
+						bWasDirty ? TEXT(" (discarded its unsaved edits)") : TEXT("")),
+					Structured);
 			});
 	}
 }
