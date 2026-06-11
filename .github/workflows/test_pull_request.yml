@@ -118,6 +118,10 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          # Self-hosted runner persists between jobs; don't leave this job's
+          # GITHUB_TOKEN in the worktree's .git config after checkout.
+          persist-credentials: false
 
       - name: BuildPlugin (compile + marketplace packaging validation)
         shell: pwsh
@@ -127,6 +131,7 @@ jobs:
           if (-not (Test-Path $runUAT)) { throw "RunUAT.bat not found at $runUAT — set the UNREAL_ENGINE_PATH repo variable." }
           $uplugin = Join-Path $env:GITHUB_WORKSPACE 'UnrealMCP\UnrealMCP.uplugin'
           $package = Join-Path $env:RUNNER_TEMP 'UnrealMCP-Package'
+          if (Test-Path $package) { Remove-Item $package -Recurse -Force }
           & $runUAT BuildPlugin -Plugin="$uplugin" -Package="$package" -TargetPlatforms=Win64 -Rocket
           if ($LASTEXITCODE -ne 0) { throw "BuildPlugin failed with exit code $LASTEXITCODE" }
 
@@ -162,13 +167,21 @@ jobs:
           $report = Get-Content $index -Raw | ConvertFrom-Json
           $failed = [int]$report.failed
           $succeeded = [int]$report.succeeded
-          Write-Host "Automation results: succeeded=$succeeded failed=$failed"
+          # UE counts specs that pass while emitting a warning under a SEPARATE
+          # succeededWithWarnings field; fold it into the pass tally so a
+          # clean-but-warned suite is not misread as the 0-specs case below.
+          $succeededWithWarnings = [int]$report.succeededWithWarnings
+          $passed = $succeeded + $succeededWithWarnings
+          Write-Host "Automation results: succeeded=$succeeded succeededWithWarnings=$succeededWithWarnings failed=$failed"
           if ($failed -gt 0) { throw "$failed Automation test(s) failed." }
-          if ($succeeded -lt 1) { throw "No Automation tests succeeded (succeeded=$succeeded) — expected at least one UnrealMcp. spec." }
+          if ($passed -lt 1) { throw "No Automation tests succeeded (succeeded=$succeeded succeededWithWarnings=$succeededWithWarnings) — expected at least one UnrealMcp. spec." }
           Write-Host "Plugin Automation: all specs passed."
 
       - name: Upload Automation report on failure
-        if: failure()
+        # REPORT_DIR is exported only at the END of the Automation step; an
+        # earlier failure (BuildPlugin, missing editor) leaves it unset, so guard
+        # the upload to avoid a second confusing failure on an empty path.
+        if: ${{ failure() && env.REPORT_DIR != '' }}
         uses: actions/upload-artifact@v4
         with:
           name: automation-report
