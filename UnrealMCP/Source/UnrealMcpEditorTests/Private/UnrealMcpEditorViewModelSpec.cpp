@@ -33,7 +33,7 @@ BEGIN_DEFINE_SPEC(FUnrealMcpEditorViewModelSpec, "UnrealMcp.EditorViewModel",
 		TSharedRef<FUnrealMcpEditorViewModel> VM = MakeShared<FUnrealMcpEditorViewModel>();
 		VM->OnPersistConfig = [Rec](const FUnrealMcpConfig&) { Rec->PersistCount++; };
 		VM->OnPushConfig = [Rec](const FUnrealMcpConfig& Cfg) { Rec->PushCount++; Rec->LastPushed = Cfg; };
-		VM->OnSendAuth = [Rec](const FString& Type) { Rec->AuthSent.Add(Type); };
+		VM->OnSendAuth = [Rec](const FString& Type) -> bool { Rec->AuthSent.Add(Type); return true; };
 		VM->OnOpenBrowser = [Rec](const FString& Url) { Rec->OpenedUrls.Add(Url); };
 		return VM;
 	}
@@ -173,12 +173,32 @@ void FUnrealMcpEditorViewModelSpec::Define()
 			VM->ApplyDeviceAuth(Pending);
 			TestEqual("browser not re-opened", Rec->OpenedUrls.Num(), 1);
 
+			const int32 PersistBeforeAuth = Rec->PersistCount;
+			const int32 PushBeforeAuth = Rec->PushCount;
 			TSharedPtr<FJsonObject> Authorized = MakeShared<FJsonObject>();
 			Authorized->SetStringField(TEXT("state"), TEXT("authorized"));
 			Authorized->SetStringField(TEXT("token"), TEXT("cloud-bearer-abc"));
 			VM->ApplyDeviceAuth(Authorized);
 			TestEqual("authorized state", static_cast<int32>(VM->GetDeviceAuthState()), static_cast<int32>(EUnrealMcpDeviceAuthState::Authorized));
 			TestTrue("cloud token stored", VM->HasCloudToken());
+			// The authorized token MUST be persisted to the §8 store AND pushed into the bridge's effective
+			// config — otherwise it is lost on restart / a "Restart bridge" re-pushes a token-less config.
+			TestTrue("authorize persisted the token", Rec->PersistCount > PersistBeforeAuth);
+			TestTrue("authorize pushed the token", Rec->PushCount > PushBeforeAuth);
+			TestEqual("pushed config carries the cloud token", Rec->LastPushed.CloudToken, FString(TEXT("cloud-bearer-abc")));
+		});
+
+		It("Authorize stays out of Pending when the auth-start frame cannot be sent (no sidecar)", [this]()
+		{
+			TSharedRef<FRecording> Rec = MakeShared<FRecording>();
+			TSharedRef<FUnrealMcpEditorViewModel> VM = MakeViewModel(Rec);
+			// A sink that reports the frame could not be delivered (no connected/handshaken sidecar).
+			VM->OnSendAuth = [Rec](const FString& Type) -> bool { Rec->AuthSent.Add(Type); return false; };
+
+			VM->Authorize();
+			TestTrue("auth-start attempted", Rec->AuthSent.Contains(TEXT("auth-start")));
+			// Must NOT wedge in a code-less Pending state — fall to Failed so the UI does not show an empty code.
+			TestEqual("not pending when send failed", static_cast<int32>(VM->GetDeviceAuthState()), static_cast<int32>(EUnrealMcpDeviceAuthState::Failed));
 		});
 
 		It("Revoke clears the cloud token, sends auth-revoke and pushes the now-anonymous config", [this]()

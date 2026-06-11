@@ -104,10 +104,11 @@ void FUnrealMcpRuntime::Startup()
 		if (BridgeServerPtr)
 			BridgeServerPtr->SetEffectiveConfig(Cfg.BuildEffectiveConnectionConfig());
 	};
-	ViewModel->OnSendAuth = [BridgeServerPtr](const FString& AuthType)
+	ViewModel->OnSendAuth = [BridgeServerPtr](const FString& AuthType) -> bool
 	{
-		if (BridgeServerPtr)
-			BridgeServerPtr->SendAuthMessage(AuthType);
+		// Plumb the send result back so Authorize() does not enter a code-less Pending state when there is no
+		// connected sidecar to receive the auth-start frame.
+		return BridgeServerPtr ? BridgeServerPtr->SendAuthMessage(AuthType) : false;
 	};
 	ViewModel->OnOpenBrowser = [](const FString& Url)
 	{
@@ -187,11 +188,21 @@ void FUnrealMcpRuntime::Shutdown()
 	// down so a reader-thread invoke cannot race the reset.
 	if (MainWindowTab.IsValid())
 	{
-		MainWindowTab->Unregister();
+		MainWindowTab->Unregister(); // also closes a live tab so its widget (a strong view-model ref) is freed
 		MainWindowTab.Reset();
 	}
 	if (BridgeServer.IsValid())
 		BridgeServer->SetStatusSink(nullptr);
+	// Null the view-model's side-effect sinks before destroying the bridge/sidecar below: those sinks capture
+	// raw FUnrealMcpBridgeServer* pointers, so if anything still holds the view-model after the tab close
+	// (a deferred RequestCloseTab, a queued widget event) it cannot dereference the soon-to-be-freed bridge.
+	if (ViewModel.IsValid())
+	{
+		ViewModel->OnPersistConfig = nullptr;
+		ViewModel->OnPushConfig = nullptr;
+		ViewModel->OnSendAuth = nullptr;
+		ViewModel->OnOpenBrowser = nullptr;
+	}
 	ViewModel.Reset();
 
 	if (BridgeServer.IsValid())

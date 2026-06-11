@@ -89,11 +89,13 @@ void FUnrealMcpEditorViewModel::Disconnect()
 
 void FUnrealMcpEditorViewModel::Authorize()
 {
-	DeviceAuthState = EUnrealMcpDeviceAuthState::Pending;
 	DeviceVerificationUrl.Reset();
 	DeviceUserCode.Reset();
-	if (OnSendAuth)
-		OnSendAuth(TEXT("auth-start"));
+	// Only enter Pending if the auth-start frame actually reached the sidecar. SendAuthMessage returns false
+	// when no sidecar is connected/handshaken; entering Pending regardless would wedge the UI showing
+	// "Complete authorization in your browser…" with an empty user code until the user manually cancels.
+	const bool bSent = OnSendAuth ? OnSendAuth(TEXT("auth-start")) : false;
+	DeviceAuthState = bSent ? EUnrealMcpDeviceAuthState::Pending : EUnrealMcpDeviceAuthState::Failed;
 }
 
 void FUnrealMcpEditorViewModel::CancelAuth()
@@ -179,10 +181,17 @@ void FUnrealMcpEditorViewModel::ApplyDeviceAuth(const TSharedPtr<FJsonObject>& D
 		if (StateRaw.Equals(TEXT("authorized"), ESearchCase::IgnoreCase) || StateRaw.Equals(TEXT("success"), ESearchCase::IgnoreCase))
 		{
 			DeviceAuthState = EUnrealMcpDeviceAuthState::Authorized;
-			// The sidecar stored the token; mirror its presence so the UI flips to the Revoke affordance.
+			// The sidecar stored the token; mirror its presence so the UI flips to the Revoke affordance, and
+			// PERSIST + PUSH it (like Revoke does): without this the bearer is lost on editor restart (never
+			// written to the §8 config store) and the bridge's effective config never learns it, so a "Restart
+			// bridge" re-pushes a token-less config and silently drops the authorized session. Guard on change
+			// so a repeated `authorized` poll update does not churn the store / re-push every tick.
 			FString Token;
-			if (DeviceAuth->TryGetStringField(TEXT("token"), Token) && !Token.IsEmpty())
+			if (DeviceAuth->TryGetStringField(TEXT("token"), Token) && !Token.IsEmpty() && Config.CloudToken != Token)
+			{
 				Config.CloudToken = Token;
+				PersistAndPush();
+			}
 		}
 		else if (StateRaw.Equals(TEXT("failed"), ESearchCase::IgnoreCase) || StateRaw.Equals(TEXT("denied"), ESearchCase::IgnoreCase) || StateRaw.Equals(TEXT("expired"), ESearchCase::IgnoreCase))
 		{

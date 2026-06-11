@@ -62,6 +62,12 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         private readonly string _clientLabel;
         private CancellationTokenSource? _authCts;
 
+        // Serialize SignalR connect/disconnect transitions so rapid Connect/Disconnect toggles (or a device-auth
+        // reconnect racing a config-driven disconnect) apply in submission order — last-write-wins — instead of
+        // two in-flight plugin.Connect()/Disconnect() calls interleaving and landing in the wrong final state.
+        private readonly object _transitionLock = new();
+        private Task _connectionTransition = Task.CompletedTask;
+
         public SidecarHost(
             IpcClient ipc,
             string sidecarVersion,
@@ -161,9 +167,9 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             _logger?.LogInformation("Applied updated connection config (mode-aware host {Host}).", _config.Host);
 
             if (wasKeepConnected && !_config.KeepConnected)
-                _ = HandleDisconnectAsync();
+                _ = RunConnectionTransition(HandleDisconnectAsync);
             else if (!wasKeepConnected && _config.KeepConnected)
-                _ = ReconnectAsync();
+                _ = RunConnectionTransition(() => ReconnectAsync());
         }
 
         /// <summary>
@@ -236,7 +242,10 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
 
         private void StartDeviceAuth()
         {
+            // Cancel AND dispose the previous flow's source before replacing it (cancel-before-dispose is safe:
+            // the in-flight flow observes an already-cancelled token, so no post-dispose registration throws).
             _authCts?.Cancel();
+            _authCts?.Dispose();
             var cts = new CancellationTokenSource();
             _authCts = cts;
             var cloudUrl = _config.Host; // Cloud mode resolved Host to cloudUrl (ApplyConnectionConfig).
@@ -257,8 +266,11 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
                 if (result.Success && result.Token != null)
                 {
                     _config.Token = result.Token; // the issued cloud bearer is NEVER logged (§8)
-                    await ReconnectAsync().ConfigureAwait(false); // the authorized session takes effect
-                    await EmitStatusAsync("Connected", cloudAuthState: "Authorized").ConfigureAwait(false);
+                    // Reconnect through the serialized transition queue and surface the ACTUAL connect outcome —
+                    // do not claim "Connected" if SignalR is still establishing (mirrors ConnectSignalRAsync).
+                    var connected = false;
+                    await RunConnectionTransition(async () => connected = await ReconnectAsync().ConfigureAwait(false)).ConfigureAwait(false);
+                    await EmitStatusAsync(connected ? "Connected" : "Connecting", cloudAuthState: "Authorized").ConfigureAwait(false);
                 }
             }
             catch (Exception ex)
@@ -279,21 +291,43 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             await EmitStatusAsync("Disconnected").ConfigureAwait(false);
         }
 
-        /// <summary>Disconnect then reconnect SignalR so a newly-applied token/host takes effect.</summary>
-        private async Task ReconnectAsync()
+        /// <summary>
+        /// Disconnect then reconnect SignalR so a newly-applied token/host takes effect. Returns whether the
+        /// connect attempt reported success, so a caller (the device-code flow) can surface the real state
+        /// instead of an unconditional "Connected".
+        /// </summary>
+        private async Task<bool> ReconnectAsync()
         {
             var plugin = _plugin;
             if (plugin == null)
-                return;
+                return false;
             try { await plugin.Disconnect().ConfigureAwait(false); } catch { /* may not be connected */ }
             try
             {
                 var ok = await plugin.Connect().ConfigureAwait(false);
                 _logger?.LogInformation(ok ? "SignalR reconnected." : "SignalR reconnect returned false; client keeps retrying.");
+                return ok;
             }
             catch (Exception ex)
             {
                 _logger?.LogWarning("SignalR reconnect failed: {Message}", ex.Message);
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Run a SignalR connect/disconnect transition serialized after any previously-queued one (last-write-wins
+        /// in submission order). Prevents two in-flight transitions from interleaving their plugin.Connect()/
+        /// Disconnect() calls and leaving the client in a state that contradicts the user's last action.
+        /// </summary>
+        private Task RunConnectionTransition(Func<Task> transition)
+        {
+            lock (_transitionLock)
+            {
+                var queued = _connectionTransition.ContinueWith(
+                    _ => transition(), CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default).Unwrap();
+                _connectionTransition = queued;
+                return queued;
             }
         }
 
@@ -334,6 +368,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             _ipc.ConfigReceived -= OnConfigReceived;
             _ipc.AuthMessageReceived -= HandleAuthMessage;
             try { _authCts?.Cancel(); } catch { /* ignore */ }
+            _authCts?.Dispose();
             try { _plugin?.Dispose(); } catch { /* ignore */ }
             _plugin = null;
         }

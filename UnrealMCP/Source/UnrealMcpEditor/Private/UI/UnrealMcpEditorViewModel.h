@@ -65,8 +65,12 @@ public:
 	TFunction<void(const FUnrealMcpConfig&)> OnPersistConfig;
 	/** Push the §1.3 `config` message built from the current config to the connected sidecar. */
 	TFunction<void(const FUnrealMcpConfig&)> OnPushConfig;
-	/** Send a §1.3 auth message (auth-start / auth-cancel / auth-revoke) to the sidecar. */
-	TFunction<void(const FString& /*AuthType*/)> OnSendAuth;
+	/**
+	 * Send a §1.3 auth message (auth-start / auth-cancel / auth-revoke) to the sidecar. Returns true when the
+	 * frame was actually handed to a connected/handshaken sidecar; false when there is no sidecar to send to
+	 * (so Authorize() can avoid wedging the UI in a code-less Pending state). A spec may leave it unset.
+	 */
+	TFunction<bool(const FString& /*AuthType*/)> OnSendAuth;
 	/** Open a verification URL in the system browser (device-code flow). */
 	TFunction<void(const FString& /*Url*/)> OnOpenBrowser;
 
@@ -140,9 +144,13 @@ public:
 	static UNREALMCPEDITOR_API bool ValidateServerUrl(const FString& Url, FString& OutError);
 
 	/**
-	 * The display form of a token for the UI (§8 — never rendered unmasked by default): empty stays empty,
+	 * The masked display form of a token (§8 — never rendered unmasked by default): empty stays empty,
 	 * otherwise a fixed-width dot mask when @p bReveal is false (the length is NOT leaked), or the raw value
-	 * when @p bReveal is true (reveal-on-hold). This is the ONLY way a token reaches a Slate text field.
+	 * when @p bReveal is true. This is the masking contract the specs lock and the form to use for any
+	 * read-only token surface. NOTE: the editable Custom-mode token field in SUnrealMcpMainWindow cannot route
+	 * through this helper — committing a mask string back would overwrite the real token — so it masks
+	 * natively via SEditableTextBox::IsPassword (revealed only while the Reveal button is held). Either path
+	 * keeps the raw value off-screen by default and out of every log line (diagnostics use MaskSecret).
 	 */
 	static UNREALMCPEDITOR_API FString MaskTokenForDisplay(const FString& Token, bool bReveal);
 

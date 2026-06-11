@@ -44,15 +44,19 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Auth
         private readonly HttpClient _http;
         private readonly ILogger? _logger;
         private readonly Func<TimeSpan, CancellationToken, Task> _delay;
+        private readonly Func<DateTimeOffset> _now;
 
         public DeviceCodeAuthenticator(
             HttpClient http,
             ILogger? logger = null,
-            Func<TimeSpan, CancellationToken, Task>? delay = null)
+            Func<TimeSpan, CancellationToken, Task>? delay = null,
+            Func<DateTimeOffset>? now = null)
         {
             _http = http ?? throw new ArgumentNullException(nameof(http));
             _logger = logger;
             _delay = delay ?? ((d, ct) => Task.Delay(d, ct));
+            // Injectable like _delay so the xUnit suite can drive the expires_in deadline deterministically.
+            _now = now ?? (() => DateTimeOffset.UtcNow);
         }
 
         /// <summary>
@@ -104,8 +108,21 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Auth
             // Poll honouring the server interval (default 5 s per RFC 8628 §3.5), backing off on slow_down.
             var interval = TimeSpan.FromSeconds(Math.Max(1, authorize.Interval > 0 ? authorize.Interval : 5));
 
+            // Client-side deadline from expires_in (RFC 8628 §3.2). Without this the loop relies entirely on the
+            // server returning expired_token — and a misbehaving/unreachable token endpoint (whose transport
+            // errors are swallowed as transient below) would poll forever. On breach we emit a terminal expired
+            // failure and stop. Fall back to 15 min only if the server omits a sane expires_in.
+            var expiresInSeconds = authorize.ExpiresIn > 0 ? authorize.ExpiresIn : 900;
+            var deadline = _now() + TimeSpan.FromSeconds(expiresInSeconds);
+
             while (!ct.IsCancellationRequested)
             {
+                if (_now() >= deadline)
+                {
+                    await SafeEmit(emit, DeviceAuthResult.FailedMessage("The authorization request expired.")).ConfigureAwait(false);
+                    return DeviceAuthResult.Failed("expired_token");
+                }
+
                 try
                 {
                     await _delay(interval, ct).ConfigureAwait(false);

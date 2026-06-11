@@ -1,7 +1,7 @@
 /*
 ┌───────────────────────────────────────────────────────────────────┐
 │  Author: Ivan Murzak (https://github.com/IvanMurzak)              │
-│  Repository: GitHub (https://github.com/IvanMurzak)              │
+│  Repository: GitHub (https://github.com/IvanMurzak/Unreal-MCP)    │
 │  Copyright (c) 2026 Ivan Murzak                                   │
 │  Licensed under the Apache License, Version 2.0.                  │
 │  See the LICENSE file in the project root for more information.   │
@@ -143,6 +143,35 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             var result = await auth.AuthorizeAsync("https://ai-game.dev", null, _ => Task.CompletedTask, cts.Token);
             Assert.False(result.Success);
             Assert.True(result.WasCancelled);
+        }
+
+        [Fact]
+        public async Task ExpiresIn_StopsPollingWithExpiredFailure()
+        {
+            // A token endpoint that never resolves (endless authorization_pending) must NOT poll forever: once
+            // the client-side expires_in deadline is breached the flow terminates with expired_token. The clock
+            // is injected so the deadline is reached deterministically without real waiting.
+            const string authorizeJson =
+                "{\"device_code\":\"dev-123\",\"user_code\":\"WXYZ-1234\"," +
+                "\"verification_uri\":\"https://ai-game.dev/device\",\"expires_in\":10,\"interval\":1}";
+            var pending = new List<string>();
+            for (var i = 0; i < 100; i++) pending.Add("{\"error\":\"authorization_pending\"}");
+            var handler = new ScriptedHandler(authorizeJson, pending);
+
+            var start = DateTimeOffset.UtcNow;
+            var clockReads = 0;
+            // First read sets the deadline (start + 10 s); subsequent reads jump 20 s past it so the very first
+            // poll iteration sees the deadline breached.
+            var auth = new DeviceCodeAuthenticator(new HttpClient(handler), logger: null,
+                delay: (_, _) => Task.CompletedTask,
+                now: () => clockReads++ == 0 ? start : start.AddSeconds(20));
+
+            var emitted = new List<DeviceAuthMessage>();
+            var result = await auth.AuthorizeAsync("https://ai-game.dev", null, m => { emitted.Add(m); return Task.CompletedTask; }, CancellationToken.None);
+
+            Assert.False(result.Success);
+            Assert.Equal("expired_token", result.Error);
+            Assert.Contains(emitted, m => m.State == "failed");
         }
 
         [Fact]

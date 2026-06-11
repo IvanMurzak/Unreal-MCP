@@ -419,11 +419,12 @@ TSharedRef<SWidget> SUnrealMcpMainWindow::BuildCustomAuthSection()
 				[
 					SNew(SButton)
 					.Text(LOCTEXT("Reveal", "Reveal"))
-					.OnClicked_Lambda([this]()
-					{
-						bRevealToken = !bRevealToken;
-						return FReply::Handled();
-					})
+					.ToolTipText(LOCTEXT("RevealHint", "Press and hold to reveal the token; it re-masks on release."))
+					// Reveal-on-HOLD (not a sticky toggle): the raw bearer is only ever drawn while the button is
+					// physically held, then immediately re-masked — the AC's "never rendered unmasked" default
+					// always holds (§8). OnPressed/OnReleased drive bRevealToken, which gates IsPassword above.
+					.OnPressed_Lambda([this]() { bRevealToken = true; })
+					.OnReleased_Lambda([this]() { bRevealToken = false; })
 				]
 				+ SHorizontalBox::Slot().AutoWidth().Padding(6, 0, 0, 0).VAlign(VAlign_Center)
 				[

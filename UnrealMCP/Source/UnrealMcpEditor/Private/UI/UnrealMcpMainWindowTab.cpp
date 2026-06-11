@@ -58,7 +58,16 @@ void FUnrealMcpMainWindowTab::Unregister()
 	if (!bRegistered)
 		return;
 	if (FSlateApplication::IsInitialized())
+	{
+		// Unregistering the spawner alone does NOT close an already-open tab: a live SDockTab keeps the hosted
+		// SUnrealMcpMainWindow (and its strong ref to the view-model) alive, and that widget captures raw
+		// bridge/sidecar pointers via OnRestartBridge / BridgeStatusProvider. On plugin disable / hot-reload
+		// (ShutdownModule while the editor and tab live on) those subsystems are destroyed, so a surviving tab
+		// would dereference freed memory on the next click. Close the live tab first so the widget is torn down.
+		if (TSharedPtr<SDockTab> LiveTab = FGlobalTabmanager::Get()->FindExistingLiveTab(TabId))
+			LiveTab->RequestCloseTab();
 		FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(TabId);
+	}
 	bRegistered = false;
 }
 
