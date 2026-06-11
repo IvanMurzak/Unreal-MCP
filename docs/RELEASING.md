@@ -22,7 +22,7 @@ listing. Each requires a deliberate human decision (and, for the first release, 
       manual `workflow_dispatch` with `dry_run=false`. `release.yml`'s `check-version` gate keeps
       this inert otherwise. Verify with `gh release list` (expect empty) and
       `git ls-remote --tags` (expect no `v*` tags) until you intend to publish.
-- [ ] **First npm `unreal-cli` publish (one-time, manual — operator only).** The first publish of a
+- [ ] **First npm `unreal-mcp-cli` publish (one-time, manual — operator only).** The first publish of a
       brand-new package **cannot** use OIDC Trusted Publishing — npm requires the package to already
       exist on the registry before a Trusted Publisher can be configured for it. So the first publish
       is a **manual operator step from a clean checkout**; CI takes over for every subsequent version.
@@ -42,8 +42,8 @@ hard-skips every tag/Release/npm-publish job.
 | Workflow | Trigger | What it does |
 | --- | --- | --- |
 | `test_pull_request.yml` | `pull_request` to `main` (+ manual) | Fans out the PR test legs: bridge build+xUnit (ubuntu + windows), server build (ubuntu), cli node 20/22, and — when a runner is registered — the UE 5.7 plugin BuildPlugin + Automation leg. |
-| `test_cli.yml` | `workflow_call` (reusable) | Builds + tests `unreal-cli` on Node 20 & 22. Called by both `test_pull_request.yml` and `release.yml`. |
-| `release.yml` | `push` to `main` (+ manual `workflow_dispatch`) | Version-gated release: builds bridge/server/plugin artifacts and (only on a real version bump) cuts the GitHub Release + tag and publishes `unreal-cli` to npm. Exposes a `dry_run` input to rehearse everything without publishing. |
+| `test_cli.yml` | `workflow_call` (reusable) | Builds + tests `unreal-mcp-cli` on Node 20 & 22. Called by both `test_pull_request.yml` and `release.yml`. |
+| `release.yml` | `push` to `main` (+ manual `workflow_dispatch`) | Version-gated release: builds bridge/server/plugin artifacts and (only on a real version bump) cuts the GitHub Release + tag and publishes `unreal-mcp-cli` to npm. Exposes a `dry_run` input to rehearse everything without publishing. |
 
 ## Versioning — the single source of truth
 
@@ -112,13 +112,23 @@ git ls-remote --tags https://github.com/IvanMurzak/Unreal-MCP   # expect: no v* 
 
 > **Why manual?** npm's OIDC Trusted Publishing can only be configured for a
 > package that **already exists** on the registry. The very first publish of
-> `unreal-cli` therefore cannot run through `release.yml`'s `publish-npm` job
+> `unreal-mcp-cli` therefore cannot run through `release.yml`'s `publish-npm` job
 > (which is OIDC-only, no `NPM_TOKEN`). The owner publishes the first version by
 > hand from a clean checkout; afterwards a Trusted Publisher is configured and
 > CI handles every subsequent version automatically.
 
-The package name `unreal-cli` was verified free on the registry. The
-`cli/package.json` is already publish-ready (`private` removed, full metadata,
+The package name `unreal-mcp-cli` was verified free on the registry (exact
+`unreal-mcp-cli`, squashed `unrealmcpcli`, and `unreal-mcpcli` all 404).
+
+> **Why `unreal-mcp-cli` and not `unreal-cli`?** The first manual `npm publish` of
+> `unreal-cli` was rejected by npm with E403 — "Package name too similar to
+> existing package `unrealcli`" (npm's anti-typosquatting check compares
+> punctuation-stripped names and only fires at publish time, so the earlier E404
+> availability check could not catch it). The package was renamed to
+> `unreal-mcp-cli` (2026-06-11), which also matches the sibling precedent of npm
+> `unity-mcp-cli` with bin `unity-mcp-cli`.
+
+The `cli/package.json` is already publish-ready (`private` removed, full metadata,
 `publishConfig: { "access": "public" }`). Publish the first
 version from a **clean checkout of `main`** (not a dev worktree), authenticated
 as the package owner (`baizor`):
@@ -136,7 +146,7 @@ npm publish                     # publishConfig sets access=public; no provenanc
 
 `npm publish` reads `publishConfig` from `cli/package.json`, so `--access public`
 need not be passed explicitly. Confirm with
-`npm view unreal-cli version` (expect `0.1.0`).
+`npm view unreal-mcp-cli version` (expect `0.1.0`).
 
 > **No provenance on the manual first publish — by design.** npm provenance can
 > only be generated from a **cloud-hosted CI runner** (GitHub Actions / GitLab
@@ -152,7 +162,7 @@ need not be passed explicitly. Confirm with
 Then, **one-time**, configure the Trusted Publisher so all future versions
 publish from CI without a token:
 
-1. On npmjs.com → the `unreal-cli` package → **Settings → Trusted publishing**.
+1. On npmjs.com → the `unreal-mcp-cli` package → **Settings → Trusted publishing**.
 2. Add a GitHub Actions publisher authorizing:
    - **Repository**: `IvanMurzak/Unreal-MCP`
    - **Workflow**: `release.yml`
@@ -256,7 +266,7 @@ The workflows use **no long-lived publish secrets**:
 | *(none)* — npm | `publish-npm` | npm publish uses **OIDC Trusted Publishing** (`id-token: write`), not a stored `NPM_TOKEN`. |
 
 **npm first-publish prerequisite (owner action):** OIDC Trusted Publishing
-requires a Trusted Publisher for the `unreal-cli` package configured on
+requires a Trusted Publisher for the `unreal-mcp-cli` package configured on
 npmjs.com that authorizes this repository + the `release.yml` workflow — and a
 Trusted Publisher can only be configured for a package that already exists. The
 `cli/package.json` `private` flag has already been removed and the package is

@@ -1,4 +1,4 @@
-# unreal-cli
+# unreal-mcp-cli
 
 Cross-platform CLI tool for [Unreal-MCP](https://github.com/IvanMurzak/Unreal-MCP) — the Unreal
 analog of [`unity-mcp-cli`](https://github.com/IvanMurzak/Unity-MCP/tree/main/cli) and
@@ -10,19 +10,19 @@ probes server health, configures AI agents (Claude Code, Cursor, VS Code, …), 
 ## Install
 
 Run without installing (npx caches the package between runs — use
-`unreal-cli@latest` to force the newest published version):
+`unreal-mcp-cli@latest` to force the newest published version):
 
 ```bash
-npx unreal-cli status
+npx unreal-mcp-cli status
 # or, to always fetch the newest published version:
-npx unreal-cli@latest status
+npx unreal-mcp-cli@latest status
 ```
 
-Or install globally to get the `unreal-cli` command on your `PATH`:
+Or install globally to get the `unreal-mcp-cli` command on your `PATH`:
 
 ```bash
-npm i -g unreal-cli
-unreal-cli status
+npm i -g unreal-mcp-cli
+unreal-mcp-cli status
 ```
 
 Requires Node `^20.19.0 || >=22.12.0`. See the
@@ -61,7 +61,7 @@ hands back a `com.epicgames.launcher://` deep link rather than performing the mu
 ## Library export
 
 ```ts
-import { configure, openProject, runTool, detectInstalledEngines } from 'unreal-cli';
+import { configure, openProject, runTool, detectInstalledEngines } from 'unreal-mcp-cli';
 ```
 
 `dist/lib.js` exposes the command logic as a side-effect-free library: no argv parsing, no stdout,
@@ -74,8 +74,8 @@ never throws past the boundary — the same contract as the Unity/Godot CLIs.
 npm install
 npm run build   # tsc -> dist/ (ESM)
 npm test        # vitest (unit tests; fixtures under tests/fixtures/)
-node bin/unreal-cli.js status
+node bin/unreal-mcp-cli.js status
 
 # Optional end-to-end integration test (NOT part of the default run):
-UNREAL_CLI_INTEGRATION=1 npm test
+UNREAL_MCP_CLI_INTEGRATION=1 npm test
 ```

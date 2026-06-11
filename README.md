@@ -5,7 +5,7 @@
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![test-pull-request](https://github.com/IvanMurzak/Unreal-MCP/actions/workflows/test_pull_request.yml/badge.svg)](https://github.com/IvanMurzak/Unreal-MCP/actions/workflows/test_pull_request.yml)
 
-> **Status: beta.** The plugin, the .NET sidecar, the local server, the `unreal-cli`, the AI Game
+> **Status: beta.** The plugin, the .NET sidecar, the local server, the `unreal-mcp-cli`, the AI Game
 > Developer editor UI, and **62 built-in tools across 8 families** have shipped and are exercised by
 > CI. Nothing is published to a package registry yet — install from source (below). Pixel-capture
 > (screenshot) tools need a GPU-backed editor; everything else runs headless.
@@ -31,7 +31,7 @@ the plugin spawns and talks to over a localhost IPC channel. The full design liv
 - [First run](#first-run)
 - [Tools](#tools) — all 8 families, 62 tools
 - [Per-tool enable / disable & Settings](#per-tool-enable--disable--settings)
-- [`unreal-cli`](#unreal-cli)
+- [`unreal-mcp-cli`](#unreal-mcp-cli)
 - [Writing an extension](#writing-an-extension)
 - [Configuration & environment variables](#configuration--environment-variables)
 - [Troubleshooting](#troubleshooting)
@@ -46,7 +46,7 @@ the plugin spawns and talks to over a localhost IPC channel. The full design liv
   refuse to load on newer engines.
 - **.NET 9 SDK** to build the bridge sidecar; **.NET 8 SDK** to build the local server. (End users
   who download release binaries need neither — they ship self-contained.)
-- **Node.js** `^20.19.0 || >=22.12.0` for the optional `unreal-cli`.
+- **Node.js** `^20.19.0 || >=22.12.0` for the optional `unreal-mcp-cli`.
 - A C++ Unreal project (the plugin builds an Editor module, so the host project must be able to
   compile C++).
 
@@ -55,15 +55,15 @@ the plugin spawns and talks to over a localhost IPC channel. The full design liv
 > No package-registry release exists yet. Until the first GitHub Release / Fab listing, install the
 > plugin from source.
 
-### Option A — `unreal-cli` (recommended)
+### Option A — `unreal-mcp-cli` (recommended)
 
 ```bash
-# From a clone of this repo (see "unreal-cli" below for the npm story once published):
+# From a clone of this repo (see "unreal-mcp-cli" below for the npm story once published):
 cd cli && npm install && npm run build
 
 # Copy or junction the plugin into <YourProject>/Plugins/UnrealMCP, then build the editor target.
 # install-plugin takes the project directory as a positional argument:
-node bin/unreal-cli.js install-plugin <YourProject> --junction
+node bin/unreal-mcp-cli.js install-plugin <YourProject> --junction
 ```
 
 ### Option B — manual
@@ -76,7 +76,7 @@ node bin/unreal-cli.js install-plugin <YourProject> --junction
 
 The sidecar binary (`unreal-mcp-bridge`) is **not** bundled. Today the plugin resolves it from the
 `UNREAL_MCP_BRIDGE_PATH` environment variable: point that at a sidecar binary, or run
-`unreal-cli bootstrap-local` to build the bridge + server from source into
+`unreal-mcp-cli bootstrap-local` to build the bridge + server from source into
 `<YourProject>/Intermediate/UnrealMCP/` and set the var to the result. With no path resolved, the
 plugin's TCP listener still starts but logs `[Unreal-MCP] no sidecar binary resolved (set
 UNREAL_MCP_BRIDGE_PATH)` and spawns nothing — launch the sidecar manually for the live e2e.
@@ -94,13 +94,13 @@ yet shipped**.
      **Revoke** to clear the stored cloud token.
    - **Custom** — connects to a local `unreal-mcp-server` you run (or any compatible server). Enter
      the server URL and point your AI client at it. (The plugin does not start the local server for
-     you — run `unreal-cli` or your own process; see Troubleshooting.)
+     you — run `unreal-mcp-cli` or your own process; see Troubleshooting.)
 3. The **Connection** section shows a status dot, a status label, and a Connect / Disconnect / Stop
    button; the bridge status reads `Running (restarts: N)` or `Stopped`. Use them to confirm the
    sidecar is live.
 4. Point your AI client (Claude Code, Cursor, the AI Game Developer app, …) at the server. The
    **AI agents** section lists the agents currently connected; to write an MCP client config use
-   `unreal-cli setup-mcp`.
+   `unreal-mcp-cli setup-mcp`.
 
 Connection settings persist to `<Project>/Saved/Config/UnrealMcp/ai-game-developer-config.json`
 (`Saved/` is gitignored by every UE template, so tokens never land in VCS by default).
@@ -248,14 +248,14 @@ The **Settings** page is reachable both as an aux tab and via
 **MCP Resources** windows are wired but ship empty in this release — each renders a subdued
 empty-state message (the "N / M enabled" summary is unique to the Tools window).
 
-## `unreal-cli`
+## `unreal-mcp-cli`
 
-A cross-platform Node CLI (`unreal-cli`) that scaffolds projects, installs the plugin, configures
+A cross-platform Node CLI (`unreal-mcp-cli`) that scaffolds projects, installs the plugin, configures
 connection settings, drives the local server, and invokes tools over HTTP. It is a port of
 `unity-mcp-cli` / `godot-cli`. Full reference: [`cli/README.md`](cli/README.md).
 
 > The npm package is `private: true` until the first publish gate. Until then, build it from source
-> (`cd cli && npm install && npm run build`) and invoke `node bin/unreal-cli.js <command>`.
+> (`cd cli && npm install && npm run build`) and invoke `node bin/unreal-mcp-cli.js <command>`.
 
 The full 16-command surface:
 
@@ -338,13 +338,13 @@ The plugin reads configuration with the precedence **process env → `<Project>/
 | `UNREAL_MCP_AUTH_OPTION` | `none` or `required` (local server auth) |
 | `UNREAL_MCP_KEEP_CONNECTED` | Persist/restore the connected state |
 | `UNREAL_MCP_TOOLS` | Enabled-tools override (whitelist; empty = no filter) |
-| `UNREAL_MCP_START_SERVER` | Parsed and persisted as the `startServer` config flag (Custom mode); auto-spawning the local `unreal-mcp-server` is **planned, not yet wired** — no code consumes this flag today, so start the server yourself (e.g. `unreal-cli`). |
+| `UNREAL_MCP_START_SERVER` | Parsed and persisted as the `startServer` config flag (Custom mode); auto-spawning the local `unreal-mcp-server` is **planned, not yet wired** — no code consumes this flag today, so start the server yourself (e.g. `unreal-mcp-cli`). |
 | `UNREAL_MCP_TRANSPORT` | `stdio` or `http` |
 | `UNREAL_MCP_LOG_LEVEL` | Log verbosity |
 | `UNREAL_MCP_BRIDGE_PATH` | Path to a sidecar binary. **Currently the only way the plugin resolves a sidecar** (auto-download is planned §6, not yet shipped). |
 
 > **Never commit `.env`.** A project-root `.env` can hold `UNREAL_MCP_TOKEN`, and UE project
-> templates ship no `.gitignore`. `unreal-cli configure` appends `.env` to the target project's
+> templates ship no `.gitignore`. `unreal-mcp-cli configure` appends `.env` to the target project's
 > `.gitignore`; this repo's own scaffold already gitignores it. The sidecar IPC token travels over
 > stdin (never argv) and is never logged.
 
@@ -362,7 +362,7 @@ The plugin reads configuration with the precedence **process env → `<Project>/
 - **No sidecar / sidecar keeps restarting.** Check the bridge status in the **Connection** section
   (`Running (restarts: N)` / `Stopped`). If the log shows `no sidecar binary resolved (set
   UNREAL_MCP_BRIDGE_PATH)`, no sidecar path was resolved — set `UNREAL_MCP_BRIDGE_PATH` or run
-  `unreal-cli bootstrap-local` to build one from source. (Automatic download and the version-skew
+  `unreal-mcp-cli bootstrap-local` to build one from source. (Automatic download and the version-skew
   redownload/alert are planned §6 behavior, not yet shipped.)
 - **Ports.** IPC uses a deterministic per-project port in `30000–39999` and probes forward (then an
   ephemeral port) on a collision; the local server uses a deterministic hash port in `20000–29999`
@@ -378,7 +378,7 @@ The plugin reads configuration with the precedence **process env → `<Project>/
 | [`UnrealMCP/`](UnrealMCP/) | The UE editor plugin (C++, module `UnrealMcpEditor`, UE 5.5+ floor, developed against 5.7) |
 | [`bridge/`](bridge/) | The .NET 9 sidecar (`unreal-mcp-bridge`) — McpPlugin host, IPC ⇄ SignalR relay |
 | [`Unreal-MCP-Server/`](Unreal-MCP-Server/) | Thin local MCP server host (`unreal-mcp-server`), analog of Godot-MCP-Server |
-| [`cli/`](cli/) | `unreal-cli` npm package (TypeScript) — 16 commands |
+| [`cli/`](cli/) | `unreal-mcp-cli` npm package (TypeScript) — 16 commands |
 | [`samples/UnrealAITemplate/`](samples/UnrealAITemplate/) | Extension template plugin (`hello-extension`) |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | The authoritative architecture design |
 | [`docs/EXTENSIONS.md`](docs/EXTENSIONS.md) | Extension author guide |

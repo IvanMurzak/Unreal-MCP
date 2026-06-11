@@ -1,4 +1,4 @@
-// Library entry point for `unreal-cli` (the `dist/lib.js` export — see
+// Library entry point for `unreal-mcp-cli` (the `dist/lib.js` export — see
 // docs/ARCHITECTURE.md §9.1).
 //
 // Contract (same as unity-mcp-cli / godot-cli):
@@ -8,7 +8,7 @@
 // - Every result is a discriminated union keyed on `kind`; errors are never
 //   thrown past the public boundary.
 //
-// Consumers: `import { configure, openProject } from 'unreal-cli'`.
+// Consumers: `import { configure, openProject } from 'unreal-mcp-cli'`.
 
 // --- command logic ---------------------------------------------------------
 export { configure } from './lib/configure.js';

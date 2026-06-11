@@ -6,7 +6,7 @@ import { fileURLToPath } from 'url';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 /** Create a unique temp directory and return its absolute path. */
-export function makeTempDir(prefix = 'unreal-cli-test-'): string {
+export function makeTempDir(prefix = 'unreal-mcp-cli-test-'): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
 }
 
