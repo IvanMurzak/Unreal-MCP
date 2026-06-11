@@ -451,6 +451,16 @@ void FUnrealMcpBridgeServer::HandleToolCall(const TSharedPtr<FJsonObject>& Messa
 				TextBlock->SetStringField(TEXT("mimeType"), TEXT("text/plain"));
 				Content.Add(MakeShared<FJsonValueObject>(TextBlock));
 			}
+			// Image content blocks (§1.3 MCP content array) — e.g. the §10 screenshot family. The
+			// sidecar maps each onto an MCP image ContentBlock (ProxyResponseMapper) with no re-shaping.
+			for (const FUnrealMcpImageContent& Image : Result.Images)
+			{
+				TSharedPtr<FJsonObject> ImageBlock = MakeShared<FJsonObject>();
+				ImageBlock->SetStringField(TEXT("type"), TEXT("image"));
+				ImageBlock->SetStringField(TEXT("data"), Image.Base64Data);
+				ImageBlock->SetStringField(TEXT("mimeType"), Image.MimeType);
+				Content.Add(MakeShared<FJsonValueObject>(ImageBlock));
+			}
 			Response->SetArrayField(TEXT("content"), Content);
 
 			if (Result.Structured.IsValid())
