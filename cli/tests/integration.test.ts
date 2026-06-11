@@ -1,13 +1,13 @@
 // Optional integration test — runs end-to-end against a real local Unreal
-// project ONLY when UNREAL_CLI_INTEGRATION is set. It is NOT part of the
+// project ONLY when UNREAL_MCP_CLI_INTEGRATION is set. It is NOT part of the
 // default `vitest run` gate (acceptance criterion: "gated behind an env
 // flag, not required for the default test run").
 //
-//   UNREAL_CLI_INTEGRATION=1 \
-//   UNREAL_CLI_INTEGRATION_PROJECT=/abs/path/to/SomeProject \
+//   UNREAL_MCP_CLI_INTEGRATION=1 \
+//   UNREAL_MCP_CLI_INTEGRATION_PROJECT=/abs/path/to/SomeProject \
 //   npm test
 //
-// Without UNREAL_CLI_INTEGRATION_PROJECT it scaffolds a throwaway project
+// Without UNREAL_MCP_CLI_INTEGRATION_PROJECT it scaffolds a throwaway project
 // in a temp dir, configures it, and probes status offline — no editor
 // binary required.
 
@@ -19,7 +19,7 @@ import { configure } from '../src/lib/configure.js';
 import { getStatus } from '../src/lib/status.js';
 import { makeTempDir, rmTempDir } from './helpers.js';
 
-const RUN = process.env['UNREAL_CLI_INTEGRATION'] === '1' || process.env['UNREAL_CLI_INTEGRATION'] === 'true';
+const RUN = process.env['UNREAL_MCP_CLI_INTEGRATION'] === '1' || process.env['UNREAL_MCP_CLI_INTEGRATION'] === 'true';
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -28,7 +28,7 @@ afterEach(() => {
 
 describe.skipIf(!RUN)('integration (env-gated)', () => {
   it('scaffolds, configures, and reports status for a real-ish project', async () => {
-    const explicit = process.env['UNREAL_CLI_INTEGRATION_PROJECT'];
+    const explicit = process.env['UNREAL_MCP_CLI_INTEGRATION_PROJECT'];
     let projectDir: string;
     if (explicit) {
       projectDir = explicit;

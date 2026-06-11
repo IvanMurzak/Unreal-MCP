@@ -77,5 +77,5 @@ npm test        # vitest (unit tests; fixtures under tests/fixtures/)
 node bin/unreal-mcp-cli.js status
 
 # Optional end-to-end integration test (NOT part of the default run):
-UNREAL_CLI_INTEGRATION=1 npm test
+UNREAL_MCP_CLI_INTEGRATION=1 npm test
 ```
