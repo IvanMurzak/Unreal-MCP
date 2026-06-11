@@ -80,7 +80,7 @@ Prompts/Resources ship empty-but-wired (§10), as designed.
   **not yet wired**: the §6 **download-on-first-run** from GitHub Releases and the **version-skew
   re-download/alert** flow are TODO stubs. The §6 download prose is retained as the plan of record,
   not the shipped state.
-- **§7 UI — shipped with partial coverage.** The §7 Slate UI shipped (#24/#29), but three §7 design
+- **§7 UI — shipped with partial coverage.** The §7 Slate UI shipped (#24/#29), but two §7 design
   affordances did **not** make this release: the **toolbar button** (§7's tab-registration paragraph,
   "under Window → AI Game Developer plus a toolbar button") — the main window is opened from its nomad
   tab only, registered under the editor's **Tools** menu category
