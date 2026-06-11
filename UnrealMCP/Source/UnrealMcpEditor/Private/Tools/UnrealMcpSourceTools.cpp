@@ -355,7 +355,11 @@ namespace UnrealMcpSourceTools
 					{
 						Window.Add(AllLines[Index]);
 					}
-					Content = FString::Join(Window, TEXT("\n"));
+					// Rejoin on the file's dominant line ending so a windowed read of a CRLF file returns
+					// CRLF (matching an unwindowed read, which returns the raw bytes) instead of silently
+					// normalizing to LF. Same detection source-update uses to preserve EOL on a splice.
+					const TCHAR* Eol = Content.Contains(TEXT("\r\n")) ? TEXT("\r\n") : TEXT("\n");
+					Content = FString::Join(Window, Eol);
 				}
 
 				// Byte-cap on the UTF-8 encoding (binary-search the longest prefix that fits).
@@ -365,7 +369,10 @@ namespace UnrealMcpSourceTools
 				if (Utf8Len(Content) > MaxBytes)
 				{
 					int32 Lo = 0;
-					int32 Hi = Content.Len();
+					// Every UTF-16 code unit encodes to >=1 UTF-8 byte, so a prefix that fits in MaxBytes
+					// bytes can be at most MaxBytes code units long — cap Hi there to avoid converting huge
+					// prefixes of a near-cap file to UTF-8 on the game thread during the search.
+					int32 Hi = FMath::Min(Content.Len(), MaxBytes);
 					while (Lo < Hi)
 					{
 						const int32 Mid = (Lo + Hi + 1) / 2;
@@ -468,6 +475,10 @@ namespace UnrealMcpSourceTools
 				}
 				if (!FFileHelper::SaveStringToFile(CppText, *CppPath.FullPath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
 				{
+					// Roll back the just-written header so the scaffold is effectively atomic — a stranded
+					// half-scaffold (header on disk, cpp missing) would otherwise block a clean retry without
+					// 'force':true.
+					IFileManager::Get().Delete(*HeaderPath.FullPath, /*RequireExists*/ false, /*EvenReadOnly*/ true);
 					return FUnrealMcpToolResult::Error(FString::Printf(TEXT("Failed to write cpp '%s'."), *CppPath.RelPath));
 				}
 
@@ -533,6 +544,9 @@ namespace UnrealMcpSourceTools
 					{
 						return FUnrealMcpToolResult::Error(FString::Printf(TEXT("Failed to read '%s'."), *Jailed.RelPath));
 					}
+					// Note: a range splice on a UTF-8-BOM file drops the BOM (LoadFileToString consumes it and
+					// the write below forces ForceUTF8WithoutBOM). This is intentional — BOM-less UTF-8 is the
+					// project source convention — and consistent with full-file writes, which also emit no BOM.
 					// Preserve the file's dominant line ending and trailing newline so a one-line splice
 					// produces a one-line diff, not a whole-file CRLF->LF rewrite that drops the final EOL.
 					const TCHAR* Eol = Existing.Contains(TEXT("\r\n")) ? TEXT("\r\n") : TEXT("\n");
@@ -561,6 +575,15 @@ namespace UnrealMcpSourceTools
 					const int32 EndLine = (int32)EndLine64;
 					TArray<FString> Replacement;
 					NewContent.ParseIntoArrayLines(Replacement, /*InCullEmpty*/ false);
+					// Mirror the phantom-trailing-empty drop on the REPLACEMENT side: a newline-terminated
+					// 'content' ("X2\n" -> ["X2",""]) would otherwise contribute its own EOL via the Join
+					// below AND re-add the file's trailing EOL, splicing a spurious blank line per edit (the
+					// same accumulation bug fixed above for the existing file's lines). AI callers very
+					// commonly send newline-terminated content, so guard the write path symmetrically.
+					if (NewContent.EndsWith(TEXT("\n")) && Replacement.Num() > 0 && Replacement.Last().IsEmpty())
+					{
+						Replacement.Pop();
+					}
 					TArray<FString> Result;
 					Result.Append(Lines.GetData(), StartLine - 1);
 					Result.Append(Replacement);

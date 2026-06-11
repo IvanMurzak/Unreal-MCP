@@ -327,6 +327,41 @@ void FUnrealMcpSourceToolsSpec::Define()
 			TestEqual(TEXT("file unchanged after rejected edits"), StillOnDisk, FString(TEXT("L1\nX2\nX3\nL4\n")));
 		});
 
+		It("splices NEWLINE-TERMINATED replacement content without inserting a blank line per edit", [this]()
+		{
+			FUnrealMcpToolRegistry Registry;
+			UnrealMcpSourceTools::Register(Registry);
+
+			// AI callers very commonly send newline-terminated 'content' ("X2\n"). ParseIntoArrayLines
+			// yields ["X2",""] for it; without dropping that phantom trailing empty element on the
+			// REPLACEMENT side, each splice would contribute its own EOL via the Join AND re-add the file's
+			// trailing EOL, inserting a spurious blank line per edit (the accumulation bug, on the write
+			// side). The other range test splices UNTERMINATED text, so it cannot catch this — assert the
+			// terminated case end-to-end with exact bytes across two consecutive edits.
+			const FString FileRel = TempModule / TEXT("RangeTerminated.cpp");
+			const FString FileAbs = UnrealMcpSourceTools::GetProjectSourceRoot() / FileRel;
+			TestTrue(TEXT("seed file written"),
+				FFileHelper::SaveStringToFile(FString(TEXT("L1\nL2\nL3\nL4\n")), *FileAbs, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM));
+
+			auto SpliceLineTerminated = [&](int32 Line, const TCHAR* Text) -> bool
+			{
+				TSharedPtr<FJsonObject> Args = SourceArgs();
+				Args->SetStringField(TEXT("path"), FileRel);
+				Args->SetStringField(TEXT("content"), Text); // caller-supplied, newline-terminated
+				Args->SetNumberField(TEXT("startLine"), Line);
+				Args->SetNumberField(TEXT("endLine"), Line);
+				return RunSourceTool(Registry, TEXT("source-update"), Args).bSuccess;
+			};
+
+			TestTrue(TEXT("first terminated splice ok"), SpliceLineTerminated(2, TEXT("X2\n")));
+			TestTrue(TEXT("second terminated splice ok"), SpliceLineTerminated(3, TEXT("X3\n")));
+
+			FString OnDisk;
+			TestTrue(TEXT("read seed back"), FFileHelper::LoadFileToString(OnDisk, *FileAbs));
+			// Exactly the two edits, single trailing newline, and NO blank line accumulated between them.
+			TestEqual(TEXT("exact bytes after two newline-terminated range edits"), OnDisk, FString(TEXT("L1\nX2\nX3\nL4\n")));
+		});
+
 		It("reports totalLines as real lines for newline-terminated and unterminated files", [this]()
 		{
 			FUnrealMcpToolRegistry Registry;
