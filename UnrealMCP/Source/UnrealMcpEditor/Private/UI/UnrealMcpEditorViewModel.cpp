@@ -238,6 +238,38 @@ void FUnrealMcpEditorViewModel::ApplyDeviceAuth(const TSharedPtr<FJsonObject>& D
 		OnOpenBrowser(DeviceVerificationUrl);
 }
 
+// --- §7 per-tool enable-map ------------------------------------------------------------------------
+
+bool FUnrealMcpEditorViewModel::IsToolDisabled(const FString& ToolName) const
+{
+	return Config.DisabledTools.Contains(ToolName);
+}
+
+void FUnrealMcpEditorViewModel::SetToolEnabled(const FString& ToolName, bool bEnabled)
+{
+	const bool bCurrentlyDisabled = Config.DisabledTools.Contains(ToolName);
+	const bool bWantDisabled = !bEnabled;
+	if (bCurrentlyDisabled == bWantDisabled)
+		return; // already in the requested state — no persist / no manifest churn.
+
+	if (bWantDisabled)
+		Config.DisabledTools.AddUnique(ToolName);
+	else
+		Config.DisabledTools.Remove(ToolName);
+
+	// Persist the blocklist to the §8 store FIRST (so the choice survives a restart even if the manifest push
+	// races a teardown), then ask the runtime to re-apply enablement to the registry + re-push the manifest.
+	// Note: this deliberately does NOT call OnPushConfig — tool enablement is a manifest (§2.2) concern, not a
+	// §1.3 `config` (connection) concern; pushing the connection config here would be a spurious sidecar re-dial.
+	if (OnPersistConfig)
+		OnPersistConfig(Config);
+	if (OnToolEnablementChanged)
+		OnToolEnablementChanged(Config.DisabledTools);
+
+	UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] tool '%s' %s via the MCP Tools window."),
+		*ToolName, bEnabled ? TEXT("enabled") : TEXT("disabled"));
+}
+
 // --- Pure helpers ----------------------------------------------------------------------------------
 
 bool FUnrealMcpEditorViewModel::ValidateServerUrl(const FString& Url, FString& OutError)

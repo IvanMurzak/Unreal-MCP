@@ -42,6 +42,9 @@ public class UnrealMcpEditor : ModuleRules
 			"WorkspaceMenuStructure",
 			"InputCore",
 			"ApplicationCore",
+			// §7 Settings page: the "Project → Plugins → AI Game Developer" section is registered via
+			// ISettingsModule (the "Settings" developer module) rendering the same Slate widget as the nomad tab.
+			"Settings",
 			// Asset / Content-Browser tool family (docs/ARCHITECTURE.md §10, issue #10):
 			//  - AssetRegistry            -> asset-find / asset-get-data / asset-refresh queries
 			//  - AssetTools               -> CreateAsset (material instance) + ImportAssetTasks

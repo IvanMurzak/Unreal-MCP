@@ -414,10 +414,65 @@ TSharedPtr<FJsonObject> FUnrealMcpToolRegistry::BuildManifestJson() const
 	Tools.GetKeys(Names);
 	Names.Sort();
 	for (const FString& Name : Names)
-		ToolArray.Add(MakeShared<FJsonValueObject>(Tools[Name].ToDescriptorJson()));
+	{
+		// §7 per-tool enable-map: a disabled tool is EXCLUDED from the served manifest entirely (not merely
+		// flagged), so the sidecar mirrors no ProxyTool for it and it never appears in tools/list (§2.2).
+		const FUnrealMcpRegisteredTool& Tool = Tools[Name];
+		if (!Tool.bEnabled)
+			continue;
+		ToolArray.Add(MakeShared<FJsonValueObject>(Tool.ToDescriptorJson()));
+	}
 
 	Manifest->SetArrayField(TEXT("tools"), ToolArray);
 	return Manifest;
+}
+
+TArray<FString> FUnrealMcpToolRegistry::GetToolNamesSorted() const
+{
+	TArray<FString> Names;
+	Tools.GetKeys(Names);
+	Names.Sort();
+	return Names;
+}
+
+int32 FUnrealMcpToolRegistry::NumEnabled() const
+{
+	int32 Count = 0;
+	for (const TPair<FString, FUnrealMcpRegisteredTool>& Pair : Tools)
+	{
+		if (Pair.Value.bEnabled)
+			++Count;
+	}
+	return Count;
+}
+
+bool FUnrealMcpToolRegistry::SetToolEnabled(const FString& Name, bool bEnabled)
+{
+	FUnrealMcpRegisteredTool* Found = Tools.Find(Name);
+	if (Found == nullptr || Found->bEnabled == bEnabled)
+		return false;
+	Found->bEnabled = bEnabled;
+	++Revision;
+	UE_LOG(LogUnrealMcp, Verbose, TEXT("[Unreal-MCP] tool '%s' %s (revision %d)."),
+		*Name, bEnabled ? TEXT("enabled") : TEXT("disabled"), Revision);
+	return true;
+}
+
+void FUnrealMcpToolRegistry::ApplyDisabledTools(const TArray<FString>& DisabledNames)
+{
+	const TSet<FString> Disabled(DisabledNames);
+	bool bAnyChanged = false;
+	for (TPair<FString, FUnrealMcpRegisteredTool>& Pair : Tools)
+	{
+		const bool bShouldEnable = !Disabled.Contains(Pair.Key);
+		if (Pair.Value.bEnabled != bShouldEnable)
+		{
+			Pair.Value.bEnabled = bShouldEnable;
+			bAnyChanged = true;
+		}
+	}
+	if (bAnyChanged)
+		++Revision;
 }
 
 FUnrealMcpToolResult FUnrealMcpToolRegistry::Execute(const FString& Name, const FUnrealMcpToolCall& Call) const

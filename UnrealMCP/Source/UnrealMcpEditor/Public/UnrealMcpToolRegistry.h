@@ -220,6 +220,28 @@ public:
 	int32 Num() const { return Tools.Num(); }
 	const FUnrealMcpRegisteredTool* Find(const FString& Name) const { return Tools.Find(Name); }
 
+	/** Every registered tool name, sorted (the §7 MCP Tools window enumerates the full set, enabled or not). */
+	TArray<FString> GetToolNamesSorted() const;
+
+	/** Count of tools whose bEnabled flag is set (the "N / M Tools" §7 Features line). */
+	int32 NumEnabled() const;
+
+	/**
+	 * Set one tool's enabled flag (the §7 per-tool toggle). Disabled tools are EXCLUDED from BuildManifestJson
+	 * so the sidecar never exposes them in tools/list (§2.2). Bumps the revision on a real change so the next
+	 * manifest push re-syncs the sidecar's diff. Unknown name / no-op change: returns false, no revision bump.
+	 * Game-thread only (same contract as any §2.2 dynamic re-registration — see the class comment).
+	 */
+	bool SetToolEnabled(const FString& Name, bool bEnabled);
+
+	/**
+	 * Apply the persisted §8 per-tool enable-map (the MCP Tools window's `disabledTools` blocklist): every tool
+	 * whose name is in @p DisabledNames is disabled, every other tool is enabled. Idempotent; bumps the revision
+	 * once if any flag changed. Called on boot (before the bridge accepts, so the first manifest already excludes
+	 * disabled tools) and on every UI toggle. Game-thread only.
+	 */
+	void ApplyDisabledTools(const TArray<FString>& DisabledNames);
+
 	/** Current manifest revision (bumps on every registry mutation). */
 	int32 GetRevision() const { return Revision; }
 

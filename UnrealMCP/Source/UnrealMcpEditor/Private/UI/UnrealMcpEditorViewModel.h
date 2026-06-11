@@ -73,6 +73,13 @@ public:
 	TFunction<bool(const FString& /*AuthType*/)> OnSendAuth;
 	/** Open a verification URL in the system browser (device-code flow). */
 	TFunction<void(const FString& /*Url*/)> OnOpenBrowser;
+	/**
+	 * Apply the §7 per-tool enable-map change: the runtime re-applies the disabled set to the tool registry and
+	 * re-pushes the manifest so the sidecar's tools/list drops/restores the toggled tool over the wire. Invoked
+	 * with the CURRENT persisted disabled-tool name list. Optional; a spec may wire a recording stub. This is
+	 * distinct from OnPushConfig: tool enablement travels via the tool-manifest (§2.2), NOT the §1.3 `config`.
+	 */
+	TFunction<void(const TArray<FString>& /*DisabledTools*/)> OnToolEnablementChanged;
 
 	// --- Config accessors (the working §8 config the UI edits). ---
 
@@ -135,6 +142,20 @@ public:
 
 	/** Connected AI-agent labels surfaced in the §7 AI-agents section (from the last `status`). */
 	const TArray<FString>& GetAiAgents() const { return AiAgents; }
+
+	// --- §7 per-tool enable-map (the MCP Tools window). ---
+
+	/** The persisted §8 disabled-tool blocklist (names the user turned off; empty = all enabled). */
+	const TArray<FString>& GetDisabledTools() const { return Config.DisabledTools; }
+	/** Whether @p ToolName is currently disabled (present in the §8 disabled-tool blocklist). */
+	UNREALMCPEDITOR_API bool IsToolDisabled(const FString& ToolName) const;
+	/**
+	 * Toggle one tool's enabled state (the §7 MCP Tools window per-tool checkbox). Mutates the §8 disabled-tool
+	 * blocklist, persists the config (OnPersistConfig — so the choice survives an editor restart), then fires
+	 * OnToolEnablementChanged so the runtime excludes/restores the tool in the served manifest. A no-op change
+	 * (already in the requested state) does nothing. Game-thread only.
+	 */
+	UNREALMCPEDITOR_API void SetToolEnabled(const FString& ToolName, bool bEnabled);
 
 	// --- Pure helpers (no instance state; the spec-friendly heart of the view-model). ---
 

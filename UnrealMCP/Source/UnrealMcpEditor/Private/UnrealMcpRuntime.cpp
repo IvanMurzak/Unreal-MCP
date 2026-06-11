@@ -12,6 +12,9 @@
 #include "Extensions/UnrealMcpExtensionManager.h"
 #include "UI/UnrealMcpEditorViewModel.h"
 #include "UI/UnrealMcpMainWindowTab.h"
+#include "UI/UnrealMcpAuxWindows.h"
+#include "UI/SUnrealMcpToolsWindow.h"
+#include "UI/SUnrealMcpFeatureListWindow.h"
 #include "Tools/UnrealMcpLogCollector.h"
 
 #include "Misc/CoreDelegates.h"
@@ -75,6 +78,16 @@ void FUnrealMcpRuntime::Startup()
 
 	const FUnrealMcpConfig Config = FUnrealMcpConfig::LoadAndResolve(DotEnv);
 
+	// §7 per-tool enable-map: apply the persisted §8 `disabledTools` blocklist to the registry BEFORE the bridge
+	// starts accepting, so the FIRST manifest a sidecar reads on handshake already excludes the disabled tools
+	// (their ProxyTools are never created sidecar-side, so they never appear in tools/list).
+	Registry->ApplyDisabledTools(Config.DisabledTools);
+	if (Config.DisabledTools.Num() > 0)
+	{
+		UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] applied %d disabled tool(s) from the §8 enable-map (%d/%d tools enabled)."),
+			Config.DisabledTools.Num(), Registry->NumEnabled(), Registry->Num());
+	}
+
 	const TSharedPtr<FJsonObject> EffectiveConfig = Config.BuildEffectiveConnectionConfig();
 	// Token is NEVER logged at any level (§8) — log the shape with the bearer masked.
 	UE_LOG(LogUnrealMcp, Log,
@@ -124,6 +137,18 @@ void FUnrealMcpRuntime::Startup()
 		if (!Url.IsEmpty())
 			FPlatformProcess::LaunchURL(*Url, nullptr, nullptr);
 	};
+	// §7 per-tool enable-map: a Tools-window toggle re-applies the disabled set to the registry and re-pushes the
+	// manifest so the sidecar's tools/list drops/restores the toggled tool over the wire (§2.2). The view-model
+	// already persisted the choice to the §8 store before invoking this; here we only mutate the live registry +
+	// push. Runs on the game thread (the UI calls it there), matching the §2.2 dynamic-re-registration contract.
+	FUnrealMcpToolRegistry* RegistryPtr = Registry.Get();
+	ViewModel->OnToolEnablementChanged = [RegistryPtr, BridgeServerPtr](const TArray<FString>& DisabledTools)
+	{
+		if (RegistryPtr)
+			RegistryPtr->ApplyDisabledTools(DisabledTools);
+		if (BridgeServerPtr)
+			BridgeServerPtr->PushManifest();
+	};
 
 	// §7 live status feed: the bridge delivers `status` / `device-auth` on the IPC READER thread. Marshal onto
 	// the game thread before touching any view-model/Slate state (the Godot M9b main-thread-marshalled rule),
@@ -168,6 +193,34 @@ void FUnrealMcpRuntime::Startup()
 			return TEXT("Stopped");
 		});
 
+	// §7 auxiliary windows (MCP Tools / Prompts / Resources / Settings). The Tools window snapshots the registry
+	// (a stable set after boot) for its list; the Settings window surfaces the bound IPC port read-only. Prompts/
+	// Resources have no plugin-side feed yet (the .NET sidecar owns those features, §2) — their providers return
+	// empty and the windows render an honest empty state rather than a fabricated registry.
+	AuxWindows = MakeUnique<FUnrealMcpAuxWindows>();
+	AuxWindows->Register(
+		ViewModel.ToSharedRef(),
+		[RegistryPtr]() -> TArray<FUnrealMcpToolListEntry>
+		{
+			TArray<FUnrealMcpToolListEntry> Entries;
+			if (RegistryPtr)
+			{
+				for (const FString& Name : RegistryPtr->GetToolNamesSorted())
+				{
+					if (const FUnrealMcpRegisteredTool* Tool = RegistryPtr->Find(Name))
+						Entries.Add(FUnrealMcpToolListEntry{ Tool->Name, Tool->Title, Tool->Description, Tool->ExtensionId });
+				}
+			}
+			return Entries;
+		},
+		[BridgeServerPtr]() -> FString
+		{
+			const int32 Port = BridgeServerPtr ? BridgeServerPtr->GetBoundPort() : -1;
+			return Port > 0 ? FString::Printf(TEXT("IPC bridge port: %d"), Port) : FString();
+		},
+		[]() -> TArray<FUnrealMcpFeatureEntry> { return {}; },  // prompts (none surfaced to the plugin yet)
+		[]() -> TArray<FUnrealMcpFeatureEntry> { return {}; }); // resources (none surfaced to the plugin yet)
+
 	// §1.5: tear down on editor pre-exit so the sidecar never orphans (layer 1).
 	PreExitHandle = FCoreDelegates::OnEnginePreExit.AddLambda([this]() { Shutdown(); });
 }
@@ -195,6 +248,11 @@ void FUnrealMcpRuntime::Shutdown()
 	// §7 UI teardown FIRST: unregister the tab and drop the bridge's status sink so no marshalled status can
 	// touch the view-model after this, then release the view-model. Clear the sink before the bridge tears
 	// down so a reader-thread invoke cannot race the reset.
+	if (AuxWindows.IsValid())
+	{
+		AuxWindows->Unregister(); // closes live aux tabs + unregisters the ISettingsModule section before view-model teardown
+		AuxWindows.Reset();
+	}
 	if (MainWindowTab.IsValid())
 	{
 		MainWindowTab->Unregister(); // also closes a live tab so its widget (a strong view-model ref) is freed
@@ -211,6 +269,7 @@ void FUnrealMcpRuntime::Shutdown()
 		ViewModel->OnPushConfig = nullptr;
 		ViewModel->OnSendAuth = nullptr;
 		ViewModel->OnOpenBrowser = nullptr;
+		ViewModel->OnToolEnablementChanged = nullptr; // captures the raw registry/bridge pointers freed below
 	}
 	ViewModel.Reset();
 

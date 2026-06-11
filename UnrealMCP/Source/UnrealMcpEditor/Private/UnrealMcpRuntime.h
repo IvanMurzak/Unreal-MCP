@@ -12,6 +12,7 @@ class FUnrealMcpSidecarManager;
 class FUnrealMcpExtensionManager;
 class FUnrealMcpEditorViewModel;
 class FUnrealMcpMainWindowTab;
+class FUnrealMcpAuxWindows;
 
 /**
  * Plugin-lifetime coordinator (docs/ARCHITECTURE.md §0). Wires the four subsystems together: the tool
@@ -43,9 +44,11 @@ private:
 	TUniquePtr<FUnrealMcpSidecarManager> SidecarManager;
 	TUniquePtr<FUnrealMcpExtensionManager> ExtensionManager;
 
-	// §7 UI: the main-window view-model (shared so the nomad tab's widget binds to it) and its tab spawner.
+	// §7 UI: the main-window view-model (shared so the nomad tab's widget binds to it) and its tab spawner,
+	// plus the four §7 auxiliary windows (MCP Tools / Prompts / Resources / Settings) sharing the same view-model.
 	TSharedPtr<FUnrealMcpEditorViewModel> ViewModel;
 	TUniquePtr<FUnrealMcpMainWindowTab> MainWindowTab;
+	TUniquePtr<FUnrealMcpAuxWindows> AuxWindows;
 
 	FDelegateHandle PreExitHandle;
 	bool bStarted = false;
