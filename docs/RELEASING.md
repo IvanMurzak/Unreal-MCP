@@ -171,8 +171,8 @@ again unless recovering a post-tag failure (see "Re-running a release" below).
 > already-published `0.1.0` fails with `E403 cannot publish over previously
 > published version` (a red `publish-npm` leg). So the **first CI-driven release
 > must target a new version** (`0.1.1` / `0.2.0`, via `bump-version.ps1`), not
-> `v0.1.0`. (The `unreal-cli` registry version is therefore one step behind the
-> first tagged Release until the next bump — expected, not a bug.)
+> `v0.1.0`. (npm will carry a `0.1.0` with no corresponding `v0.1.0` tag/Release
+> — expected, not a bug.)
 
 ## Self-hosted UE 5.7 runner
 
@@ -287,7 +287,7 @@ gh run rerun <run-id> --repo IvanMurzak/Unreal-MCP
 **Post-tag failure (the full re-run will NOT recover it).** If `publish-release`
 already created the `v<version>` tag + GitHub Release but the run then failed
 (asset-upload error, or the expected `publish-npm` auth failure while no Trusted
-Publisher is configured / `private: true` is still set), a full re-run cannot
+Publisher is configured), a full re-run cannot
 fix it: `check-version` now sees `tag_exists=true` → `should_release=false` →
 every job skips, so CI can never publish that version again. Recover one of two
 ways:
