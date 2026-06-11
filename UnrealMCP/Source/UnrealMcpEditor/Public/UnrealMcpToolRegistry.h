@@ -64,12 +64,26 @@ struct UNREALMCPEDITOR_API FUnrealMcpToolCall
 	FRotator GetRotator(const FString& Key, const FRotator& Default = FRotator::ZeroRotator) const;
 };
 
+/**
+ * One binary image content block carried in a tool result (§1.2 — "binary payloads (screenshots)
+ * travel as base64 strings inside JSON"; §1.3 — the MCP `content` array). The bridge serializes each
+ * into a `{ "type": "image", "data": <base64>, "mimeType": <mime> }` block, which the sidecar maps
+ * 1:1 onto an MCP image ContentBlock (ProxyResponseMapper). The screenshot family (§10) is the first
+ * producer.
+ */
+struct UNREALMCPEDITOR_API FUnrealMcpImageContent
+{
+	FString Base64Data;               // base64-encoded image bytes (no data: URI prefix)
+	FString MimeType = TEXT("image/png");
+};
+
 /** Terminal result of a tool invocation, mirroring the IPC tool-response shape (§1.3). */
 struct UNREALMCPEDITOR_API FUnrealMcpToolResult
 {
 	bool bSuccess = true;
 	FString Message;                       // human-readable text content block
 	TSharedPtr<FJsonObject> Structured;    // structured content (may be null)
+	TArray<FUnrealMcpImageContent> Images; // image content blocks, appended after the text block (§1.3)
 
 	static FUnrealMcpToolResult Success(const FString& InMessage, const TSharedPtr<FJsonObject>& InStructured = nullptr)
 	{
@@ -78,6 +92,14 @@ struct UNREALMCPEDITOR_API FUnrealMcpToolResult
 	static FUnrealMcpToolResult Error(const FString& InMessage)
 	{
 		return FUnrealMcpToolResult{ false, InMessage, nullptr };
+	}
+	/** Success carrying a single image content block (§10 screenshot family). */
+	static FUnrealMcpToolResult SuccessWithImage(const FString& InMessage, const FString& InBase64Data,
+		const TSharedPtr<FJsonObject>& InStructured = nullptr, const FString& InMimeType = TEXT("image/png"))
+	{
+		FUnrealMcpToolResult Result{ true, InMessage, InStructured };
+		Result.Images.Add(FUnrealMcpImageContent{ InBase64Data, InMimeType });
+		return Result;
 	}
 };
 
