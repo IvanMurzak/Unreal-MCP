@@ -1,0 +1,158 @@
+/*
+┌───────────────────────────────────────────────────────────────────┐
+│  Author: Ivan Murzak (https://github.com/IvanMurzak)              │
+│  Repository: GitHub (https://github.com/IvanMurzak)              │
+│  Copyright (c) 2026 Ivan Murzak                                   │
+│  Licensed under the Apache License, Version 2.0.                  │
+│  See the LICENSE file in the project root for more information.   │
+└───────────────────────────────────────────────────────────────────┘
+*/
+
+using System;
+using System.Collections.Generic;
+using System.Net;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
+using com.IvanMurzak.Unreal.MCP.Bridge.Auth;
+using com.IvanMurzak.Unreal.MCP.Bridge.Ipc;
+using Xunit;
+
+namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
+{
+    /// <summary>
+    /// Device-code flow specs (docs/ARCHITECTURE.md §7 item 4 / §1.3) — the real RFC 8628 grant the sidecar
+    /// now runs in place of PR #8's stub. Drives <see cref="DeviceCodeAuthenticator"/> against a scripted HTTP
+    /// handler (no network, no real waiting): asserts it emits a pending device-auth with the verification URL
+    /// + user code, polls until an access token is issued, surfaces denial/expiry, and honours cancellation.
+    /// </summary>
+    public class DeviceCodeAuthenticatorTests
+    {
+        // A scripted handler: the /authorize call returns a fixed JSON; each /token call dequeues the next body.
+        private sealed class ScriptedHandler : HttpMessageHandler
+        {
+            private readonly string _authorizeJson;
+            private readonly Queue<string> _tokenJson;
+            public int AuthorizeCalls { get; private set; }
+            public int TokenCalls { get; private set; }
+
+            public ScriptedHandler(string authorizeJson, IEnumerable<string> tokenJson)
+            {
+                _authorizeJson = authorizeJson;
+                _tokenJson = new Queue<string>(tokenJson);
+            }
+
+            protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+            {
+                var url = request.RequestUri!.AbsoluteUri;
+                string body;
+                if (url.EndsWith("/api/auth/device/authorize", StringComparison.Ordinal))
+                {
+                    AuthorizeCalls++;
+                    body = _authorizeJson;
+                }
+                else
+                {
+                    TokenCalls++;
+                    body = _tokenJson.Count > 0 ? _tokenJson.Dequeue() : "{\"error\":\"authorization_pending\"}";
+                }
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(body, System.Text.Encoding.UTF8, "application/json"),
+                });
+            }
+        }
+
+        private static DeviceCodeAuthenticator MakeAuth(ScriptedHandler handler) =>
+            // Zero delay so polling does not wait real seconds.
+            new(new HttpClient(handler), logger: null, delay: (_, _) => Task.CompletedTask);
+
+        private const string AuthorizeJson =
+            "{\"device_code\":\"dev-123\",\"user_code\":\"WXYZ-1234\"," +
+            "\"verification_uri\":\"https://ai-game.dev/device\"," +
+            "\"verification_uri_complete\":\"https://ai-game.dev/device?code=WXYZ-1234\"," +
+            "\"expires_in\":900,\"interval\":1}";
+
+        [Fact]
+        public async Task HappyPath_EmitsPendingThenAuthorizesAndReturnsToken()
+        {
+            var handler = new ScriptedHandler(AuthorizeJson, new[]
+            {
+                "{\"error\":\"authorization_pending\"}",
+                "{\"error\":\"authorization_pending\"}",
+                "{\"access_token\":\"cloud-bearer-abc\",\"token_type\":\"Bearer\"}",
+            });
+            var auth = MakeAuth(handler);
+
+            var emitted = new List<DeviceAuthMessage>();
+            var result = await auth.AuthorizeAsync("https://ai-game.dev", "Unreal", m => { emitted.Add(m); return Task.CompletedTask; }, CancellationToken.None);
+
+            Assert.True(result.Success);
+            Assert.Equal("cloud-bearer-abc", result.Token);
+
+            // First emit is the pending state with the verification URL + user code (what the UI renders, §7).
+            Assert.Contains(emitted, m => m.State == "pending" && m.UserCode == "WXYZ-1234"
+                && m.VerificationUrl == "https://ai-game.dev/device?code=WXYZ-1234");
+            // The authorized emit carries the issued token.
+            Assert.Contains(emitted, m => m.State == "authorized" && m.Token == "cloud-bearer-abc");
+            Assert.Equal(3, handler.TokenCalls); // pending, pending, success
+        }
+
+        [Fact]
+        public async Task SlowDown_IncreasesIntervalButStillSucceeds()
+        {
+            var handler = new ScriptedHandler(AuthorizeJson, new[]
+            {
+                "{\"error\":\"slow_down\"}",
+                "{\"access_token\":\"tok\"}",
+            });
+            var auth = MakeAuth(handler);
+
+            var result = await auth.AuthorizeAsync("https://ai-game.dev", null, _ => Task.CompletedTask, CancellationToken.None);
+            Assert.True(result.Success);
+            Assert.Equal("tok", result.Token);
+        }
+
+        [Fact]
+        public async Task AccessDenied_FailsAndEmitsFailed()
+        {
+            var handler = new ScriptedHandler(AuthorizeJson, new[] { "{\"error\":\"access_denied\"}" });
+            var auth = MakeAuth(handler);
+
+            var emitted = new List<DeviceAuthMessage>();
+            var result = await auth.AuthorizeAsync("https://ai-game.dev", null, m => { emitted.Add(m); return Task.CompletedTask; }, CancellationToken.None);
+
+            Assert.False(result.Success);
+            Assert.Equal("access_denied", result.Error);
+            Assert.Contains(emitted, m => m.State == "failed");
+        }
+
+        [Fact]
+        public async Task Cancellation_StopsPollingWithCancelledResult()
+        {
+            // An endless stream of authorization_pending — only cancellation ends it.
+            var pending = new List<string>();
+            for (var i = 0; i < 100; i++) pending.Add("{\"error\":\"authorization_pending\"}");
+            var handler = new ScriptedHandler(AuthorizeJson, pending);
+
+            using var cts = new CancellationTokenSource();
+            // Cancel after the first poll by counting emits is racy; instead inject a delay that cancels.
+            var auth = new DeviceCodeAuthenticator(new HttpClient(handler), logger: null,
+                delay: (_, ct) => { cts.Cancel(); return Task.CompletedTask; });
+
+            var result = await auth.AuthorizeAsync("https://ai-game.dev", null, _ => Task.CompletedTask, cts.Token);
+            Assert.False(result.Success);
+            Assert.True(result.WasCancelled);
+        }
+
+        [Fact]
+        public async Task EmptyCloudUrl_FailsImmediately()
+        {
+            var handler = new ScriptedHandler(AuthorizeJson, Array.Empty<string>());
+            var auth = MakeAuth(handler);
+            var result = await auth.AuthorizeAsync("", null, _ => Task.CompletedTask, CancellationToken.None);
+            Assert.False(result.Success);
+            Assert.Equal(0, handler.AuthorizeCalls);
+        }
+    }
+}

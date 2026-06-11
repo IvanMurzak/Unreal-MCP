@@ -9,11 +9,14 @@
 */
 
 using System;
+using System.Net.Http;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Text.Json.Nodes;
 using com.IvanMurzak.McpPlugin;
 using com.IvanMurzak.McpPlugin.Common;
 using com.IvanMurzak.ReflectorNet;
+using com.IvanMurzak.Unreal.MCP.Bridge.Auth;
 using com.IvanMurzak.Unreal.MCP.Bridge.Ipc;
 using com.IvanMurzak.Unreal.MCP.Bridge.Tools;
 using Microsoft.Extensions.Logging;
@@ -53,12 +56,20 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         private Reflector? _reflector;
         private int _signalRConnectStarted;
 
+        // §7 Cloud device-code flow (replaces PR #8's auth stubs). The authenticator is injectable so the xUnit
+        // suite drives the flow against a fake HTTP handler; _authCts cancels an in-progress flow (auth-cancel).
+        private readonly DeviceCodeAuthenticator _authenticator;
+        private readonly string _clientLabel;
+        private CancellationTokenSource? _authCts;
+
         public SidecarHost(
             IpcClient ipc,
             string sidecarVersion,
             ILoggerProvider? loggerProvider = null,
             string? fallbackHost = null,
-            string? fallbackToken = null)
+            string? fallbackToken = null,
+            DeviceCodeAuthenticator? authenticator = null,
+            string clientLabel = "Unreal-MCP-Bridge")
         {
             _ipc = ipc ?? throw new ArgumentNullException(nameof(ipc));
             _sidecarVersion = sidecarVersion;
@@ -66,6 +77,9 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             _logger = loggerProvider?.CreateLogger(nameof(SidecarHost));
             _fallbackHost = fallbackHost;
             _fallbackToken = fallbackToken;
+            _clientLabel = clientLabel;
+            _authenticator = authenticator
+                ?? new DeviceCodeAuthenticator(new HttpClient(), loggerProvider?.CreateLogger(nameof(DeviceCodeAuthenticator)));
         }
 
         public IMcpPlugin? Plugin => _plugin;
@@ -139,11 +153,17 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
 
         private void OnConfigReceived(JsonObject config)
         {
-            // §8 "on change": the plugin re-pushed the effective connection config. Apply it. A live mode/host
-            // change that requires re-dialling SignalR is deferred to the UI task — for now KeepConnected
-            // covers transient reconnects and the next reconnect epoch picks up the applied values.
+            // §8 "on change": the plugin re-pushed the effective connection config. Apply it, then honour a
+            // keepConnected transition: false → genuinely tear down SignalR (the §7 / Godot M9b Disconnect
+            // lesson — not merely drop one link); false→true → (re)connect.
+            var wasKeepConnected = _config.KeepConnected;
             ApplyConnectionConfig(config);
             _logger?.LogInformation("Applied updated connection config (mode-aware host {Host}).", _config.Host);
+
+            if (wasKeepConnected && !_config.KeepConnected)
+                _ = HandleDisconnectAsync();
+            else if (!wasKeepConnected && _config.KeepConnected)
+                _ = ReconnectAsync();
         }
 
         /// <summary>
@@ -187,27 +207,106 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         }
 
         /// <summary>
-        /// Handle a §1.3 auth message (<c>auth-start</c> / <c>auth-cancel</c> / <c>auth-revoke</c>) as a
-        /// graceful stub pending the full device-code UI flow (§8). <c>auth-revoke</c> clears the stored
-        /// cloud bearer. Public so the bridge xUnit suite can assert the stub behavior directly.
+        /// Handle a §1.3 auth message (<c>auth-start</c> / <c>auth-cancel</c> / <c>auth-revoke</c>), driving the
+        /// REAL Cloud device-code flow (§7 item 4) — the PR #8 stubs are gone for the happy path.
+        /// <c>auth-start</c> launches <see cref="DeviceCodeAuthenticator"/> against the resolved cloud URL,
+        /// forwarding <c>device-auth</c> progress to the plugin; <c>auth-cancel</c> cancels an in-progress flow;
+        /// <c>auth-revoke</c> cancels any flow and clears the stored cloud bearer. Public so the bridge xUnit
+        /// suite can drive it directly. Never throws (the flow runs on a background task).
         /// </summary>
         public void HandleAuthMessage(string type)
         {
-            // §8 auth plumbing — graceful stubs until the device-code UI flow lands.
             switch (type)
             {
+                case IpcProtocol.Type.AuthStart:
+                    StartDeviceAuth();
+                    break;
+                case IpcProtocol.Type.AuthCancel:
+                    _authCts?.Cancel();
+                    _logger?.LogInformation("auth-cancel received; cancelling the in-progress device-code flow (if any).");
+                    break;
                 case IpcProtocol.Type.AuthRevoke:
+                    _authCts?.Cancel();
                     // Clear the stored cloud bearer so a subsequent (re)connect is anonymous until re-authorized.
                     _config.Token = null;
                     _logger?.LogInformation("Cloud token revoked (auth-revoke); cleared the in-memory bearer.");
                     break;
-                case IpcProtocol.Type.AuthStart:
-                    _logger?.LogInformation("auth-start received; the device-code flow is not implemented in the sidecar-bridge MVP (pending the UI task).");
-                    break;
-                case IpcProtocol.Type.AuthCancel:
-                    _logger?.LogInformation("auth-cancel received; no in-progress device-code flow to cancel (pending the UI task).");
-                    break;
             }
+        }
+
+        private void StartDeviceAuth()
+        {
+            _authCts?.Cancel();
+            var cts = new CancellationTokenSource();
+            _authCts = cts;
+            var cloudUrl = _config.Host; // Cloud mode resolved Host to cloudUrl (ApplyConnectionConfig).
+            _logger?.LogInformation("auth-start received; beginning device-code flow against {Host}.", cloudUrl);
+            _ = RunDeviceAuthAsync(cloudUrl, cts.Token);
+        }
+
+        private async Task RunDeviceAuthAsync(string cloudUrl, CancellationToken ct)
+        {
+            try
+            {
+                var result = await _authenticator.AuthorizeAsync(
+                    cloudUrl,
+                    _clientLabel,
+                    emit: msg => _ipc.SendToPluginAsync(msg, CancellationToken.None),
+                    ct).ConfigureAwait(false);
+
+                if (result.Success && result.Token != null)
+                {
+                    _config.Token = result.Token; // the issued cloud bearer is NEVER logged (§8)
+                    await ReconnectAsync().ConfigureAwait(false); // the authorized session takes effect
+                    await EmitStatusAsync("Connected", cloudAuthState: "Authorized").ConfigureAwait(false);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning("Device-code flow ended with an error: {Message}", ex.Message);
+            }
+        }
+
+        /// <summary>Fully disconnect SignalR (auth-revoke / Disconnect), then surface a Disconnected status.</summary>
+        private async Task HandleDisconnectAsync()
+        {
+            var plugin = _plugin;
+            if (plugin != null)
+            {
+                try { await plugin.Disconnect().ConfigureAwait(false); }
+                catch (Exception ex) { _logger?.LogDebug("SignalR disconnect failed: {Message}", ex.Message); }
+            }
+            await EmitStatusAsync("Disconnected").ConfigureAwait(false);
+        }
+
+        /// <summary>Disconnect then reconnect SignalR so a newly-applied token/host takes effect.</summary>
+        private async Task ReconnectAsync()
+        {
+            var plugin = _plugin;
+            if (plugin == null)
+                return;
+            try { await plugin.Disconnect().ConfigureAwait(false); } catch { /* may not be connected */ }
+            try
+            {
+                var ok = await plugin.Connect().ConfigureAwait(false);
+                _logger?.LogInformation(ok ? "SignalR reconnected." : "SignalR reconnect returned false; client keeps retrying.");
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning("SignalR reconnect failed: {Message}", ex.Message);
+            }
+        }
+
+        /// <summary>Push a §1.3 <c>status</c> message to the plugin (the §7 live connection indicator).</summary>
+        private Task EmitStatusAsync(string connectionState, string? cloudAuthState = null)
+        {
+            var status = new StatusMessage
+            {
+                ConnectionState = connectionState,
+                KeepConnected = _config.KeepConnected,
+                CloudAuthState = cloudAuthState,
+            };
+            return _ipc.SendToPluginAsync(status, CancellationToken.None);
         }
 
         private async System.Threading.Tasks.Task ConnectSignalRAsync()
@@ -219,6 +318,9 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             {
                 var ok = await plugin.Connect().ConfigureAwait(false);
                 _logger?.LogInformation(ok ? "SignalR connected." : "SignalR initial connect returned false; client will keep retrying.");
+                // §7 live status: surface the connection result to the plugin's view-model.
+                var cloudAuthState = string.IsNullOrEmpty(_config.Token) ? null : "Authorized";
+                await EmitStatusAsync(ok ? "Connected" : "Connecting", cloudAuthState).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -231,6 +333,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             _ipc.HandshakeAccepted -= OnHandshakeAccepted;
             _ipc.ConfigReceived -= OnConfigReceived;
             _ipc.AuthMessageReceived -= HandleAuthMessage;
+            try { _authCts?.Cancel(); } catch { /* ignore */ }
             try { _plugin?.Dispose(); } catch { /* ignore */ }
             _plugin = null;
         }

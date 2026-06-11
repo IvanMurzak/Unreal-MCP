@@ -107,4 +107,38 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
         [JsonPropertyName("level")] public string? Level { get; set; }
         [JsonPropertyName("message")] public string? Message { get; set; }
     }
+
+    /// <summary>
+    /// sidecar → plugin: device-code authorization progress (§1.3 / §7 Cloud auth). Carries the verification
+    /// URL + user code (for the UI to display/open) and a coarse <c>state</c> the view-model maps to its
+    /// device-auth indicator. On success it carries the issued cloud bearer so the plugin can store it via the
+    /// §8 config store. The token is part of the success payload but is NEVER written to a log line (§8).
+    /// </summary>
+    public sealed class DeviceAuthMessage
+    {
+        [JsonPropertyName("type")] public string Type { get; set; } = IpcProtocol.Type.DeviceAuth;
+        /// <summary>One of <c>pending</c> / <c>authorized</c> / <c>failed</c> / <c>denied</c> / <c>expired</c>.</summary>
+        [JsonPropertyName("state")] public string State { get; set; } = "pending";
+        [JsonPropertyName("verificationUrl")] public string? VerificationUrl { get; set; }
+        [JsonPropertyName("userCode")] public string? UserCode { get; set; }
+        /// <summary>The issued cloud bearer — present only on the terminal <c>authorized</c> state.</summary>
+        [JsonPropertyName("token")] public string? Token { get; set; }
+        /// <summary>A short human-readable reason on a <c>failed</c> state (never a secret).</summary>
+        [JsonPropertyName("message")] public string? Message { get; set; }
+    }
+
+    /// <summary>
+    /// sidecar → plugin: live SignalR state for the §7 UI (§1.3 <c>status</c>). The plugin's view-model reads
+    /// <c>connectionState</c> / <c>keepConnected</c> / <c>cloudAuthState</c> / <c>aiAgents</c>.
+    /// </summary>
+    public sealed class StatusMessage
+    {
+        [JsonPropertyName("type")] public string Type { get; set; } = IpcProtocol.Type.Status;
+        /// <summary>One of <c>Connected</c> / <c>Connecting</c> / <c>Disconnected</c> / <c>Degraded</c>.</summary>
+        [JsonPropertyName("connectionState")] public string ConnectionState { get; set; } = "Disconnected";
+        [JsonPropertyName("keepConnected")] public bool KeepConnected { get; set; }
+        /// <summary>One of <c>Authorized</c> / <c>Unauthorized</c> (Cloud mode only; null in Custom).</summary>
+        [JsonPropertyName("cloudAuthState")] public string? CloudAuthState { get; set; }
+        [JsonPropertyName("aiAgents")] public List<string> AiAgents { get; set; } = new();
+    }
 }
