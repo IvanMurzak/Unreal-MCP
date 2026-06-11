@@ -96,6 +96,25 @@ Both plugin jobs (`plugin` in `test_pull_request.yml`/`release.yml` and
 are SKIPPED** — a skipped job does not fail a PR, so an unregistered runner never
 reds the hosted legs. The bridge / server / cli legs always provide PR signal.
 
+### Fork-PR safety (untrusted code never runs on the self-hosted runner)
+
+The self-hosted runner executes the checked-out code, so a pull request from a
+**fork** must never reach it. The `plugin` leg's `if` condition adds
+`github.event.pull_request.head.repo.full_name == github.repository`, so the
+self-hosted job runs ONLY for same-repo (branch) PRs and manual dispatches —
+fork PRs skip it (the hosted bridge / server / cli legs still give them full
+signal).
+
+Defense in depth at the repository-settings level (operator):
+
+- *Settings → Actions → General → Fork pull request workflows*: require approval
+  for **all outside collaborators** (or all fork PRs) so no fork workflow runs
+  without a maintainer's explicit click.
+- Prefer an **ephemeral / just-in-time** self-hosted runner (re-provisioned per
+  job, e.g. registered with `--ephemeral`) so one job can never leave persistent
+  state on disk for a later job to read. Never register the `unreal-5-7` runner
+  on a machine holding secrets you would not hand to an untrusted PR author.
+
 ### Registration steps (operator)
 
 1. On a Windows machine with UE 5.7 installed at `C:\Program Files\Epic Games\UE_5.7`

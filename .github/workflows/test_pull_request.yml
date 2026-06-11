@@ -102,7 +102,11 @@ jobs:
   # test or a missing report.
   plugin:
     name: plugin BuildPlugin + Automation (UE 5.7)
-    if: ${{ vars.UNREAL_RUNNER_READY == 'true' }}
+    # Gated on the runner being registered AND — for pull_request events — the PR
+    # originating from THIS repo, never a fork. A fork PR must never execute its
+    # checked-out code on the self-hosted runner (see docs/RELEASING.md). Manual
+    # dispatches (trusted) are unaffected by the fork clause.
+    if: ${{ vars.UNREAL_RUNNER_READY == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     runs-on: [self-hosted, windows, unreal-5-7]
     env:
       # Overridable per-runner via repository variables (docs/RELEASING.md).
@@ -139,6 +143,11 @@ jobs:
           & $editorCmd "$env:HOST_UPROJECT" -nullrhi -nosplash -unattended `
             -ExecCmds="Automation RunTests UnrealMcp; Quit" `
             -ReportExportPath="$reportDir" -log
+          # The editor's exit code is unreliable for test verdicts (test.md
+          # Suite 3); the parsed index.json below is authoritative. Clear the
+          # exit code so pwsh's auto-appended `exit $LASTEXITCODE` does not red
+          # the step on a nonzero editor exit unrelated to a test failure.
+          $global:LASTEXITCODE = 0
           echo "REPORT_DIR=$reportDir" >> $env:GITHUB_ENV
 
       - name: Parse Automation report (index.json is authoritative)
