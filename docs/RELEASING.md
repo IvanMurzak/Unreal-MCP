@@ -119,7 +119,7 @@ git ls-remote --tags https://github.com/IvanMurzak/Unreal-MCP   # expect: no v* 
 
 The package name `unreal-cli` was verified free on the registry. The
 `cli/package.json` is already publish-ready (`private` removed, full metadata,
-`publishConfig: { access: "public", provenance: true }`). Publish the first
+`publishConfig: { "access": "public" }`). Publish the first
 version from a **clean checkout of `main`** (not a dev worktree), authenticated
 as the package owner (`baizor`):
 
@@ -131,17 +131,28 @@ npm login                       # user: baizor
 cd cli
 npm ci
 npm run build
-npm publish                     # publishConfig already sets access=public + provenance
+npm publish                     # publishConfig sets access=public; no provenance (see note)
 ```
 
 `npm publish` reads `publishConfig` from `cli/package.json`, so `--access public`
-and `--provenance` need not be passed explicitly. Confirm with
+need not be passed explicitly. Confirm with
 `npm view unreal-cli version` (expect `0.1.0`).
+
+> **No provenance on the manual first publish — by design.** npm provenance can
+> only be generated from a **cloud-hosted CI runner** (GitHub Actions / GitLab
+> CI) with an OIDC identity; a local `npm publish` cannot produce it, and a
+> `publishConfig.provenance: true` (or `--provenance`) from a workstation hard-errors.
+> So `publishConfig` deliberately does **not** set `provenance`, and this manual
+> step publishes without it. Provenance is added automatically for every
+> *subsequent* version: `release.yml`'s `publish-npm` job runs
+> `npm publish --access public --provenance` over OIDC (npm ≥ 11.5.1). The
+> hand-published `0.1.0` simply has no provenance attestation; CI-published
+> versions do.
 
 Then, **one-time**, configure the Trusted Publisher so all future versions
 publish from CI without a token:
 
-1. On npmjs.com → the `unreal-cli` package → **Settings → Trusted Publisher**.
+1. On npmjs.com → the `unreal-cli` package → **Settings → Trusted publishing**.
 2. Add a GitHub Actions publisher authorizing:
    - **Repository**: `IvanMurzak/Unreal-MCP`
    - **Workflow**: `release.yml`
@@ -154,6 +165,15 @@ After that, every subsequent version is published by `release.yml`'s
 bump — no manual `npm publish` and no stored `NPM_TOKEN`. Do **not** hand-publish
 again unless recovering a post-tag failure (see "Re-running a release" below).
 
+> **The first CI release must bump past `0.1.0`.** Because `0.1.0` is
+> hand-published above, do not let CI publish `0.1.0` again: `publish-npm` runs
+> `npm version <v> --allow-same-version` then `npm publish`, which on the
+> already-published `0.1.0` fails with `E403 cannot publish over previously
+> published version` (a red `publish-npm` leg). So the **first CI-driven release
+> must target a new version** (`0.1.1` / `0.2.0`, via `bump-version.ps1`), not
+> `v0.1.0`. (The `unreal-cli` registry version is therefore one step behind the
+> first tagged Release until the next bump — expected, not a bug.)
+
 ## Self-hosted UE 5.7 runner
 
 The plugin leg (compile + Automation specs) needs Unreal Engine 5.7, which is
@@ -164,7 +184,9 @@ release-runner label so PR compiles do not starve release capacity.
 > **Status (2026-06-11): the runner is LIVE.** A self-hosted Windows runner
 > (labels `self-hosted`, `Windows`, `X64`, `unreal-5-7`) is registered against
 > `IvanMurzak/Unreal-MCP`, and the repository variable `UNREAL_RUNNER_READY` is
-> set to `true`. The `plugin BuildPlugin + Automation (UE 5.7)` leg now **runs**
+> set to `true`. `UNREAL_HOST_PROJECT` is **also set**, so the Automation pass
+> runs against the packaged plugin (not just the BuildPlugin compile). The
+> `plugin BuildPlugin + Automation (UE 5.7)` leg now **runs**
 > on every same-repo PR and on real releases — it is no longer skipped. The
 > registration steps below are retained for re-provisioning the runner.
 
@@ -220,7 +242,7 @@ Set via `gh variable set --repo IvanMurzak/Unreal-MCP <NAME> --body <VALUE>`
 | --- | --- | --- |
 | `UNREAL_RUNNER_READY` | to enable the plugin legs | **Currently `true`** — a `unreal-5-7` runner is registered (2026-06-11), so the plugin legs run. Unset/anything-else → plugin legs skip. |
 | `UNREAL_ENGINE_PATH` | optional | UE 5.7 install root on the runner. Defaults to `C:\Program Files\Epic Games\UE_5.7`. |
-| `UNREAL_HOST_PROJECT` | for the Automation pass | Absolute path on the runner to the host `.uproject` (with the UnrealMCP plugin) the Automation specs run against. |
+| `UNREAL_HOST_PROJECT` | for the Automation pass | **Currently set (2026-06-11)** — absolute path on the runner to the host `.uproject` (with the UnrealMCP plugin) the Automation specs run against (`C:\actions-runner-unreal\host\UnrealTestProject\UnrealTestProject.uproject`, whose `Plugins\UnrealMCP` junctions to the BuildPlugin package output in the runner workspace temp, so Automation exercises the PR's packaged plugin). |
 
 Variables (not secrets) are correct here: none of these values are sensitive.
 

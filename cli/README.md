@@ -9,10 +9,13 @@ probes server health, configures AI agents (Claude Code, Cursor, VS Code, …), 
 
 ## Install
 
-Run without installing (always the latest published version):
+Run without installing (npx caches the package between runs — use
+`unreal-cli@latest` to force the newest published version):
 
 ```bash
 npx unreal-cli status
+# or, to always fetch the newest published version:
+npx unreal-cli@latest status
 ```
 
 Or install globally to get the `unreal-cli` command on your `PATH`:
