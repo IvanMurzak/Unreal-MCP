@@ -88,6 +88,9 @@ namespace UnrealMcpSourceTools
 		// Best-effort junction/symlink jail: resolve the deepest EXISTING ancestor's real on-disk path
 		// (fixes case and, where the platform supports it, follows reparse points) and re-check
 		// containment, so a junction placed INSIDE Source/ that targets outside is still rejected.
+		// NOTE: this is a PATH-level check, so a TOCTOU window exists between it and the later file op
+		// (a junction could be swapped in after we validate). UE's file API offers no handle-based
+		// re-verify, and the documented threat model (a local AI editing project source) accepts it.
 		{
 			IFileManager& FM = IFileManager::Get();
 			FString Existing = Full;
@@ -116,10 +119,22 @@ namespace UnrealMcpSourceTools
 			}
 		}
 
-		Out.bOk = true;
 		Out.FullPath = Full;
 		Out.RelPath = Full;
 		FPaths::MakePathRelativeTo(Out.RelPath, *(Root + TEXT("/")));
+
+		// Reject NTFS alternate-data-stream syntax ("Foo.cpp:stream"): a ':' in the path RELATIVE to the
+		// jail root would otherwise let a write create/read an ADS that survives canonicalization. The
+		// drive-letter colon lives in the jail root, not the remainder, so checking RelPath is safe.
+		if (Out.RelPath.Contains(TEXT(":")))
+		{
+			Out.FullPath.Reset();
+			Out.RelPath.Reset();
+			Out.Error = FString::Printf(TEXT("'%s' contains an illegal ':' (alternate data stream)."), *InPath);
+			return Out;
+		}
+
+		Out.bOk = true;
 		return Out;
 	}
 
@@ -134,9 +149,11 @@ namespace UnrealMcpSourceTools
 
 		// MSVC:  C:\path\File.cpp(42): error C2065: 'Foo': undeclared identifier
 		//        File.cpp(42,5): warning C4101: ...   (newer toolchains may add a column)
-		const FRegexPattern MsvcPattern(TEXT("^\\s*(.+?)\\((\\d+)(?:,\\d+)?\\)\\s*:\\s*(error|warning)\\s+(.+?)\\s*$"));
-		// clang: File.cpp:42:5: error: ...
-		const FRegexPattern ClangPattern(TEXT("^\\s*(.+?):(\\d+):(?:\\d+:)?\\s*(error|warning):\\s*(.+?)\\s*$"));
+		//        File.cpp(1): fatal error C1083: ...   (a missing/typo'd #include — the optional
+		//        "fatal " prefix is consumed and the severity normalized to "error")
+		const FRegexPattern MsvcPattern(TEXT("^\\s*(.+?)\\((\\d+)(?:,\\d+)?\\)\\s*:\\s*(?:fatal\\s+)?(error|warning)\\s+(.+?)\\s*$"));
+		// clang: File.cpp:42:5: error: ...   (also "File.cpp:1:10: fatal error: 'X.h' file not found")
+		const FRegexPattern ClangPattern(TEXT("^\\s*(.+?):(\\d+):(?:\\d+:)?\\s*(?:fatal\\s+)?(error|warning):\\s*(.+?)\\s*$"));
 
 		TSet<FString> Seen;
 		auto AddMatch = [&OutDiagnostics, &Seen](const FString& File, const FString& LineStr, const FString& Sev, const FString& Msg)
@@ -295,6 +312,17 @@ namespace UnrealMcpSourceTools
 					return FUnrealMcpToolResult::Error(FString::Printf(TEXT("No source file at '%s'."), *Jailed.RelPath));
 				}
 
+				// Refuse absurdly large files BEFORE reading the whole thing into memory — the byte cap only
+				// bounds the RETURNED slice, not the read. 64 MiB is far above any sane source file.
+				static constexpr int64 MaxReadableBytes = 64ll * 1024 * 1024;
+				const int64 OnDiskSize = IFileManager::Get().FileSize(*Jailed.FullPath);
+				if (OnDiskSize > MaxReadableBytes)
+				{
+					return FUnrealMcpToolResult::Error(FString::Printf(
+						TEXT("'%s' is %lld bytes; refusing to read files larger than %lld bytes."),
+						*Jailed.RelPath, OnDiskSize, MaxReadableBytes));
+				}
+
 				FString Content;
 				if (!FFileHelper::LoadFileToString(Content, *Jailed.FullPath))
 				{
@@ -310,8 +338,10 @@ namespace UnrealMcpSourceTools
 				int32 EndLine = TotalLines;
 				if (bWindowed)
 				{
-					StartLine = FMath::Clamp((int32)Call.GetInt(TEXT("startLine"), 1), 1, FMath::Max(1, TotalLines));
-					EndLine = FMath::Clamp((int32)Call.GetInt(TEXT("endLine"), TotalLines), StartLine, FMath::Max(1, TotalLines));
+					// Clamp in int64 BEFORE narrowing — a huge value (e.g. 4294967297) would otherwise wrap
+					// to a small in-range int32 before the clamp ever ran.
+					StartLine = (int32)FMath::Clamp<int64>(Call.GetInt(TEXT("startLine"), 1), 1, FMath::Max(1, TotalLines));
+					EndLine = (int32)FMath::Clamp<int64>(Call.GetInt(TEXT("endLine"), TotalLines), StartLine, FMath::Max(1, TotalLines));
 
 					TArray<FString> Window;
 					for (int32 Index = StartLine - 1; Index < EndLine && Index < TotalLines; ++Index)
@@ -322,7 +352,7 @@ namespace UnrealMcpSourceTools
 				}
 
 				// Byte-cap on the UTF-8 encoding (binary-search the longest prefix that fits).
-				const int32 MaxBytes = FMath::Clamp((int32)Call.GetInt(TEXT("maxBytes"), 262144), 1, 4194304);
+				const int32 MaxBytes = (int32)FMath::Clamp<int64>(Call.GetInt(TEXT("maxBytes"), 262144), 1, 4194304);
 				auto Utf8Len = [](const FString& S) { return FTCHARToUTF8(*S).Length(); };
 				bool bTruncated = false;
 				if (Utf8Len(Content) > MaxBytes)
@@ -333,6 +363,13 @@ namespace UnrealMcpSourceTools
 					{
 						const int32 Mid = (Lo + Hi + 1) / 2;
 						if (Utf8Len(Content.Left(Mid)) <= MaxBytes) { Lo = Mid; } else { Hi = Mid - 1; }
+					}
+					// Don't slice between a UTF-16 surrogate pair: if the last kept code unit is a high
+					// surrogate (U+D800..U+DBFF) its low half is at index Lo (excluded), so drop it too.
+					if (Lo > 0 && Lo < Content.Len())
+					{
+						const TCHAR Prev = Content[Lo - 1];
+						if (Prev >= (TCHAR)0xD800 && Prev <= (TCHAR)0xDBFF) { --Lo; }
 					}
 					Content = Content.Left(Lo);
 					bTruncated = true;
@@ -489,6 +526,10 @@ namespace UnrealMcpSourceTools
 					{
 						return FUnrealMcpToolResult::Error(FString::Printf(TEXT("Failed to read '%s'."), *Jailed.RelPath));
 					}
+					// Preserve the file's dominant line ending and trailing newline so a one-line splice
+					// produces a one-line diff, not a whole-file CRLF->LF rewrite that drops the final EOL.
+					const TCHAR* Eol = Existing.Contains(TEXT("\r\n")) ? TEXT("\r\n") : TEXT("\n");
+					const bool bTrailingNewline = Existing.EndsWith(TEXT("\n"));
 					TArray<FString> Lines;
 					Existing.ParseIntoArrayLines(Lines, /*InCullEmpty*/ false);
 					const int32 StartLine = (int32)Call.GetInt(TEXT("startLine"), 1);
@@ -507,7 +548,11 @@ namespace UnrealMcpSourceTools
 					{
 						Result.Add(Lines[Index]);
 					}
-					Final = FString::Join(Result, TEXT("\n"));
+					Final = FString::Join(Result, Eol);
+					if (bTrailingNewline)
+					{
+						Final += Eol;
+					}
 					Mode = FString::Printf(TEXT("range [%d..%d]"), StartLine, EndLine);
 				}
 				else
@@ -731,8 +776,14 @@ namespace UnrealMcpSourceTools
 						// Live Coding surfaces a coarse enum, not per-diagnostic rows; the UBT path carries
 						// the full {file,line,severity,message} report.
 						Structured->SetArrayField(TEXT("diagnostics"), {});
-						return FUnrealMcpToolResult::Success(
-							FString::Printf(TEXT("Live Coding compile: %s."), ResultText), Structured);
+						// On a hard Failure, DON'T return the diagnostic-less enum — fall through to the UBT
+						// path below for the full structured report (success/compileClean already model the
+						// locked-DLL relink failure UBT will then hit).
+						if (Result != ELiveCodingCompileResult::Failure)
+						{
+							return FUnrealMcpToolResult::Success(
+								FString::Printf(TEXT("Live Coding compile: %s."), ResultText), Structured);
+						}
 					}
 				}
 #endif
@@ -747,6 +798,24 @@ namespace UnrealMcpSourceTools
 				if (Configuration.IsEmpty())
 				{
 					Configuration = TEXT("Development");
+				}
+
+				// target/platform/configuration are pasted verbatim into the UBT command line, so each must
+				// be a single identifier-like token (no whitespace, quotes, or dash-prefixed flags) — else a
+				// value like "UnrealTestProjectEditor Win64 Development -Clean" would inject arbitrary UBT
+				// arguments (e.g. -Clean wipes Binaries/Intermediate). Mirrors IsValidIdentifier used for
+				// generated class/module names. All real targets/platforms/configs are bare identifiers.
+				if (!IsValidIdentifier(TargetName))
+				{
+					return FUnrealMcpToolResult::Error(FString::Printf(TEXT("'%s' is not a valid build target name."), *TargetName));
+				}
+				if (!IsValidIdentifier(Platform))
+				{
+					return FUnrealMcpToolResult::Error(FString::Printf(TEXT("'%s' is not a valid build platform."), *Platform));
+				}
+				if (!IsValidIdentifier(Configuration))
+				{
+					return FUnrealMcpToolResult::Error(FString::Printf(TEXT("'%s' is not a valid build configuration."), *Configuration));
 				}
 
 				FString UProject;

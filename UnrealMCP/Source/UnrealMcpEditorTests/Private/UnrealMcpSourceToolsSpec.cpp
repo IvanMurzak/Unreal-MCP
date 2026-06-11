@@ -165,6 +165,32 @@ void FUnrealMcpSourceToolsSpec::Define()
 			}
 		});
 
+		It("parses MSVC and clang 'fatal error' compiler diagnostics (e.g. C1083 missing include)", [this]()
+		{
+			// A missing/typo'd #include is one of the most common AI-edit failures; both toolchains
+			// emit it as a file(line)-attributed "fatal error" that must surface as a normal error row.
+			const FString Output =
+				TEXT("C:\\proj\\Source\\MyGame\\MyActor.cpp(1): fatal error C1083: Cannot open include file: 'X.h': No such file or directory\n")
+				TEXT("/proj/Source/MyGame/Other.cpp:10:10: fatal error: 'Y.h' file not found\n")
+				TEXT("LINK : fatal error LNK1104: cannot open file 'UnrealEditor-UnrealTestProject.dll'\n");
+
+			TArray<UnrealMcpSourceTools::FSourceDiagnostic> Diags;
+			UnrealMcpSourceTools::ParseDiagnostics(Output, Diags);
+
+			// The two compiler-stage fatals are reported; the LNK link-stage fatal is still excluded.
+			TestEqual(TEXT("two fatal compiler diagnostics (LNK excluded)"), Diags.Num(), 2);
+			if (Diags.Num() == 2)
+			{
+				TestEqual(TEXT("msvc fatal file"), Diags[0].File, FString(TEXT("C:\\proj\\Source\\MyGame\\MyActor.cpp")));
+				TestEqual(TEXT("msvc fatal line"), Diags[0].Line, 1);
+				TestEqual(TEXT("msvc fatal severity normalized to error"), Diags[0].Severity, FString(TEXT("error")));
+				TestTrue(TEXT("msvc fatal message carries code"), Diags[0].Message.Contains(TEXT("C1083")));
+				TestEqual(TEXT("clang fatal file"), Diags[1].File, FString(TEXT("/proj/Source/MyGame/Other.cpp")));
+				TestEqual(TEXT("clang fatal line"), Diags[1].Line, 10);
+				TestEqual(TEXT("clang fatal severity normalized to error"), Diags[1].Severity, FString(TEXT("error")));
+			}
+		});
+
 		It("returns no diagnostics for clean output", [this]()
 		{
 			const FString Output = TEXT("Building UnrealTestProjectEditor...\nTarget is up to date\n");
@@ -273,6 +299,35 @@ void FUnrealMcpSourceToolsSpec::Define()
 		});
 	});
 
+	Describe("compile arg validation", [this]()
+	{
+		It("rejects injection in target/platform/configuration before launching UBT", [this]()
+		{
+			// target/platform/configuration are pasted into the UBT command line; a value carrying
+			// whitespace, a quote, or a dash-prefixed flag would inject arbitrary UBT args (e.g. -Clean
+			// wipes Binaries). Each must be rejected as a single identifier token BEFORE any process
+			// launch — so these calls fail fast and never invoke a real build.
+			FUnrealMcpToolRegistry Registry;
+			UnrealMcpSourceTools::Register(Registry);
+
+			TSharedPtr<FJsonObject> BadTarget = SourceArgs();
+			BadTarget->SetStringField(TEXT("target"), TEXT("UnrealTestProjectEditor Win64 Development -Clean"));
+			TestFalse(TEXT("whitespace/flag target rejected"), RunSourceTool(Registry, TEXT("source-compile"), BadTarget).bSuccess);
+
+			TSharedPtr<FJsonObject> DashTarget = SourceArgs();
+			DashTarget->SetStringField(TEXT("target"), TEXT("-Mode=QueryTargets"));
+			TestFalse(TEXT("dash-prefixed target rejected"), RunSourceTool(Registry, TEXT("source-compile"), DashTarget).bSuccess);
+
+			TSharedPtr<FJsonObject> BadPlatform = SourceArgs();
+			BadPlatform->SetStringField(TEXT("platform"), TEXT("Win64 -Clean"));
+			TestFalse(TEXT("whitespace platform rejected"), RunSourceTool(Registry, TEXT("source-compile"), BadPlatform).bSuccess);
+
+			TSharedPtr<FJsonObject> BadConfig = SourceArgs();
+			BadConfig->SetStringField(TEXT("configuration"), TEXT("Development\" -project=\"x"));
+			TestFalse(TEXT("quote-injection configuration rejected"), RunSourceTool(Registry, TEXT("source-compile"), BadConfig).bSuccess);
+		});
+	});
+
 	// Heavy, real-UBT round-trip — only when explicitly requested (kept out of the default fast suite).
 	if (!FPlatformMisc::GetEnvironmentVariable(TEXT("UNREAL_MCP_RUN_LIVE_COMPILE")).IsEmpty())
 	{
@@ -294,6 +349,10 @@ void FUnrealMcpSourceToolsSpec::Define()
 					IFileManager::Get().Delete(*HeaderAbs, false, true, true);
 					IFileManager::Get().Delete(*CppAbs, false, true, true);
 				};
+				// WARNING: this env-gated spec writes a probe class into the REAL primary module's Source/.
+				// AfterEach-style cleanup runs only if the It-body completes; an abort/crash between the
+				// "break" and "fix" steps below strands invalid C++ that would break subsequent builds.
+				// This leading Cleanup() pre-clean removes any such stranded probe from a prior aborted run.
 				Cleanup();
 
 				auto Compile = [&](int32& OutErrors) -> FUnrealMcpToolResult
@@ -326,6 +385,29 @@ void FUnrealMcpSourceToolsSpec::Define()
 
 				FUnrealMcpToolResult BrokenResult = Compile(Errors);
 				TestTrue(TEXT("errors reported when broken"), Errors > 0);
+				// Strengthen the structured-report proof: at least one diagnostic row must carry the
+				// probe cpp's file path and a real (1-based) line number, not just a non-zero count.
+				bool bHasLocatedDiag = false;
+				if (BrokenResult.Structured.IsValid())
+				{
+					const TArray<TSharedPtr<FJsonValue>>* DiagArray = nullptr;
+					if (BrokenResult.Structured->TryGetArrayField(TEXT("diagnostics"), DiagArray))
+					{
+						for (const TSharedPtr<FJsonValue>& Entry : *DiagArray)
+						{
+							const TSharedPtr<FJsonObject> Obj = Entry.IsValid() ? Entry->AsObject() : nullptr;
+							if (Obj.IsValid())
+							{
+								FString File;
+								int32 LineNo = 0;
+								Obj->TryGetStringField(TEXT("file"), File);
+								Obj->TryGetNumberField(TEXT("line"), LineNo);
+								if (!File.IsEmpty() && LineNo > 0) { bHasLocatedDiag = true; break; }
+							}
+						}
+					}
+				}
+				TestTrue(TEXT("a diagnostic row carries file + line"), bHasLocatedDiag);
 
 				// fix -> compile: compiler-clean again.
 				TSharedPtr<FJsonObject> Fix = SourceArgs();
