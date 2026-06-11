@@ -27,12 +27,12 @@ describe('buildServerEntry', () => {
   });
   it('builds a stdio entry launching the absolute server binary with port + auth args', () => {
     const e = buildServerEntry('stdio', 'http://x', 'tok', {
-      serverPath: '/abs/Intermediate/UnrealMCP/server/win-x64/unreal-mcp-server.exe',
+      serverPath: '/abs/Intermediate/UnrealMCP/server/win-x64/gamedev-mcp-server.exe',
       port: 5220,
     });
     expect(e).toMatchObject({
       type: 'stdio',
-      command: '/abs/Intermediate/UnrealMCP/server/win-x64/unreal-mcp-server.exe',
+      command: '/abs/Intermediate/UnrealMCP/server/win-x64/gamedev-mcp-server.exe',
     });
     expect(e.args).toEqual(
       expect.arrayContaining(['port=5220', 'client-transport=stdio', 'authorization=required', 'token=tok']),
@@ -61,18 +61,94 @@ describe('setupMcp', () => {
     expect(written.mcpServers['unreal-mcp'].url).toBe('http://localhost:5220/mcp');
   });
 
-  it('writes a stdio entry with an absolute §6 server path and a port arg', async () => {
+  it('writes a stdio entry with an absolute §6 server path and a port arg (download injected)', async () => {
     const dir = tmp();
-    const r = await setupMcp({ agentId: 'claude-code', projectDir: dir, transport: 'stdio' });
+    const serverPath = path.join(dir, 'Intermediate', 'UnrealMCP', 'server', 'win-x64', 'gamedev-mcp-server.exe');
+    const downloads: string[] = [];
+    const r = await setupMcp({
+      agentId: 'claude-code',
+      projectDir: dir,
+      transport: 'stdio',
+      env: {},
+      downloadServerImpl: async (o) => {
+        downloads.push(o.projectDir);
+        return { kind: 'success', success: true, serverPath, source: 'download', version: '8.0.0', warnings: [] };
+      },
+    });
     expect(r.kind).toBe('success');
     if (r.kind !== 'success') return;
+    expect(downloads).toEqual([dir]);
     const written = JSON.parse(fs.readFileSync(r.configPath, 'utf-8'));
     const entry = written.mcpServers['unreal-mcp'];
     expect(entry.type).toBe('stdio');
     expect(path.isAbsolute(entry.command)).toBe(true);
     expect(entry.command).toContain(path.join('Intermediate', 'UnrealMCP', 'server'));
-    expect(entry.command).toMatch(/unreal-mcp-server(\.exe)?$/);
+    expect(entry.command).toMatch(/gamedev-mcp-server(\.exe)?$/);
     expect(entry.args.some((a: string) => /^port=\d+$/.test(a))).toBe(true);
+  });
+
+  it('stdio honors the UNREAL_MCP_SERVER_PATH override and skips the download', async () => {
+    const dir = tmp();
+    const override = path.join(dir, 'local-gamedev-mcp-server.exe');
+    fs.writeFileSync(override, 'x');
+    let downloadCalled = false;
+    const r = await setupMcp({
+      agentId: 'claude-code',
+      projectDir: dir,
+      transport: 'stdio',
+      env: { UNREAL_MCP_SERVER_PATH: override },
+      downloadServerImpl: async () => {
+        downloadCalled = true;
+        throw new Error('must not be called');
+      },
+    });
+    expect(r.kind).toBe('success');
+    if (r.kind !== 'success') return;
+    expect(downloadCalled).toBe(false);
+    const written = JSON.parse(fs.readFileSync(r.configPath, 'utf-8'));
+    expect(written.mcpServers['unreal-mcp'].command).toBe(override);
+  });
+
+  it('stdio degrades a failed download to a warning (config still written with the §6 path)', async () => {
+    const dir = tmp();
+    const r = await setupMcp({
+      agentId: 'claude-code',
+      projectDir: dir,
+      transport: 'stdio',
+      env: {},
+      downloadServerImpl: async () => ({
+        kind: 'failure',
+        success: false,
+        warnings: [],
+        error: new Error('HTTP 404'),
+      }),
+    });
+    expect(r.kind).toBe('success');
+    if (r.kind !== 'success') return;
+    expect(r.warnings.some((w) => w.includes('HTTP 404'))).toBe(true);
+    expect(r.nextSteps.some((s) => s.includes('UNREAL_MCP_SERVER_PATH'))).toBe(true);
+    const written = JSON.parse(fs.readFileSync(r.configPath, 'utf-8'));
+    expect(written.mcpServers['unreal-mcp'].command).toMatch(/gamedev-mcp-server(\.exe)?$/);
+  });
+
+  it('stdio dry-run does not download (side-effect-free)', async () => {
+    const dir = tmp();
+    let downloadCalled = false;
+    const r = await setupMcp({
+      agentId: 'claude-code',
+      projectDir: dir,
+      transport: 'stdio',
+      dryRun: true,
+      env: {},
+      downloadServerImpl: async () => {
+        downloadCalled = true;
+        throw new Error('must not be called');
+      },
+    });
+    expect(r.kind).toBe('success');
+    expect(downloadCalled).toBe(false);
+    if (r.kind !== 'success') return;
+    expect(r.snippet).toContain('gamedev-mcp-server');
   });
 
   it('writes vscode config under the top-level `servers` key (not `mcpServers`)', async () => {
