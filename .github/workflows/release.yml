@@ -6,7 +6,7 @@
 # │  See the LICENSE file in the project root for more information.  │
 # └──────────────────────────────────────────────────────────────────┘
 #
-# Release pipeline (Godot-MCP release.yml skeleton, adapted for the UE four-leg
+# Release pipeline (Godot-MCP release.yml skeleton, adapted for the UE three-leg
 # mono-repo — docs/ARCHITECTURE.md §9.4). Shape:
 #   check-version (read VersionName, compute gate) -> test fan-out -> artifact
 #   build -> GATED publish (tag + GitHub Release + npm).
@@ -358,32 +358,10 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  # server self-contained single-file binaries -> unreal-mcp-server-<rid>.zip
-  # (build-all.sh emits all 7 RIDs). Cross-compiled from a single ubuntu host.
-  build-server-zips:
-    name: build server zips
-    needs: [check-version]
-    if: needs.check-version.outputs.run_tests == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-      - name: Setup .NET 8
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: "8.0.x"
-      - name: Make build script executable
-        run: chmod +x ./Unreal-MCP-Server/build-all.sh
-      - name: Build self-contained server binaries for all RIDs
-        shell: bash
-        run: cd Unreal-MCP-Server && ./build-all.sh Release
-      - name: Upload server zips
-        uses: actions/upload-artifact@v4
-        with:
-          name: unreal-mcp-server-zips
-          path: ./Unreal-MCP-Server/publish/*.zip
-          if-no-files-found: error
-          retention-days: 7
+  # NOTE: there is no server artifact job — the MCP server lives in its own
+  # shared repo (IvanMurzak/GameDev-MCP-Server, assets gamedev-mcp-server-
+  # <rid>.zip) and is released there; the CLI downloads the release pinned by
+  # cli/src/lib/server-version.ts SERVER_VERSION.
 
   # Engine-agnostic source plugin zip (BuildPlugin output). Self-hosted, gated
   # like the plugin test job. Skipped when no runner is registered; for a real
@@ -430,8 +408,9 @@ jobs:
   # ── PUBLISH (gated on a REAL release: tag absent + version bumped, NOT a
   #    dry-run). Every job here is hard-skipped during the ci-workflows dry-run. ─
 
-  # Create the GitHub Release + `v<version>` tag with the bridge/server/plugin
-  # zips attached and auto-generated notes.
+  # Create the GitHub Release + `v<version>` tag with the bridge/plugin zips
+  # attached and auto-generated notes. (Server zips are released from the
+  # shared GameDev-MCP-Server repo, not here.)
   publish-release:
     name: publish GitHub Release
     needs:
@@ -441,7 +420,6 @@ jobs:
         test-cli,
         plugin,
         build-bridge-zips,
-        build-server-zips,
         build-plugin-zip,
       ]
     if: needs.check-version.outputs.should_release == 'true' && needs.check-version.outputs.dry_run != 'true' && github.ref == 'refs/heads/main'
@@ -457,11 +435,6 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: unreal-mcp-bridge-zips
-          path: ./assets
-      - name: Download server zips
-        uses: actions/download-artifact@v4
-        with:
-          name: unreal-mcp-server-zips
           path: ./assets
       - name: Download plugin zip
         uses: actions/download-artifact@v4

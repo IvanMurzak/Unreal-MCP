@@ -7,18 +7,20 @@
 # └──────────────────────────────────────────────────────────────────┘
 
 # Pull-request CI aggregator (Unity-MCP / Godot-MCP parity, adapted for the UE
-# four-leg mono-repo — docs/ARCHITECTURE.md §9.3/§9.4). Fans out with fail-fast
+# three-leg mono-repo — docs/ARCHITECTURE.md §9.3/§9.4). Fans out with fail-fast
 # disabled so every leg reports independently:
 #   (a) bridge  — dotnet build + xUnit on hosted ubuntu-latest + windows-latest
-#   (b) server  — dotnet build on hosted ubuntu-latest (thin host, no tests yet)
-#   (c) cli     — unreal-mcp-cli node 20/22 tests via the reusable test_cli.yml
-#   (d) plugin  — UE 5.7 BuildPlugin + Automation specs (UnrealMcp. filter) on a
+#   (b) cli     — unreal-mcp-cli node 20/22 tests via the reusable test_cli.yml
+#   (c) plugin  — UE 5.7 BuildPlugin + Automation specs (UnrealMcp. filter) on a
 #                 SELF-HOSTED windows runner labelled `unreal-5-7`
 #
-# Self-hosted runner is NEVER red-by-absence: job (d) is gated on the repository
+# (There is no server leg: the MCP server lives in the shared
+# IvanMurzak/GameDev-MCP-Server repo and is tested/released there.)
+#
+# Self-hosted runner is NEVER red-by-absence: job (c) is gated on the repository
 # variable `vars.UNREAL_RUNNER_READY == 'true'`. While that variable is unset
-# (no runner registered), job (d) is SKIPPED — a skipped job does not fail the
-# PR, and the hosted legs (a)/(b)/(c) still give full PR signal. Once the owner
+# (no runner registered), job (c) is SKIPPED — a skipped job does not fail the
+# PR, and the hosted legs (a)/(b) still give full PR signal. Once the owner
 # registers the runner they set the variable to `true` (see docs/RELEASING.md)
 # and the plugin leg becomes a live required-when-available check. The label
 # `unreal-5-7` is deliberately distinct from any M1/M4 release-runner label so
@@ -70,31 +72,11 @@ jobs:
       - name: Test
         run: dotnet test bridge/Unreal-MCP-Bridge.sln --configuration Debug --no-build --verbosity normal
 
-  # (b) server — .NET 8 thin host build (clone of Godot-MCP-Server, no
-  # Unreal-specific code, no test project today). 0 errors required.
-  server:
-    name: server build (.NET 8)
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup .NET 8
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: "8.0.x"
-
-      - name: Restore
-        run: dotnet restore Unreal-MCP-Server/Unreal-MCP-Server.sln
-
-      - name: Build
-        run: dotnet build Unreal-MCP-Server/Unreal-MCP-Server.sln --configuration Debug --no-restore
-
-  # (c) cli — unreal-mcp-cli node tests (Node 20 & 22) via the reusable workflow.
+  # (b) cli — unreal-mcp-cli node tests (Node 20 & 22) via the reusable workflow.
   test-cli:
     uses: ./.github/workflows/test_cli.yml
 
-  # (d) plugin — UE 5.7 BuildPlugin (also validates marketplace packaging) +
+  # (c) plugin — UE 5.7 BuildPlugin (also validates marketplace packaging) +
   # Automation specs on the self-hosted runner. Gated on UNREAL_RUNNER_READY so
   # it never reds a PR by runner absence (see header). The job parses the
   # exported Automation index.json (NOT the editor exit code, which is

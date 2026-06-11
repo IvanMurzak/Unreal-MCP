@@ -12,7 +12,6 @@ DerivedDataCache/
 # The .NET sub-projects keep hand-authored solution files (UE only ever
 # generates a .sln at a .uproject root, never here) — un-ignore them.
 !bridge/*.sln
-!Unreal-MCP-Server/*.sln
 *.VC.db
 *.VC.VC.opendb
 *.opensdf
@@ -24,7 +23,7 @@ DerivedDataCache/
 *.xcworkspace
 
 # ----------------------------------------------------------------------------
-# .NET (bridge/, Unreal-MCP-Server/)
+# .NET (bridge/)
 # ----------------------------------------------------------------------------
 bin/
 obj/

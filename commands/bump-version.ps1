@@ -5,10 +5,14 @@
 
 .DESCRIPTION
     Updates the single shared semver across all version-bearing files (design
-    docs/ARCHITECTURE.md §9.2): the UE plugin .uplugin VersionName, the bridge and
-    server csproj <Version>s, the server.json registry manifest, and the cli npm
-    package (package.json + package-lock.json). Prevents human errors from
-    hand-editing one of them alone. Supports preview mode for safe testing.
+    docs/ARCHITECTURE.md §9.2): the UE plugin .uplugin VersionName, the bridge
+    csproj <Version>, and the cli npm package (package.json + package-lock.json).
+    Prevents human errors from hand-editing one of them alone. Supports preview
+    mode for safe testing.
+
+    NOTE: the consumed GameDev-MCP-Server version (cli/src/lib/server-version.ts
+    SERVER_VERSION) is deliberately NOT touched — the shared server is released
+    from its own repo and its version is independent of the plugin version.
 
 .PARAMETER NewVersion
     The new version number in semver format (e.g., "0.2.0")
@@ -51,18 +55,6 @@ $VersionFiles = @(
         Pattern     = '<Version>[\d\.]+</Version>'
         Replace     = '<Version>{VERSION}</Version>'
         Description = "Bridge csproj XML version"
-    },
-    @{
-        Path        = "Unreal-MCP-Server/com.IvanMurzak.Unreal.MCP.Server.csproj"
-        Pattern     = '<Version>[\d\.]+</Version>'
-        Replace     = '<Version>{VERSION}</Version>'
-        Description = "Server csproj XML version"
-    },
-    @{
-        Path        = "Unreal-MCP-Server/server.json"
-        Pattern     = '"version":\s*"[\d\.]+"'
-        Replace     = '"version": "{VERSION}"'
-        Description = "Server JSON version (2 occurrences)"
     },
     @{
         Path        = "cli/package.json"
