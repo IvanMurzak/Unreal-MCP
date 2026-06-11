@@ -23,15 +23,13 @@ describe('ridForPlatform', () => {
 });
 
 describe('planBuildSteps', () => {
-  it('plans bridge + server into Intermediate/UnrealMCP/<leg>/<rid>', () => {
+  it('plans the bridge (only — the server is downloaded, not built) into Intermediate/UnrealMCP/bridge/<rid>', () => {
     const { steps, outputRoot } = planBuildSteps('/repo', '/proj', 'win32', 'x64');
     expect(outputRoot).toBe(path.join(path.resolve('/proj'), 'Intermediate', 'UnrealMCP'));
-    expect(steps).toHaveLength(2);
+    expect(steps).toHaveLength(1);
     expect(steps[0].label).toBe('bridge');
     expect(steps[0].outputDir).toContain(path.join('Intermediate', 'UnrealMCP', 'bridge', 'win-x64'));
     expect(steps[0].projectFile).toContain(path.join('bridge', 'src'));
-    expect(steps[1].label).toBe('server');
-    expect(steps[1].projectFile).toContain('Unreal-MCP-Server');
   });
 });
 
@@ -47,7 +45,7 @@ describe('bootstrapLocal', () => {
       },
     });
     expect(r.kind).toBe('success');
-    expect(built).toEqual(['bridge', 'server']);
+    expect(built).toEqual(['bridge']);
   });
 
   it('returns failure (no throw) when a build step throws', async () => {
