@@ -230,8 +230,14 @@ namespace UnrealMcpScreenshotTools
 			{
 				Capture->PrimitiveRenderMode = ESceneCapturePrimitiveRenderMode::PRM_UseShowOnlyList;
 				Capture->ShowOnlyActors.Add(ShowOnlyActor);
+				// Include attached child actors (child-actor components, attach hierarchies — common for
+				// composed Blueprints) so visually-integral parts are not silently omitted from the render.
+				TArray<AActor*> AttachedActors;
+				ShowOnlyActor->GetAttachedActors(AttachedActors, /*bResetArray*/ true, /*bRecursivelyIncludeAttachedActors*/ true);
+				Capture->ShowOnlyActors.Append(AttachedActors);
 			}
-			Capture->SetWorldLocationAndRotation(CaptureXform.GetLocation(), CaptureXform.GetRotation());
+			// The capture component is the spawned actor's root (the actor was spawned at CaptureXform), so
+			// its world transform already equals CaptureXform — no explicit SetWorldLocationAndRotation needed.
 			Capture->CaptureScene();
 
 			FTextureRenderTargetResource* Resource = RenderTarget->GameThread_GetRenderTargetResource();
@@ -251,6 +257,34 @@ namespace UnrealMcpScreenshotTools
 			const FString Message = FString::Printf(TEXT("Captured %s (%dx%d PNG, %d bytes)."), *Source, Width, Height, Bytes);
 			UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] %s"), *Message);
 			return FUnrealMcpToolResult::SuccessWithImage(Message, Base64, MakeStructured(Source, Width, Height, Bytes));
+		}
+
+		/**
+		 * Parse a '#RRGGBB' / '#RRGGBBAA' (or bare 3/6/8-digit) hex color. FColor::FromHex silently
+		 * returns black for malformed input, so validate explicitly and surface a structured error
+		 * instead — this also gives the headless specs another GPU-free branch.
+		 */
+		bool ParseHexColor(const FString& In, FLinearColor& OutColor, FString& OutError)
+		{
+			FString Hex = In;
+			Hex.RemoveFromStart(TEXT("#"));
+			if (Hex.Len() != 3 && Hex.Len() != 6 && Hex.Len() != 8)
+			{
+				OutError = FString::Printf(
+					TEXT("Invalid 'background' hex color '%s'; expected '#RRGGBB' or '#RRGGBBAA'."), *In);
+				return false;
+			}
+			for (const TCHAR Ch : Hex)
+			{
+				if (!FChar::IsHexDigit(Ch))
+				{
+					OutError = FString::Printf(
+						TEXT("Invalid 'background' hex color '%s'; non-hex character found."), *In);
+					return false;
+				}
+			}
+			OutColor = FLinearColor(FColor::FromHex(Hex));
+			return true;
 		}
 
 		/** Shared description tail documenting the size caps (so each tool advertises them, §10). */
@@ -314,7 +348,7 @@ namespace UnrealMcpScreenshotTools
 			.ParamString(TEXT("camera"), TEXT("Camera actor reference (label, object name, or path) to render from."), EUnrealMcpParamRequirement::Required)
 			.ParamInt(TEXT("width"), TEXT("Optional output width in pixels (clamped to [1, 2048]); default 1024."))
 			.ParamInt(TEXT("height"), TEXT("Optional output height in pixels (clamped to [1, 2048]); default 1024."))
-			.ParamNumber(TEXT("fov"), TEXT("Optional horizontal field-of-view override in degrees; defaults to the camera component's FOV (or 90)."))
+			.ParamNumber(TEXT("fov"), TEXT("Optional horizontal field-of-view override in degrees (clamped to [5, 170]); defaults to the camera component's FOV (or 90)."))
 			.ReadOnlyHint(true)
 			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
 			{
@@ -332,9 +366,11 @@ namespace UnrealMcpScreenshotTools
 					return FUnrealMcpToolResult::Error(FString::Printf(TEXT("No actor matched camera reference '%s'."), *CameraRef));
 
 				UCameraComponent* CameraComponent = CameraActor->FindComponentByClass<UCameraComponent>();
-				const float Fov = Call.Has(TEXT("fov"))
+				// Clamp once at parse time to a sane perspective range; a degenerate FOV (<= 0 or >= 180)
+				// yields a NaN/garbage projection matrix rather than a usable render.
+				const float Fov = FMath::Clamp(Call.Has(TEXT("fov"))
 					? (float)Call.GetNumber(TEXT("fov"))
-					: (CameraComponent ? CameraComponent->FieldOfView : 90.0f);
+					: (CameraComponent ? CameraComponent->FieldOfView : 90.0f), 5.0f, 170.0f);
 				const FTransform CaptureXform = CameraComponent
 					? CameraComponent->GetComponentTransform()
 					: CameraActor->GetActorTransform();
@@ -357,7 +393,7 @@ namespace UnrealMcpScreenshotTools
 			.ParamInt(TEXT("width"), TEXT("Optional output width in pixels (clamped to [1, 2048]); default 1024."))
 			.ParamInt(TEXT("height"), TEXT("Optional output height in pixels (clamped to [1, 2048]); default 1024."))
 			.ParamString(TEXT("background"), TEXT("Optional background color as hex ('#RRGGBB' or '#RRGGBBAA'); defaults to dark grey."))
-			.ParamNumber(TEXT("fov"), TEXT("Optional field-of-view override in degrees; default 50."))
+			.ParamNumber(TEXT("fov"), TEXT("Optional field-of-view override in degrees (clamped to [5, 170]); default 50."))
 			.ReadOnlyHint(true)
 			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
 			{
@@ -374,25 +410,28 @@ namespace UnrealMcpScreenshotTools
 				if (!TargetActor)
 					return FUnrealMcpToolResult::Error(FString::Printf(TEXT("No actor matched reference '%s'."), *ActorRef));
 
+				// Parse + validate the background BEFORE the GPU guard so malformed hex is a GPU-free error branch.
+				FLinearColor Background(0.05f, 0.05f, 0.05f, 1.0f);
 				FString Error;
+				if (Call.Has(TEXT("background")) && !ParseHexColor(Call.GetString(TEXT("background")), Background, Error))
+					return FUnrealMcpToolResult::Error(Error);
+
 				if (!EnsureRenderingAvailable(Error))
 					return FUnrealMcpToolResult::Error(Error);
 
 				// Auto-frame: place the capture along an isometric-ish offset so the actor's bounding sphere fits the FOV.
-				const float Fov = Call.Has(TEXT("fov")) ? (float)Call.GetNumber(TEXT("fov")) : 50.0f;
+				// Clamp once here so the same value drives both the auto-framing distance below and the
+				// capture's FOVAngle (an unclamped FOV would frame and render at different angles).
+				const float Fov = FMath::Clamp(Call.Has(TEXT("fov")) ? (float)Call.GetNumber(TEXT("fov")) : 50.0f, 5.0f, 170.0f);
 				FBox Bounds = TargetActor->GetComponentsBoundingBox(/*bNonColliding*/ true);
 				FVector Center = Bounds.IsValid ? Bounds.GetCenter() : TargetActor->GetActorLocation();
 				const float Radius = Bounds.IsValid ? FMath::Max(Bounds.GetExtent().Size(), 1.0f) : 100.0f;
-				const float HalfFovRad = FMath::DegreesToRadians(FMath::Clamp(Fov, 5.0f, 170.0f) * 0.5f);
+				const float HalfFovRad = FMath::DegreesToRadians(Fov * 0.5f);
 				const float Distance = (Radius / FMath::Max(FMath::Tan(HalfFovRad), KINDA_SMALL_NUMBER)) * 1.5f;
 				const FVector Offset = FVector(-1.0f, -1.0f, 0.6f).GetSafeNormal() * Distance;
 				const FVector CamLocation = Center + Offset;
 				const FRotator CamRotation = (Center - CamLocation).Rotation();
 				const FTransform CaptureXform(CamRotation, CamLocation);
-
-				FLinearColor Background(0.05f, 0.05f, 0.05f, 1.0f);
-				if (Call.Has(TEXT("background")))
-					Background = FLinearColor(FColor::FromHex(Call.GetString(TEXT("background"))));
 
 				const int32 Width = ResolveCaptureDimension(Call.GetInt(TEXT("width"), 0));
 				const int32 Height = ResolveCaptureDimension(Call.GetInt(TEXT("height"), 0));

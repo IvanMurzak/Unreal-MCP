@@ -155,6 +155,37 @@ void FUnrealMcpScreenshotToolsSpec::Define()
 			TestTrue(TEXT("no image content on the error path"), Result.Images.Num() == 0);
 		});
 	});
+
+	Describe("image content result shape (GPU-free)", [this]()
+	{
+		// Locks the wire shape the sidecar's ProxyResponseMapper depends on: SuccessWithImage must carry
+		// the supplied base64 + mimeType in an image block, alongside (after, per the bridge server's
+		// content-array ordering) the human-readable text block. The bridge server appends Images[] after
+		// the text block in UnrealMcpBridgeServer.cpp; this asserts the producer side of that contract.
+		It("SuccessWithImage carries the base64 + mimeType image block alongside the text block", [this]()
+		{
+			const FString Base64 = TEXT("aGVsbG8=");
+			const FString Mime = TEXT("image/png");
+			const FUnrealMcpToolResult Result = FUnrealMcpToolResult::SuccessWithImage(TEXT("captured"), Base64, nullptr, Mime);
+
+			TestTrue(TEXT("success"), Result.bSuccess);
+			TestEqual(TEXT("text block preserved"), Result.Message, FString(TEXT("captured")));
+			TestEqual(TEXT("exactly one image block"), Result.Images.Num(), 1);
+			if (Result.Images.Num() == 1)
+			{
+				TestEqual(TEXT("base64 carried verbatim"), Result.Images[0].Base64Data, Base64);
+				TestEqual(TEXT("mimeType carried verbatim"), Result.Images[0].MimeType, Mime);
+			}
+		});
+
+		It("SuccessWithImage defaults the mimeType to image/png", [this]()
+		{
+			const FUnrealMcpToolResult Result = FUnrealMcpToolResult::SuccessWithImage(TEXT("captured"), TEXT("ZGF0YQ=="));
+			TestEqual(TEXT("one image block"), Result.Images.Num(), 1);
+			if (Result.Images.Num() == 1)
+				TestEqual(TEXT("default mimeType"), Result.Images[0].MimeType, FString(TEXT("image/png")));
+		});
+	});
 }
 
 #endif // WITH_DEV_AUTOMATION_TESTS
