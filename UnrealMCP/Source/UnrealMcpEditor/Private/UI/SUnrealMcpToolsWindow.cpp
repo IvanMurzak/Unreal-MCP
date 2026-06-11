@@ -17,9 +17,10 @@
 void SUnrealMcpToolsWindow::Construct(const FArguments& InArgs)
 {
 	ViewModel = InArgs._ViewModel;
-	// Snapshot the registered-tool set once — the set is static after boot (§2.2: core families register before
-	// the bridge accepts), so a re-snapshot would not change. The per-row checkbox binds LIVE to the view-model,
-	// so enable/disable edits render immediately without rebuilding the list.
+	// Snapshot the registered-tool set once at construction. Core families register before the bridge accepts
+	// (§2.2), but a §5 extension hot-reload CAN add/remove tools after boot — an already-open window keeps its
+	// construction snapshot, so a late-registered tool only appears on reopen. The per-row checkbox binds LIVE to
+	// the view-model, so enable/disable edits render immediately without rebuilding the list.
 	if (InArgs._ToolListProvider)
 		Tools = InArgs._ToolListProvider();
 

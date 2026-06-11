@@ -38,6 +38,19 @@ BEGIN_DEFINE_SPEC(FUnrealMcpToolsWindowSpec, "UnrealMcp.ToolsWindow",
 		}
 	}
 
+	// Register one extension-scoped tool under @p ExtensionId, mirroring the §5 RegisterExtension path the
+	// ExtensionManager drives on a hot-reload. Used to prove the blocklist survives a re-registration.
+	static void RegisterExtensionTool(FUnrealMcpToolRegistry& Registry, const FString& ExtensionId, const FString& ToolName)
+	{
+		Registry.RegisterExtension(ExtensionId, [&ToolName](FUnrealMcpToolRegistry& Reg)
+		{
+			Reg.Tool(ToolName)
+				.Title(ToolName)
+				.Description(TEXT("an extension tool"))
+				.Handle([](const FUnrealMcpToolCall&) { return FUnrealMcpToolResult::Success(TEXT("ok")); });
+		});
+	}
+
 	// The set of tool names present in the registry's served manifest (the §2.2 tools[] array).
 	static TArray<FString> ManifestToolNames(const FUnrealMcpToolRegistry& Registry)
 	{
@@ -182,6 +195,110 @@ void FUnrealMcpToolsWindowSpec::Define()
 			TArray<FString> Served = ManifestToolNames(Registry);
 			TestEqual("two served after boot-apply", Served.Num(), 2);
 			TestFalse("beta stays disabled across the restart", Served.Contains(TEXT("beta")));
+		});
+	});
+
+	Describe("Extension hot-reload retention (§5)", [this]()
+	{
+		It("keeps a blocklisted extension tool excluded across an extension rebuild", [this]()
+		{
+			// The §5 regression: ExtensionManager::RebuildFromProviders removes then re-registers every
+			// extension tool FRESH (bEnabled defaults true) and re-pushes the manifest. Before the registry
+			// retained the blocklist, a disabled extension tool sprang back enabled and leaked over the wire.
+			FUnrealMcpToolRegistry Registry;
+			SeedTools(Registry); // core: alpha/beta/gamma
+			RegisterExtensionTool(Registry, TEXT("com.example.ext"), TEXT("ext-tool"));
+			TestTrue("ext-tool served before disable", ManifestToolNames(Registry).Contains(TEXT("ext-tool")));
+
+			// User disables the extension tool through the §7 blocklist.
+			Registry.ApplyDisabledTools({ TEXT("ext-tool") });
+			TestFalse("ext-tool excluded after disable", ManifestToolNames(Registry).Contains(TEXT("ext-tool")));
+
+			// Simulate the hot-reload: remove the extension's tools, then re-register them fresh.
+			const int32 Removed = Registry.RemoveToolsForExtension(TEXT("com.example.ext"));
+			TestEqual("one extension tool removed on unload", Removed, 1);
+			RegisterExtensionTool(Registry, TEXT("com.example.ext"), TEXT("ext-tool"));
+
+			// Regression assertion: the rebuilt extension tool MUST still be excluded.
+			TArray<FString> AfterRebuild = ManifestToolNames(Registry);
+			TestFalse("ext-tool STILL excluded after the extension rebuild", AfterRebuild.Contains(TEXT("ext-tool")));
+			TestTrue("core alpha unaffected by the rebuild", AfterRebuild.Contains(TEXT("alpha")));
+		});
+	});
+
+	Describe("§8 enabledTools whitelist gating", [this]()
+	{
+		// served iff (whitelist empty OR member) AND NOT blocklisted — the full 3×2 matrix
+		// (whitelist empty / member / non-member) × (blocklisted / not).
+		It("gates the served manifest by the combined whitelist+blocklist rule", [this]()
+		{
+			// Row group 1 — EMPTY whitelist (no filter): blocklist alone decides.
+			{
+				FUnrealMcpToolRegistry Registry;
+				SeedTools(Registry);
+				Registry.SetEnabledToolsFilter({});             // empty → no whitelist filter
+				Registry.ApplyDisabledTools({ TEXT("beta") });  // beta blocklisted
+				TArray<FString> Served = ManifestToolNames(Registry);
+				TestTrue("empty whitelist + not blocklisted → served (alpha)", Served.Contains(TEXT("alpha")));
+				TestTrue("empty whitelist + not blocklisted → served (gamma)", Served.Contains(TEXT("gamma")));
+				TestFalse("empty whitelist + blocklisted → excluded (beta)", Served.Contains(TEXT("beta")));
+			}
+
+			// Row group 2 — whitelist {alpha,beta}, blocklist {beta}: covers member/not-blocklisted,
+			// member/blocklisted, and non-member/not-blocklisted in one shot.
+			{
+				FUnrealMcpToolRegistry Registry;
+				SeedTools(Registry);
+				Registry.SetEnabledToolsFilter({ TEXT("alpha"), TEXT("beta") });
+				Registry.ApplyDisabledTools({ TEXT("beta") });
+				TArray<FString> Served = ManifestToolNames(Registry);
+				TestTrue("member + not blocklisted → served (alpha)", Served.Contains(TEXT("alpha")));
+				TestFalse("member + blocklisted → excluded (beta)", Served.Contains(TEXT("beta")));
+				TestFalse("non-member + not blocklisted → excluded (gamma)", Served.Contains(TEXT("gamma")));
+				TestEqual("only alpha survives", Served.Num(), 1);
+			}
+
+			// Row group 3 — whitelist {alpha}, blocklist {gamma}: covers non-member/blocklisted.
+			{
+				FUnrealMcpToolRegistry Registry;
+				SeedTools(Registry);
+				Registry.SetEnabledToolsFilter({ TEXT("alpha") });
+				Registry.ApplyDisabledTools({ TEXT("gamma") });
+				TArray<FString> Served = ManifestToolNames(Registry);
+				TestTrue("member + not blocklisted → served (alpha)", Served.Contains(TEXT("alpha")));
+				TestFalse("non-member + blocklisted → excluded (gamma)", Served.Contains(TEXT("gamma")));
+				TestFalse("non-member + not blocklisted → excluded (beta)", Served.Contains(TEXT("beta")));
+			}
+		});
+
+		It("re-applying the blocklist does not clobber the retained whitelist", [this]()
+		{
+			// The §8 conflict the [medium] finding called out: ApplyDisabledTools used to set
+			// bEnabled = !blocklisted unconditionally. With both filters retained, a blocklist re-apply
+			// (even clearing it) must still honor the whitelist gate.
+			FUnrealMcpToolRegistry Registry;
+			SeedTools(Registry);
+			Registry.SetEnabledToolsFilter({ TEXT("alpha") }); // only alpha passes the whitelist
+			TestEqual("whitelist alone leaves only alpha", ManifestToolNames(Registry).Num(), 1);
+
+			Registry.ApplyDisabledTools({}); // clear the blocklist entirely
+			TArray<FString> Served = ManifestToolNames(Registry);
+			TestEqual("whitelist still enforced after a blocklist clear", Served.Num(), 1);
+			TestTrue("alpha remains the only served tool", Served.Contains(TEXT("alpha")));
+		});
+
+		It("registers extension tools honoring the retained whitelist on a rebuild", [this]()
+		{
+			// Closes the loop with §5: a non-whitelisted extension tool re-added by a hot-reload stays hidden.
+			FUnrealMcpToolRegistry Registry;
+			SeedTools(Registry);
+			Registry.SetEnabledToolsFilter({ TEXT("alpha") }); // ext-tool is NOT whitelisted
+			RegisterExtensionTool(Registry, TEXT("com.example.ext"), TEXT("ext-tool"));
+			TestFalse("non-whitelisted ext-tool excluded on first register", ManifestToolNames(Registry).Contains(TEXT("ext-tool")));
+
+			Registry.RemoveToolsForExtension(TEXT("com.example.ext"));
+			RegisterExtensionTool(Registry, TEXT("com.example.ext"), TEXT("ext-tool"));
+			TestFalse("non-whitelisted ext-tool STILL excluded after rebuild", ManifestToolNames(Registry).Contains(TEXT("ext-tool")));
 		});
 	});
 }

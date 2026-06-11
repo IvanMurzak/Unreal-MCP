@@ -227,18 +227,32 @@ public:
 	int32 NumEnabled() const;
 
 	/**
-	 * Set one tool's enabled flag (the §7 per-tool toggle). Disabled tools are EXCLUDED from BuildManifestJson
-	 * so the sidecar never exposes them in tools/list (§2.2). Bumps the revision on a real change so the next
-	 * manifest push re-syncs the sidecar's diff. Unknown name / no-op change: returns false, no revision bump.
-	 * Game-thread only (same contract as any §2.2 dynamic re-registration — see the class comment).
+	 * Set one tool's enabled flag directly — a GRANULAR helper, NOT the production §7 toggle. The Tools-window
+	 * path is view-model → OnToolEnablementChanged → ApplyDisabledTools (a whole-blocklist re-apply); this method
+	 * is the single-name primitive used by tests and any future single-tool caller. It does NOT update the
+	 * retained whitelist/blocklist, so a later SetEnabledToolsFilter / ApplyDisabledTools recompute can override
+	 * the flag it set. Disabled tools are EXCLUDED from BuildManifestJson so the sidecar never exposes them in
+	 * tools/list (§2.2). Bumps the revision on a real change. Unknown name / no-op change: returns false, no
+	 * revision bump. Game-thread only (same contract as any §2.2 dynamic re-registration — see the class comment).
 	 */
 	bool SetToolEnabled(const FString& Name, bool bEnabled);
 
 	/**
-	 * Apply the persisted §8 per-tool enable-map (the MCP Tools window's `disabledTools` blocklist): every tool
-	 * whose name is in @p DisabledNames is disabled, every other tool is enabled. Idempotent; bumps the revision
-	 * once if any flag changed. Called on boot (before the bridge accepts, so the first manifest already excludes
-	 * disabled tools) and on every UI toggle. Game-thread only.
+	 * Set the §8 env whitelist (UNREAL_MCP_TOOLS / Config.EnabledTools). A tool passes the whitelist gate iff the
+	 * whitelist is EMPTY (no filter — the common case) or the tool's name is listed. RETAINED, so a later
+	 * re-registration (extension hot-reload) and every ApplyDisabledTools re-apply re-evaluate it. Recomputes
+	 * enablement now and bumps the revision once if any flag changed. Combined effective rule (§8): a tool is
+	 * served iff (whitelist empty OR in whitelist) AND NOT in the blocklist. Game-thread only.
+	 */
+	void SetEnabledToolsFilter(const TArray<FString>& EnabledTools);
+
+	/**
+	 * Apply the persisted §7 per-tool enable-map (the MCP Tools window's `disabledTools` blocklist): every tool
+	 * whose name is in @p DisabledNames is disabled, the rest follow the §8 whitelist gate. RETAINED, so an
+	 * extension hot-reload that re-registers tools FRESH (RegisterExtension → Commit) re-applies the blocklist to
+	 * the rebuilt tools rather than resurrecting a disabled one. Recomputes against BOTH the retained whitelist and
+	 * this blocklist, so re-applying the blocklist never clobbers the whitelist. Idempotent; bumps the revision once
+	 * if any flag changed. Called on boot (before the bridge accepts) and on every UI toggle. Game-thread only.
 	 */
 	void ApplyDisabledTools(const TArray<FString>& DisabledNames);
 
@@ -260,6 +274,17 @@ public:
 private:
 	TMap<FString, FUnrealMcpRegisteredTool> Tools;
 	int32 Revision = 0;
+
+	// --- Retained §7/§8 enablement filters. Re-applied on every (re-)registration (Commit) so an extension
+	//     hot-reload cannot resurrect a disabled tool, and a blocklist re-apply never clobbers the whitelist. ---
+	TSet<FString> EnabledToolsWhitelist; // §8 UNREAL_MCP_TOOLS; empty = no filter (every tool passes the whitelist gate)
+	TSet<FString> DisabledToolNames;     // §7 persisted blocklist (the MCP Tools window's `disabledTools`)
+
+	/** The combined §8 effective-served predicate: enabled iff (whitelist empty OR member) AND NOT blocklisted. */
+	bool ShouldToolBeEnabled(const FString& Name) const;
+
+	/** Re-evaluate every registered tool's bEnabled against ShouldToolBeEnabled; bumps the revision once if any changed. */
+	void RecomputeEnablement();
 
 	// --- Extension-scope state (active only inside RegisterExtension; scopes never nest) ----------
 	bool bExtensionScope = false;

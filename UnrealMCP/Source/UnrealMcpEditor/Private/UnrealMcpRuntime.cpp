@@ -78,9 +78,11 @@ void FUnrealMcpRuntime::Startup()
 
 	const FUnrealMcpConfig Config = FUnrealMcpConfig::LoadAndResolve(DotEnv);
 
-	// §7 per-tool enable-map: apply the persisted §8 `disabledTools` blocklist to the registry BEFORE the bridge
-	// starts accepting, so the FIRST manifest a sidecar reads on handshake already excludes the disabled tools
-	// (their ProxyTools are never created sidecar-side, so they never appear in tools/list).
+	// §7/§8 enable-map: apply the §8 `enabledTools` env whitelist and the persisted §7 `disabledTools` blocklist to
+	// the registry BEFORE the bridge starts accepting, so the FIRST manifest a sidecar reads on handshake already
+	// reflects them (excluded ProxyTools are never created sidecar-side, so they never appear in tools/list). The
+	// registry RETAINS both filters, so a later §5 extension hot-reload re-applies them to the rebuilt tools.
+	Registry->SetEnabledToolsFilter(Config.EnabledTools);
 	Registry->ApplyDisabledTools(Config.DisabledTools);
 	if (Config.DisabledTools.Num() > 0)
 	{
@@ -193,8 +195,9 @@ void FUnrealMcpRuntime::Startup()
 			return TEXT("Stopped");
 		});
 
-	// §7 auxiliary windows (MCP Tools / Prompts / Resources / Settings). The Tools window snapshots the registry
-	// (a stable set after boot) for its list; the Settings window surfaces the bound IPC port read-only. Prompts/
+	// §7 auxiliary windows (MCP Tools / Prompts / Resources / Settings). The Tools window snapshots the registry on
+	// open for its list — a §5 extension hot-reload can change the set after boot, so an already-open window shows its
+	// open-time snapshot and reopen refreshes it; the Settings window surfaces the bound IPC port read-only. Prompts/
 	// Resources have no plugin-side feed yet (the .NET sidecar owns those features, §2) — their providers return
 	// empty and the windows render an honest empty state rather than a fabricated registry.
 	AuxWindows = MakeUnique<FUnrealMcpAuxWindows>();

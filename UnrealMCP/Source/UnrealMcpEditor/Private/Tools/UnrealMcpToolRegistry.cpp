@@ -359,6 +359,12 @@ void FUnrealMcpToolRegistry::Commit(FUnrealMcpRegisteredTool&& InTool)
 
 	InTool.SchemaHash = ComputeSchemaHash(InTool);
 	const FString Name = InTool.Name;
+	// §7/§8 retention: a (re-)registered tool inherits the retained whitelist/blocklist immediately, so an
+	// extension hot-reload (RebuildFromProviders removes then re-registers every extension tool FRESH, with
+	// bEnabled defaulting true) cannot resurrect a tool the user disabled, and a non-empty §8 whitelist still
+	// hides a non-whitelisted tool a rebuild re-adds. The schema hash above excludes the enabled flag (§2.2),
+	// so flipping bEnabled here does not perturb it.
+	InTool.bEnabled = ShouldToolBeEnabled(Name);
 	Tools.Add(Name, MoveTemp(InTool));
 	++Revision;
 	UE_LOG(LogUnrealMcp, Verbose, TEXT("[Unreal-MCP] registered tool '%s' (revision %d)."), *Name, Revision);
@@ -458,13 +464,22 @@ bool FUnrealMcpToolRegistry::SetToolEnabled(const FString& Name, bool bEnabled)
 	return true;
 }
 
-void FUnrealMcpToolRegistry::ApplyDisabledTools(const TArray<FString>& DisabledNames)
+bool FUnrealMcpToolRegistry::ShouldToolBeEnabled(const FString& Name) const
 {
-	const TSet<FString> Disabled(DisabledNames);
+	// §8 effective-served rule: served iff (whitelist empty — no filter — OR the name is whitelisted) AND the
+	// name is NOT in the §7 blocklist. Both sets are retained members, so this is the single source of truth
+	// shared by Commit (per-registration) and RecomputeEnablement (per-filter-change) — neither can clobber the
+	// other's intent.
+	const bool bPassesWhitelist = EnabledToolsWhitelist.IsEmpty() || EnabledToolsWhitelist.Contains(Name);
+	return bPassesWhitelist && !DisabledToolNames.Contains(Name);
+}
+
+void FUnrealMcpToolRegistry::RecomputeEnablement()
+{
 	bool bAnyChanged = false;
 	for (TPair<FString, FUnrealMcpRegisteredTool>& Pair : Tools)
 	{
-		const bool bShouldEnable = !Disabled.Contains(Pair.Key);
+		const bool bShouldEnable = ShouldToolBeEnabled(Pair.Key);
 		if (Pair.Value.bEnabled != bShouldEnable)
 		{
 			Pair.Value.bEnabled = bShouldEnable;
@@ -473,6 +488,18 @@ void FUnrealMcpToolRegistry::ApplyDisabledTools(const TArray<FString>& DisabledN
 	}
 	if (bAnyChanged)
 		++Revision;
+}
+
+void FUnrealMcpToolRegistry::SetEnabledToolsFilter(const TArray<FString>& EnabledTools)
+{
+	EnabledToolsWhitelist = TSet<FString>(EnabledTools);
+	RecomputeEnablement();
+}
+
+void FUnrealMcpToolRegistry::ApplyDisabledTools(const TArray<FString>& DisabledNames)
+{
+	DisabledToolNames = TSet<FString>(DisabledNames);
+	RecomputeEnablement();
 }
 
 FUnrealMcpToolResult FUnrealMcpToolRegistry::Execute(const FString& Name, const FUnrealMcpToolCall& Call) const
