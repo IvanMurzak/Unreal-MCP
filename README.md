@@ -364,9 +364,10 @@ The plugin reads configuration with the precedence **process env → `<Project>/
   UNREAL_MCP_BRIDGE_PATH)`, no sidecar path was resolved — set `UNREAL_MCP_BRIDGE_PATH` or run
   `unreal-cli bootstrap-local` to build one from source. (Automatic download and the version-skew
   redownload/alert are planned §6 behavior, not yet shipped.)
-- **Ports.** IPC uses a deterministic per-project port in `30000–39999`; the local server uses
-  `20000–29999`. Both probe forward on a collision, so the exact number is a debugging nicety, not a
-  requirement.
+- **Ports.** IPC uses a deterministic per-project port in `30000–39999` and probes forward (then an
+  ephemeral port) on a collision; the local server uses a deterministic hash port in `20000–29999`
+  with no probing — the CLI derives the same number without reading any config, and the server binds
+  the exact requested port. The exact number is a debugging nicety, not a requirement.
 - **Logs.** Use the main window's **Open log file** action, the `console-get-logs` tool, or the
   editor Output Log (`LogUnrealMcp` category).
 

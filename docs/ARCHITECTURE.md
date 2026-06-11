@@ -24,9 +24,12 @@ delivered it. Identifiers below (tool ids, command names, env vars, paths) were 
 | §3 Schema generation | implemented | exercised by every tool family (#13–#25) |
 | §4 GameThread dispatcher | implemented | #4 (used by all 8 families) |
 | §5 Extensions mechanism | implemented | #7 (`IUnrealMcpToolProvider`, `samples/UnrealAITemplate`) |
+| §6 Sidecar lifecycle | **partial** | #4 (spawn / crash auto-restart / orphan-prevention / stdin-token); auto-download + version-skew re-download are TODO stubs (see drift below) |
 | §7 Slate UI | implemented | #24 (AI Game Developer main window) + #29 (MCP Tools/Prompts/Resources/Settings aux windows) |
 | §8 Config & env | implemented | #8 (`UNREAL_MCP_*`, `.env`, on-disk config) |
 | §9.1 cli (`unreal-cli`, 16 commands) | implemented | #3 |
+| §9.2 Versioning | implemented | `commands/bump-version.ps1` single-sources `VersionName` across plugin/bridge/server/cli (the "≥ 6.8.0 w/ ProxyTool" pin is forward-looking — see §2.3 drift below) |
+| §9.3 Test strategy | implemented | bridge xUnit + cli vitest + plugin Automation specs (#13–#25), CI wiring #28 |
 | §9.4 CI (`test_pull_request` / `release` / `test_cli`) | implemented | #28 |
 | §10 ping family (1) | implemented | #4 |
 | §10 actor & component family (13) | implemented | #14 |
@@ -69,12 +72,21 @@ Prompts/Resources ship empty-but-wired (§10), as designed.
 - **Device-code auth (#24).** The cloud OAuth device-code flow shipped in the main window (Authorize
   → `auth-start` → `device-auth` events render the verification URL + user code; Cancel/Revoke wired),
   per §1.3 / §7 item 4.
+- **§6 sidecar lifecycle — shipped with partial coverage.** What ships today: the plugin **spawns**
+  the sidecar, hands it the one-shot IPC token over **stdin** (§1.4), **crash auto-restarts** it (the
+  Connection section reports `Running (restarts: N)` / `Stopped`), and prevents orphans (the sidecar
+  self-exits when its parent editor vanishes). The sidecar binary is resolved **only** from
+  `UNREAL_MCP_BRIDGE_PATH` (env/`.env`); `unreal-cli bootstrap-local` builds one from source. What is
+  **not yet wired**: the §6 **download-on-first-run** from GitHub Releases and the **version-skew
+  re-download/alert** flow are TODO stubs. The §6 download prose is retained as the plan of record,
+  not the shipped state.
 - **§7 UI — shipped with partial coverage.** The §7 Slate UI shipped (#24/#29), but three §7 design
-  affordances did **not** make this release: the **toolbar button** (design line 544) — the main
-  window is opened from its nomad tab only, registered under the editor's **Tools** menu category
-  (`WorkspaceMenu::GetMenuStructure().GetToolsCategory()`), not the **Window** menu (design line 571);
-  and the **connection timeline** (Unreal → MCP server → AI agent) — the Connection section ships a
-  single status dot / label / button instead. The bridge status string is `Running (restarts: N)` /
+  affordances did **not** make this release: the **toolbar button** (§7's tab-registration paragraph,
+  "under Window → AI Game Developer plus a toolbar button") — the main window is opened from its nomad
+  tab only, registered under the editor's **Tools** menu category
+  (`WorkspaceMenu::GetMenuStructure().GetToolsCategory()`), not the **Window** menu; and the
+  **connection timeline** (Unreal → MCP server → AI agent — see §7's Connection section design) — the
+  Connection section ships a single status dot / label / button instead. The bridge status string is `Running (restarts: N)` /
   `Stopped` (no PID/version), the AI agents section lists connected agents only (no config writing),
   and there is no in-UI start-local-server control. The status table marks §7 "implemented" for the
   window + 4 aux windows; these affordances are deferred.
