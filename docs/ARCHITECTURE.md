@@ -10,6 +10,95 @@
 
 ---
 
+## Implementation status (M10 — shipped)
+
+This document is the authoritative **design**; the M10 feature set has now shipped and this block
+reconciles the design with the implementation. Each numbered section is marked with the PR(s) that
+delivered it. Identifiers below (tool ids, command names, env vars, paths) were verified against
+`main` source; the README carries the user-facing, source-generated tool list.
+
+| Section | Status | Shipped by |
+|---|---|---|
+| §1 IPC bridge protocol | implemented | #4 (sidecar bridge e2e + live `ping`) |
+| §2 Dynamic tool registration | implemented | #4; the §2.3 `ProxyTool` lives in `bridge/` (see correction below) |
+| §3 Schema generation | implemented | exercised by every tool family (#13–#25) |
+| §4 GameThread dispatcher | implemented | #4 (used by all 8 families) |
+| §5 Extensions mechanism | implemented | #7 (`IUnrealMcpToolProvider`, `samples/UnrealAITemplate`) |
+| §6 Sidecar lifecycle | **partial** | #4 (spawn / crash auto-restart / orphan-prevention / stdin-token); auto-download + version-skew re-download are TODO stubs (see drift below) |
+| §7 Slate UI | implemented | #24 (AI Game Developer main window) + #29 (MCP Tools/Prompts/Resources/Settings aux windows) |
+| §8 Config & env | implemented | #8 (`UNREAL_MCP_*`, `.env`, on-disk config) |
+| §9.1 cli (`unreal-cli`, 16 commands) | implemented | #3 |
+| §9.2 Versioning | implemented | `commands/bump-version.ps1` single-sources `VersionName` across plugin/bridge/server/cli (the "≥ 6.8.0 w/ ProxyTool" pin is forward-looking — see §2.3 drift below) |
+| §9.3 Test strategy | implemented | bridge xUnit + cli vitest + plugin Automation specs (#13–#25), CI wiring #28 |
+| §9.4 CI (`test_pull_request` / `release` / `test_cli`) | implemented | #28 |
+| §10 ping family (1) | implemented | #4 |
+| §10 actor & component family (13) | implemented | #14 |
+| §10 asset family (11) | implemented | #15 (issue #10) |
+| §10 blueprint family (11) | implemented | #13 |
+| §10 source family (6) | implemented | #23 |
+| §10 screenshot family (4) | implemented | #21 |
+| §10 editor/reflection family (9) | implemented | #22 |
+| §10 level family (7) | implemented | #25 |
+
+**Total shipped: 62 core tools across 8 families** (counts verified from the registration source).
+Prompts/Resources ship empty-but-wired (§10), as designed.
+
+### Drift corrected against the implementation
+
+- **§2.3 ProxyTool — shipped in `bridge/`, not via an upstream 6.8.0 bump.** The design proposed an
+  additive MCP-Plugin-dotnet PR (`com.IvanMurzak.McpPlugin` 6.8.0). In practice the documented
+  fallback was taken: `ProxyTool` + `ProxyToolFactory` live entirely under `bridge/src/Tools/`
+  (`IRunTool` + `ToolManager.AddTool` are already public), so the bridge/server pin **stays frozen at
+  `com.IvanMurzak.McpPlugin[.Server]` 6.7.0 / `com.IvanMurzak.ReflectorNet` 5.3.1** (no
+  `UseLocalMcpPlugin` switch is wired today). A future upstream 6.8.0 ProxyTool can replace the local
+  copy through its own pipeline; until then, §2.3/§9.2's "≥ 6.8.0" is forward-looking, not the
+  shipped state.
+- **§8 effective-served semantics.** The served tool set is computed as: served **iff** the tool
+  passes the `enabledTools` **whitelist** (empty whitelist = no filter; `UNREAL_MCP_TOOLS` overrides
+  it) **AND** is not in the `disabledTools` **blocklist** (the per-tool UI toggles). Both sets are
+  retained members, so a registration or an extension hot-reload re-applies them — a rebuilt tool
+  inherits the retained toggle and cannot silently re-enable. See
+  `FUnrealMcpToolRegistry::ShouldToolBeEnabled`.
+- **Execute()-level enable gate (#29).** A disabled tool is excluded from the served manifest **and**
+  rejected at the execution boundary (`FUnrealMcpToolRegistry::Execute` returns
+  `"Tool '<name>' is disabled."`), so a stale `tools/list` that still names it can never run it.
+- **Image-content channel (#21).** The screenshot family returns a base64 **PNG as MCP image
+  content** (`content[]` with an `image` entry), as anticipated by §1.2's "binary payloads travel as
+  base64 strings inside JSON". Dimensions clamp to default 1024 / hard cap 2048 per side; capture
+  needs a GPU-backed editor (headless `-nullrhi` returns a structured error).
+- **LogCollector (#22).** `console-get-logs` / `console-clear-logs` are backed by a module-startup
+  `FUnrealMcpLogCollector` — a `GLog` `FOutputDevice` ring buffer (the Godot `GodotLogCollector`
+  pattern), as §10 describes.
+- **Device-code auth (#24).** The cloud OAuth device-code flow shipped in the main window (Authorize
+  → `auth-start` → `device-auth` events render the verification URL + user code; Cancel/Revoke wired),
+  per §1.3 / §7 item 4.
+- **§6 sidecar lifecycle — shipped with partial coverage.** What ships today: the plugin **spawns**
+  the sidecar, hands it the one-shot IPC token over **stdin** (§1.4), **crash auto-restarts** it (the
+  Connection section reports `Running (restarts: N)` / `Stopped`), and prevents orphans (the sidecar
+  self-exits when its parent editor vanishes). The sidecar binary is resolved **only** from
+  `UNREAL_MCP_BRIDGE_PATH` (env/`.env`); `unreal-cli bootstrap-local` builds one from source. What is
+  **not yet wired**: the §6 **download-on-first-run** from GitHub Releases and the **version-skew
+  re-download/alert** flow are TODO stubs. The §6 download prose is retained as the plan of record,
+  not the shipped state.
+- **§7 UI — shipped with partial coverage.** The §7 Slate UI shipped (#24/#29), but two §7 design
+  affordances did **not** make this release: the **toolbar button** (§7's tab-registration paragraph,
+  "under Window → AI Game Developer plus a toolbar button") — the main window is opened from its nomad
+  tab only, registered under the editor's **Tools** menu category
+  (`WorkspaceMenu::GetMenuStructure().GetToolsCategory()`), not the **Window** menu; and the
+  **connection timeline** (Unreal → MCP server → AI agent — see §7's Connection section design) — the
+  Connection section ships a single status dot / label / button instead. The bridge status string is `Running (restarts: N)` /
+  `Stopped` (no PID/version), the AI agents section lists connected agents only (no config writing),
+  and there is no in-UI start-local-server control. The status table marks §7 "implemented" for the
+  window + 4 aux windows; these affordances are deferred.
+- **§9.1 `.uplugin` `EngineVersion`.** The §9.1 tree comment reads "EngineVersion floor 5.5.0", but
+  the shipped `UnrealMCP.uplugin` carries **no `EngineVersion` field at all** — UE treats it as an
+  exact-build match (not a floor) and would refuse to load on newer engines. The 5.5+ floor is a
+  documented/CI claim, not a descriptor pin. (Corrected inline in §9.1.)
+- **On-disk config path.** Confirmed shipped at
+  `<Project>/Saved/Config/UnrealMcp/ai-game-developer-config.json` (§8), matching the design.
+
+---
+
 ## 0. System overview
 
 Unity and Godot embed the .NET `McpPlugin` host **in-process** (C# engine). Unreal's editor is C++,
@@ -574,7 +663,7 @@ the connection-config task).
 ```
 Unreal-MCP/
 ├── UnrealMCP/                          # the UE plugin (in-tree, like addons/godot_mcp)
-│   ├── UnrealMCP.uplugin               # VersionName single-source; EngineVersion floor 5.5.0
+│   ├── UnrealMCP.uplugin               # VersionName single-source; NO EngineVersion pin (5.5+ floor is a CI/doc claim, not a descriptor field — see status block)
 │   ├── Source/UnrealMcpEditor/         # Type Editor, LoadingPhase Default
 │   │   ├── Public/   (IUnrealMcpToolProvider.h, UnrealMcpToolRegistry.h, …)
 │   │   └── Private/  (Bridge/ Tools/ Schema/ Dispatch/ UI/ Config/ Sidecar/)
