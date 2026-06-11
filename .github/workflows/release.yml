@@ -1,0 +1,434 @@
+# ┌──────────────────────────────────────────────────────────────────┐
+# │  Author: Ivan Murzak (https://github.com/IvanMurzak)             │
+# │  Repository: GitHub (https://github.com/IvanMurzak/Unreal-MCP)   │
+# │  Copyright (c) 2026 Ivan Murzak                                  │
+# │  Licensed under the Apache License, Version 2.0.                 │
+# │  See the LICENSE file in the project root for more information.  │
+# └──────────────────────────────────────────────────────────────────┘
+#
+# Release pipeline (Godot-MCP release.yml skeleton, adapted for the UE four-leg
+# mono-repo — docs/ARCHITECTURE.md §9.4). Shape:
+#   check-version (read VersionName, compute gate) -> test fan-out -> artifact
+#   build -> GATED publish (tag + GitHub Release + npm).
+#
+# ── Gating (read docs/RELEASING.md for the full contract) ──────────────────
+# `UnrealMCP/UnrealMCP.uplugin` VersionName is the SINGLE source of truth for the
+# release version (commands/bump-version.ps1 keeps the other four files in sync).
+#
+#   should_release = (no `v<version>` tag exists yet) AND (this push bumped the
+#                     VersionName line)
+#   dry_run        = workflow_dispatch was invoked with dry_run=true
+#   run_tests      = should_release OR dry_run
+#
+# Outcomes:
+#   * Plain merge to main that does NOT bump VersionName  -> should_release=false,
+#     dry_run=false -> run_tests=false -> EVERY job skips. Merging a workflow-only
+#     or feature PR is therefore a guaranteed no-op (no tests, no artifacts, no
+#     publish) — this is what keeps THIS PR's own merge inert.
+#   * workflow_dispatch with dry_run=true -> run_tests=true (rehearse tests +
+#     artifact builds, uploaded for inspection) while the tag/Release/npm jobs
+#     are HARD-SKIPPED. This is the only way this pipeline is exercised during
+#     the ci-workflows task — nothing is ever published.
+#   * Merge that bumps VersionName to a new (untagged) version -> should_release
+#     =true, dry_run=false -> the real release fires (operator action).
+#   * workflow_dispatch with dry_run=false on an untagged version -> real release
+#     escape hatch (re-run a release when the bump already landed).
+#
+# SAFETY: publish jobs are gated on `should_release == 'true' && dry_run !=
+# 'true'`. The npm publish uses OIDC Trusted Publishing (no NPM_TOKEN secret);
+# until the owner configures a Trusted Publisher for `unreal-cli`, that step
+# fails auth and nothing is published. The self-hosted plugin artifact leg is
+# gated on UNREAL_RUNNER_READY exactly like test_pull_request.yml.
+
+name: release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Rehearse the release (run tests + build artifacts) WITHOUT tagging, creating a GitHub Release, or publishing to npm."
+        required: false
+        default: true
+        type: boolean
+
+# Least-privilege default for the whole workflow; the publish jobs elevate
+# their own permissions (contents: write for the Release, id-token: write for
+# npm OIDC) in their job blocks.
+permissions:
+  contents: read
+
+jobs:
+  # Read the release version from the .uplugin and decide whether THIS event
+  # should cut a release, only rehearse (dry-run), or do nothing.
+  check-version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.get_version.outputs.version }}
+      tag: ${{ steps.get_version.outputs.tag }}
+      tag_exists: ${{ steps.tag_exists.outputs.exists }}
+      version_changed: ${{ steps.version_changed.outputs.changed }}
+      should_release: ${{ steps.gate.outputs.should_release }}
+      dry_run: ${{ steps.gate.outputs.dry_run }}
+      run_tests: ${{ steps.gate.outputs.run_tests }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Get version from .uplugin VersionName
+        id: get_version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(grep -oE '"VersionName"[[:space:]]*:[[:space:]]*"[^"]+"' UnrealMCP/UnrealMCP.uplugin \
+            | head -n1 | sed -E 's/.*"VersionName"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')"
+          if [ -z "${version}" ]; then
+            echo "::error::Could not read VersionName from UnrealMCP/UnrealMCP.uplugin"
+            exit 1
+          fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${version}" >> "$GITHUB_OUTPUT"
+          echo "Release version: ${version} (tag v${version})"
+
+      - name: Check if tag exists
+        id: tag_exists
+        uses: mukunku/tag-exists-action@v1.7.0
+        with:
+          tag: ${{ steps.get_version.outputs.tag }}
+
+      # Did THIS push bump the VersionName line? On push we diff before..after;
+      # a plain feature/workflow merge that does not touch that line yields
+      # changed=false (keeping the release inert). On workflow_dispatch there is
+      # no push diff, so report changed=true and rely on tag_exists + dry_run.
+      - name: Detect VersionName bump
+        id: version_changed
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE_SHA: ${{ github.event.before }}
+          AFTER_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${EVENT_NAME}" != "push" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "Non-push event (${EVENT_NAME}): bump check skipped (relying on tag_exists + dry_run)."
+            exit 0
+          fi
+          if [ -z "${BEFORE_SHA}" ] || [ "${BEFORE_SHA}" = "0000000000000000000000000000000000000000" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "No usable 'before' SHA — treating as changed."
+            exit 0
+          fi
+          if git diff "${BEFORE_SHA}" "${AFTER_SHA}" -- UnrealMCP/UnrealMCP.uplugin \
+               | grep -qE '^\+[[:space:]]*"VersionName"'; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "VersionName changed in ${BEFORE_SHA}..${AFTER_SHA}."
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "VersionName unchanged in ${BEFORE_SHA}..${AFTER_SHA} — release is a no-op."
+          fi
+
+      - name: Compute gate
+        id: gate
+        env:
+          TAG_EXISTS: ${{ steps.tag_exists.outputs.exists }}
+          VERSION_CHANGED: ${{ steps.version_changed.outputs.changed }}
+          EVENT_NAME: ${{ github.event_name }}
+          DRY_RUN_INPUT: ${{ github.event.inputs.dry_run }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          dry_run=false
+          if [ "${EVENT_NAME}" = "workflow_dispatch" ] && [ "${DRY_RUN_INPUT}" = "true" ]; then
+            dry_run=true
+          fi
+          should_release=false
+          if [ "${TAG_EXISTS}" = "false" ] && [ "${VERSION_CHANGED}" = "true" ]; then
+            should_release=true
+          fi
+          run_tests=false
+          if [ "${should_release}" = "true" ] || [ "${dry_run}" = "true" ]; then
+            run_tests=true
+          fi
+          echo "dry_run=${dry_run}" >> "$GITHUB_OUTPUT"
+          echo "should_release=${should_release}" >> "$GITHUB_OUTPUT"
+          echo "run_tests=${run_tests}" >> "$GITHUB_OUTPUT"
+          echo "Gate: tag_exists=${TAG_EXISTS} version_changed=${VERSION_CHANGED} dry_run=${dry_run} -> should_release=${should_release}, run_tests=${run_tests}"
+
+  # ── TEST GATE (runs on a real release OR a dry-run rehearsal) ──────────────
+
+  bridge:
+    name: bridge build + xUnit (${{ matrix.os }})
+    needs: [check-version]
+    if: needs.check-version.outputs.run_tests == 'true'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Setup .NET 9
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "9.0.x"
+      - name: Restore
+        run: dotnet restore bridge/Unreal-MCP-Bridge.sln
+      - name: Build
+        run: dotnet build bridge/Unreal-MCP-Bridge.sln --configuration Debug --no-restore
+      - name: Test
+        run: dotnet test bridge/Unreal-MCP-Bridge.sln --configuration Debug --no-build --verbosity normal
+
+  test-cli:
+    needs: [check-version]
+    if: needs.check-version.outputs.run_tests == 'true'
+    uses: ./.github/workflows/test_cli.yml
+
+  # Plugin Automation gate — self-hosted, never red-by-absence (same
+  # UNREAL_RUNNER_READY gate as test_pull_request.yml). For a REAL release the
+  # runner MUST be registered (UNREAL_RUNNER_READY=true) so this job runs;
+  # otherwise it is skipped and the publish jobs below (which `need` it) are
+  # skipped too — a safe default. For a dry-run the publish jobs are skipped
+  # regardless. See docs/RELEASING.md.
+  plugin:
+    name: plugin BuildPlugin + Automation (UE 5.7)
+    needs: [check-version]
+    if: needs.check-version.outputs.run_tests == 'true' && vars.UNREAL_RUNNER_READY == 'true'
+    runs-on: [self-hosted, windows, unreal-5-7]
+    env:
+      UE_ROOT: ${{ vars.UNREAL_ENGINE_PATH || 'C:\Program Files\Epic Games\UE_5.7' }}
+      HOST_UPROJECT: ${{ vars.UNREAL_HOST_PROJECT }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: BuildPlugin (compile + marketplace packaging validation)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $runUAT = Join-Path $env:UE_ROOT 'Engine\Build\BatchFiles\RunUAT.bat'
+          if (-not (Test-Path $runUAT)) { throw "RunUAT.bat not found at $runUAT — set the UNREAL_ENGINE_PATH repo variable." }
+          $uplugin = Join-Path $env:GITHUB_WORKSPACE 'UnrealMCP\UnrealMCP.uplugin'
+          $package = Join-Path $env:RUNNER_TEMP 'UnrealMCP-Package'
+          & $runUAT BuildPlugin -Plugin="$uplugin" -Package="$package" -TargetPlatforms=Win64 -Rocket
+          if ($LASTEXITCODE -ne 0) { throw "BuildPlugin failed with exit code $LASTEXITCODE" }
+      - name: Run Automation specs (UnrealMcp. filter)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ([string]::IsNullOrWhiteSpace($env:HOST_UPROJECT)) {
+            throw "UNREAL_HOST_PROJECT repo variable is not set — the Automation pass needs a host .uproject with the UnrealMCP plugin enabled (see docs/RELEASING.md)."
+          }
+          $editorCmd = Join-Path $env:UE_ROOT 'Engine\Binaries\Win64\UnrealEditor-Cmd.exe'
+          $reportDir = Join-Path $env:RUNNER_TEMP 'AutomationReport'
+          if (Test-Path $reportDir) { Remove-Item $reportDir -Recurse -Force }
+          & $editorCmd "$env:HOST_UPROJECT" -nullrhi -nosplash -unattended `
+            -ExecCmds="Automation RunTests UnrealMcp; Quit" `
+            -ReportExportPath="$reportDir" -log
+          echo "REPORT_DIR=$reportDir" >> $env:GITHUB_ENV
+      - name: Parse Automation report (index.json is authoritative)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $index = Join-Path $env:REPORT_DIR 'index.json'
+          if (-not (Test-Path $index)) { throw "Automation index.json is MISSING at $index — treat as FAILURE." }
+          $report = Get-Content $index -Raw | ConvertFrom-Json
+          $failed = [int]$report.failed
+          $succeeded = [int]$report.succeeded
+          Write-Host "Automation results: succeeded=$succeeded failed=$failed"
+          if ($failed -gt 0) { throw "$failed Automation test(s) failed." }
+          if ($succeeded -lt 1) { throw "No Automation tests succeeded — expected at least one UnrealMcp. spec." }
+
+  # ── ARTIFACT BUILD (runs on a real release OR a dry-run rehearsal) ─────────
+
+  # bridge self-contained single-file binaries -> unreal-mcp-bridge-<rid>.zip ×4
+  # (§6). Cross-compiled from a single ubuntu host (no per-RID native toolchain).
+  build-bridge-zips:
+    name: build bridge zips
+    needs: [check-version]
+    if: needs.check-version.outputs.run_tests == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Setup .NET 9
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "9.0.x"
+      - name: Make publish script executable
+        run: chmod +x ./bridge/publish.sh
+      - name: Build self-contained bridge binaries for all RIDs
+        shell: bash
+        run: cd bridge && ./publish.sh Release
+      - name: Upload bridge zips
+        uses: actions/upload-artifact@v4
+        with:
+          name: unreal-mcp-bridge-zips
+          path: ./bridge/publish/*.zip
+          if-no-files-found: error
+          retention-days: 7
+
+  # server self-contained single-file binaries -> unreal-mcp-server-<rid>.zip
+  # (build-all.sh emits all 7 RIDs). Cross-compiled from a single ubuntu host.
+  build-server-zips:
+    name: build server zips
+    needs: [check-version]
+    if: needs.check-version.outputs.run_tests == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - name: Make build script executable
+        run: chmod +x ./Unreal-MCP-Server/build-all.sh
+      - name: Build self-contained server binaries for all RIDs
+        shell: bash
+        run: cd Unreal-MCP-Server && ./build-all.sh Release
+      - name: Upload server zips
+        uses: actions/upload-artifact@v4
+        with:
+          name: unreal-mcp-server-zips
+          path: ./Unreal-MCP-Server/publish/*.zip
+          if-no-files-found: error
+          retention-days: 7
+
+  # Engine-agnostic source plugin zip (BuildPlugin output). Self-hosted, gated
+  # like the plugin test job. Skipped when no runner is registered; for a real
+  # release the runner must be ready (publish-release `needs` this job).
+  build-plugin-zip:
+    name: build plugin zip (UE 5.7)
+    needs: [check-version]
+    if: needs.check-version.outputs.run_tests == 'true' && vars.UNREAL_RUNNER_READY == 'true'
+    runs-on: [self-hosted, windows, unreal-5-7]
+    env:
+      UE_ROOT: ${{ vars.UNREAL_ENGINE_PATH || 'C:\Program Files\Epic Games\UE_5.7' }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: BuildPlugin + zip
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $runUAT = Join-Path $env:UE_ROOT 'Engine\Build\BatchFiles\RunUAT.bat'
+          if (-not (Test-Path $runUAT)) { throw "RunUAT.bat not found at $runUAT — set the UNREAL_ENGINE_PATH repo variable." }
+          $uplugin = Join-Path $env:GITHUB_WORKSPACE 'UnrealMCP\UnrealMCP.uplugin'
+          $package = Join-Path $env:RUNNER_TEMP 'UnrealMCP-Package'
+          if (Test-Path $package) { Remove-Item $package -Recurse -Force }
+          & $runUAT BuildPlugin -Plugin="$uplugin" -Package="$package" -TargetPlatforms=Win64 -Rocket
+          if ($LASTEXITCODE -ne 0) { throw "BuildPlugin failed with exit code $LASTEXITCODE" }
+          $version = '${{ needs.check-version.outputs.version }}'
+          $out = Join-Path $env:GITHUB_WORKSPACE 'dist'
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          Compress-Archive -Path (Join-Path $package '*') -DestinationPath (Join-Path $out "unreal-mcp-plugin-$version.zip") -Force
+      - name: Upload plugin zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: unreal-mcp-plugin-zip
+          path: ./dist/*.zip
+          if-no-files-found: error
+          retention-days: 7
+
+  # ── PUBLISH (gated on a REAL release: tag absent + version bumped, NOT a
+  #    dry-run). Every job here is hard-skipped during the ci-workflows dry-run. ─
+
+  # Create the GitHub Release + `v<version>` tag with the bridge/server/plugin
+  # zips attached and auto-generated notes.
+  publish-release:
+    name: publish GitHub Release
+    needs:
+      [
+        check-version,
+        bridge,
+        test-cli,
+        plugin,
+        build-bridge-zips,
+        build-server-zips,
+        build-plugin-zip,
+      ]
+    if: needs.check-version.outputs.should_release == 'true' && needs.check-version.outputs.dry_run != 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      published: ${{ steps.mark.outputs.published }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Download bridge zips
+        uses: actions/download-artifact@v4
+        with:
+          name: unreal-mcp-bridge-zips
+          path: ./assets
+      - name: Download server zips
+        uses: actions/download-artifact@v4
+        with:
+          name: unreal-mcp-server-zips
+          path: ./assets
+      - name: Download plugin zip
+        uses: actions/download-artifact@v4
+        with:
+          name: unreal-mcp-plugin-zip
+          path: ./assets
+      - name: List assembled release assets
+        run: ls -la ./assets
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ needs.check-version.outputs.tag }}
+          tag_name: ${{ needs.check-version.outputs.tag }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            ./assets/*.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Mark publish success
+        id: mark
+        run: echo "published=true" >> "$GITHUB_OUTPUT"
+
+  # Publish unreal-cli to npm via OIDC Trusted Publishing (no NPM_TOKEN secret).
+  # Gated on the GitHub Release having been created (i.e. a real, non-dry-run
+  # release). The cli version is aligned to the release version at publish time.
+  publish-npm:
+    name: publish unreal-cli to npm
+    needs: [check-version, publish-release]
+    if: needs.publish-release.outputs.published == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # OIDC Trusted Publishing — no NPM_TOKEN needed.
+    defaults:
+      run:
+        working-directory: ./cli
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+      # npm OIDC Trusted Publishing requires npm >= 11.5.1; the bundled npm is
+      # older and would fail the token exchange with a masked E404.
+      - name: Upgrade npm (OIDC Trusted Publishing requires npm >= 11.5.1)
+        run: npm install -g npm@latest
+      - name: Align package version to the release version
+        run: npm version "${{ needs.check-version.outputs.version }}" --no-git-tag-version --allow-same-version
+      - name: Install dependencies
+        run: npm ci
+      - name: Build
+        run: npm run build
+      - name: Test
+        run: npm test
+      # NOTE: cli/package.json is `private: true` until the publish gate opens
+      # (conventions.md). The owner removes that flag in the version-bump commit
+      # that cuts the first real release; this step publishes the public package.
+      - name: Publish to npm with provenance
+        run: npm publish --access public --provenance
