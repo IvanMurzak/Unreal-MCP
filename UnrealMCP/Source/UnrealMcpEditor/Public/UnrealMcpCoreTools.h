@@ -50,3 +50,15 @@ namespace UnrealMcpAssetTools
 {
 	UNREALMCPEDITOR_API void Register(FUnrealMcpToolRegistry& Registry);
 }
+
+/**
+ * The editor / console / reflection tool family (docs/ARCHITECTURE.md §10 "editor/reflection family",
+ * issue #19): ~9 kebab-case tools — editor-application-get/set-state (PIE), editor-selection-get/set,
+ * console-get/clear-logs (backed by the module-startup FUnrealMcpLogCollector GLog ring buffer),
+ * console-run-command, and reflection-method-find/call (safety-gated UFunction discovery + ProcessEvent).
+ * Registered in the boot path alongside the other CORE families; also exercised in isolation by specs.
+ */
+namespace UnrealMcpEditorTools
+{
+	UNREALMCPEDITOR_API void Register(FUnrealMcpToolRegistry& Registry);
+}
