@@ -39,13 +39,13 @@ Requires Node `^20.19.0 || >=22.12.0`. See the
 | `install-plugin [path]` | Copy (or `--junction`) the UnrealMCP plugin into `<project>/Plugins` |
 | `remove-plugin [path]` | Remove the installed plugin |
 | `configure` | Write `UNREAL_MCP_*` into `<project>/.env` and gitignore `.env` (§8) |
-| `setup-mcp <agent>` | Write an MCP client config snippet (claude-code, cursor, vscode) |
+| `setup-mcp <agent>` | Write an MCP client config snippet (claude-code, cursor, vscode). With `--transport stdio` it also downloads the pinned shared [`gamedev-mcp-server`](https://github.com/IvanMurzak/GameDev-MCP-Server) release into `<project>/Intermediate/UnrealMCP/server/<rid>/` (skipped when `UNREAL_MCP_SERVER_PATH` points at a local build) |
 | `login` | OAuth device-code auth against ai-game.dev |
 | `status` | Report project + plugin + connection + live reachability |
 | `wait-for-ready` | Block until the project's MCP server responds to a ping |
 | `run-tool <tool>` | Invoke an MCP tool over the local HTTP path |
 | `run-system-tool <tool>` | Invoke a system tool over the local HTTP path |
-| `bootstrap-local [path]` | Build bridge + server from source into `Intermediate/UnrealMCP/` (§6) |
+| `bootstrap-local [path]` | Build the bridge from source into `Intermediate/UnrealMCP/` (§6) — the MCP server is downloaded from GameDev-MCP-Server releases, not built here |
 | `update [path]` | Re-sync the installed plugin from the repo source |
 | `install-engine [version]` | Detect installed engines from `LauncherInstalled.dat`; link to the Epic launcher for missing versions (never installs directly) |
 | `setup-skills` | Write a Claude-Code skill stub that drives the project's MCP server |

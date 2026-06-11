@@ -41,25 +41,38 @@ hard-skips every tag/Release/npm-publish job.
 
 | Workflow | Trigger | What it does |
 | --- | --- | --- |
-| `test_pull_request.yml` | `pull_request` to `main` (+ manual) | Fans out the PR test legs: bridge build+xUnit (ubuntu + windows), server build (ubuntu), cli node 20/22, and — when a runner is registered — the UE 5.7 plugin BuildPlugin + Automation leg. |
+| `test_pull_request.yml` | `pull_request` to `main` (+ manual) | Fans out the PR test legs: bridge build+xUnit (ubuntu + windows), cli node 20/22, and — when a runner is registered — the UE 5.7 plugin BuildPlugin + Automation leg. |
 | `test_cli.yml` | `workflow_call` (reusable) | Builds + tests `unreal-mcp-cli` on Node 20 & 22. Called by both `test_pull_request.yml` and `release.yml`. |
-| `release.yml` | `push` to `main` (+ manual `workflow_dispatch`) | Version-gated release: builds bridge/server/plugin artifacts and (only on a real version bump) cuts the GitHub Release + tag and publishes `unreal-mcp-cli` to npm. Exposes a `dry_run` input to rehearse everything without publishing. |
+| `release.yml` | `push` to `main` (+ manual `workflow_dispatch`) | Version-gated release: builds bridge/plugin artifacts and (only on a real version bump) cuts the GitHub Release + tag and publishes `unreal-mcp-cli` to npm. Exposes a `dry_run` input to rehearse everything without publishing. |
 
 ## Versioning — the single source of truth
 
 `UnrealMCP/UnrealMCP.uplugin` `VersionName` is the **single source of truth** for
 the release version. `release.yml`'s `check-version` job reads it.
-`commands/bump-version.ps1` rewrites the version across all five version-bearing
-files in one shot (the `.uplugin`, both csproj `<Version>`s, `server.json`, and
+`commands/bump-version.ps1` rewrites the version across all version-bearing
+files in one shot (the `.uplugin`, the bridge csproj `<Version>`, and
 `cli/package.json` + lockfile):
 
 ```powershell
 .\commands\bump-version.ps1 -NewVersion "0.2.0"     # add -WhatIf to preview
 ```
 
-**Never hand-edit one of the five alone.** The NuGet pins
-(`com.IvanMurzak.ReflectorNet`, `com.IvanMurzak.McpPlugin[.Server]`) are owned by
+**Never hand-edit one of them alone.** The NuGet pins
+(`com.IvanMurzak.ReflectorNet`, `com.IvanMurzak.McpPlugin`) are owned by
 the upstream release pipelines — never bump them here.
+
+### The shared MCP server is released separately
+
+The local MCP server is the shared
+[GameDev-MCP-Server](https://github.com/IvanMurzak/GameDev-MCP-Server) (binary
+`gamedev-mcp-server`, assets `gamedev-mcp-server-<rid>.zip`) — it is **not built or
+released by this repo's pipelines**. The CLI downloads the release pinned by the
+`SERVER_VERSION` constant in `cli/src/lib/server-version.ts`, which is independent
+of the plugin version and deliberately untouched by `bump-version.ps1`.
+
+**Release-order rule:** a CLI release that bumps `SERVER_VERSION` requires the
+corresponding `v<SERVER_VERSION>` GameDev-MCP-Server release (with all 7 RID zips)
+to **already exist** — cut/verify the shared release first, then bump the pin here.
 
 ## The release gate (why a normal merge never publishes)
 
@@ -98,7 +111,7 @@ gh workflow run release.yml --repo IvanMurzak/Unreal-MCP -f dry_run=true
 gh run watch --repo IvanMurzak/Unreal-MCP "$(gh run list --repo IvanMurzak/Unreal-MCP --workflow release.yml --limit 1 --json databaseId --jq '.[0].databaseId')"
 ```
 
-Expected: `bridge`, `test-cli`, `build-bridge-zips`, `build-server-zips` succeed;
+Expected: `bridge`, `test-cli`, `build-bridge-zips` succeed;
 the `plugin` / `build-plugin-zip` legs run only if the self-hosted runner is
 registered (otherwise skipped); `publish-release` and `publish-npm` are
 **skipped**. Verify nothing was published:
@@ -207,7 +220,7 @@ Both plugin jobs (`plugin` in `test_pull_request.yml`/`release.yml` and
 `UNREAL_RUNNER_READY == 'true'`. That variable is currently **`true`**, so the
 plugin jobs run. (If it is ever unset — e.g. while re-provisioning the runner —
 the plugin jobs are SKIPPED rather than failing, so an absent runner never reds
-the hosted legs; the bridge / server / cli legs always provide PR signal.)
+the hosted legs; the bridge / cli legs always provide PR signal.)
 
 ### Fork-PR safety (untrusted code never runs on the self-hosted runner)
 
@@ -215,7 +228,7 @@ The self-hosted runner executes the checked-out code, so a pull request from a
 **fork** must never reach it. The `plugin` leg's `if` condition adds
 `github.event.pull_request.head.repo.full_name == github.repository`, so the
 self-hosted job runs ONLY for same-repo (branch) PRs and manual dispatches —
-fork PRs skip it (the hosted bridge / server / cli legs still give them full
+fork PRs skip it (the hosted bridge / cli legs still give them full
 signal).
 
 Defense in depth at the repository-settings level (operator):
@@ -281,8 +294,8 @@ travels via stdin and is unrelated to CI.
 ## Re-running a release — full rerun only
 
 If a release run fails partway, **always use a full re-run, never "re-run failed
-jobs"**. The artifact-build jobs (`build-bridge-zips`, `build-server-zips`,
-`build-plugin-zip`) upload artifacts that the `publish-release` job downloads; a
+jobs"**. The artifact-build jobs (`build-bridge-zips`, `build-plugin-zip`)
+upload artifacts that the `publish-release` job downloads; a
 partial re-run does not re-run the succeeded build jobs, so their artifacts are
 absent on the new attempt and `publish-release` fails with `Artifact not found`.
 

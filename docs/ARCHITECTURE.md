@@ -124,7 +124,7 @@ Unreal sidecar from a Unity editor.
 │  └─ McpPlugin SignalR client ── Cloud (ai-game.dev) / Custom server      │
 └───────────────▲──────────────────────────────────────────────────────────┘
                 │ SignalR /hub/mcp-server (+ bearer / device-code auth)
-        MCP server (ai-game.dev, or local unreal-mcp-server thin host)
+        MCP server (ai-game.dev, or local gamedev-mcp-server — the shared host)
                 ▲  MCP (stdio / streamable HTTP)
         AI client (Claude Code, Cursor, the AI-Game-Dev app, …)
 ```
@@ -132,7 +132,9 @@ Unreal sidecar from a Unity editor.
 **Naming conventions** (used throughout): plugin name `UnrealMCP`, module `UnrealMcpEditor`,
 C++ prefixes `FUnrealMcp*` / `UUnrealMcp*` / `SUnrealMcp*` (Slate) / `IUnrealMcp*` (interfaces).
 Sidecar assembly/namespace `com.IvanMurzak.Unreal.MCP.Bridge`, binary `unreal-mcp-bridge`.
-Local server host `com.IvanMurzak.Unreal.MCP.Server`, binary `unreal-mcp-server`. npm package
+Local server: the **shared, engine-agnostic** `gamedev-mcp-server` (released from
+[IvanMurzak/GameDev-MCP-Server](https://github.com/IvanMurzak/GameDev-MCP-Server) and consumed by
+Unity-MCP / Godot-MCP / Unreal-MCP alike — no server source lives in this repo). npm package
 `unreal-mcp-cli`. Tool ids are kebab-case (`actor-create`, `blueprint-compile`) matching Unity/Godot.
 
 Two distinct child processes must not be conflated:
@@ -140,7 +142,7 @@ Two distinct child processes must not be conflated:
 | Process | Role | Managed by | Mode |
 |---|---|---|---|
 | `unreal-mcp-bridge` (sidecar) | McpPlugin host; IPC ⇄ SignalR relay | C++ plugin (`FUnrealMcpSidecarManager`) | always required |
-| `unreal-mcp-server` | thin MCP server (analog of `unity-mcp-server` / `Godot-MCP-Server`) | sidecar (mirrors Unity's `McpServerManager`, which downloads/starts/stops the binary — `McpServerManager.cs:275–346,581`) | Custom/local mode only; Cloud mode talks to ai-game.dev |
+| `gamedev-mcp-server` | the shared MCP server (one host for Unity/Godot/Unreal) | the CLI downloads it (§6, `cli/src/lib/download-server.ts`); the MCP client launches it via the `setup-mcp` stdio config, or the user runs it directly | Custom/local mode only; Cloud mode talks to ai-game.dev |
 
 ---
 
@@ -163,7 +165,7 @@ Port selection (mirrors Unity's deterministic hashing, `transport.md`: SHA256 of
 - The **actual** bound port is always passed to the sidecar via launch args, so determinism is a
   debugging nicety, never a correctness requirement. Multi-editor-instance coexistence falls out:
   different project paths hash differently; two editors on the same project resolve via probing.
-- The local `unreal-mcp-server` port (Custom mode) keeps Unity's scheme: `20000 + (SHA256(projectPath) % 10000)`.
+- The local `gamedev-mcp-server` port (Custom mode) keeps Unity's scheme: `20000 + (SHA256(projectPath) % 10000)`.
 
 Plugin-listens (not sidecar-listens) because the plugin is the stable parent: a crashed sidecar is
 respawned and simply re-dials; the plugin never has to discover a child's ephemeral port; and an
@@ -524,7 +526,8 @@ mechanism already shipped and debugged twice (Unity, Godot server downloads).
 - **Location:** `<Project>/Intermediate/UnrealMCP/bridge/<platform>/unreal-mcp-bridge(.exe)` +
   `version` file (Unity keeps a version file beside the binary — same here). `Intermediate/` is
   user-gitignored by every UE template; plugin dir is avoided because engine/Fab installs may be
-  read-only. The local `unreal-mcp-server` binary lands beside it under `…/server/<platform>/`.
+  read-only. The local `gamedev-mcp-server` binary lands beside it under `…/server/<platform>/`
+  (see "Local server acquisition" below).
 - **URL:** `https://github.com/IvanMurzak/Unreal-MCP/releases/download/<version>/unreal-mcp-bridge-<platform>.zip`
   (platforms `win-x64`, `osx-arm64`, `osx-x64`, `linux-x64` — same naming scheme as Unity's
   `ExecutableZipUrl`, `McpServerManager.cs:169`).
@@ -555,7 +558,42 @@ mechanism already shipped and debugged twice (Unity, Godot server downloads).
 - **Dev override:** `UNREAL_MCP_BRIDGE_PATH` env/`.env` var points at a locally built sidecar
   (skips download + version check) — required for the bridge task's inner dev loop and CI.
 - **Offline/air-gapped:** download failure surfaces a main-window alert with the manual unzip path;
-  `unreal-mcp-cli bootstrap-local` (§9) automates a from-source build into the same location.
+  `unreal-mcp-cli bootstrap-local` (§9) automates a from-source bridge build into the same location.
+
+### Local server acquisition (the shared GameDev-MCP-Server)
+
+The local MCP server is **not part of this repo**: it is the shared, engine-agnostic
+[`IvanMurzak/GameDev-MCP-Server`](https://github.com/IvanMurzak/GameDev-MCP-Server) (binary
+`gamedev-mcp-server`, Docker `aigamedeveloper/mcp-server`), the single host consumed by Unity-MCP,
+Godot-MCP, and Unreal-MCP. The **CLI owns server acquisition** (`cli/src/lib/download-server.ts`);
+the C++ plugin never downloads the server (only the bridge — see the TODO in
+`UnrealMcpSidecarManager.cpp`).
+
+- **URL contract:**
+  `https://github.com/IvanMurzak/GameDev-MCP-Server/releases/download/v<SERVER_VERSION>/gamedev-mcp-server-<rid>.zip`
+  (7 RIDs; tags are v-prefixed). Zip layouts are NOT uniform: the win zips are FLAT (exe + ~7
+  sidecar files — appsettings.json, NLog.config, server.json, web.config, … — at the zip root)
+  while the osx/linux zips wrap everything in a `<rid>/` folder. The CLI therefore extracts to a
+  staging dir, finds the binary (shallowest match), and moves it **plus every sidecar file beside
+  it** into the install dir — the sidecar files must land next to the exe.
+- **Version pin — independent of the plugin version:** the consumed server version is the
+  `SERVER_VERSION` constant in `cli/src/lib/server-version.ts` (single source; plugin 0.x and
+  shared server 8.x deliberately diverge — `commands/bump-version.ps1` never touches it). A
+  `version` marker file beside the binary records the installed version; missing/mismatched →
+  re-download. Bumping the pin requires the corresponding GameDev-MCP-Server release to already
+  exist (docs/RELEASING.md).
+- **Install path:** `<Project>/Intermediate/UnrealMCP/server/<rid>/gamedev-mcp-server(.exe)` +
+  `version` marker — the same §6 layout the bridge uses.
+- **Trigger:** `unreal-mcp-cli setup-mcp <agent> --transport stdio` (the path where an MCP client
+  needs a launchable local binary) downloads/refreshes automatically. A failed download degrades
+  to a warning — the config is still written and works once the binary is provided.
+- **Dev override:** `UNREAL_MCP_SERVER_PATH` env var points at a locally built server binary and
+  skips the download + version check entirely (mirrors `UNREAL_MCP_BRIDGE_PATH`). Local server
+  source development happens in the GameDev-MCP-Server repo itself.
+- **Version independence (handshake):** the plugin⇄bridge `SidecarVersion` handshake
+  (`bridge/src/Program.cs`) carries the **plugin/bridge** semver and is entirely independent of
+  the consumed server version — a `SERVER_VERSION` bump never touches the handshake, and a plugin
+  release never requires a server release (or vice versa).
 
 ---
 
@@ -596,7 +634,7 @@ item 1), not to defer debug affordances entirely:
    `auth-cancel`; Revoke sends `auth-revoke`, clearing the cloud token; auth-rejected
    handling clears token + prompts re-auth (Unity `MainWindowEditor.Connection.cs:87–100`).
 5. **Connection alerts** — inline warnings (port conflict, version mismatch, sidecar crash-looped).
-6. **MCP server section** (Custom mode) — local `unreal-mcp-server` Start/Stop + status, transport
+6. **MCP server section** (Custom mode) — local `gamedev-mcp-server` Start/Stop + status, transport
    stdio/http toggle, auth none/required + masked token field + Generate button (crypto-random,
    restart-on-apply), copyable raw JSON client config snippets (`SetupMcpServerSection`).
 7. **Bridge status** (Unreal-specific, no Unity analog) — sidecar state machine value, PID,
@@ -672,7 +710,6 @@ Unreal-MCP/
 ├── bridge/                             # .NET sidecar — com.IvanMurzak.Unreal.MCP.Bridge
 │   ├── src/  publish.(sh|ps1)          # self-contained single-file per RID
 │   └── tests/                          # xUnit (IPC framing, manifest diff, proxy tools, lifecycle)
-├── Unreal-MCP-Server/                  # thin McpPlugin.Server host (clone of Godot-MCP-Server)
 ├── cli/                                # npm `unreal-mcp-cli` (TypeScript, vitest, dist/lib.js export)
 │                                       #   commands (port of unity-mcp-cli's set, cli/src/commands/):
 │                                       #   create-project, open, close, install-plugin, remove-plugin,
@@ -693,11 +730,13 @@ submodule registration only after the public-repo gate.
 
 ### 9.2 Versioning
 
-Single semver `MAJOR.MINOR.PATCH` shared by plugin (`.uplugin` `VersionName`), bridge, server and
-cli — `commands/bump-version.ps1` rewrites all four (Unity/Godot convention). The plugin↔sidecar
+Single semver `MAJOR.MINOR.PATCH` shared by plugin (`.uplugin` `VersionName`), bridge and cli —
+`commands/bump-version.ps1` rewrites all of them (Unity/Godot convention). The plugin↔sidecar
 download URL embeds the version (§6) and the handshake double-checks it, so the pair can never
-skew. `ipcVersion` (integer, starts at 1) only bumps on breaking IPC changes. NuGet pins
-(`com.IvanMurzak.McpPlugin` ≥ 6.8.0 w/ ProxyTool, `com.IvanMurzak.ReflectorNet`) are owned by
+skew. The **consumed shared-server version is independent**: `cli/src/lib/server-version.ts`
+`SERVER_VERSION` pins the GameDev-MCP-Server release (§6) and is bumped deliberately, never by
+`bump-version.ps1`. `ipcVersion` (integer, starts at 1) only bumps on breaking IPC changes. NuGet
+pins (`com.IvanMurzak.McpPlugin` ≥ 6.8.0 w/ ProxyTool, `com.IvanMurzak.ReflectorNet`) are owned by
 upstream release pipelines — never bumped ad-hoc (Godot lockstep rule).
 
 ### 9.3 Test strategy
@@ -715,7 +754,7 @@ happens in each tool-family task against `Unreal-Test-Project` (Godot tool-wave 
 
 ### 9.4 CI shape
 
-- `test_pull_request.yml`: job A bridge+server build/test (ubuntu), job B cli (ubuntu, via
+- `test_pull_request.yml`: job A bridge build/test (ubuntu + windows), job B cli (ubuntu, via
   reusable `test_cli.yml`), job C plugin compile + Automation on the self-hosted runner — **runner
   label `unreal-5-7`**, distinct from existing release labels so M1/M4 capacity isn't starved
   (ci-workflows task constraint). Job C builds via
@@ -723,8 +762,9 @@ happens in each tool-family task against `Unreal-Test-Project` (Godot tool-wave 
   validates marketplace packaging) and then runs the Automation filter against the testbed project.
 - `release.yml` (Godot `release.yml` skeleton: version-from-source job → gate compute → test fan-out
   → artifact build → gated publish): artifacts = plugin zip (BuildPlugin output, engine-agnostic
-  source plugin), `unreal-mcp-bridge-<rid>.zip` ×4, `unreal-mcp-server-<rid>.zip` ×4, npm publish,
-  GitHub Release. **Tag/release firing is Ivan-GATED**; full-rerun-only policy for artifact-passing
+  source plugin), `unreal-mcp-bridge-<rid>.zip` ×4, npm publish, GitHub Release (server zips are
+  released from the shared GameDev-MCP-Server repo, not here — §6).
+  **Tag/release firing is Ivan-GATED**; full-rerun-only policy for artifact-passing
   workflows (gh-rerun lesson) documented in `docs/RELEASING.md`. `workflow_dispatch` exposes a
   **`dry_run` input**: when true, the test fan-out + artifact-build jobs run (artifacts uploaded
   for inspection) while the tag/GitHub-Release/npm-publish jobs are hard-skipped — this is how
