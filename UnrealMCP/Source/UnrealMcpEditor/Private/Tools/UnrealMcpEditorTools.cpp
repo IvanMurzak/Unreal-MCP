@@ -20,6 +20,7 @@
 #include "PlayInEditorDataTypes.h"
 #include "ScopedTransaction.h"
 #include "UObject/Class.h"
+#include "UObject/Script.h"
 #include "UObject/UnrealType.h"
 #include "UObject/UObjectIterator.h"
 
@@ -90,6 +91,12 @@ namespace
 					return Out;
 				}
 			}
+		}
+		else if (Call.Arguments->HasField(Key))
+		{
+			// Present but not an array (a bare string/object/number): error rather than returning an empty
+			// list, which the caller would read as "select nothing" and use to silently clear the selection.
+			OutError = FString::Printf(TEXT("'%s' must be an array of strings."), *Key);
 		}
 		return Out;
 	}
@@ -388,9 +395,9 @@ namespace UnrealMcpEditorTools
 		Registry.Tool(TEXT("console-get-logs"))
 			.Title(TEXT("Get Console Logs"))
 			.Description(TEXT("Read recent engine log lines captured by the plugin's GLog ring buffer "
-			                  "(capped at 10000). Filter by minimum severity ('Error'|'Warning'|'Display'|"
-			                  "'Log'|'Verbose'|'VeryVerbose'|'All'), exact category, and a message substring; "
-			                  "'limit' returns the most-recent N after filtering. Read-only."))
+			                  "(capped at 10000). Filter by minimum severity ('Fatal'|'Error'|'Warning'|"
+			                  "'Display'|'Log'|'Verbose'|'VeryVerbose'|'All'), exact category, and a message "
+			                  "substring; 'limit' returns the most-recent N after filtering. Read-only."))
 			.ParamString(TEXT("verbosity"), TEXT("Minimum severity to include (default 'All')."))
 			.ParamString(TEXT("category"), TEXT("Exact log category (e.g. 'LogTemp'); empty = all."))
 			.ParamString(TEXT("search"), TEXT("Case-insensitive message substring; empty = all."))
@@ -404,7 +411,7 @@ namespace UnrealMcpEditorTools
 					const FString Token = Call.GetString(TEXT("verbosity"));
 					if (!Token.IsEmpty() && !FUnrealMcpLogCollector::ParseVerbosity(Token, MinVerbosity))
 						return FUnrealMcpToolResult::Error(FString::Printf(
-							TEXT("Unknown verbosity '%s'. Use Error/Warning/Display/Log/Verbose/VeryVerbose/All."), *Token));
+							TEXT("Unknown verbosity '%s'. Use Fatal/Error/Warning/Display/Log/Verbose/VeryVerbose/All."), *Token));
 				}
 				const FString Category = Call.GetString(TEXT("category"));
 				const FString Search = Call.GetString(TEXT("search"));
@@ -603,8 +610,13 @@ namespace UnrealMcpEditorTools
 						TEXT("Method '%s' is an instance method; call it via 'target' (an instance), not 'class' "
 						     "(whose CDO is only for static/CallInEditor functions)."), *MethodName));
 
+				// 'args' is optional; absent -> an empty bag (every param defaults). But a PRESENT-but-non-object
+				// 'args' (e.g. an array or a bare string) is a malformed call — error rather than silently
+				// dropping it to an empty bag, which would zero every parameter without telling the caller.
 				const TSharedPtr<FJsonObject>* ArgsPtr = nullptr;
-				TSharedPtr<FJsonObject> Args = (Call.Arguments->TryGetObjectField(TEXT("args"), ArgsPtr) && ArgsPtr) ? *ArgsPtr : MakeShared<FJsonObject>();
+				if (Call.Arguments->HasField(TEXT("args")) && !(Call.Arguments->TryGetObjectField(TEXT("args"), ArgsPtr) && ArgsPtr))
+					return FUnrealMcpToolResult::Error(TEXT("'args' must be a JSON object mapping parameter names to values."));
+				TSharedPtr<FJsonObject> Args = ArgsPtr ? *ArgsPtr : MakeShared<FJsonObject>();
 
 				// Build + own a parameter frame for the duration of the call (init -> import -> call -> read -> destroy).
 				TArray<uint8> ParmFrame;
@@ -635,6 +647,14 @@ namespace UnrealMcpEditorTools
 
 				if (ImportError.IsEmpty())
 				{
+					// AActor::ProcessEvent gates script execution in the editor: for an actor in the editor
+					// world (not PIE, not a CDO) a plain BlueprintCallable (non-CallInEditor) function is
+					// SILENTLY SKIPPED unless GAllowActorScriptExecutionInEditor is set — the tool would
+					// otherwise return Success with a zeroed return/out-params. Scope the call in the same
+					// guard the editor's own details-panel / CallInEditor invocations use (it also resets the
+					// runaway-loop counter). The §10 safety gate above remains the authorization layer; this
+					// only lets an already-authorized call actually run.
+					FEditorScriptExecutionGuard ScriptGuard;
 					Target->ProcessEvent(Function, Frame);
 				}
 

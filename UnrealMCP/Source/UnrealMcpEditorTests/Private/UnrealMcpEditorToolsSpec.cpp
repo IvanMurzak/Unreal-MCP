@@ -162,6 +162,14 @@ void FUnrealMcpEditorToolsSpec::Define()
 			A->SetArrayField(TEXT("actors"), Refs);
 			TestFalse(TEXT("unknown ref is an error"), Run(Registry, TEXT("editor-selection-set"), A).bSuccess);
 		});
+
+		It("rejects a non-array 'actors' argument instead of silently clearing the selection", [this]()
+		{
+			FUnrealMcpToolRegistry Registry; UnrealMcpEditorTools::Register(Registry);
+			TSharedPtr<FJsonObject> A = Args();
+			A->SetStringField(TEXT("actors"), TEXT("not-an-array")); // present but a string, not an array
+			TestFalse(TEXT("string 'actors' is an error"), Run(Registry, TEXT("editor-selection-set"), A).bSuccess);
+		});
 	});
 
 	Describe("console", [this]()
@@ -248,6 +256,48 @@ void FUnrealMcpEditorToolsSpec::Define()
 				double Ret = 0; R.Structured->TryGetNumberField(TEXT("returnValue"), Ret);
 				TestEqual(TEXT("2 + 3 == 5"), (int32)Ret, 5);
 			}
+		});
+
+		It("invokes an INSTANCE BlueprintCallable method on an editor-world actor and gets a real (non-default) result", [this]()
+		{
+			// Regression guard for the FEditorScriptExecutionGuard around ProcessEvent. An editor-world actor's
+			// BlueprintCallable (non-CallInEditor) INSTANCE method is silently skipped by AActor::ProcessEvent
+			// unless script execution in the editor is enabled — without the guard the call would still report
+			// success but return the zero-initialized default (false here). Proving a 'true' result proves the
+			// method actually executed. (The static-via-CDO path above bypasses this gate, so it can't catch it.)
+			FUnrealMcpToolRegistry Registry; UnrealMcpEditorTools::Register(Registry);
+
+			AActor* Actor = SpawnTemp(TEXT("McpReflectInstance"));
+			TestTrue(TEXT("spawned a target actor"), Actor != nullptr);
+			if (!Actor) return;
+			Actor->Tags.Add(FName(TEXT("McpReflectProbe")));
+
+			TSharedPtr<FJsonObject> CallArgs = Args();
+			CallArgs->SetStringField(TEXT("target"), TEXT("McpReflectInstance"));
+			CallArgs->SetStringField(TEXT("method"), TEXT("ActorHasTag")); // BlueprintCallable instance method, bool return
+			TSharedPtr<FJsonObject> Inner = MakeShared<FJsonObject>();
+			Inner->SetStringField(TEXT("Tag"), TEXT("McpReflectProbe"));
+			CallArgs->SetObjectField(TEXT("args"), Inner);
+
+			const FUnrealMcpToolResult R = Run(Registry, TEXT("reflection-method-call"), CallArgs);
+			TestTrue(TEXT("instance call succeeds"), R.bSuccess);
+			bool bRet = false;
+			if (R.Structured.IsValid())
+				R.Structured->TryGetBoolField(TEXT("returnValue"), bRet);
+			TestTrue(TEXT("ActorHasTag returned true (method ran under the editor script guard)"), bRet);
+
+			Actor->Destroy();
+		});
+
+		It("rejects a non-object 'args' argument instead of silently zeroing every parameter", [this]()
+		{
+			FUnrealMcpToolRegistry Registry; UnrealMcpEditorTools::Register(Registry);
+			TSharedPtr<FJsonObject> A = Args();
+			A->SetStringField(TEXT("class"), TEXT("KismetMathLibrary"));
+			A->SetStringField(TEXT("method"), TEXT("Add_IntInt"));
+			TArray<TSharedPtr<FJsonValue>> ArgsArr; ArgsArr.Add(MakeShared<FJsonValueNumber>(1));
+			A->SetArrayField(TEXT("args"), ArgsArr); // present but an array, not an object
+			TestFalse(TEXT("non-object 'args' is an error"), Run(Registry, TEXT("reflection-method-call"), A).bSuccess);
 		});
 
 		It("refuses to call a non-BlueprintCallable / non-CallInEditor function (safety gate)", [this]()
