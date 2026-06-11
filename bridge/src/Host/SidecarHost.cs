@@ -427,7 +427,14 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             try
             {
                 var ok = await plugin.Connect(ct).ConfigureAwait(false);
-                _logger?.LogInformation(ok ? "SignalR reconnected." : "SignalR reconnect returned false; client keeps retrying.");
+                // The real ConnectionManager returns false (not OCE) when its token is cancelled mid-dial —
+                // distinguish a superseded dial from a genuine retry-in-progress so the log stays truthful.
+                if (ok)
+                    _logger?.LogInformation("SignalR reconnected.");
+                else if (ct.IsCancellationRequested)
+                    _logger?.LogDebug("SignalR reconnect superseded before it completed.");
+                else
+                    _logger?.LogInformation("SignalR reconnect returned false; client keeps retrying.");
                 return ok;
             }
             catch (OperationCanceledException)
@@ -519,9 +526,14 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
                 try
                 {
                     var ok = await plugin.Connect(ct).ConfigureAwait(false);
-                    _logger?.LogInformation(ok ? "SignalR connected." : "SignalR initial connect returned false; client will keep retrying.");
                     if (ct.IsCancellationRequested)
-                        return; // superseded — a newer transition owns the status emit
+                    {
+                        // Superseded — a newer transition owns the next dial + status emit. (The real
+                        // ConnectionManager returns false rather than throwing OCE on a cancelled token.)
+                        _logger?.LogDebug("SignalR initial connect superseded before it completed.");
+                        return;
+                    }
+                    _logger?.LogInformation(ok ? "SignalR connected." : "SignalR initial connect returned false; client will keep retrying.");
                     // §7 live status: surface the connection result to the plugin's view-model. Only a CLOUD-mode
                     // bearer is a cloud authorization — a Custom-mode token is a local bearer and must NOT light the
                     // "Authorized — cloud token stored" indicator (ApplyStatus latches it and never demotes).
