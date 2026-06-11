@@ -52,6 +52,20 @@ namespace UnrealMcpAssetTools
 }
 
 /**
+ * The level / map tool family (docs/ARCHITECTURE.md §10 "level family", issue #16 — the Unity Scene.*
+ * analog): level-create / level-open / level-save (save-as via optional path) / level-get-data (scoped
+ * actor-tree reads) / level-list-loaded (persistent + streaming sublevels, World-Partition aware,
+ * read-only) / level-set-current / level-unload-sublevel. 7 native C++ tools over the editor UWorld +
+ * UEditorLoadingAndSavingUtils + UEditorLevelUtils (Engine/UnrealEd only — no LevelEditor module, no
+ * UEditorActorSubsystem, so every body is headless-safe under -nullrhi). Registered in the boot path
+ * alongside the other core families; also exercised in isolation by Automation specs.
+ */
+namespace UnrealMcpLevelTools
+{
+	UNREALMCPEDITOR_API void Register(FUnrealMcpToolRegistry& Registry);
+}
+
+/**
  * The screenshot / viewport-capture tool family (docs/ARCHITECTURE.md §10 "screenshot family", issue
  * #17). Four kebab-case CORE tools that return a base64 PNG as MCP image content so an LLM can directly
  * inspect what the editor/game is rendering: `screenshot-viewport` (active editor viewport),
