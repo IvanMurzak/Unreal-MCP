@@ -128,8 +128,7 @@ The package name `unreal-mcp-cli` was verified free on the registry (exact
 > `unreal-mcp-cli` (2026-06-11), which also matches the sibling precedent of npm
 > `unity-mcp-cli` with bin `unity-mcp-cli`.
 
-The
-`cli/package.json` is already publish-ready (`private` removed, full metadata,
+The `cli/package.json` is already publish-ready (`private` removed, full metadata,
 `publishConfig: { "access": "public" }`). Publish the first
 version from a **clean checkout of `main`** (not a dev worktree), authenticated
 as the package owner (`baizor`):
