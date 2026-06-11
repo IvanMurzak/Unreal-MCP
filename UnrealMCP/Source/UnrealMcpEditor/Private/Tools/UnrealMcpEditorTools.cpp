@@ -346,7 +346,7 @@ namespace UnrealMcpEditorTools
 		Registry.Tool(TEXT("editor-selection-set"))
 			.Title(TEXT("Set Editor Selection"))
 			.Description(TEXT("Replace the editor's actor selection with the actors named by 'actors' (label / "
-			                  "name / path refs, §3.2). Pass an empty list or clear=true to deselect everything."))
+			                  "name / path refs, §3.2). Pass clear=true to deselect everything."))
 			.Param(TEXT("actors"), TEXT("array"), TEXT("Actor refs to select (label / name / path)."), EUnrealMcpParamRequirement::Optional, MakeEditorStringArraySchema(TEXT("Actor refs to select.")))
 			.ParamBool(TEXT("clear"), TEXT("Deselect all actors. When true, 'actors' is ignored."))
 			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
@@ -360,6 +360,13 @@ namespace UnrealMcpEditorTools
 					return FUnrealMcpToolResult::Error(ArrErr);
 
 				const bool bClear = Call.GetBool(TEXT("clear"));
+
+				// Require explicit intent to deselect: a call with no actor refs and no clear flag would
+				// otherwise silently wipe the whole selection and still report success. Make the caller say
+				// clear=true so a malformed/empty call can't quietly nuke the user's selection.
+				if (!bClear && Refs.Num() == 0)
+					return FUnrealMcpToolResult::Error(TEXT(
+						"No actors to select. Provide 'actors' with at least one ref, or pass clear=true to deselect everything."));
 
 				// Resolve every requested actor BEFORE mutating the selection: a bad ref aborts the whole
 				// call so the editor's selection is never left half-applied.

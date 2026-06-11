@@ -71,9 +71,12 @@ void FUnrealMcpLogCollector::Capture(const TCHAR* Message, ELogVerbosity::Type V
 	Entries.Add(MoveTemp(Entry));
 	if (Entries.Num() > MaxEntries)
 	{
-		// Evict the oldest overflow in one shot (keeps the newest MaxEntries). No shrink — the buffer
-		// stays warm at its cap so steady-state logging does no reallocation.
-		Entries.RemoveAt(0, Entries.Num() - MaxEntries, EAllowShrinking::No);
+		// Amortize the O(N) head-eviction: dropping a single entry per line at the cap would memmove the
+		// whole ~MaxEntries buffer on every log call. Instead drop a whole EvictChunk from the front in
+		// one shot, so eviction runs ~once per EvictChunk lines (O(1) amortized). The buffer never
+		// exceeds MaxEntries — it floats between MaxEntries-EvictChunk and MaxEntries. No shrink keeps the
+		// allocation warm so steady-state logging does no reallocation.
+		Entries.RemoveAt(0, FMath::Min(EvictChunk, Entries.Num()), EAllowShrinking::No);
 	}
 }
 

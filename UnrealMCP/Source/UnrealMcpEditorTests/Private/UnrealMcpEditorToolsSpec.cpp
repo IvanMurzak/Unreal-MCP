@@ -170,6 +170,14 @@ void FUnrealMcpEditorToolsSpec::Define()
 			A->SetStringField(TEXT("actors"), TEXT("not-an-array")); // present but a string, not an array
 			TestFalse(TEXT("string 'actors' is an error"), Run(Registry, TEXT("editor-selection-set"), A).bSuccess);
 		});
+
+		It("rejects a no-arg call (no actors, no clear) instead of silently deselecting everything", [this]()
+		{
+			FUnrealMcpToolRegistry Registry; UnrealMcpEditorTools::Register(Registry);
+			// Neither 'actors' nor clear=true: must be an explicit error, not a silent SelectNone reported
+			// as success — deselecting the whole selection requires the explicit clear=true intent.
+			TestFalse(TEXT("empty no-arg call is an error"), Run(Registry, TEXT("editor-selection-set"), Args()).bSuccess);
+		});
 	});
 
 	Describe("console", [this]()
@@ -189,6 +197,11 @@ void FUnrealMcpEditorToolsSpec::Define()
 			FUnrealMcpToolRegistry Registry; UnrealMcpEditorTools::Register(Registry);
 
 			// Drive the collector directly (the runtime that normally Startup()s it is not running in specs).
+			// NOTE: the collector is a process-wide singleton. Running this spec inside a LIVE editor session
+			// (rather than a throwaway -nullrhi automation process) is DESTRUCTIVE to the runtime's buffered
+			// logs — the Clear() below and console-clear-logs wipe the shared buffer. Registration state is
+			// snapshotted/restored at the end, but buffer CONTENTS are not. Acceptable for automation; do not
+			// run against a session whose captured logs you need to keep.
 			FUnrealMcpLogCollector& Collector = FUnrealMcpLogCollector::Get();
 			const bool bWasRegistered = Collector.IsRegistered();
 			Collector.Startup();

@@ -42,6 +42,15 @@ public:
 	/** Max retained entries before the oldest are evicted (ring-buffer cap, §10 "strictly capped"). */
 	static constexpr int32 MaxEntries = 10000;
 
+	/**
+	 * Eviction batch size. Head-eviction shifts every surviving element, so trimming one entry per line
+	 * at the cap would memmove the whole buffer on every log call. Instead, once the cap is reached the
+	 * oldest `EvictChunk` entries are dropped in a single memmove, so eviction runs ~once per `EvictChunk`
+	 * lines (O(1) amortized) rather than every line. The buffer never exceeds `MaxEntries`; it floats
+	 * between `MaxEntries - EvictChunk` and `MaxEntries`.
+	 */
+	static constexpr int32 EvictChunk = MaxEntries / 10;
+
 	/** The process singleton. */
 	static FUnrealMcpLogCollector& Get();
 
