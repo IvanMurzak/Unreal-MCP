@@ -273,6 +273,84 @@ void FUnrealMcpSourceToolsSpec::Define()
 			TestFalse(TEXT("header gone"), FPaths::FileExists(UnrealMcpSourceTools::GetProjectSourceRoot() / HeaderRel));
 		});
 
+		It("splices a line range with exact bytes and never accumulates blank lines across edits", [this]()
+		{
+			FUnrealMcpToolRegistry Registry;
+			UnrealMcpSourceTools::Register(Registry);
+
+			// A newline-terminated, LF, 4-line file. The phantom trailing empty element that
+			// ParseIntoArrayLines yields for such a file used to double the final newline on EVERY range
+			// splice (accumulating one blank line per edit) and inflate the addressable range by 1.
+			const FString FileRel = TempModule / TEXT("Range.cpp");
+			const FString FileAbs = UnrealMcpSourceTools::GetProjectSourceRoot() / FileRel;
+			TestTrue(TEXT("seed file written"),
+				FFileHelper::SaveStringToFile(FString(TEXT("L1\nL2\nL3\nL4\n")), *FileAbs, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM));
+
+			auto SpliceLine = [&](int32 Line, const TCHAR* Text) -> bool
+			{
+				TSharedPtr<FJsonObject> Args = SourceArgs();
+				Args->SetStringField(TEXT("path"), FileRel);
+				Args->SetStringField(TEXT("content"), Text);
+				Args->SetNumberField(TEXT("startLine"), Line);
+				Args->SetNumberField(TEXT("endLine"), Line);
+				return RunSourceTool(Registry, TEXT("source-update"), Args).bSuccess;
+			};
+
+			TestTrue(TEXT("first range splice ok"), SpliceLine(2, TEXT("X2")));
+			TestTrue(TEXT("second range splice ok"), SpliceLine(3, TEXT("X3")));
+
+			FString OnDisk;
+			TestTrue(TEXT("read seed back"), FFileHelper::LoadFileToString(OnDisk, *FileAbs));
+			// Exactly the two edits applied, single trailing newline, NO extra blank lines accumulated.
+			TestEqual(TEXT("exact bytes after two consecutive range edits"), OnDisk, FString(TEXT("L1\nX2\nX3\nL4\n")));
+
+			// The phantom no longer inflates the addressable range: line 5 (== real lines + 1) is rejected.
+			TSharedPtr<FJsonObject> OutOfRange = SourceArgs();
+			OutOfRange->SetStringField(TEXT("path"), FileRel);
+			OutOfRange->SetStringField(TEXT("content"), TEXT("X"));
+			OutOfRange->SetNumberField(TEXT("startLine"), 5);
+			OutOfRange->SetNumberField(TEXT("endLine"), 5);
+			TestFalse(TEXT("line 5 (real lines + 1) rejected"), RunSourceTool(Registry, TEXT("source-update"), OutOfRange).bSuccess);
+
+			// A huge startLine must be rejected in int64 BEFORE narrowing — a raw (int32) cast wraps
+			// 4294967297 -> 1, which would otherwise splice line 1. Validate-then-narrow rejects it.
+			TSharedPtr<FJsonObject> Wrap = SourceArgs();
+			Wrap->SetStringField(TEXT("path"), FileRel);
+			Wrap->SetStringField(TEXT("content"), TEXT("X"));
+			Wrap->SetNumberField(TEXT("startLine"), 4294967297.0);
+			Wrap->SetNumberField(TEXT("endLine"), 4294967297.0);
+			TestFalse(TEXT("wraparound startLine rejected"), RunSourceTool(Registry, TEXT("source-update"), Wrap).bSuccess);
+
+			// The rejected edits left the file byte-identical.
+			FString StillOnDisk;
+			TestTrue(TEXT("re-read after rejected edits"), FFileHelper::LoadFileToString(StillOnDisk, *FileAbs));
+			TestEqual(TEXT("file unchanged after rejected edits"), StillOnDisk, FString(TEXT("L1\nX2\nX3\nL4\n")));
+		});
+
+		It("reports totalLines as real lines for newline-terminated and unterminated files", [this]()
+		{
+			FUnrealMcpToolRegistry Registry;
+			UnrealMcpSourceTools::Register(Registry);
+
+			auto ReadTotalLines = [&](const TCHAR* Body, const TCHAR* Name) -> int32
+			{
+				const FString Rel = TempModule / Name;
+				const FString Abs = UnrealMcpSourceTools::GetProjectSourceRoot() / Rel;
+				FFileHelper::SaveStringToFile(FString(Body), *Abs, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+				TSharedPtr<FJsonObject> Args = SourceArgs();
+				Args->SetStringField(TEXT("path"), Rel);
+				const FUnrealMcpToolResult R = RunSourceTool(Registry, TEXT("source-read"), Args);
+				int32 Total = -1;
+				if (R.Structured.IsValid()) { R.Structured->TryGetNumberField(TEXT("totalLines"), Total); }
+				return Total;
+			};
+
+			// Both hold three visible lines; the phantom trailing empty element previously made the
+			// newline-terminated file over-report 4.
+			TestEqual(TEXT("newline-terminated -> 3 lines"), ReadTotalLines(TEXT("A\nB\nC\n"), TEXT("Term.cpp")), 3);
+			TestEqual(TEXT("unterminated -> 3 lines"), ReadTotalLines(TEXT("A\nB\nC"), TEXT("Unterm.cpp")), 3);
+		});
+
 		It("rejects jail escapes on every file op", [this]()
 		{
 			FUnrealMcpToolRegistry Registry;

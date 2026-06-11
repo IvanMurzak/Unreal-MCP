@@ -331,6 +331,13 @@ namespace UnrealMcpSourceTools
 
 				TArray<FString> AllLines;
 				Content.ParseIntoArrayLines(AllLines, /*InCullEmpty*/ false);
+				// ParseIntoArrayLines appends a phantom trailing empty element for a newline-terminated
+				// file ("A\nB\n" -> ["A","B",""]); drop it so totalLines counts real lines (not lines+1)
+				// and the 1-based window below addresses only real lines.
+				if (Content.EndsWith(TEXT("\n")) && AllLines.Num() > 0 && AllLines.Last().IsEmpty())
+				{
+					AllLines.Pop();
+				}
 				const int32 TotalLines = AllLines.Num();
 
 				const bool bWindowed = Call.Has(TEXT("startLine")) || Call.Has(TEXT("endLine"));
@@ -532,13 +539,26 @@ namespace UnrealMcpSourceTools
 					const bool bTrailingNewline = Existing.EndsWith(TEXT("\n"));
 					TArray<FString> Lines;
 					Existing.ParseIntoArrayLines(Lines, /*InCullEmpty*/ false);
-					const int32 StartLine = (int32)Call.GetInt(TEXT("startLine"), 1);
-					const int32 EndLine = (int32)Call.GetInt(TEXT("endLine"), 1);
-					if (StartLine < 1 || EndLine < StartLine || StartLine > Lines.Num() || EndLine > Lines.Num())
+					// ParseIntoArrayLines appends a phantom trailing empty element for a newline-terminated
+					// file ("A\nB\n" -> ["A","B",""]). Drop it so (a) the addressable range is the real line
+					// count and (b) the trailing-EOL re-add below does not double the file's final newline
+					// (the phantom would otherwise contribute one EOL via the Join, plus another from bTrailingNewline).
+					if (bTrailingNewline && Lines.Num() > 0 && Lines.Last().IsEmpty())
+					{
+						Lines.Pop();
+					}
+					// Validate the range in int64 BEFORE narrowing — a huge value (e.g. 4294967297) would
+					// otherwise wrap to a small in-range int32 and silently splice the WRONG lines. A silent
+					// mis-edit on the write path is worse than the read path's over-read, so reject here.
+					const int64 StartLine64 = Call.GetInt(TEXT("startLine"), 1);
+					const int64 EndLine64 = Call.GetInt(TEXT("endLine"), 1);
+					if (StartLine64 < 1 || EndLine64 < StartLine64 || StartLine64 > Lines.Num() || EndLine64 > Lines.Num())
 					{
 						return FUnrealMcpToolResult::Error(FString::Printf(
-							TEXT("Invalid line range [%d..%d] for '%s' (%d line(s))."), StartLine, EndLine, *Jailed.RelPath, Lines.Num()));
+							TEXT("Invalid line range [%lld..%lld] for '%s' (%d line(s))."), StartLine64, EndLine64, *Jailed.RelPath, Lines.Num()));
 					}
+					const int32 StartLine = (int32)StartLine64;
+					const int32 EndLine = (int32)EndLine64;
 					TArray<FString> Replacement;
 					NewContent.ParseIntoArrayLines(Replacement, /*InCullEmpty*/ false);
 					TArray<FString> Result;
@@ -647,7 +667,7 @@ namespace UnrealMcpSourceTools
 
 				TArray<FString> Extensions;
 				const TArray<TSharedPtr<FJsonValue>>* ExtArray = nullptr;
-				if (Call.Arguments->TryGetArrayField(TEXT("extensions"), ExtArray))
+				if (Call.Arguments.IsValid() && Call.Arguments->TryGetArrayField(TEXT("extensions"), ExtArray))
 				{
 					for (const TSharedPtr<FJsonValue>& Value : *ExtArray)
 					{
@@ -776,10 +796,11 @@ namespace UnrealMcpSourceTools
 						// Live Coding surfaces a coarse enum, not per-diagnostic rows; the UBT path carries
 						// the full {file,line,severity,message} report.
 						Structured->SetArrayField(TEXT("diagnostics"), {});
-						// On a hard Failure, DON'T return the diagnostic-less enum — fall through to the UBT
-						// path below for the full structured report (success/compileClean already model the
-						// locked-DLL relink failure UBT will then hit).
-						if (Result != ELiveCodingCompileResult::Failure)
+						// Fall through to the UBT path below — for the full structured report — on a hard
+						// Failure OR when Compile() never started (bStarted == false, leaving Result at its
+						// NotStarted init): in both cases the coarse enum carries no actionable diagnostics,
+						// and success/compileClean already model the locked-DLL relink failure UBT will hit.
+						if (bStarted && Result != ELiveCodingCompileResult::Failure)
 						{
 							return FUnrealMcpToolResult::Success(
 								FString::Printf(TEXT("Live Coding compile: %s."), ResultText), Structured);
