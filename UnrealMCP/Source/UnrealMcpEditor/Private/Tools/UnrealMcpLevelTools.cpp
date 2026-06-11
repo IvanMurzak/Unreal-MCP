@@ -185,7 +185,17 @@ namespace
 			OutError = FString::Printf(TEXT("'%s' is not a valid level asset path (expected e.g. '/Game/Maps/Arena')."), *AssetPath);
 			return false;
 		}
-		bOutExists = FPackageName::DoesPackageExist(OutPackageName);
+		// Probe for a pre-existing package AND verify it is a .umap (content-aware, like ResolveLevelFilename).
+		// SaveMap writes <name>.umap; if a NON-map asset (material, blueprint, …) already claims this long
+		// package name, saving would leave two on-disk files (Arena.umap + Arena.uasset) under one package name
+		// — an asset-registry/cooker ambiguity — while we'd wrongly report overwrote:true. Reject that collision.
+		FString ExistingFilename;
+		bOutExists = FPackageName::DoesPackageExist(OutPackageName, &ExistingFilename);
+		if (bOutExists && !ExistingFilename.EndsWith(FPackageName::GetMapPackageExtension(), ESearchCase::IgnoreCase))
+		{
+			OutError = FString::Printf(TEXT("'%s' already exists and is not a level/map asset; choose a different path."), *OutPackageName);
+			return false;
+		}
 		return true;
 	}
 }
@@ -206,7 +216,9 @@ namespace UnrealMcpLevelTools
 			                  "is reset, as with any New/Open Level)."))
 			.ParamString(TEXT("path"), TEXT("Asset path to save the new level to (e.g. '/Game/Maps/Arena'). Omit to leave it transient/in-memory."))
 			.ParamString(TEXT("template"), TEXT("Asset path of an existing level to seed the new one from. Omit for a blank level."))
-			.DestructiveHint(false)
+			// Destructive: replacing the editor world discards the current world's unsaved edits, and a
+			// create-with-path silently overwrites an existing .umap (hence `discardedDirtyLevels`/`overwrote`).
+			.DestructiveHint(true)
 			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
 			{
 				if (!GEditor)
@@ -218,6 +230,18 @@ namespace UnrealMcpLevelTools
 				// Capture unsaved map edits BEFORE replacing the world — New/Open Level discards them and the
 				// engine's confirm dialog is suppressed under -unattended, so this note is the only signal.
 				TArray<TSharedPtr<FJsonValue>> DiscardedDirty = DirtyMapPackageNames();
+
+				// Validate the save-as target BEFORE replacing the world. ResolveSaveTargetPackage is pure
+				// validation (no side effects); doing it up front means a malformed 'path' fails fast instead of
+				// destroying the caller's open world (and its unsaved edits) only to then reject the bad path.
+				bool bOverwrote = false;
+				FString SavedPackage;
+				if (!SavePath.IsEmpty())
+				{
+					FString SaveError;
+					if (!ResolveSaveTargetPackage(SavePath, SavedPackage, bOverwrote, SaveError))
+						return FUnrealMcpToolResult::Error(SaveError);
+				}
 
 				UWorld* NewWorld = nullptr;
 				if (!Template.IsEmpty())
@@ -247,16 +271,11 @@ namespace UnrealMcpLevelTools
 						return FUnrealMcpToolResult::Error(TEXT("Failed to create a new level (GEditor->NewMap returned null)."));
 				}
 
+				// Save target was validated above; now that the world exists, write it to disk. SaveMap force-
+				// overwrites an existing .umap silently — the collision was already detected into `bOverwrote`.
 				bool bSaved = false;
-				bool bOverwrote = false;
-				FString SavedPackage;
 				if (!SavePath.IsEmpty())
 				{
-					// Normalise + validate the target and probe for a pre-existing level: SaveMap force-overwrites
-					// an existing .umap silently, so detect the collision and surface it via `overwrote`.
-					FString SaveError;
-					if (!ResolveSaveTargetPackage(SavePath, SavedPackage, bOverwrote, SaveError))
-						return FUnrealMcpToolResult::Error(SaveError);
 					bSaved = UEditorLoadingAndSavingUtils::SaveMap(NewWorld, SavedPackage);
 					if (!bSaved)
 						return FUnrealMcpToolResult::Error(FString::Printf(
@@ -289,7 +308,9 @@ namespace UnrealMcpLevelTools
 			.Description(TEXT("Open an existing level as the active editor world, replacing the current one. "
 			                  "Identify it by asset path (e.g. '/Game/Maps/Arena')."))
 			.ParamString(TEXT("path"), TEXT("Asset path of the level to open (e.g. '/Game/Maps/Arena')."), EUnrealMcpParamRequirement::Required)
-			.DestructiveHint(false)
+			// Destructive: opening a level replaces the editor world and discards the current world's
+			// unsaved edits (hence `discardedDirtyLevels`).
+			.DestructiveHint(true)
 			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
 			{
 				const FString Path = Call.GetString(TEXT("path"));
@@ -323,11 +344,13 @@ namespace UnrealMcpLevelTools
 		// ----------------------------------------------------------------------------------------
 		Registry.Tool(TEXT("level-save"))
 			.Title(TEXT("Save Level"))
-			.Description(TEXT("Save the current editor level. Pass 'path' (asset path) to save-as a copy to a new "
-			                  "location; omit it to save the current level in place. A transient/never-saved level "
-			                  "with no 'path' returns an error (provide 'path' to give it a location)."))
-			.ParamString(TEXT("path"), TEXT("Asset path to save-as to (e.g. '/Game/Maps/Arena'). Omit to save the current level in place."))
-			.DestructiveHint(false)
+			.Description(TEXT("Save the current editor level. Pass 'path' (asset path) to save-as a copy of the "
+			                  "PERSISTENT level to a new location; omit it to save the current level (which may be a "
+			                  "streaming sublevel) in place. A transient/never-saved level with no 'path' returns an "
+			                  "error (provide 'path' to give it a location)."))
+			.ParamString(TEXT("path"), TEXT("Asset path to save-as the PERSISTENT level to (e.g. '/Game/Maps/Arena'). Omit to save the current level in place."))
+			// Destructive: save-as silently overwrites an existing .umap at the target (hence `overwrote`).
+			.DestructiveHint(true)
 			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
 			{
 				UWorld* World = GetWorldOrNull();
@@ -354,12 +377,22 @@ namespace UnrealMcpLevelTools
 							bOverwrote ? TEXT(" (overwrote an existing level)") : TEXT("")), Structured);
 				}
 
-				// Save-in-place. SaveCurrentLevel returns false for a transient/never-saved world (no path
-				// yet) — surface that as a structured error rather than silently no-op'ing.
+				// Save-in-place. Guard the transient/never-saved case BEFORE calling SaveCurrentLevel: for a level
+				// with no on-disk package, FEditorFileUtils::SaveLevel falls into the interactive Save-As FILE
+				// DIALOG (and PromptToCheckoutLevels can raise a checkout dialog) — modal UI that would block the
+				// game thread / bridge, violating the handler contract (no modal UI in tool bodies). Probing the
+				// current level's package existence keeps this headless-safe in an interactive editor too.
+				const FString CurrentPackage = LevelPackageName(World->GetCurrentLevel());
+				if (CurrentPackage.IsEmpty() || !FPackageName::DoesPackageExist(CurrentPackage))
+					return FUnrealMcpToolResult::Error(
+						TEXT("The current level has never been saved (it has no on-disk location yet). "
+						     "Pass 'path' to save it to a new location."));
+
+				// The level has a real package on disk; an in-place save will not prompt for a location. A false
+				// return now indicates a checkout or write failure rather than the transient case.
 				if (!UEditorLoadingAndSavingUtils::SaveCurrentLevel())
 					return FUnrealMcpToolResult::Error(
-						TEXT("The current level could not be saved in place. This happens for a transient / never-saved "
-						     "level (pass 'path' to give it a location), and can also indicate a checkout or write failure."));
+						TEXT("The current level could not be saved in place (a checkout or write failure)."));
 
 				return FUnrealMcpToolResult::Success(
 					FString::Printf(TEXT("Saved the current level '%s'."), *LevelShortName(World->GetCurrentLevel())));

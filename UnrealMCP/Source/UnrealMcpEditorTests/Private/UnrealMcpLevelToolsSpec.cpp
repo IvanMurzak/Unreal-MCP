@@ -65,9 +65,18 @@ void FUnrealMcpLevelToolsSpec::Define()
 		{
 			FUnrealMcpToolRegistry Registry;
 			UnrealMcpLevelTools::Register(Registry);
-			TestTrue(TEXT("get-data read-only"), Registry.Find(TEXT("level-get-data"))->bReadOnlyHint);
-			TestTrue(TEXT("list-loaded read-only"), Registry.Find(TEXT("level-list-loaded"))->bReadOnlyHint);
-			TestTrue(TEXT("unload-sublevel destructive"), Registry.Find(TEXT("level-unload-sublevel"))->bDestructiveHint);
+			// Find() returns nullptr for an unregistered id; null-check before dereferencing so a registration
+			// regression fails this assertion cleanly instead of crashing the whole automation run.
+			const FUnrealMcpRegisteredTool* GetData = Registry.Find(TEXT("level-get-data"));
+			const FUnrealMcpRegisteredTool* ListLoaded = Registry.Find(TEXT("level-list-loaded"));
+			const FUnrealMcpRegisteredTool* Unload = Registry.Find(TEXT("level-unload-sublevel"));
+			if (!TestNotNull(TEXT("level-get-data registered"), GetData) ||
+				!TestNotNull(TEXT("level-list-loaded registered"), ListLoaded) ||
+				!TestNotNull(TEXT("level-unload-sublevel registered"), Unload))
+				return;
+			TestTrue(TEXT("get-data read-only"), GetData->bReadOnlyHint);
+			TestTrue(TEXT("list-loaded read-only"), ListLoaded->bReadOnlyHint);
+			TestTrue(TEXT("unload-sublevel destructive"), Unload->bDestructiveHint);
 		});
 	});
 
