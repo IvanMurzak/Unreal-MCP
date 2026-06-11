@@ -152,13 +152,37 @@ namespace UnrealMcpScreenshotTools
 			return true;
 		}
 
-		/** Effective output size for a viewport-style capture: explicit width/height (clamped) else native, then hard cap. */
+		/**
+		 * Effective output size for a viewport-style capture. When BOTH width and height are supplied they
+		 * are each clamped to [1, 2048]; when only ONE is supplied the other is derived from the native
+		 * aspect ratio (so a lone width=512 on a 1920x1080 viewport yields 512x288, not a stretched
+		 * 512x1080); when NEITHER is supplied the native size is used. The result is then hard-capped.
+		 */
 		void EffectiveViewportSize(const FUnrealMcpToolCall& Call, int32 NativeW, int32 NativeH, int32& OutW, int32& OutH)
 		{
 			const int64 ReqW = Call.GetInt(TEXT("width"), 0);
 			const int64 ReqH = Call.GetInt(TEXT("height"), 0);
-			const int32 W = ReqW > 0 ? ResolveCaptureDimension(ReqW) : NativeW;
-			const int32 H = ReqH > 0 ? ResolveCaptureDimension(ReqH) : NativeH;
+			int32 W, H;
+			if (ReqW > 0 && ReqH > 0)
+			{
+				W = ResolveCaptureDimension(ReqW);
+				H = ResolveCaptureDimension(ReqH);
+			}
+			else if (ReqW > 0)
+			{
+				W = ResolveCaptureDimension(ReqW);
+				H = NativeW > 0 ? FMath::Max(1, FMath::RoundToInt(W * (double)NativeH / (double)NativeW)) : NativeH;
+			}
+			else if (ReqH > 0)
+			{
+				H = ResolveCaptureDimension(ReqH);
+				W = NativeH > 0 ? FMath::Max(1, FMath::RoundToInt(H * (double)NativeW / (double)NativeH)) : NativeW;
+			}
+			else
+			{
+				W = NativeW;
+				H = NativeH;
+			}
 			CapToMaxDimension(W, H, OutW, OutH);
 		}
 
@@ -197,8 +221,17 @@ namespace UnrealMcpScreenshotTools
 			UWorld* World, const FTransform& CaptureXform, float FovDeg, int32 Width, int32 Height,
 			const FString& Source, const FLinearColor* BackgroundColor, AActor* ShowOnlyActor)
 		{
+			// Isolated mode (a background was requested) composites the actor over a solid color. A plain
+			// SCS_FinalColorLDR capture writes opaque pixels everywhere, overwriting the render target's
+			// ClearColor — so an empty region renders as the scene's (black) background, NOT the requested
+			// color (verified windowed: a #FF0000 background came back pure black). To honor the background
+			// we capture coverage-carrying HDR scene color (SCS_SceneColorHDR, inverse opacity in alpha)
+			// into a float target and composite scene-over-background in the read-back. screenshot-camera
+			// passes no background and keeps the cheaper tonemapped LDR path.
+			const bool bComposite = (BackgroundColor != nullptr);
+
 			UTextureRenderTarget2D* RenderTarget = NewObject<UTextureRenderTarget2D>(GetTransientPackage());
-			RenderTarget->RenderTargetFormat = RTF_RGBA8;
+			RenderTarget->RenderTargetFormat = bComposite ? RTF_RGBA16f : RTF_RGBA8;
 			RenderTarget->ClearColor = BackgroundColor ? *BackgroundColor : FLinearColor::Black;
 			RenderTarget->bAutoGenerateMips = false;
 			RenderTarget->InitAutoFormat(Width, Height);
@@ -223,9 +256,17 @@ namespace UnrealMcpScreenshotTools
 
 			Capture->TextureTarget = RenderTarget;
 			Capture->FOVAngle = FovDeg;
-			Capture->CaptureSource = SCS_FinalColorLDR;
+			Capture->CaptureSource = bComposite ? SCS_SceneColorHDR : SCS_FinalColorLDR;
 			Capture->bCaptureEveryFrame = false;
 			Capture->bCaptureOnMovement = false;
+			// Pin auto-exposure. A single-shot CaptureScene() never gives eye-adaptation a chance to
+			// converge, so the default auto-exposure leaves one-off captures badly under/over-exposed.
+			// Locking min == max brightness makes exposure a fixed factor (no adaptation transient), so the
+			// capture is deterministic regardless of the scene's prior adaptation state.
+			Capture->PostProcessSettings.bOverride_AutoExposureMinBrightness = true;
+			Capture->PostProcessSettings.AutoExposureMinBrightness = 1.0f;
+			Capture->PostProcessSettings.bOverride_AutoExposureMaxBrightness = true;
+			Capture->PostProcessSettings.AutoExposureMaxBrightness = 1.0f;
 			if (ShowOnlyActor)
 			{
 				Capture->PrimitiveRenderMode = ESceneCapturePrimitiveRenderMode::PRM_UseShowOnlyList;
@@ -245,10 +286,34 @@ namespace UnrealMcpScreenshotTools
 				return FUnrealMcpToolResult::Error(TEXT("Render target resource was not available after capture."));
 
 			TArray<FColor> Pixels;
-			FReadSurfaceDataFlags ReadFlags(RCM_UNorm, CubeFace_MAX);
-			ReadFlags.SetLinearToGamma(false);
-			if (!Resource->ReadPixels(Pixels, ReadFlags))
-				return FUnrealMcpToolResult::Error(TEXT("Failed to read pixels from the capture render target."));
+			if (bComposite)
+			{
+				// SCS_SceneColorHDR stores inverse opacity in alpha (1 = empty/background visible, 0 = opaque
+				// geometry), so compositing scene-over-background recovers the requested solid background:
+				//   final = sceneColor + background * alpha   (premultiplied "over", done in linear space).
+				TArray<FLinearColor> LinearPixels;
+				if (!Resource->ReadLinearColorPixels(LinearPixels))
+					return FUnrealMcpToolResult::Error(TEXT("Failed to read pixels from the capture render target."));
+				const FLinearColor Bg = *BackgroundColor;
+				Pixels.SetNumUninitialized(LinearPixels.Num());
+				for (int32 Index = 0; Index < LinearPixels.Num(); ++Index)
+				{
+					const FLinearColor& Scene = LinearPixels[Index];
+					const FLinearColor Composited(
+						Scene.R + Bg.R * Scene.A,
+						Scene.G + Bg.G * Scene.A,
+						Scene.B + Bg.B * Scene.A,
+						1.0f);
+					Pixels[Index] = Composited.ToFColor(/*bSRGB*/ true);
+				}
+			}
+			else
+			{
+				FReadSurfaceDataFlags ReadFlags(RCM_UNorm, CubeFace_MAX);
+				ReadFlags.SetLinearToGamma(false);
+				if (!Resource->ReadPixels(Pixels, ReadFlags))
+					return FUnrealMcpToolResult::Error(TEXT("Failed to read pixels from the capture render target."));
+			}
 
 			FString Base64; int32 Bytes = 0; FString Error;
 			if (!EncodePngBase64(Pixels, Width, Height, Base64, Bytes, Error))
@@ -260,15 +325,16 @@ namespace UnrealMcpScreenshotTools
 		}
 
 		/**
-		 * Parse a '#RRGGBB' / '#RRGGBBAA' (or bare 3/6/8-digit) hex color. FColor::FromHex silently
-		 * returns black for malformed input, so validate explicitly and surface a structured error
-		 * instead — this also gives the headless specs another GPU-free branch.
+		 * Parse a '#RRGGBB' / '#RRGGBBAA' (bare 6- or 8-digit also accepted) hex color. FColor::FromHex
+		 * silently returns black for malformed input, so validate explicitly and surface a structured error
+		 * instead — this also gives the headless specs another GPU-free branch. Only the two lengths the
+		 * tool advertises are accepted (no 3-digit shorthand) so the contract matches the documentation.
 		 */
 		bool ParseHexColor(const FString& In, FLinearColor& OutColor, FString& OutError)
 		{
 			FString Hex = In;
 			Hex.RemoveFromStart(TEXT("#"));
-			if (Hex.Len() != 3 && Hex.Len() != 6 && Hex.Len() != 8)
+			if (Hex.Len() != 6 && Hex.Len() != 8)
 			{
 				OutError = FString::Printf(
 					TEXT("Invalid 'background' hex color '%s'; expected '#RRGGBB' or '#RRGGBBAA'."), *In);
@@ -302,9 +368,11 @@ namespace UnrealMcpScreenshotTools
 		// screenshot-viewport — active editor viewport.
 		Registry.Tool(TEXT("screenshot-viewport"))
 			.Title(TEXT("Screenshot Viewport"))
-			.Description(FString(TEXT("Capture the active editor viewport.")) + SizeCapNote())
-			.ParamInt(TEXT("width"), TEXT("Optional output width in pixels (clamped to [1, 2048]); native viewport width when omitted."))
-			.ParamInt(TEXT("height"), TEXT("Optional output height in pixels (clamped to [1, 2048]); native viewport height when omitted."))
+			.Description(FString(TEXT("Capture the active editor viewport. Note: while a Play-In-Editor session "
+				"has viewport focus the 'active viewport' is the PIE game view; use screenshot-game-view to "
+				"capture the game view explicitly.")) + SizeCapNote())
+			.ParamInt(TEXT("width"), TEXT("Optional output width in pixels (clamped to [1, 2048]); when only 'height' is given the width is derived from the native aspect ratio, and the native viewport width is used when both are omitted."))
+			.ParamInt(TEXT("height"), TEXT("Optional output height in pixels (clamped to [1, 2048]); when only 'width' is given the height is derived from the native aspect ratio, and the native viewport height is used when both are omitted."))
 			.ReadOnlyHint(true)
 			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
 			{
@@ -323,8 +391,8 @@ namespace UnrealMcpScreenshotTools
 		Registry.Tool(TEXT("screenshot-game-view"))
 			.Title(TEXT("Screenshot Game View"))
 			.Description(FString(TEXT("Capture the Play-In-Editor game view. Errors when no PIE session is active.")) + SizeCapNote())
-			.ParamInt(TEXT("width"), TEXT("Optional output width in pixels (clamped to [1, 2048]); native game-view width when omitted."))
-			.ParamInt(TEXT("height"), TEXT("Optional output height in pixels (clamped to [1, 2048]); native game-view height when omitted."))
+			.ParamInt(TEXT("width"), TEXT("Optional output width in pixels (clamped to [1, 2048]); when only 'height' is given the width is derived from the native aspect ratio, and the native game-view width is used when both are omitted."))
+			.ParamInt(TEXT("height"), TEXT("Optional output height in pixels (clamped to [1, 2048]); when only 'width' is given the height is derived from the native aspect ratio, and the native game-view height is used when both are omitted."))
 			.ReadOnlyHint(true)
 			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
 			{
