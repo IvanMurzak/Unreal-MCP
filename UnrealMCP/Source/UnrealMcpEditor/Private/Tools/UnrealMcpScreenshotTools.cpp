@@ -460,7 +460,7 @@ namespace UnrealMcpScreenshotTools
 			.ParamString(TEXT("actor"), TEXT("Target actor reference (label, object name, or path) to render in isolation."), EUnrealMcpParamRequirement::Required)
 			.ParamInt(TEXT("width"), TEXT("Optional output width in pixels (clamped to [1, 2048]); default 1024."))
 			.ParamInt(TEXT("height"), TEXT("Optional output height in pixels (clamped to [1, 2048]); default 1024."))
-			.ParamString(TEXT("background"), TEXT("Optional background color as hex ('#RRGGBB' or '#RRGGBBAA'); defaults to dark grey."))
+			.ParamString(TEXT("background"), TEXT("Optional background color as hex ('#RRGGBB' or '#RRGGBBAA'); the alpha of '#RRGGBBAA' is accepted but ignored (the PNG is always opaque). Defaults to dark grey."))
 			.ParamNumber(TEXT("fov"), TEXT("Optional field-of-view override in degrees (clamped to [5, 170]); default 50."))
 			.ReadOnlyHint(true)
 			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
@@ -491,18 +491,23 @@ namespace UnrealMcpScreenshotTools
 				// Clamp once here so the same value drives both the auto-framing distance below and the
 				// capture's FOVAngle (an unclamped FOV would frame and render at different angles).
 				const float Fov = FMath::Clamp(Call.Has(TEXT("fov")) ? (float)Call.GetNumber(TEXT("fov")) : 50.0f, 5.0f, 170.0f);
+				const int32 Width = ResolveCaptureDimension(Call.GetInt(TEXT("width"), 0));
+				const int32 Height = ResolveCaptureDimension(Call.GetInt(TEXT("height"), 0));
 				FBox Bounds = TargetActor->GetComponentsBoundingBox(/*bNonColliding*/ true);
 				FVector Center = Bounds.IsValid ? Bounds.GetCenter() : TargetActor->GetActorLocation();
 				const float Radius = Bounds.IsValid ? FMath::Max(Bounds.GetExtent().Size(), 1.0f) : 100.0f;
 				const float HalfFovRad = FMath::DegreesToRadians(Fov * 0.5f);
-				const float Distance = (Radius / FMath::Max(FMath::Tan(HalfFovRad), KINDA_SMALL_NUMBER)) * 1.5f;
+				// FOVAngle is the HORIZONTAL field of view, so for a wider-than-tall output the vertical FOV
+				// shrinks by Height/Width (UE's scene-capture projection zooms the minor axis in). Pull the
+				// camera back by Max(1, Width/Height) so a wide aspect frames the bounding sphere against the
+				// (smaller) vertical FOV instead of clipping the actor off the top and bottom.
+				const float AspectPullback = Height > 0 ? FMath::Max(1.0f, (float)Width / (float)Height) : 1.0f;
+				const float Distance = (Radius / FMath::Max(FMath::Tan(HalfFovRad), KINDA_SMALL_NUMBER)) * 1.5f * AspectPullback;
 				const FVector Offset = FVector(-1.0f, -1.0f, 0.6f).GetSafeNormal() * Distance;
 				const FVector CamLocation = Center + Offset;
 				const FRotator CamRotation = (Center - CamLocation).Rotation();
 				const FTransform CaptureXform(CamRotation, CamLocation);
 
-				const int32 Width = ResolveCaptureDimension(Call.GetInt(TEXT("width"), 0));
-				const int32 Height = ResolveCaptureDimension(Call.GetInt(TEXT("height"), 0));
 				const FString Source = FString::Printf(TEXT("isolated actor '%s'"), *TargetActor->GetActorNameOrLabel());
 				return CaptureWithSceneCapture(World, CaptureXform, Fov, Width, Height, Source, &Background, TargetActor);
 			});

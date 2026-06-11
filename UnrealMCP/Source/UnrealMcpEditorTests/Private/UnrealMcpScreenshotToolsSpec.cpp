@@ -6,9 +6,13 @@
 #include "CoreMinimal.h"
 #include "Misc/App.h"
 #include "Misc/AutomationTest.h"
+#include "Misc/ScopeExit.h"
 #include "UnrealMcpCoreTools.h"
 #include "UnrealMcpToolRegistry.h"
 #include "Dom/JsonObject.h"
+#include "Editor.h"
+#include "Engine/World.h"
+#include "GameFramework/Actor.h"
 
 /**
  * Screenshot / viewport-capture tool family specs (docs/ARCHITECTURE.md §10, issue #17).
@@ -137,6 +141,37 @@ void FUnrealMcpScreenshotToolsSpec::Define()
 			// no-PIE error branch (validated before the GPU guard).
 			FUnrealMcpToolRegistry Registry; UnrealMcpScreenshotTools::Register(Registry);
 			TestFalse(TEXT("not success"), RunScreenshot(Registry, TEXT("screenshot-game-view"), Args()).bSuccess);
+		});
+
+		It("screenshot-isolated rejects a malformed background hex after the actor resolves", [this]()
+		{
+			// The background hex is parsed BEFORE the GPU guard, so a malformed value is a GPU-free error
+			// branch — but it is only reachable once the 'actor' ref resolves. Spawn a transient probe actor
+			// in the editor world, reference it by name, and pass invalid hex to exercise that branch.
+			UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+			if (!World)
+			{
+				// No editor world under this harness configuration; the branch is covered windowed.
+				return;
+			}
+			FActorSpawnParameters SpawnParams;
+			SpawnParams.ObjectFlags |= RF_Transient;
+			SpawnParams.bTemporaryEditorActor = true;
+			SpawnParams.bHideFromSceneOutliner = true;
+			AActor* Probe = World->SpawnActor<AActor>(AActor::StaticClass(), FTransform::Identity, SpawnParams);
+			TestNotNull(TEXT("spawned a probe actor"), Probe);
+			if (!Probe)
+				return;
+			ON_SCOPE_EXIT { if (IsValid(Probe)) Probe->Destroy(); };
+
+			FUnrealMcpToolRegistry Registry; UnrealMcpScreenshotTools::Register(Registry);
+			TSharedPtr<FJsonObject> A = Args();
+			A->SetStringField(TEXT("actor"), Probe->GetName());
+			A->SetStringField(TEXT("background"), TEXT("not-a-hex-color"));
+			const FUnrealMcpToolResult Result = RunScreenshot(Registry, TEXT("screenshot-isolated"), A);
+			TestFalse(TEXT("malformed background hex is rejected"), Result.bSuccess);
+			TestTrue(TEXT("error names the background hex branch"), Result.Message.Contains(TEXT("hex color")));
+			TestTrue(TEXT("no image content on the error path"), Result.Images.Num() == 0);
 		});
 	});
 
