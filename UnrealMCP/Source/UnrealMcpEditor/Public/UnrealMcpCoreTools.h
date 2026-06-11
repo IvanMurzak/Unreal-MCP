@@ -50,3 +50,17 @@ namespace UnrealMcpAssetTools
 {
 	UNREALMCPEDITOR_API void Register(FUnrealMcpToolRegistry& Registry);
 }
+
+/**
+ * The level / map tool family (docs/ARCHITECTURE.md §10 "level family", issue #16 — the Unity Scene.*
+ * analog): level-create / level-open / level-save (save-as via optional path) / level-get-data (scoped
+ * actor-tree reads) / level-list-loaded (persistent + streaming sublevels, World-Partition aware,
+ * read-only) / level-set-current / level-unload-sublevel. 7 native C++ tools over the editor UWorld +
+ * UEditorLoadingAndSavingUtils + UEditorLevelUtils (Engine/UnrealEd only — no LevelEditor module, no
+ * UEditorActorSubsystem, so every body is headless-safe under -nullrhi). Registered in the boot path
+ * alongside the other core families; also exercised in isolation by Automation specs.
+ */
+namespace UnrealMcpLevelTools
+{
+	UNREALMCPEDITOR_API void Register(FUnrealMcpToolRegistry& Registry);
+}
