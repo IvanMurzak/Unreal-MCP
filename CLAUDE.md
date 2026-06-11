@@ -24,7 +24,7 @@ user-facing entry point is [`README.md`](README.md); the release runbook is
 | `UnrealMCP/Source/UnrealMcpEditorTests/` | Automation specs behind `WITH_DEV_AUTOMATION_TESTS`, names under the **`UnrealMcp.`** filter prefix. **No top-level test folder** — tests live per-leg |
 | `bridge/` | .NET 9 **sidecar** `com.IvanMurzak.Unreal.MCP.Bridge` (binary `unreal-mcp-bridge`) — the McpPlugin host the plugin spawns; IPC ⇄ SignalR relay. xUnit tests in `bridge/tests/`. Hand-authored, TRACKED solution `bridge/Unreal-MCP-Bridge.sln` |
 | `Unreal-MCP-Server/` | Thin ASP.NET Core host around `com.IvanMurzak.McpPlugin.Server` (binary `unreal-mcp-server`) — clone of Godot-MCP-Server, **no Unreal-specific server code**. Tracked solution `Unreal-MCP-Server/Unreal-MCP-Server.sln` |
-| `cli/` | `unreal-cli` npm package (TypeScript, commander, vitest) — 16 commands. `private: true` until the publish gate |
+| `cli/` | `unreal-cli` npm package (TypeScript, commander, vitest) — 16 commands. Publish-ready (metadata complete); the first version is published manually by the owner, then CI takes over — see `docs/RELEASING.md` |
 | `samples/UnrealAITemplate/` | The §5 extension template plugin (a `hello-extension` tool + an invalid-schema switch) |
 | `commands/bump-version.ps1` | Rewrites the version across `.uplugin` / both csproj / `server.json` / `cli/package.json`. **Release-pipeline-owned — never run from a feature task** |
 

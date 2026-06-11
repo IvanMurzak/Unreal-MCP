@@ -2,9 +2,32 @@
 
 Cross-platform CLI tool for [Unreal-MCP](https://github.com/IvanMurzak/Unreal-MCP) — the Unreal
 analog of [`unity-mcp-cli`](https://github.com/IvanMurzak/Unity-MCP/tree/main/cli) and
-[`godot-cli`](https://github.com/IvanMurzak/Godot-MCP/tree/main/cli).
+[`godot-cli`](https://github.com/IvanMurzak/Godot-MCP/tree/main/cli). It resolves and launches the
+Unreal Editor with the right `UNREAL_MCP_*` connection env vars, runs MCP/system tools over HTTP,
+probes server health, configures AI agents (Claude Code, Cursor, VS Code, …), and manages the
+`UnrealMCP` plugin.
 
-> **Status: pre-alpha.** The package is `private: true` until the publish gate — no `npm publish`.
+## Install
+
+Run without installing (npx caches the package between runs — use
+`unreal-cli@latest` to force the newest published version):
+
+```bash
+npx unreal-cli status
+# or, to always fetch the newest published version:
+npx unreal-cli@latest status
+```
+
+Or install globally to get the `unreal-cli` command on your `PATH`:
+
+```bash
+npm i -g unreal-cli
+unreal-cli status
+```
+
+Requires Node `^20.19.0 || >=22.12.0`. See the
+[Unreal-MCP repository](https://github.com/IvanMurzak/Unreal-MCP) for the full project docs and the
+[architecture reference](https://github.com/IvanMurzak/Unreal-MCP/blob/main/docs/ARCHITECTURE.md).
 
 ## Commands (docs/ARCHITECTURE.md §9.1)
 
