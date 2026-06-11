@@ -220,5 +220,39 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         {
             Assert.Equal(expected, (int)SidecarHost.DecideConfigTransition(wasKeepConnected, nowKeepConnected, hostOrTokenChanged));
         }
+
+        [Theory]
+        // Armed re-dial reports the ACTUAL connect outcome — never the optimistic "Connecting…" left stuck after
+        // a successful re-dial (the §7 medium fix for the OnConfigReceived Reconnect path + the device-auth commit).
+        [InlineData(true, true, "Connected")]
+        [InlineData(true, false, "Connecting")]
+        // Disarmed (the user clicked Disconnect before authorizing): the commit stores the bearer but NEVER claims
+        // a live link — "Disconnected" — so Disconnect stays genuine and no un-tearable link is built.
+        [InlineData(false, false, "Disconnected")]
+        [InlineData(false, true, "Disconnected")]
+        public void ResolveConnectionStatusAfterReconnect_HonestStatusAndDisarmedNeverConnected(
+            bool keepConnected, bool connected, string expected)
+        {
+            Assert.Equal(expected, SidecarHost.ResolveConnectionStatusAfterReconnect(keepConnected, connected));
+        }
+
+        [Fact]
+        public async Task CommitAuthorizedSession_WhileDisarmed_StoresTokenWithoutRearming()
+        {
+            // The disarmed-authorize path (docs/ARCHITECTURE.md §7): the user clicked Disconnect (keepConnected=
+            // false persisted) and then authorized. The commit MUST store the issued bearer but MUST NOT silently
+            // re-arm/claim Connected — otherwise it builds a SignalR link Disconnect (which maps a false→false
+            // config push to None) could never tear down. With no live plugin a dial is a no-op, so the no-dial
+            // status contract is locked by ResolveConnectionStatusAfterReconnect above; here we assert the disarmed
+            // commit still COMMITS the token and leaves keepConnected false. (Port 39998 is never dialed.)
+            var ipc = new IpcClient("127.0.0.1", 39998, token: "ipc-token", sidecarVersion: "0.1.0");
+            using var host = new SidecarHost(ipc, "0.1.0");
+            host.Config.KeepConnected = false;
+
+            await host.CommitAuthorizedSessionAsync("cloud-bearer-abc", CancellationToken.None);
+
+            Assert.Equal("cloud-bearer-abc", host.Config.Token); // the authorized bearer is stored even while disarmed
+            Assert.False(host.Config.KeepConnected); // and the disarmed intent is untouched — no silent re-arm
+        }
     }
 }

@@ -227,6 +227,10 @@ void FUnrealMcpEditorViewModelSpec::Define()
 			TSharedRef<FRecording> Rec = MakeShared<FRecording>();
 			TSharedRef<FUnrealMcpEditorViewModel> VM = MakeViewModel(Rec);
 
+			// Drive a realistic flow: Authorize (→ Pending) THEN the sidecar's authorized frame stores the token.
+			// (An authorized device-auth only ever arrives after auth-start; applying it straight to an Idle VM
+			// is now ignored by the cancel-race complement, so the spec mirrors the real ordering.)
+			VM->Authorize();
 			TSharedPtr<FJsonObject> Authorized = MakeShared<FJsonObject>();
 			Authorized->SetStringField(TEXT("state"), TEXT("authorized"));
 			Authorized->SetStringField(TEXT("token"), TEXT("cloud-bearer-abc"));
@@ -236,6 +240,69 @@ void FUnrealMcpEditorViewModelSpec::Define()
 			VM->Revoke();
 			TestFalse("token cleared after revoke", VM->HasCloudToken());
 			TestTrue("auth-revoke sent", Rec->AuthSent.Contains(TEXT("auth-revoke")));
+		});
+
+		It("ignores an authorized device-auth that races in after the user cancelled the flow", [this]()
+		{
+			TSharedRef<FRecording> Rec = MakeShared<FRecording>();
+			TSharedRef<FUnrealMcpEditorViewModel> VM = MakeViewModel(Rec);
+
+			// First-time flow (no stored token yet): Authorize then cancel it before authorization completes.
+			VM->Authorize();
+			TestEqual("pending after Authorize", static_cast<int32>(VM->GetDeviceAuthState()), static_cast<int32>(EUnrealMcpDeviceAuthState::Pending));
+			VM->CancelAuth();
+			TestEqual("idle after cancel (no stored token)", static_cast<int32>(VM->GetDeviceAuthState()), static_cast<int32>(EUnrealMcpDeviceAuthState::Idle));
+
+			const int32 PushBefore = Rec->PushCount;
+			// The sidecar's authorized frame (emitted before its own cancel guard ran) races in AFTER the cancel.
+			TSharedPtr<FJsonObject> Authorized = MakeShared<FJsonObject>();
+			Authorized->SetStringField(TEXT("state"), TEXT("authorized"));
+			Authorized->SetStringField(TEXT("token"), TEXT("cloud-bearer-late"));
+			VM->ApplyDeviceAuth(Authorized);
+
+			// Cancel-race complement: a just-cancelled flow (Idle) ignores the late authorized — the dropped token
+			// is NOT resurrected, the indicator stays Idle, and nothing is persisted/pushed.
+			TestEqual("still idle, late authorized ignored", static_cast<int32>(VM->GetDeviceAuthState()), static_cast<int32>(EUnrealMcpDeviceAuthState::Idle));
+			TestFalse("no token resurrected", VM->HasCloudToken());
+			TestEqual("nothing pushed for the ignored authorized", Rec->PushCount, PushBefore);
+		});
+
+		It("CancelAuth keeps the Authorized indicator when a cloud token is already stored", [this]()
+		{
+			TSharedRef<FRecording> Rec = MakeShared<FRecording>();
+			TSharedRef<FUnrealMcpEditorViewModel> VM = MakeViewModel(Rec);
+
+			// Establish a stored cloud token (a completed prior authorization, via the realistic Authorize flow).
+			VM->Authorize();
+			TSharedPtr<FJsonObject> Authorized = MakeShared<FJsonObject>();
+			Authorized->SetStringField(TEXT("state"), TEXT("authorized"));
+			Authorized->SetStringField(TEXT("token"), TEXT("cloud-bearer-abc"));
+			VM->ApplyDeviceAuth(Authorized);
+			TestTrue("token stored", VM->HasCloudToken());
+
+			// The user starts a RE-authorize then cancels: the indicator must fall back to Authorized (a bearer is
+			// still stored), not Idle — otherwise the Authorized/Revoke affordance vanishes until restart.
+			VM->Authorize();
+			VM->CancelAuth();
+			TestEqual("authorized indicator preserved on cancel-with-token",
+				static_cast<int32>(VM->GetDeviceAuthState()), static_cast<int32>(EUnrealMcpDeviceAuthState::Authorized));
+			TestTrue("token still stored", VM->HasCloudToken());
+		});
+	});
+
+	Describe("Custom-mode host trimming (§7 validated field)", [this]()
+	{
+		It("trims surrounding whitespace before storing and pushing the dial target", [this]()
+		{
+			TSharedRef<FRecording> Rec = MakeShared<FRecording>();
+			TSharedRef<FUnrealMcpEditorViewModel> VM = MakeViewModel(Rec);
+
+			// A padded-but-valid URL must validate AND be stored/pushed trimmed — the sidecar must not dial the
+			// untrimmed target.
+			VM->SetCustomHost(TEXT("  http://localhost:5244  "));
+			TestEqual("stored host is trimmed", VM->GetCustomHost(), FString(TEXT("http://localhost:5244")));
+			TestTrue("trimmed valid host pushed", Rec->PushCount >= 1);
+			TestEqual("pushed dial target is trimmed", Rec->LastPushed.CustomHost, FString(TEXT("http://localhost:5244")));
 		});
 	});
 

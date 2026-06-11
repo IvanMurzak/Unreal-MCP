@@ -37,11 +37,14 @@ void FUnrealMcpEditorViewModel::SetConnectionMode(EUnrealMcpConnectionMode InMod
 
 void FUnrealMcpEditorViewModel::SetCustomHost(const FString& InHost)
 {
-	// Keep the field editable as the user types, but only persist/push a host that validates — pushing a
+	// Trim before storing: validation already trims internally, so "  http://host  " would validate yet get
+	// persisted + pushed padded — the sidecar would then dial the untrimmed target. Store the trimmed form so
+	// the field, the §8 store, and the dial target stay consistent. Only push a host that validates — pushing a
 	// malformed URL to the sidecar would just make it dial nowhere (§7 validated field).
-	Config.CustomHost = InHost;
+	const FString Trimmed = InHost.TrimStartAndEnd();
+	Config.CustomHost = Trimmed;
 	FString Error;
-	if (ValidateServerUrl(InHost, Error))
+	if (ValidateServerUrl(Trimmed, Error))
 	{
 		PersistAndPush();
 	}
@@ -104,7 +107,10 @@ void FUnrealMcpEditorViewModel::Authorize()
 
 void FUnrealMcpEditorViewModel::CancelAuth()
 {
-	DeviceAuthState = EUnrealMcpDeviceAuthState::Idle;
+	// Cancelling an in-progress RE-authorize must not hide an already-stored cloud token: InitializeConfig maps
+	// token-present → Authorized, so dropping to Idle here would lose the "Authorized"/Revoke affordance until
+	// restart. Fall back to Authorized when a bearer is still stored; only a token-less cancel returns to Idle.
+	DeviceAuthState = HasCloudToken() ? EUnrealMcpDeviceAuthState::Authorized : EUnrealMcpDeviceAuthState::Idle;
 	DeviceVerificationUrl.Reset();
 	DeviceUserCode.Reset();
 	DeviceAuthError.Reset();
@@ -186,6 +192,14 @@ void FUnrealMcpEditorViewModel::ApplyDeviceAuth(const TSharedPtr<FJsonObject>& D
 	{
 		if (StateRaw.Equals(TEXT("authorized"), ESearchCase::IgnoreCase) || StateRaw.Equals(TEXT("success"), ESearchCase::IgnoreCase))
 		{
+			// Cancel-race complement (§7 item 4): the sidecar emits the authorized device-auth (token included)
+			// BEFORE its own auth-cancel/auth-revoke guard runs, and a pushed config would re-apply that bearer
+			// sidecar-side. If the user already cancelled/revoked this flow the indicator is back to Idle (a
+			// token-less cancel, or a revoke that cleared the bearer) — ignore the late authorized so we do not
+			// resurrect a token the user just dropped. (A cancel that KEPT a stored token leaves state Authorized,
+			// not Idle, so a legitimate re-confirm still applies.)
+			if (DeviceAuthState == EUnrealMcpDeviceAuthState::Idle)
+				return;
 			DeviceAuthState = EUnrealMcpDeviceAuthState::Authorized;
 			DeviceAuthError.Reset();
 			// The sidecar stored the token; mirror its presence so the UI flips to the Revoke affordance, and
