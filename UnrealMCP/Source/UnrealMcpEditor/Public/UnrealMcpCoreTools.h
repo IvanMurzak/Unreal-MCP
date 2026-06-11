@@ -78,3 +78,16 @@ namespace UnrealMcpScreenshotTools
 	/** Downscale (InW, InH) proportionally so the longest side is <= MaxCaptureDimension; a no-op when already within the cap. GPU-free. */
 	UNREALMCPEDITOR_API void CapToMaxDimension(int32 InW, int32 InH, int32& OutW, int32& OutH);
 }
+
+/**
+ * The C++ source / script tool family (docs/ARCHITECTURE.md §10 "source family", issue #18): six
+ * kebab-case CORE tools — source-read / source-create-class / source-update / source-delete /
+ * source-list / source-compile — that scaffold, read, edit, list and compile project C++. All file
+ * operations are jailed to <Project>/Source; source-compile returns a structured §3
+ * {file,line,severity,message} build report (the AI feedback loop). Registered in the boot path
+ * alongside the other families; also exercised in isolation by Automation specs.
+ */
+namespace UnrealMcpSourceTools
+{
+	UNREALMCPEDITOR_API void Register(FUnrealMcpToolRegistry& Registry);
+}
