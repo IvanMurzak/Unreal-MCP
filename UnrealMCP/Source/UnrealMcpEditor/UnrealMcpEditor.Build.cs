@@ -35,6 +35,13 @@ public class UnrealMcpEditor : ModuleRules
 			"Projects",
 			"EditorSubsystem",
 			"DeveloperSettings",
+			// Slate main window (docs/ARCHITECTURE.md §7): nomad-tab registration via FGlobalTabmanager
+			// needs WorkspaceMenuStructure (the "AI Game Developer" Window-menu group, applied via
+			// RegisterNomadTabSpawner().SetGroup); the masked-token field reads keystrokes via InputCore;
+			// the copyable user code / token uses FPlatformApplicationMisc::ClipboardCopy (ApplicationCore).
+			"WorkspaceMenuStructure",
+			"InputCore",
+			"ApplicationCore",
 			// Asset / Content-Browser tool family (docs/ARCHITECTURE.md §10, issue #10):
 			//  - AssetRegistry            -> asset-find / asset-get-data / asset-refresh queries
 			//  - AssetTools               -> CreateAsset (material instance) + ImportAssetTasks

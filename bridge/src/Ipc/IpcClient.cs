@@ -390,6 +390,28 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
             return await task.ConfigureAwait(false);
         }
 
+        /// <summary>
+        /// Send a sidecar→plugin message (the §7 <c>device-auth</c> / <c>status</c> feed) over the live IPC
+        /// link. No-op (returns false) when no connection is up — the plugin re-reads state on the next
+        /// handshake anyway. Never throws on a dropped link; the single mutex-guarded writer keeps the frame
+        /// from interleaving with tool traffic (§1.2). The host calls this off the reader thread.
+        /// </summary>
+        public async Task<bool> SendToPluginAsync<T>(T message, CancellationToken ct = default)
+        {
+            if (_stream == null || _tcp is not { Connected: true })
+                return false;
+            try
+            {
+                await SendAsync(message, ct).ConfigureAwait(false);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogDebug("SendToPluginAsync failed (link down?): {Message}", ex.Message);
+                return false;
+            }
+        }
+
         // --- writer (single mutex-guarded path, §1.2) -------------------------------------------------
 
         private async Task SendAsync<T>(T message, CancellationToken ct)

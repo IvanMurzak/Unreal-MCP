@@ -10,11 +10,15 @@
 #include "Bridge/UnrealMcpBridgeServer.h"
 #include "Sidecar/UnrealMcpSidecarManager.h"
 #include "Extensions/UnrealMcpExtensionManager.h"
+#include "UI/UnrealMcpEditorViewModel.h"
+#include "UI/UnrealMcpMainWindowTab.h"
 #include "Tools/UnrealMcpLogCollector.h"
 
 #include "Misc/CoreDelegates.h"
 #include "Misc/Paths.h"
 #include "Misc/EngineVersion.h"
+#include "Async/Async.h"
+#include "HAL/PlatformProcess.h"
 #include "Interfaces/IPluginManager.h"
 
 // Defined here (where every subsystem type is complete) so the TUniquePtr member deleters instantiate
@@ -94,6 +98,76 @@ void FUnrealMcpRuntime::Startup()
 	SidecarManager = MakeUnique<FUnrealMcpSidecarManager>();
 	SidecarManager->StartForPort(BoundPort, Token);
 
+	// §7 UI: the main-window view-model owns all UI state; wire its side-effect sinks to the real subsystems.
+	// All config writes go config-store-first (Save) then push the §1.3 `config` to the sidecar (§7 ownership).
+	ViewModel = MakeShared<FUnrealMcpEditorViewModel>();
+	ViewModel->InitializeConfig(Config);
+
+	FUnrealMcpBridgeServer* BridgeServerPtr = BridgeServer.Get();
+	ViewModel->OnPersistConfig = [](const FUnrealMcpConfig& Cfg)
+	{
+		Cfg.Save(FUnrealMcpConfig::DefaultConfigFilePath());
+	};
+	ViewModel->OnPushConfig = [BridgeServerPtr](const FUnrealMcpConfig& Cfg)
+	{
+		if (BridgeServerPtr)
+			BridgeServerPtr->SetEffectiveConfig(Cfg.BuildEffectiveConnectionConfig());
+	};
+	ViewModel->OnSendAuth = [BridgeServerPtr](const FString& AuthType) -> bool
+	{
+		// Plumb the send result back so Authorize() does not enter a code-less Pending state when there is no
+		// connected sidecar to receive the auth-start frame.
+		return BridgeServerPtr ? BridgeServerPtr->SendAuthMessage(AuthType) : false;
+	};
+	ViewModel->OnOpenBrowser = [](const FString& Url)
+	{
+		if (!Url.IsEmpty())
+			FPlatformProcess::LaunchURL(*Url, nullptr, nullptr);
+	};
+
+	// §7 live status feed: the bridge delivers `status` / `device-auth` on the IPC READER thread. Marshal onto
+	// the game thread before touching any view-model/Slate state (the Godot M9b main-thread-marshalled rule),
+	// and hold the view-model weakly so a late status straddling teardown is a no-op, not a use-after-free.
+	TWeakPtr<FUnrealMcpEditorViewModel> WeakViewModel = ViewModel;
+	if (BridgeServerPtr)
+	{
+		BridgeServerPtr->SetStatusSink([WeakViewModel](const FString& Type, TSharedPtr<FJsonObject> Message)
+		{
+			AsyncTask(ENamedThreads::GameThread, [WeakViewModel, Type, Message]()
+			{
+				TSharedPtr<FUnrealMcpEditorViewModel> VM = WeakViewModel.Pin();
+				if (!VM.IsValid())
+					return;
+				if (Type == TEXT("status"))
+					VM->ApplyStatus(Message);
+				else if (Type == TEXT("device-auth"))
+					VM->ApplyDeviceAuth(Message);
+			});
+		});
+	}
+
+	// Register the nomad dockable tab + Window-menu entry (§7). A manual "Restart bridge" force-relaunches the
+	// sidecar; the bridge-status line reflects the sidecar's run state.
+	FUnrealMcpSidecarManager* SidecarPtr = SidecarManager.Get();
+	MainWindowTab = MakeUnique<FUnrealMcpMainWindowTab>();
+	MainWindowTab->Register(
+		ViewModel.ToSharedRef(),
+		PluginVersion,
+		FSimpleDelegate::CreateLambda([SidecarPtr, BoundPort, Token]()
+		{
+			if (SidecarPtr)
+			{
+				SidecarPtr->Stop();
+				SidecarPtr->StartForPort(BoundPort, Token);
+			}
+		}),
+		[SidecarPtr]() -> FString
+		{
+			if (SidecarPtr && SidecarPtr->IsRunning())
+				return FString::Printf(TEXT("Running (restarts: %d)"), SidecarPtr->GetRestartCount());
+			return TEXT("Stopped");
+		});
+
 	// §1.5: tear down on editor pre-exit so the sidecar never orphans (layer 1).
 	PreExitHandle = FCoreDelegates::OnEnginePreExit.AddLambda([this]() { Shutdown(); });
 }
@@ -117,6 +191,28 @@ void FUnrealMcpRuntime::Shutdown()
 	// give the child a bounded grace to self-exit, (4) terminate as a backstop.
 	if (SidecarManager.IsValid())
 		SidecarManager->StopRestarts();
+
+	// §7 UI teardown FIRST: unregister the tab and drop the bridge's status sink so no marshalled status can
+	// touch the view-model after this, then release the view-model. Clear the sink before the bridge tears
+	// down so a reader-thread invoke cannot race the reset.
+	if (MainWindowTab.IsValid())
+	{
+		MainWindowTab->Unregister(); // also closes a live tab so its widget (a strong view-model ref) is freed
+		MainWindowTab.Reset();
+	}
+	if (BridgeServer.IsValid())
+		BridgeServer->SetStatusSink(nullptr);
+	// Null the view-model's side-effect sinks before destroying the bridge/sidecar below: those sinks capture
+	// raw FUnrealMcpBridgeServer* pointers, so if anything still holds the view-model after the tab close
+	// (a deferred RequestCloseTab, a queued widget event) it cannot dereference the soon-to-be-freed bridge.
+	if (ViewModel.IsValid())
+	{
+		ViewModel->OnPersistConfig = nullptr;
+		ViewModel->OnPushConfig = nullptr;
+		ViewModel->OnSendAuth = nullptr;
+		ViewModel->OnOpenBrowser = nullptr;
+	}
+	ViewModel.Reset();
 
 	if (BridgeServer.IsValid())
 	{

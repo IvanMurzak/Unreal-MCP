@@ -30,6 +30,11 @@ namespace
 	const FString TypeToolResponse = TEXT("tool-response");
 	const FString TypeToolCancel = TEXT("tool-cancel");
 	const FString TypeConfig = TEXT("config");
+	const FString TypeStatus = TEXT("status");
+	const FString TypeDeviceAuth = TEXT("device-auth");
+	const FString TypeAuthStart = TEXT("auth-start");
+	const FString TypeAuthCancel = TEXT("auth-cancel");
+	const FString TypeAuthRevoke = TEXT("auth-revoke");
 	const FString TypePing = TEXT("ping");
 	const FString TypePong = TEXT("pong");
 	const FString TypeShutdown = TEXT("shutdown");
@@ -325,6 +330,19 @@ void FUnrealMcpBridgeServer::HandleLine(const FString& Line, int32 Generation)
 	else if (Type == TypePong)
 	{
 		// liveness already refreshed in Run()
+	}
+	else if (Type == TypeStatus || Type == TypeDeviceAuth)
+	{
+		// §1.3 / §7: the live UI feed. Hand it to the registered sink (the view-model) WITHOUT touching any
+		// Slate/engine state here — the sink marshals onto the game thread (M9b). Copy the sink out under the
+		// lock so a concurrent window-close clear never invalidates the TFunction mid-call.
+		TFunction<void(const FString&, TSharedPtr<FJsonObject>)> SinkCopy;
+		{
+			FScopeLock Lock(&StatusSinkMutex);
+			SinkCopy = StatusSink;
+		}
+		if (SinkCopy)
+			SinkCopy(Type, Message);
 	}
 	else
 	{
@@ -659,6 +677,29 @@ void FUnrealMcpBridgeServer::SetEffectiveConfig(const TSharedPtr<FJsonObject>& I
 		EffectiveConfig = CloneJsonObject(InEffectiveConfig);
 	}
 	PushConfig(); // "on change" (§8) — no-op when no sidecar is connected
+}
+
+bool FUnrealMcpBridgeServer::SendAuthMessage(const FString& AuthType)
+{
+	// Only the three §1.3 auth verbs are valid here; reject anything else so a UI bug cannot smuggle an
+	// arbitrary message type onto the wire.
+	if (AuthType != TypeAuthStart && AuthType != TypeAuthCancel && AuthType != TypeAuthRevoke)
+	{
+		UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] refusing to send unknown auth message type '%s'."), *AuthType);
+		return false;
+	}
+	if (!bClientConnected || !bHandshakeOk)
+		return false;
+
+	TSharedPtr<FJsonObject> Message = MakeShared<FJsonObject>();
+	Message->SetStringField(TEXT("type"), AuthType);
+	return SendMessage(Message);
+}
+
+void FUnrealMcpBridgeServer::SetStatusSink(TFunction<void(const FString&, TSharedPtr<FJsonObject>)> InSink)
+{
+	FScopeLock Lock(&StatusSinkMutex);
+	StatusSink = MoveTemp(InSink);
 }
 
 void FUnrealMcpBridgeServer::CloseActiveConnection()

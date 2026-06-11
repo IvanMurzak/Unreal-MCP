@@ -9,11 +9,14 @@
 */
 
 using System;
+using System.Net.Http;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Text.Json.Nodes;
 using com.IvanMurzak.McpPlugin;
 using com.IvanMurzak.McpPlugin.Common;
 using com.IvanMurzak.ReflectorNet;
+using com.IvanMurzak.Unreal.MCP.Bridge.Auth;
 using com.IvanMurzak.Unreal.MCP.Bridge.Ipc;
 using com.IvanMurzak.Unreal.MCP.Bridge.Tools;
 using Microsoft.Extensions.Logging;
@@ -53,12 +56,32 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         private Reflector? _reflector;
         private int _signalRConnectStarted;
 
+        // §7 Cloud device-code flow (replaces PR #8's auth stubs). The authenticator is injectable so the xUnit
+        // suite drives the flow against a fake HTTP handler; _authCts cancels an in-progress flow (auth-cancel).
+        private readonly DeviceCodeAuthenticator _authenticator;
+        private readonly string _clientLabel;
+        private CancellationTokenSource? _authCts;
+        // The HttpClient the default-path authenticator uses, owned here so Dispose() releases it (the
+        // injected-authenticator path supplies its own client and leaves this null).
+        private readonly HttpClient? _ownedHttpClient;
+        // Whether the last applied connection config selected Cloud mode. Gates the §7 cloud-auth indicator:
+        // a Custom-mode bearer is a LOCAL token, not a cloud authorization, so it must not light "Authorized".
+        private bool _isCloudMode;
+
+        // Serialize SignalR connect/disconnect transitions so rapid Connect/Disconnect toggles (or a device-auth
+        // reconnect racing a config-driven disconnect) apply in submission order — last-write-wins — instead of
+        // two in-flight plugin.Connect()/Disconnect() calls interleaving and landing in the wrong final state.
+        private readonly object _transitionLock = new();
+        private Task _connectionTransition = Task.CompletedTask;
+
         public SidecarHost(
             IpcClient ipc,
             string sidecarVersion,
             ILoggerProvider? loggerProvider = null,
             string? fallbackHost = null,
-            string? fallbackToken = null)
+            string? fallbackToken = null,
+            DeviceCodeAuthenticator? authenticator = null,
+            string clientLabel = "Unreal-MCP-Bridge")
         {
             _ipc = ipc ?? throw new ArgumentNullException(nameof(ipc));
             _sidecarVersion = sidecarVersion;
@@ -66,6 +89,18 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             _logger = loggerProvider?.CreateLogger(nameof(SidecarHost));
             _fallbackHost = fallbackHost;
             _fallbackToken = fallbackToken;
+            _clientLabel = clientLabel;
+            if (authenticator != null)
+            {
+                _authenticator = authenticator;
+            }
+            else
+            {
+                // We OWN this HttpClient (the injected-authenticator path supplies its own); the authenticator
+                // never disposes it, so we track it here and release it in Dispose() for symmetry.
+                _ownedHttpClient = new HttpClient();
+                _authenticator = new DeviceCodeAuthenticator(_ownedHttpClient, loggerProvider?.CreateLogger(nameof(DeviceCodeAuthenticator)));
+            }
         }
 
         public IMcpPlugin? Plugin => _plugin;
@@ -139,11 +174,54 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
 
         private void OnConfigReceived(JsonObject config)
         {
-            // §8 "on change": the plugin re-pushed the effective connection config. Apply it. A live mode/host
-            // change that requires re-dialling SignalR is deferred to the UI task — for now KeepConnected
-            // covers transient reconnects and the next reconnect epoch picks up the applied values.
+            // §8 "on change": the plugin re-pushed the effective connection config. Apply it, then honour a
+            // keepConnected transition: false → genuinely tear down SignalR (the §7 / Godot M9b Disconnect
+            // lesson — not merely drop one link); false→true → (re)connect. A host/token change WHILE still
+            // armed must also re-dial (below) — otherwise SignalR stays bound to the stale endpoint.
+            var wasKeepConnected = _config.KeepConnected;
+            var priorHost = _config.Host;
+            var priorToken = _config.Token;
             ApplyConnectionConfig(config);
             _logger?.LogInformation("Applied updated connection config (mode-aware host {Host}).", _config.Host);
+
+            var hostOrTokenChanged =
+                !string.Equals(priorHost, _config.Host, StringComparison.Ordinal) ||
+                !string.Equals(priorToken, _config.Token, StringComparison.Ordinal);
+
+            switch (DecideConfigTransition(wasKeepConnected, _config.KeepConnected, hostOrTokenChanged))
+            {
+                case ConfigTransition.Disconnect:
+                    _ = RunConnectionTransition(HandleDisconnectAsync);
+                    break;
+                case ConfigTransition.Reconnect:
+                    // Re-dial AND surface the honest result — a bare RunConnectionTransition(ReconnectAsync) would
+                    // reconnect silently, leaving the UI stuck on the optimistic "Connecting…" after a successful
+                    // re-dial (and a stale "Connected" after a failed one). The §7 medium fix.
+                    _ = ReconnectAndEmitStatusAsync();
+                    break;
+            }
+        }
+
+        internal enum ConfigTransition { None, Disconnect, Reconnect }
+
+        /// <summary>
+        /// Decide how a §8 config push affects the live SignalR link. A keepConnected edge drives a full
+        /// disconnect (true→false, the §7 / Godot M9b Disconnect lesson — not merely drop one link) or a
+        /// reconnect (false→true). A host/token change WHILE still armed ALSO forces a reconnect: otherwise the
+        /// user switching Cloud↔Custom, editing the Server URL, or changing/generating the token while connected
+        /// leaves SignalR bound to the stale endpoint while the UI still reports "Connected". Pure so the bridge
+        /// xUnit suite locks the matrix without a live plugin; the serialized-transition queue keeps the issued
+        /// reconnect last-write-wins safe.
+        /// </summary>
+        internal static ConfigTransition DecideConfigTransition(bool wasKeepConnected, bool nowKeepConnected, bool hostOrTokenChanged)
+        {
+            if (wasKeepConnected && !nowKeepConnected)
+                return ConfigTransition.Disconnect;
+            if (!wasKeepConnected && nowKeepConnected)
+                return ConfigTransition.Reconnect;
+            if (nowKeepConnected && hostOrTokenChanged)
+                return ConfigTransition.Reconnect;
+            return ConfigTransition.None;
         }
 
         /// <summary>
@@ -171,6 +249,11 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             // Mode-aware host selection: Cloud connects to cloudUrl, Custom to host (§8). Fall back to the
             // other field only when the mode's own field is blank, so a partial message still resolves a host.
             var isCloud = string.Equals(mode, "Cloud", StringComparison.OrdinalIgnoreCase);
+            // Remember the mode so the §7 cloud-auth indicator does not treat a Custom-mode bearer as a cloud
+            // token. Only update when the message actually carried a mode — a partial config push (mode absent)
+            // must not silently flip us out of Cloud.
+            if (mode != null)
+                _isCloudMode = isCloud;
             var selected = isCloud ? cloudUrl : host;
             if (string.IsNullOrWhiteSpace(selected))
                 selected = isCloud ? host : cloudUrl;
@@ -187,27 +270,178 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         }
 
         /// <summary>
-        /// Handle a §1.3 auth message (<c>auth-start</c> / <c>auth-cancel</c> / <c>auth-revoke</c>) as a
-        /// graceful stub pending the full device-code UI flow (§8). <c>auth-revoke</c> clears the stored
-        /// cloud bearer. Public so the bridge xUnit suite can assert the stub behavior directly.
+        /// Handle a §1.3 auth message (<c>auth-start</c> / <c>auth-cancel</c> / <c>auth-revoke</c>), driving the
+        /// REAL Cloud device-code flow (§7 item 4) — the PR #8 stubs are gone for the happy path.
+        /// <c>auth-start</c> launches <see cref="DeviceCodeAuthenticator"/> against the resolved cloud URL,
+        /// forwarding <c>device-auth</c> progress to the plugin; <c>auth-cancel</c> cancels an in-progress flow;
+        /// <c>auth-revoke</c> cancels any flow and clears the stored cloud bearer. Public so the bridge xUnit
+        /// suite can drive it directly. Never throws (the flow runs on a background task).
         /// </summary>
         public void HandleAuthMessage(string type)
         {
-            // §8 auth plumbing — graceful stubs until the device-code UI flow lands.
             switch (type)
             {
+                case IpcProtocol.Type.AuthStart:
+                    StartDeviceAuth();
+                    break;
+                case IpcProtocol.Type.AuthCancel:
+                    _authCts?.Cancel();
+                    _logger?.LogInformation("auth-cancel received; cancelling the in-progress device-code flow (if any).");
+                    break;
                 case IpcProtocol.Type.AuthRevoke:
+                    _authCts?.Cancel();
                     // Clear the stored cloud bearer so a subsequent (re)connect is anonymous until re-authorized.
                     _config.Token = null;
                     _logger?.LogInformation("Cloud token revoked (auth-revoke); cleared the in-memory bearer.");
                     break;
-                case IpcProtocol.Type.AuthStart:
-                    _logger?.LogInformation("auth-start received; the device-code flow is not implemented in the sidecar-bridge MVP (pending the UI task).");
-                    break;
-                case IpcProtocol.Type.AuthCancel:
-                    _logger?.LogInformation("auth-cancel received; no in-progress device-code flow to cancel (pending the UI task).");
-                    break;
             }
+        }
+
+        private void StartDeviceAuth()
+        {
+            // Cancel AND dispose the previous flow's source before replacing it (cancel-before-dispose is safe:
+            // the in-flight flow observes an already-cancelled token, so no post-dispose registration throws).
+            _authCts?.Cancel();
+            _authCts?.Dispose();
+            var cts = new CancellationTokenSource();
+            _authCts = cts;
+            var cloudUrl = _config.Host; // Cloud mode resolved Host to cloudUrl (ApplyConnectionConfig).
+            _logger?.LogInformation("auth-start received; beginning device-code flow against {Host}.", cloudUrl);
+            _ = RunDeviceAuthAsync(cloudUrl, cts.Token);
+        }
+
+        private async Task RunDeviceAuthAsync(string cloudUrl, CancellationToken ct)
+        {
+            try
+            {
+                var result = await _authenticator.AuthorizeAsync(
+                    cloudUrl,
+                    _clientLabel,
+                    emit: msg => _ipc.SendToPluginAsync(msg, CancellationToken.None),
+                    ct).ConfigureAwait(false);
+
+                if (result.Success && result.Token != null)
+                    await CommitAuthorizedSessionAsync(result.Token, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning("Device-code flow ended with an error: {Message}", ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// Store the issued cloud bearer and reconnect SignalR so it takes effect. Guards the success-to-store
+        /// window: an auth-cancel/auth-revoke can land between the flow's final successful poll and here, and
+        /// (for revoke) already cleared the token — storing it now would resurrect a bearer the user just
+        /// cancelled/revoked. Bail before storing/reconnecting/emitting when the flow was cancelled. Internal so
+        /// the bridge xUnit suite can assert the guard without driving the whole HTTP flow.
+        /// </summary>
+        internal async Task CommitAuthorizedSessionAsync(string token, CancellationToken ct)
+        {
+            if (ct.IsCancellationRequested)
+                return;
+            _config.Token = token; // the issued cloud bearer is NEVER logged (§8)
+            // Re-dial (only when still armed) and surface the HONEST status + the cloud-authorized indicator. When
+            // the user is DISARMED — they clicked Disconnect (keepConnected=false) before authorizing — store the
+            // bearer WITHOUT dialing: claiming Connected here would build a live link Disconnect could never tear
+            // down (DecideConfigTransition maps a false→false push to None), violating the §7 Disconnect AC.
+            await ReconnectAndEmitStatusAsync(cloudAuthState: "Authorized").ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Re-dial SignalR (only when still armed) and push the HONEST resulting status to the plugin, optionally
+        /// carrying a cloud-auth indicator. BOTH §7 re-dial paths route here — a config-driven host/token change
+        /// (<see cref="OnConfigReceived"/>) and the device-auth commit (<see cref="CommitAuthorizedSessionAsync"/>)
+        /// — so neither leaves the window stuck on the optimistic "Connecting…" after a successful connect nor
+        /// claims "Connected" after a failed re-dial. When DISARMED (keepConnected=false) it does NOT dial.
+        /// </summary>
+        private async Task ReconnectAndEmitStatusAsync(string? cloudAuthState = null)
+        {
+            if (!_config.KeepConnected)
+            {
+                await EmitStatusAsync(ResolveConnectionStatusAfterReconnect(keepConnected: false, connected: false), cloudAuthState).ConfigureAwait(false);
+                return;
+            }
+
+            var connected = false;
+            await RunConnectionTransition(async () => connected = await ReconnectAsync().ConfigureAwait(false)).ConfigureAwait(false);
+            await EmitStatusAsync(ResolveConnectionStatusAfterReconnect(keepConnected: true, connected), cloudAuthState).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// The connection-state string to surface after a (possible) re-dial: a disarmed commit never claims a
+        /// live link ("Disconnected"); an armed re-dial reports the ACTUAL connect outcome instead of an
+        /// optimistic guess. Pure so the bridge xUnit suite locks the matrix without a live plugin or IPC link.
+        /// </summary>
+        internal static string ResolveConnectionStatusAfterReconnect(bool keepConnected, bool connected)
+        {
+            if (!keepConnected)
+                return "Disconnected";
+            return connected ? "Connected" : "Connecting";
+        }
+
+        /// <summary>Fully disconnect SignalR (auth-revoke / Disconnect), then surface a Disconnected status.</summary>
+        private async Task HandleDisconnectAsync()
+        {
+            var plugin = _plugin;
+            if (plugin != null)
+            {
+                try { await plugin.Disconnect().ConfigureAwait(false); }
+                catch (Exception ex) { _logger?.LogDebug("SignalR disconnect failed: {Message}", ex.Message); }
+            }
+            await EmitStatusAsync("Disconnected").ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Disconnect then reconnect SignalR so a newly-applied token/host takes effect. Returns whether the
+        /// connect attempt reported success, so a caller (the device-code flow) can surface the real state
+        /// instead of an unconditional "Connected".
+        /// </summary>
+        private async Task<bool> ReconnectAsync()
+        {
+            var plugin = _plugin;
+            if (plugin == null)
+                return false;
+            try { await plugin.Disconnect().ConfigureAwait(false); } catch { /* may not be connected */ }
+            try
+            {
+                var ok = await plugin.Connect().ConfigureAwait(false);
+                _logger?.LogInformation(ok ? "SignalR reconnected." : "SignalR reconnect returned false; client keeps retrying.");
+                return ok;
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning("SignalR reconnect failed: {Message}", ex.Message);
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Run a SignalR connect/disconnect transition serialized after any previously-queued one (last-write-wins
+        /// in submission order). Prevents two in-flight transitions from interleaving their plugin.Connect()/
+        /// Disconnect() calls and leaving the client in a state that contradicts the user's last action.
+        /// </summary>
+        private Task RunConnectionTransition(Func<Task> transition)
+        {
+            lock (_transitionLock)
+            {
+                var queued = _connectionTransition.ContinueWith(
+                    _ => transition(), CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default).Unwrap();
+                _connectionTransition = queued;
+                return queued;
+            }
+        }
+
+        /// <summary>Push a §1.3 <c>status</c> message to the plugin (the §7 live connection indicator).</summary>
+        private Task EmitStatusAsync(string connectionState, string? cloudAuthState = null)
+        {
+            var status = new StatusMessage
+            {
+                ConnectionState = connectionState,
+                KeepConnected = _config.KeepConnected,
+                CloudAuthState = cloudAuthState,
+            };
+            return _ipc.SendToPluginAsync(status, CancellationToken.None);
         }
 
         private async System.Threading.Tasks.Task ConnectSignalRAsync()
@@ -219,6 +453,11 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             {
                 var ok = await plugin.Connect().ConfigureAwait(false);
                 _logger?.LogInformation(ok ? "SignalR connected." : "SignalR initial connect returned false; client will keep retrying.");
+                // §7 live status: surface the connection result to the plugin's view-model. Only a CLOUD-mode
+                // bearer is a cloud authorization — a Custom-mode token is a local bearer and must NOT light the
+                // "Authorized — cloud token stored" indicator (ApplyStatus latches it and never demotes).
+                var cloudAuthState = _isCloudMode && !string.IsNullOrEmpty(_config.Token) ? "Authorized" : null;
+                await EmitStatusAsync(ok ? "Connected" : "Connecting", cloudAuthState).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -231,6 +470,9 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             _ipc.HandshakeAccepted -= OnHandshakeAccepted;
             _ipc.ConfigReceived -= OnConfigReceived;
             _ipc.AuthMessageReceived -= HandleAuthMessage;
+            try { _authCts?.Cancel(); } catch { /* ignore */ }
+            _authCts?.Dispose();
+            _ownedHttpClient?.Dispose(); // released here — the authenticator does not own it (default path)
             try { _plugin?.Dispose(); } catch { /* ignore */ }
             _plugin = null;
         }
