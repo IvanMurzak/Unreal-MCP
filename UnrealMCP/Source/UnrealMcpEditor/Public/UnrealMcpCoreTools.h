@@ -52,6 +52,18 @@ namespace UnrealMcpAssetTools
 }
 
 /**
+ * The editor / console / reflection tool family (docs/ARCHITECTURE.md §10 "editor/reflection family",
+ * issue #19): ~9 kebab-case tools — editor-application-get/set-state (PIE), editor-selection-get/set,
+ * console-get/clear-logs (backed by the module-startup FUnrealMcpLogCollector GLog ring buffer),
+ * console-run-command, and reflection-method-find/call (safety-gated UFunction discovery + ProcessEvent).
+ * Registered in the boot path alongside the other CORE families; also exercised in isolation by specs.
+ */
+namespace UnrealMcpEditorTools
+{
+	UNREALMCPEDITOR_API void Register(FUnrealMcpToolRegistry& Registry);
+}
+
+/**
  * The level / map tool family (docs/ARCHITECTURE.md §10 "level family", issue #16 — the Unity Scene.*
  * analog): level-create / level-open / level-save (save-as via optional path) / level-get-data (scoped
  * actor-tree reads) / level-list-loaded (persistent + streaming sublevels, World-Partition aware,
