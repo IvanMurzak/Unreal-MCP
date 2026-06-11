@@ -113,5 +113,77 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             // Post-fix: the supersede cancels the wedged connect → the localhost dial runs (green).
             await localDialed.Task.WaitAsync(TimeSpan.FromSeconds(10));
         }
+
+        [Fact]
+        public async Task SupersededDisconnect_CancelsTheTokenThreadedIntoPluginDisconnect()
+        {
+            using var host = NewHost(out _);
+
+            var disconnectStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var disconnectCancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var laterRan = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            // The disconnect wedges inside plugin.Disconnect until ITS token is cancelled — proving the
+            // per-transition token is actually threaded all the way into plugin.Disconnect(ct) (HandleDisconnectAsync).
+            var fake = new FakeMcpPlugin(
+                onConnect: _ => Task.FromResult(true),
+                onDisconnect: async ct =>
+                {
+                    disconnectStarted.TrySetResult();
+                    try { await Task.Delay(Timeout.Infinite, ct).ConfigureAwait(false); }
+                    catch (OperationCanceledException) { disconnectCancelled.TrySetResult(); }
+                });
+            host.SetPluginForTest(fake);
+
+            // keepConnected defaults to true; a config push with keepConnected=false drives a Disconnect transition
+            // (DecideConfigTransition true→false), whose HandleDisconnectAsync threads the token into plugin.Disconnect.
+            var disconnectCfg = new JsonObject
+            {
+                ["type"] = "config",
+                ["mode"] = "Custom",
+                ["host"] = "http://localhost:8500",
+                ["keepConnected"] = false,
+            };
+            host.OnConfigReceived(disconnectCfg);
+            await disconnectStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+            // A newer transition supersedes the wedged disconnect — the token observed by plugin.Disconnect must cancel.
+            _ = host.RunConnectionTransition(_ => { laterRan.TrySetResult(); return Task.CompletedTask; });
+
+            await disconnectCancelled.Task.WaitAsync(TimeSpan.FromSeconds(5)); // token threaded in AND cancelled on supersede
+            await laterRan.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+
+        [Fact]
+        public async Task InitialConnect_RoutedThroughQueue_IsSupersedableByALaterTransition()
+        {
+            using var host = NewHost(out _);
+
+            var connectStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var connectCancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var laterRan = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            // The initial connect wedges until ITS token is cancelled. If ConnectSignalRAsync issued a bare
+            // plugin.Connect() (no per-transition token) instead of routing through the queue, the token would
+            // never cancel and connectCancelled would time out.
+            var fake = new FakeMcpPlugin(async ct =>
+            {
+                connectStarted.TrySetResult();
+                try { await Task.Delay(Timeout.Infinite, ct).ConfigureAwait(false); }
+                catch (OperationCanceledException) { connectCancelled.TrySetResult(); }
+                return false;
+            });
+            host.SetPluginForTest(fake);
+
+            // The first handshake-ack kicks the initial SignalR connect through the serialized queue.
+            _ = host.ConnectSignalRAsync();
+            await connectStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+            // A later transition supersedes the in-flight initial connect — only possible because it was queued.
+            _ = host.RunConnectionTransition(_ => { laterRan.TrySetResult(); return Task.CompletedTask; });
+
+            await connectCancelled.Task.WaitAsync(TimeSpan.FromSeconds(5)); // initial connect WAS routed through the queue
+            await laterRan.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        }
     }
 }

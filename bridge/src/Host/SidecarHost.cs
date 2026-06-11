@@ -450,6 +450,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         /// </summary>
         internal Task RunConnectionTransition(Func<CancellationToken, Task> transition)
         {
+            CancellationTokenSource? superseded;
+            Task queued;
             lock (_transitionLock)
             {
                 // Supersede the in-flight transition (the documented last-write-wins): cancel its token so a
@@ -458,23 +460,36 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
                 // the loop's whole duration, so a token-less plugin.Connect() can NEVER return on its own and
                 // can NEVER be interrupted — this is the #35 root cause: after the device-auth Cloud reconnect
                 // the user's switch-back-to-Custom re-dial was enqueued behind the still-running Cloud connect
-                // and never ran, so the bridge held no link and the UI kept a stale "Connected". Cancel-before-
-                // dispose is safe (the in-flight transition observes an already-cancelled token, so no post-
-                // dispose registration throws), mirroring StartDeviceAuth's CTS handling.
-                _transitionCts?.Cancel();
-                _transitionCts?.Dispose();
+                // and never ran, so the bridge held no link and the UI kept a stale "Connected". Capture the
+                // predecessor here but cancel/dispose it OUTSIDE the lock (below): CancellationTokenSource.Cancel()
+                // runs the loser's await-continuations SYNCHRONOUSLY, and running arbitrary continuation code under
+                // _transitionLock is fragile against future edits.
+                superseded = _transitionCts;
                 var cts = new CancellationTokenSource();
                 _transitionCts = cts;
+                // Capture the token STRUCT, not the source: the queued continuation reads it when it RUNS, which
+                // may be after a LATER submission Cancel()+Dispose()'d this source. CancellationTokenSource.Token's
+                // getter still throws ObjectDisposedException post-dispose (would fault the loser transition task),
+                // but a captured CancellationToken copy stays usable — and cancel-before-dispose guarantees it
+                // reads cancelled, so the body observes the supersede correctly.
+                var token = cts.Token;
 
                 // Still CHAIN off the previous transition so two transitions never interleave their Connect/
                 // Disconnect calls (the original serialization reason) — but because the predecessor was just
                 // cancelled it now completes promptly, so this freshly-submitted transition runs without waiting
                 // on a wedged connect. The continuation passes THIS transition's token to the body.
-                var queued = _connectionTransition.ContinueWith(
-                    _ => transition(cts.Token), CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default).Unwrap();
+                queued = _connectionTransition.ContinueWith(
+                    _ => transition(token), CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default).Unwrap();
                 _connectionTransition = queued;
-                return queued;
             }
+
+            // Cancel-before-dispose is safe (the in-flight transition observes an already-cancelled token, so no
+            // post-dispose registration throws), mirroring StartDeviceAuth's CTS handling. Done outside the lock so
+            // the loser's synchronous continuations do not run under _transitionLock. Guard against a concurrent
+            // Dispose() having already torn this source down.
+            try { superseded?.Cancel(); } catch (ObjectDisposedException) { /* Dispose() raced us */ }
+            superseded?.Dispose();
+            return queued;
         }
 
         /// <summary>Push a §1.3 <c>status</c> message to the plugin (the §7 live connection indicator).</summary>
@@ -489,7 +504,9 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             return _ipc.SendToPluginAsync(status, CancellationToken.None);
         }
 
-        private Task ConnectSignalRAsync()
+        // Internal (not private) so the bridge xUnit suite can assert the initial connect is routed through the
+        // serialized + supersedable transition queue (a bare plugin.Connect() would not be cancellable).
+        internal Task ConnectSignalRAsync()
         {
             // Route the initial connect through the SAME serialized + supersedable queue as every re-dial, so a
             // config push arriving right after the handshake-ack cannot run a second plugin.Connect() concurrently
@@ -529,8 +546,18 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             _ipc.AuthMessageReceived -= HandleAuthMessage;
             try { _authCts?.Cancel(); } catch { /* ignore */ }
             _authCts?.Dispose();
-            try { _transitionCts?.Cancel(); } catch { /* ignore */ }
-            _transitionCts?.Dispose();
+            // Tear down the transition CTS under _transitionLock so a concurrent RunConnectionTransition cannot
+            // observe a half-disposed field (or have its captured predecessor disposed out from under it): take
+            // and null the field inside the lock, then cancel/dispose outside (cancel runs continuations
+            // synchronously — keep them off the lock). Cancel-after-dispose / double-dispose are guarded.
+            CancellationTokenSource? transitionCts;
+            lock (_transitionLock)
+            {
+                transitionCts = _transitionCts;
+                _transitionCts = null;
+            }
+            try { transitionCts?.Cancel(); } catch (ObjectDisposedException) { /* a racing submission disposed it */ }
+            transitionCts?.Dispose();
             _ownedHttpClient?.Dispose(); // released here — the authenticator does not own it (default path)
             try { _plugin?.Dispose(); } catch { /* ignore */ }
             _plugin = null;
