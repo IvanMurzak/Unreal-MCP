@@ -146,6 +146,46 @@ namespace
 			OutError = FString::Printf(TEXT("No level package exists at '%s'."), *PackageName);
 			return false;
 		}
+		// DoesPackageExist is content-agnostic: a non-level asset (material, blueprint, …) also passes. Without
+		// this guard NewMapFromTemplate -> LoadMap would silently fall back to a blank map (and level-open would
+		// log an engine Error). Require the resolved package to be a .umap.
+		if (!OutFilename.EndsWith(FPackageName::GetMapPackageExtension(), ESearchCase::IgnoreCase))
+		{
+			OutError = FString::Printf(TEXT("'%s' is not a level/map asset."), *PackageName);
+			OutFilename.Reset();
+			return false;
+		}
+		return true;
+	}
+
+	/** Names of dirty (unsaved) map packages that a New/Open Level would silently discard — empty when none.
+	 *  Surfaced as a structured `discardedDirtyLevels` note so an unattended/headless caller (where the engine's
+	 *  own save-prompt is suppressed) still learns that unsaved level edits were dropped. */
+	TArray<TSharedPtr<FJsonValue>> DirtyMapPackageNames()
+	{
+		TArray<UPackage*> DirtyPackages;
+		UEditorLoadingAndSavingUtils::GetDirtyMapPackages(DirtyPackages);
+		TArray<TSharedPtr<FJsonValue>> Out;
+		for (const UPackage* Package : DirtyPackages)
+			if (Package)
+				Out.Add(MakeShared<FJsonValueString>(Package->GetName()));
+		return Out;
+	}
+
+	/** Normalise a save-as asset path (object-path or package-name form) to a long package name, validating it;
+	 *  returns false + a reason when malformed. Sets bOutExists when a package already exists at the target, so
+	 *  the caller can surface an overwrite (SaveMap force-overwrites silently otherwise). */
+	bool ResolveSaveTargetPackage(const FString& AssetPath, FString& OutPackageName, bool& bOutExists, FString& OutError)
+	{
+		OutPackageName = AssetPath;
+		if (FPackageName::IsValidObjectPath(AssetPath))
+			OutPackageName = FPackageName::ObjectPathToPackageName(AssetPath);
+		if (!FPackageName::IsValidLongPackageName(OutPackageName))
+		{
+			OutError = FString::Printf(TEXT("'%s' is not a valid level asset path (expected e.g. '/Game/Maps/Arena')."), *AssetPath);
+			return false;
+		}
+		bOutExists = FPackageName::DoesPackageExist(OutPackageName);
 		return true;
 	}
 }
@@ -175,6 +215,10 @@ namespace UnrealMcpLevelTools
 				const FString Template = Call.GetString(TEXT("template"));
 				const FString SavePath = Call.GetString(TEXT("path"));
 
+				// Capture unsaved map edits BEFORE replacing the world — New/Open Level discards them and the
+				// engine's confirm dialog is suppressed under -unattended, so this note is the only signal.
+				TArray<TSharedPtr<FJsonValue>> DiscardedDirty = DirtyMapPackageNames();
+
 				UWorld* NewWorld = nullptr;
 				if (!Template.IsEmpty())
 				{
@@ -187,7 +231,9 @@ namespace UnrealMcpLevelTools
 						return FUnrealMcpToolResult::Error(FString::Printf(
 							TEXT("Could not create a level from template '%s': %s"), *Template, *TemplateError));
 
-					NewWorld = UEditorLoadingAndSavingUtils::NewMapFromTemplate(Template, /*bSaveExistingMap*/ false);
+					// Pass the resolved on-disk filename (not the raw asset path): NewMapFromTemplate forwards it
+					// to FEditorFileUtils::LoadMap, exactly as level-open does with its resolved filename.
+					NewWorld = UEditorLoadingAndSavingUtils::NewMapFromTemplate(TemplateFilename, /*bSaveExistingMap*/ false);
 					if (!NewWorld)
 						return FUnrealMcpToolResult::Error(FString::Printf(
 							TEXT("Could not create a level from template '%s' (template found but invalid)."), *Template));
@@ -202,23 +248,36 @@ namespace UnrealMcpLevelTools
 				}
 
 				bool bSaved = false;
+				bool bOverwrote = false;
+				FString SavedPackage;
 				if (!SavePath.IsEmpty())
 				{
-					// Save-as the freshly created transient world to the requested asset path.
-					bSaved = UEditorLoadingAndSavingUtils::SaveMap(NewWorld, SavePath);
+					// Normalise + validate the target and probe for a pre-existing level: SaveMap force-overwrites
+					// an existing .umap silently, so detect the collision and surface it via `overwrote`.
+					FString SaveError;
+					if (!ResolveSaveTargetPackage(SavePath, SavedPackage, bOverwrote, SaveError))
+						return FUnrealMcpToolResult::Error(SaveError);
+					bSaved = UEditorLoadingAndSavingUtils::SaveMap(NewWorld, SavedPackage);
 					if (!bSaved)
 						return FUnrealMcpToolResult::Error(FString::Printf(
-							TEXT("Created the level but failed to save it to '%s' (invalid path or save was declined)."), *SavePath));
+							TEXT("Created the level but failed to save it to '%s' (invalid path or save was declined)."), *SavedPackage));
 				}
 
 				ULevel* Persistent = NewWorld->PersistentLevel;
 				TSharedPtr<FJsonObject> Structured = LevelIdentity(Persistent, NewWorld);
 				Structured->SetBoolField(TEXT("saved"), bSaved);
 				if (bSaved)
-					Structured->SetStringField(TEXT("savedPath"), SavePath);
+				{
+					Structured->SetStringField(TEXT("savedPath"), SavedPackage);
+					Structured->SetBoolField(TEXT("overwrote"), bOverwrote);
+				}
+				if (DiscardedDirty.Num() > 0)
+					Structured->SetArrayField(TEXT("discardedDirtyLevels"), DiscardedDirty);
 
 				const FString What = Template.IsEmpty() ? TEXT("blank level") : FString::Printf(TEXT("level from template '%s'"), *Template);
-				const FString Where = bSaved ? FString::Printf(TEXT(" and saved to '%s'"), *SavePath) : TEXT(" (transient — pass 'path' to save)");
+				const FString Where = bSaved
+					? FString::Printf(TEXT(" and saved to '%s'%s"), *SavedPackage, bOverwrote ? TEXT(" (overwrote an existing level)") : TEXT(""))
+					: TEXT(" (transient — pass 'path' to save)");
 				return FUnrealMcpToolResult::Success(FString::Printf(TEXT("Created a %s%s."), *What, *Where), Structured);
 			});
 
@@ -244,13 +303,19 @@ namespace UnrealMcpLevelTools
 				if (!ResolveLevelFilename(Path, Filename, ResolveError))
 					return FUnrealMcpToolResult::Error(ResolveError);
 
+				// Capture unsaved map edits BEFORE the load replaces the world (see level-create).
+				TArray<TSharedPtr<FJsonValue>> DiscardedDirty = DirtyMapPackageNames();
+
 				UWorld* Opened = UEditorLoadingAndSavingUtils::LoadMap(Filename);
 				if (!Opened)
 					return FUnrealMcpToolResult::Error(FString::Printf(TEXT("Failed to open level '%s'."), *Path));
 
+				TSharedPtr<FJsonObject> Structured = LevelIdentity(Opened->PersistentLevel, Opened);
+				if (DiscardedDirty.Num() > 0)
+					Structured->SetArrayField(TEXT("discardedDirtyLevels"), DiscardedDirty);
 				return FUnrealMcpToolResult::Success(
 					FString::Printf(TEXT("Opened level '%s'."), *LevelShortName(Opened->PersistentLevel)),
-					LevelIdentity(Opened->PersistentLevel, Opened));
+					Structured);
 			});
 
 		// ----------------------------------------------------------------------------------------
@@ -272,18 +337,29 @@ namespace UnrealMcpLevelTools
 				const FString SavePath = Call.GetString(TEXT("path"));
 				if (!SavePath.IsEmpty())
 				{
-					if (!UEditorLoadingAndSavingUtils::SaveMap(World, SavePath))
+					// Normalise + validate the target and probe for a pre-existing level: SaveMap force-
+					// overwrites an existing .umap silently, so detect the collision and surface `overwrote`.
+					FString SavedPackage, SaveError;
+					bool bOverwrote = false;
+					if (!ResolveSaveTargetPackage(SavePath, SavedPackage, bOverwrote, SaveError))
+						return FUnrealMcpToolResult::Error(SaveError);
+					if (!UEditorLoadingAndSavingUtils::SaveMap(World, SavedPackage))
 						return FUnrealMcpToolResult::Error(FString::Printf(
-							TEXT("Failed to save the level to '%s' (invalid path or save was declined)."), *SavePath));
-					return FUnrealMcpToolResult::Success(FString::Printf(TEXT("Saved the current level to '%s'."), *SavePath));
+							TEXT("Failed to save the level to '%s' (invalid path or save was declined)."), *SavedPackage));
+					TSharedPtr<FJsonObject> Structured = MakeShared<FJsonObject>();
+					Structured->SetStringField(TEXT("savedPath"), SavedPackage);
+					Structured->SetBoolField(TEXT("overwrote"), bOverwrote);
+					return FUnrealMcpToolResult::Success(
+						FString::Printf(TEXT("Saved the current level to '%s'%s."), *SavedPackage,
+							bOverwrote ? TEXT(" (overwrote an existing level)") : TEXT("")), Structured);
 				}
 
 				// Save-in-place. SaveCurrentLevel returns false for a transient/never-saved world (no path
 				// yet) — surface that as a structured error rather than silently no-op'ing.
 				if (!UEditorLoadingAndSavingUtils::SaveCurrentLevel())
 					return FUnrealMcpToolResult::Error(
-						TEXT("The current level could not be saved in place (it is transient / has never been saved). "
-						     "Pass 'path' to save it to a location."));
+						TEXT("The current level could not be saved in place. This happens for a transient / never-saved "
+						     "level (pass 'path' to give it a location), and can also indicate a checkout or write failure."));
 
 				return FUnrealMcpToolResult::Success(
 					FString::Printf(TEXT("Saved the current level '%s'."), *LevelShortName(World->GetCurrentLevel())));
@@ -300,7 +376,7 @@ namespace UnrealMcpLevelTools
 			                  "the whole world."))
 			.ParamString(TEXT("actor"), TEXT("Label / name / path of a single actor to read. Omit to snapshot the whole world."))
 			.Param(TEXT("paths"), TEXT("array"), TEXT("Dotted property paths to include per actor (scoped read). Identity only when omitted."), EUnrealMcpParamRequirement::Optional, LevelMakeStringArraySchema(TEXT("Dotted property paths to include per actor (scoped read).")))
-			.ParamInt(TEXT("limit"), TEXT("Maximum number of actors to return for a world snapshot. Defaults to 200."))
+			.ParamInt(TEXT("limit"), TEXT("Maximum number of actors to return for a world snapshot. Defaults to 200; pass 0 or a negative value for no limit."))
 			.ReadOnlyHint(true)
 			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
 			{
@@ -322,7 +398,10 @@ namespace UnrealMcpLevelTools
 						return FUnrealMcpToolResult::Error(FString::Printf(TEXT("No actor matched '%s' (by label/name/path)."), *ActorRef));
 
 					TSharedPtr<FJsonObject> Entry = FUnrealMcpObjectRef::ActorIdentity(Actor);
-					Entry->SetObjectField(TEXT("data"), FUnrealMcpPropertyJson::SerializeObject(Actor, Paths));
+					// Attach reflected data only when a scoped 'paths' filter is given — matching the whole-world
+					// branch and the "Identity only when omitted" contract (an empty Paths returns the full dump).
+					if (Paths.Num() > 0)
+						Entry->SetObjectField(TEXT("data"), FUnrealMcpPropertyJson::SerializeObject(Actor, Paths));
 					return FUnrealMcpToolResult::Success(
 						FString::Printf(TEXT("Read actor '%s'."), *Actor->GetActorLabel()), Entry);
 				}
@@ -420,7 +499,7 @@ namespace UnrealMcpLevelTools
 			.Description(TEXT("Set the current editing level (the one new actors are added to) by name — the "
 			                  "content-browser short name of a loaded level (persistent or streaming sublevel). "
 			                  "Use level-list-loaded to discover the available names."))
-			.ParamString(TEXT("name"), TEXT("Short name of the loaded level to make current."), EUnrealMcpParamRequirement::Required)
+			.ParamString(TEXT("name"), TEXT("Short name — or full package path, to disambiguate — of the loaded level to make current."), EUnrealMcpParamRequirement::Required)
 			.DestructiveHint(false)
 			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
 			{
@@ -432,15 +511,29 @@ namespace UnrealMcpLevelTools
 				if (Name.IsEmpty())
 					return FUnrealMcpToolResult::Error(TEXT("Missing required 'name' (short name of a loaded level)."));
 
+				// Match by short name OR full package path. The package path is unambiguous; a short name that
+				// matches more than one loaded level is an error (the caller must pass the package path instead).
 				ULevel* Target = nullptr;
+				int32 ShortNameMatches = 0;
 				for (ULevel* Level : World->GetLevels())
 				{
-					if (Level && LevelShortName(Level).Equals(Name, ESearchCase::IgnoreCase))
+					if (!Level)
+						continue;
+					if (LevelPackageName(Level).Equals(Name, ESearchCase::IgnoreCase))
 					{
 						Target = Level;
+						ShortNameMatches = 1; // an exact package-path hit is decisive
 						break;
 					}
+					if (LevelShortName(Level).Equals(Name, ESearchCase::IgnoreCase))
+					{
+						Target = Level;
+						++ShortNameMatches;
+					}
 				}
+				if (ShortNameMatches > 1)
+					return FUnrealMcpToolResult::Error(FString::Printf(
+						TEXT("'%s' matches multiple loaded levels; pass the full package path (e.g. '/Game/Maps/Arena') to disambiguate."), *Name));
 				if (!Target)
 					return FUnrealMcpToolResult::Error(FString::Printf(
 						TEXT("No loaded level named '%s' (use level-list-loaded to see the available names)."), *Name));
@@ -470,7 +563,7 @@ namespace UnrealMcpLevelTools
 			.Description(TEXT("Unload (remove from the world) a loaded streaming sublevel by its short name. The "
 			                  "persistent level cannot be unloaded. Use level-list-loaded to discover the sublevel "
 			                  "names."))
-			.ParamString(TEXT("name"), TEXT("Short name of the streaming sublevel to unload."), EUnrealMcpParamRequirement::Required)
+			.ParamString(TEXT("name"), TEXT("Short name — or full package path, to disambiguate — of the streaming sublevel to unload."), EUnrealMcpParamRequirement::Required)
 			.DestructiveHint(true)
 			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
 			{
@@ -482,23 +575,40 @@ namespace UnrealMcpLevelTools
 				if (Name.IsEmpty())
 					return FUnrealMcpToolResult::Error(TEXT("Missing required 'name' (short name of a streaming sublevel)."));
 
-				// Reject the persistent level explicitly — it is not a sublevel and cannot be unloaded.
-				if (World->PersistentLevel && LevelShortName(World->PersistentLevel).Equals(Name, ESearchCase::IgnoreCase))
-					return FUnrealMcpToolResult::Error(FString::Printf(
-						TEXT("'%s' is the persistent level and cannot be unloaded."), *Name));
-
+				// Search the streaming sublevels FIRST (by short name OR full package path). Doing this before
+				// the persistent-level guard keeps a sublevel that happens to share the persistent level's short
+				// name reachable via its package path. A short name matching multiple sublevels is an error.
 				ULevelStreaming* Match = nullptr;
+				int32 ShortNameMatches = 0;
 				for (ULevelStreaming* Streaming : World->GetStreamingLevels())
 				{
-					if (Streaming && FPackageName::GetShortName(Streaming->GetWorldAssetPackageName()).Equals(Name, ESearchCase::IgnoreCase))
+					if (!Streaming)
+						continue;
+					const FString Package = Streaming->GetWorldAssetPackageName();
+					if (Package.Equals(Name, ESearchCase::IgnoreCase))
 					{
 						Match = Streaming;
+						ShortNameMatches = 1; // an exact package-path hit is decisive
 						break;
 					}
+					if (FPackageName::GetShortName(Package).Equals(Name, ESearchCase::IgnoreCase))
+					{
+						Match = Streaming;
+						++ShortNameMatches;
+					}
 				}
+				if (ShortNameMatches > 1)
+					return FUnrealMcpToolResult::Error(FString::Printf(
+						TEXT("'%s' matches multiple streaming sublevels; pass the full package path to disambiguate."), *Name));
 				if (!Match)
+				{
+					// Not a sublevel: explain the persistent-level case specifically, else a plain not-found.
+					if (World->PersistentLevel && LevelShortName(World->PersistentLevel).Equals(Name, ESearchCase::IgnoreCase))
+						return FUnrealMcpToolResult::Error(FString::Printf(
+							TEXT("'%s' is the persistent level and cannot be unloaded."), *Name));
 					return FUnrealMcpToolResult::Error(FString::Printf(
 						TEXT("No streaming sublevel named '%s' (use level-list-loaded to see the available names)."), *Name));
+				}
 
 				ULevel* Loaded = Match->GetLoadedLevel();
 				if (!Loaded)

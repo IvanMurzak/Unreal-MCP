@@ -143,7 +143,12 @@ void FUnrealMcpLevelToolsSpec::Define()
 					AddError(FString::Printf(TEXT("level-create failed: %s"), *R.Message));
 					return;
 				}
-				TestTrue(TEXT("create reports not-saved"), R.Structured.IsValid() && !R.Structured->GetBoolField(TEXT("saved")));
+				if (!R.Structured.IsValid())
+				{
+					AddError(TEXT("level-create returned no structured payload"));
+					return;
+				}
+				TestTrue(TEXT("create reports not-saved"), !R.Structured->GetBoolField(TEXT("saved")));
 				TestTrue(TEXT("create reports a persistent level"), R.Structured->GetBoolField(TEXT("isPersistent")));
 				LevelName = R.Structured->GetStringField(TEXT("name"));
 				TestTrue(TEXT("create returns a level name"), !LevelName.IsEmpty());
@@ -153,8 +158,13 @@ void FUnrealMcpLevelToolsSpec::Define()
 			{
 				const FUnrealMcpToolResult R = RunLevel(Registry, TEXT("level-list-loaded"), Args());
 				TestTrue(TEXT("list-loaded ok"), R.bSuccess);
+				if (!R.Structured.IsValid())
+				{
+					AddError(TEXT("level-list-loaded returned no structured payload"));
+					return;
+				}
 				double Count = 0;
-				TestTrue(TEXT("list-loaded has count"), R.Structured.IsValid() && R.Structured->TryGetNumberField(TEXT("count"), Count));
+				TestTrue(TEXT("list-loaded has count"), R.Structured->TryGetNumberField(TEXT("count"), Count));
 				TestTrue(TEXT("at least one level loaded"), Count >= 1.0);
 				TestFalse(TEXT("blank world is not partitioned"), R.Structured->GetBoolField(TEXT("isPartitionedWorld")));
 
@@ -172,8 +182,13 @@ void FUnrealMcpLevelToolsSpec::Define()
 			{
 				const FUnrealMcpToolResult R = RunLevel(Registry, TEXT("level-get-data"), Args());
 				TestTrue(TEXT("get-data ok"), R.bSuccess);
+				if (!R.Structured.IsValid())
+				{
+					AddError(TEXT("level-get-data returned no structured payload"));
+					return;
+				}
 				const TArray<TSharedPtr<FJsonValue>>* Actors = nullptr;
-				TestTrue(TEXT("get-data has actors array"), R.Structured.IsValid() && R.Structured->TryGetArrayField(TEXT("actors"), Actors) && Actors);
+				TestTrue(TEXT("get-data has actors array"), R.Structured->TryGetArrayField(TEXT("actors"), Actors) && Actors);
 				double Total = -1;
 				TestTrue(TEXT("get-data has total"), R.Structured->TryGetNumberField(TEXT("total"), Total) && Total >= 0.0);
 			}
