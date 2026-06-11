@@ -146,7 +146,7 @@ jobs:
           $reportDir = Join-Path $env:RUNNER_TEMP 'AutomationReport'
           if (Test-Path $reportDir) { Remove-Item $reportDir -Recurse -Force }
           & $editorCmd "$env:HOST_UPROJECT" -nullrhi -nosplash -unattended `
-            -ExecCmds="Automation RunTests UnrealMcp; Quit" `
+            -ExecCmds="Automation RunTests UnrealMcp.; Quit" `
             -ReportExportPath="$reportDir" -log
           # The editor's exit code is unreliable for test verdicts (test.md
           # Suite 3); the parsed index.json below is authoritative. Clear the

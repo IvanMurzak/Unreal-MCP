@@ -162,9 +162,18 @@ jobs:
           # command substitution before the fail-closed branches below can run.
           before_version="$(read_version "${BEFORE_SHA}" || true)"
           after_version="$(read_version "${AFTER_SHA}" || true)"
-          if [ -z "${after_version}" ]; then
+          # Fail CLOSED when EITHER side is unreadable. An empty after_version is
+          # the obvious "can't read the current version" case. An empty
+          # before_version is subtler but just as dangerous: read_version can fail
+          # on the BEFORE side when a force-push to main makes github.event.before
+          # unfetchable, or the .uplugin did not yet exist at that SHA. Comparing
+          # empty != non-empty would score that as a bump and fire a REAL tag +
+          # Release with no deliberate version change. The legitimate "VersionName
+          # first introduced" case is intentionally NOT auto-released here — cut it
+          # via workflow_dispatch with dry_run=false (the documented escape hatch).
+          if [ -z "${after_version}" ] || [ -z "${before_version}" ]; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "Could not read VersionName at ${AFTER_SHA} — treating as unchanged (fail closed)."
+            echo "Could not read VersionName at before=${BEFORE_SHA} / after=${AFTER_SHA} — treating as unchanged (fail closed)."
           elif [ "${before_version}" != "${after_version}" ]; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
             echo "VersionName changed: '${before_version}' -> '${after_version}'."
@@ -282,7 +291,7 @@ jobs:
           $reportDir = Join-Path $env:RUNNER_TEMP 'AutomationReport'
           if (Test-Path $reportDir) { Remove-Item $reportDir -Recurse -Force }
           & $editorCmd "$env:HOST_UPROJECT" -nullrhi -nosplash -unattended `
-            -ExecCmds="Automation RunTests UnrealMcp; Quit" `
+            -ExecCmds="Automation RunTests UnrealMcp.; Quit" `
             -ReportExportPath="$reportDir" -log
           # The editor's exit code is unreliable for test verdicts (test.md
           # Suite 3); the parsed index.json below is authoritative. Clear the

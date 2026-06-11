@@ -178,6 +178,23 @@ gh run rerun <run-id> --repo IvanMurzak/Unreal-MCP
 # gh run rerun <run-id> --failed
 ```
 
+**Post-tag failure (the full re-run will NOT recover it).** If `publish-release`
+already created the `v<version>` tag + GitHub Release but the run then failed
+(asset-upload error, or the expected `publish-npm` auth failure while no Trusted
+Publisher is configured / `private: true` is still set), a full re-run cannot
+fix it: `check-version` now sees `tag_exists=true` → `should_release=false` →
+every job skips, so CI can never publish that version again. Recover one of two
+ways:
+
+```bash
+# Option A — delete the tag + Release, then full re-run (CI republishes cleanly):
+gh release delete v<version> --repo IvanMurzak/Unreal-MCP --cleanup-tag --yes
+gh run rerun <run-id> --repo IvanMurzak/Unreal-MCP
+
+# Option B — keep the tag/Release and publish npm by hand from a clean checkout:
+cd cli && npm ci && npm run build && npm publish --access public
+```
+
 ## Operator gate summary
 
 - A normal merge to `main` publishes **nothing** (the version gate keeps it inert).
