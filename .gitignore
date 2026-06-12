@@ -57,3 +57,4 @@ Thumbs.db
 
 # Agent memory (infra workspace convention — never commit nested agent-memory dirs)
 **/.claude/agent-memory/
+**/.claude/pipeline/.runtime/
