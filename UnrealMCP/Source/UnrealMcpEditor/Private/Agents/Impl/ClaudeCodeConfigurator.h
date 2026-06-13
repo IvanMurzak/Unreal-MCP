@@ -25,4 +25,6 @@ public:
 		return FPaths::ConvertRelativePathToFull(FPaths::Combine(InProjectRoot, TEXT(".mcp.json")));
 	}
 	virtual FString GetBodyPath() const override { return TEXT("mcpServers"); }
+	// Per-agent skills folder (Phase C, issue #53) — mirrors Unity's ClaudeCodeConfigurator.SkillsPath.
+	virtual FString GetSkillsPath(const FString& /*InProjectRoot*/) const override { return TEXT(".claude/skills"); }
 };

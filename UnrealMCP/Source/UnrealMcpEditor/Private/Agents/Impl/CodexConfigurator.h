@@ -39,6 +39,8 @@ public:
 		return FPaths::ConvertRelativePathToFull(FPaths::Combine(InProjectRoot, TEXT(".codex"), TEXT("config.toml")));
 	}
 	virtual FString GetBodyPath() const override { return TEXT("mcp_servers"); }
+	// Per-agent skills folder (Phase C, issue #53) — mirrors Unity's CodexConfigurator.SkillsPath.
+	virtual FString GetSkillsPath(const FString& /*InProjectRoot*/) const override { return TEXT(".agents/skills"); }
 
 protected:
 	virtual TSharedRef<FAiAgentConfig> BuildStdio() const override

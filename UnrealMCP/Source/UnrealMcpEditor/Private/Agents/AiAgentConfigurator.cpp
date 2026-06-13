@@ -6,6 +6,7 @@
 
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
+#include "Misc/Paths.h"
 
 FAiAgentConnectionInfo FAiAgentConnectionInfo::FromPluginConfig(const FUnrealMcpConfig& Config, const FString& InServerPath, int32 InPort)
 {
@@ -26,6 +27,25 @@ FAiAgentConnectionInfo FAiAgentConnectionInfo::FromPluginConfig(const FUnrealMcp
 	Info.Token = Config.ResolveEffectiveToken();
 
 	return Info;
+}
+
+bool FAiAgentConfigurator::SupportsSkills(const FString& InProjectRoot) const
+{
+	return !GetSkillsPath(InProjectRoot).IsEmpty();
+}
+
+FString FAiAgentConfigurator::ResolveAbsoluteSkillsPath(const FString& InProjectRoot) const
+{
+	const FString Folder = GetSkillsPath(InProjectRoot);
+	if (Folder.IsEmpty())
+		return FString();
+
+	// Already-absolute path: normalize separators only. Otherwise resolve under the project root. Forward
+	// slashes throughout so the panel display and the writer agree regardless of host path conventions.
+	const FString Absolute = FPaths::IsRelative(Folder)
+		? FPaths::ConvertRelativePathToFull(FPaths::Combine(InProjectRoot, Folder))
+		: FPaths::ConvertRelativePathToFull(Folder);
+	return Absolute.Replace(TEXT("\\"), TEXT("/"));
 }
 
 void FAiAgentConfigurator::Initialize(const FAiAgentConnectionInfo& InConnection, const FString& InProjectRoot)

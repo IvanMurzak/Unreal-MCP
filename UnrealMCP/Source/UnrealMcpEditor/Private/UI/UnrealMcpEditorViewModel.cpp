@@ -282,6 +282,45 @@ void FUnrealMcpEditorViewModel::SetSelectedAgentId(const FString& InAgentId)
 		OnPersistConfig(Config);
 }
 
+bool FUnrealMcpEditorViewModel::IsAutoGenerateSkills(const FString& AgentId) const
+{
+	return Config.SkillAutoGenerateAgents.Contains(AgentId);
+}
+
+void FUnrealMcpEditorViewModel::SetAutoGenerateSkills(const FString& AgentId, bool bEnabled)
+{
+	if (AgentId.IsEmpty())
+		return;
+	const bool bCurrently = Config.SkillAutoGenerateAgents.Contains(AgentId);
+	if (bCurrently == bEnabled)
+		return; // no-op — no persist churn.
+
+	if (bEnabled)
+		Config.SkillAutoGenerateAgents.AddUnique(AgentId);
+	else
+		Config.SkillAutoGenerateAgents.Remove(AgentId);
+
+	// Persist-only: skills generation is pure presentation state (mirrors SetSelectedAgentId). Deliberately NO
+	// OnPushConfig — enabling skills does not change the live connection. The panel regenerates the files after this.
+	if (OnPersistConfig)
+		OnPersistConfig(Config);
+
+	UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] agent '%s' auto-generate-skills %s."),
+		*AgentId, bEnabled ? TEXT("enabled") : TEXT("disabled"));
+}
+
+void FUnrealMcpEditorViewModel::SetSkillsPath(const FString& InPath)
+{
+	const FString Normalized = InPath.IsEmpty() ? FString(TEXT(".claude/skills")) : InPath;
+	if (Config.SkillsPath == Normalized)
+		return; // no-op.
+	Config.SkillsPath = Normalized;
+
+	// Persist-only: the Custom skills folder is pure presentation state. Never pushes the §1.3 `config`.
+	if (OnPersistConfig)
+		OnPersistConfig(Config);
+}
+
 // --- Pure helpers ----------------------------------------------------------------------------------
 
 bool FUnrealMcpEditorViewModel::ValidateServerUrl(const FString& Url, FString& OutError)

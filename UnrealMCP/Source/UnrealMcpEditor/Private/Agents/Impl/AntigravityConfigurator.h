@@ -33,6 +33,8 @@ public:
 		return FPaths::ConvertRelativePathToFull(FPaths::Combine(Home, TEXT(".gemini"), TEXT("config"), TEXT("mcp_config.json")));
 	}
 	virtual FString GetBodyPath() const override { return TEXT("mcpServers"); }
+	// Per-agent skills folder (Phase C, issue #53) — mirrors Unity's AntigravityConfigurator.SkillsPath.
+	virtual FString GetSkillsPath(const FString& /*InProjectRoot*/) const override { return TEXT(".agent/skills"); }
 
 protected:
 	virtual void CustomizeStdio(FJsonAiAgentConfig& Config) const override

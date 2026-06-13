@@ -27,6 +27,8 @@ public:
 		return FPaths::ConvertRelativePathToFull(FPaths::Combine(InProjectRoot, TEXT(".junie"), TEXT("mcp"), TEXT("mcp.json")));
 	}
 	virtual FString GetBodyPath() const override { return TEXT("mcpServers"); }
+	// Per-agent skills folder (Phase C, issue #53) — mirrors Unity's RiderConfigurator.SkillsPath.
+	virtual FString GetSkillsPath(const FString& /*InProjectRoot*/) const override { return TEXT(".junie/skills"); }
 
 protected:
 	virtual void CustomizeStdio(FJsonAiAgentConfig& Config) const override { ApplyEnabled(Config); }

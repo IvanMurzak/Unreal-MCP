@@ -28,6 +28,9 @@ public:
 		return FPaths::ConvertRelativePathToFull(FPaths::Combine(InProjectRoot, TEXT(".mcp.json")));
 	}
 	virtual FString GetBodyPath() const override { return TEXT("mcpServers"); }
+	// Per-agent skills folder (Phase C, issue #53) — mirrors Unity's GitHubCopilotCliConfigurator.SkillsPath
+	// (Copilot CLI discovers `.claude/skills`, shared with Claude Code).
+	virtual FString GetSkillsPath(const FString& /*InProjectRoot*/) const override { return TEXT(".claude/skills"); }
 
 protected:
 	virtual void CustomizeStdio(FJsonAiAgentConfig& Config) const override

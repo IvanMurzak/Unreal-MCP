@@ -168,6 +168,28 @@ public:
 	 */
 	UNREALMCPEDITOR_API void SetSelectedAgentId(const FString& InAgentId);
 
+	// --- §7 per-agent skills generation (the Agent Configurators skills toggle, issue #53 Phase C). ---
+
+	/** Whether the user enabled per-agent "auto-generate skills" for @p AgentId (the C++ analog of Unity's IsAutoGenerateSkills). */
+	UNREALMCPEDITOR_API bool IsAutoGenerateSkills(const FString& AgentId) const;
+	/**
+	 * Toggle per-agent "auto-generate skills" for @p AgentId (mirrors Unity's SetAutoGenerateSkills). Mutates the
+	 * §8 skill-auto-generate agent set and persists the config (OnPersistConfig — so the choice survives a restart).
+	 * Pure UI persistence: like SetSelectedAgentId it deliberately does NOT push the §1.3 `config` (skills generation
+	 * has no effect on the live connection). A no-op change does nothing. Does NOT itself write skill files — the
+	 * caller (the panel) regenerates after enabling. Game-thread only.
+	 */
+	UNREALMCPEDITOR_API void SetAutoGenerateSkills(const FString& AgentId, bool bEnabled);
+
+	/** The user-overridable Custom-agent skills folder (project-relative; only the Custom configurator reads it). */
+	const FString& GetSkillsPath() const { return Config.SkillsPath; }
+	/**
+	 * Persist the user-overridable Custom-agent skills folder (mirrors Unity's editable SkillsPath setter). Pure UI
+	 * persistence: persists via OnPersistConfig, never pushes the §1.3 `config`. An empty value resets to the default
+	 * ".claude/skills" so the Custom agent always keeps a valid skills path. A no-op change does nothing. Game-thread only.
+	 */
+	UNREALMCPEDITOR_API void SetSkillsPath(const FString& InPath);
+
 	// --- Pure helpers (no instance state; the spec-friendly heart of the view-model). ---
 
 	/**

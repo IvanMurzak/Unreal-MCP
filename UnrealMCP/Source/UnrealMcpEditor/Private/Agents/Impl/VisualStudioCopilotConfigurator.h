@@ -26,4 +26,6 @@ public:
 		return FPaths::ConvertRelativePathToFull(FPaths::Combine(InProjectRoot, TEXT(".vs"), TEXT("mcp.json")));
 	}
 	virtual FString GetBodyPath() const override { return TEXT("servers"); }
+	// Per-agent skills folder (Phase C, issue #53) — mirrors Unity's VisualStudioCopilotConfigurator.SkillsPath.
+	virtual FString GetSkillsPath(const FString& /*InProjectRoot*/) const override { return TEXT(".github/skills"); }
 };
