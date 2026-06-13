@@ -18,6 +18,38 @@
   </PropertyGroup>
 
   <!--
+    Self-contained, single-file publish per RID (docs/ARCHITECTURE.md §6 BUNDLE model, issue #45).
+    The end user installs NO .NET SDK/runtime — the published binary carries the runtime inside it.
+    Self-containment is driven by the publish flags in bridge/publish.sh / bridge/publish.ps1
+    (-r <rid> with self-contained + PublishSingleFile). The properties below are a defensive default
+    so a flagless `dotnet publish -r <rid>` still produces a self-contained single file.
+
+    They are GUARDED on a non-empty RuntimeIdentifier so that a plain `dotnet build` / `dotnet test`
+    (no -r) stays framework-dependent and writes the flat `bin/<cfg>/net9.0/unreal-mcp-bridge.exe`
+    that the inner-dev-loop + live-e2e harness (UNREAL_MCP_BRIDGE_PATH, test.md Suite 7) point at.
+    They engage ONLY when a RID is supplied — i.e. only on the per-RID publish that builds the bundle.
+
+    Trimming is deliberately OFF — McpPlugin + ReflectorNet + SignalR resolve types by reflection at
+    runtime; the trimmer's static analysis cannot see those paths and would silently drop types,
+    yielding runtime MissingMethod/TypeLoad failures that do NOT surface at publish time. Do NOT add
+    a PublishTrimmed=true property. ReadyToRun is likewise skipped (makes output RID-native,
+    breaking cross-build of osx/linux from one host).
+  -->
+  <PropertyGroup Condition="'$(RuntimeIdentifier)' != ''">
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+  </PropertyGroup>
+
+  <!--
+    Release publishes drop debug symbols so the bundled binary ships no .pdb (size + cleanliness).
+    Scoped to a real RID publish so a plain Release build keeps its symbols.
+  -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Release' and '$(RuntimeIdentifier)' != ''">
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+  </PropertyGroup>
+
+  <!--
     Frozen reused NuGet pins, kept in lockstep with Godot-MCP (Godot-MCP.csproj):
     McpPlugin 6.7.0 + ReflectorNet 5.3.1. The MCP/reflection stack is NOT forked —
     pins are owned by the upstream release pipelines. Do NOT bump here.
