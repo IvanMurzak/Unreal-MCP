@@ -407,6 +407,13 @@ bool FJsonAiAgentConfig::AreValuesEquivalent(EUnrealMcpValueComparison Compariso
 			return NormalizeUrl(ExpectedStr) == NormalizeUrl(ActualStr);
 	}
 
+	if (Comparison == EUnrealMcpValueComparison::Path)
+	{
+		FString ExpectedStr, ActualStr;
+		if (Expected->TryGetString(ExpectedStr) && Actual->TryGetString(ActualStr))
+			return NormalizePath(ExpectedStr) == NormalizePath(ActualStr);
+	}
+
 	return JsonValueToString(Expected) == JsonValueToString(Actual);
 }
 
@@ -415,6 +422,17 @@ FString FJsonAiAgentConfig::NormalizeUrl(const FString& Url)
 	// Lowercase + trim a single trailing slash. Good enough for the http(s)://host:port/mcp shapes we emit
 	// (no need for full URI parsing — the server URL is always our own deterministic form).
 	FString Normalized = Url.ToLower();
+	Normalized.TrimStartAndEndInline();
+	while (Normalized.EndsWith(TEXT("/")))
+		Normalized.LeftChopInline(1);
+	return Normalized;
+}
+
+FString FJsonAiAgentConfig::NormalizePath(const FString& Path)
+{
+	// Unify separators to '/' and trim a trailing slash. The server command is always our own deterministic
+	// forward-slashed path, so this is enough to match a hand-edited backslash variant.
+	FString Normalized = Path.Replace(TEXT("\\"), TEXT("/"));
 	Normalized.TrimStartAndEndInline();
 	while (Normalized.EndsWith(TEXT("/")))
 		Normalized.LeftChopInline(1);

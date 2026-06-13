@@ -14,7 +14,9 @@
 enum class EUnrealMcpValueComparison : uint8
 {
 	Exact,
-	Url
+	Url,
+	/** Path-equivalence: separators unified to '/', trailing slash trimmed (Codex `command` comparison). */
+	Path
 };
 
 /**
@@ -64,6 +66,11 @@ public:
 
 	/** The full file content the entry would produce when written into an otherwise-empty file (UI preview). */
 	virtual FString GetExpectedFileContent() const = 0;
+
+	// Auth injection is baked at build time by each configurator (FJsonAiAgentConfig writes the token into `args` /
+	// the Authorization header; Codex's FTomlAiAgentConfig writes the `bearer_token_env_var` env-var-NAME indirection
+	// directly in BuildStdio/BuildHttp). There is therefore no post-hoc Apply*Authorization seam — token discipline
+	// lives entirely in the configurators, not here.
 
 	/** Write/merge this server entry into the file, preserving siblings + unrelated keys. Returns IsConfigured(). */
 	virtual bool Configure() = 0;

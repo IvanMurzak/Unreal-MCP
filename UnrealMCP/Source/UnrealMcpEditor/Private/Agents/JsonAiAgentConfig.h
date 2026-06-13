@@ -83,5 +83,6 @@ private:
 
 	static bool AreValuesEquivalent(EUnrealMcpValueComparison Comparison, const TSharedPtr<FJsonValue>& Expected, const TSharedPtr<FJsonValue>& Actual);
 	static FString NormalizeUrl(const FString& Url);
+	static FString NormalizePath(const FString& Path);
 	static FString JsonValueToString(const TSharedPtr<FJsonValue>& Value);
 };

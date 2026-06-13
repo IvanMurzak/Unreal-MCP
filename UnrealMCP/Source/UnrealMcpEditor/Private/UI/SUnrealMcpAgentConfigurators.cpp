@@ -139,7 +139,7 @@ FString SUnrealMcpAgentConfigurators::BuildSnippetPreview(bool bStdio) const
 {
 	if (!Selected.IsValid())
 		return FString();
-	FJsonAiAgentConfig& Config = bStdio ? Selected->GetConfigStdio() : Selected->GetConfigHttp();
+	FAiAgentConfig& Config = bStdio ? Selected->GetConfigStdio() : Selected->GetConfigHttp();
 	const FString Snippet = Config.GetExpectedFileContent();
 	const FAiAgentConnectionInfo Connection = ConnectionInfoProvider ? ConnectionInfoProvider() : FAiAgentConnectionInfo();
 	return MaskTokenInSnippet(Snippet, Connection.Token, bRevealToken);
@@ -268,7 +268,7 @@ void SUnrealMcpAgentConfigurators::RebuildAgentPanel()
 						if (Selected.IsValid())
 						{
 							// Copy the REAL snippet (unmasked) — the user is pasting it into their own config.
-							FJsonAiAgentConfig& Config = bStdio ? Selected->GetConfigStdio() : Selected->GetConfigHttp();
+							FAiAgentConfig& Config = bStdio ? Selected->GetConfigStdio() : Selected->GetConfigHttp();
 							FPlatformApplicationMisc::ClipboardCopy(*Config.GetExpectedFileContent());
 						}
 						return FReply::Handled();
