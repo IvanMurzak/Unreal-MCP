@@ -26,4 +26,18 @@ public:
 	/** Snippet-only: no on-disk config file. An empty path makes Configure/Detect/IsConfigured all return false. */
 	virtual FString GetConfigFilePath(const FString& /*InProjectRoot*/) const override { return FString(); }
 	virtual FString GetBodyPath() const override { return TEXT("mcpServers"); }
+
+	/**
+	 * Custom's skills path is user-overridable (Phase C, issue #53 — mirrors Unity's CustomConfigurator.SkillsPath,
+	 * which returns the persisted, editable UnityMcpPluginEditor.SkillsPath). The panel injects the persisted value
+	 * via SetCustomSkillsPath before building the skills section; the default keeps a sensible non-empty path so the
+	 * Custom agent always supports skills. An empty injected value resets to the default (never disables skills).
+	 */
+	virtual FString GetSkillsPath(const FString& /*InProjectRoot*/) const override { return CustomSkillsPath; }
+
+	/** Set the user-overridable Custom skills folder (project-relative). Empty resets to the default. */
+	void SetCustomSkillsPath(const FString& InPath) { CustomSkillsPath = InPath.IsEmpty() ? TEXT(".claude/skills") : InPath; }
+
+private:
+	FString CustomSkillsPath = TEXT(".claude/skills");
 };

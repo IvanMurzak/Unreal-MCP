@@ -5,6 +5,9 @@
 #include "UI/UnrealMcpEditorViewModel.h"
 #include "Agents/AiAgentConfiguratorRegistry.h"
 #include "Agents/JsonAiAgentConfig.h"
+#include "Agents/UnrealMcpSkillFileGenerator.h"
+#include "Agents/Impl/CustomConfigurator.h"
+#include "UnrealMcpToolRegistry.h"
 #include "UnrealMcpLog.h"
 
 #include "Widgets/SBoxPanel.h"
@@ -14,6 +17,7 @@
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SComboBox.h"
 #include "Widgets/Input/SCheckBox.h"
+#include "Widgets/Input/SEditableTextBox.h"
 #include "Widgets/Input/SMultiLineEditableTextBox.h"
 #include "Styling/AppStyle.h"
 #include "Misc/Paths.h"
@@ -124,6 +128,14 @@ void SUnrealMcpAgentConfigurators::BindSelected()
 	const FAiAgentConnectionInfo Connection = ConnectionInfoProvider ? ConnectionInfoProvider() : FAiAgentConnectionInfo();
 	const FString ProjectRoot = ProjectRootProvider ? ProjectRootProvider() : FPaths::ConvertRelativePathToFull(FPaths::ProjectDir());
 	Selected->Initialize(Connection, ProjectRoot);
+
+	// The Custom configurator's skills path is user-overridable and persisted (mirrors Unity's editable SkillsPath).
+	// Push the persisted value into the live Custom configurator so its GetSkillsPath()/SupportsSkills() reflect it.
+	if (IsViewModelValid())
+	{
+		if (FCustomConfigurator* Custom = static_cast<FCustomConfigurator*>(Selected->GetAgentId() == TEXT("other-custom") ? Selected.Get() : nullptr))
+			Custom->SetCustomSkillsPath(ViewModel->GetSkillsPath());
+	}
 }
 
 FString SUnrealMcpAgentConfigurators::MaskTokenInSnippet(const FString& Snippet, const FString& Token, bool bReveal)
@@ -306,6 +318,16 @@ void SUnrealMcpAgentConfigurators::RebuildAgentPanel()
 	AgentPanelContainer->AddSlot().AutoHeight().Padding(0, 4, 0, 0)[ SNew(SSeparator) ];
 	AgentPanelContainer->AddSlot().AutoHeight()[ BuildTransportSection(LOCTEXT("HttpHeader", "HTTP (connect to URL)"), /*bStdio*/ false) ];
 
+	// Skills section (§7/§53 Phase C) — shown ONLY when the selected agent supports skills.
+	{
+		const FString ProjectRoot = ProjectRootProvider ? ProjectRootProvider() : FPaths::ConvertRelativePathToFull(FPaths::ProjectDir());
+		if (Selected->SupportsSkills(ProjectRoot))
+		{
+			AgentPanelContainer->AddSlot().AutoHeight().Padding(0, 4, 0, 0)[ SNew(SSeparator) ];
+			AgentPanelContainer->AddSlot().AutoHeight()[ BuildSkillsSection() ];
+		}
+	}
+
 	// Remove (clears both transports).
 	AgentPanelContainer->AddSlot().AutoHeight().Padding(0, 8, 0, 0)
 	[
@@ -324,6 +346,124 @@ void SUnrealMcpAgentConfigurators::RebuildAgentPanel()
 			return FReply::Handled();
 		})
 	];
+}
+
+FString SUnrealMcpAgentConfigurators::ResolveSelectedSkillsPath() const
+{
+	if (!Selected.IsValid())
+		return FString();
+	const FString ProjectRoot = ProjectRootProvider ? ProjectRootProvider() : FPaths::ConvertRelativePathToFull(FPaths::ProjectDir());
+	return Selected->ResolveAbsoluteSkillsPath(ProjectRoot);
+}
+
+void SUnrealMcpAgentConfigurators::GenerateSkillsForSelected()
+{
+	const FString SkillsRoot = ResolveSelectedSkillsPath();
+	if (SkillsRoot.IsEmpty())
+	{
+		UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] cannot generate skills: selected agent has no skills path."));
+		return;
+	}
+
+	// Enumerate the full core tool set from a bare registry (headless-safe; the writer sources docs from the C++ tool
+	// registry, NOT a live bridge). Token discipline (§8): skill files carry only tool docs — no token is read/written.
+	FUnrealMcpToolRegistry ToolRegistry;
+	FUnrealMcpSkillFileGenerator::PopulateCoreRegistry(ToolRegistry);
+	const FUnrealMcpSkillFileGenerator::FResult Result = FUnrealMcpSkillFileGenerator::Generate(ToolRegistry, SkillsRoot);
+
+	UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] agent '%s' skills generate %s (%d file(s) -> %s)."),
+		Selected.IsValid() ? *Selected->GetAgentName() : TEXT("?"),
+		Result.bSuccess ? TEXT("succeeded") : TEXT("failed"), Result.FilesWritten, *SkillsRoot);
+}
+
+TSharedRef<SWidget> SUnrealMcpAgentConfigurators::BuildSkillsSection()
+{
+	const bool bIsCustom = Selected.IsValid() && Selected->GetAgentId() == TEXT("other-custom");
+	const FString AgentId = Selected.IsValid() ? Selected->GetAgentId() : FString();
+	const FString AbsolutePath = ResolveSelectedSkillsPath();
+
+	TSharedRef<SVerticalBox> Section = SNew(SVerticalBox)
+		+ SVerticalBox::Slot().AutoHeight().Padding(0, 8, 0, 0)
+		[
+			SNew(STextBlock)
+			.Text(LOCTEXT("SkillsHeader", "Skills")).Font(FCoreStyle::GetDefaultFontStyle("Bold", 10))
+		]
+		+ SVerticalBox::Slot().AutoHeight().Padding(0, 2, 0, 0)
+		[
+			SNew(STextBlock)
+			.AutoWrapText(true)
+			.Text(LOCTEXT("SkillsDesc", "Generate per-tool skill documentation (one SKILL.md per Unreal MCP tool) for this agent."))
+		]
+		// Auto-generate toggle (per-agent; persisted via the view-model). Turning it on generates immediately.
+		+ SVerticalBox::Slot().AutoHeight().Padding(0, 4, 0, 0)
+		[
+			SNew(SCheckBox)
+			.IsChecked_Lambda([this, AgentId]()
+			{
+				return (IsViewModelValid() && ViewModel->IsAutoGenerateSkills(AgentId))
+					? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+			})
+			.OnCheckStateChanged_Lambda([this, AgentId](ECheckBoxState NewState)
+			{
+				const bool bEnabled = (NewState == ECheckBoxState::Checked);
+				if (IsViewModelValid())
+					ViewModel->SetAutoGenerateSkills(AgentId, bEnabled);
+				if (bEnabled)
+					GenerateSkillsForSelected(); // auto-generate on enable (mirrors Unity's toggle callback)
+			})
+			[
+				SNew(STextBlock).Text(LOCTEXT("AutoGenSkills", "Auto-generate skills"))
+			]
+		];
+
+	// Output path: a read-only display for built-in agents; an editable field for the Custom agent (its skills path
+	// is user-overridable + persisted, mirroring Unity's editable Custom SkillsPath).
+	if (bIsCustom)
+	{
+		Section->AddSlot().AutoHeight().Padding(0, 4, 0, 0)
+		[
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 6, 0).VAlign(VAlign_Center)
+			[
+				SNew(STextBlock).Text(LOCTEXT("SkillsPathLabel", "Skills folder:"))
+			]
+			+ SHorizontalBox::Slot().FillWidth(1.0f)
+			[
+				SNew(SEditableTextBox)
+				.Text_Lambda([this]() { return IsViewModelValid() ? FText::FromString(ViewModel->GetSkillsPath()) : FText::GetEmpty(); })
+				.OnTextCommitted_Lambda([this](const FText& NewText, ETextCommit::Type)
+				{
+					if (IsViewModelValid())
+						ViewModel->SetSkillsPath(NewText.ToString().TrimStartAndEnd());
+					BindSelected();      // re-sync the Custom configurator's path
+					RebuildAgentPanel(); // refresh the resolved-path display
+				})
+			]
+		];
+	}
+
+	// The resolved absolute output path (always shown — read-only).
+	Section->AddSlot().AutoHeight().Padding(0, 4, 0, 0)
+	[
+		SNew(STextBlock)
+		.AutoWrapText(true)
+		.Text(FText::Format(LOCTEXT("SkillsOutFmt", "Output: {0}"), FText::FromString(AbsolutePath)))
+	];
+
+	// Generate button (explicit regeneration; idempotent).
+	Section->AddSlot().AutoHeight().Padding(0, 4, 0, 0)
+	[
+		SNew(SButton)
+		.Text(LOCTEXT("GenerateSkills", "Generate"))
+		.ToolTipText(LOCTEXT("GenerateSkillsHint", "Write one SKILL.md per Unreal MCP tool into the output folder (overwrites existing)."))
+		.OnClicked_Lambda([this]()
+		{
+			GenerateSkillsForSelected();
+			return FReply::Handled();
+		})
+	];
+
+	return Section;
 }
 
 #undef LOCTEXT_NAMESPACE

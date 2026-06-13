@@ -73,6 +73,29 @@ public:
 	/** The JSON body path this agent nests its server map under (Claude Code / Cursor: "mcpServers"). */
 	virtual FString GetBodyPath() const { return TEXT("mcpServers"); }
 
+	// --- Skills metadata (docs/ARCHITECTURE.md §7, issue #53 Phase C — the C++/Slate analog of Unity's
+	//     AiAgentConfigurator.SkillsPath / SupportsSkills / ResolveAbsoluteSkillsPath). ---
+
+	/**
+	 * The project-relative folder this agent expects its generated skill files under (e.g. ".claude/skills"),
+	 * or EMPTY when the agent does not support skills. Mirrors Unity's per-agent SkillsPath assignments 1:1
+	 * (claude-code → .claude/skills, cursor → .cursor/skills, …). @p ProjectRoot is supplied so the Custom
+	 * configurator can resolve a user-overridable path; the built-in agents ignore it and return a constant.
+	 * Empty return ⇒ SupportsSkills() == false ⇒ no skills section is shown for this agent.
+	 */
+	virtual FString GetSkillsPath(const FString& InProjectRoot) const { return FString(); }
+
+	/** True when this agent declares a non-empty skills path (the C++ analog of Unity's SupportsSkills). */
+	UNREALMCPEDITOR_API bool SupportsSkills(const FString& InProjectRoot) const;
+
+	/**
+	 * Resolve this agent's (project-relative or already-absolute) skills path to an absolute filesystem path
+	 * under @p ProjectRoot, with forward slashes — the location the writer creates and the panel displays.
+	 * An already-rooted path is returned normalized; an empty path stays empty. Mirrors Unity's
+	 * ResolveAbsoluteSkillsPath. Pure (no disk access), so the specs drive it directly.
+	 */
+	UNREALMCPEDITOR_API FString ResolveAbsoluteSkillsPath(const FString& InProjectRoot) const;
+
 	// --- Config assembly. ---
 
 	/** (Re)bind the configurator to the resolved connection info + project root; invalidates the cached configs. */

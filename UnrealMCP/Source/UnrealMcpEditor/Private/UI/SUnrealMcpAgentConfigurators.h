@@ -79,4 +79,13 @@ private:
 	FString BuildSnippetPreview(bool bStdio) const;
 	// Mask the bearer token inside an assembled snippet string unless revealed.
 	static FString MaskTokenInSnippet(const FString& Snippet, const FString& Token, bool bReveal);
+
+	// --- Skills section (issue #53 Phase C). Shown ONLY when the selected agent SupportsSkills. ---
+
+	/** Build the per-agent skills section (toggle + resolved output path + Generate button, plus the Custom edit field). */
+	TSharedRef<SWidget> BuildSkillsSection();
+	/** Resolve the selected agent's absolute skills folder (project-relative resolved under the live project root). */
+	FString ResolveSelectedSkillsPath() const;
+	/** Generate the SKILL.md files for the selected agent into its resolved skills folder (idempotent). Logs the result. */
+	void GenerateSkillsForSelected();
 };

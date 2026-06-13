@@ -42,6 +42,8 @@ public:
 #endif
 	}
 	virtual FString GetBodyPath() const override { return TEXT("mcpServers"); }
+	// Per-agent skills folder (Phase C, issue #53) — mirrors Unity's ClineConfigurator.SkillsPath.
+	virtual FString GetSkillsPath(const FString& /*InProjectRoot*/) const override { return TEXT(".cline/skills"); }
 
 protected:
 	virtual void CustomizeHttp(FJsonAiAgentConfig& Config) const override

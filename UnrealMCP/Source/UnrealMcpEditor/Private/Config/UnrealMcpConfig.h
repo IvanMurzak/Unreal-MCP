@@ -92,6 +92,15 @@ public:
 	// panel (e.g. "claude-code"/"cursor"). Pure presentation state, NO env override — Save() always round-trips
 	// the live value. Defaults to the first reference agent so a fresh project opens on a valid selection.
 	FString SelectedAgentId = TEXT("claude-code"); // "selectedAgentId"
+	// "skillAutoGenerateAgents" — the set of agent ids the user enabled per-agent "auto-generate skills" for (the
+	// §7 Agent Configurators skills toggle, issue #53 Phase C). The C++ analog of Unity's per-agent SkillAutoGenerate
+	// map; modelled as a string LIST (like enabledTools/disabledTools) since the JSON layer has no native map helper.
+	// Pure UI persistence, NO env override — Save() always round-trips the live value. Empty = no agent auto-generates.
+	TArray<FString> SkillAutoGenerateAgents; // "skillAutoGenerateAgents"
+	// "skillsPath" — the user-overridable skills folder for the Custom ("Other") agent (issue #53 Phase C, mirrors
+	// Unity's editable UnityMcpPluginEditor.SkillsPath). Project-relative; only the Custom configurator reads it (the
+	// built-in agents return their own constant). Defaults to ".claude/skills". Pure UI persistence, NO env override.
+	FString SkillsPath = TEXT(".claude/skills"); // "skillsPath"
 
 	UNREALMCPEDITOR_API FUnrealMcpConfig();
 

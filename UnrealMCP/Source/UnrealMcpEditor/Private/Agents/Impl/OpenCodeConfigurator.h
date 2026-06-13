@@ -30,6 +30,8 @@ public:
 		return FPaths::ConvertRelativePathToFull(FPaths::Combine(InProjectRoot, TEXT("opencode.json")));
 	}
 	virtual FString GetBodyPath() const override { return TEXT("mcp"); }
+	// Per-agent skills folder (Phase C, issue #53) — mirrors Unity's OpenCodeConfigurator.SkillsPath.
+	virtual FString GetSkillsPath(const FString& /*InProjectRoot*/) const override { return TEXT(".opencode/skills"); }
 
 protected:
 	virtual TSharedRef<FAiAgentConfig> BuildStdio() const override

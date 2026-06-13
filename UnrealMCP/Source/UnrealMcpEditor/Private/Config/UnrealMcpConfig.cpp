@@ -45,6 +45,8 @@ namespace
 	const TCHAR* KeyEnabledTools   = TEXT("enabledTools");
 	const TCHAR* KeyDisabledTools  = TEXT("disabledTools");
 	const TCHAR* KeySelectedAgentId = TEXT("selectedAgentId");
+	const TCHAR* KeySkillAutoGenerateAgents = TEXT("skillAutoGenerateAgents");
+	const TCHAR* KeySkillsPath     = TEXT("skillsPath");
 
 	// Read a JSON array field into a string array (skipping empty/non-string entries). Shared by the
 	// enabledTools / disabledTools list fields so their parsing stays identical.
@@ -159,6 +161,11 @@ void FUnrealMcpConfig::LoadFromJson(const TSharedPtr<FJsonObject>& Json)
 		// Pure UI persistence (no env override). A blank/missing value keeps the default selection.
 		if (Json->TryGetStringField(KeySelectedAgentId, Str) && !Str.IsEmpty())
 			SelectedAgentId = Str;
+
+		// Skills (issue #53 Phase C) — pure UI persistence, no env override.
+		ReadStringArrayField(Json, KeySkillAutoGenerateAgents, SkillAutoGenerateAgents);
+		if (Json->TryGetStringField(KeySkillsPath, Str) && !Str.IsEmpty())
+			SkillsPath = Str;
 	}
 
 	// Snapshot the (defaults + disk) baseline AFTER loading — this is what Save() restores for any key an
@@ -337,6 +344,13 @@ TSharedPtr<FJsonObject> FUnrealMcpConfig::ToJson() const
 	Obj->SetArrayField(KeyDisabledTools, Disabled);
 
 	Obj->SetStringField(KeySelectedAgentId, SelectedAgentId);
+
+	TArray<TSharedPtr<FJsonValue>> SkillAgents;
+	for (const FString& AgentId : SkillAutoGenerateAgents)
+		SkillAgents.Add(MakeShared<FJsonValueString>(AgentId));
+	Obj->SetArrayField(KeySkillAutoGenerateAgents, SkillAgents);
+
+	Obj->SetStringField(KeySkillsPath, SkillsPath);
 
 	return Obj;
 }
