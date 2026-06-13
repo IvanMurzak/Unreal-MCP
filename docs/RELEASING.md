@@ -377,7 +377,7 @@ Notes:
 ## Re-running a release — full rerun only
 
 If a release run fails partway, **always use a full re-run, never "re-run failed
-jobs"**. The artifact-build jobs (`build-bridge-zips`, `build-plugin-zip`)
+jobs"**. The artifact-build jobs (`build-bridge-macos`, `build-bridge-windows`, `build-plugin-zip`)
 upload artifacts that the `publish-release` job downloads; a
 partial re-run does not re-run the succeeded build jobs, so their artifacts are
 absent on the new attempt and `publish-release` fails with `Artifact not found`.

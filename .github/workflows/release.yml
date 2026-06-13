@@ -563,7 +563,7 @@ jobs:
           endpoint: https://eus.codesigning.azure.net
           trusted-signing-account-name: ivan-murzak
           certificate-profile-name: ai-game-dev-cert
-          files-folder: ${{ github.workspace }}/bridge/publish
+          files-folder: ${{ github.workspace }}/bridge/publish/win-x64
           files-folder-filter: exe
           files-folder-recurse: true
 
