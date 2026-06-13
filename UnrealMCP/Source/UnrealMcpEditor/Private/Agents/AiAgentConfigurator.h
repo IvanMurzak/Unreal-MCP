@@ -81,9 +81,9 @@ public:
 	UNREALMCPEDITOR_API void Invalidate();
 
 	/** The STDIO (launch-the-server) MCP-client config for this agent. Lazily built; never null after Initialize. */
-	UNREALMCPEDITOR_API FJsonAiAgentConfig& GetConfigStdio();
+	UNREALMCPEDITOR_API FAiAgentConfig& GetConfigStdio();
 	/** The HTTP (connect-to-URL) MCP-client config for this agent. Lazily built; never null after Initialize. */
-	UNREALMCPEDITOR_API FJsonAiAgentConfig& GetConfigHttp();
+	UNREALMCPEDITOR_API FAiAgentConfig& GetConfigHttp();
 
 	// --- Status helpers (across both transports, like Unity's RefreshConfigurationUI). ---
 
@@ -100,10 +100,31 @@ protected:
 	FAiAgentConnectionInfo Connection;
 	FString ProjectRoot;
 
-private:
-	TSharedPtr<FJsonAiAgentConfig> ConfigStdio;
-	TSharedPtr<FJsonAiAgentConfig> ConfigHttp;
+	/**
+	 * Build the STDIO config for this agent. The base produces the canonical JSON shape (the cli's buildServerEntry:
+	 * type=stdio, command=<server>, args=[port, client-transport, authorization, token], with url/headers removed)
+	 * and then calls CustomizeStdio() so a subclass can add per-agent keys (e.g. `disabled`, `tools`). Override the
+	 * whole method only for a fundamentally different shape (a TOML agent, OpenCode's array-command, Antigravity's
+	 * serverUrl). The default is virtual so the 16 JSON agents reuse it and only the outliers replace it.
+	 */
+	UNREALMCPEDITOR_API virtual TSharedRef<FAiAgentConfig> BuildStdio() const;
+	/** Build the HTTP config (canonical JSON: type=http, url=<host>/mcp, headers.Authorization when auth+token). */
+	UNREALMCPEDITOR_API virtual TSharedRef<FAiAgentConfig> BuildHttp() const;
 
-	TSharedRef<FJsonAiAgentConfig> BuildStdio() const;
-	TSharedRef<FJsonAiAgentConfig> BuildHttp() const;
+	/** Hook for a JSON subclass to add per-agent STDIO keys (default no-op). Called by the base BuildStdio(). */
+	virtual void CustomizeStdio(FJsonAiAgentConfig& Config) const {}
+	/** Hook for a JSON subclass to add per-agent HTTP keys (default no-op). Called by the base BuildHttp(). */
+	virtual void CustomizeHttp(FJsonAiAgentConfig& Config) const {}
+
+	// --- Connection-fact accessors for subclasses that build their own config shape (read-only). ---
+	const FAiAgentConnectionInfo& GetConnection() const { return Connection; }
+	const FString& GetProjectRoot() const { return ProjectRoot; }
+	/** The STDIO server-launch args shared by every agent (port / client-transport / authorization / token). */
+	UNREALMCPEDITOR_API TArray<FString> GetStdioArgs() const;
+	/** The server binary path with forward slashes (the `command` for STDIO agents). */
+	UNREALMCPEDITOR_API FString GetStdioCommand() const;
+
+private:
+	TSharedPtr<FAiAgentConfig> ConfigStdio;
+	TSharedPtr<FAiAgentConfig> ConfigHttp;
 };

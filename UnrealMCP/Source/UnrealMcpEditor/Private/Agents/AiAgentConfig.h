@@ -14,7 +14,9 @@
 enum class EUnrealMcpValueComparison : uint8
 {
 	Exact,
-	Url
+	Url,
+	/** Path-equivalence: separators unified to '/', trailing slash trimmed (Codex `command` comparison). */
+	Path
 };
 
 /**
@@ -64,6 +66,20 @@ public:
 
 	/** The full file content the entry would produce when written into an otherwise-empty file (UI preview). */
 	virtual FString GetExpectedFileContent() const = 0;
+
+	/**
+	 * Inject the STDIO bearer token into this config's transport-specific shape (Unity's ApplyStdioAuthorization).
+	 * The default is a no-op: FJsonAiAgentConfig bakes the token into its `args` at build time, so it needs no
+	 * post-hoc injection. Override in a format whose token lives elsewhere (e.g. a TOML env-var indirection).
+	 * @p bRequired is true when auth is required AND a token exists; @p Token is the REAL bearer (never logged).
+	 */
+	virtual void ApplyStdioAuthorization(bool bRequired, const FString& Token) {}
+	/**
+	 * Inject the HTTP bearer token into this config's transport-specific shape (Unity's ApplyHttpAuthorization).
+	 * The default is a no-op (FJsonAiAgentConfig bakes the Authorization header at build time). Override for a
+	 * format that carries auth differently (e.g. Codex's TOML `bearer_token_env_var` indirection).
+	 */
+	virtual void ApplyHttpAuthorization(bool bRequired, const FString& Token) {}
 
 	/** Write/merge this server entry into the file, preserving siblings + unrelated keys. Returns IsConfigured(). */
 	virtual bool Configure() = 0;

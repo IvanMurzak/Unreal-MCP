@@ -5,22 +5,50 @@
 #include "Agents/AiAgentConfigurator.h"
 #include "Agents/Impl/ClaudeCodeConfigurator.h"
 #include "Agents/Impl/CursorConfigurator.h"
+#include "Agents/Impl/ClaudeDesktopConfigurator.h"
+#include "Agents/Impl/VisualStudioCodeCopilotConfigurator.h"
+#include "Agents/Impl/VisualStudioCopilotConfigurator.h"
+#include "Agents/Impl/RiderConfigurator.h"
+#include "Agents/Impl/GitHubCopilotCliConfigurator.h"
+#include "Agents/Impl/GeminiConfigurator.h"
+#include "Agents/Impl/AntigravityConfigurator.h"
+#include "Agents/Impl/ClineConfigurator.h"
+#include "Agents/Impl/OpenCodeConfigurator.h"
+#include "Agents/Impl/CodexConfigurator.h"
+#include "Agents/Impl/KiloCodeConfigurator.h"
+#include "Agents/Impl/UnityAiConfigurator.h"
+#include "Agents/Impl/ZooCodeConfigurator.h"
+#include "Agents/Impl/CustomConfigurator.h"
 
 TArray<TSharedRef<FAiAgentConfigurator>> FAiAgentConfiguratorRegistry::MakeDefault()
 {
-	// Phase A: the two reference agents. Sorted alphabetically by display name (matches Unity/Godot), which keeps
-	// the dropdown stable as Phase B adds agents. A future Custom configurator is appended AFTER the sort so it
-	// always stays last regardless of its name.
+	// All Unity-parity agents. Sorted alphabetically by display name (matches Unity/Godot), which keeps the dropdown
+	// stable. The Custom configurator is appended AFTER the sort so it always stays last regardless of its name
+	// (the Custom-last invariant). 16 agents + Custom.
 	TArray<TSharedRef<FAiAgentConfigurator>> Configurators;
+	Configurators.Add(MakeShared<FAntigravityConfigurator>());
 	Configurators.Add(MakeShared<FClaudeCodeConfigurator>());
+	Configurators.Add(MakeShared<FClaudeDesktopConfigurator>());
+	Configurators.Add(MakeShared<FClineConfigurator>());
+	Configurators.Add(MakeShared<FCodexConfigurator>());
 	Configurators.Add(MakeShared<FCursorConfigurator>());
+	Configurators.Add(MakeShared<FGeminiConfigurator>());
+	Configurators.Add(MakeShared<FGitHubCopilotCliConfigurator>());
+	Configurators.Add(MakeShared<FKiloCodeConfigurator>());
+	Configurators.Add(MakeShared<FOpenCodeConfigurator>());
+	Configurators.Add(MakeShared<FRiderConfigurator>());
+	Configurators.Add(MakeShared<FUnityAiConfigurator>());
+	Configurators.Add(MakeShared<FVisualStudioCodeCopilotConfigurator>());
+	Configurators.Add(MakeShared<FVisualStudioCopilotConfigurator>());
+	Configurators.Add(MakeShared<FZooCodeConfigurator>());
 
 	Configurators.Sort([](const TSharedRef<FAiAgentConfigurator>& A, const TSharedRef<FAiAgentConfigurator>& B)
 	{
 		return A->GetAgentName() < B->GetAgentName();
 	});
 
-	// (Phase B) append the Custom configurator here, after the sort, to preserve the Custom-last invariant.
+	// Append the Custom configurator AFTER the sort to preserve the Custom-last invariant.
+	Configurators.Add(MakeShared<FCustomConfigurator>());
 
 	return Configurators;
 }

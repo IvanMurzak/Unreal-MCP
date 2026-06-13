@@ -41,21 +41,38 @@ void FAiAgentConfigurator::Invalidate()
 	ConfigHttp.Reset();
 }
 
-FJsonAiAgentConfig& FAiAgentConfigurator::GetConfigStdio()
+FAiAgentConfig& FAiAgentConfigurator::GetConfigStdio()
 {
 	if (!ConfigStdio.IsValid())
 		ConfigStdio = BuildStdio();
 	return *ConfigStdio;
 }
 
-FJsonAiAgentConfig& FAiAgentConfigurator::GetConfigHttp()
+FAiAgentConfig& FAiAgentConfigurator::GetConfigHttp()
 {
 	if (!ConfigHttp.IsValid())
 		ConfigHttp = BuildHttp();
 	return *ConfigHttp;
 }
 
-TSharedRef<FJsonAiAgentConfig> FAiAgentConfigurator::BuildStdio() const
+FString FAiAgentConfigurator::GetStdioCommand() const
+{
+	return Connection.ServerPath.Replace(TEXT("\\"), TEXT("/"));
+}
+
+TArray<FString> FAiAgentConfigurator::GetStdioArgs() const
+{
+	// The shared GameDev-MCP-Server CLI contract (identical to the cli's buildServerEntry args, sans plugin-timeout
+	// which the Unreal cli does not emit). The token arg is empty unless auth is required.
+	TArray<FString> Args;
+	Args.Add(FString::Printf(TEXT("port=%d"), Connection.Port));
+	Args.Add(TEXT("client-transport=stdio"));
+	Args.Add(FString::Printf(TEXT("authorization=%s"), Connection.bAuthRequired ? TEXT("required") : TEXT("none")));
+	Args.Add(FString::Printf(TEXT("token=%s"), Connection.bAuthRequired ? *Connection.Token : TEXT("")));
+	return Args;
+}
+
+TSharedRef<FAiAgentConfig> FAiAgentConfigurator::BuildStdio() const
 {
 	// STDIO form (the shared GameDev-MCP-Server CLI contract, identical to the cli's buildServerEntry):
 	//   { "type": "stdio", "command": <serverPath>, "args": ["port=N", "client-transport=stdio",
@@ -63,13 +80,11 @@ TSharedRef<FJsonAiAgentConfig> FAiAgentConfigurator::BuildStdio() const
 	// command is an identity key (ValueComparison::Path-equivalent → Exact is fine since we always emit the
 	// same normalized path). The HTTP-only keys (type=http url headers) are explicitly removed so a transport
 	// switch in the same file leaves no stale HTTP entry.
-	const FString Command = Connection.ServerPath.Replace(TEXT("\\"), TEXT("/"));
+	const FString Command = GetStdioCommand();
 
 	TArray<TSharedPtr<FJsonValue>> Args;
-	Args.Add(MakeShared<FJsonValueString>(FString::Printf(TEXT("port=%d"), Connection.Port)));
-	Args.Add(MakeShared<FJsonValueString>(TEXT("client-transport=stdio")));
-	Args.Add(MakeShared<FJsonValueString>(FString::Printf(TEXT("authorization=%s"), Connection.bAuthRequired ? TEXT("required") : TEXT("none"))));
-	Args.Add(MakeShared<FJsonValueString>(FString::Printf(TEXT("token=%s"), Connection.bAuthRequired ? *Connection.Token : TEXT(""))));
+	for (const FString& Arg : GetStdioArgs())
+		Args.Add(MakeShared<FJsonValueString>(Arg));
 
 	TSharedRef<FJsonAiAgentConfig> Config = MakeShared<FJsonAiAgentConfig>(
 		GetAgentName(),
@@ -83,10 +98,13 @@ TSharedRef<FJsonAiAgentConfig> FAiAgentConfigurator::BuildStdio() const
 	Config->SetPropertyToRemove(TEXT("url"));
 	Config->SetPropertyToRemove(TEXT("headers"));
 
+	// Per-agent additions (e.g. Rider/KiloCode/ZooCode `disabled`, GitHubCopilotCli `tools`).
+	CustomizeStdio(*Config);
+
 	return Config;
 }
 
-TSharedRef<FJsonAiAgentConfig> FAiAgentConfigurator::BuildHttp() const
+TSharedRef<FAiAgentConfig> FAiAgentConfigurator::BuildHttp() const
 {
 	// HTTP form (identical to the cli's buildServerEntry):
 	//   { "type": "http", "url": "<host>/mcp", "headers": { "Authorization": "Bearer <token>" }? }
@@ -114,6 +132,9 @@ TSharedRef<FJsonAiAgentConfig> FAiAgentConfigurator::BuildHttp() const
 	// Drop the STDIO-only keys so an http write over a prior stdio entry is clean.
 	Config->SetPropertyToRemove(TEXT("command"));
 	Config->SetPropertyToRemove(TEXT("args"));
+
+	// Per-agent additions (e.g. Rider/KiloCode/ZooCode `disabled`).
+	CustomizeHttp(*Config);
 
 	return Config;
 }
