@@ -24,7 +24,7 @@ delivered it. Identifiers below (tool ids, command names, env vars, paths) were 
 | §3 Schema generation | implemented | exercised by every tool family (#13–#25) |
 | §4 GameThread dispatcher | implemented | #4 (used by all 8 families) |
 | §5 Extensions mechanism | implemented | #7 (`IUnrealMcpToolProvider`, `samples/UnrealAITemplate`) |
-| §6 Sidecar lifecycle | **partial** | #4 (spawn / crash auto-restart / orphan-prevention / stdin-token); auto-download + version-skew re-download are TODO stubs (see drift below) |
+| §6 Sidecar lifecycle | implemented | #4 (spawn / crash auto-restart / orphan-prevention / stdin-token) + #46 (BUNDLE-model resolution: env override → bundled `Binaries/ThirdParty/UnrealMcpBridge/<rid>/`, zero-click auto-spawn; the superseded download-on-first-run flow is dropped — see drift below) |
 | §7 Slate UI | implemented | #24 (AI Game Developer main window) + #29 (MCP Tools/Prompts/Resources/Settings aux windows) |
 | §8 Config & env | implemented | #8 (`UNREAL_MCP_*`, `.env`, on-disk config) |
 | §9.1 cli (`unreal-mcp-cli`, 16 commands) | implemented | #3 |
@@ -72,14 +72,20 @@ Prompts/Resources ship empty-but-wired (§10), as designed.
 - **Device-code auth (#24).** The cloud OAuth device-code flow shipped in the main window (Authorize
   → `auth-start` → `device-auth` events render the verification URL + user code; Cancel/Revoke wired),
   per §1.3 / §7 item 4.
-- **§6 sidecar lifecycle — shipped with partial coverage.** What ships today: the plugin **spawns**
-  the sidecar, hands it the one-shot IPC token over **stdin** (§1.4), **crash auto-restarts** it (the
-  Connection section reports `Running (restarts: N)` / `Stopped`), and prevents orphans (the sidecar
-  self-exits when its parent editor vanishes). The sidecar binary is resolved **only** from
-  `UNREAL_MCP_BRIDGE_PATH` (env/`.env`); `unreal-mcp-cli bootstrap-local` builds one from source. What is
-  **not yet wired**: the §6 **download-on-first-run** from GitHub Releases and the **version-skew
-  re-download/alert** flow are TODO stubs. The §6 download prose is retained as the plan of record,
-  not the shipped state.
+- **§6 sidecar lifecycle — BUNDLE model shipped (#46).** The plugin **spawns** the sidecar, hands it
+  the one-shot IPC token over **stdin** (§1.4), **crash auto-restarts** it (the Connection section
+  reports `Running (restarts: N)` / `Stopped`), and prevents orphans (the sidecar self-exits when its
+  parent editor vanishes). Binary resolution now follows the §6.3 order: `UNREAL_MCP_BRIDGE_PATH`
+  (dev/CI override) → the **bundled** self-contained binary inside the plugin under
+  `Binaries/ThirdParty/UnrealMcpBridge/<rid>/` (`ResolveBridgeBinaryPath` / `ResolveRid`), with
+  macOS/Linux pre-spawn `+x` and macOS `com.apple.quarantine` strip (`PrepareBundledBinaryForSpawn`).
+  A packaged plugin therefore auto-spawns at StartupModule with zero user action; a dev source
+  checkout (no staged binary) still uses the env override and emits the rid-aware actionable warning.
+  The earlier **download-on-first-run + version-skew re-download** design is **superseded and removed**
+  (no `.lock`, no atomic-rename, no re-download recovery) — version lockstep is by construction
+  (bundle built in the same release job at the same version). The bundled binaries are staged by the
+  release job (`RuntimeDependencies`, `UnrealMcpEditor.Build.cs`) and are **never committed to git**;
+  CI signing/notarization of those binaries is owned by the T3/T4 release tasks.
 - **§7 UI — shipped with partial coverage.** The §7 Slate UI shipped (#24/#29), but two §7 design
   affordances did **not** make this release: the **toolbar button** (§7's tab-registration paragraph,
   "under Window → AI Game Developer plus a toolbar button") — the main window is opened from its nomad
@@ -113,7 +119,7 @@ Unreal sidecar from a Unity editor.
 │  ├─ FUnrealMcpSchemaGenerator ── FProperty → JSON Schema                 │
 │  ├─ FUnrealMcpGameThreadDispatcher ── AsyncTask + TPromise               │
 │  ├─ FUnrealMcpBridgeServer ── localhost TCP listener, NDJSON framing     │
-│  ├─ FUnrealMcpSidecarManager ── download / spawn / watchdog / kill       │
+│  ├─ FUnrealMcpSidecarManager ── resolve(bundled) / spawn / watchdog / kill│
 │  └─ Slate UI: main window + 4 aux tabs, ISettingsModule section          │
 └───────────────▲──────────────────────────────────────────────────────────┘
                 │ IPC: 127.0.0.1 TCP, newline-delimited JSON, token-authed
@@ -517,48 +523,124 @@ public:
 
 ## 6. Sidecar lifecycle
 
-**Decision: download-on-first-run from GitHub Releases** (exactly Unity's proven
-`DownloadServerBinaryIfNeeded` flow, `McpServerManager.cs:275–346`), **not** bundling. Rationale:
-the sidecar is a self-contained .NET 9 single-file publish (~70–90 MB ×3 RIDs); bundling triples
-the plugin zip, bloats Fab submission, and welds sidecar fixes to plugin releases. Mirrors a
-mechanism already shipped and debugged twice (Unity, Godot server downloads).
+**Decision: BUNDLE the sidecar inside the plugin.** Prebuilt, **self-contained, single-file**
+`unreal-mcp-bridge` binaries for all four RIDs ship inside the plugin and are resolved from disk at
+spawn time — there is **no download-on-first-run**. Rationale: the owner requirement is zero .NET
+install + zero manual steps for the end user; a bundle guarantees the binary is present and
+version-correct the instant the compiled plugin loads, works fully offline/air-gapped, and welds
+the sidecar to the exact plugin version it was tested against (no skew window). The earlier
+download-on-first-run design (Unity's `DownloadServerBinaryIfNeeded` flow) is **superseded**: it is
+retained only for the **shared `gamedev-mcp-server`** (a different process, owned by the CLI — see
+"Local server acquisition"), never for the bridge.
 
-- **Location:** `<Project>/Intermediate/UnrealMCP/bridge/<platform>/unreal-mcp-bridge(.exe)` +
-  `version` file (Unity keeps a version file beside the binary — same here). `Intermediate/` is
-  user-gitignored by every UE template; plugin dir is avoided because engine/Fab installs may be
-  read-only. The local `gamedev-mcp-server` binary lands beside it under `…/server/<platform>/`
-  (see "Local server acquisition" below).
-- **URL:** `https://github.com/IvanMurzak/Unreal-MCP/releases/download/<version>/unreal-mcp-bridge-<platform>.zip`
-  (platforms `win-x64`, `osx-arm64`, `osx-x64`, `linux-x64` — same naming scheme as Unity's
-  `ExecutableZipUrl`, `McpServerManager.cs:169`).
-- **Version-match:** plugin version (single-sourced, §9) vs `version` file; mismatch → re-download
-  before launch. Sidecar additionally reports `sidecarVersion` in the handshake; mismatch there
-  (manual tampering) → kill, re-download once, then hard-fail to UI.
-- **Crash auto-restart:** §1.5 backoff. **No orphans:** three independent layers — (1) plugin
-  `TerminateProc` on shutdown; (2) sidecar self-exits when the parent identified by
-  `--parent-pid` **plus its process start time** (captured via .NET `Process.StartTime` at
-  sidecar boot) vanishes (2 s poll) — the start-time check makes the identity unique, so PID
-  reuse can't silently disable this layer; (3) sidecar self-exits after 60 s without a
-  **successful handshake** — a TCP connect whose handshake is rejected does NOT reset the timer
-  (otherwise a stale-token orphan re-dialing a relaunched editor would keep itself alive
-  forever). Handshake rejection is additionally fatal to the sidecar after 3 consecutive
-  rejections (§1.4), so the rejected-handshake churn ends well before the 60 s timer. Layer 2
-  covers editor crashes, layer 3 covers the remaining edge cases.
+### 6.1 Bundled layout (exact path strings)
+
+```
+UnrealMCP/                                  # plugin root (UnrealMCP.uplugin lives here)
+└── Binaries/
+    └── ThirdParty/
+        └── UnrealMcpBridge/
+            ├── win-x64/    unreal-mcp-bridge.exe   (+ self-contained payload files)
+            ├── osx-arm64/  unreal-mcp-bridge       (+ payload)
+            ├── osx-x64/    unreal-mcp-bridge       (+ payload)
+            └── linux-x64/  unreal-mcp-bridge       (+ payload)
+```
+
+- Parent dir constant (C++): `Binaries/ThirdParty/UnrealMcpBridge/<rid>/`, resolved relative to the
+  plugin's base dir via `IPluginManager::Get().FindPlugin(TEXT("UnrealMCP"))->GetBaseDir()` (the
+  `Projects` module is already a dependency — `UnrealMcpEditor.Build.cs`).
+- Binary basename: `unreal-mcp-bridge` on macOS/Linux, `unreal-mcp-bridge.exe` on Windows (matches
+  `<AssemblyName>unreal-mcp-bridge</AssemblyName>` in the bridge csproj).
+- `Binaries/ThirdParty/` is the UE-canonical home for prebuilt third-party runtime payloads and is
+  what `RuntimeDependencies` + `-Rocket` BuildPlugin packaging expect.
+
+### 6.2 UE platform → .NET RID mapping
+
+| `UE` platform | RID dir | Notes |
+|---|---|---|
+| `Win64` (`PLATFORM_WINDOWS`) | `win-x64` | only x64 editor RID shipped |
+| `Mac` (`PLATFORM_MAC`), Apple Silicon | `osx-arm64` | chosen at runtime — see below |
+| `Mac` (`PLATFORM_MAC`), Intel | `osx-x64` | chosen at runtime — see below |
+| `Linux` (`PLATFORM_LINUX`) | `linux-x64` | only x64 editor RID shipped |
+
+**macOS arm64-vs-x64 selection at runtime.** The plugin must NOT assume the editor's own
+architecture equals the host CPU (an Intel-built editor can run under Rosetta on Apple Silicon, and
+vice-versa). The bridge is a separate child process, so it matches the **host CPU**, not the
+editor's translated architecture. `FUnrealMcpSidecarManager::ResolveRid()` reads the **physical** CPU
+via `sysctlbyname("hw.optional.arm64", …)` (returns 1 on Apple Silicon even under a translated
+process) and prefers `osx-arm64/`; if that dir is absent (defensive), it falls back to `osx-x64/`
+(runs under Rosetta 2). Intel host → `osx-x64/`. Native is preferred because Rosetta-translating the
+.NET host is slower and has historically been a source of JIT edge cases.
+
+`ResolveBridgeBinaryPath()` composes `<PluginBaseDir>/Binaries/ThirdParty/UnrealMcpBridge/<rid>/<basename>`
+and returns it only if `FPaths::FileExists` is true; otherwise empty (caller logs the actionable
+"plugin packaged without the <rid> bridge" error).
+
+### 6.3 Resolution order (replaces the stub)
+
+1. **Dev/CI override:** `UNREAL_MCP_BRIDGE_PATH` (process env or `.env`) — if set and the file
+   exists, use it. Required for the bridge inner-dev-loop and live e2e.
+2. **Bundled path:** the §6.2 composed path. This is the production path for every end user.
+3. **Neither resolves:** return empty; `StartForPort` logs an actionable error (e.g. "no sidecar
+   binary resolved for rid <rid>; reinstall the plugin for your platform, or set
+   UNREAL_MCP_BRIDGE_PATH"). No download fallback exists.
+
+### 6.4 Version-lockstep guarantee
+
+The bundled binary is built from the SAME source tree at the SAME `VersionName` as the plugin in the
+same release job. The plugin/bridge handshake (`sidecarVersion` vs `pluginVersion`, §1.3) therefore
+always matches by construction; a skew can only occur if the user hand-replaces the bundled binary
+(still caught by the handshake check, which kills + hard-fails to the UI — there is no re-download
+recovery to attempt). `commands/bump-version.ps1` already moves the `.uplugin` `VersionName` and the
+bridge csproj `<Version>` together, so the plugin zip and the bundled bridge share one version.
+
+### 6.5 Offline / air-gapped guarantee
+
+No network access is required at any point of sidecar bring-up: the binary is on disk inside the
+plugin, the token is generated locally (CSPRNG, §1.4), and the IPC is loopback TCP. Network is only
+touched when the sidecar dials the MCP server (Cloud or Custom) — i.e. only when the user has
+actively chosen to connect. A fully offline editor still loads the plugin and spawns the sidecar.
+
+### 6.6 Spawn / watchdog interaction with the bundled binary (§1.5)
+
+The §1.5 state machine is unchanged in shape; only the `LaunchingSidecar` precondition simplifies:
+
+- `LaunchingSidecar`: the binary is **present by construction** (no "version match → download" gate).
+  The plugin verifies `FileExists`, then on macOS/Linux runs a pre-spawn prep
+  (`PrepareBundledBinaryForSpawn`): `chmod 0755` to ensure the executable bit, and on macOS
+  `removexattr com.apple.quarantine` so Gatekeeper's first-exec check is bypassed offline. The prep
+  is skipped when the dev override is used (a dev-built binary is already runnable). Then `CreateProc`
+  exactly as before (token over stdin, §1.4).
+- **Auto-spawn now succeeds at StartupModule.** With the bundle, the path resolves on first boot,
+  `SpawnProcess` succeeds, the sidecar dials, handshakes, and the watchdog takes over — zero clicks.
+  Today a fresh install with no bundled binary (a dev source checkout) instead logs the §6.3 step-3
+  actionable warning and spawns nothing, as before — devs use `UNREAL_MCP_BRIDGE_PATH`.
+- **Crash auto-restart / orphan prevention** (§1.5 backoff + the three orphan layers) are unchanged;
+  they operate on whatever binary `ResolveBridgeBinaryPath()` returned, bundled or override. The three
+  orphan layers remain: (1) plugin `TerminateProc` on shutdown; (2) sidecar self-exits when the
+  `--parent-pid` editor (plus its process start time) vanishes; (3) sidecar self-exits after 60 s
+  without a successful handshake (a rejected handshake does not reset the timer, and 3 consecutive
+  rejections are fatal, §1.4).
+- **Zero-click reconnect (token cache).** The Cloud OAuth token persists as `cloudToken` in
+  `<Project>/Saved/Config/UnrealMcp/ai-game-developer-config.json` (`FUnrealMcpConfig`). On every
+  (re)connect `BuildEffectiveConnectionConfig()` re-reads it and pushes it to the sidecar via the
+  §1.3 `config` message, so after the one-time device-code browser approval the spawn → dial →
+  handshake → connect path is fully automatic on later launches. There is **no separate token store**
+  introduced by the bundle model.
+- **No `.lock`/atomic-rename/re-download machinery** — those existed only to serialize concurrent
+  first-run downloads and version-mismatch re-downloads. With a read-only bundled binary they are
+  gone from the design. Multiple editors share the same read-only files with no coordination.
 - **Multi-editor coexistence:** one sidecar per editor process (per-project port + probing, §1.1).
   Two editors on the *same* project each get their own sidecar — fine, since the MCP server
-  multiplexes plugin connections; binaries are shared read-only on disk (download uses an atomic
-  temp-file + rename, and a `.lock` file serializes concurrent first-run downloads). The lock
-  file is stamped with the owner's **PID + process start time**: a waiter that finds the owner
-  dead — or the start time mismatching (PID reuse) — takes the lock over instead of waiting
-  forever, so a crashed downloader never wedges first-run for every later editor. For
-  **version-mismatch re-download while another editor instance still runs the old binary**, the
-  recovery is Unity's proven flow (`McpServerManager.cs:200–273`, `DeleteBinaryFolderIfExists`):
-  delete fails on the locked binary → stop the running process and retry → if still locked,
-  surface a Retry/Skip dialog so the user can release the lock at their own pace.
-- **Dev override:** `UNREAL_MCP_BRIDGE_PATH` env/`.env` var points at a locally built sidecar
-  (skips download + version check) — required for the bridge task's inner dev loop and CI.
-- **Offline/air-gapped:** download failure surfaces a main-window alert with the manual unzip path;
-  `unreal-mcp-cli bootstrap-local` (§9) automates a from-source bridge build into the same location.
+  multiplexes plugin connections; the bundled binaries are shared read-only with no lock needed.
+- **Dev override:** `UNREAL_MCP_BRIDGE_PATH` env/`.env` var points at a locally built sidecar (skips
+  the bundled path) — required for the bridge task's inner dev loop and CI;
+  `unreal-mcp-cli bootstrap-local` (§9) automates a from-source bridge build for that var.
+
+**Binaries are NEVER committed to git.** They are staged into the plugin tree by the release job at
+package time (a BuildPlugin input via `RuntimeDependencies`), and `.gitignore` keeps `Binaries/` out
+of VCS. A dev source checkout has an empty `Binaries/ThirdParty/UnrealMcpBridge/` → the resolver
+returns empty → devs use `UNREAL_MCP_BRIDGE_PATH`, exactly as before.
 
 ### Local server acquisition (the shared GameDev-MCP-Server)
 

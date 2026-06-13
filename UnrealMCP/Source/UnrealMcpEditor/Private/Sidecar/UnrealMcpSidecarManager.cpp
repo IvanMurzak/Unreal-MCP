@@ -6,8 +6,17 @@
 #include "Async/Async.h"
 #include "HAL/PlatformProcess.h"
 #include "Misc/Paths.h"
+#include "Interfaces/IPluginManager.h"
 
 #include <random>
+
+#if PLATFORM_MAC || PLATFORM_LINUX
+#include <sys/stat.h>
+#endif
+#if PLATFORM_MAC
+#include <sys/xattr.h>
+#include <sys/sysctl.h>
+#endif
 
 namespace
 {
@@ -22,19 +31,117 @@ FUnrealMcpSidecarManager::~FUnrealMcpSidecarManager()
 	Stop();
 }
 
+FString FUnrealMcpSidecarManager::BridgeBinaryBasename()
+{
+#if PLATFORM_WINDOWS
+	return TEXT("unreal-mcp-bridge.exe");
+#else
+	return TEXT("unreal-mcp-bridge");
+#endif
+}
+
+FString FUnrealMcpSidecarManager::ResolveRid(bool bArm64DirExists)
+{
+#if PLATFORM_WINDOWS
+	(void)bArm64DirExists;
+	return TEXT("win-x64");
+#elif PLATFORM_MAC
+	// §6.2: select from the PHYSICAL host CPU, not the (possibly Rosetta-translated) editor arch — the
+	// bridge is a separate child and should match the hardware. `hw.optional.arm64 == 1` on Apple
+	// Silicon reports the hardware even under a translated process (verified per design R5). Fall back to
+	// osx-x64 (runs under Rosetta 2) when the arm64 slice is absent, so a missing build is never fatal.
+	int32 IsArm64 = 0;
+	size_t Size = sizeof(IsArm64);
+	if (sysctlbyname("hw.optional.arm64", &IsArm64, &Size, nullptr, 0) != 0)
+		IsArm64 = 0; // probe unavailable → treat as Intel
+	if (IsArm64 == 1 && bArm64DirExists)
+		return TEXT("osx-arm64");
+	return TEXT("osx-x64");
+#elif PLATFORM_LINUX
+	(void)bArm64DirExists;
+	return TEXT("linux-x64");
+#else
+	(void)bArm64DirExists;
+	return FString();
+#endif
+}
+
+FString FUnrealMcpSidecarManager::ComposeBundledBridgePath(const FString& PluginBaseDir)
+{
+	if (PluginBaseDir.IsEmpty())
+		return FString();
+	const FString Rid = ResolveRid();
+	if (Rid.IsEmpty())
+		return FString();
+	const FString Path = PluginBaseDir
+		/ TEXT("Binaries") / TEXT("ThirdParty") / TEXT("UnrealMcpBridge") / Rid / BridgeBinaryBasename();
+	return FPaths::ConvertRelativePathToFull(Path);
+}
+
 FString FUnrealMcpSidecarManager::ResolveBridgeBinaryPath()
 {
-	// §6 dev override (and the only resolution path until the download task lands).
+	// §6.3 step 1 — dev/CI override: UNREAL_MCP_BRIDGE_PATH wins when set and present (bridge inner
+	// dev loop + live e2e). The bundled binary is NEVER preferred over an explicit override.
 	const FString Override = FPlatformMisc::GetEnvironmentVariable(TEXT("UNREAL_MCP_BRIDGE_PATH"));
 	if (!Override.IsEmpty() && FPaths::FileExists(Override))
 		return Override;
 
-	// TODO(§6 download task): download-on-first-run of the BRIDGE from this repo's GitHub Releases
-	// into <Project>/Intermediate/UnrealMCP/bridge/<platform>/unreal-mcp-bridge(.exe). Stubbed here.
-	// Note: only the bridge is C++-managed. The local MCP server (gamedev-mcp-server, the shared
-	// IvanMurzak/GameDev-MCP-Server release) is acquired by the CLI (`unreal-mcp-cli` download-server
-	// module, §6) — do NOT implement server download here.
-	return FString();
+	// §6.3 step 2 — bundled path inside the plugin (the production path for every end user). The
+	// self-contained binary ships under Binaries/ThirdParty/UnrealMcpBridge/<rid>/ (§6.1), staged into
+	// the packaged plugin by the release job (T4); a dev source checkout has none, so this returns
+	// empty and the override above is the dev path (unchanged behavior on a fresh source tree).
+	TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("UnrealMCP"));
+	if (!Plugin.IsValid())
+		return FString(); // §6.3 step 3 — neither resolves; caller logs the actionable error.
+
+	// On Apple Silicon, prefer osx-arm64 only when that dir is actually present (defensive — a build that
+	// shipped only osx-x64 must not resolve to a missing arm64 path). Probe the arm64 dir first.
+	bool bArm64DirExists = true;
+#if PLATFORM_MAC
+	const FString Arm64Candidate = Plugin->GetBaseDir()
+		/ TEXT("Binaries") / TEXT("ThirdParty") / TEXT("UnrealMcpBridge") / TEXT("osx-arm64") / BridgeBinaryBasename();
+	bArm64DirExists = FPaths::FileExists(Arm64Candidate);
+#endif
+	const FString Rid = ResolveRid(bArm64DirExists);
+	if (Rid.IsEmpty())
+		return FString();
+
+	const FString Path = FPaths::ConvertRelativePathToFull(
+		Plugin->GetBaseDir() / TEXT("Binaries") / TEXT("ThirdParty") / TEXT("UnrealMcpBridge") / Rid / BridgeBinaryBasename());
+	return FPaths::FileExists(Path) ? Path : FString();
+}
+
+bool FUnrealMcpSidecarManager::PrepareBundledBinaryForSpawn(const FString& Path)
+{
+	if (Path.IsEmpty())
+		return false;
+
+#if PLATFORM_MAC || PLATFORM_LINUX
+	// §6.6: ensure the apphost is executable. UE has no portable chmod; call the syscall directly (no
+	// shell, no PATH dependency). 0755 = rwxr-xr-x.
+	const auto Utf8Path = StringCast<ANSICHAR>(*Path);
+	if (chmod(Utf8Path.Get(), 0755) != 0)
+	{
+		UE_LOG(LogUnrealMcp, Warning,
+			TEXT("[Unreal-MCP] could not set +x on the bundled sidecar '%s' (errno=%d); spawn may fail."),
+			*Path, errno);
+		// Not fatal — the bit may already be set by the packager; let the spawn attempt surface a real failure.
+	}
+#endif
+#if PLATFORM_MAC
+	// §6.6 / design R3: strip com.apple.quarantine so Gatekeeper's first-exec check is bypassed even
+	// offline (a binary with no quarantine xattr is not Gatekeeper-checked on exec). Belt-and-suspenders
+	// alongside notarization (T3). ENOATTR (no such attribute) is the expected happy case for an
+	// already-clean or never-quarantined binary — tolerate it.
+	if (removexattr(Utf8Path.Get(), "com.apple.quarantine", 0) != 0 && errno != ENOATTR)
+	{
+		UE_LOG(LogUnrealMcp, Verbose,
+			TEXT("[Unreal-MCP] could not strip com.apple.quarantine from '%s' (errno=%d); relying on notarization."),
+			*Path, errno);
+	}
+#endif
+	(void)Path;
+	return true;
 }
 
 FString FUnrealMcpSidecarManager::GenerateToken()
@@ -65,11 +172,23 @@ bool FUnrealMcpSidecarManager::StartForPort(int32 InIpcPort, const FString& InTo
 	BridgePath = ResolveBridgeBinaryPath();
 	if (BridgePath.IsEmpty())
 	{
+		// §6.3 step 3 graceful-degrade: a packaged plugin missing the <rid> bridge, OR a dev source
+		// checkout with no UNREAL_MCP_BRIDGE_PATH set. The bridge server still listens; surface an
+		// actionable error (the bundled binary is the production path, the env var is the dev path).
 		UE_LOG(LogUnrealMcp, Warning,
-			TEXT("[Unreal-MCP] no sidecar binary resolved (set UNREAL_MCP_BRIDGE_PATH). The bridge is listening on %d; launch the sidecar manually for the live e2e."),
-			IpcPort);
+			TEXT("[Unreal-MCP] no sidecar binary resolved for rid '%s' (bundled path absent and UNREAL_MCP_BRIDGE_PATH unset). ")
+			TEXT("The bridge is listening on %d. End users: reinstall the plugin for your platform; developers: set UNREAL_MCP_BRIDGE_PATH or run `unreal-mcp-cli bootstrap-local`."),
+			*ResolveRid(), IpcPort);
 		return false;
 	}
+
+	// §6.6 pre-spawn prep (macOS/Linux): +x and (macOS) quarantine strip on the resolved bundled binary.
+	// The dev override is assumed already-runnable (the dev built it), so prep only the bundled path.
+	const FString Override = FPlatformMisc::GetEnvironmentVariable(TEXT("UNREAL_MCP_BRIDGE_PATH"));
+	const bool bUsingOverride = !Override.IsEmpty() && FPaths::FileExists(Override)
+		&& (BridgePath == Override || BridgePath == FPaths::ConvertRelativePathToFull(Override));
+	if (!bUsingOverride)
+		PrepareBundledBinaryForSpawn(BridgePath);
 
 	if (!SpawnProcess())
 	{
