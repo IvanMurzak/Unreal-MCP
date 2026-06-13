@@ -621,10 +621,18 @@ jobs:
           # GITHUB_TOKEN in the worktree's .git config after checkout.
           persist-credentials: false
       # Download the signed per-RID publish dirs produced by the two
-      # build-bridge-* jobs. The download lands at ./bridge-staging/<rid>/ —
-      # each artifact was uploaded as a per-RID directory tree (path:
-      # ./bridge/publish/<rid>/), so the artifact's own root holds the <rid>
-      # folder. Merge all into one staging root.
+      # build-bridge-* jobs, merging all four RIDs under ./bridge-staging/<rid>/.
+      # The two artifacts were rooted differently by upload-artifact@v4:
+      #   * bridge-staging-osx-linux was uploaded with THREE dir paths
+      #     (osx-arm64/, osx-x64/, linux-x64/), so the artifact is rooted at
+      #     their least-common-ancestor (bridge/publish/) and PRESERVES the
+      #     top-level <rid>/ folders — extracting it to ./bridge-staging yields
+      #     ./bridge-staging/<rid>/ directly.
+      #   * bridge-staging-win was uploaded with a SINGLE dir path
+      #     (./bridge/publish/win-x64/), so the artifact is rooted AT that dir
+      #     and its contents are the win-x64 files WITHOUT the win-x64/ segment.
+      #     Extract it into ./bridge-staging/win-x64 so the segment is restored
+      #     and the staging loop below finds ./bridge-staging/win-x64/.
       - name: Download signed bridge (osx + linux)
         uses: actions/download-artifact@v4
         with:
@@ -634,7 +642,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: bridge-staging-win
-          path: ./bridge-staging
+          path: ./bridge-staging/win-x64
       # Stage the signed binaries into the plugin tree at the EXACT path the C++
       # resolver (FUnrealMcpSidecarManager::ResolveBridgeBinaryPath) and the
       # Build.cs RuntimeDependencies wildcard both expect:
