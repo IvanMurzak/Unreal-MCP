@@ -88,6 +88,10 @@ public:
 	// a tool is served iff (EnabledTools empty OR it is in EnabledTools) AND it is NOT in DisabledTools. This
 	// field has no env override — it is pure UI persistence, so Save() always round-trips the live value.
 	TArray<FString> DisabledTools; // "disabledTools"
+	// "selectedAgentId" — the AI-agent-configurator dropdown selection persisted by the §7 Agent Configurators
+	// panel (e.g. "claude-code"/"cursor"). Pure presentation state, NO env override — Save() always round-trips
+	// the live value. Defaults to the first reference agent so a fresh project opens on a valid selection.
+	FString SelectedAgentId = TEXT("claude-code"); // "selectedAgentId"
 
 	UNREALMCPEDITOR_API FUnrealMcpConfig();
 

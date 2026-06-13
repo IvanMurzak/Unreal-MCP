@@ -5,6 +5,7 @@
 
 #include "CoreMinimal.h"
 #include "Delegates/Delegate.h"
+#include "Agents/AiAgentConfigurator.h"
 
 class FUnrealMcpEditorViewModel;
 class SDockTab;
@@ -37,7 +38,8 @@ public:
 		const TSharedRef<FUnrealMcpEditorViewModel>& InViewModel,
 		const FString& InPluginVersion,
 		FSimpleDelegate InOnRestartBridge,
-		TFunction<FString()> InBridgeStatusProvider);
+		TFunction<FString()> InBridgeStatusProvider,
+		TFunction<FAiAgentConnectionInfo()> InConnectionInfoProvider);
 
 	/** Unregister the tab spawner (Shutdown). Idempotent. */
 	void Unregister();
@@ -49,5 +51,6 @@ private:
 	FString PluginVersion;
 	FSimpleDelegate OnRestartBridge;
 	TFunction<FString()> BridgeStatusProvider;
+	TFunction<FAiAgentConnectionInfo()> ConnectionInfoProvider;
 	bool bRegistered = false;
 };

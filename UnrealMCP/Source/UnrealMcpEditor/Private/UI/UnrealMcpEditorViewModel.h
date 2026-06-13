@@ -157,6 +157,17 @@ public:
 	 */
 	UNREALMCPEDITOR_API void SetToolEnabled(const FString& ToolName, bool bEnabled);
 
+	// --- §7 AI agent configurators panel (persisted dropdown selection). ---
+
+	/** The persisted AI-agent-configurator dropdown selection (e.g. "claude-code"). */
+	const FString& GetSelectedAgentId() const { return Config.SelectedAgentId; }
+	/**
+	 * Persist the AI-agent-configurator dropdown selection (the §7 Agent Configurators panel). Pure presentation
+	 * state: persists via OnPersistConfig so the choice survives an editor restart, but does NOT push the §1.3
+	 * `config` (the selection has no effect on the live connection). A no-op change does nothing. Game-thread only.
+	 */
+	UNREALMCPEDITOR_API void SetSelectedAgentId(const FString& InAgentId);
+
 	// --- Pure helpers (no instance state; the spec-friendly heart of the view-model). ---
 
 	/**

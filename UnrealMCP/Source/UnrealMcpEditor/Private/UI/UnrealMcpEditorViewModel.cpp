@@ -270,6 +270,18 @@ void FUnrealMcpEditorViewModel::SetToolEnabled(const FString& ToolName, bool bEn
 		*ToolName, bEnabled ? TEXT("enabled") : TEXT("disabled"));
 }
 
+void FUnrealMcpEditorViewModel::SetSelectedAgentId(const FString& InAgentId)
+{
+	if (Config.SelectedAgentId == InAgentId)
+		return; // already selected — no persist churn.
+	Config.SelectedAgentId = InAgentId;
+
+	// Persist-only: the dropdown selection is pure presentation state. Deliberately NO OnPushConfig — the
+	// selection does not change the live connection (mirrors SetToolEnabled's "manifest-only, not config" note).
+	if (OnPersistConfig)
+		OnPersistConfig(Config);
+}
+
 // --- Pure helpers ----------------------------------------------------------------------------------
 
 bool FUnrealMcpEditorViewModel::ValidateServerUrl(const FString& Url, FString& OutError)

@@ -23,7 +23,8 @@ void FUnrealMcpMainWindowTab::Register(
 	const TSharedRef<FUnrealMcpEditorViewModel>& InViewModel,
 	const FString& InPluginVersion,
 	FSimpleDelegate InOnRestartBridge,
-	TFunction<FString()> InBridgeStatusProvider)
+	TFunction<FString()> InBridgeStatusProvider,
+	TFunction<FAiAgentConnectionInfo()> InConnectionInfoProvider)
 {
 	if (bRegistered)
 		return;
@@ -32,6 +33,7 @@ void FUnrealMcpMainWindowTab::Register(
 	PluginVersion = InPluginVersion;
 	OnRestartBridge = InOnRestartBridge;
 	BridgeStatusProvider = MoveTemp(InBridgeStatusProvider);
+	ConnectionInfoProvider = MoveTemp(InConnectionInfoProvider);
 
 	// Slate may be unavailable in a commandlet / -nullrhi headless run without a slate application; guard so
 	// the Automation/smoke runs (which load the module) never crash on tab registration.
@@ -79,7 +81,8 @@ TSharedRef<SDockTab> FUnrealMcpMainWindowTab::SpawnTab(const FSpawnTabArgs& Args
 		.ViewModel(ViewModel)
 		.PluginVersion(PluginVersion)
 		.OnRestartBridge(OnRestartBridge)
-		.BridgeStatusProvider(BridgeStatusProvider));
+		.BridgeStatusProvider(BridgeStatusProvider)
+		.ConnectionInfoProvider(ConnectionInfoProvider));
 	return Tab;
 }
 
