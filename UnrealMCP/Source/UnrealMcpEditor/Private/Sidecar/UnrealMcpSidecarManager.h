@@ -11,9 +11,11 @@
  * Owns the lifecycle of the unreal-mcp-bridge sidecar process (docs/ARCHITECTURE.md §6): resolve the
  * binary, generate the one-shot IPC token, spawn the process delivering the token over stdin (§1.4),
  * watch it (crash → auto-restart with backoff, §1.5), and terminate it on editor shutdown (no orphans,
- * §6 layer 1). The download-on-first-run flow (§6) is intentionally STUBBED in this task behind the
- * UNREAL_MCP_BRIDGE_PATH dev override — the binary path must resolve from that env/.env var (or a
- * previously-downloaded location) until the release/download task lands.
+ * §6 layer 1). Binary resolution follows the §6 BUNDLE model: (1) the UNREAL_MCP_BRIDGE_PATH dev/CI
+ * override wins when set, then (2) the prebuilt self-contained binary bundled inside the plugin under
+ * Binaries/ThirdParty/UnrealMcpBridge/<rid>/. A fresh GUI install resolves the bundled path and
+ * auto-spawns at StartupModule with zero user action; a dev source checkout (no staged binary) falls
+ * back to the override, exactly as before.
  */
 class FUnrealMcpSidecarManager
 {
@@ -54,13 +56,51 @@ public:
 	bool IsRunning() const;
 	int32 GetRestartCount() const { return RestartCount.GetValue(); }
 
-	/** Resolve the bridge binary path (UNREAL_MCP_BRIDGE_PATH override, §6). Empty when unresolved. */
-	static FString ResolveBridgeBinaryPath();
+	/**
+	 * Resolve the bridge binary path (§6 BUNDLE model): UNREAL_MCP_BRIDGE_PATH dev/CI override first,
+	 * then the bundled path inside the plugin. Empty when neither resolves (caller logs the actionable
+	 * packaged-without-<rid> error). The returned bundled path is absolute (ConvertRelativePathToFull).
+	 */
+	static UNREALMCPEDITOR_API FString ResolveBridgeBinaryPath();
+
+	/**
+	 * The .NET RID directory name for the current host platform (§6.2): "win-x64" / "linux-x64", or
+	 * on macOS "osx-arm64" vs "osx-x64" chosen from the PHYSICAL host CPU (not the possibly-Rosetta-
+	 * translated editor arch). @p bArm64DirExists lets the caller fall back to osx-x64 when the
+	 * arm64 slice is absent; pure + injectable so it is unit-testable without touching the filesystem.
+	 */
+	static UNREALMCPEDITOR_API FString ResolveRid(bool bArm64DirExists = true);
+
+	/**
+	 * Compose the bundled bridge path under @p PluginBaseDir for the current host (§6.1):
+	 * <PluginBaseDir>/Binaries/ThirdParty/UnrealMcpBridge/<rid>/unreal-mcp-bridge[.exe]. Pure string
+	 * composition (no FileExists), absolute-ized — testable independent of a staged binary. @p
+	 * bArm64DirExists is forwarded to ResolveRid so the production resolver can pass its arm64-probe
+	 * result (a missing osx-arm64 slice degrades the composed path to osx-x64).
+	 */
+	static UNREALMCPEDITOR_API FString ComposeBundledBridgePath(const FString& PluginBaseDir, bool bArm64DirExists = true);
+
+	/** The platform bridge binary basename: "unreal-mcp-bridge.exe" on Windows, "unreal-mcp-bridge" elsewhere. */
+	static UNREALMCPEDITOR_API FString BridgeBinaryBasename();
 
 	/** Generate a 32-byte token via the OS CSPRNG, hex-encoded (§1.4). */
 	static FString GenerateToken();
 
+	/**
+	 * macOS/Linux pre-spawn prep on @p Path (§6.6): ensure the executable bit (+x) and, on macOS, strip
+	 * the com.apple.quarantine xattr so Gatekeeper's first-exec check is bypassed offline. No-op on
+	 * Windows. Static + path-taking so a spec can exercise it on a fixture binary; tolerant of a
+	 * missing xattr. Returns true if no fatal error occurred (a missing quarantine attr is not fatal).
+	 */
+	static UNREALMCPEDITOR_API bool PrepareBundledBinaryForSpawn(const FString& Path);
+
 private:
+	/** Whether the osx-arm64 bridge slice is present in the bundle (always true off macOS). §6.2 defensive. */
+	static bool BundledArm64SliceExists();
+
+	/** The rid the resolver would actually use for the current host (arm64-probed); for log/error messages. */
+	static FString ResolveEffectiveRid();
+
 	bool SpawnProcess();
 	void StartWatchdog();
 	void StopWatchdog();
