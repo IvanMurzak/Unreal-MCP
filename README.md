@@ -47,10 +47,11 @@ the plugin spawns and talks to over a localhost IPC channel. The full design liv
 - **Unreal Engine 5.5+** (developed and CI-tested against **5.7**). The plugin deliberately ships
   **no `EngineVersion` pin** — UE treats that field as an exact-build match, not a floor, and would
   refuse to load on newer engines.
-- **.NET 9 SDK** to build the bridge sidecar. (End users who download release binaries do not
-  need it — they ship self-contained. The local MCP server is downloaded as a prebuilt
-  [GameDev-MCP-Server](https://github.com/IvanMurzak/GameDev-MCP-Server) release binary, never
-  built here.)
+- **.NET 9 SDK** to build the bridge sidecar **from source**. (End users of a packaged release do
+  NOT need it — the self-contained sidecar is bundled inside the plugin and auto-spawned, ARCHITECTURE
+  §6. The local MCP server is downloaded as a prebuilt
+  [GameDev-MCP-Server](https://github.com/IvanMurzak/GameDev-MCP-Server) release binary, never built
+  here.)
 - **Node.js** `^20.19.0 || >=22.12.0` for the optional `unreal-mcp-cli`.
 - A C++ Unreal project (the plugin builds an Editor module, so the host project must be able to
   compile C++).
@@ -79,14 +80,20 @@ node bin/unreal-mcp-cli.js install-plugin <YourProject> --junction
 3. On editor boot the Output Log prints **`[Unreal-MCP] plugin loaded`** — that confirms the plugin
    and its game-thread dispatcher started.
 
-The sidecar binary (`unreal-mcp-bridge`) is **not** bundled. Today the plugin resolves it from the
-`UNREAL_MCP_BRIDGE_PATH` environment variable: point that at a sidecar binary, or run
+The sidecar binary (`unreal-mcp-bridge`) is **bundled inside the plugin** in a packaged release: a
+prebuilt, self-contained binary for your platform ships under
+`UnrealMCP/Binaries/ThirdParty/UnrealMcpBridge/<rid>/` and the editor **auto-spawns it on startup
+with zero user action** — no .NET install, no env var, no manual launch (ARCHITECTURE §6). The first
+Cloud OAuth device-code browser approval is the only remaining human step; after that, reconnect on
+later launches is zero-click (the cloud token is cached in `Saved/Config/UnrealMcp/`).
+
+When you build the plugin **from source** (the only option until the first GitHub Release / Fab
+listing), the bundled binary is not present — the plugin then resolves the sidecar from the
+`UNREAL_MCP_BRIDGE_PATH` environment variable instead: point that at a locally built sidecar, or run
 `unreal-mcp-cli bootstrap-local` to build the bridge from source into
-`<YourProject>/Intermediate/UnrealMCP/` and set the var to the result. With no path resolved, the
-plugin's TCP listener still starts but logs `[Unreal-MCP] no sidecar binary resolved (set
-UNREAL_MCP_BRIDGE_PATH)` and spawns nothing — launch the sidecar manually for the live e2e.
-Automatic download-on-first-connect from GitHub Releases is **planned** (ARCHITECTURE §6) but **not
-yet shipped**.
+`<YourProject>/Intermediate/UnrealMCP/` and set the var to the result. With neither a bundled binary
+nor the env var resolved, the plugin's TCP listener still starts but logs
+`[Unreal-MCP] no sidecar binary resolved for rid <rid> …` and spawns nothing.
 
 ## First run
 
@@ -346,7 +353,7 @@ The plugin reads configuration with the precedence **process env → `<Project>/
 | `UNREAL_MCP_START_SERVER` | Parsed and persisted as the `startServer` config flag (Custom mode); auto-spawning the local `gamedev-mcp-server` is **planned, not yet wired** — no code consumes this flag today, so start the server yourself (e.g. `unreal-mcp-cli`). |
 | `UNREAL_MCP_TRANSPORT` | `stdio` or `http` |
 | `UNREAL_MCP_LOG_LEVEL` | Log verbosity |
-| `UNREAL_MCP_BRIDGE_PATH` | Path to a sidecar binary. **Currently the only way the plugin resolves a sidecar** (auto-download is planned §6, not yet shipped). |
+| `UNREAL_MCP_BRIDGE_PATH` | Path to a sidecar binary — the **dev/CI override**; wins over the bundled binary (§6). A packaged release auto-resolves the bundled sidecar, so end users never set this; from-source builds use it. |
 | `UNREAL_MCP_SERVER_PATH` | Path to a local `gamedev-mcp-server` binary (read by `unreal-mcp-cli`, not the plugin) — skips the server download + version check (§6). |
 
 > **Never commit `.env`.** A project-root `.env` can hold `UNREAL_MCP_TOKEN`, and UE project
@@ -366,10 +373,12 @@ The plugin reads configuration with the precedence **process env → `<Project>/
 - **Screenshot tools return a structured error.** Pixel capture needs a GPU-backed editor — they
   cannot render under headless `-nullrhi`.
 - **No sidecar / sidecar keeps restarting.** Check the bridge status in the **Connection** section
-  (`Running (restarts: N)` / `Stopped`). If the log shows `no sidecar binary resolved (set
-  UNREAL_MCP_BRIDGE_PATH)`, no sidecar path was resolved — set `UNREAL_MCP_BRIDGE_PATH` or run
-  `unreal-mcp-cli bootstrap-local` to build one from source. (Automatic download and the version-skew
-  redownload/alert are planned §6 behavior, not yet shipped.)
+  (`Running (restarts: N)` / `Stopped`). If the log shows `no sidecar binary resolved for rid <rid>
+  …`, neither a bundled binary nor `UNREAL_MCP_BRIDGE_PATH` resolved — in a packaged release this
+  means the plugin was packaged without your platform's bridge (reinstall the correct build); in a
+  from-source build, set `UNREAL_MCP_BRIDGE_PATH` or run `unreal-mcp-cli bootstrap-local` to build one
+  from source. (The sidecar is bundled inside packaged releases and auto-spawned, §6 — there is no
+  download-on-first-run.)
 - **Ports.** IPC uses a deterministic per-project port in `30000–39999` and probes forward (then an
   ephemeral port) on a collision; the local server uses a deterministic hash port in `20000–29999`
   with no probing — the CLI derives the same number without reading any config, and the server binds

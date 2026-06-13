@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Ivan Murzak. Licensed under the Apache License, Version 2.0.
 // See the LICENSE file in the repository root for more information.
 
+using System.IO;
 using UnrealBuildTool;
 
 public class UnrealMcpEditor : ModuleRules
@@ -19,7 +20,7 @@ public class UnrealMcpEditor : ModuleRules
 		//  - Json/JsonUtilities  -> NDJSON framing + FProperty<->JSON schema/serialization (§1.2, §3)
 		//  - UnrealEd/EditorSubsystem -> editor operations from tool bodies (§3.3, §10)
 		//  - Slate/SlateCore     -> main window + 4 aux tabs (§7)
-		//  - Projects            -> IPluginManager (plugin version/paths, sidecar download, §6)
+		//  - Projects            -> IPluginManager (plugin version/paths, bundled-sidecar resolution, §6)
 		//  - DeveloperSettings   -> ISettingsModule-backed settings page (§7)
 		PrivateDependencyModuleNames.AddRange(new string[]
 		{
@@ -80,5 +81,16 @@ public class UnrealMcpEditor : ModuleRules
 		{
 			PublicDefinitions.Add("WITH_UNREAL_MCP_LIVE_CODING=0");
 		}
+
+		// Bundle the prebuilt self-contained sidecar payloads (docs/ARCHITECTURE.md §6 BUNDLE model).
+		// Staged into the packaged plugin under Binaries/ThirdParty/UnrealMcpBridge/<rid>/ so the editor
+		// can spawn the bridge with zero install (FUnrealMcpSidecarManager::ResolveBridgeBinaryPath). The
+		// binaries are NOT committed to git; the release job stages them before BuildPlugin (task T4). The
+		// recursive "..." wildcard is a no-op on a dev checkout that has not staged them, so local source
+		// builds still compile and resolve the bridge via UNREAL_MCP_BRIDGE_PATH instead. NonUFS = raw
+		// (not cooked) files, correct for native runtime binaries.
+		RuntimeDependencies.Add(
+			Path.Combine(PluginDirectory, "Binaries", "ThirdParty", "UnrealMcpBridge", "...", "*"),
+			StagedFileType.NonUFS);
 	}
 }
