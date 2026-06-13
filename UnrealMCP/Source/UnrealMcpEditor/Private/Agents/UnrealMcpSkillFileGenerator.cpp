@@ -16,8 +16,8 @@
 namespace
 {
 	// Collapse a possibly-multi-line description into a single padded line and cap its length so the YAML
-	// front-matter `description:` stays a valid single scalar (the Agent-Skills limit). Word-boundary trim with an
-	// ellipsis when truncated. Pure; no secret handling needed (descriptions are static tool docs).
+	// front-matter `description:` stays a valid single scalar. Word-boundary trim with an ellipsis when truncated.
+	// Pure; no secret handling needed (descriptions are static tool docs).
 	FString SkillGenSingleLineCapped(const FString& In, int32 MaxLen)
 	{
 		FString Flat = In;
@@ -170,8 +170,8 @@ FString FUnrealMcpSkillFileGenerator::BuildSkillMarkdown(const FUnrealMcpRegiste
 		Lines.Add(TEXT(""));
 	}
 
-	// ## How to Call — the unreal-mcp-cli form. Token discipline (§8): a `<token>` PLACEHOLDER only, NEVER a real
-	// bearer. The agent supplies its own configured credentials; the skill doc must stay secret-free.
+	// ## How to Call — the plain unreal-mcp-cli form. Token discipline (§8): NO token at all (not even a
+	// placeholder); the agent supplies its own configured credentials. The skill doc stays secret-free.
 	Lines.Add(TEXT("## How to Call"));
 	Lines.Add(TEXT(""));
 	Lines.Add(TEXT("```bash"));
@@ -180,6 +180,37 @@ FString FUnrealMcpSkillFileGenerator::BuildSkillMarkdown(const FUnrealMcpRegiste
 	Lines.Add(TEXT(""));
 
 	return FString::Join(Lines, TEXT("\n"));
+}
+
+int32 FUnrealMcpSkillFileGenerator::PruneStaleSkillFolders(const FString& SkillsRootAbsolute, const TSet<FString>& CurrentFolderNames)
+{
+	IFileManager& FileManager = IFileManager::Get();
+	int32 Pruned = 0;
+
+	// Enumerate immediate child directories of the skills root.
+	TArray<FString> ChildDirs;
+	FileManager.FindFiles(ChildDirs, *(SkillsRootAbsolute / TEXT("*")), /*Files*/ false, /*Directories*/ true);
+
+	for (const FString& ChildDir : ChildDirs)
+	{
+		// Guard 1: only ever consider a folder we would have produced ourselves — it must own a SKILL.md.
+		const FString SkillFile = FPaths::Combine(SkillsRootAbsolute, ChildDir, TEXT("SKILL.md"));
+		if (!FileManager.FileExists(*SkillFile))
+			continue;
+
+		// Guard 2: keep folders that still correspond to a current tool (the folder name is already the
+		// sanitized form the writer used, so compare directly).
+		if (CurrentFolderNames.Contains(ChildDir))
+			continue;
+
+		const FString FolderPath = FPaths::Combine(SkillsRootAbsolute, ChildDir);
+		if (FileManager.DeleteDirectory(*FolderPath, /*RequireExists*/ false, /*Tree*/ true))
+			++Pruned;
+		else
+			UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] failed to prune stale skill folder: %s"), *FolderPath);
+	}
+
+	return Pruned;
 }
 
 FUnrealMcpSkillFileGenerator::FResult FUnrealMcpSkillFileGenerator::Generate(const FUnrealMcpToolRegistry& Registry, const FString& SkillsRootAbsolute)
@@ -205,6 +236,8 @@ FUnrealMcpSkillFileGenerator::FResult FUnrealMcpSkillFileGenerator::Generate(con
 	}
 
 	const TArray<FString> ToolNames = Registry.GetToolNamesSorted();
+	TSet<FString> CurrentFolderNames;
+	CurrentFolderNames.Reserve(ToolNames.Num());
 	int32 Written = 0;
 	for (const FString& ToolName : ToolNames)
 	{
@@ -213,6 +246,7 @@ FUnrealMcpSkillFileGenerator::FResult FUnrealMcpSkillFileGenerator::Generate(con
 			continue;
 
 		const FString FolderName = SanitizeSkillFolderName(Tool->Name);
+		CurrentFolderNames.Add(FolderName);
 		const FString FilePath = FPaths::Combine(SkillsRootAbsolute, FolderName, TEXT("SKILL.md"));
 		const FString Markdown = BuildSkillMarkdown(*Tool);
 
@@ -223,9 +257,22 @@ FUnrealMcpSkillFileGenerator::FResult FUnrealMcpSkillFileGenerator::Generate(con
 			UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] failed to write skill file: %s"), *FilePath);
 	}
 
+	// Prune stale generator-owned folders: a tool removed/renamed since the last run leaves an orphaned
+	// `<old-name>/SKILL.md` whose docs no longer describe a real tool. Only delete an immediate child dir
+	// that BOTH contains a generator-owned SKILL.md AND is not in the current set — never unrelated user content.
+	Result.FilesPruned = PruneStaleSkillFolders(SkillsRootAbsolute, CurrentFolderNames);
+
+	// Every write failing (with tools to write) is a failure, not a "succeeded (0 files)" — otherwise the panel
+	// reports success for a run that produced nothing.
+	if (Written == 0 && ToolNames.Num() > 0)
+	{
+		Result.Error = FString::Printf(TEXT("Failed to write any of %d skill file(s) under %s."), ToolNames.Num(), *SkillsRootAbsolute);
+		return Result;
+	}
+
 	Result.bSuccess = true;
 	Result.FilesWritten = Written;
-	UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] generated %d skill file(s) under %s."), Written, *SkillsRootAbsolute);
+	UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] generated %d skill file(s) (pruned %d stale) under %s."), Written, Result.FilesPruned, *SkillsRootAbsolute);
 	return Result;
 }
 

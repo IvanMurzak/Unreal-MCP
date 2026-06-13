@@ -23,10 +23,11 @@ struct FUnrealMcpRegisteredTool;
  *     schema) headless-enumerable on the game thread WITHOUT a live bridge or editor connection. The resulting
  *     docs describe the ACTUAL Unreal tools an agent can call — accurate, not misleading.
  *
- * Idempotent: each SKILL.md is unconditionally overwritten on every run, so re-generating after a tool set change
- * cleanly refreshes the docs. Token discipline (§8): a skill file is PURE tool documentation — the generator never
- * reads or writes any token/secret/host/connection value. The "How to Call" block uses a `<token>` PLACEHOLDER
- * only (never the real bearer), matching Unity's secret-free SKILL.md output.
+ * Idempotent: each SKILL.md is unconditionally overwritten on every run and folders for tools no longer registered
+ * are pruned, so re-generating after a tool set change cleanly refreshes the docs. Token discipline (§8): a skill
+ * file is PURE tool documentation — the generator never reads or writes any token/secret/host/connection value. The
+ * "How to Call" block emits the plain `unreal-mcp-cli` call form with NO token at all, matching Unity's secret-free
+ * SKILL.md output.
  *
  * The markdown builder is a static pure function (no disk access) so the Automation specs assert the exact output
  * shape for a hand-built tool; PopulateCoreRegistry() fills a bare registry with every core family so a spec (or
@@ -40,8 +41,9 @@ public:
 	{
 		bool bSuccess = false;
 		int32 FilesWritten = 0;
+		int32 FilesPruned = 0;      // stale generator-owned folders removed for tools no longer registered
 		FString SkillsRootAbsolute; // the resolved folder the files were written under
-		FString Error;              // non-empty on failure (e.g. empty root, write failure)
+		FString Error;              // non-empty on failure (e.g. empty root, all writes failed)
 	};
 
 	/**
@@ -55,9 +57,9 @@ public:
 	/**
 	 * Build the SKILL.md markdown for ONE tool. Pure (no disk access) — the spec-friendly heart of the generator.
 	 * Shape: YAML front-matter (name + description) → `# <Title>` → description body → `## Input` (param table +
-	 * JSON Schema) → `## How to Call` (the `unreal-mcp-cli run-tool` form with a `<token>` placeholder only). The
-	 * YAML description is the tool's Description, single-lined + length-capped to the Agent-Skills limit so the
-	 * front-matter stays valid. NO secret ever appears.
+	 * JSON Schema) → `## How to Call` (the plain `unreal-mcp-cli run-tool` form, no token). The YAML description is
+	 * the tool's Description, single-lined + length-capped so the front-matter stays a valid scalar. NO secret ever
+	 * appears.
 	 */
 	static UNREALMCPEDITOR_API FString BuildSkillMarkdown(const FUnrealMcpRegisteredTool& Tool);
 
@@ -75,6 +77,14 @@ public:
 	 */
 	static UNREALMCPEDITOR_API void PopulateCoreRegistry(FUnrealMcpToolRegistry& Registry);
 
-	/** The max length of the YAML `description:` value (the Codex/Anthropic Agent-Skills limit). */
+	/**
+	 * Remove stale generator-owned skill folders under @p SkillsRootAbsolute — immediate child dirs that own a
+	 * SKILL.md but whose (sanitized) folder name is NOT in @p CurrentFolderNames (tools removed/renamed since the
+	 * last run). Two guards keep this from touching unrelated user content: a folder must contain a SKILL.md to be
+	 * a candidate, and it must be absent from the current set. Returns the count pruned.
+	 */
+	static UNREALMCPEDITOR_API int32 PruneStaleSkillFolders(const FString& SkillsRootAbsolute, const TSet<FString>& CurrentFolderNames);
+
+	/** A defensive single-line cap for the YAML `description:` value, keeping the front-matter scalar reasonable. */
 	static constexpr int32 MaxSkillDescriptionLength = 1024;
 };

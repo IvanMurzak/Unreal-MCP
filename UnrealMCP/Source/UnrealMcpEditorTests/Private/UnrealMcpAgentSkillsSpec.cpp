@@ -306,6 +306,56 @@ void FUnrealMcpAgentSkillsSpec::Define()
 			SkillSpecDeleteTree(Root);
 		});
 
+		It("prunes stale generator-owned folders for removed tools but keeps survivors and user content", [this]()
+		{
+			const FString Root = SkillSpecMakeTempRoot();
+			IFileManager& FileManager = IFileManager::Get();
+
+			// Set A: two tools (Commit outside an extension scope adds the descriptor directly — no handler needed).
+			FUnrealMcpToolRegistry RegA;
+			{
+				FUnrealMcpRegisteredTool Keep;
+				Keep.Name = TEXT("keep-tool");
+				Keep.Title = TEXT("Keep");
+				Keep.Description = TEXT("Stays across runs.");
+				RegA.Commit(MoveTemp(Keep));
+
+				FUnrealMcpRegisteredTool Drop;
+				Drop.Name = TEXT("drop-tool");
+				Drop.Title = TEXT("Drop");
+				Drop.Description = TEXT("Removed in set B.");
+				RegA.Commit(MoveTemp(Drop));
+			}
+			const FUnrealMcpSkillFileGenerator::FResult A = FUnrealMcpSkillFileGenerator::Generate(RegA, Root);
+			TestTrue(TEXT("set A succeeded"), A.bSuccess);
+			TestEqual(TEXT("set A wrote two"), A.FilesWritten, 2);
+			TestEqual(TEXT("set A pruned nothing"), A.FilesPruned, 0);
+
+			// Drop an unrelated user folder (no SKILL.md) — pruning must never touch it.
+			const FString UserDir = FPaths::Combine(Root, TEXT("my-notes"));
+			FFileHelper::SaveStringToFile(TEXT("hello"), *FPaths::Combine(UserDir, TEXT("README.md")));
+
+			// Set B: only keep-tool remains.
+			FUnrealMcpToolRegistry RegB;
+			{
+				FUnrealMcpRegisteredTool Keep;
+				Keep.Name = TEXT("keep-tool");
+				Keep.Title = TEXT("Keep");
+				Keep.Description = TEXT("Stays across runs.");
+				RegB.Commit(MoveTemp(Keep));
+			}
+			const FUnrealMcpSkillFileGenerator::FResult B = FUnrealMcpSkillFileGenerator::Generate(RegB, Root);
+			TestTrue(TEXT("set B succeeded"), B.bSuccess);
+			TestEqual(TEXT("set B wrote one"), B.FilesWritten, 1);
+			TestEqual(TEXT("set B pruned the removed tool"), B.FilesPruned, 1);
+
+			TestTrue(TEXT("survivor SKILL.md kept"), FileManager.FileExists(*FPaths::Combine(Root, TEXT("keep-tool"), TEXT("SKILL.md"))));
+			TestFalse(TEXT("removed tool's SKILL.md gone"), FileManager.FileExists(*FPaths::Combine(Root, TEXT("drop-tool"), TEXT("SKILL.md"))));
+			TestTrue(TEXT("unrelated user folder untouched"), FileManager.FileExists(*FPaths::Combine(UserDir, TEXT("README.md"))));
+
+			SkillSpecDeleteTree(Root);
+		});
+
 		It("fails cleanly on an empty skills root", [this]()
 		{
 			FUnrealMcpToolRegistry Registry;
