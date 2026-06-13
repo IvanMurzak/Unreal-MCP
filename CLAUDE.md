@@ -77,6 +77,21 @@ dotnet build   bridge/Unreal-MCP-Bridge.sln --configuration Debug --no-restore
 dotnet test    bridge/Unreal-MCP-Bridge.sln --configuration Debug --no-build
 ```
 
+**Publish (bundle source — docs/ARCHITECTURE.md §6 BUNDLE model).** The sidecar publishes as a
+**self-contained, single-file** binary per RID so the end user needs no .NET installed. Trimming is
+OFF (McpPlugin/ReflectorNet/SignalR are reflection-heavy). Run the repeatable publish script:
+
+```bash
+bash bridge/publish.sh                       # Release, all 4 RIDs (win-x64/linux-x64/osx-x64/osx-arm64), zipped
+bash bridge/publish.sh Release win-x64       # one RID; --no-zip leaves the raw dir (e.g. before signing)
+# PowerShell equivalent: bridge/publish.ps1 [-Platforms <rid> ...] [-NoZip]
+```
+
+Each `bridge/publish/<rid>/` holds exactly one apphost (`unreal-mcp-bridge[.exe]`, ~73–80 MB; no
+`.pdb`, no loose runtime DLLs). The csproj engages `SelfContained` + `PublishSingleFile` ONLY when a
+RID is supplied, so a plain `dotnet build`/`test` (no `-r`) stays framework-dependent at the flat
+`bin/<cfg>/net9.0/unreal-mcp-bridge.exe` path the live-e2e harness (`UNREAL_MCP_BRIDGE_PATH`) reads.
+
 ### server — none in this repo
 
 The MCP server lives in the shared [GameDev-MCP-Server](https://github.com/IvanMurzak/GameDev-MCP-Server)
