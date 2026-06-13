@@ -11,6 +11,7 @@
 #include <random>
 
 #if PLATFORM_MAC || PLATFORM_LINUX
+#include <cerrno>
 #include <sys/stat.h>
 #endif
 #if PLATFORM_MAC
@@ -66,16 +67,38 @@ FString FUnrealMcpSidecarManager::ResolveRid(bool bArm64DirExists)
 #endif
 }
 
-FString FUnrealMcpSidecarManager::ComposeBundledBridgePath(const FString& PluginBaseDir)
+FString FUnrealMcpSidecarManager::ComposeBundledBridgePath(const FString& PluginBaseDir, bool bArm64DirExists)
 {
 	if (PluginBaseDir.IsEmpty())
 		return FString();
-	const FString Rid = ResolveRid();
+	const FString Rid = ResolveRid(bArm64DirExists);
 	if (Rid.IsEmpty())
 		return FString();
 	const FString Path = PluginBaseDir
 		/ TEXT("Binaries") / TEXT("ThirdParty") / TEXT("UnrealMcpBridge") / Rid / BridgeBinaryBasename();
 	return FPaths::ConvertRelativePathToFull(Path);
+}
+
+bool FUnrealMcpSidecarManager::BundledArm64SliceExists()
+{
+	// On Apple Silicon, prefer osx-arm64 only when that dir is actually present (defensive — a build that
+	// shipped only osx-x64 must not resolve to a missing arm64 path). On non-macOS hosts the arm64 flag is
+	// irrelevant to ResolveRid, so report true (the cheap default).
+#if PLATFORM_MAC
+	TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("UnrealMCP"));
+	if (!Plugin.IsValid())
+		return false;
+	const FString Arm64Candidate = Plugin->GetBaseDir()
+		/ TEXT("Binaries") / TEXT("ThirdParty") / TEXT("UnrealMcpBridge") / TEXT("osx-arm64") / BridgeBinaryBasename();
+	return FPaths::FileExists(Arm64Candidate);
+#else
+	return true;
+#endif
+}
+
+FString FUnrealMcpSidecarManager::ResolveEffectiveRid()
+{
+	return ResolveRid(BundledArm64SliceExists());
 }
 
 FString FUnrealMcpSidecarManager::ResolveBridgeBinaryPath()
@@ -94,20 +117,11 @@ FString FUnrealMcpSidecarManager::ResolveBridgeBinaryPath()
 	if (!Plugin.IsValid())
 		return FString(); // §6.3 step 3 — neither resolves; caller logs the actionable error.
 
-	// On Apple Silicon, prefer osx-arm64 only when that dir is actually present (defensive — a build that
-	// shipped only osx-x64 must not resolve to a missing arm64 path). Probe the arm64 dir first.
-	bool bArm64DirExists = true;
-#if PLATFORM_MAC
-	const FString Arm64Candidate = Plugin->GetBaseDir()
-		/ TEXT("Binaries") / TEXT("ThirdParty") / TEXT("UnrealMcpBridge") / TEXT("osx-arm64") / BridgeBinaryBasename();
-	bArm64DirExists = FPaths::FileExists(Arm64Candidate);
-#endif
-	const FString Rid = ResolveRid(bArm64DirExists);
-	if (Rid.IsEmpty())
+	// Share the single §6.1 layout composition with the unit-tested pure helper (no inline drift); pass the
+	// arm64-probe result so a host with only the osx-x64 slice degrades to that rid.
+	const FString Path = ComposeBundledBridgePath(Plugin->GetBaseDir(), BundledArm64SliceExists());
+	if (Path.IsEmpty())
 		return FString();
-
-	const FString Path = FPaths::ConvertRelativePathToFull(
-		Plugin->GetBaseDir() / TEXT("Binaries") / TEXT("ThirdParty") / TEXT("UnrealMcpBridge") / Rid / BridgeBinaryBasename());
 	return FPaths::FileExists(Path) ? Path : FString();
 }
 
@@ -173,12 +187,14 @@ bool FUnrealMcpSidecarManager::StartForPort(int32 InIpcPort, const FString& InTo
 	if (BridgePath.IsEmpty())
 	{
 		// §6.3 step 3 graceful-degrade: a packaged plugin missing the <rid> bridge, OR a dev source
-		// checkout with no UNREAL_MCP_BRIDGE_PATH set. The bridge server still listens; surface an
-		// actionable error (the bundled binary is the production path, the env var is the dev path).
+		// checkout with no (or a stale) UNREAL_MCP_BRIDGE_PATH. The bridge server still listens; surface
+		// an actionable error (the bundled binary is the production path, the env var is the dev path).
+		// Report the EFFECTIVE rid (arm64-probed, matching ResolveBridgeBinaryPath) so the reinstall hint
+		// names the slice that was actually looked for — not osx-arm64 on a host that degraded to osx-x64.
 		UE_LOG(LogUnrealMcp, Warning,
-			TEXT("[Unreal-MCP] no sidecar binary resolved for rid '%s' (bundled path absent and UNREAL_MCP_BRIDGE_PATH unset). ")
+			TEXT("[Unreal-MCP] no sidecar binary resolved for rid '%s' (bundled path absent and UNREAL_MCP_BRIDGE_PATH unset or pointing at a missing file). ")
 			TEXT("The bridge is listening on %d. End users: reinstall the plugin for your platform; developers: set UNREAL_MCP_BRIDGE_PATH or run `unreal-mcp-cli bootstrap-local`."),
-			*ResolveRid(), IpcPort);
+			*ResolveEffectiveRid(), IpcPort);
 		return false;
 	}
 

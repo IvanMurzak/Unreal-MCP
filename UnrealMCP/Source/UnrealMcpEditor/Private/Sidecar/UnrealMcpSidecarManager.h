@@ -74,9 +74,11 @@ public:
 	/**
 	 * Compose the bundled bridge path under @p PluginBaseDir for the current host (§6.1):
 	 * <PluginBaseDir>/Binaries/ThirdParty/UnrealMcpBridge/<rid>/unreal-mcp-bridge[.exe]. Pure string
-	 * composition (no FileExists), absolute-ized — testable independent of a staged binary.
+	 * composition (no FileExists), absolute-ized — testable independent of a staged binary. @p
+	 * bArm64DirExists is forwarded to ResolveRid so the production resolver can pass its arm64-probe
+	 * result (a missing osx-arm64 slice degrades the composed path to osx-x64).
 	 */
-	static UNREALMCPEDITOR_API FString ComposeBundledBridgePath(const FString& PluginBaseDir);
+	static UNREALMCPEDITOR_API FString ComposeBundledBridgePath(const FString& PluginBaseDir, bool bArm64DirExists = true);
 
 	/** The platform bridge binary basename: "unreal-mcp-bridge.exe" on Windows, "unreal-mcp-bridge" elsewhere. */
 	static UNREALMCPEDITOR_API FString BridgeBinaryBasename();
@@ -93,6 +95,12 @@ public:
 	static UNREALMCPEDITOR_API bool PrepareBundledBinaryForSpawn(const FString& Path);
 
 private:
+	/** Whether the osx-arm64 bridge slice is present in the bundle (always true off macOS). §6.2 defensive. */
+	static bool BundledArm64SliceExists();
+
+	/** The rid the resolver would actually use for the current host (arm64-probed); for log/error messages. */
+	static FString ResolveEffectiveRid();
+
 	bool SpawnProcess();
 	void StartWatchdog();
 	void StopWatchdog();

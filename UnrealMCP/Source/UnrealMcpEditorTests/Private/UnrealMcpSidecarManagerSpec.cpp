@@ -11,6 +11,10 @@
 #include "HAL/PlatformProcess.h"
 #include "Sidecar/UnrealMcpSidecarManager.h"
 
+#if PLATFORM_MAC || PLATFORM_LINUX
+#include <sys/stat.h>
+#endif
+
 /**
  * Sidecar binary-resolution specs (docs/ARCHITECTURE.md §6 BUNDLE model). Cover the pure, host-
  * deterministic resolver helpers — RID mapping, basename, bundled-path composition — plus the
@@ -133,6 +137,17 @@ void FUnrealMcpSidecarManagerSpec::Define()
 			const FString Fake = SidecarSpecMakeFakeBinary(TEXT("prep-bridge.bin"));
 			const bool bOk = FUnrealMcpSidecarManager::PrepareBundledBinaryForSpawn(Fake);
 			TestTrue(TEXT("prep on an existing file does not report a fatal error"), bOk);
+#if PLATFORM_MAC || PLATFORM_LINUX
+			// §6.6 load-bearing behavior: the apphost must end up executable (chmod 0755). Verify the
+			// mode bits, not just the non-fatal return — a missing +x would make the real spawn fail.
+			const auto Utf8 = StringCast<ANSICHAR>(*Fake);
+			struct stat St;
+			if (TestTrue(TEXT("stat the prepped fixture"), stat(Utf8.Get(), &St) == 0))
+			{
+				TestEqual(TEXT("prepped file is mode 0755 (rwxr-xr-x)"),
+					static_cast<int32>(St.st_mode & 0777), static_cast<int32>(0755));
+			}
+#endif
 			SidecarSpecCleanup();
 		});
 
