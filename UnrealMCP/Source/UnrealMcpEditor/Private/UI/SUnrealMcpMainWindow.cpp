@@ -2,6 +2,7 @@
 // See the LICENSE file in the repository root for more information.
 
 #include "UI/SUnrealMcpMainWindow.h"
+#include "UI/SUnrealMcpAgentConfigurators.h"
 #include "UnrealMcpLog.h"
 
 #include "Widgets/SBoxPanel.h"
@@ -36,6 +37,7 @@ void SUnrealMcpMainWindow::Construct(const FArguments& InArgs)
 	PluginVersion = InArgs._PluginVersion;
 	OnRestartBridge = InArgs._OnRestartBridge;
 	BridgeStatusProvider = InArgs._BridgeStatusProvider;
+	ConnectionInfoProvider = InArgs._ConnectionInfoProvider;
 
 	ChildSlot
 	[
@@ -50,6 +52,7 @@ void SUnrealMcpMainWindow::Construct(const FArguments& InArgs)
 			+ SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 8)[ BuildCustomAuthSection() ]
 			+ SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 8)[ BuildBridgeStatusSection() ]
 			+ SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 8)[ BuildAiAgentsSection() ]
+			+ SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 8)[ BuildAgentConfiguratorsSection() ]
 			+ SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 8)[ BuildFooterSection() ]
 		]
 	];
@@ -505,6 +508,16 @@ TSharedRef<SWidget> SUnrealMcpMainWindow::BuildAiAgentsSection()
 				})
 			]
 		];
+}
+
+TSharedRef<SWidget> SUnrealMcpMainWindow::BuildAgentConfiguratorsSection()
+{
+	// The AI Agent Configurators panel (§7/§8): pick an external AI client and auto-write its MCP config. It is a
+	// self-contained compound widget bound to the same view-model (for the persisted dropdown selection) and the
+	// runtime-supplied connection-info provider (for the live server path / port / url / auth / token).
+	return SNew(SUnrealMcpAgentConfigurators)
+		.ViewModel(ViewModel)
+		.ConnectionInfoProvider(ConnectionInfoProvider);
 }
 
 TSharedRef<SWidget> SUnrealMcpMainWindow::BuildFooterSection()

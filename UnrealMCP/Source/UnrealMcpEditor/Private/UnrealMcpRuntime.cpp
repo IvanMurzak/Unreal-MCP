@@ -193,6 +193,18 @@ void FUnrealMcpRuntime::Startup()
 			if (SidecarPtr && SidecarPtr->IsRunning())
 				return FString::Printf(TEXT("Running (restarts: %d)"), SidecarPtr->GetRestartCount());
 			return TEXT("Stopped");
+		},
+		// §7/§8 AI Agent Configurators: yield the live connection facts so the assembled STDIO/HTTP snippets
+		// reflect the current config. Re-resolve the §8 config on each call (the user may have just edited the
+		// host/token in the same window) and read the bound IPC port from the bridge. The local server binary
+		// path is owned by the cli/§6 install layout — not the plugin — so it is left empty here; the STDIO
+		// snippet is still a valid template (the user supplies the binary, exactly the cli's stance), and the
+		// HTTP form is fully self-contained.
+		[BridgeServerPtr]() -> FAiAgentConnectionInfo
+		{
+			const FUnrealMcpConfig Live = FUnrealMcpConfig::LoadAndResolve();
+			const int32 Port = BridgeServerPtr ? BridgeServerPtr->GetBoundPort() : 0;
+			return FAiAgentConnectionInfo::FromPluginConfig(Live, /*ServerPath*/ FString(), Port);
 		});
 
 	// §7 auxiliary windows (MCP Tools / Prompts / Resources / Settings). The Tools window snapshots the registry on

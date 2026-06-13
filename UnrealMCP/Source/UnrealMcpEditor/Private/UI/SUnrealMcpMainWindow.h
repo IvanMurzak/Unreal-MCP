@@ -7,6 +7,7 @@
 #include "Widgets/SCompoundWidget.h"
 #include "Widgets/DeclarativeSyntaxSupport.h"
 #include "UI/UnrealMcpEditorViewModel.h"
+#include "Agents/AiAgentConfigurator.h"
 
 /**
  * The "AI Game Developer" main window (docs/ARCHITECTURE.md §7), a pure-Slate compound widget — NO UMG /
@@ -31,6 +32,8 @@ public:
 		SLATE_EVENT(FSimpleDelegate, OnRestartBridge)
 		/** Optional: a provider for the one-line bridge status string (§7 item 7). */
 		SLATE_ARGUMENT(TFunction<FString()>, BridgeStatusProvider)
+		/** Optional: yields the live connection facts for the AI Agent Configurators panel (§7/§8). */
+		SLATE_ARGUMENT(TFunction<FAiAgentConnectionInfo()>, ConnectionInfoProvider)
 	SLATE_END_ARGS()
 
 	void Construct(const FArguments& InArgs);
@@ -40,6 +43,7 @@ private:
 	FString PluginVersion;
 	FSimpleDelegate OnRestartBridge;
 	TFunction<FString()> BridgeStatusProvider;
+	TFunction<FAiAgentConnectionInfo()> ConnectionInfoProvider;
 
 	// Whether the masked Custom-mode token field is currently revealed (reveal-on-hold, §8).
 	bool bRevealToken = false;
@@ -52,6 +56,7 @@ private:
 	TSharedRef<SWidget> BuildCustomAuthSection();
 	TSharedRef<SWidget> BuildBridgeStatusSection();
 	TSharedRef<SWidget> BuildAiAgentsSection();
+	TSharedRef<SWidget> BuildAgentConfiguratorsSection();
 	TSharedRef<SWidget> BuildFooterSection();
 
 	// A bold section header row.

@@ -1,0 +1,146 @@
+// Copyright (c) 2026 Ivan Murzak. Licensed under the Apache License, Version 2.0.
+// See the LICENSE file in the repository root for more information.
+
+#include "Agents/AiAgentConfigurator.h"
+#include "Agents/JsonAiAgentConfig.h"
+
+#include "Dom/JsonObject.h"
+#include "Dom/JsonValue.h"
+
+FAiAgentConnectionInfo FAiAgentConnectionInfo::FromPluginConfig(const FUnrealMcpConfig& Config, const FString& InServerPath, int32 InPort)
+{
+	FAiAgentConnectionInfo Info;
+	Info.ServerPath = InServerPath;
+	Info.Port = InPort;
+
+	const bool bCloud = Config.ConnectionMode == EUnrealMcpConnectionMode::Cloud;
+
+	// The MCP-client URL is the effective host + "/mcp" (mirrors the cli's `${url}/mcp`). Cloud uses the cloud
+	// base URL; Custom uses the user's host. ResolveCloudBaseUrl/ResolveCustomHost already trim a trailing slash.
+	const FString BaseUrl = bCloud ? Config.ResolveCloudBaseUrl() : Config.ResolveCustomHost();
+	Info.HttpUrl = BaseUrl + TEXT("/mcp");
+
+	// Auth: Cloud always requires it (the cloud enforces it); Custom follows AuthOption. The token is the
+	// mode-resolved effective bearer (Cloud→cloudToken, Custom+Required→token, else empty).
+	Info.bAuthRequired = bCloud || Config.AuthOption == EUnrealMcpAuthOption::Required;
+	Info.Token = Config.ResolveEffectiveToken();
+
+	return Info;
+}
+
+void FAiAgentConfigurator::Initialize(const FAiAgentConnectionInfo& InConnection, const FString& InProjectRoot)
+{
+	Connection = InConnection;
+	ProjectRoot = InProjectRoot;
+	Invalidate();
+}
+
+void FAiAgentConfigurator::Invalidate()
+{
+	ConfigStdio.Reset();
+	ConfigHttp.Reset();
+}
+
+FJsonAiAgentConfig& FAiAgentConfigurator::GetConfigStdio()
+{
+	if (!ConfigStdio.IsValid())
+		ConfigStdio = BuildStdio();
+	return *ConfigStdio;
+}
+
+FJsonAiAgentConfig& FAiAgentConfigurator::GetConfigHttp()
+{
+	if (!ConfigHttp.IsValid())
+		ConfigHttp = BuildHttp();
+	return *ConfigHttp;
+}
+
+TSharedRef<FJsonAiAgentConfig> FAiAgentConfigurator::BuildStdio() const
+{
+	// STDIO form (the shared GameDev-MCP-Server CLI contract, identical to the cli's buildServerEntry):
+	//   { "type": "stdio", "command": <serverPath>, "args": ["port=N", "client-transport=stdio",
+	//     "authorization=required|none", "token=<token>"] }
+	// command is an identity key (ValueComparison::Path-equivalent → Exact is fine since we always emit the
+	// same normalized path). The HTTP-only keys (type=http url headers) are explicitly removed so a transport
+	// switch in the same file leaves no stale HTTP entry.
+	const FString Command = Connection.ServerPath.Replace(TEXT("\\"), TEXT("/"));
+
+	TArray<TSharedPtr<FJsonValue>> Args;
+	Args.Add(MakeShared<FJsonValueString>(FString::Printf(TEXT("port=%d"), Connection.Port)));
+	Args.Add(MakeShared<FJsonValueString>(TEXT("client-transport=stdio")));
+	Args.Add(MakeShared<FJsonValueString>(FString::Printf(TEXT("authorization=%s"), Connection.bAuthRequired ? TEXT("required") : TEXT("none"))));
+	Args.Add(MakeShared<FJsonValueString>(FString::Printf(TEXT("token=%s"), Connection.bAuthRequired ? *Connection.Token : TEXT(""))));
+
+	TSharedRef<FJsonAiAgentConfig> Config = MakeShared<FJsonAiAgentConfig>(
+		GetAgentName(),
+		GetConfigFilePath(ProjectRoot),
+		GetBodyPath());
+
+	Config->SetStringProperty(TEXT("type"), TEXT("stdio"), /*bRequired*/ true);
+	Config->SetStringProperty(TEXT("command"), Command, /*bRequired*/ true);
+	Config->SetProperty(TEXT("args"), MakeShared<FJsonValueArray>(Args), /*bRequired*/ true);
+	// Drop the HTTP-only keys so a stdio write over a prior http entry is clean.
+	Config->SetPropertyToRemove(TEXT("url"));
+	Config->SetPropertyToRemove(TEXT("headers"));
+
+	return Config;
+}
+
+TSharedRef<FJsonAiAgentConfig> FAiAgentConfigurator::BuildHttp() const
+{
+	// HTTP form (identical to the cli's buildServerEntry):
+	//   { "type": "http", "url": "<host>/mcp", "headers": { "Authorization": "Bearer <token>" }? }
+	// url is compared with URL semantics (trailing-slash / case tolerant). The header is added ONLY when auth is
+	// required AND a token exists; otherwise it is explicitly removed so toggling auth off scrubs a stale header.
+	TSharedRef<FJsonAiAgentConfig> Config = MakeShared<FJsonAiAgentConfig>(
+		GetAgentName(),
+		GetConfigFilePath(ProjectRoot),
+		GetBodyPath());
+
+	Config->SetStringProperty(TEXT("type"), TEXT("http"), /*bRequired*/ true);
+	Config->SetStringProperty(TEXT("url"), Connection.HttpUrl, /*bRequired*/ true, EUnrealMcpValueComparison::Url);
+
+	if (Connection.bAuthRequired && !Connection.Token.IsEmpty())
+	{
+		TSharedPtr<FJsonObject> Headers = MakeShared<FJsonObject>();
+		Headers->SetStringField(TEXT("Authorization"), FString::Printf(TEXT("Bearer %s"), *Connection.Token));
+		Config->SetProperty(TEXT("headers"), MakeShared<FJsonValueObject>(Headers), /*bRequired*/ true);
+	}
+	else
+	{
+		Config->SetPropertyToRemove(TEXT("headers"));
+	}
+
+	// Drop the STDIO-only keys so an http write over a prior stdio entry is clean.
+	Config->SetPropertyToRemove(TEXT("command"));
+	Config->SetPropertyToRemove(TEXT("args"));
+
+	return Config;
+}
+
+bool FAiAgentConfigurator::IsAnyDetected()
+{
+	return GetConfigStdio().IsDetected() || GetConfigHttp().IsDetected();
+}
+
+bool FAiAgentConfigurator::IsConfigured(bool bStdio)
+{
+	return bStdio ? GetConfigStdio().IsConfigured() : GetConfigHttp().IsConfigured();
+}
+
+bool FAiAgentConfigurator::Configure(bool bStdio)
+{
+	const bool bResult = bStdio ? GetConfigStdio().Configure() : GetConfigHttp().Configure();
+	// A write changes IsConfigured/IsDetected for BOTH cached configs (same file); rebuild on next access.
+	Invalidate();
+	return bResult;
+}
+
+bool FAiAgentConfigurator::RemoveAll()
+{
+	// Remove via either transport's config — both share the same file/body/identity, and Remove() clears the
+	// canonical entry + deprecated + duplicate aliases regardless of which transport object calls it.
+	const bool bResult = GetConfigStdio().Remove();
+	Invalidate();
+	return bResult;
+}

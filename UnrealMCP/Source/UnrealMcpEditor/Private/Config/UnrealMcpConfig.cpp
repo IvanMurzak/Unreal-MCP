@@ -44,6 +44,7 @@ namespace
 	const TCHAR* KeyStartServer    = TEXT("startServer");
 	const TCHAR* KeyEnabledTools   = TEXT("enabledTools");
 	const TCHAR* KeyDisabledTools  = TEXT("disabledTools");
+	const TCHAR* KeySelectedAgentId = TEXT("selectedAgentId");
 
 	// Read a JSON array field into a string array (skipping empty/non-string entries). Shared by the
 	// enabledTools / disabledTools list fields so their parsing stays identical.
@@ -154,6 +155,10 @@ void FUnrealMcpConfig::LoadFromJson(const TSharedPtr<FJsonObject>& Json)
 
 		ReadStringArrayField(Json, KeyEnabledTools, EnabledTools);
 		ReadStringArrayField(Json, KeyDisabledTools, DisabledTools);
+
+		// Pure UI persistence (no env override). A blank/missing value keeps the default selection.
+		if (Json->TryGetStringField(KeySelectedAgentId, Str) && !Str.IsEmpty())
+			SelectedAgentId = Str;
 	}
 
 	// Snapshot the (defaults + disk) baseline AFTER loading — this is what Save() restores for any key an
@@ -330,6 +335,8 @@ TSharedPtr<FJsonObject> FUnrealMcpConfig::ToJson() const
 	for (const FString& Tool : DisabledTools)
 		Disabled.Add(MakeShared<FJsonValueString>(Tool));
 	Obj->SetArrayField(KeyDisabledTools, Disabled);
+
+	Obj->SetStringField(KeySelectedAgentId, SelectedAgentId);
 
 	return Obj;
 }
