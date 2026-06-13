@@ -107,7 +107,28 @@ void SUnrealMcpAgentConfigurators::Construct(const FArguments& InArgs)
 		]
 	];
 
+	// Subscribe to connection-setting changes so the panel re-resolves + rebuilds when the user edits the
+	// connection mode / host / auth / token in the main window — without reselecting the agent (§7; the C++/Slate
+	// analog of Unity's InvalidateAndReloadAgentUI). The handle is removed in the destructor.
+	if (IsViewModelValid())
+		ConnectionChangedHandle = ViewModel->OnConnectionSettingsChanged.AddSP(this, &SUnrealMcpAgentConfigurators::OnConnectionSettingsChanged);
+
 	RefreshSelectedConfigurator();
+}
+
+SUnrealMcpAgentConfigurators::~SUnrealMcpAgentConfigurators()
+{
+	if (ViewModel.IsValid() && ConnectionChangedHandle.IsValid())
+		ViewModel->OnConnectionSettingsChanged.Remove(ConnectionChangedHandle);
+}
+
+void SUnrealMcpAgentConfigurators::OnConnectionSettingsChanged()
+{
+	// A connection setting changed. Re-bind the selected configurator to the now-current connection info (BindSelected
+	// calls Initialize, which invalidates the cached STDIO/HTTP configs) and rebuild the panel so the snippet preview,
+	// the per-transport status, and what Configure() will write all reflect the new settings.
+	BindSelected();
+	RebuildAgentPanel();
 }
 
 void SUnrealMcpAgentConfigurators::RefreshSelectedConfigurator()
@@ -204,8 +225,13 @@ void SUnrealMcpAgentConfigurators::RebuildAgentPanel()
 		];
 	}
 
+	// The raw config/snippet text field is noise for built-in agents (their Configure button writes the file
+	// directly); only the snippet-only Custom agent — which has no config path, so the user pastes the snippet by
+	// hand — keeps showing it (§7, issue #56). Computed once here; the panel is rebuilt on every selection change.
+	const bool bShowSnippet = Selected.IsValid() && Selected->GetAgentId() == TEXT("other-custom");
+
 	// A reusable transport section builder (STDIO and HTTP share the same shape).
-	auto BuildTransportSection = [this](const FText& Heading, bool bStdio) -> TSharedRef<SWidget>
+	auto BuildTransportSection = [this, bShowSnippet](const FText& Heading, bool bStdio) -> TSharedRef<SWidget>
 	{
 		return SNew(SVerticalBox)
 			+ SVerticalBox::Slot().AutoHeight().Padding(0, 8, 0, 0)
@@ -233,12 +259,14 @@ void SUnrealMcpAgentConfigurators::RebuildAgentPanel()
 					return FSlateColor(FLinearColor(0.85f, 0.65f, 0.20f));
 				})
 			]
-			// Snippet preview (read-only, token-masked).
+			// Snippet preview (read-only, token-masked) — shown ONLY for the Custom agent (§7, issue #56). Built-in
+			// agents write their config file via Configure, so the raw snippet text is noise and is collapsed.
 			+ SVerticalBox::Slot().AutoHeight().Padding(0, 4, 0, 0)
 			[
 				SNew(SMultiLineEditableTextBox)
 				.IsReadOnly(true)
 				.AlwaysShowScrollbars(false)
+				.Visibility(bShowSnippet ? EVisibility::Visible : EVisibility::Collapsed)
 				.Text_Lambda([this, bStdio]()
 				{
 					return FText::FromString(BuildSnippetPreview(bStdio));
@@ -356,6 +384,26 @@ FString SUnrealMcpAgentConfigurators::ResolveSelectedSkillsPath() const
 	return Selected->ResolveAbsoluteSkillsPath(ProjectRoot);
 }
 
+FString SUnrealMcpAgentConfigurators::MakeDisplayPath(const FString& AbsolutePath) const
+{
+	if (AbsolutePath.IsEmpty())
+		return AbsolutePath;
+
+	FString ProjectRoot = ProjectRootProvider ? ProjectRootProvider() : FPaths::ConvertRelativePathToFull(FPaths::ProjectDir());
+	ProjectRoot = FPaths::ConvertRelativePathToFull(ProjectRoot);
+	if (ProjectRoot.IsEmpty())
+		return AbsolutePath;
+
+	// MakePathRelativeTo mutates its first arg in place and needs a trailing slash on the base (the pattern used in
+	// Tools/UnrealMcpSourceTools.cpp). When the path is not under the root it leaves a "../"-style result; fall back
+	// to the absolute path in that case rather than show a confusing climb-out.
+	FString Relative = AbsolutePath;
+	FPaths::MakePathRelativeTo(Relative, *(ProjectRoot / TEXT("")));
+	if (Relative.IsEmpty() || Relative.StartsWith(TEXT("..")))
+		return AbsolutePath;
+	return Relative;
+}
+
 void SUnrealMcpAgentConfigurators::GenerateSkillsForSelected()
 {
 	const FString SkillsRoot = ResolveSelectedSkillsPath();
@@ -442,12 +490,15 @@ TSharedRef<SWidget> SUnrealMcpAgentConfigurators::BuildSkillsSection()
 		];
 	}
 
-	// The resolved absolute output path (always shown — read-only).
+	// The resolved output path, shown project-root-relative (e.g. ".claude/skills") for readability (§7, issue #56).
+	// The full absolute path stays available as the tooltip so the user can still see exactly where files land.
+	const FString DisplayPath = MakeDisplayPath(AbsolutePath);
 	Section->AddSlot().AutoHeight().Padding(0, 4, 0, 0)
 	[
 		SNew(STextBlock)
 		.AutoWrapText(true)
-		.Text(FText::Format(LOCTEXT("SkillsOutFmt", "Output: {0}"), FText::FromString(AbsolutePath)))
+		.Text(FText::Format(LOCTEXT("SkillsOutFmt", "Output: {0}"), FText::FromString(DisplayPath)))
+		.ToolTipText(FText::FromString(AbsolutePath))
 	];
 
 	// Generate button (explicit regeneration; idempotent).

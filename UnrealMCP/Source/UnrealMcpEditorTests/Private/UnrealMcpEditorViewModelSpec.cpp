@@ -150,6 +150,63 @@ void FUnrealMcpEditorViewModelSpec::Define()
 		});
 	});
 
+	Describe("Connection-settings change notification (§7 — the InvalidateAndReloadAgentUI seam, issue #56)", [this]()
+	{
+		It("fires OnConnectionSettingsChanged when the mode / host / auth / token change so the agent panel can re-resolve", [this]()
+		{
+			TSharedRef<FRecording> Rec = MakeShared<FRecording>();
+			TSharedRef<FUnrealMcpEditorViewModel> VM = MakeViewModel(Rec);
+
+			int32 Notifications = 0;
+			FDelegateHandle Handle = VM->OnConnectionSettingsChanged.AddLambda([&Notifications]() { Notifications++; });
+
+			// Mode change Cloud (default) -> Custom: one notification.
+			VM->SetConnectionMode(EUnrealMcpConnectionMode::Custom);
+			TestEqual("mode change notified", Notifications, 1);
+
+			// A no-op mode set (already Custom) must NOT notify — avoid spurious panel churn.
+			VM->SetConnectionMode(EUnrealMcpConnectionMode::Custom);
+			TestEqual("no-op mode change did not notify", Notifications, 1);
+
+			// Host change (even an invalid one) refreshes the previewed url.
+			VM->SetCustomHost(TEXT("http://localhost:9100"));
+			TestEqual("host change notified", Notifications, 2);
+
+			// A no-op host set (same value) must NOT notify.
+			VM->SetCustomHost(TEXT("http://localhost:9100"));
+			TestEqual("no-op host change did not notify", Notifications, 2);
+
+			// Auth option change toggles whether the snippet carries a bearer.
+			VM->SetAuthOption(EUnrealMcpAuthOption::Required);
+			TestEqual("auth change notified", Notifications, 3);
+
+			// Token change is injected into the snippet/Configure output.
+			VM->SetCustomToken(TEXT("fresh-token"));
+			TestEqual("token change notified", Notifications, 4);
+
+			// A no-op token set (same value) must NOT notify.
+			VM->SetCustomToken(TEXT("fresh-token"));
+			TestEqual("no-op token change did not notify", Notifications, 4);
+
+			VM->OnConnectionSettingsChanged.Remove(Handle);
+		});
+
+		It("does NOT notify after the subscriber unbinds (no dangling-handler refresh)", [this]()
+		{
+			TSharedRef<FRecording> Rec = MakeShared<FRecording>();
+			TSharedRef<FUnrealMcpEditorViewModel> VM = MakeViewModel(Rec);
+
+			int32 Notifications = 0;
+			FDelegateHandle Handle = VM->OnConnectionSettingsChanged.AddLambda([&Notifications]() { Notifications++; });
+			VM->SetConnectionMode(EUnrealMcpConnectionMode::Custom);
+			TestEqual("notified while bound", Notifications, 1);
+
+			VM->OnConnectionSettingsChanged.Remove(Handle);
+			VM->SetCustomHost(TEXT("http://localhost:9200"));
+			TestEqual("no notification after unbind", Notifications, 1);
+		});
+	});
+
 	Describe("Cloud device-code auth", [this]()
 	{
 		It("Authorize sends auth-start; device-auth feed opens the browser once and stores the token", [this]()

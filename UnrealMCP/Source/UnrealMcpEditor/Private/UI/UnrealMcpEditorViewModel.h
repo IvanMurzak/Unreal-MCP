@@ -81,6 +81,17 @@ public:
 	 */
 	TFunction<void(const TArray<FString>& /*DisabledTools*/)> OnToolEnablementChanged;
 
+	/**
+	 * Fires whenever a connection-affecting setting changes — connection mode (Cloud↔Custom), Custom host,
+	 * auth option, the Custom/Cloud token. The AI Agent Configurators panel subscribes to this so it can
+	 * invalidate the active configurator's cached STDIO/HTTP config and rebuild itself, keeping the shown
+	 * snippet/status AND what Configure() writes in sync with the live connection WITHOUT the user reselecting
+	 * the agent (the C++/Slate analog of Unity's InvalidateAndReloadAgentUI). Broadcast-only and side-effect
+	 * free in the view-model; subscribers do the invalidation. Specs can bind a recording lambda to assert the
+	 * notification fires. Subscribers MUST unbind (via the returned handle) before they are destroyed.
+	 */
+	FSimpleMulticastDelegate OnConnectionSettingsChanged;
+
 	// --- Config accessors (the working §8 config the UI edits). ---
 
 	const FUnrealMcpConfig& GetConfig() const { return Config; }
