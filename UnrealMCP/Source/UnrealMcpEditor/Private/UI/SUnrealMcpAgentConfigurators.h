@@ -48,11 +48,16 @@ public:
 	SLATE_END_ARGS()
 
 	void Construct(const FArguments& InArgs);
+	virtual ~SUnrealMcpAgentConfigurators() override;
 
 private:
 	TSharedPtr<FUnrealMcpEditorViewModel> ViewModel;
 	TFunction<FAiAgentConnectionInfo()> ConnectionInfoProvider;
 	TFunction<FString()> ProjectRootProvider;
+
+	// Handle for the view-model's OnConnectionSettingsChanged subscription, removed in the destructor so a
+	// connection-setting change after this widget is gone never invokes a dangling handler.
+	FDelegateHandle ConnectionChangedHandle;
 
 	TSharedPtr<FAiAgentConfiguratorRegistry> Registry;
 	// The dropdown's item source (agent display names, registry order).
@@ -70,6 +75,10 @@ private:
 
 	// Re-resolve the selected configurator from the view-model + provider and rebuild its panel.
 	void RefreshSelectedConfigurator();
+	// Handler for FUnrealMcpEditorViewModel::OnConnectionSettingsChanged: invalidate the active configurator's
+	// cached config (re-resolved from fresh connection info) and rebuild the panel, so the shown snippet/status
+	// AND what Configure() writes track the new connection settings without the user reselecting the agent.
+	void OnConnectionSettingsChanged();
 	// (Re)build the per-agent panel for the current Selected configurator into AgentPanelContainer.
 	void RebuildAgentPanel();
 	// Bind the selected configurator to the live connection info + project root.
@@ -86,6 +95,13 @@ private:
 	TSharedRef<SWidget> BuildSkillsSection();
 	/** Resolve the selected agent's absolute skills folder (project-relative resolved under the live project root). */
 	FString ResolveSelectedSkillsPath() const;
+	/**
+	 * Convert an absolute filesystem path to a project-root-relative display string (forward slashes, no leading
+	 * "./"); mirrors Unity's ToDisplayPath and the FPaths::MakePathRelativeTo pattern in UnrealMcpSourceTools.
+	 * A path already outside / not under the project root, or an empty input, is returned unchanged (still useful
+	 * as a fallback display). The full absolute path stays available as the widget's tooltip.
+	 */
+	FString MakeDisplayPath(const FString& AbsolutePath) const;
 	/** Generate the SKILL.md files for the selected agent into its resolved skills folder (idempotent). Logs the result. */
 	void GenerateSkillsForSelected();
 };

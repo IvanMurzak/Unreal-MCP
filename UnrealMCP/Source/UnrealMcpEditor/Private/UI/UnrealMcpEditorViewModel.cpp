@@ -33,6 +33,9 @@ void FUnrealMcpEditorViewModel::SetConnectionMode(EUnrealMcpConnectionMode InMod
 		return;
 	Config.ConnectionMode = InMode;
 	PersistAndPush();
+	// The resolved connection facts (auth-required, token source, http url) all hinge on the mode, so the agent
+	// configurators must re-resolve their cached config + rebuild their panel (Unity's InvalidateAndReloadAgentUI).
+	OnConnectionSettingsChanged.Broadcast();
 }
 
 void FUnrealMcpEditorViewModel::SetCustomHost(const FString& InHost)
@@ -42,12 +45,17 @@ void FUnrealMcpEditorViewModel::SetCustomHost(const FString& InHost)
 	// the field, the §8 store, and the dial target stay consistent. Only push a host that validates — pushing a
 	// malformed URL to the sidecar would just make it dial nowhere (§7 validated field).
 	const FString Trimmed = InHost.TrimStartAndEnd();
+	const bool bChanged = Config.CustomHost != Trimmed;
 	Config.CustomHost = Trimmed;
 	FString Error;
 	if (ValidateServerUrl(Trimmed, Error))
 	{
 		PersistAndPush();
 	}
+	// Refresh the configurators on any host change (even before it validates) so the previewed HTTP url tracks
+	// what the user typed; the panel reads the host through the connection-info provider, not the dialed target.
+	if (bChanged)
+		OnConnectionSettingsChanged.Broadcast();
 }
 
 void FUnrealMcpEditorViewModel::SetAuthOption(EUnrealMcpAuthOption InOption)
@@ -56,12 +64,18 @@ void FUnrealMcpEditorViewModel::SetAuthOption(EUnrealMcpAuthOption InOption)
 		return;
 	Config.AuthOption = InOption;
 	PersistAndPush();
+	// Auth-required toggles whether the snippet carries a bearer header/arg — the configurators must re-resolve.
+	OnConnectionSettingsChanged.Broadcast();
 }
 
 void FUnrealMcpEditorViewModel::SetCustomToken(const FString& InToken)
 {
+	if (Config.CustomToken == InToken)
+		return;
 	Config.CustomToken = InToken;
 	PersistAndPush();
+	// The token is injected into the STDIO args / HTTP Authorization header — refresh the configurators.
+	OnConnectionSettingsChanged.Broadcast();
 }
 
 void FUnrealMcpEditorViewModel::GenerateCustomToken()
@@ -72,6 +86,8 @@ void FUnrealMcpEditorViewModel::GenerateCustomToken()
 	UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] generated a new Custom-mode token (%s)."),
 		*FUnrealMcpConfig::MaskSecret(Config.CustomToken));
 	PersistAndPush();
+	// New token + auth flipped to required — the configurators' snippet/Configure output must reflect both.
+	OnConnectionSettingsChanged.Broadcast();
 }
 
 void FUnrealMcpEditorViewModel::Connect()
@@ -120,6 +136,11 @@ void FUnrealMcpEditorViewModel::CancelAuth()
 
 void FUnrealMcpEditorViewModel::Revoke()
 {
+	// A no-op Revoke (no bearer stored) must not churn the store / re-push / rebuild the panel — mirror the
+	// no-op guards on SetConnectionMode/SetCustomHost/SetAuthOption/SetCustomToken. Always clear the device-auth
+	// indicator state and tell the sidecar (auth-revoke is idempotent), but only persist/push/notify when a token
+	// was actually dropped.
+	const bool bHadToken = !Config.CloudToken.IsEmpty();
 	Config.CloudToken.Reset();
 	DeviceAuthState = EUnrealMcpDeviceAuthState::Idle;
 	DeviceVerificationUrl.Reset();
@@ -127,8 +148,13 @@ void FUnrealMcpEditorViewModel::Revoke()
 	DeviceAuthError.Reset();
 	if (OnSendAuth)
 		OnSendAuth(TEXT("auth-revoke"));
-	// CloudToken changed — persist (Save restores env/.env overrides) and push the now-anonymous config.
-	PersistAndPush();
+	if (bHadToken)
+	{
+		// CloudToken changed — persist (Save restores env/.env overrides) and push the now-anonymous config.
+		PersistAndPush();
+		// The Cloud-mode bearer the configurators inject is now gone — refresh so the snippet drops it.
+		OnConnectionSettingsChanged.Broadcast();
+	}
 }
 
 void FUnrealMcpEditorViewModel::ApplyStatus(const TSharedPtr<FJsonObject>& Status)
@@ -212,6 +238,8 @@ void FUnrealMcpEditorViewModel::ApplyDeviceAuth(const TSharedPtr<FJsonObject>& D
 			{
 				Config.CloudToken = Token;
 				PersistAndPush();
+				// A fresh Cloud bearer landed — the configurators inject it into the Cloud-mode snippet; refresh.
+				OnConnectionSettingsChanged.Broadcast();
 			}
 		}
 		else if (StateRaw.Equals(TEXT("failed"), ESearchCase::IgnoreCase) || StateRaw.Equals(TEXT("denied"), ESearchCase::IgnoreCase) || StateRaw.Equals(TEXT("expired"), ESearchCase::IgnoreCase))
