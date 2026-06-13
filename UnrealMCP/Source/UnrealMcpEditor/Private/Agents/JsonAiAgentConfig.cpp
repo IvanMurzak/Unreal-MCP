@@ -145,7 +145,9 @@ bool FJsonAiAgentConfig::WriteRoot(const TSharedPtr<FJsonObject>& Root) const
 	if (!Dir.IsEmpty())
 		IFileManager::Get().MakeDirectory(*Dir, /*Tree*/ true);
 
-	return FFileHelper::SaveStringToFile(Serialized, *ConfigPath);
+	// Force UTF-8 without a BOM: .mcp.json / .cursor/mcp.json are consumed by Node-based agents and the cli,
+	// and the default AutoDetect encoding can emit a UTF-8 BOM / UTF-16 that those JSON parsers choke on.
+	return FFileHelper::SaveStringToFile(Serialized, *ConfigPath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
 }
 
 TSharedPtr<FJsonObject> FJsonAiAgentConfig::NavigateToBody(const TSharedPtr<FJsonObject>& Root, const TArray<FString>& Segments)
@@ -237,7 +239,8 @@ bool FJsonAiAgentConfig::Configure()
 		const FString Dir = FPaths::GetPath(ConfigPath);
 		if (!Dir.IsEmpty())
 			IFileManager::Get().MakeDirectory(*Dir, /*Tree*/ true);
-		if (!FFileHelper::SaveStringToFile(GetExpectedFileContent(), *ConfigPath))
+		// Force UTF-8 without a BOM (see WriteRoot): Node/cli JSON parsers must not see a BOM.
+		if (!FFileHelper::SaveStringToFile(GetExpectedFileContent(), *ConfigPath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
 			return false;
 		return IsConfigured();
 	}

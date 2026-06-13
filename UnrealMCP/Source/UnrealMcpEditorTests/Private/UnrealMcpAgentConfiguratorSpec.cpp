@@ -70,6 +70,22 @@ BEGIN_DEFINE_SPEC(FUnrealMcpAgentConfiguratorSpec, "UnrealMcp.AgentConfigurators
 		return Config;
 	}
 
+	// Build a STDIO config at a path (type=stdio, command, args) that scrubs the HTTP-only keys (url, headers) —
+	// mirrors FAiAgentConfigurator::BuildStdio so a transport switch over a prior HTTP entry leaves no stale keys.
+	TSharedRef<FJsonAiAgentConfig> MakeStdioConfig(const FString& Path, const FString& Command) const
+	{
+		TSharedRef<FJsonAiAgentConfig> Config = MakeShared<FJsonAiAgentConfig>(TEXT("Test"), Path, TEXT("mcpServers"));
+		TArray<TSharedPtr<FJsonValue>> Args;
+		Args.Add(MakeShared<FJsonValueString>(TEXT("port=8080")));
+		Args.Add(MakeShared<FJsonValueString>(TEXT("client-transport=stdio")));
+		Config->SetStringProperty(TEXT("type"), TEXT("stdio"), /*bRequired*/ true);
+		Config->SetStringProperty(TEXT("command"), Command, /*bRequired*/ true);
+		Config->SetProperty(TEXT("args"), MakeShared<FJsonValueArray>(Args), /*bRequired*/ true);
+		Config->SetPropertyToRemove(TEXT("url"));
+		Config->SetPropertyToRemove(TEXT("headers"));
+		return Config;
+	}
+
 END_DEFINE_SPEC(FUnrealMcpAgentConfiguratorSpec)
 
 void FUnrealMcpAgentConfiguratorSpec::Define()
@@ -223,6 +239,49 @@ void FUnrealMcpAgentConfiguratorSpec::Define()
 
 			TSharedRef<FJsonAiAgentConfig> Config = MakeHttpConfig(Path, TEXT("http://localhost:8080/mcp"));
 			TestTrue(TEXT("trailing slash treated as configured"), Config->IsConfigured());
+
+			DeleteTempDirFor(Path);
+		});
+
+		It("switches an existing HTTP entry to STDIO cleanly (drops url/headers, adds command/args)", [this]()
+		{
+			const FString Path = MakeTempConfigPath();
+			IFileManager::Get().MakeDirectory(*FPaths::GetPath(Path), true);
+			// A pre-existing HTTP "unreal-mcp" entry, complete with an Authorization header.
+			const FString Existing = TEXT("{\n  \"mcpServers\": {\n    \"unreal-mcp\": { \"type\": \"http\", \"url\": \"http://localhost:8080/mcp\", \"headers\": { \"Authorization\": \"Bearer stale\" } }\n  }\n}");
+			FFileHelper::SaveStringToFile(Existing, *Path);
+
+			TSharedRef<FJsonAiAgentConfig> Config = MakeStdioConfig(Path, TEXT("C:/srv/gamedev-mcp-server.exe"));
+			TestTrue(TEXT("STDIO Configure over HTTP succeeds"), Config->Configure());
+
+			TSharedPtr<FJsonObject> Root = ReadJsonFile(Path);
+			const TSharedPtr<FJsonObject>* Body = nullptr;
+			Root->TryGetObjectField(TEXT("mcpServers"), Body);
+			const TSharedPtr<FJsonObject>* Entry = nullptr;
+			TestTrue(TEXT("unreal-mcp entry present"), Body && (*Body)->TryGetObjectField(TEXT("unreal-mcp"), Entry) && Entry);
+			if (Entry)
+			{
+				TestFalse(TEXT("stale url removed"), (*Entry)->HasField(TEXT("url")));
+				TestFalse(TEXT("stale headers removed"), (*Entry)->HasField(TEXT("headers")));
+				TestTrue(TEXT("command present"), (*Entry)->HasField(TEXT("command")));
+				TestTrue(TEXT("args present"), (*Entry)->HasField(TEXT("args")));
+			}
+			TestTrue(TEXT("IsConfigured after switch"), Config->IsConfigured());
+
+			DeleteTempDirFor(Path);
+		});
+
+		It("IsConfigured is false when a to-remove key still survives in the entry", [this]()
+		{
+			const FString Path = MakeTempConfigPath();
+			IFileManager::Get().MakeDirectory(*FPaths::GetPath(Path), true);
+			// An entry that already matches our desired STDIO properties BUT still carries a stale "url" key —
+			// the very key the STDIO config asks to remove. HasAnyPropertyToRemove must veto IsConfigured.
+			const FString Existing = TEXT("{\n  \"mcpServers\": {\n    \"unreal-mcp\": { \"type\": \"stdio\", \"command\": \"C:/srv/gamedev-mcp-server.exe\", \"args\": [\"port=8080\", \"client-transport=stdio\"], \"url\": \"http://localhost:8080/mcp\" }\n  }\n}");
+			FFileHelper::SaveStringToFile(Existing, *Path);
+
+			TSharedRef<FJsonAiAgentConfig> Config = MakeStdioConfig(Path, TEXT("C:/srv/gamedev-mcp-server.exe"));
+			TestFalse(TEXT("surviving to-remove key vetoes IsConfigured"), Config->IsConfigured());
 
 			DeleteTempDirFor(Path);
 		});
