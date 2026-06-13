@@ -228,7 +228,8 @@ void SUnrealMcpAgentConfigurators::RebuildAgentPanel()
 	// The raw config/snippet text field is noise for built-in agents (their Configure button writes the file
 	// directly); only the snippet-only Custom agent — which has no config path, so the user pastes the snippet by
 	// hand — keeps showing it (§7, issue #56). Computed once here; the panel is rebuilt on every selection change.
-	const bool bShowSnippet = Selected.IsValid() && Selected->GetAgentId() == TEXT("other-custom");
+	// Selected is guaranteed valid here — RebuildAgentPanel early-returns above when it is not.
+	const bool bShowSnippet = Selected->GetAgentId() == TEXT("other-custom");
 
 	// A reusable transport section builder (STDIO and HTTP share the same shape).
 	auto BuildTransportSection = [this, bShowSnippet](const FText& Heading, bool bStdio) -> TSharedRef<SWidget>

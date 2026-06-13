@@ -136,6 +136,11 @@ void FUnrealMcpEditorViewModel::CancelAuth()
 
 void FUnrealMcpEditorViewModel::Revoke()
 {
+	// A no-op Revoke (no bearer stored) must not churn the store / re-push / rebuild the panel — mirror the
+	// no-op guards on SetConnectionMode/SetCustomHost/SetAuthOption/SetCustomToken. Always clear the device-auth
+	// indicator state and tell the sidecar (auth-revoke is idempotent), but only persist/push/notify when a token
+	// was actually dropped.
+	const bool bHadToken = !Config.CloudToken.IsEmpty();
 	Config.CloudToken.Reset();
 	DeviceAuthState = EUnrealMcpDeviceAuthState::Idle;
 	DeviceVerificationUrl.Reset();
@@ -143,10 +148,13 @@ void FUnrealMcpEditorViewModel::Revoke()
 	DeviceAuthError.Reset();
 	if (OnSendAuth)
 		OnSendAuth(TEXT("auth-revoke"));
-	// CloudToken changed — persist (Save restores env/.env overrides) and push the now-anonymous config.
-	PersistAndPush();
-	// The Cloud-mode bearer the configurators inject is now gone — refresh so the snippet drops it.
-	OnConnectionSettingsChanged.Broadcast();
+	if (bHadToken)
+	{
+		// CloudToken changed — persist (Save restores env/.env overrides) and push the now-anonymous config.
+		PersistAndPush();
+		// The Cloud-mode bearer the configurators inject is now gone — refresh so the snippet drops it.
+		OnConnectionSettingsChanged.Broadcast();
+	}
 }
 
 void FUnrealMcpEditorViewModel::ApplyStatus(const TSharedPtr<FJsonObject>& Status)
