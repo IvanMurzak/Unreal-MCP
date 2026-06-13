@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!--
+    Hardened-runtime entitlements required for the self-contained .NET
+    (single-file) unreal-mcp-bridge host to run under Gatekeeper AND pass
+    Apple notarization. The .NET runtime JITs managed code, so it needs
+    allow-jit; the single-file host extracts/loads native libraries that are
+    not all individually signed under this identity, so it needs
+    disable-library-validation. Trimmed to what the bridge host actually
+    requires — identical to the GameDev-MCP-Server entitlements (the bridge
+    reuses that signing flow verbatim; docs/ARCHITECTURE.md §6 BUNDLE model).
+  -->
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+</dict>
+</plist>

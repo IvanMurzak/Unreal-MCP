@@ -11,6 +11,30 @@
 #   check-version (read VersionName, compute gate) -> test fan-out -> artifact
 #   build -> GATED publish (tag + GitHub Release + npm).
 #
+# ── Signed self-bootstrapping sidecar BUNDLE (docs/ARCHITECTURE.md §6, #51) ──
+# The self-contained `unreal-mcp-bridge` is built + code-signed per RID, then
+# STAGED INTO the plugin tree before BuildPlugin, so the packaged plugin ships
+# the signed sidecar for all four RIDs and is self-bootstrapping out of the box
+# (no .NET install, no first-run download). Job graph:
+#   check-version ─┬─ bridge (test)            ─┐
+#                  ├─ test-cli                  │
+#                  ├─ plugin (BuildPlugin+Auto) │  (test gate)
+#                  ├─ build-bridge-macos  ──────┤  signs+notarizes osx, builds linux
+#                  ├─ build-bridge-windows ─────┤  Azure-signs win-x64
+#                  └─ build-plugin-zip ◄────────┘  downloads the 4 signed RID
+#                        dirs, stages them under
+#                        UnrealMCP/Binaries/ThirdParty/UnrealMcpBridge/<rid>/,
+#                        runs BuildPlugin -Rocket (RuntimeDependencies bundle
+#                        them), zips -> publish-release attaches the plugin zip
+#                        (bundle inside) + the 4 signed bridge zips.
+# Signing is GRACEFULLY DEGRADING: every sign/notarize step is `if: env.X != ''`
+# guarded, so a run with NO secrets produces UNSIGNED-but-green artifacts. The
+# Unreal-MCP repo has no signing secrets yet (the owner mirrors the 9 from
+# GameDev-MCP-Server out-of-band — see docs/RELEASING.md); this PR merges and
+# runs green without them and begins signing the moment they exist.
+# NOTE: artifacts pass between jobs, so a failed release MUST be FULL-rerun,
+# never `gh run rerun --failed` (a partial rerun loses the bridge artifacts).
+#
 # ── Gating (read docs/RELEASING.md for the full contract) ──────────────────
 # `UnrealMCP/UnrealMCP.uplugin` VersionName is the SINGLE source of truth for the
 # release version (commands/bump-version.ps1 keeps the other four files in sync).
@@ -329,15 +353,39 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-  # ── ARTIFACT BUILD (runs on a real release OR a dry-run rehearsal) ─────────
+  # ── ARTIFACT BUILD — SIGNED BRIDGE BUNDLE (runs on a real release OR a
+  #    dry-run rehearsal). The self-contained bridge is built + code-signed per
+  #    RID here, then (T4) STAGED INTO the plugin tree before BuildPlugin so the
+  #    packaged plugin ships the signed sidecar (docs/ARCHITECTURE.md §6 BUNDLE
+  #    model, issue #51). Signing is GRACEFULLY DEGRADING: every sign/notarize
+  #    step is guarded `if: env.X != ''`, so a run with NO secrets still produces
+  #    UNSIGNED-but-green artifacts. The Unreal-MCP repo has no signing secrets
+  #    yet — this pipeline merges and runs green without them; it begins signing
+  #    the moment the owner mirrors the GameDev-MCP-Server secret set.
+  #    Platform split: codesign/notarytool are macOS-only and Azure Trusted
+  #    Signing (signtool) is Windows-only, so the osx/linux RIDs build on a Mac
+  #    runner and win-x64 builds on a Windows runner. ──────────────────────────
 
-  # bridge self-contained single-file binaries -> unreal-mcp-bridge-<rid>.zip ×4
-  # (§6). Cross-compiled from a single ubuntu host (no per-RID native toolchain).
-  build-bridge-zips:
-    name: build bridge zips
+  # macOS + Linux: osx-arm64, osx-x64 (codesign + notarize), linux-x64
+  # (unsigned, cross-built on the mac runner). Uploads the RAW per-RID publish
+  # dirs (NOT zips) as artifacts so build-plugin-zip can stage them into the
+  # plugin tree.
+  build-bridge-macos:
+    name: build bridge (macos + linux, signed)
     needs: [check-version]
     if: needs.check-version.outputs.run_tests == 'true'
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
+    # Job-level env so the signing/notarization guards (`if: env.X != ''`) can
+    # read these. A step's own `env:` is NOT visible to that same step's `if:` —
+    # the condition is evaluated before step env is applied — so the
+    # graceful-degradation guards MUST resolve their values at job scope.
+    env:
+      MAC_CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+      MAC_CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+      MAC_SIGN_IDENTITY: ${{ secrets.MAC_SIGN_IDENTITY }}
+      APPLE_API_KEY_B64: ${{ secrets.APPLE_API_KEY_B64 }}
+      APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+      APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -347,13 +395,202 @@ jobs:
           dotnet-version: "9.0.x"
       - name: Make publish script executable
         run: chmod +x ./bridge/publish.sh
-      - name: Build self-contained bridge binaries for all RIDs
+      # --no-zip: sign the raw apphost BEFORE zipping. Cross-build linux-x64
+      # here too (no native linux toolchain needed for a portable self-contained
+      # apphost); it ships unsigned (no Linux code-signing standard — matches
+      # GameDev-MCP-Server).
+      - name: Build self-contained bridge (osx + linux, no zip)
         shell: bash
-        run: cd bridge && ./publish.sh Release
-      - name: Upload bridge zips
+        run: cd bridge && ./publish.sh Release osx-arm64 osx-x64 linux-x64 --no-zip
+
+      # Import the Developer ID Application certificate into a temporary
+      # keychain. Guarded on ALL THREE mac signing secrets so a partial-secrets
+      # dispatch skips the whole sign+notarize path cleanly rather than dying
+      # under `set -e` and taking the unsigned-upload fallback down with it.
+      - name: Import macOS signing certificate
+        if: ${{ env.MAC_CSC_LINK != '' && env.MAC_CSC_KEY_PASSWORD != '' && env.MAC_SIGN_IDENTITY != '' }}
+        run: |
+          set -euo pipefail
+          KEYCHAIN_PATH="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -base64 24)"
+          CERT_PATH="$RUNNER_TEMP/certificate.p12"
+
+          echo "$MAC_CSC_LINK" | base64 --decode > "$CERT_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERT_PATH" -P "$MAC_CSC_KEY_PASSWORD" \
+            -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH" login.keychain-db
+          security set-key-partition-list -S apple-tool:,apple: \
+            -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH" >/dev/null
+
+          rm -f "$CERT_PATH"
+          echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
+
+      # Code-sign each osx apphost with the hardened runtime + the bridge
+      # entitlements (allow-jit + disable-library-validation — the .NET
+      # single-file host JITs and loads runtime-extracted native libs). Signing
+      # ONLY the apphost suffices for the shipped single-file form;
+      # disable-library-validation is what makes the runtime-extracted libs
+      # legal at exec time. Same all-three-secrets guard as the import step.
+      - name: Code-sign macOS bridge (hardened runtime)
+        if: ${{ env.MAC_CSC_LINK != '' && env.MAC_CSC_KEY_PASSWORD != '' && env.MAC_SIGN_IDENTITY != '' }}
+        run: |
+          set -euo pipefail
+          ENTITLEMENTS="build/entitlements.mac.plist"
+          for rid in osx-arm64 osx-x64; do
+            BIN="bridge/publish/${rid}/unreal-mcp-bridge"
+            echo "Signing ${BIN}..."
+            codesign --force --options runtime --timestamp \
+              --entitlements "$ENTITLEMENTS" \
+              --sign "$MAC_SIGN_IDENTITY" "$BIN"
+            codesign --verify --strict --verbose=2 "$BIN"
+          done
+
+      # Notarize the two macOS apphosts. notarytool submits a ZIP, so zip each
+      # signed osx dir to a throwaway notarization zip, submit, and require
+      # status == "Accepted" (notarytool exits 0 even on Invalid/Rejected — the
+      # exit code alone is NOT proof). The artifact we upload is the signed
+      # publish DIR (not this zip) — the staged-into-plugin form is the binary,
+      # not a zip. Notarization registers the binary's hash with Apple, so the
+      # signed-and-notarized apphost passes Gatekeeper's first-exec check when
+      # the editor spawns it (belt-and-suspenders with the T2 quarantine-xattr
+      # strip for the offline case). Guarded on the signing secrets PLUS the
+      # notarize API key — notarizing an unsigned binary is meaningless.
+      - name: Notarize macOS bridge
+        if: ${{ env.MAC_CSC_LINK != '' && env.MAC_CSC_KEY_PASSWORD != '' && env.MAC_SIGN_IDENTITY != '' && env.APPLE_API_KEY_B64 != '' }}
+        run: |
+          set -euo pipefail
+          KEY_PATH="$RUNNER_TEMP/AuthKey.p8"
+          echo "$APPLE_API_KEY_B64" | base64 --decode > "$KEY_PATH"
+
+          for rid in osx-arm64 osx-x64; do
+            NOTARIZE_ZIP="$RUNNER_TEMP/unreal-mcp-bridge-${rid}-notarize.zip"
+            (cd "bridge/publish/${rid}" && zip -r "$NOTARIZE_ZIP" .)
+            echo "Notarizing ${rid}..."
+            SUBMIT_JSON="$(xcrun notarytool submit "$NOTARIZE_ZIP" \
+              --key "$KEY_PATH" \
+              --key-id "$APPLE_API_KEY_ID" \
+              --issuer "$APPLE_API_ISSUER" \
+              --wait \
+              --output-format json)"
+            echo "$SUBMIT_JSON"
+            STATUS="$(echo "$SUBMIT_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("status",""))')"
+            if [ "$STATUS" != "Accepted" ]; then
+              echo "::error::Notarization for ${rid} did not succeed (status: ${STATUS:-unknown})"
+              exit 1
+            fi
+            echo "Notarization for ${rid} accepted."
+            rm -f "$NOTARIZE_ZIP"
+          done
+
+          rm -f "$KEY_PATH"
+
+      # Upload the RAW signed per-RID publish dirs (staging input for the plugin
+      # zip job) AND the per-RID release zips (kept as debugging /
+      # UNREAL_MCP_BRIDGE_PATH artifacts on the GitHub Release).
+      - name: Zip signed bridge dirs (release artifacts)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd bridge/publish
+          for rid in osx-arm64 osx-x64 linux-x64; do
+            if [ -d "$rid" ]; then
+              echo "Zipping ${rid}..."
+              (cd "$rid" && zip -r "../unreal-mcp-bridge-${rid}.zip" .)
+            else
+              echo "::error::Expected publish dir ${rid} not found"
+              exit 1
+            fi
+          done
+          ls -la *.zip
+      - name: Upload signed bridge staging dirs (osx + linux)
         uses: actions/upload-artifact@v4
         with:
-          name: unreal-mcp-bridge-zips
+          name: bridge-staging-osx-linux
+          path: |
+            ./bridge/publish/osx-arm64/
+            ./bridge/publish/osx-x64/
+            ./bridge/publish/linux-x64/
+          if-no-files-found: error
+          retention-days: 7
+      - name: Upload bridge release zips (osx + linux)
+        uses: actions/upload-artifact@v4
+        with:
+          name: bridge-release-zips-osx-linux
+          path: ./bridge/publish/*.zip
+          if-no-files-found: error
+          retention-days: 7
+
+  # Windows: win-x64, signed via Azure Trusted Signing (signtool is
+  # Windows-only). Built on windows-latest. Uploads the raw signed publish dir
+  # (staging input) AND the release zip.
+  build-bridge-windows:
+    name: build bridge (windows, signed)
+    needs: [check-version]
+    if: needs.check-version.outputs.run_tests == 'true'
+    runs-on: windows-latest
+    # Job-level env so the Azure Trusted Signing guard (`if: env.AZURE_CLIENT_ID
+    # != ''`) can read it — a step's own `env:` is not visible to that step's own
+    # `if:`. See the macOS job's env comment for the rationale.
+    env:
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Setup .NET 9
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "9.0.x"
+      # -NoZip: sign the raw .exe BEFORE zipping.
+      - name: Build self-contained bridge (win-x64, no zip)
+        shell: pwsh
+        run: ./bridge/publish.ps1 -Configuration Release -Platforms win-x64 -NoZip
+
+      # Sign the win-x64 .exe via Azure Trusted Signing. Guarded: skipped when
+      # AZURE_CLIENT_ID is empty, leaving the .exe unsigned but still stageable.
+      - name: Sign Windows bridge (Azure Trusted Signing)
+        if: ${{ env.AZURE_CLIENT_ID != '' }}
+        uses: azure/trusted-signing-action@v0
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: https://eus.codesigning.azure.net
+          trusted-signing-account-name: ivan-murzak
+          certificate-profile-name: ai-game-dev-cert
+          files-folder: ${{ github.workspace }}/bridge/publish/win-x64
+          files-folder-filter: exe
+          files-folder-recurse: true
+
+      - name: Zip signed bridge dir (release artifact)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $publishRoot = Join-Path $PWD "bridge/publish"
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $rid = "win-x64"
+          $runtimePath = Join-Path $publishRoot $rid
+          if (-not (Test-Path $runtimePath)) { Write-Error "Expected publish dir $rid not found" }
+          $zipPath = Join-Path $publishRoot "unreal-mcp-bridge-$rid.zip"
+          if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
+          [System.IO.Compression.ZipFile]::CreateFromDirectory($runtimePath, $zipPath)
+          Get-ChildItem -Path $publishRoot -Filter "*.zip" | Select-Object Name, Length
+      - name: Upload signed bridge staging dir (win)
+        uses: actions/upload-artifact@v4
+        with:
+          name: bridge-staging-win
+          path: ./bridge/publish/win-x64/
+          if-no-files-found: error
+          retention-days: 7
+      - name: Upload bridge release zip (win)
+        uses: actions/upload-artifact@v4
+        with:
+          name: bridge-release-zips-win
           path: ./bridge/publish/*.zip
           if-no-files-found: error
           retention-days: 7
@@ -363,12 +600,15 @@ jobs:
   # <rid>.zip) and is released there; the CLI downloads the release pinned by
   # cli/src/lib/server-version.ts SERVER_VERSION.
 
-  # Engine-agnostic source plugin zip (BuildPlugin output). Self-hosted, gated
-  # like the plugin test job. Skipped when no runner is registered; for a real
-  # release the runner must be ready (publish-release `needs` this job).
+  # Engine-agnostic source plugin zip (BuildPlugin output) WITH the signed bridge
+  # bundled in. Self-hosted, gated like the plugin test job. Skipped when no
+  # runner is registered; for a real release the runner must be ready
+  # (publish-release `needs` this job). Depends on the two signed-bridge jobs so
+  # the 4 signed RID payloads can be staged into the plugin tree before
+  # BuildPlugin packages them (docs/ARCHITECTURE.md §6 BUNDLE model, T4).
   build-plugin-zip:
     name: build plugin zip (UE 5.7)
-    needs: [check-version]
+    needs: [check-version, build-bridge-macos, build-bridge-windows]
     if: needs.check-version.outputs.run_tests == 'true' && vars.UNREAL_RUNNER_READY == 'true'
     runs-on: [self-hosted, windows, unreal-5-7]
     env:
@@ -380,6 +620,56 @@ jobs:
           # Self-hosted runner persists between jobs; don't leave this job's
           # GITHUB_TOKEN in the worktree's .git config after checkout.
           persist-credentials: false
+      # Download the signed per-RID publish dirs produced by the two
+      # build-bridge-* jobs, merging all four RIDs under ./bridge-staging/<rid>/.
+      # The two artifacts were rooted differently by upload-artifact@v4:
+      #   * bridge-staging-osx-linux was uploaded with THREE dir paths
+      #     (osx-arm64/, osx-x64/, linux-x64/), so the artifact is rooted at
+      #     their least-common-ancestor (bridge/publish/) and PRESERVES the
+      #     top-level <rid>/ folders — extracting it to ./bridge-staging yields
+      #     ./bridge-staging/<rid>/ directly.
+      #   * bridge-staging-win was uploaded with a SINGLE dir path
+      #     (./bridge/publish/win-x64/), so the artifact is rooted AT that dir
+      #     and its contents are the win-x64 files WITHOUT the win-x64/ segment.
+      #     Extract it into ./bridge-staging/win-x64 so the segment is restored
+      #     and the staging loop below finds ./bridge-staging/win-x64/.
+      - name: Download signed bridge (osx + linux)
+        uses: actions/download-artifact@v4
+        with:
+          name: bridge-staging-osx-linux
+          path: ./bridge-staging
+      - name: Download signed bridge (win)
+        uses: actions/download-artifact@v4
+        with:
+          name: bridge-staging-win
+          path: ./bridge-staging/win-x64
+      # Stage the signed binaries into the plugin tree at the EXACT path the C++
+      # resolver (FUnrealMcpSidecarManager::ResolveBridgeBinaryPath) and the
+      # Build.cs RuntimeDependencies wildcard both expect:
+      #   UnrealMCP/Binaries/ThirdParty/UnrealMcpBridge/<rid>/
+      # Binaries/ is gitignored — these files exist only transiently on the
+      # runner. With them present, BuildPlugin -Rocket's RuntimeDependencies pull
+      # them into the package; if a future UBT refuses an arbitrary ThirdParty
+      # path (design R6), the fallback is a post-BuildPlugin copy into the package
+      # output under the same relative path (the resolver path is identical).
+      - name: Stage signed bridge into the plugin tree
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $staging = Join-Path $env:GITHUB_WORKSPACE 'bridge-staging'
+          $dest = Join-Path $env:GITHUB_WORKSPACE 'UnrealMCP\Binaries\ThirdParty\UnrealMcpBridge'
+          $rids = @('win-x64', 'osx-arm64', 'osx-x64', 'linux-x64')
+          foreach ($rid in $rids) {
+            $src = Join-Path $staging $rid
+            if (-not (Test-Path $src)) { throw "Staged bridge dir missing for RID '$rid' at $src" }
+            $ridDest = Join-Path $dest $rid
+            if (Test-Path $ridDest) { Remove-Item $ridDest -Recurse -Force }
+            New-Item -ItemType Directory -Force -Path $ridDest | Out-Null
+            Copy-Item -Path (Join-Path $src '*') -Destination $ridDest -Recurse -Force
+            $files = Get-ChildItem -Path $ridDest -Recurse -File
+            Write-Host "Staged $($files.Count) file(s) for $rid -> $ridDest"
+            if ($files.Count -lt 1) { throw "No files staged for RID '$rid'." }
+          }
       - name: BuildPlugin + zip
         shell: pwsh
         env:
@@ -393,6 +683,23 @@ jobs:
           if (Test-Path $package) { Remove-Item $package -Recurse -Force }
           & $runUAT BuildPlugin -Plugin="$uplugin" -Package="$package" -TargetPlatforms=Win64 -Rocket
           if ($LASTEXITCODE -ne 0) { throw "BuildPlugin failed with exit code $LASTEXITCODE" }
+          # Verify the signed bridge bundle landed in the packaged plugin via
+          # RuntimeDependencies. If UBT did not stage the ThirdParty payloads
+          # (design R6), copy them into the package output under the same
+          # relative path as a fallback so the shipped zip always carries them.
+          $pkgThirdParty = Join-Path $package 'Binaries\ThirdParty\UnrealMcpBridge'
+          $srcThirdParty = Join-Path $env:GITHUB_WORKSPACE 'UnrealMCP\Binaries\ThirdParty\UnrealMcpBridge'
+          foreach ($rid in @('win-x64', 'osx-arm64', 'osx-x64', 'linux-x64')) {
+            $pkgRid = Join-Path $pkgThirdParty $rid
+            if (-not (Test-Path $pkgRid) -or @(Get-ChildItem -Path $pkgRid -Recurse -File -ErrorAction SilentlyContinue).Count -lt 1) {
+              Write-Host "RuntimeDependencies did not stage $rid into the package — applying post-step copy (design R6 fallback)."
+              New-Item -ItemType Directory -Force -Path $pkgRid | Out-Null
+              Copy-Item -Path (Join-Path (Join-Path $srcThirdParty $rid) '*') -Destination $pkgRid -Recurse -Force
+            }
+            $n = @(Get-ChildItem -Path $pkgRid -Recurse -File).Count
+            Write-Host "Packaged bridge for ${rid}: $n file(s)."
+            if ($n -lt 1) { throw "Packaged plugin is missing the bundled bridge for RID '$rid'." }
+          }
           $version = $env:PLUGIN_VERSION
           $out = Join-Path $env:GITHUB_WORKSPACE 'dist'
           New-Item -ItemType Directory -Force -Path $out | Out-Null
@@ -419,7 +726,8 @@ jobs:
         bridge,
         test-cli,
         plugin,
-        build-bridge-zips,
+        build-bridge-macos,
+        build-bridge-windows,
         build-plugin-zip,
       ]
     if: needs.check-version.outputs.should_release == 'true' && needs.check-version.outputs.dry_run != 'true' && github.ref == 'refs/heads/main'
@@ -431,10 +739,18 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-      - name: Download bridge zips
+      # The END-USER artifact is the plugin zip (the signed bridge is bundled
+      # INSIDE it). The per-RID signed bridge zips are also attached for
+      # debugging / UNREAL_MCP_BRIDGE_PATH users.
+      - name: Download bridge release zips (osx + linux)
         uses: actions/download-artifact@v4
         with:
-          name: unreal-mcp-bridge-zips
+          name: bridge-release-zips-osx-linux
+          path: ./assets
+      - name: Download bridge release zip (win)
+        uses: actions/download-artifact@v4
+        with:
+          name: bridge-release-zips-win
           path: ./assets
       - name: Download plugin zip
         uses: actions/download-artifact@v4

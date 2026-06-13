@@ -43,7 +43,43 @@ hard-skips every tag/Release/npm-publish job.
 | --- | --- | --- |
 | `test_pull_request.yml` | `pull_request` to `main` (+ manual) | Fans out the PR test legs: bridge build+xUnit (ubuntu + windows), cli node 20/22, and — when a runner is registered — the UE 5.7 plugin BuildPlugin + Automation leg. |
 | `test_cli.yml` | `workflow_call` (reusable) | Builds + tests `unreal-mcp-cli` on Node 20 & 22. Called by both `test_pull_request.yml` and `release.yml`. |
-| `release.yml` | `push` to `main` (+ manual `workflow_dispatch`) | Version-gated release: builds bridge/plugin artifacts and (only on a real version bump) cuts the GitHub Release + tag and publishes `unreal-mcp-cli` to npm. Exposes a `dry_run` input to rehearse everything without publishing. |
+| `release.yml` | `push` to `main` (+ manual `workflow_dispatch`) | Version-gated release: builds + **code-signs** the self-contained bridge per RID, **bundles the signed sidecar into the packaged plugin** (BuildPlugin), and (only on a real version bump) cuts the GitHub Release + tag and publishes `unreal-mcp-cli` to npm. Exposes a `dry_run` input to rehearse everything without publishing. |
+
+### The signed self-bootstrapping sidecar bundle (release.yml artifact graph)
+
+The packaged plugin ships the **signed, self-contained** `unreal-mcp-bridge` for
+all four RIDs (`win-x64`, `osx-arm64`, `osx-x64`, `linux-x64`), so the end user
+installs no .NET and performs no first-run download — the plugin is
+self-bootstrapping out of the box (`docs/ARCHITECTURE.md` §6 BUNDLE model). The
+artifact jobs in `release.yml`:
+
+- **`build-bridge-macos`** (`macos-latest`) — publishes osx-arm64 / osx-x64 /
+  linux-x64 self-contained, **codesigns** the two osx apphosts (hardened runtime
+  + `build/entitlements.mac.plist`) and **notarizes** them, then uploads the raw
+  signed dirs (staging input) + the per-RID release zips. linux-x64 ships
+  unsigned (no Linux code-signing standard — matches GameDev-MCP-Server).
+- **`build-bridge-windows`** (`windows-latest`) — publishes win-x64
+  self-contained and signs the `.exe` via **Azure Trusted Signing**, then uploads
+  the raw signed dir + the release zip. (signtool is Windows-only; codesign /
+  notarytool are macOS-only — hence the two-runner split.)
+- **`build-plugin-zip`** (self-hosted UE 5.7) — downloads the four signed RID
+  dirs, **stages them into `UnrealMCP/Binaries/ThirdParty/UnrealMcpBridge/<rid>/`**
+  (the exact path the C++ resolver + the `UnrealMcpEditor.Build.cs`
+  `RuntimeDependencies` wildcard expect), runs `BuildPlugin -Rocket` so the
+  staged binaries are packaged, then zips the plugin. A post-BuildPlugin guard
+  copies the binaries into the package output if `RuntimeDependencies` did not
+  stage them (a defensive fallback for the one unverified UBT behavior).
+
+**Binaries are never committed to git.** `Binaries/` is gitignored; the signed
+binaries exist only transiently on the runners during a release. A dev source
+checkout has an empty `Binaries/ThirdParty/UnrealMcpBridge/`, so
+`ResolveBridgeBinaryPath` returns empty and devs use `UNREAL_MCP_BRIDGE_PATH`
+(the documented inner loop) — unchanged.
+
+**Graceful degradation:** every sign/notarize step is `if: env.X != ''`-guarded.
+A run with no signing secrets still produces **unsigned-but-green** artifacts, so
+the pipeline merged and runs green before the secrets were provisioned and begins
+signing the moment they are mirrored (see [Signing secrets](#signing-secrets-code-signing--notarization-owner-provisioned) below).
 
 ## Versioning — the single source of truth
 
@@ -111,10 +147,16 @@ gh workflow run release.yml --repo IvanMurzak/Unreal-MCP -f dry_run=true
 gh run watch --repo IvanMurzak/Unreal-MCP "$(gh run list --repo IvanMurzak/Unreal-MCP --workflow release.yml --limit 1 --json databaseId --jq '.[0].databaseId')"
 ```
 
-Expected: `bridge`, `test-cli`, `build-bridge-zips` succeed;
-the `plugin` / `build-plugin-zip` legs run only if the self-hosted runner is
-registered (otherwise skipped); `publish-release` and `publish-npm` are
-**skipped**. Verify nothing was published:
+Expected: `bridge`, `test-cli`, `build-bridge-macos`, `build-bridge-windows`
+succeed (the bridge build + sign jobs run on every rehearsal; with no secrets
+they produce unsigned-but-green artifacts); the `plugin` / `build-plugin-zip`
+legs run only if the self-hosted runner is registered (otherwise skipped);
+`publish-release` and `publish-npm` are **skipped**. A dry-run is the right way
+to confirm the bundle staging works end-to-end: when the runner is ready,
+inspect `build-plugin-zip`'s log for the per-RID "Packaged bridge for <rid>: N
+file(s)." lines (and download the `unreal-mcp-plugin-zip` artifact to confirm
+`Binaries/ThirdParty/UnrealMcpBridge/<rid>/` is populated for all four RIDs).
+Verify nothing was published:
 
 ```bash
 gh release list --repo IvanMurzak/Unreal-MCP     # expect: empty
@@ -291,10 +333,51 @@ handles every subsequent version. See <https://docs.npmjs.com/trusted-publishers
 No secret is ever echoed to logs; the sidecar IPC token (`UNREAL_MCP_TOKEN`)
 travels via stdin and is unrelated to CI.
 
+### Signing secrets (code-signing + notarization, owner-provisioned)
+
+The bundled bridge is code-signed in `build-bridge-macos` (Apple codesign +
+notarize) and `build-bridge-windows` (Azure Trusted Signing). These are
+**owner-provisioned** and identical in shape to the GameDev-MCP-Server secret
+set. **The Unreal-MCP repo has none of them yet** — every signing step is
+`if: env.X != ''`-guarded, so the pipeline merges and runs green producing
+**unsigned** artifacts until the owner mirrors them. Releases are unsigned until
+provisioned; signing begins automatically on the next release after they exist.
+
+Provision them via `gh secret set --repo IvanMurzak/Unreal-MCP <NAME>` (or
+*Settings → Secrets and variables → Actions → Secrets*) with the **same values
+as `IvanMurzak/GameDev-MCP-Server`** (GitHub Actions secrets are per-repo — there
+is no org-level inheritance):
+
+| Secret | Used by | Purpose |
+| --- | --- | --- |
+| `MAC_CSC_LINK` | `build-bridge-macos` | Base64 Developer ID Application `.p12` certificate. |
+| `MAC_CSC_KEY_PASSWORD` | `build-bridge-macos` | Password for the `.p12`. |
+| `MAC_SIGN_IDENTITY` | `build-bridge-macos` | `codesign --sign` identity (Developer ID Application: …). |
+| `APPLE_API_KEY_B64` | `build-bridge-macos` | Base64 App Store Connect API key (`.p8`) for `notarytool`. |
+| `APPLE_API_KEY_ID` | `build-bridge-macos` | App Store Connect API key id. |
+| `APPLE_API_ISSUER` | `build-bridge-macos` | App Store Connect API issuer id. |
+| `AZURE_TENANT_ID` | `build-bridge-windows` | Azure Trusted Signing tenant id. |
+| `AZURE_CLIENT_ID` | `build-bridge-windows` | Azure Trusted Signing client id (also the guard for the win sign step). |
+| `AZURE_CLIENT_SECRET` | `build-bridge-windows` | Azure Trusted Signing client secret. |
+
+Notes:
+
+- The macOS sign + notarize steps are guarded on **all three** mac signing
+  secrets together (and notarize additionally on `APPLE_API_KEY_B64`), so a
+  partial-secrets state skips the whole signing path cleanly rather than failing
+  mid-way. The Windows sign step is guarded on `AZURE_CLIENT_ID`.
+- The Azure Trusted Signing account (`ivan-murzak`) and certificate profile
+  (`ai-game-dev-cert`) are hard-coded in the workflow (non-sensitive), matching
+  GameDev-MCP-Server.
+- Signing only the single-file apphost is sufficient for the shipped form: the
+  `disable-library-validation` entitlement makes the runtime-extracted native
+  libs legal at exec time. The C++ side additionally strips the macOS
+  `com.apple.quarantine` xattr at spawn (T2) for the offline-exec case.
+
 ## Re-running a release — full rerun only
 
 If a release run fails partway, **always use a full re-run, never "re-run failed
-jobs"**. The artifact-build jobs (`build-bridge-zips`, `build-plugin-zip`)
+jobs"**. The artifact-build jobs (`build-bridge-macos`, `build-bridge-windows`, `build-plugin-zip`)
 upload artifacts that the `publish-release` job downloads; a
 partial re-run does not re-run the succeeded build jobs, so their artifacts are
 absent on the new attempt and `publish-release` fails with `Artifact not found`.
