@@ -36,6 +36,8 @@
 #include "Agents/Impl/ZooCodeConfigurator.h"
 #include "Agents/Impl/CustomConfigurator.h"
 #include "Config/UnrealMcpConfig.h"
+#include "GenericPlatform/GenericPlatformFile.h"
+#include "HAL/PlatformFileManager.h"
 
 /**
  * AI Agent Configurators specs (docs/ARCHITECTURE.md §7/§8, issue #44 Phase A). Covers the JSON read-merge-write
@@ -839,6 +841,72 @@ void FUnrealMcpAgentConfiguratorSpec::Define()
 
 			TSharedRef<FTomlAiAgentConfig> Config = MakeTomlStdioConfig(Path, TEXT("C:/srv/gamedev-mcp-server.exe"));
 			TestFalse(TEXT("surviving to-remove key vetoes IsConfigured"), Config->IsConfigured());
+
+			DeleteTempDirFor(Path);
+		});
+
+		It("absorbs a nested dotted sub-table into our section so [mcp_servers.unreal-mcp.env] round-trips on merge", [this]()
+		{
+			const FString Path = MakeTempTomlPath();
+			IFileManager::Get().MakeDirectory(*FPaths::GetPath(Path), true);
+			// Our section already carries a nested env sub-table; a sibling section follows it. The merge must keep the
+			// nested sub-table glued to our section (not orphan/flatten it) AND must not swallow the sibling.
+			const FString Existing = TEXT("[mcp_servers.unreal-mcp]\nenabled = true\nurl = \"http://localhost:8080/mcp\"\n[mcp_servers.unreal-mcp.env]\nGAME_DEV_AUTH_TOKEN = \"placeholder\"\n[mcp_servers.other]\nurl = \"http://elsewhere/mcp\"\n");
+			FFileHelper::SaveStringToFile(Existing, *Path);
+
+			TSharedRef<FTomlAiAgentConfig> Config = MakeTomlHttpConfig(Path, TEXT("http://localhost:8080/mcp"));
+			TestTrue(TEXT("Configure succeeds"), Config->Configure());
+
+			const FString Content = ReadAllText(Path);
+			TestTrue(TEXT("our section present"), Content.Contains(TEXT("[mcp_servers.unreal-mcp]")));
+			TestTrue(TEXT("nested env sub-table survives"), Content.Contains(TEXT("[mcp_servers.unreal-mcp.env]")));
+			TestTrue(TEXT("nested env key survives"), Content.Contains(TEXT("GAME_DEV_AUTH_TOKEN = \"placeholder\"")));
+			TestTrue(TEXT("sibling section preserved"), Content.Contains(TEXT("[mcp_servers.other]")));
+			TestTrue(TEXT("sibling url preserved"), Content.Contains(TEXT("http://elsewhere/mcp")));
+			// The nested env key must NOT have been flattened up into our flat section as a scalar line.
+			TestTrue(TEXT("env key only inside its sub-table"), Content.Find(TEXT("GAME_DEV_AUTH_TOKEN")) > Content.Find(TEXT("[mcp_servers.unreal-mcp.env]")));
+
+			DeleteTempDirFor(Path);
+		});
+
+		It("does NOT clobber an existing-but-unreadable file (read failure must not take the clean-write path)", [this]()
+		{
+			const FString Path = MakeTempTomlPath();
+			IFileManager::Get().MakeDirectory(*FPaths::GetPath(Path), true);
+			const FString Existing = TEXT("[mcp_servers.other]\nurl = \"http://elsewhere/mcp\"\n");
+			FFileHelper::SaveStringToFile(Existing, *Path);
+
+			// Hold an EXCLUSIVE write handle (bAllowRead = false) so the config's LoadFileToStringArray fails while
+			// the file still EXISTS — the exact missing-vs-unreadable distinction the guard protects. On platforms
+			// whose filesystem grants the read anyway (the exclusive open is advisory), the lock acquire is skipped
+			// and the spec degrades to asserting the merge path simply preserves the sibling.
+			IFileHandle* Locked = FPlatformFileManager::Get().GetPlatformFile().OpenWrite(*Path, /*bAppend*/ true, /*bAllowRead*/ false);
+			TestNotNull(TEXT("write handle opened"), Locked);
+
+			TArray<FString> Probe;
+			const bool bUnreadableWhileLocked = !FFileHelper::LoadFileToStringArray(Probe, *Path);
+
+			TSharedRef<FTomlAiAgentConfig> Config = MakeTomlHttpConfig(Path, TEXT("http://localhost:8080/mcp"));
+			const bool bConfigured = Config->Configure();
+
+			if (Locked)
+				delete Locked; // releases the exclusive lock
+
+			if (bUnreadableWhileLocked)
+			{
+				// The file existed but could not be read → Configure must refuse rather than clobber.
+				TestFalse(TEXT("Configure refuses to clobber an unreadable existing file"), bConfigured);
+				const FString After = ReadAllText(Path);
+				TestTrue(TEXT("original sibling content untouched"), After.Contains(TEXT("[mcp_servers.other]")));
+				TestFalse(TEXT("our section was NOT written over the locked file"), After.Contains(TEXT("[mcp_servers.unreal-mcp]")));
+			}
+			else
+			{
+				// Platform allowed the read despite the lock → this isn't the read-failure path; just assert the
+				// normal merge preserved the sibling so the spec still has a meaningful invariant.
+				const FString After = ReadAllText(Path);
+				TestTrue(TEXT("sibling preserved on readable merge"), After.Contains(TEXT("[mcp_servers.other]")));
+			}
 
 			DeleteTempDirFor(Path);
 		});

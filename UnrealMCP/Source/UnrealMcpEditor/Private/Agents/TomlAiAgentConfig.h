@@ -84,7 +84,13 @@ private:
 
 	// --- Line-wise section navigation ---
 	static int32 FindSection(const TArray<FString>& Lines, const FString& InSectionName); // index of `[<name>]` line, or INDEX_NONE
-	static int32 FindSectionEnd(const TArray<FString>& Lines, int32 SectionStart);        // first line of the NEXT section, or Lines.Num()
+	// First line of the NEXT unrelated section, or Lines.Num(). Nested dotted sub-tables of @p SectionName
+	// (e.g. `[<SectionName>.env]`) are absorbed into the span so they travel with the section on merge/remove.
+	static int32 FindSectionEnd(const TArray<FString>& Lines, int32 SectionStart, const FString& SectionName);
+	// Index of the first nested dotted sub-table header (`[<SectionName>.…]`) within (SectionStart, SectionEnd),
+	// or SectionEnd when the section has none. The lines from here to SectionEnd are the section's nested tail,
+	// preserved verbatim across a merge (the flat scalar merge only owns the lines before this point).
+	static int32 FindNestedSubTableStart(const TArray<FString>& Lines, int32 SectionStart, int32 SectionEnd, const FString& SectionName);
 	static TMap<FString, FString> ParseSectionProps(const TArray<FString>& Lines, int32 Start, int32 End); // key→raw literal
 	TArray<TPair<int32, int32>> FindDuplicateSectionRanges(const TArray<FString>& Lines, const FString& OwnSection) const;
 

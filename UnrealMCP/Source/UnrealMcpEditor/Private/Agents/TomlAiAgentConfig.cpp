@@ -183,15 +183,34 @@ int32 FTomlAiAgentConfig::FindSection(const TArray<FString>& Lines, const FStrin
 	return INDEX_NONE;
 }
 
-int32 FTomlAiAgentConfig::FindSectionEnd(const TArray<FString>& Lines, int32 SectionStart)
+int32 FTomlAiAgentConfig::FindSectionEnd(const TArray<FString>& Lines, int32 SectionStart, const FString& SectionName)
 {
+	// A nested dotted sub-table of our section (e.g. `[mcp_servers.unreal-mcp.env]`) belongs to this section and
+	// must NOT terminate it — otherwise it gets orphaned outside the span and corrupted on merge/remove.
+	const FString NestedPrefix = FString::Printf(TEXT("[%s."), *SectionName);
 	for (int32 i = SectionStart + 1; i < Lines.Num(); ++i)
 	{
 		const FString Trimmed = Lines[i].TrimStartAndEnd();
 		if (Trimmed.StartsWith(TEXT("[")) && Trimmed.EndsWith(TEXT("]")))
+		{
+			if (Trimmed.StartsWith(NestedPrefix))
+				continue; // nested sub-table → still part of our section
 			return i;
+		}
 	}
 	return Lines.Num();
+}
+
+int32 FTomlAiAgentConfig::FindNestedSubTableStart(const TArray<FString>& Lines, int32 SectionStart, int32 SectionEnd, const FString& SectionName)
+{
+	const FString NestedPrefix = FString::Printf(TEXT("[%s."), *SectionName);
+	for (int32 i = SectionStart + 1; i < SectionEnd; ++i)
+	{
+		const FString Trimmed = Lines[i].TrimStartAndEnd();
+		if (Trimmed.StartsWith(NestedPrefix) && Trimmed.EndsWith(TEXT("]")))
+			return i;
+	}
+	return SectionEnd;
 }
 
 TMap<FString, FString> FTomlAiAgentConfig::ParseSectionProps(const TArray<FString>& Lines, int32 Start, int32 End)
@@ -239,7 +258,9 @@ TArray<TPair<int32, int32>> FTomlAiAgentConfig::FindDuplicateSectionRanges(const
 		if (Trimmed == OwnHeader)
 			continue;
 
-		const int32 SectionEnd = FindSectionEnd(Lines, i);
+		// The sibling's own name (strip the surrounding "[" / "]") so its nested sub-tables stay within its span.
+		const FString SiblingName = Trimmed.Mid(1, Trimmed.Len() - 2);
+		const int32 SectionEnd = FindSectionEnd(Lines, i, SiblingName);
 		const TMap<FString, FString> Props = ParseSectionProps(Lines, i + 1, SectionEnd);
 
 		for (const auto& Identity : OurIdentities)
@@ -267,7 +288,13 @@ bool FTomlAiAgentConfig::Configure()
 	TArray<FString> Lines;
 	if (!TryReadLines(ConfigPath, Lines))
 	{
-		// Missing / unreadable file → write a clean expected-content file.
+		// A read failure on an EXISTING file (locked / I/O error) must NOT take the clean-write path: clobbering
+		// it would wipe sibling sections + comments, violating the read-merge-write sibling-preservation contract.
+		// Only a genuinely missing file is safe to create fresh.
+		if (FPaths::FileExists(ConfigPath))
+			return false;
+
+		// Missing file → write a clean expected-content file.
 		const FString Dir = FPaths::GetPath(ConfigPath);
 		if (!Dir.IsEmpty())
 			IFileManager::Get().MakeDirectory(*Dir, /*Tree*/ true);
@@ -276,14 +303,19 @@ bool FTomlAiAgentConfig::Configure()
 		return IsConfigured();
 	}
 
-	// Remove deprecated sections.
+	// Remove deprecated sections. NOTE: FString comparison (and thus FindSection) is case-INSENSITIVE, so a
+	// deprecated name that differs from the canonical one only by case (e.g. "Unreal-MCP" vs "unreal-mcp") would
+	// otherwise match — and remove — our own canonical section here, before the merge step gets to own it. Skip any
+	// deprecated name equal to the canonical Section so the merge below (which preserves nested sub-tables) handles it.
 	for (const FString& Deprecated : DeprecatedMcpServerNames())
 	{
 		const FString DeprecatedSection = FString::Printf(TEXT("%s.%s"), *BodyPath, *Deprecated);
+		if (DeprecatedSection == Section)
+			continue;
 		const int32 DepIndex = FindSection(Lines, DeprecatedSection);
 		if (DepIndex != INDEX_NONE)
 		{
-			const int32 DepEnd = FindSectionEnd(Lines, DepIndex);
+			const int32 DepEnd = FindSectionEnd(Lines, DepIndex, DeprecatedSection);
 			Lines.RemoveAt(DepIndex, DepEnd - DepIndex);
 		}
 	}
@@ -297,8 +329,15 @@ bool FTomlAiAgentConfig::Configure()
 	const int32 SectionIndex = FindSection(Lines, Section);
 	if (SectionIndex != INDEX_NONE)
 	{
-		const int32 SectionEnd = FindSectionEnd(Lines, SectionIndex);
-		TMap<FString, FString> Merged = ParseSectionProps(Lines, SectionIndex + 1, SectionEnd);
+		const int32 SectionEnd = FindSectionEnd(Lines, SectionIndex, Section);
+		// Only the flat scalar lines BEFORE any nested sub-table (`[<section>.env]`) belong to the merge; the nested
+		// tail is preserved verbatim so a sub-table round-trips intact rather than being flattened/dropped.
+		const int32 NestedStart = FindNestedSubTableStart(Lines, SectionIndex, SectionEnd, Section);
+		TMap<FString, FString> Merged = ParseSectionProps(Lines, SectionIndex + 1, NestedStart);
+
+		TArray<FString> NestedTail;
+		for (int32 i = NestedStart; i < SectionEnd; ++i)
+			NestedTail.Add(Lines[i]);
 
 		for (const FString& Key : PropertiesToRemove)
 			Merged.Remove(Key);
@@ -307,10 +346,11 @@ bool FTomlAiAgentConfig::Configure()
 		for (const auto& Pair : Desired)
 			Merged.Add(Pair.Key, Pair.Value);
 
-		// Replace the old section lines with the rebuilt section.
+		// Replace the old section lines with the rebuilt flat section, then re-append the preserved nested tail.
 		Lines.RemoveAt(SectionIndex, SectionEnd - SectionIndex);
 		TArray<FString> NewSectionLines;
 		BuildSection(Section, Merged).ParseIntoArray(NewSectionLines, TEXT("\n"), /*CullEmpty*/ false);
+		NewSectionLines.Append(NestedTail);
 		Lines.Insert(NewSectionLines, SectionIndex);
 	}
 	else
@@ -344,7 +384,7 @@ bool FTomlAiAgentConfig::Remove()
 	const int32 SectionIndex = FindSection(Lines, Section);
 	if (SectionIndex != INDEX_NONE)
 	{
-		const int32 SectionEnd = FindSectionEnd(Lines, SectionIndex);
+		const int32 SectionEnd = FindSectionEnd(Lines, SectionIndex, Section);
 		Lines.RemoveAt(SectionIndex, SectionEnd - SectionIndex);
 		bRemoved = true;
 	}
@@ -352,10 +392,12 @@ bool FTomlAiAgentConfig::Remove()
 	for (const FString& Deprecated : DeprecatedMcpServerNames())
 	{
 		const FString DeprecatedSection = FString::Printf(TEXT("%s.%s"), *BodyPath, *Deprecated);
+		if (DeprecatedSection == Section)
+			continue; // case-only variant of the canonical section — already handled above (FString '==' is case-insensitive)
 		const int32 DepIndex = FindSection(Lines, DeprecatedSection);
 		if (DepIndex != INDEX_NONE)
 		{
-			const int32 DepEnd = FindSectionEnd(Lines, DepIndex);
+			const int32 DepEnd = FindSectionEnd(Lines, DepIndex, DeprecatedSection);
 			Lines.RemoveAt(DepIndex, DepEnd - DepIndex);
 			bRemoved = true;
 		}
@@ -396,12 +438,15 @@ bool FTomlAiAgentConfig::IsConfigured() const
 	if (!TryReadLines(ConfigPath, Lines))
 		return false;
 
-	const int32 SectionIndex = FindSection(Lines, SectionName());
+	const FString Section = SectionName();
+	const int32 SectionIndex = FindSection(Lines, Section);
 	if (SectionIndex == INDEX_NONE)
 		return false;
 
-	const int32 SectionEnd = FindSectionEnd(Lines, SectionIndex);
-	const TMap<FString, FString> Existing = ParseSectionProps(Lines, SectionIndex + 1, SectionEnd);
+	const int32 SectionEnd = FindSectionEnd(Lines, SectionIndex, Section);
+	// Match only the section's own flat scalars, not keys nested inside a `[<section>.env]` sub-table.
+	const int32 NestedStart = FindNestedSubTableStart(Lines, SectionIndex, SectionEnd, Section);
+	const TMap<FString, FString> Existing = ParseSectionProps(Lines, SectionIndex + 1, NestedStart);
 
 	return AreRequiredPropertiesMatching(Existing) && !HasAnyPropertyToRemove(Existing);
 }
