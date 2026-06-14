@@ -10,7 +10,8 @@
 [![License](https://img.shields.io/github/license/IvanMurzak/Unreal-MCP?label=License&labelColor=333A41)](https://github.com/IvanMurzak/Unreal-MCP/blob/main/LICENSE)
 [![Stand With Ukraine](https://raw.githubusercontent.com/vshymanskyy/StandWithUkraine/main/badges/StandWithUkraine.svg)](https://stand-with-ukraine.pp.ua)
 
-<!-- TODO(banner): add docs/img/promo/ai-developer-banner.jpg (Unreal-branded hero art) and render it here, mirroring the Unity/Godot READMEs -->
+  <img src="https://github.com/IvanMurzak/Unreal-MCP/raw/main/docs/img/promo/ai-developer-banner.jpg" alt="AI Game Developer" title="AI Game Developer" width="100%">
+
 <!-- TODO(demo): add an animated GIF of the AI Game Developer window driving the Unreal editor -->
 
   <p>
@@ -36,7 +37,7 @@ Unreal-MCP is the Unreal Engine counterpart of [Unity-MCP](https://github.com/Iv
 
 Unlike Unity and Godot (C# engines that host the .NET `McpPlugin` in-process), Unreal's editor is **C++** — so the .NET MCP host runs as an auto-managed **sidecar process** (`unreal-mcp-bridge`) that the plugin spawns and talks to over a localhost IPC channel. The full design lives in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) (see the §0 system-overview diagram).
 
-> **Status: beta.** The plugin, the .NET sidecar, the `unreal-mcp-cli`, the AI Game Developer editor UI, and **62 built-in tools across 8 families** have shipped and are exercised by CI. Nothing is published to a package registry yet — **install from source** (below). Pixel-capture (screenshot) tools need a GPU-backed editor; everything else runs headless.
+> **Status: beta.** The plugin, the .NET sidecar, the `unreal-mcp-cli`, the AI Game Developer editor UI, and **62 built-in tools across 8 families** have shipped and are exercised by CI. The `unreal-mcp-cli` is **published on npm** — install the plugin with it (Option B below); the Fab / Epic Marketplace listing for the precompiled plugin is coming soon (Option A). Pixel-capture (screenshot) tools need a GPU-backed editor; everything else runs headless.
 
 > **[💬 Join our Discord Server](https://discord.gg/cfbdMZX99G)** — Ask questions, showcase your work, and connect with other developers!
 
@@ -97,16 +98,23 @@ Because Fab ships precompiled binaries and the Epic Launcher updates them in pla
 
 ## Option B — `unreal-mcp-cli` (current / advanced)
 
-The CLI is the recommended path **today**, until the Fab listing is live. It copies (or, for dev, junctions) the plugin into your project and, on **update**, automatically clears the stale UE build cache so you always get a clean recompile of the new code (see [Updating the plugin](#updating-the-plugin)).
+The CLI is the recommended path **today**, until the Fab listing is live. Install it from npm — **no repo clone, no build step**. It copies (or, for dev, junctions) the plugin into your project and, on **update**, automatically clears the stale UE build cache so you always get a clean recompile of the new code (see [Updating the plugin](#updating-the-plugin)).
 
 ```bash
-# From a clone of this repo (see "unreal-mcp-cli" below for the npm story once published):
-cd cli && npm install && npm run build
+# 1. Install unreal-mcp-cli (or use `npx unreal-mcp-cli@latest <command>` for a one-off, no install)
+npm install -g unreal-mcp-cli
 
-# Copy or junction the plugin into <YourProject>/Plugins/UnrealMCP, then build the editor target.
-# install-plugin takes the project directory as a positional argument:
-node bin/unreal-mcp-cli.js install-plugin <YourProject> --junction
+# 2. Install the UnrealMCP plugin into your project
+unreal-mcp-cli install-plugin ./YourProject
+
+# 3. Authorize against the cloud server (ai-game.dev)
+unreal-mcp-cli login ./YourProject
+
+# 4. Open the Unreal Editor for the project (wires the MCP connection env vars)
+unreal-mcp-cli open ./YourProject
 ```
+
+See [`cli/README.md`](cli/README.md) for the full 16-command reference.
 
 ## Option C — manual
 
@@ -312,7 +320,7 @@ The **Settings** page is reachable both as an aux tab and via **Project Settings
 
 A cross-platform Node CLI (`unreal-mcp-cli`) that scaffolds projects, installs the plugin, configures connection settings, drives the local server, and invokes tools over HTTP. It is a port of `unity-mcp-cli` / `godot-cli`. Full reference: [`cli/README.md`](cli/README.md).
 
-> The npm package is `private: true` until the first publish gate. Until then, build it from source (`cd cli && npm install && npm run build`) and invoke `node bin/unreal-mcp-cli.js <command>`.
+> Published on npm — install with `npm install -g unreal-mcp-cli`, or run a one-off with `npx unreal-mcp-cli@latest <command>`.
 
 The full 16-command surface:
 

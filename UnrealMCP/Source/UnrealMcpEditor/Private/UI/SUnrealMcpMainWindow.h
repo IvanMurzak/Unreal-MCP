@@ -48,6 +48,12 @@ private:
 	// Whether the masked Custom-mode token field is currently revealed (reveal-on-hold, §8).
 	bool bRevealToken = false;
 
+	// The "AI Game Developer" banner brush, loaded once at Construct from the plugin's Resources dir
+	// (Resources/ai-developer-banner.png). Held as a member so the dynamic brush outlives the SImage
+	// that references it (a Slate brush must stay alive for the lifetime of the widget that draws it).
+	// Null when the image could not be loaded — BuildBannerImageSection() then renders nothing.
+	TSharedPtr<FSlateDynamicImageBrush> BannerBrush;
+
 	// Section builders (each returns a Slate widget; kept separate so §7's ordering reads top-to-bottom).
 	TSharedRef<SWidget> BuildHeaderSection();
 	TSharedRef<SWidget> BuildConnectionSection();
@@ -58,7 +64,12 @@ private:
 	TSharedRef<SWidget> BuildTransportSelector();
 	TSharedRef<SWidget> BuildBridgeStatusSection();
 	TSharedRef<SWidget> BuildAiAgentsSection();
+	TSharedRef<SWidget> BuildBannerImageSection();
 	TSharedRef<SWidget> BuildAgentConfiguratorsSection();
+
+	// Load Resources/ai-developer-banner.png from the plugin base dir into BannerBrush (no-op if it
+	// already loaded or the file is missing). Called once from Construct before the section is built.
+	void EnsureBannerBrushLoaded();
 	TSharedRef<SWidget> BuildFooterSection();
 
 	// A bold section header row.
