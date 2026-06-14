@@ -1,33 +1,59 @@
-# Unreal-MCP
+<div align="center" width="100%">
 
-**Model Context Protocol (MCP) integration for [Unreal Engine](https://www.unrealengine.com/).**
+## ![AI Game Developer — Unreal MCP](https://github.com/IvanMurzak/Unreal-MCP/blob/main/docs/img/promo/ai-developer-header.svg?raw=true)
 
-[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
-[![test-pull-request](https://github.com/IvanMurzak/Unreal-MCP/actions/workflows/test_pull_request.yml/badge.svg)](https://github.com/IvanMurzak/Unreal-MCP/actions/workflows/test_pull_request.yml)
+[![MCP](https://badge.mcpx.dev 'MCP Server')](https://modelcontextprotocol.io/introduction)
+[![Unreal Engine](https://img.shields.io/badge/Unreal%20Engine-5.5%2B-0E1128?style=flat&logo=unrealengine&logoColor=white&labelColor=333A41 'Unreal Engine 5.5+, developed and CI-tested against 5.7')](https://www.unrealengine.com/)
+[![test-pull-request](https://github.com/IvanMurzak/Unreal-MCP/actions/workflows/test_pull_request.yml/badge.svg 'CI — test-pull-request')](https://github.com/IvanMurzak/Unreal-MCP/actions/workflows/test_pull_request.yml)</br>
+[![Discord](https://img.shields.io/badge/Discord-Join-7289da?logo=discord&logoColor=white&labelColor=333A41 'Join')](https://discord.gg/cfbdMZX99G)
+[![Stars](https://img.shields.io/github/stars/IvanMurzak/Unreal-MCP 'Stars')](https://github.com/IvanMurzak/Unreal-MCP/stargazers)
+[![License](https://img.shields.io/github/license/IvanMurzak/Unreal-MCP?label=License&labelColor=333A41)](https://github.com/IvanMurzak/Unreal-MCP/blob/main/LICENSE)
+[![Stand With Ukraine](https://raw.githubusercontent.com/vshymanskyy/StandWithUkraine/main/badges/StandWithUkraine.svg)](https://stand-with-ukraine.pp.ua)
 
-> **Status: beta.** The plugin, the .NET sidecar, the `unreal-mcp-cli`, the AI Game
-> Developer editor UI, and **62 built-in tools across 8 families** have shipped and are exercised by
-> CI. Nothing is published to a package registry yet — install from source (below). Pixel-capture
-> (screenshot) tools need a GPU-backed editor; everything else runs headless.
+<!-- TODO(banner): add docs/img/promo/ai-developer-banner.jpg (Unreal-branded hero art) and render it here, mirroring the Unity/Godot READMEs -->
+<!-- TODO(demo): add an animated GIF of the AI Game Developer window driving the Unreal editor -->
 
-Unreal-MCP is the Unreal Engine counterpart of
-[Unity-MCP](https://github.com/IvanMurzak/Unity-MCP) and
-[Godot-MCP](https://github.com/IvanMurzak/Godot-MCP): a C++ editor plugin that exposes Unreal
-Editor operations as **AI Tools** and connects them to an MCP server, so an AI assistant
-(Claude, Cursor, Copilot, …) can inspect and drive your Unreal project — spawn actors, edit levels,
-author Blueprints, manage assets, edit and compile C++, capture screenshots, and more — through the
-same cloud backend ([ai-game.dev](https://ai-game.dev)) that powers Unity-MCP and Godot-MCP, or
-through a local server you run yourself. The local server is the shared, engine-agnostic
-[GameDev-MCP-Server](https://github.com/IvanMurzak/GameDev-MCP-Server) (binary
-`gamedev-mcp-server`) — one server consumed by Unity-MCP, Godot-MCP, and Unreal-MCP; no server
-source lives in this repo.
+  <p>
+    <a href="https://claude.ai/download"><img src="https://github.com/IvanMurzak/Unreal-MCP/raw/main/docs/img/mcp-clients/claude-64.png" alt="Claude" title="Claude" height="36"></a>&nbsp;&nbsp;
+    <a href="https://openai.com/index/introducing-codex/"><img src="https://github.com/IvanMurzak/Unreal-MCP/raw/main/docs/img/mcp-clients/codex-64.png" alt="Codex" title="Codex" height="36"></a>&nbsp;&nbsp;
+    <a href="https://www.cursor.com/"><img src="https://github.com/IvanMurzak/Unreal-MCP/raw/main/docs/img/mcp-clients/cursor-64.png" alt="Cursor" title="Cursor" height="36"></a>&nbsp;&nbsp;
+    <a href="https://code.visualstudio.com/docs/copilot/overview"><img src="https://github.com/IvanMurzak/Unreal-MCP/raw/main/docs/img/mcp-clients/github-copilot-64.png" alt="GitHub Copilot" title="GitHub Copilot" height="36"></a>&nbsp;&nbsp;
+    <a href="https://gemini.google.com/"><img src="https://github.com/IvanMurzak/Unreal-MCP/raw/main/docs/img/mcp-clients/gemini-64.png" alt="Gemini" title="Gemini" height="36"></a>&nbsp;&nbsp;
+    <a href="https://antigravity.google/"><img src="https://github.com/IvanMurzak/Unreal-MCP/raw/main/docs/img/mcp-clients/antigravity-64.png" alt="Antigravity" title="Antigravity" height="36"></a>&nbsp;&nbsp;
+    <a href="https://code.visualstudio.com/"><img src="https://github.com/IvanMurzak/Unreal-MCP/raw/main/docs/img/mcp-clients/vs-code-64.png" alt="VS Code" title="VS Code" height="36"></a>&nbsp;&nbsp;
+    <a href="https://www.jetbrains.com/rider/"><img src="https://github.com/IvanMurzak/Unreal-MCP/raw/main/docs/img/mcp-clients/rider-64.png" alt="Rider" title="Rider" height="36"></a>&nbsp;&nbsp;
+    <a href="https://visualstudio.microsoft.com/"><img src="https://github.com/IvanMurzak/Unreal-MCP/raw/main/docs/img/mcp-clients/visual-studio-64.png" alt="Visual Studio" title="Visual Studio" height="36"></a>&nbsp;&nbsp;
+    <a href="https://github.com/anthropics/claude-code"><img src="https://github.com/IvanMurzak/Unreal-MCP/raw/main/docs/img/mcp-clients/open-code-64.png" alt="Open Code" title="Open Code" height="36"></a>&nbsp;&nbsp;
+    <a href="https://github.com/cline/cline"><img src="https://github.com/IvanMurzak/Unreal-MCP/raw/main/docs/img/mcp-clients/cline-64.png" alt="Cline" title="Cline" height="36"></a>&nbsp;&nbsp;
+    <a href="https://github.com/Kilo-Org/kilocode"><img src="https://github.com/IvanMurzak/Unreal-MCP/raw/main/docs/img/mcp-clients/kilo-code-64.png" alt="Kilo Code" title="Kilo Code" height="36"></a>
+  </p>
 
-Unlike Unity and Godot (C# engines that host the .NET `McpPlugin` in-process), Unreal's editor is
-C++ — so the .NET MCP host runs as an auto-managed **sidecar process** (`unreal-mcp-bridge`) that
-the plugin spawns and talks to over a localhost IPC channel. The full design lives in
-[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) (see the §0 system-overview diagram).
+</div>
 
-## Table of contents
+`Unreal MCP` is an AI-powered game development assistant **for the Unreal Editor**. Connect **Claude**, **Cursor**, **Copilot**, or any MCP-aware agent to Unreal Engine and let it inspect and drive your project — spawn actors, edit levels, author Blueprints, manage assets, edit and compile C++, capture screenshots, and more.
+
+Unreal-MCP is the Unreal Engine counterpart of [Unity-MCP](https://github.com/IvanMurzak/Unity-MCP) and [Godot-MCP](https://github.com/IvanMurzak/Godot-MCP): a **C++ editor plugin** that exposes Unreal Editor operations as **AI Tools** and connects them to an MCP server through the same hosted cloud backend ([ai-game.dev](https://ai-game.dev)) that powers Unity-MCP and Godot-MCP — or your own self-hosted server. The local server is the shared, engine-agnostic [GameDev-MCP-Server](https://github.com/IvanMurzak/GameDev-MCP-Server) (binary `gamedev-mcp-server`) — one server consumed by Unity-MCP, Godot-MCP, and Unreal-MCP; no server source lives in this repo.
+
+Unlike Unity and Godot (C# engines that host the .NET `McpPlugin` in-process), Unreal's editor is **C++** — so the .NET MCP host runs as an auto-managed **sidecar process** (`unreal-mcp-bridge`) that the plugin spawns and talks to over a localhost IPC channel. The full design lives in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) (see the §0 system-overview diagram).
+
+> **Status: beta.** The plugin, the .NET sidecar, the `unreal-mcp-cli`, the AI Game Developer editor UI, and **62 built-in tools across 8 families** have shipped and are exercised by CI. Nothing is published to a package registry yet — **install from source** (below). Pixel-capture (screenshot) tools need a GPU-backed editor; everything else runs headless.
+
+> **[💬 Join our Discord Server](https://discord.gg/cfbdMZX99G)** — Ask questions, showcase your work, and connect with other developers!
+
+## ![Features](https://github.com/IvanMurzak/Unreal-MCP/blob/main/docs/img/promo/hazzard-features.svg?raw=true)
+
+- ✔️ **AI agents** — Use the best agents from **Anthropic**, **OpenAI**, **Google**, or any other provider with no vendor lock-in
+- ✔️ **62 built-in Tools** — A wide range of [MCP Tools](#tools) across **8 families** for operating the Unreal Editor
+- ✔️ **Blueprint authoring** — Create, edit, and **compile** Blueprints with a structured error/warning feedback loop the AI can act on
+- ✔️ **C++ edit & compile** — Read, scaffold, and edit project C++, then compile (Live Coding or UBT) with a structured error report
+- ✔️ **Visual feedback** — Capture viewport, game-view, camera, and isolated-actor screenshots the LLM can inspect directly
+- ✔️ **Custom / extension AI Tools** — Register **your own** AI Tools from any UE plugin with **no fork** — a public, modular-feature contract ([Customize Tools](#customize-tools))
+- ✔️ **Cloud or self-hosted** — Connect to `ai-game.dev` out of the box, or point at your own [GameDev-MCP-Server](https://github.com/IvanMurzak/GameDev-MCP-Server)
+- ✔️ **Per-tool enable / disable** — Flip any tool on or off from the **MCP Tools** window; the toggle is enforced at the execution boundary, not just hidden
+
+![AI Game Developer — Unreal MCP](https://github.com/IvanMurzak/Unreal-MCP/blob/main/docs/img/promo/hazzard-divider.svg?raw=true)
+
+# Table of contents
 
 - [Requirements](#requirements)
 - [Install](#install)
@@ -36,54 +62,42 @@ the plugin spawns and talks to over a localhost IPC channel. The full design liv
 - [Tools](#tools) — all 8 families, 62 tools
 - [Per-tool enable / disable & Settings](#per-tool-enable--disable--settings)
 - [`unreal-mcp-cli`](#unreal-mcp-cli)
-- [Writing an extension](#writing-an-extension)
+- [Customize Tools](#customize-tools)
 - [Configuration & environment variables](#configuration--environment-variables)
 - [Troubleshooting](#troubleshooting)
+- [How Unreal MCP Architecture Works](#how-unreal-mcp-architecture-works)
 - [Repo layout](#repo-layout)
 - [Links](#links)
 - [License](#license)
 
-## Requirements
+![AI Game Developer — Unreal MCP](https://github.com/IvanMurzak/Unreal-MCP/blob/main/docs/img/promo/hazzard-divider.svg?raw=true)
 
-- **Unreal Engine 5.5+** (developed and CI-tested against **5.7**). The plugin deliberately ships
-  **no `EngineVersion` pin** — UE treats that field as an exact-build match, not a floor, and would
-  refuse to load on newer engines.
-- **.NET 9 SDK** to build the bridge sidecar **from source**. (End users of a packaged release do
-  NOT need it — the self-contained sidecar is bundled inside the plugin and auto-spawned, ARCHITECTURE
-  §6. The local MCP server is downloaded as a prebuilt
-  [GameDev-MCP-Server](https://github.com/IvanMurzak/GameDev-MCP-Server) release binary, never built
-  here.)
+# Requirements
+
+- **Unreal Engine 5.5+** (developed and CI-tested against **5.7**). The plugin deliberately ships **no `EngineVersion` pin** — UE treats that field as an exact-build match, not a floor, and would refuse to load on newer engines.
+- **.NET 9 SDK** to build the bridge sidecar **from source**. (End users of a packaged release do NOT need it — the self-contained sidecar is bundled inside the plugin and auto-spawned, ARCHITECTURE §6. The local MCP server is downloaded as a prebuilt [GameDev-MCP-Server](https://github.com/IvanMurzak/GameDev-MCP-Server) release binary, never built here.)
 - **Node.js** `^20.19.0 || >=22.12.0` for the optional `unreal-mcp-cli`.
-- A C++ Unreal project (the plugin builds an Editor module, so the host project must be able to
-  compile C++).
+- A **C++ Unreal project** (the plugin builds an Editor module, so the host project must be able to compile C++).
 
-## Install
+![AI Game Developer — Unreal MCP](https://github.com/IvanMurzak/Unreal-MCP/blob/main/docs/img/promo/hazzard-divider.svg?raw=true)
 
-There are three ways to install the plugin, in order of preference. **Fab / Epic Marketplace is the
-recommended channel for end users** — it ships precompiled, per-engine binaries and the Epic Games
-Launcher keeps them up to date automatically, so there is **zero compile and zero stale-build risk**.
-Source/`unreal-mcp-cli` installs remain the current path for developers and early adopters until the
-Fab listing goes live.
+# Install
 
-### Option A — Fab / Epic Marketplace (recommended; coming soon)
+There are three ways to install the plugin, in order of preference. **Fab / Epic Marketplace is the recommended channel for end users** — it ships precompiled, per-engine binaries and the Epic Games Launcher keeps them up to date automatically, so there is **zero compile and zero stale-build risk**. Source / `unreal-mcp-cli` installs remain the current path for developers and early adopters until the Fab listing goes live.
 
-> **Status: not yet live.** The Fab listing is operator-gated and tracked separately; until it
-> publishes, use Option B or C below. The framing here is what the end-user flow will be.
+## Option A — Fab / Epic Marketplace (recommended; coming soon)
 
-1. Install **Unreal-MCP** from [Fab](https://www.fab.com/) (the Epic Marketplace successor) into your
-   engine via the Epic Games Launcher.
+> **Status: not yet live.** The Fab listing is operator-gated and tracked separately; until it publishes, use Option B or C below. The framing here is what the end-user flow will be.
+
+1. Install **Unreal-MCP** from [Fab](https://www.fab.com/) (the Epic Marketplace successor) into your engine via the Epic Games Launcher.
 2. Enable the plugin for your project from **Edit → Plugins**.
-3. Open the project — UE loads the **precompiled** plugin (no C++ build on your machine). On boot the
-   Output Log prints **`[Unreal-MCP] plugin loaded`**.
+3. Open the project — UE loads the **precompiled** plugin (no C++ build on your machine). On boot the Output Log prints **`[Unreal-MCP] plugin loaded`**.
 
-Because Fab ships precompiled binaries and the Epic Launcher updates them in place, you never compile
-the plugin and never have to clear a stale build cache — the most robust path for non-developers.
+Because Fab ships precompiled binaries and the Epic Launcher updates them in place, you never compile the plugin and never have to clear a stale build cache — the most robust path for non-developers.
 
-### Option B — `unreal-mcp-cli` (current / advanced)
+## Option B — `unreal-mcp-cli` (current / advanced)
 
-The CLI is the recommended path **today**, until the Fab listing is live. It copies (or, for dev, junctions)
-the plugin into your project and, on **update**, automatically clears the stale UE build cache so you
-always get a clean recompile of the new code (see [Updating the plugin](#updating-the-plugin)).
+The CLI is the recommended path **today**, until the Fab listing is live. It copies (or, for dev, junctions) the plugin into your project and, on **update**, automatically clears the stale UE build cache so you always get a clean recompile of the new code (see [Updating the plugin](#updating-the-plugin)).
 
 ```bash
 # From a clone of this repo (see "unreal-mcp-cli" below for the npm story once published):
@@ -94,44 +108,24 @@ cd cli && npm install && npm run build
 node bin/unreal-mcp-cli.js install-plugin <YourProject> --junction
 ```
 
-### Option C — manual
+## Option C — manual
 
-1. Copy [`UnrealMCP/`](UnrealMCP/) into `<YourProject>/Plugins/UnrealMCP/` (or create a directory
-   junction / symlink to it for live development).
+1. Copy [`UnrealMCP/`](UnrealMCP/) into `<YourProject>/Plugins/UnrealMCP/` (or create a directory junction / symlink to it for live development).
 2. Open the project; UE compiles the `UnrealMcpEditor` module on first launch.
-3. On editor boot the Output Log prints **`[Unreal-MCP] plugin loaded`** — that confirms the plugin
-   and its game-thread dispatcher started.
+3. On editor boot the Output Log prints **`[Unreal-MCP] plugin loaded`** — that confirms the plugin and its game-thread dispatcher started.
 
-The sidecar binary (`unreal-mcp-bridge`) is **bundled inside the plugin** in a packaged release: a
-prebuilt, self-contained binary for your platform ships under
-`UnrealMCP/Binaries/ThirdParty/UnrealMcpBridge/<rid>/` and the editor **auto-spawns it on startup
-with zero user action** — no .NET install, no env var, no manual launch (ARCHITECTURE §6). The first
-Cloud OAuth device-code browser approval is the only remaining human step; after that, reconnect on
-later launches is zero-click (the cloud token is cached in `Saved/Config/UnrealMcp/`).
+The sidecar binary (`unreal-mcp-bridge`) is **bundled inside the plugin** in a packaged release: a prebuilt, self-contained binary for your platform ships under `UnrealMCP/Binaries/ThirdParty/UnrealMcpBridge/<rid>/` and the editor **auto-spawns it on startup with zero user action** — no .NET install, no env var, no manual launch (ARCHITECTURE §6). The first Cloud OAuth device-code browser approval is the only remaining human step; after that, reconnect on later launches is zero-click (the cloud token is cached in `Saved/Config/UnrealMcp/`).
 
-When you build the plugin **from source** (the only option until the first GitHub Release / Fab
-listing), the bundled binary is not present — the plugin then resolves the sidecar from the
-`UNREAL_MCP_BRIDGE_PATH` environment variable instead: point that at a locally built sidecar, or run
-`unreal-mcp-cli bootstrap-local` to build the bridge from source into
-`<YourProject>/Intermediate/UnrealMCP/` and set the var to the result. With neither a bundled binary
-nor the env var resolved, the plugin's TCP listener still starts but logs
-`[Unreal-MCP] no sidecar binary resolved for rid <rid> …` and spawns nothing.
+When you build the plugin **from source** (the only option until the first GitHub Release / Fab listing), the bundled binary is not present — the plugin then resolves the sidecar from the `UNREAL_MCP_BRIDGE_PATH` environment variable instead: point that at a locally built sidecar, or run `unreal-mcp-cli bootstrap-local` to build the bridge from source into `<YourProject>/Intermediate/UnrealMCP/` and set the var to the result. With neither a bundled binary nor the env var resolved, the plugin's TCP listener still starts but logs `[Unreal-MCP] no sidecar binary resolved for rid <rid> …` and spawns nothing.
 
-## Updating the plugin
+![AI Game Developer — Unreal MCP](https://github.com/IvanMurzak/Unreal-MCP/blob/main/docs/img/promo/hazzard-divider.svg?raw=true)
 
-Updating in place must always leave you running the **new** code. The risk is UE's incremental
-compiler: if the plugin source changes (new `.cpp` files, a new module) but the old
-`UnrealMCP/Intermediate/` build cache survives, UE can do a partial recompile against a stale module
-file-list and silently leave you on old/partial code. Each channel handles this differently:
+# Updating the plugin
 
-- **Fab / Epic Marketplace → automatic.** The Epic Games Launcher replaces the precompiled binaries
-  in place; nothing to compile, no cache to clear. This is why Fab is the recommended channel.
-- **`unreal-mcp-cli update` → automatic clean rebuild.** `update` re-copies the plugin source and,
-  by **default**, deletes the installed plugin's stale `Intermediate/` and the C++ `Binaries/` so UE
-  performs a clean compile on the next editor launch — no manual steps. The bundled sidecar bridge
-  under `Binaries/ThirdParty/UnrealMcpBridge/<rid>/` is **always preserved** (only the C++ module
-  outputs are cleared). Dev **junction** installs are never cleaned (that would wipe your live source
-  tree's outputs). Pass `--no-clean` to opt out of the cache wipe.
+Updating in place must always leave you running the **new** code. The risk is UE's incremental compiler: if the plugin source changes (new `.cpp` files, a new module) but the old `UnrealMCP/Intermediate/` build cache survives, UE can do a partial recompile against a stale module file-list and silently leave you on old/partial code. Each channel handles this differently:
+
+- **Fab / Epic Marketplace → automatic.** The Epic Games Launcher replaces the precompiled binaries in place; nothing to compile, no cache to clear. This is why Fab is the recommended channel.
+- **`unreal-mcp-cli update` → automatic clean rebuild.** `update` re-copies the plugin source and, by **default**, deletes the installed plugin's stale `Intermediate/` and the C++ `Binaries/` so UE performs a clean compile on the next editor launch — no manual steps. The bundled sidecar bridge under `Binaries/ThirdParty/UnrealMcpBridge/<rid>/` is **always preserved** (only the C++ module outputs are cleared). Dev **junction** installs are never cleaned (that would wipe your live source tree's outputs). Pass `--no-clean` to opt out of the cache wipe.
 
   ```bash
   node bin/unreal-mcp-cli.js update <YourProject>            # default: clean rebuild on version change
@@ -139,44 +133,33 @@ file-list and silently leave you on old/partial code. Each channel handles this 
   node bin/unreal-mcp-cli.js update <YourProject> --no-clean # keep the existing build cache
   ```
 
-- **Manual copy → clear the cache yourself.** If you overwrite `<YourProject>/Plugins/UnrealMCP/`
-  by hand, **close the editor first**, delete `<YourProject>/Plugins/UnrealMCP/Intermediate/` and the
-  C++ `Binaries/` (keep `Binaries/ThirdParty/` if a bundled bridge is present), then relaunch so UE
-  recompiles cleanly.
+- **Manual copy → clear the cache yourself.** If you overwrite `<YourProject>/Plugins/UnrealMCP/` by hand, **close the editor first**, delete `<YourProject>/Plugins/UnrealMCP/Intermediate/` and the C++ `Binaries/` (keep `Binaries/ThirdParty/` if a bundled bridge is present), then relaunch so UE recompiles cleanly.
 
-## First run
+![AI Game Developer — Unreal MCP](https://github.com/IvanMurzak/Unreal-MCP/blob/main/docs/img/promo/hazzard-divider.svg?raw=true)
 
-1. Open the **AI Game Developer** main window from the editor's **Tools** menu (the tab is
-   registered under the Tools menu category).
+# First run
+
+1. Open the **AI Game Developer** main window from the editor's **Tools** menu (the tab is registered under the Tools menu category).
 2. **Choose a connection mode:**
-   - **Cloud** (default) — connects to [ai-game.dev](https://ai-game.dev). Click **Authorize** to
-     start the OAuth **device-code flow**: the window shows a verification URL and a short user
-     code; open the URL, enter the code, approve, and the editor finishes authorizing. Use
-     **Revoke** to clear the stored cloud token.
-   - **Custom** — connects to a local `gamedev-mcp-server` you run (or any compatible server). Enter
-     the server URL and point your AI client at it. (The plugin does not start the local server for
-     you — run `unreal-mcp-cli` or your own process; see Troubleshooting.)
-3. The **Connection** section shows a status dot, a status label, and a Connect / Disconnect / Stop
-   button; the bridge status reads `Running (restarts: N)` or `Stopped`. Use them to confirm the
-   sidecar is live.
-4. Point your AI client (Claude Code, Cursor, the AI Game Developer app, …) at the server. The
-   **AI agents** section lists the agents currently connected; to write an MCP client config use
-   `unreal-mcp-cli setup-mcp`.
+   - **Cloud** (default) — connects to [ai-game.dev](https://ai-game.dev). Click **Authorize** to start the OAuth **device-code flow**: the window shows a verification URL and a short user code; open the URL, enter the code, approve, and the editor finishes authorizing. Use **Revoke** to clear the stored cloud token.
+   - **Custom** — connects to a local `gamedev-mcp-server` you run (or any compatible server). Enter the server URL and point your AI client at it. (The plugin does not start the local server for you — run `unreal-mcp-cli` or your own process; see [Troubleshooting](#troubleshooting).)
+3. The **Connection** section shows a status dot, a status label, and a Connect / Disconnect / Stop button; the bridge status reads `Running (restarts: N)` or `Stopped`. Use them to confirm the sidecar is live.
+4. Point your AI client (Claude Code, Cursor, the AI Game Developer app, …) at the server. The **AI agents** section lists the agents currently connected; to write an MCP client config use `unreal-mcp-cli setup-mcp`.
 
-Connection settings persist to `<Project>/Saved/Config/UnrealMcp/ai-game-developer-config.json`
-(`Saved/` is gitignored by every UE template, so tokens never land in VCS by default).
+Connection settings persist to `<Project>/Saved/Config/UnrealMcp/ai-game-developer-config.json` (`Saved/` is gitignored by every UE template, so tokens never land in VCS by default).
 
-## Tools
+> That's it. Ask your AI *"Spawn three cubes in a row and a point light above them"* and watch it happen. ✨
 
-Unreal-MCP ships **62 built-in ("core") tools** across **8 families**. Tool ids are kebab-case
-(`actor-create`, `blueprint-compile`), matching the Unity/Godot naming convention. Extensions can
-add more (see [Writing an extension](#writing-an-extension)).
+![AI Game Developer — Unreal MCP](https://github.com/IvanMurzak/Unreal-MCP/blob/main/docs/img/promo/hazzard-divider.svg?raw=true)
 
-> This list is generated from the registration source
-> (`UnrealMCP/Source/UnrealMcpEditor/Private/Tools/UnrealMcp*Tools.cpp`). Counts: actor 13,
-> blueprint 11, asset 11, editor/reflection 9, level 7, source 6, screenshot 4, ping 1 = **62**.
+# Tools
 
-### Actor & component family (13)
+Unreal-MCP ships **62 built-in ("core") tools** across **8 families**. Tool ids are kebab-case (`actor-create`, `blueprint-compile`), matching the Unity/Godot naming convention. Extensions can add more (see [Customize Tools](#customize-tools)).
+
+> This list is generated from the registration source (`UnrealMCP/Source/UnrealMcpEditor/Private/Tools/UnrealMcp*Tools.cpp`). Counts: actor 13, blueprint 11, asset 11, editor/reflection 9, level 7, source 6, screenshot 4, ping 1 = **62**.
+
+<details>
+  <summary><b>Actor &amp; component family (13)</b></summary>
 
 | Tool id | What it does |
 | --- | --- |
@@ -194,7 +177,10 @@ add more (see [Writing an extension](#writing-an-extension)).
 | `object-get-data` | Read any `UObject` by path |
 | `object-modify` | Modify any `UObject` by path |
 
-### Blueprint family (11) — Unreal's flagship surface
+</details>
+
+<details>
+  <summary><b>Blueprint family (11) — Unreal's flagship surface</b></summary>
 
 | Tool id | What it does |
 | --- | --- |
@@ -210,7 +196,10 @@ add more (see [Writing an extension](#writing-an-extension)).
 | `blueprint-compile` | Compile the Blueprint and return a **structured error/warning list** (the AI feedback loop) |
 | `blueprint-spawn` | Instance the Blueprint into the current level |
 
-### Asset / Content-Browser family (11)
+</details>
+
+<details>
+  <summary><b>Asset / Content-Browser family (11)</b></summary>
 
 | Tool id | What it does |
 | --- | --- |
@@ -226,7 +215,10 @@ add more (see [Writing an extension](#writing-an-extension)).
 | `asset-material-get-data` | Read material graph/parameter info (the "shader" analog) |
 | `asset-import` | Import FBX/textures via `AssetImportTask` |
 
-### Editor / console / reflection family (9)
+</details>
+
+<details>
+  <summary><b>Editor / console / reflection family (9)</b></summary>
 
 | Tool id | What it does |
 | --- | --- |
@@ -240,7 +232,10 @@ add more (see [Writing an extension](#writing-an-extension)).
 | `reflection-method-find` | Discover callable `UFunction`s (returns invocation schemas) |
 | `reflection-method-call` | Invoke a `UFunction` (static or instance, incl. `CallInEditor`) |
 
-### Level / map family (7)
+</details>
+
+<details>
+  <summary><b>Level / map family (7)</b></summary>
 
 | Tool id | What it does |
 | --- | --- |
@@ -252,7 +247,10 @@ add more (see [Writing an extension](#writing-an-extension)).
 | `level-set-current` | Set the current/active level |
 | `level-unload-sublevel` | Unload a streaming sublevel |
 
-### Source / C++ family (6)
+</details>
+
+<details>
+  <summary><b>Source / C++ family (6)</b></summary>
 
 | Tool id | What it does |
 | --- | --- |
@@ -265,7 +263,10 @@ add more (see [Writing an extension](#writing-an-extension)).
 
 All file operations are jailed to `<Project>/Source/`.
 
-### Screenshot / viewport-capture family (4)
+</details>
+
+<details>
+  <summary><b>Screenshot / viewport-capture family (4)</b></summary>
 
 | Tool id | What it does |
 | --- | --- |
@@ -274,49 +275,44 @@ All file operations are jailed to `<Project>/Source/`.
 | `screenshot-camera` | Render from a resolved camera actor via `USceneCaptureComponent2D` |
 | `screenshot-isolated` | Render an actor in isolation (transient SceneCapture2D + show-only list) |
 
-Captures return a base64 **PNG as MCP image content** so the LLM can inspect the render directly.
-Dimensions are clamped (default 1024, hard cap 2048 per side). Pixel capture needs a GPU-backed
-editor; under headless `-nullrhi` these tools return a structured error.
+Captures return a base64 **PNG as MCP image content** so the LLM can inspect the render directly. Dimensions are clamped (default 1024, hard cap 2048 per side). Pixel capture needs a GPU-backed editor; under headless `-nullrhi` these tools return a structured error.
 
-### Ping family (1)
+</details>
+
+<details>
+  <summary><b>Ping family (1)</b></summary>
 
 | Tool id | What it does |
 | --- | --- |
 | `ping` | Liveness probe — round-trips the plugin ⇄ sidecar ⇄ server chain |
 
-## Per-tool enable / disable & Settings
+</details>
 
-Every tool can be individually enabled or disabled from the **MCP Tools** window — the standalone
-**MCP Tools** tab (registered under the editor's **Tools** menu). The window shows each tool's
-title, family, and description, plus an "N / M tools enabled" summary line. Disabling a tool:
+![AI Game Developer — Unreal MCP](https://github.com/IvanMurzak/Unreal-MCP/blob/main/docs/img/promo/hazzard-divider.svg?raw=true)
+
+# Per-tool enable / disable & Settings
+
+Every tool can be individually enabled or disabled from the **MCP Tools** window — the standalone **MCP Tools** tab (registered under the editor's **Tools** menu). The window shows each tool's title, family, and description, plus an "N / M tools enabled" summary line. Disabling a tool:
 
 - **removes it from the served manifest entirely** — it never appears in the MCP `tools/list`; and
-- is **enforced at the execution boundary too** — even if a stale `tools/list` is dispatched, a
-  disabled tool is rejected at `Execute()` rather than run.
+- is **enforced at the execution boundary too** — even if a stale `tools/list` is dispatched, a disabled tool is rejected at `Execute()` rather than run.
 
 Two filters combine to decide whether a tool is served (see ARCHITECTURE §7/§8):
 
-- a **whitelist** (`enabledTools`, overridable via `UNREAL_MCP_TOOLS`) — when non-empty, only listed
-  tools are served; empty means "no filter"; **and**
+- a **whitelist** (`enabledTools`, overridable via `UNREAL_MCP_TOOLS`) — when non-empty, only listed tools are served; empty means "no filter"; **and**
 - a **blocklist** (`disabledTools`) — the per-tool toggles you flip in the UI.
 
-A tool is served **iff** it passes the whitelist **and** is not in the blocklist. Both sets are
-persisted across editor sessions and survive an extension hot-reload (a re-registered tool inherits
-the retained toggle, so a rebuild can never silently re-enable a tool you disabled).
+A tool is served **iff** it passes the whitelist **and** is not in the blocklist. Both sets are persisted across editor sessions and survive an extension hot-reload (a re-registered tool inherits the retained toggle, so a rebuild can never silently re-enable a tool you disabled).
 
-The **Settings** page is reachable both as an aux tab and via
-**Project Settings → Plugins → AI Game Developer** (`ISettingsModule`). The **MCP Prompts** and
-**MCP Resources** windows are wired but ship empty in this release — each renders a subdued
-empty-state message (the "N / M enabled" summary is unique to the Tools window).
+The **Settings** page is reachable both as an aux tab and via **Project Settings → Plugins → AI Game Developer** (`ISettingsModule`). The **MCP Prompts** and **MCP Resources** windows are wired but ship empty in this release — each renders a subdued empty-state message (the "N / M enabled" summary is unique to the Tools window).
 
-## `unreal-mcp-cli`
+![AI Game Developer — Unreal MCP](https://github.com/IvanMurzak/Unreal-MCP/blob/main/docs/img/promo/hazzard-divider.svg?raw=true)
 
-A cross-platform Node CLI (`unreal-mcp-cli`) that scaffolds projects, installs the plugin, configures
-connection settings, drives the local server, and invokes tools over HTTP. It is a port of
-`unity-mcp-cli` / `godot-cli`. Full reference: [`cli/README.md`](cli/README.md).
+# `unreal-mcp-cli`
 
-> The npm package is `private: true` until the first publish gate. Until then, build it from source
-> (`cd cli && npm install && npm run build`) and invoke `node bin/unreal-mcp-cli.js <command>`.
+A cross-platform Node CLI (`unreal-mcp-cli`) that scaffolds projects, installs the plugin, configures connection settings, drives the local server, and invokes tools over HTTP. It is a port of `unity-mcp-cli` / `godot-cli`. Full reference: [`cli/README.md`](cli/README.md).
+
+> The npm package is `private: true` until the first publish gate. Until then, build it from source (`cd cli && npm install && npm run build`) and invoke `node bin/unreal-mcp-cli.js <command>`.
 
 The full 16-command surface:
 
@@ -339,12 +335,13 @@ The full 16-command surface:
 | `install-engine` | Detect installed Unreal engines; for a missing version, link to the Epic launcher |
 | `setup-skills` | Write a Claude-Code skill stub that drives this project's Unreal MCP server |
 
-## Writing an extension
+![AI Game Developer — Unreal MCP](https://github.com/IvanMurzak/Unreal-MCP/blob/main/docs/img/promo/hazzard-divider.svg?raw=true)
 
-Any third-party UE plugin can contribute its own MCP tools through a small, public,
-modular-feature-based contract — no fork, no link-time coupling, no load-order assumptions.
-Implement [`IUnrealMcpToolProvider`](UnrealMCP/Source/UnrealMcpEditor/Public/IUnrealMcpToolProvider.h)
-and register it as a modular feature:
+# Customize Tools
+
+**This is the headline extensibility feature.** Anyone can register their **own** AI Tools — from any third-party UE plugin — and have them appear in the MCP manifest alongside the 62 built-in tools. **No fork, no link-time coupling, no load-order assumptions.** Your tools are discovered automatically on editor boot (and on late-load / hot-unload), merged in deterministic order, and exposed to every connected AI agent.
+
+You contribute tools through a small, public, **modular-feature-based contract**: implement [`IUnrealMcpToolProvider`](UnrealMCP/Source/UnrealMcpEditor/Public/IUnrealMcpToolProvider.h) and declare your tools with the fluent [`FUnrealMcpToolRegistry`](UnrealMCP/Source/UnrealMcpEditor/Public/UnrealMcpToolRegistry.h) builder:
 
 ```cpp
 #include "IUnrealMcpToolProvider.h"
@@ -363,32 +360,42 @@ public:
             .Title(TEXT("Hello Extension"))
             .Description(TEXT("Returns a friendly greeting."))
             .ParamString(TEXT("name"), TEXT("Who to greet. Defaults to 'world'."))
-            .ReadOnlyHint(true).IdempotentHint(true)
-            .Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult { /* … */ });
+            .ReadOnlyHint(true)
+            .IdempotentHint(true)
+            .Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
+            {
+                const FString Name = Call.Has(TEXT("name")) ? Call.GetString(TEXT("name")) : TEXT("world");
+                return FUnrealMcpToolResult::Success(FString::Printf(TEXT("Hello, %s!"), *Name));
+            });
     }
 };
+```
 
+Then register the provider as a **modular feature** in your module's `StartupModule` (and unregister in `ShutdownModule`):
+
+```cpp
 // In StartupModule:
 IModularFeatures::Get().RegisterModularFeature(
     IUnrealMcpToolProvider::GetModularFeatureName(), Provider.Get());
 ```
 
-Unreal-MCP discovers every registered provider on boot (and on late-load / hot-unload), merges
-their tools in deterministic `ExtensionId` order, and surfaces the merged manifest to the sidecar.
-Invalid or duplicate tools are dropped/rejected per-extension without affecting others. Individual
-tools (including those contributed by extensions) are toggled in the **MCP Tools** window; there is
-no separate per-extension UI toggle in this release.
+**How it behaves:**
 
-- **Full author guide:** [`docs/EXTENSIONS.md`](docs/EXTENSIONS.md)
-- **Working sample:** [`samples/UnrealAITemplate/`](samples/UnrealAITemplate) — a complete,
-  buildable plugin with a `hello-extension` tool and a compile-time switch
-  (`UNREAL_AI_TEMPLATE_INVALID_SCHEMA=1`) that demonstrates the isolation behaviour.
+- **Auto-discovery & hot-reload.** Unreal-MCP enumerates every registered `UnrealMcpToolProvider` on boot, and subscribes to register/unregister events — so loading or unloading your plugin at any time triggers a **registry rebuild** and a **manifest revision bump**, and the sidecar diffs the new manifest and adds/removes the affected MCP tools automatically. You never push anything yourself.
+- **Deterministic merge.** Providers are merged in ascending `GetExtensionId()` order; within one provider, tools register in declaration order. Your `GetExtensionId()` is stamped onto every tool you contribute (don't call `.ExtensionId(...)` yourself).
+- **Per-extension isolation.** Each tool descriptor is validated (kebab-case name, well-formed schema, bound handler). An **invalid** or **duplicate** tool is dropped/rejected and the reason is recorded on **your** extension's record — your other valid tools, and every other extension, are unaffected. (UE builds without C++ exceptions, so isolation is descriptor-level, not tool-body-level; validate inputs and fail gracefully with `FUnrealMcpToolResult::Error(...)`.)
+- **Toggles & enable/disable.** Extension-contributed tools are toggled in the same **MCP Tools** window as the built-ins; a disabled extension contributes **no tools to the manifest at all**.
 
-## Configuration & environment variables
+**Learn more:**
 
-The plugin reads configuration with the precedence **process env → `<Project>/.env` → config file
-→ built-in defaults**. The recognized `UNREAL_MCP_*` variables (defined in
-`UnrealMCP/Source/UnrealMcpEditor/Private/Config/UnrealMcpConfig.cpp`):
+- **Full author guide:** [`docs/EXTENSIONS.md`](docs/EXTENSIONS.md) — the contract, the tool builder, lifecycle, ordering, isolation semantics, and versioning.
+- **Working sample:** [`samples/UnrealAITemplate/`](samples/UnrealAITemplate) — a complete, buildable plugin with a `hello-extension` tool and a compile-time switch (`UNREAL_AI_TEMPLATE_INVALID_SCHEMA=1`) that demonstrates the isolation behaviour first-hand.
+
+![AI Game Developer — Unreal MCP](https://github.com/IvanMurzak/Unreal-MCP/blob/main/docs/img/promo/hazzard-divider.svg?raw=true)
+
+# Configuration & environment variables
+
+The plugin reads configuration with the precedence **process env → `<Project>/.env` → config file → built-in defaults**. The recognized `UNREAL_MCP_*` variables (defined in `UnrealMCP/Source/UnrealMcpEditor/Private/Config/UnrealMcpConfig.cpp`):
 
 | Variable | Purpose |
 | --- | --- |
@@ -405,37 +412,47 @@ The plugin reads configuration with the precedence **process env → `<Project>/
 | `UNREAL_MCP_BRIDGE_PATH` | Path to a sidecar binary — the **dev/CI override**; wins over the bundled binary (§6). A packaged release auto-resolves the bundled sidecar, so end users never set this; from-source builds use it. |
 | `UNREAL_MCP_SERVER_PATH` | Path to a local `gamedev-mcp-server` binary (read by `unreal-mcp-cli`, not the plugin) — skips the server download + version check (§6). |
 
-> **Never commit `.env`.** A project-root `.env` can hold `UNREAL_MCP_TOKEN`, and UE project
-> templates ship no `.gitignore`. `unreal-mcp-cli configure` appends `.env` to the target project's
-> `.gitignore`; this repo's own scaffold already gitignores it. The sidecar IPC token travels over
-> stdin (never argv) and is never logged.
+> **Never commit `.env`.** A project-root `.env` can hold `UNREAL_MCP_TOKEN`, and UE project templates ship no `.gitignore`. `unreal-mcp-cli configure` appends `.env` to the target project's `.gitignore`; this repo's own scaffold already gitignores it. The sidecar IPC token travels over stdin (never argv) and is never logged.
 
-## Troubleshooting
+![AI Game Developer — Unreal MCP](https://github.com/IvanMurzak/Unreal-MCP/blob/main/docs/img/promo/hazzard-divider.svg?raw=true)
 
-- **`No connected clients. Retrying [1..10]` then HTTP 500 from a local server.** The connection
-  mode defaulted to `Cloud`, so the sidecar dialed ai-game.dev instead of your local server. Set
-  `UNREAL_MCP_CONNECTION_MODE=Custom` (env, `.env`, or the UI toggle).
-- **No `[Unreal-MCP] plugin loaded` line at boot.** The editor module failed to load — check the
-  Output Log for a `StartupModule` error or a malformed `.uplugin`.
-- **A tool body returns `'x' is required.` when invoked over the REST passthrough.** Send
-  `-H "Content-Type: application/json"`; without it the server drops the JSON body.
-- **Screenshot tools return a structured error.** Pixel capture needs a GPU-backed editor — they
-  cannot render under headless `-nullrhi`.
-- **No sidecar / sidecar keeps restarting.** Check the bridge status in the **Connection** section
-  (`Running (restarts: N)` / `Stopped`). If the log shows `no sidecar binary resolved for rid <rid>
-  …`, neither a bundled binary nor `UNREAL_MCP_BRIDGE_PATH` resolved — in a packaged release this
-  means the plugin was packaged without your platform's bridge (reinstall the correct build); in a
-  from-source build, set `UNREAL_MCP_BRIDGE_PATH` or run `unreal-mcp-cli bootstrap-local` to build one
-  from source. (The sidecar is bundled inside packaged releases and auto-spawned, §6 — there is no
-  download-on-first-run.)
-- **Ports.** IPC uses a deterministic per-project port in `30000–39999` and probes forward (then an
-  ephemeral port) on a collision; the local server uses a deterministic hash port in `20000–29999`
-  with no probing — the CLI derives the same number without reading any config, and the server binds
-  the exact requested port. The exact number is a debugging nicety, not a requirement.
-- **Logs.** Use the main window's **Open log file** action, the `console-get-logs` tool, or the
-  editor Output Log (`LogUnrealMcp` category).
+# Troubleshooting
 
-## Repo layout
+- **`No connected clients. Retrying [1..10]` then HTTP 500 from a local server.** The connection mode defaulted to `Cloud`, so the sidecar dialed ai-game.dev instead of your local server. Set `UNREAL_MCP_CONNECTION_MODE=Custom` (env, `.env`, or the UI toggle).
+- **No `[Unreal-MCP] plugin loaded` line at boot.** The editor module failed to load — check the Output Log for a `StartupModule` error or a malformed `.uplugin`.
+- **A tool body returns `'x' is required.` when invoked over the REST passthrough.** Send `-H "Content-Type: application/json"`; without it the server drops the JSON body.
+- **Screenshot tools return a structured error.** Pixel capture needs a GPU-backed editor — they cannot render under headless `-nullrhi`.
+- **No sidecar / sidecar keeps restarting.** Check the bridge status in the **Connection** section (`Running (restarts: N)` / `Stopped`). If the log shows `no sidecar binary resolved for rid <rid> …`, neither a bundled binary nor `UNREAL_MCP_BRIDGE_PATH` resolved — in a packaged release this means the plugin was packaged without your platform's bridge (reinstall the correct build); in a from-source build, set `UNREAL_MCP_BRIDGE_PATH` or run `unreal-mcp-cli bootstrap-local` to build one from source. (The sidecar is bundled inside packaged releases and auto-spawned, §6 — there is no download-on-first-run.)
+- **Ports.** IPC uses a deterministic per-project port in `30000–39999` and probes forward (then an ephemeral port) on a collision; the local server uses a deterministic hash port in `20000–29999` with no probing — the CLI derives the same number without reading any config, and the server binds the exact requested port. The exact number is a debugging nicety, not a requirement.
+- **Logs.** Use the main window's **Open log file** action, the `console-get-logs` tool, or the editor Output Log (`LogUnrealMcp` category).
+
+![AI Game Developer — Unreal MCP](https://github.com/IvanMurzak/Unreal-MCP/blob/main/docs/img/promo/hazzard-divider.svg?raw=true)
+
+# How Unreal MCP Architecture Works
+
+Unreal-MCP is a bridge between LLMs and the Unreal Editor. It exposes and explains Unreal's tools to the LLM, which then understands the interface and uses the tools according to your requests.
+
+Because the editor is **C++**, the .NET `McpPlugin` host doesn't run in-process (as it does in Unity/Godot). Instead the plugin **listens** on a localhost TCP port and spawns an auto-managed **sidecar process** (`unreal-mcp-bridge`) that **dials** it, authenticating with a one-shot token delivered over stdin. The sidecar relays IPC ⇄ SignalR to the MCP server (cloud `ai-game.dev` by default, or a local `gamedev-mcp-server`). The AI Tools the plugin registers are then callable by any MCP-aware AI agent. The authoritative design — IPC protocol, dynamic tool registration, schema generation, the game-thread dispatcher, extensions, sidecar lifecycle, UI, and config — lives in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) (start at the §0 system-overview diagram).
+
+## What is `MCP`
+
+MCP — Model Context Protocol. In a few words, it is `USB Type-C` for AI, specifically for LLMs (Large Language Models). It teaches the LLM how to use external features — such as the Unreal Engine in this case, or even your own custom C++ tool. [Official documentation](https://modelcontextprotocol.io/).
+
+## What is an `AI agent`
+
+It is an application with a chat window. It may have smart agents to operate better, and embedded advanced MCP Tools. A well-built MCP client is 50% of the AI success in executing a task — which is why it is important to choose a good one.
+
+## What is the `MCP Server`
+
+It is the bridge between the `MCP Client` and "something else" — in this case the Unreal Editor. In **Cloud** mode this is the hosted `ai-game.dev` backend; in **Custom** mode it is the shared [GameDev-MCP-Server](https://github.com/IvanMurzak/GameDev-MCP-Server) host you run yourself.
+
+## What is an `MCP Tool`
+
+An `MCP Tool` is a function the LLM can call to interact with Unreal. These tools are the bridge between natural-language requests and actual Unreal operations. When you ask the AI to "spawn an actor" or "compile this Blueprint," it uses MCP Tools to execute the action. Tools have typed, described parameters; return structured results; and run on the editor game thread via the dispatcher (the IPC reader thread never executes tool bodies).
+
+![AI Game Developer — Unreal MCP](https://github.com/IvanMurzak/Unreal-MCP/blob/main/docs/img/promo/hazzard-divider.svg?raw=true)
+
+# Repo layout
 
 | Path | What it is |
 | --- | --- |
@@ -447,7 +464,7 @@ The plugin reads configuration with the precedence **process env → `<Project>/
 | [`docs/EXTENSIONS.md`](docs/EXTENSIONS.md) | Extension author guide |
 | [`docs/RELEASING.md`](docs/RELEASING.md) | CI/CD + operator release runbook |
 
-## Links
+# Links
 
 - [Unity-MCP](https://github.com/IvanMurzak/Unity-MCP) — the Unity sibling
 - [Godot-MCP](https://github.com/IvanMurzak/Godot-MCP) — the Godot sibling
@@ -457,6 +474,6 @@ The plugin reads configuration with the precedence **process env → `<Project>/
 - [ai-game.dev](https://ai-game.dev) — the cloud backend
 - [Model Context Protocol](https://modelcontextprotocol.io/)
 
-## License
+# License
 
 [Apache-2.0](LICENSE) © Ivan Murzak
