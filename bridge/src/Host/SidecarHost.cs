@@ -36,6 +36,18 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
     /// </summary>
     public sealed class SidecarHost : IDisposable
     {
+        /// <summary>
+        /// The URL-prefix the cloud serves the MCP server + SignalR hub behind (nginx routes
+        /// <c>^/mcp(/|$)</c> → the mcp-server container, rewriting <c>/mcp/hub/... → /hub/...</c>). The
+        /// McpPlugin SignalR client appends <c>Consts.Hub.RemoteApp</c> (<c>/hub/mcp-server</c>) to
+        /// <see cref="ConnectionConfig.Host"/>, so in Cloud mode the host MUST carry this prefix — otherwise
+        /// the client dials <c>https://ai-game.dev/hub/mcp-server</c>, which nginx routes to the frontend SPA
+        /// (404) and the sidecar never connects. Mirrors Unity-MCP's <c>CloudServerUrl => base + "/mcp"</c> and
+        /// Godot-MCP's <c>CloudHubPath = "/mcp"</c>. Device-code auth hits the BACKEND (<c>/api/auth/...</c>),
+        /// which is NOT behind this prefix, so it must use the stripped base (see <see cref="StripCloudHubPath"/>).
+        /// </summary>
+        internal const string CloudHubPath = "/mcp";
+
         private readonly IpcClient _ipc;
         private readonly string _sidecarVersion;
         private readonly ILoggerProvider? _loggerProvider;
@@ -269,7 +281,11 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             if (string.IsNullOrWhiteSpace(selected))
                 selected = isCloud ? host : cloudUrl;
             if (!string.IsNullOrWhiteSpace(selected))
-                _config.Host = selected!;
+                // Cloud mode: suffix the SignalR host with the /mcp prefix the cloud serves the hub behind
+                // (idempotent — never /mcp/mcp). Custom mode: use the host verbatim (a local/self-hosted
+                // server exposes the hub at the root, like Unity/Godot Custom). Device-auth strips this back
+                // off in StartDeviceAuth (the backend /api/auth/... is NOT behind /mcp).
+                _config.Host = isCloud ? AppendCloudHubPath(selected!) : selected!;
 
             // Token: the plugin already applied mode+auth resolution (empty in Custom+None). An absent key
             // leaves the existing token; an explicit empty value clears it (anonymous connection).
@@ -278,6 +294,36 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
 
             if (config["keepConnected"] is JsonValue keepNode && keepNode.TryGetValue<bool>(out var keepConnected))
                 _config.KeepConnected = keepConnected;
+        }
+
+        /// <summary>
+        /// Append the <see cref="CloudHubPath"/> (<c>/mcp</c>) prefix to a cloud host so the McpPlugin SignalR
+        /// client dials <c>…/mcp/hub/mcp-server</c> (the cloud serves the hub behind <c>/mcp</c>). Idempotent —
+        /// a host that already ends in <c>/mcp</c> (with or without a trailing slash) is returned with a single
+        /// suffix, never <c>/mcp/mcp</c>. Trailing slashes on the base are trimmed first. Pure so the bridge
+        /// xUnit suite can lock the round-trip/idempotency/trailing-slash matrix without a live plugin. Mirrors
+        /// Unity-MCP's <c>CloudServerUrl</c> and Godot-MCP's <c>ResolveCloudUrl</c>.
+        /// </summary>
+        internal static string AppendCloudHubPath(string host)
+        {
+            var trimmed = (host ?? string.Empty).TrimEnd('/');
+            if (trimmed.EndsWith(CloudHubPath, StringComparison.OrdinalIgnoreCase))
+                return trimmed;
+            return trimmed + CloudHubPath;
+        }
+
+        /// <summary>
+        /// Strip a trailing <see cref="CloudHubPath"/> (<c>/mcp</c>) from a cloud host to recover the BASE URL
+        /// the cloud backend lives at (<c>https://ai-game.dev</c>) — device-code auth targets
+        /// <c>{base}/api/auth/device/…</c>, which is NOT behind the <c>/mcp</c> nginx prefix. The inverse of
+        /// <see cref="AppendCloudHubPath"/>; idempotent for a host with no suffix. Pure (unit-testable).
+        /// </summary>
+        internal static string StripCloudHubPath(string host)
+        {
+            var trimmed = (host ?? string.Empty).TrimEnd('/');
+            if (trimmed.EndsWith(CloudHubPath, StringComparison.OrdinalIgnoreCase))
+                return trimmed[..^CloudHubPath.Length];
+            return trimmed;
         }
 
         /// <summary>
@@ -316,7 +362,10 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             _authCts?.Dispose();
             var cts = new CancellationTokenSource();
             _authCts = cts;
-            var cloudUrl = _config.Host; // Cloud mode resolved Host to cloudUrl (ApplyConnectionConfig).
+            // ApplyConnectionConfig suffixed the Cloud host with /mcp for the SignalR hub; the device-code flow
+            // hits the BACKEND ({base}/api/auth/device/…), which is NOT behind the /mcp nginx prefix, so strip
+            // it back off to recover the base (https://ai-game.dev). A no-op for a host without the suffix.
+            var cloudUrl = StripCloudHubPath(_config.Host);
             _logger?.LogInformation("auth-start received; beginning device-code flow against {Host}.", cloudUrl);
             _ = RunDeviceAuthAsync(cloudUrl, cts.Token);
         }
