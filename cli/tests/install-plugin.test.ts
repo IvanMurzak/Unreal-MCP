@@ -48,6 +48,41 @@ describe('installPlugin (copy)', () => {
     expect(r.kind).toBe('failure');
   });
 
+  it('excludes the source checkout\'s stale Win64/Intermediate build cache but keeps the sidecar (issue #73)', async () => {
+    const project = tmp();
+    const source = makePluginSource();
+    // Extra kept content alongside the .uplugin / Source.
+    fs.mkdirSync(path.join(source, 'Resources'), { recursive: true });
+    fs.writeFileSync(path.join(source, 'Resources', 'Icon.png'), 'PNG', 'utf-8');
+    // The bundled sidecar — SHOULD be copied.
+    const bridge = path.join(source, 'Binaries', 'ThirdParty', 'UnrealMcpBridge', 'win-x64');
+    fs.mkdirSync(bridge, { recursive: true });
+    fs.writeFileSync(path.join(bridge, 'unreal-mcp-bridge.exe'), 'BRIDGE', 'utf-8');
+    // Stale dev build cache — should NOT be copied.
+    const win64 = path.join(source, 'Binaries', 'Win64');
+    fs.mkdirSync(win64, { recursive: true });
+    fs.writeFileSync(path.join(win64, 'UnrealEditor-UnrealMcpEditor.dll'), 'DLL', 'utf-8');
+    fs.writeFileSync(path.join(win64, 'UnrealEditor.modules'), '{}', 'utf-8');
+    const inter = path.join(source, 'Intermediate', 'Build', 'Win64');
+    fs.mkdirSync(inter, { recursive: true });
+    fs.writeFileSync(path.join(inter, 'x.obj'), 'OBJ', 'utf-8');
+
+    const r = await installPlugin({ projectDir: project, pluginSourceDir: source });
+    expect(r.kind).toBe('success');
+    if (r.kind !== 'success') return;
+    const p = r.installedPath;
+    // Kept:
+    expect(fs.existsSync(path.join(p, 'UnrealMCP.uplugin'))).toBe(true);
+    expect(fs.existsSync(path.join(p, 'Source', 'marker.txt'))).toBe(true);
+    expect(fs.existsSync(path.join(p, 'Resources', 'Icon.png'))).toBe(true);
+    expect(
+      fs.existsSync(path.join(p, 'Binaries', 'ThirdParty', 'UnrealMcpBridge', 'win-x64', 'unreal-mcp-bridge.exe')),
+    ).toBe(true);
+    // Excluded:
+    expect(fs.existsSync(path.join(p, 'Binaries', 'Win64'))).toBe(false);
+    expect(fs.existsSync(path.join(p, 'Intermediate'))).toBe(false);
+  });
+
   it('preserves a previously-bundled sidecar bridge across a copy re-install (issue #58)', async () => {
     // First install ships a release plugin WITH the bundled bridge.
     const project = tmp();
