@@ -206,17 +206,14 @@ jobs:
         with:
           persist-credentials: false
 
-      # No `actions/setup-dotnet`: this self-hosted runner runs as
-      # NT AUTHORITY\NETWORK SERVICE, which cannot write to C:\Program Files\dotnet,
-      # so setup-dotnet throws. The runner already has the .NET 9 SDK + runtime
-      # system-wide (alongside .NET 10), so the system `dotnet` is used directly.
-      # `actions/setup-python` DOES work — it installs into the writable runner
-      # tool cache, not Program Files.
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.x"
-
+      # No `actions/setup-dotnet` or `actions/setup-python`: this self-hosted
+      # runner runs as NT AUTHORITY\NETWORK SERVICE, which cannot write to
+      # C:\Program Files\dotnet (setup-dotnet throws) and whose tool-cache Python
+      # install (setup-python) also fails. Instead we use what the runner already
+      # has read-only under Program Files: the system .NET 9 SDK + runtime for the
+      # bridge build (below), and UE's bundled Python 3.11
+      # (Engine\Binaries\ThirdParty\Python3\Win64\python.exe — has ssl) to run the
+      # stdlib-only smoke script.
       - name: Build bridge sidecar (for UNREAL_MCP_BRIDGE_PATH override)
         shell: pwsh
         run: |
@@ -254,9 +251,11 @@ jobs:
             throw "UNREAL_HOST_PROJECT repo variable is not set — the smoke needs a host .uproject with the UnrealMCP plugin compiled (see docs/RELEASING.md)."
           }
           $editorCmd = Join-Path $env:UE_ROOT 'Engine\Binaries\Win64\UnrealEditor-Cmd.exe'
+          $py = Join-Path $env:UE_ROOT 'Engine\Binaries\ThirdParty\Python3\Win64\python.exe'
+          if (-not (Test-Path $py)) { throw "UE bundled Python not found at $py" }
           # --mode custom downloads the public gamedev-mcp-server release, runs it,
           # launches the editor in Custom mode, and asserts the tool battery. The
           # bridge override (UNREAL_MCP_BRIDGE_PATH, set above) is inherited by the
           # editor the script spawns.
-          python scripts/connection_smoke.py --mode custom --project "$env:HOST_UPROJECT" --ue "$editorCmd" --server-port 18080 --timeout 240
+          & $py scripts/connection_smoke.py --mode custom --project "$env:HOST_UPROJECT" --ue "$editorCmd" --server-port 18080 --timeout 240
           if ($LASTEXITCODE -ne 0) { throw "connection + tool smoke FAILED (exit $LASTEXITCODE)" }
