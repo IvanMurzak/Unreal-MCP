@@ -34,6 +34,7 @@ export { getStatus } from './lib/status.js';
 export { waitForReady } from './lib/wait-for-ready.js';
 export { bootstrapLocal, planBuildSteps, ridForPlatform } from './lib/bootstrap-local.js';
 export { update, readPluginVersion } from './lib/update.js';
+export { cleanPluginBuildCache, BUNDLED_BRIDGE_DIRNAME } from './lib/clean-plugin.js';
 export { setupSkills, renderSkill } from './lib/setup-skills.js';
 export {
   detectInstalledEngines,
@@ -124,5 +125,11 @@ export type { UProjectInfo } from './utils/project.js';
 export type { ResolvedConnection } from './utils/config.js';
 export type { LoginOptions, LoginResult } from './lib/login.js';
 export type { UpdateOptions, UpdateResult } from './lib/update.js';
+export type {
+  CleanPluginOptions,
+  CleanPluginResult,
+  CleanPluginSuccess,
+  CleanPluginFailure,
+} from './lib/clean-plugin.js';
 export type { SetupSkillsOptions, SetupSkillsResult } from './lib/setup-skills.js';
 export type { CloseOptions, CloseResult, RunningProcess } from './lib/close.js';

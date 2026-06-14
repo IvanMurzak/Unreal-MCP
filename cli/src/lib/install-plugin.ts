@@ -6,6 +6,7 @@
 // plugin source — the same pattern the infra testbed uses.
 
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { isUnrealProjectDir } from '../utils/project.js';
 import { emitProgress } from './progress.js';
@@ -17,6 +18,8 @@ import type {
 } from './types.js';
 
 const PLUGIN_DIRNAME = 'UnrealMCP';
+/** Subtree under `Binaries/` holding the bundled bridge (ARCHITECTURE §6.1). */
+const BUNDLED_BRIDGE_REL = path.join('Binaries', 'ThirdParty');
 
 /** True when `p` is a symlink/junction (vs a real directory). */
 function isLink(p: string): boolean {
@@ -58,6 +61,27 @@ export async function installPlugin(opts: InstallPluginOptions): Promise<Install
       message: `Installing UnrealMCP plugin into ${installedPath}`,
     });
 
+    const useJunction = opts.junction === true && process.platform === 'win32';
+    if (opts.junction === true && !useJunction) {
+      warnings.push('Junction mode is Windows-only; falling back to copy.');
+    }
+
+    // Preserve the bundled sidecar bridge across a COPY re-install. A prior
+    // (release-packaged) install ships `Binaries/ThirdParty/UnrealMcpBridge/`,
+    // but the plugin SOURCE we copy from (a dev/source checkout) does not — so
+    // a naive rm-then-copy would strip the bridge and leave the plugin unable
+    // to spawn its sidecar (ARCHITECTURE §6). Stash the existing bridge subtree
+    // to a temp dir before clearing, then restore it after the copy IF the new
+    // source did not provide its own. Junction installs never go through this
+    // path (the junction points at the live source — nothing to preserve).
+    let stashedBridge: string | null = null;
+    const priorBridge = path.join(installedPath, BUNDLED_BRIDGE_REL);
+    const installedIsRealDir = fs.existsSync(installedPath) && !isLink(installedPath);
+    if (!useJunction && installedIsRealDir && fs.existsSync(priorBridge)) {
+      stashedBridge = fs.mkdtempSync(path.join(os.tmpdir(), 'unreal-mcp-bridge-stash-'));
+      fs.cpSync(priorBridge, stashedBridge, { recursive: true });
+    }
+
     // Clear any prior install (link or real dir) so the operation is
     // idempotent and never nests a copy inside a stale junction.
     if (fs.existsSync(installedPath) || isLink(installedPath)) {
@@ -68,18 +92,48 @@ export async function installPlugin(opts: InstallPluginOptions): Promise<Install
       }
     }
 
-    const useJunction = opts.junction === true;
     if (useJunction) {
-      if (process.platform !== 'win32') {
-        warnings.push('Junction mode is Windows-only; falling back to copy.');
-      } else {
-        fs.symlinkSync(pluginSourceDir, installedPath, 'junction');
-        emitProgress(opts.onProgress, { phase: 'done', message: 'Plugin junctioned.' });
-        return { kind: 'success', success: true, installedPath, mode: 'junction', warnings };
+      fs.symlinkSync(pluginSourceDir, installedPath, 'junction');
+      emitProgress(opts.onProgress, { phase: 'done', message: 'Plugin junctioned.' });
+      return { kind: 'success', success: true, installedPath, mode: 'junction', warnings };
+    }
+
+    // If the copy THROWS after the old install was rm'd and the bridge stashed,
+    // restore the stash before rethrowing — otherwise the only copy of the
+    // (unrecoverable-from-source) bundled bridge is abandoned in os.tmpdir().
+    try {
+      fs.cpSync(pluginSourceDir, installedPath, { recursive: true });
+    } catch (copyErr: unknown) {
+      if (stashedBridge) {
+        try {
+          fs.mkdirSync(path.dirname(priorBridge), { recursive: true });
+          fs.cpSync(stashedBridge, priorBridge, { recursive: true });
+          fs.rmSync(stashedBridge, { recursive: true, force: true });
+          stashedBridge = null;
+        } catch {
+          // Best-effort restore failed — surface the stash path on the error so
+          // the user can recover the bridge manually instead of losing it.
+          const e = copyErr instanceof Error ? copyErr : new Error(String(copyErr));
+          e.message += ` (the bundled sidecar bridge was stashed at ${stashedBridge} — recover it manually)`;
+          throw e;
+        }
+      }
+      throw copyErr;
+    }
+
+    // Restore the stashed bridge if the freshly-copied source did not ship one.
+    if (stashedBridge) {
+      try {
+        if (!fs.existsSync(priorBridge)) {
+          fs.mkdirSync(path.dirname(priorBridge), { recursive: true });
+          fs.cpSync(stashedBridge, priorBridge, { recursive: true });
+          warnings.push('Preserved the previously-bundled sidecar bridge across the re-install.');
+        }
+      } finally {
+        fs.rmSync(stashedBridge, { recursive: true, force: true });
       }
     }
 
-    fs.cpSync(pluginSourceDir, installedPath, { recursive: true });
     emitProgress(opts.onProgress, { phase: 'done', message: 'Plugin copied.' });
     return { kind: 'success', success: true, installedPath, mode: 'copy', warnings };
   } catch (err: unknown) {
