@@ -54,6 +54,8 @@ private:
 	TSharedRef<SWidget> BuildModeToggleSection();
 	TSharedRef<SWidget> BuildCloudAuthSection();
 	TSharedRef<SWidget> BuildCustomAuthSection();
+	// The Custom-mode transport selector (stdio/http), shown directly under the connection-method section (§7, #59).
+	TSharedRef<SWidget> BuildTransportSelector();
 	TSharedRef<SWidget> BuildBridgeStatusSection();
 	TSharedRef<SWidget> BuildAiAgentsSection();
 	TSharedRef<SWidget> BuildAgentConfiguratorsSection();

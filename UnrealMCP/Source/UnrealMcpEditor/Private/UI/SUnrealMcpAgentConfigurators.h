@@ -84,6 +84,12 @@ private:
 	// Bind the selected configurator to the live connection info + project root.
 	void BindSelected();
 
+	// The configuration-status row for the active transport (Unity's ConfigurationElements): a
+	// "Configured (transport)" / "Not configured" label + Configure/Reconfigure + Remove (#59).
+	TSharedRef<SWidget> MakeConfigurationStatusRow(bool bStdio);
+	// A collapsible foldout rendering one per-agent rich-content section with the reusable widget templates (#59).
+	TSharedRef<SWidget> MakeRichContentFoldout(const struct FAiAgentRichContentSection& Section);
+
 	// The snippet preview text for a transport, masking the token unless bRevealToken (§8).
 	FString BuildSnippetPreview(bool bStdio) const;
 	// Mask the bearer token inside an assembled snippet string unless revealed.

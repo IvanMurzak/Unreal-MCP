@@ -25,6 +25,80 @@ public:
 		return FPaths::ConvertRelativePathToFull(FPaths::Combine(InProjectRoot, TEXT(".mcp.json")));
 	}
 	virtual FString GetBodyPath() const override { return TEXT("mcpServers"); }
+	virtual FString GetTutorialUrl() const override { return TEXT("https://youtu.be/Sknh2p12W8c"); }
 	// Per-agent skills folder (Phase C, issue #53) — mirrors Unity's ClaudeCodeConfigurator.SkillsPath.
 	virtual FString GetSkillsPath(const FString& /*InProjectRoot*/) const override { return TEXT(".claude/skills"); }
+
+	/**
+	 * Per-agent rich content (issue #59) — the 1:1 Slate-data port of Unity's ClaudeCodeConfigurator.OnUICreated:
+	 * a "Start" foldout (cd to project root + `claude`), a "Manual Configuration Steps" foldout (the `claude mcp add`
+	 * command for the active transport, with the bearer only when auth is required), and a "Troubleshooting" foldout.
+	 * The view renders these with the reusable widget templates. Pure data — no Slate, no disk — so it is spec-driven.
+	 */
+	virtual TArray<FAiAgentRichContentSection> BuildRichContent(bool bStdio) const override
+	{
+		using FItem = FAiAgentRichContentItem;
+		const FAiAgentConnectionInfo& Conn = GetConnection();
+		const FString Root = GetProjectRoot();
+		const FString ServerName = TEXT("Unreal-MCP");
+		// Match Unity: show the real token when present + auth required, else a "<token>" placeholder.
+		const FString Token = (Conn.bAuthRequired && !Conn.Token.IsEmpty()) ? Conn.Token : TEXT("<token>");
+
+		TArray<FAiAgentRichContentSection> Sections;
+
+		// "Start" foldout (opens first) — identical to Unity for both transports.
+		FAiAgentRichContentSection Start;
+		Start.Heading = TEXT("Start");
+		Start.bExpandedFirst = true;
+		Start.Items.Add(FItem::Description(TEXT("Navigate to project root")));
+		Start.Items.Add(FItem::ReadOnlyField(FString::Printf(TEXT("cd \"%s\""), *Root)));
+		Start.Items.Add(FItem::Description(TEXT("Launch Claude Code")));
+		Start.Items.Add(FItem::ReadOnlyField(TEXT("claude")));
+		Sections.Add(MoveTemp(Start));
+
+		// "Manual Configuration Steps" foldout — the add-mcp-server command for the active transport.
+		FAiAgentRichContentSection Manual;
+		Manual.Heading = TEXT("Manual Configuration Steps");
+		Manual.Items.Add(FItem::Description(TEXT("Run the following command in the folder of the Unreal project to configure Claude Code")));
+		if (bStdio)
+		{
+			const FString AuthArgs = Conn.bAuthRequired
+				? FString::Printf(TEXT(" authorization=required token=%s"), *Token)
+				: FString();
+			// Match the generic base BuildRichContent: when the local server binary is not present yet, render a
+			// "<gamedev-mcp-server>" placeholder + a Warning rather than an empty quoted path with no feedback.
+			const FString Command = Conn.ServerPath.IsEmpty()
+				? TEXT("<gamedev-mcp-server>")
+				: Conn.ServerPath.Replace(TEXT("\\"), TEXT("/"));
+			Manual.Items.Add(FItem::ReadOnlyField(FString::Printf(
+				TEXT("claude mcp add %s \"%s\" port=%d client-transport=stdio%s"),
+				*ServerName, *Command, Conn.Port, *AuthArgs)));
+			if (Conn.ServerPath.IsEmpty())
+				Manual.Items.Add(FItem::Warning(TEXT("The local MCP server binary is not present yet; the command is still a valid template and will resolve once the server is installed.")));
+		}
+		else
+		{
+			const FString AuthHeader = Conn.bAuthRequired
+				? FString::Printf(TEXT(" --header \"Authorization: Bearer %s\""), *Token)
+				: FString();
+			Manual.Items.Add(FItem::ReadOnlyField(FString::Printf(
+				TEXT("claude mcp add --transport http %s %s%s"),
+				*ServerName, *Conn.HttpUrl, *AuthHeader)));
+		}
+		Manual.Items.Add(FItem::Description(TEXT("Restart or start Claude Code to apply the configuration")));
+		Manual.Items.Add(FItem::ReadOnlyField(TEXT("claude")));
+		Sections.Add(MoveTemp(Manual));
+
+		// "Troubleshooting" foldout — same hints as Unity.
+		FAiAgentRichContentSection Trouble;
+		Trouble.Heading = TEXT("Troubleshooting");
+		Trouble.Items.Add(FItem::Description(TEXT("- Ensure Claude Code CLI is installed and accessible from the terminal")));
+		Trouble.Items.Add(FItem::Description(TEXT("- Ensure Claude Code CLI is started in the folder where the Unreal project is located")));
+		Trouble.Items.Add(FItem::Description(TEXT("- Ensure Claude Code is configured with the same port as the plugin shows right now")));
+		Trouble.Items.Add(FItem::Description(TEXT("- Check that the configuration file .mcp.json exists")));
+		Trouble.Items.Add(FItem::Description(TEXT("- Restart Claude Code after configuration changes")));
+		Sections.Add(MoveTemp(Trouble));
+
+		return Sections;
+	}
 };

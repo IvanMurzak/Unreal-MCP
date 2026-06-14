@@ -107,6 +107,25 @@ public:
 	EUnrealMcpAuthOption GetAuthOption() const { return Config.AuthOption; }
 	UNREALMCPEDITOR_API void SetAuthOption(EUnrealMcpAuthOption InOption);
 
+	// --- Transport selector (§7 — the C++ analog of Unity's SetupAiAgentSection segmented control). ---
+
+	/** The persisted (raw) transport intent. NOT connection-aware — see GetEffectiveTransport for the locked value. */
+	EUnrealMcpTransportMethod GetTransportMethod() const { return Config.GetTransportMethod(); }
+	/**
+	 * The connection-aware transport the UI offers + the snippets reflect: Cloud is LOCKED to Http (the cloud is
+	 * HTTP-only); Custom uses the stored choice. This is the value the agent configurators render a single transport
+	 * for (mirrors Unity's "Cloud forces streamableHttp" + the agent panel reading the active transport).
+	 */
+	EUnrealMcpTransportMethod GetEffectiveTransport() const { return Config.ResolveEffectiveTransport(); }
+	/** Whether the transport selector is user-editable (only in Custom mode; Cloud locks it to Http). */
+	bool IsTransportSelectable() const { return Config.ConnectionMode == EUnrealMcpConnectionMode::Custom; }
+	/**
+	 * Set the Custom-mode transport (the §7 stdio/http selector). Persists + fires OnConnectionSettingsChanged so
+	 * the agent panel re-resolves the now-selected transport's snippet/status. A no-op change does nothing. In Cloud
+	 * mode the selector is locked, so a stray set is ignored (the effective transport stays Http). Game-thread only.
+	 */
+	UNREALMCPEDITOR_API void SetTransportMethod(EUnrealMcpTransportMethod InMethod);
+
 	const FString& GetCustomToken() const { return Config.CustomToken; }
 	UNREALMCPEDITOR_API void SetCustomToken(const FString& InToken);
 	/** Replace the Custom-mode token with a fresh CSPRNG value (§7 Generate button), then persist + push. */

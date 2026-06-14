@@ -42,6 +42,45 @@ struct FAiAgentConnectionInfo
 };
 
 /**
+ * One element inside a per-agent rich-content section (docs/ARCHITECTURE.md §7) — the data model the Slate panel
+ * renders with the reusable widget templates (SUnrealMcpAgentWidgets). The Agents layer stays Slate-free and fully
+ * spec-testable: a configurator returns these structs, the view (SUnrealMcpAgentConfigurators) maps each Kind to a
+ * widget (Description→label, Warning→orange label, Alert→red label, ReadOnlyField→read-only copy field). This is the
+ * data analog of Unity's TemplateLabelDescription / TemplateWarningLabel / TemplateAlertLabel / TemplateTextFieldReadOnly
+ * calls inside a configurator's OnUICreated.
+ */
+struct FAiAgentRichContentItem
+{
+	enum class EKind : uint8
+	{
+		Description,    // a dimmed wrapped description line (Unity TemplateLabelDescription)
+		Warning,        // an orange wrapped warning line (Unity TemplateWarningLabel)
+		Alert,          // a red wrapped alert line (Unity TemplateAlertLabel)
+		ReadOnlyField   // a read-only, copyable command field (Unity TemplateTextFieldReadOnly)
+	};
+
+	EKind Kind = EKind::Description;
+	FString Text;
+
+	static FAiAgentRichContentItem Description(const FString& InText) { return { EKind::Description, InText }; }
+	static FAiAgentRichContentItem Warning(const FString& InText)     { return { EKind::Warning, InText }; }
+	static FAiAgentRichContentItem Alert(const FString& InText)       { return { EKind::Alert, InText }; }
+	static FAiAgentRichContentItem ReadOnlyField(const FString& InText) { return { EKind::ReadOnlyField, InText }; }
+};
+
+/**
+ * A collapsible per-agent rich-content section (Unity's TemplateFoldout / TemplateFoldoutFirst). bExpandedFirst marks
+ * the section that should open by default (Unity's "first" foldout, e.g. "Start"). The Slate panel wraps these in an
+ * SExpandableArea; the items render in order with the matching widget template.
+ */
+struct FAiAgentRichContentSection
+{
+	FString Heading;
+	bool bExpandedFirst = false;
+	TArray<FAiAgentRichContentItem> Items;
+};
+
+/**
  * Abstract base for an AI-agent configurator (docs/ARCHITECTURE.md §7/§8) — the C++/Slate analog of Unity's
  * AiAgentConfigurator and Godot's GodotAgentConfigurator. Unlike Godot (HTTP-only, no server shipped), Unreal
  * ships a server, so — like Unity — every configurator emits BOTH a STDIO (launch-the-server) and an HTTP
@@ -118,6 +157,19 @@ public:
 	UNREALMCPEDITOR_API bool Configure(bool bStdio);
 	/** Remove BOTH transports' entries from the file (a single Remove clears the agent regardless of transport). */
 	UNREALMCPEDITOR_API bool RemoveAll();
+
+	// --- Rich per-agent content (docs/ARCHITECTURE.md §7 — the data analog of Unity's per-agent OnUICreated). ---
+
+	/**
+	 * The collapsible rich-content sections shown for this agent under @p bStdio's transport (foldouts of
+	 * descriptions / warnings / alerts / read-only command fields). The base supplies a GENERIC default (a
+	 * "Configuration details" foldout describing where the config lands + the resolved server endpoint), so every
+	 * agent gets richer-than-bare content; an agent with a bespoke flow (e.g. Claude Code's `claude mcp add` steps)
+	 * overrides this to add the equivalent of Unity's per-agent "Start" / "Manual Configuration Steps" /
+	 * "Troubleshooting" foldouts. Pure data + connection facts (no Slate, no disk) so the specs drive it directly.
+	 * Initialize() must have been called so GetConnection()/GetProjectRoot() are current.
+	 */
+	UNREALMCPEDITOR_API virtual TArray<FAiAgentRichContentSection> BuildRichContent(bool bStdio) const;
 
 protected:
 	FAiAgentConnectionInfo Connection;

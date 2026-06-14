@@ -397,6 +397,59 @@ void FUnrealMcpEditorViewModelSpec::Define()
 		});
 	});
 
+	Describe("Transport selector (§7 stdio/http — issue #59)", [this]()
+	{
+		It("Custom mode honours the stored transport and notifies on change", [this]()
+		{
+			TSharedRef<FRecording> Rec = MakeShared<FRecording>();
+			TSharedRef<FUnrealMcpEditorViewModel> VM = MakeViewModel(Rec);
+
+			int32 Notifications = 0;
+			FDelegateHandle Handle = VM->OnConnectionSettingsChanged.AddLambda([&Notifications]() { Notifications++; });
+
+			// Enter Custom so the selector is live (mode change also notifies once).
+			VM->SetConnectionMode(EUnrealMcpConnectionMode::Custom);
+			const int32 NotificationsAfterMode = Notifications;
+			TestTrue("transport selectable in Custom", VM->IsTransportSelectable());
+
+			VM->SetTransportMethod(EUnrealMcpTransportMethod::Stdio);
+			TestEqual("effective transport is stdio", static_cast<int32>(VM->GetEffectiveTransport()), static_cast<int32>(EUnrealMcpTransportMethod::Stdio));
+			TestEqual("transport change notified once", Notifications, NotificationsAfterMode + 1);
+
+			// A no-op transport set must NOT notify.
+			VM->SetTransportMethod(EUnrealMcpTransportMethod::Stdio);
+			TestEqual("no-op transport change did not notify", Notifications, NotificationsAfterMode + 1);
+
+			// Transport selection persists but does NOT push the connection config (it is presentation state).
+			const int32 PushBefore = Rec->PushCount;
+			VM->SetTransportMethod(EUnrealMcpTransportMethod::Http);
+			TestEqual("transport change did not push the connection config", Rec->PushCount, PushBefore);
+			TestEqual("effective transport is http", static_cast<int32>(VM->GetEffectiveTransport()), static_cast<int32>(EUnrealMcpTransportMethod::Http));
+
+			VM->OnConnectionSettingsChanged.Remove(Handle);
+		});
+
+		It("Cloud locks the transport to Http and forces auth Required (mirrors Unity)", [this]()
+		{
+			TSharedRef<FRecording> Rec = MakeShared<FRecording>();
+			TSharedRef<FUnrealMcpEditorViewModel> VM = MakeViewModel(Rec);
+
+			// Start in Custom with stdio + no auth, then switch to Cloud.
+			VM->SetConnectionMode(EUnrealMcpConnectionMode::Custom);
+			VM->SetTransportMethod(EUnrealMcpTransportMethod::Stdio);
+			VM->SetAuthOption(EUnrealMcpAuthOption::None);
+
+			VM->SetConnectionMode(EUnrealMcpConnectionMode::Cloud);
+			TestFalse("transport not selectable in Cloud", VM->IsTransportSelectable());
+			TestEqual("Cloud effective transport is Http", static_cast<int32>(VM->GetEffectiveTransport()), static_cast<int32>(EUnrealMcpTransportMethod::Http));
+			TestEqual("Cloud forces auth Required", static_cast<int32>(VM->GetAuthOption()), static_cast<int32>(EUnrealMcpAuthOption::Required));
+
+			// A stray SetTransportMethod in Cloud is ignored (selector is locked).
+			VM->SetTransportMethod(EUnrealMcpTransportMethod::Stdio);
+			TestEqual("Cloud transport stays Http after stray set", static_cast<int32>(VM->GetEffectiveTransport()), static_cast<int32>(EUnrealMcpTransportMethod::Http));
+		});
+	});
+
 	Describe("Status feed application", [this]()
 	{
 		It("applies connectionState and aiAgents from a status message", [this]()
