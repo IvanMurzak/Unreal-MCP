@@ -6,7 +6,9 @@
 #include "UnrealMcpLog.h"
 
 #include "Widgets/SBoxPanel.h"
+#include "Widgets/Images/SImage.h"
 #include "Widgets/Layout/SBorder.h"
+#include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SScrollBox.h"
 #include "Widgets/Layout/SSeparator.h"
 #include "Widgets/Layout/SUniformGridPanel.h"
@@ -17,10 +19,16 @@
 #include "Widgets/Colors/SColorBlock.h"
 #include "Styling/AppStyle.h"
 #include "Styling/SlateTypes.h"
+#include "Brushes/SlateDynamicImageBrush.h"
 #include "Misc/Attribute.h"
 #include "Misc/Paths.h"
+#include "Misc/FileHelper.h"
 #include "HAL/PlatformProcess.h"
 #include "HAL/PlatformApplicationMisc.h"
+#include "IImageWrapper.h"
+#include "IImageWrapperModule.h"
+#include "Modules/ModuleManager.h"
+#include "Interfaces/IPluginManager.h"
 
 #define LOCTEXT_NAMESPACE "UnrealMcp"
 
@@ -39,6 +47,9 @@ void SUnrealMcpMainWindow::Construct(const FArguments& InArgs)
 	BridgeStatusProvider = InArgs._BridgeStatusProvider;
 	ConnectionInfoProvider = InArgs._ConnectionInfoProvider;
 
+	// Load the banner image once before building the tree; BuildBannerImageSection reads BannerBrush.
+	EnsureBannerBrushLoaded();
+
 	ChildSlot
 	[
 		SNew(SScrollBox)
@@ -52,6 +63,9 @@ void SUnrealMcpMainWindow::Construct(const FArguments& InArgs)
 			+ SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 8)[ BuildCustomAuthSection() ]
 			+ SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 8)[ BuildBridgeStatusSection() ]
 			+ SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 8)[ BuildAiAgentsSection() ]
+			// Big centered "AI Game Developer" banner — sits between the page/nav sections above and
+			// the AI Agent Configurators (MCP-client) list below (issue #65).
+			+ SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 8)[ BuildBannerImageSection() ]
 			+ SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 8)[ BuildAgentConfiguratorsSection() ]
 			+ SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 8)[ BuildFooterSection() ]
 		]
@@ -506,6 +520,91 @@ TSharedRef<SWidget> SUnrealMcpMainWindow::BuildAiAgentsSection()
 						return LOCTEXT("NoAgents", "No AI agents connected.");
 					return FText::FromString(FString::Join(ViewModel->GetAiAgents(), TEXT(", ")));
 				})
+			]
+		];
+}
+
+void SUnrealMcpMainWindow::EnsureBannerBrushLoaded()
+{
+	if (BannerBrush.IsValid())
+		return;
+
+	// Resolve the banner from the plugin's Resources dir (ships with the plugin). FindPlugin can return
+	// null in odd hosting setups — guard it so a missing plugin record never crashes the window.
+	const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("UnrealMCP"));
+	if (!Plugin.IsValid())
+	{
+		UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] banner: plugin 'UnrealMCP' not found; skipping banner image."));
+		return;
+	}
+
+	const FString BannerPath = Plugin->GetBaseDir() / TEXT("Resources/ai-developer-banner.png");
+	if (!FPaths::FileExists(BannerPath))
+	{
+		UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] banner: image not found at '%s'; skipping banner image."), *BannerPath);
+		return;
+	}
+
+	// Decode the PNG to raw BGRA so we can build a dynamic brush. FSlateDynamicImageBrush's file-path
+	// constructor only handles formats Slate already knows; decoding via ImageWrapper is the robust path
+	// and lets us read the real pixel dimensions for an aspect-correct on-screen size.
+	TArray<uint8> FileData;
+	if (!FFileHelper::LoadFileToArray(FileData, *BannerPath))
+	{
+		UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] banner: failed to read '%s'; skipping banner image."), *BannerPath);
+		return;
+	}
+
+	IImageWrapperModule& ImageWrapperModule = FModuleManager::LoadModuleChecked<IImageWrapperModule>(TEXT("ImageWrapper"));
+	const TSharedPtr<IImageWrapper> PngWrapper = ImageWrapperModule.CreateImageWrapper(EImageFormat::PNG);
+	if (!PngWrapper.IsValid() || !PngWrapper->SetCompressed(FileData.GetData(), FileData.Num()))
+	{
+		UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] banner: could not decode PNG '%s'; skipping banner image."), *BannerPath);
+		return;
+	}
+
+	TArray<uint8> RawBgra;
+	if (!PngWrapper->GetRaw(ERGBFormat::BGRA, 8, RawBgra))
+	{
+		UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] banner: could not get raw pixels from '%s'; skipping banner image."), *BannerPath);
+		return;
+	}
+
+	const int32 Width = PngWrapper->GetWidth();
+	const int32 Height = PngWrapper->GetHeight();
+	if (Width <= 0 || Height <= 0)
+		return;
+
+	// Each FSlateDynamicImageBrush needs a unique resource name. The brush takes ownership of the pixel
+	// data (TArray<uint8>) and is retained as a member, so the texture survives as long as the window does.
+	static int32 BannerBrushCounter = 0;
+	const FName ResourceName(*FString::Printf(TEXT("UnrealMcpBanner_%d"), BannerBrushCounter++));
+	BannerBrush = FSlateDynamicImageBrush::CreateWithImageData(
+		ResourceName, FVector2D(Width, Height), RawBgra);
+}
+
+TSharedRef<SWidget> SUnrealMcpMainWindow::BuildBannerImageSection()
+{
+	// No image available (missing/undecodable) — render nothing rather than a broken placeholder.
+	if (!BannerBrush.IsValid())
+		return SNullWidget::NullWidget;
+
+	// The source art is 1280x640 (2:1). Cap the on-screen width and derive the height from the real
+	// aspect ratio so the logo scales down cleanly inside the window without distortion.
+	const FVector2D ImageSize = BannerBrush->GetImageSize();
+	const float Aspect = (ImageSize.X > 0.0f) ? (ImageSize.Y / ImageSize.X) : 0.5f;
+	const float MaxWidth = 480.0f;
+	const float TargetWidth = FMath::Min(MaxWidth, static_cast<float>(ImageSize.X));
+	const float TargetHeight = TargetWidth * Aspect;
+
+	return SNew(SHorizontalBox)
+		+ SHorizontalBox::Slot().FillWidth(1.0f).HAlign(HAlign_Center).VAlign(VAlign_Center)
+		[
+			SNew(SBox)
+			.WidthOverride(TargetWidth)
+			.HeightOverride(TargetHeight)
+			[
+				SNew(SImage).Image(BannerBrush.Get())
 			]
 		];
 }
