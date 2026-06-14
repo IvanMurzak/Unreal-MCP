@@ -20,6 +20,34 @@ import type {
 const PLUGIN_DIRNAME = 'UnrealMCP';
 /** Subtree under `Binaries/` holding the bundled bridge (ARCHITECTURE §6.1). */
 const BUNDLED_BRIDGE_REL = path.join('Binaries', 'ThirdParty');
+/** `Binaries/ThirdParty` with forward slashes, for the copy filter's keep-check. */
+const BUNDLED_BRIDGE_REL_POSIX = BUNDLED_BRIDGE_REL.split(path.sep).join('/');
+
+/**
+ * Decide whether `srcAbs` (an absolute path inside `pluginSourceDir`) should be
+ * copied into the target project. Excludes the plugin SOURCE checkout's local
+ * dev build cache so we never ship stale/mismatched compiled modules (issue
+ * #73 — the inverse of #60's update-time auto-clean):
+ *   - `Intermediate/` and everything under it (UBT build artifacts).
+ *   - compiled-module dirs directly under `Binaries/` (e.g. `Binaries/Win64`),
+ *     i.e. anything under `Binaries/` that is NOT the bundled-bridge subtree.
+ * Keeps everything else — `Source/`, `Resources/`, `Config/`, `*.uplugin`, the
+ * plugin root, `Binaries/` itself (needed to reach ThirdParty), and the bundled
+ * sidecar under `Binaries/ThirdParty/**` (ARCHITECTURE §6.1).
+ */
+function copyFilter(srcAbs: string, pluginSourceDir: string): boolean {
+  const rel = path.relative(pluginSourceDir, srcAbs).split(path.sep).join('/');
+  if (rel === '' || rel === '.') return true; // the plugin root itself
+  // Skip Intermediate and its subtree.
+  if (rel === 'Intermediate' || rel.startsWith('Intermediate/')) return false;
+  // Under Binaries/: allow `Binaries` itself and the ThirdParty subtree; skip
+  // every other child (compiled-module platform dirs like Binaries/Win64).
+  if (rel === 'Binaries') return true;
+  if (rel.startsWith('Binaries/')) {
+    return rel === BUNDLED_BRIDGE_REL_POSIX || rel.startsWith(BUNDLED_BRIDGE_REL_POSIX + '/');
+  }
+  return true;
+}
 
 /** True when `p` is a symlink/junction (vs a real directory). */
 function isLink(p: string): boolean {
@@ -102,7 +130,10 @@ export async function installPlugin(opts: InstallPluginOptions): Promise<Install
     // restore the stash before rethrowing — otherwise the only copy of the
     // (unrecoverable-from-source) bundled bridge is abandoned in os.tmpdir().
     try {
-      fs.cpSync(pluginSourceDir, installedPath, { recursive: true });
+      fs.cpSync(pluginSourceDir, installedPath, {
+        recursive: true,
+        filter: (src) => copyFilter(src, pluginSourceDir),
+      });
     } catch (copyErr: unknown) {
       if (stashedBridge) {
         try {
