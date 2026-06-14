@@ -937,6 +937,71 @@ void FUnrealMcpAgentConfiguratorSpec::Define()
 			TestEqual(TEXT("blank keeps default"), Loaded.SelectedAgentId, FString(TEXT("claude-code")));
 		});
 	});
+
+	Describe("Per-agent rich content (§7 templates — issue #59)", [this]()
+	{
+		It("Claude Code emits Start / Manual / Troubleshooting foldouts with transport-specific commands", [this]()
+		{
+			FClaudeCodeConfigurator Agent;
+			FUnrealMcpConfig Config;
+			Config.ConnectionMode = EUnrealMcpConnectionMode::Custom;
+			Config.AuthOption = EUnrealMcpAuthOption::Required;
+			Config.CustomToken = TEXT("rich-token-xyz");
+			const FAiAgentConnectionInfo Conn = FAiAgentConnectionInfo::FromPluginConfig(Config, TEXT("C:/srv/gamedev-mcp-server.exe"), 5123);
+			Agent.Initialize(Conn, TEXT("C:/proj"));
+
+			// STDIO rich content: a `claude mcp add ... client-transport=stdio` command with the bearer.
+			const TArray<FAiAgentRichContentSection> Stdio = Agent.BuildRichContent(/*bStdio*/ true);
+			TestEqual(TEXT("three stdio foldouts"), Stdio.Num(), 3);
+			TestEqual(TEXT("first foldout is Start"), Stdio[0].Heading, FString(TEXT("Start")));
+			TestTrue(TEXT("Start opens first"), Stdio[0].bExpandedFirst);
+
+			FString StdioCommand;
+			for (const FAiAgentRichContentItem& Item : Stdio[1].Items)
+				if (Item.Kind == FAiAgentRichContentItem::EKind::ReadOnlyField && Item.Text.Contains(TEXT("claude mcp add")))
+					StdioCommand = Item.Text;
+			TestTrue(TEXT("stdio command present"), StdioCommand.Contains(TEXT("client-transport=stdio")));
+			TestTrue(TEXT("stdio command carries the token when auth required"), StdioCommand.Contains(TEXT("rich-token-xyz")));
+
+			// HTTP rich content: a `claude mcp add --transport http` command with the Bearer header.
+			const TArray<FAiAgentRichContentSection> Http = Agent.BuildRichContent(/*bStdio*/ false);
+			FString HttpCommand;
+			for (const FAiAgentRichContentItem& Item : Http[1].Items)
+				if (Item.Kind == FAiAgentRichContentItem::EKind::ReadOnlyField && Item.Text.Contains(TEXT("claude mcp add")))
+					HttpCommand = Item.Text;
+			TestTrue(TEXT("http command uses --transport http"), HttpCommand.Contains(TEXT("--transport http")));
+			TestTrue(TEXT("http command carries the Bearer header"), HttpCommand.Contains(TEXT("Authorization: Bearer rich-token-xyz")));
+		});
+
+		It("Claude Code omits the bearer from commands when auth is not required", [this]()
+		{
+			FClaudeCodeConfigurator Agent;
+			FUnrealMcpConfig Config;
+			Config.ConnectionMode = EUnrealMcpConnectionMode::Custom;
+			Config.AuthOption = EUnrealMcpAuthOption::None;
+			Config.CustomToken = TEXT("should-not-appear");
+			const FAiAgentConnectionInfo Conn = FAiAgentConnectionInfo::FromPluginConfig(Config, TEXT("C:/srv/server.exe"), 5123);
+			Agent.Initialize(Conn, TEXT("C:/proj"));
+
+			for (const FAiAgentRichContentSection& Section : Agent.BuildRichContent(/*bStdio*/ true))
+				for (const FAiAgentRichContentItem& Item : Section.Items)
+					TestFalse(TEXT("no token leaks when auth is None"), Item.Text.Contains(TEXT("should-not-appear")));
+		});
+
+		It("the generic base configurator supplies a Configuration-details foldout for plain agents", [this]()
+		{
+			FCursorConfigurator Agent; // Cursor uses the base BuildRichContent (no override).
+			FUnrealMcpConfig Config;
+			Config.ConnectionMode = EUnrealMcpConnectionMode::Custom;
+			const FAiAgentConnectionInfo Conn = FAiAgentConnectionInfo::FromPluginConfig(Config, TEXT("C:/srv/server.exe"), 5123);
+			Agent.Initialize(Conn, TEXT("C:/proj"));
+
+			const TArray<FAiAgentRichContentSection> Sections = Agent.BuildRichContent(/*bStdio*/ false);
+			TestEqual(TEXT("one generic section"), Sections.Num(), 1);
+			TestEqual(TEXT("generic heading"), Sections[0].Heading, FString(TEXT("Configuration details")));
+			TestTrue(TEXT("generic section has items"), Sections[0].Items.Num() > 0);
+		});
+	});
 }
 
 #endif // WITH_DEV_AUTOMATION_TESTS

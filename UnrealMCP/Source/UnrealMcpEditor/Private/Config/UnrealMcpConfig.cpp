@@ -388,6 +388,37 @@ bool FUnrealMcpConfig::Save(const FString& Path) const
 	return FFileHelper::SaveStringToFile(Serialized, *Path);
 }
 
+EUnrealMcpTransportMethod FUnrealMcpConfig::GetTransportMethod() const
+{
+	return ParseTransport(Transport);
+}
+
+void FUnrealMcpConfig::SetTransportMethod(EUnrealMcpTransportMethod InMethod)
+{
+	Transport = TransportToString(InMethod);
+}
+
+EUnrealMcpTransportMethod FUnrealMcpConfig::ResolveEffectiveTransport() const
+{
+	// Cloud is HTTP-only (the cloud server enforces streamable HTTP); stdio is never offered there. In Custom
+	// mode the user's stored choice stands. Mirrors Unity's SetupConnectionModeToggle forcing streamableHttp.
+	if (ConnectionMode == EUnrealMcpConnectionMode::Cloud)
+		return EUnrealMcpTransportMethod::Http;
+	return GetTransportMethod();
+}
+
+EUnrealMcpTransportMethod FUnrealMcpConfig::ParseTransport(const FString& Raw)
+{
+	return Raw.Equals(TEXT("stdio"), ESearchCase::IgnoreCase)
+		? EUnrealMcpTransportMethod::Stdio
+		: EUnrealMcpTransportMethod::Http; // default + unknown → Http
+}
+
+const TCHAR* FUnrealMcpConfig::TransportToString(EUnrealMcpTransportMethod Method)
+{
+	return Method == EUnrealMcpTransportMethod::Stdio ? TEXT("stdio") : TEXT("http");
+}
+
 FString FUnrealMcpConfig::ResolveCloudBaseUrl() const
 {
 	const FString Trimmed = TrimSlash(CloudUrl.TrimStartAndEnd());

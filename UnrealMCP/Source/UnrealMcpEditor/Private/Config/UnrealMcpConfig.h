@@ -28,6 +28,21 @@ enum class EUnrealMcpAuthOption : uint8
 };
 
 /**
+ * The client transport an AI agent uses to reach the MCP server (docs/ARCHITECTURE.md §7/§8) — the C++ analog
+ * of Unity's TransportMethod (stdio / streamableHttp). The user picks it in the AI Game Developer window under
+ * the Custom connection method; in Cloud mode it is LOCKED to Http (the cloud is HTTP-only — mirrors Unity's
+ * "Cloud forces streamableHttp"). It is the typed view of the existing FUnrealMcpConfig::Transport string field
+ * ("stdio" / "http"), so it persists + env-overrides through the same §8 layer with no extra storage.
+ */
+enum class EUnrealMcpTransportMethod : uint8
+{
+	/** The agent launches the MCP server itself over stdio (config carries command + args). */
+	Stdio,
+	/** The agent connects to a running MCP server over streamable HTTP (config carries url + headers). */
+	Http
+};
+
+/**
  * Connection + environment configuration for the UnrealMCP plugin (docs/ARCHITECTURE.md §8). The C++
  * analog of Godot's GodotMcpConfig + GodotMcpEnvFile + Unity's EnvironmentUtils.OverrideRecord:
  *
@@ -157,6 +172,29 @@ public:
 	 * The token is the resolved bearer (empty in Custom+None) — the sidecar sends it verbatim, never re-resolves.
 	 */
 	UNREALMCPEDITOR_API TSharedPtr<FJsonObject> BuildEffectiveConnectionConfig() const;
+
+	// --- Transport (the typed view of the Transport string field, §7/§8). ---
+
+	/**
+	 * The persisted transport as a typed enum (the typed view of the Transport string). An unrecognized/blank
+	 * stored value falls back to Http (the default the snippet/connection prefer). NOTE: this is the RAW stored
+	 * intent — it does NOT apply the Cloud→Http lock; use ResolveEffectiveTransport() for the connection-aware
+	 * value the UI/snippets must honour.
+	 */
+	UNREALMCPEDITOR_API EUnrealMcpTransportMethod GetTransportMethod() const;
+	/** Set the transport from the typed enum (writes the matching "stdio"/"http" string into Transport). */
+	UNREALMCPEDITOR_API void SetTransportMethod(EUnrealMcpTransportMethod InMethod);
+	/**
+	 * The connection-aware transport the UI offers and the snippets reflect: in Cloud mode this is ALWAYS Http
+	 * (the cloud is HTTP-only — mirrors Unity's "Cloud forces streamableHttp"); in Custom mode it is the stored
+	 * GetTransportMethod(). This is the value the agent configurators render a single transport for.
+	 */
+	UNREALMCPEDITOR_API EUnrealMcpTransportMethod ResolveEffectiveTransport() const;
+
+	/** Parse a transport string ("stdio"/"http", case-insensitive) into the enum; unknown → Http. */
+	static UNREALMCPEDITOR_API EUnrealMcpTransportMethod ParseTransport(const FString& Raw);
+	/** The canonical lowercase string ("stdio"/"http") for a transport enum (the persisted form). */
+	static UNREALMCPEDITOR_API const TCHAR* TransportToString(EUnrealMcpTransportMethod Method);
 
 	/** The resolved cloud base URL (CloudUrl override or DefaultCloudBaseUrl), trailing slash trimmed. */
 	UNREALMCPEDITOR_API FString ResolveCloudBaseUrl() const;

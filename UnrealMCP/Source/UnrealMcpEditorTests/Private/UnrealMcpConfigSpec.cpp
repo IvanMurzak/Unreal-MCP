@@ -281,6 +281,61 @@ void FUnrealMcpConfigSpec::Define()
 			TestFalse(TEXT("raw token never reached the log"), Capture.Captured.Contains(RawToken));
 		});
 	});
+
+	Describe("Transport method typed view (§7, issue #59)", [this]()
+	{
+		It("round-trips the typed transport through the Transport string field", [this]()
+		{
+			FUnrealMcpConfig Config;
+			// Default Transport is "http" (see DefaultTransport) → Http.
+			TestEqual(TEXT("default transport is Http"),
+				static_cast<int32>(Config.GetTransportMethod()), static_cast<int32>(EUnrealMcpTransportMethod::Http));
+
+			Config.SetTransportMethod(EUnrealMcpTransportMethod::Stdio);
+			TestEqual(TEXT("stored string is stdio"), Config.Transport, FString(TEXT("stdio")));
+			TestEqual(TEXT("typed read is Stdio"),
+				static_cast<int32>(Config.GetTransportMethod()), static_cast<int32>(EUnrealMcpTransportMethod::Stdio));
+
+			Config.SetTransportMethod(EUnrealMcpTransportMethod::Http);
+			TestEqual(TEXT("stored string is http"), Config.Transport, FString(TEXT("http")));
+		});
+
+		It("ParseTransport is case-insensitive and defaults unknown to Http", [this]()
+		{
+			TestEqual(TEXT("STDIO -> Stdio"),
+				static_cast<int32>(FUnrealMcpConfig::ParseTransport(TEXT("StDiO"))), static_cast<int32>(EUnrealMcpTransportMethod::Stdio));
+			TestEqual(TEXT("http -> Http"),
+				static_cast<int32>(FUnrealMcpConfig::ParseTransport(TEXT("http"))), static_cast<int32>(EUnrealMcpTransportMethod::Http));
+			TestEqual(TEXT("garbage -> Http"),
+				static_cast<int32>(FUnrealMcpConfig::ParseTransport(TEXT("websocket"))), static_cast<int32>(EUnrealMcpTransportMethod::Http));
+			TestEqual(TEXT("empty -> Http"),
+				static_cast<int32>(FUnrealMcpConfig::ParseTransport(TEXT(""))), static_cast<int32>(EUnrealMcpTransportMethod::Http));
+		});
+
+		It("ResolveEffectiveTransport locks Cloud to Http but honours the stored choice in Custom", [this]()
+		{
+			FUnrealMcpConfig Config;
+			Config.ConnectionMode = EUnrealMcpConnectionMode::Custom;
+			Config.SetTransportMethod(EUnrealMcpTransportMethod::Stdio);
+			TestEqual(TEXT("Custom honours stored stdio"),
+				static_cast<int32>(Config.ResolveEffectiveTransport()), static_cast<int32>(EUnrealMcpTransportMethod::Stdio));
+
+			// Cloud is HTTP-only regardless of the stored Transport string.
+			Config.ConnectionMode = EUnrealMcpConnectionMode::Cloud;
+			TestEqual(TEXT("Cloud forces Http even with stored stdio"),
+				static_cast<int32>(Config.ResolveEffectiveTransport()), static_cast<int32>(EUnrealMcpTransportMethod::Http));
+		});
+
+		It("honours the UNREAL_MCP_TRANSPORT env override through the typed view", [this]()
+		{
+			FUnrealMcpConfig Config;
+			Config.ApplyOverrides({}, MakeEnvReader({
+				{ TEXT("UNREAL_MCP_TRANSPORT"), TEXT("stdio") },
+			}));
+			TestEqual(TEXT("env override drives the typed transport"),
+				static_cast<int32>(Config.GetTransportMethod()), static_cast<int32>(EUnrealMcpTransportMethod::Stdio));
+		});
+	});
 }
 
 #endif // WITH_DEV_AUTOMATION_TESTS

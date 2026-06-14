@@ -177,6 +177,42 @@ bool FAiAgentConfigurator::Configure(bool bStdio)
 	return bResult;
 }
 
+TArray<FAiAgentRichContentSection> FAiAgentConfigurator::BuildRichContent(bool bStdio) const
+{
+	// Generic default (issue #59): a single "Configuration details" foldout so every built-in agent shows
+	// richer-than-bare content even without a bespoke override. Describes which transport the config targets, the
+	// resolved endpoint (HTTP url or the stdio server command + port), and whether a bearer is included. The token
+	// is NEVER inlined here — the snippet preview is the single place a (masked/revealed) token surfaces (§8).
+	using FItem = FAiAgentRichContentItem;
+
+	FAiAgentRichContentSection Section;
+	Section.Heading = TEXT("Configuration details");
+	Section.bExpandedFirst = true;
+
+	if (bStdio)
+	{
+		Section.Items.Add(FItem::Description(TEXT("This agent launches the MCP server over stdio. The config writes the server command and arguments below.")));
+		const FString Command = Connection.ServerPath.IsEmpty()
+			? TEXT("<gamedev-mcp-server>")
+			: Connection.ServerPath.Replace(TEXT("\\"), TEXT("/"));
+		Section.Items.Add(FItem::ReadOnlyField(FString::Printf(TEXT("%s port=%d client-transport=stdio"), *Command, Connection.Port)));
+		if (Connection.ServerPath.IsEmpty())
+			Section.Items.Add(FItem::Warning(TEXT("The local MCP server binary is not present yet; the snippet is still a valid template and will resolve once the server is installed.")));
+	}
+	else
+	{
+		Section.Items.Add(FItem::Description(TEXT("This agent connects to a running MCP server over HTTP at the URL below.")));
+		Section.Items.Add(FItem::ReadOnlyField(Connection.HttpUrl));
+	}
+
+	if (Connection.bAuthRequired)
+		Section.Items.Add(FItem::Description(TEXT("Authorization is required — a bearer token is included in the snippet (masked above unless revealed).")));
+	else
+		Section.Items.Add(FItem::Description(TEXT("Authorization is not required — no bearer token is sent.")));
+
+	return { MoveTemp(Section) };
+}
+
 bool FAiAgentConfigurator::RemoveAll()
 {
 	// Remove via either transport's config — both share the same file/body/identity, and Remove() clears the

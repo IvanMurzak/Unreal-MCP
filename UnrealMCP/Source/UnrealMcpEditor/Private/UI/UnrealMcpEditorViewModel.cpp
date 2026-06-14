@@ -32,9 +32,36 @@ void FUnrealMcpEditorViewModel::SetConnectionMode(EUnrealMcpConnectionMode InMod
 	if (Config.ConnectionMode == InMode)
 		return;
 	Config.ConnectionMode = InMode;
+	// Cloud is HTTP-only AND always authenticated (the cloud server enforces both): switching INTO Cloud forces
+	// transport→Http and auth→Required so the locked-in connection facts are consistent the moment the mode flips
+	// (mirrors Unity's SetupConnectionModeToggle: `TransportMethod = streamableHttp; AuthOption = required`). The
+	// stored Custom transport string is left as-is — ResolveEffectiveTransport already returns Http while in Cloud,
+	// and forcing it here keeps the persisted value coherent so a later switch back to Custom restores intent.
+	if (InMode == EUnrealMcpConnectionMode::Cloud)
+	{
+		Config.SetTransportMethod(EUnrealMcpTransportMethod::Http);
+		Config.AuthOption = EUnrealMcpAuthOption::Required;
+	}
 	PersistAndPush();
-	// The resolved connection facts (auth-required, token source, http url) all hinge on the mode, so the agent
-	// configurators must re-resolve their cached config + rebuild their panel (Unity's InvalidateAndReloadAgentUI).
+	// The resolved connection facts (auth-required, token source, http url, transport) all hinge on the mode, so the
+	// agent configurators must re-resolve their cached config + rebuild their panel (Unity's InvalidateAndReloadAgentUI).
+	OnConnectionSettingsChanged.Broadcast();
+}
+
+void FUnrealMcpEditorViewModel::SetTransportMethod(EUnrealMcpTransportMethod InMethod)
+{
+	// Cloud locks the transport to Http (the cloud is HTTP-only) — ignore a stray set so the selector cannot
+	// desync the effective transport. Only Custom mode honours the user's stdio/http choice.
+	if (Config.ConnectionMode == EUnrealMcpConnectionMode::Cloud)
+		return;
+	if (Config.GetTransportMethod() == InMethod)
+		return; // no-op — no persist / no panel churn (mirrors the other setters' no-op guards).
+	Config.SetTransportMethod(InMethod);
+	// Transport selection is UI/snippet presentation state (which transport's snippet the agent panel shows + what
+	// Configure writes); it does NOT change the live SignalR connection, so — like SetSelectedAgentId — persist only,
+	// never OnPushConfig. But it DOES change the agent snippet/status, so fire OnConnectionSettingsChanged to rebuild.
+	if (OnPersistConfig)
+		OnPersistConfig(Config);
 	OnConnectionSettingsChanged.Broadcast();
 }
 

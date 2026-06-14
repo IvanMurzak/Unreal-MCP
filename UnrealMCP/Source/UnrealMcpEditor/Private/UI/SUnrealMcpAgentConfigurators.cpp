@@ -3,6 +3,7 @@
 
 #include "UI/SUnrealMcpAgentConfigurators.h"
 #include "UI/UnrealMcpEditorViewModel.h"
+#include "UI/SUnrealMcpAgentWidgets.h"
 #include "Agents/AiAgentConfiguratorRegistry.h"
 #include "Agents/JsonAiAgentConfig.h"
 #include "Agents/UnrealMcpSkillFileGenerator.h"
@@ -13,6 +14,7 @@
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SSeparator.h"
+#include "Widgets/Layout/SExpandableArea.h"
 #include "Widgets/Text/STextBlock.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SComboBox.h"
@@ -231,102 +233,29 @@ void SUnrealMcpAgentConfigurators::RebuildAgentPanel()
 	// Selected is guaranteed valid here — RebuildAgentPanel early-returns above when it is not.
 	const bool bShowSnippet = Selected->GetAgentId() == TEXT("other-custom");
 
-	// A reusable transport section builder (STDIO and HTTP share the same shape).
-	auto BuildTransportSection = [this, bShowSnippet](const FText& Heading, bool bStdio) -> TSharedRef<SWidget>
-	{
-		return SNew(SVerticalBox)
-			+ SVerticalBox::Slot().AutoHeight().Padding(0, 8, 0, 0)
-			[
-				SNew(STextBlock).Text(Heading).Font(FCoreStyle::GetDefaultFontStyle("Bold", 10))
-			]
-			// Status line.
-			+ SVerticalBox::Slot().AutoHeight().Padding(0, 2, 0, 0)
-			[
-				SNew(STextBlock)
-				.Text_Lambda([this, bStdio]()
-				{
-					if (!Selected.IsValid())
-						return FText::GetEmpty();
-					return Selected->IsConfigured(bStdio)
-						? LOCTEXT("StatusConfigured", "Status: configured")
-						: (Selected->IsAnyDetected()
-							? LOCTEXT("StatusDetectedOutdated", "Status: detected (needs reconfigure)")
-							: LOCTEXT("StatusNotConfigured", "Status: not configured"));
-				})
-				.ColorAndOpacity_Lambda([this, bStdio]()
-				{
-					if (Selected.IsValid() && Selected->IsConfigured(bStdio))
-						return FSlateColor(FLinearColor(0.16f, 0.74f, 0.30f));
-					return FSlateColor(FLinearColor(0.85f, 0.65f, 0.20f));
-				})
-			]
-			// Snippet preview (read-only, token-masked) — shown ONLY for the Custom agent (§7, issue #56). Built-in
-			// agents write their config file via Configure, so the raw snippet text is noise and is collapsed.
-			+ SVerticalBox::Slot().AutoHeight().Padding(0, 4, 0, 0)
-			[
-				SNew(SMultiLineEditableTextBox)
-				.IsReadOnly(true)
-				.AlwaysShowScrollbars(false)
-				.Visibility(bShowSnippet ? EVisibility::Visible : EVisibility::Collapsed)
-				.Text_Lambda([this, bStdio]()
-				{
-					return FText::FromString(BuildSnippetPreview(bStdio));
-				})
-			]
-			// Action buttons.
-			+ SVerticalBox::Slot().AutoHeight().Padding(0, 4, 0, 0)
-			[
-				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 6, 0)
-				[
-					SNew(SButton)
-					.Text_Lambda([this, bStdio]()
-					{
-						return (Selected.IsValid() && Selected->IsConfigured(bStdio))
-							? LOCTEXT("Reconfigure", "Reconfigure")
-							: LOCTEXT("Configure", "Configure");
-					})
-					.OnClicked_Lambda([this, bStdio]()
-					{
-						if (Selected.IsValid())
-						{
-							const bool bOk = Selected->Configure(bStdio);
-							UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] agent '%s' %s configure %s."),
-								*Selected->GetAgentName(), bStdio ? TEXT("STDIO") : TEXT("HTTP"),
-								bOk ? TEXT("succeeded") : TEXT("failed"));
-							BindSelected(); // rebuild configs after the write
-						}
-						return FReply::Handled();
-					})
-				]
-				+ SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 6, 0)
-				[
-					SNew(SButton)
-					.Text(LOCTEXT("CopySnippet", "Copy"))
-					.ToolTipText(LOCTEXT("CopySnippetHint", "Copy the config snippet (with the real token) to the clipboard."))
-					.OnClicked_Lambda([this, bStdio]()
-					{
-						if (Selected.IsValid())
-						{
-							// Copy the REAL snippet (unmasked) — the user is pasting it into their own config.
-							FAiAgentConfig& Config = bStdio ? Selected->GetConfigStdio() : Selected->GetConfigHttp();
-							FPlatformApplicationMisc::ClipboardCopy(*Config.GetExpectedFileContent());
-						}
-						return FReply::Handled();
-					})
-				]
-			];
-	};
+	// Issue #59: render ONLY the user-selected (effective) transport, not both. Cloud locks this to Http; Custom uses
+	// the stored stdio/http choice. The whole panel rebuilds via OnConnectionSettingsChanged when the user flips the
+	// transport selector in the main window, so this single-transport view always tracks the live selection.
+	const EUnrealMcpTransportMethod EffectiveTransport = IsViewModelValid()
+		? ViewModel->GetEffectiveTransport()
+		: EUnrealMcpTransportMethod::Http;
+	const bool bStdio = EffectiveTransport == EUnrealMcpTransportMethod::Stdio;
+	const FText TransportHeading = bStdio
+		? LOCTEXT("StdioHeader", "STDIO (launch the server)")
+		: LOCTEXT("HttpHeader", "HTTP (connect to URL)");
 
 	AgentPanelContainer->AddSlot().AutoHeight()[ LinksRow ];
 
-	// Config path line.
-	AgentPanelContainer->AddSlot().AutoHeight().Padding(0, 6, 0, 0)
-	[
-		SNew(STextBlock)
-		.AutoWrapText(true)
-		.Text(FText::Format(LOCTEXT("ConfigPathFmt", "Config file: {0}"), FText::FromString(ConfigPath)))
-	];
+	// Config path line (skip for the snippet-only Custom agent, which has no on-disk file).
+	if (!ConfigPath.IsEmpty())
+	{
+		AgentPanelContainer->AddSlot().AutoHeight().Padding(0, 6, 0, 0)
+		[
+			SNew(STextBlock)
+			.AutoWrapText(true)
+			.Text(FText::Format(LOCTEXT("ConfigPathFmt", "Config file: {0}"), FText::FromString(ConfigPath)))
+		];
+	}
 
 	// Reveal-token toggle (per-agent; default masked, §8).
 	AgentPanelContainer->AddSlot().AutoHeight().Padding(0, 6, 0, 0)
@@ -342,10 +271,51 @@ void SUnrealMcpAgentConfigurators::RebuildAgentPanel()
 		]
 	];
 
-	// STDIO + HTTP sections.
-	AgentPanelContainer->AddSlot().AutoHeight()[ BuildTransportSection(LOCTEXT("StdioHeader", "STDIO (launch the server)"), /*bStdio*/ true) ];
-	AgentPanelContainer->AddSlot().AutoHeight().Padding(0, 4, 0, 0)[ SNew(SSeparator) ];
-	AgentPanelContainer->AddSlot().AutoHeight()[ BuildTransportSection(LOCTEXT("HttpHeader", "HTTP (connect to URL)"), /*bStdio*/ false) ];
+	// Active-transport heading.
+	AgentPanelContainer->AddSlot().AutoHeight().Padding(0, 8, 0, 0)
+	[
+		SNew(STextBlock).Text(TransportHeading).Font(FCoreStyle::GetDefaultFontStyle("Bold", 10))
+	];
+
+	// Configuration-status row (Unity's ConfigurationElements): "Configured (transport)" / "Not configured" +
+	// Configure/Reconfigure + Remove, shown only for agents with an on-disk config file. The snippet-only Custom
+	// agent has no file to detect, so its status row is meaningless — it relies on the snippet preview + Copy below.
+	if (!bShowSnippet)
+		AgentPanelContainer->AddSlot().AutoHeight().Padding(0, 4, 0, 0)[ MakeConfigurationStatusRow(bStdio) ];
+
+	// Per-agent rich content (issue #59): the configurator's foldout sections for the active transport (the 1:1
+	// data port of Unity's per-agent OnUICreated foldouts). Rendered with the reusable widget templates.
+	for (const FAiAgentRichContentSection& RichSection : Selected->BuildRichContent(bStdio))
+		AgentPanelContainer->AddSlot().AutoHeight().Padding(0, 4, 0, 0)[ MakeRichContentFoldout(RichSection) ];
+
+	// Snippet preview (read-only, token-masked) + Copy — shown ONLY for the Custom agent (§7, issue #56). Built-in
+	// agents write their config file via the status-row Configure button, so the raw snippet text is noise there.
+	if (bShowSnippet)
+	{
+		AgentPanelContainer->AddSlot().AutoHeight().Padding(0, 6, 0, 0)
+		[
+			SNew(SMultiLineEditableTextBox)
+			.IsReadOnly(true)
+			.AlwaysShowScrollbars(false)
+			.Text_Lambda([this, bStdio]() { return FText::FromString(BuildSnippetPreview(bStdio)); })
+		];
+		AgentPanelContainer->AddSlot().AutoHeight().Padding(0, 4, 0, 0)
+		[
+			SNew(SButton)
+			.Text(LOCTEXT("CopySnippet", "Copy snippet"))
+			.ToolTipText(LOCTEXT("CopySnippetHint", "Copy the config snippet (with the real token) to the clipboard."))
+			.OnClicked_Lambda([this, bStdio]()
+			{
+				if (Selected.IsValid())
+				{
+					// Copy the REAL snippet (unmasked) — the user is pasting it into their own config.
+					FAiAgentConfig& Config = bStdio ? Selected->GetConfigStdio() : Selected->GetConfigHttp();
+					FPlatformApplicationMisc::ClipboardCopy(*Config.GetExpectedFileContent());
+				}
+				return FReply::Handled();
+			})
+		];
+	}
 
 	// Skills section (§7/§53 Phase C) — shown ONLY when the selected agent supports skills.
 	{
@@ -356,25 +326,113 @@ void SUnrealMcpAgentConfigurators::RebuildAgentPanel()
 			AgentPanelContainer->AddSlot().AutoHeight()[ BuildSkillsSection() ];
 		}
 	}
+	// NOTE: Remove now lives inside the configuration-status row (MakeConfigurationStatusRow) for built-in agents
+	// (Unity's ConfigurationElements). The snippet-only Custom agent has no on-disk file to remove, so no extra
+	// bottom Remove button is added.
+}
 
-	// Remove (clears both transports).
-	AgentPanelContainer->AddSlot().AutoHeight().Padding(0, 8, 0, 0)
-	[
-		SNew(SButton)
-		.Text(LOCTEXT("RemoveAgent", "Remove"))
-		.IsEnabled_Lambda([this]() { return Selected.IsValid() && Selected->IsAnyDetected(); })
-		.OnClicked_Lambda([this]()
-		{
-			if (Selected.IsValid())
+TSharedRef<SWidget> SUnrealMcpAgentConfigurators::MakeConfigurationStatusRow(bool bStdio)
+{
+	// The Slate analog of Unity's ConfigurationElements: a status label ("Configured (transport)" / "Not
+	// configured") + a Configure/Reconfigure button + a Remove button (shown only when something is detected). The
+	// transport word matches the active transport. After any write, BindSelected() rebuilds the cached configs so
+	// the next status read reflects the file (the lambdas re-read Selected on each paint, so the row self-updates).
+	const FString TransportWord = bStdio ? TEXT("stdio") : TEXT("http");
+
+	return SNew(SHorizontalBox)
+		// Status label.
+		+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
+		[
+			SNew(STextBlock)
+			.Text_Lambda([this, bStdio, TransportWord]()
 			{
-				const bool bOk = Selected->RemoveAll();
-				UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] agent '%s' remove %s."),
-					*Selected->GetAgentName(), bOk ? TEXT("succeeded") : TEXT("(nothing to remove)"));
-				BindSelected();
-			}
-			return FReply::Handled();
-		})
-	];
+				if (!Selected.IsValid())
+					return FText::GetEmpty();
+				return Selected->IsConfigured(bStdio)
+					? FText::Format(LOCTEXT("StatusConfiguredFmt", "Configured ({0})"), FText::FromString(TransportWord))
+					: LOCTEXT("StatusNotConfigured", "Not configured");
+			})
+			.ColorAndOpacity_Lambda([this, bStdio]()
+			{
+				return (Selected.IsValid() && Selected->IsConfigured(bStdio))
+					? FSlateColor(UnrealMcpAgentWidgets::ConfiguredColor())
+					: FSlateColor(UnrealMcpAgentWidgets::PendingColor());
+			})
+		]
+		// Configure / Reconfigure.
+		+ SHorizontalBox::Slot().AutoWidth().Padding(6, 0, 0, 0).VAlign(VAlign_Center)
+		[
+			SNew(SButton)
+			.Text_Lambda([this, bStdio]()
+			{
+				return (Selected.IsValid() && Selected->IsConfigured(bStdio))
+					? LOCTEXT("Reconfigure", "Reconfigure")
+					: LOCTEXT("Configure", "Configure");
+			})
+			.OnClicked_Lambda([this, bStdio]()
+			{
+				if (Selected.IsValid())
+				{
+					const bool bOk = Selected->Configure(bStdio);
+					UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] agent '%s' %s configure %s."),
+						*Selected->GetAgentName(), bStdio ? TEXT("STDIO") : TEXT("HTTP"),
+						bOk ? TEXT("succeeded") : TEXT("failed"));
+					BindSelected(); // rebuild configs after the write so the status row re-reads the file
+				}
+				return FReply::Handled();
+			})
+		]
+		// Remove (clears BOTH transports' entries; visible only when something is detected, per Unity).
+		+ SHorizontalBox::Slot().AutoWidth().Padding(6, 0, 0, 0).VAlign(VAlign_Center)
+		[
+			SNew(SButton)
+			.Text(LOCTEXT("RemoveAgent", "Remove"))
+			.Visibility_Lambda([this]()
+			{
+				return (Selected.IsValid() && Selected->IsAnyDetected()) ? EVisibility::Visible : EVisibility::Collapsed;
+			})
+			.OnClicked_Lambda([this]()
+			{
+				if (Selected.IsValid())
+				{
+					const bool bOk = Selected->RemoveAll();
+					UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] agent '%s' remove %s."),
+						*Selected->GetAgentName(), bOk ? TEXT("succeeded") : TEXT("(nothing to remove)"));
+					BindSelected();
+				}
+				return FReply::Handled();
+			})
+		];
+}
+
+TSharedRef<SWidget> SUnrealMcpAgentConfigurators::MakeRichContentFoldout(const FAiAgentRichContentSection& Section)
+{
+	// Build the foldout body from the section's items, each mapped to its widget template (the data→view mapping
+	// described on FAiAgentRichContentItem). Then wrap in a collapsible area (expanded if the section is the "first").
+	TSharedRef<SVerticalBox> Body = SNew(SVerticalBox);
+	for (const FAiAgentRichContentItem& Item : Section.Items)
+	{
+		TSharedRef<SWidget> ItemWidget = SNullWidget::NullWidget;
+		switch (Item.Kind)
+		{
+			case FAiAgentRichContentItem::EKind::Description:
+				ItemWidget = UnrealMcpAgentWidgets::TemplateLabelDescription(FText::FromString(Item.Text));
+				break;
+			case FAiAgentRichContentItem::EKind::Warning:
+				ItemWidget = UnrealMcpAgentWidgets::TemplateWarningLabel(FText::FromString(Item.Text));
+				break;
+			case FAiAgentRichContentItem::EKind::Alert:
+				ItemWidget = UnrealMcpAgentWidgets::TemplateAlertLabel(FText::FromString(Item.Text));
+				break;
+			case FAiAgentRichContentItem::EKind::ReadOnlyField:
+				ItemWidget = UnrealMcpAgentWidgets::TemplateTextFieldReadOnly(Item.Text);
+				break;
+		}
+		Body->AddSlot().AutoHeight().Padding(0, 2, 0, 0)[ ItemWidget ];
+	}
+
+	return UnrealMcpAgentWidgets::TemplateFoldout(
+		FText::FromString(Section.Heading), Body, Section.bExpandedFirst);
 }
 
 FString SUnrealMcpAgentConfigurators::ResolveSelectedSkillsPath() const

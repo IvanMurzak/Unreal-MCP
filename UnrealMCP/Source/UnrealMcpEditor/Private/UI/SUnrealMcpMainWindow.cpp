@@ -392,7 +392,16 @@ TSharedRef<SWidget> SUnrealMcpMainWindow::BuildCustomAuthSection()
 		.Padding(8.0f)
 		[
 			SNew(SVerticalBox)
-			+ SVerticalBox::Slot().AutoHeight()[ SectionHeader(LOCTEXT("CustomAuthHeader", "Server authorization")) ]
+			+ SVerticalBox::Slot().AutoHeight()[ SectionHeader(LOCTEXT("CustomAuthHeader", "Custom connection settings")) ]
+			// Transport selector (stdio / http) — shown directly under the connection-method section (#59).
+			+ SVerticalBox::Slot().AutoHeight().Padding(0, 6, 0, 0)[ BuildTransportSelector() ]
+			// Authorization sub-header.
+			+ SVerticalBox::Slot().AutoHeight().Padding(0, 10, 0, 0)
+			[
+				SNew(STextBlock)
+				.Text(LOCTEXT("CustomAuthSubHeader", "Authorization"))
+				.Font(FCoreStyle::GetDefaultFontStyle("Bold", 10))
+			]
 			// none / required toggle.
 			+ SVerticalBox::Slot().AutoHeight().Padding(0, 6, 0, 0)
 			[
@@ -465,6 +474,56 @@ TSharedRef<SWidget> SUnrealMcpMainWindow::BuildCustomAuthSection()
 			? EVisibility::Visible : EVisibility::Collapsed;
 	}));
 	return Section;
+}
+
+TSharedRef<SWidget> SUnrealMcpMainWindow::BuildTransportSelector()
+{
+	// A stdio/http segmented control — the Slate analog of Unity's SetupAiAgentSection segmented control. Each is a
+	// toggle-button checkbox bound to the view-model's transport (mirrors the connection-mode toggle pattern above).
+	// Only meaningful in Custom mode (Cloud locks transport to Http); the whole BuildCustomAuthSection that hosts this
+	// is already Custom-only, so no extra visibility guard is needed here.
+	auto MakeTransportButton = [this](const FText& Label, EUnrealMcpTransportMethod Method)
+	{
+		return SNew(SCheckBox)
+			.Style(FAppStyle::Get(), "ToggleButtonCheckbox")
+			.IsChecked_Lambda([this, Method]()
+			{
+				return IsViewModelValid() && ViewModel->GetEffectiveTransport() == Method
+					? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+			})
+			.OnCheckStateChanged_Lambda([this, Method](ECheckBoxState NewState)
+			{
+				if (NewState == ECheckBoxState::Checked && IsViewModelValid())
+					ViewModel->SetTransportMethod(Method);
+			})
+			.Padding(FMargin(12, 4))
+			[
+				SNew(STextBlock).Text(Label)
+			];
+	};
+
+	return SNew(SVerticalBox)
+		+ SVerticalBox::Slot().AutoHeight()
+		[
+			SNew(STextBlock)
+			.Text(LOCTEXT("TransportLabel", "Transport"))
+			.Font(FCoreStyle::GetDefaultFontStyle("Bold", 10))
+		]
+		+ SVerticalBox::Slot().AutoHeight().Padding(0, 4, 0, 0)
+		[
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 6, 0)
+			[ MakeTransportButton(LOCTEXT("TransportStdio", "stdio"), EUnrealMcpTransportMethod::Stdio) ]
+			+ SHorizontalBox::Slot().AutoWidth()
+			[ MakeTransportButton(LOCTEXT("TransportHttp", "http"), EUnrealMcpTransportMethod::Http) ]
+		]
+		+ SVerticalBox::Slot().AutoHeight().Padding(0, 4, 0, 0)
+		[
+			SNew(STextBlock)
+			.AutoWrapText(true)
+			.ColorAndOpacity(FSlateColor(FLinearColor(0.70f, 0.70f, 0.70f)))
+			.Text(LOCTEXT("TransportHint", "stdio: the AI agent launches the MCP server itself. http: the agent connects to a running server over HTTP."))
+		];
 }
 
 TSharedRef<SWidget> SUnrealMcpMainWindow::BuildBridgeStatusSection()
