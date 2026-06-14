@@ -6,6 +6,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { installPlugin } from './install-plugin.js';
+import { cleanPluginBuildCache } from './clean-plugin.js';
 import { emitProgress } from './progress.js';
 import type { ProgressCallback } from './types.js';
 
@@ -15,6 +16,15 @@ export interface UpdateOptions {
   pluginSourceDir: string;
   /** Re-install even when versions match. Default `false`. */
   force?: boolean;
+  /**
+   * Skip wiping the installed plugin's stale UE C++ build cache
+   * (`Intermediate/` + C++ `Binaries/`) after a copy-mode update. Cleaning is
+   * the DEFAULT (`noClean` omitted/false) so the user always gets a clean
+   * recompile of the new code on next editor launch — see issue #58. The
+   * bundled sidecar bridge under `Binaries/ThirdParty/` is preserved either
+   * way. Junction (dev) installs are never cleaned regardless of this flag.
+   */
+  noClean?: boolean;
   onProgress?: ProgressCallback;
 }
 
@@ -27,6 +37,12 @@ export interface UpdateSuccess {
   toVersion: string | null;
   /** `true` when files were re-copied. */
   updated: boolean;
+  /**
+   * `true` when the stale UE build cache was wiped after this update (copy
+   * mode, `noClean` not set). `false` for no-op updates, junction installs,
+   * or when `noClean` was passed.
+   */
+  cleaned: boolean;
   installedPath: string;
   warnings: string[];
 }
@@ -95,16 +111,17 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
     const needsUpdate = opts.force === true || fromVersion === null || fromVersion !== toVersion;
     if (!needsUpdate) {
       emitProgress(opts.onProgress, { phase: 'done', message: 'Plugin already up to date.' });
-      return { kind: 'success', success: true, fromVersion, toVersion, updated: false, installedPath, warnings };
+      return { kind: 'success', success: true, fromVersion, toVersion, updated: false, cleaned: false, installedPath, warnings };
     }
 
     // Preserve the existing install mode: a dev junction install must stay a
     // junction across `update --force` rather than being silently replaced
     // with a copy (which would detach the project from the live source).
+    const installedAsJunction = isJunction(installedPath);
     const installResult = await installPlugin({
       projectDir,
       pluginSourceDir,
-      junction: isJunction(installedPath),
+      junction: installedAsJunction,
       onProgress: opts.onProgress,
     });
     if (installResult.kind === 'failure') {
@@ -112,8 +129,38 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
     }
     warnings.push(...installResult.warnings);
 
+    // Wipe the stale UE C++ build cache so the editor recompiles the new code
+    // on next launch (issue #58). DEFAULT on copy-mode updates; opt out with
+    // `noClean`. NEVER on junction installs — that would recurse through the
+    // junction and destroy the live dev source's build outputs. `installPlugin`
+    // already falls back to copy on non-Windows even when junction is requested,
+    // but the post-install path is a real dir only in true copy mode, so gate
+    // on the resolved install mode rather than the requested one.
+    let cleaned = false;
+    // `installResult` is guaranteed a success here — failure returned above.
+    const resolvedMode = installResult.mode;
+    if (!opts.noClean && resolvedMode === 'copy') {
+      const cleanResult = await cleanPluginBuildCache({ installedPath, onProgress: opts.onProgress });
+      warnings.push(...cleanResult.warnings);
+      if (cleanResult.kind === 'failure') {
+        // A failed clean must not fail the whole update — the source is already
+        // copied. Surface it as a warning so the user can clean manually.
+        warnings.push(`Could not clean stale build cache: ${cleanResult.error.message}`);
+      } else {
+        // `cleaned` means "a clean was ensured this update", not "files were
+        // found to delete" — `installPlugin`'s copy-mode rm already strips the
+        // old install (stale cache included; bridge stashed+restored), so the
+        // explicit clean often finds nothing yet still guarantees a clean tree.
+        cleaned = true;
+      }
+    } else if (!opts.noClean && resolvedMode === 'junction') {
+      warnings.push(
+        'Junction (dev) install detected — skipping build-cache clean to protect the live source outputs.',
+      );
+    }
+
     emitProgress(opts.onProgress, { phase: 'done', message: 'Plugin updated.' });
-    return { kind: 'success', success: true, fromVersion, toVersion, updated: true, installedPath, warnings };
+    return { kind: 'success', success: true, fromVersion, toVersion, updated: true, cleaned, installedPath, warnings };
   } catch (err: unknown) {
     return {
       kind: 'failure',

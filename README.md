@@ -57,6 +57,7 @@ Unlike Unity and Godot (C# engines that host the .NET `McpPlugin` in-process), U
 
 - [Requirements](#requirements)
 - [Install](#install)
+- [Updating the plugin](#updating-the-plugin)
 - [First run](#first-run)
 - [Tools](#tools) — all 8 families, 62 tools
 - [Per-tool enable / disable & Settings](#per-tool-enable--disable--settings)
@@ -82,9 +83,21 @@ Unlike Unity and Godot (C# engines that host the .NET `McpPlugin` in-process), U
 
 # Install
 
-> **No package-registry release exists yet.** Until the first GitHub Release / Fab listing, install the plugin **from source**.
+There are three ways to install the plugin, in order of preference. **Fab / Epic Marketplace is the recommended channel for end users** — it ships precompiled, per-engine binaries and the Epic Games Launcher keeps them up to date automatically, so there is **zero compile and zero stale-build risk**. Source / `unreal-mcp-cli` installs remain the current path for developers and early adopters until the Fab listing goes live.
 
-## Option A — `unreal-mcp-cli` (recommended)
+## Option A — Fab / Epic Marketplace (recommended; coming soon)
+
+> **Status: not yet live.** The Fab listing is operator-gated and tracked separately; until it publishes, use Option B or C below. The framing here is what the end-user flow will be.
+
+1. Install **Unreal-MCP** from [Fab](https://www.fab.com/) (the Epic Marketplace successor) into your engine via the Epic Games Launcher.
+2. Enable the plugin for your project from **Edit → Plugins**.
+3. Open the project — UE loads the **precompiled** plugin (no C++ build on your machine). On boot the Output Log prints **`[Unreal-MCP] plugin loaded`**.
+
+Because Fab ships precompiled binaries and the Epic Launcher updates them in place, you never compile the plugin and never have to clear a stale build cache — the most robust path for non-developers.
+
+## Option B — `unreal-mcp-cli` (current / advanced)
+
+The CLI is the recommended path **today**, until the Fab listing is live. It copies (or, for dev, junctions) the plugin into your project and, on **update**, automatically clears the stale UE build cache so you always get a clean recompile of the new code (see [Updating the plugin](#updating-the-plugin)).
 
 ```bash
 # From a clone of this repo (see "unreal-mcp-cli" below for the npm story once published):
@@ -95,7 +108,7 @@ cd cli && npm install && npm run build
 node bin/unreal-mcp-cli.js install-plugin <YourProject> --junction
 ```
 
-## Option B — manual
+## Option C — manual
 
 1. Copy [`UnrealMCP/`](UnrealMCP/) into `<YourProject>/Plugins/UnrealMCP/` (or create a directory junction / symlink to it for live development).
 2. Open the project; UE compiles the `UnrealMcpEditor` module on first launch.
@@ -104,6 +117,23 @@ node bin/unreal-mcp-cli.js install-plugin <YourProject> --junction
 The sidecar binary (`unreal-mcp-bridge`) is **bundled inside the plugin** in a packaged release: a prebuilt, self-contained binary for your platform ships under `UnrealMCP/Binaries/ThirdParty/UnrealMcpBridge/<rid>/` and the editor **auto-spawns it on startup with zero user action** — no .NET install, no env var, no manual launch (ARCHITECTURE §6). The first Cloud OAuth device-code browser approval is the only remaining human step; after that, reconnect on later launches is zero-click (the cloud token is cached in `Saved/Config/UnrealMcp/`).
 
 When you build the plugin **from source** (the only option until the first GitHub Release / Fab listing), the bundled binary is not present — the plugin then resolves the sidecar from the `UNREAL_MCP_BRIDGE_PATH` environment variable instead: point that at a locally built sidecar, or run `unreal-mcp-cli bootstrap-local` to build the bridge from source into `<YourProject>/Intermediate/UnrealMCP/` and set the var to the result. With neither a bundled binary nor the env var resolved, the plugin's TCP listener still starts but logs `[Unreal-MCP] no sidecar binary resolved for rid <rid> …` and spawns nothing.
+
+![AI Game Developer — Unreal MCP](https://github.com/IvanMurzak/Unreal-MCP/blob/main/docs/img/promo/hazzard-divider.svg?raw=true)
+
+# Updating the plugin
+
+Updating in place must always leave you running the **new** code. The risk is UE's incremental compiler: if the plugin source changes (new `.cpp` files, a new module) but the old `UnrealMCP/Intermediate/` build cache survives, UE can do a partial recompile against a stale module file-list and silently leave you on old/partial code. Each channel handles this differently:
+
+- **Fab / Epic Marketplace → automatic.** The Epic Games Launcher replaces the precompiled binaries in place; nothing to compile, no cache to clear. This is why Fab is the recommended channel.
+- **`unreal-mcp-cli update` → automatic clean rebuild.** `update` re-copies the plugin source and, by **default**, deletes the installed plugin's stale `Intermediate/` and the C++ `Binaries/` so UE performs a clean compile on the next editor launch — no manual steps. The bundled sidecar bridge under `Binaries/ThirdParty/UnrealMcpBridge/<rid>/` is **always preserved** (only the C++ module outputs are cleared). Dev **junction** installs are never cleaned (that would wipe your live source tree's outputs). Pass `--no-clean` to opt out of the cache wipe.
+
+  ```bash
+  node bin/unreal-mcp-cli.js update <YourProject>            # default: clean rebuild on version change
+  node bin/unreal-mcp-cli.js update <YourProject> --force    # re-copy even when versions match
+  node bin/unreal-mcp-cli.js update <YourProject> --no-clean # keep the existing build cache
+  ```
+
+- **Manual copy → clear the cache yourself.** If you overwrite `<YourProject>/Plugins/UnrealMCP/` by hand, **close the editor first**, delete `<YourProject>/Plugins/UnrealMCP/Intermediate/` and the C++ `Binaries/` (keep `Binaries/ThirdParty/` if a bundled bridge is present), then relaunch so UE recompiles cleanly.
 
 ![AI Game Developer — Unreal MCP](https://github.com/IvanMurzak/Unreal-MCP/blob/main/docs/img/promo/hazzard-divider.svg?raw=true)
 

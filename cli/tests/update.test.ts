@@ -20,6 +20,41 @@ function makeSource(version: string): string {
   return dir;
 }
 
+/**
+ * A plugin SOURCE that itself ships a stale C++ build cache (Intermediate/ +
+ * Binaries/Win64). Copying this into the install reproduces the cache there, so
+ * only the EXPLICIT clean step (not installPlugin's rm-then-copy) can remove it
+ * — this makes the "clean wiped the cache" assertion non-vacuous.
+ */
+function makeSourceWithCache(version: string): string {
+  const dir = makeSource(version);
+  fs.mkdirSync(path.join(dir, 'Intermediate', 'Build'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'Intermediate', 'Build', 'stale.obj'), 'stale', 'utf-8');
+  fs.mkdirSync(path.join(dir, 'Binaries', 'Win64'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'Binaries', 'Win64', 'UnrealEditor-UnrealMcpEditor.dll'), 'stale', 'utf-8');
+  return dir;
+}
+
+/**
+ * Seed an already-installed plugin under `<project>/Plugins/UnrealMCP` carrying
+ * a stale build cache (Intermediate/ + C++ Binaries/) AND a bundled bridge
+ * under Binaries/ThirdParty/ — the post-compile state a real release install
+ * reaches before an `update`.
+ */
+function seedInstalledWithCache(project: string, version: string): string {
+  const installed = path.join(project, 'Plugins', 'UnrealMCP');
+  fs.mkdirSync(installed, { recursive: true });
+  fs.writeFileSync(path.join(installed, 'UnrealMCP.uplugin'), JSON.stringify({ VersionName: version }), 'utf-8');
+  fs.mkdirSync(path.join(installed, 'Intermediate', 'Build'), { recursive: true });
+  fs.writeFileSync(path.join(installed, 'Intermediate', 'Build', 'stale.obj'), 'stale', 'utf-8');
+  fs.mkdirSync(path.join(installed, 'Binaries', 'Win64'), { recursive: true });
+  fs.writeFileSync(path.join(installed, 'Binaries', 'Win64', 'UnrealEditor-UnrealMcpEditor.dll'), 'stale', 'utf-8');
+  const bridge = path.join(installed, 'Binaries', 'ThirdParty', 'UnrealMcpBridge', 'win-x64');
+  fs.mkdirSync(bridge, { recursive: true });
+  fs.writeFileSync(path.join(bridge, 'unreal-mcp-bridge.exe'), 'BRIDGE-PAYLOAD', 'utf-8');
+  return installed;
+}
+
 describe('readPluginVersion', () => {
   it('reads VersionName, null on miss', () => {
     const dir = makeSource('0.2.0');
@@ -78,5 +113,103 @@ describe('update', () => {
       expect(r.toVersion).toBe('0.2.0');
       expect(r.updated).toBe(true);
     }
+  });
+
+  // --- issue #58: auto-clean stale build cache on update -------------------
+
+  it('on a version-change copy update, wipes Intermediate/+C++ Binaries/ and preserves the bundled bridge', async () => {
+    const project = tmp();
+    const installed = seedInstalledWithCache(project, '0.1.0');
+    const r = await update({ projectDir: project, pluginSourceDir: makeSource('0.2.0') });
+    expect(r.kind).toBe('success');
+    if (r.kind !== 'success') return;
+    expect(r.updated).toBe(true);
+    expect(r.cleaned).toBe(true);
+    // New source landed.
+    expect(readPluginVersion(path.join(installed, 'UnrealMCP.uplugin'))).toBe('0.2.0');
+    // Stale C++ cache gone.
+    expect(fs.existsSync(path.join(installed, 'Intermediate'))).toBe(false);
+    expect(fs.existsSync(path.join(installed, 'Binaries', 'Win64'))).toBe(false);
+    // Bundled bridge SURVIVED both the re-copy and the clean, payload intact.
+    const bridgeExe = path.join(installed, 'Binaries', 'ThirdParty', 'UnrealMcpBridge', 'win-x64', 'unreal-mcp-bridge.exe');
+    expect(fs.existsSync(bridgeExe)).toBe(true);
+    expect(fs.readFileSync(bridgeExe, 'utf-8')).toBe('BRIDGE-PAYLOAD');
+  });
+
+  it('clean removes cache that the COPIED SOURCE itself shipped (non-vacuous: only the explicit clean can remove it)', async () => {
+    // Distinct from the test above: here the NEW SOURCE ships the stale cache,
+    // so installPlugin's rm-then-copy RE-CREATES Intermediate/+Binaries/Win64 in
+    // the install. Only the explicit cleanPluginBuildCache step can remove them —
+    // if the clean call were deleted, these assertions would FAIL.
+    const project = tmp();
+    seedInstalledWithCache(project, '0.1.0');
+    const installed = path.join(project, 'Plugins', 'UnrealMCP');
+    const r = await update({ projectDir: project, pluginSourceDir: makeSourceWithCache('0.2.0') });
+    expect(r.kind).toBe('success');
+    if (r.kind !== 'success') return;
+    expect(r.cleaned).toBe(true);
+    // The source-shipped stale cache was copied in, then wiped by the clean.
+    expect(fs.existsSync(path.join(installed, 'Intermediate'))).toBe(false);
+    expect(fs.existsSync(path.join(installed, 'Binaries', 'Win64'))).toBe(false);
+  });
+
+  it('--no-clean leaves the source-shipped cache in place (proves the copy lands it; only clean removes it)', async () => {
+    // The mirror of the test above: with noClean, the cache the source shipped
+    // SURVIVES the update — proving installPlugin copied it in and that it is the
+    // explicit clean (not the rm-then-copy) that removes it in the default path.
+    const project = tmp();
+    seedInstalledWithCache(project, '0.1.0');
+    const installed = path.join(project, 'Plugins', 'UnrealMCP');
+    const r = await update({ projectDir: project, pluginSourceDir: makeSourceWithCache('0.2.0'), noClean: true });
+    expect(r.kind).toBe('success');
+    if (r.kind !== 'success') return;
+    expect(r.cleaned).toBe(false);
+    // The copied-in cache is still present because no explicit clean ran.
+    expect(fs.existsSync(path.join(installed, 'Intermediate'))).toBe(true);
+    expect(fs.existsSync(path.join(installed, 'Binaries', 'Win64'))).toBe(true);
+  });
+
+  it('--no-clean (noClean) skips the explicit clean step but still preserves the bridge', async () => {
+    const project = tmp();
+    const installed = seedInstalledWithCache(project, '0.1.0');
+    const r = await update({ projectDir: project, pluginSourceDir: makeSource('0.2.0'), noClean: true });
+    expect(r.kind).toBe('success');
+    if (r.kind !== 'success') return;
+    expect(r.updated).toBe(true);
+    // The opt-out: no explicit clean was performed this update.
+    expect(r.cleaned).toBe(false);
+    // The bundled bridge is preserved across the re-copy regardless of noClean
+    // (installPlugin stashes+restores it; only the explicit clean is gated).
+    const bridgeExe = path.join(installed, 'Binaries', 'ThirdParty', 'UnrealMcpBridge', 'win-x64', 'unreal-mcp-bridge.exe');
+    expect(fs.existsSync(bridgeExe)).toBe(true);
+    expect(fs.readFileSync(bridgeExe, 'utf-8')).toBe('BRIDGE-PAYLOAD');
+  });
+
+  it('junction (dev) install is NOT cleaned — the live source build outputs survive', async () => {
+    if (process.platform !== 'win32') return; // junction install path is Windows-only
+    const project = tmp();
+    fs.mkdirSync(path.join(project, 'Plugins'), { recursive: true });
+    // Live dev source carrying its own build cache.
+    const source = tmp();
+    fs.writeFileSync(path.join(source, 'UnrealMCP.uplugin'), JSON.stringify({ VersionName: '0.1.0' }), 'utf-8');
+    fs.mkdirSync(path.join(source, 'Intermediate'), { recursive: true });
+    fs.writeFileSync(path.join(source, 'Intermediate', 'live.obj'), 'live', 'utf-8');
+    fs.mkdirSync(path.join(source, 'Binaries', 'Win64'), { recursive: true });
+    fs.writeFileSync(path.join(source, 'Binaries', 'Win64', 'live.dll'), 'live', 'utf-8');
+    const link = path.join(project, 'Plugins', 'UnrealMCP');
+    try {
+      fs.symlinkSync(source, link, 'junction');
+    } catch {
+      return; // privilege-gated symlink creation — skip gracefully
+    }
+    // force an update against a 0.2.0 source while the install is a junction.
+    const newSource = makeSource('0.2.0');
+    const r = await update({ projectDir: project, pluginSourceDir: newSource, force: true });
+    expect(r.kind).toBe('success');
+    if (r.kind !== 'success') return;
+    expect(r.cleaned).toBe(false);
+    // The dev source's build outputs are untouched.
+    expect(fs.existsSync(path.join(source, 'Intermediate', 'live.obj'))).toBe(true);
+    expect(fs.existsSync(path.join(source, 'Binaries', 'Win64', 'live.dll'))).toBe(true);
   });
 });
