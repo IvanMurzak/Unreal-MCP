@@ -45,8 +45,17 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge
             var token = Console.IsInputRedirected ? Console.In.ReadLine() : null;
             var tokenPresent = !string.IsNullOrWhiteSpace(token);
 
-            var loggerProvider = new BridgeConsoleLoggerProvider(ResolveLogLevel());
+            var loggerProvider = new BridgeConsoleLoggerProvider(ResolveLogLevel(), arguments.LogFilePath);
             var logger = loggerProvider.CreateLogger("Program");
+
+            // A per-start header line so a single appended log file (one per editor session, reused across
+            // §1.5 crash-restarts) makes restarts distinguishable — timestamp + pid + resolved cloud host.
+            var cloudHost = Environment.GetEnvironmentVariable("UNREAL_MCP_HOST")
+                            ?? Environment.GetEnvironmentVariable("UNREAL_MCP_CLOUD_URL")
+                            ?? "(default cloud)";
+            logger.LogInformation(
+                "=== unreal-mcp-bridge start {StartUtc:o} v{Version} pid={Pid} host={Host} ===",
+                DateTime.UtcNow, SidecarVersion, Environment.ProcessId, cloudHost);
 
             logger.LogInformation(
                 "Sidecar v{Version} starting — ipc-port={Port}, parent-pid={Pid}, token={TokenState}.",
