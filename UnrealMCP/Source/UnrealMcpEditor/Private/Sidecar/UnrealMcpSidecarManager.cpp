@@ -230,7 +230,16 @@ bool FUnrealMcpSidecarManager::SpawnProcess()
 	}
 
 	const uint32 EditorPid = FPlatformProcess::GetCurrentProcessId();
-	const FString Parms = FString::Printf(TEXT("--ipc-port=%d --parent-pid=%u"), IpcPort, EditorPid);
+
+	// Issue #69: pass an absolute log-file path so the bridge tees its own log (the cloud-connection
+	// lifecycle) to disk — the plugin discards the child's stdout/stderr, so this is the only window into
+	// SignalR connect/auth/reconnect/route errors. Saved/Logs is gitignored by every UE template; the file
+	// is reused (appended) across §1.5 crash-restarts within one editor session. The path can contain
+	// spaces (e.g. "C:/My Project/Saved/Logs/..."), so quote it — matching argv quoting expectations.
+	const FString BridgeLogFilePath = FPaths::ConvertRelativePathToFull(
+		FPaths::ProjectSavedDir() / TEXT("Logs") / TEXT("UnrealMcpBridge.log"));
+	const FString Parms = FString::Printf(
+		TEXT("--ipc-port=%d --parent-pid=%u --log-file=\"%s\""), IpcPort, EditorPid, *BridgeLogFilePath);
 
 	ProcHandle = FPlatformProcess::CreateProc(
 		*BridgePath,

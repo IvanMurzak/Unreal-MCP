@@ -15,7 +15,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge
 {
     /// <summary>
     /// Launch arguments of the sidecar (docs/ARCHITECTURE.md §1.4). argv carries
-    /// ONLY non-secrets: <c>--ipc-port=&lt;port&gt;</c> and <c>--parent-pid=&lt;pid&gt;</c>.
+    /// ONLY non-secrets: <c>--ipc-port=&lt;port&gt;</c>, <c>--parent-pid=&lt;pid&gt;</c>, and the
+    /// optional <c>--log-file=&lt;path&gt;</c> (issue #69 — a filesystem path, not a secret).
     /// The IPC auth token is delivered over stdin (one line), never on the command
     /// line — /proc cmdline, Windows Event 4688 and WER dumps all persist argv.
     /// </summary>
@@ -23,12 +24,20 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge
     {
         public const string IpcPortArg = "--ipc-port";
         public const string ParentPidArg = "--parent-pid";
+        public const string LogFileArg = "--log-file";
 
         /// <summary>Localhost TCP port the UnrealMCP plugin listens on (the sidecar dials it).</summary>
         public int IpcPort { get; private set; }
 
         /// <summary>Unreal Editor process id — the sidecar self-exits when it vanishes (§6 orphan layer 2). 0 = not provided.</summary>
         public int ParentPid { get; private set; }
+
+        /// <summary>
+        /// Optional path the bridge tees its log lines to (issue #69). The plugin passes
+        /// <c>Saved/Logs/UnrealMcpBridge.log</c>. <c>null</c> = stderr only (unchanged behaviour).
+        /// Not a secret → argv is fine; an unwritable path degrades to stderr-only at the sink.
+        /// </summary>
+        public string? LogFilePath { get; private set; }
 
         public bool IsValid { get; private set; }
         public string? Error { get; private set; }
@@ -40,6 +49,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge
             var result = new BridgeArguments();
             int? ipcPort = null;
             int? parentPid = null;
+            string? logFilePath = null;
 
             for (var i = 0; i < args.Count; i++)
             {
@@ -56,9 +66,14 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge
                         return Invalid($"Invalid {ParentPidArg} value '{pidValue}': expected a positive integer.");
                     parentPid = pid;
                 }
+                else if (TryReadValue(args, ref i, LogFileArg, out var logValue))
+                {
+                    // Empty value is tolerated (treated as "no log file"); the sink itself validates writability.
+                    logFilePath = string.IsNullOrWhiteSpace(logValue) ? null : logValue;
+                }
                 else if (arg.StartsWith("--", StringComparison.Ordinal))
                 {
-                    return Invalid($"Unknown argument '{arg}'. Supported: {IpcPortArg}=<port> {ParentPidArg}=<pid>");
+                    return Invalid($"Unknown argument '{arg}'. Supported: {IpcPortArg}=<port> {ParentPidArg}=<pid> {LogFileArg}=<path>");
                 }
             }
 
@@ -67,6 +82,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge
 
             result.IpcPort = ipcPort.Value;
             result.ParentPid = parentPid ?? 0;
+            result.LogFilePath = logFilePath;
             result.IsValid = true;
             return result;
 
