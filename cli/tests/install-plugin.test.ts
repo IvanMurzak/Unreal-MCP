@@ -47,6 +47,25 @@ describe('installPlugin (copy)', () => {
     const r = await installPlugin({ projectDir: project, pluginSourceDir: path.join(tmp(), 'nope') });
     expect(r.kind).toBe('failure');
   });
+
+  it('preserves a previously-bundled sidecar bridge across a copy re-install (issue #58)', async () => {
+    // First install ships a release plugin WITH the bundled bridge.
+    const project = tmp();
+    const released = makePluginSource();
+    const bridge = path.join(released, 'Binaries', 'ThirdParty', 'UnrealMcpBridge', 'win-x64');
+    fs.mkdirSync(bridge, { recursive: true });
+    fs.writeFileSync(path.join(bridge, 'unreal-mcp-bridge.exe'), 'BRIDGE-PAYLOAD', 'utf-8');
+    await installPlugin({ projectDir: project, pluginSourceDir: released });
+
+    // Re-install from a SOURCE checkout that has NO bundled bridge.
+    const sourceCheckout = makePluginSource();
+    const r = await installPlugin({ projectDir: project, pluginSourceDir: sourceCheckout });
+    expect(r.kind).toBe('success');
+    if (r.kind !== 'success') return;
+    const installedBridge = path.join(r.installedPath, 'Binaries', 'ThirdParty', 'UnrealMcpBridge', 'win-x64', 'unreal-mcp-bridge.exe');
+    expect(fs.existsSync(installedBridge)).toBe(true);
+    expect(fs.readFileSync(installedBridge, 'utf-8')).toBe('BRIDGE-PAYLOAD');
+  });
 });
 
 describe('removePlugin', () => {
