@@ -13,9 +13,14 @@
 #   (b) cli     — unreal-mcp-cli node 20/22 tests via the reusable test_cli.yml
 #   (c) plugin  — UE 5.7 BuildPlugin + Automation specs (UnrealMcp. filter) on a
 #                 SELF-HOSTED windows runner labelled `unreal-5-7`
+#   (d) connection-smoke — live relay round-trip (client -> gamedev-mcp-server ->
+#                 sidecar -> plugin -> editor -> tool), self-hosted, gated on a
+#                 SEPARATE dormant `vars.UNREAL_SMOKE_READY` (owner-enabled after a
+#                 one-time runner validation; see the job + docs/RELEASING.md)
 #
 # (There is no server leg: the MCP server lives in the shared
-# IvanMurzak/GameDev-MCP-Server repo and is tested/released there.)
+# IvanMurzak/GameDev-MCP-Server repo and is tested/released there. Leg (d) pulls
+# the public server release at runtime; it does not build the server here.)
 #
 # Self-hosted runner is NEVER red-by-absence: job (c) is gated on the repository
 # variable `vars.UNREAL_RUNNER_READY == 'true'`. While that variable is unset
@@ -170,3 +175,68 @@ jobs:
           path: ${{ env.REPORT_DIR }}
           if-no-files-found: ignore
           retention-days: 7
+
+  # (d) connection + tool smoke — the live RELAY path the Automation specs do NOT
+  # cover: a real MCP client -> gamedev-mcp-server -> sidecar -> plugin -> editor
+  # round-trip, exercised by the self-contained scripts/connection_smoke.py
+  # (--mode custom: it DOWNLOADS the public gamedev-mcp-server release, runs it in
+  # streamableHttp mode, launches the host editor in Custom mode, and calls a tool
+  # battery over POST /mcp). No infra-repo dependency; the server is fetched from
+  # the public GameDev-MCP-Server releases.
+  #
+  # Gated on a DEDICATED `vars.UNREAL_SMOKE_READY == 'true'` (NOT the plugin
+  # runner var), so it stays SKIPPED — never red-by-absence — until the owner has
+  # validated it once on the runner and flips the variable. Prerequisites the
+  # owner confirms before enabling (see docs/RELEASING.md):
+  #   • the host project (`vars.UNREAL_HOST_PROJECT`) has the UnrealMCP plugin
+  #     COMPILED (the plugin leg / runner setup builds it); and
+  #   • a bridge sidecar is resolvable — this job builds it and exports
+  #     UNREAL_MCP_BRIDGE_PATH (PR builds do not bundle the §6 sidecar; only the
+  #     release job does).
+  connection-smoke:
+    name: connection + tool smoke (UE 5.7, custom server)
+    if: ${{ vars.UNREAL_SMOKE_READY == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    runs-on: [self-hosted, windows, unreal-5-7]
+    env:
+      UE_ROOT: ${{ vars.UNREAL_ENGINE_PATH || 'C:\Program Files\Epic Games\UE_5.7' }}
+      HOST_UPROJECT: ${{ vars.UNREAL_HOST_PROJECT }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET 9
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "9.0.x"
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Build bridge sidecar (for UNREAL_MCP_BRIDGE_PATH override)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          dotnet build bridge/Unreal-MCP-Bridge.sln --configuration Debug
+          if ($LASTEXITCODE -ne 0) { throw "bridge build failed ($LASTEXITCODE)" }
+          $bridge = Join-Path $env:GITHUB_WORKSPACE 'bridge\src\bin\Debug\net9.0\unreal-mcp-bridge.exe'
+          if (-not (Test-Path $bridge)) { throw "bridge binary not found at $bridge" }
+          echo "UNREAL_MCP_BRIDGE_PATH=$bridge" >> $env:GITHUB_ENV
+
+      - name: Run connection + tool smoke (custom local server)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ([string]::IsNullOrWhiteSpace($env:HOST_UPROJECT)) {
+            throw "UNREAL_HOST_PROJECT repo variable is not set — the smoke needs a host .uproject with the UnrealMCP plugin compiled (see docs/RELEASING.md)."
+          }
+          $editorCmd = Join-Path $env:UE_ROOT 'Engine\Binaries\Win64\UnrealEditor-Cmd.exe'
+          # --mode custom downloads the public gamedev-mcp-server release, runs it,
+          # launches the editor in Custom mode, and asserts the tool battery. The
+          # bridge override (UNREAL_MCP_BRIDGE_PATH, set above) is inherited by the
+          # editor the script spawns.
+          python scripts/connection_smoke.py --mode custom --project "$env:HOST_UPROJECT" --ue "$editorCmd" --server-port 18080 --timeout 240
+          if ($LASTEXITCODE -ne 0) { throw "connection + tool smoke FAILED (exit $LASTEXITCODE)" }
