@@ -226,6 +226,25 @@ jobs:
           if (-not (Test-Path $bridge)) { throw "bridge binary not found at $bridge" }
           echo "UNREAL_MCP_BRIDGE_PATH=$bridge" >> $env:GITHUB_ENV
 
+      - name: BuildPlugin into the host junction target
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ([string]::IsNullOrWhiteSpace($env:HOST_UPROJECT)) {
+            throw "UNREAL_HOST_PROJECT repo variable is not set (see docs/RELEASING.md)."
+          }
+          $runUAT = Join-Path $env:UE_ROOT 'Engine\Build\BatchFiles\RunUAT.bat'
+          $uplugin = Join-Path $env:GITHUB_WORKSPACE 'UnrealMCP\UnrealMCP.uplugin'
+          # This job runs in its OWN context — RUNNER_TEMP is cleaned per job, so the
+          # plugin leg's package is gone. The host project's Plugins\UnrealMCP junctions
+          # to $RUNNER_TEMP\UnrealMCP-Package (docs/RELEASING.md); BuildPlugin there so
+          # the host editor loads THIS PR's plugin for the smoke. (PR BuildPlugin does
+          # not bundle the §6 sidecar — that is why UNREAL_MCP_BRIDGE_PATH is set above.)
+          $package = Join-Path $env:RUNNER_TEMP 'UnrealMCP-Package'
+          if (Test-Path $package) { Remove-Item $package -Recurse -Force }
+          & $runUAT BuildPlugin -Plugin="$uplugin" -Package="$package" -TargetPlatforms=Win64 -Rocket
+          if ($LASTEXITCODE -ne 0) { throw "BuildPlugin failed ($LASTEXITCODE)" }
+
       - name: Run connection + tool smoke (custom local server)
         shell: pwsh
         run: |
