@@ -101,7 +101,10 @@ export async function cleanPluginBuildCache(opts: CleanPluginOptions): Promise<C
     if (fs.existsSync(binaries)) {
       for (const entry of fs.readdirSync(binaries)) {
         const entryPath = path.join(binaries, entry);
-        if (entry === BUNDLED_BRIDGE_DIRNAME) {
+        // Case-insensitive compare: on a case-insensitive FS (Windows/macOS) an
+        // oddly-cased `thirdparty/` is the SAME dir as the bundled bridge — a
+        // case-sensitive `===` would delete it and destroy the sidecar.
+        if (entry.toLowerCase() === BUNDLED_BRIDGE_DIRNAME.toLowerCase()) {
           preserved.push(entryPath);
           continue;
         }

@@ -98,7 +98,28 @@ export async function installPlugin(opts: InstallPluginOptions): Promise<Install
       return { kind: 'success', success: true, installedPath, mode: 'junction', warnings };
     }
 
-    fs.cpSync(pluginSourceDir, installedPath, { recursive: true });
+    // If the copy THROWS after the old install was rm'd and the bridge stashed,
+    // restore the stash before rethrowing — otherwise the only copy of the
+    // (unrecoverable-from-source) bundled bridge is abandoned in os.tmpdir().
+    try {
+      fs.cpSync(pluginSourceDir, installedPath, { recursive: true });
+    } catch (copyErr: unknown) {
+      if (stashedBridge) {
+        try {
+          fs.mkdirSync(path.dirname(priorBridge), { recursive: true });
+          fs.cpSync(stashedBridge, priorBridge, { recursive: true });
+          fs.rmSync(stashedBridge, { recursive: true, force: true });
+          stashedBridge = null;
+        } catch {
+          // Best-effort restore failed — surface the stash path on the error so
+          // the user can recover the bridge manually instead of losing it.
+          const e = copyErr instanceof Error ? copyErr : new Error(String(copyErr));
+          e.message += ` (the bundled sidecar bridge was stashed at ${stashedBridge} — recover it manually)`;
+          throw e;
+        }
+      }
+      throw copyErr;
+    }
 
     // Restore the stashed bridge if the freshly-copied source did not ship one.
     if (stashedBridge) {

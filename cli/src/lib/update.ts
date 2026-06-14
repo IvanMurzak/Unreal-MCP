@@ -137,7 +137,8 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
     // but the post-install path is a real dir only in true copy mode, so gate
     // on the resolved install mode rather than the requested one.
     let cleaned = false;
-    const resolvedMode = installResult.kind === 'success' ? installResult.mode : 'copy';
+    // `installResult` is guaranteed a success here — failure returned above.
+    const resolvedMode = installResult.mode;
     if (!opts.noClean && resolvedMode === 'copy') {
       const cleanResult = await cleanPluginBuildCache({ installedPath, onProgress: opts.onProgress });
       warnings.push(...cleanResult.warnings);
