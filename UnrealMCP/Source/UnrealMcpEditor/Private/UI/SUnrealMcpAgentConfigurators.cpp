@@ -427,6 +427,9 @@ TSharedRef<SWidget> SUnrealMcpAgentConfigurators::MakeRichContentFoldout(const F
 			case FAiAgentRichContentItem::EKind::ReadOnlyField:
 				ItemWidget = UnrealMcpAgentWidgets::TemplateTextFieldReadOnly(Item.Text);
 				break;
+			default:
+				checkNoEntry(); // Exhaustive over EKind — a new kind must add a case here, not silently render NullWidget.
+				break;
 		}
 		Body->AddSlot().AutoHeight().Padding(0, 2, 0, 0)[ ItemWidget ];
 	}

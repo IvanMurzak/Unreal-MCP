@@ -65,10 +65,16 @@ public:
 			const FString AuthArgs = Conn.bAuthRequired
 				? FString::Printf(TEXT(" authorization=required token=%s"), *Token)
 				: FString();
-			const FString Command = Conn.ServerPath.Replace(TEXT("\\"), TEXT("/"));
+			// Match the generic base BuildRichContent: when the local server binary is not present yet, render a
+			// "<gamedev-mcp-server>" placeholder + a Warning rather than an empty quoted path with no feedback.
+			const FString Command = Conn.ServerPath.IsEmpty()
+				? TEXT("<gamedev-mcp-server>")
+				: Conn.ServerPath.Replace(TEXT("\\"), TEXT("/"));
 			Manual.Items.Add(FItem::ReadOnlyField(FString::Printf(
 				TEXT("claude mcp add %s \"%s\" port=%d client-transport=stdio%s"),
 				*ServerName, *Command, Conn.Port, *AuthArgs)));
+			if (Conn.ServerPath.IsEmpty())
+				Manual.Items.Add(FItem::Warning(TEXT("The local MCP server binary is not present yet; the command is still a valid template and will resolve once the server is installed.")));
 		}
 		else
 		{
