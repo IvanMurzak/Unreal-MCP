@@ -206,11 +206,12 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Setup .NET 9
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: "9.0.x"
-
+      # No `actions/setup-dotnet`: this self-hosted runner runs as
+      # NT AUTHORITY\NETWORK SERVICE, which cannot write to C:\Program Files\dotnet,
+      # so setup-dotnet throws. The runner already has the .NET 9 SDK + runtime
+      # system-wide (alongside .NET 10), so the system `dotnet` is used directly.
+      # `actions/setup-python` DOES work — it installs into the writable runner
+      # tool cache, not Program Files.
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
