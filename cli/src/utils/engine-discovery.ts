@@ -24,6 +24,7 @@ import { execFileSync } from 'child_process';
 import { homedir } from 'os';
 import { editorBinaryPath } from './engine.js';
 import { compareEngineVersions, type EngineInstallation } from './launcher.js';
+import { verbose } from './ui.js';
 
 // ---------------------------------------------------------------------------
 // Injected surfaces (keep discovery pure + testable without a real machine)
@@ -105,8 +106,14 @@ export function commonEngineRoots(os: NodeJS.Platform, env: NodeJS.ProcessEnv = 
   // every OS — its PARENT, since the var points AT the engine dir.
   const ueRoot = env['UE_ROOT'];
   if (ueRoot && ueRoot.trim().length > 0) {
-    const parent = (os === 'win32' ? path.win32 : path.posix).dirname(ueRoot.trim());
-    if (!roots.includes(parent)) roots.unshift(parent);
+    const pj = os === 'win32' ? path.win32 : path.posix;
+    const parent = pj.dirname(ueRoot.trim());
+    // Guard against promoting a filesystem-root parent (e.g. `UE_ROOT=/opt` ->
+    // `/`, or a drive root `D:\`): readdir of `/` is wasteful and never holds a
+    // `UE_*` engine dir. `dirname` is idempotent at the root, so equality with
+    // its own dirname identifies a root reliably across both path flavours.
+    const isFsRoot = parent === pj.dirname(parent);
+    if (!isFsRoot && !roots.includes(parent)) roots.unshift(parent);
   }
   return roots;
 }
@@ -156,6 +163,14 @@ export function scanCommonLocationEngines(
     if (!fsImpl.existsImpl(binary)) return;
     seenRoots.add(key);
     const association = associationHint || readEngineAssociationFromBuildVersion(installDir, os, fsImpl);
+    if (association.length === 0) {
+      // A free-form (Linux) engine dir whose `Build.version` is absent/unreadable
+      // has no resolvable version, so it can satisfy only an empty/"highest"
+      // request — a versioned association (e.g. `5.7`) will skip it and report
+      // "not found" even though the engine is on disk. Log it so that failure is
+      // diagnosable rather than silent.
+      verbose(`scanCommonLocationEngines: found engine at ${installDir} with unknown version (no Build.version); it cannot match a versioned association`);
+    }
     found.push({
       appName: associationHint ? `UE_${associationHint}` : path.basename(installDir),
       appVersion: association,

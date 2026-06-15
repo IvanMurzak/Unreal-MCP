@@ -31,7 +31,10 @@ export const installEngineCommand = new Command('install-engine')
     if (opts.install || opts.yes) {
       const result = autoInstallEngine({
         version,
-        consent: opts.yes === true || opts.install === true,
+        // `--install` only REQUESTS acquisition; consent to the multi-GB spend
+        // is granted exclusively by `--yes` (the brief's "never spend multi-GB
+        // without explicit opt-in"). `--install` alone reaches guidance-only.
+        consent: opts.yes === true,
         interactive: process.stdout.isTTY === true,
         resolveInstalledImpl: (v) => {
           const r = discoverEngine({ engineAssociation: v, noCache: true });

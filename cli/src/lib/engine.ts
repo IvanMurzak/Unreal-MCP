@@ -202,6 +202,12 @@ export function discoverEngine(input: DiscoverEngineInput): DiscoverEngineResult
           editorPath,
           installation: {
             appName: match.buildId,
+            // NOTE: for a source/custom build `assoc` is the GUID/label the
+            // registry keyed on (e.g. `{0A1B2C3D-...}`), NOT a `x.y` version
+            // string. These version-typed fields therefore hold a GUID here.
+            // Safe at this call site (returned immediately, never version-
+            // sorted), but a latent trap if a registry installation ever flows
+            // into `compareEngineVersions` (GUID -> NaN -> 0).
             appVersion: assoc,
             installLocation: match.installLocation,
             engineAssociation: assoc,
@@ -228,10 +234,16 @@ export function discoverEngine(input: DiscoverEngineInput): DiscoverEngineResult
     return { ...fromScan, source: 'common-location' };
   }
 
-  // Exhausted — surface the most actionable unresolved reason. Prefer the
-  // launcher's (it carries install/override guidance), falling back to scan's.
+  // Exhausted — surface the most actionable unresolved reason. The launcher's
+  // message carries install/override guidance, but it talks about the "Epic
+  // launcher manifest", which does NOT exist on Linux — so on an OS with no
+  // launcher manifest prefer the scan's reason (the only discovery layer there)
+  // to avoid pointing the user at a file their platform never has.
   verbose(`discoverEngine: all layers exhausted for ${assoc || '__auto__'}`);
-  const unresolved = fromLauncher.kind === 'unresolved' ? fromLauncher : fromScan;
+  const hasLauncherManifest = getDefaultLauncherManifestPath(os) !== null;
+  const preferred = hasLauncherManifest ? fromLauncher : fromScan;
+  const fallback = hasLauncherManifest ? fromScan : fromLauncher;
+  const unresolved = preferred.kind === 'unresolved' ? preferred : fallback;
   return { ...unresolved, source: null };
 }
 
