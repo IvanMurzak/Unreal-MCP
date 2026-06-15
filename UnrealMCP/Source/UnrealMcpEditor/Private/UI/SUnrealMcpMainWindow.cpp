@@ -3,6 +3,8 @@
 
 #include "UI/SUnrealMcpMainWindow.h"
 #include "UI/SUnrealMcpAgentConfigurators.h"
+#include "UI/SUnrealMcpAgentWidgets.h"
+#include "UI/FUnrealMcpStyle.h"
 #include "UnrealMcpLog.h"
 
 #include "Widgets/SBoxPanel.h"
@@ -11,32 +13,36 @@
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SScrollBox.h"
 #include "Widgets/Layout/SSeparator.h"
-#include "Widgets/Layout/SUniformGridPanel.h"
 #include "Widgets/Text/STextBlock.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SEditableTextBox.h"
 #include "Widgets/Input/SCheckBox.h"
-#include "Widgets/Colors/SColorBlock.h"
 #include "Styling/AppStyle.h"
 #include "Styling/SlateTypes.h"
-#include "Brushes/SlateDynamicImageBrush.h"
 #include "Misc/Attribute.h"
 #include "Misc/Paths.h"
-#include "Misc/FileHelper.h"
 #include "HAL/PlatformProcess.h"
 #include "HAL/PlatformApplicationMisc.h"
-#include "IImageWrapper.h"
-#include "IImageWrapperModule.h"
-#include "Modules/ModuleManager.h"
 #include "Interfaces/IPluginManager.h"
 
 #define LOCTEXT_NAMESPACE "UnrealMcp"
 
+using UnrealMcpStyleWidgets::EDot;
+
 namespace
 {
+	// Footer links (mirrors the Unity reference footer: Discord Help/Talk, GitHub bug report, GitHub star).
 	const FString DiscordUrl = TEXT("https://discord.gg/");
-	const FString IssuesUrl = TEXT("https://github.com/IvanMurzak/Unreal-MCP/issues");
-	const FString StarUrl = TEXT("https://github.com/IvanMurzak/Unreal-MCP");
+	const FString IssuesUrl  = TEXT("https://github.com/IvanMurzak/Unreal-MCP/issues");
+	const FString StarUrl    = TEXT("https://github.com/IvanMurzak/Unreal-MCP");
+
+	// Segment value-tags for the segmented controls (the int the control reports; mapped to the enums here).
+	constexpr int32 TagCustom = 0;
+	constexpr int32 TagCloud  = 1;
+	constexpr int32 TagStdio  = 0;
+	constexpr int32 TagHttp   = 1;
+	constexpr int32 TagNone   = 0;
+	constexpr int32 TagRequired = 1;
 }
 
 void SUnrealMcpMainWindow::Construct(const FArguments& InArgs)
@@ -47,8 +53,8 @@ void SUnrealMcpMainWindow::Construct(const FArguments& InArgs)
 	BridgeStatusProvider = InArgs._BridgeStatusProvider;
 	ConnectionInfoProvider = InArgs._ConnectionInfoProvider;
 
-	// Load the banner image once before building the tree; BuildBannerImageSection reads BannerBrush.
-	EnsureBannerBrushLoaded();
+	// The AI-cube logo brush comes from the style set (registered at module startup; lazily-inited fallback).
+	LogoBrush = FUnrealMcpStyle::Get().GetBrush("UnrealMcp.Logo");
 
 	ChildSlot
 	[
@@ -58,654 +64,582 @@ void SUnrealMcpMainWindow::Construct(const FArguments& InArgs)
 			SNew(SVerticalBox)
 			+ SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 8)[ BuildHeaderSection() ]
 			+ SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 8)[ BuildConnectionSection() ]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 8)[ BuildModeToggleSection() ]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 8)[ BuildCloudAuthSection() ]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 8)[ BuildCustomAuthSection() ]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 8)[ BuildBridgeStatusSection() ]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 8)[ BuildAiAgentsSection() ]
-			// Big centered "AI Game Developer" banner — sits between the page/nav sections above and
-			// the AI Agent Configurators (MCP-client) list below (issue #65).
-			+ SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 8)[ BuildBannerImageSection() ]
 			+ SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 8)[ BuildAgentConfiguratorsSection() ]
+			+ SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 8)[ BuildExtensionsSection() ]
 			+ SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 8)[ BuildFooterSection() ]
 		]
 	];
 }
 
-TSharedRef<SWidget> SUnrealMcpMainWindow::SectionHeader(const FText& Title)
+TSharedRef<SWidget> SUnrealMcpMainWindow::UnderlinedLabel(const TAttribute<FText>& Text)
 {
-	return SNew(STextBlock)
-		.Text(Title)
-		.Font(FCoreStyle::GetDefaultFontStyle("Bold", 11));
-}
-
-TSharedRef<SWidget> SUnrealMcpMainWindow::BuildHeaderSection()
-{
-	const FString Version = PluginVersion.IsEmpty() ? TEXT("0.1.0") : PluginVersion;
-	return SNew(SBorder)
-		.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
-		.Padding(8.0f)
-		[
-			SNew(SVerticalBox)
-			+ SVerticalBox::Slot().AutoHeight()
-			[
-				SNew(STextBlock)
-				.Text(FText::Format(LOCTEXT("HeaderTitle", "AI Game Developer  —  v{0}"), FText::FromString(Version)))
-				.Font(FCoreStyle::GetDefaultFontStyle("Bold", 13))
-			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0, 6, 0, 0)
-			[
-				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 6, 0)
-				[
-					SNew(SButton)
-					.Text(LOCTEXT("OpenLog", "Open log file"))
-					.OnClicked_Lambda([]()
-					{
-						const FString ProjectLogPath = FPaths::ConvertRelativePathToFull(FPaths::ProjectLogDir());
-						FPlatformProcess::ExploreFolder(*ProjectLogPath);
-						return FReply::Handled();
-					})
-				]
-				+ SHorizontalBox::Slot().AutoWidth()
-				[
-					SNew(SButton)
-					.Text(LOCTEXT("RestartBridge", "Restart bridge"))
-					.OnClicked_Lambda([this]()
-					{
-						OnRestartBridge.ExecuteIfBound();
-						return FReply::Handled();
-					})
-				]
-			]
-		];
-}
-
-TSharedRef<SWidget> SUnrealMcpMainWindow::BuildConnectionSection()
-{
-	return SNew(SBorder)
-		.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
-		.Padding(8.0f)
-		[
-			SNew(SVerticalBox)
-			+ SVerticalBox::Slot().AutoHeight()[ SectionHeader(LOCTEXT("ConnHeader", "Connection")) ]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0, 6, 0, 0)
-			[
-				SNew(SHorizontalBox)
-				// Status dot.
-				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 8, 0)
-				[
-					SNew(SColorBlock)
-					.Size(FVector2D(14.0f, 14.0f))
-					.Color_Lambda([this]()
-					{
-						return IsViewModelValid()
-							? FUnrealMcpEditorViewModel::GetStatusColor(ViewModel->GetConnectionState())
-							: FLinearColor::Gray;
-					})
-				]
-				// Status label.
-				+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
-				[
-					SNew(STextBlock)
-					.Text_Lambda([this]()
-					{
-						return IsViewModelValid()
-							? FUnrealMcpEditorViewModel::GetStatusLabel(ViewModel->GetConnectionState())
-							: FText::GetEmpty();
-					})
-				]
-				// Connect / Disconnect / Stop button.
-				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
-				[
-					SNew(SButton)
-					.Text_Lambda([this]()
-					{
-						return IsViewModelValid()
-							? FUnrealMcpEditorViewModel::GetButtonText(ViewModel->GetConnectionState())
-							: FText::GetEmpty();
-					})
-					.OnClicked(this, &SUnrealMcpMainWindow::OnConnectClicked)
-				]
-			]
-			// Custom-mode server URL field (only shown in Custom mode).
-			+ SVerticalBox::Slot().AutoHeight().Padding(0, 8, 0, 0)
-			[
-				SNew(SVerticalBox)
-				.Visibility_Lambda([this]()
-				{
-					return IsViewModelValid() && ViewModel->GetConnectionMode() == EUnrealMcpConnectionMode::Custom
-						? EVisibility::Visible : EVisibility::Collapsed;
-				})
-				+ SVerticalBox::Slot().AutoHeight()
-				[
-					SNew(STextBlock).Text(LOCTEXT("ServerUrl", "Server URL"))
-				]
-				+ SVerticalBox::Slot().AutoHeight().Padding(0, 2, 0, 0)
-				[
-					SNew(SEditableTextBox)
-					.Text_Lambda([this]()
-					{
-						return IsViewModelValid() ? FText::FromString(ViewModel->GetCustomHost()) : FText::GetEmpty();
-					})
-					.OnTextCommitted_Lambda([this](const FText& NewText, ETextCommit::Type)
-					{
-						if (IsViewModelValid())
-							ViewModel->SetCustomHost(NewText.ToString());
-					})
-				]
-				// Inline validation error.
-				+ SVerticalBox::Slot().AutoHeight().Padding(0, 2, 0, 0)
-				[
-					SNew(STextBlock)
-					.ColorAndOpacity(FLinearColor(0.95f, 0.4f, 0.4f))
-					.Text_Lambda([this]()
-					{
-						if (!IsViewModelValid())
-							return FText::GetEmpty();
-						FString Error;
-						return FUnrealMcpEditorViewModel::ValidateServerUrl(ViewModel->GetCustomHost(), Error)
-							? FText::GetEmpty() : FText::FromString(Error);
-					})
-				]
-			]
-		];
-}
-
-TSharedRef<SWidget> SUnrealMcpMainWindow::BuildModeToggleSection()
-{
-	auto MakeModeButton = [this](const FText& Label, EUnrealMcpConnectionMode Mode)
-	{
-		return SNew(SCheckBox)
-			.Style(FAppStyle::Get(), "ToggleButtonCheckbox")
-			.IsChecked_Lambda([this, Mode]()
-			{
-				return IsViewModelValid() && ViewModel->GetConnectionMode() == Mode
-					? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
-			})
-			.OnCheckStateChanged_Lambda([this, Mode](ECheckBoxState NewState)
-			{
-				if (NewState == ECheckBoxState::Checked && IsViewModelValid())
-					ViewModel->SetConnectionMode(Mode);
-			})
-			.Padding(FMargin(12, 4))
-			[
-				SNew(STextBlock).Text(Label)
-			];
-	};
-
-	return SNew(SBorder)
-		.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
-		.Padding(8.0f)
-		[
-			SNew(SVerticalBox)
-			+ SVerticalBox::Slot().AutoHeight()[ SectionHeader(LOCTEXT("ModeHeader", "Connection mode")) ]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0, 6, 0, 0)
-			[
-				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 6, 0)[ MakeModeButton(LOCTEXT("ModeCloud", "Cloud"), EUnrealMcpConnectionMode::Cloud) ]
-				+ SHorizontalBox::Slot().AutoWidth()[ MakeModeButton(LOCTEXT("ModeCustom", "Custom"), EUnrealMcpConnectionMode::Custom) ]
-			]
-		];
-}
-
-TSharedRef<SWidget> SUnrealMcpMainWindow::BuildCloudAuthSection()
-{
-	TSharedRef<SBorder> Section = SNew(SBorder)
-		.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
-		.Padding(8.0f)
-		[
-			SNew(SVerticalBox)
-			+ SVerticalBox::Slot().AutoHeight()[ SectionHeader(LOCTEXT("CloudAuthHeader", "Cloud authorization")) ]
-			// Buttons row.
-			+ SVerticalBox::Slot().AutoHeight().Padding(0, 6, 0, 0)
-			[
-				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 6, 0)
-				[
-					SNew(SButton)
-					.Text(LOCTEXT("Authorize", "Authorize"))
-					.IsEnabled_Lambda([this]()
-					{
-						return IsViewModelValid() && ViewModel->GetDeviceAuthState() != EUnrealMcpDeviceAuthState::Pending;
-					})
-					.OnClicked_Lambda([this]()
-					{
-						if (IsViewModelValid()) ViewModel->Authorize();
-						return FReply::Handled();
-					})
-				]
-				+ SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 6, 0)
-				[
-					SNew(SButton)
-					.Text(LOCTEXT("CancelAuth", "Cancel"))
-					.Visibility_Lambda([this]()
-					{
-						return IsViewModelValid() && ViewModel->GetDeviceAuthState() == EUnrealMcpDeviceAuthState::Pending
-							? EVisibility::Visible : EVisibility::Collapsed;
-					})
-					.OnClicked_Lambda([this]()
-					{
-						if (IsViewModelValid()) ViewModel->CancelAuth();
-						return FReply::Handled();
-					})
-				]
-				+ SHorizontalBox::Slot().AutoWidth()
-				[
-					SNew(SButton)
-					.Text(LOCTEXT("Revoke", "Revoke"))
-					.Visibility_Lambda([this]()
-					{
-						return IsViewModelValid() && ViewModel->HasCloudToken()
-							? EVisibility::Visible : EVisibility::Collapsed;
-					})
-					.OnClicked_Lambda([this]()
-					{
-						if (IsViewModelValid()) ViewModel->Revoke();
-						return FReply::Handled();
-					})
-				]
-			]
-			// Device-code instructions (verification URL + user code), shown while pending.
-			+ SVerticalBox::Slot().AutoHeight().Padding(0, 6, 0, 0)
-			[
-				SNew(SVerticalBox)
-				.Visibility_Lambda([this]()
-				{
-					return IsViewModelValid() && ViewModel->GetDeviceAuthState() == EUnrealMcpDeviceAuthState::Pending
-						? EVisibility::Visible : EVisibility::Collapsed;
-				})
-				+ SVerticalBox::Slot().AutoHeight()
-				[
-					SNew(STextBlock).AutoWrapText(true)
-					.Text(LOCTEXT("DeviceInstr", "Complete authorization in your browser, then enter this code:"))
-				]
-				+ SVerticalBox::Slot().AutoHeight().Padding(0, 4, 0, 0)
-				[
-					SNew(SHorizontalBox)
-					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
-					[
-						SNew(STextBlock)
-						.Font(FCoreStyle::GetDefaultFontStyle("Bold", 14))
-						.Text_Lambda([this]()
-						{
-							return IsViewModelValid() ? FText::FromString(ViewModel->GetDeviceUserCode()) : FText::GetEmpty();
-						})
-					]
-					+ SHorizontalBox::Slot().AutoWidth().Padding(8, 0, 0, 0).VAlign(VAlign_Center)
-					[
-						SNew(SButton)
-						.Text(LOCTEXT("CopyCode", "Copy code"))
-						.OnClicked_Lambda([this]()
-						{
-							if (IsViewModelValid())
-								FPlatformApplicationMisc::ClipboardCopy(*ViewModel->GetDeviceUserCode());
-							return FReply::Handled();
-						})
-					]
-					+ SHorizontalBox::Slot().AutoWidth().Padding(8, 0, 0, 0).VAlign(VAlign_Center)
-					[
-						SNew(SButton)
-						.Text(LOCTEXT("OpenVerify", "Open verification page"))
-						.OnClicked_Lambda([this]()
-						{
-							if (IsViewModelValid())
-							{
-								const FString Url = ViewModel->GetDeviceVerificationUrl();
-								if (!Url.IsEmpty())
-									FPlatformProcess::LaunchURL(*Url, nullptr, nullptr);
-							}
-							return FReply::Handled();
-						})
-					]
-				]
-			]
-			// Authorized indicator.
-			+ SVerticalBox::Slot().AutoHeight().Padding(0, 6, 0, 0)
-			[
-				SNew(STextBlock)
-				.ColorAndOpacity(FLinearColor(0.16f, 0.74f, 0.30f))
-				.Visibility_Lambda([this]()
-				{
-					return IsViewModelValid() && ViewModel->GetDeviceAuthState() == EUnrealMcpDeviceAuthState::Authorized
-						? EVisibility::Visible : EVisibility::Collapsed;
-				})
-				.Text(LOCTEXT("Authorized", "Authorized — cloud token stored."))
-			]
-			// Failure reason (denial / expiry / no sidecar) — without this the pending instructions just
-			// collapse on failure and the window shows no feedback for an AC-level flow.
-			+ SVerticalBox::Slot().AutoHeight().Padding(0, 6, 0, 0)
-			[
-				SNew(STextBlock)
-				.AutoWrapText(true)
-				.ColorAndOpacity(FLinearColor(0.95f, 0.4f, 0.4f))
-				.Visibility_Lambda([this]()
-				{
-					return IsViewModelValid() && ViewModel->GetDeviceAuthState() == EUnrealMcpDeviceAuthState::Failed
-						? EVisibility::Visible : EVisibility::Collapsed;
-				})
-				.Text_Lambda([this]()
-				{
-					return IsViewModelValid() ? FText::FromString(ViewModel->GetDeviceAuthError()) : FText::GetEmpty();
-				})
-			]
-		];
-
-	Section->SetVisibility(MakeAttributeLambda([this]() -> EVisibility
-	{
-		return IsViewModelValid() && ViewModel->GetConnectionMode() == EUnrealMcpConnectionMode::Cloud
-			? EVisibility::Visible : EVisibility::Collapsed;
-	}));
-	return Section;
-}
-
-TSharedRef<SWidget> SUnrealMcpMainWindow::BuildCustomAuthSection()
-{
-	TSharedRef<SBorder> Section = SNew(SBorder)
-		.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
-		.Padding(8.0f)
-		[
-			SNew(SVerticalBox)
-			+ SVerticalBox::Slot().AutoHeight()[ SectionHeader(LOCTEXT("CustomAuthHeader", "Custom connection settings")) ]
-			// Transport selector (stdio / http) — shown directly under the connection-method section (#59).
-			+ SVerticalBox::Slot().AutoHeight().Padding(0, 6, 0, 0)[ BuildTransportSelector() ]
-			// Authorization sub-header.
-			+ SVerticalBox::Slot().AutoHeight().Padding(0, 10, 0, 0)
-			[
-				SNew(STextBlock)
-				.Text(LOCTEXT("CustomAuthSubHeader", "Authorization"))
-				.Font(FCoreStyle::GetDefaultFontStyle("Bold", 10))
-			]
-			// none / required toggle.
-			+ SVerticalBox::Slot().AutoHeight().Padding(0, 6, 0, 0)
-			[
-				SNew(SCheckBox)
-				.IsChecked_Lambda([this]()
-				{
-					return IsViewModelValid() && ViewModel->GetAuthOption() == EUnrealMcpAuthOption::Required
-						? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
-				})
-				.OnCheckStateChanged_Lambda([this](ECheckBoxState NewState)
-				{
-					if (IsViewModelValid())
-						ViewModel->SetAuthOption(NewState == ECheckBoxState::Checked ? EUnrealMcpAuthOption::Required : EUnrealMcpAuthOption::None);
-				})
-				[
-					SNew(STextBlock).Text(LOCTEXT("AuthRequired", "Require a bearer token"))
-				]
-			]
-			// Masked token field + Generate, shown only when auth is required.
-			+ SVerticalBox::Slot().AutoHeight().Padding(0, 6, 0, 0)
-			[
-				SNew(SHorizontalBox)
-				.Visibility_Lambda([this]()
-				{
-					return IsViewModelValid() && ViewModel->GetAuthOption() == EUnrealMcpAuthOption::Required
-						? EVisibility::Visible : EVisibility::Collapsed;
-				})
-				+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
-				[
-					SNew(SEditableTextBox)
-					// IsPassword renders the token as dots natively — the raw value is never drawn unless revealed (§8).
-					.IsPassword_Lambda([this]() { return !bRevealToken; })
-					.Text_Lambda([this]()
-					{
-						return IsViewModelValid() ? FText::FromString(ViewModel->GetCustomToken()) : FText::GetEmpty();
-					})
-					.OnTextCommitted_Lambda([this](const FText& NewText, ETextCommit::Type)
-					{
-						if (IsViewModelValid())
-							ViewModel->SetCustomToken(NewText.ToString());
-					})
-				]
-				+ SHorizontalBox::Slot().AutoWidth().Padding(6, 0, 0, 0).VAlign(VAlign_Center)
-				[
-					SNew(SButton)
-					.Text(LOCTEXT("Reveal", "Reveal"))
-					.ToolTipText(LOCTEXT("RevealHint", "Press and hold to reveal the token; it re-masks on release."))
-					// Reveal-on-HOLD (not a sticky toggle): the raw bearer is only ever drawn while the button is
-					// physically held, then immediately re-masked — the AC's "never rendered unmasked" default
-					// always holds (§8). OnPressed/OnReleased drive bRevealToken, which gates IsPassword above.
-					.OnPressed_Lambda([this]() { bRevealToken = true; })
-					.OnReleased_Lambda([this]() { bRevealToken = false; })
-				]
-				+ SHorizontalBox::Slot().AutoWidth().Padding(6, 0, 0, 0).VAlign(VAlign_Center)
-				[
-					SNew(SButton)
-					.Text(LOCTEXT("Generate", "Generate"))
-					.OnClicked_Lambda([this]()
-					{
-						if (IsViewModelValid()) ViewModel->GenerateCustomToken();
-						return FReply::Handled();
-					})
-				]
-			]
-		];
-
-	Section->SetVisibility(MakeAttributeLambda([this]() -> EVisibility
-	{
-		return IsViewModelValid() && ViewModel->GetConnectionMode() == EUnrealMcpConnectionMode::Custom
-			? EVisibility::Visible : EVisibility::Collapsed;
-	}));
-	return Section;
-}
-
-TSharedRef<SWidget> SUnrealMcpMainWindow::BuildTransportSelector()
-{
-	// A stdio/http segmented control — the Slate analog of Unity's SetupAiAgentSection segmented control. Each is a
-	// toggle-button checkbox bound to the view-model's transport (mirrors the connection-mode toggle pattern above).
-	// Only meaningful in Custom mode (Cloud locks transport to Http); the whole BuildCustomAuthSection that hosts this
-	// is already Custom-only, so no extra visibility guard is needed here.
-	auto MakeTransportButton = [this](const FText& Label, EUnrealMcpTransportMethod Method)
-	{
-		return SNew(SCheckBox)
-			.Style(FAppStyle::Get(), "ToggleButtonCheckbox")
-			.IsChecked_Lambda([this, Method]()
-			{
-				return IsViewModelValid() && ViewModel->GetEffectiveTransport() == Method
-					? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
-			})
-			.OnCheckStateChanged_Lambda([this, Method](ECheckBoxState NewState)
-			{
-				if (NewState == ECheckBoxState::Checked && IsViewModelValid())
-					ViewModel->SetTransportMethod(Method);
-			})
-			.Padding(FMargin(12, 4))
-			[
-				SNew(STextBlock).Text(Label)
-			];
-	};
-
+	// A 13px-bold label with a thin 1px underline (Slate has no text-underline run; we draw a separator).
 	return SNew(SVerticalBox)
 		+ SVerticalBox::Slot().AutoHeight()
 		[
 			SNew(STextBlock)
-			.Text(LOCTEXT("TransportLabel", "Transport"))
-			.Font(FCoreStyle::GetDefaultFontStyle("Bold", 10))
+			.TextStyle(&FUnrealMcpStyle::Get().GetWidgetStyle<FTextBlockStyle>("UnrealMcp.Text.TimelineLabel"))
+			.Text(Text)
 		]
-		+ SVerticalBox::Slot().AutoHeight().Padding(0, 4, 0, 0)
+		+ SVerticalBox::Slot().AutoHeight().Padding(0, 1, 0, 0)
+		[
+			SNew(SSeparator).Thickness(1.0f).SeparatorImage(FUnrealMcpStyle::Get().GetBrush("UnrealMcp.ConnectingLine"))
+		];
+}
+
+TSharedRef<SWidget> SUnrealMcpMainWindow::BuildHeaderSection()
+{
+	const FString Version = PluginVersion.IsEmpty() ? TEXT("0.2.0") : PluginVersion;
+
+	// Left column: base config (Log Level, Log file, Version) styled rows. Right column: the AI-cube logo.
+	auto MakeConfigRow = [](const FText& Label, const TSharedRef<SWidget>& Field)
+	{
+		return SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().FillWidth(0.40f).VAlign(VAlign_Center).Padding(0, 0, 8, 0)
+			[
+				SNew(STextBlock)
+				.TextStyle(&FUnrealMcpStyle::Get().GetWidgetStyle<FTextBlockStyle>("UnrealMcp.Text.Description"))
+				.Text(Label)
+			]
+			+ SHorizontalBox::Slot().FillWidth(0.60f).VAlign(VAlign_Center)
+			[
+				Field
+			];
+	};
+
+	const TSharedRef<SWidget> LogLevelField = SNew(SBorder)
+		.BorderImage(FUnrealMcpStyle::Get().GetBrush("UnrealMcp.Input"))
+		.Padding(FMargin(8, 3))
+		[
+			SNew(STextBlock)
+			.Text_Lambda([this]()
+			{
+				const FString Lvl = IsViewModelValid() ? ViewModel->GetConfig().LogLevel : FString();
+				return FText::FromString(Lvl.IsEmpty() ? TEXT("Info") : Lvl);
+			})
+		];
+
+	const TSharedRef<SWidget> VersionField = SNew(STextBlock)
+		.Text(FText::FromString(Version));
+
+	return UnrealMcpStyleWidgets::StyledCard(
+		SNew(SHorizontalBox)
+		// Base-config column.
+		+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
+		[
+			SNew(SVerticalBox)
+			+ SVerticalBox::Slot().AutoHeight().Padding(0, 2)[ MakeConfigRow(LOCTEXT("LogLevel", "Log Level"), LogLevelField) ]
+			+ SVerticalBox::Slot().AutoHeight().Padding(0, 2)
+			[
+				MakeConfigRow(LOCTEXT("OpenLogFile", "Log file"),
+					UnrealMcpStyleWidgets::StyledTextButton("UnrealMcp.Button.Secondary", LOCTEXT("OpenLog", "Open log file"),
+						FOnClicked::CreateLambda([]()
+						{
+							const FString ProjectLogPath = FPaths::ConvertRelativePathToFull(FPaths::ProjectLogDir());
+							FPlatformProcess::ExploreFolder(*ProjectLogPath);
+							return FReply::Handled();
+						})))
+			]
+			+ SVerticalBox::Slot().AutoHeight().Padding(0, 2)[ MakeConfigRow(LOCTEXT("VersionLbl", "Version"), VersionField) ]
+		]
+		// AI-cube logo (top-right; replaces the old banner image).
+		+ SHorizontalBox::Slot().AutoWidth().HAlign(HAlign_Right).VAlign(VAlign_Top).Padding(8, 0, 0, 0)
+		[
+			SNew(SBox).WidthOverride(48.0f).HeightOverride(48.0f)
+			[
+				SNew(SImage).Image(LogoBrush)
+			]
+		]);
+}
+
+TSharedRef<SWidget> SUnrealMcpMainWindow::BuildConnectionSection()
+{
+	// The unified Connection card: a header row ("Connection" + Custom/Cloud segmented), then the mode-specific
+	// body. Cloud shows the masked token + Revoke/Authorize; Custom shows Server URL + the MCP-server sub-card.
+	// The status timeline (dots + connecting line + underlined labels) sits below, shared across both modes.
+	return UnrealMcpStyleWidgets::StyledCard(
+		SNew(SVerticalBox)
+		// Header row: title + Custom/Cloud segmented (top-right).
+		+ SVerticalBox::Slot().AutoHeight()
 		[
 			SNew(SHorizontalBox)
-			+ SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 6, 0)
-			[ MakeTransportButton(LOCTEXT("TransportStdio", "stdio"), EUnrealMcpTransportMethod::Stdio) ]
-			+ SHorizontalBox::Slot().AutoWidth()
-			[ MakeTransportButton(LOCTEXT("TransportHttp", "http"), EUnrealMcpTransportMethod::Http) ]
+			+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
+			[ UnrealMcpStyleWidgets::SectionHeader(LOCTEXT("ConnHeader", "Connection")) ]
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+			[
+				UnrealMcpStyleWidgets::SegmentedControl(
+					{ { LOCTEXT("ModeCustom", "Custom"), TagCustom }, { LOCTEXT("ModeCloud", "Cloud"), TagCloud } },
+					[this]() { return (IsViewModelValid() && ViewModel->GetConnectionMode() == EUnrealMcpConnectionMode::Cloud) ? TagCloud : TagCustom; },
+					[this](int32 SegTag)
+					{
+						if (IsViewModelValid())
+							ViewModel->SetConnectionMode(SegTag == TagCloud ? EUnrealMcpConnectionMode::Cloud : EUnrealMcpConnectionMode::Custom);
+					})
+			]
 		]
-		+ SVerticalBox::Slot().AutoHeight().Padding(0, 4, 0, 0)
+		// Cloud auth row (masked token + Revoke / Authorize) — visible only in Cloud mode.
+		+ SVerticalBox::Slot().AutoHeight().Padding(0, 8, 0, 0)[ BuildCloudAuthRow() ]
+		// Custom Server URL + MCP-server sub-card — visible only in Custom mode.
+		+ SVerticalBox::Slot().AutoHeight().Padding(0, 8, 0, 0)[ BuildCustomServerSection() ]
+		// Shared connection-status timeline (Unreal: <status> dot + connecting line + Connect/Disconnect/Stop).
+		+ SVerticalBox::Slot().AutoHeight().Padding(0, 10, 0, 0)
+		[
+			SNew(SHorizontalBox)
+			// The status dot.
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 8, 0)
+			[
+				UnrealMcpStyleWidgets::StatusDot(TAttribute<EDot>::Create([this]()
+				{
+					if (!IsViewModelValid())
+						return EDot::Offline;
+					switch (ViewModel->GetConnectionState())
+					{
+						case EUnrealMcpConnectionState::Connected:  return EDot::Online;
+						case EUnrealMcpConnectionState::Connecting:  return EDot::Ring;
+						// Degraded must NOT use the (green) Ring brush — that reads as healthy. Show Offline.
+						case EUnrealMcpConnectionState::Degraded:    return EDot::Offline;
+						default:                                     return EDot::Offline;
+					}
+				}))
+			]
+			// The underlined "Unreal: <status>" label.
+			+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
+			[
+				UnderlinedLabel(TAttribute<FText>::Create([this]()
+				{
+					return IsViewModelValid()
+						? FUnrealMcpEditorViewModel::GetStatusLabel(ViewModel->GetConnectionState())
+						: FText::GetEmpty();
+				}))
+			]
+			// Connect / Disconnect / Stop button (secondary styling).
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+			[
+				UnrealMcpStyleWidgets::StyledButton("UnrealMcp.Button.Secondary",
+					SNew(STextBlock).Text_Lambda([this]()
+					{
+						return IsViewModelValid()
+							? FUnrealMcpEditorViewModel::GetButtonText(ViewModel->GetConnectionState())
+							: FText::GetEmpty();
+					}),
+					FOnClicked::CreateSP(this, &SUnrealMcpMainWindow::OnConnectClicked))
+			]
+		]);
+}
+
+TSharedRef<SWidget> SUnrealMcpMainWindow::BuildCloudAuthRow()
+{
+	TSharedRef<SHorizontalBox> Row = SNew(SHorizontalBox)
+		// Masked cloud token (read-only display).
+		+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center).Padding(0, 0, 6, 0)
+		[
+			SNew(SBorder)
+			.BorderImage(FUnrealMcpStyle::Get().GetBrush("UnrealMcp.Input"))
+			.Padding(FMargin(8, 4))
+			[
+				SNew(STextBlock)
+				.Text_Lambda([this]()
+				{
+					if (!IsViewModelValid() || !ViewModel->HasCloudToken())
+						return LOCTEXT("NoCloudToken", "Not authorized");
+					return FText::FromString(FUnrealMcpEditorViewModel::MaskTokenForDisplay(ViewModel->GetConfig().CloudToken, /*bReveal*/ false));
+				})
+			]
+		]
+		// Revoke (red) — only when a token is stored.
+		+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 6, 0)
+		[
+			SNew(SBox)
+			.Visibility_Lambda([this]()
+			{
+				return (IsViewModelValid() && ViewModel->HasCloudToken()) ? EVisibility::Visible : EVisibility::Collapsed;
+			})
+			[
+				UnrealMcpStyleWidgets::StyledTextButton("UnrealMcp.Button.Alert", LOCTEXT("Revoke", "Revoke"),
+					FOnClicked::CreateLambda([this]()
+					{
+						if (IsViewModelValid()) ViewModel->Revoke();
+						return FReply::Handled();
+					}))
+			]
+		]
+		// Authorize / Cancel.
+		+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+		[
+			UnrealMcpStyleWidgets::StyledButton("UnrealMcp.Button.Secondary",
+				SNew(STextBlock).Text_Lambda([this]()
+				{
+					return (IsViewModelValid() && ViewModel->GetDeviceAuthState() == EUnrealMcpDeviceAuthState::Pending)
+						? LOCTEXT("CancelAuth", "Cancel") : LOCTEXT("Authorize", "Authorize");
+				}),
+				FOnClicked::CreateLambda([this]()
+				{
+					if (!IsViewModelValid())
+						return FReply::Handled();
+					if (ViewModel->GetDeviceAuthState() == EUnrealMcpDeviceAuthState::Pending)
+						ViewModel->CancelAuth();
+					else
+						ViewModel->Authorize();
+					return FReply::Handled();
+				}))
+		];
+
+	// Device-code instructions (verification URL + user code) shown while pending; an authorized/failed line below.
+	TSharedRef<SVerticalBox> CloudBody = SNew(SVerticalBox)
+		+ SVerticalBox::Slot().AutoHeight()[ Row ]
+		// Pending: code + open-verification.
+		+ SVerticalBox::Slot().AutoHeight().Padding(0, 6, 0, 0)
+		[
+			SNew(SHorizontalBox)
+			.Visibility_Lambda([this]()
+			{
+				return (IsViewModelValid() && ViewModel->GetDeviceAuthState() == EUnrealMcpDeviceAuthState::Pending)
+					? EVisibility::Visible : EVisibility::Collapsed;
+			})
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 8, 0)
+			[
+				SNew(STextBlock)
+				.Font(FUnrealMcpStyle::TimelineLabelFont())
+				.Text_Lambda([this]() { return IsViewModelValid() ? FText::FromString(ViewModel->GetDeviceUserCode()) : FText::GetEmpty(); })
+			]
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 6, 0)
+			[
+				UnrealMcpStyleWidgets::StyledTextButton("UnrealMcp.Button.Secondary", LOCTEXT("CopyCode", "Copy code"),
+					FOnClicked::CreateLambda([this]()
+					{
+						if (IsViewModelValid())
+							FPlatformApplicationMisc::ClipboardCopy(*ViewModel->GetDeviceUserCode());
+						return FReply::Handled();
+					}))
+			]
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+			[
+				UnrealMcpStyleWidgets::StyledTextButton("UnrealMcp.Button.Secondary", LOCTEXT("OpenVerify", "Open verification page"),
+					FOnClicked::CreateLambda([this]()
+					{
+						if (IsViewModelValid())
+						{
+							const FString Url = ViewModel->GetDeviceVerificationUrl();
+							if (!Url.IsEmpty())
+								FPlatformProcess::LaunchURL(*Url, nullptr, nullptr);
+						}
+						return FReply::Handled();
+					}))
+			]
+		]
+		// Authorized indicator.
+		+ SVerticalBox::Slot().AutoHeight().Padding(0, 6, 0, 0)
+		[
+			SNew(STextBlock)
+			.ColorAndOpacity(FSlateColor(FUnrealMcpStyle::StatusOnline()))
+			.Visibility_Lambda([this]()
+			{
+				return (IsViewModelValid() && ViewModel->GetDeviceAuthState() == EUnrealMcpDeviceAuthState::Authorized)
+					? EVisibility::Visible : EVisibility::Collapsed;
+			})
+			.Text(LOCTEXT("Authorized", "Authorized — cloud token stored."))
+		]
+		// Failure reason.
+		+ SVerticalBox::Slot().AutoHeight().Padding(0, 6, 0, 0)
 		[
 			SNew(STextBlock)
 			.AutoWrapText(true)
-			.ColorAndOpacity(FSlateColor(FLinearColor(0.70f, 0.70f, 0.70f)))
-			.Text(LOCTEXT("TransportHint", "stdio: the AI agent launches the MCP server itself. http: the agent connects to a running server over HTTP."))
+			.ColorAndOpacity(FSlateColor(FUnrealMcpStyle::StatusOffline()))
+			.Visibility_Lambda([this]()
+			{
+				return (IsViewModelValid() && ViewModel->GetDeviceAuthState() == EUnrealMcpDeviceAuthState::Failed)
+					? EVisibility::Visible : EVisibility::Collapsed;
+			})
+			.Text_Lambda([this]() { return IsViewModelValid() ? FText::FromString(ViewModel->GetDeviceAuthError()) : FText::GetEmpty(); })
 		];
+
+	// Whole Cloud body is visible only in Cloud mode.
+	CloudBody->SetVisibility(MakeAttributeLambda([this]() -> EVisibility
+	{
+		return (IsViewModelValid() && ViewModel->GetConnectionMode() == EUnrealMcpConnectionMode::Cloud)
+			? EVisibility::Visible : EVisibility::Collapsed;
+	}));
+	return CloudBody;
 }
 
-TSharedRef<SWidget> SUnrealMcpMainWindow::BuildBridgeStatusSection()
+TSharedRef<SWidget> SUnrealMcpMainWindow::BuildCustomServerSection()
 {
-	return SNew(SBorder)
-		.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
-		.Padding(8.0f)
+	TSharedRef<SVerticalBox> Body = SNew(SVerticalBox)
+		// Server URL row.
+		+ SVerticalBox::Slot().AutoHeight()
 		[
-			SNew(SVerticalBox)
-			+ SVerticalBox::Slot().AutoHeight()[ SectionHeader(LOCTEXT("BridgeHeader", "Bridge (sidecar)")) ]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0, 6, 0, 0)
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 8, 0)
 			[
 				SNew(STextBlock)
-				.Text_Lambda([this]()
-				{
-					if (BridgeStatusProvider)
-						return FText::FromString(BridgeStatusProvider());
-					return LOCTEXT("BridgeUnknown", "Sidecar status unavailable.");
-				})
+				.TextStyle(&FUnrealMcpStyle::Get().GetWidgetStyle<FTextBlockStyle>("UnrealMcp.Text.Description"))
+				.Text(LOCTEXT("ServerUrl", "Server URL"))
 			]
-		];
-}
-
-TSharedRef<SWidget> SUnrealMcpMainWindow::BuildAiAgentsSection()
-{
-	return SNew(SBorder)
-		.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
-		.Padding(8.0f)
-		[
-			SNew(SVerticalBox)
-			+ SVerticalBox::Slot().AutoHeight()[ SectionHeader(LOCTEXT("AgentsHeader", "AI agents")) ]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0, 6, 0, 0)
+			+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
 			[
-				SNew(STextBlock)
-				.AutoWrapText(true)
-				.Text_Lambda([this]()
+				SNew(SEditableTextBox)
+				.Text_Lambda([this]() { return IsViewModelValid() ? FText::FromString(ViewModel->GetCustomHost()) : FText::GetEmpty(); })
+				.OnTextCommitted_Lambda([this](const FText& NewText, ETextCommit::Type)
 				{
-					if (!IsViewModelValid() || ViewModel->GetAiAgents().Num() == 0)
-						return LOCTEXT("NoAgents", "No AI agents connected.");
-					return FText::FromString(FString::Join(ViewModel->GetAiAgents(), TEXT(", ")));
+					if (IsViewModelValid())
+						ViewModel->SetCustomHost(NewText.ToString());
 				})
 			]
+		]
+		// URL validation error.
+		+ SVerticalBox::Slot().AutoHeight().Padding(0, 2, 0, 0)
+		[
+			SNew(STextBlock)
+			.ColorAndOpacity(FSlateColor(FUnrealMcpStyle::StatusOffline()))
+			.Text_Lambda([this]()
+			{
+				if (!IsViewModelValid())
+					return FText::GetEmpty();
+				FString Error;
+				return FUnrealMcpEditorViewModel::ValidateServerUrl(ViewModel->GetCustomHost(), Error)
+					? FText::GetEmpty() : FText::FromString(Error);
+			})
+		]
+		// The "MCP server" sub-card: Start + Transport + Authorization (mirrors the reference's framed sub-section).
+		+ SVerticalBox::Slot().AutoHeight().Padding(0, 8, 0, 0)
+		[
+			UnrealMcpStyleWidgets::StyledCard(
+				SNew(SVerticalBox)
+				// MCP server header row (dot + underlined label + teal Start).
+				+ SVerticalBox::Slot().AutoHeight()
+				[
+					SNew(SHorizontalBox)
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 8, 0)
+					[ UnrealMcpStyleWidgets::StatusDot(EDot::Offline) ]
+					+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
+					[ UnderlinedLabel(LOCTEXT("McpServer", "MCP server")) ]
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+					[
+						UnrealMcpStyleWidgets::StyledTextButton("UnrealMcp.Button.Primary", LOCTEXT("Start", "Start"),
+							FOnClicked::CreateLambda([this]()
+							{
+								// Start mirrors the reference's local-server Start: (re)connect through the view-model.
+								if (IsViewModelValid()) ViewModel->Connect();
+								return FReply::Handled();
+							}))
+					]
+				]
+				// Transport (stdio / http) segmented.
+				+ SVerticalBox::Slot().AutoHeight().Padding(0, 8, 0, 0)[ BuildTransportSelector() ]
+				// Authorization (none / required) + masked token + New.
+				+ SVerticalBox::Slot().AutoHeight().Padding(0, 8, 0, 0)[ BuildCustomAuthSelector() ])
 		];
+
+	Body->SetVisibility(MakeAttributeLambda([this]() -> EVisibility
+	{
+		return (IsViewModelValid() && ViewModel->GetConnectionMode() == EUnrealMcpConnectionMode::Custom)
+			? EVisibility::Visible : EVisibility::Collapsed;
+	}));
+	return Body;
 }
 
-void SUnrealMcpMainWindow::EnsureBannerBrushLoaded()
+TSharedRef<SWidget> SUnrealMcpMainWindow::BuildTransportSelector()
 {
-	if (BannerBrush.IsValid())
-		return;
-
-	// Resolve the banner from the plugin's Resources dir (ships with the plugin). FindPlugin can return
-	// null in odd hosting setups — guard it so a missing plugin record never crashes the window.
-	const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("UnrealMCP"));
-	if (!Plugin.IsValid())
-	{
-		UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] banner: plugin 'UnrealMCP' not found; skipping banner image."));
-		return;
-	}
-
-	const FString BannerPath = Plugin->GetBaseDir() / TEXT("Resources/ai-developer-banner.png");
-	if (!FPaths::FileExists(BannerPath))
-	{
-		UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] banner: image not found at '%s'; skipping banner image."), *BannerPath);
-		return;
-	}
-
-	// Decode the PNG to raw BGRA so we can build a dynamic brush. FSlateDynamicImageBrush's file-path
-	// constructor only handles formats Slate already knows; decoding via ImageWrapper is the robust path
-	// and lets us read the real pixel dimensions for an aspect-correct on-screen size.
-	TArray<uint8> FileData;
-	if (!FFileHelper::LoadFileToArray(FileData, *BannerPath))
-	{
-		UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] banner: failed to read '%s'; skipping banner image."), *BannerPath);
-		return;
-	}
-
-	IImageWrapperModule& ImageWrapperModule = FModuleManager::LoadModuleChecked<IImageWrapperModule>(TEXT("ImageWrapper"));
-	const TSharedPtr<IImageWrapper> PngWrapper = ImageWrapperModule.CreateImageWrapper(EImageFormat::PNG);
-	if (!PngWrapper.IsValid() || !PngWrapper->SetCompressed(FileData.GetData(), FileData.Num()))
-	{
-		UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] banner: could not decode PNG '%s'; skipping banner image."), *BannerPath);
-		return;
-	}
-
-	TArray<uint8> RawBgra;
-	if (!PngWrapper->GetRaw(ERGBFormat::BGRA, 8, RawBgra))
-	{
-		UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] banner: could not get raw pixels from '%s'; skipping banner image."), *BannerPath);
-		return;
-	}
-
-	const int32 Width = PngWrapper->GetWidth();
-	const int32 Height = PngWrapper->GetHeight();
-	if (Width <= 0 || Height <= 0)
-		return;
-
-	// Each FSlateDynamicImageBrush needs a unique resource name. The brush takes ownership of the pixel
-	// data (TArray<uint8>) and is retained as a member, so the texture survives as long as the window does.
-	static int32 BannerBrushCounter = 0;
-	const FName ResourceName(*FString::Printf(TEXT("UnrealMcpBanner_%d"), BannerBrushCounter++));
-	BannerBrush = FSlateDynamicImageBrush::CreateWithImageData(
-		ResourceName, FVector2D(Width, Height), RawBgra);
-}
-
-TSharedRef<SWidget> SUnrealMcpMainWindow::BuildBannerImageSection()
-{
-	// No image available (missing/undecodable) — render nothing rather than a broken placeholder.
-	if (!BannerBrush.IsValid())
-		return SNullWidget::NullWidget;
-
-	// The source art is 1280x640 (2:1). Cap the on-screen width and derive the height from the real
-	// aspect ratio so the logo scales down cleanly inside the window without distortion.
-	const FVector2D ImageSize = BannerBrush->GetImageSize();
-	const float Aspect = (ImageSize.X > 0.0f) ? (ImageSize.Y / ImageSize.X) : 0.5f;
-	const float MaxWidth = 480.0f;
-	const float TargetWidth = FMath::Min(MaxWidth, static_cast<float>(ImageSize.X));
-	const float TargetHeight = TargetWidth * Aspect;
-
 	return SNew(SHorizontalBox)
-		+ SHorizontalBox::Slot().FillWidth(1.0f).HAlign(HAlign_Center).VAlign(VAlign_Center)
+		+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center).Padding(0, 0, 8, 0)
 		[
-			SNew(SBox)
-			.WidthOverride(TargetWidth)
-			.HeightOverride(TargetHeight)
+			SNew(STextBlock)
+			.TextStyle(&FUnrealMcpStyle::Get().GetWidgetStyle<FTextBlockStyle>("UnrealMcp.Text.Description"))
+			.Text(LOCTEXT("TransportLabel", "Transport"))
+		]
+		+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+		[
+			UnrealMcpStyleWidgets::SegmentedControl(
+				{ { LOCTEXT("TransportStdio", "stdio"), TagStdio }, { LOCTEXT("TransportHttp", "http"), TagHttp } },
+				[this]() { return (IsViewModelValid() && ViewModel->GetEffectiveTransport() == EUnrealMcpTransportMethod::Http) ? TagHttp : TagStdio; },
+				[this](int32 SegTag)
+				{
+					if (IsViewModelValid())
+						ViewModel->SetTransportMethod(SegTag == TagHttp ? EUnrealMcpTransportMethod::Http : EUnrealMcpTransportMethod::Stdio);
+				},
+				TAttribute<bool>::Create([this]() { return IsViewModelValid() && ViewModel->IsTransportSelectable(); }))
+		];
+}
+
+TSharedRef<SWidget> SUnrealMcpMainWindow::BuildCustomAuthSelector()
+{
+	return SNew(SVerticalBox)
+		// Authorization Token (none / required) row.
+		+ SVerticalBox::Slot().AutoHeight()
+		[
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center).Padding(0, 0, 8, 0)
 			[
-				SNew(SImage).Image(BannerBrush.Get())
+				SNew(STextBlock)
+				.TextStyle(&FUnrealMcpStyle::Get().GetWidgetStyle<FTextBlockStyle>("UnrealMcp.Text.Description"))
+				.Text(LOCTEXT("AuthTokenLabel", "Authorization Token"))
+			]
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+			[
+				UnrealMcpStyleWidgets::SegmentedControl(
+					{ { LOCTEXT("AuthNone", "none"), TagNone }, { LOCTEXT("AuthRequired", "required"), TagRequired } },
+					[this]() { return (IsViewModelValid() && ViewModel->GetAuthOption() == EUnrealMcpAuthOption::Required) ? TagRequired : TagNone; },
+					[this](int32 SegTag)
+					{
+						if (IsViewModelValid())
+							ViewModel->SetAuthOption(SegTag == TagRequired ? EUnrealMcpAuthOption::Required : EUnrealMcpAuthOption::None);
+					})
+			]
+		]
+		// Masked token field + New — only when auth is required.
+		+ SVerticalBox::Slot().AutoHeight().Padding(0, 6, 0, 0)
+		[
+			SNew(SHorizontalBox)
+			.Visibility_Lambda([this]()
+			{
+				return (IsViewModelValid() && ViewModel->GetAuthOption() == EUnrealMcpAuthOption::Required)
+					? EVisibility::Visible : EVisibility::Collapsed;
+			})
+			+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
+			[
+				SNew(SEditableTextBox)
+				// IsPassword renders the token as dots natively; revealed only while the Reveal button is held (§8).
+				.IsPassword_Lambda([this]() { return !bRevealToken; })
+				.Text_Lambda([this]() { return IsViewModelValid() ? FText::FromString(ViewModel->GetCustomToken()) : FText::GetEmpty(); })
+				.OnTextCommitted_Lambda([this](const FText& NewText, ETextCommit::Type)
+				{
+					if (IsViewModelValid())
+						ViewModel->SetCustomToken(NewText.ToString());
+				})
+			]
+			+ SHorizontalBox::Slot().AutoWidth().Padding(6, 0, 0, 0).VAlign(VAlign_Center)
+			[
+				// Reveal-on-HOLD (not a sticky toggle): the raw bearer is drawn only while the button is
+				// physically held, then immediately re-masked — the AC's "never rendered unmasked" default
+				// always holds (§8). OnPressed/OnReleased drive bRevealToken, which gates IsPassword above.
+				SNew(SButton)
+				.ButtonStyle(&FUnrealMcpStyle::Get().GetWidgetStyle<FButtonStyle>("UnrealMcp.Button.Secondary"))
+				.HAlign(HAlign_Center).VAlign(VAlign_Center)
+				.ToolTipText(LOCTEXT("RevealHint", "Press and hold to reveal the token; it re-masks on release."))
+				.OnPressed_Lambda([this]() { bRevealToken = true; })
+				.OnReleased_Lambda([this]() { bRevealToken = false; })
+				[
+					SNew(STextBlock).Text(LOCTEXT("Reveal", "Reveal"))
+				]
+			]
+			+ SHorizontalBox::Slot().AutoWidth().Padding(6, 0, 0, 0).VAlign(VAlign_Center)
+			[
+				UnrealMcpStyleWidgets::StyledTextButton("UnrealMcp.Button.Secondary", LOCTEXT("New", "New"),
+					FOnClicked::CreateLambda([this]()
+					{
+						if (IsViewModelValid()) ViewModel->GenerateCustomToken();
+						return FReply::Handled();
+					}))
 			]
 		];
 }
 
 TSharedRef<SWidget> SUnrealMcpMainWindow::BuildAgentConfiguratorsSection()
 {
-	// The AI Agent Configurators panel (§7/§8): pick an external AI client and auto-write its MCP config. It is a
-	// self-contained compound widget bound to the same view-model (for the persisted dropdown selection) and the
-	// runtime-supplied connection-info provider (for the live server path / port / url / auth / token).
+	// The AI Agent Configurators panel (§7/§8) — out of scope for visual edits here; it inherits the new style
+	// set via FUnrealMcpStyle::Get(). Bound to the same view-model + the runtime connection-info provider.
 	return SNew(SUnrealMcpAgentConfigurators)
 		.ViewModel(ViewModel)
 		.ConnectionInfoProvider(ConnectionInfoProvider);
 }
 
+TSharedRef<SWidget> SUnrealMcpMainWindow::BuildExtensionsSection()
+{
+	// The Extensions section (issue #78): a styled header + a placeholder card when no registry data exists,
+	// matching the populated-row design (Name bold + Install button right + description below). Unreal-MCP has
+	// no extensions registry surfaced to the UI yet, so render the styled placeholder per the issue's constraint.
+	return UnrealMcpStyleWidgets::StyledCard(
+		SNew(SVerticalBox)
+		+ SVerticalBox::Slot().AutoHeight()[ UnrealMcpStyleWidgets::SectionHeader(LOCTEXT("ExtHeader", "Extensions")) ]
+		+ SVerticalBox::Slot().AutoHeight().Padding(0, 8, 0, 0)
+		[
+			// One placeholder row in the populated-row shape (bold name + Install + description below).
+			SNew(SVerticalBox)
+			+ SVerticalBox::Slot().AutoHeight()
+			[
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
+				[
+					SNew(STextBlock)
+					.Font(FUnrealMcpStyle::SubHeaderFont())
+					.Text(LOCTEXT("ExtPlaceholderName", "No extensions available"))
+				]
+				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+				[
+					SNew(SBox).IsEnabled(false)
+					[
+						UnrealMcpStyleWidgets::StyledTextButton("UnrealMcp.Button.Secondary", LOCTEXT("Install", "Install"),
+							FOnClicked::CreateLambda([]() { return FReply::Handled(); }))
+					]
+				]
+			]
+			+ SVerticalBox::Slot().AutoHeight().Padding(0, 4, 0, 0)
+			[
+				UnrealMcpStyleWidgets::Description(
+					LOCTEXT("ExtPlaceholderDesc", "Engine extensions will appear here when a registry is available. Each lists a name, a short description, and an Install action."))
+			]
+		]);
+}
+
 TSharedRef<SWidget> SUnrealMcpMainWindow::BuildFooterSection()
 {
-	auto MakeLinkButton = [](const FText& Label, const FString& Url)
-	{
-		return SNew(SButton)
-			.Text(Label)
-			.OnClicked_Lambda([Url]()
-			{
-				FPlatformProcess::LaunchURL(*Url, nullptr, nullptr);
-				return FReply::Handled();
-			});
-	};
-
-	return SNew(SVerticalBox)
-		+ SVerticalBox::Slot().AutoHeight()[ SNew(SSeparator) ]
-		+ SVerticalBox::Slot().AutoHeight().Padding(0, 6, 0, 0)
-		[
-			SNew(SHorizontalBox)
-			+ SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 6, 0)[ MakeLinkButton(LOCTEXT("Discord", "Discord"), DiscordUrl) ]
-			+ SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 6, 0)[ MakeLinkButton(LOCTEXT("Issues", "Issues"), IssuesUrl) ]
-			+ SHorizontalBox::Slot().AutoWidth()[ MakeLinkButton(LOCTEXT("Star", "Star on GitHub"), StarUrl) ]
-		]
-		+ SVerticalBox::Slot().AutoHeight().Padding(0, 6, 0, 0)
+	return UnrealMcpStyleWidgets::StyledCard(
+		SNew(SVerticalBox)
+		// "Found an issue?"
+		+ SVerticalBox::Slot().AutoHeight()
 		[
 			SNew(STextBlock)
-			.AutoWrapText(true)
-			.Text(LOCTEXT("Thanks", "Thank you for using Unreal-MCP — built by Ivan Murzak and contributors."))
-		];
+			.Font(FUnrealMcpStyle::SubHeaderFont())
+			.Text(LOCTEXT("FoundIssue", "Found an issue?"))
+		]
+		// Help/Talk (Discord) · Bug Report (GitHub) · Check.
+		+ SVerticalBox::Slot().AutoHeight().Padding(0, 8, 0, 0)
+		[
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 8, 0)
+			[
+				UnrealMcpStyleWidgets::IconButton("UnrealMcp.Button.Secondary", "UnrealMcp.Discord", LOCTEXT("HelpTalk", "Help / Talk"),
+					FOnClicked::CreateLambda([]() { FPlatformProcess::LaunchURL(*DiscordUrl, nullptr, nullptr); return FReply::Handled(); }))
+			]
+			+ SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 8, 0)
+			[
+				UnrealMcpStyleWidgets::IconButton("UnrealMcp.Button.Secondary", "UnrealMcp.GitHub", LOCTEXT("BugReport", "Bug Report"),
+					FOnClicked::CreateLambda([]() { FPlatformProcess::LaunchURL(*IssuesUrl, nullptr, nullptr); return FReply::Handled(); }))
+			]
+			+ SHorizontalBox::Slot().AutoWidth()
+			[
+				UnrealMcpStyleWidgets::StyledTextButton("UnrealMcp.Button.Secondary", LOCTEXT("RestartBridge", "Restart bridge"),
+					FOnClicked::CreateLambda([this]() { OnRestartBridge.ExecuteIfBound(); return FReply::Handled(); }))
+			]
+		]
+		// Divider.
+		+ SVerticalBox::Slot().AutoHeight().Padding(0, 10, 0, 0)[ SNew(SSeparator).Thickness(1.0f) ]
+		// Thanks text + Sincerely + gold GitHub Star.
+		+ SVerticalBox::Slot().AutoHeight().Padding(0, 8, 0, 0)
+		[
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
+			[
+				SNew(SVerticalBox)
+				+ SVerticalBox::Slot().AutoHeight()
+				[
+					SNew(STextBlock)
+					.AutoWrapText(true)
+					.Text(LOCTEXT("ThanksText", "Thank you for using AI Game Developer. If you like it, please give the project a star on GitHub."))
+				]
+				+ SVerticalBox::Slot().AutoHeight().Padding(0, 6, 0, 0)
+				[
+					SNew(STextBlock)
+					.TextStyle(&FUnrealMcpStyle::Get().GetWidgetStyle<FTextBlockStyle>("UnrealMcp.Text.Description"))
+					.Text(LOCTEXT("Sincerely", "Sincerely,\nIvan Murzak"))
+				]
+			]
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(8, 0, 0, 0)
+			[
+				UnrealMcpStyleWidgets::IconButton("UnrealMcp.Button.Golden", "UnrealMcp.Star", LOCTEXT("GitHubStar", "GitHub Star"),
+					FOnClicked::CreateLambda([]() { FPlatformProcess::LaunchURL(*StarUrl, nullptr, nullptr); return FReply::Handled(); }))
+			]
+		]);
 }
 
 FReply SUnrealMcpMainWindow::OnConnectClicked()
