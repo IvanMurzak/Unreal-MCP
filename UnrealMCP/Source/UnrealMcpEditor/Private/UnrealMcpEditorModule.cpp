@@ -4,6 +4,7 @@
 #include "Modules/ModuleManager.h"
 #include "UnrealMcpLog.h"
 #include "UnrealMcpRuntime.h"
+#include "UI/FUnrealMcpStyle.h"
 
 /**
  * Editor module for the Unreal-MCP plugin (docs/ARCHITECTURE.md §0). Owns the plugin-lifetime
@@ -20,6 +21,9 @@ public:
 		// startup hiccup never hides the proof that the module itself loaded.
 		UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] plugin loaded"));
 
+		// The "AI Game Developer" Slate style set (§7) — must be registered before any §7 window is built.
+		FUnrealMcpStyle::Initialize();
+
 		Runtime = MakeUnique<FUnrealMcpRuntime>();
 		Runtime->Startup();
 	}
@@ -31,6 +35,7 @@ public:
 			Runtime->Shutdown();
 			Runtime.Reset();
 		}
+		FUnrealMcpStyle::Shutdown();
 		UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] plugin shutting down"));
 	}
 

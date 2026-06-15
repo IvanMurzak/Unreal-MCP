@@ -10,10 +10,14 @@
 #include "Widgets/Layout/SExpandableArea.h"
 #include "Widgets/Text/STextBlock.h"
 #include "Widgets/Input/SButton.h"
+#include "Widgets/Input/SCheckBox.h"
 #include "Widgets/Input/SMultiLineEditableTextBox.h"
+#include "Widgets/Images/SImage.h"
+#include "Widgets/Layout/SBox.h"
 #include "Styling/AppStyle.h"
 #include "Styling/CoreStyle.h"
 #include "HAL/PlatformApplicationMisc.h"
+#include "UI/FUnrealMcpStyle.h"
 
 /**
  * Reusable Slate equivalents of Unity's AI-agent-configurator UI templates (docs/ARCHITECTURE.md §7) — the
@@ -125,6 +129,166 @@ namespace UnrealMcpAgentWidgets
 	inline TSharedRef<SExpandableArea> TemplateFoldoutFirst(const FText& Heading, const TSharedRef<SWidget>& Body)
 	{
 		return TemplateFoldout(Heading, Body, /*bInitiallyExpanded*/ true);
+	}
+}
+
+/**
+ * Style-set-backed reusable widgets (docs/ARCHITECTURE.md §7) — the Slate building blocks the main window
+ * composes to reach visual parity with the Unity reference. Each reads brushes/colours from FUnrealMcpStyle
+ * (NOT inline literals), so the whole window shares one palette source of truth. Header-only factory
+ * functions (no link-time dependency) so any §7 widget can reuse them.
+ *
+ * Provided:
+ *   - StyledCard       → the rounded rgba(20,40,69,0.2) frame-group container (Unity .frame-group).
+ *   - SectionHeader    → a 20px-bold section title (Unity .header).
+ *   - SegmentedControl → the tab-like Custom/Cloud · stdio/http · none/required toggle (Unity .segmented-control).
+ *   - StatusDot        → a 14px online/offline/ring connection dot (Unity .status-indicator-circle*).
+ *   - PrimaryButton / AlertButton / SecondaryButton / GoldenButton → the styled buttons (Unity .btn-*).
+ *   - IconButton       → a button with a leading icon brush + label (Unity .btn-with-icon).
+ */
+namespace UnrealMcpStyleWidgets
+{
+	/** Which status dot to draw — mirrors Unity's .status-indicator-circle-{online,disconnected,external}. */
+	enum class EDot : uint8 { Online, Offline, Ring };
+
+	/** The rounded card/frame container (Unity .frame-group). Wraps @p Content with 8px padding. */
+	inline TSharedRef<SWidget> StyledCard(const TSharedRef<SWidget>& Content)
+	{
+		return SNew(SBorder)
+			.BorderImage(FUnrealMcpStyle::Get().GetBrush("UnrealMcp.Card"))
+			.Padding(8.0f)
+			[
+				Content
+			];
+	}
+
+	/** A 20px-bold section header (Unity .header). */
+	inline TSharedRef<SWidget> SectionHeader(const FText& Title)
+	{
+		return SNew(STextBlock)
+			.TextStyle(&FUnrealMcpStyle::Get().GetWidgetStyle<FTextBlockStyle>("UnrealMcp.Text.Header"))
+			.Text(Title);
+	}
+
+	/** A dimmed 12px description/hint line (Unity .section-desc). */
+	inline TSharedRef<SWidget> Description(const TAttribute<FText>& Text)
+	{
+		return SNew(STextBlock)
+			.AutoWrapText(true)
+			.TextStyle(&FUnrealMcpStyle::Get().GetWidgetStyle<FTextBlockStyle>("UnrealMcp.Text.Description"))
+			.Text(Text);
+	}
+
+	/** A connection-status dot (14x14) bound to a live EDot provider. */
+	inline TSharedRef<SWidget> StatusDot(const TAttribute<EDot>& DotState)
+	{
+		return SNew(SBox).WidthOverride(14.0f).HeightOverride(14.0f)
+		[
+			SNew(SImage)
+			.Image_Lambda([DotState]() -> const FSlateBrush*
+			{
+				switch (DotState.Get())
+				{
+					case EDot::Online:  return FUnrealMcpStyle::Get().GetBrush("UnrealMcp.Dot.Online");
+					case EDot::Offline: return FUnrealMcpStyle::Get().GetBrush("UnrealMcp.Dot.Offline");
+					case EDot::Ring:    return FUnrealMcpStyle::Get().GetBrush("UnrealMcp.Dot.Ring");
+					default:            return FUnrealMcpStyle::Get().GetBrush("UnrealMcp.Dot.Offline");
+				}
+			})
+		];
+	}
+
+	/**
+	 * A tab-like segmented control (Unity .segmented-control): a rounded track holding N toggle segments;
+	 * the selected segment renders its text teal. Each segment is a toggle-style SCheckBox bound to the
+	 * shared IsSelected/OnSelect lambdas so it stays a thin view over the caller's state.
+	 *
+	 * @param Segments  ordered (label, value-tag) pairs. The value-tag is an int the caller maps to its enum.
+	 * @param SelectedProvider  returns the currently-selected value-tag.
+	 * @param OnSelect  invoked with the chosen value-tag when a segment is clicked.
+	 * @param IsEnabled  whole-control enable state (e.g. transport selector locked in Cloud mode).
+	 */
+	inline TSharedRef<SWidget> SegmentedControl(
+		const TArray<TPair<FText, int32>>& Segments,
+		TFunction<int32()> SelectedProvider,
+		TFunction<void(int32)> OnSelect,
+		TAttribute<bool> IsEnabled = true)
+	{
+		TSharedRef<SHorizontalBox> Track = SNew(SHorizontalBox);
+		for (const TPair<FText, int32>& Seg : Segments)
+		{
+			const FText Label = Seg.Key;
+			const int32 Tag = Seg.Value;
+			Track->AddSlot().AutoWidth()
+			[
+				SNew(SCheckBox)
+				.Style(FAppStyle::Get(), "ToggleButtonCheckbox")
+				.IsEnabled(IsEnabled)
+				.IsChecked_Lambda([SelectedProvider, Tag]()
+				{
+					return SelectedProvider() == Tag ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+				})
+				.OnCheckStateChanged_Lambda([OnSelect, Tag](ECheckBoxState NewState)
+				{
+					if (NewState == ECheckBoxState::Checked)
+						OnSelect(Tag);
+				})
+				.Padding(FMargin(10.0f, 3.0f))
+				[
+					SNew(STextBlock)
+					.Justification(ETextJustify::Center)
+					.MinDesiredWidth(40.0f)
+					.Text(Label)
+					.ColorAndOpacity_Lambda([SelectedProvider, Tag]() -> FSlateColor
+					{
+						return SelectedProvider() == Tag
+							? FSlateColor(FUnrealMcpStyle::AccentTeal())
+							: FSlateColor(FUnrealMcpStyle::DescriptionText());
+					})
+				]
+			];
+		}
+
+		return SNew(SBorder)
+			.BorderImage(FUnrealMcpStyle::Get().GetBrush("UnrealMcp.Segmented.Track"))
+			.Padding(2.0f)
+			[
+				Track
+			];
+	}
+
+	/** A button using one of the style set's FButtonStyle entries; @p Content is the button body. */
+	inline TSharedRef<SButton> StyledButton(const FName& StyleKey, const TSharedRef<SWidget>& Content, FOnClicked OnClicked)
+	{
+		return SNew(SButton)
+			.ButtonStyle(&FUnrealMcpStyle::Get().GetWidgetStyle<FButtonStyle>(StyleKey))
+			.OnClicked(OnClicked)
+			.HAlign(HAlign_Center)
+			.VAlign(VAlign_Center)
+			[
+				Content
+			];
+	}
+
+	/** A text-only styled button (teal/alert/secondary/golden depending on @p StyleKey). */
+	inline TSharedRef<SButton> StyledTextButton(const FName& StyleKey, const FText& Label, FOnClicked OnClicked)
+	{
+		return StyledButton(StyleKey, SNew(STextBlock).Text(Label), OnClicked);
+	}
+
+	/** A button with a leading icon brush + label (Unity .btn-with-icon) — Discord/GitHub footer buttons. */
+	inline TSharedRef<SButton> IconButton(const FName& StyleKey, const FName& IconBrush, const FText& Label, FOnClicked OnClicked)
+	{
+		return StyledButton(StyleKey,
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 6, 0)
+			[
+				SNew(SBox).WidthOverride(18.0f).HeightOverride(18.0f)
+				[ SNew(SImage).Image(FUnrealMcpStyle::Get().GetBrush(IconBrush)) ]
+			]
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+			[ SNew(STextBlock).Text(Label) ],
+			OnClicked);
 	}
 }
 

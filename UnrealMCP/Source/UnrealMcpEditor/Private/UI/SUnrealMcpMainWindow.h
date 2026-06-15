@@ -48,32 +48,33 @@ private:
 	// Whether the masked Custom-mode token field is currently revealed (reveal-on-hold, §8).
 	bool bRevealToken = false;
 
-	// The "AI Game Developer" banner brush, loaded once at Construct from the plugin's Resources dir
-	// (Resources/ai-developer-banner.png). Held as a member so the dynamic brush outlives the SImage
-	// that references it (a Slate brush must stay alive for the lifetime of the widget that draws it).
-	// Null when the image could not be loaded — BuildBannerImageSection() then renders nothing.
-	TSharedPtr<FSlateDynamicImageBrush> BannerBrush;
-
 	// Section builders (each returns a Slate widget; kept separate so §7's ordering reads top-to-bottom).
+	// The window now mirrors the Unity-MCP reference (issue #78): a header card with base config (Log Level /
+	// Timeout / Version) + the AI-cube logo, a unified Connection timeline card (Custom/Cloud segmented in the
+	// header row, status dots + connecting line + underlined labels, teal Start / red Revoke / masked token +
+	// New, stdio/http + none/required segmented), the AI Agent Configurators panel, an Extensions card, and a
+	// styled footer (Discord / GitHub bug-report / gold GitHub Star).
 	TSharedRef<SWidget> BuildHeaderSection();
 	TSharedRef<SWidget> BuildConnectionSection();
-	TSharedRef<SWidget> BuildModeToggleSection();
-	TSharedRef<SWidget> BuildCloudAuthSection();
-	TSharedRef<SWidget> BuildCustomAuthSection();
-	// The Custom-mode transport selector (stdio/http), shown directly under the connection-method section (§7, #59).
+	// The Cloud auth controls (masked token + Revoke/Authorize), shown inline in the Connection card in Cloud mode.
+	TSharedRef<SWidget> BuildCloudAuthRow();
+	// The Custom auth + MCP-server sub-card (Server URL, Start, Transport, none/required, masked token + New).
+	TSharedRef<SWidget> BuildCustomServerSection();
+	// The Custom-mode transport selector (stdio/http) segmented control.
 	TSharedRef<SWidget> BuildTransportSelector();
-	TSharedRef<SWidget> BuildBridgeStatusSection();
-	TSharedRef<SWidget> BuildAiAgentsSection();
-	TSharedRef<SWidget> BuildBannerImageSection();
+	// The Custom-mode authorization selector (none/required) + masked token + New.
+	TSharedRef<SWidget> BuildCustomAuthSelector();
 	TSharedRef<SWidget> BuildAgentConfiguratorsSection();
-
-	// Load Resources/ai-developer-banner.png from the plugin base dir into BannerBrush (no-op if it
-	// already loaded or the file is missing). Called once from Construct before the section is built.
-	void EnsureBannerBrushLoaded();
+	TSharedRef<SWidget> BuildExtensionsSection();
 	TSharedRef<SWidget> BuildFooterSection();
 
-	// A bold section header row.
-	static TSharedRef<SWidget> SectionHeader(const FText& Title);
+	// The AI-cube logo brush, loaded once at Construct from the plugin's Resources dir
+	// (Resources/ai-cube-logo.png) via the style set. Held as a member so the brush outlives the SImage.
+	const FSlateBrush* LogoBrush = nullptr;
+
+	// A label with a thin underline beneath it — the reference's underlined timeline labels (Slate has no
+	// first-class text-underline, so the underline is a 1px separator drawn under the text).
+	static TSharedRef<SWidget> UnderlinedLabel(const TAttribute<FText>& Text);
 
 	// Common handlers.
 	FReply OnConnectClicked();
