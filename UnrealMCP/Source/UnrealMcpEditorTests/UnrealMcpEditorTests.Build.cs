@@ -19,6 +19,7 @@ public class UnrealMcpEditorTests : ModuleRules
 			"Json",
 			"UnrealMcpEditor",
 			"BlueprintGraph", // UK2Node_Event — asserting add-event produced an ENABLED node (§10)
+			"HTTPServer",     // the dev-control server header (FUnrealMcpDevControlServer) includes HttpRouteHandle.h
 		});
 
 		// Reach the sibling editor module's PRIVATE headers (FUnrealMcpNdjsonAccumulator §1.2,

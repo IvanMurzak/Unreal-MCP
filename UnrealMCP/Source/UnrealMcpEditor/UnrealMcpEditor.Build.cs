@@ -31,6 +31,10 @@ public class UnrealMcpEditor : ModuleRules
 			"SlateCore",
 			"Networking",
 			"Sockets",
+			// DEV-ONLY inject/control bridge over the live Slate dock (FUnrealMcpDevControlServer): UE's
+			// in-process HTTP server. Env-gated (UNREAL_MCP_DEV_CONTROL=1) + loopback-only — never listens
+			// in a shipped plugin. The module is always linked; the listener is only started when gated on.
+			"HTTPServer",
 			"Json",
 			"JsonUtilities",
 			"Projects",
