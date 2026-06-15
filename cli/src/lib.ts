@@ -41,15 +41,40 @@ export {
   planEngineInstall,
   launcherInstallUrl,
 } from './lib/install-engine.js';
+export { autoInstallEngine, engineInstallGuidance } from './lib/auto-install-engine.js';
 
 // --- engine resolution -----------------------------------------------------
-export { listInstalledEngines, resolveEngineForProject } from './lib/engine.js';
+export {
+  listInstalledEngines,
+  resolveEngineForProject,
+  discoverEngine,
+  invalidateCachedEngine,
+  engineRootFromEditorPath,
+} from './lib/engine.js';
 export { resolveEngine, editorBinaryPath } from './utils/engine.js';
 export {
   parseLauncherManifest,
   matchEngineForAssociation,
   getDefaultLauncherManifestPath,
 } from './utils/launcher.js';
+export {
+  readCachedEnginePath,
+  writeCachedEnginePath,
+  clearCachedEnginePath,
+  defaultCacheFilePath,
+  keyFor as engineCacheKeyFor,
+  AUTO_KEY as ENGINE_CACHE_AUTO_KEY,
+} from './utils/engine-cache.js';
+export {
+  scanCommonLocationEngines,
+  commonEngineRoots,
+  readEngineAssociationFromBuildVersion,
+  readRegistryEngineBuilds,
+  parseRegistryBuilds,
+  matchRegistryBuild,
+  linuxEngineDirCandidates,
+  UE_BUILDS_REGISTRY_KEY,
+} from './utils/engine-discovery.js';
 export { readUProject, readEngineAssociation, findUProjectFile } from './utils/project.js';
 export { generatePortFromDirectory } from './utils/port.js';
 export { resolveConnection } from './utils/config.js';
@@ -108,6 +133,9 @@ export type {
   DetectEnginesResult,
   PlanEngineInstallOptions,
   PlanEngineInstallResult,
+  AutoInstallEngineOptions,
+  AutoInstallEngineResult,
+  AutoInstallEngineOutcome,
   WaitForReadyOptions,
   WaitForReadyResult,
   WaitForReadySuccess,
@@ -121,6 +149,21 @@ export type {
   BuildStep,
 } from './lib/types.js';
 export type { EngineInstallation } from './utils/launcher.js';
+export type {
+  EngineCacheEntry,
+  EngineCache,
+  EngineCacheIo,
+} from './utils/engine-cache.js';
+export type {
+  DiscoveryFs,
+  RegistryEngineBuild,
+  RegistryQueryImpl,
+} from './utils/engine-discovery.js';
+export type {
+  DiscoverEngineInput,
+  DiscoverEngineResult,
+  EngineDiscoverySource,
+} from './lib/engine.js';
 export type { UProjectInfo } from './utils/project.js';
 export type { ResolvedConnection } from './utils/config.js';
 export type { LoginOptions, LoginResult } from './lib/login.js';

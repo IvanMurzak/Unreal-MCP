@@ -102,6 +102,8 @@ export interface OpenProjectOptions {
   keepConnected?: boolean;
   transport?: McpTransport;
   startServer?: boolean;
+  /** Skip the persistent engine-path cache (forces a fresh discovery chain). */
+  noCache?: boolean;
   /** Test injection — installed engines (defaults to launcher manifest). */
   enginesImpl?: () => import('../utils/launcher.js').EngineInstallation[];
   /** Test injection — spawn (defaults to detached `child_process.spawn`). */
@@ -406,6 +408,60 @@ export interface PlanEngineInstallResult {
   /** `com.epicgames.launcher://` deep link that opens the install page. */
   launcherUrl: string;
   /** Human-facing guidance to print. */
+  message: string;
+}
+
+// ---------------------------------------------------------------------------
+// auto-install-engine (best-effort, consent-gated)
+// ---------------------------------------------------------------------------
+
+/**
+ * Why an auto-install attempt did NOT download/install an engine. Drives both
+ * the result message and the caller's exit behaviour.
+ */
+export type AutoInstallEngineOutcome =
+  | 'already-installed'
+  /** No unattended install path on this OS → returned guided steps + deep link. */
+  | 'guidance-only'
+  /** Consent was required but not granted (no `--yes`, non-interactive). */
+  | 'consent-required'
+  /** An install was attempted but the result did not resolve a real binary. */
+  | 'install-unverified';
+
+export interface AutoInstallEngineOptions {
+  /** Engine version/association to ensure (e.g. `"5.7"`). */
+  version: string;
+  /** Target OS; defaults to the host. */
+  os?: NodeJS.Platform;
+  /**
+   * Explicit consent to spend bandwidth/disk on a multi-GB engine install.
+   * Without it, an OS that COULD download refuses and returns guidance —
+   * never a silent multi-GB download. (Today every OS degrades to guidance,
+   * but the gate is wired so a future real download path stays opt-in.)
+   */
+  consent?: boolean;
+  /** Whether the caller is interactive (a TTY). Defaults to `false` (CI-safe). */
+  interactive?: boolean;
+  /**
+   * Injected check for "is the requested engine resolvable now?" — used both to
+   * short-circuit when already installed and to VALIDATE after any install
+   * attempt (never report success unless this returns a real binary path).
+   */
+  resolveInstalledImpl?: (version: string, os: NodeJS.Platform) => string | null;
+}
+
+export interface AutoInstallEngineResult {
+  kind: 'success';
+  success: true;
+  version: string;
+  outcome: AutoInstallEngineOutcome;
+  /** Resolved editor binary when the engine is (or became) installed. */
+  editorPath: string | null;
+  /** `com.epicgames.launcher://` deep link (always present for guidance). */
+  launcherUrl: string;
+  /** Per-OS guided install steps to print when no unattended path exists. */
+  guidance: string[];
+  /** One-line human-facing summary. */
   message: string;
 }
 
