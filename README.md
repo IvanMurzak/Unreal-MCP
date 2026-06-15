@@ -4,7 +4,7 @@
 
 [![MCP](https://badge.mcpx.dev 'MCP Server')](https://modelcontextprotocol.io/introduction)
 [![Unreal Engine](https://img.shields.io/badge/Unreal%20Engine-5.5%2B-0E1128?style=flat&logo=unrealengine&logoColor=white&labelColor=333A41 'Unreal Engine 5.5+, developed and CI-tested against 5.7')](https://www.unrealengine.com/)
-[![test-pull-request](https://github.com/IvanMurzak/Unreal-MCP/actions/workflows/test_pull_request.yml/badge.svg 'CI — test-pull-request')](https://github.com/IvanMurzak/Unreal-MCP/actions/workflows/test_pull_request.yml)</br>
+[![release](https://github.com/IvanMurzak/Unreal-MCP/workflows/release/badge.svg 'release')](https://github.com/IvanMurzak/Unreal-MCP/actions/workflows/release.yml)</br>
 [![Discord](https://img.shields.io/badge/Discord-Join-7289da?logo=discord&logoColor=white&labelColor=333A41 'Join')](https://discord.gg/cfbdMZX99G)
 [![Stars](https://img.shields.io/github/stars/IvanMurzak/Unreal-MCP 'Stars')](https://github.com/IvanMurzak/Unreal-MCP/stargazers)
 [![License](https://img.shields.io/github/license/IvanMurzak/Unreal-MCP?label=License&labelColor=333A41)](https://github.com/IvanMurzak/Unreal-MCP/blob/main/LICENSE)

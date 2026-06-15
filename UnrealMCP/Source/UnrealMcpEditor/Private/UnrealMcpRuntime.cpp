@@ -16,6 +16,7 @@
 #include "UI/SUnrealMcpToolsWindow.h"
 #include "UI/SUnrealMcpFeatureListWindow.h"
 #include "Tools/UnrealMcpLogCollector.h"
+#include "DevControl/UnrealMcpDevControlServer.h"
 
 #include "Misc/CoreDelegates.h"
 #include "Misc/Paths.h"
@@ -237,6 +238,36 @@ void FUnrealMcpRuntime::Startup()
 		[]() -> TArray<FUnrealMcpFeatureEntry> { return {}; },  // prompts (none surfaced to the plugin yet)
 		[]() -> TArray<FUnrealMcpFeatureEntry> { return {}; }); // resources (none surfaced to the plugin yet)
 
+	// DEV-ONLY inject/control HTTP bridge (docs/ARCHITECTURE.md §7). Started ONLY when the editor process env
+	// UNREAL_MCP_DEV_CONTROL == "1" — OFF by default, so a shipped plugin never opens a port. The port comes
+	// from UNREAL_MCP_DEV_CONTROL_PORT (default 9921). Handlers run on the game thread and drive the SAME live
+	// view-model the dock binds to, so an injected state / simulated click is reflected in the open window.
+	// Loopback-only (the server verifies the peer is 127.0.0.1/::1 in addition to the env gate).
+	{
+		const bool bDevControlEnabled =
+			FPlatformMisc::GetEnvironmentVariable(TEXT("UNREAL_MCP_DEV_CONTROL")) == TEXT("1");
+		if (bDevControlEnabled)
+		{
+			uint32 DevControlPort = 9921;
+			const FString PortRaw = FPlatformMisc::GetEnvironmentVariable(TEXT("UNREAL_MCP_DEV_CONTROL_PORT"));
+			if (!PortRaw.IsEmpty())
+			{
+				const int32 Parsed = FCString::Atoi(*PortRaw);
+				if (Parsed > 0 && Parsed <= 65535)
+					DevControlPort = static_cast<uint32>(Parsed);
+				else
+					UE_LOG(LogUnrealMcp, Warning, TEXT("[dev-control] ignoring invalid UNREAL_MCP_DEV_CONTROL_PORT '%s'; using %u."), *PortRaw, DevControlPort);
+			}
+
+			DevControlServer = MakeUnique<FUnrealMcpDevControlServer>();
+			if (!DevControlServer->Start(DevControlPort, ViewModel))
+			{
+				UE_LOG(LogUnrealMcp, Warning, TEXT("[dev-control] failed to start on port %u; inject/control bridge disabled."), DevControlPort);
+				DevControlServer.Reset();
+			}
+		}
+	}
+
 	// §1.5: tear down on editor pre-exit so the sidecar never orphans (layer 1).
 	PreExitHandle = FCoreDelegates::OnEnginePreExit.AddLambda([this]() { Shutdown(); });
 }
@@ -260,6 +291,15 @@ void FUnrealMcpRuntime::Shutdown()
 	// give the child a bounded grace to self-exit, (4) terminate as a backstop.
 	if (SidecarManager.IsValid())
 		SidecarManager->StopRestarts();
+
+	// DEV-ONLY inject/control bridge: stop it FIRST so no in-flight HTTP handler can touch the view-model
+	// after the teardown below frees it (the server holds the view-model weakly, but stopping unbinds the
+	// routes so the port closes cleanly). No-op when it was never started (env gate off).
+	if (DevControlServer.IsValid())
+	{
+		DevControlServer->Stop();
+		DevControlServer.Reset();
+	}
 
 	// §7 UI teardown FIRST: unregister the tab and drop the bridge's status sink so no marshalled status can
 	// touch the view-model after this, then release the view-model. Clear the sink before the bridge tears

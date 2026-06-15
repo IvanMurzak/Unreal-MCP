@@ -13,6 +13,7 @@ class FUnrealMcpExtensionManager;
 class FUnrealMcpEditorViewModel;
 class FUnrealMcpMainWindowTab;
 class FUnrealMcpAuxWindows;
+class FUnrealMcpDevControlServer;
 
 /**
  * Plugin-lifetime coordinator (docs/ARCHITECTURE.md §0). Wires the four subsystems together: the tool
@@ -49,6 +50,10 @@ private:
 	TSharedPtr<FUnrealMcpEditorViewModel> ViewModel;
 	TUniquePtr<FUnrealMcpMainWindowTab> MainWindowTab;
 	TUniquePtr<FUnrealMcpAuxWindows> AuxWindows;
+
+	// DEV-ONLY inject/control HTTP bridge over the live dock (docs/ARCHITECTURE.md §7). Created + started in
+	// Startup() ONLY when the editor process env UNREAL_MCP_DEV_CONTROL == "1"; null (never listening) otherwise.
+	TUniquePtr<FUnrealMcpDevControlServer> DevControlServer;
 
 	FDelegateHandle PreExitHandle;
 	bool bStarted = false;
