@@ -56,6 +56,47 @@ describe('discoverEngine — override always wins (bypasses cache + chain)', () 
     expect(r.kind).toBe('resolved');
     if (r.kind === 'resolved') expect(r.source).toBe('override');
   });
+
+  it('honours the INJECTED os for the override (not the host platform) — a WIN root resolves off-Windows', () => {
+    // Regression: the override path normalised the root with the host `path`
+    // (posix on Linux CI), so a Windows engine root resolved on Windows but
+    // came back `unresolved` on Linux. The override must use the injected `os`
+    // path flavour, hermetically, so this holds on every runner OS.
+    const winRoot = 'C:\\Src\\UE5';
+    const winBin = editorBinaryPath(winRoot, WIN);
+    const rWin = discoverEngine({
+      engineAssociation: '{guid}',
+      engineRootOverride: winRoot,
+      os: WIN,
+      existsImpl: (p) => p === winBin,
+      enginesImpl: () => {
+        throw new Error('manifest must not be consulted under an override');
+      },
+    });
+    expect(rWin.kind).toBe('resolved');
+    if (rWin.kind === 'resolved') {
+      expect(rWin.engineRoot).toBe(winRoot);
+      expect(rWin.editorPath).toBe(winBin);
+    }
+
+    // The symmetric case: a posix root resolved under an injected linux os.
+    const linRoot = '/opt/UnrealEngine';
+    const linBin = editorBinaryPath(linRoot, 'linux');
+    const rLin = discoverEngine({
+      engineAssociation: '',
+      engineRootOverride: linRoot,
+      os: 'linux',
+      existsImpl: (p) => p === linBin,
+      enginesImpl: () => {
+        throw new Error('manifest must not be consulted under an override');
+      },
+    });
+    expect(rLin.kind).toBe('resolved');
+    if (rLin.kind === 'resolved') {
+      expect(rLin.engineRoot).toBe(linRoot);
+      expect(rLin.editorPath).toBe(linBin);
+    }
+  });
 });
 
 describe('discoverEngine — cache is the fast path', () => {

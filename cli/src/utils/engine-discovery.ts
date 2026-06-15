@@ -172,7 +172,10 @@ export function scanCommonLocationEngines(
       verbose(`scanCommonLocationEngines: found engine at ${installDir} with unknown version (no Build.version); it cannot match a versioned association`);
     }
     found.push({
-      appName: associationHint ? `UE_${associationHint}` : path.basename(installDir),
+      // os-flavoured basename so a cross-os scan labels free-form Linux dirs
+      // correctly off a posix `installDir` even on a Windows host (the install
+      // path was built with the target-os `pj` above).
+      appName: associationHint ? `UE_${associationHint}` : pj.basename(installDir),
       appVersion: association,
       installLocation: installDir,
       engineAssociation: association,

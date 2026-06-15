@@ -93,7 +93,13 @@ export function resolveEngine(input: ResolveEngineInput): ResolveEngineResult {
   const exists = input.existsImpl ?? ((p: string) => fs.existsSync(p));
 
   if (input.engineRootOverride && input.engineRootOverride.trim().length > 0) {
-    const engineRoot = path.resolve(input.engineRootOverride.trim());
+    // Normalise the override with the TARGET-os path flavour, not the host's:
+    // the default `path.resolve` is `path.posix` on a non-Windows host (CI), so
+    // it would mangle a Windows engine root (`C:\Src\UE5` is not POSIX-absolute,
+    // so posix.resolve prepends cwd) and the binary check would then miss. This
+    // mirrors `editorBinaryPath`, which already picks the flavour by `os`.
+    const pj = os === 'win32' ? path.win32 : path.posix;
+    const engineRoot = pj.resolve(input.engineRootOverride.trim());
     const editorPath = editorBinaryPath(engineRoot, os);
     if (!exists(editorPath)) {
       return {
