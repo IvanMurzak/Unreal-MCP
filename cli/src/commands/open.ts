@@ -7,6 +7,7 @@ export const openCommand = new Command('open')
   .description('Launch the Unreal Editor for a project, wiring MCP connection env vars')
   .argument('[path]', 'Unreal project directory (defaults to cwd)')
   .option('--engine-root <dir>', 'Explicit engine install root (source builds)')
+  .option('--no-cache', 'Skip the persistent engine-path cache (force fresh discovery)')
   .option('--no-connect', 'Do not wire UNREAL_MCP_* env vars onto the editor')
   .option('--host <url>', 'UNREAL_MCP_HOST')
   .option('--token <token>', 'UNREAL_MCP_TOKEN')
@@ -19,6 +20,7 @@ export const openCommand = new Command('open')
     const result = await openProject({
       projectDir: pathArg,
       engineRoot: opts.engineRoot,
+      noCache: opts.cache === false,
       noConnect: opts.connect === false,
       host: opts.host,
       token: opts.token,

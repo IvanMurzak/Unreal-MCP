@@ -6,8 +6,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { spawn } from 'child_process';
 import { platform } from 'os';
-import { getDefaultLauncherManifestPath, readLauncherManifest } from '../utils/launcher.js';
-import { resolveEngine } from '../utils/engine.js';
+import { discoverEngine, invalidateCachedEngine } from './engine.js';
 import { readUProject } from '../utils/project.js';
 import { emitProgress } from './progress.js';
 import type {
@@ -92,18 +91,26 @@ export async function openProject(opts: OpenProjectOptions): Promise<OpenProject
       }
     }
 
-    const engines = opts.enginesImpl
-      ? opts.enginesImpl()
-      : (() => {
-          const manifestPath = getDefaultLauncherManifestPath(os);
-          return manifestPath ? readLauncherManifest(manifestPath) : [];
-        })();
-
-    const resolution = resolveEngine({
+    // Full cache-first discovery chain:
+    //   cache → launcher manifest → registry → common-location scan.
+    // `enginesImpl` (when supplied) still injects the LAUNCHER layer's engines,
+    // preserving existing test/embed behaviour; the registry + common-location
+    // layers are skipped under an injected `enginesImpl` only if the launcher
+    // layer already resolves (otherwise they run, with their own defaults).
+    const resolution = discoverEngine({
       engineAssociation: uproject.engineAssociation,
-      engines,
       engineRootOverride: opts.engineRoot,
       os,
+      noCache: opts.noCache,
+      enginesImpl: opts.enginesImpl,
+      // Thread the discovery surfaces so a library embedder / test can keep
+      // resolution hermetic — never touching the real home cache file, host
+      // registry, or real engine-install directories. Unset in normal CLI use,
+      // where the defaults wire to the real system.
+      cacheIo: opts.cacheIo,
+      discoveryFs: opts.discoveryFs,
+      registryQueryImpl: opts.registryQueryImpl,
+      existsImpl: opts.existsImpl,
     });
     if (resolution.kind === 'unresolved') {
       throw new Error(resolution.message);
@@ -125,9 +132,17 @@ export async function openProject(opts: OpenProjectOptions): Promise<OpenProject
 
     const args = [uproject.uprojectPath];
     const childEnv: NodeJS.ProcessEnv = { ...process.env, ...(env ?? {}) };
+    // Invalidate-on-spawn-failure: when the editor fails to launch from a path
+    // we resolved (most importantly a CACHED path pointing at a moved/removed
+    // engine), drop that cache slot so the next `open` re-runs the full chain.
+    // Only relevant for the real detached spawn — an injected `spawnImpl`
+    // (tests) owns its own error semantics.
+    const onSpawnError = (): void => {
+      if (!opts.noCache) invalidateCachedEngine(uproject.engineAssociation);
+    };
     const child = opts.spawnImpl
       ? opts.spawnImpl(resolution.editorPath, args, childEnv)
-      : spawnDetached(resolution.editorPath, args, childEnv);
+      : spawnDetached(resolution.editorPath, args, childEnv, onSpawnError);
 
     emitProgress(opts.onProgress, {
       phase: 'launched',
@@ -163,13 +178,21 @@ function spawnDetached(
   editorPath: string,
   args: string[],
   env: NodeJS.ProcessEnv,
+  onError?: () => void,
 ): { pid?: number } {
   const child = spawn(editorPath, args, { detached: true, stdio: 'ignore', env });
   // A detached spawn can fail asynchronously (EACCES, ENOENT) AFTER we have
   // already returned success; without an 'error' listener that emits an
   // unhandled 'error' event which crashes the CLI. Swallow it — the editor
-  // simply did not launch, and `status` will report it unreachable.
-  child.on('error', () => {});
+  // simply did not launch, and `status` will report it unreachable — but first
+  // invalidate any cached engine path so a stale cache self-heals.
+  child.on('error', () => {
+    try {
+      onError?.();
+    } catch {
+      /* never let cache cleanup crash the CLI */
+    }
+  });
   child.unref();
   return { pid: child.pid };
 }
