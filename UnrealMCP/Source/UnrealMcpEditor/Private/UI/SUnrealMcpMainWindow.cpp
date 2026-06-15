@@ -89,9 +89,9 @@ TSharedRef<SWidget> SUnrealMcpMainWindow::UnderlinedLabel(const TAttribute<FText
 
 TSharedRef<SWidget> SUnrealMcpMainWindow::BuildHeaderSection()
 {
-	const FString Version = PluginVersion.IsEmpty() ? TEXT("0.1.0") : PluginVersion;
+	const FString Version = PluginVersion.IsEmpty() ? TEXT("0.2.0") : PluginVersion;
 
-	// Left column: base config (Log Level, Timeout (ms), Version) styled rows. Right column: the AI-cube logo.
+	// Left column: base config (Log Level, Log file, Version) styled rows. Right column: the AI-cube logo.
 	auto MakeConfigRow = [](const FText& Label, const TSharedRef<SWidget>& Field)
 	{
 		return SNew(SHorizontalBox)
@@ -196,7 +196,8 @@ TSharedRef<SWidget> SUnrealMcpMainWindow::BuildConnectionSection()
 					{
 						case EUnrealMcpConnectionState::Connected:  return EDot::Online;
 						case EUnrealMcpConnectionState::Connecting:  return EDot::Ring;
-						case EUnrealMcpConnectionState::Degraded:    return EDot::Ring;
+						// Degraded must NOT use the (green) Ring brush — that reads as healthy. Show Offline.
+						case EUnrealMcpConnectionState::Degraded:    return EDot::Offline;
 						default:                                     return EDot::Offline;
 					}
 				}))
@@ -265,12 +266,12 @@ TSharedRef<SWidget> SUnrealMcpMainWindow::BuildCloudAuthRow()
 		// Authorize / Cancel.
 		+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
 		[
-			UnrealMcpStyleWidgets::StyledTextButton("UnrealMcp.Button.Secondary",
-				TAttribute<FText>::Create([this]()
+			UnrealMcpStyleWidgets::StyledButton("UnrealMcp.Button.Secondary",
+				SNew(STextBlock).Text_Lambda([this]()
 				{
 					return (IsViewModelValid() && ViewModel->GetDeviceAuthState() == EUnrealMcpDeviceAuthState::Pending)
 						? LOCTEXT("CancelAuth", "Cancel") : LOCTEXT("Authorize", "Authorize");
-				}).Get(),
+				}),
 				FOnClicked::CreateLambda([this]()
 				{
 					if (!IsViewModelValid())

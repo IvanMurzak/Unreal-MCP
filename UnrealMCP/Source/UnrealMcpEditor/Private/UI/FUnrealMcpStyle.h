@@ -58,10 +58,6 @@ public:
 	/** Alert (red) button bg rgb(88,44,44) — the Revoke button. */
 	static FLinearColor AlertButtonBg()     { return FromBytes(88, 44, 44); }
 
-	/** Toggle off #707070 / on #51C663. */
-	static FLinearColor ToggleOff()         { return FromBytes(0x70, 0x70, 0x70); }
-	static FLinearColor ToggleOn()          { return FromBytes(0x51, 0xC6, 0x63); }
-
 	/** Card / frame background rgba(20,40,69,0.2). */
 	static FLinearColor CardBg()            { return FromBytes(20, 40, 69, 51); }   // 0.2 * 255 ≈ 51
 	/** Input field bg rgba(0,0,0,0.25) / border rgba(255,255,255,0.08). */
@@ -80,7 +76,7 @@ public:
 	/** The connecting-line colour (2px rgb(80,80,80)) joining the connection-timeline dots. */
 	static FLinearColor ConnectingLine()    { return FromBytes(80, 80, 80); }
 
-	// --- Fonts (issue: headers 20px bold; section desc 12px; timeline label 13px bold + underline). ---
+	// --- Fonts (issue: headers 20px bold; section desc 9px; timeline label 13px bold + underline). ---
 
 	static FSlateFontInfo HeaderFont()      { return FCoreStyle::GetDefaultFontStyle("Bold", 20); }
 	static FSlateFontInfo TimelineLabelFont(){ return FCoreStyle::GetDefaultFontStyle("Bold", 13); }

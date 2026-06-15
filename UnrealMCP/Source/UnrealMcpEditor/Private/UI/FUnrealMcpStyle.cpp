@@ -112,7 +112,7 @@ TSharedRef<FSlateStyleSet> FUnrealMcpStyle::Create()
 		Style->Set("UnrealMcp.Text.TimelineLabel", TimelineLabel);
 	}
 
-	// --- Section description text style (12px dimmed). ---
+	// --- Section description text style (9px dimmed). ---
 	Style->Set("UnrealMcp.Text.Description", FTextBlockStyle(FCoreStyle::Get().GetWidgetStyle<FTextBlockStyle>("NormalText"))
 		.SetFont(DescriptionFont())
 		.SetColorAndOpacity(FSlateColor(DescriptionText())));

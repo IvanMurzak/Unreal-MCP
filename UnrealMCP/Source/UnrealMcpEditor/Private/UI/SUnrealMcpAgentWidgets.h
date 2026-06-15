@@ -170,7 +170,7 @@ namespace UnrealMcpStyleWidgets
 			.Text(Title);
 	}
 
-	/** A dimmed 12px description/hint line (Unity .section-desc). */
+	/** A dimmed 9px description/hint line (Unity .section-desc). */
 	inline TSharedRef<SWidget> Description(const TAttribute<FText>& Text)
 	{
 		return SNew(STextBlock)
