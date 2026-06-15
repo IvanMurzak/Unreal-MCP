@@ -103,6 +103,14 @@ export async function openProject(opts: OpenProjectOptions): Promise<OpenProject
       os,
       noCache: opts.noCache,
       enginesImpl: opts.enginesImpl,
+      // Thread the discovery surfaces so a library embedder / test can keep
+      // resolution hermetic — never touching the real home cache file, host
+      // registry, or real engine-install directories. Unset in normal CLI use,
+      // where the defaults wire to the real system.
+      cacheIo: opts.cacheIo,
+      discoveryFs: opts.discoveryFs,
+      registryQueryImpl: opts.registryQueryImpl,
+      existsImpl: opts.existsImpl,
     });
     if (resolution.kind === 'unresolved') {
       throw new Error(resolution.message);

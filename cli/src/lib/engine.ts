@@ -172,13 +172,15 @@ export function discoverEngine(input: DiscoverEngineInput): DiscoverEngineResult
     }
   }
 
-  // 2. Launcher manifest.
+  // 2. Launcher manifest. Resolve the platform manifest path once — it is
+  // reused by the exhausted-path branch below to decide which unresolved
+  // reason is most actionable (a Linux host has no launcher manifest).
+  const launcherManifestPath = getDefaultLauncherManifestPath(os);
   const launcherEngines = input.enginesImpl
     ? input.enginesImpl()
-    : (() => {
-        const manifestPath = getDefaultLauncherManifestPath(os);
-        return manifestPath ? readLauncherManifest(manifestPath) : [];
-      })();
+    : launcherManifestPath
+      ? readLauncherManifest(launcherManifestPath)
+      : [];
   verbose(`discoverEngine: launcher manifest yielded ${launcherEngines.length} engine(s)`);
   const fromLauncher = resolveEngine({ engineAssociation: assoc, engines: launcherEngines, os, existsImpl: exists });
   if (fromLauncher.kind === 'resolved') {
@@ -240,7 +242,7 @@ export function discoverEngine(input: DiscoverEngineInput): DiscoverEngineResult
   // launcher manifest prefer the scan's reason (the only discovery layer there)
   // to avoid pointing the user at a file their platform never has.
   verbose(`discoverEngine: all layers exhausted for ${assoc || '__auto__'}`);
-  const hasLauncherManifest = getDefaultLauncherManifestPath(os) !== null;
+  const hasLauncherManifest = launcherManifestPath !== null;
   const preferred = hasLauncherManifest ? fromLauncher : fromScan;
   const fallback = hasLauncherManifest ? fromScan : fromLauncher;
   const unresolved = preferred.kind === 'unresolved' ? preferred : fallback;

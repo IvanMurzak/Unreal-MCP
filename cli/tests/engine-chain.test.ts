@@ -4,10 +4,14 @@ import {
   engineRootFromEditorPath,
   type DiscoverEngineInput,
 } from '../src/lib/engine.js';
+import { openProject } from '../src/lib/open.js';
 import { editorBinaryPath } from '../src/utils/engine.js';
 import type { EngineInstallation } from '../src/utils/launcher.js';
 import type { EngineCacheIo } from '../src/utils/engine-cache.js';
 import type { DiscoveryFs } from '../src/utils/engine-discovery.js';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 
 /** In-memory cache IO so the chain's cache writes/reads are observable. */
 function memCache(initial: Record<string, { path: string; savedAt: number }> = {}, existing?: Set<string>): {
@@ -188,6 +192,57 @@ describe('discoverEngine — noCache disables read AND write', () => {
     });
     expect(r.kind).toBe('resolved');
     expect(current()).toEqual({});
+  });
+});
+
+describe('openProject — forwards the discovery surfaces (hermetic, no home cache / host registry / host fs)', () => {
+  it('resolves through an INJECTED cacheIo + discoveryFs + registryQueryImpl, never the real home cache file', async () => {
+    // A real temp project + a real fake editor binary (so the default
+    // existence check passes), but every DISCOVERY surface is injected.
+    const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'umcp-openproj-'));
+    const engineRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'umcp-engine-'));
+    try {
+      fs.writeFileSync(
+        path.join(projectDir, 'MyGame.uproject'),
+        JSON.stringify({ FileVersion: 3, EngineAssociation: '5.7' }),
+        'utf-8',
+      );
+      const bin = editorBinaryPath(engineRoot, process.platform);
+      fs.mkdirSync(path.dirname(bin), { recursive: true });
+      fs.writeFileSync(bin, '', 'utf-8');
+
+      // The injected cache slot lives only in `store`; the real home file path
+      // is asserted untouched below. registry + scan are no-ops.
+      const store = new Map<string, string>();
+      const homeCacheFile = path.join(os.homedir(), '.unreal-mcp-cli-engine-cache.json');
+      const homeCacheExistedBefore = fs.existsSync(homeCacheFile);
+
+      const r = await openProject({
+        projectDir,
+        enginesImpl: () => [
+          { appName: 'UE_5.7', appVersion: '5.7', installLocation: engineRoot, engineAssociation: '5.7' },
+        ],
+        cacheIo: {
+          cacheFilePath: '<in-memory>',
+          readImpl: (p) => store.get(p) ?? null,
+          writeImpl: (p, c) => void store.set(p, c),
+        },
+        discoveryFs: { existsImpl: () => false, readdirImpl: () => [] },
+        registryQueryImpl: () => null,
+        spawnImpl: () => ({ pid: 99 }),
+      });
+
+      expect(r.kind).toBe('success');
+      if (r.kind === 'success') expect(r.editorPid).toBe(99);
+      // The resolved path was cached into the INJECTED store, proving the
+      // cacheIo surface was threaded through openProject → discoverEngine.
+      expect(store.size).toBeGreaterThan(0);
+      // And the user's real home cache file was never created by this run.
+      expect(fs.existsSync(homeCacheFile)).toBe(homeCacheExistedBefore);
+    } finally {
+      fs.rmSync(projectDir, { recursive: true, force: true });
+      fs.rmSync(engineRoot, { recursive: true, force: true });
+    }
   });
 });
 

@@ -106,6 +106,27 @@ export interface OpenProjectOptions {
   noCache?: boolean;
   /** Test injection — installed engines (defaults to launcher manifest). */
   enginesImpl?: () => import('../utils/launcher.js').EngineInstallation[];
+  /**
+   * Test/embed injection — the persistent engine-path cache I/O surface
+   * (defaults to the real `~/.unreal-mcp-cli-engine-cache.json`). Supply an
+   * in-memory/temp surface so a unit suite or library embedder never reads or
+   * writes the user's real home cache file.
+   */
+  cacheIo?: import('../utils/engine-cache.js').EngineCacheIo;
+  /**
+   * Test/embed injection — the common-location scan's filesystem surface
+   * (defaults to the real `fs`). Supply a fake to keep discovery hermetic
+   * (no `fs.readdirSync` of real engine-install roots).
+   */
+  discoveryFs?: import('../utils/engine-discovery.js').DiscoveryFs;
+  /**
+   * Test/embed injection — the Windows-registry reader for source builds
+   * (defaults to the real `reg query`; no-op off Windows). Supply a fake so
+   * discovery never shells out to the host registry.
+   */
+  registryQueryImpl?: import('../utils/engine-discovery.js').RegistryQueryImpl;
+  /** Test/embed injection — binary existence check (defaults to `fs.existsSync`). */
+  existsImpl?: (p: string) => boolean;
   /** Test injection — spawn (defaults to detached `child_process.spawn`). */
   spawnImpl?: (editorPath: string, args: string[], env: NodeJS.ProcessEnv) => { pid?: number };
   onProgress?: ProgressCallback;
