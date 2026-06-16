@@ -285,6 +285,93 @@ namespace UnrealMcpStyleWidgets
 	}
 
 	/**
+	 * A single connection-timeline ROW: a self-contained 20px rail cell on the LEFT (its status dot pinned to the
+	 * TOP, then a FillHeight connecting-line segment that fills the rest of THIS row's height) beside the row's
+	 * CONTENT on the right. The two cells share the row's AutoHeight, so the dot sits on the content's FIRST line
+	 * (its label) and the line spans from just below the dot to the row's bottom edge.
+	 *
+	 * Stacking these rows in an SVerticalBox yields BOTH properties the single-column TimelineRail could not give
+	 * at once: (1) each dot is anchored to the TOP of its OWN content row — i.e. centred on its label — instead of
+	 * floating at the even-split midpoint of the whole cluster (which dragged the 2nd/3rd dots down into the middle
+	 * of tall rows like the MCP card); and (2) the line is still continuous, because each row's line runs from its
+	 * dot down to the row bottom, which is exactly where the next row's dot begins. @p bIsLast collapses the line
+	 * (the last point has none — Unity's .timeline-point-last). @p DotTopPadding is a small per-row nudge to centre
+	 * the 14px dot on its label's text line (labels differ slightly in cap-height / leading).
+	 *
+	 * @p bLineAbove draws a short connecting-line segment ABOVE the dot, filling the DotTopPadding gap between the
+	 * row's top edge and the (possibly nudged-down) dot — so the line arrives flush at the dot regardless of how
+	 * far DotTopPadding pushes it down (the MCP row nudges its dot ~14px to reach the card-header label; without
+	 * this the previous row's line would stop at the row boundary and leave a visible gap above the MCP dot). Pass
+	 * false for the FIRST row (nothing is above it). The above-segment uses the row's own DotState visibility-free
+	 * connecting brush; it is collapsed when the dot itself is collapsed.
+	 *
+	 * Width 20px + dot/line centred horizontally mirror Unity's .timeline-indicator (20px column, line at x=9px).
+	 */
+	inline TSharedRef<SWidget> TimelineRow(
+		const FTimelineRailDot& Point,
+		const TSharedRef<SWidget>& Content,
+		bool bIsLast,
+		bool bLineAbove)
+	{
+		// LEFT: the rail cell. When bLineAbove, a fixed-height connecting segment fills the DotTopPadding gap so the
+		// line meets the dot flush (uniform spacing into every dot); otherwise the dot just carries its top padding.
+		TSharedRef<SVerticalBox> RailCell = SNew(SVerticalBox);
+		if (bLineAbove && Point.DotTopPadding > 0.0f)
+		{
+			// The 2px-gap below mirrors the inter-dot line's 2px top gap, so the visible spacing dot↔line is uniform
+			// at every dot. The segment height = DotTopPadding - 2 (clamped >= 1) so the dot still lands at its label.
+			const float AboveHeight = FMath::Max(1.0f, Point.DotTopPadding - 2.0f);
+			RailCell->AddSlot().AutoHeight().HAlign(HAlign_Center)
+			[
+				SNew(SBox).WidthOverride(2.0f).HeightOverride(AboveHeight).Visibility(Point.DotVisibility)
+				[
+					SNew(SImage).Image(FUnrealMcpStyle::Get().GetBrush("UnrealMcp.ConnectingLine"))
+				]
+			];
+			RailCell->AddSlot().AutoHeight().HAlign(HAlign_Center).Padding(0, 2, 0, 0)
+			[
+				SNew(SBox).Visibility(Point.DotVisibility)
+				[
+					StatusDot(Point.DotState)
+				]
+			];
+		}
+		else
+		{
+			RailCell->AddSlot().AutoHeight().HAlign(HAlign_Center).Padding(0, Point.DotTopPadding, 0, 0)
+			[
+				SNew(SBox).Visibility(Point.DotVisibility)
+				[
+					StatusDot(Point.DotState)
+				]
+			];
+		}
+		if (!bIsLast)
+		{
+			RailCell->AddSlot().FillHeight(1.0f).HAlign(HAlign_Center).Padding(0, 2, 0, 0)
+			[
+				TimelineLineSegment(Point.LineBelowVisibility)
+			];
+		}
+
+		return SNew(SHorizontalBox)
+			// The rail cell — VAlign_Fill so its FillHeight line stretches to the full row height (down to the next
+			// row's dot). Fixed 20px column, 8px gutter to the content (matches the old cluster's rail->content gap).
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Fill).Padding(0, 0, 8, 0)
+			[
+				SNew(SBox).WidthOverride(20.0f)
+				[
+					RailCell
+				]
+			]
+			// The content — its first line (the row's label) is what the top-pinned dot aligns to.
+			+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Fill)
+			[
+				Content
+			];
+	}
+
+	/**
 	 * A tab-like segmented control (Unity .segmented-control): a rounded track holding N toggle segments;
 	 * the selected segment renders its text teal. Each segment is a toggle-style SCheckBox bound to the
 	 * shared IsSelected/OnSelect lambdas so it stays a thin view over the caller's state.

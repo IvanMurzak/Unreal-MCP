@@ -13,8 +13,8 @@
  * The "AI Game Developer" main window (docs/ARCHITECTURE.md §7), a pure-Slate compound widget — NO UMG /
  * editor-utility dependency. Hosted in the nomad dockable tab registered by FUnrealMcpMainWindowTab. Every
  * widget binds (via TAttribute lambdas) to the shared FUnrealMcpEditorViewModel, which owns all state; this
- * widget is a thin view. Sections, top to bottom: header/settings, connection panel, connection-mode toggle,
- * Cloud device-code auth, Custom server auth, bridge status, AI agents, footer.
+ * widget is a thin view. Sections, top to bottom: header/settings, the Connection timeline (Unreal status →
+ * MCP server → AI-agents status readout), the AI Agent Configurators section, Extensions, footer.
  *
  * Lifetime: the view-model outlives the widget (it is owned by the runtime); the widget keeps only a weak-ish
  * shared ref and reads it under IsValid guards. The status feed is marshalled to the game thread by the
@@ -50,10 +50,11 @@ private:
 
 	// Section builders (each returns a Slate widget; kept separate so §7's ordering reads top-to-bottom).
 	// The window now mirrors the Unity-MCP reference (issue #78): a header card with base config (Log Level /
-	// Timeout / Version) + the AI-cube logo, a unified Connection timeline card (Custom/Cloud segmented in the
-	// header row, status dots + connecting line + underlined labels, teal Start / red Revoke / masked token +
-	// New, stdio/http + none/required segmented), the AI Agent Configurators panel, an Extensions card, and a
-	// styled footer (Discord / GitHub bug-report / gold GitHub Star).
+	// Timeout / Version) + the AI-cube logo, a unified Connection timeline (Custom/Cloud segmented in the header
+	// row, status dots + connecting line + underlined labels, teal Start / red Revoke / masked token + New,
+	// stdio/http + none/required segmented) whose three points are Unreal status → MCP server → AI-agents status
+	// readout (issue #97), then the AI Agent Configurators panel as its own section below, an Extensions section,
+	// and a styled footer (Discord / GitHub bug-report / gold GitHub Star).
 	TSharedRef<SWidget> BuildHeaderSection();
 	TSharedRef<SWidget> BuildConnectionSection();
 	// The connection cluster (Unity's .connection-timeline): a 2-column layout — a continuous vertical rail
@@ -69,10 +70,17 @@ private:
 	TSharedRef<SWidget> BuildMcpServerCard();
 	// The "Unreal: <status>" content row (underlined label + Connect/Disconnect/Stop) — its dot lives in the rail.
 	TSharedRef<SWidget> BuildUnrealStatusRow();
+	// The "AI agents" connection-timeline content row (issue #97): an underlined "AI agents" label + the read-only
+	// list of currently-connected agents from ViewModel->GetAiAgents() (empty-state line when none). A STATUS
+	// readout (mirrors BuildUnrealStatusRow), NOT the configurator — its dot lives in the shared rail.
+	TSharedRef<SWidget> BuildAiAgentsStatusRow();
 	// The Custom-mode transport selector (stdio/http) segmented control.
 	TSharedRef<SWidget> BuildTransportSelector();
 	// The Custom-mode authorization selector (none/required) + masked token + New.
 	TSharedRef<SWidget> BuildCustomAuthSelector();
+	// The AI Agent Configurators panel (the SUnrealMcpAgentConfigurators dropdown). Issue #97 moved it back OUT of
+	// the Connection cluster to its own standalone top-level section BELOW the Connection section (where it lived
+	// before #93) — the connection status dots no longer anchor to it.
 	TSharedRef<SWidget> BuildAgentConfiguratorsSection();
 	TSharedRef<SWidget> BuildExtensionsSection();
 	TSharedRef<SWidget> BuildFooterSection();

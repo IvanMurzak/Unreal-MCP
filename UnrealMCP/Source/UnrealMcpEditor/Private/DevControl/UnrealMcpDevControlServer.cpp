@@ -362,10 +362,20 @@ int32 FUnrealMcpDevControlServer::RouteRequest(
 		TSharedPtr<FJsonObject> StatusJson = MakeShared<FJsonObject>();
 		StatusJson->SetStringField(TEXT("connectionState"), StatusLabel);
 		StatusJson->SetBoolField(TEXT("keepConnected"), bKeepConnected);
+		// Issue #97: forward an optional `aiAgents` array verbatim so a smoke test (and the live window screenshot)
+		// can drive the §7 AI-agents status row's connected-agents list + its rail dot. Optional — when omitted the
+		// list stays whatever ApplyStatus last set (a §1.3 status with no aiAgents key clears it to empty per
+		// ApplyStatus's contract, so the empty state is still exercisable by injecting a status without the field).
+		const TArray<TSharedPtr<FJsonValue>>* InAgents = nullptr;
+		if (Body->TryGetArrayField(TEXT("aiAgents"), InAgents) && InAgents)
+		{
+			StatusJson->SetArrayField(TEXT("aiAgents"), *InAgents);
+		}
 		ViewModelPtr->ApplyStatus(StatusJson);
 
 		OutResult->SetBoolField(TEXT("ok"), true);
 		OutResult->SetStringField(TEXT("connectionState"), DevControlConnectionStateLabel(ViewModelPtr->GetConnectionState()));
+		OutResult->SetNumberField(TEXT("aiAgentCount"), ViewModelPtr->GetAiAgents().Num());
 		return 200;
 	}
 

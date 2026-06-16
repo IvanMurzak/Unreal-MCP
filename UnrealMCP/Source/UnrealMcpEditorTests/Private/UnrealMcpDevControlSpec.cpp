@@ -209,6 +209,49 @@ void FUnrealMcpDevControlSpec::Define()
 			TestEqual("status", Status, 400);
 			TestFalse("not ok", Result->GetBoolField(TEXT("ok")));
 		});
+
+		It("forwards an optional aiAgents array into the view-model (issue #97 AI-agents status row)", [this]()
+		{
+			TSharedRef<FDevCtlRecording> Rec = MakeShared<FDevCtlRecording>();
+			TSharedRef<FUnrealMcpEditorViewModel> VM = DevCtlMakeViewModel(Rec);
+
+			TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
+			const int32 Status = FUnrealMcpDevControlServer::RouteRequest(
+				TEXT("POST"), TEXT("/inject/connection-status"),
+				DevCtlBody(TEXT("{\"status\":\"Connected\",\"aiAgents\":[\"Claude Code\",\"Cursor\"]}")),
+				&VM.Get(), Result);
+
+			TestEqual("status", Status, 200);
+			TestTrue("ok", Result->GetBoolField(TEXT("ok")));
+			TestEqual("aiAgentCount in response", (int32)Result->GetNumberField(TEXT("aiAgentCount")), 2);
+			// The view-model's live list (which the §7 AI-agents status row + its rail dot read) reflects the inject.
+			TestEqual("view-model agent count", VM->GetAiAgents().Num(), 2);
+			if (VM->GetAiAgents().Num() == 2)
+			{
+				TestEqual("agent[0]", VM->GetAiAgents()[0], FString(TEXT("Claude Code")));
+				TestEqual("agent[1]", VM->GetAiAgents()[1], FString(TEXT("Cursor")));
+			}
+		});
+
+		It("clears the aiAgents list when a status omits the field (empty-state path)", [this]()
+		{
+			TSharedRef<FDevCtlRecording> Rec = MakeShared<FDevCtlRecording>();
+			TSharedRef<FUnrealMcpEditorViewModel> VM = DevCtlMakeViewModel(Rec);
+
+			// First populate, then inject a status with no aiAgents key — the list must reset to empty so the
+			// AI-agents status row falls back to its "No agents connected" empty state.
+			TSharedRef<FJsonObject> First = MakeShared<FJsonObject>();
+			FUnrealMcpDevControlServer::RouteRequest(
+				TEXT("POST"), TEXT("/inject/connection-status"),
+				DevCtlBody(TEXT("{\"status\":\"Connected\",\"aiAgents\":[\"Claude Code\"]}")), &VM.Get(), First);
+			TestEqual("populated", VM->GetAiAgents().Num(), 1);
+
+			TSharedRef<FJsonObject> Second = MakeShared<FJsonObject>();
+			FUnrealMcpDevControlServer::RouteRequest(
+				TEXT("POST"), TEXT("/inject/connection-status"),
+				DevCtlBody(TEXT("{\"status\":\"Connected\"}")), &VM.Get(), Second);
+			TestEqual("cleared to empty", VM->GetAiAgents().Num(), 0);
+		});
 	});
 
 	Describe("Control mutators", [this]()
