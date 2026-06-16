@@ -29,6 +29,12 @@
 #include <sys/sysctl.h>
 #endif
 
+#if PLATFORM_WINDOWS
+#include "Windows/AllowWindowsPlatformTypes.h"
+#include <Windows.h>
+#include "Windows/HideWindowsPlatformTypes.h"
+#endif
+
 // Single source of the consumed shared-server version. Kept in lockstep with cli/src/lib/server-version.ts
 // (SERVER_VERSION) and Unity's McpServerManager.ServerVersion — the three plugins consume the SAME server.
 const TCHAR* FUnrealMcpServerManager::ServerVersion = TEXT("8.0.0");
@@ -58,6 +64,15 @@ FUnrealMcpServerManager::FUnrealMcpServerManager() = default;
 FUnrealMcpServerManager::~FUnrealMcpServerManager()
 {
 	Stop(/*bForce*/ true);
+#if PLATFORM_WINDOWS
+	// Close the kill-on-job-close Job Object handle. If any server process is still assigned to it, closing the
+	// LAST handle here trips JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE and reaps it — a final backstop on top of Stop().
+	if (JobHandle != nullptr)
+	{
+		::CloseHandle(static_cast<HANDLE>(JobHandle));
+		JobHandle = nullptr;
+	}
+#endif
 }
 
 FString FUnrealMcpServerManager::ServerBinaryBasename()
@@ -249,6 +264,7 @@ bool FUnrealMcpServerManager::DownloadBinaryIfNeeded(FString& OutBinaryPath)
 			{
 				ZipBytes = Resp->GetContent();
 				bOk = true;
+				UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] server download completed: %d bytes."), ZipBytes.Num());
 			}
 			else
 			{
@@ -282,7 +298,10 @@ bool FUnrealMcpServerManager::DownloadBinaryIfNeeded(FString& OutBinaryPath)
 	// deflate entries on read). Mirror download-server.ts: find the binary at the shallowest path, then move it
 	// + its sidecar files (appsettings.json, NLog.config, server.json, …) into the install dir.
 	IFileManager& FM = IFileManager::Get();
-	const FString TempZipPath = FPaths::CreateTempFilename(*FPaths::ProjectIntermediateDir(), TEXT("gamedev-mcp-server-"), TEXT(".zip"));
+	// Absolute temp path: CreateTempFilename's dir is project-relative; OpenRead and SaveArrayToFile can resolve a
+	// relative path against different CWDs across the engine, so make it absolute to keep both on the same file.
+	const FString TempZipPath = FPaths::ConvertRelativePathToFull(
+		FPaths::CreateTempFilename(*FPaths::ProjectIntermediateDir(), TEXT("gamedev-mcp-server-"), TEXT(".zip")));
 	if (!FFileHelper::SaveArrayToFile(ZipBytes, *TempZipPath))
 	{
 		UE_LOG(LogUnrealMcp, Error, TEXT("[Unreal-MCP] could not stage the downloaded server zip."));
@@ -293,17 +312,19 @@ bool FUnrealMcpServerManager::DownloadBinaryIfNeeded(FString& OutBinaryPath)
 	IFileHandle* ZipHandle = FPlatformFileManager::Get().GetPlatformFile().OpenRead(*TempZipPath);
 	if (ZipHandle == nullptr)
 	{
-		UE_LOG(LogUnrealMcp, Error, TEXT("[Unreal-MCP] could not reopen the staged server zip."));
+		UE_LOG(LogUnrealMcp, Error, TEXT("[Unreal-MCP] could not reopen the staged server zip at %s."), *TempZipPath);
 		return false;
 	}
 	FZipArchiveReader Reader(ZipHandle); // takes ownership of ZipHandle (closes it in its dtor)
 	if (!Reader.IsValid())
 	{
-		UE_LOG(LogUnrealMcp, Error, TEXT("[Unreal-MCP] downloaded server zip is malformed/unreadable."));
+		UE_LOG(LogUnrealMcp, Error, TEXT("[Unreal-MCP] downloaded server zip is malformed/unreadable (%lld bytes staged)."),
+			(long long)ZipBytes.Num());
 		return false;
 	}
 
 	const TArray<FString> Names = Reader.GetFileNames();
+	UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] server zip opened: %d entries."), Names.Num());
 	const FString Basename = ServerBinaryBasename();
 
 	// Find the shallowest entry whose leaf name equals the binary (flat win zip OR nested <rid>/ unix zip).
@@ -339,11 +360,15 @@ bool FUnrealMcpServerManager::DownloadBinaryIfNeeded(FString& OutBinaryPath)
 	FM.DeleteDirectory(*InstallDir, /*RequireExists*/ false, /*Tree*/ true);
 	FM.MakeDirectory(*InstallDir, /*Tree*/ true);
 
+	int32 FilesWritten = 0;
 	for (const FString& Name : Names)
 	{
 		if (Name.EndsWith(TEXT("/"))) // directory entry
 			continue;
-		if (!Name.StartsWith(BinaryDirPrefix))
+		// Only files in the binary's own folder. NOTE: FString::StartsWith returns FALSE for an empty prefix,
+		// so a FLAT win zip (BinaryDirPrefix == "") would filter out EVERYTHING — guard the empty-prefix case
+		// explicitly (every entry is "in" the root folder when the prefix is empty).
+		if (!BinaryDirPrefix.IsEmpty() && !Name.StartsWith(BinaryDirPrefix))
 			continue;
 		const FString Leaf = Name.RightChop(BinaryDirPrefix.Len());
 		if (Leaf.IsEmpty() || Leaf.Contains(TEXT("/"))) // flatten one level; skip deeper nesting
@@ -361,11 +386,14 @@ bool FUnrealMcpServerManager::DownloadBinaryIfNeeded(FString& OutBinaryPath)
 			UE_LOG(LogUnrealMcp, Error, TEXT("[Unreal-MCP] failed to write '%s'."), *OutPath);
 			return false;
 		}
+		++FilesWritten;
 	}
 
 	if (!FPaths::FileExists(BinPath))
 	{
-		UE_LOG(LogUnrealMcp, Error, TEXT("[Unreal-MCP] server binary missing after unpack at: %s"), *BinPath);
+		UE_LOG(LogUnrealMcp, Error,
+			TEXT("[Unreal-MCP] server binary missing after unpack at: %s (entry='%s', prefix='%s', files written=%d)"),
+			*BinPath, *BinaryEntryName, *BinaryDirPrefix, FilesWritten);
 		return false;
 	}
 	PrepareBinaryForSpawn(BinPath);
@@ -399,9 +427,60 @@ bool FUnrealMcpServerManager::SpawnProcess(const FString& InBinaryPath)
 		ProcHandle = NewHandle;
 		ProcId = NewProcId;
 	}
+	// Bind the child to the kill-on-job-close job so it dies with the editor by ANY exit path (graceful, hard
+	// TerminateProcess, or crash) — the load-bearing guarantee for "Start then close editor → no orphan" when
+	// the engine's graceful OnEnginePreExit teardown never runs. The handle (HANDLE on Windows) is ProcHandle.Get().
+	BindProcessToKillOnCloseJob(NewHandle.Get());
 	WritePidFile(NewProcId);
 	UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] spawned local server pid=%u on port=%d."), NewProcId, ListenPort);
 	return true;
+}
+
+void FUnrealMcpServerManager::BindProcessToKillOnCloseJob(void* ProcessHandle)
+{
+#if PLATFORM_WINDOWS
+	if (ProcessHandle == nullptr)
+		return;
+
+	// Create the job lazily on the first spawn; reuse it for restarts so one editor session = one job.
+	if (JobHandle == nullptr)
+	{
+		HANDLE NewJob = ::CreateJobObject(nullptr, nullptr);
+		if (NewJob == nullptr)
+		{
+			UE_LOG(LogUnrealMcp, Warning,
+				TEXT("[Unreal-MCP] CreateJobObject failed (err=%lu); relying on the graceful shutdown stop only."),
+				::GetLastError());
+			return;
+		}
+		JOBOBJECT_EXTENDED_LIMIT_INFORMATION Info = {};
+		Info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+		if (!::SetInformationJobObject(NewJob, JobObjectExtendedLimitInformation, &Info, sizeof(Info)))
+		{
+			UE_LOG(LogUnrealMcp, Warning,
+				TEXT("[Unreal-MCP] SetInformationJobObject failed (err=%lu); job will not kill-on-close."),
+				::GetLastError());
+			::CloseHandle(NewJob);
+			return;
+		}
+		JobHandle = NewJob;
+	}
+
+	if (!::AssignProcessToJobObject(static_cast<HANDLE>(JobHandle), static_cast<HANDLE>(ProcessHandle)))
+	{
+		// A common benign cause: the process was created in a job that disallows nesting/breakaway. Log and move
+		// on — the graceful OnEnginePreExit stop still covers a clean editor close.
+		UE_LOG(LogUnrealMcp, Warning,
+			TEXT("[Unreal-MCP] AssignProcessToJobObject failed (err=%lu); kill-on-editor-exit not guaranteed for this server."),
+			::GetLastError());
+	}
+	else
+	{
+		UE_LOG(LogUnrealMcp, Verbose, TEXT("[Unreal-MCP] local server bound to kill-on-close job."));
+	}
+#else
+	(void)ProcessHandle; // non-Windows: graceful PreExit stop + KillTree cover the supported cases.
+#endif
 }
 
 bool FUnrealMcpServerManager::Start(int32 Port, int32 PluginTimeoutMs, bool bAuthRequired, const FString& Token)
@@ -479,6 +558,9 @@ bool FUnrealMcpServerManager::ReattachIfRunning(int32 Port, int32 PluginTimeoutM
 		ProcHandle = Adopted;
 		ProcId = static_cast<uint32>(SavedPid);
 	}
+	// Re-bind the adopted survivor to a kill-on-close job so it too dies with THIS editor session by any exit
+	// path (the original spawning session's job died with that session's editor).
+	BindProcessToKillOnCloseJob(Adopted.Get());
 	bStopRequested = false;
 	WindowStartSeconds = FPlatformTime::Seconds();
 	CrashesInWindow = 0;

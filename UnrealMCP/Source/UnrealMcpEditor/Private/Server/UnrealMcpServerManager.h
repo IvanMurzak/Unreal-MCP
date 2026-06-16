@@ -146,6 +146,16 @@ private:
 	void StopWatchdog();
 	void TerminateProcess(bool bForce);
 
+	/**
+	 * Windows-only: bind the just-spawned process @p ProcessHandle to a kill-on-job-close Job Object so the OS
+	 * terminates the local server when THIS editor process dies by ANY means — including a hard
+	 * TerminateProcess / crash that never runs FUnrealMcpRuntime::Shutdown's graceful stop. The job handle is
+	 * owned by the manager (JobHandle) for the manager's lifetime; the editor process's death closes the last
+	 * handle to it, tripping JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE. No-op on non-Windows (the graceful PreExit stop
+	 * and KillTree terminate cover those; a hard-kill orphan there is out of scope for this Windows testbed).
+	 */
+	void BindProcessToKillOnCloseJob(void* ProcessHandle);
+
 	/** {Project}/Intermediate/UnrealMCP/server/server.pid — survives a module reload for ReattachIfRunning. */
 	static FString PidFilePath();
 	static void WritePidFile(uint32 Pid);
@@ -161,6 +171,12 @@ private:
 	mutable FCriticalSection ProcessMutex;
 	FProcHandle ProcHandle;
 	uint32 ProcId = 0;
+
+	// Windows-only kill-on-close Job Object handle (HANDLE stored as void*; nullptr off Windows / before first
+	// spawn). Created lazily on the first spawn and kept for the manager's lifetime so the OS reaps the server
+	// when the editor process dies by ANY means (graceful quit, hard TerminateProcess, or crash). Closed in the
+	// destructor. See BindProcessToKillOnCloseJob.
+	void* JobHandle = nullptr;
 
 	FThreadSafeBool bStopRequested = false;
 	FThreadSafeBool bStarting = false;
