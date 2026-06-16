@@ -369,8 +369,19 @@ bool FUnrealMcpServerManager::DownloadBinaryIfNeeded(FString& OutBinaryPath)
 		if (!BinaryDirPrefix.IsEmpty() && !Name.StartsWith(BinaryDirPrefix))
 			continue;
 		const FString Leaf = Name.RightChop(BinaryDirPrefix.Len());
-		if (Leaf.IsEmpty() || Leaf.Contains(TEXT("/"))) // flatten one level; skip deeper nesting
+		// Zip-slip hardening (defense in depth): only write a SINGLE safe path segment directly under InstallDir.
+		// Reject anything that could escape it — a nested path (forward OR backslash), a ".." traversal segment,
+		// or a non-relative / drive-letter / absolute leaf (e.g. "..\x", "C:evil", "\\unc\x"). A crafted entry
+		// that the slash-only check missed is dropped here rather than written outside InstallDir.
+		if (Leaf.IsEmpty()
+			|| Leaf.Contains(TEXT("/")) || Leaf.Contains(TEXT("\\"))   // no nested path segments (either separator)
+			|| Leaf.Contains(TEXT(".."))                                // no parent-dir traversal segment
+			|| !FPaths::IsRelative(Leaf)                                // reject absolute paths
+			|| Leaf.Contains(TEXT(":")))                                // reject drive-letter / ADS prefixes (e.g. "C:evil")
+		{
+			UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] skipped unsafe zip entry leaf '%s' (from '%s')."), *Leaf, *Name);
 			continue;
+		}
 
 		TArray<uint8> FileData;
 		if (!Reader.TryReadFile(Name, FileData))
