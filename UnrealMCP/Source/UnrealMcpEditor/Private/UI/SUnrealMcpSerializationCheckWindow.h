@@ -72,7 +72,6 @@ private:
 	TSharedPtr<SEditableTextBox> TargetField;
 	TSharedPtr<SCheckBox> RecursiveToggle;
 	TSharedPtr<SMultiLineEditableTextBox> OutputBox;
-	TSharedPtr<SButton> CopyButton;
 
 	// The output header text ("Output" / "Output (NN ms)"), bound live.
 	FText OutputHeader;

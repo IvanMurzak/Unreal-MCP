@@ -217,7 +217,7 @@ TSharedRef<SWidget> SUnrealMcpSerializationCheckWindow::BuildOutputSection()
 		// Copy button.
 		+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Right).Padding(0, 6, 0, 0)
 		[
-			SAssignNew(CopyButton, SButton)
+			SNew(SButton)
 			.ButtonStyle(&FUnrealMcpStyle::Get().GetWidgetStyle<FButtonStyle>("UnrealMcp.Button.Secondary"))
 			.HAlign(HAlign_Center).VAlign(VAlign_Center)
 			.OnClicked(FOnClicked::CreateSP(this, &SUnrealMcpSerializationCheckWindow::OnCopyClicked))

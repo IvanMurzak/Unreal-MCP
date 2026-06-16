@@ -76,8 +76,8 @@ void FUnrealMcpSerializationCheckSpec::Define()
 	{
 		It("serializes a real UObject to a non-empty reflected object (the window's path)", [this]()
 		{
-			// Use a transient AActor CDO-free instance is heavy; the transient package + a plain UObject is enough
-			// to prove SerializeObject walks reflected FProperties without a sidecar. AActor has reflected props.
+			// Construct a transient AActor instance (not the CDO) to prove SerializeObject walks reflected
+			// FProperties without a sidecar. AActor has reflected props, so the result is a non-empty object.
 			AActor* Actor = NewObject<AActor>(GetTransientPackage());
 			TestNotNull("actor created", Actor);
 			if (!Actor)
