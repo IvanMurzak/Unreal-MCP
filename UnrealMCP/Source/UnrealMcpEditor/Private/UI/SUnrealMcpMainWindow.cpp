@@ -235,53 +235,106 @@ TSharedRef<SWidget> SUnrealMcpMainWindow::BuildConnectionSection()
 		]
 		// Cloud auth row (masked token + Revoke / Authorize) — visible only in Cloud mode.
 		+ SVerticalBox::Slot().AutoHeight().Padding(0, 8, 0, 0)[ BuildCloudAuthRow() ]
-		// Custom Server URL + MCP-server sub-card — visible only in Custom mode.
+		// Custom Server URL + validation (NOT part of the dot cluster) — visible only in Custom mode.
 		+ SVerticalBox::Slot().AutoHeight().Padding(0, 8, 0, 0)[ BuildCustomServerSection() ]
-		// Shared connection-status row (status dot + underlined "Unreal: <status>" label + Connect/Disconnect/Stop).
+		// The connection cluster (Unity's .connection-timeline): a 2-column layout where the LEFT column is one
+		// continuous vertical rail [MCP-server dot] → [FillHeight line] → [Unreal dot], and the RIGHT column holds
+		// the matching content rows. The per-row approach (round-2) trapped each line inside an AutoHeight row with
+		// no vertical slack — structurally incapable of a continuous line. Here the line slot lives BETWEEN the two
+		// dots at the CLUSTER level, so it has the full inter-dot height as slack to fill (Unity's .timeline-line).
 		+ SVerticalBox::Slot().AutoHeight().Padding(0, 10, 0, 0)
 		[
-			SNew(SHorizontalBox)
-			// The status dot.
-			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 8, 0)
+			BuildConnectionCluster()
+		];
+}
+
+TSharedRef<SWidget> SUnrealMcpMainWindow::BuildConnectionCluster()
+{
+	// The Unreal status dot — driven by the live connection state.
+	TAttribute<EDot> UnrealDot = TAttribute<EDot>::Create([this]()
+	{
+		if (!IsViewModelValid())
+			return EDot::Offline;
+		switch (ViewModel->GetConnectionState())
+		{
+			case EUnrealMcpConnectionState::Connected:  return EDot::Online;
+			case EUnrealMcpConnectionState::Connecting:  return EDot::Ring;
+			// Degraded must NOT use the (green) Ring brush — that reads as healthy. Show Offline.
+			case EUnrealMcpConnectionState::Degraded:    return EDot::Offline;
+			default:                                     return EDot::Offline;
+		}
+	});
+
+	// The MCP-server dot + the line below it exist only in Custom mode (the MCP-server content row is Custom-only).
+	// In Cloud mode the rail collapses to just the Unreal dot, leaving no dangling line above it.
+	TAttribute<EVisibility> CustomOnly = MakeAttributeLambda([this]() -> EVisibility
+	{
+		return (IsViewModelValid() && ViewModel->GetConnectionMode() == EUnrealMcpConnectionMode::Custom)
+			? EVisibility::Visible : EVisibility::Collapsed;
+	});
+
+	UnrealMcpStyleWidgets::FTimelineRailDot McpPoint;
+	McpPoint.DotState = EDot::Offline;
+	McpPoint.DotVisibility = CustomOnly;
+	// The connecting line runs DOWN from the MCP-server dot to the Unreal dot — present only in Custom mode.
+	McpPoint.LineBelowVisibility = CustomOnly;
+	// Nudge the dot down to centre it on the "MCP server" label inside the card (8px card padding + ~half a line).
+	McpPoint.DotTopPadding = 8.0f;
+
+	UnrealMcpStyleWidgets::FTimelineRailDot UnrealPoint;
+	UnrealPoint.DotState = UnrealDot;
+	UnrealPoint.DotVisibility = EVisibility::Visible;
+	// Last point — no line below it (Unity's .timeline-point-last).
+	UnrealPoint.LineBelowVisibility = EVisibility::Collapsed;
+	// Small nudge to centre the dot on the "Unreal: <status>" label's text line.
+	UnrealPoint.DotTopPadding = 2.0f;
+
+	return SNew(SHorizontalBox)
+		// LEFT column: the continuous timeline rail owning both dots + the line between them. VAlign_Fill so the
+		// rail matches the content column's height and the FillHeight line slot can absorb the full inter-dot slack.
+		+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Fill).Padding(0, 0, 8, 0)
+		[
+			UnrealMcpStyleWidgets::TimelineRail({ McpPoint, UnrealPoint })
+		]
+		// RIGHT column: the stacked content rows, one per dot. Each row's top aligns with its dot in the rail.
+		+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Fill)
+		[
+			SNew(SVerticalBox)
+			// MCP-server card body (Custom-only) — aligns with the MCP-server dot.
+			+ SVerticalBox::Slot().AutoHeight()[ BuildMcpServerCard() ]
+			// Unreal status row — aligns with the Unreal dot.
+			+ SVerticalBox::Slot().AutoHeight()[ BuildUnrealStatusRow() ]
+		];
+}
+
+TSharedRef<SWidget> SUnrealMcpMainWindow::BuildUnrealStatusRow()
+{
+	// The "Unreal: <status>" row — underlined label + Connect/Disconnect/Stop. The dot for this row lives in the
+	// shared rail (BuildConnectionCluster), so this row carries only its content.
+	return SNew(SHorizontalBox)
+		// The underlined "Unreal: <status>" label — spans only the text (issue #80 item 3).
+		+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
+		[
+			UnderlinedLabel(TAttribute<FText>::Create([this]()
+			{
+				return IsViewModelValid()
+					? FUnrealMcpEditorViewModel::GetStatusLabel(ViewModel->GetConnectionState())
+					: FText::GetEmpty();
+			}))
+		]
+		// Connect / Disconnect / Stop button — right-aligned to the shared right edge.
+		+ SHorizontalBox::Slot().AutoWidth().HAlign(HAlign_Right).VAlign(VAlign_Center)
+		[
+			SNew(SBox).MinDesiredWidth(RightControlColumnWidth).HAlign(HAlign_Right)
 			[
-				UnrealMcpStyleWidgets::StatusDot(TAttribute<EDot>::Create([this]()
-				{
-					if (!IsViewModelValid())
-						return EDot::Offline;
-					switch (ViewModel->GetConnectionState())
+				UnrealMcpStyleWidgets::StyledButton("UnrealMcp.Button.Secondary",
+					SNew(STextBlock).Text_Lambda([this]()
 					{
-						case EUnrealMcpConnectionState::Connected:  return EDot::Online;
-						case EUnrealMcpConnectionState::Connecting:  return EDot::Ring;
-						// Degraded must NOT use the (green) Ring brush — that reads as healthy. Show Offline.
-						case EUnrealMcpConnectionState::Degraded:    return EDot::Offline;
-						default:                                     return EDot::Offline;
-					}
-				}))
-			]
-			// The underlined "Unreal: <status>" label — spans only the text (issue #80 item 3).
-			+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
-			[
-				UnderlinedLabel(TAttribute<FText>::Create([this]()
-				{
-					return IsViewModelValid()
-						? FUnrealMcpEditorViewModel::GetStatusLabel(ViewModel->GetConnectionState())
-						: FText::GetEmpty();
-				}))
-			]
-			// Connect / Disconnect / Stop button — right-aligned to the shared right edge.
-			+ SHorizontalBox::Slot().AutoWidth().HAlign(HAlign_Right).VAlign(VAlign_Center)
-			[
-				SNew(SBox).MinDesiredWidth(RightControlColumnWidth).HAlign(HAlign_Right)
-				[
-					UnrealMcpStyleWidgets::StyledButton("UnrealMcp.Button.Secondary",
-						SNew(STextBlock).Text_Lambda([this]()
-						{
-							return IsViewModelValid()
-								? FUnrealMcpEditorViewModel::GetButtonText(ViewModel->GetConnectionState())
-								: FText::GetEmpty();
-						}),
-						FOnClicked::CreateSP(this, &SUnrealMcpMainWindow::OnConnectClicked))
-				]
+						return IsViewModelValid()
+							? FUnrealMcpEditorViewModel::GetButtonText(ViewModel->GetConnectionState())
+							: FText::GetEmpty();
+					}),
+					FOnClicked::CreateSP(this, &SUnrealMcpMainWindow::OnConnectClicked))
 			]
 		];
 }
@@ -423,6 +476,9 @@ TSharedRef<SWidget> SUnrealMcpMainWindow::BuildCloudAuthRow()
 
 TSharedRef<SWidget> SUnrealMcpMainWindow::BuildCustomServerSection()
 {
+	// The Server URL row + validation — Custom-only, and NOT part of the dot cluster (it has no timeline point in
+	// the reference). The MCP-server sub-card moved into the cluster's content column (BuildMcpServerCard) so the
+	// connecting line can run continuously from the MCP-server dot down to the Unreal dot.
 	TSharedRef<SVerticalBox> Body = SNew(SVerticalBox)
 		// Server URL row — label left, input right-aligned to the shared right edge (issue #80 item 4).
 		+ SVerticalBox::Slot().AutoHeight()
@@ -458,38 +514,6 @@ TSharedRef<SWidget> SUnrealMcpMainWindow::BuildCustomServerSection()
 				return FUnrealMcpEditorViewModel::ValidateServerUrl(ViewModel->GetCustomHost(), Error)
 					? FText::GetEmpty() : FText::FromString(Error);
 			})
-		]
-		// The "MCP server" sub-card: the ONE blue rounded card kept in the Connection section (Unity .frame-mcp-server).
-		+ SVerticalBox::Slot().AutoHeight().Padding(0, 8, 0, 0)
-		[
-			UnrealMcpStyleWidgets::StyledCard(
-				SNew(SVerticalBox)
-				// MCP server header row (dot + underlined label + teal Start, right-aligned to the shared edge).
-				+ SVerticalBox::Slot().AutoHeight()
-				[
-					SNew(SHorizontalBox)
-					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 8, 0)
-					[ UnrealMcpStyleWidgets::StatusDot(EDot::Offline) ]
-					+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
-					[ UnderlinedLabel(LOCTEXT("McpServer", "MCP server")) ]
-					+ SHorizontalBox::Slot().AutoWidth().HAlign(HAlign_Right).VAlign(VAlign_Center)
-					[
-						SNew(SBox).MinDesiredWidth(RightControlColumnWidth).HAlign(HAlign_Right)
-						[
-							UnrealMcpStyleWidgets::StyledTextButton("UnrealMcp.Button.Primary", LOCTEXT("Start", "Start"),
-								FOnClicked::CreateLambda([this]()
-								{
-									// Start mirrors the reference's local-server Start: (re)connect through the view-model.
-									if (IsViewModelValid()) ViewModel->Connect();
-									return FReply::Handled();
-								}))
-						]
-					]
-				]
-				// Transport (stdio / http) segmented — indented to the section-title start, control right-aligned.
-				+ SVerticalBox::Slot().AutoHeight().Padding(0, 8, 0, 0)[ BuildTransportSelector() ]
-				// Authorization (none / required) + masked token + New.
-				+ SVerticalBox::Slot().AutoHeight().Padding(0, 8, 0, 0)[ BuildCustomAuthSelector() ])
 		];
 
 	Body->SetVisibility(MakeAttributeLambda([this]() -> EVisibility
@@ -498,6 +522,47 @@ TSharedRef<SWidget> SUnrealMcpMainWindow::BuildCustomServerSection()
 			? EVisibility::Visible : EVisibility::Collapsed;
 	}));
 	return Body;
+}
+
+TSharedRef<SWidget> SUnrealMcpMainWindow::BuildMcpServerCard()
+{
+	// The "MCP server" sub-card: the ONE blue rounded card kept in the Connection section (Unity .frame-mcp-server).
+	// The card's timeline DOT now lives in the shared rail (BuildConnectionCluster) so the connecting line is
+	// continuous from this dot down to the Unreal dot; this card carries only its content. The whole card is
+	// Custom-only — it shares the same visibility predicate as the rail's MCP-server dot + line above it.
+	TSharedRef<SWidget> Card = UnrealMcpStyleWidgets::StyledCard(
+		SNew(SVerticalBox)
+		// MCP server header row (underlined label + teal Start, right-aligned to the shared edge).
+		+ SVerticalBox::Slot().AutoHeight()
+		[
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
+			[ UnderlinedLabel(LOCTEXT("McpServer", "MCP server")) ]
+			+ SHorizontalBox::Slot().AutoWidth().HAlign(HAlign_Right).VAlign(VAlign_Center)
+			[
+				SNew(SBox).MinDesiredWidth(RightControlColumnWidth).HAlign(HAlign_Right)
+				[
+					UnrealMcpStyleWidgets::StyledTextButton("UnrealMcp.Button.Primary", LOCTEXT("Start", "Start"),
+						FOnClicked::CreateLambda([this]()
+						{
+							// Start mirrors the reference's local-server Start: (re)connect through the view-model.
+							if (IsViewModelValid()) ViewModel->Connect();
+							return FReply::Handled();
+						}))
+				]
+			]
+		]
+		// Transport (stdio / http) segmented — indented to the section-title start, control right-aligned.
+		+ SVerticalBox::Slot().AutoHeight().Padding(0, 8, 0, 0)[ BuildTransportSelector() ]
+		// Authorization (none / required) + masked token + New.
+		+ SVerticalBox::Slot().AutoHeight().Padding(0, 8, 0, 0)[ BuildCustomAuthSelector() ]);
+
+	Card->SetVisibility(MakeAttributeLambda([this]() -> EVisibility
+	{
+		return (IsViewModelValid() && ViewModel->GetConnectionMode() == EUnrealMcpConnectionMode::Custom)
+			? EVisibility::Visible : EVisibility::Collapsed;
+	}));
+	return Card;
 }
 
 TSharedRef<SWidget> SUnrealMcpMainWindow::BuildTransportSelector()
