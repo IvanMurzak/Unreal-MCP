@@ -221,6 +221,17 @@ public:
 	static UNREALMCPEDITOR_API TMap<FString, FString> LoadEnvFile(const FString& Path);
 
 	/**
+	 * Read ONE arbitrary key's sanitized value from the .env file at @p Path — NOT limited to the recognized
+	 * UNREAL_MCP_* connection keys ParseEnvLines keeps. The C++ analog of Godot's GodotMcpEnvFile.LookupRaw:
+	 * used by features outside the connection config (e.g. the dev-control bridge gate, UNREAL_MCP_DEV_CONTROL)
+	 * that want the same "process env > .env > default" precedence — the caller checks process env first, then
+	 * falls back to this. Same line rules as ParseEnvLines (skip blanks/`#`, split on first `=`, case-sensitive
+	 * key, sanitize value, last occurrence wins). Returns an empty string when the file is missing/unreadable,
+	 * the key is absent, or its value is blank. Never throws.
+	 */
+	static UNREALMCPEDITOR_API FString LookupEnvFileValue(const FString& Path, const FString& Key);
+
+	/**
 	 * Export the UNREAL_MCP_BRIDGE_PATH .env value into the editor's process environment (and ONLY that key),
 	 * set-if-absent so the §8 precedence "process env > .env" is preserved. That is the single var the editor
 	 * process itself must read out-of-band (FUnrealMcpSidecarManager resolves the sidecar binary from it, §6),
