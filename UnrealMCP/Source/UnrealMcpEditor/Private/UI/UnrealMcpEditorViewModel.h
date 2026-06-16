@@ -30,6 +30,12 @@ enum class EUnrealMcpDeviceAuthState : uint8
 {
 	/** No device-code flow in progress. */
 	Idle,
+	/**
+	 * Authorize pressed but the sidecar was not connected/handshaken yet: we have requested it (re)start and are
+	 * awaiting its handshake to FLUSH the queued auth-start (issue #99). A transient, bounded state ("Starting MCP
+	 * bridge…") — it advances to Pending on handshake, or to Failed on the bounded timeout / unresolvable binary.
+	 */
+	Connecting,
 	/** Authorize pressed; awaiting the user to complete verification in their browser. */
 	Pending,
 	/** The device-code flow succeeded and a cloud token was stored. */
@@ -68,9 +74,20 @@ public:
 	/**
 	 * Send a §1.3 auth message (auth-start / auth-cancel / auth-revoke) to the sidecar. Returns true when the
 	 * frame was actually handed to a connected/handshaken sidecar; false when there is no sidecar to send to
-	 * (so Authorize() can avoid wedging the UI in a code-less Pending state). A spec may leave it unset.
+	 * (so Authorize() can queue the auth-start and FLUSH it on handshake rather than wedging — issue #99). A
+	 * spec may leave it unset.
 	 */
 	TFunction<bool(const FString& /*AuthType*/)> OnSendAuth;
+	/**
+	 * Ensure the sidecar (unreal-mcp-bridge) is (re)started so a queued auth-start can be flushed once it
+	 * handshakes (issue #99). Wired by the runtime to FUnrealMcpSidecarManager::StartForPort (via the
+	 * OnRestartBridge-style relaunch). Returns true when the bridge binary resolved and a spawn was attempted
+	 * (or it is already running) — i.e. a handshake is plausibly imminent; false when the binary genuinely
+	 * cannot be resolved (a packaged-without-<rid> install / unset UNREAL_MCP_BRIDGE_PATH in dev), in which case
+	 * Authorize() fails fast with an actionable "install the bridge" message instead of awaiting a handshake that
+	 * will never come. A spec may leave it unset (treated as "cannot start" → actionable Failed).
+	 */
+	TFunction<bool()> OnEnsureSidecarStarted;
 	/** Open a verification URL in the system browser (device-code flow). */
 	TFunction<void(const FString& /*Url*/)> OnOpenBrowser;
 	/**
@@ -197,9 +214,31 @@ public:
 	/** The human-readable failure reason surfaced while the device-code flow is Failed (empty otherwise). */
 	const FString& GetDeviceAuthError() const { return DeviceAuthError; }
 
-	/** Authorize: begin the device-code flow (sends `auth-start`; the sidecar drives the real flow). */
-	UNREALMCPEDITOR_API void Authorize();
-	/** Cancel an in-progress device-code flow (sends `auth-cancel`). */
+	/**
+	 * Authorize: begin the device-code flow (issue #99 robust path). If a sidecar is connected the `auth-start`
+	 * frame is sent immediately and we enter Pending. If it is NOT connected yet, request it (re)start, QUEUE the
+	 * auth-start, enter the transient Connecting state, and arm a bounded timeout — the queued frame is flushed
+	 * automatically by NotifySidecarHandshakeComplete() once the sidecar handshakes. Only an unresolvable binary
+	 * (OnEnsureSidecarStarted returns false) or the timeout transitions to an actionable Failed. The sidecar drives
+	 * the real flow from auth-start onward. @p NowSeconds is the monotonic clock used to arm the timeout (the UI
+	 * passes FPlatformTime::Seconds(); a spec passes a synthetic time).
+	 */
+	UNREALMCPEDITOR_API void Authorize(double NowSeconds = 0.0);
+	/**
+	 * Flush a queued auth-start once the sidecar completes its handshake (issue #99). No-op unless we are in the
+	 * Connecting state with a queued auth-start. Called by the runtime on the game thread when the bridge reports
+	 * bClientConnected && bHandshakeOk. On a successful send we advance to Pending (the sidecar then emits the
+	 * device-auth pending/authorized/failed feed); a still-failing send leaves us Connecting until the timeout.
+	 */
+	UNREALMCPEDITOR_API void NotifySidecarHandshakeComplete();
+	/**
+	 * Drive the bounded Connecting→Failed timeout (issue #99). Call from a UI tick / active timer with the
+	 * monotonic clock; when we have been Connecting (awaiting a handshake to flush the queued auth-start) longer
+	 * than the bound, transition to an actionable Failed so the UI never wedges. No-op in any non-Connecting state.
+	 * @p NowSeconds is FPlatformTime::Seconds() from the UI (a spec passes a synthetic time).
+	 */
+	UNREALMCPEDITOR_API void TickAuthTimeout(double NowSeconds);
+	/** Cancel an in-progress device-code flow (sends `auth-cancel`; also clears a queued/awaiting auth-start). */
 	UNREALMCPEDITOR_API void CancelAuth();
 	/** Revoke + clear the stored cloud token (sends `auth-revoke`, clears CloudToken, persists). */
 	UNREALMCPEDITOR_API void Revoke();
@@ -302,6 +341,16 @@ private:
 	FString DeviceUserCode;
 	FString DeviceAuthError;
 	TArray<FString> AiAgents;
+
+	// --- Issue #99: queue-while-connecting / flush-on-handshake / bounded-timeout for Authorize. ---
+	/** True when an auth-start is queued, awaiting the sidecar handshake to flush it (set in Connecting). */
+	bool bAuthStartQueued = false;
+	/** Monotonic clock (FPlatformTime::Seconds) at which the Connecting state began, for the bounded timeout. */
+	double ConnectingStartedSeconds = 0.0;
+	/** Bounded wait for the sidecar to connect after Authorize before failing actionably (never wedge the UI). */
+	static constexpr double SidecarConnectTimeoutSeconds = 20.0;
+	/** The actionable failure message shown when the bridge binary cannot start / never connects (issue #99). */
+	UNREALMCPEDITOR_API static const TCHAR* BridgeUnavailableMessage();
 
 	// Persist (if a sink is wired) then push the §1.3 config to the sidecar (if a sink is wired).
 	void PersistAndPush();

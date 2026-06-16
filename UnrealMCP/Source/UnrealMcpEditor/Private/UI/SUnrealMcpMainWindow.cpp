@@ -25,6 +25,7 @@
 #include "Misc/Attribute.h"
 #include "Misc/Paths.h"
 #include "HAL/PlatformProcess.h"
+#include "HAL/PlatformTime.h"
 #include "HAL/PlatformApplicationMisc.h"
 #include "Interfaces/IPluginManager.h"
 
@@ -106,6 +107,19 @@ void SUnrealMcpMainWindow::Construct(const FArguments& InArgs)
 			+ SVerticalBox::Slot().AutoHeight()[ BuildFooterSection() ]
 		]
 	];
+
+	// Issue #99: a low-frequency active timer drives the bounded Cloud-auth Connecting→Failed timeout so the UI never
+	// wedges in the transient "Starting MCP bridge…" state if the sidecar never handshakes. TickAuthTimeout is a no-op
+	// in every state but Connecting, so this is effectively idle (and cheap) the rest of the time. The widget owns the
+	// timer's lifetime — it is unregistered automatically when the widget is destroyed, so no dangling view-model touch.
+	RegisterActiveTimer(0.5f, FWidgetActiveTimerDelegate::CreateSP(this, &SUnrealMcpMainWindow::TickCloudAuthTimeout));
+}
+
+EActiveTimerReturnType SUnrealMcpMainWindow::TickCloudAuthTimeout(double InCurrentTime, float /*InDeltaTime*/)
+{
+	if (IsViewModelValid())
+		ViewModel->TickAuthTimeout(FPlatformTime::Seconds());
+	return EActiveTimerReturnType::Continue;
 }
 
 TSharedRef<SWidget> SUnrealMcpMainWindow::UnderlinedLabel(const TAttribute<FText>& Text)
@@ -475,17 +489,23 @@ TSharedRef<SWidget> SUnrealMcpMainWindow::BuildCloudAuthRow()
 			UnrealMcpStyleWidgets::StyledButton("UnrealMcp.Button.Secondary",
 				SNew(STextBlock).Text_Lambda([this]()
 				{
-					return (IsViewModelValid() && ViewModel->GetDeviceAuthState() == EUnrealMcpDeviceAuthState::Pending)
+					// Both Connecting (awaiting the sidecar handshake to flush a queued auth-start, issue #99) and
+					// Pending (device-code in the browser) are in-flight states the user can Cancel.
+					if (!IsViewModelValid())
+						return LOCTEXT("Authorize", "Authorize");
+					const EUnrealMcpDeviceAuthState State = ViewModel->GetDeviceAuthState();
+					return (State == EUnrealMcpDeviceAuthState::Pending || State == EUnrealMcpDeviceAuthState::Connecting)
 						? LOCTEXT("CancelAuth", "Cancel") : LOCTEXT("Authorize", "Authorize");
 				}),
 				FOnClicked::CreateLambda([this]()
 				{
 					if (!IsViewModelValid())
 						return FReply::Handled();
-					if (ViewModel->GetDeviceAuthState() == EUnrealMcpDeviceAuthState::Pending)
+					const EUnrealMcpDeviceAuthState State = ViewModel->GetDeviceAuthState();
+					if (State == EUnrealMcpDeviceAuthState::Pending || State == EUnrealMcpDeviceAuthState::Connecting)
 						ViewModel->CancelAuth();
 					else
-						ViewModel->Authorize();
+						ViewModel->Authorize(FPlatformTime::Seconds()); // issue #99: arm the bounded connect timeout
 					return FReply::Handled();
 				}))
 		];
@@ -532,6 +552,20 @@ TSharedRef<SWidget> SUnrealMcpMainWindow::BuildCloudAuthRow()
 						return FReply::Handled();
 					}))
 			]
+		]
+		// Connecting (issue #99): transient "starting/awaiting the MCP bridge" line shown while a queued auth-start
+		// waits for the sidecar handshake to flush. Amber, mirrors the Connecting connection-status colour.
+		+ SVerticalBox::Slot().AutoHeight().Padding(0, 6, 0, 0)
+		[
+			SNew(STextBlock)
+			.AutoWrapText(true)
+			.ColorAndOpacity(FSlateColor(FUnrealMcpEditorViewModel::GetStatusColor(EUnrealMcpConnectionState::Connecting)))
+			.Visibility_Lambda([this]()
+			{
+				return (IsViewModelValid() && ViewModel->GetDeviceAuthState() == EUnrealMcpDeviceAuthState::Connecting)
+					? EVisibility::Visible : EVisibility::Collapsed;
+			})
+			.Text(LOCTEXT("AuthConnecting", "Starting MCP bridge… authorization will continue once it connects."))
 		]
 		// Authorized indicator.
 		+ SVerticalBox::Slot().AutoHeight().Padding(0, 6, 0, 0)

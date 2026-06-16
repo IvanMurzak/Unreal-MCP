@@ -151,6 +151,21 @@ void FUnrealMcpRuntime::Startup()
 		// connected sidecar to receive the auth-start frame.
 		return BridgeServerPtr ? BridgeServerPtr->SendAuthMessage(AuthType) : false;
 	};
+	// Issue #99: "ensure the sidecar is started" hook. When Cloud Authorize is pressed and no sidecar is connected
+	// yet, the view-model calls this to (re)start the bridge, then QUEUES the auth-start to flush on handshake
+	// (OnSendAuth above eventually succeeds once HandshakeSink fires). Already-running → true (a handshake is
+	// imminent / already happening). Not running → StartForPort spawns it and returns false ONLY when the binary
+	// genuinely cannot be resolved (packaged-without-<rid> / unset UNREAL_MCP_BRIDGE_PATH) — the view-model then
+	// fails fast with an actionable message instead of awaiting a handshake that will never come.
+	FUnrealMcpSidecarManager* SidecarPtrForAuth = SidecarManager.Get();
+	ViewModel->OnEnsureSidecarStarted = [SidecarPtrForAuth, BoundPort, Token]() -> bool
+	{
+		if (!SidecarPtrForAuth)
+			return false;
+		if (SidecarPtrForAuth->IsRunning())
+			return true;
+		return SidecarPtrForAuth->StartForPort(BoundPort, Token);
+	};
 	ViewModel->OnOpenBrowser = [](const FString& Url)
 	{
 		if (!Url.IsEmpty())
@@ -211,6 +226,18 @@ void FUnrealMcpRuntime::Startup()
 					VM->ApplyStatus(Message);
 				else if (Type == TEXT("device-auth"))
 					VM->ApplyDeviceAuth(Message);
+			});
+		});
+
+		// Issue #99: on each sidecar handshake-complete, marshal to the game thread and flush a queued Cloud
+		// auth-start (a no-op unless Authorize is awaiting in the Connecting state). Same M9b marshalling + weak
+		// view-model guard as the status sink so a handshake straddling teardown is a no-op, not a use-after-free.
+		BridgeServerPtr->SetHandshakeSink([WeakViewModel]()
+		{
+			AsyncTask(ENamedThreads::GameThread, [WeakViewModel]()
+			{
+				if (TSharedPtr<FUnrealMcpEditorViewModel> VM = WeakViewModel.Pin())
+					VM->NotifySidecarHandshakeComplete();
 			});
 		});
 	}
@@ -367,7 +394,10 @@ void FUnrealMcpRuntime::Shutdown()
 		MainWindowTab.Reset();
 	}
 	if (BridgeServer.IsValid())
+	{
 		BridgeServer->SetStatusSink(nullptr);
+		BridgeServer->SetHandshakeSink(nullptr); // issue #99: drop the handshake-flush sink before the VM is freed
+	}
 	// Null the view-model's side-effect sinks before destroying the bridge/sidecar below: those sinks capture
 	// raw FUnrealMcpBridgeServer* pointers, so if anything still holds the view-model after the tab close
 	// (a deferred RequestCloseTab, a queued widget event) it cannot dereference the soon-to-be-freed bridge.
@@ -376,6 +406,7 @@ void FUnrealMcpRuntime::Shutdown()
 		ViewModel->OnPersistConfig = nullptr;
 		ViewModel->OnPushConfig = nullptr;
 		ViewModel->OnSendAuth = nullptr;
+		ViewModel->OnEnsureSidecarStarted = nullptr; // issue #99: captures the raw sidecar-manager pointer freed below
 		ViewModel->OnOpenBrowser = nullptr;
 		ViewModel->OnToolEnablementChanged = nullptr; // captures the raw registry/bridge pointers freed below
 		// §7 in-UI local-server sinks capture the raw FUnrealMcpServerManager* freed below — null before that.

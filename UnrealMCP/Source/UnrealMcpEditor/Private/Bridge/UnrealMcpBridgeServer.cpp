@@ -395,6 +395,17 @@ void FUnrealMcpBridgeServer::HandleHandshake(const TSharedPtr<FJsonObject>& Mess
 	}
 
 	StartHeartbeat();
+
+	// Issue #99: notify the §7 view-model (via the game-thread-marshalling sink) that the sidecar is now connected
+	// + handshaken, so a Cloud auth-start queued while the bridge was (re)starting can be flushed exactly here. Copy
+	// the sink under the lock and invoke OUTSIDE it (the sink marshals to the game thread; never hold a lock across).
+	TFunction<void()> HandshakeSinkCopy;
+	{
+		FScopeLock Lock(&StatusSinkMutex);
+		HandshakeSinkCopy = HandshakeSink;
+	}
+	if (HandshakeSinkCopy)
+		HandshakeSinkCopy();
 }
 
 void FUnrealMcpBridgeServer::HandleToolCall(const TSharedPtr<FJsonObject>& Message)
@@ -700,6 +711,12 @@ void FUnrealMcpBridgeServer::SetStatusSink(TFunction<void(const FString&, TShare
 {
 	FScopeLock Lock(&StatusSinkMutex);
 	StatusSink = MoveTemp(InSink);
+}
+
+void FUnrealMcpBridgeServer::SetHandshakeSink(TFunction<void()> InSink)
+{
+	FScopeLock Lock(&StatusSinkMutex);
+	HandshakeSink = MoveTemp(InSink);
 }
 
 void FUnrealMcpBridgeServer::CloseActiveConnection()

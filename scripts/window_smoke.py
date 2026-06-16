@@ -209,14 +209,16 @@ class Driver:
         _req(port, "POST", "/control/connection-mode", {"mode": "Cloud"})
         _req(port, "POST", "/control/click", {"target": "authorize"})
         s = self.state()
-        # Sidecar-aware: Authorize() only enters Pending when OnSendAuth("auth-start") succeeds, which
-        # needs a connected + handshaken sidecar. A plain live-UI run has no sidecar attached, so the
-        # view-model deliberately falls to Failed (reason "No sidecar connected.") rather than wedging
-        # in a code-less Pending — see UnrealMcpEditorViewModel.cpp::Authorize(). Accept either as the
-        # expected outcome so a sidecar-less run still reports a full pass; the injected device-auth rows
-        # below exercise the Pending/Authorized/Failed readouts directly regardless.
+        # Sidecar-aware (issue #99 robust path): Authorize() reaches Pending immediately only when a connected +
+        # handshaken sidecar takes the auth-start. When the sidecar is not connected yet it enters the transient
+        # Connecting state (queues auth-start, awaits the handshake to flush it), and only an unresolvable bridge
+        # binary or the bounded timeout falls to Failed. A plain live-UI run's outcome therefore depends on whether
+        # a bridge is attached: Pending (connected), Connecting (starting/awaiting), or Failed (no binary / timeout).
+        # Accept all three so both a sidecar-staged run AND a sidecar-less run report a full pass; the injected
+        # device-auth rows below exercise the Pending/Authorized/Failed readouts directly regardless.
         auth_state = s.get("deviceAuthState")
-        self.check("authorize -> Pending (or Failed when no sidecar)", auth_state in ("Pending", "Failed"), auth_state)
+        self.check("authorize -> Pending/Connecting/Failed (sidecar-dependent)",
+                   auth_state in ("Pending", "Connecting", "Failed"), auth_state)
         _req(port, "POST", "/inject/device-auth",
              {"state": "pending", "verificationUrl": "https://ai-game.dev/device", "userCode": "WXYZ-1234"})
         self.shot("04-cloud-pending")

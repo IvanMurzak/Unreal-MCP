@@ -26,6 +26,15 @@ BEGIN_DEFINE_SPEC(FUnrealMcpEditorViewModelSpec, "UnrealMcp.EditorViewModel",
 		TArray<FString> AuthSent;
 		TArray<FString> OpenedUrls;
 		FUnrealMcpConfig LastPushed;
+		// Issue #99: the recording hook for "ensure sidecar started". EnsureSidecarStartedCount tracks how many
+		// times Authorize asked the runtime to (re)start the bridge; bSidecarCanStart is the fake binary-resolves
+		// result (true → a handshake is plausibly imminent → enter Connecting+queue; false → actionable Failed).
+		// bSidecarConnected is the fake live send-result the OnSendAuth stub reads: while false, auth-start sends
+		// fail (sidecar not connected yet), so Authorize takes the queue-and-await path; flipping it true then
+		// firing NotifySidecarHandshakeComplete simulates the bridge handshaking and flushes the queued frame.
+		int32 EnsureSidecarStartedCount = 0;
+		bool bSidecarCanStart = true;
+		bool bSidecarConnected = true;
 		// §7 in-UI local-server (issue #95): the recording stubs for the server sinks. bServerRunning is the
 		// fake live state the IsLocalServerRunningSink reads; OnStart flips it true, OnStop flips it false.
 		int32 ServerStartCount = 0;
@@ -38,7 +47,17 @@ BEGIN_DEFINE_SPEC(FUnrealMcpEditorViewModelSpec, "UnrealMcp.EditorViewModel",
 		TSharedRef<FUnrealMcpEditorViewModel> VM = MakeShared<FUnrealMcpEditorViewModel>();
 		VM->OnPersistConfig = [Rec](const FUnrealMcpConfig&) { Rec->PersistCount++; };
 		VM->OnPushConfig = [Rec](const FUnrealMcpConfig& Cfg) { Rec->PushCount++; Rec->LastPushed = Cfg; };
-		VM->OnSendAuth = [Rec](const FString& Type) -> bool { Rec->AuthSent.Add(Type); return true; };
+		// auth-start succeeds only when the fake sidecar is connected (issue #99 robust path); auth-cancel/revoke
+		// always "send" (they are best-effort over whatever connection exists). This lets a spec start disconnected
+		// (auth-start queues) then flip bSidecarConnected + fire the handshake to flush.
+		VM->OnSendAuth = [Rec](const FString& Type) -> bool
+		{
+			Rec->AuthSent.Add(Type);
+			if (Type == TEXT("auth-start"))
+				return Rec->bSidecarConnected;
+			return true;
+		};
+		VM->OnEnsureSidecarStarted = [Rec]() -> bool { Rec->EnsureSidecarStartedCount++; return Rec->bSidecarCanStart; };
 		VM->OnOpenBrowser = [Rec](const FString& Url) { Rec->OpenedUrls.Add(Url); };
 		VM->OnStartLocalServer = [Rec]() -> bool { Rec->ServerStartCount++; Rec->bServerRunning = true; return true; };
 		VM->OnStopLocalServer = [Rec]() { Rec->ServerStopCount++; Rec->bServerRunning = false; };
@@ -253,19 +272,112 @@ void FUnrealMcpEditorViewModelSpec::Define()
 			TestEqual("pushed config carries the cloud token", Rec->LastPushed.CloudToken, FString(TEXT("cloud-bearer-abc")));
 		});
 
-		It("Authorize stays out of Pending when the auth-start frame cannot be sent (no sidecar)", [this]()
+		It("Authorize enters Connecting and QUEUES auth-start when the sidecar is not connected yet (issue #99)", [this]()
 		{
 			TSharedRef<FRecording> Rec = MakeShared<FRecording>();
 			TSharedRef<FUnrealMcpEditorViewModel> VM = MakeViewModel(Rec);
-			// A sink that reports the frame could not be delivered (no connected/handshaken sidecar).
-			VM->OnSendAuth = [Rec](const FString& Type) -> bool { Rec->AuthSent.Add(Type); return false; };
+			// Sidecar is NOT connected yet, but its binary CAN start — the robust path: request a (re)start, queue
+			// the auth-start, and enter the transient Connecting state (NOT immediate Failed — the old behavior).
+			Rec->bSidecarConnected = false;
+			Rec->bSidecarCanStart = true;
 
-			VM->Authorize();
+			VM->Authorize(/*NowSeconds*/ 100.0);
 			TestTrue("auth-start attempted", Rec->AuthSent.Contains(TEXT("auth-start")));
-			// Must NOT wedge in a code-less Pending state — fall to Failed so the UI does not show an empty code.
-			TestEqual("not pending when send failed", static_cast<int32>(VM->GetDeviceAuthState()), static_cast<int32>(EUnrealMcpDeviceAuthState::Failed));
-			// And surface a reason so the window shows feedback rather than silently collapsing.
-			TestEqual("no-sidecar reason surfaced", VM->GetDeviceAuthError(), FString(TEXT("No sidecar connected.")));
+			TestEqual("ensure-sidecar-started requested once", Rec->EnsureSidecarStartedCount, 1);
+			// Transient connecting/awaiting — NOT Failed, NOT a code-less Pending.
+			TestEqual("connecting while awaiting handshake", static_cast<int32>(VM->GetDeviceAuthState()), static_cast<int32>(EUnrealMcpDeviceAuthState::Connecting));
+			// No premature failure message while we wait.
+			TestTrue("no failure reason while connecting", VM->GetDeviceAuthError().IsEmpty());
+		});
+
+		It("flushes the queued auth-start on a simulated handshake-complete (issue #99)", [this]()
+		{
+			TSharedRef<FRecording> Rec = MakeShared<FRecording>();
+			TSharedRef<FUnrealMcpEditorViewModel> VM = MakeViewModel(Rec);
+			Rec->bSidecarConnected = false;
+			Rec->bSidecarCanStart = true;
+
+			VM->Authorize(/*NowSeconds*/ 0.0);
+			TestEqual("connecting after Authorize", static_cast<int32>(VM->GetDeviceAuthState()), static_cast<int32>(EUnrealMcpDeviceAuthState::Connecting));
+			const int32 AuthStartsBeforeHandshake = Rec->AuthSent.FilterByPredicate([](const FString& T){ return T == TEXT("auth-start"); }).Num();
+
+			// The sidecar handshakes: flip the fake connection true, then notify. The queued auth-start flushes and
+			// we advance to Pending (the sidecar's device-auth feed then drives the verificationUrl / userCode).
+			Rec->bSidecarConnected = true;
+			VM->NotifySidecarHandshakeComplete();
+			const int32 AuthStartsAfterHandshake = Rec->AuthSent.FilterByPredicate([](const FString& T){ return T == TEXT("auth-start"); }).Num();
+			TestEqual("auth-start re-sent on handshake (flushed)", AuthStartsAfterHandshake, AuthStartsBeforeHandshake + 1);
+			TestEqual("pending after flush", static_cast<int32>(VM->GetDeviceAuthState()), static_cast<int32>(EUnrealMcpDeviceAuthState::Pending));
+
+			// A second handshake notification must NOT re-fire the (already-flushed) auth-start.
+			VM->NotifySidecarHandshakeComplete();
+			const int32 AuthStartsAfterSecond = Rec->AuthSent.FilterByPredicate([](const FString& T){ return T == TEXT("auth-start"); }).Num();
+			TestEqual("no double-flush on a second handshake", AuthStartsAfterSecond, AuthStartsAfterHandshake);
+		});
+
+		It("Cancel while awaiting (Connecting) clears the queue and the timeout (issue #99)", [this]()
+		{
+			TSharedRef<FRecording> Rec = MakeShared<FRecording>();
+			TSharedRef<FUnrealMcpEditorViewModel> VM = MakeViewModel(Rec);
+			Rec->bSidecarConnected = false;
+			Rec->bSidecarCanStart = true;
+
+			VM->Authorize(/*NowSeconds*/ 100.0);
+			TestEqual("connecting after Authorize", static_cast<int32>(VM->GetDeviceAuthState()), static_cast<int32>(EUnrealMcpDeviceAuthState::Connecting));
+
+			VM->CancelAuth();
+			TestEqual("idle after cancel (no stored token)", static_cast<int32>(VM->GetDeviceAuthState()), static_cast<int32>(EUnrealMcpDeviceAuthState::Idle));
+			TestTrue("auth-cancel sent", Rec->AuthSent.Contains(TEXT("auth-cancel")));
+
+			// A late handshake after the cancel must NOT resurrect the cancelled auth-start (queue was cleared).
+			Rec->bSidecarConnected = true;
+			const int32 AuthStartsBefore = Rec->AuthSent.FilterByPredicate([](const FString& T){ return T == TEXT("auth-start"); }).Num();
+			VM->NotifySidecarHandshakeComplete();
+			const int32 AuthStartsAfter = Rec->AuthSent.FilterByPredicate([](const FString& T){ return T == TEXT("auth-start"); }).Num();
+			TestEqual("cancelled queue not flushed by a late handshake", AuthStartsAfter, AuthStartsBefore);
+			TestEqual("still idle after late handshake", static_cast<int32>(VM->GetDeviceAuthState()), static_cast<int32>(EUnrealMcpDeviceAuthState::Idle));
+
+			// And a later timeout tick must NOT revive it either.
+			VM->TickAuthTimeout(/*NowSeconds*/ 1000.0);
+			TestEqual("still idle after a post-cancel timeout tick", static_cast<int32>(VM->GetDeviceAuthState()), static_cast<int32>(EUnrealMcpDeviceAuthState::Idle));
+		});
+
+		It("times out to an actionable Failed when the sidecar never connects (issue #99)", [this]()
+		{
+			TSharedRef<FRecording> Rec = MakeShared<FRecording>();
+			TSharedRef<FUnrealMcpEditorViewModel> VM = MakeViewModel(Rec);
+			Rec->bSidecarConnected = false;
+			Rec->bSidecarCanStart = true;
+
+			VM->Authorize(/*NowSeconds*/ 100.0);
+			TestEqual("connecting after Authorize", static_cast<int32>(VM->GetDeviceAuthState()), static_cast<int32>(EUnrealMcpDeviceAuthState::Connecting));
+
+			// A tick well inside the bound is a no-op (still awaiting).
+			VM->TickAuthTimeout(/*NowSeconds*/ 105.0);
+			TestEqual("still connecting inside the timeout bound", static_cast<int32>(VM->GetDeviceAuthState()), static_cast<int32>(EUnrealMcpDeviceAuthState::Connecting));
+
+			// A tick past the bound transitions to Failed with the ACTIONABLE message (not the cryptic old one).
+			VM->TickAuthTimeout(/*NowSeconds*/ 100.0 + 60.0);
+			TestEqual("failed after the timeout", static_cast<int32>(VM->GetDeviceAuthState()), static_cast<int32>(EUnrealMcpDeviceAuthState::Failed));
+			TestTrue("actionable failure mentions installing the bridge",
+				VM->GetDeviceAuthError().Contains(TEXT("bootstrap-local")) || VM->GetDeviceAuthError().Contains(TEXT("reinstall")));
+			TestFalse("failure is NOT the cryptic No-sidecar-connected message", VM->GetDeviceAuthError() == TEXT("No sidecar connected."));
+		});
+
+		It("Authorize fails fast actionably when the bridge binary cannot start at all (issue #99)", [this]()
+		{
+			TSharedRef<FRecording> Rec = MakeShared<FRecording>();
+			TSharedRef<FUnrealMcpEditorViewModel> VM = MakeViewModel(Rec);
+			// Sidecar not connected AND its binary cannot be resolved (packaged-without-<rid> / unset dev override).
+			Rec->bSidecarConnected = false;
+			Rec->bSidecarCanStart = false;
+
+			VM->Authorize(/*NowSeconds*/ 100.0);
+			TestEqual("ensure-sidecar-started attempted once", Rec->EnsureSidecarStartedCount, 1);
+			// No point awaiting a handshake that will never arrive — fail fast, actionably (never wedge).
+			TestEqual("failed fast when the binary cannot start", static_cast<int32>(VM->GetDeviceAuthState()), static_cast<int32>(EUnrealMcpDeviceAuthState::Failed));
+			TestTrue("actionable failure surfaced",
+				VM->GetDeviceAuthError().Contains(TEXT("bootstrap-local")) || VM->GetDeviceAuthError().Contains(TEXT("reinstall")));
 		});
 
 		It("surfaces a failed device-auth message and clears it on a fresh Authorize", [this]()

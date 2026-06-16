@@ -80,6 +80,15 @@ public:
 	 */
 	void SetStatusSink(TFunction<void(const FString& /*Type*/, TSharedPtr<FJsonObject> /*Message*/)> InSink);
 
+	/**
+	 * Register a sink fired exactly once each time the sidecar completes its handshake (bClientConnected &&
+	 * bHandshakeOk become true — issue #99). Invoked ON THE IPC READER THREAD; the caller (the §7 view-model
+	 * wiring) MUST marshal onto the game thread before touching Slate/view-model state (the M9b rule). Used to
+	 * FLUSH a queued Cloud auth-start the moment a (re)started bridge connects. Pass an unbound TFunction to
+	 * clear it (window close). Thread-safe; the previous sink is replaced.
+	 */
+	void SetHandshakeSink(TFunction<void()> InSink);
+
 	/** Deterministic IPC port for a project path (§1.1): 30000 + sha(path) % 10000. */
 	static int32 ComputeDeterministicPort(const FString& ProjectPath);
 
@@ -140,6 +149,11 @@ private:
 	// open/close), invoked on the reader thread; guarded so a window-close clear cannot race a reader invoke.
 	mutable FCriticalSection StatusSinkMutex;
 	TFunction<void(const FString&, TSharedPtr<FJsonObject>)> StatusSink;
+
+	// Sink fired once per completed handshake (issue #99 — flush a queued Cloud auth-start). Set/cleared on the
+	// game thread (window open/close), invoked on the reader thread from HandleHandshake; shares StatusSinkMutex
+	// (both are reader-thread invokes guarded against a game-thread window-close clear).
+	TFunction<void()> HandshakeSink;
 
 	FThreadSafeBool bStopRequested = false;
 	FThreadSafeBool bClientConnected = false;
