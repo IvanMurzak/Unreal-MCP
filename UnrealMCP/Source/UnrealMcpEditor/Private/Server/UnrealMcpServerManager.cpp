@@ -46,8 +46,6 @@ namespace
 	const int32 ServerBackoffSeconds[] = { 1, 2, 5, 10, 30 };
 	constexpr int32 ServerMaxCrashesPerWindow = 5;
 	constexpr double ServerCrashWindowSeconds = 300.0;
-	// Startup-verification window: the child must survive this long for Start to be considered healthy.
-	constexpr double ServerStartupVerifySeconds = 5.0;
 	const TCHAR* ServerProcessNameNeedle = TEXT("gamedev-mcp-server");
 
 	// GitHub release-asset URL for a rid + version (v-prefixed tags), matching the CLI's serverDownloadUrl.

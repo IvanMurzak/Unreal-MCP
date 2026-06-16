@@ -41,8 +41,8 @@ public:
 	/**
 	 * Launch + supervise the local server on @p Port with the given launch parameters (auth/token). Resolves
 	 * the binary (override → cache → download), kills any orphaned `gamedev-mcp-server` already holding @p Port,
-	 * spawns the process, verifies it survives a brief startup window, then arms the crash-restart watchdog.
-	 * Returns true when the process was spawned (verification + supervision proceed asynchronously). Idempotent:
+	 * spawns the process, then arms the crash-restart watchdog (which detects an early exit and re-launches with
+	 * backoff). Returns true when the process was spawned (supervision proceeds asynchronously). Idempotent:
 	 * a call while already running/starting is a no-op that returns true. Game-thread only.
 	 *
 	 * @p bAuthRequired / @p Token shape the `authorization` + `token` launch args exactly like Unity's BuildArguments.
