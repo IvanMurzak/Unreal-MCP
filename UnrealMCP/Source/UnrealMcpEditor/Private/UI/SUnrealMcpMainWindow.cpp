@@ -89,9 +89,10 @@ void SUnrealMcpMainWindow::Construct(const FArguments& InArgs)
 			SNew(SVerticalBox)
 			+ SVerticalBox::Slot().AutoHeight()[ BuildHeaderSection() ]
 			+ SVerticalBox::Slot().AutoHeight().Padding(0, 10)[ UnrealMcpStyleWidgets::Divider() ]
+			// The AI Agent Configurators panel is no longer a standalone top-level section — issue #93 moved it
+			// INSIDE the Connection cluster (BuildConnectionCluster), directly after the MCP-server element, so the
+			// connection timeline reads Unreal → MCP server → AI agents per ARCHITECTURE §7.
 			+ SVerticalBox::Slot().AutoHeight()[ BuildConnectionSection() ]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0, 10)[ UnrealMcpStyleWidgets::Divider() ]
-			+ SVerticalBox::Slot().AutoHeight()[ BuildAgentConfiguratorsSection() ]
 			+ SVerticalBox::Slot().AutoHeight().Padding(0, 10)[ UnrealMcpStyleWidgets::Divider() ]
 			+ SVerticalBox::Slot().AutoHeight()[ BuildExtensionsSection() ]
 			+ SVerticalBox::Slot().AutoHeight().Padding(0, 10)[ UnrealMcpStyleWidgets::Divider() ]
@@ -268,44 +269,65 @@ TSharedRef<SWidget> SUnrealMcpMainWindow::BuildConnectionCluster()
 	});
 
 	// The MCP-server dot + the line below it exist only in Custom mode (the MCP-server content row is Custom-only).
-	// In Cloud mode the rail collapses to just the Unreal dot, leaving no dangling line above it.
+	// In Cloud mode the rail collapses to the Unreal dot + the AI-agents dot, with no dangling MCP-server segment.
 	TAttribute<EVisibility> CustomOnly = MakeAttributeLambda([this]() -> EVisibility
 	{
 		return (IsViewModelValid() && ViewModel->GetConnectionMode() == EUnrealMcpConnectionMode::Custom)
 			? EVisibility::Visible : EVisibility::Collapsed;
 	});
 
+	// Issue #93: the connection timeline must read top-to-bottom EXACTLY as ARCHITECTURE §7 specifies —
+	// "Unreal point → MCP server point → AI-agent point" (the pre-#93 cluster had MCP-server ABOVE Unreal and
+	// omitted the AI-agent point entirely). The three content rows below are stacked in the same order, each
+	// aligned to its dot in the shared rail.
+
+	// Point 1 — Unreal status (always present; first in the rail).
+	UnrealMcpStyleWidgets::FTimelineRailDot UnrealPoint;
+	UnrealPoint.DotState = UnrealDot;
+	UnrealPoint.DotVisibility = EVisibility::Visible;
+	// The line runs DOWN from the Unreal dot toward the next point. Always present (a point always follows:
+	// the MCP-server point in Custom mode, or the AI-agents point in Cloud mode).
+	UnrealPoint.LineBelowVisibility = EVisibility::Visible;
+	// Small nudge to centre the dot on the "Unreal: <status>" label's text line.
+	UnrealPoint.DotTopPadding = 2.0f;
+
+	// Point 2 — MCP server (Custom-only; second in the rail).
 	UnrealMcpStyleWidgets::FTimelineRailDot McpPoint;
 	McpPoint.DotState = EDot::Offline;
 	McpPoint.DotVisibility = CustomOnly;
-	// The connecting line runs DOWN from the MCP-server dot to the Unreal dot — present only in Custom mode.
+	// The line below the MCP-server dot runs DOWN to the AI-agents dot — present only in Custom mode (the dot
+	// itself is Custom-only). In Cloud mode this whole point collapses and the Unreal line connects to AI-agents.
 	McpPoint.LineBelowVisibility = CustomOnly;
 	// Nudge the dot down to centre it on the "MCP server" label inside the card (8px card padding + ~half a line).
 	McpPoint.DotTopPadding = 8.0f;
 
-	UnrealMcpStyleWidgets::FTimelineRailDot UnrealPoint;
-	UnrealPoint.DotState = UnrealDot;
-	UnrealPoint.DotVisibility = EVisibility::Visible;
-	// Last point — no line below it (Unity's .timeline-point-last).
-	UnrealPoint.LineBelowVisibility = EVisibility::Collapsed;
-	// Small nudge to centre the dot on the "Unreal: <status>" label's text line.
-	UnrealPoint.DotTopPadding = 2.0f;
+	// Point 3 — AI agents (always present; last in the rail, so no line below it — Unity's .timeline-point-last).
+	UnrealMcpStyleWidgets::FTimelineRailDot AgentsPoint;
+	AgentsPoint.DotState = EDot::Offline;
+	AgentsPoint.DotVisibility = EVisibility::Visible;
+	AgentsPoint.LineBelowVisibility = EVisibility::Collapsed;
+	// Nudge to centre the dot on the "AI agent" header inside the carded panel (8px card padding + ~half a line).
+	AgentsPoint.DotTopPadding = 8.0f;
 
 	return SNew(SHorizontalBox)
-		// LEFT column: the continuous timeline rail owning both dots + the line between them. VAlign_Fill so the
-		// rail matches the content column's height and the FillHeight line slot can absorb the full inter-dot slack.
+		// LEFT column: the continuous timeline rail owning all three dots + the lines between them. VAlign_Fill so
+		// the rail matches the content column's height and each FillHeight line slot absorbs the inter-dot slack.
 		+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Fill).Padding(0, 0, 8, 0)
 		[
-			UnrealMcpStyleWidgets::TimelineRail({ McpPoint, UnrealPoint })
+			UnrealMcpStyleWidgets::TimelineRail({ UnrealPoint, McpPoint, AgentsPoint })
 		]
-		// RIGHT column: the stacked content rows, one per dot. Each row's top aligns with its dot in the rail.
+		// RIGHT column: the stacked content rows, one per dot, in the §7 order. Each row's top aligns with its dot.
 		+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Fill)
 		[
 			SNew(SVerticalBox)
-			// MCP-server card body (Custom-only) — aligns with the MCP-server dot.
-			+ SVerticalBox::Slot().AutoHeight()[ BuildMcpServerCard() ]
-			// Unreal status row — aligns with the Unreal dot.
+			// (1) Unreal status row — aligns with the Unreal dot.
 			+ SVerticalBox::Slot().AutoHeight()[ BuildUnrealStatusRow() ]
+			// (2) MCP-server card body (Custom-only) — aligns with the MCP-server dot.
+			+ SVerticalBox::Slot().AutoHeight().Padding(0, 8, 0, 0)[ BuildMcpServerCard() ]
+			// (3) AI agents (connected-agent list + configurators) — aligns with the AI-agents dot. Moved here from
+			// its former standalone top-level section (issue #93) so it sits inside the Connection cluster, directly
+			// after the MCP-server element, per the §7 connection-timeline order.
+			+ SVerticalBox::Slot().AutoHeight().Padding(0, 8, 0, 0)[ BuildAgentConfiguratorsSection() ]
 		];
 }
 
@@ -547,8 +569,27 @@ TSharedRef<SWidget> SUnrealMcpMainWindow::BuildMcpServerCard()
 					UnrealMcpStyleWidgets::StyledTextButton("UnrealMcp.Button.Primary", LOCTEXT("Start", "Start"),
 						FOnClicked::CreateLambda([this]()
 						{
-							// Start mirrors the reference's local-server Start: (re)connect through the view-model.
-							if (IsViewModelValid()) ViewModel->Connect();
+							// Issue #93: the MCP-server card's "Start" must start the LOCAL server-side process the
+							// plugin manages — NOT ViewModel->Connect(), which is the Unreal-side SignalR connect
+							// already driven by the "Unreal: <status>" row's Connect/Disconnect button (wiring Start
+							// to Connect() duplicated that control and never touched the server process).
+							//
+							// ARCHITECTURE NOTE (locked decision, docs/ARCHITECTURE.md §7 deviation block ~L94-97):
+							// "there is no in-UI start-local-server control" in this release — the shared
+							// gamedev-mcp-server is acquired + launched by the CLI/§6 layer, NOT by the plugin, so the
+							// view-model exposes no StartServer()/launch path to call. The ONE local server-side
+							// process the plugin DOES own and can (re)start is the .NET sidecar (unreal-mcp-bridge),
+							// which hosts the McpPlugin and dials the MCP server (§1/§6). So Start (re)starts the
+							// sidecar via the same OnRestartBridge delegate the footer/§7 item-7 Restart action uses —
+							// the closest correct, architecture-respecting semantics for "start the local server"
+							// without violating the locked no-in-UI-server-launch decision.
+							//
+							// DEFERRED FOLLOW-UP (separate task/PR — issue #93 scope was deliberately split): a true
+							// in-UI launch of the shared gamedev-mcp-server (§7 item 6) — acquire the binary via the
+							// cli/§6 download layout and spawn/manage its process, gated on Custom mode + http
+							// transport — is intentionally NOT done here. This PR ships the bridge-(re)start as the
+							// interim Start behavior; the real local-server Start/Stop lands in the follow-up.
+							OnRestartBridge.ExecuteIfBound();
 							return FReply::Handled();
 						}))
 				]
@@ -758,25 +799,25 @@ TSharedRef<SWidget> SUnrealMcpMainWindow::BuildFooterSection()
 		]
 		// Divider before the thanks block (Unity .divider).
 		+ SVerticalBox::Slot().AutoHeight().Padding(0, 10)[ UnrealMcpStyleWidgets::Divider() ]
-		// Thanks text + Sincerely on the left; the gold GitHub Star vertically centered on the same row (issue #80 item 7).
+		// Issue #93: the "Thank you …" line takes the FULL WIDTH on its own row (auto-wrap), with NO button beside it.
 		+ SVerticalBox::Slot().AutoHeight()
+		[
+			SNew(STextBlock)
+			.AutoWrapText(true)
+			.Text(LOCTEXT("ThanksText", "Thank you for using AI Game Developer. If you like it, please give the project a star on GitHub."))
+		]
+		// Issue #93: the NEXT row splits horizontally — "Sincerely,\nIvan Murzak" (two lines, left-aligned) on the
+		// LEFT, and the gold GitHub Star button on the RIGHT, vertically centered on the same row. The signature uses
+		// the SAME normal body-text style as the "Thank you …" line above (it previously used the dimmed 12px
+		// "UnrealMcp.Text.Description" style — dropped here so it visually matches normal body text).
+		+ SVerticalBox::Slot().AutoHeight().Padding(0, 6, 0, 0)
 		[
 			SNew(SHorizontalBox)
 			+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
 			[
-				SNew(SVerticalBox)
-				+ SVerticalBox::Slot().AutoHeight()
-				[
-					SNew(STextBlock)
-					.AutoWrapText(true)
-					.Text(LOCTEXT("ThanksText", "Thank you for using AI Game Developer. If you like it, please give the project a star on GitHub."))
-				]
-				+ SVerticalBox::Slot().AutoHeight().Padding(0, 6, 0, 0)
-				[
-					SNew(STextBlock)
-					.TextStyle(&FUnrealMcpStyle::Get().GetWidgetStyle<FTextBlockStyle>("UnrealMcp.Text.Description"))
-					.Text(LOCTEXT("Sincerely", "Sincerely,\nIvan Murzak"))
-				]
+				SNew(STextBlock)
+				.Justification(ETextJustify::Left)
+				.Text(LOCTEXT("Sincerely", "Sincerely,\nIvan Murzak"))
 			]
 			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(8, 0, 0, 0)
 			[
