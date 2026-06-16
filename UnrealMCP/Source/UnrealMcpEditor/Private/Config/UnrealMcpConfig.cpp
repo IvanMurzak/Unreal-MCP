@@ -507,6 +507,39 @@ TMap<FString, FString> FUnrealMcpConfig::LoadEnvFile(const FString& Path)
 	return ParseEnvLines(Lines);
 }
 
+FString FUnrealMcpConfig::LookupEnvFileValue(const FString& Path, const FString& Key)
+{
+	if (Path.IsEmpty() || Key.IsEmpty() || !FPaths::FileExists(Path))
+		return FString();
+
+	TArray<FString> Lines;
+	if (!FFileHelper::LoadFileToStringArray(Lines, *Path))
+		return FString();
+
+	FString Found; // last occurrence wins (matches ParseEnvLines)
+	for (const FString& RawLine : Lines)
+	{
+		FString Line = RawLine;
+		Line.TrimStartAndEndInline();
+		if (Line.IsEmpty() || Line[0] == TCHAR('#'))
+			continue;
+
+		int32 EqIndex = INDEX_NONE;
+		if (!Line.FindChar(TCHAR('='), EqIndex) || EqIndex <= 0)
+			continue;
+
+		FString LineKey = Line.Left(EqIndex);
+		LineKey.TrimStartAndEndInline();
+		if (!LineKey.Equals(Key, ESearchCase::CaseSensitive))
+			continue;
+
+		const FString Value = SanitizeValue(Line.Mid(EqIndex + 1));
+		if (!Value.IsEmpty())
+			Found = Value;
+	}
+	return Found;
+}
+
 void FUnrealMcpConfig::ExportDotEnvToProcessEnv(const TMap<FString, FString>& DotEnv)
 {
 	// Export ONLY the bridge-path key into the process env. That is the single var the editor process itself

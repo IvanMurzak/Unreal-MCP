@@ -244,12 +244,23 @@ void FUnrealMcpRuntime::Startup()
 	// view-model the dock binds to, so an injected state / simulated click is reflected in the open window.
 	// Loopback-only (the server verifies the peer is 127.0.0.1/::1 in addition to the env gate).
 	{
-		const bool bDevControlEnabled =
-			FPlatformMisc::GetEnvironmentVariable(TEXT("UNREAL_MCP_DEV_CONTROL")) == TEXT("1");
+		// Resolve with precedence process env > project-root .env > default — so a developer can enable the
+		// bridge by dropping the flag into the project's .env (the editor is launched from the GUI with no
+		// shell exports) WITHOUT exporting a process env var. Mirrors the §8 connection-config env-file layer
+		// (and Godot's GodotMcpPlugin.StartDevControlIfEnabled). UNREAL_MCP_DEV_CONTROL[_PORT] are NOT §8
+		// recognized keys, so they are read straight from the .env via LookupEnvFileValue, never the DotEnv map.
+		const FString DevEnvPath = FUnrealMcpConfig::DefaultEnvFilePath();
+		auto ResolveDevVar = [&DevEnvPath](const TCHAR* Key) -> FString
+		{
+			const FString FromProcess = FPlatformMisc::GetEnvironmentVariable(Key);
+			return !FromProcess.IsEmpty() ? FromProcess : FUnrealMcpConfig::LookupEnvFileValue(DevEnvPath, Key);
+		};
+
+		const bool bDevControlEnabled = ResolveDevVar(TEXT("UNREAL_MCP_DEV_CONTROL")) == TEXT("1");
 		if (bDevControlEnabled)
 		{
 			uint32 DevControlPort = 9921;
-			const FString PortRaw = FPlatformMisc::GetEnvironmentVariable(TEXT("UNREAL_MCP_DEV_CONTROL_PORT"));
+			const FString PortRaw = ResolveDevVar(TEXT("UNREAL_MCP_DEV_CONTROL_PORT"));
 			if (!PortRaw.IsEmpty())
 			{
 				const int32 Parsed = FCString::Atoi(*PortRaw);

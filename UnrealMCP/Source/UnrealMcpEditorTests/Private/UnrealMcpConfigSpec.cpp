@@ -9,6 +9,7 @@
 #include "Misc/OutputDevice.h"
 #include "Misc/OutputDeviceRedirector.h"
 #include "HAL/FileManager.h"
+#include "Misc/FileHelper.h"
 #include "Config/UnrealMcpConfig.h"
 #include "UnrealMcpLog.h"
 
@@ -95,6 +96,38 @@ void FUnrealMcpConfigSpec::Define()
 		{
 			const TMap<FString, FString> Parsed = FUnrealMcpConfig::ParseEnvLines({ TEXT("UNREAL_MCP_TOKEN=a=b=c") });
 			TestEqual(TEXT("value keeps later '='"), Parsed.FindRef(FUnrealMcpConfig::EnvToken), FString(TEXT("a=b=c")));
+		});
+	});
+
+	// LookupEnvFileValue is the single-key .env reader the dev-control gate uses (process env > .env > default).
+	// Unlike ParseEnvLines it reads an ARBITRARY key (not the §8 recognized set), so it must surface the
+	// UNREAL_MCP_DEV_CONTROL[_PORT] flags that ParseEnvLines deliberately drops. Drive it through a real temp file.
+	Describe("LookupEnvFileValue (arbitrary single key, for the dev-control gate)", [this]()
+	{
+		It("returns the sanitized value of an unrecognized key, last-wins, and empty for absent/missing", [this]()
+		{
+			const FString TempEnv = FPaths::CreateTempFilename(*FPaths::ProjectIntermediateDir(), TEXT("UnrealMcpEnvLookup-"), TEXT(".env"));
+			const FString Contents =
+				TEXT("# header comment\n")
+				TEXT("UNKNOWN_KEY=ignored-by-parse-but-readable\n")
+				TEXT("UNREAL_MCP_DEV_CONTROL=0\n")
+				TEXT("UNREAL_MCP_DEV_CONTROL=1\n")          // last occurrence wins
+				TEXT("UNREAL_MCP_DEV_CONTROL_PORT = \"9930\" \n"); // whitespace + quotes stripped
+			TestTrue(TEXT("temp .env written"), FFileHelper::SaveStringToFile(Contents, *TempEnv));
+
+			TestEqual(TEXT("dev-control flag last-wins"),
+				FUnrealMcpConfig::LookupEnvFileValue(TempEnv, TEXT("UNREAL_MCP_DEV_CONTROL")), FString(TEXT("1")));
+			TestEqual(TEXT("dev-control port sanitized"),
+				FUnrealMcpConfig::LookupEnvFileValue(TempEnv, TEXT("UNREAL_MCP_DEV_CONTROL_PORT")), FString(TEXT("9930")));
+			TestEqual(TEXT("arbitrary unrecognized key is readable"),
+				FUnrealMcpConfig::LookupEnvFileValue(TempEnv, TEXT("UNKNOWN_KEY")), FString(TEXT("ignored-by-parse-but-readable")));
+			TestEqual(TEXT("absent key yields empty"),
+				FUnrealMcpConfig::LookupEnvFileValue(TempEnv, TEXT("NOT_PRESENT")), FString());
+
+			IFileManager::Get().Delete(*TempEnv);
+
+			TestEqual(TEXT("missing file yields empty (never throws)"),
+				FUnrealMcpConfig::LookupEnvFileValue(TempEnv, TEXT("UNREAL_MCP_DEV_CONTROL")), FString());
 		});
 	});
 
