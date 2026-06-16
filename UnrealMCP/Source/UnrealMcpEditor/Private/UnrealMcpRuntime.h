@@ -9,6 +9,7 @@ class FUnrealMcpToolRegistry;
 class FUnrealMcpGameThreadDispatcher;
 class FUnrealMcpBridgeServer;
 class FUnrealMcpSidecarManager;
+class FUnrealMcpServerManager;
 class FUnrealMcpExtensionManager;
 class FUnrealMcpEditorViewModel;
 class FUnrealMcpMainWindowTab;
@@ -43,6 +44,10 @@ private:
 	TUniquePtr<FUnrealMcpGameThreadDispatcher> Dispatcher;
 	TUniquePtr<FUnrealMcpBridgeServer> BridgeServer;
 	TUniquePtr<FUnrealMcpSidecarManager> SidecarManager;
+	// §7 in-UI local-server (issue #95): owns the LOCAL gamedev-mcp-server process (Custom+http only), the
+	// plugin-side analog of Unity's McpServerManager. Distinct from SidecarManager (the always-on bridge).
+	// Force-stopped in Shutdown so no gamedev-mcp-server orphans on editor close.
+	TUniquePtr<FUnrealMcpServerManager> ServerManager;
 	TUniquePtr<FUnrealMcpExtensionManager> ExtensionManager;
 
 	// §7 UI: the main-window view-model (shared so the nomad tab's widget binds to it) and its tab spawner,

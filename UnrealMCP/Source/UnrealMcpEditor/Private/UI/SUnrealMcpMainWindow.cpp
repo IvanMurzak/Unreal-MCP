@@ -566,32 +566,34 @@ TSharedRef<SWidget> SUnrealMcpMainWindow::BuildMcpServerCard()
 			[
 				SNew(SBox).MinDesiredWidth(RightControlColumnWidth).HAlign(HAlign_Right)
 				[
-					UnrealMcpStyleWidgets::StyledTextButton("UnrealMcp.Button.Primary", LOCTEXT("Start", "Start"),
-						FOnClicked::CreateLambda([this]()
+					// Issue #95: the MCP-server card's Start/Stop button launches + supervises the LOCAL
+					// gamedev-mcp-server (FUnrealMcpServerManager) via the view-model — REPLACING the interim #94
+					// wiring that (re)started the bridge sidecar. The label toggles Start↔Stop with the live server
+					// state; the action is gated to Custom mode + http transport (ToggleLocalServer no-ops otherwise,
+					// and the button is disabled outside that mode so a stray click can never spawn a server). The
+					// card itself is already Custom-only (visibility predicate below); the IsEnabled guard further
+					// disables it for Custom+stdio. NOT ViewModel->Connect() (the Unreal-side SignalR connect, owned
+					// by the "Unreal: <status>" row) and NOT OnRestartBridge (the footer's bridge restart).
+					SNew(SButton)
+					.ButtonStyle(&FUnrealMcpStyle::Get().GetWidgetStyle<FButtonStyle>("UnrealMcp.Button.Primary"))
+					.HAlign(HAlign_Center)
+					.VAlign(VAlign_Center)
+					// Disabled (so a stray click cannot spawn a server) outside Custom+http; ToggleLocalServer also
+					// no-ops in that case as a second guard.
+					.IsEnabled_Lambda([this]() { return IsViewModelValid() && ViewModel->IsLocalServerLaunchable(); })
+					.OnClicked_Lambda([this]()
+					{
+						if (IsViewModelValid())
+							ViewModel->ToggleLocalServer();
+						return FReply::Handled();
+					})
+					[
+						SNew(STextBlock)
+						.Text_Lambda([this]()
 						{
-							// Issue #93: the MCP-server card's "Start" must start the LOCAL server-side process the
-							// plugin manages — NOT ViewModel->Connect(), which is the Unreal-side SignalR connect
-							// already driven by the "Unreal: <status>" row's Connect/Disconnect button (wiring Start
-							// to Connect() duplicated that control and never touched the server process).
-							//
-							// ARCHITECTURE NOTE (locked decision, docs/ARCHITECTURE.md §7 deviation block ~L94-97):
-							// "there is no in-UI start-local-server control" in this release — the shared
-							// gamedev-mcp-server is acquired + launched by the CLI/§6 layer, NOT by the plugin, so the
-							// view-model exposes no StartServer()/launch path to call. The ONE local server-side
-							// process the plugin DOES own and can (re)start is the .NET sidecar (unreal-mcp-bridge),
-							// which hosts the McpPlugin and dials the MCP server (§1/§6). So Start (re)starts the
-							// sidecar via the same OnRestartBridge delegate the footer/§7 item-7 Restart action uses —
-							// the closest correct, architecture-respecting semantics for "start the local server"
-							// without violating the locked no-in-UI-server-launch decision.
-							//
-							// DEFERRED FOLLOW-UP (separate task/PR — issue #93 scope was deliberately split): a true
-							// in-UI launch of the shared gamedev-mcp-server (§7 item 6) — acquire the binary via the
-							// cli/§6 download layout and spawn/manage its process, gated on Custom mode + http
-							// transport — is intentionally NOT done here. This PR ships the bridge-(re)start as the
-							// interim Start behavior; the real local-server Start/Stop lands in the follow-up.
-							OnRestartBridge.ExecuteIfBound();
-							return FReply::Handled();
-						}))
+							return IsViewModelValid() ? ViewModel->GetLocalServerButtonText() : LOCTEXT("Start", "Start");
+						})
+					]
 				]
 			]
 		]

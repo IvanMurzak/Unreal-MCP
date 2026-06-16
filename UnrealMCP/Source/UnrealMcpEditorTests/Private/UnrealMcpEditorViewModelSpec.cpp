@@ -26,6 +26,11 @@ BEGIN_DEFINE_SPEC(FUnrealMcpEditorViewModelSpec, "UnrealMcp.EditorViewModel",
 		TArray<FString> AuthSent;
 		TArray<FString> OpenedUrls;
 		FUnrealMcpConfig LastPushed;
+		// §7 in-UI local-server (issue #95): the recording stubs for the server sinks. bServerRunning is the
+		// fake live state the IsLocalServerRunningSink reads; OnStart flips it true, OnStop flips it false.
+		int32 ServerStartCount = 0;
+		int32 ServerStopCount = 0;
+		bool bServerRunning = false;
 	};
 
 	static TSharedRef<FUnrealMcpEditorViewModel> MakeViewModel(TSharedRef<FRecording> Rec)
@@ -35,6 +40,9 @@ BEGIN_DEFINE_SPEC(FUnrealMcpEditorViewModelSpec, "UnrealMcp.EditorViewModel",
 		VM->OnPushConfig = [Rec](const FUnrealMcpConfig& Cfg) { Rec->PushCount++; Rec->LastPushed = Cfg; };
 		VM->OnSendAuth = [Rec](const FString& Type) -> bool { Rec->AuthSent.Add(Type); return true; };
 		VM->OnOpenBrowser = [Rec](const FString& Url) { Rec->OpenedUrls.Add(Url); };
+		VM->OnStartLocalServer = [Rec]() -> bool { Rec->ServerStartCount++; Rec->bServerRunning = true; return true; };
+		VM->OnStopLocalServer = [Rec]() { Rec->ServerStopCount++; Rec->bServerRunning = false; };
+		VM->IsLocalServerRunningSink = [Rec]() -> bool { return Rec->bServerRunning; };
 		return VM;
 	}
 
@@ -447,6 +455,66 @@ void FUnrealMcpEditorViewModelSpec::Define()
 			// A stray SetTransportMethod in Cloud is ignored (selector is locked).
 			VM->SetTransportMethod(EUnrealMcpTransportMethod::Stdio);
 			TestEqual("Cloud transport stays Http after stray set", static_cast<int32>(VM->GetEffectiveTransport()), static_cast<int32>(EUnrealMcpTransportMethod::Http));
+		});
+	});
+
+	Describe("Local MCP-server gating + toggle (§7 in-UI Start — issue #95)", [this]()
+	{
+		It("is launchable ONLY in Custom mode + http transport", [this]()
+		{
+			TSharedRef<FRecording> Rec = MakeShared<FRecording>();
+			TSharedRef<FUnrealMcpEditorViewModel> VM = MakeViewModel(Rec);
+
+			// Custom + http -> launchable.
+			VM->SetConnectionMode(EUnrealMcpConnectionMode::Custom);
+			VM->SetTransportMethod(EUnrealMcpTransportMethod::Http);
+			TestTrue("Custom+http launchable", VM->IsLocalServerLaunchable());
+
+			// Custom + stdio -> NOT launchable.
+			VM->SetTransportMethod(EUnrealMcpTransportMethod::Stdio);
+			TestFalse("Custom+stdio not launchable", VM->IsLocalServerLaunchable());
+
+			// Cloud (forces http) -> still NOT launchable (mode gates it out).
+			VM->SetConnectionMode(EUnrealMcpConnectionMode::Cloud);
+			TestFalse("Cloud not launchable", VM->IsLocalServerLaunchable());
+		});
+
+		It("ToggleLocalServer starts then stops the server in Custom+http and reports the live state", [this]()
+		{
+			TSharedRef<FRecording> Rec = MakeShared<FRecording>();
+			TSharedRef<FUnrealMcpEditorViewModel> VM = MakeViewModel(Rec);
+			VM->SetConnectionMode(EUnrealMcpConnectionMode::Custom);
+			VM->SetTransportMethod(EUnrealMcpTransportMethod::Http);
+
+			TestFalse("starts stopped", VM->IsLocalServerRunning());
+			TestEqual("button label Start when stopped", VM->GetLocalServerButtonText().ToString(), FString(TEXT("Start")));
+
+			TestTrue("toggle acted (start)", VM->ToggleLocalServer());
+			TestEqual("started once", Rec->ServerStartCount, 1);
+			TestTrue("now running", VM->IsLocalServerRunning());
+			TestEqual("button label Stop when running", VM->GetLocalServerButtonText().ToString(), FString(TEXT("Stop")));
+
+			TestTrue("toggle acted (stop)", VM->ToggleLocalServer());
+			TestEqual("stopped once", Rec->ServerStopCount, 1);
+			TestFalse("now stopped", VM->IsLocalServerRunning());
+		});
+
+		It("ToggleLocalServer is a NO-OP (never touches the sinks) outside Custom+http", [this]()
+		{
+			TSharedRef<FRecording> Rec = MakeShared<FRecording>();
+			TSharedRef<FUnrealMcpEditorViewModel> VM = MakeViewModel(Rec);
+
+			// Custom + stdio: gated out.
+			VM->SetConnectionMode(EUnrealMcpConnectionMode::Custom);
+			VM->SetTransportMethod(EUnrealMcpTransportMethod::Stdio);
+			TestFalse("toggle is a no-op in Custom+stdio", VM->ToggleLocalServer());
+			TestEqual("no start in Custom+stdio", Rec->ServerStartCount, 0);
+
+			// Cloud: gated out.
+			VM->SetConnectionMode(EUnrealMcpConnectionMode::Cloud);
+			TestFalse("toggle is a no-op in Cloud", VM->ToggleLocalServer());
+			TestEqual("no start in Cloud", Rec->ServerStartCount, 0);
+			TestFalse("server never started", Rec->bServerRunning);
 		});
 	});
 

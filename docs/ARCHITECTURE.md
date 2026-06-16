@@ -93,9 +93,24 @@ Prompts/Resources ship empty-but-wired (§10), as designed.
   (`WorkspaceMenu::GetMenuStructure().GetToolsCategory()`), not the **Window** menu; and the
   **connection timeline** (Unreal → MCP server → AI agent — see §7's Connection section design) — the
   Connection section ships a single status dot / label / button instead. The bridge status string is `Running (restarts: N)` /
-  `Stopped` (no PID/version), the AI agents section lists connected agents only (no config writing),
-  and there is no in-UI start-local-server control. The status table marks §7 "implemented" for the
-  window + 4 aux windows; these affordances are deferred.
+  `Stopped` (no PID/version), the AI agents section lists connected agents only (no config writing).
+  The status table marks §7 "implemented" for the window + 4 aux windows; the deferred affordances
+  above remain deferred.
+- **§7 in-UI local-server Start — LANDED (issue #95, supersedes the prior "no in-UI start-local-server
+  control" decision).** Operator decision 2026-06-15: the MCP-server card's **Start/Stop** button now
+  launches and supervises the LOCAL shared `gamedev-mcp-server` directly from the editor — replacing
+  the interim #94 wiring that (re)started the bridge sidecar. A new plugin-side `FUnrealMcpServerManager`
+  (`Source/UnrealMcpEditor/Private/Server/UnrealMcpServerManager.{h,cpp}`) owns its lifecycle, the
+  plugin-side C++ analog of Unity's in-process `McpServerManager.cs` (NOT in the bridge): binary
+  resolution (`UNREAL_MCP_SERVER_PATH` override → cached binary → download), spawn via
+  `FPlatformProcess::CreateProc`, startup verification, crash-restart with backoff, orphan-port kill,
+  PID persistence + reattach across module reloads, and graceful-then-force stop on editor shutdown so
+  no `gamedev-mcp-server` orphans on editor close. **Gated to Custom mode + http transport** (Start is
+  hidden/disabled, and a click is a no-op, in Cloud or Custom+stdio). The binary cache shares the CLI's
+  §6 layout `{Project}/Intermediate/UnrealMCP/server/<rid>/`; the consumed server version is pinned in
+  `FUnrealMcpServerManager::ServerVersion`, kept in lockstep with the CLI's
+  `cli/src/lib/server-version.ts` `SERVER_VERSION`. This is distinct from the always-on
+  `unreal-mcp-bridge` sidecar (§6) — two different child processes, two different managers.
 - **§9.1 `.uplugin` `EngineVersion`.** The §9.1 tree comment reads "EngineVersion floor 5.5.0", but
   the shipped `UnrealMCP.uplugin` carries **no `EngineVersion` field at all** — UE treats it as an
   exact-build match (not a floor) and would refuse to load on newer engines. The 5.5+ floor is a
@@ -718,7 +733,10 @@ item 1), not to defer debug affordances entirely:
 5. **Connection alerts** — inline warnings (port conflict, version mismatch, sidecar crash-looped).
 6. **MCP server section** (Custom mode) — local `gamedev-mcp-server` Start/Stop + status, transport
    stdio/http toggle, auth none/required + masked token field + Generate button (crypto-random,
-   restart-on-apply), copyable raw JSON client config snippets (`SetupMcpServerSection`).
+   restart-on-apply), copyable raw JSON client config snippets (`SetupMcpServerSection`). **LANDED
+   (issue #95):** the Start/Stop button drives `FUnrealMcpServerManager` (launch + supervise the local
+   server, gated to Custom + http — see the §7 deviation block above); the button label toggles
+   Start↔Stop with the live server run-state and is disabled outside Custom+http.
 7. **Bridge status** (Unreal-specific, no Unity analog) — sidecar state machine value, PID,
    binary version, restart count, Restart button.
 8. **AI agents** — connected-agent labels + status dot, agent auto-configure list (Claude Code,
