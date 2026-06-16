@@ -56,10 +56,19 @@ private:
 	// styled footer (Discord / GitHub bug-report / gold GitHub Star).
 	TSharedRef<SWidget> BuildHeaderSection();
 	TSharedRef<SWidget> BuildConnectionSection();
+	// The connection cluster (Unity's .connection-timeline): a 2-column layout — a continuous vertical rail
+	// [MCP-server dot] → [line] → [Unreal dot] on the LEFT, the matching content rows on the RIGHT — so the
+	// connecting line spans continuously between the dots (the round-2 per-row line could not span the gap).
+	TSharedRef<SWidget> BuildConnectionCluster();
 	// The Cloud auth controls (masked token + Revoke/Authorize), shown inline in the Connection card in Cloud mode.
 	TSharedRef<SWidget> BuildCloudAuthRow();
-	// The Custom auth + MCP-server sub-card (Server URL, Start, Transport, none/required, masked token + New).
+	// The Custom Server URL row + validation (Custom-only; NOT part of the dot cluster).
 	TSharedRef<SWidget> BuildCustomServerSection();
+	// The MCP-server sub-card body (Start, Transport, none/required, masked token + New) — Custom-only. Its
+	// timeline dot lives in the shared rail (BuildConnectionCluster), not in this card.
+	TSharedRef<SWidget> BuildMcpServerCard();
+	// The "Unreal: <status>" content row (underlined label + Connect/Disconnect/Stop) — its dot lives in the rail.
+	TSharedRef<SWidget> BuildUnrealStatusRow();
 	// The Custom-mode transport selector (stdio/http) segmented control.
 	TSharedRef<SWidget> BuildTransportSelector();
 	// The Custom-mode authorization selector (none/required) + masked token + New.

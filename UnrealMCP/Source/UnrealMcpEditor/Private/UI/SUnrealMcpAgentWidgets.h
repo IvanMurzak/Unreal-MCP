@@ -211,41 +211,68 @@ namespace UnrealMcpStyleWidgets
 		];
 	}
 
-	/**
-	 * A connection-timeline indicator column (Unity's .timeline-indicator): a fixed 20px-wide column holding
-	 * the 14px status dot centred horizontally, with a 2px vertical connecting-line (rgb(80,80,80), Unity's
-	 * .timeline-line) running DOWN from the dot toward the next timeline point when @p DrawLineBelow is true.
-	 * The line FillHeight-fills the slot below the dot so it stretches to whatever height the row resolves to
-	 * (Unity uses position:absolute bottom:-10px; Slate has no absolute positioning, so a fill slot that grows
-	 * with the row is the structural equivalent). The last point in the cluster passes DrawLineBelow=false
-	 * (Unity's .timeline-point-last hides the line) — supplied as a TAttribute so it can react to mode changes
-	 * (e.g. the MCP-server point only exists in Custom mode, so the dot above it draws no dangling line in Cloud).
-	 *
-	 * Width 20px + the line centred at x=9px mirror the USS exactly; the dot is 14px so a centred line at the
-	 * dot's horizontal midpoint reads as one continuous vertical rule joining the dots.
-	 */
-	inline TSharedRef<SWidget> TimelineIndicator(const TAttribute<EDot>& DotState, const TAttribute<bool>& DrawLineBelow)
+	/** A fixed 2px-wide vertical connecting-line segment (Unity's .timeline-line, rgb(80,80,80)), centred in
+	 *  the rail's 20px column. Used as a FillHeight rail segment BETWEEN two dots so it absorbs the full
+	 *  inter-dot slack and reads as one continuous rule joining them; @p bVisible collapses it when the
+	 *  upper dot does not exist (e.g. the MCP-server point only exists in Custom mode). */
+	inline TSharedRef<SWidget> TimelineLineSegment(const TAttribute<EVisibility>& Visibility)
 	{
+		return SNew(SBox).WidthOverride(2.0f)
+			.Visibility(Visibility)
+			[
+				SNew(SImage).Image(FUnrealMcpStyle::Get().GetBrush("UnrealMcp.ConnectingLine"))
+			];
+	}
+
+	/**
+	 * A connection-timeline RAIL (Unity's .connection-timeline left column): a fixed 20px-wide vertical column
+	 * that owns ALL the cluster's status dots and the connecting-line segments BETWEEN them, so the line is a
+	 * continuous rule spanning from one dot to the next regardless of the content rows beside it. This is the
+	 * structural fix for the per-row approach (which trapped each line inside an AutoHeight row with no slack):
+	 * here the line slots are FillHeight at the CLUSTER level, between the dots, with the full inter-dot height
+	 * as slack to fill.
+	 *
+	 * Slots are supplied as alternating dot / line entries. A dot slot is AutoHeight (top-aligned so it pins to
+	 * the top of its content row beside it); a line slot is FillHeight(1) so it stretches to fill the gap down to
+	 * the next dot. Each line carries its own visibility attribute so a segment collapses when its upper dot is
+	 * absent (e.g. in Cloud mode the MCP-server dot + its line vanish, leaving only the Unreal dot).
+	 *
+	 * Width 20px + the dots/line centred horizontally mirror Unity's .timeline-indicator (20px column, line at
+	 * x=9px). The whole rail is VAlign_Fill in its parent SHorizontalBox so it matches the content column's height.
+	 */
+	struct FTimelineRailDot
+	{
+		TAttribute<EDot> DotState;
+		TAttribute<EVisibility> DotVisibility = EVisibility::Visible;
+		// Visibility of the connecting-line segment BELOW this dot; Collapsed on the last dot (no line below it).
+		TAttribute<EVisibility> LineBelowVisibility = EVisibility::Collapsed;
+		// Top padding to vertically centre the 14px dot on its sibling content row's first line (the content row
+		// may begin below the rail's y=0, e.g. a card's 8px top padding) — purely cosmetic alignment.
+		float DotTopPadding = 0.0f;
+	};
+
+	inline TSharedRef<SWidget> TimelineRail(const TArray<FTimelineRailDot>& Dots)
+	{
+		TSharedRef<SVerticalBox> Rail = SNew(SVerticalBox);
+		for (const FTimelineRailDot& Point : Dots)
+		{
+			// The dot — AutoHeight, top-aligned so it pins to the top of its sibling content row.
+			Rail->AddSlot().AutoHeight().HAlign(HAlign_Center).Padding(0, Point.DotTopPadding, 0, 0)
+			[
+				SNew(SBox).Visibility(Point.DotVisibility)
+				[
+					StatusDot(Point.DotState)
+				]
+			];
+			// The connecting line BELOW it — FillHeight so it absorbs the slack down to the next dot.
+			Rail->AddSlot().FillHeight(1.0f).HAlign(HAlign_Center).Padding(0, 2, 0, 2)
+			[
+				TimelineLineSegment(Point.LineBelowVisibility)
+			];
+		}
 		return SNew(SBox).WidthOverride(20.0f)
 		[
-			SNew(SVerticalBox)
-			// The status dot, centred horizontally in the 20px column.
-			+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center)
-			[
-				StatusDot(DotState)
-			]
-			// The 2px connecting-line below the dot — fills the remaining row height, centred under the dot.
-			+ SVerticalBox::Slot().FillHeight(1.0f).HAlign(HAlign_Center).Padding(0, 2, 0, 0)
-			[
-				SNew(SBox).WidthOverride(2.0f)
-				.Visibility_Lambda([DrawLineBelow]()
-				{
-					return DrawLineBelow.Get() ? EVisibility::HitTestInvisible : EVisibility::Collapsed;
-				})
-				[
-					SNew(SImage).Image(FUnrealMcpStyle::Get().GetBrush("UnrealMcp.ConnectingLine"))
-				]
-			]
+			Rail
 		];
 	}
 
