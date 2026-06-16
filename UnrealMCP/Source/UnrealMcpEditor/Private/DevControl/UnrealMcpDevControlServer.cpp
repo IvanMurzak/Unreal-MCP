@@ -14,6 +14,7 @@
 #include "HttpPath.h"
 #include "IHttpRouter.h"
 #include "IPAddress.h"
+#include "HAL/PlatformTime.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
 #include "Serialization/JsonReader.h"
@@ -94,6 +95,7 @@ namespace
 	{
 		switch (State)
 		{
+			case EUnrealMcpDeviceAuthState::Connecting: return TEXT("Connecting"); // issue #99 transient starting/awaiting
 			case EUnrealMcpDeviceAuthState::Pending:    return TEXT("Pending");
 			case EUnrealMcpDeviceAuthState::Authorized: return TEXT("Authorized");
 			case EUnrealMcpDeviceAuthState::Failed:     return TEXT("Failed");
@@ -547,7 +549,7 @@ int32 FUnrealMcpDevControlServer::RouteRequest(
 				ViewModelPtr->ToggleLocalServer();
 			bServerTarget = true;
 		}
-		else if (Target.Equals(TEXT("authorize"), ESearchCase::IgnoreCase))        ViewModelPtr->Authorize();
+		else if (Target.Equals(TEXT("authorize"), ESearchCase::IgnoreCase))        ViewModelPtr->Authorize(FPlatformTime::Seconds()); // issue #99: arm the bounded connect timeout (same as the Slate button)
 		else if (Target.Equals(TEXT("cancel"), ESearchCase::IgnoreCase))           ViewModelPtr->CancelAuth();
 		else if (Target.Equals(TEXT("revoke"), ESearchCase::IgnoreCase))           ViewModelPtr->Revoke();
 		else if (Target.Equals(TEXT("generate-token"), ESearchCase::IgnoreCase))   ViewModelPtr->GenerateCustomToken();

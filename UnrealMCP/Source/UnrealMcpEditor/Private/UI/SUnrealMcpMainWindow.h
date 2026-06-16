@@ -103,4 +103,8 @@ private:
 	// Common handlers.
 	FReply OnConnectClicked();
 	bool IsViewModelValid() const { return ViewModel.IsValid(); }
+
+	// Issue #99: active-timer callback driving the bounded Cloud-auth Connecting→Failed timeout (no-op unless the
+	// device-auth flow is awaiting a sidecar handshake). Registered in Construct; owned by the widget's lifetime.
+	EActiveTimerReturnType TickCloudAuthTimeout(double InCurrentTime, float InDeltaTime);
 };

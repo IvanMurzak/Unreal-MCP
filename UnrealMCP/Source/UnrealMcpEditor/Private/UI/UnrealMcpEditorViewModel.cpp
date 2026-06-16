@@ -151,23 +151,85 @@ void FUnrealMcpEditorViewModel::Disconnect()
 	PersistAndPush();
 }
 
-void FUnrealMcpEditorViewModel::Authorize()
+const TCHAR* FUnrealMcpEditorViewModel::BridgeUnavailableMessage()
+{
+	// Actionable, NOT the cryptic "No sidecar connected." — tell the user how to get a working bridge (issue #99).
+	return TEXT("MCP bridge not installed for this platform — reinstall the plugin, or run `unreal-mcp-cli bootstrap-local`.");
+}
+
+void FUnrealMcpEditorViewModel::Authorize(double NowSeconds)
 {
 	DeviceVerificationUrl.Reset();
 	DeviceUserCode.Reset();
 	DeviceAuthError.Reset();
-	// Only enter Pending if the auth-start frame actually reached the sidecar. SendAuthMessage returns false
-	// when no sidecar is connected/handshaken; entering Pending regardless would wedge the UI showing
-	// "Complete authorization in your browser…" with an empty user code until the user manually cancels.
-	const bool bSent = OnSendAuth ? OnSendAuth(TEXT("auth-start")) : false;
-	DeviceAuthState = bSent ? EUnrealMcpDeviceAuthState::Pending : EUnrealMcpDeviceAuthState::Failed;
-	// Surface a reason for the Failed state so the window does not silently collapse the pending instructions.
-	if (!bSent)
-		DeviceAuthError = TEXT("No sidecar connected.");
+	bAuthStartQueued = false;
+
+	// Fast path: a connected + handshaken sidecar takes the auth-start frame immediately → straight to Pending,
+	// then the sidecar drives the device-code feed (verificationUrl / userCode / authorized) over `device-auth`.
+	if (OnSendAuth && OnSendAuth(TEXT("auth-start")))
+	{
+		DeviceAuthState = EUnrealMcpDeviceAuthState::Pending;
+		return;
+	}
+
+	// Robust path (issue #99): the sidecar is not connected/handshaken yet. Do NOT dead-end to Failed — request
+	// it (re)start, QUEUE the auth-start, and enter the transient Connecting state. NotifySidecarHandshakeComplete()
+	// flushes the queued frame the moment the sidecar handshakes; TickAuthTimeout() bounds the wait so the UI never
+	// wedges. Only an unresolvable bridge binary fails fast with an actionable message.
+	const bool bCanStart = OnEnsureSidecarStarted ? OnEnsureSidecarStarted() : false;
+	if (!bCanStart)
+	{
+		// The bridge binary genuinely cannot be resolved/spawned (packaged-without-<rid> / unset dev override).
+		// Awaiting a handshake that will never arrive would be a silent wedge — fail fast, actionably.
+		DeviceAuthState = EUnrealMcpDeviceAuthState::Failed;
+		DeviceAuthError = BridgeUnavailableMessage();
+		return;
+	}
+
+	bAuthStartQueued = true;
+	ConnectingStartedSeconds = NowSeconds;
+	DeviceAuthState = EUnrealMcpDeviceAuthState::Connecting;
+}
+
+void FUnrealMcpEditorViewModel::NotifySidecarHandshakeComplete()
+{
+	// Only meaningful while we are waiting (Connecting) with a queued auth-start. A handshake at any other time
+	// (a normal reconnect, a manual Restart bridge with no auth in flight) must not spuriously start an auth flow.
+	if (DeviceAuthState != EUnrealMcpDeviceAuthState::Connecting || !bAuthStartQueued)
+		return;
+
+	// The sidecar is now connected/handshaken — flush the queued auth-start. On success advance to Pending (the
+	// sidecar's device-auth feed drives the rest); a still-failing send is a transient race, so stay Connecting
+	// and let either a later handshake re-fire this or the timeout fail it actionably.
+	if (OnSendAuth && OnSendAuth(TEXT("auth-start")))
+	{
+		bAuthStartQueued = false;
+		DeviceVerificationUrl.Reset();
+		DeviceUserCode.Reset();
+		DeviceAuthError.Reset();
+		DeviceAuthState = EUnrealMcpDeviceAuthState::Pending;
+	}
+}
+
+void FUnrealMcpEditorViewModel::TickAuthTimeout(double NowSeconds)
+{
+	// Bounded Connecting→Failed: only fires while awaiting the sidecar handshake. Once the wait exceeds the bound,
+	// the bridge plainly is not coming up — fail actionably and clear the queued frame so a late handshake cannot
+	// resurrect a stale auth-start. No-op in every other state (Pending/Authorized/Failed/Idle are driven elsewhere).
+	if (DeviceAuthState != EUnrealMcpDeviceAuthState::Connecting)
+		return;
+	if (NowSeconds - ConnectingStartedSeconds < SidecarConnectTimeoutSeconds)
+		return;
+
+	bAuthStartQueued = false;
+	DeviceAuthState = EUnrealMcpDeviceAuthState::Failed;
+	DeviceAuthError = BridgeUnavailableMessage();
 }
 
 void FUnrealMcpEditorViewModel::CancelAuth()
 {
+	// Cancelling clears any queued/awaiting auth-start (issue #99) so a late handshake/timeout cannot revive it.
+	bAuthStartQueued = false;
 	// Cancelling an in-progress RE-authorize must not hide an already-stored cloud token: InitializeConfig maps
 	// token-present → Authorized, so dropping to Idle here would lose the "Authorized"/Revoke affordance until
 	// restart. Fall back to Authorized when a bearer is still stored; only a token-less cancel returns to Idle.
