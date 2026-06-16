@@ -54,6 +54,9 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
             public const string ToolCancel = "tool-cancel";
             public const string Status = "status";
             public const string DeviceAuth = "device-auth";
+            // sidecar → plugin: the terminal result of one agent-config request (§7 AI-agent configurators).
+            // Correlated to the originating request by requestId; carries the engine-agnostic DTO.
+            public const string AgentConfigResult = "agent-config-result";
 
             // plugin → sidecar
             public const string HandshakeAck = "handshake-ack";
@@ -64,6 +67,13 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
             public const string AuthCancel = "auth-cancel";
             public const string AuthRevoke = "auth-revoke";
             public const string Shutdown = "shutdown";
+            // plugin → sidecar: AI-agent configurator requests (§7). The sidecar serves these against the
+            // shared com.IvanMurzak.McpPlugin.AgentConfig library and answers with an `agent-config-result`.
+            public const string AgentsList = "agents-list";       // enumerate the available agents (+ status)
+            public const string AgentStatus = "agent-status";     // describe ONE agent for a transport (the UI DTO)
+            public const string AgentConfigure = "agent-configure"; // write/merge the MCP entry into the agent's config file
+            public const string AgentRemove = "agent-remove";     // remove the MCP entry (both transports)
+            public const string AgentSkillsPath = "agent-skills-path"; // resolve the agent's skills folder (plugin writes the files)
 
             // either direction
             public const string Ping = "ping";

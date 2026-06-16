@@ -75,6 +75,15 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
         /// </summary>
         public event Action<string>? AuthMessageReceived;
 
+        /// <summary>
+        /// Raised when the plugin sends a §7 AI-agent configurator request (<c>agents-list</c> /
+        /// <c>agent-status</c> / <c>agent-configure</c> / <c>agent-remove</c> / <c>agent-skills-path</c>). The
+        /// arguments are the request <c>type</c> and the raw parsed JSON object; the host deserializes the
+        /// concrete request, serves it against the shared AgentConfig library, and sends back an
+        /// <c>agent-config-result</c> via <see cref="SendToPluginAsync"/>. Invoked off the reader thread.
+        /// </summary>
+        public event Action<string, JsonObject>? AgentConfigRequestReceived;
+
         public IpcClient(string host, int port, string token, string sidecarVersion, ILogger? logger = null)
         {
             _host = host;
@@ -271,6 +280,16 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
                 case IpcProtocol.Type.AuthRevoke:
                     // §8 auth plumbing — handled gracefully as stubs pending the full device-code UI flow.
                     AuthMessageReceived?.Invoke(type);
+                    break;
+                case IpcProtocol.Type.AgentsList:
+                case IpcProtocol.Type.AgentStatus:
+                case IpcProtocol.Type.AgentConfigure:
+                case IpcProtocol.Type.AgentRemove:
+                case IpcProtocol.Type.AgentSkillsPath:
+                    // §7 AI-agent configurator requests. The host serves them against the shared AgentConfig
+                    // library and answers with an `agent-config-result` (off the reader thread).
+                    if (node is JsonObject agentObj)
+                        AgentConfigRequestReceived?.Invoke(type, agentObj);
                     break;
                 case IpcProtocol.Type.Status:
                 case IpcProtocol.Type.Log:
