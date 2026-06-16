@@ -212,6 +212,44 @@ namespace UnrealMcpStyleWidgets
 	}
 
 	/**
+	 * A connection-timeline indicator column (Unity's .timeline-indicator): a fixed 20px-wide column holding
+	 * the 14px status dot centred horizontally, with a 2px vertical connecting-line (rgb(80,80,80), Unity's
+	 * .timeline-line) running DOWN from the dot toward the next timeline point when @p DrawLineBelow is true.
+	 * The line FillHeight-fills the slot below the dot so it stretches to whatever height the row resolves to
+	 * (Unity uses position:absolute bottom:-10px; Slate has no absolute positioning, so a fill slot that grows
+	 * with the row is the structural equivalent). The last point in the cluster passes DrawLineBelow=false
+	 * (Unity's .timeline-point-last hides the line) — supplied as a TAttribute so it can react to mode changes
+	 * (e.g. the MCP-server point only exists in Custom mode, so the dot above it draws no dangling line in Cloud).
+	 *
+	 * Width 20px + the line centred at x=9px mirror the USS exactly; the dot is 14px so a centred line at the
+	 * dot's horizontal midpoint reads as one continuous vertical rule joining the dots.
+	 */
+	inline TSharedRef<SWidget> TimelineIndicator(const TAttribute<EDot>& DotState, const TAttribute<bool>& DrawLineBelow)
+	{
+		return SNew(SBox).WidthOverride(20.0f)
+		[
+			SNew(SVerticalBox)
+			// The status dot, centred horizontally in the 20px column.
+			+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center)
+			[
+				StatusDot(DotState)
+			]
+			// The 2px connecting-line below the dot — fills the remaining row height, centred under the dot.
+			+ SVerticalBox::Slot().FillHeight(1.0f).HAlign(HAlign_Center).Padding(0, 2, 0, 0)
+			[
+				SNew(SBox).WidthOverride(2.0f)
+				.Visibility_Lambda([DrawLineBelow]()
+				{
+					return DrawLineBelow.Get() ? EVisibility::HitTestInvisible : EVisibility::Collapsed;
+				})
+				[
+					SNew(SImage).Image(FUnrealMcpStyle::Get().GetBrush("UnrealMcp.ConnectingLine"))
+				]
+			]
+		];
+	}
+
+	/**
 	 * A tab-like segmented control (Unity .segmented-control): a rounded track holding N toggle segments;
 	 * the selected segment renders its text teal. Each segment is a toggle-style SCheckBox bound to the
 	 * shared IsSelected/OnSelect lambdas so it stays a thin view over the caller's state.

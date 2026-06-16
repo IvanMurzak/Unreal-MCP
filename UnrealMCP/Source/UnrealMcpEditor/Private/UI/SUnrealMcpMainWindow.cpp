@@ -236,26 +236,31 @@ TSharedRef<SWidget> SUnrealMcpMainWindow::BuildConnectionSection()
 		+ SVerticalBox::Slot().AutoHeight().Padding(0, 8, 0, 0)[ BuildCloudAuthRow() ]
 		// Custom Server URL + MCP-server sub-card — visible only in Custom mode.
 		+ SVerticalBox::Slot().AutoHeight().Padding(0, 8, 0, 0)[ BuildCustomServerSection() ]
-		// Shared connection-status row (status dot + underlined "Unreal: <status>" label + Connect/Disconnect/Stop).
+		// Shared connection-status row (timeline indicator + underlined "Unreal: <status>" label + Connect/Disconnect/Stop).
+		// This is the LAST visible timeline point in the connection cluster (it sits below the MCP-server card in the
+		// Unreal layout), so its indicator draws NO connecting-line below (Unity's .timeline-point-last). The line that
+		// joins it to the MCP-server dot above is drawn by the MCP-server card's indicator (see BuildCustomServerSection).
 		+ SVerticalBox::Slot().AutoHeight().Padding(0, 10, 0, 0)
 		[
 			SNew(SHorizontalBox)
-			// The status dot.
-			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 8, 0)
+			// The timeline indicator (status dot only — last point, no downward line).
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Fill).Padding(0, 0, 8, 0)
 			[
-				UnrealMcpStyleWidgets::StatusDot(TAttribute<EDot>::Create([this]()
-				{
-					if (!IsViewModelValid())
-						return EDot::Offline;
-					switch (ViewModel->GetConnectionState())
+				UnrealMcpStyleWidgets::TimelineIndicator(
+					TAttribute<EDot>::Create([this]()
 					{
-						case EUnrealMcpConnectionState::Connected:  return EDot::Online;
-						case EUnrealMcpConnectionState::Connecting:  return EDot::Ring;
-						// Degraded must NOT use the (green) Ring brush — that reads as healthy. Show Offline.
-						case EUnrealMcpConnectionState::Degraded:    return EDot::Offline;
-						default:                                     return EDot::Offline;
-					}
-				}))
+						if (!IsViewModelValid())
+							return EDot::Offline;
+						switch (ViewModel->GetConnectionState())
+						{
+							case EUnrealMcpConnectionState::Connected:  return EDot::Online;
+							case EUnrealMcpConnectionState::Connecting:  return EDot::Ring;
+							// Degraded must NOT use the (green) Ring brush — that reads as healthy. Show Offline.
+							case EUnrealMcpConnectionState::Degraded:    return EDot::Offline;
+							default:                                     return EDot::Offline;
+						}
+					}),
+					/*DrawLineBelow*/ false)
 			]
 			// The underlined "Unreal: <status>" label — spans only the text (issue #80 item 3).
 			+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
@@ -467,8 +472,11 @@ TSharedRef<SWidget> SUnrealMcpMainWindow::BuildCustomServerSection()
 				+ SVerticalBox::Slot().AutoHeight()
 				[
 					SNew(SHorizontalBox)
-					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 8, 0)
-					[ UnrealMcpStyleWidgets::StatusDot(EDot::Offline) ]
+					// MCP-server timeline indicator: the dot + a 2px connecting-line DOWN toward the Unreal status
+					// dot below it (the connection cluster's second point — Unity's TimelinePointMcpServer). VAlign_Fill
+					// lets the line stretch the full header-row height so it visually reaches the next point.
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Fill).Padding(0, 0, 8, 0)
+					[ UnrealMcpStyleWidgets::TimelineIndicator(EDot::Offline, /*DrawLineBelow*/ true) ]
 					+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
 					[ UnderlinedLabel(LOCTEXT("McpServer", "MCP server")) ]
 					+ SHorizontalBox::Slot().AutoWidth().HAlign(HAlign_Right).VAlign(VAlign_Center)
