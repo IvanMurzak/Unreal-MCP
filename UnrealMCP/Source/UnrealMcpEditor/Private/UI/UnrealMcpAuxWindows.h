@@ -20,6 +20,8 @@ class FSpawnTabArgs;
  *   - UnrealMcpPromptsWindow   — MCP prompts (honest empty state until a prompts feed lands).
  *   - UnrealMcpResourcesWindow — MCP resources (honest empty state).
  *   - UnrealMcpSettingsWindow  — §8 connection settings (also the ISettingsModule section).
+ *   - UnrealMcpSerializationCheckWindow — serialize a picked UObject/Actor to JSON (Unity-MCP parity); opened
+ *     by the main window's footer "Check" button via the static TryInvokeSerializationCheckTab().
  *
  * Dedup/focus (the known Godot [low] fixed here): nomad tabs are owned by FGlobalTabmanager, which keeps a
  * single live tab per id and FOCUSES the existing one when the menu entry is invoked again — invoking a
@@ -36,6 +38,15 @@ public:
 	static const FName PromptsTabId;
 	static const FName ResourcesTabId;
 	static const FName SettingsTabId;
+	static const FName SerializationCheckTabId;
+
+	/**
+	 * Open (or focus, if already open) the Serialization Check tab. Static so the footer "Check" button and the
+	 * dev-control `check` action can both drive it without holding an FUnrealMcpAuxWindows instance. Guards on
+	 * FSlateApplication::IsInitialized() so a headless / -nullrhi run is a safe no-op. Returns true when a live
+	 * tab was invoked (false when Slate is unavailable). Game-thread only — TryInvokeTab pumps Slate.
+	 */
+	static bool TryInvokeSerializationCheckTab();
 
 	/**
 	 * Register the four nomad tabs + the ISettingsModule settings section. @p InViewModel is the shared state
@@ -67,6 +78,7 @@ private:
 	TSharedRef<SDockTab> SpawnPromptsTab(const FSpawnTabArgs& Args);
 	TSharedRef<SDockTab> SpawnResourcesTab(const FSpawnTabArgs& Args);
 	TSharedRef<SDockTab> SpawnSettingsTab(const FSpawnTabArgs& Args);
+	TSharedRef<SDockTab> SpawnSerializationCheckTab(const FSpawnTabArgs& Args);
 
 	TSharedPtr<FUnrealMcpEditorViewModel> ViewModel;
 	TFunction<TArray<FUnrealMcpToolListEntry>()> ToolListProvider;
