@@ -15,6 +15,7 @@
 #include "Widgets/Layout/SSeparator.h"
 #include "Widgets/Text/STextBlock.h"
 #include "Widgets/Input/SButton.h"
+#include "Widgets/Input/SComboBox.h"
 #include "Widgets/Input/SEditableTextBox.h"
 #include "Widgets/Input/SCheckBox.h"
 #include "Styling/AppStyle.h"
@@ -43,6 +44,19 @@ namespace
 	constexpr int32 TagHttp   = 1;
 	constexpr int32 TagNone   = 0;
 	constexpr int32 TagRequired = 1;
+
+	// The Log Level options in Unity's LogLevel.cs order (Runtime/Utils/LogLevel.cs): Trace, Debug, Info,
+	// Warning, Error, Exception, None. Rendered 1:1 in the §7 Log Level dropdown (issue #80 item 1).
+	const TArray<FString> GLogLevelNames =
+	{
+		TEXT("Trace"), TEXT("Debug"), TEXT("Info"), TEXT("Warning"),
+		TEXT("Error"), TEXT("Exception"), TEXT("None")
+	};
+
+	// One consistent right edge for every connection-row control (issue #80 item 4): the Custom/Cloud group,
+	// the Server URL input, the Start button, and the transport / auth segmented groups all right-align to the
+	// same x. A fixed-width right column makes that edge identical regardless of each control's natural width.
+	constexpr float RightControlColumnWidth = 150.0f;
 }
 
 void SUnrealMcpMainWindow::Construct(const FArguments& InArgs)
@@ -56,34 +70,55 @@ void SUnrealMcpMainWindow::Construct(const FArguments& InArgs)
 	// The AI-cube logo brush comes from the style set (registered at module startup; lazily-inited fallback).
 	LogoBrush = FUnrealMcpStyle::Get().GetBrush("UnrealMcp.Logo");
 
+	// Build the Log Level dropdown's item source once (kept as a member so OptionsSource stays valid).
+	LogLevelItems.Reset();
+	for (const FString& Name : GLogLevelNames)
+		LogLevelItems.Add(MakeShared<FString>(Name));
+
+	// Sections are no longer each wrapped in a card (issue #80 item 6). Unity uses a flat layout with 1px
+	// dividers between major sections and reserves the blue rounded frame for the few blocks that use it (the
+	// AI-agent block + the MCP-server sub-card). We mirror that: plain section content separated by Divider().
 	ChildSlot
 	[
 		SNew(SScrollBox)
-		+ SScrollBox::Slot().Padding(8.0f)
+		+ SScrollBox::Slot().Padding(16.0f)
 		[
 			SNew(SVerticalBox)
-			+ SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 8)[ BuildHeaderSection() ]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 8)[ BuildConnectionSection() ]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 8)[ BuildAgentConfiguratorsSection() ]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 8)[ BuildExtensionsSection() ]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 8)[ BuildFooterSection() ]
+			+ SVerticalBox::Slot().AutoHeight()[ BuildHeaderSection() ]
+			+ SVerticalBox::Slot().AutoHeight().Padding(0, 10)[ UnrealMcpStyleWidgets::Divider() ]
+			+ SVerticalBox::Slot().AutoHeight()[ BuildConnectionSection() ]
+			+ SVerticalBox::Slot().AutoHeight().Padding(0, 10)[ UnrealMcpStyleWidgets::Divider() ]
+			+ SVerticalBox::Slot().AutoHeight()[ BuildAgentConfiguratorsSection() ]
+			+ SVerticalBox::Slot().AutoHeight().Padding(0, 10)[ UnrealMcpStyleWidgets::Divider() ]
+			+ SVerticalBox::Slot().AutoHeight()[ BuildExtensionsSection() ]
+			+ SVerticalBox::Slot().AutoHeight().Padding(0, 10)[ UnrealMcpStyleWidgets::Divider() ]
+			+ SVerticalBox::Slot().AutoHeight()[ BuildFooterSection() ]
 		]
 	];
 }
 
 TSharedRef<SWidget> SUnrealMcpMainWindow::UnderlinedLabel(const TAttribute<FText>& Text)
 {
-	// A 13px-bold label with a thin 1px underline (Slate has no text-underline run; we draw a separator).
-	return SNew(SVerticalBox)
-		+ SVerticalBox::Slot().AutoHeight()
+	// The underline must span ONLY the label text, never the full row width (issue #80 item 3). An SHorizontalBox
+	// with a single AutoWidth slot shrinks to the text's width, so the 1px rule drawn beneath it (Slate has no
+	// text-underline run) is exactly as wide as the letters and cannot collide with the row's right-hand buttons.
+	return SNew(SHorizontalBox)
+		+ SHorizontalBox::Slot().AutoWidth()
 		[
-			SNew(STextBlock)
-			.TextStyle(&FUnrealMcpStyle::Get().GetWidgetStyle<FTextBlockStyle>("UnrealMcp.Text.TimelineLabel"))
-			.Text(Text)
-		]
-		+ SVerticalBox::Slot().AutoHeight().Padding(0, 1, 0, 0)
-		[
-			SNew(SSeparator).Thickness(1.0f).SeparatorImage(FUnrealMcpStyle::Get().GetBrush("UnrealMcp.ConnectingLine"))
+			SNew(SVerticalBox)
+			+ SVerticalBox::Slot().AutoHeight()
+			[
+				SNew(STextBlock)
+				.TextStyle(&FUnrealMcpStyle::Get().GetWidgetStyle<FTextBlockStyle>("UnrealMcp.Text.TimelineLabel"))
+				.Text(Text)
+			]
+			+ SVerticalBox::Slot().AutoHeight().Padding(0, 1, 0, 0)
+			[
+				SNew(SBox).HeightOverride(1.0f)
+				[
+					SNew(SImage).Image(FUnrealMcpStyle::Get().GetBrush("UnrealMcp.ConnectingLine"))
+				]
+			]
 		];
 }
 
@@ -91,39 +126,52 @@ TSharedRef<SWidget> SUnrealMcpMainWindow::BuildHeaderSection()
 {
 	const FString Version = PluginVersion.IsEmpty() ? TEXT("0.2.0") : PluginVersion;
 
-	// Left column: base config (Log Level, Log file, Version) styled rows. Right column: the AI-cube logo.
+	// Base-config rows (Unity .content-item): a left label column + a right field column. The label column width
+	// matches Unity's .content-item label (~85px); the field column fills the rest so every field's left edge lines up.
 	auto MakeConfigRow = [](const FText& Label, const TSharedRef<SWidget>& Field)
 	{
 		return SNew(SHorizontalBox)
-			+ SHorizontalBox::Slot().FillWidth(0.40f).VAlign(VAlign_Center).Padding(0, 0, 8, 0)
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 8, 0)
 			[
-				SNew(STextBlock)
-				.TextStyle(&FUnrealMcpStyle::Get().GetWidgetStyle<FTextBlockStyle>("UnrealMcp.Text.Description"))
-				.Text(Label)
+				SNew(SBox).WidthOverride(85.0f)
+				[
+					SNew(STextBlock)
+					.TextStyle(&FUnrealMcpStyle::Get().GetWidgetStyle<FTextBlockStyle>("UnrealMcp.Text.Description"))
+					.Text(Label)
+				]
 			]
-			+ SHorizontalBox::Slot().FillWidth(0.60f).VAlign(VAlign_Center)
+			+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
 			[
 				Field
 			];
 	};
 
-	const TSharedRef<SWidget> LogLevelField = SNew(SBorder)
-		.BorderImage(FUnrealMcpStyle::Get().GetBrush("UnrealMcp.Input"))
-		.Padding(FMargin(8, 3))
+	// Issue #80 item 1: Log Level is now a real dropdown (SComboBox) listing all seven levels, writing the choice
+	// back through the view-model (the same persisted LogLevel field the read-only display used to show).
+	const TSharedRef<SWidget> LogLevelField = SNew(SComboBox<TSharedPtr<FString>>)
+		.OptionsSource(&LogLevelItems)
+		.OnGenerateWidget_Lambda([](TSharedPtr<FString> Item)
+		{
+			return SNew(STextBlock).Text(FText::FromString(Item.IsValid() ? *Item : FString()));
+		})
+		.OnSelectionChanged_Lambda([this](TSharedPtr<FString> NewItem, ESelectInfo::Type)
+		{
+			if (NewItem.IsValid() && IsViewModelValid())
+				ViewModel->SetLogLevel(*NewItem);
+		})
 		[
 			SNew(STextBlock)
 			.Text_Lambda([this]()
 			{
-				const FString Lvl = IsViewModelValid() ? ViewModel->GetConfig().LogLevel : FString();
-				return FText::FromString(Lvl.IsEmpty() ? TEXT("Info") : Lvl);
+				return FText::FromString(IsViewModelValid() ? ViewModel->GetLogLevel() : TEXT("Info"));
 			})
 		];
 
 	const TSharedRef<SWidget> VersionField = SNew(STextBlock)
 		.Text(FText::FromString(Version));
 
-	return UnrealMcpStyleWidgets::StyledCard(
-		SNew(SHorizontalBox)
+	// The header is NOT carded anymore (issue #80 item 6) — plain content with the logo top-right.
+	return SNew(SHorizontalBox)
 		// Base-config column.
 		+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
 		[
@@ -131,57 +179,64 @@ TSharedRef<SWidget> SUnrealMcpMainWindow::BuildHeaderSection()
 			+ SVerticalBox::Slot().AutoHeight().Padding(0, 2)[ MakeConfigRow(LOCTEXT("LogLevel", "Log Level"), LogLevelField) ]
 			+ SVerticalBox::Slot().AutoHeight().Padding(0, 2)
 			[
+				// Issue #80 item 8: the Open-log button uses the compact (short) style so its row is vertically tight.
 				MakeConfigRow(LOCTEXT("OpenLogFile", "Log file"),
-					UnrealMcpStyleWidgets::StyledTextButton("UnrealMcp.Button.Secondary", LOCTEXT("OpenLog", "Open log file"),
-						FOnClicked::CreateLambda([]()
-						{
-							const FString ProjectLogPath = FPaths::ConvertRelativePathToFull(FPaths::ProjectLogDir());
-							FPlatformProcess::ExploreFolder(*ProjectLogPath);
-							return FReply::Handled();
-						})))
+					SNew(SHorizontalBox)
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+					[
+						UnrealMcpStyleWidgets::CompactTextButton(LOCTEXT("OpenLog", "Open log file"),
+							FOnClicked::CreateLambda([]()
+							{
+								const FString ProjectLogPath = FPaths::ConvertRelativePathToFull(FPaths::ProjectLogDir());
+								FPlatformProcess::ExploreFolder(*ProjectLogPath);
+								return FReply::Handled();
+							}))
+					])
 			]
 			+ SVerticalBox::Slot().AutoHeight().Padding(0, 2)[ MakeConfigRow(LOCTEXT("VersionLbl", "Version"), VersionField) ]
 		]
-		// AI-cube logo (top-right; replaces the old banner image).
-		+ SHorizontalBox::Slot().AutoWidth().HAlign(HAlign_Right).VAlign(VAlign_Top).Padding(8, 0, 0, 0)
+		// AI-cube logo (top-right).
+		+ SHorizontalBox::Slot().AutoWidth().HAlign(HAlign_Right).VAlign(VAlign_Top).Padding(15, 0, 0, 0)
 		[
-			SNew(SBox).WidthOverride(48.0f).HeightOverride(48.0f)
+			SNew(SBox).WidthOverride(60.0f).HeightOverride(60.0f)
 			[
 				SNew(SImage).Image(LogoBrush)
 			]
-		]);
+		];
 }
 
 TSharedRef<SWidget> SUnrealMcpMainWindow::BuildConnectionSection()
 {
-	// The unified Connection card: a header row ("Connection" + Custom/Cloud segmented), then the mode-specific
-	// body. Cloud shows the masked token + Revoke/Authorize; Custom shows Server URL + the MCP-server sub-card.
-	// The status timeline (dots + connecting line + underlined labels) sits below, shared across both modes.
-	return UnrealMcpStyleWidgets::StyledCard(
-		SNew(SVerticalBox)
-		// Header row: title + Custom/Cloud segmented (top-right).
+	// The Connection section is NOT carded (issue #80 item 6) — flat content matching Unity: a header row
+	// ("Connection" + Custom/Cloud segmented top-right), then the mode-specific body, then the status row. The
+	// blue card is reserved for the MCP-server sub-block only (built in BuildCustomServerSection).
+	return SNew(SVerticalBox)
+		// Header row: title + Custom/Cloud segmented (right-aligned to the shared right edge).
 		+ SVerticalBox::Slot().AutoHeight()
 		[
 			SNew(SHorizontalBox)
 			+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
 			[ UnrealMcpStyleWidgets::SectionHeader(LOCTEXT("ConnHeader", "Connection")) ]
-			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+			+ SHorizontalBox::Slot().AutoWidth().HAlign(HAlign_Right).VAlign(VAlign_Center)
 			[
-				UnrealMcpStyleWidgets::SegmentedControl(
-					{ { LOCTEXT("ModeCustom", "Custom"), TagCustom }, { LOCTEXT("ModeCloud", "Cloud"), TagCloud } },
-					[this]() { return (IsViewModelValid() && ViewModel->GetConnectionMode() == EUnrealMcpConnectionMode::Cloud) ? TagCloud : TagCustom; },
-					[this](int32 SegTag)
-					{
-						if (IsViewModelValid())
-							ViewModel->SetConnectionMode(SegTag == TagCloud ? EUnrealMcpConnectionMode::Cloud : EUnrealMcpConnectionMode::Custom);
-					})
+				SNew(SBox).MinDesiredWidth(RightControlColumnWidth).HAlign(HAlign_Right)
+				[
+					UnrealMcpStyleWidgets::SegmentedControl(
+						{ { LOCTEXT("ModeCustom", "Custom"), TagCustom }, { LOCTEXT("ModeCloud", "Cloud"), TagCloud } },
+						[this]() { return (IsViewModelValid() && ViewModel->GetConnectionMode() == EUnrealMcpConnectionMode::Cloud) ? TagCloud : TagCustom; },
+						[this](int32 SegTag)
+						{
+							if (IsViewModelValid())
+								ViewModel->SetConnectionMode(SegTag == TagCloud ? EUnrealMcpConnectionMode::Cloud : EUnrealMcpConnectionMode::Custom);
+						})
+				]
 			]
 		]
 		// Cloud auth row (masked token + Revoke / Authorize) — visible only in Cloud mode.
 		+ SVerticalBox::Slot().AutoHeight().Padding(0, 8, 0, 0)[ BuildCloudAuthRow() ]
 		// Custom Server URL + MCP-server sub-card — visible only in Custom mode.
 		+ SVerticalBox::Slot().AutoHeight().Padding(0, 8, 0, 0)[ BuildCustomServerSection() ]
-		// Shared connection-status timeline (Unreal: <status> dot + connecting line + Connect/Disconnect/Stop).
+		// Shared connection-status row (status dot + underlined "Unreal: <status>" label + Connect/Disconnect/Stop).
 		+ SVerticalBox::Slot().AutoHeight().Padding(0, 10, 0, 0)
 		[
 			SNew(SHorizontalBox)
@@ -202,7 +257,7 @@ TSharedRef<SWidget> SUnrealMcpMainWindow::BuildConnectionSection()
 					}
 				}))
 			]
-			// The underlined "Unreal: <status>" label.
+			// The underlined "Unreal: <status>" label — spans only the text (issue #80 item 3).
 			+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
 			[
 				UnderlinedLabel(TAttribute<FText>::Create([this]()
@@ -212,19 +267,22 @@ TSharedRef<SWidget> SUnrealMcpMainWindow::BuildConnectionSection()
 						: FText::GetEmpty();
 				}))
 			]
-			// Connect / Disconnect / Stop button (secondary styling).
-			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+			// Connect / Disconnect / Stop button — right-aligned to the shared right edge.
+			+ SHorizontalBox::Slot().AutoWidth().HAlign(HAlign_Right).VAlign(VAlign_Center)
 			[
-				UnrealMcpStyleWidgets::StyledButton("UnrealMcp.Button.Secondary",
-					SNew(STextBlock).Text_Lambda([this]()
-					{
-						return IsViewModelValid()
-							? FUnrealMcpEditorViewModel::GetButtonText(ViewModel->GetConnectionState())
-							: FText::GetEmpty();
-					}),
-					FOnClicked::CreateSP(this, &SUnrealMcpMainWindow::OnConnectClicked))
+				SNew(SBox).MinDesiredWidth(RightControlColumnWidth).HAlign(HAlign_Right)
+				[
+					UnrealMcpStyleWidgets::StyledButton("UnrealMcp.Button.Secondary",
+						SNew(STextBlock).Text_Lambda([this]()
+						{
+							return IsViewModelValid()
+								? FUnrealMcpEditorViewModel::GetButtonText(ViewModel->GetConnectionState())
+								: FText::GetEmpty();
+						}),
+						FOnClicked::CreateSP(this, &SUnrealMcpMainWindow::OnConnectClicked))
+				]
 			]
-		]);
+		];
 }
 
 TSharedRef<SWidget> SUnrealMcpMainWindow::BuildCloudAuthRow()
@@ -365,7 +423,7 @@ TSharedRef<SWidget> SUnrealMcpMainWindow::BuildCloudAuthRow()
 TSharedRef<SWidget> SUnrealMcpMainWindow::BuildCustomServerSection()
 {
 	TSharedRef<SVerticalBox> Body = SNew(SVerticalBox)
-		// Server URL row.
+		// Server URL row — label left, input right-aligned to the shared right edge (issue #80 item 4).
 		+ SVerticalBox::Slot().AutoHeight()
 		[
 			SNew(SHorizontalBox)
@@ -400,12 +458,12 @@ TSharedRef<SWidget> SUnrealMcpMainWindow::BuildCustomServerSection()
 					? FText::GetEmpty() : FText::FromString(Error);
 			})
 		]
-		// The "MCP server" sub-card: Start + Transport + Authorization (mirrors the reference's framed sub-section).
+		// The "MCP server" sub-card: the ONE blue rounded card kept in the Connection section (Unity .frame-mcp-server).
 		+ SVerticalBox::Slot().AutoHeight().Padding(0, 8, 0, 0)
 		[
 			UnrealMcpStyleWidgets::StyledCard(
 				SNew(SVerticalBox)
-				// MCP server header row (dot + underlined label + teal Start).
+				// MCP server header row (dot + underlined label + teal Start, right-aligned to the shared edge).
 				+ SVerticalBox::Slot().AutoHeight()
 				[
 					SNew(SHorizontalBox)
@@ -413,18 +471,21 @@ TSharedRef<SWidget> SUnrealMcpMainWindow::BuildCustomServerSection()
 					[ UnrealMcpStyleWidgets::StatusDot(EDot::Offline) ]
 					+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
 					[ UnderlinedLabel(LOCTEXT("McpServer", "MCP server")) ]
-					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+					+ SHorizontalBox::Slot().AutoWidth().HAlign(HAlign_Right).VAlign(VAlign_Center)
 					[
-						UnrealMcpStyleWidgets::StyledTextButton("UnrealMcp.Button.Primary", LOCTEXT("Start", "Start"),
-							FOnClicked::CreateLambda([this]()
-							{
-								// Start mirrors the reference's local-server Start: (re)connect through the view-model.
-								if (IsViewModelValid()) ViewModel->Connect();
-								return FReply::Handled();
-							}))
+						SNew(SBox).MinDesiredWidth(RightControlColumnWidth).HAlign(HAlign_Right)
+						[
+							UnrealMcpStyleWidgets::StyledTextButton("UnrealMcp.Button.Primary", LOCTEXT("Start", "Start"),
+								FOnClicked::CreateLambda([this]()
+								{
+									// Start mirrors the reference's local-server Start: (re)connect through the view-model.
+									if (IsViewModelValid()) ViewModel->Connect();
+									return FReply::Handled();
+								}))
+						]
 					]
 				]
-				// Transport (stdio / http) segmented.
+				// Transport (stdio / http) segmented — indented to the section-title start, control right-aligned.
 				+ SVerticalBox::Slot().AutoHeight().Padding(0, 8, 0, 0)[ BuildTransportSelector() ]
 				// Authorization (none / required) + masked token + New.
 				+ SVerticalBox::Slot().AutoHeight().Padding(0, 8, 0, 0)[ BuildCustomAuthSelector() ])
@@ -440,6 +501,8 @@ TSharedRef<SWidget> SUnrealMcpMainWindow::BuildCustomServerSection()
 
 TSharedRef<SWidget> SUnrealMcpMainWindow::BuildTransportSelector()
 {
+	// Issue #80 item 4: the transport line's label fills, and the segmented control right-aligns to the same edge
+	// as the MCP-server Start button / the server URL input — one consistent right edge for the whole sub-card.
 	return SNew(SHorizontalBox)
 		+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center).Padding(0, 0, 8, 0)
 		[
@@ -447,24 +510,27 @@ TSharedRef<SWidget> SUnrealMcpMainWindow::BuildTransportSelector()
 			.TextStyle(&FUnrealMcpStyle::Get().GetWidgetStyle<FTextBlockStyle>("UnrealMcp.Text.Description"))
 			.Text(LOCTEXT("TransportLabel", "Transport"))
 		]
-		+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+		+ SHorizontalBox::Slot().AutoWidth().HAlign(HAlign_Right).VAlign(VAlign_Center)
 		[
-			UnrealMcpStyleWidgets::SegmentedControl(
-				{ { LOCTEXT("TransportStdio", "stdio"), TagStdio }, { LOCTEXT("TransportHttp", "http"), TagHttp } },
-				[this]() { return (IsViewModelValid() && ViewModel->GetEffectiveTransport() == EUnrealMcpTransportMethod::Http) ? TagHttp : TagStdio; },
-				[this](int32 SegTag)
-				{
-					if (IsViewModelValid())
-						ViewModel->SetTransportMethod(SegTag == TagHttp ? EUnrealMcpTransportMethod::Http : EUnrealMcpTransportMethod::Stdio);
-				},
-				TAttribute<bool>::Create([this]() { return IsViewModelValid() && ViewModel->IsTransportSelectable(); }))
+			SNew(SBox).MinDesiredWidth(RightControlColumnWidth).HAlign(HAlign_Right)
+			[
+				UnrealMcpStyleWidgets::SegmentedControl(
+					{ { LOCTEXT("TransportStdio", "stdio"), TagStdio }, { LOCTEXT("TransportHttp", "http"), TagHttp } },
+					[this]() { return (IsViewModelValid() && ViewModel->GetEffectiveTransport() == EUnrealMcpTransportMethod::Http) ? TagHttp : TagStdio; },
+					[this](int32 SegTag)
+					{
+						if (IsViewModelValid())
+							ViewModel->SetTransportMethod(SegTag == TagHttp ? EUnrealMcpTransportMethod::Http : EUnrealMcpTransportMethod::Stdio);
+					},
+					TAttribute<bool>::Create([this]() { return IsViewModelValid() && ViewModel->IsTransportSelectable(); }))
+			]
 		];
 }
 
 TSharedRef<SWidget> SUnrealMcpMainWindow::BuildCustomAuthSelector()
 {
 	return SNew(SVerticalBox)
-		// Authorization Token (none / required) row.
+		// Authorization Token (none / required) row — label fills, segmented right-aligned to the shared edge.
 		+ SVerticalBox::Slot().AutoHeight()
 		[
 			SNew(SHorizontalBox)
@@ -474,16 +540,19 @@ TSharedRef<SWidget> SUnrealMcpMainWindow::BuildCustomAuthSelector()
 				.TextStyle(&FUnrealMcpStyle::Get().GetWidgetStyle<FTextBlockStyle>("UnrealMcp.Text.Description"))
 				.Text(LOCTEXT("AuthTokenLabel", "Authorization Token"))
 			]
-			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+			+ SHorizontalBox::Slot().AutoWidth().HAlign(HAlign_Right).VAlign(VAlign_Center)
 			[
-				UnrealMcpStyleWidgets::SegmentedControl(
-					{ { LOCTEXT("AuthNone", "none"), TagNone }, { LOCTEXT("AuthRequired", "required"), TagRequired } },
-					[this]() { return (IsViewModelValid() && ViewModel->GetAuthOption() == EUnrealMcpAuthOption::Required) ? TagRequired : TagNone; },
-					[this](int32 SegTag)
-					{
-						if (IsViewModelValid())
-							ViewModel->SetAuthOption(SegTag == TagRequired ? EUnrealMcpAuthOption::Required : EUnrealMcpAuthOption::None);
-					})
+				SNew(SBox).MinDesiredWidth(RightControlColumnWidth).HAlign(HAlign_Right)
+				[
+					UnrealMcpStyleWidgets::SegmentedControl(
+						{ { LOCTEXT("AuthNone", "none"), TagNone }, { LOCTEXT("AuthRequired", "required"), TagRequired } },
+						[this]() { return (IsViewModelValid() && ViewModel->GetAuthOption() == EUnrealMcpAuthOption::Required) ? TagRequired : TagNone; },
+						[this](int32 SegTag)
+						{
+							if (IsViewModelValid())
+								ViewModel->SetAuthOption(SegTag == TagRequired ? EUnrealMcpAuthOption::Required : EUnrealMcpAuthOption::None);
+						})
+				]
 			]
 		]
 		// Masked token field + New — only when auth is required.
@@ -513,18 +582,18 @@ TSharedRef<SWidget> SUnrealMcpMainWindow::BuildCustomAuthSelector()
 				// physically held, then immediately re-masked — the AC's "never rendered unmasked" default
 				// always holds (§8). OnPressed/OnReleased drive bRevealToken, which gates IsPassword above.
 				SNew(SButton)
-				.ButtonStyle(&FUnrealMcpStyle::Get().GetWidgetStyle<FButtonStyle>("UnrealMcp.Button.Secondary"))
+				.ButtonStyle(&FUnrealMcpStyle::Get().GetWidgetStyle<FButtonStyle>("UnrealMcp.Button.Compact"))
 				.HAlign(HAlign_Center).VAlign(VAlign_Center)
 				.ToolTipText(LOCTEXT("RevealHint", "Press and hold to reveal the token; it re-masks on release."))
 				.OnPressed_Lambda([this]() { bRevealToken = true; })
 				.OnReleased_Lambda([this]() { bRevealToken = false; })
 				[
-					SNew(STextBlock).Text(LOCTEXT("Reveal", "Reveal"))
+					SNew(STextBlock).Font(FUnrealMcpStyle::CompactButtonFont()).Text(LOCTEXT("Reveal", "Reveal"))
 				]
 			]
 			+ SHorizontalBox::Slot().AutoWidth().Padding(6, 0, 0, 0).VAlign(VAlign_Center)
 			[
-				UnrealMcpStyleWidgets::StyledTextButton("UnrealMcp.Button.Secondary", LOCTEXT("New", "New"),
+				UnrealMcpStyleWidgets::CompactTextButton(LOCTEXT("New", "New"),
 					FOnClicked::CreateLambda([this]()
 					{
 						if (IsViewModelValid()) ViewModel->GenerateCustomToken();
@@ -536,8 +605,9 @@ TSharedRef<SWidget> SUnrealMcpMainWindow::BuildCustomAuthSelector()
 
 TSharedRef<SWidget> SUnrealMcpMainWindow::BuildAgentConfiguratorsSection()
 {
-	// The AI Agent Configurators panel (§7/§8) — out of scope for visual edits here; it inherits the new style
-	// set via FUnrealMcpStyle::Get(). Bound to the same view-model + the runtime connection-info provider.
+	// The AI Agent Configurators panel (§7/§8). It keeps its own framed card (Unity reserves the blue frame for the
+	// AI-agent block) — one of the few elements that stays carded per issue #80 item 6. Bound to the shared
+	// view-model + the runtime connection-info provider.
 	return SNew(SUnrealMcpAgentConfigurators)
 		.ViewModel(ViewModel)
 		.ConnectionInfoProvider(ConnectionInfoProvider);
@@ -545,11 +615,9 @@ TSharedRef<SWidget> SUnrealMcpMainWindow::BuildAgentConfiguratorsSection()
 
 TSharedRef<SWidget> SUnrealMcpMainWindow::BuildExtensionsSection()
 {
-	// The Extensions section (issue #78): a styled header + a placeholder card when no registry data exists,
-	// matching the populated-row design (Name bold + Install button right + description below). Unreal-MCP has
-	// no extensions registry surfaced to the UI yet, so render the styled placeholder per the issue's constraint.
-	return UnrealMcpStyleWidgets::StyledCard(
-		SNew(SVerticalBox)
+	// The Extensions section (issue #78): a styled header + a placeholder row. NOT carded (issue #80 item 6) — Unity
+	// renders the Extensions list flat under its header, with each row a bold name + Install button + description below.
+	return SNew(SVerticalBox)
 		+ SVerticalBox::Slot().AutoHeight()[ UnrealMcpStyleWidgets::SectionHeader(LOCTEXT("ExtHeader", "Extensions")) ]
 		+ SVerticalBox::Slot().AutoHeight().Padding(0, 8, 0, 0)
 		[
@@ -561,7 +629,7 @@ TSharedRef<SWidget> SUnrealMcpMainWindow::BuildExtensionsSection()
 				+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
 				[
 					SNew(STextBlock)
-					.Font(FUnrealMcpStyle::SubHeaderFont())
+					.Font(FUnrealMcpStyle::SectionTitleFont())
 					.Text(LOCTEXT("ExtPlaceholderName", "No extensions available"))
 				]
 				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
@@ -578,13 +646,14 @@ TSharedRef<SWidget> SUnrealMcpMainWindow::BuildExtensionsSection()
 				UnrealMcpStyleWidgets::Description(
 					LOCTEXT("ExtPlaceholderDesc", "Engine extensions will appear here when a registry is available. Each lists a name, a short description, and an Install action."))
 			]
-		]);
+		];
 }
 
 TSharedRef<SWidget> SUnrealMcpMainWindow::BuildFooterSection()
 {
-	return UnrealMcpStyleWidgets::StyledCard(
-		SNew(SVerticalBox)
+	// The footer is NOT carded (issue #80 item 6) — flat content matching Unity: "Found an issue?" + a button row,
+	// a divider, then the thanks text on the left with the GitHub Star vertically centered on the same line (item 7).
+	return SNew(SVerticalBox)
 		// "Found an issue?"
 		+ SVerticalBox::Slot().AutoHeight()
 		[
@@ -592,7 +661,7 @@ TSharedRef<SWidget> SUnrealMcpMainWindow::BuildFooterSection()
 			.Font(FUnrealMcpStyle::SubHeaderFont())
 			.Text(LOCTEXT("FoundIssue", "Found an issue?"))
 		]
-		// Help/Talk (Discord) · Bug Report (GitHub) · Check.
+		// Help/Talk (Discord) · Bug Report (GitHub) · Restart bridge.
 		+ SVerticalBox::Slot().AutoHeight().Padding(0, 8, 0, 0)
 		[
 			SNew(SHorizontalBox)
@@ -612,10 +681,10 @@ TSharedRef<SWidget> SUnrealMcpMainWindow::BuildFooterSection()
 					FOnClicked::CreateLambda([this]() { OnRestartBridge.ExecuteIfBound(); return FReply::Handled(); }))
 			]
 		]
-		// Divider.
-		+ SVerticalBox::Slot().AutoHeight().Padding(0, 10, 0, 0)[ SNew(SSeparator).Thickness(1.0f) ]
-		// Thanks text + Sincerely + gold GitHub Star.
-		+ SVerticalBox::Slot().AutoHeight().Padding(0, 8, 0, 0)
+		// Divider before the thanks block (Unity .divider).
+		+ SVerticalBox::Slot().AutoHeight().Padding(0, 10)[ UnrealMcpStyleWidgets::Divider() ]
+		// Thanks text + Sincerely on the left; the gold GitHub Star vertically centered on the same row (issue #80 item 7).
+		+ SVerticalBox::Slot().AutoHeight()
 		[
 			SNew(SHorizontalBox)
 			+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
@@ -639,7 +708,7 @@ TSharedRef<SWidget> SUnrealMcpMainWindow::BuildFooterSection()
 				UnrealMcpStyleWidgets::IconButton("UnrealMcp.Button.Golden", "UnrealMcp.Star", LOCTEXT("GitHubStar", "GitHub Star"),
 					FOnClicked::CreateLambda([]() { FPlatformProcess::LaunchURL(*StarUrl, nullptr, nullptr); return FReply::Handled(); }))
 			]
-		]);
+		];
 }
 
 FReply SUnrealMcpMainWindow::OnConnectClicked()

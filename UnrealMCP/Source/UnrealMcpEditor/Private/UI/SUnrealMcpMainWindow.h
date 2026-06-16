@@ -72,8 +72,15 @@ private:
 	// (Resources/ai-cube-logo.png) via the style set. Held as a member so the brush outlives the SImage.
 	const FSlateBrush* LogoBrush = nullptr;
 
-	// A label with a thin underline beneath it — the reference's underlined timeline labels (Slate has no
-	// first-class text-underline, so the underline is a 1px separator drawn under the text).
+	// The Log Level dropdown's item source (the §7 Log Level combo, issue #80 item 1). Mirrors Unity's
+	// LogLevel enum order: Trace, Debug, Info, Warning, Error, Exception, None. Held as a member so the
+	// SComboBox's OptionsSource pointer stays valid for the widget's lifetime.
+	TArray<TSharedPtr<FString>> LogLevelItems;
+
+	// A label with a thin underline beneath it spanning ONLY the text width (issue #80 item 3) — the
+	// reference's underlined timeline labels (Slate has no first-class text-underline, so the underline is a
+	// 1px rule drawn under the text). Wrapped in an AutoWidth box so the rule never overruns into the row's
+	// right-hand controls.
 	static TSharedRef<SWidget> UnderlinedLabel(const TAttribute<FText>& Text);
 
 	// Common handlers.
