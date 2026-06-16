@@ -24,9 +24,10 @@ class STextBlock;
  * reflected FProperties), the SAME path the `object-get-data` / `actor-get-data` tools use to return Unreal
  * object data over MCP. ReflectorNet lives in the .NET sidecar and only wraps the MCP wire layer — the editor
  * plugin never needs it to serialize a UObject — so this window calls SerializeObject directly on the game
- * thread. The Recursive toggle mirrors Unity's `recursive` flag: when OFF, nested UObject* references serialize
- * as their identity (path/name) only; when ON, the full reflected graph is emitted (FJsonObjectConverter walks
- * referenced sub-objects). Target resolution reuses FUnrealMcpObjectRef::ResolveObject (path or actor label),
+ * thread. The Recursive toggle mirrors Unity's `recursive` flag: when OFF, only the top-level scalar fields are
+ * kept and every nested object/array field is DROPPED (no identity/path/name fallback — see ShallowFilter); when
+ * ON, the full reflected graph is emitted (FJsonObjectConverter walks referenced sub-objects). Target resolution
+ * reuses FUnrealMcpObjectRef::ResolveObject (path or actor label),
  * matching the tool families' ref rule. "Use selection" fills the input from the current editor selection.
  *
  * Headless-safe: like the other §7 windows, construction guards Slate-only work and the window is registered
