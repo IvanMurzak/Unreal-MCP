@@ -3,6 +3,7 @@
 
 #include "DevControl/UnrealMcpDevControlServer.h"
 #include "UI/UnrealMcpEditorViewModel.h"
+#include "UI/UnrealMcpAuxWindows.h"
 #include "Config/UnrealMcpConfig.h"
 #include "UnrealMcpLog.h"
 
@@ -248,6 +249,9 @@ int32 FUnrealMcpDevControlServer::RouteRequest(
 		OutResult->SetStringField(TEXT("connectionMode"), DevControlConnectionModeLabel(ViewModelPtr->GetConnectionMode()));
 		OutResult->SetStringField(TEXT("customHost"), ViewModelPtr->GetCustomHost());
 		OutResult->SetStringField(TEXT("selectedAgentId"), ViewModelPtr->GetSelectedAgentId());
+		// The Serialization Check window's tab id — lets the smoke test assert membership and (with a
+		// `check` click) drive the same footer "Check" button the dock renders.
+		OutResult->SetStringField(TEXT("serializationCheckTabId"), FUnrealMcpAuxWindows::SerializationCheckTabId.ToString());
 
 		TArray<TSharedPtr<FJsonValue>> Agents;
 		for (const FString& Agent : ViewModelPtr->GetAiAgents())
@@ -334,16 +338,19 @@ int32 FUnrealMcpDevControlServer::RouteRequest(
 		FString Target;
 		if (!Body.IsValid() || !Body->TryGetStringField(TEXT("target"), Target) || Target.IsEmpty())
 		{
-			DevControlFail(OutResult, TEXT("missing 'target' (connect|disconnect|authorize|revoke|generate-token)"));
+			DevControlFail(OutResult, TEXT("missing 'target' (connect|disconnect|authorize|revoke|generate-token|check)"));
 			return 400;
 		}
 
 		// Map the click target onto the matching view-model mutator — the same action the Slate button fires.
+		// `check` is the odd one out: it opens the Serialization Check aux window rather than mutating the
+		// view-model, so it routes through the static aux-window invoker (a headless no-op — see the helper).
 		if (Target.Equals(TEXT("connect"), ESearchCase::IgnoreCase))               ViewModelPtr->Connect();
 		else if (Target.Equals(TEXT("disconnect"), ESearchCase::IgnoreCase))       ViewModelPtr->Disconnect();
 		else if (Target.Equals(TEXT("authorize"), ESearchCase::IgnoreCase))        ViewModelPtr->Authorize();
 		else if (Target.Equals(TEXT("revoke"), ESearchCase::IgnoreCase))           ViewModelPtr->Revoke();
 		else if (Target.Equals(TEXT("generate-token"), ESearchCase::IgnoreCase))   ViewModelPtr->GenerateCustomToken();
+		else if (Target.Equals(TEXT("check"), ESearchCase::IgnoreCase))            FUnrealMcpAuxWindows::TryInvokeSerializationCheckTab();
 		else
 		{
 			DevControlFail(OutResult, FString::Printf(TEXT("unknown click target '%s'"), *Target));

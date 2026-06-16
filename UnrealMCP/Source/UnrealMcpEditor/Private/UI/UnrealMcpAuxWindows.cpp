@@ -3,6 +3,7 @@
 
 #include "UI/UnrealMcpAuxWindows.h"
 #include "UI/SUnrealMcpSettingsWindow.h"
+#include "UI/SUnrealMcpSerializationCheckWindow.h"
 #include "UI/UnrealMcpEditorViewModel.h"
 #include "UnrealMcpLog.h"
 
@@ -22,6 +23,7 @@ const FName FUnrealMcpAuxWindows::ToolsTabId(TEXT("UnrealMcpToolsWindow"));
 const FName FUnrealMcpAuxWindows::PromptsTabId(TEXT("UnrealMcpPromptsWindow"));
 const FName FUnrealMcpAuxWindows::ResourcesTabId(TEXT("UnrealMcpResourcesWindow"));
 const FName FUnrealMcpAuxWindows::SettingsTabId(TEXT("UnrealMcpSettingsWindow"));
+const FName FUnrealMcpAuxWindows::SerializationCheckTabId(TEXT("UnrealMcpSerializationCheckWindow"));
 
 namespace
 {
@@ -96,6 +98,12 @@ void FUnrealMcpAuxWindows::Register(
 		.SetGroup(Group)
 		.SetIcon(FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Toolbar.Settings"));
 
+	TabManager.RegisterNomadTabSpawner(SerializationCheckTabId, FOnSpawnTab::CreateRaw(this, &FUnrealMcpAuxWindows::SpawnSerializationCheckTab))
+		.SetDisplayName(LOCTEXT("SerCheckTabTitle", "Serialization Check"))
+		.SetTooltipText(LOCTEXT("SerCheckTabTooltip", "Serialize a selected UObject/Actor to JSON and inspect the output (Unity-MCP parity)."))
+		.SetGroup(Group)
+		.SetIcon(FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Adjust"));
+
 	// Also register the Settings page as a Project Settings section rendering a SECOND SUnrealMcpSettingsWindow
 	// instance (§7) — UE users expect Project Settings discoverability. The nomad tab satisfies the 4-aux-windows
 	// mandate; this is the additional, conventional entry point. Both instances bind the same view-model, so they
@@ -132,7 +140,7 @@ void FUnrealMcpAuxWindows::Unregister()
 		FGlobalTabmanager& TabManager = *FGlobalTabmanager::Get();
 		// Close any live tab first so its hosted widget (a strong view-model ref) is torn down before the runtime
 		// frees the view-model — same use-after-free guard as the main-window tab.
-		for (const FName& TabId : { ToolsTabId, PromptsTabId, ResourcesTabId, SettingsTabId })
+		for (const FName& TabId : { ToolsTabId, PromptsTabId, ResourcesTabId, SettingsTabId, SerializationCheckTabId })
 		{
 			if (TSharedPtr<SDockTab> LiveTab = TabManager.FindExistingLiveTab(TabId))
 				LiveTab->RequestCloseTab();
@@ -196,6 +204,25 @@ TSharedRef<SDockTab> FUnrealMcpAuxWindows::SpawnSettingsTab(const FSpawnTabArgs&
 		.ViewModel(ViewModel)
 		.PortStatusProvider(PortStatusProvider));
 	return Tab;
+}
+
+TSharedRef<SDockTab> FUnrealMcpAuxWindows::SpawnSerializationCheckTab(const FSpawnTabArgs& Args)
+{
+	// The Serialization Check window is self-contained (it serializes in-process via FUnrealMcpPropertyJson and
+	// resolves the target via FUnrealMcpObjectRef) — it binds NO view-model, so there is no teardown race to
+	// guard here (unlike the registry/bridge-backed Tools/Settings windows).
+	TSharedRef<SDockTab> Tab = SNew(SDockTab).TabRole(ETabRole::NomadTab);
+	Tab->SetContent(SNew(SUnrealMcpSerializationCheckWindow));
+	return Tab;
+}
+
+bool FUnrealMcpAuxWindows::TryInvokeSerializationCheckTab()
+{
+	if (!FSlateApplication::IsInitialized())
+		return false; // headless / -nullrhi: nothing to open (matches the Register() headless guard)
+
+	FGlobalTabmanager::Get()->TryInvokeTab(SerializationCheckTabId);
+	return true;
 }
 
 #undef LOCTEXT_NAMESPACE
