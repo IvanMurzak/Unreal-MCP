@@ -4,6 +4,7 @@
 #include "DevControl/UnrealMcpDevControlServer.h"
 #include "UI/UnrealMcpEditorViewModel.h"
 #include "UI/UnrealMcpAuxWindows.h"
+#include "UI/UnrealMcpExternalLinks.h"
 #include "Config/UnrealMcpConfig.h"
 #include "UnrealMcpLog.h"
 
@@ -58,6 +59,46 @@ namespace
 		if (Raw.Equals(TEXT("Cloud"), ESearchCase::IgnoreCase)) { OutMode = EUnrealMcpConnectionMode::Cloud; return true; }
 		if (Raw.Equals(TEXT("Custom"), ESearchCase::IgnoreCase)) { OutMode = EUnrealMcpConnectionMode::Custom; return true; }
 		return false;
+	}
+
+	// The transport string the dev-control surface speaks ("stdio"/"http") — matches the §7 segmented control.
+	const TCHAR* DevControlTransportLabel(EUnrealMcpTransportMethod Transport)
+	{
+		return Transport == EUnrealMcpTransportMethod::Http ? TEXT("http") : TEXT("stdio");
+	}
+
+	// Parse a "stdio"/"http" transport string (case-insensitive). Returns true + the transport on a match.
+	bool DevControlParseTransport(const FString& Raw, EUnrealMcpTransportMethod& OutTransport)
+	{
+		if (Raw.Equals(TEXT("stdio"), ESearchCase::IgnoreCase)) { OutTransport = EUnrealMcpTransportMethod::Stdio; return true; }
+		if (Raw.Equals(TEXT("http"), ESearchCase::IgnoreCase))  { OutTransport = EUnrealMcpTransportMethod::Http;  return true; }
+		return false;
+	}
+
+	// The auth-option string the dev-control surface speaks ("none"/"required") — matches the §7 segmented control.
+	const TCHAR* DevControlAuthOptionLabel(EUnrealMcpAuthOption Option)
+	{
+		return Option == EUnrealMcpAuthOption::Required ? TEXT("required") : TEXT("none");
+	}
+
+	// Parse a "none"/"required" auth-option string (case-insensitive). Returns true + the option on a match.
+	bool DevControlParseAuthOption(const FString& Raw, EUnrealMcpAuthOption& OutOption)
+	{
+		if (Raw.Equals(TEXT("none"), ESearchCase::IgnoreCase))     { OutOption = EUnrealMcpAuthOption::None;     return true; }
+		if (Raw.Equals(TEXT("required"), ESearchCase::IgnoreCase)) { OutOption = EUnrealMcpAuthOption::Required; return true; }
+		return false;
+	}
+
+	// The canonical device-code auth-state label the /state snapshot reports (the §7 Authorize/Cancel/Revoke flow).
+	const TCHAR* DevControlDeviceAuthLabel(EUnrealMcpDeviceAuthState State)
+	{
+		switch (State)
+		{
+			case EUnrealMcpDeviceAuthState::Pending:    return TEXT("Pending");
+			case EUnrealMcpDeviceAuthState::Authorized: return TEXT("Authorized");
+			case EUnrealMcpDeviceAuthState::Failed:     return TEXT("Failed");
+			case EUnrealMcpDeviceAuthState::Idle: default: return TEXT("Idle");
+		}
 	}
 
 	// Build a `{"ok":false,"error":<msg>}` result into OutResult and return the given status code.
@@ -132,9 +173,14 @@ bool FUnrealMcpDevControlServer::Start(uint32 Port, const TSharedPtr<FUnrealMcpE
 	Bind(TEXT("/health"),                   EHttpServerRequestVerbs::VERB_GET,  TEXT("GET"));
 	Bind(TEXT("/state"),                    EHttpServerRequestVerbs::VERB_GET,  TEXT("GET"));
 	Bind(TEXT("/inject/connection-status"), EHttpServerRequestVerbs::VERB_POST, TEXT("POST"));
+	Bind(TEXT("/inject/device-auth"),       EHttpServerRequestVerbs::VERB_POST, TEXT("POST"));
 	Bind(TEXT("/control/server-url"),       EHttpServerRequestVerbs::VERB_POST, TEXT("POST"));
 	Bind(TEXT("/control/connection-mode"),  EHttpServerRequestVerbs::VERB_POST, TEXT("POST"));
+	Bind(TEXT("/control/transport"),        EHttpServerRequestVerbs::VERB_POST, TEXT("POST"));
+	Bind(TEXT("/control/auth-option"),      EHttpServerRequestVerbs::VERB_POST, TEXT("POST"));
+	Bind(TEXT("/control/auth-token"),       EHttpServerRequestVerbs::VERB_POST, TEXT("POST"));
 	Bind(TEXT("/control/select-agent"),     EHttpServerRequestVerbs::VERB_POST, TEXT("POST"));
+	Bind(TEXT("/control/external-link"),    EHttpServerRequestVerbs::VERB_POST, TEXT("POST"));
 	Bind(TEXT("/control/click"),            EHttpServerRequestVerbs::VERB_POST, TEXT("POST"));
 
 	// FHttpServerModule only ticks listeners that have been started; start them so this router accepts.
@@ -249,6 +295,25 @@ int32 FUnrealMcpDevControlServer::RouteRequest(
 		OutResult->SetStringField(TEXT("connectionMode"), DevControlConnectionModeLabel(ViewModelPtr->GetConnectionMode()));
 		OutResult->SetStringField(TEXT("customHost"), ViewModelPtr->GetCustomHost());
 		OutResult->SetStringField(TEXT("selectedAgentId"), ViewModelPtr->GetSelectedAgentId());
+		// Transport / auth readouts so the smoke test can assert the §7 segmented controls + token field reacted.
+		OutResult->SetStringField(TEXT("transport"), DevControlTransportLabel(ViewModelPtr->GetEffectiveTransport()));
+		OutResult->SetBoolField(TEXT("transportSelectable"), ViewModelPtr->IsTransportSelectable());
+		OutResult->SetStringField(TEXT("authOption"), DevControlAuthOptionLabel(ViewModelPtr->GetAuthOption()));
+		// The custom token is reported MASKED only (§8 — the raw bearer never crosses the dev-control wire);
+		// `hasCustomToken` lets a test assert presence without leaking the value.
+		OutResult->SetStringField(TEXT("customTokenMasked"),
+			FUnrealMcpEditorViewModel::MaskTokenForDisplay(ViewModelPtr->GetCustomToken(), /*bReveal*/ false));
+		OutResult->SetBoolField(TEXT("hasCustomToken"), !ViewModelPtr->GetCustomToken().IsEmpty());
+		// Cloud device-auth + connection readouts (the status dots/labels mirror these).
+		OutResult->SetStringField(TEXT("deviceAuthState"), DevControlDeviceAuthLabel(ViewModelPtr->GetDeviceAuthState()));
+		OutResult->SetBoolField(TEXT("hasCloudToken"), ViewModelPtr->HasCloudToken());
+		OutResult->SetBoolField(TEXT("keepConnected"), ViewModelPtr->IsReconnectArmed());
+		// The Connect/Disconnect/Stop button label + the "Unreal: <status>" label the dock renders for this state,
+		// so the smoke test asserts the exact text a screenshot would show without reading pixels.
+		OutResult->SetStringField(TEXT("buttonLabel"),
+			FUnrealMcpEditorViewModel::GetButtonText(ViewModelPtr->GetConnectionState()).ToString());
+		OutResult->SetStringField(TEXT("statusLabel"),
+			FUnrealMcpEditorViewModel::GetStatusLabel(ViewModelPtr->GetConnectionState()).ToString());
 		// The Serialization Check window's tab id — lets the smoke test assert membership and (with a
 		// `check` click) drive the same footer "Check" button the dock renders.
 		OutResult->SetStringField(TEXT("serializationCheckTabId"), FUnrealMcpAuxWindows::SerializationCheckTabId.ToString());
@@ -257,6 +322,15 @@ int32 FUnrealMcpDevControlServer::RouteRequest(
 		for (const FString& Agent : ViewModelPtr->GetAiAgents())
 			Agents.Add(MakeShared<FJsonValueString>(Agent));
 		OutResult->SetArrayField(TEXT("aiAgents"), Agents);
+		OutResult->SetNumberField(TEXT("aiAgentCount"), ViewModelPtr->GetAiAgents().Num());
+
+		// The footer external links (assert intent, never launched) — the same urls UnrealMcpExternalLinks feeds
+		// the Help/Talk, Bug Report and GitHub Star buttons.
+		TSharedPtr<FJsonObject> Links = MakeShared<FJsonObject>();
+		Links->SetStringField(TEXT("help"), FUnrealMcpExternalLinks::Discord());
+		Links->SetStringField(TEXT("bug"), FUnrealMcpExternalLinks::Issues());
+		Links->SetStringField(TEXT("star"), FUnrealMcpExternalLinks::Star());
+		OutResult->SetObjectField(TEXT("externalLinks"), Links);
 		return 200;
 	}
 
@@ -290,6 +364,25 @@ int32 FUnrealMcpDevControlServer::RouteRequest(
 		return 200;
 	}
 
+	if (Path == TEXT("/inject/device-auth"))
+	{
+		// Inject a §1.3 `device-auth` feed message verbatim (state / verificationUrl / userCode / token / message)
+		// so the smoke test can drive the Cloud device-code rows (Pending code row, Authorized indicator, Failed
+		// reason) the same way the sidecar would. The body IS the device-auth envelope; a missing `state` is a 400.
+		FString DeviceState;
+		if (!Body.IsValid() || !Body->TryGetStringField(TEXT("state"), DeviceState) || DeviceState.IsEmpty())
+		{
+			DevControlFail(OutResult, TEXT("missing 'state' (pending|authorized|failed)"));
+			return 400;
+		}
+		ViewModelPtr->ApplyDeviceAuth(Body);
+
+		OutResult->SetBoolField(TEXT("ok"), true);
+		OutResult->SetStringField(TEXT("deviceAuthState"), DevControlDeviceAuthLabel(ViewModelPtr->GetDeviceAuthState()));
+		OutResult->SetBoolField(TEXT("hasCloudToken"), ViewModelPtr->HasCloudToken());
+		return 200;
+	}
+
 	if (Path == TEXT("/control/server-url"))
 	{
 		FString Url;
@@ -319,6 +412,57 @@ int32 FUnrealMcpDevControlServer::RouteRequest(
 		return 200;
 	}
 
+	if (Path == TEXT("/control/transport"))
+	{
+		FString TransportRaw;
+		EUnrealMcpTransportMethod Transport;
+		if (!Body.IsValid() || !Body->TryGetStringField(TEXT("transport"), TransportRaw) || !DevControlParseTransport(TransportRaw, Transport))
+		{
+			DevControlFail(OutResult, TEXT("missing/invalid 'transport' (stdio|http)"));
+			return 400;
+		}
+		// SetTransportMethod is a no-op in Cloud mode (the selector is locked to Http); the echoed effective
+		// transport tells the caller what actually took (mirrors the §7 segmented control's locked state).
+		ViewModelPtr->SetTransportMethod(Transport);
+		OutResult->SetBoolField(TEXT("ok"), true);
+		OutResult->SetStringField(TEXT("transport"), DevControlTransportLabel(ViewModelPtr->GetEffectiveTransport()));
+		OutResult->SetBoolField(TEXT("transportSelectable"), ViewModelPtr->IsTransportSelectable());
+		return 200;
+	}
+
+	if (Path == TEXT("/control/auth-option"))
+	{
+		FString OptionRaw;
+		EUnrealMcpAuthOption Option;
+		if (!Body.IsValid() || !Body->TryGetStringField(TEXT("option"), OptionRaw) || !DevControlParseAuthOption(OptionRaw, Option))
+		{
+			DevControlFail(OutResult, TEXT("missing/invalid 'option' (none|required)"));
+			return 400;
+		}
+		ViewModelPtr->SetAuthOption(Option);
+		OutResult->SetBoolField(TEXT("ok"), true);
+		OutResult->SetStringField(TEXT("authOption"), DevControlAuthOptionLabel(ViewModelPtr->GetAuthOption()));
+		return 200;
+	}
+
+	if (Path == TEXT("/control/auth-token"))
+	{
+		FString Token;
+		if (!Body.IsValid() || !Body->TryGetStringField(TEXT("token"), Token))
+		{
+			DevControlFail(OutResult, TEXT("missing 'token'"));
+			return 400;
+		}
+		// Set the Custom-mode bearer the §7 token field commits. The response reports presence + the MASKED
+		// form only — the raw token never crosses the dev-control wire (§8).
+		ViewModelPtr->SetCustomToken(Token);
+		OutResult->SetBoolField(TEXT("ok"), true);
+		OutResult->SetBoolField(TEXT("hasCustomToken"), !ViewModelPtr->GetCustomToken().IsEmpty());
+		OutResult->SetStringField(TEXT("customTokenMasked"),
+			FUnrealMcpEditorViewModel::MaskTokenForDisplay(ViewModelPtr->GetCustomToken(), /*bReveal*/ false));
+		return 200;
+	}
+
 	if (Path == TEXT("/control/select-agent"))
 	{
 		FString AgentId;
@@ -333,24 +477,50 @@ int32 FUnrealMcpDevControlServer::RouteRequest(
 		return 200;
 	}
 
+	if (Path == TEXT("/control/external-link"))
+	{
+		// Resolve a footer external-link button to the url it WOULD launch — assert intent, never open a browser
+		// (the dev-control bridge never launches a URL; that side effect belongs to the live Slate button only).
+		FString LinkName;
+		FString Url;
+		if (!Body.IsValid() || !Body->TryGetStringField(TEXT("link"), LinkName) || !FUnrealMcpExternalLinks::Resolve(LinkName, Url))
+		{
+			DevControlFail(OutResult, TEXT("missing/invalid 'link' (help|bug|star)"));
+			return 400;
+		}
+		OutResult->SetBoolField(TEXT("ok"), true);
+		OutResult->SetStringField(TEXT("link"), LinkName.ToLower());
+		OutResult->SetStringField(TEXT("url"), Url);
+		OutResult->SetBoolField(TEXT("launched"), false); // intent only — never opened
+		return 200;
+	}
+
 	if (Path == TEXT("/control/click"))
 	{
 		FString Target;
 		if (!Body.IsValid() || !Body->TryGetStringField(TEXT("target"), Target) || Target.IsEmpty())
 		{
-			DevControlFail(OutResult, TEXT("missing 'target' (connect|disconnect|authorize|revoke|generate-token|check)"));
+			DevControlFail(OutResult, TEXT("missing 'target' (connect|start|disconnect|stop|authorize|cancel|revoke|generate-token|check|restart-bridge|open-log)"));
 			return 400;
 		}
 
 		// Map the click target onto the matching view-model mutator — the same action the Slate button fires.
-		// `check` is the odd one out: it opens the Serialization Check aux window rather than mutating the
-		// view-model, so it routes through the static aux-window invoker (a headless no-op — see the helper).
+		// `start` is the MCP-server Start button (a (re)Connect); `stop` is the tri-state Disconnect/Stop. `check`,
+		// `restart-bridge` and `open-log` do NOT mutate the view-model: `check` opens the Serialization Check aux
+		// window (headless no-op via the static invoker); `restart-bridge` (a runtime bridge restart) and `open-log`
+		// (a folder-explore) are runtime/Slate side effects the dev-control bridge deliberately does NOT perform —
+		// they are acknowledged as dispatched intents so the smoke test can exercise every footer button.
 		if (Target.Equals(TEXT("connect"), ESearchCase::IgnoreCase))               ViewModelPtr->Connect();
+		else if (Target.Equals(TEXT("start"), ESearchCase::IgnoreCase))            ViewModelPtr->Connect();
 		else if (Target.Equals(TEXT("disconnect"), ESearchCase::IgnoreCase))       ViewModelPtr->Disconnect();
+		else if (Target.Equals(TEXT("stop"), ESearchCase::IgnoreCase))             ViewModelPtr->Disconnect();
 		else if (Target.Equals(TEXT("authorize"), ESearchCase::IgnoreCase))        ViewModelPtr->Authorize();
+		else if (Target.Equals(TEXT("cancel"), ESearchCase::IgnoreCase))           ViewModelPtr->CancelAuth();
 		else if (Target.Equals(TEXT("revoke"), ESearchCase::IgnoreCase))           ViewModelPtr->Revoke();
 		else if (Target.Equals(TEXT("generate-token"), ESearchCase::IgnoreCase))   ViewModelPtr->GenerateCustomToken();
 		else if (Target.Equals(TEXT("check"), ESearchCase::IgnoreCase))            FUnrealMcpAuxWindows::TryInvokeSerializationCheckTab();
+		else if (Target.Equals(TEXT("restart-bridge"), ESearchCase::IgnoreCase))   { /* runtime side effect — intent only */ }
+		else if (Target.Equals(TEXT("open-log"), ESearchCase::IgnoreCase))         { /* Slate folder-explore — intent only */ }
 		else
 		{
 			DevControlFail(OutResult, FString::Printf(TEXT("unknown click target '%s'"), *Target));

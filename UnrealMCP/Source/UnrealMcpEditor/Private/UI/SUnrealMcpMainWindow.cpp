@@ -5,6 +5,7 @@
 #include "UI/SUnrealMcpAgentConfigurators.h"
 #include "UI/SUnrealMcpAgentWidgets.h"
 #include "UI/UnrealMcpAuxWindows.h"
+#include "UI/UnrealMcpExternalLinks.h"
 #include "UI/FUnrealMcpStyle.h"
 #include "UnrealMcpLog.h"
 
@@ -34,9 +35,10 @@ using UnrealMcpStyleWidgets::EDot;
 namespace
 {
 	// Footer links (mirrors the Unity reference footer: Discord Help/Talk, GitHub bug report, GitHub star).
-	const FString DiscordUrl = TEXT("https://discord.gg/");
-	const FString IssuesUrl  = TEXT("https://github.com/IvanMurzak/Unreal-MCP/issues");
-	const FString StarUrl    = TEXT("https://github.com/IvanMurzak/Unreal-MCP");
+	// Single source of truth in UnrealMcpExternalLinks.h so the dev-control bridge reports the SAME urls.
+	const FString DiscordUrl = FUnrealMcpExternalLinks::Discord();
+	const FString IssuesUrl  = FUnrealMcpExternalLinks::Issues();
+	const FString StarUrl    = FUnrealMcpExternalLinks::Star();
 
 	// Segment value-tags for the segmented controls (the int the control reports; mapped to the enums here).
 	constexpr int32 TagCustom = 0;
