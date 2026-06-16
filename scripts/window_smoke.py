@@ -234,6 +234,21 @@ class Driver:
         self.check("cancel -> Idle", s.get("deviceAuthState") == "Idle", s.get("deviceAuthState"))
         _req(port, "POST", "/control/connection-mode", {"mode": "Custom"})
 
+        # --- AI agents status row (issue #97) — the read-only connected-agents readout in the Connection timeline ---
+        # Inject a populated list, then clear it, asserting the view-model list the §7 AI-agents row + its rail dot
+        # render. The populated screenshot is the live evidence the row lists agents; the empty one shows the
+        # "No agents connected" empty state.
+        _req(port, "POST", "/inject/connection-status",
+             {"status": "Connected", "aiAgents": ["Claude Code", "Cursor", "Copilot"]})
+        s = self.state()
+        self.check("ai-agents populated -> /state count", s.get("aiAgentCount") == 3, str(s.get("aiAgentCount")))
+        self.check("ai-agents list reflected", s.get("aiAgents") == ["Claude Code", "Cursor", "Copilot"], str(s.get("aiAgents")))
+        self.shot("06a-ai-agents-connected")
+        _req(port, "POST", "/inject/connection-status", {"status": "Connected"})
+        s = self.state()
+        self.check("ai-agents cleared -> empty state", s.get("aiAgentCount") == 0, str(s.get("aiAgentCount")))
+        self.shot("06b-ai-agents-empty")
+
         # --- Agent selector ---
         _req(port, "POST", "/control/select-agent", {"agentId": "claude-code"})
         s = self.state()
