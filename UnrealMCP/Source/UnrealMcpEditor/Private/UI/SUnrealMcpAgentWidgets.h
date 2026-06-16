@@ -242,7 +242,9 @@ namespace UnrealMcpStyleWidgets
 	 */
 	struct FTimelineRailDot
 	{
-		TAttribute<EDot> DotState;
+		// Default Offline (red) rather than the enum's value-0 Online (green) so a future rail point that forgets to
+		// set DotState reads as not-connected, not falsely healthy. Both current call sites set this explicitly.
+		TAttribute<EDot> DotState = EDot::Offline;
 		TAttribute<EVisibility> DotVisibility = EVisibility::Visible;
 		// Visibility of the connecting-line segment BELOW this dot; Collapsed on the last dot (no line below it).
 		TAttribute<EVisibility> LineBelowVisibility = EVisibility::Collapsed;
@@ -254,8 +256,9 @@ namespace UnrealMcpStyleWidgets
 	inline TSharedRef<SWidget> TimelineRail(const TArray<FTimelineRailDot>& Dots)
 	{
 		TSharedRef<SVerticalBox> Rail = SNew(SVerticalBox);
-		for (const FTimelineRailDot& Point : Dots)
+		for (int32 DotIndex = 0; DotIndex < Dots.Num(); ++DotIndex)
 		{
+			const FTimelineRailDot& Point = Dots[DotIndex];
 			// The dot — AutoHeight, top-aligned so it pins to the top of its sibling content row.
 			Rail->AddSlot().AutoHeight().HAlign(HAlign_Center).Padding(0, Point.DotTopPadding, 0, 0)
 			[
@@ -264,11 +267,16 @@ namespace UnrealMcpStyleWidgets
 					StatusDot(Point.DotState)
 				]
 			];
-			// The connecting line BELOW it — FillHeight so it absorbs the slack down to the next dot.
-			Rail->AddSlot().FillHeight(1.0f).HAlign(HAlign_Center).Padding(0, 2, 0, 2)
-			[
-				TimelineLineSegment(Point.LineBelowVisibility)
-			];
+			// The connecting line BELOW it — FillHeight so it absorbs the slack down to the next dot. Only emit it
+			// BETWEEN consecutive dots: a trailing FillHeight slot after the last dot (even Collapsed) would still
+			// claim its STRETCH share of the rail's slack, so the inter-dot line would visibly absorb only part of it.
+			if (DotIndex < Dots.Num() - 1)
+			{
+				Rail->AddSlot().FillHeight(1.0f).HAlign(HAlign_Center).Padding(0, 2, 0, 2)
+				[
+					TimelineLineSegment(Point.LineBelowVisibility)
+				];
+			}
 		}
 		return SNew(SBox).WidthOverride(20.0f)
 		[
