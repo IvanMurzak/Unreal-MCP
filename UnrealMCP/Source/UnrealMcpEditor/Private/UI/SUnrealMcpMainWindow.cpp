@@ -4,6 +4,7 @@
 #include "UI/SUnrealMcpMainWindow.h"
 #include "UI/SUnrealMcpAgentConfigurators.h"
 #include "UI/SUnrealMcpAgentWidgets.h"
+#include "UI/UnrealMcpAuxWindows.h"
 #include "UI/FUnrealMcpStyle.h"
 #include "UnrealMcpLog.h"
 
@@ -739,6 +740,13 @@ TSharedRef<SWidget> SUnrealMcpMainWindow::BuildFooterSection()
 			[
 				UnrealMcpStyleWidgets::IconButton("UnrealMcp.Button.Secondary", "UnrealMcp.GitHub", LOCTEXT("BugReport", "Bug Report"),
 					FOnClicked::CreateLambda([]() { FPlatformProcess::LaunchURL(*IssuesUrl, nullptr, nullptr); return FReply::Handled(); }))
+			]
+			// "Check" — opens the Serialization Check window (Unity-MCP parity). Secondary style, beside the
+			// support links. Delegates to the static aux-window invoker so it focuses an already-open tab.
+			+ SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 8, 0)
+			[
+				UnrealMcpStyleWidgets::StyledTextButton("UnrealMcp.Button.Secondary", LOCTEXT("Check", "Check"),
+					FOnClicked::CreateLambda([]() { FUnrealMcpAuxWindows::TryInvokeSerializationCheckTab(); return FReply::Handled(); }))
 			]
 			+ SHorizontalBox::Slot().AutoWidth()
 			[

@@ -108,6 +108,9 @@ void FUnrealMcpDevControlSpec::Define()
 			TestEqual("connectionMode", Result->GetStringField(TEXT("connectionMode")), FString(TEXT("Custom")));
 			TestEqual("customHost", Result->GetStringField(TEXT("customHost")), FString(TEXT("http://localhost:8080")));
 			TestEqual("selectedAgentId", Result->GetStringField(TEXT("selectedAgentId")), FString(TEXT("cursor")));
+			// The Serialization Check tab id is exposed so the smoke test can assert the window exists + drive it.
+			TestEqual("serializationCheckTabId", Result->GetStringField(TEXT("serializationCheckTabId")),
+				FString(TEXT("UnrealMcpSerializationCheckWindow")));
 
 			const TArray<TSharedPtr<FJsonValue>>* OutAgents = nullptr;
 			TestTrue("aiAgents present", Result->TryGetArrayField(TEXT("aiAgents"), OutAgents) && OutAgents != nullptr);
@@ -255,6 +258,22 @@ void FUnrealMcpDevControlSpec::Define()
 			TestEqual("status", Status, 200);
 			TestFalse("token changed", VM->GetCustomToken().Equals(Before));
 			TestFalse("token non-empty", VM->GetCustomToken().IsEmpty());
+		});
+
+		It("click=check returns 200 (opens the Serialization Check window; headless no-op)", [this]()
+		{
+			TSharedRef<FDevCtlRecording> Rec = MakeShared<FDevCtlRecording>();
+			TSharedRef<FUnrealMcpEditorViewModel> VM = DevCtlMakeViewModel(Rec);
+
+			TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
+			const int32 Status = FUnrealMcpDevControlServer::RouteRequest(
+				TEXT("POST"), TEXT("/control/click"), DevCtlBody(TEXT("{\"target\":\"check\"}")), &VM.Get(), Result);
+
+			// `check` opens an aux window rather than mutating the view-model. Under -nullrhi automation the
+			// tab invoke is a guarded no-op, but the route still succeeds (the action was dispatched).
+			TestEqual("status", Status, 200);
+			TestTrue("ok", Result->GetBoolField(TEXT("ok")));
+			TestEqual("target echoed", Result->GetStringField(TEXT("target")), FString(TEXT("check")));
 		});
 
 		It("rejects an unknown click target with 400", [this]()
