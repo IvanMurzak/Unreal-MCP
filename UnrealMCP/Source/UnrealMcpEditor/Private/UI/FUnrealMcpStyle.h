@@ -76,12 +76,20 @@ public:
 	/** The connecting-line colour (2px rgb(80,80,80)) joining the connection-timeline dots. */
 	static FLinearColor ConnectingLine()    { return FromBytes(80, 80, 80); }
 
-	// --- Fonts (issue: headers 20px bold; section desc 9px; timeline label 13px bold + underline). ---
+	/** The section divider colour (Unity .divider — 1px rgb(26,26,26)). */
+	static FLinearColor DividerColor()      { return FromBytes(26, 26, 26); }
+
+	// --- Fonts (Unity USS: .header 20px bold; .section-title 16px bold; .section-desc / helpbox; ---
+	//     .timeline-label 13px bold + underline; .btn-compact 11px). -----------------------------------
 
 	static FSlateFontInfo HeaderFont()      { return FCoreStyle::GetDefaultFontStyle("Bold", 20); }
 	static FSlateFontInfo TimelineLabelFont(){ return FCoreStyle::GetDefaultFontStyle("Bold", 13); }
+	/** Unity .section-title (16px bold) — the AI-agent block / MCP-server sub-card title. */
+	static FSlateFontInfo SectionTitleFont(){ return FCoreStyle::GetDefaultFontStyle("Bold", 16); }
 	static FSlateFontInfo SubHeaderFont()   { return FCoreStyle::GetDefaultFontStyle("Bold", 11); }
-	static FSlateFontInfo DescriptionFont() { return FCoreStyle::GetDefaultFontStyle("Regular", 9); }
+	static FSlateFontInfo DescriptionFont() { return FCoreStyle::GetDefaultFontStyle("Regular", 12); }
+	/** Unity .btn-compact label font (11px). */
+	static FSlateFontInfo CompactButtonFont(){ return FCoreStyle::GetDefaultFontStyle("Regular", 11); }
 
 private:
 	static TSharedRef<class FSlateStyleSet> Create();

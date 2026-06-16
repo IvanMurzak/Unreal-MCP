@@ -97,6 +97,15 @@ public:
 	const FUnrealMcpConfig& GetConfig() const { return Config; }
 	UNREALMCPEDITOR_API void InitializeConfig(const FUnrealMcpConfig& InConfig);
 
+	/** The persisted log level string ("Trace"/"Debug"/.../"None"); falls back to the §8 default when unset. */
+	UNREALMCPEDITOR_API FString GetLogLevel() const;
+	/**
+	 * Set the log level (the §7 Log Level dropdown). Persists + pushes the §1.3 config so the sidecar adopts the new
+	 * verbosity. A no-op change does nothing. Game-thread only. The accepted values mirror Unity's LogLevel enum
+	 * (Trace, Debug, Info, Warning, Error, Exception, None); an empty value resets to the §8 default.
+	 */
+	UNREALMCPEDITOR_API void SetLogLevel(const FString& InLevel);
+
 	EUnrealMcpConnectionMode GetConnectionMode() const { return Config.ConnectionMode; }
 	UNREALMCPEDITOR_API void SetConnectionMode(EUnrealMcpConnectionMode InMode);
 

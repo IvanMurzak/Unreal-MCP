@@ -96,6 +96,9 @@ TSharedRef<FSlateStyleSet> FUnrealMcpStyle::Create()
 	// --- The 2px connecting line that joins the connection-timeline dots vertically. ---
 	Style->Set("UnrealMcp.ConnectingLine", new FSlateColorBrush(ConnectingLine()));
 
+	// --- Section divider: a flat 1px rgb(26,26,26) rule between major sections (Unity .divider). ---
+	Style->Set("UnrealMcp.Divider", new FSlateColorBrush(DividerColor()));
+
 	// --- Section header text style (20px bold). ---
 	Style->Set("UnrealMcp.Text.Header", FTextBlockStyle(FCoreStyle::Get().GetWidgetStyle<FTextBlockStyle>("NormalText"))
 		.SetFont(HeaderFont())
@@ -171,6 +174,21 @@ TSharedRef<FSlateStyleSet> FUnrealMcpStyle::Create()
 			.SetNormalPadding(FMargin(10.0f, 5.0f))
 			.SetPressedPadding(FMargin(10.0f, 5.0f));
 		Style->Set("UnrealMcp.Button.Secondary", Secondary);
+	}
+
+	// --- Compact button (Unity .btn-compact) — the short Configure / Remove / Open-log style. ---
+	// height 20px, radius 4px, NO border, rgb(70,70,70) bg, 0px-vertical / 6px-horizontal padding.
+	{
+		FButtonStyle Compact = FButtonStyle()
+			.SetNormal(FSlateRoundedBoxBrush(FromBytes(70, 70, 70), 4.0f))
+			.SetHovered(FSlateRoundedBoxBrush(FromBytes(90, 90, 90), 4.0f))
+			.SetPressed(FSlateRoundedBoxBrush(FromBytes(110, 110, 110), 4.0f))
+			.SetNormalForeground(FSlateColor(FromBytes(200, 200, 200)))
+			.SetHoveredForeground(FSlateColor(FLinearColor::White))
+			.SetPressedForeground(FSlateColor(FLinearColor::White))
+			.SetNormalPadding(FMargin(6.0f, 1.0f))
+			.SetPressedPadding(FMargin(6.0f, 1.0f));
+		Style->Set("UnrealMcp.Button.Compact", Compact);
 	}
 
 	return Style;

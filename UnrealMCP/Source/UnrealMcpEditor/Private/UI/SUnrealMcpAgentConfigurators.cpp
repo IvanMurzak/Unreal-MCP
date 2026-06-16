@@ -52,61 +52,55 @@ void SUnrealMcpAgentConfigurators::Construct(const FArguments& InArgs)
 
 	TSharedPtr<FString> InitialItem = AgentNameItems.IsValidIndex(InitialIndex) ? AgentNameItems[InitialIndex] : nullptr;
 
+	// Issue #80 item 5/6: mirror the Unity AI-agent block — the ONE blue rounded frame (Unity .frame-group) kept in
+	// this section, a header ROW ("AI agent" 20px header on the left + the agent dropdown filling the right, like
+	// MainWindow.uxml's `.row` + .header + aiAgentDropdown), then the per-agent panel. The dropdown carries the
+	// selected agent's display name; the per-agent panel (links / status / foldouts) rebuilds on selection change.
 	ChildSlot
 	[
-		SNew(SBorder)
-		.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
-		.Padding(8.0f)
-		[
+		UnrealMcpStyleWidgets::StyledCard(
 			SNew(SVerticalBox)
+			// Header row: "AI agent" + dropdown (Unity .row: header left, dropdown grows on the right).
 			+ SVerticalBox::Slot().AutoHeight()
 			[
-				SNew(STextBlock)
-				.Text(LOCTEXT("AgentConfigHeader", "AI Agent Configurators"))
-				.Font(FCoreStyle::GetDefaultFontStyle("Bold", 11))
-			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0, 4, 0, 0)
-			[
-				SNew(STextBlock)
-				.AutoWrapText(true)
-				.Text(LOCTEXT("AgentConfigDesc", "Pick an AI agent / MCP client and configure it to connect to this project's MCP server."))
-			]
-			// Agent dropdown.
-			+ SVerticalBox::Slot().AutoHeight().Padding(0, 8, 0, 0)
-			[
-				SAssignNew(AgentCombo, SComboBox<TSharedPtr<FString>>)
-				.OptionsSource(&AgentNameItems)
-				.InitiallySelectedItem(InitialItem)
-				.OnGenerateWidget_Lambda([](TSharedPtr<FString> Item)
-				{
-					return SNew(STextBlock).Text(FText::FromString(Item.IsValid() ? *Item : FString()));
-				})
-				.OnSelectionChanged_Lambda([this](TSharedPtr<FString> NewItem, ESelectInfo::Type)
-				{
-					if (!NewItem.IsValid())
-						return;
-					const int32 Index = AgentNameItems.IndexOfByPredicate(
-						[&NewItem](const TSharedPtr<FString>& I) { return I == NewItem; });
-					TSharedPtr<FAiAgentConfigurator> Configurator = Registry->GetByIndex(Index);
-					if (Configurator.IsValid() && IsViewModelValid())
-						ViewModel->SetSelectedAgentId(Configurator->GetAgentId());
-					bRevealToken = false; // reset reveal on agent switch (§8)
-					RefreshSelectedConfigurator();
-				})
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 8, 0)
+				[ UnrealMcpStyleWidgets::SectionHeader(LOCTEXT("AgentSectionHeader", "AI agent")) ]
+				+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
 				[
-					SNew(STextBlock)
-					.Text_Lambda([this]()
+					SAssignNew(AgentCombo, SComboBox<TSharedPtr<FString>>)
+					.OptionsSource(&AgentNameItems)
+					.InitiallySelectedItem(InitialItem)
+					.OnGenerateWidget_Lambda([](TSharedPtr<FString> Item)
 					{
-						return Selected.IsValid() ? FText::FromString(Selected->GetAgentName()) : LOCTEXT("NoAgent", "Select an agent");
+						return SNew(STextBlock).Text(FText::FromString(Item.IsValid() ? *Item : FString()));
 					})
+					.OnSelectionChanged_Lambda([this](TSharedPtr<FString> NewItem, ESelectInfo::Type)
+					{
+						if (!NewItem.IsValid())
+							return;
+						const int32 Index = AgentNameItems.IndexOfByPredicate(
+							[&NewItem](const TSharedPtr<FString>& I) { return I == NewItem; });
+						TSharedPtr<FAiAgentConfigurator> Configurator = Registry->GetByIndex(Index);
+						if (Configurator.IsValid() && IsViewModelValid())
+							ViewModel->SetSelectedAgentId(Configurator->GetAgentId());
+						bRevealToken = false; // reset reveal on agent switch (§8)
+						RefreshSelectedConfigurator();
+					})
+					[
+						SNew(STextBlock)
+						.Text_Lambda([this]()
+						{
+							return Selected.IsValid() ? FText::FromString(Selected->GetAgentName()) : LOCTEXT("NoAgent", "Select an agent");
+						})
+					]
 				]
 			]
 			// Per-agent panel container (rebuilt on selection change).
 			+ SVerticalBox::Slot().AutoHeight().Padding(0, 8, 0, 0)
 			[
 				SAssignNew(AgentPanelContainer, SVerticalBox)
-			]
-		]
+			])
 	];
 
 	// Subscribe to connection-setting changes so the panel re-resolves + rebuilds when the user edits the

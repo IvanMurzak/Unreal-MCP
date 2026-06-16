@@ -85,6 +85,24 @@ void FUnrealMcpEditorViewModel::SetCustomHost(const FString& InHost)
 		OnConnectionSettingsChanged.Broadcast();
 }
 
+FString FUnrealMcpEditorViewModel::GetLogLevel() const
+{
+	// Fall back to the §8 default ("Info") when the persisted value is empty so the dropdown always has a valid
+	// selection to render (mirrors the header field's old empty→"Info" coalesce).
+	return Config.LogLevel.IsEmpty() ? FString(FUnrealMcpConfig::DefaultLogLevel) : Config.LogLevel;
+}
+
+void FUnrealMcpEditorViewModel::SetLogLevel(const FString& InLevel)
+{
+	// Empty resets to the §8 default so the field never persists a blank verbosity. The level is part of the §1.3
+	// `config` message (the sidecar adopts it), so persist AND push — unlike the pure-UI presentation setters.
+	const FString NewLevel = InLevel.IsEmpty() ? FString(FUnrealMcpConfig::DefaultLogLevel) : InLevel;
+	if (Config.LogLevel == NewLevel)
+		return;
+	Config.LogLevel = NewLevel;
+	PersistAndPush();
+}
+
 void FUnrealMcpEditorViewModel::SetAuthOption(EUnrealMcpAuthOption InOption)
 {
 	if (Config.AuthOption == InOption)

@@ -170,7 +170,20 @@ namespace UnrealMcpStyleWidgets
 			.Text(Title);
 	}
 
-	/** A dimmed 9px description/hint line (Unity .section-desc). */
+	/**
+	 * A full-width 1px horizontal rule (Unity .divider — rgb(26,26,26), 10px margin top/bottom). Used between
+	 * major sections instead of wrapping each in a card; mirrors the reference's flat section separators.
+	 */
+	inline TSharedRef<SWidget> Divider()
+	{
+		return SNew(SBox)
+			.HeightOverride(1.0f)
+			[
+				SNew(SImage).Image(FUnrealMcpStyle::Get().GetBrush("UnrealMcp.Divider"))
+			];
+	}
+
+	/** A dimmed description/hint line (Unity .section-desc). */
 	inline TSharedRef<SWidget> Description(const TAttribute<FText>& Text)
 	{
 		return SNew(STextBlock)
@@ -274,6 +287,14 @@ namespace UnrealMcpStyleWidgets
 	inline TSharedRef<SButton> StyledTextButton(const FName& StyleKey, const FText& Label, FOnClicked OnClicked)
 	{
 		return StyledButton(StyleKey, SNew(STextBlock).Text(Label), OnClicked);
+	}
+
+	/** The compact-button definition (declared above SectionHeader; needs StyledButton + the 11px font). */
+	inline TSharedRef<SButton> CompactTextButton(const FText& Label, FOnClicked OnClicked)
+	{
+		return StyledButton("UnrealMcp.Button.Compact",
+			SNew(STextBlock).Font(FUnrealMcpStyle::CompactButtonFont()).Text(Label),
+			OnClicked);
 	}
 
 	/** A button with a leading icon brush + label (Unity .btn-with-icon) — Discord/GitHub footer buttons. */
