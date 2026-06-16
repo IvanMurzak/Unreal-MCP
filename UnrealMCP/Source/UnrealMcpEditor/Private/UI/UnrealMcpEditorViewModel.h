@@ -81,6 +81,40 @@ public:
 	 */
 	TFunction<void(const TArray<FString>& /*DisabledTools*/)> OnToolEnablementChanged;
 
+	// --- Local MCP-server (gamedev-mcp-server) control sinks (§7 in-UI Start, issue #95). ---
+
+	/**
+	 * Start the LOCAL gamedev-mcp-server (the MCP-server card's "Start"). Wired by the runtime to
+	 * FUnrealMcpServerManager::Start(); a spec leaves it unset. ONLY invoked when the launch is gated-in
+	 * (Custom mode + http transport) — see IsLocalServerLaunchable / ToggleLocalServer. Returns true on a
+	 * successful (or already-running) start.
+	 */
+	TFunction<bool()> OnStartLocalServer;
+	/** Stop the LOCAL gamedev-mcp-server (the MCP-server card's "Stop"). Wired to FUnrealMcpServerManager::Stop(). */
+	TFunction<void()> OnStopLocalServer;
+	/** Report whether the LOCAL gamedev-mcp-server is currently running. Wired to FUnrealMcpServerManager::IsRunning(); unset → false. */
+	TFunction<bool()> IsLocalServerRunningSink;
+
+	// --- Local MCP-server gating + control (pure view-model surface over the sinks above). ---
+
+	/**
+	 * Whether the in-UI local-server Start affordance is offered at all: ONLY in Custom mode with http transport
+	 * (mirrors FUnrealMcpServerManager::IsLaunchAllowed). In Cloud mode, or Custom+stdio, the Start button is
+	 * hidden/disabled and a click is a no-op — the server is never launched. Pure (reads the config only).
+	 */
+	UNREALMCPEDITOR_API bool IsLocalServerLaunchable() const;
+	/** Whether the local server is currently running (false when no sink is wired). Game-thread only. */
+	UNREALMCPEDITOR_API bool IsLocalServerRunning() const;
+	/**
+	 * The MCP-server card's Start/Stop toggle: when launchable, start the server if stopped, else stop it. A
+	 * NO-OP (returns false, never touches the sinks) when NOT launchable (Cloud / Custom+stdio) — the gating
+	 * guard that guarantees a stray click cannot spawn a server in a non-Custom+http mode. Game-thread only.
+	 * Returns true when an action was taken.
+	 */
+	UNREALMCPEDITOR_API bool ToggleLocalServer();
+	/** The MCP-server card's button label for the current state: "Start" when stopped, "Stop" when running. */
+	UNREALMCPEDITOR_API FText GetLocalServerButtonText() const;
+
 	/**
 	 * Fires whenever a connection-affecting setting changes — connection mode (Cloud↔Custom), Custom host,
 	 * auth option, the Custom/Cloud token. The AI Agent Configurators panel subscribes to this so it can

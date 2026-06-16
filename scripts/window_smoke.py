@@ -156,7 +156,7 @@ class Driver:
         self.check("generate-token kept a token", s.get("hasCustomToken") is True)
         self.shot("01-custom-required-token")
 
-        # --- Connect / Disconnect / Stop / Start ---
+        # --- Connect / Disconnect / Stop (SignalR connection — the "Unreal: <status>" row) ---
         _req(port, "POST", "/control/click", {"target": "connect"})
         s = self.state()
         self.check("connect -> keepConnected", s.get("keepConnected") is True, s.get("connectionState"))
@@ -164,10 +164,39 @@ class Driver:
         _req(port, "POST", "/control/click", {"target": "stop"})
         s = self.state()
         self.check("stop -> not keepConnected", s.get("keepConnected") is False, s.get("connectionState"))
-        _req(port, "POST", "/control/click", {"target": "start"})
-        s = self.state()
-        self.check("start -> keepConnected", s.get("keepConnected") is True, s.get("connectionState"))
         _req(port, "POST", "/control/click", {"target": "disconnect"})
+
+        # --- Local gamedev-mcp-server Start/Stop (issue #95 — the MCP-server card) + gating matrix ---
+        # The full live launch/reachability + close-editor-kills-it matrix is driven by the operator harness
+        # in scripts/server_smoke.py (it needs a real port + process checks). Here we assert the dock-side
+        # contract the dev-control bridge exposes: gating reflects the mode/transport, and the explicit
+        # start/stop toggle drives the live server state.
+        #
+        # (1) Custom + http -> Start is launchable.
+        _req(port, "POST", "/control/connection-mode", {"mode": "Custom"})
+        _req(port, "POST", "/control/transport", {"transport": "http"})
+        s = self.state()
+        self.check("server launchable in Custom+http", s.get("serverLaunchable") is True, str(s.get("serverLaunchable")))
+        # (4a) Gating: Custom + stdio -> NOT launchable; a start click is a no-op (server stays stopped).
+        _req(port, "POST", "/control/transport", {"transport": "stdio"})
+        s = self.state()
+        self.check("server NOT launchable in Custom+stdio", s.get("serverLaunchable") is False, str(s.get("serverLaunchable")))
+        _, b = _req(port, "POST", "/control/click", {"target": "start-server"})
+        self.check("start-server no-op in Custom+stdio (not running)", b.get("serverRunning") is False, str(b.get("serverRunning")))
+        # (4b) Gating: Cloud -> NOT launchable; a start click is a no-op.
+        _req(port, "POST", "/control/connection-mode", {"mode": "Cloud"})
+        s = self.state()
+        self.check("server NOT launchable in Cloud", s.get("serverLaunchable") is False, str(s.get("serverLaunchable")))
+        _, b = _req(port, "POST", "/control/click", {"target": "start-server"})
+        self.check("start-server no-op in Cloud (not running)", b.get("serverRunning") is False, str(b.get("serverRunning")))
+        # Back to Custom+http and drive an actual launch -> stop cycle (1)+(2)+(5).
+        _req(port, "POST", "/control/connection-mode", {"mode": "Custom"})
+        _req(port, "POST", "/control/transport", {"transport": "http"})
+        _, b = _req(port, "POST", "/control/click", {"target": "start-server"})
+        self.check("start-server -> serverRunning (Custom+http)", b.get("serverRunning") is True, str(b.get("serverRunning")))
+        self.shot("02b-server-running")
+        _, b = _req(port, "POST", "/control/click", {"target": "stop-server"})
+        self.check("stop-server -> serverRunning False (clean stop)", b.get("serverRunning") is False, str(b.get("serverRunning")))
 
         # --- Injected connection-status (status dots/labels readouts) ---
         _req(port, "POST", "/inject/connection-status", {"status": "Connected"})

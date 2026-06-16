@@ -9,6 +9,7 @@
 #include "Dispatch/UnrealMcpGameThreadDispatcher.h"
 #include "Bridge/UnrealMcpBridgeServer.h"
 #include "Sidecar/UnrealMcpSidecarManager.h"
+#include "Server/UnrealMcpServerManager.h"
 #include "Extensions/UnrealMcpExtensionManager.h"
 #include "UI/UnrealMcpEditorViewModel.h"
 #include "UI/UnrealMcpMainWindowTab.h"
@@ -114,6 +115,21 @@ void FUnrealMcpRuntime::Startup()
 	SidecarManager = MakeUnique<FUnrealMcpSidecarManager>();
 	SidecarManager->StartForPort(BoundPort, Token);
 
+	// §7 in-UI local-server (issue #95): create the local gamedev-mcp-server manager. It does NOT auto-start —
+	// the user launches it from the MCP-server card's Start button (Custom+http only). Reattach to a server this
+	// plugin spawned in a previous module load (hot-reload survivor) so a later Stop / editor-quit tears it down
+	// instead of orphaning it — only meaningful in Custom+http.
+	ServerManager = MakeUnique<FUnrealMcpServerManager>();
+	if (FUnrealMcpServerManager::IsLaunchAllowed(
+			Config.ConnectionMode == EUnrealMcpConnectionMode::Custom,
+			Config.ResolveEffectiveTransport() == EUnrealMcpTransportMethod::Http))
+	{
+		const int32 ReattachPort = FUnrealMcpServerManager::ParsePortFromHost(Config.ResolveCustomHost());
+		ServerManager->ReattachIfRunning(
+			ReattachPort, /*PluginTimeoutMs*/ 10000,
+			Config.AuthOption == EUnrealMcpAuthOption::Required, Config.ResolveEffectiveToken());
+	}
+
 	// §7 UI: the main-window view-model owns all UI state; wire its side-effect sinks to the real subsystems.
 	// All config writes go config-store-first (Save) then push the §1.3 `config` to the sidecar (§7 ownership).
 	ViewModel = MakeShared<FUnrealMcpEditorViewModel>();
@@ -139,6 +155,31 @@ void FUnrealMcpRuntime::Startup()
 	{
 		if (!Url.IsEmpty())
 			FPlatformProcess::LaunchURL(*Url, nullptr, nullptr);
+	};
+
+	// §7 in-UI local-server (issue #95): wire the MCP-server card's Start/Stop to the local server manager. The
+	// view-model already gates these to Custom+http (ToggleLocalServer no-ops otherwise) — the sinks just execute.
+	// Re-resolve the §8 config on each Start so the port (from the Custom host), auth, and token reflect what the
+	// user has set right now. The port the agent dials (Custom host) MUST equal the port the server listens on.
+	FUnrealMcpServerManager* ServerPtr = ServerManager.Get();
+	ViewModel->OnStartLocalServer = [ServerPtr]() -> bool
+	{
+		if (!ServerPtr)
+			return false;
+		const FUnrealMcpConfig Live = FUnrealMcpConfig::LoadAndResolve();
+		const int32 ServerPort = FUnrealMcpServerManager::ParsePortFromHost(Live.ResolveCustomHost());
+		return ServerPtr->Start(
+			ServerPort, /*PluginTimeoutMs*/ 10000,
+			Live.AuthOption == EUnrealMcpAuthOption::Required, Live.ResolveEffectiveToken());
+	};
+	ViewModel->OnStopLocalServer = [ServerPtr]()
+	{
+		if (ServerPtr)
+			ServerPtr->Stop(/*bForce*/ false);
+	};
+	ViewModel->IsLocalServerRunningSink = [ServerPtr]() -> bool
+	{
+		return ServerPtr && ServerPtr->IsRunning();
 	};
 	// §7 per-tool enable-map: a Tools-window toggle re-applies the disabled set to the registry and re-pushes the
 	// manifest so the sidecar's tools/list drops/restores the toggled tool over the wire (§2.2). The view-model
@@ -337,6 +378,10 @@ void FUnrealMcpRuntime::Shutdown()
 		ViewModel->OnSendAuth = nullptr;
 		ViewModel->OnOpenBrowser = nullptr;
 		ViewModel->OnToolEnablementChanged = nullptr; // captures the raw registry/bridge pointers freed below
+		// §7 in-UI local-server sinks capture the raw FUnrealMcpServerManager* freed below — null before that.
+		ViewModel->OnStartLocalServer = nullptr;
+		ViewModel->OnStopLocalServer = nullptr;
+		ViewModel->IsLocalServerRunningSink = nullptr;
 	}
 	ViewModel.Reset();
 
@@ -351,6 +396,15 @@ void FUnrealMcpRuntime::Shutdown()
 		SidecarManager->WaitForExit(FTimespan::FromSeconds(3)); // bounded grace for a clean self-exit
 		SidecarManager->Stop();                                 // backstop: TerminateProc if still alive
 		SidecarManager.Reset();
+	}
+
+	// §7 in-UI local-server (issue #95): force-stop the local gamedev-mcp-server on editor shutdown so NO
+	// orphaned server process survives editor close (the DoD "Start then close → server dies" requirement).
+	// bForce blocks (bounded) until the child has actually exited. No-op when one was never started.
+	if (ServerManager.IsValid())
+	{
+		ServerManager->Stop(/*bForce*/ true);
+		ServerManager.Reset();
 	}
 
 	// Unsubscribe from modular-feature events before the registry it mutates is torn down.

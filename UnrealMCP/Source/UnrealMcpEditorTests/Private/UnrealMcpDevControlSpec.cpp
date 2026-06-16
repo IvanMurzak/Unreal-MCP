@@ -26,6 +26,10 @@ BEGIN_DEFINE_SPEC(FUnrealMcpDevControlSpec, "UnrealMcp.DevControl",
 		int32 PersistCount = 0;
 		int32 PushCount = 0;
 		TArray<FString> AuthSent;
+		// §7 in-UI local-server (issue #95): recording stubs for the server sinks.
+		int32 ServerStartCount = 0;
+		int32 ServerStopCount = 0;
+		bool bServerRunning = false;
 	};
 
 	static TSharedRef<FUnrealMcpEditorViewModel> DevCtlMakeViewModel(TSharedRef<FDevCtlRecording> Rec)
@@ -35,6 +39,9 @@ BEGIN_DEFINE_SPEC(FUnrealMcpDevControlSpec, "UnrealMcp.DevControl",
 		VM->OnPushConfig = [Rec](const FUnrealMcpConfig&) { Rec->PushCount++; };
 		VM->OnSendAuth = [Rec](const FString& Type) -> bool { Rec->AuthSent.Add(Type); return true; };
 		VM->OnOpenBrowser = [](const FString&) {};
+		VM->OnStartLocalServer = [Rec]() -> bool { Rec->ServerStartCount++; Rec->bServerRunning = true; return true; };
+		VM->OnStopLocalServer = [Rec]() { Rec->ServerStopCount++; Rec->bServerRunning = false; };
+		VM->IsLocalServerRunningSink = [Rec]() -> bool { return Rec->bServerRunning; };
 		return VM;
 	}
 
@@ -317,18 +324,77 @@ void FUnrealMcpDevControlSpec::Define()
 			TestEqual("target echoed", Result->GetStringField(TEXT("target")), FString(TEXT("check")));
 		});
 
-		It("click=start (the MCP-server Start button) arms reconnect and goes Connecting", [this]()
+		It("click=start (the MCP-server Start button) launches the local server in Custom+http (issue #95)", [this]()
 		{
 			TSharedRef<FDevCtlRecording> Rec = MakeShared<FDevCtlRecording>();
 			TSharedRef<FUnrealMcpEditorViewModel> VM = DevCtlMakeViewModel(Rec);
+			VM->SetConnectionMode(EUnrealMcpConnectionMode::Custom);
+			VM->SetTransportMethod(EUnrealMcpTransportMethod::Http);
 
 			TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
 			const int32 Status = FUnrealMcpDevControlServer::RouteRequest(
 				TEXT("POST"), TEXT("/control/click"), DevCtlBody(TEXT("{\"target\":\"start\"}")), &VM.Get(), Result);
 
 			TestEqual("status", Status, 200);
-			TestTrue("reconnect armed", VM->IsReconnectArmed());
-			TestEqual("state", VM->GetConnectionState(), EUnrealMcpConnectionState::Connecting);
+			TestEqual("server started (not Connect())", Rec->ServerStartCount, 1);
+			TestTrue("serverRunning echoed true", Result->GetBoolField(TEXT("serverRunning")));
+			TestTrue("serverLaunchable echoed true", Result->GetBoolField(TEXT("serverLaunchable")));
+			// The Start button must NOT touch the SignalR connection (that is the "Unreal:" row's Connect).
+			// Connect() would optimistically drive the state to Connecting; the server-start path must leave the
+			// SignalR connection state untouched (Disconnected here — never started).
+			TestEqual("did not drive the SignalR connection (state untouched)",
+				VM->GetConnectionState(), EUnrealMcpConnectionState::Disconnected);
+		});
+
+		It("click=start-server then stop-server drives a clean server start/stop cycle (Custom+http)", [this]()
+		{
+			TSharedRef<FDevCtlRecording> Rec = MakeShared<FDevCtlRecording>();
+			TSharedRef<FUnrealMcpEditorViewModel> VM = DevCtlMakeViewModel(Rec);
+			VM->SetConnectionMode(EUnrealMcpConnectionMode::Custom);
+			VM->SetTransportMethod(EUnrealMcpTransportMethod::Http);
+
+			TSharedRef<FJsonObject> R1 = MakeShared<FJsonObject>();
+			FUnrealMcpDevControlServer::RouteRequest(
+				TEXT("POST"), TEXT("/control/click"), DevCtlBody(TEXT("{\"target\":\"start-server\"}")), &VM.Get(), R1);
+			TestEqual("started once", Rec->ServerStartCount, 1);
+			TestTrue("running after start-server", R1->GetBoolField(TEXT("serverRunning")));
+
+			// Idempotent: a repeat start-server while running does NOT stop it.
+			TSharedRef<FJsonObject> R2 = MakeShared<FJsonObject>();
+			FUnrealMcpDevControlServer::RouteRequest(
+				TEXT("POST"), TEXT("/control/click"), DevCtlBody(TEXT("{\"target\":\"start-server\"}")), &VM.Get(), R2);
+			TestEqual("start-server idempotent (no extra start)", Rec->ServerStartCount, 1);
+			TestEqual("start-server idempotent (no stop)", Rec->ServerStopCount, 0);
+
+			TSharedRef<FJsonObject> R3 = MakeShared<FJsonObject>();
+			FUnrealMcpDevControlServer::RouteRequest(
+				TEXT("POST"), TEXT("/control/click"), DevCtlBody(TEXT("{\"target\":\"stop-server\"}")), &VM.Get(), R3);
+			TestEqual("stopped once", Rec->ServerStopCount, 1);
+			TestFalse("not running after stop-server", R3->GetBoolField(TEXT("serverRunning")));
+		});
+
+		It("click=start-server is a NO-OP that never spawns a server in Cloud / Custom+stdio (gating)", [this]()
+		{
+			TSharedRef<FDevCtlRecording> Rec = MakeShared<FDevCtlRecording>();
+			TSharedRef<FUnrealMcpEditorViewModel> VM = DevCtlMakeViewModel(Rec);
+
+			// Custom + stdio: gated out.
+			VM->SetConnectionMode(EUnrealMcpConnectionMode::Custom);
+			VM->SetTransportMethod(EUnrealMcpTransportMethod::Stdio);
+			TSharedRef<FJsonObject> R1 = MakeShared<FJsonObject>();
+			FUnrealMcpDevControlServer::RouteRequest(
+				TEXT("POST"), TEXT("/control/click"), DevCtlBody(TEXT("{\"target\":\"start-server\"}")), &VM.Get(), R1);
+			TestEqual("no start in Custom+stdio", Rec->ServerStartCount, 0);
+			TestFalse("serverRunning false in Custom+stdio", R1->GetBoolField(TEXT("serverRunning")));
+			TestFalse("serverLaunchable false in Custom+stdio", R1->GetBoolField(TEXT("serverLaunchable")));
+
+			// Cloud: gated out.
+			VM->SetConnectionMode(EUnrealMcpConnectionMode::Cloud);
+			TSharedRef<FJsonObject> R2 = MakeShared<FJsonObject>();
+			FUnrealMcpDevControlServer::RouteRequest(
+				TEXT("POST"), TEXT("/control/click"), DevCtlBody(TEXT("{\"target\":\"start-server\"}")), &VM.Get(), R2);
+			TestEqual("no start in Cloud", Rec->ServerStartCount, 0);
+			TestFalse("serverRunning false in Cloud", R2->GetBoolField(TEXT("serverRunning")));
 		});
 
 		It("click=stop (the tri-state Stop button) halts the reconnect loop", [this]()

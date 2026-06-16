@@ -40,6 +40,11 @@ public class UnrealMcpEditor : ModuleRules
 			"Projects",
 			"EditorSubsystem",
 			"DeveloperSettings",
+			// Local gamedev-mcp-server launch/supervision (FUnrealMcpServerManager, docs/ARCHITECTURE.md §7):
+			//  - HTTP          -> download the pinned server release zip on a cache miss (override/cache first)
+			//  - FileUtilities -> FZipArchiveReader (libzip-backed) to unpack the downloaded release zip
+			"HTTP",
+			"FileUtilities",
 			// Slate main window (docs/ARCHITECTURE.md §7): nomad-tab registration via FGlobalTabmanager
 			// needs WorkspaceMenuStructure (the "AI Game Developer" Window-menu group, applied via
 			// RegisterNomadTabSpawner().SetGroup); the masked-token field reads keystrokes via InputCore;

@@ -454,6 +454,47 @@ FString FUnrealMcpEditorViewModel::MaskTokenForDisplay(const FString& Token, boo
 	return FString::ChrN(8, TEXT('\x2022')); // U+2022 BULLET
 }
 
+bool FUnrealMcpEditorViewModel::IsLocalServerLaunchable() const
+{
+	// ONLY Custom mode + http transport targets a locally-hosted server (mirrors
+	// FUnrealMcpServerManager::IsLaunchAllowed). Use the connection-AWARE effective transport so Cloud (which
+	// forces Http) still gates OUT on its non-Custom mode rather than slipping through on the locked Http value.
+	return Config.ConnectionMode == EUnrealMcpConnectionMode::Custom
+		&& Config.ResolveEffectiveTransport() == EUnrealMcpTransportMethod::Http;
+}
+
+bool FUnrealMcpEditorViewModel::IsLocalServerRunning() const
+{
+	return IsLocalServerRunningSink ? IsLocalServerRunningSink() : false;
+}
+
+bool FUnrealMcpEditorViewModel::ToggleLocalServer()
+{
+	// Gating guard: a click in Cloud / Custom+stdio must NEVER spawn a server. This is the single choke point
+	// the UI Start button AND the dev-control /control/click "start" both route through.
+	if (!IsLocalServerLaunchable())
+	{
+		UE_LOG(LogUnrealMcp, Verbose,
+			TEXT("[Unreal-MCP] local-server toggle ignored — not launchable (requires Custom mode + http transport)."));
+		return false;
+	}
+
+	if (IsLocalServerRunning())
+	{
+		if (OnStopLocalServer)
+			OnStopLocalServer();
+		return true;
+	}
+	if (OnStartLocalServer)
+		return OnStartLocalServer();
+	return false;
+}
+
+FText FUnrealMcpEditorViewModel::GetLocalServerButtonText() const
+{
+	return IsLocalServerRunning() ? LOCTEXT("ServerBtnStop", "Stop") : LOCTEXT("ServerBtnStart", "Start");
+}
+
 FText FUnrealMcpEditorViewModel::GetButtonText(EUnrealMcpConnectionState State)
 {
 	switch (State)

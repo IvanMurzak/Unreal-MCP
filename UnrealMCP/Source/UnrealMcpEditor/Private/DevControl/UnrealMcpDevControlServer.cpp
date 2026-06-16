@@ -308,6 +308,11 @@ int32 FUnrealMcpDevControlServer::RouteRequest(
 		OutResult->SetStringField(TEXT("deviceAuthState"), DevControlDeviceAuthLabel(ViewModelPtr->GetDeviceAuthState()));
 		OutResult->SetBoolField(TEXT("hasCloudToken"), ViewModelPtr->HasCloudToken());
 		OutResult->SetBoolField(TEXT("keepConnected"), ViewModelPtr->IsReconnectArmed());
+		// §7 in-UI local-server (issue #95): the MCP-server card's Start/Stop readouts so the smoke test can
+		// assert gating (launchable only in Custom+http) + the live server run-state + the toggling button label.
+		OutResult->SetBoolField(TEXT("serverLaunchable"), ViewModelPtr->IsLocalServerLaunchable());
+		OutResult->SetBoolField(TEXT("serverRunning"), ViewModelPtr->IsLocalServerRunning());
+		OutResult->SetStringField(TEXT("serverButtonLabel"), ViewModelPtr->GetLocalServerButtonText().ToString());
 		// The Connect/Disconnect/Stop button label + the "Unreal: <status>" label the dock renders for this state,
 		// so the smoke test asserts the exact text a screenshot would show without reading pixels.
 		OutResult->SetStringField(TEXT("buttonLabel"),
@@ -500,20 +505,38 @@ int32 FUnrealMcpDevControlServer::RouteRequest(
 		FString Target;
 		if (!Body.IsValid() || !Body->TryGetStringField(TEXT("target"), Target) || Target.IsEmpty())
 		{
-			DevControlFail(OutResult, TEXT("missing 'target' (connect|start|disconnect|stop|authorize|cancel|revoke|generate-token|check|restart-bridge|open-log)"));
+			DevControlFail(OutResult, TEXT("missing 'target' (connect|disconnect|stop|start|start-server|stop-server|authorize|cancel|revoke|generate-token|check|restart-bridge|open-log)"));
 			return 400;
 		}
 
 		// Map the click target onto the matching view-model mutator — the same action the Slate button fires.
-		// `start` is the MCP-server Start button (a (re)Connect); `stop` is the tri-state Disconnect/Stop. `check`,
-		// `restart-bridge` and `open-log` do NOT mutate the view-model: `check` opens the Serialization Check aux
-		// window (headless no-op via the static invoker); `restart-bridge` (a runtime bridge restart) and `open-log`
-		// (a folder-explore) are runtime/Slate side effects the dev-control bridge deliberately does NOT perform —
-		// they are acknowledged as dispatched intents so the smoke test can exercise every footer button.
+		//  - `connect`/`disconnect`/`stop` drive the Unreal-side SignalR connect (the "Unreal: <status>" row).
+		//  - `start`/`start-server`/`stop-server` drive the MCP-server card's LOCAL gamedev-mcp-server (issue #95):
+		//    `start` toggles (Start↔Stop) exactly like the Slate button; `start-server`/`stop-server` are explicit
+		//    so the smoke test can drive a deterministic start THEN stop. ALL route through ToggleLocalServer /
+		//    the gated sinks, which NO-OP outside Custom+http — a click in Cloud/stdio can never spawn a server.
+		//  - `check` opens the Serialization Check aux window (headless no-op via the static invoker);
+		//    `restart-bridge` (a runtime bridge restart) and `open-log` (a folder-explore) are runtime/Slate side
+		//    effects the dev-control bridge deliberately does NOT perform — acknowledged as dispatched intents.
+		bool bServerTarget = false;
 		if (Target.Equals(TEXT("connect"), ESearchCase::IgnoreCase))               ViewModelPtr->Connect();
-		else if (Target.Equals(TEXT("start"), ESearchCase::IgnoreCase))            ViewModelPtr->Connect();
 		else if (Target.Equals(TEXT("disconnect"), ESearchCase::IgnoreCase))       ViewModelPtr->Disconnect();
 		else if (Target.Equals(TEXT("stop"), ESearchCase::IgnoreCase))             ViewModelPtr->Disconnect();
+		else if (Target.Equals(TEXT("start"), ESearchCase::IgnoreCase))            { ViewModelPtr->ToggleLocalServer(); bServerTarget = true; }
+		else if (Target.Equals(TEXT("start-server"), ESearchCase::IgnoreCase))
+		{
+			// Explicit start: toggle only if currently stopped (so a repeat start-server is idempotent, not a stop).
+			if (!ViewModelPtr->IsLocalServerRunning())
+				ViewModelPtr->ToggleLocalServer();
+			bServerTarget = true;
+		}
+		else if (Target.Equals(TEXT("stop-server"), ESearchCase::IgnoreCase))
+		{
+			// Explicit stop: toggle only if currently running.
+			if (ViewModelPtr->IsLocalServerRunning())
+				ViewModelPtr->ToggleLocalServer();
+			bServerTarget = true;
+		}
 		else if (Target.Equals(TEXT("authorize"), ESearchCase::IgnoreCase))        ViewModelPtr->Authorize();
 		else if (Target.Equals(TEXT("cancel"), ESearchCase::IgnoreCase))           ViewModelPtr->CancelAuth();
 		else if (Target.Equals(TEXT("revoke"), ESearchCase::IgnoreCase))           ViewModelPtr->Revoke();
@@ -530,6 +553,12 @@ int32 FUnrealMcpDevControlServer::RouteRequest(
 		OutResult->SetBoolField(TEXT("ok"), true);
 		OutResult->SetStringField(TEXT("target"), Target.ToLower());
 		OutResult->SetStringField(TEXT("connectionState"), DevControlConnectionStateLabel(ViewModelPtr->GetConnectionState()));
+		// Server-target clicks also report the live server state so the smoke test asserts launch/stop + gating.
+		if (bServerTarget)
+		{
+			OutResult->SetBoolField(TEXT("serverLaunchable"), ViewModelPtr->IsLocalServerLaunchable());
+			OutResult->SetBoolField(TEXT("serverRunning"), ViewModelPtr->IsLocalServerRunning());
+		}
 		return 200;
 	}
 
