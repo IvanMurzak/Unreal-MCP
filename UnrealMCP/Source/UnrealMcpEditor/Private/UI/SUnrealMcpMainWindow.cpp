@@ -306,8 +306,18 @@ TSharedRef<SWidget> SUnrealMcpMainWindow::BuildConnectionCluster()
 	UnrealPoint.DotTopPadding = 6.0f;
 
 	// Point 2 — MCP server (Custom-only; second row).
+	// Issue #97 (operator follow-up): drive the dot from the LIVE local-server run-state instead of a hardcoded
+	// EDot::Offline — Online (green) when the local gamedev-mcp-server (#95/#96 FUnrealMcpServerManager, surfaced
+	// via ViewModel->IsLocalServerRunning()) is running, else Offline. Mirrors how UnrealPoint reads
+	// GetConnectionState() and AgentsPoint reads GetAiAgents(). There is no separate "starting/launching" transient
+	// in the view-model (IsLocalServerRunning is a single bool sink), so no EDot::Ring state — Online/Offline only,
+	// no new plumbing. This dot only renders in Custom mode (the whole MCP row collapses in Cloud — see below),
+	// which matches the local-server feature's Custom+http-only gating.
 	UnrealMcpStyleWidgets::FTimelineRailDot McpPoint;
-	McpPoint.DotState = EDot::Offline;
+	McpPoint.DotState = TAttribute<EDot>::Create([this]()
+	{
+		return (IsViewModelValid() && ViewModel->IsLocalServerRunning()) ? EDot::Online : EDot::Offline;
+	});
 	McpPoint.DotVisibility = EVisibility::Visible; // the whole row collapses in Cloud mode (see below), so the dot is always visible WITHIN the row.
 	// The line below the MCP-server dot runs DOWN to the AI-agents row.
 	McpPoint.LineBelowVisibility = EVisibility::Visible;
