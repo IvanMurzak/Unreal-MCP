@@ -285,30 +285,38 @@ TSharedRef<SWidget> SUnrealMcpMainWindow::BuildConnectionCluster()
 
 	// Issue #93: the connection timeline must read top-to-bottom EXACTLY as ARCHITECTURE §7 specifies —
 	// "Unreal point → MCP server point → AI-agent point" (the pre-#93 cluster had MCP-server ABOVE Unreal and
-	// omitted the AI-agent point entirely). The three content rows below are stacked in the same order, each
-	// aligned to its dot in the shared rail.
+	// omitted the AI-agent point entirely).
+	//
+	// Issue #97 (operator alignment pass): the timeline is now built ROW-BY-ROW via TimelineRow rather than as a
+	// single rail column beside a single content column. The old two-column split positioned every dot via two
+	// even-weight FillHeight line segments, so the 2nd/3rd dots floated to the cluster's vertical midpoint and
+	// landed in the MIDDLE of tall rows (the MCP dot sat at "Authorization"; the AI-agents dot sat at "Copilot")
+	// instead of on their header labels. TimelineRow keeps each dot pinned to the TOP of its OWN row's content
+	// (its label) while still drawing a continuous line (each row's line runs from its dot to the row bottom =
+	// the next row's dot). DotTopPadding is now only a small per-label centring nudge, not a coarse positioner.
 
-	// Point 1 — Unreal status (always present; first in the rail).
+	// Point 1 — Unreal status (always present; first row).
 	UnrealMcpStyleWidgets::FTimelineRailDot UnrealPoint;
 	UnrealPoint.DotState = UnrealDot;
 	UnrealPoint.DotVisibility = EVisibility::Visible;
-	// The line runs DOWN from the Unreal dot toward the next point. Always present (a point always follows:
-	// the MCP-server point in Custom mode, or the AI-agents point in Cloud mode).
+	// The line runs DOWN from the Unreal dot to the next row (the MCP row in Custom mode, or — when the MCP row is
+	// collapsed in Cloud mode — straight on to the AI-agents row).
 	UnrealPoint.LineBelowVisibility = EVisibility::Visible;
-	// Small nudge to centre the dot on the "Unreal: <status>" label's text line.
-	UnrealPoint.DotTopPadding = 2.0f;
+	// Centre the 14px dot on the "Unreal: <status>" underlined label's text line.
+	UnrealPoint.DotTopPadding = 6.0f;
 
-	// Point 2 — MCP server (Custom-only; second in the rail).
+	// Point 2 — MCP server (Custom-only; second row).
 	UnrealMcpStyleWidgets::FTimelineRailDot McpPoint;
 	McpPoint.DotState = EDot::Offline;
-	McpPoint.DotVisibility = CustomOnly;
-	// The line below the MCP-server dot runs DOWN to the AI-agents dot — present only in Custom mode (the dot
-	// itself is Custom-only). In Cloud mode this whole point collapses and the Unreal line connects to AI-agents.
-	McpPoint.LineBelowVisibility = CustomOnly;
-	// Nudge the dot down to centre it on the "MCP server" label inside the card (8px card padding + ~half a line).
-	McpPoint.DotTopPadding = 8.0f;
+	McpPoint.DotVisibility = EVisibility::Visible; // the whole row collapses in Cloud mode (see below), so the dot is always visible WITHIN the row.
+	// The line below the MCP-server dot runs DOWN to the AI-agents row.
+	McpPoint.LineBelowVisibility = EVisibility::Visible;
+	// The MCP content is a card whose header label sits below the card's own 8px border padding; nudge the dot down
+	// to centre it on that "MCP server" header text (was a coarse 8px positioner in the old rail; here it only
+	// accounts for the card border + label leading).
+	McpPoint.DotTopPadding = 14.0f;
 
-	// Point 3 — AI agents (always present; last in the rail, so no line below it — Unity's .timeline-point-last).
+	// Point 3 — AI agents (always present; last row, so no line below it — Unity's .timeline-point-last).
 	// Issue #97: the dot is driven by live data — Online when any agent is connected (GetAiAgents().Num() > 0),
 	// else Offline — mirroring how UnrealPoint's dot reflects GetConnectionState() and Unity's aiAgentStatusCircle
 	// flips connected/disconnected from the agent list. Replaces the previous hardcoded EDot::Offline.
@@ -319,28 +327,32 @@ TSharedRef<SWidget> SUnrealMcpMainWindow::BuildConnectionCluster()
 	});
 	AgentsPoint.DotVisibility = EVisibility::Visible;
 	AgentsPoint.LineBelowVisibility = EVisibility::Collapsed;
-	// Nudge to centre the dot on the "AI agents" underlined label's text line (mirrors the Unreal-status row's 2px).
-	AgentsPoint.DotTopPadding = 2.0f;
+	// Centre the dot on the "AI agents" underlined label's text line (same label shape as the Unreal-status row).
+	AgentsPoint.DotTopPadding = 6.0f;
 
-	return SNew(SHorizontalBox)
-		// LEFT column: the continuous timeline rail owning all three dots + the lines between them. VAlign_Fill so
-		// the rail matches the content column's height and each FillHeight line slot absorbs the inter-dot slack.
-		+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Fill).Padding(0, 0, 8, 0)
+	// The MCP-server row is Custom-only: in Cloud mode the WHOLE row (its rail cell + the card) collapses, so the
+	// Unreal row's line connects straight to the AI-agents row with no dangling MCP segment.
+	TSharedRef<SWidget> McpRow = UnrealMcpStyleWidgets::TimelineRow(McpPoint, BuildMcpServerCard(), /*bIsLast*/ false, /*bLineAbove*/ true);
+	McpRow->SetVisibility(CustomOnly);
+
+	return SNew(SVerticalBox)
+		// (1) Unreal status row — dot pinned to the "Unreal: <status>" label. First row, so no line above it.
+		+ SVerticalBox::Slot().AutoHeight()
 		[
-			UnrealMcpStyleWidgets::TimelineRail({ UnrealPoint, McpPoint, AgentsPoint })
+			UnrealMcpStyleWidgets::TimelineRow(UnrealPoint, BuildUnrealStatusRow(), /*bIsLast*/ false, /*bLineAbove*/ false)
 		]
-		// RIGHT column: the stacked content rows, one per dot, in the §7 order. Each row's top aligns with its dot.
-		+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Fill)
+		// (2) MCP-server card row (Custom-only) — dot pinned to the "MCP server" card header. bLineAbove fills the
+		// dot's ~14px top nudge so the connector meets the dot flush (uniform spacing, issue #97 alignment pass).
+		+ SVerticalBox::Slot().AutoHeight().Padding(0, 8, 0, 0)
 		[
-			SNew(SVerticalBox)
-			// (1) Unreal status row — aligns with the Unreal dot.
-			+ SVerticalBox::Slot().AutoHeight()[ BuildUnrealStatusRow() ]
-			// (2) MCP-server card body (Custom-only) — aligns with the MCP-server dot.
-			+ SVerticalBox::Slot().AutoHeight().Padding(0, 8, 0, 0)[ BuildMcpServerCard() ]
-			// (3) AI agents STATUS row — aligns with the AI-agents dot. Issue #97: this is a READ-ONLY readout of the
-			// connected-agents list (BuildAiAgentsStatusRow), mirroring Unity's TimelinePointAiAgent, NOT the
-			// configurator. The configurator dropdown moved back out to its own standalone section below Connection.
-			+ SVerticalBox::Slot().AutoHeight().Padding(0, 8, 0, 0)[ BuildAiAgentsStatusRow() ]
+			McpRow
+		]
+		// (3) AI agents STATUS row — dot pinned to the "AI agents" label. Issue #97: this is a READ-ONLY readout of
+		// the connected-agents list (BuildAiAgentsStatusRow), mirroring Unity's TimelinePointAiAgent, NOT the
+		// configurator. The configurator dropdown moved back out to its own standalone section below Connection.
+		+ SVerticalBox::Slot().AutoHeight().Padding(0, 8, 0, 0)
+		[
+			UnrealMcpStyleWidgets::TimelineRow(AgentsPoint, BuildAiAgentsStatusRow(), /*bIsLast*/ true, /*bLineAbove*/ true)
 		];
 }
 
