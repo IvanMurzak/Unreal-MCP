@@ -2,7 +2,6 @@
 // See the LICENSE file in the repository root for more information.
 
 #include "UI/UnrealMcpAuxWindows.h"
-#include "UI/SUnrealMcpSettingsWindow.h"
 #include "UI/SUnrealMcpSerializationCheckWindow.h"
 #include "UI/UnrealMcpEditorViewModel.h"
 #include "UnrealMcpLog.h"
@@ -15,28 +14,17 @@
 #include "Textures/SlateIcon.h"
 #include "WorkspaceMenuStructure.h"
 #include "WorkspaceMenuStructureModule.h"
-#include "ISettingsModule.h"
-#include "Modules/ModuleManager.h"
 
 #define LOCTEXT_NAMESPACE "UnrealMcp"
 
 const FName FUnrealMcpAuxWindows::ToolsTabId(TEXT("UnrealMcpToolsWindow"));
 const FName FUnrealMcpAuxWindows::PromptsTabId(TEXT("UnrealMcpPromptsWindow"));
 const FName FUnrealMcpAuxWindows::ResourcesTabId(TEXT("UnrealMcpResourcesWindow"));
-const FName FUnrealMcpAuxWindows::SettingsTabId(TEXT("UnrealMcpSettingsWindow"));
 const FName FUnrealMcpAuxWindows::SerializationCheckTabId(TEXT("UnrealMcpSerializationCheckWindow"));
-
-namespace
-{
-	const FName SettingsContainer(TEXT("Project"));
-	const FName SettingsCategory(TEXT("Plugins"));
-	const FName SettingsSection(TEXT("AI Game Developer"));
-}
 
 void FUnrealMcpAuxWindows::Register(
 	const TSharedRef<FUnrealMcpEditorViewModel>& InViewModel,
 	TFunction<TArray<FUnrealMcpToolListEntry>()> InToolListProvider,
-	TFunction<FString()> InPortStatusProvider,
 	TFunction<TArray<FUnrealMcpFeatureEntry>()> InPromptProvider,
 	TFunction<TArray<FUnrealMcpFeatureEntry>()> InResourceProvider)
 {
@@ -45,21 +33,17 @@ void FUnrealMcpAuxWindows::Register(
 
 	ViewModel = InViewModel;
 
-	// The Tools/Settings providers close over the runtime-owned registry/bridge (raw, non-owning). A widget can
-	// outlive Unregister() — a deferred RequestCloseTab still queued when the runtime frees those subsystems — and
-	// paint once more, dereferencing freed memory. Guard both providers with a shared alive-flag that
+	// The Tools provider closes over the runtime-owned registry (raw, non-owning). A widget can outlive
+	// Unregister() — a deferred RequestCloseTab still queued when the runtime frees those subsystems — and
+	// paint once more, dereferencing freed memory. Guard the provider with a shared alive-flag that
 	// NeutralizeProviders() (from Unregister(), ahead of the runtime's BridgeServer/Registry resets) flips off, so
 	// every surviving widget copy short-circuits to a safe empty result. Mirrors the runtime's view-model
-	// side-effect-sink nulling: same teardown race, same defense, for the widget-held providers.
+	// side-effect-sink nulling: same teardown race, same defense, for the widget-held provider.
 	ProvidersAlive = MakeShared<bool>(true);
 	TSharedPtr<bool> Alive = ProvidersAlive;
 	ToolListProvider = [Alive, Inner = MoveTemp(InToolListProvider)]() -> TArray<FUnrealMcpToolListEntry>
 	{
 		return (Alive.IsValid() && *Alive && Inner) ? Inner() : TArray<FUnrealMcpToolListEntry>();
-	};
-	PortStatusProvider = [Alive, Inner = MoveTemp(InPortStatusProvider)]() -> FString
-	{
-		return (Alive.IsValid() && *Alive && Inner) ? Inner() : FString();
 	};
 	PromptProvider = MoveTemp(InPromptProvider);
 	ResourceProvider = MoveTemp(InResourceProvider);
@@ -67,15 +51,12 @@ void FUnrealMcpAuxWindows::Register(
 	// Slate may be unavailable in a commandlet / -nullrhi headless run; guard so the Automation/smoke runs
 	// (which load the module) never crash on tab registration (mirrors the main-window tab).
 	//
-	// IsInitialized() alone is NOT enough under `-nullrhi` automation: the editor runs a real (initialized)
-	// FSlateApplication even with no RHI, so this path would proceed and — via the ISettingsModule
-	// RegisterSettings below — eagerly CONSTRUCT a live SUnrealMcpSettingsWindow. Slate then ticks that
-	// widget across the long Automation run and eventually measures its window, hitting GenericWindow's
-	// GetRestoredDimensions, which is fatal with no RHI (issue #103). Also require FApp::CanEverRender()
-	// (false under `-nullrhi`) so the eager-widget path is skipped whenever rendering is unavailable —
-	// the same "rendering present" gate the screenshot family already uses for its GPU-bound branch. The
-	// main-window tab survives on IsInitialized() alone only because it registers a DORMANT spawner that
-	// constructs its widget lazily on invoke; the aux section's eager RegisterSettings widget cannot.
+	// All aux tabs registered below are DORMANT nomad spawners that construct their widget lazily on invoke,
+	// so IsInitialized() alone would suffice for them. We additionally require FApp::CanEverRender() (false
+	// under `-nullrhi`) to stay consistent with the rest of the windowed UI — the same "rendering present"
+	// gate the screenshot family uses for its GPU-bound branch — and to avoid the GenericWindow
+	// GetRestoredDimensions crash any later eager-widget path could hit headless (issue #103). With the
+	// standalone Settings window removed (issue #107), no aux registration eagerly constructs a widget.
 	if (!FSlateApplication::IsInitialized() || !FApp::CanEverRender())
 	{
 		UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] Slate unavailable or rendering disabled; skipping aux-window registration (headless / -nullrhi)."));
@@ -103,36 +84,20 @@ void FUnrealMcpAuxWindows::Register(
 		.SetGroup(Group)
 		.SetIcon(FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Box"));
 
-	TabManager.RegisterNomadTabSpawner(SettingsTabId, FOnSpawnTab::CreateRaw(this, &FUnrealMcpAuxWindows::SpawnSettingsTab))
-		.SetDisplayName(LOCTEXT("SettingsTabTitle", "AI Game Developer Settings"))
-		.SetTooltipText(LOCTEXT("SettingsTabTooltip", "Edit the AI Game Developer (Unreal-MCP) connection settings."))
-		.SetGroup(Group)
-		.SetIcon(FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Toolbar.Settings"));
-
 	TabManager.RegisterNomadTabSpawner(SerializationCheckTabId, FOnSpawnTab::CreateRaw(this, &FUnrealMcpAuxWindows::SpawnSerializationCheckTab))
 		.SetDisplayName(LOCTEXT("SerCheckTabTitle", "Serialization Check"))
 		.SetTooltipText(LOCTEXT("SerCheckTabTooltip", "Serialize a selected UObject/Actor to JSON and inspect the output (Unity-MCP parity)."))
 		.SetGroup(Group)
 		.SetIcon(FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Adjust"));
 
-	// Also register the Settings page as a Project Settings section rendering a SECOND SUnrealMcpSettingsWindow
-	// instance (§7) — UE users expect Project Settings discoverability. The nomad tab satisfies the 4-aux-windows
-	// mandate; this is the additional, conventional entry point. Both instances bind the same view-model, so they
-	// read/write identical state and stay consistent.
-	if (ISettingsModule* Settings = FModuleManager::GetModulePtr<ISettingsModule>("Settings"))
-	{
-		Settings->RegisterSettings(
-			SettingsContainer, SettingsCategory, SettingsSection,
-			LOCTEXT("SettingsSectionName", "AI Game Developer"),
-			LOCTEXT("SettingsSectionDesc", "Connection settings for the AI Game Developer (Unreal-MCP) plugin."),
-			SNew(SUnrealMcpSettingsWindow)
-				.ViewModel(ViewModel)
-				.PortStatusProvider(PortStatusProvider));
-		bSettingsRegistered = true;
-	}
+	// Connection settings live entirely in the single "AI Game Developer" main window (issue #107, Unity-MCP
+	// parity). The separate "AI Game Developer Settings" nomad tab and the "Project → Plugins → AI Game Developer"
+	// ISettingsModule section that both rendered SUnrealMcpSettingsWindow were removed — the main window's
+	// connection section owns all settings, including the read-only IPC-bridge-port line folded in from the
+	// removed window's Ports row.
 
 	bRegistered = true;
-	UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] registered the MCP Tools/Prompts/Resources/Settings aux windows."));
+	UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] registered the MCP Tools/Prompts/Resources aux windows."));
 }
 
 void FUnrealMcpAuxWindows::Unregister()
@@ -151,19 +116,12 @@ void FUnrealMcpAuxWindows::Unregister()
 		FGlobalTabmanager& TabManager = *FGlobalTabmanager::Get();
 		// Close any live tab first so its hosted widget (a strong view-model ref) is torn down before the runtime
 		// frees the view-model — same use-after-free guard as the main-window tab.
-		for (const FName& TabId : { ToolsTabId, PromptsTabId, ResourcesTabId, SettingsTabId, SerializationCheckTabId })
+		for (const FName& TabId : { ToolsTabId, PromptsTabId, ResourcesTabId, SerializationCheckTabId })
 		{
 			if (TSharedPtr<SDockTab> LiveTab = TabManager.FindExistingLiveTab(TabId))
 				LiveTab->RequestCloseTab();
 			TabManager.UnregisterNomadTabSpawner(TabId);
 		}
-	}
-
-	if (bSettingsRegistered)
-	{
-		if (ISettingsModule* Settings = FModuleManager::GetModulePtr<ISettingsModule>("Settings"))
-			Settings->UnregisterSettings(SettingsContainer, SettingsCategory, SettingsSection);
-		bSettingsRegistered = false;
 	}
 
 	bRegistered = false;
@@ -207,21 +165,11 @@ TSharedRef<SDockTab> FUnrealMcpAuxWindows::SpawnResourcesTab(const FSpawnTabArgs
 	return Tab;
 }
 
-TSharedRef<SDockTab> FUnrealMcpAuxWindows::SpawnSettingsTab(const FSpawnTabArgs& Args)
-{
-	TSharedRef<SDockTab> Tab = SNew(SDockTab).TabRole(ETabRole::NomadTab);
-	Tab->SetContent(
-		SNew(SUnrealMcpSettingsWindow)
-		.ViewModel(ViewModel)
-		.PortStatusProvider(PortStatusProvider));
-	return Tab;
-}
-
 TSharedRef<SDockTab> FUnrealMcpAuxWindows::SpawnSerializationCheckTab(const FSpawnTabArgs& Args)
 {
 	// The Serialization Check window is self-contained (it serializes in-process via FUnrealMcpPropertyJson and
 	// resolves the target via FUnrealMcpObjectRef) — it binds NO view-model, so there is no teardown race to
-	// guard here (unlike the registry/bridge-backed Tools/Settings windows).
+	// guard here (unlike the registry-backed Tools window).
 	TSharedRef<SDockTab> Tab = SNew(SDockTab).TabRole(ETabRole::NomadTab);
 	Tab->SetContent(SNew(SUnrealMcpSerializationCheckWindow));
 	return Tab;

@@ -292,11 +292,12 @@ void FUnrealMcpRuntime::Startup()
 			return BridgeServerPtr ? BridgeServerPtr->SendAgentConfigMessage(Request) : false;
 		});
 
-	// §7 auxiliary windows (MCP Tools / Prompts / Resources / Settings). The Tools window snapshots the registry on
-	// open for its list — a §5 extension hot-reload can change the set after boot, so an already-open window shows its
-	// open-time snapshot and reopen refreshes it; the Settings window surfaces the bound IPC port read-only. Prompts/
-	// Resources have no plugin-side feed yet (the .NET sidecar owns those features, §2) — their providers return
-	// empty and the windows render an honest empty state rather than a fabricated registry.
+	// §7 auxiliary windows (MCP Tools / Prompts / Resources). The Tools window snapshots the registry on open for
+	// its list — a §5 extension hot-reload can change the set after boot, so an already-open window shows its
+	// open-time snapshot and reopen refreshes it. Prompts/Resources have no plugin-side feed yet (the .NET sidecar
+	// owns those features, §2) — their providers return empty and the windows render an honest empty state rather
+	// than a fabricated registry. Connection settings (incl. the read-only IPC-bridge-port line) live in the
+	// single "AI Game Developer" main window, not an aux window (issue #107, Unity-MCP parity).
 	AuxWindows = MakeUnique<FUnrealMcpAuxWindows>();
 	AuxWindows->Register(
 		ViewModel.ToSharedRef(),
@@ -313,11 +314,6 @@ void FUnrealMcpRuntime::Startup()
 				}
 			}
 			return Entries;
-		},
-		[BridgeServerPtr]() -> FString
-		{
-			const int32 Port = BridgeServerPtr ? BridgeServerPtr->GetBoundPort() : -1;
-			return Port > 0 ? FString::Printf(TEXT("IPC bridge port: %d"), Port) : FString();
 		},
 		[]() -> TArray<FUnrealMcpFeatureEntry> { return {}; },  // prompts (none surfaced to the plugin yet)
 		[]() -> TArray<FUnrealMcpFeatureEntry> { return {}; }); // resources (none surfaced to the plugin yet)
@@ -401,7 +397,7 @@ void FUnrealMcpRuntime::Shutdown()
 	// down so a reader-thread invoke cannot race the reset.
 	if (AuxWindows.IsValid())
 	{
-		AuxWindows->Unregister(); // neutralizes the widget-held providers + closes live aux tabs + unregisters the ISettingsModule section, all before the bridge/registry below are freed
+		AuxWindows->Unregister(); // neutralizes the widget-held providers + closes live aux tabs, all before the bridge/registry below are freed
 		AuxWindows.Reset();
 	}
 	if (MainWindowTab.IsValid())

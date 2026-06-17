@@ -271,6 +271,21 @@ TSharedRef<SWidget> SUnrealMcpMainWindow::BuildConnectionSection()
 		+ SVerticalBox::Slot().AutoHeight().Padding(0, 10, 0, 0)
 		[
 			BuildConnectionCluster()
+		]
+		// Read-only IPC-bridge-port line (issue #107). Folded in from the removed standalone Settings window's
+		// BuildPortsRow so no user-facing status is lost when that window collapses into this one. Reuses the
+		// existing ConnectionInfoProvider (which already resolves the bridge's bound port for the agent-config
+		// snippets) rather than re-plumbing the Settings window's PortStatusProvider. A non-positive port means
+		// the bridge has not bound yet — show the "not bound" placeholder, matching the old Settings copy.
+		+ SVerticalBox::Slot().AutoHeight().Padding(0, 8, 0, 0)
+		[
+			UnrealMcpStyleWidgets::Description(TAttribute<FText>::Create([this]()
+			{
+				const int32 Port = ConnectionInfoProvider ? ConnectionInfoProvider().Port : 0;
+				return Port > 0
+					? FText::FromString(FString::Printf(TEXT("IPC bridge port: %d"), Port))
+					: LOCTEXT("PortsUnknown", "IPC bridge port: not bound");
+			}))
 		];
 }
 

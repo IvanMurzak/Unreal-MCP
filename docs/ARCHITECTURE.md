@@ -6,7 +6,8 @@
 > .NET sidecar reusing MCP-Plugin-dotnet + ReflectorNet (SignalR to ai-game.dev / custom server,
 > device-code + bearer auth). UE 5.7 development target, declared floor 5.5+. CI on a self-hosted
 > Windows runner with UE 5.7. Public mono-repo, Apache-2.0, Godot-MCP-style layout. Unity-MCP feature
-> parity PLUS Unreal-unique tools (Blueprints first-class). Main Slate window + 4 aux windows mandatory.
+> parity PLUS Unreal-unique tools (Blueprints first-class). Single main Slate window holding all
+> settings (Unity-MCP parity, issue #107) + aux windows mandatory.
 
 ---
 
@@ -25,7 +26,7 @@ delivered it. Identifiers below (tool ids, command names, env vars, paths) were 
 | §4 GameThread dispatcher | implemented | #4 (used by all 8 families) |
 | §5 Extensions mechanism | implemented | #7 (`IUnrealMcpToolProvider`, `samples/UnrealAITemplate`) |
 | §6 Sidecar lifecycle | implemented | #4 (spawn / crash auto-restart / orphan-prevention / stdin-token) + #46 (BUNDLE-model resolution: env override → bundled `Binaries/ThirdParty/UnrealMcpBridge/<rid>/`, zero-click auto-spawn; the superseded download-on-first-run flow is dropped — see drift below) |
-| §7 Slate UI | implemented | #24 (AI Game Developer main window) + #29 (MCP Tools/Prompts/Resources/Settings aux windows) |
+| §7 Slate UI | implemented | #24 (AI Game Developer main window) + #29 (MCP Tools/Prompts/Resources aux windows) + #107 (collapsed the separate Settings window into the single main window, Unity-MCP parity) |
 | §8 Config & env | implemented | #8 (`UNREAL_MCP_*`, `.env`, on-disk config) |
 | §9.1 cli (`unreal-mcp-cli`, 16 commands) | implemented | #3 |
 | §9.2 Versioning | implemented | `commands/bump-version.ps1` single-sources `VersionName` across plugin/bridge/server/cli (the "≥ 6.8.0 w/ ProxyTool" pin is forward-looking — see §2.3 drift below) |
@@ -94,8 +95,9 @@ Prompts/Resources ship empty-but-wired (§10), as designed.
   **connection timeline** (Unreal → MCP server → AI agent — see §7's Connection section design) — the
   Connection section ships a single status dot / label / button instead. The bridge status string is `Running (restarts: N)` /
   `Stopped` (no PID/version), the AI agents section lists connected agents only (no config writing).
-  The status table marks §7 "implemented" for the window + 4 aux windows; the deferred affordances
-  above remain deferred.
+  The status table marks §7 "implemented" for the window + its aux windows (MCP Tools/Prompts/
+  Resources + Serialization Check; the separate Settings window was collapsed into the main window
+  in #107); the deferred affordances above remain deferred.
 - **§7 in-UI local-server Start — LANDED (issue #95, supersedes the prior "no in-UI start-local-server
   control" decision).** Operator decision 2026-06-15: the MCP-server card's **Start/Stop** button now
   launches and supervises the LOCAL shared `gamedev-mcp-server` directly from the editor — replacing
@@ -135,7 +137,7 @@ Unreal sidecar from a Unity editor.
 │  ├─ FUnrealMcpGameThreadDispatcher ── AsyncTask + TPromise               │
 │  ├─ FUnrealMcpBridgeServer ── localhost TCP listener, NDJSON framing     │
 │  ├─ FUnrealMcpSidecarManager ── resolve(bundled) / spawn / watchdog / kill│
-│  └─ Slate UI: main window + 4 aux tabs, ISettingsModule section          │
+│  └─ Slate UI: single main window (settings inline) + aux tabs            │
 └───────────────▲──────────────────────────────────────────────────────────┘
                 │ IPC: 127.0.0.1 TCP, newline-delimited JSON, token-authed
 ┌───────────────▼──────────  unreal-mcp-bridge (.NET 9, self-contained) ───┐
@@ -705,12 +707,14 @@ under **Window → AI Game Developer** plus a toolbar button. Tab ids:
 | `UnrealMcpToolsWindow` | MCP Tools (list + per-tool toggles, token counts) | `McpToolsWindow.cs` |
 | `UnrealMcpPromptsWindow` | MCP Prompts | `McpPromptsWindow` |
 | `UnrealMcpResourcesWindow` | MCP Resources | `McpResourcesWindow` |
-| `UnrealMcpSettingsWindow` | Settings page | `UnityMcpProjectSettingsProvider` |
 
-The Settings page is **also** registered via `ISettingsModule` ("Project → Plugins → AI Game
-Developer") rendering the same widget — UE users expect Project Settings discoverability; the
-nomad tab satisfies the 4-aux-windows mandate. Aux windows dedupe/focus on reopen (the known
-Godot [low] gets fixed here, per the aux-windows task).
+Connection settings live entirely inside the single **AI Game Developer** main window — there is
+**no** separate Settings nomad tab and **no** "Project → Plugins → AI Game Developer"
+`ISettingsModule` section (issue #107, Unity-MCP parity: Unity holds everything in one window).
+The main window's connection section owns every setting, including the read-only IPC-bridge-port
+line folded in from the former Settings window's Ports row (it reuses the main window's existing
+`ConnectionInfoProvider`, which already resolves the bound port). Aux windows dedupe/focus on
+reopen (the known Godot [low] gets fixed here, per the aux-windows task).
 
 **Main window sections, 1:1 from `MainWindowEditor.CreateGUI.cs:218–237`** (top to bottom) —
 with one explicit deviation: Unity's `SetupDebugButtons` (line 235) is **not** ported as-is;
