@@ -12,6 +12,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig;
 using com.IvanMurzak.Unreal.MCP.Bridge.Ipc;
 using Xunit;
@@ -290,11 +291,21 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         [Fact]
         public void ResolveAbsolute_NormalisesSeparatorsAndRoots()
         {
-            var rel = AgentConfigService.ResolveAbsolute("C:/root", ".claude/skills");
-            Assert.Equal("C:/root/.claude/skills", rel);
+            // Use an OS-rooted project root + an OS-rooted "elsewhere" path so the assertions hold on
+            // both Windows and Linux: "C:/root" is rooted on Windows but NOT on Linux (where Path.IsPathRooted
+            // returns false for a drive-letter path), so a Windows-only expectation re-roots under the runner CWD
+            // on Linux. ResolveAbsolute itself is correct on both platforms (Path.IsPathRooted / Path.GetFullPath
+            // semantics); the inputs/expectations are what must be platform-aware.
+            var isWindows = RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
+            var projectRoot = isWindows ? "C:/root" : "/root";
+            var elsewhere = isWindows ? "D:/elsewhere/skills" : "/elsewhere/skills";
+
+            // A project-relative folder is combined under the (rooted) project root and forward-slashed.
+            var rel = AgentConfigService.ResolveAbsolute(projectRoot, ".claude/skills");
+            Assert.Equal(projectRoot + "/.claude/skills", rel);
             // An already-rooted path is returned (forward-slashed), not re-rooted under the project.
-            var abs = AgentConfigService.ResolveAbsolute("C:/root", "D:/elsewhere/skills");
-            Assert.Equal("D:/elsewhere/skills", abs);
+            var abs = AgentConfigService.ResolveAbsolute(projectRoot, elsewhere);
+            Assert.Equal(elsewhere, abs);
         }
     }
 }
