@@ -42,13 +42,13 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             catch { /* best-effort temp cleanup */ }
         }
 
-        private AgentSettingsDto Settings(string mode = "Local", bool authRequired = false, string? token = null) => new()
+        private AgentSettingsDto Settings(string mode = "Local", bool authRequired = false, string? token = null, string host = "http://localhost:12345/mcp") => new()
         {
             ProjectRootPath = _projectRoot,
             ExecutableFullPath = Path.Combine(_projectRoot, "server.exe"),
             Port = 12345,
             TimeoutMs = 30000,
-            Host = "http://localhost:12345/mcp",
+            Host = host,
             Token = token,
             ConnectionMode = mode,
             AuthRequired = authRequired,
@@ -123,11 +123,24 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         [Fact]
         public void Status_WhenStale_ReportsReconfigureNeeded_AndPrependsAReconfigurationAlert()
         {
-            // The antigravity agent reports ReconfigureNeeded for a fresh project root (its detected config is stale
-            // versus these connection settings). 6.9.0 then prepends a "Reconfiguration Required" Alert section.
+            // A stale config = an entry detected on disk that no longer matches the current connection settings.
+            // We drive this hermetically through claude-code, whose config is the project-local .mcp.json under the
+            // isolated temp _projectRoot (no host-home dependency) — mirroring the shared library's authoritative
+            // ReconfigureNeeded test (MCP-Plugin-dotnet AgentConfiguratorDescriptionTests.Status_StaleConfigOnDisk_*).
+            // Configure once at one Host so the entry lands on disk...
+            var configure = _service.HandleConfigure(new AgentConfigureRequestMessage
+            {
+                RequestId = "r2c-cfg", AgentId = "claude-code", Transport = "streamableHttp",
+                Settings = Settings(host: "http://localhost:12345/mcp"),
+            });
+            Assert.True(configure.Ok);
+            Assert.True(configure.Description!.IsConfigured);
+
+            // ...then describe with a DIFFERENT Host: the entry is detected but no longer matches → ReconfigureNeeded.
             var result = _service.HandleStatus(new AgentStatusRequestMessage
             {
-                RequestId = "r2c", AgentId = "antigravity", Transport = "streamableHttp", Settings = Settings(),
+                RequestId = "r2c", AgentId = "claude-code", Transport = "streamableHttp",
+                Settings = Settings(host: "http://localhost:54321/mcp"),
             });
 
             Assert.True(result.Ok);
