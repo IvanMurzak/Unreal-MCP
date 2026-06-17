@@ -41,6 +41,7 @@ namespace
 	const FString TypeAgentConfigure = TEXT("agent-configure");
 	const FString TypeAgentRemove = TEXT("agent-remove");
 	const FString TypeAgentSkillsPath = TEXT("agent-skills-path");
+	const FString TypeAgentGenerateSkills = TEXT("agent-generate-skills");
 	const FString TypeAgentConfigResult = TEXT("agent-config-result");
 	const FString TypePing = TEXT("ping");
 	const FString TypePong = TEXT("pong");
@@ -715,6 +716,15 @@ bool FUnrealMcpBridgeServer::SendAuthMessage(const FString& AuthType)
 	return SendMessage(Message);
 }
 
+bool FUnrealMcpBridgeServer::IsValidAgentConfigVerb(const FString& Type)
+{
+	// Keep in lockstep with the sidecar's IpcProtocol.MessageTypes §7 request verbs — omitting one here
+	// silently breaks that UI action (issue #101: a missing `agent-generate-skills` made the Generate button
+	// flip the panel to Disconnected because the send was refused).
+	return Type == TypeAgentsList || Type == TypeAgentStatus || Type == TypeAgentConfigure ||
+		Type == TypeAgentRemove || Type == TypeAgentSkillsPath || Type == TypeAgentGenerateSkills;
+}
+
 bool FUnrealMcpBridgeServer::SendAgentConfigMessage(const TSharedPtr<FJsonObject>& Message)
 {
 	if (!Message.IsValid())
@@ -723,9 +733,7 @@ bool FUnrealMcpBridgeServer::SendAgentConfigMessage(const TSharedPtr<FJsonObject
 	// Only the §7 agent-config request verbs are valid here, so a UI bug cannot smuggle an arbitrary message
 	// type onto the wire (mirrors SendAuthMessage's allow-list).
 	FString Type;
-	if (!Message->TryGetStringField(TEXT("type"), Type) ||
-		(Type != TypeAgentsList && Type != TypeAgentStatus && Type != TypeAgentConfigure &&
-		 Type != TypeAgentRemove && Type != TypeAgentSkillsPath))
+	if (!Message->TryGetStringField(TEXT("type"), Type) || !IsValidAgentConfigVerb(Type))
 	{
 		UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] refusing to send unknown agent-config message type '%s'."), *Type);
 		return false;

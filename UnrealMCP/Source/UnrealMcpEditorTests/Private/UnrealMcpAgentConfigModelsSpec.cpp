@@ -10,6 +10,7 @@
 #include "Serialization/JsonSerializer.h"
 #include "UI/UnrealMcpAgentConfigModels.h"
 #include "Config/UnrealMcpConfig.h"
+#include "Bridge/UnrealMcpBridgeServer.h"
 
 /**
  * Specs for the §7 AI-agent-configurator PLUGIN-SIDE models (docs/ARCHITECTURE.md §7), after the configurator
@@ -118,6 +119,34 @@ void FUnrealMcpAgentConfigModelsSpec::Define()
 			const FUnrealMcpAgentDescription Desc = FUnrealMcpAgentDescription::FromJson(nullptr);
 			TestTrue("empty agentId", Desc.AgentId.IsEmpty());
 			TestEqual("no sections", Desc.Sections.Num(), 0);
+		});
+	});
+
+	Describe("SendAgentConfigMessage verb allow-list", [this]()
+	{
+		// Regression for issue #101: the §7 send-verb allow-list (FUnrealMcpBridgeServer::IsValidAgentConfigVerb)
+		// must accept EVERY plugin→sidecar request verb the thin Slate panel issues — including
+		// `agent-generate-skills`, whose omission silently refused the Generate button's send and flipped the panel
+		// to Disconnected. Asserting the pure predicate directly avoids standing up a live socket; both an unknown
+		// verb and a disconnected send return false through SendAgentConfigMessage, so only the predicate can prove
+		// ACCEPTANCE of a valid verb.
+		It("accepts every valid agent-config request verb", [this]()
+		{
+			TestTrue("agents-list", FUnrealMcpBridgeServer::IsValidAgentConfigVerb(TEXT("agents-list")));
+			TestTrue("agent-status", FUnrealMcpBridgeServer::IsValidAgentConfigVerb(TEXT("agent-status")));
+			TestTrue("agent-configure", FUnrealMcpBridgeServer::IsValidAgentConfigVerb(TEXT("agent-configure")));
+			TestTrue("agent-remove", FUnrealMcpBridgeServer::IsValidAgentConfigVerb(TEXT("agent-remove")));
+			TestTrue("agent-skills-path", FUnrealMcpBridgeServer::IsValidAgentConfigVerb(TEXT("agent-skills-path")));
+			// The verb that was missing from the allow-list — the Generate button sends exactly this string.
+			TestTrue("agent-generate-skills", FUnrealMcpBridgeServer::IsValidAgentConfigVerb(TEXT("agent-generate-skills")));
+		});
+
+		It("rejects an unknown verb", [this]()
+		{
+			TestFalse("bogus verb", FUnrealMcpBridgeServer::IsValidAgentConfigVerb(TEXT("agent-bogus")));
+			TestFalse("empty verb", FUnrealMcpBridgeServer::IsValidAgentConfigVerb(FString()));
+			// The sidecar→plugin RESULT verb is not a send-side request verb — it must not be acceptable to send.
+			TestFalse("agent-config-result", FUnrealMcpBridgeServer::IsValidAgentConfigVerb(TEXT("agent-config-result")));
 		});
 	});
 
