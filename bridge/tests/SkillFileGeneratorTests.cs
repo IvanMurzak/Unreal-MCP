@@ -90,6 +90,30 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         }
 
         [Fact]
+        public void BuildSkillMarkdown_PrefersSkillDescriptionAndSkillBody_WithFallbackToDescription()
+        {
+            // When the manifest carries the dedicated [AiSkillDescription]/[AiSkillBody] analog fields, the YAML
+            // front-matter uses the short description and the body uses the skill body.
+            var rich = new ToolDescriptor
+            {
+                Name = "rich-tool",
+                Title = "Rich Tool",
+                Description = "Full prose description used as the fallback.",
+                SkillDescription = "Short one-liner for YAML.",
+                SkillBody = "The richer agent-facing skill body.",
+            };
+            var md = SkillFileGenerator.BuildSkillMarkdown(rich);
+            Assert.Contains("description: \"Short one-liner for YAML.\"", md);
+            Assert.Contains("The richer agent-facing skill body.", md);
+
+            // With neither present, BOTH fall back to the full Description (the Unreal manifest's current shape).
+            var plain = new ToolDescriptor { Name = "plain-tool", Title = "Plain", Description = "Only a description." };
+            var pmd = SkillFileGenerator.BuildSkillMarkdown(plain);
+            Assert.Contains("description: \"Only a description.\"", pmd);
+            Assert.Contains("Only a description.", pmd);
+        }
+
+        [Fact]
         public void BuildSkillMarkdown_NoParams_SaysSo()
         {
             var tool = new ToolDescriptor { Name = "ping", Title = "Ping", Description = "Health probe." };

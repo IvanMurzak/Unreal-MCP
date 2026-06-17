@@ -200,7 +200,13 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
         public static string BuildSkillMarkdown(ToolDescriptor tool)
         {
             var folderName = SanitizeSkillFolderName(tool.Name);
-            var yamlDesc = EscapeYamlQuoted(SingleLineCapped(tool.Description ?? string.Empty, MaxSkillDescriptionLength));
+            // YAML `description:` ← the dedicated short skill description ([AiSkillDescription] analog the manifest
+            // carries as `skillDescription`) when present, else FALL BACK to the full Description (single-lined +
+            // capped). The body below always uses the full Description. This matches the operator's intent and is
+            // forward-compatible: the moment the C++ manifest starts emitting skillDescription, the front-matter
+            // uses it without any further change here.
+            var shortDesc = !string.IsNullOrWhiteSpace(tool.SkillDescription) ? tool.SkillDescription! : (tool.Description ?? string.Empty);
+            var yamlDesc = EscapeYamlQuoted(SingleLineCapped(shortDesc, MaxSkillDescriptionLength));
             var title = string.IsNullOrEmpty(tool.Title) ? tool.Name : tool.Title!;
 
             var lines = new List<string>();
@@ -212,12 +218,15 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
             lines.Add("---");
             lines.Add(string.Empty);
 
-            // Title + full description body.
+            // Title + the body: the dedicated skill body ([AiSkillBody] analog the manifest carries as `skillBody`)
+            // when present, else the full Description. The shared lib's [AiSkillBody]/[AiSkillDescription] split is
+            // mirrored here so a tool that authors a richer skill body uses it, with a clean fallback otherwise.
             lines.Add($"# {title}");
             lines.Add(string.Empty);
-            if (!string.IsNullOrEmpty(tool.Description))
+            var body = !string.IsNullOrWhiteSpace(tool.SkillBody) ? tool.SkillBody! : (tool.Description ?? string.Empty);
+            if (!string.IsNullOrEmpty(body))
             {
-                lines.Add(tool.Description!.Trim());
+                lines.Add(body.Trim());
                 lines.Add(string.Empty);
             }
 
