@@ -84,6 +84,27 @@ void FUnrealMcpToolRegistrySpec::Define()
 			TestTrue(TEXT("has input schema"), Ping->HasField(TEXT("inputSchema")));
 			TestFalse(TEXT("schema hash non-empty"), Ping->GetStringField(TEXT("schemaHash")).IsEmpty());
 			TestTrue(TEXT("readOnlyHint true"), Ping->GetBoolField(TEXT("readOnlyHint")));
+			// §7 SKILL.md front-matter source: the manifest carries a dedicated short skillDescription. Ping
+			// declares no explicit one, so it falls back to the Title ("Ping") — NOT a truncation of the full
+			// Description. The sidecar generator uses this for the YAML `description:`.
+			TestEqual(TEXT("skillDescription falls back to Title"), Ping->GetStringField(TEXT("skillDescription")), FString(TEXT("Ping")));
+		});
+
+		It("carries an explicit skillDescription when a tool declares one", [this]()
+		{
+			FUnrealMcpToolRegistry Registry;
+			Registry.Tool(TEXT("demo-skill"))
+				.Title(TEXT("Demo Skill"))
+				.Description(TEXT("A long full description that becomes the SKILL.md body, not the front-matter."))
+				.SkillDescription(TEXT("Short front-matter line."));
+
+			TSharedPtr<FJsonObject> Manifest = Registry.BuildManifestJson();
+			const TArray<TSharedPtr<FJsonValue>>* Tools;
+			Manifest->TryGetArrayField(TEXT("tools"), Tools);
+			TSharedPtr<FJsonObject> Demo = (*Tools)[0]->AsObject();
+			TestEqual(TEXT("explicit skillDescription"), Demo->GetStringField(TEXT("skillDescription")), FString(TEXT("Short front-matter line.")));
+			// The full description is still carried separately (becomes the body).
+			TestTrue(TEXT("full description present"), Demo->GetStringField(TEXT("description")).Contains(TEXT("SKILL.md body")));
 		});
 
 		It("produces a stable schema hash for an unchanged tool", [this]()
