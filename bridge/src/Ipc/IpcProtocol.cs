@@ -74,6 +74,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
             public const string AgentConfigure = "agent-configure"; // write/merge the MCP entry into the agent's config file
             public const string AgentRemove = "agent-remove";     // remove the MCP entry (both transports)
             public const string AgentSkillsPath = "agent-skills-path"; // resolve the agent's skills folder (plugin writes the files)
+            public const string AgentGenerateSkills = "agent-generate-skills"; // sidecar resolves the path + writes the SKILL.md files
 
             // either direction
             public const string Ping = "ping";

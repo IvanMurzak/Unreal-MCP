@@ -9,6 +9,7 @@
 */
 
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig;
@@ -196,6 +197,41 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             Assert.False(result.Ok);
             Assert.NotNull(result.Error);
             Assert.Null(result.Agents);
+        }
+
+        [Fact]
+        public void GenerateSkills_WritesSkillFilesUnderTheResolvedFolder_FromTheToolCatalog()
+        {
+            // The catalog the plugin would have pushed over the manifest (carried in by the host).
+            var tools = new List<global::com.IvanMurzak.Unreal.MCP.Bridge.Ipc.ToolDescriptor>
+            {
+                new() { Name = "actor-create", Title = "Actor Create", Description = "Spawns an actor." },
+                new() { Name = "ping", Title = "Ping", Description = "Health probe." },
+            };
+
+            var result = _service.HandleGenerateSkills(new AgentGenerateSkillsRequestMessage
+            {
+                RequestId = "gs1", AgentId = "claude-code", Settings = Settings(),
+            }, tools);
+
+            Assert.True(result.Ok);
+            Assert.Equal(IpcProtocol.Type.AgentGenerateSkills, result.Op);
+            Assert.Equal(2, result.FilesWritten);
+            Assert.NotNull(result.SkillsPath);
+            Assert.True(File.Exists(Path.Combine(result.SkillsPath!, "actor-create", "SKILL.md")));
+            Assert.True(File.Exists(Path.Combine(result.SkillsPath!, "ping", "SKILL.md")));
+        }
+
+        [Fact]
+        public void GenerateSkills_NonSkillsAgent_FailsCleanly()
+        {
+            var result = _service.HandleGenerateSkills(new AgentGenerateSkillsRequestMessage
+            {
+                RequestId = "gs2", AgentId = "claude-desktop", Settings = Settings(),
+            }, new List<global::com.IvanMurzak.Unreal.MCP.Bridge.Ipc.ToolDescriptor>());
+            // claude-desktop is one of the agents Unity leaves without a skills path.
+            Assert.False(result.Ok);
+            Assert.NotNull(result.Error);
         }
 
         [Fact]

@@ -72,6 +72,17 @@ public:
 	bool SendAuthMessage(const FString& AuthType);
 
 	/**
+	 * Send a §7 AI-agent configurator request (`agents-list` / `agent-status` / `agent-configure` /
+	 * `agent-remove` / `agent-skills-path`) to the connected sidecar, which serves it against the shared
+	 * com.IvanMurzak.McpPlugin.AgentConfig library and answers with an `agent-config-result` routed back
+	 * through the status sink. @p Message must carry a `type` of one of those verbs and the request fields
+	 * (requestId, agentId, transport, settings, …). Thread-safe; no-op (returns false) when no sidecar is
+	 * connected/handshaken — the thin Slate panel then shows its graceful "bridge not connected" state. The
+	 * UI calls this on the game thread; the frame is serialized through the shared WriteMutex like any other.
+	 */
+	bool SendAgentConfigMessage(const TSharedPtr<FJsonObject>& Message);
+
+	/**
 	 * Register a sink for the inbound sidecar→plugin `status` and `device-auth` feed (§1.3 / §7). The sink
 	 * is invoked ON THE IPC READER THREAD with the message type and parsed object — the caller (the §7
 	 * view-model) MUST marshal onto the game thread (AsyncTask(GameThread)) before touching any Slate state

@@ -4,27 +4,21 @@
 #include "UI/SUnrealMcpAgentConfigurators.h"
 #include "UI/UnrealMcpEditorViewModel.h"
 #include "UI/SUnrealMcpAgentWidgets.h"
-#include "Agents/AiAgentConfiguratorRegistry.h"
-#include "Agents/JsonAiAgentConfig.h"
-#include "Agents/UnrealMcpSkillFileGenerator.h"
-#include "Agents/Impl/CustomConfigurator.h"
-#include "UnrealMcpToolRegistry.h"
 #include "UnrealMcpLog.h"
 
-#include "Widgets/SBoxPanel.h"
-#include "Widgets/Layout/SBorder.h"
-#include "Widgets/Layout/SSeparator.h"
-#include "Widgets/Layout/SExpandableArea.h"
-#include "Widgets/Text/STextBlock.h"
-#include "Widgets/Input/SButton.h"
-#include "Widgets/Input/SComboBox.h"
-#include "Widgets/Input/SCheckBox.h"
-#include "Widgets/Input/SEditableTextBox.h"
-#include "Widgets/Input/SMultiLineEditableTextBox.h"
-#include "Styling/AppStyle.h"
+#include "Dom/JsonObject.h"
+#include "Dom/JsonValue.h"
+#include "Misc/Guid.h"
 #include "Misc/Paths.h"
 #include "HAL/PlatformProcess.h"
 #include "HAL/PlatformApplicationMisc.h"
+#include "Widgets/SBoxPanel.h"
+#include "Widgets/Layout/SSeparator.h"
+#include "Widgets/Text/STextBlock.h"
+#include "Widgets/Input/SButton.h"
+#include "Widgets/Input/SComboBox.h"
+#include "Widgets/Input/SEditableTextBox.h"
+#include "Styling/CoreStyle.h"
 
 #define LOCTEXT_NAMESPACE "UnrealMcp"
 
@@ -33,34 +27,19 @@ void SUnrealMcpAgentConfigurators::Construct(const FArguments& InArgs)
 	ViewModel = InArgs._ViewModel;
 	ConnectionInfoProvider = InArgs._ConnectionInfoProvider;
 	ProjectRootProvider = InArgs._ProjectRootProvider;
+	SendRequest = InArgs._SendRequest;
 
 	if (!ProjectRootProvider)
 		ProjectRootProvider = []() { return FPaths::ConvertRelativePathToFull(FPaths::ProjectDir()); };
 
-	Registry = MakeShared<FAiAgentConfiguratorRegistry>();
+	SelectedAgentId = IsViewModelValid() ? ViewModel->GetSelectedAgentId() : FString();
 
-	// Build the dropdown's item source (agent display names in registry order).
-	AgentNameItems.Reset();
-	for (const FString& Name : Registry->GetAgentNames())
-		AgentNameItems.Add(MakeShared<FString>(Name));
-
-	// Resolve the initial selection from the persisted SelectedAgentId (clamped to a valid index).
-	const FString PersistedId = IsViewModelValid() ? ViewModel->GetSelectedAgentId() : FString();
-	int32 InitialIndex = Registry->GetIndexByAgentId(PersistedId);
-	if (InitialIndex == INDEX_NONE)
-		InitialIndex = Registry->Num() > 0 ? 0 : INDEX_NONE;
-
-	TSharedPtr<FString> InitialItem = AgentNameItems.IsValidIndex(InitialIndex) ? AgentNameItems[InitialIndex] : nullptr;
-
-	// Issue #80 item 5/6: mirror the Unity AI-agent block — the ONE blue rounded frame (Unity .frame-group) kept in
-	// this section, a header ROW ("AI agent" 20px header on the left + the agent dropdown filling the right, like
-	// MainWindow.uxml's `.row` + .header + aiAgentDropdown), then the per-agent panel. The dropdown carries the
-	// selected agent's display name; the per-agent panel (links / status / foldouts) rebuilds on selection change.
+	// Mirror the prior panel's frame: a header ROW ("AI agent" + the agent dropdown), then the per-agent panel.
+	// The dropdown's item source starts empty and is populated from the agents-list result.
 	ChildSlot
 	[
 		UnrealMcpStyleWidgets::StyledCard(
 			SNew(SVerticalBox)
-			// Header row: "AI agent" + dropdown (Unity .row: header left, dropdown grows on the right).
 			+ SVerticalBox::Slot().AutoHeight()
 			[
 				SNew(SHorizontalBox)
@@ -70,46 +49,47 @@ void SUnrealMcpAgentConfigurators::Construct(const FArguments& InArgs)
 				[
 					SAssignNew(AgentCombo, SComboBox<TSharedPtr<FString>>)
 					.OptionsSource(&AgentNameItems)
-					.InitiallySelectedItem(InitialItem)
 					.OnGenerateWidget_Lambda([](TSharedPtr<FString> Item)
 					{
 						return SNew(STextBlock).Text(FText::FromString(Item.IsValid() ? *Item : FString()));
 					})
-					.OnSelectionChanged_Lambda([this](TSharedPtr<FString> NewItem, ESelectInfo::Type)
+					.OnSelectionChanged_Lambda([this](TSharedPtr<FString> NewItem, ESelectInfo::Type SelectInfo)
 					{
-						if (!NewItem.IsValid())
-							return;
+						if (!NewItem.IsValid() || SelectInfo == ESelectInfo::Direct)
+							return; // Direct = our own programmatic set; ignore to avoid a request loop
 						const int32 Index = AgentNameItems.IndexOfByPredicate(
 							[&NewItem](const TSharedPtr<FString>& I) { return I == NewItem; });
-						TSharedPtr<FAiAgentConfigurator> Configurator = Registry->GetByIndex(Index);
-						if (Configurator.IsValid() && IsViewModelValid())
-							ViewModel->SetSelectedAgentId(Configurator->GetAgentId());
-						bRevealToken = false; // reset reveal on agent switch (§8)
-						RefreshSelectedConfigurator();
+						if (AgentIds.IsValidIndex(Index))
+						{
+							SetSelectedAgentId(AgentIds[Index]);
+							RequestSelectedStatus();
+						}
 					})
 					[
 						SNew(STextBlock)
 						.Text_Lambda([this]()
 						{
-							return Selected.IsValid() ? FText::FromString(Selected->GetAgentName()) : LOCTEXT("NoAgent", "Select an agent");
+							return bHaveDescription && !SelectedDescription.AgentName.IsEmpty()
+								? FText::FromString(SelectedDescription.AgentName)
+								: LOCTEXT("NoAgent", "Select an agent");
 						})
 					]
 				]
 			]
-			// Per-agent panel container (rebuilt on selection change).
 			+ SVerticalBox::Slot().AutoHeight().Padding(0, 8, 0, 0)
 			[
 				SAssignNew(AgentPanelContainer, SVerticalBox)
 			])
 	];
 
-	// Subscribe to connection-setting changes so the panel re-resolves + rebuilds when the user edits the
-	// connection mode / host / auth / token in the main window — without reselecting the agent (§7; the C++/Slate
-	// analog of Unity's InvalidateAndReloadAgentUI). The handle is removed in the destructor.
+	// Subscribe to connection-setting changes so the panel re-queries when the user edits the connection mode /
+	// host / auth / token — without reselecting the agent (the §7 analog of Unity's InvalidateAndReloadAgentUI).
 	if (IsViewModelValid())
-		ConnectionChangedHandle = ViewModel->OnConnectionSettingsChanged.AddSP(this, &SUnrealMcpAgentConfigurators::OnConnectionSettingsChanged);
+		ConnectionChangedHandle = ViewModel->OnConnectionSettingsChanged.AddSP(this, &SUnrealMcpAgentConfigurators::Refresh);
 
-	RefreshSelectedConfigurator();
+	RebuildAgentPanel();
+	// Query the agent set + the persisted selection's status on open. Degrades gracefully when the sidecar is down.
+	Refresh();
 }
 
 SUnrealMcpAgentConfigurators::~SUnrealMcpAgentConfigurators()
@@ -118,61 +98,277 @@ SUnrealMcpAgentConfigurators::~SUnrealMcpAgentConfigurators()
 		ViewModel->OnConnectionSettingsChanged.Remove(ConnectionChangedHandle);
 }
 
-void SUnrealMcpAgentConfigurators::OnConnectionSettingsChanged()
+// --- Request building / sending --------------------------------------------------------------------
+
+FString SUnrealMcpAgentConfigurators::NewRequestId()
 {
-	// A connection setting changed. Re-bind the selected configurator to the now-current connection info (BindSelected
-	// calls Initialize, which invalidates the cached STDIO/HTTP configs) and rebuild the panel so the snippet preview,
-	// the per-transport status, and what Configure() will write all reflect the new settings.
-	BindSelected();
-	RebuildAgentPanel();
+	return FGuid::NewGuid().ToString(EGuidFormats::Digits);
 }
 
-void SUnrealMcpAgentConfigurators::RefreshSelectedConfigurator()
+FString SUnrealMcpAgentConfigurators::EffectiveTransportString() const
 {
-	const FString PersistedId = IsViewModelValid() ? ViewModel->GetSelectedAgentId() : FString();
-	Selected = Registry->GetByAgentId(PersistedId);
-	if (!Selected.IsValid())
-		Selected = Registry->GetByIndex(0);
-
-	BindSelected();
-	RebuildAgentPanel();
+	const EUnrealMcpTransportMethod Transport = IsViewModelValid()
+		? ViewModel->GetEffectiveTransport()
+		: EUnrealMcpTransportMethod::Http;
+	return Transport == EUnrealMcpTransportMethod::Stdio ? TEXT("stdio") : TEXT("streamableHttp");
 }
 
-void SUnrealMcpAgentConfigurators::BindSelected()
+TSharedPtr<FJsonObject> SUnrealMcpAgentConfigurators::BuildSettings() const
 {
-	if (!Selected.IsValid())
-		return;
 	const FAiAgentConnectionInfo Connection = ConnectionInfoProvider ? ConnectionInfoProvider() : FAiAgentConnectionInfo();
 	const FString ProjectRoot = ProjectRootProvider ? ProjectRootProvider() : FPaths::ConvertRelativePathToFull(FPaths::ProjectDir());
-	Selected->Initialize(Connection, ProjectRoot);
 
-	// The Custom configurator's skills path is user-overridable and persisted (mirrors Unity's editable SkillsPath).
-	// Push the persisted value into the live Custom configurator so its GetSkillsPath()/SupportsSkills() reflect it.
-	if (IsViewModelValid())
+	// The mode string mirrors the sidecar's expectation (case-insensitive). Cloud forces auth; otherwise the
+	// resolved bAuthRequired carries the Custom AuthOption.
+	const bool bCloud = IsViewModelValid() && ViewModel->GetConnectionMode() == EUnrealMcpConnectionMode::Cloud;
+
+	TSharedPtr<FJsonObject> Settings = MakeShared<FJsonObject>();
+	Settings->SetStringField(TEXT("projectRootPath"), ProjectRoot);
+	Settings->SetStringField(TEXT("executableFullPath"), Connection.ServerPath);
+	Settings->SetNumberField(TEXT("port"), Connection.Port);
+	Settings->SetNumberField(TEXT("timeoutMs"), 30000);
+	Settings->SetStringField(TEXT("host"), Connection.HttpUrl);
+	// The REAL bearer is forwarded so the sidecar can inject it into the written config; it is NEVER logged here.
+	Settings->SetStringField(TEXT("token"), Connection.Token);
+	Settings->SetStringField(TEXT("connectionMode"), bCloud ? TEXT("Cloud") : TEXT("Local"));
+	Settings->SetBoolField(TEXT("authRequired"), Connection.bAuthRequired);
+	return Settings;
+}
+
+bool SUnrealMcpAgentConfigurators::SendTracked(const TSharedPtr<FJsonObject>& Request, const FString& RequestType, EPhase InFlightPhase)
+{
+	const FString RequestId = NewRequestId();
+	Request->SetStringField(TEXT("type"), RequestType);
+	Request->SetStringField(TEXT("requestId"), RequestId);
+
+	const bool bSent = SendRequest ? SendRequest(Request) : false;
+	if (!bSent)
 	{
-		if (FCustomConfigurator* Custom = static_cast<FCustomConfigurator*>(Selected->GetAgentId() == TEXT("other-custom") ? Selected.Get() : nullptr))
-			Custom->SetCustomSkillsPath(ViewModel->GetSkillsPath());
+		// Graceful degrade (§7 / PR #100 lesson): no sidecar to serve the request. Show the clear "bridge not
+		// connected" state and clear any stale in-flight tracking; Refresh() runs again on the next handshake.
+		Phase = EPhase::Disconnected;
+		PendingRequestId.Reset();
+		PendingRequestType.Reset();
+		RebuildAgentPanel();
+		return false;
 	}
+
+	Phase = InFlightPhase;
+	PendingRequestId = RequestId;
+	PendingRequestType = RequestType;
+	LastError.Reset();
+	RebuildAgentPanel();
+	return true;
 }
 
-FString SUnrealMcpAgentConfigurators::MaskTokenInSnippet(const FString& Snippet, const FString& Token, bool bReveal)
+void SUnrealMcpAgentConfigurators::RequestAgentsList()
 {
-	if (bReveal || Token.IsEmpty())
-		return Snippet;
-	// Replace every literal occurrence of the raw token with a fixed mask (length not leaked). The token shows up
-	// in the HTTP "Bearer <token>" header and the STDIO "token=<token>" arg; replacing the bare value covers both.
-	return Snippet.Replace(*Token, TEXT("********"), ESearchCase::CaseSensitive);
+	TSharedPtr<FJsonObject> Request = MakeShared<FJsonObject>();
+	Request->SetStringField(TEXT("transport"), EffectiveTransportString());
+	Request->SetObjectField(TEXT("settings"), BuildSettings());
+	SendTracked(Request, TEXT("agents-list"), EPhase::Loading);
 }
 
-FString SUnrealMcpAgentConfigurators::BuildSnippetPreview(bool bStdio) const
+void SUnrealMcpAgentConfigurators::RequestSelectedStatus()
 {
-	if (!Selected.IsValid())
-		return FString();
-	FAiAgentConfig& Config = bStdio ? Selected->GetConfigStdio() : Selected->GetConfigHttp();
-	const FString Snippet = Config.GetExpectedFileContent();
-	const FAiAgentConnectionInfo Connection = ConnectionInfoProvider ? ConnectionInfoProvider() : FAiAgentConnectionInfo();
-	return MaskTokenInSnippet(Snippet, Connection.Token, bRevealToken);
+	if (SelectedAgentId.IsEmpty())
+		return;
+	TSharedPtr<FJsonObject> Request = MakeShared<FJsonObject>();
+	Request->SetStringField(TEXT("agentId"), SelectedAgentId);
+	Request->SetStringField(TEXT("transport"), EffectiveTransportString());
+	Request->SetObjectField(TEXT("settings"), BuildSettings());
+	SendTracked(Request, TEXT("agent-status"), EPhase::Loading);
 }
+
+void SUnrealMcpAgentConfigurators::RequestConfigure()
+{
+	if (SelectedAgentId.IsEmpty())
+		return;
+	TSharedPtr<FJsonObject> Request = MakeShared<FJsonObject>();
+	Request->SetStringField(TEXT("agentId"), SelectedAgentId);
+	Request->SetStringField(TEXT("transport"), EffectiveTransportString());
+	Request->SetObjectField(TEXT("settings"), BuildSettings());
+	SendTracked(Request, TEXT("agent-configure"), EPhase::Pending);
+}
+
+void SUnrealMcpAgentConfigurators::RequestRemove()
+{
+	if (SelectedAgentId.IsEmpty())
+		return;
+	TSharedPtr<FJsonObject> Request = MakeShared<FJsonObject>();
+	Request->SetStringField(TEXT("agentId"), SelectedAgentId);
+	Request->SetStringField(TEXT("transport"), EffectiveTransportString());
+	Request->SetObjectField(TEXT("settings"), BuildSettings());
+	SendTracked(Request, TEXT("agent-remove"), EPhase::Pending);
+}
+
+void SUnrealMcpAgentConfigurators::RequestGenerateSkills()
+{
+	if (SelectedAgentId.IsEmpty())
+		return;
+	TSharedPtr<FJsonObject> Request = MakeShared<FJsonObject>();
+	Request->SetStringField(TEXT("agentId"), SelectedAgentId);
+	// The Custom agent's skills path is user-overridable + persisted; forward it so the sidecar writes there.
+	if (IsViewModelValid() && SelectedAgentId == TEXT("other-custom"))
+		Request->SetStringField(TEXT("customSkillsPath"), ViewModel->GetSkillsPath());
+	Request->SetObjectField(TEXT("settings"), BuildSettings());
+	SendTracked(Request, TEXT("agent-generate-skills"), EPhase::Pending);
+}
+
+void SUnrealMcpAgentConfigurators::WriteBackEditableValue(const FString& NewValue)
+{
+	if (SelectedAgentId.IsEmpty())
+		return;
+	// The Custom agent's editable config/skills path. Persist it view-model-side (so it survives a restart and the
+	// settings DTO carries it), then re-query status carrying the edited value so the rendered snippet updates.
+	if (IsViewModelValid() && SelectedAgentId == TEXT("other-custom"))
+		ViewModel->SetSkillsPath(NewValue);
+
+	TSharedPtr<FJsonObject> Request = MakeShared<FJsonObject>();
+	Request->SetStringField(TEXT("agentId"), SelectedAgentId);
+	Request->SetStringField(TEXT("transport"), EffectiveTransportString());
+	Request->SetStringField(TEXT("editableValue"), NewValue);
+	Request->SetObjectField(TEXT("settings"), BuildSettings());
+	// A write-back re-describes the agent (the Custom agent has no file to write, so this is effectively a status
+	// refresh that echoes the edited value into the snippet). Use agent-configure so a writable agent also persists.
+	SendTracked(Request, TEXT("agent-configure"), EPhase::Pending);
+}
+
+void SUnrealMcpAgentConfigurators::Refresh()
+{
+	// Always re-list (the set is cheap + lets the dropdown populate) and, when an agent is selected, its status.
+	// agents-list is the in-flight request we track; the selected-status request follows when the list returns.
+	RequestAgentsList();
+}
+
+// --- Result handling -------------------------------------------------------------------------------
+
+void SUnrealMcpAgentConfigurators::OnAgentConfigResult(const TSharedPtr<FJsonObject>& Result)
+{
+	if (!Result.IsValid())
+		return;
+
+	FString RequestId, Op;
+	Result->TryGetStringField(TEXT("requestId"), RequestId);
+	Result->TryGetStringField(TEXT("op"), Op);
+
+	// Ignore a stale/late result for a request we no longer await (the user superseded it). An empty PendingRequestId
+	// means nothing is in flight — but a list/status result can still arrive from a Refresh race, so accept results
+	// whose requestId matches OR when we are not tracking anything (best-effort late delivery is harmless to render).
+	if (!PendingRequestId.IsEmpty() && RequestId != PendingRequestId)
+		return;
+
+	bool bOk = false;
+	Result->TryGetBoolField(TEXT("ok"), bOk);
+	FString Error;
+	Result->TryGetStringField(TEXT("error"), Error);
+
+	// Clear the in-flight tracking now that its result arrived.
+	const FString CompletedType = PendingRequestType;
+	PendingRequestId.Reset();
+	PendingRequestType.Reset();
+	LastError = bOk ? FString() : Error;
+
+	if (Op == TEXT("agents-list"))
+	{
+		const TArray<TSharedPtr<FJsonValue>>* Agents = nullptr;
+		if (bOk && Result->TryGetArrayField(TEXT("agents"), Agents) && Agents)
+		{
+			AgentNameItems.Reset();
+			AgentIds.Reset();
+			for (const TSharedPtr<FJsonValue>& AgentValue : *Agents)
+			{
+				const TSharedPtr<FJsonObject>* AgentObj = nullptr;
+				if (!AgentValue.IsValid() || !AgentValue->TryGetObject(AgentObj) || !AgentObj)
+					continue;
+				FString Id, Name;
+				(*AgentObj)->TryGetStringField(TEXT("agentId"), Id);
+				(*AgentObj)->TryGetStringField(TEXT("agentName"), Name);
+				AgentIds.Add(Id);
+				AgentNameItems.Add(MakeShared<FString>(Name));
+			}
+			if (AgentCombo.IsValid())
+				AgentCombo->RefreshOptions();
+
+			// Resolve the selection: keep the persisted one if present, else default to the first agent.
+			if (IndexOfAgentId(SelectedAgentId) == INDEX_NONE && AgentIds.Num() > 0)
+				SetSelectedAgentId(AgentIds[0]);
+
+			Phase = EPhase::Idle;
+			// Now fetch the selected agent's detailed status (its sections/buttons).
+			RequestSelectedStatus();
+			return; // RequestSelectedStatus already rebuilt the panel into Loading
+		}
+		Phase = EPhase::Idle;
+		RebuildAgentPanel();
+		return;
+	}
+
+	if (Op == TEXT("agent-status") || Op == TEXT("agent-configure") || Op == TEXT("agent-remove"))
+	{
+		const TSharedPtr<FJsonObject>* DescObj = nullptr;
+		if (Result->TryGetObjectField(TEXT("description"), DescObj) && DescObj)
+		{
+			SelectedDescription = FUnrealMcpAgentDescription::FromJson(*DescObj);
+			bHaveDescription = true;
+		}
+		// A configure/remove that returned ok==false (e.g. the Custom agent has no writable file) still surfaces
+		// its reason via LastError; the description (if any) re-renders the current state.
+		Phase = EPhase::Idle;
+		RebuildAgentPanel();
+		return;
+	}
+
+	if (Op == TEXT("agent-generate-skills"))
+	{
+		Result->TryGetStringField(TEXT("skillsPath"), LastSkillsPath);
+		if (bOk)
+		{
+			int32 Written = 0, Pruned = 0;
+			Result->TryGetNumberField(TEXT("filesWritten"), Written);
+			Result->TryGetNumberField(TEXT("filesPruned"), Pruned);
+			LastSkillsStatus = FString::Printf(TEXT("Generated %d skill file(s)%s."),
+				Written, Pruned > 0 ? *FString::Printf(TEXT(" (pruned %d stale)"), Pruned) : TEXT(""));
+			LastError.Reset();
+		}
+		else
+		{
+			LastSkillsStatus = Error.IsEmpty() ? TEXT("Skill generation failed.") : Error;
+		}
+		Phase = EPhase::Idle;
+		RebuildAgentPanel();
+		return;
+	}
+
+	// Other ops (e.g. agent-skills-path) — currently the panel does not issue them from here; ignore safely.
+	Phase = EPhase::Idle;
+	RebuildAgentPanel();
+}
+
+// --- Selection helpers -----------------------------------------------------------------------------
+
+int32 SUnrealMcpAgentConfigurators::IndexOfAgentId(const FString& InAgentId) const
+{
+	return AgentIds.IndexOfByKey(InAgentId);
+}
+
+void SUnrealMcpAgentConfigurators::SetSelectedAgentId(const FString& InAgentId)
+{
+	SelectedAgentId = InAgentId;
+	bHaveDescription = false;
+	SelectedDescription = FUnrealMcpAgentDescription();
+	LastSkillsStatus.Reset();   // a prior agent's generation outcome is meaningless for the new selection
+	LastSkillsPath.Reset();
+	if (IsViewModelValid())
+		ViewModel->SetSelectedAgentId(InAgentId);
+
+	// Keep the combo's visible selection in sync (Direct select-info is ignored by the handler, so no loop).
+	const int32 Index = IndexOfAgentId(InAgentId);
+	if (AgentCombo.IsValid() && AgentNameItems.IsValidIndex(Index))
+		AgentCombo->SetSelectedItem(AgentNameItems[Index]);
+}
+
+// --- Rendering -------------------------------------------------------------------------------------
 
 void SUnrealMcpAgentConfigurators::RebuildAgentPanel()
 {
@@ -181,7 +377,26 @@ void SUnrealMcpAgentConfigurators::RebuildAgentPanel()
 
 	AgentPanelContainer->ClearChildren();
 
-	if (!Selected.IsValid())
+	if (Phase == EPhase::Disconnected)
+	{
+		AgentPanelContainer->AddSlot().AutoHeight()
+		[
+			UnrealMcpAgentWidgets::TemplateWarningLabel(LOCTEXT("BridgeDown",
+				"The MCP bridge is not connected. Connect (or start the bridge) to configure AI agents — this panel will refresh automatically."))
+		];
+		return;
+	}
+
+	if (Phase == EPhase::Loading && !bHaveDescription)
+	{
+		AgentPanelContainer->AddSlot().AutoHeight()
+		[
+			SNew(STextBlock).Text(LOCTEXT("LoadingAgents", "Loading AI agents…"))
+		];
+		return;
+	}
+
+	if (!bHaveDescription)
 	{
 		AgentPanelContainer->AddSlot().AutoHeight()
 		[
@@ -190,23 +405,23 @@ void SUnrealMcpAgentConfigurators::RebuildAgentPanel()
 		return;
 	}
 
-	const FString DownloadUrl = Selected->GetDownloadUrl();
-	const FString TutorialUrl = Selected->GetTutorialUrl();
-	const FString ConfigPath = Selected->GetConfigFilePath(ProjectRootProvider ? ProjectRootProvider() : FPaths::ProjectDir());
-
-	// Links row (download + optional tutorial).
+	// Links row (download + optional tutorial), mirroring the prior panel.
 	TSharedRef<SHorizontalBox> LinksRow = SNew(SHorizontalBox);
-	LinksRow->AddSlot().AutoWidth().Padding(0, 0, 6, 0)
-	[
-		SNew(SButton)
-		.Text(LOCTEXT("DownloadAgent", "Download / Docs"))
-		.OnClicked_Lambda([DownloadUrl]()
-		{
-			if (!DownloadUrl.IsEmpty())
+	const FString DownloadUrl = SelectedDescription.DownloadUrl;
+	const FString TutorialUrl = SelectedDescription.TutorialUrl;
+	if (!DownloadUrl.IsEmpty() && DownloadUrl != TEXT("NA"))
+	{
+		LinksRow->AddSlot().AutoWidth().Padding(0, 0, 6, 0)
+		[
+			SNew(SButton)
+			.Text(LOCTEXT("DownloadAgent", "Download / Docs"))
+			.OnClicked_Lambda([DownloadUrl]()
+			{
 				FPlatformProcess::LaunchURL(*DownloadUrl, nullptr, nullptr);
-			return FReply::Handled();
-		})
-	];
+				return FReply::Handled();
+			})
+		];
+	}
 	if (!TutorialUrl.IsEmpty())
 	{
 		LinksRow->AddSlot().AutoWidth()
@@ -220,357 +435,170 @@ void SUnrealMcpAgentConfigurators::RebuildAgentPanel()
 			})
 		];
 	}
-
-	// The raw config/snippet text field is noise for built-in agents (their Configure button writes the file
-	// directly); only the snippet-only Custom agent — which has no config path, so the user pastes the snippet by
-	// hand — keeps showing it (§7, issue #56). Computed once here; the panel is rebuilt on every selection change.
-	// Selected is guaranteed valid here — RebuildAgentPanel early-returns above when it is not.
-	const bool bShowSnippet = Selected->GetAgentId() == TEXT("other-custom");
-
-	// Issue #59: render ONLY the user-selected (effective) transport, not both. Cloud locks this to Http; Custom uses
-	// the stored stdio/http choice. The whole panel rebuilds via OnConnectionSettingsChanged when the user flips the
-	// transport selector in the main window, so this single-transport view always tracks the live selection.
-	const EUnrealMcpTransportMethod EffectiveTransport = IsViewModelValid()
-		? ViewModel->GetEffectiveTransport()
-		: EUnrealMcpTransportMethod::Http;
-	const bool bStdio = EffectiveTransport == EUnrealMcpTransportMethod::Stdio;
-	const FText TransportHeading = bStdio
-		? LOCTEXT("StdioHeader", "STDIO (launch the server)")
-		: LOCTEXT("HttpHeader", "HTTP (connect to URL)");
-
 	AgentPanelContainer->AddSlot().AutoHeight()[ LinksRow ];
 
-	// Config path line (skip for the snippet-only Custom agent, which has no on-disk file).
-	if (!ConfigPath.IsEmpty())
+	// Configuration-status row (Configured / Not configured + Configure/Reconfigure + Remove). The Custom agent has
+	// no detectable on-disk config (sidecar reports IsConfigured=false, configure returns a clear non-success), so
+	// only its rich-content snippet + EditableField drive it — still show the row, it self-disables sensibly.
+	AgentPanelContainer->AddSlot().AutoHeight().Padding(0, 6, 0, 0)[ MakeStatusRow() ];
+
+	// A pending/working line while a configure/remove is in flight.
+	if (Phase == EPhase::Pending)
 	{
-		AgentPanelContainer->AddSlot().AutoHeight().Padding(0, 6, 0, 0)
-		[
-			SNew(STextBlock)
-			.AutoWrapText(true)
-			.Text(FText::Format(LOCTEXT("ConfigPathFmt", "Config file: {0}"), FText::FromString(ConfigPath)))
-		];
-	}
-
-	// Reveal-token toggle (per-agent; default masked, §8).
-	AgentPanelContainer->AddSlot().AutoHeight().Padding(0, 6, 0, 0)
-	[
-		SNew(SCheckBox)
-		.IsChecked_Lambda([this]() { return bRevealToken ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
-		.OnCheckStateChanged_Lambda([this](ECheckBoxState NewState)
-		{
-			bRevealToken = (NewState == ECheckBoxState::Checked);
-		})
-		[
-			SNew(STextBlock).Text(LOCTEXT("RevealToken", "Reveal token in preview"))
-		]
-	];
-
-	// Active-transport heading.
-	AgentPanelContainer->AddSlot().AutoHeight().Padding(0, 8, 0, 0)
-	[
-		SNew(STextBlock).Text(TransportHeading).Font(FCoreStyle::GetDefaultFontStyle("Bold", 10))
-	];
-
-	// Configuration-status row (Unity's ConfigurationElements): "Configured (transport)" / "Not configured" +
-	// Configure/Reconfigure + Remove, shown only for agents with an on-disk config file. The snippet-only Custom
-	// agent has no file to detect, so its status row is meaningless — it relies on the snippet preview + Copy below.
-	if (!bShowSnippet)
-		AgentPanelContainer->AddSlot().AutoHeight().Padding(0, 4, 0, 0)[ MakeConfigurationStatusRow(bStdio) ];
-
-	// Per-agent rich content (issue #59): the configurator's foldout sections for the active transport (the 1:1
-	// data port of Unity's per-agent OnUICreated foldouts). Rendered with the reusable widget templates.
-	for (const FAiAgentRichContentSection& RichSection : Selected->BuildRichContent(bStdio))
-		AgentPanelContainer->AddSlot().AutoHeight().Padding(0, 4, 0, 0)[ MakeRichContentFoldout(RichSection) ];
-
-	// Snippet preview (read-only, token-masked) + Copy — shown ONLY for the Custom agent (§7, issue #56). Built-in
-	// agents write their config file via the status-row Configure button, so the raw snippet text is noise there.
-	if (bShowSnippet)
-	{
-		AgentPanelContainer->AddSlot().AutoHeight().Padding(0, 6, 0, 0)
-		[
-			SNew(SMultiLineEditableTextBox)
-			.IsReadOnly(true)
-			.AlwaysShowScrollbars(false)
-			.Text_Lambda([this, bStdio]() { return FText::FromString(BuildSnippetPreview(bStdio)); })
-		];
 		AgentPanelContainer->AddSlot().AutoHeight().Padding(0, 4, 0, 0)
 		[
-			SNew(SButton)
-			.Text(LOCTEXT("CopySnippet", "Copy snippet"))
-			.ToolTipText(LOCTEXT("CopySnippetHint", "Copy the config snippet (with the real token) to the clipboard."))
-			.OnClicked_Lambda([this, bStdio]()
-			{
-				if (Selected.IsValid())
-				{
-					// Copy the REAL snippet (unmasked) — the user is pasting it into their own config.
-					FAiAgentConfig& Config = bStdio ? Selected->GetConfigStdio() : Selected->GetConfigHttp();
-					FPlatformApplicationMisc::ClipboardCopy(*Config.GetExpectedFileContent());
-				}
-				return FReply::Handled();
-			})
-		];
-	}
-
-	// Skills section (§7/§53 Phase C) — shown ONLY when the selected agent supports skills.
-	{
-		const FString ProjectRoot = ProjectRootProvider ? ProjectRootProvider() : FPaths::ConvertRelativePathToFull(FPaths::ProjectDir());
-		if (Selected->SupportsSkills(ProjectRoot))
-		{
-			AgentPanelContainer->AddSlot().AutoHeight().Padding(0, 4, 0, 0)[ SNew(SSeparator) ];
-			AgentPanelContainer->AddSlot().AutoHeight()[ BuildSkillsSection() ];
-		}
-	}
-	// NOTE: Remove now lives inside the configuration-status row (MakeConfigurationStatusRow) for built-in agents
-	// (Unity's ConfigurationElements). The snippet-only Custom agent has no on-disk file to remove, so no extra
-	// bottom Remove button is added.
-}
-
-TSharedRef<SWidget> SUnrealMcpAgentConfigurators::MakeConfigurationStatusRow(bool bStdio)
-{
-	// The Slate analog of Unity's ConfigurationElements: a status label ("Configured (transport)" / "Not
-	// configured") + a Configure/Reconfigure button + a Remove button (shown only when something is detected). The
-	// transport word matches the active transport. After any write, BindSelected() rebuilds the cached configs so
-	// the next status read reflects the file (the lambdas re-read Selected on each paint, so the row self-updates).
-	const FString TransportWord = bStdio ? TEXT("stdio") : TEXT("http");
-
-	return SNew(SHorizontalBox)
-		// Status label.
-		+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
-		[
 			SNew(STextBlock)
-			.Text_Lambda([this, bStdio, TransportWord]()
-			{
-				if (!Selected.IsValid())
-					return FText::GetEmpty();
-				return Selected->IsConfigured(bStdio)
-					? FText::Format(LOCTEXT("StatusConfiguredFmt", "Configured ({0})"), FText::FromString(TransportWord))
-					: LOCTEXT("StatusNotConfigured", "Not configured");
-			})
-			.ColorAndOpacity_Lambda([this, bStdio]()
-			{
-				return (Selected.IsValid() && Selected->IsConfigured(bStdio))
-					? FSlateColor(UnrealMcpAgentWidgets::ConfiguredColor())
-					: FSlateColor(UnrealMcpAgentWidgets::PendingColor());
-			})
-		]
-		// Configure / Reconfigure.
-		+ SHorizontalBox::Slot().AutoWidth().Padding(6, 0, 0, 0).VAlign(VAlign_Center)
-		[
-			SNew(SButton)
-			.Text_Lambda([this, bStdio]()
-			{
-				return (Selected.IsValid() && Selected->IsConfigured(bStdio))
-					? LOCTEXT("Reconfigure", "Reconfigure")
-					: LOCTEXT("Configure", "Configure");
-			})
-			.OnClicked_Lambda([this, bStdio]()
-			{
-				if (Selected.IsValid())
-				{
-					const bool bOk = Selected->Configure(bStdio);
-					UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] agent '%s' %s configure %s."),
-						*Selected->GetAgentName(), bStdio ? TEXT("STDIO") : TEXT("HTTP"),
-						bOk ? TEXT("succeeded") : TEXT("failed"));
-					BindSelected(); // rebuild configs after the write so the status row re-reads the file
-				}
-				return FReply::Handled();
-			})
-		]
-		// Remove (clears BOTH transports' entries; visible only when something is detected, per Unity).
-		+ SHorizontalBox::Slot().AutoWidth().Padding(6, 0, 0, 0).VAlign(VAlign_Center)
-		[
-			SNew(SButton)
-			.Text(LOCTEXT("RemoveAgent", "Remove"))
-			.Visibility_Lambda([this]()
-			{
-				return (Selected.IsValid() && Selected->IsAnyDetected()) ? EVisibility::Visible : EVisibility::Collapsed;
-			})
-			.OnClicked_Lambda([this]()
-			{
-				if (Selected.IsValid())
-				{
-					const bool bOk = Selected->RemoveAll();
-					UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] agent '%s' remove %s."),
-						*Selected->GetAgentName(), bOk ? TEXT("succeeded") : TEXT("(nothing to remove)"));
-					BindSelected();
-				}
-				return FReply::Handled();
-			})
+			.ColorAndOpacity(FSlateColor(UnrealMcpAgentWidgets::PendingColor()))
+			.Text(LOCTEXT("Working", "Working…"))
 		];
-}
-
-TSharedRef<SWidget> SUnrealMcpAgentConfigurators::MakeRichContentFoldout(const FAiAgentRichContentSection& Section)
-{
-	// Build the foldout body from the section's items, each mapped to its widget template (the data→view mapping
-	// described on FAiAgentRichContentItem). Then wrap in a collapsible area (expanded if the section is the "first").
-	TSharedRef<SVerticalBox> Body = SNew(SVerticalBox);
-	for (const FAiAgentRichContentItem& Item : Section.Items)
-	{
-		TSharedRef<SWidget> ItemWidget = SNullWidget::NullWidget;
-		switch (Item.Kind)
-		{
-			case FAiAgentRichContentItem::EKind::Description:
-				ItemWidget = UnrealMcpAgentWidgets::TemplateLabelDescription(FText::FromString(Item.Text));
-				break;
-			case FAiAgentRichContentItem::EKind::Warning:
-				ItemWidget = UnrealMcpAgentWidgets::TemplateWarningLabel(FText::FromString(Item.Text));
-				break;
-			case FAiAgentRichContentItem::EKind::Alert:
-				ItemWidget = UnrealMcpAgentWidgets::TemplateAlertLabel(FText::FromString(Item.Text));
-				break;
-			case FAiAgentRichContentItem::EKind::ReadOnlyField:
-				ItemWidget = UnrealMcpAgentWidgets::TemplateTextFieldReadOnly(Item.Text);
-				break;
-			default:
-				checkNoEntry(); // Exhaustive over EKind — a new kind must add a case here, not silently render NullWidget.
-				break;
-		}
-		Body->AddSlot().AutoHeight().Padding(0, 2, 0, 0)[ ItemWidget ];
 	}
 
-	return UnrealMcpAgentWidgets::TemplateFoldout(
-		FText::FromString(Section.Heading), Body, Section.bExpandedFirst);
-}
-
-FString SUnrealMcpAgentConfigurators::ResolveSelectedSkillsPath() const
-{
-	if (!Selected.IsValid())
-		return FString();
-	const FString ProjectRoot = ProjectRootProvider ? ProjectRootProvider() : FPaths::ConvertRelativePathToFull(FPaths::ProjectDir());
-	return Selected->ResolveAbsoluteSkillsPath(ProjectRoot);
-}
-
-FString SUnrealMcpAgentConfigurators::MakeDisplayPath(const FString& AbsolutePath) const
-{
-	if (AbsolutePath.IsEmpty())
-		return AbsolutePath;
-
-	FString ProjectRoot = ProjectRootProvider ? ProjectRootProvider() : FPaths::ConvertRelativePathToFull(FPaths::ProjectDir());
-	ProjectRoot = FPaths::ConvertRelativePathToFull(ProjectRoot);
-	if (ProjectRoot.IsEmpty())
-		return AbsolutePath;
-
-	// MakePathRelativeTo mutates its first arg in place and needs a trailing slash on the base (the pattern used in
-	// Tools/UnrealMcpSourceTools.cpp). When the path is not under the root it leaves a "../"-style result; fall back
-	// to the absolute path in that case rather than show a confusing climb-out.
-	FString Relative = AbsolutePath;
-	FPaths::MakePathRelativeTo(Relative, *(ProjectRoot / TEXT("")));
-	if (Relative.IsEmpty() || Relative.StartsWith(TEXT("..")))
-		return AbsolutePath;
-	return Relative;
-}
-
-void SUnrealMcpAgentConfigurators::GenerateSkillsForSelected()
-{
-	const FString SkillsRoot = ResolveSelectedSkillsPath();
-	if (SkillsRoot.IsEmpty())
+	// A last-error line (e.g. the Custom agent's "no writable config file" reason).
+	if (!LastError.IsEmpty())
 	{
-		UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] cannot generate skills: selected agent has no skills path."));
-		return;
+		AgentPanelContainer->AddSlot().AutoHeight().Padding(0, 4, 0, 0)
+		[
+			UnrealMcpAgentWidgets::TemplateAlertLabel(FText::FromString(LastError))
+		];
 	}
 
-	// Enumerate the full core tool set from a bare registry (headless-safe; the writer sources docs from the C++ tool
-	// registry, NOT a live bridge). Token discipline (§8): skill files carry only tool docs — no token is read/written.
-	FUnrealMcpToolRegistry ToolRegistry;
-	FUnrealMcpSkillFileGenerator::PopulateCoreRegistry(ToolRegistry);
-	const FUnrealMcpSkillFileGenerator::FResult Result = FUnrealMcpSkillFileGenerator::Generate(ToolRegistry, SkillsRoot);
+	// Per-agent rich content: the sidecar's DTO sections, rendered with the existing reusable widget templates.
+	for (const FAiAgentRichContentSection& Section : SelectedDescription.Sections)
+		AgentPanelContainer->AddSlot().AutoHeight().Padding(0, 4, 0, 0)[ MakeRichContentFoldout(Section) ];
 
-	UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] agent '%s' skills generate %s (%d file(s) -> %s)."),
-		Selected.IsValid() ? *Selected->GetAgentName() : TEXT("?"),
-		Result.bSuccess ? TEXT("succeeded") : TEXT("failed"), Result.FilesWritten, *SkillsRoot);
+	// Skills section (§7) — shown only when the sidecar reports the agent supports skills. A thin view: the
+	// Generate button sends the agent-generate-skills IPC request; the sidecar resolves the path + writes the
+	// SKILL.md files (sourced from the tool manifest). No C++ generation logic here.
+	if (SelectedDescription.bSupportsSkills)
+	{
+		AgentPanelContainer->AddSlot().AutoHeight().Padding(0, 6, 0, 0)[ SNew(SSeparator) ];
+		AgentPanelContainer->AddSlot().AutoHeight()[ MakeSkillsSection() ];
+	}
 }
 
-TSharedRef<SWidget> SUnrealMcpAgentConfigurators::BuildSkillsSection()
+TSharedRef<SWidget> SUnrealMcpAgentConfigurators::MakeSkillsSection()
 {
-	const bool bIsCustom = Selected.IsValid() && Selected->GetAgentId() == TEXT("other-custom");
-	const FString AgentId = Selected.IsValid() ? Selected->GetAgentId() : FString();
-	const FString AbsolutePath = ResolveSelectedSkillsPath();
+	const bool bBusy = Phase == EPhase::Pending || Phase == EPhase::Loading;
 
 	TSharedRef<SVerticalBox> Section = SNew(SVerticalBox)
 		+ SVerticalBox::Slot().AutoHeight().Padding(0, 8, 0, 0)
 		[
 			SNew(STextBlock)
-			.Text(LOCTEXT("SkillsHeader", "Skills")).Font(FCoreStyle::GetDefaultFontStyle("Bold", 10))
+			.Text(LOCTEXT("SkillsHeader", "Skills"))
+			.Font(FCoreStyle::GetDefaultFontStyle("Bold", 10))
 		]
 		+ SVerticalBox::Slot().AutoHeight().Padding(0, 2, 0, 0)
 		[
 			SNew(STextBlock)
 			.AutoWrapText(true)
-			.Text(LOCTEXT("SkillsDesc", "Generate per-tool skill documentation (one SKILL.md per Unreal MCP tool) for this agent."))
+			.Text(LOCTEXT("SkillsDesc", "Generate per-tool skill documentation (one SKILL.md per Unreal MCP tool) for this agent. The MCP bridge writes the files from the live tool set."))
 		]
-		// Auto-generate toggle (per-agent; persisted via the view-model). Turning it on generates immediately.
+		// Generate button (sends the IPC request; the sidecar does the writing).
 		+ SVerticalBox::Slot().AutoHeight().Padding(0, 4, 0, 0)
 		[
-			SNew(SCheckBox)
-			.IsChecked_Lambda([this, AgentId]()
-			{
-				return (IsViewModelValid() && ViewModel->IsAutoGenerateSkills(AgentId))
-					? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
-			})
-			.OnCheckStateChanged_Lambda([this, AgentId](ECheckBoxState NewState)
-			{
-				const bool bEnabled = (NewState == ECheckBoxState::Checked);
-				if (IsViewModelValid())
-					ViewModel->SetAutoGenerateSkills(AgentId, bEnabled);
-				if (bEnabled)
-					GenerateSkillsForSelected(); // auto-generate on enable (mirrors Unity's toggle callback)
-			})
-			[
-				SNew(STextBlock).Text(LOCTEXT("AutoGenSkills", "Auto-generate skills"))
-			]
+			SNew(SButton)
+			.IsEnabled(!bBusy)
+			.Text(LOCTEXT("GenerateSkills", "Generate skill files"))
+			.ToolTipText(LOCTEXT("GenerateSkillsHint", "Ask the MCP bridge to write one SKILL.md per Unreal MCP tool into this agent's skills folder."))
+			.OnClicked_Lambda([this]() { RequestGenerateSkills(); return FReply::Handled(); })
 		];
 
-	// Output path: a read-only display for built-in agents; an editable field for the Custom agent (its skills path
-	// is user-overridable + persisted, mirroring Unity's editable Custom SkillsPath).
-	if (bIsCustom)
+	// The resolved output path (from the last run) + the last-run status line, when present.
+	if (!LastSkillsPath.IsEmpty())
 	{
 		Section->AddSlot().AutoHeight().Padding(0, 4, 0, 0)
 		[
-			SNew(SHorizontalBox)
-			+ SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 6, 0).VAlign(VAlign_Center)
-			[
-				SNew(STextBlock).Text(LOCTEXT("SkillsPathLabel", "Skills folder:"))
-			]
-			+ SHorizontalBox::Slot().FillWidth(1.0f)
-			[
-				SNew(SEditableTextBox)
-				.Text_Lambda([this]() { return IsViewModelValid() ? FText::FromString(ViewModel->GetSkillsPath()) : FText::GetEmpty(); })
-				.OnTextCommitted_Lambda([this](const FText& NewText, ETextCommit::Type)
-				{
-					if (IsViewModelValid())
-						ViewModel->SetSkillsPath(NewText.ToString().TrimStartAndEnd());
-					BindSelected();      // re-sync the Custom configurator's path
-					RebuildAgentPanel(); // refresh the resolved-path display
-				})
-			]
+			SNew(STextBlock)
+			.AutoWrapText(true)
+			.Text(FText::Format(LOCTEXT("SkillsOutFmt", "Output: {0}"), FText::FromString(LastSkillsPath)))
+		];
+	}
+	if (!LastSkillsStatus.IsEmpty())
+	{
+		Section->AddSlot().AutoHeight().Padding(0, 4, 0, 0)
+		[
+			SNew(STextBlock)
+			.AutoWrapText(true)
+			.Text(FText::FromString(LastSkillsStatus))
 		];
 	}
 
-	// The resolved output path, shown project-root-relative (e.g. ".claude/skills") for readability (§7, issue #56).
-	// The full absolute path stays available as the tooltip so the user can still see exactly where files land.
-	const FString DisplayPath = MakeDisplayPath(AbsolutePath);
-	Section->AddSlot().AutoHeight().Padding(0, 4, 0, 0)
-	[
-		SNew(STextBlock)
-		.AutoWrapText(true)
-		.Text(FText::Format(LOCTEXT("SkillsOutFmt", "Output: {0}"), FText::FromString(DisplayPath)))
-		.ToolTipText(FText::FromString(AbsolutePath))
-	];
-
-	// Generate button (explicit regeneration; idempotent).
-	Section->AddSlot().AutoHeight().Padding(0, 4, 0, 0)
-	[
-		SNew(SButton)
-		.Text(LOCTEXT("GenerateSkills", "Generate"))
-		.ToolTipText(LOCTEXT("GenerateSkillsHint", "Write one SKILL.md per Unreal MCP tool into the output folder (overwrites existing)."))
-		.OnClicked_Lambda([this]()
-		{
-			GenerateSkillsForSelected();
-			return FReply::Handled();
-		})
-	];
-
 	return Section;
+}
+
+TSharedRef<SWidget> SUnrealMcpAgentConfigurators::MakeStatusRow()
+{
+	const bool bConfigured = SelectedDescription.bIsConfigured;
+	const bool bBusy = Phase == EPhase::Pending || Phase == EPhase::Loading;
+	const FString TransportWord = EffectiveTransportString() == TEXT("stdio") ? TEXT("stdio") : TEXT("http");
+
+	return SNew(SHorizontalBox)
+		+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
+		[
+			SNew(STextBlock)
+			.Text(bConfigured
+				? FText::Format(LOCTEXT("StatusConfiguredFmt", "Configured ({0})"), FText::FromString(TransportWord))
+				: LOCTEXT("StatusNotConfigured", "Not configured"))
+			.ColorAndOpacity(FSlateColor(bConfigured
+				? UnrealMcpAgentWidgets::ConfiguredColor()
+				: UnrealMcpAgentWidgets::PendingColor()))
+		]
+		+ SHorizontalBox::Slot().AutoWidth().Padding(6, 0, 0, 0).VAlign(VAlign_Center)
+		[
+			SNew(SButton)
+			.IsEnabled(!bBusy)
+			.Text(bConfigured ? LOCTEXT("Reconfigure", "Reconfigure") : LOCTEXT("Configure", "Configure"))
+			.OnClicked_Lambda([this]() { RequestConfigure(); return FReply::Handled(); })
+		]
+		+ SHorizontalBox::Slot().AutoWidth().Padding(6, 0, 0, 0).VAlign(VAlign_Center)
+		[
+			SNew(SButton)
+			.IsEnabled(!bBusy)
+			.Visibility(bConfigured ? EVisibility::Visible : EVisibility::Collapsed)
+			.Text(LOCTEXT("RemoveAgent", "Remove"))
+			.OnClicked_Lambda([this]() { RequestRemove(); return FReply::Handled(); })
+		];
+}
+
+TSharedRef<SWidget> SUnrealMcpAgentConfigurators::MakeItemWidget(const FAiAgentRichContentItem& Item)
+{
+	switch (Item.Kind)
+	{
+		case FAiAgentRichContentItem::EKind::Description:
+			return UnrealMcpAgentWidgets::TemplateLabelDescription(FText::FromString(Item.Text));
+		case FAiAgentRichContentItem::EKind::Warning:
+			return UnrealMcpAgentWidgets::TemplateWarningLabel(FText::FromString(Item.Text));
+		case FAiAgentRichContentItem::EKind::Alert:
+			return UnrealMcpAgentWidgets::TemplateAlertLabel(FText::FromString(Item.Text));
+		case FAiAgentRichContentItem::EKind::ReadOnlyField:
+			return UnrealMcpAgentWidgets::TemplateTextFieldReadOnly(Item.Text);
+		case FAiAgentRichContentItem::EKind::EditableField:
+		{
+			// An editable value the user can change (the Custom agent's editable config/skills path). On commit,
+			// write it back to the sidecar over IPC (and persist it view-model-side). Seed with the current text.
+			const FString Initial = Item.Text;
+			return SNew(SEditableTextBox)
+				.Text(FText::FromString(Initial))
+				.OnTextCommitted_Lambda([this](const FText& NewText, ETextCommit::Type CommitType)
+				{
+					if (CommitType == ETextCommit::OnEnter || CommitType == ETextCommit::OnUserMovedFocus)
+						WriteBackEditableValue(NewText.ToString().TrimStartAndEnd());
+				});
+		}
+		default:
+			checkNoEntry(); // Exhaustive over EKind — a new kind must add a case here.
+			return SNullWidget::NullWidget;
+	}
+}
+
+TSharedRef<SWidget> SUnrealMcpAgentConfigurators::MakeRichContentFoldout(const FAiAgentRichContentSection& Section)
+{
+	TSharedRef<SVerticalBox> Body = SNew(SVerticalBox);
+	for (const FAiAgentRichContentItem& Item : Section.Items)
+		Body->AddSlot().AutoHeight().Padding(0, 2, 0, 0)[ MakeItemWidget(Item) ];
+
+	return UnrealMcpAgentWidgets::TemplateFoldout(
+		FText::FromString(Section.Heading), Body, Section.bExpandedFirst);
 }
 
 #undef LOCTEXT_NAMESPACE

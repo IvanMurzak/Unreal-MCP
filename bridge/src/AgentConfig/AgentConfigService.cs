@@ -35,17 +35,22 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
     /// auto-detected (the library has runtime per-OS path detection). Pure (no IPC dependency) so the xUnit suite
     /// drives it directly with a hand-built request and asserts the produced result/DTO.
     ///
-    /// Skill-file GENERATION stays plugin-side on purpose: the per-tool SKILL.md bodies are sourced from the C++
-    /// tool registry (the live tool docs), which the sidecar does not hold; this service only resolves WHERE the
-    /// files belong (<see cref="HandleSkillsPath"/>), mirroring the SidecarHost's <c>GenerateSkillFiles = false</c>.
+    /// Skill-file GENERATION also lives sidecar-side (<see cref="HandleGenerateSkills"/>): the per-tool SKILL.md
+    /// bodies are sourced from the tool manifest the C++ plugin already pushes over IPC (the ProxyTool catalog —
+    /// Name/Title/Description/hints/input+output schema), so the sidecar has the source data without any new
+    /// C++→sidecar payload. <see cref="SkillFileGenerator"/> does the writing; this service resolves the path.
+    /// (Unrelated to the SignalR host's <c>GenerateSkillFiles = false</c>, which governs the .NET host's own
+    /// auto-generation of skills for ITS static tools — the sidecar has none.)
     /// </summary>
     public sealed class AgentConfigService
     {
         private readonly ILogger? _logger;
+        private readonly SkillFileGenerator _skillGenerator;
 
         public AgentConfigService(ILogger? logger = null)
         {
             _logger = logger;
+            _skillGenerator = new SkillFileGenerator(logger);
         }
 
         // --- Request handlers (one per plugin → sidecar request type). Each returns the terminal result the
@@ -190,6 +195,38 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
             var projectRoot = request.Settings?.ProjectRootPath ?? string.Empty;
             result.SkillsPath = ResolveAbsolute(projectRoot, folder!);
             result.Ok = true;
+            return result;
+        }
+
+        /// <summary>
+        /// Generate the per-tool SKILL.md files for an agent into its resolved skills folder (§7, issue #101). The
+        /// sidecar resolves WHERE (the agent's skills path) and WRITES the files from <paramref name="tools"/> — the
+        /// tool catalog the C++ plugin already pushed over the IPC manifest — so no C++ generation logic remains.
+        /// </summary>
+        public AgentConfigResultMessage HandleGenerateSkills(AgentGenerateSkillsRequestMessage request, IReadOnlyList<ToolDescriptor> tools)
+        {
+            var result = NewResult(request.RequestId, IpcProtocol.Type.AgentGenerateSkills);
+
+            var configurator = AiAgentConfiguratorRegistry.GetByAgentId(request.AgentId);
+            if (configurator == null)
+                return Fail(result, $"Unknown agent id '{request.AgentId}'.");
+
+            ApplyEditableValue(configurator, request.CustomSkillsPath);
+
+            var folder = configurator.SkillsPath;
+            if (string.IsNullOrEmpty(folder))
+                return Fail(result, $"Agent '{request.AgentId}' does not support skills.");
+
+            var projectRoot = request.Settings?.ProjectRootPath ?? string.Empty;
+            var skillsRoot = ResolveAbsolute(projectRoot, folder!);
+            result.SkillsPath = skillsRoot;
+
+            var genResult = _skillGenerator.Generate(tools ?? Array.Empty<ToolDescriptor>(), skillsRoot);
+            result.Ok = genResult.Success;
+            result.FilesWritten = genResult.FilesWritten;
+            result.FilesPruned = genResult.FilesPruned;
+            if (!genResult.Success)
+                result.Error = genResult.Error ?? "Skill generation failed.";
             return result;
         }
 

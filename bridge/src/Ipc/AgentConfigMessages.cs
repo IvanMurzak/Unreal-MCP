@@ -95,9 +95,9 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
     }
 
     /// <summary>
-    /// plugin → sidecar: resolve the agent's skills folder (absolute). The plugin OWNS skill-file generation
-    /// because the per-tool SKILL.md bodies are sourced from the C++ tool registry (the SidecarHost runs with
-    /// <c>GenerateSkillFiles = false</c>); the sidecar only resolves WHERE the files belong from the shared lib.
+    /// plugin → sidecar: resolve the agent's skills folder (absolute). A read-only query used by the panel to show
+    /// where SKILL.md files would land; the WRITE is <see cref="AgentGenerateSkillsRequestMessage"/>. The shared
+    /// library owns the per-agent skills path; the sidecar resolves it to an absolute folder.
     /// </summary>
     public sealed class AgentSkillsPathRequestMessage
     {
@@ -105,6 +105,21 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
         [JsonPropertyName("requestId")] public string RequestId { get; set; } = string.Empty;
         [JsonPropertyName("agentId")] public string AgentId { get; set; } = string.Empty;
         /// <summary>For the Custom agent: the user-edited (project-relative or absolute) skills path to resolve.</summary>
+        [JsonPropertyName("customSkillsPath")] public string? CustomSkillsPath { get; set; }
+        [JsonPropertyName("settings")] public AgentSettingsDto? Settings { get; set; }
+    }
+
+    /// <summary>
+    /// plugin → sidecar: GENERATE the per-tool SKILL.md files for an agent (§7, issue #101). The sidecar resolves
+    /// the agent's skills folder, then writes one <c>&lt;skillsRoot&gt;/&lt;tool&gt;/SKILL.md</c> per tool, sourced
+    /// from the tool manifest the plugin already pushed over IPC (the ProxyTool catalog) — no C++ generation logic.
+    /// </summary>
+    public sealed class AgentGenerateSkillsRequestMessage
+    {
+        [JsonPropertyName("type")] public string Type { get; set; } = IpcProtocol.Type.AgentGenerateSkills;
+        [JsonPropertyName("requestId")] public string RequestId { get; set; } = string.Empty;
+        [JsonPropertyName("agentId")] public string AgentId { get; set; } = string.Empty;
+        /// <summary>For the Custom agent: the user-edited (project-relative or absolute) skills path to write under.</summary>
         [JsonPropertyName("customSkillsPath")] public string? CustomSkillsPath { get; set; }
         [JsonPropertyName("settings")] public AgentSettingsDto? Settings { get; set; }
     }
@@ -164,7 +179,11 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
         [JsonPropertyName("agents")] public List<AgentConfiguratorDescriptionDto>? Agents { get; set; }
         /// <summary>The single agent's description (status / configure / remove requests).</summary>
         [JsonPropertyName("description")] public AgentConfiguratorDescriptionDto? Description { get; set; }
-        /// <summary>The resolved absolute skills folder (skills-path request only).</summary>
+        /// <summary>The resolved absolute skills folder (skills-path AND generate-skills requests).</summary>
         [JsonPropertyName("skillsPath")] public string? SkillsPath { get; set; }
+        /// <summary>Count of SKILL.md files written (generate-skills request only).</summary>
+        [JsonPropertyName("filesWritten")] public int? FilesWritten { get; set; }
+        /// <summary>Count of stale generator-owned folders pruned (generate-skills request only).</summary>
+        [JsonPropertyName("filesPruned")] public int? FilesPruned { get; set; }
     }
 }

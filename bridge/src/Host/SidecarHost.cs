@@ -420,6 +420,13 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
                     return _agentConfig.HandleRemove(node.Deserialize<AgentRemoveRequestMessage>(IpcProtocol.JsonOptions)!);
                 case IpcProtocol.Type.AgentSkillsPath:
                     return _agentConfig.HandleSkillsPath(node.Deserialize<AgentSkillsPathRequestMessage>(IpcProtocol.JsonOptions)!);
+                case IpcProtocol.Type.AgentGenerateSkills:
+                    // The SKILL.md bodies come from the tool manifest the plugin already pushed (the ProxyTool
+                    // catalog the registrar holds) — pass that snapshot to the generator. An empty catalog (no
+                    // manifest applied yet) yields a clean "no tools" result rather than a crash.
+                    return _agentConfig.HandleGenerateSkills(
+                        node.Deserialize<AgentGenerateSkillsRequestMessage>(IpcProtocol.JsonOptions)!,
+                        _registrar?.AppliedDescriptors ?? new System.Collections.Generic.List<ToolDescriptor>());
                 default:
                     return new AgentConfigResultMessage
                     {

@@ -286,6 +286,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
                 case IpcProtocol.Type.AgentConfigure:
                 case IpcProtocol.Type.AgentRemove:
                 case IpcProtocol.Type.AgentSkillsPath:
+                case IpcProtocol.Type.AgentGenerateSkills:
                     // §7 AI-agent configurator requests. The host serves them against the shared AgentConfig
                     // library and answers with an `agent-config-result` (off the reader thread).
                     if (node is JsonObject agentObj)

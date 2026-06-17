@@ -68,6 +68,14 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
         /// <summary>Names of the tools currently registered by this registrar (test/inspection aid).</summary>
         public IReadOnlyCollection<string> AppliedToolNames => _applied.Keys;
 
+        /// <summary>
+        /// A snapshot of the currently-applied tool descriptors (§7 skill-file generation reads this). The
+        /// descriptors carry the full per-tool metadata the C++ plugin pushed over the manifest (Name / Title /
+        /// Description / hints / input+output schema) — exactly the source the SKILL.md generator needs, so the
+        /// sidecar can author the docs without any extra C++→sidecar payload. A copied list (caller mutation-safe).
+        /// </summary>
+        public IReadOnlyList<ToolDescriptor> AppliedDescriptors => new List<ToolDescriptor>(_applied.Values);
+
         public int LastAppliedRevision => _lastAppliedRevision;
 
         /// <summary>
