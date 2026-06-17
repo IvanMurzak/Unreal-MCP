@@ -25,7 +25,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
     /// <summary>
     /// The sidecar's AI-agent configuration service (docs/ARCHITECTURE.md §7). Serves the plugin's thin Slate
     /// panel by delegating EVERY configurator decision to the shared, engine-agnostic
-    /// <c>com.IvanMurzak.McpPlugin.AgentConfig</c> library (MCP-Plugin-dotnet 6.8.0): it lists the available
+    /// <c>com.IvanMurzak.McpPlugin.AgentConfig</c> library (MCP-Plugin-dotnet 6.9.0): it lists the available
     /// agents, describes one agent for a transport (the UI DTO), writes/removes the agent's MCP config file, and
     /// resolves the agent's skills folder. The plugin no longer carries any C++ configurator logic — this service
     /// IS the single implementation, shared with Unity/Godot through the same library.
@@ -243,22 +243,35 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
                 AgentId = description.AgentId,
                 IconName = description.IconName,
                 IsConfigured = description.IsConfigured,
+                // 6.9.0: forward the tri-state status so the plugin can label the action button
+                // (Reconfigure when ReconfigureNeeded) and so a "Reconfiguration Required" Alert renders.
+                Status = description.Status.ToString(),
                 IsInstalled = description.IsInstalled,
                 SupportsSkills = configurator.SupportsSkills,
                 DownloadUrl = configurator.DownloadUrl,
                 TutorialUrl = configurator.TutorialUrl,
+                // 6.9.0: the top-level Link items (download / tutorial / docs), carried with their Url so the plugin
+                // renders clickable hyperlinks. Each is a Link-kind ConfigurationItem.
+                Links = description.Links
+                    .Select(MapItem)
+                    .ToList(),
                 Sections = description.Sections
                     .Select(s => new AgentSectionDto
                     {
                         Heading = s.Heading,
                         ExpandedFirst = s.ExpandedFirst,
                         Items = s.Items
-                            .Select(i => new AgentItemDto { Kind = i.Kind.ToString(), Text = i.Text })
+                            .Select(MapItem)
                             .ToList(),
                     })
                     .ToList(),
             };
         }
+
+        /// <summary>Map one shared-library <c>ConfigurationItem</c> to the IPC <see cref="AgentItemDto"/>, carrying the
+        /// 6.9.0 <c>Url</c> (non-empty only for <c>Link</c>-kind items).</summary>
+        private static AgentItemDto MapItem(global::com.IvanMurzak.McpPlugin.AgentConfig.ConfigurationItem item) =>
+            new() { Kind = item.Kind.ToString(), Text = item.Text, Url = item.Url ?? string.Empty };
 
         /// <summary>Map the inline IPC settings DTO into the shared library's host-aware settings.</summary>
         private static AgentConfiguratorSettings MapSettings(AgentSettingsDto dto)

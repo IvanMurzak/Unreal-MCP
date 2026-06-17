@@ -51,16 +51,21 @@
 
   <!--
     Reused NuGet pins, kept in lockstep with Godot-MCP (Godot-MCP.csproj):
-    McpPlugin 6.8.0 + ReflectorNet 5.3.1. The MCP/reflection stack is NOT forked —
-    pins are owned by the upstream release pipelines. The 6.8.0 bump consumes the new
+    McpPlugin 6.9.0 + ReflectorNet 5.3.1. The MCP/reflection stack is NOT forked —
+    pins are owned by the upstream release pipelines. The 6.8.0 bump consumed the new
     shared engine-agnostic com.IvanMurzak.McpPlugin.AgentConfig module (the AI-agent
     configurators + the AgentConfiguratorDescription UI-DTO) so the sidecar hosts the
     AI-agent configuration service instead of the duplicated C++ Agents/ implementation.
-    6.8.0 keeps the ReflectorNet 5.3.1 dependency, so the lockstep with Godot-MCP holds.
+    6.9.0 carries the AgentConfig parity fix (Kilo/Zoo: disabled=false + HTTP
+    type="streamable-http") plus the AgentConfiguratorDescription DTO extension — the new
+    ConfigurationItemKind.Link + ConfigurationItem.Url (clickable open-URL items), the
+    ConfiguratorStatus tri-state (NotConfigured/Configured/ReconfigureNeeded) on a Status
+    field, and a Links collection (with a prepended "Reconfiguration Required" Alert when
+    stale). 6.9.0 keeps the ReflectorNet 5.3.1 dependency, so the lockstep with Godot-MCP holds.
   -->
   <ItemGroup>
     <PackageReference Include="com.IvanMurzak.ReflectorNet" Version="5.3.1" />
-    <PackageReference Include="com.IvanMurzak.McpPlugin" Version="6.8.0" />
+    <PackageReference Include="com.IvanMurzak.McpPlugin" Version="6.9.0" />
   </ItemGroup>
 
   <!-- The xUnit suite exercises a couple of internal helpers (e.g. ProxyTool.CalculateTokenCount). -->

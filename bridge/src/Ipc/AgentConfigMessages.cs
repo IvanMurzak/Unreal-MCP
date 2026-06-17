@@ -124,12 +124,15 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
         [JsonPropertyName("settings")] public AgentSettingsDto? Settings { get; set; }
     }
 
-    /// <summary>One UI item inside an <see cref="AgentSectionDto"/> — engine-agnostic, no UI handle.</summary>
+    /// <summary>One UI item inside an <see cref="AgentSectionDto"/> (or a top-level <see cref="AgentConfiguratorDescriptionDto.Links"/>
+    /// entry) — engine-agnostic, no UI handle.</summary>
     public sealed class AgentItemDto
     {
-        /// <summary>One of <c>Description</c> / <c>Warning</c> / <c>Alert</c> / <c>ReadOnlyField</c> / <c>EditableField</c>.</summary>
+        /// <summary>One of <c>Description</c> / <c>Warning</c> / <c>Alert</c> / <c>ReadOnlyField</c> / <c>EditableField</c> / <c>Link</c>.</summary>
         [JsonPropertyName("kind")] public string Kind { get; set; } = "Description";
         [JsonPropertyName("text")] public string Text { get; set; } = string.Empty;
+        /// <summary>The open-URL target for a <c>Link</c>-kind item (e.g. download / tutorial); empty for non-link kinds.</summary>
+        [JsonPropertyName("url")] public string Url { get; set; } = string.Empty;
     }
 
     /// <summary>One collapsible UI section the plugin renders as a foldout.</summary>
@@ -152,10 +155,24 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
         /// <summary>Icon file NAME only (e.g. <c>claude-64.png</c>), never the bytes; null when no icon.</summary>
         [JsonPropertyName("iconName")] public string? IconName { get; set; }
         [JsonPropertyName("isConfigured")] public bool IsConfigured { get; set; }
+        /// <summary>
+        /// The tri-state configuration status (6.9.0): <c>NotConfigured</c> / <c>Configured</c> / <c>ReconfigureNeeded</c>.
+        /// <c>ReconfigureNeeded</c> means a config entry exists but its connection settings are stale — the library
+        /// also prepends a "Reconfiguration Required" Alert section to <see cref="Sections"/> in that case. The plugin
+        /// uses it to label the action button (Configure / Reconfigure). Sent as the enum NAME (verbatim).
+        /// </summary>
+        [JsonPropertyName("status")] public string Status { get; set; } = "NotConfigured";
         [JsonPropertyName("isInstalled")] public bool IsInstalled { get; set; }
         [JsonPropertyName("supportsSkills")] public bool SupportsSkills { get; set; }
         [JsonPropertyName("downloadUrl")] public string? DownloadUrl { get; set; }
         [JsonPropertyName("tutorialUrl")] public string? TutorialUrl { get; set; }
+        /// <summary>
+        /// The top-level clickable links for this agent (6.9.0) — <c>Link</c>-kind items carrying a label
+        /// (<see cref="AgentItemDto.Text"/>) and an <see cref="AgentItemDto.Url"/> (download / tutorial / docs). The
+        /// plugin renders each as a hyperlink that opens the URL. Supersedes the single
+        /// <see cref="DownloadUrl"/>/<see cref="TutorialUrl"/> pair (kept for back-compat); prefer this collection.
+        /// </summary>
+        [JsonPropertyName("links")] public List<AgentItemDto> Links { get; set; } = new();
         [JsonPropertyName("sections")] public List<AgentSectionDto> Sections { get; set; } = new();
     }
 

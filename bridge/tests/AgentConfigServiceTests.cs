@@ -100,6 +100,46 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         }
 
         [Fact]
+        public void Status_CarriesTheTriStateStatus_AndTopLevelLinks()
+        {
+            // 6.9.0 DTO extension: the description carries the ConfiguratorStatus tri-state and a top-level Links
+            // collection of Link-kind items (with their Url). claude-code has nothing written, so it is NotConfigured,
+            // and it advertises a Download + a YouTube Tutorial link.
+            var result = _service.HandleStatus(new AgentStatusRequestMessage
+            {
+                RequestId = "r2b", AgentId = "claude-code", Transport = "streamableHttp", Settings = Settings(),
+            });
+
+            Assert.True(result.Ok);
+            var d = result.Description!;
+            Assert.Equal("NotConfigured", d.Status);
+            Assert.NotEmpty(d.Links);
+            Assert.All(d.Links, l => Assert.Equal("Link", l.Kind));
+            // Each link carries an open-URL target the plugin renders as a clickable hyperlink.
+            Assert.All(d.Links, l => Assert.False(string.IsNullOrEmpty(l.Url)));
+            Assert.Contains(d.Links, l => l.Url == "https://youtu.be/Sknh2p12W8c");
+        }
+
+        [Fact]
+        public void Status_WhenStale_ReportsReconfigureNeeded_AndPrependsAReconfigurationAlert()
+        {
+            // The antigravity agent reports ReconfigureNeeded for a fresh project root (its detected config is stale
+            // versus these connection settings). 6.9.0 then prepends a "Reconfiguration Required" Alert section.
+            var result = _service.HandleStatus(new AgentStatusRequestMessage
+            {
+                RequestId = "r2c", AgentId = "antigravity", Transport = "streamableHttp", Settings = Settings(),
+            });
+
+            Assert.True(result.Ok);
+            var d = result.Description!;
+            Assert.Equal("ReconfigureNeeded", d.Status);
+            // The library prepends a "Reconfiguration Required" section whose first item is an Alert-kind line.
+            var reconfig = d.Sections.FirstOrDefault(s => s.Heading == "Reconfiguration Required");
+            Assert.NotNull(reconfig);
+            Assert.Contains(reconfig!.Items, i => i.Kind == "Alert");
+        }
+
+        [Fact]
         public void Status_UnknownAgent_FailsCleanly()
         {
             var result = _service.HandleStatus(new AgentStatusRequestMessage
