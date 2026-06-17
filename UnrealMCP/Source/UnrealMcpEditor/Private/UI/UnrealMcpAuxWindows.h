@@ -12,14 +12,15 @@ class SDockTab;
 class FSpawnTabArgs;
 
 /**
- * Registers the four §7 auxiliary windows (docs/ARCHITECTURE.md §7) as nomad dockable tabs under the same
- * "Window → Tools" group as the main window, plus the Settings page ALSO as a "Project → Plugins → AI Game
- * Developer" ISettingsModule section (UE users expect Project Settings discoverability):
+ * Registers the §7 auxiliary windows (docs/ARCHITECTURE.md §7) as nomad dockable tabs under the same
+ * "Window → Tools" group as the main window. Connection settings are NOT an aux window — they live in the
+ * single "AI Game Developer" main window (issue #107, Unity-MCP parity); the former standalone
+ * "AI Game Developer Settings" tab + its "Project → Plugins → AI Game Developer" ISettingsModule section
+ * were removed.
  *
  *   - UnrealMcpToolsWindow     — per-tool enable/disable (drives the §8 enable-map + manifest exclusion).
  *   - UnrealMcpPromptsWindow   — MCP prompts (honest empty state until a prompts feed lands).
  *   - UnrealMcpResourcesWindow — MCP resources (honest empty state).
- *   - UnrealMcpSettingsWindow  — §8 connection settings (also the ISettingsModule section).
  *   - UnrealMcpSerializationCheckWindow — serialize a picked UObject/Actor to JSON (Unity-MCP parity); opened
  *     by the main window's footer "Check" button via the static TryInvokeSerializationCheckTab().
  *
@@ -37,7 +38,6 @@ public:
 	static const FName ToolsTabId;
 	static const FName PromptsTabId;
 	static const FName ResourcesTabId;
-	static const FName SettingsTabId;
 	static const FName SerializationCheckTabId;
 
 	/**
@@ -49,24 +49,22 @@ public:
 	static bool TryInvokeSerializationCheckTab();
 
 	/**
-	 * Register the four nomad tabs + the ISettingsModule settings section. @p InViewModel is the shared state
-	 * model (must outlive the windows — the runtime owns it). @p InToolListProvider snapshots the registry's
-	 * tool set for the Tools window; @p InPortStatusProvider yields the read-only IPC-port line for Settings;
+	 * Register the nomad tabs. @p InViewModel is the shared state model (must outlive the windows — the runtime
+	 * owns it). @p InToolListProvider snapshots the registry's tool set for the Tools window;
 	 * @p InPromptProvider / @p InResourceProvider feed the Prompts / Resources lists (may be unset → empty
 	 * state). Idempotent: a second call is a no-op.
 	 */
 	void Register(
 		const TSharedRef<FUnrealMcpEditorViewModel>& InViewModel,
 		TFunction<TArray<FUnrealMcpToolListEntry>()> InToolListProvider,
-		TFunction<FString()> InPortStatusProvider,
 		TFunction<TArray<FUnrealMcpFeatureEntry>()> InPromptProvider,
 		TFunction<TArray<FUnrealMcpFeatureEntry>()> InResourceProvider);
 
-	/** Unregister the tab spawners + the settings section (Shutdown). Idempotent. Neutralizes the providers first. */
+	/** Unregister the tab spawners (Shutdown). Idempotent. Neutralizes the providers first. */
 	void Unregister();
 
 	/**
-	 * Flip the shared alive-flag the Tools/Settings providers close over, so any widget that outlives Unregister()
+	 * Flip the shared alive-flag the Tools provider closes over, so any widget that outlives Unregister()
 	 * (a deferred RequestCloseTab still queued when the runtime frees the registry/bridge) short-circuits its
 	 * provider to a safe empty result instead of dereferencing freed memory. Called from Unregister(), which the
 	 * runtime invokes BEFORE the BridgeServer/Registry resets. Idempotent; safe before Register(). Game-thread only.
@@ -77,17 +75,14 @@ private:
 	TSharedRef<SDockTab> SpawnToolsTab(const FSpawnTabArgs& Args);
 	TSharedRef<SDockTab> SpawnPromptsTab(const FSpawnTabArgs& Args);
 	TSharedRef<SDockTab> SpawnResourcesTab(const FSpawnTabArgs& Args);
-	TSharedRef<SDockTab> SpawnSettingsTab(const FSpawnTabArgs& Args);
 	TSharedRef<SDockTab> SpawnSerializationCheckTab(const FSpawnTabArgs& Args);
 
 	TSharedPtr<FUnrealMcpEditorViewModel> ViewModel;
 	TFunction<TArray<FUnrealMcpToolListEntry>()> ToolListProvider;
-	TFunction<FString()> PortStatusProvider;
 	TFunction<TArray<FUnrealMcpFeatureEntry>()> PromptProvider;
 	TFunction<TArray<FUnrealMcpFeatureEntry>()> ResourceProvider;
-	// Shared with every widget-held copy of the registry/bridge-touching providers; NeutralizeProviders() flips it
+	// Shared with every widget-held copy of the registry-touching provider; NeutralizeProviders() flips it
 	// false during teardown so a surviving widget's next paint returns empty rather than dereferencing freed memory.
 	TSharedPtr<bool> ProvidersAlive;
 	bool bRegistered = false;
-	bool bSettingsRegistered = false;
 };

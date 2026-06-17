@@ -61,7 +61,7 @@ Unlike Unity and Godot (C# engines that host the .NET `McpPlugin` in-process), U
 - [Updating the plugin](#updating-the-plugin)
 - [First run](#first-run)
 - [Tools](#tools) — all 8 families, 62 tools
-- [Per-tool enable / disable & Settings](#per-tool-enable--disable--settings)
+- [Per-tool enable / disable](#per-tool-enable--disable)
 - [`unreal-mcp-cli`](#unreal-mcp-cli)
 - [Customize Tools](#customize-tools)
 - [Configuration & environment variables](#configuration--environment-variables)
@@ -298,7 +298,7 @@ Captures return a base64 **PNG as MCP image content** so the LLM can inspect the
 
 ![AI Game Developer — Unreal MCP](https://github.com/IvanMurzak/Unreal-MCP/blob/main/docs/img/promo/hazzard-divider.svg?raw=true)
 
-# Per-tool enable / disable & Settings
+# Per-tool enable / disable
 
 Every tool can be individually enabled or disabled from the **MCP Tools** window — the standalone **MCP Tools** tab (registered under the editor's **Tools** menu). The window shows each tool's title, family, and description, plus an "N / M tools enabled" summary line. Disabling a tool:
 
@@ -312,7 +312,7 @@ Two filters combine to decide whether a tool is served (see ARCHITECTURE §7/§8
 
 A tool is served **iff** it passes the whitelist **and** is not in the blocklist. Both sets are persisted across editor sessions and survive an extension hot-reload (a re-registered tool inherits the retained toggle, so a rebuild can never silently re-enable a tool you disabled).
 
-The **Settings** page is reachable both as an aux tab and via **Project Settings → Plugins → AI Game Developer** (`ISettingsModule`). The **MCP Prompts** and **MCP Resources** windows are wired but ship empty in this release — each renders a subdued empty-state message (the "N / M enabled" summary is unique to the Tools window).
+All connection settings live in the single **AI Game Developer** main window's Connection section (there is no separate Settings tab or Project-Settings page — Unity-MCP parity). The **MCP Prompts** and **MCP Resources** windows are wired but ship empty in this release — each renders a subdued empty-state message (the "N / M enabled" summary is unique to the Tools window).
 
 ![AI Game Developer — Unreal MCP](https://github.com/IvanMurzak/Unreal-MCP/blob/main/docs/img/promo/hazzard-divider.svg?raw=true)
 
