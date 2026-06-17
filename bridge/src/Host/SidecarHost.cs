@@ -9,6 +9,8 @@
 */
 
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
@@ -16,12 +18,14 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using com.IvanMurzak.McpPlugin;
 using com.IvanMurzak.McpPlugin.Common;
+using com.IvanMurzak.McpPlugin.Common.Model;
 using com.IvanMurzak.ReflectorNet;
 using com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig;
 using com.IvanMurzak.Unreal.MCP.Bridge.Auth;
 using com.IvanMurzak.Unreal.MCP.Bridge.Ipc;
 using com.IvanMurzak.Unreal.MCP.Bridge.Tools;
 using Microsoft.Extensions.Logging;
+using R3;
 using McpVersion = com.IvanMurzak.McpPlugin.Common.Version;
 
 namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
@@ -86,6 +90,36 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         // a Custom-mode bearer is a LOCAL token, not a cloud authorization, so it must not light "Authorized".
         private bool _isCloudMode;
 
+        // §7 connected-AI-agent roster (issue #109). The plugin's "AI agents" status row reflects
+        // StatusMessage.AiAgents; before this it was hardcoded empty. The roster is the formatted label list
+        // ("AI agent: {ClientName} ({ClientVersion})") for the currently-connected MCP clients, sourced from
+        // McpManager.OnClientsChanged (push) and seeded via McpManagerHub.GetMcpClientData() (pull). Guarded by
+        // _rosterLock: OnClientsChanged fires on an R3 callback thread while EmitStatusAsync reads it from the
+        // transition queue / connect path, so the read and write must not race. A fresh status is emitted from the
+        // OnClientsChanged handler so the editor refreshes live on agent join/leave — today status fired only on
+        // the editor's own connection/auth transitions.
+        private readonly object _rosterLock = new();
+        private List<string> _connectedAgents = new();
+        private IDisposable? _clientsChangedSubscription;
+
+        // The bridge's OWN SignalR client label (Version.Environment). Used to defensively drop a self-entry from
+        // the roster: the server's GetMcpClientData/OnClientsChanged report MCP client (AI-agent) sessions, NOT the
+        // asking plugin, so in practice no self-entry appears — but excluding by name keeps the row honest if a
+        // future server build ever surfaces the plugin's own session. (McpClientData in the pinned McpPlugin 6.10.0
+        // exposes no ClientType discriminator, so name-equality is the available self-filter — see issue #109.)
+        private const string SelfClientName = "Unreal-MCP-Bridge";
+
+        // §7 retry/backoff for the roster seed (mirrors Unity's 3×/3s): an agent's MCP session can lag the plugin's
+        // SignalR connect, so an immediate GetMcpClientData() can return empty even though an agent is about to join.
+        // Internal so the bridge xUnit suite can drive the seed without waiting real seconds (override to 0 delay).
+        internal int RosterSeedRetryCount = 3;
+        internal int RosterSeedRetryDelayMs = 3000;
+
+        // Test seam: the status emitter. Defaults to the IPC send; the bridge xUnit suite swaps it for a capture so
+        // it can assert AiAgents population + the live re-emit on a roster change without a live socket. Never null
+        // after construction.
+        private Func<StatusMessage, Task> _statusEmitter;
+
         // Serialize SignalR connect/disconnect transitions so rapid Connect/Disconnect toggles (or a device-auth
         // reconnect racing a config-driven disconnect) apply in submission order — last-write-wins — instead of
         // two in-flight plugin.Connect()/Disconnect() calls interleaving and landing in the wrong final state.
@@ -111,6 +145,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             _fallbackHost = fallbackHost;
             _fallbackToken = fallbackToken;
             _clientLabel = clientLabel;
+            // Default to the real IPC send; SetStatusEmitterForTest swaps it in the xUnit suite.
+            _statusEmitter = status => _ipc.SendToPluginAsync(status, CancellationToken.None);
             _agentConfig = new AgentConfigService(loggerProvider?.CreateLogger(nameof(AgentConfigService)));
             if (authenticator != null)
             {
@@ -135,6 +171,20 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         /// repro — without standing up a live SignalR endpoint.
         /// </summary>
         internal void SetPluginForTest(IMcpPlugin plugin) => _plugin = plugin;
+
+        /// <summary>
+        /// Test seam: replace the status emitter (default: IPC send) with a capture so the bridge xUnit suite can
+        /// assert <see cref="StatusMessage.AiAgents"/> population and the live re-emit on a roster change without a
+        /// live socket. The captured emitter is invoked for EVERY status the host pushes.
+        /// </summary>
+        internal void SetStatusEmitterForTest(Func<StatusMessage, Task> emitter) =>
+            _statusEmitter = emitter ?? throw new ArgumentNullException(nameof(emitter));
+
+        /// <summary>Test seam: the current cached connected-agent roster (the labels surfaced in StatusMessage.AiAgents).</summary>
+        internal IReadOnlyList<string> ConnectedAgentsSnapshot
+        {
+            get { lock (_rosterLock) return _connectedAgents.ToList(); }
+        }
 
         /// <summary>
         /// Build the plugin (empty tool set) + reflector, wire the manifest registrar to the live
@@ -177,6 +227,12 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
 
             // Wire the registrar BEFORE the IPC loop can deliver a manifest.
             _ipc.Registrar = _registrar;
+
+            // §7 (issue #109): subscribe to the connected-AI-agent roster so the plugin's "AI agents" status row
+            // refreshes live. OnClientsChanged fires with the full active-client list on every agent join/leave;
+            // cache the formatted labels and push a FRESH status so the editor updates without a reconnect.
+            SubscribeToClientRoster(_plugin);
+
             _ipc.HandshakeAccepted += OnHandshakeAccepted;
             _ipc.ConfigReceived += OnConfigReceived;
             _ipc.AuthMessageReceived += HandleAuthMessage;
@@ -516,6 +572,10 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
                 if (ct.IsCancellationRequested)
                     return; // superseded — the newer transition owns the authoritative status emit
                 await EmitStatusAsync(ResolveConnectionStatusAfterReconnect(keepConnected: true, connected), cloudAuthState).ConfigureAwait(false);
+                // §7 (issue #109): a re-dial (config host/token change or device-auth commit) re-establishes the
+                // SignalR link — re-seed the roster so the agents row reflects the post-reconnect state.
+                if (connected)
+                    _ = SeedRosterAsync();
             }).ConfigureAwait(false);
         }
 
@@ -632,16 +692,116 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             return queued;
         }
 
+        /// <summary>
+        /// Subscribe to <see cref="IMcpManager.OnClientsChanged"/> so the §7 "AI agents" status row tracks the live
+        /// roster (issue #109). On each change: cache the formatted labels and emit a FRESH <c>status</c> so the
+        /// editor refreshes on agent join/leave (today status fired only on the editor's own connection/auth
+        /// transitions). Internal + plugin-injected so the bridge xUnit suite can drive it with a fake manager whose
+        /// observable it controls. Idempotent: a second subscribe (e.g. a re-Build) replaces the prior subscription.
+        /// </summary>
+        internal void SubscribeToClientRoster(IMcpPlugin plugin)
+        {
+            // Replace any prior subscription so a re-wire does not leak / double-emit.
+            _clientsChangedSubscription?.Dispose();
+            _clientsChangedSubscription = plugin.McpManager.OnClientsChanged
+                .Subscribe(clients =>
+                {
+                    UpdateRoster(clients);
+                    // Emit a fresh status carrying the new roster. The connection state is unchanged by a roster
+                    // change, so report the resolved current state (armed → Connected once a link exists; the plugin
+                    // latches the dot from aiAgents anyway). Fire-and-forget — never throw out of the R3 callback.
+                    _ = EmitStatusAsync(_config.KeepConnected ? "Connected" : "Disconnected");
+                });
+        }
+
+        /// <summary>
+        /// Seed the roster on connect via <see cref="IMcpManagerHub.GetMcpClientData"/> (pull), with a small
+        /// retry/backoff (Unity uses 3×/3s) because an agent's MCP session can lag the plugin's SignalR connect —
+        /// an immediate pull can return empty even though an agent is about to join. Each successful pull updates
+        /// the cache and emits a fresh status; if the pull yields no connected agent and retries remain (and we are
+        /// still armed), it waits <see cref="RosterSeedRetryDelayMs"/> and tries again. Never throws (runs on a
+        /// background task). Internal so the bridge xUnit suite can drive it directly.
+        /// </summary>
+        internal async Task SeedRosterAsync(CancellationToken ct = default)
+        {
+            var hub = _plugin?.McpManagerHub;
+            if (hub == null)
+                return;
+
+            for (var attempt = 0; ; attempt++)
+            {
+                if (ct.IsCancellationRequested)
+                    return;
+
+                McpClientData[]? clients = null;
+                try
+                {
+                    var task = hub.GetMcpClientData();
+                    if (task != null)
+                        clients = await task.ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    _logger?.LogDebug("Roster seed pull failed: {Message}", ex.Message);
+                }
+
+                if (clients != null)
+                {
+                    UpdateRoster(clients);
+                    await EmitStatusAsync(_config.KeepConnected ? "Connected" : "Disconnected").ConfigureAwait(false);
+                }
+
+                var anyConnected = clients != null && clients.Any(c => c.IsConnected);
+                // Retry only while no agent is connected yet, retries remain, and we are still armed — exactly
+                // Unity's condition (an agent is expected to re-establish its session shortly after we connect).
+                if (anyConnected || attempt >= RosterSeedRetryCount || !_config.KeepConnected)
+                    return;
+
+                _logger?.LogDebug("No AI agent in roster yet; retrying seed ({RetriesLeft} left).", RosterSeedRetryCount - attempt);
+                try { await Task.Delay(RosterSeedRetryDelayMs, ct).ConfigureAwait(false); }
+                catch (OperationCanceledException) { return; }
+            }
+        }
+
+        /// <summary>Recompute + cache the connected-agent labels from a roster snapshot (under <see cref="_rosterLock"/>).</summary>
+        private void UpdateRoster(IReadOnlyList<McpClientData>? clients)
+        {
+            var labels = BuildAgentLabels(clients);
+            lock (_rosterLock)
+                _connectedAgents = labels;
+        }
+
+        /// <summary>
+        /// Project a roster snapshot to the §7 status labels: keep only connected clients, drop the bridge's own
+        /// self-entry (defensive — the server reports MCP client sessions, not the asking plugin), and format each
+        /// as Unity's exact label <c>"AI agent: {ClientName} ({ClientVersion})"</c>. Pure + static so the bridge
+        /// xUnit suite locks the filter/format/self-exclusion matrix without a live plugin. Null/empty → empty list.
+        /// </summary>
+        internal static List<string> BuildAgentLabels(IReadOnlyList<McpClientData>? clients)
+        {
+            if (clients == null)
+                return new List<string>();
+            return clients
+                .Where(c => c != null && c.IsConnected)
+                .Where(c => !string.Equals(c.ClientName, SelfClientName, StringComparison.Ordinal))
+                .Select(c => $"AI agent: {c.ClientName} ({c.ClientVersion})")
+                .ToList();
+        }
+
         /// <summary>Push a §1.3 <c>status</c> message to the plugin (the §7 live connection indicator).</summary>
         private Task EmitStatusAsync(string connectionState, string? cloudAuthState = null)
         {
+            List<string> agents;
+            lock (_rosterLock)
+                agents = _connectedAgents.ToList();
             var status = new StatusMessage
             {
                 ConnectionState = connectionState,
                 KeepConnected = _config.KeepConnected,
                 CloudAuthState = cloudAuthState,
+                AiAgents = agents,
             };
-            return _ipc.SendToPluginAsync(status, CancellationToken.None);
+            return _statusEmitter(status);
         }
 
         // Internal (not private) so the bridge xUnit suite can assert the initial connect is routed through the
@@ -672,6 +832,11 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
                     // "Authorized — cloud token stored" indicator (ApplyStatus latches it and never demotes).
                     var cloudAuthState = _isCloudMode && !string.IsNullOrEmpty(_config.Token) ? "Authorized" : null;
                     await EmitStatusAsync(ok ? "Connected" : "Connecting", cloudAuthState).ConfigureAwait(false);
+                    // §7 (issue #109): once connected, seed the AI-agent roster (with retry/backoff) so the row is
+                    // populated even before the first OnClientsChanged push. Fire-and-forget on a background task —
+                    // it has its own retry delays and must not block the transition queue.
+                    if (ok)
+                        _ = SeedRosterAsync();
                 }
                 catch (OperationCanceledException)
                 {
@@ -690,6 +855,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             _ipc.ConfigReceived -= OnConfigReceived;
             _ipc.AuthMessageReceived -= HandleAuthMessage;
             _ipc.AgentConfigRequestReceived -= HandleAgentConfigRequest;
+            try { _clientsChangedSubscription?.Dispose(); } catch { /* ignore */ }
+            _clientsChangedSubscription = null;
             try { _authCts?.Cancel(); } catch { /* ignore */ }
             _authCts?.Dispose();
             // Tear down the transition CTS under _transitionLock so a concurrent RunConnectionTransition cannot
