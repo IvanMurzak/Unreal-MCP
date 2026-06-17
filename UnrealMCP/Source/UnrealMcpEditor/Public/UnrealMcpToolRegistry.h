@@ -112,6 +112,14 @@ struct UNREALMCPEDITOR_API FUnrealMcpRegisteredTool
 	FString Name;
 	FString Title;
 	FString Description;
+	/**
+	 * A dedicated SHORT skill description (the [AiSkillDescription] analog, docs/ARCHITECTURE.md §7) used for the
+	 * generated SKILL.md YAML front-matter `description:` — distinct from the full Description, which becomes the
+	 * SKILL.md body. Optional per tool; when empty the manifest falls back to the Title (a concise human label),
+	 * and the sidecar generator further falls back to the capped full Description. Declared via the fluent
+	 * FUnrealMcpToolBuilder::SkillDescription(); shipped to the sidecar in ToDescriptorJson() as `skillDescription`.
+	 */
+	FString SkillDescription;
 	TArray<FUnrealMcpParamSpec> Params;
 	TSharedPtr<FJsonObject> OutputSchema;
 	bool bReadOnlyHint = false;
@@ -149,6 +157,8 @@ public:
 
 	FUnrealMcpToolBuilder& Title(const FString& InTitle);
 	FUnrealMcpToolBuilder& Description(const FString& InDescription);
+	/** Set the SHORT skill description (the [AiSkillDescription] analog → SKILL.md front-matter). Optional. */
+	FUnrealMcpToolBuilder& SkillDescription(const FString& InSkillDescription);
 	FUnrealMcpToolBuilder& ParamString(const FString& Name, const FString& Desc, EUnrealMcpParamRequirement Req = EUnrealMcpParamRequirement::Optional);
 	FUnrealMcpToolBuilder& ParamInt(const FString& Name, const FString& Desc, EUnrealMcpParamRequirement Req = EUnrealMcpParamRequirement::Optional);
 	FUnrealMcpToolBuilder& ParamNumber(const FString& Name, const FString& Desc, EUnrealMcpParamRequirement Req = EUnrealMcpParamRequirement::Optional);

@@ -6,108 +6,153 @@
 #include "CoreMinimal.h"
 #include "Widgets/SCompoundWidget.h"
 #include "Widgets/DeclarativeSyntaxSupport.h"
-#include "Agents/AiAgentConfigurator.h"
+#include "UI/UnrealMcpAgentConfigModels.h"
 
 class FUnrealMcpEditorViewModel;
-class FAiAgentConfiguratorRegistry;
-class FAiAgentConfigurator;
+class FJsonObject;
 class SVerticalBox;
 template <typename T> class SComboBox;
 
 /**
- * The "AI Agent Configurators" Slate panel (docs/ARCHITECTURE.md §7) — the Unreal/Slate analog of Unity's
- * AiAgentConfigurators UI and Godot's AgentConfiguratorsPanel. Lets the user pick an external AI agent / MCP
- * client from a dropdown and auto-configure it to reach this project's MCP server by writing/merging that
- * client's config file (STDIO and HTTP forms), with live status + Configure/Reconfigure/Remove.
+ * The "AI Agent Configurators" Slate panel (docs/ARCHITECTURE.md §7) — a THIN VIEW over the C# sidecar's
+ * AI-agent configuration service (issue #101). All configurator LOGIC (which agents exist, where each writes its
+ * config, configure/remove/status, the per-transport UI content) lives in the shared
+ * <c>com.IvanMurzak.McpPlugin.AgentConfig</c> library and is served by the sidecar over IPC. This panel only:
  *
- * State sources, kept thin (the view is dumb, the model owns state):
- *  - ViewModel — persists the dropdown selection (SelectedAgentId) and is the single config store.
- *  - ConnectionInfoProvider — yields the live FAiAgentConnectionInfo (server path / port / url / auth / token)
- *    so the assembled STDIO/HTTP snippets always reflect the current connection. Resolving this needs the
- *    runtime's bridge port + the §6 server path, which the panel cannot reach directly — hence a provider sink
- *    (mirrors the aux-windows PortStatusProvider pattern), wired by the runtime; a spec injects a stub.
- *  - ProjectRootProvider — yields the live project root for resolving per-agent config file paths.
+ *   - sends requests (`agents-list` / `agent-status` / `agent-configure` / `agent-remove` / `agent-skills-path`)
+ *     over IPC via the injected SendRequest sink (wired to FUnrealMcpBridgeServer::SendAgentConfigMessage);
+ *   - parses the `agent-config-result` DTO into FUnrealMcpAgentDescription / FAiAgentRichContentSection and
+ *     renders it with the existing reusable widget templates (SUnrealMcpAgentWidgets);
+ *   - drives an async pending/refresh state machine: Configure/Remove enter a pending state, the sidecar performs
+ *     the write and returns the refreshed status, the panel re-renders; status is (re)queried on panel open and
+ *     after each action, and whenever the connection settings change;
+ *   - renders the EditableField kind (the Custom agent's editable config/skills path) and writes a committed
+ *     value back over IPC;
+ *   - degrades gracefully when the sidecar is not connected (the SendRequest sink returns false): it shows a
+ *     clear "bridge not connected" state and re-requests on the next handshake, instead of erroring.
  *
- * Token discipline (§8): the assembled snippet preview masks the bearer token by default; a per-agent Reveal
- * toggle shows the raw value only while explicitly enabled. Configure() and Copy write/copy the REAL token; the
- * raw value never reaches a log line. Switching agents resets the reveal toggle.
+ * NO C++ configurator subsystem (Agents/) is referenced — it was removed in #101. The panel keeps its own thin
+ * UI shell only. Agent ICONS stay plugin-side conceptually (the DTO carries the icon NAME only; the plugin would
+ * resolve the name to a brush) — there are no agent-icon brush assets shipped today, so the name is carried in
+ * the model for forward compatibility but no icon is drawn (parity with the prior panel, which drew none).
  *
- * Built with its own registry instance (fresh configurators), so it can be hosted as a section inside the main
- * window without sharing config-cache state with any spec's registry.
+ * Threading (M9b): SendRequest is invoked on the game thread; OnAgentConfigResult MUST be called on the game
+ * thread by the caller (the runtime marshals the IPC reader-thread `agent-config-result` onto the game thread
+ * before delivering it here).
  */
 class SUnrealMcpAgentConfigurators : public SCompoundWidget
 {
 public:
 	SLATE_BEGIN_ARGS(SUnrealMcpAgentConfigurators) {}
-		/** The shared view-model (owned by the runtime). Required for persistence. */
+		/** The shared view-model (owned by the runtime). Used to persist the dropdown selection + read the skills path. */
 		SLATE_ARGUMENT(TSharedPtr<FUnrealMcpEditorViewModel>, ViewModel)
-		/** Yields the live connection facts used to assemble the STDIO/HTTP snippets. Required for correct output. */
+		/** Yields the live connection facts forwarded to the sidecar as the per-request settings. Required for correct output. */
 		SLATE_ARGUMENT(TFunction<FAiAgentConnectionInfo()>, ConnectionInfoProvider)
-		/** Yields the live project root for per-agent config-file path resolution. Defaults to the project dir. */
+		/** Yields the live project root for the settings DTO. Defaults to the project dir. */
 		SLATE_ARGUMENT(TFunction<FString()>, ProjectRootProvider)
+		/**
+		 * Sends an agent-config request JSON object to the sidecar over IPC. Returns true when the frame reached a
+		 * connected/handshaken sidecar; false when there is no sidecar (the panel then shows the graceful
+		 * "bridge not connected" state and retries on the next handshake). Wired by the runtime to
+		 * FUnrealMcpBridgeServer::SendAgentConfigMessage; a spec injects a recording stub.
+		 */
+		SLATE_ARGUMENT(TFunction<bool(const TSharedPtr<FJsonObject>&)>, SendRequest)
 	SLATE_END_ARGS()
 
 	void Construct(const FArguments& InArgs);
 	virtual ~SUnrealMcpAgentConfigurators() override;
 
+	/**
+	 * Deliver a sidecar `agent-config-result` (§7) to the panel. Called ON THE GAME THREAD by the runtime after it
+	 * marshals the IPC message off the reader thread. Correlates by the requestId the panel issued; an unknown /
+	 * stale requestId is ignored. Updates the agent list / selected-agent description / skills path and re-renders.
+	 * Public so a spec drives the async state machine directly with a synthetic result.
+	 */
+	UNREALMCPEDITOR_API void OnAgentConfigResult(const TSharedPtr<FJsonObject>& Result);
+
+	/**
+	 * Re-query the agent set + the selected agent's status from the sidecar (panel open / handshake / a connection
+	 * setting changed). Idempotent and safe to call when the sidecar is down — it just enters the graceful state.
+	 */
+	UNREALMCPEDITOR_API void Refresh();
+
 private:
 	TSharedPtr<FUnrealMcpEditorViewModel> ViewModel;
 	TFunction<FAiAgentConnectionInfo()> ConnectionInfoProvider;
 	TFunction<FString()> ProjectRootProvider;
+	TFunction<bool(const TSharedPtr<FJsonObject>&)> SendRequest;
 
-	// Handle for the view-model's OnConnectionSettingsChanged subscription, removed in the destructor so a
-	// connection-setting change after this widget is gone never invokes a dangling handler.
+	// Subscription to the view-model's OnConnectionSettingsChanged, removed in the destructor.
 	FDelegateHandle ConnectionChangedHandle;
 
-	TSharedPtr<FAiAgentConfiguratorRegistry> Registry;
-	// The dropdown's item source (agent display names, registry order).
+	// The dropdown's item source (agent display names, sidecar registry order). Rebuilt from the agents-list result.
 	TArray<TSharedPtr<FString>> AgentNameItems;
+	// Parallel agent ids (same order as AgentNameItems) — the id sent in per-agent requests.
+	TArray<FString> AgentIds;
 	TSharedPtr<SComboBox<TSharedPtr<FString>>> AgentCombo;
-	// The container holding the currently-selected agent's per-agent panel (rebuilt on selection change).
+	// The container holding the currently-selected agent's per-agent panel (rebuilt on selection change / result).
 	TSharedPtr<SVerticalBox> AgentPanelContainer;
 
-	// The currently-selected configurator (resolved from the view-model's persisted SelectedAgentId, clamped).
-	TSharedPtr<FAiAgentConfigurator> Selected;
-	// Whether the snippet preview reveals the raw token (per-agent; reset on selection change). Default masked.
-	bool bRevealToken = false;
+	// The selected agent id (persisted via the view-model) and its last-known description from the sidecar.
+	FString SelectedAgentId;
+	FUnrealMcpAgentDescription SelectedDescription;
+	bool bHaveDescription = false;
+
+	/** The async UI phase for the selected agent's status/action round-trip. */
+	enum class EPhase : uint8
+	{
+		Idle,         // a description is shown (or none requested yet)
+		Loading,      // a status/list request is in flight
+		Pending,      // a configure/remove action is in flight (buttons disabled, "Working…")
+		Disconnected, // the sidecar is not connected (SendRequest returned false) — graceful degrade
+	};
+	EPhase Phase = EPhase::Idle;
+	// A short human-readable error from the last failed result (shown in the panel; never a secret).
+	FString LastError;
+
+	// In-flight request correlation: the requestId the panel issued and what operation it was (so a stale/late
+	// result for a superseded request is ignored). Empty Pending/Loading requestId ⇒ nothing in flight.
+	FString PendingRequestId;
+	FString PendingRequestType;
 
 	bool IsViewModelValid() const { return ViewModel.IsValid(); }
 
-	// Re-resolve the selected configurator from the view-model + provider and rebuild its panel.
-	void RefreshSelectedConfigurator();
-	// Handler for FUnrealMcpEditorViewModel::OnConnectionSettingsChanged: invalidate the active configurator's
-	// cached config (re-resolved from fresh connection info) and rebuild the panel, so the shown snippet/status
-	// AND what Configure() writes track the new connection settings without the user reselecting the agent.
-	void OnConnectionSettingsChanged();
-	// (Re)build the per-agent panel for the current Selected configurator into AgentPanelContainer.
-	void RebuildAgentPanel();
-	// Bind the selected configurator to the live connection info + project root.
-	void BindSelected();
+	// --- Request builders / senders (game thread). ---
 
-	// The configuration-status row for the active transport (Unity's ConfigurationElements): a
-	// "Configured (transport)" / "Not configured" label + Configure/Reconfigure + Remove (#59).
-	TSharedRef<SWidget> MakeConfigurationStatusRow(bool bStdio);
-	// A collapsible foldout rendering one per-agent rich-content section with the reusable widget templates (#59).
-	TSharedRef<SWidget> MakeRichContentFoldout(const struct FAiAgentRichContentSection& Section);
-
-	// The snippet preview text for a transport, masking the token unless bRevealToken (§8).
-	FString BuildSnippetPreview(bool bStdio) const;
-	// Mask the bearer token inside an assembled snippet string unless revealed.
-	static FString MaskTokenInSnippet(const FString& Snippet, const FString& Token, bool bReveal);
-
-	// --- Skills section (issue #53 Phase C). Shown ONLY when the selected agent SupportsSkills. ---
-
-	/** Build the per-agent skills section (toggle + resolved output path + Generate button, plus the Custom edit field). */
-	TSharedRef<SWidget> BuildSkillsSection();
-	/** Resolve the selected agent's absolute skills folder (project-relative resolved under the live project root). */
-	FString ResolveSelectedSkillsPath() const;
+	/** Build the per-request settings DTO from the live connection info + project root. */
+	TSharedPtr<FJsonObject> BuildSettings() const;
+	/** The effective transport string the sidecar should compute status for ("stdio"/"streamableHttp"). */
+	FString EffectiveTransportString() const;
+	/** Generate a fresh correlation id for a request. */
+	static FString NewRequestId();
 	/**
-	 * Convert an absolute filesystem path to a project-root-relative display string (forward slashes, no leading
-	 * "./"); mirrors Unity's ToDisplayPath and the FPaths::MakePathRelativeTo pattern in UnrealMcpSourceTools.
-	 * A path already outside / not under the project root, or an empty input, is returned unchanged (still useful
-	 * as a fallback display). The full absolute path stays available as the widget's tooltip.
+	 * Send a request object (sets type/requestId), tracking it as the in-flight request of @p Phase. Returns true
+	 * when it reached the sidecar; on false the panel enters the Disconnected graceful state and re-renders.
 	 */
-	FString MakeDisplayPath(const FString& AbsolutePath) const;
-	/** Generate the SKILL.md files for the selected agent into its resolved skills folder (idempotent). Logs the result. */
-	void GenerateSkillsForSelected();
+	bool SendTracked(const TSharedPtr<FJsonObject>& Request, const FString& RequestType, EPhase InFlightPhase);
+
+	void RequestAgentsList();
+	void RequestSelectedStatus();
+	void RequestConfigure();
+	void RequestRemove();
+	void WriteBackEditableValue(const FString& NewValue);
+	/** Ask the sidecar to GENERATE the per-tool SKILL.md files for the selected agent (§7 skills section). */
+	void RequestGenerateSkills();
+
+	// --- Rendering. ---
+
+	void RebuildAgentPanel();
+	/** The links row (6.9.0 top-level Link items as hyperlinks; legacy Download/Tutorial buttons when none). */
+	TSharedRef<SWidget> MakeLinksRow();
+	TSharedRef<SWidget> MakeStatusRow();
+	/** The skills section (generate button + resolved path + last-run status), shown only when the agent supports skills. */
+	TSharedRef<SWidget> MakeSkillsSection();
+	TSharedRef<SWidget> MakeRichContentFoldout(const FAiAgentRichContentSection& Section);
+	TSharedRef<SWidget> MakeItemWidget(const FAiAgentRichContentItem& Item);
+	void SetSelectedAgentId(const FString& InAgentId);
+	int32 IndexOfAgentId(const FString& InAgentId) const;
+
+	// The last skill-generation outcome for the selected agent (shown in the skills section; reset on selection change).
+	FString LastSkillsStatus;   // e.g. "Generated 62 file(s)" / a failure reason (empty = none run yet)
+	FString LastSkillsPath;     // the resolved absolute folder the sidecar wrote under (from the result)
 };

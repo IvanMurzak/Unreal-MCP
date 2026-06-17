@@ -5,10 +5,12 @@
 
 #include "CoreMinimal.h"
 #include "Delegates/Delegate.h"
-#include "Agents/AiAgentConfigurator.h"
+#include "UI/UnrealMcpAgentConfigModels.h"
 
 class FUnrealMcpEditorViewModel;
+class FJsonObject;
 class SDockTab;
+class SUnrealMcpMainWindow;
 class FSpawnTabArgs;
 class FTabManager;
 class FWorkspaceItem;
@@ -39,10 +41,18 @@ public:
 		const FString& InPluginVersion,
 		FSimpleDelegate InOnRestartBridge,
 		TFunction<FString()> InBridgeStatusProvider,
-		TFunction<FAiAgentConnectionInfo()> InConnectionInfoProvider);
+		TFunction<FAiAgentConnectionInfo()> InConnectionInfoProvider,
+		TFunction<bool(const TSharedPtr<FJsonObject>&)> InSendAgentConfigRequest = nullptr);
 
 	/** Unregister the tab spawner (Shutdown). Idempotent. */
 	void Unregister();
+
+	/**
+	 * Deliver a sidecar `agent-config-result` (§7) to the live main window's AI Agent Configurators panel. Called
+	 * on the game thread by the runtime after it marshals the IPC message off the reader thread. No-op when no
+	 * window is currently spawned.
+	 */
+	void DeliverAgentConfigResult(const TSharedPtr<FJsonObject>& Result);
 
 private:
 	TSharedRef<SDockTab> SpawnTab(const FSpawnTabArgs& Args);
@@ -52,5 +62,9 @@ private:
 	FSimpleDelegate OnRestartBridge;
 	TFunction<FString()> BridgeStatusProvider;
 	TFunction<FAiAgentConnectionInfo()> ConnectionInfoProvider;
+	TFunction<bool(const TSharedPtr<FJsonObject>&)> SendAgentConfigRequest;
+	// The currently-spawned main window (weak so a closed tab does not keep it alive); the agent-config-result
+	// feed forwards through it to the panel.
+	TWeakPtr<SUnrealMcpMainWindow> ActiveWindow;
 	bool bRegistered = false;
 };

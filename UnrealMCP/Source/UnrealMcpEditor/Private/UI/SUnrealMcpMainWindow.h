@@ -7,7 +7,10 @@
 #include "Widgets/SCompoundWidget.h"
 #include "Widgets/DeclarativeSyntaxSupport.h"
 #include "UI/UnrealMcpEditorViewModel.h"
-#include "Agents/AiAgentConfigurator.h"
+#include "UI/UnrealMcpAgentConfigModels.h"
+
+class FJsonObject;
+class SUnrealMcpAgentConfigurators;
 
 /**
  * The "AI Game Developer" main window (docs/ARCHITECTURE.md §7), a pure-Slate compound widget — NO UMG /
@@ -34,9 +37,20 @@ public:
 		SLATE_ARGUMENT(TFunction<FString()>, BridgeStatusProvider)
 		/** Optional: yields the live connection facts for the AI Agent Configurators panel (§7/§8). */
 		SLATE_ARGUMENT(TFunction<FAiAgentConnectionInfo()>, ConnectionInfoProvider)
+		/**
+		 * Optional: sends an AI-agent configurator request to the sidecar over IPC (§7, issue #101). Forwarded to
+		 * the SUnrealMcpAgentConfigurators panel; wired by the runtime to FUnrealMcpBridgeServer::SendAgentConfigMessage.
+		 */
+		SLATE_ARGUMENT(TFunction<bool(const TSharedPtr<FJsonObject>&)>, SendAgentConfigRequest)
 	SLATE_END_ARGS()
 
 	void Construct(const FArguments& InArgs);
+
+	/**
+	 * Deliver a sidecar `agent-config-result` to the AI Agent Configurators panel (§7). Called on the game thread
+	 * by the runtime after it marshals the IPC message off the reader thread. No-op when the panel is not built.
+	 */
+	UNREALMCPEDITOR_API void DeliverAgentConfigResult(const TSharedPtr<FJsonObject>& Result);
 
 private:
 	TSharedPtr<FUnrealMcpEditorViewModel> ViewModel;
@@ -44,6 +58,9 @@ private:
 	FSimpleDelegate OnRestartBridge;
 	TFunction<FString()> BridgeStatusProvider;
 	TFunction<FAiAgentConnectionInfo()> ConnectionInfoProvider;
+	TFunction<bool(const TSharedPtr<FJsonObject>&)> SendAgentConfigRequest;
+	// The AI Agent Configurators panel — held so the runtime's `agent-config-result` feed can reach it.
+	TSharedPtr<SUnrealMcpAgentConfigurators> AgentConfiguratorsPanel;
 
 	// Whether the masked Custom-mode token field is currently revealed (reveal-on-hold, §8).
 	bool bRevealToken = false;

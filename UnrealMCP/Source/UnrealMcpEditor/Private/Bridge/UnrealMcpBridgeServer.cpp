@@ -35,6 +35,14 @@ namespace
 	const FString TypeAuthStart = TEXT("auth-start");
 	const FString TypeAuthCancel = TEXT("auth-cancel");
 	const FString TypeAuthRevoke = TEXT("auth-revoke");
+	// §7 AI-agent configurator IPC verbs (plugin → sidecar requests + the sidecar → plugin result).
+	const FString TypeAgentsList = TEXT("agents-list");
+	const FString TypeAgentStatus = TEXT("agent-status");
+	const FString TypeAgentConfigure = TEXT("agent-configure");
+	const FString TypeAgentRemove = TEXT("agent-remove");
+	const FString TypeAgentSkillsPath = TEXT("agent-skills-path");
+	const FString TypeAgentGenerateSkills = TEXT("agent-generate-skills");
+	const FString TypeAgentConfigResult = TEXT("agent-config-result");
 	const FString TypePing = TEXT("ping");
 	const FString TypePong = TEXT("pong");
 	const FString TypeShutdown = TEXT("shutdown");
@@ -331,11 +339,12 @@ void FUnrealMcpBridgeServer::HandleLine(const FString& Line, int32 Generation)
 	{
 		// liveness already refreshed in Run()
 	}
-	else if (Type == TypeStatus || Type == TypeDeviceAuth)
+	else if (Type == TypeStatus || Type == TypeDeviceAuth || Type == TypeAgentConfigResult)
 	{
-		// §1.3 / §7: the live UI feed. Hand it to the registered sink (the view-model) WITHOUT touching any
-		// Slate/engine state here — the sink marshals onto the game thread (M9b). Copy the sink out under the
-		// lock so a concurrent window-close clear never invalidates the TFunction mid-call.
+		// §1.3 / §7: the live UI feed (connection status, device-auth, AND the AI-agent configurator results).
+		// Hand it to the registered sink (the view-model) WITHOUT touching any Slate/engine state here — the
+		// sink marshals onto the game thread (M9b) and routes by type. Copy the sink out under the lock so a
+		// concurrent window-close clear never invalidates the TFunction mid-call.
 		TFunction<void(const FString&, TSharedPtr<FJsonObject>)> SinkCopy;
 		{
 			FScopeLock Lock(&StatusSinkMutex);
@@ -704,6 +713,34 @@ bool FUnrealMcpBridgeServer::SendAuthMessage(const FString& AuthType)
 
 	TSharedPtr<FJsonObject> Message = MakeShared<FJsonObject>();
 	Message->SetStringField(TEXT("type"), AuthType);
+	return SendMessage(Message);
+}
+
+bool FUnrealMcpBridgeServer::IsValidAgentConfigVerb(const FString& Type)
+{
+	// Keep in lockstep with the sidecar's IpcProtocol.MessageTypes §7 request verbs — omitting one here
+	// silently breaks that UI action (issue #101: a missing `agent-generate-skills` made the Generate button
+	// flip the panel to Disconnected because the send was refused).
+	return Type == TypeAgentsList || Type == TypeAgentStatus || Type == TypeAgentConfigure ||
+		Type == TypeAgentRemove || Type == TypeAgentSkillsPath || Type == TypeAgentGenerateSkills;
+}
+
+bool FUnrealMcpBridgeServer::SendAgentConfigMessage(const TSharedPtr<FJsonObject>& Message)
+{
+	if (!Message.IsValid())
+		return false;
+
+	// Only the §7 agent-config request verbs are valid here, so a UI bug cannot smuggle an arbitrary message
+	// type onto the wire (mirrors SendAuthMessage's allow-list).
+	FString Type;
+	if (!Message->TryGetStringField(TEXT("type"), Type) || !IsValidAgentConfigVerb(Type))
+	{
+		UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] refusing to send unknown agent-config message type '%s'."), *Type);
+		return false;
+	}
+	if (!bClientConnected || !bHandshakeOk)
+		return false;
+
 	return SendMessage(Message);
 }
 

@@ -72,6 +72,27 @@ public:
 	bool SendAuthMessage(const FString& AuthType);
 
 	/**
+	 * Send a §7 AI-agent configurator request (`agents-list` / `agent-status` / `agent-configure` /
+	 * `agent-remove` / `agent-skills-path` / `agent-generate-skills`) to the connected sidecar, which serves it
+	 * against the shared com.IvanMurzak.McpPlugin.AgentConfig library and answers with an `agent-config-result`
+	 * routed back through the status sink. @p Message must carry a `type` of one of those verbs (see
+	 * IsValidAgentConfigVerb) and the request fields (requestId, agentId, transport, settings, …). Thread-safe;
+	 * no-op (returns false) when no sidecar is connected/handshaken — the thin Slate panel then shows its
+	 * graceful "bridge not connected" state. The UI calls this on the game thread; the frame is serialized
+	 * through the shared WriteMutex like any other.
+	 */
+	bool SendAgentConfigMessage(const TSharedPtr<FJsonObject>& Message);
+
+	/**
+	 * The §7 agent-config request-verb allow-list (mirrors SendAuthMessage's allow-list): a UI bug cannot
+	 * smuggle an arbitrary message type onto the wire. SendAgentConfigMessage gates on this before sending,
+	 * so the verb set stays in lockstep with the sidecar's IpcProtocol.MessageTypes. Pure + static so a spec
+	 * can assert the accepted/rejected verbs without standing up a live socket. UNREALMCPEDITOR_API-exported
+	 * so the Tests module (a separate DLL) links against it.
+	 */
+	static UNREALMCPEDITOR_API bool IsValidAgentConfigVerb(const FString& Type);
+
+	/**
 	 * Register a sink for the inbound sidecar→plugin `status` and `device-auth` feed (§1.3 / §7). The sink
 	 * is invoked ON THE IPC READER THREAD with the message type and parsed object — the caller (the §7
 	 * view-model) MUST marshal onto the game thread (AsyncTask(GameThread)) before touching any Slate state

@@ -28,6 +28,7 @@
 #include "HAL/PlatformTime.h"
 #include "HAL/PlatformApplicationMisc.h"
 #include "Interfaces/IPluginManager.h"
+#include "Dom/JsonObject.h"
 
 #define LOCTEXT_NAMESPACE "UnrealMcp"
 
@@ -70,6 +71,7 @@ void SUnrealMcpMainWindow::Construct(const FArguments& InArgs)
 	OnRestartBridge = InArgs._OnRestartBridge;
 	BridgeStatusProvider = InArgs._BridgeStatusProvider;
 	ConnectionInfoProvider = InArgs._ConnectionInfoProvider;
+	SendAgentConfigRequest = InArgs._SendAgentConfigRequest;
 
 	// The AI-cube logo brush comes from the style set (registered at module startup; lazily-inited fallback).
 	LogoBrush = FUnrealMcpStyle::Get().GetBrush("UnrealMcp.Logo");
@@ -826,9 +828,16 @@ TSharedRef<SWidget> SUnrealMcpMainWindow::BuildAgentConfiguratorsSection()
 	// card (Unity reserves the blue frame for the AI-agent block) — one of the few elements that stays carded per
 	// issue #80 item 6. Bound to the shared view-model + the runtime connection-info provider. This is distinct
 	// from BuildAiAgentsStatusRow (the read-only connected-agents readout inside the Connection timeline).
-	return SNew(SUnrealMcpAgentConfigurators)
+	return SAssignNew(AgentConfiguratorsPanel, SUnrealMcpAgentConfigurators)
 		.ViewModel(ViewModel)
-		.ConnectionInfoProvider(ConnectionInfoProvider);
+		.ConnectionInfoProvider(ConnectionInfoProvider)
+		.SendRequest(SendAgentConfigRequest);
+}
+
+void SUnrealMcpMainWindow::DeliverAgentConfigResult(const TSharedPtr<FJsonObject>& Result)
+{
+	if (AgentConfiguratorsPanel.IsValid())
+		AgentConfiguratorsPanel->OnAgentConfigResult(Result);
 }
 
 TSharedRef<SWidget> SUnrealMcpMainWindow::BuildExtensionsSection()

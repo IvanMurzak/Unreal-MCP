@@ -12,10 +12,12 @@ using System;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using com.IvanMurzak.McpPlugin;
 using com.IvanMurzak.McpPlugin.Common;
 using com.IvanMurzak.ReflectorNet;
+using com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig;
 using com.IvanMurzak.Unreal.MCP.Bridge.Auth;
 using com.IvanMurzak.Unreal.MCP.Bridge.Ipc;
 using com.IvanMurzak.Unreal.MCP.Bridge.Tools;
@@ -68,6 +70,10 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         private Reflector? _reflector;
         private int _signalRConnectStarted;
 
+        // §7 AI-agent configurator service, backed by the shared com.IvanMurzak.McpPlugin.AgentConfig library
+        // (the single cross-engine implementation). Serves the plugin's thin Slate panel over IPC.
+        private readonly AgentConfigService _agentConfig;
+
         // §7 Cloud device-code flow (replaces PR #8's auth stubs). The authenticator is injectable so the xUnit
         // suite drives the flow against a fake HTTP handler; _authCts cancels an in-progress flow (auth-cancel).
         private readonly DeviceCodeAuthenticator _authenticator;
@@ -105,6 +111,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             _fallbackHost = fallbackHost;
             _fallbackToken = fallbackToken;
             _clientLabel = clientLabel;
+            _agentConfig = new AgentConfigService(loggerProvider?.CreateLogger(nameof(AgentConfigService)));
             if (authenticator != null)
             {
                 _authenticator = authenticator;
@@ -173,6 +180,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             _ipc.HandshakeAccepted += OnHandshakeAccepted;
             _ipc.ConfigReceived += OnConfigReceived;
             _ipc.AuthMessageReceived += HandleAuthMessage;
+            _ipc.AgentConfigRequestReceived += HandleAgentConfigRequest;
 
             _logger?.LogInformation("Sidecar host built (version {Version}); awaiting IPC handshake.", _sidecarVersion);
         }
@@ -351,6 +359,82 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
                     _config.Token = null;
                     _logger?.LogInformation("Cloud token revoked (auth-revoke); cleared the in-memory bearer.");
                     break;
+            }
+        }
+
+        /// <summary>
+        /// Serve a §7 AI-agent configurator request against the shared <see cref="AgentConfigService"/> and send
+        /// the terminal <c>agent-config-result</c> back to the plugin. Deserializes the concrete request by its
+        /// <paramref name="type"/>, runs the (synchronous, file-IO) handler off the reader thread, and frames the
+        /// result. Never throws — a malformed request or a handler exception becomes an <c>ok == false</c> result
+        /// (or, when even the requestId cannot be recovered, a logged drop), so it cannot tear down the read loop.
+        /// Public so the bridge xUnit suite can drive the dispatch without a live socket.
+        /// </summary>
+        public void HandleAgentConfigRequest(string type, JsonObject node)
+        {
+            // Run off the reader thread: the handlers touch the filesystem (configure/remove write config files).
+            _ = Task.Run(async () =>
+            {
+                AgentConfigResultMessage result;
+                try
+                {
+                    result = ServeAgentConfigRequest(type, node);
+                }
+                catch (Exception ex)
+                {
+                    // Best-effort: recover the requestId so the plugin can fail the pending UI action instead of
+                    // hanging. A request with no requestId is dropped (logged) — there is nothing to correlate.
+                    var requestId = node["requestId"]?.GetValue<string>();
+                    if (string.IsNullOrEmpty(requestId))
+                    {
+                        _logger?.LogWarning("Dropped malformed agent-config '{Type}' request: {Message}", type, ex.Message);
+                        return;
+                    }
+                    result = new AgentConfigResultMessage
+                    {
+                        RequestId = requestId!,
+                        Op = type,
+                        Ok = false,
+                        Error = $"Sidecar failed to serve '{type}': {ex.Message}",
+                    };
+                }
+                await _ipc.SendToPluginAsync(result, CancellationToken.None).ConfigureAwait(false);
+            });
+        }
+
+        /// <summary>
+        /// Deserialize + dispatch one agent-config request to the matching <see cref="AgentConfigService"/> handler.
+        /// Internal so the xUnit suite asserts the routing (and the produced DTO) without the IPC send.
+        /// </summary>
+        internal AgentConfigResultMessage ServeAgentConfigRequest(string type, JsonObject node)
+        {
+            switch (type)
+            {
+                case IpcProtocol.Type.AgentsList:
+                    return _agentConfig.HandleList(node.Deserialize<AgentsListRequestMessage>(IpcProtocol.JsonOptions)!);
+                case IpcProtocol.Type.AgentStatus:
+                    return _agentConfig.HandleStatus(node.Deserialize<AgentStatusRequestMessage>(IpcProtocol.JsonOptions)!);
+                case IpcProtocol.Type.AgentConfigure:
+                    return _agentConfig.HandleConfigure(node.Deserialize<AgentConfigureRequestMessage>(IpcProtocol.JsonOptions)!);
+                case IpcProtocol.Type.AgentRemove:
+                    return _agentConfig.HandleRemove(node.Deserialize<AgentRemoveRequestMessage>(IpcProtocol.JsonOptions)!);
+                case IpcProtocol.Type.AgentSkillsPath:
+                    return _agentConfig.HandleSkillsPath(node.Deserialize<AgentSkillsPathRequestMessage>(IpcProtocol.JsonOptions)!);
+                case IpcProtocol.Type.AgentGenerateSkills:
+                    // The SKILL.md bodies come from the tool manifest the plugin already pushed (the ProxyTool
+                    // catalog the registrar holds) — pass that snapshot to the generator. An empty catalog (no
+                    // manifest applied yet) yields a clean "no tools" result rather than a crash.
+                    return _agentConfig.HandleGenerateSkills(
+                        node.Deserialize<AgentGenerateSkillsRequestMessage>(IpcProtocol.JsonOptions)!,
+                        _registrar?.AppliedDescriptors ?? new System.Collections.Generic.List<ToolDescriptor>());
+                default:
+                    return new AgentConfigResultMessage
+                    {
+                        RequestId = node["requestId"]?.GetValue<string>() ?? string.Empty,
+                        Op = type,
+                        Ok = false,
+                        Error = $"Unknown agent-config request type '{type}'.",
+                    };
             }
         }
 
@@ -605,6 +689,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             _ipc.HandshakeAccepted -= OnHandshakeAccepted;
             _ipc.ConfigReceived -= OnConfigReceived;
             _ipc.AuthMessageReceived -= HandleAuthMessage;
+            _ipc.AgentConfigRequestReceived -= HandleAgentConfigRequest;
             try { _authCts?.Cancel(); } catch { /* ignore */ }
             _authCts?.Dispose();
             // Tear down the transition CTS under _transitionLock so a concurrent RunConnectionTransition cannot

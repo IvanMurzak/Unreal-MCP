@@ -213,19 +213,27 @@ void FUnrealMcpRuntime::Startup()
 	// the game thread before touching any view-model/Slate state (the Godot M9b main-thread-marshalled rule),
 	// and hold the view-model weakly so a late status straddling teardown is a no-op, not a use-after-free.
 	TWeakPtr<FUnrealMcpEditorViewModel> WeakViewModel = ViewModel;
+	// The agent-config-result feed (§7, issue #101) routes to the main-window tab's panel. The tab is owned by
+	// `this` (the runtime) and torn down in Shutdown on the game thread BEFORE the status sink is cleared; the
+	// sink marshals onto the game thread, so a result that straddles teardown runs after Shutdown and reads a
+	// reset MainWindowTab — guard with the same weak view-model check (its reset coincides with teardown) and a
+	// null MainWindowTab check so it is a no-op, never a use-after-free.
+	FUnrealMcpRuntime* RuntimePtr = this;
 	if (BridgeServerPtr)
 	{
-		BridgeServerPtr->SetStatusSink([WeakViewModel](const FString& Type, TSharedPtr<FJsonObject> Message)
+		BridgeServerPtr->SetStatusSink([WeakViewModel, RuntimePtr](const FString& Type, TSharedPtr<FJsonObject> Message)
 		{
-			AsyncTask(ENamedThreads::GameThread, [WeakViewModel, Type, Message]()
+			AsyncTask(ENamedThreads::GameThread, [WeakViewModel, RuntimePtr, Type, Message]()
 			{
 				TSharedPtr<FUnrealMcpEditorViewModel> VM = WeakViewModel.Pin();
 				if (!VM.IsValid())
-					return;
+					return; // teardown straddled — also the guard for RuntimePtr->MainWindowTab below (reset in Shutdown)
 				if (Type == TEXT("status"))
 					VM->ApplyStatus(Message);
 				else if (Type == TEXT("device-auth"))
 					VM->ApplyDeviceAuth(Message);
+				else if (Type == TEXT("agent-config-result") && RuntimePtr->MainWindowTab.IsValid())
+					RuntimePtr->MainWindowTab->DeliverAgentConfigResult(Message);
 			});
 		});
 
@@ -274,6 +282,14 @@ void FUnrealMcpRuntime::Startup()
 			const FUnrealMcpConfig Live = FUnrealMcpConfig::LoadAndResolve();
 			const int32 Port = BridgeServerPtr ? BridgeServerPtr->GetBoundPort() : 0;
 			return FAiAgentConnectionInfo::FromPluginConfig(Live, /*ServerPath*/ FString(), Port);
+		},
+		// §7 (issue #101) AI Agent Configurators: send a configurator request to the sidecar over IPC. Returns
+		// false when no sidecar is connected — the thin panel then shows its graceful "bridge not connected"
+		// state and re-requests on the next handshake. The result returns via the status sink's
+		// `agent-config-result` route above.
+		[BridgeServerPtr](const TSharedPtr<FJsonObject>& Request) -> bool
+		{
+			return BridgeServerPtr ? BridgeServerPtr->SendAgentConfigMessage(Request) : false;
 		});
 
 	// §7 auxiliary windows (MCP Tools / Prompts / Resources / Settings). The Tools window snapshots the registry on

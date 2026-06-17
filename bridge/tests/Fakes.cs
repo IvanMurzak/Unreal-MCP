@@ -21,6 +21,10 @@ using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.Logging;
 using R3;
 using McpVersion = com.IvanMurzak.McpPlugin.Common.Version;
+// MCP-Plugin 6.8.0 introduced an upstream com.IvanMurzak.McpPlugin.ProxyTool, which collides with the
+// bridge's local Tools.ProxyTool under this file's two usings. The FakeToolSink implements the LOCAL
+// IProxyToolSink, so pin the bare name to the local type.
+using ProxyTool = com.IvanMurzak.Unreal.MCP.Bridge.Tools.ProxyTool;
 
 namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
 {
