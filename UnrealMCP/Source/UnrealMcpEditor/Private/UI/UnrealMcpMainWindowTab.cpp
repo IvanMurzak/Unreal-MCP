@@ -6,6 +6,7 @@
 #include "UI/UnrealMcpEditorViewModel.h"
 #include "UnrealMcpLog.h"
 
+#include "Misc/App.h"
 #include "Framework/Docking/TabManager.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Widgets/Docking/SDockTab.h"
@@ -38,10 +39,15 @@ void FUnrealMcpMainWindowTab::Register(
 	SendAgentConfigRequest = MoveTemp(InSendAgentConfigRequest);
 
 	// Slate may be unavailable in a commandlet / -nullrhi headless run without a slate application; guard so
-	// the Automation/smoke runs (which load the module) never crash on tab registration.
-	if (!FSlateApplication::IsInitialized())
+	// the Automation/smoke runs (which load the module) never crash on tab registration. IsInitialized() alone
+	// is too weak under `-nullrhi` automation (the editor still runs an initialized FSlateApplication): a
+	// registered nomad spawner can be auto-invoked by the editor's layout restore, spawning a real top-level
+	// SWindow that Slate later measures via GenericWindow::GetRestoredDimensions — fatal with no RHI (#103).
+	// Also require FApp::CanEverRender() (false under `-nullrhi`), the same "rendering present" gate the
+	// screenshot family uses, so no plugin window is registered/spawned on a headless leg.
+	if (!FSlateApplication::IsInitialized() || !FApp::CanEverRender())
 	{
-		UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] Slate not initialized; skipping main-window tab registration (headless)."));
+		UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] Slate unavailable or rendering disabled; skipping main-window tab registration (headless / -nullrhi)."));
 		return;
 	}
 
