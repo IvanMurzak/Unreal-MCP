@@ -48,7 +48,9 @@ struct FAiAgentConnectionInfo
  * panel renders with the reusable widget templates (SUnrealMcpAgentWidgets). 1:1 with the shared library's
  * <c>ConfigurationItemKind</c> emitted in the DTO: Description→label, Warning→orange label, Alert→red label,
  * ReadOnlyField→read-only copy field, EditableField→an editable field whose committed value is written back to
- * the sidecar over IPC (the Custom agent's editable config/skills path).
+ * the sidecar over IPC (the Custom agent's editable config/skills path), Link→a clickable hyperlink that opens
+ * <see cref="Url"/> (MCP-Plugin-dotnet 6.9.0 — download / tutorial / docs links carried in the top-level Links
+ * collection).
  */
 struct FAiAgentRichContentItem
 {
@@ -58,20 +60,27 @@ struct FAiAgentRichContentItem
 		Warning,        // an orange wrapped warning line
 		Alert,          // a red wrapped alert line
 		ReadOnlyField,  // a read-only, copyable command field
-		EditableField   // an editable field; the committed value is written back over IPC (Custom agent)
+		EditableField,  // an editable field; the committed value is written back over IPC (Custom agent)
+		Link            // a clickable hyperlink that opens Url (6.9.0: download / tutorial / docs)
 	};
 
 	EKind Kind = EKind::Description;
 	FString Text;
+	// The open-URL target for a Link-kind item (6.9.0); empty for every other kind.
+	FString Url;
 
 	static FAiAgentRichContentItem Description(const FString& InText)   { return { EKind::Description, InText }; }
 	static FAiAgentRichContentItem Warning(const FString& InText)       { return { EKind::Warning, InText }; }
 	static FAiAgentRichContentItem Alert(const FString& InText)         { return { EKind::Alert, InText }; }
 	static FAiAgentRichContentItem ReadOnlyField(const FString& InText) { return { EKind::ReadOnlyField, InText }; }
 	static FAiAgentRichContentItem EditableField(const FString& InText) { return { EKind::EditableField, InText }; }
+	static FAiAgentRichContentItem Link(const FString& InText, const FString& InUrl) { return { EKind::Link, InText, InUrl }; }
 
-	/** Parse a DTO kind string ("Description"/"Warning"/"Alert"/"ReadOnlyField"/"EditableField") into the enum. */
+	/** Parse a DTO kind string ("Description"/"Warning"/"Alert"/"ReadOnlyField"/"EditableField"/"Link") into the enum. */
 	static UNREALMCPEDITOR_API EKind ParseKind(const FString& Raw);
+
+	/** Parse one DTO item object ("kind"/"text"/"url") into this struct. */
+	static UNREALMCPEDITOR_API FAiAgentRichContentItem FromJson(const TSharedPtr<FJsonObject>& Json);
 };
 
 /**
@@ -87,6 +96,19 @@ struct FAiAgentRichContentSection
 };
 
 /**
+ * The tri-state configuration status (MCP-Plugin-dotnet 6.9.0 <c>ConfiguratorStatus</c>): NotConfigured (nothing
+ * written), Configured (a valid up-to-date entry exists), ReconfigureNeeded (an entry exists but its connection
+ * settings are stale — the sidecar also prepends a "Reconfiguration Required" Alert section). The panel uses it to
+ * label the action button (Reconfigure vs Configure).
+ */
+enum class EAiAgentConfiguratorStatus : uint8
+{
+	NotConfigured,
+	Configured,
+	ReconfigureNeeded
+};
+
+/**
  * The plugin-side mirror of the sidecar's <c>AgentConfiguratorDescription</c> DTO (§7) — identity + status + the
  * ordered UI sections, parsed from the IPC <c>agent-config-result</c>. The icon is a NAME only (the sidecar never
  * sends bytes); the panel resolves the name to a Slate brush. The thin panel holds one of these per visible agent
@@ -98,11 +120,20 @@ struct FUnrealMcpAgentDescription
 	FString AgentName;
 	FString IconName;       // file name only (e.g. "claude-64.png"); empty when no icon
 	bool bIsConfigured = false;
+	// 6.9.0 tri-state: drives the action-button label (Reconfigure when ReconfigureNeeded). Defaults to NotConfigured
+	// so an older/absent field degrades to the Configure label rather than mislabelling.
+	EAiAgentConfiguratorStatus Status = EAiAgentConfiguratorStatus::NotConfigured;
 	bool bIsInstalled = false;
 	bool bSupportsSkills = false;
 	FString DownloadUrl;
 	FString TutorialUrl;
+	// 6.9.0 top-level Link items (download / tutorial / docs) — each a Link-kind item with Text + Url the panel
+	// renders as a clickable hyperlink. Supersedes the single Download/Tutorial pair (kept for back-compat).
+	TArray<FAiAgentRichContentItem> Links;
 	TArray<FAiAgentRichContentSection> Sections;
+
+	/** Parse the DTO status string ("NotConfigured"/"Configured"/"ReconfigureNeeded") into the enum. */
+	static UNREALMCPEDITOR_API EAiAgentConfiguratorStatus ParseStatus(const FString& Raw);
 
 	/** Parse one <c>AgentConfiguratorDescriptionDto</c> JSON object (from the IPC result) into this struct. */
 	static UNREALMCPEDITOR_API FUnrealMcpAgentDescription FromJson(const TSharedPtr<FJsonObject>& Json);

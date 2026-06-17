@@ -142,6 +142,8 @@ private:
 	// --- Rendering. ---
 
 	void RebuildAgentPanel();
+	/** The links row (6.9.0 top-level Link items as hyperlinks; legacy Download/Tutorial buttons when none). */
+	TSharedRef<SWidget> MakeLinksRow();
 	TSharedRef<SWidget> MakeStatusRow();
 	/** The skills section (generate button + resolved path + last-run status), shown only when the agent supports skills. */
 	TSharedRef<SWidget> MakeSkillsSection();

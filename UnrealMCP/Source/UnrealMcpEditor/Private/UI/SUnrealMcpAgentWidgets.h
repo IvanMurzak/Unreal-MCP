@@ -13,10 +13,12 @@
 #include "Widgets/Input/SCheckBox.h"
 #include "Widgets/Input/SMultiLineEditableTextBox.h"
 #include "Widgets/Images/SImage.h"
+#include "Widgets/Input/SHyperlink.h"
 #include "Widgets/Layout/SBox.h"
 #include "Styling/AppStyle.h"
 #include "Styling/CoreStyle.h"
 #include "HAL/PlatformApplicationMisc.h"
+#include "HAL/PlatformProcess.h"
 #include "UI/FUnrealMcpStyle.h"
 
 /**
@@ -105,6 +107,26 @@ namespace UnrealMcpAgentWidgets
 					return FReply::Handled();
 				})
 			];
+	}
+
+	/**
+	 * A clickable hyperlink that opens @p Url in the system browser (MCP-Plugin-dotnet 6.9.0 Link kind — the agent's
+	 * download / tutorial / docs links). SHyperlink renders as underlined link text; clicking calls
+	 * FPlatformProcess::LaunchURL. An empty Url collapses to a plain (non-clickable) label so a malformed Link item
+	 * degrades to its text rather than a dead link.
+	 */
+	inline TSharedRef<SWidget> TemplateLink(const FText& Label, const FString& Url)
+	{
+		if (Url.IsEmpty())
+			return TemplateLabelDescription(Label);
+
+		return SNew(SHyperlink)
+			.Text(Label)
+			.ToolTipText(FText::FromString(Url))
+			.OnNavigate_Lambda([Url]()
+			{
+				FPlatformProcess::LaunchURL(*Url, nullptr, nullptr);
+			});
 	}
 
 	/** Unity's TemplateFoldout — a collapsible section (collapsed by default). */

@@ -45,11 +45,29 @@ void FUnrealMcpAgentConfigModelsSpec::Define()
 			TestEqual("Alert", FAiAgentRichContentItem::ParseKind(TEXT("Alert")), FAiAgentRichContentItem::EKind::Alert);
 			TestEqual("ReadOnlyField", FAiAgentRichContentItem::ParseKind(TEXT("ReadOnlyField")), FAiAgentRichContentItem::EKind::ReadOnlyField);
 			TestEqual("EditableField", FAiAgentRichContentItem::ParseKind(TEXT("EditableField")), FAiAgentRichContentItem::EKind::EditableField);
+			// 6.9.0: the Link kind (clickable open-URL items).
+			TestEqual("Link", FAiAgentRichContentItem::ParseKind(TEXT("Link")), FAiAgentRichContentItem::EKind::Link);
 		});
 
 		It("degrades an unknown kind to Description", [this]()
 		{
 			TestEqual("unknown", FAiAgentRichContentItem::ParseKind(TEXT("Bogus")), FAiAgentRichContentItem::EKind::Description);
+		});
+	});
+
+	Describe("ParseStatus", [this]()
+	{
+		It("maps every shared-library ConfiguratorStatus name", [this]()
+		{
+			TestEqual("NotConfigured", FUnrealMcpAgentDescription::ParseStatus(TEXT("NotConfigured")), EAiAgentConfiguratorStatus::NotConfigured);
+			TestEqual("Configured", FUnrealMcpAgentDescription::ParseStatus(TEXT("Configured")), EAiAgentConfiguratorStatus::Configured);
+			TestEqual("ReconfigureNeeded", FUnrealMcpAgentDescription::ParseStatus(TEXT("ReconfigureNeeded")), EAiAgentConfiguratorStatus::ReconfigureNeeded);
+		});
+
+		It("degrades an unknown/absent status to NotConfigured", [this]()
+		{
+			TestEqual("unknown", FUnrealMcpAgentDescription::ParseStatus(TEXT("Bogus")), EAiAgentConfiguratorStatus::NotConfigured);
+			TestEqual("empty", FUnrealMcpAgentDescription::ParseStatus(FString()), EAiAgentConfiguratorStatus::NotConfigured);
 		});
 	});
 
@@ -112,6 +130,59 @@ void FUnrealMcpAgentConfigModelsSpec::Define()
 			TestEqual("second items", Desc.Sections[1].Items.Num(), 1);
 			TestEqual("editable kind", Desc.Sections[1].Items[0].Kind, FAiAgentRichContentItem::EKind::EditableField);
 			TestEqual("editable text", Desc.Sections[1].Items[0].Text, FString(TEXT(".claude/skills")));
+		});
+
+		It("parses the 6.9.0 status, top-level links, and per-item link urls", [this]()
+		{
+			const FString Json = TEXT(R"JSON(
+			{
+				"agentId": "claude-code",
+				"agentName": "Claude Code",
+				"status": "ReconfigureNeeded",
+				"isConfigured": true,
+				"links":
+				[
+					{ "kind": "Link", "text": "Download", "url": "https://example.com/dl" },
+					{ "kind": "Link", "text": "YouTube Tutorial", "url": "https://youtu.be/abc" }
+				],
+				"sections":
+				[
+					{
+						"heading": "Reconfiguration Required",
+						"expandedFirst": true,
+						"items":
+						[
+							{ "kind": "Alert", "text": "Connection settings have changed." }
+						]
+					}
+				]
+			})JSON");
+
+			const FUnrealMcpAgentDescription Desc = FUnrealMcpAgentDescription::FromJson(AgentConfigModelsParseObject(Json));
+
+			// Tri-state status drives the Reconfigure button label.
+			TestEqual("status", Desc.Status, EAiAgentConfiguratorStatus::ReconfigureNeeded);
+
+			// The top-level Links collection: Link-kind items carrying both text and url.
+			TestEqual("link count", Desc.Links.Num(), 2);
+			TestEqual("link0 kind", Desc.Links[0].Kind, FAiAgentRichContentItem::EKind::Link);
+			TestEqual("link0 text", Desc.Links[0].Text, FString(TEXT("Download")));
+			TestEqual("link0 url", Desc.Links[0].Url, FString(TEXT("https://example.com/dl")));
+			TestEqual("link1 url", Desc.Links[1].Url, FString(TEXT("https://youtu.be/abc")));
+
+			// The prepended "Reconfiguration Required" Alert section round-trips (already an Alert-kind renderer).
+			TestEqual("section count", Desc.Sections.Num(), 1);
+			TestEqual("reconfig heading", Desc.Sections[0].Heading, FString(TEXT("Reconfiguration Required")));
+			TestEqual("alert kind", Desc.Sections[0].Items[0].Kind, FAiAgentRichContentItem::EKind::Alert);
+		});
+
+		It("defaults status to NotConfigured and links to empty when the fields are absent", [this]()
+		{
+			// An older sidecar (no status/links fields) must degrade safely, not mislabel or crash.
+			const FString Json = TEXT(R"JSON({ "agentId": "claude-code", "agentName": "Claude Code" })JSON");
+			const FUnrealMcpAgentDescription Desc = FUnrealMcpAgentDescription::FromJson(AgentConfigModelsParseObject(Json));
+			TestEqual("default status", Desc.Status, EAiAgentConfiguratorStatus::NotConfigured);
+			TestEqual("no links", Desc.Links.Num(), 0);
 		});
 
 		It("returns an empty description for a null/invalid object", [this]()

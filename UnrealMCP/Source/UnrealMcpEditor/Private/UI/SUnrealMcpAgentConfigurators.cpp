@@ -405,37 +405,9 @@ void SUnrealMcpAgentConfigurators::RebuildAgentPanel()
 		return;
 	}
 
-	// Links row (download + optional tutorial), mirroring the prior panel.
-	TSharedRef<SHorizontalBox> LinksRow = SNew(SHorizontalBox);
-	const FString DownloadUrl = SelectedDescription.DownloadUrl;
-	const FString TutorialUrl = SelectedDescription.TutorialUrl;
-	if (!DownloadUrl.IsEmpty() && DownloadUrl != TEXT("NA"))
-	{
-		LinksRow->AddSlot().AutoWidth().Padding(0, 0, 6, 0)
-		[
-			SNew(SButton)
-			.Text(LOCTEXT("DownloadAgent", "Download / Docs"))
-			.OnClicked_Lambda([DownloadUrl]()
-			{
-				FPlatformProcess::LaunchURL(*DownloadUrl, nullptr, nullptr);
-				return FReply::Handled();
-			})
-		];
-	}
-	if (!TutorialUrl.IsEmpty())
-	{
-		LinksRow->AddSlot().AutoWidth()
-		[
-			SNew(SButton)
-			.Text(LOCTEXT("TutorialAgent", "Tutorial"))
-			.OnClicked_Lambda([TutorialUrl]()
-			{
-				FPlatformProcess::LaunchURL(*TutorialUrl, nullptr, nullptr);
-				return FReply::Handled();
-			})
-		];
-	}
-	AgentPanelContainer->AddSlot().AutoHeight()[ LinksRow ];
+	// Links row — the 6.9.0 top-level Link items (download / tutorial / docs) as clickable hyperlinks, with a
+	// graceful fallback to the legacy DownloadUrl/TutorialUrl buttons when an older sidecar sends no Links.
+	AgentPanelContainer->AddSlot().AutoHeight()[ MakeLinksRow() ];
 
 	// Configuration-status row (Configured / Not configured + Configure/Reconfigure + Remove). The Custom agent has
 	// no detectable on-disk config (sidecar reports IsConfigured=false, configure returns a clear non-success), so
@@ -526,11 +498,68 @@ TSharedRef<SWidget> SUnrealMcpAgentConfigurators::MakeSkillsSection()
 	return Section;
 }
 
+TSharedRef<SWidget> SUnrealMcpAgentConfigurators::MakeLinksRow()
+{
+	TSharedRef<SHorizontalBox> LinksRow = SNew(SHorizontalBox);
+
+	// Preferred (6.9.0): the top-level Link items, each opening its Url. Rendered as inline hyperlinks.
+	if (SelectedDescription.Links.Num() > 0)
+	{
+		bool bFirst = true;
+		for (const FAiAgentRichContentItem& Link : SelectedDescription.Links)
+		{
+			if (Link.Url.IsEmpty() || Link.Url == TEXT("NA"))
+				continue; // the Custom agent's "NA" download — nothing to open
+			LinksRow->AddSlot().AutoWidth().Padding(bFirst ? FMargin(0) : FMargin(12, 0, 0, 0)).VAlign(VAlign_Center)
+			[
+				UnrealMcpAgentWidgets::TemplateLink(FText::FromString(Link.Text), Link.Url)
+			];
+			bFirst = false;
+		}
+		return LinksRow;
+	}
+
+	// Fallback (older sidecar with no Links): the legacy DownloadUrl/TutorialUrl button pair.
+	const FString DownloadUrl = SelectedDescription.DownloadUrl;
+	const FString TutorialUrl = SelectedDescription.TutorialUrl;
+	if (!DownloadUrl.IsEmpty() && DownloadUrl != TEXT("NA"))
+	{
+		LinksRow->AddSlot().AutoWidth().Padding(0, 0, 6, 0)
+		[
+			SNew(SButton)
+			.Text(LOCTEXT("DownloadAgent", "Download / Docs"))
+			.OnClicked_Lambda([DownloadUrl]()
+			{
+				FPlatformProcess::LaunchURL(*DownloadUrl, nullptr, nullptr);
+				return FReply::Handled();
+			})
+		];
+	}
+	if (!TutorialUrl.IsEmpty())
+	{
+		LinksRow->AddSlot().AutoWidth()
+		[
+			SNew(SButton)
+			.Text(LOCTEXT("TutorialAgent", "Tutorial"))
+			.OnClicked_Lambda([TutorialUrl]()
+			{
+				FPlatformProcess::LaunchURL(*TutorialUrl, nullptr, nullptr);
+				return FReply::Handled();
+			})
+		];
+	}
+	return LinksRow;
+}
+
 TSharedRef<SWidget> SUnrealMcpAgentConfigurators::MakeStatusRow()
 {
 	const bool bConfigured = SelectedDescription.bIsConfigured;
 	const bool bBusy = Phase == EPhase::Pending || Phase == EPhase::Loading;
 	const FString TransportWord = EffectiveTransportString() == TEXT("stdio") ? TEXT("stdio") : TEXT("http");
+	// 6.9.0: drive the action-button label off the tri-state status — "Reconfigure" when an entry exists but is
+	// stale, else "Configure". (When ReconfigureNeeded the sidecar also prepends a "Reconfiguration Required" Alert
+	// section, rendered below as an Alert-kind item.) Falls back to bIsConfigured if Status is absent (older sidecar).
+	const bool bReconfigure = SelectedDescription.Status == EAiAgentConfiguratorStatus::ReconfigureNeeded || bConfigured;
 
 	return SNew(SHorizontalBox)
 		+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
@@ -547,7 +576,7 @@ TSharedRef<SWidget> SUnrealMcpAgentConfigurators::MakeStatusRow()
 		[
 			SNew(SButton)
 			.IsEnabled(!bBusy)
-			.Text(bConfigured ? LOCTEXT("Reconfigure", "Reconfigure") : LOCTEXT("Configure", "Configure"))
+			.Text(bReconfigure ? LOCTEXT("Reconfigure", "Reconfigure") : LOCTEXT("Configure", "Configure"))
 			.OnClicked_Lambda([this]() { RequestConfigure(); return FReply::Handled(); })
 		]
 		+ SHorizontalBox::Slot().AutoWidth().Padding(6, 0, 0, 0).VAlign(VAlign_Center)
@@ -572,6 +601,10 @@ TSharedRef<SWidget> SUnrealMcpAgentConfigurators::MakeItemWidget(const FAiAgentR
 			return UnrealMcpAgentWidgets::TemplateAlertLabel(FText::FromString(Item.Text));
 		case FAiAgentRichContentItem::EKind::ReadOnlyField:
 			return UnrealMcpAgentWidgets::TemplateTextFieldReadOnly(Item.Text);
+		case FAiAgentRichContentItem::EKind::Link:
+			// 6.9.0: a clickable hyperlink opening Url (FPlatformProcess::LaunchURL). Used inside a section when the
+			// sidecar emits a Link item there; the top-level Links collection renders via MakeLinksRow.
+			return UnrealMcpAgentWidgets::TemplateLink(FText::FromString(Item.Text), Item.Url);
 		case FAiAgentRichContentItem::EKind::EditableField:
 		{
 			// An editable value the user can change (the Custom agent's editable config/skills path). On commit,

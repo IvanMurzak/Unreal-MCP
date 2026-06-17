@@ -34,7 +34,31 @@ FAiAgentRichContentItem::EKind FAiAgentRichContentItem::ParseKind(const FString&
 	if (Raw == TEXT("Alert"))         return EKind::Alert;
 	if (Raw == TEXT("ReadOnlyField")) return EKind::ReadOnlyField;
 	if (Raw == TEXT("EditableField")) return EKind::EditableField;
+	if (Raw == TEXT("Link"))          return EKind::Link;
 	return EKind::Description;
+}
+
+FAiAgentRichContentItem FAiAgentRichContentItem::FromJson(const TSharedPtr<FJsonObject>& Json)
+{
+	FAiAgentRichContentItem Item;
+	if (!Json.IsValid())
+		return Item;
+
+	FString Kind;
+	Json->TryGetStringField(TEXT("kind"), Kind);
+	Item.Kind = ParseKind(Kind);
+	Json->TryGetStringField(TEXT("text"), Item.Text);
+	Json->TryGetStringField(TEXT("url"), Item.Url); // 6.9.0: populated only for Link-kind items
+	return Item;
+}
+
+EAiAgentConfiguratorStatus FUnrealMcpAgentDescription::ParseStatus(const FString& Raw)
+{
+	// Match the shared library's ConfiguratorStatus names. Unknown / absent → NotConfigured (the safe default that
+	// labels the action button "Configure" rather than falsely "Reconfigure").
+	if (Raw == TEXT("Configured"))        return EAiAgentConfiguratorStatus::Configured;
+	if (Raw == TEXT("ReconfigureNeeded")) return EAiAgentConfiguratorStatus::ReconfigureNeeded;
+	return EAiAgentConfiguratorStatus::NotConfigured;
 }
 
 FUnrealMcpAgentDescription FUnrealMcpAgentDescription::FromJson(const TSharedPtr<FJsonObject>& Json)
@@ -51,6 +75,25 @@ FUnrealMcpAgentDescription FUnrealMcpAgentDescription::FromJson(const TSharedPtr
 	Json->TryGetBoolField(TEXT("supportsSkills"), Desc.bSupportsSkills);
 	Json->TryGetStringField(TEXT("downloadUrl"), Desc.DownloadUrl);
 	Json->TryGetStringField(TEXT("tutorialUrl"), Desc.TutorialUrl);
+
+	// 6.9.0: the tri-state status. Absent in an older sidecar → NotConfigured (back-compat).
+	FString StatusRaw;
+	Json->TryGetStringField(TEXT("status"), StatusRaw);
+	Desc.Status = ParseStatus(StatusRaw);
+
+	// 6.9.0: the top-level Link items (each a Link-kind item with text + url). Absent in an older sidecar → empty,
+	// and the legacy downloadUrl/tutorialUrl fall-back renders instead (RebuildAgentPanel handles the choice).
+	const TArray<TSharedPtr<FJsonValue>>* Links = nullptr;
+	if (Json->TryGetArrayField(TEXT("links"), Links) && Links)
+	{
+		for (const TSharedPtr<FJsonValue>& LinkValue : *Links)
+		{
+			const TSharedPtr<FJsonObject>* LinkObj = nullptr;
+			if (!LinkValue.IsValid() || !LinkValue->TryGetObject(LinkObj) || !LinkObj)
+				continue;
+			Desc.Links.Add(FAiAgentRichContentItem::FromJson(*LinkObj));
+		}
+	}
 
 	const TArray<TSharedPtr<FJsonValue>>* Sections = nullptr;
 	if (Json->TryGetArrayField(TEXT("sections"), Sections) && Sections)
@@ -74,14 +117,7 @@ FUnrealMcpAgentDescription FUnrealMcpAgentDescription::FromJson(const TSharedPtr
 					if (!ItemValue.IsValid() || !ItemValue->TryGetObject(ItemObj) || !ItemObj)
 						continue;
 
-					FString Kind, Text;
-					(*ItemObj)->TryGetStringField(TEXT("kind"), Kind);
-					(*ItemObj)->TryGetStringField(TEXT("text"), Text);
-
-					FAiAgentRichContentItem Item;
-					Item.Kind = FAiAgentRichContentItem::ParseKind(Kind);
-					Item.Text = Text;
-					Section.Items.Add(MoveTemp(Item));
+					Section.Items.Add(FAiAgentRichContentItem::FromJson(*ItemObj));
 				}
 			}
 			Desc.Sections.Add(MoveTemp(Section));
