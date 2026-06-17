@@ -7,6 +7,7 @@
 #include "UI/UnrealMcpEditorViewModel.h"
 #include "UnrealMcpLog.h"
 
+#include "Misc/App.h"
 #include "Framework/Docking/TabManager.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Widgets/Docking/SDockTab.h"
@@ -65,9 +66,19 @@ void FUnrealMcpAuxWindows::Register(
 
 	// Slate may be unavailable in a commandlet / -nullrhi headless run; guard so the Automation/smoke runs
 	// (which load the module) never crash on tab registration (mirrors the main-window tab).
-	if (!FSlateApplication::IsInitialized())
+	//
+	// IsInitialized() alone is NOT enough under `-nullrhi` automation: the editor runs a real (initialized)
+	// FSlateApplication even with no RHI, so this path would proceed and — via the ISettingsModule
+	// RegisterSettings below — eagerly CONSTRUCT a live SUnrealMcpSettingsWindow. Slate then ticks that
+	// widget across the long Automation run and eventually measures its window, hitting GenericWindow's
+	// GetRestoredDimensions, which is fatal with no RHI (issue #103). Also require FApp::CanEverRender()
+	// (false under `-nullrhi`) so the eager-widget path is skipped whenever rendering is unavailable —
+	// the same "rendering present" gate the screenshot family already uses for its GPU-bound branch. The
+	// main-window tab survives on IsInitialized() alone only because it registers a DORMANT spawner that
+	// constructs its widget lazily on invoke; the aux section's eager RegisterSettings widget cannot.
+	if (!FSlateApplication::IsInitialized() || !FApp::CanEverRender())
 	{
-		UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] Slate not initialized; skipping aux-window registration (headless)."));
+		UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] Slate unavailable or rendering disabled; skipping aux-window registration (headless / -nullrhi)."));
 		return;
 	}
 
@@ -218,8 +229,17 @@ TSharedRef<SDockTab> FUnrealMcpAuxWindows::SpawnSerializationCheckTab(const FSpa
 
 bool FUnrealMcpAuxWindows::TryInvokeSerializationCheckTab()
 {
-	if (!FSlateApplication::IsInitialized())
-		return false; // headless / -nullrhi: nothing to open (matches the Register() headless guard)
+	// IsInitialized() alone is too weak under `-nullrhi` automation (the editor runs an initialized
+	// FSlateApplication with no RHI). TryInvokeTab spawns a REAL top-level SWindow regardless of whether the
+	// nomad spawner is registered — if the spawner is missing it falls back to an "unrecognized tab" hosted in
+	// a fresh layout window all the same. Slate then ticks and measures that window via GenericWindow's
+	// GetRestoredDimensions, which is FATAL with no RHI (issue #103: the crash fires on a deferred tick a few
+	// seconds after the invoke, so it lands on whichever spec is running then). Gate on FApp::CanEverRender()
+	// (false under `-nullrhi`) — the same "rendering present" check the screenshot family uses — so the window
+	// is never spawned headless. The DevControl `check` route + the main-window footer button both treat a
+	// false return as a no-op, preserving their headless coverage.
+	if (!FSlateApplication::IsInitialized() || !FApp::CanEverRender())
+		return false; // headless / -nullrhi: nothing to open without a renderer
 
 	FGlobalTabmanager::Get()->TryInvokeTab(SerializationCheckTabId);
 	return true;
