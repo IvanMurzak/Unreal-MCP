@@ -60,6 +60,9 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         }
 
         public void DisconnectImmediate() { }
+        // McpPlugin 6.10.0 added IConnection.WaitForImmediateTeardown(TimeSpan) — the immediate-teardown
+        // path is not exercised by the transition orchestration under test, so report "torn down".
+        public bool WaitForImmediateTeardown(TimeSpan timeout) => true;
         public void Dispose() { }
 
         // Unused surface — the transition orchestration under test never reads these. Throwing keeps the fake
