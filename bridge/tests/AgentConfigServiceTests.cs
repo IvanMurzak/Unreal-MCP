@@ -101,6 +101,49 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         }
 
         [Fact]
+        public void Status_CarriesTheTroubleshootingSection_ThroughTheDto()
+        {
+            // 6.10.0 AgentConfig extension: most built-in agents gained a per-agent "Troubleshooting" section.
+            // The sidecar's Describe() serializes description.Sections generically (no heading/kind filter), so the
+            // new section must surface in the emitted DTO without any passthrough change. claude-code carries one.
+            var result = _service.HandleStatus(new AgentStatusRequestMessage
+            {
+                RequestId = "r2t", AgentId = "claude-code", Transport = "streamableHttp", Settings = Settings(),
+            });
+
+            Assert.True(result.Ok);
+            var d = result.Description!;
+            var troubleshooting = d.Sections.FirstOrDefault(s => s.Heading == "Troubleshooting");
+            Assert.NotNull(troubleshooting);
+            // The section's guidance lines come through as Description-kind items with non-empty text.
+            Assert.NotEmpty(troubleshooting!.Items);
+            Assert.Contains(troubleshooting.Items, i => i.Kind == "Description" && !string.IsNullOrEmpty(i.Text));
+        }
+
+        [Fact]
+        public void Status_CustomAgent_CarriesTheDockerCommands_ThroughTheDto()
+        {
+            // 6.10.0 AgentConfig extension: the Custom (other-custom) agent's Configuration section now spells out
+            // the Docker lifecycle (run / start / stop / rm) as ReadOnlyField command items. The generic Sections
+            // passthrough must carry those command strings into the DTO verbatim so the Slate panel can show them.
+            var result = _service.HandleStatus(new AgentStatusRequestMessage
+            {
+                RequestId = "r2d", AgentId = "other-custom", Transport = "streamableHttp", Settings = Settings(),
+            });
+
+            Assert.True(result.Ok);
+            var d = result.Description!;
+            var commandTexts = d.Sections
+                .SelectMany(s => s.Items)
+                .Where(i => i.Kind == "ReadOnlyField")
+                .Select(i => i.Text ?? string.Empty)
+                .ToList();
+            // The Docker run command (with the resolved port) and the start command must both be present verbatim.
+            Assert.Contains(commandTexts, t => t.StartsWith("docker run") && t.Contains("12345"));
+            Assert.Contains(commandTexts, t => t.StartsWith("docker start"));
+        }
+
+        [Fact]
         public void Status_CarriesTheTriStateStatus_AndTopLevelLinks()
         {
             // 6.9.0 DTO extension: the description carries the ConfiguratorStatus tri-state and a top-level Links
