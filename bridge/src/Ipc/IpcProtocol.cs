@@ -22,8 +22,46 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
         /// <summary>
         /// IPC wire-protocol version (§9.2). Bumped only on a breaking framing/schema change; the
         /// handshake (§1.3) carries it so a future version can negotiate without breaking old pairs.
+        ///
+        /// <para>
+        /// <b>v2</b> (M16 P0) adds the prompt/resource message families — the
+        /// <c>prompt-manifest</c>/<c>resource-manifest</c>, <c>prompt-get</c>/<c>resource-read</c>, and
+        /// <c>prompt-response</c>/<c>resource-response</c> discriminators. The version is NEGOTIATED on
+        /// the handshake (<see cref="NegotiateVersion"/>): two v2 peers exchange prompts/resources; a v1
+        /// peer paired with a v2 peer negotiates down to v1 and the link stays TOOLS-ONLY (the v2 peer
+        /// simply never pushes/serves the prompt/resource families). The tool path is byte-identical
+        /// across both versions, so a version mismatch never breaks tools.
+        /// </para>
         /// </summary>
-        public const int IpcVersion = 1;
+        public const int IpcVersion = 2;
+
+        /// <summary>
+        /// The lowest IPC version at which the prompt/resource message families (v2) are exchanged. When
+        /// the negotiated version (<see cref="NegotiateVersion"/>) is below this, the link stays tools-only.
+        /// </summary>
+        public const int PromptsResourcesMinVersion = 2;
+
+        /// <summary>
+        /// Negotiate the effective IPC version for a link from the two peers' advertised versions: the
+        /// MINIMUM of the local and remote versions (the highest both understand). A peer must not use a
+        /// message family the negotiated version does not cover, so a v2↔v1 pair negotiates to 1 and stays
+        /// tools-only, while a v2↔v2 pair negotiates to 2 and may exchange prompts/resources. Pure +
+        /// static so the negotiation matrix is unit-testable without a live socket. A non-positive or
+        /// absent remote version (a malformed/legacy handshake that omitted the field) is treated as 1.
+        /// </summary>
+        public static int NegotiateVersion(int localVersion, int remoteVersion)
+        {
+            var remote = remoteVersion > 0 ? remoteVersion : 1;
+            var local = localVersion > 0 ? localVersion : 1;
+            return local < remote ? local : remote;
+        }
+
+        /// <summary>
+        /// Whether a link whose negotiated IPC version is <paramref name="negotiatedVersion"/> exchanges
+        /// the v2 prompt/resource message families. False on a tools-only (v1-negotiated) link.
+        /// </summary>
+        public static bool SupportsPromptsResources(int negotiatedVersion) =>
+            negotiatedVersion >= PromptsResourcesMinVersion;
 
         /// <summary>Max NDJSON line length (§1.2). A peer aborts the connection on violation.</summary>
         public const int MaxLineBytes = 64 * 1024 * 1024;
@@ -58,10 +96,24 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
             // Correlated to the originating request by requestId; carries the engine-agnostic DTO.
             public const string AgentConfigResult = "agent-config-result";
 
+            // sidecar → plugin: fetch one prompt's rendered messages / read one resource's content (v2, §A.1).
+            // Both round-trip through PendingCallRegistry by requestId, exactly like a tool-call, and reuse the
+            // generic `tool-cancel` (by requestId) for cooperative cancellation — no new cancel verbs.
+            public const string PromptGet = "prompt-get";
+            public const string ResourceRead = "resource-read";
+
             // plugin → sidecar
             public const string HandshakeAck = "handshake-ack";
             public const string ToolManifest = "tool-manifest";
             public const string ToolResponse = "tool-response";
+            // plugin → sidecar: full prompt/resource-set snapshots (v2, §A.1) — diffed against the last applied
+            // by the prompt/resource manifest registrars, mirroring `tool-manifest`. Only exchanged when the
+            // negotiated IPC version is >= PromptsResourcesMinVersion (a tools-only link never sees these).
+            public const string PromptManifest = "prompt-manifest";
+            public const string ResourceManifest = "resource-manifest";
+            // plugin → sidecar: terminal prompt-get / resource-read results (v2, §A.1), correlated by requestId.
+            public const string PromptResponse = "prompt-response";
+            public const string ResourceResponse = "resource-response";
             public const string Config = "config";
             public const string AuthStart = "auth-start";
             public const string AuthCancel = "auth-cancel";

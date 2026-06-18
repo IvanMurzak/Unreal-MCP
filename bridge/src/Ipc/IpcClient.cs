@@ -38,6 +38,10 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
         private readonly ILogger? _logger;
 
         private readonly PendingCallRegistry _pending = new();
+        // v2 (§A.1) prompt-get / resource-read pending registries — reuse the same correlation machinery as
+        // tool-calls (generic over the response type). Failed/drained alongside _pending on every disconnect.
+        private readonly PendingCallRegistry<PromptResponseMessage> _pendingPrompts = new();
+        private readonly PendingCallRegistry<ResourceResponseMessage> _pendingResources = new();
         private readonly ReconnectBackoff _backoff = new();
         private readonly SemaphoreSlim _writeLock = new(1, 1);
 
@@ -51,6 +55,31 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
 
         /// <summary>Routes applied tool manifests; set by the host before <see cref="RunAsync"/>.</summary>
         public ManifestRegistrar? Registrar { get; set; }
+
+        /// <summary>
+        /// Routes applied prompt manifests (IPC v2, §A.1); set by the host (P1) before <see cref="RunAsync"/>.
+        /// Null in the P0 scaffold — a <c>prompt-manifest</c> that arrives with no registrar wired is logged
+        /// and dropped (forward-compatible: the plugin never pushes one until both peers negotiate v2 and a
+        /// prompt registry exists).
+        /// </summary>
+        public IManifestSink<PromptManifestMessage>? PromptRegistrar { get; set; }
+
+        /// <summary>
+        /// Routes applied resource manifests (IPC v2, §A.1); set by the host (P2) before <see cref="RunAsync"/>.
+        /// Null in the P0 scaffold — see <see cref="PromptRegistrar"/>.
+        /// </summary>
+        public IManifestSink<ResourceManifestMessage>? ResourceRegistrar { get; set; }
+
+        /// <summary>
+        /// The IPC version negotiated on the most recent accepted handshake (<see cref="IpcProtocol.NegotiateVersion"/>):
+        /// the minimum of this sidecar's <see cref="IpcProtocol.IpcVersion"/> and the version the plugin advertised in
+        /// the handshake-ack. <c>0</c> until the first ack. When below <see cref="IpcProtocol.PromptsResourcesMinVersion"/>
+        /// the link is tools-only and the prompt/resource families are never exchanged (an old peer keeps working).
+        /// </summary>
+        public int NegotiatedIpcVersion { get; private set; }
+
+        /// <summary>True once a handshake negotiated an IPC version that exchanges the v2 prompt/resource families.</summary>
+        public bool SupportsPromptsResources => IpcProtocol.SupportsPromptsResources(NegotiatedIpcVersion);
 
         /// <summary>Raised when a <c>handshake-ack</c> is received (the link is established, §1.5).</summary>
         public event Action<HandshakeAckMessage>? HandshakeAccepted;
@@ -166,6 +195,13 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
                 if (first == ackTcs.Task && ackTcs.Task.IsCompletedSuccessfully)
                 {
                     _backoff.Reset();
+                    // §A.1 version negotiation: the link runs at min(local, plugin) — the highest both understand.
+                    // A v1 plugin negotiates down to 1 (tools-only); a v2 plugin enables the prompt/resource families.
+                    // The tool path is identical at every version, so a mismatch never breaks tools (an old peer works).
+                    NegotiatedIpcVersion = IpcProtocol.NegotiateVersion(IpcProtocol.IpcVersion, ackTcs.Task.Result.IpcVersion);
+                    _logger?.LogInformation("IPC version negotiated: {Negotiated} (local {Local}, plugin {Remote}); prompts/resources {State}.",
+                        NegotiatedIpcVersion, IpcProtocol.IpcVersion, ackTcs.Task.Result.IpcVersion,
+                        SupportsPromptsResources ? "ENABLED" : "tools-only");
                     _ackAccepted = true; // open the gate: tool-calls may now hit the wire (§1.4)
                     HandshakeAccepted?.Invoke(ackTcs.Task.Result);
                     using var heartbeat = StartHeartbeat(connCts);
@@ -196,7 +232,11 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
             {
                 CloseConnection(tcp);
                 _pending.FailAll(); // every in-flight proxy call fails fast (§2.2 step 4)
+                _pendingPrompts.FailAll();   // v2: in-flight prompt-get/resource-read fail fast too (§A.1)
+                _pendingResources.FailAll();
                 Registrar?.ResetForReconnect(); // §1.5: next handshake-ack re-applies the manifest
+                PromptRegistrar?.ResetForReconnect();
+                ResourceRegistrar?.ResetForReconnect();
             }
         }
 
@@ -253,6 +293,40 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
                     var response = node!.Deserialize<ToolResponseMessage>(IpcProtocol.JsonOptions);
                     if (response != null && !_pending.TryComplete(response.RequestId, response))
                         _logger?.LogDebug("Dropped tool-response for unknown/completed requestId {Id}.", response.RequestId);
+                    break;
+                }
+                case IpcProtocol.Type.PromptManifest:
+                {
+                    // v2 (§A.1): apply the prompt-set snapshot. Dropped (logged) when no registrar is wired — the
+                    // P0 scaffold has none, and a v1-negotiated link never receives this anyway.
+                    var manifest = node!.Deserialize<PromptManifestMessage>(IpcProtocol.JsonOptions);
+                    if (manifest != null && PromptRegistrar != null)
+                        PromptRegistrar.ApplyManifest(manifest);
+                    else if (manifest != null)
+                        _logger?.LogDebug("Received prompt-manifest but no PromptRegistrar is wired (scaffold); dropping.");
+                    break;
+                }
+                case IpcProtocol.Type.ResourceManifest:
+                {
+                    var manifest = node!.Deserialize<ResourceManifestMessage>(IpcProtocol.JsonOptions);
+                    if (manifest != null && ResourceRegistrar != null)
+                        ResourceRegistrar.ApplyManifest(manifest);
+                    else if (manifest != null)
+                        _logger?.LogDebug("Received resource-manifest but no ResourceRegistrar is wired (scaffold); dropping.");
+                    break;
+                }
+                case IpcProtocol.Type.PromptResponse:
+                {
+                    var response = node!.Deserialize<PromptResponseMessage>(IpcProtocol.JsonOptions);
+                    if (response != null && !_pendingPrompts.TryComplete(response.RequestId, response))
+                        _logger?.LogDebug("Dropped prompt-response for unknown/completed requestId {Id}.", response.RequestId);
+                    break;
+                }
+                case IpcProtocol.Type.ResourceResponse:
+                {
+                    var response = node!.Deserialize<ResourceResponseMessage>(IpcProtocol.JsonOptions);
+                    if (response != null && !_pendingResources.TryComplete(response.RequestId, response))
+                        _logger?.LogDebug("Dropped resource-response for unknown/completed requestId {Id}.", response.RequestId);
                     break;
                 }
                 case IpcProtocol.Type.Ping:
@@ -410,6 +484,86 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
             return await task.ConfigureAwait(false);
         }
 
+        // --- Prompt/Resource outbound channels (IPC v2, §A.1) ----------------------------------------
+
+        /// <summary>
+        /// Send a <c>prompt-get</c> and await its terminal <c>prompt-response</c> (IPC v2, §A.1). Mirrors
+        /// <see cref="CallToolAsync"/> exactly — gates on a completed handshake, correlates by requestId via
+        /// the prompt pending registry, forwards cancellation as the generic <c>tool-cancel</c>, and arms the
+        /// same local timeout backstop. Throws <see cref="IpcDisconnectedException"/> when the link is down so
+        /// the proxy (P1) fails fast. The plugin only serves these on a v2-negotiated link.
+        /// </summary>
+        public Task<PromptResponseMessage> GetPromptAsync(string prompt, JsonObject? arguments, int timeoutMs, CancellationToken cancellationToken)
+            => RoundTripAsync(_pendingPrompts,
+                requestId => new PromptGetMessage { RequestId = requestId, Prompt = prompt, Arguments = arguments, TimeoutMs = timeoutMs },
+                $"Prompt '{prompt}'", timeoutMs, cancellationToken);
+
+        /// <summary>
+        /// Send a <c>resource-read</c> and await its terminal <c>resource-response</c> (IPC v2, §A.1). The
+        /// resource analog of <see cref="GetPromptAsync"/>; same handshake gate, requestId correlation,
+        /// <c>tool-cancel</c> forwarding, and timeout backstop.
+        /// </summary>
+        public Task<ResourceResponseMessage> ReadResourceAsync(string uri, int timeoutMs, CancellationToken cancellationToken)
+            => RoundTripAsync(_pendingResources,
+                requestId => new ResourceReadMessage { RequestId = requestId, Uri = uri, TimeoutMs = timeoutMs },
+                $"Resource '{uri}'", timeoutMs, cancellationToken);
+
+        /// <summary>
+        /// The shared request→response round-trip for the v2 prompt-get / resource-read channels: identical to
+        /// <see cref="CallToolAsync"/>'s body but parameterized over the pending registry + request factory, so
+        /// the handshake gate, requestId correlation, cancellation-as-tool-cancel, and local timeout backstop
+        /// are written once. <typeparamref name="TResponse"/> is the matching terminal response type.
+        /// </summary>
+        private async Task<TResponse> RoundTripAsync<TResponse>(
+            PendingCallRegistry<TResponse> registry,
+            Func<string, object> buildRequest,
+            string what,
+            int timeoutMs,
+            CancellationToken cancellationToken)
+        {
+            // Gate on a COMPLETED handshake, not merely an open socket — same race as CallToolAsync (§1.4).
+            var stream = _stream;
+            if (stream == null || !_ackAccepted || _tcp is not { Connected: true })
+                throw new IpcDisconnectedException();
+
+            var requestId = Guid.NewGuid().ToString("N");
+            var task = registry.Register(requestId);
+
+            // Cancellation: forward the caller's token as the GENERIC tool-cancel (by requestId, reused for all
+            // kinds, §A.1) and fail the pending call.
+            using var registration = cancellationToken.Register(() =>
+            {
+                _ = SafeAwait(SendAsync(new ToolCancelMessage { RequestId = requestId }, CancellationToken.None));
+                registry.TryFail(requestId, new OperationCanceledException(cancellationToken));
+            });
+
+            try
+            {
+                await SendAsync(buildRequest(requestId), cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                registry.TryFail(requestId, new IpcDisconnectedException());
+                throw new IpcDisconnectedException();
+            }
+
+            if (timeoutMs > 0)
+            {
+                using var backstopCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                var completed = await Task.WhenAny(task, Task.Delay(timeoutMs + IpcProtocol.CallTimeoutGraceMs, backstopCts.Token)).ConfigureAwait(false);
+                backstopCts.Cancel();
+                if (completed != task && !cancellationToken.IsCancellationRequested)
+                {
+                    var timeout = new TimeoutException($"{what} call timed out after {timeoutMs + IpcProtocol.CallTimeoutGraceMs} ms with no IPC response.");
+                    _ = SafeAwait(SendAsync(new ToolCancelMessage { RequestId = requestId }, CancellationToken.None));
+                    registry.TryFail(requestId, timeout);
+                    throw timeout;
+                }
+            }
+
+            return await task.ConfigureAwait(false);
+        }
+
         /// <summary>
         /// Send a sidecar→plugin message (the §7 <c>device-auth</c> / <c>status</c> feed) over the live IPC
         /// link. No-op (returns false) when no connection is up — the plugin re-reads state on the next
@@ -479,6 +633,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
             try { _tcp?.Close(); } catch { /* ignore */ }
             _writeLock.Dispose();
             _pending.FailAll();
+            _pendingPrompts.FailAll();
+            _pendingResources.FailAll();
             return ValueTask.CompletedTask;
         }
     }

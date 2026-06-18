@@ -16,17 +16,23 @@ using com.IvanMurzak.Unreal.MCP.Bridge.Tools;
 namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
 {
     /// <summary>
-    /// Correlates in-flight <c>tool-call</c>s with their <c>tool-response</c>s by <c>requestId</c>
+    /// Correlates in-flight requests with their terminal responses by <c>requestId</c>
     /// (docs/ARCHITECTURE.md §1.3, §2.2). Thread-safe. On IPC disconnect, <see cref="FailAll"/> completes
     /// every pending call with <see cref="IpcDisconnectedException"/> immediately rather than letting it
-    /// hang to its timeout (§1.5, §2.2 step 4). A <c>tool-response</c> for an unknown / already-completed
-    /// id is silently dropped (<see cref="TryComplete"/> returns false) — covering late responses that
-    /// straddle a reconnect (§1.5).
+    /// hang to its timeout (§1.5, §2.2 step 4). A response for an unknown / already-completed id is silently
+    /// dropped (<see cref="TryComplete"/> returns false) — covering late responses that straddle a reconnect
+    /// (§1.5).
+    ///
+    /// <para>
+    /// Generic over the response type so the SAME correlation machinery serves tool-calls
+    /// (<typeparamref name="TResponse"/> = <c>ToolResponseMessage</c>, via <see cref="PendingCallRegistry"/>),
+    /// prompt-get, and resource-read (IPC v2, §A.1) — "reuse the PendingCallRegistry" per the design.
+    /// </para>
     /// </summary>
-    public sealed class PendingCallRegistry
+    public class PendingCallRegistry<TResponse>
     {
         private readonly object _gate = new();
-        private readonly Dictionary<string, TaskCompletionSource<ToolResponseMessage>> _pending = new();
+        private readonly Dictionary<string, TaskCompletionSource<TResponse>> _pending = new();
 
         public int Count
         {
@@ -38,9 +44,9 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
         /// asynchronously so completing it from the reader loop never inlines proxy/handler code onto
         /// the reader thread.
         /// </summary>
-        public Task<ToolResponseMessage> Register(string requestId)
+        public Task<TResponse> Register(string requestId)
         {
-            var tcs = new TaskCompletionSource<ToolResponseMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var tcs = new TaskCompletionSource<TResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
             lock (_gate)
             {
                 // A duplicate id (should never happen — ids are unique per call) fails the prior waiter.
@@ -55,9 +61,9 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
         /// Complete a pending call with its response. Returns false (and drops the response) when no call
         /// with that id is pending — a late or duplicate response straddling a reconnect (§1.5).
         /// </summary>
-        public bool TryComplete(string requestId, ToolResponseMessage response)
+        public bool TryComplete(string requestId, TResponse response)
         {
-            TaskCompletionSource<ToolResponseMessage>? tcs;
+            TaskCompletionSource<TResponse>? tcs;
             lock (_gate)
             {
                 if (!_pending.TryGetValue(requestId, out tcs))
@@ -70,7 +76,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
         /// <summary>Cancel/forget a single pending call (e.g. the caller's CancellationToken fired).</summary>
         public bool TryFail(string requestId, Exception exception)
         {
-            TaskCompletionSource<ToolResponseMessage>? tcs;
+            TaskCompletionSource<TResponse>? tcs;
             lock (_gate)
             {
                 if (!_pending.TryGetValue(requestId, out tcs))
@@ -86,15 +92,24 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
         /// </summary>
         public void FailAll(Exception? exception = null)
         {
-            List<TaskCompletionSource<ToolResponseMessage>> waiters;
+            List<TaskCompletionSource<TResponse>> waiters;
             lock (_gate)
             {
-                waiters = new List<TaskCompletionSource<ToolResponseMessage>>(_pending.Values);
+                waiters = new List<TaskCompletionSource<TResponse>>(_pending.Values);
                 _pending.Clear();
             }
             var ex = exception ?? new IpcDisconnectedException();
             foreach (var tcs in waiters)
                 tcs.TrySetException(ex);
         }
+    }
+
+    /// <summary>
+    /// The tool-call pending registry (<c>tool-call</c> ⇄ <c>tool-response</c> by requestId). A thin alias
+    /// of <see cref="PendingCallRegistry{TResponse}"/> at <c>ToolResponseMessage</c> so the original
+    /// non-generic call sites and xUnit tests are unchanged.
+    /// </summary>
+    public sealed class PendingCallRegistry : PendingCallRegistry<ToolResponseMessage>
+    {
     }
 }

@@ -44,29 +44,33 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
     /// Applies tool manifests (docs/ARCHITECTURE.md §2.2) to an <see cref="IProxyToolSink"/>: diff against
     /// the previously applied set, then remove / add (as <see cref="ProxyTool"/>s) / re-add changed /
     /// toggle enabled. Honours the out-of-order revision guard (§2.2 step 3) — but
-    /// <see cref="ResetForReconnect"/> (called on every <c>handshake-ack</c>, §1.5) resets the
-    /// last-applied revision to −1 so a post-reconnect re-push with an unchanged revision is always
-    /// applied. NOT thread-safe by itself: ProxyTool's docs require the host to serialize tool-set
-    /// mutations; the IPC client invokes this from its single reader loop.
+    /// <see cref="ManifestRegistrarBase{TDescriptor}.ResetForReconnect"/> (called on every
+    /// <c>handshake-ack</c>, §1.5) resets the last-applied revision to −1 so a post-reconnect re-push with
+    /// an unchanged revision is always applied. NOT thread-safe by itself: ProxyTool's docs require the host
+    /// to serialize tool-set mutations; the IPC client invokes this from its single reader loop.
+    ///
+    /// <para>
+    /// The revision-guard / reconnect-reset / diff-application machinery lives in the shared, kind-agnostic
+    /// <see cref="ManifestRegistrarBase{TDescriptor}"/> so the prompt (P1) and resource (P2) registrars
+    /// reuse it. This tool registrar is the original behaviour expressed through that base (gated by the
+    /// bridge xUnit suite); the tool-specific bits are the <see cref="ProxyTool"/> sink + the
+    /// <see cref="ManifestDiffer"/> name/schema-hash diff.
+    /// </para>
     /// </summary>
-    public sealed class ManifestRegistrar
+    public sealed class ManifestRegistrar : ManifestRegistrarBase<ToolDescriptor>
     {
         private readonly IProxyToolSink _sink;
         private readonly IToolCallChannel _channel;
-        private readonly ILogger? _logger;
-
-        private readonly Dictionary<string, ToolDescriptor> _applied = new();
-        private int _lastAppliedRevision = -1;
 
         public ManifestRegistrar(IProxyToolSink sink, IToolCallChannel channel, ILogger? logger = null)
+            : base(logger)
         {
             _sink = sink;
             _channel = channel;
-            _logger = logger;
         }
 
         /// <summary>Names of the tools currently registered by this registrar (test/inspection aid).</summary>
-        public IReadOnlyCollection<string> AppliedToolNames => _applied.Keys;
+        public IReadOnlyCollection<string> AppliedToolNames => Applied.Keys;
 
         /// <summary>
         /// A snapshot of the currently-applied tool descriptors (§7 skill-file generation reads this). The
@@ -74,68 +78,54 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
         /// Description / hints / input+output schema) — exactly the source the SKILL.md generator needs, so the
         /// sidecar can author the docs without any extra C++→sidecar payload. A copied list (caller mutation-safe).
         /// </summary>
-        public IReadOnlyList<ToolDescriptor> AppliedDescriptors => new List<ToolDescriptor>(_applied.Values);
+        public IReadOnlyList<ToolDescriptor> AppliedDescriptors => new List<ToolDescriptor>(Applied.Values);
 
-        public int LastAppliedRevision => _lastAppliedRevision;
-
-        /// <summary>
-        /// Reset the revision guard after a (re)connection handshake (§1.5). The applied snapshot is
-        /// retained — the long-lived McpPlugin still has the proxies registered, so a re-pushed manifest
-        /// that is byte-identical diffs to a no-op (correct), while a genuine change while the link was
-        /// down is still caught by the diff.
-        /// </summary>
-        public void ResetForReconnect() => _lastAppliedRevision = -1;
-
-        /// <summary>Apply a manifest. Returns the diff that was applied (empty when ignored/no-op).</summary>
+        /// <summary>Apply a tool manifest. Returns the diff that was applied (empty when ignored/no-op).</summary>
         public ManifestDiff Apply(ToolManifestMessage manifest)
         {
-            if (manifest.Revision <= _lastAppliedRevision)
-            {
-                _logger?.LogDebug(
-                    "Ignoring tool-manifest revision {Revision} (<= last applied {LastApplied}).",
-                    manifest.Revision, _lastAppliedRevision);
-                return new ManifestDiff();
-            }
+            // ApplyEntries drives the shared remove/changed/add/enabled orchestration through the hooks below
+            // and returns the kind-agnostic diff; re-shape it into the concrete ManifestDiff the §7 callers and
+            // the existing xUnit suite consume (the lists are the same references — no copy of the descriptors).
+            var generic = ApplyEntries(manifest.Revision, manifest.Tools);
 
-            var diff = ManifestDiffer.Compute(_applied, manifest.Tools);
-
-            foreach (var name in diff.Removed)
-            {
-                _sink.RemoveTool(name);
-                _applied.Remove(name);
-            }
-
-            foreach (var desc in diff.Changed)
-            {
-                _sink.RemoveTool(desc.Name);
-                _sink.AddTool(desc.Name, ProxyToolFactory.Create(desc, _channel));
-                _applied[desc.Name] = desc;
-            }
-
-            foreach (var desc in diff.Added)
-            {
-                _sink.AddTool(desc.Name, ProxyToolFactory.Create(desc, _channel));
-                _applied[desc.Name] = desc;
-            }
-
-            foreach (var (name, enabled) in diff.EnabledChanged)
-            {
-                _sink.SetToolEnabled(name, enabled);
-                if (_applied.TryGetValue(name, out var existing))
-                    existing.Enabled = enabled;
-            }
-
-            _lastAppliedRevision = manifest.Revision;
-
-            if (!diff.IsEmpty)
-            {
-                _logger?.LogInformation(
-                    "Applied tool-manifest revision {Revision}: +{Added} ~{Changed} -{Removed} ⏼{Enabled} (total {Total}).",
-                    manifest.Revision, diff.Added.Count, diff.Changed.Count, diff.Removed.Count,
-                    diff.EnabledChanged.Count, _applied.Count);
-            }
-
+            var diff = new ManifestDiff();
+            diff.Added.AddRange(generic.Added);
+            diff.Changed.AddRange(generic.Changed);
+            diff.Removed.AddRange(generic.Removed);
+            diff.EnabledChanged.AddRange(generic.EnabledChanged);
             return diff;
+        }
+
+        protected override string KindLabel => "tool";
+
+        protected override string KeyOf(ToolDescriptor descriptor) => descriptor.Name;
+
+        protected override ManifestDiff<ToolDescriptor> ComputeDiff(IReadOnlyList<ToolDescriptor> next)
+        {
+            // Reuse the existing tool-specific differ (name + schemaHash, with the structural fallback), then
+            // re-shape its result into the kind-agnostic diff the base applies.
+            var toolDiff = ManifestDiffer.Compute(Applied, next);
+            var generic = new ManifestDiff<ToolDescriptor>();
+            generic.Added.AddRange(toolDiff.Added);
+            generic.Changed.AddRange(toolDiff.Changed);
+            generic.Removed.AddRange(toolDiff.Removed);
+            generic.EnabledChanged.AddRange(toolDiff.EnabledChanged);
+            return generic;
+        }
+
+        protected override void SinkRemove(string key) => _sink.RemoveTool(key);
+
+        protected override void SinkAdd(ToolDescriptor descriptor) =>
+            _sink.AddTool(descriptor.Name, ProxyToolFactory.Create(descriptor, _channel));
+
+        protected override void SinkSetEnabled(string key, bool enabled) => _sink.SetToolEnabled(key, enabled);
+
+        protected override ToolDescriptor WithEnabled(ToolDescriptor descriptor, bool enabled)
+        {
+            // Mutate in place + return the same instance — preserves the pre-generalization behaviour exactly
+            // (the retained snapshot's Enabled flag is updated on the existing descriptor object).
+            descriptor.Enabled = enabled;
+            return descriptor;
         }
     }
 }
