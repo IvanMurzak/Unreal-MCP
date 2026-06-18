@@ -1,9 +1,14 @@
 # Writing an Unreal-MCP Extension
 
-Unreal-MCP exposes the Unreal Editor to MCP-aware AI assistants as a set of **tools**. Any third-party
-UE plugin can contribute its own tools through a small, public, modular-feature-based contract — no
-fork, no link-time coupling, no load-order assumptions. This guide is the authoritative author
-reference. The design rationale lives in [`docs/ARCHITECTURE.md`](ARCHITECTURE.md) §5.
+Unreal-MCP exposes the Unreal Editor to MCP-aware AI assistants as a set of **tools**, **prompts**, and
+**resources**. Any third-party UE plugin can contribute its own through a small, public,
+modular-feature-based contract — no fork, no link-time coupling, no load-order assumptions. This guide is the
+authoritative author reference. The tool design rationale lives in [`docs/ARCHITECTURE.md`](ARCHITECTURE.md)
+§5; the prompt/resource design is in §A.
+
+The tool contract is documented first and in full; **prompts** and **resources** follow the exact same
+shape (provider interface + fluent registry builder + modular-feature registration) and are documented in
+their own sections below — read the tool section first, then the deltas.
 
 A complete, buildable example accompanies this guide:
 [`samples/UnrealAITemplate/`](../samples/UnrealAITemplate).
@@ -188,6 +193,170 @@ version, and your `GetExtensionVersion()` is your own.
 
 ---
 
+## Custom prompts
+
+Beyond tools, an extension can contribute **MCP prompts** — reusable, parameterized prompt templates the AI
+agent can fetch via `prompts/get`. The contract is the exact prompt sibling of the tool contract: implement
+[`IUnrealMcpPromptProvider`](../UnrealMCP/Source/UnrealMcpRuntime/Public/IUnrealMcpPromptProvider.h) and
+declare prompts with the fluent
+[`FUnrealMcpPromptRegistry`](../UnrealMCP/Source/UnrealMcpRuntime/Public/UnrealMcpPromptRegistry.h) builder
+(both headers in the `UnrealMcpRuntime` module). The architecture is in
+[`docs/ARCHITECTURE.md`](ARCHITECTURE.md) §A.
+
+```cpp
+class IUnrealMcpPromptProvider : public IModularFeature
+{
+public:
+    static FName GetModularFeatureName();          // FName("UnrealMcpPromptProvider")
+    virtual FString GetExtensionId() const = 0;    // stable, unique, reverse-DNS
+    virtual FText   GetDisplayName() const = 0;
+    virtual FString GetExtensionVersion() const = 0;
+    virtual void    RegisterPrompts(FUnrealMcpPromptRegistry& Registry) = 0;
+};
+```
+
+### The prompt builder
+
+`Registry.Prompt("prompt-id")` returns a fluent builder. Available calls:
+
+- `.Title(...)`, `.Description(...)` — human-/LLM-facing copy.
+- `.Role(EUnrealMcpPromptRole::User | ::Assistant)` — the default author role of the rendered message(s).
+- `.ParamString / .ParamInt / .ParamNumber / .ParamBool / .ParamVector(name, desc, requirement)` — declare a
+  prompt argument. These are the **same** param helpers and `EUnrealMcpParamRequirement` as the tool builder
+  (prompt args reuse the tool schema generation verbatim). `.Param(name, jsonType, desc, req, customSchema)`
+  is the generic escape hatch.
+- `.Handle(lambda)` — bind the handler and commit the prompt. The handler runs on the **game thread** and
+  receives the same `FUnrealMcpToolCall` args surface (`Call.GetString(...)`, `Call.Has(...)`); it returns a
+  `FUnrealMcpPromptResult`.
+
+A prompt handler returns role-tagged messages. The common one-shot shape is the static helper:
+
+```cpp
+#include "IUnrealMcpPromptProvider.h"
+#include "UnrealMcpPromptRegistry.h"
+
+virtual void RegisterPrompts(FUnrealMcpPromptRegistry& Registry) override
+{
+    Registry.Prompt(TEXT("level-design-brief"))
+        .Title(TEXT("Level Design Brief"))
+        .Description(TEXT("Generate a level design brief from a single 'theme' argument."))
+        .Role(EUnrealMcpPromptRole::User)
+        .ParamString(TEXT("theme"), TEXT("The level theme (e.g. 'haunted forest')."),
+                     EUnrealMcpParamRequirement::Required)
+        .Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpPromptResult
+        {
+            const FString Theme = Call.GetString(TEXT("theme"));
+            if (Theme.IsEmpty())
+                return FUnrealMcpPromptResult::Error(TEXT("theme is required."));
+
+            const FString Text = FString::Printf(
+                TEXT("Draft a level design brief for a \"%s\"-themed level. Cover layout, pacing, "
+                     "key encounters, and mood."), *Theme);
+            return FUnrealMcpPromptResult::Success(Text, EUnrealMcpPromptRole::User);
+        });
+}
+```
+
+This is the shipped core `level-design-brief` prompt
+([`UnrealMCP/Source/UnrealMcpRuntime/Private/Prompts/UnrealMcpCorePrompts.cpp`](../UnrealMCP/Source/UnrealMcpRuntime/Private/Prompts/UnrealMcpCorePrompts.cpp)).
+Register the provider as a modular feature exactly as for tools, but under
+`IUnrealMcpPromptProvider::GetModularFeatureName()`:
+
+```cpp
+IModularFeatures::Get().RegisterModularFeature(
+    IUnrealMcpPromptProvider::GetModularFeatureName(), PromptProvider.Get());
+// ... and UnregisterModularFeature(...) in ShutdownModule.
+```
+
+Prompt ids are **kebab-case**, the same rule as tool ids. Do **not** call `.ExtensionId(...)` yourself — your
+`GetExtensionId()` is stamped automatically. Lifecycle, ordering, isolation (descriptor-level: a duplicate
+prompt name across providers is rejected first-wins; an invalid descriptor is dropped), and per-extension
+enable/disable behave **identically** to the tool path described above.
+
+---
+
+## Custom resources
+
+An extension can also contribute **MCP resources** — addressable, readable content the AI agent fetches via
+`resources/read`. Implement
+[`IUnrealMcpResourceProvider`](../UnrealMCP/Source/UnrealMcpRuntime/Public/IUnrealMcpResourceProvider.h) and
+declare resources with the fluent
+[`FUnrealMcpResourceRegistry`](../UnrealMCP/Source/UnrealMcpRuntime/Public/UnrealMcpResourceRegistry.h)
+builder.
+
+```cpp
+class IUnrealMcpResourceProvider : public IModularFeature
+{
+public:
+    static FName GetModularFeatureName();          // FName("UnrealMcpResourceProvider")
+    virtual FString GetExtensionId() const = 0;
+    virtual FText   GetDisplayName() const = 0;
+    virtual FString GetExtensionVersion() const = 0;
+    virtual void    RegisterResources(FUnrealMcpResourceRegistry& Registry) = 0;
+};
+```
+
+### The resource builder
+
+`Registry.Resource("unreal://your/uri")` returns a fluent builder — the resource's **URI is its identity**
+(the registry key and the MCP route). Available calls:
+
+- `.Name(...)`, `.Description(...)` — human-/LLM-facing copy.
+- `.MimeType(...)` — e.g. `"application/json"`, `"image/png"`.
+- `.Read(lambda)` — bind the read handler and commit the resource. The handler runs on the **game thread**,
+  receives the requested `FString Uri`, and returns a `FUnrealMcpResourceResult`.
+
+A read returns one or more content blocks. Each block is **text XOR a base64 blob** + a mime type — use the
+static helpers `FUnrealMcpResourceResult::Text(uri, text, mimeType)` or `::Blob(uri, base64, mimeType)` (and
+`::MakeError(reason)` on failure):
+
+```cpp
+#include "IUnrealMcpResourceProvider.h"
+#include "UnrealMcpResourceRegistry.h"
+
+virtual void RegisterResources(FUnrealMcpResourceRegistry& Registry) override
+{
+    // A JSON (text) resource:
+    Registry.Resource(TEXT("unreal://project/levels"))
+        .Name(TEXT("Project Levels"))
+        .Description(TEXT("A JSON snapshot of the active world and its levels."))
+        .MimeType(TEXT("application/json"))
+        .Read([](const FString& Uri) -> FUnrealMcpResourceResult
+        {
+            return FUnrealMcpResourceResult::Text(Uri, BuildLevelsJson(), TEXT("application/json"));
+        });
+
+    // A binary (blob) resource — carried as base64, like a screenshot image:
+    Registry.Resource(TEXT("unreal://project/icon"))
+        .Name(TEXT("Project Icon"))
+        .Description(TEXT("A small PNG, returned as a base64 blob."))
+        .MimeType(TEXT("image/png"))
+        .Read([](const FString& Uri) -> FUnrealMcpResourceResult
+        {
+            const FString Base64 = FBase64::Encode(IconBytes, sizeof(IconBytes));
+            return FUnrealMcpResourceResult::Blob(Uri, Base64, TEXT("image/png"));
+        });
+}
+```
+
+These are the shipped core resources
+([`UnrealMCP/Source/UnrealMcpRuntime/Private/Resources/UnrealMcpCoreResources.cpp`](../UnrealMCP/Source/UnrealMcpRuntime/Private/Resources/UnrealMcpCoreResources.cpp)).
+Register the provider under `IUnrealMcpResourceProvider::GetModularFeatureName()` (same modular-feature
+pattern as tools and prompts). Lifecycle, ordering, isolation (a duplicate **URI** across providers is
+rejected first-wins; an invalid descriptor is dropped), and per-extension enable/disable behave identically.
+
+> **Scope note (MVP).** Only **static, fixed-URI** resources are supported today —
+> templated / parameterized resource URIs are deferred (`docs/ARCHITECTURE.md` §A.1). Declare one resource per
+> concrete URI.
+
+> **Binary-content note.** A blob is base64 on the Unreal side and on the IPC wire (the C++ `Blob(...)`
+> helper and the bridge `ProxyResource` round-trip it correctly). A known **upstream** encoding quirk in the
+> shared GameDev-MCP-Server / MCP-Plugin-dotnet can re-emit blob bytes on the MCP wire to the client — text
+> resources round-trip cleanly end-to-end; if a binary resource arrives mis-encoded at the client, that
+> upstream issue is the cause, not the Unreal-MCP plugin or bridge.
+
+---
+
 ## Runtime usage (in-game extensions)
 
 Everything above also works **in a running game** (PIE, Standalone, packaged Development) — this is the
@@ -215,17 +384,27 @@ discoverable wrapper so you never have to touch `IModularFeatures` directly:
 ```cpp
 #include "UnrealMcpRuntimeSubsystem.h"
 #include "IUnrealMcpToolProvider.h"
+#include "IUnrealMcpPromptProvider.h"
+#include "IUnrealMcpResourceProvider.h"
 
 if (UUnrealMcpRuntimeSubsystem* Mcp = UUnrealMcpRuntimeSubsystem::Get(this))
-    Mcp->RegisterToolProvider(MyProviderInstance);     // tools merge into the live registry; manifest re-pushed
-// ... later, before destroying the provider:
-    Mcp->UnregisterToolProvider(MyProviderInstance);   // tools drop out; manifest re-pushed
+{
+    Mcp->RegisterToolProvider(MyToolProvider);          // tools merge in; manifest re-pushed
+    Mcp->RegisterPromptProvider(MyPromptProvider);      // prompts merge in; manifest re-pushed
+    Mcp->RegisterResourceProvider(MyResourceProvider);  // resources merge in; manifest re-pushed
+}
+// ... later, before destroying the providers:
+    Mcp->UnregisterToolProvider(MyToolProvider);
+    Mcp->UnregisterPromptProvider(MyPromptProvider);
+    Mcp->UnregisterResourceProvider(MyResourceProvider);
 ```
 
-Both paths feed the same extension manager: registering or unregistering at any time rebuilds the registry
-and **re-pushes the manifest**, so a connected sidecar's `tools/list` gains/loses your tools automatically.
-The subsystem does **not** take ownership of the provider — keep it alive while it is registered (typically
-a member of your game module or a `UGameInstanceSubsystem`) and unregister before destroying it.
+All three kinds feed the same kind-aware extension manager: registering or unregistering at any time rebuilds
+the relevant registry and **re-pushes the manifest**, so a connected sidecar's `tools/list` / `prompts/list`
+/ `resources/list` gains/loses your contributions automatically. The subsystem does **not** take ownership of
+a provider — keep it alive while it is registered (typically a member of your game module or a
+`UGameInstanceSubsystem`) and unregister before destroying it. The same provider object may implement more
+than one contract (tools + prompts + resources) and be registered under each.
 
 ## Reference examples
 

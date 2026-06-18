@@ -38,4 +38,16 @@ an **invalid** tool (an empty-named parameter — a malformed schema). Unreal-MC
 entry and records the failure on this extension's record; `hello-extension` stays registered. This is
 the §5 descriptor-validation isolation guarantee in action.
 
-See [`docs/ARCHITECTURE.md`](../../docs/ARCHITECTURE.md) §5 and [`docs/EXTENSIONS.md`](../../docs/EXTENSIONS.md).
+## Prompts & resources
+
+This sample focuses on the **tool** contract. Prompts and resources use the exact sibling contracts —
+`IUnrealMcpPromptProvider` + `FUnrealMcpPromptRegistry` and `IUnrealMcpResourceProvider` +
+`FUnrealMcpResourceRegistry` (same `UnrealMcpRuntime` module, same modular-feature registration, same
+isolation rules). For runnable prompt/resource examples, see the shipped **core** families
+[`UnrealMcpCorePrompts.cpp`](../../UnrealMCP/Source/UnrealMcpRuntime/Private/Prompts/UnrealMcpCorePrompts.cpp)
+(`level-design-brief`) and
+[`UnrealMcpCoreResources.cpp`](../../UnrealMCP/Source/UnrealMcpRuntime/Private/Resources/UnrealMcpCoreResources.cpp)
+(`unreal://project/levels` + `unreal://project/icon`), and the authoring sections in
+[`docs/EXTENSIONS.md`](../../docs/EXTENSIONS.md).
+
+See [`docs/ARCHITECTURE.md`](../../docs/ARCHITECTURE.md) §5 + §A and [`docs/EXTENSIONS.md`](../../docs/EXTENSIONS.md).

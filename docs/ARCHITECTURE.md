@@ -223,7 +223,13 @@ Envelope: every message is a JSON object with a `type` field. `requestId` correl
 | plugin → sidecar | `tool-manifest` | full snapshot: `revision` (monotonic int) + array of tool descriptors (§2.2) |
 | sidecar → plugin | `tool-call` | `requestId`, `tool`, `arguments` (raw JSON object), `timeoutMs` |
 | plugin → sidecar | `tool-response` | `requestId`, `status: "success"\|"error"`, `content` (MCP content array), `structured` (object) |
-| sidecar → plugin | `tool-cancel` | `requestId` — cooperative cancellation (§4) |
+| plugin → sidecar | `prompt-manifest` | full snapshot: `revision` + array of prompt descriptors (§A.1) — IPC v2 |
+| sidecar → plugin | `prompt-get` | `requestId`, `prompt`, `arguments`, `timeoutMs` (§A.1) — IPC v2 |
+| plugin → sidecar | `prompt-response` | `requestId`, `status`, `messages[]` (role + text) (§A.1) — IPC v2 |
+| plugin → sidecar | `resource-manifest` | full snapshot: `revision` + array of resource descriptors (§A.1) — IPC v2 |
+| sidecar → plugin | `resource-read` | `requestId`, `uri`, `timeoutMs` (§A.1) — IPC v2 |
+| plugin → sidecar | `resource-response` | `requestId`, `status`, `contents[]` (text XOR base64 blob + mimeType) (§A.1) — IPC v2 |
+| sidecar → plugin | `tool-cancel` | `requestId` — cooperative cancellation (§4); reused for prompt-get / resource-read |
 | plugin → sidecar | `config` | UI/config changed: connect/disconnect, mode, host, token, enabled-tools map |
 | sidecar → plugin | `status` | SignalR state for the UI: `connectionState`, `keepConnected`, `cloudAuthState`, `serverProcessState`, `aiAgents[]` |
 | plugin → sidecar | `auth-start` | begin the device-code flow (UI Authorize button) |
@@ -949,8 +955,13 @@ BP state machines; Behavior Trees; plugin management family (`package-*` analog 
 IPluginManager); profiler family (`stat` capture analog); `tests-run` (Automation runner
 exposure); Skills generation (sidecar-side, free once prompts land — Godot generates them on boot).
 
-Prompts and resources ship empty-but-wired in MVP (the framework relays them already; counts show
-0 in the UI) — first content is backlog.
+Prompts and resources shipped **empty-but-wired** in the MVP (the framework relays them already;
+counts show 0 in the UI). The **M16** task chain then added the full developer→C++→IPC→bridge→manager
+registration path for **custom prompts and resources** (the appendix **§A** below is the authoritative
+design), with core samples `level-design-brief` (prompt) and `unreal://project/levels` +
+`unreal://project/icon` (resources). Still deferred after M16: **templated / parameterized resource URIs**
+(MVP is static fixed-URI only) and **populating the §7 Prompts / Resources aux windows** (registration and
+e2e work without the windows populated — see §A.5).
 
 ---
 
@@ -1235,3 +1246,111 @@ The 5.5 floor must be EXERCISED (packaged Development build on a 5.5 install) be
   out-of-order revision guard, handshake timeout-as-crash, FText/delegate/interface property
   exclusions, non-string TMap key convention, promise double-set guard, manifest re-push on
   reconnect idempotency.
+
+---
+
+## Appendix A — Custom prompts & resources (M16)
+
+> Authoritative design for the **M16** prompt/resource registration path — the exact siblings of the §2/§3/§5
+> tool path. M16 added the developer→C++→IPC→bridge→manager half on top of the existing empty-but-wired
+> server↔sidecar relay, consuming `com.IvanMurzak.McpPlugin` (`IPromptManager` / `IResourceManager` /
+> `IRunPrompt` / `IRunResource`) **as-is** — no upstream MCP-Plugin-dotnet change was required (the public
+> manager surface already mirrors the tools path `ProxyTool` rides). The C++ identifiers below are shipped in
+> `UnrealMcpRuntime/Public/`; the bridge types in `bridge/src/`.
+
+### A.1 IPC protocol (the §1.3 analog)
+
+Prompts/resources reuse the §1.2 NDJSON framing, the §2.2 revision-guarded full-snapshot diff, and the §1.5
+reconnect re-push. `ipcVersion` was bumped **1 → 2**; the handshake negotiates it, so an old sidecar/plugin
+pair still does tools-only. The new `type` discriminators are in the §1.3 message-schema table:
+
+- plugin → sidecar: `prompt-manifest {revision, prompts[]}`, `resource-manifest {revision, resources[]}`.
+- sidecar → plugin: `prompt-get {requestId, prompt, arguments, timeoutMs}`, `resource-read {requestId, uri, timeoutMs}`.
+- plugin → sidecar: `prompt-response {requestId, status, messages[]}` (≈ `ResponseGetPrompt`),
+  `resource-response {requestId, status, contents[]}` (≈ `ResponseResourceContent[]`).
+- The generic `tool-cancel` (by `requestId`) is reused for both — no new cancel verbs.
+
+**Prompt descriptor**: `{name (kebab), title, description, role ("user"|"assistant"), inputSchema (JSON Schema
+→ the manager flattens to `arguments[]`), enabled, extensionId, schemaHash}`.
+**Resource descriptor**: `{uri (→ the MCP route), name, description, mimeType, enabled, extensionId, schemaHash}`.
+
+**Content**: a resource read returns one or more content blocks; each is `Text` (string) **XOR** `Blob`
+(base64) + `mimeType`, so binary content (e.g. an image) rides as base64 exactly like a screenshot tool's
+image payload.
+
+**Scope (MVP)**: static fixed-URI resources only. Templated / parameterized resource URIs are **deferred**
+(upstream McpPlugin has `RunResourceTemplates` / `ResponseResourceTemplate`, later-additive). The
+list-changed notifications (`notifications/{prompts,resources}/list_changed`) are IN scope and free — the
+manager owns them: `AddPrompt` / `AddResource` fire `On*Updated`, so the bridge needs zero push machinery
+(same as tools).
+
+### A.2 C++ surface (Model-A: contracts + registries + runtime families in `UnrealMcpRuntime`)
+
+The prompt/resource contracts and registries live in the **runtime module** (re-exported by `UnrealMcpEditor`),
+so the same headers serve editor and runtime extensions — exactly like the tool path.
+
+- **Providers** — `IUnrealMcpPromptProvider` / `IUnrealMcpResourceProvider` (mirror `IUnrealMcpToolProvider`).
+  Modular-feature names `UnrealMcpPromptProvider` / `UnrealMcpResourceProvider`; declaration entry points
+  `RegisterPrompts(FUnrealMcpPromptRegistry&)` / `RegisterResources(FUnrealMcpResourceRegistry&)`. Both carry
+  the same `GetExtensionId()` / `GetDisplayName()` / `GetExtensionVersion()` triple as the tool provider. One
+  plugin may implement all three contracts.
+- **Registries + builders** —
+  - `FUnrealMcpPromptRegistry` / `FUnrealMcpPromptBuilder`: `Registry.Prompt("id").Title().Description().Role()
+    .ParamString/Int/Number/Bool/Vector/Param(...).Handle(call → FUnrealMcpPromptResult)`. The role enum is
+    **`EUnrealMcpPromptRole { User, Assistant }`**. The result is role-tagged messages
+    (`FUnrealMcpPromptResult::Success(text, role, description)` / `::Error(description)`). Prompt arguments
+    **reuse `FUnrealMcpParamSpec` + `EUnrealMcpParamRequirement` + the §3.2 schema generation verbatim**, and
+    a prompt handler receives the same `FUnrealMcpToolCall` args+cancel surface as a tool handler.
+  - `FUnrealMcpResourceRegistry` / `FUnrealMcpResourceBuilder`: `Registry.Resource("unreal://uri").Name()
+    .Description().MimeType().Read(handler(uri) → FUnrealMcpResourceResult)`. The result is content blocks
+    (`FUnrealMcpResourceResult::Text(uri, text, mimeType)` / `::Blob(uri, base64, mimeType)` /
+    `::Success(contents)` / `::MakeError(error)`). A resource's **URI is its identity** (the registry key and
+    the MCP route).
+  - Both registries clone the tool registry's machinery: monotonic `Revision`, `BuildManifestJson()`,
+    `Execute` / `Read`, `RegisterExtension` / `Remove*ForExtension`, `ComputeSchemaHash`, descriptor
+    validation, and the §7/§8 enable filters (`Set*EnabledFilter` whitelist + `ApplyDisabled*` blocklist).
+    They reuse the tool registry's `FUnrealMcpExtensionRegistrationResult` verbatim.
+- **Runtime subsystem** — `UUnrealMcpRuntimeSubsystem::RegisterPromptProvider` / `UnregisterPromptProvider`
+  and `RegisterResourceProvider` / `UnregisterResourceProvider` (thin `IModularFeatures::RegisterModularFeature`
+  wrappers with identical not-owned semantics to `RegisterToolProvider`).
+- **Extension manager** — `FUnrealMcpExtensionManager` is **kind-aware** (three registries + three
+  modular-feature subscriptions) rather than triplicated, so its re-entrancy guard / deferred-rebuild /
+  disabled-set persistence / ExtensionId sort are shared and load-bearing for §5 isolation. `OnChanged` fires
+  the tool, prompt, and resource manifest pushes together.
+- **Coordinator + bridge server** — the editor coordinator (and the runtime subsystem's PImpl) builds the
+  prompt + resource registries alongside the tool registry, registers the core families, and hands all three
+  to the single `FUnrealMcpBridgeServer`, which adds prompt/resource manifest pushes (on Ready + OnChanged)
+  and `HandlePromptGet` / `HandleResourceRead` marshalling through the **existing**
+  `FUnrealMcpGameThreadDispatcher` (§4 game-thread, no-modal-UI). No new threads or sockets.
+
+### A.3 Bridge (mirror `ProxyTool` / `ProxyToolFactory` / `ManifestRegistrar`)
+
+- **`ProxyPrompt : IRunPrompt`** — schema-blind; `Run` round-trips `prompt-get` → `ResponseGetPrompt`,
+  fail-fast on `IpcDisconnectedException`. Built by `ProxyPromptFactory`.
+- **`ProxyResource : IRunResource`** — composes `ProxyResourceContent : IRunResourceContent`
+  (`Run` → `resource-read` → `ResponseResourceContent[]`) + `ProxyResourceList : IRunResourceList` (static
+  MVP: a 1-element `ResponseListResource[]` synthesized from the descriptor, no IPC). Built by
+  `ProxyResourceFactory`.
+- **Registrars** — `PromptManifestRegistrar` / `ResourceManifestRegistrar` clone `ManifestRegistrar` (revision
+  guard, `ResetForReconnect`, add/remove/changed/enabled diff). Their sinks (`PromptManagerSink` over
+  `IPromptManager` / `ResourceManagerSink` over `IResourceManager`) forward to the manager's
+  `AddPrompt(prompt)` / `AddResource(resource)` — note the **runner-only** manager signature (the
+  name/route comes from the runner itself), unlike the tool path's `AddTool(name, runner)`.
+- **`SidecarHost.Build()`** grabs `_plugin.McpManager.PromptManager` / `.ResourceManager` (both **nullable** →
+  guard + log; default-constructed empty by `McpPluginBuilder.Build`, then filled by the registrar — the same
+  empty-then-manifest model as tools), builds the registrars, and wires them to the IPC client. `IpcClient`
+  routes the inbound manifests and owns the outbound `prompt-get` / `resource-read` channels (reusing the
+  existing `PendingCallRegistry`).
+
+### A.4 Schema / serialization
+
+Prompt arguments ride `FUnrealMcpParamSpec` → JSON Schema (§3.2, unchanged); resource content uses
+Text/Blob(base64) + mimeType; everything travels over the existing camelCase NDJSON `IpcProtocol.JsonOptions`.
+No new serializer configuration.
+
+### A.5 UI angle (deferred)
+
+Populating the §7 empty **Prompts** / **Resources** aux windows from each registry's `BuildManifestJson()`
+(parity with the Tools window) is a **follow-up** (M16-P4): name/title/description + role for prompts,
+uri + mimeType for resources, plus an enable toggle. Registration and end-to-end use work **without** the
+windows populated — the windows still render their subdued empty-state in this release.
