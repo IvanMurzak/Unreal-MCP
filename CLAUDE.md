@@ -21,7 +21,7 @@ user-facing entry point is [`README.md`](README.md); the release runbook is
 | Path | What it is |
 | --- | --- |
 | `UnrealMCP/` | The UE **editor plugin**. `UnrealMCP/UnrealMCP.uplugin` `VersionName` is the version single-source (currently `0.1.0`). **No `EngineVersion` pin** (UE treats it as exact-match, not a floor). Modules: `UnrealMcpEditor` + `UnrealMcpEditorTests` (both Type `Editor`, LoadingPhase `Default`) |
-| `UnrealMCP/Source/UnrealMcpEditor/Public/` | The extension contract (`IUnrealMcpToolProvider.h`), the tool registry (`UnrealMcpToolRegistry.h`), and the core-family `Register` entry points (`UnrealMcpCoreTools.h`) |
+| `UnrealMCP/Source/UnrealMcpRuntime/Public/` | The extension contract (`IUnrealMcpToolProvider.h`), the tool registry (`UnrealMcpToolRegistry.h`), the runtime bootstrap (`UnrealMcpRuntimeSubsystem.h`), the kill-switch settings (`UnrealMcpRuntimeSettings.h`), and the runtime core-family `Register` entry points (`UnrealMcpRuntimeCoreTools.h`). The headers are re-exported by `UnrealMcpEditor`, so the same contract serves editor and runtime extensions |
 | `UnrealMCP/Source/UnrealMcpEditor/Private/` | `Tools/` (the 8 families), `Config/`, `UI/`, plus Bridge/Schema/Dispatch/Sidecar code per ARCHITECTURE §9.1 |
 | `UnrealMCP/Source/UnrealMcpEditorTests/` | Automation specs behind `WITH_DEV_AUTOMATION_TESTS`, names under the **`UnrealMcp.`** filter prefix. **No top-level test folder** — tests live per-leg |
 | `bridge/` | .NET 9 **sidecar** `com.IvanMurzak.Unreal.MCP.Bridge` (binary `unreal-mcp-bridge`) — the McpPlugin host the plugin spawns; IPC ⇄ SignalR relay. xUnit tests in `bridge/tests/`. Hand-authored, TRACKED solution `bridge/Unreal-MCP-Bridge.sln` |
