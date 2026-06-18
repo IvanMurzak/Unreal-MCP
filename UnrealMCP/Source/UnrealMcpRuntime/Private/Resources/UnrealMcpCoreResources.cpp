@@ -9,8 +9,11 @@
 #include "Engine/Level.h"
 #include "Engine/LevelStreaming.h"
 #include "Misc/Base64.h"
+#include "Dom/JsonObject.h"          // FJsonObject::SetStringField overloads — NOT transitively present in the Game build
+#include "Dom/JsonValue.h"           // FJsonValueObject for the levels[] array
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
+#include "UObject/Package.h"         // UObject::GetOutermost()->GetName() (UPackage) — Game-build standalone include
 
 /**
  * The core resources (docs/ARCHITECTURE.md §A.1). Self-contained, Engine-only handlers — no UnrealEd symbols
