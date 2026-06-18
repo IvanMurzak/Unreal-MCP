@@ -43,17 +43,19 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         // ── the pure edge-decision matrix ────────────────────────────────────────────────────────────────────
 
         [Fact]
-        public void ShouldEmit_OnDropOffConnected_EmitsConnecting()
+        public void ShouldEmit_OnDropOffConnected_EmitsDisconnected()
         {
+            // A drop off Connected emits "Disconnected" — the plugin's ParseConnectionState folds that into amber
+            // Degraded while armed (no amber→blue flip vs. the editor's optimistic post-Stop Degraded).
             var emit = SidecarHost.ShouldEmitOnConnectionStateChange(
                 (int)HubConnectionState.Connected, (int)HubConnectionState.Reconnecting, out var state);
             Assert.True(emit);
-            Assert.Equal("Connecting", state);
+            Assert.Equal("Disconnected", state);
 
             // A hard drop to Disconnected is also an off-Connected edge.
             Assert.True(SidecarHost.ShouldEmitOnConnectionStateChange(
                 (int)HubConnectionState.Connected, (int)HubConnectionState.Disconnected, out var state2));
-            Assert.Equal("Connecting", state2);
+            Assert.Equal("Disconnected", state2);
         }
 
         [Fact]
@@ -111,7 +113,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             fake.PushConnectionState(HubConnectionState.Reconnecting);
             Assert.Equal(2, emitted.Count);
             Assert.NotEqual("Connected", emitted[^1].ConnectionState);
-            Assert.Equal("Connecting", emitted[^1].ConnectionState);
+            Assert.Equal("Disconnected", emitted[^1].ConnectionState);
         }
 
         [Fact]

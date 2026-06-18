@@ -746,9 +746,9 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         /// an R3 <c>ReadOnlyReactiveProperty&lt;HubConnectionState&gt;</c>). On a transition AWAY from
         /// <see cref="HubConnectionState.Connected"/> (the link dropped — most importantly because the user stopped the
         /// local server the editor was connected to), emit a FRESH non-green <c>status</c> so the plugin's dot leaves
-        /// green and the action button updates, WITHOUT requiring an editor-initiated config push. While still armed the
-        /// drop reads as "Connecting" (the client is auto-retrying = the plugin's Degraded once keepConnected is applied,
-        /// see ParseConnectionState); a disarmed drop reads as "Disconnected". A transition INTO Connected re-emits a
+        /// green and the action button updates, WITHOUT requiring an editor-initiated config push. The drop emits
+        /// "Disconnected", which the plugin's ParseConnectionState folds into amber Degraded while armed (the client is
+        /// auto-retrying) and a true Disconnected when disarmed. A transition INTO Connected re-emits a
         /// Connected status so a transport-level recovery (the client reconnected on its own) also refreshes the dot.
         /// Internal + plugin-injected so the bridge xUnit suite drives it with a fake whose ConnectionState it controls.
         /// Idempotent: a second subscribe (a re-Build) replaces the prior subscription.
@@ -776,7 +776,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         /// bug-2 trigger) or a RECOVERY back into Connected — never on the baseline first observation (<paramref
         /// name="previous"/> &lt; 0) or a same-state re-publish, so a property that re-emits its current value on
         /// subscribe does not spam a redundant status. Pure + static so the bridge xUnit suite locks the matrix without a
-        /// live client. The shipped string is mode-agnostic ("Connecting"/"Connected"); <see cref="EmitStatusAsync"/>
+        /// live client. The shipped string is mode-agnostic ("Disconnected"/"Connected"); <see cref="EmitStatusAsync"/>
         /// stamps the live <c>keepConnected</c>, which the plugin's ParseConnectionState folds into Degraded while armed.
         /// </summary>
         internal static bool ShouldEmitOnConnectionStateChange(int previous, int current, out string connectionState)
@@ -791,9 +791,11 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
 
             if (wasConnected && !nowConnected)
             {
-                // The link the editor was on just dropped (stopped local server / network loss). Report "Connecting"
-                // — the McpPlugin client auto-retries while armed; the plugin maps that to its amber Degraded dot.
-                connectionState = "Connecting";
+                // The link the editor was on just dropped (stopped local server / network loss). Report "Disconnected"
+                // — while armed the plugin's ParseConnectionState folds Disconnected into its amber Degraded dot (the
+                // client auto-retries in the background), matching the ViewModel's optimistic post-Stop Degraded so the
+                // dot drops straight to amber with no amber→blue flip; a disarmed drop reads as a true Disconnected.
+                connectionState = "Disconnected";
                 return true;
             }
             if (!wasConnected && nowConnected)

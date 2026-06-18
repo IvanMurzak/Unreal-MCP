@@ -584,7 +584,9 @@ bool FUnrealMcpEditorViewModel::ToggleLocalServer()
 		// (keepConnected unchanged): the user STOPPED the server, not the connection — re-Starting it should resume
 		// without re-arming. While armed, a torn-down link reads as Degraded (background-retry), matching ParseConnectionState.
 		if (Config.bKeepConnected
-			&& (ConnectionState == EUnrealMcpConnectionState::Connected || ConnectionState == EUnrealMcpConnectionState::Connecting))
+			&& (ConnectionState == EUnrealMcpConnectionState::Connected
+				|| ConnectionState == EUnrealMcpConnectionState::Connecting
+				|| ConnectionState == EUnrealMcpConnectionState::Degraded))
 		{
 			ConnectionState = EUnrealMcpConnectionState::Degraded;
 		}
