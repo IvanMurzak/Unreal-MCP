@@ -54,10 +54,15 @@ void UUnrealMcpRuntimeSubsystem::Initialize(FSubsystemCollectionBase& Collection
 
 	// Build the runtime-owned machinery (mirrors FUnrealMcpEditorCoordinator, §12.3 Model A) — registry +
 	// runtime-safe families + dispatcher + bridge. Editor-only families are NOT registered here (this path
-	// runs in a packaged game where they would not compile/link); R4 adds the remaining runtime-safe families.
+	// runs in a packaged game where they would not compile/link). R4 (§12.7) registers the full runtime-safe
+	// set: ping, actor/component, the console+reflection subset, the screenshot subset, and level-get-data.
 	Impl = MakePimpl<FRuntimeImpl>();
 	Impl->Registry = MakeUnique<FUnrealMcpToolRegistry>();
 	UnrealMcpPingTool::Register(*Impl->Registry);
+	UnrealMcpActorTools::Register(*Impl->Registry); // §10 actor / component family (World->SpawnActor runtime branch)
+	UnrealMcpConsoleReflectionTools::Register(*Impl->Registry); // §10 console + reflection runtime subset
+	UnrealMcpRuntimeScreenshotTools::Register(*Impl->Registry); // §10 screenshot runtime subset (game-view, camera)
+	UnrealMcpRuntimeLevelTools::Register(*Impl->Registry); // §10 read-only level-get-data
 
 	Impl->Dispatcher = MakeUnique<FUnrealMcpGameThreadDispatcher>();
 	Impl->BridgeServer = MakeUnique<FUnrealMcpBridgeServer>(*Impl->Registry, *Impl->Dispatcher);

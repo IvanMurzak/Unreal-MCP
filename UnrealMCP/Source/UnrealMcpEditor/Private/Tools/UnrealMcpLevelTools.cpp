@@ -4,7 +4,6 @@
 #include "UnrealMcpCoreTools.h"
 #include "UnrealMcpToolRegistry.h"
 #include "Tools/UnrealMcpObjectRef.h"
-#include "Tools/UnrealMcpPropertyJson.h"
 
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
@@ -20,10 +19,11 @@
 #include "UObject/Package.h"
 
 /**
- * The level / map tool family (docs/ARCHITECTURE.md §10 "level family", the Unity Scene.* analog),
- * declared via §3.3. Seven native C++ tools over the world / map editor surface:
- *   level-create, level-open, level-save, level-get-data, level-list-loaded, level-set-current,
- *   level-unload-sublevel.
+ * The editor level / map tool family (docs/ARCHITECTURE.md §10 "level family", the Unity Scene.* analog),
+ * declared via §3.3. Six native C++ EDITOR-ONLY tools over the world / map editor surface:
+ *   level-create, level-open, level-save, level-list-loaded, level-set-current, level-unload-sublevel.
+ * (The read-only level-get-data moved to the runtime module's UnrealMcpRuntimeLevelTools in R4, §12.7 —
+ * it needs no UnrealEd, so it works over a runtime connection too.)
  *
  * Headless-safety (the binding lesson carried from the actor family, issue #16):
  *   - UEditorActorSubsystem AND ULevelEditorSubsystem (LevelEditor module) are avoided. We touch the
@@ -39,57 +39,10 @@
  *
  * Every Handle() body runs ON the game thread (the dispatcher marshals Registry.Execute, §4), so the
  * bodies touch the editor world / UObject graph directly. Reuses FUnrealMcpObjectRef (§3.2 path-or-name
- * refs) and FUnrealMcpPropertyJson (scoped reads) from the actor family for level-get-data.
+ * refs) from the actor family.
  */
 namespace
 {
-	/** An `array` of strings — the §3.2 scoped-read `paths` filter (mirrors the actor family's local schema).
-	 *  Uniquely named (Level-prefixed): the UE unity build concatenates this TU with the other tool
-	 *  families' TUs, so a bare `MakeStringArraySchema` would ODR-collide with the actor family's copy. */
-	TSharedPtr<FJsonObject> LevelMakeStringArraySchema(const FString& Desc)
-	{
-		TSharedPtr<FJsonObject> Items = MakeShared<FJsonObject>();
-		Items->SetStringField(TEXT("type"), TEXT("string"));
-
-		TSharedPtr<FJsonObject> Schema = MakeShared<FJsonObject>();
-		Schema->SetStringField(TEXT("type"), TEXT("array"));
-		if (!Desc.IsEmpty())
-			Schema->SetStringField(TEXT("description"), Desc);
-		Schema->SetObjectField(TEXT("items"), Items);
-		return Schema;
-	}
-
-	/**
-	 * Read a string array argument (the scoped-read `paths` filter); empty when absent or not an array.
-	 * A non-string entry is reported via OutError (and the array is left empty) rather than silently
-	 * dropped — a dropped entry would otherwise flip the scoped read to "identity only" (the opposite of
-	 * the requested scope) with no signal to the caller. Same contract as the actor family's helper.
-	 * Uniquely named (Level-prefixed) to avoid a unity-build ODR collision with the actor family's copy.
-	 */
-	TArray<FString> LevelGetStringArray(const FUnrealMcpToolCall& Call, const FString& Key, FString& OutError)
-	{
-		TArray<FString> Out;
-		const TArray<TSharedPtr<FJsonValue>>* Arr = nullptr;
-		if (Call.Arguments->TryGetArrayField(Key, Arr) && Arr)
-		{
-			for (const TSharedPtr<FJsonValue>& V : *Arr)
-			{
-				FString S;
-				if (V.IsValid() && V->TryGetString(S))
-				{
-					Out.Add(S);
-				}
-				else
-				{
-					OutError = FString::Printf(TEXT("'%s' must be an array of strings; a non-string entry was provided."), *Key);
-					Out.Reset();
-					return Out;
-				}
-			}
-		}
-		return Out;
-	}
-
 	/** Long package name of a level's outermost package (e.g. /Game/Maps/Arena); empty when null. */
 	FString LevelPackageName(const ULevel* Level)
 	{
@@ -421,77 +374,10 @@ namespace UnrealMcpLevelTools
 					FString::Printf(TEXT("Saved the current level '%s'."), *LevelShortName(World->GetCurrentLevel())));
 			});
 
-		// ----------------------------------------------------------------------------------------
-		// level-get-data — actor-tree snapshot of the loaded world; scoped reads via 'paths' (§3.2).
-		// ----------------------------------------------------------------------------------------
-		Registry.Tool(TEXT("level-get-data"))
-			.Title(TEXT("Get Level Data"))
-			.Description(TEXT("Read an actor-tree snapshot of the loaded editor world. Returns each actor's "
-			                  "identity, optionally including reflected data scoped to the dotted 'paths' filter "
-			                  "(§3.2) to save tokens. Pass 'actor' to scope the read to a single actor instead of "
-			                  "the whole world."))
-			.ParamString(TEXT("actor"), TEXT("Label / name / path of a single actor to read. Omit to snapshot the whole world."))
-			.Param(TEXT("paths"), TEXT("array"), TEXT("Dotted property paths to include per actor (scoped read). Identity only when omitted."), EUnrealMcpParamRequirement::Optional, LevelMakeStringArraySchema(TEXT("Dotted property paths to include per actor (scoped read).")))
-			.ParamInt(TEXT("limit"), TEXT("Maximum number of actors to return for a world snapshot. Defaults to 200; pass 0 or a negative value for no limit."))
-			.ReadOnlyHint(true)
-			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
-			{
-				UWorld* World = GetWorldOrNull();
-				if (!World)
-					return FUnrealMcpToolResult::Error(TEXT("No editor world available."));
-
-				FString PathsError;
-				const TArray<FString> Paths = LevelGetStringArray(Call, TEXT("paths"), PathsError);
-				if (!PathsError.IsEmpty())
-					return FUnrealMcpToolResult::Error(PathsError);
-
-				// Single-actor scope.
-				const FString ActorRef = Call.GetString(TEXT("actor"));
-				if (!ActorRef.IsEmpty())
-				{
-					AActor* Actor = FUnrealMcpObjectRef::ResolveActor(ActorRef, World);
-					if (!Actor)
-						return FUnrealMcpToolResult::Error(FString::Printf(TEXT("No actor matched '%s' (by label/name/path)."), *ActorRef));
-
-					TSharedPtr<FJsonObject> Entry = FUnrealMcpObjectRef::ActorIdentity(Actor);
-					// Attach reflected data only when a scoped 'paths' filter is given — matching the whole-world
-					// branch and the "Identity only when omitted" contract (an empty Paths returns the full dump).
-					if (Paths.Num() > 0)
-						Entry->SetObjectField(TEXT("data"), FUnrealMcpPropertyJson::SerializeObject(Actor, Paths));
-					return FUnrealMcpToolResult::Success(
-						FString::Printf(TEXT("Read actor '%s'."), *Actor->GetActorLabel()), Entry);
-				}
-
-				// Whole-world snapshot.
-				const int32 Limit = static_cast<int32>(Call.GetInt(TEXT("limit"), 200));
-				TArray<TSharedPtr<FJsonValue>> Actors;
-				int32 Total = 0;
-				for (TActorIterator<AActor> It(World); It; ++It)
-				{
-					AActor* Actor = *It;
-					if (!Actor)
-						continue;
-					++Total;
-					if (Limit > 0 && Actors.Num() >= Limit)
-						continue; // keep counting the total, stop materializing entries
-
-					TSharedPtr<FJsonObject> Entry = FUnrealMcpObjectRef::ActorIdentity(Actor);
-					if (Paths.Num() > 0)
-						Entry->SetObjectField(TEXT("data"), FUnrealMcpPropertyJson::SerializeObject(Actor, Paths));
-					Actors.Add(MakeShared<FJsonValueObject>(Entry));
-				}
-
-				TSharedPtr<FJsonObject> Structured = LevelIdentity(World->GetCurrentLevel(), World);
-				Structured->SetStringField(TEXT("world"), World->GetName());
-				Structured->SetBoolField(TEXT("isPartitionedWorld"), World->IsPartitionedWorld());
-				Structured->SetNumberField(TEXT("levelCount"), World->GetLevels().Num());
-				Structured->SetNumberField(TEXT("count"), Actors.Num());
-				Structured->SetNumberField(TEXT("total"), Total);
-				Structured->SetArrayField(TEXT("actors"), Actors);
-				return FUnrealMcpToolResult::Success(
-					FString::Printf(TEXT("Snapshot of world '%s': %d actor(s) (returned %d)."), *World->GetName(), Total, Actors.Num()),
-					Structured);
-			});
+		// NOTE (§12.7, R4): the read-only `level-get-data` tool moved DOWN into the runtime module's
+		// UnrealMcpRuntimeLevelTools so it works over a runtime connection (PIE / packaged game) too — it
+		// touches only Engine UWorld surface, no UnrealEd. The remaining level tools below stay editor-only
+		// (they need UEditorLoadingAndSavingUtils / UEditorLevelUtils for level create/open/save/sublevel ops).
 
 		// ----------------------------------------------------------------------------------------
 		// level-list-loaded — persistent + streaming sublevels, World-Partition aware (read-only).

@@ -5,7 +5,7 @@
 
 #include "CoreMinimal.h"
 #include "Misc/AutomationTest.h"
-#include "UnrealMcpCoreTools.h"
+#include "UnrealMcpRuntimeCoreTools.h" // §12.7: the actor/component family moved to the runtime module (R4)
 #include "UnrealMcpToolRegistry.h"
 #include "Dom/JsonObject.h"
 #include "Editor.h"
