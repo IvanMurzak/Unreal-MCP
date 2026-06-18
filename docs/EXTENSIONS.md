@@ -186,9 +186,51 @@ version, and your `GetExtensionVersion()` is your own.
 
 ---
 
-## Reference example
+## Runtime usage (in-game extensions)
 
-[`samples/UnrealAITemplate/`](../samples/UnrealAITemplate) is a complete, buildable plugin implementing
-everything above with a `hello-extension` tool. It also carries a compile-time switch
-(`UNREAL_AI_TEMPLATE_INVALID_SCHEMA=1`) that emits an intentionally invalid tool so you can observe the
-isolation behaviour first-hand.
+Everything above also works **in a running game** (PIE, Standalone, packaged Development) — this is the
+primary Unity-parity use case (`docs/ARCHITECTURE.md` §12.9): a game ships its own gameplay tools and an
+AI assistant drives them live, the UE analog of Unity's `[AiTool]` Chess-bot example.
+
+The contract is identical — the extension headers (`IUnrealMcpToolProvider.h`, `UnrealMcpToolRegistry.h`)
+live in the Unreal-MCP plugin's **runtime module** `UnrealMcpRuntime`, and `IModularFeatures` is
+runtime-available — with two differences for a game extension:
+
+- **Make your module `Type=Runtime`** (not `Editor`) in its `.uplugin`, and depend on **`UnrealMcpRuntime`**
+  (not `UnrealMcpEditor`) in your `*.Build.cs`, so it compiles into a packaged Game target where the editor
+  module is absent.
+- **The runtime MCP surface is opt-in and OFF by default** (`docs/ARCHITECTURE.md` §12.8). Your tools only
+  become reachable after the game enables the kill switch (Project Settings → Plugins → Unreal MCP (Runtime)
+  → `bRuntimeMcpEnabled`) and explicitly connects:
+  `UUnrealMcpRuntimeSubsystem::Get(this)->Connect("http://localhost:8080", "my-token")` (or the QA console
+  command `UnrealMcp.Connect <host> [token]`).
+
+### Ergonomic registration via the runtime subsystem
+
+Module-startup registration (Step 3) works in a game too, but the runtime subsystem also offers a
+discoverable wrapper so you never have to touch `IModularFeatures` directly:
+
+```cpp
+#include "UnrealMcpRuntimeSubsystem.h"
+#include "IUnrealMcpToolProvider.h"
+
+if (UUnrealMcpRuntimeSubsystem* Mcp = UUnrealMcpRuntimeSubsystem::Get(this))
+    Mcp->RegisterToolProvider(MyProviderInstance);     // tools merge into the live registry; manifest re-pushed
+// ... later, before destroying the provider:
+    Mcp->UnregisterToolProvider(MyProviderInstance);   // tools drop out; manifest re-pushed
+```
+
+Both paths feed the same extension manager: registering or unregistering at any time rebuilds the registry
+and **re-pushes the manifest**, so a connected sidecar's `tools/list` gains/loses your tools automatically.
+The subsystem does **not** take ownership of the provider — keep it alive while it is registered (typically
+a member of your game module or a `UGameInstanceSubsystem`) and unregister before destroying it.
+
+## Reference examples
+
+- [`samples/UnrealAITemplate/`](../samples/UnrealAITemplate) — the **editor** extension sample: a complete,
+  buildable `Type=Editor` plugin with a `hello-extension` tool. It also carries a compile-time switch
+  (`UNREAL_AI_TEMPLATE_INVALID_SCHEMA=1`) that emits an intentionally invalid tool so you can observe the
+  isolation behaviour first-hand.
+- [`samples/UnrealAIRuntimeSample/`](../samples/UnrealAIRuntimeSample) — the **runtime (in-game)** extension
+  sample: a `Type=Runtime` plugin whose `game-time-dilation` tool reads/sets the live `UWorld`'s
+  `AWorldSettings::TimeDilation`, callable in a running game over a runtime MCP connection (§12.9).
