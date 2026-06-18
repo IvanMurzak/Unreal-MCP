@@ -99,15 +99,14 @@ public class UnrealMcpEditor : ModuleRules
 			PublicDefinitions.Add("WITH_UNREAL_MCP_LIVE_CODING=0");
 		}
 
-		// Bundle the prebuilt self-contained sidecar payloads (docs/ARCHITECTURE.md §6 BUNDLE model).
-		// Staged into the packaged plugin under Binaries/ThirdParty/UnrealMcpBridge/<rid>/ so the editor
-		// can spawn the bridge with zero install (FUnrealMcpSidecarManager::ResolveBridgeBinaryPath). The
-		// binaries are NOT committed to git; the release job stages them before BuildPlugin (task T4). The
-		// recursive "..." wildcard is a no-op on a dev checkout that has not staged them, so local source
-		// builds still compile and resolve the bridge via UNREAL_MCP_BRIDGE_PATH instead. NonUFS = raw
-		// (not cooked) files, correct for native runtime binaries.
-		RuntimeDependencies.Add(
-			Path.Combine(PluginDirectory, "Binaries", "ThirdParty", "UnrealMcpBridge", "...", "*"),
-			StagedFileType.NonUFS);
+		// NOTE (R2, docs/ARCHITECTURE.md §12.5): the RuntimeDependencies.Add(.../UnrealMcpBridge/<rid>/*)
+		// sidecar-staging declaration MOVED out of this editor module and DOWN into UnrealMcpRuntime.Build.cs
+		// (task unreal-mcp-runtime-sidecar-packaging, issue #123). UBT only stages a RuntimeDependency into
+		// builds that include the declaring module's target; declaring it on the EDITOR module bundled the
+		// sidecar into editor packages but NOT into packaged GAMES (the editor module is absent from a Game
+		// target). Declaring it on the runtime module — which is part of both the editor AND the game target —
+		// bundles the bridge into packaged Development/Shipping game builds too, the whole point of R2. The
+		// editor BuildPlugin path still bundles because UnrealMcpRuntime is a transitive dependency of the
+		// editor module, so its RuntimeDependencies are honoured by the editor package as well (no regression).
 	}
 }

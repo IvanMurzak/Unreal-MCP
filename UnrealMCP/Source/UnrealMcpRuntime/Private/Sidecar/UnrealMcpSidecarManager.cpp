@@ -186,15 +186,32 @@ bool FUnrealMcpSidecarManager::StartForPort(int32 InIpcPort, const FString& InTo
 	BridgePath = ResolveBridgeBinaryPath();
 	if (BridgePath.IsEmpty())
 	{
-		// §6.3 step 3 graceful-degrade: a packaged plugin missing the <rid> bridge, OR a dev source
-		// checkout with no (or a stale) UNREAL_MCP_BRIDGE_PATH. The bridge server still listens; surface
-		// an actionable error (the bundled binary is the production path, the env var is the dev path).
-		// Report the EFFECTIVE rid (arm64-probed, matching ResolveBridgeBinaryPath) so the reinstall hint
-		// names the slice that was actually looked for — not osx-arm64 on a host that degraded to osx-x64.
+		// §6.3 step 3 graceful-degrade. Two distinct causes; surface the right actionable error for each.
+		const FString EffectiveRid = ResolveEffectiveRid();
+		if (EffectiveRid.IsEmpty())
+		{
+			// docs/ARCHITECTURE.md §12.5 — Desktop-only constraint. ResolveRid returns empty on a non-desktop
+			// host (console/mobile), which cannot spawn an external .NET process; no sidecar is bundled or
+			// spawnable there. This is an unsupported-platform condition, NOT a missing-install one, so do not
+			// emit the reinstall hint (there is nothing to reinstall). The bridge server still listens, but the
+			// runtime MCP feature is unavailable on this platform by design.
+			UE_LOG(LogUnrealMcp, Warning,
+				TEXT("[Unreal-MCP] the .NET sidecar is unavailable on this platform — runtime MCP is Desktop-only ")
+				TEXT("(Win64/Mac/Linux); console/mobile cannot spawn an external .NET process (docs/ARCHITECTURE.md §12.5). ")
+				TEXT("The bridge is listening on %d, but no sidecar will be spawned."),
+				IpcPort);
+			return false;
+		}
+
+		// A packaged plugin missing the <rid> bridge, OR a dev source checkout with no (or a stale)
+		// UNREAL_MCP_BRIDGE_PATH. The bridge server still listens; surface an actionable error (the bundled
+		// binary is the production path, the env var is the dev path). Report the EFFECTIVE rid (arm64-probed,
+		// matching ResolveBridgeBinaryPath) so the reinstall hint names the slice that was actually looked for
+		// — not osx-arm64 on a host that degraded to osx-x64.
 		UE_LOG(LogUnrealMcp, Warning,
 			TEXT("[Unreal-MCP] no sidecar binary resolved for rid '%s' (bundled path absent and UNREAL_MCP_BRIDGE_PATH unset or pointing at a missing file). ")
 			TEXT("The bridge is listening on %d. End users: reinstall the plugin for your platform; developers: set UNREAL_MCP_BRIDGE_PATH or run `unreal-mcp-cli bootstrap-local`."),
-			*ResolveEffectiveRid(), IpcPort);
+			*EffectiveRid, IpcPort);
 		return false;
 	}
 
