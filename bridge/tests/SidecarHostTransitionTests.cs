@@ -9,6 +9,8 @@
 */
 
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Text.Json.Nodes;
 using System.Threading;
 using System.Threading.Tasks;
@@ -152,6 +154,75 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
 
             await disconnectCancelled.Task.WaitAsync(TimeSpan.FromSeconds(5)); // token threaded in AND cancelled on supersede
             await laterRan.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+
+        // ── issue #116 bug 1 (bridge half): a mode/host change while connected re-dials the NEW target ──────────
+
+        [Fact]
+        public void DecideConfigTransition_HostChangeWhileArmed_ReDials()
+        {
+            // The crux of bug 1 on the bridge: a user switching Cloud↔Custom or editing the Server URL while connected
+            // (keepConnected stays true) changes the resolved host → DecideConfigTransition MUST return Reconnect so
+            // SignalR re-dials the new target instead of staying bound to the abandoned one (UI then converges off the
+            // optimistic Connecting the ViewModel set).
+            Assert.Equal(SidecarHost.ConfigTransition.Reconnect,
+                SidecarHost.DecideConfigTransition(wasKeepConnected: true, nowKeepConnected: true, hostOrTokenChanged: true));
+            // No host/token change while armed → no churn.
+            Assert.Equal(SidecarHost.ConfigTransition.None,
+                SidecarHost.DecideConfigTransition(wasKeepConnected: true, nowKeepConnected: true, hostOrTokenChanged: false));
+        }
+
+        [Fact]
+        public async Task ModeSwitchWhileConnected_TearsDownTheOldLink_AndReDialsTheNewTarget()
+        {
+            using var host = NewHost(out _);
+
+            // Track BOTH the disconnect of the old link and the dial of the new target. The bug-1 contract on the
+            // bridge: a mode/host change while armed must NOT leave SignalR bound to the abandoned target — it
+            // disconnects the current link and re-dials the NEW host. (The optimistic "drop the green dot immediately"
+            // is the ViewModel's job; the bridge's job is to actually retarget the transport, then emit the honest
+            // resulting status — never a stale "Connected" against the old target.)
+            var newTargetDialed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var fake = new FakeMcpPlugin(
+                onConnect: _ =>
+                {
+                    // ReconnectAsync reads the freshly-applied Host before dialing — exactly the live ConnectionManager
+                    // behavior. Only the NEW (localhost) target should ever be dialed after the switch.
+                    if ((host.Config.Host ?? "").Contains("localhost", StringComparison.OrdinalIgnoreCase))
+                        newTargetDialed.TrySetResult();
+                    return Task.FromResult(true);
+                },
+                onDisconnect: _ => Task.CompletedTask);
+            host.SetPluginForTest(fake);
+
+            // Armed + connected in Cloud (the state right after the user connected in Cloud).
+            host.ApplyConnectionConfig(Cfg("Cloud", cloudUrl: "https://ai-game.dev"));
+
+            var emitted = new List<StatusMessage>();
+            host.SetStatusEmitterForTest(s => { lock (emitted) emitted.Add(s); return Task.CompletedTask; });
+
+            // The user switches to Custom (a host change while armed) → OnConfigReceived issues a Reconnect transition.
+            host.OnConfigReceived(Cfg("Custom", host: "http://localhost:8500", token: ""));
+
+            // The new (localhost) target was dialed — SignalR did not stay pinned to the abandoned Cloud target.
+            await newTargetDialed.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            // The old link was torn down before the re-dial (ReconnectAsync disconnects first).
+            Assert.True(fake.DisconnectCalls >= 1);
+            // The honest post-redial status is Connected against the NEW target — never a stale Connected emitted
+            // without a re-dial having happened.
+            await WaitUntilAsync(() => { lock (emitted) return emitted.Any(s => s.ConnectionState == "Connected"); },
+                TimeSpan.FromSeconds(5));
+        }
+
+        private static async Task WaitUntilAsync(Func<bool> condition, TimeSpan timeout)
+        {
+            var deadline = DateTime.UtcNow + timeout;
+            while (DateTime.UtcNow < deadline)
+            {
+                if (condition()) return;
+                await Task.Delay(20).ConfigureAwait(false);
+            }
+            Assert.True(condition(), "condition not met within timeout");
         }
 
         [Fact]

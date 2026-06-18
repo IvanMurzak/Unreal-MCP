@@ -42,10 +42,31 @@ void FUnrealMcpEditorViewModel::SetConnectionMode(EUnrealMcpConnectionMode InMod
 		Config.SetTransportMethod(EUnrealMcpTransportMethod::Http);
 		Config.AuthOption = EUnrealMcpAuthOption::Required;
 	}
+	// Bug #116: a mode switch RETARGETS the connection (Cloud↔Custom dial a different server). If we were showing
+	// Connected/Degraded against the now-abandoned target, the dot must drop off green THE MOMENT the mode flips —
+	// not stay green until the sidecar's re-dial status crosses the wire. PersistAndPush below triggers the bridge's
+	// host-changed re-dial (DecideConfigTransition→Reconnect, which emits Connecting→Connected/etc.), but the UI must
+	// not lag behind it: optimistically reflect the in-flight retarget so no window of stale-green exists.
+	ReflectTargetChangeOptimistically();
 	PersistAndPush();
 	// The resolved connection facts (auth-required, token source, http url, transport) all hinge on the mode, so the
 	// agent configurators must re-resolve their cached config + rebuild their panel (Unity's InvalidateAndReloadAgentUI).
 	OnConnectionSettingsChanged.Broadcast();
+}
+
+void FUnrealMcpEditorViewModel::ReflectTargetChangeOptimistically()
+{
+	// Bug #116 (mode/target switch): when the dial target changes WHILE we are presenting a live/armed link
+	// (Connected or Degraded), the link we are showing is to the OLD target and is about to be torn down + re-dialed
+	// by the sidecar. Optimistically demote to Connecting so the green dot drops immediately; the sidecar's honest
+	// re-dial `status` (Connecting→Connected on success, or Disconnected/Degraded on failure) then converges the UI.
+	// Only meaningful while armed: an unarmed (already Disconnected) view-model has no green to drop, and forcing
+	// Connecting there would falsely claim a connect is in flight when keepConnected=false means none will run.
+	if (Config.bKeepConnected
+		&& (ConnectionState == EUnrealMcpConnectionState::Connected || ConnectionState == EUnrealMcpConnectionState::Degraded))
+	{
+		ConnectionState = EUnrealMcpConnectionState::Connecting;
+	}
 }
 
 void FUnrealMcpEditorViewModel::SetTransportMethod(EUnrealMcpTransportMethod InMethod)
@@ -75,8 +96,19 @@ void FUnrealMcpEditorViewModel::SetCustomHost(const FString& InHost)
 	const bool bChanged = Config.CustomHost != Trimmed;
 	Config.CustomHost = Trimmed;
 	FString Error;
-	if (ValidateServerUrl(Trimmed, Error))
+	if (bChanged && ValidateServerUrl(Trimmed, Error))
 	{
+		// Bug #116: editing the Server URL to a NEW valid target retargets the dial — the sidecar re-dials the new
+		// host (DecideConfigTransition→Reconnect) and the green dot for the OLD host must drop immediately. Mirror
+		// the SetConnectionMode path: optimistically demote off green before the push so no stale-green window exists.
+		// Only on an actual change to a valid host — a malformed edit never changes the dial target (no push, no retarget).
+		ReflectTargetChangeOptimistically();
+		PersistAndPush();
+	}
+	else if (ValidateServerUrl(Trimmed, Error))
+	{
+		// Re-typing the same valid host (bChanged == false): still push for idempotent parity with the prior
+		// behavior, but there is no retarget — the dial target is unchanged, so the connection state must not churn.
 		PersistAndPush();
 	}
 	// Refresh the configurators on any host change (even before it validates) so the previewed HTTP url tracks
@@ -545,6 +577,19 @@ bool FUnrealMcpEditorViewModel::ToggleLocalServer()
 	{
 		if (OnStopLocalServer)
 			OnStopLocalServer();
+		// Bug #116 (stop local server while connected): the server the editor's transport is connected to has just
+		// gone away — the SignalR link is now dead even though no explicit Disconnect was clicked. The dot must not
+		// stay green. Optimistically demote off Connected/Degraded so the UI reflects the drop immediately; the
+		// bridge's transport-drop status (issue #116, ConnectionState→non-Connected) then converges it. We stay armed
+		// (keepConnected unchanged): the user STOPPED the server, not the connection — re-Starting it should resume
+		// without re-arming. While armed, a torn-down link reads as Degraded (background-retry), matching ParseConnectionState.
+		if (Config.bKeepConnected
+			&& (ConnectionState == EUnrealMcpConnectionState::Connected
+				|| ConnectionState == EUnrealMcpConnectionState::Connecting
+				|| ConnectionState == EUnrealMcpConnectionState::Degraded))
+		{
+			ConnectionState = EUnrealMcpConnectionState::Degraded;
+		}
 		return true;
 	}
 	if (OnStartLocalServer)

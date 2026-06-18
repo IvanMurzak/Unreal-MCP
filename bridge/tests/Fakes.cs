@@ -48,6 +48,11 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         private readonly IMcpManager? _mcpManager;
         private readonly IMcpManagerHub? _mcpManagerHub;
 
+        // Bug #116: a controllable transport connection-state property so the connection-drop subscription path is
+        // drivable without a live SignalR client. Tests push transitions via PushConnectionState; the property is
+        // seeded Disconnected. The transition tests never read it (R3 lets it lie dormant), so they are unaffected.
+        private readonly ReactiveProperty<HubConnectionState> _connectionState = new(HubConnectionState.Disconnected);
+
         public FakeMcpPlugin(
             Func<CancellationToken, Task<bool>> onConnect,
             Func<CancellationToken, Task>? onDisconnect = null,
@@ -59,6 +64,9 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             _mcpManager = mcpManager;
             _mcpManagerHub = mcpManagerHub;
         }
+
+        /// <summary>Bug #116: drive a transport connection-state transition through <see cref="ConnectionState"/>.</summary>
+        public void PushConnectionState(HubConnectionState state) => _connectionState.Value = state;
 
         public Task<bool> Connect(CancellationToken cancellationToken = default)
         {
@@ -81,7 +89,9 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         // Unused surface — the transition orchestration under test never reads these. Throwing keeps the fake
         // honest: if a future change starts depending on one, the test fails loudly instead of silently.
         public ReadOnlyReactiveProperty<bool> KeepConnected => throw new NotSupportedException();
-        public ReadOnlyReactiveProperty<HubConnectionState> ConnectionState => throw new NotSupportedException();
+        // Bug #116: a real (controllable) ConnectionState so the connection-drop subscription is testable; the
+        // transition tests never subscribe, so seeding it does not perturb them.
+        public ReadOnlyReactiveProperty<HubConnectionState> ConnectionState => _connectionState;
         public Observable<Unit> OnAuthorizationRejected => throw new NotSupportedException();
         public ILogger Logger => throw new NotSupportedException();
         // Roster path (issue #109): return the injected fakes when supplied; otherwise throw to keep the

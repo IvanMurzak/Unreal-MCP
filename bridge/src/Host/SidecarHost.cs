@@ -24,6 +24,7 @@ using com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig;
 using com.IvanMurzak.Unreal.MCP.Bridge.Auth;
 using com.IvanMurzak.Unreal.MCP.Bridge.Ipc;
 using com.IvanMurzak.Unreal.MCP.Bridge.Tools;
+using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.Logging;
 using R3;
 using McpVersion = com.IvanMurzak.McpPlugin.Common.Version;
@@ -101,6 +102,19 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         private readonly object _rosterLock = new();
         private List<string> _connectedAgents = new();
         private IDisposable? _clientsChangedSubscription;
+
+        // Bug #116: subscription to the transport-level SignalR connection state (IConnection.ConnectionState, an R3
+        // ReadOnlyReactiveProperty<HubConnectionState>). When the link the editor is connected to drops — e.g. the user
+        // stops the LOCAL gamedev-mcp-server the editor was connected to — McpPlugin's client transitions Connected →
+        // Reconnecting/Disconnected WITHOUT any editor-initiated config push, so none of the existing status-emit paths
+        // (config transition, device-auth, roster) fire and the plugin's dot stays stale-green. This subscription makes
+        // that drop observable: on a transition AWAY from Connected (while still armed) it emits a fresh non-green
+        // `status` so the dot leaves green and the action button updates. Replaced on re-Build; disposed in Dispose().
+        private IDisposable? _connectionStateSubscription;
+        // The last HubConnectionState we OBSERVED, so we only react to genuine Connected→non-Connected DROPS (not every
+        // tick of a property that may re-publish its current value on subscribe). HubConnectionState lives in
+        // Microsoft.AspNetCore.SignalR.Client; stored as the enum's int to avoid leaking the type across this field.
+        private int _lastObservedConnectionState = -1;
 
         // The bridge's OWN SignalR client label (Version.Environment). Used to defensively drop a self-entry from
         // the roster: the server's GetMcpClientData/OnClientsChanged report MCP client (AI-agent) sessions, NOT the
@@ -232,6 +246,12 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             // refreshes live. OnClientsChanged fires with the full active-client list on every agent join/leave;
             // cache the formatted labels and push a FRESH status so the editor updates without a reconnect.
             SubscribeToClientRoster(_plugin);
+
+            // Bug #116: subscribe to the transport-level connection state so a link DROP (e.g. the user stopped the
+            // local server the editor was connected to) demotes the plugin's dot off green even though no editor
+            // config push fired. This is the "subscribe to the McpPlugin connection-lost/reconnecting event and emit a
+            // fresh status" half of the bug-2 fix; the ViewModel optimistic demote on Stop is the other half.
+            SubscribeToConnectionState(_plugin);
 
             _ipc.HandshakeAccepted += OnHandshakeAccepted;
             _ipc.ConfigReceived += OnConfigReceived;
@@ -722,6 +742,86 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         }
 
         /// <summary>
+        /// Bug #116: subscribe to the transport-level SignalR connection state (<see cref="IConnection.ConnectionState"/>,
+        /// an R3 <c>ReadOnlyReactiveProperty&lt;HubConnectionState&gt;</c>). On a transition AWAY from
+        /// <see cref="HubConnectionState.Connected"/> (the link dropped — most importantly because the user stopped the
+        /// local server the editor was connected to), emit a FRESH non-green <c>status</c> so the plugin's dot leaves
+        /// green and the action button updates, WITHOUT requiring an editor-initiated config push. The drop emits
+        /// "Disconnected", which the plugin's ParseConnectionState folds into amber Degraded while armed (the client is
+        /// auto-retrying) and a true Disconnected when disarmed. A transition INTO Connected re-emits a
+        /// Connected status so a transport-level recovery (the client reconnected on its own) also refreshes the dot.
+        /// Internal + plugin-injected so the bridge xUnit suite drives it with a fake whose ConnectionState it controls.
+        /// Idempotent: a second subscribe (a re-Build) replaces the prior subscription.
+        /// </summary>
+        internal void SubscribeToConnectionState(IMcpPlugin plugin)
+        {
+            _connectionStateSubscription?.Dispose();
+            // Reset the observed-state latch so the first value the property publishes establishes the baseline rather
+            // than being mis-read as a drop from a stale prior subscription's last value.
+            _lastObservedConnectionState = -1;
+            _connectionStateSubscription = plugin.ConnectionState
+                .Subscribe(state =>
+                {
+                    var previous = _lastObservedConnectionState;
+                    _lastObservedConnectionState = (int)state;
+                    // Fire-and-forget; never throw out of the R3 callback (it runs on a client thread).
+                    if (ShouldEmitOnConnectionStateChange(previous, (int)state, out var connectionState))
+                        _ = EmitConnectionStateStatusAsync(connectionState);
+                });
+        }
+
+        /// <summary>
+        /// Decide whether a transport-level <see cref="HubConnectionState"/> transition warrants a fresh <c>status</c>
+        /// emit, and what connection-state string to ship. We emit on a genuine EDGE only — a DROP off Connected (the
+        /// bug-2 trigger) or a RECOVERY back into Connected — never on the baseline first observation (<paramref
+        /// name="previous"/> &lt; 0) or a same-state re-publish, so a property that re-emits its current value on
+        /// subscribe does not spam a redundant status. Pure + static so the bridge xUnit suite locks the matrix without a
+        /// live client. The shipped string is mode-agnostic ("Disconnected"/"Connected"); <see cref="EmitStatusAsync"/>
+        /// stamps the live <c>keepConnected</c>, which the plugin's ParseConnectionState folds into Degraded while armed.
+        /// </summary>
+        internal static bool ShouldEmitOnConnectionStateChange(int previous, int current, out string connectionState)
+        {
+            connectionState = string.Empty;
+            // No prior observation (baseline) or no actual change — nothing to report.
+            if (previous < 0 || previous == current)
+                return false;
+
+            var nowConnected = current == (int)HubConnectionState.Connected;
+            var wasConnected = previous == (int)HubConnectionState.Connected;
+
+            if (wasConnected && !nowConnected)
+            {
+                // The link the editor was on just dropped (stopped local server / network loss). Report "Disconnected"
+                // — while armed the plugin's ParseConnectionState folds Disconnected into its amber Degraded dot (the
+                // client auto-retries in the background), matching the ViewModel's optimistic post-Stop Degraded so the
+                // dot drops straight to amber with no amber→blue flip; a disarmed drop reads as a true Disconnected.
+                connectionState = "Disconnected";
+                return true;
+            }
+            if (!wasConnected && nowConnected)
+            {
+                // A transport-level recovery (the client reconnected on its own) — refresh the dot back to green.
+                connectionState = "Connected";
+                return true;
+            }
+            // Connecting↔Reconnecting and other non-Connected churn: no edge that changes the green/non-green dot.
+            return false;
+        }
+
+        /// <summary>
+        /// Emit a <c>status</c> for a transport-level connection-state edge (Bug #116). A non-Connected drop must ALSO
+        /// clear the cached roster so a later reconnect re-seeds fresh and the "AI agents" row does not linger from the
+        /// dropped link (mirrors the disconnect paths' <see cref="ClearRoster"/>). <see cref="EmitStatusAsync"/> already
+        /// ships an empty roster under any non-Connected state, but clearing the cache keeps it honest for the next seed.
+        /// </summary>
+        private Task EmitConnectionStateStatusAsync(string connectionState)
+        {
+            if (!string.Equals(connectionState, "Connected", StringComparison.Ordinal))
+                ClearRoster();
+            return EmitStatusAsync(connectionState);
+        }
+
+        /// <summary>
         /// Seed the roster on connect via <see cref="IMcpManagerHub.GetMcpClientData"/> (pull), with a small
         /// retry/backoff (Unity uses 3×/3s) because an agent's MCP session can lag the plugin's SignalR connect —
         /// an immediate pull can return empty even though an agent is about to join. Each successful pull updates
@@ -898,6 +998,10 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             _ipc.AgentConfigRequestReceived -= HandleAgentConfigRequest;
             try { _clientsChangedSubscription?.Dispose(); } catch { /* ignore */ }
             _clientsChangedSubscription = null;
+            // Bug #116: drop the transport connection-state subscription so a late R3 callback cannot touch a
+            // half-disposed host.
+            try { _connectionStateSubscription?.Dispose(); } catch { /* ignore */ }
+            _connectionStateSubscription = null;
             // §7 (issue #111): teardown clears the roster cache so it never outlives the host.
             ClearRoster();
             try { _authCts?.Cancel(); } catch { /* ignore */ }
