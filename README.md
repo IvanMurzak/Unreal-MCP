@@ -48,7 +48,7 @@ Unlike Unity and Godot (C# engines that host the .NET `McpPlugin` in-process), U
 - ✔️ **Blueprint authoring** — Create, edit, and **compile** Blueprints with a structured error/warning feedback loop the AI can act on
 - ✔️ **C++ edit & compile** — Read, scaffold, and edit project C++, then compile (Live Coding or UBT) with a structured error report
 - ✔️ **Visual feedback** — Capture viewport, game-view, camera, and isolated-actor screenshots the LLM can inspect directly
-- ✔️ **Custom / extension AI Tools** — Register **your own** AI Tools from any UE plugin with **no fork** — a public, modular-feature contract ([Customize Tools](#customize-tools))
+- ✔️ **Custom Tools, Prompts & Resources** — Register **your own** AI Tools, prompt templates, and resources from any UE plugin with **no fork** — one public, modular-feature contract ([Customize Tools, Prompts & Resources](#customize-tools-prompts--resources))
 - ✔️ **Cloud or self-hosted** — Connect to `ai-game.dev` out of the box, or point at your own [GameDev-MCP-Server](https://github.com/IvanMurzak/GameDev-MCP-Server)
 - ✔️ **Per-tool enable / disable** — Flip any tool on or off from the **MCP Tools** window; the toggle is enforced at the execution boundary, not just hidden
 
@@ -63,7 +63,7 @@ Unlike Unity and Godot (C# engines that host the .NET `McpPlugin` in-process), U
 - [Tools](#tools) — all 8 families, 62 tools
 - [Per-tool enable / disable](#per-tool-enable--disable)
 - [`unreal-mcp-cli`](#unreal-mcp-cli)
-- [Customize Tools](#customize-tools)
+- [Customize Tools, Prompts & Resources](#customize-tools-prompts--resources)
 - [Runtime usage (in-game)](#runtime-usage-in-game)
 - [Configuration & environment variables](#configuration--environment-variables)
 - [Troubleshooting](#troubleshooting)
@@ -163,7 +163,7 @@ Connection settings persist to `<Project>/Saved/Config/UnrealMcp/ai-game-develop
 
 # Tools
 
-Unreal-MCP ships **62 built-in ("core") tools** across **8 families**. Tool ids are kebab-case (`actor-create`, `blueprint-compile`), matching the Unity/Godot naming convention. Extensions can add more (see [Customize Tools](#customize-tools)).
+Unreal-MCP ships **62 built-in ("core") tools** across **8 families**. Tool ids are kebab-case (`actor-create`, `blueprint-compile`), matching the Unity/Godot naming convention. Extensions can add more (see [Customize Tools, Prompts & Resources](#customize-tools-prompts--resources)).
 
 > This list is generated from the registration source (`UnrealMCP/Source/UnrealMcpEditor/Private/Tools/UnrealMcp*Tools.cpp`). Counts: actor 13, blueprint 11, asset 11, editor/reflection 9, level 7, source 6, screenshot 4, ping 1 = **62**.
 
@@ -346,11 +346,15 @@ The full 16-command surface:
 
 ![AI Game Developer — Unreal MCP](https://github.com/IvanMurzak/Unreal-MCP/blob/main/docs/img/promo/hazzard-divider.svg?raw=true)
 
-# Customize Tools
+# Customize Tools, Prompts & Resources
 
-**This is the headline extensibility feature.** Anyone can register their **own** AI Tools — from any third-party UE plugin — and have them appear in the MCP manifest alongside the 62 built-in tools. **No fork, no link-time coupling, no load-order assumptions.** Your tools are discovered automatically on editor boot (and on late-load / hot-unload), merged in deterministic order, and exposed to every connected AI agent.
+**This is the headline extensibility feature.** Anyone can register their **own** AI Tools, **prompts**, and **resources** — from any third-party UE plugin — and have them appear in the MCP manifest alongside the built-ins. **No fork, no link-time coupling, no load-order assumptions.** Your contributions are discovered automatically on editor boot (and on late-load / hot-unload), merged in deterministic order, and exposed to every connected AI agent.
 
-You contribute tools through a small, public, **modular-feature-based contract**: implement [`IUnrealMcpToolProvider`](UnrealMCP/Source/UnrealMcpRuntime/Public/IUnrealMcpToolProvider.h) and declare your tools with the fluent [`FUnrealMcpToolRegistry`](UnrealMCP/Source/UnrealMcpRuntime/Public/UnrealMcpToolRegistry.h) builder (both headers live in the `UnrealMcpRuntime` module, re-exported by `UnrealMcpEditor`, so the same contract serves editor and [runtime](#runtime-usage-in-game) extensions):
+All three kinds use the **same** small, public, **modular-feature-based contract** — a provider interface plus a fluent registry builder, both living in the `UnrealMcpRuntime` module (re-exported by `UnrealMcpEditor`, so the same contract serves editor and [runtime](#runtime-usage-in-game) extensions). The full author guide is [`docs/EXTENSIONS.md`](docs/EXTENSIONS.md).
+
+## Tools
+
+Implement [`IUnrealMcpToolProvider`](UnrealMCP/Source/UnrealMcpRuntime/Public/IUnrealMcpToolProvider.h) and declare your tools with the fluent [`FUnrealMcpToolRegistry`](UnrealMCP/Source/UnrealMcpRuntime/Public/UnrealMcpToolRegistry.h) builder:
 
 ```cpp
 #include "IUnrealMcpToolProvider.h"
@@ -388,17 +392,97 @@ IModularFeatures::Get().RegisterModularFeature(
     IUnrealMcpToolProvider::GetModularFeatureName(), Provider.Get());
 ```
 
-**How it behaves:**
+## Prompts
 
-- **Auto-discovery & hot-reload.** Unreal-MCP enumerates every registered `UnrealMcpToolProvider` on boot, and subscribes to register/unregister events — so loading or unloading your plugin at any time triggers a **registry rebuild** and a **manifest revision bump**, and the sidecar diffs the new manifest and adds/removes the affected MCP tools automatically. You never push anything yourself.
-- **Deterministic merge.** Providers are merged in ascending `GetExtensionId()` order; within one provider, tools register in declaration order. Your `GetExtensionId()` is stamped onto every tool you contribute (don't call `.ExtensionId(...)` yourself).
-- **Per-extension isolation.** Each tool descriptor is validated (kebab-case name, well-formed schema, bound handler). An **invalid** or **duplicate** tool is dropped/rejected and the reason is recorded on **your** extension's record — your other valid tools, and every other extension, are unaffected. (UE builds without C++ exceptions, so isolation is descriptor-level, not tool-body-level; validate inputs and fail gracefully with `FUnrealMcpToolResult::Error(...)`.)
-- **Toggles & enable/disable.** Extension-contributed tools are toggled in the same **MCP Tools** window as the built-ins; a disabled extension contributes **no tools to the manifest at all**.
+Prompts are reusable, parameterized prompt templates the agent fetches via `prompts/get`. Implement [`IUnrealMcpPromptProvider`](UnrealMCP/Source/UnrealMcpRuntime/Public/IUnrealMcpPromptProvider.h) and declare prompts with [`FUnrealMcpPromptRegistry`](UnrealMCP/Source/UnrealMcpRuntime/Public/UnrealMcpPromptRegistry.h). Prompt arguments reuse the **same** `Param*` helpers as the tool builder; a handler returns role-tagged messages:
+
+```cpp
+#include "IUnrealMcpPromptProvider.h"
+#include "UnrealMcpPromptRegistry.h"
+
+class FMyPromptProvider : public IUnrealMcpPromptProvider
+{
+public:
+    virtual FString GetExtensionId() const override      { return TEXT("com.foo.my-extension"); }
+    virtual FText   GetDisplayName() const override      { return NSLOCTEXT("Foo", "Name", "My Extension"); }
+    virtual FString GetExtensionVersion() const override { return TEXT("1.0.0"); }
+
+    virtual void RegisterPrompts(FUnrealMcpPromptRegistry& Registry) override
+    {
+        Registry.Prompt(TEXT("level-design-brief"))
+            .Title(TEXT("Level Design Brief"))
+            .Description(TEXT("Generate a level design brief from a single 'theme' argument."))
+            .Role(EUnrealMcpPromptRole::User)
+            .ParamString(TEXT("theme"), TEXT("The level theme (e.g. 'haunted forest')."),
+                         EUnrealMcpParamRequirement::Required)
+            .Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpPromptResult
+            {
+                const FString Theme = Call.GetString(TEXT("theme"));
+                if (Theme.IsEmpty())
+                    return FUnrealMcpPromptResult::Error(TEXT("theme is required."));
+                const FString Text = FString::Printf(
+                    TEXT("Draft a level design brief for a \"%s\"-themed level."), *Theme);
+                return FUnrealMcpPromptResult::Success(Text, EUnrealMcpPromptRole::User);
+            });
+    }
+};
+
+// Register under the prompt modular-feature name (and unregister in ShutdownModule):
+IModularFeatures::Get().RegisterModularFeature(
+    IUnrealMcpPromptProvider::GetModularFeatureName(), PromptProvider.Get());
+```
+
+`level-design-brief` is the shipped **core** prompt — see [`UnrealMCP/Source/UnrealMcpRuntime/Private/Prompts/UnrealMcpCorePrompts.cpp`](UnrealMCP/Source/UnrealMcpRuntime/Private/Prompts/UnrealMcpCorePrompts.cpp).
+
+## Resources
+
+Resources are addressable, readable content the agent fetches via `resources/read` — the resource's **URI is its identity**. Implement [`IUnrealMcpResourceProvider`](UnrealMCP/Source/UnrealMcpRuntime/Public/IUnrealMcpResourceProvider.h) and declare resources with [`FUnrealMcpResourceRegistry`](UnrealMCP/Source/UnrealMcpRuntime/Public/UnrealMcpResourceRegistry.h). A read returns content blocks — **text XOR a base64 blob** + a mime type:
+
+```cpp
+#include "IUnrealMcpResourceProvider.h"
+#include "UnrealMcpResourceRegistry.h"
+
+virtual void RegisterResources(FUnrealMcpResourceRegistry& Registry) override
+{
+    Registry.Resource(TEXT("unreal://project/levels"))                  // JSON (text) resource
+        .Name(TEXT("Project Levels"))
+        .Description(TEXT("A JSON snapshot of the active world and its levels."))
+        .MimeType(TEXT("application/json"))
+        .Read([](const FString& Uri) -> FUnrealMcpResourceResult
+        {
+            return FUnrealMcpResourceResult::Text(Uri, BuildLevelsJson(), TEXT("application/json"));
+        });
+
+    Registry.Resource(TEXT("unreal://project/icon"))                    // binary (blob) resource
+        .Name(TEXT("Project Icon"))
+        .Description(TEXT("A small PNG, returned as a base64 blob."))
+        .MimeType(TEXT("image/png"))
+        .Read([](const FString& Uri) -> FUnrealMcpResourceResult
+        {
+            const FString Base64 = FBase64::Encode(IconBytes, sizeof(IconBytes));
+            return FUnrealMcpResourceResult::Blob(Uri, Base64, TEXT("image/png"));
+        });
+}
+
+// Register under the resource modular-feature name (and unregister in ShutdownModule):
+IModularFeatures::Get().RegisterModularFeature(
+    IUnrealMcpResourceProvider::GetModularFeatureName(), ResourceProvider.Get());
+```
+
+`unreal://project/levels` and `unreal://project/icon` are the shipped **core** resources — see [`UnrealMCP/Source/UnrealMcpRuntime/Private/Resources/UnrealMcpCoreResources.cpp`](UnrealMCP/Source/UnrealMcpRuntime/Private/Resources/UnrealMcpCoreResources.cpp). Only **static, fixed-URI** resources are supported today (templated / parameterized URIs are deferred). A blob is base64 on the Unreal side and the IPC wire; a known **upstream** quirk in the shared GameDev-MCP-Server / MCP-Plugin-dotnet can mis-emit blob bytes on the final MCP wire to the client (text resources round-trip cleanly end-to-end) — that is an upstream issue, not the Unreal plugin or bridge.
+
+**How it behaves** (identical for tools, prompts, and resources):
+
+- **Auto-discovery & hot-reload.** Unreal-MCP enumerates every registered provider (`UnrealMcpToolProvider` / `UnrealMcpPromptProvider` / `UnrealMcpResourceProvider`) on boot, and subscribes to register/unregister events — so loading or unloading your plugin at any time triggers a **registry rebuild** and a **manifest revision bump**, and the sidecar diffs the new manifest and adds/removes the affected tools / prompts / resources automatically. You never push anything yourself.
+- **Deterministic merge.** Providers are merged in ascending `GetExtensionId()` order; within one provider, entries register in declaration order. Your `GetExtensionId()` is stamped onto everything you contribute (don't call `.ExtensionId(...)` yourself).
+- **Per-extension isolation.** Each descriptor is validated (a tool/prompt needs a kebab-case name + well-formed schema + bound handler; a resource needs a non-empty URI + handler). An **invalid** or **duplicate** entry (duplicate tool/prompt **name**, or duplicate resource **URI**) is dropped/rejected and the reason is recorded on **your** extension's record — your other valid entries, and every other extension, are unaffected. (UE builds without C++ exceptions, so isolation is descriptor-level, not handler-body-level; validate inputs and fail gracefully with the `Error(...)` result helpers.)
+- **Toggles & enable/disable.** Extension-contributed tools are toggled in the **MCP Tools** window like the built-ins; a disabled extension contributes nothing to any manifest. (The **MCP Prompts** / **MCP Resources** windows are wired but still render empty in this release — see [Per-tool enable / disable](#per-tool-enable--disable) — so prompt/resource toggling from the UI is a follow-up; registration and use work today.)
 
 **Learn more:**
 
-- **Full author guide:** [`docs/EXTENSIONS.md`](docs/EXTENSIONS.md) — the contract, the tool builder, lifecycle, ordering, isolation semantics, and versioning.
-- **Working samples:** [`samples/UnrealAITemplate/`](samples/UnrealAITemplate) — a complete, buildable **editor** extension plugin with a `hello-extension` tool and a compile-time switch (`UNREAL_AI_TEMPLATE_INVALID_SCHEMA=1`) that demonstrates the isolation behaviour first-hand; [`samples/UnrealAIRuntimeSample/`](samples/UnrealAIRuntimeSample) — the **runtime (in-game)** counterpart, a `Type=Runtime` plugin whose `game-time-dilation` tool reads/sets the live world's time dilation, callable in a running game over a runtime MCP connection ([`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §12.9; see EXTENSIONS.md "Runtime usage").
+- **Full author guide:** [`docs/EXTENSIONS.md`](docs/EXTENSIONS.md) — the contract for tools, prompts, and resources, the builders, lifecycle, ordering, isolation semantics, and versioning.
+- **Design:** [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §5 (tools) + **§A** (the prompt/resource registration path).
+- **Working samples:** [`samples/UnrealAITemplate/`](samples/UnrealAITemplate) — a complete, buildable **editor** extension plugin with a `hello-extension` tool and a compile-time switch (`UNREAL_AI_TEMPLATE_INVALID_SCHEMA=1`) that demonstrates the isolation behaviour first-hand; [`samples/UnrealAIRuntimeSample/`](samples/UnrealAIRuntimeSample) — the **runtime (in-game)** counterpart, a `Type=Runtime` plugin whose `game-time-dilation` tool reads/sets the live world's time dilation, callable in a running game over a runtime MCP connection ([`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §12.9; see EXTENSIONS.md "Runtime usage"). For prompts and resources, the shipped **core** families ([`UnrealMcpCorePrompts.cpp`](UnrealMCP/Source/UnrealMcpRuntime/Private/Prompts/UnrealMcpCorePrompts.cpp) `level-design-brief`, [`UnrealMcpCoreResources.cpp`](UnrealMCP/Source/UnrealMcpRuntime/Private/Resources/UnrealMcpCoreResources.cpp) `unreal://project/levels` + `unreal://project/icon`) are the runnable reference.
 
 ![AI Game Developer — Unreal MCP](https://github.com/IvanMurzak/Unreal-MCP/blob/main/docs/img/promo/hazzard-divider.svg?raw=true)
 
@@ -441,18 +525,21 @@ UnrealMcp.Disconnect
 
 The console path always uses loopback + Custom mode.
 
-## Your own in-game tools
+## Your own in-game tools, prompts & resources
 
-A game ships its **own** gameplay tools and the AI drives them live — the UE analog of Unity's `WithToolsFromAssembly` / `[AiTool]` Chess-bot. You author tools exactly as for an editor extension (implement [`IUnrealMcpToolProvider`](UnrealMCP/Source/UnrealMcpRuntime/Public/IUnrealMcpToolProvider.h), declare tools via [`FUnrealMcpToolRegistry`](UnrealMCP/Source/UnrealMcpRuntime/Public/UnrealMcpToolRegistry.h)), with two changes for a game module: make it **`Type=Runtime`** and depend on **`UnrealMcpRuntime`** (not `UnrealMcpEditor`). Register the provider at module startup, or use the subsystem's discoverable wrapper:
+A game ships its **own** gameplay tools (and, if useful, prompts and resources) and the AI drives them live — the UE analog of Unity's `WithToolsFromAssembly` / `[AiTool]` Chess-bot. You author all three exactly as for an editor extension (the [Customize Tools, Prompts & Resources](#customize-tools-prompts--resources) section above), with two changes for a game module: make it **`Type=Runtime`** and depend on **`UnrealMcpRuntime`** (not `UnrealMcpEditor`). Register your providers at module startup, or use the subsystem's discoverable wrappers — one register/unregister pair per kind:
 
 ```cpp
 if (UUnrealMcpRuntimeSubsystem* Mcp = UUnrealMcpRuntimeSubsystem::Get(this))
-    Mcp->RegisterToolProvider(MyProviderInstance);     // tools merge in; manifest re-pushed
-// ... before destroying the provider:
-    Mcp->UnregisterToolProvider(MyProviderInstance);   // tools drop out; manifest re-pushed
+{
+    Mcp->RegisterToolProvider(MyToolProvider);          // tools merge in; manifest re-pushed
+    Mcp->RegisterPromptProvider(MyPromptProvider);      // prompts merge in; manifest re-pushed
+    Mcp->RegisterResourceProvider(MyResourceProvider);  // resources merge in; manifest re-pushed
+}
+// ... before destroying the providers, call the matching Unregister*Provider(...) for each.
 ```
 
-The complete, buildable example is [`samples/UnrealAIRuntimeSample/`](samples/UnrealAIRuntimeSample) — a `Type=Runtime` plugin whose **`game-time-dilation`** tool reads/sets the live world's `AWorldSettings::TimeDilation` (slow-motion / fast-forward), callable in a running game over a runtime MCP connection. The author-side details (the contract, lifecycle, ordering, isolation) are in [`docs/EXTENSIONS.md` → Runtime usage](docs/EXTENSIONS.md#runtime-usage-in-game-extensions).
+The complete, buildable example is [`samples/UnrealAIRuntimeSample/`](samples/UnrealAIRuntimeSample) — a `Type=Runtime` plugin whose **`game-time-dilation`** tool reads/sets the live world's `AWorldSettings::TimeDilation` (slow-motion / fast-forward), callable in a running game over a runtime MCP connection. (It demonstrates the tool path; prompts and resources register through the same three-wrapper API shown above and the shipped core families are the runnable reference.) The author-side details (the contract, lifecycle, ordering, isolation) are in [`docs/EXTENSIONS.md` → Runtime usage](docs/EXTENSIONS.md#runtime-usage-in-game-extensions).
 
 ## Runtime tool set vs editor-only
 
