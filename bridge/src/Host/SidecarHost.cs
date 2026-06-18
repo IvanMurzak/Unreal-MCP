@@ -559,6 +559,9 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         {
             if (!_config.KeepConnected)
             {
+                // §7 (issue #111): the reconnect is disarmed (the user clicked Disconnect / keepConnected=false), so
+                // there will be no live link — clear the cached roster so a later re-arm re-seeds fresh.
+                ClearRoster();
                 await EmitStatusAsync(ResolveConnectionStatusAfterReconnect(keepConnected: false, connected: false), cloudAuthState).ConfigureAwait(false);
                 return;
             }
@@ -600,6 +603,10 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
                 try { await plugin.Disconnect(ct).ConfigureAwait(false); }
                 catch (Exception ex) { _logger?.LogDebug("SignalR disconnect failed: {Message}", ex.Message); }
             }
+            // §7 (issue #111): a user Disconnect tears the link down without firing OnClientsChanged, so clear the
+            // cache here too — otherwise a later reconnect would re-seed the agents row from the frozen pre-disconnect
+            // list before SeedRosterAsync pulls the live state.
+            ClearRoster();
             // A superseded disconnect must not emit its now-stale "Disconnected" after the winning transition's
             // status — the newer transition owns the authoritative emit (last-write-wins).
             if (!ct.IsCancellationRequested)
@@ -772,10 +779,29 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         }
 
         /// <summary>
+        /// Clear the cached connected-agent roster (issue #111). Called on every disconnect/teardown path so a later
+        /// reconnect re-seeds fresh from <see cref="SeedRosterAsync"/> rather than from a frozen pre-disconnect list.
+        /// <see cref="EmitStatusAsync"/> already gates a stale cache from leaking under a non-connected state; this
+        /// keeps the in-memory cache itself honest too (guarded by <see cref="_rosterLock"/>).
+        /// </summary>
+        private void ClearRoster()
+        {
+            lock (_rosterLock)
+                _connectedAgents = new List<string>();
+        }
+
+        /// <summary>
         /// Project a roster snapshot to the §7 status labels: keep only connected clients, drop the bridge's own
-        /// self-entry (defensive — the server reports MCP client sessions, not the asking plugin), and format each
-        /// as Unity's exact label <c>"AI agent: {ClientName} ({ClientVersion})"</c>. Pure + static so the bridge
-        /// xUnit suite locks the filter/format/self-exclusion matrix without a live plugin. Null/empty → empty list.
+        /// self-entry (defensive — the server reports MCP client sessions, not the asking plugin), DEDUPE by display
+        /// identity (<c>ClientName</c>,<c>ClientVersion</c>), and format each as Unity's exact label
+        /// <c>"AI agent: {ClientName} ({ClientVersion})"</c>. Pure + static so the bridge xUnit suite locks the
+        /// filter/dedupe/format/self-exclusion matrix without a live plugin. Null/empty → empty list.
+        ///
+        /// Dedupe rationale (issue #111): the server's <c>GetMcpClientData</c>/<c>OnClientsChanged</c> reports one
+        /// <see cref="McpClientData"/> per MCP SESSION (keyed by physicalId), and a single client (e.g. Claude Code)
+        /// commonly holds 2+ live sessions — so without this collapse the row shows duplicate identical labels after
+        /// merely reopening the project. Group by (ClientName, ClientVersion), NOT by SessionId: SessionId is
+        /// per-session and would never collapse the duplicates we are trying to remove.
         /// </summary>
         internal static List<string> BuildAgentLabels(IReadOnlyList<McpClientData>? clients)
         {
@@ -784,6 +810,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             return clients
                 .Where(c => c != null && c.IsConnected)
                 .Where(c => !string.Equals(c.ClientName, SelfClientName, StringComparison.Ordinal))
+                .GroupBy(c => (c.ClientName, c.ClientVersion))
+                .Select(g => g.First())
                 .Select(c => $"AI agent: {c.ClientName} ({c.ClientVersion})")
                 .ToList();
         }
@@ -791,9 +819,22 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         /// <summary>Push a §1.3 <c>status</c> message to the plugin (the §7 live connection indicator).</summary>
         private Task EmitStatusAsync(string connectionState, string? cloudAuthState = null)
         {
+            // §7 clear-on-non-connected invariant (issue #111, mirrors Unity's MainWindowEditor.Connection.cs):
+            // the "AI agents" dot is driven by aiAgents.Num() > 0, so any non-"Connected" transition (Disconnect,
+            // Connecting, Disconnected) MUST ship an EMPTY roster regardless of the cache — otherwise a user
+            // Disconnect (which never fires OnClientsChanged on a torn-down link) leaves the row stale/green. The
+            // disconnect paths ALSO clear _connectedAgents so a later reconnect re-seeds fresh, but this guard is
+            // the authoritative gate: a stale cache can never leak out under a non-connected state.
             List<string> agents;
-            lock (_rosterLock)
-                agents = _connectedAgents.ToList();
+            if (!string.Equals(connectionState, "Connected", StringComparison.Ordinal))
+            {
+                agents = new List<string>();
+            }
+            else
+            {
+                lock (_rosterLock)
+                    agents = _connectedAgents.ToList();
+            }
             var status = new StatusMessage
             {
                 ConnectionState = connectionState,
@@ -857,6 +898,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             _ipc.AgentConfigRequestReceived -= HandleAgentConfigRequest;
             try { _clientsChangedSubscription?.Dispose(); } catch { /* ignore */ }
             _clientsChangedSubscription = null;
+            // §7 (issue #111): teardown clears the roster cache so it never outlives the host.
+            ClearRoster();
             try { _authCts?.Cancel(); } catch { /* ignore */ }
             _authCts?.Dispose();
             // Tear down the transition CTS under _transitionLock so a concurrent RunConnectionTransition cannot
