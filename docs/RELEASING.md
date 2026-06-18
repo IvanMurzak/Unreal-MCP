@@ -64,11 +64,62 @@ artifact jobs in `release.yml`:
   notarytool are macOS-only — hence the two-runner split.)
 - **`build-plugin-zip`** (self-hosted UE 5.7) — downloads the four signed RID
   dirs, **stages them into `UnrealMCP/Binaries/ThirdParty/UnrealMcpBridge/<rid>/`**
-  (the exact path the C++ resolver + the `UnrealMcpEditor.Build.cs`
-  `RuntimeDependencies` wildcard expect), runs `BuildPlugin -Rocket` so the
-  staged binaries are packaged, then zips the plugin. A post-BuildPlugin guard
-  copies the binaries into the package output if `RuntimeDependencies` did not
-  stage them (a defensive fallback for the one unverified UBT behavior).
+  (the exact path the C++ resolver + the `UnrealMcpRuntime.Build.cs`
+  `RuntimeDependencies` per-RID staging expect — moved out of the editor module in
+  R2 so the bridge bundles into packaged GAMES, not just editor packages; see
+  [Packaged-game sidecar bundling](#packaged-game-sidecar-bundling-r2) below), runs
+  `BuildPlugin -Rocket` so the staged binaries are packaged, then zips the plugin.
+  A post-BuildPlugin guard copies the binaries into the package output if
+  `RuntimeDependencies` did not stage them (a defensive fallback for the one
+  unverified UBT behavior).
+
+### Packaged-game sidecar bundling (R2)
+
+The `RuntimeDependencies.Add(.../UnrealMcpBridge/<rid>/*)` declaration that stages
+the sidecar lives in **`UnrealMcpRuntime.Build.cs`** (the `Type: Runtime` module),
+NOT the editor module (`docs/ARCHITECTURE.md` §12.5). UBT only stages a module's
+RuntimeDependencies into a build whose target includes that module: the runtime
+module is part of both the editor target and a packaged Game target, so the bridge
+now bundles into packaged **Development/Shipping game** builds — the editor module
+is absent from a Game target, so when the declaration lived there a packaged game
+shipped without the sidecar.
+
+Conservative staging (adopted defaults, design Open questions 1 & 2):
+
+- **Per-RID, not all four** — only the targeted platform's RID(s) are staged
+  (`win-x64`, `linux-x64`, or both macOS slices), since each self-contained slice
+  is ~73-80 MB.
+- **Desktop-only** — nothing is staged for console/mobile targets (they cannot
+  spawn an external .NET process); runtime MCP is Win64/Mac/Linux only.
+- **Shipping is NOT bundled by default** — a Shipping game omits the sidecar unless
+  the consumer opts in via the `bUnrealMcpAllowShipping` Build flag (the same flag
+  that gates runtime `Connect()` in Shipping, §12.8 #3). Development and editor
+  builds always stage.
+
+**Staging a packaged game (testbed / consumer build):** the bridge binaries are
+gitignored, so a fresh checkout has an empty `Binaries/ThirdParty/UnrealMcpBridge/`.
+Before packaging a **game** (`BuildCookRun -build -cook -stage`, e.g. the
+`Unreal-Test-Project` testbed) you must publish the sidecar for the target RID and
+place it at the bundled path first — otherwise the per-RID `RuntimeDependencies`
+wildcard matches nothing and the staged game has no sidecar:
+
+```bash
+# 1. Publish the self-contained sidecar for the target RID (e.g. win-x64):
+bash bridge/publish.sh Release win-x64 --no-zip
+# 2. Place it at the bundled path the resolver reads:
+#    <plugin>/Binaries/ThirdParty/UnrealMcpBridge/<rid>/unreal-mcp-bridge[.exe]
+mkdir -p UnrealMCP/Binaries/ThirdParty/UnrealMcpBridge/win-x64
+cp bridge/publish/win-x64/unreal-mcp-bridge.exe \
+   UnrealMCP/Binaries/ThirdParty/UnrealMcpBridge/win-x64/
+# 3. Package the game (Win64 Development): RunUAT BuildCookRun -build -cook -stage.
+#    The staged game then contains
+#    <Staged>/<Project>/Plugins/UnrealMCP/Binaries/ThirdParty/UnrealMcpBridge/win-x64/
+#    unreal-mcp-bridge.exe — ResolveBridgeBinaryPath resolves it in the packaged process.
+```
+
+In CI this is automatic: `build-plugin-zip` downloads the signed per-RID dirs and
+stages them before BuildPlugin. The manual sequence above is for a local
+packaged-game verification of the bundle (it is not part of a normal release).
 
 **Binaries are never committed to git.** `Binaries/` is gitignored; the signed
 binaries exist only transiently on the runners during a release. A dev source

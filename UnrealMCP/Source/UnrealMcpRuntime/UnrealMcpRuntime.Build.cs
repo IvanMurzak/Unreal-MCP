@@ -1,10 +1,27 @@
 // Copyright (c) 2026 Ivan Murzak. Licensed under the Apache License, Version 2.0.
 // See the LICENSE file in the repository root for more information.
 
+using System.IO;
 using UnrealBuildTool;
 
 public class UnrealMcpRuntime : ModuleRules
 {
+	// docs/ARCHITECTURE.md §12.5 + §6.2 / Sidecar/UnrealMcpSidecarManager.cpp::ResolveRid — the .NET RID
+	// directory name the C++ resolver looks under (Binaries/ThirdParty/UnrealMcpBridge/<rid>/). Kept in
+	// lockstep with ResolveRid: win-x64 / linux-x64 / osx-* (both mac slices). Returns null for a non-desktop
+	// platform (console/mobile) — those cannot spawn an external .NET process, so runtime MCP is Desktop-only
+	// (Win64/Mac/Linux) and nothing is staged there (matches ResolveRid returning empty on those hosts).
+	private static string[] BridgeRidsForPlatform(UnrealTargetPlatform Platform)
+	{
+		if (Platform == UnrealTargetPlatform.Win64)
+			return new string[] { "win-x64" };
+		if (Platform == UnrealTargetPlatform.Linux)
+			return new string[] { "linux-x64" };
+		if (Platform == UnrealTargetPlatform.Mac)
+			return new string[] { "osx-arm64", "osx-x64" }; // ResolveRid picks one at runtime from the host CPU
+		return null; // non-desktop (console/mobile) — Desktop-only constraint, stage nothing
+	}
+
 	public UnrealMcpRuntime(ReadOnlyTargetRules Target) : base(Target)
 	{
 		PCHUsage = ModuleRules.PCHUsageMode.UseExplicitOrSharedPCHs;
@@ -56,8 +73,45 @@ public class UnrealMcpRuntime : ModuleRules
 		bool bUnrealMcpAllowShipping = false;
 		PublicDefinitions.Add("UNREAL_MCP_ALLOW_SHIPPING=" + (bUnrealMcpAllowShipping ? "1" : "0"));
 
-		// NOTE (R2): RuntimeDependencies.Add(.../UnrealMcpBridge/<rid>/*) deliberately stays in
-		// UnrealMcpEditor.Build.cs for now. Moving it here (so the sidecar bundles into packaged GAMES) is
-		// the explicit scope of task R2 (unreal-mcp-runtime-sidecar-packaging) — out of scope for R1.
+		// R2 (docs/ARCHITECTURE.md §12.5): bundle the prebuilt self-contained sidecar payloads into the
+		// packaged plugin under Binaries/ThirdParty/UnrealMcpBridge/<rid>/ — the exact path the C++ resolver
+		// (FUnrealMcpSidecarManager::ResolveBridgeBinaryPath / ComposeBundledBridgePath) reads at runtime, so
+		// a packaged game spawns the bridge with zero install and zero first-run download (§6 BUNDLE model).
+		//
+		// Why this declaration lives on the RUNTIME module (the whole point of R2): UBT only stages a module's
+		// RuntimeDependencies into a build whose target includes that module. UnrealMcpRuntime (Type: Runtime)
+		// is part of BOTH the editor target AND a packaged Game target, so its RuntimeDependencies bundle into
+		// packaged Development/Shipping GAME builds — not just editor packages. (When it lived on the Editor
+		// module it staged into editor packages only; a Game target omits the editor module entirely, so a
+		// packaged game shipped without the sidecar — the bug R2 fixes.) The editor BuildPlugin path still
+		// bundles because the editor module depends on UnrealMcpRuntime, so UBT honours this module's
+		// RuntimeDependencies in the editor package as well — no regression.
+		//
+		// Conservative gating (adopted defaults, design Open questions 1 & 2):
+		//  - Stage ONLY the targeted-platform RID(s) (BridgeRidsForPlatform), not a recursive "..." wildcard
+		//    over all four RIDs. Each self-contained slice is ~73-80 MB, so a per-platform package carries
+		//    only the slice it can actually run (e.g. a Win64 game stages win-x64 alone).
+		//  - DESKTOP-ONLY: console/mobile cannot spawn an external .NET process, so BridgeRidsForPlatform
+		//    returns null there and nothing is staged (mirrors ResolveRid returning empty on those hosts).
+		//  - SHIPPING is NOT staged by default: a Shipping game omits the sidecar unless the consumer opts in
+		//    via bUnrealMcpAllowShipping (the same flag that gates runtime Connect() in Shipping, §12.8 #3).
+		//    Development/editor builds always stage. This keeps a default Shipping build lean and closes the
+		//    runtime remote-control surface unless deliberately enabled.
+		//
+		// The binaries are NEVER committed to git (Binaries/ is gitignored); the release job stages the signed
+		// per-RID slices into this path before BuildPlugin (docs/RELEASING.md). The "*" wildcard is a no-op on
+		// a dev source checkout that has not staged them, so local source builds still compile and resolve the
+		// bridge via UNREAL_MCP_BRIDGE_PATH instead. NonUFS = raw (uncooked) files, correct for native binaries.
+		bool bStageSidecar = (Target.Configuration != UnrealTargetConfiguration.Shipping) || bUnrealMcpAllowShipping;
+		string[] StageRids = BridgeRidsForPlatform(Target.Platform);
+		if (bStageSidecar && StageRids != null)
+		{
+			foreach (string Rid in StageRids)
+			{
+				RuntimeDependencies.Add(
+					Path.Combine(PluginDirectory, "Binaries", "ThirdParty", "UnrealMcpBridge", Rid, "*"),
+					StagedFileType.NonUFS);
+			}
+		}
 	}
 }
