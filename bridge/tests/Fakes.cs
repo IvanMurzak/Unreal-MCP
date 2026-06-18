@@ -167,6 +167,68 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         }
     }
 
+    /// <summary>A scripted <see cref="IPromptCallChannel"/> for testing the prompt proxy/registration path.</summary>
+    public sealed class FakePromptCallChannel : IPromptCallChannel
+    {
+        private readonly Func<string, JsonObject?, PromptResponseMessage>? _responder;
+        public bool Connected { get; set; } = true;
+
+        public string? LastPrompt { get; private set; }
+        public JsonObject? LastArguments { get; private set; }
+        public int Calls { get; private set; }
+
+        public FakePromptCallChannel(Func<string, JsonObject?, PromptResponseMessage>? responder = null)
+            => _responder = responder;
+
+        public Task<PromptResponseMessage> GetPromptAsync(string prompt, JsonObject? arguments, int timeoutMs, CancellationToken ct)
+        {
+            Calls++;
+            LastPrompt = prompt;
+            LastArguments = arguments;
+            if (!Connected)
+                throw new IpcDisconnectedException();
+
+            var response = _responder?.Invoke(prompt, arguments) ?? new PromptResponseMessage
+            {
+                RequestId = "fake",
+                Status = IpcProtocol.Status.Success,
+            };
+            return Task.FromResult(response);
+        }
+    }
+
+    /// <summary>An in-memory <see cref="IProxyPromptSink"/> recording the prompt registrar's mutations.</summary>
+    public sealed class FakePromptSink : IProxyPromptSink
+    {
+        public readonly Dictionary<string, ProxyPrompt> Prompts = new();
+        public readonly Dictionary<string, bool> Enabled = new();
+
+        public bool HasPrompt(string name) => Prompts.ContainsKey(name);
+
+        public bool AddPrompt(string name, ProxyPrompt prompt)
+        {
+            if (Prompts.ContainsKey(name))
+                return false;
+            Prompts[name] = prompt;
+            Enabled[name] = prompt.Enabled;
+            return true;
+        }
+
+        public bool RemovePrompt(string name)
+        {
+            Enabled.Remove(name);
+            return Prompts.Remove(name);
+        }
+
+        public bool SetPromptEnabled(string name, bool enabled)
+        {
+            if (!Prompts.ContainsKey(name))
+                return false;
+            Enabled[name] = enabled;
+            return true;
+        }
+    }
+
     /// <summary>
     /// A controllable <see cref="IMcpManager"/> for driving the connected-AI-agent roster path (issue #109): the
     /// test pushes new rosters through <see cref="PushClients"/> (an R3 <see cref="Subject{T}"/> backing

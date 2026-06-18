@@ -11,6 +11,8 @@
 // Forward-declared: RegisterToolProvider/UnregisterToolProvider take it by pointer only (§12.9), so the
 // PUBLIC header needs no extension-contract include — callers include IUnrealMcpToolProvider.h themselves.
 class IUnrealMcpToolProvider;
+// Forward-declared for the same reason: RegisterPromptProvider/UnregisterPromptProvider take it by pointer.
+class IUnrealMcpPromptProvider;
 
 // The runtime-owned machinery (registry/dispatcher/bridge/sidecar/extensions) is held behind a PImpl
 // (FRuntimeImpl, defined in the .cpp) so this PUBLIC header forward-declares nothing module-private and the
@@ -140,6 +142,19 @@ public:
 	 * one that was never registered, is a harmless no-op (IModularFeatures tolerates an unknown unregister).
 	 */
 	void UnregisterToolProvider(IUnrealMcpToolProvider* Provider);
+
+	/**
+	 * Register a custom gameplay PROMPT provider at runtime (§A.2) — the prompt sibling of
+	 * RegisterToolProvider. A thin wrapper over
+	 * `IModularFeatures::Get().RegisterModularFeature(IUnrealMcpPromptProvider::GetModularFeatureName(), Provider)`:
+	 * the extension manager subscribed to the prompt modular-feature events in Initialize(), so the
+	 * registration rebuilds the prompt registry and re-pushes the manifest. OWNERSHIP: not owned — the caller
+	 * keeps @p Provider alive and must UnregisterPromptProvider before destroying it. Null is a no-op.
+	 */
+	void RegisterPromptProvider(IUnrealMcpPromptProvider* Provider);
+
+	/** Unregister a prompt provider previously registered via RegisterPromptProvider (or directly via IModularFeatures). Null / unknown is a harmless no-op. */
+	void UnregisterPromptProvider(IUnrealMcpPromptProvider* Provider);
 
 	/** Whether the loopback listener armed (a port is bound). False means Initialize failed to bind. */
 	bool IsListenerArmed() const { return BoundPort > 0; }

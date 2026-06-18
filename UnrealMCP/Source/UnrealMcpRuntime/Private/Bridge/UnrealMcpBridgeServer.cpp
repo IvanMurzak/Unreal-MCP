@@ -4,6 +4,7 @@
 #include "UnrealMcpBridgeServer.h"
 #include "UnrealMcpNdjson.h"
 #include "UnrealMcpToolRegistry.h"
+#include "UnrealMcpPromptRegistry.h"
 #include "Dispatch/UnrealMcpGameThreadDispatcher.h"
 #include "UnrealMcpLog.h"
 
@@ -91,8 +92,10 @@ namespace
 	}
 }
 
-FUnrealMcpBridgeServer::FUnrealMcpBridgeServer(FUnrealMcpToolRegistry& InRegistry, FUnrealMcpGameThreadDispatcher& InDispatcher)
+FUnrealMcpBridgeServer::FUnrealMcpBridgeServer(FUnrealMcpToolRegistry& InRegistry, FUnrealMcpGameThreadDispatcher& InDispatcher,
+	FUnrealMcpPromptRegistry* InPromptRegistry)
 	: Registry(InRegistry)
+	, PromptRegistry(InPromptRegistry)
 	, Dispatcher(InDispatcher)
 {
 }
@@ -575,19 +578,136 @@ void FUnrealMcpBridgeServer::HandleToolCancel(const TSharedPtr<FJsonObject>& Mes
 
 void FUnrealMcpBridgeServer::HandlePromptGet(const TSharedPtr<FJsonObject>& Message)
 {
-	// SCAFFOLD (M16 P0, §A.1): no prompt registry is wired until P1. Answer with an error-status
-	// `prompt-response` correlated by requestId so the sidecar's pending call resolves (fail fast) rather
-	// than hanging to its timeout — exactly how a tool-call to an unknown tool fails. P1 replaces this body
-	// with a real dispatch through FUnrealMcpGameThreadDispatcher (game-thread, no-modal-UI, §4).
-	FString RequestId;
-	Message->TryGetStringField(TEXT("requestId"), RequestId);
+	// Do not start new work once teardown has begun (same contract as HandleToolCall): the continuation
+	// captures `this` and the body the prompt registry, both freed right after Shutdown().
+	if (bStopRequested)
+		return;
 
-	TSharedPtr<FJsonObject> Response = MakeShared<FJsonObject>();
-	Response->SetStringField(TEXT("type"), TypePromptResponse);
-	Response->SetStringField(TEXT("requestId"), RequestId);
-	Response->SetStringField(TEXT("status"), TEXT("error"));
-	Response->SetStringField(TEXT("error"), TEXT("Prompts are not implemented yet (scaffold)."));
-	SendMessage(Response);
+	FString RequestId, PromptName;
+	Message->TryGetStringField(TEXT("requestId"), RequestId);
+	Message->TryGetStringField(TEXT("prompt"), PromptName);
+
+	// Defensive: a prompt-get must never arrive on a tools-only build (the v2 gate blocks the manifest), but
+	// answer with a correlated error rather than dropping the pending call if PromptRegistry is null.
+	if (PromptRegistry == nullptr)
+	{
+		TSharedPtr<FJsonObject> Response = MakeShared<FJsonObject>();
+		Response->SetStringField(TEXT("type"), TypePromptResponse);
+		Response->SetStringField(TEXT("requestId"), RequestId);
+		Response->SetStringField(TEXT("status"), TEXT("error"));
+		Response->SetStringField(TEXT("error"), TEXT("Prompts are not implemented."));
+		SendMessage(Response);
+		return;
+	}
+
+	int32 TimeoutMs = DefaultToolTimeoutMs;
+	double TimeoutValue;
+	if (Message->TryGetNumberField(TEXT("timeoutMs"), TimeoutValue) && TimeoutValue > 0)
+		TimeoutMs = static_cast<int32>(TimeoutValue);
+
+	TSharedPtr<FJsonObject> Arguments = MakeShared<FJsonObject>();
+	const TSharedPtr<FJsonObject>* ArgsPtr;
+	if (Message->TryGetObjectField(TEXT("arguments"), ArgsPtr) && ArgsPtr->IsValid())
+		Arguments = *ArgsPtr;
+
+	// Per-call cancel flag (§4) — reuse the SAME CancelFlags map as tool-calls (the generic tool-cancel by
+	// requestId covers all kinds, §A.1). Shared ownership keeps it alive past the map-entry removal.
+	TSharedRef<FThreadSafeBool, ESPMode::ThreadSafe> CancelFlag = MakeShared<FThreadSafeBool, ESPMode::ThreadSafe>(false);
+
+	bool bTrackCancel = false;
+	if (!RequestId.IsEmpty())
+	{
+		FScopeLock Lock(&CancelMutex);
+		if (CancelFlags.Contains(RequestId))
+		{
+			UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] duplicate prompt-get requestId '%s'; not tracking cancellation for it."), *RequestId);
+		}
+		else
+		{
+			CancelFlags.Add(RequestId, CancelFlag);
+			bTrackCancel = true;
+		}
+	}
+
+	FUnrealMcpToolCall Call(Arguments);
+	Call.CancelRequested = CancelFlag;
+
+	const FString CapturedPrompt = PromptName;
+	const FString CapturedRequestId = RequestId;
+	const bool bRemoveOnDone = bTrackCancel;
+	FUnrealMcpPromptRegistry* CapturedRegistry = PromptRegistry;
+
+	InFlightCalls.Increment();
+
+	// The dispatcher's Dispatch is hard-typed to FUnrealMcpToolResult, so marshal the prompt Execute onto the
+	// game thread through it and PACK the FUnrealMcpPromptResult into a FUnrealMcpToolResult transport: the
+	// Structured JSON carries { description, messages:[{role,text}] } and the bSuccess flag rides on
+	// FUnrealMcpToolResult::bSuccess / Message (the error reason). The .Next unpacks it into a prompt-response.
+	// This keeps the game-thread + per-call timeout + cancel semantics identical to the tool path with the
+	// least new surface (no second Dispatch overload / no parallel registry plumbing in the dispatcher).
+	Dispatcher.Dispatch(
+		Call,
+		[CapturedRegistry, CapturedPrompt](const FUnrealMcpToolCall& C) -> FUnrealMcpToolResult
+		{
+			const FUnrealMcpPromptResult PromptResult = CapturedRegistry->Execute(CapturedPrompt, C);
+
+			TSharedPtr<FJsonObject> Packed = MakeShared<FJsonObject>();
+			Packed->SetStringField(TEXT("description"), PromptResult.Description);
+			TArray<TSharedPtr<FJsonValue>> Messages;
+			for (const FUnrealMcpPromptMessage& Msg : PromptResult.Messages)
+			{
+				TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
+				Entry->SetStringField(TEXT("role"), Msg.Role == EUnrealMcpPromptRole::Assistant ? TEXT("assistant") : TEXT("user"));
+				Entry->SetStringField(TEXT("text"), Msg.Text);
+				Messages.Add(MakeShared<FJsonValueObject>(Entry));
+			}
+			Packed->SetArrayField(TEXT("messages"), Messages);
+
+			// On success Message is unused; on error it carries the reason so the .Next surfaces it as `error`.
+			FUnrealMcpToolResult Transport = PromptResult.bSuccess
+				? FUnrealMcpToolResult::Success(FString(), Packed)
+				: FUnrealMcpToolResult::Error(PromptResult.Description);
+			Transport.Structured = Packed; // Error() drops Structured — re-attach so the .Next can read messages
+			return Transport;
+		},
+		FTimespan::FromMilliseconds(TimeoutMs))
+		.Next([this, CapturedRequestId, bRemoveOnDone](FUnrealMcpToolResult Result)
+		{
+			TSharedPtr<FJsonObject> Response = MakeShared<FJsonObject>();
+			Response->SetStringField(TEXT("type"), TypePromptResponse);
+			Response->SetStringField(TEXT("requestId"), CapturedRequestId);
+			Response->SetStringField(TEXT("status"), Result.bSuccess ? TEXT("success") : TEXT("error"));
+
+			if (Result.bSuccess)
+			{
+				// Unpack the transport: description + messages[] (the timeout path leaves Structured null —
+				// then this is an empty success, which the sidecar maps to a no-message prompt response).
+				if (Result.Structured.IsValid())
+				{
+					FString Description;
+					if (Result.Structured->TryGetStringField(TEXT("description"), Description))
+						Response->SetStringField(TEXT("description"), Description);
+
+					const TArray<TSharedPtr<FJsonValue>>* Messages = nullptr;
+					if (Result.Structured->TryGetArrayField(TEXT("messages"), Messages))
+						Response->SetArrayField(TEXT("messages"), *Messages);
+				}
+			}
+			else
+			{
+				// Result.Message carries the error reason (registry error, or the dispatcher's timeout error).
+				Response->SetStringField(TEXT("error"), Result.Message);
+			}
+
+			SendMessage(Response);
+
+			if (bRemoveOnDone)
+			{
+				FScopeLock Lock(&CancelMutex);
+				CancelFlags.Remove(CapturedRequestId);
+			}
+			InFlightCalls.Decrement();
+		});
 }
 
 void FUnrealMcpBridgeServer::HandleResourceRead(const TSharedPtr<FJsonObject>& Message)
@@ -744,12 +864,33 @@ void FUnrealMcpBridgeServer::PushResourceManifest()
 
 void FUnrealMcpBridgeServer::SendPromptManifestLocked()
 {
-	// SCAFFOLD (M16 P0, §A.1): no prompt registry exists until P1, so there is nothing to send. Also gated on a
-	// v2-negotiated link — a tools-only (v1) sidecar never receives a prompt-manifest. The real body (mirroring
-	// SendManifestLocked over the prompt registry's BuildManifestJson) lands with the P1 registry.
+	// Caller holds WriteMutex. Gated on a v2-negotiated link — a tools-only (v1) sidecar never receives a
+	// prompt-manifest (an old sidecar keeps working). Mirrors SendManifestLocked exactly over the prompt
+	// registry's BuildManifestJson. The same startup-stability argument applies (the prompt registry is built
+	// before the bridge accepts; dynamic re-registration marshals through the dispatcher).
 	if (NegotiatedIpcVersion < PromptsResourcesMinVersion)
 		return;
-	// (no-op: P1 fills this in)
+	if (PromptRegistry == nullptr)
+		return;
+
+	const TSharedPtr<FJsonObject> Manifest = PromptRegistry->BuildManifestJson();
+	const FString Json = SerializeCondensed(Manifest);
+	const TArray<uint8> Framed = FUnrealMcpNdjsonAccumulator::Encode(Json);
+
+	FScopeLock ConnLock(&ConnectionMutex);
+	if (ClientSocket == nullptr)
+		return;
+
+	if (!TrySendFramedLocked(Framed))
+	{
+		UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] prompt-manifest send failed mid-frame; dropping connection."));
+		SocketsPendingDestroy.Add(ClientSocket);
+		ClientSocket = nullptr;
+		bClientConnected = false;
+		bHandshakeOk = false;
+		bHeartbeatStop = true;
+		return;
+	}
 }
 
 void FUnrealMcpBridgeServer::SendResourceManifestLocked()

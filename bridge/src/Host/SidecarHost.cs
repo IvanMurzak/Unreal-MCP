@@ -72,6 +72,9 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
 
         private IMcpPlugin? _plugin;
         private ManifestRegistrar? _registrar;
+        // §A.1 (P1) prompt manifest registrar. Null when the built McpPlugin has no PromptManager (defensive —
+        // the empty-then-manifest model means the manager is normally present, like ToolManager).
+        private PromptManifestRegistrar? _promptRegistrar;
         private Reflector? _reflector;
         private int _signalRConnectStarted;
 
@@ -241,6 +244,25 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
 
             // Wire the registrar BEFORE the IPC loop can deliver a manifest.
             _ipc.Registrar = _registrar;
+
+            // §A.1 (P1) prompts: wire the prompt manifest registrar to the live PromptManager, mirroring the
+            // tool wiring. The manager is NULLABLE on IMcpManager; the empty-then-manifest model (no
+            // WithPrompts* at build, the plugin's prompt-manifest populates it) means it is normally present.
+            // PromptManifestRegistrar implements IManifestSink<PromptManifestMessage>, so this satisfies
+            // IpcClient.PromptRegistrar directly. A v1-negotiated link never delivers a prompt-manifest.
+            var promptManager = _plugin.McpManager.PromptManager;
+            if (promptManager != null)
+            {
+                _promptRegistrar = new PromptManifestRegistrar(
+                    new PromptManagerSink(promptManager),
+                    _ipc,
+                    _loggerProvider?.CreateLogger(nameof(PromptManifestRegistrar)));
+                _ipc.PromptRegistrar = _promptRegistrar;
+            }
+            else
+            {
+                _logger?.LogWarning("Built McpPlugin has no PromptManager; prompts disabled this session.");
+            }
 
             // §7 (issue #109): subscribe to the connected-AI-agent roster so the plugin's "AI agents" status row
             // refreshes live. OnClientsChanged fires with the full active-client list on every agent join/leave;

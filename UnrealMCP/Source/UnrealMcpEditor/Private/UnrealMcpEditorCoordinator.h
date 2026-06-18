@@ -6,6 +6,7 @@
 #include "CoreMinimal.h"
 
 class FUnrealMcpToolRegistry;
+class FUnrealMcpPromptRegistry;
 class FUnrealMcpGameThreadDispatcher;
 class FUnrealMcpBridgeServer;
 class FUnrealMcpSidecarManager;
@@ -46,6 +47,8 @@ public:
 
 private:
 	TUniquePtr<FUnrealMcpToolRegistry> Registry;
+	// §A.1 prompt registry (P1): built alongside the tool registry on the SAME Model A path.
+	TUniquePtr<FUnrealMcpPromptRegistry> PromptRegistry;
 	TUniquePtr<FUnrealMcpGameThreadDispatcher> Dispatcher;
 	TUniquePtr<FUnrealMcpBridgeServer> BridgeServer;
 	TUniquePtr<FUnrealMcpSidecarManager> SidecarManager;
