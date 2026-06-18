@@ -9,7 +9,9 @@
 #include "UObject/NameTypes.h"
 
 class FUnrealMcpToolRegistry;
+class FUnrealMcpPromptRegistry;
 class IUnrealMcpToolProvider;
+class IUnrealMcpPromptProvider;
 class IModularFeature;
 
 /**
@@ -58,11 +60,15 @@ class UNREALMCPRUNTIME_API FUnrealMcpExtensionManager
 {
 public:
 	/**
-	 * @param InRegistry   the plugin-owned registry to merge extension tools into (core tools must already be registered).
-	 * @param InOnChanged  fired after every rebuild so the owner can re-push the manifest (no-op when disconnected).
-	 * @param InConfigPath absolute path of the disabledExtensions[] JSON file; empty => default under the project Saved dir.
+	 * @param InRegistry        the plugin-owned tool registry to merge extension tools into (core tools must already be registered).
+	 * @param InOnChanged       fired after every rebuild so the owner can re-push the manifest(s) (no-op when disconnected).
+	 * @param InConfigPath      absolute path of the disabledExtensions[] JSON file; empty => default under the project Saved dir.
+	 * @param InPromptRegistry  OPTIONAL (§A.2) prompt registry to ALSO merge prompt-provider extensions into. Nullable —
+	 *                          when null the manager is tool-only (existing call sites keep compiling). Gated by the SAME
+	 *                          DisabledExtensions set / re-entrancy guard / ExtensionId sort as the tool pass.
 	 */
-	FUnrealMcpExtensionManager(FUnrealMcpToolRegistry& InRegistry, TFunction<void()> InOnChanged, const FString& InConfigPath = FString());
+	FUnrealMcpExtensionManager(FUnrealMcpToolRegistry& InRegistry, TFunction<void()> InOnChanged, const FString& InConfigPath = FString(),
+		FUnrealMcpPromptRegistry* InPromptRegistry = nullptr);
 	~FUnrealMcpExtensionManager();
 
 	/** Load persisted disabled set, subscribe to modular-feature events, and run the initial rebuild. */
@@ -86,14 +92,23 @@ public:
 	/** Rebuild from an explicit provider list — deterministic, no global IModularFeatures (test seam). */
 	void RebuildFromProviders(const TArray<IUnrealMcpToolProvider*>& Providers, bool bNotify = true);
 
-	/** Override the provider source used by Startup/SetExtensionEnabled rebuilds (test seam; default = live discovery). */
+	/** Override the TOOL provider source used by Startup/SetExtensionEnabled rebuilds (test seam; default = live discovery). */
 	void SetProviderSourceForTesting(TFunction<TArray<IUnrealMcpToolProvider*>()> InSource) { ProviderSource = MoveTemp(InSource); }
+
+	/** Override the PROMPT provider source used by rebuilds (§A.2 test seam; default = live discovery). */
+	void SetPromptProviderSourceForTesting(TFunction<TArray<IUnrealMcpPromptProvider*>()> InSource) { PromptProviderSource = MoveTemp(InSource); }
 
 private:
 	/** Rebuild from the current ProviderSource (live IModularFeatures discovery by default). */
 	void Rebuild(bool bNotify);
 
 	TArray<IUnrealMcpToolProvider*> GatherProviders() const;
+	TArray<IUnrealMcpPromptProvider*> GatherPromptProviders() const;
+
+	/** §A.2 prompt pass of a rebuild: clear previous prompt-extension contributions, then merge enabled+valid+
+	 *  non-duplicate prompt providers into PromptRegistry (same DisabledExtensions / IsValidExtensionId / sort).
+	 *  No-op when PromptRegistry == nullptr. Driven from RebuildFromProviders so the single OnChanged covers both. */
+	void RebuildPromptProviders();
 
 	void OnFeatureRegistered(const FName& Type, IModularFeature* Feature);
 	void OnFeatureUnregistered(const FName& Type, IModularFeature* Feature);
@@ -102,14 +117,19 @@ private:
 	void SaveConfig() const;
 
 	FUnrealMcpToolRegistry& Registry;
+	// §A.2: nullable prompt registry. When set, RebuildFromProviders also runs a prompt pass.
+	FUnrealMcpPromptRegistry* PromptRegistry = nullptr;
 	TFunction<void()> OnChanged;
 	FString ConfigPath;
 	TFunction<TArray<IUnrealMcpToolProvider*>()> ProviderSource;
+	TFunction<TArray<IUnrealMcpPromptProvider*>()> PromptProviderSource;
 
 	TArray<FUnrealMcpExtensionRecord> Records;
 	TSet<FString> DisabledExtensions;
 	/** Extension ids that currently contributed tools, so a rebuild can remove exactly those before re-registering. */
 	TArray<FString> RegisteredExtensionIds;
+	/** §A.2: extension ids that currently contributed prompts (the prompt-pass analog of RegisteredExtensionIds). */
+	TArray<FString> RegisteredPromptExtensionIds;
 
 	FDelegateHandle RegisteredHandle;
 	FDelegateHandle UnregisteredHandle;

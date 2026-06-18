@@ -4,7 +4,9 @@
 #include "Extensions/UnrealMcpExtensionManager.h"
 
 #include "IUnrealMcpToolProvider.h"
+#include "IUnrealMcpPromptProvider.h"
 #include "UnrealMcpToolRegistry.h"
+#include "UnrealMcpPromptRegistry.h"
 #include "UnrealMcpLog.h"
 
 #include "Features/IModularFeatures.h"
@@ -68,16 +70,19 @@ namespace
 }
 
 FUnrealMcpExtensionManager::FUnrealMcpExtensionManager(
-	FUnrealMcpToolRegistry& InRegistry, TFunction<void()> InOnChanged, const FString& InConfigPath)
+	FUnrealMcpToolRegistry& InRegistry, TFunction<void()> InOnChanged, const FString& InConfigPath,
+	FUnrealMcpPromptRegistry* InPromptRegistry)
 	: Registry(InRegistry)
+	, PromptRegistry(InPromptRegistry)
 	, OnChanged(MoveTemp(InOnChanged))
 {
 	ConfigPath = InConfigPath.IsEmpty()
 		? FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Config"), TEXT("UnrealMCP"), TEXT("Extensions.json"))
 		: InConfigPath;
 
-	// Default provider source: the live modular-feature registry. Overridable for deterministic tests.
+	// Default provider sources: the live modular-feature registry. Overridable for deterministic tests.
 	ProviderSource = [this]() { return GatherProviders(); };
+	PromptProviderSource = [this]() { return GatherPromptProviders(); };
 }
 
 FUnrealMcpExtensionManager::~FUnrealMcpExtensionManager()
@@ -143,6 +148,12 @@ TArray<IUnrealMcpToolProvider*> FUnrealMcpExtensionManager::GatherProviders() co
 {
 	return IModularFeatures::Get().GetModularFeatureImplementations<IUnrealMcpToolProvider>(
 		IUnrealMcpToolProvider::GetModularFeatureName());
+}
+
+TArray<IUnrealMcpPromptProvider*> FUnrealMcpExtensionManager::GatherPromptProviders() const
+{
+	return IModularFeatures::Get().GetModularFeatureImplementations<IUnrealMcpPromptProvider>(
+		IUnrealMcpPromptProvider::GetModularFeatureName());
 }
 
 void FUnrealMcpExtensionManager::Rebuild(bool bNotify)
@@ -243,7 +254,14 @@ void FUnrealMcpExtensionManager::RebuildFromProviders(const TArray<IUnrealMcpToo
 		Records.Add(MoveTemp(Record));
 	}
 
-	// 4. Notify the owner to re-push the manifest (§2.2).
+	// 3.5 (§A.2) PROMPT pass: merge prompt-provider extensions into the prompt registry, gated by the SAME
+	//     DisabledExtensions set / IsValidExtensionId / ExtensionId sort. Runs inside the same re-entrancy guard
+	//     so the single OnChanged below covers BOTH passes (no duplicated notify, no second guard). No-op when
+	//     PromptRegistry == nullptr. The tool Records[] above stay tool-centric (the §7 UI is P4) — this is purely
+	//     additive: it does not touch Records / RegisteredExtensionIds, only the prompt registry + its own id list.
+	RebuildPromptProviders();
+
+	// 4. Notify the owner to re-push the manifest(s) (§2.2 / §A.1 — tool + prompt + resource).
 	if (bNotify && OnChanged)
 		OnChanged();
 
@@ -259,11 +277,81 @@ void FUnrealMcpExtensionManager::RebuildFromProviders(const TArray<IUnrealMcpToo
 	}
 }
 
+void FUnrealMcpExtensionManager::RebuildPromptProviders()
+{
+	// §A.2 prompt pass — the prompt analog of the tool pass in RebuildFromProviders, sharing the same
+	// DisabledExtensions set, IsValidExtensionId discipline, and ExtensionId sort. Called from inside the
+	// re-entrancy guard, so it never opens a nested registry scope across the two passes (the prompt registry's
+	// own RegisterExtension scope is independent of the tool registry's and is opened+closed here per provider).
+	if (PromptRegistry == nullptr)
+		return;
+
+	// 1. Clear the previous prompt-extension contribution (core prompts are untouched: only ids we registered).
+	for (const FString& Id : RegisteredPromptExtensionIds)
+		PromptRegistry->RemovePromptsForExtension(Id);
+	RegisteredPromptExtensionIds.Reset();
+
+	const TArray<IUnrealMcpPromptProvider*> Providers = PromptProviderSource ? PromptProviderSource() : GatherPromptProviders();
+
+	// 2. Deterministic ordering by ExtensionId (StableSort keeps registration order as the tie-break).
+	TArray<IUnrealMcpPromptProvider*> Sorted;
+	Sorted.Reserve(Providers.Num());
+	for (IUnrealMcpPromptProvider* P : Providers)
+	{
+		if (P != nullptr)
+			Sorted.Add(P);
+	}
+	Sorted.StableSort([](const IUnrealMcpPromptProvider& A, const IUnrealMcpPromptProvider& B)
+	{
+		return A.GetExtensionId() < B.GetExtensionId();
+	});
+
+	// 3. Register each ENABLED + valid + non-duplicate provider's prompts.
+	TSet<FString> SeenIds;
+	for (IUnrealMcpPromptProvider* Provider : Sorted)
+	{
+		const FString Id = Provider->GetExtensionId();
+
+		// 3a. Validate the id (reuse the SAME helper as the tool pass — never register under "core"/garbage).
+		FString IdError;
+		if (!IsValidExtensionId(Id, IdError))
+		{
+			UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] prompt extension rejected: %s — its prompts were skipped."), *IdError);
+			continue;
+		}
+
+		// 3b. Duplicate id (first-sorted wins). The tool pass already records the public Record for this id; the
+		//     prompt pass only needs to avoid double-registration / a clobbered removal key.
+		if (SeenIds.Contains(Id))
+		{
+			UE_LOG(LogUnrealMcp, Warning,
+				TEXT("[Unreal-MCP] duplicate prompt extension id '%s' — another provider already registered it; this provider's prompts were skipped."),
+				*Id);
+			continue;
+		}
+		SeenIds.Add(Id);
+
+		// 3c. Gated by the SAME DisabledExtensions set as tools (one toggle disables an extension's tools AND prompts).
+		if (DisabledExtensions.Contains(Id))
+			continue;
+
+		PromptRegistry->RegisterExtension(Id, [Provider](FUnrealMcpPromptRegistry& Reg) { Provider->RegisterPrompts(Reg); });
+		RegisteredPromptExtensionIds.AddUnique(Id);
+	}
+}
+
 void FUnrealMcpExtensionManager::OnFeatureRegistered(const FName& Type, IModularFeature* /*Feature*/)
 {
+	// The single OnModularFeatureRegistered subscription receives EVERY feature type; rebuild when the type is
+	// the tool OR (§A.2) the prompt provider feature. A rebuild runs both passes + the single OnChanged.
 	if (Type == IUnrealMcpToolProvider::GetModularFeatureName())
 	{
 		UE_LOG(LogUnrealMcp, Verbose, TEXT("[Unreal-MCP] tool provider registered; rebuilding extensions."));
+		Rebuild(/*bNotify*/ true);
+	}
+	else if (PromptRegistry != nullptr && Type == IUnrealMcpPromptProvider::GetModularFeatureName())
+	{
+		UE_LOG(LogUnrealMcp, Verbose, TEXT("[Unreal-MCP] prompt provider registered; rebuilding extensions."));
 		Rebuild(/*bNotify*/ true);
 	}
 }
@@ -273,6 +361,11 @@ void FUnrealMcpExtensionManager::OnFeatureUnregistered(const FName& Type, IModul
 	if (Type == IUnrealMcpToolProvider::GetModularFeatureName())
 	{
 		UE_LOG(LogUnrealMcp, Verbose, TEXT("[Unreal-MCP] tool provider unregistered; rebuilding extensions."));
+		Rebuild(/*bNotify*/ true);
+	}
+	else if (PromptRegistry != nullptr && Type == IUnrealMcpPromptProvider::GetModularFeatureName())
+	{
+		UE_LOG(LogUnrealMcp, Verbose, TEXT("[Unreal-MCP] prompt provider unregistered; rebuilding extensions."));
 		Rebuild(/*bNotify*/ true);
 	}
 }

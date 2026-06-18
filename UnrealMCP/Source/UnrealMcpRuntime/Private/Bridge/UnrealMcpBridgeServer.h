@@ -13,6 +13,7 @@
 #include <atomic>
 
 class FUnrealMcpToolRegistry;
+class FUnrealMcpPromptRegistry;
 class FUnrealMcpGameThreadDispatcher;
 class FTcpListener;
 class FSocket;
@@ -32,7 +33,10 @@ struct FIPv4Endpoint;
 class UNREALMCPRUNTIME_API FUnrealMcpBridgeServer : public FRunnable
 {
 public:
-	FUnrealMcpBridgeServer(FUnrealMcpToolRegistry& InRegistry, FUnrealMcpGameThreadDispatcher& InDispatcher);
+	// @p InPromptRegistry is nullable — a tools-only caller may omit it and the prompt path stays inert
+	// (SendPromptManifestLocked / HandlePromptGet guard on it). Both coordinators pass it (P1).
+	FUnrealMcpBridgeServer(FUnrealMcpToolRegistry& InRegistry, FUnrealMcpGameThreadDispatcher& InDispatcher,
+		FUnrealMcpPromptRegistry* InPromptRegistry = nullptr);
 	virtual ~FUnrealMcpBridgeServer() override;
 
 	/**
@@ -175,6 +179,9 @@ private:
 	void DrainInFlightCalls(FTimespan Grace);      // wait (bounded) for in-flight continuations to finish
 
 	FUnrealMcpToolRegistry& Registry;
+	// Nullable: the prompt registry (P1). When null the prompt path is inert (SendPromptManifestLocked /
+	// HandlePromptGet guard on it) so a tools-only build / test still compiles + links.
+	FUnrealMcpPromptRegistry* PromptRegistry = nullptr;
 	FUnrealMcpGameThreadDispatcher& Dispatcher;
 
 	FTcpListener* Listener = nullptr;

@@ -5,7 +5,9 @@
 #include "UnrealMcpLog.h"
 #include "UnrealMcpCoreTools.h"
 #include "UnrealMcpRuntimeCoreTools.h"
+#include "UnrealMcpRuntimeCorePrompts.h"
 #include "UnrealMcpToolRegistry.h"
+#include "UnrealMcpPromptRegistry.h"
 #include "Config/UnrealMcpConfig.h"
 #include "Dispatch/UnrealMcpGameThreadDispatcher.h"
 #include "Bridge/UnrealMcpBridgeServer.h"
@@ -72,8 +74,15 @@ void FUnrealMcpEditorCoordinator::Startup()
 	UnrealMcpScreenshotTools::Register(*Registry); // §10 editor screenshot subset (screenshot-viewport, screenshot-isolated)
 	UnrealMcpSourceTools::Register(*Registry); // §10 C++ source / script family (issue #18)
 
+	// §A.1 prompt registry (P1): the prompt sibling of the tool registry, built on the SAME Model A path. The
+	// core prompt family registers before the bridge starts accepting so the first prompt-manifest a v2 sidecar
+	// reads on handshake already includes it. The §8 config has EnabledTools/DisabledTools for tools but NO
+	// EnabledPrompts/DisabledPrompts field today, so no prompt filter is applied at boot (all-enabled default).
+	PromptRegistry = MakeUnique<FUnrealMcpPromptRegistry>();
+	UnrealMcpCorePrompts::Register(*PromptRegistry);
+
 	Dispatcher = MakeUnique<FUnrealMcpGameThreadDispatcher>();
-	BridgeServer = MakeUnique<FUnrealMcpBridgeServer>(*Registry, *Dispatcher);
+	BridgeServer = MakeUnique<FUnrealMcpBridgeServer>(*Registry, *Dispatcher, PromptRegistry.Get());
 
 	// Discover 3rd-party extension tool providers (§5) and merge them into the registry BEFORE the bridge
 	// starts accepting, so the first manifest a sidecar reads on handshake already includes them. Late
@@ -92,7 +101,9 @@ void FUnrealMcpEditorCoordinator::Startup()
 				BridgeServer->PushPromptManifest();
 				BridgeServer->PushResourceManifest();
 			}
-		});
+		},
+		/*InConfigPath*/ FString(),
+		PromptRegistry.Get()); // §A.2 kind-aware: also merge prompt-provider extensions into the prompt registry
 	ExtensionManager->Startup();
 
 	const FString ProjectPath = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir());
@@ -491,6 +502,7 @@ void FUnrealMcpEditorCoordinator::Shutdown()
 	}
 
 	Dispatcher.Reset();
+	PromptRegistry.Reset(); // after ExtensionManager (which holds a raw pointer to it) is torn down above
 	Registry.Reset();
 
 	// §12.6: drop the editor world resolver so no stale GEditor-capturing lambda survives teardown. The
