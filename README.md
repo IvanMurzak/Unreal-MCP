@@ -64,6 +64,7 @@ Unlike Unity and Godot (C# engines that host the .NET `McpPlugin` in-process), U
 - [Per-tool enable / disable](#per-tool-enable--disable)
 - [`unreal-mcp-cli`](#unreal-mcp-cli)
 - [Customize Tools](#customize-tools)
+- [Runtime usage (in-game)](#runtime-usage-in-game)
 - [Configuration & environment variables](#configuration--environment-variables)
 - [Troubleshooting](#troubleshooting)
 - [How Unreal MCP Architecture Works](#how-unreal-mcp-architecture-works)
@@ -349,7 +350,7 @@ The full 16-command surface:
 
 **This is the headline extensibility feature.** Anyone can register their **own** AI Tools — from any third-party UE plugin — and have them appear in the MCP manifest alongside the 62 built-in tools. **No fork, no link-time coupling, no load-order assumptions.** Your tools are discovered automatically on editor boot (and on late-load / hot-unload), merged in deterministic order, and exposed to every connected AI agent.
 
-You contribute tools through a small, public, **modular-feature-based contract**: implement [`IUnrealMcpToolProvider`](UnrealMCP/Source/UnrealMcpEditor/Public/IUnrealMcpToolProvider.h) and declare your tools with the fluent [`FUnrealMcpToolRegistry`](UnrealMCP/Source/UnrealMcpEditor/Public/UnrealMcpToolRegistry.h) builder:
+You contribute tools through a small, public, **modular-feature-based contract**: implement [`IUnrealMcpToolProvider`](UnrealMCP/Source/UnrealMcpRuntime/Public/IUnrealMcpToolProvider.h) and declare your tools with the fluent [`FUnrealMcpToolRegistry`](UnrealMCP/Source/UnrealMcpRuntime/Public/UnrealMcpToolRegistry.h) builder (both headers live in the `UnrealMcpRuntime` module, re-exported by `UnrealMcpEditor`, so the same contract serves editor and [runtime](#runtime-usage-in-game) extensions):
 
 ```cpp
 #include "IUnrealMcpToolProvider.h"
@@ -398,6 +399,78 @@ IModularFeatures::Get().RegisterModularFeature(
 
 - **Full author guide:** [`docs/EXTENSIONS.md`](docs/EXTENSIONS.md) — the contract, the tool builder, lifecycle, ordering, isolation semantics, and versioning.
 - **Working samples:** [`samples/UnrealAITemplate/`](samples/UnrealAITemplate) — a complete, buildable **editor** extension plugin with a `hello-extension` tool and a compile-time switch (`UNREAL_AI_TEMPLATE_INVALID_SCHEMA=1`) that demonstrates the isolation behaviour first-hand; [`samples/UnrealAIRuntimeSample/`](samples/UnrealAIRuntimeSample) — the **runtime (in-game)** counterpart, a `Type=Runtime` plugin whose `game-time-dilation` tool reads/sets the live world's time dilation, callable in a running game over a runtime MCP connection ([`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §12.9; see EXTENSIONS.md "Runtime usage").
+
+![AI Game Developer — Unreal MCP](https://github.com/IvanMurzak/Unreal-MCP/blob/main/docs/img/promo/hazzard-divider.svg?raw=true)
+
+# Runtime usage (in-game)
+
+Everything above drives the **editor**. Unreal-MCP can also run **inside a running game** — PIE, Standalone, or a packaged **Development** build — so an AI assistant can drive your game live. This is the Unreal counterpart of [Unity-MCP's runtime (in-game) support](https://github.com/IvanMurzak/Unity-MCP#runtime-usage-in-game): the UE analog of Unity's `UnityMcpPluginRuntime.Initialize().Build().Connect()` and its `[AiTool]` Chess-bot sample.
+
+The runtime entry point is a `UGameInstanceSubsystem`, [`UUnrealMcpRuntimeSubsystem`](UnrealMCP/Source/UnrealMcpRuntime/Public/UnrealMcpRuntimeSubsystem.h) (in the plugin's `UnrealMcpRuntime` **runtime module**). It is auto-instantiated once per `UGameInstance` but **never auto-connects** — a connection is always an explicit, opt-in call (see [the security contract](#runtime-security-contract) below).
+
+## Connect three ways
+
+All three reach the same `UUnrealMcpRuntimeSubsystem::Connect(Host, Token, Mode, bAllowRemoteHost)`; the connection mode defaults to **Custom** (a developer-supplied loopback server).
+
+**1. From C++** (e.g. your `GameMode::BeginPlay`):
+
+```cpp
+#include "UnrealMcpRuntimeSubsystem.h"
+
+void AMyGameMode::BeginPlay()
+{
+    Super::BeginPlay();
+
+    if (UUnrealMcpRuntimeSubsystem* Mcp = UUnrealMcpRuntimeSubsystem::Get(this))
+        Mcp->Connect(TEXT("http://localhost:8080"), TEXT("my-token")); // Custom mode, loopback
+    // ... and, when you are done:
+    //  Mcp->Disconnect();
+}
+```
+
+`Get(WorldContext)` is a static `BlueprintPure` helper that returns the subsystem for the context's game instance (or null). `Connect` returns `false` (and connects nothing) if any security gate rejects — see below.
+
+**2. From Blueprint** — `Get Unreal MCP Runtime Subsystem` (the `Get` node, `WorldContext`-aware) → **`Connect`** (a `BlueprintCallable` node under the **Unreal MCP** category; `Token` / `Mode` / `bAllowRemoteHost` are advanced pins). Pair it with the **`Disconnect`** node and the **`Is Connected`** pure node for status.
+
+**3. From the console** (QA convenience, no recompile) — registered while the subsystem is alive:
+
+```
+UnrealMcp.Connect <host> [token]
+UnrealMcp.Disconnect
+```
+
+The console path always uses loopback + Custom mode.
+
+## Your own in-game tools
+
+A game ships its **own** gameplay tools and the AI drives them live — the UE analog of Unity's `WithToolsFromAssembly` / `[AiTool]` Chess-bot. You author tools exactly as for an editor extension (implement [`IUnrealMcpToolProvider`](UnrealMCP/Source/UnrealMcpRuntime/Public/IUnrealMcpToolProvider.h), declare tools via [`FUnrealMcpToolRegistry`](UnrealMCP/Source/UnrealMcpRuntime/Public/UnrealMcpToolRegistry.h)), with two changes for a game module: make it **`Type=Runtime`** and depend on **`UnrealMcpRuntime`** (not `UnrealMcpEditor`). Register the provider at module startup, or use the subsystem's discoverable wrapper:
+
+```cpp
+if (UUnrealMcpRuntimeSubsystem* Mcp = UUnrealMcpRuntimeSubsystem::Get(this))
+    Mcp->RegisterToolProvider(MyProviderInstance);     // tools merge in; manifest re-pushed
+// ... before destroying the provider:
+    Mcp->UnregisterToolProvider(MyProviderInstance);   // tools drop out; manifest re-pushed
+```
+
+The complete, buildable example is [`samples/UnrealAIRuntimeSample/`](samples/UnrealAIRuntimeSample) — a `Type=Runtime` plugin whose **`game-time-dilation`** tool reads/sets the live world's `AWorldSettings::TimeDilation` (slow-motion / fast-forward), callable in a running game over a runtime MCP connection. The author-side details (the contract, lifecycle, ordering, isolation) are in [`docs/EXTENSIONS.md` → Runtime usage](docs/EXTENSIONS.md#runtime-usage-in-game-extensions).
+
+## Runtime tool set vs editor-only
+
+A runtime connection serves a **deliberately smaller** built-in set than the editor — **22 runtime-safe built-in tools** (vs the [62 editor tools](#tools)): the actor / component family, `object-get-data` / `object-modify`, `level-get-data`, the console / reflection tools, `screenshot-game-view` / `screenshot-camera`, and `ping`. Editor-only families — Blueprint authoring, asset / Content-Browser operations, C++ source edit & compile, level create/open/save, editor-application state, and viewport/isolated screenshots — are **not** present at runtime (there is no editor in a shipped game). Your own custom tools, registered via the extension bus above, are added on top of the 22 built-ins.
+
+## <a id="runtime-security-contract"></a>Security contract
+
+A runtime connection is **remote control of a running game** (`actor-create`, `object-modify`, arbitrary CVars via `console-run-command`, arbitrary `UFunction`s via `reflection-method-call`) — RCE-class if it were reachable in a shipped product. The runtime surface is therefore locked down by **five layered mitigations** ([`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §12.8), all enforced inside `Connect()`:
+
+1. **Opt-in only.** The subsystem auto-instantiates but **never auto-connects** — there is no auto-dial on load and no config-asset auto-connect. A connection only ever happens through an explicit `Connect()` call.
+2. **Kill switch, default OFF.** `UUnrealMcpRuntimeSettings::bRuntimeMcpEnabled` (Project Settings → Plugins → **Unreal MCP (Runtime)**) defaults to **`false`**. While it is off, every `Connect()` is rejected and no sidecar is spawned. It is a **Game** config setting (`DefaultGame.ini`, section `[/Script/UnrealMcpRuntime.UnrealMcpRuntimeSettings]`), so it travels into the packaged build where the gate must take effect. Turning it on does **not** auto-connect — an explicit `Connect()` is still required.
+3. **Shipping gate.** The `bUnrealMcpAllowShipping` `*.Build.cs` flag defaults to **`false`** (→ `UNREAL_MCP_ALLOW_SHIPPING=0`); in a **Shipping** build `Connect()` logs and returns `false` unless that flag was deliberately compiled in. Development / PIE builds are unaffected.
+4. **Loopback-host default.** `Connect()` rejects any non-loopback `Host` unless the caller explicitly passes `bAllowRemoteHost = true`. The default keeps the connection on `localhost` / `127.0.0.0/8` / `::1`.
+5. **Loopback IPC + one-shot stdin token.** The plugin ⇄ sidecar IPC is loopback-only and authenticated with a one-shot token delivered over **stdin, never argv**, and never logged (same model as the editor, ARCHITECTURE §1.4).
+
+Additionally, the runtime path is **Desktop-only** (Win64 / Mac / Linux): spawning the .NET `unreal-mcp-bridge` sidecar process is not possible on console or mobile platforms, so those platforms have no runtime MCP surface at all.
+
+> **End-to-end runbook.** The full operator walkthrough — enabling the kill switch, connecting from PIE and a packaged Development build, and exercising tools over the live connection — is in [`docs/RUNTIME-E2E.md`](docs/RUNTIME-E2E.md). The deterministic half (security gates, world-resolver switching, connect/disconnect/orphan-safety) is locked by headless Automation specs.
 
 ![AI Game Developer — Unreal MCP](https://github.com/IvanMurzak/Unreal-MCP/blob/main/docs/img/promo/hazzard-divider.svg?raw=true)
 

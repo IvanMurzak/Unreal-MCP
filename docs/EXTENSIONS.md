@@ -13,9 +13,11 @@ A complete, buildable example accompanies this guide:
 ## The contract
 
 Implement a single interface —
-[`IUnrealMcpToolProvider`](../UnrealMCP/Source/UnrealMcpEditor/Public/IUnrealMcpToolProvider.h), the
+[`IUnrealMcpToolProvider`](../UnrealMCP/Source/UnrealMcpRuntime/Public/IUnrealMcpToolProvider.h), the
 **only Unreal-MCP-specific contract header** (to declare tools you also include `UnrealMcpToolRegistry.h`,
-and to register the provider you include `Features/IModularFeatures.h` — see Steps 2–3 below):
+and to register the provider you include `Features/IModularFeatures.h` — see Steps 2–3 below). Both public
+headers live in the plugin's **`UnrealMcpRuntime`** module (re-exported by `UnrealMcpEditor`), so the same
+contract serves both editor and [runtime (in-game)](#runtime-usage-in-game-extensions) extensions:
 
 ```cpp
 class IUnrealMcpToolProvider : public IModularFeature
