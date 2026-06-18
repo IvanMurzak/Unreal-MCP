@@ -229,6 +229,66 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         }
     }
 
+    /// <summary>A scripted <see cref="IResourceCallChannel"/> for testing the resource proxy/registration path.</summary>
+    public sealed class FakeResourceCallChannel : IResourceCallChannel
+    {
+        private readonly Func<string, ResourceResponseMessage>? _responder;
+        public bool Connected { get; set; } = true;
+
+        public string? LastUri { get; private set; }
+        public int Calls { get; private set; }
+
+        public FakeResourceCallChannel(Func<string, ResourceResponseMessage>? responder = null)
+            => _responder = responder;
+
+        public Task<ResourceResponseMessage> ReadResourceAsync(string uri, int timeoutMs, CancellationToken ct)
+        {
+            Calls++;
+            LastUri = uri;
+            if (!Connected)
+                throw new IpcDisconnectedException();
+
+            var response = _responder?.Invoke(uri) ?? new ResourceResponseMessage
+            {
+                RequestId = "fake",
+                Status = IpcProtocol.Status.Success,
+            };
+            return Task.FromResult(response);
+        }
+    }
+
+    /// <summary>An in-memory <see cref="IProxyResourceSink"/> recording the resource registrar's mutations.</summary>
+    public sealed class FakeResourceSink : IProxyResourceSink
+    {
+        public readonly Dictionary<string, ProxyResource> Resources = new();
+        public readonly Dictionary<string, bool> Enabled = new();
+
+        public bool HasResource(string key) => Resources.ContainsKey(key);
+
+        public bool AddResource(string key, ProxyResource resource)
+        {
+            if (Resources.ContainsKey(key))
+                return false;
+            Resources[key] = resource;
+            Enabled[key] = resource.Enabled;
+            return true;
+        }
+
+        public bool RemoveResource(string key)
+        {
+            Enabled.Remove(key);
+            return Resources.Remove(key);
+        }
+
+        public bool SetResourceEnabled(string key, bool enabled)
+        {
+            if (!Resources.ContainsKey(key))
+                return false;
+            Enabled[key] = enabled;
+            return true;
+        }
+    }
+
     /// <summary>
     /// A controllable <see cref="IMcpManager"/> for driving the connected-AI-agent roster path (issue #109): the
     /// test pushes new rosters through <see cref="PushClients"/> (an R3 <see cref="Subject{T}"/> backing
