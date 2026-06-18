@@ -11,12 +11,14 @@
 #include "Dom/JsonValue.h"
 
 /**
- * Level / map tool family specs (docs/ARCHITECTURE.md §10, issue #16 — Unity Scene.* analog).
+ * Editor level / map tool family specs (docs/ARCHITECTURE.md §10, issue #16 — Unity Scene.* analog, §12.7).
+ * Covers the six EDITOR-ONLY level tools. The read-only level-get-data moved to the runtime module in R4;
+ * its specs live in UnrealMcpRuntimeLevelToolsSpec.cpp.
  *
  * Three groups:
  *  - registration   — every declared tool is present with a kebab-case id + correct hints (no live editor).
  *  - error paths     — each tool's required-arg / not-found guard returns an error result.
- *  - live round-trip — a real in-editor lifecycle (create -> list-loaded -> get-data -> set-current),
+ *  - live round-trip — a real in-editor lifecycle (create -> list-loaded -> set-current),
  *    driven entirely through GEditor->NewMap() (the level-create no-'path' branch), so NOTHING is
  *    written to disk and the testbed working tree stays clean. Disk save / open is proven separately by
  *    the live bridge e2e (which saves under a temp content path and cleans up).
@@ -43,14 +45,14 @@ void FUnrealMcpLevelToolsSpec::Define()
 {
 	Describe("registration", [this]()
 	{
-		It("registers all seven level tools with kebab-case ids", [this]()
+		It("registers all six editor level tools with kebab-case ids", [this]()
 		{
 			FUnrealMcpToolRegistry Registry;
 			UnrealMcpLevelTools::Register(Registry);
 
 			const TArray<FString> Expected = {
 				TEXT("level-create"), TEXT("level-open"), TEXT("level-save"),
-				TEXT("level-get-data"), TEXT("level-list-loaded"), TEXT("level-set-current"),
+				TEXT("level-list-loaded"), TEXT("level-set-current"),
 				TEXT("level-unload-sublevel")
 			};
 			for (const FString& Name : Expected)
@@ -58,7 +60,9 @@ void FUnrealMcpLevelToolsSpec::Define()
 				TestTrue(FString::Printf(TEXT("has %s"), *Name), Registry.HasTool(Name));
 				TestTrue(FString::Printf(TEXT("%s is valid kebab id"), *Name), FUnrealMcpToolRegistry::IsValidToolName(Name));
 			}
-			TestEqual(TEXT("exactly seven tools"), Registry.Num(), Expected.Num());
+			TestEqual(TEXT("exactly six tools"), Registry.Num(), Expected.Num());
+			// level-get-data moved to the runtime module (R4, §12.7) — it must NOT be in the editor level family.
+			TestFalse(TEXT("level-get-data is no longer in the editor level family"), Registry.HasTool(TEXT("level-get-data")));
 		});
 
 		It("marks read-only and destructive tools correctly", [this]()
@@ -67,14 +71,11 @@ void FUnrealMcpLevelToolsSpec::Define()
 			UnrealMcpLevelTools::Register(Registry);
 			// Find() returns nullptr for an unregistered id; null-check before dereferencing so a registration
 			// regression fails this assertion cleanly instead of crashing the whole automation run.
-			const FUnrealMcpRegisteredTool* GetData = Registry.Find(TEXT("level-get-data"));
 			const FUnrealMcpRegisteredTool* ListLoaded = Registry.Find(TEXT("level-list-loaded"));
 			const FUnrealMcpRegisteredTool* Unload = Registry.Find(TEXT("level-unload-sublevel"));
-			if (!TestNotNull(TEXT("level-get-data registered"), GetData) ||
-				!TestNotNull(TEXT("level-list-loaded registered"), ListLoaded) ||
+			if (!TestNotNull(TEXT("level-list-loaded registered"), ListLoaded) ||
 				!TestNotNull(TEXT("level-unload-sublevel registered"), Unload))
 				return;
-			TestTrue(TEXT("get-data read-only"), GetData->bReadOnlyHint);
 			TestTrue(TEXT("list-loaded read-only"), ListLoaded->bReadOnlyHint);
 			TestTrue(TEXT("unload-sublevel destructive"), Unload->bDestructiveHint);
 		});
@@ -122,17 +123,6 @@ void FUnrealMcpLevelToolsSpec::Define()
 		{
 			FUnrealMcpToolRegistry Registry; UnrealMcpLevelTools::Register(Registry);
 			TestFalse(TEXT("not success"), RunLevel(Registry, TEXT("level-unload-sublevel"), Args()).bSuccess);
-		});
-
-		It("level-get-data errors on a non-string paths entry", [this]()
-		{
-			FUnrealMcpToolRegistry Registry; UnrealMcpLevelTools::Register(Registry);
-			TSharedPtr<FJsonObject> A = Args();
-			// An object entry is genuinely non-stringable — unlike a JSON number, which UE's
-			// FJsonValue::TryGetString coerces to its text form ("42") and would NOT trip the guard.
-			TArray<TSharedPtr<FJsonValue>> Paths; Paths.Add(MakeShared<FJsonValueObject>(MakeShared<FJsonObject>()));
-			A->SetArrayField(TEXT("paths"), Paths);
-			TestFalse(TEXT("not success"), RunLevel(Registry, TEXT("level-get-data"), A).bSuccess);
 		});
 	});
 
@@ -187,21 +177,6 @@ void FUnrealMcpLevelToolsSpec::Define()
 						if (V.IsValid() && V->AsObject().IsValid() && V->AsObject()->GetBoolField(TEXT("isPersistent")))
 							bSawPersistent = true;
 				TestTrue(TEXT("persistent level present in list"), bSawPersistent);
-			}
-
-			// level-get-data whole-world snapshot: an actors array + numeric total.
-			{
-				const FUnrealMcpToolResult R = RunLevel(Registry, TEXT("level-get-data"), Args());
-				TestTrue(TEXT("get-data ok"), R.bSuccess);
-				if (!R.Structured.IsValid())
-				{
-					AddError(TEXT("level-get-data returned no structured payload"));
-					return;
-				}
-				const TArray<TSharedPtr<FJsonValue>>* Actors = nullptr;
-				TestTrue(TEXT("get-data has actors array"), R.Structured->TryGetArrayField(TEXT("actors"), Actors) && Actors);
-				double Total = -1;
-				TestTrue(TEXT("get-data has total"), R.Structured->TryGetNumberField(TEXT("total"), Total) && Total >= 0.0);
 			}
 
 			// level-set-current on the persistent level: already current -> success (idempotent).

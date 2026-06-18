@@ -1147,6 +1147,35 @@ editor-driven tools follow the user into PIE (matches Unity) — deferred until 
 Net runtime built-in set ≈22. PLUS user-authored runtime tools via the extension bus (§12.9) — the PRIMARY
 Unity runtime use case. Parity is "framework + your custom tools," not "all 62 built-ins in-game."
 
+**R4 implementation (landed).** The runtime-safe families now live in the runtime module and are registered
+by BOTH the editor coordinator (Model A, on top of the shared registry) and the runtime bootstrap subsystem
+(`UUnrealMcpRuntimeSubsystem::Initialize`). The realized split — exactly 22 runtime built-ins:
+`ping` (1) + actor/component (13: `actor-create/destroy/duplicate/find/modify/set-parent`,
+`actor-component-add/destroy/get/modify/list-all`, `object-get-data/modify`) +
+console/reflection (5: `console-get-logs/clear-logs/run-command`, `reflection-method-find/-call`) +
+screenshot (2: `screenshot-game-view`, `screenshot-camera`) + `level-get-data` (1). Files:
+`UnrealMcpRuntime/Private/Tools/UnrealMcpActorTools.cpp` (moved DOWN, `git mv`),
+`UnrealMcpConsoleReflectionTools.cpp`, `UnrealMcpRuntimeScreenshotTools.cpp`, `UnrealMcpRuntimeLevelTools.cpp`
+(new). Editor-only families stay editor-registered, unchanged in count.
+- **Undo transaction reconciliation.** §12.2 listed `FScopedTransaction` as a `#if WITH_EDITOR`-guarded
+  coupling, but `FScopedTransaction` lives in the **UnrealEd module**, which the Type=Runtime module
+  deliberately does not link — so even guarded, the editor build of the runtime module fails to LINK it. The
+  actor family therefore drops its own named undo transaction (a no-op RAII seam in both configs); the
+  per-op `Modify()` + `MarkPackageDirty()` calls are retained (Engine, WITH_EDITOR) so the editor's active
+  transaction still records the mutation — only the per-op named undo grouping is lost when the family is
+  driven from the runtime module. Likewise `FActorLabelUtilities::SetActorLabelUnique` (UnrealEd) is replaced
+  by `AActor::SetActorLabel` (Engine, WITH_EDITOR); the friendly label is read via `GetActorNameOrLabel`
+  (runtime-safe) instead of the WITH_EDITOR-only `GetActorLabel`.
+- **`screenshot-game-view`** uses `GEngine->GameViewport->Viewport` (runtime-available) instead of the editor
+  family's `GEditor->GetPIEViewport()`.
+- **Reflection runtime gate** accepts BlueprintCallable (+ Static for the CDO path) ONLY — the editor family's
+  `CallInEditor` allowance is excluded (that metadata is `WITH_EDITORONLY_DATA`).
+- **Lost-transitive-include fixes** the Game-target BuildPlugin surfaced (the editor PCH had masked them):
+  explicit `#include`s for `UObject/TextProperty.h` + `UObject/EnumProperty.h` (reflection property `IsA<>`)
+  and `UObject/Package.h` (`GetTransientPackage()` Outer); `FActorSpawnParameters::bHideFromSceneOutliner` is
+  `#if WITH_EDITOR`-guarded. "editor-only tools absent from the runtime manifest" is a deterministic
+  Automation gate (`UnrealMcp.RuntimeSubsystem` → "runtime manifest separation").
+
 ### 12.8 Security analysis (shipped-game remote-control surface)
 A runtime connection is remote control of a running game (actor-create, object-modify, console-run-command
 arbitrary CVars, reflection-method-call arbitrary UFunctions) — RCE-class if reachable. Mitigations (ALL in design):

@@ -55,13 +55,21 @@ void FUnrealMcpEditorCoordinator::Startup()
 	FUnrealMcpLogCollector::Get().Startup();
 
 	Registry = MakeUnique<FUnrealMcpToolRegistry>();
+	// §12.3 Model A: the editor coordinator registers BOTH the runtime-safe families (which also work over a
+	// runtime connection — they live in the runtime module) AND the editor-only families on top of the SAME
+	// registry. The runtime bootstrap subsystem (R3) registers ONLY the runtime-safe subset in a packaged game.
+	// --- Runtime-safe families (UnrealMcpRuntimeCoreTools.h, §12.7) ---
 	UnrealMcpPingTool::Register(*Registry);
-	UnrealMcpActorTools::Register(*Registry);
+	UnrealMcpActorTools::Register(*Registry); // §10 actor / component family — runtime-safe (World->SpawnActor + WITH_EDITOR guards)
+	UnrealMcpConsoleReflectionTools::Register(*Registry); // §10 console + reflection runtime subset (console-*, reflection-method-*)
+	UnrealMcpRuntimeScreenshotTools::Register(*Registry); // §10 screenshot runtime subset (screenshot-game-view, screenshot-camera)
+	UnrealMcpRuntimeLevelTools::Register(*Registry); // §10 read-only level-get-data (runtime-safe)
+	// --- Editor-only families (UnrealMcpCoreTools.h) ---
 	UnrealMcpBlueprintTools::Register(*Registry); // §10 flagship Blueprint family (CORE)
 	UnrealMcpAssetTools::Register(*Registry); // §10 asset / Content-Browser family (issue #10)
-	UnrealMcpEditorTools::Register(*Registry); // §10 editor / console / reflection family (issue #19)
-	UnrealMcpLevelTools::Register(*Registry); // §10 level / map family (issue #16, Unity Scene.* analog)
-	UnrealMcpScreenshotTools::Register(*Registry); // §10 screenshot / viewport-capture family (issue #17)
+	UnrealMcpEditorTools::Register(*Registry); // §10 editor-application / selection family (issue #19, editor-only subset)
+	UnrealMcpLevelTools::Register(*Registry); // §10 level / map WRITE family (issue #16, Unity Scene.* analog)
+	UnrealMcpScreenshotTools::Register(*Registry); // §10 editor screenshot subset (screenshot-viewport, screenshot-isolated)
 	UnrealMcpSourceTools::Register(*Registry); // §10 C++ source / script family (issue #18)
 
 	Dispatcher = MakeUnique<FUnrealMcpGameThreadDispatcher>();

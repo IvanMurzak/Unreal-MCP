@@ -13,6 +13,8 @@
 #include "UnrealMcpRuntimeSubsystem.h"
 #include "UnrealMcpRuntimeSettings.h"
 #include "Tools/UnrealMcpWorldProvider.h"
+#include "UnrealMcpRuntimeCoreTools.h" // runtime-safe families (§12.7) — for the runtime-manifest-separation check
+#include "UnrealMcpToolRegistry.h"      // FUnrealMcpToolRegistry — the registry the separation check builds against
 
 /**
  * Specs for the R3 runtime bootstrap (docs/ARCHITECTURE.md §12.4 / §12.6 / §12.8). These exercise the parts
@@ -137,6 +139,69 @@ void FUnrealMcpRuntimeSubsystemSpec::Define()
 			{
 				return GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
 			});
+		});
+	});
+
+	Describe("runtime manifest separation (§12.7 R4 DoD)", [this]()
+	{
+		// Build a registry with EXACTLY the runtime-safe families the runtime bootstrap subsystem registers
+		// (UnrealMcpRuntimeSubsystem::Initialize: ping + actor/component + console/reflection + screenshot
+		// subset + level-get-data). This is the authoritative headless proxy for the packaged-game runtime
+		// manifest: the subsystem builds its registry privately inside Initialize() (which needs a live
+		// UGameInstance + bridge), so asserting against the SAME registration list here proves the manifest's
+		// shape without the live harness — and is what makes "editor-only tools absent from the runtime
+		// manifest" a deterministic CI gate rather than a flaky live-e2e step.
+		auto BuildRuntimeRegistry = [](FUnrealMcpToolRegistry& Registry)
+		{
+			UnrealMcpPingTool::Register(Registry);
+			UnrealMcpActorTools::Register(Registry);
+			UnrealMcpConsoleReflectionTools::Register(Registry);
+			UnrealMcpRuntimeScreenshotTools::Register(Registry);
+			UnrealMcpRuntimeLevelTools::Register(Registry);
+		};
+
+		It("includes the runtime-safe tools and EXCLUDES every editor-only tool", [this, BuildRuntimeRegistry]()
+		{
+			FUnrealMcpToolRegistry Registry;
+			BuildRuntimeRegistry(Registry);
+
+			// --- Runtime-safe tools MUST be present (the family also works over a runtime connection). ---
+			const TCHAR* const RuntimeExpected[] = {
+				TEXT("ping"),
+				// actor / component family (13)
+				TEXT("actor-create"), TEXT("actor-destroy"), TEXT("actor-duplicate"), TEXT("actor-find"),
+				TEXT("actor-modify"), TEXT("actor-set-parent"), TEXT("actor-component-add"),
+				TEXT("actor-component-destroy"), TEXT("actor-component-get"), TEXT("actor-component-modify"),
+				TEXT("actor-component-list-all"), TEXT("object-get-data"), TEXT("object-modify"),
+				// console + reflection runtime subset (5)
+				TEXT("console-get-logs"), TEXT("console-clear-logs"), TEXT("console-run-command"),
+				TEXT("reflection-method-find"), TEXT("reflection-method-call"),
+				// screenshot runtime subset (2)
+				TEXT("screenshot-game-view"), TEXT("screenshot-camera"),
+				// read-only level data (1)
+				TEXT("level-get-data")
+			};
+			for (const TCHAR* Name : RuntimeExpected)
+				TestTrue(FString::Printf(TEXT("runtime manifest HAS %s"), Name), Registry.HasTool(Name));
+
+			// The runtime set is exactly these (1 + 13 + 5 + 2 + 1 = 22).
+			TestEqual(TEXT("runtime tool count == 22"), Registry.Num(), (int32)UE_ARRAY_COUNT(RuntimeExpected));
+
+			// --- Editor-only tools MUST be ABSENT from the runtime manifest. ---
+			const TCHAR* const EditorOnlyForbidden[] = {
+				// editor-application / selection
+				TEXT("editor-application-get-state"), TEXT("editor-application-set-state"),
+				TEXT("editor-selection-get"), TEXT("editor-selection-set"),
+				// editor screenshot subset
+				TEXT("screenshot-viewport"), TEXT("screenshot-isolated"),
+				// level WRITE + editor list
+				TEXT("level-create"), TEXT("level-open"), TEXT("level-save"),
+				TEXT("level-list-loaded"), TEXT("level-set-current"), TEXT("level-unload-sublevel"),
+				// representative asset / blueprint / source family members
+				TEXT("asset-find"), TEXT("blueprint-create"), TEXT("source-compile")
+			};
+			for (const TCHAR* Name : EditorOnlyForbidden)
+				TestFalse(FString::Printf(TEXT("runtime manifest does NOT have editor-only %s"), Name), Registry.HasTool(Name));
 		});
 	});
 }
