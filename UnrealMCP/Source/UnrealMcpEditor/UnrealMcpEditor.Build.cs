@@ -13,7 +13,20 @@ public class UnrealMcpEditor : ModuleRules
 		PublicDependencyModuleNames.AddRange(new string[]
 		{
 			"Core",
+			// docs/ARCHITECTURE.md §12.3 Model A: the engine-agnostic machinery (registry, dispatcher,
+			// bridge, sidecar, config, extensions, object-ref + world provider, the runtime-safe `ping`
+			// core tool) now lives in the UnrealMcpRuntime module. The editor coordinator builds those
+			// types and layers the editor-only families on top of the SAME registry. Public (not Private)
+			// so the runtime module's public headers (UnrealMcpToolRegistry.h, IUnrealMcpToolProvider.h,
+			// UnrealMcpLog.h) are visible to anything that depends on this editor module in turn.
+			"UnrealMcpRuntime",
 		});
+
+		// Reach the runtime module's PRIVATE headers (Bridge/, Dispatch/, Config/, Sidecar/, Extensions/,
+		// Tools/UnrealMcpWorldProvider.h, Tools/UnrealMcpLogCollector.h, …) so the editor coordinator can
+		// construct + wire those subsystems directly. The types are UNREALMCPRUNTIME_API-exported, so
+		// symbols link via the module dependency above; this only opens the include path.
+		PrivateIncludePaths.Add(Path.Combine(ModuleDirectory, "..", "UnrealMcpRuntime", "Private"));
 
 		// The dependency set the architecture needs (docs/ARCHITECTURE.md):
 		//  - Networking/Sockets  -> FUnrealMcpBridgeServer (localhost TCP listener, §1)

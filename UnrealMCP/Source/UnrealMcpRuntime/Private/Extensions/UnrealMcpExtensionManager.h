@@ -43,7 +43,7 @@ struct FUnrealMcpExtensionRecord
  * Saved dir. TODO(connection-config §8): fold this into FUnrealMcpConfig once that store lands, so the
  * extension enable state shares one config surface with connection settings.
  */
-class UNREALMCPEDITOR_API FUnrealMcpExtensionManager
+class UNREALMCPRUNTIME_API FUnrealMcpExtensionManager
 {
 public:
 	/**

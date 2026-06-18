@@ -22,8 +22,11 @@ public class UnrealAITemplate : ModuleRules
 			// "Json" is needed because the public registry header (UnrealMcpToolRegistry.h) includes
 			// Dom/JsonObject.h, and the sample's handler builds a structured result with FJsonObject.
 			"Json",
-			// The extension contract + tool registry live in the Unreal-MCP plugin's editor module.
-			"UnrealMcpEditor",
+			// The extension contract (IUnrealMcpToolProvider.h) + tool registry (UnrealMcpToolRegistry.h)
+			// live in the Unreal-MCP plugin's RUNTIME module (docs/ARCHITECTURE.md §12.1) — extensions are
+			// runtime-available (IModularFeatures, §5/§12.9), so the sample depends on the runtime module,
+			// not the editor module.
+			"UnrealMcpRuntime",
 		});
 	}
 }

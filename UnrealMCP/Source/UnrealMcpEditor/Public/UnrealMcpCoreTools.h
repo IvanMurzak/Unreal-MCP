@@ -8,14 +8,11 @@
 class FUnrealMcpToolRegistry;
 
 /**
- * Registration entry points for the core tool families (docs/ARCHITECTURE.md §10). Exported so the
- * runtime coordinator wires them on boot AND the Automation specs can register + exercise them in
- * isolation. `ping` ships with the sidecar-bridge task; later families add their own Register here.
+ * Registration entry points for the EDITOR-only core tool families (docs/ARCHITECTURE.md §10). Exported
+ * so the editor coordinator wires them on boot AND the Automation specs can register + exercise them in
+ * isolation. The runtime-safe `ping` family moved to the runtime module (UnrealMcpRuntimeCoreTools.h,
+ * §12.1); the other families below are editor-only until their runtime subset migrates in R4.
  */
-namespace UnrealMcpPingTool
-{
-	UNREALMCPEDITOR_API void Register(FUnrealMcpToolRegistry& Registry);
-}
 
 /**
  * The actor & component tool family (docs/ARCHITECTURE.md §10 "actor family"): actor lifecycle

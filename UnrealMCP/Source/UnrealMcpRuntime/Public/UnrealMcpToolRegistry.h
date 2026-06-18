@@ -25,7 +25,7 @@ enum class EUnrealMcpParamRequirement : uint8
 };
 
 /** A declared tool parameter (name + JSON-schema type + description). */
-struct UNREALMCPEDITOR_API FUnrealMcpParamSpec
+struct UNREALMCPRUNTIME_API FUnrealMcpParamSpec
 {
 	FString Name;
 	FString JsonType;        // "string" | "integer" | "number" | "boolean" | "object" | "array"
@@ -38,7 +38,7 @@ struct UNREALMCPEDITOR_API FUnrealMcpParamSpec
  * The arguments + cancellation surface handed to a tool handler. The handler runs ON the game thread
  * (the dispatcher guarantees this, §4); it must never block on bridge state or pump modal UI.
  */
-struct UNREALMCPEDITOR_API FUnrealMcpToolCall
+struct UNREALMCPRUNTIME_API FUnrealMcpToolCall
 {
 	/** Raw JSON arguments object (never null; empty object when the call carried none). */
 	TSharedPtr<FJsonObject> Arguments;
@@ -71,14 +71,14 @@ struct UNREALMCPEDITOR_API FUnrealMcpToolCall
  * 1:1 onto an MCP image ContentBlock (ProxyResponseMapper). The screenshot family (§10) is the first
  * producer.
  */
-struct UNREALMCPEDITOR_API FUnrealMcpImageContent
+struct UNREALMCPRUNTIME_API FUnrealMcpImageContent
 {
 	FString Base64Data;               // base64-encoded image bytes (no data: URI prefix)
 	FString MimeType = TEXT("image/png");
 };
 
 /** Terminal result of a tool invocation, mirroring the IPC tool-response shape (§1.3). */
-struct UNREALMCPEDITOR_API FUnrealMcpToolResult
+struct UNREALMCPRUNTIME_API FUnrealMcpToolResult
 {
 	bool bSuccess = true;
 	FString Message;                       // human-readable text content block
@@ -107,7 +107,7 @@ struct UNREALMCPEDITOR_API FUnrealMcpToolResult
 using FUnrealMcpToolHandler = TFunction<FUnrealMcpToolResult(const FUnrealMcpToolCall&)>;
 
 /** A fully compiled tool: descriptor (manifest shape) + handler. */
-struct UNREALMCPEDITOR_API FUnrealMcpRegisteredTool
+struct UNREALMCPRUNTIME_API FUnrealMcpRegisteredTool
 {
 	FString Name;
 	FString Title;
@@ -141,7 +141,7 @@ struct UNREALMCPEDITOR_API FUnrealMcpRegisteredTool
 class FUnrealMcpToolRegistry;
 
 /** Outcome of registering one extension provider's tools (docs/ARCHITECTURE.md §5). */
-struct UNREALMCPEDITOR_API FUnrealMcpExtensionRegistrationResult
+struct UNREALMCPRUNTIME_API FUnrealMcpExtensionRegistrationResult
 {
 	/** Number of tools that passed validation + dedup and were committed under the extension's id. */
 	int32 ToolsRegistered = 0;
@@ -150,7 +150,7 @@ struct UNREALMCPEDITOR_API FUnrealMcpExtensionRegistrationResult
 };
 
 /** Fluent declaration builder (docs/ARCHITECTURE.md §3.3). One per tool; commits on destruction-free Handle(). */
-class UNREALMCPEDITOR_API FUnrealMcpToolBuilder
+class UNREALMCPRUNTIME_API FUnrealMcpToolBuilder
 {
 public:
 	FUnrealMcpToolBuilder(FUnrealMcpToolRegistry& InRegistry, const FString& InName);
@@ -194,7 +194,7 @@ private:
  * Any DYNAMIC re-registration (the §2.2 hot-reload path) MUST marshal both the mutation and the manifest
  * read through the game-thread dispatcher (§4) — the reader thread must never observe a half-mutated set.
  */
-class UNREALMCPEDITOR_API FUnrealMcpToolRegistry
+class UNREALMCPRUNTIME_API FUnrealMcpToolRegistry
 {
 public:
 	/** Begin declaring a tool (docs/ARCHITECTURE.md §3.3 fluent API). */

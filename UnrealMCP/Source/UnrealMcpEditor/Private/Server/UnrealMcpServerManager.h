@@ -149,7 +149,7 @@ private:
 	/**
 	 * Windows-only: bind the just-spawned process @p ProcessHandle to a kill-on-job-close Job Object so the OS
 	 * terminates the local server when THIS editor process dies by ANY means — including a hard
-	 * TerminateProcess / crash that never runs FUnrealMcpRuntime::Shutdown's graceful stop. The job handle is
+	 * TerminateProcess / crash that never runs FUnrealMcpEditorCoordinator::Shutdown's graceful stop. The job handle is
 	 * owned by the manager (JobHandle) for the manager's lifetime; the editor process's death closes the last
 	 * handle to it, tripping JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE. No-op on non-Windows (the graceful PreExit stop
 	 * and KillTree terminate cover those; a hard-kill orphan there is out of scope for this Windows testbed).

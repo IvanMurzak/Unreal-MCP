@@ -28,7 +28,7 @@ struct FIPv4Endpoint;
  * the connection; a heartbeat thread pings on a timer. All socket WRITES go through a single mutex so
  * messages never interleave (§1.2). Tool bodies run on the game thread via the dispatcher — never here.
  */
-class FUnrealMcpBridgeServer : public FRunnable
+class UNREALMCPRUNTIME_API FUnrealMcpBridgeServer : public FRunnable
 {
 public:
 	FUnrealMcpBridgeServer(FUnrealMcpToolRegistry& InRegistry, FUnrealMcpGameThreadDispatcher& InDispatcher);
@@ -87,10 +87,10 @@ public:
 	 * The §7 agent-config request-verb allow-list (mirrors SendAuthMessage's allow-list): a UI bug cannot
 	 * smuggle an arbitrary message type onto the wire. SendAgentConfigMessage gates on this before sending,
 	 * so the verb set stays in lockstep with the sidecar's IpcProtocol.MessageTypes. Pure + static so a spec
-	 * can assert the accepted/rejected verbs without standing up a live socket. UNREALMCPEDITOR_API-exported
+	 * can assert the accepted/rejected verbs without standing up a live socket. UNREALMCPRUNTIME_API-exported
 	 * so the Tests module (a separate DLL) links against it.
 	 */
-	static UNREALMCPEDITOR_API bool IsValidAgentConfigVerb(const FString& Type);
+	static bool IsValidAgentConfigVerb(const FString& Type);
 
 	/**
 	 * Register a sink for the inbound sidecar→plugin `status` and `device-auth` feed (§1.3 / §7). The sink

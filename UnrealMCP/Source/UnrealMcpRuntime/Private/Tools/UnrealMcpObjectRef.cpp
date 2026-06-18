@@ -2,9 +2,9 @@
 // See the LICENSE file in the repository root for more information.
 
 #include "UnrealMcpObjectRef.h"
+#include "UnrealMcpWorldProvider.h"
 
 #include "Dom/JsonObject.h"
-#include "Editor.h"
 #include "Engine/Blueprint.h"
 #include "EngineUtils.h"            // TActorIterator
 #include "GameFramework/Actor.h"
@@ -16,9 +16,12 @@ namespace FUnrealMcpObjectRef
 {
 	UWorld* GetEditorWorld()
 	{
-		if (!GEditor)
-			return nullptr;
-		return GEditor->GetEditorWorldContext().World();
+		// §12.6: the runtime module owns no GEditor reference. The world is resolved via the injected
+		// FUnrealMcpWorldProvider resolver — the editor coordinator installs one returning the editor
+		// world (`GEditor->GetEditorWorldContext().World()`), preserving today's behaviour byte-for-byte;
+		// the runtime subsystem (R3) installs a game-world resolver. Null when no resolver is set, exactly
+		// matching the old `!GEditor -> nullptr` contract outside the editor.
+		return FUnrealMcpWorldProvider::GetActiveWorld();
 	}
 
 	UClass* ResolveClass(const FString& ClassRef)

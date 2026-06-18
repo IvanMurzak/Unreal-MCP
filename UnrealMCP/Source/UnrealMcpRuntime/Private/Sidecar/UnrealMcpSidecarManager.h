@@ -17,7 +17,7 @@
  * auto-spawns at StartupModule with zero user action; a dev source checkout (no staged binary) falls
  * back to the override, exactly as before.
  */
-class FUnrealMcpSidecarManager
+class UNREALMCPRUNTIME_API FUnrealMcpSidecarManager
 {
 public:
 	FUnrealMcpSidecarManager() = default;
@@ -61,7 +61,7 @@ public:
 	 * then the bundled path inside the plugin. Empty when neither resolves (caller logs the actionable
 	 * packaged-without-<rid> error). The returned bundled path is absolute (ConvertRelativePathToFull).
 	 */
-	static UNREALMCPEDITOR_API FString ResolveBridgeBinaryPath();
+	static FString ResolveBridgeBinaryPath();
 
 	/**
 	 * The .NET RID directory name for the current host platform (§6.2): "win-x64" / "linux-x64", or
@@ -69,7 +69,7 @@ public:
 	 * translated editor arch). @p bArm64DirExists lets the caller fall back to osx-x64 when the
 	 * arm64 slice is absent; pure + injectable so it is unit-testable without touching the filesystem.
 	 */
-	static UNREALMCPEDITOR_API FString ResolveRid(bool bArm64DirExists = true);
+	static FString ResolveRid(bool bArm64DirExists = true);
 
 	/**
 	 * Compose the bundled bridge path under @p PluginBaseDir for the current host (§6.1):
@@ -78,10 +78,10 @@ public:
 	 * bArm64DirExists is forwarded to ResolveRid so the production resolver can pass its arm64-probe
 	 * result (a missing osx-arm64 slice degrades the composed path to osx-x64).
 	 */
-	static UNREALMCPEDITOR_API FString ComposeBundledBridgePath(const FString& PluginBaseDir, bool bArm64DirExists = true);
+	static FString ComposeBundledBridgePath(const FString& PluginBaseDir, bool bArm64DirExists = true);
 
 	/** The platform bridge binary basename: "unreal-mcp-bridge.exe" on Windows, "unreal-mcp-bridge" elsewhere. */
-	static UNREALMCPEDITOR_API FString BridgeBinaryBasename();
+	static FString BridgeBinaryBasename();
 
 	/** Generate a 32-byte token via the OS CSPRNG, hex-encoded (§1.4). */
 	static FString GenerateToken();
@@ -92,7 +92,7 @@ public:
 	 * Windows. Static + path-taking so a spec can exercise it on a fixture binary; tolerant of a
 	 * missing xattr. Returns true if no fatal error occurred (a missing quarantine attr is not fatal).
 	 */
-	static UNREALMCPEDITOR_API bool PrepareBundledBinaryForSpawn(const FString& Path);
+	static bool PrepareBundledBinaryForSpawn(const FString& Path);
 
 private:
 	/** Whether the osx-arm64 bridge slice is present in the bundle (always true off macOS). §6.2 defensive. */

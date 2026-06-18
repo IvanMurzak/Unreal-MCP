@@ -3,8 +3,8 @@
 
 #include "UnrealMcpCoreTools.h"
 #include "UnrealMcpToolRegistry.h"
-#include "UnrealMcpObjectRef.h"
-#include "UnrealMcpPropertyJson.h"
+#include "Tools/UnrealMcpObjectRef.h"
+#include "Tools/UnrealMcpPropertyJson.h"
 
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"

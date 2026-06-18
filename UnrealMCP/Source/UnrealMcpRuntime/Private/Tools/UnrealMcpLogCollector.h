@@ -36,7 +36,7 @@ struct FUnrealMcpLogEntry
  * are idempotent — `Shutdown()` MUST still run at module teardown so no dangling listener lingers on
  * `GLog` while the editor keeps running (an orphaned device crashes the editor on exit).
  */
-class UNREALMCPEDITOR_API FUnrealMcpLogCollector : public FOutputDevice
+class UNREALMCPRUNTIME_API FUnrealMcpLogCollector : public FOutputDevice
 {
 public:
 	/** Max retained entries before the oldest are evicted (ring-buffer cap, §10 "strictly capped"). */

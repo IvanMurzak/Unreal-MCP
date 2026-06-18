@@ -7,4 +7,4 @@
 #include "Logging/LogMacros.h"
 
 /** Dedicated log category for everything Unreal-MCP. */
-UNREALMCPEDITOR_API DECLARE_LOG_CATEGORY_EXTERN(LogUnrealMcp, Log, All);
+UNREALMCPRUNTIME_API DECLARE_LOG_CATEGORY_EXTERN(LogUnrealMcp, Log, All);

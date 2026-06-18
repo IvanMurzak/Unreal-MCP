@@ -60,29 +60,29 @@ enum class EUnrealMcpTransportMethod : uint8
  *
  * The parsing / precedence / persistence surface is pure (CoreMinimal + Json only, env/file readers are
  * injectable) so it is fully drivable from the UnrealMcpEditorTests Automation specs with no real process
- * env or files. All symbols are UNREALMCPEDITOR_API-exported so the Tests module links against them.
+ * env or files. All symbols are UNREALMCPRUNTIME_API-exported so the Tests module links against them.
  */
 class FUnrealMcpConfig
 {
 public:
 	// --- Recognized environment-variable names (§8). ---
-	static UNREALMCPEDITOR_API const TCHAR* EnvConnectionMode; // UNREAL_MCP_CONNECTION_MODE
-	static UNREALMCPEDITOR_API const TCHAR* EnvHost;           // UNREAL_MCP_HOST
-	static UNREALMCPEDITOR_API const TCHAR* EnvCloudUrl;       // UNREAL_MCP_CLOUD_URL
-	static UNREALMCPEDITOR_API const TCHAR* EnvToken;          // UNREAL_MCP_TOKEN
-	static UNREALMCPEDITOR_API const TCHAR* EnvAuthOption;     // UNREAL_MCP_AUTH_OPTION
-	static UNREALMCPEDITOR_API const TCHAR* EnvKeepConnected;  // UNREAL_MCP_KEEP_CONNECTED
-	static UNREALMCPEDITOR_API const TCHAR* EnvTools;          // UNREAL_MCP_TOOLS
-	static UNREALMCPEDITOR_API const TCHAR* EnvStartServer;    // UNREAL_MCP_START_SERVER
-	static UNREALMCPEDITOR_API const TCHAR* EnvTransport;      // UNREAL_MCP_TRANSPORT
-	static UNREALMCPEDITOR_API const TCHAR* EnvLogLevel;       // UNREAL_MCP_LOG_LEVEL
-	static UNREALMCPEDITOR_API const TCHAR* EnvBridgePath;     // UNREAL_MCP_BRIDGE_PATH (dev-only, §6)
+	static UNREALMCPRUNTIME_API const TCHAR* EnvConnectionMode; // UNREAL_MCP_CONNECTION_MODE
+	static UNREALMCPRUNTIME_API const TCHAR* EnvHost;           // UNREAL_MCP_HOST
+	static UNREALMCPRUNTIME_API const TCHAR* EnvCloudUrl;       // UNREAL_MCP_CLOUD_URL
+	static UNREALMCPRUNTIME_API const TCHAR* EnvToken;          // UNREAL_MCP_TOKEN
+	static UNREALMCPRUNTIME_API const TCHAR* EnvAuthOption;     // UNREAL_MCP_AUTH_OPTION
+	static UNREALMCPRUNTIME_API const TCHAR* EnvKeepConnected;  // UNREAL_MCP_KEEP_CONNECTED
+	static UNREALMCPRUNTIME_API const TCHAR* EnvTools;          // UNREAL_MCP_TOOLS
+	static UNREALMCPRUNTIME_API const TCHAR* EnvStartServer;    // UNREAL_MCP_START_SERVER
+	static UNREALMCPRUNTIME_API const TCHAR* EnvTransport;      // UNREAL_MCP_TRANSPORT
+	static UNREALMCPRUNTIME_API const TCHAR* EnvLogLevel;       // UNREAL_MCP_LOG_LEVEL
+	static UNREALMCPRUNTIME_API const TCHAR* EnvBridgePath;     // UNREAL_MCP_BRIDGE_PATH (dev-only, §6)
 
 	// --- Defaults. ---
-	static UNREALMCPEDITOR_API const TCHAR* DefaultCloudBaseUrl; // https://ai-game.dev
-	static UNREALMCPEDITOR_API const TCHAR* DefaultCustomHost;   // http://localhost:8080
-	static UNREALMCPEDITOR_API const TCHAR* DefaultLogLevel;     // Info
-	static UNREALMCPEDITOR_API const TCHAR* DefaultTransport;    // http
+	static UNREALMCPRUNTIME_API const TCHAR* DefaultCloudBaseUrl; // https://ai-game.dev
+	static UNREALMCPRUNTIME_API const TCHAR* DefaultCustomHost;   // http://localhost:8080
+	static UNREALMCPRUNTIME_API const TCHAR* DefaultLogLevel;     // Info
+	static UNREALMCPRUNTIME_API const TCHAR* DefaultTransport;    // http
 
 	// --- Live (post-override) backing fields, serialized to the camelCase JSON keys in the comments. ---
 	EUnrealMcpConnectionMode ConnectionMode = EUnrealMcpConnectionMode::Cloud; // "connectionMode"
@@ -117,25 +117,25 @@ public:
 	// built-in agents return their own constant). Defaults to ".claude/skills". Pure UI persistence, NO env override.
 	FString SkillsPath = TEXT(".claude/skills"); // "skillsPath"
 
-	UNREALMCPEDITOR_API FUnrealMcpConfig();
+	UNREALMCPRUNTIME_API FUnrealMcpConfig();
 
 	// --- Standard on-disk locations (production paths; resolved from the live project). ---
 	/** <Project>/Saved/Config/UnrealMcp/ai-game-developer-config.json (§8). */
-	static UNREALMCPEDITOR_API FString DefaultConfigFilePath();
+	static UNREALMCPRUNTIME_API FString DefaultConfigFilePath();
 	/** <Project>/.env (§8). */
-	static UNREALMCPEDITOR_API FString DefaultEnvFilePath();
+	static UNREALMCPRUNTIME_API FString DefaultEnvFilePath();
 
 	/**
 	 * Production convenience: load the on-disk config (if any), parse <Project>/.env, then apply env/.env
 	 * overrides with full precedence, and return the resolved config. Reads real process env + files.
 	 */
-	static UNREALMCPEDITOR_API FUnrealMcpConfig LoadAndResolve();
+	static UNREALMCPRUNTIME_API FUnrealMcpConfig LoadAndResolve();
 
 	/**
 	 * Same as LoadAndResolve() but with an already-parsed @p DotEnv map, so a caller that needs the parsed
 	 * .env for another purpose (e.g. ExportDotEnvToProcessEnv) does not parse the file twice.
 	 */
-	static UNREALMCPEDITOR_API FUnrealMcpConfig LoadAndResolve(const TMap<FString, FString>& DotEnv);
+	static UNREALMCPRUNTIME_API FUnrealMcpConfig LoadAndResolve(const TMap<FString, FString>& DotEnv);
 
 	/**
 	 * Load the persisted config JSON at @p Path into the backing fields, and snapshot the result as the
@@ -143,10 +143,10 @@ public:
 	 * is the common first-run case — fields keep their defaults and the baseline is the default snapshot.
 	 * Never throws.
 	 */
-	UNREALMCPEDITOR_API void LoadFromFile(const FString& Path);
+	UNREALMCPRUNTIME_API void LoadFromFile(const FString& Path);
 
 	/** Set the disk baseline directly from a parsed JSON object (or defaults when null). LoadFromFile delegates here; also the injectable seam for tests. */
-	UNREALMCPEDITOR_API void LoadFromJson(const TSharedPtr<FJsonObject>& Json);
+	UNREALMCPRUNTIME_API void LoadFromJson(const TSharedPtr<FJsonObject>& Json);
 
 	/**
 	 * Apply the .env values (lower precedence) then the process env (higher precedence) on top of the
@@ -154,24 +154,24 @@ public:
 	 * resolves a process-env var (returns false when unset); inject a stub in tests. @p DotEnv is the parsed
 	 * .env map (see ParseEnvLines / LoadEnvFile); pass an empty map to disable the file layer.
 	 */
-	UNREALMCPEDITOR_API void ApplyOverrides(const TMap<FString, FString>& DotEnv, const TFunction<bool(const FString&, FString&)>& EnvReader);
+	UNREALMCPRUNTIME_API void ApplyOverrides(const TMap<FString, FString>& DotEnv, const TFunction<bool(const FString&, FString&)>& EnvReader);
 
 	/** Serialize the CURRENT (post-override) field values to a camelCase JSON object. */
-	UNREALMCPEDITOR_API TSharedPtr<FJsonObject> ToJson() const;
+	UNREALMCPRUNTIME_API TSharedPtr<FJsonObject> ToJson() const;
 
 	/**
 	 * Serialize to @p Path, restoring the disk baseline for every env/.env-overridden key first so an
 	 * override is never persisted (Unity OverrideRecord pattern). The in-memory fields are unchanged.
 	 * Creates the parent directory. Returns false on a genuine write failure.
 	 */
-	UNREALMCPEDITOR_API bool Save(const FString& Path) const;
+	UNREALMCPRUNTIME_API bool Save(const FString& Path) const;
 
 	/**
 	 * Build the effective connection config the plugin pushes to the sidecar (§1.3 `config` / handshake-ack):
 	 * resolves mode → host/cloudUrl, and mode+auth → token. Keys: mode, host, cloudUrl, token, keepConnected.
 	 * The token is the resolved bearer (empty in Custom+None) — the sidecar sends it verbatim, never re-resolves.
 	 */
-	UNREALMCPEDITOR_API TSharedPtr<FJsonObject> BuildEffectiveConnectionConfig() const;
+	UNREALMCPRUNTIME_API TSharedPtr<FJsonObject> BuildEffectiveConnectionConfig() const;
 
 	// --- Transport (the typed view of the Transport string field, §7/§8). ---
 
@@ -181,27 +181,27 @@ public:
 	 * intent — it does NOT apply the Cloud→Http lock; use ResolveEffectiveTransport() for the connection-aware
 	 * value the UI/snippets must honour.
 	 */
-	UNREALMCPEDITOR_API EUnrealMcpTransportMethod GetTransportMethod() const;
+	UNREALMCPRUNTIME_API EUnrealMcpTransportMethod GetTransportMethod() const;
 	/** Set the transport from the typed enum (writes the matching "stdio"/"http" string into Transport). */
-	UNREALMCPEDITOR_API void SetTransportMethod(EUnrealMcpTransportMethod InMethod);
+	UNREALMCPRUNTIME_API void SetTransportMethod(EUnrealMcpTransportMethod InMethod);
 	/**
 	 * The connection-aware transport the UI offers and the snippets reflect: in Cloud mode this is ALWAYS Http
 	 * (the cloud is HTTP-only — mirrors Unity's "Cloud forces streamableHttp"); in Custom mode it is the stored
 	 * GetTransportMethod(). This is the value the agent configurators render a single transport for.
 	 */
-	UNREALMCPEDITOR_API EUnrealMcpTransportMethod ResolveEffectiveTransport() const;
+	UNREALMCPRUNTIME_API EUnrealMcpTransportMethod ResolveEffectiveTransport() const;
 
 	/** Parse a transport string ("stdio"/"http", case-insensitive) into the enum; unknown → Http. */
-	static UNREALMCPEDITOR_API EUnrealMcpTransportMethod ParseTransport(const FString& Raw);
+	static UNREALMCPRUNTIME_API EUnrealMcpTransportMethod ParseTransport(const FString& Raw);
 	/** The canonical lowercase string ("stdio"/"http") for a transport enum (the persisted form). */
-	static UNREALMCPEDITOR_API const TCHAR* TransportToString(EUnrealMcpTransportMethod Method);
+	static UNREALMCPRUNTIME_API const TCHAR* TransportToString(EUnrealMcpTransportMethod Method);
 
 	/** The resolved cloud base URL (CloudUrl override or DefaultCloudBaseUrl), trailing slash trimmed. */
-	UNREALMCPEDITOR_API FString ResolveCloudBaseUrl() const;
+	UNREALMCPRUNTIME_API FString ResolveCloudBaseUrl() const;
 	/** The resolved Custom-mode host (CustomHost or DefaultCustomHost), trailing slash trimmed. */
-	UNREALMCPEDITOR_API FString ResolveCustomHost() const;
+	UNREALMCPRUNTIME_API FString ResolveCustomHost() const;
 	/** The mode+auth-resolved bearer token: Cloud→CloudToken, Custom→(None?empty:CustomToken). */
-	UNREALMCPEDITOR_API FString ResolveEffectiveToken() const;
+	UNREALMCPRUNTIME_API FString ResolveEffectiveToken() const;
 
 	/** Whether ApplyOverrides recorded any env/.env override (for diagnostics/tests). */
 	bool HasOverrides() const { return OverriddenKeys.Num() > 0; }
@@ -215,10 +215,10 @@ public:
 	 * (trim whitespace + one pair of wrapping single OR double quotes), skip a blank value, last occurrence
 	 * wins. The returned map is keyed by the full UNREAL_MCP_* name.
 	 */
-	static UNREALMCPEDITOR_API TMap<FString, FString> ParseEnvLines(const TArray<FString>& Lines);
+	static UNREALMCPRUNTIME_API TMap<FString, FString> ParseEnvLines(const TArray<FString>& Lines);
 
 	/** Read + parse the .env file at @p Path. A missing/unreadable file returns an empty map (never throws). */
-	static UNREALMCPEDITOR_API TMap<FString, FString> LoadEnvFile(const FString& Path);
+	static UNREALMCPRUNTIME_API TMap<FString, FString> LoadEnvFile(const FString& Path);
 
 	/**
 	 * Read ONE arbitrary key's sanitized value from the .env file at @p Path — NOT limited to the recognized
@@ -229,7 +229,7 @@ public:
 	 * key, sanitize value, last occurrence wins). Returns an empty string when the file is missing/unreadable,
 	 * the key is absent, or its value is blank. Never throws.
 	 */
-	static UNREALMCPEDITOR_API FString LookupEnvFileValue(const FString& Path, const FString& Key);
+	static UNREALMCPRUNTIME_API FString LookupEnvFileValue(const FString& Path, const FString& Key);
 
 	/**
 	 * Export the UNREAL_MCP_BRIDGE_PATH .env value into the editor's process environment (and ONLY that key),
@@ -239,16 +239,16 @@ public:
 	 * the authoritative §1.3 `config` push, so process-env export would only leak the bearer token into every
 	 * editor child and pin stale .env values at process-env precedence on a later re-resolve.
 	 */
-	static UNREALMCPEDITOR_API void ExportDotEnvToProcessEnv(const TMap<FString, FString>& DotEnv);
+	static UNREALMCPRUNTIME_API void ExportDotEnvToProcessEnv(const TMap<FString, FString>& DotEnv);
 
 	/**
 	 * Mask a secret for logging: "<unset>" when empty, otherwise "***" (the value never appears). Use this
 	 * EVERYWHERE a token could otherwise reach a log line (§8 — tokens never logged at any level).
 	 */
-	static UNREALMCPEDITOR_API FString MaskSecret(const FString& Secret);
+	static UNREALMCPRUNTIME_API FString MaskSecret(const FString& Secret);
 
 	/** Sanitize a value identically to a process-env value: trim whitespace + one wrapping quote pair. */
-	static UNREALMCPEDITOR_API FString SanitizeValue(const FString& Raw);
+	static UNREALMCPRUNTIME_API FString SanitizeValue(const FString& Raw);
 
 private:
 	// The disk-baseline JSON snapshot taken at LoadFromFile/LoadFromJson time — the values Save() persists

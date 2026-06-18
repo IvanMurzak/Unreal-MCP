@@ -17,7 +17,7 @@
  * A per-call timeout completes the future with a structured error if the body has not finished; the
  * body's late result is then dropped (the promise's single-completion guard prevents a double-set, §4).
  */
-class UNREALMCPEDITOR_API FUnrealMcpGameThreadDispatcher
+class UNREALMCPRUNTIME_API FUnrealMcpGameThreadDispatcher
 {
 public:
 	/**
