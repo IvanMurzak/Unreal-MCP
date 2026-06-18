@@ -10,6 +10,7 @@
 
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.Json.Nodes;
 using System.Threading;
 using System.Threading.Tasks;
 using com.IvanMurzak.McpPlugin.Common.Model;
@@ -72,6 +73,44 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             Assert.Equal(new[] { "AI agent: Claude (1.0.0)" }, labels);
         }
 
+        // ── (issue #111) dedupe by display identity: one client = one label, distinct identities NOT collapsed ──
+
+        [Fact]
+        public void BuildAgentLabels_DedupesIdenticalNameAndVersion_ToOneLabel()
+        {
+            // A single client (Claude Code) holds two live MCP sessions → the server returns two McpClientData with
+            // identical ClientName/ClientVersion. The row must collapse them to exactly ONE label (issue #111 Bug 1).
+            var labels = SidecarHost.BuildAgentLabels(new[]
+            {
+                Agent("Claude Code", "1.2.3"),
+                Agent("Claude Code", "1.2.3"),
+            });
+
+            Assert.Equal(new[] { "AI agent: Claude Code (1.2.3)" }, labels);
+        }
+
+        [Fact]
+        public void BuildAgentLabels_DoesNotCollapseDistinctNamesOrVersions()
+        {
+            // Distinct display identities must remain separate: a different name OR a different version is a
+            // different entry — only an exact (name, version) match is a duplicate.
+            var labels = SidecarHost.BuildAgentLabels(new[]
+            {
+                Agent("Claude Code", "1.2.3"),
+                Agent("Claude Code", "1.2.4"), // same name, different version → kept
+                Agent("Cursor", "1.2.3"),      // different name, same version → kept
+            });
+
+            Assert.Equal(
+                new[]
+                {
+                    "AI agent: Claude Code (1.2.3)",
+                    "AI agent: Claude Code (1.2.4)",
+                    "AI agent: Cursor (1.2.3)",
+                },
+                labels);
+        }
+
         // ── (1)+(4) OnClientsChanged caches the roster AND re-emits a fresh status carrying it ────────────────
 
         [Fact]
@@ -98,6 +137,95 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             Assert.Empty(host.ConnectedAgentsSnapshot);
             Assert.Equal(2, emitted.Count);
             Assert.Empty(emitted[^1].AiAgents);
+        }
+
+        // ── (issue #111 Bug 1 regression) the connected live-refresh path emits the DEDUPED non-empty list ───
+
+        [Fact]
+        public void OnClientsChanged_WhileConnected_EmitsDedupedNonEmptyList_NoRegression()
+        {
+            using var host = NewHost(out _); // keepConnected defaults to true → "Connected" emits
+            var emitted = new List<StatusMessage>();
+            host.SetStatusEmitterForTest(s => { emitted.Add(s); return Task.CompletedTask; });
+
+            var manager = new FakeMcpManager();
+            var fake = new FakeMcpPlugin(onConnect: _ => Task.FromResult(true), mcpManager: manager);
+            host.SubscribeToClientRoster(fake);
+
+            // Two sessions for the same client (the #111 duplicate) plus a distinct one → deduped to two labels,
+            // and (no #110 regression) the connected path still ships the populated list live.
+            manager.PushClients(new[]
+            {
+                Agent("Claude Code", "1.2.3"),
+                Agent("Claude Code", "1.2.3"),
+                Agent("Cursor", "0.42"),
+            });
+
+            Assert.Equal(new[] { "AI agent: Claude Code (1.2.3)", "AI agent: Cursor (0.42)" }, host.ConnectedAgentsSnapshot);
+            Assert.Single(emitted);
+            Assert.Equal("Connected", emitted[^1].ConnectionState);
+            Assert.Equal(new[] { "AI agent: Claude Code (1.2.3)", "AI agent: Cursor (0.42)" }, emitted[^1].AiAgents);
+        }
+
+        // ── (issue #111 Bug 2) a non-"Connected" emit ships an EMPTY AiAgents list even with a primed cache ──
+
+        [Fact]
+        public void OnClientsChanged_WhileDisarmed_ShipsEmptyAiAgents_EvenThoughCacheIsPrimed()
+        {
+            using var host = NewHost(out _);
+            // Disarm BEFORE the roster push so the OnClientsChanged handler emits "Disconnected" (non-connected).
+            host.ApplyConnectionConfig(new JsonObject { ["mode"] = "Custom", ["host"] = "http://localhost:8500", ["keepConnected"] = false });
+
+            var emitted = new List<StatusMessage>();
+            host.SetStatusEmitterForTest(s => { emitted.Add(s); return Task.CompletedTask; });
+
+            var manager = new FakeMcpManager();
+            var fake = new FakeMcpPlugin(onConnect: _ => Task.FromResult(true), mcpManager: manager);
+            host.SubscribeToClientRoster(fake);
+
+            // The roster cache is primed (UpdateRoster runs regardless of connection state)...
+            manager.PushClients(new[] { Agent("Claude Code", "1.2.3") });
+
+            Assert.Equal(new[] { "AI agent: Claude Code (1.2.3)" }, host.ConnectedAgentsSnapshot); // cache populated
+            Assert.Single(emitted);
+            Assert.Equal("Disconnected", emitted[^1].ConnectionState);
+            Assert.Empty(emitted[^1].AiAgents); // ...but a non-connected status ships EMPTY (the dot stays Offline)
+        }
+
+        // ── (issue #111 Bug 2) a user Disconnect clears the cache AND ships empty AiAgents ────────────────────
+
+        [Fact]
+        public async Task UserDisconnect_ClearsRosterCache_AndShipsEmptyAiAgents()
+        {
+            using var host = NewHost(out _);
+            var manager = new FakeMcpManager();
+            var fake = new FakeMcpPlugin(onConnect: _ => Task.FromResult(true), mcpManager: manager);
+            host.SetPluginForTest(fake);
+            host.SubscribeToClientRoster(fake);
+
+            var disconnectEmitted = new TaskCompletionSource<StatusMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
+            // Prime the cache while connected, then capture the "Disconnected" status the disconnect transition emits.
+            host.SetStatusEmitterForTest(s =>
+            {
+                if (string.Equals(s.ConnectionState, "Disconnected", System.StringComparison.Ordinal))
+                    disconnectEmitted.TrySetResult(s);
+                return Task.CompletedTask;
+            });
+            manager.PushClients(new[] { Agent("Claude Code", "1.2.3") });
+            Assert.Equal(new[] { "AI agent: Claude Code (1.2.3)" }, host.ConnectedAgentsSnapshot); // primed
+
+            // A user Disconnect = keepConnected true→false config push → HandleDisconnectAsync runs (via the queue).
+            host.OnConfigReceived(new JsonObject
+            {
+                ["type"] = "config",
+                ["mode"] = "Custom",
+                ["host"] = "http://localhost:8500",
+                ["keepConnected"] = false,
+            });
+
+            var status = await disconnectEmitted.Task.WaitAsync(System.TimeSpan.FromSeconds(5));
+            Assert.Empty(status.AiAgents);                 // the emitted Disconnected status carries no agents
+            Assert.Empty(host.ConnectedAgentsSnapshot);    // and the cache itself was cleared (fresh re-seed on reconnect)
         }
 
         // ── connect-time seed via GetMcpClientData(), with retry/backoff when the agent session lags ─────────
