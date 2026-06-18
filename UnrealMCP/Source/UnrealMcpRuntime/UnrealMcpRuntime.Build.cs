@@ -12,6 +12,11 @@ public class UnrealMcpRuntime : ModuleRules
 		PublicDependencyModuleNames.AddRange(new string[]
 		{
 			"Core",
+			// Json: the UNREALMCPRUNTIME_API headers Tools/UnrealMcpObjectRef.h + Tools/UnrealMcpPropertyJson.h
+			// expose TSharedPtr<FJsonObject> in their signatures, so FJsonObject must be visible to any module
+			// that includes them across the .dll boundary (BuildPlugin compiles this module without the editor's
+			// shared PCH, which previously supplied the transitive include). PUBLIC, not Private, for that reason.
+			"Json",
 		});
 
 		// The engine-agnostic, NON-editor machinery the runtime module owns (docs/ARCHITECTURE.md §12.1):
@@ -29,7 +34,6 @@ public class UnrealMcpRuntime : ModuleRules
 			"Engine",
 			"Networking",
 			"Sockets",
-			"Json",
 			"JsonUtilities",
 			"Projects",
 			"ImageWrapper",

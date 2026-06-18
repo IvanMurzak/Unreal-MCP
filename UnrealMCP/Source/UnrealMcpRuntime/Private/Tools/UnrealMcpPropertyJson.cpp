@@ -159,8 +159,15 @@ namespace FUnrealMcpPropertyJson
 		// completes the standard editor edit protocol (PreEditChange -> write -> PostEditChange at line ~256):
 		// properties whose edit hooks tear down state up front (component render-state/registration guards,
 		// cached-data invalidation) can misbehave when raw memory is written without the pre-notify.
+		// Modify()/PreEditChange()/PostEditChange() are WITH_EDITOR-only on UObject (transaction buffer +
+		// editor edit-protocol hooks), so they cannot be called from a Type=Runtime module that BuildPlugin
+		// compiles in a non-editor configuration. Guard them: in the editor the undo/edit-protocol behaviour is
+		// preserved byte-for-byte; in a packaged game the raw FProperty writes below still apply (no transaction
+		// buffer or edit hooks exist there to drive). MarkPackageDirty() is available in both configurations.
+#if WITH_EDITOR
 		Object->Modify();
 		Object->PreEditChange(nullptr);
+#endif
 
 		int32 Applied = 0;
 		for (const TPair<FString, TSharedPtr<FJsonValue>>& Field : Properties->Values)
@@ -259,7 +266,9 @@ namespace FUnrealMcpPropertyJson
 		// and re-runs the edit hooks that the pre-notify tore down) — calling it only when Applied>0 would
 		// leave a zero-applied object stranded mid-edit (e.g. an unregistered component). Only dirty the
 		// package when something actually changed.
+#if WITH_EDITOR
 		Object->PostEditChange();
+#endif
 		if (Applied > 0)
 			Object->MarkPackageDirty();
 		return Applied;

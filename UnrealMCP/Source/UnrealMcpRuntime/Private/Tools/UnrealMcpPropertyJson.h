@@ -4,6 +4,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Dom/JsonObject.h"   // TSharedPtr<FJsonObject> appears by-value in the UNREALMCPRUNTIME_API signatures below
 
 class UObject;
 

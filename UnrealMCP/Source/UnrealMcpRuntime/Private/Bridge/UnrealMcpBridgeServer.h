@@ -7,6 +7,7 @@
 #include "HAL/Runnable.h"
 #include "HAL/ThreadSafeBool.h"
 #include "HAL/PlatformTLS.h"
+#include "Async/Future.h"      // TFuture<void> HeartbeatFuture member below
 #include "Dom/JsonObject.h"
 
 #include <atomic>

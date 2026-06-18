@@ -4,6 +4,7 @@
 #include "UnrealMcpLogCollector.h"
 
 #include "Algo/Reverse.h"
+#include "Misc/OutputDeviceRedirector.h"   // GLog is an FOutputDeviceRedirector*; Add/RemoveOutputDevice deref the complete type
 
 FUnrealMcpLogCollector& FUnrealMcpLogCollector::Get()
 {

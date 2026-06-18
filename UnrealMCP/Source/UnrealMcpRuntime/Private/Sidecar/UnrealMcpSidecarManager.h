@@ -5,7 +5,8 @@
 
 #include "CoreMinimal.h"
 #include "HAL/ThreadSafeBool.h"
-#include "GenericPlatform/GenericPlatformProcess.h"
+#include "HAL/PlatformProcess.h"   // FProcHandle is a by-value member below; the platform header defines the complete type (the generic header only forward-declares it)
+#include "Async/Future.h"          // TFuture<void> WatchdogFuture member below
 
 /**
  * Owns the lifecycle of the unreal-mcp-bridge sidecar process (docs/ARCHITECTURE.md §6): resolve the
