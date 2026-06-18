@@ -75,6 +75,9 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         // §A.1 (P1) prompt manifest registrar. Null when the built McpPlugin has no PromptManager (defensive —
         // the empty-then-manifest model means the manager is normally present, like ToolManager).
         private PromptManifestRegistrar? _promptRegistrar;
+        // §A.1 (P2) resource manifest registrar. Null when the built McpPlugin has no ResourceManager (defensive
+        // — same empty-then-manifest model as the prompt registrar).
+        private ResourceManifestRegistrar? _resourceRegistrar;
         private Reflector? _reflector;
         private int _signalRConnectStarted;
 
@@ -262,6 +265,25 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             else
             {
                 _logger?.LogWarning("Built McpPlugin has no PromptManager; prompts disabled this session.");
+            }
+
+            // §A.1 (P2) resources: wire the resource manifest registrar to the live ResourceManager, mirroring the
+            // prompt wiring. The manager is NULLABLE on IMcpManager; the empty-then-manifest model (no WithResources*
+            // at build, the plugin's resource-manifest populates it) means it is normally present.
+            // ResourceManifestRegistrar implements IManifestSink<ResourceManifestMessage>, so this satisfies
+            // IpcClient.ResourceRegistrar directly. A v1-negotiated link never delivers a resource-manifest.
+            var resourceManager = _plugin.McpManager.ResourceManager;
+            if (resourceManager != null)
+            {
+                _resourceRegistrar = new ResourceManifestRegistrar(
+                    new ResourceManagerSink(resourceManager),
+                    _ipc,
+                    _loggerProvider?.CreateLogger(nameof(ResourceManifestRegistrar)));
+                _ipc.ResourceRegistrar = _resourceRegistrar;
+            }
+            else
+            {
+                _logger?.LogWarning("Built McpPlugin has no ResourceManager; resources disabled this session.");
             }
 
             // §7 (issue #109): subscribe to the connected-AI-agent roster so the plugin's "AI agents" status row

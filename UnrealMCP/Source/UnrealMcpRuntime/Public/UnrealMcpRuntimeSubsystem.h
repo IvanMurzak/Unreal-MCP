@@ -13,6 +13,8 @@
 class IUnrealMcpToolProvider;
 // Forward-declared for the same reason: RegisterPromptProvider/UnregisterPromptProvider take it by pointer.
 class IUnrealMcpPromptProvider;
+// Forward-declared for the same reason: RegisterResourceProvider/UnregisterResourceProvider take it by pointer.
+class IUnrealMcpResourceProvider;
 
 // The runtime-owned machinery (registry/dispatcher/bridge/sidecar/extensions) is held behind a PImpl
 // (FRuntimeImpl, defined in the .cpp) so this PUBLIC header forward-declares nothing module-private and the
@@ -155,6 +157,19 @@ public:
 
 	/** Unregister a prompt provider previously registered via RegisterPromptProvider (or directly via IModularFeatures). Null / unknown is a harmless no-op. */
 	void UnregisterPromptProvider(IUnrealMcpPromptProvider* Provider);
+
+	/**
+	 * Register a custom gameplay RESOURCE provider at runtime (§A.2) — the resource sibling of
+	 * RegisterToolProvider / RegisterPromptProvider. A thin wrapper over
+	 * `IModularFeatures::Get().RegisterModularFeature(IUnrealMcpResourceProvider::GetModularFeatureName(), Provider)`:
+	 * the extension manager subscribed to the resource modular-feature events in Initialize(), so the
+	 * registration rebuilds the resource registry and re-pushes the manifest. OWNERSHIP: not owned — the caller
+	 * keeps @p Provider alive and must UnregisterResourceProvider before destroying it. Null is a no-op.
+	 */
+	void RegisterResourceProvider(IUnrealMcpResourceProvider* Provider);
+
+	/** Unregister a resource provider previously registered via RegisterResourceProvider (or directly via IModularFeatures). Null / unknown is a harmless no-op. */
+	void UnregisterResourceProvider(IUnrealMcpResourceProvider* Provider);
 
 	/** Whether the loopback listener armed (a port is bound). False means Initialize failed to bind. */
 	bool IsListenerArmed() const { return BoundPort > 0; }

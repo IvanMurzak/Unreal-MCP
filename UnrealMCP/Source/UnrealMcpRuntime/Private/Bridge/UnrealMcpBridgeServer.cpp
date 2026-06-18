@@ -5,6 +5,7 @@
 #include "UnrealMcpNdjson.h"
 #include "UnrealMcpToolRegistry.h"
 #include "UnrealMcpPromptRegistry.h"
+#include "UnrealMcpResourceRegistry.h"
 #include "Dispatch/UnrealMcpGameThreadDispatcher.h"
 #include "UnrealMcpLog.h"
 
@@ -93,9 +94,10 @@ namespace
 }
 
 FUnrealMcpBridgeServer::FUnrealMcpBridgeServer(FUnrealMcpToolRegistry& InRegistry, FUnrealMcpGameThreadDispatcher& InDispatcher,
-	FUnrealMcpPromptRegistry* InPromptRegistry)
+	FUnrealMcpPromptRegistry* InPromptRegistry, FUnrealMcpResourceRegistry* InResourceRegistry)
 	: Registry(InRegistry)
 	, PromptRegistry(InPromptRegistry)
+	, ResourceRegistry(InResourceRegistry)
 	, Dispatcher(InDispatcher)
 {
 }
@@ -712,18 +714,131 @@ void FUnrealMcpBridgeServer::HandlePromptGet(const TSharedPtr<FJsonObject>& Mess
 
 void FUnrealMcpBridgeServer::HandleResourceRead(const TSharedPtr<FJsonObject>& Message)
 {
-	// SCAFFOLD (M16 P0, §A.1): no resource registry is wired until P2 — same error-status fast-fail as the
-	// prompt stub. P2 replaces this with a real read dispatched on the game thread (an asset enumeration must
-	// not block the game thread unboundedly, §A.1 risk 7).
-	FString RequestId;
-	Message->TryGetStringField(TEXT("requestId"), RequestId);
+	// Do not start new work once teardown has begun (same contract as HandleToolCall / HandlePromptGet): the
+	// continuation captures `this` and the resource registry, both freed right after Shutdown().
+	if (bStopRequested)
+		return;
 
-	TSharedPtr<FJsonObject> Response = MakeShared<FJsonObject>();
-	Response->SetStringField(TEXT("type"), TypeResourceResponse);
-	Response->SetStringField(TEXT("requestId"), RequestId);
-	Response->SetStringField(TEXT("status"), TEXT("error"));
-	Response->SetStringField(TEXT("error"), TEXT("Resources are not implemented yet (scaffold)."));
-	SendMessage(Response);
+	FString RequestId, Uri;
+	Message->TryGetStringField(TEXT("requestId"), RequestId);
+	Message->TryGetStringField(TEXT("uri"), Uri);
+
+	// Defensive: a resource-read must never arrive on a tools-only build (the v2 gate blocks the manifest), but
+	// answer with a correlated error rather than dropping the pending call if ResourceRegistry is null.
+	if (ResourceRegistry == nullptr)
+	{
+		TSharedPtr<FJsonObject> Response = MakeShared<FJsonObject>();
+		Response->SetStringField(TEXT("type"), TypeResourceResponse);
+		Response->SetStringField(TEXT("requestId"), RequestId);
+		Response->SetStringField(TEXT("status"), TEXT("error"));
+		Response->SetStringField(TEXT("error"), TEXT("Resources are not implemented."));
+		SendMessage(Response);
+		return;
+	}
+
+	int32 TimeoutMs = DefaultToolTimeoutMs;
+	double TimeoutValue;
+	if (Message->TryGetNumberField(TEXT("timeoutMs"), TimeoutValue) && TimeoutValue > 0)
+		TimeoutMs = static_cast<int32>(TimeoutValue);
+
+	// Per-call cancel flag (§4) — reuse the SAME CancelFlags map as tool-calls (the generic tool-cancel by
+	// requestId covers all kinds, §A.1). Shared ownership keeps it alive past the map-entry removal.
+	TSharedRef<FThreadSafeBool, ESPMode::ThreadSafe> CancelFlag = MakeShared<FThreadSafeBool, ESPMode::ThreadSafe>(false);
+
+	bool bTrackCancel = false;
+	if (!RequestId.IsEmpty())
+	{
+		FScopeLock Lock(&CancelMutex);
+		if (CancelFlags.Contains(RequestId))
+		{
+			UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] duplicate resource-read requestId '%s'; not tracking cancellation for it."), *RequestId);
+		}
+		else
+		{
+			CancelFlags.Add(RequestId, CancelFlag);
+			bTrackCancel = true;
+		}
+	}
+
+	// A resource read takes no arguments (static MVP URIs); pass an empty args object + the cancel flag so the
+	// dispatcher contract (game thread + per-call timeout + cancel) is identical to the tool/prompt path.
+	FUnrealMcpToolCall Call(MakeShared<FJsonObject>());
+	Call.CancelRequested = CancelFlag;
+
+	const FString CapturedUri = Uri;
+	const FString CapturedRequestId = RequestId;
+	const bool bRemoveOnDone = bTrackCancel;
+	FUnrealMcpResourceRegistry* CapturedRegistry = ResourceRegistry;
+
+	InFlightCalls.Increment();
+
+	// PACK the FUnrealMcpResourceResult into the FUnrealMcpToolResult transport (same trick as HandlePromptGet):
+	// the Structured JSON carries { contents:[{uri,mimeType,text|blob}] }, bSuccess rides on the tool result's
+	// flag, and the error reason rides on Message. The .Next unpacks it into a resource-response. This keeps the
+	// game-thread + per-call timeout + cancel semantics identical to the tool path with the least new surface.
+	Dispatcher.Dispatch(
+		Call,
+		[CapturedRegistry, CapturedUri](const FUnrealMcpToolCall& /*C*/) -> FUnrealMcpToolResult
+		{
+			const FUnrealMcpResourceResult ResourceResult = CapturedRegistry->Read(CapturedUri);
+
+			TSharedPtr<FJsonObject> Packed = MakeShared<FJsonObject>();
+			TArray<TSharedPtr<FJsonValue>> Contents;
+			for (const FUnrealMcpResourceContent& Content : ResourceResult.Contents)
+			{
+				TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
+				Entry->SetStringField(TEXT("uri"), Content.Uri);
+				if (!Content.MimeType.IsEmpty())
+					Entry->SetStringField(TEXT("mimeType"), Content.MimeType);
+				if (Content.bIsBlob)
+					Entry->SetStringField(TEXT("blob"), Content.Blob);
+				else
+					Entry->SetStringField(TEXT("text"), Content.Text);
+				Contents.Add(MakeShared<FJsonValueObject>(Entry));
+			}
+			Packed->SetArrayField(TEXT("contents"), Contents);
+
+			// On success Message is unused; on error it carries the reason so the .Next surfaces it as `error`.
+			FUnrealMcpToolResult Transport = ResourceResult.bSuccess
+				? FUnrealMcpToolResult::Success(FString(), Packed)
+				: FUnrealMcpToolResult::Error(ResourceResult.Error);
+			Transport.Structured = Packed; // Error() drops Structured — re-attach so the .Next can read contents
+			return Transport;
+		},
+		FTimespan::FromMilliseconds(TimeoutMs))
+		.Next([this, CapturedRequestId, bRemoveOnDone](FUnrealMcpToolResult Result)
+		{
+			TSharedPtr<FJsonObject> Response = MakeShared<FJsonObject>();
+			Response->SetStringField(TEXT("type"), TypeResourceResponse);
+			Response->SetStringField(TEXT("requestId"), CapturedRequestId);
+			Response->SetStringField(TEXT("status"), Result.bSuccess ? TEXT("success") : TEXT("error"));
+
+			if (Result.bSuccess)
+			{
+				// Unpack the transport: contents[] (the timeout path leaves Structured null — then this is an
+				// empty success, which the sidecar maps to a no-content resource response).
+				if (Result.Structured.IsValid())
+				{
+					const TArray<TSharedPtr<FJsonValue>>* Contents = nullptr;
+					if (Result.Structured->TryGetArrayField(TEXT("contents"), Contents))
+						Response->SetArrayField(TEXT("contents"), *Contents);
+				}
+			}
+			else
+			{
+				// Result.Message carries the error reason (registry error, or the dispatcher's timeout error).
+				Response->SetStringField(TEXT("error"), Result.Message);
+			}
+
+			SendMessage(Response);
+
+			if (bRemoveOnDone)
+			{
+				FScopeLock Lock(&CancelMutex);
+				CancelFlags.Remove(CapturedRequestId);
+			}
+			InFlightCalls.Decrement();
+		});
 }
 
 bool FUnrealMcpBridgeServer::SendMessage(const TSharedPtr<FJsonObject>& Message)
@@ -895,10 +1010,33 @@ void FUnrealMcpBridgeServer::SendPromptManifestLocked()
 
 void FUnrealMcpBridgeServer::SendResourceManifestLocked()
 {
-	// SCAFFOLD (M16 P0, §A.1): no resource registry exists until P2. Same v2 gate + no-op as the prompt manifest.
+	// Caller holds WriteMutex. Gated on a v2-negotiated link — a tools-only (v1) sidecar never receives a
+	// resource-manifest (an old sidecar keeps working). Mirrors SendPromptManifestLocked exactly over the
+	// resource registry's BuildManifestJson. The same startup-stability argument applies (the resource registry
+	// is built before the bridge accepts; dynamic re-registration marshals through the dispatcher).
 	if (NegotiatedIpcVersion < PromptsResourcesMinVersion)
 		return;
-	// (no-op: P2 fills this in)
+	if (ResourceRegistry == nullptr)
+		return;
+
+	const TSharedPtr<FJsonObject> Manifest = ResourceRegistry->BuildManifestJson();
+	const FString Json = SerializeCondensed(Manifest);
+	const TArray<uint8> Framed = FUnrealMcpNdjsonAccumulator::Encode(Json);
+
+	FScopeLock ConnLock(&ConnectionMutex);
+	if (ClientSocket == nullptr)
+		return;
+
+	if (!TrySendFramedLocked(Framed))
+	{
+		UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] resource-manifest send failed mid-frame; dropping connection."));
+		SocketsPendingDestroy.Add(ClientSocket);
+		ClientSocket = nullptr;
+		bClientConnected = false;
+		bHandshakeOk = false;
+		bHeartbeatStop = true;
+		return;
+	}
 }
 
 void FUnrealMcpBridgeServer::SendConfigLocked()
