@@ -7,6 +7,7 @@
 
 class FUnrealMcpToolRegistry;
 class FUnrealMcpPromptRegistry;
+class FUnrealMcpResourceRegistry;
 class FUnrealMcpGameThreadDispatcher;
 class FUnrealMcpBridgeServer;
 class FUnrealMcpSidecarManager;
@@ -49,6 +50,8 @@ private:
 	TUniquePtr<FUnrealMcpToolRegistry> Registry;
 	// §A.1 prompt registry (P1): built alongside the tool registry on the SAME Model A path.
 	TUniquePtr<FUnrealMcpPromptRegistry> PromptRegistry;
+	// §A.1 resource registry (P2): built alongside the tool/prompt registries on the SAME Model A path.
+	TUniquePtr<FUnrealMcpResourceRegistry> ResourceRegistry;
 	TUniquePtr<FUnrealMcpGameThreadDispatcher> Dispatcher;
 	TUniquePtr<FUnrealMcpBridgeServer> BridgeServer;
 	TUniquePtr<FUnrealMcpSidecarManager> SidecarManager;

@@ -6,8 +6,10 @@
 #include "UnrealMcpCoreTools.h"
 #include "UnrealMcpRuntimeCoreTools.h"
 #include "UnrealMcpRuntimeCorePrompts.h"
+#include "UnrealMcpRuntimeCoreResources.h"
 #include "UnrealMcpToolRegistry.h"
 #include "UnrealMcpPromptRegistry.h"
+#include "UnrealMcpResourceRegistry.h"
 #include "Config/UnrealMcpConfig.h"
 #include "Dispatch/UnrealMcpGameThreadDispatcher.h"
 #include "Bridge/UnrealMcpBridgeServer.h"
@@ -81,8 +83,15 @@ void FUnrealMcpEditorCoordinator::Startup()
 	PromptRegistry = MakeUnique<FUnrealMcpPromptRegistry>();
 	UnrealMcpCorePrompts::Register(*PromptRegistry);
 
+	// §A.1 resource registry (P2): the resource sibling of the tool/prompt registries, built on the SAME Model A
+	// path. The core resource family registers before the bridge starts accepting so the first resource-manifest a
+	// v2 sidecar reads on handshake already includes it. The §8 config has no EnabledResources/DisabledResources
+	// field today, so no resource filter is applied at boot (all-enabled default).
+	ResourceRegistry = MakeUnique<FUnrealMcpResourceRegistry>();
+	UnrealMcpCoreResources::Register(*ResourceRegistry);
+
 	Dispatcher = MakeUnique<FUnrealMcpGameThreadDispatcher>();
-	BridgeServer = MakeUnique<FUnrealMcpBridgeServer>(*Registry, *Dispatcher, PromptRegistry.Get());
+	BridgeServer = MakeUnique<FUnrealMcpBridgeServer>(*Registry, *Dispatcher, PromptRegistry.Get(), ResourceRegistry.Get());
 
 	// Discover 3rd-party extension tool providers (§5) and merge them into the registry BEFORE the bridge
 	// starts accepting, so the first manifest a sidecar reads on handshake already includes them. Late
@@ -103,7 +112,8 @@ void FUnrealMcpEditorCoordinator::Startup()
 			}
 		},
 		/*InConfigPath*/ FString(),
-		PromptRegistry.Get()); // §A.2 kind-aware: also merge prompt-provider extensions into the prompt registry
+		PromptRegistry.Get(), // §A.2 kind-aware: also merge prompt-provider extensions into the prompt registry
+		ResourceRegistry.Get()); // §A.2 kind-aware: also merge resource-provider extensions into the resource registry
 	ExtensionManager->Startup();
 
 	const FString ProjectPath = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir());
@@ -502,6 +512,7 @@ void FUnrealMcpEditorCoordinator::Shutdown()
 	}
 
 	Dispatcher.Reset();
+	ResourceRegistry.Reset(); // after ExtensionManager (which holds a raw pointer to it) is torn down above
 	PromptRegistry.Reset(); // after ExtensionManager (which holds a raw pointer to it) is torn down above
 	Registry.Reset();
 

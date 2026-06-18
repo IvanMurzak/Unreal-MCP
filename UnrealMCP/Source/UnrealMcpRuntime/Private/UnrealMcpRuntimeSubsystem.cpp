@@ -6,8 +6,10 @@
 #include "UnrealMcpLog.h"
 #include "UnrealMcpRuntimeCoreTools.h"
 #include "UnrealMcpRuntimeCorePrompts.h"
+#include "UnrealMcpRuntimeCoreResources.h"
 #include "UnrealMcpToolRegistry.h"
 #include "UnrealMcpPromptRegistry.h"
+#include "UnrealMcpResourceRegistry.h"
 #include "Config/UnrealMcpConfig.h"
 #include "Dispatch/UnrealMcpGameThreadDispatcher.h"
 #include "Bridge/UnrealMcpBridgeServer.h"
@@ -16,6 +18,7 @@
 #include "Tools/UnrealMcpWorldProvider.h"
 #include "IUnrealMcpToolProvider.h"
 #include "IUnrealMcpPromptProvider.h"
+#include "IUnrealMcpResourceProvider.h"
 
 #include "Features/IModularFeatures.h"
 #include "Engine/GameInstance.h"
@@ -39,6 +42,7 @@ struct UUnrealMcpRuntimeSubsystem::FRuntimeImpl
 {
 	TUniquePtr<FUnrealMcpToolRegistry> Registry;
 	TUniquePtr<FUnrealMcpPromptRegistry> PromptRegistry;
+	TUniquePtr<FUnrealMcpResourceRegistry> ResourceRegistry;
 	TUniquePtr<FUnrealMcpGameThreadDispatcher> Dispatcher;
 	TUniquePtr<FUnrealMcpBridgeServer> BridgeServer;
 	TUniquePtr<FUnrealMcpSidecarManager> SidecarManager;
@@ -76,8 +80,15 @@ void UUnrealMcpRuntimeSubsystem::Initialize(FSubsystemCollectionBase& Collection
 	Impl->PromptRegistry = MakeUnique<FUnrealMcpPromptRegistry>();
 	UnrealMcpCorePrompts::Register(*Impl->PromptRegistry);
 
+	// §A.1 resource registry (P2): the resource sibling of the tool/prompt registries, built on the SAME Model A
+	// path. The core resource family registers before the bridge arms so the first resource-manifest a v2 sidecar
+	// reads on handshake already includes it. No §7/§8 resource filters here (the runtime path applies none).
+	Impl->ResourceRegistry = MakeUnique<FUnrealMcpResourceRegistry>();
+	UnrealMcpCoreResources::Register(*Impl->ResourceRegistry);
+
 	Impl->Dispatcher = MakeUnique<FUnrealMcpGameThreadDispatcher>();
-	Impl->BridgeServer = MakeUnique<FUnrealMcpBridgeServer>(*Impl->Registry, *Impl->Dispatcher, Impl->PromptRegistry.Get());
+	Impl->BridgeServer = MakeUnique<FUnrealMcpBridgeServer>(
+		*Impl->Registry, *Impl->Dispatcher, Impl->PromptRegistry.Get(), Impl->ResourceRegistry.Get());
 
 	// Discover §5 extension providers and merge them BEFORE the bridge arms, so the first manifest a sidecar
 	// reads on a later Connect already includes them; a late register/unregister re-pushes the manifest.
@@ -96,7 +107,8 @@ void UUnrealMcpRuntimeSubsystem::Initialize(FSubsystemCollectionBase& Collection
 			}
 		},
 		/*InConfigPath*/ FString(),
-		Impl->PromptRegistry.Get()); // §A.2 kind-aware: also merge prompt-provider extensions into the prompt registry
+		Impl->PromptRegistry.Get(), // §A.2 kind-aware: also merge prompt-provider extensions into the prompt registry
+		Impl->ResourceRegistry.Get()); // §A.2 kind-aware: also merge resource-provider extensions into the resource registry
 	Impl->ExtensionManager->Startup();
 
 	const FString ProjectPath = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir());
@@ -161,6 +173,7 @@ void UUnrealMcpRuntimeSubsystem::Deinitialize()
 		}
 
 		Impl->Dispatcher.Reset();
+		Impl->ResourceRegistry.Reset(); // after ExtensionManager (holds a raw pointer to it) is torn down above
 		Impl->PromptRegistry.Reset();
 		Impl->Registry.Reset();
 		Impl.Reset();
@@ -369,6 +382,30 @@ void UUnrealMcpRuntimeSubsystem::UnregisterPromptProvider(IUnrealMcpPromptProvid
 
 	IModularFeatures::Get().UnregisterModularFeature(IUnrealMcpPromptProvider::GetModularFeatureName(), Provider);
 	UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] runtime prompt provider '%s' unregistered."), *Provider->GetExtensionId());
+}
+
+void UUnrealMcpRuntimeSubsystem::RegisterResourceProvider(IUnrealMcpResourceProvider* Provider)
+{
+	if (!Provider)
+	{
+		UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] RegisterResourceProvider: null provider ignored."));
+		return;
+	}
+
+	// Thin wrapper over IModularFeatures (§A.2): the extension manager subscribed to the resource register event
+	// in Initialize(), so this triggers the same resource-registry rebuild + manifest re-push a plugin-load-time
+	// registration does. Not owned — the caller keeps the provider alive and must UnregisterResourceProvider.
+	IModularFeatures::Get().RegisterModularFeature(IUnrealMcpResourceProvider::GetModularFeatureName(), Provider);
+	UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] runtime resource provider '%s' registered."), *Provider->GetExtensionId());
+}
+
+void UUnrealMcpRuntimeSubsystem::UnregisterResourceProvider(IUnrealMcpResourceProvider* Provider)
+{
+	if (!Provider)
+		return; // null is a harmless no-op
+
+	IModularFeatures::Get().UnregisterModularFeature(IUnrealMcpResourceProvider::GetModularFeatureName(), Provider);
+	UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] runtime resource provider '%s' unregistered."), *Provider->GetExtensionId());
 }
 
 bool UUnrealMcpRuntimeSubsystem::IsLoopbackHost(const FString& Host)
