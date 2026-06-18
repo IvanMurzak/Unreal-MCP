@@ -215,6 +215,12 @@ bool UUnrealMcpRuntimeSubsystem::Connect(const FString& Host, const FString& Tok
 	const TSharedPtr<FJsonObject> EffectiveConfig = Config.BuildEffectiveConnectionConfig();
 	Impl->BridgeServer->SetEffectiveConfig(EffectiveConfig); // also pushes the §1.3 `config` if a sidecar is already up
 
+	// Display values for the connection logs below: the mode label, and a host that falls back to a
+	// readable "(default)" when no Host override was passed (Cloud with no override resolves to the
+	// default cloud URL, Custom to the §8 default host) instead of logging an empty string.
+	const TCHAR* const ModeForLog = Mode == EUnrealMcpRuntimeConnectionMode::Cloud ? TEXT("Cloud") : TEXT("Custom");
+	const FString HostForLog = Host.IsEmpty() ? TEXT("(default)") : Host;
+
 	// Spawn the sidecar (§12.4: deferred to Connect so a never-connecting game spawns zero child procs). The
 	// sidecar dials the armed loopback port and authenticates with IpcToken over stdin (§1.4).
 	if (!Impl->SidecarManager.IsValid())
@@ -226,7 +232,7 @@ bool UUnrealMcpRuntimeSubsystem::Connect(const FString& Host, const FString& Tok
 		// sidecar. Treat as success (idempotent reconnect with updated target).
 		UE_LOG(LogUnrealMcp, Log,
 			TEXT("[Unreal-MCP] runtime Connect: sidecar already running; pushed updated config (mode=%s, host=%s)."),
-			Mode == EUnrealMcpRuntimeConnectionMode::Cloud ? TEXT("Cloud") : TEXT("Custom"), *Host);
+			ModeForLog, *HostForLog);
 		return true;
 	}
 
@@ -241,8 +247,7 @@ bool UUnrealMcpRuntimeSubsystem::Connect(const FString& Host, const FString& Tok
 
 	UE_LOG(LogUnrealMcp, Log,
 		TEXT("[Unreal-MCP] runtime Connect: sidecar spawned, dialing loopback port %d (mode=%s, host=%s, token=%s)."),
-		BoundPort, Mode == EUnrealMcpRuntimeConnectionMode::Cloud ? TEXT("Cloud") : TEXT("Custom"),
-		*Host, *FUnrealMcpConfig::MaskSecret(Token));
+		BoundPort, ModeForLog, *HostForLog, *FUnrealMcpConfig::MaskSecret(Token));
 	return true;
 #endif // UE_BUILD_SHIPPING && UNREAL_MCP_ALLOW_SHIPPING==0
 }
