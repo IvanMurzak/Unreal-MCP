@@ -12,7 +12,9 @@
 #include "Sidecar/UnrealMcpSidecarManager.h"
 #include "Extensions/UnrealMcpExtensionManager.h"
 #include "Tools/UnrealMcpWorldProvider.h"
+#include "IUnrealMcpToolProvider.h"
 
+#include "Features/IModularFeatures.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
 #include "Misc/Paths.h"
@@ -291,6 +293,34 @@ UUnrealMcpRuntimeSubsystem* UUnrealMcpRuntimeSubsystem::Get(const UObject* World
 		return nullptr;
 	UGameInstance* GI = World->GetGameInstance();
 	return GI ? GI->GetSubsystem<UUnrealMcpRuntimeSubsystem>() : nullptr;
+}
+
+void UUnrealMcpRuntimeSubsystem::RegisterToolProvider(IUnrealMcpToolProvider* Provider)
+{
+	if (!Provider)
+	{
+		UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] RegisterToolProvider: null provider ignored."));
+		return;
+	}
+
+	// Thin wrapper over IModularFeatures (§12.9): the extension manager subscribed to the register event in
+	// Initialize(), so this registration triggers the same registry rebuild + manifest re-push that a
+	// plugin-load-time registration does. The subsystem does NOT take ownership — the caller keeps the
+	// provider alive and is responsible for UnregisterToolProvider before destroying it.
+	IModularFeatures::Get().RegisterModularFeature(IUnrealMcpToolProvider::GetModularFeatureName(), Provider);
+	UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] runtime tool provider '%s' registered."), *Provider->GetExtensionId());
+}
+
+void UUnrealMcpRuntimeSubsystem::UnregisterToolProvider(IUnrealMcpToolProvider* Provider)
+{
+	if (!Provider)
+		return; // null is a harmless no-op (mirrors a Disconnect() that was never connected)
+
+	// The manager observes the unregister event, rebuilds, and re-pushes the manifest so a connected
+	// sidecar drops the provider's tools. IModularFeatures tolerates unregistering a feature that was never
+	// registered, so a double-unregister or an unknown provider is harmless.
+	IModularFeatures::Get().UnregisterModularFeature(IUnrealMcpToolProvider::GetModularFeatureName(), Provider);
+	UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] runtime tool provider '%s' unregistered."), *Provider->GetExtensionId());
 }
 
 bool UUnrealMcpRuntimeSubsystem::IsLoopbackHost(const FString& Host)

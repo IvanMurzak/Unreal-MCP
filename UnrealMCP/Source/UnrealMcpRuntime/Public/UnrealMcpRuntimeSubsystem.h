@@ -8,6 +8,10 @@
 #include "Templates/PimplPtr.h"
 #include "UnrealMcpRuntimeSubsystem.generated.h"
 
+// Forward-declared: RegisterToolProvider/UnregisterToolProvider take it by pointer only (§12.9), so the
+// PUBLIC header needs no extension-contract include — callers include IUnrealMcpToolProvider.h themselves.
+class IUnrealMcpToolProvider;
+
 // The runtime-owned machinery (registry/dispatcher/bridge/sidecar/extensions) is held behind a PImpl
 // (FRuntimeImpl, defined in the .cpp) so this PUBLIC header forward-declares nothing module-private and the
 // TUniquePtr<incomplete-type> members never reach UHT's generated vtable-helper ctor in the .gen.cpp (which,
@@ -106,6 +110,36 @@ public:
 	 */
 	UFUNCTION(BlueprintPure, Category = "Unreal MCP", meta = (WorldContext = "WorldContext"))
 	static UUnrealMcpRuntimeSubsystem* Get(const UObject* WorldContext);
+
+	/**
+	 * Register a custom gameplay tool provider at runtime (docs/ARCHITECTURE.md §12.9) — the ergonomic
+	 * UE analog of Unity's `WithToolsFromAssembly` / `[AiTool]` scan (README Chess example). A game module
+	 * registers an IUnrealMcpToolProvider it owns and its tools merge into the live registry; the §5
+	 * extension manager rebuilds the registry and re-pushes the manifest so a CONNECTED sidecar's
+	 * `tools/list` gains the provider's tools without the developer touching IModularFeatures directly.
+	 *
+	 * This is a thin, discoverable wrapper over
+	 * `IModularFeatures::Get().RegisterModularFeature(IUnrealMcpToolProvider::GetModularFeatureName(), Provider)`:
+	 * the manager subscribed to the modular-feature register/unregister events in Initialize(), so the
+	 * registration is observed and the manifest re-pushed exactly as a plugin-load-time registration is
+	 * (docs/EXTENSIONS.md "Runtime usage"). The same provider may be registered via either path.
+	 *
+	 * OWNERSHIP: @p Provider is NOT owned by the subsystem — the caller keeps it alive for as long as it is
+	 * registered (typically a member of the game module/subsystem) and MUST call UnregisterToolProvider
+	 * (or unregister the modular feature) before destroying it. A null @p Provider is a no-op.
+	 *
+	 * Callable from C++ and Blueprint is NOT offered (a raw interface pointer is not a Blueprint type);
+	 * Blueprint authors expose tools by registering their provider in C++ module startup as today.
+	 */
+	void RegisterToolProvider(IUnrealMcpToolProvider* Provider);
+
+	/**
+	 * Unregister a gameplay tool provider previously registered via RegisterToolProvider (or directly via
+	 * IModularFeatures). The §5 manager observes the unregister event, rebuilds the registry, and re-pushes
+	 * the manifest so a connected sidecar's `tools/list` drops the provider's tools. A null @p Provider, or
+	 * one that was never registered, is a harmless no-op (IModularFeatures tolerates an unknown unregister).
+	 */
+	void UnregisterToolProvider(IUnrealMcpToolProvider* Provider);
 
 	/** Whether the loopback listener armed (a port is bound). False means Initialize failed to bind. */
 	bool IsListenerArmed() const { return BoundPort > 0; }
