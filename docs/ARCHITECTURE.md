@@ -981,7 +981,198 @@ Prompts and resources ship empty-but-wired in MVP (the framework relays them alr
 
 ---
 
-## 12. Open questions for TD / Ivan (none block the scaffold or sidecar tasks)
+## 12. Runtime (in-game) support
+
+Sections 0-11 describe the editor-only plugin. §12 adds runtime MCP (PIE, Standalone, packaged
+Development/Shipping) at Unity-MCP parity (Unity's `UnityMcpPluginRuntime.Initialize().Build().Connect()`,
+README "Runtime usage (in-game)"). Three locked decisions: (a) reuse the .NET sidecar (no in-process
+C++ server); (b) new `UnrealMcpRuntime` module (Type Runtime) holds engine-agnostic machinery +
+runtime-safe tools, `UnrealMcpEditor` depends on it; (c) runtime connect is explicit opt-in — never
+auto-connect in a shipped game.
+
+> **Delivery status (M15 task DAG R1–R7).** R1 (`unreal-mcp-runtime-module-extraction`) has landed the
+> module + the infra move + the editor-coordinator rename + the world provider (the pure refactor below);
+> R2–R7 deliver sidecar-packaging, the bootstrap subsystem, runtime tool families, the extension bus,
+> testbed verification and docs. Where the text below describes the bootstrap subsystem (§12.4), sidecar
+> packaging into games (§12.5), the runtime world resolver (§12.6) or the runtime tool families (§12.7),
+> those are the design contracts the later R-tasks implement — R1 ships only the module skeleton, the
+> moved-down infra, and the editor-side world resolver.
+
+### 12.0 Why this is mostly a refactor
+The sidecar is build-agnostic (dials loopback, stdin token, config via IPC with env fallback
+`UNREAL_MCP_HOST`/`UNREAL_MCP_TOKEN`, `SidecarHost.cs:200-203`, `Program.cs:86-88`). A packaged game
+reuses the identical binary. The work is C++-side: move IPC bridge server, GameThread dispatcher,
+registry, schema gen, object-ref resolver, sidecar manager, config out of the editor module into a
+Runtime module; abstract the GEditor/world couplings; add an explicit opt-in bootstrap. Most editor
+subsystems already depend only on runtime-safe modules (Core/CoreUObject/Engine/Networking/Sockets/
+Json/JsonUtilities/Projects).
+
+### 12.1 The `UnrealMcpRuntime` module
+New module under `UnrealMCP/Source/UnrealMcpRuntime/`. `.uplugin` (Runtime module FIRST so it loads
+before the editor module that depends on it):
+```json
+{ "Name": "UnrealMcpRuntime", "Type": "Runtime", "LoadingPhase": "Default" },
+{ "Name": "UnrealMcpEditor",  "Type": "Editor",  "LoadingPhase": "Default" },
+{ "Name": "UnrealMcpEditorTests", "Type": "Editor", "LoadingPhase": "Default" }
+```
+Type Runtime (loads in editor/PIE/Standalone/packaged — Unity `includePlatforms:[]` analog).
+LoadingPhase Default (the bootstrap subsystem defers its own work, §12.4).
+
+`UnrealMcpRuntime.Build.cs` deps:
+- Public: `Core`
+- Private: `CoreUObject`, `Engine`, `Networking`, `Sockets`, `Json`, `JsonUtilities`, `Projects`,
+  `ImageWrapper`, `RenderCore`, `RHI` (runtime screenshot subset).
+- `RuntimeDependencies.Add(.../UnrealMcpBridge/<rid>/*, StagedFileType.NonUFS)` MOVES here from the
+  editor Build.cs (§12.5) so the sidecar bundles into packaged GAMES. **(R2 — in R1 it stays in the
+  editor Build.cs.)**
+
+STAYS editor-only in `UnrealMcpEditor.Build.cs`: UnrealEd, Slate, SlateCore, EditorSubsystem,
+WorkspaceMenuStructure, InputCore, ApplicationCore, AssetRegistry, AssetTools, MaterialEditor,
+EditorScriptingUtilities, BlueprintGraph, KismetCompiler, HTTP, FileUtilities, HTTPServer,
+LiveCoding(Win64). `UnrealMcpEditor` adds `"UnrealMcpRuntime"` to PublicDependencyModuleNames.
+Public headers move to `UnrealMcpRuntime/Public/`: `UnrealMcpToolRegistry.h`, `IUnrealMcpToolProvider.h`,
+`UnrealMcpLog.h` (plus a runtime-owned `UnrealMcpRuntimeCoreTools.h` declaring the runtime-safe `ping`
+Register). `UnrealMcpCoreTools.h` stays editor (the editor-only families' Register declarations). Single
+`LogUnrealMcp` category moves down.
+
+### 12.2 What moves DOWN vs stays editor-only
+MOVES to UnrealMcpRuntime (from `UnrealMcpEditor/Private/`): `Bridge/UnrealMcpBridgeServer.*`+
+`Bridge/UnrealMcpNdjson.*`; `Dispatch/UnrealMcpGameThreadDispatcher.*` (no GEditor);
+`Tools/UnrealMcpToolRegistry.cpp`+`Public/UnrealMcpToolRegistry.h`; `Tools/UnrealMcpObjectRef.*`
+(world abstraction via §12.6); `Tools/UnrealMcpPropertyJson.*`+`Tools/UnrealMcpAssetScopedRead.*`;
+`Sidecar/UnrealMcpSidecarManager.*`; `Config/UnrealMcpConfig.*`; `Extensions/UnrealMcpExtensionManager.*`+
+`Public/IUnrealMcpToolProvider.h`; `Tools/UnrealMcpLogCollector.*`; `Tools/UnrealMcpPingTool.cpp`;
+`UnrealMcpLog.*`.
+STAYS editor-only: all `UI/**`, `Server/UnrealMcpServerManager.*`, `DevControl/*`,
+`UnrealMcpEditorViewModel.*`; families `UnrealMcpAssetTools.cpp`, `UnrealMcpBlueprintTools.cpp`,
+`UnrealMcpSourceTools.*`, `UnrealMcpLevelTools.cpp`, `UnrealMcpScreenshotTools.cpp`, `UnrealMcpEditorTools.cpp`
+and `UnrealMcpActorTools.cpp`; the renamed `FUnrealMcpEditorCoordinator`.
+
+> **R1 scope note (ActorTools).** The design's eventual target makes `UnrealMcpActorTools.cpp`
+> runtime-safe (`#if WITH_EDITOR`-guard its `FScopedTransaction` / `FActorLabelUtilities::SetActorLabelUnique`
+> / `Editor.h` couplings; resolve the world via §12.6). That transform — together with the runtime
+> console/reflection subset, the runtime screenshot subset and `level-get-data` — is **R4**
+> (`unreal-mcp-runtime-tool-families`). R1 therefore leaves ActorTools (and all other families) in the
+> editor module so the runtime module stays UnrealEd-free and GEditor-free (§12.1 dep list, R1 grep gate);
+> ActorTools simply consumes the now-moved-down ObjectRef/PropertyJson via the runtime module. Moving it
+> down before its WITH_EDITOR guards exist would force UnrealEd into the runtime Build.cs, contradicting
+> §12.1.
+
+Must-abstract GEditor couplings (the true blockers, handled per task): (1) `FUnrealMcpObjectRef::
+GetEditorWorld()` — done in R1 via §12.6; (2) actor spawn `World->SpawnActor` (already the engine path;
+`FScopedTransaction`/`SetActorLabel` `#if WITH_EDITOR` in R4); (3) `UnrealMcpEditorTools.cpp` PIE +
+selection stay editor; `console-run-command` (`GEngine->Exec`) runtime-safe (R4).
+
+### 12.3 Layering: editor depends on runtime — **Model A (chosen): single runtime-owned bridge**
+The runtime module always constructs registry+dispatcher+bridge+sidecar (editor AND game) and registers
+runtime-safe families. The editor coordinator, when present, registers editor-only families on top of the
+SAME registry, keeps Slate/view-model/server-manager/dev-control, and wires existing UI sinks to the
+runtime bridge. Connect policy differs (editor: config/UI; game: opt-in §12.4) but is a connect TRIGGER,
+not a separate bridge. Max parity, one code path. (Rejected Model B: two coordinators.)
+
+> **R1 realization.** The renamed `FUnrealMcpEditorCoordinator` (was the misnamed `FUnrealMcpRuntime`,
+> §12 executive finding 3) lives in the editor module and *builds* the runtime-owned types (registry,
+> dispatcher, bridge, sidecar, extension manager, config — all now `UNREALMCPRUNTIME_API`-exported) then
+> layers the editor families + Slate UI on the same registry. The standalone runtime bootstrap that builds
+> the same stack without an editor is R3.
+
+`UnrealMcpEditorTests` private-include reach-ins repoint by adding `UnrealMcpRuntime` to the test
+Build.cs PrivateDependencyModuleNames + `$(ModuleDir)/../UnrealMcpRuntime/Private` to PrivateIncludePaths
+(keeping the editor Private path for the editor-staying reach-ins). Keep the `UnrealMcp.` filter prefix in
+R1 to prove equivalence. Unity-build ODR rule holds (unique helpers).
+
+### 12.4 Runtime bootstrap API (explicit opt-in) — **R3**
+A **`UGameInstanceSubsystem`** — auto-instantiated per UGameInstance but NEVER auto-connecting:
+```cpp
+UCLASS() class UNREALMCPRUNTIME_API UUnrealMcpRuntimeSubsystem : public UGameInstanceSubsystem {
+  GENERATED_BODY()
+public:
+  virtual void Initialize(FSubsystemCollectionBase&) override; // builds registry/dispatcher/bridge — NO connect
+  virtual void Deinitialize() override;                         // orphan-safe sidecar teardown
+  UFUNCTION(BlueprintCallable, Category="Unreal MCP")
+  bool Connect(const FString& Host, const FString& Token=TEXT(""),
+               EUnrealMcpRuntimeConnectionMode Mode=EUnrealMcpRuntimeConnectionMode::Custom);
+  UFUNCTION(BlueprintCallable, Category="Unreal MCP") void Disconnect();
+  UFUNCTION(BlueprintCallable, BlueprintPure) bool IsConnected() const;
+  static UUnrealMcpRuntimeSubsystem* Get(const UObject* WorldContext);
+};
+```
+`Initialize` builds registry+runtime families+dispatcher+bridge, generates token, `BridgeServer->Start`
+(listener armed) — does NOT spawn sidecar or connect. `Connect()` spawns the sidecar
+(`SidecarManager->StartForPort`) and pushes a `config` IPC msg `keepConnected:true` + resolved
+host/token/mode (reuse `BuildEffectiveConnectionConfig`). Defer sidecar spawn to Connect (a game that
+never calls Connect spawns zero child procs). Also: a Blueprint `Connect MCP` node; console commands
+`UnrealMcp.Connect <host> [token]` / `UnrealMcp.Disconnect` (QA without recompile). REJECT any
+config-asset that auto-connects.
+
+### 12.5 Sidecar packaging into non-editor builds — **R2**
+Today `RuntimeDependencies.Add(.../UnrealMcpBridge/.../*)` is in `UnrealMcpEditor.Build.cs` → stages
+into editor packages but NOT packaged games. **Move it to `UnrealMcpRuntime.Build.cs`** → UBT stages the
+bridge into packaged Development/Shipping at `<Staged>/<Project>/Plugins/UnrealMCP/Binaries/ThirdParty/
+UnrealMcpBridge/<rid>/`. `ComposeBundledBridgePath` resolves via `IPluginManager...FindPlugin("UnrealMCP")
+->GetBaseDir()` — runtime-available, so `ResolveBridgeBinaryPath` works in a packaged game UNCHANGED.
+Only Build.cs ownership moves. Risks: self-contained ~73-80 MB/RID — gate staging behind a target/config
+switch. **Console/mobile cannot spawn an external .NET process → runtime MCP is Desktop-only
+(Win64/Mac/Linux).**
+
+### 12.6 GameThread dispatch + world resolution under a live game
+Dispatcher already runtime-clean — moves down unchanged. World resolution → a provider in the runtime
+module:
+```cpp
+namespace FUnrealMcpWorldProvider {
+  UNREALMCPRUNTIME_API UWorld* GetActiveWorld();
+  UNREALMCPRUNTIME_API void SetWorldResolver(TFunction<UWorld*()>);
+  UNREALMCPRUNTIME_API void ClearWorldResolver();
+}
+```
+**R1 ships this provider** and rewires `FUnrealMcpObjectRef::GetEditorWorld()` → `GetActiveWorld()`
+delegating to the injected resolver. The EDITOR coordinator installs
+`[]{return GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;}` in Startup (preserves today's
+behaviour byte-for-byte) and clears it in Shutdown — so the runtime module itself holds NO GEditor
+reference. The RUNTIME subsystem (R3) installs `[this]{return GetGameInstance()->GetWorld();}` instead.
+PIE subtlety (verify on 5.7): the editor resolver may later return `GEditor->PlayWorld` when set, so
+editor-driven tools follow the user into PIE (matches Unity) — deferred until the runtime families need it.
+
+### 12.7 Runtime-safe vs editor-only tool taxonomy (drives R4)
+- **ping (1):** runtime-safe — moved to the runtime module in R1.
+- **actor & component (13):** runtime-safe AFTER world abstraction + spawn branch (`World->SpawnActor`;
+  `SetActorLabel`/`FScopedTransaction` WITH_EDITOR-guarded). **R4.**
+- **asset (11):** editor-only. **level (7):** editor-only EXCEPT a read-only runtime `level-get-data` (R4).
+- **blueprint (11):** editor-only. **source (6):** editor-only.
+- **screenshot (4):** MIXED → `screenshot-game-view` + `screenshot-camera` runtime-safe (R4); viewport/
+  isolated editor-only. GPU required.
+- **editor/reflection (9):** MIXED. `editor-application-*`/`editor-selection-*` editor-only;
+  `console-get-logs`/`console-clear-logs`/`console-run-command` runtime-safe; `reflection-method-find`/
+  `-call` runtime-safe for non-`CallInEditor` (R4).
+Net runtime built-in set ≈22. PLUS user-authored runtime tools via the extension bus (§12.9) — the PRIMARY
+Unity runtime use case. Parity is "framework + your custom tools," not "all 62 built-ins in-game."
+
+### 12.8 Security analysis (shipped-game remote-control surface)
+A runtime connection is remote control of a running game (actor-create, object-modify, console-run-command
+arbitrary CVars, reflection-method-call arbitrary UFunctions) — RCE-class if reachable. Mitigations (ALL in design):
+1. **Explicit opt-in only** (the invariant): subsystem auto-instantiates but NEVER auto-connects. Any path
+   that connects without an explicit developer call is a security defect.
+2. **Loopback IPC + one-shot stdin token** (unchanged §1.4).
+3. **Build-config gating:** `bUnrealMcpAllowShipping` Build.cs flag (default false) → with 0, Connect in
+   Shipping logs+returns false.
+4. **Kill switch:** `UUnrealMcpRuntimeSettings:UDeveloperSettings` `bRuntimeMcpEnabled` default FALSE.
+5. **Loopback-host default:** Connect rejects non-loopback hosts unless explicit `bAllowRemoteHost`.
+6. No token in argv/logs.
+
+### 12.9 Runtime extension tool registration
+`IModularFeatures` (§5) is runtime-available — `IUnrealMcpToolProvider` works identically at runtime; the
+extension manager moves down (R1). Recommended ergonomic: `UUnrealMcpRuntimeSubsystem::RegisterToolProvider(
+IUnrealMcpToolProvider*)` (R3+). UE analog of Unity `WithToolsFromAssembly`/`[AiTool]` scan (README Chess
+example). Subsystem rebuilds registry + re-pushes manifest on register/unregister.
+
+### 12.10 Compatibility / version-floor
+UGameInstance::GetWorld, UGameInstanceSubsystem, UWorld::SpawnActor, USceneCaptureComponent2D,
+UGameViewportClient stable 5.5→5.7. Screenshot APIs drift slightly — version-check runtime variants on 5.5.
+The 5.5 floor must be EXERCISED (packaged Development build on a 5.5 install) before claiming it.
+
+---
+
+## 13. Open questions for TD / Ivan (none block the scaffold or sidecar tasks)
 
 1. **Fab packaging ambition**: should `release.yml` produce a Fab-submission-ready archive from
    day one (extra metadata/screenshot requirements), or is the GitHub zip enough until the Fab

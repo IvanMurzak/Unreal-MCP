@@ -6,6 +6,7 @@
 #include "CoreMinimal.h"
 #include "Misc/AutomationTest.h"
 #include "UnrealMcpCoreTools.h"
+#include "UnrealMcpRuntimeCoreTools.h" // UnrealMcpPingTool::Register moved to the runtime module (§12.1)
 #include "UnrealMcpToolRegistry.h"
 #include "Dom/JsonObject.h"
 

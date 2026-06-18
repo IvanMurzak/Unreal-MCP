@@ -1,9 +1,10 @@
 // Copyright (c) 2026 Ivan Murzak. Licensed under the Apache License, Version 2.0.
 // See the LICENSE file in the repository root for more information.
 
-#include "UnrealMcpRuntime.h"
+#include "UnrealMcpEditorCoordinator.h"
 #include "UnrealMcpLog.h"
 #include "UnrealMcpCoreTools.h"
+#include "UnrealMcpRuntimeCoreTools.h"
 #include "UnrealMcpToolRegistry.h"
 #include "Config/UnrealMcpConfig.h"
 #include "Dispatch/UnrealMcpGameThreadDispatcher.h"
@@ -17,8 +18,10 @@
 #include "UI/SUnrealMcpToolsWindow.h"
 #include "UI/SUnrealMcpFeatureListWindow.h"
 #include "Tools/UnrealMcpLogCollector.h"
+#include "Tools/UnrealMcpWorldProvider.h"
 #include "DevControl/UnrealMcpDevControlServer.h"
 
+#include "Editor.h"
 #include "Misc/CoreDelegates.h"
 #include "Misc/Paths.h"
 #include "Misc/EngineVersion.h"
@@ -28,14 +31,24 @@
 
 // Defined here (where every subsystem type is complete) so the TUniquePtr member deleters instantiate
 // correctly regardless of unity-build grouping. See the header comment.
-FUnrealMcpRuntime::FUnrealMcpRuntime() = default;
-FUnrealMcpRuntime::~FUnrealMcpRuntime() = default;
+FUnrealMcpEditorCoordinator::FUnrealMcpEditorCoordinator() = default;
+FUnrealMcpEditorCoordinator::~FUnrealMcpEditorCoordinator() = default;
 
-void FUnrealMcpRuntime::Startup()
+void FUnrealMcpEditorCoordinator::Startup()
 {
 	if (bStarted)
 		return;
 	bStarted = true;
+
+	// §12.6: install the EDITOR world resolver into the runtime module BEFORE any tool body can run. The
+	// runtime module's FUnrealMcpObjectRef::GetEditorWorld() now delegates to FUnrealMcpWorldProvider; this
+	// resolver preserves today's behaviour byte-for-byte (`GEditor ? GEditor->GetEditorWorldContext().World()
+	// : nullptr`). Cleared in Shutdown(). The runtime bootstrap subsystem (R3) installs a game-world resolver
+	// instead; in the editor this coordinator owns the resolver.
+	FUnrealMcpWorldProvider::SetWorldResolver([]() -> UWorld*
+	{
+		return GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	});
 
 	// §10 editor/reflection family: start the GLog ring-buffer collector BEFORE anything else so the
 	// earliest startup log lines are already captured for console-get-logs. Shutdown() deregisters it.
@@ -218,22 +231,22 @@ void FUnrealMcpRuntime::Startup()
 	// sink marshals onto the game thread, so a result that straddles teardown runs after Shutdown and reads a
 	// reset MainWindowTab — guard with the same weak view-model check (its reset coincides with teardown) and a
 	// null MainWindowTab check so it is a no-op, never a use-after-free.
-	FUnrealMcpRuntime* RuntimePtr = this;
+	FUnrealMcpEditorCoordinator* CoordinatorPtr = this;
 	if (BridgeServerPtr)
 	{
-		BridgeServerPtr->SetStatusSink([WeakViewModel, RuntimePtr](const FString& Type, TSharedPtr<FJsonObject> Message)
+		BridgeServerPtr->SetStatusSink([WeakViewModel, CoordinatorPtr](const FString& Type, TSharedPtr<FJsonObject> Message)
 		{
-			AsyncTask(ENamedThreads::GameThread, [WeakViewModel, RuntimePtr, Type, Message]()
+			AsyncTask(ENamedThreads::GameThread, [WeakViewModel, CoordinatorPtr, Type, Message]()
 			{
 				TSharedPtr<FUnrealMcpEditorViewModel> VM = WeakViewModel.Pin();
 				if (!VM.IsValid())
-					return; // teardown straddled — also the guard for RuntimePtr->MainWindowTab below (reset in Shutdown)
+					return; // teardown straddled — also the guard for CoordinatorPtr->MainWindowTab below (reset in Shutdown)
 				if (Type == TEXT("status"))
 					VM->ApplyStatus(Message);
 				else if (Type == TEXT("device-auth"))
 					VM->ApplyDeviceAuth(Message);
-				else if (Type == TEXT("agent-config-result") && RuntimePtr->MainWindowTab.IsValid())
-					RuntimePtr->MainWindowTab->DeliverAgentConfigResult(Message);
+				else if (Type == TEXT("agent-config-result") && CoordinatorPtr->MainWindowTab.IsValid())
+					CoordinatorPtr->MainWindowTab->DeliverAgentConfigResult(Message);
 			});
 		});
 
@@ -363,7 +376,7 @@ void FUnrealMcpRuntime::Startup()
 	PreExitHandle = FCoreDelegates::OnEnginePreExit.AddLambda([this]() { Shutdown(); });
 }
 
-void FUnrealMcpRuntime::Shutdown()
+void FUnrealMcpEditorCoordinator::Shutdown()
 {
 	if (!bStarted)
 		return;
@@ -459,6 +472,11 @@ void FUnrealMcpRuntime::Shutdown()
 
 	Dispatcher.Reset();
 	Registry.Reset();
+
+	// §12.6: drop the editor world resolver so no stale GEditor-capturing lambda survives teardown. The
+	// captured lambda is GEditor-free of captured state (it reads the global), but clearing keeps the
+	// provider's lifecycle symmetric with Startup. Idempotent.
+	FUnrealMcpWorldProvider::ClearWorldResolver();
 
 	// §10 editor/reflection family: deregister the GLog listener LAST so no dangling FOutputDevice remains
 	// on GLog — an orphaned device crashes the editor on exit. Idempotent (safe if Startup never ran).

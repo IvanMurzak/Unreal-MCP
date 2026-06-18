@@ -15,7 +15,7 @@ class FJsonObject;
  * ask for exactly the slice it needs.
  *
  * Implemented as a pure JSON→JSON transform (no editor state) so it is exercised by fast unit
- * Automation specs without a live content browser. Declared UNREALMCPEDITOR_API + lives in the
+ * Automation specs without a live content browser. Declared UNREALMCPRUNTIME_API + lives in the
  * editor module's Private/ so the sibling Tests module can reach it via PrivateIncludePaths and
  * link the symbol (mirrors the dispatcher/ndjson test-seam pattern).
  *
@@ -32,5 +32,5 @@ namespace UnrealMcpAssetScopedRead
 	 *   value into the result at the same nesting. A path that does not resolve is silently skipped.
 	 * - Overlapping paths merge (e.g. "a.b" + "a.c" → { a: { b, c } }).
 	 */
-	UNREALMCPEDITOR_API TSharedPtr<FJsonObject> Apply(const TSharedPtr<FJsonObject>& Source, const TArray<FString>& Paths);
+	UNREALMCPRUNTIME_API TSharedPtr<FJsonObject> Apply(const TSharedPtr<FJsonObject>& Source, const TArray<FString>& Paths);
 }

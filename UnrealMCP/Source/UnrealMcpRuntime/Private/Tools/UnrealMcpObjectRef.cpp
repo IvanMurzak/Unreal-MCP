@@ -2,9 +2,9 @@
 // See the LICENSE file in the repository root for more information.
 
 #include "UnrealMcpObjectRef.h"
+#include "UnrealMcpWorldProvider.h"
 
 #include "Dom/JsonObject.h"
-#include "Editor.h"
 #include "Engine/Blueprint.h"
 #include "EngineUtils.h"            // TActorIterator
 #include "GameFramework/Actor.h"
@@ -12,13 +12,33 @@
 #include "UObject/SoftObjectPath.h"
 #include "UObject/UObjectGlobals.h"
 
+namespace
+{
+	// AActor::GetActorLabel() is WITH_EDITOR-only (it lives behind the editor-only label storage), so it
+	// cannot be called from a Type=Runtime module that BuildPlugin compiles in a non-editor configuration.
+	// In the editor we return the friendly label byte-for-byte as before; outside the editor (packaged game,
+	// where labels do not exist) we fall back to the object name, which is the actor's only stable identifier
+	// there. This preserves today's editor behaviour exactly while keeping the module packageable (§12).
+	FString ObjectRefActorLabel(const AActor* Actor)
+	{
+#if WITH_EDITOR
+		return Actor->GetActorLabel();
+#else
+		return Actor->GetName();
+#endif
+	}
+}
+
 namespace FUnrealMcpObjectRef
 {
 	UWorld* GetEditorWorld()
 	{
-		if (!GEditor)
-			return nullptr;
-		return GEditor->GetEditorWorldContext().World();
+		// §12.6: the runtime module owns no GEditor reference. The world is resolved via the injected
+		// FUnrealMcpWorldProvider resolver — the editor coordinator installs one returning the editor
+		// world (`GEditor->GetEditorWorldContext().World()`), preserving today's behaviour byte-for-byte;
+		// the runtime subsystem (R3) installs a game-world resolver. Null when no resolver is set, exactly
+		// matching the old `!GEditor -> nullptr` contract outside the editor.
+		return FUnrealMcpWorldProvider::GetActiveWorld();
 	}
 
 	UClass* ResolveClass(const FString& ClassRef)
@@ -65,7 +85,7 @@ namespace FUnrealMcpObjectRef
 		for (TActorIterator<AActor> It(World); It; ++It)
 		{
 			AActor* Actor = *It;
-			if (Actor->GetActorLabel().Equals(ActorRef, ESearchCase::CaseSensitive)
+			if (ObjectRefActorLabel(Actor).Equals(ActorRef, ESearchCase::CaseSensitive)
 				|| Actor->GetName().Equals(ActorRef, ESearchCase::CaseSensitive)
 				|| Actor->GetPathName().Equals(ActorRef, ESearchCase::CaseSensitive))
 			{
@@ -76,7 +96,7 @@ namespace FUnrealMcpObjectRef
 		// Case-insensitive label fallback (LLM-supplied labels are often loosely cased).
 		for (TActorIterator<AActor> It(World); It; ++It)
 		{
-			if (It->GetActorLabel().Equals(ActorRef, ESearchCase::IgnoreCase))
+			if (ObjectRefActorLabel(*It).Equals(ActorRef, ESearchCase::IgnoreCase))
 				return *It;
 		}
 
@@ -133,7 +153,7 @@ namespace FUnrealMcpObjectRef
 		if (!Actor)
 			return Json;
 		Json->SetStringField(TEXT("name"), Actor->GetName());
-		Json->SetStringField(TEXT("label"), Actor->GetActorLabel());
+		Json->SetStringField(TEXT("label"), ObjectRefActorLabel(Actor));
 		Json->SetStringField(TEXT("class"), Actor->GetClass() ? Actor->GetClass()->GetPathName() : FString());
 		Json->SetStringField(TEXT("path"), Actor->GetPathName());
 		return Json;

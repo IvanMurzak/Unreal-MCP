@@ -17,20 +17,25 @@ class FUnrealMcpAuxWindows;
 class FUnrealMcpDevControlServer;
 
 /**
- * Plugin-lifetime coordinator (docs/ARCHITECTURE.md §0). Wires the four subsystems together: the tool
- * registry (+ core tools), the game-thread dispatcher (§4), the IPC bridge server (§1), and the sidecar
- * manager (§6). Owned by the editor module; started in StartupModule and torn down on editor pre-exit /
- * ShutdownModule so the sidecar never orphans (§6 layer 1).
+ * Plugin-lifetime EDITOR coordinator (docs/ARCHITECTURE.md §0, §12.3 Model A). Builds the runtime-owned
+ * subsystems (tool registry + core tools, the game-thread dispatcher §4, the IPC bridge server §1, the
+ * sidecar manager §6 — all now living in the UnrealMcpRuntime module) and layers the editor-only families
+ * + Slate UI + local-server manager + dev-control bridge on top of the SAME registry. Owned by the editor
+ * module; started in StartupModule and torn down on editor pre-exit / ShutdownModule so the sidecar never
+ * orphans (§6 layer 1). Installs the §12.6 EDITOR world resolver into FUnrealMcpWorldProvider on Startup.
+ *
+ * Renamed from the misleading `FUnrealMcpRuntime` (it was always the editor coordinator, never a runtime
+ * one — §12 executive finding 3). The actual runtime bootstrap is UUnrealMcpRuntimeSubsystem, landing in R3.
  */
-class FUnrealMcpRuntime
+class FUnrealMcpEditorCoordinator
 {
 public:
 	// Declared (not defaulted inline) and defined in the .cpp so the TUniquePtr deleters for the
 	// forward-declared subsystem members are instantiated where those types are complete. Without this,
 	// a non-unity / adaptive build of UnrealMcpEditorModule.cpp (which only sees the forward decls)
 	// fails with C4150 "deletion of pointer to incomplete type".
-	FUnrealMcpRuntime();
-	~FUnrealMcpRuntime();
+	FUnrealMcpEditorCoordinator();
+	~FUnrealMcpEditorCoordinator();
 
 	void Startup();
 	void Shutdown();

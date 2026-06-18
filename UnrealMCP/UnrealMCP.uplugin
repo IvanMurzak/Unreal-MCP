@@ -16,6 +16,11 @@
   "Installed": false,
   "Modules": [
     {
+      "Name": "UnrealMcpRuntime",
+      "Type": "Runtime",
+      "LoadingPhase": "Default"
+    },
+    {
       "Name": "UnrealMcpEditor",
       "Type": "Editor",
       "LoadingPhase": "Default"

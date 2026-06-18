@@ -11,7 +11,7 @@
  * stateful accumulator: feed it raw bytes off the socket and it yields complete UTF-8 lines, buffering
  * partial lines across reads. Pure (no socket dependency) so it is unit-tested by an Automation spec.
  */
-class UNREALMCPEDITOR_API FUnrealMcpNdjsonAccumulator
+class UNREALMCPRUNTIME_API FUnrealMcpNdjsonAccumulator
 {
 public:
 	static constexpr int32 DefaultMaxLineBytes = 64 * 1024 * 1024;

@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Ivan Murzak. Licensed under the Apache License, Version 2.0.
 // See the LICENSE file in the repository root for more information.
 
-#include "UnrealMcpCoreTools.h"
+#include "UnrealMcpRuntimeCoreTools.h"
 #include "UnrealMcpToolRegistry.h"
 
 /**
@@ -12,7 +12,7 @@
  */
 namespace UnrealMcpPingTool
 {
-	UNREALMCPEDITOR_API void Register(FUnrealMcpToolRegistry& Registry)
+	UNREALMCPRUNTIME_API void Register(FUnrealMcpToolRegistry& Registry)
 	{
 		Registry.Tool(TEXT("ping"))
 			.Title(TEXT("Ping"))

@@ -4,6 +4,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Dom/JsonObject.h"   // TSharedPtr<FJsonObject> appears by-value in the UNREALMCPRUNTIME_API signatures below
 
 class UObject;
 
@@ -29,11 +30,11 @@ namespace FUnrealMcpPropertyJson
 	 * non-empty, only those dotted paths (e.g. `rootComponent.relativeLocation`, `staticMesh`) are
 	 * retained in the result (scoped read). Returns an empty object when @p Object is null.
 	 */
-	UNREALMCPEDITOR_API TSharedPtr<FJsonObject> SerializeObject(const UObject* Object, const TArray<FString>& Paths);
+	UNREALMCPRUNTIME_API TSharedPtr<FJsonObject> SerializeObject(const UObject* Object, const TArray<FString>& Paths);
 
 	/** Filter @p Source down to the requested dotted @p Paths, preserving nesting. Empty Paths → @p Source
 	 *  returned as-is (no copy — callers must not mutate the result in that case). */
-	UNREALMCPEDITOR_API TSharedPtr<FJsonObject> FilterByPaths(const TSharedPtr<FJsonObject>& Source, const TArray<FString>& Paths);
+	UNREALMCPRUNTIME_API TSharedPtr<FJsonObject> FilterByPaths(const TSharedPtr<FJsonObject>& Source, const TArray<FString>& Paths);
 
 	/**
 	 * Apply each field of @p Properties to @p Object via reflection (§3.2). Actor transform keys
@@ -43,5 +44,5 @@ namespace FUnrealMcpPropertyJson
 	 * fields successfully applied; appends a one-line reason per failed field to @p OutErrors. Marks the
 	 * object modified / dirty and fires PostEditChange when at least one field changed.
 	 */
-	UNREALMCPEDITOR_API int32 ApplyProperties(UObject* Object, const TSharedPtr<FJsonObject>& Properties, TArray<FString>& OutErrors);
+	UNREALMCPRUNTIME_API int32 ApplyProperties(UObject* Object, const TSharedPtr<FJsonObject>& Properties, TArray<FString>& OutErrors);
 }
