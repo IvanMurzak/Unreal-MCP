@@ -60,6 +60,8 @@ Unlike Unity and Godot (C# engines that host the .NET `McpPlugin` in-process), U
 - [Install](#install)
 - [Updating the plugin](#updating-the-plugin)
 - [First run](#first-run)
+- [Best practices for AI requests](#best-practices-for-ai-requests)
+- [Discovering capabilities](#discovering-capabilities)
 - [Tools](#tools) — all 8 families, 62 tools
 - [Per-tool enable / disable](#per-tool-enable--disable)
 - [`unreal-mcp-cli`](#unreal-mcp-cli)
@@ -157,6 +159,80 @@ Updating in place must always leave you running the **new** code. The risk is UE
 Connection settings persist to `<Project>/Saved/Config/UnrealMcp/ai-game-developer-config.json` (`Saved/` is gitignored by every UE template, so tokens never land in VCS by default).
 
 > That's it. Ask your AI *"Spawn three cubes in a row and a point light above them"* and watch it happen. ✨
+
+![AI Game Developer — Unreal MCP](https://github.com/IvanMurzak/Unreal-MCP/blob/main/docs/img/promo/hazzard-divider.svg?raw=true)
+
+# Best practices for AI requests
+
+You drive Unreal-MCP in **plain natural language**. You don't name tools or learn an API — you describe the outcome you want, and the AI agent picks the right MCP tool(s) from the plugin's catalog, runs them against your live editor, and reads the structured results back. A good request is **small, concrete, and verifiable**.
+
+**Anatomy of a good request:**
+
+1. **State the concrete outcome, not the tool.** Say *"Create a third-person player Blueprint in the current level"*, not *"call blueprint-create then blueprint-add-component"*. The agent maps intent to tools.
+2. **Reference the current context.** "In the active level", "on the selected actor", "in the `Arena` map" — the plugin has read tools (`actor-find`, `level-get-data`, `editor-selection-get`, `blueprint-get`) so the agent can resolve those references for itself.
+3. **Keep the first request tiny.** One level, one actor, one Blueprint. Verify it worked, then build up. Big multi-step asks are fine once you trust the loop.
+4. **Ask for a screenshot to verify visually.** Unreal-MCP can capture the viewport, game view, a camera, or an isolated actor as a PNG the LLM can inspect directly. Adding *"…then take a viewport screenshot so I can see it"* closes the loop with visual feedback the agent reads too.
+5. **Let the agent compile and self-correct.** `blueprint-compile` and `source-compile` return a **structured error/warning list**, so *"compile it and fix any errors"* is a valid, powerful request — the intended Unreal feedback loop.
+6. **Name things explicitly when you'll refer back.** *"Create an actor named `Crate`"* lets the next request say *"move the Crate up by 200 units"*.
+
+A reliable shape for a first request:
+
+> **"In the current level, create `<thing>` named `<name>`, set `<one property>`, then take a viewport screenshot."**
+
+**Example prompts** (copy-pasteable):
+
+- **Actor placement:** *"Create a new Actor Blueprint with a static mesh cube and place three of them in the level."*
+- **Spawn + transform:** *"Spawn a `StaticMeshActor` named `Crate` at the player start, then move it up by 200 units and rotate it 45 degrees."*
+- **Level workflow:** *"Create a new level called `Arena`, open it, and list every actor in it."*
+- **C++ authoring + compile loop:** *"Create a new C++ Actor class called `Pickup`, add a Tick override, then compile the C++ and report any build errors."*
+- **Visual verification:** *"Take a screenshot of the editor viewport so I can see the layout."*
+
+**Blueprint authoring** is Unreal-MCP's flagship surface — full visual-scripting authoring with a compile feedback loop the AI can read and act on. These exercise the 11-tool Blueprint family:
+
+- **Create + populate a Blueprint:** *"Create a Blueprint named `BP_Door` that extends Actor, add a `StaticMeshComponent` called `Body`, then add a `BeginPlay` event."*
+- **Variables + defaults:** *"Add a float variable called `Health` to `BP_Player`, make it editable with a default of 100, and set the default move speed to 600."*
+- **Functions + compile:** *"Add a `TakeDamage` function to `BP_Player`, then compile `BP_Player` and tell me about any errors or warnings."*
+- **Inspect + instance:** *"Summarize the `BP_Player` Blueprint — its variables, components, functions, events, and parent chain — then drop three `BP_Door` instances into the level."*
+
+![AI Game Developer — Unreal MCP](https://github.com/IvanMurzak/Unreal-MCP/blob/main/docs/img/promo/hazzard-divider.svg?raw=true)
+
+# Discovering capabilities
+
+You don't need to memorize tool ids — capability discovery is **conversational**. Just ask the agent what it can do, and it enumerates the tools the plugin exposes (every MCP client calls `tools/list` on connect, so the agent always knows its current catalog). Patterns that work well:
+
+- **Ask the agent to list its tools.** *"List every AI Game Developer / Unreal MCP tool you can call right now, grouped by family."*
+- **Ask for the tool families.** *"What families of tools do you have for Unreal — actors, Blueprints, levels, assets, …?"* The agent groups its tools and summarizes each.
+- **Probe the connection first.** *"Ping the Unreal plugin to check the connection."* runs the `ping` tool and confirms the AI client ⇄ server ⇄ sidecar ⇄ editor chain is live before you ask for real work.
+- **Ask the agent to describe a specific tool.** *"What parameters does `blueprint-create` take?"* — MCP tools carry JSON schemas, so the agent reports required vs optional parameters.
+- **Use reflection as an escape hatch.** `reflection-method-find` / `reflection-method-call` let the agent discover and invoke `UFunction`s that aren't covered by a dedicated tool.
+
+**The 8 tool families** (62 built-in tools — full table under [Tools](#tools)):
+
+| Family | Tools | What it covers |
+| --- | --- | --- |
+| Actor & Component | 13 | Spawn / destroy / duplicate / find / modify actors; set-parent; add / get / modify / destroy / list components; read or modify any `UObject` by path. |
+| **Blueprint** | 11 | Create Blueprint classes; add / remove components; add / modify variables; set class-default (CDO) values; add functions & events; **compile** (structured error/warning loop); spawn instances into the level. |
+| Asset & Content | 11 | AssetRegistry find / get-data; create-folder, copy, move, delete, refresh; Material Instance create / modify / get-data; FBX & texture import. |
+| Editor & Reflection | 9 | Read / set editor application state (Play-In-Editor); selection get / set; console get / clear logs; run console command or CVar; find + call `UFunction`s. |
+| Level / Map | 7 | Create, open, save, get-data; list loaded sublevels (World-Partition aware); set-current; unload a streaming sublevel. |
+| Source / C++ | 6 | Read (sliced), create-class (header + cpp), update, delete, list module files, **compile** (Live Coding or UBT, structured error report). File ops are jailed to `<Project>/Source/`. |
+| Screenshot | 4 | Viewport, game view, camera (SceneCapture2D), and isolated-actor renders returned as PNG the LLM can inspect. |
+| Ping | 1 | Liveness probe — round-trips the whole plugin ⇄ sidecar ⇄ server chain. |
+
+**Key architectural fact — the .NET sidecar.** Unlike Unity and Godot (C# engines that host the .NET `McpPlugin` in-process), the Unreal editor is **C++**, so the .NET MCP host runs as an auto-managed **sidecar process** (`unreal-mcp-bridge`) that the plugin spawns and talks to over a localhost IPC channel. This is invisible day-to-day, but it's why the connection chain is **AI client ⇄ MCP server ⇄ `unreal-mcp-bridge` sidecar ⇄ Unreal plugin ⇄ live editor**, and why a stuck connection is usually the sidecar/IPC or auth rather than the tools themselves — `ping` round-trips the whole chain. Full design in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
+> Unreal-MCP is currently **beta** and installs via the `unreal-mcp-cli` (npm) today — see [Install](#install). All 62 tools are **built-in** ("core"); Unreal ships an extension contract ([Customize Tools](#customize-tools)) but no extension packages yet, so the family map above is the complete set. A precompiled Fab / Epic Marketplace listing is coming soon.
+
+**Discovery recipe** to get oriented in a fresh project:
+
+1. *"Ping the Unreal plugin and confirm we're connected."*
+2. *"List every tool you can call, grouped by the 8 families, with a one-line summary of each family."*
+3. *"What can you do with Blueprints specifically?"* (surfaces the 11-tool Blueprint family — the flagship surface)
+4. *"List every actor in the current level."* (`level-get-data`)
+5. *"Are we currently in Play-In-Editor?"* (`editor-application-get-state`)
+6. Pick one family (e.g. Blueprint) and ask for a tiny concrete action plus a viewport screenshot.
+
+Learn more on the website: the **[AI Game Developer docs](https://ai-game.dev/docs)**, the **[Unreal tools reference](https://ai-game.dev/docs/tools/unreal)**, and the **[Unreal engine page](https://ai-game.dev/engines/unreal)** at **[ai-game.dev](https://ai-game.dev)**.
 
 ![AI Game Developer — Unreal MCP](https://github.com/IvanMurzak/Unreal-MCP/blob/main/docs/img/promo/hazzard-divider.svg?raw=true)
 
@@ -479,7 +555,10 @@ An `MCP Tool` is a function the LLM can call to interact with Unreal. These tool
 - [GameDev-MCP-Server](https://github.com/IvanMurzak/GameDev-MCP-Server) — the shared local MCP server (`gamedev-mcp-server`)
 - [MCP-Plugin-dotnet](https://github.com/IvanMurzak/MCP-Plugin-dotnet) — the shared .NET MCP plugin/server core (`com.IvanMurzak.McpPlugin`)
 - [ReflectorNet](https://github.com/IvanMurzak/ReflectorNet) — the shared reflection/serialization core
-- [ai-game.dev](https://ai-game.dev) — the cloud backend
+- [ai-game.dev](https://ai-game.dev) — the cloud backend & website
+- [ai-game.dev/docs](https://ai-game.dev/docs) — documentation
+- [ai-game.dev/docs/tools/unreal](https://ai-game.dev/docs/tools/unreal) — the online Unreal tools reference
+- [ai-game.dev/engines/unreal](https://ai-game.dev/engines/unreal) — the Unreal engine page
 - [Model Context Protocol](https://modelcontextprotocol.io/)
 
 # License
