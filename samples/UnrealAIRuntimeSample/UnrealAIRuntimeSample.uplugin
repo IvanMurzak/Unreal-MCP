@@ -1,0 +1,29 @@
+{
+  "FileVersion": 3,
+  "Version": 1,
+  "VersionName": "1.0.0",
+  "FriendlyName": "Unreal AI Runtime Sample (in-game MCP extension)",
+  "Description": "Minimal standalone sample demonstrating the Unreal-MCP RUNTIME extension contract (docs/ARCHITECTURE.md §12.9): a Type=Runtime game module that registers a custom gameplay tool callable IN A LIVE GAME (PIE / Standalone / packaged Development). The 'game-time-dilation' tool reads and sets the live UWorld's AWorldSettings::TimeDilation, proving an extension author can drive real gameplay state over a runtime MCP connection — the UE analog of Unity's [AiTool] Chess-bot example. Mirrors samples/UnrealAITemplate (the EDITOR-side extension sample) but Type=Runtime so it compiles into a packaged game.",
+  "Category": "AI",
+  "CreatedBy": "Ivan Murzak",
+  "CreatedByURL": "https://github.com/IvanMurzak",
+  "DocsURL": "https://github.com/IvanMurzak/Unreal-MCP/blob/main/docs/EXTENSIONS.md",
+  "SupportURL": "https://github.com/IvanMurzak/Unreal-MCP/issues",
+  "CanContainContent": false,
+  "IsBetaVersion": true,
+  "IsExperimentalVersion": false,
+  "Installed": false,
+  "Modules": [
+    {
+      "Name": "UnrealAIRuntimeSample",
+      "Type": "Runtime",
+      "LoadingPhase": "Default"
+    }
+  ],
+  "Plugins": [
+    {
+      "Name": "UnrealMCP",
+      "Enabled": true
+    }
+  ]
+}

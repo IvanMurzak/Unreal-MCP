@@ -397,7 +397,7 @@ IModularFeatures::Get().RegisterModularFeature(
 **Learn more:**
 
 - **Full author guide:** [`docs/EXTENSIONS.md`](docs/EXTENSIONS.md) — the contract, the tool builder, lifecycle, ordering, isolation semantics, and versioning.
-- **Working sample:** [`samples/UnrealAITemplate/`](samples/UnrealAITemplate) — a complete, buildable plugin with a `hello-extension` tool and a compile-time switch (`UNREAL_AI_TEMPLATE_INVALID_SCHEMA=1`) that demonstrates the isolation behaviour first-hand.
+- **Working samples:** [`samples/UnrealAITemplate/`](samples/UnrealAITemplate) — a complete, buildable **editor** extension plugin with a `hello-extension` tool and a compile-time switch (`UNREAL_AI_TEMPLATE_INVALID_SCHEMA=1`) that demonstrates the isolation behaviour first-hand; [`samples/UnrealAIRuntimeSample/`](samples/UnrealAIRuntimeSample) — the **runtime (in-game)** counterpart, a `Type=Runtime` plugin whose `game-time-dilation` tool reads/sets the live world's time dilation, callable in a running game over a runtime MCP connection ([`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §12.9; see EXTENSIONS.md "Runtime usage").
 
 ![AI Game Developer — Unreal MCP](https://github.com/IvanMurzak/Unreal-MCP/blob/main/docs/img/promo/hazzard-divider.svg?raw=true)
 
@@ -467,7 +467,8 @@ An `MCP Tool` is a function the LLM can call to interact with Unreal. These tool
 | [`UnrealMCP/`](UnrealMCP/) | The UE editor plugin (C++, module `UnrealMcpEditor`, UE 5.5+ floor, developed against 5.7) |
 | [`bridge/`](bridge/) | The .NET 9 sidecar (`unreal-mcp-bridge`) — McpPlugin host, IPC ⇄ SignalR relay |
 | [`cli/`](cli/) | `unreal-mcp-cli` npm package (TypeScript) — 16 commands |
-| [`samples/UnrealAITemplate/`](samples/UnrealAITemplate/) | Extension template plugin (`hello-extension`) |
+| [`samples/UnrealAITemplate/`](samples/UnrealAITemplate/) | Editor extension template plugin (`hello-extension`) |
+| [`samples/UnrealAIRuntimeSample/`](samples/UnrealAIRuntimeSample/) | Runtime (in-game) extension sample (`game-time-dilation`, `Type=Runtime`) |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | The authoritative architecture design |
 | [`docs/EXTENSIONS.md`](docs/EXTENSIONS.md) | Extension author guide |
 | [`docs/RELEASING.md`](docs/RELEASING.md) | CI/CD + operator release runbook |
