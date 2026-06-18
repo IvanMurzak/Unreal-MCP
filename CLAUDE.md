@@ -129,12 +129,14 @@ separately in `cli/src/lib/server-version.ts` (`SERVER_VERSION`); bumping it req
 corresponding shared release to already exist (see `docs/RELEASING.md`).
 
 **Frozen NuGet pins** (lockstep with Godot-MCP; owned by the upstream release pipelines — NEVER bump
-here): `com.IvanMurzak.ReflectorNet` **5.3.1**, `com.IvanMurzak.McpPlugin` **6.9.0** (bridge — 6.9.0 also
+here): `com.IvanMurzak.ReflectorNet` **5.3.1**, `com.IvanMurzak.McpPlugin` **6.10.0** (bridge — 6.10.0 also
 supplies the shared engine-agnostic `com.IvanMurzak.McpPlugin.AgentConfig` module the bridge now consumes;
-keeps the ReflectorNet 5.3.1 dependency, so the Godot-MCP lockstep holds). The §2.3 `ProxyTool` lives in `bridge/`
-(`bridge/src/Tools/ProxyTool.cs` + `ProxyToolFactory.cs`) — `IRunTool` + `ToolManager.AddTool` are
-already public, so no upstream API bump was required; a future upstream 6.8.0 ProxyTool can replace the
-local copy through its own pipeline.
+keeps the ReflectorNet 5.3.1 dependency, so the Godot-MCP lockstep holds). This number drifts as upstream
+releases (it has gone 6.7.0 → 6.9.0 → 6.10.0); the authoritative pin is always whatever
+`bridge/src/com.IvanMurzak.Unreal.MCP.Bridge.csproj` declares — read it live, do not trust this line. The
+§2.3 `ProxyTool` lives in `bridge/` (`bridge/src/Tools/ProxyTool.cs` + `ProxyToolFactory.cs`) — `IRunTool`
++ `ToolManager.AddTool` are already public, so no upstream API bump was required; a future upstream
+ProxyTool can replace the local copy through its own pipeline.
 
 ## Conventions
 
