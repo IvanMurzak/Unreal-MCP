@@ -78,9 +78,21 @@ void FUnrealMcpEditorCoordinator::Startup()
 	// Discover 3rd-party extension tool providers (§5) and merge them into the registry BEFORE the bridge
 	// starts accepting, so the first manifest a sidecar reads on handshake already includes them. Late
 	// register/unregister events rebuild the registry and re-push the manifest via the OnChanged callback.
+	// §A.1 kind-aware OnChanged: a rebuild re-pushes ALL THREE manifests (tool + prompt + resource). The
+	// prompt/resource pushes are scaffold no-ops until P1/P2 wire those registries (and are gated on a
+	// v2-negotiated link), but firing all three here makes the extension manager's change contract
+	// kind-uniform so P1/P2 only add a registry — not a new notify path.
 	ExtensionManager = MakeUnique<FUnrealMcpExtensionManager>(
 		*Registry,
-		[this]() { if (BridgeServer.IsValid()) BridgeServer->PushManifest(); });
+		[this]()
+		{
+			if (BridgeServer.IsValid())
+			{
+				BridgeServer->PushManifest();
+				BridgeServer->PushPromptManifest();
+				BridgeServer->PushResourceManifest();
+			}
+		});
 	ExtensionManager->Startup();
 
 	const FString ProjectPath = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir());

@@ -52,8 +52,18 @@ public:
 	int32 GetBoundPort() const { return BoundPort; }
 	bool IsClientConnected() const { return bClientConnected; }
 
-	/** Re-push the manifest (call after the registry changes, §2.2 hot reload). No-op when disconnected. */
+	/** Re-push the tool manifest (call after the registry changes, §2.2 hot reload). No-op when disconnected. */
 	void PushManifest();
+
+	/**
+	 * Re-push the prompt / resource manifests (IPC v2, docs/ARCHITECTURE.md §A.1). SCAFFOLD STUBS (M16 P0):
+	 * a prompt/resource registry is not wired until P1/P2, so today these no-op (nothing to send) — they
+	 * exist so the kind-aware extension manager's OnChanged can fire all three Push*Manifest() uniformly.
+	 * Both are additionally GATED on a v2-negotiated link: on a tools-only (v1) connection they never send,
+	 * so an old sidecar keeps working. No-op when disconnected. The real bodies arrive with the P1/P2 registries.
+	 */
+	void PushPromptManifest();
+	void PushResourceManifest();
 
 	/**
 	 * Replace the effective connection config and, if a sidecar is connected, push the §1.3 `config` message
@@ -114,6 +124,19 @@ public:
 	/** Deterministic IPC port for a project path (§1.1): 30000 + sha(path) % 10000. */
 	static int32 ComputeDeterministicPort(const FString& ProjectPath);
 
+	/**
+	 * Negotiate the effective IPC version for a link from the two peers' advertised versions (§A.1): the
+	 * MINIMUM of @p LocalVersion and @p RemoteVersion (the highest both understand). A non-positive / absent
+	 * remote version (a legacy handshake that omitted the field) is treated as v1, so a v2 plugin paired with
+	 * a v1 sidecar negotiates to 1 and stays tools-only. Pure + static + UNREALMCPRUNTIME_API-exported so the
+	 * negotiation matrix is unit-testable from the Tests module without standing up a live socket — and so the
+	 * .NET sidecar's IpcProtocol.NegotiateVersion and this share one documented contract.
+	 */
+	static int32 NegotiateIpcVersion(int32 LocalVersion, int32 RemoteVersion);
+
+	/** This plugin's advertised IPC wire-protocol version (§9.2 / §A.1). Exported for the negotiation spec. */
+	static int32 GetIpcVersion();
+
 	// FRunnable (the reader loop) ------------------------------------------------------------------
 	virtual bool Init() override;
 	virtual uint32 Run() override;
@@ -127,9 +150,21 @@ private:
 	void HandleToolCall(const TSharedPtr<FJsonObject>& Message);
 	void HandleToolCancel(const TSharedPtr<FJsonObject>& Message);
 
+	/**
+	 * Handle a v2 `prompt-get` / `resource-read` request (§A.1). SCAFFOLD STUBS (M16 P0): no prompt/resource
+	 * registry is wired until P1/P2, so each answers with an `error`-status response carrying a "not
+	 * implemented" reason (correlated by requestId), exactly as a tool-call to an unknown tool would fail —
+	 * never silently dropped, so the sidecar's pending call resolves instead of hanging. The real bodies
+	 * (marshalling through FUnrealMcpGameThreadDispatcher) land with the P1/P2 registries.
+	 */
+	void HandlePromptGet(const TSharedPtr<FJsonObject>& Message);
+	void HandleResourceRead(const TSharedPtr<FJsonObject>& Message);
+
 	bool SendMessage(const TSharedPtr<FJsonObject>& Message);
 	void SendHandshakeAck();
 	void SendManifestLocked();
+	void SendPromptManifestLocked();   // v2 scaffold: no-op until a prompt registry is wired (P1)
+	void SendResourceManifestLocked(); // v2 scaffold: no-op until a resource registry is wired (P2)
 	void SendConfigLocked(); // WriteMutex held: frame + send the §1.3 `config` message (no-op when no config)
 	bool TrySendFramedLocked(const TArray<uint8>& Framed); // WriteMutex+ConnectionMutex held, ClientSocket valid
 	void CloseActiveConnection();
@@ -180,6 +215,13 @@ private:
 	FThreadSafeBool bStopRequested = false;
 	FThreadSafeBool bClientConnected = false;
 	FThreadSafeBool bHandshakeOk = false;
+
+	// The IPC version negotiated on the current connection's handshake (§A.1): min(this plugin's IpcVersion,
+	// the sidecar's advertised ipcVersion). 0 until a handshake completes. When below the v2 floor the link is
+	// tools-only and the prompt/resource families are never pushed (an old sidecar keeps working). Written on
+	// the reader thread in HandleHandshake (under ConnectionMutex with bHandshakeOk), read on the reader thread
+	// in the Push*ManifestLocked gate — same thread, so a plain int suffices.
+	int32 NegotiatedIpcVersion = 0;
 	FThreadSafeCounter LastActivitySeconds; // wall-clock seconds of last inbound activity
 
 	mutable FCriticalSection WriteMutex;     // serializes all socket sends (§1.2)

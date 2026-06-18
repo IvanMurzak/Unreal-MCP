@@ -34,7 +34,7 @@ struct FUnrealMcpExtensionRecord
  * Discovers IUnrealMcpToolProvider modular features, merges their tools into the plugin's single
  * FUnrealMcpToolRegistry in deterministic order (sorted by ExtensionId), isolates invalid/duplicate
  * entries (§5), and persists per-extension enable state. On every change it rebuilds the registry and
- * fires OnChanged so the bridge re-pushes the manifest (§2.2 hot-reload).
+ * fires OnChanged so the bridge re-pushes the manifest(s) (§2.2 / §A.1 hot-reload).
  *
  * Threading: all rebuilds run on the game thread. Initial discovery happens during plugin StartupModule;
  * late register/unregister events arrive on the game thread (module load/unload), as do UI toggles (§7).
@@ -42,6 +42,17 @@ struct FUnrealMcpExtensionRecord
  * Persistence: disabledExtensions[] is stored in a minimal standalone JSON file under the project's
  * Saved dir. TODO(connection-config §8): fold this into FUnrealMcpConfig once that store lands, so the
  * extension enable state shares one config surface with connection settings.
+ *
+ * KIND-AWARENESS (M16, docs/ARCHITECTURE.md §A.2). This manager is the single hot-reload coordinator for
+ * ALL extension kinds — tools today, prompts (P1) and resources (P2) next. The shared, load-bearing
+ * machinery is the re-entrancy guard / deferred-rebuild, the disabled-set persistence, and the ExtensionId
+ * sort; it is written ONCE here and reused per kind so the §5 isolation guarantees hold identically for
+ * prompts and resources. The OnChanged callback is already kind-uniform: a single rebuild fires the owner's
+ * notify, which re-pushes the tool AND prompt AND resource manifests (the coordinator/subsystem wires all
+ * three Push*Manifest() — the prompt/resource pushes are scaffold no-ops until P1/P2). When P1/P2 land they
+ * add, alongside the tool Registry below: a prompt/resource registry reference, an IUnrealMcp{Prompt,Resource}Provider
+ * modular-feature subscription (mirroring RegisteredHandle/UnregisteredHandle), and a RegisterExtension pass in
+ * RebuildFromProviders gated by the SAME DisabledExtensions set — no new notify path, no duplicated guard.
  */
 class UNREALMCPRUNTIME_API FUnrealMcpExtensionManager
 {

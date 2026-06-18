@@ -71,9 +71,20 @@ void UUnrealMcpRuntimeSubsystem::Initialize(FSubsystemCollectionBase& Collection
 
 	// Discover §5 extension providers and merge them BEFORE the bridge arms, so the first manifest a sidecar
 	// reads on a later Connect already includes them; a late register/unregister re-pushes the manifest.
+	// §A.1 kind-aware OnChanged: a rebuild re-pushes ALL THREE manifests (tool + prompt + resource). The
+	// prompt/resource pushes are scaffold no-ops until P1/P2 wire those registries (and are gated on a
+	// v2-negotiated link); firing all three keeps the change contract kind-uniform with the editor coordinator.
 	Impl->ExtensionManager = MakeUnique<FUnrealMcpExtensionManager>(
 		*Impl->Registry,
-		[this]() { if (Impl && Impl->BridgeServer.IsValid()) Impl->BridgeServer->PushManifest(); });
+		[this]()
+		{
+			if (Impl && Impl->BridgeServer.IsValid())
+			{
+				Impl->BridgeServer->PushManifest();
+				Impl->BridgeServer->PushPromptManifest();
+				Impl->BridgeServer->PushResourceManifest();
+			}
+		});
 	Impl->ExtensionManager->Startup();
 
 	const FString ProjectPath = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir());

@@ -29,6 +29,13 @@ namespace
 	const FString TypeToolCall = TEXT("tool-call");
 	const FString TypeToolResponse = TEXT("tool-response");
 	const FString TypeToolCancel = TEXT("tool-cancel");
+	// v2 prompt/resource message families (docs/ARCHITECTURE.md §A.1) — exchanged only on a v2-negotiated link.
+	const FString TypePromptManifest = TEXT("prompt-manifest");
+	const FString TypeResourceManifest = TEXT("resource-manifest");
+	const FString TypePromptGet = TEXT("prompt-get");
+	const FString TypeResourceRead = TEXT("resource-read");
+	const FString TypePromptResponse = TEXT("prompt-response");
+	const FString TypeResourceResponse = TEXT("resource-response");
 	const FString TypeConfig = TEXT("config");
 	const FString TypeStatus = TEXT("status");
 	const FString TypeDeviceAuth = TEXT("device-auth");
@@ -47,7 +54,13 @@ namespace
 	const FString TypePong = TEXT("pong");
 	const FString TypeShutdown = TEXT("shutdown");
 
-	constexpr int32 IpcVersion = 1;
+	// IPC wire-protocol version (§9.2 / §A.1). v2 adds the prompt/resource message families; it is NEGOTIATED on
+	// the handshake (min of this plugin's version and the sidecar's advertised ipcVersion). A v1 sidecar paired
+	// with this v2 plugin negotiates down to 1 and the link stays tools-only — the tool path is identical at every
+	// version, so a version mismatch never breaks tools (an old sidecar keeps working).
+	constexpr int32 IpcVersion = 2;
+	// The lowest negotiated version at which the prompt/resource families are exchanged (§A.1).
+	constexpr int32 PromptsResourcesMinVersion = 2;
 	constexpr int32 HeartbeatIntervalSeconds = 5;
 	constexpr int32 HeartbeatTimeoutSeconds = 15;
 	constexpr int32 DefaultToolTimeoutMs = 30000;
@@ -107,6 +120,21 @@ int32 FUnrealMcpBridgeServer::ComputeDeterministicPort(const FString& InProjectP
 		(static_cast<uint32>(Digest[2]) << 8) |
 		(static_cast<uint32>(Digest[3]));
 	return 30000 + static_cast<int32>(Value % 10000);
+}
+
+int32 FUnrealMcpBridgeServer::NegotiateIpcVersion(int32 LocalVersion, int32 RemoteVersion)
+{
+	// min(local, remote) = the highest version both peers understand (§A.1). A non-positive / absent remote
+	// (a legacy handshake that omitted the field) is treated as v1. Mirrors the sidecar's
+	// IpcProtocol.NegotiateVersion so both ends agree on the negotiated version without re-exchanging it.
+	const int32 Remote = RemoteVersion > 0 ? RemoteVersion : 1;
+	const int32 Local = LocalVersion > 0 ? LocalVersion : 1;
+	return FMath::Min(Local, Remote);
+}
+
+int32 FUnrealMcpBridgeServer::GetIpcVersion()
+{
+	return IpcVersion;
 }
 
 int32 FUnrealMcpBridgeServer::Start(const FString& InToken, const FString& InProjectPath, const FString& InPluginVersion, const FString& InEngineVersion,
@@ -329,6 +357,8 @@ void FUnrealMcpBridgeServer::HandleLine(const FString& Line, int32 Generation)
 	if (Type == TypeHandshake)        HandleHandshake(Message, Generation);
 	else if (Type == TypeToolCall)    HandleToolCall(Message);
 	else if (Type == TypeToolCancel)  HandleToolCancel(Message);
+	else if (Type == TypePromptGet)   HandlePromptGet(Message);     // v2 scaffold stub (§A.1)
+	else if (Type == TypeResourceRead) HandleResourceRead(Message); // v2 scaffold stub (§A.1)
 	else if (Type == TypePing)
 	{
 		TSharedPtr<FJsonObject> Pong = MakeShared<FJsonObject>();
@@ -387,19 +417,36 @@ void FUnrealMcpBridgeServer::HandleHandshake(const TSharedPtr<FJsonObject>& Mess
 				Generation, ConnectionGeneration);
 			return;
 		}
+		// §A.1 version negotiation: the link runs at min(this plugin, sidecar). A v1 sidecar negotiates down to
+		// 1 (tools-only); a v2 sidecar enables the prompt/resource families. Read the sidecar's advertised version
+		// off the handshake (absent/legacy → v1). Stored under ConnectionMutex alongside bHandshakeOk so the
+		// post-handshake manifest push (same reader thread) reads a settled value.
+		int32 SidecarIpcVersion = 0;
+		{
+			double VersionNumber = 0.0;
+			if (Message->TryGetNumberField(TEXT("ipcVersion"), VersionNumber))
+				SidecarIpcVersion = static_cast<int32>(VersionNumber);
+		}
+		NegotiatedIpcVersion = FUnrealMcpBridgeServer::NegotiateIpcVersion(IpcVersion, SidecarIpcVersion);
 		bHandshakeOk = true;
 	}
 
-	UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] handshake accepted."));
+	UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] handshake accepted (IPC v%d negotiated; prompts/resources %s)."),
+		NegotiatedIpcVersion,
+		NegotiatedIpcVersion >= PromptsResourcesMinVersion ? TEXT("ENABLED") : TEXT("tools-only"));
 	SendHandshakeAck();
 
-	// §1.5: on Ready immediately push the manifest AND the effective connection config (§1.3 `config`, §8).
+	// §1.5: on Ready immediately push the manifest(s) AND the effective connection config (§1.3 `config`, §8).
 	// The handshake-ack already carries the config for the sidecar's initial SignalR connect; the standalone
 	// `config` message satisfies the §8 "on Ready and on change" contract and is the channel a later UI edit
-	// re-pushes through (SetEffectiveConfig → PushConfig).
+	// re-pushes through (SetEffectiveConfig → PushConfig). The prompt/resource manifests are §A.1 scaffold
+	// no-ops until P1/P2 wire the registries (and are gated on a v2-negotiated link), but pushing them here
+	// keeps the on-Ready ordering identical to what P1/P2 expect.
 	{
 		FScopeLock Lock(&WriteMutex);
 		SendManifestLocked();
+		SendPromptManifestLocked();
+		SendResourceManifestLocked();
 		SendConfigLocked();
 	}
 
@@ -526,6 +573,39 @@ void FUnrealMcpBridgeServer::HandleToolCancel(const TSharedPtr<FJsonObject>& Mes
 		(*Flag).Get() = true;
 }
 
+void FUnrealMcpBridgeServer::HandlePromptGet(const TSharedPtr<FJsonObject>& Message)
+{
+	// SCAFFOLD (M16 P0, §A.1): no prompt registry is wired until P1. Answer with an error-status
+	// `prompt-response` correlated by requestId so the sidecar's pending call resolves (fail fast) rather
+	// than hanging to its timeout — exactly how a tool-call to an unknown tool fails. P1 replaces this body
+	// with a real dispatch through FUnrealMcpGameThreadDispatcher (game-thread, no-modal-UI, §4).
+	FString RequestId;
+	Message->TryGetStringField(TEXT("requestId"), RequestId);
+
+	TSharedPtr<FJsonObject> Response = MakeShared<FJsonObject>();
+	Response->SetStringField(TEXT("type"), TypePromptResponse);
+	Response->SetStringField(TEXT("requestId"), RequestId);
+	Response->SetStringField(TEXT("status"), TEXT("error"));
+	Response->SetStringField(TEXT("error"), TEXT("Prompts are not implemented yet (scaffold)."));
+	SendMessage(Response);
+}
+
+void FUnrealMcpBridgeServer::HandleResourceRead(const TSharedPtr<FJsonObject>& Message)
+{
+	// SCAFFOLD (M16 P0, §A.1): no resource registry is wired until P2 — same error-status fast-fail as the
+	// prompt stub. P2 replaces this with a real read dispatched on the game thread (an asset enumeration must
+	// not block the game thread unboundedly, §A.1 risk 7).
+	FString RequestId;
+	Message->TryGetStringField(TEXT("requestId"), RequestId);
+
+	TSharedPtr<FJsonObject> Response = MakeShared<FJsonObject>();
+	Response->SetStringField(TEXT("type"), TypeResourceResponse);
+	Response->SetStringField(TEXT("requestId"), RequestId);
+	Response->SetStringField(TEXT("status"), TEXT("error"));
+	Response->SetStringField(TEXT("error"), TEXT("Resources are not implemented yet (scaffold)."));
+	SendMessage(Response);
+}
+
 bool FUnrealMcpBridgeServer::SendMessage(const TSharedPtr<FJsonObject>& Message)
 {
 	const FString Json = SerializeCondensed(Message);
@@ -644,6 +724,40 @@ void FUnrealMcpBridgeServer::PushManifest()
 		return;
 	FScopeLock Lock(&WriteMutex);
 	SendManifestLocked();
+}
+
+void FUnrealMcpBridgeServer::PushPromptManifest()
+{
+	if (!bClientConnected || !bHandshakeOk)
+		return;
+	FScopeLock Lock(&WriteMutex);
+	SendPromptManifestLocked();
+}
+
+void FUnrealMcpBridgeServer::PushResourceManifest()
+{
+	if (!bClientConnected || !bHandshakeOk)
+		return;
+	FScopeLock Lock(&WriteMutex);
+	SendResourceManifestLocked();
+}
+
+void FUnrealMcpBridgeServer::SendPromptManifestLocked()
+{
+	// SCAFFOLD (M16 P0, §A.1): no prompt registry exists until P1, so there is nothing to send. Also gated on a
+	// v2-negotiated link — a tools-only (v1) sidecar never receives a prompt-manifest. The real body (mirroring
+	// SendManifestLocked over the prompt registry's BuildManifestJson) lands with the P1 registry.
+	if (NegotiatedIpcVersion < PromptsResourcesMinVersion)
+		return;
+	// (no-op: P1 fills this in)
+}
+
+void FUnrealMcpBridgeServer::SendResourceManifestLocked()
+{
+	// SCAFFOLD (M16 P0, §A.1): no resource registry exists until P2. Same v2 gate + no-op as the prompt manifest.
+	if (NegotiatedIpcVersion < PromptsResourcesMinVersion)
+		return;
+	// (no-op: P2 fills this in)
 }
 
 void FUnrealMcpBridgeServer::SendConfigLocked()
