@@ -650,6 +650,174 @@ void FUnrealMcpEditorViewModelSpec::Define()
 			TestEqual("two agents", VM->GetAiAgents().Num(), 2);
 		});
 	});
+
+	Describe("Connection-status lifecycle (issue #116)", [this]()
+	{
+		// Drive the view-model into a live, green "Connected" state the way the runtime does: arm via Connect()
+		// then apply a Connected `status` from the sidecar. Returns a VM presenting Connected + armed.
+		auto MakeConnectedVM = [](TSharedRef<FRecording> Rec) -> TSharedRef<FUnrealMcpEditorViewModel>
+		{
+			TSharedRef<FUnrealMcpEditorViewModel> VM = MakeViewModel(Rec);
+			VM->Connect();
+			TSharedPtr<FJsonObject> Status = MakeShared<FJsonObject>();
+			Status->SetStringField(TEXT("connectionState"), TEXT("Connected"));
+			Status->SetBoolField(TEXT("keepConnected"), true);
+			VM->ApplyStatus(Status);
+			return VM;
+		};
+
+		It("Bug 1: switching connection mode while connected drops the green Connected state immediately", [this, MakeConnectedVM]()
+		{
+			TSharedRef<FRecording> Rec = MakeShared<FRecording>();
+			// Default config mode is Cloud — connect green in Cloud, then switch to Custom (a retarget).
+			TSharedRef<FUnrealMcpEditorViewModel> VM = MakeConnectedVM(Rec);
+			TestEqual("green before the switch", static_cast<int32>(VM->GetConnectionState()), static_cast<int32>(EUnrealMcpConnectionState::Connected));
+
+			VM->SetConnectionMode(EUnrealMcpConnectionMode::Custom);
+			// The dot must leave green the INSTANT the target changes — not wait for the sidecar's re-dial status.
+			TestNotEqual("no longer Connected after the mode switch",
+				static_cast<int32>(VM->GetConnectionState()), static_cast<int32>(EUnrealMcpConnectionState::Connected));
+			TestEqual("optimistically Connecting to the new target",
+				static_cast<int32>(VM->GetConnectionState()), static_cast<int32>(EUnrealMcpConnectionState::Connecting));
+			// Still armed: the user retargeted, they did not Disconnect — a re-dial to the new target is expected.
+			TestTrue("still armed after the retarget", VM->IsReconnectArmed());
+			// And it pushed the new config so the sidecar re-dials the new target.
+			TestTrue("pushed the retargeted config", Rec->PushCount >= 1);
+		});
+
+		It("Bug 1: the symmetric Custom->Cloud switch also drops the green state", [this]()
+		{
+			TSharedRef<FRecording> Rec = MakeShared<FRecording>();
+			TSharedRef<FUnrealMcpEditorViewModel> VM = MakeViewModel(Rec);
+			// Enter Custom, connect green there, then switch back to Cloud.
+			VM->SetConnectionMode(EUnrealMcpConnectionMode::Custom);
+			VM->Connect();
+			TSharedPtr<FJsonObject> Status = MakeShared<FJsonObject>();
+			Status->SetStringField(TEXT("connectionState"), TEXT("Connected"));
+			Status->SetBoolField(TEXT("keepConnected"), true);
+			VM->ApplyStatus(Status);
+			TestEqual("green in Custom", static_cast<int32>(VM->GetConnectionState()), static_cast<int32>(EUnrealMcpConnectionState::Connected));
+
+			VM->SetConnectionMode(EUnrealMcpConnectionMode::Cloud);
+			TestEqual("Connecting after Custom->Cloud",
+				static_cast<int32>(VM->GetConnectionState()), static_cast<int32>(EUnrealMcpConnectionState::Connecting));
+		});
+
+		It("Bug 1: editing the Server URL to a new valid host while connected drops the green state", [this]()
+		{
+			TSharedRef<FRecording> Rec = MakeShared<FRecording>();
+			TSharedRef<FUnrealMcpEditorViewModel> VM = MakeViewModel(Rec);
+			VM->SetConnectionMode(EUnrealMcpConnectionMode::Custom);
+			VM->SetCustomHost(TEXT("http://localhost:5244"));
+			VM->Connect();
+			TSharedPtr<FJsonObject> Status = MakeShared<FJsonObject>();
+			Status->SetStringField(TEXT("connectionState"), TEXT("Connected"));
+			Status->SetBoolField(TEXT("keepConnected"), true);
+			VM->ApplyStatus(Status);
+			TestEqual("green before the host edit", static_cast<int32>(VM->GetConnectionState()), static_cast<int32>(EUnrealMcpConnectionState::Connected));
+
+			// Edit to a DIFFERENT valid host: retargets the dial → drop off green.
+			VM->SetCustomHost(TEXT("http://localhost:9999"));
+			TestEqual("Connecting after the host retarget",
+				static_cast<int32>(VM->GetConnectionState()), static_cast<int32>(EUnrealMcpConnectionState::Connecting));
+		});
+
+		It("Bug 1: re-typing the SAME host (no retarget) does NOT churn the Connected state", [this]()
+		{
+			TSharedRef<FRecording> Rec = MakeShared<FRecording>();
+			TSharedRef<FUnrealMcpEditorViewModel> VM = MakeViewModel(Rec);
+			VM->SetConnectionMode(EUnrealMcpConnectionMode::Custom);
+			VM->SetCustomHost(TEXT("http://localhost:5244"));
+			VM->Connect();
+			TSharedPtr<FJsonObject> Status = MakeShared<FJsonObject>();
+			Status->SetStringField(TEXT("connectionState"), TEXT("Connected"));
+			Status->SetBoolField(TEXT("keepConnected"), true);
+			VM->ApplyStatus(Status);
+
+			// Same host value — the dial target is unchanged, so the live Connected state must be preserved.
+			VM->SetCustomHost(TEXT("http://localhost:5244"));
+			TestEqual("still Connected after a no-retarget host set",
+				static_cast<int32>(VM->GetConnectionState()), static_cast<int32>(EUnrealMcpConnectionState::Connected));
+		});
+
+		It("Bug 1: an invalid host edit while connected does NOT drop green (no retarget happens)", [this]()
+		{
+			TSharedRef<FRecording> Rec = MakeShared<FRecording>();
+			TSharedRef<FUnrealMcpEditorViewModel> VM = MakeViewModel(Rec);
+			VM->SetConnectionMode(EUnrealMcpConnectionMode::Custom);
+			VM->SetCustomHost(TEXT("http://localhost:5244"));
+			VM->Connect();
+			TSharedPtr<FJsonObject> Status = MakeShared<FJsonObject>();
+			Status->SetStringField(TEXT("connectionState"), TEXT("Connected"));
+			Status->SetBoolField(TEXT("keepConnected"), true);
+			VM->ApplyStatus(Status);
+
+			// A malformed URL never becomes the dial target (no push) — so the live link to the OLD valid host stands.
+			VM->SetCustomHost(TEXT("not-a-url"));
+			TestEqual("still Connected after a malformed host edit",
+				static_cast<int32>(VM->GetConnectionState()), static_cast<int32>(EUnrealMcpConnectionState::Connected));
+		});
+
+		It("Bug 1: a mode switch while DISCONNECTED does not fabricate a Connecting state", [this]()
+		{
+			TSharedRef<FRecording> Rec = MakeShared<FRecording>();
+			TSharedRef<FUnrealMcpEditorViewModel> VM = MakeViewModel(Rec);
+			// Never connected (unarmed, Disconnected). A retarget must not claim a connect is in flight.
+			TestEqual("starts Disconnected", static_cast<int32>(VM->GetConnectionState()), static_cast<int32>(EUnrealMcpConnectionState::Disconnected));
+			VM->SetConnectionMode(EUnrealMcpConnectionMode::Custom);
+			TestEqual("stays Disconnected (no green to drop, no re-dial armed)",
+				static_cast<int32>(VM->GetConnectionState()), static_cast<int32>(EUnrealMcpConnectionState::Disconnected));
+		});
+
+		It("Bug 2: stopping the local server while connected drives the state off Connected", [this]()
+		{
+			TSharedRef<FRecording> Rec = MakeShared<FRecording>();
+			TSharedRef<FUnrealMcpEditorViewModel> VM = MakeViewModel(Rec);
+			// Custom + http = launchable; start the local server, then connect green to it.
+			VM->SetConnectionMode(EUnrealMcpConnectionMode::Custom);
+			VM->SetTransportMethod(EUnrealMcpTransportMethod::Http);
+			VM->ToggleLocalServer(); // start
+			TestTrue("server running", VM->IsLocalServerRunning());
+			VM->Connect();
+			TSharedPtr<FJsonObject> Status = MakeShared<FJsonObject>();
+			Status->SetStringField(TEXT("connectionState"), TEXT("Connected"));
+			Status->SetBoolField(TEXT("keepConnected"), true);
+			VM->ApplyStatus(Status);
+			TestEqual("green before stopping the server", static_cast<int32>(VM->GetConnectionState()), static_cast<int32>(EUnrealMcpConnectionState::Connected));
+
+			// Stop the server the editor is connected to: the dot must leave green WITHOUT a manual Disconnect.
+			VM->ToggleLocalServer(); // stop
+			TestEqual("server stopped once", Rec->ServerStopCount, 1);
+			TestFalse("server no longer running", VM->IsLocalServerRunning());
+			TestNotEqual("no longer Connected after stopping the server",
+				static_cast<int32>(VM->GetConnectionState()), static_cast<int32>(EUnrealMcpConnectionState::Connected));
+			// Stays armed (the user stopped the SERVER, not the connection) — a re-Start should resume; while armed a
+			// torn-down link reads as Degraded (background retry), so the action button leaves "Disconnect".
+			TestEqual("Degraded after the server stop", static_cast<int32>(VM->GetConnectionState()), static_cast<int32>(EUnrealMcpConnectionState::Degraded));
+			TestTrue("still armed", VM->IsReconnectArmed());
+		});
+
+		It("Bug 2: the action button label updates off 'Disconnect' once the server-stop drops the link", [this]()
+		{
+			TSharedRef<FRecording> Rec = MakeShared<FRecording>();
+			TSharedRef<FUnrealMcpEditorViewModel> VM = MakeViewModel(Rec);
+			VM->SetConnectionMode(EUnrealMcpConnectionMode::Custom);
+			VM->SetTransportMethod(EUnrealMcpTransportMethod::Http);
+			VM->ToggleLocalServer();
+			VM->Connect();
+			TSharedPtr<FJsonObject> Status = MakeShared<FJsonObject>();
+			Status->SetStringField(TEXT("connectionState"), TEXT("Connected"));
+			Status->SetBoolField(TEXT("keepConnected"), true);
+			VM->ApplyStatus(Status);
+			TestEqual("button is Disconnect while Connected",
+				FUnrealMcpEditorViewModel::GetButtonText(VM->GetConnectionState()).ToString(), FString(TEXT("Disconnect")));
+
+			VM->ToggleLocalServer(); // stop
+			// Degraded → the tri-state maps to "Stop" (the user can halt the background retry) — no longer "Disconnect".
+			TestEqual("button updated off Disconnect after the server stop",
+				FUnrealMcpEditorViewModel::GetButtonText(VM->GetConnectionState()).ToString(), FString(TEXT("Stop")));
+		});
+	});
 }
 
 #endif // WITH_DEV_AUTOMATION_TESTS

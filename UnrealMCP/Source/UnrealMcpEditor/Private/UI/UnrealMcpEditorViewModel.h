@@ -354,4 +354,14 @@ private:
 
 	// Persist (if a sink is wired) then push the §1.3 config to the sidecar (if a sink is wired).
 	void PersistAndPush();
+
+	/**
+	 * Bug #116: a connection-target change (mode switch Cloud↔Custom, or editing the Custom Server URL to a new
+	 * valid host) RETARGETS the dial — the bridge re-dials the new target (DecideConfigTransition→Reconnect). If we
+	 * are presenting a live/armed link (Connected/Degraded) to the OLD target, optimistically demote to Connecting so
+	 * the green dot drops the instant the target flips, instead of lagging until the sidecar's honest re-dial `status`
+	 * arrives. No-op when unarmed (keepConnected=false → no green to drop and no re-dial will run). The sidecar's
+	 * subsequent `status` (Connecting→Connected on success, Disconnected/Degraded on failure) converges the UI.
+	 */
+	void ReflectTargetChangeOptimistically();
 };
