@@ -14,6 +14,7 @@
 
 class FUnrealMcpToolRegistry;
 class FUnrealMcpPromptRegistry;
+class FUnrealMcpResourceRegistry;
 class FUnrealMcpGameThreadDispatcher;
 class FTcpListener;
 class FSocket;
@@ -33,10 +34,11 @@ struct FIPv4Endpoint;
 class UNREALMCPRUNTIME_API FUnrealMcpBridgeServer : public FRunnable
 {
 public:
-	// @p InPromptRegistry is nullable — a tools-only caller may omit it and the prompt path stays inert
-	// (SendPromptManifestLocked / HandlePromptGet guard on it). Both coordinators pass it (P1).
+	// @p InPromptRegistry / @p InResourceRegistry are nullable — a tools-only caller may omit them and the
+	// prompt/resource paths stay inert (Send*ManifestLocked / Handle* guard on them). Both coordinators pass
+	// the prompt registry (P1) and the resource registry (P2).
 	FUnrealMcpBridgeServer(FUnrealMcpToolRegistry& InRegistry, FUnrealMcpGameThreadDispatcher& InDispatcher,
-		FUnrealMcpPromptRegistry* InPromptRegistry = nullptr);
+		FUnrealMcpPromptRegistry* InPromptRegistry = nullptr, FUnrealMcpResourceRegistry* InResourceRegistry = nullptr);
 	virtual ~FUnrealMcpBridgeServer() override;
 
 	/**
@@ -60,11 +62,11 @@ public:
 	void PushManifest();
 
 	/**
-	 * Re-push the prompt / resource manifests (IPC v2, docs/ARCHITECTURE.md §A.1). SCAFFOLD STUBS (M16 P0):
-	 * a prompt/resource registry is not wired until P1/P2, so today these no-op (nothing to send) — they
-	 * exist so the kind-aware extension manager's OnChanged can fire all three Push*Manifest() uniformly.
-	 * Both are additionally GATED on a v2-negotiated link: on a tools-only (v1) connection they never send,
-	 * so an old sidecar keeps working. No-op when disconnected. The real bodies arrive with the P1/P2 registries.
+	 * Re-push the prompt / resource manifests (IPC v2, docs/ARCHITECTURE.md §A.1). Both mirror PushManifest
+	 * over their respective registry's BuildManifestJson (the prompt registry wired in P1, the resource
+	 * registry in P2). Both are GATED on a v2-negotiated link: on a tools-only (v1) connection they never
+	 * send, so an old sidecar keeps working; they also no-op when the corresponding registry is null (a
+	 * tools-only caller) or when disconnected.
 	 */
 	void PushPromptManifest();
 	void PushResourceManifest();
@@ -155,11 +157,10 @@ private:
 	void HandleToolCancel(const TSharedPtr<FJsonObject>& Message);
 
 	/**
-	 * Handle a v2 `prompt-get` / `resource-read` request (§A.1). SCAFFOLD STUBS (M16 P0): no prompt/resource
-	 * registry is wired until P1/P2, so each answers with an `error`-status response carrying a "not
-	 * implemented" reason (correlated by requestId), exactly as a tool-call to an unknown tool would fail —
-	 * never silently dropped, so the sidecar's pending call resolves instead of hanging. The real bodies
-	 * (marshalling through FUnrealMcpGameThreadDispatcher) land with the P1/P2 registries.
+	 * Handle a v2 `prompt-get` / `resource-read` request (§A.1). Each marshals the registry read onto the game
+	 * thread through FUnrealMcpGameThreadDispatcher (§4) and answers with the correlated `prompt-response` /
+	 * `resource-response`. A null registry (tools-only caller) answers with a correlated `error` status rather
+	 * than dropping the pending call. Prompts wired in P1; resources in P2.
 	 */
 	void HandlePromptGet(const TSharedPtr<FJsonObject>& Message);
 	void HandleResourceRead(const TSharedPtr<FJsonObject>& Message);
@@ -167,8 +168,8 @@ private:
 	bool SendMessage(const TSharedPtr<FJsonObject>& Message);
 	void SendHandshakeAck();
 	void SendManifestLocked();
-	void SendPromptManifestLocked();   // v2 scaffold: no-op until a prompt registry is wired (P1)
-	void SendResourceManifestLocked(); // v2 scaffold: no-op until a resource registry is wired (P2)
+	void SendPromptManifestLocked();   // v2: prompt registry wired (P1); v2-gated + null-guarded
+	void SendResourceManifestLocked(); // v2: resource registry wired (P2); v2-gated + null-guarded
 	void SendConfigLocked(); // WriteMutex held: frame + send the §1.3 `config` message (no-op when no config)
 	bool TrySendFramedLocked(const TArray<uint8>& Framed); // WriteMutex+ConnectionMutex held, ClientSocket valid
 	void CloseActiveConnection();
@@ -182,6 +183,9 @@ private:
 	// Nullable: the prompt registry (P1). When null the prompt path is inert (SendPromptManifestLocked /
 	// HandlePromptGet guard on it) so a tools-only build / test still compiles + links.
 	FUnrealMcpPromptRegistry* PromptRegistry = nullptr;
+	// Nullable: the resource registry (P2). When null the resource path is inert (SendResourceManifestLocked /
+	// HandleResourceRead guard on it) so a tools-only build / test still compiles + links.
+	FUnrealMcpResourceRegistry* ResourceRegistry = nullptr;
 	FUnrealMcpGameThreadDispatcher& Dispatcher;
 
 	FTcpListener* Listener = nullptr;

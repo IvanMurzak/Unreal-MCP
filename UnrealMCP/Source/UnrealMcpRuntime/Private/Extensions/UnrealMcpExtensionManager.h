@@ -10,8 +10,10 @@
 
 class FUnrealMcpToolRegistry;
 class FUnrealMcpPromptRegistry;
+class FUnrealMcpResourceRegistry;
 class IUnrealMcpToolProvider;
 class IUnrealMcpPromptProvider;
+class IUnrealMcpResourceProvider;
 class IModularFeature;
 
 /**
@@ -66,9 +68,11 @@ public:
 	 * @param InPromptRegistry  OPTIONAL (§A.2) prompt registry to ALSO merge prompt-provider extensions into. Nullable —
 	 *                          when null the manager is tool-only (existing call sites keep compiling). Gated by the SAME
 	 *                          DisabledExtensions set / re-entrancy guard / ExtensionId sort as the tool pass.
+	 * @param InResourceRegistry OPTIONAL (§A.2) resource registry to ALSO merge resource-provider extensions into. Nullable —
+	 *                          same gating + null-safe contract as @p InPromptRegistry (the resource analog).
 	 */
 	FUnrealMcpExtensionManager(FUnrealMcpToolRegistry& InRegistry, TFunction<void()> InOnChanged, const FString& InConfigPath = FString(),
-		FUnrealMcpPromptRegistry* InPromptRegistry = nullptr);
+		FUnrealMcpPromptRegistry* InPromptRegistry = nullptr, FUnrealMcpResourceRegistry* InResourceRegistry = nullptr);
 	~FUnrealMcpExtensionManager();
 
 	/** Load persisted disabled set, subscribe to modular-feature events, and run the initial rebuild. */
@@ -98,17 +102,25 @@ public:
 	/** Override the PROMPT provider source used by rebuilds (§A.2 test seam; default = live discovery). */
 	void SetPromptProviderSourceForTesting(TFunction<TArray<IUnrealMcpPromptProvider*>()> InSource) { PromptProviderSource = MoveTemp(InSource); }
 
+	/** Override the RESOURCE provider source used by rebuilds (§A.2 test seam; default = live discovery). */
+	void SetResourceProviderSourceForTesting(TFunction<TArray<IUnrealMcpResourceProvider*>()> InSource) { ResourceProviderSource = MoveTemp(InSource); }
+
 private:
 	/** Rebuild from the current ProviderSource (live IModularFeatures discovery by default). */
 	void Rebuild(bool bNotify);
 
 	TArray<IUnrealMcpToolProvider*> GatherProviders() const;
 	TArray<IUnrealMcpPromptProvider*> GatherPromptProviders() const;
+	TArray<IUnrealMcpResourceProvider*> GatherResourceProviders() const;
 
 	/** §A.2 prompt pass of a rebuild: clear previous prompt-extension contributions, then merge enabled+valid+
 	 *  non-duplicate prompt providers into PromptRegistry (same DisabledExtensions / IsValidExtensionId / sort).
 	 *  No-op when PromptRegistry == nullptr. Driven from RebuildFromProviders so the single OnChanged covers both. */
 	void RebuildPromptProviders();
+
+	/** §A.2 resource pass of a rebuild — the resource analog of RebuildPromptProviders (same gating + sort).
+	 *  No-op when ResourceRegistry == nullptr. Also driven from RebuildFromProviders under the single guard/notify. */
+	void RebuildResourceProviders();
 
 	void OnFeatureRegistered(const FName& Type, IModularFeature* Feature);
 	void OnFeatureUnregistered(const FName& Type, IModularFeature* Feature);
@@ -119,10 +131,13 @@ private:
 	FUnrealMcpToolRegistry& Registry;
 	// §A.2: nullable prompt registry. When set, RebuildFromProviders also runs a prompt pass.
 	FUnrealMcpPromptRegistry* PromptRegistry = nullptr;
+	// §A.2: nullable resource registry. When set, RebuildFromProviders also runs a resource pass.
+	FUnrealMcpResourceRegistry* ResourceRegistry = nullptr;
 	TFunction<void()> OnChanged;
 	FString ConfigPath;
 	TFunction<TArray<IUnrealMcpToolProvider*>()> ProviderSource;
 	TFunction<TArray<IUnrealMcpPromptProvider*>()> PromptProviderSource;
+	TFunction<TArray<IUnrealMcpResourceProvider*>()> ResourceProviderSource;
 
 	TArray<FUnrealMcpExtensionRecord> Records;
 	TSet<FString> DisabledExtensions;
@@ -130,6 +145,8 @@ private:
 	TArray<FString> RegisteredExtensionIds;
 	/** §A.2: extension ids that currently contributed prompts (the prompt-pass analog of RegisteredExtensionIds). */
 	TArray<FString> RegisteredPromptExtensionIds;
+	/** §A.2: extension ids that currently contributed resources (the resource-pass analog of RegisteredExtensionIds). */
+	TArray<FString> RegisteredResourceExtensionIds;
 
 	FDelegateHandle RegisteredHandle;
 	FDelegateHandle UnregisteredHandle;
