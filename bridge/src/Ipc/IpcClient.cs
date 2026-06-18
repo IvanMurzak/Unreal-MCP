@@ -29,7 +29,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
     /// reader thread (RunContinuationsAsynchronously). One mutex-guarded writer serializes every send so
     /// messages never interleave (§1.2).
     /// </summary>
-    public sealed class IpcClient : IToolCallChannel, IPromptCallChannel, IAsyncDisposable
+    public sealed class IpcClient : IToolCallChannel, IPromptCallChannel, IResourceCallChannel, IAsyncDisposable
     {
         private readonly string _host;
         private readonly int _port;
