@@ -117,6 +117,52 @@ void FUnrealMcpRuntimeSubsystemSpec::Define()
 		});
 	});
 
+	Describe("Disconnect + orphan safety (§12.4 lifecycle / §12.8 #1)", [this]()
+	{
+		// R6 (issue #127) — the connect/disconnect lifecycle and orphan-safe teardown. The LIVE sidecar
+		// spawn-and-handshake half is the packaged / PIE runbook (docs/RUNTIME-E2E.md, test.md Suite 7);
+		// these specs lock the headless-deterministic half: that Disconnect is a safe idempotent no-op when
+		// nothing was ever connected, so a game that calls Disconnect (or whose UGameInstance tears down)
+		// without a prior successful Connect leaves ZERO orphaned sidecar state behind.
+		It("Disconnect on a never-connected subsystem is a harmless no-op (no orphaned sidecar)", [this]()
+		{
+			UUnrealMcpRuntimeSubsystem* Subsystem = RuntimeSpecMakeSubsystem();
+			TestFalse(TEXT("precondition: not connected"), Subsystem->IsConnected());
+
+			// Disconnect must not require a prior Connect — the §12.4 teardown contract is "idempotent,
+			// a no-op when not connected" (the same path Deinitialize relies on for orphan safety).
+			Subsystem->Disconnect();
+			TestFalse(TEXT("still not connected after a no-op Disconnect"), Subsystem->IsConnected());
+
+			// A second Disconnect is equally safe (idempotency under repeated teardown).
+			Subsystem->Disconnect();
+			TestFalse(TEXT("idempotent second Disconnect"), Subsystem->IsConnected());
+		});
+
+		It("a rejected Connect leaves nothing to disconnect (kill switch off -> Connect false -> clean Disconnect)", [this]()
+		{
+			const bool bPrev = RuntimeSpecSetKillSwitch(false);
+			UUnrealMcpRuntimeSubsystem* Subsystem = RuntimeSpecMakeSubsystem();
+
+			// Connect rejects (kill switch off); it must NOT have spawned a sidecar, so IsConnected stays false
+			// and a follow-up Disconnect is a clean no-op — proving a rejected opt-in cannot orphan a process.
+			const bool bConnected = Subsystem->Connect(TEXT("http://localhost:8080"));
+			TestFalse(TEXT("rejected Connect"), bConnected);
+			Subsystem->Disconnect();
+			TestFalse(TEXT("nothing connected after rejected Connect + Disconnect"), Subsystem->IsConnected());
+
+			RuntimeSpecSetKillSwitch(bPrev);
+		});
+
+		It("Get(nullptr) returns null rather than crashing (console-command / BeginPlay null-context guard)", [this]()
+		{
+			// The §12.4 BeginPlay snippet and the UnrealMcp.Connect console command both reach the subsystem
+			// via Get(WorldContext); a null context (no world / no game instance) must resolve to null, not
+			// dereference. This is the guard that keeps a Disconnect-on-shutdown path orphan-safe.
+			TestNull(TEXT("Get(nullptr) -> null"), UUnrealMcpRuntimeSubsystem::Get(nullptr));
+		});
+	});
+
 	Describe("World resolver switching (§12.6)", [this]()
 	{
 		// Save + restore the global resolver so these tests do not perturb the editor coordinator's installed
@@ -135,6 +181,41 @@ void FUnrealMcpRuntimeSubsystemSpec::Define()
 			TestNull(TEXT("after Clear, GetActiveWorld is null"), FUnrealMcpWorldProvider::GetActiveWorld());
 
 			// Re-install the editor resolver so the rest of the suite (which may resolve worlds) is unaffected.
+			FUnrealMcpWorldProvider::SetWorldResolver([]() -> UWorld*
+			{
+				return GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+			});
+		});
+
+		It("swaps editor<->runtime resolvers and GetActiveWorld follows whichever is active (§12.6 dual-bootstrap)", [this]()
+		{
+			// R6 (issue #127): the §12.6 design point is that the SAME runtime module is driven by an EDITOR
+			// resolver (FUnrealMcpEditorCoordinator -> editor world) or a RUNTIME resolver (the subsystem ->
+			// GetGameInstance()->GetWorld()), and GetActiveWorld() routes to whichever bootstrap installed
+			// last. We inject two distinct fixture worlds standing in for "the editor world" and "the live
+			// game world" and assert the swap is honoured both directions — the headless proxy for the
+			// editor->PIE->packaged resolver handoff the runbook exercises live.
+			UWorld* EditorFixtureWorld  = NewObject<UWorld>(GetTransientPackage());
+			UWorld* RuntimeFixtureWorld = NewObject<UWorld>(GetTransientPackage());
+			TestNotEqual(TEXT("the two fixture worlds are distinct"), EditorFixtureWorld, RuntimeFixtureWorld);
+
+			// Editor bootstrap installs its resolver.
+			FUnrealMcpWorldProvider::SetWorldResolver([EditorFixtureWorld]() -> UWorld* { return EditorFixtureWorld; });
+			TestEqual(TEXT("editor resolver -> editor world"),
+				FUnrealMcpWorldProvider::GetActiveWorld(), EditorFixtureWorld);
+
+			// Runtime bootstrap installs its resolver (e.g. a packaged game's UGameInstanceSubsystem) — the
+			// later install wins, exactly as the runtime subsystem's Initialize() overrides any editor resolver.
+			FUnrealMcpWorldProvider::SetWorldResolver([RuntimeFixtureWorld]() -> UWorld* { return RuntimeFixtureWorld; });
+			TestEqual(TEXT("runtime resolver -> runtime/game world"),
+				FUnrealMcpWorldProvider::GetActiveWorld(), RuntimeFixtureWorld);
+
+			// And back to the editor resolver (a runtime teardown re-installing the editor resolver).
+			FUnrealMcpWorldProvider::SetWorldResolver([EditorFixtureWorld]() -> UWorld* { return EditorFixtureWorld; });
+			TestEqual(TEXT("swapped back -> editor world"),
+				FUnrealMcpWorldProvider::GetActiveWorld(), EditorFixtureWorld);
+
+			// Restore the live editor resolver so the rest of the suite is unaffected.
 			FUnrealMcpWorldProvider::SetWorldResolver([]() -> UWorld*
 			{
 				return GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
