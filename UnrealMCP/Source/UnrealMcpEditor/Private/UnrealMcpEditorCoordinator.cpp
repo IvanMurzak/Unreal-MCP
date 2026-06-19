@@ -59,21 +59,20 @@ void FUnrealMcpEditorCoordinator::Startup()
 	FUnrealMcpLogCollector::Get().Startup();
 
 	Registry = MakeUnique<FUnrealMcpToolRegistry>();
-	// §12.3 Model A: the editor coordinator registers BOTH the runtime-safe families (which also work over a
-	// runtime connection — they live in the runtime module) AND the editor-only families on top of the SAME
-	// registry. The runtime bootstrap subsystem (R3) registers ONLY the runtime-safe subset in a packaged game.
-	// --- Runtime-safe families (UnrealMcpRuntimeCoreTools.h, §12.7) ---
-	UnrealMcpPingTool::Register(*Registry);
-	UnrealMcpActorTools::Register(*Registry); // §10 actor / component family — runtime-safe (World->SpawnActor + WITH_EDITOR guards)
-	UnrealMcpConsoleReflectionTools::Register(*Registry); // §10 console + reflection runtime subset (console-*, reflection-method-*)
-	UnrealMcpRuntimeScreenshotTools::Register(*Registry); // §10 screenshot runtime subset (screenshot-game-view, screenshot-camera)
-	UnrealMcpRuntimeLevelTools::Register(*Registry); // §10 read-only level-get-data (runtime-safe)
+	// §12.3 Model A: the editor coordinator builds the registry and registers the runtime-safe `ping` (from
+	// the runtime module) PLUS every engine-development family on top of the SAME registry. All of these
+	// families are EDITOR-ONLY — they drive the editor (undo, asset registry, Blueprint compile, the editor
+	// world) and several are RCE-class — so they live in the editor module and are NOT compiled into a packaged
+	// game. The runtime bootstrap subsystem (UUnrealMcpRuntimeSubsystem) registers ONLY `ping` in a packaged
+	// game; a game adds its own runtime tools via an IUnrealMcpToolProvider extension (RegisterToolProvider).
+	UnrealMcpPingTool::Register(*Registry); // runtime-safe liveness probe (UnrealMcpRuntimeCoreTools.h)
 	// --- Editor-only families (UnrealMcpCoreTools.h) ---
+	UnrealMcpActorTools::Register(*Registry); // §10 actor / component family
 	UnrealMcpBlueprintTools::Register(*Registry); // §10 flagship Blueprint family (CORE)
 	UnrealMcpAssetTools::Register(*Registry); // §10 asset / Content-Browser family (issue #10)
-	UnrealMcpEditorTools::Register(*Registry); // §10 editor-application / selection family (issue #19, editor-only subset)
-	UnrealMcpLevelTools::Register(*Registry); // §10 level / map WRITE family (issue #16, Unity Scene.* analog)
-	UnrealMcpScreenshotTools::Register(*Registry); // §10 editor screenshot subset (screenshot-viewport, screenshot-isolated)
+	UnrealMcpEditorTools::Register(*Registry); // §10 editor / console / reflection family (issue #19)
+	UnrealMcpLevelTools::Register(*Registry); // §10 level / map family (issue #16, Unity Scene.* analog)
+	UnrealMcpScreenshotTools::Register(*Registry); // §10 screenshot / viewport-capture family (issue #17)
 	UnrealMcpSourceTools::Register(*Registry); // §10 C++ source / script family (issue #18)
 
 	// §A.1 prompt registry (P1): the prompt sibling of the tool registry, built on the SAME Model A path. The
