@@ -15,13 +15,10 @@
 #include "GameFramework/Actor.h"
 
 /**
- * Editor screenshot / viewport-capture tool family specs (docs/ARCHITECTURE.md §10, issue #17, §12.7).
- * Covers the two EDITOR-ONLY tools — screenshot-viewport, screenshot-isolated. The runtime-safe subset
- * (screenshot-game-view, screenshot-camera) moved to the runtime module in R4; its specs live in
- * UnrealMcpRuntimeScreenshotToolsSpec.cpp.
+ * Screenshot / viewport-capture tool family specs (docs/ARCHITECTURE.md §10, issue #17).
  *
  * These are GPU-free: they cover registration, the dimension clamp/cap logic, and every argument /
- * precondition error branch (missing 'actor', unresolved refs, malformed background hex). The actual
+ * precondition error branch (missing 'camera'/'actor', unresolved refs, no PIE session). The actual
  * pixel-capture paths CANNOT run headless (`-nullrhi` has no GPU) — those are LIVE-VERIFIED WINDOWED
  * over the bridge. To keep the suite green headless, the capture branch is asserted to return a clean
  * "rendering unavailable" error (never a crash) when FApp::CanEverRender() is false, rather than being
@@ -44,20 +41,21 @@ void FUnrealMcpScreenshotToolsSpec::Define()
 {
 	Describe("registration", [this]()
 	{
-		It("registers the two editor screenshot tools with kebab-case ids", [this]()
+		It("registers all four screenshot tools with kebab-case ids", [this]()
 		{
 			FUnrealMcpToolRegistry Registry;
 			UnrealMcpScreenshotTools::Register(Registry);
 
 			const TArray<FString> Expected = {
-				TEXT("screenshot-viewport"), TEXT("screenshot-isolated")
+				TEXT("screenshot-viewport"), TEXT("screenshot-game-view"),
+				TEXT("screenshot-camera"), TEXT("screenshot-isolated")
 			};
 			for (const FString& Name : Expected)
 			{
 				TestTrue(FString::Printf(TEXT("has %s"), *Name), Registry.HasTool(Name));
 				TestTrue(FString::Printf(TEXT("%s is a valid kebab id"), *Name), FUnrealMcpToolRegistry::IsValidToolName(Name));
 			}
-			TestEqual(TEXT("exactly two tools"), Registry.Num(), Expected.Num());
+			TestEqual(TEXT("exactly four tools"), Registry.Num(), Expected.Num());
 		});
 
 		It("marks every screenshot tool read-only (capture never mutates the scene)", [this]()
@@ -65,7 +63,8 @@ void FUnrealMcpScreenshotToolsSpec::Define()
 			FUnrealMcpToolRegistry Registry;
 			UnrealMcpScreenshotTools::Register(Registry);
 			const TArray<FString> Names = {
-				TEXT("screenshot-viewport"), TEXT("screenshot-isolated")
+				TEXT("screenshot-viewport"), TEXT("screenshot-game-view"),
+				TEXT("screenshot-camera"), TEXT("screenshot-isolated")
 			};
 			for (const FString& Name : Names)
 			{
@@ -108,6 +107,20 @@ void FUnrealMcpScreenshotToolsSpec::Define()
 
 	Describe("error paths (GPU-free)", [this]()
 	{
+		It("screenshot-camera errors when 'camera' is missing", [this]()
+		{
+			FUnrealMcpToolRegistry Registry; UnrealMcpScreenshotTools::Register(Registry);
+			TestFalse(TEXT("not success"), RunScreenshot(Registry, TEXT("screenshot-camera"), Args()).bSuccess);
+		});
+
+		It("screenshot-camera errors for an unresolved camera reference", [this]()
+		{
+			FUnrealMcpToolRegistry Registry; UnrealMcpScreenshotTools::Register(Registry);
+			TSharedPtr<FJsonObject> A = Args();
+			A->SetStringField(TEXT("camera"), TEXT("__definitely_missing_camera__"));
+			TestFalse(TEXT("not success"), RunScreenshot(Registry, TEXT("screenshot-camera"), A).bSuccess);
+		});
+
 		It("screenshot-isolated errors when 'actor' is missing", [this]()
 		{
 			FUnrealMcpToolRegistry Registry; UnrealMcpScreenshotTools::Register(Registry);
@@ -120,6 +133,14 @@ void FUnrealMcpScreenshotToolsSpec::Define()
 			TSharedPtr<FJsonObject> A = Args();
 			A->SetStringField(TEXT("actor"), TEXT("__definitely_missing_actor__"));
 			TestFalse(TEXT("not success"), RunScreenshot(Registry, TEXT("screenshot-isolated"), A).bSuccess);
+		});
+
+		It("screenshot-game-view errors with no active PIE session", [this]()
+		{
+			// No Play-In-Editor session runs under the Automation harness, so this is the documented
+			// no-PIE error branch (validated before the GPU guard).
+			FUnrealMcpToolRegistry Registry; UnrealMcpScreenshotTools::Register(Registry);
+			TestFalse(TEXT("not success"), RunScreenshot(Registry, TEXT("screenshot-game-view"), Args()).bSuccess);
 		});
 
 		It("screenshot-isolated rejects a malformed background hex after the actor resolves", [this]()

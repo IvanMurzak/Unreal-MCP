@@ -223,66 +223,43 @@ void FUnrealMcpRuntimeSubsystemSpec::Define()
 		});
 	});
 
-	Describe("runtime manifest separation (§12.7 R4 DoD)", [this]()
+	Describe("runtime manifest separation (ping-only built-in)", [this]()
 	{
-		// Build a registry with EXACTLY the runtime-safe families the runtime bootstrap subsystem registers
-		// (UnrealMcpRuntimeSubsystem::Initialize: ping + actor/component + console/reflection + screenshot
-		// subset + level-get-data). This is the authoritative headless proxy for the packaged-game runtime
-		// manifest: the subsystem builds its registry privately inside Initialize() (which needs a live
-		// UGameInstance + bridge), so asserting against the SAME registration list here proves the manifest's
-		// shape without the live harness — and is what makes "editor-only tools absent from the runtime
-		// manifest" a deterministic CI gate rather than a flaky live-e2e step.
-		auto BuildRuntimeRegistry = [](FUnrealMcpToolRegistry& Registry)
-		{
-			UnrealMcpPingTool::Register(Registry);
-			UnrealMcpActorTools::Register(Registry);
-			UnrealMcpConsoleReflectionTools::Register(Registry);
-			UnrealMcpRuntimeScreenshotTools::Register(Registry);
-			UnrealMcpRuntimeLevelTools::Register(Registry);
-		};
-
-		It("includes the runtime-safe tools and EXCLUDES every editor-only tool", [this, BuildRuntimeRegistry]()
+		// Build a registry with EXACTLY what the runtime bootstrap subsystem registers
+		// (UUnrealMcpRuntimeSubsystem::Initialize): `ping` and nothing else. The subsystem builds its registry
+		// privately inside Initialize() (which needs a live UGameInstance + bridge), so asserting against the
+		// SAME registration list here proves the runtime manifest's shape without the live harness — and is
+		// what makes "the runtime ships ONLY ping; every engine-development tool is editor-only" a deterministic
+		// CI gate rather than a flaky live-e2e step. A game adds its own runtime tools via an
+		// IUnrealMcpToolProvider extension, which is exercised separately (extension specs).
+		It("the runtime built-in manifest is EXACTLY {ping} — every engine-development tool is absent", [this]()
 		{
 			FUnrealMcpToolRegistry Registry;
-			BuildRuntimeRegistry(Registry);
+			UnrealMcpPingTool::Register(Registry); // the ONLY built-in the runtime subsystem registers
 
-			// --- Runtime-safe tools MUST be present (the family also works over a runtime connection). ---
-			const TCHAR* const RuntimeExpected[] = {
-				TEXT("ping"),
-				// actor / component family (13)
-				TEXT("actor-create"), TEXT("actor-destroy"), TEXT("actor-duplicate"), TEXT("actor-find"),
-				TEXT("actor-modify"), TEXT("actor-set-parent"), TEXT("actor-component-add"),
-				TEXT("actor-component-destroy"), TEXT("actor-component-get"), TEXT("actor-component-modify"),
-				TEXT("actor-component-list-all"), TEXT("object-get-data"), TEXT("object-modify"),
-				// console + reflection runtime subset (5)
+			// --- ping is present and is the SOLE built-in. ---
+			TestTrue(TEXT("runtime manifest HAS ping"), Registry.HasTool(TEXT("ping")));
+			TestEqual(TEXT("runtime built-in tool count == 1 (ping only)"), Registry.Num(), 1);
+
+			// --- Every engine-development tool MUST be ABSENT from the runtime built-in manifest. ---
+			const TCHAR* const EditorOnlyForbidden[] = {
+				// actor / component family (now editor-only)
+				TEXT("actor-create"), TEXT("actor-destroy"), TEXT("object-get-data"), TEXT("object-modify"),
+				// console + reflection (now editor-only)
 				TEXT("console-get-logs"), TEXT("console-clear-logs"), TEXT("console-run-command"),
 				TEXT("reflection-method-find"), TEXT("reflection-method-call"),
-				// screenshot runtime subset (2)
-				TEXT("screenshot-game-view"), TEXT("screenshot-camera"),
-				// read-only level data (1)
-				TEXT("level-get-data")
-			};
-			for (const TCHAR* Name : RuntimeExpected)
-				TestTrue(FString::Printf(TEXT("runtime manifest HAS %s"), Name), Registry.HasTool(Name));
-
-			// The runtime set is exactly these (1 + 13 + 5 + 2 + 1 = 22).
-			TestEqual(TEXT("runtime tool count == 22"), Registry.Num(), (int32)UE_ARRAY_COUNT(RuntimeExpected));
-
-			// --- Editor-only tools MUST be ABSENT from the runtime manifest. ---
-			const TCHAR* const EditorOnlyForbidden[] = {
-				// editor-application / selection
-				TEXT("editor-application-get-state"), TEXT("editor-application-set-state"),
-				TEXT("editor-selection-get"), TEXT("editor-selection-set"),
-				// editor screenshot subset
+				// screenshot (now editor-only)
 				TEXT("screenshot-viewport"), TEXT("screenshot-isolated"),
-				// level WRITE + editor list
-				TEXT("level-create"), TEXT("level-open"), TEXT("level-save"),
+				TEXT("screenshot-game-view"), TEXT("screenshot-camera"),
+				// level read + write (now editor-only)
+				TEXT("level-get-data"), TEXT("level-create"), TEXT("level-open"), TEXT("level-save"),
 				TEXT("level-list-loaded"), TEXT("level-set-current"), TEXT("level-unload-sublevel"),
-				// representative asset / blueprint / source family members
-				TEXT("asset-find"), TEXT("blueprint-create"), TEXT("source-compile")
+				// representative asset / blueprint / editor-application / source family members
+				TEXT("asset-find"), TEXT("blueprint-create"), TEXT("editor-application-get-state"),
+				TEXT("editor-selection-get"), TEXT("source-compile")
 			};
 			for (const TCHAR* Name : EditorOnlyForbidden)
-				TestFalse(FString::Printf(TEXT("runtime manifest does NOT have editor-only %s"), Name), Registry.HasTool(Name));
+				TestFalse(FString::Printf(TEXT("runtime manifest does NOT have engine-dev tool %s"), Name), Registry.HasTool(Name));
 		});
 	});
 }

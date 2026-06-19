@@ -49,11 +49,13 @@ public class UnrealMcpRuntime : ModuleRules
 		//  - Networking/Sockets  -> FUnrealMcpBridgeServer (localhost TCP listener, §1)
 		//  - Json/JsonUtilities  -> NDJSON framing + FProperty<->JSON schema/serialization (§1.2, §3)
 		//  - Projects            -> IPluginManager (plugin version/paths, bundled-sidecar resolution, §6)
-		//  - ImageWrapper/RenderCore/RHI -> the runtime-screenshot subset (kept here for the §12.7 R4
-		//    families that will land later; harmless in an editor build, runtime-available in a packaged game)
 		// Deliberately NO UnrealEd / Slate / EditorSubsystem / AssetRegistry / AssetTools / BlueprintGraph /
-		// KismetCompiler / HTTP / FileUtilities / HTTPServer / LiveCoding here — those stay editor-only in
-		// UnrealMcpEditor.Build.cs. This module must remain GEditor-free (R1 grep gate) and packageable.
+		// KismetCompiler / HTTP / FileUtilities / HTTPServer / LiveCoding / ImageWrapper / RenderCore / RHI
+		// here — those stay editor-only in UnrealMcpEditor.Build.cs. The runtime module ships only `ping` plus
+		// the infra (bridge/registry/dispatcher/sidecar/world-provider/extension-manager), so it pulls no
+		// rendering/capture deps; the engine-development tool families (incl. the screenshot family that uses
+		// ImageWrapper/RenderCore/RHI) are EDITOR-ONLY. This module must remain GEditor-free (R1 grep gate)
+		// and packageable.
 		PrivateDependencyModuleNames.AddRange(new string[]
 		{
 			// CoreUObject + Engine are PUBLIC deps (above) — the R3 public UObject headers expose them.
@@ -61,9 +63,6 @@ public class UnrealMcpRuntime : ModuleRules
 			"Sockets",
 			"JsonUtilities",
 			"Projects",
-			"ImageWrapper",
-			"RenderCore",
-			"RHI",
 		});
 
 		// R3 (§12.8 #3): the bUnrealMcpAllowShipping Build flag (default false) → UNREAL_MCP_ALLOW_SHIPPING.

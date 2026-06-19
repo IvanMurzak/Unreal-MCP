@@ -26,15 +26,15 @@
 #include "Camera/CameraComponent.h"
 
 /**
- * The editor screenshot / viewport-capture tool family (docs/ARCHITECTURE.md §10 "screenshot family",
- * issue #17, §12.7). Two kebab-case EDITOR-ONLY tools that return a base64 PNG as MCP image content:
+ * The screenshot / viewport-capture tool family (docs/ARCHITECTURE.md §10 "screenshot family", issue
+ * #17). Four kebab-case CORE tools that return a base64 PNG as MCP image content:
  *
- *  - `screenshot-viewport`   — active editor viewport via FViewport::ReadPixels (GEditor->GetActiveViewport).
+ *  - `screenshot-viewport`   — active editor viewport via FViewport::ReadPixels.
+ *  - `screenshot-game-view`  — PIE/game view via the PIE FViewport; structured error when no PIE session.
+ *  - `screenshot-camera`     — render from a §3.2-resolved camera actor through a transient
+ *                              USceneCaptureComponent2D into a render target, then read back.
  *  - `screenshot-isolated`   — isolated actor render: transient SceneCapture2D + show-only list +
  *                              neutral background (the Godot SubViewport pattern mapped to UE).
- *
- * The runtime-safe subset — `screenshot-game-view` (live game viewport) and `screenshot-camera` —
- * moved DOWN into the runtime module's UnrealMcpRuntimeScreenshotTools in R4 (§12.7).
  *
  * Every handler runs ON the game thread (the dispatcher guarantees it, §4). Captures are dimension-
  * capped (default 1024, hard cap 2048 per side; width/height clamped). Actual pixel capture needs a
@@ -385,6 +385,72 @@ namespace UnrealMcpScreenshotTools
 					return FUnrealMcpToolResult::Error(TEXT("No active editor viewport. Focus a level editor viewport and retry."));
 
 				return CaptureFromViewport(Call, Viewport, TEXT("editor viewport"));
+			});
+
+		// screenshot-game-view — PIE/game view; structured error when no PIE session is active.
+		Registry.Tool(TEXT("screenshot-game-view"))
+			.Title(TEXT("Screenshot Game View"))
+			.Description(FString(TEXT("Capture the Play-In-Editor game view. Errors when no PIE session is active.")) + SizeCapNote())
+			.ParamInt(TEXT("width"), TEXT("Optional output width in pixels (clamped to [1, 2048]); when only 'height' is given the width is derived from the native aspect ratio, and the native game-view width is used when both are omitted."))
+			.ParamInt(TEXT("height"), TEXT("Optional output height in pixels (clamped to [1, 2048]); when only 'width' is given the height is derived from the native aspect ratio, and the native game-view height is used when both are omitted."))
+			.ReadOnlyHint(true)
+			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
+			{
+				// Validate the PIE precondition FIRST (GPU-free, headless-spec-covered).
+				const bool bPlaySessionActive = GEditor && GEditor->PlayWorld != nullptr;
+				FViewport* PieViewport = GEditor ? GEditor->GetPIEViewport() : nullptr;
+				if (!bPlaySessionActive || !PieViewport)
+					return FUnrealMcpToolResult::Error(TEXT("No Play-In-Editor session is active. Start PIE before calling screenshot-game-view."));
+
+				FString Error;
+				if (!EnsureRenderingAvailable(Error))
+					return FUnrealMcpToolResult::Error(Error);
+
+				return CaptureFromViewport(Call, PieViewport, TEXT("PIE game view"));
+			});
+
+		// screenshot-camera — render from a resolved camera actor via SceneCapture2D.
+		Registry.Tool(TEXT("screenshot-camera"))
+			.Title(TEXT("Screenshot Camera"))
+			.Description(FString(TEXT("Render the scene from a chosen camera actor (resolved by label/name/path) and capture it.")) + SizeCapNote())
+			.ParamString(TEXT("camera"), TEXT("Camera actor reference (label, object name, or path) to render from."), EUnrealMcpParamRequirement::Required)
+			.ParamInt(TEXT("width"), TEXT("Optional output width in pixels (clamped to [1, 2048]); default 1024."))
+			.ParamInt(TEXT("height"), TEXT("Optional output height in pixels (clamped to [1, 2048]); default 1024."))
+			.ParamNumber(TEXT("fov"), TEXT("Optional horizontal field-of-view override in degrees (clamped to [5, 170]); defaults to the camera component's FOV (or 90)."))
+			.ReadOnlyHint(true)
+			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
+			{
+				// Validate arguments + resolve the camera FIRST (GPU-free, headless-spec-covered).
+				if (!Call.Has(TEXT("camera")))
+					return FUnrealMcpToolResult::Error(TEXT("'camera' is required."));
+
+				UWorld* World = FUnrealMcpObjectRef::GetEditorWorld();
+				if (!World)
+					return FUnrealMcpToolResult::Error(TEXT("No editor world is available."));
+
+				const FString CameraRef = Call.GetString(TEXT("camera"));
+				AActor* CameraActor = FUnrealMcpObjectRef::ResolveActor(CameraRef, World);
+				if (!CameraActor)
+					return FUnrealMcpToolResult::Error(FString::Printf(TEXT("No actor matched camera reference '%s'."), *CameraRef));
+
+				UCameraComponent* CameraComponent = CameraActor->FindComponentByClass<UCameraComponent>();
+				// Clamp once at parse time to a sane perspective range; a degenerate FOV (<= 0 or >= 180)
+				// yields a NaN/garbage projection matrix rather than a usable render.
+				const float Fov = FMath::Clamp(Call.Has(TEXT("fov"))
+					? (float)Call.GetNumber(TEXT("fov"))
+					: (CameraComponent ? CameraComponent->FieldOfView : 90.0f), 5.0f, 170.0f);
+				const FTransform CaptureXform = CameraComponent
+					? CameraComponent->GetComponentTransform()
+					: CameraActor->GetActorTransform();
+
+				FString Error;
+				if (!EnsureRenderingAvailable(Error))
+					return FUnrealMcpToolResult::Error(Error);
+
+				const int32 Width = ResolveCaptureDimension(Call.GetInt(TEXT("width"), 0));
+				const int32 Height = ResolveCaptureDimension(Call.GetInt(TEXT("height"), 0));
+				const FString Source = FString::Printf(TEXT("camera '%s'"), *CameraActor->GetActorNameOrLabel());
+				return CaptureWithSceneCapture(World, CaptureXform, Fov, Width, Height, Source, nullptr, nullptr);
 			});
 
 		// screenshot-isolated — isolated actor render (transient SceneCapture2D + show-only list + background).

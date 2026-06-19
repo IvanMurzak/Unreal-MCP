@@ -119,16 +119,16 @@ Leave it running. The runtime game will dial `http://localhost:<port>` in **Cust
 
 With the connection up, exercise (over the server's REST passthrough and/or `tools/list`):
 
-- `ping` — readiness probe.
-- `actor-create` — spawn a **native** actor AND a **Blueprint-class** actor (BP-class actors
-  spawn fine at runtime, §12.7).
-- `console-run-command` — run a CVar / console command in the live game.
-- `game-time-dilation` — the R5 runtime sample tool
-  (`samples/UnrealAIRuntimeSample/`), if that sample plugin is enabled in the testbed.
-- `tools/list` — confirm the **runtime** tool set is present (≈22 built-ins + any registered
-  sample/extension tools) and that editor-only tools (`asset-find`, `blueprint-create`,
-  `editor-application-*`, …) are **absent**. Use MCP `tools/list` over `POST /mcp` for
-  membership assertions — the `/api/tools/<name>` REST passthrough only invokes one named tool.
+- `ping` — readiness probe. The runtime ships exactly ONE built-in tool: `ping` (§12.7).
+- `game-time-dilation` — the runtime sample tool (`samples/UnrealAIRuntimeSample/`), if that sample
+  plugin is enabled in the testbed. This is the **bring-your-own-tool** path: a game registers its own
+  `IUnrealMcpToolProvider` and its tools appear alongside `ping`.
+- `tools/list` — confirm the **runtime** built-in manifest is exactly `{ping}` plus any registered
+  sample/extension tools, and that EVERY engine-development tool — the actor/component family,
+  `console-run-command`, `level-get-data`, the screenshot tools, `asset-find`, `blueprint-create`,
+  `editor-application-*`, … — is **absent** at runtime (they are editor-only, §12.7). Use MCP
+  `tools/list` over `POST /mcp` for membership assertions — the `/api/tools/<name>` REST passthrough
+  only invokes one named tool.
 
 `-H "Content-Type: application/json"` is REQUIRED on `/api/tools/<name>` calls (without it the
 server drops the body and returns `'x' is required.`).

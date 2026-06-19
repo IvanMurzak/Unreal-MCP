@@ -63,16 +63,15 @@ void UUnrealMcpRuntimeSubsystem::Initialize(FSubsystemCollectionBase& Collection
 	});
 
 	// Build the runtime-owned machinery (mirrors FUnrealMcpEditorCoordinator, §12.3 Model A) — registry +
-	// runtime-safe families + dispatcher + bridge. Editor-only families are NOT registered here (this path
-	// runs in a packaged game where they would not compile/link). R4 (§12.7) registers the full runtime-safe
-	// set: ping, actor/component, the console+reflection subset, the screenshot subset, and level-get-data.
+	// dispatcher + bridge. The runtime module ships exactly ONE built-in tool: `ping` (a liveness probe + a
+	// non-empty manifest). Every engine-development tool family (actor/component, console/reflection,
+	// screenshot, level-read/write, blueprint, asset, source, editor-application/selection) is EDITOR-ONLY
+	// and registered by the editor coordinator — those tools drive the editor and several are RCE-class, so
+	// they are not compiled into a shipped game by default. A game brings its own runtime tools by registering
+	// an IUnrealMcpToolProvider (RegisterToolProvider, the §5 extension bus).
 	Impl = MakePimpl<FRuntimeImpl>();
 	Impl->Registry = MakeUnique<FUnrealMcpToolRegistry>();
 	UnrealMcpPingTool::Register(*Impl->Registry);
-	UnrealMcpActorTools::Register(*Impl->Registry); // §10 actor / component family (World->SpawnActor runtime branch)
-	UnrealMcpConsoleReflectionTools::Register(*Impl->Registry); // §10 console + reflection runtime subset
-	UnrealMcpRuntimeScreenshotTools::Register(*Impl->Registry); // §10 screenshot runtime subset (game-view, camera)
-	UnrealMcpRuntimeLevelTools::Register(*Impl->Registry); // §10 read-only level-get-data
 
 	// §A.1 prompt registry (P1): the prompt sibling of the tool registry, built on the SAME Model A path. The
 	// core prompt family registers before the bridge arms so the first prompt-manifest a v2 sidecar reads on

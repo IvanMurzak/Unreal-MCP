@@ -543,7 +543,9 @@ The complete, buildable example is [`samples/UnrealAIRuntimeSample/`](samples/Un
 
 ## Runtime tool set vs editor-only
 
-A runtime connection serves a **deliberately smaller** built-in set than the editor — **22 runtime-safe built-in tools** (vs the [62 editor tools](#tools)): the actor / component family, `object-get-data` / `object-modify`, `level-get-data`, the console / reflection tools, `screenshot-game-view` / `screenshot-camera`, and `ping`. Editor-only families — Blueprint authoring, asset / Content-Browser operations, C++ source edit & compile, level create/open/save, editor-application state, and viewport/isolated screenshots — are **not** present at runtime (there is no editor in a shipped game). Your own custom tools, registered via the extension bus above, are added on top of the 22 built-ins.
+A runtime connection ships exactly **one** built-in tool: **`ping`** (a liveness probe + a non-empty manifest). Everything a runtime AI agent can do beyond `ping` is **bring-your-own**: register your own tools via the extension bus above (`RegisterToolProvider`), and they appear on top of `ping`.
+
+All of the engine-development families — the actor / component family, `object-get-data` / `object-modify`, `level-get-data`, the console / reflection tools, every screenshot tool, plus Blueprint authoring, asset / Content-Browser operations, C++ source edit & compile, level create/open/save, and editor-application state — are **editor-only** (the [62 editor tools](#tools)). They drive the editor and several are RCE-class (e.g. `reflection-method-call`, `console-run-command`), so they are not compiled into a shipped game by default. There is no editor in a packaged game, so the runtime built-in surface is intentionally just `ping` + whatever tools your game registers.
 
 ## <a id="runtime-security-contract"></a>Security contract
 

@@ -1117,10 +1117,11 @@ selection stay editor; `console-run-command` (`GEngine->Exec`) runtime-safe (R4)
 
 ### 12.3 Layering: editor depends on runtime — **Model A (chosen): single runtime-owned bridge**
 The runtime module always constructs registry+dispatcher+bridge+sidecar (editor AND game) and registers
-runtime-safe families. The editor coordinator, when present, registers editor-only families on top of the
-SAME registry, keeps Slate/view-model/server-manager/dev-control, and wires existing UI sinks to the
-runtime bridge. Connect policy differs (editor: config/UI; game: opt-in §12.4) but is a connect TRIGGER,
-not a separate bridge. Max parity, one code path. (Rejected Model B: two coordinators.)
+the runtime built-in (`ping` only — §12.7). The editor coordinator, when present, registers the
+editor-only engine-development families on top of the SAME registry, keeps Slate/view-model/server-manager/
+dev-control, and wires existing UI sinks to the runtime bridge. Connect policy differs (editor: config/UI;
+game: opt-in §12.4) but is a connect TRIGGER, not a separate bridge. Max parity, one code path. (Rejected
+Model B: two coordinators.)
 
 > **R1 realization.** The renamed `FUnrealMcpEditorCoordinator` (was the misnamed `FUnrealMcpRuntime`,
 > §12 executive finding 3) lives in the editor module and *builds* the runtime-owned types (registry,
@@ -1185,48 +1186,40 @@ reference. The RUNTIME subsystem (R3) installs `[this]{return GetGameInstance()-
 PIE subtlety (verify on 5.7): the editor resolver may later return `GEditor->PlayWorld` when set, so
 editor-driven tools follow the user into PIE (matches Unity) — deferred until the runtime families need it.
 
-### 12.7 Runtime-safe vs editor-only tool taxonomy (drives R4)
-- **ping (1):** runtime-safe — moved to the runtime module in R1.
-- **actor & component (13):** runtime-safe AFTER world abstraction + spawn branch (`World->SpawnActor`;
-  `SetActorLabel`/`FScopedTransaction` WITH_EDITOR-guarded). **R4.**
-- **asset (11):** editor-only. **level (7):** editor-only EXCEPT a read-only runtime `level-get-data` (R4).
-- **blueprint (11):** editor-only. **source (6):** editor-only.
-- **screenshot (4):** MIXED → `screenshot-game-view` + `screenshot-camera` runtime-safe (R4); viewport/
-  isolated editor-only. GPU required.
-- **editor/reflection (9):** MIXED. `editor-application-*`/`editor-selection-*` editor-only;
-  `console-get-logs`/`console-clear-logs`/`console-run-command` runtime-safe; `reflection-method-find`/
-  `-call` runtime-safe for non-`CallInEditor` (R4).
-Net runtime built-in set ≈22. PLUS user-authored runtime tools via the extension bus (§12.9) — the PRIMARY
-Unity runtime use case. Parity is "framework + your custom tools," not "all 62 built-ins in-game."
+### 12.7 Runtime built-in tool set — `ping` only (R4 reverted, issue #141)
 
-**R4 implementation (landed).** The runtime-safe families now live in the runtime module and are registered
-by BOTH the editor coordinator (Model A, on top of the shared registry) and the runtime bootstrap subsystem
-(`UUnrealMcpRuntimeSubsystem::Initialize`). The realized split — exactly 22 runtime built-ins:
-`ping` (1) + actor/component (13: `actor-create/destroy/duplicate/find/modify/set-parent`,
-`actor-component-add/destroy/get/modify/list-all`, `object-get-data/modify`) +
-console/reflection (5: `console-get-logs/clear-logs/run-command`, `reflection-method-find/-call`) +
-screenshot (2: `screenshot-game-view`, `screenshot-camera`) + `level-get-data` (1). Files:
-`UnrealMcpRuntime/Private/Tools/UnrealMcpActorTools.cpp` (moved DOWN, `git mv`),
-`UnrealMcpConsoleReflectionTools.cpp`, `UnrealMcpRuntimeScreenshotTools.cpp`, `UnrealMcpRuntimeLevelTools.cpp`
-(new). Editor-only families stay editor-registered, unchanged in count.
-- **Undo transaction reconciliation.** §12.2 listed `FScopedTransaction` as a `#if WITH_EDITOR`-guarded
-  coupling, but `FScopedTransaction` lives in the **UnrealEd module**, which the Type=Runtime module
-  deliberately does not link — so even guarded, the editor build of the runtime module fails to LINK it. The
-  actor family therefore drops its own named undo transaction (a no-op RAII seam in both configs); the
-  per-op `Modify()` + `MarkPackageDirty()` calls are retained (Engine, WITH_EDITOR) so the editor's active
-  transaction still records the mutation — only the per-op named undo grouping is lost when the family is
-  driven from the runtime module. Likewise `FActorLabelUtilities::SetActorLabelUnique` (UnrealEd) is replaced
-  by `AActor::SetActorLabel` (Engine, WITH_EDITOR); the friendly label is read via `GetActorNameOrLabel`
-  (runtime-safe) instead of the WITH_EDITOR-only `GetActorLabel`.
-- **`screenshot-game-view`** uses `GEngine->GameViewport->Viewport` (runtime-available) instead of the editor
-  family's `GEditor->GetPIEViewport()`.
-- **Reflection runtime gate** accepts BlueprintCallable (+ Static for the CDO path) ONLY — the editor family's
-  `CallInEditor` allowance is excluded (that metadata is `WITH_EDITORONLY_DATA`).
-- **Lost-transitive-include fixes** the Game-target BuildPlugin surfaced (the editor PCH had masked them):
-  explicit `#include`s for `UObject/TextProperty.h` + `UObject/EnumProperty.h` (reflection property `IsA<>`)
-  and `UObject/Package.h` (`GetTransientPackage()` Outer); `FActorSpawnParameters::bHideFromSceneOutliner` is
-  `#if WITH_EDITOR`-guarded. "editor-only tools absent from the runtime manifest" is a deterministic
-  Automation gate (`UnrealMcp.RuntimeSubsystem` → "runtime manifest separation").
+**Decision (current): the runtime module ships exactly ONE built-in tool — `ping`.** Every
+engine-development family (actor/component, console/reflection, screenshot, level read+write, blueprint,
+asset, source, editor-application/selection) is **editor-only**, registered by the editor coordinator from
+the editor module. A game obtains runtime tools by **bringing its own** — registering an
+`IUnrealMcpToolProvider` via `UUnrealMcpRuntimeSubsystem::RegisterToolProvider` (the §12.9 extension bus).
+The runtime module = lean infra (bridge / registry / dispatcher / sidecar / world-provider /
+extension-manager) + `ping`. Parity is "framework + your custom tools," not "a subset of the built-ins
+in-game."
+
+Rationale: the engine-development tools are AI **authoring / inspection / dev** tools — and several are
+RCE-class (`reflection-method-call`, `console-run-command`, arbitrary `object-modify`/`actor-*`). They
+operate the editor and do not belong compiled into a shipped game by default. Keeping them editor-only
+removes that surface from a packaged game entirely (rather than gating it behind §12.8's runtime
+mitigations) and keeps the runtime module dependency-lean (no UnrealEd, no ImageWrapper/RenderCore/RHI).
+
+> **History — R4 (PRs #121 c91f206 / #122 38667d3), now reverted.** R4 moved a "runtime-safe" subset
+> (actor/component, a console/reflection subset, a `screenshot-game-view`/`screenshot-camera` subset, and
+> read-only `level-get-data` — ~22 built-ins total) DOWN into the runtime module so they worked over a
+> runtime connection, behind `World->SpawnActor` + `WITH_EDITOR` seams (no-op `FScopedTransaction`,
+> `AActor::SetActorLabel` for `FActorLabelUtilities::SetActorLabelUnique`, `GetActorNameOrLabel` for the
+> WITH_EDITOR-only `GetActorLabel`, `GEngine->GameViewport` for `GEditor->GetPIEViewport()`, a
+> non-`CallInEditor` reflection gate). Issue #141 reverts that in intent: those families are restored to
+> their editor-only implementations and registrations (the actor family `git mv`'d back to the editor
+> module; console/reflection + `level-get-data` re-merged into `UnrealMcpEditorTools.cpp` /
+> `UnrealMcpLevelTools.cpp`; the editor 4-tool screenshot family — `screenshot-viewport`, the PIE
+> `screenshot-game-view`, `screenshot-camera`, `screenshot-isolated` — restored; the runtime
+> `UnrealMcpRuntimeScreenshotTools.cpp` dropped). The editor still exposes all 62 built-ins across 8
+> families, unchanged in count — only their module home and the runtime registration reverted.
+
+"the runtime built-in manifest is exactly `{ping}`; every engine-development tool is absent" is a
+deterministic Automation gate (`UnrealMcp.RuntimeSubsystem` → "runtime manifest separation (ping-only
+built-in)").
 
 ### 12.8 Security analysis (shipped-game remote-control surface)
 A runtime connection is remote control of a running game (actor-create, object-modify, console-run-command
