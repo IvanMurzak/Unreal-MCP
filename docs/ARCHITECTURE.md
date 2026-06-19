@@ -1233,6 +1233,17 @@ arbitrary CVars, reflection-method-call arbitrary UFunctions) — RCE-class if r
 5. **Loopback-host default:** Connect rejects non-loopback hosts unless explicit `bAllowRemoteHost`.
 6. No token in argv/logs.
 
+**Strongest footprint mitigation — consumer-side editor-only deny-list.** An editor-only consumer can
+remove the entire shipped-game surface (mitigations 1–6 become moot) by pinning the plugin to the editor
+in *their own* `.uproject` reference: `{ "Name": "UnrealMCP", "Enabled": true, "TargetDenyList": ["Game",
+"Client", "Server"] }`. UE honours `TargetDenyList`/`TargetAllowList` on a plugin reference
+(`PluginReferenceDescriptor::IsEnabledForTarget`), so the `UnrealMcpRuntime` module + the bundled sidecar
+`RuntimeDependencies` (§12.5) are excluded from packaged `Game`/`Client`/`Server` builds entirely — zero
+compiled footprint. This is a **consumer-side** opt-out (not a plugin default, since the plugin must stay
+runtime-shippable for §12.7 in-game usage); a direct `*.Build.cs` dependency on an `UnrealMcp*` module
+from a game module overrides the deny-list. See README → [Editor-only — exclude Unreal-MCP from packaged
+games](../README.md#editor-only-exclude-from-packaged-games) for the full recipe and caveat.
+
 ### 12.9 Runtime extension tool registration
 `IModularFeatures` (§5) is runtime-available — `IUnrealMcpToolProvider` works identically at runtime; the
 extension manager moves down (R1). Recommended ergonomic: `UUnrealMcpRuntimeSubsystem::RegisterToolProvider(
