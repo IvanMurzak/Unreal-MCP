@@ -75,14 +75,13 @@ IMPLEMENT_PRIMARY_GAME_MODULE(FDefaultGameModuleImpl, ${name}, "${name}");
 
   const gameTarget = `// Copyright (c) 2026 Ivan Murzak (Apache-2.0)
 using UnrealBuildTool;
-using System.Collections.Generic;
 
 public class ${name}Target : TargetRules
 {
 \tpublic ${name}Target(TargetInfo Target) : base(Target)
 \t{
 \t\tType = TargetType.Game;
-\t\tDefaultBuildSettings = BuildSettingsVersion.V5;
+\t\tDefaultBuildSettings = BuildSettingsVersion.Latest;
 \t\tIncludeOrderVersion = EngineIncludeOrderVersion.Latest;
 \t\tExtraModuleNames.Add("${name}");
 \t}
@@ -91,14 +90,13 @@ public class ${name}Target : TargetRules
 
   const editorTarget = `// Copyright (c) 2026 Ivan Murzak (Apache-2.0)
 using UnrealBuildTool;
-using System.Collections.Generic;
 
 public class ${name}EditorTarget : TargetRules
 {
 \tpublic ${name}EditorTarget(TargetInfo Target) : base(Target)
 \t{
 \t\tType = TargetType.Editor;
-\t\tDefaultBuildSettings = BuildSettingsVersion.V5;
+\t\tDefaultBuildSettings = BuildSettingsVersion.Latest;
 \t\tIncludeOrderVersion = EngineIncludeOrderVersion.Latest;
 \t\tExtraModuleNames.Add("${name}");
 \t}
