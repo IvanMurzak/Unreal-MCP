@@ -74,9 +74,45 @@ FString FUnrealMcpSidecarManager::ComposeBundledBridgePath(const FString& Plugin
 	const FString Rid = ResolveRid(bArm64DirExists);
 	if (Rid.IsEmpty())
 		return FString();
+	// §6.1 staged path — UBT stages the sidecar HERE in the package (Binaries/ is the UE-canonical home
+	// for prebuilt third-party runtime payloads), so a packaged game / non-Fab GitHub-release build resolves
+	// from this path. NOTE: in a Fab SOURCE submission this folder is STRIPPED by Fab (#139) and only
+	// re-created when Epic's recompile stages the surviving Sidecar/<rid>/ source — so the resolver also
+	// checks the surviving folder (see ComposeSurvivingBridgePath / ComposeBundledBridgeCandidates).
 	const FString Path = PluginBaseDir
 		/ TEXT("Binaries") / TEXT("ThirdParty") / TEXT("UnrealMcpBridge") / Rid / BridgeBinaryBasename();
 	return FPaths::ConvertRelativePathToFull(Path);
+}
+
+FString FUnrealMcpSidecarManager::ComposeSurvivingBridgePath(const FString& PluginBaseDir, bool bArm64DirExists)
+{
+	// Fab-surviving source location (#139): Fab strips Binaries/Intermediate/Saved from a submitted SOURCE
+	// plugin, so the prebuilt sidecar must live in a folder that survives — Sidecar/<rid>/ (declared in
+	// Config/FilterPlugin.ini). UBT stages it into Binaries/ThirdParty at Epic's compile time, but if a
+	// build keeps the payload only in the surviving folder, the resolver still finds it here.
+	if (PluginBaseDir.IsEmpty())
+		return FString();
+	const FString Rid = ResolveRid(bArm64DirExists);
+	if (Rid.IsEmpty())
+		return FString();
+	const FString Path = PluginBaseDir / TEXT("Sidecar") / Rid / BridgeBinaryBasename();
+	return FPaths::ConvertRelativePathToFull(Path);
+}
+
+TArray<FString> FUnrealMcpSidecarManager::ComposeBundledBridgeCandidates(const FString& PluginBaseDir, bool bArm64DirExists)
+{
+	// The resolution-order list the production resolver walks (§6.3 step 2): the STAGED Binaries/ThirdParty
+	// path first (the canonical packaged location every non-Fab build uses), then the FAB-SURVIVING
+	// Sidecar/<rid>/ source as a fallback so an Epic-compiled Fab build whose staging differs still resolves.
+	// Empty entries (empty base / non-desktop rid) are dropped so callers can FileExists-walk a clean list.
+	TArray<FString> Candidates;
+	const FString Staged = ComposeBundledBridgePath(PluginBaseDir, bArm64DirExists);
+	if (!Staged.IsEmpty())
+		Candidates.Add(Staged);
+	const FString Surviving = ComposeSurvivingBridgePath(PluginBaseDir, bArm64DirExists);
+	if (!Surviving.IsEmpty())
+		Candidates.Add(Surviving);
+	return Candidates;
 }
 
 bool FUnrealMcpSidecarManager::BundledArm64SliceExists()
@@ -88,9 +124,13 @@ bool FUnrealMcpSidecarManager::BundledArm64SliceExists()
 	TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("UnrealMCP"));
 	if (!Plugin.IsValid())
 		return false;
-	const FString Arm64Candidate = Plugin->GetBaseDir()
+	const FString BaseDir = Plugin->GetBaseDir();
+	// The osx-arm64 slice can live in EITHER the staged Binaries/ThirdParty path OR the Fab-surviving
+	// Sidecar/ source (#139) — present in either is enough to prefer the native arm64 rid.
+	const FString StagedArm64 = BaseDir
 		/ TEXT("Binaries") / TEXT("ThirdParty") / TEXT("UnrealMcpBridge") / TEXT("osx-arm64") / BridgeBinaryBasename();
-	return FPaths::FileExists(Arm64Candidate);
+	const FString SurvivingArm64 = BaseDir / TEXT("Sidecar") / TEXT("osx-arm64") / BridgeBinaryBasename();
+	return FPaths::FileExists(StagedArm64) || FPaths::FileExists(SurvivingArm64);
 #else
 	return true;
 #endif
@@ -110,19 +150,24 @@ FString FUnrealMcpSidecarManager::ResolveBridgeBinaryPath()
 		return Override;
 
 	// §6.3 step 2 — bundled path inside the plugin (the production path for every end user). The
-	// self-contained binary ships under Binaries/ThirdParty/UnrealMcpBridge/<rid>/ (§6.1), staged into
-	// the packaged plugin by the release job (T4); a dev source checkout has none, so this returns
-	// empty and the override above is the dev path (unchanged behavior on a fresh source tree).
+	// self-contained binary ships under Binaries/ThirdParty/UnrealMcpBridge/<rid>/ (§6.1, the STAGED path,
+	// used by packaged games + non-Fab GitHub releases) OR — for a Fab SOURCE submission (#139) — under the
+	// Fab-surviving Sidecar/<rid>/ folder that Epic's recompile stages from. Walk both, in that order; a dev
+	// source checkout has neither, so this returns empty and the override above is the dev path (unchanged
+	// behavior on a fresh source tree).
 	TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("UnrealMCP"));
 	if (!Plugin.IsValid())
 		return FString(); // §6.3 step 3 — neither resolves; caller logs the actionable error.
 
-	// Share the single §6.1 layout composition with the unit-tested pure helper (no inline drift); pass the
+	// Share the single §6.1 layout composition with the unit-tested pure helpers (no inline drift); pass the
 	// arm64-probe result so a host with only the osx-x64 slice degrades to that rid.
-	const FString Path = ComposeBundledBridgePath(Plugin->GetBaseDir(), BundledArm64SliceExists());
-	if (Path.IsEmpty())
-		return FString();
-	return FPaths::FileExists(Path) ? Path : FString();
+	const TArray<FString> Candidates = ComposeBundledBridgeCandidates(Plugin->GetBaseDir(), BundledArm64SliceExists());
+	for (const FString& Candidate : Candidates)
+	{
+		if (FPaths::FileExists(Candidate))
+			return Candidate;
+	}
+	return FString();
 }
 
 bool FUnrealMcpSidecarManager::PrepareBundledBinaryForSpawn(const FString& Path)

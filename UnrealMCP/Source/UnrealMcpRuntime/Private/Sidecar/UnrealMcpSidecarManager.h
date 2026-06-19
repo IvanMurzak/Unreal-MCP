@@ -13,10 +13,12 @@
  * binary, generate the one-shot IPC token, spawn the process delivering the token over stdin (§1.4),
  * watch it (crash → auto-restart with backoff, §1.5), and terminate it on editor shutdown (no orphans,
  * §6 layer 1). Binary resolution follows the §6 BUNDLE model: (1) the UNREAL_MCP_BRIDGE_PATH dev/CI
- * override wins when set, then (2) the prebuilt self-contained binary bundled inside the plugin under
- * Binaries/ThirdParty/UnrealMcpBridge/<rid>/. A fresh GUI install resolves the bundled path and
- * auto-spawns at StartupModule with zero user action; a dev source checkout (no staged binary) falls
- * back to the override, exactly as before.
+ * override wins when set, then (2) the prebuilt self-contained binary bundled inside the plugin — checked
+ * at the STAGED path Binaries/ThirdParty/UnrealMcpBridge/<rid>/ first, then the FAB-SURVIVING source
+ * Sidecar/<rid>/ (#139: Fab strips Binaries/ from a source submission, so the surviving folder is what
+ * Epic's recompile stages from). A fresh GUI install resolves the bundled path and auto-spawns at
+ * StartupModule with zero user action; a dev source checkout (no staged binary) falls back to the
+ * override, exactly as before.
  */
 class UNREALMCPRUNTIME_API FUnrealMcpSidecarManager
 {
@@ -73,13 +75,29 @@ public:
 	static FString ResolveRid(bool bArm64DirExists = true);
 
 	/**
-	 * Compose the bundled bridge path under @p PluginBaseDir for the current host (§6.1):
+	 * Compose the STAGED bundled bridge path under @p PluginBaseDir for the current host (§6.1):
 	 * <PluginBaseDir>/Binaries/ThirdParty/UnrealMcpBridge/<rid>/unreal-mcp-bridge[.exe]. Pure string
 	 * composition (no FileExists), absolute-ized — testable independent of a staged binary. @p
 	 * bArm64DirExists is forwarded to ResolveRid so the production resolver can pass its arm64-probe
-	 * result (a missing osx-arm64 slice degrades the composed path to osx-x64).
+	 * result (a missing osx-arm64 slice degrades the composed path to osx-x64). This is the packaged-game /
+	 * non-Fab path; the Fab-surviving source location is ComposeSurvivingBridgePath (#139).
 	 */
 	static FString ComposeBundledBridgePath(const FString& PluginBaseDir, bool bArm64DirExists = true);
+
+	/**
+	 * Compose the FAB-SURVIVING bridge source path under @p PluginBaseDir for the current host (#139):
+	 * <PluginBaseDir>/Sidecar/<rid>/unreal-mcp-bridge[.exe]. Fab strips Binaries/ from a submitted SOURCE
+	 * plugin, so the prebuilt sidecar lives here (declared in Config/FilterPlugin.ini) to survive the strip;
+	 * UBT stages it into Binaries/ThirdParty at Epic's compile time. Pure string composition, absolute-ized.
+	 */
+	static FString ComposeSurvivingBridgePath(const FString& PluginBaseDir, bool bArm64DirExists = true);
+
+	/**
+	 * The ordered bridge-path candidates the production resolver walks (§6.3 step 2): the STAGED
+	 * Binaries/ThirdParty path first, then the FAB-SURVIVING Sidecar/<rid>/ source (#139). Empty entries
+	 * (empty base dir / non-desktop rid) are omitted so callers can FileExists-walk a clean list.
+	 */
+	static TArray<FString> ComposeBundledBridgeCandidates(const FString& PluginBaseDir, bool bArm64DirExists = true);
 
 	/** The platform bridge binary basename: "unreal-mcp-bridge.exe" on Windows, "unreal-mcp-bridge" elsewhere. */
 	static FString BridgeBinaryBasename();

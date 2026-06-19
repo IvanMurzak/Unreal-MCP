@@ -108,6 +108,47 @@ void FUnrealMcpSidecarManagerSpec::Define()
 		});
 	});
 
+	Describe("ComposeSurvivingBridgePath (#139 Fab-surviving source)", [this]()
+	{
+		It("composes <base>/Sidecar/<rid>/<basename> — Fab strips Binaries/, so this folder survives", [this]()
+		{
+			const FString Base = TEXT("C:/fake/plugin/UnrealMCP");
+			const FString Path = FUnrealMcpSidecarManager::ComposeSurvivingBridgePath(Base);
+			const FString Expected = FPaths::ConvertRelativePathToFull(
+				FString(Base) / TEXT("Sidecar")
+				/ FUnrealMcpSidecarManager::ResolveRid() / FUnrealMcpSidecarManager::BridgeBinaryBasename());
+			TestEqual(TEXT("composed surviving path matches the #139 Sidecar/<rid>/ layout"), Path, Expected);
+			TestTrue(TEXT("surviving path is under the Sidecar folder, NOT Binaries/"),
+				(Path.Contains(TEXT("/Sidecar/")) || Path.Contains(TEXT("\\Sidecar\\")))
+				&& !Path.Contains(TEXT("ThirdParty")));
+		});
+
+		It("returns empty for an empty plugin base dir", [this]()
+		{
+			TestTrue(TEXT("empty base -> empty path"), FUnrealMcpSidecarManager::ComposeSurvivingBridgePath(FString()).IsEmpty());
+		});
+	});
+
+	Describe("ComposeBundledBridgeCandidates (#139 resolution order)", [this]()
+	{
+		It("lists the STAGED Binaries/ThirdParty path first, then the FAB-SURVIVING Sidecar/ source", [this]()
+		{
+			const FString Base = TEXT("C:/fake/plugin/UnrealMCP");
+			const TArray<FString> Candidates = FUnrealMcpSidecarManager::ComposeBundledBridgeCandidates(Base);
+			TestEqual(TEXT("two candidates on a desktop host"), Candidates.Num(), 2);
+			TestEqual(TEXT("first candidate is the staged Binaries/ThirdParty path"),
+				Candidates[0], FUnrealMcpSidecarManager::ComposeBundledBridgePath(Base));
+			TestEqual(TEXT("second candidate is the Fab-surviving Sidecar/ source"),
+				Candidates[1], FUnrealMcpSidecarManager::ComposeSurvivingBridgePath(Base));
+		});
+
+		It("returns an empty list for an empty plugin base dir", [this]()
+		{
+			TestEqual(TEXT("empty base -> no candidates"),
+				FUnrealMcpSidecarManager::ComposeBundledBridgeCandidates(FString()).Num(), 0);
+		});
+	});
+
 	Describe("ResolveBridgeBinaryPath", [this]()
 	{
 		It("returns the UNREAL_MCP_BRIDGE_PATH override when it points at an existing file (§6.3 step 1)", [this]()
