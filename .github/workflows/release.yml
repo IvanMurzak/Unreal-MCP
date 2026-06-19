@@ -312,6 +312,9 @@ jobs:
           $distUplugin = Join-Path $package 'UnrealMCP.uplugin'
           if (Test-Path $distUplugin) {
             $mods = (Get-Content $distUplugin -Raw | ConvertFrom-Json).Modules.Name
+            # Defensive: a null $mods (unreadable/empty Modules array) makes the
+            # `-contains` below silently $false and defeats the C2 guard — fail loud.
+            if (-not $mods) { throw "Could not read Modules from distributed .uplugin at $distUplugin — refusing to pass the C2 guard blind." }
             if ($mods -contains 'UnrealMcpEditorTests') {
               throw "Distributed package SHIPS UnrealMcpEditorTests — Fab review would flag it (C2 regression)."
             }

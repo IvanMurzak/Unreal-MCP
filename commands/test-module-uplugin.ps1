@@ -22,6 +22,13 @@
     NEVER commit the descriptor with the test module added: this script is a transient
     dev/CI mutation only. The distributed/committed form has NO test module.
 
+    NOTE: -Action Remove restores the descriptor's SEMANTIC form (no test module), not
+    its BYTE-IDENTICAL form -- the round-trip through ConvertTo-Json may reorder keys or
+    re-indent versus the committed file. So a local dev Add->Remove can leave a cosmetic
+    (formatting-only) working-tree diff on UnrealMCP.uplugin. That diff is harmless; clean
+    it with `git checkout UnrealMCP/UnrealMCP.uplugin`. (CI runs Add->Remove in a finally
+    and discards the workspace, so it never commits the cosmetic diff.)
+
 .PARAMETER Action
     Add | Remove.
 
