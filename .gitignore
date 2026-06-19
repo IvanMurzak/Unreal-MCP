@@ -23,6 +23,20 @@ DerivedDataCache/
 *.xcworkspace
 
 # ----------------------------------------------------------------------------
+# Sidecar bundle (#139 Fab-surviving staging — UnrealMCP/Sidecar/<rid>/)
+# The prebuilt self-contained bridge binaries (~73-80 MB/RID) are staged here
+# transiently (release.yml signs+stages; Epic's Fab recompile stages from the
+# submitted source) and are NEVER committed. Keep the folder STRUCTURE in VCS
+# (README + per-RID .gitkeep) so the source zip ships the folders, but ignore
+# every payload file inside them.
+# ----------------------------------------------------------------------------
+UnrealMCP/Sidecar/**
+!UnrealMCP/Sidecar/
+!UnrealMCP/Sidecar/README.md
+!UnrealMCP/Sidecar/*/
+!UnrealMCP/Sidecar/*/.gitkeep
+
+# ----------------------------------------------------------------------------
 # .NET (bridge/)
 # ----------------------------------------------------------------------------
 bin/

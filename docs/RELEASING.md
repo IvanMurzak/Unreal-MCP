@@ -31,7 +31,10 @@ listing. Each requires a deliberate human decision (and, for the first release, 
 - [ ] **Fab (Epic marketplace) submission.** Entirely manual and **out of scope of every CI
       workflow** — the release pipeline produces an engine-agnostic source-plugin zip
       (BuildPlugin output), but no job submits to Fab. Fab carries its own metadata/screenshot
-      requirements and an Epic review; do it by hand when the listing is ready.
+      requirements and an Epic review; do it by hand when the listing is ready. The plugin is
+      Fab source-submission READY (#139): the sidecar survives Fab's `Binaries/` strip via
+      `Sidecar/<rid>/`, the distributed `.uplugin` ships no test module, and `FilterPlugin.ini`
+      is complete — see [Fab source-submission readiness](#fab-epic-marketplace-source-submission-readiness-139) below.
 
 A normal merge to `main` publishes nothing; the version gate keeps `release.yml` inert. The safe
 rehearsal is a `dry_run=true` dispatch (below), which exercises the test + artifact jobs and
@@ -63,15 +66,18 @@ artifact jobs in `release.yml`:
   the raw signed dir + the release zip. (signtool is Windows-only; codesign /
   notarytool are macOS-only — hence the two-runner split.)
 - **`build-plugin-zip`** (self-hosted UE 5.7) — downloads the four signed RID
-  dirs, **stages them into `UnrealMCP/Binaries/ThirdParty/UnrealMcpBridge/<rid>/`**
-  (the exact path the C++ resolver + the `UnrealMcpRuntime.Build.cs`
-  `RuntimeDependencies` per-RID staging expect — moved out of the editor module in
-  R2 so the bridge bundles into packaged GAMES, not just editor packages; see
+  dirs, **stages them into the Fab-surviving `UnrealMCP/Sidecar/<rid>/`** (#139 — the
+  folder declared in `Config/FilterPlugin.ini` that survives a Fab strip; the
+  `UnrealMcpRuntime.Build.cs` `RuntimeDependencies` two-arg form then stages it into
+  `Binaries/ThirdParty/UnrealMcpBridge/<rid>/` at compile time, the path the C++
+  resolver reads — declared on the runtime module in R2 so the bridge bundles into
+  packaged GAMES, not just editor packages; see
   [Packaged-game sidecar bundling](#packaged-game-sidecar-bundling-r2) below), runs
   `BuildPlugin -Rocket` so the staged binaries are packaged, then zips the plugin.
-  A post-BuildPlugin guard copies the binaries into the package output if
-  `RuntimeDependencies` did not stage them (a defensive fallback for the one
-  unverified UBT behavior).
+  A post-BuildPlugin guard copies the binaries from `Sidecar/<rid>/` into the
+  package's `Binaries/ThirdParty/...` output if `RuntimeDependencies` did not stage
+  them, and asserts the surviving `Sidecar/<rid>/` payload shipped (the form Epic's
+  Fab recompile stages from).
 
 ### Packaged-game sidecar bundling (R2)
 
@@ -97,35 +103,68 @@ Conservative staging (adopted defaults, design Open questions 1 & 2):
   builds always stage.
 
 **Staging a packaged game (testbed / consumer build):** the bridge binaries are
-gitignored, so a fresh checkout has an empty `Binaries/ThirdParty/UnrealMcpBridge/`.
-Before packaging a **game** (`BuildCookRun -build -cook -stage`, e.g. the
-`Unreal-Test-Project` testbed) you must publish the sidecar for the target RID and
-place it at the bundled path first — otherwise the per-RID `RuntimeDependencies`
-wildcard matches nothing and the staged game has no sidecar:
+gitignored, so a fresh checkout has empty `Sidecar/<rid>/` folders (only the
+`README.md` + per-RID `.gitkeep` placeholders are tracked). Before packaging a
+**game** (`BuildCookRun -build -cook -stage`, e.g. the `Unreal-Test-Project`
+testbed) you must publish the sidecar for the target RID and place it in the
+Fab-surviving `Sidecar/<rid>/` folder first (#139) — otherwise the per-RID
+`RuntimeDependencies` source wildcard matches nothing and the staged game has no
+sidecar:
 
 ```bash
 # 1. Publish the self-contained sidecar for the target RID (e.g. win-x64):
 bash bridge/publish.sh Release win-x64 --no-zip
-# 2. Place it at the bundled path the resolver reads:
-#    <plugin>/Binaries/ThirdParty/UnrealMcpBridge/<rid>/unreal-mcp-bridge[.exe]
-mkdir -p UnrealMCP/Binaries/ThirdParty/UnrealMcpBridge/win-x64
-cp bridge/publish/win-x64/unreal-mcp-bridge.exe \
-   UnrealMCP/Binaries/ThirdParty/UnrealMcpBridge/win-x64/
+# 2. Place it in the Fab-surviving source folder (#139) — RuntimeDependencies
+#    stages it from here into Binaries/ThirdParty/... at compile time, and the
+#    resolver also reads it directly from here:
+#    <plugin>/Sidecar/<rid>/unreal-mcp-bridge[.exe]
+cp bridge/publish/win-x64/* UnrealMCP/Sidecar/win-x64/
 # 3. Package the game (Win64 Development): RunUAT BuildCookRun -build -cook -stage.
-#    The staged game then contains
+#    The staged game then contains the sidecar at
 #    <Staged>/<Project>/Plugins/UnrealMCP/Binaries/ThirdParty/UnrealMcpBridge/win-x64/
-#    unreal-mcp-bridge.exe — ResolveBridgeBinaryPath resolves it in the packaged process.
+#    (RuntimeDependencies-staged) AND <...>/Plugins/UnrealMCP/Sidecar/win-x64/
+#    (the surviving source) — ResolveBridgeBinaryPath resolves either.
 ```
 
 In CI this is automatic: `build-plugin-zip` downloads the signed per-RID dirs and
-stages them before BuildPlugin. The manual sequence above is for a local
-packaged-game verification of the bundle (it is not part of a normal release).
+stages them into `Sidecar/<rid>/` before BuildPlugin. The manual sequence above is
+for a local packaged-game verification of the bundle (it is not part of a normal
+release).
 
-**Binaries are never committed to git.** `Binaries/` is gitignored; the signed
-binaries exist only transiently on the runners during a release. A dev source
-checkout has an empty `Binaries/ThirdParty/UnrealMcpBridge/`, so
-`ResolveBridgeBinaryPath` returns empty and devs use `UNREAL_MCP_BRIDGE_PATH`
+**Binaries are never committed to git.** The `Sidecar/<rid>/` payloads (and
+`Binaries/`) are gitignored; the signed binaries exist only transiently on the
+runners during a release. A dev source checkout has empty `Sidecar/<rid>/` folders,
+so `ResolveBridgeBinaryPath` returns empty and devs use `UNREAL_MCP_BRIDGE_PATH`
 (the documented inner loop) — unchanged.
+
+### Fab (Epic marketplace) source-submission readiness (#139)
+
+Fab accepts a **source** plugin and recompiles it per engine version, **stripping
+`Binaries/`, `Intermediate/`, `Saved/`** from the submitted zip. Three in-repo fixes
+keep the plugin submittable (`docs/ARCHITECTURE.md` §6.7); submission itself is still
+an entirely manual operator step (no CI job submits — see the checklist at the top):
+
+- **C1 — surviving sidecar.** The prebuilt sidecar lives in the Fab-surviving
+  `Sidecar/<rid>/` folder (declared in `Config/FilterPlugin.ini`), staged into
+  `Binaries/ThirdParty/UnrealMcpBridge/<rid>/` by `RuntimeDependencies`, and resolved
+  from both paths (`ComposeBundledBridgeCandidates`). So an Epic-compiled build
+  resolves the sidecar even though `Binaries/` was stripped.
+- **C2 — no shipped test module.** The DISTRIBUTED `UnrealMCP.uplugin` omits
+  `UnrealMcpEditorTests` (Fab flags shipped test modules). PR/dev CI re-adds it
+  transiently via `commands/test-module-uplugin.ps1` around the Automation BuildPlugin,
+  then reverts — so `BuildPlugin -Rocket` on the distributed descriptor is test-free +
+  green, while the `UnrealMcp.` specs still run on every PR. **Never commit the
+  descriptor with the test module added.**
+- **C3 — FilterPlugin hygiene.** `Config/FilterPlugin.ini` ships the `Sidecar/...`
+  tree; no source uses hardcoded/absolute paths; all packaged paths are ≤140 chars
+  from the plugin root; the zip excludes `Binaries/Intermediate/Saved/.vs` (Fab strips
+  them — the surviving `Sidecar/<rid>/` copy is what the recompile uses).
+
+**Manual Fab submission (operator):** run `BuildPlugin -Rocket` against the committed
+(distributed, test-free) `UnrealMCP.uplugin` with the signed `Sidecar/<rid>/` payloads
+in place, verify the package carries `Sidecar/<rid>/` + a test-free `.uplugin`, then
+upload the source zip to Fab. **Do not bump `VersionName` for a Fab submission** unless
+it is also a coordinated release (the version is release-pipeline-owned).
 
 **Graceful degradation:** every sign/notarize step is `if: env.X != ''`-guarded.
 A run with no signing secrets still produces **unsigned-but-green** artifacts, so
