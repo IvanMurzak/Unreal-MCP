@@ -24,11 +24,6 @@
       "Name": "UnrealMcpEditor",
       "Type": "Editor",
       "LoadingPhase": "Default"
-    },
-    {
-      "Name": "UnrealMcpEditorTests",
-      "Type": "Editor",
-      "LoadingPhase": "Default"
     }
   ],
   "Plugins": [
