@@ -375,6 +375,14 @@ runtime-available — with two differences for a game extension:
   → `bRuntimeMcpEnabled`) and explicitly connects:
   `UUnrealMcpRuntimeSubsystem::Get(this)->Connect("http://localhost:8080", "my-token")` (or the QA console
   command `UnrealMcp.Connect <host> [token]`).
+- **To expose ONLY your own tools, opt out of the built-ins.** By default the runtime registry merges your
+  tools on top of the 22 runtime-safe built-ins. Turn off `bRegisterBuiltinRuntimeTools` (same settings
+  page → **Register Built-in Runtime Tools**, default `true`) to skip the built-in families at startup so
+  the registry contains only what your `IUnrealMcpToolProvider` registers. The built-ins include
+  `reflection-method-call` and `console-run-command` (effectively remote code execution), so this is a
+  security lever: a game that needs only its own narrow tool surface should opt out. Like the kill switch
+  it is a **Game** config setting (it travels into the packaged build) and gates the runtime path only —
+  the editor toolset is unaffected.
 
 ### Ergonomic registration via the runtime subsystem
 

@@ -1198,6 +1198,14 @@ arbitrary CVars, reflection-method-call arbitrary UFunctions) — RCE-class if r
 4. **Kill switch:** `UUnrealMcpRuntimeSettings:UDeveloperSettings` `bRuntimeMcpEnabled` default FALSE.
 5. **Loopback-host default:** Connect rejects non-loopback hosts unless explicit `bAllowRemoteHost`.
 6. No token in argv/logs.
+7. **Built-in tool-set opt-out:** `UUnrealMcpRuntimeSettings::bRegisterBuiltinRuntimeTools` (Config=Game,
+   DefaultConfig, default TRUE). `UUnrealMcpRuntimeSubsystem::Initialize` registers the five built-in
+   runtime-safe core families (via the static `RegisterBuiltinRuntimeTools` helper) ONLY when this flag is
+   on; with it off, the built-ins are skipped and ONLY custom `IUnrealMcpToolProvider` tools reach the
+   runtime registry — so a shipped game can expose only its own tools and never the `reflection-method-call`
+   / `console-run-command` RCE-class surface. Default TRUE keeps existing behavior unchanged. Gates the
+   RUNTIME path only — the editor coordinator (Model A) keeps the full toolset. Tools-only: core prompts /
+   resources registration is unchanged (a follow-up may add parity).
 
 ### 12.9 Runtime extension tool registration
 `IModularFeatures` (§5) is runtime-available — `IUnrealMcpToolProvider` works identically at runtime; the

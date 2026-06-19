@@ -545,6 +545,12 @@ The complete, buildable example is [`samples/UnrealAIRuntimeSample/`](samples/Un
 
 A runtime connection serves a **deliberately smaller** built-in set than the editor — **22 runtime-safe built-in tools** (vs the [62 editor tools](#tools)): the actor / component family, `object-get-data` / `object-modify`, `level-get-data`, the console / reflection tools, `screenshot-game-view` / `screenshot-camera`, and `ping`. Editor-only families — Blueprint authoring, asset / Content-Browser operations, C++ source edit & compile, level create/open/save, editor-application state, and viewport/isolated screenshots — are **not** present at runtime (there is no editor in a shipped game). Your own custom tools, registered via the extension bus above, are added on top of the 22 built-ins.
 
+### Shipping only your own tools (opt out of the built-ins)
+
+If you want a shipped game to expose **only its own custom tools** and none of the 22 built-ins, turn off `UUnrealMcpRuntimeSettings::bRegisterBuiltinRuntimeTools` (Project Settings → Plugins → **Unreal MCP (Runtime)** → **Register Built-in Runtime Tools**). It defaults to **`true`** (no behavior change for existing users); set it to **`false`** to skip the built-in families at startup so the runtime registry contains only the tools your `IUnrealMcpToolProvider` registers.
+
+This is a **security** lever as much as a scoping one: the built-in set includes `reflection-method-call` and `console-run-command`, which together amount to remote arbitrary-code-execution over the connection. A game that only needs its own narrow tool surface should opt out so that surface is never exposed. Like the kill switch, this is a **Game** config setting (`DefaultGame.ini`, section `[/Script/UnrealMcpRuntime.UnrealMcpRuntimeSettings]`), so it travels into the packaged build. It gates the **runtime** path only — the editor toolset is unaffected. (Tools only; core prompts / resources are unchanged — a follow-up may add parity.)
+
 ## <a id="runtime-security-contract"></a>Security contract
 
 A runtime connection is **remote control of a running game** (`actor-create`, `object-modify`, arbitrary CVars via `console-run-command`, arbitrary `UFunction`s via `reflection-method-call`) — RCE-class if it were reachable in a shipped product. The runtime surface is therefore locked down by **five layered mitigations** ([`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §12.8), all enforced inside `Connect()`:
