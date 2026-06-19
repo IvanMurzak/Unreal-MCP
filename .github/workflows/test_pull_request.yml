@@ -110,37 +110,70 @@ jobs:
           # GITHUB_TOKEN in the worktree's .git config after checkout.
           persist-credentials: false
 
-      - name: BuildPlugin (compile + marketplace packaging validation)
+      - name: BuildPlugin (marketplace packaging validation — DISTRIBUTED, test-free)
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          # C2 (#139): this validates the DISTRIBUTED package — the committed
+          # UnrealMCP.uplugin omits the UnrealMcpEditorTests module (Fab review flags
+          # shipped test/automation modules), so this BuildPlugin -Rocket proves the
+          # marketplace package builds green WITHOUT the test module. The Automation
+          # pass below rebuilds WITH the test module into a separate junction target.
           $runUAT = Join-Path $env:UE_ROOT 'Engine\Build\BatchFiles\RunUAT.bat'
           if (-not (Test-Path $runUAT)) { throw "RunUAT.bat not found at $runUAT — set the UNREAL_ENGINE_PATH repo variable." }
           $uplugin = Join-Path $env:GITHUB_WORKSPACE 'UnrealMCP\UnrealMCP.uplugin'
-          $package = Join-Path $env:RUNNER_TEMP 'UnrealMCP-Package'
+          $package = Join-Path $env:RUNNER_TEMP 'UnrealMCP-Dist-Package'
           if (Test-Path $package) { Remove-Item $package -Recurse -Force }
           & $runUAT BuildPlugin -Plugin="$uplugin" -Package="$package" -TargetPlatforms=Win64 -Rocket
-          if ($LASTEXITCODE -ne 0) { throw "BuildPlugin failed with exit code $LASTEXITCODE" }
+          if ($LASTEXITCODE -ne 0) { throw "Distributed BuildPlugin failed with exit code $LASTEXITCODE" }
+          # Guard: the packaged distributed plugin must NOT carry the test module.
+          $distUplugin = Join-Path $package 'UnrealMCP.uplugin'
+          if (Test-Path $distUplugin) {
+            $mods = (Get-Content $distUplugin -Raw | ConvertFrom-Json).Modules.Name
+            if ($mods -contains 'UnrealMcpEditorTests') {
+              throw "Distributed package SHIPS UnrealMcpEditorTests — Fab review would flag it (C2 regression)."
+            }
+          }
 
-      - name: Run Automation specs (UnrealMcp. filter)
+      - name: Run Automation specs (UnrealMcp. filter — test module rebuilt in)
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           if ([string]::IsNullOrWhiteSpace($env:HOST_UPROJECT)) {
             throw "UNREAL_HOST_PROJECT repo variable is not set — the Automation pass needs a host .uproject with the UnrealMCP plugin enabled (see docs/RELEASING.md)."
           }
-          $editorCmd = Join-Path $env:UE_ROOT 'Engine\Binaries\Win64\UnrealEditor-Cmd.exe'
-          $reportDir = Join-Path $env:RUNNER_TEMP 'AutomationReport'
-          if (Test-Path $reportDir) { Remove-Item $reportDir -Recurse -Force }
-          & $editorCmd "$env:HOST_UPROJECT" -nullrhi -nosplash -unattended `
-            -ExecCmds="Automation RunTests UnrealMcp.; Quit" `
-            -ReportExportPath="$reportDir" -log
-          # The editor's exit code is unreliable for test verdicts (test.md
-          # Suite 3); the parsed index.json below is authoritative. Clear the
-          # exit code so pwsh's auto-appended `exit $LASTEXITCODE` does not red
-          # the step on a nonzero editor exit unrelated to a test failure.
-          $global:LASTEXITCODE = 0
-          echo "REPORT_DIR=$reportDir" >> $env:GITHUB_ENV
+          # C2 (#139): the host project's Plugins\UnrealMCP junctions to the package
+          # at $RUNNER_TEMP\UnrealMCP-Package (docs/RELEASING.md). The distributed
+          # package above is test-free, so to run the specs we transiently ADD the
+          # UnrealMcpEditorTests module, BuildPlugin into that junction target (so the
+          # package the host loads CONTAINS the specs), run Automation, then ALWAYS
+          # revert the descriptor in finally (the toggle is idempotent — a crashed run
+          # never leaves the committed descriptor wedged).
+          $runUAT = Join-Path $env:UE_ROOT 'Engine\Build\BatchFiles\RunUAT.bat'
+          $toggle = Join-Path $env:GITHUB_WORKSPACE 'commands\test-module-uplugin.ps1'
+          $uplugin = Join-Path $env:GITHUB_WORKSPACE 'UnrealMCP\UnrealMCP.uplugin'
+          & $toggle -Action Add
+          try {
+            $package = Join-Path $env:RUNNER_TEMP 'UnrealMCP-Package'
+            if (Test-Path $package) { Remove-Item $package -Recurse -Force }
+            & $runUAT BuildPlugin -Plugin="$uplugin" -Package="$package" -TargetPlatforms=Win64 -Rocket
+            if ($LASTEXITCODE -ne 0) { throw "Automation BuildPlugin (with test module) failed with exit code $LASTEXITCODE" }
+            $editorCmd = Join-Path $env:UE_ROOT 'Engine\Binaries\Win64\UnrealEditor-Cmd.exe'
+            $reportDir = Join-Path $env:RUNNER_TEMP 'AutomationReport'
+            if (Test-Path $reportDir) { Remove-Item $reportDir -Recurse -Force }
+            & $editorCmd "$env:HOST_UPROJECT" -nullrhi -nosplash -unattended `
+              -ExecCmds="Automation RunTests UnrealMcp.; Quit" `
+              -ReportExportPath="$reportDir" -log
+            # The editor's exit code is unreliable for test verdicts (test.md
+            # Suite 3); the parsed index.json below is authoritative. Clear the
+            # exit code so pwsh's auto-appended `exit $LASTEXITCODE` does not red
+            # the step on a nonzero editor exit unrelated to a test failure.
+            $global:LASTEXITCODE = 0
+            echo "REPORT_DIR=$reportDir" >> $env:GITHUB_ENV
+          }
+          finally {
+            & $toggle -Action Remove
+          }
 
       - name: Parse Automation report (index.json is authoritative)
         shell: pwsh
