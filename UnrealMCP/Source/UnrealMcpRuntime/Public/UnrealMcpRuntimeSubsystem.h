@@ -11,6 +11,8 @@
 // Forward-declared: RegisterToolProvider/UnregisterToolProvider take it by pointer only (§12.9), so the
 // PUBLIC header needs no extension-contract include — callers include IUnrealMcpToolProvider.h themselves.
 class IUnrealMcpToolProvider;
+// Forward-declared: RegisterBuiltinRuntimeTools takes it by reference; the .cpp includes the registry header.
+class FUnrealMcpToolRegistry;
 // Forward-declared for the same reason: RegisterPromptProvider/UnregisterPromptProvider take it by pointer.
 class IUnrealMcpPromptProvider;
 // Forward-declared for the same reason: RegisterResourceProvider/UnregisterResourceProvider take it by pointer.
@@ -180,6 +182,16 @@ public:
 	 * An empty host counts as loopback (it resolves to the §8 DefaultCustomHost, which is localhost).
 	 */
 	static bool IsLoopbackHost(const FString& Host);
+
+	/**
+	 * Register the built-in runtime-safe core tool families (ping, actor/component, console+reflection,
+	 * screenshot, level-get-data) into @p Registry. Initialize() calls this ONLY when the
+	 * UUnrealMcpRuntimeSettings::bRegisterBuiltinRuntimeTools opt-out is on (the default); a game that turns
+	 * it off ships with ONLY its own IUnrealMcpToolProvider tools (docs/ARCHITECTURE.md §12.8). Static +
+	 * exported so the gate is testable without standing up a subsystem — a spec registers a test provider's
+	 * tool with/without this call and asserts the built-in count is gated by the flag.
+	 */
+	static void RegisterBuiltinRuntimeTools(FUnrealMcpToolRegistry& Registry);
 
 private:
 	/** Register / unregister the QA console commands (UnrealMcp.Connect / UnrealMcp.Disconnect). */

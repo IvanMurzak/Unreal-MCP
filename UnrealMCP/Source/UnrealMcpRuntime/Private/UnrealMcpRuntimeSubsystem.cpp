@@ -49,6 +49,18 @@ struct UUnrealMcpRuntimeSubsystem::FRuntimeImpl
 	TUniquePtr<FUnrealMcpExtensionManager> ExtensionManager;
 };
 
+void UUnrealMcpRuntimeSubsystem::RegisterBuiltinRuntimeTools(FUnrealMcpToolRegistry& Registry)
+{
+	// The runtime-safe core families (docs/ARCHITECTURE.md §10, §12.7). Editor-only families are NOT here
+	// (this path runs in a packaged game where they would not compile/link). Kept in lockstep with the call
+	// site in Initialize() — a §12.8 opt-out skips this whole set so only custom provider tools register.
+	UnrealMcpPingTool::Register(Registry);
+	UnrealMcpActorTools::Register(Registry); // §10 actor / component family (World->SpawnActor runtime branch)
+	UnrealMcpConsoleReflectionTools::Register(Registry); // §10 console + reflection runtime subset
+	UnrealMcpRuntimeScreenshotTools::Register(Registry); // §10 screenshot runtime subset (game-view, camera)
+	UnrealMcpRuntimeLevelTools::Register(Registry); // §10 read-only level-get-data
+}
+
 void UUnrealMcpRuntimeSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
 	Super::Initialize(Collection);
@@ -68,11 +80,23 @@ void UUnrealMcpRuntimeSubsystem::Initialize(FSubsystemCollectionBase& Collection
 	// set: ping, actor/component, the console+reflection subset, the screenshot subset, and level-get-data.
 	Impl = MakePimpl<FRuntimeImpl>();
 	Impl->Registry = MakeUnique<FUnrealMcpToolRegistry>();
-	UnrealMcpPingTool::Register(*Impl->Registry);
-	UnrealMcpActorTools::Register(*Impl->Registry); // §10 actor / component family (World->SpawnActor runtime branch)
-	UnrealMcpConsoleReflectionTools::Register(*Impl->Registry); // §10 console + reflection runtime subset
-	UnrealMcpRuntimeScreenshotTools::Register(*Impl->Registry); // §10 screenshot runtime subset (game-view, camera)
-	UnrealMcpRuntimeLevelTools::Register(*Impl->Registry); // §10 read-only level-get-data
+
+	// §12.8: the built-in core tool families register only when the bRegisterBuiltinRuntimeTools opt-out is
+	// on (default true). When a game turns it off, the built-ins are skipped and ONLY custom
+	// IUnrealMcpToolProvider tools (merged below via the extension manager) reach the runtime registry — so a
+	// shipped game can expose ONLY its own tools and never the reflection-method-call / console-run-command
+	// remote-control surface. Gates the RUNTIME path only; the editor coordinator keeps the full toolset.
+	const UUnrealMcpRuntimeSettings* RuntimeSettings = GetDefault<UUnrealMcpRuntimeSettings>();
+	if (!RuntimeSettings || RuntimeSettings->bRegisterBuiltinRuntimeTools)
+	{
+		RegisterBuiltinRuntimeTools(*Impl->Registry);
+	}
+	else
+	{
+		UE_LOG(LogUnrealMcp, Log,
+			TEXT("[Unreal-MCP] runtime built-in tools skipped (bRegisterBuiltinRuntimeTools is off); ")
+			TEXT("only custom IUnrealMcpToolProvider tools will be registered."));
+	}
 
 	// §A.1 prompt registry (P1): the prompt sibling of the tool registry, built on the SAME Model A path. The
 	// core prompt family registers before the bridge arms so the first prompt-manifest a v2 sidecar reads on
