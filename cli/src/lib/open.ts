@@ -45,6 +45,7 @@ export function buildOpenEnv(opts: OpenProjectOptions): Record<string, string> |
     env['UNREAL_MCP_TRANSPORT'] = opts.transport;
   }
   if (opts.startServer !== undefined) env['UNREAL_MCP_START_SERVER'] = opts.startServer ? 'true' : 'false';
+  if (opts.connectionMode !== undefined) env['UNREAL_MCP_CONNECTION_MODE'] = opts.connectionMode;
   return Object.keys(env).length > 0 ? env : undefined;
 }
 
@@ -86,6 +87,7 @@ export async function openProject(opts: OpenProjectOptions): Promise<OpenProject
       if (opts.keepConnected) ignored.push('keepConnected');
       if (opts.tools !== undefined) ignored.push('tools');
       if (opts.startServer !== undefined) ignored.push('startServer');
+      if (opts.connectionMode !== undefined) ignored.push('connectionMode');
       if (ignored.length > 0) {
         warnings.push(`Connection options are ignored under --no-connect: ${ignored.join(', ')}.`);
       }
