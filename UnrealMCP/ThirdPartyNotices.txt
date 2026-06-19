@@ -1,0 +1,134 @@
+Third-Party Notices for the UnrealMCP plugin
+=============================================
+
+The UnrealMCP plugin is licensed under the Apache License, Version 2.0
+("Apache-2.0"). See the LICENSE file at the root of this repository
+(https://github.com/IvanMurzak/Unreal-MCP) for the full text.
+
+    Copyright 2026 Ivan Murzak
+
+This plugin redistributes prebuilt third-party binaries. The bundled
+".NET" sidecar (`unreal-mcp-bridge`) is a self-contained, single-file
+.NET 9 application shipped per platform RID under `Sidecar/<rid>/`
+(`win-x64`, `linux-x64`, `osx-x64`, `osx-arm64`) and staged into
+`Binaries/ThirdParty/UnrealMcpBridge/<rid>/` at compile time. Because it
+is self-contained, each bundled binary carries the Microsoft .NET 9
+runtime and the managed dependencies listed below inside it.
+
+The third-party components redistributed via that bundled sidecar, and
+their licenses, are enumerated below. Each component remains the property
+of its respective copyright holder(s) and is governed by its own license.
+
+--------------------------------------------------------------------------
+1. Microsoft .NET 9 Runtime and Libraries (self-contained)
+--------------------------------------------------------------------------
+Publisher : Microsoft Corporation and the .NET Foundation
+License   : MIT License
+Source    : https://github.com/dotnet/runtime
+License   : https://github.com/dotnet/runtime/blob/main/LICENSE.TXT
+
+The sidecar is published self-contained, so the Microsoft .NET runtime,
+the CoreCLR, and the Base Class Library ship embedded inside the
+`unreal-mcp-bridge` binary.
+
+--------------------------------------------------------------------------
+2. Microsoft.AspNetCore.SignalR.Client
+--------------------------------------------------------------------------
+Version   : 8.0.15 (or compatible, as resolved at publish time)
+Publisher : Microsoft Corporation and the .NET Foundation
+License   : MIT License
+Source    : https://github.com/dotnet/aspnetcore
+License   : https://github.com/dotnet/aspnetcore/blob/main/LICENSE.txt
+
+Used by the sidecar's McpPlugin host to maintain the SignalR connection
+to the MCP server.
+
+--------------------------------------------------------------------------
+3. Microsoft.Extensions.Logging
+--------------------------------------------------------------------------
+Version   : 8.0.1 (or compatible, as resolved at publish time)
+Publisher : Microsoft Corporation and the .NET Foundation
+License   : MIT License
+Source    : https://github.com/dotnet/runtime
+License   : https://github.com/dotnet/runtime/blob/main/LICENSE.TXT
+
+--------------------------------------------------------------------------
+4. System.Text.Json
+--------------------------------------------------------------------------
+Version   : 8.0.5 (or compatible, as resolved at publish time)
+Publisher : Microsoft Corporation and the .NET Foundation
+License   : MIT License
+Source    : https://github.com/dotnet/runtime
+License   : https://github.com/dotnet/runtime/blob/main/LICENSE.TXT
+
+--------------------------------------------------------------------------
+5. R3
+--------------------------------------------------------------------------
+Version   : 1.3.0 (or compatible, as resolved at publish time)
+Publisher : Cysharp, Inc.
+License   : MIT License
+Source    : https://github.com/Cysharp/R3
+License   : https://github.com/Cysharp/R3/blob/main/LICENSE
+
+Reactive-extensions library used transitively by com.IvanMurzak.McpPlugin.
+
+--------------------------------------------------------------------------
+6. com.IvanMurzak.McpPlugin (and com.IvanMurzak.McpPlugin.Common)
+--------------------------------------------------------------------------
+Version   : 6.10.0
+Publisher : Ivan Murzak
+License   : Apache License, Version 2.0
+Source    : https://github.com/IvanMurzak/com.IvanMurzak.McpPlugin
+License   : https://github.com/IvanMurzak/com.IvanMurzak.McpPlugin/blob/main/LICENSE
+
+The MCP plugin host the sidecar runs (SignalR client + tool registry).
+
+--------------------------------------------------------------------------
+7. com.IvanMurzak.ReflectorNet
+--------------------------------------------------------------------------
+Version   : 5.3.1
+Publisher : Ivan Murzak
+License   : Apache License, Version 2.0
+Source    : https://github.com/IvanMurzak/ReflectorNet
+License   : https://github.com/IvanMurzak/ReflectorNet/blob/main/LICENSE
+
+Reflection / serialization library used by the McpPlugin host.
+
+==========================================================================
+MIT License (applies to the MIT-licensed components listed above)
+==========================================================================
+
+Permission is hereby granted, free of charge, to any person obtaining a
+copy of this software and associated documentation files (the "Software"),
+to deal in the Software without restriction, including without limitation
+the rights to use, copy, modify, merge, publish, distribute, sublicense,
+and/or sell copies of the Software, and to permit persons to whom the
+Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+==========================================================================
+Apache License 2.0 (applies to the Apache-2.0-licensed components, and to
+the UnrealMCP plugin itself)
+==========================================================================
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may not
+use these files except in compliance with the License. You may obtain a
+copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+License for the specific language governing permissions and limitations
+under the License.
