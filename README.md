@@ -65,6 +65,7 @@ Unlike Unity and Godot (C# engines that host the .NET `McpPlugin` in-process), U
 - [`unreal-mcp-cli`](#unreal-mcp-cli)
 - [Customize Tools, Prompts & Resources](#customize-tools-prompts--resources)
 - [Runtime usage (in-game)](#runtime-usage-in-game)
+  - [Editor-only — exclude Unreal-MCP from packaged games](#editor-only-exclude-from-packaged-games)
 - [Configuration & environment variables](#configuration--environment-variables)
 - [Troubleshooting](#troubleshooting)
 - [How Unreal MCP Architecture Works](#how-unreal-mcp-architecture-works)
@@ -546,6 +547,25 @@ The complete, buildable example is [`samples/UnrealAIRuntimeSample/`](samples/Un
 A runtime connection ships exactly **one** built-in tool: **`ping`** (a liveness probe + a non-empty manifest). Everything a runtime AI agent can do beyond `ping` is **bring-your-own**: register your own tools via the extension bus above (`RegisterToolProvider`), and they appear on top of `ping`.
 
 All of the engine-development families — the actor / component family, `object-get-data` / `object-modify`, `level-get-data`, the console / reflection tools, every screenshot tool, plus Blueprint authoring, asset / Content-Browser operations, C++ source edit & compile, level create/open/save, and editor-application state — are **editor-only** (the [62 editor tools](#tools)). They drive the editor and several are RCE-class (e.g. `reflection-method-call`, `console-run-command`), so they are not compiled into a shipped game by default. There is no editor in a packaged game, so the runtime built-in surface is intentionally just `ping` + whatever tools your game registers.
+
+## <a id="editor-only-exclude-from-packaged-games"></a>Editor-only — exclude Unreal-MCP from packaged games
+
+If you only want Unreal-MCP for **AI tooling inside the Unreal Editor** and intend to ship a packaged game with **zero Unreal-MCP footprint** — no runtime module, no bundled `.NET` sidecar binary — pin the plugin to the editor with a **`TargetDenyList`** in your **consumer project's own `.uproject`** (not the plugin's `.uplugin`):
+
+```jsonc
+// <YourProject>.uproject — "Plugins" array
+{
+    "Name": "UnrealMCP",
+    "Enabled": true,
+    "TargetDenyList": [ "Game", "Client", "Server" ]
+}
+```
+
+UE honours `TargetDenyList` / `TargetAllowList` on a plugin reference (`PluginReferenceDescriptor::IsEnabledForTarget`): the plugin stays active in the **Editor** target, but is **excluded from packaged `Game` / `Client` / `Server` builds** — so neither the runtime infra module nor the bundled `unreal-mcp-bridge` sidecar is staged or compiled into your shipped product. Editor-type modules (`UnrealMcpEditor`) are stripped from a game build regardless; the deny-list also drops the `UnrealMcpRuntime` infra module and its sidecar `RuntimeDependencies` (§12.5), giving you a **zero compiled footprint**.
+
+> **Caveat — do not create a direct module dependency.** A `TargetDenyList` only excludes the plugin's *own* modules. If one of your **game** modules adds `UnrealMcpRuntime` (or any `UnrealMcp*` module) to its `*.Build.cs` `PublicDependencyModuleNames` / `PrivateDependencyModuleNames`, or `#include`s an `UnrealMcp*` header, that direct dependency **overrides the deny-list** and UBT compiles the runtime module into your game anyway. A pure editor-only project references nothing from the plugin, so it stays clean by construction — only opt into a module dependency when you actually want [runtime (in-game) usage](#runtime-usage-in-game).
+
+For **runtime (in-game)** usage instead, leave the deny-list **off**: the `UnrealMcpRuntime` infra module + the `ping` built-in ship into the packaged build (§12.5), and you register your own gameplay tools via `IUnrealMcpToolProvider` — see [Runtime usage (in-game)](#runtime-usage-in-game) and [Customize Tools, Prompts & Resources](#customize-tools-prompts--resources). The two are mutually exclusive: deny-list for an editor-only project, no deny-list for a game that hosts a live MCP connection.
 
 ## <a id="runtime-security-contract"></a>Security contract
 
