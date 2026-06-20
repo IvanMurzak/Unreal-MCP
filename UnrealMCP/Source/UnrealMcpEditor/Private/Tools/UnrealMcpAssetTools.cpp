@@ -12,6 +12,8 @@
 #include "UObject/TopLevelAssetPath.h"
 #include "UObject/GCObjectScopeGuard.h"
 #include "Misc/Paths.h"
+#include "Misc/ScopeExit.h"
+#include "HAL/IConsoleManager.h"
 #include "ScopedTransaction.h"
 
 #include "AssetRegistry/AssetRegistryModule.h"
@@ -968,6 +970,35 @@ namespace UnrealMcpAssetTools
 				Task->bReplaceExisting = bReplaceExisting;
 				Task->bSave = bSave;
 				Task->bAsync = false;
+
+				// asset-import runs SYNCHRONOUSLY on the game thread inside the §4 dispatcher, which
+				// delivers handler bodies as game-thread TaskGraph tasks (AsyncTask(GameThread)). UE5's
+				// Interchange importer pumps the game-thread TaskGraph while waiting on its own async
+				// pipeline, RE-ENTERING the named-thread queue we are already executing inside — which
+				// trips `++Queue(QueueIndex).RecursionGuard == 1` (TaskGraph.cpp) and HARD-CRASHES the
+				// editor (assertion + minidump, no recovery). Force the legacy (non-Interchange) UFactory
+				// import path for the duration of this call: it imports inline without pumping the
+				// TaskGraph, so there is no re-entrancy. The decision is gated by the
+				// `Interchange.FeatureFlags.Import.Enable` CVar (AssetTools::ShouldUseInterchangeFramework
+				// reads UInterchangeManager::IsInterchangeImportEnabled()), so we flip it off and restore
+				// it unconditionally via ON_SCOPE_EXIT. FBX/textures/etc. resolve to their legacy
+				// factories; an Interchange-only format would fail gracefully ("produced no assets")
+				// instead of crashing. Keeping Interchange would require an async-handler surface (§4),
+				// tracked separately.
+				IConsoleVariable* const InterchangeImportCVar =
+					IConsoleManager::Get().FindConsoleVariable(TEXT("Interchange.FeatureFlags.Import.Enable"));
+				const bool bInterchangeWasEnabled = InterchangeImportCVar != nullptr && InterchangeImportCVar->GetBool();
+				if (bInterchangeWasEnabled)
+				{
+					InterchangeImportCVar->Set(false, ECVF_SetByCode);
+				}
+				ON_SCOPE_EXIT
+				{
+					if (bInterchangeWasEnabled)
+					{
+						InterchangeImportCVar->Set(true, ECVF_SetByCode);
+					}
+				};
 
 				GetAssetTools().ImportAssetTasks({ Task });
 
