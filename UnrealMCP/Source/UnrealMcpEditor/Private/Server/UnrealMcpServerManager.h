@@ -133,6 +133,23 @@ private:
 	/** Download + unpack the pinned server zip into the §6 install dir (override/cache miss path). Blocking; game-thread. */
 	bool DownloadBinaryIfNeeded(FString& OutBinaryPath);
 
+	/**
+	 * Fail-closed verify-before-execute gate. Called from DownloadBinaryIfNeeded AFTER the zip bytes are in
+	 * hand and BEFORE FZipArchiveReader / CreateProc. Fetches the release's `SHA256SUMS` manifest (a second
+	 * blocking HTTP GET mirroring the zip download, with a bounded transient-retry), computes @p ZipBytes'
+	 * SHA256 via UE's native FSHA256Signature (no third-party dep), and compares against the manifest entry
+	 * for @p AssetZipName via the pure-managed FUnrealMcpServerChecksum::VerifyZipChecksum. Returns true ONLY
+	 * when the digest matched the manifest. Every failure path — a manifest we could not fetch after all
+	 * retries, an unparsable manifest, a missing entry, or a digest mismatch — returns false with a clear
+	 * UE_LOG so the caller skips extraction/launch. Game-thread; blocking. */
+	bool VerifyDownloadedZip(const TArray<uint8>& ZipBytes, const FString& Version, const FString& AssetZipName) const;
+
+	/**
+	 * Download the `SHA256SUMS` manifest text with a bounded transient-retry (mirrors the zip download's
+	 * tick-until-done pattern on the game thread). Writes the manifest body to @p OutText and returns true,
+	 * or returns false when every attempt failed (the fail-closed signal). Game-thread; blocking. */
+	static bool FetchSha256SumsText(const FString& SumsUrl, FString& OutText);
+
 	/** Spawn the resolved binary with the current launch args; records ProcHandle + ProcId under ProcessMutex. */
 	bool SpawnProcess(const FString& BinaryPath);
 

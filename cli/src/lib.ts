@@ -28,6 +28,17 @@ export {
   SERVER_BINARY_BASENAME,
   SERVER_PATH_ENV_VAR,
 } from './lib/download-server.js';
+export {
+  serverChecksumsUrl,
+  serverZipAssetName,
+  parseSha256Sums,
+  lookupDigest,
+  verifyDigest,
+  verifyZip,
+  checksumFailureReason,
+  SHA256SUMS_ASSET_NAME,
+} from './lib/server-checksum.js';
+export type { ChecksumVerdict } from './lib/server-checksum.js';
 export { SERVER_VERSION } from './lib/server-version.js';
 export { login } from './lib/login.js';
 export { getStatus } from './lib/status.js';

@@ -25,11 +25,49 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { createHash } from 'node:crypto';
 import { unzipSync } from 'fflate';
 import { ridForPlatform } from './bootstrap-local.js';
 import { SERVER_VERSION } from './server-version.js';
 import { emitProgress } from './progress.js';
+import {
+  serverChecksumsUrl,
+  serverZipAssetName,
+  verifyZip,
+  checksumFailureReason,
+  SHA256SUMS_ASSET_NAME,
+} from './server-checksum.js';
 import type { DownloadServerOptions, DownloadServerResult } from './types.js';
+
+/** Attempts (1 initial + retries) for the SHA256SUMS manifest fetch before fail-closed. */
+const SHA256SUMS_FETCH_ATTEMPTS = 3;
+
+/**
+ * Fetch the `SHA256SUMS` manifest text with a bounded transient-retry, reusing
+ * the injectable `fetchImpl` so a test can inject the manifest. Returns the
+ * manifest body, or `null` when every attempt failed (the fail-closed signal —
+ * an unverified binary must NEVER be executed). Never throws.
+ */
+async function fetchSha256SumsText(
+  url: string,
+  fetchImpl: typeof fetch,
+  warnings: string[],
+): Promise<string | null> {
+  for (let attempt = 1; attempt <= SHA256SUMS_FETCH_ATTEMPTS; attempt++) {
+    try {
+      const response = await fetchImpl(url);
+      if (response.ok) return await response.text();
+      // An HTTP error is treated as transient and retried (a release just being
+      // published can briefly 404 the manifest); a persistent failure fails closed.
+      warnings.push(`${SHA256SUMS_ASSET_NAME} fetch attempt ${attempt}/${SHA256SUMS_FETCH_ATTEMPTS} failed: HTTP ${response.status}.`);
+    } catch (err: unknown) {
+      warnings.push(
+        `${SHA256SUMS_ASSET_NAME} fetch attempt ${attempt}/${SHA256SUMS_FETCH_ATTEMPTS} failed: ${err instanceof Error ? err.message : String(err)}.`,
+      );
+    }
+  }
+  return null;
+}
 
 /** Base name of the shared server binary (extension added per-OS). */
 export const SERVER_BINARY_BASENAME = 'gamedev-mcp-server';
@@ -175,6 +213,38 @@ export async function downloadServer(opts: DownloadServerOptions): Promise<Downl
       );
     }
     const zipBytes = new Uint8Array(await response.arrayBuffer());
+
+    // FAIL-CLOSED INTEGRITY GATE (verify-before-execute, issue #155). The zip bytes
+    // are in hand but UNTRUSTED. Before unzipSync/extract/execute, fetch the
+    // release's SHA256SUMS manifest (sibling of the zip URL under the same
+    // v<version> tag), compute the downloaded zip's SHA256 (node:crypto), and
+    // compare against the manifest entry for THIS RID. On MISMATCH / MISSING entry /
+    // unparsable-or-unfetchable manifest we return the failure path WITHOUT
+    // extracting — an unverified binary must NEVER be executed (a compromised
+    // release asset or a trusted-CA MITM would otherwise yield arbitrary code
+    // execution on the developer's machine).
+    const sumsUrl = serverChecksumsUrl(version);
+    const sha256SumsText = await fetchSha256SumsText(sumsUrl, fetchImpl, warnings);
+    if (sha256SumsText === null) {
+      throw new Error(
+        `Refusing to launch MCP server: could not download the ${SHA256SUMS_ASSET_NAME} integrity manifest ` +
+          `from ${sumsUrl} after ${SHA256SUMS_FETCH_ATTEMPTS} attempt(s). The downloaded binary was NOT ` +
+          `verified and will not be extracted (fail-closed).`,
+      );
+    }
+    const actualHexDigest = createHash('sha256').update(zipBytes).digest('hex');
+    const assetZipName = serverZipAssetName(rid);
+    const verdict = verifyZip(sha256SumsText, assetZipName, actualHexDigest);
+    if (verdict !== 'verified') {
+      throw new Error(
+        `Refusing to launch MCP server: ${checksumFailureReason(verdict, assetZipName)}. ` +
+          `The binary will not be extracted or executed (fail-closed).`,
+      );
+    }
+    emitProgress(opts.onProgress, {
+      phase: 'info',
+      message: `Verified ${assetZipName} against ${SHA256SUMS_ASSET_NAME} (SHA256 OK).`,
+    });
 
     // Staging-dir extraction: unzip everything to a throwaway dir, find the
     // binary wherever the layout put it, then move its folder's files.
