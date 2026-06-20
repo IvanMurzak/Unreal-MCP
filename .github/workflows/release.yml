@@ -280,12 +280,22 @@ jobs:
   # skipped too — a safe default. For a dry-run the publish jobs are skipped
   # regardless. See docs/RELEASING.md.
   plugin:
-    name: plugin BuildPlugin + Automation (UE 5.7)
+    name: plugin BuildPlugin + Automation (UE ${{ matrix.ue }})
     needs: [check-version]
     if: needs.check-version.outputs.run_tests == 'true' && vars.UNREAL_RUNNER_READY == 'true'
+    # Matrix runs UE 5.7 and 5.8 as parallel jobs; the single self-hosted runner
+    # (label `unreal-5-7`, legacy) executes them sequentially. fail-fast:false so
+    # one engine's failure never cancels the other's leg. Downstream artifact /
+    # publish jobs that `needs: [plugin]` wait for BOTH legs — so a release is
+    # gated on the plugin passing Automation on both engines.
     runs-on: [self-hosted, windows, unreal-5-7]
+    strategy:
+      fail-fast: false
+      matrix:
+        ue: ['5.7', '5.8']
     env:
-      UE_ROOT: ${{ vars.UNREAL_ENGINE_PATH || 'C:\Program Files\Epic Games\UE_5.7' }}
+      # Engine path is driven by the matrix (standard Epic install layout).
+      UE_ROOT: C:\Program Files\Epic Games\UE_${{ matrix.ue }}
       HOST_UPROJECT: ${{ vars.UNREAL_HOST_PROJECT }}
     steps:
       - name: Checkout repository
@@ -339,6 +349,15 @@ jobs:
             if (Test-Path $package) { Remove-Item $package -Recurse -Force }
             & $runUAT BuildPlugin -Plugin="$uplugin" -Package="$package" -TargetPlatforms=Win64 -Rocket
             if ($LASTEXITCODE -ne 0) { throw "Automation BuildPlugin (with test module) failed with exit code $LASTEXITCODE" }
+            # Rebuild the host's OWN game module for THIS matrix engine so the editor
+            # opens without an out-of-date-modules failure (the host's committed
+            # Binaries may be built for a different UE version, and an -unattended
+            # editor will NOT interactively rebuild). The plugin is already current
+            # via the BuildPlugin into the host's Plugins junction above.
+            $hostBuild = Join-Path $env:UE_ROOT 'Engine\Build\BatchFiles\Build.bat'
+            $hostTarget = [System.IO.Path]::GetFileNameWithoutExtension($env:HOST_UPROJECT) + 'Editor'
+            & $hostBuild $hostTarget Win64 Development -project="$env:HOST_UPROJECT" -WaitMutex
+            if ($LASTEXITCODE -ne 0) { throw "Host editor target ($hostTarget) build failed for UE_ROOT=$env:UE_ROOT (exit $LASTEXITCODE)" }
             $editorCmd = Join-Path $env:UE_ROOT 'Engine\Binaries\Win64\UnrealEditor-Cmd.exe'
             $reportDir = Join-Path $env:RUNNER_TEMP 'AutomationReport'
             if (Test-Path $reportDir) { Remove-Item $reportDir -Recurse -Force }
