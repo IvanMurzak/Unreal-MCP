@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
+import { createHash } from 'node:crypto';
 import { zipSync, strToU8 } from 'fflate';
 import {
   downloadServer,
@@ -13,6 +14,7 @@ import {
   serverInstallDir,
   SERVER_PATH_ENV_VAR,
 } from '../src/lib/download-server.js';
+import { serverZipAssetName } from '../src/lib/server-checksum.js';
 import { SERVER_VERSION } from '../src/lib/server-version.js';
 import { makeTempDir, rmTempDir } from './helpers.js';
 
@@ -48,10 +50,56 @@ function folderedUnixZip(rid: string): Uint8Array {
   return zipSync(entries);
 }
 
-/** A `fetch` stub returning the given zip bytes (200 OK). */
-function fetchZip(bytes: Uint8Array, calls?: string[]): typeof fetch {
+/** SHA256 hex of bytes, matching the createHash('sha256') the downloader uses. */
+function sha256Hex(bytes: Uint8Array): string {
+  return createHash('sha256').update(bytes).digest('hex');
+}
+
+/**
+ * Build a valid `SHA256SUMS` manifest for the given zip + RID — the digest the
+ * fail-closed verify-gate must accept. `digestOverride` injects a WRONG digest
+ * to exercise the tampered-rejection path; `omitEntry` produces a manifest with
+ * no line for this RID (missing-entry path).
+ */
+function makeSha256Sums(
+  bytes: Uint8Array,
+  rid: string,
+  opts: { digestOverride?: string; omitEntry?: boolean } = {},
+): string {
+  if (opts.omitEntry) {
+    // A manifest with some-other-RID entry but NOT this one.
+    return `${'0'.repeat(64)}  gamedev-mcp-server-some-other-rid.zip\n`;
+  }
+  const digest = opts.digestOverride ?? sha256Hex(bytes);
+  return `${digest}  ${serverZipAssetName(rid)}\n`;
+}
+
+/**
+ * A `fetch` stub serving BOTH the zip (the download URL) AND the SHA256SUMS
+ * manifest (the integrity URL). The manifest is computed from the zip bytes so
+ * the verify-gate passes by default. `sumsOpts` lets a test serve a tampered /
+ * missing / unfetchable manifest; `rid` is the asset the manifest keys on.
+ */
+function fetchZip(
+  bytes: Uint8Array,
+  calls?: string[],
+  rid = 'win-x64',
+  sumsOpts: { digestOverride?: string; omitEntry?: boolean; sumsHttpError?: number } = {},
+): typeof fetch {
   return (async (url: unknown) => {
-    calls?.push(String(url));
+    const u = String(url);
+    calls?.push(u);
+    if (u.endsWith('SHA256SUMS')) {
+      if (sumsOpts.sumsHttpError) {
+        return { ok: false, status: sumsOpts.sumsHttpError, statusText: 'err', text: async () => '' } as unknown as Response;
+      }
+      return {
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        text: async () => makeSha256Sums(bytes, rid, sumsOpts),
+      } as unknown as Response;
+    }
     return {
       ok: true,
       status: 200,
@@ -61,10 +109,10 @@ function fetchZip(bytes: Uint8Array, calls?: string[]): typeof fetch {
   }) as typeof fetch;
 }
 
-/** A `fetch` stub returning an HTTP error. */
+/** A `fetch` stub returning an HTTP error (for the ZIP download — fails before verify). */
 function fetch404(): typeof fetch {
   return (async () =>
-    ({ ok: false, status: 404, statusText: 'Not Found', arrayBuffer: async () => new ArrayBuffer(0) }) as unknown as Response) as typeof fetch;
+    ({ ok: false, status: 404, statusText: 'Not Found', arrayBuffer: async () => new ArrayBuffer(0), text: async () => '' }) as unknown as Response) as typeof fetch;
 }
 
 // --- pure helpers ------------------------------------------------------------
@@ -146,7 +194,7 @@ describe('downloadServer', () => {
       os: 'linux',
       arch: 'x64',
       env: {},
-      fetchImpl: fetchZip(folderedUnixZip('linux-x64')),
+      fetchImpl: fetchZip(folderedUnixZip('linux-x64'), undefined, 'linux-x64'),
     });
     expect(r.kind).toBe('success');
     if (r.kind !== 'success') return;
@@ -173,7 +221,8 @@ describe('downloadServer', () => {
     expect(second.kind).toBe('success');
     if (second.kind !== 'success') return;
     expect(second.source).toBe('cache');
-    expect(calls).toHaveLength(1);
+    // First download = 2 fetches (zip + SHA256SUMS); the cache hit adds none.
+    expect(calls).toHaveLength(2);
   });
 
   it('re-downloads when the version marker is stale', async () => {
@@ -187,7 +236,8 @@ describe('downloadServer', () => {
     expect(r.kind).toBe('success');
     if (r.kind !== 'success') return;
     expect(r.source).toBe('download');
-    expect(calls).toHaveLength(1);
+    // 2 fetches: the release zip + the SHA256SUMS integrity manifest.
+    expect(calls).toHaveLength(2);
     expect(fs.readFileSync(r.serverPath, 'utf-8')).toBe('exe-bytes');
     expect(readVersionMarker(installDir)).toBe(SERVER_VERSION);
   });
@@ -240,5 +290,75 @@ describe('downloadServer', () => {
     expect(r.kind).toBe('failure');
     if (r.kind !== 'failure') return;
     expect(r.error.message).toContain('gamedev-mcp-server.exe');
+  });
+
+  // --- fail-closed integrity gate (issue #155) ------------------------------
+
+  it('FAIL-CLOSED: a tampered zip (digest mismatch) is rejected and NEVER extracted', async () => {
+    const proj = tmp();
+    // The manifest advertises a WRONG digest for win-x64 → mismatch → refuse to extract.
+    const r = await downloadServer({
+      projectDir: proj,
+      os: 'win32',
+      arch: 'x64',
+      env: {},
+      fetchImpl: fetchZip(flatWinZip(), undefined, 'win-x64', { digestOverride: 'f'.repeat(64) }),
+    });
+    expect(r.kind).toBe('failure');
+    if (r.kind !== 'failure') return;
+    expect(r.error.message).toContain('did not match');
+    // Nothing was extracted — the install dir holds no binary.
+    expect(fs.existsSync(resolveServerBinaryPath(proj, 'win32', 'x64'))).toBe(false);
+  });
+
+  it('FAIL-CLOSED: a manifest missing this RID entry is rejected and NEVER extracted', async () => {
+    const proj = tmp();
+    const r = await downloadServer({
+      projectDir: proj,
+      os: 'win32',
+      arch: 'x64',
+      env: {},
+      fetchImpl: fetchZip(flatWinZip(), undefined, 'win-x64', { omitEntry: true }),
+    });
+    expect(r.kind).toBe('failure');
+    if (r.kind !== 'failure') return;
+    expect(r.error.message).toContain('no entry for');
+    expect(fs.existsSync(resolveServerBinaryPath(proj, 'win32', 'x64'))).toBe(false);
+  });
+
+  it('FAIL-CLOSED: an unfetchable SHA256SUMS manifest (persistent HTTP error) is rejected', async () => {
+    const proj = tmp();
+    const r = await downloadServer({
+      projectDir: proj,
+      os: 'win32',
+      arch: 'x64',
+      env: {},
+      fetchImpl: fetchZip(flatWinZip(), undefined, 'win-x64', { sumsHttpError: 500 }),
+    });
+    expect(r.kind).toBe('failure');
+    if (r.kind !== 'failure') return;
+    expect(r.error.message).toContain('SHA256SUMS');
+    expect(fs.existsSync(resolveServerBinaryPath(proj, 'win32', 'x64'))).toBe(false);
+  });
+
+  it('verifies the REAL win-x64 release digest end-to-end (node:crypto SHA256 of fixed bytes == manifest)', async () => {
+    // Synthesize a zip whose real SHA256 is what the (test-built) manifest advertises, proving the
+    // createHash('sha256') compute path agrees with the manifest comparison through the whole download.
+    const proj = tmp();
+    const zip = flatWinZip();
+    const realDigest = sha256Hex(zip);
+    const calls: string[] = [];
+    const r = await downloadServer({
+      projectDir: proj,
+      os: 'win32',
+      arch: 'x64',
+      env: {},
+      // digestOverride set to the REAL computed digest — equivalent to the genuine manifest.
+      fetchImpl: fetchZip(zip, calls, 'win-x64', { digestOverride: realDigest }),
+    });
+    expect(r.kind).toBe('success');
+    if (r.kind !== 'success') return;
+    expect(r.source).toBe('download');
+    expect(fs.existsSync(r.serverPath)).toBe(true);
   });
 });

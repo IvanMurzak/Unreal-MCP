@@ -2,6 +2,7 @@
 // See the LICENSE file in the repository root for more information.
 
 #include "Server/UnrealMcpServerManager.h"
+#include "Server/UnrealMcpServerChecksum.h"
 #include "UnrealMcpLog.h"
 
 #include "Async/Async.h"
@@ -292,6 +293,17 @@ bool FUnrealMcpServerManager::DownloadBinaryIfNeeded(FString& OutBinaryPath)
 	if (!bOk || ZipBytes.Num() == 0)
 		return false;
 
+	// FAIL-CLOSED INTEGRITY GATE (verify-before-execute, issue #155). The zip bytes are in hand but UNTRUSTED.
+	// Before staging/opening/launching, download the release's SHA256SUMS manifest (sibling of the zip URL
+	// under the same v<ServerVersion> tag), compute the downloaded zip's SHA256 (self-contained FIPS 180-4 —
+	// UE's FPlatformMisc::GetSHA256Signature is a desktop stub that asserts),
+	// and compare against the manifest entry for THIS RID. On MISMATCH / MISSING entry / unparsable-or-
+	// unfetchable manifest we return WITHOUT extracting or launching — an unverified binary must NEVER be
+	// executed (a compromised release asset or a trusted-CA MITM would otherwise yield arbitrary code
+	// execution on the developer's machine).
+	if (!VerifyDownloadedZip(ZipBytes, ServerVersion, FUnrealMcpServerChecksum::ServerZipAssetName(Rid)))
+		return false;
+
 	// Stage the downloaded bytes to a temp file and open it with FZipArchiveReader (libzip-backed: it inflates
 	// deflate entries on read). Mirror download-server.ts: find the binary at the shallowest path, then move it
 	// + its sidecar files (appsettings.json, NLog.config, server.json, …) into the install dir.
@@ -410,6 +422,105 @@ bool FUnrealMcpServerManager::DownloadBinaryIfNeeded(FString& OutBinaryPath)
 
 	UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] local server ready: %s (version %s)"), *BinPath, ServerVersion);
 	OutBinaryPath = BinPath;
+	return true;
+}
+
+namespace
+{
+	// Bounded transient-retry config for the SHA256SUMS manifest fetch (mirrors Unity's
+	// Sha256SumsFetchAttempts/Sha256SumsRetryDelay). A transient network error on the manifest fetch is
+	// retried (the binary is already downloaded; only the integrity manifest is missing) — but a persistent
+	// failure NEVER falls through to executing an unverified binary.
+	constexpr int32 Sha256SumsFetchAttempts = 3;
+	constexpr float Sha256SumsRetryDelaySeconds = 1.0f;
+}
+
+bool FUnrealMcpServerManager::FetchSha256SumsText(const FString& SumsUrl, FString& OutText)
+{
+	for (int32 Attempt = 1; Attempt <= Sha256SumsFetchAttempts; ++Attempt)
+	{
+		FHttpModule& Http = FHttpModule::Get();
+		TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request = Http.CreateRequest();
+		Request->SetURL(SumsUrl);
+		Request->SetVerb(TEXT("GET"));
+
+		bool bDone = false;
+		bool bOk = false;
+		FString Body;
+		Request->OnProcessRequestComplete().BindLambda(
+			[&bDone, &bOk, &Body](FHttpRequestPtr Req, FHttpResponsePtr Resp, bool bConnectedOk)
+			{
+				bDone = true;
+				if (bConnectedOk && Resp.IsValid() && Resp->GetResponseCode() == 200)
+				{
+					Body = Resp->GetContentAsString();
+					bOk = true;
+				}
+			});
+
+		if (Request->ProcessRequest())
+		{
+			// Tick the HTTP module on this (game) thread until the manifest GET completes or a deadline
+			// elapses — same bounded synchronous wait the zip download uses.
+			const double Deadline = FPlatformTime::Seconds() + 30.0;
+			while (!bDone && FPlatformTime::Seconds() < Deadline)
+			{
+				Http.GetHttpManager().Tick(0.1f);
+				FPlatformProcess::Sleep(0.05f);
+			}
+			if (!bDone)
+				Request->CancelRequest();
+		}
+
+		if (bOk)
+		{
+			OutText = Body;
+			return true;
+		}
+
+		if (Attempt < Sha256SumsFetchAttempts)
+		{
+			UE_LOG(LogUnrealMcp, Warning,
+				TEXT("[Unreal-MCP] %s fetch attempt %d/%d failed; retrying…"),
+				FUnrealMcpServerChecksum::Sha256SumsAssetName, Attempt, Sha256SumsFetchAttempts);
+			FPlatformProcess::Sleep(Sha256SumsRetryDelaySeconds);
+		}
+	}
+	return false;
+}
+
+bool FUnrealMcpServerManager::VerifyDownloadedZip(const TArray<uint8>& ZipBytes, const FString& Version, const FString& AssetZipName) const
+{
+	const FString SumsUrl = FUnrealMcpServerChecksum::Sha256SumsUrl(Version);
+
+	// 1) Fetch the integrity manifest (bounded transient-retry). A failure after all attempts is fail-closed.
+	FString Sha256SumsText;
+	if (!FetchSha256SumsText(SumsUrl, Sha256SumsText))
+	{
+		UE_LOG(LogUnrealMcp, Error,
+			TEXT("[Unreal-MCP] refusing to launch the server: could not download the %s integrity manifest from %s ")
+			TEXT("after %d attempt(s). The downloaded binary was NOT verified and will not be executed (fail-closed)."),
+			FUnrealMcpServerChecksum::Sha256SumsAssetName, *SumsUrl, Sha256SumsFetchAttempts);
+		return false;
+	}
+
+	// 2) Compute the downloaded zip's SHA256 (self-contained FIPS 180-4 — no third-party dep; UE's
+	//    FPlatformMisc::GetSHA256Signature is a desktop stub that asserts, so we hash it ourselves).
+	const FString ActualHexDigest = FUnrealMcpServerChecksum::ComputeSha256Hex(ZipBytes);
+
+	// 3) Parse + compare via the pure-managed verifier (unit-tested by an Automation spec, no editor needed).
+	const FUnrealMcpServerChecksum::EChecksumVerdict Verdict =
+		FUnrealMcpServerChecksum::VerifyZipChecksum(Sha256SumsText, AssetZipName, ActualHexDigest);
+	if (Verdict != FUnrealMcpServerChecksum::EChecksumVerdict::Verified)
+	{
+		UE_LOG(LogUnrealMcp, Error,
+			TEXT("[Unreal-MCP] refusing to launch the server: %s. The binary will not be extracted or executed (fail-closed)."),
+			*FUnrealMcpServerChecksum::ChecksumFailureReason(Verdict, AssetZipName));
+		return false;
+	}
+
+	UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] verified '%s' against %s (SHA256 OK)."),
+		*AssetZipName, FUnrealMcpServerChecksum::Sha256SumsAssetName);
 	return true;
 }
 
