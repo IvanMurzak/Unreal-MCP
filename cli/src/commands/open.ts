@@ -16,6 +16,7 @@ export const openCommand = new Command('open')
   .option('--keep-connected', 'UNREAL_MCP_KEEP_CONNECTED=true')
   .option('--transport <t>', 'UNREAL_MCP_TRANSPORT: stdio | http')
   .option('--start-server', 'UNREAL_MCP_START_SERVER=true')
+  .option('--connection-mode <mode>', 'UNREAL_MCP_CONNECTION_MODE: Custom | Cloud | (default empty = plugin default)')
   .action(async (pathArg: string | undefined, opts) => {
     const result = await openProject({
       projectDir: pathArg,
@@ -29,6 +30,7 @@ export const openCommand = new Command('open')
       keepConnected: opts.keepConnected,
       transport: opts.transport as McpTransport | undefined,
       startServer: opts.startServer,
+      connectionMode: opts.connectionMode,
     });
     ui.printWarnings(result.warnings);
     if (result.kind === 'failure') {

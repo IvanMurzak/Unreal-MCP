@@ -102,6 +102,8 @@ export interface OpenProjectOptions {
   keepConnected?: boolean;
   transport?: McpTransport;
   startServer?: boolean;
+  /** UNREAL_MCP_CONNECTION_MODE — e.g. "Custom" for a local server. */
+  connectionMode?: string;
   /** Skip the persistent engine-path cache (forces a fresh discovery chain). */
   noCache?: boolean;
   /** Test injection — installed engines (defaults to launcher manifest). */
