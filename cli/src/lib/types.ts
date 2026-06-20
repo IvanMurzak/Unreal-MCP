@@ -397,6 +397,13 @@ export interface DetectEnginesOptions {
   /** Explicit manifest path (defaults to the platform location). */
   manifestPath?: string;
   os?: NodeJS.Platform;
+  /**
+   * Test injection — the common-location engine scan. Defaults to scanning the
+   * host's popular Epic-install roots, so an engine that is installed on disk
+   * but not (yet) listed in the launcher manifest is still detected. Tests pass
+   * `() => []` to isolate the manifest, or a stub to assert the union/dedup.
+   */
+  scanImpl?: (os: NodeJS.Platform) => import('../utils/launcher.js').EngineInstallation[];
 }
 
 export interface DetectEnginesResult {
@@ -412,6 +419,8 @@ export interface PlanEngineInstallOptions {
   version: string;
   manifestPath?: string;
   os?: NodeJS.Platform;
+  /** Test injection — common-location scan (see DetectEnginesOptions.scanImpl). */
+  scanImpl?: (os: NodeJS.Platform) => import('../utils/launcher.js').EngineInstallation[];
 }
 
 /**
