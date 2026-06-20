@@ -341,7 +341,9 @@ release-runner label so PR compiles do not starve release capacity.
 > `IvanMurzak/Unreal-MCP`, and the repository variable `UNREAL_RUNNER_READY` is
 > set to `true`. `UNREAL_HOST_PROJECT` is **also set**, so the Automation pass
 > runs against the packaged plugin (not just the BuildPlugin compile). The
-> `plugin BuildPlugin + Automation (UE 5.7)` leg now **runs**
+> `plugin BuildPlugin + Automation (UE <ver>)` leg — a `matrix.ue: ['5.7', '5.8']`
+> (the single runner has both engines installed and runs the legs sequentially;
+> the host game module is rebuilt for each matrix engine) — now **runs**
 > on every same-repo PR and on real releases — it is no longer skipped. The
 > registration steps below are retained for re-provisioning the runner.
 
