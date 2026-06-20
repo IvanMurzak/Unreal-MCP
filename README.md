@@ -1,9 +1,11 @@
 <div align="center" width="100%">
 
-## ![AI Game Developer — Unreal MCP](https://github.com/IvanMurzak/Unreal-MCP/blob/main/docs/img/promo/ai-developer-header.svg?raw=true)
+  <h1>✨ AI Game Developer — <i>Unreal MCP</i></h1>
 
 [![MCP](https://badge.mcpx.dev 'MCP Server')](https://modelcontextprotocol.io/introduction)
-[![Unreal Engine](https://img.shields.io/badge/Unreal%20Engine-5.5%20%E2%80%93%205.8-0E1128?style=flat&logo=unrealengine&logoColor=white&labelColor=333A41 'Unreal Engine 5.5+ — CI-tested against 5.7, verified on 5.8')](https://www.unrealengine.com/)
+[![Unreal Engine](https://img.shields.io/badge/Unreal%20Engine-5.5%2B-0E1128?style=flat&logo=unrealengine&logoColor=white&labelColor=333A41 'Unreal Engine 5.5+ — CI-tested against 5.7 and 5.8')](https://www.unrealengine.com/)
+[![Unreal Editor](https://img.shields.io/badge/Editor-X?style=flat&logo=unrealengine&logoColor=white&labelColor=333A41&color=2A2A2A 'Unreal Editor supported')](https://www.unrealengine.com/)
+[![Unreal Runtime](https://img.shields.io/badge/Runtime-X?style=flat&logo=unrealengine&logoColor=white&labelColor=333A41&color=2A2A2A 'Unreal Runtime supported')](https://www.unrealengine.com/)
 [![release](https://github.com/IvanMurzak/Unreal-MCP/workflows/release/badge.svg 'release')](https://github.com/IvanMurzak/Unreal-MCP/actions/workflows/release.yml)</br>
 [![Discord](https://img.shields.io/badge/Discord-Join-7289da?logo=discord&logoColor=white&labelColor=333A41 'Join')](https://discord.gg/cfbdMZX99G)
 [![Stars](https://img.shields.io/github/stars/IvanMurzak/Unreal-MCP 'Stars')](https://github.com/IvanMurzak/Unreal-MCP/stargazers)
