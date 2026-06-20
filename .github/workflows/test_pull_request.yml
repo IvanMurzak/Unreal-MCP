@@ -88,19 +88,29 @@ jobs:
   # unreliable for test failures — test.md Suite 3) and fails on any failed
   # test or a missing report.
   plugin:
-    name: plugin BuildPlugin + Automation (UE 5.7)
+    name: plugin BuildPlugin + Automation (UE ${{ matrix.ue }})
     # Gated on the runner being registered AND — for pull_request events — the PR
     # originating from THIS repo, never a fork. A fork PR must never execute its
     # checked-out code on the self-hosted runner (see docs/RELEASING.md). Manual
     # dispatches (trusted) are unaffected by the fork clause.
     if: ${{ vars.UNREAL_RUNNER_READY == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    # The matrix runs UE 5.7 and 5.8 as parallel jobs; the single self-hosted
+    # runner (label `unreal-5-7`, legacy name) executes them sequentially. Both
+    # engines are installed at the standard Epic paths on the runner.
+    # fail-fast:false so one engine's failure never cancels the other's leg.
     runs-on: [self-hosted, windows, unreal-5-7]
+    strategy:
+      fail-fast: false
+      matrix:
+        ue: ['5.7', '5.8']
     env:
-      # Overridable per-runner via repository variables (docs/RELEASING.md).
-      UE_ROOT: ${{ vars.UNREAL_ENGINE_PATH || 'C:\Program Files\Epic Games\UE_5.7' }}
+      # Engine path is driven by the matrix (standard Epic install layout).
+      UE_ROOT: C:\Program Files\Epic Games\UE_${{ matrix.ue }}
       # Absolute path on the runner to a host .uproject with the UnrealMCP plugin
       # available (the runner's local Unreal-Test-Project analog). Required for
-      # the Automation pass; BuildPlugin alone does not need it.
+      # the Automation pass; BuildPlugin alone does not need it. A "Sync host to
+      # UE_ROOT" step below rebuilds the host's own game module for the matrix
+      # engine, so one host project serves both engines.
       HOST_UPROJECT: ${{ vars.UNREAL_HOST_PROJECT }}
     steps:
       - name: Checkout repository
@@ -161,6 +171,16 @@ jobs:
             if (Test-Path $package) { Remove-Item $package -Recurse -Force }
             & $runUAT BuildPlugin -Plugin="$uplugin" -Package="$package" -TargetPlatforms=Win64 -Rocket
             if ($LASTEXITCODE -ne 0) { throw "Automation BuildPlugin (with test module) failed with exit code $LASTEXITCODE" }
+            # Rebuild the host's OWN game module for THIS matrix engine so the editor
+            # opens without an out-of-date-modules failure (the host's committed
+            # Binaries may be built for a different UE version, and an -unattended
+            # editor will NOT interactively rebuild). The plugin is already current
+            # via the BuildPlugin into the host's Plugins junction above; this builds
+            # the host shell + the junctioned plugin for UE_ROOT.
+            $hostBuild = Join-Path $env:UE_ROOT 'Engine\Build\BatchFiles\Build.bat'
+            $hostTarget = [System.IO.Path]::GetFileNameWithoutExtension($env:HOST_UPROJECT) + 'Editor'
+            & $hostBuild $hostTarget Win64 Development -project="$env:HOST_UPROJECT" -WaitMutex
+            if ($LASTEXITCODE -ne 0) { throw "Host editor target ($hostTarget) build failed for UE_ROOT=$env:UE_ROOT (exit $LASTEXITCODE)" }
             $editorCmd = Join-Path $env:UE_ROOT 'Engine\Binaries\Win64\UnrealEditor-Cmd.exe'
             $reportDir = Join-Path $env:RUNNER_TEMP 'AutomationReport'
             if (Test-Path $reportDir) { Remove-Item $reportDir -Recurse -Force }
@@ -230,11 +250,15 @@ jobs:
   #     UNREAL_MCP_BRIDGE_PATH (PR builds do not bundle the §6 sidecar; only the
   #     release job does).
   connection-smoke:
-    name: connection + tool smoke (UE 5.7, custom server)
+    name: connection + tool smoke (UE ${{ matrix.ue }}, custom server)
     if: ${{ vars.UNREAL_SMOKE_READY == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     runs-on: [self-hosted, windows, unreal-5-7]
+    strategy:
+      fail-fast: false
+      matrix:
+        ue: ['5.7', '5.8']
     env:
-      UE_ROOT: ${{ vars.UNREAL_ENGINE_PATH || 'C:\Program Files\Epic Games\UE_5.7' }}
+      UE_ROOT: C:\Program Files\Epic Games\UE_${{ matrix.ue }}
       HOST_UPROJECT: ${{ vars.UNREAL_HOST_PROJECT }}
     steps:
       - name: Checkout repository
@@ -278,6 +302,14 @@ jobs:
           if (Test-Path $package) { Remove-Item $package -Recurse -Force }
           & $runUAT BuildPlugin -Plugin="$uplugin" -Package="$package" -TargetPlatforms=Win64 -Rocket
           if ($LASTEXITCODE -ne 0) { throw "BuildPlugin failed ($LASTEXITCODE)" }
+          # Rebuild the host's own game module for THIS matrix engine so the smoke's
+          # editor launch does not fail on out-of-date modules (the committed host
+          # Binaries may be built for a different UE version; -unattended will not
+          # interactively rebuild). The plugin is current via the junction above.
+          $hostBuild = Join-Path $env:UE_ROOT 'Engine\Build\BatchFiles\Build.bat'
+          $hostTarget = [System.IO.Path]::GetFileNameWithoutExtension($env:HOST_UPROJECT) + 'Editor'
+          & $hostBuild $hostTarget Win64 Development -project="$env:HOST_UPROJECT" -WaitMutex
+          if ($LASTEXITCODE -ne 0) { throw "Host editor target ($hostTarget) build failed for UE_ROOT=$env:UE_ROOT (exit $LASTEXITCODE)" }
 
       - name: Run connection + tool smoke (custom local server)
         shell: pwsh

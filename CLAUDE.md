@@ -181,10 +181,14 @@ CI runs on every PR via **`test_pull_request.yml`** (workflow name `test-pull-re
 
 - bridge build + xUnit on `ubuntu-latest` **and** `windows-latest`
 - `test-cli / cli` on Node 20 **and** Node 22 (reusable `test_cli.yml`)
-- `plugin BuildPlugin + Automation (UE 5.7)` — runs on a **self-hosted Windows runner** labelled
-  `unreal-5-7`, and is **gated on the repository variable `UNREAL_RUNNER_READY == 'true'`**. While that
-  variable is unset the plugin job is **SKIPPED** (never red-by-absence), and fork PRs skip it too (it
-  also requires `head.repo.full_name == github.repository`). The hosted bridge/server/cli legs always
+- `plugin BuildPlugin + Automation (UE <ver>)` and `connection + tool smoke (UE <ver>)` — a
+  **`strategy.matrix.ue: ['5.7', '5.8']`** runs both engine versions (the engine path is driven by
+  `UE_ROOT: C:\Program Files\Epic Games\UE_${{ matrix.ue }}`; the host's own game module is rebuilt for
+  the matrix engine so one host project serves both). They run on the **self-hosted Windows runner**
+  labelled `unreal-5-7` (legacy name — the single runner has both engines installed and executes the
+  matrix legs **sequentially**), and are **gated on `UNREAL_RUNNER_READY` / `UNREAL_SMOKE_READY == 'true'`**.
+  While unset the jobs are **SKIPPED** (never red-by-absence), and fork PRs skip them too (they
+  also require `head.repo.full_name == github.repository`). The hosted bridge/server/cli legs always
   provide PR signal.
 
 `release.yml` is version-gated and **publishes nothing on a normal merge** — see
