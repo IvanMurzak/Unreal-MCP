@@ -368,8 +368,12 @@ bool FUnrealMcpConfig::Save(const FString& Path) const
 	{
 		for (const FString& Key : OverriddenKeys)
 		{
-			if (const TSharedPtr<FJsonValue>* Baseline = DiskBaselineJson->Values.Find(Key))
-				Out->SetField(Key, *Baseline);
+			// Use the public TryGetField accessor instead of reaching into the FJsonObject::Values
+			// map directly: UE 5.8 changed that map's key type (FString -> FStringType), so
+			// `Values.Find(const FString&)` no longer compiles. TryGetField(FStringView) is stable
+			// across UE 5.7/5.8 (FString implicitly converts to FStringView).
+			if (const TSharedPtr<FJsonValue> Baseline = DiskBaselineJson->TryGetField(Key))
+				Out->SetField(Key, Baseline);
 			else
 				Out->RemoveField(Key);
 		}

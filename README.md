@@ -3,7 +3,7 @@
 ## ![AI Game Developer — Unreal MCP](https://github.com/IvanMurzak/Unreal-MCP/blob/main/docs/img/promo/ai-developer-header.svg?raw=true)
 
 [![MCP](https://badge.mcpx.dev 'MCP Server')](https://modelcontextprotocol.io/introduction)
-[![Unreal Engine](https://img.shields.io/badge/Unreal%20Engine-5.5%2B-0E1128?style=flat&logo=unrealengine&logoColor=white&labelColor=333A41 'Unreal Engine 5.5+, developed and CI-tested against 5.7')](https://www.unrealengine.com/)
+[![Unreal Engine](https://img.shields.io/badge/Unreal%20Engine-5.5%20%E2%80%93%205.8-0E1128?style=flat&logo=unrealengine&logoColor=white&labelColor=333A41 'Unreal Engine 5.5+ — CI-tested against 5.7, verified on 5.8')](https://www.unrealengine.com/)
 [![release](https://github.com/IvanMurzak/Unreal-MCP/workflows/release/badge.svg 'release')](https://github.com/IvanMurzak/Unreal-MCP/actions/workflows/release.yml)</br>
 [![Discord](https://img.shields.io/badge/Discord-Join-7289da?logo=discord&logoColor=white&labelColor=333A41 'Join')](https://discord.gg/cfbdMZX99G)
 [![Stars](https://img.shields.io/github/stars/IvanMurzak/Unreal-MCP 'Stars')](https://github.com/IvanMurzak/Unreal-MCP/stargazers)
@@ -77,7 +77,7 @@ Unlike Unity and Godot (C# engines that host the .NET `McpPlugin` in-process), U
 
 # Requirements
 
-- **Unreal Engine 5.5+** (developed and CI-tested against **5.7**). The plugin deliberately ships **no `EngineVersion` pin** — UE treats that field as an exact-build match, not a floor, and would refuse to load on newer engines.
+- **Unreal Engine 5.5+** (developed and CI-tested against **5.7**, and verified to build & run on **5.8**). The plugin deliberately ships **no `EngineVersion` pin** — UE treats that field as an exact-build match, not a floor, and would refuse to load on newer engines.
 - **.NET 9 SDK** to build the bridge sidecar **from source**. (End users of a packaged release do NOT need it — the self-contained sidecar is bundled inside the plugin and auto-spawned, ARCHITECTURE §6. The local MCP server is downloaded as a prebuilt [GameDev-MCP-Server](https://github.com/IvanMurzak/GameDev-MCP-Server) release binary, never built here.)
 - **Node.js** `^20.19.0 || >=22.12.0` for the optional `unreal-mcp-cli`.
 - A **C++ Unreal project** (the plugin builds an Editor module, so the host project must be able to compile C++).
@@ -646,7 +646,7 @@ An `MCP Tool` is a function the LLM can call to interact with Unreal. These tool
 
 | Path | What it is |
 | --- | --- |
-| [`UnrealMCP/`](UnrealMCP/) | The UE editor plugin (C++, module `UnrealMcpEditor`, UE 5.5+ floor, developed against 5.7) |
+| [`UnrealMCP/`](UnrealMCP/) | The UE editor plugin (C++, module `UnrealMcpEditor`, UE 5.5+ floor, developed against 5.7, verified on 5.8) |
 | [`bridge/`](bridge/) | The .NET 9 sidecar (`unreal-mcp-bridge`) — McpPlugin host, IPC ⇄ SignalR relay |
 | [`cli/`](cli/) | `unreal-mcp-cli` npm package (TypeScript) — 16 commands |
 | [`samples/UnrealAITemplate/`](samples/UnrealAITemplate/) | Editor extension template plugin (`hello-extension`) |
