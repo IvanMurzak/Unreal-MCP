@@ -137,7 +137,8 @@ private:
 	 * Fail-closed verify-before-execute gate. Called from DownloadBinaryIfNeeded AFTER the zip bytes are in
 	 * hand and BEFORE FZipArchiveReader / CreateProc. Fetches the release's `SHA256SUMS` manifest (a second
 	 * blocking HTTP GET mirroring the zip download, with a bounded transient-retry), computes @p ZipBytes'
-	 * SHA256 via UE's native FSHA256Signature (no third-party dep), and compares against the manifest entry
+	 * SHA256 via a self-contained FIPS 180-4 SHA-256 (UE's FPlatformMisc::GetSHA256Signature is a desktop
+	 * stub that asserts; no third-party dep), and compares against the manifest entry
 	 * for @p AssetZipName via the pure-managed FUnrealMcpServerChecksum::VerifyZipChecksum. Returns true ONLY
 	 * when the digest matched the manifest. Every failure path — a manifest we could not fetch after all
 	 * retries, an unparsable manifest, a missing entry, or a digest mismatch — returns false with a clear

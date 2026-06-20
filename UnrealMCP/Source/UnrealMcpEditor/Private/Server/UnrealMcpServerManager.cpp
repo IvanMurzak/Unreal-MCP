@@ -295,7 +295,8 @@ bool FUnrealMcpServerManager::DownloadBinaryIfNeeded(FString& OutBinaryPath)
 
 	// FAIL-CLOSED INTEGRITY GATE (verify-before-execute, issue #155). The zip bytes are in hand but UNTRUSTED.
 	// Before staging/opening/launching, download the release's SHA256SUMS manifest (sibling of the zip URL
-	// under the same v<ServerVersion> tag), compute the downloaded zip's SHA256 (UE-native FSHA256Signature),
+	// under the same v<ServerVersion> tag), compute the downloaded zip's SHA256 (self-contained FIPS 180-4 —
+	// UE's FPlatformMisc::GetSHA256Signature is a desktop stub that asserts),
 	// and compare against the manifest entry for THIS RID. On MISMATCH / MISSING entry / unparsable-or-
 	// unfetchable manifest we return WITHOUT extracting or launching — an unverified binary must NEVER be
 	// executed (a compromised release asset or a trusted-CA MITM would otherwise yield arbitrary code

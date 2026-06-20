@@ -18,7 +18,8 @@
  * Keeping this logic here — rather than inline in `FUnrealMcpServerManager` (whose methods touch HTTP,
  * the filesystem, and process spawn) — makes every decision unit-testable in an Automation spec with no
  * live download and no running server: each function below is a deterministic string/enum/map transform.
- * The HTTP fetch + SHA256 compute (via UE's native `FSHA256Signature`) that surround this verdict live
+ * The HTTP fetch + SHA256 compute (via a self-contained FIPS 180-4 SHA-256 — `ComputeSha256Hex` below;
+ * UE's `FPlatformMisc::GetSHA256Signature` is a desktop stub that asserts) that surround this verdict live
  * in the editor-coupled manager. Mirrors Unity-MCP's `McpServerChecksum` (PR #842) and Godot-MCP's
  * `GodotMcpServerView` checksum seam (PR #193); same parser/verify/test shape, adapted to UE types.
  */
