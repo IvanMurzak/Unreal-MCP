@@ -1,7 +1,7 @@
 {
   "FileVersion": 3,
   "Version": 1,
-  "VersionName": "0.4.0",
+  "VersionName": "0.4.1",
   "FriendlyName": "Unreal MCP (AI Game Developer)",
   "Description": "Model Context Protocol (MCP) integration for the Unreal Editor. Exposes editor operations as AI Tools so MCP-aware AI assistants (Claude, Cursor, Copilot, ...) can inspect and drive your Unreal project. Requires Unreal Engine 5.5+ (no EngineVersion pin: UE treats that field as an exact-build match, not a floor, and would refuse to load on newer engines).",
   "Category": "AI",

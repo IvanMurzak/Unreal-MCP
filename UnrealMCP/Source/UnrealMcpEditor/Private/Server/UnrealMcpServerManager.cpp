@@ -38,7 +38,7 @@
 
 // Single source of the consumed shared-server version. Kept in lockstep with cli/src/lib/server-version.ts
 // (SERVER_VERSION) and Unity's McpServerManager.ServerVersion — the three plugins consume the SAME server.
-const TCHAR* FUnrealMcpServerManager::ServerVersion = TEXT("8.0.0");
+const TCHAR* FUnrealMcpServerManager::ServerVersion = TEXT("8.0.1");
 const TCHAR* FUnrealMcpServerManager::ServerPathEnvVar = TEXT("UNREAL_MCP_SERVER_PATH");
 
 namespace
