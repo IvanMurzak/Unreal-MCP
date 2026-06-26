@@ -1,0 +1,50 @@
+UnrealMCP/Source/UnrealMcpRuntime/Public/UnrealMcpRuntimeSubsystem.h
+  s_3e0a2681fef788::t_4dce6376cfa10d 1-7,9-10,17-112,118-119,121-124,133-142
+  s_3e0a2681fef788::t_be384f01ee08c5 8,11-16
+  s_3e0a2681fef788::t_2fa9b6eaa6e73d 125-127
+  s_3e0a2681fef788::t_3cc8339a15a520 128-132
+  s_3e0a2681fef788::t_6c7a3e614c613d 113-117,120
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpRuntimeSubsystemSpec.cpp
+  s_3e0a2681fef788::t_f04f27c69b3a7b 11
+  s_3e0a2681fef788::t_3fadd1ec5a220d 10
+  s_3e0a2681fef788::t_08c5701a9b4e0c 102
+  s_3e0a2681fef788::t_f94f6510937e0a 36-39,42-43
+  s_3e0a2681fef788::t_dbe2ca97abf107 88-89
+  s_3e0a2681fef788::t_663f69f0474f76 1-9,12-35,40-41,44-87,90-101,103-144
+UnrealMCP/Source/UnrealMcpRuntime/Private/UnrealMcpRuntimeSubsystem.cpp
+  s_3e0a2681fef788::t_a285c3219e23f1 255-259,265
+  s_3e0a2681fef788::t_5162718d162d71 58-60,62-63,67-70
+  s_3e0a2681fef788::t_6f96a98d21088d 106,108-135
+  s_3e0a2681fef788::t_83d86f0040f13b 182
+  s_3e0a2681fef788::t_e121f3825eb205 216,220-221,223,233
+  s_3e0a2681fef788::t_455346f48961fd 30-40
+  s_3e0a2681fef788::t_732db6ec1d03f4 357-370
+  s_3e0a2681fef788::t_0b1dad7fedc49a 86
+  s_3e0a2681fef788::t_87b53e00811481 1-29,42-57,61,64-66,71-85,87-105,107,136-161,165-181,183-215,217-219,222,224-232,234-251,253-254,264,266-269,273-356
+  s_3e0a2681fef788::t_10bedf4f80a115 41
+  s_3e0a2681fef788::t_810d4986c1637c 252,260-263,270-272
+  s_3e0a2681fef788::t_20d546ae4d2074 162-164
+UnrealMCP/Source/UnrealMcpRuntime/Private/UnrealMcpRuntimeSettings.cpp
+  s_3e0a2681fef788::t_e82778010d6c1c 1-18
+UnrealMCP/Source/UnrealMcpRuntime/Public/UnrealMcpRuntimeSettings.h
+  s_3e0a2681fef788::t_f5be7e282dcddf 1-44
+UnrealMCP/Source/UnrealMcpRuntime/UnrealMcpRuntime.Build.cs
+  s_3e0a2681fef788::t_5a9161f74dbc58 41,51-57
+  s_3e0a2681fef788::t_04b1fcad45bbc3 20-27,58
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.8",
+  "base_commit_sha": "86aa39db4053efca42c386aa9773eeb2c2782621",
+  "prompts": {},
+  "sessions": {
+    "s_3e0a2681fef788": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a9715f3a-114a-4de7-815b-97526309448b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

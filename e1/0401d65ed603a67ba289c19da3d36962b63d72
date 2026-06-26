@@ -1,0 +1,19 @@
+docs/ARCHITECTURE.md
+  s_53ce73f91e4281::t_9ec0f5dd458609 127,135-137,145,168,529-530,561-596,637,733-734,736-739,757,765-767
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "e10401d65ed603a67ba289c19da3d36962b63d72",
+  "prompts": {},
+  "sessions": {
+    "s_53ce73f91e4281": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e24c1167-2410-4c32-885c-4fd71d157405",
+        "model": "claude-fable-5"
+      },
+      "human_author": null
+    }
+  }
+}

@@ -1,0 +1,38 @@
+UnrealMCP/Source/UnrealMcpRuntime/Private/Extensions/UnrealMcpExtensionManager.cpp
+  s_3e0a2681fef788::t_5ee4ceab48207a 8,11,457-458
+  s_3e0a2681fef788::t_5856c38724dbe0 274-277
+  s_3e0a2681fef788::t_a39037856cd201 413-419
+  s_3e0a2681fef788::t_570c0ec320f675 435-439,454-456
+UnrealMCP/Source/UnrealMcpRuntime/Private/Bridge/UnrealMcpBridgeServer.cpp
+  s_3e0a2681fef788::t_47f59172c80115 1014-1016,1020,1022-1024,1026,1031-1039
+  s_3e0a2681fef788::t_7a4ca4a3970d52 97
+  s_3e0a2681fef788::t_24b643de78a3da 718-720,722,726-737,739,755-761,763-766,768-771,775-783,785-799,801-814,816-831
+  s_3e0a2681fef788::t_59d6a152083b02 8,100,717,724,740-742,744-746,748-754,835-841,1013,1019,1027-1028,1030
+UnrealMCP/Source/UnrealMcpRuntime/Private/Bridge/UnrealMcpBridgeServer.h
+  s_3e0a2681fef788::t_289cf271382321 67-69
+  s_3e0a2681fef788::t_f9aa50186f27f4 186-188
+  s_3e0a2681fef788::t_5230d272152876 17
+UnrealMCP/Source/UnrealMcpRuntime/Private/Extensions/UnrealMcpExtensionManager.h
+  s_3e0a2681fef788::t_4fc7d50a15ff17 148-149
+  s_3e0a2681fef788::t_aac7e4aa4faa26 13,16
+  s_3e0a2681fef788::t_ed0713cc22dd58 71-72,75
+  s_3e0a2681fef788::t_d965178627f931 114,121-123
+  s_3e0a2681fef788::t_6d55bf35b5231d 134-135,140
+  s_3e0a2681fef788::t_5a71df6402ad94 105-106
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.8",
+  "base_commit_sha": "fda822c2f5cfb6fa4e1011ca6b7d35a37796722a",
+  "prompts": {},
+  "sessions": {
+    "s_3e0a2681fef788": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a9715f3a-114a-4de7-815b-97526309448b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

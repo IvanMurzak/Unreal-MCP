@@ -1,0 +1,21 @@
+bridge/src/Ipc/IpcClient.cs
+  s_3e0a2681fef788::t_320635504f04b9 32
+bridge/src/Tools/ResourceCallChannel.cs
+  s_3e0a2681fef788::t_b6d416dd6bbae2 1-39
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.8",
+  "base_commit_sha": "7106f7aa07646fc597f614c4d7a3041063a8a824",
+  "prompts": {},
+  "sessions": {
+    "s_3e0a2681fef788": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a9715f3a-114a-4de7-815b-97526309448b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

@@ -1,0 +1,37 @@
+UnrealMCP/Source/UnrealMcpRuntime/Private/Sidecar/UnrealMcpSidecarManager.h
+  s_3e0a2681fef788::t_c7a6be4a3d9230 8-9
+UnrealMCP/Source/UnrealMcpRuntime/Private/Tools/UnrealMcpObjectRef.h
+  s_3e0a2681fef788::t_f95027a04f048f 7
+UnrealMCP/Source/UnrealMcpRuntime/Private/Tools/UnrealMcpPropertyJson.h
+  s_3e0a2681fef788::t_623dc5834e121e 7
+UnrealMCP/Source/UnrealMcpRuntime/Private/Bridge/UnrealMcpBridgeServer.h
+  s_3e0a2681fef788::t_e0dffec5b5782e 10
+UnrealMCP/Source/UnrealMcpRuntime/Private/Tools/UnrealMcpObjectRef.cpp
+  s_3e0a2681fef788::t_69a6cb805f7c54 88
+  s_3e0a2681fef788::t_84d1796f5e2754 156
+  s_3e0a2681fef788::t_fabc8ae83c98f2 99
+  s_3e0a2681fef788::t_1bad01fd443e96 15-31
+UnrealMCP/Source/UnrealMcpRuntime/Private/Tools/UnrealMcpPropertyJson.cpp
+  s_3e0a2681fef788::t_eeb4ecd09affc2 162-167,170
+  s_3e0a2681fef788::t_b31426c54d1fad 269,271
+UnrealMCP/Source/UnrealMcpRuntime/Private/Tools/UnrealMcpLogCollector.cpp
+  s_3e0a2681fef788::t_fd13c6e104f752 7
+UnrealMCP/Source/UnrealMcpRuntime/UnrealMcpRuntime.Build.cs
+  s_3e0a2681fef788::t_7096535e14e523 15-19
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.8",
+  "base_commit_sha": "18b0c1e6d2e7854ec39f3cbc8d219ec401eda77f",
+  "prompts": {},
+  "sessions": {
+    "s_3e0a2681fef788": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a9715f3a-114a-4de7-815b-97526309448b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

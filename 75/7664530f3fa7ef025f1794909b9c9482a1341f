@@ -1,0 +1,43 @@
+README.md
+  s_94cae3b80679a2::t_8d72dfe042f529 315
+  s_94cae3b80679a2::t_a82bd505ce02db 301
+  s_94cae3b80679a2::t_9740e74407aae5 64
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/UnrealMcpAuxWindows.h
+  s_94cae3b80679a2::t_3abdc104fad479 15-19
+  s_94cae3b80679a2::t_b342c8199656b6 52-53,63,67,84
+UnrealMCP/Source/UnrealMcpEditor/Private/UnrealMcpRuntime.cpp
+  s_94cae3b80679a2::t_7b0e90e91b5ca4 295-300
+  s_94cae3b80679a2::t_b0c1f081c0639e 400
+docs/ARCHITECTURE.md
+  s_94cae3b80679a2::t_19289e8d2e23ad 140
+  s_94cae3b80679a2::t_c2f91463c3646a 98-100
+  s_94cae3b80679a2::t_e58f40161d70ef 9-10
+  s_94cae3b80679a2::t_1bffc31953457f 29
+  s_94cae3b80679a2::t_cd07b317a4d4de 711-717
+UnrealMCP/Source/UnrealMcpEditor/UnrealMcpEditor.Build.cs
+  s_94cae3b80679a2::t_3e8feae20d6270 22
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/UnrealMcpAuxWindows.cpp
+  s_94cae3b80679a2::t_502c268d2b38ac 36-38,41
+  s_94cae3b80679a2::t_87b8d3eb285175 93-97,100
+  s_94cae3b80679a2::t_ec39deaeff5d32 119
+  s_94cae3b80679a2::t_1150e46d2b99ce 54-59
+  s_94cae3b80679a2::t_29240b38d20675 172
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/SUnrealMcpMainWindow.cpp
+  s_94cae3b80679a2::t_5d31c0ea19f392 274-288
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.8",
+  "base_commit_sha": "757664530f3fa7ef025f1794909b9c9482a1341f",
+  "prompts": {},
+  "sessions": {
+    "s_94cae3b80679a2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d15dc434-a705-4009-9c19-05eae0bfc388",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

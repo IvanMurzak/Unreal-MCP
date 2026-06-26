@@ -1,0 +1,30 @@
+bridge/src/Ipc/IpcClient.cs
+  s_3e0a2681fef788::t_9224858f68a31b 32
+bridge/src/Host/SidecarHost.cs
+  s_3e0a2681fef788::t_c67017030f1c16 75-77
+  s_3e0a2681fef788::t_75ab721f3d56bb 248-265
+bridge/src/Tools/ProxyPrompt.cs
+  s_3e0a2681fef788::t_653b322ff23de7 1-66
+bridge/src/Tools/ProxyPromptFactory.cs
+  s_3e0a2681fef788::t_47b4c5867eac44 1-88
+bridge/src/Tools/PromptManifestRegistrar.cs
+  s_3e0a2681fef788::t_511142592a83f9 1-161
+bridge/src/Tools/PromptCallChannel.cs
+  s_3e0a2681fef788::t_98360a3d1ede53 1-40
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.8",
+  "base_commit_sha": "055296901187fa6db868567edf75c61adb517d2e",
+  "prompts": {},
+  "sessions": {
+    "s_3e0a2681fef788": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a9715f3a-114a-4de7-815b-97526309448b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
