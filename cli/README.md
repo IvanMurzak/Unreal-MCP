@@ -64,6 +64,17 @@ empty association falls back to the highest installed engine; a GUID (source bui
 `--engine-root`. `install-engine` enumerates the same manifest and, for a not-yet-installed version,
 hands back a `com.epicgames.launcher://` deep link rather than performing the multi-GB download.
 
+## Connection mode
+
+`open` (and the `openProject` library call) select the editor's MCP target via
+`UNREAL_MCP_CONNECTION_MODE`: `Custom` points the plugin's sidecar at a local/self-hosted server
+(`--host`), `Cloud` at ai-game.dev. Set it explicitly with `--connection-mode <Custom|Cloud>`. When
+you omit it, supplying a `--host` **infers `Custom`** — a host implies a non-Cloud target, and the
+plugin otherwise defaults to `Cloud` and ignores the host (silently dialing the cloud). An explicit
+`--connection-mode` always wins over that inference; with neither a host nor a mode the variable is
+left unset and the plugin default applies. Under `--no-connect` no `UNREAL_MCP_*` variables (the mode
+included) are wired onto the editor at all.
+
 ## Library export
 
 ```ts

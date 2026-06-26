@@ -102,7 +102,13 @@ export interface OpenProjectOptions {
   keepConnected?: boolean;
   transport?: McpTransport;
   startServer?: boolean;
-  /** UNREAL_MCP_CONNECTION_MODE — e.g. "Custom" for a local server. */
+  /**
+   * UNREAL_MCP_CONNECTION_MODE — `"Custom"` for a local server, `"Cloud"` for
+   * ai-game.dev. When omitted, an explicit `host` infers `"Custom"` (a host
+   * implies a non-Cloud target; the plugin otherwise defaults to Cloud and
+   * ignores the host). An explicit value always wins; with neither `host` nor
+   * `connectionMode` the var is omitted and the plugin default applies.
+   */
   connectionMode?: string;
   /** Skip the persistent engine-path cache (forces a fresh discovery chain). */
   noCache?: boolean;

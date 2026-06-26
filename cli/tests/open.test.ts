@@ -38,6 +38,8 @@ describe('buildOpenEnv', () => {
       UNREAL_MCP_KEEP_CONNECTED: 'true',
       UNREAL_MCP_AUTH_OPTION: 'required',
       UNREAL_MCP_TRANSPORT: 'http',
+      // host present + no explicit mode => Custom inferred (see emission matrix below)
+      UNREAL_MCP_CONNECTION_MODE: 'Custom',
     });
   });
 
@@ -48,6 +50,47 @@ describe('buildOpenEnv', () => {
   it('throws on bad auth/transport enums', () => {
     expect(() => buildOpenEnv({ auth: 'bogus' as never })).toThrow();
     expect(() => buildOpenEnv({ transport: 'bogus' as never })).toThrow();
+  });
+
+  describe('UNREAL_MCP_CONNECTION_MODE emission matrix', () => {
+    it('emits an explicit Custom mode', () => {
+      expect(buildOpenEnv({ connectionMode: 'Custom' })).toEqual({
+        UNREAL_MCP_CONNECTION_MODE: 'Custom',
+      });
+    });
+
+    it('emits an explicit Cloud mode', () => {
+      expect(buildOpenEnv({ connectionMode: 'Cloud' })).toEqual({
+        UNREAL_MCP_CONNECTION_MODE: 'Cloud',
+      });
+    });
+
+    it('infers Custom from a host when no mode is given', () => {
+      expect(buildOpenEnv({ host: 'http://localhost:5220' })).toEqual({
+        UNREAL_MCP_HOST: 'http://localhost:5220',
+        UNREAL_MCP_CONNECTION_MODE: 'Custom',
+      });
+    });
+
+    it('lets an explicit mode win over the host-presence inference', () => {
+      expect(buildOpenEnv({ host: 'http://localhost:5220', connectionMode: 'Cloud' })).toEqual({
+        UNREAL_MCP_HOST: 'http://localhost:5220',
+        UNREAL_MCP_CONNECTION_MODE: 'Cloud',
+      });
+    });
+
+    it('omits the var when neither host nor mode is given', () => {
+      const env = buildOpenEnv({ token: 't' });
+      expect(env).toEqual({ UNREAL_MCP_TOKEN: 't' });
+      expect(env?.UNREAL_MCP_CONNECTION_MODE).toBeUndefined();
+    });
+
+    it('drops the var under --no-connect even with a host (no inference)', () => {
+      expect(buildOpenEnv({ noConnect: true, host: 'http://h' })).toBeUndefined();
+      expect(
+        buildOpenEnv({ noConnect: true, host: 'http://h', connectionMode: 'Custom' }),
+      ).toBeUndefined();
+    });
   });
 });
 
