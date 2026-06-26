@@ -316,11 +316,13 @@ int32 FUnrealMcpDevControlServer::RouteRequest(
 		OutResult->SetBoolField(TEXT("serverRunning"), ViewModelPtr->IsLocalServerRunning());
 		OutResult->SetStringField(TEXT("serverButtonLabel"), ViewModelPtr->GetLocalServerButtonText().ToString());
 		// The Connect/Disconnect/Stop button label + the "Unreal: <status>" label the dock renders for this state,
-		// so the smoke test asserts the exact text a screenshot would show without reading pixels.
+		// so the smoke test asserts the exact text a screenshot would show without reading pixels. The button keeps
+		// reading the RAW state (its tri-state is unchanged), but the status label reads the EFFECTIVE state so the
+		// harness reports the SAME "Unreal: No MCP bridge" text the dock now shows in the NoBinary case (issue #63).
 		OutResult->SetStringField(TEXT("buttonLabel"),
 			FUnrealMcpEditorViewModel::GetButtonText(ViewModelPtr->GetConnectionState()).ToString());
 		OutResult->SetStringField(TEXT("statusLabel"),
-			FUnrealMcpEditorViewModel::GetStatusLabel(ViewModelPtr->GetConnectionState()).ToString());
+			FUnrealMcpEditorViewModel::GetStatusLabel(ViewModelPtr->GetEffectiveConnectionState()).ToString());
 		// The Serialization Check window's tab id — lets the smoke test assert membership and (with a
 		// `check` click) drive the same footer "Check" button the dock renders.
 		OutResult->SetStringField(TEXT("serializationCheckTabId"), FUnrealMcpAuxWindows::SerializationCheckTabId.ToString());

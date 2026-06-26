@@ -40,6 +40,10 @@ BEGIN_DEFINE_SPEC(FUnrealMcpEditorViewModelSpec, "UnrealMcp.EditorViewModel",
 		int32 ServerStartCount = 0;
 		int32 ServerStopCount = 0;
 		bool bServerRunning = false;
+		// Issue #63: the fake "bridge binary resolvable" state the IsBridgeBinaryResolvableSink reads. Default true
+		// (resolvable) so every existing spec sees the raw connection state through GetEffectiveConnectionState; a
+		// NoBinary spec flips it false to assert the proactive overlay.
+		bool bBridgeBinaryResolvable = true;
 	};
 
 	static TSharedRef<FUnrealMcpEditorViewModel> MakeViewModel(TSharedRef<FRecording> Rec)
@@ -62,6 +66,7 @@ BEGIN_DEFINE_SPEC(FUnrealMcpEditorViewModelSpec, "UnrealMcp.EditorViewModel",
 		VM->OnStartLocalServer = [Rec]() -> bool { Rec->ServerStartCount++; Rec->bServerRunning = true; return true; };
 		VM->OnStopLocalServer = [Rec]() { Rec->ServerStopCount++; Rec->bServerRunning = false; };
 		VM->IsLocalServerRunningSink = [Rec]() -> bool { return Rec->bServerRunning; };
+		VM->IsBridgeBinaryResolvableSink = [Rec]() -> bool { return Rec->bBridgeBinaryResolvable; };
 		return VM;
 	}
 
@@ -127,6 +132,108 @@ void FUnrealMcpEditorViewModelSpec::Define()
 			TestEqual("Connected -> Connected",
 				static_cast<int32>(FUnrealMcpEditorViewModel::ParseConnectionState(TEXT("Connected"), true)),
 				static_cast<int32>(EUnrealMcpConnectionState::Connected));
+		});
+	});
+
+	Describe("Proactive 'no sidecar binary' surfacing (issue #63)", [this]()
+	{
+		It("leaves the effective state as the raw state and shows NO hint while the bridge binary resolves", [this]()
+		{
+			TSharedRef<FRecording> Rec = MakeShared<FRecording>();
+			TSharedRef<FUnrealMcpEditorViewModel> VM = MakeViewModel(Rec); // bBridgeBinaryResolvable defaults true
+			// A fresh VM is Disconnected; with a resolvable binary the effective state equals the raw state.
+			TestEqual("effective == raw (Disconnected) while resolvable",
+				static_cast<int32>(VM->GetEffectiveConnectionState()), static_cast<int32>(EUnrealMcpConnectionState::Disconnected));
+			TestTrue("no hint while resolvable",
+				FUnrealMcpEditorViewModel::GetConnectionHint(VM->GetEffectiveConnectionState()).IsEmpty());
+		});
+
+		It("surfaces a distinct NoBinary state with an actionable hint when the binary cannot be resolved", [this]()
+		{
+			TSharedRef<FRecording> Rec = MakeShared<FRecording>();
+			Rec->bBridgeBinaryResolvable = false; // packaged-without-<rid> / unset UNREAL_MCP_BRIDGE_PATH (dev source)
+			TSharedRef<FUnrealMcpEditorViewModel> VM = MakeViewModel(Rec);
+
+			// The raw live state is still the unchanged Disconnected — only the EFFECTIVE display state overlays NoBinary.
+			TestEqual("raw state unchanged (Disconnected)",
+				static_cast<int32>(VM->GetConnectionState()), static_cast<int32>(EUnrealMcpConnectionState::Disconnected));
+			TestEqual("effective state overlays NoBinary",
+				static_cast<int32>(VM->GetEffectiveConnectionState()), static_cast<int32>(EUnrealMcpConnectionState::NoBinary));
+
+			// The label is DISTINCT from the generic Disconnected one ("not just 'Stopped'", per the issue).
+			TestNotEqual("NoBinary label differs from Disconnected",
+				FUnrealMcpEditorViewModel::GetStatusLabel(EUnrealMcpConnectionState::NoBinary).ToString(),
+				FUnrealMcpEditorViewModel::GetStatusLabel(EUnrealMcpConnectionState::Disconnected).ToString());
+
+			// The hint is non-empty and actionable — the SAME install guidance the reactive Authorize failure shows.
+			const FText Hint = FUnrealMcpEditorViewModel::GetConnectionHint(VM->GetEffectiveConnectionState());
+			TestFalse("hint is non-empty in NoBinary", Hint.IsEmpty());
+			TestTrue("hint is actionable (reinstall / bootstrap-local)",
+				Hint.ToString().Contains(TEXT("bootstrap-local")) || Hint.ToString().Contains(TEXT("reinstall")));
+		});
+
+		It("distinguishes NoBinary (install/config) from a transient Connecting (binary present, not yet handshaken)", [this]()
+		{
+			// Binary present: clicking Connect yields a transient Connecting, NOT NoBinary.
+			TSharedRef<FRecording> RecOk = MakeShared<FRecording>(); // resolvable
+			TSharedRef<FUnrealMcpEditorViewModel> VmOk = MakeViewModel(RecOk);
+			VmOk->Connect();
+			TestEqual("Connecting (not NoBinary) when the binary is present",
+				static_cast<int32>(VmOk->GetEffectiveConnectionState()), static_cast<int32>(EUnrealMcpConnectionState::Connecting));
+			TestTrue("no hint while genuinely Connecting",
+				FUnrealMcpEditorViewModel::GetConnectionHint(VmOk->GetEffectiveConnectionState()).IsEmpty());
+
+			// Binary absent: the same Connect can never complete, so the effective state is NoBinary, not a perpetual
+			// Connecting — the user sees the install/config problem instead of a forever-spinner.
+			TSharedRef<FRecording> RecNo = MakeShared<FRecording>();
+			RecNo->bBridgeBinaryResolvable = false;
+			TSharedRef<FUnrealMcpEditorViewModel> VmNo = MakeViewModel(RecNo);
+			VmNo->Connect();
+			TestEqual("raw Connecting while armed",
+				static_cast<int32>(VmNo->GetConnectionState()), static_cast<int32>(EUnrealMcpConnectionState::Connecting));
+			TestEqual("effective NoBinary overlays the never-completing Connecting",
+				static_cast<int32>(VmNo->GetEffectiveConnectionState()), static_cast<int32>(EUnrealMcpConnectionState::NoBinary));
+		});
+
+		It("never masks a live Connected/Degraded link even if resolvability reads false", [this]()
+		{
+			TSharedRef<FRecording> Rec = MakeShared<FRecording>();
+			TSharedRef<FUnrealMcpEditorViewModel> VM = MakeViewModel(Rec);
+			// Drive to a live green link the way the runtime does (arm + apply a Connected status).
+			VM->Connect();
+			TSharedPtr<FJsonObject> Status = MakeShared<FJsonObject>();
+			Status->SetStringField(TEXT("connectionState"), TEXT("Connected"));
+			Status->SetBoolField(TEXT("keepConnected"), true);
+			VM->ApplyStatus(Status);
+			TestEqual("Connected before the resolvability flip",
+				static_cast<int32>(VM->GetEffectiveConnectionState()), static_cast<int32>(EUnrealMcpConnectionState::Connected));
+
+			// A Connected link PROVES a sidecar (hence a binary) exists — a stale "unresolvable" read must not mask it.
+			Rec->bBridgeBinaryResolvable = false;
+			TestEqual("still Connected — NoBinary never masks a live link",
+				static_cast<int32>(VM->GetEffectiveConnectionState()), static_cast<int32>(EUnrealMcpConnectionState::Connected));
+
+			// Same guard for Degraded (armed + a reported Disconnected = background retry of a link that DID exist).
+			TSharedPtr<FJsonObject> Dropped = MakeShared<FJsonObject>();
+			Dropped->SetStringField(TEXT("connectionState"), TEXT("Disconnected"));
+			Dropped->SetBoolField(TEXT("keepConnected"), true);
+			VM->ApplyStatus(Dropped);
+			TestEqual("Degraded raw after an armed drop",
+				static_cast<int32>(VM->GetConnectionState()), static_cast<int32>(EUnrealMcpConnectionState::Degraded));
+			TestEqual("Degraded is not overlaid by NoBinary",
+				static_cast<int32>(VM->GetEffectiveConnectionState()), static_cast<int32>(EUnrealMcpConnectionState::Degraded));
+		});
+
+		It("emits a hint ONLY for NoBinary and a Connect button label for it", [this]()
+		{
+			// The hint line is rendered only in NoBinary — every other state yields an empty hint (no extra row).
+			TestFalse("NoBinary hint non-empty", FUnrealMcpEditorViewModel::GetConnectionHint(EUnrealMcpConnectionState::NoBinary).IsEmpty());
+			TestTrue("Disconnected hint empty", FUnrealMcpEditorViewModel::GetConnectionHint(EUnrealMcpConnectionState::Disconnected).IsEmpty());
+			TestTrue("Connected hint empty", FUnrealMcpEditorViewModel::GetConnectionHint(EUnrealMcpConnectionState::Connected).IsEmpty());
+			TestTrue("Connecting hint empty", FUnrealMcpEditorViewModel::GetConnectionHint(EUnrealMcpConnectionState::Connecting).IsEmpty());
+			// The static button helper offers Connect as the NoBinary fallback (exhaustive-switch coverage).
+			TestEqual("NoBinary button label is Connect",
+				FUnrealMcpEditorViewModel::GetButtonText(EUnrealMcpConnectionState::NoBinary).ToString(), FString(TEXT("Connect")));
 		});
 	});
 
