@@ -119,6 +119,9 @@ void FUnrealMcpEditorViewModelSpec::Define()
 			const FLinearColor Connected = FUnrealMcpEditorViewModel::GetStatusColor(EUnrealMcpConnectionState::Connected);
 			const FLinearColor Disconnected = FUnrealMcpEditorViewModel::GetStatusColor(EUnrealMcpConnectionState::Disconnected);
 			TestFalse("connected colour != disconnected colour", Connected.Equals(Disconnected));
+			// NoBinary shares the Disconnected red (issue #63); the distinct label + hint carry the difference, not the colour.
+			TestTrue("NoBinary colour matches Disconnected (red)",
+				FUnrealMcpEditorViewModel::GetStatusColor(EUnrealMcpConnectionState::NoBinary).Equals(Disconnected));
 		});
 
 		It("treats a reported Disconnected-while-armed as Degraded, not a true stop", [this]()
@@ -231,6 +234,7 @@ void FUnrealMcpEditorViewModelSpec::Define()
 			TestTrue("Disconnected hint empty", FUnrealMcpEditorViewModel::GetConnectionHint(EUnrealMcpConnectionState::Disconnected).IsEmpty());
 			TestTrue("Connected hint empty", FUnrealMcpEditorViewModel::GetConnectionHint(EUnrealMcpConnectionState::Connected).IsEmpty());
 			TestTrue("Connecting hint empty", FUnrealMcpEditorViewModel::GetConnectionHint(EUnrealMcpConnectionState::Connecting).IsEmpty());
+			TestTrue("Degraded hint empty", FUnrealMcpEditorViewModel::GetConnectionHint(EUnrealMcpConnectionState::Degraded).IsEmpty());
 			// The static button helper offers Connect as the NoBinary fallback (exhaustive-switch coverage).
 			TestEqual("NoBinary button label is Connect",
 				FUnrealMcpEditorViewModel::GetButtonText(EUnrealMcpConnectionState::NoBinary).ToString(), FString(TEXT("Connect")));
