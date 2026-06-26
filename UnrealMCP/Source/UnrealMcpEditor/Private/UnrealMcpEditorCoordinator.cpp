@@ -224,6 +224,14 @@ void FUnrealMcpEditorCoordinator::Startup()
 		if (!Url.IsEmpty())
 			FPlatformProcess::LaunchURL(*Url, nullptr, nullptr);
 	};
+	// Issue #63: proactively surface the "no sidecar binary resolved" state in the always-visible Connection
+	// section. Snapshot resolvability ONCE here (the bundled-binary layout + UNREAL_MCP_BRIDGE_PATH env were both
+	// finalized above — ExportDotEnvToProcessEnv ran, and StartForPort already resolved against the same env), so
+	// the per-frame TAttribute that reads GetEffectiveConnectionState never walks the filesystem. A mid-session
+	// recovery (run `unreal-mcp-cli bootstrap-local`, then "Restart bridge") still clears the hint the instant the
+	// sidecar connects, because GetEffectiveConnectionState short-circuits NoBinary off a live Connected link.
+	const bool bBridgeBinaryResolvable = !FUnrealMcpSidecarManager::ResolveBridgeBinaryPath().IsEmpty();
+	ViewModel->IsBridgeBinaryResolvableSink = [bBridgeBinaryResolvable]() -> bool { return bBridgeBinaryResolvable; };
 
 	// §7 in-UI local-server (issue #95): wire the MCP-server card's Start/Stop to the local server manager. The
 	// view-model already gates these to Custom+http (ToggleLocalServer no-ops otherwise) — the sinks just execute.
@@ -478,6 +486,7 @@ void FUnrealMcpEditorCoordinator::Shutdown()
 		ViewModel->OnStartLocalServer = nullptr;
 		ViewModel->OnStopLocalServer = nullptr;
 		ViewModel->IsLocalServerRunningSink = nullptr;
+		ViewModel->IsBridgeBinaryResolvableSink = nullptr; // issue #63: captures only a bool, nulled for teardown symmetry
 	}
 	ViewModel.Reset();
 

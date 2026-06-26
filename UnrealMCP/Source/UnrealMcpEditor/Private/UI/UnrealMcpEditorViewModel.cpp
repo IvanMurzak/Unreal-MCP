@@ -602,6 +602,28 @@ FText FUnrealMcpEditorViewModel::GetLocalServerButtonText() const
 	return IsLocalServerRunning() ? LOCTEXT("ServerBtnStop", "Stop") : LOCTEXT("ServerBtnStart", "Start");
 }
 
+bool FUnrealMcpEditorViewModel::IsBridgeBinaryResolvable() const
+{
+	// Unknown (no sink wired) ⇒ assume resolvable so the NoBinary hint never false-alarms — only a sink that
+	// explicitly reports "not resolvable" surfaces the install/config state (issue #63).
+	return IsBridgeBinaryResolvableSink ? IsBridgeBinaryResolvableSink() : true;
+}
+
+EUnrealMcpConnectionState FUnrealMcpEditorViewModel::GetEffectiveConnectionState() const
+{
+	// A live or armed-and-recently-live link proves a sidecar (hence a binary) exists — the `status` feed that
+	// produced Connected/Degraded originates in the sidecar — so never overlay NoBinary on it; return the raw
+	// state untouched.
+	if (ConnectionState == EUnrealMcpConnectionState::Connected || ConnectionState == EUnrealMcpConnectionState::Degraded)
+		return ConnectionState;
+
+	// Otherwise (a plain Disconnected, or a Connecting that can never complete because no binary can spawn): when
+	// the bridge binary cannot be resolved, the sidecar can never come up, so surface NoBinary PROACTIVELY — the
+	// user sees the install/config problem before clicking Connect/Authorize, distinct from a transient
+	// Disconnected/Connecting. When it IS resolvable, the raw state stands (issue #63).
+	return IsBridgeBinaryResolvable() ? ConnectionState : EUnrealMcpConnectionState::NoBinary;
+}
+
 FText FUnrealMcpEditorViewModel::GetButtonText(EUnrealMcpConnectionState State)
 {
 	switch (State)
@@ -609,6 +631,9 @@ FText FUnrealMcpEditorViewModel::GetButtonText(EUnrealMcpConnectionState State)
 		case EUnrealMcpConnectionState::Connected:  return LOCTEXT("BtnDisconnect", "Disconnect");
 		case EUnrealMcpConnectionState::Connecting: return LOCTEXT("BtnStop", "Stop");
 		case EUnrealMcpConnectionState::Degraded:   return LOCTEXT("BtnStop", "Stop");
+		// NoBinary is a not-connected state: offer Connect as the fallback (the connect/disconnect button keeps
+		// reading the RAW state, so this case is mainly for switch-exhaustiveness + direct callers, issue #63).
+		case EUnrealMcpConnectionState::NoBinary:
 		case EUnrealMcpConnectionState::Disconnected:
 		default:                                    return LOCTEXT("BtnConnect", "Connect");
 	}
@@ -621,6 +646,9 @@ FText FUnrealMcpEditorViewModel::GetStatusLabel(EUnrealMcpConnectionState State)
 		case EUnrealMcpConnectionState::Connected:  return LOCTEXT("StatusConnected", "Unreal: Connected");
 		case EUnrealMcpConnectionState::Connecting: return LOCTEXT("StatusConnecting", "Unreal: Connecting…");
 		case EUnrealMcpConnectionState::Degraded:   return LOCTEXT("StatusDegraded", "Unreal: Reconnecting…");
+		// Issue #63: a distinct label (NOT the generic "Disconnected") so the user reads this as an install/config
+		// problem, not a transient stop. The actionable remedy is in GetConnectionHint's companion line.
+		case EUnrealMcpConnectionState::NoBinary:   return LOCTEXT("StatusNoBinary", "Unreal: No MCP bridge");
 		case EUnrealMcpConnectionState::Disconnected:
 		default:                                    return LOCTEXT("StatusDisconnected", "Unreal: Disconnected");
 	}
@@ -633,9 +661,22 @@ FLinearColor FUnrealMcpEditorViewModel::GetStatusColor(EUnrealMcpConnectionState
 		case EUnrealMcpConnectionState::Connected:  return FLinearColor(0.16f, 0.74f, 0.30f); // green
 		case EUnrealMcpConnectionState::Connecting: return FLinearColor(0.95f, 0.69f, 0.13f); // amber
 		case EUnrealMcpConnectionState::Degraded:   return FLinearColor(0.95f, 0.49f, 0.13f); // orange
+		// NoBinary is a not-working state — red, the same family as Disconnected (the distinct label + the
+		// actionable hint line carry the "no binary, not just stopped" distinction, issue #63).
+		case EUnrealMcpConnectionState::NoBinary:
 		case EUnrealMcpConnectionState::Disconnected:
 		default:                                    return FLinearColor(0.55f, 0.16f, 0.16f); // red
 	}
+}
+
+FText FUnrealMcpEditorViewModel::GetConnectionHint(EUnrealMcpConnectionState State)
+{
+	// Only NoBinary carries a hint. Reuse BridgeUnavailableMessage() — the SAME actionable text the reactive
+	// Authorize() failure shows (issue #99) — so the proactive Connection-section hint and the reactive auth
+	// failure never diverge (single source of truth). Every other state renders no hint line.
+	if (State == EUnrealMcpConnectionState::NoBinary)
+		return FText::FromString(BridgeUnavailableMessage());
+	return FText::GetEmpty();
 }
 
 EUnrealMcpConnectionState FUnrealMcpEditorViewModel::ParseConnectionState(const FString& Raw, bool bKeepConnected)

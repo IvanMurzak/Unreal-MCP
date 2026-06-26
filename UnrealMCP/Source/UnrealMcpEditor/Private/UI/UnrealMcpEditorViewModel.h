@@ -22,7 +22,18 @@ enum class EUnrealMcpConnectionState : uint8
 	/** SignalR connected; tools are reachable end-to-end. */
 	Connected,
 	/** Was connected, lost the link, and is auto-retrying in the background (keepConnected=true). */
-	Degraded
+	Degraded,
+	/**
+	 * The sidecar bridge binary cannot be resolved at all (issue #63): no bundled binary for this host rid AND
+	 * no `UNREAL_MCP_BRIDGE_PATH` override pointing at an existing file (FUnrealMcpSidecarManager::
+	 * ResolveBridgeBinaryPath() is empty). The TCP listener is up but NO sidecar can ever spawn, so the link can
+	 * never come up — an install/config problem distinct from the transient Disconnected/Connecting. Surfaced
+	 * PROACTIVELY in the always-visible Connection section (before the user clicks Connect/Authorize) with an
+	 * actionable hint — the proactive complement of the reactive Authorize() failure (BridgeUnavailableMessage()).
+	 * This is a DERIVED display state (GetEffectiveConnectionState), never stored in ConnectionState and never
+	 * emitted by the sidecar `status` feed.
+	 */
+	NoBinary
 };
 
 /** Cloud device-code authorization progress (docs/ARCHITECTURE.md §7 item 4 / §1.3 `device-auth`). */
@@ -112,6 +123,15 @@ public:
 	/** Report whether the LOCAL gamedev-mcp-server is currently running. Wired to FUnrealMcpServerManager::IsRunning(); unset → false. */
 	TFunction<bool()> IsLocalServerRunningSink;
 
+	/**
+	 * Report whether the sidecar bridge binary can be resolved (issue #63): true when
+	 * FUnrealMcpSidecarManager::ResolveBridgeBinaryPath() yields a non-empty path (a bundled <rid> binary exists
+	 * OR `UNREAL_MCP_BRIDGE_PATH` points at a real file). Wired by the coordinator. Unset → treated as resolvable
+	 * (true) so an unwired host / a spec that does not care never spuriously shows the NoBinary state. Read by
+	 * GetEffectiveConnectionState to overlay the proactive NoBinary hint. Game-thread only.
+	 */
+	TFunction<bool()> IsBridgeBinaryResolvableSink;
+
 	// --- Local MCP-server gating + control (pure view-model surface over the sinks above). ---
 
 	/**
@@ -194,6 +214,25 @@ public:
 	// --- Connection control. ---
 
 	EUnrealMcpConnectionState GetConnectionState() const { return ConnectionState; }
+
+	/**
+	 * Whether the sidecar bridge binary is resolvable (issue #63). Reads IsBridgeBinaryResolvableSink; true when
+	 * the sink is unset (unknown ⇒ assume present, so the NoBinary hint never false-alarms in a spec / unwired
+	 * host). Game-thread only.
+	 */
+	UNREALMCPEDITOR_API bool IsBridgeBinaryResolvable() const;
+
+	/**
+	 * The connection state to DISPLAY in the always-visible Connection section (issue #63): overlays a proactive
+	 * NoBinary on the raw live state when the bridge binary cannot be resolved AND we are not on a live link. A
+	 * Connected/Degraded raw state proves a sidecar exists (the `status` feed originates there), so it is returned
+	 * unchanged — NoBinary never masks a real link. Otherwise — a plain Disconnected, or a Connecting that can
+	 * never complete because no binary can spawn — an unresolvable binary yields NoBinary, so the user sees the
+	 * install/config problem BEFORE clicking Connect/Authorize, distinct from the transient Disconnected/Connecting
+	 * (the §63 "distinguish no-binary from not-yet-handshaken" ask). The raw GetConnectionState() is deliberately
+	 * unchanged — it stays the live SignalR state the connect/disconnect logic and the status feed drive.
+	 */
+	UNREALMCPEDITOR_API EUnrealMcpConnectionState GetEffectiveConnectionState() const;
 
 	/** §7 Connect: keepConnected=true, optimistic Connecting state, push the config (sidecar (re)dials). */
 	UNREALMCPEDITOR_API void Connect();
@@ -328,6 +367,15 @@ public:
 	static UNREALMCPEDITOR_API FText GetStatusLabel(EUnrealMcpConnectionState State);
 	/** The status-dot colour for a connection state (green Connected / amber transitional / red off). */
 	static UNREALMCPEDITOR_API FLinearColor GetStatusColor(EUnrealMcpConnectionState State);
+
+	/**
+	 * The actionable hint shown beneath the Connection-section status for a state (issue #63). For NoBinary it
+	 * returns the SAME actionable "install the bridge" guidance as the reactive Authorize() failure
+	 * (BridgeUnavailableMessage) so the proactive and reactive surfaces never diverge; empty for every other state
+	 * (no hint line is rendered). Pure/static — a spec asserts NoBinary yields a non-empty actionable string and
+	 * the healthy states yield empty.
+	 */
+	static UNREALMCPEDITOR_API FText GetConnectionHint(EUnrealMcpConnectionState State);
 
 	/** Parse a §1.3 connectionState string ("Connected"/"Connecting"/"Degraded"/…) into the enum. */
 	static UNREALMCPEDITOR_API EUnrealMcpConnectionState ParseConnectionState(const FString& Raw, bool bKeepConnected);

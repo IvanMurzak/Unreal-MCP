@@ -291,17 +291,21 @@ TSharedRef<SWidget> SUnrealMcpMainWindow::BuildConnectionSection()
 
 TSharedRef<SWidget> SUnrealMcpMainWindow::BuildConnectionCluster()
 {
-	// The Unreal status dot — driven by the live connection state.
+	// The Unreal status dot — driven by the EFFECTIVE connection state so the proactive NoBinary overlay (issue #63)
+	// shows as a red Offline dot, not a green/amber one. GetEffectiveConnectionState only diverges from the raw
+	// state when the bridge binary is unresolvable AND we are not on a live link.
 	TAttribute<EDot> UnrealDot = TAttribute<EDot>::Create([this]()
 	{
 		if (!IsViewModelValid())
 			return EDot::Offline;
-		switch (ViewModel->GetConnectionState())
+		switch (ViewModel->GetEffectiveConnectionState())
 		{
 			case EUnrealMcpConnectionState::Connected:  return EDot::Online;
 			case EUnrealMcpConnectionState::Connecting:  return EDot::Ring;
 			// Degraded must NOT use the (green) Ring brush — that reads as healthy. Show Offline.
 			case EUnrealMcpConnectionState::Degraded:    return EDot::Offline;
+			// NoBinary (issue #63) is an install/config problem — red Offline dot, like Disconnected.
+			case EUnrealMcpConnectionState::NoBinary:    return EDot::Offline;
 			default:                                     return EDot::Offline;
 		}
 	});
@@ -399,33 +403,63 @@ TSharedRef<SWidget> SUnrealMcpMainWindow::BuildConnectionCluster()
 
 TSharedRef<SWidget> SUnrealMcpMainWindow::BuildUnrealStatusRow()
 {
-	// The "Unreal: <status>" row — underlined label + Connect/Disconnect/Stop. The dot for this row lives in the
-	// shared rail (BuildConnectionCluster), so this row carries only its content.
-	return SNew(SHorizontalBox)
-		// The underlined "Unreal: <status>" label — spans only the text (issue #80 item 3).
-		+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
+	// The "Unreal: <status>" row — underlined label + Connect/Disconnect/Stop, plus (issue #63) an actionable hint
+	// line shown only in the NoBinary state. The dot for this row lives in the shared rail (BuildConnectionCluster)
+	// and pins to the TOP label, so the optional hint below it does not disturb the dot alignment.
+	//
+	// The status LABEL + dot read the EFFECTIVE state (so NoBinary surfaces as "Unreal: No MCP bridge"); the
+	// Connect/Disconnect/Stop button keeps reading the RAW GetConnectionState() — its tri-state connect/disconnect
+	// semantics are unchanged by the proactive overlay (a missing binary does not change what Connect/Stop do).
+	return SNew(SVerticalBox)
+		+ SVerticalBox::Slot().AutoHeight()
 		[
-			UnderlinedLabel(TAttribute<FText>::Create([this]()
+			SNew(SHorizontalBox)
+			// The underlined "Unreal: <status>" label — spans only the text (issue #80 item 3).
+			+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
+			[
+				UnderlinedLabel(TAttribute<FText>::Create([this]()
+				{
+					return IsViewModelValid()
+						? FUnrealMcpEditorViewModel::GetStatusLabel(ViewModel->GetEffectiveConnectionState())
+						: FText::GetEmpty();
+				}))
+			]
+			// Connect / Disconnect / Stop button — right-aligned to the shared right edge.
+			+ SHorizontalBox::Slot().AutoWidth().HAlign(HAlign_Right).VAlign(VAlign_Center)
+			[
+				SNew(SBox).MinDesiredWidth(RightControlColumnWidth).HAlign(HAlign_Right)
+				[
+					UnrealMcpStyleWidgets::StyledButton("UnrealMcp.Button.Secondary",
+						SNew(STextBlock).Text_Lambda([this]()
+						{
+							return IsViewModelValid()
+								? FUnrealMcpEditorViewModel::GetButtonText(ViewModel->GetConnectionState())
+								: FText::GetEmpty();
+						}),
+						FOnClicked::CreateSP(this, &SUnrealMcpMainWindow::OnConnectClicked))
+				]
+			]
+		]
+		// Issue #63: the proactive "no MCP bridge binary" hint — the SAME actionable text the reactive Authorize
+		// failure shows (BridgeUnavailableMessage, issue #99), surfaced in the always-visible Connection section
+		// BEFORE the user clicks Connect/Authorize. Red (StatusOffline, matching the other alert/validation lines)
+		// and collapsed in every state but NoBinary, so a healthy/transient connection shows no extra row.
+		+ SVerticalBox::Slot().AutoHeight().Padding(0, 4, 0, 0)
+		[
+			SNew(STextBlock)
+			.AutoWrapText(true)
+			.ColorAndOpacity(FSlateColor(FUnrealMcpStyle::StatusOffline()))
+			.Visibility_Lambda([this]()
+			{
+				return (IsViewModelValid() && ViewModel->GetEffectiveConnectionState() == EUnrealMcpConnectionState::NoBinary)
+					? EVisibility::Visible : EVisibility::Collapsed;
+			})
+			.Text_Lambda([this]()
 			{
 				return IsViewModelValid()
-					? FUnrealMcpEditorViewModel::GetStatusLabel(ViewModel->GetConnectionState())
+					? FUnrealMcpEditorViewModel::GetConnectionHint(ViewModel->GetEffectiveConnectionState())
 					: FText::GetEmpty();
-			}))
-		]
-		// Connect / Disconnect / Stop button — right-aligned to the shared right edge.
-		+ SHorizontalBox::Slot().AutoWidth().HAlign(HAlign_Right).VAlign(VAlign_Center)
-		[
-			SNew(SBox).MinDesiredWidth(RightControlColumnWidth).HAlign(HAlign_Right)
-			[
-				UnrealMcpStyleWidgets::StyledButton("UnrealMcp.Button.Secondary",
-					SNew(STextBlock).Text_Lambda([this]()
-					{
-						return IsViewModelValid()
-							? FUnrealMcpEditorViewModel::GetButtonText(ViewModel->GetConnectionState())
-							: FText::GetEmpty();
-					}),
-					FOnClicked::CreateSP(this, &SUnrealMcpMainWindow::OnConnectClicked))
-			]
+			})
 		];
 }
 
