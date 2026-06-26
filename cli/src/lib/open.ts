@@ -27,6 +27,14 @@ function isValidTransport(v: unknown): v is McpTransport {
  * Build the `UNREAL_MCP_*` env-var map propagated to the editor process.
  * Returns `undefined` when `noConnect` is set or nothing maps. Pure;
  * throws on invalid enum values (caught at the `openProject` boundary).
+ *
+ * Connection-mode resolution (`UNREAL_MCP_CONNECTION_MODE`): an explicit
+ * `connectionMode` always wins; otherwise an explicit `host` infers `Custom`
+ * (a host implies a non-Cloud target, and the plugin defaults to Cloud — so a
+ * host with no mode would silently dial the cloud). With neither set the var is
+ * omitted and the plugin default applies. Mirrors godot-cli's host-presence
+ * mode default. `noConnect` drops every var (including the mode).
+ *
  * Exported for tests.
  */
 export function buildOpenEnv(opts: OpenProjectOptions): Record<string, string> | undefined {
@@ -45,7 +53,14 @@ export function buildOpenEnv(opts: OpenProjectOptions): Record<string, string> |
     env['UNREAL_MCP_TRANSPORT'] = opts.transport;
   }
   if (opts.startServer !== undefined) env['UNREAL_MCP_START_SERVER'] = opts.startServer ? 'true' : 'false';
-  if (opts.connectionMode !== undefined) env['UNREAL_MCP_CONNECTION_MODE'] = opts.connectionMode;
+  // Connection mode: an explicit value always wins; otherwise infer `Custom`
+  // from the presence of an explicit host (the plugin defaults to Cloud, where
+  // a bare host is ignored). Neither set => omit (plugin default applies).
+  if (opts.connectionMode !== undefined) {
+    env['UNREAL_MCP_CONNECTION_MODE'] = opts.connectionMode;
+  } else if (opts.host !== undefined) {
+    env['UNREAL_MCP_CONNECTION_MODE'] = 'Custom';
+  }
   return Object.keys(env).length > 0 ? env : undefined;
 }
 
