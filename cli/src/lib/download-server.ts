@@ -76,8 +76,8 @@ export const SERVER_BINARY_BASENAME = 'gamedev-mcp-server';
 /** Env var that overrides the server binary path (skips download + version check). */
 export const SERVER_PATH_ENV_VAR = 'UNREAL_MCP_SERVER_PATH';
 
-/** GitHub repo the server binaries are released from. */
-const SERVER_RELEASE_REPO = 'IvanMurzak/GameDev-MCP-Server';
+/** GitHub repo the server binaries (and the SHA256SUMS manifest) are released from. */
+export const SERVER_RELEASE_REPO = 'IvanMurzak/GameDev-MCP-Server';
 
 /** Executable file name for an OS: `gamedev-mcp-server(.exe)`. Pure. */
 export function serverExecutableName(osPlatform: NodeJS.Platform): string {

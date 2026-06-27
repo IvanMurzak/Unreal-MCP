@@ -16,10 +16,7 @@
 // seam (PR #193); same parser/verify/test shape, TS idioms.
 
 import { SERVER_VERSION } from './server-version.js';
-import { SERVER_BINARY_BASENAME } from './download-server.js';
-
-/** GitHub repo the server binaries (and the SHA256SUMS manifest) are released from. */
-const SERVER_RELEASE_REPO = 'IvanMurzak/GameDev-MCP-Server';
+import { SERVER_BINARY_BASENAME, SERVER_RELEASE_REPO } from './download-server.js';
 
 /**
  * The name of the integrity manifest asset attached to every GameDev-MCP-Server
