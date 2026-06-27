@@ -128,15 +128,18 @@ namespace FUnrealMcpScopedRead
 	TSharedPtr<FJsonObject> Filter(
 		const TSharedPtr<FJsonObject>& Source, const TArray<FString>& Paths, const FScopedReadOptions& Options)
 	{
+		// A null/invalid source always yields a valid empty object (never an aliased null) — matching each prior
+		// impl's leading guard. Checked BEFORE the no-paths branch so the no-source + no-paths combination cannot
+		// return the null alias on the bDeepClone==false (actor/level) path.
+		if (!Source.IsValid())
+		{
+			return MakeShared<FJsonObject>();
+		}
 		// No paths requested → the whole object. Deep-clone it (asset) so the caller can mutate freely, or return
 		// the source alias (actor/level — the caller must not mutate it). Each prior impl's no-paths branch.
 		if (Paths.Num() == 0)
 		{
 			return Options.bDeepClone ? ScopedReadCloneObject(Source) : Source;
-		}
-		if (!Source.IsValid())
-		{
-			return MakeShared<FJsonObject>();
 		}
 
 		TSharedPtr<FJsonObject> Out = MakeShared<FJsonObject>();

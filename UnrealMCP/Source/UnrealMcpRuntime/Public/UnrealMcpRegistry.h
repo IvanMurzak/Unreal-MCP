@@ -347,9 +347,6 @@ protected:
 			++Revision;
 	}
 
-	/** Mutable access to the entry map for the concrete dispatch surface (keeps dispatch kind-specific). */
-	const TMap<FString, TEntry>& GetEntries() const { return Entries; }
-
 private:
 	TMap<FString, TEntry> Entries;
 	int32 Revision = 0;
