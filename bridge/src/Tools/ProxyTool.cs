@@ -26,12 +26,15 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
     /// dynamic, manifest-driven tool set.
     ///
     /// <para>
-    /// <b>TODO (upstream swap):</b> this is a local mirror of <c>MCP-Plugin-dotnet</c> PR #122's
-    /// <c>com.IvanMurzak.McpPlugin.ProxyTool</c> (docs/ARCHITECTURE.md §2.3). The §2.3 additive API
-    /// lands as <c>com.IvanMurzak.McpPlugin</c> &gt;= 6.8.0; when the pin is bumped (release-pipeline
-    /// owned), delete this file and use the upstream type — the public surface is identical. The pin
-    /// is FROZEN at 6.7.0 here, so the chars/4 token-count formula is inlined rather than reusing the
-    /// 6.8.0-only <c>ToolTokenCount.Calculate</c> helper. The behaviour is byte-identical.
+    /// <b>TODO (upstream swap):</b> this is a deliberate bridge-local mirror of the
+    /// <c>com.IvanMurzak.McpPlugin.ProxyTool</c> design (docs/ARCHITECTURE.md §2.3). <see cref="IRunTool"/> +
+    /// <c>IToolManager.AddTool</c> are already public, so hosting it here needed no upstream API bump. The
+    /// <c>com.IvanMurzak.McpPlugin</c> pin is currently 6.10.0 — read the live value from the bridge csproj;
+    /// it drifts as upstream releases (it has gone 6.7.0 → 6.9.0 → 6.10.0) — and ships no equivalent
+    /// <c>ProxyTool</c> yet, so the chars/4 token-count formula stays inlined below to keep this mirror
+    /// self-contained rather than depending on an upstream <c>ToolTokenCount.Calculate</c> helper. If a
+    /// future upstream ships an equivalent ProxyTool, the swap is release-pipeline owned: delete this file
+    /// and use the upstream type — the public surface is identical. The behaviour is byte-identical either way.
     /// </para>
     /// </summary>
     public sealed class ProxyTool : IRunTool
