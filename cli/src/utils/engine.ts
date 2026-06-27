@@ -14,6 +14,17 @@ import {
 } from './launcher.js';
 
 /**
+ * The `path` flavour to use for a TARGET platform, regardless of the host: the
+ * Windows backslash variant for `win32`, the POSIX forward-slash variant
+ * otherwise. Centralises the `os === 'win32' ? path.win32 : path.posix` idiom
+ * that engine-path resolution repeats so a cross-OS scan (e.g. resolving a
+ * Windows engine root on a Linux CI host) keeps correct separators. Pure.
+ */
+export function pathFor(os: NodeJS.Platform): path.PlatformPath {
+  return os === 'win32' ? path.win32 : path.posix;
+}
+
+/**
  * Build the absolute path to the `UnrealEditor` binary under an engine
  * install root, for the given platform. `cmd === true` returns the
  * headless console binary (`UnrealEditor-Cmd`) used by `wait-for-ready`
@@ -28,7 +39,7 @@ export function editorBinaryPath(
   // Use the path flavor for the TARGET os, not the host — so resolving a
   // macOS/Linux engine on a Windows host (and vice versa) yields correct
   // separators.
-  const pj = os === 'win32' ? path.win32 : path.posix;
+  const pj = pathFor(os);
   switch (os) {
     case 'win32':
       return pj.join(engineRoot, 'Engine', 'Binaries', 'Win64', `${exe}.exe`);
@@ -98,7 +109,7 @@ export function resolveEngine(input: ResolveEngineInput): ResolveEngineResult {
     // it would mangle a Windows engine root (`C:\Src\UE5` is not POSIX-absolute,
     // so posix.resolve prepends cwd) and the binary check would then miss. This
     // mirrors `editorBinaryPath`, which already picks the flavour by `os`.
-    const pj = os === 'win32' ? path.win32 : path.posix;
+    const pj = pathFor(os);
     const engineRoot = pj.resolve(input.engineRootOverride.trim());
     const editorPath = editorBinaryPath(engineRoot, os);
     if (!exists(editorPath)) {

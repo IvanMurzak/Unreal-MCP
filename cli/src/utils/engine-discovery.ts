@@ -21,9 +21,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
-import { homedir } from 'os';
-import { editorBinaryPath } from './engine.js';
-import { compareEngineVersions, type EngineInstallation } from './launcher.js';
+import { editorBinaryPath, pathFor } from './engine.js';
+import { byEngineVersionDesc, type EngineInstallation } from './launcher.js';
 import { verbose } from './ui.js';
 
 // ---------------------------------------------------------------------------
@@ -35,6 +34,8 @@ export interface DiscoveryFs {
   existsImpl: (p: string) => boolean;
   /** List directory entry NAMES (not full paths); `[]` on any error. */
   readdirImpl: (p: string) => string[];
+  /** Read a UTF-8 file's contents; `null` on any error (absent/unreadable). */
+  readFileImpl: (p: string) => string | null;
 }
 
 function defaultFs(): DiscoveryFs {
@@ -45,6 +46,13 @@ function defaultFs(): DiscoveryFs {
         return fs.readdirSync(p);
       } catch {
         return [];
+      }
+    },
+    readFileImpl: (p: string): string | null => {
+      try {
+        return fs.readFileSync(p, 'utf-8');
+      } catch {
+        return null;
       }
     },
   };
@@ -106,7 +114,7 @@ export function commonEngineRoots(os: NodeJS.Platform, env: NodeJS.ProcessEnv = 
   // every OS — its PARENT, since the var points AT the engine dir.
   const ueRoot = env['UE_ROOT'];
   if (ueRoot && ueRoot.trim().length > 0) {
-    const pj = os === 'win32' ? path.win32 : path.posix;
+    const pj = pathFor(os);
     const parent = pj.dirname(ueRoot.trim());
     // Guard against promoting a filesystem-root parent (e.g. `UE_ROOT=/opt` ->
     // `/`, or a drive root `D:\`): readdir of `/` is wasteful and never holds a
@@ -152,7 +160,7 @@ export function scanCommonLocationEngines(
   fsImpl: DiscoveryFs = defaultFs(),
 ): EngineInstallation[] {
   const roots = commonEngineRoots(os, env);
-  const pj = os === 'win32' ? path.win32 : path.posix;
+  const pj = pathFor(os);
   const found: EngineInstallation[] = [];
   const seenRoots = new Set<string>();
 
@@ -204,7 +212,7 @@ export function scanCommonLocationEngines(
     }
   }
 
-  found.sort((a, b) => compareEngineVersions(b.engineAssociation, a.engineAssociation));
+  found.sort(byEngineVersionDesc);
   return found;
 }
 
@@ -219,15 +227,11 @@ export function readEngineAssociationFromBuildVersion(
   os: NodeJS.Platform,
   fsImpl: DiscoveryFs = defaultFs(),
 ): string {
-  const pj = os === 'win32' ? path.win32 : path.posix;
+  const pj = pathFor(os);
   const versionFile = pj.join(engineRoot, 'Engine', 'Build', 'Build.version');
   if (!fsImpl.existsImpl(versionFile)) return '';
-  let raw: string;
-  try {
-    raw = fs.readFileSync(versionFile, 'utf-8');
-  } catch {
-    return '';
-  }
+  const raw = fsImpl.readFileImpl(versionFile);
+  if (raw === null) return '';
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);

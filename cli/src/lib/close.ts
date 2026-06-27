@@ -6,6 +6,7 @@ import * as path from 'path';
 import { execFileSync } from 'child_process';
 import { platform } from 'os';
 import { findUProjectFile } from '../utils/project.js';
+import { asError } from '../utils/error.js';
 import { emitProgress } from './progress.js';
 import type { ProgressCallback } from './types.js';
 
@@ -115,7 +116,7 @@ export async function close(opts: CloseOptions = {}): Promise<CloseResult> {
         kill(m.pid);
         terminated.push(m.pid);
       } catch (err) {
-        warnings.push(`Failed to terminate PID ${m.pid}: ${err instanceof Error ? err.message : String(err)}`);
+        warnings.push(`Failed to terminate PID ${m.pid}: ${asError(err).message}`);
       }
     }
 
@@ -126,7 +127,7 @@ export async function close(opts: CloseOptions = {}): Promise<CloseResult> {
       kind: 'failure',
       success: false,
       warnings,
-      error: err instanceof Error ? err : new Error(String(err)),
+      error: asError(err),
     };
   }
 }

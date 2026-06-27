@@ -8,6 +8,7 @@ import { PACKAGE_NAME, PACKAGE_VERSION } from '../version.js';
 import { readUProject } from '../utils/project.js';
 import { resolveConnection } from '../utils/config.js';
 import { probePing } from '../utils/probe.js';
+import { asError } from '../utils/error.js';
 import type { StatusOptions, StatusReport } from './types.js';
 
 /**
@@ -62,7 +63,7 @@ export async function getStatus(opts: StatusOptions = {}): Promise<StatusReport>
       }
     } catch (err) {
       report.connection = { url: '', source: 'unresolved', hasToken: false };
-      report.probeReason = err instanceof Error ? err.message : String(err);
+      report.probeReason = asError(err).message;
     }
   }
 

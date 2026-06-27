@@ -7,6 +7,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { installPlugin } from './install-plugin.js';
 import { cleanPluginBuildCache } from './clean-plugin.js';
+import { asError } from '../utils/error.js';
+import { isSymlink } from '../utils/fs.js';
 import { emitProgress } from './progress.js';
 import type { ProgressCallback } from './types.js';
 
@@ -55,15 +57,6 @@ export interface UpdateFailure {
 }
 
 export type UpdateResult = UpdateSuccess | UpdateFailure;
-
-/** True when `p` is an existing symlink/junction (vs a real directory). */
-function isJunction(p: string): boolean {
-  try {
-    return fs.lstatSync(p).isSymbolicLink();
-  } catch {
-    return false;
-  }
-}
 
 /** Read `VersionName` from a `UnrealMCP.uplugin`. Pure. Returns null on miss. */
 export function readPluginVersion(upluginPath: string): string | null {
@@ -117,7 +110,7 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
     // Preserve the existing install mode: a dev junction install must stay a
     // junction across `update --force` rather than being silently replaced
     // with a copy (which would detach the project from the live source).
-    const installedAsJunction = isJunction(installedPath);
+    const installedAsJunction = isSymlink(installedPath);
     const installResult = await installPlugin({
       projectDir,
       pluginSourceDir,
@@ -166,7 +159,7 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
       kind: 'failure',
       success: false,
       warnings,
-      error: err instanceof Error ? err : new Error(String(err)),
+      error: asError(err),
     };
   }
 }
