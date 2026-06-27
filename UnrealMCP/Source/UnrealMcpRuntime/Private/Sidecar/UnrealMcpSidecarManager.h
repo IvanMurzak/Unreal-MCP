@@ -4,9 +4,8 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "HAL/ThreadSafeBool.h"
 #include "HAL/PlatformProcess.h"   // FProcHandle is a by-value member below; the platform header defines the complete type (the generic header only forward-declares it)
-#include "Async/Future.h"          // TFuture<void> WatchdogFuture member below
+#include "UnrealMcpSupervisedProcess.h"   // the shared §1.5 crash-restart watchdog (FUnrealMcpSupervisedProcess Watchdog member below)
 
 /**
  * Owns the lifecycle of the unreal-mcp-bridge sidecar process (docs/ARCHITECTURE.md §6): resolve the
@@ -57,7 +56,7 @@ public:
 	 * is intentionally unsynchronized — a concurrent call racing a watchdog restart is not a supported use.
 	 */
 	bool IsRunning() const;
-	int32 GetRestartCount() const { return RestartCount.GetValue(); }
+	int32 GetRestartCount() const { return Watchdog.GetRestartCount(); }
 
 	/**
 	 * Resolve the bridge binary path (§6 BUNDLE model): UNREAL_MCP_BRIDGE_PATH dev/CI override first,
@@ -132,11 +131,8 @@ private:
 	FProcHandle ProcHandle;
 	uint32 ProcId = 0;
 
-	FThreadSafeBool bStopRequested = false;
-	FThreadSafeCounter RestartCount;
-	TFuture<void> WatchdogFuture;
-
-	// Crash-rate guard (§1.5): > 5 crashes in 5 minutes → stop restarting.
-	double WindowStartSeconds = 0.0;
-	int32 CrashesInWindow = 0;
+	// The §1.5 crash-restart watchdog (backoff {1,2,5,10,30}s + give-up after 5 crashes / 300s). Shared with
+	// FUnrealMcpServerManager via FUnrealMcpSupervisedProcess; this manager supplies the IsAlive / Respawn
+	// closures in StartWatchdog().
+	FUnrealMcpSupervisedProcess Watchdog;
 };

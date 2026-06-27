@@ -7,6 +7,7 @@
 #include "HAL/ThreadSafeBool.h"
 #include "HAL/CriticalSection.h"
 #include "GenericPlatform/GenericPlatformProcess.h"
+#include "UnrealMcpSupervisedProcess.h"   // the shared §1.5 crash-restart watchdog (FUnrealMcpSupervisedProcess Watchdog member below)
 
 /**
  * Owns the lifecycle of the LOCAL shared `gamedev-mcp-server` process (the engine-agnostic MCP server
@@ -60,7 +61,7 @@ public:
 	bool IsRunning() const;
 
 	/** Total auto-restarts the watchdog performed since the last Start (for the UI status string). */
-	int32 GetRestartCount() const { return RestartCount.GetValue(); }
+	int32 GetRestartCount() const { return Watchdog.GetRestartCount(); }
 
 	/**
 	 * Reattach to a server this plugin spawned in a PREVIOUS editor module load (a hot-reload / domain-reload
@@ -196,12 +197,11 @@ private:
 	// destructor. See BindProcessToKillOnCloseJob.
 	void* JobHandle = nullptr;
 
-	FThreadSafeBool bStopRequested = false;
 	FThreadSafeBool bStarting = false;
-	FThreadSafeCounter RestartCount;
-	TFuture<void> WatchdogFuture;
 
-	// Crash-rate guard (mirrors the sidecar §1.5): > 5 crashes in 5 minutes → stop restarting.
-	double WindowStartSeconds = 0.0;
-	int32 CrashesInWindow = 0;
+	// The §1.5 crash-restart watchdog (backoff {1,2,5,10,30}s + give-up after 5 crashes / 300s). Shared with
+	// FUnrealMcpSidecarManager via FUnrealMcpSupervisedProcess; this manager supplies the IsAlive / Respawn /
+	// OnGiveUp closures (the respawn kills an orphan on the port + re-spawns; give-up clears the pid file) in
+	// StartWatchdog().
+	FUnrealMcpSupervisedProcess Watchdog;
 };
