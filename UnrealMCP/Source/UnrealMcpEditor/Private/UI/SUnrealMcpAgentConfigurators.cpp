@@ -528,11 +528,7 @@ TSharedRef<SWidget> SUnrealMcpAgentConfigurators::MakeLinksRow()
 		[
 			SNew(SButton)
 			.Text(LOCTEXT("DownloadAgent", "Download / Docs"))
-			.OnClicked_Lambda([DownloadUrl]()
-			{
-				FPlatformProcess::LaunchURL(*DownloadUrl, nullptr, nullptr);
-				return FReply::Handled();
-			})
+			.OnClicked(UnrealMcpStyleWidgets::OpenUrlClicked(DownloadUrl))
 		];
 	}
 	if (!TutorialUrl.IsEmpty())
@@ -541,11 +537,7 @@ TSharedRef<SWidget> SUnrealMcpAgentConfigurators::MakeLinksRow()
 		[
 			SNew(SButton)
 			.Text(LOCTEXT("TutorialAgent", "Tutorial"))
-			.OnClicked_Lambda([TutorialUrl]()
-			{
-				FPlatformProcess::LaunchURL(*TutorialUrl, nullptr, nullptr);
-				return FReply::Handled();
-			})
+			.OnClicked(UnrealMcpStyleWidgets::OpenUrlClicked(TutorialUrl))
 		];
 	}
 	return LinksRow;

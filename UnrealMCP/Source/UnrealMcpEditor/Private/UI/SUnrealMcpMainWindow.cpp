@@ -944,12 +944,12 @@ TSharedRef<SWidget> SUnrealMcpMainWindow::BuildFooterSection()
 			+ SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 8, 0)
 			[
 				UnrealMcpStyleWidgets::IconButton("UnrealMcp.Button.Secondary", "UnrealMcp.Discord", LOCTEXT("HelpTalk", "Help / Talk"),
-					FOnClicked::CreateLambda([]() { FPlatformProcess::LaunchURL(*DiscordUrl, nullptr, nullptr); return FReply::Handled(); }))
+					UnrealMcpStyleWidgets::OpenUrlClicked(DiscordUrl))
 			]
 			+ SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 8, 0)
 			[
 				UnrealMcpStyleWidgets::IconButton("UnrealMcp.Button.Secondary", "UnrealMcp.GitHub", LOCTEXT("BugReport", "Bug Report"),
-					FOnClicked::CreateLambda([]() { FPlatformProcess::LaunchURL(*IssuesUrl, nullptr, nullptr); return FReply::Handled(); }))
+					UnrealMcpStyleWidgets::OpenUrlClicked(IssuesUrl))
 			]
 			// "Check" — opens the Serialization Check window (Unity-MCP parity). Secondary style, beside the
 			// support links. Delegates to the static aux-window invoker so it focuses an already-open tab.
@@ -989,7 +989,7 @@ TSharedRef<SWidget> SUnrealMcpMainWindow::BuildFooterSection()
 			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(8, 0, 0, 0)
 			[
 				UnrealMcpStyleWidgets::IconButton("UnrealMcp.Button.Golden", "UnrealMcp.Star", LOCTEXT("GitHubStar", "GitHub Star"),
-					FOnClicked::CreateLambda([]() { FPlatformProcess::LaunchURL(*StarUrl, nullptr, nullptr); return FReply::Handled(); }))
+					UnrealMcpStyleWidgets::OpenUrlClicked(StarUrl))
 			]
 		];
 }
