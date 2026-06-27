@@ -21,7 +21,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
-import { homedir } from 'os';
 import { editorBinaryPath, pathFor } from './engine.js';
 import { byEngineVersionDesc, type EngineInstallation } from './launcher.js';
 import { verbose } from './ui.js';
