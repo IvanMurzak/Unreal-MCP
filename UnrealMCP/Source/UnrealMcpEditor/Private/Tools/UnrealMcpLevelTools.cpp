@@ -3,6 +3,8 @@
 
 #include "UnrealMcpCoreTools.h"
 #include "UnrealMcpToolRegistry.h"
+#include "UnrealMcpSchema.h"          // shared §3.2 schema builders (FUnrealMcpSchema::StringArray)
+#include "UnrealMcpToolArgs.h"        // shared FUnrealMcpToolArgs::GetStringArray
 #include "Tools/UnrealMcpObjectRef.h"
 #include "Tools/UnrealMcpPropertyJson.h"
 
@@ -43,52 +45,9 @@
  */
 namespace
 {
-	/** An `array` of strings — the §3.2 scoped-read `paths` filter (mirrors the actor family's local schema).
-	 *  Uniquely named (Level-prefixed): the UE unity build concatenates this TU with the other tool
-	 *  families' TUs, so a bare `MakeStringArraySchema` would ODR-collide with the actor family's copy. */
-	TSharedPtr<FJsonObject> LevelMakeStringArraySchema(const FString& Desc)
-	{
-		TSharedPtr<FJsonObject> Items = MakeShared<FJsonObject>();
-		Items->SetStringField(TEXT("type"), TEXT("string"));
-
-		TSharedPtr<FJsonObject> Schema = MakeShared<FJsonObject>();
-		Schema->SetStringField(TEXT("type"), TEXT("array"));
-		if (!Desc.IsEmpty())
-			Schema->SetStringField(TEXT("description"), Desc);
-		Schema->SetObjectField(TEXT("items"), Items);
-		return Schema;
-	}
-
-	/**
-	 * Read a string array argument (the scoped-read `paths` filter); empty when absent or not an array.
-	 * A non-string entry is reported via OutError (and the array is left empty) rather than silently
-	 * dropped — a dropped entry would otherwise flip the scoped read to "identity only" (the opposite of
-	 * the requested scope) with no signal to the caller. Same contract as the actor family's helper.
-	 * Uniquely named (Level-prefixed) to avoid a unity-build ODR collision with the actor family's copy.
-	 */
-	TArray<FString> LevelGetStringArray(const FUnrealMcpToolCall& Call, const FString& Key, FString& OutError)
-	{
-		TArray<FString> Out;
-		const TArray<TSharedPtr<FJsonValue>>* Arr = nullptr;
-		if (Call.Arguments->TryGetArrayField(Key, Arr) && Arr)
-		{
-			for (const TSharedPtr<FJsonValue>& V : *Arr)
-			{
-				FString S;
-				if (V.IsValid() && V->TryGetString(S))
-				{
-					Out.Add(S);
-				}
-				else
-				{
-					OutError = FString::Printf(TEXT("'%s' must be an array of strings; a non-string entry was provided."), *Key);
-					Out.Reset();
-					return Out;
-				}
-			}
-		}
-		return Out;
-	}
+	// The scoped-read `paths` string-array schema + reader are the shared FUnrealMcpSchema::StringArray /
+	// FUnrealMcpToolArgs::GetStringArray surfaces (UnrealMcpSchema.h / UnrealMcpToolArgs.h) — see the call sites
+	// below. Only level-specific helpers remain in this namespace.
 
 	/** Long package name of a level's outermost package (e.g. /Game/Maps/Arena); empty when null. */
 	FString LevelPackageName(const ULevel* Level)
@@ -431,7 +390,7 @@ namespace UnrealMcpLevelTools
 			                  "(§3.2) to save tokens. Pass 'actor' to scope the read to a single actor instead of "
 			                  "the whole world."))
 			.ParamString(TEXT("actor"), TEXT("Label / name / path of a single actor to read. Omit to snapshot the whole world."))
-			.Param(TEXT("paths"), TEXT("array"), TEXT("Dotted property paths to include per actor (scoped read). Identity only when omitted."), EUnrealMcpParamRequirement::Optional, LevelMakeStringArraySchema(TEXT("Dotted property paths to include per actor (scoped read).")))
+			.Param(TEXT("paths"), TEXT("array"), TEXT("Dotted property paths to include per actor (scoped read). Identity only when omitted."), EUnrealMcpParamRequirement::Optional, FUnrealMcpSchema::StringArray(TEXT("Dotted property paths to include per actor (scoped read).")))
 			.ParamInt(TEXT("limit"), TEXT("Maximum number of actors to return for a world snapshot. Defaults to 200; pass 0 or a negative value for no limit."))
 			.ReadOnlyHint(true)
 			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
@@ -441,7 +400,7 @@ namespace UnrealMcpLevelTools
 					return FUnrealMcpToolResult::Error(TEXT("No editor world available."));
 
 				FString PathsError;
-				const TArray<FString> Paths = LevelGetStringArray(Call, TEXT("paths"), PathsError);
+				const TArray<FString> Paths = FUnrealMcpToolArgs::GetStringArray(Call, TEXT("paths"), PathsError);
 				if (!PathsError.IsEmpty())
 					return FUnrealMcpToolResult::Error(PathsError);
 

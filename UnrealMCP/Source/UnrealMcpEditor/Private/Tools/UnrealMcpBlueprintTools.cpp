@@ -4,6 +4,7 @@
 #include "UnrealMcpCoreTools.h"
 #include "UnrealMcpToolRegistry.h"
 #include "UnrealMcpLog.h"
+#include "Tools/UnrealMcpObjectRef.h"   // the de-facto standard class resolver (FUnrealMcpObjectRef::ResolveClass)
 
 #include "Engine/Blueprint.h"
 #include "Engine/BlueprintGeneratedClass.h"
@@ -43,23 +44,13 @@
 namespace
 {
 	// ---- Resolution helpers ----------------------------------------------------------------------
-
-	/** Resolve a UClass from a native class path ("/Script/Engine.Actor"), a short name ("Actor"), or a
-	 *  Blueprint asset path ("/Game/X/BP_Y.BP_Y" -> its GeneratedClass). Returns null when unresolved. */
-	UClass* ResolveClass(const FString& Path)
-	{
-		if (Path.IsEmpty())
-			return nullptr;
-		if (UClass* Found = UClass::TryFindTypeSlow<UClass>(Path))
-			return Found;
-		// LOAD_NoWarn|LOAD_Quiet: these are speculative probes run on every tool call with a fresh path;
-		// a miss is expected and must not spam the editor log with LoadPackage failure warnings.
-		if (UClass* Loaded = LoadObject<UClass>(nullptr, *Path, nullptr, LOAD_NoWarn | LOAD_Quiet))
-			return Loaded;
-		if (UBlueprint* BP = LoadObject<UBlueprint>(nullptr, *Path, nullptr, LOAD_NoWarn | LOAD_Quiet))
-			return BP->GeneratedClass;
-		return nullptr;
-	}
+	//
+	// Class resolution uses the shared FUnrealMcpObjectRef::ResolveClass (Tools/UnrealMcpObjectRef.h) — the
+	// de-facto standard the actor/asset/level families already use. It is a strict superset of the resolver this
+	// file once carried locally: it ADDS an FSoftClassPath::TryLoadClass step (resolves native + generated
+	// Blueprint class paths without a scan) and a FindFirstObject fallback on top of the
+	// TryFindTypeSlow + object/Blueprint-asset load chain. Broadening the Blueprint family's resolution to match
+	// is the intended convergence.
 
 	/** Resolve a UBlueprint by object path. Prefers an already-in-memory object (assets created earlier
 	 *  this session are registered with the AssetRegistry but not saved to disk), then falls back to load. */
@@ -135,7 +126,7 @@ namespace
 		else
 		{
 			// Object / class / struct path: resolve to a UClass (object ref) or a UScriptStruct.
-			if (UClass* Class = ResolveClass(Type))
+			if (UClass* Class = FUnrealMcpObjectRef::ResolveClass(Type))
 				Set(UEdGraphSchema_K2::PC_Object, NAME_None, Class);
 			else if (UScriptStruct* Struct = LoadObject<UScriptStruct>(nullptr, *Type, nullptr, LOAD_NoWarn | LOAD_Quiet))
 				Set(UEdGraphSchema_K2::PC_Struct, NAME_None, Struct);
@@ -216,7 +207,7 @@ namespace UnrealMcpBlueprintTools
 				if (Path.IsEmpty())
 					return FUnrealMcpToolResult::Error(TEXT("'path' is required."));
 
-				UClass* ParentClass = ResolveClass(ParentPath);
+				UClass* ParentClass = FUnrealMcpObjectRef::ResolveClass(ParentPath);
 				if (!ParentClass)
 					return FUnrealMcpToolResult::Error(FString::Printf(TEXT("could not resolve parent class '%s'."), *ParentPath));
 				if (!FKismetEditorUtilities::CanCreateBlueprintOfClass(ParentClass))
@@ -413,7 +404,7 @@ namespace UnrealMcpBlueprintTools
 					return FUnrealMcpToolResult::Error(TEXT("Blueprint has no Simple Construction Script (not an Actor-based Blueprint?)."));
 
 				const FString CompName = Call.GetString(TEXT("name"));
-				UClass* CompClass = ResolveClass(Call.GetString(TEXT("componentClass")));
+				UClass* CompClass = FUnrealMcpObjectRef::ResolveClass(Call.GetString(TEXT("componentClass")));
 				if (!CompClass || !CompClass->IsChildOf(UActorComponent::StaticClass()))
 					return FUnrealMcpToolResult::Error(FString::Printf(TEXT("'%s' is not a UActorComponent subclass."), *Call.GetString(TEXT("componentClass"))));
 				// SCS CreateNode calls NewObject on the class; an abstract/deprecated class fatally asserts there

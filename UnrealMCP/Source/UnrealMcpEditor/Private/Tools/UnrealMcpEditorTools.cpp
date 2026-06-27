@@ -3,6 +3,8 @@
 
 #include "UnrealMcpCoreTools.h"
 #include "UnrealMcpToolRegistry.h"
+#include "UnrealMcpSchema.h"          // shared §3.2 schema builders (FUnrealMcpSchema::StringArray/ObjectBag)
+#include "UnrealMcpToolArgs.h"        // shared FUnrealMcpToolArgs::GetStringArray
 #include "Tools/UnrealMcpObjectRef.h"
 #include "Tools/UnrealMcpLogCollector.h"
 
@@ -41,65 +43,10 @@
  */
 namespace
 {
-	// --- Local schema builders -------------------------------------------------------------------
-
-	/** An `array` of strings (the §3.2 refs list for editor-selection-set). */
-	TSharedPtr<FJsonObject> MakeEditorStringArraySchema(const FString& Desc)
-	{
-		TSharedPtr<FJsonObject> Items = MakeShared<FJsonObject>();
-		Items->SetStringField(TEXT("type"), TEXT("string"));
-
-		TSharedPtr<FJsonObject> Schema = MakeShared<FJsonObject>();
-		Schema->SetStringField(TEXT("type"), TEXT("array"));
-		if (!Desc.IsEmpty())
-			Schema->SetStringField(TEXT("description"), Desc);
-		Schema->SetObjectField(TEXT("items"), Items);
-		return Schema;
-	}
-
-	/** A free-form `{ key: value }` argument bag (reflection-method-call's `args`). */
-	TSharedPtr<FJsonObject> MakeArgsBagSchema(const FString& Desc)
-	{
-		TSharedPtr<FJsonObject> Schema = MakeShared<FJsonObject>();
-		Schema->SetStringField(TEXT("type"), TEXT("object"));
-		if (!Desc.IsEmpty())
-			Schema->SetStringField(TEXT("description"), Desc);
-		Schema->SetBoolField(TEXT("additionalProperties"), true);
-		return Schema;
-	}
-
-	// --- Small helpers ---------------------------------------------------------------------------
-
-	/** Read a string-array argument; non-string entries fail via OutError (the array is cleared). */
-	TArray<FString> GetEditorStringArray(const FUnrealMcpToolCall& Call, const FString& Key, FString& OutError)
-	{
-		TArray<FString> Out;
-		const TArray<TSharedPtr<FJsonValue>>* Arr = nullptr;
-		if (Call.Arguments->TryGetArrayField(Key, Arr) && Arr)
-		{
-			for (const TSharedPtr<FJsonValue>& V : *Arr)
-			{
-				FString S;
-				if (V.IsValid() && V->TryGetString(S))
-				{
-					Out.Add(S);
-				}
-				else
-				{
-					OutError = FString::Printf(TEXT("'%s' must be an array of strings; a non-string entry was provided."), *Key);
-					Out.Reset();
-					return Out;
-				}
-			}
-		}
-		else if (Call.Arguments->HasField(Key))
-		{
-			// Present but not an array (a bare string/object/number): error rather than returning an empty
-			// list, which the caller would read as "select nothing" and use to silently clear the selection.
-			OutError = FString::Printf(TEXT("'%s' must be an array of strings."), *Key);
-		}
-		return Out;
-	}
+	// The string-array refs schema + reader (editor-selection-set) and the free-form args-bag schema
+	// (reflection-method-call) are the shared FUnrealMcpSchema::StringArray / FUnrealMcpSchema::ObjectBag /
+	// FUnrealMcpToolArgs::GetStringArray surfaces (UnrealMcpSchema.h / UnrealMcpToolArgs.h) — see the call sites
+	// below. Only editor-family-specific helpers remain in this namespace.
 
 	/** The §3.2 JSON-schema type token for a reflected FProperty (best-effort, for discovery output). */
 	FString PropertyTypeName(const FProperty* Prop)
@@ -347,7 +294,7 @@ namespace UnrealMcpEditorTools
 			.Title(TEXT("Set Editor Selection"))
 			.Description(TEXT("Replace the editor's actor selection with the actors named by 'actors' (label / "
 			                  "name / path refs, §3.2). Pass clear=true to deselect everything."))
-			.Param(TEXT("actors"), TEXT("array"), TEXT("Actor refs to select (label / name / path)."), EUnrealMcpParamRequirement::Optional, MakeEditorStringArraySchema(TEXT("Actor refs to select.")))
+			.Param(TEXT("actors"), TEXT("array"), TEXT("Actor refs to select (label / name / path)."), EUnrealMcpParamRequirement::Optional, FUnrealMcpSchema::StringArray(TEXT("Actor refs to select.")))
 			.ParamBool(TEXT("clear"), TEXT("Deselect all actors. When true, 'actors' is ignored."))
 			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
 			{
@@ -355,7 +302,7 @@ namespace UnrealMcpEditorTools
 					return FUnrealMcpToolResult::Error(TEXT("No editor available (not running in the editor)."));
 
 				FString ArrErr;
-				const TArray<FString> Refs = GetEditorStringArray(Call, TEXT("actors"), ArrErr);
+				const TArray<FString> Refs = FUnrealMcpToolArgs::GetStringArray(Call, TEXT("actors"), ArrErr);
 				if (!ArrErr.IsEmpty())
 					return FUnrealMcpToolResult::Error(ArrErr);
 
@@ -560,7 +507,7 @@ namespace UnrealMcpEditorTools
 			.ParamString(TEXT("target"), TEXT("Object/actor ref to call the method on (instance methods)."))
 			.ParamString(TEXT("class"), TEXT("Class ref whose CDO to call on (static/CallInEditor methods)."))
 			.ParamString(TEXT("method"), TEXT("The UFunction name to invoke."), EUnrealMcpParamRequirement::Required)
-			.Param(TEXT("args"), TEXT("object"), TEXT("Parameter name -> value map (§3.2)."), EUnrealMcpParamRequirement::Optional, MakeArgsBagSchema(TEXT("Parameter name -> value map.")))
+			.Param(TEXT("args"), TEXT("object"), TEXT("Parameter name -> value map (§3.2)."), EUnrealMcpParamRequirement::Optional, FUnrealMcpSchema::ObjectBag(TEXT("Parameter name -> value map.")))
 			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
 			{
 				const FString MethodName = Call.GetString(TEXT("method"));
