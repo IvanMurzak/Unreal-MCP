@@ -34,6 +34,8 @@ export interface DiscoveryFs {
   existsImpl: (p: string) => boolean;
   /** List directory entry NAMES (not full paths); `[]` on any error. */
   readdirImpl: (p: string) => string[];
+  /** Read a UTF-8 file's contents; `null` on any error (absent/unreadable). */
+  readFileImpl: (p: string) => string | null;
 }
 
 function defaultFs(): DiscoveryFs {
@@ -44,6 +46,13 @@ function defaultFs(): DiscoveryFs {
         return fs.readdirSync(p);
       } catch {
         return [];
+      }
+    },
+    readFileImpl: (p: string): string | null => {
+      try {
+        return fs.readFileSync(p, 'utf-8');
+      } catch {
+        return null;
       }
     },
   };
@@ -221,12 +230,8 @@ export function readEngineAssociationFromBuildVersion(
   const pj = pathFor(os);
   const versionFile = pj.join(engineRoot, 'Engine', 'Build', 'Build.version');
   if (!fsImpl.existsImpl(versionFile)) return '';
-  let raw: string;
-  try {
-    raw = fs.readFileSync(versionFile, 'utf-8');
-  } catch {
-    return '';
-  }
+  const raw = fsImpl.readFileImpl(versionFile);
+  if (raw === null) return '';
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
