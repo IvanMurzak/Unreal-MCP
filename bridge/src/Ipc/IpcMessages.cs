@@ -40,8 +40,35 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
         [JsonPropertyName("config")] public JsonObject? Config { get; set; }
     }
 
+    /// <summary>
+    /// The kind-agnostic manifest-entry contract the generic differ (<see cref="Tools.ManifestDiffer"/>) and the
+    /// shared <see cref="Tools.ManifestRegistrarBase{TDescriptor}"/> need to diff/apply a tool, prompt, or
+    /// resource descriptor without knowing its concrete shape (docs/ARCHITECTURE.md §2.2 / §A.1): the dedup
+    /// <see cref="Key"/> (tool/prompt name or resource uri), the <see cref="SchemaHash"/> the diff compares on,
+    /// the <see cref="Enabled"/> flag, and the <see cref="StructuralSignature"/> fallback used when a hash is
+    /// absent on either side. The computed members carry <see cref="JsonIgnoreAttribute"/> — they are
+    /// projections of the existing wire fields, never serialized.
+    /// </summary>
+    public interface IManifestDescriptor
+    {
+        /// <summary>The dedup/registration key — tool/prompt <c>name</c> or resource <c>uri</c>.</summary>
+        string Key { get; }
+
+        /// <summary>The schema hash the diff compares on (the plugin excludes the enabled flag from it, §2.2).</summary>
+        string? SchemaHash { get; }
+
+        /// <summary>Whether the entry is exposed to MCP clients (toggled independently of the schema hash).</summary>
+        bool Enabled { get; set; }
+
+        /// <summary>
+        /// The structural fallback signature — everything defining the entry's surface EXCEPT the enabled flag —
+        /// used to diff deterministically when a <see cref="SchemaHash"/> is absent on either side.
+        /// </summary>
+        string StructuralSignature { get; }
+    }
+
     /// <summary>One entry in <see cref="ToolManifestMessage.Tools"/> — shaped to fill <c>IRunTool</c> 1:1 (§2.2).</summary>
-    public sealed class ToolDescriptor
+    public sealed class ToolDescriptor : IManifestDescriptor
     {
         [JsonPropertyName("name")] public string Name { get; set; } = string.Empty;
         [JsonPropertyName("title")] public string? Title { get; set; }
@@ -57,6 +84,25 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
         [JsonPropertyName("enabled")] public bool Enabled { get; set; } = true;
         [JsonPropertyName("extensionId")] public string? ExtensionId { get; set; }
         [JsonPropertyName("schemaHash")] public string? SchemaHash { get; set; }
+
+        /// <inheritdoc />
+        [JsonIgnore] public string Key => Name;
+
+        /// <inheritdoc />
+        [JsonIgnore]
+        public string StructuralSignature
+        {
+            get
+            {
+                // Everything that defines the tool's surface EXCEPT the enabled flag.
+                var input = InputSchema?.ToJsonString() ?? "null";
+                var output = OutputSchema?.ToJsonString() ?? "null";
+                return string.Join("",
+                    Name, Title, Description, SkillDescription, SkillBody,
+                    input, output,
+                    ReadOnlyHint, DestructiveHint, IdempotentHint, OpenWorldHint, ExtensionId);
+            }
+        }
     }
 
     /// <summary>plugin → sidecar: full tool-set snapshot. The sidecar diffs it against the last applied (§2.2).</summary>
@@ -98,7 +144,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
     /// (§A.1). <c>inputSchema</c> is a JSON Schema the manager flattens to the prompt's arguments[];
     /// <c>role</c> is the message author role (<c>"user"</c> | <c>"assistant"</c>).
     /// </summary>
-    public sealed class PromptDescriptor
+    public sealed class PromptDescriptor : IManifestDescriptor
     {
         [JsonPropertyName("name")] public string Name { get; set; } = string.Empty;
         [JsonPropertyName("title")] public string? Title { get; set; }
@@ -109,6 +155,21 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
         [JsonPropertyName("enabled")] public bool Enabled { get; set; } = true;
         [JsonPropertyName("extensionId")] public string? ExtensionId { get; set; }
         [JsonPropertyName("schemaHash")] public string? SchemaHash { get; set; }
+
+        /// <inheritdoc />
+        [JsonIgnore] public string Key => Name;
+
+        /// <inheritdoc />
+        [JsonIgnore]
+        public string StructuralSignature
+        {
+            get
+            {
+                // Everything that defines the prompt's surface EXCEPT the enabled flag.
+                var input = InputSchema?.ToJsonString() ?? "null";
+                return string.Join("", Name, Title, Description, Role, input, ExtensionId);
+            }
+        }
     }
 
     /// <summary>plugin → sidecar: full prompt-set snapshot (v2, §A.1). The sidecar diffs it against the last applied.</summary>
@@ -124,7 +185,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
     /// 1:1 (§A.1). <c>uri</c> is the resource's MCP URI (the manager's route); MVP resources are
     /// static fixed-URI (templated URIs are deferred — see §A.1).
     /// </summary>
-    public sealed class ResourceDescriptor
+    public sealed class ResourceDescriptor : IManifestDescriptor
     {
         [JsonPropertyName("uri")] public string Uri { get; set; } = string.Empty;
         [JsonPropertyName("name")] public string? Name { get; set; }
@@ -133,6 +194,13 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
         [JsonPropertyName("enabled")] public bool Enabled { get; set; } = true;
         [JsonPropertyName("extensionId")] public string? ExtensionId { get; set; }
         [JsonPropertyName("schemaHash")] public string? SchemaHash { get; set; }
+
+        /// <inheritdoc />
+        [JsonIgnore] public string Key => Uri;
+
+        /// <inheritdoc />
+        // Everything that defines the resource's surface EXCEPT the enabled flag.
+        [JsonIgnore] public string StructuralSignature => string.Join("", Uri, Name, Description, MimeType, ExtensionId);
     }
 
     /// <summary>plugin → sidecar: full resource-set snapshot (v2, §A.1). The sidecar diffs it against the last applied.</summary>
