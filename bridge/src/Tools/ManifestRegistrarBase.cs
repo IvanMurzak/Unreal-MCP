@@ -9,6 +9,7 @@
 */
 
 using System.Collections.Generic;
+using com.IvanMurzak.Unreal.MCP.Bridge.Ipc;
 using Microsoft.Extensions.Logging;
 
 namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
@@ -70,6 +71,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
     /// </para>
     /// </summary>
     public abstract class ManifestRegistrarBase<TDescriptor>
+        where TDescriptor : IManifestDescriptor
     {
         protected readonly ILogger? Logger;
 
@@ -93,8 +95,9 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
         /// <summary>The kind label used in log lines ("tool" / "prompt" / "resource").</summary>
         protected abstract string KindLabel { get; }
 
-        /// <summary>Extract the kind-specific dedup/registration key from a descriptor (tool name / resource uri).</summary>
-        protected abstract string KeyOf(TDescriptor descriptor);
+        /// <summary>The dedup/registration key for a descriptor — tool/prompt name or resource uri, via
+        /// <see cref="IManifestDescriptor.Key"/>.</summary>
+        protected string KeyOf(TDescriptor descriptor) => descriptor.Key;
 
         /// <summary>Compute the diff of <paramref name="next"/> against the retained <see cref="Applied"/> set.</summary>
         protected abstract ManifestDiff<TDescriptor> ComputeDiff(IReadOnlyList<TDescriptor> next);
@@ -108,9 +111,14 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
         /// <summary>Toggle the enabled flag for <paramref name="key"/> on the underlying manager.</summary>
         protected abstract void SinkSetEnabled(string key, bool enabled);
 
-        /// <summary>Return a copy of <paramref name="descriptor"/> with its enabled flag set to <paramref name="enabled"/>
-        /// (the retained snapshot is updated so a later diff sees the new flag).</summary>
-        protected abstract TDescriptor WithEnabled(TDescriptor descriptor, bool enabled);
+        /// <summary>Set the enabled flag on <paramref name="descriptor"/> and return it (the retained snapshot is
+        /// updated in place so a later diff sees the new flag). Mutate-in-place preserves the pre-generalization
+        /// behaviour of the former byte-identical per-kind overrides exactly.</summary>
+        protected TDescriptor WithEnabled(TDescriptor descriptor, bool enabled)
+        {
+            descriptor.Enabled = enabled;
+            return descriptor;
+        }
 
         /// <summary>
         /// Apply a manifest revision carrying <paramref name="entries"/>. Honours the out-of-order revision

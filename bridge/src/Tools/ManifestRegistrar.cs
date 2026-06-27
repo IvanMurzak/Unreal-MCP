@@ -81,37 +81,13 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
         public IReadOnlyList<ToolDescriptor> AppliedDescriptors => new List<ToolDescriptor>(Applied.Values);
 
         /// <summary>Apply a tool manifest. Returns the diff that was applied (empty when ignored/no-op).</summary>
-        public ManifestDiff Apply(ToolManifestMessage manifest)
-        {
-            // ApplyEntries drives the shared remove/changed/add/enabled orchestration through the hooks below
-            // and returns the kind-agnostic diff; re-shape it into the concrete ManifestDiff the §7 callers and
-            // the existing xUnit suite consume (the lists are the same references — no copy of the descriptors).
-            var generic = ApplyEntries(manifest.Revision, manifest.Tools);
-
-            var diff = new ManifestDiff();
-            diff.Added.AddRange(generic.Added);
-            diff.Changed.AddRange(generic.Changed);
-            diff.Removed.AddRange(generic.Removed);
-            diff.EnabledChanged.AddRange(generic.EnabledChanged);
-            return diff;
-        }
+        public ManifestDiff<ToolDescriptor> Apply(ToolManifestMessage manifest)
+            => ApplyEntries(manifest.Revision, manifest.Tools);
 
         protected override string KindLabel => "tool";
 
-        protected override string KeyOf(ToolDescriptor descriptor) => descriptor.Name;
-
         protected override ManifestDiff<ToolDescriptor> ComputeDiff(IReadOnlyList<ToolDescriptor> next)
-        {
-            // Reuse the existing tool-specific differ (name + schemaHash, with the structural fallback), then
-            // re-shape its result into the kind-agnostic diff the base applies.
-            var toolDiff = ManifestDiffer.Compute(Applied, next);
-            var generic = new ManifestDiff<ToolDescriptor>();
-            generic.Added.AddRange(toolDiff.Added);
-            generic.Changed.AddRange(toolDiff.Changed);
-            generic.Removed.AddRange(toolDiff.Removed);
-            generic.EnabledChanged.AddRange(toolDiff.EnabledChanged);
-            return generic;
-        }
+            => ManifestDiffer.Compute(Applied, next);
 
         protected override void SinkRemove(string key) => _sink.RemoveTool(key);
 
@@ -119,13 +95,5 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
             _sink.AddTool(descriptor.Name, ProxyToolFactory.Create(descriptor, _channel));
 
         protected override void SinkSetEnabled(string key, bool enabled) => _sink.SetToolEnabled(key, enabled);
-
-        protected override ToolDescriptor WithEnabled(ToolDescriptor descriptor, bool enabled)
-        {
-            // Mutate in place + return the same instance — preserves the pre-generalization behaviour exactly
-            // (the retained snapshot's Enabled flag is updated on the existing descriptor object).
-            descriptor.Enabled = enabled;
-            return descriptor;
-        }
     }
 }

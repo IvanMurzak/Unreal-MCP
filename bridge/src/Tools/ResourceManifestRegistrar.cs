@@ -49,69 +49,11 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
     }
 
     /// <summary>
-    /// The resource-specific differ (docs/ARCHITECTURE.md §A.1) — the resource sibling of
-    /// <see cref="ManifestDiffer"/> / <see cref="PromptManifestDiffer"/>: compare by <c>uri</c> +
-    /// <c>schemaHash</c> (the hash excludes the enabled flag), with a structural-signature fallback when a hash
-    /// is absent on either side.
-    /// </summary>
-    internal static class ResourceManifestDiffer
-    {
-        public static ManifestDiff<ResourceDescriptor> Compute(
-            IReadOnlyDictionary<string, ResourceDescriptor> previous,
-            IReadOnlyList<ResourceDescriptor> next)
-        {
-            var diff = new ManifestDiff<ResourceDescriptor>();
-            var nextByUri = new Dictionary<string, ResourceDescriptor>();
-
-            foreach (var desc in next)
-            {
-                if (string.IsNullOrEmpty(desc.Uri))
-                    continue;
-                nextByUri[desc.Uri] = desc;
-
-                if (!previous.TryGetValue(desc.Uri, out var prev))
-                {
-                    diff.Added.Add(desc);
-                    continue;
-                }
-
-                if (!SchemaEquals(prev, desc))
-                    diff.Changed.Add(desc);
-                else if (prev.Enabled != desc.Enabled)
-                    diff.EnabledChanged.Add((desc.Uri, desc.Enabled));
-                // else: identical → no-op.
-            }
-
-            foreach (var uri in previous.Keys)
-            {
-                if (!nextByUri.ContainsKey(uri))
-                    diff.Removed.Add(uri);
-            }
-
-            return diff;
-        }
-
-        private static bool SchemaEquals(ResourceDescriptor a, ResourceDescriptor b)
-        {
-            if (!string.IsNullOrEmpty(a.SchemaHash) || !string.IsNullOrEmpty(b.SchemaHash))
-                return a.SchemaHash == b.SchemaHash;
-
-            return Signature(a) == Signature(b);
-        }
-
-        private static string Signature(ResourceDescriptor d)
-        {
-            // Structural fallback: everything that defines the resource's surface EXCEPT the enabled flag.
-            return string.Join("", d.Uri, d.Name, d.Description, d.MimeType, d.ExtensionId);
-        }
-    }
-
-    /// <summary>
     /// Applies resource manifests (docs/ARCHITECTURE.md §A.1) to an <see cref="IProxyResourceSink"/> — the
     /// resource sibling of <see cref="ManifestRegistrar"/> / <see cref="PromptManifestRegistrar"/>. Derives from
     /// the shared, kind-agnostic <see cref="ManifestRegistrarBase{TDescriptor}"/> (the revision guard / reconnect
     /// reset / diff-application loop) and supplies the resource-specific bits: the <see cref="ProxyResource"/>
-    /// sink + the <see cref="ResourceManifestDiffer"/>. Implements
+    /// sink + the <see cref="ManifestDiffer"/>. Implements
     /// <see cref="IManifestSink{ResourceManifestMessage}"/> so the IPC client routes a <c>resource-manifest</c>
     /// to it without knowing the descriptor type. NOT thread-safe by itself: the IPC client invokes Apply from
     /// its single reader loop (same contract as the tool/prompt registrars).
@@ -144,10 +86,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
 
         protected override string KindLabel => "resource";
 
-        protected override string KeyOf(ResourceDescriptor descriptor) => descriptor.Uri;
-
         protected override ManifestDiff<ResourceDescriptor> ComputeDiff(IReadOnlyList<ResourceDescriptor> next)
-            => ResourceManifestDiffer.Compute(Applied, next);
+            => ManifestDiffer.Compute(Applied, next);
 
         protected override void SinkRemove(string key) => _sink.RemoveResource(key);
 
@@ -155,12 +95,5 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
             _sink.AddResource(descriptor.Uri, ProxyResourceFactory.Create(descriptor, _channel));
 
         protected override void SinkSetEnabled(string key, bool enabled) => _sink.SetResourceEnabled(key, enabled);
-
-        protected override ResourceDescriptor WithEnabled(ResourceDescriptor descriptor, bool enabled)
-        {
-            // Mutate in place + return the same instance (preserves the tool/prompt-registrar behaviour exactly).
-            descriptor.Enabled = enabled;
-            return descriptor;
-        }
     }
 }

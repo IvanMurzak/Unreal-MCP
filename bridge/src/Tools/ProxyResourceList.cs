@@ -25,10 +25,20 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
     /// </summary>
     public sealed class ProxyResourceList : IRunResourceList
     {
-        private readonly ResourceDescriptorSnapshot _snapshot;
+        private readonly string _uri;
+        private readonly string _name;
+        private readonly bool _enabled;
+        private readonly string? _mimeType;
+        private readonly string? _description;
 
         public ProxyResourceList(string uri, string name, bool enabled, string? mimeType, string? description)
-            => _snapshot = new ResourceDescriptorSnapshot(uri, name, enabled, mimeType, description);
+        {
+            _uri = uri ?? throw new ArgumentNullException(nameof(uri));
+            _name = name ?? string.Empty;
+            _enabled = enabled;
+            _mimeType = mimeType;
+            _description = description;
+        }
 
         public Task<ResponseListResource[]> Run(params object?[] parameters) => ListAsync();
         public Task<ResponseListResource[]> Run(IDictionary<string, object?>? namedParameters) => ListAsync();
@@ -37,30 +47,12 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
         {
             // Static MVP: one entry, the resource's own descriptor. No IPC — the URI is fixed and known.
             var entry = new ResponseListResource(
-                uri: _snapshot.Uri,
-                name: _snapshot.Name,
-                enabled: _snapshot.Enabled,
-                mimeType: _snapshot.MimeType,
-                description: _snapshot.Description);
+                uri: _uri,
+                name: _name,
+                enabled: _enabled,
+                mimeType: _mimeType,
+                description: _description);
             return Task.FromResult(new[] { entry });
-        }
-
-        private readonly struct ResourceDescriptorSnapshot
-        {
-            public readonly string Uri;
-            public readonly string Name;
-            public readonly bool Enabled;
-            public readonly string? MimeType;
-            public readonly string? Description;
-
-            public ResourceDescriptorSnapshot(string uri, string name, bool enabled, string? mimeType, string? description)
-            {
-                Uri = uri ?? throw new ArgumentNullException(nameof(uri));
-                Name = name ?? string.Empty;
-                Enabled = enabled;
-                MimeType = mimeType;
-                Description = description;
-            }
         }
     }
 }
