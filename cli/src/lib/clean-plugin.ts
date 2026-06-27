@@ -16,6 +16,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { asError } from '../utils/error.js';
+import { isSymlink } from '../utils/fs.js';
 import { emitProgress } from './progress.js';
 import type { ProgressCallback } from './types.js';
 
@@ -49,15 +50,6 @@ export interface CleanPluginFailure {
 
 export type CleanPluginResult = CleanPluginSuccess | CleanPluginFailure;
 
-/** True when `p` is a symlink/junction (vs a real directory). */
-function isLink(p: string): boolean {
-  try {
-    return fs.lstatSync(p).isSymbolicLink();
-  } catch {
-    return false;
-  }
-}
-
 /**
  * Delete the C++ module build cache (`Intermediate/` + `Binaries/` minus the
  * bundled-bridge subtree) inside an installed plugin so UE recompiles cleanly.
@@ -77,7 +69,7 @@ export async function cleanPluginBuildCache(opts: CleanPluginOptions): Promise<C
 
     // Defensive: refuse to clean through a junction — removing files via a
     // junction recurses into the live source the junction points at.
-    if (isLink(installedPath)) {
+    if (isSymlink(installedPath)) {
       warnings.push(
         `Refusing to clean ${installedPath}: it is a junction/symlink (dev install). ` +
           'Skipping build-cache clean to protect the live source outputs.',

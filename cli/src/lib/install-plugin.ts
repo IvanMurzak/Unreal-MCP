@@ -10,6 +10,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { isUnrealProjectDir } from '../utils/project.js';
 import { asError } from '../utils/error.js';
+import { isSymlink } from '../utils/fs.js';
 import { emitProgress } from './progress.js';
 import type {
   InstallPluginOptions,
@@ -48,15 +49,6 @@ function copyFilter(srcAbs: string, pluginSourceDir: string): boolean {
     return rel === BUNDLED_BRIDGE_REL_POSIX || rel.startsWith(BUNDLED_BRIDGE_REL_POSIX + '/');
   }
   return true;
-}
-
-/** True when `p` is a symlink/junction (vs a real directory). */
-function isLink(p: string): boolean {
-  try {
-    return fs.lstatSync(p).isSymbolicLink();
-  } catch {
-    return false;
-  }
 }
 
 export async function installPlugin(opts: InstallPluginOptions): Promise<InstallPluginResult> {
@@ -105,7 +97,7 @@ export async function installPlugin(opts: InstallPluginOptions): Promise<Install
     // path (the junction points at the live source — nothing to preserve).
     let stashedBridge: string | null = null;
     const priorBridge = path.join(installedPath, BUNDLED_BRIDGE_REL);
-    const installedIsRealDir = fs.existsSync(installedPath) && !isLink(installedPath);
+    const installedIsRealDir = fs.existsSync(installedPath) && !isSymlink(installedPath);
     if (!useJunction && installedIsRealDir && fs.existsSync(priorBridge)) {
       stashedBridge = fs.mkdtempSync(path.join(os.tmpdir(), 'unreal-mcp-bridge-stash-'));
       fs.cpSync(priorBridge, stashedBridge, { recursive: true });
@@ -113,8 +105,8 @@ export async function installPlugin(opts: InstallPluginOptions): Promise<Install
 
     // Clear any prior install (link or real dir) so the operation is
     // idempotent and never nests a copy inside a stale junction.
-    if (fs.existsSync(installedPath) || isLink(installedPath)) {
-      if (isLink(installedPath)) {
+    if (fs.existsSync(installedPath) || isSymlink(installedPath)) {
+      if (isSymlink(installedPath)) {
         fs.unlinkSync(installedPath);
       } else {
         fs.rmSync(installedPath, { recursive: true, force: true });
@@ -190,7 +182,7 @@ export async function removePlugin(opts: RemovePluginOptions): Promise<RemovePlu
       message: `Removing UnrealMCP plugin from ${installedPath}`,
     });
 
-    const present = fs.existsSync(installedPath) || isLink(installedPath);
+    const present = fs.existsSync(installedPath) || isSymlink(installedPath);
     if (!present) {
       emitProgress(opts.onProgress, { phase: 'done', message: 'Plugin was not installed.' });
       return { kind: 'success', success: true, removed: false, installedPath, warnings };
@@ -198,7 +190,7 @@ export async function removePlugin(opts: RemovePluginOptions): Promise<RemovePlu
 
     // unlink a junction (never recurse through it into the live source);
     // rm a real directory.
-    if (isLink(installedPath)) {
+    if (isSymlink(installedPath)) {
       fs.unlinkSync(installedPath);
     } else {
       fs.rmSync(installedPath, { recursive: true, force: true });
