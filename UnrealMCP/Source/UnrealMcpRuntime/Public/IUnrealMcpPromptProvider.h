@@ -4,7 +4,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Features/IModularFeature.h"
+#include "IUnrealMcpProviderBase.h"
 
 class FUnrealMcpPromptRegistry;
 
@@ -28,7 +28,7 @@ class FUnrealMcpPromptRegistry;
  * handler bound). Invalid entries are dropped and a duplicate prompt name across providers rejects the
  * later registration (first-wins by the ExtensionId sort). Other extensions are never affected.
  */
-class IUnrealMcpPromptProvider : public IModularFeature
+class IUnrealMcpPromptProvider : public IUnrealMcpProviderBase
 {
 public:
 	virtual ~IUnrealMcpPromptProvider() = default;
@@ -39,18 +39,7 @@ public:
 		return FName(TEXT("UnrealMcpPromptProvider"));
 	}
 
-	/**
-	 * Stable, unique extension identifier — reverse-DNS recommended (e.g. "com.foo.niagara-ai"). Used as
-	 * the deterministic sort key and as the manifest's per-prompt extensionId. Two providers with the same
-	 * id is an authoring error (the second's duplicate prompts are rejected).
-	 */
-	virtual FString GetExtensionId() const = 0;
-
-	/** Human-readable name shown in the extensions UI row (§7). */
-	virtual FText GetDisplayName() const = 0;
-
-	/** Free-form version string of the extension (independent of the Unreal-MCP plugin version). */
-	virtual FString GetExtensionVersion() const = 0;
+	// GetExtensionId / GetDisplayName / GetExtensionVersion are inherited from IUnrealMcpProviderBase.
 
 	/**
 	 * Declare the extension's prompts into @p Registry using the fluent FUnrealMcpPromptBuilder

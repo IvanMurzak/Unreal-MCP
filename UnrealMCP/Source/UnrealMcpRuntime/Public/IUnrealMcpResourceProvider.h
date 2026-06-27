@@ -4,7 +4,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Features/IModularFeature.h"
+#include "IUnrealMcpProviderBase.h"
 
 class FUnrealMcpResourceRegistry;
 
@@ -32,7 +32,7 @@ class FUnrealMcpResourceRegistry;
  * present). Invalid entries are dropped and a duplicate resource uri across providers rejects the later
  * registration (first-wins by the ExtensionId sort). Other extensions are never affected.
  */
-class IUnrealMcpResourceProvider : public IModularFeature
+class IUnrealMcpResourceProvider : public IUnrealMcpProviderBase
 {
 public:
 	virtual ~IUnrealMcpResourceProvider() = default;
@@ -43,18 +43,7 @@ public:
 		return FName(TEXT("UnrealMcpResourceProvider"));
 	}
 
-	/**
-	 * Stable, unique extension identifier — reverse-DNS recommended (e.g. "com.foo.niagara-ai"). Used as
-	 * the deterministic sort key and as the manifest's per-resource extensionId. Two providers with the
-	 * same id is an authoring error (the second's duplicate resources are rejected).
-	 */
-	virtual FString GetExtensionId() const = 0;
-
-	/** Human-readable name shown in the extensions UI row (§7). */
-	virtual FText GetDisplayName() const = 0;
-
-	/** Free-form version string of the extension (independent of the Unreal-MCP plugin version). */
-	virtual FString GetExtensionVersion() const = 0;
+	// GetExtensionId / GetDisplayName / GetExtensionVersion are inherited from IUnrealMcpProviderBase.
 
 	/**
 	 * Declare the extension's resources into @p Registry using the fluent FUnrealMcpResourceBuilder
