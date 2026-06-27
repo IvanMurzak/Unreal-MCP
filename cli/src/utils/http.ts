@@ -61,3 +61,36 @@ export async function fetchWithTimeout(
     externalSignal?.removeEventListener('abort', externalAbort);
   }
 }
+
+/**
+ * The canonical low-level network-failure category of a thrown fetch error,
+ * derived from its underlying `err.cause.code` (the Node/undici cause set):
+ *
+ *   - `ECONNREFUSED`            → `'connection-refused'`
+ *   - `ECONNRESET`             → `'connection-reset'`
+ *   - `ENOTFOUND` / `EAI_AGAIN` → `'network-error'` (DNS/name resolution)
+ *
+ * Returns `undefined` for anything else (including a non-`Error`, a missing
+ * cause, or an unrecognised code) so the caller can fall back to its own
+ * message/enum. Callers map this single category to their own surface —
+ * `run-tool` uses it directly as a failure-reason enum, `probe` maps it to
+ * human-readable text. Pure; does NOT classify an `AbortError` (a timeout /
+ * cancellation is the caller's concern, decided before this is consulted).
+ */
+export type NetworkErrorCategory = 'connection-refused' | 'connection-reset' | 'network-error';
+
+export function networkErrorCategory(err: unknown): NetworkErrorCategory | undefined {
+  const cause =
+    err instanceof Error && 'cause' in err ? (err.cause as { code?: string } | undefined) : undefined;
+  switch (cause?.code) {
+    case 'ECONNREFUSED':
+      return 'connection-refused';
+    case 'ECONNRESET':
+      return 'connection-reset';
+    case 'ENOTFOUND':
+    case 'EAI_AGAIN':
+      return 'network-error';
+    default:
+      return undefined;
+  }
+}

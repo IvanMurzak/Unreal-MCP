@@ -5,7 +5,7 @@
 
 import { resolveConnection } from '../utils/config.js';
 import { asError } from '../utils/error.js';
-import { fetchWithTimeout } from '../utils/http.js';
+import { fetchWithTimeout, networkErrorCategory } from '../utils/http.js';
 import type {
   RunToolFailure,
   RunToolFailureReason,
@@ -148,12 +148,8 @@ function classifyFetchError(err: unknown, endpoint: string, timeoutMs: number, t
       ? makeFailure({ endpoint, reason: 'timeout', message: `Tool call timed out after ${timeoutMs}ms.`, error: err })
       : makeFailure({ endpoint, reason: 'aborted', message: 'Tool call was aborted by the caller.', error: err });
   }
-  const error = err instanceof Error ? err : new Error(String(err));
-  const cause = err instanceof Error && 'cause' in err ? (err.cause as { code?: string } | undefined) : undefined;
-  let reason: RunToolFailureReason = 'unknown';
-  if (cause?.code === 'ECONNREFUSED') reason = 'connection-refused';
-  else if (cause?.code === 'ECONNRESET') reason = 'connection-reset';
-  else if (cause?.code === 'ENOTFOUND' || cause?.code === 'EAI_AGAIN') reason = 'network-error';
+  const error = asError(err);
+  const reason: RunToolFailureReason = networkErrorCategory(err) ?? 'unknown';
   return makeFailure({ endpoint, reason, message: error.message, error });
 }
 

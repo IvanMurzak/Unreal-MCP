@@ -9,7 +9,8 @@
 // /api/tools/ping → 200 {"result":"pong"}. ARCHITECTURE.md §e2e runbook
 // already cited /api/tools/ping — this endpoint now matches it.
 
-import { fetchWithTimeout } from './http.js';
+import { asError } from './error.js';
+import { fetchWithTimeout, networkErrorCategory, type NetworkErrorCategory } from './http.js';
 
 export const PING_ENDPOINT = '/api/tools/ping';
 
@@ -71,19 +72,16 @@ export async function probePing(baseUrl: string, opts: ProbeOptions = {}): Promi
   }
 }
 
+/** Human-readable text for each shared network-failure category. */
+const NETWORK_CATEGORY_TEXT: Record<NetworkErrorCategory, string> = {
+  'connection-refused': 'connection refused',
+  'connection-reset': 'connection reset',
+  'network-error': 'host not found',
+};
+
 function classifyError(err: unknown): string {
   if (err instanceof Error && err.name === 'AbortError') return 'timed out';
-  const cause =
-    err instanceof Error && 'cause' in err ? (err.cause as { code?: string } | undefined) : undefined;
-  switch (cause?.code) {
-    case 'ECONNREFUSED':
-      return 'connection refused';
-    case 'ECONNRESET':
-      return 'connection reset';
-    case 'ENOTFOUND':
-    case 'EAI_AGAIN':
-      return 'host not found';
-    default:
-      return err instanceof Error ? err.message : String(err);
-  }
+  const category = networkErrorCategory(err);
+  if (category) return NETWORK_CATEGORY_TEXT[category];
+  return asError(err).message;
 }
