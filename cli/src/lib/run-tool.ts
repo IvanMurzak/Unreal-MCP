@@ -5,6 +5,7 @@
 
 import { resolveConnection } from '../utils/config.js';
 import { asError } from '../utils/error.js';
+import { fetchWithTimeout } from '../utils/http.js';
 import type {
   RunToolFailure,
   RunToolFailureReason,
@@ -54,28 +55,22 @@ async function invokeTool(routePrefix: string, opts: RunToolOptions): Promise<Ru
   const fetchImpl = opts.fetchImpl ?? globalThis.fetch;
   const timeoutMs = typeof opts.timeoutMs === 'number' && opts.timeoutMs > 0 ? opts.timeoutMs : DEFAULT_TIMEOUT_MS;
 
-  const controller = new AbortController();
+  // `timedOut` lets `classifyFetchError` tell OUR timeout's AbortError apart
+  // from a caller-supplied `opts.signal` cancellation: `fetchWithTimeout`
+  // invokes `onTimeout` only when its own deadline fires, never on an external
+  // abort.
   let timedOut = false;
-  const timer = setTimeout(() => {
-    timedOut = true;
-    controller.abort();
-  }, timeoutMs);
-  const externalAbort = (): void => controller.abort();
-  if (opts.signal) {
-    if (opts.signal.aborted) controller.abort();
-    else opts.signal.addEventListener('abort', externalAbort, { once: true });
-  }
 
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (token) headers['Authorization'] = `Bearer ${token}`;
 
   try {
-    const response = await fetchImpl(endpoint, {
-      method: 'POST',
-      headers,
-      body: body.json,
-      signal: controller.signal,
-    });
+    const response = await fetchWithTimeout(
+      fetchImpl,
+      endpoint,
+      { method: 'POST', headers, body: body.json },
+      { timeoutMs, externalSignal: opts.signal, onTimeout: () => { timedOut = true; } },
+    );
     const text = await safeReadText(response);
     const data = parseJsonOrText(text);
     if (!response.ok) {
@@ -90,9 +85,6 @@ async function invokeTool(routePrefix: string, opts: RunToolOptions): Promise<Ru
     return { kind: 'success', success: true, endpoint, httpStatus: response.status, data };
   } catch (err) {
     return classifyFetchError(err, endpoint, timeoutMs, timedOut);
-  } finally {
-    clearTimeout(timer);
-    opts.signal?.removeEventListener('abort', externalAbort);
   }
 }
 

@@ -8,6 +8,9 @@
 // verified manually: system-tools/ping → 500 (null response),
 // /api/tools/ping → 200 {"result":"pong"}. ARCHITECTURE.md §e2e runbook
 // already cited /api/tools/ping — this endpoint now matches it.
+
+import { fetchWithTimeout } from './http.js';
+
 export const PING_ENDPOINT = '/api/tools/ping';
 
 export interface ProbeSuccess {
@@ -42,18 +45,16 @@ export async function probePing(baseUrl: string, opts: ProbeOptions = {}): Promi
   const timeoutMs = typeof opts.timeoutMs === 'number' && opts.timeoutMs > 0 ? opts.timeoutMs : 5000;
   const fetchImpl = opts.fetchImpl ?? globalThis.fetch;
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (opts.token) headers['Authorization'] = `Bearer ${opts.token}`;
 
   try {
-    const response = await fetchImpl(endpoint, {
-      method: 'POST',
-      headers,
-      body: '{}',
-      signal: controller.signal,
-    });
+    const response = await fetchWithTimeout(
+      fetchImpl,
+      endpoint,
+      { method: 'POST', headers, body: '{}' },
+      { timeoutMs },
+    );
     const text = await response.text().catch(() => '');
     if (response.ok) {
       let data: unknown;
@@ -67,8 +68,6 @@ export async function probePing(baseUrl: string, opts: ProbeOptions = {}): Promi
     return { ok: false, baseUrl, reason: `HTTP ${response.status}` };
   } catch (err) {
     return { ok: false, baseUrl, reason: classifyError(err) };
-  } finally {
-    clearTimeout(timer);
   }
 }
 
