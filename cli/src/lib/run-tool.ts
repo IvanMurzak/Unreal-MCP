@@ -4,6 +4,7 @@
 // Library-safe: errors are returned, never thrown.
 
 import { resolveConnection } from '../utils/config.js';
+import { asError } from '../utils/error.js';
 import type {
   RunToolFailure,
   RunToolFailureReason,
@@ -39,7 +40,7 @@ async function invokeTool(routePrefix: string, opts: RunToolOptions): Promise<Ru
     return makeFailure({
       endpoint: '',
       reason: 'invalid-input',
-      message: err instanceof Error ? err.message : String(err),
+      message: asError(err).message,
       error: err instanceof Error ? err : undefined,
     });
   }
@@ -117,7 +118,7 @@ function serializeInput(input: unknown): { json: string } | { error: Error } {
       JSON.parse(input);
       return { json: input };
     } catch (err) {
-      return { error: new Error(`input string is not valid JSON: ${err instanceof Error ? err.message : String(err)}`) };
+      return { error: new Error(`input string is not valid JSON: ${asError(err).message}`) };
     }
   }
   if (typeof input !== 'object') {
@@ -126,7 +127,7 @@ function serializeInput(input: unknown): { json: string } | { error: Error } {
   try {
     return { json: JSON.stringify(input) };
   } catch (err) {
-    return { error: new Error(`input could not be serialized to JSON: ${err instanceof Error ? err.message : String(err)}`) };
+    return { error: new Error(`input could not be serialized to JSON: ${asError(err).message}`) };
   }
 }
 

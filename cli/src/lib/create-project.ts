@@ -8,6 +8,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { asError } from '../utils/error.js';
 import { emitProgress } from './progress.js';
 import type { CreateProjectOptions, CreateProjectResult } from './types.js';
 
@@ -213,7 +214,7 @@ export async function createProject(opts: CreateProjectOptions): Promise<CreateP
       warnings,
     };
   } catch (err: unknown) {
-    const error = err instanceof Error ? err : new Error(String(err));
+    const error = asError(err);
     return {
       kind: 'failure',
       success: false,

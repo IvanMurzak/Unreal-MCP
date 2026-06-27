@@ -9,6 +9,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { isUnrealProjectDir } from '../utils/project.js';
+import { asError } from '../utils/error.js';
 import { emitProgress } from './progress.js';
 import type {
   InstallPluginOptions,
@@ -144,7 +145,7 @@ export async function installPlugin(opts: InstallPluginOptions): Promise<Install
         } catch {
           // Best-effort restore failed — surface the stash path on the error so
           // the user can recover the bridge manually instead of losing it.
-          const e = copyErr instanceof Error ? copyErr : new Error(String(copyErr));
+          const e = asError(copyErr);
           e.message += ` (the bundled sidecar bridge was stashed at ${stashedBridge} — recover it manually)`;
           throw e;
         }
@@ -172,7 +173,7 @@ export async function installPlugin(opts: InstallPluginOptions): Promise<Install
       kind: 'failure',
       success: false,
       warnings,
-      error: err instanceof Error ? err : new Error(String(err)),
+      error: asError(err),
     };
   }
 }
@@ -210,7 +211,7 @@ export async function removePlugin(opts: RemovePluginOptions): Promise<RemovePlu
       kind: 'failure',
       success: false,
       warnings,
-      error: err instanceof Error ? err : new Error(String(err)),
+      error: asError(err),
     };
   }
 }

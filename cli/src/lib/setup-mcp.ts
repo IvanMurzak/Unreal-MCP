@@ -11,6 +11,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { platform } from 'os';
 import { resolveConnection } from '../utils/config.js';
+import { asError } from '../utils/error.js';
 import { generatePortFromDirectory } from '../utils/port.js';
 import {
   downloadServer,
@@ -200,7 +201,7 @@ export async function setupMcp(opts: SetupMcpOptions): Promise<SetupMcpResult> {
       success: false,
       warnings,
       nextSteps,
-      error: err instanceof Error ? err : new Error(String(err)),
+      error: asError(err),
     };
   }
 }

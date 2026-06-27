@@ -7,6 +7,7 @@
 
 import { writeEnvFile, ensureEnvGitignored } from '../utils/env-file.js';
 import * as path from 'path';
+import { asError } from '../utils/error.js';
 import { emitProgress } from './progress.js';
 import type { ProgressCallback } from './types.js';
 
@@ -134,7 +135,7 @@ export async function login(opts: LoginOptions = {}): Promise<LoginResult> {
 
     return fail('timeout', `Login timed out after ${timeoutMs}ms.`);
   } catch (err) {
-    const error = err instanceof Error ? err : new Error(String(err));
+    const error = asError(err);
     // A per-request `fetchWithTimeout` deadline surfaces as an AbortError;
     // classify that as a timeout rather than a generic network error.
     const reason = error.name === 'AbortError' ? 'timeout' : 'network-error';

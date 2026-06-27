@@ -8,6 +8,7 @@ import { spawn } from 'child_process';
 import { platform } from 'os';
 import { discoverEngine, invalidateCachedEngine } from './engine.js';
 import { readUProject } from '../utils/project.js';
+import { asError } from '../utils/error.js';
 import { emitProgress } from './progress.js';
 import type {
   AuthOption,
@@ -179,7 +180,7 @@ export async function openProject(opts: OpenProjectOptions): Promise<OpenProject
       warnings,
     };
   } catch (err: unknown) {
-    const error = err instanceof Error ? err : new Error(String(err));
+    const error = asError(err);
     return {
       kind: 'failure',
       success: false,

@@ -22,6 +22,7 @@ import * as path from 'path';
 import { spawn } from 'child_process';
 import { platform } from 'os';
 import { emitProgress } from './progress.js';
+import { asError } from '../utils/error.js';
 import type { BootstrapLocalOptions, BootstrapLocalResult, BuildStep } from './types.js';
 
 const BRIDGE_CSPROJ = path.join('bridge', 'src', 'com.IvanMurzak.Unreal.MCP.Bridge.csproj');
@@ -95,7 +96,7 @@ export async function bootstrapLocal(opts: BootstrapLocalOptions): Promise<Boots
       kind: 'failure',
       success: false,
       warnings,
-      error: err instanceof Error ? err : new Error(String(err)),
+      error: asError(err),
     };
   }
 }

@@ -7,6 +7,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { installPlugin } from './install-plugin.js';
 import { cleanPluginBuildCache } from './clean-plugin.js';
+import { asError } from '../utils/error.js';
 import { emitProgress } from './progress.js';
 import type { ProgressCallback } from './types.js';
 
@@ -166,7 +167,7 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
       kind: 'failure',
       success: false,
       warnings,
-      error: err instanceof Error ? err : new Error(String(err)),
+      error: asError(err),
     };
   }
 }

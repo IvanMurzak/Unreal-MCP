@@ -15,6 +15,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { asError } from '../utils/error.js';
 import { emitProgress } from './progress.js';
 import type { ProgressCallback } from './types.js';
 
@@ -128,7 +129,7 @@ export async function cleanPluginBuildCache(opts: CleanPluginOptions): Promise<C
       removed,
       preserved,
       warnings,
-      error: err instanceof Error ? err : new Error(String(err)),
+      error: asError(err),
     };
   }
 }
