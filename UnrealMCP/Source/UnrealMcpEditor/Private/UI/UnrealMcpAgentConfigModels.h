@@ -69,13 +69,6 @@ struct FAiAgentRichContentItem
 	// The open-URL target for a Link-kind item (6.9.0); empty for every other kind.
 	FString Url;
 
-	static FAiAgentRichContentItem Description(const FString& InText)   { return { EKind::Description, InText }; }
-	static FAiAgentRichContentItem Warning(const FString& InText)       { return { EKind::Warning, InText }; }
-	static FAiAgentRichContentItem Alert(const FString& InText)         { return { EKind::Alert, InText }; }
-	static FAiAgentRichContentItem ReadOnlyField(const FString& InText) { return { EKind::ReadOnlyField, InText }; }
-	static FAiAgentRichContentItem EditableField(const FString& InText) { return { EKind::EditableField, InText }; }
-	static FAiAgentRichContentItem Link(const FString& InText, const FString& InUrl) { return { EKind::Link, InText, InUrl }; }
-
 	/** Parse a DTO kind string ("Description"/"Warning"/"Alert"/"ReadOnlyField"/"EditableField"/"Link") into the enum. */
 	static UNREALMCPEDITOR_API EKind ParseKind(const FString& Raw);
 
