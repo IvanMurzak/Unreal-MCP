@@ -3,52 +3,16 @@
 
 #include "UnrealMcpPromptRegistry.h"
 #include "UnrealMcpLog.h"
-#include "Misc/SecureHash.h"
-#include "Serialization/JsonSerializer.h"
-#include "Serialization/JsonWriter.h"
-#include "Policies/CondensedJsonPrintPolicy.h"
+#include "UnrealMcpDescriptorHash.h"
+#include "UnrealMcpSchema.h"
+#include "UnrealMcpValidation.h"
 
 // --- Schema building ------------------------------------------------------------------------------
-// The §3.2 schema generation is VERBATIM identical to the tool registry's. The tool file's anonymous-namespace
-// helpers (MakeTypedSchema / MakeVectorSchema / SerializeStable) cannot be reused across translation units in a
-// unity build without an ODR collision, so the prompt registry gets family-UNIQUE copies (Prompt*-prefixed).
+// The §3.2 scalar + vector schema builders are the shared FUnrealMcpSchema TU (UnrealMcpSchema.h) — the same
+// externally-linked definition the tool registry + editor tool families use (no more Prompt*-prefixed clones).
 
 namespace
 {
-	TSharedPtr<FJsonObject> PromptMakeTypedSchema(const FString& JsonType, const FString& Description)
-	{
-		TSharedPtr<FJsonObject> Schema = MakeShared<FJsonObject>();
-		Schema->SetStringField(TEXT("type"), JsonType);
-		if (!Description.IsEmpty())
-			Schema->SetStringField(TEXT("description"), Description);
-		return Schema;
-	}
-
-	/** A {x,y,z: number} object schema (the §3.2 FVector mapping). */
-	TSharedPtr<FJsonObject> PromptMakeVectorSchema(const FString& Description)
-	{
-		TSharedPtr<FJsonObject> Props = MakeShared<FJsonObject>();
-		Props->SetObjectField(TEXT("x"), PromptMakeTypedSchema(TEXT("number"), FString()));
-		Props->SetObjectField(TEXT("y"), PromptMakeTypedSchema(TEXT("number"), FString()));
-		Props->SetObjectField(TEXT("z"), PromptMakeTypedSchema(TEXT("number"), FString()));
-
-		TSharedPtr<FJsonObject> Schema = MakeShared<FJsonObject>();
-		Schema->SetStringField(TEXT("type"), TEXT("object"));
-		if (!Description.IsEmpty())
-			Schema->SetStringField(TEXT("description"), Description);
-		Schema->SetObjectField(TEXT("properties"), Props);
-		return Schema;
-	}
-
-	FString PromptSerializeStable(const TSharedPtr<FJsonObject>& Object)
-	{
-		FString Out;
-		TSharedRef<TJsonWriter<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>> Writer =
-			TJsonWriterFactory<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>::Create(&Out);
-		FJsonSerializer::Serialize(Object.ToSharedRef(), Writer);
-		return Out;
-	}
-
 	/** The wire string for an EUnrealMcpPromptRole ("user" | "assistant"). */
 	const TCHAR* PromptRoleToString(EUnrealMcpPromptRole Role)
 	{
@@ -69,7 +33,7 @@ TSharedPtr<FJsonObject> FUnrealMcpRegisteredPrompt::BuildInputSchema() const
 	{
 		TSharedPtr<FJsonObject> ParamSchema = Param.ObjectSchema.IsValid()
 			? Param.ObjectSchema
-			: PromptMakeTypedSchema(Param.JsonType, Param.Description);
+			: FUnrealMcpSchema::TypedSchema(Param.JsonType, Param.Description);
 
 		Properties->SetObjectField(Param.Name, ParamSchema);
 		if (Param.Requirement == EUnrealMcpParamRequirement::Required)
@@ -131,7 +95,7 @@ FUnrealMcpPromptBuilder& FUnrealMcpPromptBuilder::ParamBool(const FString& Name,
 }
 FUnrealMcpPromptBuilder& FUnrealMcpPromptBuilder::ParamVector(const FString& Name, const FString& Desc, EUnrealMcpParamRequirement Req)
 {
-	FUnrealMcpParamSpec Spec{ Name, TEXT("object"), Desc, Req, PromptMakeVectorSchema(Desc) };
+	FUnrealMcpParamSpec Spec{ Name, TEXT("object"), Desc, Req, FUnrealMcpSchema::VectorSchema(Desc) };
 	Prompt.Params.Add(Spec);
 	return *this;
 }
@@ -157,45 +121,15 @@ FUnrealMcpPromptBuilder FUnrealMcpPromptRegistry::Prompt(const FString& Name)
 
 FString FUnrealMcpPromptRegistry::ComputeSchemaHash(const FUnrealMcpRegisteredPrompt& InPrompt)
 {
-	// Hash the canonicalized descriptor MINUS the enabled flag (mirror the tool registry). Reuse
-	// ToDescriptorJson and drop "enabled" + "schemaHash" so the hash is stable regardless of those fields.
-	FUnrealMcpRegisteredPrompt Copy = InPrompt;
-	Copy.SchemaHash.Empty();
-	TSharedPtr<FJsonObject> Desc = Copy.ToDescriptorJson();
-	Desc->RemoveField(TEXT("enabled"));
-	Desc->RemoveField(TEXT("schemaHash"));
-
-	const FString Canonical = PromptSerializeStable(Desc);
-	FSHA1 Sha;
-	const FTCHARToUTF8 Utf8(*Canonical);
-	Sha.Update(reinterpret_cast<const uint8*>(Utf8.Get()), Utf8.Length());
-	Sha.Final();
-	uint8 Digest[20];
-	Sha.GetHash(Digest);
-	return FString(TEXT("sha1:")) + BytesToHex(Digest, 20).ToLower();
+	// Hash the canonicalized descriptor MINUS the enabled flag (mirror the tool registry): the shared helper
+	// builds the hash off the descriptor JSON directly (it strips enabled/schemaHash itself), no struct copy needed.
+	return UnrealMcpComputeDescriptorHash(InPrompt.ToDescriptorJson());
 }
 
 bool FUnrealMcpPromptRegistry::IsValidPromptName(const FString& Name)
 {
-	// Same kebab rule as the tool registry (no leading/trailing/doubled hyphen; lowercase letters/digits).
-	if (Name.IsEmpty())
-		return false;
-
-	bool bPrevHyphen = false;
-	const int32 Len = Name.Len();
-	for (int32 i = 0; i < Len; ++i)
-	{
-		const TCHAR C = Name[i];
-		const bool bLower = (C >= TEXT('a') && C <= TEXT('z'));
-		const bool bDigit = (C >= TEXT('0') && C <= TEXT('9'));
-		const bool bHyphen = (C == TEXT('-'));
-		if (!bLower && !bDigit && !bHyphen)
-			return false;
-		if (bHyphen && (i == 0 || i == Len - 1 || bPrevHyphen))
-			return false;
-		bPrevHyphen = bHyphen;
-	}
-	return true;
+	// Same shared kebab rule as the tool registry (no leading/trailing/doubled hyphen; lowercase letters/digits).
+	return FUnrealMcpValidation::IsValidKebabName(Name);
 }
 
 bool FUnrealMcpPromptRegistry::ValidatePrompt(const FUnrealMcpRegisteredPrompt& InPrompt, FString& OutError)
@@ -214,45 +148,7 @@ bool FUnrealMcpPromptRegistry::ValidatePrompt(const FUnrealMcpRegisteredPrompt& 
 		return false;
 	}
 
-	static const TCHAR* const KnownTypes[] = { TEXT("string"), TEXT("integer"), TEXT("number"), TEXT("boolean"), TEXT("object"), TEXT("array") };
-	TSet<FString> SeenParams;
-	for (const FUnrealMcpParamSpec& Param : InPrompt.Params)
-	{
-		if (Param.Name.IsEmpty())
-		{
-			OutError = FString::Printf(TEXT("prompt '%s' has a parameter with an empty name (malformed schema)"), *InPrompt.Name);
-			return false;
-		}
-
-		bool bKnown = false;
-		for (const TCHAR* const Known : KnownTypes)
-		{
-			if (Param.JsonType == Known) { bKnown = true; break; }
-		}
-		if (!bKnown)
-		{
-			OutError = FString::Printf(TEXT("prompt '%s' parameter '%s' has unknown JSON type '%s' (malformed schema)"),
-				*InPrompt.Name, *Param.Name, *Param.JsonType);
-			return false;
-		}
-
-		if ((Param.JsonType == TEXT("object") || Param.JsonType == TEXT("array")) && !Param.ObjectSchema.IsValid())
-		{
-			OutError = FString::Printf(TEXT("prompt '%s' %s parameter '%s' has no schema (malformed schema)"),
-				*InPrompt.Name, *Param.JsonType, *Param.Name);
-			return false;
-		}
-
-		bool bAlreadyPresent = false;
-		SeenParams.Add(Param.Name, &bAlreadyPresent);
-		if (bAlreadyPresent)
-		{
-			OutError = FString::Printf(TEXT("prompt '%s' declares duplicate parameter '%s' (malformed schema)"),
-				*InPrompt.Name, *Param.Name);
-			return false;
-		}
-	}
-	return true;
+	return FUnrealMcpValidation::ValidateParamSpecs(InPrompt.Params, TEXT("prompt"), InPrompt.Name, OutError);
 }
 
 void FUnrealMcpPromptRegistry::Commit(FUnrealMcpRegisteredPrompt&& InPrompt)
@@ -353,9 +249,7 @@ TSharedPtr<FJsonObject> FUnrealMcpPromptRegistry::BuildManifestJson() const
 	Manifest->SetNumberField(TEXT("revision"), Revision);
 
 	TArray<TSharedPtr<FJsonValue>> PromptArray;
-	TArray<FString> Names;
-	Prompts.GetKeys(Names);
-	Names.Sort();
+	const TArray<FString> Names = GetPromptNamesSorted();
 	for (const FString& Name : Names)
 	{
 		// A disabled prompt is EXCLUDED from the served manifest entirely (mirror the tool registry).
@@ -402,12 +296,12 @@ bool FUnrealMcpPromptRegistry::SetPromptEnabled(const FString& Name, bool bEnabl
 
 bool FUnrealMcpPromptRegistry::ShouldPromptBeEnabled(const FString& Name) const
 {
-	return PassesEnabledPromptsWhitelist(Name) && !DisabledPromptNames.Contains(Name);
+	return Enablement.ShouldBeEnabled(Name);
 }
 
 bool FUnrealMcpPromptRegistry::PassesEnabledPromptsWhitelist(const FString& Name) const
 {
-	return EnabledPromptsWhitelist.IsEmpty() || EnabledPromptsWhitelist.Contains(Name);
+	return Enablement.PassesWhitelist(Name);
 }
 
 void FUnrealMcpPromptRegistry::RecomputeEnablement()
@@ -428,13 +322,13 @@ void FUnrealMcpPromptRegistry::RecomputeEnablement()
 
 void FUnrealMcpPromptRegistry::SetEnabledPromptsFilter(const TArray<FString>& EnabledPrompts)
 {
-	EnabledPromptsWhitelist = TSet<FString>(EnabledPrompts);
+	Enablement.SetWhitelist(EnabledPrompts);
 	RecomputeEnablement();
 }
 
 void FUnrealMcpPromptRegistry::ApplyDisabledPrompts(const TArray<FString>& DisabledNames)
 {
-	DisabledPromptNames = TSet<FString>(DisabledNames);
+	Enablement.SetBlocklist(DisabledNames);
 	RecomputeEnablement();
 }
 

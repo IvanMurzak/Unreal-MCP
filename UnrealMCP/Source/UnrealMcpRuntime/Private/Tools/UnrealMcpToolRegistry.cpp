@@ -3,10 +3,9 @@
 
 #include "UnrealMcpToolRegistry.h"
 #include "UnrealMcpLog.h"
-#include "Misc/SecureHash.h"
-#include "Serialization/JsonSerializer.h"
-#include "Serialization/JsonWriter.h"
-#include "Policies/CondensedJsonPrintPolicy.h"
+#include "UnrealMcpDescriptorHash.h"
+#include "UnrealMcpSchema.h"
+#include "UnrealMcpValidation.h"
 
 // --- FUnrealMcpToolCall accessors -----------------------------------------------------------------
 
@@ -65,43 +64,8 @@ FRotator FUnrealMcpToolCall::GetRotator(const FString& Key, const FRotator& Defa
 }
 
 // --- Schema building ------------------------------------------------------------------------------
-
-namespace
-{
-	TSharedPtr<FJsonObject> MakeTypedSchema(const FString& JsonType, const FString& Description)
-	{
-		TSharedPtr<FJsonObject> Schema = MakeShared<FJsonObject>();
-		Schema->SetStringField(TEXT("type"), JsonType);
-		if (!Description.IsEmpty())
-			Schema->SetStringField(TEXT("description"), Description);
-		return Schema;
-	}
-
-	/** A {x,y,z: number} object schema (the §3.2 FVector mapping). */
-	TSharedPtr<FJsonObject> MakeVectorSchema(const FString& Description)
-	{
-		TSharedPtr<FJsonObject> Props = MakeShared<FJsonObject>();
-		Props->SetObjectField(TEXT("x"), MakeTypedSchema(TEXT("number"), FString()));
-		Props->SetObjectField(TEXT("y"), MakeTypedSchema(TEXT("number"), FString()));
-		Props->SetObjectField(TEXT("z"), MakeTypedSchema(TEXT("number"), FString()));
-
-		TSharedPtr<FJsonObject> Schema = MakeShared<FJsonObject>();
-		Schema->SetStringField(TEXT("type"), TEXT("object"));
-		if (!Description.IsEmpty())
-			Schema->SetStringField(TEXT("description"), Description);
-		Schema->SetObjectField(TEXT("properties"), Props);
-		return Schema;
-	}
-
-	FString SerializeStable(const TSharedPtr<FJsonObject>& Object)
-	{
-		FString Out;
-		TSharedRef<TJsonWriter<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>> Writer =
-			TJsonWriterFactory<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>::Create(&Out);
-		FJsonSerializer::Serialize(Object.ToSharedRef(), Writer);
-		return Out;
-	}
-}
+// The §3.2 scalar + vector schema builders now live in the shared FUnrealMcpSchema TU (UnrealMcpSchema.h),
+// externally linked so the prompt registry + the editor tool families reuse the SAME definition.
 
 TSharedPtr<FJsonObject> FUnrealMcpRegisteredTool::BuildInputSchema() const
 {
@@ -117,7 +81,7 @@ TSharedPtr<FJsonObject> FUnrealMcpRegisteredTool::BuildInputSchema() const
 		// the simple scalar types fall back to a {type,description} schema.
 		TSharedPtr<FJsonObject> ParamSchema = Param.ObjectSchema.IsValid()
 			? Param.ObjectSchema
-			: MakeTypedSchema(Param.JsonType, Param.Description);
+			: FUnrealMcpSchema::TypedSchema(Param.JsonType, Param.Description);
 
 		Properties->SetObjectField(Param.Name, ParamSchema);
 		if (Param.Requirement == EUnrealMcpParamRequirement::Required)
@@ -188,7 +152,7 @@ FUnrealMcpToolBuilder& FUnrealMcpToolBuilder::ParamBool(const FString& Name, con
 }
 FUnrealMcpToolBuilder& FUnrealMcpToolBuilder::ParamVector(const FString& Name, const FString& Desc, EUnrealMcpParamRequirement Req)
 {
-	FUnrealMcpParamSpec Spec{ Name, TEXT("object"), Desc, Req, MakeVectorSchema(Desc) };
+	FUnrealMcpParamSpec Spec{ Name, TEXT("object"), Desc, Req, FUnrealMcpSchema::VectorSchema(Desc) };
 	Tool.Params.Add(Spec);
 	return *this;
 }
@@ -218,44 +182,14 @@ FUnrealMcpToolBuilder FUnrealMcpToolRegistry::Tool(const FString& Name)
 
 FString FUnrealMcpToolRegistry::ComputeSchemaHash(const FUnrealMcpRegisteredTool& InTool)
 {
-	// Hash the canonicalized descriptor MINUS the enabled flag (§2.2). Reuse ToDescriptorJson and drop
-	// "enabled" + "schemaHash" so the hash is stable regardless of those mutable fields.
-	FUnrealMcpRegisteredTool Copy = InTool;
-	Copy.SchemaHash.Empty();
-	TSharedPtr<FJsonObject> Desc = Copy.ToDescriptorJson();
-	Desc->RemoveField(TEXT("enabled"));
-	Desc->RemoveField(TEXT("schemaHash"));
-
-	const FString Canonical = SerializeStable(Desc);
-	FSHA1 Sha;
-	const FTCHARToUTF8 Utf8(*Canonical);
-	Sha.Update(reinterpret_cast<const uint8*>(Utf8.Get()), Utf8.Length());
-	Sha.Final();
-	uint8 Digest[20];
-	Sha.GetHash(Digest);
-	return FString(TEXT("sha1:")) + BytesToHex(Digest, 20).ToLower();
+	// Hash the canonicalized descriptor MINUS the enabled flag (§2.2): the shared helper builds the hash off the
+	// descriptor JSON directly (it strips enabled/schemaHash itself), so no struct deep-copy is needed.
+	return UnrealMcpComputeDescriptorHash(InTool.ToDescriptorJson());
 }
 
 bool FUnrealMcpToolRegistry::IsValidToolName(const FString& Name)
 {
-	if (Name.IsEmpty())
-		return false;
-
-	bool bPrevHyphen = false;
-	const int32 Len = Name.Len();
-	for (int32 i = 0; i < Len; ++i)
-	{
-		const TCHAR C = Name[i];
-		const bool bLower = (C >= TEXT('a') && C <= TEXT('z'));
-		const bool bDigit = (C >= TEXT('0') && C <= TEXT('9'));
-		const bool bHyphen = (C == TEXT('-'));
-		if (!bLower && !bDigit && !bHyphen)
-			return false;
-		if (bHyphen && (i == 0 || i == Len - 1 || bPrevHyphen))
-			return false; // no leading, trailing, or doubled hyphen
-		bPrevHyphen = bHyphen;
-	}
-	return true;
+	return FUnrealMcpValidation::IsValidKebabName(Name);
 }
 
 bool FUnrealMcpToolRegistry::ValidateTool(const FUnrealMcpRegisteredTool& InTool, FString& OutError)
@@ -274,45 +208,7 @@ bool FUnrealMcpToolRegistry::ValidateTool(const FUnrealMcpRegisteredTool& InTool
 		return false;
 	}
 
-	static const TCHAR* const KnownTypes[] = { TEXT("string"), TEXT("integer"), TEXT("number"), TEXT("boolean"), TEXT("object"), TEXT("array") };
-	TSet<FString> SeenParams;
-	for (const FUnrealMcpParamSpec& Param : InTool.Params)
-	{
-		if (Param.Name.IsEmpty())
-		{
-			OutError = FString::Printf(TEXT("tool '%s' has a parameter with an empty name (malformed schema)"), *InTool.Name);
-			return false;
-		}
-
-		bool bKnown = false;
-		for (const TCHAR* const Known : KnownTypes)
-		{
-			if (Param.JsonType == Known) { bKnown = true; break; }
-		}
-		if (!bKnown)
-		{
-			OutError = FString::Printf(TEXT("tool '%s' parameter '%s' has unknown JSON type '%s' (malformed schema)"),
-				*InTool.Name, *Param.Name, *Param.JsonType);
-			return false;
-		}
-
-		if ((Param.JsonType == TEXT("object") || Param.JsonType == TEXT("array")) && !Param.ObjectSchema.IsValid())
-		{
-			OutError = FString::Printf(TEXT("tool '%s' %s parameter '%s' has no schema (malformed schema)"),
-				*InTool.Name, *Param.JsonType, *Param.Name);
-			return false;
-		}
-
-		bool bAlreadyPresent = false;
-		SeenParams.Add(Param.Name, &bAlreadyPresent);
-		if (bAlreadyPresent)
-		{
-			OutError = FString::Printf(TEXT("tool '%s' declares duplicate parameter '%s' (malformed schema)"),
-				*InTool.Name, *Param.Name);
-			return false;
-		}
-	}
-	return true;
+	return FUnrealMcpValidation::ValidateParamSpecs(InTool.Params, TEXT("tool"), InTool.Name, OutError);
 }
 
 void FUnrealMcpToolRegistry::Commit(FUnrealMcpRegisteredTool&& InTool)
@@ -422,9 +318,7 @@ TSharedPtr<FJsonObject> FUnrealMcpToolRegistry::BuildManifestJson() const
 
 	TArray<TSharedPtr<FJsonValue>> ToolArray;
 	// Deterministic ordering by name keeps the manifest stable across runs (§5 ordering principle).
-	TArray<FString> Names;
-	Tools.GetKeys(Names);
-	Names.Sort();
+	const TArray<FString> Names = GetToolNamesSorted();
 	for (const FString& Name : Names)
 	{
 		// §7 per-tool enable-map: a disabled tool is EXCLUDED from the served manifest entirely (not merely
@@ -473,15 +367,14 @@ bool FUnrealMcpToolRegistry::SetToolEnabled(const FString& Name, bool bEnabled)
 bool FUnrealMcpToolRegistry::ShouldToolBeEnabled(const FString& Name) const
 {
 	// §8 effective-served rule: served iff (whitelist empty — no filter — OR the name is whitelisted) AND the
-	// name is NOT in the §7 blocklist. Both sets are retained members, so this is the single source of truth
-	// shared by Commit (per-registration) and RecomputeEnablement (per-filter-change) — neither can clobber the
-	// other's intent.
-	return PassesEnabledToolsWhitelist(Name) && !DisabledToolNames.Contains(Name);
+	// name is NOT in the §7 blocklist. The retained filter is the single source of truth shared by Commit
+	// (per-registration) and RecomputeEnablement (per-filter-change) — neither can clobber the other's intent.
+	return Enablement.ShouldBeEnabled(Name);
 }
 
 bool FUnrealMcpToolRegistry::PassesEnabledToolsWhitelist(const FString& Name) const
 {
-	return EnabledToolsWhitelist.IsEmpty() || EnabledToolsWhitelist.Contains(Name);
+	return Enablement.PassesWhitelist(Name);
 }
 
 void FUnrealMcpToolRegistry::RecomputeEnablement()
@@ -502,13 +395,13 @@ void FUnrealMcpToolRegistry::RecomputeEnablement()
 
 void FUnrealMcpToolRegistry::SetEnabledToolsFilter(const TArray<FString>& EnabledTools)
 {
-	EnabledToolsWhitelist = TSet<FString>(EnabledTools);
+	Enablement.SetWhitelist(EnabledTools);
 	RecomputeEnablement();
 }
 
 void FUnrealMcpToolRegistry::ApplyDisabledTools(const TArray<FString>& DisabledNames)
 {
-	DisabledToolNames = TSet<FString>(DisabledNames);
+	Enablement.SetBlocklist(DisabledNames);
 	RecomputeEnablement();
 }
 
