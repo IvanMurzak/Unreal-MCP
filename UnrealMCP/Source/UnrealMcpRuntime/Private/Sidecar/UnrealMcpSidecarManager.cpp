@@ -11,10 +11,8 @@
 
 #include <random>
 
-#if PLATFORM_MAC || PLATFORM_LINUX
-#include <cerrno>
-#endif
 #if PLATFORM_MAC
+#include <cerrno>
 #include <sys/xattr.h>
 #endif
 
