@@ -263,5 +263,13 @@ private:
 
 	static bool TryParseMode(const FString& Raw, EUnrealMcpConnectionMode& OutMode);
 	static bool TryParseAuthOption(const FString& Raw, EUnrealMcpAuthOption& OutOption);
+
+	/**
+	 * Parse one raw .env line into a trimmed key + sanitized value (the shared line grammar of ParseEnvLines /
+	 * LookupEnvFileValue): trim the line, skip a blank or `#`-comment line, split on the FIRST `=` (with a
+	 * non-empty key), and SanitizeValue the right side. Returns true only when a non-empty key AND a non-empty
+	 * value were parsed; false (with @p OutKey/@p OutValue left empty) for a skipped/blank/empty-value line.
+	 */
+	static bool ParseEnvLine(const FString& RawLine, FString& OutKey, FString& OutValue);
 	static bool TryParseBool(const FString& Raw, bool& OutValue);
 };

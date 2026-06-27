@@ -34,8 +34,7 @@
  *   - TemplateAlertLabel         → a RED wrapped label (Unity's .alert-label).
  *   - TemplateTextFieldReadOnly  → a read-only, selectable command field WITH a Copy button (Unity's read-only
  *                                  TextField the user copies a command out of).
- *   - TemplateFoldout / First    → an SExpandableArea (Unity's Foldout); "First" starts expanded.
- *   - SUnrealMcpAlertPanel       → title + message + bullet items + optional action button (Unity's AlertPanel).
+ *   - TemplateFoldout            → an SExpandableArea (Unity's Foldout).
  *   - MakeConfigurationStatusRow → "Configured (transport)" / "Not configured" + Configure/Reconfigure + Remove
  *                                  (Unity's ConfigurationElements).
  *
@@ -145,12 +144,6 @@ namespace UnrealMcpAgentWidgets
 			[
 				Body
 			];
-	}
-
-	/** Unity's TemplateFoldoutFirst — the first foldout, which starts EXPANDED. */
-	inline TSharedRef<SExpandableArea> TemplateFoldoutFirst(const FText& Heading, const TSharedRef<SWidget>& Body)
-	{
-		return TemplateFoldout(Heading, Body, /*bInitiallyExpanded*/ true);
 	}
 }
 
@@ -275,44 +268,14 @@ namespace UnrealMcpStyleWidgets
 		float DotTopPadding = 0.0f;
 	};
 
-	inline TSharedRef<SWidget> TimelineRail(const TArray<FTimelineRailDot>& Dots)
-	{
-		TSharedRef<SVerticalBox> Rail = SNew(SVerticalBox);
-		for (int32 DotIndex = 0; DotIndex < Dots.Num(); ++DotIndex)
-		{
-			const FTimelineRailDot& Point = Dots[DotIndex];
-			// The dot — AutoHeight, top-aligned so it pins to the top of its sibling content row.
-			Rail->AddSlot().AutoHeight().HAlign(HAlign_Center).Padding(0, Point.DotTopPadding, 0, 0)
-			[
-				SNew(SBox).Visibility(Point.DotVisibility)
-				[
-					StatusDot(Point.DotState)
-				]
-			];
-			// The connecting line BELOW it — FillHeight so it absorbs the slack down to the next dot. Only emit it
-			// BETWEEN consecutive dots: a trailing FillHeight slot after the last dot (even Collapsed) would still
-			// claim its STRETCH share of the rail's slack, so the inter-dot line would visibly absorb only part of it.
-			if (DotIndex < Dots.Num() - 1)
-			{
-				Rail->AddSlot().FillHeight(1.0f).HAlign(HAlign_Center).Padding(0, 2, 0, 2)
-				[
-					TimelineLineSegment(Point.LineBelowVisibility)
-				];
-			}
-		}
-		return SNew(SBox).WidthOverride(20.0f)
-		[
-			Rail
-		];
-	}
-
 	/**
 	 * A single connection-timeline ROW: a self-contained 20px rail cell on the LEFT (its status dot pinned to the
 	 * TOP, then a FillHeight connecting-line segment that fills the rest of THIS row's height) beside the row's
 	 * CONTENT on the right. The two cells share the row's AutoHeight, so the dot sits on the content's FIRST line
 	 * (its label) and the line spans from just below the dot to the row's bottom edge.
 	 *
-	 * Stacking these rows in an SVerticalBox yields BOTH properties the single-column TimelineRail could not give
+	 * Stacking these rows in an SVerticalBox yields BOTH properties a single-column rail (one SVerticalBox owning
+	 * every dot, with the content beside it) could not give
 	 * at once: (1) each dot is anchored to the TOP of its OWN content row — i.e. centred on its label — instead of
 	 * floating at the even-split midpoint of the whole cluster (which dragged the 2nd/3rd dots down into the middle
 	 * of tall rows like the MCP card); and (2) the line is still continuous, because each row's line runs from its
@@ -479,6 +442,13 @@ namespace UnrealMcpStyleWidgets
 			OnClicked);
 	}
 
+	/** The shared OnClicked delegate for a URL button: open @p Url in the system browser, handled. The single
+	 *  copy of the footer / agent-links open-URL click lambda (was repeated per button). */
+	inline FOnClicked OpenUrlClicked(const FString& Url)
+	{
+		return FOnClicked::CreateLambda([Url]() { FPlatformProcess::LaunchURL(*Url, nullptr, nullptr); return FReply::Handled(); });
+	}
+
 	/** A button with a leading icon brush + label (Unity .btn-with-icon) — Discord/GitHub footer buttons. */
 	inline TSharedRef<SButton> IconButton(const FName& StyleKey, const FName& IconBrush, const FText& Label, FOnClicked OnClicked)
 	{
@@ -494,98 +464,3 @@ namespace UnrealMcpStyleWidgets
 			OnClicked);
 	}
 }
-
-/**
- * Unity's AlertPanel.cs as a Slate compound widget (docs/ARCHITECTURE.md §7): a bordered notice with a bold title,
- * a wrapped message, an optional bulleted item list, and an optional action button. SetVisible toggles the whole
- * panel. Used for the §7 "Setup Required" / "Reconfiguration Required" / Cloud-auth alerts. Fluent AddItem/SetButton
- * mirror the Unity API 1:1 so callers read the same.
- */
-class SUnrealMcpAlertPanel : public SCompoundWidget
-{
-public:
-	SLATE_BEGIN_ARGS(SUnrealMcpAlertPanel) {}
-		SLATE_ARGUMENT(FText, Title)
-		SLATE_ARGUMENT(FText, Message)
-	SLATE_END_ARGS()
-
-	void Construct(const FArguments& InArgs)
-	{
-		ItemsBox = SNew(SVerticalBox);
-
-		ButtonBox = SNew(SHorizontalBox);
-
-		ChildSlot
-		[
-			SAssignNew(RootBorder, SBorder)
-			.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
-			.Padding(8.0f)
-			[
-				SNew(SVerticalBox)
-				+ SVerticalBox::Slot().AutoHeight()
-				[
-					SNew(STextBlock)
-					.Text(InArgs._Title)
-					.ColorAndOpacity(FSlateColor(UnrealMcpAgentWidgets::WarningColor()))
-					.Font(FCoreStyle::GetDefaultFontStyle("Bold", 11))
-				]
-				+ SVerticalBox::Slot().AutoHeight().Padding(0, 4, 0, 0)
-				[
-					SNew(STextBlock)
-					.AutoWrapText(true)
-					.Text(InArgs._Message)
-				]
-				+ SVerticalBox::Slot().AutoHeight().Padding(0, 4, 0, 0)
-				[
-					ItemsBox.ToSharedRef()
-				]
-				+ SVerticalBox::Slot().AutoHeight().Padding(0, 6, 0, 0)
-				[
-					ButtonBox.ToSharedRef()
-				]
-			]
-		];
-	}
-
-	/** Add a bulleted item line; bRecommended renders it green (Unity's "alert-frame-item-recommended"). */
-	SUnrealMcpAlertPanel& AddItem(const FText& Text, bool bRecommended = false)
-	{
-		ItemsBox->AddSlot().AutoHeight().Padding(0, 1, 0, 0)
-		[
-			SNew(STextBlock)
-			.AutoWrapText(true)
-			.ColorAndOpacity(FSlateColor(bRecommended ? UnrealMcpAgentWidgets::ConfiguredColor() : UnrealMcpAgentWidgets::DescriptionColor()))
-			.Text(Text)
-		];
-		return *this;
-	}
-
-	/** Configure the (single) action button. Calling again replaces the previous button. */
-	SUnrealMcpAlertPanel& SetButton(const FText& Text, FSimpleDelegate OnClick)
-	{
-		ButtonBox->ClearChildren();
-		ButtonBox->AddSlot().AutoWidth()
-		[
-			SNew(SButton)
-			.Text(Text)
-			.OnClicked_Lambda([OnClick]()
-			{
-				OnClick.ExecuteIfBound();
-				return FReply::Handled();
-			})
-		];
-		return *this;
-	}
-
-	/** Show / hide the whole panel (Unity's SetVisible). */
-	void SetVisible(bool bVisible)
-	{
-		if (RootBorder.IsValid())
-			RootBorder->SetVisibility(bVisible ? EVisibility::Visible : EVisibility::Collapsed);
-	}
-
-private:
-	TSharedPtr<SBorder> RootBorder;
-	TSharedPtr<SVerticalBox> ItemsBox;
-	TSharedPtr<SHorizontalBox> ButtonBox;
-};

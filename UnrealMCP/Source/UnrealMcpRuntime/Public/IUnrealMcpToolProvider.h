@@ -4,7 +4,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Features/IModularFeature.h"
+#include "IUnrealMcpProviderBase.h"
 
 class FUnrealMcpToolRegistry;
 
@@ -32,7 +32,7 @@ class FUnrealMcpToolRegistry;
  * (first-wins by the ExtensionId sort). Other extensions are never affected. Crash-level faults
  * inside a tool body are editor crashes regardless of family and are out of isolation scope.
  */
-class IUnrealMcpToolProvider : public IModularFeature
+class IUnrealMcpToolProvider : public IUnrealMcpProviderBase
 {
 public:
 	virtual ~IUnrealMcpToolProvider() = default;
@@ -43,18 +43,7 @@ public:
 		return FName(TEXT("UnrealMcpToolProvider"));
 	}
 
-	/**
-	 * Stable, unique extension identifier — reverse-DNS recommended (e.g. "com.foo.niagara-ai").
-	 * Used as the deterministic sort key and as the manifest's per-tool extensionId. Two providers
-	 * with the same id is an authoring error (the second's duplicate tools are rejected).
-	 */
-	virtual FString GetExtensionId() const = 0;
-
-	/** Human-readable name shown in the extensions UI row (§7). */
-	virtual FText GetDisplayName() const = 0;
-
-	/** Free-form version string of the extension (independent of the Unreal-MCP plugin version). */
-	virtual FString GetExtensionVersion() const = 0;
+	// GetExtensionId / GetDisplayName / GetExtensionVersion are inherited from IUnrealMcpProviderBase.
 
 	/**
 	 * Declare the extension's tools into @p Registry using the fluent FUnrealMcpToolBuilder

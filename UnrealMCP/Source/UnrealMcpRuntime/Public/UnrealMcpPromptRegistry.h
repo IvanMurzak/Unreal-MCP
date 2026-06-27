@@ -214,9 +214,9 @@ private:
 	TMap<FString, FUnrealMcpRegisteredPrompt> Prompts;
 	int32 Revision = 0;
 
-	// --- Retained §7/§8 enablement filters (mirror the tool registry exactly). ---
-	TSet<FString> EnabledPromptsWhitelist; // §8 whitelist; empty = no filter
-	TSet<FString> DisabledPromptNames;     // §7 persisted blocklist
+	// --- Retained §7/§8 enablement filter (mirror the tool registry exactly).
+	//     Whitelist = §8 whitelist (empty = no filter); Blocklist = §7 persisted blocklist. ---
+	FUnrealMcpEnablementFilter Enablement;
 
 	/** The combined §8 effective-served predicate: enabled iff (whitelist empty OR member) AND NOT blocklisted. */
 	bool ShouldPromptBeEnabled(const FString& Name) const;

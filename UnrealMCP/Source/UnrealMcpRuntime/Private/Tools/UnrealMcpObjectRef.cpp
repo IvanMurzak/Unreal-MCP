@@ -81,7 +81,11 @@ namespace FUnrealMcpObjectRef
 
 		// Exact (case-SENSITIVE) match on label / name / full path first (deterministic). FString::operator==
 		// is case-INSENSITIVE in UE, so an explicit ESearchCase::CaseSensitive Equals is required to make the
-		// exact-first preference real and keep the case-insensitive fallback below reachable.
+		// exact-first preference real and keep the case-insensitive fallback below reachable. A single sweep:
+		// any exact match returns immediately; otherwise we remember the FIRST case-insensitive label match
+		// (LLM-supplied labels are often loosely cased) and return it after the sweep — same result the old
+		// second pass produced (iteration order is identical), without walking every actor twice.
+		AActor* IgnoreCaseFallback = nullptr;
 		for (TActorIterator<AActor> It(World); It; ++It)
 		{
 			AActor* Actor = *It;
@@ -91,16 +95,11 @@ namespace FUnrealMcpObjectRef
 			{
 				return Actor;
 			}
+			if (IgnoreCaseFallback == nullptr && ObjectRefActorLabel(Actor).Equals(ActorRef, ESearchCase::IgnoreCase))
+				IgnoreCaseFallback = Actor;
 		}
 
-		// Case-insensitive label fallback (LLM-supplied labels are often loosely cased).
-		for (TActorIterator<AActor> It(World); It; ++It)
-		{
-			if (ObjectRefActorLabel(*It).Equals(ActorRef, ESearchCase::IgnoreCase))
-				return *It;
-		}
-
-		return nullptr;
+		return IgnoreCaseFallback;
 	}
 
 	UActorComponent* ResolveComponent(AActor* Actor, const FString& ComponentRef)
