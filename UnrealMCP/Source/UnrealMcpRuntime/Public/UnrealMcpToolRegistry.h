@@ -8,6 +8,9 @@
 #include "HAL/ThreadSafeBool.h"
 #include "Templates/Function.h"
 #include "UnrealMcpEnablementFilter.h"
+// The generic registry template (TUnrealMcpRegistry) + the shared FUnrealMcpExtensionRegistrationResult.
+// FUnrealMcpToolRegistry is one instantiation of it (the prompt + resource registries are the other two).
+#include "UnrealMcpRegistry.h"
 
 /**
  * Core tool-registration types for the Unreal-MCP plugin (docs/ARCHITECTURE.md §2, §3.3).
@@ -141,14 +144,8 @@ struct UNREALMCPRUNTIME_API FUnrealMcpRegisteredTool
 
 class FUnrealMcpToolRegistry;
 
-/** Outcome of registering one extension provider's tools (docs/ARCHITECTURE.md §5). */
-struct UNREALMCPRUNTIME_API FUnrealMcpExtensionRegistrationResult
-{
-	/** Number of tools that passed validation + dedup and were committed under the extension's id. */
-	int32 ToolsRegistered = 0;
-	/** One human-readable line per dropped (invalid) or rejected (duplicate) entry; empty when healthy. */
-	TArray<FString> Errors;
-};
+// FUnrealMcpExtensionRegistrationResult moved to the shared UnrealMcpRegistry.h (included above) so all three
+// registries see one definition; it is still visible to every consumer that includes this header.
 
 /** Fluent declaration builder (docs/ARCHITECTURE.md §3.3). One per tool; commits on destruction-free Handle(). */
 class UNREALMCPRUNTIME_API FUnrealMcpToolBuilder
@@ -187,126 +184,89 @@ private:
 };
 
 /**
- * The plugin-owned tool registry (docs/ARCHITECTURE.md §2.2). Holds the compiled tool set, produces
- * the JSON manifest snapshot for the bridge, and dispatches tool-calls by name. A monotonic Revision
- * bumps on every registry change so the sidecar's manifest diff can reason about ordering (§2.2 step 3).
- * Not thread-safe. All mutation happens at startup (core families Register before the bridge accepts), so
- * the bridge may read BuildManifestJson() directly from its IPC reader thread on handshake without a race.
- * Any DYNAMIC re-registration (the §2.2 hot-reload path) MUST marshal both the mutation and the manifest
- * read through the game-thread dispatcher (§4) — the reader thread must never observe a half-mutated set.
+ * Kind-specific policy for the tool registry instantiation of TUnrealMcpRegistry. Supplies the key
+ * accessor (Name), validation (kebab name + bound handler + param specs), the manifest strings, and the
+ * nouns used in collision-rejection messages + log lines.
+ */
+struct FUnrealMcpToolRegistryTraits
+{
+	static const FString& KeyOf(const FUnrealMcpRegisteredTool& Entry) { return Entry.Name; }
+	static const TCHAR* KindNoun() { return TEXT("tool"); }
+	static const TCHAR* KindNounCapitalized() { return TEXT("Tool"); }
+	static const TCHAR* KeyNoun() { return TEXT("name"); }
+	static const TCHAR* ManifestType() { return TEXT("tool-manifest"); }
+	static const TCHAR* ManifestArrayKey() { return TEXT("tools"); }
+	/** True iff @p Name is a valid kebab-case tool id (non-empty; lowercase letters/digits with single internal hyphens). */
+	static bool IsValidKey(const FString& Name);
+	/** Validate a tool descriptor for the §5 isolation contract. Returns false + a reason on the first problem. */
+	static bool Validate(const FUnrealMcpRegisteredTool& InTool, FString& OutError);
+};
+
+/**
+ * The plugin-owned tool registry (docs/ARCHITECTURE.md §2.2). One instantiation of the generic
+ * TUnrealMcpRegistry (which owns the compiled tool set, the manifest snapshot, the §7/§8 enablement, the
+ * extension-scope registration, and the schema-hash). This class adds only the genuinely tool-specific
+ * surface: the fluent builder entry, the kind-named public forwarders that keep the original API stable,
+ * and the Execute dispatch (whose argument + result types are tool-specific).
+ *
+ * A monotonic Revision bumps on every registry change so the sidecar's manifest diff can reason about
+ * ordering (§2.2 step 3). Not thread-safe. All mutation happens at startup (core families Register before
+ * the bridge accepts), so the bridge may read BuildManifestJson() directly from its IPC reader thread on
+ * handshake without a race. Any DYNAMIC re-registration (the §2.2 hot-reload path) MUST marshal both the
+ * mutation and the manifest read through the game-thread dispatcher (§4) — the reader thread must never
+ * observe a half-mutated set.
  */
 class UNREALMCPRUNTIME_API FUnrealMcpToolRegistry
+	: public TUnrealMcpRegistry<FUnrealMcpToolRegistry, FUnrealMcpRegisteredTool, FUnrealMcpToolRegistryTraits>
 {
 public:
 	/** Begin declaring a tool (docs/ARCHITECTURE.md §3.3 fluent API). */
 	FUnrealMcpToolBuilder Tool(const FString& Name);
 
-	/**
-	 * Commit a fully-built tool (called by the builder's Handle()).
-	 * - Core path (default): replaces any same-named tool — core families are trusted.
-	 * - Extension scope (inside RegisterExtension): the tool is stamped with the scope's ExtensionId,
-	 *   validated (§5 — name pattern / schema well-formedness / handler bound), and deduped against
-	 *   already-registered tools. An invalid entry is DROPPED and a duplicate is REJECTED (first-wins),
-	 *   each recording a line in the scope's error list; neither affects other tools or extensions.
-	 */
-	void Commit(FUnrealMcpRegisteredTool&& InTool);
+	// --- Kind-named API forwarders (preserve the original public surface; the logic lives in the template).
 
-	/**
-	 * Register an extension provider's tools (docs/ARCHITECTURE.md §5). Opens an "extension scope":
-	 * every Commit during @p RegisterFn is stamped with @p ExtensionId, validated, and deduped, with
-	 * invalid/duplicate entries dropped/rejected and recorded in the returned result. Scopes never nest.
-	 */
-	FUnrealMcpExtensionRegistrationResult RegisterExtension(const FString& ExtensionId, TFunctionRef<void(FUnrealMcpToolRegistry&)> RegisterFn);
-
-	/** Remove every tool stamped with @p ExtensionId (hot-unload / rebuild, §5). Bumps revision if any removed. Returns count removed. */
-	int32 RemoveToolsForExtension(const FString& ExtensionId);
-
-	/** True iff @p Name is a valid kebab-case tool id (non-empty; lowercase letters/digits with single internal hyphens). */
-	static bool IsValidToolName(const FString& Name);
-
+	/** True iff @p Name is a valid kebab-case tool id. */
+	static bool IsValidToolName(const FString& Name) { return FUnrealMcpToolRegistryTraits::IsValidKey(Name); }
 	/** Validate a tool descriptor for the §5 isolation contract. Returns false + a reason on the first problem. */
-	static bool ValidateTool(const FUnrealMcpRegisteredTool& InTool, FString& OutError);
+	static bool ValidateTool(const FUnrealMcpRegisteredTool& InTool, FString& OutError) { return FUnrealMcpToolRegistryTraits::Validate(InTool, OutError); }
 
-	bool HasTool(const FString& Name) const { return Tools.Contains(Name); }
-	int32 Num() const { return Tools.Num(); }
-	const FUnrealMcpRegisteredTool* Find(const FString& Name) const { return Tools.Find(Name); }
-
+	bool HasTool(const FString& Name) const { return Has(Name); }
+	/** Remove every tool stamped with @p ExtensionId (hot-unload / rebuild, §5). Returns count removed. */
+	int32 RemoveToolsForExtension(const FString& ExtensionId) { return RemoveForExtension(ExtensionId); }
 	/** Every registered tool name, sorted (the §7 MCP Tools window enumerates the full set, enabled or not). */
-	TArray<FString> GetToolNamesSorted() const;
-
-	/** Count of tools whose bEnabled flag is set (backs the boot-time enable-map log line). */
-	int32 NumEnabled() const;
+	TArray<FString> GetToolNamesSorted() const { return GetKeysSorted(); }
 
 	/**
-	 * True iff @p Name passes the §8 EnabledTools whitelist gate (the whitelist is empty, or the name is listed) —
-	 * the STATIC env-driven dimension of the served predicate, independent of the §7 runtime blocklist. The §7
-	 * MCP Tools window reads this to surface whitelist-gated tools, which the per-tool UI toggle cannot re-enable.
+	 * True iff @p Name passes the §8 EnabledTools whitelist gate — the STATIC env-driven dimension of the
+	 * served predicate, independent of the §7 runtime blocklist. The §7 MCP Tools window reads this to surface
+	 * whitelist-gated tools, which the per-tool UI toggle cannot re-enable.
 	 */
-	bool PassesEnabledToolsWhitelist(const FString& Name) const;
+	bool PassesEnabledToolsWhitelist(const FString& Name) const { return PassesWhitelist(Name); }
 
 	/**
-	 * Set one tool's enabled flag directly — a GRANULAR helper, NOT the production §7 toggle. The Tools-window
-	 * path is view-model → OnToolEnablementChanged → ApplyDisabledTools (a whole-blocklist re-apply); this method
-	 * is the single-name primitive used by tests and any future single-tool caller. It does NOT update the
-	 * retained whitelist/blocklist, so a later SetEnabledToolsFilter / ApplyDisabledTools recompute can override
-	 * the flag it set. Disabled tools are EXCLUDED from BuildManifestJson so the sidecar never exposes them in
-	 * tools/list (§2.2). Bumps the revision on a real change. Unknown name / no-op change: returns false, no
-	 * revision bump. Game-thread only (same contract as any §2.2 dynamic re-registration — see the class comment).
+	 * Set one tool's enabled flag directly — a GRANULAR helper, NOT the production §7 toggle (that path is
+	 * view-model → OnToolEnablementChanged → ApplyDisabledTools, a whole-blocklist re-apply). Used by tests +
+	 * any future single-tool caller. Does NOT update the retained whitelist/blocklist. Game-thread only.
 	 */
-	bool SetToolEnabled(const FString& Name, bool bEnabled);
+	bool SetToolEnabled(const FString& Name, bool bEnabled) { return SetEnabled(Name, bEnabled); }
 
 	/**
-	 * Set the §8 env whitelist (UNREAL_MCP_TOOLS / Config.EnabledTools). A tool passes the whitelist gate iff the
-	 * whitelist is EMPTY (no filter — the common case) or the tool's name is listed. RETAINED, so a later
-	 * re-registration (extension hot-reload) and every ApplyDisabledTools re-apply re-evaluate it. Recomputes
-	 * enablement now and bumps the revision once if any flag changed. Combined effective rule (§8): a tool is
-	 * served iff (whitelist empty OR in whitelist) AND NOT in the blocklist. Game-thread only.
+	 * Set the §8 env whitelist (UNREAL_MCP_TOOLS / Config.EnabledTools). RETAINED, re-evaluated on every
+	 * re-registration + ApplyDisabledTools re-apply. Combined effective rule (§8): served iff (whitelist empty
+	 * OR in whitelist) AND NOT in the blocklist. Game-thread only.
 	 */
-	void SetEnabledToolsFilter(const TArray<FString>& EnabledTools);
+	void SetEnabledToolsFilter(const TArray<FString>& EnabledTools) { SetWhitelistFilter(EnabledTools); }
 
 	/**
-	 * Apply the persisted §7 per-tool enable-map (the MCP Tools window's `disabledTools` blocklist): every tool
-	 * whose name is in @p DisabledNames is disabled, the rest follow the §8 whitelist gate. RETAINED, so an
-	 * extension hot-reload that re-registers tools FRESH (RegisterExtension → Commit) re-applies the blocklist to
-	 * the rebuilt tools rather than resurrecting a disabled one. Recomputes against BOTH the retained whitelist and
-	 * this blocklist, so re-applying the blocklist never clobbers the whitelist. Idempotent; bumps the revision once
-	 * if any flag changed. Called on boot (before the bridge accepts) and on every UI toggle. Game-thread only.
+	 * Apply the persisted §7 per-tool enable-map (the MCP Tools window's `disabledTools` blocklist). RETAINED,
+	 * so an extension hot-reload that re-registers tools FRESH re-applies the blocklist rather than resurrecting
+	 * a disabled one; re-applying never clobbers the whitelist. Idempotent. Game-thread only.
 	 */
-	void ApplyDisabledTools(const TArray<FString>& DisabledNames);
-
-	/** Current manifest revision (bumps on every registry mutation). */
-	int32 GetRevision() const { return Revision; }
-
-	/** Build the full tool-manifest message body (revision + tools[]) for the bridge (§2.2). */
-	TSharedPtr<FJsonObject> BuildManifestJson() const;
+	void ApplyDisabledTools(const TArray<FString>& DisabledNames) { ApplyBlocklist(DisabledNames); }
 
 	/**
 	 * Execute a tool by name on the CURRENT thread (the dispatcher has already marshalled to the game
-	 * thread). Returns an error result for an unknown tool. The handler owns argument interpretation.
+	 * thread). Returns an error result for an unknown / disabled tool. The handler owns argument interpretation.
 	 */
 	FUnrealMcpToolResult Execute(const FString& Name, const FUnrealMcpToolCall& Call) const;
-
-	/** Compute the stable schema hash for a tool descriptor (§2.2 — excludes the enabled flag). */
-	static FString ComputeSchemaHash(const FUnrealMcpRegisteredTool& InTool);
-
-private:
-	TMap<FString, FUnrealMcpRegisteredTool> Tools;
-	int32 Revision = 0;
-
-	// --- Retained §7/§8 enablement filter. Re-applied on every (re-)registration (Commit) so an extension
-	//     hot-reload cannot resurrect a disabled tool, and a blocklist re-apply never clobbers the whitelist.
-	//     Whitelist = §8 UNREAL_MCP_TOOLS (empty = no filter); Blocklist = §7 persisted `disabledTools`. ---
-	FUnrealMcpEnablementFilter Enablement;
-
-	/** The combined §8 effective-served predicate: enabled iff (whitelist empty OR member) AND NOT blocklisted. */
-	bool ShouldToolBeEnabled(const FString& Name) const;
-
-	/** Re-evaluate every registered tool's bEnabled against ShouldToolBeEnabled; bumps the revision once if any changed. */
-	void RecomputeEnablement();
-
-	// --- Extension-scope state (active only inside RegisterExtension; scopes never nest) ----------
-	bool bExtensionScope = false;
-	FString ScopeExtensionId;
-	int32 ScopeToolsRegistered = 0;
-	TArray<FString> ScopeErrors;
 };

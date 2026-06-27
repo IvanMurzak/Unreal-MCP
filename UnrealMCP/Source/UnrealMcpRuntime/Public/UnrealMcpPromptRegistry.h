@@ -129,104 +129,73 @@ private:
 };
 
 /**
- * The plugin-owned prompt registry (docs/ARCHITECTURE.md §A.1) — the exact prompt sibling of
- * FUnrealMcpToolRegistry. Holds the compiled prompt set, produces the JSON manifest snapshot for the
- * bridge, and dispatches prompt-get requests by name. A monotonic Revision bumps on every change so the
- * sidecar's manifest diff can reason about ordering. Not thread-safe (same contract as the tool registry):
- * all mutation happens at startup before the bridge accepts; any DYNAMIC re-registration MUST marshal both
- * the mutation and the manifest read through the game-thread dispatcher (§4).
+ * Kind-specific policy for the prompt registry instantiation of TUnrealMcpRegistry. The exact prompt sibling
+ * of FUnrealMcpToolRegistryTraits: key accessor (Name), validation (kebab name + bound handler + param specs),
+ * manifest strings, and the nouns for collision-rejection messages + log lines.
+ */
+struct FUnrealMcpPromptRegistryTraits
+{
+	static const FString& KeyOf(const FUnrealMcpRegisteredPrompt& Entry) { return Entry.Name; }
+	static const TCHAR* KindNoun() { return TEXT("prompt"); }
+	static const TCHAR* KindNounCapitalized() { return TEXT("Prompt"); }
+	static const TCHAR* KeyNoun() { return TEXT("name"); }
+	static const TCHAR* ManifestType() { return TEXT("prompt-manifest"); }
+	static const TCHAR* ManifestArrayKey() { return TEXT("prompts"); }
+	/** True iff @p Name is a valid kebab-case prompt id (same rule as the tool registry). */
+	static bool IsValidKey(const FString& Name);
+	/** Validate a prompt descriptor for the §5 isolation contract. Returns false + a reason on the first problem. */
+	static bool Validate(const FUnrealMcpRegisteredPrompt& InPrompt, FString& OutError);
+};
+
+/**
+ * The plugin-owned prompt registry (docs/ARCHITECTURE.md §A.1) — one instantiation of the generic
+ * TUnrealMcpRegistry, the exact prompt sibling of FUnrealMcpToolRegistry. The template owns the compiled
+ * prompt set, the manifest snapshot, the §7/§8 enablement, the extension-scope registration, and the
+ * schema-hash; this class adds only the prompt-specific surface (the fluent builder entry, the kind-named
+ * forwarders that keep the original API stable, and the Execute dispatch). Same threading contract as the
+ * tool registry: all mutation happens at startup before the bridge accepts; any DYNAMIC re-registration MUST
+ * marshal both the mutation and the manifest read through the game-thread dispatcher (§4).
  *
  * Prompt args reuse FUnrealMcpParamSpec + the §3.2 schema generation verbatim (see BuildInputSchema).
  */
 class UNREALMCPRUNTIME_API FUnrealMcpPromptRegistry
+	: public TUnrealMcpRegistry<FUnrealMcpPromptRegistry, FUnrealMcpRegisteredPrompt, FUnrealMcpPromptRegistryTraits>
 {
 public:
 	/** Begin declaring a prompt (the §3.3 fluent API, prompt analog). */
 	FUnrealMcpPromptBuilder Prompt(const FString& Name);
 
-	/**
-	 * Commit a fully-built prompt (called by the builder's Handle()).
-	 * - Core path (default): replaces any same-named prompt — core families are trusted.
-	 * - Extension scope (inside RegisterExtension): the prompt is stamped with the scope's ExtensionId,
-	 *   validated (§5), and deduped. An invalid entry is DROPPED and a duplicate is REJECTED (first-wins).
-	 */
-	void Commit(FUnrealMcpRegisteredPrompt&& InPrompt);
-
-	/**
-	 * Register an extension provider's prompts (§5). Opens an "extension scope": every Commit during
-	 * @p RegisterFn is stamped with @p ExtensionId, validated, and deduped. Reuses the tool registry's
-	 * FUnrealMcpExtensionRegistrationResult (its `ToolsRegistered` count here means "entries registered").
-	 * Scopes never nest.
-	 */
-	FUnrealMcpExtensionRegistrationResult RegisterExtension(const FString& ExtensionId, TFunctionRef<void(FUnrealMcpPromptRegistry&)> RegisterFn);
-
-	/** Remove every prompt stamped with @p ExtensionId (hot-unload / rebuild, §5). Bumps revision if any removed. Returns count removed. */
-	int32 RemovePromptsForExtension(const FString& ExtensionId);
+	// --- Kind-named API forwarders (preserve the original public surface; the logic lives in the template).
 
 	/** True iff @p Name is a valid kebab-case prompt id (same rule as the tool registry). */
-	static bool IsValidPromptName(const FString& Name);
-
+	static bool IsValidPromptName(const FString& Name) { return FUnrealMcpPromptRegistryTraits::IsValidKey(Name); }
 	/** Validate a prompt descriptor for the §5 isolation contract. Returns false + a reason on the first problem. */
-	static bool ValidatePrompt(const FUnrealMcpRegisteredPrompt& InPrompt, FString& OutError);
+	static bool ValidatePrompt(const FUnrealMcpRegisteredPrompt& InPrompt, FString& OutError) { return FUnrealMcpPromptRegistryTraits::Validate(InPrompt, OutError); }
 
-	bool HasPrompt(const FString& Name) const { return Prompts.Contains(Name); }
-	int32 Num() const { return Prompts.Num(); }
-	const FUnrealMcpRegisteredPrompt* Find(const FString& Name) const { return Prompts.Find(Name); }
-
+	bool HasPrompt(const FString& Name) const { return Has(Name); }
+	/** Remove every prompt stamped with @p ExtensionId (hot-unload / rebuild, §5). Returns count removed. */
+	int32 RemovePromptsForExtension(const FString& ExtensionId) { return RemoveForExtension(ExtensionId); }
 	/** Every registered prompt name, sorted. */
-	TArray<FString> GetPromptNamesSorted() const;
-
-	/** Count of prompts whose bEnabled flag is set. */
-	int32 NumEnabled() const;
+	TArray<FString> GetPromptNamesSorted() const { return GetKeysSorted(); }
 
 	/** True iff @p Name passes the §8 EnabledPrompts whitelist gate (empty whitelist, or the name is listed). */
-	bool PassesEnabledPromptsWhitelist(const FString& Name) const;
+	bool PassesEnabledPromptsWhitelist(const FString& Name) const { return PassesWhitelist(Name); }
 
 	/**
-	 * Set one prompt's enabled flag directly — a GRANULAR helper, NOT a production §7 toggle. Does NOT
-	 * update the retained whitelist/blocklist. Disabled prompts are EXCLUDED from BuildManifestJson.
-	 * Bumps the revision on a real change. Unknown name / no-op change: returns false, no bump. Game-thread only.
+	 * Set one prompt's enabled flag directly — a GRANULAR helper, NOT a production §7 toggle. Does NOT update
+	 * the retained whitelist/blocklist. Disabled prompts are EXCLUDED from BuildManifestJson. Game-thread only.
 	 */
-	bool SetPromptEnabled(const FString& Name, bool bEnabled);
+	bool SetPromptEnabled(const FString& Name, bool bEnabled) { return SetEnabled(Name, bEnabled); }
 
 	/** Set the §8 env whitelist. Mirrors the tool registry's SetEnabledToolsFilter exactly. Game-thread only. */
-	void SetEnabledPromptsFilter(const TArray<FString>& EnabledPrompts);
+	void SetEnabledPromptsFilter(const TArray<FString>& EnabledPrompts) { SetWhitelistFilter(EnabledPrompts); }
 
 	/** Apply the persisted §7 per-prompt enable-map (blocklist). Mirrors the tool registry's ApplyDisabledTools. Game-thread only. */
-	void ApplyDisabledPrompts(const TArray<FString>& DisabledNames);
-
-	/** Current manifest revision (bumps on every registry mutation). */
-	int32 GetRevision() const { return Revision; }
-
-	/** Build the full prompt-manifest message body (revision + prompts[]) for the bridge (§A.1). Disabled prompts excluded, sorted by name. */
-	TSharedPtr<FJsonObject> BuildManifestJson() const;
+	void ApplyDisabledPrompts(const TArray<FString>& DisabledNames) { ApplyBlocklist(DisabledNames); }
 
 	/**
 	 * Execute a prompt by name on the CURRENT thread (the dispatcher has already marshalled to the game
 	 * thread). Returns an error result for an unknown / disabled prompt. The handler owns argument interpretation.
 	 */
 	FUnrealMcpPromptResult Execute(const FString& Name, const FUnrealMcpToolCall& Call) const;
-
-	/** Compute the stable schema hash for a prompt descriptor (excludes the enabled flag). */
-	static FString ComputeSchemaHash(const FUnrealMcpRegisteredPrompt& InPrompt);
-
-private:
-	TMap<FString, FUnrealMcpRegisteredPrompt> Prompts;
-	int32 Revision = 0;
-
-	// --- Retained §7/§8 enablement filter (mirror the tool registry exactly).
-	//     Whitelist = §8 whitelist (empty = no filter); Blocklist = §7 persisted blocklist. ---
-	FUnrealMcpEnablementFilter Enablement;
-
-	/** The combined §8 effective-served predicate: enabled iff (whitelist empty OR member) AND NOT blocklisted. */
-	bool ShouldPromptBeEnabled(const FString& Name) const;
-
-	/** Re-evaluate every registered prompt's bEnabled against ShouldPromptBeEnabled; bumps the revision once if any changed. */
-	void RecomputeEnablement();
-
-	// --- Extension-scope state (active only inside RegisterExtension; scopes never nest) ----------
-	bool bExtensionScope = false;
-	FString ScopeExtensionId;
-	int32 ScopePromptsRegistered = 0;
-	TArray<FString> ScopeErrors;
 };
