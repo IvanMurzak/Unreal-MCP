@@ -22,7 +22,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
 import { homedir } from 'os';
-import { editorBinaryPath } from './engine.js';
+import { editorBinaryPath, pathFor } from './engine.js';
 import { compareEngineVersions, type EngineInstallation } from './launcher.js';
 import { verbose } from './ui.js';
 
@@ -106,7 +106,7 @@ export function commonEngineRoots(os: NodeJS.Platform, env: NodeJS.ProcessEnv = 
   // every OS — its PARENT, since the var points AT the engine dir.
   const ueRoot = env['UE_ROOT'];
   if (ueRoot && ueRoot.trim().length > 0) {
-    const pj = os === 'win32' ? path.win32 : path.posix;
+    const pj = pathFor(os);
     const parent = pj.dirname(ueRoot.trim());
     // Guard against promoting a filesystem-root parent (e.g. `UE_ROOT=/opt` ->
     // `/`, or a drive root `D:\`): readdir of `/` is wasteful and never holds a
@@ -152,7 +152,7 @@ export function scanCommonLocationEngines(
   fsImpl: DiscoveryFs = defaultFs(),
 ): EngineInstallation[] {
   const roots = commonEngineRoots(os, env);
-  const pj = os === 'win32' ? path.win32 : path.posix;
+  const pj = pathFor(os);
   const found: EngineInstallation[] = [];
   const seenRoots = new Set<string>();
 
@@ -219,7 +219,7 @@ export function readEngineAssociationFromBuildVersion(
   os: NodeJS.Platform,
   fsImpl: DiscoveryFs = defaultFs(),
 ): string {
-  const pj = os === 'win32' ? path.win32 : path.posix;
+  const pj = pathFor(os);
   const versionFile = pj.join(engineRoot, 'Engine', 'Build', 'Build.version');
   if (!fsImpl.existsImpl(versionFile)) return '';
   let raw: string;
