@@ -53,7 +53,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
     /// resource sibling of <see cref="ManifestRegistrar"/> / <see cref="PromptManifestRegistrar"/>. Derives from
     /// the shared, kind-agnostic <see cref="ManifestRegistrarBase{TDescriptor}"/> (the revision guard / reconnect
     /// reset / diff-application loop) and supplies the resource-specific bits: the <see cref="ProxyResource"/>
-    /// sink + the <see cref="ResourceManifestDiffer"/>. Implements
+    /// sink + the <see cref="ManifestDiffer"/>. Implements
     /// <see cref="IManifestSink{ResourceManifestMessage}"/> so the IPC client routes a <c>resource-manifest</c>
     /// to it without knowing the descriptor type. NOT thread-safe by itself: the IPC client invokes Apply from
     /// its single reader loop (same contract as the tool/prompt registrars).

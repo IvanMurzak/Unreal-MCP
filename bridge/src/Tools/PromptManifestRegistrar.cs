@@ -49,7 +49,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
     /// sibling of <see cref="ManifestRegistrar"/>. Derives from the shared, kind-agnostic
     /// <see cref="ManifestRegistrarBase{TDescriptor}"/> (the revision guard / reconnect reset / diff-application
     /// loop) and supplies the prompt-specific bits: the <see cref="ProxyPrompt"/> sink + the
-    /// <see cref="PromptManifestDiffer"/>. Implements <see cref="IManifestSink{PromptManifestMessage}"/> so the
+    /// <see cref="ManifestDiffer"/>. Implements <see cref="IManifestSink{PromptManifestMessage}"/> so the
     /// IPC client routes a <c>prompt-manifest</c> to it without knowing the descriptor type. NOT thread-safe by
     /// itself: the IPC client invokes Apply from its single reader loop (same contract as the tool registrar).
     /// </summary>

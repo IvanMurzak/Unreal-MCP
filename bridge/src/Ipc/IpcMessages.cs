@@ -41,8 +41,9 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
     }
 
     /// <summary>
-    /// The kind-agnostic manifest-entry contract the generic differ (<see cref="Tools.ManifestDiffer"/>) and the
-    /// shared <see cref="Tools.ManifestRegistrarBase{TDescriptor}"/> need to diff/apply a tool, prompt, or
+    /// The kind-agnostic manifest-entry contract the generic differ
+    /// (<see cref="com.IvanMurzak.Unreal.MCP.Bridge.Tools.ManifestDiffer"/>) and the shared
+    /// <see cref="com.IvanMurzak.Unreal.MCP.Bridge.Tools.ManifestRegistrarBase{TDescriptor}"/> need to diff/apply a tool, prompt, or
     /// resource descriptor without knowing its concrete shape (docs/ARCHITECTURE.md §2.2 / §A.1): the dedup
     /// <see cref="Key"/> (tool/prompt name or resource uri), the <see cref="SchemaHash"/> the diff compares on,
     /// the <see cref="Enabled"/> flag, and the <see cref="StructuralSignature"/> fallback used when a hash is
