@@ -23,7 +23,7 @@ import * as path from 'path';
 import { execFileSync } from 'child_process';
 import { homedir } from 'os';
 import { editorBinaryPath, pathFor } from './engine.js';
-import { compareEngineVersions, type EngineInstallation } from './launcher.js';
+import { byEngineVersionDesc, type EngineInstallation } from './launcher.js';
 import { verbose } from './ui.js';
 
 // ---------------------------------------------------------------------------
@@ -204,7 +204,7 @@ export function scanCommonLocationEngines(
     }
   }
 
-  found.sort((a, b) => compareEngineVersions(b.engineAssociation, a.engineAssociation));
+  found.sort(byEngineVersionDesc);
   return found;
 }
 
