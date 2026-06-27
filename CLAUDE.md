@@ -51,7 +51,7 @@ the editor module that depends on it):
 > (b) the `UnrealMcpRuntime` module holds the engine-agnostic infra + the runtime-safe `ping`, and
 > `UnrealMcpEditor` depends on it; (c) a runtime connection is **explicit opt-in** — a shipped game NEVER
 > auto-connects. The 62 engine-development tools are all **editor-only**; a game brings its OWN gameplay
-> tools (see [Customize Tools, Prompts & Resources](#extensions--custom-tools-prompts--resources)).
+> tools via `IUnrealMcpToolProvider` (author guide: [`docs/EXTENSIONS.md`](docs/EXTENSIONS.md)).
 
 ## Layout
 
