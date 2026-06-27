@@ -424,65 +424,16 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
 
         // --- IToolCallChannel -------------------------------------------------------------------------
 
-        public async Task<ToolResponseMessage> CallToolAsync(string tool, JsonObject? arguments, int timeoutMs, CancellationToken cancellationToken)
-        {
-            // Gate on a COMPLETED handshake, not merely an open socket: _stream/_tcp are published right after
-            // the dial — BEFORE the handshake-ack — and on a reconnect epoch the ProxyTools from the prior
-            // epoch are still registered. A SignalR-driven call landing in that pre-ack window would win the
-            // write race against the handshake, hit the wire first, and be silently dropped by the plugin's
-            // pre-handshake auth gate, with no tool-response ever returning. Fail fast pre-ack instead.
-            var stream = _stream;
-            if (stream == null || !_ackAccepted || _tcp is not { Connected: true })
-                throw new IpcDisconnectedException();
-
-            var requestId = Guid.NewGuid().ToString("N");
-            var task = _pending.Register(requestId);
-
-            // Cancellation: forward the caller's token as tool-cancel and fail the pending call (§4).
-            using var registration = cancellationToken.Register(() =>
-            {
-                // Observe the send like the pong path: if the link is down this fire-and-forget faults, and an
-                // un-awaited faulted Task surfaces as an unobserved TaskException on the finalizer thread.
-                _ = SafeAwait(SendAsync(new ToolCancelMessage { RequestId = requestId }, CancellationToken.None));
-                _pending.TryFail(requestId, new OperationCanceledException(cancellationToken));
-            });
-
-            try
-            {
-                await SendAsync(new ToolCallMessage
-                {
-                    RequestId = requestId,
-                    Tool = tool,
-                    Arguments = arguments,
-                    TimeoutMs = timeoutMs,
-                }, cancellationToken).ConfigureAwait(false);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                _pending.TryFail(requestId, new IpcDisconnectedException());
-                throw new IpcDisconnectedException();
-            }
-
-            // Local timeout backstop: timeoutMs is also embedded in the message for the plugin to honour, but
-            // a silently-dropped call (or a peer that never answers) must still fail this task rather than
-            // hang forever on a healthy link. Arm a local deadline slightly beyond the request timeout so the
-            // plugin's own terminal response normally wins the race; only fire when nothing comes back.
-            if (timeoutMs > 0)
-            {
-                using var backstopCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                var completed = await Task.WhenAny(task, Task.Delay(timeoutMs + IpcProtocol.CallTimeoutGraceMs, backstopCts.Token)).ConfigureAwait(false);
-                backstopCts.Cancel(); // stop the backstop timer whichever side won
-                if (completed != task && !cancellationToken.IsCancellationRequested)
-                {
-                    var timeout = new TimeoutException($"Tool '{tool}' call timed out after {timeoutMs + IpcProtocol.CallTimeoutGraceMs} ms with no IPC response.");
-                    _ = SafeAwait(SendAsync(new ToolCancelMessage { RequestId = requestId }, CancellationToken.None));
-                    _pending.TryFail(requestId, timeout);
-                    throw timeout;
-                }
-            }
-
-            return await task.ConfigureAwait(false);
-        }
+        /// <summary>
+        /// Send a <c>tool-call</c> and await its terminal <c>tool-response</c> (§2.2). Delegates to the shared
+        /// <see cref="RoundTripAsync"/> round-trip — the same handshake gate, requestId correlation,
+        /// cancellation-as-<c>tool-cancel</c>, and local timeout backstop that <see cref="GetPromptAsync"/> and
+        /// <see cref="ReadResourceAsync"/> use. Throws <see cref="IpcDisconnectedException"/> when the link is down.
+        /// </summary>
+        public Task<ToolResponseMessage> CallToolAsync(string tool, JsonObject? arguments, int timeoutMs, CancellationToken cancellationToken)
+            => RoundTripAsync(_pending,
+                requestId => new ToolCallMessage { RequestId = requestId, Tool = tool, Arguments = arguments, TimeoutMs = timeoutMs },
+                $"Tool '{tool}'", timeoutMs, cancellationToken);
 
         // --- Prompt/Resource outbound channels (IPC v2, §A.1) ----------------------------------------
 
@@ -509,9 +460,10 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
                 $"Resource '{uri}'", timeoutMs, cancellationToken);
 
         /// <summary>
-        /// The shared request→response round-trip for the v2 prompt-get / resource-read channels: identical to
-        /// <see cref="CallToolAsync"/>'s body but parameterized over the pending registry + request factory, so
-        /// the handshake gate, requestId correlation, cancellation-as-tool-cancel, and local timeout backstop
+        /// The shared request→response round-trip for every correlated IPC channel — tool-call (via
+        /// <see cref="CallToolAsync"/>), prompt-get (<see cref="GetPromptAsync"/>), and resource-read
+        /// (<see cref="ReadResourceAsync"/>) — parameterized over the pending registry + request factory so the
+        /// handshake gate, requestId correlation, cancellation-as-<c>tool-cancel</c>, and local timeout backstop
         /// are written once. <typeparamref name="TResponse"/> is the matching terminal response type.
         /// </summary>
         private async Task<TResponse> RoundTripAsync<TResponse>(
@@ -521,7 +473,11 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
             int timeoutMs,
             CancellationToken cancellationToken)
         {
-            // Gate on a COMPLETED handshake, not merely an open socket — same race as CallToolAsync (§1.4).
+            // Gate on a COMPLETED handshake, not merely an open socket: _stream/_tcp are published right after
+            // the dial — BEFORE the handshake-ack — and on a reconnect epoch the proxies from the prior epoch
+            // are still registered. A SignalR-driven call landing in that pre-ack window would win the write
+            // race against the handshake, hit the wire first, and be silently dropped by the plugin's
+            // pre-handshake auth gate, with no response ever returning. Fail fast pre-ack instead (§1.4).
             var stream = _stream;
             if (stream == null || !_ackAccepted || _tcp is not { Connected: true })
                 throw new IpcDisconnectedException();
