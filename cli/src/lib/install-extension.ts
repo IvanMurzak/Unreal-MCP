@@ -49,6 +49,7 @@ import {
 import { emitProgress } from './progress.js';
 import type {
   ExtensionBuildStep,
+  ExtensionInstallOutcome,
   InstallExtensionOptions,
   InstallExtensionResult,
 } from './types.js';
@@ -179,7 +180,16 @@ export async function installExtension(
     }
     const rebuildRequired = changed && !built;
 
-    const outcome = !changed ? 'already-up-to-date' : fromVersion === null ? 'added' : 'updated';
+    // !materializeNeeded with changed === true means the files were already at
+    // the target version and only the .uproject enable entry was (re)written —
+    // an "enabled" outcome, distinct from a real version "updated".
+    const outcome: ExtensionInstallOutcome = !changed
+      ? 'already-up-to-date'
+      : !materializeNeeded
+        ? 'enabled'
+        : fromVersion === null
+          ? 'added'
+          : 'updated';
     const message = buildMessage(outcome, pluginName, fromVersion, toVersion, built, rebuildRequired, gatingPlugins);
 
     emitProgress(opts.onProgress, { phase: 'done', message });
@@ -196,7 +206,7 @@ export async function installExtension(
       sourceKind: source.kind,
       fromVersion,
       toVersion,
-      enabledPlugins: enable.enabledPlugins,
+      enabledPlugins: enable.addedOrFlipped,
       uprojectPath: uproject.uprojectPath,
       built,
       message,
@@ -286,7 +296,9 @@ async function materialize(
     message: `Downloading extension ${pluginName} ${source.version} from ${source.url}`,
   });
   const fetchImpl = opts.fetchImpl ?? fetch;
-  const response = await fetchImpl(source.url);
+  const response = await fetchImpl(source.url, {
+    signal: AbortSignal.timeout(opts.downloadTimeoutMs ?? 60_000),
+  });
   if (!response.ok) {
     throw new Error(
       `Failed to download extension ${pluginName} ${source.version}: HTTP ${response.status} ${response.statusText} ` +
@@ -545,7 +557,7 @@ function compareSemver(a: string, b: string): number {
 
 /** A short, printable status line for the result. */
 function buildMessage(
-  outcome: 'added' | 'updated' | 'already-up-to-date',
+  outcome: ExtensionInstallOutcome,
   pluginName: string,
   fromVersion: string | null,
   toVersion: string | null,
@@ -564,6 +576,8 @@ function buildMessage(
       return `Installed extension ${pluginName}${toVersion ? ` ${toVersion}` : ''} and enabled it${gating}.${compile}`;
     case 'updated':
       return `Updated extension ${pluginName}${fromVersion ? ` ${fromVersion}` : ''} → ${toVersion ?? '(unpinned)'}${gating}.${compile}`;
+    case 'enabled':
+      return `Enabled existing extension ${pluginName}${fromVersion ? ` ${fromVersion}` : ''} in the project${gating}.${compile}`;
     case 'already-up-to-date':
       return `Extension ${pluginName}${toVersion ? ` ${toVersion}` : ''} is already installed and enabled.`;
   }

@@ -60,6 +60,13 @@ export interface EnablePluginsResult {
   text: string;
   /** The names enabled in the project after the operation (full `Plugins[]` enabled set). */
   enabledPlugins: string[];
+  /**
+   * The subset of names this call actually switched on — appended as new
+   * entries, or flipped from `Enabled: false` to `true`. Plugins already enabled
+   * before the call are excluded (they are still listed in `enabledPlugins`).
+   * Equals `enabledPlugins` only when nothing was pre-enabled.
+   */
+  addedOrFlipped: string[];
 }
 
 /**
@@ -93,7 +100,7 @@ export function enablePluginsInUProject(uprojectText: string, pluginNames: reado
     wanted.push(name);
   }
 
-  let changed = false;
+  const addedOrFlipped: string[] = [];
   const plugins = existing.slice();
   for (const name of wanted) {
     const idx = plugins.findIndex(
@@ -101,10 +108,10 @@ export function enablePluginsInUProject(uprojectText: string, pluginNames: reado
     );
     if (idx === -1) {
       plugins.push({ Name: name, Enabled: true });
-      changed = true;
+      addedOrFlipped.push(name);
     } else if (plugins[idx].Enabled !== true) {
       plugins[idx] = { ...plugins[idx], Enabled: true };
-      changed = true;
+      addedOrFlipped.push(name);
     }
   }
 
@@ -112,12 +119,13 @@ export function enablePluginsInUProject(uprojectText: string, pluginNames: reado
     .filter((p) => typeof p.Name === 'string' && p.Enabled !== false)
     .map((p) => p.Name as string);
 
-  if (!changed) {
-    return { changed: false, text: uprojectText, enabledPlugins };
+  // The text changed iff at least one name was appended or flipped on.
+  if (addedOrFlipped.length === 0) {
+    return { changed: false, text: uprojectText, enabledPlugins, addedOrFlipped };
   }
 
   parsed['Plugins'] = plugins;
   const trailingNewline = uprojectText.endsWith('\n') ? '\n' : '';
   const text = JSON.stringify(parsed, null, '\t') + trailingNewline;
-  return { changed: true, text, enabledPlugins };
+  return { changed: true, text, enabledPlugins, addedOrFlipped };
 }

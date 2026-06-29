@@ -633,7 +633,7 @@ export type BootstrapLocalResult = BootstrapLocalSuccess | BootstrapLocalFailure
 // ---------------------------------------------------------------------------
 
 /** How an `install-extension` run ended (a `kind: 'success'` classification). */
-export type ExtensionInstallOutcome = 'added' | 'updated' | 'already-up-to-date';
+export type ExtensionInstallOutcome = 'added' | 'updated' | 'enabled' | 'already-up-to-date';
 
 /** Re-export of the install-source channel discriminant for the public result. */
 export type { InstallSourceKind };
@@ -690,6 +690,12 @@ export interface InstallExtensionOptions {
   /** Inject the HTTP client (defaults to global `fetch`). Test injection. */
   fetchImpl?: typeof fetch;
   /**
+   * Abort the GitHub-release download if no response arrives within this many
+   * milliseconds, so a stalled/slow server cannot hang the CLI indefinitely.
+   * Default 60000. Ignored for `--source` (local) installs.
+   */
+  downloadTimeoutMs?: number;
+  /**
    * Inject the UBT build runner (defaults to spawning UnrealBuildTool). Test
    * injection — a fake records the `ExtensionBuildStep` without a real engine.
    */
@@ -702,7 +708,7 @@ export interface InstallExtensionOptions {
 export interface InstallExtensionSuccess {
   kind: 'success';
   success: true;
-  /** Classified outcome (added / updated / already-up-to-date). */
+  /** Classified outcome (added / updated / enabled / already-up-to-date). */
   outcome: ExtensionInstallOutcome;
   /** True when files were materialized and/or the `.uproject` was written. */
   changed: boolean;
@@ -720,7 +726,11 @@ export interface InstallExtensionSuccess {
   fromVersion: string | null;
   /** Version this install targeted: catalog pin / `--version` / the source `.uplugin`'s `VersionName`, or `null`. */
   toVersion: string | null;
-  /** Plugins enabled in the `.uproject` after the run (extension + gating engine plugins). */
+  /**
+   * Plugins this run newly enabled in the `.uproject` — the extension and any
+   * gating engine plugins it appended or flipped from disabled. Plugins that
+   * were already enabled before the run are NOT listed.
+   */
   enabledPlugins: string[];
   /** Absolute path to the `.uproject` touched. */
   uprojectPath: string;

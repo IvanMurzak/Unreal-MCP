@@ -199,6 +199,8 @@ describe('uproject-plugins', () => {
     expect(r1.changed).toBe(true);
     expect(r1.text.endsWith('\n')).toBe(true);
     expect(r1.enabledPlugins.sort()).toEqual(['Existing', 'MyExt']);
+    // addedOrFlipped lists exactly what this call switched on (MyExt appended, Existing flipped).
+    expect(r1.addedOrFlipped.sort()).toEqual(['Existing', 'MyExt']);
     const parsed = JSON.parse(r1.text) as { Plugins: { Name: string; Enabled: boolean }[] };
     expect(parsed.Plugins.find((p) => p.Name === 'Existing')!.Enabled).toBe(true);
 
@@ -206,6 +208,17 @@ describe('uproject-plugins', () => {
     const r2 = enablePluginsInUProject(r1.text, ['MyExt', 'Existing']);
     expect(r2.changed).toBe(false);
     expect(r2.text).toBe(r1.text);
+    expect(r2.addedOrFlipped).toEqual([]);
+  });
+
+  it('addedOrFlipped excludes plugins already enabled before the call', () => {
+    const base = JSON.stringify({ FileVersion: 3, Plugins: [{ Name: 'AlreadyOn', Enabled: true }] }, null, '\t');
+    const r = enablePluginsInUProject(base, ['AlreadyOn', 'NewExt']);
+    expect(r.changed).toBe(true);
+    // The full enabled set still includes the pre-existing plugin ...
+    expect(r.enabledPlugins.sort()).toEqual(['AlreadyOn', 'NewExt']);
+    // ... but addedOrFlipped reports only the newly switched-on extension.
+    expect(r.addedOrFlipped).toEqual(['NewExt']);
   });
 
   it('creates a Plugins array when absent', () => {
@@ -267,6 +280,31 @@ describe('installExtension (local --source)', () => {
     expect(r.rebuildRequired).toBe(false);
     // No write to the .uproject.
     expect(fs.readFileSync(uprojectPath, 'utf-8')).toBe(before);
+  });
+
+  it("reports 'enabled' (not 'updated') when files are current but the .uproject lost the enable entry", async () => {
+    const project = makeProject();
+    const source = makeExtensionSource('FooNiagara', { version: '1.0.0', plugins: ['Niagara'] });
+    await installExtension({ projectDir: project, extensionId: 'com.foo.niagara', source });
+
+    // Drop the extension's enable entry while the materialized files stay at the
+    // same version on disk → re-install should re-enable, not "update".
+    const uprojectPath = path.join(project, 'MyGame.uproject');
+    const upj = JSON.parse(fs.readFileSync(uprojectPath, 'utf-8')) as { Plugins: { Name: string; Enabled: boolean }[] };
+    upj.Plugins = upj.Plugins.filter((p) => p.Name !== 'FooNiagara');
+    fs.writeFileSync(uprojectPath, JSON.stringify(upj, null, '\t'));
+
+    const r = await installExtension({ projectDir: project, extensionId: 'com.foo.niagara', source });
+    expect(r.kind).toBe('success');
+    if (r.kind !== 'success') return;
+    expect(r.outcome).toBe('enabled');
+    expect(r.changed).toBe(true);
+    expect(r.fromVersion).toBe('1.0.0');
+    expect(r.toVersion).toBe('1.0.0');
+    expect(r.message).toMatch(/Enabled existing extension FooNiagara 1\.0\.0/);
+    // Only the re-enabled extension is reported, not the pre-existing Niagara.
+    expect(r.enabledPlugins).toContain('FooNiagara');
+    expect(r.enabledPlugins).not.toContain('Niagara');
   });
 
   it('updates when the source version is newer (fromVersion → toVersion)', async () => {
@@ -360,6 +398,20 @@ describe('installExtension (download + failures)', () => {
     const installed = path.join(project, 'Plugins', 'FooNiagara');
     expect(fs.existsSync(path.join(installed, 'FooNiagara.uplugin'))).toBe(true);
     expect(r.enabledPlugins).toContain('Niagara');
+  });
+
+  it('passes an abort signal (download timeout) to the release fetch', async () => {
+    const project = makeProject();
+    const upluginJson = JSON.stringify({ FileVersion: 3, VersionName: '1.0.0' });
+    let seenSignal: unknown;
+    const fetchImpl = (async (_url: string, init?: { signal?: AbortSignal }) => {
+      seenSignal = init?.signal;
+      return zipResponse({ 'FooNiagara/FooNiagara.uplugin': enc(upluginJson) });
+    }) as unknown as typeof fetch;
+
+    const r = await installExtension({ projectDir: project, extensionId: 'com.foo.niagara', catalog, fetchImpl });
+    expect(r.kind).toBe('success');
+    expect(seenSignal).toBeInstanceOf(AbortSignal);
   });
 
   it('fails (no throw) on an HTTP error from the release', async () => {
