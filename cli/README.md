@@ -127,7 +127,9 @@ there plus a materializer branch, **without touching callers**.
 **Compile-on-install strategy (chosen + documented).** Extensions ship as **source** and are compiled
 by **UnrealBuildTool**. The default is **source-ship + compile-on-next-editor-open** (the install
 reports `rebuildRequired: true`); `--build` opts into an **eager** UBT compile against the resolved
-engine. Source-ship is chosen over shipping precompiled-per-UE-version binaries because UE plugin
+engine (**Windows-only** — it invokes `UnrealBuildTool.exe` for the `Win64` target; on macOS/Linux omit
+`--build` and let the editor recompile on next open). Source-ship is chosen over shipping
+precompiled-per-UE-version binaries because UE plugin
 binaries are version/config/platform-specific and ABI-unstable across engine minors — exactly why the
 core `install-plugin` also ships source and excludes the stale build cache.
 

@@ -40,7 +40,7 @@ import {
   unknownExtensionMessage,
   type ExtensionDescriptor,
 } from '../utils/extensions-catalog.js';
-import { resolveInstallSource, type InstallSource } from '../utils/extension-source.js';
+import { resolveInstallSource, stripLeadingV, type InstallSource } from '../utils/extension-source.js';
 import {
   parseUPluginDependencies,
   readUPluginVersionName,
@@ -129,7 +129,9 @@ export async function installExtension(
     const materializeNeeded =
       opts.force === true ||
       !installedPresent ||
-      (toVersion !== null && fromVersion !== toVersion);
+      // Normalize a possible leading `v` on either side so `v1.0.0` (a .uplugin
+      // VersionName) and `1.0.0` (a catalog/--version pin) are not seen as a diff.
+      (toVersion !== null && stripLeadingV(fromVersion ?? '') !== stripLeadingV(toVersion));
 
     if (materializeNeeded) {
       emitProgress(opts.onProgress, {
@@ -440,6 +442,9 @@ async function runUbtBuild(
     );
     return false;
   }
+  // Eager `--build` is Windows-only: the host binary (`UnrealBuildTool.exe`) and
+  // the `Win64` target platform below are hardcoded. On macOS/Linux, omit `--build`
+  // and let the editor recompile the extension on next open (the default path).
   const ubtPath = path.join(
     engineRoot,
     'Engine',
@@ -476,14 +481,26 @@ function resolveEngineRoot(engineAssociation: string, opts: InstallExtensionOpti
   return r.kind === 'resolved' ? r.engineRoot : null;
 }
 
-/** Default UBT runner: spawn UnrealBuildTool, resolve on exit 0, reject otherwise. */
+/**
+ * Default UBT runner: spawn UnrealBuildTool, resolve on exit 0, reject otherwise.
+ * stdout stays silenced (the library is stdout-quiet), but stderr is captured so a
+ * non-zero exit surfaces the actual compile error — the last ~2KB — through the
+ * rejection (and thus the structured `UBT build failed: ...` warning) instead of a
+ * bare exit code. The buffer is bounded to its tail so a chatty build can't grow it.
+ */
 function defaultBuildImpl(step: ExtensionBuildStep): Promise<void> {
   return new Promise<void>((resolve, reject) => {
-    const child = spawn(step.ubtPath, step.args, { stdio: 'ignore' });
+    const child = spawn(step.ubtPath, step.args, { stdio: ['ignore', 'ignore', 'pipe'] });
+    let stderr = '';
+    child.stderr?.on('data', (chunk) => {
+      stderr += chunk.toString();
+      if (stderr.length > 4096) stderr = stderr.slice(-4096);
+    });
     child.on('error', reject);
     child.on('close', (code) => {
-      if (code === 0) resolve();
-      else reject(new Error(`UnrealBuildTool exited with code ${code}`));
+      if (code === 0) return resolve();
+      const tail = stderr.trim().slice(-2048);
+      reject(new Error(`UnrealBuildTool exited with code ${code}${tail ? `:\n${tail}` : ''}`));
     });
   });
 }

@@ -450,7 +450,9 @@ What it does, and why:
    itself, in the project's `.uproject` `Plugins[]` array.
 4. **Compile.** A Unreal-MCP extension is shipped as **C++ source** and compiled by UnrealBuildTool. The
    default strategy is **source-ship + compile-on-next-editor-open** (`install-extension` reports
-   `rebuildRequired: true`); `--build` opts into an eager UBT compile against the resolved engine. We
+   `rebuildRequired: true`); `--build` opts into an eager UBT compile against the resolved engine
+   (**Windows-only** — it invokes `UnrealBuildTool.exe` for the `Win64` target; on macOS/Linux omit
+   `--build` and rely on compile-on-next-editor-open). We
    ship source rather than precompiled-per-UE-version binaries because UE plugin binaries are tied to an
    exact engine version + build config + platform and are ABI-unstable across engine minors — the same
    reason the core `install-plugin` ships source and excludes the stale `Intermediate/`/`Binaries/` cache.
