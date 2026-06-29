@@ -317,7 +317,7 @@ async function materialize(
 function resolveLocalPluginRoot(source: string): string {
   const resolved = path.resolve(source);
   if (!fs.existsSync(resolved)) throw new Error(`--source directory does not exist: ${resolved}`);
-  const direct = fs.existsSync(resolved) && hasUPluginDirectlyIn(resolved);
+  const direct = hasUPluginDirectlyIn(resolved);
   if (direct) return resolved;
   const found = findUPluginFile(resolved);
   if (found) return path.dirname(found);
@@ -485,6 +485,7 @@ function findUPluginFile(dir: string): string | null {
   let best: string | null = null;
   let bestDepth = Number.MAX_SAFE_INTEGER;
   const walk = (d: string, depth: number): void => {
+    if (depth >= bestDepth) return;
     let entries: fs.Dirent[];
     try {
       entries = fs.readdirSync(d, { withFileTypes: true });

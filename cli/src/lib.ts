@@ -24,20 +24,6 @@ export {
   hasVersion,
   unknownExtensionMessage,
 } from './utils/extensions-catalog.js';
-export {
-  resolveInstallSource,
-  extensionDownloadUrl,
-  extensionAssetName,
-  assertTrustedDownloadUrl,
-  releaseTag as extensionReleaseTag,
-  stripLeadingV as stripExtensionLeadingV,
-  TRUSTED_DOWNLOAD_HOST as EXTENSION_TRUSTED_DOWNLOAD_HOST,
-} from './utils/extension-source.js';
-export {
-  parseUPluginDependencies,
-  readUPluginVersionName,
-  enablePluginsInUProject,
-} from './utils/uproject-plugins.js';
 export { runTool, runSystemTool } from './lib/run-tool.js';
 export { setupMcp, listAgentIds, buildServerEntry } from './lib/setup-mcp.js';
 export {
@@ -218,4 +204,3 @@ export type { SetupSkillsOptions, SetupSkillsResult } from './lib/setup-skills.j
 export type { CloseOptions, CloseResult, RunningProcess } from './lib/close.js';
 export type { ExtensionDescriptor, ExtensionTool } from './utils/extensions-catalog.js';
 export type { InstallSource } from './utils/extension-source.js';
-export type { EnablePluginsResult } from './utils/uproject-plugins.js';

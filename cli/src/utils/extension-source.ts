@@ -42,7 +42,7 @@ export function stripLeadingV(version: string): string {
  */
 export function releaseTag(version: string): string {
   const v = (version ?? '').trim();
-  return v.startsWith('v') ? v : `v${v}`;
+  return /^v/i.test(v) ? v : `v${v}`;
 }
 
 /**
