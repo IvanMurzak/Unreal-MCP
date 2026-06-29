@@ -72,6 +72,7 @@ void SUnrealMcpMainWindow::Construct(const FArguments& InArgs)
 	BridgeStatusProvider = InArgs._BridgeStatusProvider;
 	ConnectionInfoProvider = InArgs._ConnectionInfoProvider;
 	SendAgentConfigRequest = InArgs._SendAgentConfigRequest;
+	ExtensionsWiring = InArgs._ExtensionsWiring;
 
 	// The AI-cube logo brush comes from the style set (registered at module startup; lazily-inited fallback).
 	LogoBrush = FUnrealMcpStyle::Get().GetBrush("UnrealMcp.Logo");
@@ -891,38 +892,61 @@ void SUnrealMcpMainWindow::DeliverAgentConfigResult(const TSharedPtr<FJsonObject
 
 TSharedRef<SWidget> SUnrealMcpMainWindow::BuildExtensionsSection()
 {
-	// The Extensions section (issue #78): a styled header + a placeholder row. NOT carded (issue #80 item 6) — Unity
-	// renders the Extensions list flat under its header, with each row a bold name + Install button + description below.
-	return SNew(SVerticalBox)
-		+ SVerticalBox::Slot().AutoHeight()[ UnrealMcpStyleWidgets::SectionHeader(LOCTEXT("ExtHeader", "Extensions")) ]
-		+ SVerticalBox::Slot().AutoHeight().Padding(0, 8, 0, 0)
+	// The Extensions section (issue #78 styled header). Issue #179 (Unity-parity): host the REAL per-extension
+	// Install / Update / Installed list inside this window — the same SUnrealMcpExtensionsWindow widget T5 built
+	// (#177), now in embedded mode (no own title, AutoHeight list) so it composes under this section's header
+	// and reuses T5's catalog + FUnrealMcpExtensionInstaller install path verbatim (no duplicated install logic).
+	// When the coordinator has not wired the live providers (e.g. a bare/test construct), fall back to the static
+	// placeholder so this section never renders an unusable empty panel.
+	TSharedRef<SVerticalBox> Section = SNew(SVerticalBox)
+		+ SVerticalBox::Slot().AutoHeight()[ UnrealMcpStyleWidgets::SectionHeader(LOCTEXT("ExtHeader", "Extensions")) ];
+
+	if (ExtensionsWiring.IsWired())
+	{
+		Section->AddSlot().AutoHeight().Padding(0, 8, 0, 0)
 		[
-			// One placeholder row in the populated-row shape (bold name + Install + description below).
-			SNew(SVerticalBox)
-			+ SVerticalBox::Slot().AutoHeight()
-			[
-				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
-				[
-					SNew(STextBlock)
-					.Font(FUnrealMcpStyle::SectionTitleFont())
-					.Text(LOCTEXT("ExtPlaceholderName", "No extensions available"))
-				]
-				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
-				[
-					SNew(SBox).IsEnabled(false)
-					[
-						UnrealMcpStyleWidgets::StyledTextButton("UnrealMcp.Button.Secondary", LOCTEXT("Install", "Install"),
-							FOnClicked::CreateLambda([]() { return FReply::Handled(); }))
-					]
-				]
-			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0, 4, 0, 0)
-			[
-				UnrealMcpStyleWidgets::Description(
-					LOCTEXT("ExtPlaceholderDesc", "Engine extensions will appear here when a registry is available. Each lists a name, a short description, and an Install action."))
-			]
+			SNew(SUnrealMcpExtensionsWindow)
+			.bEmbedded(true)
+			.ProjectDir(ExtensionsWiring.ProjectDir)
+			.InitialCatalog(ExtensionsWiring.InitialCatalog)
+			.InstalledProvider(ExtensionsWiring.InstalledProvider)
+			.CatalogFetcher(ExtensionsWiring.CatalogFetcher)
+			.OnSetEnabled(ExtensionsWiring.OnSetEnabled)
+			.OnInstall(ExtensionsWiring.OnInstall)
+			.OnTriggerLiveCompile(ExtensionsWiring.OnTriggerLiveCompile)
 		];
+		return Section;
+	}
+
+	// Unwired fallback: one placeholder row in the populated-row shape (bold name + disabled Install + description).
+	Section->AddSlot().AutoHeight().Padding(0, 8, 0, 0)
+	[
+		SNew(SVerticalBox)
+		+ SVerticalBox::Slot().AutoHeight()
+		[
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
+			[
+				SNew(STextBlock)
+				.Font(FUnrealMcpStyle::SectionTitleFont())
+				.Text(LOCTEXT("ExtPlaceholderName", "No extensions available"))
+			]
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+			[
+				SNew(SBox).IsEnabled(false)
+				[
+					UnrealMcpStyleWidgets::StyledTextButton("UnrealMcp.Button.Secondary", LOCTEXT("Install", "Install"),
+						FOnClicked::CreateLambda([]() { return FReply::Handled(); }))
+				]
+			]
+		]
+		+ SVerticalBox::Slot().AutoHeight().Padding(0, 4, 0, 0)
+		[
+			UnrealMcpStyleWidgets::Description(
+				LOCTEXT("ExtPlaceholderDesc", "Engine extensions will appear here when a registry is available. Each lists a name, a short description, and an Install action."))
+		]
+	];
+	return Section;
 }
 
 TSharedRef<SWidget> SUnrealMcpMainWindow::BuildFooterSection()

@@ -9,9 +9,32 @@
 #include "Templates/Function.h"
 #include "Extensions/UnrealMcpExtensionCatalog.h"
 #include "Extensions/UnrealMcpExtensionInstaller.h"
+#include "Extensions/UnrealMcpExtensionManager.h" // FUnrealMcpExtensionRecord (runtime module; by value in the wiring's installed-provider signature)
 
-struct FUnrealMcpExtensionRecord; // runtime module
 class SVerticalBox;
+
+/**
+ * Wiring for the §7 Extensions panel (docs/ARCHITECTURE.md §7 item 10 — install channel #3). Bundled so the
+ * hosts that construct the panel (the "AI Game Developer" main window's Extensions section, via
+ * FUnrealMcpMainWindowTab) keep a readable construction call. The providers/delegates are owned by the editor
+ * coordinator (catalog fetch + installer in the editor module; the enable toggle routes to the runtime
+ * extension manager's §5 hot-load path). The coordinator guards the InstalledProvider with a teardown
+ * alive-flag so a deferred widget paint after the runtime extension manager is freed returns empty rather than
+ * dereferencing freed memory.
+ */
+struct FUnrealMcpExtensionsPanelWiring
+{
+	FString ProjectDir;
+	TArray<FUnrealMcpCatalogEntry> InitialCatalog;
+	TFunction<TArray<FUnrealMcpExtensionRecord>()> InstalledProvider;
+	TFunction<bool(TArray<FUnrealMcpCatalogEntry>&, FString&)> CatalogFetcher;
+	TFunction<void(const FString&, bool)> OnSetEnabled;
+	TFunction<FUnrealMcpInstallResult(const FUnrealMcpCatalogEntry&, bool)> OnInstall;
+	TFunction<FString()> OnTriggerLiveCompile;
+
+	/** True once the coordinator has wired the live providers (false for a default-constructed placeholder). */
+	bool IsWired() const { return static_cast<bool>(InstalledProvider) || static_cast<bool>(OnInstall) || static_cast<bool>(CatalogFetcher); }
+};
 
 /**
  * The "Extensions" window (docs/ARCHITECTURE.md §7 item 10) — install channel #3 of three, the most
@@ -31,13 +54,28 @@ class SVerticalBox;
  * Catalog fetch is on-demand (a Refresh button), never on construct — so the headless boot smoke / Automation
  * runs never block on the network. The window renders the INSTALLED/LOADED set immediately from the supplied
  * providers and merges the catalog in once fetched.
+ *
+ * Embedded mode (issue #179): this same widget is the Extensions SECTION of the "AI Game Developer" main window
+ * (Unity-parity — Unity surfaces the list inline in its main window, not a separate one). Pass `bEmbedded(true)`
+ * and the widget drops its own bold "Extensions" title (the host section supplies it) and its inner FillHeight
+ * SScrollBox (the host main window already scrolls — a nested FillHeight inside the host's AutoHeight slot would
+ * collapse to zero), rendering the rows as an AutoHeight list instead. Every other affordance — Refresh, the
+ * per-row Install / Update / enable-disable, the compile-on-install hint + Live Coding button, the error badge —
+ * is byte-identical between the two modes, so there is ONE row-builder and ONE install path (no duplicated logic).
  */
 class SUnrealMcpExtensionsWindow : public SCompoundWidget
 {
 public:
-	SLATE_BEGIN_ARGS(SUnrealMcpExtensionsWindow) {}
+	SLATE_BEGIN_ARGS(SUnrealMcpExtensionsWindow)
+		: _bEmbedded(false)
+	{}
 		/** The UE project directory (scanned for installed plugins + the install target). */
 		SLATE_ARGUMENT(FString, ProjectDir)
+		/**
+		 * Embedded-in-the-main-window mode (issue #179): drop the standalone title header + the inner FillHeight
+		 * scroll box so the panel composes into the host main window's own scroll area as an AutoHeight section.
+		 */
+		SLATE_ARGUMENT(bool, bEmbedded)
 		/** An initial catalog (usually empty at boot — fetched on Refresh to avoid a boot-time network call). */
 		SLATE_ARGUMENT(TArray<FUnrealMcpCatalogEntry>, InitialCatalog)
 		/** Snapshots the live loaded-provider records (id / display name / version / tool count / enabled / error). */
@@ -55,6 +93,8 @@ public:
 	void Construct(const FArguments& InArgs);
 
 private:
+	// When true, render as a section of the host main window (no own title, AutoHeight list) — see the class note.
+	bool bEmbedded = false;
 	FString ProjectDir;
 	TArray<FUnrealMcpCatalogEntry> Catalog;
 	TFunction<TArray<FUnrealMcpExtensionRecord>()> InstalledProvider;
