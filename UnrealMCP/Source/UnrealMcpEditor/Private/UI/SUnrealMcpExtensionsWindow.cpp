@@ -240,11 +240,15 @@ FReply SUnrealMcpExtensionsWindow::OnRefreshClicked()
 	if (CatalogFetcher(Fetched, Error))
 	{
 		Catalog = MoveTemp(Fetched);
-		StatusMessage = FString::Printf(TEXT("Loaded %d available extension(s) from the catalog."), Catalog.Num());
+		StatusMessage = FText::Format(
+			LOCTEXT("ExtLoadedCount", "Loaded {0} available extension(s) from the catalog."),
+			FText::AsNumber(Catalog.Num())).ToString();
 	}
 	else
 	{
-		StatusMessage = FString::Printf(TEXT("Could not load the catalog: %s"), *Error);
+		StatusMessage = FText::Format(
+			LOCTEXT("ExtCatalogLoadFailed", "Could not load the catalog: {0}"),
+			FText::FromString(Error)).ToString();
 	}
 	RebuildList();
 	return FReply::Handled();
@@ -257,14 +261,18 @@ FReply SUnrealMcpExtensionsWindow::OnInstallClicked(FString ExtensionId, bool bF
 	const FUnrealMcpCatalogEntry* Entry = FUnrealMcpExtensionCatalog::FindEntry(Catalog, ExtensionId);
 	if (Entry == nullptr)
 	{
-		StatusMessage = FString::Printf(TEXT("Extension '%s' is no longer in the catalog — Refresh and try again."), *ExtensionId);
+		StatusMessage = FText::Format(
+			LOCTEXT("ExtNotInCatalog", "Extension '{0}' is no longer in the catalog — Refresh and try again."),
+			FText::FromString(ExtensionId)).ToString();
 		return FReply::Handled();
 	}
 
 	const FUnrealMcpInstallResult Result = OnInstall(*Entry, bForce);
-	StatusMessage = Result.bSuccess ? Result.Message : FString::Printf(TEXT("Install failed: %s"), *Result.Error);
+	StatusMessage = Result.bSuccess
+		? Result.Message
+		: FText::Format(LOCTEXT("ExtInstallFailed", "Install failed: {0}"), FText::FromString(Result.Error)).ToString();
 	for (const FString& Warning : Result.Warnings)
-		StatusMessage += FString::Printf(TEXT("\nWarning: %s"), *Warning);
+		StatusMessage += FText::Format(LOCTEXT("ExtInstallWarning", "\nWarning: {0}"), FText::FromString(Warning)).ToString();
 	bRestartHintVisible = Result.bSuccess && Result.bRebuildRequired;
 
 	if (Result.bSuccess)
@@ -293,7 +301,10 @@ void SUnrealMcpExtensionsWindow::OnEnabledChanged(FString ExtensionId, bool bEna
 {
 	if (OnSetEnabled)
 		OnSetEnabled(ExtensionId, bEnabled);
-	StatusMessage = FString::Printf(TEXT("Extension '%s' %s."), *ExtensionId, bEnabled ? TEXT("enabled") : TEXT("disabled"));
+	StatusMessage = FText::Format(
+		LOCTEXT("ExtToggleStatus", "Extension '{0}' {1}."),
+		FText::FromString(ExtensionId),
+		bEnabled ? LOCTEXT("ExtEnabledWord", "enabled") : LOCTEXT("ExtDisabledWord", "disabled")).ToString();
 	RebuildList();
 }
 

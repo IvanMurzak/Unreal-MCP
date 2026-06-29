@@ -171,8 +171,13 @@ public:
 private:
 	/** Resolve a `--source` arg to the plugin root (dir directly holding a `.uplugin`, else its parent). */
 	static FString ResolveLocalPluginRoot(const FString& SourceDir, FString& OutError);
-	/** Bounded sync HTTP GET of the github-release zip → extract to a fresh staging dir → return its plugin root. */
-	static bool DownloadAndExtract(const FString& Url, double TimeoutSeconds, FString& OutPluginRoot, FString& OutError);
+	/**
+	 * Bounded sync HTTP GET of the github-release zip → extract to a fresh temp dir → return its plugin root
+	 * (@p OutPluginRoot, which points INSIDE @p OutExtractDir). The caller owns @p OutExtractDir and must
+	 * delete it once the plugin root has been consumed (it is set as soon as the temp dir is created, so a
+	 * post-creation extract failure still hands back a dir to clean).
+	 */
+	static bool DownloadAndExtract(const FString& Url, double TimeoutSeconds, FString& OutPluginRoot, FString& OutExtractDir, FString& OutError);
 	/** Recursively copy @p SourceRoot → @p DestRoot, skipping build-cache / VCS subtrees. */
 	static bool CopyPluginTreeFiltered(const FString& SourceRoot, const FString& DestRoot, FString& OutError);
 };

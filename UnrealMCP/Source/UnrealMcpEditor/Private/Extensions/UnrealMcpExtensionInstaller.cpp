@@ -30,6 +30,21 @@ namespace
 	/** The trusted download host — extension zips come ONLY from github.com (mirrors extension-source.ts). */
 	const TCHAR* ExtInstTrustedDownloadHost = TEXT("github.com");
 
+	/**
+	 * Shared state for a bounded, synchronous HTTP wait. Heap-held via a thread-safe shared ref and captured
+	 * BY VALUE in the completion lambda, so a cancelled request whose completion delegate fires on a LATER
+	 * HttpManager tick (after the calling frame returned on the timeout path) writes into live memory rather
+	 * than dangling stack references (use-after-return).
+	 */
+	struct FExtInstHttpWait
+	{
+		bool bDone = false;
+		bool bOk = false;
+		int32 ResponseCode = -1;
+		TArray<uint8> Bytes; // DownloadAndExtract payload
+		FString Body;        // FetchCatalogSync payload
+	};
+
 	/** Plugin-source subtrees never copied into the target project (mirrors install-extension.ts EXCLUDED_DIRS). */
 	bool ExtInstIsExcludedSegment(const FString& Segment)
 	{
@@ -121,9 +136,9 @@ FString FUnrealMcpExtensionInstaller::ExtensionAssetName(const FString& PluginNa
 
 FString FUnrealMcpExtensionInstaller::ExtensionDownloadUrl(const FString& Repo, const FString& PluginName, const FString& Version)
 {
-	const FString Bare = StripLeadingV(Version);
+	// ExtensionAssetName strips the leading v internally, so pass Version through directly.
 	return FString::Printf(TEXT("https://%s/%s/releases/download/%s/%s"),
-		ExtInstTrustedDownloadHost, *Repo, *ReleaseTag(Version), *ExtensionAssetName(PluginName, Bare));
+		ExtInstTrustedDownloadHost, *Repo, *ReleaseTag(Version), *ExtensionAssetName(PluginName, Version));
 }
 
 bool FUnrealMcpExtensionInstaller::IsTrustedDownloadUrl(const FString& Url)
@@ -353,32 +368,32 @@ bool FUnrealMcpExtensionInstaller::CopyPluginTreeFiltered(const FString& SourceR
 
 	bool bOk = true;
 	FString FailReason;
-	PF.IterateDirectoryRecursively(*SourceFull, [&](const TCHAR* Path, bool bIsDir) -> bool
+	// Recursive walk that PRUNES build-cache / VCS subtrees at the directory level (never descends into
+	// them), rather than descending everywhere and discarding each excluded file after the fact.
+	TFunction<void(const FString&, const FString&)> Walk = [&](const FString& SrcDir, const FString& DstDir)
 	{
-		if (bIsDir)
+		PF.IterateDirectory(*SrcDir, [&](const TCHAR* Path, bool bIsDir) -> bool
+		{
+			const FString Full = Path;
+			const FString Leaf = FPaths::GetCleanFilename(Full);
+			if (bIsDir)
+			{
+				if (!ExtInstIsExcludedSegment(Leaf))
+					Walk(Full, DstDir / Leaf);
+				return bOk; // stop the walk once a copy has failed
+			}
+			const FString DestFile = DstDir / Leaf;
+			PF.CreateDirectoryTree(*DstDir);
+			if (!PF.CopyFile(*DestFile, Path))
+			{
+				bOk = false;
+				FailReason = FString::Printf(TEXT("failed to copy '%s' → '%s'"), Path, *DestFile);
+				return false; // stop iterating this directory
+			}
 			return true;
-		FString Rel = Path;
-		FPaths::MakePathRelativeTo(Rel, *(SourceFull / TEXT("")));
-		Rel.ReplaceInline(TEXT("\\"), TEXT("/"));
-
-		TArray<FString> Segments;
-		Rel.ParseIntoArray(Segments, TEXT("/"));
-		for (const FString& Seg : Segments)
-		{
-			if (ExtInstIsExcludedSegment(Seg))
-				return true; // skip build-cache / VCS subtree file
-		}
-
-		const FString DestFile = DestFull / Rel;
-		PF.CreateDirectoryTree(*FPaths::GetPath(DestFile));
-		if (!PF.CopyFile(*DestFile, Path))
-		{
-			bOk = false;
-			FailReason = FString::Printf(TEXT("failed to copy '%s' → '%s'"), Path, *DestFile);
-			return false; // stop iterating
-		}
-		return true;
-	});
+		});
+	};
+	Walk(SourceFull, DestFull);
 
 	if (!bOk)
 		OutError = FailReason;
@@ -397,7 +412,8 @@ bool FUnrealMcpExtensionInstaller::PlacePluginDir(const FString& SourcePluginRoo
 	PF.DeleteDirectoryRecursively(*Staging);
 	ON_SCOPE_EXIT { PF.DeleteDirectoryRecursively(*Staging); };
 
-	// 1. Filtered copy into a sibling staging dir (a mid-copy failure never touches an existing install).
+	// 1. Filtered copy into a sibling staging dir first, so the swap below only ever copies a validated
+	//    tree (a mid-copy failure HERE leaves the existing install untouched — the staging dir is separate).
 	if (!CopyPluginTreeFiltered(SourcePluginRoot, Staging, OutError))
 		return false;
 	if (FindUPluginFile(Staging).IsEmpty())
@@ -406,11 +422,30 @@ bool FUnrealMcpExtensionInstaller::PlacePluginDir(const FString& SourcePluginRoo
 		return false;
 	}
 
-	// 2. Swap: drop the existing install, then move the validated staging tree into place
-	//    (CopyDirectoryTree lives on IPlatformFile, not IFileManager).
+	// 2. Swap with rollback. Preserve the prior install (move it aside to a sibling backup) BEFORE
+	//    dropping it, so that if the final copy-into-place fails the project is restored to its previous
+	//    working install rather than left half-written with nothing. (CopyDirectoryTree is on IPlatformFile.)
+	const FString Backup = PluginsDir / FString::Printf(TEXT(".unreal-mcp-ext-backup-%u-%llx"),
+		FPlatformProcess::GetCurrentProcessId(), (uint64)FPlatformTime::Cycles64());
+	PF.DeleteDirectoryRecursively(*Backup);
+	ON_SCOPE_EXIT { PF.DeleteDirectoryRecursively(*Backup); };
+
+	const bool bHadExisting = PF.DirectoryExists(*InstallReal);
+	if (bHadExisting && !PF.CopyDirectoryTree(*Backup, *InstallReal, /*bOverwriteAllExisting*/ true))
+	{
+		OutError = FString::Printf(TEXT("failed to back up the existing install at '%s' before replacing it"), *InstallReal);
+		return false;
+	}
+
 	PF.DeleteDirectoryRecursively(*InstallReal);
 	if (!PF.CopyDirectoryTree(*InstallReal, *Staging, /*bOverwriteAllExisting*/ true))
 	{
+		// Restore the prior install so a failed swap can't leave the project with no working install.
+		if (bHadExisting)
+		{
+			PF.DeleteDirectoryRecursively(*InstallReal);
+			PF.CopyDirectoryTree(*InstallReal, *Backup, /*bOverwriteAllExisting*/ true);
+		}
 		OutError = FString::Printf(TEXT("failed to move staged plugin into '%s'"), *InstallReal);
 		return false;
 	}
@@ -435,7 +470,7 @@ FString FUnrealMcpExtensionInstaller::ResolveLocalPluginRoot(const FString& Sour
 	return FPaths::GetPath(Uplugin);
 }
 
-bool FUnrealMcpExtensionInstaller::DownloadAndExtract(const FString& Url, double TimeoutSeconds, FString& OutPluginRoot, FString& OutError)
+bool FUnrealMcpExtensionInstaller::DownloadAndExtract(const FString& Url, double TimeoutSeconds, FString& OutPluginRoot, FString& OutExtractDir, FString& OutError)
 {
 	if (!IsTrustedDownloadUrl(Url))
 	{
@@ -446,25 +481,23 @@ bool FUnrealMcpExtensionInstaller::DownloadAndExtract(const FString& Url, double
 	UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] downloading extension zip from %s"), *Url);
 
 	// Bounded synchronous HTTP GET on the game thread (the user explicitly clicked Install) — mirrors the
-	// local-server download's bounded wait (FUnrealMcpServerManager::DownloadBinaryIfNeeded).
+	// local-server download's bounded wait (FUnrealMcpServerManager::DownloadBinaryIfNeeded). The wait state
+	// is heap-held + captured by value so a late completion after a timeout cancel can't write dangling refs.
 	FHttpModule& Http = FHttpModule::Get();
 	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request = Http.CreateRequest();
 	Request->SetURL(Url);
 	Request->SetVerb(TEXT("GET"));
 
-	bool bDone = false;
-	bool bOk = false;
-	int32 ResponseCode = -1;
-	TArray<uint8> ZipBytes;
+	TSharedRef<FExtInstHttpWait, ESPMode::ThreadSafe> State = MakeShared<FExtInstHttpWait, ESPMode::ThreadSafe>();
 	Request->OnProcessRequestComplete().BindLambda(
-		[&bDone, &bOk, &ResponseCode, &ZipBytes](FHttpRequestPtr, FHttpResponsePtr Resp, bool bConnectedOk)
+		[State](FHttpRequestPtr, FHttpResponsePtr Resp, bool bConnectedOk)
 		{
-			bDone = true;
-			ResponseCode = Resp.IsValid() ? Resp->GetResponseCode() : -1;
-			if (bConnectedOk && Resp.IsValid() && ResponseCode == 200)
+			State->bDone = true;
+			State->ResponseCode = Resp.IsValid() ? Resp->GetResponseCode() : -1;
+			if (bConnectedOk && Resp.IsValid() && State->ResponseCode == 200)
 			{
-				ZipBytes = Resp->GetContent();
-				bOk = true;
+				State->Bytes = Resp->GetContent();
+				State->bOk = true;
 			}
 		});
 
@@ -475,21 +508,21 @@ bool FUnrealMcpExtensionInstaller::DownloadAndExtract(const FString& Url, double
 	}
 
 	const double Deadline = FPlatformTime::Seconds() + TimeoutSeconds;
-	while (!bDone && FPlatformTime::Seconds() < Deadline)
+	while (!State->bDone && FPlatformTime::Seconds() < Deadline)
 	{
 		Http.GetHttpManager().Tick(0.1f);
 		FPlatformProcess::Sleep(0.05f);
 	}
-	if (!bDone)
+	if (!State->bDone)
 	{
 		Request->CancelRequest();
 		OutError = TEXT("the extension download timed out");
 		return false;
 	}
-	if (!bOk || ZipBytes.Num() == 0)
+	if (!State->bOk || State->Bytes.Num() == 0)
 	{
 		OutError = FString::Printf(TEXT("extension download failed (HTTP %d) from %s. Verify the release exists, or install from a local source."),
-			ResponseCode, *Url);
+			State->ResponseCode, *Url);
 		return false;
 	}
 
@@ -499,7 +532,7 @@ bool FUnrealMcpExtensionInstaller::DownloadAndExtract(const FString& Url, double
 	IFileManager& FM = IFileManager::Get();
 	const FString TempZip = FPaths::ConvertRelativePathToFull(
 		FPaths::CreateTempFilename(*FPaths::ProjectIntermediateDir(), TEXT("unreal-mcp-ext-"), TEXT(".zip")));
-	if (!FFileHelper::SaveArrayToFile(ZipBytes, *TempZip))
+	if (!FFileHelper::SaveArrayToFile(State->Bytes, *TempZip))
 	{
 		OutError = TEXT("could not stage the downloaded extension zip");
 		return false;
@@ -523,6 +556,9 @@ bool FUnrealMcpExtensionInstaller::DownloadAndExtract(const FString& Url, double
 		FPaths::CreateTempFilename(*FPaths::ProjectIntermediateDir(), TEXT("unreal-mcp-ext-extract-"), TEXT("")));
 	const FString ExtractReal = ExtractDir; // already absolute
 	FM.MakeDirectory(*ExtractReal, /*Tree*/ true);
+	// Surface the temp extract dir so the caller deletes it once PlacePluginDir has consumed the plugin
+	// root inside it — the returned OutPluginRoot points INTO this dir, so it cannot be cleaned here.
+	OutExtractDir = ExtractReal;
 
 	const TArray<FString> Names = Reader.GetFileNames();
 	for (const FString& Name : Names)
@@ -575,19 +611,16 @@ bool FUnrealMcpExtensionInstaller::FetchCatalogSync(
 	Request->SetURL(Trimmed);
 	Request->SetVerb(TEXT("GET"));
 
-	bool bDone = false;
-	bool bOk = false;
-	int32 ResponseCode = -1;
-	FString Body;
+	TSharedRef<FExtInstHttpWait, ESPMode::ThreadSafe> State = MakeShared<FExtInstHttpWait, ESPMode::ThreadSafe>();
 	Request->OnProcessRequestComplete().BindLambda(
-		[&bDone, &bOk, &ResponseCode, &Body](FHttpRequestPtr, FHttpResponsePtr Resp, bool bConnectedOk)
+		[State](FHttpRequestPtr, FHttpResponsePtr Resp, bool bConnectedOk)
 		{
-			bDone = true;
-			ResponseCode = Resp.IsValid() ? Resp->GetResponseCode() : -1;
-			if (bConnectedOk && Resp.IsValid() && ResponseCode == 200)
+			State->bDone = true;
+			State->ResponseCode = Resp.IsValid() ? Resp->GetResponseCode() : -1;
+			if (bConnectedOk && Resp.IsValid() && State->ResponseCode == 200)
 			{
-				Body = Resp->GetContentAsString();
-				bOk = true;
+				State->Body = Resp->GetContentAsString();
+				State->bOk = true;
 			}
 		});
 
@@ -597,25 +630,25 @@ bool FUnrealMcpExtensionInstaller::FetchCatalogSync(
 		return false;
 	}
 	const double Deadline = FPlatformTime::Seconds() + TimeoutSeconds;
-	while (!bDone && FPlatformTime::Seconds() < Deadline)
+	while (!State->bDone && FPlatformTime::Seconds() < Deadline)
 	{
 		Http.GetHttpManager().Tick(0.1f);
 		FPlatformProcess::Sleep(0.05f);
 	}
-	if (!bDone)
+	if (!State->bDone)
 	{
 		Request->CancelRequest();
 		OutError = TEXT("the catalog fetch timed out");
 		return false;
 	}
-	if (!bOk)
+	if (!State->bOk)
 	{
-		OutError = FString::Printf(TEXT("could not fetch the catalog (HTTP %d) from %s"), ResponseCode, *Trimmed);
+		OutError = FString::Printf(TEXT("could not fetch the catalog (HTTP %d) from %s"), State->ResponseCode, *Trimmed);
 		return false;
 	}
 
 	FString Warning;
-	if (!FUnrealMcpExtensionCatalog::ParseCatalogJson(Body, OutEntries, OutError, Warning))
+	if (!FUnrealMcpExtensionCatalog::ParseCatalogJson(State->Body, OutEntries, OutError, Warning))
 		return false;
 	if (!Warning.IsEmpty())
 		UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] %s"), *Warning);
@@ -671,6 +704,14 @@ FUnrealMcpInstallResult FUnrealMcpExtensionInstaller::Install(const FUnrealMcpIn
 	{
 		FString PluginRoot;
 		FString Err;
+		// The github-release path extracts into a temp dir whose lifetime must outlast DownloadAndExtract
+		// (PluginRoot points inside it) but end after PlacePluginDir consumes it — clean it on block exit.
+		FString ExtractDirToClean;
+		ON_SCOPE_EXIT
+		{
+			if (!ExtractDirToClean.IsEmpty())
+				IFileManager::Get().DeleteDirectory(*ExtractDirToClean, /*RequireExists*/ false, /*Tree*/ true);
+		};
 		if (!Options.SourceDir.TrimStartAndEnd().IsEmpty())
 		{
 			PluginRoot = ResolveLocalPluginRoot(Options.SourceDir, Err);
@@ -684,7 +725,7 @@ FUnrealMcpInstallResult FUnrealMcpExtensionInstaller::Install(const FUnrealMcpIn
 		{
 			const FString Url = ExtensionDownloadUrl(Options.Descriptor.Repo, PluginName, ToVersion);
 			FString ExtractedRoot;
-			if (!DownloadAndExtract(Url, Options.DownloadTimeoutSeconds, ExtractedRoot, Err))
+			if (!DownloadAndExtract(Url, Options.DownloadTimeoutSeconds, ExtractedRoot, ExtractDirToClean, Err))
 			{
 				Result.Error = Err;
 				return Result;
