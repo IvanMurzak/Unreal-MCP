@@ -16,6 +16,28 @@ export { openProject, buildOpenEnv } from './lib/open.js';
 export { close, selectEditorProcesses } from './lib/close.js';
 export { createProject, renderProjectTemplate, validateModuleName } from './lib/create-project.js';
 export { installPlugin, removePlugin } from './lib/install-plugin.js';
+export { installExtension } from './lib/install-extension.js';
+export {
+  EXTENSIONS_CATALOG,
+  EXTENSION_CATALOG_SCHEMA_VERSION,
+  findExtension,
+  hasVersion,
+  unknownExtensionMessage,
+} from './utils/extensions-catalog.js';
+export {
+  resolveInstallSource,
+  extensionDownloadUrl,
+  extensionAssetName,
+  assertTrustedDownloadUrl,
+  releaseTag as extensionReleaseTag,
+  stripLeadingV as stripExtensionLeadingV,
+  TRUSTED_DOWNLOAD_HOST as EXTENSION_TRUSTED_DOWNLOAD_HOST,
+} from './utils/extension-source.js';
+export {
+  parseUPluginDependencies,
+  readUPluginVersionName,
+  enablePluginsInUProject,
+} from './utils/uproject-plugins.js';
 export { runTool, runSystemTool } from './lib/run-tool.js';
 export { setupMcp, listAgentIds, buildServerEntry } from './lib/setup-mcp.js';
 export {
@@ -127,6 +149,13 @@ export type {
   RemovePluginResult,
   RemovePluginSuccess,
   RemovePluginFailure,
+  InstallExtensionOptions,
+  InstallExtensionResult,
+  InstallExtensionSuccess,
+  InstallExtensionFailure,
+  ExtensionInstallOutcome,
+  ExtensionBuildStep,
+  InstallSourceKind,
   RunToolOptions,
   RunToolResult,
   RunToolSuccess,
@@ -187,3 +216,6 @@ export type {
 } from './lib/clean-plugin.js';
 export type { SetupSkillsOptions, SetupSkillsResult } from './lib/setup-skills.js';
 export type { CloseOptions, CloseResult, RunningProcess } from './lib/close.js';
+export type { ExtensionDescriptor, ExtensionTool } from './utils/extensions-catalog.js';
+export type { InstallSource } from './utils/extension-source.js';
+export type { EnablePluginsResult } from './utils/uproject-plugins.js';
