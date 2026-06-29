@@ -44,6 +44,7 @@ Requires Node `^20.19.0 || >=22.12.0`. See the
 | `close [path]` | Terminate the editor process running a project |
 | `install-plugin [path]` | Copy (or `--junction`) the UnrealMCP plugin into `<project>/Plugins` |
 | `remove-plugin [path]` | Remove the installed plugin |
+| `install-extension <id> [path]` | Install a third-party Unreal-MCP **extension** plugin into `<project>/Plugins/<name>`, enable it + its gating engine plugins (e.g. `Niagara`) in the `.uproject`, and (re)compile (on next editor open, or now with `--build`). `--source <dir>` installs from a local copy (offline/CI); `--version <x.y.z>` overrides the catalog pin. Idempotent. See [Extensions](#extensions) |
 | `configure` | Write `UNREAL_MCP_*` into `<project>/.env` and gitignore `.env` (§8) |
 | `setup-mcp <agent>` | Write an MCP client config snippet (claude-code, cursor, vscode). With `--transport stdio` it also downloads the pinned shared [`gamedev-mcp-server`](https://github.com/IvanMurzak/GameDev-MCP-Server) release into `<project>/Intermediate/UnrealMCP/server/<rid>/` (skipped when `UNREAL_MCP_SERVER_PATH` points at a local build) |
 | `login` | OAuth device-code auth against ai-game.dev |
@@ -84,6 +85,58 @@ import { configure, openProject, runTool, detectInstalledEngines } from 'unreal-
 `dist/lib.js` exposes the command logic as a side-effect-free library: no argv parsing, no stdout,
 no process exit. Every function returns a `{ kind: 'success' | 'failure' }` discriminated union and
 never throws past the boundary — the same contract as the Unity/Godot CLIs.
+
+## Extensions
+
+An **extension** is a third-party UE C++ Editor (or Runtime) plugin that implements
+`IUnrealMcpToolProvider` (see [`docs/EXTENSIONS.md`](../docs/EXTENSIONS.md)) and contributes MCP tools
+to the core Unreal-MCP plugin. `install-extension` is the install channel for them:
+
+```bash
+# From the extension's GitHub release (the default channel):
+unreal-mcp-cli install-extension com.acme.niagara ./MyGame --version 1.2.0
+
+# From a local copy (offline / CI / dev — mirrors godot-cli install-plugin --source):
+unreal-mcp-cli install-extension com.acme.niagara ./MyGame --source ../Unreal-AI-Niagara/MyNiagaraExt
+
+# Compile immediately instead of on next editor open:
+unreal-mcp-cli install-extension com.acme.niagara ./MyGame --source <dir> --build
+```
+
+It (1) resolves `<id>` against the **shared extension catalog**, (2) places the plugin into
+`<project>/Plugins/<pluginName>/`, (3) enables the extension **and its gating engine plugins** (e.g.
+`Niagara`, read from the extension's own `.uplugin` `Plugins[]` ∪ the catalog hint) in the `.uproject`,
+and (4) compiles it. It is **idempotent** — a re-run that finds the same version already installed and
+enabled writes nothing.
+
+**Catalog / manifest format.** The installable extensions are listed in a shared, **engine-agnostic**
+catalog (`src/utils/extensions-catalog.ts`, the typed mirror of the future
+`extensions.catalog.json` — `{ schemaVersion, extensions[] }`, the same shape as Godot's
+`addons/godot_mcp/extensions.catalog.json`). Each `ExtensionDescriptor` carries `extensionId`
+(reverse-DNS resolve key), `name`, `pluginName` (the `Plugins/<pluginName>` folder), `repo` (GitHub
+release source), `version`, **`minCoreVersion`** (the minimum core Unreal-MCP version — surfaced as a
+warning when unmet), `enginePlugins` (gating plugins), and `tools`. The catalog ships **empty** until
+the first extension is published; `--source <dir>` installs an unpublished extension regardless (the
+descriptor is then synthesized from the source `.uplugin`).
+
+**Pluggable install source (Fab-ready).** `resolveInstallSource` (`src/utils/extension-source.ts`) is
+the single decision point for *where* the files come from — `--source` (local) or the GitHub release
+(github.com-only, fail-closed). A future **Fab** (Epic marketplace) channel is added as one new `kind`
+there plus a materializer branch, **without touching callers**.
+
+**Compile-on-install strategy (chosen + documented).** Extensions ship as **source** and are compiled
+by **UnrealBuildTool**. The default is **source-ship + compile-on-next-editor-open** (the install
+reports `rebuildRequired: true`); `--build` opts into an **eager** UBT compile against the resolved
+engine (**Windows-only** — it invokes `UnrealBuildTool.exe` for the `Win64` target; on macOS/Linux omit
+`--build` and let the editor recompile on next open). Source-ship is chosen over shipping
+precompiled-per-UE-version binaries because UE plugin
+binaries are version/config/platform-specific and ABI-unstable across engine minors — exactly why the
+core `install-plugin` also ships source and excludes the stale build cache.
+
+**Engine-agnostic API.** `installExtension(opts)` and its `ExtensionDescriptor` / `InstallExtensionResult`
+shapes are deliberately engine-neutral (no Unreal-only types in the signature) so `unity-mcp-cli` /
+`godot-cli` can adopt the identical surface — the Unreal-specific bits (plugin placement, `.uproject`
+enable, UBT) live behind it.
 
 ## Develop
 
