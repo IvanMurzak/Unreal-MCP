@@ -13,16 +13,19 @@
 // by UBT — so the descriptor carries plugin-placement metadata (`pluginName`,
 // `repo`, `enginePlugins`) rather than a package id.
 //
-// CATALOG FORMAT (also the shape of the future shared
-// `engines/unreal/.../extensions.catalog.json`, mirroring Godot's
+// CATALOG FORMAT (the shape of the shared source-of-truth
+// `cli/extensions.catalog.json`, mirroring Godot's
 // `addons/godot_mcp/extensions.catalog.json` `{ schemaVersion, extensions[] }`):
 //
 //   { schemaVersion: 1, extensions: ExtensionDescriptor[] }
 //
 // This module is the CLI's typed mirror so the published npm package stays
-// self-contained (no runtime dependency on a sibling JSON). When the first Unreal
-// extension ships, append its entry here AND to the JSON, and add a parity test
-// (mirroring godot-cli's `extensions-catalog-parity.test.ts`).
+// self-contained (no runtime dependency on a sibling JSON). The JSON is the
+// single source of truth; this constant MUST stay value-equivalent to it. The
+// parity test `cli/tests/extensions-catalog-parity.test.ts` reads the JSON and
+// FAILS the build if this mirror drifts — so adding/changing an extension means
+// editing BOTH the JSON and this array (the test enforces it), exactly the
+// discipline godot-cli's `extensions-catalog-parity.test.ts` uses.
 //
 // No top-level side effects; pure data + pure lookups only.
 
@@ -81,13 +84,40 @@ export interface ExtensionDescriptor {
 
 /**
  * The extension catalog, the typed mirror of the shared
- * `extensions.catalog.json`. Ships EMPTY until the first Unreal-MCP extension
- * plugin is published — `install-extension <id>` then reports "unknown
- * extension" for every catalog id (the `--source <dir>` channel still works for
- * local/CI/offline installs of an unpublished extension). A future parity test
- * keeps this in lockstep with the JSON.
+ * `cli/extensions.catalog.json`. `install-extension <id>` resolves a user-typed
+ * id against this list (by `extensionId`, `name`, or `pluginName`); an id absent
+ * from it reports "unknown extension" but is still installable via the
+ * `--source <dir>` channel. The parity test
+ * `cli/tests/extensions-catalog-parity.test.ts` keeps this in lockstep with the
+ * JSON source of truth.
  */
-export const EXTENSIONS_CATALOG: readonly ExtensionDescriptor[] = [] as const;
+export const EXTENSIONS_CATALOG: readonly ExtensionDescriptor[] = [
+  {
+    extensionId: 'com.ivanmurzak.unreal-ai-niagara',
+    name: 'Niagara Tools',
+    description: "AI tools for Unreal's Niagara VFX system (list/inspect systems, spawn components).",
+    pluginName: 'UnrealAINiagara',
+    repo: 'IvanMurzak/Unreal-AI-Niagara',
+    version: '0.1.0',
+    minCoreVersion: '0.5.0',
+    enginePlugins: ['Niagara'],
+    tools: [
+      {
+        name: 'niagara-list-systems',
+        description:
+          'List every Niagara system (UNiagaraSystem) asset in the project (read-only), optionally filtered by a content-path prefix.',
+      },
+      {
+        name: 'niagara-get-system',
+        description: 'Inspect a single Niagara system asset (read-only) and report its emitters.',
+      },
+      {
+        name: 'niagara-spawn-component',
+        description: 'Spawn a Niagara component for a system into the active editor world at a location.',
+      },
+    ],
+  },
+] as const;
 
 /** True when a descriptor carries a concrete version pin (drives the up-to-date / update decision). */
 export function hasVersion(descriptor: ExtensionDescriptor): boolean {
