@@ -7,7 +7,7 @@
     <Nullable>enable</Nullable>
     <RootNamespace>com.IvanMurzak.Unreal.MCP.Bridge</RootNamespace>
     <AssemblyName>unreal-mcp-bridge</AssemblyName>
-    <Version>0.5.0</Version>
+    <Version>0.6.0</Version>
     <Authors>Ivan Murzak</Authors>
     <Company>Ivan Murzak</Company>
     <Copyright>Copyright © 2026 Ivan Murzak</Copyright>
