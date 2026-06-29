@@ -34,7 +34,9 @@ BEGIN_DEFINE_SPEC(FUnrealMcpExtensionInstallerSpec, "UnrealMcp.ExtensionInstalle
 	static void InstallerSpecWrite(const FString& Path, const FString& Contents)
 	{
 		IFileManager::Get().MakeDirectory(*FPaths::GetPath(Path), /*Tree*/ true);
-		FFileHelper::SaveStringToFile(Contents, *Path);
+		// Surface a failed scratch write here (fatal in a dev/automation build) instead of letting it turn
+		// into an opaque "file not found" / "install failed" further down the spec.
+		verifyf(FFileHelper::SaveStringToFile(Contents, *Path), TEXT("InstallerSpecWrite: failed to write '%s'"), *Path);
 	}
 
 	static FUnrealMcpExtensionRecord InstallerSpecRecord(const FString& Id, const FString& Version, bool bEnabled, int32 Tools, const FString& Error)

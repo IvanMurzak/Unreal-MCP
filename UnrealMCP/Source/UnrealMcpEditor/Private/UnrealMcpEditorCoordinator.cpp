@@ -407,12 +407,15 @@ void FUnrealMcpEditorCoordinator::Startup()
 			ILiveCodingModule* LiveCoding = FModuleManager::GetModulePtr<ILiveCodingModule>(FName(LIVE_CODING_MODULE_NAME));
 			if (LiveCoding && LiveCoding->IsEnabledForSession() && LiveCoding->HasStarted() && !LiveCoding->IsCompiling())
 			{
-				ELiveCodingCompileResult Result = ELiveCodingCompileResult::NotStarted;
-				LiveCoding->Compile(ELiveCodingCompileFlags::WaitForCompletion, &Result);
-				if (Result == ELiveCodingCompileResult::Success || Result == ELiveCodingCompileResult::NoChanges)
-					return TEXT("Live Coding compile finished. A newly added extension module may still need an editor restart to load.");
-				return TEXT("Live Coding compile did not complete cleanly — restart the editor to finish compiling.");
+				// Fire-and-forget: OnCompileClicked() calls this synchronously on the game thread, so a
+				// WaitForCompletion compile (20-60s) would freeze the editor — and this very panel — looking
+				// like a hang. Kick it off like UE's own Compile button does and point the user at the Live
+				// Coding panel for progress.
+				LiveCoding->Compile(ELiveCodingCompileFlags::None, nullptr);
+				return TEXT("Live Coding compilation started — watch the Live Coding panel for progress. A newly added extension module may still need an editor restart to load.");
 			}
+			if (LiveCoding && LiveCoding->IsEnabledForSession() && LiveCoding->HasStarted())
+				return TEXT("Live Coding is already compiling — wait for it to finish, then restart the editor if the new extension module still isn't loaded.");
 			return TEXT("Live Coding is not enabled/started — restart the editor to finish compiling the installed extension(s).");
 		}
 		return TEXT("Live Coding is unavailable in this session — restart the editor to finish compiling.");

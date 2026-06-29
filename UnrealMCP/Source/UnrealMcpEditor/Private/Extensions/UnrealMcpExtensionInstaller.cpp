@@ -444,7 +444,15 @@ bool FUnrealMcpExtensionInstaller::PlacePluginDir(const FString& SourcePluginRoo
 		if (bHadExisting)
 		{
 			PF.DeleteDirectoryRecursively(*InstallReal);
-			PF.CopyDirectoryTree(*InstallReal, *Backup, /*bOverwriteAllExisting*/ true);
+			if (!PF.CopyDirectoryTree(*InstallReal, *Backup, /*bOverwriteAllExisting*/ true))
+			{
+				// Both the swap AND the rollback failed: the prior install is gone and the plugin dir is now
+				// empty — say so, so the user knows manual repair is needed rather than a simple retry.
+				OutError = FString::Printf(
+					TEXT("failed to move staged plugin into '%s', and restoring the prior install from backup also failed — '%s' is now empty and needs manual repair"),
+					*InstallReal, *InstallReal);
+				return false;
+			}
 		}
 		OutError = FString::Printf(TEXT("failed to move staged plugin into '%s'"), *InstallReal);
 		return false;
@@ -566,7 +574,7 @@ bool FUnrealMcpExtensionInstaller::DownloadAndExtract(const FString& Url, double
 			continue; // directory entry
 		// Zip-slip guard: the resolved path must stay under ExtractDir (mirrors the CLI's extractZip).
 		const FString Target = FPaths::ConvertRelativePathToFull(ExtractDir / Name);
-		if (Target != ExtractDir && !Target.StartsWith(ExtractDir + TEXT("/")) && !Target.StartsWith(ExtractDir + TEXT("\\")))
+		if (Target != ExtractDir && !Target.StartsWith(ExtractDir + TEXT("/")))
 		{
 			UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] skipped suspicious zip entry escaping the extract dir: %s"), *Name);
 			continue;
