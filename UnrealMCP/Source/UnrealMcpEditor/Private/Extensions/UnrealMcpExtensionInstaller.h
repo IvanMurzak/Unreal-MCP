@@ -45,7 +45,11 @@ struct FUnrealMcpInstallResult
 	FString InstalledPath;
 	FString FromVersion;
 	FString ToVersion;
-	/** The gating engine plugins enabled alongside the extension (e.g. Niagara). */
+	/**
+	 * Plugins this install newly enabled in the .uproject — the extension's own plugin plus any
+	 * gating engine plugins (e.g. Niagara) it appended or flipped from disabled. Plugins already
+	 * enabled before the run are NOT listed. Mirrors the CLI's InstallExtensionResult.enabledPlugins.
+	 */
 	TArray<FString> EnabledPlugins;
 	FString UprojectPath;
 	FString Message;

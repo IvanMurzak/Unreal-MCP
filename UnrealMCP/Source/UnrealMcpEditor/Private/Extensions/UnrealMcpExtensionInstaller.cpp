@@ -554,20 +554,19 @@ bool FUnrealMcpExtensionInstaller::DownloadAndExtract(const FString& Url, double
 
 	const FString ExtractDir = FPaths::ConvertRelativePathToFull(
 		FPaths::CreateTempFilename(*FPaths::ProjectIntermediateDir(), TEXT("unreal-mcp-ext-extract-"), TEXT("")));
-	const FString ExtractReal = ExtractDir; // already absolute
-	FM.MakeDirectory(*ExtractReal, /*Tree*/ true);
+	FM.MakeDirectory(*ExtractDir, /*Tree*/ true);
 	// Surface the temp extract dir so the caller deletes it once PlacePluginDir has consumed the plugin
 	// root inside it — the returned OutPluginRoot points INTO this dir, so it cannot be cleaned here.
-	OutExtractDir = ExtractReal;
+	OutExtractDir = ExtractDir;
 
 	const TArray<FString> Names = Reader.GetFileNames();
 	for (const FString& Name : Names)
 	{
 		if (Name.EndsWith(TEXT("/")))
 			continue; // directory entry
-		// Zip-slip guard: the resolved path must stay under ExtractReal (mirrors the CLI's extractZip).
-		const FString Target = FPaths::ConvertRelativePathToFull(ExtractReal / Name);
-		if (Target != ExtractReal && !Target.StartsWith(ExtractReal + TEXT("/")) && !Target.StartsWith(ExtractReal + TEXT("\\")))
+		// Zip-slip guard: the resolved path must stay under ExtractDir (mirrors the CLI's extractZip).
+		const FString Target = FPaths::ConvertRelativePathToFull(ExtractDir / Name);
+		if (Target != ExtractDir && !Target.StartsWith(ExtractDir + TEXT("/")) && !Target.StartsWith(ExtractDir + TEXT("\\")))
 		{
 			UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] skipped suspicious zip entry escaping the extract dir: %s"), *Name);
 			continue;
@@ -586,7 +585,7 @@ bool FUnrealMcpExtensionInstaller::DownloadAndExtract(const FString& Url, double
 		}
 	}
 
-	const FString Uplugin = FindUPluginFile(ExtractReal);
+	const FString Uplugin = FindUPluginFile(ExtractDir);
 	if (Uplugin.IsEmpty())
 	{
 		OutError = FString::Printf(TEXT("downloaded zip did not contain a .uplugin (%s is not a valid extension release)"), *Url);

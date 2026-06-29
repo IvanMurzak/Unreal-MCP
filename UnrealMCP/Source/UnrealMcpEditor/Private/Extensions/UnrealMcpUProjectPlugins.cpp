@@ -111,7 +111,8 @@ bool FUnrealMcpUProjectPlugins::EnablePluginsInUProject(
 		else
 		{
 			const TSharedPtr<FJsonObject>* Obj = nullptr;
-			Plugins[Idx]->TryGetObject(Obj);
+			if (!Plugins[Idx]->TryGetObject(Obj) || !Obj || !(*Obj).IsValid())
+				continue; // defensive: FindPluginIndex validated this entry, but never deref a null object
 			bool bEnabled = true;
 			(*Obj)->TryGetBoolField(TEXT("Enabled"), bEnabled);
 			if (!bEnabled)
