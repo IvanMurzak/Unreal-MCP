@@ -6,10 +6,30 @@
 #include "CoreMinimal.h"
 #include "UI/SUnrealMcpToolsWindow.h"
 #include "UI/SUnrealMcpFeatureListWindow.h"
+#include "UI/SUnrealMcpExtensionsWindow.h"
+#include "Extensions/UnrealMcpExtensionManager.h" // FUnrealMcpExtensionRecord (by value in the installed-provider signature)
 
 class FUnrealMcpEditorViewModel;
 class SDockTab;
 class FSpawnTabArgs;
+
+/**
+ * Wiring for the §7 Extensions panel (docs/ARCHITECTURE.md §7 item 10 — install channel #3). Bundled so
+ * the aux-windows Register() signature stays readable. The providers/delegates are owned by the editor
+ * coordinator (catalog fetch + installer in the editor module; the enable toggle routes to the runtime
+ * extension manager's §5 hot-load path). The InstalledProvider is guarded by the same teardown alive-flag
+ * as the Tools provider.
+ */
+struct FUnrealMcpExtensionsPanelWiring
+{
+	FString ProjectDir;
+	TArray<FUnrealMcpCatalogEntry> InitialCatalog;
+	TFunction<TArray<FUnrealMcpExtensionRecord>()> InstalledProvider;
+	TFunction<bool(TArray<FUnrealMcpCatalogEntry>&, FString&)> CatalogFetcher;
+	TFunction<void(const FString&, bool)> OnSetEnabled;
+	TFunction<FUnrealMcpInstallResult(const FUnrealMcpCatalogEntry&, bool)> OnInstall;
+	TFunction<FString()> OnTriggerLiveCompile;
+};
 
 /**
  * Registers the §7 auxiliary windows (docs/ARCHITECTURE.md §7) as nomad dockable tabs under the same
@@ -39,6 +59,7 @@ public:
 	static const FName PromptsTabId;
 	static const FName ResourcesTabId;
 	static const FName SerializationCheckTabId;
+	static const FName ExtensionsTabId;
 
 	/**
 	 * Open (or focus, if already open) the Serialization Check tab. Static so the footer "Check" button and the
@@ -58,7 +79,8 @@ public:
 		const TSharedRef<FUnrealMcpEditorViewModel>& InViewModel,
 		TFunction<TArray<FUnrealMcpToolListEntry>()> InToolListProvider,
 		TFunction<TArray<FUnrealMcpFeatureEntry>()> InPromptProvider,
-		TFunction<TArray<FUnrealMcpFeatureEntry>()> InResourceProvider);
+		TFunction<TArray<FUnrealMcpFeatureEntry>()> InResourceProvider,
+		FUnrealMcpExtensionsPanelWiring InExtensionsWiring = FUnrealMcpExtensionsPanelWiring());
 
 	/** Unregister the tab spawners (Shutdown). Idempotent. Neutralizes the providers first. */
 	void Unregister();
@@ -76,11 +98,14 @@ private:
 	TSharedRef<SDockTab> SpawnPromptsTab(const FSpawnTabArgs& Args);
 	TSharedRef<SDockTab> SpawnResourcesTab(const FSpawnTabArgs& Args);
 	TSharedRef<SDockTab> SpawnSerializationCheckTab(const FSpawnTabArgs& Args);
+	TSharedRef<SDockTab> SpawnExtensionsTab(const FSpawnTabArgs& Args);
 
 	TSharedPtr<FUnrealMcpEditorViewModel> ViewModel;
 	TFunction<TArray<FUnrealMcpToolListEntry>()> ToolListProvider;
 	TFunction<TArray<FUnrealMcpFeatureEntry>()> PromptProvider;
 	TFunction<TArray<FUnrealMcpFeatureEntry>()> ResourceProvider;
+	// §7 Extensions panel (install channel #3) wiring; InstalledProvider is alive-flag-guarded like the Tools provider.
+	FUnrealMcpExtensionsPanelWiring ExtensionsWiring;
 	// Shared with every widget-held copy of the registry-touching provider; NeutralizeProviders() flips it
 	// false during teardown so a surviving widget's next paint returns empty rather than dereferencing freed memory.
 	TSharedPtr<bool> ProvidersAlive;
