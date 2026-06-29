@@ -103,8 +103,38 @@ describe('extensions-catalog', () => {
     tools: [{ name: 'niagara-create', description: 'Create a Niagara system.' }],
   };
 
-  it('ships empty by default', () => {
-    expect(EXTENSIONS_CATALOG).toHaveLength(0);
+  it('ships the Unreal-AI-Niagara entry', () => {
+    expect(EXTENSIONS_CATALOG.length).toBeGreaterThanOrEqual(1);
+    const niagara = findExtension('com.ivanmurzak.unreal-ai-niagara');
+    expect(niagara).not.toBeNull();
+    expect(niagara!.pluginName).toBe('UnrealAINiagara');
+    expect(niagara!.repo).toBe('IvanMurzak/Unreal-AI-Niagara');
+    expect(niagara!.version).toBe('0.1.0');
+    expect(niagara!.enginePlugins).toEqual(['Niagara']);
+    expect(niagara!.tools.map((t) => t.name)).toEqual([
+      'niagara-list-systems',
+      'niagara-get-system',
+      'niagara-spawn-component',
+    ]);
+  });
+
+  it('install-extension resolves the Niagara id to the v0.1.0 release zip by id', () => {
+    // Default-channel resolution: a user typing `install-extension <niagara-id>` (no --source,
+    // no --version) resolves to the catalog-pinned v0.1.0 GitHub-release zip.
+    const niagara = findExtension('com.ivanmurzak.unreal-ai-niagara');
+    expect(niagara).not.toBeNull();
+    const source = resolveInstallSource({
+      repo: niagara!.repo,
+      pluginName: niagara!.pluginName,
+      version: niagara!.version,
+    });
+    expect(source.kind).toBe('github-release');
+    if (source.kind === 'github-release') {
+      expect(source.url).toBe(
+        'https://github.com/IvanMurzak/Unreal-AI-Niagara/releases/download/v0.1.0/UnrealAINiagara-0.1.0.zip',
+      );
+      expect(source.version).toBe('0.1.0');
+    }
   });
 
   it('findExtension matches by extensionId, name, or pluginName (case-insensitive)', () => {

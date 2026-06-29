@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "extensions": [
+    {
+      "extensionId": "com.ivanmurzak.unreal-ai-niagara",
+      "name": "Niagara Tools",
+      "description": "AI tools for Unreal's Niagara VFX system (list/inspect systems, spawn components).",
+      "pluginName": "UnrealAINiagara",
+      "repo": "IvanMurzak/Unreal-AI-Niagara",
+      "version": "0.1.0",
+      "minCoreVersion": "0.5.0",
+      "enginePlugins": ["Niagara"],
+      "tools": [
+        { "name": "niagara-list-systems", "description": "List every Niagara system (UNiagaraSystem) asset in the project (read-only), optionally filtered by a content-path prefix." },
+        { "name": "niagara-get-system", "description": "Inspect a single Niagara system asset (read-only) and report its emitters." },
+        { "name": "niagara-spawn-component", "description": "Spawn a Niagara component for a system into the active editor world at a location." }
+      ]
+    }
+  ]
+}

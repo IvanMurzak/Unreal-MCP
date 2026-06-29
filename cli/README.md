@@ -110,14 +110,15 @@ and (4) compiles it. It is **idempotent** — a re-run that finds the same versi
 enabled writes nothing.
 
 **Catalog / manifest format.** The installable extensions are listed in a shared, **engine-agnostic**
-catalog (`src/utils/extensions-catalog.ts`, the typed mirror of the future
+catalog (`src/utils/extensions-catalog.ts`, the typed mirror of the source-of-truth
 `extensions.catalog.json` — `{ schemaVersion, extensions[] }`, the same shape as Godot's
-`addons/godot_mcp/extensions.catalog.json`). Each `ExtensionDescriptor` carries `extensionId`
-(reverse-DNS resolve key), `name`, `pluginName` (the `Plugins/<pluginName>` folder), `repo` (GitHub
-release source), `version`, **`minCoreVersion`** (the minimum core Unreal-MCP version — surfaced as a
-warning when unmet), `enginePlugins` (gating plugins), and `tools`. The catalog ships **empty** until
-the first extension is published; `--source <dir>` installs an unpublished extension regardless (the
-descriptor is then synthesized from the source `.uplugin`).
+`addons/godot_mcp/extensions.catalog.json`; a parity test keeps the two in lockstep). Each
+`ExtensionDescriptor` carries `extensionId` (reverse-DNS resolve key), `name`, `pluginName` (the
+`Plugins/<pluginName>` folder), `repo` (GitHub release source), `version`, **`minCoreVersion`** (the
+minimum core Unreal-MCP version — surfaced as a warning when unmet), `enginePlugins` (gating plugins),
+and `tools`. The catalog currently lists **Niagara Tools** (`com.ivanmurzak.unreal-ai-niagara`);
+`--source <dir>` installs an unpublished or off-catalog extension regardless (the descriptor is then
+synthesized from the source `.uplugin`).
 
 **Pluggable install source (Fab-ready).** `resolveInstallSource` (`src/utils/extension-source.ts`) is
 the single decision point for *where* the files come from — `--source` (local) or the GitHub release
