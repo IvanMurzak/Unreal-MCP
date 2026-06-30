@@ -117,6 +117,43 @@ export const EXTENSIONS_CATALOG: readonly ExtensionDescriptor[] = [
       },
     ],
   },
+  {
+    extensionId: 'com.ivanmurzak.unreal-ai-landscape',
+    name: 'Landscape Tools',
+    description: "AI tools for Unreal's Landscape + Water systems (inspect landscapes, water bodies & zones).",
+    pluginName: 'UnrealAILandscape',
+    repo: 'IvanMurzak/Unreal-AI-Landscape',
+    version: '0.1.0',
+    minCoreVersion: '0.5.0',
+    enginePlugins: ['Water'],
+    tools: [
+      {
+        name: 'landscape-list-actors',
+        description:
+          'Lists every Landscape actor / proxy in the active editor world (read-only), reporting class, whether it is the primary ALandscape (vs a streaming proxy), and component count.',
+      },
+      {
+        name: 'landscape-get-actor',
+        description:
+          'Inspects a single Landscape actor by name (read-only): section layout (componentSizeQuads / subsectionSizeQuads / numSubsections), component count, landscape material, and paint layers.',
+      },
+      {
+        name: 'landscape-list-water-bodies',
+        description:
+          'Lists every Water body actor in the active editor world (read-only), reporting its type (River / Lake / Ocean / Custom) and spline-point count.',
+      },
+      {
+        name: 'landscape-get-water-body',
+        description:
+          'Inspects a single Water body by name (read-only): type, spline-point count, water material, and owning water zone.',
+      },
+      {
+        name: 'landscape-list-water-zones',
+        description:
+          'Lists every Water zone actor in the active editor world (read-only), reporting world location and 2D zone extent.',
+      },
+    ],
+  },
 ] as const;
 
 /** True when a descriptor carries a concrete version pin (drives the up-to-date / update decision). */
