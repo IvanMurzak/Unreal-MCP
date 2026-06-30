@@ -124,7 +124,7 @@ export const EXTENSIONS_CATALOG: readonly ExtensionDescriptor[] = [
       "AI tools for Unreal's Control Rig (list/inspect rig blueprints, controls, bones, and actor components).",
     pluginName: 'UnrealAIControlRig',
     repo: 'IvanMurzak/Unreal-AI-ControlRig',
-    version: '0.1.0',
+    version: '0.1.1',
     minCoreVersion: '0.5.0',
     enginePlugins: ['ControlRig'],
     tools: [
@@ -151,7 +151,7 @@ export const EXTENSIONS_CATALOG: readonly ExtensionDescriptor[] = [
       {
         name: 'control-rig-get-component',
         description:
-          'Inspects the Control Rig component of an actor in the active editor world (read-only). Looks the actor up by its label. Returns { actorName, componentName, controlRigClass } or a defensive error if the actor or component is not found.',
+          'Inspects the Control Rig component of an actor in the active editor world (read-only). Looks the actor up by its label. Returns { actorName, componentName, controlRigClass, hasControlRig } (controlRigClass is the bound rig instance\'s class, or "None" when no rig is bound) or a defensive error if the actor or component is not found.',
       },
     ],
   },
