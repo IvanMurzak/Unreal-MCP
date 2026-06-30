@@ -8,6 +8,7 @@
 #include "Widgets/DeclarativeSyntaxSupport.h"
 #include "UI/UnrealMcpEditorViewModel.h"
 #include "UI/UnrealMcpAgentConfigModels.h"
+#include "UI/SUnrealMcpExtensionsWindow.h" // FUnrealMcpExtensionsPanelWiring + the embedded Extensions panel (issue #179)
 
 class FJsonObject;
 class SUnrealMcpAgentConfigurators;
@@ -42,6 +43,13 @@ public:
 		 * the SUnrealMcpAgentConfigurators panel; wired by the runtime to FUnrealMcpBridgeServer::SendAgentConfigMessage.
 		 */
 		SLATE_ARGUMENT(TFunction<bool(const TSharedPtr<FJsonObject>&)>, SendAgentConfigRequest)
+		/**
+		 * Optional: wiring for the embedded Extensions section (§7 item 10, issue #179 — Unity-parity). When the
+		 * coordinator supplies live providers (catalog fetch + the FUnrealMcpExtensionInstaller install path + the
+		 * §5 hot-load enable toggle), BuildExtensionsSection() hosts the real SUnrealMcpExtensionsWindow panel in
+		 * embedded mode; left default (unwired) it falls back to the static placeholder.
+		 */
+		SLATE_ARGUMENT(FUnrealMcpExtensionsPanelWiring, ExtensionsWiring)
 	SLATE_END_ARGS()
 
 	void Construct(const FArguments& InArgs);
@@ -59,6 +67,9 @@ private:
 	TFunction<FString()> BridgeStatusProvider;
 	TFunction<FAiAgentConnectionInfo()> ConnectionInfoProvider;
 	TFunction<bool(const TSharedPtr<FJsonObject>&)> SendAgentConfigRequest;
+	// §7 item 10 (issue #179): wiring for the embedded Extensions section. Held so BuildExtensionsSection() can
+	// construct the SUnrealMcpExtensionsWindow panel in embedded mode against the coordinator's install providers.
+	FUnrealMcpExtensionsPanelWiring ExtensionsWiring;
 	// The AI Agent Configurators panel — held so the runtime's `agent-config-result` feed can reach it.
 	TSharedPtr<SUnrealMcpAgentConfigurators> AgentConfiguratorsPanel;
 

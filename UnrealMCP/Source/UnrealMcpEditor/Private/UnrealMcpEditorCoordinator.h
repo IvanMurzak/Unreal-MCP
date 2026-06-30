@@ -67,6 +67,13 @@ private:
 	TUniquePtr<FUnrealMcpMainWindowTab> MainWindowTab;
 	TUniquePtr<FUnrealMcpAuxWindows> AuxWindows;
 
+	// Teardown alive-flag guarding the embedded Extensions panel's InstalledProvider (issue #179). The provider
+	// captures the raw FUnrealMcpExtensionManager*; a deferred main-window paint (a queued RequestCloseTab) could
+	// otherwise fire after Shutdown frees the extension manager. Flipped false at the START of Shutdown() — before
+	// the main-window tab close and the ExtensionManager reset — so any surviving widget read returns empty. This
+	// mirrors FUnrealMcpAuxWindows::ProvidersAlive for the Tools provider (the lifetime owner holds the flag here).
+	TSharedPtr<bool> ExtProvidersAlive;
+
 	// DEV-ONLY inject/control HTTP bridge over the live dock (docs/ARCHITECTURE.md §7). Created + started in
 	// Startup() ONLY when the editor process env UNREAL_MCP_DEV_CONTROL == "1"; null (never listening) otherwise.
 	TUniquePtr<FUnrealMcpDevControlServer> DevControlServer;

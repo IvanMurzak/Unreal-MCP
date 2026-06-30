@@ -21,20 +21,17 @@ const FName FUnrealMcpAuxWindows::ToolsTabId(TEXT("UnrealMcpToolsWindow"));
 const FName FUnrealMcpAuxWindows::PromptsTabId(TEXT("UnrealMcpPromptsWindow"));
 const FName FUnrealMcpAuxWindows::ResourcesTabId(TEXT("UnrealMcpResourcesWindow"));
 const FName FUnrealMcpAuxWindows::SerializationCheckTabId(TEXT("UnrealMcpSerializationCheckWindow"));
-const FName FUnrealMcpAuxWindows::ExtensionsTabId(TEXT("UnrealMcpExtensionsWindow"));
 
 void FUnrealMcpAuxWindows::Register(
 	const TSharedRef<FUnrealMcpEditorViewModel>& InViewModel,
 	TFunction<TArray<FUnrealMcpToolListEntry>()> InToolListProvider,
 	TFunction<TArray<FUnrealMcpFeatureEntry>()> InPromptProvider,
-	TFunction<TArray<FUnrealMcpFeatureEntry>()> InResourceProvider,
-	FUnrealMcpExtensionsPanelWiring InExtensionsWiring)
+	TFunction<TArray<FUnrealMcpFeatureEntry>()> InResourceProvider)
 {
 	if (bRegistered)
 		return;
 
 	ViewModel = InViewModel;
-	ExtensionsWiring = MoveTemp(InExtensionsWiring);
 
 	// The Tools provider closes over the runtime-owned registry (raw, non-owning). A widget can outlive
 	// Unregister() — a deferred RequestCloseTab still queued when the runtime frees those subsystems — and
@@ -50,19 +47,6 @@ void FUnrealMcpAuxWindows::Register(
 	};
 	PromptProvider = MoveTemp(InPromptProvider);
 	ResourceProvider = MoveTemp(InResourceProvider);
-
-	// Guard the Extensions panel's loaded-provider snapshot with the SAME teardown alive-flag: a deferred
-	// widget paint after Unregister() (which frees the runtime extension manager) must short-circuit to an
-	// empty result rather than dereference freed memory. The enable/install delegates are click-driven on a
-	// live editor, but guard the read-each-paint InstalledProvider exactly like the Tools provider.
-	if (ExtensionsWiring.InstalledProvider)
-	{
-		ExtensionsWiring.InstalledProvider =
-			[Alive, Inner = MoveTemp(ExtensionsWiring.InstalledProvider)]() -> TArray<FUnrealMcpExtensionRecord>
-			{
-				return (Alive.IsValid() && *Alive && Inner) ? Inner() : TArray<FUnrealMcpExtensionRecord>();
-			};
-	}
 
 	// Slate may be unavailable in a commandlet / -nullrhi headless run; guard so the Automation/smoke runs
 	// (which load the module) never crash on tab registration (mirrors the main-window tab).
@@ -106,12 +90,10 @@ void FUnrealMcpAuxWindows::Register(
 		.SetGroup(Group)
 		.SetIcon(FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Adjust"));
 
-	// §7 item 10 Extensions panel — install channel #3 (browse/install/enable/disable/update extensions in-editor).
-	TabManager.RegisterNomadTabSpawner(ExtensionsTabId, FOnSpawnTab::CreateRaw(this, &FUnrealMcpAuxWindows::SpawnExtensionsTab))
-		.SetDisplayName(LOCTEXT("ExtensionsTabTitle", "Extensions"))
-		.SetTooltipText(LOCTEXT("ExtensionsTabTooltip", "Browse, install, enable/disable, and update Unreal-MCP extensions without leaving the editor."))
-		.SetGroup(Group)
-		.SetIcon(FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Plus"));
+	// The §7 item 10 Extensions panel (install channel #3) is NO LONGER a standalone nomad tab (issue #179): the
+	// per-extension Install / Update / Installed list now lives inside the "AI Game Developer" main window's
+	// Extensions section (Unity-parity), wired by the coordinator straight to FUnrealMcpMainWindowTab. The same
+	// SUnrealMcpExtensionsWindow widget is reused there in embedded mode — no duplicate window for the user to find.
 
 	// Connection settings live entirely in the single "AI Game Developer" main window (issue #107, Unity-MCP
 	// parity). The separate "AI Game Developer Settings" nomad tab and the "Project → Plugins → AI Game Developer"
@@ -139,7 +121,7 @@ void FUnrealMcpAuxWindows::Unregister()
 		FGlobalTabmanager& TabManager = *FGlobalTabmanager::Get();
 		// Close any live tab first so its hosted widget (a strong view-model ref) is torn down before the runtime
 		// frees the view-model — same use-after-free guard as the main-window tab.
-		for (const FName& TabId : { ToolsTabId, PromptsTabId, ResourcesTabId, SerializationCheckTabId, ExtensionsTabId })
+		for (const FName& TabId : { ToolsTabId, PromptsTabId, ResourcesTabId, SerializationCheckTabId })
 		{
 			if (TSharedPtr<SDockTab> LiveTab = TabManager.FindExistingLiveTab(TabId))
 				LiveTab->RequestCloseTab();
@@ -195,24 +177,6 @@ TSharedRef<SDockTab> FUnrealMcpAuxWindows::SpawnSerializationCheckTab(const FSpa
 	// guard here (unlike the registry-backed Tools window).
 	TSharedRef<SDockTab> Tab = SNew(SDockTab).TabRole(ETabRole::NomadTab);
 	Tab->SetContent(SNew(SUnrealMcpSerializationCheckWindow));
-	return Tab;
-}
-
-TSharedRef<SDockTab> FUnrealMcpAuxWindows::SpawnExtensionsTab(const FSpawnTabArgs& Args)
-{
-	// The §7 Extensions panel (install channel #3). The InstalledProvider was alive-flag-guarded in Register so a
-	// deferred paint after teardown returns empty rather than dereferencing the freed runtime extension manager;
-	// the catalog fetch + install + enable delegates are click-driven on a live editor.
-	TSharedRef<SDockTab> Tab = SNew(SDockTab).TabRole(ETabRole::NomadTab);
-	Tab->SetContent(
-		SNew(SUnrealMcpExtensionsWindow)
-		.ProjectDir(ExtensionsWiring.ProjectDir)
-		.InitialCatalog(ExtensionsWiring.InitialCatalog)
-		.InstalledProvider(ExtensionsWiring.InstalledProvider)
-		.CatalogFetcher(ExtensionsWiring.CatalogFetcher)
-		.OnSetEnabled(ExtensionsWiring.OnSetEnabled)
-		.OnInstall(ExtensionsWiring.OnInstall)
-		.OnTriggerLiveCompile(ExtensionsWiring.OnTriggerLiveCompile));
 	return Tab;
 }
 

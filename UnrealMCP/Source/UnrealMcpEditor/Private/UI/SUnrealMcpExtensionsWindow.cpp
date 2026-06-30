@@ -18,6 +18,7 @@
 
 void SUnrealMcpExtensionsWindow::Construct(const FArguments& InArgs)
 {
+	bEmbedded = InArgs._bEmbedded;
 	ProjectDir = InArgs._ProjectDir;
 	Catalog = InArgs._InitialCatalog;
 	InstalledProvider = InArgs._InstalledProvider;
@@ -32,29 +33,37 @@ void SUnrealMcpExtensionsWindow::Construct(const FArguments& InArgs)
 
 	ListContainer = SNew(SVerticalBox);
 
-	ChildSlot
-	[
-		SNew(SVerticalBox)
-		// Header: title + Refresh.
-		+ SVerticalBox::Slot().AutoHeight().Padding(8, 8, 8, 4)
+	// The Refresh button is identical in both modes. In embedded mode it is the only header element (the host
+	// main window's section header already says "Extensions"); standalone, it sits to the right of the bold title.
+	const TSharedRef<SWidget> RefreshButton =
+		SNew(SButton)
+		.Text(LOCTEXT("ExtRefresh", "Refresh catalog"))
+		.ToolTipText(LOCTEXT("ExtRefreshTip", "Fetch the latest available-extensions catalog over HTTP."))
+		.OnClicked(this, &SUnrealMcpExtensionsWindow::OnRefreshClicked);
+
+	// Embedded: the host section header already says "Extensions", so the header row is just the Refresh button,
+	// right-aligned at the slot level. Standalone: a FillWidth bold title pushes Refresh to the right.
+	TSharedRef<SHorizontalBox> HeaderRow = SNew(SHorizontalBox);
+	if (!bEmbedded)
+	{
+		HeaderRow->AddSlot().FillWidth(1.0f).VAlign(VAlign_Center)
 		[
-			SNew(SHorizontalBox)
-			+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
-			[
-				SNew(STextBlock)
-				.Text(LOCTEXT("ExtHeading", "Extensions"))
-				.Font(FCoreStyle::GetDefaultFontStyle("Bold", 13))
-			]
-			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
-			[
-				SNew(SButton)
-				.Text(LOCTEXT("ExtRefresh", "Refresh catalog"))
-				.ToolTipText(LOCTEXT("ExtRefreshTip", "Fetch the latest available-extensions catalog over HTTP."))
-				.OnClicked(this, &SUnrealMcpExtensionsWindow::OnRefreshClicked)
-			]
-		]
+			SNew(STextBlock)
+			.Text(LOCTEXT("ExtHeading", "Extensions"))
+			.Font(FCoreStyle::GetDefaultFontStyle("Bold", 13))
+		];
+	}
+	HeaderRow->AddSlot().AutoWidth().VAlign(VAlign_Center)[ RefreshButton ];
+
+	// Embedded composes into the host's padded scroll area, so it carries no outer padding of its own.
+	const FMargin HeaderPad = bEmbedded ? FMargin(0, 0, 0, 4) : FMargin(8, 8, 8, 4);
+	const FMargin LinePad   = bEmbedded ? FMargin(0, 0, 0, 4) : FMargin(8, 0, 8, 4);
+
+	TSharedRef<SVerticalBox> Body = SNew(SVerticalBox)
+		// Header: (embedded) Refresh only, right-aligned · (standalone) bold title + Refresh.
+		+ SVerticalBox::Slot().AutoHeight().HAlign(bEmbedded ? HAlign_Right : HAlign_Fill).Padding(HeaderPad)[ HeaderRow ]
 		// Status line.
-		+ SVerticalBox::Slot().AutoHeight().Padding(8, 0, 8, 4)
+		+ SVerticalBox::Slot().AutoHeight().Padding(LinePad)
 		[
 			SNew(STextBlock)
 			.Text(this, &SUnrealMcpExtensionsWindow::GetStatusText)
@@ -62,7 +71,7 @@ void SUnrealMcpExtensionsWindow::Construct(const FArguments& InArgs)
 			.ColorAndOpacity(FSlateColor::UseSubduedForeground())
 		]
 		// Compile-on-install hint (the §5 key UX risk): visible only after an install that needs a rebuild.
-		+ SVerticalBox::Slot().AutoHeight().Padding(8, 0, 8, 4)
+		+ SVerticalBox::Slot().AutoHeight().Padding(LinePad)
 		[
 			SNew(SBorder)
 			.Visibility(this, &SUnrealMcpExtensionsWindow::GetRestartHintVisibility)
@@ -84,14 +93,25 @@ void SUnrealMcpExtensionsWindow::Construct(const FArguments& InArgs)
 					.OnClicked(this, &SUnrealMcpExtensionsWindow::OnCompileClicked)
 				]
 			]
-		]
-		+ SVerticalBox::Slot().AutoHeight()[ SNew(SSeparator) ]
-		+ SVerticalBox::Slot().FillHeight(1.0f)
+		];
+
+	if (bEmbedded)
+	{
+		// The host main window already wraps everything in an SScrollBox, so the list is an AutoHeight block —
+		// a nested FillHeight scroll box here would collapse to zero height inside the host's AutoHeight slot.
+		Body->AddSlot().AutoHeight().Padding(0, 4, 0, 0)[ ListContainer.ToSharedRef() ];
+	}
+	else
+	{
+		Body->AddSlot().AutoHeight()[ SNew(SSeparator) ];
+		Body->AddSlot().FillHeight(1.0f)
 		[
 			SNew(SScrollBox)
 			+ SScrollBox::Slot().Padding(8.0f)[ ListContainer.ToSharedRef() ]
-		]
-	];
+		];
+	}
+
+	ChildSlot[ Body ];
 
 	RebuildList();
 }

@@ -318,67 +318,24 @@ void FUnrealMcpEditorCoordinator::Startup()
 		});
 	}
 
-	// Register the nomad dockable tab + Window-menu entry (§7). A manual "Restart bridge" force-relaunches the
-	// sidecar; the bridge-status line reflects the sidecar's run state.
-	FUnrealMcpSidecarManager* SidecarPtr = SidecarManager.Get();
-	MainWindowTab = MakeUnique<FUnrealMcpMainWindowTab>();
-	MainWindowTab->Register(
-		ViewModel.ToSharedRef(),
-		PluginVersion,
-		FSimpleDelegate::CreateLambda([SidecarPtr, BoundPort, Token]()
-		{
-			if (SidecarPtr)
-			{
-				SidecarPtr->Stop();
-				SidecarPtr->StartForPort(BoundPort, Token);
-			}
-		}),
-		[SidecarPtr]() -> FString
-		{
-			if (SidecarPtr && SidecarPtr->IsRunning())
-				return FString::Printf(TEXT("Running (restarts: %d)"), SidecarPtr->GetRestartCount());
-			return TEXT("Stopped");
-		},
-		// §7/§8 AI Agent Configurators: yield the live connection facts so the assembled STDIO/HTTP snippets
-		// reflect the current config. Re-resolve the §8 config on each call (the user may have just edited the
-		// host/token in the same window) and read the bound IPC port from the bridge. The local server binary
-		// path is owned by the cli/§6 install layout — not the plugin — so it is left empty here; the STDIO
-		// snippet is still a valid template (the user supplies the binary, exactly the cli's stance), and the
-		// HTTP form is fully self-contained.
-		[BridgeServerPtr]() -> FAiAgentConnectionInfo
-		{
-			const FUnrealMcpConfig Live = FUnrealMcpConfig::LoadAndResolve();
-			const int32 Port = BridgeServerPtr ? BridgeServerPtr->GetBoundPort() : 0;
-			return FAiAgentConnectionInfo::FromPluginConfig(Live, /*ServerPath*/ FString(), Port);
-		},
-		// §7 (issue #101) AI Agent Configurators: send a configurator request to the sidecar over IPC. Returns
-		// false when no sidecar is connected — the thin panel then shows its graceful "bridge not connected"
-		// state and re-requests on the next handshake. The result returns via the status sink's
-		// `agent-config-result` route above.
-		[BridgeServerPtr](const TSharedPtr<FJsonObject>& Request) -> bool
-		{
-			return BridgeServerPtr ? BridgeServerPtr->SendAgentConfigMessage(Request) : false;
-		});
-
-	// §7 auxiliary windows (MCP Tools / Prompts / Resources). The Tools window snapshots the registry on open for
-	// its list — a §5 extension hot-reload can change the set after boot, so an already-open window shows its
-	// open-time snapshot and reopen refreshes it. Prompts/Resources have no plugin-side feed yet (the .NET sidecar
-	// owns those features, §2) — their providers return empty and the windows render an honest empty state rather
-	// than a fabricated registry. Connection settings (incl. the read-only IPC-bridge-port line) live in the
-	// single "AI Game Developer" main window, not an aux window (issue #107, Unity-MCP parity).
-	// §7 item 10 Extensions panel (install channel #3): wire the catalog fetch (HTTP, on-demand), the install
-	// service (FUnrealMcpExtensionInstaller — fetch → place in Plugins/ → edit .uproject → compile-on-open), and
-	// the §5 hot-load enable toggle (ExtensionManager::SetExtensionEnabled → manifest revision bump → bridge
-	// re-proxies). The InstalledProvider snapshots the runtime extension manager's live records; the aux-windows
-	// guards it with the teardown alive-flag. No catalog fetch happens at boot (empty InitialCatalog) so the
-	// headless smoke / Automation runs never block on the network.
+	// §7 item 10 Extensions panel (install channel #3, issue #179 — Unity-parity): the per-extension
+	// Install / Update / Installed list is now hosted INSIDE the "AI Game Developer" main window's Extensions
+	// section (no separate window to find). Wire the catalog fetch (HTTP, on-demand), the install service
+	// (FUnrealMcpExtensionInstaller — fetch → place in Plugins/ → edit .uproject → compile-on-open), and the §5
+	// hot-load enable toggle (ExtensionManager::SetExtensionEnabled → manifest revision bump → bridge re-proxies).
+	// The InstalledProvider snapshots the runtime extension manager's live records, guarded by the teardown
+	// alive-flag (ExtProvidersAlive) so a deferred main-window paint after Shutdown frees the manager returns
+	// empty rather than dereferencing freed memory. No catalog fetch happens at boot (empty InitialCatalog) so
+	// the headless smoke / Automation runs never block on the network.
+	ExtProvidersAlive = MakeShared<bool>(true);
+	TSharedPtr<bool> ExtAlive = ExtProvidersAlive;
 	FUnrealMcpExtensionManager* ExtMgrPtr = ExtensionManager.Get();
 	const FString ExtProjectDir = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir());
 	FUnrealMcpExtensionsPanelWiring ExtWiring;
 	ExtWiring.ProjectDir = ExtProjectDir;
-	ExtWiring.InstalledProvider = [ExtMgrPtr]() -> TArray<FUnrealMcpExtensionRecord>
+	ExtWiring.InstalledProvider = [ExtAlive, ExtMgrPtr]() -> TArray<FUnrealMcpExtensionRecord>
 	{
-		return ExtMgrPtr ? ExtMgrPtr->GetExtensions() : TArray<FUnrealMcpExtensionRecord>();
+		return (ExtAlive.IsValid() && *ExtAlive && ExtMgrPtr) ? ExtMgrPtr->GetExtensions() : TArray<FUnrealMcpExtensionRecord>();
 	};
 	ExtWiring.CatalogFetcher = [](TArray<FUnrealMcpCatalogEntry>& Out, FString& Err) -> bool
 	{
@@ -424,6 +381,57 @@ void FUnrealMcpEditorCoordinator::Startup()
 #endif
 	};
 
+	// Register the nomad dockable tab + Window-menu entry (§7). A manual "Restart bridge" force-relaunches the
+	// sidecar; the bridge-status line reflects the sidecar's run state. The Extensions wiring above rides along so
+	// the spawned main window's Extensions section hosts the live Install/Update list (issue #179).
+	FUnrealMcpSidecarManager* SidecarPtr = SidecarManager.Get();
+	MainWindowTab = MakeUnique<FUnrealMcpMainWindowTab>();
+	MainWindowTab->Register(
+		ViewModel.ToSharedRef(),
+		PluginVersion,
+		FSimpleDelegate::CreateLambda([SidecarPtr, BoundPort, Token]()
+		{
+			if (SidecarPtr)
+			{
+				SidecarPtr->Stop();
+				SidecarPtr->StartForPort(BoundPort, Token);
+			}
+		}),
+		[SidecarPtr]() -> FString
+		{
+			if (SidecarPtr && SidecarPtr->IsRunning())
+				return FString::Printf(TEXT("Running (restarts: %d)"), SidecarPtr->GetRestartCount());
+			return TEXT("Stopped");
+		},
+		// §7/§8 AI Agent Configurators: yield the live connection facts so the assembled STDIO/HTTP snippets
+		// reflect the current config. Re-resolve the §8 config on each call (the user may have just edited the
+		// host/token in the same window) and read the bound IPC port from the bridge. The local server binary
+		// path is owned by the cli/§6 install layout — not the plugin — so it is left empty here; the STDIO
+		// snippet is still a valid template (the user supplies the binary, exactly the cli's stance), and the
+		// HTTP form is fully self-contained.
+		[BridgeServerPtr]() -> FAiAgentConnectionInfo
+		{
+			const FUnrealMcpConfig Live = FUnrealMcpConfig::LoadAndResolve();
+			const int32 Port = BridgeServerPtr ? BridgeServerPtr->GetBoundPort() : 0;
+			return FAiAgentConnectionInfo::FromPluginConfig(Live, /*ServerPath*/ FString(), Port);
+		},
+		// §7 (issue #101) AI Agent Configurators: send a configurator request to the sidecar over IPC. Returns
+		// false when no sidecar is connected — the thin panel then shows its graceful "bridge not connected"
+		// state and re-requests on the next handshake. The result returns via the status sink's
+		// `agent-config-result` route above.
+		[BridgeServerPtr](const TSharedPtr<FJsonObject>& Request) -> bool
+		{
+			return BridgeServerPtr ? BridgeServerPtr->SendAgentConfigMessage(Request) : false;
+		},
+		MoveTemp(ExtWiring)); // issue #179: the embedded Extensions section wiring
+
+	// §7 auxiliary windows (MCP Tools / Prompts / Resources). The Tools window snapshots the registry on open for
+	// its list — a §5 extension hot-reload can change the set after boot, so an already-open window shows its
+	// open-time snapshot and reopen refreshes it. Prompts/Resources have no plugin-side feed yet (the .NET sidecar
+	// owns those features, §2) — their providers return empty and the windows render an honest empty state rather
+	// than a fabricated registry. Connection settings (incl. the read-only IPC-bridge-port line) live in the
+	// single "AI Game Developer" main window, not an aux window (issue #107, Unity-MCP parity). The Extensions
+	// panel is no longer an aux tab either (issue #179) — its wiring went to the main-window tab above.
 	AuxWindows = MakeUnique<FUnrealMcpAuxWindows>();
 	AuxWindows->Register(
 		ViewModel.ToSharedRef(),
@@ -442,8 +450,7 @@ void FUnrealMcpEditorCoordinator::Startup()
 			return Entries;
 		},
 		[]() -> TArray<FUnrealMcpFeatureEntry> { return {}; },  // prompts (none surfaced to the plugin yet)
-		[]() -> TArray<FUnrealMcpFeatureEntry> { return {}; },  // resources (none surfaced to the plugin yet)
-		MoveTemp(ExtWiring));
+		[]() -> TArray<FUnrealMcpFeatureEntry> { return {}; }); // resources (none surfaced to the plugin yet)
 
 	// DEV-ONLY inject/control HTTP bridge (docs/ARCHITECTURE.md §7). Started ONLY when the editor process env
 	// UNREAL_MCP_DEV_CONTROL == "1" — OFF by default, so a shipped plugin never opens a port. The port comes
@@ -495,6 +502,12 @@ void FUnrealMcpEditorCoordinator::Shutdown()
 	if (!bStarted)
 		return;
 	bStarted = false;
+
+	// issue #179: neutralize the embedded Extensions panel's InstalledProvider FIRST — before the main-window tab
+	// close and the ExtensionManager reset below — so a deferred main-window paint (a queued RequestCloseTab) reads
+	// an empty list instead of dereferencing the soon-to-be-freed extension manager. Mirrors the aux-windows guard.
+	if (ExtProvidersAlive.IsValid())
+		*ExtProvidersAlive = false;
 
 	if (PreExitHandle.IsValid())
 	{
