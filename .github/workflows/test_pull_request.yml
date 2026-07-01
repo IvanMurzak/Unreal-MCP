@@ -94,15 +94,17 @@ jobs:
     # checked-out code on the self-hosted runner (see docs/RELEASING.md). Manual
     # dispatches (trusted) are unaffected by the fork clause.
     if: ${{ vars.UNREAL_RUNNER_READY == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
-    # The matrix runs UE 5.7 and 5.8 as parallel jobs; the single self-hosted
-    # runner (label `unreal-5-7`, legacy name) executes them sequentially. Both
-    # engines are installed at the standard Epic paths on the runner.
+    # PR-gating is scoped to UE 5.7 ONLY. The single self-hosted runner (label
+    # `unreal-5-7`, legacy name) shares ONE host project whose `Intermediate` is
+    # NOT isolated per UE version, so a 5.8 build corrupts the 5.7 build's
+    # makefile/index.json and reds BOTH legs.
+    # TODO(5.8): UHT cross-version contamination in shared host Intermediate — defer until per-version Intermediate isolation
     # fail-fast:false so one engine's failure never cancels the other's leg.
     runs-on: [self-hosted, windows, unreal-5-7]
     strategy:
       fail-fast: false
       matrix:
-        ue: ['5.7', '5.8']
+        ue: ['5.7']
     env:
       # Engine path is driven by the matrix (standard Epic install layout).
       UE_ROOT: C:\Program Files\Epic Games\UE_${{ matrix.ue }}
@@ -256,7 +258,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        ue: ['5.7', '5.8']
+        # TODO(5.8): UHT cross-version contamination in shared host Intermediate — defer until per-version Intermediate isolation
+        ue: ['5.7']
     env:
       UE_ROOT: C:\Program Files\Epic Games\UE_${{ matrix.ue }}
       HOST_UPROJECT: ${{ vars.UNREAL_HOST_PROJECT }}
