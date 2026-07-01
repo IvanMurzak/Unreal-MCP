@@ -90,6 +90,11 @@ void FUnrealMcpAuxWindows::Register(
 		.SetGroup(Group)
 		.SetIcon(FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Adjust"));
 
+	// The §7 item 10 Extensions panel (install channel #3) is NO LONGER a standalone nomad tab (issue #179): the
+	// per-extension Install / Update / Installed list now lives inside the "AI Game Developer" main window's
+	// Extensions section (Unity-parity), wired by the coordinator straight to FUnrealMcpMainWindowTab. The same
+	// SUnrealMcpExtensionsWindow widget is reused there in embedded mode — no duplicate window for the user to find.
+
 	// Connection settings live entirely in the single "AI Game Developer" main window (issue #107, Unity-MCP
 	// parity). The separate "AI Game Developer Settings" nomad tab and the "Project → Plugins → AI Game Developer"
 	// ISettingsModule section that both rendered SUnrealMcpSettingsWindow were removed — the main window's

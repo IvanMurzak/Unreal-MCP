@@ -94,15 +94,17 @@ jobs:
     # checked-out code on the self-hosted runner (see docs/RELEASING.md). Manual
     # dispatches (trusted) are unaffected by the fork clause.
     if: ${{ vars.UNREAL_RUNNER_READY == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
-    # The matrix runs UE 5.7 and 5.8 as parallel jobs; the single self-hosted
-    # runner (label `unreal-5-7`, legacy name) executes them sequentially. Both
-    # engines are installed at the standard Epic paths on the runner.
+    # PR-gating is scoped to UE 5.7 ONLY. The single self-hosted runner (label
+    # `unreal-5-7`, legacy name) shares ONE host project whose `Intermediate` is
+    # NOT isolated per UE version, so a 5.8 build corrupts the 5.7 build's
+    # makefile/index.json and reds BOTH legs.
+    # TODO(5.8): UHT cross-version contamination in shared host Intermediate — defer until per-version Intermediate isolation
     # fail-fast:false so one engine's failure never cancels the other's leg.
     runs-on: [self-hosted, windows, unreal-5-7]
     strategy:
       fail-fast: false
       matrix:
-        ue: ['5.7', '5.8']
+        ue: ['5.7']
     env:
       # Engine path is driven by the matrix (standard Epic install layout).
       UE_ROOT: C:\Program Files\Epic Games\UE_${{ matrix.ue }}
@@ -171,6 +173,30 @@ jobs:
             if (Test-Path $package) { Remove-Item $package -Recurse -Force }
             & $runUAT BuildPlugin -Plugin="$uplugin" -Package="$package" -TargetPlatforms=Win64 -Rocket
             if ($LASTEXITCODE -ne 0) { throw "Automation BuildPlugin (with test module) failed with exit code $LASTEXITCODE" }
+            # SELF-HEAL the host's Plugins\UnrealMCP junction (docs/RELEASING.md invariant).
+            # The junction MUST point at the per-run BuildPlugin output ($package =
+            # $RUNNER_TEMP\UnrealMCP-Package), which INCLUDES the UnrealMcpEditorTests
+            # module just built above — so the UnrealMcp.* Automation specs register.
+            # Off-workflow dev tooling (worktree.py / testbed.py / a manual mklink) can
+            # silently repoint this junction at the Fab-clean submodule source (whose
+            # distributed .uplugin OMITS the test module -> 0 specs -> "index.json
+            # MISSING"), reding every PR. Force-recreate it here so a clobbered junction
+            # auto-recovers. Idempotent: we drop any existing reparse point/dir first,
+            # then mklink /J. $package was just populated by the BuildPlugin above, so
+            # the target is present.
+            $hostPluginsDir = Join-Path (Split-Path -Parent $env:HOST_UPROJECT) 'Plugins'
+            $hostJunction = Join-Path $hostPluginsDir 'UnrealMCP'
+            New-Item -ItemType Directory -Force -Path $hostPluginsDir | Out-Null
+            if (Test-Path -LiteralPath $hostJunction) {
+              # Remove whatever is there (junction/dir/reparse point) without following it.
+              cmd /c rmdir "$hostJunction" 2>$null
+              if (Test-Path -LiteralPath $hostJunction) { Remove-Item -LiteralPath $hostJunction -Recurse -Force }
+            }
+            cmd /c mklink /J "$hostJunction" "$package" | Write-Host
+            if ($LASTEXITCODE -ne 0) { throw "Failed to (re)create host junction $hostJunction -> $package (exit $LASTEXITCODE)" }
+            # Assert it now resolves to THIS run's package (so a stale target can't slip through).
+            $resolved = (Get-Item -LiteralPath $hostJunction).Target
+            Write-Host "Host junction: $hostJunction -> $resolved (expected $package)"
             # Rebuild the host's OWN game module for THIS matrix engine so the editor
             # opens without an out-of-date-modules failure (the host's committed
             # Binaries may be built for a different UE version, and an -unattended
@@ -256,7 +282,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        ue: ['5.7', '5.8']
+        # TODO(5.8): UHT cross-version contamination in shared host Intermediate — defer until per-version Intermediate isolation
+        ue: ['5.7']
     env:
       UE_ROOT: C:\Program Files\Epic Games\UE_${{ matrix.ue }}
       HOST_UPROJECT: ${{ vars.UNREAL_HOST_PROJECT }}
@@ -302,6 +329,22 @@ jobs:
           if (Test-Path $package) { Remove-Item $package -Recurse -Force }
           & $runUAT BuildPlugin -Plugin="$uplugin" -Package="$package" -TargetPlatforms=Win64 -Rocket
           if ($LASTEXITCODE -ne 0) { throw "BuildPlugin failed ($LASTEXITCODE)" }
+          # SELF-HEAL the host's Plugins\UnrealMCP junction (docs/RELEASING.md invariant) —
+          # same rationale as the plugin leg: force-recreate it to point at THIS run's
+          # $package so off-workflow tooling that repointed it at the submodule source
+          # can never wedge the smoke. Idempotent: drop any existing reparse point/dir
+          # first, then mklink /J. $package was just populated above.
+          $hostPluginsDir = Join-Path (Split-Path -Parent $env:HOST_UPROJECT) 'Plugins'
+          $hostJunction = Join-Path $hostPluginsDir 'UnrealMCP'
+          New-Item -ItemType Directory -Force -Path $hostPluginsDir | Out-Null
+          if (Test-Path -LiteralPath $hostJunction) {
+            cmd /c rmdir "$hostJunction" 2>$null
+            if (Test-Path -LiteralPath $hostJunction) { Remove-Item -LiteralPath $hostJunction -Recurse -Force }
+          }
+          cmd /c mklink /J "$hostJunction" "$package" | Write-Host
+          if ($LASTEXITCODE -ne 0) { throw "Failed to (re)create host junction $hostJunction -> $package (exit $LASTEXITCODE)" }
+          $resolved = (Get-Item -LiteralPath $hostJunction).Target
+          Write-Host "Host junction: $hostJunction -> $resolved (expected $package)"
           # Rebuild the host's own game module for THIS matrix engine so the smoke's
           # editor launch does not fail on out-of-date modules (the committed host
           # Binaries may be built for a different UE version; -unattended will not

@@ -26,7 +26,8 @@ void FUnrealMcpMainWindowTab::Register(
 	FSimpleDelegate InOnRestartBridge,
 	TFunction<FString()> InBridgeStatusProvider,
 	TFunction<FAiAgentConnectionInfo()> InConnectionInfoProvider,
-	TFunction<bool(const TSharedPtr<FJsonObject>&)> InSendAgentConfigRequest)
+	TFunction<bool(const TSharedPtr<FJsonObject>&)> InSendAgentConfigRequest,
+	FUnrealMcpExtensionsPanelWiring InExtensionsWiring)
 {
 	if (bRegistered)
 		return;
@@ -37,6 +38,7 @@ void FUnrealMcpMainWindowTab::Register(
 	BridgeStatusProvider = MoveTemp(InBridgeStatusProvider);
 	ConnectionInfoProvider = MoveTemp(InConnectionInfoProvider);
 	SendAgentConfigRequest = MoveTemp(InSendAgentConfigRequest);
+	ExtensionsWiring = MoveTemp(InExtensionsWiring);
 
 	// Slate may be unavailable in a commandlet / -nullrhi headless run without a slate application; guard so
 	// the Automation/smoke runs (which load the module) never crash on tab registration. IsInitialized() alone
@@ -91,7 +93,8 @@ TSharedRef<SDockTab> FUnrealMcpMainWindowTab::SpawnTab(const FSpawnTabArgs& Args
 		.OnRestartBridge(OnRestartBridge)
 		.BridgeStatusProvider(BridgeStatusProvider)
 		.ConnectionInfoProvider(ConnectionInfoProvider)
-		.SendAgentConfigRequest(SendAgentConfigRequest);
+		.SendAgentConfigRequest(SendAgentConfigRequest)
+		.ExtensionsWiring(ExtensionsWiring);
 	// Track the live window (weak) so the runtime's agent-config-result feed reaches its panel; a re-spawn
 	// (re-opened tab) replaces it, and a closed tab leaves a stale weak ptr that DeliverAgentConfigResult ignores.
 	ActiveWindow = Window;
