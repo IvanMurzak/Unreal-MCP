@@ -5,6 +5,7 @@
 
 import { resolveConnection } from '../utils/config.js';
 import { probePing } from '../utils/probe.js';
+import { asError } from '../utils/error.js';
 import { emitProgress } from './progress.js';
 import type { WaitForReadyOptions, WaitForReadyResult } from './types.js';
 
@@ -28,7 +29,7 @@ export async function waitForReady(opts: WaitForReadyOptions = {}): Promise<Wait
     url = conn.url;
     token = conn.token;
   } catch (err) {
-    const error = err instanceof Error ? err : new Error(String(err));
+    const error = asError(err);
     return { kind: 'failure', success: false, url, elapsedMs: 0, attempts: 0, lastReason: error.message, error };
   }
 

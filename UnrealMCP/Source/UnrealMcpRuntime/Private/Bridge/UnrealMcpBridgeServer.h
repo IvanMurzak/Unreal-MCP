@@ -172,6 +172,15 @@ private:
 	void SendResourceManifestLocked(); // v2: resource registry wired (P2); v2-gated + null-guarded
 	void SendConfigLocked(); // WriteMutex held: frame + send the §1.3 `config` message (no-op when no config)
 	bool TrySendFramedLocked(const TArray<uint8>& Framed); // WriteMutex+ConnectionMutex held, ClientSocket valid
+	// Caller holds WriteMutex. Acquires ConnectionMutex, no-ops (returns false) when no client is connected,
+	// otherwise sends @p Framed via TrySendFramedLocked; on a genuine mid-frame failure it drops the connection
+	// (DropConnectionLocked, @p Reason naming the failing send) and returns false. The single send-or-drop tail
+	// shared by SendMessage + the manifest/config senders. @p Reason is the human label logged on the drop.
+	bool SendFramedLocked(const TArray<uint8>& Framed, const TCHAR* Reason);
+	// Caller holds ConnectionMutex. Parks the live socket for the reader thread to free, clears the connection/
+	// handshake/heartbeat flags, and logs `[Unreal-MCP] <Reason>; dropping connection.`. The shared teardown the
+	// send paths run when a frame cannot be delivered (never DestroySocket from a send path — see DrainPendingDestroy).
+	void DropConnectionLocked(const TCHAR* Reason);
 	void CloseActiveConnection();
 	void DrainPendingDestroy();    // reader-/shutdown-owned: actually frees sockets parked for teardown
 	void StartHeartbeat();

@@ -12,11 +12,19 @@ import {
 } from '../src/utils/engine-discovery.js';
 import { editorBinaryPath } from '../src/utils/engine.js';
 
-/** Build a DiscoveryFs from a set of existing paths + a dir->names listing. */
-function fakeFs(existing: Set<string>, dirs: Record<string, string[]> = {}): DiscoveryFs {
+/**
+ * Build a DiscoveryFs from a set of existing paths + a dir->names listing +
+ * an optional path->file-contents map (for the now-injectable file read).
+ */
+function fakeFs(
+  existing: Set<string>,
+  dirs: Record<string, string[]> = {},
+  files: Record<string, string> = {},
+): DiscoveryFs {
   return {
     existsImpl: (p) => existing.has(p),
     readdirImpl: (p) => dirs[p] ?? [],
+    readFileImpl: (p) => files[p] ?? null,
   };
 }
 
@@ -82,15 +90,17 @@ describe('scanCommonLocationEngines (Linux free-form layout — fixes the dead e
     const install = '/opt/UnrealEngine';
     const bin = editorBinaryPath(install, 'linux');
     const buildVersion = '/opt/UnrealEngine/Engine/Build/Build.version';
-    // Note: readEngineAssociationFromBuildVersion uses the REAL fs.readFileSync,
-    // so we can only assert the existsImpl-gated branch here; association falls
-    // back to '' when the file is not present on the real disk. The engine is
-    // still discovered (usable as the highest-installed fallback).
-    const fs = fakeFs(new Set(['/opt', bin]), { '/opt': ['UnrealEngine', 'other'] });
+    // The Build.version read now goes through the injected `readFileImpl`, so a
+    // hermetic test can supply its contents and assert the parsed association.
+    const fs = fakeFs(
+      new Set(['/opt', bin, buildVersion]),
+      { '/opt': ['UnrealEngine', 'other'] },
+      { [buildVersion]: JSON.stringify({ MajorVersion: 5, MinorVersion: 7 }) },
+    );
     const engines = scanCommonLocationEngines('linux', {}, fs);
     expect(engines).toHaveLength(1);
     expect(engines[0].installLocation).toBe(install);
-    void buildVersion;
+    expect(engines[0].engineAssociation).toBe('5.7');
   });
 
   it('finds a UE_5.7 dir on Linux too', () => {
@@ -105,6 +115,22 @@ describe('scanCommonLocationEngines (Linux free-form layout — fixes the dead e
 describe('readEngineAssociationFromBuildVersion', () => {
   it('returns "" when the file does not exist (injected fs)', () => {
     const fs = fakeFs(new Set());
+    expect(readEngineAssociationFromBuildVersion('/opt/UE', 'linux', fs)).toBe('');
+  });
+
+  it('reads "major.minor" through the injected readFileImpl', () => {
+    const versionFile = '/opt/UE/Engine/Build/Build.version';
+    const fs = fakeFs(
+      new Set([versionFile]),
+      {},
+      { [versionFile]: JSON.stringify({ MajorVersion: 5, MinorVersion: 7, PatchVersion: 4 }) },
+    );
+    expect(readEngineAssociationFromBuildVersion('/opt/UE', 'linux', fs)).toBe('5.7');
+  });
+
+  it('returns "" when the injected read yields malformed JSON', () => {
+    const versionFile = '/opt/UE/Engine/Build/Build.version';
+    const fs = fakeFs(new Set([versionFile]), {}, { [versionFile]: 'not json' });
     expect(readEngineAssociationFromBuildVersion('/opt/UE', 'linux', fs)).toBe('');
   });
 });

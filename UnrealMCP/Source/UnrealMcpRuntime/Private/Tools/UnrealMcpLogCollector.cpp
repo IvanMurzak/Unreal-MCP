@@ -126,17 +126,10 @@ TArray<FUnrealMcpLogEntry> FUnrealMcpLogCollector::Snapshot(ELogVerbosity::Type 
 
 FString FUnrealMcpLogCollector::VerbosityToString(ELogVerbosity::Type Verbosity)
 {
-	switch (Verbosity & ELogVerbosity::VerbosityMask)
-	{
-	case ELogVerbosity::Fatal:       return TEXT("Fatal");
-	case ELogVerbosity::Error:       return TEXT("Error");
-	case ELogVerbosity::Warning:     return TEXT("Warning");
-	case ELogVerbosity::Display:     return TEXT("Display");
-	case ELogVerbosity::Log:         return TEXT("Log");
-	case ELogVerbosity::Verbose:     return TEXT("Verbose");
-	case ELogVerbosity::VeryVerbose: return TEXT("VeryVerbose");
-	default:                         return TEXT("Log");
-	}
+	// Defer to the engine's verbosity→name mapping (Fatal/Error/Warning/Display/Log/Verbose/VeryVerbose), masking
+	// off the flag bits first (the `&` yields an int, so cast back to the enum). A captured GLog entry always
+	// carries one of those real verbosities.
+	return ::ToString(static_cast<ELogVerbosity::Type>(Verbosity & ELogVerbosity::VerbosityMask));
 }
 
 bool FUnrealMcpLogCollector::ParseVerbosity(const FString& Token, ELogVerbosity::Type& OutVerbosity)

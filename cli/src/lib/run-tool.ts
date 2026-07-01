@@ -4,6 +4,8 @@
 // Library-safe: errors are returned, never thrown.
 
 import { resolveConnection } from '../utils/config.js';
+import { asError } from '../utils/error.js';
+import { fetchWithTimeout, networkErrorCategory } from '../utils/http.js';
 import type {
   RunToolFailure,
   RunToolFailureReason,
@@ -39,7 +41,7 @@ async function invokeTool(routePrefix: string, opts: RunToolOptions): Promise<Ru
     return makeFailure({
       endpoint: '',
       reason: 'invalid-input',
-      message: err instanceof Error ? err.message : String(err),
+      message: asError(err).message,
       error: err instanceof Error ? err : undefined,
     });
   }
@@ -53,28 +55,22 @@ async function invokeTool(routePrefix: string, opts: RunToolOptions): Promise<Ru
   const fetchImpl = opts.fetchImpl ?? globalThis.fetch;
   const timeoutMs = typeof opts.timeoutMs === 'number' && opts.timeoutMs > 0 ? opts.timeoutMs : DEFAULT_TIMEOUT_MS;
 
-  const controller = new AbortController();
+  // `timedOut` lets `classifyFetchError` tell OUR timeout's AbortError apart
+  // from a caller-supplied `opts.signal` cancellation: `fetchWithTimeout`
+  // invokes `onTimeout` only when its own deadline fires, never on an external
+  // abort.
   let timedOut = false;
-  const timer = setTimeout(() => {
-    timedOut = true;
-    controller.abort();
-  }, timeoutMs);
-  const externalAbort = (): void => controller.abort();
-  if (opts.signal) {
-    if (opts.signal.aborted) controller.abort();
-    else opts.signal.addEventListener('abort', externalAbort, { once: true });
-  }
 
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (token) headers['Authorization'] = `Bearer ${token}`;
 
   try {
-    const response = await fetchImpl(endpoint, {
-      method: 'POST',
-      headers,
-      body: body.json,
-      signal: controller.signal,
-    });
+    const response = await fetchWithTimeout(
+      fetchImpl,
+      endpoint,
+      { method: 'POST', headers, body: body.json },
+      { timeoutMs, externalSignal: opts.signal, onTimeout: () => { timedOut = true; } },
+    );
     const text = await safeReadText(response);
     const data = parseJsonOrText(text);
     if (!response.ok) {
@@ -89,9 +85,6 @@ async function invokeTool(routePrefix: string, opts: RunToolOptions): Promise<Ru
     return { kind: 'success', success: true, endpoint, httpStatus: response.status, data };
   } catch (err) {
     return classifyFetchError(err, endpoint, timeoutMs, timedOut);
-  } finally {
-    clearTimeout(timer);
-    opts.signal?.removeEventListener('abort', externalAbort);
   }
 }
 
@@ -117,7 +110,7 @@ function serializeInput(input: unknown): { json: string } | { error: Error } {
       JSON.parse(input);
       return { json: input };
     } catch (err) {
-      return { error: new Error(`input string is not valid JSON: ${err instanceof Error ? err.message : String(err)}`) };
+      return { error: new Error(`input string is not valid JSON: ${asError(err).message}`) };
     }
   }
   if (typeof input !== 'object') {
@@ -126,7 +119,7 @@ function serializeInput(input: unknown): { json: string } | { error: Error } {
   try {
     return { json: JSON.stringify(input) };
   } catch (err) {
-    return { error: new Error(`input could not be serialized to JSON: ${err instanceof Error ? err.message : String(err)}`) };
+    return { error: new Error(`input could not be serialized to JSON: ${asError(err).message}`) };
   }
 }
 
@@ -155,12 +148,8 @@ function classifyFetchError(err: unknown, endpoint: string, timeoutMs: number, t
       ? makeFailure({ endpoint, reason: 'timeout', message: `Tool call timed out after ${timeoutMs}ms.`, error: err })
       : makeFailure({ endpoint, reason: 'aborted', message: 'Tool call was aborted by the caller.', error: err });
   }
-  const error = err instanceof Error ? err : new Error(String(err));
-  const cause = err instanceof Error && 'cause' in err ? (err.cause as { code?: string } | undefined) : undefined;
-  let reason: RunToolFailureReason = 'unknown';
-  if (cause?.code === 'ECONNREFUSED') reason = 'connection-refused';
-  else if (cause?.code === 'ECONNRESET') reason = 'connection-reset';
-  else if (cause?.code === 'ENOTFOUND' || cause?.code === 'EAI_AGAIN') reason = 'network-error';
+  const error = asError(err);
+  const reason: RunToolFailureReason = networkErrorCategory(err) ?? 'unknown';
   return makeFailure({ endpoint, reason, message: error.message, error });
 }
 

@@ -124,6 +124,9 @@ private:
 
 	void OnFeatureRegistered(const FName& Type, IModularFeature* Feature);
 	void OnFeatureUnregistered(const FName& Type, IModularFeature* Feature);
+	/** Shared body of the register/unregister handlers: if @p Type is one of the (wired) provider kinds, log
+	 *  `<kind> provider <Verb>` and rebuild. @p Verb is "registered" / "unregistered". */
+	void HandleFeatureChange(const FName& Type, const TCHAR* Verb);
 
 	void LoadConfig();
 	void SaveConfig() const;

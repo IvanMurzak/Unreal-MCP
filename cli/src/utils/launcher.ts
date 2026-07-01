@@ -89,7 +89,7 @@ export function parseLauncherManifest(content: string): EngineInstallation[] {
     });
   }
   // Highest version first so "no association" callers get the newest engine.
-  engines.sort((a, b) => compareEngineVersions(b.engineAssociation, a.engineAssociation));
+  engines.sort(byEngineVersionDesc);
   return engines;
 }
 
@@ -123,6 +123,18 @@ export function compareEngineVersions(a: string, b: string): number {
 }
 
 /**
+ * `Array.prototype.sort` comparator that orders engine installations
+ * highest-`engineAssociation`-version first, so "no association" callers get
+ * the newest engine. The single source for the
+ * `compareEngineVersions(b.engineAssociation, a.engineAssociation)` descending
+ * sort the manifest parse, the empty-association match, and the
+ * common-location scan all repeat. Pure.
+ */
+export function byEngineVersionDesc(a: EngineInstallation, b: EngineInstallation): number {
+  return compareEngineVersions(b.engineAssociation, a.engineAssociation);
+}
+
+/**
  * Match a project's `EngineAssociation` against the installed engines.
  *
  * - A launcher version association (`"5.7"`) matches the engine with that
@@ -145,9 +157,7 @@ export function matchEngineForAssociation(
     // `open`'s injectable `enginesImpl` may feed an unsorted list — so sort
     // here too rather than relying on the caller's ordering.
     if (engines.length === 0) return null;
-    return [...engines].sort((a, b) =>
-      compareEngineVersions(b.engineAssociation, a.engineAssociation),
-    )[0];
+    return [...engines].sort(byEngineVersionDesc)[0];
   }
   if (assoc.startsWith('{')) {
     // GUID — a registered source build; not in the launcher manifest.

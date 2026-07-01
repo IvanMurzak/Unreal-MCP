@@ -226,9 +226,9 @@ private:
 	TMap<FString, FUnrealMcpRegisteredResource> Resources;
 	int32 Revision = 0;
 
-	// --- Retained §7/§8 enablement filters (mirror the tool/prompt registries exactly). ---
-	TSet<FString> EnabledResourcesWhitelist; // §8 whitelist; empty = no filter
-	TSet<FString> DisabledResourceUris;      // §7 persisted blocklist
+	// --- Retained §7/§8 enablement filter (mirror the tool/prompt registries exactly).
+	//     Whitelist = §8 whitelist (empty = no filter); Blocklist = §7 persisted blocklist. ---
+	FUnrealMcpEnablementFilter Enablement;
 
 	/** The combined §8 effective-served predicate: enabled iff (whitelist empty OR member) AND NOT blocklisted. */
 	bool ShouldResourceBeEnabled(const FString& Uri) const;

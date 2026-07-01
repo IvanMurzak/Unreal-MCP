@@ -13,6 +13,9 @@
 //
 // No top-level side effects; no runtime deps beyond TypeScript types.
 
+import type { ExtensionDescriptor } from '../utils/extensions-catalog.js';
+import type { InstallSourceKind } from '../utils/extension-source.js';
+
 export type ResultKind = 'success' | 'failure';
 
 // ---------------------------------------------------------------------------
@@ -624,3 +627,125 @@ export interface BootstrapLocalFailure {
 }
 
 export type BootstrapLocalResult = BootstrapLocalSuccess | BootstrapLocalFailure;
+
+// ---------------------------------------------------------------------------
+// install-extension
+// ---------------------------------------------------------------------------
+
+/** How an `install-extension` run ended (a `kind: 'success'` classification). */
+export type ExtensionInstallOutcome = 'added' | 'updated' | 'enabled' | 'already-up-to-date';
+
+/** Re-export of the install-source channel discriminant for the public result. */
+export type { InstallSourceKind };
+
+/**
+ * A single UBT compile invocation `install-extension --build` runs. Exposed so a
+ * test can inject `buildImpl` and assert the build was requested without a real
+ * UnrealBuildTool / engine on the machine.
+ */
+export interface ExtensionBuildStep {
+  /** Absolute path to `UnrealBuildTool.exe`. */
+  ubtPath: string;
+  /** Editor target name, e.g. `MyProjectEditor`. */
+  editorTarget: string;
+  /** Absolute path to the `.uproject`. */
+  uprojectPath: string;
+  /** The full UBT argument vector (target, platform, config, `-project=...`, `-WaitMutex`). */
+  args: string[];
+}
+
+export interface InstallExtensionOptions {
+  /** Target Unreal project root (holds the `.uproject` + `Plugins/`). */
+  projectDir: string;
+  /**
+   * The extension `<id>` to install — matched against the catalog by
+   * `extensionId`, then `name`, then `pluginName` (case-insensitive). When the id
+   * is NOT in the catalog, `source` is required and the descriptor is synthesized
+   * from the `--source` dir's `.uplugin`.
+   */
+  extensionId: string;
+  /**
+   * Local source dir (offline / CI / dev): a UE plugin directory containing
+   * `<pluginName>.uplugin`, or a directory that contains one. Wins over the
+   * GitHub-release download channel. Mirrors godot-cli `install-plugin --source`.
+   */
+  source?: string;
+  /** Override the catalog-pinned version (also the version requested from the GitHub release). Ignored when empty. */
+  version?: string;
+  /**
+   * Compile the project via UBT after install. Default `false` — the extension
+   * ships as SOURCE and UE recompiles it on the next editor open (the documented
+   * compile-on-install strategy); `--build` opts into eager compilation.
+   */
+  build?: boolean;
+  /** Engine root for the `--build` UBT invocation. Defaults to discovery from the project's `EngineAssociation`. */
+  engineRoot?: string;
+  /** Re-materialize + re-enable even when already up to date. Default `false`. */
+  force?: boolean;
+  /**
+   * Catalog to resolve `extensionId` against. Defaults to the bundled
+   * `EXTENSIONS_CATALOG`. Injectable for tests.
+   */
+  catalog?: readonly ExtensionDescriptor[];
+  /** Inject the HTTP client (defaults to global `fetch`). Test injection. */
+  fetchImpl?: typeof fetch;
+  /**
+   * Abort the GitHub-release download if no response arrives within this many
+   * milliseconds, so a stalled/slow server cannot hang the CLI indefinitely.
+   * Default 60000. Ignored for `--source` (local) installs.
+   */
+  downloadTimeoutMs?: number;
+  /**
+   * Inject the UBT build runner (defaults to spawning UnrealBuildTool). Test
+   * injection — a fake records the `ExtensionBuildStep` without a real engine.
+   */
+  buildImpl?: (step: ExtensionBuildStep) => Promise<void>;
+  /** Inject engine-root resolution for `--build` (defaults to the engine-discovery chain). Test injection. */
+  resolveEngineRootImpl?: (engineAssociation: string) => string | null;
+  onProgress?: ProgressCallback;
+}
+
+export interface InstallExtensionSuccess {
+  kind: 'success';
+  success: true;
+  /** Classified outcome (added / updated / enabled / already-up-to-date). */
+  outcome: ExtensionInstallOutcome;
+  /** True when files were materialized and/or the `.uproject` was written. */
+  changed: boolean;
+  /** True when the project must be (re)compiled — i.e. files changed and `--build` did NOT run. */
+  rebuildRequired: boolean;
+  /** The user-supplied id that resolved to the descriptor. */
+  extensionId: string;
+  /** Resolved plugin folder/descriptor name (`Plugins/<pluginName>`). */
+  pluginName: string;
+  /** Absolute path the extension was installed to (`<project>/Plugins/<pluginName>`). */
+  installedPath: string;
+  /** Which channel the files came from. */
+  sourceKind: InstallSourceKind;
+  /** Version installed before this run: `null` when not previously installed. */
+  fromVersion: string | null;
+  /** Version this install targeted: catalog pin / `--version` / the source `.uplugin`'s `VersionName`, or `null`. */
+  toVersion: string | null;
+  /**
+   * Plugins this run newly enabled in the `.uproject` — the extension and any
+   * gating engine plugins it appended or flipped from disabled. Plugins that
+   * were already enabled before the run are NOT listed.
+   */
+  enabledPlugins: string[];
+  /** Absolute path to the `.uproject` touched. */
+  uprojectPath: string;
+  /** True when UBT compiled the project this run (`--build`). */
+  built: boolean;
+  /** A short human-readable status line, safe to print. */
+  message: string;
+  warnings: string[];
+}
+
+export interface InstallExtensionFailure {
+  kind: 'failure';
+  success: false;
+  warnings: string[];
+  error: Error;
+}
+
+export type InstallExtensionResult = InstallExtensionSuccess | InstallExtensionFailure;

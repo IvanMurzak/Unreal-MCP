@@ -3,29 +3,20 @@
 
 #include "UnrealMcpSidecarManager.h"
 #include "UnrealMcpLog.h"
-#include "Async/Async.h"
+#include "UnrealMcpProcessUtil.h"   // shared ResolveDotNetRid + MakeExecutable
 #include "HAL/PlatformProcess.h"
+#include "HAL/PlatformTime.h"       // FPlatformTime::Seconds (WaitForExit) — was transitively via the removed Async/Async.h
 #include "Misc/Paths.h"
 #include "Interfaces/IPluginManager.h"
 
 #include <random>
 
-#if PLATFORM_MAC || PLATFORM_LINUX
-#include <cerrno>
-#include <sys/stat.h>
-#endif
 #if PLATFORM_MAC
+#include <cerrno>
 #include <sys/xattr.h>
-#include <sys/sysctl.h>
 #endif
 
-namespace
-{
-	// §1.5 restart backoff schedule (seconds).
-	const int32 BackoffSeconds[] = { 1, 2, 5, 10, 30 };
-	constexpr int32 MaxCrashesPerWindow = 5;
-	constexpr double CrashWindowSeconds = 300.0;
-}
+// The §1.5 backoff schedule + crash-rate constants now live in FUnrealMcpSupervisedProcess.
 
 FUnrealMcpSidecarManager::~FUnrealMcpSidecarManager()
 {
@@ -43,28 +34,9 @@ FString FUnrealMcpSidecarManager::BridgeBinaryBasename()
 
 FString FUnrealMcpSidecarManager::ResolveRid(bool bArm64DirExists)
 {
-#if PLATFORM_WINDOWS
-	(void)bArm64DirExists;
-	return TEXT("win-x64");
-#elif PLATFORM_MAC
-	// §6.2: select from the PHYSICAL host CPU, not the (possibly Rosetta-translated) editor arch — the
-	// bridge is a separate child and should match the hardware. `hw.optional.arm64 == 1` on Apple
-	// Silicon reports the hardware even under a translated process (verified per design R5). Fall back to
-	// osx-x64 (runs under Rosetta 2) when the arm64 slice is absent, so a missing build is never fatal.
-	int32 IsArm64 = 0;
-	size_t Size = sizeof(IsArm64);
-	if (sysctlbyname("hw.optional.arm64", &IsArm64, &Size, nullptr, 0) != 0)
-		IsArm64 = 0; // probe unavailable → treat as Intel
-	if (IsArm64 == 1 && bArm64DirExists)
-		return TEXT("osx-arm64");
-	return TEXT("osx-x64");
-#elif PLATFORM_LINUX
-	(void)bArm64DirExists;
-	return TEXT("linux-x64");
-#else
-	(void)bArm64DirExists;
-	return FString();
-#endif
+	// The RID resolver is shared with FUnrealMcpServerManager — see FUnrealMcpProcessUtil::ResolveDotNetRid
+	// (§6.2). This thin forwarder keeps the tested static-member entry point.
+	return FUnrealMcpProcessUtil::ResolveDotNetRid(bArm64DirExists);
 }
 
 FString FUnrealMcpSidecarManager::ComposeBundledBridgePath(const FString& PluginBaseDir, bool bArm64DirExists)
@@ -175,23 +147,15 @@ bool FUnrealMcpSidecarManager::PrepareBundledBinaryForSpawn(const FString& Path)
 	if (Path.IsEmpty())
 		return false;
 
-#if PLATFORM_MAC || PLATFORM_LINUX
-	// §6.6: ensure the apphost is executable. UE has no portable chmod; call the syscall directly (no
-	// shell, no PATH dependency). 0755 = rwxr-xr-x.
-	const auto Utf8Path = StringCast<ANSICHAR>(*Path);
-	if (chmod(Utf8Path.Get(), 0755) != 0)
-	{
-		UE_LOG(LogUnrealMcp, Warning,
-			TEXT("[Unreal-MCP] could not set +x on the bundled sidecar '%s' (errno=%d); spawn may fail."),
-			*Path, errno);
-		// Not fatal — the bit may already be set by the packager; let the spawn attempt surface a real failure.
-	}
-#endif
+	// §6.6: ensure the apphost is executable (shared +x helper — no-op on Windows). Not fatal on failure.
+	FUnrealMcpProcessUtil::MakeExecutable(Path);
+
 #if PLATFORM_MAC
 	// §6.6 / design R3: strip com.apple.quarantine so Gatekeeper's first-exec check is bypassed even
 	// offline (a binary with no quarantine xattr is not Gatekeeper-checked on exec). Belt-and-suspenders
 	// alongside notarization (T3). ENOATTR (no such attribute) is the expected happy case for an
 	// already-clean or never-quarantined binary — tolerate it.
+	const auto Utf8Path = StringCast<ANSICHAR>(*Path);
 	if (removexattr(Utf8Path.Get(), "com.apple.quarantine", 0) != 0 && errno != ENOATTR)
 	{
 		UE_LOG(LogUnrealMcp, Verbose,
@@ -199,7 +163,6 @@ bool FUnrealMcpSidecarManager::PrepareBundledBinaryForSpawn(const FString& Path)
 			*Path, errno);
 	}
 #endif
-	(void)Path;
 	return true;
 }
 
@@ -226,7 +189,6 @@ bool FUnrealMcpSidecarManager::StartForPort(int32 InIpcPort, const FString& InTo
 {
 	IpcPort = InIpcPort;
 	Token = InToken;
-	bStopRequested = false;
 
 	BridgePath = ResolveBridgeBinaryPath();
 	if (BridgePath.IsEmpty())
@@ -274,9 +236,7 @@ bool FUnrealMcpSidecarManager::StartForPort(int32 InIpcPort, const FString& InTo
 		return false;
 	}
 
-	WindowStartSeconds = FPlatformTime::Seconds();
-	CrashesInWindow = 0;
-	StartWatchdog();
+	StartWatchdog();   // Watchdog.Start() resets the crash window + stop flag for this run.
 	return true;
 }
 
@@ -336,76 +296,28 @@ bool FUnrealMcpSidecarManager::SpawnProcess()
 
 void FUnrealMcpSidecarManager::StartWatchdog()
 {
-	if (WatchdogFuture.IsValid())
-		return;
-
-	WatchdogFuture = Async(EAsyncExecution::Thread, [this]()
-	{
-		int32 BackoffIndex = 0;
-		while (!bStopRequested)
+	// The §1.5 crash-restart loop lives in FUnrealMcpSupervisedProcess; supply the sidecar-specific liveness
+	// probe + respawn. The respawn closes the dead handle and re-spawns (a fresh token rotates each relaunch,
+	// §1.4 — the bridge server reads the new token on the next handshake). No give-up side effect (the bridge
+	// server keeps listening). All run ON the watchdog thread, the manager's single-owner mutation context.
+	Watchdog.Start(
+		/*IsAlive*/ [this]() { return ProcHandle.IsValid() && FPlatformProcess::IsProcRunning(ProcHandle); },
+		/*Respawn*/ [this]() -> bool
 		{
-			FPlatformProcess::Sleep(1.0f);
-			if (bStopRequested)
-				break;
-
-			if (ProcHandle.IsValid() && FPlatformProcess::IsProcRunning(ProcHandle))
-			{
-				BackoffIndex = 0; // healthy
-				continue;
-			}
-
-			// The process died unexpectedly (§1.5 auto-restart).
-			const double Now = FPlatformTime::Seconds();
-			if (Now - WindowStartSeconds > CrashWindowSeconds)
-			{
-				WindowStartSeconds = Now;
-				CrashesInWindow = 0;
-			}
-			if (++CrashesInWindow > MaxCrashesPerWindow)
-			{
-				UE_LOG(LogUnrealMcp, Error,
-					TEXT("[Unreal-MCP] sidecar crashed > %d times in %.0fs; giving up auto-restart."),
-					MaxCrashesPerWindow, CrashWindowSeconds);
-				return;
-			}
-
-			const int32 DelaySeconds = BackoffSeconds[FMath::Min(BackoffIndex, (int32)UE_ARRAY_COUNT(BackoffSeconds) - 1)];
-			++BackoffIndex;
-			UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] sidecar exited; restarting in %ds (restart #%d)."),
-				DelaySeconds, RestartCount.GetValue() + 1);
-
-			// Chunk the backoff on a short tick (not one uninterruptible Sleep of up to 30 s): StopWatchdog()
-			// joins this thread on the game thread at editor shutdown, so a single long sleep would stall the
-			// editor's quit for the remainder of the backoff. Poll bStopRequested like the bridge heartbeat.
-			const double BackoffUntil = FPlatformTime::Seconds() + DelaySeconds;
-			while (!bStopRequested && FPlatformTime::Seconds() < BackoffUntil)
-				FPlatformProcess::Sleep(0.5f);
-			if (bStopRequested)
-				break;
-
 			if (ProcHandle.IsValid())
 			{
 				FPlatformProcess::CloseProc(ProcHandle);
 				ProcHandle.Reset();
 			}
-			// Fresh token each relaunch (§1.4 — token rotates every relaunch). The bridge server reads
-			// the new token on the next handshake; the server's Start() token is the authority, so a
-			// relaunched sidecar with a stale token would be rejected. NOTE: rotating the server-side
-			// token on relaunch lands with the full lifecycle wiring; the MVP keeps the launch token.
-			if (SpawnProcess())
-				RestartCount.Increment();
-		}
-	});
+			return SpawnProcess();
+		},
+		/*OnGiveUp*/ nullptr,
+		TEXT("sidecar"));
 }
 
 void FUnrealMcpSidecarManager::StopWatchdog()
 {
-	bStopRequested = true;
-	if (WatchdogFuture.IsValid())
-	{
-		WatchdogFuture.Wait();
-		WatchdogFuture = TFuture<void>();
-	}
+	Watchdog.Stop();
 }
 
 void FUnrealMcpSidecarManager::TerminateProcess()

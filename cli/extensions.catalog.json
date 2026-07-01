@@ -1,0 +1,105 @@
+{
+  "schemaVersion": 1,
+  "extensions": [
+    {
+      "extensionId": "com.ivanmurzak.unreal-ai-niagara",
+      "name": "Niagara Tools",
+      "description": "AI tools for Unreal's Niagara VFX system (list/inspect systems, spawn components).",
+      "pluginName": "UnrealAINiagara",
+      "repo": "IvanMurzak/Unreal-AI-Niagara",
+      "version": "0.1.0",
+      "minCoreVersion": "0.5.0",
+      "enginePlugins": ["Niagara"],
+      "tools": [
+        { "name": "niagara-list-systems", "description": "List every Niagara system (UNiagaraSystem) asset in the project (read-only), optionally filtered by a content-path prefix." },
+        { "name": "niagara-get-system", "description": "Inspect a single Niagara system asset (read-only) and report its emitters." },
+        { "name": "niagara-spawn-component", "description": "Spawn a Niagara component for a system into the active editor world at a location." }
+      ]
+    },
+    {
+      "extensionId": "com.ivanmurzak.unreal-ai-enhanced-input",
+      "name": "EnhancedInput Tools",
+      "description": "AI tools for Unreal's Enhanced Input system (list/inspect Input Actions & Mapping Contexts, create actions/contexts, add key mappings).",
+      "pluginName": "UnrealAIEnhancedInput",
+      "repo": "IvanMurzak/Unreal-AI-EnhancedInput",
+      "version": "0.1.0",
+      "minCoreVersion": "0.5.0",
+      "enginePlugins": ["EnhancedInput"],
+      "tools": [
+        { "name": "enhanced-input-list", "description": "Lists every Enhanced Input asset in the project via the Asset Registry, without loading any of them: Input Actions (UInputAction) and Mapping Contexts (UInputMappingContext). Optionally filter by a content-path prefix." },
+        { "name": "enhanced-input-get", "description": "Inspects a single Enhanced Input asset (read-only): for a UInputAction reports its value type; for a UInputMappingContext reports its key -> action mappings." },
+        { "name": "enhanced-input-action-create", "description": "Creates a UInputAction asset (an Enhanced Input action) at a content path, with an optional value type (Boolean | Axis1D | Axis2D | Axis3D). Optionally saves it to disk." },
+        { "name": "enhanced-input-context-create", "description": "Creates a UInputMappingContext asset (an Enhanced Input mapping context) at a content path. Optionally saves it to disk." },
+        { "name": "enhanced-input-add-mapping", "description": "Adds a key -> action mapping to a UInputMappingContext, binding an FKey to a UInputAction. Optionally saves it to disk." }
+      ]
+    },
+    {
+      "extensionId": "com.ivanmurzak.unreal-ai-pcg",
+      "name": "PCG Tools",
+      "description": "AI tools for Unreal's Procedural Content Generation (PCG) framework (list/inspect graphs, add & inspect PCG components, trigger generation).",
+      "pluginName": "UnrealAIPCG",
+      "repo": "IvanMurzak/Unreal-AI-PCG",
+      "version": "0.1.0",
+      "minCoreVersion": "0.5.0",
+      "enginePlugins": ["PCG"],
+      "tools": [
+        { "name": "pcg-list-graphs", "description": "Lists every PCG graph (UPCGGraph) asset in the project via the Asset Registry, without loading any of them. Optionally filter by a content-path prefix." },
+        { "name": "pcg-get-graph", "description": "Inspects a single PCG graph asset (read-only) and reports its nodes." },
+        { "name": "pcg-add-component", "description": "Adds a UPCGComponent to a named actor in the active editor world, optionally bound to a PCG graph asset." },
+        { "name": "pcg-get-component", "description": "Inspects the UPCGComponent on a named actor in the active editor world (read-only): its bound graph and generation state." },
+        { "name": "pcg-generate", "description": "Triggers PCG generation (refresh) on the UPCGComponent of a named actor in the active editor world." }
+      ]
+    },
+    {
+      "extensionId": "com.ivanmurzak.unreal-ai-gas",
+      "name": "GAS Tools",
+      "description": "AI tools for Unreal's Gameplay Ability System (list abilities/effects/attribute sets, inspect an ability, grant an ability to an actor).",
+      "pluginName": "UnrealAIGAS",
+      "repo": "IvanMurzak/Unreal-AI-GAS",
+      "version": "0.1.0",
+      "minCoreVersion": "0.5.0",
+      "enginePlugins": ["GameplayAbilities"],
+      "tools": [
+        { "name": "gas-list-abilities", "description": "Lists every Gameplay Ability class (UGameplayAbility subclass — native C++ and Blueprint) known to the project via the Asset Registry, without loading any of them. Optionally filter by a class-path prefix." },
+        { "name": "gas-list-effects", "description": "Lists every Gameplay Effect class (UGameplayEffect subclass — native C++ and Blueprint) known to the project via the Asset Registry, without loading any of them. Optionally filter by a class-path prefix." },
+        { "name": "gas-list-attribute-sets", "description": "Lists every Attribute Set class (UAttributeSet subclass — native C++ and Blueprint) known to the project via the Asset Registry, without loading any of them. Optionally filter by a class-path prefix." },
+        { "name": "gas-inspect-ability", "description": "Inspects a single Gameplay Ability class (read-only) by loading its class default object and reporting its configuration: gameplay tags, cost/cooldown Gameplay Effect classes, and instancing policy." },
+        { "name": "gas-grant-ability", "description": "Grants a Gameplay Ability to a named actor's AbilitySystemComponent in the active editor world (the actor must already own an AbilitySystemComponent)." }
+      ]
+    },
+    {
+      "extensionId": "com.ivanmurzak.unreal-ai-landscape",
+      "name": "Landscape Tools",
+      "description": "AI tools for Unreal's Landscape + Water systems (inspect landscapes, water bodies & zones).",
+      "pluginName": "UnrealAILandscape",
+      "repo": "IvanMurzak/Unreal-AI-Landscape",
+      "version": "0.1.0",
+      "minCoreVersion": "0.5.0",
+      "enginePlugins": ["Water"],
+      "tools": [
+        { "name": "landscape-list-actors", "description": "Lists every Landscape actor / proxy in the active editor world (read-only), reporting class, whether it is the primary ALandscape (vs a streaming proxy), and component count." },
+        { "name": "landscape-get-actor", "description": "Inspects a single Landscape actor by name (read-only): section layout (componentSizeQuads / subsectionSizeQuads / numSubsections), component count, landscape material, and paint layers." },
+        { "name": "landscape-list-water-bodies", "description": "Lists every Water body actor in the active editor world (read-only), reporting its type (River / Lake / Ocean / Custom) and spline-point count." },
+        { "name": "landscape-get-water-body", "description": "Inspects a single Water body by name (read-only): type, spline-point count, water material, and owning water zone." },
+        { "name": "landscape-list-water-zones", "description": "Lists every Water zone actor in the active editor world (read-only), reporting world location and 2D zone extent." }
+      ]
+    },
+    {
+      "extensionId": "com.ivanmurzak.unreal-ai-control-rig",
+      "name": "ControlRig Tools",
+      "description": "AI tools for Unreal's Control Rig (list/inspect rig blueprints, controls, bones, and actor components).",
+      "pluginName": "UnrealAIControlRig",
+      "repo": "IvanMurzak/Unreal-AI-ControlRig",
+      "version": "0.1.1",
+      "minCoreVersion": "0.5.0",
+      "enginePlugins": ["ControlRig"],
+      "tools": [
+        { "name": "control-rig-list", "description": "Lists every Control Rig blueprint (UControlRigBlueprint) asset in the project via the Asset Registry, without loading any of them. Optionally filter by a content-path prefix. Returns { count, controlRigs:[{ name, path }] }." },
+        { "name": "control-rig-get", "description": "Inspects a single Control Rig blueprint asset (read-only) and reports its rig element hierarchy. Returns { path, name, boneCount, nullCount, controlCount, curveCount, elementCount, elements:[{ name, type }] }." },
+        { "name": "control-rig-list-controls", "description": "Lists the control elements of a Control Rig blueprint (read-only), each with its control type (e.g. Float, Transform, Bool). Returns { path, controlCount, controls:[{ name, controlType }] }." },
+        { "name": "control-rig-list-bones", "description": "Lists the bone elements of a Control Rig blueprint (read-only), each with its immediate parent bone (empty for a root). Returns { path, boneCount, bones:[{ name, parent }] }." },
+        { "name": "control-rig-get-component", "description": "Inspects the Control Rig component of an actor in the active editor world (read-only). Looks the actor up by its label. Returns { actorName, componentName, controlRigClass, hasControlRig } (controlRigClass is the bound rig instance's class, or \"None\" when no rig is bound) or a defensive error if the actor or component is not found." }
+      ]
+    }
+  ]
+}

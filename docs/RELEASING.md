@@ -404,6 +404,29 @@ Set via `gh variable set --repo IvanMurzak/Unreal-MCP <NAME> --body <VALUE>`
 
 Variables (not secrets) are correct here: none of these values are sensitive.
 
+### The host `Plugins\UnrealMCP` junction — the load-bearing invariant (self-healed)
+
+The host project's `Plugins\UnrealMCP` **must** junction to the per-run BuildPlugin
+output `$RUNNER_TEMP\UnrealMCP-Package`, **not** the dev submodule source. Why it
+matters: the Automation pass BuildPlugins the plugin **with** the `UnrealMcpEditorTests`
+module transiently re-added (`commands/test-module-uplugin.ps1 -Action Add`) into
+`$RUNNER_TEMP\UnrealMCP-Package`, so that package — and only that package — carries the
+`UnrealMcp.*` specs. The Fab-clean **committed** `UnrealMCP.uplugin` deliberately OMITS
+the test module (C2, #139), so if the host junction points at the submodule source the
+editor loads a spec-free plugin → **0 specs register → the parse step fails with
+"index.json MISSING"** (the crash/no-report case), reding the plugin leg.
+
+Off-workflow dev tooling on the runner (`worktree.py` / `testbed.py` / a manual
+`mklink`) can silently repoint this junction at the submodule source, which reddened
+every Unreal-MCP PR from 2026-06-30 until it was repointed by hand. To make this
+self-recovering, the `plugin` job (in both `test_pull_request.yml` and `release.yml`)
+and the `connection-smoke` job now **force-recreate the junction** right after the
+Automation-pass BuildPlugin populates `$RUNNER_TEMP\UnrealMCP-Package` and before the
+editor launches: it removes any existing reparse point/dir and re-runs
+`mklink /J <host>\Plugins\UnrealMCP <package>`, then logs the resolved target. The step
+is idempotent — a correctly-pointed junction is simply re-created identically, so a
+clobbered junction auto-heals with no operator action.
+
 ## Secrets (least-privilege)
 
 The workflows use **no long-lived publish secrets**:

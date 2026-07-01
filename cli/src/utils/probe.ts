@@ -8,6 +8,10 @@
 // verified manually: system-tools/ping → 500 (null response),
 // /api/tools/ping → 200 {"result":"pong"}. ARCHITECTURE.md §e2e runbook
 // already cited /api/tools/ping — this endpoint now matches it.
+
+import { asError } from './error.js';
+import { fetchWithTimeout, networkErrorCategory, type NetworkErrorCategory } from './http.js';
+
 export const PING_ENDPOINT = '/api/tools/ping';
 
 export interface ProbeSuccess {
@@ -42,18 +46,16 @@ export async function probePing(baseUrl: string, opts: ProbeOptions = {}): Promi
   const timeoutMs = typeof opts.timeoutMs === 'number' && opts.timeoutMs > 0 ? opts.timeoutMs : 5000;
   const fetchImpl = opts.fetchImpl ?? globalThis.fetch;
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (opts.token) headers['Authorization'] = `Bearer ${opts.token}`;
 
   try {
-    const response = await fetchImpl(endpoint, {
-      method: 'POST',
-      headers,
-      body: '{}',
-      signal: controller.signal,
-    });
+    const response = await fetchWithTimeout(
+      fetchImpl,
+      endpoint,
+      { method: 'POST', headers, body: '{}' },
+      { timeoutMs },
+    );
     const text = await response.text().catch(() => '');
     if (response.ok) {
       let data: unknown;
@@ -67,24 +69,19 @@ export async function probePing(baseUrl: string, opts: ProbeOptions = {}): Promi
     return { ok: false, baseUrl, reason: `HTTP ${response.status}` };
   } catch (err) {
     return { ok: false, baseUrl, reason: classifyError(err) };
-  } finally {
-    clearTimeout(timer);
   }
 }
 
+/** Human-readable text for each shared network-failure category. */
+const NETWORK_CATEGORY_TEXT: Record<NetworkErrorCategory, string> = {
+  'connection-refused': 'connection refused',
+  'connection-reset': 'connection reset',
+  'network-error': 'host not found',
+};
+
 function classifyError(err: unknown): string {
   if (err instanceof Error && err.name === 'AbortError') return 'timed out';
-  const cause =
-    err instanceof Error && 'cause' in err ? (err.cause as { code?: string } | undefined) : undefined;
-  switch (cause?.code) {
-    case 'ECONNREFUSED':
-      return 'connection refused';
-    case 'ECONNRESET':
-      return 'connection reset';
-    case 'ENOTFOUND':
-    case 'EAI_AGAIN':
-      return 'host not found';
-    default:
-      return err instanceof Error ? err.message : String(err);
-  }
+  const category = networkErrorCategory(err);
+  if (category) return NETWORK_CATEGORY_TEXT[category];
+  return asError(err).message;
 }

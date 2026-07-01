@@ -3,27 +3,7 @@
 
 #include "UnrealMcpResourceRegistry.h"
 #include "UnrealMcpLog.h"
-#include "Misc/SecureHash.h"
-#include "Serialization/JsonSerializer.h"
-#include "Serialization/JsonWriter.h"
-#include "Policies/CondensedJsonPrintPolicy.h"
-
-// --- Stable serialization helper (family-UNIQUE name) ---------------------------------------------
-// The tool/prompt registries each have their own SerializeStable in an anonymous namespace; a unity build
-// concatenates every .cpp into one TU, so an anonymous-namespace helper is NOT file-private. Give the
-// resource copy a family-unique name (Resource*-prefixed) to dodge the §ODR collision (conventions.md).
-
-namespace
-{
-	FString ResourceSerializeStable(const TSharedPtr<FJsonObject>& Object)
-	{
-		FString Out;
-		TSharedRef<TJsonWriter<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>> Writer =
-			TJsonWriterFactory<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>::Create(&Out);
-		FJsonSerializer::Serialize(Object.ToSharedRef(), Writer);
-		return Out;
-	}
-}
+#include "UnrealMcpDescriptorHash.h"
 
 TSharedPtr<FJsonObject> FUnrealMcpRegisteredResource::ToDescriptorJson() const
 {
@@ -67,22 +47,9 @@ FUnrealMcpResourceBuilder FUnrealMcpResourceRegistry::Resource(const FString& Ur
 
 FString FUnrealMcpResourceRegistry::ComputeSchemaHash(const FUnrealMcpRegisteredResource& InResource)
 {
-	// Hash the canonicalized descriptor MINUS the enabled flag (mirror the tool/prompt registries). Reuse
-	// ToDescriptorJson and drop "enabled" + "schemaHash" so the hash is stable regardless of those fields.
-	FUnrealMcpRegisteredResource Copy = InResource;
-	Copy.SchemaHash.Empty();
-	TSharedPtr<FJsonObject> Desc = Copy.ToDescriptorJson();
-	Desc->RemoveField(TEXT("enabled"));
-	Desc->RemoveField(TEXT("schemaHash"));
-
-	const FString Canonical = ResourceSerializeStable(Desc);
-	FSHA1 Sha;
-	const FTCHARToUTF8 Utf8(*Canonical);
-	Sha.Update(reinterpret_cast<const uint8*>(Utf8.Get()), Utf8.Length());
-	Sha.Final();
-	uint8 Digest[20];
-	Sha.GetHash(Digest);
-	return FString(TEXT("sha1:")) + BytesToHex(Digest, 20).ToLower();
+	// Hash the canonicalized descriptor MINUS the enabled flag (mirror the tool/prompt registries): the shared
+	// helper builds the hash off the descriptor JSON directly (it strips enabled/schemaHash itself), no copy needed.
+	return UnrealMcpComputeDescriptorHash(InResource.ToDescriptorJson());
 }
 
 bool FUnrealMcpResourceRegistry::IsValidResourceUri(const FString& Uri)
@@ -218,9 +185,7 @@ TSharedPtr<FJsonObject> FUnrealMcpResourceRegistry::BuildManifestJson() const
 	Manifest->SetNumberField(TEXT("revision"), Revision);
 
 	TArray<TSharedPtr<FJsonValue>> ResourceArray;
-	TArray<FString> Uris;
-	Resources.GetKeys(Uris);
-	Uris.Sort();
+	const TArray<FString> Uris = GetResourceUrisSorted();
 	for (const FString& Uri : Uris)
 	{
 		// A disabled resource is EXCLUDED from the served manifest entirely (mirror the tool/prompt registries).
@@ -267,12 +232,12 @@ bool FUnrealMcpResourceRegistry::SetResourceEnabled(const FString& Uri, bool bEn
 
 bool FUnrealMcpResourceRegistry::ShouldResourceBeEnabled(const FString& Uri) const
 {
-	return PassesEnabledResourcesWhitelist(Uri) && !DisabledResourceUris.Contains(Uri);
+	return Enablement.ShouldBeEnabled(Uri);
 }
 
 bool FUnrealMcpResourceRegistry::PassesEnabledResourcesWhitelist(const FString& Uri) const
 {
-	return EnabledResourcesWhitelist.IsEmpty() || EnabledResourcesWhitelist.Contains(Uri);
+	return Enablement.PassesWhitelist(Uri);
 }
 
 void FUnrealMcpResourceRegistry::RecomputeEnablement()
@@ -293,13 +258,13 @@ void FUnrealMcpResourceRegistry::RecomputeEnablement()
 
 void FUnrealMcpResourceRegistry::SetEnabledResourcesFilter(const TArray<FString>& EnabledResources)
 {
-	EnabledResourcesWhitelist = TSet<FString>(EnabledResources);
+	Enablement.SetWhitelist(EnabledResources);
 	RecomputeEnablement();
 }
 
 void FUnrealMcpResourceRegistry::ApplyDisabledResources(const TArray<FString>& DisabledUris)
 {
-	DisabledResourceUris = TSet<FString>(DisabledUris);
+	Enablement.SetBlocklist(DisabledUris);
 	RecomputeEnablement();
 }
 

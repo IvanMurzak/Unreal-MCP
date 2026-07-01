@@ -6,6 +6,7 @@ import { closeCommand } from './commands/close.js';
 import { configureCommand } from './commands/configure.js';
 import { createProjectCommand } from './commands/create-project.js';
 import { installEngineCommand } from './commands/install-engine.js';
+import { installExtensionCommand } from './commands/install-extension.js';
 import { installPluginCommand } from './commands/install-plugin.js';
 import { loginCommand } from './commands/login.js';
 import { openCommand } from './commands/open.js';
@@ -26,13 +27,14 @@ program
   .version(PACKAGE_VERSION)
   .option('-v, --verbose', 'Enable verbose diagnostic output');
 
-// The full 16-command surface (docs/ARCHITECTURE.md §9.1).
+// The full 17-command surface (docs/ARCHITECTURE.md §9.1).
 const subcommands = [
   createProjectCommand,
   openCommand,
   closeCommand,
   installPluginCommand,
   removePluginCommand,
+  installExtensionCommand,
   configureCommand,
   setupMcpCommand,
   loginCommand,

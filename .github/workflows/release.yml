@@ -349,6 +349,25 @@ jobs:
             if (Test-Path $package) { Remove-Item $package -Recurse -Force }
             & $runUAT BuildPlugin -Plugin="$uplugin" -Package="$package" -TargetPlatforms=Win64 -Rocket
             if ($LASTEXITCODE -ne 0) { throw "Automation BuildPlugin (with test module) failed with exit code $LASTEXITCODE" }
+            # SELF-HEAL the host's Plugins\UnrealMCP junction (docs/RELEASING.md invariant).
+            # It MUST point at THIS run's BuildPlugin output ($package =
+            # $RUNNER_TEMP\UnrealMCP-Package), which INCLUDES the UnrealMcpEditorTests
+            # module just built above so the UnrealMcp.* Automation specs register.
+            # Off-workflow dev tooling can silently repoint it at the Fab-clean submodule
+            # source (whose distributed .uplugin omits the test module -> 0 specs ->
+            # "index.json MISSING"); force-recreate it here so a clobbered junction
+            # auto-recovers. Idempotent: drop any existing reparse point/dir, then mklink /J.
+            $hostPluginsDir = Join-Path (Split-Path -Parent $env:HOST_UPROJECT) 'Plugins'
+            $hostJunction = Join-Path $hostPluginsDir 'UnrealMCP'
+            New-Item -ItemType Directory -Force -Path $hostPluginsDir | Out-Null
+            if (Test-Path -LiteralPath $hostJunction) {
+              cmd /c rmdir "$hostJunction" 2>$null
+              if (Test-Path -LiteralPath $hostJunction) { Remove-Item -LiteralPath $hostJunction -Recurse -Force }
+            }
+            cmd /c mklink /J "$hostJunction" "$package" | Write-Host
+            if ($LASTEXITCODE -ne 0) { throw "Failed to (re)create host junction $hostJunction -> $package (exit $LASTEXITCODE)" }
+            $resolved = (Get-Item -LiteralPath $hostJunction).Target
+            Write-Host "Host junction: $hostJunction -> $resolved (expected $package)"
             # Rebuild the host's OWN game module for THIS matrix engine so the editor
             # opens without an out-of-date-modules failure (the host's committed
             # Binaries may be built for a different UE version, and an -unattended

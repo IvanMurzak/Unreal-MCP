@@ -7,6 +7,8 @@
 
 import { writeEnvFile, ensureEnvGitignored } from '../utils/env-file.js';
 import * as path from 'path';
+import { asError } from '../utils/error.js';
+import { fetchWithTimeout } from '../utils/http.js';
 import { emitProgress } from './progress.js';
 import type { ProgressCallback } from './types.js';
 
@@ -68,11 +70,16 @@ export async function login(opts: LoginOptions = {}): Promise<LoginResult> {
   try {
     emitProgress(opts.onProgress, { phase: 'start', message: 'Requesting device authorization' });
 
-    const codeResp = await fetchWithTimeout(fetchImpl, `${baseUrl}${DEFAULT_DEVICE_PATH}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: '{}',
-    });
+    const codeResp = await fetchWithTimeout(
+      fetchImpl,
+      `${baseUrl}${DEFAULT_DEVICE_PATH}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+      },
+      { timeoutMs: PER_REQUEST_TIMEOUT_MS },
+    );
     if (!codeResp.ok) {
       return fail('device-code-failed', `Device code request failed: HTTP ${codeResp.status}`);
     }
@@ -94,11 +101,16 @@ export async function login(opts: LoginOptions = {}): Promise<LoginResult> {
 
     while (now() < deadline) {
       await sleep(intervalMs);
-      const tokenResp = await fetchWithTimeout(fetchImpl, `${baseUrl}${DEFAULT_TOKEN_PATH}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ device_code: code.device_code }),
-      });
+      const tokenResp = await fetchWithTimeout(
+        fetchImpl,
+        `${baseUrl}${DEFAULT_TOKEN_PATH}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ device_code: code.device_code }),
+        },
+        { timeoutMs: PER_REQUEST_TIMEOUT_MS },
+      );
 
       if (tokenResp.ok) {
         const body = (await tokenResp.json()) as { access_token?: string };
@@ -134,7 +146,7 @@ export async function login(opts: LoginOptions = {}): Promise<LoginResult> {
 
     return fail('timeout', `Login timed out after ${timeoutMs}ms.`);
   } catch (err) {
-    const error = err instanceof Error ? err : new Error(String(err));
+    const error = asError(err);
     // A per-request `fetchWithTimeout` deadline surfaces as an AbortError;
     // classify that as a timeout rather than a generic network error.
     const reason = error.name === 'AbortError' ? 'timeout' : 'network-error';
@@ -153,25 +165,6 @@ function persistToken(projectDir: string | undefined, token: string): string | n
   ensureEnvGitignored(dir);
   writeEnvFile(envPath, { UNREAL_MCP_TOKEN: token, UNREAL_MCP_CONNECTION_MODE: 'Cloud' });
   return envPath;
-}
-
-/**
- * `fetch` with a per-request abort deadline so a hung endpoint cannot stall
- * the device flow indefinitely (the overall poll deadline only fires between
- * polls). Honors the injected `fetchImpl` for tests.
- */
-async function fetchWithTimeout(
-  fetchImpl: typeof fetch,
-  url: string,
-  init: RequestInit,
-): Promise<Response> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), PER_REQUEST_TIMEOUT_MS);
-  try {
-    return await fetchImpl(url, { ...init, signal: controller.signal });
-  } finally {
-    clearTimeout(timer);
-  }
 }
 
 function fail(reason: string, message: string): LoginFailure {

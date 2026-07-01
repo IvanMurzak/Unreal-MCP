@@ -4,6 +4,7 @@
 #include "Server/UnrealMcpServerManager.h"
 #include "Server/UnrealMcpServerChecksum.h"
 #include "UnrealMcpLog.h"
+#include "UnrealMcpProcessUtil.h"   // shared ResolveDotNetRid + MakeExecutable
 
 #include "Async/Async.h"
 #include "HAL/PlatformProcess.h"
@@ -22,14 +23,6 @@
 
 #include "FileUtilities/ZipArchiveReader.h"
 
-#if PLATFORM_MAC || PLATFORM_LINUX
-#include <cerrno>
-#include <sys/stat.h>
-#endif
-#if PLATFORM_MAC
-#include <sys/sysctl.h>
-#endif
-
 #if PLATFORM_WINDOWS
 #include "Windows/AllowWindowsPlatformTypes.h"
 #include <Windows.h>
@@ -43,10 +36,7 @@ const TCHAR* FUnrealMcpServerManager::ServerPathEnvVar = TEXT("UNREAL_MCP_SERVER
 
 namespace
 {
-	// Restart backoff schedule (seconds) — mirrors the sidecar §1.5 watchdog.
-	const int32 ServerBackoffSeconds[] = { 1, 2, 5, 10, 30 };
-	constexpr int32 ServerMaxCrashesPerWindow = 5;
-	constexpr double ServerCrashWindowSeconds = 300.0;
+	// The §1.5 backoff schedule + crash-rate constants now live in FUnrealMcpSupervisedProcess.
 	const TCHAR* ServerProcessNameNeedle = TEXT("gamedev-mcp-server");
 
 	// GitHub release-asset URL for a rid + version (v-prefixed tags), matching the CLI's serverDownloadUrl.
@@ -85,24 +75,9 @@ FString FUnrealMcpServerManager::ServerBinaryBasename()
 
 FString FUnrealMcpServerManager::ResolveRid(bool bArm64DirExists)
 {
-#if PLATFORM_WINDOWS
-	(void)bArm64DirExists;
-	return TEXT("win-x64");
-#elif PLATFORM_MAC
-	int32 IsArm64 = 0;
-	size_t Size = sizeof(IsArm64);
-	if (sysctlbyname("hw.optional.arm64", &IsArm64, &Size, nullptr, 0) != 0)
-		IsArm64 = 0;
-	if (IsArm64 == 1 && bArm64DirExists)
-		return TEXT("osx-arm64");
-	return TEXT("osx-x64");
-#elif PLATFORM_LINUX
-	(void)bArm64DirExists;
-	return TEXT("linux-x64");
-#else
-	(void)bArm64DirExists;
-	return FString();
-#endif
+	// The RID resolver is shared with FUnrealMcpSidecarManager — see FUnrealMcpProcessUtil::ResolveDotNetRid
+	// (§6.2). This thin forwarder keeps the tested static-member entry point.
+	return FUnrealMcpProcessUtil::ResolveDotNetRid(bArm64DirExists);
 }
 
 FString FUnrealMcpServerManager::ServerInstallDir(const FString& ProjectDir, const FString& Rid)
@@ -195,18 +170,8 @@ bool FUnrealMcpServerManager::IsLaunchAllowed(bool bIsCustomMode, bool bIsHttpTr
 
 void FUnrealMcpServerManager::PrepareBinaryForSpawn(const FString& Path)
 {
-#if PLATFORM_MAC || PLATFORM_LINUX
-	if (Path.IsEmpty())
-		return;
-	const auto Utf8Path = StringCast<ANSICHAR>(*Path);
-	if (chmod(Utf8Path.Get(), 0755) != 0)
-	{
-		UE_LOG(LogUnrealMcp, Warning,
-			TEXT("[Unreal-MCP] could not set +x on the local server '%s' (errno=%d); spawn may fail."), *Path, errno);
-	}
-#else
-	(void)Path;
-#endif
+	// §6.6: ensure the apphost is executable (shared +x helper — no-op on Windows). Not fatal on failure.
+	FUnrealMcpProcessUtil::MakeExecutable(Path);
 }
 
 FString FUnrealMcpServerManager::ResolveBinaryPath() const
@@ -612,7 +577,6 @@ bool FUnrealMcpServerManager::Start(int32 Port, int32 PluginTimeoutMs, bool bAut
 	}
 
 	bStarting = true;
-	bStopRequested = false;
 	ListenPort = Port;
 	LaunchArgs = BuildLaunchArgs(Port, PluginTimeoutMs, bAuthRequired, Token);
 
@@ -645,9 +609,7 @@ bool FUnrealMcpServerManager::Start(int32 Port, int32 PluginTimeoutMs, bool bAut
 		return false;
 	}
 
-	WindowStartSeconds = FPlatformTime::Seconds();
-	CrashesInWindow = 0;
-	RestartCount.Reset();
+	Watchdog.ResetRestartCount();   // fresh Start zeroes the restart counter (Watchdog.Start resets the crash window).
 	StartWatchdog();
 	bStarting = false;
 	return true;
@@ -681,9 +643,7 @@ bool FUnrealMcpServerManager::ReattachIfRunning(int32 Port, int32 PluginTimeoutM
 	// Re-bind the adopted survivor to a kill-on-close job so it too dies with THIS editor session by any exit
 	// path (the original spawning session's job died with that session's editor).
 	BindProcessToKillOnCloseJob(Adopted.Get());
-	bStopRequested = false;
-	WindowStartSeconds = FPlatformTime::Seconds();
-	CrashesInWindow = 0;
+	// Reattach does NOT reset the restart counter (only a fresh Start does); Watchdog.Start resets the crash window.
 	StartWatchdog();
 	UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] reattached to existing local server pid=%d on port=%d."), SavedPid, Port);
 	return true;
@@ -691,57 +651,18 @@ bool FUnrealMcpServerManager::ReattachIfRunning(int32 Port, int32 PluginTimeoutM
 
 void FUnrealMcpServerManager::StartWatchdog()
 {
-	if (WatchdogFuture.IsValid())
-		return;
-
-	WatchdogFuture = Async(EAsyncExecution::Thread, [this]()
-	{
-		int32 BackoffIndex = 0;
-		while (!bStopRequested)
+	// The §1.5 crash-restart loop lives in FUnrealMcpSupervisedProcess; supply the server-specific liveness probe
+	// + respawn + give-up. The liveness read and the dead-handle close both take ProcessMutex (the watchdog thread
+	// otherwise owns ProcHandle mutation); the respawn first frees any orphan squatting on the listen port, then
+	// re-spawns; give-up clears the pid file. All run ON the watchdog thread.
+	Watchdog.Start(
+		/*IsAlive*/ [this]() -> bool
 		{
-			FPlatformProcess::Sleep(1.0f);
-			if (bStopRequested)
-				break;
-
-			bool bAlive;
-			{
-				FScopeLock Lock(&ProcessMutex);
-				bAlive = ProcHandle.IsValid() && FPlatformProcess::IsProcRunning(ProcHandle);
-			}
-			if (bAlive)
-			{
-				BackoffIndex = 0;
-				continue;
-			}
-
-			// Process died unexpectedly — crash-restart with backoff + a crash-rate guard.
-			const double Now = FPlatformTime::Seconds();
-			if (Now - WindowStartSeconds > ServerCrashWindowSeconds)
-			{
-				WindowStartSeconds = Now;
-				CrashesInWindow = 0;
-			}
-			if (++CrashesInWindow > ServerMaxCrashesPerWindow)
-			{
-				UE_LOG(LogUnrealMcp, Error,
-					TEXT("[Unreal-MCP] local server crashed > %d times in %.0fs; giving up auto-restart."),
-					ServerMaxCrashesPerWindow, ServerCrashWindowSeconds);
-				ClearPidFile();
-				return;
-			}
-
-			const int32 DelaySeconds = ServerBackoffSeconds[FMath::Min(BackoffIndex, (int32)UE_ARRAY_COUNT(ServerBackoffSeconds) - 1)];
-			++BackoffIndex;
-			UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] local server exited; restarting in %ds (restart #%d)."),
-				DelaySeconds, RestartCount.GetValue() + 1);
-
-			// Chunk the backoff so editor shutdown (which joins this thread) is not stalled by one long sleep.
-			const double BackoffUntil = FPlatformTime::Seconds() + DelaySeconds;
-			while (!bStopRequested && FPlatformTime::Seconds() < BackoffUntil)
-				FPlatformProcess::Sleep(0.5f);
-			if (bStopRequested)
-				break;
-
+			FScopeLock Lock(&ProcessMutex);
+			return ProcHandle.IsValid() && FPlatformProcess::IsProcRunning(ProcHandle);
+		},
+		/*Respawn*/ [this]() -> bool
+		{
 			{
 				FScopeLock Lock(&ProcessMutex);
 				if (ProcHandle.IsValid())
@@ -752,20 +673,15 @@ void FUnrealMcpServerManager::StartWatchdog()
 			}
 			if (ListenPort > 0)
 				KillOrphanedServerOnPort(ListenPort);
-			if (SpawnProcess(BinaryPath))
-				RestartCount.Increment();
-		}
-	});
+			return SpawnProcess(BinaryPath);
+		},
+		/*OnGiveUp*/ [this]() { ClearPidFile(); },
+		TEXT("local server"));
 }
 
 void FUnrealMcpServerManager::StopWatchdog()
 {
-	bStopRequested = true;
-	if (WatchdogFuture.IsValid())
-	{
-		WatchdogFuture.Wait();
-		WatchdogFuture = TFuture<void>();
-	}
+	Watchdog.Stop();
 }
 
 void FUnrealMcpServerManager::TerminateProcess(bool bForce)

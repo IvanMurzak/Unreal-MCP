@@ -6,6 +6,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { writeEnvFile, ensureEnvGitignored, type KnownEnvKey } from '../utils/env-file.js';
+import { asError } from '../utils/error.js';
 import { emitProgress } from './progress.js';
 import type { ConfigureOptions, ConfigureResult } from './types.js';
 
@@ -106,7 +107,7 @@ export async function configure(opts: ConfigureOptions): Promise<ConfigureResult
       kind: 'failure',
       success: false,
       warnings,
-      error: err instanceof Error ? err : new Error(String(err)),
+      error: asError(err),
     };
   }
 }

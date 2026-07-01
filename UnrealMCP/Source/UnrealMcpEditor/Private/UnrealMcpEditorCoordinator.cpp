@@ -16,6 +16,7 @@
 #include "Sidecar/UnrealMcpSidecarManager.h"
 #include "Server/UnrealMcpServerManager.h"
 #include "Extensions/UnrealMcpExtensionManager.h"
+#include "Extensions/UnrealMcpExtensionInstaller.h" // §7 install channel #3 (catalog fetch + installer)
 #include "UI/UnrealMcpEditorViewModel.h"
 #include "UI/UnrealMcpMainWindowTab.h"
 #include "UI/UnrealMcpAuxWindows.h"
@@ -26,12 +27,18 @@
 #include "DevControl/UnrealMcpDevControlServer.h"
 
 #include "Editor.h"
+#include "Misc/App.h"
 #include "Misc/CoreDelegates.h"
 #include "Misc/Paths.h"
 #include "Misc/EngineVersion.h"
 #include "Async/Async.h"
 #include "HAL/PlatformProcess.h"
+#include "Modules/ModuleManager.h"
 #include "Interfaces/IPluginManager.h"
+
+#if WITH_UNREAL_MCP_LIVE_CODING
+#include "ILiveCodingModule.h"
+#endif
 
 // Defined here (where every subsystem type is complete) so the TUniquePtr member deleters instantiate
 // correctly regardless of unity-build grouping. See the header comment.
@@ -311,8 +318,72 @@ void FUnrealMcpEditorCoordinator::Startup()
 		});
 	}
 
+	// §7 item 10 Extensions panel (install channel #3, issue #179 — Unity-parity): the per-extension
+	// Install / Update / Installed list is now hosted INSIDE the "AI Game Developer" main window's Extensions
+	// section (no separate window to find). Wire the catalog fetch (HTTP, on-demand), the install service
+	// (FUnrealMcpExtensionInstaller — fetch → place in Plugins/ → edit .uproject → compile-on-open), and the §5
+	// hot-load enable toggle (ExtensionManager::SetExtensionEnabled → manifest revision bump → bridge re-proxies).
+	// The InstalledProvider snapshots the runtime extension manager's live records, guarded by the teardown
+	// alive-flag (ExtProvidersAlive) so a deferred main-window paint after Shutdown frees the manager returns
+	// empty rather than dereferencing freed memory. No catalog fetch happens at boot (empty InitialCatalog) so
+	// the headless smoke / Automation runs never block on the network.
+	ExtProvidersAlive = MakeShared<bool>(true);
+	TSharedPtr<bool> ExtAlive = ExtProvidersAlive;
+	FUnrealMcpExtensionManager* ExtMgrPtr = ExtensionManager.Get();
+	const FString ExtProjectDir = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir());
+	FUnrealMcpExtensionsPanelWiring ExtWiring;
+	ExtWiring.ProjectDir = ExtProjectDir;
+	ExtWiring.InstalledProvider = [ExtAlive, ExtMgrPtr]() -> TArray<FUnrealMcpExtensionRecord>
+	{
+		return (ExtAlive.IsValid() && *ExtAlive && ExtMgrPtr) ? ExtMgrPtr->GetExtensions() : TArray<FUnrealMcpExtensionRecord>();
+	};
+	ExtWiring.CatalogFetcher = [](TArray<FUnrealMcpCatalogEntry>& Out, FString& Err) -> bool
+	{
+		return FUnrealMcpExtensionInstaller::FetchCatalogSync(FUnrealMcpExtensionCatalog::DefaultCatalogUrl(), 30.0, Out, Err);
+	};
+	ExtWiring.OnSetEnabled = [ExtMgrPtr](const FString& Id, bool bEnabled)
+	{
+		if (ExtMgrPtr)
+			ExtMgrPtr->SetExtensionEnabled(Id, bEnabled); // §5 hot-load: rebuild + re-push the manifest(s)
+	};
+	ExtWiring.OnInstall = [ExtProjectDir](const FUnrealMcpCatalogEntry& Entry, bool bForce) -> FUnrealMcpInstallResult
+	{
+		FUnrealMcpInstallOptions Opts;
+		Opts.ProjectDir = ExtProjectDir;
+		Opts.Descriptor = Entry;
+		Opts.bForce = bForce;
+		return FUnrealMcpExtensionInstaller::Install(Opts);
+	};
+	ExtWiring.OnTriggerLiveCompile = []() -> FString
+	{
+#if WITH_UNREAL_MCP_LIVE_CODING
+		// Best-effort: Live Coding patches already-loaded modules. A freshly installed extension's brand-new
+		// module may still require a full editor restart to load — so the messaging stays honest either way.
+		if (!FApp::IsUnattended())
+		{
+			ILiveCodingModule* LiveCoding = FModuleManager::GetModulePtr<ILiveCodingModule>(FName(LIVE_CODING_MODULE_NAME));
+			if (LiveCoding && LiveCoding->IsEnabledForSession() && LiveCoding->HasStarted() && !LiveCoding->IsCompiling())
+			{
+				// Fire-and-forget: OnCompileClicked() calls this synchronously on the game thread, so a
+				// WaitForCompletion compile (20-60s) would freeze the editor — and this very panel — looking
+				// like a hang. Kick it off like UE's own Compile button does and point the user at the Live
+				// Coding panel for progress.
+				LiveCoding->Compile(ELiveCodingCompileFlags::None, nullptr);
+				return TEXT("Live Coding compilation started — watch the Live Coding panel for progress. A newly added extension module may still need an editor restart to load.");
+			}
+			if (LiveCoding && LiveCoding->IsEnabledForSession() && LiveCoding->HasStarted())
+				return TEXT("Live Coding is already compiling — wait for it to finish, then restart the editor if the new extension module still isn't loaded.");
+			return TEXT("Live Coding is not enabled/started — restart the editor to finish compiling the installed extension(s).");
+		}
+		return TEXT("Live Coding is unavailable in this session — restart the editor to finish compiling.");
+#else
+		return TEXT("Live Coding is unavailable on this platform — restart the editor to finish compiling.");
+#endif
+	};
+
 	// Register the nomad dockable tab + Window-menu entry (§7). A manual "Restart bridge" force-relaunches the
-	// sidecar; the bridge-status line reflects the sidecar's run state.
+	// sidecar; the bridge-status line reflects the sidecar's run state. The Extensions wiring above rides along so
+	// the spawned main window's Extensions section hosts the live Install/Update list (issue #179).
 	FUnrealMcpSidecarManager* SidecarPtr = SidecarManager.Get();
 	MainWindowTab = MakeUnique<FUnrealMcpMainWindowTab>();
 	MainWindowTab->Register(
@@ -351,14 +422,16 @@ void FUnrealMcpEditorCoordinator::Startup()
 		[BridgeServerPtr](const TSharedPtr<FJsonObject>& Request) -> bool
 		{
 			return BridgeServerPtr ? BridgeServerPtr->SendAgentConfigMessage(Request) : false;
-		});
+		},
+		MoveTemp(ExtWiring)); // issue #179: the embedded Extensions section wiring
 
 	// §7 auxiliary windows (MCP Tools / Prompts / Resources). The Tools window snapshots the registry on open for
 	// its list — a §5 extension hot-reload can change the set after boot, so an already-open window shows its
 	// open-time snapshot and reopen refreshes it. Prompts/Resources have no plugin-side feed yet (the .NET sidecar
 	// owns those features, §2) — their providers return empty and the windows render an honest empty state rather
 	// than a fabricated registry. Connection settings (incl. the read-only IPC-bridge-port line) live in the
-	// single "AI Game Developer" main window, not an aux window (issue #107, Unity-MCP parity).
+	// single "AI Game Developer" main window, not an aux window (issue #107, Unity-MCP parity). The Extensions
+	// panel is no longer an aux tab either (issue #179) — its wiring went to the main-window tab above.
 	AuxWindows = MakeUnique<FUnrealMcpAuxWindows>();
 	AuxWindows->Register(
 		ViewModel.ToSharedRef(),
@@ -429,6 +502,12 @@ void FUnrealMcpEditorCoordinator::Shutdown()
 	if (!bStarted)
 		return;
 	bStarted = false;
+
+	// issue #179: neutralize the embedded Extensions panel's InstalledProvider FIRST — before the main-window tab
+	// close and the ExtensionManager reset below — so a deferred main-window paint (a queued RequestCloseTab) reads
+	// an empty list instead of dereferencing the soon-to-be-freed extension manager. Mirrors the aux-windows guard.
+	if (ExtProvidersAlive.IsValid())
+		*ExtProvidersAlive = false;
 
 	if (PreExitHandle.IsValid())
 	{

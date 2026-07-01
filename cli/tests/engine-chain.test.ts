@@ -165,6 +165,7 @@ describe('discoverEngine — layer ordering: launcher → registry → common-lo
     const discoveryFs: DiscoveryFs = {
       existsImpl: (p) => p === root || p === bin,
       readdirImpl: (p) => (p === root ? ['UE_5.7'] : []),
+      readFileImpl: () => null,
     };
     const r = discoverEngine({
       engineAssociation: '5.7',
@@ -188,6 +189,7 @@ describe('discoverEngine — layer ordering: launcher → registry → common-lo
     const discoveryFs: DiscoveryFs = {
       existsImpl: (p) => p === root || p === bin,
       readdirImpl: (p) => (p === root ? ['UnrealEngine'] : []),
+      readFileImpl: () => null,
     };
     const r = discoverEngine({
       engineAssociation: '',
@@ -211,7 +213,7 @@ describe('discoverEngine — layer ordering: launcher → registry → common-lo
       cacheIo: io,
       enginesImpl: () => [],
       registryQueryImpl: () => null,
-      discoveryFs: { existsImpl: () => false, readdirImpl: () => [] },
+      discoveryFs: { existsImpl: () => false, readdirImpl: () => [], readFileImpl: () => null },
     });
     expect(r.kind).toBe('unresolved');
     if (r.kind === 'unresolved') expect(r.source).toBeNull();
@@ -268,7 +270,7 @@ describe('openProject — forwards the discovery surfaces (hermetic, no home cac
           readImpl: (p) => store.get(p) ?? null,
           writeImpl: (p, c) => void store.set(p, c),
         },
-        discoveryFs: { existsImpl: () => false, readdirImpl: () => [] },
+        discoveryFs: { existsImpl: () => false, readdirImpl: () => [], readFileImpl: () => null },
         registryQueryImpl: () => null,
         spawnImpl: () => ({ pid: 99 }),
       });

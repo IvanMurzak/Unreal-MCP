@@ -3,6 +3,8 @@
 
 #include "UnrealMcpCoreTools.h"
 #include "UnrealMcpToolRegistry.h"
+#include "UnrealMcpSchema.h"          // shared §3.2 schema builders (FUnrealMcpSchema::Rotator/ObjectBag/StringArray)
+#include "UnrealMcpToolArgs.h"        // shared FUnrealMcpToolArgs::GetStringArray
 #include "Tools/UnrealMcpObjectRef.h"
 #include "Tools/UnrealMcpPropertyJson.h"
 
@@ -29,81 +31,9 @@
  */
 namespace
 {
-	// --- Local schema builders (the typed builder helpers don't cover rotators / property bags / lists) ---
-
-	/** `{pitch,yaw,roll: number}` — the §3.2 FRotator mapping (degrees). Read back via FUnrealMcpToolCall::GetRotator. */
-	TSharedPtr<FJsonObject> MakeRotatorSchema(const FString& Desc)
-	{
-		auto Num = []() { TSharedPtr<FJsonObject> N = MakeShared<FJsonObject>(); N->SetStringField(TEXT("type"), TEXT("number")); return N; };
-		TSharedPtr<FJsonObject> Props = MakeShared<FJsonObject>();
-		Props->SetObjectField(TEXT("pitch"), Num());
-		Props->SetObjectField(TEXT("yaw"), Num());
-		Props->SetObjectField(TEXT("roll"), Num());
-
-		TSharedPtr<FJsonObject> Schema = MakeShared<FJsonObject>();
-		Schema->SetStringField(TEXT("type"), TEXT("object"));
-		if (!Desc.IsEmpty())
-			Schema->SetStringField(TEXT("description"), Desc);
-		Schema->SetObjectField(TEXT("properties"), Props);
-		return Schema;
-	}
-
-	/** A free-form `{ key: value }` property bag — arbitrary FProperty writes (§3.2), additionalProperties allowed. */
-	TSharedPtr<FJsonObject> MakePropertyBagSchema(const FString& Desc)
-	{
-		TSharedPtr<FJsonObject> Schema = MakeShared<FJsonObject>();
-		Schema->SetStringField(TEXT("type"), TEXT("object"));
-		if (!Desc.IsEmpty())
-			Schema->SetStringField(TEXT("description"), Desc);
-		Schema->SetBoolField(TEXT("additionalProperties"), true);
-		return Schema;
-	}
-
-	/** An `array` of strings — used for the §3.2 scoped-read `paths` filter. */
-	TSharedPtr<FJsonObject> MakeStringArraySchema(const FString& Desc)
-	{
-		TSharedPtr<FJsonObject> Items = MakeShared<FJsonObject>();
-		Items->SetStringField(TEXT("type"), TEXT("string"));
-
-		TSharedPtr<FJsonObject> Schema = MakeShared<FJsonObject>();
-		Schema->SetStringField(TEXT("type"), TEXT("array"));
-		if (!Desc.IsEmpty())
-			Schema->SetStringField(TEXT("description"), Desc);
-		Schema->SetObjectField(TEXT("items"), Items);
-		return Schema;
-	}
-
-	// --- Small argument helpers ---
-
-	/**
-	 * Read a string array argument (the scoped-read `paths` filter); empty when absent or not an array.
-	 * A non-string entry is reported via OutError (and the array is left empty) rather than silently
-	 * dropped — a dropped entry would otherwise flip the scoped read to "identity only" / "full object"
-	 * (the opposite extremes of the requested scope) with no signal to the caller.
-	 */
-	TArray<FString> GetStringArray(const FUnrealMcpToolCall& Call, const FString& Key, FString& OutError)
-	{
-		TArray<FString> Out;
-		const TArray<TSharedPtr<FJsonValue>>* Arr = nullptr;
-		if (Call.Arguments->TryGetArrayField(Key, Arr) && Arr)
-		{
-			for (const TSharedPtr<FJsonValue>& V : *Arr)
-			{
-				FString S;
-				if (V.IsValid() && V->TryGetString(S))
-				{
-					Out.Add(S);
-				}
-				else
-				{
-					OutError = FString::Printf(TEXT("'%s' must be an array of strings; a non-string entry was provided."), *Key);
-					Out.Reset();
-					return Out;
-				}
-			}
-		}
-		return Out;
-	}
+	// Schema builders (rotator / property bag / string-array) + the scoped-read `paths` reader are the shared
+	// FUnrealMcpSchema / FUnrealMcpToolArgs surfaces (UnrealMcpSchema.h / UnrealMcpToolArgs.h) — see their call
+	// sites below. Only family-specific helpers remain here.
 
 	/** The 'properties' object argument (the write property bag); null when absent. */
 	TSharedPtr<FJsonObject> GetPropertiesArg(const FUnrealMcpToolCall& Call)
@@ -167,7 +97,7 @@ namespace UnrealMcpActorTools
 			.ParamString(TEXT("classPath"), TEXT("Native class or Blueprint asset path/name."), EUnrealMcpParamRequirement::Required)
 			.ParamString(TEXT("name"), TEXT("Actor label. Auto-generated when omitted."))
 			.ParamVector(TEXT("location"), TEXT("World location {x,y,z}. Defaults to origin."))
-			.Param(TEXT("rotation"), TEXT("object"), TEXT("World rotation {pitch,yaw,roll} in degrees."), EUnrealMcpParamRequirement::Optional, MakeRotatorSchema(TEXT("World rotation {pitch,yaw,roll} in degrees.")))
+			.Param(TEXT("rotation"), TEXT("object"), TEXT("World rotation {pitch,yaw,roll} in degrees."), EUnrealMcpParamRequirement::Optional, FUnrealMcpSchema::Rotator(TEXT("World rotation {pitch,yaw,roll} in degrees.")))
 			.ParamString(TEXT("parentActor"), TEXT("Label/path of an actor to attach the new actor to."))
 			.DestructiveHint(false)
 			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
@@ -323,7 +253,7 @@ namespace UnrealMcpActorTools
 			.ParamString(TEXT("labelFilter"), TEXT("Case-insensitive substring matched against actor labels."))
 			.ParamString(TEXT("pathFilter"), TEXT("Case-insensitive substring matched against full actor paths."))
 			.ParamString(TEXT("classFilter"), TEXT("Class path/name; matches actors of this class or a subclass."))
-			.Param(TEXT("paths"), TEXT("array"), TEXT("Dotted property paths to include per actor (scoped read). Identity only when omitted."), EUnrealMcpParamRequirement::Optional, MakeStringArraySchema(TEXT("Dotted property paths to include per actor (scoped read).")))
+			.Param(TEXT("paths"), TEXT("array"), TEXT("Dotted property paths to include per actor (scoped read). Identity only when omitted."), EUnrealMcpParamRequirement::Optional, FUnrealMcpSchema::StringArray(TEXT("Dotted property paths to include per actor (scoped read).")))
 			.ParamInt(TEXT("limit"), TEXT("Maximum number of actors to return. Defaults to 100."))
 			.ReadOnlyHint(true)
 			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
@@ -336,7 +266,7 @@ namespace UnrealMcpActorTools
 				const FString PathFilter = Call.GetString(TEXT("pathFilter"));
 				const FString ClassFilter = Call.GetString(TEXT("classFilter"));
 				FString PathsError;
-				const TArray<FString> Paths = GetStringArray(Call, TEXT("paths"), PathsError);
+				const TArray<FString> Paths = FUnrealMcpToolArgs::GetStringArray(Call, TEXT("paths"), PathsError);
 				if (!PathsError.IsEmpty())
 					return FUnrealMcpToolResult::Error(PathsError);
 				const int32 Limit = static_cast<int32>(Call.GetInt(TEXT("limit"), 100));
@@ -386,7 +316,7 @@ namespace UnrealMcpActorTools
 			                  "'rotation' {pitch,yaw,roll}, and 'scale' {x,y,z} are routed to the transform "
 			                  "APIs; all other keys are set by name through FProperty reflection."))
 			.ParamString(TEXT("actor"), TEXT("Actor label / name / path to modify."), EUnrealMcpParamRequirement::Required)
-			.Param(TEXT("properties"), TEXT("object"), TEXT("Property bag of name -> value to write (incl. transform keys)."), EUnrealMcpParamRequirement::Required, MakePropertyBagSchema(TEXT("Property bag of name -> value to write.")))
+			.Param(TEXT("properties"), TEXT("object"), TEXT("Property bag of name -> value to write (incl. transform keys)."), EUnrealMcpParamRequirement::Required, FUnrealMcpSchema::ObjectBag(TEXT("Property bag of name -> value to write.")))
 			.DestructiveHint(false)
 			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
 			{
@@ -580,7 +510,7 @@ namespace UnrealMcpActorTools
 			.Description(TEXT("Read a component's reflected properties, optionally scoped to the dotted 'paths' filter."))
 			.ParamString(TEXT("actor"), TEXT("Owning actor label / name / path."), EUnrealMcpParamRequirement::Required)
 			.ParamString(TEXT("component"), TEXT("Component name to read."), EUnrealMcpParamRequirement::Required)
-			.Param(TEXT("paths"), TEXT("array"), TEXT("Dotted property paths to include (scoped read). Full object when omitted."), EUnrealMcpParamRequirement::Optional, MakeStringArraySchema(TEXT("Dotted property paths to include (scoped read).")))
+			.Param(TEXT("paths"), TEXT("array"), TEXT("Dotted property paths to include (scoped read). Full object when omitted."), EUnrealMcpParamRequirement::Optional, FUnrealMcpSchema::StringArray(TEXT("Dotted property paths to include (scoped read).")))
 			.ReadOnlyHint(true)
 			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
 			{
@@ -594,7 +524,7 @@ namespace UnrealMcpActorTools
 					return FUnrealMcpToolResult::Error(FString::Printf(TEXT("No component matched '%s' on '%s'."), *CompRef, *Actor->GetActorLabel()));
 
 				FString PathsError;
-				const TArray<FString> Paths = GetStringArray(Call, TEXT("paths"), PathsError);
+				const TArray<FString> Paths = FUnrealMcpToolArgs::GetStringArray(Call, TEXT("paths"), PathsError);
 				if (!PathsError.IsEmpty())
 					return FUnrealMcpToolResult::Error(PathsError);
 				TSharedPtr<FJsonObject> Data = FUnrealMcpObjectRef::ComponentIdentity(Comp);
@@ -612,7 +542,7 @@ namespace UnrealMcpActorTools
 			                  "'relativeScale3D' {x,y,z} routed to the relative-transform APIs."))
 			.ParamString(TEXT("actor"), TEXT("Owning actor label / name / path."), EUnrealMcpParamRequirement::Required)
 			.ParamString(TEXT("component"), TEXT("Component name to modify."), EUnrealMcpParamRequirement::Required)
-			.Param(TEXT("properties"), TEXT("object"), TEXT("Property bag of name -> value to write."), EUnrealMcpParamRequirement::Required, MakePropertyBagSchema(TEXT("Property bag of name -> value to write.")))
+			.Param(TEXT("properties"), TEXT("object"), TEXT("Property bag of name -> value to write."), EUnrealMcpParamRequirement::Required, FUnrealMcpSchema::ObjectBag(TEXT("Property bag of name -> value to write.")))
 			.DestructiveHint(false)
 			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
 			{
@@ -694,7 +624,7 @@ namespace UnrealMcpActorTools
 			                  "('/Game/Folder/Asset.Asset') or, for scene objects, by actor label. Optionally "
 			                  "scoped to the dotted 'paths' filter."))
 			.ParamString(TEXT("object"), TEXT("Object path or actor label/name/path."), EUnrealMcpParamRequirement::Required)
-			.Param(TEXT("paths"), TEXT("array"), TEXT("Dotted property paths to include (scoped read). Full object when omitted."), EUnrealMcpParamRequirement::Optional, MakeStringArraySchema(TEXT("Dotted property paths to include (scoped read).")))
+			.Param(TEXT("paths"), TEXT("array"), TEXT("Dotted property paths to include (scoped read). Full object when omitted."), EUnrealMcpParamRequirement::Optional, FUnrealMcpSchema::StringArray(TEXT("Dotted property paths to include (scoped read).")))
 			.ReadOnlyHint(true)
 			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
 			{
@@ -707,7 +637,7 @@ namespace UnrealMcpActorTools
 					return FUnrealMcpToolResult::Error(FString::Printf(TEXT("No object matched '%s'."), *Ref));
 
 				FString PathsError;
-				const TArray<FString> Paths = GetStringArray(Call, TEXT("paths"), PathsError);
+				const TArray<FString> Paths = FUnrealMcpToolArgs::GetStringArray(Call, TEXT("paths"), PathsError);
 				if (!PathsError.IsEmpty())
 					return FUnrealMcpToolResult::Error(PathsError);
 				TSharedPtr<FJsonObject> Structured = MakeShared<FJsonObject>();
@@ -726,7 +656,7 @@ namespace UnrealMcpActorTools
 			.Description(TEXT("Write reflected properties on any UObject resolved by object path or actor label. "
 			                  "Transform keys are honored when the object is an actor or scene component."))
 			.ParamString(TEXT("object"), TEXT("Object path or actor label/name/path."), EUnrealMcpParamRequirement::Required)
-			.Param(TEXT("properties"), TEXT("object"), TEXT("Property bag of name -> value to write."), EUnrealMcpParamRequirement::Required, MakePropertyBagSchema(TEXT("Property bag of name -> value to write.")))
+			.Param(TEXT("properties"), TEXT("object"), TEXT("Property bag of name -> value to write."), EUnrealMcpParamRequirement::Required, FUnrealMcpSchema::ObjectBag(TEXT("Property bag of name -> value to write.")))
 			.DestructiveHint(false)
 			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
 			{

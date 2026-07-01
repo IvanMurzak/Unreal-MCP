@@ -4,6 +4,7 @@
 #include "UnrealMcpCoreTools.h"
 #include "UnrealMcpToolRegistry.h"
 #include "UnrealMcpLog.h"
+#include "UnrealMcpToolArgs.h"        // shared FUnrealMcpToolArgs::GetStringArray (strict: errors on a non-string / non-array)
 #include "Tools/UnrealMcpAssetScopedRead.h"
 
 #include "Dom/JsonObject.h"
@@ -110,29 +111,15 @@ namespace UnrealMcpAssetTools
 		return !(IsReservedRoot(TEXT("/Engine")) || IsReservedRoot(TEXT("/Script")) || IsReservedRoot(TEXT("/Temp")));
 	}
 
-	/** Read a string-array argument (returns empty when absent or not an array). */
-	static TArray<FString> GetStringArray(const FUnrealMcpToolCall& Call, const FString& Key)
+	/**
+	 * The §3.2 scoped-read field list (the `paths` argument) for read-only get-data tools. Delegates to the
+	 * shared strict reader: a non-string entry or a present-but-not-array `paths` is reported via @p OutError
+	 * (and an empty list returned), so a malformed filter errors rather than silently widening the read (this
+	 * family used to silently drop bad entries — converged to the strict contract the other families use).
+	 */
+	static TArray<FString> GetScopedReadPaths(const FUnrealMcpToolCall& Call, FString& OutError)
 	{
-		TArray<FString> Result;
-		const TArray<TSharedPtr<FJsonValue>>* Array;
-		if (Call.Arguments->TryGetArrayField(Key, Array))
-		{
-			for (const TSharedPtr<FJsonValue>& Value : *Array)
-			{
-				FString Str;
-				if (Value.IsValid() && Value->TryGetString(Str))
-				{
-					Result.Add(Str);
-				}
-			}
-		}
-		return Result;
-	}
-
-	/** The §3.2 scoped-read field list (the `paths` argument) for read-only get-data tools. */
-	static TArray<FString> GetScopedReadPaths(const FUnrealMcpToolCall& Call)
-	{
-		return GetStringArray(Call, TEXT("paths"));
+		return FUnrealMcpToolArgs::GetStringArray(Call, TEXT("paths"), OutError);
 	}
 
 	static TSharedPtr<FJsonObject> AssetDataToJson(const FAssetData& Data)
@@ -315,7 +302,12 @@ namespace UnrealMcpAssetTools
 				});
 				Full->SetObjectField(TEXT("tags"), Tags);
 
-				const TSharedPtr<FJsonObject> Structured = UnrealMcpAssetScopedRead::Apply(Full, GetScopedReadPaths(Call));
+				FString PathsError;
+				const TArray<FString> ScopedPaths = GetScopedReadPaths(Call, PathsError);
+				if (!PathsError.IsEmpty())
+					return FUnrealMcpToolResult::Error(PathsError);
+
+				const TSharedPtr<FJsonObject> Structured = UnrealMcpAssetScopedRead::Apply(Full, ScopedPaths);
 				return FUnrealMcpToolResult::Success(
 					FString::Printf(TEXT("Asset data for '%s'."), *Data.AssetName.ToString()), Structured);
 			});
@@ -541,7 +533,10 @@ namespace UnrealMcpAssetTools
 			.IdempotentHint(true)
 			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
 			{
-				TArray<FString> Paths = GetStringArray(Call, TEXT("paths"));
+				FString PathsError;
+				TArray<FString> Paths = FUnrealMcpToolArgs::GetStringArray(Call, TEXT("paths"), PathsError);
+				if (!PathsError.IsEmpty())
+					return FUnrealMcpToolResult::Error(PathsError);
 				const FString SinglePath = Call.GetString(TEXT("path"));
 				const bool bForce = Call.GetBool(TEXT("force"), false);
 				if (!SinglePath.IsEmpty())
@@ -916,7 +911,12 @@ namespace UnrealMcpAssetTools
 				Full->SetObjectField(TEXT("vectors"), Vectors);
 				Full->SetObjectField(TEXT("textures"), Textures);
 
-				const TSharedPtr<FJsonObject> Structured = UnrealMcpAssetScopedRead::Apply(Full, GetScopedReadPaths(Call));
+				FString PathsError;
+				const TArray<FString> ScopedPaths = GetScopedReadPaths(Call, PathsError);
+				if (!PathsError.IsEmpty())
+					return FUnrealMcpToolResult::Error(PathsError);
+
+				const TSharedPtr<FJsonObject> Structured = UnrealMcpAssetScopedRead::Apply(Full, ScopedPaths);
 				return FUnrealMcpToolResult::Success(
 					FString::Printf(TEXT("Material parameters for '%s'."), *Material->GetName()), Structured);
 			});

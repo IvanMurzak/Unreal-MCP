@@ -6,6 +6,7 @@
 #include "CoreMinimal.h"
 #include "Delegates/Delegate.h"
 #include "UI/UnrealMcpAgentConfigModels.h"
+#include "UI/SUnrealMcpExtensionsWindow.h" // FUnrealMcpExtensionsPanelWiring (the embedded Extensions section wiring, issue #179)
 
 class FUnrealMcpEditorViewModel;
 class FJsonObject;
@@ -42,7 +43,8 @@ public:
 		FSimpleDelegate InOnRestartBridge,
 		TFunction<FString()> InBridgeStatusProvider,
 		TFunction<FAiAgentConnectionInfo()> InConnectionInfoProvider,
-		TFunction<bool(const TSharedPtr<FJsonObject>&)> InSendAgentConfigRequest = nullptr);
+		TFunction<bool(const TSharedPtr<FJsonObject>&)> InSendAgentConfigRequest = nullptr,
+		FUnrealMcpExtensionsPanelWiring InExtensionsWiring = FUnrealMcpExtensionsPanelWiring());
 
 	/** Unregister the tab spawner (Shutdown). Idempotent. */
 	void Unregister();
@@ -63,6 +65,9 @@ private:
 	TFunction<FString()> BridgeStatusProvider;
 	TFunction<FAiAgentConnectionInfo()> ConnectionInfoProvider;
 	TFunction<bool(const TSharedPtr<FJsonObject>&)> SendAgentConfigRequest;
+	// §7 item 10 (issue #179): wiring for the main window's embedded Extensions section, forwarded to each
+	// spawned SUnrealMcpMainWindow. The coordinator guards its InstalledProvider with a teardown alive-flag.
+	FUnrealMcpExtensionsPanelWiring ExtensionsWiring;
 	// The currently-spawned main window (weak so a closed tab does not keep it alive); the agent-config-result
 	// feed forwards through it to the panel.
 	TWeakPtr<SUnrealMcpMainWindow> ActiveWindow;

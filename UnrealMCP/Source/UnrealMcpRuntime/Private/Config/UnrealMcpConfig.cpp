@@ -456,6 +456,32 @@ TSharedPtr<FJsonObject> FUnrealMcpConfig::BuildEffectiveConnectionConfig() const
 	return Obj;
 }
 
+bool FUnrealMcpConfig::ParseEnvLine(const FString& RawLine, FString& OutKey, FString& OutValue)
+{
+	OutKey.Reset();
+	OutValue.Reset();
+
+	FString Line = RawLine;
+	Line.TrimStartAndEndInline();
+	if (Line.IsEmpty() || Line[0] == TCHAR('#'))
+		return false;
+
+	int32 EqIndex = INDEX_NONE;
+	if (!Line.FindChar(TCHAR('='), EqIndex) || EqIndex <= 0)
+		return false;
+
+	FString Key = Line.Left(EqIndex);
+	Key.TrimStartAndEndInline();
+
+	const FString Value = SanitizeValue(Line.Mid(EqIndex + 1));
+	if (Value.IsEmpty())
+		return false;
+
+	OutKey = MoveTemp(Key);
+	OutValue = Value;
+	return true;
+}
+
 TMap<FString, FString> FUnrealMcpConfig::ParseEnvLines(const TArray<FString>& Lines)
 {
 	static const TCHAR* RecognizedKeys[] = {
@@ -466,17 +492,9 @@ TMap<FString, FString> FUnrealMcpConfig::ParseEnvLines(const TArray<FString>& Li
 	TMap<FString, FString> Result;
 	for (const FString& RawLine : Lines)
 	{
-		FString Line = RawLine;
-		Line.TrimStartAndEndInline();
-		if (Line.IsEmpty() || Line[0] == TCHAR('#'))
+		FString Key, Value;
+		if (!ParseEnvLine(RawLine, Key, Value))
 			continue;
-
-		int32 EqIndex = INDEX_NONE;
-		if (!Line.FindChar(TCHAR('='), EqIndex) || EqIndex <= 0)
-			continue;
-
-		FString Key = Line.Left(EqIndex);
-		Key.TrimStartAndEndInline();
 
 		bool bRecognized = false;
 		for (const TCHAR* Recognized : RecognizedKeys)
@@ -488,10 +506,6 @@ TMap<FString, FString> FUnrealMcpConfig::ParseEnvLines(const TArray<FString>& Li
 			}
 		}
 		if (!bRecognized)
-			continue;
-
-		const FString Value = SanitizeValue(Line.Mid(EqIndex + 1));
-		if (Value.IsEmpty())
 			continue;
 
 		Result.Add(Key, Value); // last occurrence wins
@@ -523,23 +537,11 @@ FString FUnrealMcpConfig::LookupEnvFileValue(const FString& Path, const FString&
 	FString Found; // last occurrence wins (matches ParseEnvLines)
 	for (const FString& RawLine : Lines)
 	{
-		FString Line = RawLine;
-		Line.TrimStartAndEndInline();
-		if (Line.IsEmpty() || Line[0] == TCHAR('#'))
+		FString LineKey, Value;
+		if (!ParseEnvLine(RawLine, LineKey, Value))
 			continue;
-
-		int32 EqIndex = INDEX_NONE;
-		if (!Line.FindChar(TCHAR('='), EqIndex) || EqIndex <= 0)
-			continue;
-
-		FString LineKey = Line.Left(EqIndex);
-		LineKey.TrimStartAndEndInline();
-		if (!LineKey.Equals(Key, ESearchCase::CaseSensitive))
-			continue;
-
-		const FString Value = SanitizeValue(Line.Mid(EqIndex + 1));
-		if (!Value.IsEmpty())
-			Found = Value;
+		if (LineKey.Equals(Key, ESearchCase::CaseSensitive))
+			Found = Value; // ParseEnvLine already dropped empty values
 	}
 	return Found;
 }

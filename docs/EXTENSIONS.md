@@ -415,3 +415,49 @@ than one contract (tools + prompts + resources) and be registered under each.
 - [`samples/UnrealAIRuntimeSample/`](../samples/UnrealAIRuntimeSample) — the **runtime (in-game)** extension
   sample: a `Type=Runtime` plugin whose `game-time-dilation` tool reads/sets the live `UWorld`'s
   `AWorldSettings::TimeDilation`, callable in a running game over a runtime MCP connection (§12.9).
+
+---
+
+## Installing an extension into a project
+
+The supported way to install a published (or local) extension into a user's Unreal project is the
+`unreal-mcp-cli install-extension` command (and the matching exported library function
+`installExtension`, parity with `installPlugin`):
+
+```bash
+# From the extension's GitHub release (the default channel):
+unreal-mcp-cli install-extension <extensionId> <project> --version <x.y.z>
+
+# From a local copy — offline / CI / dev (mirrors godot-cli install-plugin --source):
+unreal-mcp-cli install-extension <extensionId> <project> --source <plugin-dir>
+
+# Compile now instead of on next editor open:
+unreal-mcp-cli install-extension <extensionId> <project> --source <plugin-dir> --build
+```
+
+What it does, and why:
+
+1. **Resolve** `<extensionId>` against the shared, engine-agnostic **extension catalog** (the typed
+   `cli/src/utils/extensions-catalog.ts`, mirror of the future `extensions.catalog.json` —
+   `{ schemaVersion, extensions[] }`; each descriptor carries `extensionId`, `pluginName`, `repo`,
+   `version`, `minCoreVersion`, `enginePlugins`, `tools`). An unpublished extension installs anyway via
+   `--source` (the descriptor is synthesized from the source `.uplugin`).
+2. **Place** the plugin into `<project>/Plugins/<pluginName>/` (build-cache / VCS subtrees excluded;
+   staged-then-swapped so a failed install never corrupts an existing one).
+3. **Enable** the extension **and its gating engine plugins** — e.g. an extension that uses Niagara
+   declares `"Plugins": [ { "Name": "Niagara", "Enabled": true } ]` in its own `.uplugin`; the installer
+   reads that set (∪ the catalog `enginePlugins` hint) and enables every entry, plus the extension
+   itself, in the project's `.uproject` `Plugins[]` array.
+4. **Compile.** A Unreal-MCP extension is shipped as **C++ source** and compiled by UnrealBuildTool. The
+   default strategy is **source-ship + compile-on-next-editor-open** (`install-extension` reports
+   `rebuildRequired: true`); `--build` opts into an eager UBT compile against the resolved engine
+   (**Windows-only** — it invokes `UnrealBuildTool.exe` for the `Win64` target; on macOS/Linux omit
+   `--build` and rely on compile-on-next-editor-open). We
+   ship source rather than precompiled-per-UE-version binaries because UE plugin binaries are tied to an
+   exact engine version + build config + platform and are ABI-unstable across engine minors — the same
+   reason the core `install-plugin` ships source and excludes the stale `Intermediate/`/`Binaries/` cache.
+
+The install is **idempotent** (a re-run at the same version that is already enabled writes nothing) and
+the install-source resolver is **pluggable** — a future **Fab** (Epic marketplace) channel slots in as a
+new source `kind` without changing the command or library API. See
+[`cli/README.md` § Extensions](../cli/README.md#extensions) for the full option list.

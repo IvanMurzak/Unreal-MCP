@@ -69,6 +69,76 @@ namespace
 		}
 		return true;
 	}
+
+	/**
+	 * The KIND-agnostic prompt/resource rebuild pass (§A.2). The prompt and resource passes were verbatim
+	 * copies differing only in the provider/registry KIND and the kind nouns; this template factors out the
+	 * shared loop — clear the previous contribution, ExtensionId sort (StableSort tie-break = registration
+	 * order), per-provider IsValidExtensionId + duplicate-id + DisabledExtensions gating — and takes the two
+	 * kind-specific operations (remove-by-id, register-one-provider) plus the @p KindNoun for the log lines.
+	 * Called from inside the manager's re-entrancy guard, so each kind's RegisterExtension scope is opened+
+	 * closed here per provider and never nests across passes (a per-registry scope is independent of the others').
+	 */
+	template <typename TProvider>
+	void RebuildProviderKind(
+		const TArray<TProvider*>& Providers,
+		const TSet<FString>& DisabledExtensions,
+		TArray<FString>& RegisteredIds,
+		const TCHAR* KindNoun,
+		TFunctionRef<void(const FString&)> RemoveForExtension,
+		TFunctionRef<void(const FString&, TProvider*)> RegisterForExtension)
+	{
+		// 1. Clear the previous KIND-extension contribution (core entries are untouched: only ids we registered).
+		for (const FString& Id : RegisteredIds)
+			RemoveForExtension(Id);
+		RegisteredIds.Reset();
+
+		// 2. Deterministic ordering by ExtensionId (StableSort keeps registration order as the tie-break).
+		TArray<TProvider*> Sorted;
+		Sorted.Reserve(Providers.Num());
+		for (TProvider* P : Providers)
+		{
+			if (P != nullptr)
+				Sorted.Add(P);
+		}
+		Sorted.StableSort([](const TProvider& A, const TProvider& B)
+		{
+			return A.GetExtensionId() < B.GetExtensionId();
+		});
+
+		// 3. Register each ENABLED + valid + non-duplicate provider's entries.
+		TSet<FString> SeenIds;
+		for (TProvider* Provider : Sorted)
+		{
+			const FString Id = Provider->GetExtensionId();
+
+			// 3a. Validate the id (reuse the SAME helper as the tool pass — never register under "core"/garbage).
+			FString IdError;
+			if (!IsValidExtensionId(Id, IdError))
+			{
+				UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] %s extension rejected: %s — its %ss were skipped."), KindNoun, *IdError, KindNoun);
+				continue;
+			}
+
+			// 3b. Duplicate id (first-sorted wins). The tool pass already records the public Record for this id; the
+			//     KIND pass only needs to avoid double-registration / a clobbered removal key.
+			if (SeenIds.Contains(Id))
+			{
+				UE_LOG(LogUnrealMcp, Warning,
+					TEXT("[Unreal-MCP] duplicate %s extension id '%s' — another provider already registered it; this provider's %ss were skipped."),
+					KindNoun, *Id, KindNoun);
+				continue;
+			}
+			SeenIds.Add(Id);
+
+			// 3c. Gated by the SAME DisabledExtensions set as tools (one toggle disables an extension's tools AND this kind).
+			if (DisabledExtensions.Contains(Id))
+				continue;
+
+			RegisterForExtension(Id, Provider);
+			RegisteredIds.AddUnique(Id);
+		}
+	}
 }
 
 FUnrealMcpExtensionManager::FUnrealMcpExtensionManager(
@@ -295,167 +365,68 @@ void FUnrealMcpExtensionManager::RebuildFromProviders(const TArray<IUnrealMcpToo
 void FUnrealMcpExtensionManager::RebuildPromptProviders()
 {
 	// §A.2 prompt pass — the prompt analog of the tool pass in RebuildFromProviders, sharing the same
-	// DisabledExtensions set, IsValidExtensionId discipline, and ExtensionId sort. Called from inside the
-	// re-entrancy guard, so it never opens a nested registry scope across the two passes (the prompt registry's
-	// own RegisterExtension scope is independent of the tool registry's and is opened+closed here per provider).
+	// DisabledExtensions set, IsValidExtensionId discipline, and ExtensionId sort (the KIND-agnostic loop lives
+	// in RebuildProviderKind). Called from inside the re-entrancy guard, so it never opens a nested registry
+	// scope across passes (the prompt registry's own RegisterExtension scope is independent of the tool registry's).
 	if (PromptRegistry == nullptr)
 		return;
 
-	// 1. Clear the previous prompt-extension contribution (core prompts are untouched: only ids we registered).
-	for (const FString& Id : RegisteredPromptExtensionIds)
-		PromptRegistry->RemovePromptsForExtension(Id);
-	RegisteredPromptExtensionIds.Reset();
-
 	const TArray<IUnrealMcpPromptProvider*> Providers = PromptProviderSource ? PromptProviderSource() : GatherPromptProviders();
-
-	// 2. Deterministic ordering by ExtensionId (StableSort keeps registration order as the tie-break).
-	TArray<IUnrealMcpPromptProvider*> Sorted;
-	Sorted.Reserve(Providers.Num());
-	for (IUnrealMcpPromptProvider* P : Providers)
-	{
-		if (P != nullptr)
-			Sorted.Add(P);
-	}
-	Sorted.StableSort([](const IUnrealMcpPromptProvider& A, const IUnrealMcpPromptProvider& B)
-	{
-		return A.GetExtensionId() < B.GetExtensionId();
-	});
-
-	// 3. Register each ENABLED + valid + non-duplicate provider's prompts.
-	TSet<FString> SeenIds;
-	for (IUnrealMcpPromptProvider* Provider : Sorted)
-	{
-		const FString Id = Provider->GetExtensionId();
-
-		// 3a. Validate the id (reuse the SAME helper as the tool pass — never register under "core"/garbage).
-		FString IdError;
-		if (!IsValidExtensionId(Id, IdError))
+	RebuildProviderKind<IUnrealMcpPromptProvider>(
+		Providers, DisabledExtensions, RegisteredPromptExtensionIds, TEXT("prompt"),
+		[this](const FString& Id) { PromptRegistry->RemovePromptsForExtension(Id); },
+		[this](const FString& Id, IUnrealMcpPromptProvider* Provider)
 		{
-			UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] prompt extension rejected: %s — its prompts were skipped."), *IdError);
-			continue;
-		}
-
-		// 3b. Duplicate id (first-sorted wins). The tool pass already records the public Record for this id; the
-		//     prompt pass only needs to avoid double-registration / a clobbered removal key.
-		if (SeenIds.Contains(Id))
-		{
-			UE_LOG(LogUnrealMcp, Warning,
-				TEXT("[Unreal-MCP] duplicate prompt extension id '%s' — another provider already registered it; this provider's prompts were skipped."),
-				*Id);
-			continue;
-		}
-		SeenIds.Add(Id);
-
-		// 3c. Gated by the SAME DisabledExtensions set as tools (one toggle disables an extension's tools AND prompts).
-		if (DisabledExtensions.Contains(Id))
-			continue;
-
-		PromptRegistry->RegisterExtension(Id, [Provider](FUnrealMcpPromptRegistry& Reg) { Provider->RegisterPrompts(Reg); });
-		RegisteredPromptExtensionIds.AddUnique(Id);
-	}
+			PromptRegistry->RegisterExtension(Id, [Provider](FUnrealMcpPromptRegistry& Reg) { Provider->RegisterPrompts(Reg); });
+		});
 }
 
 void FUnrealMcpExtensionManager::RebuildResourceProviders()
 {
-	// §A.2 resource pass — the resource analog of RebuildPromptProviders, sharing the same DisabledExtensions
-	// set, IsValidExtensionId discipline, and ExtensionId sort. Called from inside the re-entrancy guard, so it
-	// never opens a nested registry scope across passes (the resource registry's own RegisterExtension scope is
-	// independent of the tool/prompt registries' and is opened+closed here per provider).
+	// §A.2 resource pass — the resource analog of RebuildPromptProviders (same gating + sort via the shared
+	// RebuildProviderKind). Called from inside the re-entrancy guard, so it never opens a nested registry scope
+	// across passes (the resource registry's own RegisterExtension scope is independent of the tool/prompt ones').
 	if (ResourceRegistry == nullptr)
 		return;
 
-	// 1. Clear the previous resource-extension contribution (core resources are untouched: only ids we registered).
-	for (const FString& Id : RegisteredResourceExtensionIds)
-		ResourceRegistry->RemoveResourcesForExtension(Id);
-	RegisteredResourceExtensionIds.Reset();
-
 	const TArray<IUnrealMcpResourceProvider*> Providers = ResourceProviderSource ? ResourceProviderSource() : GatherResourceProviders();
-
-	// 2. Deterministic ordering by ExtensionId (StableSort keeps registration order as the tie-break).
-	TArray<IUnrealMcpResourceProvider*> Sorted;
-	Sorted.Reserve(Providers.Num());
-	for (IUnrealMcpResourceProvider* P : Providers)
-	{
-		if (P != nullptr)
-			Sorted.Add(P);
-	}
-	Sorted.StableSort([](const IUnrealMcpResourceProvider& A, const IUnrealMcpResourceProvider& B)
-	{
-		return A.GetExtensionId() < B.GetExtensionId();
-	});
-
-	// 3. Register each ENABLED + valid + non-duplicate provider's resources.
-	TSet<FString> SeenIds;
-	for (IUnrealMcpResourceProvider* Provider : Sorted)
-	{
-		const FString Id = Provider->GetExtensionId();
-
-		// 3a. Validate the id (reuse the SAME helper as the tool/prompt passes — never register under "core"/garbage).
-		FString IdError;
-		if (!IsValidExtensionId(Id, IdError))
+	RebuildProviderKind<IUnrealMcpResourceProvider>(
+		Providers, DisabledExtensions, RegisteredResourceExtensionIds, TEXT("resource"),
+		[this](const FString& Id) { ResourceRegistry->RemoveResourcesForExtension(Id); },
+		[this](const FString& Id, IUnrealMcpResourceProvider* Provider)
 		{
-			UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] resource extension rejected: %s — its resources were skipped."), *IdError);
-			continue;
-		}
+			ResourceRegistry->RegisterExtension(Id, [Provider](FUnrealMcpResourceRegistry& Reg) { Provider->RegisterResources(Reg); });
+		});
+}
 
-		// 3b. Duplicate id (first-sorted wins). The tool pass already records the public Record for this id; the
-		//     resource pass only needs to avoid double-registration / a clobbered removal key.
-		if (SeenIds.Contains(Id))
-		{
-			UE_LOG(LogUnrealMcp, Warning,
-				TEXT("[Unreal-MCP] duplicate resource extension id '%s' — another provider already registered it; this provider's resources were skipped."),
-				*Id);
-			continue;
-		}
-		SeenIds.Add(Id);
+void FUnrealMcpExtensionManager::HandleFeatureChange(const FName& Type, const TCHAR* Verb)
+{
+	// The single OnModularFeature(Un)Registered subscription receives EVERY feature type; rebuild when the type is
+	// the tool OR (§A.2) the prompt/resource provider feature (gated on the matching registry being wired). A
+	// rebuild runs all wired passes + the single OnChanged.
+	const TCHAR* Kind = nullptr;
+	if (Type == IUnrealMcpToolProvider::GetModularFeatureName())
+		Kind = TEXT("tool");
+	else if (PromptRegistry != nullptr && Type == IUnrealMcpPromptProvider::GetModularFeatureName())
+		Kind = TEXT("prompt");
+	else if (ResourceRegistry != nullptr && Type == IUnrealMcpResourceProvider::GetModularFeatureName())
+		Kind = TEXT("resource");
 
-		// 3c. Gated by the SAME DisabledExtensions set as tools/prompts (one toggle disables an extension's tools AND prompts AND resources).
-		if (DisabledExtensions.Contains(Id))
-			continue;
+	if (Kind == nullptr)
+		return;
 
-		ResourceRegistry->RegisterExtension(Id, [Provider](FUnrealMcpResourceRegistry& Reg) { Provider->RegisterResources(Reg); });
-		RegisteredResourceExtensionIds.AddUnique(Id);
-	}
+	UE_LOG(LogUnrealMcp, Verbose, TEXT("[Unreal-MCP] %s provider %s; rebuilding extensions."), Kind, Verb);
+	Rebuild(/*bNotify*/ true);
 }
 
 void FUnrealMcpExtensionManager::OnFeatureRegistered(const FName& Type, IModularFeature* /*Feature*/)
 {
-	// The single OnModularFeatureRegistered subscription receives EVERY feature type; rebuild when the type is
-	// the tool OR (§A.2) the prompt provider feature. A rebuild runs both passes + the single OnChanged.
-	if (Type == IUnrealMcpToolProvider::GetModularFeatureName())
-	{
-		UE_LOG(LogUnrealMcp, Verbose, TEXT("[Unreal-MCP] tool provider registered; rebuilding extensions."));
-		Rebuild(/*bNotify*/ true);
-	}
-	else if (PromptRegistry != nullptr && Type == IUnrealMcpPromptProvider::GetModularFeatureName())
-	{
-		UE_LOG(LogUnrealMcp, Verbose, TEXT("[Unreal-MCP] prompt provider registered; rebuilding extensions."));
-		Rebuild(/*bNotify*/ true);
-	}
-	else if (ResourceRegistry != nullptr && Type == IUnrealMcpResourceProvider::GetModularFeatureName())
-	{
-		UE_LOG(LogUnrealMcp, Verbose, TEXT("[Unreal-MCP] resource provider registered; rebuilding extensions."));
-		Rebuild(/*bNotify*/ true);
-	}
+	HandleFeatureChange(Type, TEXT("registered"));
 }
 
 void FUnrealMcpExtensionManager::OnFeatureUnregistered(const FName& Type, IModularFeature* /*Feature*/)
 {
-	if (Type == IUnrealMcpToolProvider::GetModularFeatureName())
-	{
-		UE_LOG(LogUnrealMcp, Verbose, TEXT("[Unreal-MCP] tool provider unregistered; rebuilding extensions."));
-		Rebuild(/*bNotify*/ true);
-	}
-	else if (PromptRegistry != nullptr && Type == IUnrealMcpPromptProvider::GetModularFeatureName())
-	{
-		UE_LOG(LogUnrealMcp, Verbose, TEXT("[Unreal-MCP] prompt provider unregistered; rebuilding extensions."));
-		Rebuild(/*bNotify*/ true);
-	}
-	else if (ResourceRegistry != nullptr && Type == IUnrealMcpResourceProvider::GetModularFeatureName())
-	{
-		UE_LOG(LogUnrealMcp, Verbose, TEXT("[Unreal-MCP] resource provider unregistered; rebuilding extensions."));
-		Rebuild(/*bNotify*/ true);
-	}
+	HandleFeatureChange(Type, TEXT("unregistered"));
 }
 
 void FUnrealMcpExtensionManager::LoadConfig()

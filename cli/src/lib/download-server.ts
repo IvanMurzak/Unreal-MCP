@@ -29,6 +29,7 @@ import { createHash } from 'node:crypto';
 import { unzipSync } from 'fflate';
 import { ridForPlatform } from './bootstrap-local.js';
 import { SERVER_VERSION } from './server-version.js';
+import { asError } from '../utils/error.js';
 import { emitProgress } from './progress.js';
 import {
   serverChecksumsUrl,
@@ -62,7 +63,7 @@ async function fetchSha256SumsText(
       warnings.push(`${SHA256SUMS_ASSET_NAME} fetch attempt ${attempt}/${SHA256SUMS_FETCH_ATTEMPTS} failed: HTTP ${response.status}.`);
     } catch (err: unknown) {
       warnings.push(
-        `${SHA256SUMS_ASSET_NAME} fetch attempt ${attempt}/${SHA256SUMS_FETCH_ATTEMPTS} failed: ${err instanceof Error ? err.message : String(err)}.`,
+        `${SHA256SUMS_ASSET_NAME} fetch attempt ${attempt}/${SHA256SUMS_FETCH_ATTEMPTS} failed: ${asError(err).message}.`,
       );
     }
   }
@@ -75,8 +76,8 @@ export const SERVER_BINARY_BASENAME = 'gamedev-mcp-server';
 /** Env var that overrides the server binary path (skips download + version check). */
 export const SERVER_PATH_ENV_VAR = 'UNREAL_MCP_SERVER_PATH';
 
-/** GitHub repo the server binaries are released from. */
-const SERVER_RELEASE_REPO = 'IvanMurzak/GameDev-MCP-Server';
+/** GitHub repo the server binaries (and the SHA256SUMS manifest) are released from. */
+export const SERVER_RELEASE_REPO = 'IvanMurzak/GameDev-MCP-Server';
 
 /** Executable file name for an OS: `gamedev-mcp-server(.exe)`. Pure. */
 export function serverExecutableName(osPlatform: NodeJS.Platform): string {
@@ -289,7 +290,7 @@ export async function downloadServer(opts: DownloadServerOptions): Promise<Downl
       try {
         fs.chmodSync(exePath, 0o755);
       } catch (err: unknown) {
-        warnings.push(`Could not mark the server binary executable: ${err instanceof Error ? err.message : String(err)}`);
+        warnings.push(`Could not mark the server binary executable: ${asError(err).message}`);
       }
     }
     fs.writeFileSync(path.join(installDir, 'version'), version, 'utf-8');
@@ -306,7 +307,7 @@ export async function downloadServer(opts: DownloadServerOptions): Promise<Downl
       success: false,
       url,
       warnings,
-      error: err instanceof Error ? err : new Error(String(err)),
+      error: asError(err),
     };
   }
 }

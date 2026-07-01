@@ -7,6 +7,7 @@
 #include "Dom/JsonObject.h"
 #include "HAL/ThreadSafeBool.h"
 #include "Templates/Function.h"
+#include "UnrealMcpEnablementFilter.h"
 
 /**
  * Core tool-registration types for the Unreal-MCP plugin (docs/ARCHITECTURE.md §2, §3.3).
@@ -292,10 +293,10 @@ private:
 	TMap<FString, FUnrealMcpRegisteredTool> Tools;
 	int32 Revision = 0;
 
-	// --- Retained §7/§8 enablement filters. Re-applied on every (re-)registration (Commit) so an extension
-	//     hot-reload cannot resurrect a disabled tool, and a blocklist re-apply never clobbers the whitelist. ---
-	TSet<FString> EnabledToolsWhitelist; // §8 UNREAL_MCP_TOOLS; empty = no filter (every tool passes the whitelist gate)
-	TSet<FString> DisabledToolNames;     // §7 persisted blocklist (the MCP Tools window's `disabledTools`)
+	// --- Retained §7/§8 enablement filter. Re-applied on every (re-)registration (Commit) so an extension
+	//     hot-reload cannot resurrect a disabled tool, and a blocklist re-apply never clobbers the whitelist.
+	//     Whitelist = §8 UNREAL_MCP_TOOLS (empty = no filter); Blocklist = §7 persisted `disabledTools`. ---
+	FUnrealMcpEnablementFilter Enablement;
 
 	/** The combined §8 effective-served predicate: enabled iff (whitelist empty OR member) AND NOT blocklisted. */
 	bool ShouldToolBeEnabled(const FString& Name) const;

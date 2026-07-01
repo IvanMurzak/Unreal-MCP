@@ -847,25 +847,37 @@ bool FUnrealMcpBridgeServer::SendMessage(const TSharedPtr<FJsonObject>& Message)
 	const TArray<uint8> Framed = FUnrealMcpNdjsonAccumulator::Encode(Json);
 
 	FScopeLock WriteLock(&WriteMutex);
+	return SendFramedLocked(Framed, TEXT("socket send failed mid-frame"));
+}
+
+bool FUnrealMcpBridgeServer::SendFramedLocked(const TArray<uint8>& Framed, const TCHAR* Reason)
+{
+	// Caller holds WriteMutex. Acquire ConnectionMutex for the null-check + send + (on failure) drop, so the
+	// reader cannot free the socket under us. A genuine (non-would-block) failure mid-frame corrupts the stream —
+	// the peer would see a truncated line with the next frame concatenated, and a lost tool-response hangs the
+	// pending call until the heartbeat — so drop the connection for a clean sidecar reconnect.
 	FScopeLock ConnLock(&ConnectionMutex);
 	if (ClientSocket == nullptr)
 		return false;
 
 	if (!TrySendFramedLocked(Framed))
 	{
-		// A genuine (non-would-block) failure mid-frame corrupts the stream — the peer would see a truncated
-		// line with the next frame concatenated, and a lost tool-response hangs the pending call until the
-		// heartbeat. Drop the connection so the sidecar reconnects cleanly. We hold ConnectionMutex, so just
-		// park the socket for the reader to free (never DestroySocket from here) and clear flags.
-		UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] socket send failed mid-frame; dropping connection."));
-		SocketsPendingDestroy.Add(ClientSocket);
-		ClientSocket = nullptr;
-		bClientConnected = false;
-		bHandshakeOk = false;
-		bHeartbeatStop = true;
+		DropConnectionLocked(Reason);
 		return false;
 	}
 	return true;
+}
+
+void FUnrealMcpBridgeServer::DropConnectionLocked(const TCHAR* Reason)
+{
+	// Caller holds ConnectionMutex. Park the socket for the reader to free (never DestroySocket from a send
+	// path — that is DrainPendingDestroy's single-owner job) and clear the connection/handshake/heartbeat flags.
+	UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] %s; dropping connection."), Reason);
+	SocketsPendingDestroy.Add(ClientSocket);
+	ClientSocket = nullptr;
+	bClientConnected = false;
+	bHandshakeOk = false;
+	bHeartbeatStop = true;
 }
 
 bool FUnrealMcpBridgeServer::TrySendFramedLocked(const TArray<uint8>& Framed)
@@ -934,23 +946,8 @@ void FUnrealMcpBridgeServer::SendManifestLocked()
 	// accepts), so the manifest is stable by the time any handshake arrives. Dynamic re-registration (the
 	// §2.2 hot-reload path) MUST instead marshal the manifest build through the game-thread dispatcher.
 	const TSharedPtr<FJsonObject> Manifest = Registry.BuildManifestJson();
-	const FString Json = SerializeCondensed(Manifest);
-	const TArray<uint8> Framed = FUnrealMcpNdjsonAccumulator::Encode(Json);
-
-	FScopeLock ConnLock(&ConnectionMutex);
-	if (ClientSocket == nullptr)
-		return;
-
-	if (!TrySendFramedLocked(Framed))
-	{
-		UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] manifest send failed mid-frame; dropping connection."));
-		SocketsPendingDestroy.Add(ClientSocket);
-		ClientSocket = nullptr;
-		bClientConnected = false;
-		bHandshakeOk = false;
-		bHeartbeatStop = true;
-		return;
-	}
+	const TArray<uint8> Framed = FUnrealMcpNdjsonAccumulator::Encode(SerializeCondensed(Manifest));
+	SendFramedLocked(Framed, TEXT("manifest send failed mid-frame"));
 }
 
 void FUnrealMcpBridgeServer::PushManifest()
@@ -989,23 +986,8 @@ void FUnrealMcpBridgeServer::SendPromptManifestLocked()
 		return;
 
 	const TSharedPtr<FJsonObject> Manifest = PromptRegistry->BuildManifestJson();
-	const FString Json = SerializeCondensed(Manifest);
-	const TArray<uint8> Framed = FUnrealMcpNdjsonAccumulator::Encode(Json);
-
-	FScopeLock ConnLock(&ConnectionMutex);
-	if (ClientSocket == nullptr)
-		return;
-
-	if (!TrySendFramedLocked(Framed))
-	{
-		UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] prompt-manifest send failed mid-frame; dropping connection."));
-		SocketsPendingDestroy.Add(ClientSocket);
-		ClientSocket = nullptr;
-		bClientConnected = false;
-		bHandshakeOk = false;
-		bHeartbeatStop = true;
-		return;
-	}
+	const TArray<uint8> Framed = FUnrealMcpNdjsonAccumulator::Encode(SerializeCondensed(Manifest));
+	SendFramedLocked(Framed, TEXT("prompt-manifest send failed mid-frame"));
 }
 
 void FUnrealMcpBridgeServer::SendResourceManifestLocked()
@@ -1020,23 +1002,8 @@ void FUnrealMcpBridgeServer::SendResourceManifestLocked()
 		return;
 
 	const TSharedPtr<FJsonObject> Manifest = ResourceRegistry->BuildManifestJson();
-	const FString Json = SerializeCondensed(Manifest);
-	const TArray<uint8> Framed = FUnrealMcpNdjsonAccumulator::Encode(Json);
-
-	FScopeLock ConnLock(&ConnectionMutex);
-	if (ClientSocket == nullptr)
-		return;
-
-	if (!TrySendFramedLocked(Framed))
-	{
-		UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] resource-manifest send failed mid-frame; dropping connection."));
-		SocketsPendingDestroy.Add(ClientSocket);
-		ClientSocket = nullptr;
-		bClientConnected = false;
-		bHandshakeOk = false;
-		bHeartbeatStop = true;
-		return;
-	}
+	const TArray<uint8> Framed = FUnrealMcpNdjsonAccumulator::Encode(SerializeCondensed(Manifest));
+	SendFramedLocked(Framed, TEXT("resource-manifest send failed mid-frame"));
 }
 
 void FUnrealMcpBridgeServer::SendConfigLocked()
@@ -1057,22 +1024,8 @@ void FUnrealMcpBridgeServer::SendConfigLocked()
 	for (const TPair<FString, TSharedPtr<FJsonValue>>& Field : ConfigCopy->Values)
 		Message->SetField(Field.Key, Field.Value);
 
-	const FString Json = SerializeCondensed(Message);
-	const TArray<uint8> Framed = FUnrealMcpNdjsonAccumulator::Encode(Json);
-
-	FScopeLock ConnLock(&ConnectionMutex);
-	if (ClientSocket == nullptr)
-		return;
-
-	if (!TrySendFramedLocked(Framed))
-	{
-		UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] config send failed mid-frame; dropping connection."));
-		SocketsPendingDestroy.Add(ClientSocket);
-		ClientSocket = nullptr;
-		bClientConnected = false;
-		bHandshakeOk = false;
-		bHeartbeatStop = true;
-	}
+	const TArray<uint8> Framed = FUnrealMcpNdjsonAccumulator::Encode(SerializeCondensed(Message));
+	SendFramedLocked(Framed, TEXT("config send failed mid-frame"));
 }
 
 void FUnrealMcpBridgeServer::PushConfig()
