@@ -57,7 +57,7 @@ the editor module that depends on it):
 
 | Path | What it is |
 | --- | --- |
-| `UnrealMCP/` | The UE **plugin**. `UnrealMCP/UnrealMCP.uplugin` `VersionName` is the version single-source (currently **`0.5.0`**). **No `EngineVersion` pin** (UE treats that field as an exact-build match, not a floor, and would refuse to load on newer engines); the **5.5+ floor** is a CI/doc claim (CI-tested against **5.7** and **5.8**). Declared modules: **`UnrealMcpRuntime` (Type `Runtime`)** + **`UnrealMcpEditor` (Type `Editor`)**, both LoadingPhase `Default`, runtime first |
+| `UnrealMCP/` | The UE **plugin**. `UnrealMCP/UnrealMCP.uplugin` `VersionName` is the version single-source (currently **`0.6.1`**). **No `EngineVersion` pin** (UE treats that field as an exact-build match, not a floor, and would refuse to load on newer engines); the **5.5+ floor** is a CI/doc claim (CI-tested against **5.7** and **5.8**). Declared modules: **`UnrealMcpRuntime` (Type `Runtime`)** + **`UnrealMcpEditor` (Type `Editor`)**, both LoadingPhase `Default`, runtime first |
 | `UnrealMCP/Source/UnrealMcpRuntime/Public/` | The **public** contracts — re-exported by `UnrealMcpEditor`, so the SAME headers serve editor and runtime extensions: the tool/prompt/resource provider interfaces (`IUnrealMcpToolProvider.h`, `IUnrealMcpPromptProvider.h`, `IUnrealMcpResourceProvider.h`) + their fluent registries (`UnrealMcpToolRegistry.h`, `UnrealMcpPromptRegistry.h`, `UnrealMcpResourceRegistry.h`); the runtime bootstrap (`UnrealMcpRuntimeSubsystem.h`); the kill-switch settings (`UnrealMcpRuntimeSettings.h`); and the runtime core-family `Register` entry points (`UnrealMcpRuntimeCoreTools.h` = `ping`, `UnrealMcpRuntimeCorePrompts.h`, `UnrealMcpRuntimeCoreResources.h`) |
 | `UnrealMCP/Source/UnrealMcpRuntime/Private/` | The infra that cooks into games: `Bridge/` (TCP listener + NDJSON), `Dispatch/` (game-thread dispatcher), `Tools/` (registry, object-ref, world provider, property-JSON, scoped-read, log collector, `ping`), `Sidecar/`, `Config/`, `Extensions/`, plus the core `Prompts/`/`Resources/` families |
 | `UnrealMCP/Source/UnrealMcpEditor/Private/` | The editor-only surface: `Tools/` (the 8 families = 62 tools), `UI/` (Slate main window + aux tabs), `Server/` (local `gamedev-mcp-server` manager), `DevControl/`, plus the renamed editor coordinator |
@@ -209,7 +209,7 @@ runtime module ships only `ping`.
 
 ## Versioning
 
-Single semver shared by plugin / bridge / cli, currently **0.5.0**. The `UnrealMCP/UnrealMCP.uplugin`
+Single semver shared by plugin / bridge / cli, currently **0.6.1**. The `UnrealMCP/UnrealMCP.uplugin`
 `VersionName` is the **single source of truth**. Bump with:
 
 ```powershell
