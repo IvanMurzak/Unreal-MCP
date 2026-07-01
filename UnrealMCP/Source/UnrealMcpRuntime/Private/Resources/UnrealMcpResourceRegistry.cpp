@@ -38,21 +38,9 @@ void FUnrealMcpResourceBuilder::Read(FUnrealMcpResourceHandler InHandler)
 	Registry.Commit(MoveTemp(Resource));
 }
 
-// --- FUnrealMcpResourceRegistry -------------------------------------------------------------------
+// --- FUnrealMcpResourceRegistryTraits (kind-specific policy for the generic template) -------------
 
-FUnrealMcpResourceBuilder FUnrealMcpResourceRegistry::Resource(const FString& Uri)
-{
-	return FUnrealMcpResourceBuilder(*this, Uri);
-}
-
-FString FUnrealMcpResourceRegistry::ComputeSchemaHash(const FUnrealMcpRegisteredResource& InResource)
-{
-	// Hash the canonicalized descriptor MINUS the enabled flag (mirror the tool/prompt registries): the shared
-	// helper builds the hash off the descriptor JSON directly (it strips enabled/schemaHash itself), no copy needed.
-	return UnrealMcpComputeDescriptorHash(InResource.ToDescriptorJson());
-}
-
-bool FUnrealMcpResourceRegistry::IsValidResourceUri(const FString& Uri)
+bool FUnrealMcpResourceRegistryTraits::IsValidKey(const FString& Uri)
 {
 	// Static MVP: a resource URI must be non-empty and free of control characters / whitespace (a malformed
 	// uri would leak into the manifest as the manager's route). We deliberately do NOT enforce a scheme so a
@@ -69,9 +57,9 @@ bool FUnrealMcpResourceRegistry::IsValidResourceUri(const FString& Uri)
 	return true;
 }
 
-bool FUnrealMcpResourceRegistry::ValidateResource(const FUnrealMcpRegisteredResource& InResource, FString& OutError)
+bool FUnrealMcpResourceRegistryTraits::Validate(const FUnrealMcpRegisteredResource& InResource, FString& OutError)
 {
-	if (!IsValidResourceUri(InResource.Uri))
+	if (!IsValidKey(InResource.Uri))
 	{
 		OutError = FString::Printf(
 			TEXT("invalid resource uri '%s' (must be non-empty and contain no whitespace/control characters)"),
@@ -87,197 +75,22 @@ bool FUnrealMcpResourceRegistry::ValidateResource(const FUnrealMcpRegisteredReso
 	return true;
 }
 
-void FUnrealMcpResourceRegistry::Commit(FUnrealMcpRegisteredResource&& InResource)
+// --- FUnrealMcpResourceRegistry (only the resource-specific surface; the rest is inherited from the template) ---
+
+FUnrealMcpResourceBuilder FUnrealMcpResourceRegistry::Resource(const FString& Uri)
 {
-	if (bExtensionScope)
-	{
-		// Extensions are untrusted: stamp the owning id, validate, and dedup (§5).
-		InResource.ExtensionId = ScopeExtensionId;
-
-		FString Error;
-		if (!ValidateResource(InResource, Error))
-		{
-			ScopeErrors.Add(Error);
-			UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] extension '%s': %s — entry dropped."), *ScopeExtensionId, *Error);
-			return;
-		}
-
-		if (const FUnrealMcpRegisteredResource* Existing = Resources.Find(InResource.Uri))
-		{
-			FString Rejection;
-			if (Existing->ExtensionId == TEXT("core"))
-			{
-				Rejection = FString::Printf(
-					TEXT("resource '%s' rejected: uri collides with a built-in core resource (extensions may not shadow core)"),
-					*InResource.Uri);
-			}
-			else if (Existing->ExtensionId == ScopeExtensionId)
-			{
-				Rejection = FString::Printf(
-					TEXT("resource '%s' rejected: this extension already declared a resource with that uri (duplicate within the extension)"),
-					*InResource.Uri);
-			}
-			else
-			{
-				Rejection = FString::Printf(
-					TEXT("resource '%s' rejected: uri already registered by extension '%s' (first-wins by ExtensionId sort)"),
-					*InResource.Uri, *Existing->ExtensionId);
-			}
-			ScopeErrors.Add(Rejection);
-			UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] extension '%s': %s"), *ScopeExtensionId, *Rejection);
-			return;
-		}
-
-		++ScopeResourcesRegistered;
-	}
-
-	InResource.SchemaHash = ComputeSchemaHash(InResource);
-	const FString Uri = InResource.Uri;
-	// §7/§8 retention: a (re-)registered resource inherits the retained whitelist/blocklist immediately.
-	InResource.bEnabled = ShouldResourceBeEnabled(Uri);
-	Resources.Add(Uri, MoveTemp(InResource));
-	++Revision;
-	UE_LOG(LogUnrealMcp, Verbose, TEXT("[Unreal-MCP] registered resource '%s' (revision %d)."), *Uri, Revision);
-}
-
-FUnrealMcpExtensionRegistrationResult FUnrealMcpResourceRegistry::RegisterExtension(
-	const FString& ExtensionId, TFunctionRef<void(FUnrealMcpResourceRegistry&)> RegisterFn)
-{
-	checkf(!bExtensionScope, TEXT("FUnrealMcpResourceRegistry::RegisterExtension does not support nested scopes."));
-
-	bExtensionScope = true;
-	ScopeExtensionId = ExtensionId;
-	ScopeResourcesRegistered = 0;
-	ScopeErrors.Reset();
-
-	RegisterFn(*this);
-
-	FUnrealMcpExtensionRegistrationResult Result;
-	Result.ToolsRegistered = ScopeResourcesRegistered; // reused struct: count means "entries registered"
-	Result.Errors = MoveTemp(ScopeErrors);
-
-	bExtensionScope = false;
-	ScopeExtensionId.Empty();
-	ScopeResourcesRegistered = 0;
-	ScopeErrors.Reset();
-	return Result;
-}
-
-int32 FUnrealMcpResourceRegistry::RemoveResourcesForExtension(const FString& ExtensionId)
-{
-	TArray<FString> ToRemove;
-	for (const TPair<FString, FUnrealMcpRegisteredResource>& Pair : Resources)
-	{
-		if (Pair.Value.ExtensionId == ExtensionId)
-			ToRemove.Add(Pair.Key);
-	}
-	for (const FString& Uri : ToRemove)
-		Resources.Remove(Uri);
-	if (ToRemove.Num() > 0)
-		++Revision;
-	return ToRemove.Num();
-}
-
-TSharedPtr<FJsonObject> FUnrealMcpResourceRegistry::BuildManifestJson() const
-{
-	TSharedPtr<FJsonObject> Manifest = MakeShared<FJsonObject>();
-	Manifest->SetStringField(TEXT("type"), TEXT("resource-manifest"));
-	Manifest->SetNumberField(TEXT("revision"), Revision);
-
-	TArray<TSharedPtr<FJsonValue>> ResourceArray;
-	const TArray<FString> Uris = GetResourceUrisSorted();
-	for (const FString& Uri : Uris)
-	{
-		// A disabled resource is EXCLUDED from the served manifest entirely (mirror the tool/prompt registries).
-		const FUnrealMcpRegisteredResource& R = Resources[Uri];
-		if (!R.bEnabled)
-			continue;
-		ResourceArray.Add(MakeShared<FJsonValueObject>(R.ToDescriptorJson()));
-	}
-
-	Manifest->SetArrayField(TEXT("resources"), ResourceArray);
-	return Manifest;
-}
-
-TArray<FString> FUnrealMcpResourceRegistry::GetResourceUrisSorted() const
-{
-	TArray<FString> Uris;
-	Resources.GetKeys(Uris);
-	Uris.Sort();
-	return Uris;
-}
-
-int32 FUnrealMcpResourceRegistry::NumEnabled() const
-{
-	int32 Count = 0;
-	for (const TPair<FString, FUnrealMcpRegisteredResource>& Pair : Resources)
-	{
-		if (Pair.Value.bEnabled)
-			++Count;
-	}
-	return Count;
-}
-
-bool FUnrealMcpResourceRegistry::SetResourceEnabled(const FString& Uri, bool bEnabled)
-{
-	FUnrealMcpRegisteredResource* Found = Resources.Find(Uri);
-	if (Found == nullptr || Found->bEnabled == bEnabled)
-		return false;
-	Found->bEnabled = bEnabled;
-	++Revision;
-	UE_LOG(LogUnrealMcp, Verbose, TEXT("[Unreal-MCP] resource '%s' %s (revision %d)."),
-		*Uri, bEnabled ? TEXT("enabled") : TEXT("disabled"), Revision);
-	return true;
-}
-
-bool FUnrealMcpResourceRegistry::ShouldResourceBeEnabled(const FString& Uri) const
-{
-	return Enablement.ShouldBeEnabled(Uri);
-}
-
-bool FUnrealMcpResourceRegistry::PassesEnabledResourcesWhitelist(const FString& Uri) const
-{
-	return Enablement.PassesWhitelist(Uri);
-}
-
-void FUnrealMcpResourceRegistry::RecomputeEnablement()
-{
-	bool bAnyChanged = false;
-	for (TPair<FString, FUnrealMcpRegisteredResource>& Pair : Resources)
-	{
-		const bool bShouldEnable = ShouldResourceBeEnabled(Pair.Key);
-		if (Pair.Value.bEnabled != bShouldEnable)
-		{
-			Pair.Value.bEnabled = bShouldEnable;
-			bAnyChanged = true;
-		}
-	}
-	if (bAnyChanged)
-		++Revision;
-}
-
-void FUnrealMcpResourceRegistry::SetEnabledResourcesFilter(const TArray<FString>& EnabledResources)
-{
-	Enablement.SetWhitelist(EnabledResources);
-	RecomputeEnablement();
-}
-
-void FUnrealMcpResourceRegistry::ApplyDisabledResources(const TArray<FString>& DisabledUris)
-{
-	Enablement.SetBlocklist(DisabledUris);
-	RecomputeEnablement();
+	return FUnrealMcpResourceBuilder(*this, Uri);
 }
 
 FUnrealMcpResourceResult FUnrealMcpResourceRegistry::Read(const FString& Uri) const
 {
-	const FUnrealMcpRegisteredResource* Found = Resources.Find(Uri);
-	if (Found == nullptr || !Found->Handler)
-		return FUnrealMcpResourceResult::MakeError(FString::Printf(TEXT("Unknown resource '%s'."), *Uri));
-
-	// Gate disabled resources at the read boundary (mirror the tool/prompt registries): a disabled resource is
-	// dropped from BuildManifestJson, but a stale resources/list could still dispatch it by uri.
-	if (!Found->bEnabled)
-		return FUnrealMcpResourceResult::MakeError(FString::Printf(TEXT("Resource '%s' is disabled."), *Uri));
+	// FindForDispatch gates disabled resources at the read boundary (a disabled resource is dropped from
+	// BuildManifestJson, but a stale resources/list could still dispatch it by uri) and yields the SAME
+	// "Unknown resource '%s'." / "Resource '%s' is disabled." messages.
+	FString Error;
+	const FUnrealMcpRegisteredResource* Found = FindForDispatch(Uri, Error);
+	if (Found == nullptr)
+		return FUnrealMcpResourceResult::MakeError(Error);
 
 	return Found->Handler(Uri);
 }

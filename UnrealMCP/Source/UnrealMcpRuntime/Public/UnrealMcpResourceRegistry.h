@@ -142,103 +142,72 @@ private:
 };
 
 /**
- * The plugin-owned resource registry (docs/ARCHITECTURE.md §A.1) — the exact resource sibling of
- * FUnrealMcpToolRegistry / FUnrealMcpPromptRegistry. Holds the compiled resource set, produces the JSON
- * manifest snapshot for the bridge, and dispatches resource-read requests by URI. A monotonic Revision
- * bumps on every change so the sidecar's manifest diff can reason about ordering. Not thread-safe (same
- * contract as the tool/prompt registries): all mutation happens at startup before the bridge accepts; any
- * DYNAMIC re-registration MUST marshal both the mutation and the manifest read through the game-thread
- * dispatcher (§4).
+ * Kind-specific policy for the resource registry instantiation of TUnrealMcpRegistry. Differs from the
+ * tool/prompt traits in the KEY (Uri, not Name → KeyNoun "uri") and the validation (a resource has no param
+ * specs; the key rule is the uri rule, not the kebab rule).
+ */
+struct FUnrealMcpResourceRegistryTraits
+{
+	static const FString& KeyOf(const FUnrealMcpRegisteredResource& Entry) { return Entry.Uri; }
+	static const TCHAR* KindNoun() { return TEXT("resource"); }
+	static const TCHAR* KindNounCapitalized() { return TEXT("Resource"); }
+	static const TCHAR* KeyNoun() { return TEXT("uri"); }
+	static const TCHAR* ManifestType() { return TEXT("resource-manifest"); }
+	static const TCHAR* ManifestArrayKey() { return TEXT("resources"); }
+	/** True iff @p Uri is a valid resource URI (non-empty, no control/whitespace chars). */
+	static bool IsValidKey(const FString& Uri);
+	/** Validate a resource descriptor for the §5 isolation contract. Returns false + a reason on the first problem. */
+	static bool Validate(const FUnrealMcpRegisteredResource& InResource, FString& OutError);
+};
+
+/**
+ * The plugin-owned resource registry (docs/ARCHITECTURE.md §A.1) — one instantiation of the generic
+ * TUnrealMcpRegistry, the exact resource sibling of FUnrealMcpToolRegistry / FUnrealMcpPromptRegistry. The
+ * template owns the compiled resource set, the manifest snapshot, the §7/§8 enablement, the extension-scope
+ * registration, and the schema-hash; this class adds only the resource-specific surface (the fluent builder
+ * entry, the kind-named forwarders that keep the original API stable, and the Read dispatch, keyed by URI).
+ * Same threading contract as the tool/prompt registries: all mutation happens at startup before the bridge
+ * accepts; any DYNAMIC re-registration MUST marshal both the mutation and the manifest read through the
+ * game-thread dispatcher (§4).
  */
 class UNREALMCPRUNTIME_API FUnrealMcpResourceRegistry
+	: public TUnrealMcpRegistry<FUnrealMcpResourceRegistry, FUnrealMcpRegisteredResource, FUnrealMcpResourceRegistryTraits>
 {
 public:
 	/** Begin declaring a resource (the §3.3 fluent API, resource analog). @p Uri is the resource's identity. */
 	FUnrealMcpResourceBuilder Resource(const FString& Uri);
 
-	/**
-	 * Commit a fully-built resource (called by the builder's Read()).
-	 * - Core path (default): replaces any same-uri resource — core families are trusted.
-	 * - Extension scope (inside RegisterExtension): the resource is stamped with the scope's ExtensionId,
-	 *   validated (§5), and deduped. An invalid entry is DROPPED and a duplicate is REJECTED (first-wins).
-	 */
-	void Commit(FUnrealMcpRegisteredResource&& InResource);
-
-	/**
-	 * Register an extension provider's resources (§5). Opens an "extension scope": every Commit during
-	 * @p RegisterFn is stamped with @p ExtensionId, validated, and deduped. Reuses the tool registry's
-	 * FUnrealMcpExtensionRegistrationResult (its `ToolsRegistered` count here means "entries registered").
-	 * Scopes never nest.
-	 */
-	FUnrealMcpExtensionRegistrationResult RegisterExtension(const FString& ExtensionId, TFunctionRef<void(FUnrealMcpResourceRegistry&)> RegisterFn);
-
-	/** Remove every resource stamped with @p ExtensionId (hot-unload / rebuild, §5). Bumps revision if any removed. Returns count removed. */
-	int32 RemoveResourcesForExtension(const FString& ExtensionId);
+	// --- Kind-named API forwarders (preserve the original public surface; the logic lives in the template).
 
 	/** True iff @p Uri is a valid resource URI (non-empty, no control/whitespace chars). */
-	static bool IsValidResourceUri(const FString& Uri);
-
+	static bool IsValidResourceUri(const FString& Uri) { return FUnrealMcpResourceRegistryTraits::IsValidKey(Uri); }
 	/** Validate a resource descriptor for the §5 isolation contract. Returns false + a reason on the first problem. */
-	static bool ValidateResource(const FUnrealMcpRegisteredResource& InResource, FString& OutError);
+	static bool ValidateResource(const FUnrealMcpRegisteredResource& InResource, FString& OutError) { return FUnrealMcpResourceRegistryTraits::Validate(InResource, OutError); }
 
-	bool HasResource(const FString& Uri) const { return Resources.Contains(Uri); }
-	int32 Num() const { return Resources.Num(); }
-	const FUnrealMcpRegisteredResource* Find(const FString& Uri) const { return Resources.Find(Uri); }
-
+	bool HasResource(const FString& Uri) const { return Has(Uri); }
+	/** Remove every resource stamped with @p ExtensionId (hot-unload / rebuild, §5). Returns count removed. */
+	int32 RemoveResourcesForExtension(const FString& ExtensionId) { return RemoveForExtension(ExtensionId); }
 	/** Every registered resource URI, sorted. */
-	TArray<FString> GetResourceUrisSorted() const;
-
-	/** Count of resources whose bEnabled flag is set. */
-	int32 NumEnabled() const;
+	TArray<FString> GetResourceUrisSorted() const { return GetKeysSorted(); }
 
 	/** True iff @p Uri passes the §8 EnabledResources whitelist gate (empty whitelist, or the uri is listed). */
-	bool PassesEnabledResourcesWhitelist(const FString& Uri) const;
+	bool PassesEnabledResourcesWhitelist(const FString& Uri) const { return PassesWhitelist(Uri); }
 
 	/**
-	 * Set one resource's enabled flag directly — a GRANULAR helper, NOT a production §7 toggle. Does NOT
-	 * update the retained whitelist/blocklist. Disabled resources are EXCLUDED from BuildManifestJson.
-	 * Bumps the revision on a real change. Unknown uri / no-op change: returns false, no bump. Game-thread only.
+	 * Set one resource's enabled flag directly — a GRANULAR helper, NOT a production §7 toggle. Does NOT update
+	 * the retained whitelist/blocklist. Disabled resources are EXCLUDED from BuildManifestJson. Game-thread only.
 	 */
-	bool SetResourceEnabled(const FString& Uri, bool bEnabled);
+	bool SetResourceEnabled(const FString& Uri, bool bEnabled) { return SetEnabled(Uri, bEnabled); }
 
 	/** Set the §8 env whitelist. Mirrors the tool registry's SetEnabledToolsFilter exactly. Game-thread only. */
-	void SetEnabledResourcesFilter(const TArray<FString>& EnabledResources);
+	void SetEnabledResourcesFilter(const TArray<FString>& EnabledResources) { SetWhitelistFilter(EnabledResources); }
 
 	/** Apply the persisted §7 per-resource enable-map (blocklist). Mirrors the tool registry's ApplyDisabledTools. Game-thread only. */
-	void ApplyDisabledResources(const TArray<FString>& DisabledUris);
-
-	/** Current manifest revision (bumps on every registry mutation). */
-	int32 GetRevision() const { return Revision; }
-
-	/** Build the full resource-manifest message body (revision + resources[]) for the bridge (§A.1). Disabled resources excluded, sorted by uri. */
-	TSharedPtr<FJsonObject> BuildManifestJson() const;
+	void ApplyDisabledResources(const TArray<FString>& DisabledUris) { ApplyBlocklist(DisabledUris); }
 
 	/**
 	 * Read a resource by URI on the CURRENT thread (the dispatcher has already marshalled to the game
 	 * thread). Returns an error result for an unknown / disabled resource. The handler owns content production.
 	 */
 	FUnrealMcpResourceResult Read(const FString& Uri) const;
-
-	/** Compute the stable schema hash for a resource descriptor (excludes the enabled flag). */
-	static FString ComputeSchemaHash(const FUnrealMcpRegisteredResource& InResource);
-
-private:
-	TMap<FString, FUnrealMcpRegisteredResource> Resources;
-	int32 Revision = 0;
-
-	// --- Retained §7/§8 enablement filter (mirror the tool/prompt registries exactly).
-	//     Whitelist = §8 whitelist (empty = no filter); Blocklist = §7 persisted blocklist. ---
-	FUnrealMcpEnablementFilter Enablement;
-
-	/** The combined §8 effective-served predicate: enabled iff (whitelist empty OR member) AND NOT blocklisted. */
-	bool ShouldResourceBeEnabled(const FString& Uri) const;
-
-	/** Re-evaluate every registered resource's bEnabled against ShouldResourceBeEnabled; bumps the revision once if any changed. */
-	void RecomputeEnablement();
-
-	// --- Extension-scope state (active only inside RegisterExtension; scopes never nest) ----------
-	bool bExtensionScope = false;
-	FString ScopeExtensionId;
-	int32 ScopeResourcesRegistered = 0;
-	TArray<FString> ScopeErrors;
 };

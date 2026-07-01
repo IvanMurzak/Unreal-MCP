@@ -3,6 +3,7 @@
 
 #include "UnrealMcpPropertyJson.h"
 
+#include "Tools/UnrealMcpScopedRead.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
 #include "JsonObjectConverter.h"
@@ -72,78 +73,12 @@ namespace FUnrealMcpPropertyJson
 
 	TSharedPtr<FJsonObject> FilterByPaths(const TSharedPtr<FJsonObject>& Source, const TArray<FString>& Paths)
 	{
-		if (!Source.IsValid())
-			return MakeShared<FJsonObject>();
-		if (Paths.Num() == 0)
-			return Source;
-
-		TSharedPtr<FJsonObject> Out = MakeShared<FJsonObject>();
-		for (const FString& Path : Paths)
-		{
-			TArray<FString> Segments;
-			Path.ParseIntoArray(Segments, TEXT("."), /*CullEmpty*/ true);
-			if (Segments.Num() == 0)
-				continue;
-
-			// Walk the source object segment by segment; mirror the structure into Out so the caller gets
-			// the requested leaf at the same nesting depth it lives at in the full serialization.
-			TSharedPtr<FJsonObject> SrcCursor = Source;
-			TSharedPtr<FJsonObject> OutCursor = Out;
-			bool bResolved = true;
-			for (int32 i = 0; i < Segments.Num(); ++i)
-			{
-				const FString& Seg = Segments[i];
-				const bool bLeaf = (i == Segments.Num() - 1);
-
-				// Case-insensitive field match (paths may be loosely cased like property writes).
-				FString MatchedKey;
-				TSharedPtr<FJsonValue> MatchedValue;
-				for (const TPair<FString, TSharedPtr<FJsonValue>>& Field : SrcCursor->Values)
-				{
-					if (Field.Key.Equals(Seg, ESearchCase::IgnoreCase))
-					{
-						MatchedKey = Field.Key;
-						MatchedValue = Field.Value;
-						break;
-					}
-				}
-				if (!MatchedValue.IsValid())
-				{
-					bResolved = false;
-					break;
-				}
-
-				if (bLeaf)
-				{
-					OutCursor->SetField(MatchedKey, MatchedValue);
-					break;
-				}
-
-				const TSharedPtr<FJsonObject>* NextSrc;
-				if (!MatchedValue->TryGetObject(NextSrc) || !NextSrc->IsValid())
-				{
-					bResolved = false;
-					break;
-				}
-
-				// Reuse an existing nested object in Out (so two paths under the same parent merge).
-				TSharedPtr<FJsonObject> NextOut;
-				const TSharedPtr<FJsonObject>* ExistingOut;
-				if (OutCursor->TryGetObjectField(MatchedKey, ExistingOut) && ExistingOut->IsValid())
-				{
-					NextOut = *ExistingOut;
-				}
-				else
-				{
-					NextOut = MakeShared<FJsonObject>();
-					OutCursor->SetObjectField(MatchedKey, NextOut);
-				}
-				SrcCursor = *NextSrc;
-				OutCursor = NextOut;
-			}
-			(void)bResolved; // an unresolved path simply contributes nothing — not an error.
-		}
-		return Out;
+		// The actor/level scoped read is now the shared FUnrealMcpScopedRead::Filter with the ACTOR/LEVEL options:
+		// CASE-INSENSITIVE segment match (paths may be loosely cased like property writes), ALIASED values (the
+		// result shares the source's value pointers — empty Paths returns Source as-is, no copy, so callers must
+		// not mutate it), and partial-branch residue LEFT for an unresolved path (the historical behavior). The
+		// segment-split / descent / overlapping-path merge that used to live here verbatim moved into the shared filter.
+		return FUnrealMcpScopedRead::Filter(Source, Paths, FScopedReadOptions::ActorLevelDefaults());
 	}
 
 	int32 ApplyProperties(UObject* Object, const TSharedPtr<FJsonObject>& Properties, TArray<FString>& OutErrors)
