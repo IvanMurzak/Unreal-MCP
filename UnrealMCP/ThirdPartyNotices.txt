@@ -9,7 +9,8 @@ The UnrealMCP plugin is licensed under the Apache License, Version 2.0
 
 This plugin redistributes prebuilt third-party binaries. The bundled
 ".NET" sidecar (`unreal-mcp-bridge`) is a self-contained, single-file
-.NET 9 application shipped per platform RID under `Sidecar/<rid>/`
+.NET 9 application shipped per platform RID under
+`Source/ThirdParty/UnrealMcpBridge/<rid>/`
 (`win-x64`, `linux-x64`, `osx-x64`, `osx-arm64`) and staged into
 `Binaries/ThirdParty/UnrealMcpBridge/<rid>/` at compile time. Because it
 is self-contained, each bundled binary carries the Microsoft .NET 9

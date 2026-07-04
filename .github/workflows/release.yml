@@ -23,8 +23,9 @@
 #                  ├─ build-bridge-windows ─────┤  Azure-signs win-x64
 #                  └─ build-plugin-zip ◄────────┘  downloads the 4 signed RID
 #                        dirs, stages them under the FAB-SURVIVING source folder
-#                        UnrealMCP/Sidecar/<rid>/ (#139; Fab strips Binaries/), runs
-#                        BuildPlugin -Rocket (RuntimeDependencies stage Sidecar/ ->
+#                        UnrealMCP/Source/ThirdParty/UnrealMcpBridge/<rid>/ (#139/#187;
+#                        Fab strips Binaries/), runs BuildPlugin -Rocket (RuntimeDependencies
+#                        stage Source/ThirdParty/UnrealMcpBridge/ ->
 #                        Binaries/ThirdParty/UnrealMcpBridge/<rid>/), zips ->
 #                        publish-release attaches the plugin zip (bundle inside) +
 #                        the 4 signed bridge zips.
@@ -715,21 +716,21 @@ jobs:
           path: ./bridge-staging/win-x64
       # Stage the signed binaries into the FAB-SURVIVING source folder the C++
       # resolver (FUnrealMcpSidecarManager::ComposeSurvivingBridgePath) and the
-      # Build.cs RuntimeDependencies SOURCE arg both read (#139):
-      #   UnrealMCP/Sidecar/<rid>/
-      # Sidecar/ survives a Fab strip (Binaries/ is stripped) and is declared in
-      # Config/FilterPlugin.ini; UnrealMcpRuntime.Build.cs's RuntimeDependencies
-      # two-arg (target,source) form then STAGES it into the package's
-      # Binaries/ThirdParty/UnrealMcpBridge/<rid>/ at BuildPlugin time. The Sidecar
-      # payload files are gitignored — they exist only transiently on the runner.
-      # If a future UBT does not stage them (design R6), the post-BuildPlugin copy
-      # below populates the package's Binaries/ThirdParty path as a fallback.
-      - name: Stage signed bridge into the Fab-surviving Sidecar folder
+      # Build.cs RuntimeDependencies SOURCE arg both read (#139/#187):
+      #   UnrealMCP/Source/ThirdParty/UnrealMcpBridge/<rid>/
+      # This engine-canonical Source/ThirdParty/ folder survives a Fab strip
+      # (Binaries/ is stripped) and is declared in Config/FilterPlugin.ini;
+      # UnrealMcpRuntime.Build.cs's RuntimeDependencies two-arg (target,source) form
+      # then STAGES it into the package's Binaries/ThirdParty/UnrealMcpBridge/<rid>/ at
+      # BuildPlugin time. The payload files are gitignored — they exist only
+      # transiently on the runner. If a future UBT does not stage them (design R6), the
+      # post-BuildPlugin copy below populates the package's Binaries/ThirdParty path as a fallback.
+      - name: Stage signed bridge into the Fab-surviving Source/ThirdParty folder
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $staging = Join-Path $env:GITHUB_WORKSPACE 'bridge-staging'
-          $dest = Join-Path $env:GITHUB_WORKSPACE 'UnrealMCP\Sidecar'
+          $dest = Join-Path $env:GITHUB_WORKSPACE 'UnrealMCP\Source\ThirdParty\UnrealMcpBridge'
           $rids = @('win-x64', 'osx-arm64', 'osx-x64', 'linux-x64')
           foreach ($rid in $rids) {
             $src = Join-Path $staging $rid
@@ -756,17 +757,17 @@ jobs:
           & $runUAT BuildPlugin -Plugin="$uplugin" -Package="$package" -TargetPlatforms=Win64 -Rocket
           if ($LASTEXITCODE -ne 0) { throw "BuildPlugin failed with exit code $LASTEXITCODE" }
           # Verify the signed bridge bundle landed in the packaged plugin via
-          # RuntimeDependencies (#139: source = UnrealMCP/Sidecar/<rid>/, target =
-          # the package's Binaries/ThirdParty/UnrealMcpBridge/<rid>/). If UBT did not
-          # stage the payloads (design R6), copy them from the surviving Sidecar
-          # source into the package's Binaries/ThirdParty path (the resolver's staged
-          # path) as a fallback so the shipped zip always carries them.
+          # RuntimeDependencies (#139/#187: source = UnrealMCP/Source/ThirdParty/UnrealMcpBridge/<rid>/,
+          # target = the package's Binaries/ThirdParty/UnrealMcpBridge/<rid>/). If UBT did
+          # not stage the payloads (design R6), copy them from the surviving
+          # Source/ThirdParty/UnrealMcpBridge source into the package's Binaries/ThirdParty
+          # path (the resolver's staged path) as a fallback so the shipped zip always carries them.
           $pkgThirdParty = Join-Path $package 'Binaries\ThirdParty\UnrealMcpBridge'
-          $srcSidecar = Join-Path $env:GITHUB_WORKSPACE 'UnrealMCP\Sidecar'
+          $srcSidecar = Join-Path $env:GITHUB_WORKSPACE 'UnrealMCP\Source\ThirdParty\UnrealMcpBridge'
           foreach ($rid in @('win-x64', 'osx-arm64', 'osx-x64', 'linux-x64')) {
             $pkgRid = Join-Path $pkgThirdParty $rid
             if (-not (Test-Path $pkgRid) -or @(Get-ChildItem -Path $pkgRid -Recurse -File -ErrorAction SilentlyContinue).Count -lt 1) {
-              Write-Host "RuntimeDependencies did not stage $rid into the package — applying post-step copy from Sidecar/ (design R6 fallback)."
+              Write-Host "RuntimeDependencies did not stage $rid into the package — applying post-step copy from Source/ThirdParty/UnrealMcpBridge/ (design R6 fallback)."
               New-Item -ItemType Directory -Force -Path $pkgRid | Out-Null
               Copy-Item -Path (Join-Path (Join-Path $srcSidecar $rid) '*') -Destination $pkgRid -Recurse -Force
             }
@@ -776,13 +777,13 @@ jobs:
           }
           # Also confirm the Fab-surviving source folder shipped INSIDE the package
           # (the form Epic's recompile stages from). Fab strips Binaries/, so the
-          # Sidecar/<rid>/ copy is what survives a source submission.
-          $pkgSidecar = Join-Path $package 'Sidecar'
+          # Source/ThirdParty/UnrealMcpBridge/<rid>/ copy is what survives a source submission.
+          $pkgSidecar = Join-Path $package 'Source\ThirdParty\UnrealMcpBridge'
           foreach ($rid in @('win-x64', 'osx-arm64', 'osx-x64', 'linux-x64')) {
             $pkgRid = Join-Path $pkgSidecar $rid
             $n = @(Get-ChildItem -Path $pkgRid -Recurse -File -ErrorAction SilentlyContinue).Count
-            Write-Host "Packaged Fab-surviving Sidecar for ${rid}: $n file(s)."
-            if ($n -lt 1) { throw "Packaged plugin is missing the Fab-surviving Sidecar/$rid payload (FilterPlugin.ini)." }
+            Write-Host "Packaged Fab-surviving Source/ThirdParty/UnrealMcpBridge for ${rid}: $n file(s)."
+            if ($n -lt 1) { throw "Packaged plugin is missing the Fab-surviving Source/ThirdParty/UnrealMcpBridge/$rid payload (FilterPlugin.ini)." }
           }
           $version = $env:PLUGIN_VERSION
           $out = Join-Path $env:GITHUB_WORKSPACE 'dist'

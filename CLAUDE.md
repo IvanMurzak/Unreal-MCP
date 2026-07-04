@@ -171,9 +171,10 @@ Each `bridge/publish/<rid>/` holds exactly one apphost (`unreal-mcp-bridge[.exe]
 RID is supplied, so a plain `dotnet build`/`test` (no `-r`) stays framework-dependent at the flat
 `bin/<cfg>/net9.0/unreal-mcp-bridge.exe` path the live-e2e harness (`UNREAL_MCP_BRIDGE_PATH`) reads.
 
-The release job stages the signed per-RID slices into the plugin's Fab-surviving `Sidecar/<rid>/` folder
-(declared in `Config/FilterPlugin.ini`); `UnrealMcpRuntime.Build.cs` `RuntimeDependencies` (two-arg form)
-then stages them into `Binaries/ThirdParty/UnrealMcpBridge/<rid>/` at package time — the path the C++
+The release job stages the signed per-RID slices into the plugin's Fab-surviving, engine-canonical
+`Source/ThirdParty/UnrealMcpBridge/<rid>/` folder (declared in `Config/FilterPlugin.ini`);
+`UnrealMcpRuntime.Build.cs` `RuntimeDependencies` (two-arg form) then stages them into
+`Binaries/ThirdParty/UnrealMcpBridge/<rid>/` at package time — the path the C++
 resolver reads. Binaries are **never** committed to git.
 
 ### server — none in this repo
@@ -279,7 +280,7 @@ pipeline.
 - **Commits:** `<type>(<scope>): <description>` conventional commits (scopes: plugin, bridge,
   cli, ipc, tools, dispatcher, schema, ui, sidecar, config, runtime, samples, ci, docs). Reference issues
   with `Closes #N`. Never `git add -A`. Never commit `Binaries/`/`Intermediate/`/`Saved/`/`bin/`/`obj/`/
-  `node_modules/`/`dist/` or the `Sidecar/<rid>/` binary payloads. The `.sln` at a `.uproject` root is
+  `node_modules/`/`dist/` or the `Source/ThirdParty/UnrealMcpBridge/<rid>/` binary payloads. The `.sln` at a `.uproject` root is
   generated — never commit it; the hand-authored `bridge/Unreal-MCP-Bridge.sln` is the un-ignored
   exception.
 

@@ -18,12 +18,14 @@
     {
       "Name": "UnrealMcpRuntime",
       "Type": "Runtime",
-      "LoadingPhase": "Default"
+      "LoadingPhase": "Default",
+      "PlatformAllowList": [ "Win64", "Mac", "Linux" ]
     },
     {
       "Name": "UnrealMcpEditor",
       "Type": "Editor",
-      "LoadingPhase": "Default"
+      "LoadingPhase": "Default",
+      "PlatformAllowList": [ "Win64", "Mac", "Linux" ]
     }
   ],
   "Plugins": [
