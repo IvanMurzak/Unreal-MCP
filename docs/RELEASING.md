@@ -137,10 +137,10 @@ runners during a release. A dev source checkout has empty `Source/ThirdParty/Unr
 so `ResolveBridgeBinaryPath` returns empty and devs use `UNREAL_MCP_BRIDGE_PATH`
 (the documented inner loop) — unchanged.
 
-### Fab (Epic marketplace) source-submission readiness (#139)
+### Fab (Epic marketplace) source-submission readiness (#139/#187)
 
 Fab accepts a **source** plugin and recompiles it per engine version, **stripping
-`Binaries/`, `Intermediate/`, `Saved/`** from the submitted zip. Three in-repo fixes
+`Binaries/`, `Intermediate/`, `Saved/`** from the submitted zip. In-repo fixes
 keep the plugin submittable (`docs/ARCHITECTURE.md` §6.7); submission itself is still
 an entirely manual operator step (no CI job submits — see the checklist at the top):
 
