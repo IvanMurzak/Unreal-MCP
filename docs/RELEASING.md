@@ -34,7 +34,7 @@ listing. Each requires a deliberate human decision (and, for the first release, 
       requirements and an Epic review; do it by hand when the listing is ready. The plugin is
       Fab source-submission READY (#139/#187): the sidecar survives Fab's `Binaries/` strip via
       `Source/ThirdParty/UnrealMcpBridge/<rid>/`, the distributed `.uplugin` ships no test module, and `FilterPlugin.ini`
-      is complete — see [Fab source-submission readiness](#fab-epic-marketplace-source-submission-readiness-139) below.
+      is complete — see [Fab source-submission readiness](#fab-epic-marketplace-source-submission-readiness-139187) below.
 
 A normal merge to `main` publishes nothing; the version gate keeps `release.yml` inert. The safe
 rehearsal is a `dry_run=true` dispatch (below), which exercises the test + artifact jobs and
