@@ -14,8 +14,8 @@
  * §6 layer 1). Binary resolution follows the §6 BUNDLE model: (1) the UNREAL_MCP_BRIDGE_PATH dev/CI
  * override wins when set, then (2) the prebuilt self-contained binary bundled inside the plugin — checked
  * at the STAGED path Binaries/ThirdParty/UnrealMcpBridge/<rid>/ first, then the FAB-SURVIVING source
- * Sidecar/<rid>/ (#139: Fab strips Binaries/ from a source submission, so the surviving folder is what
- * Epic's recompile stages from). A fresh GUI install resolves the bundled path and auto-spawns at
+ * Source/ThirdParty/UnrealMcpBridge/<rid>/ (#139/#187: Fab strips Binaries/ from a source submission, so
+ * the surviving folder is what Epic's recompile stages from). A fresh GUI install resolves the bundled path and auto-spawns at
  * StartupModule with zero user action; a dev source checkout (no staged binary) falls back to the
  * override, exactly as before.
  */
@@ -84,16 +84,18 @@ public:
 	static FString ComposeBundledBridgePath(const FString& PluginBaseDir, bool bArm64DirExists = true);
 
 	/**
-	 * Compose the FAB-SURVIVING bridge source path under @p PluginBaseDir for the current host (#139):
-	 * <PluginBaseDir>/Sidecar/<rid>/unreal-mcp-bridge[.exe]. Fab strips Binaries/ from a submitted SOURCE
-	 * plugin, so the prebuilt sidecar lives here (declared in Config/FilterPlugin.ini) to survive the strip;
-	 * UBT stages it into Binaries/ThirdParty at Epic's compile time. Pure string composition, absolute-ized.
+	 * Compose the FAB-SURVIVING bridge source path under @p PluginBaseDir for the current host (#139/#187):
+	 * <PluginBaseDir>/Source/ThirdParty/UnrealMcpBridge/<rid>/unreal-mcp-bridge[.exe]. Fab strips Binaries/
+	 * from a submitted SOURCE plugin, so the prebuilt sidecar lives under the engine-canonical
+	 * Source/ThirdParty/ layout (declared in Config/FilterPlugin.ini) to survive the strip; UBT stages it
+	 * into Binaries/ThirdParty at Epic's compile time. Pure string composition, absolute-ized.
 	 */
 	static FString ComposeSurvivingBridgePath(const FString& PluginBaseDir, bool bArm64DirExists = true);
 
 	/**
 	 * The ordered bridge-path candidates the production resolver walks (§6.3 step 2): the STAGED
-	 * Binaries/ThirdParty path first, then the FAB-SURVIVING Sidecar/<rid>/ source (#139). Empty entries
+	 * Binaries/ThirdParty path first, then the FAB-SURVIVING Source/ThirdParty/UnrealMcpBridge/<rid>/ source
+	 * (#139/#187). Empty entries
 	 * (empty base dir / non-desktop rid) are omitted so callers can FileExists-walk a clean list.
 	 */
 	static TArray<FString> ComposeBundledBridgeCandidates(const FString& PluginBaseDir, bool bArm64DirExists = true);

@@ -7,8 +7,8 @@ using UnrealBuildTool;
 public class UnrealMcpRuntime : ModuleRules
 {
 	// docs/ARCHITECTURE.md §12.5 + §6.2 / Sidecar/UnrealMcpSidecarManager.cpp::ResolveRid — the .NET RID
-	// directory name the C++ resolver looks under (Sidecar/<rid>/ as the Fab-surviving source, staged into
-	// Binaries/ThirdParty/UnrealMcpBridge/<rid>/ at package time). Kept in lockstep with ResolveRid:
+	// directory name the C++ resolver looks under (Source/ThirdParty/UnrealMcpBridge/<rid>/ as the
+	// Fab-surviving source, staged into Binaries/ThirdParty/UnrealMcpBridge/<rid>/ at package time). Kept in lockstep with ResolveRid:
 	// win-x64 / linux-x64 / osx-* (both mac slices). Returns null for a non-desktop platform (console/mobile)
 	// — those cannot spawn an external .NET process, so runtime MCP is Desktop-only (Win64/Mac/Linux) and
 	// nothing is staged there (matches ResolveRid returning empty on those hosts).
@@ -79,20 +79,23 @@ public class UnrealMcpRuntime : ModuleRules
 		// at runtime, so a packaged game spawns the bridge with zero install and zero first-run download
 		// (§6 BUNDLE model).
 		//
-		// FAB SOURCE-SUBMISSION CONSTRAINT (#139): Fab accepts a SOURCE plugin and RECOMPILES it on Epic's
-		// side per engine version, STRIPPING Binaries/, Intermediate/, and Saved/ from the submitted zip. So
-		// the sidecar must NOT live (only) under Binaries/ in the source tree — it would be gone in the
-		// Epic-compiled build. Instead the prebuilt slices live in the FAB-SURVIVING source folder
-		// Sidecar/<rid>/ (declared in Config/FilterPlugin.ini so it ships in the source zip), and this
+		// FAB SOURCE-SUBMISSION CONSTRAINT (#139/#187): Fab accepts a SOURCE plugin and RECOMPILES it on
+		// Epic's side per engine version, STRIPPING Binaries/, Intermediate/, and Saved/ from the submitted
+		// zip. So the sidecar must NOT live (only) under Binaries/ in the source tree — it would be gone in
+		// the Epic-compiled build. Fab review requires redistributed third-party binaries under the
+		// engine-canonical Source/ThirdParty/<Lib>/<platform>/ layout, so the prebuilt slices live in the
+		// FAB-SURVIVING source folder Source/ThirdParty/UnrealMcpBridge/<rid>/ (declared in
+		// Config/FilterPlugin.ini; Source/ also ships in the source zip automatically), and this
 		// RuntimeDependencies declaration uses the TWO-ARG (target, source) form so UBT STAGES the surviving
 		// source into the package's Binaries/ThirdParty/UnrealMcpBridge/<rid>/ at compile time:
-		//   target = $(PluginDir)/Binaries/ThirdParty/UnrealMcpBridge/<rid>/*   (resolver's runtime path)
-		//   source = $(PluginDir)/Sidecar/<rid>/*                                (Fab-surviving, in the zip)
-		// This works for BOTH paths: (a) Epic's Fab recompile sees Sidecar/<rid>/ (survived the strip) and
-		// stages it; (b) the GitHub-release / release.yml flow stages the SIGNED slices into Sidecar/<rid>/
-		// before BuildPlugin (docs/RELEASING.md), so the same RuntimeDependencies bundles them. The resolver
-		// ALSO checks Sidecar/<rid>/ directly (ComposeBundledBridgeCandidates) so an Epic-compiled build whose
-		// staging differs still resolves from the surviving folder.
+		//   target = $(PluginDir)/Binaries/ThirdParty/UnrealMcpBridge/<rid>/*        (resolver's runtime path)
+		//   source = $(PluginDir)/Source/ThirdParty/UnrealMcpBridge/<rid>/*          (Fab-surviving, in the zip)
+		// This works for BOTH paths: (a) Epic's Fab recompile sees Source/ThirdParty/UnrealMcpBridge/<rid>/
+		// (survived the strip) and stages it; (b) the GitHub-release / release.yml flow stages the SIGNED
+		// slices into Source/ThirdParty/UnrealMcpBridge/<rid>/ before BuildPlugin (docs/RELEASING.md), so the
+		// same RuntimeDependencies bundles them. The resolver ALSO checks Source/ThirdParty/UnrealMcpBridge/<rid>/
+		// directly (ComposeBundledBridgeCandidates) so an Epic-compiled build whose staging differs still
+		// resolves from the surviving folder.
 		//
 		// Why this declaration lives on the RUNTIME module (the whole point of R2): UBT only stages a module's
 		// RuntimeDependencies into a build whose target includes that module. UnrealMcpRuntime (Type: Runtime)
@@ -114,9 +117,10 @@ public class UnrealMcpRuntime : ModuleRules
 		//    Development/editor builds always stage. This keeps a default Shipping build lean and closes the
 		//    runtime remote-control surface unless deliberately enabled.
 		//
-		// The binaries are NEVER committed to git (Sidecar/ payload files are gitignored — only the folder's
-		// .gitkeep is tracked); the release job stages the signed per-RID slices into Sidecar/<rid>/ before
-		// BuildPlugin (docs/RELEASING.md). The "*" wildcard is a no-op on a dev source checkout that has not
+		// The binaries are NEVER committed to git (Source/ThirdParty/UnrealMcpBridge/ payload files are
+		// gitignored — only the folder's .gitkeep is tracked); the release job stages the signed per-RID
+		// slices into Source/ThirdParty/UnrealMcpBridge/<rid>/ before BuildPlugin (docs/RELEASING.md). The
+		// "*" wildcard is a no-op on a dev source checkout that has not
 		// staged them, so local source builds still compile and resolve the bridge via UNREAL_MCP_BRIDGE_PATH
 		// instead. NonUFS = raw (uncooked) files, correct for native binaries.
 		bool bStageSidecar = (Target.Configuration != UnrealTargetConfiguration.Shipping) || bUnrealMcpAllowShipping;
@@ -127,7 +131,7 @@ public class UnrealMcpRuntime : ModuleRules
 			{
 				RuntimeDependencies.Add(
 					Path.Combine(PluginDirectory, "Binaries", "ThirdParty", "UnrealMcpBridge", Rid, "*"),
-					Path.Combine(PluginDirectory, "Sidecar", Rid, "*"),
+					Path.Combine(PluginDirectory, "Source", "ThirdParty", "UnrealMcpBridge", Rid, "*"),
 					StagedFileType.NonUFS);
 			}
 		}

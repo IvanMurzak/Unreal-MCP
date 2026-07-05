@@ -108,19 +108,19 @@ void FUnrealMcpSidecarManagerSpec::Define()
 		});
 	});
 
-	Describe("ComposeSurvivingBridgePath (#139 Fab-surviving source)", [this]()
+	Describe("ComposeSurvivingBridgePath (#139/#187 Fab-surviving source)", [this]()
 	{
-		It("composes <base>/Sidecar/<rid>/<basename> — Fab strips Binaries/, so this folder survives", [this]()
+		It("composes <base>/Source/ThirdParty/UnrealMcpBridge/<rid>/<basename> — the engine-canonical Fab-surviving layout", [this]()
 		{
 			const FString Base = TEXT("C:/fake/plugin/UnrealMCP");
 			const FString Path = FUnrealMcpSidecarManager::ComposeSurvivingBridgePath(Base);
 			const FString Expected = FPaths::ConvertRelativePathToFull(
-				FString(Base) / TEXT("Sidecar")
+				FString(Base) / TEXT("Source") / TEXT("ThirdParty") / TEXT("UnrealMcpBridge")
 				/ FUnrealMcpSidecarManager::ResolveRid() / FUnrealMcpSidecarManager::BridgeBinaryBasename());
-			TestEqual(TEXT("composed surviving path matches the #139 Sidecar/<rid>/ layout"), Path, Expected);
-			TestTrue(TEXT("surviving path is under the Sidecar folder, NOT Binaries/"),
-				(Path.Contains(TEXT("/Sidecar/")) || Path.Contains(TEXT("\\Sidecar\\")))
-				&& !Path.Contains(TEXT("ThirdParty")));
+			TestEqual(TEXT("composed surviving path matches the #187 Source/ThirdParty/UnrealMcpBridge/<rid>/ layout"), Path, Expected);
+			TestTrue(TEXT("surviving path is under Source/ThirdParty/UnrealMcpBridge, NOT Binaries/"),
+				(Path.Contains(TEXT("/Source/ThirdParty/UnrealMcpBridge/")) || Path.Contains(TEXT("\\Source\\ThirdParty\\UnrealMcpBridge\\")))
+				&& !Path.Contains(TEXT("Binaries")));
 		});
 
 		It("returns empty for an empty plugin base dir", [this]()
@@ -129,16 +129,16 @@ void FUnrealMcpSidecarManagerSpec::Define()
 		});
 	});
 
-	Describe("ComposeBundledBridgeCandidates (#139 resolution order)", [this]()
+	Describe("ComposeBundledBridgeCandidates (#139/#187 resolution order)", [this]()
 	{
-		It("lists the STAGED Binaries/ThirdParty path first, then the FAB-SURVIVING Sidecar/ source", [this]()
+		It("lists the STAGED Binaries/ThirdParty path first, then the FAB-SURVIVING Source/ThirdParty source", [this]()
 		{
 			const FString Base = TEXT("C:/fake/plugin/UnrealMCP");
 			const TArray<FString> Candidates = FUnrealMcpSidecarManager::ComposeBundledBridgeCandidates(Base);
 			TestEqual(TEXT("two candidates on a desktop host"), Candidates.Num(), 2);
 			TestEqual(TEXT("first candidate is the staged Binaries/ThirdParty path"),
 				Candidates[0], FUnrealMcpSidecarManager::ComposeBundledBridgePath(Base));
-			TestEqual(TEXT("second candidate is the Fab-surviving Sidecar/ source"),
+			TestEqual(TEXT("second candidate is the Fab-surviving Source/ThirdParty source"),
 				Candidates[1], FUnrealMcpSidecarManager::ComposeSurvivingBridgePath(Base));
 		});
 

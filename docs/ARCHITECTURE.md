@@ -560,34 +560,38 @@ retained only for the **shared `gamedev-mcp-server`** (a different process, owne
 
 ```
 UnrealMCP/                                  # plugin root (UnrealMCP.uplugin lives here)
-├── Sidecar/                                # FAB-SURVIVING source location (#139) — declared in
-│   └── <rid>/  unreal-mcp-bridge[.exe]     #   Config/FilterPlugin.ini so it ships in the source zip
-│      (+ self-contained payload files)     #   (win-x64 / osx-arm64 / osx-x64 / linux-x64)
-└── Binaries/                               # STAGED location — UBT stages Sidecar/<rid>/ here at
-    └── ThirdParty/                         #   compile time (RuntimeDependencies two-arg form). Fab
+├── Source/ThirdParty/UnrealMcpBridge/      # FAB-SURVIVING source location (#139/#187) — the
+│   └── <rid>/  unreal-mcp-bridge[.exe]     #   engine-canonical Source/ThirdParty/<Lib>/<platform>/
+│      (+ self-contained payload files)     #   layout, declared in Config/FilterPlugin.ini so it ships
+│                                           #   in the source zip (win-x64 / osx-arm64 / osx-x64 / linux-x64)
+└── Binaries/                               # STAGED location — UBT stages Source/ThirdParty/UnrealMcpBridge/<rid>/
+    └── ThirdParty/                         #   here at compile time (RuntimeDependencies two-arg form). Fab
         └── UnrealMcpBridge/                #   STRIPS this whole folder from a source submission, so
             └── <rid>/  unreal-mcp-bridge[.exe]   it is re-created only by a recompile (Epic's or local).
 ```
 
-- **Two locations, one resolver (#139 Fab readiness).** Fab accepts a *source* plugin and recompiles
-  it per engine version, **stripping `Binaries/`, `Intermediate/`, `Saved/`** from the submitted zip.
-  So the prebuilt sidecar CANNOT live only under `Binaries/` — it lives in the Fab-surviving
-  `Sidecar/<rid>/` folder (declared in `Config/FilterPlugin.ini`), and `UnrealMcpRuntime.Build.cs`'s
-  `RuntimeDependencies` two-arg `(target, source)` form **stages** it into
+- **Two locations, one resolver (#139/#187 Fab readiness).** Fab accepts a *source* plugin and recompiles
+  it per engine version, **stripping `Binaries/`, `Intermediate/`, `Saved/`** from the submitted zip, and
+  requires redistributed third-party binaries under the engine-canonical `Source/ThirdParty/<Lib>/<platform>/`
+  layout. So the prebuilt sidecar CANNOT live only under `Binaries/` — it lives in the Fab-surviving
+  `Source/ThirdParty/UnrealMcpBridge/<rid>/` folder (declared in `Config/FilterPlugin.ini`), and
+  `UnrealMcpRuntime.Build.cs`'s `RuntimeDependencies` two-arg `(target, source)` form **stages** it into
   `Binaries/ThirdParty/UnrealMcpBridge/<rid>/` at compile time. The resolver walks BOTH: the staged
   `Binaries/ThirdParty` path first (packaged games + non-Fab GitHub releases), then the surviving
-  `Sidecar/<rid>/` source (Epic-compiled Fab builds, whose `Binaries/` was stripped + may not re-stage).
+  `Source/ThirdParty/UnrealMcpBridge/<rid>/` source (Epic-compiled Fab builds, whose `Binaries/` was
+  stripped + may not re-stage). The `<rid>/` folders hold only binaries (no `*.Build.cs`), so UBT never
+  treats `Source/ThirdParty/UnrealMcpBridge/` as a module.
 - Resolver helpers (C++, `FUnrealMcpSidecarManager`): `ComposeBundledBridgePath` →
-  `Binaries/ThirdParty/UnrealMcpBridge/<rid>/`; `ComposeSurvivingBridgePath` → `Sidecar/<rid>/`;
-  `ComposeBundledBridgeCandidates` returns the ordered list `ResolveBridgeBinaryPath` FileExists-walks.
-  All resolve relative to the plugin's base dir via
+  `Binaries/ThirdParty/UnrealMcpBridge/<rid>/`; `ComposeSurvivingBridgePath` →
+  `Source/ThirdParty/UnrealMcpBridge/<rid>/`; `ComposeBundledBridgeCandidates` returns the ordered list
+  `ResolveBridgeBinaryPath` FileExists-walks. All resolve relative to the plugin's base dir via
   `IPluginManager::Get().FindPlugin(TEXT("UnrealMCP"))->GetBaseDir()` (the `Projects` module is a
   dependency — `UnrealMcpRuntime.Build.cs`).
 - Binary basename: `unreal-mcp-bridge` on macOS/Linux, `unreal-mcp-bridge.exe` on Windows (matches
   `<AssemblyName>unreal-mcp-bridge</AssemblyName>` in the bridge csproj).
 - `Binaries/ThirdParty/` is the UE-canonical home for prebuilt third-party runtime payloads and is
   what `RuntimeDependencies` + `-Rocket` BuildPlugin packaging expect for a packaged GAME; the
-  `Sidecar/<rid>/` source is the marketplace-distribution form Fab recompiles from.
+  `Source/ThirdParty/UnrealMcpBridge/<rid>/` source is the marketplace-distribution form Fab recompiles from.
 
 ### 6.2 UE platform → .NET RID mapping
 
@@ -608,7 +612,7 @@ process) and prefers `osx-arm64/`; if that dir is absent (defensive), it falls b
 .NET host is slower and has historically been a source of JIT edge cases.
 
 `ResolveBridgeBinaryPath()` walks the §6.1 candidate list (staged `Binaries/ThirdParty/...` first, then
-the Fab-surviving `Sidecar/<rid>/`) and returns the first whose `FPaths::FileExists` is true; otherwise
+the Fab-surviving `Source/ThirdParty/UnrealMcpBridge/<rid>/`) and returns the first whose `FPaths::FileExists` is true; otherwise
 empty (caller logs the actionable "plugin packaged without the <rid> bridge" error).
 
 ### 6.3 Resolution order (replaces the stub)
@@ -616,8 +620,8 @@ empty (caller logs the actionable "plugin packaged without the <rid> bridge" err
 1. **Dev/CI override:** `UNREAL_MCP_BRIDGE_PATH` (process env or `.env`) — if set and the file
    exists, use it. Required for the bridge inner-dev-loop and live e2e.
 2. **Bundled paths (in order):** the §6.1 candidate list — the staged
-   `Binaries/ThirdParty/UnrealMcpBridge/<rid>/` path first, then the Fab-surviving `Sidecar/<rid>/`
-   source (#139). The first that exists wins. This is the production path for every end user; the
+   `Binaries/ThirdParty/UnrealMcpBridge/<rid>/` path first, then the Fab-surviving
+   `Source/ThirdParty/UnrealMcpBridge/<rid>/` source (#139/#187). The first that exists wins. This is the production path for every end user; the
    Fab-surviving fallback is what an Epic-compiled marketplace build resolves from after Fab strips
    `Binaries/`.
 3. **Neither resolves:** return empty; `StartForPort` logs an actionable error (e.g. "no sidecar
@@ -677,34 +681,43 @@ The §1.5 state machine is unchanged in shape; only the `LaunchingSidecar` preco
   `unreal-mcp-cli bootstrap-local` (§9) automates a from-source bridge build for that var.
 
 **Binaries are NEVER committed to git.** The signed per-RID payloads are staged into the Fab-surviving
-`Sidecar/<rid>/` folder by the release job at package time (a BuildPlugin input via
-`RuntimeDependencies`'s two-arg form, #139), and `.gitignore` keeps the `Sidecar/<rid>/` payloads (and
-`Binaries/`) out of VCS — only the `Sidecar/` folder STRUCTURE (`README.md` + per-RID `.gitkeep`) is
+`Source/ThirdParty/UnrealMcpBridge/<rid>/` folder by the release job at package time (a BuildPlugin input via
+`RuntimeDependencies`'s two-arg form, #139/#187), and `.gitignore` keeps the
+`Source/ThirdParty/UnrealMcpBridge/<rid>/` payloads (and `Binaries/`) out of VCS — only the
+`Source/ThirdParty/UnrealMcpBridge/` folder STRUCTURE (`README.md` + per-RID `.gitkeep`) is
 tracked, so the source zip ships the folders while the payloads stay transient. A dev source checkout
-has empty `Sidecar/<rid>/` (and `Binaries/ThirdParty/UnrealMcpBridge/`) → the resolver returns empty →
+has empty `Source/ThirdParty/UnrealMcpBridge/<rid>/` (and `Binaries/ThirdParty/UnrealMcpBridge/`) → the resolver returns empty →
 devs use `UNREAL_MCP_BRIDGE_PATH`, exactly as before.
 
-### 6.7 Fab (Epic marketplace) source-submission readiness (#139)
+### 6.7 Fab (Epic marketplace) source-submission readiness (#139/#187)
 
-Submitting `UnrealMCP` to Fab as a **source** plugin imposes three constraints on the §6 BUNDLE model;
-all three are handled in-repo (issue #139), and submission itself remains an operator-gated manual step
+Submitting `UnrealMCP` to Fab as a **source** plugin imposes constraints on the §6 BUNDLE model;
+all are handled in-repo (issues #139/#187), and submission itself remains an operator-gated manual step
 (no CI job submits — see `docs/RELEASING.md`):
 
-1. **Sidecar must survive the strip.** Fab strips `Binaries/`/`Intermediate/`/`Saved/` and recompiles,
-   so the prebuilt sidecar lives in `Sidecar/<rid>/` (declared in `Config/FilterPlugin.ini`), is staged
+1. **Sidecar must survive the strip, under the canonical ThirdParty layout.** Fab strips
+   `Binaries/`/`Intermediate/`/`Saved/` and recompiles, and requires redistributed third-party binaries
+   under the engine-canonical `Source/ThirdParty/<Lib>/<platform>/` layout — so the prebuilt sidecar lives
+   in `Source/ThirdParty/UnrealMcpBridge/<rid>/` (declared in `Config/FilterPlugin.ini`), is staged
    into `Binaries/ThirdParty/UnrealMcpBridge/<rid>/` by `RuntimeDependencies`, and is ALSO resolved
-   directly from `Sidecar/<rid>/` (§6.1 candidate list) so an Epic-compiled build resolves it even when
-   `Binaries/` did not re-stage. This does not regress the GitHub-release/npm bundle nor `release.yml`'s
-   signed-binary staging — both now stage into `Sidecar/<rid>/` before BuildPlugin.
+   directly from `Source/ThirdParty/UnrealMcpBridge/<rid>/` (§6.1 candidate list) so an Epic-compiled build
+   resolves it even when `Binaries/` did not re-stage. This does not regress the GitHub-release/npm bundle
+   nor `release.yml`'s signed-binary staging — both now stage into `Source/ThirdParty/UnrealMcpBridge/<rid>/`
+   before BuildPlugin.
 2. **No shipped test/automation module.** Fab review flags shipped test modules, so the DISTRIBUTED
    `UnrealMCP.uplugin` omits `UnrealMcpEditorTests`. PR/dev CI still runs the `UnrealMcp.` Automation
    specs by transiently re-adding the module via `commands/test-module-uplugin.ps1` (idempotent
    add/remove around the Automation BuildPlugin), then reverting — the committed/distributed descriptor
    never carries the test module. `BuildPlugin -Rocket` on the distributed descriptor stays green.
-3. **FilterPlugin hygiene.** `Config/FilterPlugin.ini` ships the `Sidecar/...` tree; no source uses
-   hardcoded/absolute paths (resolution is plugin-base-dir relative, §6.1); all packaged paths are
-   ≤140 chars from the plugin root; the packaged zip excludes `Binaries/Intermediate/Saved/.vs` (Fab
-   strips them; the resolver's surviving `Sidecar/<rid>/` copy is what remains).
+3. **FilterPlugin hygiene.** `Config/FilterPlugin.ini` ships the `Source/ThirdParty/UnrealMcpBridge/...`
+   tree; no source uses hardcoded/absolute paths (resolution is plugin-base-dir relative, §6.1); all
+   packaged paths are ≤140 chars from the plugin root; the packaged zip excludes
+   `Binaries/Intermediate/Saved/.vs` (Fab strips them; the resolver's surviving
+   `Source/ThirdParty/UnrealMcpBridge/<rid>/` copy is what remains).
+4. **Modules declare their supported platforms (#187).** Both modules in `UnrealMCP.uplugin`
+   (`UnrealMcpRuntime`, `UnrealMcpEditor`) carry `"PlatformAllowList": ["Win64","Mac","Linux"]`, matching
+   the desktop-only target platforms (console/mobile cannot spawn the .NET sidecar, §12.5). Fab review
+   expects modules to enumerate their supported platforms rather than defaulting to all.
 
 ### Local server acquisition (the shared GameDev-MCP-Server)
 
