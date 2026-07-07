@@ -10,6 +10,11 @@ The authoritative design is [`docs/ARCHITECTURE.md`](ARCHITECTURE.md) §9
 keep the two in lockstep, and keep the CI command surface 1:1 with the
 implement-task profile `test.md` (infra repo).
 
+For the short operator "what do I run?" flow, see
+[`docs/GITHUB-RELEASE-RUNBOOK.md`](GITHUB-RELEASE-RUNBOOK.md). The wrapper
+script documented there (`commands/release-github.ps1`) does **not** bypass this
+file's contract — it only wraps `commands/bump-version.ps1` and `release.yml`.
+
 ## Release checklist — operator-gated leaves
 
 The following actions are **deliberately operator-gated** and are **not** performed by a normal

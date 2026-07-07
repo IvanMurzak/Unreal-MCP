@@ -531,7 +531,7 @@ describe('installExtension (--build)', () => {
     if (r.kind !== 'success') return;
     expect(r.built).toBe(false);
     expect(r.rebuildRequired).toBe(true);
-    expect(r.warnings.join(' ')).toMatch(/UBT build failed/);
+    expect(r.warnings.join(' ')).toMatch(/Build failed/);
   });
 });
 

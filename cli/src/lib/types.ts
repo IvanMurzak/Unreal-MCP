@@ -15,6 +15,7 @@
 
 import type { ExtensionDescriptor } from '../utils/extensions-catalog.js';
 import type { InstallSourceKind } from '../utils/extension-source.js';
+import type { DismissOutcome, DismissPlatform, UnrealStartupDialogKey } from '../utils/startup-dialog-dismiss.js';
 
 export type ResultKind = 'success' | 'failure';
 
@@ -29,6 +30,13 @@ export type ProgressEvent =
   | { phase: 'engine-resolved'; message: string; editorPath: string; engineRoot: string }
   | { phase: 'launching'; message: string; editorPath: string; projectDir: string }
   | { phase: 'launched'; message: string; pid?: number }
+  | {
+      phase: 'startup-dialog-dismissed';
+      message: string;
+      button: string;
+      dialog: UnrealStartupDialogKey;
+      platform: DismissPlatform;
+    }
   | { phase: 'done'; message: string };
 
 export type ProgressCallback = (event: ProgressEvent) => void;
@@ -96,6 +104,20 @@ export interface OpenProjectOptions {
   projectDir?: string;
   /** Explicit engine root override (source builds). */
   engineRoot?: string;
+  /**
+   * On desktop platforms, compile native modules via Unreal build tooling before launch when the
+   * project/plugin state requires it. Default `true`.
+   */
+  build?: boolean;
+  /**
+   * On desktop platforms, poll for known Unreal startup blocker dialogs after launch and
+   * auto-click the affirmative button. Default `true`.
+   */
+  autoDismissStartupDialogs?: boolean;
+  /** Overall timeout for the startup-dialog auto-dismiss polling loop. Default `12000`. */
+  startupDismissTimeoutMs?: number;
+  /** Polling interval for the startup-dialog auto-dismiss loop. Default `1000`. */
+  startupDismissPollIntervalMs?: number;
   /** Skip wiring MCP connection env vars onto the editor process. */
   noConnect?: boolean;
   host?: string;
@@ -140,6 +162,10 @@ export interface OpenProjectOptions {
   existsImpl?: (p: string) => boolean;
   /** Test injection — spawn (defaults to detached `child_process.spawn`). */
   spawnImpl?: (editorPath: string, args: string[], env: NodeJS.ProcessEnv) => { pid?: number };
+  /** Test injection — build runner used by the pre-launch build. */
+  buildImpl?: (step: UbtBuildStep) => Promise<void>;
+  /** Test injection — startup-dialog probe used by the post-launch dismiss loop. */
+  dismissStartupDialogImpl?: (platform: DismissPlatform) => Promise<DismissOutcome>;
   onProgress?: ProgressCallback;
 }
 
@@ -644,21 +670,24 @@ export type ExtensionInstallOutcome = 'added' | 'updated' | 'enabled' | 'already
 /** Re-export of the install-source channel discriminant for the public result. */
 export type { InstallSourceKind };
 
-/**
- * A single UBT compile invocation `install-extension --build` runs. Exposed so a
- * test can inject `buildImpl` and assert the build was requested without a real
- * UnrealBuildTool / engine on the machine.
- */
-export interface ExtensionBuildStep {
-  /** Absolute path to `UnrealBuildTool.exe`. */
+/** A single desktop Unreal build invocation. */
+export interface UbtBuildStep {
+  /** Absolute path to the build entrypoint (`UnrealBuildTool.exe` or platform `Build.sh`). */
   ubtPath: string;
   /** Editor target name, e.g. `MyProjectEditor`. */
   editorTarget: string;
   /** Absolute path to the `.uproject`. */
   uprojectPath: string;
-  /** The full UBT argument vector (target, platform, config, `-project=...`, `-WaitMutex`). */
+  /** The full build argument vector (target, platform, config, `-project=...`, `-WaitMutex`). */
   args: string[];
 }
+
+/**
+ * A single UBT compile invocation `install-extension --build` runs. Exposed so a
+ * test can inject `buildImpl` and assert the build was requested without a real
+ * UnrealBuildTool / engine on the machine.
+ */
+export interface ExtensionBuildStep extends UbtBuildStep {}
 
 export interface InstallExtensionOptions {
   /** Target Unreal project root (holds the `.uproject` + `Plugins/`). */

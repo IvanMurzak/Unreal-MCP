@@ -10,11 +10,27 @@ import { discoverEngine, invalidateCachedEngine } from './engine.js';
 import { readUProject } from '../utils/project.js';
 import { asError } from '../utils/error.js';
 import { emitProgress } from './progress.js';
+import {
+  tryDismissUnrealStartupDialog,
+  type DismissOutcome,
+  type DismissPlatform,
+  LINUX_WAYLAND_UNSUPPORTED_PREFIX,
+  LINUX_XDOTOOL_MISSING_PREFIX,
+  UNSUPPORTED_PLATFORM_PREFIX,
+} from '../utils/startup-dialog-dismiss.js';
+import {
+  corePluginNeedsBuild,
+  isDesktopBuildPlatform,
+  projectHasNativeCode,
+  resolveDesktopBuildStep,
+  runUnrealBuildStep,
+} from '../utils/unreal-build.js';
 import type {
   AuthOption,
   McpTransport,
   OpenProjectOptions,
   OpenProjectResult,
+  UbtBuildStep,
 } from './types.js';
 
 function isValidAuth(v: unknown): v is AuthOption {
@@ -141,6 +157,19 @@ export async function openProject(opts: OpenProjectOptions): Promise<OpenProject
       engineRoot: resolution.engineRoot,
     });
 
+    await maybeBuildBeforeOpen(
+      {
+        projectDir,
+        projectName: uproject.projectName,
+        uprojectPath: uproject.uprojectPath,
+        engineRoot: resolution.engineRoot,
+        build: opts.build,
+        buildImpl: opts.buildImpl,
+        onProgress: opts.onProgress,
+      },
+      warnings,
+    );
+
     emitProgress(opts.onProgress, {
       phase: 'launching',
       message: 'Launching Unreal Editor',
@@ -167,6 +196,18 @@ export async function openProject(opts: OpenProjectOptions): Promise<OpenProject
       message: `Launched (PID: ${child.pid ?? 'unknown'})`,
       pid: child.pid,
     });
+
+    if (isDesktopBuildPlatform(os) && opts.autoDismissStartupDialogs !== false) {
+      await pollAndDismissStartupDialogs({
+        timeoutMs: opts.startupDismissTimeoutMs ?? 12000,
+        intervalMs: opts.startupDismissPollIntervalMs ?? 1000,
+        onProgress: opts.onProgress,
+        warnings,
+        probe: opts.dismissStartupDialogImpl ?? tryDismissUnrealStartupDialog,
+        platform: os,
+      });
+    }
+
     emitProgress(opts.onProgress, { phase: 'done', message: 'Editor launched.' });
 
     return {
@@ -190,6 +231,137 @@ export async function openProject(opts: OpenProjectOptions): Promise<OpenProject
       error,
     };
   }
+}
+
+interface PreLaunchBuildOptions {
+  projectDir: string;
+  projectName: string;
+  uprojectPath: string;
+  engineRoot: string;
+  build?: boolean;
+  buildImpl?: (step: UbtBuildStep) => Promise<void>;
+  onProgress?: OpenProjectOptions['onProgress'];
+}
+
+async function maybeBuildBeforeOpen(
+  opts: PreLaunchBuildOptions,
+  warnings: string[],
+): Promise<void> {
+  if (opts.build === false) return;
+  const hostPlatform = platform();
+  if (!isDesktopBuildPlatform(hostPlatform)) {
+    if (needsPreLaunchBuild(opts.projectDir)) {
+      warnings.push(
+        `Native modules may require compilation before launch, but pre-launch build is unsupported on ${hostPlatform}.`,
+      );
+    }
+    return;
+  }
+  if (!needsPreLaunchBuild(opts.projectDir)) return;
+  const step: UbtBuildStep = resolveDesktopBuildStep({
+    platform: hostPlatform,
+    engineRoot: opts.engineRoot,
+    projectName: opts.projectName,
+    uprojectPath: opts.uprojectPath,
+  });
+
+  emitProgress(opts.onProgress, {
+    phase: 'info',
+    message: `Compiling ${step.editorTarget} before launch`,
+  });
+  const buildImpl = opts.buildImpl ?? runUnrealBuildStep;
+  try {
+    await buildImpl(step);
+    emitProgress(opts.onProgress, {
+      phase: 'info',
+      message: `Build succeeded for ${step.editorTarget}`,
+    });
+  } catch (err: unknown) {
+    throw new Error(`Pre-launch build failed: ${asError(err).message}`);
+  }
+}
+
+function needsPreLaunchBuild(projectDir: string): boolean {
+  const hostPlatform = platform();
+  return isDesktopBuildPlatform(hostPlatform)
+    ? projectHasNativeCode(projectDir) || corePluginNeedsBuild(projectDir, hostPlatform)
+    : projectHasNativeCode(projectDir);
+}
+
+interface PollAndDismissStartupDialogsOptions {
+  timeoutMs: number;
+  intervalMs: number;
+  onProgress: OpenProjectOptions['onProgress'];
+  warnings: string[];
+  platform: DismissPlatform;
+  probe: (platform: DismissPlatform) => Promise<DismissOutcome>;
+  noDialogGraceMs?: number;
+  settleAfterDismissMs?: number;
+}
+
+export async function _pollAndDismissStartupDialogsForTests(
+  opts: PollAndDismissStartupDialogsOptions,
+): Promise<void> {
+  return pollAndDismissStartupDialogs(opts);
+}
+
+async function pollAndDismissStartupDialogs(
+  opts: PollAndDismissStartupDialogsOptions,
+): Promise<void> {
+  const deadline = Date.now() + Math.max(0, opts.timeoutMs);
+  const interval = Math.max(50, opts.intervalMs);
+  const graceMs = Math.max(0, opts.noDialogGraceMs ?? 5000);
+  const settleMs = Math.max(0, opts.settleAfterDismissMs ?? 3000);
+  const start = Date.now();
+  const seenErrorMessages = new Set<string>();
+  let lastDismissedAt: number | undefined;
+
+  while (Date.now() < deadline) {
+    const outcome = await opts.probe(opts.platform);
+    const now = Date.now();
+    if (outcome.kind === 'dismissed') {
+      lastDismissedAt = now;
+      emitProgress(opts.onProgress, {
+        phase: 'startup-dialog-dismissed',
+        message: `[open] dismissed Unreal startup dialog (dialog=${outcome.dialog}, button=${outcome.button}, platform=${opts.platform})`,
+        dialog: outcome.dialog,
+        button: outcome.button,
+        platform: opts.platform,
+      });
+    } else if (outcome.kind === 'error') {
+      if (!seenErrorMessages.has(outcome.message)) {
+        seenErrorMessages.add(outcome.message);
+        opts.warnings.push(`startup-dialog auto-dismiss: ${outcome.message}`);
+      }
+      if (
+        outcome.message.includes(UNSUPPORTED_PLATFORM_PREFIX) ||
+        outcome.message.includes(LINUX_XDOTOOL_MISSING_PREFIX) ||
+        outcome.message.includes(LINUX_WAYLAND_UNSUPPORTED_PREFIX)
+      ) {
+        return;
+      }
+    } else if (lastDismissedAt === undefined && now - start >= graceMs) {
+      return;
+    } else if (lastDismissedAt !== undefined && now - lastDismissedAt >= settleMs) {
+      return;
+    }
+
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) break;
+    await sleep(Math.min(interval, remaining));
+  }
+
+  if (seenErrorMessages.size > 0 && lastDismissedAt === undefined) {
+    opts.warnings.push(
+      `startup-dialog auto-dismiss timed out after ${opts.timeoutMs}ms — continuing without further startup-dialog polling`,
+    );
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }
 
 function spawnDetached(

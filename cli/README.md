@@ -45,7 +45,7 @@ Requires Node `^20.19.0 || >=22.12.0`. See the
 | Command | What it does |
 | --- | --- |
 | `create-project <path>` | Scaffold a minimal Unreal Engine C++ project |
-| `open [path]` | Launch the Unreal Editor, wiring `UNREAL_MCP_*` env vars (engine resolved via `EngineAssociation` + `LauncherInstalled.dat`) |
+| `open [path]` | Launch the Unreal Editor, wiring `UNREAL_MCP_*` env vars (engine resolved via `EngineAssociation` + `LauncherInstalled.dat`). On desktop platforms it auto-runs a pre-launch build when the project/plugin still needs native editor binaries, then auto-dismisses the known startup blocker dialogs; pass `--no-build` or `--no-auto-dismiss-startup-dialogs` to skip either behavior |
 | `close [path]` | Terminate the editor process running a project |
 | `install-plugin [path]` | Copy (or `--junction`) the UnrealMCP plugin into `<project>/Plugins` — default source = local repo checkout when present, else the version-matched GitHub source asset |
 | `remove-plugin [path]` | Remove the installed plugin |
@@ -131,10 +131,9 @@ the single decision point for *where* the files come from — `--source` (local)
 there plus a materializer branch, **without touching callers**.
 
 **Compile-on-install strategy (chosen + documented).** Extensions ship as **source** and are compiled
-by **UnrealBuildTool**. The default is **source-ship + compile-on-next-editor-open** (the install
-reports `rebuildRequired: true`); `--build` opts into an **eager** UBT compile against the resolved
-engine (**Windows-only** — it invokes `UnrealBuildTool.exe` for the `Win64` target; on macOS/Linux omit
-`--build` and let the editor recompile on next open). Source-ship is chosen over shipping
+by Unreal's desktop build tooling. The default is **source-ship + compile-on-next-editor-open** (the install
+reports `rebuildRequired: true`); `--build` opts into an **eager** compile against the resolved
+engine on **Windows / macOS / Linux**. Source-ship is chosen over shipping
 precompiled-per-UE-version binaries because UE plugin
 binaries are version/config/platform-specific and ABI-unstable across engine minors — exactly why the
 core `install-plugin` also ships source and excludes the stale build cache.

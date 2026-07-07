@@ -9,7 +9,7 @@ export const installExtensionCommand = new Command('install-extension')
   .argument('[path]', 'Unreal project directory (defaults to cwd)')
   .option('--source <dir>', 'Install from a local plugin directory (offline / CI / dev) instead of downloading')
   .option('--version <x.y.z>', 'Override the catalog-pinned version to install (also the GitHub release version)')
-  .option('--build', 'Compile the project via UnrealBuildTool now (Windows-only; default: recompile on next editor open)')
+  .option('--build', 'Compile the project now via the desktop Unreal build toolchain (default: recompile on next editor open)')
   .option('--engine-root <dir>', 'Engine root for --build (default: resolved from the project EngineAssociation)')
   .option('--force', 'Re-materialize + re-enable even when already up to date')
   .action(
