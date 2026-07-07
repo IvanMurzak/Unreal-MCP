@@ -18,7 +18,11 @@
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
 #include "Misc/PackageName.h"
+#if __has_include("Misc/StringOutputDevice.h")
 #include "Misc/StringOutputDevice.h"
+#else
+#include "Containers/UnrealString.h"
+#endif
 #include "PlayInEditorDataTypes.h"
 #include "ScopedTransaction.h"
 #include "UObject/Class.h"

@@ -69,7 +69,7 @@ artifact jobs in `release.yml`:
   self-contained and signs the `.exe` via **Azure Trusted Signing**, then uploads
   the raw signed dir + the release zip. (signtool is Windows-only; codesign /
   notarytool are macOS-only — hence the two-runner split.)
-- **`build-plugin-zip`** (self-hosted UE 5.7) — downloads the four signed RID
+- **`build-plugin-zip`** (self-hosted UE 5.8) — downloads the four signed RID
   dirs, **stages them into the Fab-surviving `UnrealMCP/Source/ThirdParty/UnrealMcpBridge/<rid>/`**
   (#139/#187 — the engine-canonical `Source/ThirdParty/` folder declared in `Config/FilterPlugin.ini`
   that survives a Fab strip; the `UnrealMcpRuntime.Build.cs` `RuntimeDependencies` two-arg form then
@@ -83,7 +83,9 @@ artifact jobs in `release.yml`:
   A post-BuildPlugin guard copies the binaries from `Source/ThirdParty/UnrealMcpBridge/<rid>/` into the
   package's `Binaries/ThirdParty/...` output if `RuntimeDependencies` did not stage
   them, and asserts the surviving `Source/ThirdParty/UnrealMcpBridge/<rid>/` payload shipped (the form Epic's
-  Fab recompile stages from).
+  Fab recompile stages from). The packaged zip job waits for the plugin matrix
+  so its UE 5.8 `BuildPlugin` run does not overlap the UE 5.8 validation leg on
+  the same machine's AutomationTool lock.
 
 ### Packaged-game sidecar bundling (R2)
 
@@ -353,16 +355,22 @@ Windows runner** labelled `unreal-5-7` — deliberately distinct from any M1/M4
 release-runner label so PR compiles do not starve release capacity. The label is
 legacy; the release matrix now validates UE 5.5/5.6/5.7/5.8 on that machine.
 
-> **Status (2026-06-11): the runner is LIVE.** A self-hosted Windows runner
-> (labels `self-hosted`, `Windows`, `X64`, `unreal-5-7`) is registered against
+> **Status (2026-06-11): the runner is LIVE.** Self-hosted Windows runners
+> (labels `self-hosted`, `Windows`, `X64`, `unreal-5-7`) are registered against
 > `IvanMurzak/Unreal-MCP`, and the repository variable `UNREAL_RUNNER_READY` is
-> set to `true`. `UNREAL_HOST_PROJECT` is **also set**, so the Automation pass
-> runs against the packaged plugin (not just the BuildPlugin compile). The
+> set to `true`. Each runner should carry its own
+> `<runner-root>\host\UnrealTestProject\UnrealTestProject.uproject`; the
+> workflows prefer that runner-local host and keep `UNREAL_HOST_PROJECT` only as
+> a fallback. That keeps parallel Automation jobs from sharing one mutable
+> `Plugins\UnrealMCP` junction while still exercising the packaged plugin. The
 > `plugin BuildPlugin + Automation (UE <ver>)` coverage now splits by workflow:
 > `test_pull_request.yml` runs **UE 5.8 only** for same-repo PRs, while
 > `release.yml` runs `matrix.ue: ['5.5', '5.6', '5.7', '5.8']` on real releases
-> and dry-runs. The single runner has all supported engines installed and runs
-> those legs sequentially; the host game module is rebuilt per engine. The
+> and dry-runs. Multiple registered runners can process those legs in parallel;
+> the host game module is rebuilt per engine on each runner-local host. The
+> PR smoke job waits for the plugin job, because both use UE 5.8 `RunUAT` on the
+> same machine and Unreal's AutomationTool permits only one same-engine instance
+> at a time.
 > registration steps below are retained for re-provisioning the runner.
 
 ### Never red-by-absence
@@ -401,9 +409,10 @@ Defense in depth at the repository-settings level (operator):
    *Settings → Actions → Runners → New self-hosted runner* (Windows x64). Follow
    the `./config.cmd` steps GitHub shows.
 2. Give the runner the labels `self-hosted`, `windows`, and **`unreal-5-7`**.
-3. Prepare a host `.uproject` on the runner that has the `UnrealMCP` plugin
-   available (the analog of the infra `Unreal-Test-Project/`, plugin junctioned
-   or copied into its `Plugins/`). Note its absolute path.
+3. Prepare a host `.uproject` under that runner root at
+   `host\UnrealTestProject\UnrealTestProject.uproject`. For multiple runners,
+   copy the host project into each runner root so parallel jobs do not share the
+   same `Plugins\UnrealMCP` junction.
 4. Set the repository variables (below).
 5. Open a throwaway PR (or re-run an existing one) and confirm the `plugin` leg
    now runs and is green.
@@ -416,9 +425,9 @@ Set via `gh variable set --repo IvanMurzak/Unreal-MCP <NAME> --body <VALUE>`
 | Variable | Required | Purpose |
 | --- | --- | --- |
 | `UNREAL_RUNNER_READY` | to enable the plugin legs | **Currently `true`** — a `unreal-5-7` runner is registered (2026-06-11), so the plugin legs run. Unset/anything-else → plugin legs skip. |
-| `UNREAL_ENGINE_PATH` | optional | UE 5.7 install root on the runner. Defaults to `C:\Program Files\Epic Games\UE_5.7`. |
-| `UNREAL_HOST_PROJECT` | for the Automation pass | **Currently set (2026-06-11)** — absolute path on the runner to the host `.uproject` (with the UnrealMCP plugin) the Automation specs run against (`C:\actions-runner-unreal\host\UnrealTestProject\UnrealTestProject.uproject`, whose `Plugins\UnrealMCP` junctions to the BuildPlugin package output in the runner workspace temp, so Automation exercises the PR's packaged plugin). |
-| `UNREAL_SMOKE_READY` | to enable the `connection-smoke` leg | Gates the live relay round-trip leg (client → `gamedev-mcp-server` → sidecar → plugin → editor → tool, via `scripts/connection_smoke.py --mode custom`). **Separate from `UNREAL_RUNNER_READY`** so the smoke leg stays SKIPPED — never red-by-absence — until validated once on the runner. The leg builds the bridge (→ `UNREAL_MCP_BRIDGE_PATH`), runs its own `BuildPlugin` into the `UNREAL_HOST_PROJECT` junction target (`$RUNNER_TEMP\UnrealMCP-Package`), downloads the public `gamedev-mcp-server` release, and asserts a tool battery. Set to `true` to enable; reuses `UNREAL_HOST_PROJECT` + `UNREAL_ENGINE_PATH`. |
+| `UNREAL_ENGINE_PATH` | optional | Packaged-plugin UE install root on the runner. Defaults to the latest supported engine, `C:\Program Files\Epic Games\UE_5.8`. |
+| `UNREAL_HOST_PROJECT` | fallback only | Optional fallback absolute path for older single-runner setups. Current workflows first look for `<runner-root>\host\UnrealTestProject\UnrealTestProject.uproject`, derived from `RUNNER_TEMP`, so multi-runner CI should provision that path per runner instead of sharing one repo variable path. |
+| `UNREAL_SMOKE_READY` | to enable the `connection-smoke` leg | Gates the live relay round-trip leg (client → `gamedev-mcp-server` → sidecar → plugin → editor → tool, via `scripts/connection_smoke.py --mode custom`). **Separate from `UNREAL_RUNNER_READY`** so the smoke leg stays SKIPPED — never red-by-absence — until validated once on the runner. The leg builds the bridge (→ `UNREAL_MCP_BRIDGE_PATH`), runs its own `BuildPlugin` into the runner-local host project junction target (`$RUNNER_TEMP\UnrealMCP-Package`), downloads the public `gamedev-mcp-server` release, and asserts a tool battery. Set to `true` to enable; reuses the resolved host project + `UNREAL_ENGINE_PATH`. |
 
 Variables (not secrets) are correct here: none of these values are sensitive.
 

@@ -32,7 +32,11 @@
 #include "Misc/PackageName.h"
 #include "Logging/TokenizedMessage.h"
 #include "Misc/UObjectToken.h"
+#if __has_include("Misc/StringOutputDevice.h")
 #include "Misc/StringOutputDevice.h"
+#else
+#include "Containers/UnrealString.h"
+#endif
 
 /**
  * The Blueprint tool family (docs/ARCHITECTURE.md §10). MVP floor — read + structure-edit + compile +
