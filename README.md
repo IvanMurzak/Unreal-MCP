@@ -103,7 +103,7 @@ Because Fab ships precompiled binaries and the Epic Launcher updates them in pla
 
 ## Option B — `unreal-mcp-cli` (current / advanced)
 
-The CLI is the recommended path **today**, until the Fab listing is live. Install it from npm — **no repo clone, no build step**. It copies (or, for dev, junctions) the plugin into your project and, on **update**, automatically clears the stale UE build cache so you always get a clean recompile of the new code (see [Updating the plugin](#updating-the-plugin)).
+The CLI is the recommended path **today**, until the Fab listing is live. Install it from npm — **no repo clone, no build step**. By default `install-plugin` / `update` use a local `UnrealMCP/` checkout when one is present; otherwise they download the packaged plugin zip from the public GitHub Release that matches the CLI version. `--plugin-source <dir>` remains the offline / CI / dev override. The CLI copies (or, for dev, junctions) the plugin into your project and, on **update**, automatically clears the stale UE build cache so you always get a clean recompile of the new code (see [Updating the plugin](#updating-the-plugin)).
 
 ```bash
 # 1. Install unreal-mcp-cli (or use `npx unreal-mcp-cli@latest <command>` for a one-off, no install)

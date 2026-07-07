@@ -10,12 +10,19 @@ import { cleanPluginBuildCache } from './clean-plugin.js';
 import { asError } from '../utils/error.js';
 import { isSymlink } from '../utils/fs.js';
 import { emitProgress } from './progress.js';
+import { PACKAGE_VERSION } from '../version.js';
+import { defaultCorePluginSource, resolvePluginSource } from './plugin-source.js';
+import { stripLeadingV } from '../utils/extension-source.js';
 import type { ProgressCallback } from './types.js';
 
 export interface UpdateOptions {
   projectDir: string;
-  /** Plugin source to update from. */
-  pluginSourceDir: string;
+  /**
+   * Optional plugin source to update from. When omitted, the library uses a
+   * local repo checkout if present, otherwise the GitHub Release asset matching
+   * the CLI package version.
+   */
+  pluginSourceDir?: string;
   /** Re-install even when versions match. Default `false`. */
   force?: boolean;
   /**
@@ -27,6 +34,8 @@ export interface UpdateOptions {
    * way. Junction (dev) installs are never cleaned regardless of this flag.
    */
   noClean?: boolean;
+  /** Injectable fetch for tests (download path only). */
+  fetchImpl?: typeof fetch;
   onProgress?: ProgressCallback;
 }
 
@@ -72,17 +81,23 @@ export function readPluginVersion(upluginPath: string): string | null {
 
 export async function update(opts: UpdateOptions): Promise<UpdateResult> {
   const warnings: string[] = [];
+  let cleanupSource: (() => void) | undefined;
   try {
     if (!opts?.projectDir) throw new Error('projectDir is required.');
-    if (!opts?.pluginSourceDir) throw new Error('pluginSourceDir is required.');
     const projectDir = path.resolve(opts.projectDir);
-    const pluginSourceDir = path.resolve(opts.pluginSourceDir);
 
     const installedUplugin = path.join(projectDir, 'Plugins', 'UnrealMCP', 'UnrealMCP.uplugin');
-    const sourceUplugin = path.join(pluginSourceDir, 'UnrealMCP.uplugin');
     const fromVersion = readPluginVersion(installedUplugin);
-    const toVersion = readPluginVersion(sourceUplugin);
     const installedPath = path.join(projectDir, 'Plugins', 'UnrealMCP');
+    const localSource =
+      (opts.pluginSourceDir ?? '').trim() !== ''
+        ? path.resolve(opts.pluginSourceDir!)
+        : opts.fetchImpl
+          ? null
+          : defaultCorePluginSource();
+    const toVersion = localSource
+      ? readPluginVersion(path.join(localSource, 'UnrealMCP.uplugin'))
+      : PACKAGE_VERSION;
 
     emitProgress(opts.onProgress, {
       phase: 'start',
@@ -101,11 +116,21 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
     // installed: `null !== null` is `false`, so without the explicit
     // `fromVersion === null` clause an uninstalled plugin against an unreadable
     // source would short-circuit to "already up to date" and never install.
-    const needsUpdate = opts.force === true || fromVersion === null || fromVersion !== toVersion;
+    const needsUpdate =
+      opts.force === true ||
+      fromVersion === null ||
+      stripLeadingV(fromVersion ?? '') !== stripLeadingV(toVersion ?? '');
     if (!needsUpdate) {
       emitProgress(opts.onProgress, { phase: 'done', message: 'Plugin already up to date.' });
       return { kind: 'success', success: true, fromVersion, toVersion, updated: false, cleaned: false, installedPath, warnings };
     }
+
+    const resolvedSource = await resolvePluginSource({
+      pluginSourceDir: localSource ?? undefined,
+      fetchImpl: opts.fetchImpl,
+      onProgress: opts.onProgress,
+    });
+    cleanupSource = resolvedSource.cleanup;
 
     // Preserve the existing install mode: a dev junction install must stay a
     // junction across `update --force` rather than being silently replaced
@@ -113,7 +138,7 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
     const installedAsJunction = isSymlink(installedPath);
     const installResult = await installPlugin({
       projectDir,
-      pluginSourceDir,
+      pluginSourceDir: resolvedSource.pluginSourceDir,
       junction: installedAsJunction,
       onProgress: opts.onProgress,
     });
@@ -161,5 +186,7 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
       warnings,
       error: asError(err),
     };
+  } finally {
+    cleanupSource?.();
   }
 }

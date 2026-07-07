@@ -209,10 +209,16 @@ export type CreateProjectResult = CreateProjectSuccess | CreateProjectFailure;
 export interface InstallPluginOptions {
   /** Target Unreal project root. */
   projectDir: string;
-  /** Source `UnrealMCP/` plugin directory to install. */
-  pluginSourceDir: string;
+  /**
+   * Optional source `UnrealMCP/` plugin directory to install. When omitted, the
+   * library uses a local repo checkout if one is present, otherwise it downloads
+   * the GitHub Release asset that matches the CLI package version.
+   */
+  pluginSourceDir?: string;
   /** Junction (dev) instead of copy. Windows only. Default `false`. */
   junction?: boolean;
+  /** Injectable fetch for tests (download path only). */
+  fetchImpl?: typeof fetch;
   onProgress?: ProgressCallback;
 }
 

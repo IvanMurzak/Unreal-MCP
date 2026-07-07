@@ -19,6 +19,7 @@ export const installExtensionCommand = new Command('install-extension')
       opts: { source?: string; version?: string; build?: boolean; engineRoot?: string; force?: boolean },
     ) => {
       const projectDir = path.resolve(pathArg ?? process.cwd());
+      const spinner = ui.startSpinner(`Installing extension ${id}...`);
 
       const result = await installExtension({
         projectDir,
@@ -28,16 +29,20 @@ export const installExtensionCommand = new Command('install-extension')
         build: opts.build,
         engineRoot: opts.engineRoot,
         force: opts.force,
+        onProgress: (event) => {
+          spinner.text = event.message;
+        },
       });
 
-      ui.printWarnings(result.warnings);
       if (result.kind === 'failure') {
-        ui.error(result.error.message);
+        spinner.error(result.error.message);
+        ui.printWarnings(result.warnings);
         process.exitCode = 1;
         return;
       }
 
-      ui.success(result.message);
+      spinner.success(result.message);
+      ui.printWarnings(result.warnings);
       ui.label('Installed at', result.installedPath);
       if (result.enabledPlugins.length > 0) {
         ui.label('Enabled plugins', result.enabledPlugins.join(', '));

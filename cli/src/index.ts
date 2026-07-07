@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import { PACKAGE_VERSION } from './version.js';
-import { setVerbose } from './utils/ui.js';
+import { configureStyledHelp, setVerbose } from './utils/ui.js';
 import { bootstrapLocalCommand } from './commands/bootstrap-local.js';
 import { closeCommand } from './commands/close.js';
 import { configureCommand } from './commands/configure.js';
@@ -50,8 +50,11 @@ const subcommands = [
 
 for (const cmd of subcommands) {
   cmd.option('-v, --verbose', 'Enable verbose diagnostic output');
+  configureStyledHelp(cmd);
   program.addCommand(cmd);
 }
+
+configureStyledHelp(program, PACKAGE_VERSION);
 
 program.hook('preAction', (_thisCommand, actionCommand) => {
   const opts = actionCommand.optsWithGlobals() as { verbose?: boolean };

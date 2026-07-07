@@ -1,16 +1,11 @@
 import { Command } from 'commander';
-import { fileURLToPath } from 'url';
-import * as path from 'path';
 import { update } from '../lib/update.js';
-import { defaultPluginSource } from '../utils/repo.js';
 import * as ui from '../utils/ui.js';
 
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-
 export const updateCommand = new Command('update')
-  .description('Update the UnrealMCP plugin installed in a project from the repo source')
+  .description('Update the UnrealMCP plugin installed in a project from a local source or the matching GitHub release')
   .argument('[path]', 'Unreal project directory (defaults to cwd)')
-  .option('--plugin-source <dir>', 'UnrealMCP plugin source dir (defaults to the repo plugin)')
+  .option('--plugin-source <dir>', 'UnrealMCP plugin source dir (offline / CI / dev override)')
   .option('--force', 'Re-install even when versions match')
   .option(
     '--no-clean',
@@ -22,32 +17,31 @@ export const updateCommand = new Command('update')
       opts: { pluginSource?: string; force?: boolean; clean?: boolean },
     ) => {
       const projectDir = pathArg ?? process.cwd();
-      const pluginSourceDir = opts.pluginSource ?? defaultPluginSource(HERE);
-      if (!pluginSourceDir) {
-        ui.error('Could not locate the UnrealMCP plugin source. Pass --plugin-source <dir>.');
-        process.exitCode = 1;
-        return;
-      }
+      const spinner = ui.startSpinner('Checking installed UnrealMCP plugin...');
       // commander maps `--no-clean` to `opts.clean === false`; absent → undefined (clean).
       const result = await update({
         projectDir,
-        pluginSourceDir,
+        pluginSourceDir: opts.pluginSource,
         force: opts.force,
         noClean: opts.clean === false,
+        onProgress: (event) => {
+          spinner.text = event.message;
+        },
       });
-      ui.printWarnings(result.warnings);
       if (result.kind === 'failure') {
-        ui.error(result.error.message);
+        spinner.error(result.error.message);
+        ui.printWarnings(result.warnings);
         process.exitCode = 1;
         return;
       }
       if (result.updated) {
         const cleanedNote = result.cleaned ? ' (build cache cleaned)' : '';
-        ui.success(
+        spinner.success(
           `Updated plugin ${result.fromVersion ?? 'none'} -> ${result.toVersion ?? 'unknown'}${cleanedNote}`,
         );
       } else {
-        ui.info(`Plugin already up to date (${result.toVersion ?? 'unknown'}).`);
+        spinner.success(`Plugin already up to date (${result.toVersion ?? 'unknown'}).`);
       }
+      ui.printWarnings(result.warnings);
     },
   );
