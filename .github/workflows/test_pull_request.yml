@@ -202,10 +202,13 @@ jobs:
             # Binaries may be built for a different UE version, and an -unattended
             # editor will NOT interactively rebuild). The plugin is already current
             # via the BuildPlugin into the host's Plugins junction above; this builds
-            # the host shell + the junctioned plugin for UE_ROOT.
+            # the host shell + the junctioned plugin for UE_ROOT. IMPORTANT:
+            # force -NoLiveCoding on the self-hosted service runner — UE 5.8's UBT
+            # can otherwise probe the global LiveCoding mutex and die with
+            # UnauthorizedAccessException under the service account.
             $hostBuild = Join-Path $env:UE_ROOT 'Engine\Build\BatchFiles\Build.bat'
             $hostTarget = [System.IO.Path]::GetFileNameWithoutExtension($env:HOST_UPROJECT) + 'Editor'
-            & $hostBuild $hostTarget Win64 Development -project="$env:HOST_UPROJECT" -WaitMutex
+            & $hostBuild $hostTarget Win64 Development -project="$env:HOST_UPROJECT" -WaitMutex -NoLiveCoding
             if ($LASTEXITCODE -ne 0) { throw "Host editor target ($hostTarget) build failed for UE_ROOT=$env:UE_ROOT (exit $LASTEXITCODE)" }
             $editorCmd = Join-Path $env:UE_ROOT 'Engine\Binaries\Win64\UnrealEditor-Cmd.exe'
             $reportDir = Join-Path $env:RUNNER_TEMP 'AutomationReport'
@@ -349,9 +352,11 @@ jobs:
           # editor launch does not fail on out-of-date modules (the committed host
           # Binaries may be built for a different UE version; -unattended will not
           # interactively rebuild). The plugin is current via the junction above.
+          # Force -NoLiveCoding for the same self-hosted service-account reason as
+          # the Automation leg above.
           $hostBuild = Join-Path $env:UE_ROOT 'Engine\Build\BatchFiles\Build.bat'
           $hostTarget = [System.IO.Path]::GetFileNameWithoutExtension($env:HOST_UPROJECT) + 'Editor'
-          & $hostBuild $hostTarget Win64 Development -project="$env:HOST_UPROJECT" -WaitMutex
+          & $hostBuild $hostTarget Win64 Development -project="$env:HOST_UPROJECT" -WaitMutex -NoLiveCoding
           if ($LASTEXITCODE -ne 0) { throw "Host editor target ($hostTarget) build failed for UE_ROOT=$env:UE_ROOT (exit $LASTEXITCODE)" }
 
       - name: Run connection + tool smoke (custom local server)

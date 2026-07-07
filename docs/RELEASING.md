@@ -176,6 +176,13 @@ locally, verify the source zip carries `Source/ThirdParty/UnrealMcpBridge/<rid>/
 then upload that source zip to Fab. **Do not bump `VersionName` for a Fab submission** unless
 it is also a coordinated release (the version is release-pipeline-owned).
 
+**Self-hosted runner Live Coding gotcha (UE 5.8+):** the unattended host-project rebuilds inside
+`test_pull_request.yml` / `release.yml` run under the Windows service account on `IVANPC-unreal`.
+On UE 5.8, UBT can probe the global Live Coding mutex during that host rebuild and fail with
+`UnauthorizedAccessException` on the service account. The workflow therefore passes
+`-NoLiveCoding` on those `Build.bat ... -project=<HOST_UPROJECT>` calls. Do not remove that flag
+unless the runner model changes and the mutex access is re-verified.
+
 **Graceful degradation:** every sign/notarize step is `if: env.X != ''`-guarded.
 A run with no signing secrets still produces **unsigned-but-green** artifacts, so
 the pipeline merged and runs green before the secrets were provisioned and begins

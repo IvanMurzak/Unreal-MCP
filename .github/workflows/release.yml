@@ -374,10 +374,13 @@ jobs:
             # opens without an out-of-date-modules failure (the host's committed
             # Binaries may be built for a different UE version, and an -unattended
             # editor will NOT interactively rebuild). The plugin is already current
-            # via the BuildPlugin into the host's Plugins junction above.
+            # via the BuildPlugin into the host's Plugins junction above. IMPORTANT:
+            # force -NoLiveCoding on the self-hosted service runner — UE 5.8's UBT
+            # can otherwise probe the global LiveCoding mutex and die with
+            # UnauthorizedAccessException under the service account.
             $hostBuild = Join-Path $env:UE_ROOT 'Engine\Build\BatchFiles\Build.bat'
             $hostTarget = [System.IO.Path]::GetFileNameWithoutExtension($env:HOST_UPROJECT) + 'Editor'
-            & $hostBuild $hostTarget Win64 Development -project="$env:HOST_UPROJECT" -WaitMutex
+            & $hostBuild $hostTarget Win64 Development -project="$env:HOST_UPROJECT" -WaitMutex -NoLiveCoding
             if ($LASTEXITCODE -ne 0) { throw "Host editor target ($hostTarget) build failed for UE_ROOT=$env:UE_ROOT (exit $LASTEXITCODE)" }
             $editorCmd = Join-Path $env:UE_ROOT 'Engine\Binaries\Win64\UnrealEditor-Cmd.exe'
             $reportDir = Join-Path $env:RUNNER_TEMP 'AutomationReport'
