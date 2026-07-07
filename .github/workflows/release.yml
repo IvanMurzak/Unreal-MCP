@@ -107,7 +107,7 @@ jobs:
       run_tests: ${{ steps.gate.outputs.run_tests }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
           fetch-tags: true
@@ -258,7 +258,7 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: Setup .NET 9
         uses: actions/setup-dotnet@v4
         with:
@@ -285,23 +285,24 @@ jobs:
     name: plugin BuildPlugin + Automation (UE ${{ matrix.ue }})
     needs: [check-version]
     if: needs.check-version.outputs.run_tests == 'true' && vars.UNREAL_RUNNER_READY == 'true'
-    # Matrix runs UE 5.7 and 5.8 as parallel jobs; the single self-hosted runner
-    # (label `unreal-5-7`, legacy) executes them sequentially. fail-fast:false so
-    # one engine's failure never cancels the other's leg. Downstream artifact /
-    # publish jobs that `needs: [plugin]` wait for BOTH legs — so a release is
-    # gated on the plugin passing Automation on both engines.
+    # Matrix covers the supported UE 5.5/5.6/5.7/5.8 set; the single self-hosted
+    # runner (label `unreal-5-7`, legacy) executes the legs sequentially.
+    # fail-fast:false so one engine's failure never cancels the others. Downstream
+    # artifact / publish jobs that `needs: [plugin]` wait for ALL legs — so a
+    # release is gated on the plugin passing Automation across the full supported
+    # engine matrix.
     runs-on: [self-hosted, windows, unreal-5-7]
     strategy:
       fail-fast: false
       matrix:
-        ue: ['5.7', '5.8']
+        ue: ['5.5', '5.6', '5.7', '5.8']
     env:
       # Engine path is driven by the matrix (standard Epic install layout).
       UE_ROOT: C:\Program Files\Epic Games\UE_${{ matrix.ue }}
       HOST_UPROJECT: ${{ vars.UNREAL_HOST_PROJECT }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           # Self-hosted runner persists between jobs; don't leave this job's
           # GITHUB_TOKEN in the worktree's .git config after checkout.
@@ -374,10 +375,13 @@ jobs:
             # opens without an out-of-date-modules failure (the host's committed
             # Binaries may be built for a different UE version, and an -unattended
             # editor will NOT interactively rebuild). The plugin is already current
-            # via the BuildPlugin into the host's Plugins junction above.
+            # via the BuildPlugin into the host's Plugins junction above. IMPORTANT:
+            # force -NoLiveCoding on the self-hosted service runner — UE 5.8's UBT
+            # can otherwise probe the global LiveCoding mutex and die with
+            # UnauthorizedAccessException under the service account.
             $hostBuild = Join-Path $env:UE_ROOT 'Engine\Build\BatchFiles\Build.bat'
             $hostTarget = [System.IO.Path]::GetFileNameWithoutExtension($env:HOST_UPROJECT) + 'Editor'
-            & $hostBuild $hostTarget Win64 Development -project="$env:HOST_UPROJECT" -WaitMutex
+            & $hostBuild $hostTarget Win64 Development -project="$env:HOST_UPROJECT" -WaitMutex -NoLiveCoding
             if ($LASTEXITCODE -ne 0) { throw "Host editor target ($hostTarget) build failed for UE_ROOT=$env:UE_ROOT (exit $LASTEXITCODE)" }
             $editorCmd = Join-Path $env:UE_ROOT 'Engine\Binaries\Win64\UnrealEditor-Cmd.exe'
             $reportDir = Join-Path $env:RUNNER_TEMP 'AutomationReport'
@@ -460,7 +464,7 @@ jobs:
       APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: Setup .NET 9
         uses: actions/setup-dotnet@v4
         with:
@@ -613,7 +617,7 @@ jobs:
       AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: Setup .NET 9
         uses: actions/setup-dotnet@v4
         with:
@@ -691,7 +695,7 @@ jobs:
       UE_ROOT: ${{ vars.UNREAL_ENGINE_PATH || 'C:\Program Files\Epic Games\UE_5.7' }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           # Self-hosted runner persists between jobs; don't leave this job's
           # GITHUB_TOKEN in the worktree's .git config after checkout.
@@ -892,7 +896,7 @@ jobs:
       published: ${{ steps.mark.outputs.published }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       # Attach both plugin artifacts:
       #   * unreal-mcp-plugin-source-<version>.zip  -> CLI/Fab source install asset
       #   * unreal-mcp-plugin-<version>.zip         -> packaged BuildPlugin artifact
@@ -951,9 +955,9 @@ jobs:
         working-directory: ./cli
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: "22"
           registry-url: "https://registry.npmjs.org"
