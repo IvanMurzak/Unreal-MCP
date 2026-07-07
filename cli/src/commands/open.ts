@@ -18,6 +18,7 @@ export const openCommand = new Command('open')
   .option('--start-server', 'UNREAL_MCP_START_SERVER=true')
   .option('--connection-mode <mode>', 'UNREAL_MCP_CONNECTION_MODE: Custom | Cloud | (default empty = plugin default)')
   .action(async (pathArg: string | undefined, opts) => {
+    const spinner = ui.startSpinner('Opening Unreal project...');
     const result = await openProject({
       projectDir: pathArg,
       engineRoot: opts.engineRoot,
@@ -31,14 +32,18 @@ export const openCommand = new Command('open')
       transport: opts.transport as McpTransport | undefined,
       startServer: opts.startServer,
       connectionMode: opts.connectionMode,
+      onProgress: (event) => {
+        spinner.text = event.message;
+      },
     });
-    ui.printWarnings(result.warnings);
     if (result.kind === 'failure') {
-      ui.error(result.errorMessage);
+      spinner.error(result.errorMessage);
+      ui.printWarnings(result.warnings);
       process.exitCode = 1;
       return;
     }
-    ui.success(`Launched Unreal Editor (PID: ${result.editorPid ?? 'unknown'})`);
+    spinner.success(`Launched Unreal Editor (PID: ${result.editorPid ?? 'unknown'})`);
+    ui.printWarnings(result.warnings);
     ui.label('editor', result.editorPath);
     ui.label('engine', result.engineRoot);
   });

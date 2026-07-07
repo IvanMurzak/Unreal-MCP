@@ -1,7 +1,9 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
+import { zipSync, strToU8 } from 'fflate';
 import { update, readPluginVersion } from '../src/lib/update.js';
+import { PACKAGE_VERSION } from '../src/version.js';
 import { makeTempDir, rmTempDir } from './helpers.js';
 
 const dirs: string[] = [];
@@ -18,6 +20,19 @@ function makeSource(version: string): string {
   const dir = tmp();
   fs.writeFileSync(path.join(dir, 'UnrealMCP.uplugin'), JSON.stringify({ VersionName: version }), 'utf-8');
   return dir;
+}
+
+function zipResponse(entries: Record<string, Uint8Array>, calls?: string[]): typeof fetch {
+  const bytes = zipSync(entries);
+  return (async (url: string) => {
+    calls?.push(url);
+    return {
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+    } as unknown as Response;
+  }) as typeof fetch;
 }
 
 /**
@@ -113,6 +128,46 @@ describe('update', () => {
       expect(r.toVersion).toBe('0.2.0');
       expect(r.updated).toBe(true);
     }
+  });
+
+  it('does not download when the installed version already matches the CLI version', async () => {
+    const project = tmp();
+    await update({ projectDir: project, pluginSourceDir: makeSource(PACKAGE_VERSION) });
+    const calls: string[] = [];
+    const r = await update({
+      projectDir: project,
+      fetchImpl: (async (url: string) => {
+        calls.push(url);
+        throw new Error('fetch should not have been called');
+      }) as typeof fetch,
+    });
+    expect(r.kind).toBe('success');
+    if (r.kind !== 'success') return;
+    expect(r.updated).toBe(false);
+    expect(calls).toEqual([]);
+  });
+
+  it('downloads the packaged plugin zip when no local source exists and the installed version differs', async () => {
+    const project = tmp();
+    await update({ projectDir: project, pluginSourceDir: makeSource('0.1.0') });
+    const calls: string[] = [];
+    const r = await update({
+      projectDir: project,
+      fetchImpl: zipResponse(
+        {
+          'UnrealMCP.uplugin': strToU8(JSON.stringify({ VersionName: PACKAGE_VERSION })),
+          'Source/marker.txt': strToU8('downloaded'),
+        },
+        calls,
+      ),
+    });
+    expect(r.kind).toBe('success');
+    if (r.kind !== 'success') return;
+    expect(r.updated).toBe(true);
+    expect(r.fromVersion).toBe('0.1.0');
+    expect(r.toVersion).toBe(PACKAGE_VERSION);
+    expect(fs.existsSync(path.join(project, 'Plugins', 'UnrealMCP', 'Source', 'marker.txt'))).toBe(true);
+    expect(calls.some((url) => /unreal-mcp-plugin-/.test(url))).toBe(true);
   });
 
   // --- issue #58: auto-clean stale build cache on update -------------------

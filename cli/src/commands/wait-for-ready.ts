@@ -10,6 +10,7 @@ export const waitForReadyCommand = new Command('wait-for-ready')
   .option('--timeout <ms>', 'Overall timeout in ms (default 120000)', (v) => parseInt(v, 10))
   .option('--interval <ms>', 'Poll interval in ms (default 2000)', (v) => parseInt(v, 10))
   .action(async (opts: { path?: string; url?: string; token?: string; timeout?: number; interval?: number }) => {
+    const spinner = ui.startSpinner('Waiting for Unreal MCP server...');
     const result = await waitForReady({
       projectDir: opts.path,
       url: opts.url,
@@ -17,13 +18,13 @@ export const waitForReadyCommand = new Command('wait-for-ready')
       timeoutMs: opts.timeout,
       intervalMs: opts.interval,
       onProgress: (e) => {
-        if (e.phase === 'info') ui.verbose(e.message);
+        if (e.phase === 'info' || e.phase === 'start') spinner.text = e.message;
       },
     });
     if (result.kind === 'failure') {
-      ui.error(`Not ready after ${result.elapsedMs}ms (${result.attempts} attempts): ${result.lastReason}`);
+      spinner.error(`Not ready after ${result.elapsedMs}ms (${result.attempts} attempts): ${result.lastReason}`);
       process.exitCode = 1;
       return;
     }
-    ui.success(`Ready after ${result.elapsedMs}ms (${result.attempts} attempt(s)) — ${result.url}`);
+    spinner.success(`Ready after ${result.elapsedMs}ms (${result.attempts} attempt(s)) — ${result.url}`);
   });

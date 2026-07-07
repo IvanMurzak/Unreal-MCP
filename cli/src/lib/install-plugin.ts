@@ -12,6 +12,7 @@ import { isUnrealProjectDir } from '../utils/project.js';
 import { asError } from '../utils/error.js';
 import { isSymlink } from '../utils/fs.js';
 import { emitProgress } from './progress.js';
+import { resolvePluginSource } from './plugin-source.js';
 import type {
   InstallPluginOptions,
   InstallPluginResult,
@@ -53,12 +54,11 @@ function copyFilter(srcAbs: string, pluginSourceDir: string): boolean {
 
 export async function installPlugin(opts: InstallPluginOptions): Promise<InstallPluginResult> {
   const warnings: string[] = [];
+  let cleanupSource: (() => void) | undefined;
   try {
     if (!opts?.projectDir) throw new Error('projectDir is required.');
-    if (!opts?.pluginSourceDir) throw new Error('pluginSourceDir is required.');
 
     const projectDir = path.resolve(opts.projectDir);
-    const pluginSourceDir = path.resolve(opts.pluginSourceDir);
     if (!fs.existsSync(projectDir)) throw new Error(`Project directory does not exist: ${projectDir}`);
     // Guard against a wrong-cwd run silently scaffolding Plugins/UnrealMCP in
     // an arbitrary directory (consistent with `close`/`status`, which key on
@@ -67,6 +67,13 @@ export async function installPlugin(opts: InstallPluginOptions): Promise<Install
     if (!isUnrealProjectDir(projectDir)) {
       warnings.push(`No .uproject found in ${projectDir} — is this an Unreal project directory?`);
     }
+    const resolvedSource = await resolvePluginSource({
+      pluginSourceDir: opts.pluginSourceDir,
+      fetchImpl: opts.fetchImpl,
+      onProgress: opts.onProgress,
+    });
+    cleanupSource = resolvedSource.cleanup;
+    const pluginSourceDir = path.resolve(resolvedSource.pluginSourceDir);
     if (!fs.existsSync(pluginSourceDir))
       throw new Error(`Plugin source directory does not exist: ${pluginSourceDir}`);
     if (!fs.existsSync(path.join(pluginSourceDir, 'UnrealMCP.uplugin'))) {
@@ -82,9 +89,15 @@ export async function installPlugin(opts: InstallPluginOptions): Promise<Install
       message: `Installing UnrealMCP plugin into ${installedPath}`,
     });
 
-    const useJunction = opts.junction === true && process.platform === 'win32';
-    if (opts.junction === true && !useJunction) {
+    let useJunction = opts.junction === true && process.platform === 'win32';
+    if (opts.junction === true && process.platform !== 'win32') {
       warnings.push('Junction mode is Windows-only; falling back to copy.');
+    }
+    if (opts.junction === true && resolvedSource.sourceKind !== 'local') {
+      warnings.push(
+        'Junction mode requires a stable local plugin source; falling back to copy for the downloaded GitHub release.',
+      );
+      useJunction = false;
     }
 
     // Preserve the bundled sidecar bridge across a COPY re-install. A prior
@@ -167,6 +180,8 @@ export async function installPlugin(opts: InstallPluginOptions): Promise<Install
       warnings,
       error: asError(err),
     };
+  } finally {
+    cleanupSource?.();
   }
 }
 
