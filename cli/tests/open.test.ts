@@ -62,11 +62,23 @@ function writeInstalledPlugin(dir: string, opts?: { precompiled?: boolean }): vo
   fs.writeFileSync(path.join(pluginDir, 'UnrealMCP.uplugin'), JSON.stringify({ FileVersion: 3 }), 'utf-8');
   if (!opts?.precompiled) return;
 
-  const binariesDir = path.join(pluginDir, 'Binaries', 'Win64');
+  const { platformDir, runtimeExt } = currentPlatformBinaryLayout();
+  const binariesDir = path.join(pluginDir, 'Binaries', platformDir);
   fs.mkdirSync(binariesDir, { recursive: true });
   fs.writeFileSync(path.join(binariesDir, 'UnrealEditor.modules'), '{}', 'utf-8');
-  fs.writeFileSync(path.join(binariesDir, 'UnrealEditor-UnrealMcpRuntime.dll'), '', 'utf-8');
-  fs.writeFileSync(path.join(binariesDir, 'UnrealEditor-UnrealMcpEditor.dll'), '', 'utf-8');
+  fs.writeFileSync(path.join(binariesDir, `UnrealEditor-UnrealMcpRuntime.${runtimeExt}`), '', 'utf-8');
+  fs.writeFileSync(path.join(binariesDir, `UnrealEditor-UnrealMcpEditor.${runtimeExt}`), '', 'utf-8');
+}
+
+function currentPlatformBinaryLayout(): { platformDir: string; runtimeExt: string } {
+  switch (process.platform) {
+    case 'darwin':
+      return { platformDir: 'Mac', runtimeExt: 'dylib' };
+    case 'linux':
+      return { platformDir: 'Linux', runtimeExt: 'so' };
+    default:
+      return { platformDir: 'Win64', runtimeExt: 'dll' };
+  }
 }
 
 describe('buildOpenEnv', () => {
@@ -135,7 +147,21 @@ describe('buildOpenEnv', () => {
 });
 
 describe('openProject', () => {
-  const expectsWindowsBuild = process.platform === 'win32';
+  const expectsDesktopBuild =
+    process.platform === 'win32' || process.platform === 'darwin' || process.platform === 'linux';
+
+  function expectedBuildPathFragment(): string {
+    switch (process.platform) {
+      case 'win32':
+        return path.join('Engine', 'Binaries', 'DotNET', 'UnrealBuildTool');
+      case 'darwin':
+        return path.join('Engine', 'Build', 'BatchFiles', 'Mac', 'Build.sh');
+      case 'linux':
+        return path.join('Engine', 'Build', 'BatchFiles', 'Linux', 'Build.sh');
+      default:
+        return 'Engine';
+    }
+  }
 
   it('resolves the engine and spawns the editor (injected engines + spawn)', async () => {
     const dir = tmp();
@@ -183,7 +209,7 @@ describe('openProject', () => {
       },
     });
     expect(r.kind).toBe('success');
-    if (expectsWindowsBuild) {
+    if (expectsDesktopBuild) {
       expect(probeCalls).toBeGreaterThanOrEqual(2);
       expect(
         progress.some(
@@ -217,7 +243,7 @@ describe('openProject', () => {
     expect(probeCalls).toBe(0);
   });
 
-  it('builds via UBT before launch for native projects on Windows', async () => {
+  it('builds before launch for native projects on desktop platforms', async () => {
     const dir = tmp();
     writeUProject(dir, 'MyGame', '5.7');
     writeNativeSourceLayout(dir, 'MyGame');
@@ -236,16 +262,13 @@ describe('openProject', () => {
       },
     });
     expect(r.kind).toBe('success');
-    if (expectsWindowsBuild) {
+    if (expectsDesktopBuild) {
       expect(built).not.toBeNull();
       expect(built?.editorTarget).toBe('MyGameEditor');
-      expect(built?.ubtPath).toContain(path.join('Engine', 'Binaries', 'DotNET', 'UnrealBuildTool'));
+      expect(built?.ubtPath).toContain(expectedBuildPathFragment());
       expect(built?.args).toContain('-WaitMutex');
     } else {
       expect(built).toBeNull();
-      if (r.kind === 'success') {
-        expect(r.warnings.some((w) => /Windows-only/.test(w))).toBe(true);
-      }
     }
     expect(spawned).toBe(true);
   });
@@ -265,10 +288,7 @@ describe('openProject', () => {
       spawnImpl: () => ({ pid: 8 }),
     });
     expect(r.kind).toBe('success');
-    expect(buildCount).toBe(expectsWindowsBuild ? 1 : 0);
-    if (!expectsWindowsBuild && r.kind === 'success') {
-      expect(r.warnings.some((w) => /Windows-only/.test(w))).toBe(true);
-    }
+    expect(buildCount).toBe(expectsDesktopBuild ? 1 : 0);
   });
 
   it('skips the pre-launch build when disabled explicitly', async () => {
@@ -325,7 +345,7 @@ describe('openProject', () => {
         return { pid: 34 };
       },
     });
-    if (expectsWindowsBuild) {
+    if (expectsDesktopBuild) {
       expect(r.kind).toBe('failure');
       if (r.kind === 'failure') expect(r.errorMessage).toContain('Pre-launch build failed: compile broke');
       expect(spawned).toBe(false);

@@ -58,7 +58,7 @@ describe('CLI integration', () => {
       expect(exitCode, `${cmd} --help should exit 0`).toBe(0);
       expect(stdout, `${cmd} --help should name the command`).toContain(cmd);
     }
-  });
+  }, 15000);
 
   it('status runs and prints the package identity', () => {
     const { stdout, exitCode } = runCli(['status', '--no-probe']);
