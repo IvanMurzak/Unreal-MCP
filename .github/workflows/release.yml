@@ -285,16 +285,17 @@ jobs:
     name: plugin BuildPlugin + Automation (UE ${{ matrix.ue }})
     needs: [check-version]
     if: needs.check-version.outputs.run_tests == 'true' && vars.UNREAL_RUNNER_READY == 'true'
-    # Matrix runs UE 5.7 and 5.8 as parallel jobs; the single self-hosted runner
-    # (label `unreal-5-7`, legacy) executes them sequentially. fail-fast:false so
-    # one engine's failure never cancels the other's leg. Downstream artifact /
-    # publish jobs that `needs: [plugin]` wait for BOTH legs — so a release is
-    # gated on the plugin passing Automation on both engines.
+    # Matrix covers the supported UE 5.5/5.6/5.7/5.8 set; the single self-hosted
+    # runner (label `unreal-5-7`, legacy) executes the legs sequentially.
+    # fail-fast:false so one engine's failure never cancels the others. Downstream
+    # artifact / publish jobs that `needs: [plugin]` wait for ALL legs — so a
+    # release is gated on the plugin passing Automation across the full supported
+    # engine matrix.
     runs-on: [self-hosted, windows, unreal-5-7]
     strategy:
       fail-fast: false
       matrix:
-        ue: ['5.7', '5.8']
+        ue: ['5.5', '5.6', '5.7', '5.8']
     env:
       # Engine path is driven by the matrix (standard Epic install layout).
       UE_ROOT: C:\Program Files\Epic Games\UE_${{ matrix.ue }}

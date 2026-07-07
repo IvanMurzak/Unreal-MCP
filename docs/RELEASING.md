@@ -2,7 +2,7 @@
 
 This document is the operator runbook for the CI/CD workflows under
 `.github/workflows/`. It covers the PR test pipeline, the gated release pipeline,
-the self-hosted UE 5.7 runner, the dry-run rehearsal procedure, and the required
+the self-hosted Unreal runner, the dry-run rehearsal procedure, and the required
 secrets / repository variables.
 
 The authoritative design is [`docs/ARCHITECTURE.md`](ARCHITECTURE.md) §9
@@ -50,7 +50,7 @@ hard-skips every tag/Release/npm-publish job.
 | --- | --- | --- |
 | `test_pull_request.yml` | `pull_request` to `main` (+ manual) | Fans out the PR test legs: bridge build+xUnit (ubuntu + windows), cli node 20/22, and — when a runner is registered — the UE 5.7 plugin BuildPlugin + Automation leg. |
 | `test_cli.yml` | `workflow_call` (reusable) | Builds + tests `unreal-mcp-cli` on Node 20 & 22. Called by both `test_pull_request.yml` and `release.yml`. |
-| `release.yml` | `push` to `main` (+ manual `workflow_dispatch`) | Version-gated release: builds + **code-signs** the self-contained bridge per RID, publishes a dedicated **source** plugin asset for CLI/Fab installs, **bundles the signed sidecar into the packaged plugin** (BuildPlugin), and (only on a real version bump) cuts the GitHub Release + tag and publishes `unreal-mcp-cli` to npm. Exposes a `dry_run` input to rehearse everything without publishing. |
+| `release.yml` | `push` to `main` (+ manual `workflow_dispatch`) | Version-gated release: builds + **code-signs** the self-contained bridge per RID, validates the plugin Automation leg across UE 5.5/5.6/5.7/5.8, publishes a dedicated **source** plugin asset for CLI/Fab installs, **bundles the signed sidecar into the packaged plugin** (BuildPlugin), and (only on a real version bump) cuts the GitHub Release + tag and publishes `unreal-mcp-cli` to npm. Exposes a `dry_run` input to rehearse everything without publishing. |
 
 ### The signed self-bootstrapping sidecar bundle (release.yml artifact graph)
 
@@ -345,21 +345,23 @@ again unless recovering a post-tag failure (see "Re-running a release" below).
 > `v0.1.0`. (npm will carry a `0.1.0` with no corresponding `v0.1.0` tag/Release
 > — expected, not a bug.)
 
-## Self-hosted UE 5.7 runner
+## Self-hosted Unreal runner
 
-The plugin leg (compile + Automation specs) needs Unreal Engine 5.7, which is
-not available on GitHub-hosted runners. It runs on a **self-hosted Windows
-runner** labelled `unreal-5-7` — deliberately distinct from any M1/M4
-release-runner label so PR compiles do not starve release capacity.
+The plugin leg (compile + Automation specs) needs local Unreal Engine installs,
+which are not available on GitHub-hosted runners. It runs on a **self-hosted
+Windows runner** labelled `unreal-5-7` — deliberately distinct from any M1/M4
+release-runner label so PR compiles do not starve release capacity. The label is
+legacy; the release matrix now validates UE 5.5/5.6/5.7/5.8 on that machine.
 
 > **Status (2026-06-11): the runner is LIVE.** A self-hosted Windows runner
 > (labels `self-hosted`, `Windows`, `X64`, `unreal-5-7`) is registered against
 > `IvanMurzak/Unreal-MCP`, and the repository variable `UNREAL_RUNNER_READY` is
 > set to `true`. `UNREAL_HOST_PROJECT` is **also set**, so the Automation pass
 > runs against the packaged plugin (not just the BuildPlugin compile). The
-> `plugin BuildPlugin + Automation (UE <ver>)` leg — a `matrix.ue: ['5.7', '5.8']`
-> (the single runner has both engines installed and runs the legs sequentially;
-> the host game module is rebuilt for each matrix engine) — now **runs**
+> `plugin BuildPlugin + Automation (UE <ver>)` leg — a
+> `matrix.ue: ['5.5', '5.6', '5.7', '5.8']` (the single runner has all supported
+> engines installed and runs the legs sequentially; the host game module is
+> rebuilt for each matrix engine) — now **runs**
 > on every same-repo PR and on real releases — it is no longer skipped. The
 > registration steps below are retained for re-provisioning the runner.
 
@@ -393,8 +395,8 @@ Defense in depth at the repository-settings level (operator):
 
 ### Registration steps (operator)
 
-1. On a Windows machine with UE 5.7 installed at `C:\Program Files\Epic Games\UE_5.7`
-   (or elsewhere — see the `UNREAL_ENGINE_PATH` variable below), register a
+1. On a Windows machine with UE 5.5, 5.6, 5.7, and 5.8 installed at the standard
+   Epic paths (`C:\Program Files\Epic Games\UE_5.5` through `UE_5.8`), register a
    self-hosted runner against `IvanMurzak/Unreal-MCP`:
    *Settings → Actions → Runners → New self-hosted runner* (Windows x64). Follow
    the `./config.cmd` steps GitHub shows.
