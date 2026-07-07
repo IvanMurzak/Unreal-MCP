@@ -147,7 +147,7 @@ describe('update', () => {
     expect(calls).toEqual([]);
   });
 
-  it('downloads the packaged plugin zip when no local source exists and the installed version differs', async () => {
+  it('downloads the dedicated source asset when no local source exists and the installed version differs', async () => {
     const project = tmp();
     await update({ projectDir: project, pluginSourceDir: makeSource('0.1.0') });
     const calls: string[] = [];
@@ -155,8 +155,9 @@ describe('update', () => {
       projectDir: project,
       fetchImpl: zipResponse(
         {
-          'UnrealMCP.uplugin': strToU8(JSON.stringify({ VersionName: PACKAGE_VERSION })),
-          'Source/marker.txt': strToU8('downloaded'),
+          'UnrealMCP/UnrealMCP.uplugin': strToU8(JSON.stringify({ VersionName: PACKAGE_VERSION, Installed: false })),
+          'UnrealMCP/Source/marker.txt': strToU8('downloaded'),
+          'UnrealMCP/Source/ThirdParty/UnrealMcpBridge/win-x64/unreal-mcp-bridge.exe': strToU8('BRIDGE'),
         },
         calls,
       ),
@@ -167,7 +168,12 @@ describe('update', () => {
     expect(r.fromVersion).toBe('0.1.0');
     expect(r.toVersion).toBe(PACKAGE_VERSION);
     expect(fs.existsSync(path.join(project, 'Plugins', 'UnrealMCP', 'Source', 'marker.txt'))).toBe(true);
-    expect(calls.some((url) => /unreal-mcp-plugin-/.test(url))).toBe(true);
+    expect(
+      fs.existsSync(
+        path.join(project, 'Plugins', 'UnrealMCP', 'Binaries', 'ThirdParty', 'UnrealMcpBridge', 'win-x64', 'unreal-mcp-bridge.exe'),
+      ),
+    ).toBe(true);
+    expect(calls.some((url) => /unreal-mcp-plugin-source-/.test(url))).toBe(true);
   });
 
   // --- issue #58: auto-clean stale build cache on update -------------------

@@ -3,11 +3,11 @@
 // is:
 //   1. explicit local `pluginSourceDir`
 //   2. local repo checkout (`UnrealMCP/`)
-//   3. GitHub Release asset that matches THIS CLI's package version
+//   3. GitHub Release SOURCE asset that matches THIS CLI's package version
 //
 // The version coupling is intentional: Unreal-MCP plugin / bridge / CLI share
 // one semver and are released together, so the published CLI can safely fetch
-// `unreal-mcp-plugin-<PACKAGE_VERSION>.zip`.
+// `unreal-mcp-plugin-source-<PACKAGE_VERSION>.zip`.
 
 import * as fs from 'fs';
 import * as os from 'os';
@@ -27,10 +27,10 @@ import type { ProgressCallback } from './types.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
-/** GitHub repo releasing the packaged core UnrealMCP plugin zip. */
-export const CORE_PLUGIN_RELEASE_REPO = 'IvanMurzak/Unreal-MCP';
-/** Release-asset basename for the packaged core plugin. */
-export const CORE_PLUGIN_ZIP_BASENAME = 'unreal-mcp-plugin';
+/** GitHub repo releasing the core UnrealMCP source-install asset. */
+export const CORE_PLUGIN_SOURCE_RELEASE_REPO = 'IvanMurzak/Unreal-MCP';
+/** Release-asset basename for the source-install core plugin asset. */
+export const CORE_PLUGIN_SOURCE_ZIP_BASENAME = 'unreal-mcp-plugin-source';
 
 export interface ResolvePluginSourceOptions {
   /**
@@ -52,17 +52,17 @@ export interface ResolvedPluginSource {
   cleanup: () => void;
 }
 
-/** `unreal-mcp-plugin-<version>.zip` (asset uses the bare version, not `v`). */
-export function corePluginAssetName(version: string = PACKAGE_VERSION): string {
-  return `${CORE_PLUGIN_ZIP_BASENAME}-${stripLeadingV(version)}.zip`;
+/** `unreal-mcp-plugin-source-<version>.zip` (asset uses the bare version, not `v`). */
+export function corePluginSourceAssetName(version: string = PACKAGE_VERSION): string {
+  return `${CORE_PLUGIN_SOURCE_ZIP_BASENAME}-${stripLeadingV(version)}.zip`;
 }
 
 /**
- * Release-asset URL for the packaged core plugin zip, version-locked to the CLI
- * unless the caller overrides it for tests.
+ * Release-asset URL for the dedicated core-plugin SOURCE asset, version-locked
+ * to the CLI unless the caller overrides it for tests.
  */
-export function corePluginDownloadUrl(version: string = PACKAGE_VERSION): string {
-  return `https://${TRUSTED_DOWNLOAD_HOST}/${CORE_PLUGIN_RELEASE_REPO}/releases/download/${releaseTag(version)}/${corePluginAssetName(version)}`;
+export function corePluginSourceDownloadUrl(version: string = PACKAGE_VERSION): string {
+  return `https://${TRUSTED_DOWNLOAD_HOST}/${CORE_PLUGIN_SOURCE_RELEASE_REPO}/releases/download/${releaseTag(version)}/${corePluginSourceAssetName(version)}`;
 }
 
 /** Resolve the nearest repo checkout's `UnrealMCP/` dir from this package, if any. */
@@ -116,8 +116,9 @@ export function findUPluginFile(root: string): string | null {
 }
 
 /**
- * Resolve the core plugin source for install/update. Falls back to the packaged
- * GitHub Release zip that matches THIS CLI's version when no local source exists.
+ * Resolve the core plugin source for install/update. Falls back to the dedicated
+ * GitHub Release SOURCE asset that matches THIS CLI's version when no local
+ * source exists.
  */
 export async function resolvePluginSource(
   opts: ResolvePluginSourceOptions = {},
@@ -143,7 +144,7 @@ export async function resolvePluginSource(
   }
 
   const version = PACKAGE_VERSION;
-  const url = corePluginDownloadUrl(version);
+  const url = corePluginSourceDownloadUrl(version);
   assertTrustedDownloadUrl(url);
   emitProgress(opts.onProgress, {
     phase: 'info',
@@ -161,7 +162,7 @@ export async function resolvePluginSource(
   const zipBytes = new Uint8Array(await response.arrayBuffer());
   emitProgress(opts.onProgress, {
     phase: 'info',
-    message: `Extracting ${corePluginAssetName(version)}`,
+    message: `Extracting ${corePluginSourceAssetName(version)}`,
   });
 
   const stagingDir = fs.mkdtempSync(path.join(os.tmpdir(), 'unreal-mcp-plugin-'));
@@ -180,7 +181,23 @@ export async function resolvePluginSource(
     const pluginFile = findUPluginFile(stagingDir);
     if (!pluginFile) {
       throw new Error(
-        `Downloaded plugin archive ${corePluginAssetName(version)} did not contain an UnrealMCP.uplugin descriptor.`,
+        `Downloaded plugin archive ${corePluginSourceAssetName(version)} did not contain an UnrealMCP.uplugin descriptor.`,
+      );
+    }
+    let descriptor: Record<string, unknown>;
+    try {
+      descriptor = JSON.parse(fs.readFileSync(pluginFile, 'utf-8')) as Record<string, unknown>;
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      throw new Error(
+        `Downloaded plugin archive ${corePluginSourceAssetName(version)} contained an unreadable UnrealMCP.uplugin descriptor: ${message}`,
+      );
+    }
+    const engineVersion = typeof descriptor['EngineVersion'] === 'string' ? descriptor['EngineVersion'].trim() : '';
+    if (engineVersion !== '') {
+      throw new Error(
+        `Downloaded plugin asset ${corePluginSourceAssetName(version)} is not a source install bundle: UnrealMCP.uplugin pins EngineVersion '${engineVersion}'. ` +
+          `Verify the ${releaseTag(version)} release published ${corePluginSourceAssetName(version)}, or pass --plugin-source <dir> for an offline/dev install.`,
       );
     }
 

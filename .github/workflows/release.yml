@@ -24,11 +24,12 @@
 #                  └─ build-plugin-zip ◄────────┘  downloads the 4 signed RID
 #                        dirs, stages them under the FAB-SURVIVING source folder
 #                        UnrealMCP/Source/ThirdParty/UnrealMcpBridge/<rid>/ (#139/#187;
-#                        Fab strips Binaries/), runs BuildPlugin -Rocket (RuntimeDependencies
-#                        stage Source/ThirdParty/UnrealMcpBridge/ ->
-#                        Binaries/ThirdParty/UnrealMcpBridge/<rid>/), zips ->
-#                        publish-release attaches the plugin zip (bundle inside) +
-#                        the 4 signed bridge zips.
+#                        Fab strips Binaries/), emits the dedicated SOURCE install asset
+#                        unreal-mcp-plugin-source-<version>.zip, runs BuildPlugin -Rocket
+#                        (RuntimeDependencies stage Source/ThirdParty/UnrealMcpBridge/ ->
+#                        Binaries/ThirdParty/UnrealMcpBridge/<rid>/), zips the PACKAGED
+#                        plugin as unreal-mcp-plugin-<version>.zip ->
+#                        publish-release attaches both plugin zips + the 4 signed bridge zips.
 # Signing is GRACEFULLY DEGRADING: every sign/notarize step is `if: env.X != ''`
 # guarded, so a run with NO secrets produces UNSIGNED-but-green artifacts. The
 # Unreal-MCP repo has no signing secrets yet (the owner mirrors the 9 from
@@ -671,14 +672,18 @@ jobs:
   # <rid>.zip) and is released there; the CLI downloads the release pinned by
   # cli/src/lib/server-version.ts SERVER_VERSION.
 
-  # Engine-agnostic source plugin zip (BuildPlugin output) WITH the signed bridge
-  # bundled in. Self-hosted, gated like the plugin test job. Skipped when no
-  # runner is registered; for a real release the runner must be ready
+  # Release plugin zips: the dedicated SOURCE install asset
+  # `unreal-mcp-plugin-source-<version>.zip` (CLI/Fab install path, no
+  # EngineVersion pin, test-free descriptor) AND the PACKAGED BuildPlugin asset
+  # `unreal-mcp-plugin-<version>.zip` with the signed bridge bundled in under
+  # Binaries/ThirdParty/. Self-hosted, gated like the plugin test job. Skipped
+  # when no runner is registered; for a real release the runner must be ready
   # (publish-release `needs` this job). Depends on the two signed-bridge jobs so
-  # the 4 signed RID payloads can be staged into the plugin tree before
-  # BuildPlugin packages them (docs/ARCHITECTURE.md §6 BUNDLE model, T4).
+  # the 4 signed RID payloads can be staged into the plugin tree before the
+  # source asset is cut and BuildPlugin packages them (docs/ARCHITECTURE.md §6
+  # BUNDLE model, T4).
   build-plugin-zip:
-    name: build plugin zip (UE 5.7)
+    name: build plugin release zips (UE 5.7)
     needs: [check-version, build-bridge-macos, build-bridge-windows]
     if: needs.check-version.outputs.run_tests == 'true' && vars.UNREAL_RUNNER_READY == 'true'
     runs-on: [self-hosted, windows, unreal-5-7]
@@ -743,6 +748,63 @@ jobs:
             Write-Host "Staged $($files.Count) file(s) for $rid -> $ridDest"
             if ($files.Count -lt 1) { throw "No files staged for RID '$rid'." }
           }
+      - name: Build source plugin zip
+        shell: pwsh
+        env:
+          PLUGIN_VERSION: ${{ needs.check-version.outputs.version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pluginRoot = Join-Path $env:GITHUB_WORKSPACE 'UnrealMCP'
+          $uplugin = Join-Path $pluginRoot 'UnrealMCP.uplugin'
+          $descriptor = Get-Content $uplugin -Raw | ConvertFrom-Json
+          $hasEngineVersion = ($descriptor.PSObject.Properties.Name -contains 'EngineVersion') -and -not [string]::IsNullOrWhiteSpace([string]$descriptor.EngineVersion)
+          if ($hasEngineVersion) {
+            throw "The distributed source descriptor must not pin EngineVersion (found '$($descriptor.EngineVersion)')."
+          }
+          $modules = @($descriptor.Modules.Name)
+          if ($modules -contains 'UnrealMcpEditorTests') {
+            throw "The distributed source descriptor must not ship UnrealMcpEditorTests."
+          }
+          $stageRoot = Join-Path $env:RUNNER_TEMP 'UnrealMCP-Source-Package'
+          if (Test-Path $stageRoot) { Remove-Item $stageRoot -Recurse -Force }
+          $pluginStage = Join-Path $stageRoot 'UnrealMCP'
+          New-Item -ItemType Directory -Force -Path $pluginStage | Out-Null
+          foreach ($rel in @(
+            'UnrealMCP.uplugin',
+            'Config',
+            'Resources',
+            'Source\UnrealMcpRuntime',
+            'Source\UnrealMcpEditor',
+            'Source\ThirdParty',
+            'ThirdPartyNotices.txt'
+          )) {
+            $src = Join-Path $pluginRoot $rel
+            if (-not (Test-Path $src)) { throw "Source-asset input missing: $src" }
+            $dst = Join-Path $pluginStage $rel
+            $dstParent = Split-Path -Parent $dst
+            if (-not [string]::IsNullOrWhiteSpace($dstParent)) {
+              New-Item -ItemType Directory -Force -Path $dstParent | Out-Null
+            }
+            if (Test-Path $src -PathType Container) {
+              Copy-Item -Path $src -Destination $dst -Recurse -Force
+            } else {
+              Copy-Item -Path $src -Destination $dst -Force
+            }
+          }
+          if (Test-Path (Join-Path $pluginStage 'Source\UnrealMcpEditorTests')) {
+            throw "The source asset staging unexpectedly included UnrealMcpEditorTests."
+          }
+          foreach ($rid in @('win-x64', 'osx-arm64', 'osx-x64', 'linux-x64')) {
+            $ridDir = Join-Path $pluginStage "Source\ThirdParty\UnrealMcpBridge\$rid"
+            $fileCount = @(Get-ChildItem -Path $ridDir -Recurse -File -ErrorAction SilentlyContinue).Count
+            Write-Host "Source asset bridge for ${rid}: $fileCount file(s)."
+            if ($fileCount -lt 1) { throw "Source asset is missing the staged bridge payload for RID '$rid'." }
+          }
+          $out = Join-Path $env:GITHUB_WORKSPACE 'dist'
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          $zip = Join-Path $out "unreal-mcp-plugin-source-$env:PLUGIN_VERSION.zip"
+          if (Test-Path $zip) { Remove-Item $zip -Force }
+          Compress-Archive -Path $pluginStage -DestinationPath $zip -Force
       - name: BuildPlugin + zip
         shell: pwsh
         env:
@@ -789,20 +851,27 @@ jobs:
           $out = Join-Path $env:GITHUB_WORKSPACE 'dist'
           New-Item -ItemType Directory -Force -Path $out | Out-Null
           Compress-Archive -Path (Join-Path $package '*') -DestinationPath (Join-Path $out "unreal-mcp-plugin-$version.zip") -Force
-      - name: Upload plugin zip
+      - name: Upload source plugin zip
         uses: actions/upload-artifact@v4
         with:
-          name: unreal-mcp-plugin-zip
-          path: ./dist/*.zip
+          name: unreal-mcp-plugin-source-zip
+          path: ./dist/unreal-mcp-plugin-source-${{ needs.check-version.outputs.version }}.zip
+          if-no-files-found: error
+          retention-days: 7
+      - name: Upload packaged plugin zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: unreal-mcp-plugin-packaged-zip
+          path: ./dist/unreal-mcp-plugin-${{ needs.check-version.outputs.version }}.zip
           if-no-files-found: error
           retention-days: 7
 
   # ── PUBLISH (gated on a REAL release: tag absent + version bumped, NOT a
   #    dry-run). Every job here is hard-skipped during the ci-workflows dry-run. ─
 
-  # Create the GitHub Release + `v<version>` tag with the bridge/plugin zips
-  # attached and auto-generated notes. (Server zips are released from the
-  # shared GameDev-MCP-Server repo, not here.)
+  # Create the GitHub Release + `v<version>` tag with the bridge zips, the
+  # dedicated SOURCE install asset, and the PACKAGED BuildPlugin zip attached.
+  # (Server zips are released from the shared GameDev-MCP-Server repo, not here.)
   publish-release:
     name: publish GitHub Release
     needs:
@@ -824,9 +893,11 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-      # The END-USER artifact is the plugin zip (the signed bridge is bundled
-      # INSIDE it). The per-RID signed bridge zips are also attached for
-      # debugging / UNREAL_MCP_BRIDGE_PATH users.
+      # Attach both plugin artifacts:
+      #   * unreal-mcp-plugin-source-<version>.zip  -> CLI/Fab source install asset
+      #   * unreal-mcp-plugin-<version>.zip         -> packaged BuildPlugin artifact
+      # The per-RID signed bridge zips are also attached for debugging /
+      # UNREAL_MCP_BRIDGE_PATH users.
       - name: Download bridge release zips (osx + linux)
         uses: actions/download-artifact@v4
         with:
@@ -837,10 +908,15 @@ jobs:
         with:
           name: bridge-release-zips-win
           path: ./assets
-      - name: Download plugin zip
+      - name: Download source plugin zip
         uses: actions/download-artifact@v4
         with:
-          name: unreal-mcp-plugin-zip
+          name: unreal-mcp-plugin-source-zip
+          path: ./assets
+      - name: Download packaged plugin zip
+        uses: actions/download-artifact@v4
+        with:
+          name: unreal-mcp-plugin-packaged-zip
           path: ./assets
       - name: List assembled release assets
         run: ls -la ./assets

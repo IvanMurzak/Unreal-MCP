@@ -10,28 +10,27 @@ The authoritative design is [`docs/ARCHITECTURE.md`](ARCHITECTURE.md) §9
 keep the two in lockstep, and keep the CI command surface 1:1 with the
 implement-task profile `test.md` (infra repo).
 
-## Release checklist — operator-gated leaves (NONE fired automatically)
+## Release checklist — operator-gated leaves
 
 The following actions are **deliberately operator-gated** and are **not** performed by a normal
-merge, by CI on a feature/docs PR, or by any automated task. As of this writing **none of them has
-fired** — Unreal-MCP has no GitHub Release, no `v*` tag, no published npm package, and no Fab
-listing. Each requires a deliberate human decision (and, for the first release, one-time setup):
+merge, by CI on a feature/docs PR, or by any automated task. GitHub Releases and npm publishes are
+now CI-backed once a deliberate version bump lands on `main`, but they still require an intentional
+operator release decision. Fab submission remains fully manual:
 
-- [ ] **First GitHub Release + `v<version>` tag.** Fires only when a deliberate `VersionName` bump
-      lands on `main` (run `commands/bump-version.ps1`, commit, merge) on an untagged version — or a
-      manual `workflow_dispatch` with `dry_run=false`. `release.yml`'s `check-version` gate keeps
-      this inert otherwise. Verify with `gh release list` (expect empty) and
-      `git ls-remote --tags` (expect no `v*` tags) until you intend to publish.
-- [ ] **First npm `unreal-mcp-cli` publish (one-time, manual — operator only).** The first publish of a
-      brand-new package **cannot** use OIDC Trusted Publishing — npm requires the package to already
-      exist on the registry before a Trusted Publisher can be configured for it. So the first publish
-      is a **manual operator step from a clean checkout**; CI takes over for every subsequent version.
-      The `cli/package.json` `private` flag has already been removed and the publish metadata
-      completed (issue #33 prep). The runbook is **[First npm publish](#first-npm-publish-one-time-manual)** below — do NOT run it from CI.
+- [ ] **GitHub Release + `v<version>` tag.** Fires only when a deliberate `VersionName` bump lands on
+      `main` (run `commands/bump-version.ps1`, commit, merge) on an untagged version — or a manual
+      `workflow_dispatch` with `dry_run=false`. `release.yml`'s `check-version` gate keeps this inert
+      otherwise.
+- [ ] **`unreal-mcp-cli` publish.** The initial npm bootstrap was manual; subsequent publishes are
+      CI-owned through `release.yml`'s OIDC `publish-npm` job. Do **not** hand-publish from a feature
+      branch or a normal docs/code PR. The historical one-time bootstrap runbook remains below for
+      reference.
 - [ ] **Fab (Epic marketplace) submission.** Entirely manual and **out of scope of every CI
-      workflow** — the release pipeline produces an engine-agnostic source-plugin zip
-      (BuildPlugin output), but no job submits to Fab. Fab carries its own metadata/screenshot
-      requirements and an Epic review; do it by hand when the listing is ready. The plugin is
+      workflow** — the release pipeline produces both a dedicated source-plugin zip
+      (`unreal-mcp-plugin-source-<version>.zip`, the CLI/Fab install asset) and the packaged
+      BuildPlugin zip (`unreal-mcp-plugin-<version>.zip`), but no job submits to Fab. Fab carries
+      its own metadata/screenshot requirements and an Epic review; do it by hand when the listing
+      is ready. The plugin is
       Fab source-submission READY (#139/#187): the sidecar survives Fab's `Binaries/` strip via
       `Source/ThirdParty/UnrealMcpBridge/<rid>/`, the distributed `.uplugin` ships no test module, and `FilterPlugin.ini`
       is complete — see [Fab source-submission readiness](#fab-epic-marketplace-source-submission-readiness-139187) below.
@@ -46,7 +45,7 @@ hard-skips every tag/Release/npm-publish job.
 | --- | --- | --- |
 | `test_pull_request.yml` | `pull_request` to `main` (+ manual) | Fans out the PR test legs: bridge build+xUnit (ubuntu + windows), cli node 20/22, and — when a runner is registered — the UE 5.7 plugin BuildPlugin + Automation leg. |
 | `test_cli.yml` | `workflow_call` (reusable) | Builds + tests `unreal-mcp-cli` on Node 20 & 22. Called by both `test_pull_request.yml` and `release.yml`. |
-| `release.yml` | `push` to `main` (+ manual `workflow_dispatch`) | Version-gated release: builds + **code-signs** the self-contained bridge per RID, **bundles the signed sidecar into the packaged plugin** (BuildPlugin), and (only on a real version bump) cuts the GitHub Release + tag and publishes `unreal-mcp-cli` to npm. Exposes a `dry_run` input to rehearse everything without publishing. |
+| `release.yml` | `push` to `main` (+ manual `workflow_dispatch`) | Version-gated release: builds + **code-signs** the self-contained bridge per RID, publishes a dedicated **source** plugin asset for CLI/Fab installs, **bundles the signed sidecar into the packaged plugin** (BuildPlugin), and (only on a real version bump) cuts the GitHub Release + tag and publishes `unreal-mcp-cli` to npm. Exposes a `dry_run` input to rehearse everything without publishing. |
 
 ### The signed self-bootstrapping sidecar bundle (release.yml artifact graph)
 
@@ -72,8 +71,10 @@ artifact jobs in `release.yml`:
   stages it into `Binaries/ThirdParty/UnrealMcpBridge/<rid>/` at compile time, the path the C++
   resolver reads — declared on the runtime module in R2 so the bridge bundles into
   packaged GAMES, not just editor packages; see
-  [Packaged-game sidecar bundling](#packaged-game-sidecar-bundling-r2) below), runs
-  `BuildPlugin -Rocket` so the staged binaries are packaged, then zips the plugin.
+  [Packaged-game sidecar bundling](#packaged-game-sidecar-bundling-r2) below), then emits
+  **two plugin zips**: the dedicated source install asset
+  `unreal-mcp-plugin-source-<version>.zip` (CLI/Fab source form, no `EngineVersion` pin, no test module)
+  and the packaged BuildPlugin asset `unreal-mcp-plugin-<version>.zip`.
   A post-BuildPlugin guard copies the binaries from `Source/ThirdParty/UnrealMcpBridge/<rid>/` into the
   package's `Binaries/ThirdParty/...` output if `RuntimeDependencies` did not stage
   them, and asserts the surviving `Source/ThirdParty/UnrealMcpBridge/<rid>/` payload shipped (the form Epic's
@@ -163,10 +164,11 @@ an entirely manual operator step (no CI job submits — see the checklist at the
   `"PlatformAllowList": ["Win64","Mac","Linux"]` (desktop-only — console/mobile cannot spawn the .NET
   sidecar), which Fab review expects.
 
-**Manual Fab submission (operator):** run `BuildPlugin -Rocket` against the committed
-(distributed, test-free) `UnrealMCP.uplugin` with the signed `Source/ThirdParty/UnrealMcpBridge/<rid>/` payloads
-in place, verify the package carries `Source/ThirdParty/UnrealMcpBridge/<rid>/` + a test-free `.uplugin`, then
-upload the source zip to Fab. **Do not bump `VersionName` for a Fab submission** unless
+**Manual Fab submission (operator):** prefer the release-produced
+`unreal-mcp-plugin-source-<version>.zip` asset — it is the distributed, test-free source form with
+the signed `Source/ThirdParty/UnrealMcpBridge/<rid>/` payloads already staged. If you must rebuild it
+locally, verify the source zip carries `Source/ThirdParty/UnrealMcpBridge/<rid>/` + a test-free `.uplugin`,
+then upload that source zip to Fab. **Do not bump `VersionName` for a Fab submission** unless
 it is also a coordinated release (the version is release-pipeline-owned).
 
 **Graceful degradation:** every sign/notarize step is `if: env.X != ''`-guarded.
@@ -247,14 +249,13 @@ legs run only if the self-hosted runner is registered (otherwise skipped);
 `publish-release` and `publish-npm` are **skipped**. A dry-run is the right way
 to confirm the bundle staging works end-to-end: when the runner is ready,
 inspect `build-plugin-zip`'s log for the per-RID "Packaged bridge for <rid>: N
-file(s)." lines (and download the `unreal-mcp-plugin-zip` artifact to confirm
-`Binaries/ThirdParty/UnrealMcpBridge/<rid>/` is populated for all four RIDs).
-Verify nothing was published:
-
-```bash
-gh release list --repo IvanMurzak/Unreal-MCP     # expect: empty
-git ls-remote --tags https://github.com/IvanMurzak/Unreal-MCP   # expect: no v* tags
-```
+file(s)." lines, then download both the `unreal-mcp-plugin-source-zip` artifact
+(to confirm `Source/ThirdParty/UnrealMcpBridge/<rid>/` shipped without an
+`EngineVersion` pin) and the `unreal-mcp-plugin-packaged-zip` artifact (to
+confirm `Binaries/ThirdParty/UnrealMcpBridge/<rid>/` is populated for all four
+RIDs).
+Verify the `publish-release` and `publish-npm` jobs were skipped. A dry-run should upload artifacts
+only; it must not create a new tag, GitHub Release, or npm publish for the current `VersionName`.
 
 ## First npm publish (one-time, manual)
 

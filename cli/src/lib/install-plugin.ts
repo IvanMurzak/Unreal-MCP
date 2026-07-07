@@ -23,8 +23,31 @@ import type {
 const PLUGIN_DIRNAME = 'UnrealMCP';
 /** Subtree under `Binaries/` holding the bundled bridge (ARCHITECTURE §6.1). */
 const BUNDLED_BRIDGE_REL = path.join('Binaries', 'ThirdParty');
+/** Bridge root under `Binaries/ThirdParty/` after a release/source-asset install. */
+const BUNDLED_BRIDGE_ROOT_REL = path.join(BUNDLED_BRIDGE_REL, 'UnrealMcpBridge');
+/** Fab-surviving source-side bridge root shipped by the dedicated source asset. */
+const SOURCE_BUNDLED_BRIDGE_ROOT_REL = path.join('Source', 'ThirdParty', 'UnrealMcpBridge');
 /** `Binaries/ThirdParty` with forward slashes, for the copy filter's keep-check. */
 const BUNDLED_BRIDGE_REL_POSIX = BUNDLED_BRIDGE_REL.split(path.sep).join('/');
+
+function hasBundledBridgePayload(root: string): boolean {
+  if (!fs.existsSync(root)) return false;
+  const queue: string[] = [root];
+  while (queue.length > 0) {
+    const dir = queue.shift()!;
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const next = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        queue.push(next);
+        continue;
+      }
+      if (entry.isFile() && /^unreal-mcp-bridge(?:\.exe)?$/i.test(entry.name)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
 
 /**
  * Decide whether `srcAbs` (an absolute path inside `pluginSourceDir`) should be
@@ -95,21 +118,23 @@ export async function installPlugin(opts: InstallPluginOptions): Promise<Install
     }
     if (opts.junction === true && resolvedSource.sourceKind !== 'local') {
       warnings.push(
-        'Junction mode requires a stable local plugin source; falling back to copy for the downloaded GitHub release.',
+        'Junction mode requires a stable local plugin source; falling back to copy for the downloaded GitHub source asset.',
       );
       useJunction = false;
     }
 
-    // Preserve the bundled sidecar bridge across a COPY re-install. A prior
-    // (release-packaged) install ships `Binaries/ThirdParty/UnrealMcpBridge/`,
-    // but the plugin SOURCE we copy from (a dev/source checkout) does not — so
-    // a naive rm-then-copy would strip the bridge and leave the plugin unable
-    // to spawn its sidecar (ARCHITECTURE §6). Stash the existing bridge subtree
-    // to a temp dir before clearing, then restore it after the copy IF the new
-    // source did not provide its own. Junction installs never go through this
-    // path (the junction points at the live source — nothing to preserve).
+    // Preserve or refresh the bundled sidecar bridge across a COPY re-install.
+    // A prior release install ships `Binaries/ThirdParty/UnrealMcpBridge/`, but
+    // a dev/source checkout does not; the dedicated GitHub source asset instead
+    // ships the RID payload under `Source/ThirdParty/UnrealMcpBridge/`. Stash the
+    // existing `Binaries/ThirdParty/` subtree before clearing, then after the copy
+    // either materialize a fresh `Binaries/ThirdParty/UnrealMcpBridge/` from the
+    // source-side payload, or restore the prior bundled bridge when the new source
+    // has no bridge at all. Junction installs never go through this path.
     let stashedBridge: string | null = null;
     const priorBridge = path.join(installedPath, BUNDLED_BRIDGE_REL);
+    const installedBridgeRoot = path.join(installedPath, BUNDLED_BRIDGE_ROOT_REL);
+    const sourceBridgeRoot = path.join(pluginSourceDir, SOURCE_BUNDLED_BRIDGE_ROOT_REL);
     const installedIsRealDir = fs.existsSync(installedPath) && !isSymlink(installedPath);
     if (!useJunction && installedIsRealDir && fs.existsSync(priorBridge)) {
       stashedBridge = fs.mkdtempSync(path.join(os.tmpdir(), 'unreal-mcp-bridge-stash-'));
@@ -158,10 +183,18 @@ export async function installPlugin(opts: InstallPluginOptions): Promise<Install
       throw copyErr;
     }
 
-    // Restore the stashed bridge if the freshly-copied source did not ship one.
+    // The dedicated source asset ships the bridge payload under Source/ThirdParty;
+    // materialize it into Binaries/ThirdParty so the first editor open has the
+    // staged runtime path even before a local recompile runs.
+    if (!fs.existsSync(installedBridgeRoot) && hasBundledBridgePayload(sourceBridgeRoot)) {
+      fs.mkdirSync(path.dirname(installedBridgeRoot), { recursive: true });
+      fs.cpSync(sourceBridgeRoot, installedBridgeRoot, { recursive: true });
+    }
+
+    // Restore the stashed bridge if the freshly-copied source still did not ship one.
     if (stashedBridge) {
       try {
-        if (!fs.existsSync(priorBridge)) {
+        if (!fs.existsSync(installedBridgeRoot)) {
           fs.mkdirSync(path.dirname(priorBridge), { recursive: true });
           fs.cpSync(stashedBridge, priorBridge, { recursive: true });
           warnings.push('Preserved the previously-bundled sidecar bridge across the re-install.');
