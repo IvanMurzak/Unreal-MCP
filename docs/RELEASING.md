@@ -48,7 +48,7 @@ hard-skips every tag/Release/npm-publish job.
 
 | Workflow | Trigger | What it does |
 | --- | --- | --- |
-| `test_pull_request.yml` | `pull_request` to `main` (+ manual) | Fans out the PR test legs: bridge build+xUnit (ubuntu + windows), cli node 20/22, and — when a runner is registered — the UE 5.7 plugin BuildPlugin + Automation leg. |
+| `test_pull_request.yml` | `pull_request` to `main` (+ manual) | Fans out the PR test legs: bridge build+xUnit (ubuntu + windows), cli node 20/22, and — when a runner is registered — the UE 5.8 plugin BuildPlugin + Automation leg. |
 | `test_cli.yml` | `workflow_call` (reusable) | Builds + tests `unreal-mcp-cli` on Node 20 & 22. Called by both `test_pull_request.yml` and `release.yml`. |
 | `release.yml` | `push` to `main` (+ manual `workflow_dispatch`) | Version-gated release: builds + **code-signs** the self-contained bridge per RID, validates the plugin Automation leg across UE 5.5/5.6/5.7/5.8, publishes a dedicated **source** plugin asset for CLI/Fab installs, **bundles the signed sidecar into the packaged plugin** (BuildPlugin), and (only on a real version bump) cuts the GitHub Release + tag and publishes `unreal-mcp-cli` to npm. Exposes a `dry_run` input to rehearse everything without publishing. |
 
@@ -358,11 +358,11 @@ legacy; the release matrix now validates UE 5.5/5.6/5.7/5.8 on that machine.
 > `IvanMurzak/Unreal-MCP`, and the repository variable `UNREAL_RUNNER_READY` is
 > set to `true`. `UNREAL_HOST_PROJECT` is **also set**, so the Automation pass
 > runs against the packaged plugin (not just the BuildPlugin compile). The
-> `plugin BuildPlugin + Automation (UE <ver>)` leg — a
-> `matrix.ue: ['5.5', '5.6', '5.7', '5.8']` (the single runner has all supported
-> engines installed and runs the legs sequentially; the host game module is
-> rebuilt for each matrix engine) — now **runs**
-> on every same-repo PR and on real releases — it is no longer skipped. The
+> `plugin BuildPlugin + Automation (UE <ver>)` coverage now splits by workflow:
+> `test_pull_request.yml` runs **UE 5.8 only** for same-repo PRs, while
+> `release.yml` runs `matrix.ue: ['5.5', '5.6', '5.7', '5.8']` on real releases
+> and dry-runs. The single runner has all supported engines installed and runs
+> those legs sequentially; the host game module is rebuilt per engine. The
 > registration steps below are retained for re-provisioning the runner.
 
 ### Never red-by-absence
