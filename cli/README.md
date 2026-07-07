@@ -33,9 +33,12 @@ Requires Node `^20.19.0 || >=22.12.0`. See the
 > itself is **Fab / Epic Marketplace** (precompiled per-engine binaries, auto-updated by the Epic
 > Games Launcher — zero compile, zero stale-build risk). This CLI is the current/advanced/dev path
 > until the Fab listing is live; its `install-plugin` / `update` commands use a local `UnrealMCP/`
-> checkout when present, otherwise they download the public GitHub Release asset that matches the
-> CLI version, then copy the plugin into a project and keep its build cache clean on update (see
-> the `update` row below). `--plugin-source <dir>` remains the offline / CI / dev override.
+> checkout when present, otherwise they download the dedicated `unreal-mcp-plugin-source-<version>.zip`
+> GitHub Release asset that matches the CLI version. That source asset keeps the distributed
+> descriptor semantics (**no `EngineVersion` pin**) and carries the signed bridge payload under
+> `Source/ThirdParty/UnrealMcpBridge/<rid>/`, which the installer materializes into
+> `Binaries/ThirdParty/...` for first-open convenience. `--plugin-source <dir>` remains the offline /
+> CI / dev override.
 
 ## Commands (docs/ARCHITECTURE.md §9.1)
 
@@ -44,7 +47,7 @@ Requires Node `^20.19.0 || >=22.12.0`. See the
 | `create-project <path>` | Scaffold a minimal Unreal Engine C++ project |
 | `open [path]` | Launch the Unreal Editor, wiring `UNREAL_MCP_*` env vars (engine resolved via `EngineAssociation` + `LauncherInstalled.dat`) |
 | `close [path]` | Terminate the editor process running a project |
-| `install-plugin [path]` | Copy (or `--junction`) the UnrealMCP plugin into `<project>/Plugins` — default source = local repo checkout when present, else the version-matched GitHub Release zip |
+| `install-plugin [path]` | Copy (or `--junction`) the UnrealMCP plugin into `<project>/Plugins` — default source = local repo checkout when present, else the version-matched GitHub source asset |
 | `remove-plugin [path]` | Remove the installed plugin |
 | `install-extension <id> [path]` | Install a third-party Unreal-MCP **extension** plugin into `<project>/Plugins/<name>`, enable it + its gating engine plugins (e.g. `Niagara`) in the `.uproject`, and (re)compile (on next editor open, or now with `--build`). `--source <dir>` installs from a local copy (offline/CI); `--version <x.y.z>` overrides the catalog pin. Idempotent. See [Extensions](#extensions) |
 | `configure` | Write `UNREAL_MCP_*` into `<project>/.env` and gitignore `.env` (§8) |
@@ -55,7 +58,7 @@ Requires Node `^20.19.0 || >=22.12.0`. See the
 | `run-tool <tool>` | Invoke an MCP tool over the local HTTP path |
 | `run-system-tool <tool>` | Invoke a system tool over the local HTTP path |
 | `bootstrap-local [path]` | Build the bridge from source into `Intermediate/UnrealMCP/` (§6) — the MCP server is downloaded from GameDev-MCP-Server releases, not built here |
-| `update [path]` | Re-sync the installed plugin from a local source or the version-matched GitHub Release zip. On a version change it **auto-cleans** the stale UE C++ build cache (`Intermediate/` + C++ `Binaries/`) so the editor recompiles cleanly — the bundled sidecar bridge under `Binaries/ThirdParty/` is preserved, junction (dev) installs are never cleaned, and `--no-clean` opts out |
+| `update [path]` | Re-sync the installed plugin from a local source or the version-matched GitHub source asset. On a version change it **auto-cleans** the stale UE C++ build cache (`Intermediate/` + C++ `Binaries/`) so the editor recompiles cleanly — the bundled sidecar bridge under `Binaries/ThirdParty/` is refreshed from `Source/ThirdParty/` when the release source asset ships it, otherwise preserved, junction (dev) installs are never cleaned, and `--no-clean` opts out |
 | `install-engine [version]` | Detect installed engines from `LauncherInstalled.dat`; link to the Epic launcher for missing versions (never installs directly) |
 | `setup-skills` | Write a Claude-Code skill stub that drives the project's MCP server |
 

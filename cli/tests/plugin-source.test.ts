@@ -3,8 +3,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { zipSync, strToU8 } from 'fflate';
 import {
-  corePluginAssetName,
-  corePluginDownloadUrl,
+  corePluginSourceAssetName,
+  corePluginSourceDownloadUrl,
   findUPluginFile,
   resolveLocalPluginRoot,
   resolvePluginSource,
@@ -35,9 +35,9 @@ function zipResponse(entries: Record<string, Uint8Array>): typeof fetch {
 
 describe('core plugin release helpers', () => {
   it('builds the version-matched core plugin asset name + URL', () => {
-    expect(corePluginAssetName('0.6.2')).toBe('unreal-mcp-plugin-0.6.2.zip');
-    expect(corePluginDownloadUrl('0.6.2')).toBe(
-      'https://github.com/IvanMurzak/Unreal-MCP/releases/download/v0.6.2/unreal-mcp-plugin-0.6.2.zip',
+    expect(corePluginSourceAssetName('0.6.2')).toBe('unreal-mcp-plugin-source-0.6.2.zip');
+    expect(corePluginSourceDownloadUrl('0.6.2')).toBe(
+      'https://github.com/IvanMurzak/Unreal-MCP/releases/download/v0.6.2/unreal-mcp-plugin-source-0.6.2.zip',
     );
   });
 });
@@ -63,8 +63,8 @@ describe('resolvePluginSource', () => {
   it('downloads + extracts the core plugin release when no local source is supplied', async () => {
     const result = await resolvePluginSource({
       fetchImpl: zipResponse({
-        'UnrealMCP.uplugin': strToU8(JSON.stringify({ VersionName: PACKAGE_VERSION })),
-        'Source/marker.txt': strToU8('downloaded'),
+        'UnrealMCP/UnrealMCP.uplugin': strToU8(JSON.stringify({ VersionName: PACKAGE_VERSION, Installed: false })),
+        'UnrealMCP/Source/marker.txt': strToU8('downloaded'),
       }),
     });
     try {
@@ -74,6 +74,16 @@ describe('resolvePluginSource', () => {
     } finally {
       result.cleanup();
     }
+  });
+
+  it('rejects a downloaded packaged plugin descriptor that pins EngineVersion', async () => {
+    await expect(
+      resolvePluginSource({
+        fetchImpl: zipResponse({
+          'UnrealMCP/UnrealMCP.uplugin': strToU8(JSON.stringify({ VersionName: PACKAGE_VERSION, EngineVersion: '5.7.0' })),
+        }),
+      }),
+    ).rejects.toThrow(/EngineVersion/i);
   });
 
   it('rejects zip-slip paths in the downloaded archive', async () => {

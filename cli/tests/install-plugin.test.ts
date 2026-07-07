@@ -115,13 +115,13 @@ describe('installPlugin (copy)', () => {
     expect(fs.readFileSync(installedBridge, 'utf-8')).toBe('BRIDGE-PAYLOAD');
   });
 
-  it('downloads the packaged plugin zip from GitHub when no local source is available', async () => {
+  it('downloads the dedicated source asset from GitHub when no local source is available', async () => {
     const project = tmp();
     writeUProject(project, 'DownloadInstall');
     const fetchImpl = zipResponse({
-      'UnrealMCP.uplugin': strToU8(JSON.stringify({ VersionName: PACKAGE_VERSION })),
-      'Source/marker.txt': strToU8('downloaded'),
-      'Source/ThirdParty/UnrealMcpBridge/win-x64/unreal-mcp-bridge.exe': strToU8('BRIDGE'),
+      'UnrealMCP/UnrealMCP.uplugin': strToU8(JSON.stringify({ VersionName: PACKAGE_VERSION, Installed: false })),
+      'UnrealMCP/Source/marker.txt': strToU8('downloaded'),
+      'UnrealMCP/Source/ThirdParty/UnrealMcpBridge/win-x64/unreal-mcp-bridge.exe': strToU8('BRIDGE'),
     });
     const r = await installPlugin({ projectDir: project, fetchImpl });
     expect(r.kind).toBe('success');
@@ -129,9 +129,18 @@ describe('installPlugin (copy)', () => {
     expect(r.mode).toBe('copy');
     expect(fs.existsSync(path.join(r.installedPath, 'UnrealMCP.uplugin'))).toBe(true);
     expect(fs.existsSync(path.join(r.installedPath, 'Source', 'marker.txt'))).toBe(true);
+    const descriptor = JSON.parse(
+      fs.readFileSync(path.join(r.installedPath, 'UnrealMCP.uplugin'), 'utf-8'),
+    ) as Record<string, unknown>;
+    expect(descriptor['EngineVersion']).toBeUndefined();
     expect(
       fs.existsSync(
         path.join(r.installedPath, 'Source', 'ThirdParty', 'UnrealMcpBridge', 'win-x64', 'unreal-mcp-bridge.exe'),
+      ),
+    ).toBe(true);
+    expect(
+      fs.existsSync(
+        path.join(r.installedPath, 'Binaries', 'ThirdParty', 'UnrealMcpBridge', 'win-x64', 'unreal-mcp-bridge.exe'),
       ),
     ).toBe(true);
   });
@@ -140,14 +149,42 @@ describe('installPlugin (copy)', () => {
     const project = tmp();
     writeUProject(project, 'DownloadJunction');
     const fetchImpl = zipResponse({
-      'UnrealMCP.uplugin': strToU8(JSON.stringify({ VersionName: PACKAGE_VERSION })),
-      'Source/marker.txt': strToU8('downloaded'),
+      'UnrealMCP/UnrealMCP.uplugin': strToU8(JSON.stringify({ VersionName: PACKAGE_VERSION, Installed: false })),
+      'UnrealMCP/Source/marker.txt': strToU8('downloaded'),
     });
     const r = await installPlugin({ projectDir: project, junction: true, fetchImpl });
     expect(r.kind).toBe('success');
     if (r.kind !== 'success') return;
     expect(r.mode).toBe('copy');
     expect(r.warnings.some((w) => /stable local plugin source/i.test(w))).toBe(true);
+  });
+
+  it('refreshes a legacy packaged install with the source-asset bridge payload instead of restoring the stale bridge', async () => {
+    const project = tmp();
+    const legacy = makePluginSource();
+    const oldBridge = path.join(legacy, 'Binaries', 'ThirdParty', 'UnrealMcpBridge', 'win-x64');
+    fs.mkdirSync(oldBridge, { recursive: true });
+    fs.writeFileSync(path.join(oldBridge, 'unreal-mcp-bridge.exe'), 'OLD-BRIDGE', 'utf-8');
+    await installPlugin({ projectDir: project, pluginSourceDir: legacy });
+
+    const sourceAsset = makePluginSource();
+    const newBridge = path.join(sourceAsset, 'Source', 'ThirdParty', 'UnrealMcpBridge', 'win-x64');
+    fs.mkdirSync(newBridge, { recursive: true });
+    fs.writeFileSync(path.join(newBridge, 'unreal-mcp-bridge.exe'), 'NEW-BRIDGE', 'utf-8');
+
+    const r = await installPlugin({ projectDir: project, pluginSourceDir: sourceAsset });
+    expect(r.kind).toBe('success');
+    if (r.kind !== 'success') return;
+    const installedBridge = path.join(
+      r.installedPath,
+      'Binaries',
+      'ThirdParty',
+      'UnrealMcpBridge',
+      'win-x64',
+      'unreal-mcp-bridge.exe',
+    );
+    expect(fs.existsSync(installedBridge)).toBe(true);
+    expect(fs.readFileSync(installedBridge, 'utf-8')).toBe('NEW-BRIDGE');
   });
 });
 

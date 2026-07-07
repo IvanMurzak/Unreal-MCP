@@ -563,7 +563,7 @@ UnrealMCP/                                  # plugin root (UnrealMCP.uplugin liv
 ├── Source/ThirdParty/UnrealMcpBridge/      # FAB-SURVIVING source location (#139/#187) — the
 │   └── <rid>/  unreal-mcp-bridge[.exe]     #   engine-canonical Source/ThirdParty/<Lib>/<platform>/
 │      (+ self-contained payload files)     #   layout, declared in Config/FilterPlugin.ini so it ships
-│                                           #   in the source zip (win-x64 / osx-arm64 / osx-x64 / linux-x64)
+│                                           #   in the dedicated source release zip (win-x64 / osx-arm64 / osx-x64 / linux-x64)
 └── Binaries/                               # STAGED location — UBT stages Source/ThirdParty/UnrealMcpBridge/<rid>/
     └── ThirdParty/                         #   here at compile time (RuntimeDependencies two-arg form). Fab
         └── UnrealMcpBridge/                #   STRIPS this whole folder from a source submission, so
@@ -685,8 +685,9 @@ The §1.5 state machine is unchanged in shape; only the `LaunchingSidecar` preco
 `RuntimeDependencies`'s two-arg form, #139/#187), and `.gitignore` keeps the
 `Source/ThirdParty/UnrealMcpBridge/<rid>/` payloads (and `Binaries/`) out of VCS — only the
 `Source/ThirdParty/UnrealMcpBridge/` folder STRUCTURE (`README.md` + per-RID `.gitkeep`) is
-tracked, so the source zip ships the folders while the payloads stay transient. A dev source checkout
-has empty `Source/ThirdParty/UnrealMcpBridge/<rid>/` (and `Binaries/ThirdParty/UnrealMcpBridge/`) → the resolver returns empty →
+tracked in git. The **release-produced** `unreal-mcp-plugin-source-<version>.zip` asset is created
+after staging, so it ships the real payloads; a dev source checkout still has empty
+`Source/ThirdParty/UnrealMcpBridge/<rid>/` (and `Binaries/ThirdParty/UnrealMcpBridge/`) → the resolver returns empty →
 devs use `UNREAL_MCP_BRIDGE_PATH`, exactly as before.
 
 ### 6.7 Fab (Epic marketplace) source-submission readiness (#139/#187)
@@ -702,8 +703,8 @@ all are handled in-repo (issues #139/#187), and submission itself remains an ope
    into `Binaries/ThirdParty/UnrealMcpBridge/<rid>/` by `RuntimeDependencies`, and is ALSO resolved
    directly from `Source/ThirdParty/UnrealMcpBridge/<rid>/` (§6.1 candidate list) so an Epic-compiled build
    resolves it even when `Binaries/` did not re-stage. This does not regress the GitHub-release/npm bundle
-   nor `release.yml`'s signed-binary staging — both now stage into `Source/ThirdParty/UnrealMcpBridge/<rid>/`
-   before BuildPlugin.
+   nor `release.yml`'s signed-binary staging — the dedicated CLI/Fab source asset and the packaged
+   BuildPlugin asset are both cut from the same staged `Source/ThirdParty/UnrealMcpBridge/<rid>/` payloads.
 2. **No shipped test/automation module.** Fab review flags shipped test modules, so the DISTRIBUTED
    `UnrealMCP.uplugin` omits `UnrealMcpEditorTests`. PR/dev CI still runs the `UnrealMcp.` Automation
    specs by transiently re-adding the module via `commands/test-module-uplugin.ps1` (idempotent
@@ -925,8 +926,10 @@ happens in each tool-family task against `Unreal-Test-Project` (Godot tool-wave 
   `RunUAT.bat BuildPlugin -Plugin=UnrealMCP.uplugin -Package=<out> -TargetPlatforms=Win64` (also
   validates marketplace packaging) and then runs the Automation filter against the testbed project.
 - `release.yml` (Godot `release.yml` skeleton: version-from-source job → gate compute → test fan-out
-  → artifact build → gated publish): artifacts = plugin zip (BuildPlugin output, engine-agnostic
-  source plugin), `unreal-mcp-bridge-<rid>.zip` ×4, npm publish, GitHub Release (server zips are
+  → artifact build → gated publish): artifacts = dedicated source plugin zip
+  (`unreal-mcp-plugin-source-<version>.zip`, CLI/Fab install asset), packaged plugin zip
+  (`unreal-mcp-plugin-<version>.zip`, BuildPlugin output with the staged bundle),
+  `unreal-mcp-bridge-<rid>.zip` ×4, npm publish, GitHub Release (server zips are
   released from the shared GameDev-MCP-Server repo, not here — §6).
   **Tag/release firing is Ivan-GATED**; full-rerun-only policy for artifact-passing
   workflows (gh-rerun lesson) documented in `docs/RELEASING.md`. `workflow_dispatch` exposes a
