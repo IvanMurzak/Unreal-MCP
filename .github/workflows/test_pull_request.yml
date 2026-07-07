@@ -148,6 +148,21 @@ jobs:
             }
           }
 
+      - name: Resolve runner-local host project
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $runnerRoot = Split-Path -Parent (Split-Path -Parent $env:RUNNER_TEMP)
+          $runnerLocalHost = Join-Path $runnerRoot 'host\UnrealTestProject\UnrealTestProject.uproject'
+          if (Test-Path $runnerLocalHost) {
+            "HOST_UPROJECT=$runnerLocalHost" >> $env:GITHUB_ENV
+            Write-Host "Using runner-local host project: $runnerLocalHost"
+          } elseif (-not [string]::IsNullOrWhiteSpace($env:HOST_UPROJECT) -and (Test-Path $env:HOST_UPROJECT)) {
+            Write-Host "Using UNREAL_HOST_PROJECT fallback: $env:HOST_UPROJECT"
+          } else {
+            throw "No host .uproject found. Expected runner-local '$runnerLocalHost' or a valid UNREAL_HOST_PROJECT repo variable."
+          }
+
       - name: Run Automation specs (UnrealMcp. filter — test module rebuilt in)
         shell: pwsh
         run: |
@@ -278,6 +293,7 @@ jobs:
   #     release job does).
   connection-smoke:
     name: connection + tool smoke (UE ${{ matrix.ue }}, custom server)
+    needs: [plugin]
     if: ${{ vars.UNREAL_SMOKE_READY == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     runs-on: [self-hosted, windows, unreal-5-7]
     strategy:
@@ -310,6 +326,21 @@ jobs:
           $bridge = Join-Path $env:GITHUB_WORKSPACE 'bridge\src\bin\Debug\net9.0\unreal-mcp-bridge.exe'
           if (-not (Test-Path $bridge)) { throw "bridge binary not found at $bridge" }
           echo "UNREAL_MCP_BRIDGE_PATH=$bridge" >> $env:GITHUB_ENV
+
+      - name: Resolve runner-local host project
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $runnerRoot = Split-Path -Parent (Split-Path -Parent $env:RUNNER_TEMP)
+          $runnerLocalHost = Join-Path $runnerRoot 'host\UnrealTestProject\UnrealTestProject.uproject'
+          if (Test-Path $runnerLocalHost) {
+            "HOST_UPROJECT=$runnerLocalHost" >> $env:GITHUB_ENV
+            Write-Host "Using runner-local host project: $runnerLocalHost"
+          } elseif (-not [string]::IsNullOrWhiteSpace($env:HOST_UPROJECT) -and (Test-Path $env:HOST_UPROJECT)) {
+            Write-Host "Using UNREAL_HOST_PROJECT fallback: $env:HOST_UPROJECT"
+          } else {
+            throw "No host .uproject found. Expected runner-local '$runnerLocalHost' or a valid UNREAL_HOST_PROJECT repo variable."
+          }
 
       - name: BuildPlugin into the host junction target
         shell: pwsh

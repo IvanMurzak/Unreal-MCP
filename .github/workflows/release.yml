@@ -28,7 +28,7 @@
 #                        unreal-mcp-plugin-source-<version>.zip, runs BuildPlugin -Rocket
 #                        (RuntimeDependencies stage Source/ThirdParty/UnrealMcpBridge/ ->
 #                        Binaries/ThirdParty/UnrealMcpBridge/<rid>/), zips the PACKAGED
-#                        plugin as unreal-mcp-plugin-<version>.zip ->
+#                        plugin with the latest supported UE as unreal-mcp-plugin-<version>.zip ->
 #                        publish-release attaches both plugin zips + the 4 signed bridge zips.
 # Signing is GRACEFULLY DEGRADING: every sign/notarize step is `if: env.X != ''`
 # guarded, so a run with NO secrets produces UNSIGNED-but-green artifacts. The
@@ -331,6 +331,20 @@ jobs:
             if ($mods -contains 'UnrealMcpEditorTests') {
               throw "Distributed package SHIPS UnrealMcpEditorTests — Fab review would flag it (C2 regression)."
             }
+          }
+      - name: Resolve runner-local host project
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $runnerRoot = Split-Path -Parent (Split-Path -Parent $env:RUNNER_TEMP)
+          $runnerLocalHost = Join-Path $runnerRoot 'host\UnrealTestProject\UnrealTestProject.uproject'
+          if (Test-Path $runnerLocalHost) {
+            "HOST_UPROJECT=$runnerLocalHost" >> $env:GITHUB_ENV
+            Write-Host "Using runner-local host project: $runnerLocalHost"
+          } elseif (-not [string]::IsNullOrWhiteSpace($env:HOST_UPROJECT) -and (Test-Path $env:HOST_UPROJECT)) {
+            Write-Host "Using UNREAL_HOST_PROJECT fallback: $env:HOST_UPROJECT"
+          } else {
+            throw "No host .uproject found. Expected runner-local '$runnerLocalHost' or a valid UNREAL_HOST_PROJECT repo variable."
           }
       - name: Run Automation specs (UnrealMcp. filter — test module rebuilt in)
         shell: pwsh
@@ -680,19 +694,23 @@ jobs:
   # `unreal-mcp-plugin-source-<version>.zip` (CLI/Fab install path, no
   # EngineVersion pin, test-free descriptor) AND the PACKAGED BuildPlugin asset
   # `unreal-mcp-plugin-<version>.zip` with the signed bridge bundled in under
-  # Binaries/ThirdParty/. Self-hosted, gated like the plugin test job. Skipped
-  # when no runner is registered; for a real release the runner must be ready
-  # (publish-release `needs` this job). Depends on the two signed-bridge jobs so
-  # the 4 signed RID payloads can be staged into the plugin tree before the
-  # source asset is cut and BuildPlugin packages them (docs/ARCHITECTURE.md §6
-  # BUNDLE model, T4).
+  # Binaries/ThirdParty/. The single packaged artifact is built with the latest
+  # supported UE; the source artifact stays engine-version unpinned and the
+  # release matrix still validates the lower supported engines. Self-hosted,
+  # gated like the plugin test job. Skipped when no runner is registered; for a
+  # real release the runner must be ready (publish-release `needs` this job).
+  # Depends on the plugin matrix so its UE 5.8 BuildPlugin cannot overlap the UE
+  # 5.8 validation leg on the same machine's AutomationTool lock. Also depends
+  # on the two signed-bridge jobs so the 4 signed RID payloads can be staged into
+  # the plugin tree before the source asset is cut and BuildPlugin packages them
+  # (docs/ARCHITECTURE.md §6 BUNDLE model, T4).
   build-plugin-zip:
-    name: build plugin release zips (UE 5.7)
-    needs: [check-version, build-bridge-macos, build-bridge-windows]
+    name: build plugin release zips (UE 5.8)
+    needs: [check-version, plugin, build-bridge-macos, build-bridge-windows]
     if: needs.check-version.outputs.run_tests == 'true' && vars.UNREAL_RUNNER_READY == 'true'
     runs-on: [self-hosted, windows, unreal-5-7]
     env:
-      UE_ROOT: ${{ vars.UNREAL_ENGINE_PATH || 'C:\Program Files\Epic Games\UE_5.7' }}
+      UE_ROOT: ${{ vars.UNREAL_ENGINE_PATH || 'C:\Program Files\Epic Games\UE_5.8' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
