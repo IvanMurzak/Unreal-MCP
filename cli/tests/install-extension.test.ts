@@ -494,7 +494,14 @@ describe('installExtension (--build)', () => {
     expect(steps).toHaveLength(1);
     expect(steps[0].editorTarget).toBe('MyGameEditor');
     expect(steps[0].args).toContain('-WaitMutex');
-    expect(steps[0].ubtPath.replace(/\\/g, '/')).toContain('C:/Engine/Engine/Binaries/DotNET/UnrealBuildTool/UnrealBuildTool.exe');
+    const normalized = steps[0].ubtPath.replace(/\\/g, '/');
+    if (process.platform === 'darwin') {
+      expect(normalized).toContain('C:/Engine/Engine/Build/BatchFiles/Mac/Build.sh');
+    } else if (process.platform === 'linux') {
+      expect(normalized).toContain('C:/Engine/Engine/Build/BatchFiles/Linux/Build.sh');
+    } else {
+      expect(normalized).toContain('C:/Engine/Engine/Binaries/DotNET/UnrealBuildTool/UnrealBuildTool.exe');
+    }
   });
 
   it('warns + falls back to rebuild-on-next-open when no engine root resolves', async () => {
@@ -531,7 +538,7 @@ describe('installExtension (--build)', () => {
     if (r.kind !== 'success') return;
     expect(r.built).toBe(false);
     expect(r.rebuildRequired).toBe(true);
-    expect(r.warnings.join(' ')).toMatch(/UBT build failed/);
+    expect(r.warnings.join(' ')).toMatch(/Build failed/);
   });
 });
 

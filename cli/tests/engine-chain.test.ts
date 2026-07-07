@@ -262,6 +262,7 @@ describe('openProject — forwards the discovery surfaces (hermetic, no home cac
 
       const r = await openProject({
         projectDir,
+        autoDismissStartupDialogs: false,
         enginesImpl: () => [
           { appName: 'UE_5.7', appVersion: '5.7', installLocation: engineRoot, engineAssociation: '5.7' },
         ],

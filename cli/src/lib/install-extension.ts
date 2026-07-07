@@ -42,6 +42,11 @@ import {
 } from '../utils/extensions-catalog.js';
 import { resolveInstallSource, stripLeadingV, type InstallSource } from '../utils/extension-source.js';
 import {
+  isDesktopBuildPlatform,
+  resolveDesktopBuildStep,
+  runUnrealBuildStep,
+} from '../utils/unreal-build.js';
+import {
   parseUPluginDependencies,
   readUPluginVersionName,
   enablePluginsInUProject,
@@ -442,33 +447,27 @@ async function runUbtBuild(
     );
     return false;
   }
-  // Eager `--build` is Windows-only: the host binary (`UnrealBuildTool.exe`) and
-  // the `Win64` target platform below are hardcoded. On macOS/Linux, omit `--build`
-  // and let the editor recompile the extension on next open (the default path).
-  const ubtPath = path.join(
+  if (!isDesktopBuildPlatform(process.platform)) {
+    warnings.push(
+      `--build requested on unsupported platform "${process.platform}". Skipping compile — the editor will recompile the extension on next open.`,
+    );
+    return false;
+  }
+  const step: ExtensionBuildStep = resolveDesktopBuildStep({
+    platform: process.platform,
     engineRoot,
-    'Engine',
-    'Binaries',
-    'DotNET',
-    'UnrealBuildTool',
-    'UnrealBuildTool.exe',
-  );
-  const editorTarget = `${projectName}Editor`;
-  const step: ExtensionBuildStep = {
-    ubtPath,
-    editorTarget,
+    projectName,
     uprojectPath,
-    args: [editorTarget, 'Win64', 'Development', `-project=${uprojectPath}`, '-WaitMutex'],
-  };
-  emitProgress(opts.onProgress, { phase: 'start', message: `Compiling ${editorTarget} via UBT` });
-  const buildImpl = opts.buildImpl ?? defaultBuildImpl;
+  });
+  emitProgress(opts.onProgress, { phase: 'start', message: `Compiling ${step.editorTarget} before launch` });
+  const buildImpl = opts.buildImpl ?? runUnrealBuildStep;
   try {
     await buildImpl(step);
-    emitProgress(opts.onProgress, { phase: 'done', message: 'UBT build succeeded.' });
+    emitProgress(opts.onProgress, { phase: 'done', message: 'Build succeeded.' });
     return true;
   } catch (err: unknown) {
     warnings.push(
-      `UBT build failed: ${asError(err).message}. The editor will recompile the extension on next open.`,
+      `Build failed: ${asError(err).message}. The editor will recompile the extension on next open.`,
     );
     return false;
   }
@@ -479,30 +478,6 @@ function resolveEngineRoot(engineAssociation: string, opts: InstallExtensionOpti
   if (opts.resolveEngineRootImpl) return opts.resolveEngineRootImpl(engineAssociation);
   const r = discoverEngine({ engineAssociation, noCache: true });
   return r.kind === 'resolved' ? r.engineRoot : null;
-}
-
-/**
- * Default UBT runner: spawn UnrealBuildTool, resolve on exit 0, reject otherwise.
- * stdout stays silenced (the library is stdout-quiet), but stderr is captured so a
- * non-zero exit surfaces the actual compile error — the last ~2KB — through the
- * rejection (and thus the structured `UBT build failed: ...` warning) instead of a
- * bare exit code. The buffer is bounded to its tail so a chatty build can't grow it.
- */
-function defaultBuildImpl(step: ExtensionBuildStep): Promise<void> {
-  return new Promise<void>((resolve, reject) => {
-    const child = spawn(step.ubtPath, step.args, { stdio: ['ignore', 'ignore', 'pipe'] });
-    let stderr = '';
-    child.stderr?.on('data', (chunk) => {
-      stderr += chunk.toString();
-      if (stderr.length > 4096) stderr = stderr.slice(-4096);
-    });
-    child.on('error', reject);
-    child.on('close', (code) => {
-      if (code === 0) return resolve();
-      const tail = stderr.trim().slice(-2048);
-      reject(new Error(`UnrealBuildTool exited with code ${code}${tail ? `:\n${tail}` : ''}`));
-    });
-  });
 }
 
 // ---------------------------------------------------------------------------
