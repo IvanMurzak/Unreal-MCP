@@ -107,7 +107,7 @@ jobs:
       run_tests: ${{ steps.gate.outputs.run_tests }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
           fetch-tags: true
@@ -258,7 +258,7 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: Setup .NET 9
         uses: actions/setup-dotnet@v4
         with:
@@ -302,7 +302,7 @@ jobs:
       HOST_UPROJECT: ${{ vars.UNREAL_HOST_PROJECT }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           # Self-hosted runner persists between jobs; don't leave this job's
           # GITHUB_TOKEN in the worktree's .git config after checkout.
@@ -464,7 +464,7 @@ jobs:
       APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: Setup .NET 9
         uses: actions/setup-dotnet@v4
         with:
@@ -617,7 +617,7 @@ jobs:
       AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: Setup .NET 9
         uses: actions/setup-dotnet@v4
         with:
@@ -695,7 +695,7 @@ jobs:
       UE_ROOT: ${{ vars.UNREAL_ENGINE_PATH || 'C:\Program Files\Epic Games\UE_5.7' }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           # Self-hosted runner persists between jobs; don't leave this job's
           # GITHUB_TOKEN in the worktree's .git config after checkout.
@@ -896,7 +896,7 @@ jobs:
       published: ${{ steps.mark.outputs.published }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       # Attach both plugin artifacts:
       #   * unreal-mcp-plugin-source-<version>.zip  -> CLI/Fab source install asset
       #   * unreal-mcp-plugin-<version>.zip         -> packaged BuildPlugin artifact
@@ -955,9 +955,9 @@ jobs:
         working-directory: ./cli
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: "22"
           registry-url: "https://registry.npmjs.org"
