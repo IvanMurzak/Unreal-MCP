@@ -370,8 +370,14 @@ legacy; the release matrix now validates UE 5.5/5.6/5.7/5.8 on that machine.
 > the host game module is rebuilt per engine on each runner-local host. The
 > PR smoke job waits for the plugin job, because both use UE 5.8 `RunUAT` on the
 > same machine and Unreal's AutomationTool permits only one same-engine instance
-> at a time.
-> registration steps below are retained for re-provisioning the runner.
+> at a time. The registration steps below are retained for re-provisioning the
+> runner.
+
+The host-project `Build.bat` calls pass a per-job `-log=$RUNNER_TEMP\...` path.
+Do not remove that when tuning the workflow: parallel runners share the same
+Windows service account, and UBT's default
+`%LOCALAPPDATA%\UnrealBuildTool\Log.txt` can fail during log rotation when
+multiple engines build host targets at once.
 
 ### Never red-by-absence
 

@@ -221,7 +221,8 @@ jobs:
             # UnauthorizedAccessException under the service account.
             $hostBuild = Join-Path $env:UE_ROOT 'Engine\Build\BatchFiles\Build.bat'
             $hostTarget = [System.IO.Path]::GetFileNameWithoutExtension($env:HOST_UPROJECT) + 'Editor'
-            & $hostBuild $hostTarget Win64 Development -project="$env:HOST_UPROJECT" -WaitMutex -NoLiveCoding
+            $hostBuildLog = Join-Path $env:RUNNER_TEMP "UBT-$hostTarget-$($env:GITHUB_JOB)-$($env:RUNNER_NAME).log"
+            & $hostBuild $hostTarget Win64 Development -project="$env:HOST_UPROJECT" -WaitMutex -NoLiveCoding -log="$hostBuildLog"
             if ($LASTEXITCODE -ne 0) { throw "Host editor target ($hostTarget) build failed for UE_ROOT=$env:UE_ROOT (exit $LASTEXITCODE)" }
             $editorCmd = Join-Path $env:UE_ROOT 'Engine\Binaries\Win64\UnrealEditor-Cmd.exe'
             $reportDir = Join-Path $env:RUNNER_TEMP 'AutomationReport'
@@ -384,7 +385,8 @@ jobs:
           # the Automation leg above.
           $hostBuild = Join-Path $env:UE_ROOT 'Engine\Build\BatchFiles\Build.bat'
           $hostTarget = [System.IO.Path]::GetFileNameWithoutExtension($env:HOST_UPROJECT) + 'Editor'
-          & $hostBuild $hostTarget Win64 Development -project="$env:HOST_UPROJECT" -WaitMutex -NoLiveCoding
+          $hostBuildLog = Join-Path $env:RUNNER_TEMP "UBT-$hostTarget-$($env:GITHUB_JOB)-$($env:RUNNER_NAME).log"
+          & $hostBuild $hostTarget Win64 Development -project="$env:HOST_UPROJECT" -WaitMutex -NoLiveCoding -log="$hostBuildLog"
           if ($LASTEXITCODE -ne 0) { throw "Host editor target ($hostTarget) build failed for UE_ROOT=$env:UE_ROOT (exit $LASTEXITCODE)" }
 
       - name: Run connection + tool smoke (custom local server)
