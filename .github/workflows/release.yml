@@ -260,7 +260,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v5
       - name: Setup .NET 9
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: "9.0.x"
       - name: Restore
@@ -294,6 +294,7 @@ jobs:
     runs-on: [self-hosted, windows, unreal-5-7]
     strategy:
       fail-fast: false
+      max-parallel: 2
       matrix:
         ue: ['5.5', '5.6', '5.7', '5.8']
     env:
@@ -437,7 +438,7 @@ jobs:
         # earlier failure (BuildPlugin, missing editor) leaves it unset, so guard
         # the upload to avoid a second confusing failure on an empty path.
         if: ${{ failure() && env.REPORT_DIR != '' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: automation-report
           path: ${{ env.REPORT_DIR }}
@@ -481,7 +482,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v5
       - name: Setup .NET 9
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: "9.0.x"
       - name: Make publish script executable
@@ -598,7 +599,7 @@ jobs:
           done
           ls -la *.zip
       - name: Upload signed bridge staging dirs (osx + linux)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bridge-staging-osx-linux
           path: |
@@ -608,7 +609,7 @@ jobs:
           if-no-files-found: error
           retention-days: 7
       - name: Upload bridge release zips (osx + linux)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bridge-release-zips-osx-linux
           path: ./bridge/publish/*.zip
@@ -634,7 +635,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v5
       - name: Setup .NET 9
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: "9.0.x"
       # -NoZip: sign the raw .exe BEFORE zipping.
@@ -672,14 +673,14 @@ jobs:
           [System.IO.Compression.ZipFile]::CreateFromDirectory($runtimePath, $zipPath)
           Get-ChildItem -Path $publishRoot -Filter "*.zip" | Select-Object Name, Length
       - name: Upload signed bridge staging dir (win)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bridge-staging-win
           path: ./bridge/publish/win-x64/
           if-no-files-found: error
           retention-days: 7
       - name: Upload bridge release zip (win)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bridge-release-zips-win
           path: ./bridge/publish/*.zip
@@ -721,7 +722,7 @@ jobs:
           persist-credentials: false
       # Download the signed per-RID publish dirs produced by the two
       # build-bridge-* jobs, merging all four RIDs under ./bridge-staging/<rid>/.
-      # The two artifacts were rooted differently by upload-artifact@v4:
+      # The two artifacts were rooted differently by upload-artifact:
       #   * bridge-staging-osx-linux was uploaded with THREE dir paths
       #     (osx-arm64/, osx-x64/, linux-x64/), so the artifact is rooted at
       #     their least-common-ancestor (bridge/publish/) and PRESERVES the
@@ -733,12 +734,12 @@ jobs:
       #     Extract it into ./bridge-staging/win-x64 so the segment is restored
       #     and the staging loop below finds ./bridge-staging/win-x64/.
       - name: Download signed bridge (osx + linux)
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: bridge-staging-osx-linux
           path: ./bridge-staging
       - name: Download signed bridge (win)
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: bridge-staging-win
           path: ./bridge-staging/win-x64
@@ -875,14 +876,14 @@ jobs:
           New-Item -ItemType Directory -Force -Path $out | Out-Null
           Compress-Archive -Path (Join-Path $package '*') -DestinationPath (Join-Path $out "unreal-mcp-plugin-$version.zip") -Force
       - name: Upload source plugin zip
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: unreal-mcp-plugin-source-zip
           path: ./dist/unreal-mcp-plugin-source-${{ needs.check-version.outputs.version }}.zip
           if-no-files-found: error
           retention-days: 7
       - name: Upload packaged plugin zip
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: unreal-mcp-plugin-packaged-zip
           path: ./dist/unreal-mcp-plugin-${{ needs.check-version.outputs.version }}.zip
@@ -922,22 +923,22 @@ jobs:
       # The per-RID signed bridge zips are also attached for debugging /
       # UNREAL_MCP_BRIDGE_PATH users.
       - name: Download bridge release zips (osx + linux)
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: bridge-release-zips-osx-linux
           path: ./assets
       - name: Download bridge release zip (win)
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: bridge-release-zips-win
           path: ./assets
       - name: Download source plugin zip
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: unreal-mcp-plugin-source-zip
           path: ./assets
       - name: Download packaged plugin zip
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: unreal-mcp-plugin-packaged-zip
           path: ./assets

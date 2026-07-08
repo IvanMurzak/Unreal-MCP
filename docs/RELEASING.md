@@ -366,8 +366,10 @@ legacy; the release matrix now validates UE 5.5/5.6/5.7/5.8 on that machine.
 > `plugin BuildPlugin + Automation (UE <ver>)` coverage now splits by workflow:
 > `test_pull_request.yml` runs **UE 5.8 only** for same-repo PRs, while
 > `release.yml` runs `matrix.ue: ['5.5', '5.6', '5.7', '5.8']` on real releases
-> and dry-runs. Multiple registered runners can process those legs in parallel;
-> the host game module is rebuilt per engine on each runner-local host. The
+> and dry-runs, capped at two parallel Unreal engines to avoid MSVC PCH virtual
+> memory exhaustion on the local machine. Multiple registered runners still
+> reduce queue time; the host game module is rebuilt per engine on each
+> runner-local host. The
 > PR smoke job waits for the plugin job, because both use UE 5.8 `RunUAT` on the
 > same machine and Unreal's AutomationTool permits only one same-engine instance
 > at a time. The registration steps below are retained for re-provisioning the

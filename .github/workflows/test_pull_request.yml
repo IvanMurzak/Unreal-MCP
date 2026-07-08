@@ -64,7 +64,7 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Setup .NET 9
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: "9.0.x"
 
@@ -268,7 +268,7 @@ jobs:
         # earlier failure (BuildPlugin, missing editor) leaves it unset, so guard
         # the upload to avoid a second confusing failure on an empty path.
         if: ${{ failure() && env.REPORT_DIR != '' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: automation-report
           path: ${{ env.REPORT_DIR }}
