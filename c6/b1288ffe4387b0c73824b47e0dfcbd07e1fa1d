@@ -1,0 +1,19 @@
+cli/src/lib/login.ts
+  s_d5f619ffecbba9::t_c75e89ac251a37 16
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "c6b1288ffe4387b0c73824b47e0dfcbd07e1fa1d",
+  "prompts": {},
+  "sessions": {
+    "s_d5f619ffecbba9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f3e5d-2986-76a2-a12f-29eb073ed677",
+        "model": "gpt-5.5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
