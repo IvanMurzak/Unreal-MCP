@@ -643,21 +643,26 @@ jobs:
         shell: pwsh
         run: ./bridge/publish.ps1 -Configuration Release -Platforms win-x64 -NoZip
 
-      # Sign the win-x64 .exe via Azure Trusted Signing. Guarded: skipped when
-      # AZURE_CLIENT_ID is empty, leaving the .exe unsigned but still stageable.
-      - name: Sign Windows bridge (Azure Trusted Signing)
+      # Sign the win-x64 .exe via Azure Artifact Signing (formerly Trusted
+      # Signing). Guarded: skipped when AZURE_CLIENT_ID is empty, leaving the
+      # .exe unsigned but still stageable.
+      - name: Sign Windows bridge (Azure Artifact Signing)
         if: ${{ env.AZURE_CLIENT_ID != '' }}
-        uses: azure/trusted-signing-action@v0
+        uses: azure/artifact-signing-action@v2
         with:
           azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
           azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
           endpoint: https://eus.codesigning.azure.net
-          trusted-signing-account-name: ivan-murzak
+          signing-account-name: ivan-murzak
           certificate-profile-name: ai-game-dev-cert
           files-folder: ${{ github.workspace }}/bridge/publish/win-x64
           files-folder-filter: exe
           files-folder-recurse: true
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+          cache-dependencies: false
 
       - name: Zip signed bridge dir (release artifact)
         shell: pwsh
@@ -945,16 +950,22 @@ jobs:
       - name: List assembled release assets
         run: ls -la ./assets
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
-        with:
-          name: ${{ needs.check-version.outputs.tag }}
-          tag_name: ${{ needs.check-version.outputs.tag }}
-          generate_release_notes: true
-          fail_on_unmatched_files: true
-          files: |
-            ./assets/*.zip
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.check-version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=(./assets/*.zip)
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "::error::No release zip assets found in ./assets"
+            exit 1
+          fi
+          gh release create "${TAG}" "${files[@]}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --target "${GITHUB_SHA}" \
+            --title "${TAG}" \
+            --generate-notes
       - name: Mark publish success
         id: mark
         run: echo "published=true" >> "$GITHUB_OUTPUT"
