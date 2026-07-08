@@ -13,7 +13,7 @@ import { emitProgress } from './progress.js';
 import type { ProgressCallback } from './types.js';
 
 const DEFAULT_BASE_URL = 'https://ai-game.dev';
-const DEFAULT_DEVICE_PATH = '/api/auth/device/code';
+const DEFAULT_DEVICE_PATH = '/api/auth/device/authorize';
 const DEFAULT_TOKEN_PATH = '/api/auth/device/token';
 /** Per-request deadline so a hung endpoint can't stall the flow forever. */
 const PER_REQUEST_TIMEOUT_MS = 30_000;

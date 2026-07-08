@@ -18,7 +18,7 @@ function tmp(): string {
 function deviceFlowFetch(pendingCount: number): typeof fetch {
   let tokenCalls = 0;
   return (async (url: string) => {
-    if (String(url).endsWith('/code')) {
+    if (String(url).endsWith('/authorize')) {
       return fakeResponse({
         ok: true,
         status: 200,
@@ -72,7 +72,7 @@ describe('login (device flow)', () => {
   it('increases the poll interval persistently after slow_down (RFC 8628)', async () => {
     let tokenCalls = 0;
     const fetchImpl = (async (url: string) => {
-      if (String(url).endsWith('/code')) {
+      if (String(url).endsWith('/authorize')) {
         return fakeResponse({ ok: true, status: 200, body: JSON.stringify({ device_code: 'd', user_code: 'u', verification_uri: 'v', interval: 1 }) });
       }
       tokenCalls += 1;
@@ -92,7 +92,7 @@ describe('login (device flow)', () => {
 
   it('fails on access_denied', async () => {
     const fetchImpl = (async (url: string) => {
-      if (String(url).endsWith('/code')) {
+      if (String(url).endsWith('/authorize')) {
         return fakeResponse({ ok: true, status: 200, body: JSON.stringify({ device_code: 'd', user_code: 'u', verification_uri: 'v', interval: 1 }) });
       }
       return fakeResponse({ ok: false, status: 400, body: JSON.stringify({ error: 'access_denied' }) });
@@ -105,7 +105,7 @@ describe('login (device flow)', () => {
   it('times out when the user never authorizes', async () => {
     let clock = 0;
     const fetchImpl = (async (url: string) => {
-      if (String(url).endsWith('/code')) {
+      if (String(url).endsWith('/authorize')) {
         return fakeResponse({ ok: true, status: 200, body: JSON.stringify({ device_code: 'd', user_code: 'u', verification_uri: 'v', interval: 1 }) });
       }
       return fakeResponse({ ok: false, status: 400, body: JSON.stringify({ error: 'authorization_pending' }) });
