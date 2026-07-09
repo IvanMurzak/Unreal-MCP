@@ -19,7 +19,8 @@
 //   (`port`/`client-transport`/`authorization`/`token`) and deliberately omits
 //   Unity's `plugin-timeout` to preserve the current behaviour for the shared
 //   `gamedev-mcp-server` binary.
-// - Roster = the Godot 14: id `vscode` (not `vscode-copilot`), includes
+// - Roster = the 14 shared ids brought to naming parity with unity-mcp-cli:
+//   the VS Code id is `vscode-copilot` (renamed from `vscode`), includes
 //   `custom`, omits the Unity-only `unity-ai`.
 
 import chalk from 'chalk';
@@ -193,7 +194,7 @@ export const agentRegistry: readonly AgentDefinition[] = [
 
   // ── VS Code (Copilot) ────────────────────────────────────────
   {
-    id: 'vscode',
+    id: 'vscode-copilot',
     name: 'Visual Studio Code (Copilot)',
     skillsPath: '.github/skills',
     configPathDisplay: '.vscode/mcp.json',

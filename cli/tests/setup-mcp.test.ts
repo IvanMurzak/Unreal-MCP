@@ -20,7 +20,7 @@ const EXPECTED_IDS = [
   'claude-code',
   'claude-desktop',
   'cursor',
-  'vscode',
+  'vscode-copilot',
   'vs-copilot',
   'rider-junie',
   'github-copilot-cli',
@@ -43,9 +43,9 @@ describe('agent roster', () => {
     expect([...listAgentIds()].sort()).toEqual([...getAgentIds()].sort());
   });
 
-  it('uses id `vscode` (not `vscode-copilot`), includes `custom`, omits `unity-ai`', () => {
-    expect(getAgentIds()).toContain('vscode');
-    expect(getAgentIds()).not.toContain('vscode-copilot');
+  it('uses id `vscode-copilot` (not `vscode`), includes `custom`, omits `unity-ai`', () => {
+    expect(getAgentIds()).toContain('vscode-copilot');
+    expect(getAgentIds()).not.toContain('vscode');
     expect(getAgentIds()).toContain('custom');
     expect(getAgentIds()).not.toContain('unity-ai');
   });
@@ -157,9 +157,9 @@ describe('setupMcp — http transport', () => {
     expect(written.mcpServers['unreal-mcp'].url).toBe('http://h/mcp');
   });
 
-  it('writes vscode config under the top-level `servers` key (not `mcpServers`)', async () => {
+  it('writes vscode-copilot config under the top-level `servers` key (not `mcpServers`)', async () => {
     const dir = tmp();
-    const r = await setupMcp({ agentId: 'vscode', projectDir: dir, transport: 'http', url: 'http://localhost:5220' });
+    const r = await setupMcp({ agentId: 'vscode-copilot', projectDir: dir, transport: 'http', url: 'http://localhost:5220' });
     expect(r.kind).toBe('success');
     if (r.kind !== 'success') return;
     const written = JSON.parse(fs.readFileSync(r.configPath, 'utf-8'));
