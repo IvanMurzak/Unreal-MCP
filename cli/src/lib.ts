@@ -25,7 +25,14 @@ export {
   unknownExtensionMessage,
 } from './utils/extensions-catalog.js';
 export { runTool, runSystemTool } from './lib/run-tool.js';
-export { setupMcp, listAgentIds, buildServerEntry } from './lib/setup-mcp.js';
+export { setupMcp, listAgentIds } from './lib/setup-mcp.js';
+export {
+  agentRegistry,
+  getAgentById,
+  getAgentIds,
+  MCP_SERVER_NAME,
+} from './utils/agents.js';
+export type { AgentDefinition } from './utils/agents.js';
 export {
   downloadServer,
   serverDownloadUrl,
