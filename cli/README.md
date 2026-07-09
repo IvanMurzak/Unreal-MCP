@@ -1,16 +1,58 @@
-# unreal-mcp-cli
+<div align="center" width="100%">
+  <h1>Unreal MCP — <i>CLI</i></h1>
 
-Cross-platform CLI tool for [Unreal-MCP](https://github.com/IvanMurzak/Unreal-MCP) — the Unreal
-analog of [`unity-mcp-cli`](https://github.com/IvanMurzak/Unity-MCP/tree/main/cli) and
-[`godot-cli`](https://github.com/IvanMurzak/Godot-MCP/tree/main/cli). It resolves and launches the
-Unreal Editor with the right `UNREAL_MCP_*` connection env vars, runs MCP/system tools over HTTP,
-probes server health, configures AI agents (Claude Code, Cursor, VS Code, …), and manages the
-`UnrealMCP` plugin.
+[![npm](https://img.shields.io/npm/v/unreal-mcp-cli?label=npm&labelColor=333A41 'npm package')](https://www.npmjs.com/package/unreal-mcp-cli)
+[![Node.js](https://img.shields.io/badge/Node.js-%5E20.19.0%20%7C%7C%20%3E%3D22.12.0-5FA04E?logo=nodedotjs&labelColor=333A41 'Node.js')](https://nodejs.org/)
+[![License](https://img.shields.io/github/license/IvanMurzak/Unreal-MCP?label=License&labelColor=333A41)](https://github.com/IvanMurzak/Unreal-MCP/blob/main/LICENSE)
+[![Website](https://img.shields.io/badge/website-ai--game.dev-bc6c25?labelColor=333A41)](https://ai-game.dev)
+[![Stand With Ukraine](https://raw.githubusercontent.com/vshymanskyy/StandWithUkraine/main/badges/StandWithUkraine.svg)](https://stand-with-ukraine.pp.ua)
 
-## Install
+  <img src="https://github.com/IvanMurzak/Unity-MCP/raw/main/docs/img/promo/ai-developer-banner-glitch.gif" alt="AI Game Developer" title="Unreal MCP CLI" width="100%">
 
-Run without installing (npx caches the package between runs — use
-`unreal-mcp-cli@latest` to force the newest published version):
+  <p>
+    <a href="https://claude.ai/download"><img src="https://github.com/IvanMurzak/Unity-MCP/raw/main/docs/img/mcp-clients/claude-64.png" alt="Claude" title="Claude" height="36"></a>&nbsp;&nbsp;
+    <a href="https://openai.com/index/introducing-codex/"><img src="https://github.com/IvanMurzak/Unity-MCP/raw/main/docs/img/mcp-clients/codex-64.png" alt="Codex" title="Codex" height="36"></a>&nbsp;&nbsp;
+    <a href="https://www.cursor.com/"><img src="https://github.com/IvanMurzak/Unity-MCP/raw/main/docs/img/mcp-clients/cursor-64.png" alt="Cursor" title="Cursor" height="36"></a>&nbsp;&nbsp;
+    <a href="https://code.visualstudio.com/docs/copilot/overview"><img src="https://github.com/IvanMurzak/Unity-MCP/raw/main/docs/img/mcp-clients/github-copilot-64.png" alt="GitHub Copilot" title="GitHub Copilot" height="36"></a>&nbsp;&nbsp;
+    <a href="https://gemini.google.com/"><img src="https://github.com/IvanMurzak/Unity-MCP/raw/main/docs/img/mcp-clients/gemini-64.png" alt="Gemini" title="Gemini" height="36"></a>&nbsp;&nbsp;
+    <a href="https://antigravity.google/"><img src="https://github.com/IvanMurzak/Unity-MCP/raw/main/docs/img/mcp-clients/antigravity-64.png" alt="Antigravity" title="Antigravity" height="36"></a>&nbsp;&nbsp;
+    <a href="https://code.visualstudio.com/"><img src="https://github.com/IvanMurzak/Unity-MCP/raw/main/docs/img/mcp-clients/vs-code-64.png" alt="VS Code" title="VS Code" height="36"></a>&nbsp;&nbsp;
+    <a href="https://www.jetbrains.com/rider/"><img src="https://github.com/IvanMurzak/Unity-MCP/raw/main/docs/img/mcp-clients/rider-64.png" alt="Rider" title="Rider" height="36"></a>
+  </p>
+
+</div>
+
+Cross-platform CLI tool for **[Unreal-MCP](https://github.com/IvanMurzak/Unreal-MCP)** — the Unreal
+analog of [`unity-mcp-cli`](https://www.npmjs.com/package/unity-mcp-cli) and
+[`godot-cli`](https://www.npmjs.com/package/godot-cli). It resolves and launches the Unreal Editor with
+the right `UNREAL_MCP_*` connection env vars, runs MCP/system tools over HTTP, probes server health,
+configures AI agents (Claude Code, Cursor, VS Code, …), and manages the `UnrealMCP` plugin.
+
+Backed by **[ai-game.dev](https://ai-game.dev)**. See the
+[Unreal-MCP repository](https://github.com/IvanMurzak/Unreal-MCP) for the full project docs and the
+[architecture reference](https://github.com/IvanMurzak/Unreal-MCP/blob/main/docs/ARCHITECTURE.md).
+
+## ![AI Game Developer — Unreal SKILLS and MCP](https://github.com/IvanMurzak/Unity-MCP/blob/main/docs/img/promo/hazzard-features.svg?raw=true)
+
+- :white_check_mark: **Open & Connect** — launch the Unreal Editor with `UNREAL_MCP_*` connection env vars (engine auto-resolved)
+- :white_check_mark: **Create projects** — scaffold a minimal Unreal Engine C++ project
+- :white_check_mark: **Install plugin** — copy (or junction) the UnrealMCP plugin into a project's `Plugins/`
+- :white_check_mark: **Install extensions** — add third-party Unreal-MCP AI tool-family plugins and their gating engine plugins
+- :white_check_mark: **Configure** — write `UNREAL_MCP_*` connection settings into the project `.env`
+- :white_check_mark: **Setup MCP** — write MCP client config for AI agents (optionally download the shared server for stdio)
+- :white_check_mark: **Login** — OAuth device-code auth against `ai-game.dev`
+- :white_check_mark: **Status & wait-for-ready** — report project/plugin/connection state; block until the MCP server answers
+- :white_check_mark: **Run tools** — invoke MCP and system tools over the local HTTP path
+- :white_check_mark: **Install engine** — detect installed engines and link to the Epic launcher for missing versions
+- :white_check_mark: **Cross-platform** — Windows, macOS, and Linux
+- :white_check_mark: **Library API** — a side-effect-free, typed library surface for embedding
+
+![divider](https://github.com/IvanMurzak/Unity-MCP/blob/main/docs/img/promo/hazzard-divider.svg?raw=true)
+
+# Quick Start
+
+Run without installing (`npx` caches the package between runs — use `unreal-mcp-cli@latest` to force the
+newest published version):
 
 ```bash
 npx unreal-mcp-cli status
@@ -25,9 +67,7 @@ npm i -g unreal-mcp-cli
 unreal-mcp-cli status
 ```
 
-Requires Node `^20.19.0 || >=22.12.0`. See the
-[Unreal-MCP repository](https://github.com/IvanMurzak/Unreal-MCP) for the full project docs and the
-[architecture reference](https://github.com/IvanMurzak/Unreal-MCP/blob/main/docs/ARCHITECTURE.md).
+> **Requirements:** [Node.js](https://nodejs.org/) `^20.19.0 || >=22.12.0`.
 
 > **Plugin distribution.** For end users, the **recommended** way to install the UnrealMCP plugin
 > itself is **Fab / Epic Marketplace** (precompiled per-engine binaries, auto-updated by the Epic
@@ -40,7 +80,9 @@ Requires Node `^20.19.0 || >=22.12.0`. See the
 > `Binaries/ThirdParty/...` for first-open convenience. `--plugin-source <dir>` remains the offline /
 > CI / dev override.
 
-## Commands (docs/ARCHITECTURE.md §9.1)
+![divider](https://github.com/IvanMurzak/Unity-MCP/blob/main/docs/img/promo/hazzard-divider.svg?raw=true)
+
+# Commands (docs/ARCHITECTURE.md §9.1)
 
 | Command | What it does |
 | --- | --- |
@@ -154,3 +196,40 @@ node bin/unreal-mcp-cli.js status
 # Optional end-to-end integration test (NOT part of the default run):
 UNREAL_MCP_CLI_INTEGRATION=1 npm test
 ```
+
+![divider](https://github.com/IvanMurzak/Unity-MCP/blob/main/docs/img/promo/hazzard-divider.svg?raw=true)
+
+# Supported AI Agents
+
+`unreal-mcp-cli setup-mcp <agent>` writes a ready-to-use MCP client config so your favorite AI coding
+agent can drive the Unreal Editor. Core support today: **Claude Code**, **Cursor**, and
+**VS Code (Copilot)** — with the shared AI Game Developer ecosystem below.
+
+<div align="center">
+  <p>
+    <a href="https://claude.ai/download"><img src="https://github.com/IvanMurzak/Unity-MCP/raw/main/docs/img/mcp-clients/claude-64.png" alt="Claude" title="Claude" height="36"></a>&nbsp;&nbsp;
+    <a href="https://openai.com/index/introducing-codex/"><img src="https://github.com/IvanMurzak/Unity-MCP/raw/main/docs/img/mcp-clients/codex-64.png" alt="Codex" title="Codex" height="36"></a>&nbsp;&nbsp;
+    <a href="https://www.cursor.com/"><img src="https://github.com/IvanMurzak/Unity-MCP/raw/main/docs/img/mcp-clients/cursor-64.png" alt="Cursor" title="Cursor" height="36"></a>&nbsp;&nbsp;
+    <a href="https://code.visualstudio.com/docs/copilot/overview"><img src="https://github.com/IvanMurzak/Unity-MCP/raw/main/docs/img/mcp-clients/github-copilot-64.png" alt="GitHub Copilot" title="GitHub Copilot" height="36"></a>&nbsp;&nbsp;
+    <a href="https://gemini.google.com/"><img src="https://github.com/IvanMurzak/Unity-MCP/raw/main/docs/img/mcp-clients/gemini-64.png" alt="Gemini" title="Gemini" height="36"></a>&nbsp;&nbsp;
+    <a href="https://antigravity.google/"><img src="https://github.com/IvanMurzak/Unity-MCP/raw/main/docs/img/mcp-clients/antigravity-64.png" alt="Antigravity" title="Antigravity" height="36"></a>&nbsp;&nbsp;
+    <a href="https://code.visualstudio.com/"><img src="https://github.com/IvanMurzak/Unity-MCP/raw/main/docs/img/mcp-clients/vs-code-64.png" alt="VS Code" title="VS Code" height="36"></a>&nbsp;&nbsp;
+    <a href="https://www.jetbrains.com/rider/"><img src="https://github.com/IvanMurzak/Unity-MCP/raw/main/docs/img/mcp-clients/rider-64.png" alt="Rider" title="Rider" height="36"></a>&nbsp;&nbsp;
+    <a href="https://github.com/anthropics/claude-code"><img src="https://github.com/IvanMurzak/Unity-MCP/raw/main/docs/img/mcp-clients/open-code-64.png" alt="Open Code" title="Open Code" height="36"></a>&nbsp;&nbsp;
+    <a href="https://github.com/cline/cline"><img src="https://github.com/IvanMurzak/Unity-MCP/raw/main/docs/img/mcp-clients/cline-64.png" alt="Cline" title="Cline" height="36"></a>
+  </p>
+</div>
+
+```bash
+unreal-mcp-cli setup-mcp claude-code ./MyGame       # write the agent's MCP client config
+unreal-mcp-cli setup-mcp cursor ./MyGame --transport stdio
+```
+
+> For the full Unreal-MCP project documentation, see the
+> [main README](https://github.com/IvanMurzak/Unreal-MCP/blob/main/README.md) and the
+> [architecture reference](https://github.com/IvanMurzak/Unreal-MCP/blob/main/docs/ARCHITECTURE.md).
+> Backed by **[ai-game.dev](https://ai-game.dev)**.
+
+<div align="center">
+  <sub>Made with :orange_heart: for game developers — <a href="https://ai-game.dev">ai-game.dev</a></sub>
+</div>
