@@ -50,26 +50,33 @@
   </PropertyGroup>
 
   <!--
-    Reused NuGet pins, kept in lockstep with Godot-MCP (Godot-MCP.csproj):
-    McpPlugin 6.11.0 + ReflectorNet 5.3.1. The MCP/reflection stack is NOT forked —
-    pins are owned by the upstream release pipelines. The 6.8.0 bump consumed the new
-    shared engine-agnostic com.IvanMurzak.McpPlugin.AgentConfig module (the AI-agent
-    configurators + the AgentConfiguratorDescription UI-DTO) so the sidecar hosts the
-    AI-agent configuration service instead of the duplicated C++ Agents/ implementation.
-    6.9.0 carried the AgentConfig parity fix (Kilo/Zoo: disabled=false + HTTP
-    type="streamable-http") plus the AgentConfiguratorDescription DTO extension — the new
-    ConfigurationItemKind.Link + ConfigurationItem.Url (clickable open-URL items), the
-    ConfiguratorStatus tri-state (NotConfigured/Configured/ReconfigureNeeded) on a Status
-    field, and a Links collection (with a prepended "Reconfiguration Required" Alert when
-    stale). 6.10.0 extends AgentConfiguratorDescription.Sections further — per-agent
-    "Troubleshooting" sections and the Custom agent's Docker command content. Both flow
-    through the existing generic Sections passthrough in AgentConfigService.Describe (no
-    code change needed). 6.11.0 is a minor bump (also adopted by Unity-MCP 0.83.0) that
-    keeps the ReflectorNet 5.3.1 dependency, so the lockstep with Godot-MCP holds.
+    Reused NuGet pins — normally owned by the upstream release pipelines and kept in lockstep
+    with Godot-MCP (Godot-MCP.csproj). Current: McpPlugin 7.0.0-preview.1 + ReflectorNet 5.3.2.
+    The MCP/reflection stack is NOT forked. Historical context: the 6.8.0 bump consumed the new
+    shared engine-agnostic com.IvanMurzak.McpPlugin.AgentConfig module (the AI-agent configurators
+    + the AgentConfiguratorDescription UI-DTO) so the sidecar hosts the AI-agent configuration
+    service instead of the duplicated C++ Agents/ implementation. 6.9.0 carried the AgentConfig
+    parity fix (Kilo/Zoo: disabled=false + HTTP type="streamable-http") plus the
+    AgentConfiguratorDescription DTO extension — ConfigurationItemKind.Link + ConfigurationItem.Url
+    (clickable open-URL items), the ConfiguratorStatus tri-state (NotConfigured/Configured/
+    ReconfigureNeeded) on a Status field, and a Links collection (with a prepended "Reconfiguration
+    Required" Alert when stale). 6.10.0 extends AgentConfiguratorDescription.Sections further
+    (per-agent "Troubleshooting" sections + the Custom agent's Docker command), all via the generic
+    Sections passthrough in AgentConfigService.Describe. 6.11.0 was a minor bump keeping ReflectorNet
+    5.3.1.
+    ⚠ DEVIATION (mcp-authorize f1, PR 1/~6 — maintainer-authorized dependency-freshness bump, per the
+    PIPELINE.md "Freshness-bump carve-out"): 6.11.0 -> 7.0.0-preview.1 is the breaking-major adoption
+    of the mcp-authorize connection layer. In 7.0 ConnectionConfig's static bearer becomes a credential
+    PROVIDER (the migrated call sites live in Host/SidecarHost.cs); this PR migrates the existing
+    static-token flow onto that new API shape, behavior-preserving, with NO new auth features (RFC 8628
+    device flow, machine credential store, etc. land in later PRs). 7.0.0-preview.1
+    transitively requires ReflectorNet >= 5.3.2, so its explicit pin advances 5.3.1 -> 5.3.2 in the
+    same bump (NU1605 downgrade otherwise). Both versions are published on nuget.org. The Godot-MCP
+    lockstep is temporarily broken until the sibling Godot adoption PR lands.
   -->
   <ItemGroup>
-    <PackageReference Include="com.IvanMurzak.ReflectorNet" Version="5.3.1" />
-    <PackageReference Include="com.IvanMurzak.McpPlugin" Version="6.11.0" />
+    <PackageReference Include="com.IvanMurzak.ReflectorNet" Version="5.3.2" />
+    <PackageReference Include="com.IvanMurzak.McpPlugin" Version="7.0.0-preview.1" />
   </ItemGroup>
 
   <!-- The xUnit suite exercises a couple of internal helpers (e.g. ProxyTool.CalculateTokenCount). -->

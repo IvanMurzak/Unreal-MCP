@@ -197,11 +197,11 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             using var cts = new CancellationTokenSource();
             cts.Cancel();
             await host.CommitAuthorizedSessionAsync("cloud-bearer-abc", cts.Token);
-            Assert.Null(host.Config.Token); // the guard bailed — the just-cancelled bearer is NOT stored
+            Assert.Null(host.CurrentBearer); // the guard bailed — the just-cancelled bearer is NOT stored
 
             // Control: an uncancelled commit DOES store the bearer, proving the guard (not a no-op) blocks it.
             await host.CommitAuthorizedSessionAsync("cloud-bearer-abc", CancellationToken.None);
-            Assert.Equal("cloud-bearer-abc", host.Config.Token);
+            Assert.Equal("cloud-bearer-abc", host.CurrentBearer);
         }
 
         [Theory]
@@ -251,7 +251,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
 
             await host.CommitAuthorizedSessionAsync("cloud-bearer-abc", CancellationToken.None);
 
-            Assert.Equal("cloud-bearer-abc", host.Config.Token); // the authorized bearer is stored even while disarmed
+            Assert.Equal("cloud-bearer-abc", host.CurrentBearer); // the authorized bearer is stored even while disarmed
             Assert.False(host.Config.KeepConnected); // and the disarmed intent is untouched — no silent re-arm
         }
     }

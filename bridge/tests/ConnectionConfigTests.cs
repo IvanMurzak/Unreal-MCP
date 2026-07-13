@@ -51,7 +51,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             // The cloud serves the SignalR hub behind the /mcp nginx prefix, so the McpPlugin connection host
             // MUST carry it (the client appends /hub/mcp-server) — otherwise it dials the frontend SPA → 404.
             Assert.Equal("https://ai-game.dev/mcp", host.Config.Host);
-            Assert.Equal("cloud-bearer", host.Config.Token);
+            Assert.Equal("cloud-bearer", host.CurrentBearer);
         }
 
         [Fact]
@@ -100,7 +100,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             // Custom mode uses the host VERBATIM — no /mcp hub suffix (a local/self-hosted server exposes the
             // hub at the root, mirroring Unity/Godot Custom mode).
             Assert.Equal("http://localhost:5200", host.Config.Host);
-            Assert.Equal("custom-bearer", host.Config.Token);
+            Assert.Equal("custom-bearer", host.CurrentBearer);
         }
 
         [Fact]
@@ -110,7 +110,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             host.ApplyConnectionConfig(Config("Custom", host: "http://localhost:5200", cloudUrl: null, token: ""));
 
             Assert.Equal("http://localhost:5200", host.Config.Host);
-            Assert.Null(host.Config.Token); // Custom+None sends no bearer (plugin resolved token to empty)
+            Assert.Null(host.CurrentBearer); // Custom+None sends no bearer (plugin resolved token to empty)
         }
 
         [Fact]
@@ -121,7 +121,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             host.ApplyConnectionConfig(new JsonObject { ["mode"] = "Custom" }); // no host/cloudUrl/token
 
             Assert.Equal("http://localhost:5170", host.Config.Host);
-            Assert.Equal("env-token", host.Config.Token);
+            Assert.Equal("env-token", host.CurrentBearer);
         }
 
         [Fact]
@@ -158,10 +158,10 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         {
             using var host = BuildHost();
             host.ApplyConnectionConfig(Config("Cloud", host: null, cloudUrl: "https://ai-game.dev", token: "cloud-bearer"));
-            Assert.Equal("cloud-bearer", host.Config.Token);
+            Assert.Equal("cloud-bearer", host.CurrentBearer);
 
             host.HandleAuthMessage(IpcProtocol.Type.AuthRevoke);
-            Assert.Null(host.Config.Token);
+            Assert.Null(host.CurrentBearer);
         }
 
         [Theory]
@@ -173,7 +173,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             host.ApplyConnectionConfig(Config("Custom", host: "http://localhost:5200", cloudUrl: null, token: "keep"));
 
             host.HandleAuthMessage(type); // must not throw and must not touch the bearer
-            Assert.Equal("keep", host.Config.Token);
+            Assert.Equal("keep", host.CurrentBearer);
         }
 
         // --- AppendCloudHubPath / StripCloudHubPath helper specs (the /mcp hub-prefix round-trip) -----------

@@ -165,13 +165,21 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         }
 
         [Fact]
-        public void Status_WhenStale_ReportsReconfigureNeeded_AndPrependsAReconfigurationAlert()
+        public void Status_ConnectionSettingDrift_StaysConfigured_Under7xDeterministicUrl()
         {
-            // A stale config = an entry detected on disk that no longer matches the current connection settings.
-            // We drive this hermetically through claude-code, whose config is the project-local .mcp.json under the
-            // isolated temp _projectRoot (no host-home dependency) — mirroring the shared library's authoritative
-            // ReconfigureNeeded test (MCP-Plugin-dotnet AgentConfiguratorDescriptionTests.Status_StaleConfigOnDisk_*).
-            // Configure once at one Host so the entry lands on disk...
+            // McpPlugin 7.0 (mcp-authorize) made the written HTTP config URL project-DETERMINISTIC — a project pin
+            // + a derived per-project port (SHA256(projectRoot) → 20000–29999) and NO embedded token — so the raw
+            // host/port carried in the settings no longer drives the on-disk entry (the library writes e.g.
+            // `http://localhost:<derived>/mcp/p/<pin>`). Consequence: a connection-setting change alone (here a
+            // different Host, same project root) no longer makes the entry "stale" — the desired URL recomputes
+            // identically from the same project, so the shared library reports Configured, NOT ReconfigureNeeded,
+            // and emits no "Reconfiguration Required" alert. (Pre-7.0 this exact scenario returned ReconfigureNeeded;
+            // this test was updated when the 7.0 dependency was adopted. `AgentConfigService.Describe` is unchanged
+            // and still forwards whatever tri-state the library produces — it just no longer produces ReconfigureNeeded
+            // for host/port drift. The engine-side reconciliation of the new config model — MapSettings token drop,
+            // the 8080→derived-port migration — is a later mcp-authorize PR; this locks the adopted 7.0 behavior so
+            // that later change is deliberate.)
+            // Configure once so the entry lands on disk (project-local .mcp.json under the isolated temp _projectRoot)...
             var configure = _service.HandleConfigure(new AgentConfigureRequestMessage
             {
                 RequestId = "r2c-cfg", AgentId = "claude-code", Transport = "streamableHttp",
@@ -180,7 +188,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             Assert.True(configure.Ok);
             Assert.True(configure.Description!.IsConfigured);
 
-            // ...then describe with a DIFFERENT Host: the entry is detected but no longer matches → ReconfigureNeeded.
+            // ...then describe with a DIFFERENT Host: under 7.0 the entry is still detected AND still matches (the URL
+            // derives from the project, not this host), so it stays Configured with no reconfiguration alert.
             var result = _service.HandleStatus(new AgentStatusRequestMessage
             {
                 RequestId = "r2c", AgentId = "claude-code", Transport = "streamableHttp",
@@ -189,11 +198,9 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
 
             Assert.True(result.Ok);
             var d = result.Description!;
-            Assert.Equal("ReconfigureNeeded", d.Status);
-            // The library prepends a "Reconfiguration Required" section whose first item is an Alert-kind line.
-            var reconfig = d.Sections.FirstOrDefault(s => s.Heading == "Reconfiguration Required");
-            Assert.NotNull(reconfig);
-            Assert.Contains(reconfig!.Items, i => i.Kind == "Alert");
+            Assert.True(d.IsConfigured);
+            Assert.Equal("Configured", d.Status);
+            Assert.DoesNotContain(d.Sections, s => s.Heading == "Reconfiguration Required");
         }
 
         [Fact]
