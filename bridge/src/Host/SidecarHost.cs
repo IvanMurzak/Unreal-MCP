@@ -70,6 +70,15 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             GenerateSkillFiles = false,
         };
 
+        // McpPlugin 7.0 removed the static ConnectionConfig.Token string; the connection layer now pulls the
+        // bearer from ConnectionConfig.CredentialProvider (a Func<Task<string?>>) on each dial. The sidecar still
+        // resolves a STATIC bearer — the plugin pushes the effective token over IPC (§8), and the full device-flow
+        // / machine-credential-store auth lands in later mcp-authorize PRs — so we hold that bearer here and expose
+        // it through the provider wired in the constructor. Volatile-guarded: the provider callback runs on the
+        // connection layer's thread while the IPC reader thread / transition tasks mutate it (the same cross-thread
+        // access the pre-7.0 auto-property already had, now made explicit).
+        private string? _bearerToken;
+
         private IMcpPlugin? _plugin;
         private ManifestRegistrar? _registrar;
         // §A.1 (P1) prompt manifest registrar. Null when the built McpPlugin has no PromptManager (defensive —
@@ -165,6 +174,12 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             _fallbackHost = fallbackHost;
             _fallbackToken = fallbackToken;
             _clientLabel = clientLabel;
+            // McpPlugin 7.0: the connection layer pulls the bearer from ConnectionConfig.CredentialProvider on each
+            // dial instead of reading a static ConnectionConfig.Token. Wire it once, here, to the sidecar's resolved
+            // bearer so the SAME token the plugin pushes over IPC (or the Build()-time env fallback) flows to SignalR,
+            // behavior-identical to the pre-7.0 static-token path. The provider's return type is Task<string?>, so a
+            // null bearer flows through as null → anonymous connection, exactly as the old null ConnectionConfig.Token did.
+            _config.CredentialProvider = () => Task.FromResult<string?>(BearerToken);
             // Default to the real IPC send; SetStatusEmitterForTest swaps it in the xUnit suite.
             _statusEmitter = status => _ipc.SendToPluginAsync(status, CancellationToken.None);
             _agentConfig = new AgentConfigService(loggerProvider?.CreateLogger(nameof(AgentConfigService)));
@@ -183,6 +198,26 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
 
         public IMcpPlugin? Plugin => _plugin;
         public ConnectionConfig Config => _config;
+
+        /// <summary>
+        /// The static bearer the sidecar currently holds — the value <see cref="ConnectionConfig.CredentialProvider"/>
+        /// returns to the connection layer (McpPlugin 7.0 replaced the old <c>ConnectionConfig.Token</c> string with
+        /// this async provider callback). Volatile so the provider's cross-thread read sees the latest write.
+        /// </summary>
+        private string? BearerToken
+        {
+            get => Volatile.Read(ref _bearerToken);
+            set => Volatile.Write(ref _bearerToken, value);
+        }
+
+        /// <summary>
+        /// Test seam: the bearer the connection layer would resolve from <see cref="ConnectionConfig.CredentialProvider"/>
+        /// right now, obtained by invoking the provider (so it proves the provider is wired to the stored bearer, not
+        /// merely that the field is set). The sidecar's provider completes synchronously (a <see cref="Task.FromResult{TResult}"/>),
+        /// so this never blocks. Replaces the pre-7.0 <c>host.Config.Token</c> the bridge xUnit suite asserted.
+        /// </summary>
+        internal string? CurrentBearer =>
+            _config.CredentialProvider is { } provider ? provider().GetAwaiter().GetResult() : null;
 
         /// <summary>
         /// Test seam: substitute a fake <see cref="IMcpPlugin"/> for the real one <see cref="Build"/> creates,
@@ -220,7 +255,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             if (!string.IsNullOrWhiteSpace(_fallbackHost))
                 _config.Host = _fallbackHost!;
             if (!string.IsNullOrWhiteSpace(_fallbackToken))
-                _config.Token = _fallbackToken;
+                BearerToken = _fallbackToken;
 
             // ProxyTools are schema-blind (raw JSON in/out, §2.1), so a bare reflector suffices — no
             // engine type converters are needed sidecar-side.
@@ -331,13 +366,13 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             // armed must also re-dial (below) — otherwise SignalR stays bound to the stale endpoint.
             var wasKeepConnected = _config.KeepConnected;
             var priorHost = _config.Host;
-            var priorToken = _config.Token;
+            var priorToken = BearerToken;
             ApplyConnectionConfig(config);
             _logger?.LogInformation("Applied updated connection config (mode-aware host {Host}).", _config.Host);
 
             var hostOrTokenChanged =
                 !string.Equals(priorHost, _config.Host, StringComparison.Ordinal) ||
-                !string.Equals(priorToken, _config.Token, StringComparison.Ordinal);
+                !string.Equals(priorToken, BearerToken, StringComparison.Ordinal);
 
             switch (DecideConfigTransition(wasKeepConnected, _config.KeepConnected, hostOrTokenChanged))
             {
@@ -416,9 +451,11 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
                 _config.Host = isCloud ? AppendCloudHubPath(selected!) : selected!;
 
             // Token: the plugin already applied mode+auth resolution (empty in Custom+None). An absent key
-            // leaves the existing token; an explicit empty value clears it (anonymous connection).
+            // leaves the existing token; an explicit empty value clears it (anonymous connection). The resolved
+            // bearer flows to SignalR through ConnectionConfig.CredentialProvider (McpPlugin 7.0), which reads
+            // this stored value on the next dial.
             if (token != null)
-                _config.Token = string.IsNullOrEmpty(token) ? null : token;
+                BearerToken = string.IsNullOrEmpty(token) ? null : token;
 
             if (config["keepConnected"] is JsonValue keepNode && keepNode.TryGetValue<bool>(out var keepConnected))
                 _config.KeepConnected = keepConnected;
@@ -476,7 +513,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
                 case IpcProtocol.Type.AuthRevoke:
                     _authCts?.Cancel();
                     // Clear the stored cloud bearer so a subsequent (re)connect is anonymous until re-authorized.
-                    _config.Token = null;
+                    BearerToken = null;
                     _logger?.LogInformation("Cloud token revoked (auth-revoke); cleared the in-memory bearer.");
                     break;
             }
@@ -604,7 +641,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         {
             if (ct.IsCancellationRequested)
                 return;
-            _config.Token = token; // the issued cloud bearer is NEVER logged (§8)
+            BearerToken = token; // the issued cloud bearer is NEVER logged (§8)
             // Re-dial (only when still armed) and surface the HONEST status + the cloud-authorized indicator. When
             // the user is DISARMED — they clicked Disconnect (keepConnected=false) before authorizing — store the
             // bearer WITHOUT dialing: claiming Connected here would build a live link Disconnect could never tear
@@ -1015,7 +1052,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
                     // §7 live status: surface the connection result to the plugin's view-model. Only a CLOUD-mode
                     // bearer is a cloud authorization — a Custom-mode token is a local bearer and must NOT light the
                     // "Authorized — cloud token stored" indicator (ApplyStatus latches it and never demotes).
-                    var cloudAuthState = _isCloudMode && !string.IsNullOrEmpty(_config.Token) ? "Authorized" : null;
+                    var cloudAuthState = _isCloudMode && !string.IsNullOrEmpty(BearerToken) ? "Authorized" : null;
                     await EmitStatusAsync(ok ? "Connected" : "Connecting", cloudAuthState).ConfigureAwait(false);
                     // §7 (issue #109): once connected, seed the AI-agent roster (with retry/backoff) so the row is
                     // populated even before the first OnClientsChanged push. Fire-and-forget on a background task —
