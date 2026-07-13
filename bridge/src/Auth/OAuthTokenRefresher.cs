@@ -65,7 +65,6 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Auth
 
             var baseUrl = serverTarget.TrimEnd('/');
 
-            HttpResponseMessage response;
             string json;
             try
             {
@@ -77,7 +76,9 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Auth
                     new KeyValuePair<string, string>("refresh_token", refreshToken),
                     new KeyValuePair<string, string>("client_id", _clientId),
                 });
-                response = await _http.PostAsync($"{baseUrl}/oauth/token", content, cancellationToken).ConfigureAwait(false);
+                // Dispose the response (as DeviceCodeAuthenticator does) so a long-lived session's proactive/on-401
+                // refreshes do not leak the HttpResponseMessage + its pooled connection until finalization.
+                using var response = await _http.PostAsync($"{baseUrl}/oauth/token", content, cancellationToken).ConfigureAwait(false);
                 json = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
