@@ -9,8 +9,8 @@
 */
 
 using System;
+using System.Collections.Generic;
 using System.Net.Http;
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading;
@@ -21,12 +21,15 @@ using Microsoft.Extensions.Logging;
 namespace com.IvanMurzak.Unreal.MCP.Bridge.Auth
 {
     /// <summary>
-    /// The real Cloud device-code authorization flow (docs/ARCHITECTURE.md §7 item 4 / §1.3), replacing PR #8's
-    /// <c>auth-start</c> / <c>auth-cancel</c> / <c>auth-revoke</c> stubs for the happy path. It is the RFC 8628
-    /// device-authorization grant against the ai-game.dev cloud — the SAME contract Unity-MCP's
-    /// <c>DeviceAuthService</c> uses: <c>POST {cloudUrl}/api/auth/device/authorize</c> →
-    /// <c>POST {cloudUrl}/api/auth/device/token</c> polled until an <c>access_token</c> is issued, the flow is
-    /// denied/expired, or it is cancelled.
+    /// The Cloud device-authorization sign-in flow (docs/ARCHITECTURE.md §7 / .claude/design/mcp-authorize
+    /// 03-auth-flows.md Flow B), on the **RFC 8628-conformant** ai-game.dev alias:
+    /// <c>POST {base}/oauth/device_authorization</c> (form: <c>client_id</c> + <c>scope=mcp:plugin</c>) →
+    /// <c>POST {base}/oauth/token</c> polled with the device-code grant
+    /// (<c>grant_type=urn:ietf:params:oauth:grant-type:device_code</c>) until the AS issues an ES256 JWT
+    /// (<c>access_token</c>, <c>aud=urn:agd:hub</c>) + a <c>refresh_token</c>, the flow is denied/expired,
+    /// or it is cancelled. This replaces the legacy <c>/api/auth/device/*</c> opaque-token path (retired with
+    /// the mcp-authorize breaking release); the caller persists the issued refresh token into the shared
+    /// machine credential store so sign-in happens once per machine (D12).
     ///
     /// As each step progresses it invokes the <c>emit</c> callback with a <see cref="DeviceAuthMessage"/> so the
     /// sidecar can forward it to the plugin (which renders the verification URL + user code, §7). The HTTP layer
@@ -35,13 +38,26 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Auth
     /// </summary>
     public sealed class DeviceCodeAuthenticator
     {
+        /// <summary>The public device-flow client identifier this engine plugin presents to the AS
+        /// (RFC 8628; the AS metadata advertises <c>token_endpoint_auth_methods_supported: ["none"]</c>,
+        /// so no client secret is used). The exact registered value is confirmed by the live-e2e against
+        /// the 9.0 server (mcp-authorize PR 6); the mocked-AS suites here do not depend on it.</summary>
+        public const string DefaultClientId = "unreal-mcp-plugin";
+
+        /// <summary>The device-flow scope that selects the ES256 MCP JWT + refresh-token response (design 03 Flow B).</summary>
+        public const string PluginScope = "mcp:plugin";
+
         private static readonly JsonSerializerOptions JsonOptions = new()
         {
             PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
             PropertyNameCaseInsensitive = true,
         };
 
+        private const string DeviceCodeGrantType = "urn:ietf:params:oauth:grant-type:device_code";
+
         private readonly HttpClient _http;
+        private readonly string _clientId;
+        private readonly string _scope;
         private readonly ILogger? _logger;
         private readonly Func<TimeSpan, CancellationToken, Task> _delay;
         private readonly Func<DateTimeOffset> _now;
@@ -50,9 +66,13 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Auth
             HttpClient http,
             ILogger? logger = null,
             Func<TimeSpan, CancellationToken, Task>? delay = null,
-            Func<DateTimeOffset>? now = null)
+            Func<DateTimeOffset>? now = null,
+            string clientId = DefaultClientId,
+            string scope = PluginScope)
         {
             _http = http ?? throw new ArgumentNullException(nameof(http));
+            _clientId = clientId;
+            _scope = scope;
             _logger = logger;
             _delay = delay ?? ((d, ct) => Task.Delay(d, ct));
             // Injectable like _delay so the xUnit suite can drive the expires_in deadline deterministically.
@@ -63,13 +83,12 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Auth
         /// Run the full device-code flow against <paramref name="cloudUrl"/>. Emits a <c>pending</c>
         /// device-auth (with the verification URL + user code) as soon as the authorize call returns, polls the
         /// token endpoint honouring the server's <c>interval</c> (and <c>slow_down</c>), and returns the issued
-        /// bearer on success. On denial / expiry / cancellation it emits a terminal <c>failed</c> (or the flow's
-        /// own cancellation) and returns a non-success result. Never throws for an expected protocol outcome;
-        /// a transport exception bubbles as a failed result with the message.
+        /// ES256 JWT + refresh token on success. On denial / expiry / cancellation it emits a terminal
+        /// <c>failed</c> (or the flow's own cancellation) and returns a non-success result. Never throws for an
+        /// expected protocol outcome; a transport exception bubbles as a failed result with the message.
         /// </summary>
         public async Task<DeviceAuthResult> AuthorizeAsync(
             string cloudUrl,
-            string? clientLabel,
             Func<DeviceAuthMessage, Task> emit,
             CancellationToken ct)
         {
@@ -81,7 +100,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Auth
             DeviceAuthorizeResponse authorize;
             try
             {
-                authorize = await InitiateAsync(baseUrl, clientLabel, ct).ConfigureAwait(false);
+                authorize = await InitiateAsync(baseUrl, ct).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -149,13 +168,14 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Auth
 
                 if (!string.IsNullOrEmpty(token.AccessToken))
                 {
+                    var expiresAt = token.ExpiresIn > 0 ? _now() + TimeSpan.FromSeconds(token.ExpiresIn) : (DateTimeOffset?)null;
                     await SafeEmit(emit, new DeviceAuthMessage
                     {
                         State = "authorized",
                         Token = token.AccessToken,
                     }).ConfigureAwait(false);
-                    _logger?.LogInformation("Device-code flow authorized; cloud token stored."); // token NEVER logged (§8)
-                    return DeviceAuthResult.Authorized(token.AccessToken!);
+                    _logger?.LogInformation("Device-code flow authorized; cloud credential issued."); // token/refresh NEVER logged (§8)
+                    return DeviceAuthResult.Authorized(token.AccessToken!, token.RefreshToken, expiresAt);
                 }
 
                 switch (token.Error)
@@ -182,13 +202,15 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Auth
             return DeviceAuthResult.Cancelled();
         }
 
-        private async Task<DeviceAuthorizeResponse> InitiateAsync(string baseUrl, string? clientLabel, CancellationToken ct)
+        private async Task<DeviceAuthorizeResponse> InitiateAsync(string baseUrl, CancellationToken ct)
         {
-            var body = clientLabel != null
-                ? JsonSerializer.Serialize(new { client_label = clientLabel }, JsonOptions)
-                : "{}";
-            using var content = new StringContent(body, Encoding.UTF8, "application/json");
-            using var response = await _http.PostAsync($"{baseUrl}/api/auth/device/authorize", content, ct).ConfigureAwait(false);
+            // RFC 8628 §3.1: application/x-www-form-urlencoded { client_id, scope }.
+            using var content = new FormUrlEncodedContent(new[]
+            {
+                new KeyValuePair<string, string>("client_id", _clientId),
+                new KeyValuePair<string, string>("scope", _scope),
+            });
+            using var response = await _http.PostAsync($"{baseUrl}/oauth/device_authorization", content, ct).ConfigureAwait(false);
             response.EnsureSuccessStatusCode();
             var json = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
             return JsonSerializer.Deserialize<DeviceAuthorizeResponse>(json, JsonOptions)
@@ -197,11 +219,15 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Auth
 
         private async Task<DeviceTokenResponse> PollAsync(string baseUrl, string deviceCode, CancellationToken ct)
         {
-            var body = JsonSerializer.Serialize(
-                new { device_code = deviceCode, grant_type = "urn:ietf:params:oauth:grant-type:device_code" },
-                JsonOptions);
-            using var content = new StringContent(body, Encoding.UTF8, "application/json");
-            using var response = await _http.PostAsync($"{baseUrl}/api/auth/device/token", content, ct).ConfigureAwait(false);
+            // RFC 8628 §3.4: application/x-www-form-urlencoded device-code grant. The token endpoint returns a
+            // 400 with { error } while pending — do NOT EnsureSuccessStatusCode; read + decode the body either way.
+            using var content = new FormUrlEncodedContent(new[]
+            {
+                new KeyValuePair<string, string>("grant_type", DeviceCodeGrantType),
+                new KeyValuePair<string, string>("device_code", deviceCode),
+                new KeyValuePair<string, string>("client_id", _clientId),
+            });
+            using var response = await _http.PostAsync($"{baseUrl}/oauth/token", content, ct).ConfigureAwait(false);
             var json = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
             return JsonSerializer.Deserialize<DeviceTokenResponse>(json, JsonOptions)
                 ?? throw new InvalidOperationException("Empty device token response.");
@@ -227,21 +253,29 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Auth
         public sealed class DeviceTokenResponse
         {
             [JsonPropertyName("access_token")] public string? AccessToken { get; set; }
+            [JsonPropertyName("refresh_token")] public string? RefreshToken { get; set; }
             [JsonPropertyName("token_type")] public string? TokenType { get; set; }
+            [JsonPropertyName("expires_in")] public int ExpiresIn { get; set; }
             [JsonPropertyName("error")] public string? Error { get; set; }
             [JsonPropertyName("error_description")] public string? ErrorDescription { get; set; }
         }
     }
 
-    /// <summary>Terminal outcome of a device-code flow. The token is present only on <see cref="Success"/>.</summary>
+    /// <summary>
+    /// Terminal outcome of a device-code flow. The credential (access token + refresh token + expiry) is present
+    /// only on <see cref="Success"/>; the caller persists it into the machine credential store (D12).
+    /// </summary>
     public sealed class DeviceAuthResult
     {
         public bool Success { get; private init; }
         public bool WasCancelled { get; private init; }
         public string? Token { get; private init; }
+        public string? RefreshToken { get; private init; }
+        public DateTimeOffset? ExpiresAt { get; private init; }
         public string? Error { get; private init; }
 
-        public static DeviceAuthResult Authorized(string token) => new() { Success = true, Token = token };
+        public static DeviceAuthResult Authorized(string token, string? refreshToken = null, DateTimeOffset? expiresAt = null) =>
+            new() { Success = true, Token = token, RefreshToken = refreshToken, ExpiresAt = expiresAt };
         public static DeviceAuthResult Cancelled() => new() { WasCancelled = true, Error = "cancelled" };
         public static DeviceAuthResult Failed(string error) => new() { Error = error };
 
