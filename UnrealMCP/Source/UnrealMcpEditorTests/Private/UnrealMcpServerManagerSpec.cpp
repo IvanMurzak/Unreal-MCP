@@ -175,7 +175,7 @@ void FUnrealMcpServerManagerSpec::Define()
 	{
 		It("is pinned to the lockstep value (kept in sync with cli/src/lib/server-version.ts)", [this]()
 		{
-			TestEqual(TEXT("pinned server version"), FString(FUnrealMcpServerManager::ServerVersion), FString(TEXT("8.0.3")));
+			TestEqual(TEXT("pinned server version"), FString(FUnrealMcpServerManager::ServerVersion), FString(TEXT("9.0.0")));
 		});
 	});
 
