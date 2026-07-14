@@ -16,6 +16,7 @@
 import type { ExtensionDescriptor } from '../utils/extensions-catalog.js';
 import type { InstallSourceKind } from '../utils/extension-source.js';
 import type { DismissOutcome, DismissPlatform, UnrealStartupDialogKey } from '../utils/startup-dialog-dismiss.js';
+import type { EnrollOptions, EnrollResult } from './enroll.js';
 
 export type ResultKind = 'success' | 'failure';
 
@@ -243,8 +244,34 @@ export interface InstallPluginOptions {
   pluginSourceDir?: string;
   /** Junction (dev) instead of copy. Windows only. Default `false`. */
   junction?: boolean;
-  /** Injectable fetch for tests (download path only). */
+  /**
+   * `--with-server`: after installing the plugin, download the RID-matched
+   * `gamedev-mcp-server` binary into the CLI-managed dir (checksum-verified via
+   * the existing SHA256SUMS flow), so an offline user needs no .NET SDK (D12).
+   */
+  withServer?: boolean;
+  /** `--server-version <v>`: server version to download for `--with-server`. Defaults to the pinned `SERVER_VERSION`. */
+  serverVersion?: string;
+  /** `--server-source <path-or-url>`: offline/CI escape hatch for the `--with-server` download (see `DownloadServerOptions.source`). */
+  serverSource?: string;
+  /**
+   * `--enroll <code>` / `--enroll-stdin`: redeem a D13 enrollment code for a
+   * plugin credential (→ shared machine store + project marker + pin upsert). No
+   * browser hop. The code is single-use and burns on the first attempt.
+   */
+  enrollCode?: string;
+  /** Auth base URL for `--enroll` (defaults to `https://ai-game.dev`). Test injection. */
+  baseUrl?: string;
+  /** Override the machine credential store base dir for `--enroll` (default `~/.ai-game-dev`). Test injection. */
+  storeBaseDir?: string;
+  /** Injectable fetch for tests (plugin download + server download + enroll). */
   fetchImpl?: typeof fetch;
+  /** Injectable clock for the enrollment credential's `expiresAt`. Test injection. */
+  nowImpl?: () => number;
+  /** Inject the `--with-server` acquisition (defaults to `downloadServer`). Test injection. */
+  downloadServerImpl?: (opts: DownloadServerOptions) => Promise<DownloadServerResult>;
+  /** Inject the `--enroll` redemption (defaults to `enrollPlugin`). Test injection. */
+  enrollImpl?: (opts: EnrollOptions) => Promise<EnrollResult>;
   onProgress?: ProgressCallback;
 }
 
@@ -254,6 +281,18 @@ export interface InstallPluginSuccess {
   /** Absolute path to `<project>/Plugins/UnrealMCP`. */
   installedPath: string;
   mode: 'copy' | 'junction';
+  /** `--with-server`: absolute path of the downloaded server binary, when acquired. */
+  serverPath?: string;
+  /** `--with-server`: installed server version, when acquired. */
+  serverVersion?: string | null;
+  /** `--enroll`: `true` when a credential was redeemed + persisted. */
+  enrolled?: boolean;
+  /** `--enroll`: the server-target URL the code was minted for. */
+  serverTarget?: string;
+  /** `--enroll`: the D14 routing pin derived for this project. */
+  pin?: string;
+  /** `--enroll`: project-local agent config files whose URL was pinned. */
+  pinnedConfigFiles?: string[];
   warnings: string[];
 }
 
@@ -398,6 +437,17 @@ export interface DownloadServerOptions {
   arch?: string;
   /** Server version to download. Defaults to the pinned `SERVER_VERSION`. */
   version?: string;
+  /**
+   * Offline / CI escape hatch (the `install-plugin --server-source` flag): a
+   * local path or URL supplying the server binary directly instead of the
+   * pinned GitHub release. Accepts a local `.zip`, an already-extracted
+   * directory, a bare binary file, or an `http(s)://` URL to a `.zip`. Because
+   * it is an EXPLICIT user-provided artifact, the release `SHA256SUMS` gate is
+   * skipped for this path (the gate protects the DEFAULT download only). Wins
+   * over the network download; the `UNREAL_MCP_SERVER_PATH` env override still
+   * wins over this.
+   */
+  source?: string;
   /** Env source for the `UNREAL_MCP_SERVER_PATH` override (test injection). */
   env?: NodeJS.ProcessEnv;
   /** Inject the HTTP client (defaults to global `fetch`). */
@@ -413,7 +463,7 @@ export interface DownloadServerSuccess {
   /** Absolute path to the resolved server binary. */
   serverPath: string;
   /** How the binary was resolved. */
-  source: 'override' | 'cache' | 'download';
+  source: 'override' | 'cache' | 'download' | 'source';
   /** Installed server version (`null` for an override — version unknown/unchecked). */
   version: string | null;
   warnings: string[];

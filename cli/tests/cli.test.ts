@@ -1,19 +1,41 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import { execFileSync } from 'child_process';
+import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CLI_PATH = path.resolve(__dirname, '..', 'bin', 'unreal-mcp-cli.js');
 
-function runCli(args: string[]): { stdout: string; exitCode: number } {
+function runCli(args: string[], input?: string): { stdout: string; exitCode: number } {
   try {
-    const stdout = execFileSync('node', [CLI_PATH, ...args], { encoding: 'utf-8', timeout: 20000 });
+    const stdout = execFileSync('node', [CLI_PATH, ...args], {
+      encoding: 'utf-8',
+      timeout: 20000,
+      input: input ?? '',
+    });
     return { stdout, exitCode: 0 };
   } catch (err: unknown) {
     const e = err as { stdout?: string; stderr?: string; status?: number };
     return { stdout: (e.stdout ?? '') + (e.stderr ?? ''), exitCode: e.status ?? 1 };
   }
+}
+
+const cliDirs: string[] = [];
+afterEach(() => {
+  while (cliDirs.length) {
+    try {
+      fs.rmSync(cliDirs.pop()!, { recursive: true, force: true });
+    } catch {
+      /* ignore */
+    }
+  }
+});
+function cliTmp(): string {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'unreal-mcp-cli-int-'));
+  cliDirs.push(d);
+  return d;
 }
 
 const ALL_COMMANDS = [
@@ -72,4 +94,41 @@ describe('CLI integration', () => {
     expect(exitCode).toBe(0);
     expect(stdout).toContain('5.7');
   });
+
+  it('install-plugin --help lists the mcp-authorize flags', () => {
+    const { stdout, exitCode } = runCli(['install-plugin', '--help']);
+    expect(exitCode).toBe(0);
+    for (const flag of ['--with-server', '--server-version', '--server-source', '--enroll', '--enroll-stdin']) {
+      expect(stdout, `install-plugin --help should list ${flag}`).toContain(flag);
+    }
+  });
+
+  it('configure --help lists the --agent proxy flag', () => {
+    const { stdout, exitCode } = runCli(['configure', '--help']);
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain('--agent');
+  });
+
+  it('install-plugin rejects --enroll and --enroll-stdin together (before reading stdin)', () => {
+    const { stdout, exitCode } = runCli(['install-plugin', cliTmp(), '--enroll', 'x', '--enroll-stdin']);
+    expect(exitCode).toBe(1);
+    expect(stdout).toMatch(/either --enroll <code> or --enroll-stdin/i);
+  });
+
+  it('install-plugin --enroll-stdin reads the code from stdin (never argv) and attempts redemption', () => {
+    // A minimal local plugin source so the plugin install succeeds offline; enroll
+    // then redeems against an unreachable base-url → connection refused. The code
+    // is delivered ONLY on stdin, proving --enroll-stdin keeps it out of argv.
+    const project = cliTmp();
+    const source = cliTmp();
+    fs.writeFileSync(path.join(source, 'UnrealMCP.uplugin'), JSON.stringify({ VersionName: '0.1.0' }));
+    const { stdout, exitCode } = runCli(
+      ['install-plugin', project, '--plugin-source', source, '--enroll-stdin', '--base-url', 'http://127.0.0.1:9'],
+      'STDIN-ENROLL-CODE',
+    );
+    // Plugin materialized; enrollment attempted and failed on the refused connection.
+    expect(fs.existsSync(path.join(project, 'Plugins', 'UnrealMCP', 'UnrealMCP.uplugin'))).toBe(true);
+    expect(exitCode).toBe(1);
+    expect(stdout).toMatch(/enrollment failed/i);
+  }, 20000);
 });

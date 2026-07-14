@@ -13,9 +13,12 @@ import { asError } from '../utils/error.js';
 import { isSymlink } from '../utils/fs.js';
 import { emitProgress } from './progress.js';
 import { resolvePluginSource } from './plugin-source.js';
+import { downloadServer } from './download-server.js';
+import { enrollPlugin } from './enroll.js';
 import type {
   InstallPluginOptions,
   InstallPluginResult,
+  InstallPluginSuccess,
   RemovePluginOptions,
   RemovePluginResult,
 } from './types.js';
@@ -154,7 +157,11 @@ export async function installPlugin(opts: InstallPluginOptions): Promise<Install
     if (useJunction) {
       fs.symlinkSync(pluginSourceDir, installedPath, 'junction');
       emitProgress(opts.onProgress, { phase: 'done', message: 'Plugin junctioned.' });
-      return { kind: 'success', success: true, installedPath, mode: 'junction', warnings };
+      return await postInstall(
+        { kind: 'success', success: true, installedPath, mode: 'junction', warnings },
+        opts,
+        projectDir,
+      );
     }
 
     // If the copy THROWS after the old install was rm'd and the bridge stashed,
@@ -205,7 +212,11 @@ export async function installPlugin(opts: InstallPluginOptions): Promise<Install
     }
 
     emitProgress(opts.onProgress, { phase: 'done', message: 'Plugin copied.' });
-    return { kind: 'success', success: true, installedPath, mode: 'copy', warnings };
+    return await postInstall(
+      { kind: 'success', success: true, installedPath, mode: 'copy', warnings },
+      opts,
+      projectDir,
+    );
   } catch (err: unknown) {
     return {
       kind: 'failure',
@@ -216,6 +227,76 @@ export async function installPlugin(opts: InstallPluginOptions): Promise<Install
   } finally {
     cleanupSource?.();
   }
+}
+
+/**
+ * Run the post-plugin-install add-ons the `install-plugin` flags request, in
+ * order: `--with-server` (best-effort — a download failure degrades to a warning,
+ * the plugin is already in), then `--enroll` (a failure IS surfaced — the user
+ * explicitly asked to redeem a credential, and a bad/spent code must not read as
+ * success). `base` is the already-successful plugin install; its `warnings` array
+ * is mutated in place. Never throws.
+ */
+async function postInstall(
+  base: InstallPluginSuccess,
+  opts: InstallPluginOptions,
+  projectDir: string,
+): Promise<InstallPluginResult> {
+  // --with-server: acquire the RID-matched gamedev-mcp-server into the managed
+  // dir (SHA256SUMS-verified). Best-effort: a failure warns but keeps the install.
+  if (opts.withServer) {
+    const download = opts.downloadServerImpl ?? downloadServer;
+    const dl = await download({
+      projectDir,
+      version: opts.serverVersion,
+      source: opts.serverSource,
+      fetchImpl: opts.fetchImpl,
+      onProgress: opts.onProgress,
+    });
+    if (dl.kind === 'success') {
+      base.warnings.push(...dl.warnings);
+      base.serverPath = dl.serverPath;
+      base.serverVersion = dl.version;
+    } else {
+      base.warnings.push(
+        `--with-server: could not download the gamedev-mcp-server binary: ${dl.error.message}. ` +
+          `The plugin is installed; re-run once the download can succeed or use --server-source.`,
+      );
+    }
+  }
+
+  // --enroll: redeem the code → machine store + marker + pin. A failure is
+  // surfaced as an overall failure (the plugin/server are still installed).
+  if (opts.enrollCode !== undefined) {
+    const enroll = opts.enrollImpl ?? enrollPlugin;
+    const er = await enroll({
+      enrollCode: opts.enrollCode,
+      projectDir,
+      baseUrl: opts.baseUrl,
+      storeBaseDir: opts.storeBaseDir,
+      fetchImpl: opts.fetchImpl,
+      nowImpl: opts.nowImpl,
+      onProgress: opts.onProgress,
+    });
+    if (er.kind === 'success') {
+      base.enrolled = true;
+      base.serverTarget = er.serverTarget;
+      base.pin = er.pin;
+      base.pinnedConfigFiles = er.pinnedConfigFiles;
+      base.warnings.push(...er.warnings);
+    } else {
+      return {
+        kind: 'failure',
+        success: false,
+        warnings: base.warnings,
+        error: new Error(
+          `Plugin installed at ${base.installedPath}, but enrollment failed (${er.reason}): ${er.error.message}`,
+        ),
+      };
+    }
+  }
+
+  return base;
 }
 
 export async function removePlugin(opts: RemovePluginOptions): Promise<RemovePluginResult> {

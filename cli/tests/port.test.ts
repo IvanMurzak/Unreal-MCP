@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { generatePortFromDirectory, normalizeProjectRoot } from '../src/utils/port.js';
+import { generatePortFromDirectory, normalizeProjectRoot, deriveProjectPin } from '../src/utils/port.js';
 
 describe('generatePortFromDirectory', () => {
   it('is deterministic and in the 20000-29999 range', () => {
@@ -59,5 +59,32 @@ describe('generatePortFromDirectory — ProjectIdentity golden-vector parity', (
     // The naive path a bad port would hash: 'İ'.toLowerCase() === 'i̇'.
     expect(normalizeProjectRoot('/home/İstanbul/game')).toContain('İ');
     expect(normalizeProjectRoot('/home/İstanbul/game')).not.toContain('̇');
+  });
+});
+
+// The D14 routing pin shares the ProjectIdentity derivation with the port, so it
+// is gated by the SAME golden vectors (ProjectIdentity.GoldenVectors.json `pin`
+// field). `deriveProjectPin` MUST reproduce every `pin` byte-for-byte.
+describe('deriveProjectPin — ProjectIdentity golden-vector parity', () => {
+  const VECTORS: ReadonlyArray<{ path: string; pin: string; note: string }> = [
+    { path: '/home/user/my-game', pin: '34ea75f2', note: 'POSIX typical project path' },
+    { path: '/home/user/my-game/', pin: '34ea75f2', note: 'trailing slash trimmed → identical' },
+    { path: '/home/USER/My-Game', pin: '34ea75f2', note: 'case-folded → identical' },
+    { path: 'C:\\Users\\user\\my-game', pin: '8ef72cf7', note: 'Windows backslash form' },
+    { path: 'C:\\Users\\user\\my-game\\', pin: '8ef72cf7', note: 'trailing backslash trimmed → identical' },
+    { path: 'C:/Users/user/my-game', pin: '5a87324e', note: 'forward-slash form DIFFERS (separators not normalized)' },
+    { path: '/home/İstanbul/game', pin: '672d80a7', note: 'U+0130 — ToLowerInvariant leaves it unchanged' },
+    { path: '/srv/games/space sim', pin: '08c6cbb6', note: 'path containing a space' },
+  ];
+
+  for (const v of VECTORS) {
+    it(`derives ${v.pin} for ${JSON.stringify(v.path)} (${v.note})`, () => {
+      expect(deriveProjectPin(v.path)).toBe(v.pin);
+    });
+  }
+
+  it('is 8 lowercase hex chars and independent of any port override', () => {
+    const pin = deriveProjectPin('/home/user/my-game');
+    expect(pin).toMatch(/^[0-9a-f]{8}$/);
   });
 });

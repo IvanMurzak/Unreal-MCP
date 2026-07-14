@@ -74,3 +74,23 @@ export function generatePortFromDirectory(dir: string): number {
   const uint32 = hash.readUInt32LE(0);
   return MIN_PORT + (uint32 % PORT_RANGE);
 }
+
+/** Number of hex characters in the routing pin (first 4 bytes of the hash). */
+export const PROJECT_PIN_LENGTH = 8;
+
+/**
+ * The D14 routing **pin** for a project directory: the first 4 bytes of the
+ * SHA-256 of the normalized project root, rendered as 8 lowercase hex chars.
+ * The pin is NEVER affected by a port override — it is purely hash-derived.
+ *
+ * Byte-for-byte identical to the shared `ProjectIdentity.DerivePin`
+ * (`McpPlugin/src/AgentConfig/ProjectIdentity.cs`, `ToHex(hash, 4)`), gated by
+ * the same golden vectors that pin `generatePortFromDirectory`, so the pin the
+ * CLI writes into an agent config's `/p/<pin>` URL segment routes to the SAME
+ * project's engine the plugin reports in its hub instance-metadata handshake.
+ * Pure.
+ */
+export function deriveProjectPin(dir: string): string {
+  const hash = createHash('sha256').update(normalizeProjectRoot(dir), 'utf-8').digest();
+  return hash.subarray(0, PROJECT_PIN_LENGTH / 2).toString('hex');
+}

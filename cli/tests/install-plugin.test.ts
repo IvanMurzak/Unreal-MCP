@@ -207,3 +207,111 @@ describe('removePlugin', () => {
     if (r.kind === 'success') expect(r.removed).toBe(false);
   });
 });
+
+describe('installPlugin --with-server', () => {
+  it('downloads the server after the plugin install and records its path', async () => {
+    const project = tmp();
+    const source = makePluginSource();
+    let called: unknown;
+    const r = await installPlugin({
+      projectDir: project,
+      pluginSourceDir: source,
+      withServer: true,
+      serverVersion: '9.0.0',
+      downloadServerImpl: async (opts) => {
+        called = opts;
+        return { kind: 'success', success: true, serverPath: '/managed/gamedev-mcp-server.exe', source: 'download', version: '9.0.0', warnings: [] };
+      },
+    });
+    expect(r.kind).toBe('success');
+    if (r.kind !== 'success') return;
+    expect(r.serverPath).toBe('/managed/gamedev-mcp-server.exe');
+    expect(r.serverVersion).toBe('9.0.0');
+    expect((called as { projectDir: string }).projectDir).toBe(project);
+    expect((called as { version?: string }).version).toBe('9.0.0');
+  });
+
+  it('forwards --server-source to the download resolver', async () => {
+    const project = tmp();
+    const source = makePluginSource();
+    let seenSource: string | undefined;
+    await installPlugin({
+      projectDir: project,
+      pluginSourceDir: source,
+      withServer: true,
+      serverSource: '/local/server.zip',
+      downloadServerImpl: async (opts) => {
+        seenSource = opts.source;
+        return { kind: 'success', success: true, serverPath: '/x', source: 'source', version: '9.0.0', warnings: [] };
+      },
+    });
+    expect(seenSource).toBe('/local/server.zip');
+  });
+
+  it('degrades a server-download failure to a warning (plugin still installed)', async () => {
+    const project = tmp();
+    const source = makePluginSource();
+    const r = await installPlugin({
+      projectDir: project,
+      pluginSourceDir: source,
+      withServer: true,
+      downloadServerImpl: async () => ({ kind: 'failure', success: false, warnings: [], error: new Error('offline') }),
+    });
+    expect(r.kind).toBe('success');
+    if (r.kind === 'success') {
+      expect(r.serverPath).toBeUndefined();
+      expect(r.warnings.join(' ')).toMatch(/--with-server/);
+    }
+  });
+});
+
+describe('installPlugin --enroll', () => {
+  it('redeems the code after the plugin install and records enrollment fields', async () => {
+    const project = tmp();
+    const source = makePluginSource();
+    let seenCode: string | undefined;
+    const r = await installPlugin({
+      projectDir: project,
+      pluginSourceDir: source,
+      enrollCode: 'ABCD-1234',
+      enrollImpl: async (opts) => {
+        seenCode = opts.enrollCode;
+        return {
+          kind: 'success',
+          success: true,
+          token: 't',
+          serverTarget: 'https://ai-game.dev',
+          credentialPath: '/store/credentials.json',
+          markerPath: path.join(opts.projectDir, '.ai-game-dev', 'project.json'),
+          pin: 'abcd1234',
+          pinnedConfigFiles: [path.join(opts.projectDir, '.mcp.json')],
+          warnings: [],
+        };
+      },
+    });
+    expect(r.kind).toBe('success');
+    if (r.kind !== 'success') return;
+    expect(seenCode).toBe('ABCD-1234');
+    expect(r.enrolled).toBe(true);
+    expect(r.serverTarget).toBe('https://ai-game.dev');
+    expect(r.pin).toBe('abcd1234');
+  });
+
+  it('surfaces an enroll failure as an overall failure (noting the plugin was installed)', async () => {
+    const project = tmp();
+    const source = makePluginSource();
+    const r = await installPlugin({
+      projectDir: project,
+      pluginSourceDir: source,
+      enrollCode: 'spent',
+      enrollImpl: async () => ({ kind: 'failure', success: false, reason: 'invalid_code', error: new Error('bad code') }),
+    });
+    expect(r.kind).toBe('failure');
+    if (r.kind === 'failure') {
+      expect(r.error.message).toMatch(/Plugin installed/);
+      expect(r.error.message).toMatch(/enrollment failed/i);
+    }
+    // The plugin was still materialized on disk.
+    expect(fs.existsSync(path.join(project, 'Plugins', 'UnrealMCP', 'UnrealMCP.uplugin'))).toBe(true);
+  });
+});
