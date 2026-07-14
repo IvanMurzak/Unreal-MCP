@@ -1,11 +1,16 @@
 // `login` — OAuth 2.0 device authorization flow against ai-game.dev.
 // Requests a device code, surfaces the verification URL + user code via
 // `onProgress`, then polls the token endpoint until the user authorizes
-// (or the flow times out). On success, optionally persists the token into
-// the project's `.env`. fetch + sleep + clock are injectable for tests.
-// Library-safe: never throws past the boundary.
+// (or the flow times out). On success, persists the credential into the
+// SHARED machine credential store (`~/.ai-game-dev/credentials.json`, mcp-authorize
+// design 06/09 D12) so sign-in happens once per machine — never into a
+// committable project file on the default path. The `--path` override still
+// keeps a project-local `.env` (gitignored) for per-project accounts.
+// fetch + sleep + clock are injectable for tests. Library-safe: never throws
+// past the boundary.
 
 import { writeEnvFile, ensureEnvGitignored } from '../utils/env-file.js';
+import { MachineCredentialStore, type MachineCredentials, CREDENTIALS_VERSION } from '../utils/machine-credentials.js';
 import * as path from 'path';
 import { asError } from '../utils/error.js';
 import { fetchWithTimeout } from '../utils/http.js';
@@ -20,8 +25,14 @@ const PER_REQUEST_TIMEOUT_MS = 30_000;
 
 export interface LoginOptions {
   baseUrl?: string;
-  /** Persist the token into `<projectDir>/.env` on success. */
+  /**
+   * When set, persist the credential into `<projectDir>/.env` (gitignored) instead
+   * of the shared machine store — the `--path` per-project override. Unset (the
+   * default) persists into the shared machine credential store.
+   */
   projectDir?: string;
+  /** Test seam: override the machine credential store base dir (default `~/.ai-game-dev`). */
+  storeBaseDir?: string;
   /** Overall poll deadline. Default 300000 ms (5 min). */
   timeoutMs?: number;
   fetchImpl?: typeof fetch;
@@ -30,12 +41,20 @@ export interface LoginOptions {
   onProgress?: ProgressCallback;
 }
 
+/** Where a successful login persisted its credential. */
+export type PersistTarget = 'machine-store' | 'project-env';
+
 export interface LoginSuccess {
   kind: 'success';
   success: true;
   token: string;
-  /** `true` when the token was written to a project `.env`. */
+  /** `true` when the credential was persisted (always true on success). */
   persisted: boolean;
+  /** Where the credential landed: the shared machine store (default) or a project `.env` (`--path`). */
+  persistedTo: PersistTarget;
+  /** Absolute path of the file the credential was written to. */
+  credentialPath: string;
+  /** Set only for the project-`.env` override path (back-compat convenience). */
   envPath?: string;
 }
 
@@ -113,18 +132,20 @@ export async function login(opts: LoginOptions = {}): Promise<LoginResult> {
       );
 
       if (tokenResp.ok) {
-        const body = (await tokenResp.json()) as { access_token?: string };
+        const body = (await tokenResp.json()) as TokenResponse;
         if (!body.access_token) {
           return fail('token-malformed', 'Token response missing access_token.');
         }
-        const persisted = persistToken(opts.projectDir, body.access_token);
+        const persisted = await persistCredential(opts, body, baseUrl, now);
         emitProgress(opts.onProgress, { phase: 'done', message: 'Login complete.' });
         return {
           kind: 'success',
           success: true,
           token: body.access_token,
-          persisted: persisted !== null,
-          envPath: persisted ?? undefined,
+          persisted: true,
+          persistedTo: persisted.persistedTo,
+          credentialPath: persisted.credentialPath,
+          envPath: persisted.envPath,
         };
       }
 
@@ -154,17 +175,56 @@ export async function login(opts: LoginOptions = {}): Promise<LoginResult> {
   }
 }
 
-function persistToken(projectDir: string | undefined, token: string): string | null {
-  if (!projectDir) return null;
-  const dir = path.resolve(projectDir);
-  const envPath = path.join(dir, '.env');
-  // The token is a secret — make sure `.env` is gitignored BEFORE it lands on
-  // disk (mirrors `configure`'s §8 guard so `login -p .` can't leave a
-  // committable token file behind even if the process dies between the two
-  // writes).
-  ensureEnvGitignored(dir);
-  writeEnvFile(envPath, { UNREAL_MCP_TOKEN: token, UNREAL_MCP_CONNECTION_MODE: 'Cloud' });
-  return envPath;
+interface TokenResponse {
+  access_token?: string;
+  refresh_token?: string;
+  /** Seconds until `access_token` expires (RFC 8628 / OAuth). */
+  expires_in?: number;
+}
+
+interface PersistOutcome {
+  persistedTo: PersistTarget;
+  credentialPath: string;
+  envPath?: string;
+}
+
+/**
+ * Persist the freshly-authorized credential. The default path writes the shared
+ * machine store (`~/.ai-game-dev/credentials.json`, DPAPI/0600) so the token
+ * NEVER lands in a committable project file; the `--path` override keeps the
+ * legacy project-local `.env` (gitignored) for per-project accounts.
+ */
+async function persistCredential(
+  opts: LoginOptions,
+  body: TokenResponse,
+  serverTarget: string,
+  now: () => number,
+): Promise<PersistOutcome> {
+  if (opts.projectDir) {
+    const dir = path.resolve(opts.projectDir);
+    const envPath = path.join(dir, '.env');
+    // The token is a secret — make sure `.env` is gitignored BEFORE it lands on
+    // disk (mirrors `configure`'s §8 guard so `login -p .` can't leave a
+    // committable token file behind even if the process dies between the two
+    // writes).
+    ensureEnvGitignored(dir);
+    writeEnvFile(envPath, { UNREAL_MCP_TOKEN: body.access_token, UNREAL_MCP_CONNECTION_MODE: 'Cloud' });
+    return { persistedTo: 'project-env', credentialPath: envPath, envPath };
+  }
+
+  const store = new MachineCredentialStore(opts.storeBaseDir);
+  const credentials: MachineCredentials = {
+    version: CREDENTIALS_VERSION,
+    accessToken: body.access_token,
+    refreshToken: body.refresh_token ?? undefined,
+    expiresAt:
+      typeof body.expires_in === 'number' && body.expires_in > 0
+        ? new Date(now() + body.expires_in * 1000).toISOString()
+        : undefined,
+    serverTarget,
+  };
+  await store.write(credentials);
+  return { persistedTo: 'machine-store', credentialPath: store.credentialsPath };
 }
 
 function fail(reason: string, message: string): LoginFailure {
