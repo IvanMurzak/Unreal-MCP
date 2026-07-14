@@ -12,6 +12,8 @@
 
 // --- command logic ---------------------------------------------------------
 export { configure } from './lib/configure.js';
+export { configureAgent } from './lib/configure-agent.js';
+export { enrollPlugin } from './lib/enroll.js';
 export { openProject, buildOpenEnv } from './lib/open.js';
 export { close, selectEditorProcesses } from './lib/close.js';
 export { createProject, renderProjectTemplate, validateModuleName } from './lib/create-project.js';
@@ -102,7 +104,23 @@ export {
   UE_BUILDS_REGISTRY_KEY,
 } from './utils/engine-discovery.js';
 export { readUProject, readEngineAssociation, findUProjectFile } from './utils/project.js';
-export { generatePortFromDirectory } from './utils/port.js';
+export { generatePortFromDirectory, deriveProjectPin, PROJECT_PIN_LENGTH } from './utils/port.js';
+export {
+  readProjectMarker,
+  writeProjectMarker,
+  serializeProjectMarker,
+  upsertServerTarget,
+  projectMarkerPath,
+  PROJECT_MARKER_DIR,
+  PROJECT_MARKER_FILE,
+} from './utils/project-marker.js';
+export {
+  upsertProjectPin,
+  pinnedUrl,
+  originMatches,
+  applyPinToConfigText,
+  projectLocalAgentConfigPaths,
+} from './utils/pin-upsert.js';
 export { resolveConnection } from './utils/config.js';
 export {
   parseEnvContent,
@@ -198,8 +216,22 @@ export type {
   EngineDiscoverySource,
 } from './lib/engine.js';
 export type { UProjectInfo } from './utils/project.js';
+export type { ProjectMarker } from './utils/project-marker.js';
+export type { UpsertPinOptions, UpsertPinResult } from './utils/pin-upsert.js';
 export type { ResolvedConnection } from './utils/config.js';
 export type { LoginOptions, LoginResult } from './lib/login.js';
+export type {
+  EnrollOptions,
+  EnrollResult,
+  EnrollSuccess,
+  EnrollFailure,
+} from './lib/enroll.js';
+export type {
+  ConfigureAgentOptions,
+  ConfigureAgentResult,
+  ConfigureAgentSuccess,
+  ConfigureAgentFailure,
+} from './lib/configure-agent.js';
 export type { UpdateOptions, UpdateResult } from './lib/update.js';
 export type {
   CleanPluginOptions,

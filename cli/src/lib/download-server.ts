@@ -158,14 +158,178 @@ export function findExtractedBinary(stagingDir: string, executableName: string):
   return best;
 }
 
+/** True when `value` looks like an `http(s)://` URL. Pure. */
+function isHttpUrl(value: string): boolean {
+  return /^https?:\/\//i.test(value.trim());
+}
+
+/**
+ * Staging-extract a server zip's bytes into `installDir`: unzip everything to a
+ * throwaway dir, FIND the binary wherever the layout put it (root for the FLAT
+ * win zips, nested `<rid>/` for osx/linux), then replace `installDir` with the
+ * binary PLUS every sidecar file beside it. Returns the installed binary path.
+ * `sourceLabel` names the zip in error messages. Throws on a missing binary.
+ */
+function extractServerZip(
+  zipBytes: Uint8Array,
+  installDir: string,
+  exeName: string,
+  sourceLabel: string,
+  warnings: string[],
+): string {
+  const stagingDir = fs.mkdtempSync(path.join(os.tmpdir(), `${SERVER_BINARY_BASENAME}-extract-`));
+  try {
+    const entries = unzipSync(zipBytes);
+    for (const [entryName, data] of Object.entries(entries)) {
+      if (entryName.endsWith('/')) continue; // directory entry
+      const target = path.join(stagingDir, entryName);
+      // Zip-slip guard: never write outside the staging dir.
+      if (!path.resolve(target).startsWith(path.resolve(stagingDir) + path.sep)) {
+        warnings.push(`Skipped suspicious zip entry: ${entryName}`);
+        continue;
+      }
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.writeFileSync(target, data);
+    }
+
+    const extractedBinary = findExtractedBinary(stagingDir, exeName);
+    if (!extractedBinary) {
+      throw new Error(`Server binary '${exeName}' not found inside ${sourceLabel}.`);
+    }
+
+    // Replace any stale install dir so a partial/old extract can't linger, then
+    // move the binary PLUS its sidecar files (appsettings.json, NLog.config, … —
+    // they MUST land next to the binary).
+    fs.rmSync(installDir, { recursive: true, force: true });
+    fs.mkdirSync(installDir, { recursive: true });
+    const sourceDir = path.dirname(extractedBinary);
+    for (const entry of fs.readdirSync(sourceDir, { withFileTypes: true })) {
+      if (!entry.isFile()) continue;
+      fs.renameSync(path.join(sourceDir, entry.name), path.join(installDir, entry.name));
+    }
+  } finally {
+    fs.rmSync(stagingDir, { recursive: true, force: true });
+  }
+
+  const exePath = path.join(installDir, exeName);
+  if (!fs.existsSync(exePath)) {
+    throw new Error(`Server binary not found after unpack at: ${exePath}`);
+  }
+  return exePath;
+}
+
+/**
+ * Install from an ALREADY-EXTRACTED local directory (or the directory holding a
+ * bare binary file): find the binary under `sourceDir`, then COPY it + its
+ * sidecar files into `installDir` (copy, never move — the user's source stays
+ * intact). Returns the installed binary path. Throws on a missing binary.
+ */
+function installServerFromDir(sourceDir: string, installDir: string, exeName: string): string {
+  const extractedBinary = findExtractedBinary(sourceDir, exeName);
+  if (!extractedBinary) {
+    throw new Error(`Server binary '${exeName}' not found under source '${sourceDir}'.`);
+  }
+  fs.rmSync(installDir, { recursive: true, force: true });
+  fs.mkdirSync(installDir, { recursive: true });
+  const dir = path.dirname(extractedBinary);
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (!entry.isFile()) continue;
+    fs.copyFileSync(path.join(dir, entry.name), path.join(installDir, entry.name));
+  }
+  const exePath = path.join(installDir, exeName);
+  if (!fs.existsSync(exePath)) {
+    throw new Error(`Server binary not found after copy at: ${exePath}`);
+  }
+  return exePath;
+}
+
+/**
+ * Finalize a freshly-installed server binary: chmod on Unix + write the
+ * `version` marker beside it. Shared by the download and source paths.
+ */
+function finalizeServerInstall(
+  exePath: string,
+  installDir: string,
+  osPlatform: NodeJS.Platform,
+  version: string,
+  warnings: string[],
+): void {
+  if (osPlatform !== 'win32') {
+    try {
+      fs.chmodSync(exePath, 0o755);
+    } catch (err: unknown) {
+      warnings.push(`Could not mark the server binary executable: ${asError(err).message}`);
+    }
+  }
+  fs.writeFileSync(path.join(installDir, 'version'), version, 'utf-8');
+}
+
+/**
+ * Install the server from the explicit `--server-source` escape hatch (a local
+ * `.zip`, an already-extracted directory, a bare binary file, or an
+ * `http(s)://` URL to a `.zip`). This is a TRUSTED, user-provided artifact, so
+ * the release `SHA256SUMS` integrity gate is deliberately NOT applied (it can
+ * only verify the pinned GitHub release). Returns the resolved binary path.
+ */
+async function installFromSource(
+  source: string,
+  installDir: string,
+  exeName: string,
+  osPlatform: NodeJS.Platform,
+  version: string,
+  fetchImpl: typeof fetch,
+  onProgress: DownloadServerOptions['onProgress'],
+  warnings: string[],
+): Promise<string> {
+  const trimmed = source.trim();
+
+  if (isHttpUrl(trimmed)) {
+    emitProgress(onProgress, { phase: 'start', message: `Fetching server from --server-source URL: ${trimmed}` });
+    const response = await fetchImpl(trimmed);
+    if (!response.ok) {
+      throw new Error(`--server-source download failed: HTTP ${response.status} ${response.statusText} for ${trimmed}.`);
+    }
+    const zipBytes = new Uint8Array(await response.arrayBuffer());
+    const exePath = extractServerZip(zipBytes, installDir, exeName, `the --server-source URL (${trimmed})`, warnings);
+    finalizeServerInstall(exePath, installDir, osPlatform, version, warnings);
+    return exePath;
+  }
+
+  const abs = path.resolve(trimmed);
+  let stat: fs.Stats;
+  try {
+    stat = fs.statSync(abs);
+  } catch {
+    throw new Error(`--server-source path does not exist: ${abs}`);
+  }
+
+  if (stat.isFile() && abs.toLowerCase().endsWith('.zip')) {
+    emitProgress(onProgress, { phase: 'start', message: `Extracting server from --server-source zip: ${abs}` });
+    const zipBytes = new Uint8Array(fs.readFileSync(abs));
+    const exePath = extractServerZip(zipBytes, installDir, exeName, `the --server-source zip (${abs})`, warnings);
+    finalizeServerInstall(exePath, installDir, osPlatform, version, warnings);
+    return exePath;
+  }
+
+  // A directory (already-extracted) OR a bare binary file: install from its dir.
+  emitProgress(onProgress, { phase: 'start', message: `Installing server from --server-source path: ${abs}` });
+  const sourceDir = stat.isDirectory() ? abs : path.dirname(abs);
+  const exePath = installServerFromDir(sourceDir, installDir, exeName);
+  finalizeServerInstall(exePath, installDir, osPlatform, version, warnings);
+  return exePath;
+}
+
 /**
  * Download + install the pinned `gamedev-mcp-server` binary when it is
  * missing or version-mismatched. Resolution order:
  *
  * 1. `UNREAL_MCP_SERVER_PATH` override → used as-is (no download, no check).
- * 2. Cached binary whose `version` marker equals the pin → reused.
- * 3. Otherwise: download the release zip, staging-extract, move the binary +
- *    its sidecar files into the install dir, chmod on Unix, write `version`.
+ * 2. `--server-source` escape hatch (local zip/dir/binary or URL) → installed
+ *    into the managed dir WITHOUT the SHA256SUMS gate (trusted user artifact).
+ * 3. Cached binary whose `version` marker equals the pin → reused.
+ * 4. Otherwise: download the release zip, VERIFY it against the release
+ *    `SHA256SUMS` (fail-closed), staging-extract, move the binary + its sidecar
+ *    files into the install dir, chmod on Unix, write `version`.
  *
  * Never throws past the boundary — failures return `{ kind: 'failure' }`.
  */
@@ -193,12 +357,35 @@ export async function downloadServer(opts: DownloadServerOptions): Promise<Downl
     const exeName = serverExecutableName(osPlatform);
     const exePath = path.join(installDir, exeName);
 
-    // 2. Cache hit — binary present AND version marker matches the pin.
+    // 2. Explicit `--server-source` escape hatch (offline / CI) — a trusted,
+    //    user-provided local zip/dir/binary or URL. Installed WITHOUT the
+    //    SHA256SUMS gate (that gate protects the DEFAULT GitHub download only).
+    if (opts.source && opts.source.trim().length > 0) {
+      const fetchImpl = opts.fetchImpl ?? fetch;
+      const resolved = await installFromSource(
+        opts.source,
+        installDir,
+        exeName,
+        osPlatform,
+        version,
+        fetchImpl,
+        opts.onProgress,
+        warnings,
+      );
+      emitProgress(opts.onProgress, {
+        phase: 'file-written',
+        message: `Server binary ready from --server-source: ${resolved} (version ${version})`,
+        filePath: resolved,
+      });
+      return { kind: 'success', success: true, serverPath: resolved, source: 'source', version, warnings };
+    }
+
+    // 3. Cache hit — binary present AND version marker matches the pin.
     if (!opts.force && fs.existsSync(exePath) && readVersionMarker(installDir) === version) {
       return { kind: 'success', success: true, serverPath: exePath, source: 'cache', version, warnings };
     }
 
-    // 3. Download the release zip.
+    // 4. Download the release zip.
     const rid = ridForPlatform(osPlatform, arch);
     url = serverDownloadUrl(rid, version);
     emitProgress(opts.onProgress, {
@@ -249,51 +436,8 @@ export async function downloadServer(opts: DownloadServerOptions): Promise<Downl
 
     // Staging-dir extraction: unzip everything to a throwaway dir, find the
     // binary wherever the layout put it, then move its folder's files.
-    const stagingDir = fs.mkdtempSync(path.join(os.tmpdir(), `${SERVER_BINARY_BASENAME}-extract-`));
-    try {
-      const entries = unzipSync(zipBytes);
-      for (const [entryName, data] of Object.entries(entries)) {
-        if (entryName.endsWith('/')) continue; // directory entry
-        const target = path.join(stagingDir, entryName);
-        // Zip-slip guard: never write outside the staging dir.
-        if (!path.resolve(target).startsWith(path.resolve(stagingDir) + path.sep)) {
-          warnings.push(`Skipped suspicious zip entry: ${entryName}`);
-          continue;
-        }
-        fs.mkdirSync(path.dirname(target), { recursive: true });
-        fs.writeFileSync(target, data);
-      }
-
-      const extractedBinary = findExtractedBinary(stagingDir, exeName);
-      if (!extractedBinary) {
-        throw new Error(`Server binary '${exeName}' not found inside the downloaded zip (${url}).`);
-      }
-
-      // Replace any stale install dir so a partial/old extract can't linger,
-      // then move the binary PLUS its sidecar files (appsettings.json,
-      // NLog.config, server.json, … — they MUST land next to the binary).
-      fs.rmSync(installDir, { recursive: true, force: true });
-      fs.mkdirSync(installDir, { recursive: true });
-      const sourceDir = path.dirname(extractedBinary);
-      for (const entry of fs.readdirSync(sourceDir, { withFileTypes: true })) {
-        if (!entry.isFile()) continue;
-        fs.renameSync(path.join(sourceDir, entry.name), path.join(installDir, entry.name));
-      }
-    } finally {
-      fs.rmSync(stagingDir, { recursive: true, force: true });
-    }
-
-    if (!fs.existsSync(exePath)) {
-      throw new Error(`Server binary not found after unpack at: ${exePath}`);
-    }
-    if (osPlatform !== 'win32') {
-      try {
-        fs.chmodSync(exePath, 0o755);
-      } catch (err: unknown) {
-        warnings.push(`Could not mark the server binary executable: ${asError(err).message}`);
-      }
-    }
-    fs.writeFileSync(path.join(installDir, 'version'), version, 'utf-8');
+    extractServerZip(zipBytes, installDir, exeName, `the downloaded zip (${url})`, warnings);
+    finalizeServerInstall(exePath, installDir, osPlatform, version, warnings);
 
     emitProgress(opts.onProgress, {
       phase: 'file-written',

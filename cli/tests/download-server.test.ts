@@ -362,3 +362,133 @@ describe('downloadServer', () => {
     expect(fs.existsSync(r.serverPath)).toBe(true);
   });
 });
+
+// --- --server-source escape hatch (offline / CI) ----------------------------
+
+/** A fetch that FAILS the test if called — asserts the source path never hits the network. */
+function fetchNever(): typeof fetch {
+  return (async () => {
+    throw new Error('fetch must not be called for a local --server-source');
+  }) as typeof fetch;
+}
+
+describe('downloadServer --server-source', () => {
+  it('installs from a local .zip into the managed dir WITHOUT the SHA256SUMS gate', async () => {
+    const proj = tmp();
+    const src = tmp();
+    const zipPath = path.join(src, 'server.zip');
+    fs.writeFileSync(zipPath, flatWinZip());
+
+    const r = await downloadServer({
+      projectDir: proj,
+      os: 'win32',
+      arch: 'x64',
+      env: {},
+      source: zipPath,
+      fetchImpl: fetchNever(), // no network — no SHA256SUMS fetch, no release download
+    });
+    expect(r.kind).toBe('success');
+    if (r.kind !== 'success') return;
+    expect(r.source).toBe('source');
+    const installDir = serverInstallDir(proj, 'win32', 'x64');
+    expect(r.serverPath).toBe(path.join(installDir, 'gamedev-mcp-server.exe'));
+    expect(fs.existsSync(r.serverPath)).toBe(true);
+    // Sidecars moved beside the binary, and the version marker written.
+    expect(fs.existsSync(path.join(installDir, 'appsettings.json'))).toBe(true);
+    expect(readVersionMarker(installDir)).toBe(SERVER_VERSION);
+  });
+
+  it('installs from an already-extracted directory (copy, source left intact)', async () => {
+    const proj = tmp();
+    const src = tmp();
+    fs.writeFileSync(path.join(src, 'gamedev-mcp-server.exe'), 'exe-bytes');
+    fs.writeFileSync(path.join(src, 'appsettings.json'), '{}');
+
+    const r = await downloadServer({
+      projectDir: proj,
+      os: 'win32',
+      arch: 'x64',
+      env: {},
+      source: src,
+      fetchImpl: fetchNever(),
+    });
+    expect(r.kind).toBe('success');
+    if (r.kind !== 'success') return;
+    expect(r.source).toBe('source');
+    expect(fs.existsSync(r.serverPath)).toBe(true);
+    // The source directory is preserved (copy, not move).
+    expect(fs.existsSync(path.join(src, 'gamedev-mcp-server.exe'))).toBe(true);
+  });
+
+  it('installs from a bare binary file path', async () => {
+    const proj = tmp();
+    const src = tmp();
+    const bin = path.join(src, 'gamedev-mcp-server.exe');
+    fs.writeFileSync(bin, 'exe-bytes');
+
+    const r = await downloadServer({ projectDir: proj, os: 'win32', arch: 'x64', env: {}, source: bin, fetchImpl: fetchNever() });
+    expect(r.kind).toBe('success');
+    if (r.kind === 'success') expect(r.source).toBe('source');
+  });
+
+  it('downloads from a --server-source URL WITHOUT fetching SHA256SUMS', async () => {
+    const proj = tmp();
+    const zip = flatWinZip();
+    const calls: string[] = [];
+    const fetchImpl = (async (url: unknown) => {
+      calls.push(String(url));
+      return {
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        arrayBuffer: async () => zip.buffer.slice(zip.byteOffset, zip.byteOffset + zip.byteLength),
+      } as unknown as Response;
+    }) as typeof fetch;
+
+    const r = await downloadServer({
+      projectDir: proj,
+      os: 'win32',
+      arch: 'x64',
+      env: {},
+      source: 'https://example.com/custom-server.zip',
+      fetchImpl,
+    });
+    expect(r.kind).toBe('success');
+    if (r.kind === 'success') expect(r.source).toBe('source');
+    // Exactly one fetch — the source URL. No SHA256SUMS request.
+    expect(calls).toEqual(['https://example.com/custom-server.zip']);
+    expect(calls.some((u) => u.endsWith('SHA256SUMS'))).toBe(false);
+  });
+
+  it('fails cleanly for a non-existent --server-source path', async () => {
+    const r = await downloadServer({
+      projectDir: tmp(),
+      os: 'win32',
+      arch: 'x64',
+      env: {},
+      source: path.join(tmp(), 'does-not-exist.zip'),
+      fetchImpl: fetchNever(),
+    });
+    expect(r.kind).toBe('failure');
+    if (r.kind === 'failure') expect(r.error.message).toMatch(/does not exist/i);
+  });
+
+  it('the UNREAL_MCP_SERVER_PATH override still wins over --server-source', async () => {
+    const proj = tmp();
+    const overrideBin = path.join(tmp(), 'gamedev-mcp-server.exe');
+    fs.writeFileSync(overrideBin, 'x');
+    const r = await downloadServer({
+      projectDir: proj,
+      os: 'win32',
+      arch: 'x64',
+      env: { [SERVER_PATH_ENV_VAR]: overrideBin },
+      source: path.join(tmp(), 'ignored.zip'),
+      fetchImpl: fetchNever(),
+    });
+    expect(r.kind).toBe('success');
+    if (r.kind === 'success') {
+      expect(r.source).toBe('override');
+      expect(r.serverPath).toBe(overrideBin);
+    }
+  });
+});
