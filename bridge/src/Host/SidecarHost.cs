@@ -28,6 +28,9 @@ using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.Logging;
 using R3;
 using McpVersion = com.IvanMurzak.McpPlugin.Common.Version;
+// The shared machine credential store + DTO (McpPlugin 7.0). Aliased to avoid colliding the two AgentConfig
+// namespaces (this one + the bridge-local com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig imported above).
+using McpAgentConfig = com.IvanMurzak.McpPlugin.AgentConfig;
 
 namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
 {
@@ -50,8 +53,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         /// <see cref="ConnectionConfig.Host"/>, so in Cloud mode the host MUST carry this prefix — otherwise
         /// the client dials <c>https://ai-game.dev/hub/mcp-server</c>, which nginx routes to the frontend SPA
         /// (404) and the sidecar never connects. Mirrors Unity-MCP's <c>CloudServerUrl => base + "/mcp"</c> and
-        /// Godot-MCP's <c>CloudHubPath = "/mcp"</c>. Device-code auth hits the BACKEND (<c>/api/auth/...</c>),
-        /// which is NOT behind this prefix, so it must use the stripped base (see <see cref="StripCloudHubPath"/>).
+        /// Godot-MCP's <c>CloudHubPath = "/mcp"</c>. Device-code auth + token refresh hit the AS (<c>/oauth/...</c>),
+        /// which is NOT behind this prefix, so they must use the stripped base (see <see cref="StripCloudHubPath"/>).
         /// </summary>
         internal const string CloudHubPath = "/mcp";
 
@@ -71,13 +74,27 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         };
 
         // McpPlugin 7.0 removed the static ConnectionConfig.Token string; the connection layer now pulls the
-        // bearer from ConnectionConfig.CredentialProvider (a Func<Task<string?>>) on each dial. The sidecar still
-        // resolves a STATIC bearer — the plugin pushes the effective token over IPC (§8), and the full device-flow
-        // / machine-credential-store auth lands in later mcp-authorize PRs — so we hold that bearer here and expose
-        // it through the provider wired in the constructor. Volatile-guarded: the provider callback runs on the
-        // connection layer's thread while the IPC reader thread / transition tasks mutate it (the same cross-thread
-        // access the pre-7.0 auto-property already had, now made explicit).
+        // bearer from ConnectionConfig.CredentialProvider (a Func<Task<string?>>) on each dial. In CUSTOM mode the
+        // sidecar resolves a STATIC bearer — the plugin pushes the effective local token over IPC (§8) — held here
+        // and returned by ResolveBearerAsync. In CLOUD mode the machine-stored ES256 JWT (below) wins. Volatile-
+        // guarded: the provider callback runs on the connection layer's thread while the IPC reader thread /
+        // transition tasks mutate it (the same cross-thread access the pre-7.0 auto-property already had).
         private string? _bearerToken;
+
+        // mcp-authorize (design 03 Flow B / 06): the shared machine credential store + the McpPlugin 7.0 credential
+        // provider that owns the once-per-machine ES256-JWT/refresh-token lifecycle. NULL unless the caller opted in
+        // by supplying a store (Program.cs → ~/.ai-game-dev; the xUnit suite → a temp dir). When null the sidecar
+        // behaves exactly as before (static bearer only), so the Custom/env paths are untouched. When present:
+        //  - ResolveBearerAsync returns the provider's auto-refreshed JWT in Cloud mode (the device-flow / boot
+        //    auto-adopt credential), else the static bearer;
+        //  - a successful device-code sign-in is persisted here (CommitAuthorizedSessionAsync) + adopted live;
+        //  - the coordinator refreshes on the connection's OnAuthorizationRejected (on-401 → refresh → reconnect);
+        //  - OnSignInRequired surfaces "sign in again" to the editor.
+        private readonly McpAgentConfig.MachineCredentialStore? _credentialStore;
+        private readonly PluginCredentialProvider? _credentialProvider;
+        private readonly ITokenRefresher? _tokenRefresher;
+        private ConnectionCredentialCoordinator? _credentialCoordinator;
+        private IDisposable? _signInRequiredSubscription;
 
         private IMcpPlugin? _plugin;
         private ManifestRegistrar? _registrar;
@@ -97,7 +114,6 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         // §7 Cloud device-code flow (replaces PR #8's auth stubs). The authenticator is injectable so the xUnit
         // suite drives the flow against a fake HTTP handler; _authCts cancels an in-progress flow (auth-cancel).
         private readonly DeviceCodeAuthenticator _authenticator;
-        private readonly string _clientLabel;
         private CancellationTokenSource? _authCts;
         // The HttpClient the default-path authenticator uses, owned here so Dispose() releases it (the
         // injected-authenticator path supplies its own client and leaves this null).
@@ -165,7 +181,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             string? fallbackHost = null,
             string? fallbackToken = null,
             DeviceCodeAuthenticator? authenticator = null,
-            string clientLabel = "Unreal-MCP-Bridge")
+            McpAgentConfig.MachineCredentialStore? credentialStore = null,
+            ITokenRefresher? tokenRefresher = null)
         {
             _ipc = ipc ?? throw new ArgumentNullException(nameof(ipc));
             _sidecarVersion = sidecarVersion;
@@ -173,26 +190,32 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             _logger = loggerProvider?.CreateLogger(nameof(SidecarHost));
             _fallbackHost = fallbackHost;
             _fallbackToken = fallbackToken;
-            _clientLabel = clientLabel;
             // McpPlugin 7.0: the connection layer pulls the bearer from ConnectionConfig.CredentialProvider on each
-            // dial instead of reading a static ConnectionConfig.Token. Wire it once, here, to the sidecar's resolved
-            // bearer so the SAME token the plugin pushes over IPC (or the Build()-time env fallback) flows to SignalR,
-            // behavior-identical to the pre-7.0 static-token path. The provider's return type is Task<string?>, so a
-            // null bearer flows through as null → anonymous connection, exactly as the old null ConnectionConfig.Token did.
-            _config.CredentialProvider = () => Task.FromResult<string?>(BearerToken);
+            // dial instead of reading a static ConnectionConfig.Token. ResolveBearerAsync returns the Cloud machine-
+            // stored JWT when signed in, else the static bearer the plugin pushes over IPC (or the Build()-time env
+            // fallback) — behavior-identical to the pre-7.0 static-token path when no credential store is wired.
+            _config.CredentialProvider = ResolveBearerAsync;
             // Default to the real IPC send; SetStatusEmitterForTest swaps it in the xUnit suite.
             _statusEmitter = status => _ipc.SendToPluginAsync(status, CancellationToken.None);
             _agentConfig = new AgentConfigService(loggerProvider?.CreateLogger(nameof(AgentConfigService)));
-            if (authenticator != null)
-            {
-                _authenticator = authenticator;
-            }
-            else
-            {
-                // We OWN this HttpClient (the injected-authenticator path supplies its own); the authenticator
-                // never disposes it, so we track it here and release it in Dispose() for symmetry.
+
+            // A single owned HttpClient covers the default device authenticator AND the default token refresher; the
+            // injected-* paths (xUnit) supply their own, so we only mint one when a default actually needs it.
+            if (authenticator == null || (credentialStore != null && tokenRefresher == null))
                 _ownedHttpClient = new HttpClient();
-                _authenticator = new DeviceCodeAuthenticator(_ownedHttpClient, loggerProvider?.CreateLogger(nameof(DeviceCodeAuthenticator)));
+
+            _authenticator = authenticator
+                ?? new DeviceCodeAuthenticator(_ownedHttpClient!, loggerProvider?.CreateLogger(nameof(DeviceCodeAuthenticator)));
+
+            // mcp-authorize: wire the machine-credential lifecycle ONLY when the caller opted in with a store. Left
+            // null, the sidecar keeps the pre-existing static-bearer behavior exactly (Custom/env paths untouched).
+            if (credentialStore != null)
+            {
+                _credentialStore = credentialStore;
+                _tokenRefresher = tokenRefresher
+                    ?? new OAuthTokenRefresher(_ownedHttpClient!, logger: loggerProvider?.CreateLogger(nameof(OAuthTokenRefresher)));
+                _credentialProvider = new PluginCredentialProvider(
+                    _credentialStore, _tokenRefresher, loggerProvider?.CreateLogger(nameof(PluginCredentialProvider)));
             }
         }
 
@@ -212,12 +235,38 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
 
         /// <summary>
         /// Test seam: the bearer the connection layer would resolve from <see cref="ConnectionConfig.CredentialProvider"/>
-        /// right now, obtained by invoking the provider (so it proves the provider is wired to the stored bearer, not
-        /// merely that the field is set). The sidecar's provider completes synchronously (a <see cref="Task.FromResult{TResult}"/>),
-        /// so this never blocks. Replaces the pre-7.0 <c>host.Config.Token</c> the bridge xUnit suite asserted.
+        /// right now, obtained by invoking the provider (so it proves the provider is wired to the resolved bearer, not
+        /// merely that the field is set). In the static-bearer path it completes synchronously; a Cloud signed-in path
+        /// with a valid (non-expiring) stored token also returns synchronously. Replaces the pre-7.0
+        /// <c>host.Config.Token</c> the bridge xUnit suite asserted.
         /// </summary>
         internal string? CurrentBearer =>
             _config.CredentialProvider is { } provider ? provider().GetAwaiter().GetResult() : null;
+
+        /// <summary>Test seam: the wired machine-credential provider (null unless a store was supplied).</summary>
+        internal PluginCredentialProvider? CredentialProvider => _credentialProvider;
+
+        /// <summary>
+        /// Resolve the bearer the SignalR client should present on the next dial (wired to
+        /// <see cref="ConnectionConfig.CredentialProvider"/>). In CLOUD mode, once the machine credential provider is
+        /// signed in (device-flow sign-in or boot auto-adopt of a seeded store, D12), return its ES256 JWT — the
+        /// provider proactively refreshes it before <c>exp</c>. Otherwise return the static bearer the plugin pushed
+        /// over IPC (Custom mode) or the Build()-time env fallback — behavior-identical to the pre-mcp-authorize path.
+        /// A Custom-mode local token is never overridden by a cloud credential (the <see cref="_isCloudMode"/> guard).
+        /// </summary>
+        private Task<string?> ResolveBearerAsync()
+        {
+            var provider = _credentialProvider;
+            if (provider != null && _isCloudMode && provider.IsSignedIn)
+                return ResolveCloudBearerAsync(provider);
+            return Task.FromResult(BearerToken);
+        }
+
+        private async Task<string?> ResolveCloudBearerAsync(PluginCredentialProvider provider)
+        {
+            var jwt = await provider.GetAccessTokenAsync().ConfigureAwait(false);
+            return !string.IsNullOrEmpty(jwt) ? jwt : BearerToken;
+        }
 
         /// <summary>
         /// Test seam: substitute a fake <see cref="IMcpPlugin"/> for the real one <see cref="Build"/> creates,
@@ -331,6 +380,23 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             // config push fired. This is the "subscribe to the McpPlugin connection-lost/reconnecting event and emit a
             // fresh status" half of the bug-2 fix; the ViewModel optimistic demote on Stop is the other half.
             SubscribeToConnectionState(_plugin);
+
+            // mcp-authorize (design 03 Flow B / 06): when the machine-credential path is active, wire the on-401
+            // refresh→reconnect and the "sign in again" surfacing. The coordinator subscribes to the connection's
+            // OnAuthorizationRejected (3 consecutive SignalR rejections, §Flow E) and refreshes the credential via
+            // the provider; the connection layer re-pulls the freshened JWT through ResolveBearerAsync on its next
+            // dial. A terminal refresh failure raises OnSignInRequired → we emit a status carrying "SignInRequired".
+            // Boot auto-adopt needs no action here: the provider auto-loads a seeded store on construction, so if a
+            // credential exists the very first Cloud dial is already signed in (zero-button, D12).
+            if (_credentialProvider != null)
+            {
+                _credentialCoordinator = new ConnectionCredentialCoordinator(
+                    _plugin, _credentialProvider, _loggerProvider?.CreateLogger(nameof(ConnectionCredentialCoordinator)));
+                _signInRequiredSubscription = _credentialProvider.OnSignInRequired
+                    .Subscribe(signal => { _ = EmitStatusAsync(_config.KeepConnected ? "Connecting" : "Disconnected", cloudAuthState: "SignInRequired"); });
+                if (_credentialStore!.Exists)
+                    _logger?.LogInformation("Machine credential present; the sidecar will connect signed-in with no UI (zero-button boot, D12).");
+            }
 
             _ipc.HandshakeAccepted += OnHandshakeAccepted;
             _ipc.ConfigReceived += OnConfigReceived;
@@ -447,7 +513,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
                 // Cloud mode: suffix the SignalR host with the /mcp prefix the cloud serves the hub behind
                 // (idempotent — never /mcp/mcp). Custom mode: use the host verbatim (a local/self-hosted
                 // server exposes the hub at the root, like Unity/Godot Custom). Device-auth strips this back
-                // off in StartDeviceAuth (the backend /api/auth/... is NOT behind /mcp).
+                // off in StartDeviceAuth (the AS /oauth/... is NOT behind /mcp).
                 _config.Host = isCloud ? AppendCloudHubPath(selected!) : selected!;
 
             // Token: the plugin already applied mode+auth resolution (empty in Custom+None). An absent key
@@ -479,9 +545,10 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
 
         /// <summary>
         /// Strip a trailing <see cref="CloudHubPath"/> (<c>/mcp</c>) from a cloud host to recover the BASE URL
-        /// the cloud backend lives at (<c>https://ai-game.dev</c>) — device-code auth targets
-        /// <c>{base}/api/auth/device/…</c>, which is NOT behind the <c>/mcp</c> nginx prefix. The inverse of
-        /// <see cref="AppendCloudHubPath"/>; idempotent for a host with no suffix. Pure (unit-testable).
+        /// the cloud backend + AS live at (<c>https://ai-game.dev</c>) — device-code auth + token refresh target
+        /// <c>{base}/oauth/device_authorization</c> + <c>{base}/oauth/token</c>, which are NOT behind the
+        /// <c>/mcp</c> nginx prefix. The inverse of <see cref="AppendCloudHubPath"/>; idempotent for a host with
+        /// no suffix. Pure (unit-testable).
         /// </summary>
         internal static string StripCloudHubPath(string host)
         {
@@ -514,7 +581,12 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
                     _authCts?.Cancel();
                     // Clear the stored cloud bearer so a subsequent (re)connect is anonymous until re-authorized.
                     BearerToken = null;
-                    _logger?.LogInformation("Cloud token revoked (auth-revoke); cleared the in-memory bearer.");
+                    // mcp-authorize sign-out (design 03 Flow B): wipe the persisted refresh token + clear the provider
+                    // so no signed-in state survives on this machine. (The /oauth/revoke network call to the AS and the
+                    // editor-UI sign-out button land in later mcp-authorize PRs; the local wipe is the security-critical half.)
+                    try { _credentialProvider?.SignOut(); _credentialStore?.Delete(); }
+                    catch (Exception ex) { _logger?.LogDebug("Sign-out credential wipe failed: {Message}", ex.Message); }
+                    _logger?.LogInformation("Cloud token revoked (auth-revoke); cleared the in-memory bearer + machine credential store.");
                     break;
             }
         }
@@ -604,8 +676,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             var cts = new CancellationTokenSource();
             _authCts = cts;
             // ApplyConnectionConfig suffixed the Cloud host with /mcp for the SignalR hub; the device-code flow
-            // hits the BACKEND ({base}/api/auth/device/…), which is NOT behind the /mcp nginx prefix, so strip
-            // it back off to recover the base (https://ai-game.dev). A no-op for a host without the suffix.
+            // hits the AS ({base}/oauth/device_authorization + /oauth/token), which is NOT behind the /mcp nginx
+            // prefix, so strip it back off to recover the base (https://ai-game.dev). A no-op for a host without the suffix.
             var cloudUrl = StripCloudHubPath(_config.Host);
             _logger?.LogInformation("auth-start received; beginning device-code flow against {Host}.", cloudUrl);
             _ = RunDeviceAuthAsync(cloudUrl, cts.Token);
@@ -617,17 +689,59 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             {
                 var result = await _authenticator.AuthorizeAsync(
                     cloudUrl,
-                    _clientLabel,
                     emit: msg => _ipc.SendToPluginAsync(msg, CancellationToken.None),
                     ct).ConfigureAwait(false);
 
                 if (result.Success && result.Token != null)
-                    await CommitAuthorizedSessionAsync(result.Token, ct).ConfigureAwait(false);
+                    await CommitAuthorizedSessionAsync(result, ct).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
                 _logger?.LogWarning("Device-code flow ended with an error: {Message}", ex.Message);
             }
+        }
+
+        /// <summary>
+        /// Commit a successful device-code sign-in: PERSIST the issued credential (ES256 JWT + refresh token +
+        /// expiry) into the shared machine credential store (D12) so sign-in is once-per-machine and survives
+        /// restarts, ADOPT it into the live provider, then store the in-memory bearer + reconnect. The persist step
+        /// is a no-op when no store is wired (Custom/legacy path) or the AS returned no refresh token. Guards the
+        /// same cancel/revoke race as the string overload — nothing is persisted once the flow was cancelled.
+        /// Tokens are NEVER logged (§8). Internal so the bridge xUnit suite drives it without the whole HTTP flow.
+        /// </summary>
+        internal async Task CommitAuthorizedSessionAsync(DeviceAuthResult result, CancellationToken ct)
+        {
+            if (ct.IsCancellationRequested || result.Token == null)
+                return;
+
+            if (_credentialStore != null && !string.IsNullOrEmpty(result.RefreshToken))
+            {
+                // The server target is the cloud BASE (no /mcp hub prefix), the same base device-auth ran against —
+                // the refresher reuses it for the refresh-token grant. Persist + adopt so the provider is signed in.
+                var serverTarget = StripCloudHubPath(_config.Host);
+                var creds = new McpAgentConfig.MachineCredentials
+                {
+                    Version = 1,
+                    AccessToken = result.Token,
+                    RefreshToken = result.RefreshToken,
+                    ExpiresAt = result.ExpiresAt,
+                    ServerTarget = string.IsNullOrWhiteSpace(serverTarget) ? null : serverTarget,
+                };
+                try
+                {
+                    _credentialStore.Write(creds);
+                    _credentialProvider?.Adopt(creds);
+                    _logger?.LogInformation("Cloud credential persisted to the machine store; signed in once-per-machine (D12).");
+                }
+                catch (Exception ex)
+                {
+                    // A store write failure must not lose the session — fall through to the in-memory bearer so this
+                    // editor session still connects signed-in; only the cross-restart persistence is degraded.
+                    _logger?.LogWarning("Failed to persist the cloud credential to the machine store: {Message}", ex.Message);
+                }
+            }
+
+            await CommitAuthorizedSessionAsync(result.Token, ct).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -1087,6 +1201,13 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             ClearRoster();
             try { _authCts?.Cancel(); } catch { /* ignore */ }
             _authCts?.Dispose();
+            // mcp-authorize: drop the on-401 coordinator + sign-in-required subscription + credential provider so no
+            // late R3 callback touches a half-disposed host (the store itself is stateless/owned by the caller).
+            try { _signInRequiredSubscription?.Dispose(); } catch { /* ignore */ }
+            _signInRequiredSubscription = null;
+            try { _credentialCoordinator?.Dispose(); } catch { /* ignore */ }
+            _credentialCoordinator = null;
+            try { _credentialProvider?.Dispose(); } catch { /* ignore */ }
             // Tear down the transition CTS under _transitionLock so a concurrent RunConnectionTransition cannot
             // observe a half-disposed field (or have its captured predecessor disposed out from under it): take
             // and null the field inside the lock, then cancel/dispose outside (cancel runs continuations

@@ -22,20 +22,27 @@ using Xunit;
 namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
 {
     /// <summary>
-    /// Device-code flow specs (docs/ARCHITECTURE.md §7 item 4 / §1.3) — the real RFC 8628 grant the sidecar
-    /// now runs in place of PR #8's stub. Drives <see cref="DeviceCodeAuthenticator"/> against a scripted HTTP
-    /// handler (no network, no real waiting): asserts it emits a pending device-auth with the verification URL
-    /// + user code, polls until an access token is issued, surfaces denial/expiry, and honours cancellation.
+    /// Device-code flow specs (docs/ARCHITECTURE.md §7 / .claude/design/mcp-authorize 03 Flow B) — the RFC 8628
+    /// grant the sidecar runs on the ai-game.dev alias (<c>POST /oauth/device_authorization</c> →
+    /// <c>POST /oauth/token</c> device grant). Drives <see cref="DeviceCodeAuthenticator"/> against a scripted HTTP
+    /// handler (no network, no real waiting): asserts it posts the form-encoded <c>client_id</c> + <c>scope=mcp:plugin</c>
+    /// to the correct endpoints, emits a pending device-auth with the verification URL + user code, polls until an
+    /// ES256 JWT + refresh token are issued, surfaces denial/expiry, and honours cancellation.
     /// </summary>
     public class DeviceCodeAuthenticatorTests
     {
-        // A scripted handler: the /authorize call returns a fixed JSON; each /token call dequeues the next body.
+        // A scripted handler: the /oauth/device_authorization call returns a fixed JSON; each /oauth/token call
+        // dequeues the next body (as an RFC 8628 token endpoint would — 400 while pending/error, 200 on success).
         private sealed class ScriptedHandler : HttpMessageHandler
         {
             private readonly string _authorizeJson;
             private readonly Queue<string> _tokenJson;
             public int AuthorizeCalls { get; private set; }
             public int TokenCalls { get; private set; }
+            public string? LastAuthorizeUrl { get; private set; }
+            public string? LastAuthorizeBody { get; private set; }
+            public string? LastTokenUrl { get; private set; }
+            public string? LastTokenBody { get; private set; }
 
             public ScriptedHandler(string authorizeJson, IEnumerable<string> tokenJson)
             {
@@ -43,24 +50,33 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
                 _tokenJson = new Queue<string>(tokenJson);
             }
 
-            protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+            protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
             {
                 var url = request.RequestUri!.AbsoluteUri;
-                string body;
-                if (url.EndsWith("/api/auth/device/authorize", StringComparison.Ordinal))
+                var body = request.Content != null ? await request.Content.ReadAsStringAsync(cancellationToken) : "";
+                string responseBody;
+                var status = HttpStatusCode.OK;
+                if (url.EndsWith("/oauth/device_authorization", StringComparison.Ordinal))
                 {
                     AuthorizeCalls++;
-                    body = _authorizeJson;
+                    LastAuthorizeUrl = url;
+                    LastAuthorizeBody = body;
+                    responseBody = _authorizeJson;
                 }
                 else
                 {
                     TokenCalls++;
-                    body = _tokenJson.Count > 0 ? _tokenJson.Dequeue() : "{\"error\":\"authorization_pending\"}";
+                    LastTokenUrl = url;
+                    LastTokenBody = body;
+                    responseBody = _tokenJson.Count > 0 ? _tokenJson.Dequeue() : "{\"error\":\"authorization_pending\"}";
+                    // RFC 8628 §3.5: the token endpoint answers a pending/errored device grant with a 400 + { error }.
+                    if (responseBody.Contains("\"error\"", StringComparison.Ordinal))
+                        status = HttpStatusCode.BadRequest;
                 }
-                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                return new HttpResponseMessage(status)
                 {
-                    Content = new StringContent(body, System.Text.Encoding.UTF8, "application/json"),
-                });
+                    Content = new StringContent(responseBody, System.Text.Encoding.UTF8, "application/json"),
+                };
             }
         }
 
@@ -75,27 +91,38 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             "\"expires_in\":900,\"interval\":1}";
 
         [Fact]
-        public async Task HappyPath_EmitsPendingThenAuthorizesAndReturnsToken()
+        public async Task HappyPath_EmitsPendingThenAuthorizesAndReturnsCredential()
         {
             var handler = new ScriptedHandler(AuthorizeJson, new[]
             {
                 "{\"error\":\"authorization_pending\"}",
                 "{\"error\":\"authorization_pending\"}",
-                "{\"access_token\":\"cloud-bearer-abc\",\"token_type\":\"Bearer\"}",
+                "{\"access_token\":\"cloud-jwt-abc\",\"refresh_token\":\"refresh-xyz\",\"token_type\":\"Bearer\",\"expires_in\":3600}",
             });
             var auth = MakeAuth(handler);
 
             var emitted = new List<DeviceAuthMessage>();
-            var result = await auth.AuthorizeAsync("https://ai-game.dev", "Unreal", m => { emitted.Add(m); return Task.CompletedTask; }, CancellationToken.None);
+            var result = await auth.AuthorizeAsync("https://ai-game.dev", m => { emitted.Add(m); return Task.CompletedTask; }, CancellationToken.None);
 
             Assert.True(result.Success);
-            Assert.Equal("cloud-bearer-abc", result.Token);
+            Assert.Equal("cloud-jwt-abc", result.Token);
+            Assert.Equal("refresh-xyz", result.RefreshToken);           // the refresh token feeds the machine store (D12)
+            Assert.NotNull(result.ExpiresAt);                            // computed from expires_in for proactive refresh
+            Assert.True(result.ExpiresAt > DateTimeOffset.UtcNow);
+
+            // The RFC 8628 endpoints + the form-encoded client_id + scope=mcp:plugin authorize body.
+            Assert.EndsWith("/oauth/device_authorization", handler.LastAuthorizeUrl);
+            Assert.Contains("client_id=unreal-mcp-plugin", handler.LastAuthorizeBody);
+            Assert.Contains("scope=mcp", handler.LastAuthorizeBody); // "mcp:plugin" url-encodes the ':' — match the prefix
+            Assert.EndsWith("/oauth/token", handler.LastTokenUrl);
+            Assert.Contains("grant_type=urn", handler.LastTokenBody);   // device-code grant URN (':' url-encoded)
+            Assert.Contains("device_code=dev-123", handler.LastTokenBody);
 
             // First emit is the pending state with the verification URL + user code (what the UI renders, §7).
             Assert.Contains(emitted, m => m.State == "pending" && m.UserCode == "WXYZ-1234"
                 && m.VerificationUrl == "https://ai-game.dev/device?code=WXYZ-1234");
-            // The authorized emit carries the issued token.
-            Assert.Contains(emitted, m => m.State == "authorized" && m.Token == "cloud-bearer-abc");
+            // The authorized emit carries the issued access token (the plugin's UI feed; never logged).
+            Assert.Contains(emitted, m => m.State == "authorized" && m.Token == "cloud-jwt-abc");
             Assert.Equal(3, handler.TokenCalls); // pending, pending, success
         }
 
@@ -105,13 +132,14 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             var handler = new ScriptedHandler(AuthorizeJson, new[]
             {
                 "{\"error\":\"slow_down\"}",
-                "{\"access_token\":\"tok\"}",
+                "{\"access_token\":\"tok\",\"refresh_token\":\"r\"}",
             });
             var auth = MakeAuth(handler);
 
-            var result = await auth.AuthorizeAsync("https://ai-game.dev", null, _ => Task.CompletedTask, CancellationToken.None);
+            var result = await auth.AuthorizeAsync("https://ai-game.dev", _ => Task.CompletedTask, CancellationToken.None);
             Assert.True(result.Success);
             Assert.Equal("tok", result.Token);
+            Assert.Equal("r", result.RefreshToken);
         }
 
         [Fact]
@@ -121,7 +149,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             var auth = MakeAuth(handler);
 
             var emitted = new List<DeviceAuthMessage>();
-            var result = await auth.AuthorizeAsync("https://ai-game.dev", null, m => { emitted.Add(m); return Task.CompletedTask; }, CancellationToken.None);
+            var result = await auth.AuthorizeAsync("https://ai-game.dev", m => { emitted.Add(m); return Task.CompletedTask; }, CancellationToken.None);
 
             Assert.False(result.Success);
             Assert.Equal("access_denied", result.Error);
@@ -141,7 +169,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             var auth = new DeviceCodeAuthenticator(new HttpClient(handler), logger: null,
                 delay: (_, ct) => { cts.Cancel(); return Task.CompletedTask; });
 
-            var result = await auth.AuthorizeAsync("https://ai-game.dev", null, _ => Task.CompletedTask, cts.Token);
+            var result = await auth.AuthorizeAsync("https://ai-game.dev", _ => Task.CompletedTask, cts.Token);
             Assert.False(result.Success);
             Assert.True(result.WasCancelled);
         }
@@ -168,7 +196,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
                 now: () => clockReads++ == 0 ? start : start.AddSeconds(20));
 
             var emitted = new List<DeviceAuthMessage>();
-            var result = await auth.AuthorizeAsync("https://ai-game.dev", null, m => { emitted.Add(m); return Task.CompletedTask; }, CancellationToken.None);
+            var result = await auth.AuthorizeAsync("https://ai-game.dev", m => { emitted.Add(m); return Task.CompletedTask; }, CancellationToken.None);
 
             Assert.False(result.Success);
             Assert.Equal("expired_token", result.Error);
@@ -180,7 +208,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         {
             var handler = new ScriptedHandler(AuthorizeJson, Array.Empty<string>());
             var auth = MakeAuth(handler);
-            var result = await auth.AuthorizeAsync("", null, _ => Task.CompletedTask, CancellationToken.None);
+            var result = await auth.AuthorizeAsync("", _ => Task.CompletedTask, CancellationToken.None);
             Assert.False(result.Success);
             Assert.Equal(0, handler.AuthorizeCalls);
         }
