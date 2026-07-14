@@ -746,7 +746,12 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
                 }
                 catch (Exception ex)
                 {
-                    var requestId = node["requestId"]?.GetValue<string>();
+                    // Recover the requestId defensively: this catch runs in a fire-and-forget Task.Run, so it must
+                    // itself never throw (GetValue<string>() would throw on a non-string requestId token — exactly the
+                    // malformed-request case that lands us here — turning a handled drop into an unobserved exception).
+                    string? requestId = null;
+                    if (node["requestId"] is JsonValue requestIdValue)
+                        requestIdValue.TryGetValue(out requestId);
                     if (string.IsNullOrEmpty(requestId))
                     {
                         _logger?.LogWarning("Dropped malformed project-config '{Type}' request: {Message}", type, ex.Message);
