@@ -52,6 +52,11 @@ namespace
 	const FString TypeAgentSkillsPath = TEXT("agent-skills-path");
 	const FString TypeAgentGenerateSkills = TEXT("agent-generate-skills");
 	const FString TypeAgentConfigResult = TEXT("agent-config-result");
+	// mcp-authorize PR 4 IPC verbs (design 04/06): the plugin → sidecar `project-config` request and the
+	// sidecar → plugin `project-config-result`. The sidecar resolves THIS project's {pin, derived local-server
+	// port, serverTarget} via the shared C# ProjectIdentity + project marker (no C++ derivation duplication).
+	const FString TypeProjectConfig = TEXT("project-config");
+	const FString TypeProjectConfigResult = TEXT("project-config-result");
 	const FString TypePing = TEXT("ping");
 	const FString TypePong = TEXT("pong");
 	const FString TypeShutdown = TEXT("shutdown");
@@ -374,9 +379,10 @@ void FUnrealMcpBridgeServer::HandleLine(const FString& Line, int32 Generation)
 	{
 		// liveness already refreshed in Run()
 	}
-	else if (Type == TypeStatus || Type == TypeDeviceAuth || Type == TypeAgentConfigResult)
+	else if (Type == TypeStatus || Type == TypeDeviceAuth || Type == TypeAgentConfigResult || Type == TypeProjectConfigResult)
 	{
-		// §1.3 / §7: the live UI feed (connection status, device-auth, AND the AI-agent configurator results).
+		// §1.3 / §7 / mcp-authorize PR 4: the live UI + control feed (connection status, device-auth, the AI-agent
+		// configurator results, AND the resolved project-config result carrying the derived local-server port).
 		// Hand it to the registered sink (the view-model) WITHOUT touching any Slate/engine state here — the
 		// sink marshals onto the game thread (M9b) and routes by type. Copy the sink out under the lock so a
 		// concurrent window-close clear never invalidates the TFunction mid-call.
@@ -1087,6 +1093,21 @@ bool FUnrealMcpBridgeServer::SendAgentConfigMessage(const TSharedPtr<FJsonObject
 	if (!bClientConnected || !bHandshakeOk)
 		return false;
 
+	return SendMessage(Message);
+}
+
+bool FUnrealMcpBridgeServer::SendProjectConfigRequest(const FString& RequestId, const FString& InProjectPath)
+{
+	// mcp-authorize PR 4 (design 04/06): ask the sidecar to resolve THIS project's {pin, derived local-server
+	// port, serverTarget}. The result arrives as a `project-config-result` routed through the status sink. No verb
+	// allow-list needed (this is not a user-driven UI verb like the auth/agent-config sends) — a single fixed type.
+	if (!bClientConnected || !bHandshakeOk)
+		return false;
+
+	TSharedPtr<FJsonObject> Message = MakeShared<FJsonObject>();
+	Message->SetStringField(TEXT("type"), TypeProjectConfig);
+	Message->SetStringField(TEXT("requestId"), RequestId);
+	Message->SetStringField(TEXT("projectPath"), InProjectPath);
 	return SendMessage(Message);
 }
 

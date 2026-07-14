@@ -422,6 +422,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             _ipc.ConfigReceived += OnConfigReceived;
             _ipc.AuthMessageReceived += HandleAuthMessage;
             _ipc.AgentConfigRequestReceived += HandleAgentConfigRequest;
+            _ipc.ProjectConfigRequestReceived += HandleProjectConfigRequest;
 
             _logger?.LogInformation("Sidecar host built (version {Version}); awaiting IPC handshake.", _sidecarVersion);
         }
@@ -723,6 +724,79 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
                         Error = $"Unknown agent-config request type '{type}'.",
                     };
             }
+        }
+
+        /// <summary>
+        /// Serve a mcp-authorize PR 4 <c>project-config</c> request (design 04/06): resolve THIS project's
+        /// {pin, derived local-server port, portIsOverridden, serverTarget} via <see cref="ProjectConnectionResolver"/>
+        /// and send the terminal <c>project-config-result</c> back to the plugin. Runs the (file-IO) resolve off the
+        /// reader thread. Never throws — a malformed request or a resolve failure becomes an <c>ok == false</c> result
+        /// (or, when even the requestId cannot be recovered, a logged drop), so it cannot tear down the read loop.
+        /// Public so the bridge xUnit suite can drive the dispatch without a live socket.
+        /// </summary>
+        public void HandleProjectConfigRequest(string type, JsonObject node)
+        {
+            // Run off the reader thread: ProjectConnectionResolver.Resolve reads the on-disk project marker.
+            _ = Task.Run(async () =>
+            {
+                ProjectConfigResultMessage result;
+                try
+                {
+                    result = BuildProjectConfigResult(node);
+                }
+                catch (Exception ex)
+                {
+                    var requestId = node["requestId"]?.GetValue<string>();
+                    if (string.IsNullOrEmpty(requestId))
+                    {
+                        _logger?.LogWarning("Dropped malformed project-config '{Type}' request: {Message}", type, ex.Message);
+                        return;
+                    }
+                    result = new ProjectConfigResultMessage
+                    {
+                        RequestId = requestId!,
+                        Ok = false,
+                        Error = $"Sidecar failed to resolve project config: {ex.Message}",
+                    };
+                }
+                await _ipc.SendToPluginAsync(result, CancellationToken.None).ConfigureAwait(false);
+            });
+        }
+
+        /// <summary>
+        /// Resolve a <c>project-config</c> request into its terminal result. Prefers the project root the request
+        /// carries (race-free — the C++ plugin knows <c>FPaths::ProjectDir()</c>); falls back to the handshake-reported
+        /// root cached by <see cref="ApplyProjectIdentity"/>. Resolution goes through the SAME
+        /// <see cref="ProjectConnectionResolver.Resolve"/> PR 3 uses, so the returned pin/port carry byte-for-byte
+        /// <c>ProjectIdentity</c> golden-vector parity and the marker's <c>portOverride</c> precedence. Internal so the
+        /// bridge xUnit suite asserts the resolved DTO (parity + override) without the IPC send.
+        /// </summary>
+        internal ProjectConfigResultMessage BuildProjectConfigResult(JsonObject node)
+        {
+            var request = node.Deserialize<ProjectConfigRequestMessage>(IpcProtocol.JsonOptions) ?? new ProjectConfigRequestMessage();
+
+            var projectRoot = !string.IsNullOrWhiteSpace(request.ProjectPath)
+                ? request.ProjectPath
+                : Volatile.Read(ref _projectRootPath);
+
+            if (string.IsNullOrWhiteSpace(projectRoot))
+                return new ProjectConfigResultMessage
+                {
+                    RequestId = request.RequestId,
+                    Ok = false,
+                    Error = "No project path available to resolve the connection identity (handshake not applied and request carried none).",
+                };
+
+            var resolved = ProjectConnectionResolver.Resolve(projectRoot!, _instanceId);
+            return new ProjectConfigResultMessage
+            {
+                RequestId = request.RequestId,
+                Ok = true,
+                Pin = resolved.Pin,
+                Port = resolved.Port,
+                PortIsOverridden = resolved.PortIsOverridden,
+                ServerTarget = resolved.ServerTarget,
+            };
         }
 
         private void StartDeviceAuth()
