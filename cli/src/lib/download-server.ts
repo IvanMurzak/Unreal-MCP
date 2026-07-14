@@ -385,7 +385,7 @@ export async function downloadServer(opts: DownloadServerOptions): Promise<Downl
       return { kind: 'success', success: true, serverPath: exePath, source: 'cache', version, warnings };
     }
 
-    // 3. Download the release zip.
+    // 4. Download the release zip.
     const rid = ridForPlatform(osPlatform, arch);
     url = serverDownloadUrl(rid, version);
     emitProgress(opts.onProgress, {

@@ -126,7 +126,18 @@ export async function enrollPlugin(opts: EnrollOptions): Promise<EnrollResult> {
       }
       const body = (await resp.json().catch(() => ({}))) as { error?: string; error_description?: string };
       const reason = body.error === 'invalid_grant' ? 'invalid_code' : body.error ?? `http-${resp.status}`;
-      return fail(reason, INVALID_CODE_MESSAGE);
+      // A 400 (or an explicit `invalid_grant`) is the AS's uniform spent/invalid/
+      // expired-code signal (no oracle). Any OTHER status (e.g. a transient 5xx) is
+      // a server-side failure, not a bad code — surfacing INVALID_CODE_MESSAGE there
+      // would wrongly tell the user to reissue a code that is actually fine.
+      if (resp.status === 400 || body.error === 'invalid_grant') {
+        return fail(reason, INVALID_CODE_MESSAGE);
+      }
+      return fail(
+        reason,
+        `The enrollment server returned HTTP ${resp.status}${resp.statusText ? ` ${resp.statusText}` : ''}. ` +
+          `This is a server-side error, not a bad code — try again shortly.`,
+      );
     }
 
     const body = (await resp.json()) as RedeemResponse;
