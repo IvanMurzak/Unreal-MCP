@@ -107,6 +107,15 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         private Reflector? _reflector;
         private int _signalRConnectStarted;
 
+        // mcp-authorize PR 3 (design 04/06): the instance-metadata handshake identity. _instanceId is minted ONCE
+        // per sidecar process — the sidecar is a child of one editor session, so a single GUID reused across every
+        // (re)connect is exactly the "InstanceId minted per editor session, stable across reconnects" the pairing
+        // plane (b3) expects. _projectRootPath caches the project root the plugin reported in the handshake-ack
+        // (FPaths::ProjectDir()); Volatile-guarded because ApplyProjectIdentity writes it on the IPC reader thread
+        // while a later marker-write path could read it off a background task.
+        private readonly string _instanceId = Guid.NewGuid().ToString();
+        private string? _projectRootPath;
+
         // §7 AI-agent configurator service, backed by the shared com.IvanMurzak.McpPlugin.AgentConfig library
         // (the single cross-engine implementation). Serves the plugin's thin Slate panel over IPC.
         private readonly AgentConfigService _agentConfig;
@@ -245,6 +254,17 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
 
         /// <summary>Test seam: the wired machine-credential provider (null unless a store was supplied).</summary>
         internal PluginCredentialProvider? CredentialProvider => _credentialProvider;
+
+        /// <summary>
+        /// Test seam: the instance-metadata handshake payload the sidecar will attach to the SignalR hub connection
+        /// (mcp-authorize PR 3), or null before a handshake-ack carried a project path. Set by
+        /// <see cref="ApplyProjectIdentity"/>; read by the McpPlugin connection layer via
+        /// <see cref="ConnectionConfig.InstanceMetadata"/>.
+        /// </summary>
+        internal ConnectionInstanceMetadata? InstanceMetadata => _config.InstanceMetadata;
+
+        /// <summary>Test seam: the per-editor-session instance id (stable across reconnects) reported in the metadata.</summary>
+        internal string InstanceId => _instanceId;
 
         /// <summary>
         /// Resolve the bearer the SignalR client should present on the next dial (wired to
@@ -412,6 +432,11 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             // mode-aware host/token/keepConnected selection lives in ApplyConnectionConfig.
             ApplyConnectionConfig(ack.Config);
 
+            // mcp-authorize PR 3 (design 04/06): resolve THIS project's connection identity from the reported
+            // project root and attach the instance-metadata handshake payload BEFORE the connect below dials —
+            // ConnectionConfig.InstanceMetadata is read by the McpPlugin HubConnectionProvider on each dial.
+            ApplyProjectIdentity(ack.ProjectPath);
+
             _logger?.LogInformation("Handshake accepted (plugin {PluginVersion}, engine {Engine}); connecting SignalR to {Host}.",
                 ack.PluginVersion, ack.EngineVersion, _config.Host);
 
@@ -422,6 +447,39 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
                 _ = ConnectSignalRAsync();
             else
                 _logger?.LogDebug("Handshake re-accepted; SignalR connect already initiated (KeepConnected handles reconnection).");
+        }
+
+        /// <summary>
+        /// Resolve THIS project's connection identity (mcp-authorize PR 3, design 04/06) from the project root the
+        /// plugin reported in the handshake-ack (<c>FPaths::ConvertRelativePathToFull(FPaths::ProjectDir())</c>) and
+        /// attach the instance-metadata handshake payload to <see cref="ConnectionConfig.InstanceMetadata"/> — the
+        /// McpPlugin connection layer sends it as non-secret query params on the SignalR hub URL, so the server's
+        /// account+instance pairing plane (b3) registers this editor session. Also caches the project root (for the
+        /// marker-write path) and sets <see cref="ConnectionConfig.ProjectRootPath"/>. Idempotent: a re-handshake
+        /// (IPC reconnect) re-resolves the same values with the SAME <see cref="_instanceId"/>. A blank project path
+        /// leaves the metadata null (the pre-b7 behaviour — the server falls back to a synthetic single instance).
+        /// Never throws (a malformed path must not tear down the read loop). Internal so the bridge xUnit suite
+        /// asserts the resolved metadata without driving a live connect (mirrors <see cref="ApplyConnectionConfig"/>).
+        /// </summary>
+        internal void ApplyProjectIdentity(string? projectPath)
+        {
+            if (string.IsNullOrWhiteSpace(projectPath))
+                return;
+
+            Volatile.Write(ref _projectRootPath, projectPath);
+            try
+            {
+                var resolved = ProjectConnectionResolver.Resolve(projectPath!, _instanceId);
+                _config.InstanceMetadata = resolved.Metadata;
+                _config.ProjectRootPath = projectPath;
+                _logger?.LogInformation(
+                    "Resolved project identity for '{ProjectName}' (pin {Pin}, port {Port}{Override}, instance {InstanceId}); attaching instance metadata to the hub handshake.",
+                    resolved.ProjectName, resolved.Pin, resolved.Port, resolved.PortIsOverridden ? " [user override]" : string.Empty, _instanceId);
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning("Failed to resolve project identity from '{ProjectPath}': {Message}", projectPath, ex.Message);
+            }
         }
 
         internal void OnConfigReceived(JsonObject config)
