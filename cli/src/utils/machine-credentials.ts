@@ -192,7 +192,17 @@ function runDpapi(script: string, input: Buffer): Promise<Buffer> {
         }
       },
     );
-    child.stdin?.end(input.toString('base64'));
+    // A spawn failure (e.g. powershell not on PATH) surfaces via the execFile
+    // callback's `err`; but writing to a broken/closed stdin ALSO emits an
+    // `'error'` on the stdin stream, which throws (crashes the process) unless
+    // handled. Route it to `reject` — harmless if the callback already settled
+    // the promise. (Matches the `child.on('error', reject)` spawn convention in
+    // unreal-build.ts / open.ts.)
+    const stdin = child.stdin;
+    if (stdin) {
+      stdin.on('error', reject);
+      stdin.end(input.toString('base64'));
+    }
   });
 }
 
