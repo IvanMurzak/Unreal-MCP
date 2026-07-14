@@ -183,6 +183,21 @@ void FUnrealMcpAgentConfigModelsSpec::Define()
 			const FUnrealMcpAgentDescription Desc = FUnrealMcpAgentDescription::FromJson(AgentConfigModelsParseObject(Json));
 			TestEqual("default status", Desc.Status, EAiAgentConfiguratorStatus::NotConfigured);
 			TestEqual("no links", Desc.Links.Num(), 0);
+			// mcp-authorize PR 5: supportsOAuth absent → default true (assume OAuth-capable; no escape hatch surfaced).
+			TestTrue("default supportsOAuth", Desc.bSupportsOAuth);
+		});
+
+		It("parses the mcp-authorize PR 5 supportsOAuth capability flag", [this]()
+		{
+			// A SupportsOAuth == false agent is the signal for the editor to offer the "Advanced: use access token"
+			// escape hatch. The plugin-side model must carry it verbatim from the DTO.
+			const FString JsonFalse = TEXT(R"JSON({ "agentId": "legacy-client", "agentName": "Legacy", "supportsOAuth": false })JSON");
+			const FUnrealMcpAgentDescription DescFalse = FUnrealMcpAgentDescription::FromJson(AgentConfigModelsParseObject(JsonFalse));
+			TestFalse("supportsOAuth false round-trips", DescFalse.bSupportsOAuth);
+
+			const FString JsonTrue = TEXT(R"JSON({ "agentId": "claude-code", "agentName": "Claude Code", "supportsOAuth": true })JSON");
+			const FUnrealMcpAgentDescription DescTrue = FUnrealMcpAgentDescription::FromJson(AgentConfigModelsParseObject(JsonTrue));
+			TestTrue("supportsOAuth true round-trips", DescTrue.bSupportsOAuth);
 		});
 
 		It("returns an empty description for a null/invalid object", [this]()
@@ -244,6 +259,50 @@ void FUnrealMcpAgentConfigModelsSpec::Define()
 			const FAiAgentConnectionInfo Info = FAiAgentConnectionInfo::FromPluginConfig(Config, FString(), 0);
 			TestTrue("cloud requires auth", Info.bAuthRequired);
 			TestTrue("httpUrl ends with /mcp", Info.HttpUrl.EndsWith(TEXT("/mcp")));
+		});
+
+		// mcp-authorize PR 5 (design 06, Flow C): bUseAccessToken drives the "Advanced: use access token" escape hatch.
+		// It is true ONLY for a Custom-mode Required-auth WITH a non-empty token — the default path (and Cloud, whose
+		// auth is server-enforced native OAuth, never a user PAT) stays on the credential-free OAuth path.
+		It("does not opt into the access-token escape hatch on the default Custom path", [this]()
+		{
+			FUnrealMcpConfig Config;
+			Config.ConnectionMode = EUnrealMcpConnectionMode::Custom;
+			Config.CustomHost = TEXT("http://localhost:8080");
+			Config.AuthOption = EUnrealMcpAuthOption::None;
+			const FAiAgentConnectionInfo Info = FAiAgentConnectionInfo::FromPluginConfig(Config, FString(), 31234);
+			TestFalse("no escape hatch on default path", Info.bUseAccessToken);
+		});
+
+		It("opts into the access-token escape hatch for Custom + Required + a token", [this]()
+		{
+			FUnrealMcpConfig Config;
+			Config.ConnectionMode = EUnrealMcpConnectionMode::Custom;
+			Config.CustomHost = TEXT("http://localhost:8080");
+			Config.AuthOption = EUnrealMcpAuthOption::Required;
+			Config.CustomToken = TEXT("pat-secret-value");
+			const FAiAgentConnectionInfo Info = FAiAgentConnectionInfo::FromPluginConfig(Config, FString(), 31234);
+			TestTrue("escape hatch active", Info.bUseAccessToken);
+			TestEqual("token forwarded", Info.Token, FString(TEXT("pat-secret-value")));
+		});
+
+		It("does not opt in for Custom + Required but an EMPTY token", [this]()
+		{
+			FUnrealMcpConfig Config;
+			Config.ConnectionMode = EUnrealMcpConnectionMode::Custom;
+			Config.AuthOption = EUnrealMcpAuthOption::Required;
+			Config.CustomToken = FString();
+			const FAiAgentConnectionInfo Info = FAiAgentConnectionInfo::FromPluginConfig(Config, FString(), 31234);
+			TestFalse("no token → no escape hatch", Info.bUseAccessToken);
+		});
+
+		It("never opts into the escape hatch in Cloud mode (native OAuth, not a user PAT)", [this]()
+		{
+			FUnrealMcpConfig Config;
+			Config.ConnectionMode = EUnrealMcpConnectionMode::Cloud;
+			Config.CloudToken = TEXT("cloud-bearer-value");
+			const FAiAgentConnectionInfo Info = FAiAgentConnectionInfo::FromPluginConfig(Config, FString(), 0);
+			TestFalse("cloud never uses the PAT escape hatch", Info.bUseAccessToken);
 		});
 	});
 }

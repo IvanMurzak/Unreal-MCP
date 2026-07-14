@@ -23,6 +23,15 @@ FAiAgentConnectionInfo FAiAgentConnectionInfo::FromPluginConfig(const FUnrealMcp
 	Info.bAuthRequired = bCloud || Config.AuthOption == EUnrealMcpAuthOption::Required;
 	Info.Token = Config.ResolveEffectiveToken();
 
+	// mcp-authorize PR 5 (design 06, Flow C): the "Advanced: use access token" escape hatch. The DEFAULT path is
+	// native MCP OAuth (URL-only, no bearer) — with the device-flow machine credential store (PR 2) the token is no
+	// longer required input. Only an explicit Custom-mode Required-auth WITH a non-empty token opts into the legacy
+	// Bearer shape for clients that cannot do MCP OAuth. Cloud is ALWAYS native OAuth (its auth is server-enforced,
+	// never a user-pasted PAT), so it never triggers the escape hatch.
+	Info.bUseAccessToken = !bCloud
+		&& Config.AuthOption == EUnrealMcpAuthOption::Required
+		&& !Info.Token.IsEmpty();
+
 	return Info;
 }
 
@@ -73,6 +82,9 @@ FUnrealMcpAgentDescription FUnrealMcpAgentDescription::FromJson(const TSharedPtr
 	Json->TryGetBoolField(TEXT("isConfigured"), Desc.bIsConfigured);
 	Json->TryGetBoolField(TEXT("isInstalled"), Desc.bIsInstalled);
 	Json->TryGetBoolField(TEXT("supportsSkills"), Desc.bSupportsSkills);
+	// mcp-authorize PR 5 (design 06): the native-OAuth capability. Absent in an older sidecar → leave the default
+	// true (assume OAuth-capable) so the escape hatch is only surfaced for an explicit supportsOAuth=false.
+	Json->TryGetBoolField(TEXT("supportsOAuth"), Desc.bSupportsOAuth);
 	Json->TryGetStringField(TEXT("downloadUrl"), Desc.DownloadUrl);
 	Json->TryGetStringField(TEXT("tutorialUrl"), Desc.TutorialUrl);
 

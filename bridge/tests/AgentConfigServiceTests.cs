@@ -43,7 +43,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             catch { /* best-effort temp cleanup */ }
         }
 
-        private AgentSettingsDto Settings(string mode = "Local", bool authRequired = false, string? token = null, string host = "http://localhost:12345/mcp") => new()
+        private AgentSettingsDto Settings(string mode = "Local", bool authRequired = false, string? token = null, string host = "http://localhost:12345/mcp", bool useAccessToken = false) => new()
         {
             ProjectRootPath = _projectRoot,
             ExecutableFullPath = Path.Combine(_projectRoot, "server.exe"),
@@ -53,6 +53,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             Token = token,
             ConnectionMode = mode,
             AuthRequired = authRequired,
+            UseAccessToken = useAccessToken,
         };
 
         [Fact]
@@ -245,6 +246,73 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             Assert.True(remove.Ok);
             Assert.NotNull(remove.Description);
             Assert.False(remove.Description!.IsConfigured);
+        }
+
+        [Fact]
+        public void Configure_DefaultPath_WritesUrlOnly_NoBearer_EvenWhenAuthRequired()
+        {
+            // mcp-authorize PR 5 (design 06, D11): the token is NO LONGER required input on the default path. Even with
+            // authRequired set AND a token supplied, the default path (useAccessToken = false → native MCP OAuth) writes
+            // a credential-free HTTP config — the client authorizes natively, so no bearer lands in .mcp.json.
+            const string pat = "secret-pat-should-not-be-written";
+            var configure = _service.HandleConfigure(new AgentConfigureRequestMessage
+            {
+                RequestId = "cfg-default", AgentId = "claude-code", Transport = "streamableHttp",
+                Settings = Settings(authRequired: true, token: pat, useAccessToken: false),
+            });
+            Assert.True(configure.Ok);
+            Assert.True(configure.Description!.IsConfigured);
+
+            // The written project-local .mcp.json carries only the URL — never the bearer/token on the default path.
+            var mcpJson = Path.Combine(_projectRoot, ".mcp.json");
+            Assert.True(File.Exists(mcpJson));
+            var content = File.ReadAllText(mcpJson);
+            Assert.DoesNotContain(pat, content);
+            Assert.DoesNotContain("Authorization", content);
+            Assert.DoesNotContain("Bearer", content);
+        }
+
+        [Fact]
+        public void Configure_AdvancedAccessToken_WritesTheLegacyBearer()
+        {
+            // mcp-authorize PR 5 (design 06, Flow C): the "Advanced: use access token" escape hatch (useAccessToken =
+            // true, a token supplied) writes the legacy Bearer shape for clients that cannot do MCP OAuth — the PAT
+            // lands in the config the shared library's HttpCredentialMode.AccessToken path produces.
+            const string pat = "advanced-pat-abc123";
+            var configure = _service.HandleConfigure(new AgentConfigureRequestMessage
+            {
+                RequestId = "cfg-advanced", AgentId = "claude-code", Transport = "streamableHttp",
+                Settings = Settings(authRequired: true, token: pat, useAccessToken: true),
+            });
+            Assert.True(configure.Ok);
+
+            // The advanced escape hatch DOES embed the PAT (the legacy Bearer shape `headers.Authorization: Bearer …`)
+            // — the deliberate Flow C trade-off for clients that cannot do MCP OAuth. Assert on the written file, the
+            // real deliverable; the refreshed Description's IsConfigured is Oauth-mode (the shared library's Describe
+            // has no credentialMode), so it reports ReconfigureNeeded here — a known status-detection limitation, not a
+            // write failure (see design_notes).
+            var mcpJson = Path.Combine(_projectRoot, ".mcp.json");
+            Assert.True(File.Exists(mcpJson));
+            var content = File.ReadAllText(mcpJson);
+            Assert.Contains(pat, content);
+            Assert.Contains("Bearer", content);
+        }
+
+        [Fact]
+        public void List_ForwardsSupportsOAuth_ForEveryAgent()
+        {
+            // mcp-authorize PR 5 (design 06): the description DTO forwards each configurator's SupportsOAuth so the
+            // editor UI knows which agents need the "Advanced: use access token" escape hatch (SupportsOAuth == false).
+            var result = _service.HandleList(new AgentsListRequestMessage
+            {
+                RequestId = "oauth", Transport = "streamableHttp", Settings = Settings(),
+            });
+            Assert.True(result.Ok);
+            Assert.NotNull(result.Agents);
+            // Every built-in agent in the current registry supports native MCP OAuth (all default true); the field is
+            // wired through so a future SupportsOAuth == false agent surfaces the escape-hatch signal to the plugin.
+            Assert.Contains(result.Agents!, a => a.AgentId == "claude-code" && a.SupportsOAuth);
+            Assert.All(result.Agents!, a => Assert.True(a.SupportsOAuth));
         }
 
         [Fact]

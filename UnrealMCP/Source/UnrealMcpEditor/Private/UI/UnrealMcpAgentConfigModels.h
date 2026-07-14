@@ -30,6 +30,9 @@ class FJsonObject;
  *  - Port        — the deterministic IPC port for this project (§1.1).
  *  - HttpUrl     — the resolved MCP-client URL the HTTP form points at: <effective host>/mcp.
  *  - bAuthRequired / Token — whether a bearer is sent and its real value (the REAL bearer — masking is the UI's job).
+ *  - bUseAccessToken — mcp-authorize PR 5 (design 06, Flow C): whether the "Advanced: use access token" escape
+ *                  hatch is active (Custom mode + Required auth + a non-empty token). The default path is native
+ *                  MCP OAuth (URL-only, no bearer); ONLY this flag makes the sidecar write the legacy Bearer shape.
  */
 struct FAiAgentConnectionInfo
 {
@@ -38,6 +41,8 @@ struct FAiAgentConnectionInfo
 	FString HttpUrl;
 	bool bAuthRequired = false;
 	FString Token;
+	// mcp-authorize PR 5: the explicit "Advanced: use access token" opt-in (Flow C). False on the default OAuth path.
+	bool bUseAccessToken = false;
 
 	/** Resolve the connection facts from the live plugin config (the same builder the panel/runtime used pre-#101). */
 	static UNREALMCPEDITOR_API FAiAgentConnectionInfo FromPluginConfig(const FUnrealMcpConfig& Config, const FString& InServerPath, int32 InPort);
@@ -118,6 +123,10 @@ struct FUnrealMcpAgentDescription
 	EAiAgentConfiguratorStatus Status = EAiAgentConfiguratorStatus::NotConfigured;
 	bool bIsInstalled = false;
 	bool bSupportsSkills = false;
+	// mcp-authorize PR 5 (design 06): whether this agent can do native MCP OAuth. Default true (credential-free
+	// config + client-side authorize). A false value is the signal to offer the "Advanced: use access token" (PAT)
+	// escape hatch for that agent; an older/absent field degrades to true so the default OAuth path is assumed.
+	bool bSupportsOAuth = true;
 	FString DownloadUrl;
 	FString TutorialUrl;
 	// 6.9.0 top-level Link items (download / tutorial / docs) — each a Link-kind item with Text + Url the panel
