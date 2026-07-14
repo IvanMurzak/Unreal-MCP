@@ -113,6 +113,15 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
         /// </summary>
         public event Action<string, JsonObject>? AgentConfigRequestReceived;
 
+        /// <summary>
+        /// Raised when the plugin sends a mcp-authorize PR 4 <c>project-config</c> request (design 04/06): the C++
+        /// plugin asking the sidecar to resolve THIS project's {pin, derived local-server port, serverTarget}. The
+        /// arguments are the request <c>type</c> and the raw parsed JSON object; the host resolves it via
+        /// <c>ProjectConnectionResolver</c> and answers with a <c>project-config-result</c> via
+        /// <see cref="SendToPluginAsync"/> (off the reader thread).
+        /// </summary>
+        public event Action<string, JsonObject>? ProjectConfigRequestReceived;
+
         public IpcClient(string host, int port, string token, string sidecarVersion, ILogger? logger = null)
         {
             _host = host;
@@ -365,6 +374,13 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
                     // library and answers with an `agent-config-result` (off the reader thread).
                     if (node is JsonObject agentObj)
                         AgentConfigRequestReceived?.Invoke(type, agentObj);
+                    break;
+                case IpcProtocol.Type.ProjectConfig:
+                    // mcp-authorize PR 4: the plugin requests THIS project's resolved {pin, derived local-server
+                    // port, serverTarget}. The host resolves via ProjectConnectionResolver and answers with a
+                    // `project-config-result` (off the reader thread).
+                    if (node is JsonObject projectConfigObj)
+                        ProjectConfigRequestReceived?.Invoke(type, projectConfigObj);
                     break;
                 case IpcProtocol.Type.Status:
                 case IpcProtocol.Type.Log:

@@ -31,6 +31,8 @@
 #include "Misc/CoreDelegates.h"
 #include "Misc/Paths.h"
 #include "Misc/EngineVersion.h"
+#include "Misc/Guid.h"          // FGuid for the mcp-authorize PR 4 project-config request id
+#include "Dom/JsonObject.h"     // FJsonObject field getters in ApplyProjectConfigResult
 #include "Async/Async.h"
 #include "HAL/PlatformProcess.h"
 #include "Modules/ModuleManager.h"
@@ -176,19 +178,13 @@ void FUnrealMcpEditorCoordinator::Startup()
 	SidecarManager->StartForPort(BoundPort, Token);
 
 	// §7 in-UI local-server (issue #95): create the local gamedev-mcp-server manager. It does NOT auto-start —
-	// the user launches it from the MCP-server card's Start button (Custom+http only). Reattach to a server this
-	// plugin spawned in a previous module load (hot-reload survivor) so a later Stop / editor-quit tears it down
-	// instead of orphaning it — only meaningful in Custom+http.
+	// the user launches it from the MCP-server card's Start button (Custom+http only).
+	// mcp-authorize PR 4 (design 04/06): the local server now listens on the sidecar-DERIVED per-project port
+	// (McpPlugin ProjectIdentity + the marker's portOverride), delivered over IPC on handshake — NOT the fixed
+	// 8080 ParsePortFromHost default. That port is unknown until the sidecar handshakes, so the survivor REATTACH
+	// (hot-reload survivor so a later Stop / editor-quit tears it down instead of orphaning it) is deferred to
+	// ApplyProjectConfigResult (the first `project-config-result`). No 8080 fallback on the golden path.
 	ServerManager = MakeUnique<FUnrealMcpServerManager>();
-	if (FUnrealMcpServerManager::IsLaunchAllowed(
-			Config.ConnectionMode == EUnrealMcpConnectionMode::Custom,
-			Config.ResolveEffectiveTransport() == EUnrealMcpTransportMethod::Http))
-	{
-		const int32 ReattachPort = FUnrealMcpServerManager::ParsePortFromHost(Config.ResolveCustomHost());
-		ServerManager->ReattachIfRunning(
-			ReattachPort, /*PluginTimeoutMs*/ 10000,
-			Config.AuthOption == EUnrealMcpAuthOption::Required, Config.ResolveEffectiveToken());
-	}
 
 	// §7 UI: the main-window view-model owns all UI state; wire its side-effect sinks to the real subsystems.
 	// All config writes go config-store-first (Save) then push the §1.3 `config` to the sidecar (§7 ownership).
@@ -242,15 +238,26 @@ void FUnrealMcpEditorCoordinator::Startup()
 
 	// §7 in-UI local-server (issue #95): wire the MCP-server card's Start/Stop to the local server manager. The
 	// view-model already gates these to Custom+http (ToggleLocalServer no-ops otherwise) — the sinks just execute.
-	// Re-resolve the §8 config on each Start so the port (from the Custom host), auth, and token reflect what the
-	// user has set right now. The port the agent dials (Custom host) MUST equal the port the server listens on.
+	// mcp-authorize PR 4 (design 04/06): the server listens on the sidecar-DERIVED per-project port (delivered over
+	// IPC on handshake; marker portOverride wins), NOT the fixed 8080 ParsePortFromHost default. The sidecar is
+	// auto-spawned at plugin load, so the port is cached (DerivedLocalServerPort) well before the user can click
+	// Start; if it is somehow not yet known, fail cleanly rather than fall back to 8080. Auth/token still reflect
+	// the live §8 config. Runs on the game thread (the UI calls it there — same thread the status sink writes on).
 	FUnrealMcpServerManager* ServerPtr = ServerManager.Get();
-	ViewModel->OnStartLocalServer = [ServerPtr]() -> bool
+	FUnrealMcpEditorCoordinator* CoordinatorForStart = this;
+	ViewModel->OnStartLocalServer = [ServerPtr, CoordinatorForStart]() -> bool
 	{
 		if (!ServerPtr)
 			return false;
+		const int32 ServerPort = CoordinatorForStart->DerivedLocalServerPort;
+		if (ServerPort <= 0)
+		{
+			UE_LOG(LogUnrealMcp, Warning,
+				TEXT("[Unreal-MCP] cannot start the local server yet: the derived per-project port has not arrived ")
+				TEXT("from the sidecar. Wait for the bridge to connect, then try again."));
+			return false;
+		}
 		const FUnrealMcpConfig Live = FUnrealMcpConfig::LoadAndResolve();
-		const int32 ServerPort = FUnrealMcpServerManager::ParsePortFromHost(Live.ResolveCustomHost());
 		return ServerPtr->Start(
 			ServerPort, /*PluginTimeoutMs*/ 10000,
 			Live.AuthOption == EUnrealMcpAuthOption::Required, Live.ResolveEffectiveToken());
@@ -302,14 +309,23 @@ void FUnrealMcpEditorCoordinator::Startup()
 					VM->ApplyDeviceAuth(Message);
 				else if (Type == TEXT("agent-config-result") && CoordinatorPtr->MainWindowTab.IsValid())
 					CoordinatorPtr->MainWindowTab->DeliverAgentConfigResult(Message);
+				else if (Type == TEXT("project-config-result"))
+					// mcp-authorize PR 4: cache the sidecar-derived local-server port (and reattach a survivor on it).
+					CoordinatorPtr->ApplyProjectConfigResult(Message);
 			});
 		});
 
 		// Issue #99: on each sidecar handshake-complete, marshal to the game thread and flush a queued Cloud
 		// auth-start (a no-op unless Authorize is awaiting in the Connecting state). Same M9b marshalling + weak
 		// view-model guard as the status sink so a handshake straddling teardown is a no-op, not a use-after-free.
-		BridgeServerPtr->SetHandshakeSink([WeakViewModel]()
+		// mcp-authorize PR 4 (design 04/06): ALSO request THIS project's resolved connection identity ({pin,
+		// derived local-server port, serverTarget}). The result routes back through the status sink to
+		// ApplyProjectConfigResult. Sent directly on the IPC reader thread (SendProjectConfigRequest is
+		// thread-safe); the project root is captured by value so a handshake straddling teardown is still safe.
+		BridgeServerPtr->SetHandshakeSink([WeakViewModel, BridgeServerPtr, ProjectPath]()
 		{
+			if (BridgeServerPtr)
+				BridgeServerPtr->SendProjectConfigRequest(FGuid::NewGuid().ToString(), ProjectPath);
 			AsyncTask(ENamedThreads::GameThread, [WeakViewModel]()
 			{
 				if (TSharedPtr<FUnrealMcpEditorViewModel> VM = WeakViewModel.Pin())
@@ -495,6 +511,56 @@ void FUnrealMcpEditorCoordinator::Startup()
 
 	// §1.5: tear down on editor pre-exit so the sidecar never orphans (layer 1).
 	PreExitHandle = FCoreDelegates::OnEnginePreExit.AddLambda([this]() { Shutdown(); });
+}
+
+void FUnrealMcpEditorCoordinator::ApplyProjectConfigResult(const TSharedPtr<FJsonObject>& Message)
+{
+	// mcp-authorize PR 4 (design 04/06). Game thread (the bridge status sink marshals onto it). Cache the
+	// sidecar-DERIVED per-project local-server port and, on the FIRST result, reattach a survivor local server on
+	// it (Custom+http only) — the reattach that ran at Startup before PR 4 now runs here, because the derived port
+	// is unknown until the sidecar handshakes. A malformed / not-ok result is a no-op.
+	if (!Message.IsValid())
+		return;
+
+	bool bOk = false;
+	Message->TryGetBoolField(TEXT("ok"), bOk);
+	if (!bOk)
+	{
+		FString Error;
+		Message->TryGetStringField(TEXT("error"), Error);
+		UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] project-config-result not ok: %s"), *Error);
+		return;
+	}
+
+	double PortNumber = 0.0;
+	if (!Message->TryGetNumberField(TEXT("port"), PortNumber) || PortNumber <= 0.0 || PortNumber > 65535.0)
+	{
+		UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] project-config-result carried no valid derived port; ignoring."));
+		return;
+	}
+	const int32 DerivedPort = static_cast<int32>(PortNumber);
+
+	bool bPortIsOverridden = false;
+	Message->TryGetBoolField(TEXT("portIsOverridden"), bPortIsOverridden);
+
+	DerivedLocalServerPort = DerivedPort;
+	UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] resolved derived local-server port %d%s from the sidecar."),
+		DerivedPort, bPortIsOverridden ? TEXT(" [user override]") : TEXT(""));
+
+	// One-time survivor reattach on the derived port (Custom+http only; a re-handshake must not repeat it).
+	if (bLocalServerReattachAttempted || !ServerManager.IsValid())
+		return;
+
+	const FUnrealMcpConfig Live = FUnrealMcpConfig::LoadAndResolve();
+	if (FUnrealMcpServerManager::IsLaunchAllowed(
+			Live.ConnectionMode == EUnrealMcpConnectionMode::Custom,
+			Live.ResolveEffectiveTransport() == EUnrealMcpTransportMethod::Http))
+	{
+		ServerManager->ReattachIfRunning(
+			DerivedPort, /*PluginTimeoutMs*/ 10000,
+			Live.AuthOption == EUnrealMcpAuthOption::Required, Live.ResolveEffectiveToken());
+	}
+	bLocalServerReattachAttempted = true;
 }
 
 void FUnrealMcpEditorCoordinator::Shutdown()

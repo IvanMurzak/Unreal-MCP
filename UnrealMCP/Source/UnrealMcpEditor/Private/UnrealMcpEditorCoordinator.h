@@ -42,6 +42,14 @@ public:
 	void Startup();
 	void Shutdown();
 
+	/**
+	 * Handle a sidecar `project-config-result` (mcp-authorize PR 4, design 04/06): cache the DERIVED per-project
+	 * local-server port (ProjectIdentity + marker portOverride) and, on the FIRST result, reattach a survivor local
+	 * server on it (Custom+http only). Runs on the game thread (the bridge status sink marshals onto it). A no-op on
+	 * an `ok == false` / invalid-port result. Public so the wiring lambda routes to it (see Startup).
+	 */
+	void ApplyProjectConfigResult(const TSharedPtr<class FJsonObject>& Message);
+
 	FUnrealMcpToolRegistry* GetRegistry() const { return Registry.Get(); }
 	FUnrealMcpBridgeServer* GetBridgeServer() const { return BridgeServer.Get(); }
 	FUnrealMcpExtensionManager* GetExtensionManager() const { return ExtensionManager.Get(); }
@@ -77,6 +85,16 @@ private:
 	// DEV-ONLY inject/control HTTP bridge over the live dock (docs/ARCHITECTURE.md §7). Created + started in
 	// Startup() ONLY when the editor process env UNREAL_MCP_DEV_CONTROL == "1"; null (never listening) otherwise.
 	TUniquePtr<FUnrealMcpDevControlServer> DevControlServer;
+
+	// mcp-authorize PR 4 (design 04/06): the deterministic per-project LOCAL-server port the sidecar derives
+	// (McpPlugin ProjectIdentity + the project marker's portOverride) and delivers over IPC on each handshake.
+	// -1 until the first `project-config-result` arrives. Replaces the fixed-8080 ParsePortFromHost default for
+	// the local `gamedev-mcp-server` start. Game-thread only (written from the game-thread-marshalled bridge
+	// status sink, read by the OnStartLocalServer sink), so no lock is needed.
+	int32 DerivedLocalServerPort = -1;
+	// Guards the one-time survivor reattach: the reattach that used to run in Startup now runs when the first
+	// derived port arrives (the port is unknown until the sidecar handshakes) and must not repeat on a reconnect.
+	bool bLocalServerReattachAttempted = false;
 
 	FDelegateHandle PreExitHandle;
 	bool bStarted = false;

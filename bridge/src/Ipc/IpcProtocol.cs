@@ -95,6 +95,10 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
             // sidecar → plugin: the terminal result of one agent-config request (§7 AI-agent configurators).
             // Correlated to the originating request by requestId; carries the engine-agnostic DTO.
             public const string AgentConfigResult = "agent-config-result";
+            // sidecar → plugin: the resolved connection identity for the current project (mcp-authorize PR 4,
+            // design 04/06) — {pin, derived local-server port, portIsOverridden, serverTarget}. The terminal
+            // answer to a plugin `project-config` request, correlated by requestId.
+            public const string ProjectConfigResult = "project-config-result";
 
             // sidecar → plugin: fetch one prompt's rendered messages / read one resource's content (v2, §A.1).
             // Both round-trip through PendingCallRegistry by requestId, exactly like a tool-call, and reuse the
@@ -127,6 +131,10 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
             public const string AgentRemove = "agent-remove";     // remove the MCP entry (both transports)
             public const string AgentSkillsPath = "agent-skills-path"; // resolve the agent's skills folder (plugin writes the files)
             public const string AgentGenerateSkills = "agent-generate-skills"; // sidecar resolves the path + writes the SKILL.md files
+            // plugin → sidecar: request THIS project's resolved connection identity (mcp-authorize PR 4). The
+            // sidecar computes {pin, derived local-server port, serverTarget} from McpPlugin's ProjectIdentity +
+            // the project marker and answers with a `project-config-result`. Carries the project root to resolve from.
+            public const string ProjectConfig = "project-config";
 
             // either direction
             public const string Ping = "ping";

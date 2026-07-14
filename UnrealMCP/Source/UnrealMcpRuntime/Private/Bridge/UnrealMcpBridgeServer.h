@@ -110,6 +110,16 @@ public:
 	static bool IsValidAgentConfigVerb(const FString& Type);
 
 	/**
+	 * Send a mcp-authorize PR 4 `project-config` request (design 04/06) to the connected sidecar, which resolves
+	 * THIS project's {pin, derived local-server port, enrolled server target} via the shared C# ProjectIdentity +
+	 * project marker and answers with a `project-config-result` routed back through the status sink. @p RequestId
+	 * correlates the response; @p InProjectPath is the plugin's project root the sidecar resolves from (the sidecar
+	 * falls back to the handshake-reported root when it is empty). Thread-safe; no-op (returns false) when no
+	 * sidecar is connected/handshaken. The UI/coordinator calls this; the frame is serialized through WriteMutex.
+	 */
+	bool SendProjectConfigRequest(const FString& RequestId, const FString& InProjectPath);
+
+	/**
 	 * Register a sink for the inbound sidecar→plugin `status` and `device-auth` feed (§1.3 / §7). The sink
 	 * is invoked ON THE IPC READER THREAD with the message type and parsed object — the caller (the §7
 	 * view-model) MUST marshal onto the game thread (AsyncTask(GameThread)) before touching any Slate state
