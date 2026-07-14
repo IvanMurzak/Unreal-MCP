@@ -44,12 +44,25 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
         [JsonPropertyName("timeoutMs")] public int TimeoutMs { get; set; } = IpcProtocol.DefaultToolTimeoutMs;
         /// <summary>The streamableHttp server URL (http transport <c>url</c>).</summary>
         [JsonPropertyName("host")] public string Host { get; set; } = string.Empty;
-        /// <summary>Bearer token, or empty/null when auth is not configured. NEVER logged (§8).</summary>
+        /// <summary>
+        /// The access token for the "Advanced: use access token" escape hatch (Flow C), or empty/null otherwise.
+        /// NEVER logged (§8). No longer required input on the default path (mcp-authorize PR 5): with the device-flow
+        /// machine credential store (PR 2) the default config is credential-free (native MCP OAuth), so this is
+        /// carried ONLY when <see cref="UseAccessToken"/> is set.
+        /// </summary>
         [JsonPropertyName("token")] public string? Token { get; set; }
         /// <summary>One of <c>Local</c> / <c>Cloud</c> (case-insensitive). Cloud always requires auth.</summary>
         [JsonPropertyName("connectionMode")] public string ConnectionMode { get; set; } = "Local";
         /// <summary>Whether bearer-token auth is required (independent of cloud enforcement).</summary>
         [JsonPropertyName("authRequired")] public bool AuthRequired { get; set; }
+        /// <summary>
+        /// The "Advanced: use access token" escape hatch opt-in (mcp-authorize PR 5, design 06, Flow C). Default
+        /// <c>false</c> → the credential-free native-OAuth path (D11): HTTP configs carry <c>type</c> + <c>url</c>
+        /// only, no embedded bearer. When <c>true</c> AND a non-empty <see cref="Token"/> is supplied, the HTTP
+        /// config is written with the legacy Bearer shape (<c>HttpCredentialMode.AccessToken</c>) for the few
+        /// clients that cannot do MCP OAuth (<see cref="AgentConfiguratorDescriptionDto.SupportsOAuth"/> == false).
+        /// </summary>
+        [JsonPropertyName("useAccessToken")] public bool UseAccessToken { get; set; }
     }
 
     /// <summary>plugin → sidecar: enumerate the available agents and (optionally) their status for a transport.</summary>
@@ -164,6 +177,14 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
         [JsonPropertyName("status")] public string Status { get; set; } = "NotConfigured";
         [JsonPropertyName("isInstalled")] public bool IsInstalled { get; set; }
         [JsonPropertyName("supportsSkills")] public bool SupportsSkills { get; set; }
+        /// <summary>
+        /// Whether this agent can complete native MCP OAuth against the server URL (mcp-authorize PR 5, design 06).
+        /// Default <c>true</c> — the plugin writes the credential-free config and the client's own authorize flow
+        /// completes the loop. A <c>false</c> value is the signal for the editor UI to offer the "Advanced: use
+        /// access token" (PAT) escape hatch (Flow C) for that agent. Forwarded verbatim from the shared
+        /// configurator's <c>SupportsOAuth</c>.
+        /// </summary>
+        [JsonPropertyName("supportsOAuth")] public bool SupportsOAuth { get; set; } = true;
         [JsonPropertyName("downloadUrl")] public string? DownloadUrl { get; set; }
         [JsonPropertyName("tutorialUrl")] public string? TutorialUrl { get; set; }
         /// <summary>

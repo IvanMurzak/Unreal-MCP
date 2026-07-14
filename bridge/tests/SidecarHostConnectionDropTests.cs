@@ -154,5 +154,27 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             // Exactly one Connected + one drop status — the superseded first subscription is disposed, so no duplicates.
             Assert.Equal(2, emitted.Count);
         }
+
+        // mcp-authorize PR 5 (design 06 / D12): the cloud sign-in indicator surfaces the signed-in state in the editor
+        // from EITHER an in-session bearer (an in-editor device flow) OR a populated machine credential store (a
+        // zero-button boot — sign-in done out-of-editor via a CLI login / enrollment / another engine or project).
+        [Theory]
+        // Custom mode is never a cloud authorization — neither a local bearer nor a store credential lights it.
+        [InlineData(false, false, false, null)]
+        [InlineData(false, true, false, null)]
+        [InlineData(false, false, true, null)]
+        [InlineData(false, true, true, null)]
+        // Cloud mode with no credential of either kind → not signed in.
+        [InlineData(true, false, false, null)]
+        // Cloud mode with an in-session bearer (in-editor device flow) → signed in.
+        [InlineData(true, true, false, "Authorized")]
+        // Cloud mode with ONLY a machine-store credential (zero-button boot, out-of-editor sign-in) → signed in.
+        [InlineData(true, false, true, "Authorized")]
+        [InlineData(true, true, true, "Authorized")]
+        public void ResolveCloudAuthState_SurfacesSignedIn_FromSessionBearerOrMachineStore(
+            bool isCloudMode, bool hasSessionBearer, bool machineCredentialExists, string? expected)
+        {
+            Assert.Equal(expected, SidecarHost.ResolveCloudAuthState(isCloudMode, hasSessionBearer, machineCredentialExists));
+        }
     }
 }

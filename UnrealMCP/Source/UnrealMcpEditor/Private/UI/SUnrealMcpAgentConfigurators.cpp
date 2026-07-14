@@ -128,10 +128,15 @@ TSharedPtr<FJsonObject> SUnrealMcpAgentConfigurators::BuildSettings() const
 	Settings->SetNumberField(TEXT("port"), Connection.Port);
 	Settings->SetNumberField(TEXT("timeoutMs"), 30000);
 	Settings->SetStringField(TEXT("host"), Connection.HttpUrl);
-	// The REAL bearer is forwarded so the sidecar can inject it into the written config; it is NEVER logged here.
-	Settings->SetStringField(TEXT("token"), Connection.Token);
+	// mcp-authorize PR 5 (design 06, D11): the DEFAULT path is native MCP OAuth — the sidecar writes a
+	// credential-free config, so DON'T forward the bearer there ("HTTP configs: stop embedding tokens"). The REAL
+	// bearer is forwarded ONLY on the "Advanced: use access token" escape hatch (Flow C), where the sidecar injects
+	// it into the legacy Bearer shape. It is NEVER logged here.
+	Settings->SetStringField(TEXT("token"), Connection.bUseAccessToken ? Connection.Token : FString());
 	Settings->SetStringField(TEXT("connectionMode"), bCloud ? TEXT("Cloud") : TEXT("Local"));
 	Settings->SetBoolField(TEXT("authRequired"), Connection.bAuthRequired);
+	// The explicit escape-hatch opt-in — the sidecar keys the HttpCredentialMode.AccessToken path off this.
+	Settings->SetBoolField(TEXT("useAccessToken"), Connection.bUseAccessToken);
 	return Settings;
 }
 

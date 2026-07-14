@@ -946,6 +946,18 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             return connected ? "Connected" : "Connecting";
         }
 
+        /// <summary>
+        /// Resolve the cloud sign-in indicator for a status emit (mcp-authorize PR 5, design 06 / D12). Cloud mode
+        /// reports <c>"Authorized"</c> when EITHER an in-session bearer was issued (an in-editor device flow) OR the
+        /// shared machine credential store already holds a credential (zero-button sign-in — a CLI login, an
+        /// enrollment, or another engine/project signed in once-per-machine). This is what surfaces the signed-in
+        /// state in the editor even when sign-in happened out-of-editor. <c>null</c> in Custom mode, or when no
+        /// credential of either kind is present. Pure + static so the bridge xUnit suite locks the matrix without a
+        /// live SignalR link or machine store.
+        /// </summary>
+        internal static string? ResolveCloudAuthState(bool isCloudMode, bool hasSessionBearer, bool machineCredentialExists) =>
+            isCloudMode && (hasSessionBearer || machineCredentialExists) ? "Authorized" : null;
+
         /// <summary>Fully disconnect SignalR (auth-revoke / Disconnect), then surface a Disconnected status.</summary>
         private async Task HandleDisconnectAsync(CancellationToken ct)
         {
@@ -1301,9 +1313,13 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
                     }
                     _logger?.LogInformation(ok ? "SignalR connected." : "SignalR initial connect returned false; client will keep retrying.");
                     // §7 live status: surface the connection result to the plugin's view-model. Only a CLOUD-mode
-                    // bearer is a cloud authorization — a Custom-mode token is a local bearer and must NOT light the
-                    // "Authorized — cloud token stored" indicator (ApplyStatus latches it and never demotes).
-                    var cloudAuthState = _isCloudMode && !string.IsNullOrEmpty(BearerToken) ? "Authorized" : null;
+                    // credential is a cloud authorization — a Custom-mode token is a local bearer and must NOT light
+                    // the "Authorized" indicator (ApplyStatus latches it and never demotes). mcp-authorize PR 5
+                    // (design 06, D12): the machine credential store being populated ALSO counts as signed-in, so a
+                    // zero-button boot (sign-in done out-of-editor: a CLI login, an enrollment, another engine/project)
+                    // surfaces the signed-in state without an in-editor device flow.
+                    var cloudAuthState = ResolveCloudAuthState(
+                        _isCloudMode, !string.IsNullOrEmpty(BearerToken), _credentialStore?.Exists == true);
                     await EmitStatusAsync(ok ? "Connected" : "Connecting", cloudAuthState).ConfigureAwait(false);
                     // §7 (issue #109): once connected, seed the AI-agent roster (with retry/backoff) so the row is
                     // populated even before the first OnClientsChanged push. Fire-and-forget on a background task —

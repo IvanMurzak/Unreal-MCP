@@ -18,6 +18,7 @@ using com.IvanMurzak.Unreal.MCP.Bridge.Ipc;
 using Microsoft.Extensions.Logging;
 using McpAuthOption = com.IvanMurzak.McpPlugin.Common.Consts.MCP.Server.AuthOption;
 using McpConnectionMode = com.IvanMurzak.McpPlugin.AgentConfig.ConnectionMode;
+using McpHttpCredentialMode = com.IvanMurzak.McpPlugin.AgentConfig.HttpCredentialMode;
 using McpTransport = com.IvanMurzak.McpPlugin.Common.Consts.MCP.Server.TransportMethod;
 
 namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
@@ -111,9 +112,12 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
             var transport = ParseTransport(request.Transport);
             try
             {
+                // mcp-authorize PR 5 (design 06): the DEFAULT path is native MCP OAuth — the written HTTP config is
+                // credential-free (HttpCredentialMode.Oauth). Only the explicit "Advanced: use access token" opt-in
+                // (with a token) writes the legacy Bearer shape (Flow C) for the clients that cannot do MCP OAuth.
                 var config = transport == McpTransport.stdio
                     ? configurator.GetStdioConfig(settings, _logger)
-                    : configurator.GetHttpConfig(settings, _logger);
+                    : configurator.GetHttpConfig(settings, _logger, ResolveCredentialMode(request.Settings));
                 result.Ok = config.Configure();
                 if (!result.Ok)
                     result.Error = $"Configure returned false for '{request.AgentId}' ({transport}).";
@@ -248,6 +252,9 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
                 Status = description.Status.ToString(),
                 IsInstalled = description.IsInstalled,
                 SupportsSkills = configurator.SupportsSkills,
+                // mcp-authorize PR 5 (design 06): forward the native-OAuth capability so the editor UI knows which
+                // agents need the "Advanced: use access token" (PAT) escape hatch — SupportsOAuth == false clients.
+                SupportsOAuth = configurator.SupportsOAuth,
                 DownloadUrl = configurator.DownloadUrl,
                 TutorialUrl = configurator.TutorialUrl,
                 // 6.9.0: the top-level Link items (download / tutorial / docs), carried with their Url so the plugin
@@ -273,23 +280,53 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
         private static AgentItemDto MapItem(global::com.IvanMurzak.McpPlugin.AgentConfig.ConfigurationItem item) =>
             new() { Kind = item.Kind.ToString(), Text = item.Text, Url = item.Url ?? string.Empty };
 
-        /// <summary>Map the inline IPC settings DTO into the shared library's host-aware settings.</summary>
+        /// <summary>
+        /// Map the inline IPC settings DTO into the shared library's host-aware settings.
+        ///
+        /// <para>
+        /// mcp-authorize PR 5 (design 06, D11): the token is NO LONGER required input on the default path. With the
+        /// device-flow machine credential store (PR 2) the client authorizes natively (MCP OAuth) and the written
+        /// config is credential-free — the shared library's <c>GetHttpConfig</c> defaults to
+        /// <c>HttpCredentialMode.Oauth</c> and never embeds a bearer. So <c>authOption</c> + <c>token</c> are carried
+        /// ONLY for the explicit "Advanced: use access token" escape hatch (Flow C); <c>dto.AuthRequired</c> alone
+        /// (which Cloud enforcement sets) no longer forces a bearer-carrying config. This drops the previous
+        /// "AuthRequired ⇒ authOption.required" gating that made the default path token-required.
+        /// </para>
+        /// </summary>
         private static AgentConfiguratorSettings MapSettings(AgentSettingsDto dto)
         {
             var connectionMode = string.Equals(dto.ConnectionMode, "Cloud", StringComparison.OrdinalIgnoreCase)
                 ? McpConnectionMode.Cloud
                 : McpConnectionMode.Local;
-            var authOption = dto.AuthRequired ? McpAuthOption.required : McpAuthOption.none;
+            var useAccessToken = UsesAccessToken(dto);
+            var authOption = useAccessToken ? McpAuthOption.required : McpAuthOption.none;
             return AgentConfiguratorSettings.CreateForHost(
                 projectRootPath: dto.ProjectRootPath,
                 executableFullPath: dto.ExecutableFullPath,
                 port: dto.Port,
                 timeoutMs: dto.TimeoutMs,
                 host: dto.Host,
-                token: string.IsNullOrEmpty(dto.Token) ? null : dto.Token,
+                token: useAccessToken ? dto.Token : null,
                 connectionMode: connectionMode,
                 authOption: authOption);
         }
+
+        /// <summary>
+        /// Whether a request opts into the "Advanced: use access token" escape hatch (mcp-authorize PR 5, design 06,
+        /// Flow C): the plugin explicitly set <see cref="AgentSettingsDto.UseAccessToken"/> AND supplied a non-empty
+        /// <see cref="AgentSettingsDto.Token"/>. Everything else is the default credential-free native-OAuth path.
+        /// </summary>
+        private static bool UsesAccessToken(AgentSettingsDto? dto) =>
+            dto != null && dto.UseAccessToken && !string.IsNullOrEmpty(dto.Token);
+
+        /// <summary>
+        /// Resolve the HTTP credential mode for a request (mcp-authorize PR 5, design 06). The default is native MCP
+        /// OAuth (<see cref="McpHttpCredentialMode.Oauth"/>, URL-only — no embedded bearer); only the "Advanced: use
+        /// access token" opt-in (see <see cref="UsesAccessToken"/>) selects <see cref="McpHttpCredentialMode.AccessToken"/>
+        /// so the legacy Bearer shape is written for clients that cannot do MCP OAuth.
+        /// </summary>
+        private static McpHttpCredentialMode ResolveCredentialMode(AgentSettingsDto? dto) =>
+            UsesAccessToken(dto) ? McpHttpCredentialMode.AccessToken : McpHttpCredentialMode.Oauth;
 
         private static McpTransport ParseTransport(string? transport) =>
             string.Equals(transport, "stdio", StringComparison.OrdinalIgnoreCase)
