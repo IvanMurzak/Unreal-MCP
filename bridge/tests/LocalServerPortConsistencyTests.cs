@@ -92,8 +92,14 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             RunInTempDir(projectRoot =>
             {
                 // D15: an explicit user override in the committable project marker wins over the hash-derived port —
-                // and must win IDENTICALLY on both the server-bind and written-config sides.
-                const int overridePort = 26543;
+                // and must win IDENTICALLY on both the server-bind and written-config sides. Pick an override that is
+                // GUARANTEED to differ from THIS temp dir's hash-derived port — both live in the same 20000–29999
+                // band, so a fixed constant has a ~1/10000 chance of colliding with the random-temp-path hash, which
+                // would flip the override-is-exercised assertion below into a spurious failure. Deriving first and
+                // stepping off the collision keeps the assertion meaningful (bind == override != derived ⇒ the
+                // override path really won) while making it deterministic.
+                var derivedPort = ProjectIdentity.DerivePort(projectRoot);
+                var overridePort = derivedPort == 26543 ? 26544 : 26543;
                 new ProjectMarker { PortOverride = overridePort }.Write(projectRoot);
 
                 var bind = ServerBindPort(projectRoot);
@@ -103,7 +109,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
                 Assert.Equal(overridePort, written);
                 Assert.Equal(bind, written);
                 // The override is NOT the hash-derived port (proves the override path is exercised, not a coincidence).
-                Assert.NotEqual(overridePort, ProjectIdentity.DerivePort(projectRoot));
+                Assert.NotEqual(overridePort, derivedPort);
             });
         }
 
