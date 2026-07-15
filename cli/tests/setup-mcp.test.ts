@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
-import { setupMcp, listAgentIds } from '../src/lib/setup-mcp.js';
+import { setupMcp, listAgentIds, shouldWriteAuthHeader } from '../src/lib/setup-mcp.js';
 import { agentRegistry, getAgentById, getAgentIds, MCP_SERVER_NAME } from '../src/utils/agents.js';
 import { makeTempDir, rmTempDir } from './helpers.js';
 
@@ -58,6 +58,13 @@ describe('agent roster', () => {
       expect(['json', 'toml']).toContain(a.configFormat);
       expect(typeof a.bodyPath).toBe('string');
       expect(a.bodyPath.length).toBeGreaterThan(0);
+      expect(typeof a.supportsOAuth).toBe('boolean');
+    }
+  });
+
+  it('every agent is OAuth-capable (supportsOAuth true — b6 / D11 default)', () => {
+    for (const a of agentRegistry) {
+      expect(a.supportsOAuth).toBe(true);
     }
   });
 
@@ -138,7 +145,7 @@ describe('setupMcp — http transport', () => {
     expect(written.mcpServers['unreal-mcp'].type).toBe('http');
   });
 
-  it('adds a bearer header when a token is supplied', async () => {
+  it('adds a bearer header when a token is EXPLICITLY supplied (PAT opt-in / Flow C)', async () => {
     const dir = tmp();
     const r = await setupMcp({ agentId: 'claude-code', projectDir: dir, transport: 'http', url: 'http://h', token: 'tok' });
     expect(r.kind).toBe('success');
@@ -187,6 +194,88 @@ describe('setupMcp — http transport', () => {
     expect(fs.existsSync(r.configPath)).toBe(false);
     expect(r.snippet).toContain('unreal-mcp');
     expect(r.snippet).toContain('http://h/mcp');
+  });
+});
+
+describe('setupMcp — D11 credential-free OAuth config (http)', () => {
+  // The flagship fix: OAuth-capable interactive clients must get a URL-only
+  // `{type,url}` config with NO Authorization header, so the client performs its
+  // own native RFC 9728 OAuth. A static Bearer header both 401s against the hosted
+  // AS and suppresses the client's OAuth handshake.
+  for (const agentId of ['claude-code', 'cursor', 'vscode-copilot']) {
+    it(`writes URL-only ${agentId} config (no Authorization header) with no token`, async () => {
+      const dir = tmp();
+      const r = await setupMcp({ agentId, projectDir: dir, transport: 'http', url: 'https://ai-game.dev' });
+      expect(r.kind).toBe('success');
+      if (r.kind !== 'success') return;
+      const written = JSON.parse(fs.readFileSync(r.configPath, 'utf-8'));
+      const body = getAgentById(agentId)!.bodyPath;
+      const entry = written[body]['unreal-mcp'];
+      expect(entry.type).toBe('http');
+      expect(entry.url).toBe('https://ai-game.dev/mcp');
+      expect(entry.headers).toBeUndefined();
+    });
+  }
+
+  it('writes URL-only codex (TOML) config with no Authorization', async () => {
+    const dir = tmp();
+    const r = await setupMcp({ agentId: 'codex', projectDir: dir, transport: 'http', url: 'https://ai-game.dev' });
+    expect(r.kind).toBe('success');
+    if (r.kind !== 'success') return;
+    const content = fs.readFileSync(r.configPath, 'utf-8');
+    expect(content).toContain('url = "https://ai-game.dev/mcp"');
+    expect(content.toLowerCase()).not.toContain('authorization');
+  });
+
+  it('an AMBIENT token (project .env) does NOT inject a header for an OAuth client (the bug)', async () => {
+    const dir = tmp();
+    // Simulate a project whose .env carries a token — the exact pre-fix condition
+    // that used to inject a static Bearer header and break the client's OAuth.
+    fs.writeFileSync(
+      path.join(dir, '.env'),
+      'UNREAL_MCP_HOST=https://ai-game.dev\nUNREAL_MCP_TOKEN=ambient-pat\n',
+      'utf-8',
+    );
+    const r = await setupMcp({ agentId: 'claude-code', projectDir: dir, transport: 'http' });
+    expect(r.kind).toBe('success');
+    if (r.kind !== 'success') return;
+    const entry = JSON.parse(fs.readFileSync(r.configPath, 'utf-8')).mcpServers['unreal-mcp'];
+    expect(entry.url).toBe('https://ai-game.dev/mcp');
+    expect(entry.headers).toBeUndefined();
+  });
+
+  it('a re-run over a config that still has a stale Authorization header strips it', async () => {
+    const dir = tmp();
+    // Pre-fix state left on disk by an older buggy run: a lingering Bearer header.
+    fs.writeFileSync(
+      path.join(dir, '.mcp.json'),
+      JSON.stringify({
+        mcpServers: { 'unreal-mcp': { type: 'http', url: 'https://ai-game.dev/mcp', headers: { Authorization: 'Bearer stale' } } },
+      }),
+      'utf-8',
+    );
+    const r = await setupMcp({ agentId: 'claude-code', projectDir: dir, transport: 'http', url: 'https://ai-game.dev' });
+    expect(r.kind).toBe('success');
+    if (r.kind !== 'success') return;
+    const entry = JSON.parse(fs.readFileSync(r.configPath, 'utf-8')).mcpServers['unreal-mcp'];
+    expect(entry.url).toBe('https://ai-game.dev/mcp');
+    expect(entry.headers).toBeUndefined();
+  });
+});
+
+describe('shouldWriteAuthHeader (pure decision)', () => {
+  it('OAuth-capable client with an ambient token → no header (URL-only)', () => {
+    expect(shouldWriteAuthHeader({ token: 'ambient', supportsOAuth: true, explicitPatOptIn: false })).toBe(false);
+  });
+  it('OAuth-capable client with an EXPLICIT PAT opt-in → header (Flow C)', () => {
+    expect(shouldWriteAuthHeader({ token: 'pat', supportsOAuth: true, explicitPatOptIn: true })).toBe(true);
+  });
+  it('non-OAuth client with a token → header (fallback), even without explicit opt-in', () => {
+    expect(shouldWriteAuthHeader({ token: 'tok', supportsOAuth: false, explicitPatOptIn: false })).toBe(true);
+  });
+  it('no token → never a header, regardless of the other flags', () => {
+    expect(shouldWriteAuthHeader({ token: '', supportsOAuth: false, explicitPatOptIn: true })).toBe(false);
+    expect(shouldWriteAuthHeader({ token: '', supportsOAuth: true, explicitPatOptIn: false })).toBe(false);
   });
 });
 
