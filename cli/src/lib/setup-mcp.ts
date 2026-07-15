@@ -39,6 +39,34 @@ export function listAgentIds(): string[] {
   return getAgentIds();
 }
 
+/**
+ * Decide whether `setup-mcp` should write a static `Authorization: Bearer` header
+ * into an http client config. Pure — exported for unit tests.
+ *
+ * Design decision D11 / Flow A: an OAuth-capable interactive client (Claude Code,
+ * Cursor, Codex, Copilot, …) must receive a CREDENTIAL-FREE, URL-only config so it
+ * performs its own native RFC 9728 OAuth against the endpoint. A static Bearer
+ * header (a) is rejected by the hosted OAuth server (401) and (b) SUPPRESSES the
+ * client's own OAuth handshake ("OAuth fallback is disabled when headers.
+ * Authorization is set"). So a header is written ONLY when a credential is present
+ * AND either the client is NOT OAuth-capable (`supportsOAuth:false`) OR the caller
+ * EXPLICITLY opted into a PAT (passed `--token`) — Flow C, the recommended path for
+ * headless CI / self-hosted required-auth against a non-OAuth endpoint. An ambient
+ * token (resolved from the project `.env` / process env) never forces a header onto
+ * an OAuth-capable client. Mirrors the shared b6 C# configurators / `configure --agent`.
+ */
+export function shouldWriteAuthHeader(args: {
+  /** The resolved credential (`''` when none). */
+  token: string;
+  /** The agent's OAuth capability (`AgentDefinition.supportsOAuth`). */
+  supportsOAuth: boolean;
+  /** `true` when the user EXPLICITLY supplied a token (PAT opt-in), not an ambient one. */
+  explicitPatOptIn: boolean;
+}): boolean {
+  if (args.token.length === 0) return false;
+  return !args.supportsOAuth || args.explicitPatOptIn;
+}
+
 export async function setupMcp(opts: SetupMcpOptions): Promise<SetupMcpResult> {
   const warnings: string[] = [];
   const nextSteps: string[] = [];
@@ -96,7 +124,18 @@ export async function setupMcp(opts: SetupMcpOptions): Promise<SetupMcpResult> {
       // this avoids the historical `/mcp` double-append.
       const httpUrl = appendMcp(conn.url);
       const token = conn.token ?? '';
-      props = agent.getHttpProps(httpUrl, token, token.length > 0);
+      // D11 / Flow A: OAuth-capable clients get a CREDENTIAL-FREE, URL-only config
+      // so they run their own native OAuth; a static Bearer header is emitted only
+      // for a non-OAuth client (`supportsOAuth:false`) or an EXPLICIT PAT opt-in
+      // (the caller passed `--token`) — Flow C. An ambient token (from the project
+      // `.env` / process env) never forces a header. See `shouldWriteAuthHeader`.
+      const explicitPatOptIn = (opts.token ?? '').trim().length > 0;
+      const writeAuthHeader = shouldWriteAuthHeader({
+        token,
+        supportsOAuth: agent.supportsOAuth,
+        explicitPatOptIn,
+      });
+      props = agent.getHttpProps(httpUrl, token, writeAuthHeader);
       removeKeys = agent.httpRemoveKeys;
     }
 

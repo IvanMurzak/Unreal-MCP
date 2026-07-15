@@ -40,6 +40,18 @@ export interface AgentDefinition {
   configPathDisplay: string;
   /** Config-file serialization format. `toml` is the Codex branch. */
   configFormat: 'json' | 'toml';
+  /**
+   * Whether this client performs its OWN native RFC 9728 OAuth against an
+   * OAuth-protected MCP endpoint (design decision D11 / Flow A). `true` for every
+   * interactive client — the b6 configurator default. When `true`, `setup-mcp`
+   * writes a CREDENTIAL-FREE, URL-only http config (no `Authorization` header) so
+   * the client runs its own OAuth handshake: a static Bearer header is both
+   * rejected by the hosted OAuth server (401) AND suppresses the client's own
+   * flow ("OAuth fallback is disabled when headers.Authorization is set"). A
+   * static header is emitted only for a `supportsOAuth:false` client OR an
+   * explicit PAT opt-in (Flow C) — see `lib/setup-mcp.ts` `shouldWriteAuthHeader`.
+   */
+  supportsOAuth: boolean;
   bodyPath: string;
   /** Resolve the absolute config-file path for a given project root. */
   getConfigPath(projectPath: string): string;
@@ -99,6 +111,17 @@ function stdioArgs(port: number, auth: string, token: string): string[] {
   ];
 }
 
+/**
+ * Build the `{ Authorization: Bearer <token> }` header object for an http server
+ * entry, or `undefined` to omit it entirely.
+ *
+ * `authRequired` is the FINAL "write a static Bearer header?" decision, computed
+ * by the caller (`lib/setup-mcp.ts` `shouldWriteAuthHeader`) from the agent's
+ * `supportsOAuth` capability + whether the user explicitly opted into a PAT.
+ * OAuth-capable clients (Flow A) receive a credential-free, URL-only config, so
+ * the caller passes `false` for them unless a PAT was explicitly supplied — the
+ * static Bearer header is the PAT / non-OAuth fallback only (Flow C).
+ */
 function authHeaders(
   token: string,
   authRequired: boolean,
@@ -123,6 +146,7 @@ export const agentRegistry: readonly AgentDefinition[] = [
     skillsPath: '.claude/skills',
     configPathDisplay: '.mcp.json',
     configFormat: 'json',
+    supportsOAuth: true,
     bodyPath: 'mcpServers',
     getConfigPath: (p) => path.join(p, '.mcp.json'),
     getStdioProps: (serverPath, port, auth, token) => ({
@@ -135,7 +159,7 @@ export const agentRegistry: readonly AgentDefinition[] = [
       ...(authHeaders(token, authRequired) ? { headers: authHeaders(token, authRequired) } : {}),
     }),
     stdioRemoveKeys: ['type', 'url'],
-    httpRemoveKeys: ['command', 'args'],
+    httpRemoveKeys: ['command', 'args', 'headers'],
   },
 
   // ── Claude Desktop ───────────────────────────────────────────
@@ -145,6 +169,7 @@ export const agentRegistry: readonly AgentDefinition[] = [
     skillsPath: null,
     configPathDisplay: '~/Claude/claude_desktop_config.json',
     configFormat: 'json',
+    supportsOAuth: true,
     bodyPath: 'mcpServers',
     getConfigPath: () => {
       if (isWindows()) {
@@ -166,7 +191,7 @@ export const agentRegistry: readonly AgentDefinition[] = [
       ...(authHeaders(token, authRequired) ? { headers: authHeaders(token, authRequired) } : {}),
     }),
     stdioRemoveKeys: ['url'],
-    httpRemoveKeys: ['command', 'args'],
+    httpRemoveKeys: ['command', 'args', 'headers'],
   },
 
   // ── Cursor ───────────────────────────────────────────────────
@@ -176,6 +201,7 @@ export const agentRegistry: readonly AgentDefinition[] = [
     skillsPath: '.cursor/skills',
     configPathDisplay: '.cursor/mcp.json',
     configFormat: 'json',
+    supportsOAuth: true,
     bodyPath: 'mcpServers',
     getConfigPath: (p) => path.join(p, '.cursor', 'mcp.json'),
     getStdioProps: (serverPath, port, auth, token) => ({
@@ -189,7 +215,7 @@ export const agentRegistry: readonly AgentDefinition[] = [
       ...(authHeaders(token, authRequired) ? { headers: authHeaders(token, authRequired) } : {}),
     }),
     stdioRemoveKeys: ['url'],
-    httpRemoveKeys: ['command', 'args'],
+    httpRemoveKeys: ['command', 'args', 'headers'],
   },
 
   // ── VS Code (Copilot) ────────────────────────────────────────
@@ -199,6 +225,7 @@ export const agentRegistry: readonly AgentDefinition[] = [
     skillsPath: '.github/skills',
     configPathDisplay: '.vscode/mcp.json',
     configFormat: 'json',
+    supportsOAuth: true,
     bodyPath: 'servers',
     getConfigPath: (p) => path.join(p, '.vscode', 'mcp.json'),
     getStdioProps: (serverPath, port, auth, token) => ({
@@ -212,7 +239,7 @@ export const agentRegistry: readonly AgentDefinition[] = [
       ...(authHeaders(token, authRequired) ? { headers: authHeaders(token, authRequired) } : {}),
     }),
     stdioRemoveKeys: ['url'],
-    httpRemoveKeys: ['command', 'args'],
+    httpRemoveKeys: ['command', 'args', 'headers'],
   },
 
   // ── Visual Studio (Copilot) ──────────────────────────────────
@@ -222,6 +249,7 @@ export const agentRegistry: readonly AgentDefinition[] = [
     skillsPath: '.github/skills',
     configPathDisplay: '.vs/mcp.json',
     configFormat: 'json',
+    supportsOAuth: true,
     bodyPath: 'servers',
     getConfigPath: (p) => path.join(p, '.vs', 'mcp.json'),
     getStdioProps: (serverPath, port, auth, token) => ({
@@ -235,7 +263,7 @@ export const agentRegistry: readonly AgentDefinition[] = [
       ...(authHeaders(token, authRequired) ? { headers: authHeaders(token, authRequired) } : {}),
     }),
     stdioRemoveKeys: ['url'],
-    httpRemoveKeys: ['command', 'args'],
+    httpRemoveKeys: ['command', 'args', 'headers'],
   },
 
   // ── Rider (Junie) ───────────────────────────────────────────
@@ -245,6 +273,7 @@ export const agentRegistry: readonly AgentDefinition[] = [
     skillsPath: '.junie/skills',
     configPathDisplay: '.junie/mcp/mcp.json',
     configFormat: 'json',
+    supportsOAuth: true,
     bodyPath: 'mcpServers',
     getConfigPath: (p) => path.join(p, '.junie', 'mcp', 'mcp.json'),
     getStdioProps: (serverPath, port, auth, token) => ({
@@ -260,7 +289,7 @@ export const agentRegistry: readonly AgentDefinition[] = [
       ...(authHeaders(token, authRequired) ? { headers: authHeaders(token, authRequired) } : {}),
     }),
     stdioRemoveKeys: ['disabled', 'url'],
-    httpRemoveKeys: ['disabled', 'command', 'args'],
+    httpRemoveKeys: ['disabled', 'command', 'args', 'headers'],
   },
 
   // ── GitHub Copilot CLI ──────────────────────────────────────
@@ -270,6 +299,7 @@ export const agentRegistry: readonly AgentDefinition[] = [
     skillsPath: '.github/skills',
     configPathDisplay: '~/.copilot/mcp-config.json',
     configFormat: 'json',
+    supportsOAuth: true,
     bodyPath: 'mcpServers',
     getConfigPath: () => path.join(home(), '.copilot', 'mcp-config.json'),
     getStdioProps: (serverPath, port, auth, token) => ({
@@ -284,7 +314,7 @@ export const agentRegistry: readonly AgentDefinition[] = [
       ...(authHeaders(token, authRequired) ? { headers: authHeaders(token, authRequired) } : {}),
     }),
     stdioRemoveKeys: ['url', 'type'],
-    httpRemoveKeys: ['command', 'args'],
+    httpRemoveKeys: ['command', 'args', 'headers'],
   },
 
   // ── Gemini ──────────────────────────────────────────────────
@@ -294,6 +324,7 @@ export const agentRegistry: readonly AgentDefinition[] = [
     skillsPath: '.gemini/skills',
     configPathDisplay: '.gemini/settings.json',
     configFormat: 'json',
+    supportsOAuth: true,
     bodyPath: 'mcpServers',
     getConfigPath: (p) => path.join(p, '.gemini', 'settings.json'),
     getStdioProps: (serverPath, port, auth, token) => ({
@@ -307,7 +338,7 @@ export const agentRegistry: readonly AgentDefinition[] = [
       ...(authHeaders(token, authRequired) ? { headers: authHeaders(token, authRequired) } : {}),
     }),
     stdioRemoveKeys: ['url'],
-    httpRemoveKeys: ['command', 'args'],
+    httpRemoveKeys: ['command', 'args', 'headers'],
   },
 
   // ── Antigravity ─────────────────────────────────────────────
@@ -317,6 +348,7 @@ export const agentRegistry: readonly AgentDefinition[] = [
     skillsPath: '.agent/skills',
     configPathDisplay: '~/.gemini/config/mcp_config.json',
     configFormat: 'json',
+    supportsOAuth: true,
     bodyPath: 'mcpServers',
     getConfigPath: () => path.join(home(), '.gemini', 'config', 'mcp_config.json'),
     // Antigravity uses a `serverUrl` key (not `url`) and a `disabled` flag.
@@ -340,6 +372,7 @@ export const agentRegistry: readonly AgentDefinition[] = [
     skillsPath: '.cline/skills',
     configPathDisplay: '~/Code/globalStorage/.../cline_mcp_settings.json',
     configFormat: 'json',
+    supportsOAuth: true,
     bodyPath: 'mcpServers',
     getConfigPath: () => {
       if (isWindows()) {
@@ -369,7 +402,7 @@ export const agentRegistry: readonly AgentDefinition[] = [
       ...(authHeaders(token, authRequired) ? { headers: authHeaders(token, authRequired) } : {}),
     }),
     stdioRemoveKeys: ['url'],
-    httpRemoveKeys: ['command', 'args'],
+    httpRemoveKeys: ['command', 'args', 'headers'],
   },
 
   // ── Open Code ───────────────────────────────────────────────
@@ -379,6 +412,7 @@ export const agentRegistry: readonly AgentDefinition[] = [
     skillsPath: '.opencode/skills',
     configPathDisplay: 'opencode.json',
     configFormat: 'json',
+    supportsOAuth: true,
     bodyPath: 'mcp',
     getConfigPath: (p) => path.join(p, 'opencode.json'),
     getStdioProps: (serverPath, port, auth, token) => ({
@@ -393,7 +427,7 @@ export const agentRegistry: readonly AgentDefinition[] = [
       ...(authHeaders(token, authRequired) ? { headers: authHeaders(token, authRequired) } : {}),
     }),
     stdioRemoveKeys: ['url', 'args'],
-    httpRemoveKeys: ['command', 'args'],
+    httpRemoveKeys: ['command', 'args', 'headers'],
   },
 
   // ── Codex (TOML config) ─────────────────────────────────────
@@ -403,6 +437,7 @@ export const agentRegistry: readonly AgentDefinition[] = [
     skillsPath: '.agents/skills',
     configPathDisplay: '.codex/config.toml',
     configFormat: 'toml',
+    supportsOAuth: true,
     bodyPath: 'mcp_servers',
     getConfigPath: (p) => path.join(p, '.codex', 'config.toml'),
     // Codex's stdio arg vector omits the bearer token (it is not accepted on
@@ -430,6 +465,7 @@ export const agentRegistry: readonly AgentDefinition[] = [
     skillsPath: '.kilocode/skills',
     configPathDisplay: '.kilocode/mcp.json',
     configFormat: 'json',
+    supportsOAuth: true,
     bodyPath: 'mcpServers',
     getConfigPath: (p) => path.join(p, '.kilocode', 'mcp.json'),
     getStdioProps: (serverPath, port, auth, token) => ({
@@ -445,7 +481,7 @@ export const agentRegistry: readonly AgentDefinition[] = [
       ...(authHeaders(token, authRequired) ? { headers: authHeaders(token, authRequired) } : {}),
     }),
     stdioRemoveKeys: ['url'],
-    httpRemoveKeys: ['command', 'args'],
+    httpRemoveKeys: ['command', 'args', 'headers'],
   },
 
   // ── Custom (generic mcpServers entry written to a caller path) ─
@@ -455,6 +491,7 @@ export const agentRegistry: readonly AgentDefinition[] = [
     skillsPath: null,
     configPathDisplay: 'mcp.json',
     configFormat: 'json',
+    supportsOAuth: true,
     bodyPath: 'mcpServers',
     getConfigPath: (p) => path.join(p, 'mcp.json'),
     getStdioProps: (serverPath, port, auth, token) => ({
@@ -468,7 +505,7 @@ export const agentRegistry: readonly AgentDefinition[] = [
       ...(authHeaders(token, authRequired) ? { headers: authHeaders(token, authRequired) } : {}),
     }),
     stdioRemoveKeys: ['url'],
-    httpRemoveKeys: ['command', 'args'],
+    httpRemoveKeys: ['command', 'args', 'headers'],
   },
 ] as const;
 
