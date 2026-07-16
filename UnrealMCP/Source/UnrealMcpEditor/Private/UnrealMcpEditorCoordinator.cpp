@@ -249,6 +249,8 @@ void FUnrealMcpEditorCoordinator::Startup()
 	{
 		if (!ServerPtr)
 			return false;
+		if (ServerPtr->IsRunning())
+			return true; // already up — idempotent, no arg round-trip needed.
 		const int32 ServerPort = CoordinatorForStart->DerivedLocalServerPort;
 		if (ServerPort <= 0)
 		{
@@ -257,10 +259,13 @@ void FUnrealMcpEditorCoordinator::Startup()
 				TEXT("from the sidecar. Wait for the bridge to connect, then try again."));
 			return false;
 		}
+		// mcp-authorize g5/g6 consolidation: the launch-arg string is composed by the .NET sidecar's SHARED
+		// ServerLaunchArguments builder (none/oauth/token) — this C++ side never assembles it. Request the args over
+		// IPC; ApplyServerLaunchArgsResult runs Start with the returned string. Returns true = start INITIATED (the
+		// server-running sink polls IsRunning to reflect the actual state once the async Start completes).
 		const FUnrealMcpConfig Live = FUnrealMcpConfig::LoadAndResolve();
-		return ServerPtr->Start(
-			ServerPort, /*PluginTimeoutMs*/ 10000,
-			Live.AuthOption == EUnrealMcpAuthOption::Required, Live.ResolveEffectiveToken());
+		CoordinatorForStart->RequestServerLaunchArgs(ServerPort, /*PluginTimeoutMs*/ 10000, Live, /*bReattach*/ false);
+		return true;
 	};
 	ViewModel->OnStopLocalServer = [ServerPtr]()
 	{
@@ -312,6 +317,9 @@ void FUnrealMcpEditorCoordinator::Startup()
 				else if (Type == TEXT("project-config-result"))
 					// mcp-authorize PR 4: cache the sidecar-derived local-server port (and reattach a survivor on it).
 					CoordinatorPtr->ApplyProjectConfigResult(Message);
+				else if (Type == TEXT("server-launch-args-result"))
+					// mcp-authorize g5/g6: the sidecar composed the launch args — run the pending Start/reattach.
+					CoordinatorPtr->ApplyServerLaunchArgsResult(Message);
 			});
 		});
 
@@ -544,6 +552,11 @@ void FUnrealMcpEditorCoordinator::ApplyProjectConfigResult(const TSharedPtr<FJso
 	Message->TryGetBoolField(TEXT("portIsOverridden"), bPortIsOverridden);
 
 	DerivedLocalServerPort = DerivedPort;
+	// mcp-authorize g5/g6: cache the routing pin too — the oauth-mode launch args need public-url = the pinned
+	// loopback URL (http://localhost:<port>/mcp/p/<pin>) forwarded to the sidecar's shared builder.
+	FString Pin;
+	if (Message->TryGetStringField(TEXT("pin"), Pin))
+		DerivedLocalServerPin = Pin;
 	UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] resolved derived local-server port %d%s from the sidecar."),
 		DerivedPort, bPortIsOverridden ? TEXT(" [user override]") : TEXT(""));
 
@@ -556,11 +569,86 @@ void FUnrealMcpEditorCoordinator::ApplyProjectConfigResult(const TSharedPtr<FJso
 			Live.ConnectionMode == EUnrealMcpConnectionMode::Custom,
 			Live.ResolveEffectiveTransport() == EUnrealMcpTransportMethod::Http))
 	{
-		ServerManager->ReattachIfRunning(
-			DerivedPort, /*PluginTimeoutMs*/ 10000,
-			Live.AuthOption == EUnrealMcpAuthOption::Required, Live.ResolveEffectiveToken());
+		// g5/g6 consolidation: the reattach's launch args (used by the watchdog respawn) are also sidecar-composed —
+		// request them; ApplyServerLaunchArgsResult calls ReattachIfRunning with the returned string.
+		RequestServerLaunchArgs(DerivedPort, /*PluginTimeoutMs*/ 10000, Live, /*bReattach*/ true);
 	}
 	bLocalServerReattachAttempted = true;
+}
+
+void FUnrealMcpEditorCoordinator::RequestServerLaunchArgs(int32 Port, int32 PluginTimeoutMs, const FUnrealMcpConfig& Live, bool bReattach)
+{
+	// mcp-authorize g5/g6 consolidation. Game thread. Forward the resolved connection facts to the sidecar's SHARED
+	// ServerLaunchArguments builder; the C++ side NEVER assembles the arg string. The token/issuer/public-url are the
+	// mode-specific credentials the builder needs (fail-closed there on a missing one → ApplyServerLaunchArgsResult logs).
+	if (!BridgeServer.IsValid())
+	{
+		UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] cannot request launch args: no bridge server."));
+		return;
+	}
+
+	const FString AuthMode = FUnrealMcpConfig::AuthOptionToString(Live.AuthOption);
+	const FString Token = Live.ResolveEffectiveToken(); // non-empty only in Token mode
+	FString AuthIssuer;
+	FString PublicUrl;
+	if (Live.AuthOption == EUnrealMcpAuthOption::Oauth)
+	{
+		// Loopback OAuth (design Part A): issuer = the resolved cloud base (the AS that mints loopback-audience
+		// tokens); public-url = the exact pinned loopback URL the client dials. Both must be present or the shared
+		// builder fails closed (never a silent auth=none downgrade).
+		AuthIssuer = Live.ResolveCloudBaseUrl();
+		if (!DerivedLocalServerPin.IsEmpty())
+			PublicUrl = FString::Printf(TEXT("http://localhost:%d/mcp/p/%s"), Port, *DerivedLocalServerPin);
+	}
+
+	const FString RequestId = FGuid::NewGuid().ToString();
+	PendingServerLaunches.Add(RequestId, FPendingServerLaunch{ Port, bReattach });
+	if (!BridgeServer->SendServerLaunchArgsRequest(RequestId, Port, PluginTimeoutMs, AuthMode, Token, AuthIssuer, PublicUrl))
+	{
+		PendingServerLaunches.Remove(RequestId);
+		UE_LOG(LogUnrealMcp, Warning,
+			TEXT("[Unreal-MCP] could not send the server-launch-args request (sidecar not connected); ")
+			TEXT("start again once the bridge is connected."));
+	}
+}
+
+void FUnrealMcpEditorCoordinator::ApplyServerLaunchArgsResult(const TSharedPtr<FJsonObject>& Message)
+{
+	// mcp-authorize g5/g6 consolidation. Game thread (the bridge status sink marshals onto it). Pop the pending
+	// Start/reattach for this requestId and run it with the sidecar-composed launch args. A malformed / not-ok /
+	// unknown-requestId result is a no-op (the token is never in this message — the sidecar never echoes it).
+	if (!Message.IsValid() || !ServerManager.IsValid())
+		return;
+
+	FString RequestId;
+	if (!Message->TryGetStringField(TEXT("requestId"), RequestId) || RequestId.IsEmpty())
+		return;
+
+	FPendingServerLaunch Pending;
+	if (!PendingServerLaunches.RemoveAndCopyValue(RequestId, Pending))
+		return; // unknown / already-handled requestId
+
+	bool bOk = false;
+	Message->TryGetBoolField(TEXT("ok"), bOk);
+	if (!bOk)
+	{
+		FString Error;
+		Message->TryGetStringField(TEXT("error"), Error);
+		UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] server-launch-args-result not ok: %s"), *Error);
+		return;
+	}
+
+	FString Args;
+	if (!Message->TryGetStringField(TEXT("args"), Args) || Args.IsEmpty())
+	{
+		UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] server-launch-args-result carried no args; not starting."));
+		return;
+	}
+
+	if (Pending.bReattach)
+		ServerManager->ReattachIfRunning(Pending.Port, Args);
+	else
+		ServerManager->Start(Pending.Port, Args);
 }
 
 void FUnrealMcpEditorCoordinator::Shutdown()

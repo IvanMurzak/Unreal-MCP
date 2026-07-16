@@ -261,9 +261,9 @@ void FUnrealMcpAgentConfigModelsSpec::Define()
 			TestTrue("httpUrl ends with /mcp", Info.HttpUrl.EndsWith(TEXT("/mcp")));
 		});
 
-		// mcp-authorize PR 5 (design 06, Flow C): bUseAccessToken drives the "Advanced: use access token" escape hatch.
-		// It is true ONLY for a Custom-mode Required-auth WITH a non-empty token — the default path (and Cloud, whose
-		// auth is server-enforced native OAuth, never a user PAT) stays on the credential-free OAuth path.
+		// mcp-authorize g5/g6: bUseAccessToken (the "write Authorization: Bearer <secret>" credential mode) is true
+		// ONLY for Custom-mode Token-auth WITH a non-empty secret. None (anonymous), Oauth (native OAuth — the client
+		// authorizes itself), and Cloud (server-enforced OAuth, never a user PAT) all stay on the credential-free path.
 		It("does not opt into the access-token escape hatch on the default Custom path", [this]()
 		{
 			FUnrealMcpConfig Config;
@@ -274,23 +274,35 @@ void FUnrealMcpAgentConfigModelsSpec::Define()
 			TestFalse("no escape hatch on default path", Info.bUseAccessToken);
 		});
 
-		It("opts into the access-token escape hatch for Custom + Required + a token", [this]()
+		It("does not opt into the access-token escape hatch in Oauth mode (native OAuth, URL-only)", [this]()
 		{
 			FUnrealMcpConfig Config;
 			Config.ConnectionMode = EUnrealMcpConnectionMode::Custom;
 			Config.CustomHost = TEXT("http://localhost:8080");
-			Config.AuthOption = EUnrealMcpAuthOption::Required;
+			Config.AuthOption = EUnrealMcpAuthOption::Oauth;
+			Config.CustomToken = TEXT("pat-secret-value"); // stored but NOT written as a bearer in Oauth mode
+			const FAiAgentConnectionInfo Info = FAiAgentConnectionInfo::FromPluginConfig(Config, FString(), 31234);
+			TestTrue("oauth requires auth", Info.bAuthRequired);
+			TestFalse("no bearer written in oauth mode", Info.bUseAccessToken);
+		});
+
+		It("opts into the access-token escape hatch for Custom + Token + a secret", [this]()
+		{
+			FUnrealMcpConfig Config;
+			Config.ConnectionMode = EUnrealMcpConnectionMode::Custom;
+			Config.CustomHost = TEXT("http://localhost:8080");
+			Config.AuthOption = EUnrealMcpAuthOption::Token;
 			Config.CustomToken = TEXT("pat-secret-value");
 			const FAiAgentConnectionInfo Info = FAiAgentConnectionInfo::FromPluginConfig(Config, FString(), 31234);
 			TestTrue("escape hatch active", Info.bUseAccessToken);
 			TestEqual("token forwarded", Info.Token, FString(TEXT("pat-secret-value")));
 		});
 
-		It("does not opt in for Custom + Required but an EMPTY token", [this]()
+		It("does not opt in for Custom + Token but an EMPTY secret", [this]()
 		{
 			FUnrealMcpConfig Config;
 			Config.ConnectionMode = EUnrealMcpConnectionMode::Custom;
-			Config.AuthOption = EUnrealMcpAuthOption::Required;
+			Config.AuthOption = EUnrealMcpAuthOption::Token;
 			Config.CustomToken = FString();
 			const FAiAgentConnectionInfo Info = FAiAgentConnectionInfo::FromPluginConfig(Config, FString(), 31234);
 			TestFalse("no token → no escape hatch", Info.bUseAccessToken);

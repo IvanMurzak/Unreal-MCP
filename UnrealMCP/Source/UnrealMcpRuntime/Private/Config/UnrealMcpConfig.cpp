@@ -72,6 +72,19 @@ namespace
 			Out.LeftChopInline(1);
 		return Out;
 	}
+
+	// The persisted (config-file) PascalCase form of the auth option. Kept distinct from the lowercase
+	// launch/wire form (FUnrealMcpConfig::AuthOptionToString) — the JSON store has always used PascalCase
+	// ("None"/"Required"); the g5/g6 migration extends it to "None"/"Oauth"/"Token".
+	const TCHAR* AuthOptionToPersistString(EUnrealMcpAuthOption Option)
+	{
+		switch (Option)
+		{
+			case EUnrealMcpAuthOption::Oauth: return TEXT("Oauth");
+			case EUnrealMcpAuthOption::Token: return TEXT("Token");
+			default:                          return TEXT("None");
+		}
+	}
 }
 
 FUnrealMcpConfig::FUnrealMcpConfig()
@@ -327,7 +340,7 @@ TSharedPtr<FJsonObject> FUnrealMcpConfig::ToJson() const
 	Obj->SetStringField(KeyToken, CustomToken);
 	Obj->SetStringField(KeyCloudToken, CloudToken);
 	Obj->SetStringField(KeyCloudUrl, CloudUrl);
-	Obj->SetStringField(KeyAuthOption, AuthOption == EUnrealMcpAuthOption::Required ? TEXT("Required") : TEXT("None"));
+	Obj->SetStringField(KeyAuthOption, AuthOptionToPersistString(AuthOption));
 	Obj->SetBoolField(KeyKeepConnected, bKeepConnected);
 	Obj->SetStringField(KeyLogLevel, LogLevel);
 	Obj->SetStringField(KeyTransport, Transport);
@@ -440,9 +453,10 @@ FString FUnrealMcpConfig::ResolveEffectiveToken() const
 	if (ConnectionMode == EUnrealMcpConnectionMode::Cloud)
 		return CloudToken;
 
-	// Custom mode: an anonymous (None) connection sends NO bearer, regardless of any stored token — so
-	// flipping auth back to None drops the token from the wire without discarding the user's stored value.
-	return AuthOption == EUnrealMcpAuthOption::Required ? CustomToken : FString();
+	// Custom mode: only Token mode sends a bearer. None (anonymous/loopback) and Oauth (native OAuth — the
+	// client authorizes itself, no static bearer) send NOTHING, regardless of any stored token — so flipping
+	// auth away from Token drops the token from the wire without discarding the user's stored value.
+	return AuthOption == EUnrealMcpAuthOption::Token ? CustomToken : FString();
 }
 
 TSharedPtr<FJsonObject> FUnrealMcpConfig::BuildEffectiveConnectionConfig() const
@@ -604,12 +618,34 @@ bool FUnrealMcpConfig::TryParseAuthOption(const FString& Raw, EUnrealMcpAuthOpti
 		OutOption = EUnrealMcpAuthOption::None;
 		return true;
 	}
+	if (Normalized.Equals(TEXT("Oauth"), ESearchCase::IgnoreCase))
+	{
+		OutOption = EUnrealMcpAuthOption::Oauth;
+		return true;
+	}
+	if (Normalized.Equals(TEXT("Token"), ESearchCase::IgnoreCase))
+	{
+		OutOption = EUnrealMcpAuthOption::Token;
+		return true;
+	}
+	// Migration (mcp-authorize g5): the retired legacy `Required` (shared-secret bearer) maps to Token, so an
+	// existing persisted config / .env keeps working instead of crashing the 9.x server with `authorization=required`.
 	if (Normalized.Equals(TEXT("Required"), ESearchCase::IgnoreCase))
 	{
-		OutOption = EUnrealMcpAuthOption::Required;
+		OutOption = EUnrealMcpAuthOption::Token;
 		return true;
 	}
 	return false;
+}
+
+const TCHAR* FUnrealMcpConfig::AuthOptionToString(EUnrealMcpAuthOption Option)
+{
+	switch (Option)
+	{
+		case EUnrealMcpAuthOption::Oauth: return TEXT("oauth");
+		case EUnrealMcpAuthOption::Token: return TEXT("token");
+		default:                          return TEXT("none");
+	}
 }
 
 bool FUnrealMcpConfig::TryParseBool(const FString& Raw, bool& OutValue)

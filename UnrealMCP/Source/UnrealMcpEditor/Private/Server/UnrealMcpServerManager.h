@@ -40,15 +40,18 @@ public:
 	UNREALMCPEDITOR_API ~FUnrealMcpServerManager();
 
 	/**
-	 * Launch + supervise the local server on @p Port with the given launch parameters (auth/token). Resolves
-	 * the binary (override → cache → download), kills any orphaned `gamedev-mcp-server` already holding @p Port,
-	 * spawns the process, then arms the crash-restart watchdog (which detects an early exit and re-launches with
-	 * backoff). Returns true when the process was spawned (supervision proceeds asynchronously). Idempotent:
-	 * a call while already running/starting is a no-op that returns true. Game-thread only.
+	 * Launch + supervise the local server on @p Port with the pre-composed @p LaunchArgs. Resolves the binary
+	 * (override → cache → download), kills any orphaned `gamedev-mcp-server` already holding @p Port, spawns the
+	 * process, then arms the crash-restart watchdog (which detects an early exit and re-launches with backoff).
+	 * Returns true when the process was spawned (supervision proceeds asynchronously). Idempotent: a call while
+	 * already running/starting is a no-op that returns true. Game-thread only.
 	 *
-	 * @p bAuthRequired / @p Token shape the `authorization` + `token` launch args exactly like Unity's BuildArguments.
+	 * mcp-authorize g5/g6 consolidation: @p LaunchArgs is composed by the .NET sidecar's SHARED
+	 * ServerLaunchArguments builder (none/oauth/token) and delivered over IPC — this manager NEVER assembles the
+	 * arg string itself. The caller (FUnrealMcpEditorCoordinator) requests it via SendServerLaunchArgsRequest and
+	 * calls Start in the async result callback, so the args are always the freshly-resolved auth mode.
 	 */
-	bool Start(int32 Port, int32 PluginTimeoutMs, bool bAuthRequired, const FString& Token);
+	bool Start(int32 Port, const FString& LaunchArgs);
 
 	/**
 	 * Stop the supervised server. Stops the watchdog first (so a relaunch cannot undo the kill), then sends the
@@ -69,7 +72,7 @@ public:
 	 * still names a live `gamedev-mcp-server`, adopt it (so a later Stop tears it down) and re-arm the watchdog;
 	 * otherwise clear the stale marker. Returns true when an existing process was adopted. Game-thread only.
 	 */
-	bool ReattachIfRunning(int32 Port, int32 PluginTimeoutMs, bool bAuthRequired, const FString& Token);
+	bool ReattachIfRunning(int32 Port, const FString& LaunchArgs);
 
 	// --- Pure / static helpers (the spec-friendly heart — no live process, injectable filesystem). ---
 
@@ -103,15 +106,6 @@ public:
 	 * server listens on, so both are derived from the SAME Custom host the UI shows (mirrors Unity's Port).
 	 */
 	static UNREALMCPEDITOR_API int32 ParsePortFromHost(const FString& HostUrl, int32 DefaultPort = 8080);
-
-	/**
-	 * Compose the server launch args (Unity BuildArguments parity, the order the server's CLI parser expects):
-	 *   port=<port> plugin-timeout=<ms> client-transport=streamableHttp authorization=<none|required> [token=<t>]
-	 * The token arg is appended ONLY when @p bAuthRequired AND @p Token is non-empty. Pure — exercised by a spec.
-	 * The transport is ALWAYS streamableHttp for a launched local server (the agent's stdio/http choice is about
-	 * how the AGENT reaches the server, not how the server is hosted) — matching Unity's hard-coded launch transport.
-	 */
-	static UNREALMCPEDITOR_API FString BuildLaunchArgs(int32 Port, int32 PluginTimeoutMs, bool bAuthRequired, const FString& Token);
 
 	/**
 	 * Whether the local server may be launched for the given mode + transport. ONLY Custom mode + http transport

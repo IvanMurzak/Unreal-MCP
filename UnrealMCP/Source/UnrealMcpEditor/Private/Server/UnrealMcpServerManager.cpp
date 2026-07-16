@@ -31,7 +31,7 @@
 
 // Single source of the consumed shared-server version. Kept in lockstep with cli/src/lib/server-version.ts
 // (SERVER_VERSION) and Unity's McpServerManager.ServerVersion — the three plugins consume the SAME server.
-const TCHAR* FUnrealMcpServerManager::ServerVersion = TEXT("9.0.0");
+const TCHAR* FUnrealMcpServerManager::ServerVersion = TEXT("9.1.0");
 const TCHAR* FUnrealMcpServerManager::ServerPathEnvVar = TEXT("UNREAL_MCP_SERVER_PATH");
 
 namespace
@@ -150,17 +150,6 @@ int32 FUnrealMcpServerManager::ParsePortFromHost(const FString& HostUrl, int32 D
 	if (bHadScheme)
 		return bHttps ? 443 : 80;
 	return DefaultPort;
-}
-
-FString FUnrealMcpServerManager::BuildLaunchArgs(int32 Port, int32 PluginTimeoutMs, bool bAuthRequired, const FString& Token)
-{
-	// Unity BuildArguments parity. client-transport is ALWAYS streamableHttp for a launched local server.
-	FString Args = FString::Printf(
-		TEXT("port=%d plugin-timeout=%d client-transport=streamableHttp authorization=%s"),
-		Port, PluginTimeoutMs, bAuthRequired ? TEXT("required") : TEXT("none"));
-	if (bAuthRequired && !Token.IsEmpty())
-		Args += FString::Printf(TEXT(" token=%s"), *Token);
-	return Args;
 }
 
 bool FUnrealMcpServerManager::IsLaunchAllowed(bool bIsCustomMode, bool bIsHttpTransport)
@@ -568,7 +557,7 @@ void FUnrealMcpServerManager::BindProcessToKillOnCloseJob(void* ProcessHandle)
 #endif
 }
 
-bool FUnrealMcpServerManager::Start(int32 Port, int32 PluginTimeoutMs, bool bAuthRequired, const FString& Token)
+bool FUnrealMcpServerManager::Start(int32 Port, const FString& InLaunchArgs)
 {
 	if (IsRunning() || bStarting)
 	{
@@ -578,7 +567,9 @@ bool FUnrealMcpServerManager::Start(int32 Port, int32 PluginTimeoutMs, bool bAut
 
 	bStarting = true;
 	ListenPort = Port;
-	LaunchArgs = BuildLaunchArgs(Port, PluginTimeoutMs, bAuthRequired, Token);
+	// mcp-authorize g5/g6: LaunchArgs are pre-composed by the .NET sidecar's shared ServerLaunchArguments builder
+	// and passed in — this manager never assembles the none/oauth/token arg string.
+	LaunchArgs = InLaunchArgs;
 
 	// Resolve the binary (override → cache); download on a miss.
 	BinaryPath = ResolveBinaryPath();
@@ -615,7 +606,7 @@ bool FUnrealMcpServerManager::Start(int32 Port, int32 PluginTimeoutMs, bool bAut
 	return true;
 }
 
-bool FUnrealMcpServerManager::ReattachIfRunning(int32 Port, int32 PluginTimeoutMs, bool bAuthRequired, const FString& Token)
+bool FUnrealMcpServerManager::ReattachIfRunning(int32 Port, const FString& InLaunchArgs)
 {
 	const int32 SavedPid = ReadPidFile();
 	if (SavedPid <= 0 || !IsServerProcessAlive(SavedPid))
@@ -633,7 +624,7 @@ bool FUnrealMcpServerManager::ReattachIfRunning(int32 Port, int32 PluginTimeoutM
 	}
 
 	ListenPort = Port;
-	LaunchArgs = BuildLaunchArgs(Port, PluginTimeoutMs, bAuthRequired, Token);
+	LaunchArgs = InLaunchArgs; // pre-composed by the sidecar (g5/g6) — used by the watchdog's respawn closure.
 	BinaryPath = ResolveBinaryPath();
 	{
 		FScopeLock Lock(&ProcessMutex);

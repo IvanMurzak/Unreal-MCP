@@ -57,6 +57,11 @@ namespace
 	// port, serverTarget} via the shared C# ProjectIdentity + project marker (no C++ derivation duplication).
 	const FString TypeProjectConfig = TEXT("project-config");
 	const FString TypeProjectConfigResult = TEXT("project-config-result");
+	// mcp-authorize g5/g6 consolidation: the plugin → sidecar `server-launch-args` request and the sidecar →
+	// plugin `server-launch-args-result`. The sidecar composes the local-server launch-arg string via the SHARED
+	// ServerLaunchArguments builder (none/oauth/token) so the C++ side holds no duplicate arg logic.
+	const FString TypeServerLaunchArgs = TEXT("server-launch-args");
+	const FString TypeServerLaunchArgsResult = TEXT("server-launch-args-result");
 	const FString TypePing = TEXT("ping");
 	const FString TypePong = TEXT("pong");
 	const FString TypeShutdown = TEXT("shutdown");
@@ -379,10 +384,11 @@ void FUnrealMcpBridgeServer::HandleLine(const FString& Line, int32 Generation)
 	{
 		// liveness already refreshed in Run()
 	}
-	else if (Type == TypeStatus || Type == TypeDeviceAuth || Type == TypeAgentConfigResult || Type == TypeProjectConfigResult)
+	else if (Type == TypeStatus || Type == TypeDeviceAuth || Type == TypeAgentConfigResult || Type == TypeProjectConfigResult || Type == TypeServerLaunchArgsResult)
 	{
-		// §1.3 / §7 / mcp-authorize PR 4: the live UI + control feed (connection status, device-auth, the AI-agent
-		// configurator results, AND the resolved project-config result carrying the derived local-server port).
+		// §1.3 / §7 / mcp-authorize PR 4 + g5/g6: the live UI + control feed (connection status, device-auth, the
+		// AI-agent configurator results, the resolved project-config result carrying the derived local-server port,
+		// AND the composed server-launch-args result the local-server start awaits).
 		// Hand it to the registered sink (the view-model) WITHOUT touching any Slate/engine state here — the
 		// sink marshals onto the game thread (M9b) and routes by type. Copy the sink out under the lock so a
 		// concurrent window-close clear never invalidates the TFunction mid-call.
@@ -1108,6 +1114,33 @@ bool FUnrealMcpBridgeServer::SendProjectConfigRequest(const FString& RequestId, 
 	Message->SetStringField(TEXT("type"), TypeProjectConfig);
 	Message->SetStringField(TEXT("requestId"), RequestId);
 	Message->SetStringField(TEXT("projectPath"), InProjectPath);
+	return SendMessage(Message);
+}
+
+bool FUnrealMcpBridgeServer::SendServerLaunchArgsRequest(
+	const FString& RequestId, int32 InPort, int32 InPluginTimeoutMs, const FString& InAuthMode,
+	const FString& InToken, const FString& InAuthIssuer, const FString& InPublicUrl)
+{
+	// mcp-authorize g5/g6 consolidation: ask the sidecar to COMPOSE the local-server launch-arg string via the
+	// shared ServerLaunchArguments builder. The C++ side forwards the resolved connection facts and never assembles
+	// the none/oauth/token arg string itself. The result arrives as a `server-launch-args-result` routed through the
+	// status sink. The token travels only over this loopback IPC (never argv, never logged) — same as the §1.4 model.
+	// (Params are In-prefixed so InToken does not shadow the FUnrealMcpBridgeServer::Token member — C4458 under /WX.)
+	if (!bClientConnected || !bHandshakeOk)
+		return false;
+
+	TSharedPtr<FJsonObject> Message = MakeShared<FJsonObject>();
+	Message->SetStringField(TEXT("type"), TypeServerLaunchArgs);
+	Message->SetStringField(TEXT("requestId"), RequestId);
+	Message->SetNumberField(TEXT("port"), InPort);
+	Message->SetNumberField(TEXT("pluginTimeoutMs"), InPluginTimeoutMs);
+	Message->SetStringField(TEXT("authMode"), InAuthMode);
+	if (!InToken.IsEmpty())
+		Message->SetStringField(TEXT("token"), InToken);
+	if (!InAuthIssuer.IsEmpty())
+		Message->SetStringField(TEXT("authIssuer"), InAuthIssuer);
+	if (!InPublicUrl.IsEmpty())
+		Message->SetStringField(TEXT("publicUrl"), InPublicUrl);
 	return SendMessage(Message);
 }
 

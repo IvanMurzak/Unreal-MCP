@@ -99,6 +99,11 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
             // design 04/06) — {pin, derived local-server port, portIsOverridden, serverTarget}. The terminal
             // answer to a plugin `project-config` request, correlated by requestId.
             public const string ProjectConfigResult = "project-config-result";
+            // sidecar → plugin: the composed local-server launch-arg string (mcp-authorize g5/g6 consolidation).
+            // The terminal answer to a plugin `server-launch-args` request: the sidecar calls the SHARED
+            // com.IvanMurzak.McpPlugin.ServerLaunch.ServerLaunchArguments builder (none/oauth/token) so the C++
+            // editor never duplicates the arg-building logic. Correlated by requestId.
+            public const string ServerLaunchArgsResult = "server-launch-args-result";
 
             // sidecar → plugin: fetch one prompt's rendered messages / read one resource's content (v2, §A.1).
             // Both round-trip through PendingCallRegistry by requestId, exactly like a tool-call, and reuse the
@@ -135,6 +140,12 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
             // sidecar computes {pin, derived local-server port, serverTarget} from McpPlugin's ProjectIdentity +
             // the project marker and answers with a `project-config-result`. Carries the project root to resolve from.
             public const string ProjectConfig = "project-config";
+            // plugin → sidecar: compose the LOCAL gamedev-mcp-server launch-arg string (mcp-authorize g5/g6
+            // consolidation). The C++ FUnrealMcpServerManager can't call the C# McpPlugin builder directly, so it
+            // delegates: it forwards {port, timeoutMs, authMode, token, authIssuer, publicUrl} and the sidecar calls
+            // the SHARED com.IvanMurzak.McpPlugin.ServerLaunch.ServerLaunchArguments.BuildCommandLine(...), answering
+            // with a `server-launch-args-result`. No C++ duplicate of the none/oauth/token arg logic.
+            public const string ServerLaunchArgs = "server-launch-args";
 
             // either direction
             public const string Ping = "ping";

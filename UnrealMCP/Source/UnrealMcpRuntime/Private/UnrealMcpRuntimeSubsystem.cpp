@@ -241,8 +241,10 @@ bool UUnrealMcpRuntimeSubsystem::Connect(const FString& Host, const FString& Tok
 		Config.CustomHost = Host;
 		if (!Token.IsEmpty())
 		{
+			// A runtime Connect() with an explicit static bearer is Token mode (mcp-authorize g5/g6 — the successor
+			// of the retired Required; the resolved effective token then travels on the §1.3 config push).
 			Config.CustomToken = Token;
-			Config.AuthOption = EUnrealMcpAuthOption::Required;
+			Config.AuthOption = EUnrealMcpAuthOption::Token;
 		}
 	}
 	else

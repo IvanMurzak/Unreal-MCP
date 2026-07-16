@@ -283,7 +283,7 @@ void FUnrealMcpEditorViewModelSpec::Define()
 
 			VM->GenerateCustomToken();
 			TestFalse("token generated", VM->GetCustomToken().IsEmpty());
-			TestEqual("generating flips auth to Required", static_cast<int32>(VM->GetAuthOption()), static_cast<int32>(EUnrealMcpAuthOption::Required));
+			TestEqual("generating flips auth to Token", static_cast<int32>(VM->GetAuthOption()), static_cast<int32>(EUnrealMcpAuthOption::Token));
 			TestTrue("persisted at least once", Rec->PersistCount >= 1);
 		});
 	});
@@ -315,7 +315,7 @@ void FUnrealMcpEditorViewModelSpec::Define()
 			TestEqual("no-op host change did not notify", Notifications, 2);
 
 			// Auth option change toggles whether the snippet carries a bearer.
-			VM->SetAuthOption(EUnrealMcpAuthOption::Required);
+			VM->SetAuthOption(EUnrealMcpAuthOption::Token);
 			TestEqual("auth change notified", Notifications, 3);
 
 			// Token change is injected into the snippet/Configure output.
@@ -660,7 +660,7 @@ void FUnrealMcpEditorViewModelSpec::Define()
 			VM->OnConnectionSettingsChanged.Remove(Handle);
 		});
 
-		It("Cloud locks the transport to Http and forces auth Required (mirrors Unity)", [this]()
+		It("Cloud locks the transport to Http and forces auth Oauth (mirrors Unity)", [this]()
 		{
 			TSharedRef<FRecording> Rec = MakeShared<FRecording>();
 			TSharedRef<FUnrealMcpEditorViewModel> VM = MakeViewModel(Rec);
@@ -673,7 +673,8 @@ void FUnrealMcpEditorViewModelSpec::Define()
 			VM->SetConnectionMode(EUnrealMcpConnectionMode::Cloud);
 			TestFalse("transport not selectable in Cloud", VM->IsTransportSelectable());
 			TestEqual("Cloud effective transport is Http", static_cast<int32>(VM->GetEffectiveTransport()), static_cast<int32>(EUnrealMcpTransportMethod::Http));
-			TestEqual("Cloud forces auth Required", static_cast<int32>(VM->GetAuthOption()), static_cast<int32>(EUnrealMcpAuthOption::Required));
+			// Cloud is account-gated native OAuth — the g5/g6 successor of the retired Required.
+			TestEqual("Cloud forces auth Oauth", static_cast<int32>(VM->GetAuthOption()), static_cast<int32>(EUnrealMcpAuthOption::Oauth));
 
 			// A stray SetTransportMethod in Cloud is ignored (selector is locked).
 			VM->SetTransportMethod(EUnrealMcpTransportMethod::Stdio);

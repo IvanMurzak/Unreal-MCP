@@ -40,7 +40,10 @@ void FUnrealMcpEditorViewModel::SetConnectionMode(EUnrealMcpConnectionMode InMod
 	if (InMode == EUnrealMcpConnectionMode::Cloud)
 	{
 		Config.SetTransportMethod(EUnrealMcpTransportMethod::Http);
-		Config.AuthOption = EUnrealMcpAuthOption::Required;
+		// Cloud auth is account-gated native OAuth (the cloud enforces it) — map to Oauth (the g5/g6 successor of
+		// the retired Required). The value is largely presentational in Cloud (bCloud independently drives
+		// bAuthRequired), but keeping it Oauth keeps the persisted intent coherent for a later switch back to Custom.
+		Config.AuthOption = EUnrealMcpAuthOption::Oauth;
 	}
 	// Bug #116: a mode switch RETARGETS the connection (Cloud↔Custom dial a different server). If we were showing
 	// Connected/Degraded against the now-abandoned target, the dot must drop off green THE MOMENT the mode flips —
@@ -158,8 +161,9 @@ void FUnrealMcpEditorViewModel::SetCustomToken(const FString& InToken)
 void FUnrealMcpEditorViewModel::GenerateCustomToken()
 {
 	Config.CustomToken = FUnrealMcpSidecarManager::GenerateToken();
-	// Generating a token only makes sense when auth is actually required — flip it so the new token is used.
-	Config.AuthOption = EUnrealMcpAuthOption::Required;
+	// Generating a local secret only makes sense in Token mode (the offline shared-secret path) — flip to Token
+	// so the new secret is launched (`auth=token token=<secret>`) and written as the client's Bearer credential.
+	Config.AuthOption = EUnrealMcpAuthOption::Token;
 	UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] generated a new Custom-mode token (%s)."),
 		*FUnrealMcpConfig::MaskSecret(Config.CustomToken));
 	PersistAndPush();

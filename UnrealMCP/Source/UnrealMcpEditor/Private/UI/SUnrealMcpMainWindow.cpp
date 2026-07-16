@@ -47,8 +47,10 @@ namespace
 	constexpr int32 TagCloud  = 1;
 	constexpr int32 TagStdio  = 0;
 	constexpr int32 TagHttp   = 1;
-	constexpr int32 TagNone   = 0;
-	constexpr int32 TagRequired = 1;
+	// Auth segment (mcp-authorize g5/g6): the 3-way none / oauth / token local-server auth mode.
+	constexpr int32 TagNone  = 0;
+	constexpr int32 TagOauth = 1;
+	constexpr int32 TagToken = 2;
 
 	// The Log Level options in Unity's LogLevel.cs order (Runtime/Utils/LogLevel.cs): Trace, Debug, Info,
 	// Warning, Error, Exception, None. Rendered 1:1 in the §7 Log Level dropdown (issue #80 item 1).
@@ -797,7 +799,7 @@ TSharedRef<SWidget> SUnrealMcpMainWindow::BuildTransportSelector()
 TSharedRef<SWidget> SUnrealMcpMainWindow::BuildCustomAuthSelector()
 {
 	return SNew(SVerticalBox)
-		// Authorization Token (none / required) row — label fills, segmented right-aligned to the shared edge.
+		// Authorization (none / oauth / token) row — label fills, segmented right-aligned to the shared edge.
 		+ SVerticalBox::Slot().AutoHeight()
 		[
 			SNew(SHorizontalBox)
@@ -805,30 +807,45 @@ TSharedRef<SWidget> SUnrealMcpMainWindow::BuildCustomAuthSelector()
 			[
 				SNew(STextBlock)
 				.TextStyle(&FUnrealMcpStyle::Get().GetWidgetStyle<FTextBlockStyle>("UnrealMcp.Text.Description"))
-				.Text(LOCTEXT("AuthTokenLabel", "Authorization Token"))
+				.Text(LOCTEXT("AuthTokenLabel", "Authorization"))
 			]
 			+ SHorizontalBox::Slot().AutoWidth().HAlign(HAlign_Right).VAlign(VAlign_Center)
 			[
 				SNew(SBox).MinDesiredWidth(RightControlColumnWidth).HAlign(HAlign_Right)
 				[
 					UnrealMcpStyleWidgets::SegmentedControl(
-						{ { LOCTEXT("AuthNone", "none"), TagNone }, { LOCTEXT("AuthRequired", "required"), TagRequired } },
-						[this]() { return (IsViewModelValid() && ViewModel->GetAuthOption() == EUnrealMcpAuthOption::Required) ? TagRequired : TagNone; },
+						{ { LOCTEXT("AuthNone", "none"), TagNone }, { LOCTEXT("AuthOauth", "oauth"), TagOauth }, { LOCTEXT("AuthToken", "token"), TagToken } },
+						[this]() -> int32
+						{
+							if (!IsViewModelValid())
+								return TagNone;
+							switch (ViewModel->GetAuthOption())
+							{
+								case EUnrealMcpAuthOption::Oauth: return TagOauth;
+								case EUnrealMcpAuthOption::Token: return TagToken;
+								default:                          return TagNone;
+							}
+						},
 						[this](int32 SegTag)
 						{
-							if (IsViewModelValid())
-								ViewModel->SetAuthOption(SegTag == TagRequired ? EUnrealMcpAuthOption::Required : EUnrealMcpAuthOption::None);
+							if (!IsViewModelValid())
+								return;
+							const EUnrealMcpAuthOption Option =
+								SegTag == TagOauth ? EUnrealMcpAuthOption::Oauth :
+								SegTag == TagToken ? EUnrealMcpAuthOption::Token :
+								EUnrealMcpAuthOption::None;
+							ViewModel->SetAuthOption(Option);
 						})
 				]
 			]
 		]
-		// Masked token field + New — only when auth is required.
+		// Masked token field + New — only in Token mode (Oauth authorizes natively; None is anonymous).
 		+ SVerticalBox::Slot().AutoHeight().Padding(0, 6, 0, 0)
 		[
 			SNew(SHorizontalBox)
 			.Visibility_Lambda([this]()
 			{
-				return (IsViewModelValid() && ViewModel->GetAuthOption() == EUnrealMcpAuthOption::Required)
+				return (IsViewModelValid() && ViewModel->GetAuthOption() == EUnrealMcpAuthOption::Token)
 					? EVisibility::Visible : EVisibility::Collapsed;
 			})
 			+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
