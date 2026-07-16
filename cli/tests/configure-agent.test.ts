@@ -6,7 +6,7 @@ import type { DownloadServerResult } from '../src/lib/types.js';
 
 function okDownload(serverPath: string): () => Promise<DownloadServerResult> {
   return async () =>
-    ({ kind: 'success', success: true, serverPath, source: 'download', version: '9.0.0', warnings: [] }) as DownloadServerResult;
+    ({ kind: 'success', success: true, serverPath, source: 'download', version: '9.1.0', warnings: [] }) as DownloadServerResult;
 }
 
 describe('configureAgent (proxy to gamedev-mcp-server configure)', () => {

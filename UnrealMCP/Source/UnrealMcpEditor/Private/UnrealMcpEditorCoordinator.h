@@ -50,6 +50,14 @@ public:
 	 */
 	void ApplyProjectConfigResult(const TSharedPtr<class FJsonObject>& Message);
 
+	/**
+	 * Handle a sidecar `server-launch-args-result` (mcp-authorize g5/g6 consolidation): the SHARED
+	 * ServerLaunchArguments builder composed the local-server launch-arg string, so now execute the pending
+	 * Start / reattach for the correlated requestId. Runs on the game thread (the bridge status sink marshals onto
+	 * it). A no-op on an `ok == false` / unknown-requestId result. Public so the wiring lambda routes to it.
+	 */
+	void ApplyServerLaunchArgsResult(const TSharedPtr<class FJsonObject>& Message);
+
 	FUnrealMcpToolRegistry* GetRegistry() const { return Registry.Get(); }
 	FUnrealMcpBridgeServer* GetBridgeServer() const { return BridgeServer.Get(); }
 	FUnrealMcpExtensionManager* GetExtensionManager() const { return ExtensionManager.Get(); }
@@ -92,9 +100,24 @@ private:
 	// the local `gamedev-mcp-server` start. Game-thread only (written from the game-thread-marshalled bridge
 	// status sink, read by the OnStartLocalServer sink), so no lock is needed.
 	int32 DerivedLocalServerPort = -1;
+	// mcp-authorize g5/g6: the sidecar-derived routing pin (first 8 hex of the ProjectIdentity SHA-256), cached
+	// alongside the port from the same `project-config-result`. Used to compose the oauth-mode `public-url`
+	// (http://localhost:<port>/mcp/p/<pin>) forwarded to the sidecar's launch-arg builder. Empty until the first result.
+	FString DerivedLocalServerPin;
 	// Guards the one-time survivor reattach: the reattach that used to run in Startup now runs when the first
 	// derived port arrives (the port is unknown until the sidecar handshakes) and must not repeat on a reconnect.
 	bool bLocalServerReattachAttempted = false;
+
+	// mcp-authorize g5/g6 consolidation: in-flight `server-launch-args` requests keyed by requestId. The
+	// OnStartLocalServer sink (and the one-time reattach) send an IPC request for the composed launch args and
+	// record the {port, bReattach} here; ApplyServerLaunchArgsResult pops the entry and runs Start/Reattach with the
+	// returned string. Game-thread only (both the send and the marshalled result run there) — no lock needed.
+	struct FPendingServerLaunch { int32 Port = -1; bool bReattach = false; };
+	TMap<FString, FPendingServerLaunch> PendingServerLaunches;
+
+	// Compose + send a `server-launch-args` IPC request for @p Live's resolved auth mode and, on the async result,
+	// Start (or, when @p bReattach, ReattachIfRunning) the local server on @p Port with the sidecar-built args.
+	void RequestServerLaunchArgs(int32 Port, int32 PluginTimeoutMs, const class FUnrealMcpConfig& Live, bool bReattach);
 
 	FDelegateHandle PreExitHandle;
 	bool bStarted = false;

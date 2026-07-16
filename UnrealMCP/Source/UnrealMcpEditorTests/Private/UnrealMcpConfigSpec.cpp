@@ -182,7 +182,7 @@ void FUnrealMcpConfigSpec::Define()
 
 	Describe("token routing + effective config", [this]()
 	{
-		It("Custom + None sends no bearer; Custom + Required sends the custom token", [this]()
+		It("Custom + None/Oauth send no bearer; Custom + Token sends the custom token", [this]()
 		{
 			FUnrealMcpConfig Config;
 			Config.ConnectionMode = EUnrealMcpConnectionMode::Custom;
@@ -196,8 +196,49 @@ void FUnrealMcpConfigSpec::Define()
 			TestEqual(TEXT("custom token stored"), Config.CustomToken, FString(TEXT("the-custom-token")));
 			TestTrue(TEXT("effective token empty under None"), Config.ResolveEffectiveToken().IsEmpty());
 
-			Config.AuthOption = EUnrealMcpAuthOption::Required;
-			TestEqual(TEXT("effective token under Required"), Config.ResolveEffectiveToken(), FString(TEXT("the-custom-token")));
+			// Oauth mode is native OAuth (the client authorizes itself) — still NO static bearer on the wire.
+			Config.AuthOption = EUnrealMcpAuthOption::Oauth;
+			TestTrue(TEXT("effective token empty under Oauth"), Config.ResolveEffectiveToken().IsEmpty());
+
+			// Only Token mode (the offline shared secret) puts the custom token on the wire.
+			Config.AuthOption = EUnrealMcpAuthOption::Token;
+			TestEqual(TEXT("effective token under Token"), Config.ResolveEffectiveToken(), FString(TEXT("the-custom-token")));
+		});
+
+		It("migrates a persisted legacy authOption \"Required\" to Token (g5/g6)", [this]()
+		{
+			// A config saved by a pre-g5 plugin carries authOption:"Required". On load it must migrate to Token so the
+			// user keeps a working (offline-secret) local server instead of emitting the retired `required` value that
+			// crashes the 9.x server. And re-serializing must persist the migrated "Token" (the migration sticks).
+			TSharedPtr<FJsonObject> Json = MakeShared<FJsonObject>();
+			Json->SetStringField(TEXT("connectionMode"), TEXT("Custom"));
+			Json->SetStringField(TEXT("authOption"), TEXT("Required"));
+			Json->SetStringField(TEXT("token"), TEXT("legacy-secret"));
+
+			const FUnrealMcpConfig Config = FromDiskJson(Json);
+			TestEqual(TEXT("legacy Required migrated to Token"),
+				static_cast<int32>(Config.AuthOption), static_cast<int32>(EUnrealMcpAuthOption::Token));
+			TestEqual(TEXT("Token mode still sends the stored secret"), Config.ResolveEffectiveToken(), FString(TEXT("legacy-secret")));
+
+			const TSharedPtr<FJsonObject> Reserialized = Config.ToJson();
+			FString Persisted;
+			TestTrue(TEXT("authOption persisted"), Reserialized->TryGetStringField(TEXT("authOption"), Persisted));
+			TestEqual(TEXT("re-serializes as Token, not Required"), Persisted, FString(TEXT("Token")));
+		});
+
+		It("round-trips a persisted Oauth authOption", [this]()
+		{
+			TSharedPtr<FJsonObject> Json = MakeShared<FJsonObject>();
+			Json->SetStringField(TEXT("connectionMode"), TEXT("Custom"));
+			Json->SetStringField(TEXT("authOption"), TEXT("Oauth"));
+
+			const FUnrealMcpConfig Config = FromDiskJson(Json);
+			TestEqual(TEXT("Oauth parsed"), static_cast<int32>(Config.AuthOption), static_cast<int32>(EUnrealMcpAuthOption::Oauth));
+			// Oauth is native OAuth — no static bearer on the wire even if a token were stored.
+			TestTrue(TEXT("Oauth sends no bearer"), Config.ResolveEffectiveToken().IsEmpty());
+			FString Persisted;
+			Config.ToJson()->TryGetStringField(TEXT("authOption"), Persisted);
+			TestEqual(TEXT("re-serializes as Oauth"), Persisted, FString(TEXT("Oauth")));
 		});
 
 		It("routes the token to the cloud field in Cloud mode", [this]()

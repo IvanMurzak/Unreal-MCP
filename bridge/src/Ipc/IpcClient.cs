@@ -122,6 +122,15 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
         /// </summary>
         public event Action<string, JsonObject>? ProjectConfigRequestReceived;
 
+        /// <summary>
+        /// Raised when the plugin sends a mcp-authorize g5/g6 <c>server-launch-args</c> request: the C++
+        /// <c>FUnrealMcpServerManager</c> asking the sidecar to compose the local-server launch-arg string via the
+        /// SHARED <c>ServerLaunchArguments</c> builder (none/oauth/token), so the C++ side holds no duplicate arg
+        /// logic. The arguments are the request <c>type</c> and the raw parsed JSON object; the host composes it and
+        /// answers with a <c>server-launch-args-result</c> via <see cref="SendToPluginAsync"/> (off the reader thread).
+        /// </summary>
+        public event Action<string, JsonObject>? ServerLaunchArgsRequestReceived;
+
         public IpcClient(string host, int port, string token, string sidecarVersion, ILogger? logger = null)
         {
             _host = host;
@@ -381,6 +390,13 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
                     // `project-config-result` (off the reader thread).
                     if (node is JsonObject projectConfigObj)
                         ProjectConfigRequestReceived?.Invoke(type, projectConfigObj);
+                    break;
+                case IpcProtocol.Type.ServerLaunchArgs:
+                    // mcp-authorize g5/g6: the plugin asks the sidecar to compose the local-server launch-arg
+                    // string via the shared ServerLaunchArguments builder (none/oauth/token). The host answers
+                    // with a `server-launch-args-result` (off the reader thread).
+                    if (node is JsonObject launchArgsObj)
+                        ServerLaunchArgsRequestReceived?.Invoke(type, launchArgsObj);
                     break;
                 case IpcProtocol.Type.Status:
                 case IpcProtocol.Type.Log:

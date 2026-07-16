@@ -18,18 +18,19 @@ FAiAgentConnectionInfo FAiAgentConnectionInfo::FromPluginConfig(const FUnrealMcp
 	const FString BaseUrl = bCloud ? Config.ResolveCloudBaseUrl() : Config.ResolveCustomHost();
 	Info.HttpUrl = BaseUrl + TEXT("/mcp");
 
-	// Auth: Cloud always requires it (the cloud enforces it); Custom follows AuthOption. The token is the
-	// mode-resolved effective bearer (Cloud→cloudToken, Custom+Required→token, else empty).
-	Info.bAuthRequired = bCloud || Config.AuthOption == EUnrealMcpAuthOption::Required;
+	// Auth (mcp-authorize g5/g6): Cloud always requires it (the cloud enforces it); Custom requires it in Oauth
+	// AND Token modes (None is anonymous/loopback). The token is the mode-resolved effective bearer
+	// (Cloud→cloudToken, Custom+Token→token, else empty — Oauth/None carry no static bearer).
+	Info.bAuthRequired = bCloud
+		|| Config.AuthOption == EUnrealMcpAuthOption::Oauth
+		|| Config.AuthOption == EUnrealMcpAuthOption::Token;
 	Info.Token = Config.ResolveEffectiveToken();
 
-	// mcp-authorize PR 5 (design 06, Flow C): the "Advanced: use access token" escape hatch. The DEFAULT path is
-	// native MCP OAuth (URL-only, no bearer) — with the device-flow machine credential store (PR 2) the token is no
-	// longer required input. Only an explicit Custom-mode Required-auth WITH a non-empty token opts into the legacy
-	// Bearer shape for clients that cannot do MCP OAuth. Cloud is ALWAYS native OAuth (its auth is server-enforced,
-	// never a user-pasted PAT), so it never triggers the escape hatch.
+	// The "write Authorization: Bearer <secret>" credential mode maps ONLY to Custom Token mode with a non-empty
+	// secret (g5/g6 DoD: "token → URL + Authorization: Bearer <local-secret>"). Cloud + Oauth are native MCP OAuth
+	// (URL-only config, the client authorizes itself); None is anonymous. So only Token opts into the Bearer shape.
 	Info.bUseAccessToken = !bCloud
-		&& Config.AuthOption == EUnrealMcpAuthOption::Required
+		&& Config.AuthOption == EUnrealMcpAuthOption::Token
 		&& !Info.Token.IsEmpty();
 
 	return Info;

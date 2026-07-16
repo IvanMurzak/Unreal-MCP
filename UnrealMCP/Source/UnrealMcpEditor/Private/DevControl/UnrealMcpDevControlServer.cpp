@@ -76,17 +76,21 @@ namespace
 		return false;
 	}
 
-	// The auth-option string the dev-control surface speaks ("none"/"required") — matches the §7 segmented control.
+	// The auth-option string the dev-control surface speaks ("none"/"oauth"/"token") — matches the §7 segmented control.
 	const TCHAR* DevControlAuthOptionLabel(EUnrealMcpAuthOption Option)
 	{
-		return Option == EUnrealMcpAuthOption::Required ? TEXT("required") : TEXT("none");
+		return FUnrealMcpConfig::AuthOptionToString(Option);
 	}
 
-	// Parse a "none"/"required" auth-option string (case-insensitive). Returns true + the option on a match.
+	// Parse a "none"/"oauth"/"token" auth-option string (case-insensitive; legacy "required" maps to token via the
+	// shared migration). Returns true + the option on a match.
 	bool DevControlParseAuthOption(const FString& Raw, EUnrealMcpAuthOption& OutOption)
 	{
-		if (Raw.Equals(TEXT("none"), ESearchCase::IgnoreCase))     { OutOption = EUnrealMcpAuthOption::None;     return true; }
-		if (Raw.Equals(TEXT("required"), ESearchCase::IgnoreCase)) { OutOption = EUnrealMcpAuthOption::Required; return true; }
+		if (Raw.Equals(TEXT("none"), ESearchCase::IgnoreCase))  { OutOption = EUnrealMcpAuthOption::None;  return true; }
+		if (Raw.Equals(TEXT("oauth"), ESearchCase::IgnoreCase)) { OutOption = EUnrealMcpAuthOption::Oauth; return true; }
+		if (Raw.Equals(TEXT("token"), ESearchCase::IgnoreCase)) { OutOption = EUnrealMcpAuthOption::Token; return true; }
+		// Legacy back-compat: an old dev-control client still sending "required" maps to token (the g5 migration).
+		if (Raw.Equals(TEXT("required"), ESearchCase::IgnoreCase)) { OutOption = EUnrealMcpAuthOption::Token; return true; }
 		return false;
 	}
 

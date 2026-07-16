@@ -129,36 +129,11 @@ void FUnrealMcpServerManagerSpec::Define()
 		});
 	});
 
-	Describe("BuildLaunchArgs", [this]()
-	{
-		It("composes Unity-parity args with streamableHttp and authorization=none (no token)", [this]()
-		{
-			const FString Args = FUnrealMcpServerManager::BuildLaunchArgs(8080, 10000, /*bAuthRequired*/ false, TEXT(""));
-			TestEqual(TEXT("none-auth args"), Args,
-				FString(TEXT("port=8080 plugin-timeout=10000 client-transport=streamableHttp authorization=none")));
-			TestFalse(TEXT("no token arg when auth is none"), Args.Contains(TEXT("token=")));
-		});
-
-		It("appends token= only when auth is required AND a token is present", [this]()
-		{
-			const FString WithToken = FUnrealMcpServerManager::BuildLaunchArgs(9000, 5000, /*bAuthRequired*/ true, TEXT("secret123"));
-			TestTrue(TEXT("required+token has authorization=required"), WithToken.Contains(TEXT("authorization=required")));
-			TestTrue(TEXT("required+token has token=secret123"), WithToken.Contains(TEXT("token=secret123")));
-
-			// Required but no token -> no token arg (matches Unity BuildArguments).
-			const FString NoToken = FUnrealMcpServerManager::BuildLaunchArgs(9000, 5000, /*bAuthRequired*/ true, TEXT(""));
-			TestTrue(TEXT("required+empty-token still authorization=required"), NoToken.Contains(TEXT("authorization=required")));
-			TestFalse(TEXT("required+empty-token has no token arg"), NoToken.Contains(TEXT("token=")));
-		});
-
-		It("always launches with client-transport=streamableHttp", [this]()
-		{
-			// The agent's stdio/http selection is about how the AGENT reaches the server; the launched server
-			// is always hosted over streamableHttp (Unity parity).
-			TestTrue(TEXT("transport is streamableHttp"),
-				FUnrealMcpServerManager::BuildLaunchArgs(1, 1, false, TEXT("")).Contains(TEXT("client-transport=streamableHttp")));
-		});
-	});
+	// NOTE (mcp-authorize g5/g6 consolidation): the launch-arg composition no longer lives in C++. The former
+	// FUnrealMcpServerManager::BuildLaunchArgs was DELETED — FUnrealMcpServerManager::Start now takes a pre-composed
+	// arg string, and the sidecar's SHARED com.IvanMurzak.McpPlugin.ServerLaunch.ServerLaunchArguments builder
+	// (none/oauth/token) composes it (covered by the bridge xUnit SidecarHostServerLaunchArgsTests). There is no C++
+	// arg-building logic left to spec here.
 
 	Describe("IsLaunchAllowed", [this]()
 	{
@@ -175,7 +150,7 @@ void FUnrealMcpServerManagerSpec::Define()
 	{
 		It("is pinned to the lockstep value (kept in sync with cli/src/lib/server-version.ts)", [this]()
 		{
-			TestEqual(TEXT("pinned server version"), FString(FUnrealMcpServerManager::ServerVersion), FString(TEXT("9.0.0")));
+			TestEqual(TEXT("pinned server version"), FString(FUnrealMcpServerManager::ServerVersion), FString(TEXT("9.1.0")));
 		});
 	});
 

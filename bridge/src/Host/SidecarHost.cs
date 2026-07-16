@@ -19,6 +19,7 @@ using System.Text.Json.Nodes;
 using com.IvanMurzak.McpPlugin;
 using com.IvanMurzak.McpPlugin.Common;
 using com.IvanMurzak.McpPlugin.Common.Model;
+using com.IvanMurzak.McpPlugin.ServerLaunch;
 using com.IvanMurzak.ReflectorNet;
 using com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig;
 using com.IvanMurzak.Unreal.MCP.Bridge.Auth;
@@ -423,6 +424,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             _ipc.AuthMessageReceived += HandleAuthMessage;
             _ipc.AgentConfigRequestReceived += HandleAgentConfigRequest;
             _ipc.ProjectConfigRequestReceived += HandleProjectConfigRequest;
+            _ipc.ServerLaunchArgsRequestReceived += HandleServerLaunchArgsRequest;
 
             _logger?.LogInformation("Sidecar host built (version {Version}); awaiting IPC handshake.", _sidecarVersion);
         }
@@ -802,6 +804,107 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
                 PortIsOverridden = resolved.PortIsOverridden,
                 ServerTarget = resolved.ServerTarget,
             };
+        }
+
+        /// <summary>
+        /// Serve a mcp-authorize g5/g6 <c>server-launch-args</c> request: compose the LOCAL gamedev-mcp-server
+        /// launch-arg string via the SHARED <see cref="ServerLaunchArguments"/> builder (none/oauth/token) so the C++
+        /// <c>FUnrealMcpServerManager</c> never duplicates the arg logic, and send the terminal
+        /// <c>server-launch-args-result</c> back to the plugin. Never throws — a malformed request or a builder
+        /// <c>ArgumentException</c> (e.g. token mode with no secret) becomes an <c>ok == false</c> result (or, when even
+        /// the requestId cannot be recovered, a logged drop) so it cannot tear down the read loop. Public so the bridge
+        /// xUnit suite can drive the dispatch without a live socket.
+        /// </summary>
+        public void HandleServerLaunchArgsRequest(string type, JsonObject node)
+        {
+            _ = Task.Run(async () =>
+            {
+                ServerLaunchArgsResultMessage result;
+                try
+                {
+                    result = BuildServerLaunchArgsResult(node);
+                }
+                catch (Exception ex)
+                {
+                    // Recover the requestId defensively — this runs in a fire-and-forget Task.Run and must never throw.
+                    string? requestId = null;
+                    if (node["requestId"] is JsonValue requestIdValue)
+                        requestIdValue.TryGetValue(out requestId);
+                    if (string.IsNullOrEmpty(requestId))
+                    {
+                        _logger?.LogWarning("Dropped malformed server-launch-args '{Type}' request: {Message}", type, ex.Message);
+                        return;
+                    }
+                    result = new ServerLaunchArgsResultMessage
+                    {
+                        RequestId = requestId!,
+                        Ok = false,
+                        Error = $"Sidecar failed to compose launch args: {ex.Message}",
+                    };
+                }
+                await _ipc.SendToPluginAsync(result, CancellationToken.None).ConfigureAwait(false);
+            });
+        }
+
+        /// <summary>
+        /// Compose a <c>server-launch-args</c> request into its terminal result by calling the SHARED
+        /// <see cref="ServerLaunchArguments.BuildCommandLine"/> — the SAME builder Unity/Godot call in-process — with the
+        /// plugin-resolved connection facts. The auth mode maps to <see cref="Consts.MCP.Server.AuthOption"/>
+        /// (none/oauth/token; anything unrecognized fails closed as an error, never a silent downgrade). The builder is
+        /// fail-closed: token mode needs a non-empty token; oauth mode needs both issuer and public-url — a missing
+        /// credential throws <see cref="ArgumentException"/>, surfaced as <c>ok == false</c>. Internal so the bridge
+        /// xUnit suite asserts the composed args without the IPC send. Never logs the token.
+        /// </summary>
+        internal ServerLaunchArgsResultMessage BuildServerLaunchArgsResult(JsonObject node)
+        {
+            var request = node.Deserialize<ServerLaunchArgsRequestMessage>(IpcProtocol.JsonOptions) ?? new ServerLaunchArgsRequestMessage();
+
+            // Accept only the enum NAMES (none|oauth|token). Enum.TryParse ALSO accepts numeric strings — e.g. "0"
+            // parses to the underlying enum value (none), which would let an unexpected numeric authMode silently spawn
+            // an anonymous server: the exact silent auth=none downgrade the g5/g6 design forbids. Reject any numeric
+            // form and fail closed (the plugin's FUnrealMcpConfig::AuthOptionToString only ever emits the names).
+            var rawAuthMode = request.AuthMode ?? string.Empty;
+            if (long.TryParse(rawAuthMode, out _)
+                || !Enum.TryParse<Consts.MCP.Server.AuthOption>(rawAuthMode, ignoreCase: true, out var authOption)
+                || (authOption != Consts.MCP.Server.AuthOption.none
+                    && authOption != Consts.MCP.Server.AuthOption.oauth
+                    && authOption != Consts.MCP.Server.AuthOption.token))
+            {
+                return new ServerLaunchArgsResultMessage
+                {
+                    RequestId = request.RequestId,
+                    Ok = false,
+                    Error = $"Unsupported auth mode '{request.AuthMode}' (expected none|oauth|token).",
+                };
+            }
+
+            try
+            {
+                var args = ServerLaunchArguments.BuildCommandLine(
+                    request.Port,
+                    request.PluginTimeoutMs,
+                    Consts.MCP.Server.TransportMethod.streamableHttp,
+                    authOption,
+                    token: request.Token,
+                    authIssuer: request.AuthIssuer,
+                    publicUrl: request.PublicUrl);
+                return new ServerLaunchArgsResultMessage
+                {
+                    RequestId = request.RequestId,
+                    Ok = true,
+                    Args = args,
+                };
+            }
+            catch (ArgumentException ex)
+            {
+                // Fail-closed: a mode's missing credential (token/issuer/public-url). Never echo the token.
+                return new ServerLaunchArgsResultMessage
+                {
+                    RequestId = request.RequestId,
+                    Ok = false,
+                    Error = ex.Message,
+                };
+            }
         }
 
         private void StartDeviceAuth()

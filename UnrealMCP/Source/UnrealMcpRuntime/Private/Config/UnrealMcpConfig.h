@@ -16,15 +16,20 @@ enum class EUnrealMcpConnectionMode : uint8
 };
 
 /**
- * Whether a Custom-mode connection sends a bearer token (§8). Only meaningful in
- * EUnrealMcpConnectionMode::Custom — Cloud-mode auth is the device-code flow (a later UI task).
+ * The Custom-mode local-server auth mode (mcp-authorize g5/g6, §8). Only meaningful in
+ * EUnrealMcpConnectionMode::Custom — Cloud-mode auth is the device-code flow. Mirrors the shared
+ * Consts.MCP.Server.AuthOption { none, oauth, token } the McpPlugin launch-arg builder consumes.
+ * The retired legacy `Required` value is migrated to Token on load (TryParseAuthOption accepts the
+ * old "Required" string and maps it to Token so an existing config keeps working).
  */
 enum class EUnrealMcpAuthOption : uint8
 {
-	/** No bearer token is sent (the Custom server accepts anonymous connections). */
+	/** Anonymous / loopback trust — no credential (server launched `auth=none`). The crash-safe default. */
 	None,
-	/** A bearer token is sent (the Custom server requires authorization). */
-	Required
+	/** Account-gated OAuth 2.1 — server launched `auth=oauth` with `auth-issuer` + `public-url`; client authorizes natively (URL-only config). */
+	Oauth,
+	/** Offline shared secret — server launched `auth=token token=<secret>`; client config carries `Authorization: Bearer <secret>`. */
+	Token
 };
 
 /**
@@ -195,6 +200,14 @@ public:
 	static UNREALMCPRUNTIME_API EUnrealMcpTransportMethod ParseTransport(const FString& Raw);
 	/** The canonical lowercase string ("stdio"/"http") for a transport enum (the persisted form). */
 	static UNREALMCPRUNTIME_API const TCHAR* TransportToString(EUnrealMcpTransportMethod Method);
+
+	/**
+	 * The canonical lowercase auth-mode string ("none"/"oauth"/"token") — the value the shared McpPlugin
+	 * ServerLaunchArguments builder + the gamedev-mcp-server CLI consume (the `auth=<mode>` launch arg), and
+	 * the value the g6 consolidation forwards over IPC to the sidecar. The C++ side NEVER assembles the launch
+	 * arg string itself (the sidecar's shared builder owns that); this is only the mode token.
+	 */
+	static UNREALMCPRUNTIME_API const TCHAR* AuthOptionToString(EUnrealMcpAuthOption Option);
 
 	/** The resolved cloud base URL (CloudUrl override or DefaultCloudBaseUrl), trailing slash trimmed. */
 	UNREALMCPRUNTIME_API FString ResolveCloudBaseUrl() const;

@@ -156,7 +156,7 @@ namespace UnrealMcpAgentWidgets
  * Provided:
  *   - StyledCard       → the rounded rgba(20,40,69,0.2) frame-group container (Unity .frame-group).
  *   - SectionHeader    → a 20px-bold section title (Unity .header).
- *   - SegmentedControl → the tab-like Custom/Cloud · stdio/http · none/required toggle (Unity .segmented-control).
+ *   - SegmentedControl → the tab-like Custom/Cloud · stdio/http · none/oauth/token toggle (Unity .segmented-control).
  *   - StatusDot        → a 14px online/offline/ring connection dot (Unity .status-indicator-circle*).
  *   - PrimaryButton / AlertButton / SecondaryButton / GoldenButton → the styled buttons (Unity .btn-*).
  *   - IconButton       → a button with a leading icon brush + label (Unity .btn-with-icon).

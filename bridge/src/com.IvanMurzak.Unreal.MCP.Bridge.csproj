@@ -73,10 +73,16 @@
     transitively requires ReflectorNet >= 5.3.2, so its explicit pin advances 5.3.1 -> 5.3.2 in the
     same bump (NU1605 downgrade otherwise). Both versions are published on nuget.org. The Godot-MCP
     lockstep is temporarily broken until the sibling Godot adoption PR lands.
+    ⚠ DEVIATION (mcp-authorize g5/g6, maintainer-authorized dependency-freshness bump, per the
+    PIPELINE.md "Freshness-bump carve-out"): 7.0.0 -> 7.1.0 is the additive minor that publishes the
+    shared com.IvanMurzak.McpPlugin.ServerLaunch.ServerLaunchArguments builder (the new none/oauth/token
+    launch-arg logic) + the Consts.MCP.Server.AuthOption { none, oauth, token } enum the g6 consolidation
+    delegates to (the sidecar calls ServerLaunchArguments.BuildCommandLine so the C++ editor no longer
+    duplicates arg-building). Published on nuget.org; ReflectorNet stays 5.3.2 (7.1.0 keeps that floor).
   -->
   <ItemGroup>
     <PackageReference Include="com.IvanMurzak.ReflectorNet" Version="5.3.2" />
-    <PackageReference Include="com.IvanMurzak.McpPlugin" Version="7.0.0" />
+    <PackageReference Include="com.IvanMurzak.McpPlugin" Version="7.1.0" />
   </ItemGroup>
 
   <!-- The xUnit suite exercises a couple of internal helpers (e.g. ProxyTool.CalculateTokenCount). -->

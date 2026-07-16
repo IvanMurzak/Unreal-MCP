@@ -136,7 +136,7 @@ void FUnrealMcpDevControlSpec::Define()
 			TSharedRef<FUnrealMcpEditorViewModel> VM = DevCtlMakeViewModel(Rec);
 			VM->SetConnectionMode(EUnrealMcpConnectionMode::Custom);
 			VM->SetTransportMethod(EUnrealMcpTransportMethod::Stdio);
-			VM->SetAuthOption(EUnrealMcpAuthOption::Required);
+			VM->SetAuthOption(EUnrealMcpAuthOption::Token);
 			VM->SetCustomToken(TEXT("super-secret-bearer-1234567890"));
 
 			TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
@@ -147,7 +147,7 @@ void FUnrealMcpDevControlSpec::Define()
 			TestEqual("transport", Result->GetStringField(TEXT("transport")), FString(TEXT("stdio")));
 			TestTrue("transport selectable in Custom", Result->GetBoolField(TEXT("transportSelectable")));
 			// Auth option + token presence; the raw token is NEVER reported (§8) — only the masked form.
-			TestEqual("authOption", Result->GetStringField(TEXT("authOption")), FString(TEXT("required")));
+			TestEqual("authOption", Result->GetStringField(TEXT("authOption")), FString(TEXT("token")));
 			TestTrue("hasCustomToken", Result->GetBoolField(TEXT("hasCustomToken")));
 			const FString MaskedInState = Result->GetStringField(TEXT("customTokenMasked"));
 			TestFalse("masked token is not the raw value", MaskedInState.Equals(TEXT("super-secret-bearer-1234567890")));
@@ -556,11 +556,27 @@ void FUnrealMcpDevControlSpec::Define()
 
 			TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
 			const int32 Status = FUnrealMcpDevControlServer::RouteRequest(
-				TEXT("POST"), TEXT("/control/auth-option"), DevCtlBody(TEXT("{\"option\":\"required\"}")), &VM.Get(), Result);
+				TEXT("POST"), TEXT("/control/auth-option"), DevCtlBody(TEXT("{\"option\":\"token\"}")), &VM.Get(), Result);
 
 			TestEqual("status", Status, 200);
-			TestEqual("auth option", VM->GetAuthOption(), EUnrealMcpAuthOption::Required);
-			TestEqual("echoed auth option", Result->GetStringField(TEXT("authOption")), FString(TEXT("required")));
+			TestEqual("auth option", VM->GetAuthOption(), EUnrealMcpAuthOption::Token);
+			TestEqual("echoed auth option", Result->GetStringField(TEXT("authOption")), FString(TEXT("token")));
+		});
+
+		It("migrates a legacy 'required' auth-option to token", [this]()
+		{
+			TSharedRef<FDevCtlRecording> Rec = MakeShared<FDevCtlRecording>();
+			TSharedRef<FUnrealMcpEditorViewModel> VM = DevCtlMakeViewModel(Rec);
+			VM->SetConnectionMode(EUnrealMcpConnectionMode::Custom);
+
+			TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
+			const int32 Status = FUnrealMcpDevControlServer::RouteRequest(
+				TEXT("POST"), TEXT("/control/auth-option"), DevCtlBody(TEXT("{\"option\":\"required\"}")), &VM.Get(), Result);
+
+			// g5/g6 back-compat: an old dev-control client sending "required" is migrated to Token, echoed as "token".
+			TestEqual("status", Status, 200);
+			TestEqual("legacy required migrates to token", VM->GetAuthOption(), EUnrealMcpAuthOption::Token);
+			TestEqual("echoed auth option", Result->GetStringField(TEXT("authOption")), FString(TEXT("token")));
 		});
 
 		It("rejects an invalid auth-option with 400", [this]()
