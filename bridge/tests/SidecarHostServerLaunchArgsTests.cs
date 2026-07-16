@@ -156,5 +156,21 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             Assert.False(string.IsNullOrEmpty(result.Error));
             Assert.Null(result.Args);
         }
+
+        [Fact]
+        public void BuildServerLaunchArgsResult_NumericAuthMode_RejectedNotSilentlyDowngraded()
+        {
+            using var host = BuildHost();
+
+            // Enum.TryParse also parses NUMERIC strings ("0" -> the first enum member, none). A numeric authMode must
+            // NOT be accepted — that would silently spawn an anonymous (auth=none) server. Only the NAMES none|oauth|token
+            // are valid; a numeric form fails closed, exactly like the legacy `required` rejection above.
+            var result = host.BuildServerLaunchArgsResult(Request("r-7", "0"));
+
+            Assert.False(result.Ok);
+            Assert.Equal("r-7", result.RequestId);
+            Assert.False(string.IsNullOrEmpty(result.Error));
+            Assert.Null(result.Args);
+        }
     }
 }

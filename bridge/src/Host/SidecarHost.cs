@@ -859,7 +859,13 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         {
             var request = node.Deserialize<ServerLaunchArgsRequestMessage>(IpcProtocol.JsonOptions) ?? new ServerLaunchArgsRequestMessage();
 
-            if (!Enum.TryParse<Consts.MCP.Server.AuthOption>(request.AuthMode, ignoreCase: true, out var authOption)
+            // Accept only the enum NAMES (none|oauth|token). Enum.TryParse ALSO accepts numeric strings — e.g. "0"
+            // parses to the underlying enum value (none), which would let an unexpected numeric authMode silently spawn
+            // an anonymous server: the exact silent auth=none downgrade the g5/g6 design forbids. Reject any numeric
+            // form and fail closed (the plugin's FUnrealMcpConfig::AuthOptionToString only ever emits the names).
+            var rawAuthMode = request.AuthMode ?? string.Empty;
+            if (long.TryParse(rawAuthMode, out _)
+                || !Enum.TryParse<Consts.MCP.Server.AuthOption>(rawAuthMode, ignoreCase: true, out var authOption)
                 || (authOption != Consts.MCP.Server.AuthOption.none
                     && authOption != Consts.MCP.Server.AuthOption.oauth
                     && authOption != Consts.MCP.Server.AuthOption.token))
