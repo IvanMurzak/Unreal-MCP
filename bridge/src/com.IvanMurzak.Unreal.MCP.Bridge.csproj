@@ -79,10 +79,13 @@
     launch-arg logic) + the Consts.MCP.Server.AuthOption { none, oauth, token } enum the g6 consolidation
     delegates to (the sidecar calls ServerLaunchArguments.BuildCommandLine so the C++ editor no longer
     duplicates arg-building). Published on nuget.org; ReflectorNet stays 5.3.2 (7.1.0 keeps that floor).
+    ⚠ DEVIATION (mcp-authorize i6, maintainer-authorized dependency-freshness bump, per the
+    PIPELINE.md "Freshness-bump carve-out"): 7.1.0 -> 7.1.1 is the patch that carries the i1 BUG-A
+    token-mode validator fix. Published on nuget.org; ReflectorNet stays 5.3.2 (7.1.1 keeps that floor).
   -->
   <ItemGroup>
     <PackageReference Include="com.IvanMurzak.ReflectorNet" Version="5.3.2" />
-    <PackageReference Include="com.IvanMurzak.McpPlugin" Version="7.1.0" />
+    <PackageReference Include="com.IvanMurzak.McpPlugin" Version="7.1.1" />
   </ItemGroup>
 
   <!-- The xUnit suite exercises a couple of internal helpers (e.g. ProxyTool.CalculateTokenCount). -->
