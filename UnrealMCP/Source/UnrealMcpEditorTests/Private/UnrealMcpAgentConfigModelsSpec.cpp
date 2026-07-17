@@ -298,6 +298,22 @@ void FUnrealMcpAgentConfigModelsSpec::Define()
 			TestEqual("token forwarded", Info.Token, FString(TEXT("pat-secret-value")));
 		});
 
+		It("forwards the SAME resolved token the local-server launch uses (mcp-authorize i4, BUG-B lockstep)", [this]()
+		{
+			// The written client-config bearer (Info.Token) and the local-server launch arg both read
+			// FUnrealMcpConfig::ResolveEffectiveToken(), so they carry the SAME secret at a given instant — the
+			// property whose absence produced Unity BUG-B (a regenerated local token orphaned the already-written
+			// client bearer -> Claude Code 401). Lock the equality so the two token sinks can never diverge.
+			FUnrealMcpConfig Config;
+			Config.ConnectionMode = EUnrealMcpConnectionMode::Custom;
+			Config.CustomHost = TEXT("http://localhost:8080");
+			Config.AuthOption = EUnrealMcpAuthOption::Token;
+			Config.CustomToken = TEXT("shared-local-secret");
+			const FAiAgentConnectionInfo Info = FAiAgentConnectionInfo::FromPluginConfig(Config, FString(), 31234);
+			TestEqual("client bearer == resolved effective token", Info.Token, Config.ResolveEffectiveToken());
+			TestEqual("resolved token is the stored secret", Config.ResolveEffectiveToken(), FString(TEXT("shared-local-secret")));
+		});
+
 		It("does not opt in for Custom + Token but an EMPTY secret", [this]()
 		{
 			FUnrealMcpConfig Config;

@@ -268,6 +268,89 @@ void FUnrealMcpConfigSpec::Define()
 		});
 	});
 
+	// mcp-authorize i4 (BUG-B analog audit): the Custom-mode local server token must be STABLE — it must
+	// never silently regenerate the way Unity's LocalToken did (Unity-MCP #897), which orphaned the
+	// already-written client .mcp.json bearer and produced a Claude Code 401. On Unreal the token is the
+	// single persisted CustomToken field with NO generation on construct/load, so these invariants hold by
+	// construction; lock them so a future refactor cannot silently reintroduce the divergence.
+	Describe("local token lifecycle — BUG-B immunity (mcp-authorize i4)", [this]()
+	{
+		It("never mints a token on construction or on an empty-token load (no generate-if-empty)", [this]()
+		{
+			// A fresh config carries NO token — the store must not seed one. (Unity's SetDefault mis-seeded a
+			// generated secret, forcing a generate-if-empty re-mint that then drifted.) Custom+Token with an
+			// unset secret therefore resolves EMPTY, deterministically, every time — never an auto-minted value.
+			FUnrealMcpConfig Fresh;
+			TestTrue(TEXT("fresh custom token empty"), Fresh.CustomToken.IsEmpty());
+			TestTrue(TEXT("fresh cloud token empty"), Fresh.CloudToken.IsEmpty());
+
+			// An empty persisted token round-trips empty (never auto-minted on load).
+			TSharedPtr<FJsonObject> Empty = MakeShared<FJsonObject>();
+			Empty->SetStringField(TEXT("connectionMode"), TEXT("Custom"));
+			Empty->SetStringField(TEXT("authOption"), TEXT("Token"));
+			Empty->SetStringField(TEXT("token"), FString());
+			const FUnrealMcpConfig Loaded = FromDiskJson(Empty);
+			TestTrue(TEXT("empty token stays empty after load"), Loaded.CustomToken.IsEmpty());
+			TestTrue(TEXT("effective token empty (nothing minted)"), Loaded.ResolveEffectiveToken().IsEmpty());
+		});
+
+		It("round-trips a persisted custom token deterministically through Save()/LoadFromFile()", [this]()
+		{
+			const FString Path = FPaths::Combine(FPaths::ProjectIntermediateDir(), TEXT("UnrealMcpConfigSpec"), TEXT("token-roundtrip.json"));
+			IFileManager::Get().Delete(*Path, false, true, true);
+
+			FUnrealMcpConfig Config;
+			Config.ConnectionMode = EUnrealMcpConnectionMode::Custom;
+			Config.AuthOption = EUnrealMcpAuthOption::Token;
+			Config.CustomToken = TEXT("persisted-local-secret-abc123");
+			TestTrue(TEXT("save ok"), Config.Save(Path));
+
+			FUnrealMcpConfig Reloaded;
+			Reloaded.LoadFromFile(Path);
+			TestEqual(TEXT("custom token survives save/load unchanged"),
+				Reloaded.CustomToken, FString(TEXT("persisted-local-secret-abc123")));
+			TestEqual(TEXT("effective token unchanged after reload"),
+				Reloaded.ResolveEffectiveToken(), FString(TEXT("persisted-local-secret-abc123")));
+
+			IFileManager::Get().Delete(*Path, false, true, true);
+		});
+
+		It("keeps the custom token unchanged across a connection-mode re-apply", [this]()
+		{
+			// Flipping Cloud<->Custom must NOT move the stored secret. (Unity's bug routed a generated token to
+			// the wrong slot on a mode-set.) CustomToken and CloudToken are independent persisted fields here.
+			FUnrealMcpConfig Config;
+			Config.ConnectionMode = EUnrealMcpConnectionMode::Custom;
+			Config.AuthOption = EUnrealMcpAuthOption::Token;
+			Config.CustomToken = TEXT("stable-secret");
+
+			Config.ConnectionMode = EUnrealMcpConnectionMode::Cloud;
+			Config.ConnectionMode = EUnrealMcpConnectionMode::Custom;
+
+			TestEqual(TEXT("custom token unchanged after mode re-apply"), Config.CustomToken, FString(TEXT("stable-secret")));
+			TestTrue(TEXT("cloud token still empty"), Config.CloudToken.IsEmpty());
+			TestEqual(TEXT("effective token still the stored secret"), Config.ResolveEffectiveToken(), FString(TEXT("stable-secret")));
+		});
+
+		It("feeds the server-launch arg and the client-config bearer from the SAME resolved token", [this]()
+		{
+			// The local-server launch (coordinator -> ServerLaunchArgs) reads ResolveEffectiveToken(); the client
+			// config write (FAiAgentConnectionInfo::FromPluginConfig) reads the same. They therefore cannot diverge
+			// — the exact property whose absence caused Unity BUG-B. (The FromPluginConfig side is asserted in
+			// UnrealMcp.AgentConfigModels; here we lock the config-side resolution the launch + §1.3 config share.)
+			FUnrealMcpConfig Config;
+			Config.ConnectionMode = EUnrealMcpConnectionMode::Custom;
+			Config.AuthOption = EUnrealMcpAuthOption::Token;
+			Config.CustomToken = TEXT("one-source-of-truth");
+
+			const TSharedPtr<FJsonObject> Eff = Config.BuildEffectiveConnectionConfig();
+			TestEqual(TEXT("effective-config token == resolved token"),
+				Eff->GetStringField(TEXT("token")), Config.ResolveEffectiveToken());
+			TestEqual(TEXT("resolved token is the stored secret"),
+				Config.ResolveEffectiveToken(), FString(TEXT("one-source-of-truth")));
+		});
+	});
+
 	Describe("Save() baseline-restore (env/.env never persisted)", [this]()
 	{
 		It("round-trips the disk baseline while the in-memory config keeps the override", [this]()

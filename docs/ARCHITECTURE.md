@@ -856,6 +856,26 @@ the connection-config task).
 - **Token protection:** masked in UI (reveal-on-hold), never logged at any level (log scrubber on
   the `log` IPC channel + NLog layout rule sidecar-side), file written with no extra ACL work but
   documented as secret; `UNREAL_MCP_TOKEN` recommended for CI instead of the file.
+- **Local-token lifecycle — BUG-B audit (mcp-authorize i4): absent by construction.** The Unity
+  sibling ([[i2]], Unity-MCP #897) hit BUG-B: the Custom-mode local server token *silently
+  regenerated* after Configure, so the already-written client `.mcp.json` bearer went stale → Claude
+  Code **401**. The Unreal C++ store is immune by design, so no fix is needed:
+  - **Single resolved source.** The Custom-mode secret is the one persisted `token` field
+    (`FUnrealMcpConfig::CustomToken`), read via `ResolveEffectiveToken()`. Both consumers read that
+    SAME value — the local-server launch arg (`FUnrealMcpEditorCoordinator` → the sidecar's shared
+    `ServerLaunchArguments` builder, `auth=token token=<secret>`) and the written client bearer
+    (`FAiAgentConnectionInfo::FromPluginConfig` → `AgentConfigService`) — so they can never diverge at
+    a given instant.
+  - **No silent regeneration.** Unlike Unity's `SetDefault` (which mis-seeded a generated secret into
+    the wrong slot and forced a drifting generate-if-empty re-mint), the C++ store performs NO token
+    generation on construct/load: `CustomToken` defaults empty, has no generate-if-empty fallback, and
+    lives in its own JSON field (never mode-routed at (de)serialize), so it round-trips deterministically
+    and survives a connection-mode re-apply unchanged.
+  - **Intentional change re-syncs.** The token changes ONLY on an explicit user action (typing it, or the
+    "New" button `GenerateCustomToken`); both re-persist + push the new config to the sidecar AND refresh
+    the agent configurators, whose tri-state status surfaces `ReconfigureNeeded` (the shared
+    `McpPlugin.AgentConfig` token-aware validator, mcp-authorize [[i1]]) so the user re-Configures.
+  - Locked by the `UnrealMcp.Config` + `UnrealMcp.AgentConfigModels` Automation specs.
 
 ---
 
