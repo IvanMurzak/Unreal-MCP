@@ -857,7 +857,7 @@ the connection-config task).
   the `log` IPC channel + NLog layout rule sidecar-side), file written with no extra ACL work but
   documented as secret; `UNREAL_MCP_TOKEN` recommended for CI instead of the file.
 - **Local-token lifecycle — BUG-B audit (mcp-authorize i4): absent by construction.** The Unity
-  sibling ([[i2]], Unity-MCP #897) hit BUG-B: the Custom-mode local server token *silently
+  sibling (mcp-authorize i2, Unity-MCP #897) hit BUG-B: the Custom-mode local server token *silently
   regenerated* after Configure, so the already-written client `.mcp.json` bearer went stale → Claude
   Code **401**. The Unreal C++ store is immune by design, so no fix is needed:
   - **Single resolved source.** The Custom-mode secret is the one persisted `token` field
@@ -874,7 +874,7 @@ the connection-config task).
   - **Intentional change re-syncs.** The token changes ONLY on an explicit user action (typing it, or the
     "New" button `GenerateCustomToken`); both re-persist + push the new config to the sidecar AND refresh
     the agent configurators, whose tri-state status surfaces `ReconfigureNeeded` (the shared
-    `McpPlugin.AgentConfig` token-aware validator, mcp-authorize [[i1]]) so the user re-Configures.
+    `McpPlugin.AgentConfig` token-aware validator, mcp-authorize i1) so the user re-Configures.
   - Locked by the `UnrealMcp.Config` + `UnrealMcp.AgentConfigModels` Automation specs.
 
 ---

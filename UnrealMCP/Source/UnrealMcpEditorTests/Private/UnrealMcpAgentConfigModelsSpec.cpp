@@ -306,7 +306,6 @@ void FUnrealMcpAgentConfigModelsSpec::Define()
 			// client bearer -> Claude Code 401). Lock the equality so the two token sinks can never diverge.
 			FUnrealMcpConfig Config;
 			Config.ConnectionMode = EUnrealMcpConnectionMode::Custom;
-			Config.CustomHost = TEXT("http://localhost:8080");
 			Config.AuthOption = EUnrealMcpAuthOption::Token;
 			Config.CustomToken = TEXT("shared-local-secret");
 			const FAiAgentConnectionInfo Info = FAiAgentConnectionInfo::FromPluginConfig(Config, FString(), 31234);
