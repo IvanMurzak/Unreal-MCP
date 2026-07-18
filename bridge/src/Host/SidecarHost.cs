@@ -217,8 +217,12 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             _authenticator = authenticator
                 ?? new DeviceCodeAuthenticator(_ownedHttpClient!, loggerProvider?.CreateLogger(nameof(DeviceCodeAuthenticator)));
 
-            // mcp-authorize: wire the machine-credential lifecycle ONLY when the caller opted in with a store. Left
-            // null, the sidecar keeps the pre-existing static-bearer behavior exactly (Custom/env paths untouched).
+            // mcp-authorize: wire the machine-credential lifecycle when a store is supplied. B14: PRODUCTION MUST
+            // build the sidecar through CreateForProduction, which ALWAYS supplies the store, so a Cloud sign-in can
+            // never silently degrade to a static bearer without refresh (design 01 §7d, V11). A null store here is
+            // ONLY the static-bearer TEST seam (Custom/env-mode config/transition tests that carry no cloud
+            // credential); it mirrors the real pre-sign-in state (a wired-but-empty store also lands on the static
+            // path). No prod path reaches this constructor with a null store.
             if (credentialStore != null)
             {
                 _credentialStore = credentialStore;
@@ -228,6 +232,37 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
                     _credentialStore, _tokenRefresher, loggerProvider?.CreateLogger(nameof(PluginCredentialProvider)));
             }
         }
+
+        /// <summary>
+        /// B14 — the PRODUCTION construction path. Unlike the raw constructor (whose optional
+        /// <paramref name="credentialStore"/> is a TEST seam for the static/Custom-bearer path), this factory
+        /// GUARANTEES the shared machine credential store — and with it the on-401 refresh + token-refresher —
+        /// is wired, so a Cloud sign-in can never silently degrade to a static bearer without refresh (the B14
+        /// silent-degradation path). <see cref="Program"/> builds the sidecar through here; the store can no
+        /// longer be dropped by editing the entry point. The store defaults to the real <c>~/.ai-game-dev</c>
+        /// machine store; the bridge xUnit suite injects an isolated temp store (and optionally a scripted
+        /// refresher) to prove the prod wiring includes the store and exercises the refresh path without touching
+        /// real machine state.
+        /// </summary>
+        internal static SidecarHost CreateForProduction(
+            IpcClient ipc,
+            string sidecarVersion,
+            ILoggerProvider? loggerProvider = null,
+            string? fallbackHost = null,
+            string? fallbackToken = null,
+            DeviceCodeAuthenticator? authenticator = null,
+            McpAgentConfig.MachineCredentialStore? credentialStore = null,
+            ITokenRefresher? tokenRefresher = null)
+            => new SidecarHost(
+                ipc,
+                sidecarVersion,
+                loggerProvider,
+                fallbackHost,
+                fallbackToken,
+                authenticator,
+                // B14 guarantee: null collapses to the real machine store, so the store is ALWAYS wired in prod.
+                credentialStore: credentialStore ?? new McpAgentConfig.MachineCredentialStore(),
+                tokenRefresher: tokenRefresher);
 
         public IMcpPlugin? Plugin => _plugin;
         public ConnectionConfig Config => _config;
