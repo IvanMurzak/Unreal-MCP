@@ -8,7 +8,11 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { isUnrealProjectDir } from '../utils/project.js';
+// T5/B1: recognise the project root via cli-core's shared marker probe using the
+// Unreal engine adapter (any `*.uproject` in the root) — one policy across the
+// three CLIs. Warn-not-refuse: install-plugin's `requireMarker` is effectively
+// false (a not-yet-initialised tree is a valid, rarer flow).
+import { probeProjectMarkers, unrealAdapter } from '@baizor/gamedev-cli-core';
 import { asError } from '../utils/error.js';
 import { isSymlink } from '../utils/fs.js';
 import { emitProgress } from './progress.js';
@@ -89,8 +93,9 @@ export async function installPlugin(opts: InstallPluginOptions): Promise<Install
     // Guard against a wrong-cwd run silently scaffolding Plugins/UnrealMCP in
     // an arbitrary directory (consistent with `close`/`status`, which key on
     // a `.uproject`). Warn rather than refuse — installing into a not-yet-
-    // initialised project tree is a valid, if rarer, flow.
-    if (!isUnrealProjectDir(projectDir)) {
+    // initialised project tree is a valid, if rarer, flow. The marker set comes
+    // from the shared cli-core Unreal adapter (any `*.uproject`).
+    if (!probeProjectMarkers(projectDir, unrealAdapter.markers).found) {
       warnings.push(`No .uproject found in ${projectDir} — is this an Unreal project directory?`);
     }
     const resolvedSource = await resolvePluginSource({

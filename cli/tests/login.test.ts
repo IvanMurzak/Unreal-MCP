@@ -4,7 +4,12 @@ import * as path from 'path';
 import { login } from '../src/lib/login.js';
 import { readEnvFile } from '../src/utils/env-file.js';
 import { MachineCredentialStore } from '../src/utils/machine-credentials.js';
-import { makeTempDir, rmTempDir, fakeResponse } from './helpers.js';
+import type {
+  DeviceAuthTransport,
+  DeviceAuthorizeResponse,
+  DeviceTokenResponse,
+} from '@baizor/gamedev-cli-core';
+import { makeTempDir, rmTempDir } from './helpers.js';
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -22,49 +27,70 @@ interface SuccessBody {
   expires_in?: number;
 }
 
-function deviceFlowFetch(pendingCount: number, success: SuccessBody = { access_token: 'final-token' }): typeof fetch {
-  let tokenCalls = 0;
-  return (async (url: string) => {
-    if (String(url).endsWith('/authorize')) {
-      return fakeResponse({
-        ok: true,
-        status: 200,
-        body: JSON.stringify({
-          device_code: 'dev123',
-          user_code: 'WXYZ-1234',
-          verification_uri: 'https://ai-game.dev/activate',
-          interval: 1,
-        }),
-      });
-    }
-    // token endpoint
-    tokenCalls += 1;
-    if (tokenCalls <= pendingCount) {
-      return fakeResponse({ ok: false, status: 400, body: JSON.stringify({ error: 'authorization_pending' }) });
-    }
-    return fakeResponse({ ok: true, status: 200, body: JSON.stringify(success) });
-  }) as unknown as typeof fetch;
+/**
+ * A fake cli-core device-auth transport: `pendingCount` `authorization_pending`
+ * polls, then the success token. Bypasses the HTTP transport entirely, so the
+ * test exercises the CLI's adapter (delegation + persistence), not core's RFC
+ * 8628 state machine (which cli-core unit-tests itself).
+ */
+function deviceFlowTransport(
+  pendingCount: number,
+  success: SuccessBody = { access_token: 'final-token' },
+): DeviceAuthTransport {
+  let polls = 0;
+  return {
+    async requestDeviceCode(): Promise<DeviceAuthorizeResponse> {
+      return {
+        device_code: 'dev123',
+        user_code: 'WXYZ-1234',
+        verification_uri: 'https://ai-game.dev/activate',
+        expires_in: 900,
+        interval: 0,
+      };
+    },
+    async pollToken(): Promise<DeviceTokenResponse> {
+      polls += 1;
+      if (polls <= pendingCount) return { error: 'authorization_pending' };
+      return {
+        access_token: success.access_token,
+        refresh_token: success.refresh_token,
+        expires_in: success.expires_in,
+        token_type: 'Bearer',
+      };
+    },
+  };
 }
 
-describe('login (device flow)', () => {
+/** A transport that returns a terminal OAuth error on the first poll. */
+function terminalTransport(error: string): DeviceAuthTransport {
+  return {
+    async requestDeviceCode(): Promise<DeviceAuthorizeResponse> {
+      return { device_code: 'd', user_code: 'u', verification_uri: 'https://ai-game.dev/activate', expires_in: 900 };
+    },
+    async pollToken(): Promise<DeviceTokenResponse> {
+      return { error };
+    },
+  };
+}
+
+describe('login (OAuth 2.1 device flow → cli-core)', () => {
   it('polls past authorization_pending and returns the token', async () => {
     const r = await login({
       storeBaseDir: tmp(),
-      fetchImpl: deviceFlowFetch(2),
+      transport: deviceFlowTransport(2),
       sleepImpl: async () => {},
       nowImpl: () => 0,
-      timeoutMs: 100000,
     });
     expect(r.kind).toBe('success');
     if (r.kind === 'success') expect(r.token).toBe('final-token');
   });
 
-  it('persists to the shared machine store by default (not a project .env)', async () => {
+  it('persists the FULL credential set to the shared machine store by default (not a project .env)', async () => {
     const store = tmp();
     const project = tmp();
     const r = await login({
       storeBaseDir: store,
-      fetchImpl: deviceFlowFetch(0, { access_token: 'jwt-1', refresh_token: 'refresh-1', expires_in: 3600 }),
+      transport: deviceFlowTransport(0, { access_token: 'jwt-1', refresh_token: 'refresh-1', expires_in: 3600 }),
       sleepImpl: async () => {},
       nowImpl: () => 1_000_000, // fixed clock for a deterministic expiresAt
     });
@@ -91,7 +117,7 @@ describe('login (device flow)', () => {
     const dir = tmp();
     const r = await login({
       projectDir: dir,
-      fetchImpl: deviceFlowFetch(0),
+      transport: deviceFlowTransport(0),
       sleepImpl: async () => {},
       nowImpl: () => 0,
     });
@@ -106,49 +132,15 @@ describe('login (device flow)', () => {
     expect(fs.readFileSync(path.join(dir, '.gitignore'), 'utf-8')).toContain('.env');
   });
 
-  it('increases the poll interval persistently after slow_down (RFC 8628)', async () => {
-    let tokenCalls = 0;
-    const fetchImpl = (async (url: string) => {
-      if (String(url).endsWith('/authorize')) {
-        return fakeResponse({ ok: true, status: 200, body: JSON.stringify({ device_code: 'd', user_code: 'u', verification_uri: 'v', interval: 1 }) });
-      }
-      tokenCalls += 1;
-      if (tokenCalls === 1) {
-        return fakeResponse({ ok: false, status: 400, body: JSON.stringify({ error: 'slow_down' }) });
-      }
-      return fakeResponse({ ok: true, status: 200, body: JSON.stringify({ access_token: 'final-token' }) });
-    }) as unknown as typeof fetch;
-    const sleeps: number[] = [];
-    const r = await login({ storeBaseDir: tmp(), fetchImpl, sleepImpl: async (ms) => { sleeps.push(ms); }, nowImpl: () => 0, timeoutMs: 100000 });
-    expect(r.kind).toBe('success');
-    // One sleep per poll (at the top of the loop): 1000ms before the first
-    // (slow_down) poll, then a PERSISTENTLY increased 6000ms before the retry —
-    // not a one-shot extra sleep at the old 1000ms cadence.
-    expect(sleeps).toEqual([1000, 6000]);
+  it('fails cleanly on access_denied', async () => {
+    const r = await login({ transport: terminalTransport('access_denied'), sleepImpl: async () => {}, nowImpl: () => 0 });
+    expect(r.kind).toBe('failure');
+    if (r.kind === 'failure') expect(r.reason).toBe('denied');
   });
 
-  it('fails on access_denied', async () => {
-    const fetchImpl = (async (url: string) => {
-      if (String(url).endsWith('/authorize')) {
-        return fakeResponse({ ok: true, status: 200, body: JSON.stringify({ device_code: 'd', user_code: 'u', verification_uri: 'v', interval: 1 }) });
-      }
-      return fakeResponse({ ok: false, status: 400, body: JSON.stringify({ error: 'access_denied' }) });
-    }) as unknown as typeof fetch;
-    const r = await login({ fetchImpl, sleepImpl: async () => {}, nowImpl: () => 0 });
+  it('fails cleanly on expired_token', async () => {
+    const r = await login({ transport: terminalTransport('expired_token'), sleepImpl: async () => {}, nowImpl: () => 0 });
     expect(r.kind).toBe('failure');
-    if (r.kind === 'failure') expect(r.reason).toBe('access_denied');
-  });
-
-  it('times out when the user never authorizes', async () => {
-    let clock = 0;
-    const fetchImpl = (async (url: string) => {
-      if (String(url).endsWith('/authorize')) {
-        return fakeResponse({ ok: true, status: 200, body: JSON.stringify({ device_code: 'd', user_code: 'u', verification_uri: 'v', interval: 1 }) });
-      }
-      return fakeResponse({ ok: false, status: 400, body: JSON.stringify({ error: 'authorization_pending' }) });
-    }) as unknown as typeof fetch;
-    const r = await login({ fetchImpl, sleepImpl: async (ms) => { clock += ms; }, nowImpl: () => clock, timeoutMs: 3000 });
-    expect(r.kind).toBe('failure');
-    if (r.kind === 'failure') expect(r.reason).toBe('timeout');
+    if (r.kind === 'failure') expect(r.reason).toBe('expired');
   });
 });

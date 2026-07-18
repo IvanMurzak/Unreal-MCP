@@ -11,6 +11,11 @@
 
 import * as path from 'path';
 import { platform } from 'os';
+// cli-core owns the T4 pinned-routing policy: `pinUrl` appends the `/p/<pin>`
+// routing segment and `derivePinV2` is the shared v2 ProjectIdentity pin
+// (`\`→`/`-normalized), so the CLI writes the SAME pinned URL the C# Editor
+// Configure and the sibling CLIs write for a given project.
+import { pinUrl, derivePinV2 } from '@baizor/gamedev-cli-core';
 import { resolveConnection, appendMcp } from '../utils/config.js';
 import { asError } from '../utils/error.js';
 import { generatePortFromDirectory } from '../utils/port.js';
@@ -122,7 +127,15 @@ export async function setupMcp(opts: SetupMcpOptions): Promise<SetupMcpResult> {
       // `/mcp` segment is appended ONCE here (idempotently, tolerating a URL
       // that already ends in `/mcp`) so the agent closures use `url` verbatim;
       // this avoids the historical `/mcp` double-append.
-      const httpUrl = appendMcp(conn.url);
+      //
+      // T4 (defect B4/B8): the URL is PINNED by default —
+      // `<base>/mcp/p/<pin-v2>` — so the config routes strictly to THIS
+      // project's engine instance even when the account has several, exactly as
+      // the Editor Configure does. `--no-pin` is the escape hatch (unpinned).
+      // M8: the pin is a routing path segment, not part of the OAuth resource;
+      // the canonical resource stays `<base>/mcp`.
+      const canonicalUrl = appendMcp(conn.url);
+      const httpUrl = opts.noPin ? canonicalUrl : pinUrl(canonicalUrl, derivePinV2(projectDir));
       const token = conn.token ?? '';
       // D11 / Flow A: OAuth-capable clients get a CREDENTIAL-FREE, URL-only config
       // so they run their own native OAuth; a static Bearer header is emitted only

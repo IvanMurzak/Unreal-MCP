@@ -11,6 +11,7 @@ export const setupMcpCommand = new Command('setup-mcp')
   .option('--transport <t>', 'Transport: http | stdio (default http)')
   .option('--url <url>', 'Explicit MCP server URL override')
   .option('--token <token>', 'Bearer token override')
+  .option('--no-pin', 'Write an unpinned <base>/mcp URL instead of the default pinned <base>/mcp/p/<pin>')
   .option('--dry-run', 'Print the snippet instead of writing it')
   .option('--list', 'List all supported agent ids and their config paths')
   .action(async (agent: string | undefined, opts) => {
@@ -36,6 +37,8 @@ export const setupMcpCommand = new Command('setup-mcp')
       transport: opts.transport as McpTransport | undefined,
       url: opts.url,
       token: opts.token,
+      // Commander maps `--no-pin` to `pin === false`; the default (pinned) is `pin !== false`.
+      noPin: opts.pin === false,
       dryRun: opts.dryRun,
     });
     ui.printWarnings(result.warnings);
