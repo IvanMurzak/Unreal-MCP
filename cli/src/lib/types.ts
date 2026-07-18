@@ -388,6 +388,11 @@ export interface SetupMcpOptions {
   transport?: McpTransport;
   url?: string;
   token?: string;
+  /**
+   * `--no-pin`: write an UNPINNED `<base>/mcp` URL instead of the default pinned
+   * `<base>/mcp/p/<pin-v2>` (T4 escape hatch). Default `false` (pinned).
+   */
+  noPin?: boolean;
   /** Return the snippet instead of writing it. Default `false` (write). */
   dryRun?: boolean;
   /**

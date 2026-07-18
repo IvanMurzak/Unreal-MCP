@@ -1,27 +1,40 @@
-// `login` — OAuth 2.0 device authorization flow against ai-game.dev.
-// Requests a device code, surfaces the verification URL + user code via
-// `onProgress`, then polls the token endpoint until the user authorizes
-// (or the flow times out). On success, persists the credential into the
-// SHARED machine credential store (`~/.ai-game-dev/credentials.json`, mcp-authorize
-// design 06/09 D12) so sign-in happens once per machine — never into a
-// committable project file on the default path. The `--path` override still
-// keeps a project-local `.env` (gitignored) for per-project accounts.
-// fetch + sleep + clock are injectable for tests. Library-safe: never throws
-// past the boundary.
+// `login` — OAuth 2.1 device authorization flow (RFC 8628) against ai-game.dev,
+// now on the shared `@baizor/gamedev-cli-core` `deviceLogin` engine (auth-fixes
+// design 02 T1). It POSTs `client_id` (`unreal-mcp-cli`) + scope (`mcp:plugin`)
+// to `{base}/oauth/device_authorization`, surfaces the verification URL + user
+// code via `onProgress`, then redeems the grant at `{base}/oauth/token` — an
+// ES256 hub JWT plus a rotating refresh token. This REPLACES the legacy JSON
+// device-authorization endpoints and **never mints a PAT** (personal access
+// tokens stay a manual, human-only tool).
+//
+// On success the FULL credential set (accessToken, refreshToken, expiresAt,
+// serverTarget, subject) is persisted into the SHARED machine credential store
+// (`~/.ai-game-dev/credentials.json`, mcp-authorize design 06/09 D12) so sign-in
+// happens once per machine — never into a committable project file on the default
+// path. The `--path` override still keeps a project-local `.env` (gitignored) for
+// per-project accounts. transport + delay + clock are injectable for tests.
+// Library-safe: never throws past the boundary.
 
 import { writeEnvFile, ensureEnvGitignored } from '../utils/env-file.js';
-import { MachineCredentialStore, type MachineCredentials, CREDENTIALS_VERSION } from '../utils/machine-credentials.js';
+import {
+  MachineCredentialStore,
+  type MachineCredentials,
+  CREDENTIALS_VERSION,
+} from '../utils/machine-credentials.js';
+import {
+  deviceLogin,
+  HttpDeviceAuthTransport,
+  unrealAdapter,
+  DEFAULT_PLUGIN_SCOPE,
+  type DeviceAuthTransport,
+  type MachineCredentials as CoreMachineCredentials,
+} from '@baizor/gamedev-cli-core';
 import * as path from 'path';
 import { asError } from '../utils/error.js';
-import { fetchWithTimeout } from '../utils/http.js';
 import { emitProgress } from './progress.js';
 import type { ProgressCallback } from './types.js';
 
 const DEFAULT_BASE_URL = 'https://ai-game.dev';
-const DEFAULT_DEVICE_PATH = '/api/auth/device/authorize';
-const DEFAULT_TOKEN_PATH = '/api/auth/device/token';
-/** Per-request deadline so a hung endpoint can't stall the flow forever. */
-const PER_REQUEST_TIMEOUT_MS = 30_000;
 
 export interface LoginOptions {
   baseUrl?: string;
@@ -33,11 +46,17 @@ export interface LoginOptions {
   projectDir?: string;
   /** Test seam: override the machine credential store base dir (default `~/.ai-game-dev`). */
   storeBaseDir?: string;
-  /** Overall poll deadline. Default 300000 ms (5 min). */
+  /**
+   * Overall poll deadline (ms). Accepted for CLI/back-compat; the effective
+   * deadline is the device-code `expires_in` the authorization server returns
+   * (RFC 8628), which `deviceLogin` enforces.
+   */
   timeoutMs?: number;
   fetchImpl?: typeof fetch;
   sleepImpl?: (ms: number) => Promise<void>;
   nowImpl?: () => number;
+  /** Test seam: inject a device-authorization transport (bypasses the HTTP transport). */
+  transport?: DeviceAuthTransport;
   onProgress?: ProgressCallback;
 }
 
@@ -61,125 +80,70 @@ export interface LoginSuccess {
 export interface LoginFailure {
   kind: 'failure';
   success: false;
-  /** Coarse reason — `access_denied`, `expired_token`, `timeout`, ... */
+  /** Coarse reason — `denied`, `expired`, `cancelled`, `error`, ... (cli-core `deviceLogin` reasons). */
   reason: string;
   error: Error;
 }
 
 export type LoginResult = LoginSuccess | LoginFailure;
 
-interface DeviceCodeResponse {
-  device_code: string;
-  user_code: string;
-  verification_uri: string;
-  verification_uri_complete?: string;
-  interval?: number;
-  expires_in?: number;
-}
-
-const realSleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
-
 export async function login(opts: LoginOptions = {}): Promise<LoginResult> {
   const baseUrl = (opts.baseUrl ?? DEFAULT_BASE_URL).replace(/\/+$/, '');
-  const fetchImpl = opts.fetchImpl ?? globalThis.fetch;
-  const sleep = opts.sleepImpl ?? realSleep;
-  const now = opts.nowImpl ?? Date.now;
-  const timeoutMs = typeof opts.timeoutMs === 'number' && opts.timeoutMs > 0 ? opts.timeoutMs : 300_000;
 
   try {
     emitProgress(opts.onProgress, { phase: 'start', message: 'Requesting device authorization' });
 
-    const codeResp = await fetchWithTimeout(
-      fetchImpl,
-      `${baseUrl}${DEFAULT_DEVICE_PATH}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: '{}',
-      },
-      { timeoutMs: PER_REQUEST_TIMEOUT_MS },
-    );
-    if (!codeResp.ok) {
-      return fail('device-code-failed', `Device code request failed: HTTP ${codeResp.status}`);
-    }
-    const code = (await codeResp.json()) as DeviceCodeResponse;
-    if (!code.device_code || !code.user_code || !code.verification_uri) {
-      return fail('device-code-malformed', 'Device code response missing required fields.');
-    }
+    // Build the RFC 8628 device-auth transport. `client_id` is the Unreal product
+    // id from the shared engine adapter; scope selects the mcp:plugin JWT +
+    // refresh-token response. A test may inject its own transport directly.
+    const transport =
+      opts.transport ??
+      new HttpDeviceAuthTransport({
+        serverBaseUrl: baseUrl,
+        clientId: unrealAdapter.clientId,
+        scope: DEFAULT_PLUGIN_SCOPE,
+        fetchImpl: opts.fetchImpl,
+      });
 
-    emitProgress(opts.onProgress, {
-      phase: 'info',
-      message:
-        `To authorize, open ${code.verification_uri_complete ?? code.verification_uri} ` +
-        `and enter code ${code.user_code}`,
+    const result = await deviceLogin({
+      serverBaseUrl: baseUrl,
+      clientId: unrealAdapter.clientId,
+      // Scope is carried by the transport above; `deviceLogin` reads its own
+      // `scope` only to build a DEFAULT transport, which we always override.
+      // Record the AS root on the credential (never a pinned hub URL) — b2 MED-2.
+      serverTarget: baseUrl,
+      transport,
+      delay: opts.sleepImpl,
+      now: opts.nowImpl,
+      onUserCode: (userCode, verificationUri) => {
+        emitProgress(opts.onProgress, {
+          phase: 'info',
+          message: `To authorize, open ${verificationUri} and enter code ${userCode}`,
+        });
+      },
+      onPolling: () => {
+        emitProgress(opts.onProgress, { phase: 'info', message: 'Waiting for authorization…' });
+      },
     });
 
-    let intervalMs = Math.max(1, code.interval ?? 5) * 1000;
-    const start = now();
-    const deadline = start + timeoutMs;
-
-    while (now() < deadline) {
-      await sleep(intervalMs);
-      const tokenResp = await fetchWithTimeout(
-        fetchImpl,
-        `${baseUrl}${DEFAULT_TOKEN_PATH}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ device_code: code.device_code }),
-        },
-        { timeoutMs: PER_REQUEST_TIMEOUT_MS },
-      );
-
-      if (tokenResp.ok) {
-        const body = (await tokenResp.json()) as TokenResponse;
-        if (!body.access_token) {
-          return fail('token-malformed', 'Token response missing access_token.');
-        }
-        const persisted = await persistCredential(opts, body, baseUrl, now);
-        emitProgress(opts.onProgress, { phase: 'done', message: 'Login complete.' });
-        return {
-          kind: 'success',
-          success: true,
-          token: body.access_token,
-          persisted: true,
-          persistedTo: persisted.persistedTo,
-          credentialPath: persisted.credentialPath,
-          envPath: persisted.envPath,
-        };
-      }
-
-      // Pending / slow-down / terminal errors per the device-flow spec.
-      const errBody = (await tokenResp.json().catch(() => ({}))) as { error?: string };
-      const error = errBody.error ?? `http-${tokenResp.status}`;
-      if (error === 'authorization_pending') continue;
-      if (error === 'slow_down') {
-        // RFC 8628 §3.5: on `slow_down` the poll interval MUST be increased by
-        // 5 seconds for this and ALL subsequent requests — a persistent
-        // back-off, not a one-shot extra sleep. The next loop iteration sleeps
-        // the new interval at the top before polling again.
-        intervalMs += 5000;
-        continue;
-      }
-      // access_denied, expired_token, or anything else terminal.
-      return fail(error, `Authorization failed: ${error}`);
+    if (!result.ok) {
+      return { kind: 'failure', success: false, reason: result.reason, error: new Error(result.message) };
     }
 
-    return fail('timeout', `Login timed out after ${timeoutMs}ms.`);
+    const persisted = await persistCredential(opts, result.credentials);
+    emitProgress(opts.onProgress, { phase: 'done', message: 'Login complete.' });
+    return {
+      kind: 'success',
+      success: true,
+      token: result.credentials.accessToken ?? '',
+      persisted: true,
+      persistedTo: persisted.persistedTo,
+      credentialPath: persisted.credentialPath,
+      envPath: persisted.envPath,
+    };
   } catch (err) {
-    const error = asError(err);
-    // A per-request `fetchWithTimeout` deadline surfaces as an AbortError;
-    // classify that as a timeout rather than a generic network error.
-    const reason = error.name === 'AbortError' ? 'timeout' : 'network-error';
-    return { kind: 'failure', success: false, reason, error };
+    return { kind: 'failure', success: false, reason: 'error', error: asError(err) };
   }
-}
-
-interface TokenResponse {
-  access_token?: string;
-  refresh_token?: string;
-  /** Seconds until `access_token` expires (RFC 8628 / OAuth). */
-  expires_in?: number;
 }
 
 interface PersistOutcome {
@@ -192,13 +156,13 @@ interface PersistOutcome {
  * Persist the freshly-authorized credential. The default path writes the shared
  * machine store (`~/.ai-game-dev/credentials.json`, DPAPI/0600) so the token
  * NEVER lands in a committable project file; the `--path` override keeps the
- * legacy project-local `.env` (gitignored) for per-project accounts.
+ * project-local `.env` (gitignored) for per-project accounts. The store is
+ * byte-compatible with the C# / cli-core store, so the returned cli-core
+ * credential set is written through verbatim.
  */
 async function persistCredential(
   opts: LoginOptions,
-  body: TokenResponse,
-  serverTarget: string,
-  now: () => number,
+  credentials: CoreMachineCredentials,
 ): Promise<PersistOutcome> {
   if (opts.projectDir) {
     const dir = path.resolve(opts.projectDir);
@@ -208,25 +172,19 @@ async function persistCredential(
     // committable token file behind even if the process dies between the two
     // writes).
     ensureEnvGitignored(dir);
-    writeEnvFile(envPath, { UNREAL_MCP_TOKEN: body.access_token, UNREAL_MCP_CONNECTION_MODE: 'Cloud' });
+    writeEnvFile(envPath, { UNREAL_MCP_TOKEN: credentials.accessToken ?? '', UNREAL_MCP_CONNECTION_MODE: 'Cloud' });
     return { persistedTo: 'project-env', credentialPath: envPath, envPath };
   }
 
   const store = new MachineCredentialStore(opts.storeBaseDir);
-  const credentials: MachineCredentials = {
+  const localCreds: MachineCredentials = {
     version: CREDENTIALS_VERSION,
-    accessToken: body.access_token,
-    refreshToken: body.refresh_token ?? undefined,
-    expiresAt:
-      typeof body.expires_in === 'number' && body.expires_in > 0
-        ? new Date(now() + body.expires_in * 1000).toISOString()
-        : undefined,
-    serverTarget,
+    accessToken: credentials.accessToken,
+    refreshToken: credentials.refreshToken ?? undefined,
+    expiresAt: credentials.expiresAt ?? undefined,
+    serverTarget: credentials.serverTarget ?? undefined,
+    subject: credentials.subject,
   };
-  await store.write(credentials);
+  await store.write(localCreds);
   return { persistedTo: 'machine-store', credentialPath: store.credentialsPath };
-}
-
-function fail(reason: string, message: string): LoginFailure {
-  return { kind: 'failure', success: false, reason, error: new Error(message) };
 }
