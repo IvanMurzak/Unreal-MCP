@@ -9,6 +9,7 @@
 */
 
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Net;
 using System.Net.Http;
@@ -33,13 +34,26 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
     /// that structural. A per-test temp store isolates these from the real <c>~/.ai-game-dev</c> — no network, no
     /// shared machine state.
     /// </summary>
-    public class SidecarHostProdWiringTests
+    public class SidecarHostProdWiringTests : IDisposable
     {
-        private static string NewStoreDir()
+        // Temp store dirs created by this test instance, deleted in Dispose (best-effort) so repeated runs do not
+        // leak %TEMP% dirs — matches the sibling SidecarHostProjectConfigTests' RunInTempDir cleanup convention.
+        private readonly List<string> _tempDirs = new();
+
+        private string NewStoreDir()
         {
             var dir = Path.Combine(Path.GetTempPath(), "umcp-prodwire-" + Guid.NewGuid().ToString("N")[..12]);
             Directory.CreateDirectory(dir);
+            _tempDirs.Add(dir);
             return dir;
+        }
+
+        public void Dispose()
+        {
+            foreach (var dir in _tempDirs)
+            {
+                try { Directory.Delete(dir, recursive: true); } catch { /* best-effort cleanup */ }
+            }
         }
 
         private static IpcClient NewIpc() => new("127.0.0.1", 39998, token: "ipc-token", sidecarVersion: "0.1.0");
@@ -47,23 +61,18 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         private static JsonObject CloudConfig(string cloudUrl = "https://ai-game.dev") =>
             new() { ["mode"] = "Cloud", ["cloudUrl"] = cloudUrl };
 
-        // A scripted HTTP handler for the /oauth/token refresh endpoint: returns one fixed body + status.
+        // A scripted HTTP handler for the /oauth/token refresh endpoint: returns one fixed 200 body.
         private sealed class RefreshHandler : HttpMessageHandler
         {
             private readonly string _json;
-            private readonly HttpStatusCode _status;
             public int Calls { get; private set; }
 
-            public RefreshHandler(string json, HttpStatusCode status)
-            {
-                _json = json;
-                _status = status;
-            }
+            public RefreshHandler(string json) => _json = json;
 
             protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
             {
                 Calls++;
-                return Task.FromResult(new HttpResponseMessage(_status)
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
                 {
                     Content = new StringContent(_json, Encoding.UTF8, "application/json"),
                 });
@@ -121,8 +130,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             });
 
             var handler = new RefreshHandler(
-                "{\"access_token\":\"rotated-jwt\",\"refresh_token\":\"new-refresh\",\"token_type\":\"Bearer\",\"expires_in\":3600}",
-                HttpStatusCode.OK);
+                "{\"access_token\":\"rotated-jwt\",\"refresh_token\":\"new-refresh\",\"token_type\":\"Bearer\",\"expires_in\":3600}");
             var refresher = new OAuthTokenRefresher(new HttpClient(handler));
 
             using var host = SidecarHost.CreateForProduction(
