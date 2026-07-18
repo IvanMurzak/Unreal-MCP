@@ -11,7 +11,6 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
-using com.IvanMurzak.McpPlugin.AgentConfig;
 using com.IvanMurzak.Unreal.MCP.Bridge.Host;
 using com.IvanMurzak.Unreal.MCP.Bridge.Ipc;
 using com.IvanMurzak.Unreal.MCP.Bridge.Sidecar;
@@ -80,18 +79,21 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge
                 sidecarVersion: SidecarVersion,
                 logger: loggerProvider.CreateLogger(nameof(IpcClient)));
 
-            using var host = new SidecarHost(
+            // B14 (design 01 §7d, V11): build via CreateForProduction, which ALWAYS wires the shared machine
+            // credential store (~/.ai-game-dev/credentials.json, 0600 / DPAPI — read by the engine plugins, the
+            // CLIs, and the local server so sign-in is once-per-machine). That store presence enables the
+            // device-code sign-in, boot auto-adopt (zero-button), and proactive/on-401 refresh. Routing prod
+            // through the factory (instead of the raw constructor's optional-store test seam) makes it impossible
+            // to drop the store from the entry point, so a Cloud sign-in can never silently degrade to a static
+            // bearer without refresh. The factory defaults to the real ~/.ai-game-dev store; the xUnit suite
+            // injects a temp dir instead.
+            using var host = SidecarHost.CreateForProduction(
                 ipc,
                 SidecarVersion,
                 loggerProvider,
                 fallbackHost: Environment.GetEnvironmentVariable("UNREAL_MCP_HOST")
                               ?? Environment.GetEnvironmentVariable("UNREAL_MCP_CLOUD_URL"),
-                fallbackToken: Environment.GetEnvironmentVariable("UNREAL_MCP_TOKEN"),
-                // mcp-authorize (D12): the shared machine credential store (~/.ai-game-dev/credentials.json, 0600 /
-                // DPAPI) — read by the engine plugins, the CLIs, and the local server so sign-in is once-per-machine.
-                // Its presence enables the device-code sign-in, boot auto-adopt (zero-button), and proactive/on-401
-                // refresh. Left default (~/.ai-game-dev); the xUnit suite injects a temp dir instead.
-                credentialStore: new MachineCredentialStore());
+                fallbackToken: Environment.GetEnvironmentVariable("UNREAL_MCP_TOKEN"));
             host.Build();
 
             // No-orphan watchdogs (§6) ------------------------------------------------------------------
