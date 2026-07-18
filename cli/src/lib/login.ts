@@ -27,6 +27,7 @@ import {
   unrealAdapter,
   DEFAULT_PLUGIN_SCOPE,
   type DeviceAuthTransport,
+  type MachineCredentials as CoreMachineCredentials,
 } from '@baizor/gamedev-cli-core';
 import * as path from 'path';
 import { asError } from '../utils/error.js';
@@ -107,7 +108,8 @@ export async function login(opts: LoginOptions = {}): Promise<LoginResult> {
     const result = await deviceLogin({
       serverBaseUrl: baseUrl,
       clientId: unrealAdapter.clientId,
-      scope: DEFAULT_PLUGIN_SCOPE,
+      // Scope is carried by the transport above; `deviceLogin` reads its own
+      // `scope` only to build a DEFAULT transport, which we always override.
       // Record the AS root on the credential (never a pinned hub URL) — b2 MED-2.
       serverTarget: baseUrl,
       transport,
@@ -160,13 +162,7 @@ interface PersistOutcome {
  */
 async function persistCredential(
   opts: LoginOptions,
-  credentials: {
-    accessToken?: string;
-    refreshToken?: string;
-    expiresAt?: string;
-    serverTarget?: string;
-    subject?: unknown;
-  },
+  credentials: CoreMachineCredentials,
 ): Promise<PersistOutcome> {
   if (opts.projectDir) {
     const dir = path.resolve(opts.projectDir);
@@ -187,7 +183,7 @@ async function persistCredential(
     refreshToken: credentials.refreshToken ?? undefined,
     expiresAt: credentials.expiresAt ?? undefined,
     serverTarget: credentials.serverTarget ?? undefined,
-    subject: typeof credentials.subject === 'string' ? credentials.subject : undefined,
+    subject: credentials.subject,
   };
   await store.write(localCreds);
   return { persistedTo: 'machine-store', credentialPath: store.credentialsPath };
