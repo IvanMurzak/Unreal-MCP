@@ -275,6 +275,44 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+      - name: Cleanup this job's build outputs (self-hosted disk hygiene)
+        # Self-hosted disk hygiene. This runner is SHARED with other repos' jobs and
+        # its RUNNER_TEMP + the persistent runner-local host project are NOT auto-pruned
+        # after a job, so per-run BuildPlugin packages and host logs accumulate across
+        # runs (a contributor to disk-full spikes during heavy concurrent CI). Remove
+        # ONLY THIS job's own regenerable outputs. Deliberately NOT touched:
+        #   • host DerivedDataCache / Intermediate / Binaries — a persistent
+        #     shared-for-speed cache; deleting it forces a full shader/host recompile
+        #     every run (§ guardrail: never prune a cache other runs rely on for speed).
+        #   • the host Plugins\UnrealMCP junction — owned by the self-heal step above.
+        #   • Docker — these UE jobs use no containers, and the daemon is shared with
+        #     the context-engine / ai-pipeline runners' ACTIVE jobs.
+        # Best-effort: a cleanup failure must NEVER red an otherwise-green run.
+        if: always()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          function Remove-Tree([string]$p) {
+            if ([string]::IsNullOrWhiteSpace($p) -or -not (Test-Path -LiteralPath $p)) { return }
+            Write-Host "Removing $p"
+            cmd /c rmdir /s /q "$p" 2>$null
+            if (Test-Path -LiteralPath $p) { Remove-Item -LiteralPath $p -Recurse -Force -ErrorAction SilentlyContinue }
+          }
+          # 1. This job's per-run BuildPlugin / report outputs under RUNNER_TEMP.
+          foreach ($name in @('UnrealMCP-Package','UnrealMCP-Dist-Package','UnrealMCP-Source-Package','AutomationReport')) {
+            Remove-Tree (Join-Path $env:RUNNER_TEMP $name)
+          }
+          # 2. This job's UBT logs under RUNNER_TEMP.
+          Get-ChildItem -Path $env:RUNNER_TEMP -Filter 'UBT-*.log' -File -ErrorAction SilentlyContinue |
+            Remove-Item -Force -ErrorAction SilentlyContinue
+          # 3. Host project transient logs/crashes ONLY (unbounded growers; NOT the
+          #    DDC / Intermediate / Binaries speed caches).
+          if (-not [string]::IsNullOrWhiteSpace($env:HOST_UPROJECT) -and (Test-Path -LiteralPath $env:HOST_UPROJECT)) {
+            $hostRoot = Split-Path -Parent $env:HOST_UPROJECT
+            foreach ($sub in @('Saved\Logs','Saved\Crashes')) { Remove-Tree (Join-Path $hostRoot $sub) }
+          }
+          Write-Host "Per-run cleanup done (DDC / Intermediate / Binaries and Docker intentionally preserved)."
+
   # (d) connection + tool smoke — the live RELAY path the Automation specs do NOT
   # cover: a real MCP client -> gamedev-mcp-server -> sidecar -> plugin -> editor
   # round-trip, exercised by the self-contained scripts/connection_smoke.py
@@ -405,3 +443,29 @@ jobs:
           # editor the script spawns.
           & $py scripts/connection_smoke.py --mode custom --project "$env:HOST_UPROJECT" --ue "$editorCmd" --server-port 18080 --timeout 240
           if ($LASTEXITCODE -ne 0) { throw "connection + tool smoke FAILED (exit $LASTEXITCODE)" }
+
+      - name: Cleanup this job's build outputs (self-hosted disk hygiene)
+        # See the plugin job's cleanup note. Removes ONLY this job's own regenerable
+        # RUNNER_TEMP package + host transient logs; preserves the host
+        # DDC / Intermediate / Binaries speed cache, the junction (self-heal above),
+        # and Docker (unused here; daemon shared with other runners).
+        if: always()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          function Remove-Tree([string]$p) {
+            if ([string]::IsNullOrWhiteSpace($p) -or -not (Test-Path -LiteralPath $p)) { return }
+            Write-Host "Removing $p"
+            cmd /c rmdir /s /q "$p" 2>$null
+            if (Test-Path -LiteralPath $p) { Remove-Item -LiteralPath $p -Recurse -Force -ErrorAction SilentlyContinue }
+          }
+          foreach ($name in @('UnrealMCP-Package','UnrealMCP-Dist-Package','UnrealMCP-Source-Package','AutomationReport')) {
+            Remove-Tree (Join-Path $env:RUNNER_TEMP $name)
+          }
+          Get-ChildItem -Path $env:RUNNER_TEMP -Filter 'UBT-*.log' -File -ErrorAction SilentlyContinue |
+            Remove-Item -Force -ErrorAction SilentlyContinue
+          if (-not [string]::IsNullOrWhiteSpace($env:HOST_UPROJECT) -and (Test-Path -LiteralPath $env:HOST_UPROJECT)) {
+            $hostRoot = Split-Path -Parent $env:HOST_UPROJECT
+            foreach ($sub in @('Saved\Logs','Saved\Crashes')) { Remove-Tree (Join-Path $hostRoot $sub) }
+          }
+          Write-Host "Per-run cleanup done (DDC / Intermediate / Binaries and Docker intentionally preserved)."
