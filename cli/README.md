@@ -93,7 +93,7 @@ unreal-mcp-cli status
 | `remove-plugin [path]` | Remove the installed plugin |
 | `install-extension <id> [path]` | Install a third-party Unreal-MCP **extension** plugin into `<project>/Plugins/<name>`, enable it + its gating engine plugins (e.g. `Niagara`) in the `.uproject`, and (re)compile (on next editor open, or now with `--build`). `--source <dir>` installs from a local copy (offline/CI); `--version <x.y.z>` overrides the catalog pin. Idempotent. See [Extensions](#extensions) |
 | `configure` | Write `UNREAL_MCP_*` into `<project>/.env` and gitignore `.env` (§8) |
-| `setup-mcp <agent>` | Write an MCP client config snippet (claude-code, cursor, vscode-copilot). With `--transport stdio` it also downloads the pinned shared [`gamedev-mcp-server`](https://github.com/IvanMurzak/GameDev-MCP-Server) release into `<project>/Intermediate/UnrealMCP/server/<rid>/` (skipped when `UNREAL_MCP_SERVER_PATH` points at a local build) |
+| `setup-mcp <agent>` | Write an MCP client config snippet (claude-code, cursor, vscode-copilot). Over the default `http` transport it points the agent at the **project-pinned** cloud URL `<base>/mcp/p/<pin>` (so the agent routes to *this* project's editor); pass `--no-pin` for the bare `<base>/mcp` URL. OAuth-capable clients get a credential-free, URL-only config and run their own device-code login. With `--transport stdio` it instead downloads the pinned shared [`gamedev-mcp-server`](https://github.com/IvanMurzak/GameDev-MCP-Server) release into `<project>/Intermediate/UnrealMCP/server/<rid>/` (skipped when `UNREAL_MCP_SERVER_PATH` points at a local build) |
 | `login` | OAuth device-code auth against ai-game.dev |
 | `status` | Report project + plugin + connection + live reachability |
 | `wait-for-ready` | Block until the project's MCP server responds to a ping |
@@ -221,7 +221,8 @@ agent can drive the Unreal Editor. Core support today: **Claude Code**, **Cursor
 </div>
 
 ```bash
-unreal-mcp-cli setup-mcp claude-code ./MyGame       # write the agent's MCP client config
+unreal-mcp-cli setup-mcp claude-code ./MyGame       # pinned <base>/mcp/p/<pin> URL (routes to this project)
+unreal-mcp-cli setup-mcp claude-code ./MyGame --no-pin   # bare, unpinned <base>/mcp URL instead
 unreal-mcp-cli setup-mcp cursor ./MyGame --transport stdio
 ```
 

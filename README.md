@@ -161,6 +161,8 @@ Updating in place must always leave you running the **new** code. The risk is UE
 
 Connection settings persist to `<Project>/Saved/Config/UnrealMcp/ai-game-developer-config.json` (`Saved/` is gitignored by every UE template, so tokens never land in VCS by default).
 
+> **Pinned MCP client URL.** `unreal-mcp-cli setup-mcp <agent>` writes an MCP client config that points at the **project-pinned** cloud URL `<base>/mcp/p/<pin>`, so the agent routes to **this** project's editor even when your account drives several. Pass `--no-pin` to write the bare `<base>/mcp` URL instead. The pin is a routing path segment only — the OAuth resource stays `<base>/mcp`, and OAuth-capable clients (Claude Code, Cursor, …) still run their own device-code login against it.
+
 > That's it. Ask your AI *"Spawn three cubes in a row and a point light above them"* and watch it happen. ✨
 
 ![AI Game Developer — Unreal MCP](https://github.com/IvanMurzak/Unreal-MCP/blob/main/docs/img/promo/hazzard-divider.svg?raw=true)
@@ -596,7 +598,7 @@ The plugin reads configuration with the precedence **process env → `<Project>/
 | `UNREAL_MCP_HOST` | Server URL (Custom mode), e.g. `http://localhost:<port>` |
 | `UNREAL_MCP_CLOUD_URL` | Cloud backend URL (defaults to ai-game.dev) |
 | `UNREAL_MCP_TOKEN` | Auth token (sidecar IPC token / server token). **Secret — never commit.** |
-| `UNREAL_MCP_AUTH_OPTION` | `none` or `required` (local server auth) |
+| `UNREAL_MCP_AUTH_OPTION` | `none` or `oauth` (local server auth) |
 | `UNREAL_MCP_KEEP_CONNECTED` | Persist/restore the connected state |
 | `UNREAL_MCP_TOOLS` | Enabled-tools override (whitelist; empty = no filter) |
 | `UNREAL_MCP_START_SERVER` | Parsed and persisted as the `startServer` config flag (Custom mode); auto-spawning the local `gamedev-mcp-server` is **planned, not yet wired** — no code consumes this flag today, so start the server yourself (e.g. `unreal-mcp-cli`). |
