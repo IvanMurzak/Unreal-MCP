@@ -1,6 +1,6 @@
 {
   "name": "unreal-mcp-cli",
-  "version": "0.9.2",
+  "version": "0.10.0",
   "description": "Cross-platform CLI tool for Unreal-MCP (Skills & MCP). Resolves and launches the Unreal editor with MCP connection env vars, runs MCP/system tools over HTTP, probes server health, configures AI agents (Claude Code, Cursor, VS Code, …), and manages the UnrealMCP plugin. Works with Claude Code, Cursor, Copilot, and any MCP client.",
   "type": "module",
   "main": "dist/lib.js",
