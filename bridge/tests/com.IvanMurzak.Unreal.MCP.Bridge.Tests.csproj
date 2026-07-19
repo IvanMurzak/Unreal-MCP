@@ -9,6 +9,21 @@
     <AssemblyName>Unreal-MCP-Bridge.Tests</AssemblyName>
   </PropertyGroup>
 
+  <!--
+    Mirror the bridge csproj's local-LIB toggle so `-p:UseLocalMcpPlugin=true` (a global build
+    property, applied to every project in the solution) also defines USE_LOCAL_MCP_PLUGIN here — the
+    guarded dual-hash tests (which reference primitives that exist ONLY in the source LIB, e.g.
+    ProjectIdentity.DeriveProjectPathHashV2 / ConnectionInstanceMetadata.ProjectPathHashLegacy from
+    MCP-Plugin-dotnet #165) compile ONLY in local-LIB mode and are excluded from the default (NuGet)
+    build that CI runs.
+  -->
+  <PropertyGroup>
+    <UseLocalMcpPlugin Condition="'$(UseLocalMcpPlugin)' == ''">false</UseLocalMcpPlugin>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(UseLocalMcpPlugin)' == 'true'">
+    <DefineConstants>$(DefineConstants);USE_LOCAL_MCP_PLUGIN</DefineConstants>
+  </PropertyGroup>
+
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
     <PackageReference Include="xunit" Version="2.9.2" />

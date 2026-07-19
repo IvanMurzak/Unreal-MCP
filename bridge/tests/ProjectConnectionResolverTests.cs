@@ -85,6 +85,59 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             Assert.StartsWith("https://ai-game.dev/mcp/hub/mcp-server?", url);
         }
 
+#if USE_LOCAL_MCP_PLUGIN
+        /// <summary>
+        /// Dual-hash transition (auth-fixes T3 / defect B5, MCP-Plugin-dotnet #165). Built against the
+        /// SOURCE LIB (<c>-p:UseLocalMcpPlugin=true</c>) the sidecar's instance metadata carries BOTH the v2
+        /// <c>projectPathHash</c> (separator-normalized) AND the v1 legacy hash, so a session pinned by an
+        /// OLD (v1) config still matches this NEW plugin. A Windows-style BACKSLASH root is used
+        /// deliberately: v2 converts <c>'\' -&gt; '/'</c> before hashing while v1 does not, so the two
+        /// hashes DIFFER — proving the legacy hash is emitted independently, not the v2 hash echoed.
+        /// (Excluded from the default NuGet build, whose pinned McpPlugin lacks these primitives; the pin
+        /// gains them in the release wave k3/R1.)
+        /// </summary>
+        [Fact]
+        public void Resolve_Metadata_EmitsBothV2AndLegacyHashes_ForWindowsRoot()
+        {
+            const string root = @"C:\Users\user\my-game";
+            var resolved = ProjectConnectionResolver.Resolve(root, instanceId: "inst-dual", machineName: "DESKTOP-X");
+
+            var meta = resolved.Metadata;
+            // Primary hash is the v2 (separator-normalized) hash; legacy is the v1 hash of the same root.
+            Assert.Equal(ProjectIdentity.DeriveProjectPathHashV2(root), meta.ProjectPathHash);
+            Assert.Equal(ProjectIdentity.DeriveProjectPathHash(root), meta.ProjectPathHashLegacy);
+            // On a backslash path the two normalizations diverge, so the hashes MUST differ (the whole point
+            // of the transition — kills the Windows v1/v2 pin mismatch, defect B5).
+            Assert.NotEqual(meta.ProjectPathHash, meta.ProjectPathHashLegacy);
+            Assert.Equal(64, meta.ProjectPathHash.Length);
+            Assert.Equal(64, meta.ProjectPathHashLegacy.Length);
+
+            // Both hashes travel as non-secret hub query params so the server can pin-match on EITHER.
+            var values = resolved.Metadata.ToQuery().Values;
+            Assert.Contains(meta.ProjectPathHash, values);
+            Assert.Contains(meta.ProjectPathHashLegacy, values);
+        }
+
+        /// <summary>
+        /// A POSIX root (no backslashes) hashes IDENTICALLY under v1 and v2 — the only v2 step is
+        /// <c>'\' -&gt; '/'</c> — so the legacy hash EQUALS the primary; it is still emitted, so an old
+        /// v1-pinned config matches. Locks that the dual-hash payload is present even when the two coincide.
+        /// </summary>
+        [Fact]
+        public void Resolve_Metadata_EmitsLegacyHash_EvenWhenEqualToV2_ForPosixRoot()
+        {
+            const string root = "/home/user/my-game";
+            var resolved = ProjectConnectionResolver.Resolve(root, instanceId: "inst-posix");
+
+            var meta = resolved.Metadata;
+            Assert.Equal(ProjectIdentity.DeriveProjectPathHashV2(root), meta.ProjectPathHash);
+            Assert.Equal(ProjectIdentity.DeriveProjectPathHash(root), meta.ProjectPathHashLegacy);
+            // No backslashes -> v1 and v2 normalization coincide -> identical hashes, both present.
+            Assert.Equal(meta.ProjectPathHash, meta.ProjectPathHashLegacy);
+            Assert.False(string.IsNullOrEmpty(meta.ProjectPathHashLegacy));
+        }
+#endif
+
         [Fact]
         public void ResolveProjectName_PrefersUProjectBasename_ThenDirectoryName()
         {
