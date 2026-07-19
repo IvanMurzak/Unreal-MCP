@@ -83,9 +83,45 @@
     PIPELINE.md "Freshness-bump carve-out"): 7.1.0 -> 7.1.1 is the patch that carries the i1 BUG-A
     token-mode validator fix. Published on nuget.org; ReflectorNet stays 5.3.2 (7.1.1 keeps that floor).
   -->
-  <ItemGroup>
+  <!--
+    Local-LIB dev toggle (auth-fixes f1b — parity with the GameDev-MCP-Server + Unity/Godot
+    `UseLocalMcpPlugin` pattern). Build with `-p:UseLocalMcpPlugin=true` to reference the
+    MCP-Plugin-dotnet + ReflectorNet SOURCE (checked out as sibling submodules in the `software`
+    workspace under `shared/`) instead of the published NuGet packages. This lets the sidecar compile
+    against UNPUBLISHED McpPlugin primitives — e.g. the dual-hash transition landed in
+    MCP-Plugin-dotnet #165 (`ProjectIdentity.DeriveProjectPathHashV2` +
+    `ConnectionInstanceMetadata.ProjectPathHashLegacy`) — BEFORE they ship on NuGet.
+
+    It DEFAULTS OFF: a plain `dotnet build` / `dotnet test` — and ALL CI — stays on the NuGet pins
+    below, so the switch NEVER affects the shipped binary or the PR gate. The NuGet pins advance to a
+    version carrying those primitives in the release wave (k3/R1), after which the switch is a pure
+    dev convenience. Override the source location with `-p:McpPluginRepoPath=<path>` /
+    `-p:ReflectorNetRepoPath=<path>`; the committed defaults are workspace-RELATIVE (never a
+    machine-absolute path), and are used ONLY when the switch is on.
+  -->
+  <PropertyGroup>
+    <UseLocalMcpPlugin Condition="'$(UseLocalMcpPlugin)' == ''">false</UseLocalMcpPlugin>
+    <McpPluginRepoPath Condition="'$(McpPluginRepoPath)' == ''">$(MSBuildThisFileDirectory)../../../../../shared/MCP-Plugin-dotnet</McpPluginRepoPath>
+    <ReflectorNetRepoPath Condition="'$(ReflectorNetRepoPath)' == ''">$(MSBuildThisFileDirectory)../../../../../shared/ReflectorNet</ReflectorNetRepoPath>
+  </PropertyGroup>
+
+  <!--
+    The local-LIB build defines USE_LOCAL_MCP_PLUGIN so source can `#if`-gate calls to primitives that
+    exist ONLY in the source LIB (not yet on the NuGet pin) — the default build compiles the
+    NuGet-only path, keeping CI green.
+  -->
+  <PropertyGroup Condition="'$(UseLocalMcpPlugin)' == 'true'">
+    <DefineConstants>$(DefineConstants);USE_LOCAL_MCP_PLUGIN</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(UseLocalMcpPlugin)' != 'true'">
     <PackageReference Include="com.IvanMurzak.ReflectorNet" Version="5.3.2" />
     <PackageReference Include="com.IvanMurzak.McpPlugin" Version="7.1.1" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(UseLocalMcpPlugin)' == 'true'">
+    <ProjectReference Include="$(McpPluginRepoPath)/McpPlugin/McpPlugin.csproj" />
+    <ProjectReference Include="$(ReflectorNetRepoPath)/ReflectorNet/ReflectorNet.csproj" />
   </ItemGroup>
 
   <!-- The xUnit suite exercises a couple of internal helpers (e.g. ProxyTool.CalculateTokenCount). -->

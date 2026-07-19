@@ -510,9 +510,22 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
                 var resolved = ProjectConnectionResolver.Resolve(projectPath!, _instanceId);
                 _config.InstanceMetadata = resolved.Metadata;
                 _config.ProjectRootPath = projectPath;
+                // Log the reported project root (the deterministic hash INPUT) alongside the resulting
+                // projectPathHash. This is the OQ1/k2 evidence the auth-fixes design wants captured per engine:
+                // the exact string each runtime feeds into ProjectIdentity, and the hash it derives (the
+                // handshake routing key). Non-secret — the credential travels separately in the Authorization header.
                 _logger?.LogInformation(
-                    "Resolved project identity for '{ProjectName}' (pin {Pin}, port {Port}{Override}, instance {InstanceId}); attaching instance metadata to the hub handshake.",
-                    resolved.ProjectName, resolved.Pin, resolved.Port, resolved.PortIsOverridden ? " [user override]" : string.Empty, _instanceId);
+                    "Resolved project identity for '{ProjectName}' (pin {Pin}, port {Port}{Override}, instance {InstanceId}); hash input '{HashInput}' -> projectPathHash {ProjectPathHash}; attaching instance metadata to the hub handshake.",
+                    resolved.ProjectName, resolved.Pin, resolved.Port, resolved.PortIsOverridden ? " [user override]" : string.Empty, _instanceId, projectPath, resolved.ProjectPathHash);
+#if USE_LOCAL_MCP_PLUGIN
+                // Dual-hash transition (auth-fixes T3 / defect B5, MCP-Plugin-dotnet #165): built against the
+                // source LIB, ConnectionInstanceMetadata carries the v1 legacy hash alongside the v2 primary so a
+                // session pinned by an OLD (v1) config still matches this plugin. Surfaced only in the local-LIB
+                // build; the NuGet pin gains this field in the release wave (k3/R1).
+                _logger?.LogInformation(
+                    "Dual-hash active: projectPathHashLegacy (v1) {ProjectPathHashLegacy} sent alongside the v2 projectPathHash.",
+                    resolved.Metadata.ProjectPathHashLegacy);
+#endif
             }
             catch (Exception ex)
             {
