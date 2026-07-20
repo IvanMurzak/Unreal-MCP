@@ -110,6 +110,74 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             });
         }
 
+        /// <summary>
+        /// Precedence level 2 end-to-end through the host (auth-fixes T1 / defect A): the §8 <c>config</c> message
+        /// carries the plugin's effective Custom-mode host, and a port the user typed into it becomes the port the
+        /// local server binds. Proves the wiring — <c>ApplyConnectionConfig</c> → <c>LocalBindHost</c> →
+        /// <c>ProjectConnectionResolver.Resolve</c> — not just the resolver, which is covered per-level in
+        /// <c>ProjectConnectionResolverTests</c>.
+        /// </summary>
+        [Fact]
+        public void BuildProjectConfigResult_TypedCustomHostPort_WinsOverDerivedPort()
+        {
+            using var host = BuildHost();
+            host.ApplyConnectionConfig(new JsonObject
+            {
+                ["mode"] = "Custom",
+                ["host"] = "http://localhost:27618",
+                ["cloudUrl"] = "https://ai-game.dev",
+            });
+
+            var result = host.BuildProjectConfigResult(Request("r-5", "/home/user/my-game"));
+
+            Assert.True(result.Ok);
+            Assert.Equal("34ea75f2", result.Pin);   // the PIN is untouched by the port precedence
+            Assert.Equal(27618, result.Port);
+            Assert.True(result.PortIsOverridden);   // a user choice, not the derivation
+            Assert.NotEqual(23940, result.Port);    // the golden derived port really was displaced
+        }
+
+        /// <summary>
+        /// Cloud mode contributes no level 2, mirroring the writer's <c>ConnectionMode.Local</c> gate: the written
+        /// URL keeps its authority verbatim and no local server runs, so the derived port stands even though the
+        /// same message carried a Custom host with an explicit port.
+        /// </summary>
+        [Fact]
+        public void BuildProjectConfigResult_CloudMode_IgnoresTypedCustomHostPort()
+        {
+            using var host = BuildHost();
+            host.ApplyConnectionConfig(new JsonObject
+            {
+                ["mode"] = "Cloud",
+                ["host"] = "http://localhost:27618",
+                ["cloudUrl"] = "https://ai-game.dev",
+            });
+
+            var result = host.BuildProjectConfigResult(Request("r-6", "/home/user/my-game"));
+
+            Assert.True(result.Ok);
+            Assert.Equal(23940, result.Port);
+            Assert.False(result.PortIsOverridden);
+        }
+
+        /// <summary>
+        /// A blank host clears level 2 back to the derivation — a user who empties the Host field gets the
+        /// per-project derived port, not a stale typed one from an earlier push.
+        /// </summary>
+        [Fact]
+        public void BuildProjectConfigResult_BlankCustomHost_FallsBackToDerivedPort()
+        {
+            using var host = BuildHost();
+            host.ApplyConnectionConfig(new JsonObject { ["mode"] = "Custom", ["host"] = "http://localhost:27618" });
+            host.ApplyConnectionConfig(new JsonObject { ["mode"] = "Custom", ["host"] = "" });
+
+            var result = host.BuildProjectConfigResult(Request("r-7", "/home/user/my-game"));
+
+            Assert.True(result.Ok);
+            Assert.Equal(23940, result.Port);
+            Assert.False(result.PortIsOverridden);
+        }
+
         [Fact]
         public void BuildProjectConfigResult_FallsBackToHandshakeRoot_WhenRequestOmitsPath()
         {
