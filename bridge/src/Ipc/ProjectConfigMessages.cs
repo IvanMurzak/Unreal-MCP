@@ -22,13 +22,15 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
     ///
     /// The plugin sends a <see cref="ProjectConfigRequestMessage"/> (carrying its project root); the sidecar
     /// resolves the identity via <c>ProjectConnectionResolver</c> (byte-for-byte <c>ProjectIdentity</c> golden-vector
-    /// parity + the project marker's <c>portOverride</c> precedence) and answers with a
-    /// <see cref="ProjectConfigResultMessage"/>. The marker port override always wins — it is baked into
-    /// <see cref="ProjectConfigResultMessage.Port"/> by the resolver, and surfaced via
-    /// <see cref="ProjectConfigResultMessage.PortIsOverridden"/> for logging.
+    /// parity for the pin) and answers with a <see cref="ProjectConfigResultMessage"/>.
+    /// <see cref="ProjectConfigResultMessage.Port"/> arrives fully resolved by the three-level precedence the shared
+    /// McpPlugin config writer also applies (auth-fixes T1 / defect A, owner ruling 2026-07-19): the project
+    /// marker's <c>portOverride</c>, else a port the user typed into the Custom-mode loopback host, else the
+    /// deterministic derivation. Whether the winner was a USER choice (either of the first two) rather than the
+    /// derivation is surfaced via <see cref="ProjectConfigResultMessage.PortIsOverridden"/> for logging.
     /// </summary>
 
-    /// <summary>plugin → sidecar: request the resolved {pin, derived port, serverTarget} for the plugin's project.</summary>
+    /// <summary>plugin → sidecar: request the resolved {pin, resolved port, serverTarget} for the plugin's project.</summary>
     public sealed class ProjectConfigRequestMessage
     {
         [JsonPropertyName("type")] public string Type { get; set; } = IpcProtocol.Type.ProjectConfig;
@@ -55,9 +57,9 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
         [JsonPropertyName("error")] public string? Error { get; set; }
         /// <summary>The routing pin — first 8 hex chars of the ProjectIdentity SHA-256 (D14/D15).</summary>
         [JsonPropertyName("pin")] public string? Pin { get; set; }
-        /// <summary>The deterministic per-project local-server port (marker <c>portOverride</c> if set, else the SHA-derived 20000–29999 port).</summary>
+        /// <summary>The resolved per-project local-server bind port: the marker <c>portOverride</c> if set, else a port explicitly typed into the Custom-mode loopback host, else the SHA-derived 20000–29999 port.</summary>
         [JsonPropertyName("port")] public int Port { get; set; }
-        /// <summary>Whether <see cref="Port"/> came from the marker's user <c>portOverride</c> (informational; the override is already applied to <see cref="Port"/>).</summary>
+        /// <summary>Whether <see cref="Port"/> is a USER choice — the marker's <c>portOverride</c> or a port typed into the loopback host — rather than the deterministic derivation (informational; the winner is already applied to <see cref="Port"/>).</summary>
         [JsonPropertyName("portIsOverridden")] public bool PortIsOverridden { get; set; }
         /// <summary>The enrolled server target (hosted vs local) from the project marker, or null when unenrolled.</summary>
         [JsonPropertyName("serverTarget")] public string? ServerTarget { get; set; }

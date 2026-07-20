@@ -203,6 +203,161 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             });
         }
 
+        // ── Local-server bind-port precedence (auth-fixes T1 / defect A, owner ruling 2026-07-19) ────────────
+        // The binder's OWN contract: marker portOverride (1) > explicit port typed into the loopback host (2) >
+        // deterministic derivation (3) — the same three levels the shared McpPlugin writer applies, so the port
+        // the local gamedev-mcp-server BINDS is the port the Configure button WRITES. These assert the resolver
+        // directly (given root + marker + host → port), so they hold on the CURRENT McpPlugin pin; the
+        // writer-vs-binder parity that needs 7.3.0 lives in LocalServerPortConsistencyTests.
+
+        /// <summary>
+        /// Level 2 beats level 3: with no marker, a port the user typed into the Custom-mode loopback host is what
+        /// the local server binds — NOT the hash-derived port. This is the behaviour reversal T1 delivers; before
+        /// it the resolver ignored the typed port to mirror the OLD writer.
+        /// </summary>
+        [Fact]
+        public void Resolve_TypedLoopbackHostPort_WinsOverDerivedPort()
+        {
+            const string root = "/home/user/my-game";   // golden vector → derived 23940
+            var resolved = ProjectConnectionResolver.Resolve(
+                root, instanceId: "inst-typed", localHost: "http://localhost:27618/mcp");
+
+            Assert.Equal(27618, resolved.Port);
+            Assert.Equal(LocalServerPortSource.TypedHost, resolved.PortSource);
+            Assert.True(resolved.PortIsOverridden);
+            // The typed port really displaced the derivation (not a coincidental match).
+            Assert.NotEqual(ProjectIdentity.DerivePort(root), resolved.Port);
+        }
+
+        /// <summary>
+        /// Level 1 beats level 2: a marker <c>portOverride</c> is a deliberate per-project pin, so it wins even
+        /// when the host ALSO carries an explicit port. Both are user choices; the marker is the more specific one.
+        /// </summary>
+        [Fact]
+        public void Resolve_MarkerPortOverride_WinsOverTypedLoopbackHostPort()
+        {
+            RunInTempDir(dir =>
+            {
+                // Step off the temp dir's own derived port so "override != derived" stays deterministic (same
+                // reasoning as LocalServerPortConsistencyTests — both live in the 20000–29999 band).
+                var derivedPort = ProjectIdentity.DerivePort(dir);
+                var overridePort = derivedPort == 26543 ? 26544 : 26543;
+                new ProjectMarker { PortOverride = overridePort }.Write(dir);
+
+                var resolved = ProjectConnectionResolver.Resolve(
+                    dir, instanceId: "inst-both", localHost: "http://localhost:27618/mcp");
+
+                Assert.Equal(overridePort, resolved.Port);
+                Assert.Equal(LocalServerPortSource.MarkerOverride, resolved.PortSource);
+                Assert.True(resolved.PortIsOverridden);
+                // Neither of the two losing levels was picked — so the ordering, not a value collision, decided.
+                Assert.NotEqual(27618, resolved.Port);
+                Assert.NotEqual(derivedPort, resolved.Port);
+            });
+        }
+
+        /// <summary>
+        /// Level 3 stands when the host carries NO explicit port. Load-bearing: <c>Uri.Port</c> would synthesise
+        /// the scheme default (80) here, which would make "no port typed" indistinguishable from "80 typed" and
+        /// bind 80 instead of the per-project derived port — which is why the resolver parses the RAW host string.
+        /// </summary>
+        [Fact]
+        public void Resolve_HostWithoutExplicitPort_FallsBackToDerivedPort()
+        {
+            const string root = "/home/user/my-game";
+            var resolved = ProjectConnectionResolver.Resolve(
+                root, instanceId: "inst-portless", localHost: "http://localhost/mcp");
+
+            Assert.Equal(23940, resolved.Port);
+            Assert.Equal(LocalServerPortSource.Derived, resolved.PortSource);
+            Assert.False(resolved.PortIsOverridden);
+            Assert.NotEqual(80, resolved.Port);
+        }
+
+        /// <summary>
+        /// A NON-loopback host contributes no level 2, mirroring the writer's
+        /// <c>ConnectionMode.Local &amp;&amp; uri.IsLoopback</c> gate: a hosted target keeps its authority verbatim
+        /// there and has no local server to bind here, so the derived port stands on both sides.
+        /// </summary>
+        [Fact]
+        public void Resolve_NonLoopbackHostPort_IsIgnored()
+        {
+            const string root = "/home/user/my-game";
+            var resolved = ProjectConnectionResolver.Resolve(
+                root, instanceId: "inst-remote", localHost: "https://mcp.example.com:9999/mcp");
+
+            Assert.Equal(23940, resolved.Port);
+            Assert.Equal(LocalServerPortSource.Derived, resolved.PortSource);
+        }
+
+        /// <summary>
+        /// An absent host (Cloud mode, or no config pushed yet) leaves the pre-T1 levels 1+3 behaviour exactly as
+        /// it was — the change is strictly additive for every caller that supplies no host.
+        /// </summary>
+        [Fact]
+        public void Resolve_NoHost_KeepsDerivedPort()
+        {
+            var resolved = ProjectConnectionResolver.Resolve("/home/user/my-game", instanceId: "inst-nohost");
+
+            Assert.Equal(23940, resolved.Port);
+            Assert.Equal(LocalServerPortSource.Derived, resolved.PortSource);
+        }
+
+        /// <summary>
+        /// The level-2 host parser, mirroring <c>AgentConfiguratorSettings.TryGetExplicitPort</c> + the writer's
+        /// loopback gate: which host strings yield a typed port at all. Anything that yields <c>null</c> falls
+        /// through to the derived port rather than binding something unusable.
+        /// </summary>
+        [Theory]
+        [InlineData("http://localhost:27618/mcp", 27618)]     // the canonical typed-port case
+        [InlineData("http://127.0.0.1:27618", 27618)]         // IPv4 loopback literal
+        [InlineData("http://[::1]:27618/mcp", 27618)]         // IPv6 literal — port follows the closing bracket
+        [InlineData("http://user:pass@localhost:27618", 27618)] // userinfo colon is not a port separator
+        [InlineData("http://LOCALHOST:27618", 27618)]         // loopback detection is case-insensitive
+        [InlineData("http://localhost/mcp", null)]            // no port typed — NOT the scheme default 80
+        [InlineData("http://localhost:/mcp", null)]           // empty port
+        [InlineData("http://localhost:abc/mcp", null)]        // non-numeric — rejected by Uri.TryCreate, see below
+        [InlineData("http://localhost:70000", null)]          // out of range — rejected by Uri.TryCreate, see below
+        [InlineData("http://localhost:0", null)]              // zero is not a bindable port
+        [InlineData("https://mcp.example.com:9999", null)]    // not loopback
+        [InlineData("localhost:27618", null)]                 // not an absolute URI
+        [InlineData("", null)]
+        [InlineData(null, null)]
+        public void TryGetExplicitLoopbackPort_ReadsOnlyAnExplicitLoopbackPort(string? host, int? expected)
+        {
+            Assert.Equal(expected, ProjectConnectionResolver.TryGetExplicitLoopbackPort(host));
+        }
+
+        /// <summary>
+        /// The raw-string parser DIRECTLY, because the loopback entry point above cannot reach all of it: it gates
+        /// on <c>Uri.TryCreate(..., Absolute)</c> first, and <c>Uri</c> rejects an out-of-range or non-numeric port
+        /// itself — so the <c>&gt; 0 &amp;&amp; &lt;= Consts.Hub.MaxPort</c> range guard and the
+        /// <c>NumberStyles.None</c> validator never execute through it, and the two rows above marked "rejected by
+        /// Uri.TryCreate" pass for that reason rather than by exercising the guards.
+        ///
+        /// <para>Those two guards are precisely the parts most likely to DRIFT from
+        /// <c>AgentConfiguratorSettings.TryGetExplicitPort</c>, which this method deliberately duplicates (the LIB
+        /// member is <c>internal</c> and ships in 7.3.0, while the binder must hold on the 7.2.0 pin). Leaving them
+        /// uncovered would defeat the point of mirroring the LIB step for step, so these rows mirror the LIB's own
+        /// parser rows — a divergence here means the binder and the writer would disagree on a port.</para>
+        /// </summary>
+        [Theory]
+        [InlineData("http://localhost:65535", 65535)]                  // upper bound is inclusive
+        [InlineData("http://localhost:65536", null)]                   // range guard — UNREACHABLE via the loopback gate
+        [InlineData("http://localhost:99999999999999999999", null)]    // int.TryParse overflow, not an exception
+        [InlineData("http://localhost:+80", null)]                     // NumberStyles.None rejects a sign
+        [InlineData("http://localhost:-80", null)]
+        [InlineData("http://localhost:8 0", null)]                     // ...and embedded whitespace
+        [InlineData("http://localhost:8080?x=1", 8080)]                // query terminates the authority
+        [InlineData("http://localhost:8080#frag", 8080)]               // ...as does a fragment
+        [InlineData("//localhost:8080", null)]                         // scheme-relative: authority is empty before the first '/'
+        [InlineData("localhost:8080", 8080)]                           // scheme-less IS parsed here; the loopback gate is what rejects it
+        [InlineData("http://[::1]", null)]                             // bracketed IPv6 address alone carries no port
+        public void TryGetExplicitPort_MirrorsTheLibParserIncludingItsGuards(string? host, int? expected)
+        {
+            Assert.Equal(expected, ProjectConnectionResolver.TryGetExplicitPort(host));
+        }
+
         [Fact]
         public void PersistServerTarget_BlankInputs_AreNoOps()
         {

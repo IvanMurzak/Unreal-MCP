@@ -180,6 +180,17 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             // for host/port drift. The engine-side reconciliation of the new config model — MapSettings token drop,
             // the 8080→derived-port migration — is a later mcp-authorize PR; this locks the adopted 7.0 behavior so
             // that later change is deliberate.)
+            //
+            // ⚠ CASCADE BLOCKER — this test's PREMISE is reversed by McpPlugin 7.3.0 (PRs #174/#176) and it WILL
+            // FAIL on the pin bump (verified locally against the LIB source: `dotnet test -p:UseLocalMcpPlugin=true`
+            // reds the trailing `Assert.True(d.IsConfigured)` below). Reason: 7.3.0's `AgentConfiguratorSettings.PinnedPort` inserts
+            // "an explicit port typed into the Host" BETWEEN the marker override and the derived port, so the
+            // written URL is no longer host-independent — the :12345 → :54321 drift below genuinely changes the
+            // desired URL and the on-disk entry becomes stale. Under 7.3.0 the CORRECT expectation is
+            // ReconfigureNeeded (which is what this scenario returned pre-7.0). Update this test IN THE SAME PR
+            // that bumps the pin — do not weaken it here; on the current 7.2.0 pin the assertions below are right.
+            // (Second Unreal-side blocker for the auth-fixes T1 cascade, alongside the pending
+            // LocalServerPortConsistencyTests.WrittenConfigPort_EqualsServerBindPort_OnDefaultLocalPath.)
             // Configure once so the entry lands on disk (project-local .mcp.json under the isolated temp _projectRoot)...
             var configure = _service.HandleConfigure(new AgentConfigureRequestMessage
             {

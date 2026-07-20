@@ -130,7 +130,18 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         private readonly HttpClient? _ownedHttpClient;
         // Whether the last applied connection config selected Cloud mode. Gates the §7 cloud-auth indicator:
         // a Custom-mode bearer is a LOCAL token, not a cloud authorization, so it must not light "Authorized".
-        private bool _isCloudMode;
+        // Volatile for the same reason as _customHost below: LocalBindHost gates on it from the project-config
+        // Task.Run worker while ApplyConnectionConfig writes it on the IPC reader thread.
+        private volatile bool _isCloudMode;
+
+        // The plugin's effective CUSTOM-mode host (FUnrealMcpConfig::ResolveCustomHost()) as last pushed over the
+        // §8 `config` message — the source of precedence level 2 for the local-server bind port (see
+        // ProjectConnectionResolver.Resolve). Deliberately NOT _config.Host: that carries the Cloud /mcp suffix,
+        // the --host argv fallback, and the McpPlugin default (Consts.Hub.DefaultHost = http://localhost:8080), so
+        // reading it would apply a "typed" port the plugin never sent. Null until the plugin actually pushes one,
+        // which keeps a config-less sidecar (and every test that drives the resolver directly) on levels 1+3.
+        // Volatile: written on the IPC reader thread, read from the project-config Task.Run worker.
+        private string? _customHost;
 
         // §7 connected-AI-agent roster (issue #109). The plugin's "AI agents" status row reflects
         // StatusMessage.AiAgents; before this it was hardcoded empty. The roster is the formatted label list
@@ -298,6 +309,16 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         /// <see cref="ConnectionConfig.InstanceMetadata"/>.
         /// </summary>
         internal ConnectionInstanceMetadata? InstanceMetadata => _config.InstanceMetadata;
+
+        /// <summary>
+        /// The host whose explicitly-typed port may claim precedence level 2 of the local-server bind port
+        /// (<see cref="ProjectConnectionResolver.Resolve"/>): the plugin's effective Custom-mode host, or
+        /// <c>null</c> in Cloud mode. The Cloud gate mirrors the writer, which only rewrites a loopback port for
+        /// <c>ConnectionMode.Local</c> — in Cloud mode the written URL keeps its authority verbatim and no local
+        /// server runs, so the derived port stands. The xUnit suite asserts this gate end-to-end through
+        /// <see cref="BuildProjectConfigResult"/>, so it needs no wider accessibility than <c>private</c>.
+        /// </summary>
+        private string? LocalBindHost => _isCloudMode ? null : Volatile.Read(ref _customHost);
 
         /// <summary>Test seam: the per-editor-session instance id (stable across reconnects) reported in the metadata.</summary>
         internal string InstanceId => _instanceId;
@@ -507,7 +528,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             Volatile.Write(ref _projectRootPath, projectPath);
             try
             {
-                var resolved = ProjectConnectionResolver.Resolve(projectPath!, _instanceId);
+                var resolved = ProjectConnectionResolver.Resolve(projectPath!, _instanceId, localHost: LocalBindHost);
                 _config.InstanceMetadata = resolved.Metadata;
                 _config.ProjectRootPath = projectPath;
                 // Log the reported project root (the deterministic hash INPUT) alongside the resulting
@@ -515,8 +536,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
                 // the exact string each runtime feeds into ProjectIdentity, and the hash it derives (the
                 // handshake routing key). Non-secret — the credential travels separately in the Authorization header.
                 _logger?.LogInformation(
-                    "Resolved project identity for '{ProjectName}' (pin {Pin}, port {Port}{Override}, instance {InstanceId}); hash input '{HashInput}' -> projectPathHash {ProjectPathHash}; attaching instance metadata to the hub handshake.",
-                    resolved.ProjectName, resolved.Pin, resolved.Port, resolved.PortIsOverridden ? " [user override]" : string.Empty, _instanceId, projectPath, resolved.ProjectPathHash);
+                    "Resolved project identity for '{ProjectName}' (pin {Pin}, port {Port} [{PortSource}], instance {InstanceId}); hash input '{HashInput}' -> projectPathHash {ProjectPathHash}; attaching instance metadata to the hub handshake.",
+                    resolved.ProjectName, resolved.Pin, resolved.Port, resolved.PortSource, _instanceId, projectPath, resolved.ProjectPathHash);
 #if USE_LOCAL_MCP_PLUGIN
                 // Dual-hash transition (auth-fixes T3 / defect B5, MCP-Plugin-dotnet #165): built against the
                 // source LIB, ConnectionInstanceMetadata carries the v1 legacy hash alongside the v2 primary so a
@@ -615,6 +636,18 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             // must not silently flip us out of Cloud.
             if (mode != null)
                 _isCloudMode = isCloud;
+
+            // Remember the raw Custom-mode host for the local-server bind-port precedence (level 2). Captured
+            // BEFORE the mode-aware selection below so the Cloud /mcp suffix never reaches the port parser. An
+            // absent key leaves the previous value (partial pushes); an explicit blank clears it back to derived.
+            //
+            // ⚠ KNOWN GAP — a host edited MID-SESSION updates this field but does not reach the C++ side until the
+            // next handshake, so the plugin's cached bind port can go stale while the writer emits the new port.
+            // Pre-T1 the resolved port depended only on immutable inputs, which is why caching it per handshake was
+            // correct. NOT fixed here: the two candidate fixes sit on opposite sides of the IPC boundary, so the
+            // choice is a design call — analysis and options are in PR #251 for owner sequencing.
+            if (host != null)
+                Volatile.Write(ref _customHost, string.IsNullOrWhiteSpace(host) ? null : host);
             var selected = isCloud ? cloudUrl : host;
             if (string.IsNullOrWhiteSpace(selected))
                 selected = isCloud ? host : cloudUrl;
@@ -822,9 +855,11 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         /// Resolve a <c>project-config</c> request into its terminal result. Prefers the project root the request
         /// carries (race-free — the C++ plugin knows <c>FPaths::ProjectDir()</c>); falls back to the handshake-reported
         /// root cached by <see cref="ApplyProjectIdentity"/>. Resolution goes through the SAME
-        /// <see cref="ProjectConnectionResolver.Resolve"/> PR 3 uses, so the returned pin/port carry byte-for-byte
-        /// <c>ProjectIdentity</c> golden-vector parity and the marker's <c>portOverride</c> precedence. Internal so the
-        /// bridge xUnit suite asserts the resolved DTO (parity + override) without the IPC send.
+        /// <see cref="ProjectConnectionResolver.Resolve"/> PR 3 uses, so the returned pin carries byte-for-byte
+        /// <c>ProjectIdentity</c> golden-vector parity and the port follows the full marker &gt; typed-host &gt;
+        /// derived precedence (auth-fixes T1 / defect A), fed the Custom-mode host via <see cref="LocalBindHost"/>.
+        /// Internal so the bridge xUnit suite asserts the resolved DTO (parity + each precedence level) without the
+        /// IPC send.
         /// </summary>
         internal ProjectConfigResultMessage BuildProjectConfigResult(JsonObject node)
         {
@@ -842,7 +877,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
                     Error = "No project path available to resolve the connection identity (handshake not applied and request carried none).",
                 };
 
-            var resolved = ProjectConnectionResolver.Resolve(projectRoot!, _instanceId);
+            var resolved = ProjectConnectionResolver.Resolve(projectRoot!, _instanceId, localHost: LocalBindHost);
             return new ProjectConfigResultMessage
             {
                 RequestId = request.RequestId,
