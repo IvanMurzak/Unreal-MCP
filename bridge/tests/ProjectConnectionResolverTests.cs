@@ -304,6 +304,113 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         }
 
         /// <summary>
+        /// The C++ plugin's built-in Custom-mode host, <c>FUnrealMcpConfig::DefaultCustomHost</c>
+        /// (<c>UnrealMcpRuntime/Private/Config/UnrealMcpConfig.cpp</c>). This is the EXACT string the sidecar
+        /// receives as the §8 <c>config</c> message's <c>host</c> on the default path — <c>ResolveCustomHost()</c>
+        /// substitutes the default for a blank entry and adds no suffix — so it reaches level 2 verbatim through
+        /// <c>SidecarHost.LocalBindHost</c>.
+        ///
+        /// <para><b>Cross-language lockstep (issue #252).</b> C# cannot read the C++ constant, so this literal
+        /// mirrors it. The C++ half of the lockstep is <c>UnrealMcpConfigSpec</c>'s "resolves a PORT-LESS host on
+        /// the default path" guard: it asserts the real constant declares no explicit port, which is the single
+        /// property the three facts below depend on. If someone re-adds a port to the C++ default, that spec reds
+        /// even though these C# facts (pinned to this literal) would not — which is exactly why both halves
+        /// exist.</para>
+        /// </summary>
+        private const string PluginDefaultCustomHost = "http://localhost";
+
+        /// <summary>
+        /// <b>The regression guard for issue #252.</b> On DEFAULT settings two different projects must resolve to
+        /// DIFFERENT local-server ports — the per-project isolation that lets two Unreal editors run side by side.
+        ///
+        /// <para>This is the test that would have caught the defect. The old default host was the hardcoded
+        /// <c>http://localhost:8080</c>, and once the owner-ruled precedence made a typed loopback port beat the
+        /// derivation, that baked-in 8080 read as "the user typed 8080" for EVERY project — collapsing them all
+        /// onto one port. Nothing asserted that the DEFAULT path still reached level 3; the per-level facts above
+        /// all pass their host in explicitly, so none of them exercises the plugin's own default.</para>
+        /// </summary>
+        [Fact]
+        public void Resolve_PluginDefaultHost_YieldsDifferentPortsPerProject()
+        {
+            // Two golden-vector roots with distinct derivations (23940 / 29310) — see ProjectIdentity_MatchesGoldenVectors.
+            const string rootA = "/home/user/my-game";
+            const string rootB = "C:\\Users\\user\\my-game";
+
+            var a = ProjectConnectionResolver.Resolve(rootA, instanceId: "inst-a", localHost: PluginDefaultCustomHost);
+            var b = ProjectConnectionResolver.Resolve(rootB, instanceId: "inst-b", localHost: PluginDefaultCustomHost);
+
+            // The isolation property itself.
+            Assert.NotEqual(a.Port, b.Port);
+
+            // …and it holds because level 3 decided, not by coincidence: each project got ITS OWN derivation.
+            Assert.Equal(LocalServerPortSource.Derived, a.PortSource);
+            Assert.Equal(LocalServerPortSource.Derived, b.PortSource);
+            Assert.Equal(23940, a.Port);
+            Assert.Equal(29310, b.Port);
+            Assert.False(a.PortIsOverridden);
+            Assert.False(b.PortIsOverridden);
+
+            // Neither collapsed onto the OLD hardcoded default's port (the exact regression), nor onto the scheme
+            // default 80 that a Uri.Port-based reading of a port-less host would have produced.
+            Assert.NotEqual(8080, a.Port);
+            Assert.NotEqual(8080, b.Port);
+            Assert.NotEqual(80, a.Port);
+            Assert.NotEqual(80, b.Port);
+        }
+
+        /// <summary>
+        /// The port-less default must not be mistaken for "typed ports are ignored again": a port the user
+        /// actually enters still wins level 2 over the derivation. Guards the owner ruling of 2026-07-19 ("the
+        /// Configure button must use exactly the port the user enters") against being undone by the #252 fix —
+        /// the DEFAULT expresses no opinion, a USER entry still does.
+        /// </summary>
+        [Fact]
+        public void Resolve_TypedPort_StillOutranksThePluginDefaultHost()
+        {
+            const string root = "/home/user/my-game";   // golden vector → derived 23940
+
+            var onDefault = ProjectConnectionResolver.Resolve(root, instanceId: "inst-def", localHost: PluginDefaultCustomHost);
+            var onTyped = ProjectConnectionResolver.Resolve(root, instanceId: "inst-typed", localHost: "http://localhost:27618");
+
+            Assert.Equal(LocalServerPortSource.Derived, onDefault.PortSource);
+            Assert.Equal(23940, onDefault.Port);
+
+            Assert.Equal(LocalServerPortSource.TypedHost, onTyped.PortSource);
+            Assert.Equal(27618, onTyped.Port);
+
+            // Same project, different host: the user's entry is what moved the port.
+            Assert.NotEqual(onDefault.Port, onTyped.Port);
+        }
+
+        /// <summary>
+        /// Level 1 still outranks BOTH: a marker <c>portOverride</c> wins even on the port-less default host, so
+        /// the #252 fix did not disturb the deliberate per-project pin. The complement of
+        /// <see cref="Resolve_MarkerPortOverride_WinsOverTypedLoopbackHostPort"/>, which pins level 1 over a TYPED
+        /// host; this pins it over the DEFAULT one, where level 2 is absent and the derivation is the rival.
+        /// </summary>
+        [Fact]
+        public void Resolve_MarkerPortOverride_StillWinsOnThePluginDefaultHost()
+        {
+            RunInTempDir(dir =>
+            {
+                // Step off this temp dir's own derived port so "override != derived" stays deterministic (both
+                // live in the 20000–29999 band — same reasoning as the sibling marker facts).
+                var derivedPort = ProjectIdentity.DerivePort(dir);
+                var overridePort = derivedPort == 26543 ? 26544 : 26543;
+                new ProjectMarker { PortOverride = overridePort }.Write(dir);
+
+                var resolved = ProjectConnectionResolver.Resolve(
+                    dir, instanceId: "inst-marker-default", localHost: PluginDefaultCustomHost);
+
+                Assert.Equal(overridePort, resolved.Port);
+                Assert.Equal(LocalServerPortSource.MarkerOverride, resolved.PortSource);
+                Assert.True(resolved.PortIsOverridden);
+                // The marker, not the derivation, decided — so level 1 really outranks the default path.
+                Assert.NotEqual(derivedPort, resolved.Port);
+            });
+        }
+
+        /// <summary>
         /// The level-2 host parser, mirroring <c>AgentConfiguratorSettings.TryGetExplicitPort</c> + the writer's
         /// loopback gate: which host strings yield a typed port at all. Anything that yields <c>null</c> falls
         /// through to the derived port rather than binding something unusable.
