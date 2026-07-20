@@ -21,9 +21,10 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
 {
     /// <summary>
     /// Proves the mcp-authorize PR 4 project-config IPC channel (design 04/06): the new message round-trips over the
-    /// NDJSON wire, and the sidecar resolves a <c>project-config</c> request into the derived {pin, port, serverTarget}
-    /// with byte-for-byte <see cref="ProjectIdentity"/> golden-vector parity and the project marker's
-    /// <c>portOverride</c> precedence — all without a live socket (mirrors <c>SidecarHostInstanceMetadataTests</c>).
+    /// NDJSON wire, and the sidecar resolves a <c>project-config</c> request into the resolved {pin, port, serverTarget}
+    /// with byte-for-byte <see cref="ProjectIdentity"/> golden-vector parity for the pin and the full
+    /// marker <c>portOverride</c> &gt; typed-host &gt; derived bind-port precedence (auth-fixes T1) for the port —
+    /// all without a live socket (mirrors <c>SidecarHostInstanceMetadataTests</c>).
     /// </summary>
     public class SidecarHostProjectConfigTests
     {

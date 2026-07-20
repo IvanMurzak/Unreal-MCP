@@ -87,6 +87,9 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         /// <summary>The engine identifier this sidecar reports in its instance metadata (design 04/06).</summary>
         internal const string Engine = "unreal";
 
+        /// <summary>The characters that terminate a URL's authority component (path / query / fragment).</summary>
+        private static readonly char[] AuthorityTerminators = { '/', '?', '#' };
+
         /// <summary>
         /// Resolve the full connection identity for <paramref name="projectRoot"/>. Reads the on-disk project
         /// marker (may be absent) for the port override + server target, resolves the local-server bind port,
@@ -159,16 +162,23 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         /// The port the user explicitly typed into <paramref name="host"/>, or <c>null</c> when there is none —
         /// precedence level 2 of <see cref="Resolve"/>. Returns <c>null</c> unless <paramref name="host"/> parses
         /// as an ABSOLUTE LOOPBACK URI, mirroring the writer's <c>ConnectionMode.Local &amp;&amp; uri.IsLoopback</c>
-        /// gate in <c>AgentConfiguratorSettings.BuildPinnedHttpUrl</c>: a hosted / non-loopback target keeps its
-        /// authority verbatim there and has no local server to bind here, so neither side rewrites its port.
+        /// gate in <c>AgentConfiguratorSettings.BuildPinnedHttpUrl</c>.
+        ///
+        /// <para>That gate mirrors where the writer REWRITES a port, which is not the same as what it EMITS. For a
+        /// Cloud / hosted target neither side acts — the writer keeps the authority verbatim and there is no local
+        /// server to bind. But for a Local-mode NON-loopback host (<c>http://0.0.0.0:8080</c>, a LAN IP) the writer
+        /// still emits that authority verbatim, port included, while this binder falls back to the derived port —
+        /// so the two names DIVERGE there. That asymmetry is pre-existing and deliberate (a non-loopback authority
+        /// is not something the local <c>gamedev-mcp-server</c> binds); it is spelled out here so the "mirrors the
+        /// writer" claim is not read as an exact equivalence.</para>
         /// </summary>
         internal static int? TryGetExplicitLoopbackPort(string? host)
         {
-            if (string.IsNullOrWhiteSpace(host))
-                return null;
+            // No null/blank guard needed: Uri.TryCreate already fails for null, "" and all-whitespace (pinned by
+            // this method's theory rows). TryGetExplicitPort keeps its own guard — that one mirrors the LIB.
             if (!Uri.TryCreate(host, UriKind.Absolute, out var uri) || !uri.IsLoopback)
                 return null;
-            return TryGetExplicitPort(host!);
+            return TryGetExplicitPort(host);
         }
 
         /// <summary>
@@ -181,6 +191,10 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         /// including the <c>&gt; 0 &amp;&amp; &lt;= Consts.Hub.MaxPort</c> guard, so an unusable port falls back to
         /// the derived one on BOTH sides rather than diverging. It is duplicated here rather than called because
         /// the LIB member is <c>internal</c> and ships in 7.3.0, while this binder must hold on the 7.2.0 pin.</para>
+        ///
+        /// <para>Test seam: <c>internal</c> rather than <c>private</c> because the loopback entry point cannot
+        /// reach all of this method's guards — see <c>TryGetExplicitPort_MirrorsTheLibParserIncludingItsGuards</c>
+        /// for why the suite drives it directly.</para>
         /// </summary>
         internal static int? TryGetExplicitPort(string? host)
         {
@@ -212,9 +226,6 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
 
             return port > 0 && port <= Consts.Hub.MaxPort ? port : (int?)null;
         }
-
-        /// <summary>The characters that terminate a URL's authority component (path / query / fragment).</summary>
-        private static readonly char[] AuthorityTerminators = { '/', '?', '#' };
 
         /// <summary>
         /// The human-facing project name: the basename (no extension) of the first top-level <c>*.uproject</c>

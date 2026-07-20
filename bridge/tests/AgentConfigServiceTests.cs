@@ -183,7 +183,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             //
             // ⚠ CASCADE BLOCKER — this test's PREMISE is reversed by McpPlugin 7.3.0 (PRs #174/#176) and it WILL
             // FAIL on the pin bump (verified locally against the LIB source: `dotnet test -p:UseLocalMcpPlugin=true`
-            // reds line 202, `IsConfigured` false). Reason: 7.3.0's `AgentConfiguratorSettings.PinnedPort` inserts
+            // reds the trailing `Assert.True(d.IsConfigured)` below). Reason: 7.3.0's `AgentConfiguratorSettings.PinnedPort` inserts
             // "an explicit port typed into the Host" BETWEEN the marker override and the derived port, so the
             // written URL is no longer host-independent — the :12345 → :54321 drift below genuinely changes the
             // desired URL and the on-disk entry becomes stale. Under 7.3.0 the CORRECT expectation is

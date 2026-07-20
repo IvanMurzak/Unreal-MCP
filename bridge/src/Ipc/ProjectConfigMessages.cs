@@ -30,7 +30,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
     /// derivation is surfaced via <see cref="ProjectConfigResultMessage.PortIsOverridden"/> for logging.
     /// </summary>
 
-    /// <summary>plugin → sidecar: request the resolved {pin, derived port, serverTarget} for the plugin's project.</summary>
+    /// <summary>plugin → sidecar: request the resolved {pin, resolved port, serverTarget} for the plugin's project.</summary>
     public sealed class ProjectConfigRequestMessage
     {
         [JsonPropertyName("type")] public string Type { get; set; } = IpcProtocol.Type.ProjectConfig;

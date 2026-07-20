@@ -220,7 +220,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         {
             const string root = "/home/user/my-game";   // golden vector → derived 23940
             var resolved = ProjectConnectionResolver.Resolve(
-                root, instanceId: "inst-typed", machineName: null, localHost: "http://localhost:27618/mcp");
+                root, instanceId: "inst-typed", localHost: "http://localhost:27618/mcp");
 
             Assert.Equal(27618, resolved.Port);
             Assert.Equal(LocalServerPortSource.TypedHost, resolved.PortSource);
@@ -245,7 +245,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
                 new ProjectMarker { PortOverride = overridePort }.Write(dir);
 
                 var resolved = ProjectConnectionResolver.Resolve(
-                    dir, instanceId: "inst-both", machineName: null, localHost: "http://localhost:27618/mcp");
+                    dir, instanceId: "inst-both", localHost: "http://localhost:27618/mcp");
 
                 Assert.Equal(overridePort, resolved.Port);
                 Assert.Equal(LocalServerPortSource.MarkerOverride, resolved.PortSource);
@@ -266,7 +266,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         {
             const string root = "/home/user/my-game";
             var resolved = ProjectConnectionResolver.Resolve(
-                root, instanceId: "inst-portless", machineName: null, localHost: "http://localhost/mcp");
+                root, instanceId: "inst-portless", localHost: "http://localhost/mcp");
 
             Assert.Equal(23940, resolved.Port);
             Assert.Equal(LocalServerPortSource.Derived, resolved.PortSource);
@@ -284,7 +284,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         {
             const string root = "/home/user/my-game";
             var resolved = ProjectConnectionResolver.Resolve(
-                root, instanceId: "inst-remote", machineName: null, localHost: "https://mcp.example.com:9999/mcp");
+                root, instanceId: "inst-remote", localHost: "https://mcp.example.com:9999/mcp");
 
             Assert.Equal(23940, resolved.Port);
             Assert.Equal(LocalServerPortSource.Derived, resolved.PortSource);
@@ -316,8 +316,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         [InlineData("http://LOCALHOST:27618", 27618)]         // loopback detection is case-insensitive
         [InlineData("http://localhost/mcp", null)]            // no port typed — NOT the scheme default 80
         [InlineData("http://localhost:/mcp", null)]           // empty port
-        [InlineData("http://localhost:abc/mcp", null)]        // non-numeric
-        [InlineData("http://localhost:70000", null)]          // out of range (> Consts.Hub.MaxPort)
+        [InlineData("http://localhost:abc/mcp", null)]        // non-numeric — rejected by Uri.TryCreate, see below
+        [InlineData("http://localhost:70000", null)]          // out of range — rejected by Uri.TryCreate, see below
         [InlineData("http://localhost:0", null)]              // zero is not a bindable port
         [InlineData("https://mcp.example.com:9999", null)]    // not loopback
         [InlineData("localhost:27618", null)]                 // not an absolute URI
@@ -326,6 +326,36 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         public void TryGetExplicitLoopbackPort_ReadsOnlyAnExplicitLoopbackPort(string? host, int? expected)
         {
             Assert.Equal(expected, ProjectConnectionResolver.TryGetExplicitLoopbackPort(host));
+        }
+
+        /// <summary>
+        /// The raw-string parser DIRECTLY, because the loopback entry point above cannot reach all of it: it gates
+        /// on <c>Uri.TryCreate(..., Absolute)</c> first, and <c>Uri</c> rejects an out-of-range or non-numeric port
+        /// itself — so the <c>&gt; 0 &amp;&amp; &lt;= Consts.Hub.MaxPort</c> range guard and the
+        /// <c>NumberStyles.None</c> validator never execute through it, and the two rows above marked "rejected by
+        /// Uri.TryCreate" pass for that reason rather than by exercising the guards.
+        ///
+        /// <para>Those two guards are precisely the parts most likely to DRIFT from
+        /// <c>AgentConfiguratorSettings.TryGetExplicitPort</c>, which this method deliberately duplicates (the LIB
+        /// member is <c>internal</c> and ships in 7.3.0, while the binder must hold on the 7.2.0 pin). Leaving them
+        /// uncovered would defeat the point of mirroring the LIB step for step, so these rows mirror the LIB's own
+        /// parser rows — a divergence here means the binder and the writer would disagree on a port.</para>
+        /// </summary>
+        [Theory]
+        [InlineData("http://localhost:65535", 65535)]                  // upper bound is inclusive
+        [InlineData("http://localhost:65536", null)]                   // range guard — UNREACHABLE via the loopback gate
+        [InlineData("http://localhost:99999999999999999999", null)]    // int.TryParse overflow, not an exception
+        [InlineData("http://localhost:+80", null)]                     // NumberStyles.None rejects a sign
+        [InlineData("http://localhost:-80", null)]
+        [InlineData("http://localhost:8 0", null)]                     // ...and embedded whitespace
+        [InlineData("http://localhost:8080?x=1", 8080)]                // query terminates the authority
+        [InlineData("http://localhost:8080#frag", 8080)]               // ...as does a fragment
+        [InlineData("//localhost:8080", null)]                         // scheme-relative: authority is empty before the first '/'
+        [InlineData("localhost:8080", 8080)]                           // scheme-less IS parsed here; the loopback gate is what rejects it
+        [InlineData("http://[::1]", null)]                             // bracketed IPv6 address alone carries no port
+        public void TryGetExplicitPort_MirrorsTheLibParserIncludingItsGuards(string? host, int? expected)
+        {
+            Assert.Equal(expected, ProjectConnectionResolver.TryGetExplicitPort(host));
         }
 
         [Fact]

@@ -76,7 +76,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         /// host the writer gets — the sidecar reads it off the §8 <c>config</c> message (<c>SidecarHost.LocalBindHost</c>),
         /// so passing it here is what makes this a like-for-like parity check rather than two different questions.</summary>
         private static int ServerBindPort(string projectRoot, string host = RawCustomHost) =>
-            ProjectConnectionResolver.Resolve(projectRoot, instanceId: "editor-session", machineName: null, localHost: host).Port;
+            ProjectConnectionResolver.Resolve(projectRoot, instanceId: "editor-session", localHost: host).Port;
 
         [Fact(Skip = "Needs McpPlugin 7.3.0 (PRs #174/#176). The binder now honours the typed loopback port (8080 " +
                      "from the hardcoded DefaultCustomHost), but the pinned 7.2.0 writer still overwrites it with " +
