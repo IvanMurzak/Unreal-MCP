@@ -140,6 +140,56 @@ void FUnrealMcpConfigSpec::Define()
 			TestEqual(TEXT("default cloud base"), Config.ResolveCloudBaseUrl(), FString(FUnrealMcpConfig::DefaultCloudBaseUrl));
 		});
 
+		It("resolves a PORT-LESS host on the default path, so the derived per-project port survives", [this]()
+		{
+			// Issue #252 — the C++ half of a cross-language lockstep, and the guard that would have caught
+			// the regression at its source. The Custom-mode host is not merely a display string: the sidecar
+			// forwards it as precedence LEVEL 2 of the local-server bind port (SidecarHost.LocalBindHost →
+			// ProjectConnectionResolver.TryGetExplicitLoopbackPort). Because ResolveCustomHost() substitutes
+			// DefaultCustomHost for a blank entry, a port baked into that default is indistinguishable from a
+			// port the user actually TYPED — so it would win level 2 for EVERY project and collapse them all
+			// onto one port. Asserting the RESOLVED default-path host (not just the constant) is what makes
+			// this end-to-end: it is the exact string the sidecar receives over the §8 `config` message.
+			// The bridge xUnit suite asserts the other half (a port-less loopback host ⇒ per-project derived
+			// ports that DIFFER); this pins the source of truth those vectors mirror.
+			auto DeclaresExplicitPort = [](const FString& Url) -> bool
+			{
+				FString Authority = Url;
+				FString Scheme;
+				FString Remainder;
+				if (Url.Split(TEXT("://"), &Scheme, &Remainder))
+					Authority = Remainder;
+				// Drop any path/query so a colon beyond the authority can never read as a port.
+				int32 TerminatorIndex = INDEX_NONE;
+				for (int32 Index = 0; Index < Authority.Len(); ++Index)
+				{
+					const TCHAR Ch = Authority[Index];
+					if (Ch == TEXT('/') || Ch == TEXT('?') || Ch == TEXT('#'))
+					{
+						TerminatorIndex = Index;
+						break;
+					}
+				}
+				if (TerminatorIndex != INDEX_NONE)
+					Authority.LeftInline(TerminatorIndex);
+				int32 ColonIndex = INDEX_NONE;
+				return Authority.FindChar(TEXT(':'), ColonIndex);
+			};
+
+			TestFalse(TEXT("DefaultCustomHost declares no explicit port"),
+				DeclaresExplicitPort(FString(FUnrealMcpConfig::DefaultCustomHost)));
+
+			FUnrealMcpConfig Config; // fresh, no disk, no overrides — the default path
+			TestFalse(TEXT("a fresh config resolves to a port-less host"),
+				DeclaresExplicitPort(Config.ResolveCustomHost()));
+
+			// A genuinely user-typed port is still carried through verbatim — the owner ruling of 2026-07-19
+			// ("the Configure button must use exactly the port the user enters") is preserved, not undone.
+			Config.CustomHost = TEXT("http://localhost:27618");
+			TestTrue(TEXT("a user-typed port survives resolution"), DeclaresExplicitPort(Config.ResolveCustomHost()));
+			TestEqual(TEXT("…verbatim"), Config.ResolveCustomHost(), FString(TEXT("http://localhost:27618")));
+		});
+
 		It("file value beats the default", [this]()
 		{
 			TSharedPtr<FJsonObject> Disk = MakeShared<FJsonObject>();

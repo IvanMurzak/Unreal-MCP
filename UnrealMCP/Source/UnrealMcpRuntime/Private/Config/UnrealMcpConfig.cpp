@@ -25,7 +25,19 @@ const TCHAR* FUnrealMcpConfig::EnvBridgePath     = TEXT("UNREAL_MCP_BRIDGE_PATH"
 
 // --- Defaults. ---
 const TCHAR* FUnrealMcpConfig::DefaultCloudBaseUrl = TEXT("https://ai-game.dev");
-const TCHAR* FUnrealMcpConfig::DefaultCustomHost   = TEXT("http://localhost:8080");
+// Deliberately PORT-LESS (issue #252). The Custom-mode host is not just a display string: the sidecar
+// forwards it as precedence level 2 of the local-server bind port (SidecarHost.LocalBindHost →
+// ProjectConnectionResolver.TryGetExplicitLoopbackPort — "an explicit port the USER typed into Host"
+// beats the deterministic per-project derivation, per the owner ruling of 2026-07-19). Because
+// ResolveCustomHost() substitutes this default for a blank entry, ANY port written here is
+// indistinguishable from a port the user actually typed — so the old "http://localhost:8080" made every
+// project on default settings claim 8080 and collide with every other open editor. Carrying no port at
+// all is what keeps "the user expressed no opinion" representable, letting level 3 (the ProjectIdentity
+// v2 derivation, 20000–29999) supply a per-project port again. A typed port still wins: it arrives in
+// CustomHost and is parsed off the RAW string, never synthesised from the scheme (a port-less host is
+// NOT read as 80). Keep it port-less — see UnrealMcpConfigSpec's "no explicit port" guard, which is the
+// C++ half of that cross-language lockstep.
+const TCHAR* FUnrealMcpConfig::DefaultCustomHost   = TEXT("http://localhost");
 const TCHAR* FUnrealMcpConfig::DefaultLogLevel     = TEXT("Info");
 const TCHAR* FUnrealMcpConfig::DefaultTransport    = TEXT("http");
 

@@ -85,7 +85,9 @@ public:
 
 	// --- Defaults. ---
 	static UNREALMCPRUNTIME_API const TCHAR* DefaultCloudBaseUrl; // https://ai-game.dev
-	static UNREALMCPRUNTIME_API const TCHAR* DefaultCustomHost;   // http://localhost:8080
+	// http://localhost — deliberately PORT-LESS so the local-server bind port falls through to the
+	// deterministic per-project derivation (issue #252); see the definition's comment.
+	static UNREALMCPRUNTIME_API const TCHAR* DefaultCustomHost;
 	static UNREALMCPRUNTIME_API const TCHAR* DefaultLogLevel;     // Info
 	static UNREALMCPRUNTIME_API const TCHAR* DefaultTransport;    // http
 
