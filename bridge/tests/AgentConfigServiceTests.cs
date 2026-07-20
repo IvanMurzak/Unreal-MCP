@@ -166,7 +166,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         }
 
         [Fact]
-        public void Status_ConnectionSettingDrift_StaysConfigured_Under7xDeterministicUrl()
+        public void Status_ConnectionSettingDrift_NeedsReconfigure_Under73xTypedPortUrl()
         {
             // McpPlugin 7.0 (mcp-authorize) made the written HTTP config URL project-DETERMINISTIC — a project pin
             // + a derived per-project port (SHA256(projectRoot) → 20000–29999) and NO embedded token — so the raw
@@ -181,16 +181,11 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             // the 8080→derived-port migration — is a later mcp-authorize PR; this locks the adopted 7.0 behavior so
             // that later change is deliberate.)
             //
-            // ⚠ CASCADE BLOCKER — this test's PREMISE is reversed by McpPlugin 7.3.0 (PRs #174/#176) and it WILL
-            // FAIL on the pin bump (verified locally against the LIB source: `dotnet test -p:UseLocalMcpPlugin=true`
-            // reds the trailing `Assert.True(d.IsConfigured)` below). Reason: 7.3.0's `AgentConfiguratorSettings.PinnedPort` inserts
-            // "an explicit port typed into the Host" BETWEEN the marker override and the derived port, so the
-            // written URL is no longer host-independent — the :12345 → :54321 drift below genuinely changes the
-            // desired URL and the on-disk entry becomes stale. Under 7.3.0 the CORRECT expectation is
-            // ReconfigureNeeded (which is what this scenario returned pre-7.0). Update this test IN THE SAME PR
-            // that bumps the pin — do not weaken it here; on the current 7.2.0 pin the assertions below are right.
-            // (Second Unreal-side blocker for the auth-fixes T1 cascade, alongside the pending
-            // LocalServerPortConsistencyTests.WrittenConfigPort_EqualsServerBindPort_OnDefaultLocalPath.)
+            // RESOLVED (McpPlugin 7.3.0, PRs #174/#176): `AgentConfiguratorSettings.PinnedPort` inserts "an explicit
+            // port typed into the Host" BETWEEN the marker override and the derived port, so the written URL is no
+            // longer host-independent. A host/port drift therefore makes the on-disk entry genuinely stale again and
+            // the correct status is ReconfigureNeeded -- the pre-7.0 behaviour, restored deliberately by owner ruling
+            // (the user's typed port must be honoured). This test now locks THAT contract.
             // Configure once so the entry lands on disk (project-local .mcp.json under the isolated temp _projectRoot)...
             var configure = _service.HandleConfigure(new AgentConfigureRequestMessage
             {
@@ -200,8 +195,9 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             Assert.True(configure.Ok);
             Assert.True(configure.Description!.IsConfigured);
 
-            // ...then describe with a DIFFERENT Host: under 7.0 the entry is still detected AND still matches (the URL
-            // derives from the project, not this host), so it stays Configured with no reconfiguration alert.
+            // ...then describe with a DIFFERENT Host. Under 7.3.0 the typed loopback port participates in the
+            // written URL (PinnedPort precedence level 2), so :12345 -> :54321 genuinely changes the desired URL
+            // and the on-disk entry IS now stale -> ReconfigureNeeded, exactly as this scenario behaved pre-7.0.
             var result = _service.HandleStatus(new AgentStatusRequestMessage
             {
                 RequestId = "r2c", AgentId = "claude-code", Transport = "streamableHttp",
@@ -210,9 +206,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
 
             Assert.True(result.Ok);
             var d = result.Description!;
-            Assert.True(d.IsConfigured);
-            Assert.Equal("Configured", d.Status);
-            Assert.DoesNotContain(d.Sections, s => s.Heading == "Reconfiguration Required");
+            Assert.Equal("ReconfigureNeeded", d.Status);
+            Assert.Contains(d.Sections, s => s.Heading == "Reconfiguration Required");
         }
 
         [Fact]

@@ -78,11 +78,10 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         private static int ServerBindPort(string projectRoot, string host = RawCustomHost) =>
             ProjectConnectionResolver.Resolve(projectRoot, instanceId: "editor-session", localHost: host).Port;
 
-        [Fact(Skip = "Needs McpPlugin 7.3.0 (PRs #174/#176). The binder now honours the typed loopback port (8080 " +
-                     "from the hardcoded DefaultCustomHost), but the pinned 7.2.0 writer still overwrites it with " +
-                     "the derived port, so the two legitimately disagree until the bridge csproj pin advances. " +
-                     "Un-skip in the same PR that bumps com.IvanMurzak.McpPlugin to 7.3.0 — no assertion change " +
-                     "required, it is the pin that makes it pass.")]
+        // Un-skipped by the McpPlugin 7.3.0 pin bump (PRs #174/#176), exactly as the skip note prescribed:
+        // the pinned writer now honours the typed loopback port, so writer and binder agree again. No assertion
+        // was changed -- the pin is what makes this pass.
+        [Fact]
         public void WrittenConfigPort_EqualsServerBindPort_OnDefaultLocalPath()
         {
             // Canonical golden vector (/home/user/my-game → 23940) — no project marker, and the default host
