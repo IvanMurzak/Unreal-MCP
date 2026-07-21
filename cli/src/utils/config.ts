@@ -15,7 +15,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { readEnvFile } from './env-file.js';
-import { generatePortFromDirectory } from './port.js';
+import { generatePortFromDirectory, isAbsoluteLoopbackHost, resolveLocalBindPort } from './port.js';
+import { readProjectMarker } from './project-marker.js';
 
 export interface ResolvedConnection {
   /** Base URL with no trailing slash. */
@@ -85,11 +86,19 @@ export function resolveConnection(opts: ResolveConnectionOptions): ResolvedConne
   if (pluginConfig) {
     const fromConfig = resolveConnectionFromPluginConfig(pluginConfig);
     if (fromConfig.url) {
-      return { url: stripTrailingSlash(fromConfig.url), token: token ?? fromConfig.token, source: 'plugin-config' };
+      return {
+        url: resolveCustomHostUrl(fromConfig.url, projectDir),
+        token: token ?? fromConfig.token,
+        source: 'plugin-config',
+      };
     }
   }
 
-  const port = generatePortFromDirectory(projectDir);
+  // No host anywhere → deterministic localhost fallback, still honoring a marker
+  // portOverride (level 1) over the v1 derivation (level 3); there is no host so the
+  // typed-host level 2 is N/A. Mirrors the binder's default-host resolution.
+  const marker = readProjectMarker(projectDir);
+  const { port } = resolveLocalBindPort({ projectDir, markerPortOverride: marker?.portOverride });
   return { url: `http://localhost:${port}`, token, source: 'deterministic-port' };
 }
 
@@ -102,6 +111,31 @@ function nonEmpty(value: string | undefined): string | undefined {
 
 export function stripTrailingSlash(url: string): string {
   return url.trim().replace(/\/+$/, '');
+}
+
+/**
+ * Resolve the effective connection URL for a Custom-mode plugin-config `host` (defect D
+ * / D21). A LOOPBACK host is pointed at the port the sidecar actually binds via the
+ * three-level precedence (marker `portOverride` → typed loopback port → v1 derivation),
+ * so a port-less `http://localhost` (or a legacy default `:8080`) no longer connects to
+ * the wrong port. A NON-loopback host (a LAN IP / remote target) is used verbatim — the
+ * local `gamedev-mcp-server` binds no such authority, mirroring the bridge binder's
+ * deliberate levels-1+3-only divergence for non-loopback hosts. Pure given the marker on
+ * disk.
+ */
+function resolveCustomHostUrl(host: string, projectDir: string): string {
+  const stripped = stripTrailingSlash(host);
+  if (!isAbsoluteLoopbackHost(stripped)) return stripped;
+
+  const marker = readProjectMarker(projectDir);
+  const { port } = resolveLocalBindPort({ projectDir, host: stripped, markerPortOverride: marker?.portOverride });
+
+  // Rebuild <scheme>://<host>:<port>, preserving any path/query the host carried. Building
+  // the authority by hand (rather than URL.port =) keeps the resolved port explicit even
+  // when it equals a scheme default that WHATWG would otherwise elide.
+  const url = new URL(stripped);
+  const authoritativePath = url.pathname === '/' ? '' : url.pathname;
+  return stripTrailingSlash(`${url.protocol}//${url.hostname}:${port}${authoritativePath}${url.search}`);
 }
 
 // --- Plugin on-disk JSON config (issue #71) -------------------------------
@@ -129,9 +163,9 @@ export interface PluginConnectionConfig {
   cloudToken?: string;
   /** Custom-mode host (full base URL). */
   host?: string;
-  /** Bearer token for Custom mode (only on the wire when authOption is Required). */
+  /** Bearer token for Custom mode (only on the wire when authOption resolves to Token). */
   token?: string;
-  /** "Required" | "None" — Custom-mode auth gate for `token`. */
+  /** "None" | "Token" | "Oauth" (legacy "Required" → Token) — Custom-mode auth gate for `token`. */
   authOption?: string;
 }
 
@@ -178,8 +212,10 @@ export function isCloudMode(config: PluginConnectionConfig): boolean {
  * Resolve a `{ url, token }` from a plugin config, mirroring the plugin's
  * routing (FUnrealMcpConfig):
  *   - Cloud  -> url = appendMcp(cloudUrl), token = cloudToken
- *   - Custom -> url = host,                token = (authOption Required ? token : undefined)
- * `url` may be undefined when the relevant field is blank.
+ *   - Custom -> url = host,                token = (authOption resolves to Token ? token : undefined)
+ * `url` may be undefined when the relevant field is blank. The Custom `url` here is the RAW
+ * host; loopback port resolution (defect D) happens in `resolveConnection`, which has the
+ * project dir + marker to apply the three-level bind-port precedence.
  */
 export function resolveConnectionFromPluginConfig(config: PluginConnectionConfig): {
   url: string | undefined;
@@ -192,13 +228,30 @@ export function resolveConnectionFromPluginConfig(config: PluginConnectionConfig
       token: nonEmpty(config.cloudToken),
     };
   }
-  // Custom mode: the token only goes on the wire when auth is Required (mirrors
-  // FUnrealMcpConfig::ResolveEffectiveToken).
-  const authRequired = (config.authOption ?? '').trim().toLowerCase() === 'required';
+  // Custom mode: the token only goes on the wire in `Token` auth mode — `None`
+  // (anonymous/loopback) and `Oauth` (native OAuth, no static bearer) send NOTHING,
+  // regardless of any stored token (mirrors FUnrealMcpConfig::ResolveEffectiveToken).
   return {
     url: nonEmpty(config.host),
-    token: authRequired ? nonEmpty(config.token) : undefined,
+    token: parseCustomAuthMode(config.authOption) === 'token' ? nonEmpty(config.token) : undefined,
   };
+}
+
+/** The Custom-mode auth modes the plugin persists (PascalCase on disk, matched case-insensitively). */
+export type CustomAuthMode = 'none' | 'token' | 'oauth';
+
+/**
+ * Map a persisted `authOption` string to the Custom-mode auth mode, mirroring the plugin's
+ * `FUnrealMcpConfig::TryParseAuthOption` (`UnrealMcpConfig.cpp:625-651`): `None`/`Token`/`Oauth`
+ * plus the g5 migration `Required` → `Token` (the retired shared-secret gate). Anything absent
+ * or unrecognized resolves to `none` — so no bearer is ever sent for a config the plugin did not
+ * mark as Token. Replaces the retired `authOption === 'required'` gate (defect C). Pure.
+ */
+export function parseCustomAuthMode(raw: string | undefined): CustomAuthMode {
+  const v = (raw ?? '').trim().toLowerCase();
+  if (v === 'token' || v === 'required') return 'token'; // 'required' is the legacy alias for Token (g5 migration)
+  if (v === 'oauth') return 'oauth';
+  return 'none';
 }
 
 /**
