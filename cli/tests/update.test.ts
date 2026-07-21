@@ -5,6 +5,7 @@ import { zipSync, strToU8 } from 'fflate';
 import { update, readPluginVersion } from '../src/lib/update.js';
 import { PACKAGE_VERSION } from '../src/version.js';
 import { makeTempDir, rmTempDir } from './helpers.js';
+import { makeMinisignKeypair, type MinisignTestKeypair } from './minisign-fixture.js';
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -22,10 +23,14 @@ function makeSource(version: string): string {
   return dir;
 }
 
-function zipResponse(entries: Record<string, Uint8Array>, calls?: string[]): typeof fetch {
+function zipResponse(entries: Record<string, Uint8Array>, kp: MinisignTestKeypair, calls?: string[]): typeof fetch {
   const bytes = zipSync(entries);
+  const sigText = kp.sign(bytes);
   return (async (url: string) => {
     calls?.push(url);
+    if (url.endsWith('.minisig')) {
+      return { ok: true, status: 200, statusText: 'OK', text: async () => sigText } as unknown as Response;
+    }
     return {
       ok: true,
       status: 200,
@@ -151,14 +156,17 @@ describe('update', () => {
     const project = tmp();
     await update({ projectDir: project, pluginSourceDir: makeSource('0.1.0') });
     const calls: string[] = [];
+    const kp = makeMinisignKeypair();
     const r = await update({
       projectDir: project,
+      publicKeyOverride: kp.publicKeyLine,
       fetchImpl: zipResponse(
         {
           'UnrealMCP/UnrealMCP.uplugin': strToU8(JSON.stringify({ VersionName: PACKAGE_VERSION, Installed: false })),
           'UnrealMCP/Source/marker.txt': strToU8('downloaded'),
           'UnrealMCP/Source/ThirdParty/UnrealMcpBridge/win-x64/unreal-mcp-bridge.exe': strToU8('BRIDGE'),
         },
+        kp,
         calls,
       ),
     });

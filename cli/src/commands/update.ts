@@ -6,6 +6,7 @@ export const updateCommand = new Command('update')
   .description('Update the UnrealMCP plugin installed in a project from a local source or the matching GitHub release')
   .argument('[path]', 'Unreal project directory (defaults to cwd)')
   .option('--plugin-source <dir>', 'UnrealMCP plugin source dir (offline / CI / dev override)')
+  .option('--version <v>', 'Plugin-source release version to download (defaults to this CLI version)')
   .option('--force', 'Re-install even when versions match')
   .option(
     '--no-clean',
@@ -14,7 +15,7 @@ export const updateCommand = new Command('update')
   .action(
     async (
       pathArg: string | undefined,
-      opts: { pluginSource?: string; force?: boolean; clean?: boolean },
+      opts: { pluginSource?: string; version?: string; force?: boolean; clean?: boolean },
     ) => {
       const projectDir = pathArg ?? process.cwd();
       const spinner = ui.startSpinner('Checking installed UnrealMCP plugin...');
@@ -22,6 +23,7 @@ export const updateCommand = new Command('update')
       const result = await update({
         projectDir,
         pluginSourceDir: opts.pluginSource,
+        version: opts.version,
         force: opts.force,
         noClean: opts.clean === false,
         onProgress: (event) => {

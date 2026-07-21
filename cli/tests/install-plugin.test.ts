@@ -5,6 +5,7 @@ import { zipSync, strToU8 } from 'fflate';
 import { installPlugin, removePlugin } from '../src/lib/install-plugin.js';
 import { PACKAGE_VERSION } from '../src/version.js';
 import { makeTempDir, rmTempDir, writeUProject } from './helpers.js';
+import { makeMinisignKeypair, type MinisignTestKeypair } from './minisign-fixture.js';
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -24,15 +25,25 @@ function makePluginSource(): string {
   return dir;
 }
 
-function zipResponse(entries: Record<string, Uint8Array>): typeof fetch {
+/**
+ * URL-aware fake fetch for the plugin-source download path: serves the zip bytes
+ * for the zip URL and a valid `.minisig` (signed over those exact bytes) for the
+ * signature URL, so the D12 verify-before-extract gate passes.
+ */
+function zipAndSigResponse(entries: Record<string, Uint8Array>, kp: MinisignTestKeypair): typeof fetch {
   const bytes = zipSync(entries);
-  return (async () =>
-    ({
+  const sigText = kp.sign(bytes);
+  return (async (url: string) => {
+    if (url.endsWith('.minisig')) {
+      return { ok: true, status: 200, statusText: 'OK', text: async () => sigText } as unknown as Response;
+    }
+    return {
       ok: true,
       status: 200,
       statusText: 'OK',
       arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
-    }) as unknown as Response) as typeof fetch;
+    } as unknown as Response;
+  }) as typeof fetch;
 }
 
 describe('installPlugin (copy)', () => {
@@ -118,12 +129,16 @@ describe('installPlugin (copy)', () => {
   it('downloads the dedicated source asset from GitHub when no local source is available', async () => {
     const project = tmp();
     writeUProject(project, 'DownloadInstall');
-    const fetchImpl = zipResponse({
-      'UnrealMCP/UnrealMCP.uplugin': strToU8(JSON.stringify({ VersionName: PACKAGE_VERSION, Installed: false })),
-      'UnrealMCP/Source/marker.txt': strToU8('downloaded'),
-      'UnrealMCP/Source/ThirdParty/UnrealMcpBridge/win-x64/unreal-mcp-bridge.exe': strToU8('BRIDGE'),
-    });
-    const r = await installPlugin({ projectDir: project, fetchImpl });
+    const kp = makeMinisignKeypair();
+    const fetchImpl = zipAndSigResponse(
+      {
+        'UnrealMCP/UnrealMCP.uplugin': strToU8(JSON.stringify({ VersionName: PACKAGE_VERSION, Installed: false })),
+        'UnrealMCP/Source/marker.txt': strToU8('downloaded'),
+        'UnrealMCP/Source/ThirdParty/UnrealMcpBridge/win-x64/unreal-mcp-bridge.exe': strToU8('BRIDGE'),
+      },
+      kp,
+    );
+    const r = await installPlugin({ projectDir: project, fetchImpl, publicKeyOverride: kp.publicKeyLine });
     expect(r.kind).toBe('success');
     if (r.kind !== 'success') return;
     expect(r.mode).toBe('copy');
@@ -148,11 +163,15 @@ describe('installPlugin (copy)', () => {
   it('falls back to copy when --junction targets a downloaded GitHub release', async () => {
     const project = tmp();
     writeUProject(project, 'DownloadJunction');
-    const fetchImpl = zipResponse({
-      'UnrealMCP/UnrealMCP.uplugin': strToU8(JSON.stringify({ VersionName: PACKAGE_VERSION, Installed: false })),
-      'UnrealMCP/Source/marker.txt': strToU8('downloaded'),
-    });
-    const r = await installPlugin({ projectDir: project, junction: true, fetchImpl });
+    const kp = makeMinisignKeypair();
+    const fetchImpl = zipAndSigResponse(
+      {
+        'UnrealMCP/UnrealMCP.uplugin': strToU8(JSON.stringify({ VersionName: PACKAGE_VERSION, Installed: false })),
+        'UnrealMCP/Source/marker.txt': strToU8('downloaded'),
+      },
+      kp,
+    );
+    const r = await installPlugin({ projectDir: project, junction: true, fetchImpl, publicKeyOverride: kp.publicKeyLine });
     expect(r.kind).toBe('success');
     if (r.kind !== 'success') return;
     expect(r.mode).toBe('copy');

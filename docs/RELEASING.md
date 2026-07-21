@@ -86,6 +86,49 @@ artifact jobs in `release.yml`:
   Fab recompile stages from). The packaged zip job waits for the plugin matrix
   so its UE 5.8 `BuildPlugin` run does not overlap the UE 5.8 validation leg on
   the same machine's AutomationTool lock.
+- **`publish-release`** additionally **signs** `unreal-mcp-plugin-source-<version>.zip`
+  with `minisign` and attaches `unreal-mcp-plugin-source-<version>.zip.minisig` as a
+  sibling release asset (see [Plugin-source signing key](#plugin-source-signing-key-d12--cli-verifies-before-install)).
+
+### Plugin-source signing key (D12 — CLI verifies before install)
+
+`unreal-mcp-plugin-source-<version>.zip` is the C++ plugin source the
+`unreal-mcp-cli` `install-plugin` / `update` commands auto-download for a
+zero-config install (the npm package does NOT bundle the plugin source). Because
+that zip carries the code UE compiles on next open, it is a **supply-chain
+surface**: a same-origin SHA256 would be integrity-only (a release-asset attacker
+replaces the zip AND its checksum), so — unlike the server binary's `SHA256SUMS`
+gate — the CLI verifies a **detached minisign (Ed25519) signature** over a PINNED
+publisher key (zero-config-engine-connect D12; the workspace Ed25519 key-mint
+precedent).
+
+- **Release side** — `publish-release` signs the source zip with `minisign` and
+  publishes `…-source-<version>.zip.minisig` beside it. The step is **fail-closed**:
+  it errors when the `MINISIGN_SECRET_KEY` secret is absent, so a release never
+  ships an unsigned source zip the CLI would reject. (This is stricter than the
+  OS code-signing secrets below, which skip-if-absent — an unsigned bridge still
+  runs, but an unsigned source zip cannot be verified, so it must not ship.)
+- **CLI side** — `cli/src/lib/plugin-signature.ts` (`verifyMinisign`) fetches the
+  `.minisig` and verifies it against the baked-in `MINISIGN_PUBLIC_KEY` BEFORE the
+  zip is extracted. Any failure — missing / tampered / wrong-key / un-provisioned —
+  is a HARD fail; the zip is never installed. A local `--plugin-source <dir>` is a
+  trusted source and skips verification (the offline / dev / CI path).
+
+**⚠ Provisioning — REQUIRED before the next release (currently a follow-up).** The
+signing key is not yet minted, so `MINISIGN_PUBLIC_KEY` holds the sentinel
+`UNPROVISIONED` and the CLI download path fails closed. To provision:
+
+1. Mint a **passwordless** keypair (no key password, so CI signs non-interactively):
+   `minisign -G -W -p unreal-mcp-plugin.pub -s unreal-mcp-plugin.key`. Keep
+   `unreal-mcp-plugin.key` in the workspace `.secrets/` store — NEVER in git.
+2. Add the secret-key file contents as the repo secret `MINISIGN_SECRET_KEY`:
+   `gh secret set MINISIGN_SECRET_KEY --repo IvanMurzak/Unreal-MCP < unreal-mcp-plugin.key`.
+3. Replace the `MINISIGN_PUBLIC_KEY` sentinel in `cli/src/lib/plugin-signature.ts`
+   with the base64 line of `unreal-mcp-plugin.pub`, and ship it in the next CLI
+   release (the public key travels inside the npm package).
+
+The public key is safe to commit (it verifies, it cannot sign); the secret key
+lives ONLY in the `.secrets/` store and the CI secret.
 
 ### Packaged-game sidecar bundling (R2)
 
@@ -469,6 +512,7 @@ The workflows use **no long-lived publish secrets**:
 | Secret | Used by | Notes |
 | --- | --- | --- |
 | `GITHUB_TOKEN` | `publish-release` | Auto-provided by GitHub Actions. Scoped per-job: the whole workflow defaults to `permissions: contents: read`; only `publish-release` elevates to `contents: write` to create the Release. |
+| `MINISIGN_SECRET_KEY` | `publish-release` | **Fail-closed** — the passwordless minisign secret-key file that signs `unreal-mcp-plugin-source-<version>.zip` (the CLI verifies the `.minisig` before install, D12). Not yet provisioned; the release step errors until it is set. See [Plugin-source signing key](#plugin-source-signing-key-d12--cli-verifies-before-install). |
 | *(none)* — npm | `publish-npm` | npm publish uses **OIDC Trusted Publishing** (`id-token: write`), not a stored `NPM_TOKEN`. |
 
 **npm first-publish prerequisite (owner action):** OIDC Trusted Publishing

@@ -242,6 +242,11 @@ export interface InstallPluginOptions {
    * the GitHub Release asset that matches the CLI package version.
    */
   pluginSourceDir?: string;
+  /**
+   * `--version` escape hatch: the plugin-source release version to download when
+   * no local source is used. Defaults to the CLI's own `PACKAGE_VERSION`.
+   */
+  version?: string;
   /** Junction (dev) instead of copy. Windows only. Default `false`. */
   junction?: boolean;
   /**
@@ -266,6 +271,12 @@ export interface InstallPluginOptions {
   storeBaseDir?: string;
   /** Injectable fetch for tests (plugin download + server download + enroll). */
   fetchImpl?: typeof fetch;
+  /**
+   * Test/injection seam for the pinned publisher key the downloaded plugin
+   * source's `.minisig` is verified against (see `ResolvePluginSourceOptions`).
+   * Production callers leave this unset (the baked-in key is used).
+   */
+  publicKeyOverride?: string;
   /** Injectable clock for the enrollment credential's `expiresAt`. Test injection. */
   nowImpl?: () => number;
   /** Inject the `--with-server` acquisition (defaults to `downloadServer`). Test injection. */

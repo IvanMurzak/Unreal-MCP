@@ -1010,6 +1010,45 @@ jobs:
           path: ./assets
       - name: List assembled release assets
         run: ls -la ./assets
+      # Sign the plugin-SOURCE zip with the pinned publisher key so the CLI can
+      # VERIFY it before install (zero-config-engine-connect D12). A same-origin
+      # SHA256 is integrity-only (a release-asset attacker swaps the zip AND its
+      # checksum); a detached minisign (Ed25519) signature over an OFFLINE key is a
+      # real supply-chain control. The CLI's `plugin-signature.ts` verifies this
+      # `.minisig` against the baked-in `MINISIGN_PUBLIC_KEY`. FAIL-CLOSED: a real
+      # release MUST be signed, so this step errors when `MINISIGN_SECRET_KEY` is
+      # absent rather than publishing a source zip the CLI would then reject.
+      # ⚠ Provisioning is a follow-up (see docs/RELEASING.md "Plugin-source signing
+      # key"): mint a PASSWORDLESS keypair (`minisign -G -W`), add the secret-key
+      # file as the repo secret `MINISIGN_SECRET_KEY`, and bake the public key into
+      # `cli/src/lib/plugin-signature.ts`. Until then this step fails the release.
+      - name: Sign the plugin-source zip (minisign)
+        env:
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+          VERSION: ${{ needs.check-version.outputs.version }}
+        run: |
+          set -euo pipefail
+          if [ -z "${MINISIGN_SECRET_KEY:-}" ]; then
+            echo "::error::MINISIGN_SECRET_KEY is not set. The plugin-source signing key must be provisioned before a release (docs/RELEASING.md 'Plugin-source signing key'). Refusing to publish an unsigned source zip the CLI would reject (fail-closed)."
+            exit 1
+          fi
+          zip="./assets/unreal-mcp-plugin-source-${VERSION}.zip"
+          if [ ! -f "$zip" ]; then
+            echo "::error::Source zip not found at $zip"
+            exit 1
+          fi
+          sudo apt-get update
+          sudo apt-get install -y minisign
+          keyfile="$RUNNER_TEMP/minisign.key"
+          printf '%s\n' "$MINISIGN_SECRET_KEY" > "$keyfile"
+          # The key is passwordless (minted with `minisign -G -W`), so signing does
+          # not prompt; `< /dev/null` guards against any interactive read on a CI
+          # runner with no tty. `-x` names the detached signature output.
+          minisign -S -s "$keyfile" -m "$zip" -x "${zip}.minisig" \
+            -t "unreal-mcp plugin source ${VERSION} signed by AI Game Dev release CI" < /dev/null
+          rm -f "$keyfile"
+          echo "Signed $zip -> ${zip}.minisig"
+          ls -la ./assets
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -1017,7 +1056,8 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          files=(./assets/*.zip)
+          # Attach every zip AND the plugin-source `.minisig` signature (D12).
+          files=(./assets/*.zip ./assets/*.minisig)
           if [ "${#files[@]}" -eq 0 ]; then
             echo "::error::No release zip assets found in ./assets"
             exit 1

@@ -100,7 +100,9 @@ export async function installPlugin(opts: InstallPluginOptions): Promise<Install
     }
     const resolvedSource = await resolvePluginSource({
       pluginSourceDir: opts.pluginSourceDir,
+      version: opts.version,
       fetchImpl: opts.fetchImpl,
+      publicKeyOverride: opts.publicKeyOverride,
       onProgress: opts.onProgress,
     });
     cleanupSource = resolvedSource.cleanup;
