@@ -136,9 +136,18 @@ describe('verifyMinisign — fail-closed gate (accept-real / reject-tampered)', 
     const sig = kp.sign(data);
     expect(verifyMinisign(MINISIGN_PUBLIC_KEY_UNSET, sig, data)).toBe('public-key-not-provisioned');
     expect(verifyMinisign('', sig, data)).toBe('public-key-not-provisioned');
-    // The shipped default is still the sentinel (key provisioning is a follow-up).
-    expect(MINISIGN_PUBLIC_KEY).toBe(MINISIGN_PUBLIC_KEY_UNSET);
-    expect(verifyMinisign(MINISIGN_PUBLIC_KEY, sig, data)).toBe('public-key-not-provisioned');
+  });
+
+  it('ships a provisioned publisher key (not the sentinel) that parses', () => {
+    // The shipped default is the real minisign publisher key (provisioned 2026-07-21).
+    expect(MINISIGN_PUBLIC_KEY).not.toBe(MINISIGN_PUBLIC_KEY_UNSET);
+    expect(parseMinisignPublicKey(MINISIGN_PUBLIC_KEY)).not.toBeNull();
+    // A signature made with a DIFFERENT key is rejected against the pinned key, proving
+    // the baked key is a specific real key (not a wildcard) and still fails closed.
+    const foreign = makeMinisignKeypair();
+    const verdict = verifyMinisign(MINISIGN_PUBLIC_KEY, foreign.sign(data), data);
+    expect(verdict).not.toBe('verified');
+    expect(verdict).not.toBe('public-key-not-provisioned');
   });
 
   it('fails closed when the pinned key itself is malformed (public-key-unparsable)', () => {

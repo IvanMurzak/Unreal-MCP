@@ -44,18 +44,18 @@ import { createHash, createPublicKey, verify as cryptoVerify } from 'node:crypto
  * `untrusted comment:` line). The matching SECRET key is minted offline / held in
  * CI secrets and NEVER ships in this package.
  *
- * ⚠ NOT YET PROVISIONED (e2 / D12 follow-up). While this holds the sentinel below,
- * every download-path install FAILS CLOSED with `public-key-not-provisioned` — an
- * unverified zip is never installed. Provisioning (see docs/RELEASING.md
- * "Plugin-source signing key"): mint a PASSWORDLESS minisign keypair
- * (`minisign -G -W -p unreal-mcp-plugin.pub -s unreal-mcp-plugin.key`), store the
- * secret-key file as the repo secret `MINISIGN_SECRET_KEY` (release.yml signs the
- * source zip with it), and REPLACE the sentinel below with the base64 line of
- * `unreal-mcp-plugin.pub`. Until then, offline/dev installs use `--plugin-source <dir>`
- * (a trusted local source skips signature verification, like `--server-source`).
+ * ✅ PROVISIONED 2026-07-21 (zero-config-engine-connect e2/e3). The key below is the
+ * base64 line of `unreal-mcp-plugin.pub` (minisign key id `194DD8FC6092DA33`); its
+ * passwordless secret key is held offline and as the repo secret `MINISIGN_SECRET_KEY`,
+ * which release.yml's "Sign the plugin-source zip" step uses (fail-closed — a release
+ * errors without it). To ROTATE: mint a new passwordless keypair (`minisign -G -W`),
+ * update `MINISIGN_SECRET_KEY`, replace the line below, and cut a new release. Old CLIs
+ * keep trusting the old key (no revocation channel — rotate only on compromise + ship
+ * the new CLI promptly). Offline/dev installs still skip verification via
+ * `--plugin-source <dir>` (a trusted local source, like `--server-source`).
  */
 export const MINISIGN_PUBLIC_KEY_UNSET = 'UNPROVISIONED';
-export const MINISIGN_PUBLIC_KEY = MINISIGN_PUBLIC_KEY_UNSET;
+export const MINISIGN_PUBLIC_KEY = 'RWQz2pJg/NhNGQhoFbZZiUuNKRdB2esdgZ0Wns1Rd+jbzFefv5zIeerB';
 
 /** Sibling-asset suffix of the detached minisign signature for the source zip. */
 export const PLUGIN_SOURCE_SIGNATURE_ASSET_SUFFIX = '.minisig';
