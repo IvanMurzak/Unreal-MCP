@@ -23,6 +23,7 @@ export const installPluginCommand = new Command('install-plugin')
   .description('Install the UnrealMCP plugin into <project>/Plugins (copy or --junction). Defaults to the local repo source when present, otherwise downloads the matching GitHub release. Optionally bundles the local MCP server (--with-server) and/or redeems an agent enrollment code (--enroll).')
   .argument('[path]', 'Unreal project directory (defaults to cwd)')
   .option('--plugin-source <dir>', 'UnrealMCP plugin source dir (offline / CI / dev override)')
+  .option('--version <v>', 'Plugin-source release version to download (defaults to this CLI version)')
   .option('--junction', 'Create a dev junction instead of copying (Windows)')
   .option('--with-server', 'Also download the RID-matched gamedev-mcp-server binary (checksum-verified) into the managed dir')
   .option('--server-version <v>', 'Server version to download with --with-server (defaults to the pinned SERVER_VERSION)')
@@ -35,6 +36,7 @@ export const installPluginCommand = new Command('install-plugin')
       pathArg: string | undefined,
       opts: {
         pluginSource?: string;
+        version?: string;
         junction?: boolean;
         withServer?: boolean;
         serverVersion?: string;
@@ -68,6 +70,7 @@ export const installPluginCommand = new Command('install-plugin')
       const result = await installPlugin({
         projectDir,
         pluginSourceDir: opts.pluginSource,
+        version: opts.version,
         junction: opts.junction,
         withServer: opts.withServer,
         serverVersion: opts.serverVersion,

@@ -23,6 +23,12 @@ import {
   releaseTag,
   stripLeadingV,
 } from '../utils/extension-source.js';
+import {
+  MINISIGN_PUBLIC_KEY,
+  PLUGIN_SOURCE_SIGNATURE_ASSET_SUFFIX,
+  verifyMinisign,
+  signatureFailureReason,
+} from './plugin-signature.js';
 import type { ProgressCallback } from './types.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -38,8 +44,22 @@ export interface ResolvePluginSourceOptions {
    * any parent dir that contains a `.uplugin` beneath it.
    */
   pluginSourceDir?: string;
+  /**
+   * `--version` escape hatch: the plugin-source release version to download.
+   * Defaults to this CLI's own `PACKAGE_VERSION` (the version-locked default —
+   * plugin/bridge/cli share one semver and release together). Ignored when a local
+   * `pluginSourceDir` is used.
+   */
+  version?: string;
   /** Injectable fetch for tests. Defaults to global `fetch`. */
   fetchImpl?: typeof fetch;
+  /**
+   * Test/injection seam for the pinned publisher key the downloaded source zip's
+   * `.minisig` is verified against. Defaults to the baked-in `MINISIGN_PUBLIC_KEY`.
+   * Production callers leave this unset; tests inject an ephemeral keypair's public
+   * key so the verify-before-extract gate can be exercised without the real key.
+   */
+  publicKeyOverride?: string;
   onProgress?: ProgressCallback;
 }
 
@@ -63,6 +83,20 @@ export function corePluginSourceAssetName(version: string = PACKAGE_VERSION): st
  */
 export function corePluginSourceDownloadUrl(version: string = PACKAGE_VERSION): string {
   return `https://${TRUSTED_DOWNLOAD_HOST}/${CORE_PLUGIN_SOURCE_RELEASE_REPO}/releases/download/${releaseTag(version)}/${corePluginSourceAssetName(version)}`;
+}
+
+/** `unreal-mcp-plugin-source-<version>.zip.minisig` — the detached signature sibling asset. */
+export function corePluginSourceSignatureAssetName(version: string = PACKAGE_VERSION): string {
+  return `${corePluginSourceAssetName(version)}${PLUGIN_SOURCE_SIGNATURE_ASSET_SUFFIX}`;
+}
+
+/**
+ * Release-asset URL of the detached minisign signature for the source zip — the
+ * SIBLING of `corePluginSourceDownloadUrl` under the SAME `v<version>` release
+ * tag. Verified against the pinned publisher key BEFORE extraction (fail-closed).
+ */
+export function corePluginSourceSignatureUrl(version: string = PACKAGE_VERSION): string {
+  return `${corePluginSourceDownloadUrl(version)}${PLUGIN_SOURCE_SIGNATURE_ASSET_SUFFIX}`;
 }
 
 /** Resolve the nearest repo checkout's `UnrealMCP/` dir from this package, if any. */
@@ -115,10 +149,38 @@ export function findUPluginFile(root: string): string | null {
   return null;
 }
 
+/** Attempts (1 initial + retries) for the `.minisig` signature fetch before fail-closed. */
+const SIGNATURE_FETCH_ATTEMPTS = 3;
+
+/**
+ * Fetch the detached `.minisig` signature text with a bounded transient-retry
+ * (a just-published release can briefly 404 a sibling asset), reusing the
+ * injectable `fetchImpl`. Returns the signature body, or `null` when every
+ * attempt failed — the fail-closed signal an unverified zip is never extracted.
+ * Never throws.
+ */
+async function fetchSignatureText(url: string, fetchImpl: typeof fetch): Promise<string | null> {
+  for (let attempt = 1; attempt <= SIGNATURE_FETCH_ATTEMPTS; attempt++) {
+    try {
+      const response = await fetchImpl(url);
+      if (response.ok) return await response.text();
+    } catch {
+      // transient — retried below; a persistent failure fails closed (null).
+    }
+  }
+  return null;
+}
+
 /**
  * Resolve the core plugin source for install/update. Falls back to the dedicated
  * GitHub Release SOURCE asset that matches THIS CLI's version when no local
  * source exists.
+ *
+ * The downloaded zip is SIGNATURE-VERIFIED against the pinned publisher key BEFORE
+ * it is extracted (D12): the `.minisig` sibling asset is fetched and checked with
+ * `verifyMinisign` — a tampered/unsigned/wrong-key zip is rejected fail-closed and
+ * NEVER installed. A local `pluginSourceDir` (explicit `--plugin-source` or the
+ * in-repo checkout) is a trusted source and skips verification.
  */
 export async function resolvePluginSource(
   opts: ResolvePluginSourceOptions = {},
@@ -143,7 +205,7 @@ export async function resolvePluginSource(
     };
   }
 
-  const version = PACKAGE_VERSION;
+  const version = (opts.version ?? '').trim() || PACKAGE_VERSION;
   const url = corePluginSourceDownloadUrl(version);
   assertTrustedDownloadUrl(url);
   emitProgress(opts.onProgress, {
@@ -160,6 +222,41 @@ export async function resolvePluginSource(
     );
   }
   const zipBytes = new Uint8Array(await response.arrayBuffer());
+
+  // FAIL-CLOSED SIGNATURE GATE (verify-before-extract, D12). The zip bytes are in
+  // hand but UNTRUSTED. Fetch the detached `.minisig` sibling asset and verify it
+  // against the pinned publisher key BEFORE unzipSync/extract. A same-origin
+  // SHA256 would be integrity-only (a release-asset attacker replaces the zip AND
+  // its checksum); a signature over an offline-held key cannot be forged. On ANY
+  // non-`verified` verdict — missing/malformed signature, wrong key, tampered zip,
+  // or an un-provisioned pinned key — we throw WITHOUT extracting: an unverified
+  // plugin source is NEVER installed. `--plugin-source <dir>` (a trusted local
+  // source) is the offline/dev escape hatch and does not reach this branch.
+  const publicKey = opts.publicKeyOverride ?? MINISIGN_PUBLIC_KEY;
+  const signatureUrl = corePluginSourceSignatureUrl(version);
+  assertTrustedDownloadUrl(signatureUrl);
+  const signatureText = await fetchSignatureText(signatureUrl, fetchImpl);
+  const signatureAssetName = corePluginSourceSignatureAssetName(version);
+  if (signatureText === null) {
+    throw new Error(
+      `Refusing to install UnrealMCP plugin ${version}: could not download its signature ` +
+        `(${signatureAssetName}) from ${signatureUrl} after ${SIGNATURE_FETCH_ATTEMPTS} attempt(s). ` +
+        `The download was NOT verified and will not be extracted (fail-closed). ` +
+        `Pass --plugin-source <dir> for an offline/dev install.`,
+    );
+  }
+  const verdict = verifyMinisign(publicKey, signatureText, zipBytes);
+  if (verdict !== 'verified') {
+    throw new Error(
+      `Refusing to install UnrealMCP plugin ${version}: ${signatureFailureReason(verdict, signatureAssetName)}. ` +
+        `The plugin source will not be extracted or installed (fail-closed).`,
+    );
+  }
+  emitProgress(opts.onProgress, {
+    phase: 'info',
+    message: `Verified ${signatureAssetName} against the pinned publisher key.`,
+  });
+
   emitProgress(opts.onProgress, {
     phase: 'info',
     message: `Extracting ${corePluginSourceAssetName(version)}`,

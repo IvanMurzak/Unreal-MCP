@@ -74,11 +74,14 @@ unreal-mcp-cli status
 > Games Launcher — zero compile, zero stale-build risk). This CLI is the current/advanced/dev path
 > until the Fab listing is live; its `install-plugin` / `update` commands use a local `UnrealMCP/`
 > checkout when present, otherwise they download the dedicated `unreal-mcp-plugin-source-<version>.zip`
-> GitHub Release asset that matches the CLI version. That source asset keeps the distributed
+> GitHub Release asset that matches the CLI version (override with `--version <x.y.z>`). The downloaded
+> zip is **signature-verified** against a pinned publisher key (a detached minisign / Ed25519 signature,
+> `…-source-<version>.zip.minisig`) **before** it is extracted — a tampered, unsigned, or wrong-key
+> download is a hard failure and is never installed. That source asset keeps the distributed
 > descriptor semantics (**no `EngineVersion` pin**) and carries the signed bridge payload under
 > `Source/ThirdParty/UnrealMcpBridge/<rid>/`, which the installer materializes into
 > `Binaries/ThirdParty/...` for first-open convenience. `--plugin-source <dir>` remains the offline /
-> CI / dev override.
+> CI / dev override (a trusted local source, so it skips signature verification).
 
 ![divider](https://github.com/IvanMurzak/Unity-MCP/blob/main/docs/img/promo/hazzard-divider.svg?raw=true)
 

@@ -23,6 +23,11 @@ export interface UpdateOptions {
    * the CLI package version.
    */
   pluginSourceDir?: string;
+  /**
+   * `--version` escape hatch: the plugin-source release version to download when no
+   * local source is used. Defaults to the CLI's own `PACKAGE_VERSION`.
+   */
+  version?: string;
   /** Re-install even when versions match. Default `false`. */
   force?: boolean;
   /**
@@ -36,6 +41,12 @@ export interface UpdateOptions {
   noClean?: boolean;
   /** Injectable fetch for tests (download path only). */
   fetchImpl?: typeof fetch;
+  /**
+   * Test/injection seam for the pinned publisher key the downloaded plugin
+   * source's `.minisig` is verified against (see `ResolvePluginSourceOptions`).
+   * Production callers leave this unset (the baked-in key is used).
+   */
+  publicKeyOverride?: string;
   onProgress?: ProgressCallback;
 }
 
@@ -95,9 +106,10 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
         : opts.fetchImpl
           ? null
           : defaultCorePluginSource();
+    const downloadVersion = (opts.version ?? '').trim() || PACKAGE_VERSION;
     const toVersion = localSource
       ? readPluginVersion(path.join(localSource, 'UnrealMCP.uplugin'))
-      : PACKAGE_VERSION;
+      : downloadVersion;
 
     emitProgress(opts.onProgress, {
       phase: 'start',
@@ -127,7 +139,9 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
 
     const resolvedSource = await resolvePluginSource({
       pluginSourceDir: localSource ?? undefined,
+      version: opts.version,
       fetchImpl: opts.fetchImpl,
+      publicKeyOverride: opts.publicKeyOverride,
       onProgress: opts.onProgress,
     });
     cleanupSource = resolvedSource.cleanup;
