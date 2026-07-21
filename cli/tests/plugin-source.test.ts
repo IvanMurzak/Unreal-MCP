@@ -134,14 +134,14 @@ describe('resolvePluginSource — download + signature gate', () => {
     ).rejects.toThrow(/could not download its signature/i);
   });
 
-  it('FAILS CLOSED when the pinned signing key is un-provisioned (default sentinel key)', async () => {
-    const kp = makeMinisignKeypair();
+  it('FAILS CLOSED against a foreign-signed release (the baked publisher key is provisioned)', async () => {
+    const kp = makeMinisignKeypair(); // a DIFFERENT key than the baked-in production publisher key
     await expect(
-      // No publicKeyOverride → the baked-in sentinel key → never install unverified.
+      // No publicKeyOverride → the baked-in PRODUCTION key → a zip signed by any other key is rejected.
       resolvePluginSource({
         fetchImpl: zipAndSigResponse({ 'UnrealMCP/UnrealMCP.uplugin': strToU8('{}') }, kp),
       }),
-    ).rejects.toThrow(/signing key is not provisioned/i);
+    ).rejects.toThrow(/different key than this CLI trusts|fail-closed/i);
   });
 
   it('rejects a downloaded packaged plugin descriptor that pins EngineVersion (after verify)', async () => {
