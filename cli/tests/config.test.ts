@@ -5,11 +5,13 @@ import {
   resolveConnection,
   readPluginConfig,
   resolveConnectionFromPluginConfig,
+  parseCustomAuthMode,
   appendMcp,
   isCloudMode,
   PLUGIN_CONFIG_RELATIVE_PATH,
 } from '../src/utils/config.js';
 import { generatePortFromDirectory } from '../src/utils/port.js';
+import { writeProjectMarker } from '../src/utils/project-marker.js';
 import { makeTempDir, rmTempDir } from './helpers.js';
 
 const tempDirs: string[] = [];
@@ -84,6 +86,25 @@ describe('resolveConnectionFromPluginConfig', () => {
     const r = resolveConnectionFromPluginConfig({ connectionMode: 'Custom', host: 'http://localhost:9001', authOption: 'None', token: 'tk' });
     expect(r.url).toBe('http://localhost:9001');
     expect(r.token).toBeUndefined();
+  });
+
+  // Defect C — the current plugin writes authOption "Token"; the retired `'required'` gate
+  // dropped the token. The gate now keys on Token (with Required as the legacy migration alias).
+  it('Custom + authOption Token → token sent (defect C: the retired required-gate is gone)', () => {
+    const r = resolveConnectionFromPluginConfig({ connectionMode: 'Custom', host: 'http://localhost:9001', authOption: 'Token', token: 'tk' });
+    expect(r.token).toBe('tk');
+  });
+  it('Custom + authOption Oauth → token undefined (native OAuth sends no static bearer)', () => {
+    const r = resolveConnectionFromPluginConfig({ connectionMode: 'Custom', host: 'http://localhost:9001', authOption: 'Oauth', token: 'tk' });
+    expect(r.token).toBeUndefined();
+  });
+  it('Custom + legacy authOption Required → token sent (g5 migration → Token)', () => {
+    const r = resolveConnectionFromPluginConfig({ connectionMode: 'Custom', host: 'http://localhost:9001', authOption: 'Required', token: 'tk' });
+    expect(r.token).toBe('tk');
+  });
+  it('Custom + missing/unrecognized authOption → token undefined (defaults to None)', () => {
+    expect(resolveConnectionFromPluginConfig({ connectionMode: 'Custom', host: 'http://localhost:9001', token: 'tk' }).token).toBeUndefined();
+    expect(resolveConnectionFromPluginConfig({ connectionMode: 'Custom', host: 'http://localhost:9001', authOption: 'bogus', token: 'tk' }).token).toBeUndefined();
   });
 
   it('isCloudMode is case-insensitive', () => {
@@ -175,6 +196,73 @@ describe('resolveConnection — plugin-config layer (issue #71)', () => {
     const dir = makeProject({ config: { connectionMode: 'Custom' } });
     const r = resolveConnection({ projectDir: dir, processEnv: {} });
     expect(r.url).toBe(`http://localhost:${generatePortFromDirectory(dir)}`);
+    expect(r.source).toBe('deterministic-port');
+  });
+
+  // Defect C wired through resolveConnection: the current-plugin `Token` config sends the token.
+  it('Custom config + authOption Token → token sent via the plugin-config layer (defect C)', () => {
+    const dir = makeProject({ config: { connectionMode: 'Custom', host: 'http://localhost:9100', authOption: 'Token', token: 'tk' } });
+    const r = resolveConnection({ projectDir: dir, processEnv: {} });
+    expect(r.token).toBe('tk');
+    expect(r.source).toBe('plugin-config');
+  });
+});
+
+describe('parseCustomAuthMode (defect C — token-mode gate)', () => {
+  it('maps None/Token/Oauth case-insensitively', () => {
+    expect(parseCustomAuthMode('None')).toBe('none');
+    expect(parseCustomAuthMode('token')).toBe('token');
+    expect(parseCustomAuthMode('OAUTH')).toBe('oauth');
+  });
+  it('migrates the retired Required → token', () => {
+    expect(parseCustomAuthMode('Required')).toBe('token');
+    expect(parseCustomAuthMode('required')).toBe('token');
+  });
+  it('defaults absent / unrecognized to none (no bearer)', () => {
+    expect(parseCustomAuthMode(undefined)).toBe('none');
+    expect(parseCustomAuthMode('')).toBe('none');
+    expect(parseCustomAuthMode('bogus')).toBe('none');
+  });
+});
+
+describe('resolveConnection — Custom-mode loopback port resolution (defect D / D21)', () => {
+  it('port-less loopback host (http://localhost) → derived port, NOT verbatim :80', () => {
+    const dir = makeProject({ config: { connectionMode: 'Custom', host: 'http://localhost', authOption: 'None' } });
+    const r = resolveConnection({ projectDir: dir, processEnv: {} });
+    expect(r.url).toBe(`http://localhost:${generatePortFromDirectory(dir)}`);
+    expect(r.source).toBe('plugin-config');
+  });
+
+  it('a typed loopback port with no marker is kept (level 2 beats the derivation)', () => {
+    const dir = makeProject({ config: { connectionMode: 'Custom', host: 'http://localhost:8080', authOption: 'None' } });
+    const r = resolveConnection({ projectDir: dir, processEnv: {} });
+    expect(r.url).toBe('http://localhost:8080');
+    expect(r.source).toBe('plugin-config');
+  });
+
+  it('a marker portOverride wins over a legacy :8080 host (verbatim :8080 no longer used)', () => {
+    const dir = makeProject({ config: { connectionMode: 'Custom', host: 'http://localhost:8080', authOption: 'None' } });
+    writeProjectMarker(dir, { portOverride: 21234 });
+    const r = resolveConnection({ projectDir: dir, processEnv: {} });
+    expect(r.url).toBe('http://localhost:21234');
+  });
+
+  it('a marker portOverride also rewrites a port-less loopback host', () => {
+    const dir = makeProject({ config: { connectionMode: 'Custom', host: 'http://localhost', authOption: 'None' } });
+    writeProjectMarker(dir, { portOverride: 25000 });
+    expect(resolveConnection({ projectDir: dir, processEnv: {} }).url).toBe('http://localhost:25000');
+  });
+
+  it('a NON-loopback Custom host is used verbatim (the local server binds no LAN authority)', () => {
+    const dir = makeProject({ config: { connectionMode: 'Custom', host: 'http://192.168.1.5:8080', authOption: 'None' } });
+    expect(resolveConnection({ projectDir: dir, processEnv: {} }).url).toBe('http://192.168.1.5:8080');
+  });
+
+  it('the deterministic fallback honors a marker portOverride when there is no host', () => {
+    const dir = makeProject();
+    writeProjectMarker(dir, { portOverride: 26543 });
+    const r = resolveConnection({ projectDir: dir, processEnv: {} });
+    expect(r.url).toBe('http://localhost:26543');
     expect(r.source).toBe('deterministic-port');
   });
 });
