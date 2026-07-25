@@ -200,13 +200,23 @@ the `content[]` image array). `/api/tools/<name>` calls **require** `-H "Content
 
 ## Tool / prompt / resource surface
 
-The editor ships **62 built-in ("core") tools across 8 families** (counts from the registration source:
-actor 13, blueprint 11, asset 11, editor/reflection 9, level 7, source 6, screenshot 4, ping 1 = 62).
-Tool ids are kebab-case (`actor-create`, `blueprint-compile`); the registry validates
-`^[a-z0-9]+(-[a-z0-9]+)*$`. The README carries the full, source-generated family-by-family list — treat
-it as the canonical inventory. Plus shipped **core prompt** `level-design-brief` and **core resources**
-`unreal://project/levels` + `unreal://project/icon` (static fixed-URI only; templated URIs deferred). The
-runtime module ships only `ping`.
+The editor ships **61 built-in ("core") tools across 7 families** on the STANDARD surface (counts from the
+registration source: actor 13, blueprint 11, asset 11, editor/reflection 9, level 7, source 6,
+screenshot 4 = 61), plus **3 SYSTEM tools**. Tool ids are kebab-case (`actor-create`,
+`blueprint-compile`); the registry validates `^[a-z0-9]+(-[a-z0-9]+)*$`. The README carries the full,
+source-generated family-by-family list — treat it as the canonical inventory. Plus shipped **core prompt**
+`level-design-brief` and **core resources** `unreal://project/levels` + `unreal://project/icon` (static
+fixed-URI only; templated URIs deferred). The runtime module ships only `ping`.
+
+**Tool surfaces (ARCHITECTURE §2.4, owner ruling 2026-07-25).** Every tool is `Standard` (in `tools/list`
++ `/api/tools/<name>`) or `System` (`/api/system-tools/<name>` ONLY, never advertised to an AI agent) —
+the C++ mirror of the `McpToolType` Unity/Godot declare via `[AiTool(..., ToolType = McpToolType.System)]`.
+Declared with `FUnrealMcpToolBuilder::ToolType(EUnrealMcpToolType::System)` and shipped in the manifest as
+`toolType`; the sidecar's `SurfaceRoutingToolSink` puts each proxy on the matching McpPlugin manager. The
+three system tools are **`ping`**, **`unreal-skill-create`** (generates a self-registering C++ tool file
+into `UnrealMcpEditor/Private/Tools/Skills/` and reports **rebuild required** — it is never live before a
+rebuild) and **`unreal-skill-generate`** (sidecar-native, `bridge/src/Tools/SkillGenerateTool.cs`).
+`POST /api/tools/ping` no longer resolves — the CLI probes the system route with a legacy fallback.
 
 ## Versioning
 

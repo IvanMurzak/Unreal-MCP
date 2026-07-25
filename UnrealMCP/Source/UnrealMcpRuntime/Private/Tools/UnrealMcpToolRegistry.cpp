@@ -113,9 +113,28 @@ TSharedPtr<FJsonObject> FUnrealMcpRegisteredTool::ToDescriptorJson() const
 	Desc->SetBoolField(TEXT("idempotentHint"), bIdempotentHint);
 	Desc->SetBoolField(TEXT("openWorldHint"), bOpenWorldHint);
 	Desc->SetBoolField(TEXT("enabled"), bEnabled);
+	// §2.4 served surface. Always emitted (never omitted for the Standard default) so the sidecar never has
+	// to infer it and an older descriptor can be told apart from a deliberately-standard one.
+	Desc->SetStringField(TEXT("toolType"), UnrealMcpToolTypeToString(ToolType));
 	Desc->SetStringField(TEXT("extensionId"), ExtensionId);
 	Desc->SetStringField(TEXT("schemaHash"), SchemaHash);
 	return Desc;
+}
+
+// --- Tool type (§2.4) -----------------------------------------------------------------------------
+
+const TCHAR* UnrealMcpToolTypeToString(EUnrealMcpToolType ToolType)
+{
+	return ToolType == EUnrealMcpToolType::System ? TEXT("system") : TEXT("standard");
+}
+
+EUnrealMcpToolType UnrealMcpToolTypeFromString(const FString& Token)
+{
+	// Lenient by design: an unknown/absent token means "the sender predates §2.4", and the safe reading of
+	// silence is the pre-§2.4 behaviour — a standard tool. Never surfaces an unknown token as System.
+	return Token.Equals(TEXT("system"), ESearchCase::IgnoreCase)
+		? EUnrealMcpToolType::System
+		: EUnrealMcpToolType::Standard;
 }
 
 // --- FUnrealMcpToolBuilder ------------------------------------------------------------------------
@@ -161,6 +180,7 @@ FUnrealMcpToolBuilder& FUnrealMcpToolBuilder::Param(const FString& Name, const F
 	Tool.Params.Add(FUnrealMcpParamSpec{ Name, JsonType, Desc, Req, CustomSchema });
 	return *this;
 }
+FUnrealMcpToolBuilder& FUnrealMcpToolBuilder::ToolType(EUnrealMcpToolType InToolType) { Tool.ToolType = InToolType; return *this; }
 FUnrealMcpToolBuilder& FUnrealMcpToolBuilder::ReadOnlyHint(bool bValue) { Tool.bReadOnlyHint = bValue; return *this; }
 FUnrealMcpToolBuilder& FUnrealMcpToolBuilder::DestructiveHint(bool bValue) { Tool.bDestructiveHint = bValue; return *this; }
 FUnrealMcpToolBuilder& FUnrealMcpToolBuilder::IdempotentHint(bool bValue) { Tool.bIdempotentHint = bValue; return *this; }

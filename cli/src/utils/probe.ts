@@ -1,18 +1,27 @@
 // HTTP readiness probe against a project's local MCP server. Used by
-// `status` and `wait-for-ready`. The `ping` MCP tool echoes back —
+// `status` and `wait-for-ready`. The `ping` tool echoes back —
 // a 2xx means the server (and the plugin behind it) is reachable.
 
-// NOTE (doc/code reconciliation): The Unreal sidecar does NOT implement the
-// `ping` system-tool handler (`/api/system-tools/ping` returns null → HTTP 500),
-// so we route through `/api/tools/ping` (the MCP tool route). This was
-// verified manually: system-tools/ping → 500 (null response),
-// /api/tools/ping → 200 {"result":"pong"}. ARCHITECTURE.md §e2e runbook
-// already cited /api/tools/ping — this endpoint now matches it.
+// `ping` is a SYSTEM tool (docs/ARCHITECTURE.md §2.4, owner ruling 2026-07-25):
+// it is host plumbing this CLI drives, not a capability an AI agent should see
+// in `tools/list`, so it lives at `/api/system-tools/ping` and NO LONGER
+// resolves at `/api/tools/ping`.
+//
+// The legacy endpoint is kept as a FALLBACK, not as the primary: a CLI is
+// routinely newer than the plugin a given project has installed, and against a
+// pre-§2.4 plugin `ping` is still a standard tool. Probing system-first and
+// falling back on a non-2xx means both plugin generations report reachable, and
+// neither costs a round trip in the steady state. (This mirrors the D17-style
+// feature-detect the desktop app uses for the same transition.)
 
 import { asError } from './error.js';
 import { fetchWithTimeout, networkErrorCategory, type NetworkErrorCategory } from './http.js';
 
-export const PING_ENDPOINT = '/api/tools/ping';
+/** The system-tools route `ping` lives on since §2.4. Tried first. */
+export const PING_ENDPOINT = '/api/system-tools/ping';
+
+/** The pre-§2.4 standard-tool route. Tried only when {@link PING_ENDPOINT} answers non-2xx. */
+export const LEGACY_PING_ENDPOINT = '/api/tools/ping';
 
 export interface ProbeSuccess {
   ok: true;
@@ -37,12 +46,39 @@ export interface ProbeOptions {
 }
 
 /**
- * POST `{}` to the server's `ping` endpoint. Never throws — every failure
- * mode (connection refused, timeout, non-2xx, malformed body) is folded
- * into a `{ ok: false }` result with a human-readable reason.
+ * POST `{}` to the server's `ping` endpoint — the system-tools route first, the
+ * legacy standard-tool route as a fallback for a pre-§2.4 plugin. Never throws:
+ * every failure mode (connection refused, timeout, non-2xx, malformed body) is
+ * folded into a `{ ok: false }` result with a human-readable reason.
+ *
+ * A TRANSPORT failure (refused / timeout / DNS) is reported immediately without
+ * trying the fallback — the server is unreachable, so a second identical round
+ * trip would only double the wait for the same answer. Only a reachable server
+ * that answered non-2xx justifies asking the other route.
  */
 export async function probePing(baseUrl: string, opts: ProbeOptions = {}): Promise<ProbeResult> {
-  const endpoint = `${baseUrl}${PING_ENDPOINT}`;
+  const primary = await probeEndpoint(baseUrl, PING_ENDPOINT, opts);
+  if (primary.ok || primary.transportFailed) return primary.result;
+
+  const fallback = await probeEndpoint(baseUrl, LEGACY_PING_ENDPOINT, opts);
+  // Surface the SYSTEM route's failure when neither answered: it is the route
+  // this CLI expects, so its status is the actionable one.
+  return fallback.ok ? fallback.result : primary.result;
+}
+
+interface EndpointProbe {
+  ok: boolean;
+  /** The request never reached the server (refused / timeout / DNS) — retrying another path is pointless. */
+  transportFailed: boolean;
+  result: ProbeResult;
+}
+
+async function probeEndpoint(
+  baseUrl: string,
+  route: string,
+  opts: ProbeOptions,
+): Promise<EndpointProbe> {
+  const endpoint = `${baseUrl}${route}`;
   const timeoutMs = typeof opts.timeoutMs === 'number' && opts.timeoutMs > 0 ? opts.timeoutMs : 5000;
   const fetchImpl = opts.fetchImpl ?? globalThis.fetch;
 
@@ -64,11 +100,23 @@ export async function probePing(baseUrl: string, opts: ProbeOptions = {}): Promi
       } catch {
         data = text;
       }
-      return { ok: true, baseUrl, httpStatus: response.status, data };
+      return {
+        ok: true,
+        transportFailed: false,
+        result: { ok: true, baseUrl, httpStatus: response.status, data },
+      };
     }
-    return { ok: false, baseUrl, reason: `HTTP ${response.status}` };
+    return {
+      ok: false,
+      transportFailed: false,
+      result: { ok: false, baseUrl, reason: `HTTP ${response.status}` },
+    };
   } catch (err) {
-    return { ok: false, baseUrl, reason: classifyError(err) };
+    return {
+      ok: false,
+      transportFailed: true,
+      result: { ok: false, baseUrl, reason: classifyError(err) },
+    };
   }
 }
 

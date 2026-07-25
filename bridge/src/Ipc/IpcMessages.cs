@@ -8,6 +8,7 @@
 └───────────────────────────────────────────────────────────────────┘
 */
 
+using System;
 using System.Collections.Generic;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
@@ -84,8 +85,30 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
         [JsonPropertyName("idempotentHint")] public bool? IdempotentHint { get; set; }
         [JsonPropertyName("openWorldHint")] public bool? OpenWorldHint { get; set; }
         [JsonPropertyName("enabled")] public bool Enabled { get; set; } = true;
+
+        /// <summary>
+        /// The served SURFACE (docs/ARCHITECTURE.md §2.4): <c>"standard"</c> (default) or <c>"system"</c>. The
+        /// wire form of the plugin's <c>EUnrealMcpToolType</c>, itself the 1:1 mirror of the shared
+        /// <c>com.IvanMurzak.McpPlugin.McpToolType</c> the C# engines express as
+        /// <c>[AiTool(..., ToolType = McpToolType.System)]</c>. Absent (an older plugin that predates §2.4) reads
+        /// as standard — see <see cref="IsSystem"/>.
+        /// </summary>
+        [JsonPropertyName("toolType")] public string? ToolType { get; set; }
+
         [JsonPropertyName("extensionId")] public string? ExtensionId { get; set; }
         [JsonPropertyName("schemaHash")] public string? SchemaHash { get; set; }
+
+        /// <summary>The wire token for the system surface (the only non-default <see cref="ToolType"/> value).</summary>
+        public const string SystemToolType = "system";
+
+        /// <summary>
+        /// True iff this tool belongs on the SYSTEM surface (<c>/api/system-tools/&lt;name&gt;</c>), i.e. it must
+        /// NOT appear in <c>tools/list</c> nor resolve at <c>/api/tools/&lt;name&gt;</c>. Deliberately lenient:
+        /// only the exact token (case-insensitively) opts in, so a missing/unknown value can never accidentally
+        /// hide a tool from every AI agent.
+        /// </summary>
+        [JsonIgnore]
+        public bool IsSystem => string.Equals(ToolType, SystemToolType, StringComparison.OrdinalIgnoreCase);
 
         /// <inheritdoc />
         [JsonIgnore] public string Key => Name;
@@ -96,13 +119,15 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
         {
             get
             {
-                // Everything that defines the tool's surface EXCEPT the enabled flag.
+                // Everything that defines the tool's surface EXCEPT the enabled flag. ToolType is part of it:
+                // a tool that moves between the standard and system surfaces must diff as CHANGED so the
+                // registrar removes the old proxy and re-adds it on the other manager (§2.2 changed-entry path).
                 var input = InputSchema?.ToJsonString() ?? "null";
                 var output = OutputSchema?.ToJsonString() ?? "null";
                 return string.Join("",
                     Name, Title, Description, SkillDescription, SkillBody,
                     input, output,
-                    ReadOnlyHint, DestructiveHint, IdempotentHint, OpenWorldHint, ExtensionId);
+                    ReadOnlyHint, DestructiveHint, IdempotentHint, OpenWorldHint, ExtensionId, IsSystem);
             }
         }
     }

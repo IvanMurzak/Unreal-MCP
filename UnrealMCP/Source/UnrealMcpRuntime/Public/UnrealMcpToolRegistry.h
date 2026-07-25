@@ -28,6 +28,32 @@ enum class EUnrealMcpParamRequirement : uint8
 	Required
 };
 
+/**
+ * Which SURFACE a tool is served on (docs/ARCHITECTURE.md §2.4). The 1:1 C++ mirror of the shared
+ * `com.IvanMurzak.McpPlugin.McpToolType` the C# engines (Unity / Godot) express as
+ * `[AiTool(..., ToolType = McpToolType.System)]`:
+ *
+ *   - `Standard` — advertised to MCP clients (`tools/list`) and callable at `/api/tools/<name>`. The default.
+ *   - `System`   — an INTERNAL tool: reachable ONLY over the server's `/api/system-tools/<name>` HTTP
+ *                  route, never advertised to an AI agent. Used for host-plumbing operations a client
+ *                  (the CLI / the desktop app) drives directly — liveness probing and skill authoring.
+ *
+ * The flag travels to the sidecar in the §2.2 manifest descriptor as `toolType` ("standard" | "system");
+ * the sidecar routes each proxied tool onto the matching McpPlugin manager, so a System tool is absent
+ * from `tools/list` AND from `/api/tools/<name>` — exactly Unity's semantics.
+ */
+enum class EUnrealMcpToolType : uint8
+{
+	Standard,
+	System
+};
+
+/** The manifest wire token for @p ToolType ("standard" | "system"). */
+UNREALMCPRUNTIME_API const TCHAR* UnrealMcpToolTypeToString(EUnrealMcpToolType ToolType);
+
+/** Parse a manifest wire token back to a tool type; anything unrecognized (or empty) is `Standard`. */
+UNREALMCPRUNTIME_API EUnrealMcpToolType UnrealMcpToolTypeFromString(const FString& Token);
+
 /** A declared tool parameter (name + JSON-schema type + description). */
 struct UNREALMCPRUNTIME_API FUnrealMcpParamSpec
 {
@@ -126,6 +152,13 @@ struct UNREALMCPRUNTIME_API FUnrealMcpRegisteredTool
 	FString SkillDescription;
 	TArray<FUnrealMcpParamSpec> Params;
 	TSharedPtr<FJsonObject> OutputSchema;
+	/**
+	 * The served surface (§2.4). `Standard` (the default) keeps the tool in `tools/list` + `/api/tools/<name>`;
+	 * `System` moves it to `/api/system-tools/<name>` only. Declared via FUnrealMcpToolBuilder::ToolType() and
+	 * shipped to the sidecar in ToDescriptorJson() as `toolType`. It participates in the schema hash, so
+	 * flipping a tool's surface re-registers its sidecar proxy on the OTHER manager (§2.2 changed-entry path).
+	 */
+	EUnrealMcpToolType ToolType = EUnrealMcpToolType::Standard;
 	bool bReadOnlyHint = false;
 	bool bDestructiveHint = false;
 	bool bIdempotentHint = false;
@@ -169,6 +202,12 @@ public:
 	 * own schemas locally so the shared builder surface stays small (one method, not one per math type).
 	 */
 	FUnrealMcpToolBuilder& Param(const FString& Name, const FString& JsonType, const FString& Desc, EUnrealMcpParamRequirement Req, TSharedPtr<FJsonObject> CustomSchema = nullptr);
+	/**
+	 * Declare the served SURFACE (§2.4). Omit for the normal case (`Standard`); pass
+	 * `EUnrealMcpToolType::System` for an internal tool that must NOT reach an AI agent's `tools/list`
+	 * and is invoked only over `/api/system-tools/<name>` (the `ping` liveness probe, the skill tools).
+	 */
+	FUnrealMcpToolBuilder& ToolType(EUnrealMcpToolType InToolType);
 	FUnrealMcpToolBuilder& ReadOnlyHint(bool bValue);
 	FUnrealMcpToolBuilder& DestructiveHint(bool bValue);
 	FUnrealMcpToolBuilder& IdempotentHint(bool bValue);

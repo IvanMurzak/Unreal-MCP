@@ -11,6 +11,7 @@
 using System.Collections.Generic;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using com.IvanMurzak.McpPlugin;
 using com.IvanMurzak.McpPlugin.Common.Model;
 using com.IvanMurzak.Unreal.MCP.Bridge.Ipc;
 
@@ -57,7 +58,12 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
                         // Fail fast — never hang to timeoutMs (§2.2 step 4).
                         return ResponseCallTool.Error(ex.Message).SetRequestID(requestId);
                     }
-                }) { Enabled = descriptor.Enabled };
+                },
+                // §2.4: carry the plugin-declared surface onto the proxy so SurfaceRoutingToolSink can put it on
+                // the system-tool manager instead of the MCP tool manager. A descriptor with no `toolType` (an
+                // older plugin) reads as Standard, preserving the pre-§2.4 behaviour exactly.
+                toolType: descriptor.IsSystem ? McpToolType.System : McpToolType.Standard)
+            { Enabled = descriptor.Enabled };
         }
 
         /// <summary>

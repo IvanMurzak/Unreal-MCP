@@ -55,6 +55,16 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
         public bool? OpenWorldHint { get; }
 
         /// <summary>
+        /// The served SURFACE (docs/ARCHITECTURE.md §2.4). <see cref="McpToolType.Standard"/> keeps the proxy on
+        /// the MCP tool manager (<c>tools/list</c> + <c>/api/tools/&lt;name&gt;</c>);
+        /// <see cref="McpToolType.System"/> moves it to the system-tool manager
+        /// (<c>/api/system-tools/&lt;name&gt;</c> only). Two consumers read it: <c>McpPluginBuilder.Build</c>
+        /// partitions BUILD-TIME runners by this value, and <c>SurfaceRoutingToolSink</c> routes each
+        /// manifest-driven proxy to the matching manager at runtime.
+        /// </summary>
+        public McpToolType ToolType { get; }
+
+        /// <summary>
         /// Whether this tool is exposed to MCP clients. Settable so the manifest registrar can toggle a
         /// runtime tool on/off. For post-registration toggling prefer
         /// <c>IToolManager.SetToolEnabled(name, enabled)</c> (it also fires the list-changed notification).
@@ -94,8 +104,10 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
             bool? destructiveHint,
             bool? idempotentHint,
             bool? openWorldHint,
-            Func<string, IReadOnlyDictionary<string, JsonElement>?, CancellationToken, Task<ResponseCallTool>> handler)
+            Func<string, IReadOnlyDictionary<string, JsonElement>?, CancellationToken, Task<ResponseCallTool>> handler,
+            McpToolType toolType = McpToolType.Standard)
         {
+            ToolType = toolType;
             Name = name ?? throw new ArgumentNullException(nameof(name));
             Title = title;
             Description = description;

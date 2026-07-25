@@ -26,6 +26,7 @@ using com.IvanMurzak.Unreal.MCP.Bridge.Auth;
 using com.IvanMurzak.Unreal.MCP.Bridge.Ipc;
 using com.IvanMurzak.Unreal.MCP.Bridge.Tools;
 using Microsoft.AspNetCore.SignalR.Client;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using R3;
 using McpVersion = com.IvanMurzak.McpPlugin.Common.Version;
@@ -394,15 +395,50 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
                 Environment = "Unreal-MCP-Bridge",
             };
 
-            // No WithToolsFromAssembly — the sidecar's tools are 100% dynamic (the plugin's manifest).
-            var builder = new McpPluginBuilder(version, _loggerProvider).SetConfig(_config);
+            // No WithToolsFromAssembly — the sidecar's tools are 100% dynamic (the plugin's manifest). Keep the
+            // CONCRETE builder (SetConfig returns the interface) so its ServiceProvider is reachable after Build:
+            // that is how the system-tool collection is obtained below.
+            var builder = new McpPluginBuilder(version, _loggerProvider);
+            builder.SetConfig(_config);
+
+            // §2.4 `unreal-skill-generate` — the ONE tool the sidecar itself owns, declared BEFORE Build so the
+            // builder's ToolType partitioning drops it straight into the system-tool collection. Its inputs (the
+            // manifest catalog + the handshake project root) are late-bound callbacks; neither exists yet here.
+            builder.AddTool(SkillGenerateTool.ToolId, SkillGenerateTool.Create(
+                toolCatalog: () => _registrar?.AppliedDescriptors,
+                projectRoot: () => _config.ProjectRootPath,
+                generator: new SkillFileGenerator(_loggerProvider?.CreateLogger(nameof(SkillFileGenerator)))));
+
             _plugin = builder.Build(_reflector);
 
             var toolManager = _plugin.McpManager.ToolManager
                 ?? throw new InvalidOperationException("Built McpPlugin has no ToolManager.");
 
+            // §2.4 surface routing: manifest tools flagged `toolType: "system"` by the plugin (ping,
+            // unreal-skill-create) must land on the SYSTEM manager, not the MCP tool manager. McpPlugin's
+            // ISystemToolManager is read-only because the C# engines fix their system set at build time; the
+            // Unreal sidecar's set is dynamic, so we mutate the DI-singleton SystemToolRunnerCollection the
+            // manager reads live (see SystemToolSink for the full rationale). Missing collection ⇒ fall back to
+            // standard-only routing: every tool stays reachable (on the wrong surface) rather than vanishing.
+            var systemToolRunners = builder.ServiceProvider?.GetService<SystemToolRunnerCollection>();
+            IProxyToolSink toolSink;
+            if (systemToolRunners != null)
+            {
+                toolSink = new SurfaceRoutingToolSink(
+                    new ToolManagerSink(toolManager),
+                    new SystemToolSink(systemToolRunners),
+                    _loggerProvider?.CreateLogger(nameof(SurfaceRoutingToolSink)));
+            }
+            else
+            {
+                _logger?.LogWarning(
+                    "Built McpPlugin exposes no SystemToolRunnerCollection; system tools will be served on the " +
+                    "standard surface this session.");
+                toolSink = new ToolManagerSink(toolManager);
+            }
+
             _registrar = new ManifestRegistrar(
-                new ToolManagerSink(toolManager),
+                toolSink,
                 _ipc,
                 _loggerProvider?.CreateLogger(nameof(ManifestRegistrar)));
 
