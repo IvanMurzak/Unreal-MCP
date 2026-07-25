@@ -40,14 +40,14 @@ Unreal-MCP is the Unreal Engine counterpart of [Unity-MCP](https://github.com/Iv
 
 Unlike Unity and Godot (C# engines that host the .NET `McpPlugin` in-process), Unreal's editor is **C++** — so the .NET MCP host runs as an auto-managed **sidecar process** (`unreal-mcp-bridge`) that the plugin spawns and talks to over a localhost IPC channel. The full design lives in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) (see the §0 system-overview diagram).
 
-> **Status: beta.** The plugin, the .NET sidecar, the `unreal-mcp-cli`, the AI Game Developer editor UI, and **62 built-in tools across 8 families** have shipped and are exercised by CI. The `unreal-mcp-cli` is **published on npm** — install the plugin with it (Option B below); the Fab / Epic Marketplace listing for the precompiled plugin is coming soon (Option A). Pixel-capture (screenshot) tools need a GPU-backed editor; everything else runs headless.
+> **Status: beta.** The plugin, the .NET sidecar, the `unreal-mcp-cli`, the AI Game Developer editor UI, and **61 built-in tools across 7 families** (plus 3 system tools) have shipped and are exercised by CI. The `unreal-mcp-cli` is **published on npm** — install the plugin with it (Option B below); the Fab / Epic Marketplace listing for the precompiled plugin is coming soon (Option A). Pixel-capture (screenshot) tools need a GPU-backed editor; everything else runs headless.
 
 > **[💬 Join our Discord Server](https://discord.gg/cfbdMZX99G)** — Ask questions, showcase your work, and connect with other developers!
 
 ## ![Features](https://github.com/IvanMurzak/Unreal-MCP/blob/main/docs/img/promo/hazzard-features.svg?raw=true)
 
 - ✔️ **AI agents** — Use the best agents from **Anthropic**, **OpenAI**, **Google**, or any other provider with no vendor lock-in
-- ✔️ **62 built-in Tools** — A wide range of [MCP Tools](#tools) across **8 families** for operating the Unreal Editor
+- ✔️ **61 built-in Tools** — A wide range of [MCP Tools](#tools) across **7 families** for operating the Unreal Editor
 - ✔️ **Blueprint authoring** — Create, edit, and **compile** Blueprints with a structured error/warning feedback loop the AI can act on
 - ✔️ **C++ edit & compile** — Read, scaffold, and edit project C++, then compile (Live Coding or UBT) with a structured error report
 - ✔️ **Visual feedback** — Capture viewport, game-view, camera, and isolated-actor screenshots the LLM can inspect directly
@@ -63,7 +63,7 @@ Unlike Unity and Godot (C# engines that host the .NET `McpPlugin` in-process), U
 - [Install](#install)
 - [Updating the plugin](#updating-the-plugin)
 - [First run](#first-run)
-- [Tools](#tools) — all 8 families, 62 tools
+- [Tools](#tools) — all 7 families, 61 tools (+ 3 system tools)
 - [Per-tool enable / disable](#per-tool-enable--disable)
 - [`unreal-mcp-cli`](#unreal-mcp-cli)
 - [Customize Tools, Prompts & Resources](#customize-tools-prompts--resources)
@@ -557,7 +557,7 @@ The complete, buildable example is [`samples/UnrealAIRuntimeSample/`](samples/Un
 
 A runtime connection ships exactly **one** built-in tool: **`ping`** (a liveness probe). `ping` is a [system tool](#tools), so it answers at `POST /api/system-tools/ping` and is not advertised to an AI agent — meaning a packaged game that registers nothing of its own presents an **empty** tool list, which is an honest description of it. Everything a runtime AI agent can do is **bring-your-own**: register your own tools via the extension bus above (`RegisterToolProvider`) and they appear normally.
 
-All of the engine-development families — the actor / component family, `object-get-data` / `object-modify`, `level-get-data`, the console / reflection tools, every screenshot tool, plus Blueprint authoring, asset / Content-Browser operations, C++ source edit & compile, level create/open/save, and editor-application state — are **editor-only** (the [62 editor tools](#tools)). They drive the editor and several are RCE-class (e.g. `reflection-method-call`, `console-run-command`), so they are not compiled into a shipped game by default. There is no editor in a packaged game, so the runtime built-in surface is intentionally just `ping` + whatever tools your game registers.
+All of the engine-development families — the actor / component family, `object-get-data` / `object-modify`, `level-get-data`, the console / reflection tools, every screenshot tool, plus Blueprint authoring, asset / Content-Browser operations, C++ source edit & compile, level create/open/save, and editor-application state — are **editor-only** (the [61 editor tools](#tools)). They drive the editor and several are RCE-class (e.g. `reflection-method-call`, `console-run-command`), so they are not compiled into a shipped game by default. There is no editor in a packaged game, so the runtime built-in surface is intentionally just `ping` + whatever tools your game registers.
 
 ## <a id="editor-only-exclude-from-packaged-games"></a>Editor-only — exclude Unreal-MCP from packaged games
 

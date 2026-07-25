@@ -23,7 +23,7 @@ delivered it. Identifiers below (tool ids, command names, env vars, paths) were 
 | §1 IPC bridge protocol | implemented | #4 (sidecar bridge e2e + live `ping`) |
 | §2 Dynamic tool registration | implemented | #4; the §2.3 `ProxyTool` lives in `bridge/` (see correction below) |
 | §3 Schema generation | implemented | exercised by every tool family (#13–#25) |
-| §4 GameThread dispatcher | implemented | #4 (used by all 8 families) |
+| §4 GameThread dispatcher | implemented | #4 (used by every tool family) |
 | §5 Extensions mechanism | implemented | #7 (`IUnrealMcpToolProvider`, `samples/UnrealAITemplate`) |
 | §6 Sidecar lifecycle | implemented | #4 (spawn / crash auto-restart / orphan-prevention / stdin-token) + #46 (BUNDLE-model resolution: env override → bundled `Binaries/ThirdParty/UnrealMcpBridge/<rid>/`, zero-click auto-spawn; the superseded download-on-first-run flow is dropped — see drift below) |
 | §7 Slate UI | implemented | #24 (AI Game Developer main window) + #29 (MCP Tools/Prompts/Resources aux windows) + #107 (collapsed the separate Settings window into the single main window, Unity-MCP parity) |
@@ -32,7 +32,7 @@ delivered it. Identifiers below (tool ids, command names, env vars, paths) were 
 | §9.2 Versioning | implemented | `commands/bump-version.ps1` single-sources `VersionName` across plugin/bridge/server/cli (the "≥ 6.8.0 w/ ProxyTool" pin is forward-looking — see §2.3 drift below) |
 | §9.3 Test strategy | implemented | bridge xUnit + cli vitest + plugin Automation specs (#13–#25), CI wiring #28 |
 | §9.4 CI (`test_pull_request` / `release` / `test_cli`) | implemented | #28 |
-| §10 ping family (1) | implemented | #4 |
+| §10 system tools (3: `ping`, `unreal-skill-create`, `unreal-skill-generate` — see §2.4) | implemented | #4 + owner ruling 2026-07-25 |
 | §10 actor & component family (13) | implemented | #14 |
 | §10 asset family (11) | implemented | #15 (issue #10) |
 | §10 blueprint family (11) | implemented | #13 |
@@ -41,7 +41,8 @@ delivered it. Identifiers below (tool ids, command names, env vars, paths) were 
 | §10 editor/reflection family (9) | implemented | #22 |
 | §10 level family (7) | implemented | #25 |
 
-**Total shipped: 62 core tools across 8 families** (counts verified from the registration source).
+**Total shipped: 61 STANDARD core tools across 7 families, plus 3 SYSTEM tools (§2.4)** (counts verified
+from the registration source).
 Prompts/Resources ship empty-but-wired (§10), as designed.
 
 ### Drift corrected against the implementation
@@ -386,7 +387,7 @@ A tool is served on exactly one of two surfaces, mirroring the shared
 
 | surface | reachable at | in `tools/list`? | for |
 | --- | --- | --- | --- |
-| **Standard** (default) | `/api/tools/<name>` + MCP `tools/call` | yes | the 62 authoring tools an AI agent drives |
+| **Standard** (default) | `/api/tools/<name>` + MCP `tools/call` | yes | the 61 authoring tools an AI agent drives |
 | **System** | `/api/system-tools/<name>` **only** | **no** | host plumbing a CLIENT drives: liveness, skill authoring |
 
 **The system tools are `ping`, `unreal-skill-create`, `unreal-skill-generate`** — the same three, with
@@ -1316,7 +1317,9 @@ mitigations) and keeps the runtime module dependency-lean (no UnrealEd, no Image
 > `UnrealMcpLevelTools.cpp`; the editor 4-tool screenshot family — `screenshot-viewport`, the PIE
 > `screenshot-game-view`, `screenshot-camera`, `screenshot-isolated` — restored; the runtime
 > `UnrealMcpRuntimeScreenshotTools.cpp` dropped). The editor still exposes all 62 built-ins across 8
-> families, unchanged in count — only their module home and the runtime registration reverted.
+> families, unchanged in count — only their module home and the runtime registration reverted. (Those are
+> the PRE-§2.4 counts, correct as of #141; `ping` has since moved to the SYSTEM surface, leaving 61
+> standard tools across 7 families — see §2.4.)
 
 "the runtime built-in manifest is exactly `{ping}`; every engine-development tool is absent" is a
 deterministic Automation gate (`UnrealMcp.RuntimeSubsystem` → "runtime manifest separation (ping-only
