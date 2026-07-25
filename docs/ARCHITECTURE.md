@@ -23,7 +23,7 @@ delivered it. Identifiers below (tool ids, command names, env vars, paths) were 
 | §1 IPC bridge protocol | implemented | #4 (sidecar bridge e2e + live `ping`) |
 | §2 Dynamic tool registration | implemented | #4; the §2.3 `ProxyTool` lives in `bridge/` (see correction below) |
 | §3 Schema generation | implemented | exercised by every tool family (#13–#25) |
-| §4 GameThread dispatcher | implemented | #4 (used by all 8 families) |
+| §4 GameThread dispatcher | implemented | #4 (used by every tool family) |
 | §5 Extensions mechanism | implemented | #7 (`IUnrealMcpToolProvider`, `samples/UnrealAITemplate`) |
 | §6 Sidecar lifecycle | implemented | #4 (spawn / crash auto-restart / orphan-prevention / stdin-token) + #46 (BUNDLE-model resolution: env override → bundled `Binaries/ThirdParty/UnrealMcpBridge/<rid>/`, zero-click auto-spawn; the superseded download-on-first-run flow is dropped — see drift below) |
 | §7 Slate UI | implemented | #24 (AI Game Developer main window) + #29 (MCP Tools/Prompts/Resources aux windows) + #107 (collapsed the separate Settings window into the single main window, Unity-MCP parity) |
@@ -32,7 +32,7 @@ delivered it. Identifiers below (tool ids, command names, env vars, paths) were 
 | §9.2 Versioning | implemented | `commands/bump-version.ps1` single-sources `VersionName` across plugin/bridge/server/cli (the "≥ 6.8.0 w/ ProxyTool" pin is forward-looking — see §2.3 drift below) |
 | §9.3 Test strategy | implemented | bridge xUnit + cli vitest + plugin Automation specs (#13–#25), CI wiring #28 |
 | §9.4 CI (`test_pull_request` / `release` / `test_cli`) | implemented | #28 |
-| §10 ping family (1) | implemented | #4 |
+| §10 system tools (3: `ping`, `unreal-skill-create`, `unreal-skill-generate` — see §2.4) | implemented | #4 + owner ruling 2026-07-25 |
 | §10 actor & component family (13) | implemented | #14 |
 | §10 asset family (11) | implemented | #15 (issue #10) |
 | §10 blueprint family (11) | implemented | #13 |
@@ -41,7 +41,8 @@ delivered it. Identifiers below (tool ids, command names, env vars, paths) were 
 | §10 editor/reflection family (9) | implemented | #22 |
 | §10 level family (7) | implemented | #25 |
 
-**Total shipped: 62 core tools across 8 families** (counts verified from the registration source).
+**Total shipped: 61 STANDARD core tools across 7 families, plus 3 SYSTEM tools (§2.4)** (counts verified
+from the registration source).
 Prompts/Resources ship empty-but-wired (§10), as designed.
 
 ### Drift corrected against the implementation
@@ -378,6 +379,64 @@ Until the NuGet release lands, `bridge/` builds with a `UseLocalMcpPlugin=true` 
 Fallback if the PR were rejected (it won't be — same owner): `ProxyTool` can live entirely in
 `bridge/` since `IRunTool` + `ToolManager.AddTool` are already public; the PR is for reuse, not
 necessity. **Verdict: minor additive API (b), confirmed.**
+
+### 2.4 Tool surfaces — STANDARD vs SYSTEM (owner ruling 2026-07-25)
+
+A tool is served on exactly one of two surfaces, mirroring the shared
+`com.IvanMurzak.McpPlugin.McpToolType` the C# engines declare as `[AiTool(..., ToolType = McpToolType.System)]`:
+
+| surface | reachable at | in `tools/list`? | for |
+| --- | --- | --- | --- |
+| **Standard** (default) | `/api/tools/<name>` + MCP `tools/call` | yes | the 61 authoring tools an AI agent drives |
+| **System** | `/api/system-tools/<name>` **only** | **no** | host plumbing a CLIENT drives: liveness, skill authoring |
+
+**The system tools are `ping`, `unreal-skill-create`, `unreal-skill-generate`** — the same three, with
+the engine prefix swapped, on Unity (`unity-skill-*`) and Godot (`godot-skill-*`). They are not
+capabilities: `ping` is how the `unreal-mcp-cli` and the desktop app decide the editor is reachable, and
+the skill tools author documentation/tooling. Leaving them on the standard surface spends `tools/list`
+tokens in every agent session on tools the agent must never call.
+
+**C++ declaration.** `FUnrealMcpToolBuilder::ToolType(EUnrealMcpToolType::System)`; the flag lives on
+`FUnrealMcpRegisteredTool::ToolType` (default `Standard`) and ships in the §2.2 manifest descriptor as
+`"toolType": "standard" | "system"`. It is inside the schema hash, so moving a tool between surfaces
+diffs as a CHANGED entry and re-registers the sidecar proxy on the other manager. An absent/unknown token
+parses as `Standard`, so an older plugin against a newer sidecar behaves exactly as before.
+
+**Sidecar routing.** `SurfaceRoutingToolSink` (wrapping `ToolManagerSink` + `SystemToolSink`) sends each
+proxied tool to the manager its descriptor named, and remembers which surface each name landed on so a
+later remove/toggle hits the right one. McpPlugin's `ISystemToolManager` is read-only by design — for the
+C# engines the system set is fixed at `McpPluginBuilder.Build` time — so the dynamic path writes the
+DI-singleton `SystemToolRunnerCollection` (a plain `Dictionary<string, IRunTool>`) that
+`McpSystemToolManager` reads live on every call. No upstream API change was needed.
+
+**Where each tool lives, and why the pair is split:**
+
+- `ping` and `unreal-skill-create` are **C++** tools proxied over IPC. `unreal-skill-create` writes plugin
+  C++ and needs the editor's own view of the install; `ping` must prove the editor round trip, which only a
+  C++-side handler can.
+- `unreal-skill-generate` is **sidecar-native** (`bridge/src/Tools/SkillGenerateTool.cs`). SKILL.md
+  generation moved out of C++ in #101 and the sidecar already holds the descriptor catalog; a C++ handler
+  may not synchronously wait on bridge state (§4, §11 risk 2), so a C++-homed generate tool could only
+  fire-and-forget and misreport completion. It is declared through `McpPluginBuilder.AddTool` before
+  `Build`, which partitions build-time runners by `IRunTool.ToolType` with no post-build mutation at all.
+
+**`unreal-skill-create` emits C++ and says a rebuild is required** (owner ruling, option (b)). Unity's
+`skill-create` writes a `.cs` Unity hot-compiles on domain reload; Unreal has no such path, and emitting C#
+into the sidecar is not viable (`bridge/src` has no Roslyn and no `AssemblyLoadContext`, and it ships as a
+prebuilt single-file binary an end user cannot recompile). The generated file lands in
+`UnrealMCP/Source/UnrealMcpEditor/Private/Tools/Skills/` and **self-registers** via
+`FUnrealMcpGeneratedSkillRegistrar`, so adding or deleting a skill never edits another file — the editor
+coordinator calls `UnrealMcpGeneratedSkills::Register` exactly once. The result always reports
+`rebuildRequired: true` / `callable: false`; triggering Live Coding automatically is deliberately deferred.
+The plugin's editor module is the destination rather than a game module because a game module that depends
+on `UnrealMcpRuntime` overrides a consumer's `TargetDenyList` and drags the plugin into packaged builds.
+A precompiled (marketplace) install has no C++ source on disk and is refused with that reason.
+
+**Consequence for callers.** `POST /api/tools/ping` no longer resolves. The CLI probes
+`/api/system-tools/ping` first and falls back to the legacy route only for a pre-§2.4 plugin
+(`cli/src/utils/probe.ts`); `scripts/connection_smoke.py` asserts `ping` is ABSENT from `tools/list` and
+exercises it over the REST system route instead. SKILL.md files are generated for standard tools only —
+documenting a system tool would re-expose it through the skills channel.
 
 ---
 
@@ -931,7 +990,7 @@ upstream release pipelines — never bumped ad-hoc (Godot lockstep rule).
 | bridge unit | xUnit (+Shouldly/Moq, McpPlugin conventions) | hosted ubuntu, PR | framing codec, manifest diff, ProxyTool mapping, backoff, config push |
 | cli unit | vitest | hosted ubuntu, PR | command logic, engine discovery (`LauncherInstalled.dat` fixture), lib export |
 | plugin unit/functional | UE Automation Spec (`BEGIN_DEFINE_SPEC`, filter `UnrealMcp.`) | self-hosted win UE 5.7, PR | schema generator table (§3.2 golden files), registry/dedup/ordering, dispatcher timeout+cancel, env/.env/config precedence, view-model status logic |
-| headless e2e | script: editor + local server + sidecar | self-hosted win, release (+nightly) | `UnrealEditor-Cmd.exe <proj> -ExecCmds="Automation RunTests UnrealMcp; Quit" -ReportExportPath=<dir> -unattended -nullrhi -nosplash -log`; CI parses the exported JSON report (`index.json`) for pass/fail + per-test results instead of scraping the log; live `ping`→`pong` via `POST /api/tools/ping` (Godot testbed runbook port) |
+| headless e2e | script: editor + local server + sidecar | self-hosted win, release (+nightly) | `UnrealEditor-Cmd.exe <proj> -ExecCmds="Automation RunTests UnrealMcp; Quit" -ReportExportPath=<dir> -unattended -nullrhi -nosplash -log`; CI parses the exported JSON report (`index.json`) for pass/fail + per-test results instead of scraping the log; live `ping`→`pong` via `POST /api/system-tools/ping` (§2.4 — `ping` is a SYSTEM tool) |
 | windowed/visual | operator runbook | local RTX machine | screenshots family, Slate windows (no GPU in headless — Godot lesson) |
 
 PR scope = first three rows. Release scope adds e2e + packaging. Per-tool live verification
@@ -1233,6 +1292,13 @@ The runtime module = lean infra (bridge / registry / dispatcher / sidecar / worl
 extension-manager) + `ping`. Parity is "framework + your custom tools," not "a subset of the built-ins
 in-game."
 
+> **§2.4 consequence:** `ping` is a SYSTEM tool, so it is served at `/api/system-tools/ping` and is NOT
+> advertised in `tools/list`. A packaged game that registers no tools of its own therefore advertises an
+> EMPTY tool list to an AI agent — which is the honest description of it: there is nothing an agent can
+> do there yet. `ping` remains fully reachable for liveness probing, and the runtime registry still
+> contains exactly `{ping}` (the deterministic `UnrealMcp.RuntimeSubsystem` gate asserts the REGISTRY, so
+> it is unaffected). The moment the game registers an `IUnrealMcpToolProvider`, its tools appear normally.
+
 Rationale: the engine-development tools are AI **authoring / inspection / dev** tools — and several are
 RCE-class (`reflection-method-call`, `console-run-command`, arbitrary `object-modify`/`actor-*`). They
 operate the editor and do not belong compiled into a shipped game by default. Keeping them editor-only
@@ -1251,7 +1317,9 @@ mitigations) and keeps the runtime module dependency-lean (no UnrealEd, no Image
 > `UnrealMcpLevelTools.cpp`; the editor 4-tool screenshot family — `screenshot-viewport`, the PIE
 > `screenshot-game-view`, `screenshot-camera`, `screenshot-isolated` — restored; the runtime
 > `UnrealMcpRuntimeScreenshotTools.cpp` dropped). The editor still exposes all 62 built-ins across 8
-> families, unchanged in count — only their module home and the runtime registration reverted.
+> families, unchanged in count — only their module home and the runtime registration reverted. (Those are
+> the PRE-§2.4 counts, correct as of #141; `ping` has since moved to the SYSTEM surface, leaving 61
+> standard tools across 7 families — see §2.4.)
 
 "the runtime built-in manifest is exactly `{ping}`; every engine-development tool is absent" is a
 deterministic Automation gate (`UnrealMcp.RuntimeSubsystem` → "runtime manifest separation (ping-only

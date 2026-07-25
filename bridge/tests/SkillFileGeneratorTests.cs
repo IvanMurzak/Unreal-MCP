@@ -170,6 +170,60 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         }
 
         [Fact]
+        public void Generate_SkipsSystemTools()
+        {
+            var gen = new SkillFileGenerator();
+            var tools = new List<ToolDescriptor>
+            {
+                DemoTool(),
+                new ToolDescriptor { Name = "ping", Description = "p", ToolType = "system" },
+            };
+
+            var result = gen.Generate(tools, _root);
+
+            Assert.True(result.Success);
+            Assert.Equal(1, result.FilesWritten);
+            Assert.True(Directory.Exists(Path.Combine(_root, "demo-tool")));
+            // A system tool is never documented — writing it would re-expose it through the skills channel.
+            Assert.False(Directory.Exists(Path.Combine(_root, "ping")));
+        }
+
+        [Fact]
+        public void Generate_AllSystemCatalog_PrunesNothingAndReportsFailure()
+        {
+            // REGRESSION (§2.4): when EVERY tool is a system tool the documented set is empty, so the stale-folder
+            // prune would run with an empty "current" set and delete every skill folder under the root — then
+            // report Success. That case is routine now: the runtime (in-game) built-in surface is `ping` ALONE and
+            // `ping` became a system tool, so a bare packaged game hits it on every `unreal-skill-generate`.
+            var gen = new SkillFileGenerator();
+            gen.Generate(new List<ToolDescriptor> { DemoTool() }, _root);
+            Assert.True(Directory.Exists(Path.Combine(_root, "demo-tool")));
+
+            var result = gen.Generate(
+                new List<ToolDescriptor> { new ToolDescriptor { Name = "ping", Description = "p", ToolType = "system" } },
+                _root);
+
+            Assert.False(result.Success);
+            Assert.NotNull(result.Error);
+            Assert.Equal(0, result.FilesPruned);
+            Assert.True(Directory.Exists(Path.Combine(_root, "demo-tool")));   // NOT wiped
+        }
+
+        [Fact]
+        public void Generate_EmptyCatalog_PrunesNothingAndReportsFailure()
+        {
+            // The sibling case: no manifest pushed yet. Same hazard, same refusal.
+            var gen = new SkillFileGenerator();
+            gen.Generate(new List<ToolDescriptor> { DemoTool() }, _root);
+
+            var result = gen.Generate(new List<ToolDescriptor>(), _root);
+
+            Assert.False(result.Success);
+            Assert.Equal(0, result.FilesPruned);
+            Assert.True(Directory.Exists(Path.Combine(_root, "demo-tool")));   // NOT wiped
+        }
+
+        [Fact]
         public void Generate_EmptyRoot_Fails()
         {
             var gen = new SkillFileGenerator();

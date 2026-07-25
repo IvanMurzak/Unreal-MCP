@@ -69,6 +69,16 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
         /// Creates the folder tree, overwrites existing files (idempotent), prunes stale generator-owned folders.
         /// Never throws — a write failure is reported in the result. Every tool is documented regardless of its
         /// enabled flag (the docs stay useful even for a tool hidden at runtime).
+        ///
+        /// <para>
+        /// SYSTEM tools are the ONE exclusion (docs/ARCHITECTURE.md §2.4): a skill file is agent-facing
+        /// documentation, and a system tool is by definition one an AI agent must never call (`ping`,
+        /// `unreal-skill-create`). Emitting a SKILL.md for one would re-expose it through the skills channel,
+        /// defeating the surface split. They are excluded HERE, in the single place both callers (the editor
+        /// panel's generate button and the `unreal-skill-generate` system tool) funnel through, so the rule
+        /// cannot drift between them — and an existing system-tool skill folder from before §2.4 is pruned as
+        /// stale on the next run.
+        /// </para>
         /// </summary>
         public Result Generate(IReadOnlyList<ToolDescriptor> tools, string skillsRootAbsolute)
         {
@@ -90,8 +100,9 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
                 return result;
             }
 
-            // Stable order (the C++ generator sorted by name) so a regenerate is deterministic.
-            var ordered = tools.OrderBy(t => t.Name, StringComparer.Ordinal).ToList();
+            // Stable order (the C++ generator sorted by name) so a regenerate is deterministic. System tools are
+            // filtered out first — see the §2.4 note on this method.
+            var ordered = tools.Where(t => !t.IsSystem).OrderBy(t => t.Name, StringComparer.Ordinal).ToList();
             var currentFolders = new HashSet<string>(StringComparer.Ordinal);
             var written = 0;
 
@@ -114,9 +125,24 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
                 }
             }
 
+            // NEVER prune on an empty document set. `currentFolders` is empty here, so the prune below would
+            // delete EVERY skill folder under the root. Two ways to reach it, and §2.4 made the second one
+            // routine: (a) the plugin has not pushed a manifest yet (the catalog is genuinely empty), and
+            // (b) every tool in the manifest is a SYSTEM tool — which is exactly the runtime (in-game) case,
+            // where the built-in surface is `ping` ALONE and `ping` is now a system tool. Before §2.4 `ordered`
+            // was `[ping]` there and the wipe was unreachable. Bailing out keeps Success=false, so the caller
+            // is told nothing happened instead of being handed "generated 0 (pruned N)" as a success.
+            if (ordered.Count == 0)
+            {
+                result.Error = tools.Count == 0
+                    ? "No tools in the catalog yet (the plugin has not pushed a tool manifest) — nothing generated, nothing pruned."
+                    : $"All {tools.Count} tool(s) in the catalog are SYSTEM tools (§2.4), which are never documented — nothing generated, nothing pruned.";
+                return result;
+            }
+
             result.FilesPruned = PruneStaleSkillFolders(skillsRootAbsolute, currentFolders);
 
-            if (written == 0 && ordered.Count > 0)
+            if (written == 0)
             {
                 result.Error = $"Failed to write any of {ordered.Count} skill file(s) under {skillsRootAbsolute}.";
                 return result;

@@ -6,7 +6,8 @@ Unity-MCP and Godot-MCP. It works in **two modes**: an **editor** mode (the defa
 **Editor**: spawn actors, edit levels, author/compile Blueprints, edit/compile C++, capture screenshots,
 …) and an opt-in **in-game runtime** mode (drive a running PIE / Standalone / packaged **Development**
 build so an AI can operate your live game). **Status: beta** — the plugin, the .NET sidecar, the
-`unreal-mcp-cli`, the AI Game Developer editor UI, and **62 built-in editor tools across 8 families**
+`unreal-mcp-cli`, the AI Game Developer editor UI, and **61 built-in editor tools across 7 families**
+(plus 3 §2.4 system tools)
 have shipped and are covered by CI. The `unreal-mcp-cli` is **published on npm** (the Fab / Epic
 Marketplace listing for the precompiled plugin is coming soon). The local MCP server is the shared,
 engine-agnostic [GameDev-MCP-Server](https://github.com/IvanMurzak/GameDev-MCP-Server)
@@ -44,13 +45,14 @@ the editor module that depends on it):
   DeveloperSettings public; Networking/Sockets/Json/JsonUtilities/Projects private). Also home to the
   runtime bootstrap (`UUnrealMcpRuntimeSubsystem`) + kill-switch settings (`UUnrealMcpRuntimeSettings`).
 - **`UnrealMcpEditor`** (Type **Editor**, LoadingPhase Default) — depends on `UnrealMcpRuntime` and layers
-  the Slate UI + the **62 editor-only tools** (the 8 families below, several RCE-class) on the SAME
-  registry, plus the local-server manager and the dev-control bridge.
+  the Slate UI + the **61 editor-only tools** (the 7 families below, several RCE-class) + the
+  `unreal-skill-create` system tool (§2.4) on the SAME registry, plus the local-server manager and the
+  dev-control bridge.
 
 > Three locked decisions (ARCHITECTURE §12): (a) reuse the .NET sidecar — no in-process C++ server;
 > (b) the `UnrealMcpRuntime` module holds the engine-agnostic infra + the runtime-safe `ping`, and
 > `UnrealMcpEditor` depends on it; (c) a runtime connection is **explicit opt-in** — a shipped game NEVER
-> auto-connects. The 62 engine-development tools are all **editor-only**; a game brings its OWN gameplay
+> auto-connects. The 61 engine-development tools are all **editor-only**; a game brings its OWN gameplay
 > tools via `IUnrealMcpToolProvider` (author guide: [`docs/EXTENSIONS.md`](docs/EXTENSIONS.md)).
 
 ## Layout
@@ -60,7 +62,7 @@ the editor module that depends on it):
 | `UnrealMCP/` | The UE **plugin**. `UnrealMCP/UnrealMCP.uplugin` `VersionName` is the version single-source (currently **`0.6.1`**). **No `EngineVersion` pin** (UE treats that field as an exact-build match, not a floor, and would refuse to load on newer engines); the **5.5+ floor** is a CI/doc claim (CI-tested against **5.7** and **5.8**). Declared modules: **`UnrealMcpRuntime` (Type `Runtime`)** + **`UnrealMcpEditor` (Type `Editor`)**, both LoadingPhase `Default`, runtime first |
 | `UnrealMCP/Source/UnrealMcpRuntime/Public/` | The **public** contracts — re-exported by `UnrealMcpEditor`, so the SAME headers serve editor and runtime extensions: the tool/prompt/resource provider interfaces (`IUnrealMcpToolProvider.h`, `IUnrealMcpPromptProvider.h`, `IUnrealMcpResourceProvider.h`) + their fluent registries (`UnrealMcpToolRegistry.h`, `UnrealMcpPromptRegistry.h`, `UnrealMcpResourceRegistry.h`); the runtime bootstrap (`UnrealMcpRuntimeSubsystem.h`); the kill-switch settings (`UnrealMcpRuntimeSettings.h`); and the runtime core-family `Register` entry points (`UnrealMcpRuntimeCoreTools.h` = `ping`, `UnrealMcpRuntimeCorePrompts.h`, `UnrealMcpRuntimeCoreResources.h`) |
 | `UnrealMCP/Source/UnrealMcpRuntime/Private/` | The infra that cooks into games: `Bridge/` (TCP listener + NDJSON), `Dispatch/` (game-thread dispatcher), `Tools/` (registry, object-ref, world provider, property-JSON, scoped-read, log collector, `ping`), `Sidecar/`, `Config/`, `Extensions/`, plus the core `Prompts/`/`Resources/` families |
-| `UnrealMCP/Source/UnrealMcpEditor/Private/` | The editor-only surface: `Tools/` (the 8 families = 62 tools), `UI/` (Slate main window + aux tabs), `Server/` (local `gamedev-mcp-server` manager), `DevControl/`, plus the renamed editor coordinator |
+| `UnrealMCP/Source/UnrealMcpEditor/Private/` | The editor-only surface: `Tools/` (the 7 families = 61 tools, plus the `unreal-skill-create` system tool), `UI/` (Slate main window + aux tabs), `Server/` (local `gamedev-mcp-server` manager), `DevControl/`, plus the renamed editor coordinator |
 | `UnrealMCP/Source/UnrealMcpEditorTests/` | Automation specs behind `WITH_DEV_AUTOMATION_TESTS`, names under the **`UnrealMcp.`** filter prefix. **This module is NOT declared in the distributed `UnrealMCP.uplugin`** (Fab flags shipped test modules, §6.7) — PR/dev CI transiently re-adds it via `commands/test-module-uplugin.ps1` around the Automation BuildPlugin, then reverts. **No top-level test folder** — tests live per-leg |
 | `bridge/` | .NET 9 **sidecar** `com.IvanMurzak.Unreal.MCP.Bridge` (binary `unreal-mcp-bridge`) — the self-contained McpPlugin host the plugin spawns; IPC ⇄ SignalR relay. xUnit tests in `bridge/tests/`. Hand-authored, TRACKED solution `bridge/Unreal-MCP-Bridge.sln` |
 | `cli/` | `unreal-mcp-cli` npm package (TypeScript, commander, vitest) — 16 commands. **Published on npm**; CI owns subsequent releases (see `docs/RELEASING.md`) |
@@ -77,8 +79,8 @@ via `FUnrealMcpServerManager`, gated to Custom + http).
 ## Editor vs runtime (in-game)
 
 - **Editor mode** (default, everything in §0–§11): the **Editor** loads the plugin, auto-spawns the
-  sidecar, and serves the 62 editor tools + the core `ping`/prompt/resource families. This is the
-  `unreal-mcp-cli` / AI Game Developer window flow.
+  sidecar, and serves the 61 editor tools + the §2.4 system tools + the core prompt/resource families.
+  This is the `unreal-mcp-cli` / AI Game Developer window flow.
 - **Runtime mode** (§12): a running game can host an MCP connection. The entry point is a
   `UGameInstanceSubsystem`, `UUnrealMcpRuntimeSubsystem` (in `UnrealMcpRuntime`) — auto-instantiated per
   `UGameInstance` but it **never auto-connects**; `Initialize()` only arms the listener (no sidecar spawn,
@@ -89,7 +91,8 @@ via `FUnrealMcpServerManager`, gated to Custom + http).
   selection) is **editor-only** — they drive the editor and several are RCE-class, so they are not
   compiled into a shipped game. A game gets runtime tools by **bringing its own** via
   `IUnrealMcpToolProvider` (see the §12.7 / §12.9 design; the deterministic
-  `UnrealMcp.RuntimeSubsystem` Automation gate asserts the runtime manifest is exactly `{ping}`).
+  `UnrealMcp.RuntimeSubsystem` Automation gate asserts the runtime REGISTRY is exactly `{ping}` — `ping` is a
+  §2.4 SYSTEM tool, so `tools/list` on a bare runtime connection is legitimately EMPTY).
 - **Runtime security gates** — all enforced inside `Connect()` (§12.8): (1) **opt-in only**, never
   auto-connect; (2) **kill switch** `UUnrealMcpRuntimeSettings::bRuntimeMcpEnabled` (Project Settings →
   Plugins → *Unreal MCP (Runtime)*, a **Game** config setting in `DefaultGame.ini`) defaults **false** —
@@ -200,13 +203,23 @@ the `content[]` image array). `/api/tools/<name>` calls **require** `-H "Content
 
 ## Tool / prompt / resource surface
 
-The editor ships **62 built-in ("core") tools across 8 families** (counts from the registration source:
-actor 13, blueprint 11, asset 11, editor/reflection 9, level 7, source 6, screenshot 4, ping 1 = 62).
-Tool ids are kebab-case (`actor-create`, `blueprint-compile`); the registry validates
-`^[a-z0-9]+(-[a-z0-9]+)*$`. The README carries the full, source-generated family-by-family list — treat
-it as the canonical inventory. Plus shipped **core prompt** `level-design-brief` and **core resources**
-`unreal://project/levels` + `unreal://project/icon` (static fixed-URI only; templated URIs deferred). The
-runtime module ships only `ping`.
+The editor ships **61 built-in ("core") tools across 7 families** on the STANDARD surface (counts from the
+registration source: actor 13, blueprint 11, asset 11, editor/reflection 9, level 7, source 6,
+screenshot 4 = 61), plus **3 SYSTEM tools**. Tool ids are kebab-case (`actor-create`,
+`blueprint-compile`); the registry validates `^[a-z0-9]+(-[a-z0-9]+)*$`. The README carries the full,
+source-generated family-by-family list — treat it as the canonical inventory. Plus shipped **core prompt**
+`level-design-brief` and **core resources** `unreal://project/levels` + `unreal://project/icon` (static
+fixed-URI only; templated URIs deferred). The runtime module ships only `ping`.
+
+**Tool surfaces (ARCHITECTURE §2.4, owner ruling 2026-07-25).** Every tool is `Standard` (in `tools/list`
++ `/api/tools/<name>`) or `System` (`/api/system-tools/<name>` ONLY, never advertised to an AI agent) —
+the C++ mirror of the `McpToolType` Unity/Godot declare via `[AiTool(..., ToolType = McpToolType.System)]`.
+Declared with `FUnrealMcpToolBuilder::ToolType(EUnrealMcpToolType::System)` and shipped in the manifest as
+`toolType`; the sidecar's `SurfaceRoutingToolSink` puts each proxy on the matching McpPlugin manager. The
+three system tools are **`ping`**, **`unreal-skill-create`** (generates a self-registering C++ tool file
+into `UnrealMcpEditor/Private/Tools/Skills/` and reports **rebuild required** — it is never live before a
+rebuild) and **`unreal-skill-generate`** (sidecar-native, `bridge/src/Tools/SkillGenerateTool.cs`).
+`POST /api/tools/ping` no longer resolves — the CLI probes the system route with a legacy fallback.
 
 ## Versioning
 

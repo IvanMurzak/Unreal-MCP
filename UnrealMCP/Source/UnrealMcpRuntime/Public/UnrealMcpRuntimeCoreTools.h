@@ -11,7 +11,10 @@ class FUnrealMcpToolRegistry;
  * Registration entry point for the RUNTIME-safe built-in tool family (docs/ARCHITECTURE.md §10, §12).
  *
  * `ping` is the ONLY built-in tool the runtime module ships: a liveness probe + a non-empty manifest so a
- * runtime connection always has at least one tool. Every engine-development tool family — actor/component,
+ * runtime connection always has at least one REGISTERED tool. Note `ping` is a SYSTEM tool (§2.4), so it is
+ * served at `/api/system-tools/ping` and is NOT advertised in `tools/list` — a packaged game that registers
+ * no tools of its own therefore presents an EMPTY `tools/list` to an AI agent (§12.7), even though the
+ * registry still contains exactly {ping}. Every engine-development tool family — actor/component,
  * console/reflection, screenshot, level-read/write, blueprint, asset, source, editor-application/selection —
  * is EDITOR-ONLY and registered by the editor coordinator from the editor module's UnrealMcpCoreTools.h
  * (those tools drive the editor: undo transactions, the asset registry, Blueprint compilation, the editor

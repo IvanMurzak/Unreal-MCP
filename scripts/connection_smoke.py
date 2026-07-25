@@ -161,15 +161,42 @@ def mcp_call_tool(url: str, token: str | None, sid: str | None, name: str, args:
 
 
 SMOKE_BATTERY = [
-    ("ping", lambda nonce: {"message": nonce}),
     ("editor-application-get-state", lambda nonce: {}),
     ("level-list-loaded", lambda nonce: {}),
     ("actor-find", lambda nonce: {}),
     ("actor-component-list-all", lambda nonce: {}),
 ]
 
+# `ping` is a SYSTEM tool (docs/ARCHITECTURE.md §2.4, owner ruling 2026-07-25), so it is deliberately
+# ABSENT from tools/list and cannot be exercised through tools/call. It is checked over the REST
+# system-tools route instead — which is the stronger assertion anyway: it proves the surface split
+# itself works end to end (server -> sidecar system manager -> IPC -> editor -> back), not just that
+# some tool round-trips.
+SYSTEM_PING_ROUTE = "/api/system-tools/ping"
 
-def run_e2e(url: str, token: str | None, nonce: str) -> tuple[bool, str]:
+
+def rest_system_ping(base_url: str, token: str | None, nonce: str,
+                     timeout: float = 30.0) -> tuple[bool, str]:
+    """POST the nonce to /api/system-tools/ping and confirm it comes back echoed."""
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    req = urllib.request.Request(
+        base_url.rstrip("/") + SYSTEM_PING_ROUTE,
+        data=json.dumps({"message": nonce}).encode(),
+        method="POST", headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout, context=ssl.create_default_context()) as resp:
+            body = resp.read().decode("utf-8", "replace")
+            ok = resp.status == 200 and nonce in body
+            return ok, f"HTTP {resp.status} {body.strip()[:100]}"
+    except urllib.error.HTTPError as e:
+        return False, f"HTTP {e.code}"
+    except (urllib.error.URLError, socket.timeout, ssl.SSLError, ConnectionError) as e:
+        return False, f"{type(e).__name__}: {e}"
+
+
+def run_e2e(url: str, rest_base: str, token: str | None, nonce: str) -> tuple[bool, str]:
     status, sid = mcp_initialize(url, token)
     if status != 200 or not sid:
         return False, f"initialize failed (HTTP {status})"
@@ -183,6 +210,12 @@ def run_e2e(url: str, token: str | None, nonce: str) -> tuple[bool, str]:
     if not tools:
         return False, "tools/list returned no tools"
     log(f"e2e: tools/list -> {len(tools)} tools (e.g. {', '.join(sorted(tools)[:6])})")
+
+    # §2.4: a SYSTEM tool must NOT be advertised to MCP clients. Assert the split rather than merely
+    # tolerating the absence — a `ping` that reappeared here would mean the surface regressed.
+    if "ping" in tools:
+        return False, "ping is advertised in tools/list — it must be a SYSTEM tool (§2.4)"
+
     results: list[tuple[str, bool]] = []
     call_id = 10
     for name, mkargs in SMOKE_BATTERY:
@@ -190,12 +223,15 @@ def run_e2e(url: str, token: str | None, nonce: str) -> tuple[bool, str]:
             continue
         ok, sid, text = mcp_call_tool(url, token, sid, name, mkargs(nonce), call_id)
         call_id += 1
-        if name == "ping" and ok:
-            ok = (nonce in text) or ("pong" in text.lower())
         results.append((name, ok))
         log(f"e2e: {name:<30} -> {'OK  ' if ok else 'FAIL'}  {text[:60]}")
-    if not results:
-        return True, f"connected + {len(tools)} tools listed (no battery tools present; list = PASS)"
+
+    # The system-surface half of the round trip, over REST (the route the CLI + desktop app probe). The base
+    # is passed in, not derived from `url`: cloud and custom mount the REST surfaces differently (see main).
+    ping_ok, ping_detail = rest_system_ping(rest_base, token, nonce)
+    results.append(("ping (system)", ping_ok))
+    log(f"e2e: {'ping (system-tools)':<30} -> {'OK  ' if ping_ok else 'FAIL'}  {ping_detail[:60]}")
+
     passed = sum(1 for _, ok in results if ok)
     detail = f"{passed}/{len(results)} tools OK ({len(tools)} listed): " + \
              ", ".join(f"{n}{'' if ok else '!'}" for n, ok in results)
@@ -346,6 +382,11 @@ def main() -> int:
             raise SystemExit("FAIL: no cloudToken — authorize once in the editor first.")
         base = (cfg.get("cloudUrl") or "https://ai-game.dev").rstrip("/")
         mcp_url = base + "/mcp"
+        # REST base for the §2.4 system-tools route. In CLOUD mode nginx mounts the WHOLE MCP server under
+        # /mcp and strips that prefix, so the REST surfaces live at <base>/mcp/api/... — do NOT strip it back
+        # off (<base>/api/... reaches the billing backend, not the MCP server). This is why it is threaded
+        # explicitly rather than derived from mcp_url.
+        rest_base = mcp_url
         log(f"mode=cloud  mcp={mcp_url}  (token len {len(token)})")
     else:
         token = None
@@ -363,6 +404,8 @@ def main() -> int:
             return 1
         log(f"local server listening on {port}")
         mcp_url = f"http://localhost:{port}/mcp"
+        # Local server: /mcp and /api/... are siblings off the root.
+        rest_base = f"http://localhost:{port}"
         editor_env["UNREAL_MCP_CONNECTION_MODE"] = "Custom"
         editor_env["UNREAL_MCP_HOST"] = f"http://localhost:{port}"
         editor_env["UNREAL_MCP_KEEP_CONNECTED"] = "true"
@@ -411,7 +454,7 @@ def main() -> int:
 
         if connect_result == "PASS" and not args.connect_only:
             log("connection up — running e2e tool battery...")
-            e2e_ok, e2e_detail = run_e2e(mcp_url, token, nonce=f"conn-smoke-{int(start)}")
+            e2e_ok, e2e_detail = run_e2e(mcp_url, rest_base, token, nonce=f"conn-smoke-{int(start)}")
     finally:
         marks = scan_log(logpath) or marks
         if not args.keep_editor and proc.poll() is None:
