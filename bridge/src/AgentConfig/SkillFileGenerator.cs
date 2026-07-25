@@ -125,9 +125,24 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
                 }
             }
 
+            // NEVER prune on an empty document set. `currentFolders` is empty here, so the prune below would
+            // delete EVERY skill folder under the root. Two ways to reach it, and §2.4 made the second one
+            // routine: (a) the plugin has not pushed a manifest yet (the catalog is genuinely empty), and
+            // (b) every tool in the manifest is a SYSTEM tool — which is exactly the runtime (in-game) case,
+            // where the built-in surface is `ping` ALONE and `ping` is now a system tool. Before §2.4 `ordered`
+            // was `[ping]` there and the wipe was unreachable. Bailing out keeps Success=false, so the caller
+            // is told nothing happened instead of being handed "generated 0 (pruned N)" as a success.
+            if (ordered.Count == 0)
+            {
+                result.Error = tools.Count == 0
+                    ? "No tools in the catalog yet (the plugin has not pushed a tool manifest) — nothing generated, nothing pruned."
+                    : $"All {tools.Count} tool(s) in the catalog are SYSTEM tools (§2.4), which are never documented — nothing generated, nothing pruned.";
+                return result;
+            }
+
             result.FilesPruned = PruneStaleSkillFolders(skillsRootAbsolute, currentFolders);
 
-            if (written == 0 && ordered.Count > 0)
+            if (written == 0)
             {
                 result.Error = $"Failed to write any of {ordered.Count} skill file(s) under {skillsRootAbsolute}.";
                 return result;

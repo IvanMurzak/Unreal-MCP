@@ -39,9 +39,13 @@ namespace UnrealMcpGeneratedSkills
 	UNREALMCPEDITOR_API int32 Num();
 
 	/**
-	 * Run every self-registered generated skill against @p Registry, in link order. Called once by the
-	 * editor coordinator AFTER the hand-written core families, so a generated skill that reuses a core
-	 * tool id is rejected by the registry's normal collision handling rather than shadowing a built-in.
+	 * Run every self-registered generated skill against @p Registry, in link order, inside an EXTENSION
+	 * SCOPE (ExtensionId `generated-skill`) — never the core path. Generated skills are machine-authored
+	 * and hand-editable, so they are untrusted: the extension scope validates each entry and rejects a
+	 * collision first-wins ("extensions may not shadow core"), which is what actually stops a generated
+	 * `actor-create` from replacing the built-in. ORDER IS NOT THE GUARD — the core path replaces any
+	 * same-key entry, so committing there would let a generated id win outright (and running LAST would
+	 * make that certain). Called once by the editor coordinator after the hand-written core families.
 	 */
 	UNREALMCPEDITOR_API void Register(FUnrealMcpToolRegistry& Registry);
 }

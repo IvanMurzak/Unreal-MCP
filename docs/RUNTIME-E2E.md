@@ -119,12 +119,14 @@ Leave it running. The runtime game will dial `http://localhost:<port>` in **Cust
 
 With the connection up, exercise (over the server's REST passthrough and/or `tools/list`):
 
-- `ping` — readiness probe. The runtime ships exactly ONE built-in tool: `ping` (§12.7).
+- `ping` — readiness probe, over `POST /api/system-tools/ping` (§2.4 — `ping` is a SYSTEM tool and is NOT
+  in `tools/list`). The runtime ships exactly ONE built-in tool: `ping` (§12.7).
 - `game-time-dilation` — the runtime sample tool (`samples/UnrealAIRuntimeSample/`), if that sample
   plugin is enabled in the testbed. This is the **bring-your-own-tool** path: a game registers its own
   `IUnrealMcpToolProvider` and its tools appear alongside `ping`.
-- `tools/list` — confirm the **runtime** built-in manifest is exactly `{ping}` plus any registered
-  sample/extension tools, and that EVERY engine-development tool — the actor/component family,
+- `tools/list` — `ping` is a SYSTEM tool (§2.4) and is **absent** here by design, so on a bare runtime
+  connection `tools/list` is legitimately **EMPTY**; with the runtime sample enabled it is exactly
+  `{game-time-dilation}`. Confirm that EVERY engine-development tool — the actor/component family,
   `console-run-command`, `level-get-data`, the screenshot tools, `asset-find`, `blueprint-create`,
   `editor-application-*`, … — is **absent** at runtime (they are editor-only, §12.7). Use MCP
   `tools/list` over `POST /mcp` for membership assertions — the `/api/tools/<name>` REST passthrough

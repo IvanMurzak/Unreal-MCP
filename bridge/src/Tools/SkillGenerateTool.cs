@@ -88,7 +88,10 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
                 inputSchema: BuildInputSchema(),
                 outputSchema: null,
                 readOnlyHint: false,
-                destructiveHint: false,
+                // Destructive per the MCP definition ("may perform destructive updates ... deleting data,
+                // overwriting files"): every run overwrites each SKILL.md and recursively deletes stale
+                // generator-owned folders. Idempotent still holds — the same catalog yields the same tree.
+                destructiveHint: true,
                 idempotentHint: true,
                 openWorldHint: false,
                 handler: (requestId, namedParameters, cancellationToken) =>

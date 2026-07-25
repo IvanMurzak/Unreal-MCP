@@ -87,8 +87,10 @@ void FUnrealMcpEditorCoordinator::Startup()
 	UnrealMcpSourceTools::Register(*Registry); // §10 C++ source / script family (issue #18)
 	UnrealMcpSkillTools::Register(*Registry); // §2.4 skill authoring — `unreal-skill-create` (SYSTEM surface)
 	// §2.4 generated skills: every C++ file `unreal-skill-create` emitted into
-	// UnrealMcpEditor/Private/Tools/Skills/ self-registered at static-init time; run them LAST so a generated
-	// id that collides with a core tool is rejected by the registry rather than shadowing a built-in. This is
+	// UnrealMcpEditor/Private/Tools/Skills/ self-registered at static-init time. They commit through an
+	// EXTENSION SCOPE (see UnrealMcpGeneratedSkills::Register), which is what rejects a generated id that
+	// collides with a core tool — the ordering below is NOT the guard, since the core path would simply
+	// replace the built-in. Registering after the core families just keeps the log order readable. This is
 	// the ONE wiring line generated skills need — adding or deleting one never edits this file again.
 	UnrealMcpGeneratedSkills::Register(*Registry);
 

@@ -196,7 +196,7 @@ def rest_system_ping(base_url: str, token: str | None, nonce: str,
         return False, f"{type(e).__name__}: {e}"
 
 
-def run_e2e(url: str, token: str | None, nonce: str) -> tuple[bool, str]:
+def run_e2e(url: str, rest_base: str, token: str | None, nonce: str) -> tuple[bool, str]:
     status, sid = mcp_initialize(url, token)
     if status != 200 or not sid:
         return False, f"initialize failed (HTTP {status})"
@@ -226,9 +226,9 @@ def run_e2e(url: str, token: str | None, nonce: str) -> tuple[bool, str]:
         results.append((name, ok))
         log(f"e2e: {name:<30} -> {'OK  ' if ok else 'FAIL'}  {text[:60]}")
 
-    # The system-surface half of the round trip, over REST (the route the CLI + desktop app probe).
-    base_url = url[: -len("/mcp")] if url.endswith("/mcp") else url
-    ping_ok, ping_detail = rest_system_ping(base_url, token, nonce)
+    # The system-surface half of the round trip, over REST (the route the CLI + desktop app probe). The base
+    # is passed in, not derived from `url`: cloud and custom mount the REST surfaces differently (see main).
+    ping_ok, ping_detail = rest_system_ping(rest_base, token, nonce)
     results.append(("ping (system)", ping_ok))
     log(f"e2e: {'ping (system-tools)':<30} -> {'OK  ' if ping_ok else 'FAIL'}  {ping_detail[:60]}")
 
@@ -382,6 +382,11 @@ def main() -> int:
             raise SystemExit("FAIL: no cloudToken — authorize once in the editor first.")
         base = (cfg.get("cloudUrl") or "https://ai-game.dev").rstrip("/")
         mcp_url = base + "/mcp"
+        # REST base for the §2.4 system-tools route. In CLOUD mode nginx mounts the WHOLE MCP server under
+        # /mcp and strips that prefix, so the REST surfaces live at <base>/mcp/api/... — do NOT strip it back
+        # off (<base>/api/... reaches the billing backend, not the MCP server). This is why it is threaded
+        # explicitly rather than derived from mcp_url.
+        rest_base = mcp_url
         log(f"mode=cloud  mcp={mcp_url}  (token len {len(token)})")
     else:
         token = None
@@ -399,6 +404,8 @@ def main() -> int:
             return 1
         log(f"local server listening on {port}")
         mcp_url = f"http://localhost:{port}/mcp"
+        # Local server: /mcp and /api/... are siblings off the root.
+        rest_base = f"http://localhost:{port}"
         editor_env["UNREAL_MCP_CONNECTION_MODE"] = "Custom"
         editor_env["UNREAL_MCP_HOST"] = f"http://localhost:{port}"
         editor_env["UNREAL_MCP_KEEP_CONNECTED"] = "true"
@@ -447,7 +454,7 @@ def main() -> int:
 
         if connect_result == "PASS" and not args.connect_only:
             log("connection up — running e2e tool battery...")
-            e2e_ok, e2e_detail = run_e2e(mcp_url, token, nonce=f"conn-smoke-{int(start)}")
+            e2e_ok, e2e_detail = run_e2e(mcp_url, rest_base, token, nonce=f"conn-smoke-{int(start)}")
     finally:
         marks = scan_log(logpath) or marks
         if not args.keep_editor and proc.poll() is None:

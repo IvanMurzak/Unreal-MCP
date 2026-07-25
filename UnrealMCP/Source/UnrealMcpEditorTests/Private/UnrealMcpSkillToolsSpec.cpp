@@ -263,6 +263,52 @@ void FUnrealMcpSkillToolsSpec::Define()
 			TestEqual(TEXT("registered exactly the compiled-in generated skills"),
 				Registry.Num(), Before + UnrealMcpGeneratedSkills::Num());
 		});
+
+		It("enrolls a skill through the bus and registers it", [this]()
+		{
+			// The assertion above is 0 == 0 + 0 in a clean checkout (and in CI), so it would still pass if
+			// Register() were an empty function. Drive the bus directly to make it load-bearing. The backing
+			// array is process-global and append-only, so the ids here are `spec-`-namespaced.
+			UnrealMcpGeneratedSkills::Add([](FUnrealMcpToolRegistry& R)
+			{
+				R.Tool(TEXT("spec-bus-enrolled-skill"))
+					.Description(TEXT("Spec fixture for the generated-skill bus."))
+					.Handle([](const FUnrealMcpToolCall&) { return FUnrealMcpToolResult::Success(TEXT("ok")); });
+			});
+
+			FUnrealMcpToolRegistry Registry;
+			UnrealMcpGeneratedSkills::Register(Registry);
+			TestTrue(TEXT("the enrolled skill landed in the registry"),
+				Registry.HasTool(TEXT("spec-bus-enrolled-skill")));
+		});
+
+		It("NEVER lets a generated skill shadow a core tool", [this]()
+		{
+			// The load-bearing guard. Generated skills commit through an EXTENSION SCOPE, not the trusted core
+			// path — the core path "replaces any same-key entry" (UnrealMcpRegistry.h Commit), so committing
+			// there would let a generated `actor-create.cpp` silently REPLACE the built-in handler for every AI
+			// agent, and running the bus LAST (as the coordinator does) would make that certain rather than
+			// prevent it. The extension scope rejects the collision first-wins instead, so CORE must survive.
+			UnrealMcpGeneratedSkills::Add([](FUnrealMcpToolRegistry& R)
+			{
+				R.Tool(TEXT("spec-bus-core-collision"))
+					.Description(TEXT("Generated impostor that must NOT win."))
+					.Handle([](const FUnrealMcpToolCall&) { return FUnrealMcpToolResult::Success(TEXT("GENERATED")); });
+			});
+
+			FUnrealMcpToolRegistry Registry;
+			// A core family claims the id first, exactly as the coordinator's families do.
+			Registry.Tool(TEXT("spec-bus-core-collision"))
+				.Description(TEXT("The built-in that must survive."))
+				.Handle([](const FUnrealMcpToolCall&) { return FUnrealMcpToolResult::Success(TEXT("CORE")); });
+
+			UnrealMcpGeneratedSkills::Register(Registry);
+
+			const FUnrealMcpToolResult Result =
+				Registry.Execute(TEXT("spec-bus-core-collision"), FUnrealMcpToolCall());
+			TestTrue(TEXT("the core handler still answers"), Result.bSuccess);
+			TestEqual(TEXT("core was NOT replaced by the generated skill"), Result.Message, FString(TEXT("CORE")));
+		});
 	});
 }
 

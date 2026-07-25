@@ -382,8 +382,9 @@ namespace UnrealMcpSkillTools
 				if (!ValidateSkillSpec(Spec, Error))
 					return FUnrealMcpToolResult::Error(Error);
 
-				// A live collision is a clearer failure than a build-time duplicate the registry would silently
-				// reject later (core tools win; §5 first-wins).
+				// Refuse up front: a live collision reported here is far clearer than one surfaced only as a
+				// warning at the NEXT boot, when the generated skill's extension scope rejects it first-wins
+				// ("extensions may not shadow core") and the tool silently never appears.
 				if (RegistryPtr != nullptr && RegistryPtr->HasTool(Spec.ToolId))
 				{
 					return FUnrealMcpToolResult::Error(FString::Printf(

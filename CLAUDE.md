@@ -91,7 +91,8 @@ via `FUnrealMcpServerManager`, gated to Custom + http).
   selection) is **editor-only** — they drive the editor and several are RCE-class, so they are not
   compiled into a shipped game. A game gets runtime tools by **bringing its own** via
   `IUnrealMcpToolProvider` (see the §12.7 / §12.9 design; the deterministic
-  `UnrealMcp.RuntimeSubsystem` Automation gate asserts the runtime manifest is exactly `{ping}`).
+  `UnrealMcp.RuntimeSubsystem` Automation gate asserts the runtime REGISTRY is exactly `{ping}` — `ping` is a
+  §2.4 SYSTEM tool, so `tools/list` on a bare runtime connection is legitimately EMPTY).
 - **Runtime security gates** — all enforced inside `Connect()` (§12.8): (1) **opt-in only**, never
   auto-connect; (2) **kill switch** `UUnrealMcpRuntimeSettings::bRuntimeMcpEnabled` (Project Settings →
   Plugins → *Unreal MCP (Runtime)*, a **Game** config setting in `DefaultGame.ini`) defaults **false** —

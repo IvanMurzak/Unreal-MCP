@@ -171,7 +171,7 @@ Connection settings persist to `<Project>/Saved/Config/UnrealMcp/ai-game-develop
 
 Unreal-MCP ships **61 built-in ("core") tools** across **7 families** that your AI can call, plus **3 system tools** it cannot (see below). Tool ids are kebab-case (`actor-create`, `blueprint-compile`), matching the Unity/Godot naming convention. Extensions can add more (see [Customize Tools, Prompts & Resources](#customize-tools-prompts--resources)).
 
-> This list is generated from the registration source (`UnrealMCP/Source/UnrealMcpEditor/Private/Tools/UnrealMcp*Tools.cpp`). Counts: actor 13, blueprint 11, asset 11, editor/reflection 9, level 7, source 6, screenshot 4 = **61**.
+> This list is generated from the STANDARD-surface registration sources (`UnrealMCP/Source/UnrealMcpEditor/Private/Tools/UnrealMcp*Tools.cpp`, excluding `UnrealMcpSkillTools.cpp` — its tool is a system tool, listed separately below). Counts: actor 13, blueprint 11, asset 11, editor/reflection 9, level 7, source 6, screenshot 4 = **61**.
 
 <details>
   <summary><b>Actor &amp; component family (13)</b></summary>
