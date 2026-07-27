@@ -51,7 +51,7 @@
 
   <!--
     Reused NuGet pins — normally owned by the upstream release pipelines and kept in lockstep
-    with Godot-MCP (Godot-MCP.csproj). Current: McpPlugin 7.5.0 + ReflectorNet 5.3.3.
+    with Godot-MCP (Godot-MCP.csproj). Current: McpPlugin 7.5.1 + ReflectorNet 5.3.3.
     The MCP/reflection stack is NOT forked. Historical context: the 6.8.0 bump consumed the new
     shared engine-agnostic com.IvanMurzak.McpPlugin.AgentConfig module (the AI-agent configurators
     + the AgentConfiguratorDescription UI-DTO) so the sidecar hosts the AI-agent configuration
@@ -86,6 +86,9 @@
     so this explicit pin has to advance BEFORE the McpPlugin bump can restore (NU1605 package-downgrade
     otherwise). Landed on its own so the release cascade can retry the McpPlugin bump; the McpPlugin pin
     above is still 7.5.0 and remains the release pipeline's to move.
+    McpPlugin 7.5.0 -> 7.5.1: the downstream bump the entry above was preparing for, now landed. Patch
+    release from MCP-Plugin-dotnet; its raised transitive ReflectorNet floor (>= 5.3.3) is already
+    satisfied by the explicit ReflectorNet pin, so restore is clean (no NU1605).
   -->
   <!--
     Local-LIB dev toggle (auth-fixes f1b — parity with the GameDev-MCP-Server + Unity/Godot
@@ -120,7 +123,7 @@
 
   <ItemGroup Condition="'$(UseLocalMcpPlugin)' != 'true'">
     <PackageReference Include="com.IvanMurzak.ReflectorNet" Version="5.3.3" />
-    <PackageReference Include="com.IvanMurzak.McpPlugin" Version="7.5.0" />
+    <PackageReference Include="com.IvanMurzak.McpPlugin" Version="7.5.1" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(UseLocalMcpPlugin)' == 'true'">
