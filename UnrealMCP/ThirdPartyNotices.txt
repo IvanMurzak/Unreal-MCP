@@ -76,7 +76,7 @@ Reactive-extensions library used transitively by com.IvanMurzak.McpPlugin.
 --------------------------------------------------------------------------
 6. com.IvanMurzak.McpPlugin (and com.IvanMurzak.McpPlugin.Common)
 --------------------------------------------------------------------------
-Version   : 6.10.0
+Version   : 7.5.1
 Publisher : Ivan Murzak
 License   : Apache License, Version 2.0
 Source    : https://github.com/IvanMurzak/com.IvanMurzak.McpPlugin
