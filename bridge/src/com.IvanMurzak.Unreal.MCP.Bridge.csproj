@@ -51,7 +51,7 @@
 
   <!--
     Reused NuGet pins — normally owned by the upstream release pipelines and kept in lockstep
-    with Godot-MCP (Godot-MCP.csproj). Current: McpPlugin 7.5.0 + ReflectorNet 5.3.2.
+    with Godot-MCP (Godot-MCP.csproj). Current: McpPlugin 7.5.0 + ReflectorNet 5.3.3.
     The MCP/reflection stack is NOT forked. Historical context: the 6.8.0 bump consumed the new
     shared engine-agnostic com.IvanMurzak.McpPlugin.AgentConfig module (the AI-agent configurators
     + the AgentConfiguratorDescription UI-DTO) so the sidecar hosts the AI-agent configuration
@@ -82,6 +82,10 @@
     ⚠ DEVIATION (mcp-authorize i6, maintainer-authorized dependency-freshness bump, per the
     PIPELINE.md "Freshness-bump carve-out"): 7.1.0 -> 7.1.1 is the patch that carries the i1 BUG-A
     token-mode validator fix. Published on nuget.org; ReflectorNet stays 5.3.2 (7.1.1 keeps that floor).
+    ReflectorNet 5.3.2 -> 5.3.3: McpPlugin 7.5.1 raises its transitive ReflectorNet floor to >= 5.3.3,
+    so this explicit pin has to advance BEFORE the McpPlugin bump can restore (NU1605 package-downgrade
+    otherwise). Landed on its own so the release cascade can retry the McpPlugin bump; the McpPlugin pin
+    above is still 7.5.0 and remains the release pipeline's to move.
   -->
   <!--
     Local-LIB dev toggle (auth-fixes f1b — parity with the GameDev-MCP-Server + Unity/Godot
@@ -115,7 +119,7 @@
   </PropertyGroup>
 
   <ItemGroup Condition="'$(UseLocalMcpPlugin)' != 'true'">
-    <PackageReference Include="com.IvanMurzak.ReflectorNet" Version="5.3.2" />
+    <PackageReference Include="com.IvanMurzak.ReflectorNet" Version="5.3.3" />
     <PackageReference Include="com.IvanMurzak.McpPlugin" Version="7.5.0" />
   </ItemGroup>
 
