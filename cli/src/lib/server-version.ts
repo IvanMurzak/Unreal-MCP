@@ -9,4 +9,4 @@
 // (with all `gamedev-mcp-server-<rid>.zip` assets) MUST already exist on
 // GameDev-MCP-Server BEFORE a CLI release that pins it (docs/RELEASING.md).
 
-export const SERVER_VERSION = '9.2.4';
+export const SERVER_VERSION = '9.2.5';
