@@ -1139,11 +1139,19 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             if (ct.IsCancellationRequested || result.Token == null)
                 return;
 
+            // The terminal status this flow may claim (review e1-B1): "Authorized" ONLY when nothing that ran
+            // failed. When the F1 commit ran and did NOT reach FullyCommitted, the honest failure frame the
+            // commit path just emitted must STAND — the C++ ApplyStatus latches "Authorized" and never demotes
+            // (UnrealMcpEditorViewModel ~:316), so an unconditional claim here would clobber the failure
+            // milliseconds after it surfaced. null = no indicator change. The no-store / no-refresh-token paths
+            // ran no commit, so nothing failed and the pre-e1 in-session-bearer claim stands.
+            string? cloudAuthState = "Authorized";
             if (_credentialStore != null && _machineLock != null && !string.IsNullOrEmpty(result.RefreshToken))
             {
+                var fullyCommitted = false;
                 try
                 {
-                    await CommitLoginFamiliesAsync(result, ct).ConfigureAwait(false);
+                    fullyCommitted = await CommitLoginFamiliesAsync(result, ct).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException) when (ct.IsCancellationRequested)
                 {
@@ -1152,21 +1160,28 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
                 catch (Exception ex)
                 {
                     // A commit failure must not lose the session — fall through to the in-memory bearer so this
-                    // editor session still connects; only the cross-restart persistence is degraded.
+                    // editor session still connects; only the cross-restart persistence is degraded. Surface it
+                    // honestly (this shape bypassed CommitLoginFamiliesAsync's own failure surfacing).
                     _logger?.LogWarning("Login commit to the machine store failed: {Message}", ex.Message);
+                    await SafeEmitDeviceAuthTextAsync(
+                        "Partially authorized — your sign-in could not be fully saved (" + ex.Message + ").").ConfigureAwait(false);
                 }
+                if (!fullyCommitted)
+                    cloudAuthState = null;
             }
 
-            await CommitAuthorizedSessionAsync(result.Token, ct).ConfigureAwait(false);
+            await CommitAuthorizedSessionAsync(result.Token, ct, cloudAuthState).ConfigureAwait(false);
         }
 
         /// <summary>
         /// The F1 store sequence (03 F1.3–F1.4): two-lock-hold agent commit + RFC 8693 derivation via the shared
         /// <see cref="MachineCredentialLoginCommit"/>, with the bounded exchange-retry loop of the F1 failure path
         /// ("token exchange fails → P retries with backoff; the agent family stays committed"). MUST only be
-        /// called with the store + machine lock wired.
+        /// called with the store + machine lock wired. Returns true iff the commit reached
+        /// <see cref="LoginCommitStatus.FullyCommitted"/> — the caller keys its terminal "Authorized" claim on
+        /// this (review e1-B1: a failed derivation's failure frame must not be clobbered by a status promote).
         /// </summary>
-        private async Task CommitLoginFamiliesAsync(DeviceAuthResult result, CancellationToken ct)
+        private async Task<bool> CommitLoginFamiliesAsync(DeviceAuthResult result, CancellationToken ct)
         {
             // The server target is the cloud BASE (no /mcp hub prefix), the same base device-auth ran against —
             // the refresher/exchange/revocation clients reuse it (their /oauth/* endpoints are NOT behind /mcp).
@@ -1286,7 +1301,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
                 // internal write-back can never race a peer's rotation (G-SEC-2: no lock-free credential writes).
                 await AdoptCommittedStoreIntoProviderAsync(ct).ConfigureAwait(false);
                 _logger?.LogInformation("Login commit complete: agent + plugin families persisted to the machine store (D12/F1)."); // tokens NEVER logged (§8)
-                return;
+                return true;
             }
 
             // Surface the F1 failure honestly over the device-auth IPC feed (status text only — the C++ side
@@ -1306,6 +1321,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
                     + (detail ?? "token exchange failed") + "). It will be retried on the next sign-in.",
             };
             await SafeEmitDeviceAuthTextAsync(text).ConfigureAwait(false);
+            return false;
         }
 
         /// <summary>
@@ -1404,8 +1420,12 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         /// (for revoke) already cleared the token — storing it now would resurrect a bearer the user just
         /// cancelled/revoked. Bail before storing/reconnecting/emitting when the flow was cancelled. Internal so
         /// the bridge xUnit suite can assert the guard without driving the whole HTTP flow.
+        /// <para><paramref name="cloudAuthState"/> (review e1-B1): the indicator this re-dial's status may carry.
+        /// Defaults to <c>"Authorized"</c> (a bare bearer commit with no F1 store sequence — nothing that could
+        /// have failed); the <see cref="DeviceAuthResult"/> overload passes <c>null</c> after a failed/aborted
+        /// derivation so the honest failure frame is not clobbered by a latching status promote.</para>
         /// </summary>
-        internal async Task CommitAuthorizedSessionAsync(string token, CancellationToken ct)
+        internal async Task CommitAuthorizedSessionAsync(string token, CancellationToken ct, string? cloudAuthState = "Authorized")
         {
             if (ct.IsCancellationRequested)
                 return;
@@ -1414,7 +1434,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             // the user is DISARMED — they clicked Disconnect (keepConnected=false) before authorizing — store the
             // bearer WITHOUT dialing: claiming Connected here would build a live link Disconnect could never tear
             // down (DecideConfigTransition maps a false→false push to None), violating the §7 Disconnect AC.
-            await ReconnectAndEmitStatusAsync(cloudAuthState: "Authorized").ConfigureAwait(false);
+            await ReconnectAndEmitStatusAsync(cloudAuthState).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -1466,14 +1486,18 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         /// <summary>
         /// Resolve the cloud sign-in indicator for a status emit (mcp-authorize PR 5, design 06 / D12). Cloud mode
         /// reports <c>"Authorized"</c> when EITHER an in-session bearer was issued (an in-editor device flow) OR the
-        /// shared machine credential store already holds a credential (zero-button sign-in — a CLI login, an
-        /// enrollment, or another engine/project signed in once-per-machine). This is what surfaces the signed-in
-        /// state in the editor even when sign-in happened out-of-editor. <c>null</c> in Custom mode, or when no
-        /// credential of either kind is present. Pure + static so the bridge xUnit suite locks the matrix without a
-        /// live SignalR link or machine store.
+        /// machine credential provider is actually SIGNED IN off the shared store (zero-button sign-in — a CLI
+        /// login, an enrollment, or another engine/project signed in once-per-machine). <c>null</c> in Custom mode,
+        /// or when no credential of either kind is present. Pure + static so the bridge xUnit suite locks the
+        /// matrix without a live SignalR link or machine store.
+        /// <para><b>The third argument must be a plugin-plane signed-in signal, never bare store existence</b>
+        /// (review e1-B1; design 04 §1: "<c>Exists</c> alone must never be used as a signed-in signal"). An
+        /// agent-only store — the state a failed F1 derivation leaves behind — EXISTS but is not signed in on the
+        /// plugin plane, and lighting "Authorized" from it would claim a working hub connection the a4-hardened
+        /// hub will reject. Call sites pass <c>PluginCredentialProvider.IsSignedIn</c>.</para>
         /// </summary>
-        internal static string? ResolveCloudAuthState(bool isCloudMode, bool hasSessionBearer, bool machineCredentialExists) =>
-            isCloudMode && (hasSessionBearer || machineCredentialExists) ? "Authorized" : null;
+        internal static string? ResolveCloudAuthState(bool isCloudMode, bool hasSessionBearer, bool machineCredentialSignedIn) =>
+            isCloudMode && (hasSessionBearer || machineCredentialSignedIn) ? "Authorized" : null;
 
         /// <summary>Fully disconnect SignalR (auth-revoke / Disconnect), then surface a Disconnected status.</summary>
         private async Task HandleDisconnectAsync(CancellationToken ct)
@@ -1832,11 +1856,13 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
                     // §7 live status: surface the connection result to the plugin's view-model. Only a CLOUD-mode
                     // credential is a cloud authorization — a Custom-mode token is a local bearer and must NOT light
                     // the "Authorized" indicator (ApplyStatus latches it and never demotes). mcp-authorize PR 5
-                    // (design 06, D12): the machine credential store being populated ALSO counts as signed-in, so a
+                    // (design 06, D12): the machine credential PROVIDER being signed in ALSO counts, so a
                     // zero-button boot (sign-in done out-of-editor: a CLI login, an enrollment, another engine/project)
-                    // surfaces the signed-in state without an in-editor device flow.
+                    // surfaces the signed-in state without an in-editor device flow. The signal is the provider's
+                    // plugin-plane IsSignedIn, NEVER bare store existence (review e1-B1; 04 §1) — an agent-only
+                    // store after a failed F1 derivation exists without being signed in.
                     var cloudAuthState = ResolveCloudAuthState(
-                        _isCloudMode, !string.IsNullOrEmpty(BearerToken), _credentialStore?.Exists == true);
+                        _isCloudMode, !string.IsNullOrEmpty(BearerToken), _credentialProvider?.IsSignedIn == true);
                     await EmitStatusAsync(ok ? "Connected" : "Connecting", cloudAuthState).ConfigureAwait(false);
                     // §7 (issue #109): once connected, seed the AI-agent roster (with retry/backoff) so the row is
                     // populated even before the first OnClientsChanged push. Fire-and-forget on a background task —

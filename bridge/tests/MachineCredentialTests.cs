@@ -176,6 +176,122 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             Assert.Equal("agent-jwt", host.CurrentBearer);
         }
 
+        // --- Review e1-B1: a failed derivation must never be followed by an "Authorized" status claim ----------
+
+        [Fact]
+        public async Task DeviceAuthCommit_FailedDerivation_NeverEmitsAuthorizedStatus()
+        {
+            // The B1 scenario: the exchange endpoint is down, retries exhaust, the honest "Partially
+            // authorized" device-auth frame goes out — and the commit's terminal status fallthrough must NOT
+            // carry cloudAuthState "Authorized", because the C++ ApplyStatus LATCHES Authorized and never
+            // demotes: an unconditional claim would clobber the failure milliseconds after it surfaced, leaving
+            // an "Authorized" light over a hub dial the a4-hardened hub rejects.
+            var dir = NewStoreDir();
+            using var host = new SidecarHost(NewIpc(), "0.1.0",
+                credentialStore: new MachineCredentialStore(dir),
+                exchangeClient: new FakeExchangeClient(TokenExchangeResult.Failure("exchange down")));
+            var statuses = new List<StatusMessage>();
+            host.SetStatusEmitterForTest(s => { statuses.Add(s); return Task.CompletedTask; });
+            host.LoginDerivationRetryAttempts = 1;
+            host.LoginDerivationRetryDelayMs = 0;
+            host.SetDeviceAuthEmitterForTest(_ => Task.CompletedTask);
+            host.ApplyConnectionConfig(CloudConfig());
+
+            await host.CommitAuthorizedSessionAsync(
+                DeviceAuthResult.Authorized("agent-jwt", "agent-refresh", DateTimeOffset.UtcNow.AddHours(1)),
+                CancellationToken.None);
+
+            Assert.NotEmpty(statuses); // the terminal status DID go out (the claim below cannot pass vacuously)
+            Assert.DoesNotContain(statuses, s => s.CloudAuthState == "Authorized");
+        }
+
+        [Fact]
+        public async Task DeviceAuthCommit_FullCommit_EmitsAuthorizedStatus()
+        {
+            // The positive control for the test above: the SAME capture channel observes "Authorized" when the
+            // derivation actually completed — proving the failure-path assert fails for the right reason and not
+            // because the emitter never carries the indicator.
+            var dir = NewStoreDir();
+            using var host = new SidecarHost(NewIpc(), "0.1.0",
+                credentialStore: new MachineCredentialStore(dir),
+                exchangeClient: new FakeExchangeClient(PluginExchangeSuccess()));
+            var statuses = new List<StatusMessage>();
+            host.SetStatusEmitterForTest(s => { statuses.Add(s); return Task.CompletedTask; });
+            host.ApplyConnectionConfig(CloudConfig());
+
+            await host.CommitAuthorizedSessionAsync(
+                DeviceAuthResult.Authorized("agent-jwt", "agent-refresh", DateTimeOffset.UtcNow.AddHours(1)),
+                CancellationToken.None);
+
+            Assert.Contains(statuses, s => s.CloudAuthState == "Authorized");
+        }
+
+        [Fact]
+        public async Task ConnectStatus_AgentOnlyStore_DoesNotLightAuthorized()
+        {
+            // Review e1-B1 / design 04 §1 ("Exists alone must never be used as a signed-in signal"): the
+            // connect-status indicator must key on the provider's plugin-plane IsSignedIn, never bare store
+            // existence. An AGENT-ONLY store — exactly what a failed F1 derivation leaves behind — exists
+            // without being signed in, and must not light "Authorized".
+            var dir = NewStoreDir();
+            new MachineCredentialStore(dir).Write(new MachineCredentials
+            {
+                ServerTarget = "https://ai-game.dev",
+                Families = new MachineCredentialFamilies
+                {
+                    Agent = new MachineCredentialFamily
+                    {
+                        AccessToken = "agent-jwt", RefreshToken = "agent-refresh",
+                        ClientId = "unreal-mcp-plugin", Scope = "mcp:agent",
+                    },
+                },
+            });
+            using var host = new SidecarHost(NewIpc(), "0.1.0", credentialStore: new MachineCredentialStore(dir));
+            Assert.True(new MachineCredentialStore(dir).Exists);        // the store EXISTS…
+            Assert.False(host.CredentialProvider!.IsSignedIn);          // …but the plugin plane is NOT signed in
+
+            var statuses = new List<StatusMessage>();
+            host.SetStatusEmitterForTest(s => { statuses.Add(s); return Task.CompletedTask; });
+            host.ApplyConnectionConfig(CloudConfig());                  // Cloud mode, no in-session bearer
+            host.SetPluginForTest(new FakeMcpPlugin(_ => Task.FromResult(false))); // connect=false skips roster seeding
+            await host.ConnectSignalRAsync();
+
+            var status = Assert.Single(statuses);
+            Assert.Null(status.CloudAuthState);
+        }
+
+        [Fact]
+        public async Task ConnectStatus_PluginPlaneStore_LightsAuthorized()
+        {
+            // Positive control: the SAME connect-status path DOES light "Authorized" for a store the provider is
+            // actually signed in on (zero-button boot) — so the agent-only assert above fails for the right reason.
+            var dir = NewStoreDir();
+            new MachineCredentialStore(dir).Write(new MachineCredentials
+            {
+                ServerTarget = "https://ai-game.dev",
+                Families = new MachineCredentialFamilies
+                {
+                    Plugin = new MachineCredentialFamily
+                    {
+                        AccessToken = "plugin-jwt", RefreshToken = "plugin-refresh",
+                        ExpiresAt = DateTimeOffset.UtcNow.AddHours(1),
+                        ClientId = "unreal-mcp-plugin", Scope = "mcp:plugin",
+                    },
+                },
+            });
+            using var host = new SidecarHost(NewIpc(), "0.1.0", credentialStore: new MachineCredentialStore(dir));
+            Assert.True(host.CredentialProvider!.IsSignedIn);
+
+            var statuses = new List<StatusMessage>();
+            host.SetStatusEmitterForTest(s => { statuses.Add(s); return Task.CompletedTask; });
+            host.ApplyConnectionConfig(CloudConfig());
+            host.SetPluginForTest(new FakeMcpPlugin(_ => Task.FromResult(false)));
+            await host.ConnectSignalRAsync();
+
+            var status = Assert.Single(statuses);
+            Assert.Equal("Authorized", status.CloudAuthState);
+        }
+
         [Fact]
         public async Task DeviceAuthCommit_WithoutRefreshToken_DoesNotWriteStore()
         {
