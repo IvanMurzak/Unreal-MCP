@@ -20,7 +20,6 @@
 // real token. fetch + clock + store base dir are injectable for tests.
 // Library-safe: never throws past the boundary.
 
-import { MachineCredentialStore, type MachineCredentials, CREDENTIALS_VERSION } from '../utils/machine-credentials.js';
 import { upsertServerTarget } from '../utils/project-marker.js';
 // B5 FIX (auth-fixes design 02 T3): the routing pin is derived with cli-core's
 // v2 ProjectIdentity (`derivePinV2`), which normalizes `\`→`/` before hashing.
@@ -28,7 +27,20 @@ import { upsertServerTarget } from '../utils/project-marker.js';
 // `deriveProjectPin` hashed those backslashes verbatim, so the enroll pin never
 // prefix-matched the plugin's forward-slash `projectPathHash` and pinned routing
 // silently failed on Windows. v2 collapses `C:\a\b` and `C:/a/b` to one hash.
-import { derivePinV2 } from '@baizor/gamedev-cli-core';
+//
+// e2: the credential persist goes through cli-core's `commitToolsOnlyLogin`
+// (enroll IS the browser-less tools-only mint path — 03 F10): ONE lock hold
+// writing the plugin family (+ v1 mirror) into the SHARED v2 machine store,
+// with the D6/F7 account-switch guard applied. The CLI-local store copy is
+// deleted (it dropped unknown fields and wrote non-atomically).
+import {
+  commitToolsOnlyLogin,
+  derivePinV2,
+  MachineCredentialStore,
+  normalizeRedeemResponse,
+  unrealAdapter,
+  type CredentialCodec,
+} from '@baizor/gamedev-cli-core';
 import { upsertProjectPin } from '../utils/pin-upsert.js';
 import { asError } from '../utils/error.js';
 import { fetchWithTimeout } from '../utils/http.js';
@@ -50,6 +62,15 @@ export interface EnrollOptions {
   baseUrl?: string;
   /** Override the machine credential store base dir (default `~/.ai-game-dev`). Test injection. */
   storeBaseDir?: string;
+  /** Override the store's at-rest codec (default: DPAPI on Windows). Test injection. */
+  storeCodec?: CredentialCodec;
+  /**
+   * D6/F7 account-switch confirmation (`--yes`-gated on the CLI): called when
+   * the redeemed credential's `sub` differs from the store's subject. ABSENT ⇒
+   * a mismatch is DECLINED fail-closed (the just-redeemed family is revoked
+   * best-effort and NOTHING is written).
+   */
+  confirmAccountSwitch?: (info: { storedSubject: string; newSubject: string }) => boolean | Promise<boolean>;
   fetchImpl?: typeof fetch;
   nowImpl?: () => number;
   onProgress?: ProgressCallback;
@@ -90,6 +111,10 @@ interface RedeemResponse {
   refresh_token?: string;
   scope?: string;
   server_url?: string;
+  /** O5/a6: the account (`sub`) the credential resolves to — feeds the D6/F7 guard. */
+  sub?: string;
+  /** O5/a6: the OAuth client id the credential was minted under — stored verbatim. */
+  client_id?: string;
 }
 
 /** The single actionable message for a spent/invalid/expired code (server uniform error). */
@@ -148,21 +173,49 @@ export async function enrollPlugin(opts: EnrollOptions): Promise<EnrollResult> {
 
     const body = (await resp.json()) as RedeemResponse;
     if (!body.access_token) return fail('token-malformed', 'Redeem response missing access_token.');
-    const serverTarget = (body.server_url ?? DEFAULT_BASE_URL).replace(/\/+$/, '');
+    // cli-core's normalizer maps the AS response defensively (snake_case AND
+    // camelCase; `expires_in` seconds → absolute ISO `expiresAt`) and carries
+    // the O5/a6 fields: `sub` (the account the credential resolves to — feeds
+    // the D6/F7 guard) and `client_id` (the mint client, stamped verbatim onto
+    // the stored family so refresh presents the RIGHT id — 04 §3 rule 2).
+    const redeemed = normalizeRedeemResponse(body as unknown as Record<string, unknown>, now);
+    const serverTarget = (redeemed.serverTarget ?? DEFAULT_BASE_URL).replace(/\/+$/, '');
 
-    // 1. Persist the plugin credential into the SHARED machine store (D12).
-    const store = new MachineCredentialStore(opts.storeBaseDir);
-    const credentials: MachineCredentials = {
-      version: CREDENTIALS_VERSION,
-      accessToken: body.access_token,
-      refreshToken: body.refresh_token ?? undefined,
-      expiresAt:
-        typeof body.expires_in === 'number' && body.expires_in > 0
-          ? new Date(now() + body.expires_in * 1000).toISOString()
-          : undefined,
-      serverTarget,
-    };
-    await store.write(credentials);
+    // 1. Persist the plugin credential into the SHARED machine store (D12)
+    //    through cli-core's tools-only commit (F10): plugin family + v1 mirror
+    //    under ONE lock hold, D6/F7 guard included. Pre-a6 servers omit
+    //    `client_id`; this CLI's own id is the transitional stamp then (the
+    //    provider would present it as the component default anyway).
+    const store = new MachineCredentialStore(opts.storeBaseDir, opts.storeCodec);
+    const commit = await commitToolsOnlyLogin({
+      store,
+      clientId: redeemed.clientId ?? unrealAdapter.clientId,
+      credentials: {
+        accessToken: redeemed.accessToken,
+        refreshToken: redeemed.refreshToken,
+        expiresAt: redeemed.expiresAt,
+        serverTarget,
+        subject: redeemed.subject,
+      },
+      confirmAccountSwitch: opts.confirmAccountSwitch,
+      fetchImpl,
+      onWarning: (message) => warnings.push(message),
+    });
+    if (commit.status === 'switch-declined') {
+      return fail(
+        'account-switch-declined',
+        `This machine is signed in as a different account (${commit.storedSubject}); the enrollment ` +
+          `code resolves to ${commit.newSubject}. Nothing was written — re-run with --yes to switch ` +
+          'the whole machine to the new account.',
+      );
+    }
+    if (commit.status === 'aborted') {
+      return fail(
+        'commit-aborted',
+        'Enrollment aborted before writing: the machine\'s stored credential changed while the ' +
+          'redeem was in flight. Retry the enrollment.',
+      );
+    }
     emitProgress(opts.onProgress, {
       phase: 'info',
       message: `Plugin credential saved to the shared machine store (${store.credentialsPath}).`,

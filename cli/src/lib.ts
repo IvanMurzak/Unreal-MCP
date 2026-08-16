@@ -121,7 +121,7 @@ export {
   applyPinToConfigText,
   projectLocalAgentConfigPaths,
 } from './utils/pin-upsert.js';
-export { resolveConnection } from './utils/config.js';
+export { resolveConnection, readMachineStoreAccessToken } from './utils/config.js';
 export {
   parseEnvContent,
   writeEnvFile,
@@ -218,7 +218,7 @@ export type {
 export type { UProjectInfo } from './utils/project.js';
 export type { ProjectMarker } from './utils/project-marker.js';
 export type { UpsertPinOptions, UpsertPinResult } from './utils/pin-upsert.js';
-export type { ResolvedConnection } from './utils/config.js';
+export type { ResolvedConnection, MachineAuthOptions } from './utils/config.js';
 export type { LoginOptions, LoginResult } from './lib/login.js';
 export type {
   EnrollOptions,

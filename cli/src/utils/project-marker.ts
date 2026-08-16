@@ -16,8 +16,8 @@
 //                   unknown fields ignored on read (forwards-compatible).
 //   • at rest     — non-secret, standard file permissions, 2-space-indented JSON.
 //
-// **Credentials are NEVER written here** — they live only in the machine
-// credential store (`utils/machine-credentials.ts`). This file is safe to commit.
+// **Credentials are NEVER written here** — they live only in the shared machine
+// credential store (cli-core `MachineCredentialStore`). This file is safe to commit.
 //
 // Library-safe: read tolerates a missing/blank/garbage marker (returns null);
 // callers own error shaping.

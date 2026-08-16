@@ -103,6 +103,20 @@ describe('CLI integration', () => {
     }
   });
 
+  it('login --help lists the e2 flags (--tools-only, --yes, --path)', () => {
+    const { stdout, exitCode } = runCli(['login', '--help']);
+    expect(exitCode).toBe(0);
+    for (const flag of ['--tools-only', '--yes', '--path']) {
+      expect(stdout, `login --help should list ${flag}`).toContain(flag);
+    }
+  });
+
+  it('install-plugin --help lists --yes (enroll account-switch gate)', () => {
+    const { stdout, exitCode } = runCli(['install-plugin', '--help']);
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain('--yes');
+  });
+
   it('configure --help lists the --agent proxy flag', () => {
     const { stdout, exitCode } = runCli(['configure', '--help']);
     expect(exitCode).toBe(0);

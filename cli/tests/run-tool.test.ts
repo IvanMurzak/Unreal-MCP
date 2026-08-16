@@ -60,11 +60,16 @@ describe('runTool', () => {
     const ac = new AbortController();
     const fetchImpl = (async (_url: string, init: RequestInit) =>
       new Promise<Response>((_resolve, reject) => {
-        init.signal?.addEventListener('abort', () => {
+        const abort = (): void => {
           const e = new Error('aborted');
           e.name = 'AbortError';
           reject(e);
-        });
+        };
+        // Mirror real fetch: a signal that is ALREADY aborted rejects
+        // immediately (connection resolution is async now, so the abort can
+        // land before the request starts).
+        if (init.signal?.aborted) return abort();
+        init.signal?.addEventListener('abort', abort);
       })) as unknown as typeof fetch;
     const p = runTool({ toolName: 'ping', url: 'http://h', fetchImpl, signal: ac.signal, timeoutMs: 10000 });
     ac.abort();

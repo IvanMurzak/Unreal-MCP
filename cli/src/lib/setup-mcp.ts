@@ -85,7 +85,12 @@ export async function setupMcp(opts: SetupMcpOptions): Promise<SetupMcpResult> {
     const transport: McpTransport = opts.transport ?? 'http';
     const projectDir = path.resolve(opts.projectDir ?? process.cwd());
 
-    const conn = resolveConnection({ projectDir, url: opts.url, token: opts.token });
+    const conn = await resolveConnection({
+      projectDir,
+      url: opts.url,
+      token: opts.token,
+      machineAuth: opts.machineAuth,
+    });
 
     // Build the agent's server-entry props for the chosen transport.
     let props: Record<string, unknown>;
