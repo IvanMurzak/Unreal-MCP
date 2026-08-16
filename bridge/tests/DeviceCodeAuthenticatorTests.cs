@@ -22,12 +22,13 @@ using Xunit;
 namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
 {
     /// <summary>
-    /// Device-code flow specs (docs/ARCHITECTURE.md §7 / .claude/design/mcp-authorize 03 Flow B) — the RFC 8628
+    /// Device-code flow specs (docs/ARCHITECTURE.md §7 / unified-machine-auth 03 F1) — the RFC 8628
     /// grant the sidecar runs on the ai-game.dev alias (<c>POST /oauth/device_authorization</c> →
     /// <c>POST /oauth/token</c> device grant). Drives <see cref="DeviceCodeAuthenticator"/> against a scripted HTTP
-    /// handler (no network, no real waiting): asserts it posts the form-encoded <c>client_id</c> + <c>scope=mcp:plugin</c>
-    /// to the correct endpoints, emits a pending device-auth with the verification URL + user code, polls until an
-    /// ES256 JWT + refresh token are issued, surfaces denial/expiry, and honours cancellation.
+    /// handler (no network, no real waiting): asserts it posts the form-encoded <c>client_id</c> +
+    /// <c>scope=mcp:agent</c> (the F1 AGENT scope — task e1) to the correct endpoints, emits a pending device-auth
+    /// with the verification URL + user code, polls until an ES256 JWT + refresh token are issued, surfaces
+    /// denial/expiry, and honours cancellation.
     /// </summary>
     public class DeviceCodeAuthenticatorTests
     {
@@ -110,10 +111,13 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             Assert.NotNull(result.ExpiresAt);                            // computed from expires_in for proactive refresh
             Assert.True(result.ExpiresAt > DateTimeOffset.UtcNow);
 
-            // The RFC 8628 endpoints + the form-encoded client_id + scope=mcp:plugin authorize body.
+            // The RFC 8628 endpoints + the form-encoded client_id + scope=mcp:agent authorize body (F1 — the
+            // device flow mints the machine-wide AGENT family; the plugin family is derived by exchange, 04 §4).
+            // Decode the form so the assert pins the EXACT scope — a "scope=mcp" prefix could not tell
+            // mcp:agent from mcp:plugin, which is precisely the e1 change.
             Assert.EndsWith("/oauth/device_authorization", handler.LastAuthorizeUrl);
             Assert.Contains("client_id=unreal-mcp-plugin", handler.LastAuthorizeBody);
-            Assert.Contains("scope=mcp", handler.LastAuthorizeBody); // "mcp:plugin" url-encodes the ':' — match the prefix
+            Assert.Contains("scope=mcp:agent", WebUtility.UrlDecode(handler.LastAuthorizeBody));
             Assert.EndsWith("/oauth/token", handler.LastTokenUrl);
             Assert.Contains("grant_type=urn", handler.LastTokenBody);   // device-code grant URN (':' url-encoded)
             Assert.Contains("device_code=dev-123", handler.LastTokenBody);

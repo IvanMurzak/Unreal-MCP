@@ -156,10 +156,13 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         }
 
         // mcp-authorize PR 5 (design 06 / D12): the cloud sign-in indicator surfaces the signed-in state in the editor
-        // from EITHER an in-session bearer (an in-editor device flow) OR a populated machine credential store (a
-        // zero-button boot — sign-in done out-of-editor via a CLI login / enrollment / another engine or project).
+        // from EITHER an in-session bearer (an in-editor device flow) OR the machine credential provider being
+        // SIGNED IN off the shared store (a zero-button boot — sign-in done out-of-editor via a CLI login /
+        // enrollment / another engine or project). Review e1-B1 / design 04 §1: the third input is the provider's
+        // plugin-plane IsSignedIn, NEVER bare store existence — an agent-only store (a failed F1 derivation's
+        // leftover) exists without being signed in.
         [Theory]
-        // Custom mode is never a cloud authorization — neither a local bearer nor a store credential lights it.
+        // Custom mode is never a cloud authorization — neither a local bearer nor a store sign-in lights it.
         [InlineData(false, false, false, null)]
         [InlineData(false, true, false, null)]
         [InlineData(false, false, true, null)]
@@ -168,13 +171,13 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         [InlineData(true, false, false, null)]
         // Cloud mode with an in-session bearer (in-editor device flow) → signed in.
         [InlineData(true, true, false, "Authorized")]
-        // Cloud mode with ONLY a machine-store credential (zero-button boot, out-of-editor sign-in) → signed in.
+        // Cloud mode with ONLY a provider sign-in (zero-button boot, out-of-editor sign-in) → signed in.
         [InlineData(true, false, true, "Authorized")]
         [InlineData(true, true, true, "Authorized")]
-        public void ResolveCloudAuthState_SurfacesSignedIn_FromSessionBearerOrMachineStore(
-            bool isCloudMode, bool hasSessionBearer, bool machineCredentialExists, string? expected)
+        public void ResolveCloudAuthState_SurfacesSignedIn_FromSessionBearerOrProviderSignIn(
+            bool isCloudMode, bool hasSessionBearer, bool machineCredentialSignedIn, string? expected)
         {
-            Assert.Equal(expected, SidecarHost.ResolveCloudAuthState(isCloudMode, hasSessionBearer, machineCredentialExists));
+            Assert.Equal(expected, SidecarHost.ResolveCloudAuthState(isCloudMode, hasSessionBearer, machineCredentialSignedIn));
         }
     }
 }

@@ -17,6 +17,7 @@ using System.Text;
 using System.Text.Json.Nodes;
 using System.Threading;
 using System.Threading.Tasks;
+using com.IvanMurzak.McpPlugin;
 using com.IvanMurzak.McpPlugin.AgentConfig;
 using com.IvanMurzak.Unreal.MCP.Bridge.Auth;
 using com.IvanMurzak.Unreal.MCP.Bridge.Host;
@@ -131,18 +132,37 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
 
             var handler = new RefreshHandler(
                 "{\"access_token\":\"rotated-jwt\",\"refresh_token\":\"new-refresh\",\"token_type\":\"Bearer\",\"expires_in\":3600}");
-            var refresher = new OAuthTokenRefresher(new HttpClient(handler));
-
+            // Only the HTTP layer is scripted (authHttpClient seam): the refresher is the one the REAL default
+            // wiring constructs (the shared HttpTokenRefresher, unified-machine-auth e1), so this drives the
+            // true prod refresh path end-to-end.
             using var host = SidecarHost.CreateForProduction(
                 NewIpc(), "0.1.0",
                 credentialStore: new MachineCredentialStore(dir),
-                tokenRefresher: refresher);
+                authHttpClient: new HttpClient(handler));
             host.ApplyConnectionConfig(CloudConfig());
 
             var bearer = await Task.Run(() => host.CurrentBearer);
 
             Assert.True(handler.Calls >= 1, "the wired refresher must be invoked to rotate the expired credential");
             Assert.Equal("rotated-jwt", bearer);
+        }
+
+        [Fact]
+        public void CreateForProduction_DefaultRefresher_IsTheSharedHttpTokenRefresher_WithThisComponentsClientId()
+        {
+            // unified-machine-auth e1 wiring pin: with NO injected refresher, the prod factory constructs the
+            // SHARED McpPlugin HttpTokenRefresher (stored-clientId + no-scope refresh rules, 04 §3) carrying
+            // THIS component's client id as the legacy-family default (04 §3.7) — never a bridge-local
+            // refresher, and never another component's id.
+            var dir = NewStoreDir();
+            using var host = SidecarHost.CreateForProduction(NewIpc(), "0.1.0", credentialStore: new MachineCredentialStore(dir));
+
+            var refresher = Assert.IsType<HttpTokenRefresher>(host.TokenRefresher);
+            Assert.Equal(DeviceCodeAuthenticator.DefaultClientId, refresher.ComponentClientId);
+
+            // And the provider shares the host's ONE cross-process machine lock (04 §2) rooted at the store dir.
+            Assert.NotNull(host.MachineLock);
+            Assert.Equal(dir, host.MachineLock!.BaseDirectory);
         }
     }
 }

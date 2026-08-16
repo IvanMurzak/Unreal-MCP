@@ -23,6 +23,7 @@
 #include "Styling/AppStyle.h"
 #include "Styling/SlateTypes.h"
 #include "Misc/Attribute.h"
+#include "Misc/MessageDialog.h"
 #include "Misc/Paths.h"
 #include "HAL/PlatformProcess.h"
 #include "HAL/PlatformTime.h"
@@ -532,7 +533,18 @@ TSharedRef<SWidget> SUnrealMcpMainWindow::BuildCloudAuthRow()
 				UnrealMcpStyleWidgets::StyledTextButton("UnrealMcp.Button.Alert", LOCTEXT("Revoke", "Revoke"),
 					FOnClicked::CreateLambda([this]()
 					{
-						if (IsViewModelValid()) ViewModel->Revoke();
+						// unified-machine-auth F6.1 (task e1): sign-out is MACHINE-WIDE — the sidecar revokes
+						// every stored credential family and deletes the shared machine store, signing out
+						// every AI Game Dev tool on this machine — so confirm before sending auth-revoke.
+						// The DevControl /action revoke path stays unprompted (automation must never block
+						// on a modal); this dialog guards only the human button.
+						if (IsViewModelValid()
+							&& FMessageDialog::Open(EAppMsgType::YesNo, LOCTEXT("RevokeConfirm",
+								"Sign out of AI Game Dev on this machine?\n\nThis signs out every tool that shares this machine's credential (engine plugins, CLIs, and the desktop app)."))
+								== EAppReturnType::Yes)
+						{
+							ViewModel->Revoke();
+						}
 						return FReply::Handled();
 					}))
 			]
