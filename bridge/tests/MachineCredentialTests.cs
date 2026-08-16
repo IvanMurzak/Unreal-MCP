@@ -9,6 +9,7 @@
 */
 
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Net;
 using System.Net.Http;
@@ -16,6 +17,7 @@ using System.Text;
 using System.Text.Json.Nodes;
 using System.Threading;
 using System.Threading.Tasks;
+using com.IvanMurzak.McpPlugin;
 using com.IvanMurzak.McpPlugin.AgentConfig;
 using com.IvanMurzak.Unreal.MCP.Bridge.Auth;
 using com.IvanMurzak.Unreal.MCP.Bridge.Host;
@@ -25,12 +27,14 @@ using Xunit;
 namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
 {
     /// <summary>
-    /// mcp-authorize (design 03 Flow B / 06, D12) machine-credential specs — the once-per-machine sign-in the
-    /// sidecar wires on top of McpPlugin 7.0's <c>MachineCredentialStore</c> + <c>PluginCredentialProvider</c>.
-    /// Covers: the OAuth refresh-token grant (<see cref="OAuthTokenRefresher"/>); persisting a successful device
-    /// sign-in into the shared store; boot auto-adopt of a seeded store (zero-button); Custom-mode precedence over
-    /// a cloud credential; and sign-out wiping the store. A per-test temp directory isolates the store from the
-    /// real <c>~/.ai-game-dev</c> (and from other tests) — no network, no shared machine state.
+    /// unified-machine-auth (design 03 F1/F6, 04, task e1) machine-credential specs — the once-per-machine
+    /// sign-in the sidecar wires on top of McpPlugin 8.1's <c>MachineCredentialStore</c> +
+    /// <c>PluginCredentialProvider</c> + the b3 helpers. Covers: the F1 two-lock-hold login commit (agent
+    /// family + RFC 8693-derived plugin family + v1 mirror); the F1 failure path (exchange fails → agent
+    /// family stays committed, failure surfaced over IPC); boot auto-adopt of a seeded store (zero-button);
+    /// Custom-mode precedence over a cloud credential; and the F6 machine-wide sign-out (per-family RFC 7009
+    /// revocation + lock-protocol delete). A per-test temp directory isolates the store from the real
+    /// <c>~/.ai-game-dev</c> (and from other tests) — no network, no shared machine state.
     /// </summary>
     public class MachineCredentialTests
     {
@@ -46,103 +50,130 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         private static JsonObject CloudConfig(string cloudUrl = "https://ai-game.dev") =>
             new() { ["mode"] = "Cloud", ["cloudUrl"] = cloudUrl };
 
-        // A scripted HTTP handler for the token endpoint: returns one fixed body + status, capturing the request.
-        private sealed class RefreshHandler : HttpMessageHandler
+        // A fake RFC 8693 exchange client (unified-machine-auth 04 §4): scripts the derivation outcome so the
+        // login-commit path runs with no network. Captures the subject token + target it was handed.
+        internal sealed class FakeExchangeClient : ITokenExchangeClient
         {
-            private readonly string _json;
-            private readonly HttpStatusCode _status;
-            public string? LastUrl { get; private set; }
-            public string? LastBody { get; private set; }
+            private readonly Queue<TokenExchangeResult> _results;
+            public int Calls { get; private set; }
+            public string? LastSubjectToken { get; private set; }
+            public string? LastServerTarget { get; private set; }
 
-            public RefreshHandler(string json, HttpStatusCode status)
-            {
-                _json = json;
-                _status = status;
-            }
+            public FakeExchangeClient(params TokenExchangeResult[] results) => _results = new Queue<TokenExchangeResult>(results);
 
-            protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+            public string ClientId => DeviceCodeAuthenticator.DefaultClientId;
+
+            public Task<TokenExchangeResult> ExchangeAsync(string subjectAccessToken, string? serverTarget, CancellationToken cancellationToken = default)
             {
-                LastUrl = request.RequestUri!.AbsoluteUri;
-                LastBody = request.Content != null ? await request.Content.ReadAsStringAsync(cancellationToken) : "";
-                return new HttpResponseMessage(_status)
-                {
-                    Content = new StringContent(_json, Encoding.UTF8, "application/json"),
-                };
+                Calls++;
+                LastSubjectToken = subjectAccessToken;
+                LastServerTarget = serverTarget;
+                var result = _results.Count > 1 ? _results.Dequeue() : _results.Peek();
+                return Task.FromResult(result);
             }
         }
 
-        // --- OAuthTokenRefresher (ITokenRefresher) --------------------------------------------------------------
-
-        [Fact]
-        public async Task Refresher_ReturnsRotatedCredential_OnSuccess()
+        // A fake RFC 7009 revocation client capturing every (token, clientId) pair presented (F6.2).
+        internal sealed class FakeRevocationClient : ITokenRevocationClient
         {
-            var handler = new RefreshHandler(
-                "{\"access_token\":\"new-jwt\",\"refresh_token\":\"rotated-refresh\",\"token_type\":\"Bearer\",\"expires_in\":3600}",
-                HttpStatusCode.OK);
-            var refresher = new OAuthTokenRefresher(new HttpClient(handler));
+            public List<(string Token, string? ClientId)> Revoked { get; } = new();
 
-            var result = await refresher.RefreshAsync("old-refresh", "https://ai-game.dev", CancellationToken.None);
-
-            Assert.True(result.Succeeded);
-            Assert.Equal("new-jwt", result.AccessToken);
-            Assert.Equal("rotated-refresh", result.RefreshToken); // the AS rotates the refresh token (design 03 / a3)
-            Assert.NotNull(result.ExpiresAt);
-
-            // OAuth 2.1 refresh grant, form-encoded, to /oauth/token.
-            Assert.EndsWith("/oauth/token", handler.LastUrl);
-            Assert.Contains("grant_type=refresh_token", handler.LastBody);
-            Assert.Contains("refresh_token=old-refresh", handler.LastBody);
-            Assert.Contains("client_id=unreal-mcp-plugin", handler.LastBody);
+            public Task<bool> RevokeAsync(string token, string? clientId, string? serverTarget, CancellationToken cancellationToken = default)
+            {
+                Revoked.Add((token, clientId));
+                return Task.FromResult(true);
+            }
         }
 
-        [Fact]
-        public async Task Refresher_ReturnsFailure_OnInvalidGrant()
-        {
-            // A revoked/expired (or reuse-detected) refresh token comes back as a 400 { error } — surfaced as a
-            // failure the provider raises OnSignInRequired for, NOT a thrown exception.
-            var handler = new RefreshHandler("{\"error\":\"invalid_grant\"}", HttpStatusCode.BadRequest);
-            var refresher = new OAuthTokenRefresher(new HttpClient(handler));
+        internal static TokenExchangeResult PluginExchangeSuccess(
+            string accessToken = "plugin-jwt", string refreshToken = "plugin-refresh", string? subject = "usr_1") =>
+            TokenExchangeResult.Success(accessToken, refreshToken, DateTimeOffset.UtcNow.AddHours(1),
+                scope: "mcp:plugin", subject: subject, issuedTokenType: "urn:ietf:params:oauth:token-type:access_token");
 
-            var result = await refresher.RefreshAsync("stale-refresh", "https://ai-game.dev", CancellationToken.None);
-
-            Assert.False(result.Succeeded);
-            Assert.Contains("invalid_grant", result.FailureReason);
-        }
+        // --- F1 login commit → v2 store (agent + plugin families + mirror) --------------------------------------
 
         [Fact]
-        public async Task Refresher_FailsCleanly_OnMissingInputs()
-        {
-            var refresher = new OAuthTokenRefresher(new HttpClient(new RefreshHandler("{}", HttpStatusCode.OK)));
-            Assert.False((await refresher.RefreshAsync("", "https://ai-game.dev", CancellationToken.None)).Succeeded);
-            Assert.False((await refresher.RefreshAsync("r", "", CancellationToken.None)).Succeeded);
-        }
-
-        // --- Device-auth commit → machine store (D12) -----------------------------------------------------------
-
-        [Fact]
-        public async Task DeviceAuthCommit_PersistsCredentialToStore_AndSignsInProvider()
+        public async Task DeviceAuthCommit_RunsTwoLockHoldCommit_AgentAndPluginFamilies_PlusMirror()
         {
             var dir = NewStoreDir();
-            using var host = new SidecarHost(NewIpc(), "0.1.0", credentialStore: new MachineCredentialStore(dir));
+            var exchange = new FakeExchangeClient(PluginExchangeSuccess());
+            using var host = new SidecarHost(NewIpc(), "0.1.0",
+                credentialStore: new MachineCredentialStore(dir), exchangeClient: exchange);
             host.SetStatusEmitterForTest(_ => Task.CompletedTask); // no live IPC socket
 
             // Cloud mode so the server-target resolves to the cloud base and CurrentBearer prefers the stored JWT.
             host.ApplyConnectionConfig(CloudConfig());
 
-            var result = DeviceAuthResult.Authorized("cloud-jwt", "refresh-1", DateTimeOffset.UtcNow.AddHours(1));
+            var result = DeviceAuthResult.Authorized("agent-jwt", "agent-refresh", DateTimeOffset.UtcNow.AddHours(1));
             await host.CommitAuthorizedSessionAsync(result, CancellationToken.None);
 
-            // Persisted to the shared machine store, server target stripped of the /mcp hub prefix.
-            var persisted = new MachineCredentialStore(dir);
-            Assert.True(persisted.Exists);
-            var creds = persisted.Read();
-            Assert.Equal("cloud-jwt", creds!.AccessToken);
-            Assert.Equal("refresh-1", creds.RefreshToken);
-            Assert.Equal("https://ai-game.dev", creds.ServerTarget);
+            // The v2 document (04 §1): agent family stamped with the presented clientId + mcp:agent scope (D8),
+            // plugin family from the exchange stamped with the exchanging client's own id + mcp:plugin, the
+            // v1 compat mirror re-stamped from the PLUGIN family, and the exchange's `sub` backfilled (O5).
+            var creds = new MachineCredentialStore(dir).Read();
+            Assert.NotNull(creds);
+            Assert.Equal(MachineCredentials.CurrentVersion, creds!.Version);
+            Assert.Equal("https://ai-game.dev", creds.ServerTarget); // stripped of the /mcp hub prefix
+            Assert.Equal("usr_1", creds.Subject);
 
-            // Adopted live → provider signed in → the Cloud dial presents the stored JWT (no UI).
+            var agent = creds.Families?.Agent;
+            Assert.NotNull(agent);
+            Assert.Equal("agent-jwt", agent!.AccessToken);
+            Assert.Equal("agent-refresh", agent.RefreshToken);
+            Assert.Equal(DeviceCodeAuthenticator.DefaultClientId, agent.ClientId);
+            Assert.Equal(DeviceCodeAuthenticator.AgentScope, agent.Scope);
+
+            var plugin = creds.Families?.Plugin;
+            Assert.NotNull(plugin);
+            Assert.Equal("plugin-jwt", plugin!.AccessToken);
+            Assert.Equal("plugin-refresh", plugin.RefreshToken);
+            Assert.Equal(DeviceCodeAuthenticator.DefaultClientId, plugin.ClientId);
+            Assert.Equal("mcp:plugin", plugin.Scope);
+
+            // v1 compat mirror = the plugin family's triple (old readers keep working, 04 §1).
+            Assert.Equal("plugin-jwt", creds.AccessToken);
+            Assert.Equal("plugin-refresh", creds.RefreshToken);
+
+            // The exchange was fed the AGENT access token (03 F1.4), and the provider adopted the committed
+            // document live → the Cloud dial presents the PLUGIN-plane JWT (the hub-audience token).
+            Assert.Equal("agent-jwt", exchange.LastSubjectToken);
             Assert.True(host.CredentialProvider!.IsSignedIn);
-            Assert.Equal("cloud-jwt", host.CurrentBearer);
+            Assert.Equal("plugin-jwt", host.CurrentBearer);
+        }
+
+        [Fact]
+        public async Task DeviceAuthCommit_ExchangeFails_AgentFamilyStaysCommitted_AndFailureSurfacedOverIpc()
+        {
+            // The F1 failure path (03 F1): the agent family is committed on the FIRST lock hold, so a failed
+            // exchange leaves a valid agent credential; the sidecar retries with backoff and then surfaces
+            // "partially authorized" status text to the editor UI over the device-auth feed.
+            var dir = NewStoreDir();
+            var exchange = new FakeExchangeClient(TokenExchangeResult.Failure("exchange down"));
+            using var host = new SidecarHost(NewIpc(), "0.1.0",
+                credentialStore: new MachineCredentialStore(dir), exchangeClient: exchange);
+            host.SetStatusEmitterForTest(_ => Task.CompletedTask);
+            host.LoginDerivationRetryAttempts = 2;
+            host.LoginDerivationRetryDelayMs = 0; // no real waiting
+            var frames = new List<DeviceAuthMessage>();
+            host.SetDeviceAuthEmitterForTest(m => { frames.Add(m); return Task.CompletedTask; });
+            host.ApplyConnectionConfig(CloudConfig());
+
+            var result = DeviceAuthResult.Authorized("agent-jwt", "agent-refresh", DateTimeOffset.UtcNow.AddHours(1));
+            await host.CommitAuthorizedSessionAsync(result, CancellationToken.None);
+
+            var creds = new MachineCredentialStore(dir).Read();
+            Assert.NotNull(creds?.Families?.Agent);                       // the agent family survived (F1 failure path)
+            Assert.Equal("agent-jwt", creds!.Families!.Agent!.AccessToken);
+            Assert.Null(creds.Families.Plugin);                           // no plugin family was derived
+            Assert.Null(creds.AccessToken);                               // and the v1 mirror has no plugin-plane source
+
+            Assert.Equal(1 + 2, exchange.Calls);                          // initial + the bounded retries
+            Assert.Contains(frames, f => f.State == "failed" && f.Message != null
+                && f.Message.Contains("Partially authorized", StringComparison.Ordinal));
+
+            // The session itself still connects on the in-memory agent bearer (no signed-in plugin plane).
+            Assert.False(host.CredentialProvider!.IsSignedIn);
+            Assert.Equal("agent-jwt", host.CurrentBearer);
         }
 
         [Fact]
@@ -150,7 +181,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         {
             // A response missing a refresh token is not a persistable machine credential — don't half-write it.
             var dir = NewStoreDir();
-            using var host = new SidecarHost(NewIpc(), "0.1.0", credentialStore: new MachineCredentialStore(dir));
+            using var host = new SidecarHost(NewIpc(), "0.1.0",
+                credentialStore: new MachineCredentialStore(dir), exchangeClient: new FakeExchangeClient(PluginExchangeSuccess()));
             host.SetStatusEmitterForTest(_ => Task.CompletedTask);
             host.ApplyConnectionConfig(CloudConfig());
 
@@ -201,27 +233,83 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             Assert.Equal("local-tok", host.CurrentBearer);
         }
 
-        // --- Sign-out (auth-revoke) wipes the store -------------------------------------------------------------
+        // --- Sign-out (auth-revoke) = F6 machine-wide sign-out --------------------------------------------------
 
         [Fact]
-        public void AuthRevoke_WipesMachineStore_AndClearsProvider()
+        public async Task AuthRevoke_RevokesEveryFamilyWithItsStoredClientId_ThenDeletesStore()
         {
+            // F6 (unified-machine-auth 03, task e1): sign-out revokes EVERY stored family's refresh token via
+            // RFC 7009 — each with the clientId the family was minted under (the component default only for a
+            // legacy family of unknown id) — BEFORE the lock-protocol delete unlinks them.
             var dir = NewStoreDir();
             new MachineCredentialStore(dir).Write(new MachineCredentials
             {
-                Version = 1,
-                AccessToken = "cloud-jwt",
-                RefreshToken = "r",
-                ExpiresAt = DateTimeOffset.UtcNow.AddHours(1),
                 ServerTarget = "https://ai-game.dev",
+                Families = new MachineCredentialFamilies
+                {
+                    Agent = new MachineCredentialFamily
+                    {
+                        AccessToken = "agent-jwt", RefreshToken = "agent-refresh",
+                        ClientId = "unreal-mcp-plugin", Scope = "mcp:agent",
+                    },
+                    Plugin = new MachineCredentialFamily
+                    {
+                        AccessToken = "plugin-jwt", RefreshToken = "plugin-refresh",
+                        ClientId = "some-other-surface", Scope = "mcp:plugin",
+                    },
+                },
             });
-            using var host = new SidecarHost(NewIpc(), "0.1.0", credentialStore: new MachineCredentialStore(dir));
+            var revocation = new FakeRevocationClient();
+            using var host = new SidecarHost(NewIpc(), "0.1.0",
+                credentialStore: new MachineCredentialStore(dir), revocationClient: revocation);
             Assert.True(host.CredentialProvider!.IsSignedIn);
 
             host.HandleAuthMessage(IpcProtocol.Type.AuthRevoke);
+            Assert.NotNull(host.PendingSignOut);                    // runs off the IPC reader thread
+            await host.PendingSignOut!;
 
-            Assert.False(new MachineCredentialStore(dir).Exists);   // the stored refresh token is gone
+            // Each family was revoked presenting ITS OWN stored clientId (F6.2 — never a blanket component id).
+            Assert.Contains(("agent-refresh", (string?)"unreal-mcp-plugin"), revocation.Revoked);
+            Assert.Contains(("plugin-refresh", (string?)"some-other-surface"), revocation.Revoked);
+            Assert.Equal(2, revocation.Revoked.Count);
+
+            Assert.False(new MachineCredentialStore(dir).Exists);   // the stored refresh tokens are gone (lock-protocol delete)
             Assert.False(host.CredentialProvider!.IsSignedIn);      // and the provider is signed out
+        }
+
+        [Fact]
+        public async Task AuthRevoke_OfflineRevocationFailure_StillDeletesStoreLocally()
+        {
+            // F6.4 offline sign-out: revoke calls fail → the store is STILL deleted locally; families die
+            // naturally server-side (≤30 d) and remain listed on the website until then.
+            var dir = NewStoreDir();
+            new MachineCredentialStore(dir).Write(new MachineCredentials
+            {
+                ServerTarget = "https://ai-game.dev",
+                Families = new MachineCredentialFamilies
+                {
+                    Plugin = new MachineCredentialFamily
+                    {
+                        AccessToken = "plugin-jwt", RefreshToken = "plugin-refresh",
+                        ClientId = "unreal-mcp-plugin", Scope = "mcp:plugin",
+                    },
+                },
+            });
+            var failing = new ThrowingRevocationClient();
+            using var host = new SidecarHost(NewIpc(), "0.1.0",
+                credentialStore: new MachineCredentialStore(dir), revocationClient: failing);
+
+            host.HandleAuthMessage(IpcProtocol.Type.AuthRevoke);
+            await host.PendingSignOut!;
+
+            Assert.False(new MachineCredentialStore(dir).Exists);
+            Assert.False(host.CredentialProvider!.IsSignedIn);
+        }
+
+        internal sealed class ThrowingRevocationClient : ITokenRevocationClient
+        {
+            public Task<bool> RevokeAsync(string token, string? clientId, string? serverTarget, CancellationToken cancellationToken = default)
+                => Task.FromException<bool>(new HttpRequestException("offline"));
         }
 
         // --- Build wiring smoke (on-401 coordinator + sign-in-required subscription) ----------------------------

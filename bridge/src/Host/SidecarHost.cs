@@ -83,20 +83,42 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         // transition tasks mutate it (the same cross-thread access the pre-7.0 auto-property already had).
         private string? _bearerToken;
 
-        // mcp-authorize (design 03 Flow B / 06): the shared machine credential store + the McpPlugin 7.0 credential
-        // provider that owns the once-per-machine ES256-JWT/refresh-token lifecycle. NULL unless the caller opted in
+        // unified-machine-auth e1 (design 03 F1/F6, 04 §2-§4): the shared machine credential store + the McpPlugin
+        // 8.1 credential provider that owns the once-per-machine v2-family lifecycle. NULL unless the caller opted in
         // by supplying a store (Program.cs → ~/.ai-game-dev; the xUnit suite → a temp dir). When null the sidecar
         // behaves exactly as before (static bearer only), so the Custom/env paths are untouched. When present:
         //  - ResolveBearerAsync returns the provider's auto-refreshed JWT in Cloud mode (the device-flow / boot
         //    auto-adopt credential), else the static bearer;
-        //  - a successful device-code sign-in is persisted here (CommitAuthorizedSessionAsync) + adopted live;
+        //  - a successful device-code sign-in runs the two-lock-hold LOGIN COMMIT (agent family + RFC 8693-derived
+        //    plugin family + v1 mirror — MachineCredentialLoginCommit, never a bare store write);
+        //  - refresh goes through the shared HttpTokenRefresher presenting the family's STORED clientId, omitting
+        //    scope/resource entirely (04 §3.2/§3.3), under the cross-process _machineLock;
         //  - the coordinator refreshes on the connection's OnAuthorizationRejected (on-401 → refresh → reconnect);
-        //  - OnSignInRequired surfaces "sign in again" to the editor.
+        //  - OnSignInRequired surfaces "sign in again" to the editor;
+        //  - auth-revoke runs the machine-wide sign-out (RFC 7009 per family + lock-protocol delete, F6).
         private readonly McpAgentConfig.MachineCredentialStore? _credentialStore;
         private readonly PluginCredentialProvider? _credentialProvider;
         private readonly ITokenRefresher? _tokenRefresher;
+        // The ONE cross-process machine-credential lock instance (04 §2), shared by the provider's refresh path,
+        // the login commit, and the sign-out delete path — so every credential write on this host goes through the
+        // same mutual exclusion (G-SEC-2: no lock-free credential writes).
+        private readonly McpAgentConfig.MachineCredentialLock? _machineLock;
+        // Test seams (fake AS): the RFC 8693 exchange + RFC 7009 revocation clients. Null in production — the
+        // defaults are constructed per call against the then-current cloud base (the config arrives over IPC
+        // after construction, so they cannot be built eagerly here).
+        private readonly ITokenExchangeClient? _injectedExchangeClient;
+        private readonly ITokenRevocationClient? _injectedRevocationClient;
         private ConnectionCredentialCoordinator? _credentialCoordinator;
         private IDisposable? _signInRequiredSubscription;
+
+        // F1 failure path (03 F1): bounded retry of the token-exchange derivation after the agent family is
+        // committed ("token exchange fails → P retries with backoff; the agent family stays committed").
+        // Internal so the xUnit suite can drive the retries without real waiting.
+        internal int LoginDerivationRetryAttempts = 3;
+        internal int LoginDerivationRetryDelayMs = 1000;
+
+        /// <summary>Test seam: the in-flight machine-wide sign-out task (auth-revoke), so tests can await it.</summary>
+        internal Task? PendingSignOut;
 
         private IMcpPlugin? _plugin;
         private ManifestRegistrar? _registrar;
@@ -129,6 +151,9 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         // The HttpClient the default-path authenticator uses, owned here so Dispose() releases it (the
         // injected-authenticator path supplies its own client and leaves this null).
         private readonly HttpClient? _ownedHttpClient;
+        // The HttpClient the default auth/refresh/exchange/revocation constructions use: the ctor's
+        // authHttpClient test seam when provided (a scripted client through the REAL wiring), else the owned one.
+        private readonly HttpClient? _authHttpClient;
         // Whether the last applied connection config selected Cloud mode. Gates the §7 cloud-auth indicator:
         // a Custom-mode bearer is a LOCAL token, not a cloud authorization, so it must not light "Authorized".
         // Volatile for the same reason as _customHost below: LocalBindHost gates on it from the project-config
@@ -204,7 +229,10 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             string? fallbackToken = null,
             DeviceCodeAuthenticator? authenticator = null,
             McpAgentConfig.MachineCredentialStore? credentialStore = null,
-            ITokenRefresher? tokenRefresher = null)
+            ITokenRefresher? tokenRefresher = null,
+            ITokenExchangeClient? exchangeClient = null,
+            ITokenRevocationClient? revocationClient = null,
+            HttpClient? authHttpClient = null)
         {
             _ipc = ipc ?? throw new ArgumentNullException(nameof(ipc));
             _sidecarVersion = sidecarVersion;
@@ -221,13 +249,17 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             _statusEmitter = status => _ipc.SendToPluginAsync(status, CancellationToken.None);
             _agentConfig = new AgentConfigService(loggerProvider?.CreateLogger(nameof(AgentConfigService)));
 
-            // A single owned HttpClient covers the default device authenticator AND the default token refresher; the
-            // injected-* paths (xUnit) supply their own, so we only mint one when a default actually needs it.
-            if (authenticator == null || (credentialStore != null && tokenRefresher == null))
+            // A single owned HttpClient covers the default device authenticator AND the default token
+            // refresher / exchange / revocation clients; the injected-* paths (xUnit) supply their own — either
+            // whole fake clients, or authHttpClient (a scripted HttpClient threaded through the REAL default
+            // wiring, so the wire-level suite exercises the exact production construction). We only mint an
+            // owned client when a default actually needs it and no scripted client was provided.
+            if (authHttpClient == null && (authenticator == null || (credentialStore != null && tokenRefresher == null)))
                 _ownedHttpClient = new HttpClient();
+            _authHttpClient = authHttpClient ?? _ownedHttpClient;
 
             _authenticator = authenticator
-                ?? new DeviceCodeAuthenticator(_ownedHttpClient!, loggerProvider?.CreateLogger(nameof(DeviceCodeAuthenticator)));
+                ?? new DeviceCodeAuthenticator(_authHttpClient!, loggerProvider?.CreateLogger(nameof(DeviceCodeAuthenticator)));
 
             // mcp-authorize: wire the machine-credential lifecycle when a store is supplied. B14: PRODUCTION MUST
             // build the sidecar through CreateForProduction, which ALWAYS supplies the store, so a Cloud sign-in can
@@ -238,10 +270,25 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             if (credentialStore != null)
             {
                 _credentialStore = credentialStore;
+                // The ONE cross-process lock (04 §2), rooted at the store's own directory, shared by every
+                // credential write path in this process (provider refresh, login commit, sign-out delete).
+                _machineLock = new McpAgentConfig.MachineCredentialLock(credentialStore.BaseDirectory);
+                // unified-machine-auth e1: the SHARED HttpTokenRefresher replaces the engine-local
+                // OAuthTokenRefresher. It presents the family's STORED clientId (the component default id ONLY
+                // for a v1-adopted legacy family of unknown id, 04 §3.7) and omits scope/resource entirely
+                // (04 §3.3 / P0-3). The default server target is deliberately EMPTY: a refresh always carries the
+                // store document's serverTarget (stamped at login), and a store with no target must fail the
+                // attempt — exactly the pre-e1 behavior — rather than silently guess an AS.
                 _tokenRefresher = tokenRefresher
-                    ?? new OAuthTokenRefresher(_ownedHttpClient!, logger: loggerProvider?.CreateLogger(nameof(OAuthTokenRefresher)));
+                    ?? new HttpTokenRefresher(
+                        defaultServerTarget: string.Empty,
+                        componentClientId: DeviceCodeAuthenticator.DefaultClientId,
+                        httpClient: _authHttpClient);
                 _credentialProvider = new PluginCredentialProvider(
-                    _credentialStore, _tokenRefresher, loggerProvider?.CreateLogger(nameof(PluginCredentialProvider)));
+                    _credentialStore, _tokenRefresher, loggerProvider?.CreateLogger(nameof(PluginCredentialProvider)),
+                    credentialLock: _machineLock);
+                _injectedExchangeClient = exchangeClient;
+                _injectedRevocationClient = revocationClient;
             }
         }
 
@@ -264,7 +311,10 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             string? fallbackToken = null,
             DeviceCodeAuthenticator? authenticator = null,
             McpAgentConfig.MachineCredentialStore? credentialStore = null,
-            ITokenRefresher? tokenRefresher = null)
+            ITokenRefresher? tokenRefresher = null,
+            ITokenExchangeClient? exchangeClient = null,
+            ITokenRevocationClient? revocationClient = null,
+            HttpClient? authHttpClient = null)
             => new SidecarHost(
                 ipc,
                 sidecarVersion,
@@ -274,7 +324,10 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
                 authenticator,
                 // B14 guarantee: null collapses to the real machine store, so the store is ALWAYS wired in prod.
                 credentialStore: credentialStore ?? new McpAgentConfig.MachineCredentialStore(),
-                tokenRefresher: tokenRefresher);
+                tokenRefresher: tokenRefresher,
+                exchangeClient: exchangeClient,
+                revocationClient: revocationClient,
+                authHttpClient: authHttpClient);
 
         public IMcpPlugin? Plugin => _plugin;
         public ConnectionConfig Config => _config;
@@ -302,6 +355,13 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
 
         /// <summary>Test seam: the wired machine-credential provider (null unless a store was supplied).</summary>
         internal PluginCredentialProvider? CredentialProvider => _credentialProvider;
+
+        /// <summary>Test seam: the wired token refresher, so the suite can pin the default wiring (the shared
+        /// <see cref="HttpTokenRefresher"/> carrying this component's client id — unified-machine-auth e1).</summary>
+        internal ITokenRefresher? TokenRefresher => _tokenRefresher;
+
+        /// <summary>Test seam: the ONE cross-process machine-credential lock (04 §2) this host wires everywhere.</summary>
+        internal McpAgentConfig.MachineCredentialLock? MachineLock => _machineLock;
 
         /// <summary>
         /// Test seam: the instance-metadata handshake payload the sidecar will attach to the SignalR hub connection
@@ -759,12 +819,13 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
                     _authCts?.Cancel();
                     // Clear the stored cloud bearer so a subsequent (re)connect is anonymous until re-authorized.
                     BearerToken = null;
-                    // mcp-authorize sign-out (design 03 Flow B): wipe the persisted refresh token + clear the provider
-                    // so no signed-in state survives on this machine. (The /oauth/revoke network call to the AS and the
-                    // editor-UI sign-out button land in later mcp-authorize PRs; the local wipe is the security-critical half.)
-                    try { _credentialProvider?.SignOut(); _credentialStore?.Delete(); }
-                    catch (Exception ex) { _logger?.LogDebug("Sign-out credential wipe failed: {Message}", ex.Message); }
-                    _logger?.LogInformation("Cloud token revoked (auth-revoke); cleared the in-memory bearer + machine credential store.");
+                    // unified-machine-auth F6 (e1): machine-wide sign-out — best-effort RFC 7009 revocation of EVERY
+                    // stored family's refresh token (each with its STORED clientId; the component default for a
+                    // v1-adopted legacy family, F6.2), then the 04 §2 lock-protocol delete path. Runs on a background
+                    // task: the revocations are network calls with bounded retries and must not block the IPC reader
+                    // thread. Offline sign-out still deletes locally (F6.4). The editor-UI confirm ("signs out all
+                    // tools on this machine") happens on the C++ side before auth-revoke is sent.
+                    PendingSignOut = RunMachineWideSignOutAsync();
                     break;
             }
         }
@@ -1061,46 +1122,280 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         }
 
         /// <summary>
-        /// Commit a successful device-code sign-in: PERSIST the issued credential (ES256 JWT + refresh token +
-        /// expiry) into the shared machine credential store (D12) so sign-in is once-per-machine and survives
-        /// restarts, ADOPT it into the live provider, then store the in-memory bearer + reconnect. The persist step
-        /// is a no-op when no store is wired (Custom/legacy path) or the AS returned no refresh token. Guards the
-        /// same cancel/revoke race as the string overload — nothing is persisted once the flow was cancelled.
-        /// Tokens are NEVER logged (§8). Internal so the bridge xUnit suite drives it without the whole HTTP flow.
+        /// Commit a successful device-code sign-in — the F1 sequence (unified-machine-auth 03 F1, 04 §4, task e1):
+        /// the issued credential is the machine-wide AGENT family (scope <c>mcp:agent</c>, stamped with the
+        /// clientId actually presented — D8), committed via <see cref="MachineCredentialLoginCommit"/>'s
+        /// two-lock-hold sequence: agent family (first hold) → RFC 8693 token exchange (no lock) → plugin family
+        /// + v1 compat mirror (second hold). A failed exchange leaves the committed agent family and retries with
+        /// backoff (bounded); the failure is surfaced to the editor UI over the <c>device-auth</c> IPC feed as
+        /// status text ("partially authorized"). On full commit the provider adopts the committed store under the
+        /// same machine lock (no lock-free credential write — G-SEC-2). The commit step is a no-op when no store
+        /// is wired (Custom/legacy path) or the AS returned no refresh token. Guards the same cancel/revoke race
+        /// as the string overload — nothing is persisted once the flow was cancelled. Tokens are NEVER logged
+        /// (§8). Internal so the bridge xUnit suite drives it without the whole HTTP flow.
         /// </summary>
         internal async Task CommitAuthorizedSessionAsync(DeviceAuthResult result, CancellationToken ct)
         {
             if (ct.IsCancellationRequested || result.Token == null)
                 return;
 
-            if (_credentialStore != null && !string.IsNullOrEmpty(result.RefreshToken))
+            if (_credentialStore != null && _machineLock != null && !string.IsNullOrEmpty(result.RefreshToken))
             {
-                // The server target is the cloud BASE (no /mcp hub prefix), the same base device-auth ran against —
-                // the refresher reuses it for the refresh-token grant. Persist + adopt so the provider is signed in.
-                var serverTarget = StripCloudHubPath(_config.Host);
-                var creds = new McpAgentConfig.MachineCredentials
-                {
-                    Version = 1,
-                    AccessToken = result.Token,
-                    RefreshToken = result.RefreshToken,
-                    ExpiresAt = result.ExpiresAt,
-                    ServerTarget = string.IsNullOrWhiteSpace(serverTarget) ? null : serverTarget,
-                };
                 try
                 {
-                    _credentialStore.Write(creds);
-                    _credentialProvider?.Adopt(creds);
-                    _logger?.LogInformation("Cloud credential persisted to the machine store; signed in once-per-machine (D12).");
+                    await CommitLoginFamiliesAsync(result, ct).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    return; // cancelled mid-commit — the string overload's guard below would bail anyway
                 }
                 catch (Exception ex)
                 {
-                    // A store write failure must not lose the session — fall through to the in-memory bearer so this
-                    // editor session still connects signed-in; only the cross-restart persistence is degraded.
-                    _logger?.LogWarning("Failed to persist the cloud credential to the machine store: {Message}", ex.Message);
+                    // A commit failure must not lose the session — fall through to the in-memory bearer so this
+                    // editor session still connects; only the cross-restart persistence is degraded.
+                    _logger?.LogWarning("Login commit to the machine store failed: {Message}", ex.Message);
                 }
             }
 
             await CommitAuthorizedSessionAsync(result.Token, ct).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// The F1 store sequence (03 F1.3–F1.4): two-lock-hold agent commit + RFC 8693 derivation via the shared
+        /// <see cref="MachineCredentialLoginCommit"/>, with the bounded exchange-retry loop of the F1 failure path
+        /// ("token exchange fails → P retries with backoff; the agent family stays committed"). MUST only be
+        /// called with the store + machine lock wired.
+        /// </summary>
+        private async Task CommitLoginFamiliesAsync(DeviceAuthResult result, CancellationToken ct)
+        {
+            // The server target is the cloud BASE (no /mcp hub prefix), the same base device-auth ran against —
+            // the refresher/exchange/revocation clients reuse it (their /oauth/* endpoints are NOT behind /mcp).
+            var stripped = StripCloudHubPath(_config.Host);
+            var serverTarget = string.IsNullOrWhiteSpace(stripped) ? null : stripped;
+
+            // D8: the family is stamped with the clientId ACTUALLY presented in the device flow (never inferred)
+            // and the granted scope (the AS echoes `scope` per RFC 6749 §5.1; absent means "as requested").
+            var agentFamily = new McpAgentConfig.MachineCredentialFamily
+            {
+                AccessToken = result.Token,
+                RefreshToken = result.RefreshToken,
+                ExpiresAt = result.ExpiresAt,
+                ClientId = _authenticator.ClientId,
+                Scope = result.GrantedScope ?? _authenticator.Scope,
+            };
+
+            // The exchange presents this component's OWN client id (RFC 8693 / O2) — the derived plugin family
+            // is stamped with it. The device-flow token response carries no `sub` today, so the commit's subject
+            // is null (F7.3: the guard only fires when BOTH subjects are known); the exchange response's `sub`
+            // is backfilled into the document by the second hold (O5).
+            var exchangeClient = _injectedExchangeClient
+                ?? new TokenExchangeClient(serverTarget ?? string.Empty, _authenticator.ClientId, _authHttpClient);
+
+            var commit = await MachineCredentialLoginCommit.CommitAsync(
+                _credentialStore!, _machineLock!, agentFamily, serverTarget, subject: null,
+                exchangeClient, confirmedReplaceOfSubject: null,
+                revocationClient: _injectedRevocationClient, logger: _logger,
+                cancellationToken: ct).ConfigureAwait(false);
+            var status = commit.Status;
+            var exchange = commit.ExchangeResult;
+            var detail = commit.Detail;
+
+            // F1 failure path: bounded retries with backoff. Busy re-runs the whole commit (nothing was written);
+            // AgentOnly re-runs the exchange; PluginCommitBusy / StoreUnreadable retry the plugin-family commit
+            // alone (the minted family is carried in `exchange`, so no re-exchange). Terminal aborts
+            // (SubjectMismatch / StoreSignedOut / GuardPremiseChanged) are never retried here — they mean another
+            // login/sign-out interleaved and won the race.
+            for (var attempt = 1;
+                 attempt <= LoginDerivationRetryAttempts
+                     && !ct.IsCancellationRequested
+                     && status != LoginCommitStatus.FullyCommitted
+                     && (status == LoginCommitStatus.Busy
+                         || status == LoginCommitStatus.AgentOnly
+                         || status == LoginCommitStatus.PluginCommitBusy
+                         || status == LoginCommitStatus.StoreUnreadable);
+                 attempt++)
+            {
+                if (status != LoginCommitStatus.Busy)
+                {
+                    await SafeEmitDeviceAuthTextAsync(
+                        "Partially authorized — finishing tool authorization (retry " + attempt + " of "
+                        + LoginDerivationRetryAttempts + ")…").ConfigureAwait(false);
+                }
+                try
+                {
+                    await Task.Delay(LoginDerivationRetryDelayMs * attempt, ct).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+
+                if (status == LoginCommitStatus.Busy)
+                {
+                    // Nothing was written yet — retry the whole two-hold sequence.
+                    var again = await MachineCredentialLoginCommit.CommitAsync(
+                        _credentialStore!, _machineLock!, agentFamily, serverTarget, subject: null,
+                        exchangeClient, confirmedReplaceOfSubject: null,
+                        revocationClient: _injectedRevocationClient, logger: _logger,
+                        cancellationToken: ct).ConfigureAwait(false);
+                    status = again.Status;
+                    exchange = again.ExchangeResult;
+                    detail = again.Detail;
+                    continue;
+                }
+
+                if (status == LoginCommitStatus.AgentOnly || exchange == null || !exchange.Succeeded)
+                {
+                    // The exchange itself failed — re-run it (the agent family stays committed, 03 F1).
+                    try
+                    {
+                        exchange = await exchangeClient.ExchangeAsync(agentFamily.AccessToken!, serverTarget, ct).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        throw;
+                    }
+                    catch (Exception ex)
+                    {
+                        detail = ex.Message; // never token material
+                        exchange = null;
+                    }
+                    if (exchange == null || !exchange.Succeeded || string.IsNullOrEmpty(exchange.AccessToken))
+                    {
+                        status = LoginCommitStatus.AgentOnly;
+                        detail = exchange?.FailureReason ?? detail;
+                        continue;
+                    }
+                }
+
+                // A minted plugin family is in hand — commit it under one hold (no re-exchange). The premise
+                // subject is the exchange's `sub` (the compare only fires when the store's subject is also known).
+                var retry = await MachineCredentialLoginCommit.CommitPluginFamilyAsync(
+                    _credentialStore!, _machineLock!, exchange, _authenticator.ClientId,
+                    expectedSubject: exchange.Subject, serverTarget,
+                    revocationClient: _injectedRevocationClient, logger: _logger,
+                    cancellationToken: ct).ConfigureAwait(false);
+                status = retry.Status;
+                exchange = retry.ExchangeResult ?? exchange;
+                detail = retry.Detail ?? detail;
+            }
+
+            if (status == LoginCommitStatus.FullyCommitted)
+            {
+                // Adopt the committed document into the live provider UNDER THE MACHINE LOCK, so the provider's
+                // internal write-back can never race a peer's rotation (G-SEC-2: no lock-free credential writes).
+                await AdoptCommittedStoreIntoProviderAsync(ct).ConfigureAwait(false);
+                _logger?.LogInformation("Login commit complete: agent + plugin families persisted to the machine store (D12/F1)."); // tokens NEVER logged (§8)
+                return;
+            }
+
+            // Surface the F1 failure honestly over the device-auth IPC feed (status text only — the C++ side
+            // renders Message verbatim). The agent family stays committed on the AgentOnly-shaped outcomes, so a
+            // later session (or re-login) can finish the derivation; Busy means nothing was written at all.
+            _logger?.LogWarning("Login commit incomplete ({Status}): {Detail}", status, detail ?? "no detail");
+            var text = status switch
+            {
+                LoginCommitStatus.Busy =>
+                    "Sign-in could not be saved — the machine credential store is busy. Please try again.",
+                LoginCommitStatus.SubjectMismatch or LoginCommitStatus.GuardPremiseChanged =>
+                    "Sign-in aborted — this machine was signed in to a different account mid-flow. Sign out first, then try again.",
+                LoginCommitStatus.StoreSignedOut =>
+                    "Sign-in aborted — the machine was signed out while authorizing. Please sign in again.",
+                _ =>
+                    "Partially authorized — your sign-in is saved, but tool authorization did not finish ("
+                    + (detail ?? "token exchange failed") + "). It will be retried on the next sign-in.",
+            };
+            await SafeEmitDeviceAuthTextAsync(text).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Re-read the just-committed store and adopt it into the live provider while HOLDING the machine lock —
+        /// <see cref="PluginCredentialProvider.Adopt"/> persists its argument, and that write must never run
+        /// lock-free (G-SEC-2) where it could clobber a peer's concurrent rotation. A busy lock skips the live
+        /// adopt (rare — the commit just released it): the session still connects via the in-memory bearer and
+        /// the next boot auto-adopts from the store.
+        /// </summary>
+        private async Task AdoptCommittedStoreIntoProviderAsync(CancellationToken ct)
+        {
+            if (_credentialStore == null || _machineLock == null || _credentialProvider == null)
+                return;
+
+            var hold = await Task.Run(() => _machineLock.TryAcquire(), ct).ConfigureAwait(false);
+            if (hold == null)
+            {
+                _logger?.LogWarning("Machine credential lock busy after login commit; the committed sign-in is picked up on the next boot.");
+                return;
+            }
+            using (hold)
+            {
+                var read = _credentialStore.TryRead();
+                if (read.Status == McpAgentConfig.MachineCredentialStoreStatus.Ok && read.Credentials != null)
+                    _credentialProvider.Adopt(read.Credentials);
+                else
+                    _logger?.LogWarning("Committed store could not be re-read for live adoption ({Status}); picked up on the next boot.", read.Status);
+            }
+        }
+
+        // Test seam: where F1-failure device-auth text frames go. Defaults to the IPC send; the xUnit suite swaps
+        // it for a capture so it can assert the "partially authorized" surfacing without a live socket.
+        private Func<DeviceAuthMessage, Task>? _deviceAuthEmitterOverride;
+
+        /// <summary>Test seam: capture the F1-failure <c>device-auth</c> frames instead of sending them over IPC.</summary>
+        internal void SetDeviceAuthEmitterForTest(Func<DeviceAuthMessage, Task> emitter) =>
+            _deviceAuthEmitterOverride = emitter ?? throw new ArgumentNullException(nameof(emitter));
+
+        /// <summary>Emit a terminal <c>failed</c> device-auth frame carrying human-facing status text (never a secret).</summary>
+        private async Task SafeEmitDeviceAuthTextAsync(string message)
+        {
+            try
+            {
+                var frame = DeviceAuthResult.FailedMessage(message);
+                if (_deviceAuthEmitterOverride != null)
+                    await _deviceAuthEmitterOverride(frame).ConfigureAwait(false);
+                else
+                    await _ipc.SendToPluginAsync(frame, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch
+            {
+                // A UI feed hiccup never breaks the login flow (same rule as DeviceCodeAuthenticator.SafeEmit).
+            }
+        }
+
+        /// <summary>
+        /// The F6 machine-wide sign-out (unified-machine-auth 03 F6, task e1): best-effort RFC 7009 revocation of
+        /// every stored family (each with its STORED clientId; the component default for a legacy family), then
+        /// the 04 §2 lock-protocol delete path — all via the shared <see cref="MachineWideSignOut"/> helper —
+        /// followed by the provider's local state reset. Never throws (runs detached from the IPC reader thread).
+        /// </summary>
+        private async Task RunMachineWideSignOutAsync()
+        {
+            try
+            {
+                if (_credentialStore != null && _machineLock != null)
+                {
+                    var stripped = StripCloudHubPath(_config.Host);
+                    var revocationClient = _injectedRevocationClient
+                        ?? new TokenRevocationClient(string.IsNullOrWhiteSpace(stripped) ? string.Empty : stripped, _authHttpClient);
+                    var result = await MachineWideSignOut.SignOutAsync(
+                        _credentialStore, _machineLock, revocationClient, _authenticator.ClientId, _logger).ConfigureAwait(false);
+                    if (result.Busy)
+                        _logger?.LogWarning("Sign-out: the machine credential lock is busy; the store was not deleted — retry sign-out.");
+                    else
+                        _logger?.LogInformation(
+                            "Machine-wide sign-out complete (F6): {Revoked} family revocation(s) acknowledged, {Failed} failed (offline sign-out deletes locally; unrevoked families expire naturally).",
+                            result.FamiliesRevoked, result.RevocationsFailed);
+                }
+
+                // Reset the provider's in-memory state. Its lock-protocol store delete is a no-op by now (the
+                // machine-wide helper already unlinked the file), which is exactly why the order matters:
+                // revocation needs the stored refresh tokens BEFORE they are unlinked.
+                _credentialProvider?.SignOut();
+                _logger?.LogInformation("Cloud sign-out complete (auth-revoke): in-memory bearer cleared, provider signed out.");
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning("Machine-wide sign-out failed: {Message}", ex.Message); // never token material
+            }
         }
 
         /// <summary>

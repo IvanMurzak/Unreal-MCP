@@ -21,15 +21,17 @@ using Microsoft.Extensions.Logging;
 namespace com.IvanMurzak.Unreal.MCP.Bridge.Auth
 {
     /// <summary>
-    /// The Cloud device-authorization sign-in flow (docs/ARCHITECTURE.md §7 / .claude/design/mcp-authorize
-    /// 03-auth-flows.md Flow B), on the **RFC 8628-conformant** ai-game.dev alias:
-    /// <c>POST {base}/oauth/device_authorization</c> (form: <c>client_id</c> + <c>scope=mcp:plugin</c>) →
+    /// The Cloud device-authorization sign-in flow (docs/ARCHITECTURE.md §7 / unified-machine-auth
+    /// 03-auth-flows.md F1), on the **RFC 8628-conformant** ai-game.dev alias:
+    /// <c>POST {base}/oauth/device_authorization</c> (form: <c>client_id</c> + <c>scope=mcp:agent</c> —
+    /// the F1 AGENT scope: the verification page shows the client label + the plain-language scope, D11) →
     /// <c>POST {base}/oauth/token</c> polled with the device-code grant
     /// (<c>grant_type=urn:ietf:params:oauth:grant-type:device_code</c>) until the AS issues an ES256 JWT
-    /// (<c>access_token</c>, <c>aud=urn:agd:hub</c>) + a <c>refresh_token</c>, the flow is denied/expired,
+    /// (<c>access_token</c>) + a <c>refresh_token</c>, the flow is denied/expired,
     /// or it is cancelled. This replaces the legacy <c>/api/auth/device/*</c> opaque-token path (retired with
-    /// the mcp-authorize breaking release); the caller persists the issued refresh token into the shared
-    /// machine credential store so sign-in happens once per machine (D12).
+    /// the mcp-authorize breaking release); the caller commits the issued AGENT family into the shared
+    /// machine credential store via the two-lock-hold login commit (04 §4) and derives the plugin family by
+    /// RFC 8693 token exchange, so sign-in happens once per machine (D12) and every other tool adopts it (F1.5).
     ///
     /// As each step progresses it invokes the <c>emit</c> callback with a <see cref="DeviceAuthMessage"/> so the
     /// sidecar can forward it to the plugin (which renders the verification URL + user code, §7). The HTTP layer
@@ -44,7 +46,14 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Auth
         /// the 9.0 server (mcp-authorize PR 6); the mocked-AS suites here do not depend on it.</summary>
         public const string DefaultClientId = "unreal-mcp-plugin";
 
-        /// <summary>The device-flow scope that selects the ES256 MCP JWT + refresh-token response (design 03 Flow B).</summary>
+        /// <summary>
+        /// The F1 device-flow scope (unified-machine-auth 03 F1 / e1): a first login mints the machine-wide
+        /// AGENT family; the plugin family is then derived from it by RFC 8693 token exchange (04 §4), never
+        /// minted directly. The D11 verification page shows this scope in plain language before approval.
+        /// </summary>
+        public const string AgentScope = "mcp:agent";
+
+        /// <summary>The tools-only scope (design O10) — kept for the explicit tools-only flows; NOT the default.</summary>
         public const string PluginScope = "mcp:plugin";
 
         private static readonly JsonSerializerOptions JsonOptions = new()
@@ -68,7 +77,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Auth
             Func<TimeSpan, CancellationToken, Task>? delay = null,
             Func<DateTimeOffset>? now = null,
             string clientId = DefaultClientId,
-            string scope = PluginScope)
+            string scope = AgentScope)
         {
             _http = http ?? throw new ArgumentNullException(nameof(http));
             _clientId = clientId;
@@ -78,6 +87,15 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Auth
             // Injectable like _delay so the xUnit suite can drive the expires_in deadline deterministically.
             _now = now ?? (() => DateTimeOffset.UtcNow);
         }
+
+        /// <summary>
+        /// The OAuth client id this flow presents to the AS — and therefore the id the minted agent family
+        /// must be stamped with (design D8: written from the value actually presented, never inferred).
+        /// </summary>
+        public string ClientId => _clientId;
+
+        /// <summary>The scope this flow requests (the family stamp falls back to it when the AS omits <c>scope</c>).</summary>
+        public string Scope => _scope;
 
         /// <summary>
         /// Run the full device-code flow against <paramref name="cloudUrl"/>. Emits a <c>pending</c>
@@ -175,7 +193,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Auth
                         Token = token.AccessToken,
                     }).ConfigureAwait(false);
                     _logger?.LogInformation("Device-code flow authorized; cloud credential issued."); // token/refresh NEVER logged (§8)
-                    return DeviceAuthResult.Authorized(token.AccessToken!, token.RefreshToken, expiresAt);
+                    return DeviceAuthResult.Authorized(token.AccessToken!, token.RefreshToken, expiresAt, token.Scope);
                 }
 
                 switch (token.Error)
@@ -256,6 +274,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Auth
             [JsonPropertyName("refresh_token")] public string? RefreshToken { get; set; }
             [JsonPropertyName("token_type")] public string? TokenType { get; set; }
             [JsonPropertyName("expires_in")] public int ExpiresIn { get; set; }
+            [JsonPropertyName("scope")] public string? Scope { get; set; }
             [JsonPropertyName("error")] public string? Error { get; set; }
             [JsonPropertyName("error_description")] public string? ErrorDescription { get; set; }
         }
@@ -272,10 +291,13 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Auth
         public string? Token { get; private init; }
         public string? RefreshToken { get; private init; }
         public DateTimeOffset? ExpiresAt { get; private init; }
+        /// <summary>The granted scope as echoed by the AS's token response (RFC 6749 §5.1 — optional when
+        /// identical to the requested scope); null means "as requested". Used to stamp the agent family.</summary>
+        public string? GrantedScope { get; private init; }
         public string? Error { get; private init; }
 
-        public static DeviceAuthResult Authorized(string token, string? refreshToken = null, DateTimeOffset? expiresAt = null) =>
-            new() { Success = true, Token = token, RefreshToken = refreshToken, ExpiresAt = expiresAt };
+        public static DeviceAuthResult Authorized(string token, string? refreshToken = null, DateTimeOffset? expiresAt = null, string? grantedScope = null) =>
+            new() { Success = true, Token = token, RefreshToken = refreshToken, ExpiresAt = expiresAt, GrantedScope = grantedScope };
         public static DeviceAuthResult Cancelled() => new() { WasCancelled = true, Error = "cancelled" };
         public static DeviceAuthResult Failed(string error) => new() { Error = error };
 
