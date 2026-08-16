@@ -1,0 +1,20 @@
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/SUnrealMcpAgentWidgets.h
+  s_ead1ecca7180ec::t_42dda3c0e200bd 259,261,270-279
+  s_ead1ecca7180ec::t_fe56da9994dd6a 245-247
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.7",
+  "base_commit_sha": "7284e7f9d2dddca4262de65ae85a99a12b047004",
+  "prompts": {},
+  "sessions": {
+    "s_ead1ecca7180ec": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "15b53224-c7bf-4a0c-a438-a39890763358",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

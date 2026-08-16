@@ -1,0 +1,54 @@
+bridge/src/Host/SidecarHost.cs
+  s_577a2d878f6a8b::t_12fe57dfb9fb18 90
+  s_577a2d878f6a8b::t_af656508c17c21 77
+  s_577a2d878f6a8b::t_3971d1f3a67178 78-81,84-89,91-94
+  s_577a2d878f6a8b::t_5f6f1f30235fc6 95
+  s_577a2d878f6a8b::t_add99708fa8f1e 56-57
+  s_577a2d878f6a8b::t_2de12fd7b54779 96-98
+  s_577a2d878f6a8b::t_5c3a4c60315034 31-33
+  s_60a8bc93caaf8d::t_efe033e437443b 184-185,194-197,201-204,206-218,238-241,246-270,384-400,516,548-551,584-589,679-680,696,704-746,1204-1210
+bridge/tests/DeviceCodeAuthenticatorTests.cs
+  s_577a2d878f6a8b::t_ad26797a542b00 25-30,34-35,42-45,53,56-59,62-64,69-74,76,78-79,94,100,105,108-119,124-125,135,139,142,152,172,199,211
+bridge/src/Auth/DeviceCodeAuthenticator.cs
+  s_577a2d878f6a8b::t_6e55bfcf64992a 12,24-32,41-49,56-57,59-60,69-71,74-75,86-88,103,171,177-178,205,207-213,222-230,256,258,264-267,273-274,277-278
+bridge/tests/MachineCredentialTests.cs
+  s_577a2d878f6a8b::t_08ae9a7bda88eb 1-225,252-253
+  s_577a2d878f6a8b::t_02b390a8294b2d 226-251
+bridge/src/Auth/OAuthTokenRefresher.cs
+  s_577a2d878f6a8b::t_4fbeec003747fb 1-58,60-128
+  s_577a2d878f6a8b::t_ed22d519e338b6 59
+bridge/src/Program.cs
+  s_a9c799f33bc797::t_43c380b52647aa 14,89-94
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.13",
+  "base_commit_sha": "53981b41f23869238b34a70b25b62bd71b21878c",
+  "prompts": {},
+  "sessions": {
+    "s_577a2d878f6a8b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "56f44c21-869d-4224-8704-37b441386caf",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_60a8bc93caaf8d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "03188b33-a380-4cc6-8828-e042067a9c50",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_a9c799f33bc797": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a862a20279d91014f",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

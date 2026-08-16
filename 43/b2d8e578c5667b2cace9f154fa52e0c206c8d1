@@ -1,0 +1,33 @@
+cli/src/utils/http.ts
+  s_ccc717f86d7e3e::t_3fbb07b1bb54b2 64-96
+cli/src/utils/probe.ts
+  s_ccc717f86d7e3e::t_b1b9c9a17e3c20 12
+  s_ccc717f86d7e3e::t_c98fd2edcb8448 13
+  s_421944529f445d::t_42d68c0666410d 75-81,84-86
+cli/src/lib/run-tool.ts
+  s_421944529f445d::t_02edb3771bd985 8,151-152
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "43b2d8e578c5667b2cace9f154fa52e0c206c8d1",
+  "prompts": {},
+  "sessions": {
+    "s_421944529f445d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a6aefd38cc8701e73",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_ccc717f86d7e3e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9c8ada08-e4d5-462c-b934-8bbd1f9565d6",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

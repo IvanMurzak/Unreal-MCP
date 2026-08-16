@@ -1,0 +1,23 @@
+cli/src/lib/plugin-signature.ts
+  s_f1c6af787775a9::t_d151636e37233b 47-55,58
+cli/tests/plugin-signature.test.ts
+  s_f1c6af787775a9::t_931be8f93ae96f 139-150
+cli/tests/plugin-source.test.ts
+  s_f1c6af787775a9::t_6fc270777362bd 137-138,140,144
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "88ecf6a27b3d3ded1f7b84455c1929f35cc894c5",
+  "prompts": {},
+  "sessions": {
+    "s_f1c6af787775a9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a2a91884-de91-4638-9a88-4101f6258fee",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

@@ -1,0 +1,23 @@
+bridge/src/Ipc/IpcMessages.cs
+  s_0623429b150542::t_528c288e1607ba 44-46
+bridge/src/Tools/PromptManifestRegistrar.cs
+  s_0623429b150542::t_981d4516632309 52
+bridge/src/Tools/ResourceManifestRegistrar.cs
+  s_0623429b150542::t_583f38149dad09 56
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "223a46f2ff4cd62a104ed9bf7f1361c6eb1f98b4",
+  "prompts": {},
+  "sessions": {
+    "s_0623429b150542": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8e0a718e-5797-4f06-99b5-cbcc2d8978d7",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

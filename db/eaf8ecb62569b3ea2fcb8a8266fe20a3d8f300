@@ -1,0 +1,19 @@
+bridge/src/Auth/OAuthTokenRefresher.cs
+  s_577a2d878f6a8b::t_f4e90e8be407d0 79-81
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.13",
+  "base_commit_sha": "dbeaf8ecb62569b3ea2fcb8a8266fe20a3d8f300",
+  "prompts": {},
+  "sessions": {
+    "s_577a2d878f6a8b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "56f44c21-869d-4224-8704-37b441386caf",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

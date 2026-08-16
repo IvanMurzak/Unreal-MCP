@@ -1,0 +1,25 @@
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpSourceToolsSpec.cpp
+  s_908974782fafa1::t_86edfd5befe7cf 330-364
+UnrealMCP/Source/UnrealMcpEditor/Private/Tools/UnrealMcpSourceTools.cpp
+  s_908974782fafa1::t_98e084afc541c0 478-481
+  s_908974782fafa1::t_d0c2f889f5028b 547-549
+  s_908974782fafa1::t_7b2f6ce005fec4 578-586
+  s_908974782fafa1::t_f1716ac4d2dee7 358-362
+  s_908974782fafa1::t_67932a0b8d1c9a 372-375
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "8ea2742981fa56592a0df48f5fac740dedc0442b",
+  "prompts": {},
+  "sessions": {
+    "s_908974782fafa1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f1748397-e586-40bb-91a9-b89c0caebdf5",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

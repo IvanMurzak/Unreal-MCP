@@ -1,0 +1,28 @@
+bridge/tests/SidecarHostRosterTests.cs
+  s_94cae3b80679a2::t_c54c9885684294 13
+  s_94cae3b80679a2::t_d5251e34fd28b4 142-230
+  s_94cae3b80679a2::t_ee2adb130de146 76-113
+bridge/src/Host/SidecarHost.cs
+  s_94cae3b80679a2::t_9253bc86b08020 562-564
+  s_94cae3b80679a2::t_fb2ab877d412e4 782-792
+  s_94cae3b80679a2::t_9b739f5da6ff46 781,795-804,813-814
+  s_94cae3b80679a2::t_29826a1127480f 822-827,829-837
+  s_94cae3b80679a2::t_ccd249952e588d 901-902
+  s_94cae3b80679a2::t_47a0e02efd9f1a 606-609
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.8",
+  "base_commit_sha": "b9e7699452df5770f72856f16f3e1ab87f45d9a5",
+  "prompts": {},
+  "sessions": {
+    "s_94cae3b80679a2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d15dc434-a705-4009-9c19-05eae0bfc388",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

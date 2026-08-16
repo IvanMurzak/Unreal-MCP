@@ -1,0 +1,19 @@
+UnrealMCP/Source/UnrealMcpEditor/Private/Tools/UnrealMcpLevelTools.cpp
+  s_908974782fafa1::t_d1cd9c12d5e1fe 188-198
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "48025c227f26d172a6ad8ff941f14f03c061bbec",
+  "prompts": {},
+  "sessions": {
+    "s_908974782fafa1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f1748397-e586-40bb-91a9-b89c0caebdf5",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
