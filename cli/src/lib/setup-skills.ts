@@ -4,7 +4,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { resolveConnection } from '../utils/config.js';
+import { resolveConnection, type MachineAuthOptions } from '../utils/config.js';
 import { asError } from '../utils/error.js';
 import { emitProgress } from './progress.js';
 import type { ProgressCallback } from './types.js';
@@ -14,6 +14,8 @@ export interface SetupSkillsOptions {
   url?: string;
   token?: string;
   force?: boolean;
+  /** Machine-store token-fallback injection (tests). See `MachineAuthOptions`. */
+  machineAuth?: MachineAuthOptions;
   onProgress?: ProgressCallback;
 }
 
@@ -62,7 +64,9 @@ export async function setupSkills(opts: SetupSkillsOptions = {}): Promise<SetupS
     let url = opts.url ?? '';
     if (!url) {
       try {
-        url = resolveConnection({ projectDir, url: opts.url, token: opts.token }).url;
+        url = (
+          await resolveConnection({ projectDir, url: opts.url, token: opts.token, machineAuth: opts.machineAuth })
+        ).url;
       } catch {
         url = 'http://localhost:<deterministic-port>';
         warnings.push('Could not resolve a connection URL — wrote a placeholder into the skill.');

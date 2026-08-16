@@ -13,6 +13,7 @@
 //
 // No top-level side effects; no runtime deps beyond TypeScript types.
 
+import type { MachineAuthOptions } from '../utils/config.js';
 import type { ExtensionDescriptor } from '../utils/extensions-catalog.js';
 import type { InstallSourceKind } from '../utils/extension-source.js';
 import type { DismissOutcome, DismissPlatform, UnrealStartupDialogKey } from '../utils/startup-dialog-dismiss.js';
@@ -269,6 +270,12 @@ export interface InstallPluginOptions {
   baseUrl?: string;
   /** Override the machine credential store base dir for `--enroll` (default `~/.ai-game-dev`). Test injection. */
   storeBaseDir?: string;
+  /**
+   * `--yes`: confirm replacing the machine's stored account when the redeemed
+   * enrollment credential resolves to a DIFFERENT subject (D6/F7). Without it a
+   * mismatch is declined fail-closed and nothing is written.
+   */
+  assumeYes?: boolean;
   /** Injectable fetch for tests (plugin download + server download + enroll). */
   fetchImpl?: typeof fetch;
   /**
@@ -364,6 +371,8 @@ export interface RunToolOptions {
   timeoutMs?: number;
   signal?: AbortSignal;
   fetchImpl?: typeof fetch;
+  /** Machine-store token-fallback injection (tests). See `MachineAuthOptions`. */
+  machineAuth?: MachineAuthOptions;
 }
 
 export interface RunToolSuccess {
@@ -416,6 +425,8 @@ export interface SetupMcpOptions {
    * `downloadServer`). Test injection.
    */
   downloadServerImpl?: (opts: DownloadServerOptions) => Promise<DownloadServerResult>;
+  /** Machine-store token-fallback injection (tests). See `MachineAuthOptions`. */
+  machineAuth?: MachineAuthOptions;
   onProgress?: ProgressCallback;
 }
 
@@ -623,6 +634,8 @@ export interface WaitForReadyOptions {
   nowImpl?: () => number;
   /** Injectable sleep for tests. */
   sleepImpl?: (ms: number) => Promise<void>;
+  /** Machine-store token-fallback injection (tests). See `MachineAuthOptions`. */
+  machineAuth?: MachineAuthOptions;
   onProgress?: ProgressCallback;
 }
 
@@ -658,6 +671,8 @@ export interface StatusOptions {
   noProbe?: boolean;
   probeTimeoutMs?: number;
   fetchImpl?: typeof fetch;
+  /** Machine-store token-fallback injection (tests). See `MachineAuthOptions`. */
+  machineAuth?: MachineAuthOptions;
 }
 
 export interface StatusReport {

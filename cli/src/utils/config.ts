@@ -11,12 +11,32 @@
 // reading this file the CLI falls through to the deterministic localhost port
 // where no server runs (issue #71). We mirror Unity's CLI, which reads its own
 // plugin config in the same precedence slot.
+//
+// Cloud-mode TOKEN fallback (unified-machine-auth e2): when no higher layer
+// supplies a token, the shared machine credential store
+// (`~/.ai-game-dev/credentials.json`) is consulted THROUGH cli-core's
+// `MachineCredentialProvider` — the single refresh-owning entry point — so a
+// `login`-once machine authenticates `run-tool`/`status` with no per-project
+// state, and a near-expiry token is proactively refreshed under the
+// cross-process lock. Order in cloud mode (spec e2):
+//   explicit override (flag/env/`.env`) > plugin-config `cloudToken` (until W4
+//   demotes it) > machine store via provider.
 
 import * as fs from 'fs';
 import * as path from 'path';
+import {
+  HttpTokenRefresher,
+  MachineCredentialProvider,
+  MachineCredentialStore,
+  unrealAdapter,
+  type CredentialCodec,
+} from '@baizor/gamedev-cli-core';
 import { readEnvFile } from './env-file.js';
 import { generatePortFromDirectory, isAbsoluteLoopbackHost, resolveLocalBindPort } from './port.js';
 import { readProjectMarker } from './project-marker.js';
+
+/** The hosted authorization-server root used when a stored credential carries no `serverTarget`. */
+const DEFAULT_CLOUD_AS_ROOT = 'https://ai-game.dev';
 
 export interface ResolvedConnection {
   /** Base URL with no trailing slash. */
@@ -25,6 +45,25 @@ export interface ResolvedConnection {
   token: string | undefined;
   /** Where the URL came from — for diagnostics / `status`. */
   source: 'override' | 'process-env' | 'env-file' | 'plugin-config' | 'deterministic-port';
+}
+
+/**
+ * Injection seams for the Cloud-mode machine-store token fallback. Production
+ * callers leave this unset (real store at `~/.ai-game-dev`, platform codec,
+ * global `fetch`). Tests inject a temp store dir / codec / fake-AS fetch — or
+ * `readToken` to bypass the provider entirely.
+ */
+export interface MachineAuthOptions {
+  /** Override the machine credential store base dir (default `~/.ai-game-dev`). */
+  storeBaseDir?: string;
+  /** Override the at-rest codec (default: DPAPI on Windows, 0600 plaintext on POSIX). */
+  codec?: CredentialCodec;
+  /** Injectable `fetch` for the provider's refresh HTTP (fake AS in tests). */
+  fetchImpl?: typeof fetch;
+  /** Injectable clock (ms since epoch) for expiry decisions. */
+  clock?: () => number;
+  /** Full override of the machine-store token read (unit tests of layering). */
+  readToken?: () => Promise<string | undefined>;
 }
 
 export interface ResolveConnectionOptions {
@@ -36,16 +75,48 @@ export interface ResolveConnectionOptions {
   token?: string;
   /** Injectable env source (defaults to `process.env`). */
   processEnv?: NodeJS.ProcessEnv;
+  /** Machine-store fallback injection (tests). See {@link MachineAuthOptions}. */
+  machineAuth?: MachineAuthOptions;
+}
+
+/**
+ * Read the plugin-plane access token from the shared machine credential store
+ * via cli-core's `MachineCredentialProvider` — lock-guarded, double-checked
+ * proactive refresh included. Returns `undefined` when the machine is signed
+ * out, the store is unreadable, the lock stays contended, or the refresh
+ * fails with the token already expired: connection resolution must DEGRADE to
+ * "no token" (the server answers 401 and the caller surfaces sign-in), never
+ * crash a tool call. Mirrors unity `config.ts` / godot `connection.ts`.
+ */
+export async function readMachineStoreAccessToken(auth: MachineAuthOptions = {}): Promise<string | undefined> {
+  if (auth.readToken) return auth.readToken();
+  try {
+    const store = new MachineCredentialStore(auth.storeBaseDir, auth.codec);
+    const refresher = new HttpTokenRefresher({
+      defaultServerBaseUrl: DEFAULT_CLOUD_AS_ROOT,
+      fetchImpl: auth.fetchImpl,
+      now: auth.clock,
+    });
+    const provider = new MachineCredentialProvider(store, refresher, {
+      // Presented ONLY for families that store no clientId (`families.legacy`).
+      defaultClientId: unrealAdapter.clientId,
+      clock: auth.clock,
+    });
+    return await provider.getAccessToken({ family: 'plugin' });
+  } catch {
+    return undefined;
+  }
 }
 
 /**
  * Resolve the MCP server URL + token to use for a project. Pure given an
- * injected `processEnv`; reads the project `.env` via the filesystem.
+ * injected `processEnv`; reads the project `.env` via the filesystem, and — in
+ * Cloud mode with no other token — the shared machine credential store.
  *
  * Throws only when neither a `projectDir` nor a `url` override is supplied
  * — every other path degrades to the deterministic localhost port.
  */
-export function resolveConnection(opts: ResolveConnectionOptions): ResolvedConnection {
+export async function resolveConnection(opts: ResolveConnectionOptions): Promise<ResolvedConnection> {
   const env = opts.processEnv ?? process.env;
   const envToken = nonEmpty(env['UNREAL_MCP_TOKEN']);
 
@@ -86,9 +157,18 @@ export function resolveConnection(opts: ResolveConnectionOptions): ResolvedConne
   if (pluginConfig) {
     const fromConfig = resolveConnectionFromPluginConfig(pluginConfig);
     if (fromConfig.url) {
+      // Cloud-mode token order (e2): explicit override / env / `.env` (already
+      // layered into `token`) > plugin-config `cloudToken` (until W4 demotes
+      // it) > machine store via provider. The machine store is consulted ONLY
+      // in Cloud mode — a Custom-mode host authenticates with its own
+      // `token`/`authOption` gate and never a cloud credential.
+      let resolvedToken = token ?? fromConfig.token;
+      if (resolvedToken === undefined && isCloudMode(pluginConfig)) {
+        resolvedToken = await readMachineStoreAccessToken(opts.machineAuth);
+      }
       return {
         url: resolveCustomHostUrl(fromConfig.url, projectDir),
-        token: token ?? fromConfig.token,
+        token: resolvedToken,
         source: 'plugin-config',
       };
     }

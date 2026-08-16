@@ -25,7 +25,12 @@ export async function waitForReady(opts: WaitForReadyOptions = {}): Promise<Wait
   let url = '';
   let token: string | undefined;
   try {
-    const conn = resolveConnection({ projectDir: opts.projectDir, url: opts.url, token: opts.token });
+    const conn = await resolveConnection({
+      projectDir: opts.projectDir,
+      url: opts.url,
+      token: opts.token,
+      machineAuth: opts.machineAuth,
+    });
     url = conn.url;
     token = conn.token;
   } catch (err) {

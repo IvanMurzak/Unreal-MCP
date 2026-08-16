@@ -30,10 +30,11 @@ async function invokeTool(routePrefix: string, opts: RunToolOptions): Promise<Ru
   let url: string;
   let token: string | undefined;
   try {
-    const resolved = resolveConnection({
+    const resolved = await resolveConnection({
       projectDir: opts.projectDir,
       url: opts.url,
       token: opts.token,
+      machineAuth: opts.machineAuth,
     });
     url = resolved.url;
     token = resolved.token;

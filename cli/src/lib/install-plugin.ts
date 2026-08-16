@@ -281,6 +281,9 @@ async function postInstall(
       projectDir,
       baseUrl: opts.baseUrl,
       storeBaseDir: opts.storeBaseDir,
+      // D6/F7: `--yes` confirms switching the machine's stored account; absent,
+      // a subject mismatch declines fail-closed inside the enroll commit.
+      confirmAccountSwitch: opts.assumeYes ? async () => true : undefined,
       fetchImpl: opts.fetchImpl,
       nowImpl: opts.nowImpl,
       onProgress: opts.onProgress,

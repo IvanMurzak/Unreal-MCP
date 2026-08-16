@@ -31,6 +31,7 @@ export const installPluginCommand = new Command('install-plugin')
   .option('--enroll <code>', 'Redeem a D13 agent enrollment code → shared machine store + project marker + pin (no browser)')
   .option('--enroll-stdin', 'Read the enrollment code from stdin instead of argv (keeps it out of shell history)')
   .option('--base-url <url>', 'Auth base URL for --enroll (defaults to https://ai-game.dev)')
+  .option('-y, --yes', 'Confirm switching this machine to a different ai-game.dev account when the --enroll credential is a different user (otherwise a mismatch aborts unchanged)')
   .action(
     async (
       pathArg: string | undefined,
@@ -44,6 +45,7 @@ export const installPluginCommand = new Command('install-plugin')
         enroll?: string;
         enrollStdin?: boolean;
         baseUrl?: string;
+        yes?: boolean;
       },
     ) => {
       const projectDir = pathArg ?? process.cwd();
@@ -77,6 +79,7 @@ export const installPluginCommand = new Command('install-plugin')
         serverSource: opts.serverSource,
         enrollCode,
         baseUrl: opts.baseUrl,
+        assumeYes: opts.yes,
         onProgress: (event) => {
           spinner.text = event.message;
         },

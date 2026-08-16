@@ -49,7 +49,12 @@ export async function getStatus(opts: StatusOptions = {}): Promise<StatusReport>
   // Resolve a connection when we have either a project or an explicit URL.
   if (projectDir || opts.url) {
     try {
-      const conn = resolveConnection({ projectDir, url: opts.url, token: opts.token });
+      const conn = await resolveConnection({
+        projectDir,
+        url: opts.url,
+        token: opts.token,
+        machineAuth: opts.machineAuth,
+      });
       report.connection = { url: conn.url, source: conn.source, hasToken: conn.token !== undefined };
 
       if (!opts.noProbe) {
