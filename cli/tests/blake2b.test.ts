@@ -219,3 +219,35 @@ describe('vendored BLAKE2b-512 — streaming form', () => {
     }
   });
 });
+
+describe('vendored BLAKE2b-512 — typed-array views with a non-zero byteOffset', () => {
+  // NOT a hypothetical: `readFileSync` returns a Node Buffer, which is a view onto
+  // a POOLED ArrayBuffer at a non-zero byteOffset — so this is the shape the real
+  // release asset arrives in. An implementation that reached for `input.buffer`
+  // instead of honouring `byteOffset`/`length` would hash the whole pool and stay
+  // green on every other test in this file, because they all pass offset-0 arrays.
+  const CASES: ReadonlyArray<readonly [number, number, number]> = [
+    [1000, 7, 300],
+    [500, 128, 256],
+    [4096, 1, 4095],
+    [300, 299, 1],
+    [2000, 64, 1024],
+  ];
+
+  for (const [total, offset, length] of CASES) {
+    it(`hashes a ${length}-byte view at byteOffset ${offset} as its own bytes`, () => {
+      const backing = Buffer.from(pattern(total));
+      const view = new Uint8Array(backing.buffer, backing.byteOffset + offset, length);
+      expect(view.byteOffset).not.toBe(0);
+      const native = createHash('blake2b512').update(view).digest('hex');
+      expect(hex(blake2b512Js(view))).toBe(native);
+      // And it must equal hashing those same bytes copied to a fresh, offset-0 array.
+      expect(hex(blake2b512Js(Uint8Array.from(view)))).toBe(native);
+    });
+  }
+
+  it('hashes a pooled Node Buffer identically to node:crypto', () => {
+    const buf = Buffer.from('hello world — pooled buffers carry a non-zero byteOffset', 'utf8');
+    expect(hex(blake2b512Js(buf))).toBe(createHash('blake2b512').update(buf).digest('hex'));
+  });
+});
