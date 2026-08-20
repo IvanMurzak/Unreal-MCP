@@ -1,0 +1,61 @@
+cli/src/utils/extensions-catalog.ts
+  s_e3cea916442b5e::t_93a8b1732fcbc2 120-188,190,192-195,198,202-203,205-206,208,210-211,213,215-216,218,220-221,223,225-226,228,230-233,239-240,242-243,245,247-248,250,252-253,255,257-258,260,262-263,265,267-270,273,278,280-281,283,285-286,288,290-291,293,295-296,298,300-301,303,305-307
+  s_e3cea916442b5e::t_e677b46da203be 189
+  s_e3cea916442b5e::t_f8d336b012dda1 191
+  s_e3cea916442b5e::t_0d0aaceaca3f70 196-197
+  s_e3cea916442b5e::t_56bdeba92a9479 199-201
+  s_e3cea916442b5e::t_68b614db3245e4 204
+  s_e3cea916442b5e::t_b9ce0b8a53d631 207
+  s_e3cea916442b5e::t_45c0c47ed90aee 209
+  s_e3cea916442b5e::t_a93b14172c81c2 212
+  s_e3cea916442b5e::t_dce4f18b666176 214
+  s_e3cea916442b5e::t_cb1f7d7aec161b 217
+  s_e3cea916442b5e::t_90db8e8f8f15f5 219
+  s_e3cea916442b5e::t_514f25afd13cc5 222
+  s_e3cea916442b5e::t_da949a5d6d6765 224
+  s_e3cea916442b5e::t_4739bfbfd08bed 227
+  s_e3cea916442b5e::t_26c8a2259bbd60 229
+  s_e3cea916442b5e::t_66ba01b583cee1 234-238
+  s_e3cea916442b5e::t_29d449e5661e85 241
+  s_e3cea916442b5e::t_8e37c6e04873b8 244
+  s_e3cea916442b5e::t_43cc3c9c0ea3cb 246
+  s_e3cea916442b5e::t_c35cc8bd5a9061 249
+  s_e3cea916442b5e::t_ff13d5791b085a 251
+  s_e3cea916442b5e::t_63253f2a2a33ca 254
+  s_e3cea916442b5e::t_846204aa71320f 256
+  s_e3cea916442b5e::t_b8c88595f8d547 259
+  s_e3cea916442b5e::t_1993d5208dae69 261
+  s_e3cea916442b5e::t_738d85a6cb287b 264
+  s_e3cea916442b5e::t_23929f5360a18e 266
+  s_e3cea916442b5e::t_f73bb166cb0e18 271-272
+  s_e3cea916442b5e::t_25744501910728 274-277
+  s_e3cea916442b5e::t_60dcb18a576e5e 279
+  s_e3cea916442b5e::t_3cd309048708d4 282
+  s_e3cea916442b5e::t_1f6824e020c29a 284
+  s_e3cea916442b5e::t_3cc59b956113a7 287
+  s_e3cea916442b5e::t_59d817c7919fbf 289
+  s_e3cea916442b5e::t_f05b9b2e1c43fa 292
+  s_e3cea916442b5e::t_4c13c12bedbe79 294
+  s_e3cea916442b5e::t_a5e210835d56f4 297
+  s_e3cea916442b5e::t_0a6e3dfacac406 299
+  s_e3cea916442b5e::t_c14b580a66a445 302
+  s_e3cea916442b5e::t_4832636072f7c6 304
+cli/extensions.catalog.json
+  s_e3cea916442b5e::t_6538d71b68f78c 18-102
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "87d801f173567004ebd2210ad03946fd9030a0a0",
+  "prompts": {},
+  "sessions": {
+    "s_e3cea916442b5e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c575ab56-73e6-4952-bb8b-fef415924e27",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

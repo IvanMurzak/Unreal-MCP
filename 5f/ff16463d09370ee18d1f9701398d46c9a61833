@@ -1,0 +1,37 @@
+cli/src/lib/install-extension.ts
+  s_e3cea916442b5e::t_f5c1871380cff2 484-490,493-498,501-503
+  s_e3cea916442b5e::t_ec61a84ad1e7a5 445-447
+  s_e3cea916442b5e::t_ed5664b68eca0a 43
+  s_e3cea916442b5e::t_b1cefc6c1b9287 132-134
+cli/src/commands/install-extension.ts
+  s_e3cea916442b5e::t_ae110ad74a0fea 12
+  s_e3cea916442b5e::t_3b065703cb411b 42-44
+cli/README.md
+  s_2cbc3d21848d92::t_e40d33ab4d11de 130-132
+docs/EXTENSIONS.md
+  s_2cbc3d21848d92::t_9d44d18e0863aa 453-455
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "5fff16463d09370ee18d1f9701398d46c9a61833",
+  "prompts": {},
+  "sessions": {
+    "s_2cbc3d21848d92": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a0c993477929a6111",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_e3cea916442b5e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c575ab56-73e6-4952-bb8b-fef415924e27",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

@@ -1,0 +1,23 @@
+cli/src/utils/engine.ts
+  s_7ca8a226e944ee::t_5268f0248fe3d6 96-102
+cli/tests/engine-chain.test.ts
+  s_7ca8a226e944ee::t_b697e2a62f8162 59-99
+cli/src/utils/engine-discovery.ts
+  s_7ca8a226e944ee::t_4b80f488f4165d 175-178
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "d471bec72c13f77b838aa3f85bd474d9ae12cc58",
+  "prompts": {},
+  "sessions": {
+    "s_7ca8a226e944ee": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5c789ba2-4580-4b69-b03f-4b499d4e3b5c",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

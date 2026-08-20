@@ -1,0 +1,33 @@
+bridge/src/Host/ProjectConnectionResolver.cs
+  s_a8c9458399d776::t_f8860ebeceb7ea 1-167
+bridge/tests/SidecarHostInstanceMetadataTests.cs
+  s_a8c9458399d776::t_a18ebcb8aa2b65 1-80
+bridge/tests/ProjectConnectionResolverTests.cs
+  s_a8c9458399d776::t_e8667ad488a3a8 1-178
+bridge/src/Host/SidecarHost.cs
+  s_f6b26e96017eda::t_d0cb812312c68d 110-118,258-268,435-439,452-484
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.13",
+  "base_commit_sha": "d6a2d7c0798eb2629f9462be43ba544fd7590281",
+  "prompts": {},
+  "sessions": {
+    "s_a8c9458399d776": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b119af13-fc80-4059-ad25-5149834e798d",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_f6b26e96017eda": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "df97bed0-a81a-4172-94c6-b2e89d0c9541",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

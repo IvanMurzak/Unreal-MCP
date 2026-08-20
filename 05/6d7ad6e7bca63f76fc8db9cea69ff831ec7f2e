@@ -1,0 +1,29 @@
+UnrealMCP/Source/UnrealMcpRuntime/Private/Bridge/UnrealMcpBridgeServer.cpp
+  s_421944529f445d::t_09399afc8b6439 850-858,865,871-882,949-950,989-990,1005-1006,1027-1028
+UnrealMCP/Source/UnrealMcpRuntime/Private/Bridge/UnrealMcpBridgeServer.h
+  s_f4fba200a9b4a6::t_e22e96bf585a3e 175-183
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "056d7ad6e7bca63f76fc8db9cea69ff831ec7f2e",
+  "prompts": {},
+  "sessions": {
+    "s_421944529f445d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a6aefd38cc8701e73",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_f4fba200a9b4a6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a2e2283f5ac8c63a4",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
