@@ -31,12 +31,35 @@
 //               protecting the trusted comment from tampering.
 //
 // Everything here is PURE (no I/O, no network): parsing is byte-slicing and the
-// verify is deterministic `node:crypto` (Ed25519 + BLAKE2b-512). The HTTP fetch
-// that surrounds this verdict lives in `plugin-source.ts`, so every decision
-// below is unit-testable with no real download — the suite proves ACCEPT-real /
+// verify is deterministic (Ed25519 + BLAKE2b-512). The HTTP fetch that surrounds
+// this verdict lives in `plugin-source.ts`, so every decision below is
+// unit-testable with no real download — the suite proves ACCEPT-real /
 // REJECT-tampered against a genuine (pynacl-generated) minisign vector.
+//
+// BLAKE2b-512 IS NOT UNIVERSALLY AVAILABLE. `node:crypto` delegates digests to the
+// runtime's TLS library, and only OpenSSL builds carry the BLAKE2 family. Measured
+// on this workspace 2026-08-20:
+//
+//   Node 22.18.0      openssl 3.0.16   52 digests   blake2b512 ✅
+//   Electron 43.0.0   openssl 0.0.0     9 digests   blake2b512 ❌ throws
+//                     (BoringSSL)                   'Digest method not supported'
+//
+// The AI Game Dev desktop app value-imports this package and runs it IN-PROCESS
+// under Electron, so an unguarded `createHash('blake2b512')` threw straight out of
+// `verifyMinisign` — past every fail-closed verdict below — and surfaced to the
+// user as the bare string `Digest method not supported`. Since minisign's default
+// `ED` algorithm is PREHASHED (Ed25519 over BLAKE2b-512(file)) and every shipped
+// Unreal-MCP release is signed that way, Unreal plugin install was broken outright
+// in the packaged app. Unity/Godot are unaffected: their CLIs only hash `sha256`.
+//
+// The fix is `./blake2b.ts`, a vendored RFC 7693 BLAKE2b-512 used ONLY when the
+// runtime lacks the native digest. Native stays first and unchanged. Re-signing
+// with the legacy `Ed` tag was rejected because it would strand every
+// already-published signature; a correct fallback keeps them all verifiable.
 
 import { createHash, createPublicKey, verify as cryptoVerify } from 'node:crypto';
+
+import { blake2b512Js } from './blake2b.js';
 
 /**
  * The pinned publisher public key the downloaded plugin-source zip is verified
@@ -71,6 +94,8 @@ const ED25519_PUBLIC_KEY_LEN = 32;
 const ED25519_SIGNATURE_LEN = 64;
 const PUBLIC_KEY_BLOB_LEN = 2 + KEY_ID_LEN + ED25519_PUBLIC_KEY_LEN; // 42
 const SIGNATURE_BLOB_LEN = 2 + KEY_ID_LEN + ED25519_SIGNATURE_LEN; // 74
+/** A BLAKE2b-512 digest is exactly 64 bytes; anything else is not a usable digest. */
+const BLAKE2B_512_DIGEST_LEN = 64;
 
 /**
  * The fixed 12-byte ASN.1 SPKI prefix for a raw Ed25519 public key. Prepending it
@@ -80,6 +105,98 @@ const SIGNATURE_BLOB_LEN = 2 + KEY_ID_LEN + ED25519_SIGNATURE_LEN; // 74
  * of an Ed25519 key begins with exactly these bytes.)
  */
 const ED25519_SPKI_PREFIX = Buffer.from('302a300506032b6570032100', 'hex');
+
+/**
+ * A BLAKE2b-512 implementation. Returns `null` when it cannot produce a digest —
+ * never throws, so a missing digest becomes a fail-closed VERDICT rather than an
+ * exception escaping `verifyMinisign`.
+ */
+export type Blake2b512Fn = (data: Uint8Array) => Buffer | null;
+
+/**
+ * BLAKE2b-512 via `node:crypto`. Returns `null` — rather than throwing — on any
+ * runtime whose TLS library lacks the digest (Electron/BoringSSL throws
+ * `Digest method not supported` here; see the header note).
+ */
+export function nativeBlake2b512(data: Uint8Array): Buffer | null {
+  try {
+    return createHash('blake2b512').update(data).digest();
+  } catch {
+    return null;
+  }
+}
+
+/** BLAKE2b-512 via the vendored pure-JS RFC 7693 implementation. Never throws. */
+export function fallbackBlake2b512(data: Uint8Array): Buffer | null {
+  try {
+    return Buffer.from(blake2b512Js(data));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The native-first / fallback-second digest policy, with both implementations
+ * injected so the policy itself is testable on a single runtime. A digest counts
+ * only if it is present AND exactly 64 bytes; anything else falls through, and
+ * `null` out the bottom means NOTHING could be hashed (fail-closed).
+ *
+ * `native` is tried first and its result is used unchanged whenever it is usable,
+ * so on an OpenSSL runtime the fallback is never even called.
+ */
+export function selectBlake2b512(data: Uint8Array, native: Blake2b512Fn, fallback: Blake2b512Fn): Buffer | null {
+  let digest: Buffer | null = null;
+  try {
+    digest = native(data);
+  } catch {
+    digest = null;
+  }
+  if (digest && digest.length === BLAKE2B_512_DIGEST_LEN) return digest;
+
+  try {
+    digest = fallback(data);
+  } catch {
+    return null;
+  }
+  return digest && digest.length === BLAKE2B_512_DIGEST_LEN ? digest : null;
+}
+
+/**
+ * The production digest policy: **native first, vendored fallback second**.
+ *
+ * On a runtime that has `blake2b512` this is exactly the previous behaviour — the
+ * native OpenSSL digest, byte for byte. The fallback runs only where the native
+ * digest is unavailable, and produces the identical bytes (proven by the
+ * differential tests in `tests/blake2b.test.ts`, and measured end-to-end against
+ * the real v0.14.0 release asset under Electron 43).
+ *
+ * Returns `null` only if BOTH fail, which callers MUST treat as "did not verify".
+ */
+export function blake2b512(data: Uint8Array): Buffer | null {
+  return selectBlake2b512(data, nativeBlake2b512, fallbackBlake2b512);
+}
+
+/** The subset of `process.versions` that identifies which crypto backend is in play. */
+export interface DigestRuntimeVersions {
+  readonly node?: string | undefined;
+  readonly electron?: string | undefined;
+  readonly openssl?: string | undefined;
+}
+
+/**
+ * A one-line description of the runtime whose crypto backend is being blamed, for
+ * the `digest-unavailable` message. Without this the failure reaches the user as
+ * an unattributable four-word string; with it, a bug report carries the one fact
+ * that explains it (`electron 43.0.0, openssl 0.0.0` = BoringSSL, no BLAKE2).
+ * `versions` is injectable so the wording is testable without a second runtime.
+ */
+export function describeDigestRuntime(versions: DigestRuntimeVersions = process.versions): string {
+  const parts: string[] = [];
+  if (versions.electron) parts.push(`electron ${versions.electron}`);
+  if (versions.node) parts.push(`node ${versions.node}`);
+  if (versions.openssl) parts.push(`openssl ${versions.openssl}`);
+  return parts.length > 0 ? parts.join(', ') : 'unknown runtime';
+}
 
 /** Parsed minisign public key. */
 export interface MinisignPublicKey {
@@ -116,6 +233,13 @@ export type SignatureVerdict =
   | 'key-id-mismatch'
   /** The signature's algorithm tag is neither `ED` (prehashed) nor `Ed` (legacy). */
   | 'unsupported-algorithm'
+  /**
+   * A prehashed (`ED`) signature needs BLAKE2b-512 of the file, and NEITHER the
+   * runtime's native digest NOR the vendored fallback could produce one. Nothing
+   * is verified in that state, so it is fail-closed like any other non-`verified`
+   * verdict — the download is rejected, never installed unverified.
+   */
+  | 'digest-unavailable'
   /** The Ed25519 signature over the file did not verify (tampered zip / wrong key). */
   | 'signature-mismatch'
   /** The Ed25519 global signature over the trusted comment did not verify. */
@@ -234,18 +358,36 @@ function ed25519Verify(message: Buffer, keyObject: ReturnType<typeof createPubli
   }
 }
 
+/** Options for {@link verifyMinisign}. Production callers pass none. */
+export interface VerifyMinisignOptions {
+  /**
+   * INTERNAL TEST SEAM — the BLAKE2b-512 implementation used for prehashed (`ED`)
+   * signatures. Defaults to {@link blake2b512} (native first, vendored fallback
+   * second), which is what every production caller gets; `plugin-source.ts` does
+   * NOT forward this, and no CLI flag reaches it.
+   *
+   * It selects WHICH implementation computes the digest — it can never skip,
+   * weaken, or short-circuit verification. A wrong digest fails Ed25519 and lands
+   * on `signature-mismatch`; a `null` digest lands on `digest-unavailable`. Both
+   * are fail-closed.
+   */
+  readonly blake2b512?: Blake2b512Fn;
+}
+
 /**
  * The single fail-closed decision `plugin-source.ts` calls BEFORE `unzipSync`:
  * verify `fileBytes` against `signatureText` (the `.minisig`) using the pinned
  * `publicKeyText`. Returns `'verified'` ONLY when the pinned key parsed, the
- * signature parsed, their key ids matched, and BOTH the file signature and the
- * trusted-comment global signature verified with Ed25519; every other outcome is
- * a distinct fail-closed verdict. Pure, deterministic, never throws.
+ * signature parsed, their key ids matched, a digest was obtainable for a
+ * prehashed signature, and BOTH the file signature and the trusted-comment global
+ * signature verified with Ed25519; every other outcome is a distinct fail-closed
+ * verdict. Deterministic, and never throws.
  */
 export function verifyMinisign(
   publicKeyText: string | null | undefined,
   signatureText: string | null | undefined,
   fileBytes: Uint8Array,
+  options: VerifyMinisignOptions = {},
 ): SignatureVerdict {
   const pkText = (publicKeyText ?? '').trim();
   if (pkText.length === 0 || pkText === MINISIGN_PUBLIC_KEY_UNSET) return 'public-key-not-provisioned';
@@ -263,8 +405,24 @@ export function verifyMinisign(
   if (!keyObject) return 'public-key-unparsable';
 
   // Prehashed (`ED`) signs BLAKE2b-512 of the file; legacy (`Ed`) signs the file bytes.
-  const message =
-    sig.algorithm === ALGO_PREHASHED ? createHash('blake2b512').update(fileBytes).digest() : Buffer.from(fileBytes);
+  // The digest fn is native-first with a vendored pure-JS fallback, because
+  // Electron/BoringSSL has no `blake2b512` (header note). A `null` digest means
+  // NOTHING was verified, so it must fail closed rather than fall through to a
+  // comparison against arbitrary bytes.
+  let message: Buffer;
+  if (sig.algorithm === ALGO_PREHASHED) {
+    let digest: Buffer | null;
+    try {
+      digest = (options.blake2b512 ?? blake2b512)(fileBytes);
+    } catch {
+      // Keeps the "never throws" contract even for an injected implementation.
+      digest = null;
+    }
+    if (!digest || digest.length !== BLAKE2B_512_DIGEST_LEN) return 'digest-unavailable';
+    message = digest;
+  } else {
+    message = Buffer.from(fileBytes);
+  }
   if (!ed25519Verify(message, keyObject, sig.signature)) return 'signature-mismatch';
 
   // Global signature protects the trusted comment: Ed25519 over ( signature || trusted_comment ).
@@ -274,8 +432,18 @@ export function verifyMinisign(
   return 'verified';
 }
 
-/** A short, actionable human-readable reason for a non-`'verified'` verdict. Pure. */
-export function signatureFailureReason(verdict: SignatureVerdict, assetName: string): string {
+/**
+ * A short, actionable human-readable reason for a non-`'verified'` verdict.
+ *
+ * Pure for every verdict except `digest-unavailable`, whose wording embeds a
+ * description of the current runtime's crypto backend (that is the single fact
+ * that explains the failure). Pass `runtimeDescription` to pin it in a test.
+ */
+export function signatureFailureReason(
+  verdict: SignatureVerdict,
+  assetName: string,
+  runtimeDescription: string = describeDigestRuntime(),
+): string {
   switch (verdict) {
     case 'public-key-not-provisioned':
       return (
@@ -291,6 +459,13 @@ export function signatureFailureReason(verdict: SignatureVerdict, assetName: str
       return `the '${assetName}' signature was made with a different key than this CLI trusts`;
     case 'unsupported-algorithm':
       return `the '${assetName}' signature uses an unsupported algorithm`;
+    case 'digest-unavailable':
+      return (
+        `the '${assetName}' signature is prehashed (BLAKE2b-512) and this runtime could not compute that ` +
+        `digest — neither its built-in crypto (${runtimeDescription}) nor the bundled fallback ` +
+        `produced one, so the download was NOT verified. Please report this with the runtime details above; ` +
+        `meanwhile, pass --plugin-source <dir> to install from a trusted local checkout`
+      );
     case 'signature-mismatch':
       return `the downloaded plugin source did not match its '${assetName}' signature (tampered or wrong key)`;
     case 'global-signature-mismatch':

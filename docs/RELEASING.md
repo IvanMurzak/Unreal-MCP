@@ -110,13 +110,42 @@ precedent).
   runs, but an unsigned source zip cannot be verified, so it must not ship.)
 - **CLI side** — `cli/src/lib/plugin-signature.ts` (`verifyMinisign`) fetches the
   `.minisig` and verifies it against the baked-in `MINISIGN_PUBLIC_KEY` BEFORE the
-  zip is extracted. Any failure — missing / tampered / wrong-key / un-provisioned —
-  is a HARD fail; the zip is never installed. A local `--plugin-source <dir>` is a
-  trusted source and skips verification (the offline / dev / CI path).
+  zip is extracted. Any failure — missing / tampered / wrong-key / un-provisioned /
+  no-digest-available — is a HARD fail; the zip is never installed. A local
+  `--plugin-source <dir>` is a trusted source and skips verification (the offline /
+  dev / CI path).
+- **BLAKE2b-512 availability (why `cli/src/lib/blake2b.ts` exists).** `minisign -S`
+  defaults to the **prehashed `ED`** algorithm, so the Ed25519 signature covers
+  BLAKE2b-512(zip), not the zip bytes — every asset we have published is `ED`.
+  `node:crypto` gets its digests from the runtime's TLS library, and **only OpenSSL
+  builds carry BLAKE2**. Measured 2026-08-20: Node 22.18.0 (OpenSSL 3.0.16) offers
+  52 digests including `blake2b512`; **Electron 43.0.0 (BoringSSL, `openssl` reports
+  `0.0.0`) offers 9 and throws `Digest method not supported`**. The AI Game Dev
+  desktop app value-imports this package and runs it in-process under Electron, so
+  an unguarded `createHash('blake2b512')` broke Unreal plugin install outright
+  there. `verifyMinisign` now hashes **native-first with a vendored pure-JS RFC 7693
+  fallback**; if neither works it returns the fail-closed verdict
+  `digest-unavailable`. Re-signing old assets with the legacy `Ed` tag was
+  deliberately NOT done — it would strand every already-published signature.
+  **Do not "simplify" this back to a bare `createHash` call.** To re-check a real
+  release asset on any runtime:
 
-**⚠ Provisioning — REQUIRED before the next release (currently a follow-up).** The
-signing key is not yet minted, so `MINISIGN_PUBLIC_KEY` holds the sentinel
-`UNPROVISIONED` and the CLI download path fails closed. To provision:
+  ```bash
+  gh release download v0.14.0 --repo IvanMurzak/Unreal-MCP \
+    --pattern 'unreal-mcp-plugin-source-*.zip*' --dir /tmp/rel
+  cd cli && npm run build
+  npm run verify:real-asset -- /tmp/rel 0.14.0                  # Node
+  ELECTRON_RUN_AS_NODE=1 <electron> scripts/verify-real-asset.mjs /tmp/rel 0.14.0
+  ```
+
+**✅ Provisioned 2026-07-21** — `MINISIGN_PUBLIC_KEY` in
+`cli/src/lib/plugin-signature.ts` holds the real publisher key (minisign key id
+`194DD8FC6092DA33`; the same 8 bytes read off the wire in order are
+`33da9260fcd84d19` — minisign displays the id as a little-endian u64), and
+released assets carry a valid `.minisig`; the
+`UNPROVISIONED` sentinel remains only as the fail-closed default. (This paragraph
+previously said the key was "not yet minted" — stale since the key was provisioned.)
+To ROTATE the key:
 
 1. Mint a **passwordless** keypair (no key password, so CI signs non-interactively):
    `minisign -G -W -p unreal-mcp-plugin.pub -s unreal-mcp-plugin.key`. Keep

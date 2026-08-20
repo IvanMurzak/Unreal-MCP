@@ -29,6 +29,7 @@
     "pretest": "npm run build",
     "test": "vitest run",
     "test:watch": "vitest",
+    "verify:real-asset": "node scripts/verify-real-asset.mjs",
     "prepublishOnly": "npm run build",
     "prepack": "npm run build"
   },
