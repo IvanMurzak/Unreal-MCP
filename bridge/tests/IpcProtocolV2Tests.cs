@@ -182,5 +182,55 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             Assert.Equal("aGVsbG8=", respBack.Contents![1].Blob);   // base64 binary rides intact
             Assert.Null(respBack.Contents![1].Text);
         }
+
+        // --- §1.3 `status` cloudAuthState (oauth-client-error-hygiene d1) -----------------------------------
+
+        [Fact]
+        public void Status_CloudAuthState_SignInRequired_RoundTripsOnTheWire()
+        {
+            // The third contract value (IpcMessages.cs StatusMessage.CloudAuthState): a terminal dead-family
+            // verdict rides the status channel as "SignInRequired" — pin the exact wire spelling the C++
+            // ApplyStatus matches on, so a casing/rename drift is caught here rather than as a silent no-op
+            // in the editor (the C++ side deliberately IGNORES unrecognized values).
+            var status = new StatusMessage
+            {
+                ConnectionState = "Connecting",
+                KeepConnected = true,
+                CloudAuthState = "SignInRequired",
+            };
+
+            var json = JsonSerializer.Serialize(status, IpcProtocol.JsonOptions);
+            Assert.Contains("\"type\":\"status\"", json);
+            Assert.Contains("\"cloudAuthState\":\"SignInRequired\"", json);
+
+            var back = JsonSerializer.Deserialize<StatusMessage>(json, IpcProtocol.JsonOptions)!;
+            Assert.Equal("SignInRequired", back.CloudAuthState);
+            Assert.Equal("Connecting", back.ConnectionState);
+            Assert.True(back.KeepConnected);
+        }
+
+        [Theory]
+        [InlineData("Authorized")]    // the long-standing emitted value
+        [InlineData("Unauthorized")]  // legacy documented value (never emitted) — must still parse
+        [InlineData("SomeFutureState")] // a value from a NEWER peer — the string field must carry it, not throw
+        public void Status_LegacyAndUnknownCloudAuthValues_StillParse(string value)
+        {
+            // The CloudAuthState field is a plain string on the wire (no C#-side enum/validation), so a
+            // legacy or future value must deserialize losslessly — growing the value set can never break an
+            // older sidecar's parse. This is the C# half of the "tolerate the third value" contract; the C++
+            // half (ApplyStatus ignores unrecognized values) is locked in UnrealMcpEditorViewModelSpec.
+            var json = $"{{\"type\":\"status\",\"connectionState\":\"Connected\",\"keepConnected\":true,\"cloudAuthState\":\"{value}\",\"aiAgents\":[]}}";
+            var back = JsonSerializer.Deserialize<StatusMessage>(json, IpcProtocol.JsonOptions)!;
+            Assert.Equal(value, back.CloudAuthState);
+        }
+
+        [Fact]
+        public void Status_AbsentCloudAuthState_ParsesAsNull()
+        {
+            // Custom mode / no cloud credential: the field is simply absent (null) — the pre-cloud contract.
+            var json = "{\"type\":\"status\",\"connectionState\":\"Connected\",\"keepConnected\":true,\"aiAgents\":[]}";
+            var back = JsonSerializer.Deserialize<StatusMessage>(json, IpcProtocol.JsonOptions)!;
+            Assert.Null(back.CloudAuthState);
+        }
     }
 }

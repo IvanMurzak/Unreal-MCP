@@ -350,7 +350,16 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
         /// <summary>One of <c>Connected</c> / <c>Connecting</c> / <c>Disconnected</c> / <c>Degraded</c>.</summary>
         [JsonPropertyName("connectionState")] public string ConnectionState { get; set; } = "Disconnected";
         [JsonPropertyName("keepConnected")] public bool KeepConnected { get; set; }
-        /// <summary>One of <c>Authorized</c> / <c>Unauthorized</c> (Cloud mode only; null in Custom).</summary>
+        /// <summary>
+        /// One of <c>Authorized</c> / <c>SignInRequired</c> (Cloud mode only; null in Custom, or when no cloud
+        /// credential of either kind is present). <c>Authorized</c>: an in-session bearer or a signed-in machine
+        /// credential backs the connection. <c>SignInRequired</c>: the machine credential died terminally (a
+        /// refresh was rejected with a dead-family verdict — the user must sign in again); emitted by the
+        /// <c>OnSignInRequired</c> subscription wired in <c>SidecarHost.Build</c>. The legacy documented value
+        /// <c>Unauthorized</c> was never emitted by any shipped sidecar. Consumers MUST tolerate unrecognized
+        /// values (ignore, never fail) so this set can grow without a lockstep plugin release — the C++
+        /// <c>ApplyStatus</c> honours that by matching known values and ignoring the rest.
+        /// </summary>
         [JsonPropertyName("cloudAuthState")] public string? CloudAuthState { get; set; }
         [JsonPropertyName("aiAgents")] public List<string> AiAgents { get; set; } = new();
     }

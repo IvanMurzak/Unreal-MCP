@@ -657,6 +657,23 @@ TSharedRef<SWidget> SUnrealMcpMainWindow::BuildCloudAuthRow()
 					? EVisibility::Visible : EVisibility::Collapsed;
 			})
 			.Text_Lambda([this]() { return IsViewModelValid() ? FText::FromString(ViewModel->GetDeviceAuthError()) : FText::GetEmpty(); })
+		]
+		// Sign-in required (oauth-client-error-hygiene d1): the machine credential died terminally — the
+		// sidecar's `status` feed reported cloudAuthState=SignInRequired. A PERSISTENT line (D4 ladder step 3:
+		// after the one unattended assisted re-auth per session, no sign-in carousel) whose manual recovery is
+		// the Authorize button in the row above.
+		+ SVerticalBox::Slot().AutoHeight().Padding(0, 6, 0, 0)
+		[
+			SNew(STextBlock)
+			.AutoWrapText(true)
+			.ColorAndOpacity(FSlateColor(FUnrealMcpStyle::StatusOffline()))
+			.Visibility_Lambda([this]()
+			{
+				return (IsViewModelValid() && ViewModel->GetDeviceAuthState() == EUnrealMcpDeviceAuthState::SignInRequired)
+					? EVisibility::Visible : EVisibility::Collapsed;
+			})
+			.Text(LOCTEXT("SignInRequired",
+				"Sign in required — your saved sign-in is no longer valid. Click Authorize to open the sign-in page in your browser."))
 		];
 
 	// Whole Cloud body is visible only in Cloud mode.

@@ -453,5 +453,54 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
 
             host.Dispose(); // disposes the coordinator + subscription + provider without throwing
         }
+
+        // --- oauth-client-error-hygiene d1: dead-family verdict → "SignInRequired" on the status feed ----------
+
+        /// <summary>A refresher whose every attempt is the dead-family verdict (invalid_grant, 04 §3.5).</summary>
+        internal sealed class InvalidGrantRefresher : ITokenRefresher
+        {
+            public Task<TokenRefreshResult> RefreshAsync(string refreshToken, string? serverTarget, CancellationToken cancellationToken = default)
+                => Task.FromResult(TokenRefreshResult.Failure("refresh token expired", TokenRefreshFailureKind.InvalidGrant));
+        }
+
+        [Fact]
+        public async Task TerminalRefreshFailure_EmitsSignInRequiredStatus()
+        {
+            // d1 contract: SidecarHost.Build wires provider.OnSignInRequired → a status emit carrying
+            // cloudAuthState "SignInRequired" (the third documented StatusMessage value). Drive the only
+            // signal source — a terminal invalid_grant verdict, confirmed dead by the provider's
+            // post-failure re-read — through the REAL subscription, and pin the exact wire spelling the
+            // C++ ApplyStatus consumer matches on. Store + refresher are local fakes; no network.
+            var dir = NewStoreDir();
+            new MachineCredentialStore(dir).Write(new MachineCredentials
+            {
+                ServerTarget = "https://ai-game.dev",
+                Families = new MachineCredentialFamilies
+                {
+                    Plugin = new MachineCredentialFamily
+                    {
+                        AccessToken = "plugin-jwt", RefreshToken = "dead-refresh",
+                        ExpiresAt = DateTimeOffset.UtcNow.AddHours(1),
+                        ClientId = "unreal-mcp-plugin", Scope = "mcp:plugin",
+                    },
+                },
+            });
+            using var host = new SidecarHost(NewIpc(), "0.1.0",
+                credentialStore: new MachineCredentialStore(dir),
+                tokenRefresher: new InvalidGrantRefresher());
+            var statuses = new List<StatusMessage>();
+            host.SetStatusEmitterForTest(s => { statuses.Add(s); return Task.CompletedTask; });
+            host.ApplyConnectionConfig(CloudConfig());
+            host.Build(); // wires the OnSignInRequired → status subscription
+
+            Assert.True(host.CredentialProvider!.IsSignedIn);
+            // Control (both halves): before the verdict, NO status claims SignInRequired — so the positive
+            // assert below cannot pass on an emit that predates the refresh failure.
+            Assert.DoesNotContain(statuses, s => s.CloudAuthState == "SignInRequired");
+
+            Assert.False(await host.CredentialProvider!.RefreshAsync()); // invalid_grant → dead family
+
+            Assert.Contains(statuses, s => s.CloudAuthState == "SignInRequired");
+        }
     }
 }

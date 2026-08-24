@@ -52,7 +52,15 @@ enum class EUnrealMcpDeviceAuthState : uint8
 	/** The device-code flow succeeded and a cloud token was stored. */
 	Authorized,
 	/** The flow failed, was denied, or expired. */
-	Failed
+	Failed,
+	/**
+	 * The machine credential died terminally (the sidecar's §1.3 `status` feed reported
+	 * `cloudAuthState: "SignInRequired"` — a refresh was rejected with a dead-family verdict): the user must
+	 * sign in again. A PERSISTENT state (oauth-client-error-hygiene d1 / recovery-ladder D4 step 3): once the
+	 * one unattended assisted re-auth per session has been spent, this renders status-only and the manual
+	 * Authorize button is the recovery action — no unattended sign-in carousel.
+	 */
+	SignInRequired
 };
 
 /**
@@ -389,6 +397,27 @@ private:
 	FString DeviceUserCode;
 	FString DeviceAuthError;
 	TArray<FString> AiAgents;
+
+	// --- D4 assisted re-auth (oauth-client-error-hygiene d1): once-gate + carousel guard. ---
+	/**
+	 * Reason classes for which the ONE unattended assisted re-auth of this editor session already fired
+	 * (recovery-ladder D4 step 3, the carousel guard — same semantics as Unity c1). A second same-reason
+	 * verdict (the assisted flow failed, expired unattended, or the fresh credential died again) renders the
+	 * persistent SignInRequired status ONLY; recovery is then the manual Authorize button. Session-scoped by
+	 * construction: the view-model lives from module startup to shutdown, so a full editor restart re-arms
+	 * the gate (deliberate — D4 wants the user involved until authorization succeeds). The only reason class
+	 * the status channel carries today is "SignInRequired" itself; keyed by string so a future
+	 * reason-bearing status (e.g. invalid_target's "server configuration error") inherits the guard.
+	 */
+	TSet<FString> AssistedAuthAttemptedReasons;
+	/**
+	 * Handle a `status` message whose cloudAuthState is "SignInRequired" (d1): render the persistent
+	 * sign-in-required state and — in Cloud mode, at most once per session per reason class — initiate the
+	 * sidecar-owned device flow unattended so the browser opens on the verification URL (the sidecar's
+	 * `device-auth` feed then drives ApplyDeviceAuth's one-shot OnOpenBrowser). Never restarts the bridge
+	 * (fast-path send only) and never stomps a device flow already in flight.
+	 */
+	void HandleSignInRequired();
 
 	// --- Issue #99: queue-while-connecting / flush-on-handshake / bounded-timeout for Authorize. ---
 	/** True when an auth-start is queued, awaiting the sidecar handshake to flush it (set in Connecting). */

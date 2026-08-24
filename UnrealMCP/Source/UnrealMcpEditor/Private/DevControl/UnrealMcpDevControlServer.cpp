@@ -103,6 +103,7 @@ namespace
 			case EUnrealMcpDeviceAuthState::Pending:    return TEXT("Pending");
 			case EUnrealMcpDeviceAuthState::Authorized: return TEXT("Authorized");
 			case EUnrealMcpDeviceAuthState::Failed:     return TEXT("Failed");
+			case EUnrealMcpDeviceAuthState::SignInRequired: return TEXT("SignInRequired"); // d1 persistent dead-credential state
 			case EUnrealMcpDeviceAuthState::Idle: default: return TEXT("Idle");
 		}
 	}
@@ -379,11 +380,22 @@ int32 FUnrealMcpDevControlServer::RouteRequest(
 		{
 			StatusJson->SetArrayField(TEXT("aiAgents"), *InAgents);
 		}
+		// oauth-client-error-hygiene d1: forward an optional `cloudAuthState` verbatim ("Authorized" /
+		// "SignInRequired") so a smoke test / the live window can drive the Cloud sign-in indicator — including
+		// the D4 assisted re-auth once-gate — exactly the way the sidecar's §1.3 status feed would.
+		FString InCloudAuthState;
+		if (Body->TryGetStringField(TEXT("cloudAuthState"), InCloudAuthState) && !InCloudAuthState.IsEmpty())
+		{
+			StatusJson->SetStringField(TEXT("cloudAuthState"), InCloudAuthState);
+		}
 		ViewModelPtr->ApplyStatus(StatusJson);
 
 		OutResult->SetBoolField(TEXT("ok"), true);
 		OutResult->SetStringField(TEXT("connectionState"), DevControlConnectionStateLabel(ViewModelPtr->GetConnectionState()));
 		OutResult->SetNumberField(TEXT("aiAgentCount"), ViewModelPtr->GetAiAgents().Num());
+		// d1: echo the device-auth indicator too, so an injected cloudAuthState's effect (Pending on the
+		// assisted initiation, SignInRequired once the carousel guard holds) is assertable in one round-trip.
+		OutResult->SetStringField(TEXT("deviceAuthState"), DevControlDeviceAuthLabel(ViewModelPtr->GetDeviceAuthState()));
 		return 200;
 	}
 
