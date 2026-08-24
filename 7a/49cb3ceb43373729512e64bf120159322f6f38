@@ -1,0 +1,45 @@
+UnrealMCP/Source/UnrealMcpEditor/Public/UnrealMcpCoreTools.h
+  s_908974782fafa1::t_f1d9e5f31fd674 19-28
+UnrealMCP/Source/UnrealMcpEditor/Private/UnrealMcpRuntime.cpp
+  s_908974782fafa1::t_71b0944001c16a 32
+UnrealMCP/Source/UnrealMcpEditor/UnrealMcpEditor.Build.cs
+  s_908974782fafa1::t_47c6912f5c0818 38-46
+UnrealMCP/UnrealMCP.uplugin
+  s_908974782fafa1::t_3b797e35a7a926 28-33
+UnrealMCP/Source/UnrealMcpEditor/Private/Tools/UnrealMcpAssetScopedRead.cpp
+  s_908974782fafa1::t_75a017ef55f784 1-45,52,56-138
+  s_908974782fafa1::t_ca1c1320d2d2e2 46-51,53-55
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpAssetToolsSpec.cpp
+  s_908974782fafa1::t_f9d74de8f0a742 1-245
+UnrealMCP/Source/UnrealMcpEditor/Private/Tools/UnrealMcpAssetScopedRead.h
+  s_908974782fafa1::t_58f38fd734d4d0 1-36
+UnrealMCP/Source/UnrealMcpEditor/Private/Tools/UnrealMcpAssetTools.cpp
+  s_908974782fafa1::t_648206dae5c827 519-530,539,541,543,558,560,568-573,583,590,592
+  s_908974782fafa1::t_ca65706a9c5785 174-182
+  s_908974782fafa1::t_b55a77a16ebb30 267,270
+  s_908974782fafa1::t_ebeb2adf8a3b10 640-643
+  s_908974782fafa1::t_521ab677c0d7f6 448-453
+  s_908974782fafa1::t_7f2bb1d2016de9 1-173,183-266,268-269,271-447,454-507,512-518,531-538,540,542,544-557,559,561-567,574-582,584-585,587-589,591,593-639,644-756
+  s_908974782fafa1::t_4acff4ff97de1f 508-511
+  s_908974782fafa1::t_3ac5a461220374 586
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpAssetScopedReadSpec.cpp
+  s_908974782fafa1::t_9a97c1a38eda18 61,67-70
+  s_908974782fafa1::t_7cd1b9da38b144 1-60,62-66,71-79,82-113
+  s_908974782fafa1::t_dd05e2dad3c802 80-81
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "7a49cb3ceb43373729512e64bf120159322f6f38",
+  "prompts": {},
+  "sessions": {
+    "s_908974782fafa1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f1748397-e586-40bb-91a9-b89c0caebdf5",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

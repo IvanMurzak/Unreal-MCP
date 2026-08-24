@@ -1,0 +1,65 @@
+cli/src/utils/error.ts
+  s_ccc717f86d7e3e::t_08f44d02a9ae25 1-18
+cli/src/lib/clean-plugin.ts
+  s_ccc717f86d7e3e::t_1b6ccf34a8a516 18,132
+cli/src/lib/run-tool.ts
+  s_ccc717f86d7e3e::t_ef07cefcd42832 7,43,121,130
+cli/src/lib/bootstrap-local.ts
+  s_421944529f445d::t_23051d1e868b77 25,99
+cli/src/lib/close.ts
+  s_421944529f445d::t_c3abed2d2cc357 9,119,130
+cli/src/lib/configure.ts
+  s_421944529f445d::t_39bb05a4729db0 9,110
+cli/src/lib/create-project.ts
+  s_421944529f445d::t_385d02fc0ce3ed 11,217
+cli/src/lib/download-server.ts
+  s_f4fba200a9b4a6::t_1e30117ce20b06 32,66,293,310
+cli/src/lib/install-plugin.ts
+  s_421944529f445d::t_ae30642bb135ab 12,148,176,214
+cli/src/lib/login.ts
+  s_421944529f445d::t_7b93b3972ae497 10,138
+cli/src/lib/open.ts
+  s_421944529f445d::t_6a187d1d39707d 11,183
+cli/src/lib/setup-mcp.ts
+  s_421944529f445d::t_b27d42d90b1107 14,204
+cli/src/lib/setup-skills.ts
+  s_421944529f445d::t_0146b0781a4077 8,89
+cli/src/lib/status.ts
+  s_421944529f445d::t_cb378732983517 11,66
+cli/src/lib/update.ts
+  s_421944529f445d::t_adc90e449f674b 10,170
+cli/src/lib/wait-for-ready.ts
+  s_421944529f445d::t_f11ea13bafdc97 8,32
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "e488ed974c4b0d9e8b161c770d5cd8eaabdc2e3b",
+  "prompts": {},
+  "sessions": {
+    "s_421944529f445d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a6aefd38cc8701e73",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_ccc717f86d7e3e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9c8ada08-e4d5-462c-b934-8bbd1f9565d6",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_f4fba200a9b4a6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a2e2283f5ac8c63a4",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

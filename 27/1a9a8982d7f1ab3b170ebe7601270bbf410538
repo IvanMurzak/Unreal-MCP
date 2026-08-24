@@ -1,0 +1,26 @@
+cli/tests/bootstrap-local.test.ts
+  s_53ce73f91e4281::t_6823e63d55b19e 26,29,48
+cli/src/commands/bootstrap-local.ts
+  s_53ce73f91e4281::t_a555baa19e9672 11,56
+  s_53ce73f91e4281::t_3e7c41257eb746 46,54-55
+cli/src/lib/bootstrap-local.ts
+  s_53ce73f91e4281::t_2582f5b9c2532a 42-44
+  s_53ce73f91e4281::t_af4832f79af5b3 78
+  s_53ce73f91e4281::t_d2c4aed07a7e65 1-10,16
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "271a9a8982d7f1ab3b170ebe7601270bbf410538",
+  "prompts": {},
+  "sessions": {
+    "s_53ce73f91e4281": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e24c1167-2410-4c32-885c-4fd71d157405",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

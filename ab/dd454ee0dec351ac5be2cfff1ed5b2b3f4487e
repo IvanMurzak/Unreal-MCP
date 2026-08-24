@@ -1,0 +1,64 @@
+UnrealMCP/Source/UnrealMcpEditor/Private/DevControl/UnrealMcpDevControlServer.cpp
+  s_010c46d1df2a14::t_1efe266699c0fd 508,513-521,525-539,556-561
+  s_010c46d1df2a14::t_57e920e734e469 311-315
+UnrealMCP/Source/UnrealMcpEditor/Private/Server/UnrealMcpServerManager.h
+  s_010c46d1df2a14::t_6e41ae7fa6b72d 38-39
+  s_010c46d1df2a14::t_27a5e7c95088d0 1-37,40-173
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpEditorViewModelSpec.cpp
+  s_010c46d1df2a14::t_599997b3b14c25 461-520
+  s_010c46d1df2a14::t_583a828c44d6a9 29-33,43-45
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpDevControlSpec.cpp
+  s_010c46d1df2a14::t_2c1d39a2bf00c0 29-32,42-44
+  s_010c46d1df2a14::t_2d8ca479770853 343-346
+  s_010c46d1df2a14::t_be503729818691 327,331-332,339-342,347-397
+UnrealMCP/Source/UnrealMcpEditor/UnrealMcpEditor.Build.cs
+  s_010c46d1df2a14::t_3c43f95c213b22 43-47
+docs/ARCHITECTURE.md
+  s_010c46d1df2a14::t_565e0ccfb36f45 96-113
+  s_010c46d1df2a14::t_1110321f6c6666 736-739
+UnrealMCP/Source/UnrealMcpEditor/Private/Server/UnrealMcpServerManager.cpp
+  s_010c46d1df2a14::t_4929a560d0a05a 56-57
+  s_010c46d1df2a14::t_da2e8c54b35801 281-294,296,299-304,306,308,310,312,314-316,319,321,324,330,334-335,342,344,346,348,353,355
+  s_010c46d1df2a14::t_b6257f0dfa3ab4 18
+  s_010c46d1df2a14::t_28c661e50da2ee 14-15
+  s_010c46d1df2a14::t_eac6b426273445 21-22
+  s_010c46d1df2a14::t_c7df210b08d533 1-13,16-17,19-20,23-55,58-280,295,297-298,305,307,309,311,313,317-318,320,322-323,325-329,331-333,336-341,343,345,347,349-352,354,356-736
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/UnrealMcpEditorViewModel.cpp
+  s_010c46d1df2a14::t_91609ecaf21181 457-497
+UnrealMCP/Source/UnrealMcpEditor/Private/UnrealMcpRuntime.h
+  s_010c46d1df2a14::t_f7b6e7b70a53d5 47-50
+  s_010c46d1df2a14::t_1e09e5a77e6854 12
+scripts/window_smoke.py
+  s_010c46d1df2a14::t_92984b5a6a3e57 159,169-200
+scripts/server_smoke.py
+  s_010c46d1df2a14::t_bdb12ae01d84d8 1-240
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/UnrealMcpEditorViewModel.h
+  s_010c46d1df2a14::t_a14f6acaa656dd 84-117
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/SUnrealMcpMainWindow.cpp
+  s_010c46d1df2a14::t_ee2605fae08461 569-576,591-592,594
+  s_010c46d1df2a14::t_94ac59f95fdfaa 577-590,595-596
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpServerManagerSpec.cpp
+  s_010c46d1df2a14::t_2de802f96a4c64 1-204
+UnrealMCP/Source/UnrealMcpEditor/Private/UnrealMcpRuntime.cpp
+  s_010c46d1df2a14::t_99fe6801eb0656 12
+  s_010c46d1df2a14::t_916a1034cdbd29 381-384
+  s_010c46d1df2a14::t_3a075f80a0649b 401-409
+  s_010c46d1df2a14::t_7f3ec5d01f3edb 118-132
+  s_010c46d1df2a14::t_935738f57795b5 159-183
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.7",
+  "base_commit_sha": "abdd454ee0dec351ac5be2cfff1ed5b2b3f4487e",
+  "prompts": {},
+  "sessions": {
+    "s_010c46d1df2a14": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5abf135e-29a4-41c1-907c-855f83d24eff",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

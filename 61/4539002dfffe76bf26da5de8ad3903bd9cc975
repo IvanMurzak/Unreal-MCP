@@ -1,0 +1,67 @@
+cli/src/utils/config.ts
+  s_908974782fafa1::t_258fd15c87fb17 43,46,54-62,64-66,69-71,75-82
+cli/src/lib/open.ts
+  s_908974782fafa1::t_1f46d36f7c2bb7 57-61,63-64,66,68,70
+  s_908974782fafa1::t_df693b299ac610 11
+cli/src/lib/types.ts
+  s_908974782fafa1::t_fbd3786b641386 236
+cli/src/commands/bootstrap-local.ts
+  s_908974782fafa1::t_97690c9577ec5a 28-34
+  s_908974782fafa1::t_88ee5c953a19c3 47-53
+cli/tests/env-file.test.ts
+  s_908974782fafa1::t_5f5a442c7723c8 82-90
+cli/src/commands/status.ts
+  s_908974782fafa1::t_c7a6797dc9c35e 32-36
+cli/tests/close.test.ts
+  s_908974782fafa1::t_d6ff890bfa29f5 34-41
+  s_908974782fafa1::t_67357516694884 67-79
+cli/tests/run-tool.test.ts
+  s_908974782fafa1::t_65bc7088226b10 59-75
+cli/tests/configure.test.ts
+  s_908974782fafa1::t_83d66c359d5b54 73-82
+cli/src/lib/setup-mcp.ts
+  s_908974782fafa1::t_2fa341bea476cb 10,12-13,19-36
+  s_908974782fafa1::t_46198e44e65418 107-114
+  s_908974782fafa1::t_f1a7bc64ebb2fd 60-62,68,75-81,83-89
+cli/tests/login.test.ts
+  s_908974782fafa1::t_131317dcccb518 2
+  s_908974782fafa1::t_9a1de9c86c9916 68-69
+cli/src/lib/bootstrap-local.ts
+  s_908974782fafa1::t_cedee5ed8d42a6 9-13
+cli/src/utils/env-file.ts
+  s_908974782fafa1::t_b47306684ff2bc 66,78,82-83,88
+  s_908974782fafa1::t_82eb279e9e7a3b 97-102,107
+cli/src/lib/login.ts
+  s_908974782fafa1::t_71bd89221f3e16 8,16-17
+  s_908974782fafa1::t_459b1eca66aeab 97
+  s_908974782fafa1::t_f9a35601197b84 71
+  s_908974782fafa1::t_d049d9c7728565 140-141,143-146,150-166
+cli/src/lib/close.ts
+  s_908974782fafa1::t_76c55dffa4d272 65,69-83
+  s_908974782fafa1::t_73efbed8b4a42f 92-99
+cli/src/lib/run-tool.ts
+  s_908974782fafa1::t_e4c689529399c2 57-61
+  s_908974782fafa1::t_7e844d52603cad 150,152-156
+  s_908974782fafa1::t_363e04fd887c47 91
+cli/tests/setup-mcp.test.ts
+  s_908974782fafa1::t_f3c76cc9c588a3 64-77
+  s_908974782fafa1::t_e104239975588a 28-48
+cli/src/lib/configure.ts
+  s_908974782fafa1::t_b488257fbff363 59-64,67-75
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "614539002dfffe76bf26da5de8ad3903bd9cc975",
+  "prompts": {},
+  "sessions": {
+    "s_908974782fafa1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f1748397-e586-40bb-91a9-b89c0caebdf5",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

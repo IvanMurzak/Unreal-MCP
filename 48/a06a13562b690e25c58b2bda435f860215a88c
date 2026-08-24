@@ -1,0 +1,22 @@
+bridge/tests/SkillFileGeneratorTests.cs
+  s_94cae3b80679a2::t_58fdc9177b8ff1 93-115
+bridge/src/AgentConfig/SkillFileGenerator.cs
+  s_94cae3b80679a2::t_24bb368878f2ae 203-209
+  s_94cae3b80679a2::t_5b81ec4036a3d9 221-223,226-227,229
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.7",
+  "base_commit_sha": "48a06a13562b690e25c58b2bda435f860215a88c",
+  "prompts": {},
+  "sessions": {
+    "s_94cae3b80679a2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d15dc434-a705-4009-9c19-05eae0bfc388",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
