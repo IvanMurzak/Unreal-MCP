@@ -1,0 +1,25 @@
+UnrealMCP/UnrealMCP.uplugin
+  s_c34224420978bf::t_94ca3de02062e1 4
+bridge/src/com.IvanMurzak.Unreal.MCP.Bridge.csproj
+  s_c34224420978bf::t_fe5c3926e2c5ca 10
+cli/package-lock.json
+  s_c34224420978bf::t_4bdebde6d53a50 3,9
+cli/package.json
+  s_c34224420978bf::t_af9bcf9e862962 3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "a82987250ee0efa701f14bb6a4ece977f290e542",
+  "prompts": {},
+  "sessions": {
+    "s_c34224420978bf": {
+      "agent_id": {
+        "tool": "github-copilot-cli",
+        "id": "2ddfc6c3-5016-4d25-a1b7-48742281f2bd",
+        "model": "gpt-5.4"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

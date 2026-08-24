@@ -1,0 +1,57 @@
+cli/tests/install-extension.test.ts
+  s_e3cea916442b5e::t_a774d393f7a123 1-510
+cli/src/lib.ts
+  s_e3cea916442b5e::t_c2df37825d18e2 30-32
+  s_e3cea916442b5e::t_4a5af323f63a11 20,23-29,36
+  s_e3cea916442b5e::t_54a9b0852a8740 19
+  s_e3cea916442b5e::t_cb0ad1fcb5c8d8 21-22
+  s_e3cea916442b5e::t_1e1aa81e1dbe23 33-35
+  s_e3cea916442b5e::t_b7d33117363cc4 37-39
+  s_16d7a2a5cf5bc9::t_6c9e41109d6ed3 40,152-158,219-221
+cli/src/lib/types.ts
+  s_e3cea916442b5e::t_ec5ff14c7050ef 16-18
+  s_e3cea916442b5e::t_3599a2c13ac617 630-741
+cli/src/commands/install-extension.ts
+  s_e3cea916442b5e::t_aca19b4ffe2672 1-47
+cli/src/lib/install-extension.ts
+  s_e3cea916442b5e::t_1d836def1f1684 1-569
+cli/src/utils/extension-source.ts
+  s_e3cea916442b5e::t_45a012957cfa76 1-145
+cli/src/utils/extensions-catalog.ts
+  s_e3cea916442b5e::t_b68e6fd8908cc4 1-133
+cli/README.md
+  s_e3cea916442b5e::t_5d39cde851f660 47
+  s_16d7a2a5cf5bc9::t_0cb0cede0f6208 89-138
+cli/src/utils/uproject-plugins.ts
+  s_e3cea916442b5e::t_6146a19afeb070 1-123
+cli/src/index.ts
+  s_e3cea916442b5e::t_b7efe1b7ecfe5e 9,30,37
+cli/tests/cli.test.ts
+  s_16d7a2a5cf5bc9::t_29290deb94fb41 25,40
+docs/EXTENSIONS.md
+  s_16d7a2a5cf5bc9::t_e15b5907e5eb0e 418-461
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "66d00737291633d6714c963cfe3be8e4229f4019",
+  "prompts": {},
+  "sessions": {
+    "s_16d7a2a5cf5bc9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-ac6e3c4286086b50c",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_e3cea916442b5e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c575ab56-73e6-4952-bb8b-fef415924e27",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

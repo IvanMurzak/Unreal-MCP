@@ -1,0 +1,26 @@
+cli/src/lib/update.ts
+  s_5601a2ed5b932a::t_d5f850ad089215 140-141
+cli/src/lib/install-plugin.ts
+  s_5601a2ed5b932a::t_7a76e651a143d9 101-122
+cli/src/lib/clean-plugin.ts
+  s_5601a2ed5b932a::t_3cc3ebe6094fd5 104-107
+cli/tests/update.test.ts
+  s_5601a2ed5b932a::t_63a02b4914a61f 139-171
+  s_5601a2ed5b932a::t_ce15af58323fd9 23-37
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "8778c7686b82c8160583e4c872486083fe7a2dff",
+  "prompts": {},
+  "sessions": {
+    "s_5601a2ed5b932a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4a9d921c-49f2-4338-ab19-c42684cbc42e",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

@@ -1,0 +1,29 @@
+.editorconfig
+  s_908974782fafa1::t_7a78ad0073fdb4 1-49
+CLAUDE.md
+  s_908974782fafa1::t_fac32e175d4756 1-87
+README.md
+  s_908974782fafa1::t_69834446e47914 1-68
+commands/bump-version.ps1
+  s_908974782fafa1::t_fffbe55c027ca8 1-243
+LICENSE
+  s_908974782fafa1::t_f0370cb97b4aaf 1-201
+.gitignore
+  s_908974782fafa1::t_248614a4f15d98 1-60
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "64ea8c1d555137ede5b703a6fe5c5df0a2b63859",
+  "prompts": {},
+  "sessions": {
+    "s_908974782fafa1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f1748397-e586-40bb-91a9-b89c0caebdf5",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
