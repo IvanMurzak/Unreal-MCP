@@ -313,12 +313,19 @@ void FUnrealMcpEditorViewModel::ApplyStatus(const TSharedPtr<FJsonObject>& Statu
 
 	ConnectionState = ParseConnectionState(StateRaw, bKeep);
 
-	// A `status` reflecting an authorized cloud session promotes the device-auth indicator.
+	// A `status` reflecting an authorized cloud session promotes the device-auth indicator; a
+	// "SignInRequired" (the machine credential died terminally — oauth-client-error-hygiene d1) demotes it
+	// to the persistent sign-in-required state and runs the D4 assisted re-auth ladder. Any OTHER value —
+	// the legacy documented "Unauthorized" (never emitted by a shipped sidecar) or a future addition — is
+	// deliberately ignored, never an error: the §1.3 contract requires consumers to tolerate unrecognized
+	// cloudAuthState values so the set can grow without a lockstep plugin release.
 	FString CloudAuthState;
 	if (Status->TryGetStringField(TEXT("cloudAuthState"), CloudAuthState))
 	{
 		if (CloudAuthState.Equals(TEXT("Authorized"), ESearchCase::IgnoreCase))
 			DeviceAuthState = EUnrealMcpDeviceAuthState::Authorized;
+		else if (CloudAuthState.Equals(TEXT("SignInRequired"), ESearchCase::IgnoreCase))
+			HandleSignInRequired();
 	}
 
 	AiAgents.Reset();
@@ -339,6 +346,49 @@ void FUnrealMcpEditorViewModel::ApplyStatus(const TSharedPtr<FJsonObject>& Statu
 					AiAgents.Add(Label);
 			}
 		}
+	}
+}
+
+void FUnrealMcpEditorViewModel::HandleSignInRequired()
+{
+	// A device flow already in flight owns the indicator: Pending means the user is (or is about to be)
+	// verifying in the browser, Connecting means an auth-start is queued awaiting the sidecar handshake
+	// (issue #99). A SignInRequired status racing either must not collapse the pending instructions or
+	// double-initiate the flow — the flow's own device-auth feed will settle the state.
+	if (DeviceAuthState == EUnrealMcpDeviceAuthState::Pending || DeviceAuthState == EUnrealMcpDeviceAuthState::Connecting)
+		return;
+
+	// Render the persistent sign-in-required state (the d1 "silent red" fix: the user SEES why the
+	// connection cannot come up instead of an eternally amber dot). The window shows the companion line +
+	// the manual Authorize button while in this state.
+	DeviceAuthState = EUnrealMcpDeviceAuthState::SignInRequired;
+
+	// D4 recovery-ladder step 2 — involve the user, unattended, at most ONCE per editor session per reason
+	// class (step 3, the carousel guard — Unity c1 parity): initiate the SIDECAR-owned device flow so its
+	// `device-auth` feed delivers the verification URL and ApplyDeviceAuth's one-shot OnOpenBrowser opens
+	// the default browser on it. A second same-reason verdict (the assisted flow failed, its device code
+	// expired unattended, or the fresh credential died again) must NOT re-open anything — persistent status
+	// + manual Authorize only. Cloud-gated: a Custom-mode editor has no cloud sign-in to assist.
+	if (Config.ConnectionMode != EUnrealMcpConnectionMode::Cloud)
+		return;
+	const FString ReasonClass = TEXT("SignInRequired");
+	if (AssistedAuthAttemptedReasons.Contains(ReasonClass))
+		return;
+	AssistedAuthAttemptedReasons.Add(ReasonClass);
+
+	// Fast-path send only: this status just arrived FROM the sidecar, so it is connected/handshaken. If the
+	// send still fails (racing an IPC drop), stay in SignInRequired — an UNATTENDED initiation must never
+	// spawn/restart the bridge or arm the issue-#99 queue/timeout machinery; the manual Authorize button
+	// routes through that robust path when the user acts. Reset the URL/code so the flow's fresh
+	// verification URL triggers ApplyDeviceAuth's first-URL browser open.
+	DeviceVerificationUrl.Reset();
+	DeviceUserCode.Reset();
+	DeviceAuthError.Reset();
+	if (OnSendAuth && OnSendAuth(TEXT("auth-start")))
+	{
+		DeviceAuthState = EUnrealMcpDeviceAuthState::Pending;
+		UE_LOG(LogUnrealMcp, Log,
+			TEXT("[Unreal-MCP] cloud sign-in required — starting the assisted re-authorization (the browser will open on the verification page)."));
 	}
 }
 

@@ -252,6 +252,39 @@ void FUnrealMcpDevControlSpec::Define()
 				DevCtlBody(TEXT("{\"status\":\"Connected\"}")), &VM.Get(), Second);
 			TestEqual("cleared to empty", VM->GetAiAgents().Num(), 0);
 		});
+
+		It("forwards cloudAuthState so a SignInRequired verdict reaches the D4 ladder and /state renders it (d1)", [this]()
+		{
+			TSharedRef<FDevCtlRecording> Rec = MakeShared<FDevCtlRecording>();
+			TSharedRef<FUnrealMcpEditorViewModel> VM = DevCtlMakeViewModel(Rec);
+			// Default config mode is Cloud; the DevCtl OnSendAuth stub always accepts, so the FIRST injected
+			// verdict spends the session's one unattended assisted initiation (→ Pending).
+			TSharedRef<FJsonObject> First = MakeShared<FJsonObject>();
+			const int32 FirstStatus = FUnrealMcpDevControlServer::RouteRequest(
+				TEXT("POST"), TEXT("/inject/connection-status"),
+				DevCtlBody(TEXT("{\"status\":\"Connecting\",\"cloudAuthState\":\"SignInRequired\"}")), &VM.Get(), First);
+			TestEqual("first inject status", FirstStatus, 200);
+			TestEqual("assisted flow armed", First->GetStringField(TEXT("deviceAuthState")), FString(TEXT("Pending")));
+			TestTrue("auth-start reached the sidecar seam", Rec->AuthSent.Contains(TEXT("auth-start")));
+
+			// The assisted flow dies (terminal failed frame), then the SECOND verdict holds as the
+			// persistent sign-in-required indicator (the D4 carousel guard — no re-initiation).
+			TSharedRef<FJsonObject> FailedResult = MakeShared<FJsonObject>();
+			FUnrealMcpDevControlServer::RouteRequest(
+				TEXT("POST"), TEXT("/inject/device-auth"),
+				DevCtlBody(TEXT("{\"state\":\"failed\",\"message\":\"The authorization request expired.\"}")), &VM.Get(), FailedResult);
+
+			TSharedRef<FJsonObject> Second = MakeShared<FJsonObject>();
+			FUnrealMcpDevControlServer::RouteRequest(
+				TEXT("POST"), TEXT("/inject/connection-status"),
+				DevCtlBody(TEXT("{\"status\":\"Connecting\",\"cloudAuthState\":\"SignInRequired\"}")), &VM.Get(), Second);
+			TestEqual("persistent indicator echoed", Second->GetStringField(TEXT("deviceAuthState")), FString(TEXT("SignInRequired")));
+
+			// /state (the surface the smoke test + live window drive) reports the persistent state.
+			TSharedRef<FJsonObject> State = MakeShared<FJsonObject>();
+			FUnrealMcpDevControlServer::RouteRequest(TEXT("GET"), TEXT("/state"), nullptr, &VM.Get(), State);
+			TestEqual("state deviceAuthState", State->GetStringField(TEXT("deviceAuthState")), FString(TEXT("SignInRequired")));
+		});
 	});
 
 	Describe("Control mutators", [this]()

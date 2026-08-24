@@ -612,6 +612,179 @@ void FUnrealMcpEditorViewModelSpec::Define()
 		});
 	});
 
+	Describe("Cloud sign-in required (oauth-client-error-hygiene d1 — D4 assisted re-auth)", [this]()
+	{
+		It("initiates the assisted re-auth ONCE per session, opens the browser via the seam, then holds status-only (carousel guard)", [this]()
+		{
+			TSharedRef<FRecording> Rec = MakeShared<FRecording>();
+			TSharedRef<FUnrealMcpEditorViewModel> VM = MakeViewModel(Rec);
+			// Default config mode is Cloud — the assisted path is armed. Count only auth-start frames.
+			auto SignInAuthStarts = [Rec]() { return Rec->AuthSent.FilterByPredicate([](const FString& T) { return T == TEXT("auth-start"); }).Num(); };
+
+			// The verdict envelope exactly as SidecarHost emits it: EmitStatusAsync(keepConnected ?
+			// "Connecting" : "Disconnected", cloudAuthState: "SignInRequired").
+			TSharedPtr<FJsonObject> Verdict = MakeShared<FJsonObject>();
+			Verdict->SetStringField(TEXT("connectionState"), TEXT("Connecting"));
+			Verdict->SetBoolField(TEXT("keepConnected"), true);
+			Verdict->SetStringField(TEXT("cloudAuthState"), TEXT("SignInRequired"));
+
+			// First verdict of the session: the ONE unattended initiation — auth-start sent, flow armed.
+			VM->ApplyStatus(Verdict);
+			TestEqual("assisted auth-start sent once", SignInAuthStarts(), 1);
+			TestEqual("pending after the assisted initiation",
+				static_cast<int32>(VM->GetDeviceAuthState()), static_cast<int32>(EUnrealMcpDeviceAuthState::Pending));
+
+			// The sidecar-owned flow answers with the verification URL → the browser opens ONCE via the seam
+			// (OnOpenBrowser — no real browser; the D4 "auto-open the default browser" leg).
+			TSharedPtr<FJsonObject> Pending = MakeShared<FJsonObject>();
+			Pending->SetStringField(TEXT("state"), TEXT("pending"));
+			Pending->SetStringField(TEXT("verificationUrl"), TEXT("https://ai-game.dev/device"));
+			Pending->SetStringField(TEXT("userCode"), TEXT("WXYZ-1234"));
+			VM->ApplyDeviceAuth(Pending);
+			TestEqual("browser opened once via the seam", Rec->OpenedUrls.Num(), 1);
+
+			// A repeated identical verdict while the flow is in flight: no re-initiation, no re-open, no stomp.
+			VM->ApplyStatus(Verdict);
+			TestEqual("no re-initiation while the flow is pending", SignInAuthStarts(), 1);
+			TestEqual("pending preserved",
+				static_cast<int32>(VM->GetDeviceAuthState()), static_cast<int32>(EUnrealMcpDeviceAuthState::Pending));
+
+			// The assisted flow expires unattended (the sidecar's terminal failed frame).
+			TSharedPtr<FJsonObject> Failed = MakeShared<FJsonObject>();
+			Failed->SetStringField(TEXT("state"), TEXT("failed"));
+			Failed->SetStringField(TEXT("message"), TEXT("The authorization request expired."));
+			VM->ApplyDeviceAuth(Failed);
+			TestEqual("failed after the unattended expiry",
+				static_cast<int32>(VM->GetDeviceAuthState()), static_cast<int32>(EUnrealMcpDeviceAuthState::Failed));
+
+			// Second same-reason verdict: the carousel guard — persistent status ONLY. No auth-start, no browser.
+			VM->ApplyStatus(Verdict);
+			TestEqual("no second unattended initiation (carousel guard)", SignInAuthStarts(), 1);
+			TestEqual("browser not re-opened", Rec->OpenedUrls.Num(), 1);
+			TestEqual("persistent sign-in-required status",
+				static_cast<int32>(VM->GetDeviceAuthState()), static_cast<int32>(EUnrealMcpDeviceAuthState::SignInRequired));
+
+			// Every further identical status stays status-only (the once-gate holds for the whole session).
+			VM->ApplyStatus(Verdict);
+			TestEqual("still exactly one unattended initiation", SignInAuthStarts(), 1);
+			TestEqual("still sign-in-required",
+				static_cast<int32>(VM->GetDeviceAuthState()), static_cast<int32>(EUnrealMcpDeviceAuthState::SignInRequired));
+
+			// The MANUAL Authorize button stays available after the guard engaged — the guard bounds only
+			// the unattended path, never the user's own action.
+			VM->Authorize();
+			TestEqual("manual Authorize still initiates", SignInAuthStarts(), 2);
+			TestEqual("pending after the manual Authorize",
+				static_cast<int32>(VM->GetDeviceAuthState()), static_cast<int32>(EUnrealMcpDeviceAuthState::Pending));
+		});
+
+		It("never stomps a device flow already in flight; the racing verdict does not consume the once-gate", [this]()
+		{
+			TSharedRef<FRecording> Rec = MakeShared<FRecording>();
+			TSharedRef<FUnrealMcpEditorViewModel> VM = MakeViewModel(Rec);
+			auto SignInAuthStarts2 = [Rec]() { return Rec->AuthSent.FilterByPredicate([](const FString& T) { return T == TEXT("auth-start"); }).Num(); };
+
+			TSharedPtr<FJsonObject> Verdict = MakeShared<FJsonObject>();
+			Verdict->SetStringField(TEXT("connectionState"), TEXT("Connecting"));
+			Verdict->SetBoolField(TEXT("keepConnected"), true);
+			Verdict->SetStringField(TEXT("cloudAuthState"), TEXT("SignInRequired"));
+
+			// The user already pressed Authorize (manual flow in flight, browser instructions imminent).
+			VM->Authorize();
+			TestEqual("manual flow armed", SignInAuthStarts2(), 1);
+
+			// The verdict races in while Pending: it must neither collapse the flow nor double-initiate.
+			VM->ApplyStatus(Verdict);
+			TestEqual("no second auth-start while pending", SignInAuthStarts2(), 1);
+			TestEqual("pending preserved for the in-flight flow",
+				static_cast<int32>(VM->GetDeviceAuthState()), static_cast<int32>(EUnrealMcpDeviceAuthState::Pending));
+
+			// The manual flow dies; the NEXT verdict may spend the session's one unattended initiation —
+			// the racing verdict above did not consume the gate (positive control for the early return).
+			TSharedPtr<FJsonObject> Failed = MakeShared<FJsonObject>();
+			Failed->SetStringField(TEXT("state"), TEXT("failed"));
+			Failed->SetStringField(TEXT("message"), TEXT("Authorization was denied."));
+			VM->ApplyDeviceAuth(Failed);
+			VM->ApplyStatus(Verdict);
+			TestEqual("unattended initiation after the manual flow died", SignInAuthStarts2(), 2);
+			TestEqual("pending after the assisted initiation",
+				static_cast<int32>(VM->GetDeviceAuthState()), static_cast<int32>(EUnrealMcpDeviceAuthState::Pending));
+		});
+
+		It("renders but never auto-initiates outside Cloud mode; switching to Cloud re-arms it (positive control)", [this]()
+		{
+			TSharedRef<FRecording> Rec = MakeShared<FRecording>();
+			TSharedRef<FUnrealMcpEditorViewModel> VM = MakeViewModel(Rec);
+			auto SignInAuthStarts3 = [Rec]() { return Rec->AuthSent.FilterByPredicate([](const FString& T) { return T == TEXT("auth-start"); }).Num(); };
+			VM->SetConnectionMode(EUnrealMcpConnectionMode::Custom);
+
+			TSharedPtr<FJsonObject> Verdict = MakeShared<FJsonObject>();
+			Verdict->SetStringField(TEXT("connectionState"), TEXT("Disconnected"));
+			Verdict->SetBoolField(TEXT("keepConnected"), false);
+			Verdict->SetStringField(TEXT("cloudAuthState"), TEXT("SignInRequired"));
+
+			VM->ApplyStatus(Verdict);
+			TestEqual("no unattended auth-start in Custom mode", SignInAuthStarts3(), 0);
+			TestEqual("no browser open in Custom mode", Rec->OpenedUrls.Num(), 0);
+			TestEqual("state still rendered (truthful indicator)",
+				static_cast<int32>(VM->GetDeviceAuthState()), static_cast<int32>(EUnrealMcpDeviceAuthState::SignInRequired));
+
+			// Positive control on the SAME fixture: Cloud mode DOES initiate — the negative half above can fail.
+			VM->SetConnectionMode(EUnrealMcpConnectionMode::Cloud);
+			VM->ApplyStatus(Verdict);
+			TestEqual("initiated once back in Cloud mode", SignInAuthStarts3(), 1);
+		});
+
+		It("ignores legacy and unknown cloudAuthState values; recognized values still act (§1.3 forward compatibility)", [this]()
+		{
+			TSharedRef<FRecording> Rec = MakeShared<FRecording>();
+			TSharedRef<FUnrealMcpEditorViewModel> VM = MakeViewModel(Rec);
+
+			// The legacy documented value (never emitted by a shipped sidecar) and a future unknown value:
+			// both must be IGNORED — no state change, no auth send, no crash (the tolerance the contract
+			// requires of every consumer so the value set can grow without a lockstep plugin release).
+			for (const TCHAR* Unrecognized : { TEXT("Unauthorized"), TEXT("SomeFutureState") })
+			{
+				TSharedPtr<FJsonObject> Status = MakeShared<FJsonObject>();
+				Status->SetStringField(TEXT("connectionState"), TEXT("Connected"));
+				Status->SetBoolField(TEXT("keepConnected"), true);
+				Status->SetStringField(TEXT("cloudAuthState"), Unrecognized);
+				VM->ApplyStatus(Status);
+				TestEqual("unrecognized value left the device-auth state alone",
+					static_cast<int32>(VM->GetDeviceAuthState()), static_cast<int32>(EUnrealMcpDeviceAuthState::Idle));
+			}
+			TestEqual("no auth frames sent for unrecognized values", Rec->AuthSent.Num(), 0);
+
+			// An absent field (Custom mode / pre-cloud sidecar) also leaves the state alone.
+			TSharedPtr<FJsonObject> NoField = MakeShared<FJsonObject>();
+			NoField->SetStringField(TEXT("connectionState"), TEXT("Connected"));
+			NoField->SetBoolField(TEXT("keepConnected"), true);
+			VM->ApplyStatus(NoField);
+			TestEqual("absent field left the device-auth state alone",
+				static_cast<int32>(VM->GetDeviceAuthState()), static_cast<int32>(EUnrealMcpDeviceAuthState::Idle));
+
+			// Positive control on the same fixture family: recognized values DO act — "Authorized" promotes…
+			TSharedPtr<FJsonObject> AuthorizedStatus = MakeShared<FJsonObject>();
+			AuthorizedStatus->SetStringField(TEXT("connectionState"), TEXT("Connected"));
+			AuthorizedStatus->SetBoolField(TEXT("keepConnected"), true);
+			AuthorizedStatus->SetStringField(TEXT("cloudAuthState"), TEXT("Authorized"));
+			VM->ApplyStatus(AuthorizedStatus);
+			TestEqual("Authorized promoted the indicator",
+				static_cast<int32>(VM->GetDeviceAuthState()), static_cast<int32>(EUnrealMcpDeviceAuthState::Authorized));
+
+			// …and a case-variant "signinrequired" demotes it (the matcher is case-insensitive, like the
+			// long-standing Authorized matcher) and runs the assisted initiation.
+			TSharedPtr<FJsonObject> LowerVerdict = MakeShared<FJsonObject>();
+			LowerVerdict->SetStringField(TEXT("connectionState"), TEXT("Connecting"));
+			LowerVerdict->SetBoolField(TEXT("keepConnected"), true);
+			LowerVerdict->SetStringField(TEXT("cloudAuthState"), TEXT("signinrequired"));
+			VM->ApplyStatus(LowerVerdict);
+			TestEqual("case-variant verdict initiated the assisted flow",
+				static_cast<int32>(VM->GetDeviceAuthState()), static_cast<int32>(EUnrealMcpDeviceAuthState::Pending));
+			TestTrue("auth-start sent for the case-variant verdict", Rec->AuthSent.Contains(TEXT("auth-start")));
+		});
+	});
+
 	Describe("Custom-mode host trimming (§7 validated field)", [this]()
 	{
 		It("trims surrounding whitespace before storing and pushing the dial target", [this]()
