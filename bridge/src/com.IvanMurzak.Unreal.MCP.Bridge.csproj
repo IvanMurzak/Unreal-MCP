@@ -7,7 +7,7 @@
     <Nullable>enable</Nullable>
     <RootNamespace>com.IvanMurzak.Unreal.MCP.Bridge</RootNamespace>
     <AssemblyName>unreal-mcp-bridge</AssemblyName>
-    <Version>0.15.0</Version>
+    <Version>0.16.0</Version>
     <Authors>Ivan Murzak</Authors>
     <Company>Ivan Murzak</Company>
     <Copyright>Copyright © 2026 Ivan Murzak</Copyright>
@@ -51,7 +51,7 @@
 
   <!--
     Reused NuGet pins — normally owned by the upstream release pipelines and kept in lockstep
-    with Godot-MCP (Godot-MCP.csproj). Current: McpPlugin 8.1.0 + ReflectorNet 5.4.0.
+    with Godot-MCP (Godot-MCP.csproj). Current: McpPlugin 8.3.0 + ReflectorNet 5.4.0.
     The MCP/reflection stack is NOT forked. Historical context: the 6.8.0 bump consumed the new
     shared engine-agnostic com.IvanMurzak.McpPlugin.AgentConfig module (the AI-agent configurators
     + the AgentConfiguratorDescription UI-DTO) so the sidecar hosts the AI-agent configuration
@@ -89,6 +89,13 @@
     McpPlugin 7.5.0 -> 7.5.1: the downstream bump the entry above was preparing for, now landed. Patch
     release from MCP-Plugin-dotnet; its raised transitive ReflectorNet floor (>= 5.3.3) is already
     satisfied by the explicit ReflectorNet pin, so restore is clean (no NU1605).
+    McpPlugin 8.1.0 -> 8.3.0 (oauth-client-error-hygiene r3): carries the a1-a3 OAuth error-hygiene
+    wave — 401/refresher terminal-failure classification, the dead-credential-family memo (new public
+    SignInRequiredReason + optional recheck-period ctor), and the ConnectionCredentialCoordinator
+    stop/resume seam (new public additive ConnectionAttemptResult enum) — ending the unbounded
+    dead-credential reconnect flood. The sidecar's existing SignInRequired status emit pairs with the
+    UE-side D4 consumer (#285) shipped in this same release. ReflectorNet floor stays 5.4.0 (8.3.0
+    keeps it), so the explicit pin is unchanged.
   -->
   <!--
     Local-LIB dev toggle (auth-fixes f1b — parity with the GameDev-MCP-Server + Unity/Godot
@@ -123,7 +130,7 @@
 
   <ItemGroup Condition="'$(UseLocalMcpPlugin)' != 'true'">
     <PackageReference Include="com.IvanMurzak.ReflectorNet" Version="5.4.0" />
-    <PackageReference Include="com.IvanMurzak.McpPlugin" Version="8.1.0" />
+    <PackageReference Include="com.IvanMurzak.McpPlugin" Version="8.3.0" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(UseLocalMcpPlugin)' == 'true'">
