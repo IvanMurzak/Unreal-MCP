@@ -432,6 +432,31 @@ The plugin's editor module is the destination rather than a game module because 
 on `UnrealMcpRuntime` overrides a consumer's `TargetDenyList` and drags the plugin into packaged builds.
 A precompiled (marketplace) install has no C++ source on disk and is refused with that reason.
 
+**Every generated SKILL.md carries a provenance marker.** The YAML front matter closes with, as its LAST
+block before the closing `---`:
+
+```yaml
+metadata:
+  generated-by: mcp-plugin-dotnet
+```
+
+The two-space indent is load-bearing — it is what makes `generated-by` a nested mapping rather than a
+sibling top-level scalar. The value deliberately carries **no version and no timestamp**, so regenerating
+an unchanged tool rewrites a byte-identical file. It exists so a consumer can tell a generated skill from a
+hand-authored one and dedup only its own output against the live tool catalog (matching on the front
+matter's `name:`); such a consumer is expected to be **fail-open** — an unmarked file is kept. There is no
+such consumer in this repo yet, and `PruneStaleSkillFolders` is **not** one: it prunes on the presence of a
+`SKILL.md`, not on the marker.
+
+The same two lines the shared `com.IvanMurzak.McpPlugin.Skills.SkillFileGenerator` emits, but this class is
+independent of it rather than a subclass, so it stamps its own copy (unifying the two is a known deferred
+follow-up). Same line *content*, not the same bytes: the shared generator terminates with
+`Environment.NewLine` while this one joins the document with `"\n"`, so a consumer must match the marker
+per line, never as one raw byte run. This generator's front matter is therefore LF-only on every platform;
+note the `### Input JSON Schema` fences further down are serialized by `System.Text.Json` with
+`WriteIndented`, whose newline defaults to `Environment.NewLine`, so a generated `SKILL.md` is
+**mixed-ending on Windows** outside the front matter.
+
 **Consequence for callers.** `POST /api/tools/ping` no longer resolves. The CLI probes
 `/api/system-tools/ping` first and falls back to the legacy route only for a pre-§2.4 plugin
 (`cli/src/utils/probe.ts`); `scripts/connection_smoke.py` asserts `ping` is ABSENT from `tools/list` and

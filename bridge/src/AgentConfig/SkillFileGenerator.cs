@@ -53,20 +53,45 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
         /// YAML front-matter key holding the provenance block. In the Skills file format used by Codex (and
         /// Anthropic Agent Skills) <c>metadata</c> is a declared front-matter field carrying a free-form mapping
         /// of extra keys, which is why the marker nests under it rather than sitting as a bare top-level key a
-        /// host would simply ignore.
+        /// host would simply ignore. (That framing is the shared library's own, restated here rather than
+        /// re-derived — nothing in this repository pins the host format.)
+        /// <para>
+        /// This and the two constants below are <c>public</c> to mirror the shared library, which publishes the
+        /// same three — so a later unification has a name-for-name seam. They are not consumed outside this
+        /// class today; the tests reach them through <c>InternalsVisibleTo</c> either way.
+        /// </para>
         /// </summary>
         public const string ProvenanceBlockKey = "metadata";
 
         /// <summary>
         /// Key, nested under <see cref="ProvenanceBlockKey"/>, marking a SKILL.md as written by a generator
-        /// rather than hand-authored by a user. A consumer that dedups generated skills against the live tool
-        /// catalog keys on this; an unmarked file is treated as hand-authored and always kept (fail-open).
+        /// rather than hand-authored by a user. It exists so a consumer that dedups generated skills against
+        /// the live tool catalog can tell the two apart and leave user-authored files alone; such a consumer
+        /// is expected to be fail-open (an unmarked file is kept). No consumer exists in this repository yet,
+        /// so the marker is currently inert here — and note that <see cref="PruneStaleSkillFolders"/> is NOT
+        /// one: it deletes on the presence of a SKILL.md, not on this marker.
+        /// <para>
+        /// Matching a marked file back to a catalog entry relies on the front matter's <c>name:</c> — see
+        /// <see cref="SanitizeSkillFolderName"/>, which is the identity on the kebab-case ids the registry
+        /// validates and lossy on anything else.
+        /// </para>
         /// </summary>
         public const string ProvenanceKey = "generated-by";
 
         /// <summary>
         /// Value written for <see cref="ProvenanceKey"/>. Deliberately carries NO version and NO timestamp, so
         /// regenerating an unchanged tool rewrites a byte-identical file.
+        /// <para>
+        /// The same two lines that <c>com.IvanMurzak.McpPlugin.Skills.SkillFileGenerator</c> emits — verified
+        /// against the MCP-Plugin-dotnet source at the time of writing, and NOT present in the released 8.3.0
+        /// this bridge pins, so nothing here fails if the shared value drifts. Re-check at the next McpPlugin
+        /// bump, and prefer emitting from the shared constants once a release carries them.
+        /// </para>
+        /// <para>
+        /// Same line CONTENT, not the same bytes: the shared generator uses <c>AppendLine</c>, so its
+        /// terminator is <c>Environment.NewLine</c>, while this one joins with <c>"\n"</c>. A consumer must
+        /// therefore match the marker per line, never as one raw byte run.
+        /// </para>
         /// </summary>
         public const string ProvenanceValue = "mcp-plugin-dotnet";
 
@@ -260,20 +285,18 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
 
             var lines = new List<string>();
 
-            // YAML front-matter (name + description + the provenance marker).
+            // YAML front-matter.
             lines.Add("---");
             lines.Add($"name: {folderName}");
             lines.Add($"description: \"{yamlDesc}\"");
-            // Provenance marker — the LAST block INSIDE the front matter, immediately before the closing `---`,
-            // byte-identical to the shared com.IvanMurzak.McpPlugin AgentConfig generator's own marker (which
-            // Unity and the Godot C# addon inherit by subclassing; this class is independent, so it stamps its
-            // own). A consumer that dedups generated skills parses the front matter only, so a marker written
-            // after the closing `---` would be invisible to it.
-            //
-            // Written RAW from these constants, never through EscapeYamlQuoted: that helper escapes a single
-            // scalar and would collapse the nested mapping into a quoted string. Nothing tool-derived reaches
-            // these two lines, so a tool description cannot forge the marker — the description itself is
-            // single-lined and double-quoted above, which is what keeps it from breaking out of its scalar.
+            // Provenance marker (what it is FOR: see ProvenanceKey / ProvenanceValue). Three mechanical
+            // constraints hold here: it is the LAST block INSIDE the front matter, immediately before the
+            // closing `---`, because a consumer parses the front matter only and would never see it below;
+            // the two-space indent is what makes it a nested mapping rather than a sibling scalar; and it is
+            // written RAW from the constants, never through EscapeYamlQuoted, which escapes a single scalar
+            // and would collapse the nested mapping into a quoted string. Nothing tool-derived reaches these
+            // two lines, and the description above cannot break out of its own scalar to forge them — see
+            // SingleLineCapped for the mechanism and its limits.
             lines.Add($"{ProvenanceBlockKey}:");
             lines.Add($"  {ProvenanceKey}: {ProvenanceValue}");
             lines.Add("---");
@@ -395,6 +418,17 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
 
         // --- Formatting helpers (mirror the C++ generator) ------------------------------------------
 
+        /// <summary>
+        /// Flatten a description to a single capped line for the YAML <c>description:</c> scalar.
+        /// <para>
+        /// Load-bearing beyond formatting: flattening CR/LF/tab is what stops a tool description from spanning
+        /// several front-matter lines and forging a second top-level <c>metadata:</c> block (see
+        /// <see cref="ProvenanceKey"/>). That guarantee is scoped to a real YAML parser — this does NOT
+        /// neutralise U+0085 / U+2028 / U+2029 or other C0 controls, which a purely line-oriented reader (a
+        /// regex under the <c>m</c> flag) would treat as line breaks. Long-standing behaviour; if you tighten
+        /// it, the marker's forgery guard is what you are strengthening.
+        /// </para>
+        /// </summary>
         internal static string SingleLineCapped(string input, int maxLen)
         {
             var flat = (input ?? string.Empty)

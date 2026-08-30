@@ -43,6 +43,9 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             catch { /* best-effort temp cleanup */ }
         }
 
+        /// <summary>Where <see cref="DemoTool"/>'s SKILL.md lands under the per-test temp root.</summary>
+        private string DemoSkillPath => Path.Combine(_root, "demo-tool", "SKILL.md");
+
         // A hand-built tool with one required + one optional param and a description carrying a literal pipe — the
         // same fixture shape the old C++ spec used to assert table escaping.
         private static ToolDescriptor DemoTool()
@@ -143,11 +146,11 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
 
             Assert.True(result.Success);
             Assert.Equal(2, result.FilesWritten);
-            Assert.True(File.Exists(Path.Combine(_root, "demo-tool", "SKILL.md")));
+            Assert.True(File.Exists(DemoSkillPath));
             Assert.True(File.Exists(Path.Combine(_root, "ping", "SKILL.md")));
             // The written content is the same as the pure builder produced.
             Assert.Equal(SkillFileGenerator.BuildSkillMarkdown(DemoTool()),
-                File.ReadAllText(Path.Combine(_root, "demo-tool", "SKILL.md")));
+                File.ReadAllText(DemoSkillPath));
         }
 
         [Fact]
@@ -260,6 +263,18 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         private const string MarkerEntryLine = "  generated-by: mcp-plugin-dotnet";
 
         /// <summary>
+        /// Assert a marker line occurs exactly once in <paramref name="region"/>. `Assert.Equal(1, n)` and
+        /// `Assert.Single` have no message overload, so an `Assert.True` carries <paramref name="half"/> —
+        /// otherwise every one of these prints an indistinguishable "Expected: 1 / Actual: 2" and a red names
+        /// the test without naming which half broke.
+        /// </summary>
+        private static void AssertExactlyOne(string half, IEnumerable<string> region, string marker)
+        {
+            var found = region.Count(l => l == marker);
+            Assert.True(found == 1, $"{half}: expected exactly ONE '{marker.Trim()}' — found {found}");
+        }
+
+        /// <summary>
         /// The front-matter lines: everything strictly between the opening `---` and the next `---`. Splitting
         /// on '\n' only (never trimming) keeps a stray '\r' visible to the caller instead of silently absorbing
         /// it — a consumer parsing the front matter has to see the same bytes we do.
@@ -280,12 +295,17 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             Assert.True(gen.Generate(new List<ToolDescriptor> { DemoTool() }, _root).Success);
 
             // Assert against the file on DISK — that is the artifact a dedup consumer parses.
-            var lines = File.ReadAllText(Path.Combine(_root, "demo-tool", "SKILL.md")).Split('\n');
+            var lines = File.ReadAllText(DemoSkillPath).Split('\n');
 
             Assert.Equal("---", lines[0]);
             Assert.Equal("name: demo-tool", lines[1]);                     // `name:` unchanged and still FIRST
             Assert.Equal("description: \"Does a demo thing.\"", lines[2]);
-            Assert.Equal(MarkerBlockLine, lines[3]);                       // marker block key, top level
+            // PRESENCE and POSITION break for different reasons — a marker deleted outright vs one emitted
+            // below the closing `---`. The index equality alone discriminates them (-1 vs 6), but a bare -1
+            // reads as a puzzle, so the absent case gets its own named message first.
+            var markerIndex = Array.IndexOf(lines, MarkerBlockLine);
+            Assert.True(markerIndex >= 0, $"'{MarkerBlockLine}' is ABSENT from the generated document entirely");
+            Assert.Equal(3, markerIndex);                                  // ...and it sits INSIDE the front matter
             Assert.Equal(MarkerEntryLine, lines[4]);                       // exactly two leading spaces
             Assert.Equal("---", lines[5]);                                 // ...and it is the LAST block inside
         }
@@ -297,15 +317,21 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             var allLines = md.Split('\n');
             var frontMatter = FrontMatterLines(md);
 
-            // (1) Exactly one marker in the front matter. For this fixture the positional test above already
-            //     entails this much (its closing `---` at index 5 bounds the block) — the independent half is (2).
-            Assert.Equal(1, frontMatter.Count(l => l == MarkerBlockLine));
-            Assert.Equal(1, frontMatter.Count(l => l == MarkerEntryLine));
+            // (1) Exactly one marker in the front matter. For this fixture the positional test above entails
+            //     this much — but only via Generate_WritesOneSkillPerToolUnderSanitizedFolders, whose
+            //     whole-document equality is what ties that test's on-disk file to this builder's output.
+            //     Kept as the direct claim on the builder, so weakening that bridge does not silently leave
+            //     the builder path unguarded.
+            AssertExactlyOne("in-front-matter half", frontMatter, MarkerBlockLine);
+            AssertExactlyOne("in-front-matter half", frontMatter, MarkerEntryLine);
             // (2) ...and NOWHERE else in the document. This fixture's own text carries no marker, so a second
             //     occurrence anywhere below the front matter could only be one the generator emitted itself.
-            Assert.Equal(1, allLines.Count(l => l == MarkerBlockLine));
-            Assert.Equal(1, allLines.Count(l => l == MarkerEntryLine));
-            // (3) The published constants are the single source of those two literals.
+            AssertExactlyOne("nowhere-else half", allLines, MarkerBlockLine);
+            AssertExactlyOne("nowhere-else half", allLines, MarkerEntryLine);
+            // (3) The published constants compose the two literals the assertions above pin. This catches a
+            //     constant renamed or revalued out from under those literals; it does NOT prove the generator
+            //     READS the constants (a hardcoded emission with the constants intact satisfies everything
+            //     here), which C# affords no cheap assertion for.
             Assert.Equal(MarkerBlockLine, SkillFileGenerator.ProvenanceBlockKey + ":");
             Assert.Equal(MarkerEntryLine, "  " + SkillFileGenerator.ProvenanceKey + ": " + SkillFileGenerator.ProvenanceValue);
         }
@@ -343,18 +369,24 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             // Regeneration must rewrite a byte-identical file: the marker value carries no version and no
             // timestamp. Fresh generator instance AND a freshly constructed (equal-valued) descriptor on each
             // pass, so nothing is shared between them but the values.
+            //
+            // Generate_WritesOneSkillPerToolUnderSanitizedFolders already compares one written file against a
+            // rebuild, so it catches per-emission nondeterminism too. What is new here is the rest: a second
+            // generator INSTANCE (no cross-pass state), an overwrite of an existing file rather than a first
+            // write, and a BYTE comparison that would also catch an encoding or BOM change.
             var first = new SkillFileGenerator();
             Assert.True(first.Generate(new List<ToolDescriptor> { DemoTool() }, _root).Success);
-            var pass1 = File.ReadAllBytes(Path.Combine(_root, "demo-tool", "SKILL.md"));
+            var pass1 = File.ReadAllBytes(DemoSkillPath);
 
             var second = new SkillFileGenerator();
             Assert.True(second.Generate(new List<ToolDescriptor> { DemoTool() }, _root).Success);
-            var pass2 = File.ReadAllBytes(Path.Combine(_root, "demo-tool", "SKILL.md"));
+            var pass2 = File.ReadAllBytes(DemoSkillPath);
 
             Assert.Equal(pass1, pass2);
-            // Positive control — without it an equality over two MARKER-LESS files would score green.
+            // Positive control — without it an equality over two MARKER-LESS files would score green. ONE
+            // reading is the whole control: past the equality above the two decode to the same string, so a
+            // second Contains over pass2 could not fail whatever the generator did.
             Assert.Contains(MarkerEntryLine, Encoding.UTF8.GetString(pass1));
-            Assert.Contains(MarkerEntryLine, Encoding.UTF8.GetString(pass2));
         }
 
         [Fact]
@@ -372,7 +404,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             var gen = new SkillFileGenerator();
             Assert.True(gen.Generate(new List<ToolDescriptor> { DemoTool() }, _root).Success);
 
-            var content = File.ReadAllText(Path.Combine(_root, "demo-tool", "SKILL.md"));
+            var content = File.ReadAllText(DemoSkillPath);
             var closeIndex = content.IndexOf("\n---\n", StringComparison.Ordinal);
             Assert.True(closeIndex > 0, "front matter is never closed with an LF-delimited ---");
             var frontMatterRegion = content.Substring(0, closeIndex + "\n---\n".Length);
