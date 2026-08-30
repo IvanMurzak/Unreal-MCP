@@ -32,7 +32,9 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
     /// library: putting it upstream would force another NuGet release, and the SKILL.md shape (the param table
     /// derived from the input schema, the <c>unreal-mcp-cli run-tool</c> call form) is Unreal-specific.
     ///
-    /// Output shape (1:1 with the removed C++ generator): YAML front-matter (name + capped single-line description)
+    /// Output shape (1:1 with the removed C++ generator, plus the provenance marker): YAML front-matter (name +
+    /// capped single-line description + the <c>metadata: / generated-by:</c> marker that identifies the file as
+    /// generated rather than hand-authored — see <see cref="ProvenanceKey"/>)
     /// → <c># Title</c> → full description body → optional <c>**Hints:**</c> line → <c>## Input</c> (param table +
     /// the input JSON Schema fence) → optional <c>## Output</c> (output schema fence) → <c>## How to Call</c> (the
     /// plain token-free <c>unreal-mcp-cli run-tool</c> form). Idempotent: every SKILL.md is overwritten and stale
@@ -46,6 +48,27 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
     {
         /// <summary>A defensive single-line cap for the YAML <c>description:</c> scalar (mirrors the C++ generator).</summary>
         public const int MaxSkillDescriptionLength = 1024;
+
+        /// <summary>
+        /// YAML front-matter key holding the provenance block. In the Skills file format used by Codex (and
+        /// Anthropic Agent Skills) <c>metadata</c> is a declared front-matter field carrying a free-form mapping
+        /// of extra keys, which is why the marker nests under it rather than sitting as a bare top-level key a
+        /// host would simply ignore.
+        /// </summary>
+        public const string ProvenanceBlockKey = "metadata";
+
+        /// <summary>
+        /// Key, nested under <see cref="ProvenanceBlockKey"/>, marking a SKILL.md as written by a generator
+        /// rather than hand-authored by a user. A consumer that dedups generated skills against the live tool
+        /// catalog keys on this; an unmarked file is treated as hand-authored and always kept (fail-open).
+        /// </summary>
+        public const string ProvenanceKey = "generated-by";
+
+        /// <summary>
+        /// Value written for <see cref="ProvenanceKey"/>. Deliberately carries NO version and NO timestamp, so
+        /// regenerating an unchanged tool rewrites a byte-identical file.
+        /// </summary>
+        public const string ProvenanceValue = "mcp-plugin-dotnet";
 
         private readonly ILogger? _logger;
 
@@ -237,10 +260,22 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
 
             var lines = new List<string>();
 
-            // YAML front-matter (name + description).
+            // YAML front-matter (name + description + the provenance marker).
             lines.Add("---");
             lines.Add($"name: {folderName}");
             lines.Add($"description: \"{yamlDesc}\"");
+            // Provenance marker — the LAST block INSIDE the front matter, immediately before the closing `---`,
+            // byte-identical to the shared com.IvanMurzak.McpPlugin AgentConfig generator's own marker (which
+            // Unity and the Godot C# addon inherit by subclassing; this class is independent, so it stamps its
+            // own). A consumer that dedups generated skills parses the front matter only, so a marker written
+            // after the closing `---` would be invisible to it.
+            //
+            // Written RAW from these constants, never through EscapeYamlQuoted: that helper escapes a single
+            // scalar and would collapse the nested mapping into a quoted string. Nothing tool-derived reaches
+            // these two lines, so a tool description cannot forge the marker — the description itself is
+            // single-lined and double-quoted above, which is what keeps it from breaking out of its scalar.
+            lines.Add($"{ProvenanceBlockKey}:");
+            lines.Add($"  {ProvenanceKey}: {ProvenanceValue}");
             lines.Add("---");
             lines.Add(string.Empty);
 

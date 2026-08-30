@@ -11,6 +11,8 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
+using System.Text;
 using System.Text.Json.Nodes;
 using com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig;
 using com.IvanMurzak.Unreal.MCP.Bridge.Ipc;
@@ -239,6 +241,144 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             Assert.Equal(2, rows.Count);
             Assert.Contains(rows, r => r.StartsWith("| `name` | string | yes |"));
             Assert.Contains(rows, r => r.StartsWith("| `count` | integer | no |"));
+        }
+
+        // --- Provenance marker -------------------------------------------------------------------------
+        //
+        // A generated SKILL.md carries a front-matter marker identifying it as generated rather than
+        // hand-authored, so a consumer can dedup its own generated skills against the live tool catalog while
+        // leaving user-authored files alone. The marker is two literal lines, the LAST block inside the front
+        // matter:
+        //
+        //     metadata:
+        //       generated-by: mcp-plugin-dotnet
+        //
+        // The two-space indent is load-bearing — it is what makes this a nested YAML mapping rather than a
+        // sibling scalar — so these assertions compare whole lines POSITIONALLY and UN-TRIMMED.
+
+        private const string MarkerBlockLine = "metadata:";
+        private const string MarkerEntryLine = "  generated-by: mcp-plugin-dotnet";
+
+        /// <summary>
+        /// The front-matter lines: everything strictly between the opening `---` and the next `---`. Splitting
+        /// on '\n' only (never trimming) keeps a stray '\r' visible to the caller instead of silently absorbing
+        /// it — a consumer parsing the front matter has to see the same bytes we do.
+        /// </summary>
+        private static List<string> FrontMatterLines(string markdown)
+        {
+            var lines = new List<string>(markdown.Split('\n'));
+            Assert.Equal("---", lines[0]);                       // the document opens the front matter
+            var close = lines.IndexOf("---", 1);
+            Assert.True(close > 0, "front matter is never closed");
+            return lines.GetRange(1, close - 1);
+        }
+
+        [Fact]
+        public void Generate_StampsProvenanceMarkerAsTheLastFrontMatterBlock_PositionalAndUntrimmed()
+        {
+            var gen = new SkillFileGenerator();
+            Assert.True(gen.Generate(new List<ToolDescriptor> { DemoTool() }, _root).Success);
+
+            // Assert against the file on DISK — that is the artifact a dedup consumer parses.
+            var lines = File.ReadAllText(Path.Combine(_root, "demo-tool", "SKILL.md")).Split('\n');
+
+            Assert.Equal("---", lines[0]);
+            Assert.Equal("name: demo-tool", lines[1]);                     // `name:` unchanged and still FIRST
+            Assert.Equal("description: \"Does a demo thing.\"", lines[2]);
+            Assert.Equal(MarkerBlockLine, lines[3]);                       // marker block key, top level
+            Assert.Equal(MarkerEntryLine, lines[4]);                       // exactly two leading spaces
+            Assert.Equal("---", lines[5]);                                 // ...and it is the LAST block inside
+        }
+
+        [Fact]
+        public void BuildSkillMarkdown_ProvenanceMarkerAppearsExactlyOnce_InTheFrontMatterAndNowhereElse()
+        {
+            var md = SkillFileGenerator.BuildSkillMarkdown(DemoTool());
+            var allLines = md.Split('\n');
+            var frontMatter = FrontMatterLines(md);
+
+            // (1) Exactly one marker in the front matter. For this fixture the positional test above already
+            //     entails this much (its closing `---` at index 5 bounds the block) — the independent half is (2).
+            Assert.Equal(1, frontMatter.Count(l => l == MarkerBlockLine));
+            Assert.Equal(1, frontMatter.Count(l => l == MarkerEntryLine));
+            // (2) ...and NOWHERE else in the document. This fixture's own text carries no marker, so a second
+            //     occurrence anywhere below the front matter could only be one the generator emitted itself.
+            Assert.Equal(1, allLines.Count(l => l == MarkerBlockLine));
+            Assert.Equal(1, allLines.Count(l => l == MarkerEntryLine));
+            // (3) The published constants are the single source of those two literals.
+            Assert.Equal(MarkerBlockLine, SkillFileGenerator.ProvenanceBlockKey + ":");
+            Assert.Equal(MarkerEntryLine, "  " + SkillFileGenerator.ProvenanceKey + ": " + SkillFileGenerator.ProvenanceValue);
+        }
+
+        [Fact]
+        public void BuildSkillMarkdown_DescriptionCannotForgeASecondTopLevelMarker()
+        {
+            // A tool whose own description carries the marker text at line start. The front-matter description
+            // is single-lined and double-quoted, so this text can never escape its scalar — the front matter
+            // still holds exactly ONE top-level marker. (The verbatim multi-line text DOES reappear in the body
+            // below the closing `---`; the front matter is the only region a marker means anything in, which is
+            // why these counts are scoped to it.)
+            var forger = new ToolDescriptor
+            {
+                Name = "forge-tool",
+                Title = "Forge Tool",
+                Description = "Prose first.\n" + MarkerBlockLine + "\n" + MarkerEntryLine + "\nAnd more prose.",
+            };
+
+            var md = SkillFileGenerator.BuildSkillMarkdown(forger);
+            var frontMatter = FrontMatterLines(md);
+
+            Assert.Equal(1, frontMatter.Count(l => l == MarkerBlockLine));
+            Assert.Equal(1, frontMatter.Count(l => l == MarkerEntryLine));
+            // The forged text was flattened into the quoted description scalar rather than dropped.
+            Assert.Contains(frontMatter, l => l.StartsWith("description: \"Prose first. " + MarkerBlockLine));
+            // Positive control: the marker really is where we expect, so the counts above are not "1 by luck".
+            Assert.Equal(MarkerBlockLine, frontMatter[frontMatter.Count - 2]);
+            Assert.Equal(MarkerEntryLine, frontMatter[frontMatter.Count - 1]);
+        }
+
+        [Fact]
+        public void Generate_IsByteStable_AcrossAFreshGeneratorAndAFreshEqualValuedInput()
+        {
+            // Regeneration must rewrite a byte-identical file: the marker value carries no version and no
+            // timestamp. Fresh generator instance AND a freshly constructed (equal-valued) descriptor on each
+            // pass, so nothing is shared between them but the values.
+            var first = new SkillFileGenerator();
+            Assert.True(first.Generate(new List<ToolDescriptor> { DemoTool() }, _root).Success);
+            var pass1 = File.ReadAllBytes(Path.Combine(_root, "demo-tool", "SKILL.md"));
+
+            var second = new SkillFileGenerator();
+            Assert.True(second.Generate(new List<ToolDescriptor> { DemoTool() }, _root).Success);
+            var pass2 = File.ReadAllBytes(Path.Combine(_root, "demo-tool", "SKILL.md"));
+
+            Assert.Equal(pass1, pass2);
+            // Positive control — without it an equality over two MARKER-LESS files would score green.
+            Assert.Contains(MarkerEntryLine, Encoding.UTF8.GetString(pass1));
+            Assert.Contains(MarkerEntryLine, Encoding.UTF8.GetString(pass2));
+        }
+
+        [Fact]
+        public void Generate_WritesAnLfOnlyFrontMatter_SoTheMarkerNeedsNoCrlfNormalisation()
+        {
+            // The document skeleton is joined with "\n" (not AppendLine / Environment.NewLine), so the FRONT
+            // MATTER — the only region a marker means anything in — is LF-terminated on every platform, Windows
+            // included: a parser never sees a '\r' glued to the marker value.
+            //
+            // Scoped to the front matter deliberately. Further down the document the embedded JSON Schema fence
+            // is serialized by System.Text.Json with WriteIndented, whose JsonWriterOptions.NewLine defaults to
+            // Environment.NewLine — so a generated SKILL.md is MIXED-ending on Windows (LF skeleton, CRLF inside
+            // the fence). That is pre-existing and out of scope here; a whole-document "no \r" assertion would
+            // pass on Linux and fail on Windows, which is why this asserts the region the claim is about.
+            var gen = new SkillFileGenerator();
+            Assert.True(gen.Generate(new List<ToolDescriptor> { DemoTool() }, _root).Success);
+
+            var content = File.ReadAllText(Path.Combine(_root, "demo-tool", "SKILL.md"));
+            var closeIndex = content.IndexOf("\n---\n", StringComparison.Ordinal);
+            Assert.True(closeIndex > 0, "front matter is never closed with an LF-delimited ---");
+            var frontMatterRegion = content.Substring(0, closeIndex + "\n---\n".Length);
+
+            Assert.DoesNotContain("\r", frontMatterRegion);
+            Assert.Contains("\n" + MarkerEntryLine + "\n", frontMatterRegion);
         }
     }
 }
