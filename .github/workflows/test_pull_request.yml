@@ -119,6 +119,7 @@ jobs:
           # Self-hosted runner persists between jobs; don't leave this job's
           # GITHUB_TOKEN in the worktree's .git config after checkout.
           persist-credentials: false
+          clean: false
 
       - name: BuildPlugin (marketplace packaging validation — DISTRIBUTED, test-free)
         shell: pwsh
@@ -347,6 +348,7 @@ jobs:
         uses: actions/checkout@v5
         with:
           persist-credentials: false
+          clean: false
 
       # No `actions/setup-dotnet` or `actions/setup-python`: this self-hosted
       # runner runs as NT AUTHORITY\NETWORK SERVICE, which cannot write to

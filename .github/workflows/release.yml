@@ -308,6 +308,7 @@ jobs:
           # Self-hosted runner persists between jobs; don't leave this job's
           # GITHUB_TOKEN in the worktree's .git config after checkout.
           persist-credentials: false
+          clean: false
       - name: BuildPlugin (marketplace packaging validation — DISTRIBUTED, test-free)
         shell: pwsh
         run: |
@@ -763,6 +764,7 @@ jobs:
           # Self-hosted runner persists between jobs; don't leave this job's
           # GITHUB_TOKEN in the worktree's .git config after checkout.
           persist-credentials: false
+          clean: false
       # Download the signed per-RID publish dirs produced by the two
       # build-bridge-* jobs, merging all four RIDs under ./bridge-staging/<rid>/.
       # The two artifacts were rooted differently by upload-artifact:
