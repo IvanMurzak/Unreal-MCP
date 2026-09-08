@@ -6,3 +6,4 @@
 self-hosted-runner:
   labels:
     - unreal-5-7
+    - unreal-5-8
