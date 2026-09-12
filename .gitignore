@@ -79,3 +79,12 @@ Thumbs.db
 # Agent memory (infra workspace convention — never commit nested agent-memory dirs)
 **/.claude/agent-memory/
 **/.claude/pipeline/.runtime/
+
+# Host-created subagent worktrees land here when an agent runs with its cwd inside
+# this repo. They are ephemeral checkouts, never source.
+.claude/worktrees/
+
+# Machine-generated pipeline runtime state — not source.
+# `.pipeline/.hooks/` stays tracked; only its runtime siblings are ignored.
+.pipeline/.runtime/
+.pipeline/.stats/
