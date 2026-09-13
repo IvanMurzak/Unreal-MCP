@@ -13,7 +13,8 @@ chain legs need beyond `chain_feed.py record` live in this file and import it.
   assets-identity  Prove that EVERY listed project's obj/project.assets.json resolved the lock's
                    ws version of each NuGet package the override forced. `record` proves only the
                    RECIPES pins (bridge/src); the xUnit project restores on its own. Exit 3 on any
-                   mismatch, 2 on a refusal, 0 on an ordinary run (no lock).
+                   mismatch, 2 on a refusal, 0 on an ordinary run (no lock) or when no NuGet
+                   producer of the lock is in the job's --edges scope.
 
 Both take the SAME `--job` / `--edges` as the job's `apply` and `record`.
 Stdlib only: runs on hosted python3 and on UE's bundled Python 3.11.
@@ -116,9 +117,19 @@ def cmd_assets_identity(args):
         return 2
     if ctx is None:
         return 0
-    edges, _ = cf.scoped_edges(ctx)
-    nuget = [edge for edge in edges if edge["mode"] == "nuget"]
-    rows = cf.nuget_rows_for(ctx, nuget) if nuget else []
+    try:
+        edges, _ = cf.scoped_edges(ctx)
+        nuget = [edge for edge in edges if edge["mode"] == "nuget"]
+        rows = cf.nuget_rows_for(ctx, nuget) if nuget else []
+    except cf.Refusal as exc:
+        cf.log("chain: refused: %s" % exc)
+        return 2
+    if not nuget:
+        # `apply` marks the leg active when ANY edge of this lock is overridden (a cli-core-only
+        # or server-only lock included); no NuGet producer in this job's --edges scope is then a
+        # named n/a, exactly as `record` reports it, never a red leg.
+        cf.log("chain: n/a no NuGet producer of this lock is in this job's --edges scope")
+        return 0
     if not rows:
         cf.log("chain: FAIL the override forced no NuGet package in this job's scope; nothing to prove")
         return 3

@@ -81,9 +81,11 @@ env:
 
 # Ordinary runs (unchanged): auto-cancel superseded runs when a new commit is pushed
 # to the same PR so intermediate pushes don't pile up runner time (§03-implement
-# push-early note). Dispatched chain runs: one group per lock and NEVER cancelled —
-# cancelling a job on the self-hosted Unreal pool wedges the runner, so a second lock
-# queues behind the first instead of cancelling it.
+# push-early note). Dispatched chain runs: one group per lock with cancel-in-progress
+# off — cancelling a job on the self-hosted Unreal pool wedges the runner. Different
+# locks run independently and wait for a free runner; a re-dispatch of the SAME lock
+# waits for the running one (GitHub keeps at most one pending run per group and
+# replaces it, which is harmless: a pending run holds no runner).
 concurrency:
   group: ${{ github.event_name == 'workflow_dispatch' && format('chain-{0}-{1}', inputs.lock_hash8, github.workflow) || format('test-pr-{0}-{1}', github.workflow, github.event.pull_request.number || github.ref) }}
   cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' && true }}
@@ -110,7 +112,7 @@ jobs:
         with:
           dotnet-version: "9.0.x"
 
-      # Chain leg (§C4): resolve the interpreter once, then — under a lock — self-build
+      # Chain leg: resolve the interpreter once, then — under a lock — self-build
       # ReflectorNet + McpPlugin into a local feed and force the bridge csproj's pins to
       # the lock's exact ws versions BEFORE the first restore.
       - name: chain python (posix)
@@ -200,8 +202,9 @@ jobs:
     # bounded. The runner label remains `unreal-5-7` for legacy reasons only.
     # fail-fast:false so one engine's failure never cancels the other's leg.
     runs-on: [self-hosted, windows, unreal-5-7]
-    # A hang guard, not a budget. A hung job is never cancelled from GitHub (that wedges
-    # the self-hosted runner); the step's process is killed on the box instead.
+    # A hang guard, not a budget. Expiry IS a GitHub-side cancel and can wedge this
+    # self-hosted runner exactly like a manual cancel, so it is sized to fire only on a real
+    # hang. Never cancel a slow job by hand: kill the step's process on the box instead.
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -249,7 +252,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "chain: $py is not a runnable Python 3.9+ (exit $LASTEXITCODE)" }
           "CHAIN_PY=$py" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
-      # The C++ plugin consumes nothing from the chain: sha assertion (§C6) + record only.
+      # The C++ plugin consumes nothing from the chain: under a lock, only assert that the lock's
+      # unreal-mcp sha is this run's commit, then record.
       - name: chain feed
         id: chain
         shell: pwsh
@@ -410,7 +414,7 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-      # Per-job leg record (§C5): the sha assertion's outcome + every out-of-scope edge as a
+      # Per-job leg record: the sha assertion's outcome + every out-of-scope edge as a
       # named skip. `--job-status` makes a failed/cancelled job record `result: red`.
       - name: chain leg record
         id: chain_record
@@ -490,7 +494,7 @@ jobs:
     needs: [plugin]
     if: ${{ vars.UNREAL_SMOKE_READY == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     runs-on: [self-hosted, windows, unreal-5-7]
-    # A hang guard, not a budget (never cancel a hung self-hosted job from GitHub).
+    # A hang guard, not a budget — see the plugin job: expiry is a GitHub-side cancel.
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -530,7 +534,8 @@ jobs:
       # `clean: false` keeps untracked files between runs on this persistent workspace, so a
       # chain run whose cleanup never ran (a killed job) would leave its generated nuget.config /
       # Directory.Build.targets behind and silently re-point the NEXT ordinary bridge build at a
-      # local feed. Remove only files carrying the chain's own GENERATED marker, plus the feed.
+      # local feed. Remove only files carrying the chain's own GENERATED marker (the text of
+      # GENERATED_MARKER in the vendored chain_feed.py — keep in sync on re-vendor), plus the feed.
       - name: chain sweep stale overrides
         shell: pwsh
         run: |
