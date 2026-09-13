@@ -9,19 +9,42 @@
 # Reusable workflow: build + test the unreal-mcp-cli npm package (cli/) on a
 # Node 20 & 22 matrix. Mirrors Unity-MCP / Godot-MCP test_cli.yml. Called by
 # both test_pull_request.yml (PR signal) and release.yml (pre-publish gate).
+#
+# Chain leg (node `unreal-mcp`, job `test-cli`, scope `--edges npm`): a reusable
+# workflow does NOT inherit its caller's `env`, so test_pull_request.yml forwards
+# the chain lock as the two OPTIONAL inputs below. When they are empty (every
+# release.yml call, every ordinary PR run) each chain step logs
+# "chain: no lock (ordinary run)" and exits 0, or is skipped.
 name: test-cli
 
 on:
   workflow_call:
+    inputs:
+      lock:
+        description: the chain lock JSON forwarded by a workflow_dispatch caller (empty = ordinary run)
+        required: false
+        type: string
+        default: ""
+      lock_hash8:
+        description: first 8 hex characters of the lock hash (empty = ordinary run)
+        required: false
+        type: string
+        default: ""
 
 # Least-privilege: this workflow only reads the checked-out source.
 permissions:
   contents: read
 
+env:
+  CHAIN_LOCK: ${{ inputs.lock }}
+  CHAIN_LOCK_HASH8: ${{ inputs.lock_hash8 }}
+
 jobs:
   test-cli:
     name: cli (node ${{ matrix.node-version }})
     runs-on: ubuntu-latest
+    # A hang guard, not a budget.
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -38,11 +61,56 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
 
+      # Chain steps run from the checkout root (the job default is ./cli). The
+      # interpreter is resolved once and invoked through ${{ env.CHAIN_PY }}.
+      - name: chain python (posix)
+        if: env.CHAIN_PY == ''
+        shell: bash
+        working-directory: ${{ github.workspace }}
+        run: |
+          for c in python3 python; do
+            if "$c" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 9) else 1)' >/dev/null 2>&1; then
+              echo "CHAIN_PY=$c" >> "$GITHUB_ENV"; exit 0
+            fi
+          done
+          echo 'chain: no Python 3.9+ on PATH (tried python3, python)' >&2; exit 2
+
+      - name: chain feed
+        id: chain
+        working-directory: ${{ github.workspace }}
+        run: ${{ env.CHAIN_PY }} .github/scripts/chain_feed.py apply --node unreal-mcp --job test-cli --edges npm
+
       - name: Install dependencies
         run: npm ci
+
+      # AFTER `npm ci`, which would undo a --no-save install of the ws cli-core tarball.
+      - name: chain feed (npm)
+        if: env.CHAIN_ACTIVE == '1'
+        working-directory: ${{ github.workspace }}
+        run: ${{ env.CHAIN_PY }} .github/scripts/chain_feed.py apply-npm --node unreal-mcp --dir cli
 
       - name: Build TypeScript
         run: npm run build
 
       - name: Run tests
         run: npm test
+
+      - name: chain pin drift
+        if: always() && env.CHAIN_ACTIVE == '1'
+        working-directory: ${{ github.workspace }}
+        run: ${{ env.CHAIN_PY }} .github/scripts/chain_leg_checks.py pin-drift --job test-cli --edges npm
+
+      # Identity proof + per-job leg record (exit 3 on any failed proof => RED even if the tests
+      # passed). `--job-status` makes a failed/cancelled job record `result: red`.
+      - name: chain leg record
+        id: chain_record
+        if: always()
+        working-directory: ${{ github.workspace }}
+        run: ${{ env.CHAIN_PY }} .github/scripts/chain_feed.py record --node unreal-mcp --job test-cli --edges npm --matrix node${{ matrix.node-version }} --job-status ${{ job.status }} "--warn=${{ env.CHAIN_PIN_DRIFT }}" --out chain-leg.json
+
+      - name: chain leg artifact
+        if: always() && steps.chain_record.outputs.artifact_name != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.chain_record.outputs.artifact_name }}
+          path: chain-leg.json

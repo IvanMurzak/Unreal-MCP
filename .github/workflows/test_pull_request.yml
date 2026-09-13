@@ -30,23 +30,65 @@
 # and the plugin leg becomes a live required-when-available check. The label
 # `unreal-5-7` is deliberately distinct from any M1/M4 release-runner label so
 # PR compiles do not starve release capacity (§9.4 constraint).
+#
+# Chain leg (node `unreal-mcp`, driven from ai-game-dev-software `.scripts/chain/`):
+# under `workflow_dispatch` the SAME jobs take the chain lock JSON (`lock`) and its
+# 8-hex hash (`lock_hash8`), and `.github/scripts/chain_feed.py` (VENDORED,
+# byte-identical to ai-game-dev-software `.scripts/chain/leg/chain_feed.py` — edit
+# there, re-vendor) self-builds the lower layers the lock pins and proves each job
+# consumed them. Per-job edge scope, passed identically to `apply` and `record`:
+#   bridge            --edges nuget                        ReflectorNet + McpPlugin feed
+#   test-cli          --edges npm                          cli-core tarball (test_cli.yml)
+#   plugin            --edges none                         C++ consumes nothing: sha assertion + record
+#   connection-smoke  --edges nuget --edges server-binary  bridge feed + the self-built
+#                                                          server as UNREAL_MCP_SERVER_PATH
+# `.github/scripts/chain_leg_checks.py` (repo-owned, NOT vendored) adds the pin-drift
+# warning and the xUnit-project identity proof. The self-hosted jobs have no Python on
+# PATH, so they junction UE's bundled Python 3.11 to a space-free CHAIN_PY under
+# RUNNER_TEMP. On every other run each chain step logs
+# "chain: no lock (ordinary run)" and exits 0, or is skipped.
 name: test-pull-request
 
 on:
   workflow_dispatch:
+    inputs:
+      lock:
+        description: the chain lock JSON (<= 60000 characters)
+        required: true
+        type: string
+      lock_hash8:
+        description: first 8 hex characters of the lock hash
+        required: true
+        type: string
   pull_request:
-    branches: [main]
+    # `chain-testing` is the chain-testing integration branch: without it a PR into
+    # that branch would get no CI at all.
+    branches: [main, chain-testing]
     types: [opened, synchronize, reopened]
+
+# Empty on ordinary runs => GitHub's default title. The chain dispatcher captures a
+# dispatched run by this exact title + headSha.
+run-name: ${{ github.event_name == 'workflow_dispatch' && format('chain {0} unreal-mcp', inputs.lock_hash8) || '' }}
 
 # Least-privilege: PR test jobs only read the checked-out source.
 permissions:
   contents: read
 
-# Auto-cancel superseded runs when a new commit is pushed to the same PR so
-# intermediate pushes don't pile up runner time (§03-implement push-early note).
+# Empty on every event but workflow_dispatch (`inputs` is empty there).
+env:
+  CHAIN_LOCK: ${{ inputs.lock }}
+  CHAIN_LOCK_HASH8: ${{ inputs.lock_hash8 }}
+
+# Ordinary runs (unchanged): auto-cancel superseded runs when a new commit is pushed
+# to the same PR so intermediate pushes don't pile up runner time (§03-implement
+# push-early note). Dispatched chain runs: one group per lock with cancel-in-progress
+# off — cancelling a job on the self-hosted Unreal pool wedges the runner. Different
+# locks run independently and wait for a free runner; a re-dispatch of the SAME lock
+# waits for the running one (GitHub keeps at most one pending run per group and
+# replaces it, which is harmless: a pending run holds no runner).
 concurrency:
-  group: test-pr-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.event_name == 'workflow_dispatch' && format('chain-{0}-{1}', inputs.lock_hash8, github.workflow) || format('test-pr-{0}-{1}', github.workflow, github.event.pull_request.number || github.ref) }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' && true }}
 
 jobs:
   # (a) bridge — .NET 9 sidecar build + xUnit on BOTH hosted OSes (the sidecar
@@ -55,6 +97,8 @@ jobs:
   bridge:
     name: bridge build + xUnit (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    # A hang guard, not a budget.
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -68,6 +112,36 @@ jobs:
         with:
           dotnet-version: "9.0.x"
 
+      # Chain leg: resolve the interpreter once, then — under a lock — self-build
+      # ReflectorNet + McpPlugin into a local feed and force the bridge csproj's pins to
+      # the lock's exact ws versions BEFORE the first restore.
+      - name: chain python (posix)
+        if: runner.os != 'Windows' && env.CHAIN_PY == ''
+        shell: bash
+        run: |
+          for c in python3 python; do
+            if "$c" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 9) else 1)' >/dev/null 2>&1; then
+              echo "CHAIN_PY=$c" >> "$GITHUB_ENV"; exit 0
+            fi
+          done
+          echo 'chain: no Python 3.9+ on PATH (tried python3, python)' >&2; exit 2
+
+      - name: chain python (windows)
+        if: runner.os == 'Windows' && env.CHAIN_PY == ''
+        shell: pwsh
+        run: |
+          foreach ($c in 'python', 'py', 'python3') {
+            if (-not (Get-Command $c -ErrorAction SilentlyContinue)) { continue }
+            $global:LASTEXITCODE = $null
+            & $c -c 'import sys; sys.exit(0 if sys.version_info >= (3, 9) else 1)' 2>$null
+            if ($LASTEXITCODE -eq 0) { "CHAIN_PY=$c" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8; exit 0 }
+          }
+          [Console]::Error.WriteLine('chain: no Python 3.9+ on PATH (tried python, py, python3)'); exit 2
+
+      - name: chain feed
+        id: chain
+        run: ${{ env.CHAIN_PY }} .github/scripts/chain_feed.py apply --node unreal-mcp --job bridge --edges nuget
+
       - name: Restore
         run: dotnet restore bridge/Unreal-MCP-Bridge.sln
 
@@ -77,9 +151,38 @@ jobs:
       - name: Test
         run: dotnet test bridge/Unreal-MCP-Bridge.sln --configuration Debug --no-build --verbosity normal
 
+      # `record` proves only bridge/src (the RECIPES pin). The xUnit project restores on its
+      # own, so prove BOTH assets files resolved the lock's ws packages (exit 3 otherwise).
+      - name: chain identity (bridge + test project)
+        if: env.CHAIN_ACTIVE == '1'
+        run: ${{ env.CHAIN_PY }} .github/scripts/chain_leg_checks.py assets-identity --job bridge --edges nuget --project bridge/src/com.IvanMurzak.Unreal.MCP.Bridge.csproj --project bridge/tests/com.IvanMurzak.Unreal.MCP.Bridge.Tests.csproj
+
+      - name: chain pin drift
+        if: always() && env.CHAIN_ACTIVE == '1'
+        run: ${{ env.CHAIN_PY }} .github/scripts/chain_leg_checks.py pin-drift --job bridge --edges nuget
+
+      # Identity proof + per-job leg record: exit 3 on any failed proof => this job is RED
+      # even if its tests passed. `--job-status` makes a failed/cancelled job record red.
+      - name: chain leg record
+        id: chain_record
+        if: always()
+        run: ${{ env.CHAIN_PY }} .github/scripts/chain_feed.py record --node unreal-mcp --job bridge --edges nuget --job-status ${{ job.status }} "--warn=${{ env.CHAIN_PIN_DRIFT }}" --out chain-leg.json
+
+      - name: chain leg artifact
+        if: always() && steps.chain_record.outputs.artifact_name != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.chain_record.outputs.artifact_name }}
+          path: chain-leg.json
+
   # (b) cli — unreal-mcp-cli node tests (Node 20 & 22) via the reusable workflow.
+  # A reusable workflow does not inherit this workflow's `env`, so the chain lock is
+  # forwarded as inputs (both empty on an ordinary run).
   test-cli:
     uses: ./.github/workflows/test_cli.yml
+    with:
+      lock: ${{ inputs.lock }}
+      lock_hash8: ${{ inputs.lock_hash8 }}
 
   # (c) plugin — UE 5.8 BuildPlugin (also validates marketplace packaging) +
   # Automation specs on the self-hosted runner. Gated on UNREAL_RUNNER_READY so
@@ -99,6 +202,10 @@ jobs:
     # bounded. The runner label remains `unreal-5-7` for legacy reasons only.
     # fail-fast:false so one engine's failure never cancels the other's leg.
     runs-on: [self-hosted, windows, unreal-5-7]
+    # A hang guard, not a budget. Expiry IS a GitHub-side cancel and can wedge this
+    # self-hosted runner exactly like a manual cancel, so it is sized to fire only on a real
+    # hang. Never cancel a slow job by hand: kill the step's process on the box instead.
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -120,6 +227,37 @@ jobs:
           # GITHUB_TOKEN in the worktree's .git config after checkout.
           persist-credentials: false
           clean: false
+
+      # Chain leg. This runner account has no Python on PATH; UE's bundled Python 3.11 is the
+      # only interpreter, and it lives under "C:\Program Files\..." — a path with spaces that
+      # ${{ env.CHAIN_PY }} (substituted UNQUOTED) would split. Junction its folder to a
+      # space-free path under RUNNER_TEMP, prove it runs, and export that as CHAIN_PY.
+      - name: chain python (UE bundled, space-free path)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $src = Join-Path $env:UE_ROOT 'Engine\Binaries\ThirdParty\Python3\Win64'
+          if (-not (Test-Path -LiteralPath (Join-Path $src 'python.exe'))) { throw "chain: UE bundled Python not found under $src" }
+          if ($env:RUNNER_TEMP -match '\s') { throw "chain: RUNNER_TEMP '$env:RUNNER_TEMP' contains whitespace; CHAIN_PY must be space-free" }
+          $link = Join-Path $env:RUNNER_TEMP 'chain-py'
+          if (Test-Path -LiteralPath $link) {
+            # A LINK only: plain rmdir removes the junction, never the engine files behind it.
+            cmd /c rmdir "$link" 2>$null
+            if (Test-Path -LiteralPath $link) { throw "chain: could not remove stale $link" }
+          }
+          cmd /c mklink /J "$link" "$src" | Write-Host
+          if ($LASTEXITCODE -ne 0) { throw "chain: mklink /J $link -> $src failed (exit $LASTEXITCODE)" }
+          $py = Join-Path $link 'python.exe'
+          & $py -c "import sys; print('chain: python', sys.version); sys.exit(0 if sys.version_info >= (3, 9) else 1)"
+          if ($LASTEXITCODE -ne 0) { throw "chain: $py is not a runnable Python 3.9+ (exit $LASTEXITCODE)" }
+          "CHAIN_PY=$py" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      # The C++ plugin consumes nothing from the chain: under a lock, only assert that the lock's
+      # unreal-mcp sha is this run's commit, then record.
+      - name: chain feed
+        id: chain
+        shell: pwsh
+        run: ${{ env.CHAIN_PY }} .github/scripts/chain_feed.py apply --node unreal-mcp --job plugin --edges none
 
       - name: BuildPlugin (marketplace packaging validation — DISTRIBUTED, test-free)
         shell: pwsh
@@ -276,6 +414,21 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+      # Per-job leg record: the sha assertion's outcome + every out-of-scope edge as a
+      # named skip. `--job-status` makes a failed/cancelled job record `result: red`.
+      - name: chain leg record
+        id: chain_record
+        if: always()
+        shell: pwsh
+        run: ${{ env.CHAIN_PY }} .github/scripts/chain_feed.py record --node unreal-mcp --job plugin --edges none --engine unreal --engine-version ${{ matrix.ue }} --job-status ${{ job.status }} --out chain-leg.json
+
+      - name: chain leg artifact
+        if: always() && steps.chain_record.outputs.artifact_name != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.chain_record.outputs.artifact_name }}
+          path: chain-leg.json
+
       - name: Cleanup this job's build outputs (self-hosted disk hygiene)
         # Self-hosted disk hygiene. This runner is SHARED with other repos' jobs and
         # its RUNNER_TEMP + the persistent runner-local host project are NOT auto-pruned
@@ -299,6 +452,11 @@ jobs:
             cmd /c rmdir /s /q "$p" 2>$null
             if (Test-Path -LiteralPath $p) { Remove-Item -LiteralPath $p -Recurse -Force -ErrorAction SilentlyContinue }
           }
+          # 0. The chain python junction: remove the LINK first (plain rmdir, never a recursive
+          #    delete that could follow it into the engine install), then the leg record.
+          $chainPy = Join-Path $env:RUNNER_TEMP 'chain-py'
+          if (Test-Path -LiteralPath $chainPy) { cmd /c rmdir "$chainPy" 2>$null }
+          Remove-Item -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'chain-leg.json') -Force -ErrorAction SilentlyContinue
           # 1. This job's per-run BuildPlugin / report outputs under RUNNER_TEMP.
           foreach ($name in @('UnrealMCP-Package','UnrealMCP-Dist-Package','UnrealMCP-Source-Package','AutomationReport')) {
             Remove-Tree (Join-Path $env:RUNNER_TEMP $name)
@@ -336,6 +494,8 @@ jobs:
     needs: [plugin]
     if: ${{ vars.UNREAL_SMOKE_READY == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     runs-on: [self-hosted, windows, unreal-5-7]
+    # A hang guard, not a budget — see the plugin job: expiry is a GitHub-side cancel.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -349,6 +509,55 @@ jobs:
         with:
           persist-credentials: false
           clean: false
+
+      # Chain leg — same space-free UE Python junction as the plugin job.
+      - name: chain python (UE bundled, space-free path)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $src = Join-Path $env:UE_ROOT 'Engine\Binaries\ThirdParty\Python3\Win64'
+          if (-not (Test-Path -LiteralPath (Join-Path $src 'python.exe'))) { throw "chain: UE bundled Python not found under $src" }
+          if ($env:RUNNER_TEMP -match '\s') { throw "chain: RUNNER_TEMP '$env:RUNNER_TEMP' contains whitespace; CHAIN_PY must be space-free" }
+          $link = Join-Path $env:RUNNER_TEMP 'chain-py'
+          if (Test-Path -LiteralPath $link) {
+            # A LINK only: plain rmdir removes the junction, never the engine files behind it.
+            cmd /c rmdir "$link" 2>$null
+            if (Test-Path -LiteralPath $link) { throw "chain: could not remove stale $link" }
+          }
+          cmd /c mklink /J "$link" "$src" | Write-Host
+          if ($LASTEXITCODE -ne 0) { throw "chain: mklink /J $link -> $src failed (exit $LASTEXITCODE)" }
+          $py = Join-Path $link 'python.exe'
+          & $py -c "import sys; print('chain: python', sys.version); sys.exit(0 if sys.version_info >= (3, 9) else 1)"
+          if ($LASTEXITCODE -ne 0) { throw "chain: $py is not a runnable Python 3.9+ (exit $LASTEXITCODE)" }
+          "CHAIN_PY=$py" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      # `clean: false` keeps untracked files between runs on this persistent workspace, so a
+      # chain run whose cleanup never ran (a killed job) would leave its generated nuget.config /
+      # Directory.Build.targets behind and silently re-point the NEXT ordinary bridge build at a
+      # local feed. Remove only files carrying the chain's own GENERATED marker (the text of
+      # GENERATED_MARKER in the vendored chain_feed.py — keep in sync on re-vendor), plus the feed.
+      - name: chain sweep stale overrides
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($name in 'nuget.config', 'Directory.Build.targets') {
+            $p = Join-Path $env:GITHUB_WORKSPACE $name
+            if ((Test-Path -LiteralPath $p) -and ((Get-Content -LiteralPath $p -Raw) -match 'GENERATED by chain\.py')) {
+              Remove-Item -LiteralPath $p -Force
+              Write-Host "chain: removed stale generated $p"
+            }
+          }
+          $feed = Join-Path $env:GITHUB_WORKSPACE '.artifacts'
+          if (Test-Path -LiteralPath $feed) { Remove-Item -LiteralPath $feed -Recurse -Force; Write-Host "chain: removed stale $feed" }
+
+      # Under a lock: clone ReflectorNet / MCP-Plugin-dotnet / GameDev-MCP-Server at the lock
+      # shas, build them with the SYSTEM .NET SDK (no setup-dotnet here, see below), force the
+      # bridge csproj's pins to the lock's ws versions, publish the win-x64 server with its
+      # chain-identity.json marker and export UNREAL_MCP_SERVER_PATH — BEFORE the bridge build.
+      - name: chain feed
+        id: chain
+        shell: pwsh
+        run: ${{ env.CHAIN_PY }} .github/scripts/chain_feed.py apply --node unreal-mcp --job connection-smoke --edges nuget --edges server-binary
 
       # No `actions/setup-dotnet` or `actions/setup-python`: this self-hosted
       # runner runs as NT AUTHORITY\NETWORK SERVICE, which cannot write to
@@ -443,8 +652,39 @@ jobs:
           # launches the editor in Custom mode, and asserts the tool battery. The
           # bridge override (UNREAL_MCP_BRIDGE_PATH, set above) is inherited by the
           # editor the script spawns.
+          if ($env:CHAIN_ACTIVE -eq '1') {
+            # Under a lock the script must reuse the chain-built server (it prefers an existing
+            # UNREAL_MCP_SERVER_PATH over the release download) — name it and its marker here,
+            # because the script itself logs only the file name.
+            if ([string]::IsNullOrWhiteSpace($env:UNREAL_MCP_SERVER_PATH) -or -not (Test-Path -LiteralPath $env:UNREAL_MCP_SERVER_PATH)) {
+              throw "chain: UNREAL_MCP_SERVER_PATH '$env:UNREAL_MCP_SERVER_PATH' is not an existing chain-built server"
+            }
+            Write-Host "chain: smoke server UNREAL_MCP_SERVER_PATH=$env:UNREAL_MCP_SERVER_PATH"
+            Get-Content -LiteralPath (Join-Path (Split-Path -Parent $env:UNREAL_MCP_SERVER_PATH) 'chain-identity.json') | Write-Host
+          }
           & $py scripts/connection_smoke.py --mode custom --project "$env:HOST_UPROJECT" --ue "$editorCmd" --server-port 18080 --timeout 240
           if ($LASTEXITCODE -ne 0) { throw "connection + tool smoke FAILED (exit $LASTEXITCODE)" }
+
+      - name: chain pin drift
+        if: always() && env.CHAIN_ACTIVE == '1'
+        shell: pwsh
+        run: ${{ env.CHAIN_PY }} .github/scripts/chain_leg_checks.py pin-drift --job connection-smoke --edges nuget --edges server-binary
+
+      # Identity proof + per-job leg record: the bridge assets file at ws AND
+      # UNREAL_MCP_SERVER_PATH -> the packed exe whose chain-identity.json matches. Exit 3 on any
+      # failed proof => RED even if the smoke passed.
+      - name: chain leg record
+        id: chain_record
+        if: always()
+        shell: pwsh
+        run: ${{ env.CHAIN_PY }} .github/scripts/chain_feed.py record --node unreal-mcp --job connection-smoke --edges nuget --edges server-binary --engine unreal --engine-version ${{ matrix.ue }} --job-status ${{ job.status }} "--warn=${{ env.CHAIN_PIN_DRIFT }}" --out chain-leg.json
+
+      - name: chain leg artifact
+        if: always() && steps.chain_record.outputs.artifact_name != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.chain_record.outputs.artifact_name }}
+          path: chain-leg.json
 
       - name: Cleanup this job's build outputs (self-hosted disk hygiene)
         # See the plugin job's cleanup note. Removes ONLY this job's own regenerable
@@ -461,6 +701,22 @@ jobs:
             cmd /c rmdir /s /q "$p" 2>$null
             if (Test-Path -LiteralPath $p) { Remove-Item -LiteralPath $p -Recurse -Force -ErrorAction SilentlyContinue }
           }
+          # Chain leg: the python junction LINK first (plain rmdir, never recursive), then the
+          # generated override files (only when they carry the chain's GENERATED marker — this
+          # clean:false workspace would otherwise hand them to the next ordinary run), the feed,
+          # the lower-layer clones and the leg record.
+          $chainPy = Join-Path $env:RUNNER_TEMP 'chain-py'
+          if (Test-Path -LiteralPath $chainPy) { cmd /c rmdir "$chainPy" 2>$null }
+          foreach ($name in 'nuget.config', 'Directory.Build.targets') {
+            $p = Join-Path $env:GITHUB_WORKSPACE $name
+            if ((Test-Path -LiteralPath $p) -and ((Get-Content -LiteralPath $p -Raw) -match 'GENERATED by chain\.py')) {
+              Write-Host "Removing generated $p"
+              Remove-Item -LiteralPath $p -Force -ErrorAction SilentlyContinue
+            }
+          }
+          Remove-Tree (Join-Path $env:GITHUB_WORKSPACE '.artifacts')
+          Remove-Tree (Join-Path $env:RUNNER_TEMP 'chain')
+          Remove-Item -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'chain-leg.json') -Force -ErrorAction SilentlyContinue
           foreach ($name in @('UnrealMCP-Package','UnrealMCP-Dist-Package','UnrealMCP-Source-Package','AutomationReport')) {
             Remove-Tree (Join-Path $env:RUNNER_TEMP $name)
           }
