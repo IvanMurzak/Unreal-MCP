@@ -16,7 +16,11 @@
 #   (d) connection-smoke — live relay round-trip (client -> gamedev-mcp-server ->
 #                 sidecar -> plugin -> editor -> tool), self-hosted, gated on a
 #                 SEPARATE dormant `vars.UNREAL_SMOKE_READY` (owner-enabled after a
-#                 one-time runner validation; see the job + docs/RELEASING.md)
+#                 one-time runner validation; see the job + docs/RELEASING.md). It also
+#                 RECORDS the editor tool contract (T2 chain fixture): the smoke's raw
+#                 MCP dump is canonicalised + diffed against tests/chain-fixtures/<ue>/
+#                 tools.jsonl by the vendored .github/scripts/chain_fixture.py
+#                 (MCP-Plugin-dotnet scripts/chain_fixture.py — edit there, re-vendor).
 #
 # (There is no server leg: the MCP server lives in the shared
 # IvanMurzak/GameDev-MCP-Server repo and is tested/released there. Leg (d) pulls
@@ -699,8 +703,69 @@ jobs:
             Write-Host "chain: smoke server UNREAL_MCP_SERVER_PATH=$env:UNREAL_MCP_SERVER_PATH"
             Get-Content -LiteralPath (Join-Path (Split-Path -Parent $env:UNREAL_MCP_SERVER_PATH) 'chain-identity.json') | Write-Host
           }
-          & $py scripts/connection_smoke.py --mode custom --project "$env:HOST_UPROJECT" --ue "$editorCmd" --server-port 18080 --timeout 240
+          # T2 chain record (MCP-Plugin-dotnet docs/chain-fixtures.md): the smoke also writes the RAW
+          # MCP-level dump of tools/list + the battery it runs (tests/chain-fixtures/battery.json, kept
+          # equal to the script's SMOKE_BATTERY) to RUNNER_TEMP — never under the host project.
+          $record = Join-Path $env:RUNNER_TEMP 'chain-record\raw.json'
+          & $py scripts/connection_smoke.py --mode custom --project "$env:HOST_UPROJECT" --ue "$editorCmd" --server-port 18080 --timeout 240 --record-out "$record" --battery tests/chain-fixtures/battery.json
           if ($LASTEXITCODE -ne 0) { throw "connection + tool smoke FAILED (exit $LASTEXITCODE)" }
+
+      # T2 chain fixture (docs/chain-fixtures.md §F5): canonicalise the smoke's raw dump and diff it against
+      # the committed tests/chain-fixtures/<ue>/tools.jsonl with the VENDORED chain_fixture.py under UE's
+      # bundled Python. A missing committed fixture FAILS (fixture-missing) — the leg never goes green
+      # without one; exit 3 is a contract-change: review it and commit the new fixture.
+      - name: chain fixture diff
+        shell: pwsh
+        env:
+          PYTHONUTF8: '1'
+          CHAIN_RECORD_RAW: ${{ runner.temp }}\chain-record\raw.json
+          CHAIN_FIXTURE_OUT: ${{ runner.temp }}\chain-fixture-unreal-${{ matrix.ue }}
+          CHAIN_FIXTURE_COMMITTED: tests/chain-fixtures/${{ matrix.ue }}/tools.jsonl
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $py = Join-Path $env:UE_ROOT 'Engine\Binaries\ThirdParty\Python3\Win64\python.exe'
+          New-Item -ItemType Directory -Force -Path $env:CHAIN_FIXTURE_OUT | Out-Null
+          if (-not (Test-Path -LiteralPath $env:CHAIN_RECORD_RAW)) {
+            Write-Host "::error title=chain fixture::raw-dump-missing: $env:CHAIN_RECORD_RAW was not written by the smoke"
+            exit 1
+          }
+          $fresh = Join-Path $env:CHAIN_FIXTURE_OUT 'fresh.jsonl'
+          & $py .github/scripts/chain_fixture.py canonicalize "$env:CHAIN_RECORD_RAW" --out "$fresh"
+          $rc = $LASTEXITCODE
+          if ($rc -ne 0) {
+            # No fresh.jsonl to review, so the raw dump is the only evidence.
+            Copy-Item -LiteralPath $env:CHAIN_RECORD_RAW -Destination $env:CHAIN_FIXTURE_OUT
+            Write-Host "::error title=chain fixture::canonicalize exited $rc"
+            exit $rc
+          }
+          # Masking evidence without uploading the raw dump: the smoke logged how often the host project's
+          # absolute path occurs in the raw responses; the canonical form must carry <path> instead.
+          $masked = (Select-String -LiteralPath $fresh -Pattern '<path>' -SimpleMatch -AllMatches | ForEach-Object { $_.Matches.Count } | Measure-Object -Sum).Sum
+          Write-Host "chain-mask: <path> placeholders in fresh.jsonl = $([int]$masked)"
+          if (-not (Test-Path -LiteralPath $env:CHAIN_FIXTURE_COMMITTED)) {
+            Write-Host "::error title=chain fixture::fixture-missing: $env:CHAIN_FIXTURE_COMMITTED is not committed. Review fresh.jsonl in the chain-fixture-unreal-${{ matrix.ue }} artifact and commit it."
+            exit 1
+          }
+          $diffTxt = Join-Path $env:CHAIN_FIXTURE_OUT 'diff.txt'
+          & $py .github/scripts/chain_fixture.py diff "$env:CHAIN_FIXTURE_COMMITTED" "$fresh" | Out-File -LiteralPath $diffTxt -Encoding utf8NoBOM
+          $rc = $LASTEXITCODE
+          Get-Content -LiteralPath $diffTxt | Write-Host
+          switch ($rc) {
+            0 { Write-Host "chain fixture: identical to $env:CHAIN_FIXTURE_COMMITTED (diff exit 0)"; exit 0 }
+            3 { Write-Host "::error title=chain fixture::contract-change: the editor tool contract differs from $env:CHAIN_FIXTURE_COMMITTED (unified diff above and in diff.txt)"; exit 3 }
+            default { Write-Host "::error title=chain fixture::diff exited $rc"; exit $rc }
+          }
+
+      - name: chain fixture artifact
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: chain-fixture-unreal-${{ matrix.ue }}
+          path: ${{ runner.temp }}\chain-fixture-unreal-${{ matrix.ue }}
+          if-no-files-found: ignore
+          # Review aid only (fresh.jsonl to commit, diff.txt; the raw dump only when canonicalize failed):
+          # the replay side reads the COMMITTED fixture, never this artifact.
+          retention-days: 1
 
       - name: chain pin drift
         if: always() && env.CHAIN_ACTIVE == '1'
@@ -756,6 +821,9 @@ jobs:
           }
           Remove-Tree (Join-Path $env:GITHUB_WORKSPACE '.artifacts')
           Remove-Tree (Join-Path $env:RUNNER_TEMP 'chain')
+          # T2 chain record: the smoke's raw dump and the canonical/diff review files.
+          Remove-Tree (Join-Path $env:RUNNER_TEMP 'chain-record')
+          Remove-Tree (Join-Path $env:RUNNER_TEMP 'chain-fixture-unreal-${{ matrix.ue }}')
           Remove-Item -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'chain-leg.json') -Force -ErrorAction SilentlyContinue
           foreach ($name in @('UnrealMCP-Package','UnrealMCP-Dist-Package','UnrealMCP-Source-Package','AutomationReport')) {
             Remove-Tree (Join-Path $env:RUNNER_TEMP $name)
