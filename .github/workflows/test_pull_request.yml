@@ -54,7 +54,8 @@
 # `.github/scripts/chain_leg_checks.py` (repo-owned, NOT vendored) adds the pin-drift
 # warning and the xUnit-project identity proof. The self-hosted jobs have no Python on
 # PATH, so they junction UE's bundled Python 3.11 to an absolute, space-free CHAIN_PY under
-# RUNNER_TEMP (the hardened script's contract: never a bare name). On every other run each chain step logs
+# RUNNER_TEMP (the hardened script's contract: never a bare name). On every other run
+# each chain step logs
 # "chain: no lock (ordinary run)" and exits 0, or is skipped.
 name: test-pull-request
 
@@ -192,7 +193,7 @@ jobs:
         with:
           name: ${{ steps.chain_record.outputs.artifact_name }}
           path: chain-leg.json
-          # A few-KB JSON leg record; the chain driver collects it right after the run.
+          # A few-KB JSON leg record; whoever dispatched the chain run collects it right after the run.
           retention-days: 1
 
   # (b) cli — unreal-mcp-cli node tests (Node 20 & 22) via the reusable workflow.
@@ -271,7 +272,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "chain: mklink /J $link -> $src failed (exit $LASTEXITCODE)" }
           # The hardened chain_feed.py contract: CHAIN_PY is an ABSOLUTE, SPACE-FREE, forward-slashed
           # interpreter path (never a bare name). Exported through GITHUB_ENV, so it is this job's env
-          # for every later step (a job-level `env:` cannot read runner.temp).
+          # for every later step. The fragment's job-level `env: CHAIN_PY:` form is not usable here:
+          # the path lives under runner.temp, which a job-level `env:` cannot read.
           $py = (Join-Path $link 'python.exe').Replace('\', '/')
           if ($py -notmatch '^[A-Za-z]:/\S+\z' -or -not (Test-Path -LiteralPath $py -PathType Leaf)) { throw "chain: CHAIN_PY '$py' is not an absolute, space-free interpreter path" }
           # Prove it RUNS with the same probe the print-fragment resolvers use (C-extension imports + 3.9+).
@@ -445,7 +447,7 @@ jobs:
         # earlier failure (BuildPlugin, missing editor) leaves it unset, so guard
         # the upload to avoid a second confusing failure on an empty path.
         # Not on a chain dispatch: the report directory is large, and chain mode uploads only the
-        # small JSON leg records + the compact T2 fixture review artifact (owner artifact rule).
+        # small JSON leg records + the compact T2 chain fixture review artifact.
         if: ${{ failure() && env.REPORT_DIR != '' && env.CHAIN_LOCK == '' }}
         uses: actions/upload-artifact@v7
         with:
@@ -468,7 +470,7 @@ jobs:
         with:
           name: ${{ steps.chain_record.outputs.artifact_name }}
           path: chain-leg.json
-          # A few-KB JSON leg record; the chain driver collects it right after the run.
+          # A few-KB JSON leg record; whoever dispatched the chain run collects it right after the run.
           retention-days: 1
 
       - name: Cleanup this job's build outputs (self-hosted disk hygiene)
@@ -582,7 +584,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "chain: mklink /J $link -> $src failed (exit $LASTEXITCODE)" }
           # The hardened chain_feed.py contract: CHAIN_PY is an ABSOLUTE, SPACE-FREE, forward-slashed
           # interpreter path (never a bare name). Exported through GITHUB_ENV, so it is this job's env
-          # for every later step (a job-level `env:` cannot read runner.temp).
+          # for every later step. The fragment's job-level `env: CHAIN_PY:` form is not usable here:
+          # the path lives under runner.temp, which a job-level `env:` cannot read.
           $py = (Join-Path $link 'python.exe').Replace('\', '/')
           if ($py -notmatch '^[A-Za-z]:/\S+\z' -or -not (Test-Path -LiteralPath $py -PathType Leaf)) { throw "chain: CHAIN_PY '$py' is not an absolute, space-free interpreter path" }
           # Prove it RUNS with the same probe the print-fragment resolvers use (C-extension imports + 3.9+).
@@ -823,7 +826,7 @@ jobs:
         with:
           name: ${{ steps.chain_record.outputs.artifact_name }}
           path: chain-leg.json
-          # A few-KB JSON leg record; the chain driver collects it right after the run.
+          # A few-KB JSON leg record; whoever dispatched the chain run collects it right after the run.
           retention-days: 1
 
       - name: Cleanup this job's build outputs (self-hosted disk hygiene)

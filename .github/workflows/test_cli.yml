@@ -63,8 +63,9 @@ jobs:
 
       # Chain steps run from the checkout root (the job default is ./cli). The
       # interpreter is resolved once and invoked through ${{ env.CHAIN_PY }}.
-      # Verbatim from `chain_feed.py print-fragment --node unreal-mcp`: the resolver RUNS a
-      # candidate and exports its absolute, space-free sys.executable (never a bare name).
+      # Verbatim from `chain_feed.py print-fragment --node unreal-mcp` (plus the checkout-root
+      # `working-directory`): each resolver RUNS a candidate and exports its absolute, space-free
+      # sys.executable (never a bare name).
       - name: chain python (posix)
         if: runner.os != 'Windows' && env.CHAIN_PY == ''
         shell: bash
@@ -135,5 +136,5 @@ jobs:
         with:
           name: ${{ steps.chain_record.outputs.artifact_name }}
           path: chain-leg.json
-          # A few-KB JSON leg record; the chain driver collects it right after the run.
+          # A few-KB JSON leg record; whoever dispatched the chain run collects it right after the run.
           retention-days: 1
