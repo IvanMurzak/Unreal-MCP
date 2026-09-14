@@ -1,0 +1,18 @@
+{
+  "schema": 1,
+  "_comment": [
+    "Unreal-MCP's T2 chain battery (format: MCP-Plugin-dotnet docs/chain-fixtures.md). Recorded by",
+    "scripts/connection_smoke.py --record-out/--battery (recorder: mcp-client) on the connection-smoke job;",
+    "the committed result is tests/chain-fixtures/<ue-version>/tools.jsonl.",
+    "READ-ONLY TOOLS ONLY: the smoke runs against the runner's persistent host project.",
+    "KEEP EQUAL to SMOKE_BATTERY in scripts/connection_smoke.py (same names, empty args, same order):",
+    "--record-out without --battery must produce the same canonical fixture as with this file.",
+    "`ping` is a SYSTEM tool, absent from tools/list, and is not part of the fixture."
+  ],
+  "calls": [
+    { "name": "editor-application-get-state", "args": {} },
+    { "name": "level-list-loaded", "args": {} },
+    { "name": "actor-find", "args": {} },
+    { "name": "actor-component-list-all", "args": {} }
+  ]
+}

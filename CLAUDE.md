@@ -304,11 +304,12 @@ CI runs on every PR via **`test_pull_request.yml`** (workflow name `test-pull-re
 - bridge build + xUnit on `ubuntu-latest` **and** `windows-latest`
 - `test-cli / cli` on Node 20 **and** Node 22 (reusable `test_cli.yml`)
 - `plugin BuildPlugin + Automation (UE <ver>)` and `connection + tool smoke (UE <ver>)` — a
-  **`strategy.matrix.ue: ['5.7', '5.8']`** runs both engine versions (the engine path is driven by
-  `UE_ROOT: C:\Program Files\Epic Games\UE_${{ matrix.ue }}`; the host's own game module is rebuilt for
-  the matrix engine so one host project serves both). They run on the **self-hosted Windows runner**
-  labelled `unreal-5-7` (legacy name — the single runner has both engines installed and executes the
-  matrix legs **sequentially**), and are **gated on `UNREAL_RUNNER_READY` / `UNREAL_SMOKE_READY == 'true'`**.
+  **`strategy.matrix.ue: ['5.8']`** (the engine path is driven by
+  `UE_ROOT: C:\Program Files\Epic Games\UE_${{ matrix.ue }}`; `release.yml` validates UE 5.5–5.8).
+  They run on the **self-hosted Windows runners** labelled `unreal-5-7` (legacy name — several
+  ephemeral runners on ONE machine; every UE job holds the machine-wide UE lock from
+  `.github/scripts/ue-machine-lock.ps1`, so UE jobs run **one at a time** — see
+  [`docs/RELEASING.md`](docs/RELEASING.md#machine-wide-ue-lock)), and are **gated on `UNREAL_RUNNER_READY` / `UNREAL_SMOKE_READY == 'true'`**.
   While unset the jobs are **SKIPPED** (never red-by-absence), and fork PRs skip them too (they
   also require `head.repo.full_name == github.repository`). The hosted bridge/server/cli legs always
   provide PR signal.
