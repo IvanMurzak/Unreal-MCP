@@ -33,6 +33,7 @@ import json
 import os
 import platform
 import re
+import shlex
 import shutil
 import struct
 import subprocess
@@ -50,7 +51,33 @@ EXIT_IDENTITY = 3
 #: hard cap so a lock that grew past the limit is a named refusal here rather than an opaque
 #: GitHub-side rejection at dispatch time.
 MAX_LOCK_CHARS = 60000
-LOCK_HASH8_RE = re.compile(r"^[0-9a-f]{8}$")
+LOCK_HASH8_RE = re.compile(r"^[0-9a-f]{8}\Z")
+
+# ----------------------------------------------------------------------
+# lock input validation — every lock-sourced scalar, strictly, at LOAD time
+# ----------------------------------------------------------------------
+#
+# The lock is untrusted input: it arrives as a `workflow_dispatch` string or out of a PR BODY
+# (§C7), and its values reach a `shell=True` recipe, a git argv, a feed PATH, an XML attribute
+# and `$GITHUB_ENV` (`CHAIN_BUILD_PROPS` / `CHAIN_WS_VERSION`, which consumer workflows
+# interpolate into their own `run:` steps). So each value is checked against the one shape it
+# may have BEFORE anything reads it, and a mismatch is an exit-2 refusal naming the field —
+# never a value quietly carried to a sink. Every pattern is anchored with `\Z` (or used with
+# `fullmatch`): Python's `$` also matches before a trailing newline.
+
+LOCK_SHA_RE = re.compile(r"^[0-9a-f]{40}\Z")
+#: `lock.ws_version_for`: `<base_version>-ws.g<sha[:8]>`. The character set admits no shell,
+#: cmd.exe, path-separator or XML metacharacter, and no leading `-`.
+LOCK_WS_VERSION_RE = re.compile(r"^[0-9]+(?:\.[0-9]+){0,3}(?:-[0-9A-Za-z.-]+)?-ws\.g([0-9a-f]{8})\Z")
+LOCK_STATES = ("main", "released", "sha", "branch", "pr")
+LOCK_HASH_RE = re.compile(r"^sha256:[0-9a-f]{64}\Z")
+#: A ref as `lock.py` records it (`refs/heads/<branch>`, `refs/pull/<n>/head`, a sha). This file
+#: never reads it, so its shape is git's own ref grammar, the grammar `lock.parse_state` accepts,
+#: not a narrower charset. A git-legal branch such as `fix/#12` must not hard-block its lock. No
+#: control character, whitespace, `~^:?*[\`, `..` or leading `-`. A future reader that pastes it
+#: into a shell must quote it (`shell_value`).
+LOCK_REF_RE = re.compile(r"^(?!-)(?!.*\.\.)[^\s~^:?*\[\\\x00-\x1f\x7f]+\Z")
+_CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f]")
 
 #: §C7 — the train path. A `pull_request` carrying a `train/` label takes its lock from the
 #: fenced block in the PR BODY, read out of the event payload (never `gh`, so the workflow
@@ -90,7 +117,9 @@ SERVER_MARKER_FIELDS = ("ws_version", "sha", "rid", "publish_cmd", "exe_sha256",
 
 #: A single NuGet version. Anything carrying range syntax, a float or whitespace is refused
 #: rather than pasted into a `Version=` attribute where it would become a range of its own.
-_VERSION_RE = re.compile(r"^[0-9]+(?:\.[0-9]+){0,3}(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$")
+#: Anchored with `\Z`, never `$`: in Python `$` also matches BEFORE a trailing newline, so
+#: `"5.4.0\n"` would pass a `$`-anchored `match` and carry the newline into whatever it reaches.
+_VERSION_RE = re.compile(r"^[0-9]+(?:\.[0-9]+){0,3}(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?\Z")
 _PLACEHOLDER_RE = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
 _EXPR_RE = re.compile(r"\$\{\{(.*?)\}\}", re.DOTALL)
 
@@ -195,6 +224,13 @@ RECIPES = {
             "tgz": {"kind": "tgz", "id": "@baizor/gamedev-cli-core"},
         },
         "consumes": [],
+        # A TWIN is a checkout one JOB drives beside its own, not a package it restores: the
+        # mixed-language concurrency suite runs MCP-Plugin-dotnet's C# harness from source
+        # (`concurrency-suite.yml`, the `MCP_PLUGIN_DOTNET_REF` clone). Under a lock it is cloned
+        # at the lock's sha. Mirrors the manifest leg's `twins:` (`recipes-check`).
+        "twins": [
+            {"node": "mcp-plugin-dotnet", "workflow": "concurrency-suite.yml", "job": "suite"},
+        ],
     },
     "unity-mcp": {
         "path": "engines/unity/Unity-MCP",
@@ -439,11 +475,27 @@ NEEDS_NEW_CONCURRENCY = ("unity-mcp",)
 #: runs (MCP-Plugin-dotnet `test-pull-request.yml`). §C5 lets a repo keep its own major (>= v4).
 UPLOAD_ARTIFACT_MAJOR = "v7"
 
+#: The interpreter probe both fragment resolvers RUN. It imports C-extension modules (a
+#: half-installed interpreter reports a version but cannot import `select`/`zlib`) and prints its
+#: own `sys.executable` with forward slashes, which is what the resolver exports — never the
+#: candidate's NAME. It contains no quote character of either kind, so it survives a bash AND a
+#: pwsh single-quoted argument unchanged.
+CHAIN_PY_PROBE = (
+    "import sys, select, zlib, hashlib; sys.version_info >= (3, 9) or sys.exit(1); "
+    "print(sys.executable.replace(chr(92), chr(47)))"
+)
+
 #: `--edges` selectors that name neither a mode, a producer node nor a `<node>/<artifact>` ref.
 #: `self` = this node's OWN pack (what a root leg proves); `none` = the §C6 sha assertion and a
 #: record, nothing overridden and nothing proven (a job that consumes nothing from the chain).
 SCOPE_SELF = "self"
 SCOPE_NONE = "none"
+
+#: `--edges twin:<node>` selects a declared twin (RECIPES `twins:`). A twin is OPT-IN: no
+#: `--edges` at all does NOT select it, because it belongs to ONE job — cloning it into every
+#: other job of the node would demand a twin proof those jobs can never produce.
+SCOPE_TWIN_PREFIX = "twin:"
+TWIN_ENV_PREFIX = "CHAIN_TWIN_"
 
 
 class Refusal(Exception):
@@ -498,8 +550,43 @@ def host_rid():
     return "linux-x64"
 
 
-def substitute(command, values):
-    """Replace every `{token}`; refuse on one this file does not define or cannot fill."""
+#: The characters cmd.exe treats as syntax even inside a double-quoted argument (`%`/`!`
+#: expansion, `^` escape, `"` quote toggling) or outside one (`&`, `|`, `<`, `>`).
+_CMD_METACHARS = '&|<>^%!"'
+
+
+def shell_value(name, value, windows=None):
+    """One placeholder value made safe to paste into a `shell=True` recipe.
+
+    POSIX `/bin/sh`: `shlex.quote` — a value made only of `[A-Za-z0-9@%+=:,./_-]` (every
+    validated ws version and every ordinary runner path) comes back unchanged, so the plan text
+    is the same as before; anything else is single-quoted. Windows `cmd.exe` has no quoting that
+    neutralises `%`/`!`/`^`, so there the value must already be free of cmd metacharacters (the
+    lock values are, by `validate_lock`); a runner path with whitespace or parentheses is
+    double-quoted. CR, LF and NUL are refused on both — no quoting survives a line break.
+    """
+    text = str(value)
+    if any(ch in text for ch in "\r\n\x00"):
+        raise Refusal("placeholder {%s} value %r carries a line break or NUL; refusing to build a shell command" % (name, text))
+    if windows is None:
+        windows = os.name == "nt"
+    if windows:
+        bad = sorted(set(text) & set(_CMD_METACHARS))
+        if bad:
+            raise Refusal(
+                "placeholder {%s} value %r carries cmd.exe metacharacter(s) %s; refusing to build a "
+                "shell command" % (name, text, " ".join(bad))
+            )
+        return '"%s"' % text if any(ch.isspace() or ch in "()" for ch in text) else text
+    return shlex.quote(text)
+
+
+def substitute(command, values, quote=None):
+    """Replace every `{token}`; refuse on one this file does not define or cannot fill.
+
+    `quote(name, value)` — `shell_value` for a command that reaches a shell — is applied to
+    each value as it is pasted in; the recipe text itself is trusted (it is this file's own).
+    """
     names = {m.group(1) for m in _PLACEHOLDER_RE.finditer(command)}
     unknown = sorted(names - set(values))
     if unknown:
@@ -512,7 +599,8 @@ def substitute(command, values):
             "placeholder(s) %s in %r have no value in this lock"
             % (", ".join("{%s}" % e for e in empty), command)
         )
-    return _PLACEHOLDER_RE.sub(lambda m: values[m.group(1)], command)
+    quote = quote or (lambda _name, value: value)
+    return _PLACEHOLDER_RE.sub(lambda m: quote(m.group(1), values[m.group(1)]), command)
 
 
 def topological_order(node_ids):
@@ -614,6 +702,83 @@ def load_lock_text(args):
     return None, None, "no lock (ordinary run)"
 
 
+def _lock_field_refusal(where, value, shape):
+    # `%r` escapes CR/LF and quotes the value, so the refusal line itself cannot be split.
+    return Refusal("lock %s = %r is not %s; refusing the whole lock before any value is used" % (where, value, shape))
+
+
+def _lock_string(where, value):
+    if not isinstance(value, str):
+        raise _lock_field_refusal(where, value, "a string")
+    if _CONTROL_CHARS_RE.search(value):
+        raise _lock_field_refusal(where, value, "free of control characters (CR, LF, NUL, ...)")
+    return value
+
+
+def validate_lock(lock):
+    """Refuse (exit 2) any lock whose scalars are not exactly the shape `lock.py` writes.
+
+    Runs in `build_context` straight after the JSON parse, BEFORE the lock hash, the node's sha,
+    the recipes or any writer reads a value — so a value that would change a shell command, a
+    git argv, a feed path, `$GITHUB_ENV` or `$GITHUB_OUTPUT` never reaches one:
+
+    * `nodes` keys — the node ids this file knows (`RECIPES`, which `recipes-check` pins to the
+      manifest); `follows` names one of them too;
+    * `sha` — exactly 40 lowercase hex (never an option-shaped `--upload-pack=...` git argv);
+    * `ws_version` — `<version>-ws.g<8 hex>`, and those 8 hex are the node's own `sha[:8]`
+      whenever the node carries a sha (`lock.ws_version_for`);
+    * `version` / `base_version` — a plain version (`_VERSION_RE`);
+    * `state` — one of `LOCK_STATES`; `ref` — a ref-name character set;
+    * `lock_hash` — `sha256:<64 hex>` when present.
+    """
+    nodes = lock.get("nodes")
+    lock_hash = lock.get("lock_hash")
+    if lock_hash not in (None, ""):
+        if not isinstance(lock_hash, str) or not LOCK_HASH_RE.match(lock_hash):
+            raise _lock_field_refusal("lock_hash", lock_hash, "sha256:<64 lowercase hex>")
+    for node_id, entry in nodes.items():
+        where = "nodes.%s" % (node_id,)
+        if node_id not in RECIPES:
+            raise _lock_field_refusal(
+                "nodes key", node_id, "a node id this file knows (%s)" % ", ".join(sorted(RECIPES))
+            )
+        if not isinstance(entry, dict):
+            raise _lock_field_refusal(where, entry, "an object")
+        for key, value in entry.items():
+            if value is None:
+                continue
+            if isinstance(value, (dict, list)):
+                raise _lock_field_refusal("%s.%s" % (where, key), value, "a scalar")
+            if isinstance(value, str):
+                _lock_string("%s.%s" % (where, key), value)
+        state = entry.get("state")
+        if state is not None and state not in LOCK_STATES:
+            raise _lock_field_refusal(where + ".state", state, "one of %s" % ", ".join(LOCK_STATES))
+        sha = entry.get("sha")
+        if sha is not None and not (isinstance(sha, str) and LOCK_SHA_RE.match(sha)):
+            raise _lock_field_refusal(where + ".sha", sha, "40 lowercase hex characters")
+        for key in ("version", "base_version"):
+            value = entry.get(key)
+            if value is not None and not (isinstance(value, str) and _VERSION_RE.match(value)):
+                raise _lock_field_refusal("%s.%s" % (where, key), value, "a plain version")
+        ws_version = entry.get("ws_version")
+        if ws_version is not None:
+            match = LOCK_WS_VERSION_RE.match(ws_version) if isinstance(ws_version, str) else None
+            if match is None:
+                raise _lock_field_refusal(where + ".ws_version", ws_version, "<version>-ws.g<8 lowercase hex>")
+            if sha and match.group(1) != sha[:8]:
+                raise _lock_field_refusal(
+                    where + ".ws_version", ws_version, "stamped with this node's own sha (-ws.g%s)" % sha[:8]
+                )
+        ref = entry.get("ref")
+        if ref is not None and not (isinstance(ref, str) and LOCK_REF_RE.match(ref)):
+            raise _lock_field_refusal(where + ".ref", ref, "a git ref name (no whitespace, ~^:?*[\\, `..` or leading -)")
+        follows = entry.get("follows")
+        if follows is not None and follows not in RECIPES:
+            raise _lock_field_refusal(where + ".follows", follows, "a node id this file knows")
+    return lock
+
+
 class LegContext(object):
     """Everything a subcommand is allowed to need, resolved once."""
 
@@ -669,6 +834,10 @@ class LegContext(object):
     def clone_dir(self, node_id):
         return self.chain_temp / node_id
 
+    def twin_dir(self, node_id):
+        """Apart from `clone_dir`: a lower-layer build of the same node must never rmtree it."""
+        return self.chain_temp / "twin" / node_id
+
     # -- lock -----------------------------------------------------------
     def node_entry(self, node_id):
         return (self.lock.get("nodes") or {}).get(node_id) or {}
@@ -715,12 +884,13 @@ def build_context(args, enforce_limits=True):
         raise Refusal("lock is not JSON (%s): %s" % (source, exc))
     if not isinstance(lock, dict) or not isinstance(lock.get("nodes"), dict):
         raise Refusal("lock (%s) has no `nodes` object" % source)
+    validate_lock(lock)
 
     if not hash8:
         hash8 = str(lock.get("lock_hash") or "").split(":")[-1][:8]
     if not LOCK_HASH8_RE.match(hash8 or ""):
         raise Refusal(
-            "lock_hash8 %r does not match ^[0-9a-f]{8}$; refusing rather than guessing the "
+            "lock_hash8 %r is not exactly 8 lowercase hex characters; refusing rather than guessing the "
             "run-name and cache key" % (hash8,)
         )
 
@@ -747,6 +917,14 @@ def build_context(args, enforce_limits=True):
     else:
         log("chain: lock from %s" % source)
     log("chain: lock %s node %s" % (ctx.lock_hash8, ctx.node))
+    # A twin belongs to ONE job: selected anywhere else it would clone the twin and record a
+    # `<workflow> twin` identity row in a job that never drives it.
+    for twin in scoped_twins(ctx):
+        if not twin_in_job(ctx, twin):
+            raise Refusal(
+                "--edges %s: the twin is declared for job %r of %s, not --job %r; pass the "
+                "selector only in that job" % (twin_selector(twin), twin["job"], twin["workflow"], ctx.job)
+            )
     assert_head_sha(ctx)
     return ctx
 
@@ -808,7 +986,8 @@ def consumer_pins(edge):
 
 
 def scope_selectors(node_id):
-    """Every `--edges` value `node_id` accepts: modes, producers, refs, consumer pins, `self`, `none`."""
+    """Every `--edges` value `node_id` accepts: modes, producers, refs, consumer pins, `self`,
+    `twin:<node>`, `none`."""
     edges = [edge for edge in RECIPES[node_id]["consumes"] if edge["mode"] != "project"]
     out = sorted({edge["mode"] for edge in edges}) + sorted({edge["node"] for edge in edges})
     for value in [edge["ref"] for edge in edges] + sorted({p for edge in edges for p in consumer_pins(edge)}):
@@ -818,6 +997,9 @@ def scope_selectors(node_id):
             out.append(value)
     if is_root_node(node_id) and own_packable_artifacts(node_id):
         out.append(SCOPE_SELF)
+    for twin in node_twins(node_id):
+        if twin_selector(twin) not in out:
+            out.append(twin_selector(twin))
     out.append(SCOPE_NONE)
     return out
 
@@ -912,13 +1094,18 @@ def is_root_node(node_id):
 
 
 def leg_is_active(ctx):
-    """A leg is evidence for this lock when it consumes a ws producer OR is a root at a ws version.
+    """A leg is evidence for this lock when it consumes a ws producer, is a root at a ws version,
+    OR this job selected a twin the lock pins at a sha (`--edges twin:<node>`).
 
     A root builds at `CHAIN_BUILD_PROPS` and packs its own artifact at the lock's ws version for
-    its consumers, so it is a leg exactly like any other. Every other node with no overridden
-    edge is a no-op, as before.
+    its consumers, so it is a leg exactly like any other. A pinned twin is a commit the job must
+    prove it ran against. Every other node with no overridden edge is a no-op, as before.
     """
-    return bool(overridden_edges(ctx)) or (is_root_node(ctx.node) and bool(ctx.ws_version(ctx.node)))
+    return (
+        bool(overridden_edges(ctx))
+        or (is_root_node(ctx.node) and bool(ctx.ws_version(ctx.node)))
+        or bool(pinned_twins(ctx))
+    )
 
 
 def own_pack_in_scope(ctx):
@@ -947,6 +1134,16 @@ def scope_skips(ctx, inside, outside, own_outside):
         {"step": "identity %s/%s (own pack)" % (ctx.node, key), "reason": reason}
         for key, _ in own_outside
     ]
+    # A twin is skipped by name only in the job it is declared for: every OTHER job of the node
+    # never had it, so a row there would claim a gap that does not exist.
+    selected = scoped_twins(ctx)
+    rows += [
+        {"step": "identity %s (%s)" % (twin_consumer(twin), twin_selector(twin)),
+         "reason": "twin not selected: this job passes no --edges %s, so it keeps its own ref and "
+                   "nothing is proven" % twin_selector(twin)}
+        for twin in node_twins(ctx.node)
+        if twin not in selected and ctx.job and ctx.job == twin["job"]
+    ]
     return rows
 
 
@@ -956,6 +1153,20 @@ def own_build_props(ctx):
     own_ws = ctx.ws_version(ctx.node)
     if recipe_build and "{ws_version}" in recipe_build and own_ws:
         return "-p:Version=%s" % own_ws
+    return None
+
+
+def own_ws_version_export(ctx):
+    """`CHAIN_WS_VERSION` — a ROOT's own ws version, for whatever ecosystem it packs in.
+
+    `CHAIN_BUILD_PROPS` exists only when the recipe's build takes `{ws_version}` (an MSBuild
+    property), so an npm root such as cli-core exported nothing its pack step could stamp —
+    yet its workflow packs with `npm pkg set version=$CHAIN_WS_VERSION && npm pack`.
+    Exported for every root at a ws version; a consumer's ws version lives in the lock.
+    """
+    own_ws = ctx.ws_version(ctx.node)
+    if is_root_node(ctx.node) and own_ws:
+        return own_ws
     return None
 
 
@@ -1027,8 +1238,9 @@ def build_plan(ctx, edges):
             "dir": as_posix_abs(clone_dir),
             "clone": clone_argv(node_id, ctx.sha(node_id) or "", clone_dir, recipe["slug"]),
             "override": nuget_rows_for_node(ctx, node_id),
-            "build": substitute(recipe["build"], values) if recipe["build"] else None,
-            "pack": [substitute(raw, values) for raw in recipe["pack"]],
+            # these strings run with `shell=True`: every pasted value goes through `shell_value`
+            "build": substitute(recipe["build"], values, quote=shell_value) if recipe["build"] else None,
+            "pack": [substitute(raw, values, quote=shell_value) for raw in recipe["pack"]],
             "expect": expected_artifacts(ctx, node_id),
         }
         plan.append(entry)
@@ -1071,6 +1283,152 @@ def tarball_filename(package_id, ws_version):
     """
     slug = package_id[1:] if package_id.startswith("@") else package_id
     return "%s-%s.tgz" % (slug.replace("/", "-"), ws_version)
+
+
+# ----------------------------------------------------------------------
+# twins — a checkout one job drives beside its own, pinned by the lock
+# ----------------------------------------------------------------------
+
+
+def node_twins(node_id):
+    return list(RECIPES[node_id].get("twins") or ())
+
+
+def twin_selector(twin):
+    return SCOPE_TWIN_PREFIX + twin["node"]
+
+
+def twin_env(twin):
+    """`mcp-plugin-dotnet` -> `CHAIN_TWIN_MCP_PLUGIN_DOTNET`."""
+    return TWIN_ENV_PREFIX + re.sub(r"[^A-Za-z0-9]+", "_", twin["node"]).upper()
+
+
+def twin_consumer(twin):
+    """The identity row's `consumer`: `concurrency-suite.yml` -> `concurrency-suite twin`."""
+    workflow = twin["workflow"]
+    stem = workflow.rsplit(".", 1)[0] if workflow.endswith((".yml", ".yaml")) else workflow
+    return "%s twin" % stem
+
+
+def twin_slug(twin):
+    return RECIPES[twin["node"]]["slug"]
+
+
+def twin_repo(twin):
+    """The twin's repo NAME (`MCP-Plugin-dotnet`), as the dry-run line prints it."""
+    return twin_slug(twin).split("/")[-1]
+
+
+def twin_in_job(ctx, twin):
+    return bool(ctx.job) and ctx.job == twin["job"]
+
+
+def scoped_twins(ctx):
+    """The declared twins this job selected with `--edges twin:<node>` (never implied)."""
+    if ctx.scope is None:
+        return []
+    return [twin for twin in node_twins(ctx.node) if twin_selector(twin) in ctx.scope]
+
+
+def twin_unpinned(ctx, twin):
+    """The lock RELEASES the twin: `lock.resolve` gives a `released` node a version and no sha, so
+    there is no commit to clone — the job keeps its own ref and the gap is a named skip."""
+    return ctx.node_entry(twin["node"]).get("state") == "released" and not ctx.sha(twin["node"])
+
+
+def pinned_twins(ctx):
+    """The selected twins the lock pins (or claims to): everything `apply` must clone and `record` prove."""
+    return [twin for twin in scoped_twins(ctx) if not twin_unpinned(ctx, twin)]
+
+
+def twin_sha(ctx, twin):
+    """The lock's sha for the twin, or a refusal: a twin that is not pinned is not evidence."""
+    sha = ctx.sha(twin["node"])
+    if not sha:
+        raise Refusal(
+            "--edges %s: the lock has no sha for node %r (state %r), so the twin cannot be "
+            "cloned at a pinned commit" % (twin_selector(twin), twin["node"], ctx.node_entry(twin["node"]).get("state"))
+        )
+    return sha
+
+
+def twin_plan(ctx):
+    """Every pinned twin as `{twin, sha, dir, env, clone}`, with ZERO side effects: `apply` runs
+    exactly the clone `dry-run` prints. A twin whose state claims a sha it lacks is refused here."""
+    plan = []
+    for twin in pinned_twins(ctx):
+        sha = twin_sha(ctx, twin)
+        directory = ctx.twin_dir(twin["node"])
+        plan.append({
+            "twin": twin, "sha": sha, "dir": as_posix_abs(directory), "env": twin_env(twin),
+            "clone": clone_argv(twin["node"], sha, directory, twin_slug(twin)),
+        })
+    return plan
+
+
+def twin_skips(ctx):
+    """One `skipped[]` row per selected twin the lock releases (no sha, nothing cloned or proven)."""
+    return [
+        {"step": "identity %s (%s)" % (twin_consumer(twin), twin_selector(twin)),
+         "reason": "lock.nodes.%s is released (%s) with no sha: nothing cloned, the job used its "
+                   "own ref, not proven" % (twin["node"], ctx.node_entry(twin["node"]).get("version"))}
+        for twin in scoped_twins(ctx) if twin_unpinned(ctx, twin)
+    ]
+
+
+def git_head(directory):
+    """`(sha, None)` from `git -C <directory> rev-parse HEAD`, or `(None, why)`.
+
+    The status comes from `returncode`, and the output is CAPTURED, never piped.
+    """
+    git = shutil.which("git")
+    if git is None:
+        return None, "git is not on PATH"
+    try:
+        completed = subprocess.run(
+            [git, "-C", as_posix_abs(directory), "rev-parse", "HEAD"],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=dict(os.environ, **_GIT_ENV),
+        )
+    except OSError as exc:
+        return None, str(exc)
+    if completed.returncode != 0:
+        detail = completed.stderr.decode("utf-8", "replace").strip()
+        return None, "exit %d: %s" % (completed.returncode, detail[:200])
+    sha = completed.stdout.decode("utf-8", "replace").strip()
+    return (sha, None) if sha else (None, "empty output")
+
+
+def _twin_proofs(ctx):
+    """One identity row per pinned twin: its checkout's HEAD vs the lock's sha.
+
+    A twin dir with no `.git` is `ok: false` BEFORE git runs — `git -C` on a plain directory
+    walks UP to any enclosing repo and would report that repo's HEAD instead of failing.
+    """
+    proofs = []
+    for twin in pinned_twins(ctx):
+        consumer = twin_consumer(twin)
+        package = twin_slug(twin)
+        expected = ctx.sha(twin["node"]) or None
+        directory = ctx.twin_dir(twin["node"])
+        label = "git -C %s rev-parse HEAD" % as_posix_abs(directory)
+        if not expected:
+            proofs.append(_proof(
+                consumer, "lock.nodes.%s has no sha: the twin is not pinned" % twin["node"],
+                package, None, None, False,
+            ))
+            continue
+        if not (directory / ".git").exists():
+            proofs.append(_proof(
+                consumer, "twin dir %s is missing or not a git checkout (apply never cloned it)"
+                % as_posix_abs(directory), package, None, expected, False,
+            ))
+            continue
+        resolved, why = git_head(directory)
+        if resolved is None:
+            proofs.append(_proof(consumer, "%s failed: %s" % (label, why), package, None, expected, False))
+            continue
+        proofs.append(_proof(consumer, label, package, resolved, expected, resolved == expected))
+    return proofs
 
 
 # ----------------------------------------------------------------------
@@ -1632,7 +1990,9 @@ def apply_pnpm(ctx, edges):
     write_text(workspace_yaml, compose_workspace_yaml(existing, entries))
     notes.extend("pnpm-workspace.yaml overrides: %s -> %s" % (pid, spec) for pid, spec in entries)
     require_tool("pnpm", "the App leg installs its overrides with pnpm")
-    if run(PNPM_INSTALL_CMD, cwd=app_dir, env=ctx.command_env(), shell=True) != 0:
+    # an argv list, not a `shell=True` string: no lock value reaches this command. On Windows, `run`
+    # resolves `pnpm.cmd`, and a `.cmd` still executes through cmd.exe.
+    if run(PNPM_INSTALL_CMD.split(), cwd=app_dir, env=ctx.command_env()) != 0:
         raise Refusal("`%s` failed in %s" % (PNPM_INSTALL_CMD, as_posix_abs(app_dir)))
     notes.append("%s: %s exit 0" % (as_posix_abs(app_dir), PNPM_INSTALL_CMD))
     return [as_posix_abs(workspace_yaml), as_posix_abs(app_dir / "package.json")], notes
@@ -1880,24 +2240,48 @@ def command(name, help_text):
     return decorate
 
 
-def _write_github_env(pairs):
-    path = os.environ.get("GITHUB_ENV")
+_GITHUB_FILE_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\Z")
+
+
+def _checked_github_lines(what, pairs):
+    """`KEY=value\\n` lines for `$GITHUB_ENV` / `$GITHUB_OUTPUT` — or a refusal, before ANY is written.
+
+    Both files are line-oriented: a CR or LF inside a value (or a key) starts a NEW `KEY=value`
+    line, i.e. it injects a variable of the value's choosing into every later step. The runner
+    splits on CR as well as LF, so both are refused, together with NUL and a key that is not an
+    identifier. Every pair is checked first, so a refused batch writes nothing at all.
+    """
+    lines = []
+    for key, value in pairs:
+        key_text, value_text = str(key), str(value)
+        if not _GITHUB_FILE_KEY_RE.match(key_text):
+            raise Refusal("refusing to write %s key %r: not an identifier" % (what, key_text))
+        if any(ch in value_text for ch in "\r\n\x00"):
+            raise Refusal(
+                "refusing to write %s value for %s: it carries a CR, LF or NUL (%r), which would "
+                "inject extra keys" % (what, key_text, value_text)
+            )
+        lines.append("%s=%s\n" % (key_text, value_text))
+    return lines
+
+
+def _append_github_file(env_name, pairs):
+    path = os.environ.get(env_name)
     if not path:
         return
-    with io.open(path, "a", encoding="utf-8") as handle:
-        for key, value in pairs:
-            if "\n" in str(value):
-                raise Refusal("refusing to export a multi-line value for %s" % key)
-            handle.write("%s=%s\n" % (key, value))
+    lines = _checked_github_lines("$%s" % env_name, pairs)
+    # `newline=""`: write the `\n` verbatim; a text-mode `\r\n` on Windows is harmless to the
+    # runner but would make the file's bytes depend on the platform that wrote it.
+    with io.open(path, "a", encoding="utf-8", newline="") as handle:
+        handle.writelines(lines)
+
+
+def _write_github_env(pairs):
+    _append_github_file("GITHUB_ENV", pairs)
 
 
 def _write_github_output(pairs):
-    path = os.environ.get("GITHUB_OUTPUT")
-    if not path:
-        return
-    with io.open(path, "a", encoding="utf-8") as handle:
-        for key, value in pairs:
-            handle.write("%s=%s\n" % (key, value))
+    _append_github_file("GITHUB_OUTPUT", pairs)
 
 
 #: `leg-state.json` carries whether `apply` got to the end. `record` goes RED for an active leg
@@ -2001,11 +2385,42 @@ def cmd_apply(args):
                 )
         log("chain: %s built and packed at %s" % (node_id, entry["ws_version"]))
 
+    exported = {}
+    twins = []
+    # 1b. the twins the lock pins, each cloned at the LOCK's sha — never a branch. A bogus or
+    #     unreachable sha fails the fetch, and that is a refusal (exit 2), not a fallback. A twin
+    #     the lock RELEASES has no sha: nothing is cloned or exported, and `record` names the gap.
+    for twin_entry in twin_plan(ctx):
+        twin = twin_entry["twin"]
+        twin_dir = ctx.twin_dir(twin["node"])
+        if twin_dir.exists():
+            shutil.rmtree(str(twin_dir), ignore_errors=True)
+            if twin_dir.exists():
+                raise Refusal(
+                    "twin %s: %s survived its delete (a locked or read-only file); refusing to clone "
+                    "into a stale checkout" % (twin_repo(twin), twin_entry["dir"])
+                )
+        twin_dir.parent.mkdir(parents=True, exist_ok=True)
+        require_tool("git", "the leg clones the %s twin at the lock sha" % twin_repo(twin))
+        git_env = dict(os.environ, **_GIT_ENV)
+        for argv in twin_entry["clone"]:
+            status = run(argv, env=git_env)
+            if status != 0:
+                raise Refusal(
+                    "twin %s: `%s` exited %s: clone of %s at lock.nodes.%s.sha %s failed (never "
+                    "falling back to a branch)"
+                    % (twin_repo(twin), " ".join(argv), status, twin_slug(twin), twin["node"], twin_entry["sha"])
+                )
+        exported[twin_entry["env"]] = twin_entry["dir"]
+        twins.append({"node": twin["node"], "sha": twin_entry["sha"], "dir": twin_entry["dir"], "env": twin_entry["env"]})
+        log("chain: twin %s @ %s -> %s (%s)" % (twin_repo(twin), twin_entry["sha"], twin_entry["dir"], twin_entry["env"]))
+    for row in twin_skips(ctx):
+        log("chain: skip %s: %s" % (row["step"], row["reason"]))
+
     # 2. this node's own override, at the CHECKOUT ROOT.
     written = []
     notes = []
     modes = sorted({edge["mode"] for edge in edges})
-    exported = {}
     nuget_edges = [e for e in edges if e["mode"] == "nuget"]
     if nuget_edges:
         rows = nuget_rows_for(ctx, nuget_edges)
@@ -2037,6 +2452,9 @@ def cmd_apply(args):
     build_props = own_build_props(ctx)
     if build_props:
         exported["CHAIN_BUILD_PROPS"] = build_props
+    ws_export = own_ws_version_export(ctx)
+    if ws_export:
+        exported["CHAIN_WS_VERSION"] = ws_export
     _write_github_env(sorted(exported.items()))
     _write_github_output([("active", "true")])
 
@@ -2048,6 +2466,7 @@ def cmd_apply(args):
         "modes": modes,
         "overrides": written,
         "notes": notes,
+        "twins": twins,
         "env": exported,
         "feed_build_seconds": round(time.time() - started, 3),
         "scope": scope_json(ctx.scope),
@@ -2118,8 +2537,12 @@ def cmd_apply_npm(args):
                 "tarball missing for %s -> %s (never falling back to the registry)"
                 % (edge["ref"], as_posix_abs(tarball))
             )
-        cmd = "npm install %s --no-save" % as_posix_abs(tarball)
-        if run(cmd, cwd=target, env=ctx.command_env(), shell=True) != 0:
+        # an argv list, not a `shell=True` string: the tarball path carries the lock's ws version
+        # (validated at load). On Windows `npm.cmd` still runs through cmd.exe, so the validation is
+        # what keeps that value inert there, not the argv form.
+        argv = ["npm", "install", as_posix_abs(tarball), "--no-save"]
+        cmd = " ".join(argv)
+        if run(argv, cwd=target, env=ctx.command_env()) != 0:
             raise Refusal("`%s` failed in %s" % (cmd, as_posix_abs(target)))
         log("chain: npm --no-save %s -> %s" % (as_posix_abs(target), as_posix_abs(tarball)))
     state = _load_state(ctx)
@@ -2154,7 +2577,7 @@ def cmd_dry_run(args):
             % (ctx.node, ctx.ws_version(ctx.node), ctx.sha(ctx.node)))
         values = placeholder_values(ctx, ctx.node, ctx.checkout)
         for raw in RECIPES[ctx.node]["pack"]:
-            log("chain:   pack    %s" % substitute(raw, values))
+            log("chain:   pack    %s" % substitute(raw, values, quote=shell_value))
         for _, body in own_packable_artifacts(ctx.node):
             # checkout-relative: the same `.artifacts/<feed>/<file>` the workflow's pack step writes
             relative = feed_artifact_path(ctx, ctx.node, body).relative_to(ctx.checkout).as_posix()
@@ -2162,6 +2585,17 @@ def cmd_dry_run(args):
     for _, body in own:
         log("chain:   prove   %s (own pack)" % as_posix_abs(feed_artifact_path(ctx, ctx.node, body)))
     for row in scope_skips(ctx, edges, outside, own_outside):
+        log("chain:   skip    %s: %s" % (row["step"], row["reason"]))
+    twins = twin_plan(ctx)
+    for entry in twins:
+        twin, sha = entry["twin"], entry["sha"]
+        log("")
+        log("chain: twin %s @ %s — job %s of %s" % (twin_repo(twin), sha, twin["job"], twin["workflow"]))
+        for argv in entry["clone"]:
+            log("chain:   clone   %s" % " ".join(str(a) for a in argv))
+        log("chain:   export  %s=%s" % (entry["env"], entry["dir"]))
+        log("chain:   prove   %s: git -C %s rev-parse HEAD == %s" % (twin_consumer(twin), entry["dir"], sha))
+    for row in twin_skips(ctx):
         log("chain:   skip    %s: %s" % (row["step"], row["reason"]))
     for entry in build_plan(ctx, edges):
         log("")
@@ -2220,6 +2654,11 @@ def cmd_dry_run(args):
     build_props = own_build_props(ctx)
     if build_props:
         keys.append("CHAIN_BUILD_PROPS=%s" % build_props)
+    ws_export = own_ws_version_export(ctx)
+    if ws_export:
+        keys.append("CHAIN_WS_VERSION=%s" % ws_export)
+    for entry in twins:
+        keys.append("%s=%s" % (entry["env"], entry["dir"]))
     for key in keys:
         log("chain:   %s" % key)
     return EXIT_OK
@@ -2233,12 +2672,12 @@ def cmd_record(args):
     state = _load_state(ctx)
     edges, outside = scoped_edges(ctx)
     own, own_outside = own_pack_in_scope(ctx)
-    proofs = apply_status_proofs(ctx, state) + identity_proofs(ctx, edges, own)
+    proofs = apply_status_proofs(ctx, state) + identity_proofs(ctx, edges, own) + _twin_proofs(ctx)
     skipped = list(state.get("skipped") or [])
     # The named gaps belong in the record whether or not `apply` wrote the state file: a leg
     # that reports NO skips is claiming coverage it does not have (A22). An edge this job's
     # `--edges` scope left out is one of them — never proven, never silently absent.
-    for row in _default_skips(ctx) + scope_skips(ctx, edges, outside, own_outside):
+    for row in _default_skips(ctx) + scope_skips(ctx, edges, outside, own_outside) + twin_skips(ctx):
         if row not in skipped:
             skipped.append(row)
     for raw in getattr(args, "skip", None) or ():
@@ -2314,10 +2753,15 @@ def artifact_name(ctx, record):
     v4 artifacts are immutable and a second matrix job uploading the same name FAILS (B4), so
     MPD x3, Unity x12 and Godot x24 each need a distinct one.
     """
-    parts = ["chain-leg", record["node"], record["os"] or "unknown", record["job"] or "job"]
+    def clean(value):
+        # The name reaches `$GITHUB_OUTPUT` and an artifact name: only `[A-Za-z0-9._-]` survives
+        # (a GitHub job id already is exactly that, so a real name is unchanged).
+        return re.sub(r"[^A-Za-z0-9._-]+", "-", str(value)).strip("-")
+
+    parts = ["chain-leg", record["node"], clean(record["os"] or "unknown"), clean(record["job"] or "job")]
     suffix = record.get("matrix") or ""
     if suffix:
-        parts.append(re.sub(r"[^A-Za-z0-9._-]+", "-", suffix).strip("-"))
+        parts.append(clean(suffix))
     return "-".join(p for p in parts if p)
 
 
@@ -2776,10 +3220,16 @@ def render_fragment(node, existing_group=None, existing_cancel=None, new_concurr
         "#     The interpreter is resolved ONCE per job and invoked through the ${{ env.CHAIN_PY }}",
         "#     EXPRESSION, which GitHub substitutes before any shell runs — so the same step text works",
         "#     under bash (hosted) and pwsh (Windows self-hosted, where `shell: bash` is WSL). Never a",
-        "#     bare `python`: macOS has none and a hosted Windows image has no `python3`.",
+        "#     bare `python` — and never a bare interpreter NAME at all. Each resolver RUNS a candidate,",
+        "#     which must import C-extension modules and print its own sys.executable, and exports THAT",
+        "#     absolute, space-free, forward-slashed path (the output SHAPE is the verdict). A name is",
+        "#     re-resolved on every call, and on the shared Windows runners `python`/`py` can resolve",
+        "#     into ANOTHER runner's (possibly deleted) workspace, so `py` is never a candidate. The",
+        "#     run-it-and-export-sys.executable idea follows ai-game-dev-software's",
+        "#     .github/scripts/resolve-python.ps1 — but NOT that script's `py` last resort.",
         "#     A runner with no usable Python on PATH (the Unreal self-hosted legs run UE's bundled",
-        "#     python.exe) sets job-level `env: CHAIN_PY:` to a SPACE-FREE interpreter path instead —",
-        "#     the value is substituted unquoted — and both resolver steps below then skip.",
+        "#     python.exe) sets job-level `env: CHAIN_PY:` to an ABSOLUTE, SPACE-FREE interpreter path",
+        "#     instead — the value is substituted unquoted — and both resolver steps below then skip.",
         "#     Every step id below is chain-prefixed and used ONCE per job: never reuse a job's own step id",
         "#     (e.g. a second `server` step to swap a downloaded binary for the chain one) — branch inside",
         "#     ONE step on env.CHAIN_ACTIVE instead.",
@@ -2788,22 +3238,31 @@ def render_fragment(node, existing_group=None, existing_cancel=None, new_concurr
         "        shell: bash",
         "        run: |",
         "          for c in python3 python; do",
-        "            if \"$c\" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 9) else 1)' >/dev/null 2>&1; then",
-        "              echo \"CHAIN_PY=$c\" >> \"$GITHUB_ENV\"; exit 0",
-        "            fi",
+        "            exe=\"$(\"$c\" -c '%s' 2>/dev/null)\" || continue" % CHAIN_PY_PROBE,
+        "            case \"$exe\" in /*) ;; *) continue ;; esac",
+        "            case \"$exe\" in *[[:space:]]*) continue ;; esac",
+        "            [ -f \"$exe\" ] && [ -x \"$exe\" ] || continue",
+        "            echo \"CHAIN_PY=$exe\" >> \"$GITHUB_ENV\"; exit 0",
         "          done",
-        "          echo 'chain: no Python 3.9+ on PATH (tried python3, python)' >&2; exit 2",
+        "          echo 'chain: no Python 3.9+ on PATH that runs and reports an absolute, space-free sys.executable (tried python3, python)' >&2; exit 2",
         "      - name: chain python (windows)",
         "        if: runner.os == 'Windows' && env.CHAIN_PY == ''",
         "        shell: pwsh",
         "        run: |",
-        "          foreach ($c in 'python', 'py', 'python3') {",
-        "            if (-not (Get-Command $c -ErrorAction SilentlyContinue)) { continue }",
+        "          foreach ($c in 'python', 'python3') {",
+        "            $cmd = Get-Command $c -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1",
+        "            if (-not $cmd) { continue }",
         "            $global:LASTEXITCODE = $null",
-        "            & $c -c 'import sys; sys.exit(0 if sys.version_info >= (3, 9) else 1)' 2>$null",
-        "            if ($LASTEXITCODE -eq 0) { \"CHAIN_PY=$c\" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8; exit 0 }",
+        # `try`: a GitHub pwsh step runs under `$ErrorActionPreference = 'stop'`, so a candidate that
+        # cannot even START (a 0-byte or half-deleted python.exe) would throw and end the step
+        # instead of moving on to the next one.
+        "            try { $out = & $cmd.Source -c '%s' 2>$null } catch { continue }" % CHAIN_PY_PROBE,
+        "            if ($LASTEXITCODE -ne 0) { continue }",
+        "            $exe = (@($out) -join ' ').Trim()",
+        "            if ($exe -notmatch '^[A-Za-z]:/\\S+\\z' -or -not (Test-Path -LiteralPath $exe -PathType Leaf)) { continue }",
+        "            \"CHAIN_PY=$exe\" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8; exit 0",
         "          }",
-        "          [Console]::Error.WriteLine('chain: no Python 3.9+ on PATH (tried python, py, python3)'); exit 2",
+        "          [Console]::Error.WriteLine('chain: no Python 3.9+ on PATH that runs and reports an absolute, space-free sys.executable (tried python, python3; never py)'); exit 2",
         "      - name: chain feed",
         "        id: chain",
         "        run: ${{ env.CHAIN_PY }} .github/scripts/chain_feed.py apply --node %s --job %s" % (node, job),
@@ -2826,6 +3285,22 @@ def render_fragment(node, existing_group=None, existing_cancel=None, new_concurr
             "#     root node: with no --edges `record` proves this node's OWN pack, so a job that does "
             "not pack passes --edges none"
         )
+    for twin in node_twins(node):
+        selector = twin_selector(twin)
+        lines += [
+            "#     twin: job `%s` of %s drives %s from source. It passes --edges %s (a twin is never "
+            "implied by an absent --edges):" % (twin["job"], twin["workflow"], twin_repo(twin), selector),
+            "#           ${{ env.CHAIN_PY }} .github/scripts/chain_feed.py apply  --node %s --job %s --edges %s"
+            % (node, twin["job"], selector),
+            "#           ${{ env.CHAIN_PY }} .github/scripts/chain_feed.py record --node %s --job %s --edges %s "
+            "--job-status ${{ job.status }} --out chain-leg.json" % (node, twin["job"], selector),
+            "#     `apply` clones %s at lock.nodes.%s.sha into $%s (a bogus sha fails `apply` at the fetch);"
+            % (twin_repo(twin), twin["node"], twin_env(twin)),
+            "#     the job's clone step uses that path when env.%s != '' (unset when the lock RELEASES the twin:"
+            " a named skip), else its existing ref;" % twin_env(twin),
+            "#     `record` proves identity[] {consumer: \"%s\", resolved: its rev-parse HEAD, expected: the lock sha}"
+            % twin_consumer(twin),
+        ]
     if any(edge["mode"] == "npm" for edge in RECIPES[node]["consumes"]):
         npm_dir = next(
             (edge.get("path") or "." for edge in RECIPES[node]["consumes"] if edge["mode"] == "npm"), "."
@@ -2898,7 +3373,8 @@ def build_parser():
             child.add_argument(
                 "--edges", action="append", default=[], metavar="SELECTOR",
                 help="scope THIS job to part of the node's edges: a mode (nuget), a producer node id, "
-                     "a <node>/<artifact> ref, `self` (this node's own pack) or `none`; repeatable. "
+                     "a <node>/<artifact> ref, `self` (this node's own pack), `twin:<node>` (clone a "
+                     "declared twin at the lock sha; never implied) or `none`; repeatable. "
                      "Pass the SAME values to apply and record; default: every edge",
             )
         if name == "apply-npm":

@@ -63,17 +63,39 @@ jobs:
 
       # Chain steps run from the checkout root (the job default is ./cli). The
       # interpreter is resolved once and invoked through ${{ env.CHAIN_PY }}.
+      # Verbatim from `chain_feed.py print-fragment --node unreal-mcp` (plus the checkout-root
+      # `working-directory`): each resolver RUNS a candidate and exports its absolute, space-free
+      # sys.executable (never a bare name).
       - name: chain python (posix)
-        if: env.CHAIN_PY == ''
+        if: runner.os != 'Windows' && env.CHAIN_PY == ''
         shell: bash
         working-directory: ${{ github.workspace }}
         run: |
           for c in python3 python; do
-            if "$c" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 9) else 1)' >/dev/null 2>&1; then
-              echo "CHAIN_PY=$c" >> "$GITHUB_ENV"; exit 0
-            fi
+            exe="$("$c" -c 'import sys, select, zlib, hashlib; sys.version_info >= (3, 9) or sys.exit(1); print(sys.executable.replace(chr(92), chr(47)))' 2>/dev/null)" || continue
+            case "$exe" in /*) ;; *) continue ;; esac
+            case "$exe" in *[[:space:]]*) continue ;; esac
+            [ -f "$exe" ] && [ -x "$exe" ] || continue
+            echo "CHAIN_PY=$exe" >> "$GITHUB_ENV"; exit 0
           done
-          echo 'chain: no Python 3.9+ on PATH (tried python3, python)' >&2; exit 2
+          echo 'chain: no Python 3.9+ on PATH that runs and reports an absolute, space-free sys.executable (tried python3, python)' >&2; exit 2
+
+      - name: chain python (windows)
+        if: runner.os == 'Windows' && env.CHAIN_PY == ''
+        shell: pwsh
+        working-directory: ${{ github.workspace }}
+        run: |
+          foreach ($c in 'python', 'python3') {
+            $cmd = Get-Command $c -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+            if (-not $cmd) { continue }
+            $global:LASTEXITCODE = $null
+            try { $out = & $cmd.Source -c 'import sys, select, zlib, hashlib; sys.version_info >= (3, 9) or sys.exit(1); print(sys.executable.replace(chr(92), chr(47)))' 2>$null } catch { continue }
+            if ($LASTEXITCODE -ne 0) { continue }
+            $exe = (@($out) -join ' ').Trim()
+            if ($exe -notmatch '^[A-Za-z]:/\S+\z' -or -not (Test-Path -LiteralPath $exe -PathType Leaf)) { continue }
+            "CHAIN_PY=$exe" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8; exit 0
+          }
+          [Console]::Error.WriteLine('chain: no Python 3.9+ on PATH that runs and reports an absolute, space-free sys.executable (tried python, python3; never py)'); exit 2
 
       - name: chain feed
         id: chain
@@ -114,3 +136,5 @@ jobs:
         with:
           name: ${{ steps.chain_record.outputs.artifact_name }}
           path: chain-leg.json
+          # A few-KB JSON leg record; whoever dispatched the chain run collects it right after the run.
+          retention-days: 1
