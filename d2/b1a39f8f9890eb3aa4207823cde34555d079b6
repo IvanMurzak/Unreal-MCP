@@ -1,0 +1,36 @@
+.gitattributes
+  s_de71e20c9d8602::t_ef641a51698583 1-5
+.github/workflows/test_pull_request.yml
+  s_de71e20c9d8602::t_46b677095bccd3 741-744
+  s_de71e20c9d8602::t_af8bd0e23bb85a 706-710,713-740,745-769
+  s_de71e20c9d8602::t_4f81e684e38fa8 19-23
+  s_de71e20c9d8602::t_95282c940aac81 824-826
+tests/chain-fixtures/battery.json
+  s_de71e20c9d8602::t_75bba539be6edd 1-18
+scripts/connection_smoke.py
+  s_de71e20c9d8602::t_53fc413554f632 611-622
+  s_de71e20c9d8602::t_698c3504b00dd2 632,640-641
+  s_de71e20c9d8602::t_3d32ab779d9abf 227-338,358-359,363,366,370-371
+  s_de71e20c9d8602::t_94dd8768021552 507-512,515-517
+  s_de71e20c9d8602::t_474c4c35f70c00 32-37
+  s_de71e20c9d8602::t_8a266133843aa0 153-173,175-176,182,186-188,360
+  s_de71e20c9d8602::t_7bdafd761bf6c7 580
+.github/scripts/chain_fixture.py
+  s_de71e20c9d8602::t_97ec2f0a3c1597 1-888
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d2b1a39f8f9890eb3aa4207823cde34555d079b6",
+  "prompts": {},
+  "sessions": {
+    "s_de71e20c9d8602": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b1fa7ae0-224c-4b0e-8499-22456e0d6a3f",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
