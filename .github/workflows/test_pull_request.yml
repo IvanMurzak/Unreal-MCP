@@ -53,8 +53,8 @@
 #                                                          server as UNREAL_MCP_SERVER_PATH
 # `.github/scripts/chain_leg_checks.py` (repo-owned, NOT vendored) adds the pin-drift
 # warning and the xUnit-project identity proof. The self-hosted jobs have no Python on
-# PATH, so they junction UE's bundled Python 3.11 to a space-free CHAIN_PY under
-# RUNNER_TEMP. On every other run each chain step logs
+# PATH, so they junction UE's bundled Python 3.11 to an absolute, space-free CHAIN_PY under
+# RUNNER_TEMP (the hardened script's contract: never a bare name). On every other run each chain step logs
 # "chain: no lock (ordinary run)" and exits 0, or is skipped.
 name: test-pull-request
 
@@ -124,28 +124,37 @@ jobs:
       # Chain leg: resolve the interpreter once, then — under a lock — self-build
       # ReflectorNet + McpPlugin into a local feed and force the bridge csproj's pins to
       # the lock's exact ws versions BEFORE the first restore.
+      # Verbatim from `chain_feed.py print-fragment --node unreal-mcp`: each resolver RUNS a
+      # candidate and exports its absolute, space-free, forward-slashed sys.executable (never a
+      # bare name, never `py`).
       - name: chain python (posix)
         if: runner.os != 'Windows' && env.CHAIN_PY == ''
         shell: bash
         run: |
           for c in python3 python; do
-            if "$c" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 9) else 1)' >/dev/null 2>&1; then
-              echo "CHAIN_PY=$c" >> "$GITHUB_ENV"; exit 0
-            fi
+            exe="$("$c" -c 'import sys, select, zlib, hashlib; sys.version_info >= (3, 9) or sys.exit(1); print(sys.executable.replace(chr(92), chr(47)))' 2>/dev/null)" || continue
+            case "$exe" in /*) ;; *) continue ;; esac
+            case "$exe" in *[[:space:]]*) continue ;; esac
+            [ -f "$exe" ] && [ -x "$exe" ] || continue
+            echo "CHAIN_PY=$exe" >> "$GITHUB_ENV"; exit 0
           done
-          echo 'chain: no Python 3.9+ on PATH (tried python3, python)' >&2; exit 2
+          echo 'chain: no Python 3.9+ on PATH that runs and reports an absolute, space-free sys.executable (tried python3, python)' >&2; exit 2
 
       - name: chain python (windows)
         if: runner.os == 'Windows' && env.CHAIN_PY == ''
         shell: pwsh
         run: |
-          foreach ($c in 'python', 'py', 'python3') {
-            if (-not (Get-Command $c -ErrorAction SilentlyContinue)) { continue }
+          foreach ($c in 'python', 'python3') {
+            $cmd = Get-Command $c -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+            if (-not $cmd) { continue }
             $global:LASTEXITCODE = $null
-            & $c -c 'import sys; sys.exit(0 if sys.version_info >= (3, 9) else 1)' 2>$null
-            if ($LASTEXITCODE -eq 0) { "CHAIN_PY=$c" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8; exit 0 }
+            try { $out = & $cmd.Source -c 'import sys, select, zlib, hashlib; sys.version_info >= (3, 9) or sys.exit(1); print(sys.executable.replace(chr(92), chr(47)))' 2>$null } catch { continue }
+            if ($LASTEXITCODE -ne 0) { continue }
+            $exe = (@($out) -join ' ').Trim()
+            if ($exe -notmatch '^[A-Za-z]:/\S+\z' -or -not (Test-Path -LiteralPath $exe -PathType Leaf)) { continue }
+            "CHAIN_PY=$exe" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8; exit 0
           }
-          [Console]::Error.WriteLine('chain: no Python 3.9+ on PATH (tried python, py, python3)'); exit 2
+          [Console]::Error.WriteLine('chain: no Python 3.9+ on PATH that runs and reports an absolute, space-free sys.executable (tried python, python3; never py)'); exit 2
 
       - name: chain feed
         id: chain
@@ -183,6 +192,8 @@ jobs:
         with:
           name: ${{ steps.chain_record.outputs.artifact_name }}
           path: chain-leg.json
+          # A few-KB JSON leg record; the chain driver collects it right after the run.
+          retention-days: 1
 
   # (b) cli — unreal-mcp-cli node tests (Node 20 & 22) via the reusable workflow.
   # A reusable workflow does not inherit this workflow's `env`, so the chain lock is
@@ -258,10 +269,18 @@ jobs:
           }
           cmd /c mklink /J "$link" "$src" | Write-Host
           if ($LASTEXITCODE -ne 0) { throw "chain: mklink /J $link -> $src failed (exit $LASTEXITCODE)" }
-          $py = Join-Path $link 'python.exe'
-          & $py -c "import sys; print('chain: python', sys.version); sys.exit(0 if sys.version_info >= (3, 9) else 1)"
+          # The hardened chain_feed.py contract: CHAIN_PY is an ABSOLUTE, SPACE-FREE, forward-slashed
+          # interpreter path (never a bare name). Exported through GITHUB_ENV, so it is this job's env
+          # for every later step (a job-level `env:` cannot read runner.temp).
+          $py = (Join-Path $link 'python.exe').Replace('\', '/')
+          if ($py -notmatch '^[A-Za-z]:/\S+\z' -or -not (Test-Path -LiteralPath $py -PathType Leaf)) { throw "chain: CHAIN_PY '$py' is not an absolute, space-free interpreter path" }
+          # Prove it RUNS with the same probe the print-fragment resolvers use (C-extension imports + 3.9+).
+          $global:LASTEXITCODE = $null
+          $exe = & $py -c 'import sys, select, zlib, hashlib; sys.version_info >= (3, 9) or sys.exit(1); print(sys.executable.replace(chr(92), chr(47)))'
           if ($LASTEXITCODE -ne 0) { throw "chain: $py is not a runnable Python 3.9+ (exit $LASTEXITCODE)" }
+          Write-Host "chain: probe sys.executable=$((@($exe) -join ' ').Trim())"
           "CHAIN_PY=$py" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "chain: CHAIN_PY=$py"
 
       # The C++ plugin consumes nothing from the chain: under a lock, only assert that the lock's
       # unreal-mcp sha is this run's commit, then record.
@@ -425,7 +444,9 @@ jobs:
         # REPORT_DIR is exported only at the END of the Automation step; an
         # earlier failure (BuildPlugin, missing editor) leaves it unset, so guard
         # the upload to avoid a second confusing failure on an empty path.
-        if: ${{ failure() && env.REPORT_DIR != '' }}
+        # Not on a chain dispatch: the report directory is large, and chain mode uploads only the
+        # small JSON leg records + the compact T2 fixture review artifact (owner artifact rule).
+        if: ${{ failure() && env.REPORT_DIR != '' && env.CHAIN_LOCK == '' }}
         uses: actions/upload-artifact@v7
         with:
           name: automation-report
@@ -447,6 +468,8 @@ jobs:
         with:
           name: ${{ steps.chain_record.outputs.artifact_name }}
           path: chain-leg.json
+          # A few-KB JSON leg record; the chain driver collects it right after the run.
+          retention-days: 1
 
       - name: Cleanup this job's build outputs (self-hosted disk hygiene)
         # Self-hosted disk hygiene. This runner is SHARED with other repos' jobs and
@@ -557,10 +580,18 @@ jobs:
           }
           cmd /c mklink /J "$link" "$src" | Write-Host
           if ($LASTEXITCODE -ne 0) { throw "chain: mklink /J $link -> $src failed (exit $LASTEXITCODE)" }
-          $py = Join-Path $link 'python.exe'
-          & $py -c "import sys; print('chain: python', sys.version); sys.exit(0 if sys.version_info >= (3, 9) else 1)"
+          # The hardened chain_feed.py contract: CHAIN_PY is an ABSOLUTE, SPACE-FREE, forward-slashed
+          # interpreter path (never a bare name). Exported through GITHUB_ENV, so it is this job's env
+          # for every later step (a job-level `env:` cannot read runner.temp).
+          $py = (Join-Path $link 'python.exe').Replace('\', '/')
+          if ($py -notmatch '^[A-Za-z]:/\S+\z' -or -not (Test-Path -LiteralPath $py -PathType Leaf)) { throw "chain: CHAIN_PY '$py' is not an absolute, space-free interpreter path" }
+          # Prove it RUNS with the same probe the print-fragment resolvers use (C-extension imports + 3.9+).
+          $global:LASTEXITCODE = $null
+          $exe = & $py -c 'import sys, select, zlib, hashlib; sys.version_info >= (3, 9) or sys.exit(1); print(sys.executable.replace(chr(92), chr(47)))'
           if ($LASTEXITCODE -ne 0) { throw "chain: $py is not a runnable Python 3.9+ (exit $LASTEXITCODE)" }
+          Write-Host "chain: probe sys.executable=$((@($exe) -join ' ').Trim())"
           "CHAIN_PY=$py" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "chain: CHAIN_PY=$py"
 
       # `clean: false` keeps untracked files between runs on this persistent workspace, so a
       # chain run whose cleanup never ran (a killed job) would leave its generated nuget.config /
@@ -723,6 +754,11 @@ jobs:
           CHAIN_FIXTURE_COMMITTED: tests/chain-fixtures/${{ matrix.ue }}/tools.jsonl
         run: |
           $ErrorActionPreference = 'Stop'
+          # PYTHONUTF8 makes Python WRITE UTF-8, but pwsh DECODES a native command's stdout with
+          # [Console]::OutputEncoding (the runner's ANSI code page, cp1252), so a non-ASCII tool
+          # description in the diff was mojibaked on its way into diff.txt and the log. Decode as UTF-8.
+          [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+          $OutputEncoding = [System.Text.UTF8Encoding]::new($false)
           $py = Join-Path $env:UE_ROOT 'Engine\Binaries\ThirdParty\Python3\Win64\python.exe'
           New-Item -ItemType Directory -Force -Path $env:CHAIN_FIXTURE_OUT | Out-Null
           if (-not (Test-Path -LiteralPath $env:CHAIN_RECORD_RAW)) {
@@ -787,6 +823,8 @@ jobs:
         with:
           name: ${{ steps.chain_record.outputs.artifact_name }}
           path: chain-leg.json
+          # A few-KB JSON leg record; the chain driver collects it right after the run.
+          retention-days: 1
 
       - name: Cleanup this job's build outputs (self-hosted disk hygiene)
         # See the plugin job's cleanup note. Removes ONLY this job's own regenerable
