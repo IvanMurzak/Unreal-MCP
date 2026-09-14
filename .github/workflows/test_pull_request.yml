@@ -22,6 +22,11 @@
 # IvanMurzak/GameDev-MCP-Server repo and is tested/released there. Leg (d) pulls
 # the public server release at runtime; it does not build the server here.)
 #
+# Machine-wide UE lock (#293): the self-hosted UE jobs (c) and (d) each hold one lock shared by
+# EVERY UE job on the machine (PR runs, chain dispatches of any chain lock, release legs), taken by
+# `.github/scripts/ue-machine-lock.ps1` around their UE steps — see docs/RELEASING.md
+# "Machine-wide UE lock". The run-level `concurrency:` below is unchanged and does not do this.
+#
 # Self-hosted runner is NEVER red-by-absence: job (c) is gated on the repository
 # variable `vars.UNREAL_RUNNER_READY == 'true'`. While that variable is unset
 # (no runner registered), job (c) is SKIPPED — a skipped job does not fail the
@@ -205,7 +210,9 @@ jobs:
     # A hang guard, not a budget. Expiry IS a GitHub-side cancel and can wedge this
     # self-hosted runner exactly like a manual cancel, so it is sized to fire only on a real
     # hang. Never cancel a slow job by hand: kill the step's process on the box instead.
-    timeout-minutes: 60
+    # 180 = the machine-wide UE lock's 120-min bounded wait + the original 60-min guard, so an
+    # expired wait fails the Acquire step instead of cancelling the job.
+    timeout-minutes: 180
     strategy:
       fail-fast: false
       matrix:
@@ -258,6 +265,14 @@ jobs:
         id: chain
         shell: pwsh
         run: ${{ env.CHAIN_PY }} .github/scripts/chain_feed.py apply --node unreal-mcp --job plugin --edges none
+
+      # Machine-wide UE lock (#293; see the header and docs/RELEASING.md). Held from here until
+      # the always() release step that ends this job.
+      - name: Acquire machine-wide UE lock
+        id: ue_lock
+        shell: pwsh
+        run: |
+          & "$env:GITHUB_WORKSPACE\.github\scripts\ue-machine-lock.ps1" -Action Acquire -WaitMinutes 120
 
       - name: BuildPlugin (marketplace packaging validation — DISTRIBUTED, test-free)
         shell: pwsh
@@ -444,6 +459,8 @@ jobs:
         # Best-effort: a cleanup failure must NEVER red an otherwise-green run.
         if: always()
         shell: pwsh
+        env:
+          UE_LOCK_OUTCOME: ${{ steps.ue_lock.outcome }}
         run: |
           $ErrorActionPreference = 'Continue'
           function Remove-Tree([string]$p) {
@@ -465,12 +482,21 @@ jobs:
           Get-ChildItem -Path $env:RUNNER_TEMP -Filter 'UBT-*.log' -File -ErrorAction SilentlyContinue |
             Remove-Item -Force -ErrorAction SilentlyContinue
           # 3. Host project transient logs/crashes ONLY (unbounded growers; NOT the
-          #    DDC / Intermediate / Binaries speed caches).
-          if (-not [string]::IsNullOrWhiteSpace($env:HOST_UPROJECT) -and (Test-Path -LiteralPath $env:HOST_UPROJECT)) {
+          #    DDC / Intermediate / Binaries speed caches). Only while this job held the
+          #    machine-wide UE lock: otherwise the host may be another job's live editor.
+          if ($env:UE_LOCK_OUTCOME -eq 'success' -and -not [string]::IsNullOrWhiteSpace($env:HOST_UPROJECT) -and (Test-Path -LiteralPath $env:HOST_UPROJECT)) {
             $hostRoot = Split-Path -Parent $env:HOST_UPROJECT
             foreach ($sub in @('Saved\Logs','Saved\Crashes')) { Remove-Tree (Join-Path $hostRoot $sub) }
           }
           Write-Host "Per-run cleanup done (DDC / Intermediate / Binaries and Docker intentionally preserved)."
+
+      # Last step, so everything from BuildPlugin through the host-log cleanup stays inside the
+      # machine-wide UE lock. A no-op when Acquire never ran; never fails the job.
+      - name: Release machine-wide UE lock
+        if: always()
+        shell: pwsh
+        run: |
+          & "$env:GITHUB_WORKSPACE\.github\scripts\ue-machine-lock.ps1" -Action Release
 
   # (d) connection + tool smoke — the live RELAY path the Automation specs do NOT
   # cover: a real MCP client -> gamedev-mcp-server -> sidecar -> plugin -> editor
@@ -495,7 +521,8 @@ jobs:
     if: ${{ vars.UNREAL_SMOKE_READY == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     runs-on: [self-hosted, windows, unreal-5-7]
     # A hang guard, not a budget — see the plugin job: expiry is a GitHub-side cancel.
-    timeout-minutes: 30
+    # 150 = the machine-wide UE lock's 120-min bounded wait + the original 30-min guard.
+    timeout-minutes: 150
     strategy:
       fail-fast: false
       matrix:
@@ -591,6 +618,16 @@ jobs:
           } else {
             throw "No host .uproject found. Expected runner-local '$runnerLocalHost' or a valid UNREAL_HOST_PROJECT repo variable."
           }
+
+      # Machine-wide UE serialization (#293) — see the plugin job. Taken after the chain feed and
+      # bridge build (no UE there) so this job does not hold the machine while it clones and
+      # packs; from here the BuildPlugin, the host junction and the fixed smoke port 18080 are
+      # all machine-shared, so everything up to the release step stays inside the lock.
+      - name: Acquire machine-wide UE lock
+        id: ue_lock
+        shell: pwsh
+        run: |
+          & "$env:GITHUB_WORKSPACE\.github\scripts\ue-machine-lock.ps1" -Action Acquire -WaitMinutes 120
 
       - name: BuildPlugin into the host junction target
         shell: pwsh
@@ -690,9 +727,12 @@ jobs:
         # See the plugin job's cleanup note. Removes ONLY this job's own regenerable
         # RUNNER_TEMP package + host transient logs; preserves the host
         # DDC / Intermediate / Binaries speed cache, the junction (self-heal above),
-        # and Docker (unused here; daemon shared with other runners).
+        # and Docker (unused here; daemon shared with other runners). The host logs are
+        # removed only while this job held the machine-wide UE lock.
         if: always()
         shell: pwsh
+        env:
+          UE_LOCK_OUTCOME: ${{ steps.ue_lock.outcome }}
         run: |
           $ErrorActionPreference = 'Continue'
           function Remove-Tree([string]$p) {
@@ -722,8 +762,15 @@ jobs:
           }
           Get-ChildItem -Path $env:RUNNER_TEMP -Filter 'UBT-*.log' -File -ErrorAction SilentlyContinue |
             Remove-Item -Force -ErrorAction SilentlyContinue
-          if (-not [string]::IsNullOrWhiteSpace($env:HOST_UPROJECT) -and (Test-Path -LiteralPath $env:HOST_UPROJECT)) {
+          if ($env:UE_LOCK_OUTCOME -eq 'success' -and -not [string]::IsNullOrWhiteSpace($env:HOST_UPROJECT) -and (Test-Path -LiteralPath $env:HOST_UPROJECT)) {
             $hostRoot = Split-Path -Parent $env:HOST_UPROJECT
             foreach ($sub in @('Saved\Logs','Saved\Crashes')) { Remove-Tree (Join-Path $hostRoot $sub) }
           }
           Write-Host "Per-run cleanup done (DDC / Intermediate / Binaries and Docker intentionally preserved)."
+
+      # Last step, so the smoke's BuildPlugin, editor and port stay inside the machine-wide UE lock.
+      - name: Release machine-wide UE lock
+        if: always()
+        shell: pwsh
+        run: |
+          & "$env:GITHUB_WORKSPACE\.github\scripts\ue-machine-lock.ps1" -Action Release
