@@ -29,6 +29,12 @@ Usage
         [--ue <UnrealEditor-Cmd.exe>] [--timeout 180] [--poll 5] [--connect-only]
         [--keep-editor] [--no-kill-existing] [--server-port 18080]
         [--server <gamedev-mcp-server[.exe]>] [--server-version latest|8.0.0]
+        [--record-out <raw.json>] [--battery <battery.json>]
+
+  --record-out / --battery: the T2 chain record (MCP-Plugin-dotnet docs/chain-fixtures.md). The battery
+  replaces SMOKE_BATTERY (default unchanged); the RAW MCP-level dump of tools/list + every battery call
+  is written for .github/scripts/chain_fixture.py to canonicalise and diff. Without the flags nothing
+  about the smoke changes.
 
 Exit code 0 = all requested stages passed; non-zero = FAIL / timeout / setup error.
 """
@@ -144,20 +150,42 @@ def _result_text(msg: dict) -> str:
                     if isinstance(i, dict) and i.get("type") == "text")
 
 
+def mcp_list_tool_entries(url: str, token: str | None, sid: str | None) -> list[dict]:
+    """The FULL tools/list entries (every page), for the T2 chain record. The smoke's own assertions keep
+    using mcp_list_tools' names."""
+    entries: list[dict] = []
+    cursor = None
+    call_id = 1000
+    while True:
+        call_id += 1
+        payload: dict = {"jsonrpc": "2.0", "id": call_id, "method": "tools/list"}
+        if cursor:
+            payload["params"] = {"cursor": cursor}
+        _s, sid, msgs = mcp_post(url, token, payload, sid)
+        result = next((m.get("result") for m in msgs if m.get("id") == call_id and "result" in m), None)
+        if not isinstance(result, dict):
+            return entries
+        entries.extend(t for t in (result.get("tools") or []) if isinstance(t, dict))
+        cursor = result.get("nextCursor")
+        if not cursor:
+            return entries
+
+
 def mcp_call_tool(url: str, token: str | None, sid: str | None, name: str, args: dict,
-                  call_id: int) -> tuple[bool, str | None, str]:
+                  call_id: int) -> tuple[bool, str | None, str, dict | None]:
+    """Returns (ok, session id, short text, raw CallToolResult or None when there was no result)."""
     _s, sid, msgs = mcp_post(url, token, {"jsonrpc": "2.0", "id": call_id, "method": "tools/call",
                                           "params": {"name": name, "arguments": args}}, sid)
     for m in msgs:
         if m.get("id") == call_id:
             if "error" in m:
-                return False, sid, str(m.get("error"))[:120]
+                return False, sid, str(m.get("error"))[:120], None
             res = m.get("result", {})
             text = _result_text(m) or json.dumps(res.get("structuredContent", ""))[:120]
             if res.get("isError"):
-                return False, sid, text[:120]
-            return True, sid, text.strip()[:120]
-    return False, sid, "no result"
+                return False, sid, text[:120], res
+            return True, sid, text.strip()[:120], res
+    return False, sid, "no result", None
 
 
 SMOKE_BATTERY = [
@@ -196,7 +224,118 @@ def rest_system_ping(base_url: str, token: str | None, nonce: str,
         return False, f"{type(e).__name__}: {e}"
 
 
-def run_e2e(url: str, rest_base: str, token: str | None, nonce: str) -> tuple[bool, str]:
+# --------------------------------------------------------------------------- T2 chain record
+#
+# `--record-out` writes the RAW, F1-shaped dump of MCP-Plugin-dotnet docs/chain-fixtures.md (recorder
+# `mcp-client`, surface `editor`): one meta line, one `tool` line per tools/list entry, one `call` line
+# per battery call. It is NOT canonical — `.github/scripts/chain_fixture.py canonicalize` sorts, masks,
+# caps and computes args_hash. The two projections below mirror that script's own `record` recorder
+# (`_tool_line_from_mcp` / `_response_from_mcp`) so both mcp-client captures agree.
+
+RECORD_SCHEMA = 1
+RECORD_TOOL_FIELDS = ("readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint")
+MCP_PLUGIN_PACKAGE = "com.IvanMurzak.McpPlugin"
+
+
+def load_battery(path: Path) -> list[tuple[str, dict]]:
+    """A chain battery: {"schema": 1, "calls": [{"name": ..., "args": {...}}, ...]}."""
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, json.JSONDecodeError) as e:
+        raise SystemExit(f"FAIL: cannot read battery {path}: {e}")
+    if not isinstance(doc, dict) or str(doc.get("schema")) != str(RECORD_SCHEMA):
+        raise SystemExit(f"FAIL: battery {path}: expected a JSON object with schema {RECORD_SCHEMA}")
+    calls = doc.get("calls")
+    if not isinstance(calls, list) or not calls:
+        raise SystemExit(f"FAIL: battery {path} must carry a non-empty 'calls' array")
+    battery: list[tuple[str, dict]] = []
+    for entry in calls:
+        if not isinstance(entry, dict) or not entry.get("name"):
+            raise SystemExit(f"FAIL: battery {path}: every call needs a 'name'")
+        args = entry.get("args") or {}
+        if not isinstance(args, dict):
+            raise SystemExit(f"FAIL: battery {path}: 'args' of {entry['name']} must be a JSON object")
+        battery.append((str(entry["name"]), args))
+    return battery
+
+
+def default_battery(nonce: str) -> list[tuple[str, dict]]:
+    return [(name, mkargs(nonce)) for name, mkargs in SMOKE_BATTERY]
+
+
+def record_tool_line(entry: dict) -> dict:
+    annotations = entry.get("annotations") or {}
+    line: dict = {"kind": "tool", "name": entry.get("name")}
+    title = annotations.get("title")
+    if title is None:
+        title = entry.get("title")
+    values = {"title": title, "description": entry.get("description"),
+              "inputSchema": entry.get("inputSchema"), "outputSchema": entry.get("outputSchema")}
+    values.update({key: annotations.get(key) for key in RECORD_TOOL_FIELDS})
+    for key, value in values.items():
+        if value is not None:
+            line[key] = value
+    return line
+
+
+def record_response(result: dict) -> dict:
+    # errorKind is deliberately absent: an MCP client never observes it (docs/chain-fixtures.md "Two recorders").
+    response: dict = {"status": "error" if result.get("isError") else "success"}
+    if result.get("content") is not None:
+        response["content"] = result["content"]
+    if result.get("structuredContent") is not None:
+        response["structuredContent"] = result["structuredContent"]
+    return response
+
+
+def record_meta(ue: Path) -> dict:
+    """Provenance meta. plugin_version / mcp_plugin_version / recorded_at are masked by `diff`."""
+    m = re.search(r"UE_(\d+(?:\.\d+)*)", str(ue))
+    plugin_version = "unknown"
+    uplugin = Path(__file__).resolve().parent.parent / "UnrealMCP" / "UnrealMCP.uplugin"
+    try:
+        plugin_version = str(json.loads(uplugin.read_text(encoding="utf-8-sig")).get("VersionName") or "unknown")
+    except (OSError, json.JSONDecodeError):
+        pass
+    # The McpPlugin version the sidecar was BUILT against (a ws version under a chain lock): read from the
+    # bridge's own deps.json beside UNREAL_MCP_BRIDGE_PATH, i.e. the binary this smoke actually runs.
+    mcp_plugin_version = "unknown"
+    bridge = os.environ.get("UNREAL_MCP_BRIDGE_PATH")
+    if bridge:
+        deps = Path(bridge).with_suffix(".deps.json")
+        try:
+            libraries = json.loads(deps.read_text(encoding="utf-8-sig")).get("libraries") or {}
+            for key in libraries:
+                package, _, version = key.partition("/")
+                if package == MCP_PLUGIN_PACKAGE and version:
+                    mcp_plugin_version = version
+                    break
+        except (OSError, json.JSONDecodeError, AttributeError):
+            pass
+    return {"schema": RECORD_SCHEMA, "kind": "meta", "engine": "unreal",
+            "engine_version": m.group(1) if m else "unknown", "surface": "editor",
+            "plugin_version": plugin_version, "mcp_plugin_version": mcp_plugin_version,
+            "recorded_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "recorder": "mcp-client"}
+
+
+def write_record(path: Path, lines: list[dict], project: Path) -> None:
+    text = "".join(json.dumps(line, ensure_ascii=False, separators=(",", ":")) + "\n" for line in lines)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8", newline="") as fh:
+        fh.write(text)
+    tools = sum(1 for line in lines if line.get("kind") == "tool")
+    calls = sum(1 for line in lines if line.get("kind") == "call")
+    log(f"chain-record: {tools} tools, {calls} calls -> {path}")
+    # Positive half of the masking check: the host project's absolute path as it appears in the dump
+    # (JSON-escaped backslashes). chain_fixture.py canonicalize must turn every occurrence into <path>.
+    host = json.dumps(str(project.parent))[1:-1]
+    log(f"chain-record: host project path {str(project.parent)!r} occurs {text.count(host)} time(s) in the raw dump")
+
+
+def run_e2e(url: str, rest_base: str, token: str | None, nonce: str,
+            battery: list[tuple[str, dict]] | None = None,
+            record: list[dict] | None = None) -> tuple[bool, str]:
+    """`battery` replaces SMOKE_BATTERY when given; `record`, when given, receives the raw dump lines."""
     status, sid = mcp_initialize(url, token)
     if status != 200 or not sid:
         return False, f"initialize failed (HTTP {status})"
@@ -216,15 +355,20 @@ def run_e2e(url: str, rest_base: str, token: str | None, nonce: str) -> tuple[bo
     if "ping" in tools:
         return False, "ping is advertised in tools/list — it must be a SYSTEM tool (§2.4)"
 
+    if record is not None:
+        record.extend(record_tool_line(entry) for entry in mcp_list_tool_entries(url, token, sid))
+
     results: list[tuple[str, bool]] = []
     call_id = 10
-    for name, mkargs in SMOKE_BATTERY:
+    for name, args in (battery if battery is not None else default_battery(nonce)):
         if name not in tools:
             continue
-        ok, sid, text = mcp_call_tool(url, token, sid, name, mkargs(nonce), call_id)
+        ok, sid, text, raw = mcp_call_tool(url, token, sid, name, args, call_id)
         call_id += 1
         results.append((name, ok))
         log(f"e2e: {name:<30} -> {'OK  ' if ok else 'FAIL'}  {text[:60]}")
+        if record is not None and raw is not None:
+            record.append({"kind": "call", "name": name, "args": args, "response": record_response(raw)})
 
     # The system-surface half of the round trip, over REST (the route the CLI + desktop app probe). The base
     # is passed in, not derived from `url`: cloud and custom mount the REST surfaces differently (see main).
@@ -360,8 +504,17 @@ def main() -> int:
     ap.add_argument("--server-port", type=int, default=18080)
     ap.add_argument("--server", type=str, default=None, help="custom: gamedev-mcp-server path override")
     ap.add_argument("--server-version", type=str, default="latest", help="custom: release version or 'latest'")
+    ap.add_argument("--record-out", type=Path, default=None,
+                    help="T2 chain record: write the RAW MCP-level dump (tools/list + every battery call, "
+                         "MCP-Plugin-dotnet docs/chain-fixtures.md F1, recorder mcp-client) to this path")
+    ap.add_argument("--battery", type=Path, default=None,
+                    help="chain battery JSON ({schema:1, calls:[{name, args}]}) that replaces the built-in "
+                         "SMOKE_BATTERY (default: SMOKE_BATTERY)")
     args = ap.parse_args()
     _ascii_safe_stdio()
+    if args.record_out is not None and args.connect_only:
+        ap.error("--record-out needs the tool battery; it cannot be combined with --connect-only")
+    battery = load_battery(args.battery) if args.battery is not None else None
 
     project = args.project.resolve()
     if not project.is_file():
@@ -424,6 +577,7 @@ def main() -> int:
     connect_result = "TIMEOUT"
     e2e_ok: bool | None = None
     e2e_detail = ""
+    record_ok = args.record_out is None  # a requested record that was never written fails the run
     connected_at = None
     marks: dict = {}
     start = time.monotonic()
@@ -454,7 +608,18 @@ def main() -> int:
 
         if connect_result == "PASS" and not args.connect_only:
             log("connection up — running e2e tool battery...")
-            e2e_ok, e2e_detail = run_e2e(mcp_url, rest_base, token, nonce=f"conn-smoke-{int(start)}")
+            record_lines: list[dict] | None = [record_meta(args.ue)] if args.record_out is not None else None
+            e2e_ok, e2e_detail = run_e2e(mcp_url, rest_base, token, nonce=f"conn-smoke-{int(start)}",
+                                         battery=battery, record=record_lines)
+            if record_lines is not None:
+                if any(line.get("kind") == "tool" for line in record_lines):
+                    try:
+                        write_record(args.record_out, record_lines, project)
+                        record_ok = True
+                    except OSError as e:
+                        log(f"chain-record: FAILED to write {args.record_out}: {e}")
+                else:
+                    log("chain-record: FAILED — tools/list returned no entries to record")
     finally:
         marks = scan_log(logpath) or marks
         if not args.keep_editor and proc.poll() is None:
@@ -464,7 +629,7 @@ def main() -> int:
             log("stopping local server...")
             kill_tree(server_proc.pid)
 
-    overall = connect_result == "PASS" and (args.connect_only or e2e_ok is True)
+    overall = connect_result == "PASS" and (args.connect_only or e2e_ok is True) and record_ok
     print("\n" + "=" * 70)
     print(f"MODE    : {args.mode}")
     print(f"CONNECT : {'PASS' if connect_result == 'PASS' else 'FAIL (' + connect_result + ')'}"
@@ -472,6 +637,8 @@ def main() -> int:
     if not args.connect_only:
         print(f"E2E     : {'SKIPPED' if e2e_ok is None else ('PASS' if e2e_ok else 'FAIL')}"
               + (f"  -- {e2e_detail}" if e2e_detail else ""))
+    if args.record_out is not None:
+        print(f"RECORD  : {'PASS' if record_ok else 'FAIL'}  -- {args.record_out}")
     print(f"RESULT  : {'PASS' if overall else 'FAIL'}")
     if not overall:
         print(f"  markers: {marks}")
