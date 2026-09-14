@@ -85,7 +85,8 @@ artifact jobs in `release.yml`:
   them, and asserts the surviving `Source/ThirdParty/UnrealMcpBridge/<rid>/` payload shipped (the form Epic's
   Fab recompile stages from). The packaged zip job waits for the plugin matrix
   so its UE 5.8 `BuildPlugin` run does not overlap the UE 5.8 validation leg on
-  the same machine's AutomationTool lock.
+  the same machine's AutomationTool lock. Like every self-hosted UE job, it also
+  holds the [machine-wide UE lock](#machine-wide-ue-lock) around its UE steps.
 - **`publish-release`** additionally **signs** `unreal-mcp-plugin-source-<version>.zip`
   with `minisign` and attaches `unreal-mcp-plugin-source-<version>.zip.minisig` as a
   sibling release asset (see [Plugin-source signing key](#plugin-source-signing-key-d12--cli-verifies-before-install)).
@@ -446,6 +447,38 @@ legacy; the release matrix now validates UE 5.5/5.6/5.7/5.8 on that machine.
 > same machine and Unreal's AutomationTool permits only one same-engine instance
 > at a time. The registration steps below are retained for re-provisioning the
 > runner.
+
+### Machine-wide UE lock
+
+The owner's runner-manager autoscales several ephemeral `runner-manager-*` runners on
+ONE machine. They share one UE install per engine (AutomationTool refuses a second
+instance: `A conflicting instance of AutomationTool is already running`) and one
+host `Plugins\UnrealMCP` junction. A workflow `concurrency:` group cannot serialize
+them: the run-level group is keyed per run or per chain lock, and a job-level group
+keeps only ONE pending job and cancels the older one.
+
+So every self-hosted UE job (`plugin` and `connection-smoke` in
+`test_pull_request.yml`; `plugin` and `build-plugin-zip` in `release.yml`) takes a
+machine-wide lock with `.github/scripts/ue-machine-lock.ps1`:
+
+- **Acquire** runs just before the job's first UE step. It holds an exclusive OS file
+  handle on `C:\ProgramData\UnrealMCP-ci\ue.lock` through a small detached holder
+  process, because the lock must outlive each step's own process. While it waits, it
+  logs `waiting for the machine-wide UE lock ... held by: <repo> run <id> ...` once a
+  minute. The wait is bounded (120 min in PR jobs, 180 min in release jobs), and a
+  PR job's `timeout-minutes` covers that wait, so an expired wait fails the step
+  instead of cancelling the job. A cancel can wedge a self-hosted runner.
+- **Release** is the job's last step, `if: always()`, and never fails the job.
+- **A killed job cannot wedge the lock.** The OS frees the handle when the holder
+  exits. The holder exits on Release, when the job's `Runner.Worker` process is gone,
+  when the runner's orphan-process cleanup kills it at job end, or after 360 min.
+- The first job to create `C:\ProgramData\UnrealMCP-ci\` grants Modify to
+  Authenticated Users, LOCAL SERVICE and NETWORK SERVICE, so runners under different
+  accounts can all open the lock.
+
+The lock spans every engine version, so it also serializes the release matrix
+legs, which `max-parallel: 2` would otherwise run two at a time. It is the
+authoritative serialization, and it does not change runner labels.
 
 The host-project `Build.bat` calls pass a per-job `-log=$RUNNER_TEMP\...` path.
 Do not remove that when tuning the workflow: parallel runners share the same

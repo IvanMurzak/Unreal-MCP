@@ -309,6 +309,14 @@ jobs:
           # GITHUB_TOKEN in the worktree's .git config after checkout.
           persist-credentials: false
           clean: false
+      # Machine-wide UE serialization (#293): one lock for every self-hosted UE job on this
+      # machine, whatever the engine version, so matrix legs, PR runs and chain dispatches never
+      # share UAT or the host junction. Held until the always() release step ending this job.
+      # This job has no timeout-minutes (360 default), which covers the longer wait.
+      - name: Acquire machine-wide UE lock
+        shell: pwsh
+        run: |
+          & "$env:GITHUB_WORKSPACE\.github\scripts\ue-machine-lock.ps1" -Action Acquire -WaitMinutes 180
       - name: BuildPlugin (marketplace packaging validation — DISTRIBUTED, test-free)
         shell: pwsh
         run: |
@@ -483,6 +491,13 @@ jobs:
             foreach ($sub in @('Saved\Logs','Saved\Crashes')) { Remove-Tree (Join-Path $hostRoot $sub) }
           }
           Write-Host "Per-run cleanup done (DDC / Intermediate / Binaries and Docker intentionally preserved)."
+
+      # Last step, so the whole UE portion stays inside the machine-wide UE lock (#293).
+      - name: Release machine-wide UE lock
+        if: always()
+        shell: pwsh
+        run: |
+          & "$env:GITHUB_WORKSPACE\.github\scripts\ue-machine-lock.ps1" -Action Release
 
   # ── ARTIFACT BUILD — SIGNED BRIDGE BUNDLE (runs on a real release OR a
   #    dry-run rehearsal). The self-contained bridge is built + code-signed per
@@ -874,6 +889,11 @@ jobs:
           $zip = Join-Path $out "unreal-mcp-plugin-source-$env:PLUGIN_VERSION.zip"
           if (Test-Path $zip) { Remove-Item $zip -Force }
           Compress-Archive -Path $pluginStage -DestinationPath $zip -Force
+      # Machine-wide UE serialization (#293) — see the plugin job. The source zip above runs no UE.
+      - name: Acquire machine-wide UE lock
+        shell: pwsh
+        run: |
+          & "$env:GITHUB_WORKSPACE\.github\scripts\ue-machine-lock.ps1" -Action Acquire -WaitMinutes 180
       - name: BuildPlugin + zip
         shell: pwsh
         env:
@@ -957,6 +977,13 @@ jobs:
             Remove-Tree (Join-Path $env:RUNNER_TEMP $name)
           }
           Write-Host "Per-run release-packaging cleanup done."
+
+      # Last step, so the BuildPlugin stays inside the machine-wide UE lock (#293).
+      - name: Release machine-wide UE lock
+        if: always()
+        shell: pwsh
+        run: |
+          & "$env:GITHUB_WORKSPACE\.github\scripts\ue-machine-lock.ps1" -Action Release
 
   # ── PUBLISH (gated on a REAL release: tag absent + version bumped, NOT a
   #    dry-run). Every job here is hard-skipped during the ci-workflows dry-run. ─
