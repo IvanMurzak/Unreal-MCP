@@ -44,7 +44,7 @@ param(
 
     # The bounded wait. The job's timeout-minutes must exceed this plus the job's own work, because
     # a job timeout is a GitHub-side cancel, which can wedge a self-hosted runner.
-    [int] $WaitMinutes = 120,
+    [int] $WaitMinutes = 60,
 
     # Backstop only: releases a holder whose job vanished and whose worker could not be resolved.
     [int] $MaxHoldMinutes = 360,

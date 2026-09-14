@@ -226,9 +226,9 @@ jobs:
     # A hang guard, not a budget. Expiry IS a GitHub-side cancel and can wedge this
     # self-hosted runner exactly like a manual cancel, so it is sized to fire only on a real
     # hang. Never cancel a slow job by hand: kill the step's process on the box instead.
-    # 180 = the machine-wide UE lock's 120-min bounded wait + the original 60-min guard, so an
+    # 120 = the machine-wide UE lock's 60-min bounded wait + the original 60-min guard, so an
     # expired wait fails the Acquire step instead of cancelling the job.
-    timeout-minutes: 180
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
@@ -297,7 +297,7 @@ jobs:
         id: ue_lock
         shell: pwsh
         run: |
-          & "$env:GITHUB_WORKSPACE\.github\scripts\ue-machine-lock.ps1" -Action Acquire -WaitMinutes 120
+          & "$env:GITHUB_WORKSPACE\.github\scripts\ue-machine-lock.ps1" -Action Acquire -WaitMinutes 60
 
       - name: BuildPlugin (marketplace packaging validation — DISTRIBUTED, test-free)
         shell: pwsh
@@ -550,8 +550,8 @@ jobs:
     if: ${{ vars.UNREAL_SMOKE_READY == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     runs-on: [self-hosted, windows, unreal-5-7]
     # A hang guard, not a budget — see the plugin job: expiry is a GitHub-side cancel.
-    # 150 = the machine-wide UE lock's 120-min bounded wait + the original 30-min guard.
-    timeout-minutes: 150
+    # 90 = the machine-wide UE lock's 60-min bounded wait + the original 30-min guard.
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
@@ -665,7 +665,7 @@ jobs:
         id: ue_lock
         shell: pwsh
         run: |
-          & "$env:GITHUB_WORKSPACE\.github\scripts\ue-machine-lock.ps1" -Action Acquire -WaitMinutes 120
+          & "$env:GITHUB_WORKSPACE\.github\scripts\ue-machine-lock.ps1" -Action Acquire -WaitMinutes 60
 
       - name: BuildPlugin into the host junction target
         shell: pwsh
