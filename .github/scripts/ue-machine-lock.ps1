@@ -9,11 +9,13 @@
     Machine-wide mutex for the self-hosted Unreal Engine CI jobs.
 
 .DESCRIPTION
-    The owner's runner-manager autoscales several ephemeral runners on ONE machine. They share one
-    UE install (AutomationTool refuses a second instance: "A conflicting instance of AutomationTool
-    is already running") and one host-project Plugins\UnrealMCP junction. A workflow `concurrency:`
-    group cannot serialize them: a run-level group is keyed per run, and a job-level group keeps only
-    ONE pending job and cancels the older one.
+    An autoscaler on the self-hosted Unreal machine registers several ephemeral `runner-manager-*`
+    runners on that ONE machine. They share one UE install per engine (AutomationTool refuses a
+    second instance: "A conflicting instance of AutomationTool is already running") and, on the
+    UNREAL_HOST_PROJECT fallback, one host-project Plugins\UnrealMCP junction. A workflow
+    `concurrency:` group cannot serialize them: the run-level group is keyed per PR, ref or chain
+    lock, and a job-level group keeps only ONE pending job and cancels the older one.
+    See docs/RELEASING.md "Machine-wide UE lock".
 
     The lock is an exclusive OS file handle on a fixed machine path. A job must keep holding it
     across several steps, and every step is its own process, so a small detached HOLDER process owns
@@ -61,6 +63,10 @@ if ([string]::IsNullOrWhiteSpace($StateDir)) {
     $base = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { [IO.Path]::GetTempPath() }
     $StateDir = Join-Path $base 'ue-machine-lock'
 }
+# A trailing backslash before the closing quote of the holder's -StateDir "..." argument would
+# escape that quote and scramble every argument after it.
+$StateDir = $StateDir.TrimEnd('\')
+$LockPath = $LockPath.TrimEnd('\')
 $pidFile = Join-Path $StateDir 'holder.pid'
 $ownerFile = Join-Path $StateDir 'owner'
 $logFile = Join-Path $StateDir 'holder.log'
@@ -91,9 +97,21 @@ function Get-InnermostException([Exception] $Exception) {
     return $ex
 }
 
+# Resolved once and kept: an open process handle stops Windows from reusing the pid, so an
+# unrelated later process can never pass for the job's worker and pin the lock.
+$script:WatchProcess = $null
 function Test-WatchAlive {
     if ($WatchPid -le 0) { return $true }
-    return $null -ne (Get-Process -Id $WatchPid -ErrorAction SilentlyContinue)
+    if ($null -eq $script:WatchProcess) {
+        try {
+            $proc = [Diagnostics.Process]::GetProcessById($WatchPid)
+            $null = $proc.Handle
+            $script:WatchProcess = $proc
+        }
+        catch [ArgumentException] { return $false }
+        catch { return $null -ne (Get-Process -Id $WatchPid -ErrorAction SilentlyContinue) }
+    }
+    return -not $script:WatchProcess.HasExited
 }
 
 function Read-LockOwner {
@@ -127,6 +145,7 @@ function Initialize-LockFolder {
     # otherwise a lock file created under one account would be read-only to the next one, and that
     # account would fail to open it. Best effort: a concurrent creator may have done this already.
     & icacls.exe $dir /grant '*S-1-5-11:(OI)(CI)M' '*S-1-5-18:(OI)(CI)F' '*S-1-5-19:(OI)(CI)M' '*S-1-5-20:(OI)(CI)M' | Out-Null
+    if ($LASTEXITCODE -ne 0) { Write-HolderLog "icacls could not grant access on $dir (exit $LASTEXITCODE); runners under other accounts may be denied the lock" }
 }
 
 function Invoke-Hold {
@@ -212,14 +231,13 @@ function Find-RunnerWorker {
 }
 
 function Invoke-Acquire {
-    if ((Test-Path -LiteralPath $pidFile) -and (Test-Path -LiteralPath $acquiredFile)) {
-        $existing = Get-Process -Id ([int](Get-Content -LiteralPath $pidFile -Raw).Trim()) -ErrorAction SilentlyContinue
-        if ($existing) { Write-Host "ue-machine-lock: this job already holds the lock (holder pid $($existing.Id))"; return }
-    }
     if (Test-Path -LiteralPath $StateDir) { Remove-Item -LiteralPath $StateDir -Recurse -Force }
     New-Item -ItemType Directory -Force -Path $StateDir | Out-Null
 
     $watch = if ($WatchPid -gt 0) { $WatchPid } else { Find-RunnerWorker }
+    if ($watch -le 0) {
+        Write-Host "::warning::ue-machine-lock: the job's Runner.Worker process was not found, so a job killed without its Release step holds the lock for up to $MaxHoldMinutes min"
+    }
     $owner = if ($env:GITHUB_RUN_ID) {
         '{0} run {1} attempt {2} job {3} ({4}) on runner {5}' -f $env:GITHUB_REPOSITORY, $env:GITHUB_RUN_ID, $env:GITHUB_RUN_ATTEMPT, $env:GITHUB_JOB, $env:UE_ROOT, $env:RUNNER_NAME
     }
@@ -229,23 +247,24 @@ function Invoke-Acquire {
     $psi = [Diagnostics.ProcessStartInfo]::new((Get-Process -Id $PID).Path)
     $psi.UseShellExecute = $true
     $psi.WindowStyle = [Diagnostics.ProcessWindowStyle]::Hidden
+    # Not the step's working directory: the holder must not keep the workspace folder open.
+    $psi.WorkingDirectory = [Environment]::SystemDirectory
     $psi.Arguments = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -Action Hold -LockPath "{1}" -StateDir "{2}" -WaitMinutes {3} -MaxHoldMinutes {4} -WatchPid {5}' -f $PSCommandPath, $LockPath, $StateDir, $WaitMinutes, $MaxHoldMinutes, $watch
     $holder = [Diagnostics.Process]::Start($psi)
-    Write-FileAtomic $pidFile ([string]$holder.Id)
+    # The start time lets Release tell this holder apart from a later process that reused its pid.
+    Write-FileAtomic $pidFile ('{0} {1}' -f $holder.Id, $holder.StartTime.ToFileTimeUtc())
     Write-Host "ue-machine-lock: holder pid $($holder.Id) is acquiring $LockPath for: $owner (released when pid $watch exits, or after $MaxHoldMinutes min)"
 
     $printed = 0
     $deadline = [DateTime]::UtcNow.AddMinutes($WaitMinutes + 5)
     while ($true) {
+        # Sample HasExited first: the holder writes acquired/failed before it exits, so the
+        # files read below are final whenever $exited is true.
+        $exited = $holder.HasExited
         $printed = Show-NewHolderLog $printed
         if (Test-Path -LiteralPath $acquiredFile) { return }
         if (Test-Path -LiteralPath $failedFile) { throw "ue-machine-lock: $((Get-Content -LiteralPath $failedFile -Raw).Trim())" }
-        if ($holder.HasExited) {
-            Start-Sleep -Seconds 1
-            $printed = Show-NewHolderLog $printed
-            if (Test-Path -LiteralPath $failedFile) { throw "ue-machine-lock: $((Get-Content -LiteralPath $failedFile -Raw).Trim())" }
-            throw "ue-machine-lock: the holder exited with code $($holder.ExitCode) before acquiring the lock"
-        }
+        if ($exited) { throw "ue-machine-lock: the holder exited with code $($holder.ExitCode) before acquiring the lock" }
         if ([DateTime]::UtcNow -ge $deadline) {
             Stop-Process -Id $holder.Id -Force -ErrorAction SilentlyContinue
             throw "ue-machine-lock: the holder neither acquired nor gave up within $($WaitMinutes + 5) min"
@@ -259,14 +278,25 @@ function Invoke-Release {
         Write-Host 'ue-machine-lock: this job holds no lock (Acquire never ran); nothing to release'
         return
     }
-    $holderId = [int](Get-Content -LiteralPath $pidFile -Raw).Trim()
+    $fields = (Get-Content -LiteralPath $pidFile -Raw).Trim() -split '\s+'
+    $holderId = [int]$fields[0]
+    $holderStart = if ($fields.Count -gt 1) { [long]$fields[1] } else { -1 }
     Write-FileAtomic $releaseFile 'release'
+    # Only this job's own holder is waited on or killed: a live process with the same pid but a
+    # different start time is an unrelated process that reused the pid of an exited holder.
     $proc = Get-Process -Id $holderId -ErrorAction SilentlyContinue
-    if ($proc -and $proc.ProcessName -match '^(pwsh|powershell)$') {
+    $isHolder = $false
+    if ($proc) {
+        try { $isHolder = $proc.StartTime.ToFileTimeUtc() -eq $holderStart } catch { $isHolder = $false }
+    }
+    if ($isHolder) {
         if (-not $proc.WaitForExit(60000)) {
             Write-Host "ue-machine-lock: holder pid $holderId did not exit within 60 s; killing it (the OS releases its handle)"
             Stop-Process -Id $holderId -Force -ErrorAction SilentlyContinue
         }
+    }
+    elseif ((Test-Path -LiteralPath $acquiredFile) -and -not (Test-Path -LiteralPath $failedFile)) {
+        Write-Host "::warning::ue-machine-lock: holder pid $holderId had already exited before Release, so part of this job may have run without the lock; see the holder log below"
     }
     Show-NewHolderLog 0 | Out-Null
 }

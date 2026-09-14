@@ -440,21 +440,29 @@ legacy; the release matrix now validates UE 5.5/5.6/5.7/5.8 on that machine.
 > `test_pull_request.yml` runs **UE 5.8 only** for same-repo PRs, while
 > `release.yml` runs `matrix.ue: ['5.5', '5.6', '5.7', '5.8']` on real releases
 > and dry-runs, capped at two parallel Unreal engines to avoid MSVC PCH virtual
-> memory exhaustion on the local machine. Multiple registered runners still
-> reduce queue time; the host game module is rebuilt per engine on each
-> runner-local host. The
+> memory exhaustion on the local machine. The host game module is rebuilt per
+> engine on each runner-local host. The
 > PR smoke job waits for the plugin job, because both use UE 5.8 `RunUAT` on the
 > same machine and Unreal's AutomationTool permits only one same-engine instance
-> at a time. The registration steps below are retained for re-provisioning the
-> runner.
+> at a time. Every self-hosted UE job now also holds the
+> [machine-wide UE lock](#machine-wide-ue-lock), so only ONE UE job runs on the
+> machine at a time and extra runners no longer shorten the UE queue. The
+> registration steps below are retained for re-provisioning the runner.
+
+The host-project `Build.bat` calls pass a per-job `-log=$RUNNER_TEMP\...` path.
+Do not remove that when tuning the workflow: parallel runners share the same
+Windows service account, and UBT's default
+`%LOCALAPPDATA%\UnrealBuildTool\Log.txt` can fail during log rotation when
+multiple engines build host targets at once.
 
 ### Machine-wide UE lock
 
-The owner's runner-manager autoscales several ephemeral `runner-manager-*` runners on
-ONE machine. They share one UE install per engine (AutomationTool refuses a second
-instance: `A conflicting instance of AutomationTool is already running`) and one
+An autoscaler on the self-hosted Unreal machine registers several ephemeral
+`runner-manager-*` runners on that ONE machine. They share one UE install per engine
+(AutomationTool refuses a second instance: `A conflicting instance of AutomationTool
+is already running`) and, whenever a runner falls back to `UNREAL_HOST_PROJECT`, one
 host `Plugins\UnrealMCP` junction. A workflow `concurrency:` group cannot serialize
-them: the run-level group is keyed per run or per chain lock, and a job-level group
+them: the run-level group is keyed per PR, ref or chain lock, and a job-level group
 keeps only ONE pending job and cancels the older one.
 
 So every self-hosted UE job (`plugin` and `connection-smoke` in
@@ -470,21 +478,23 @@ machine-wide lock with `.github/scripts/ue-machine-lock.ps1`:
   instead of cancelling the job. A cancel can wedge a self-hosted runner.
 - **Release** is the job's last step, `if: always()`, and never fails the job.
 - **A killed job cannot wedge the lock.** The OS frees the handle when the holder
-  exits. The holder exits on Release, when the job's `Runner.Worker` process is gone,
-  when the runner's orphan-process cleanup kills it at job end, or after 360 min.
+  exits. The holder exits on Release, when the job's `Runner.Worker` process is gone
+  (Acquire prints a `::warning::` when it cannot find that process), or after
+  360 min; the runner's orphan-process cleanup at job end is a best-effort extra.
+- The cleanup step deletes the host project's `Saved\Logs` and `Saved\Crashes` only
+  when this job's Acquire succeeded, so a job that never got the lock cannot delete
+  the logs of the job that holds it.
 - The first job to create `C:\ProgramData\UnrealMCP-ci\` grants Modify to
-  Authenticated Users, LOCAL SERVICE and NETWORK SERVICE, so runners under different
-  accounts can all open the lock.
+  Authenticated Users, LOCAL SERVICE and NETWORK SERVICE (SYSTEM: Full), so runners
+  under different accounts can all open the lock. An existing folder is left as-is.
 
 The lock spans every engine version, so it also serializes the release matrix
 legs, which `max-parallel: 2` would otherwise run two at a time. It is the
 authoritative serialization, and it does not change runner labels.
 
-The host-project `Build.bat` calls pass a per-job `-log=$RUNNER_TEMP\...` path.
-Do not remove that when tuning the workflow: parallel runners share the same
-Windows service account, and UBT's default
-`%LOCALAPPDATA%\UnrealBuildTool\Log.txt` can fail during log rotation when
-multiple engines build host targets at once.
+Waiters retry every 5 s, so the lock is **not first-come-first-served**: under
+heavy PR or chain traffic a job can lose repeatedly and fail when its bounded wait
+expires. Avoid dispatching a release while many Unreal PR runs are queued.
 
 ### Never red-by-absence
 

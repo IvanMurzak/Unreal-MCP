@@ -23,7 +23,7 @@
 # the public server release at runtime; it does not build the server here.)
 #
 # Machine-wide UE lock (#293): the self-hosted UE jobs (c) and (d) each hold one lock shared by
-# EVERY UE job on the machine (PR runs, chain dispatches of any lock, release legs), taken by
+# EVERY UE job on the machine (PR runs, chain dispatches of any chain lock, release legs), taken by
 # `.github/scripts/ue-machine-lock.ps1` around their UE steps — see docs/RELEASING.md
 # "Machine-wide UE lock". The run-level `concurrency:` below is unchanged and does not do this.
 #
@@ -266,13 +266,10 @@ jobs:
         shell: pwsh
         run: ${{ env.CHAIN_PY }} .github/scripts/chain_feed.py apply --node unreal-mcp --job plugin --edges none
 
-      # Machine-wide UE serialization (#293). Every runner-manager runner on this machine shares
-      # one UE install (AutomationTool is single-instance) and the host Plugins\UnrealMCP
-      # junction, so a run-level `concurrency:` group cannot keep two UE jobs apart, and a
-      # job-level group would CANCEL an older pending job. Held from here until the always()
-      # release step that ends this job; a killed job frees it when the holder or the job's
-      # Runner.Worker exits. Mechanics: .github/scripts/ue-machine-lock.ps1.
+      # Machine-wide UE lock (#293; see the header and docs/RELEASING.md). Held from here until
+      # the always() release step that ends this job.
       - name: Acquire machine-wide UE lock
+        id: ue_lock
         shell: pwsh
         run: |
           & "$env:GITHUB_WORKSPACE\.github\scripts\ue-machine-lock.ps1" -Action Acquire -WaitMinutes 120
@@ -462,6 +459,8 @@ jobs:
         # Best-effort: a cleanup failure must NEVER red an otherwise-green run.
         if: always()
         shell: pwsh
+        env:
+          UE_LOCK_OUTCOME: ${{ steps.ue_lock.outcome }}
         run: |
           $ErrorActionPreference = 'Continue'
           function Remove-Tree([string]$p) {
@@ -483,8 +482,9 @@ jobs:
           Get-ChildItem -Path $env:RUNNER_TEMP -Filter 'UBT-*.log' -File -ErrorAction SilentlyContinue |
             Remove-Item -Force -ErrorAction SilentlyContinue
           # 3. Host project transient logs/crashes ONLY (unbounded growers; NOT the
-          #    DDC / Intermediate / Binaries speed caches).
-          if (-not [string]::IsNullOrWhiteSpace($env:HOST_UPROJECT) -and (Test-Path -LiteralPath $env:HOST_UPROJECT)) {
+          #    DDC / Intermediate / Binaries speed caches). Only while this job held the
+          #    machine-wide UE lock: otherwise the host may be another job's live editor.
+          if ($env:UE_LOCK_OUTCOME -eq 'success' -and -not [string]::IsNullOrWhiteSpace($env:HOST_UPROJECT) -and (Test-Path -LiteralPath $env:HOST_UPROJECT)) {
             $hostRoot = Split-Path -Parent $env:HOST_UPROJECT
             foreach ($sub in @('Saved\Logs','Saved\Crashes')) { Remove-Tree (Join-Path $hostRoot $sub) }
           }
@@ -624,6 +624,7 @@ jobs:
       # packs; from here the BuildPlugin, the host junction and the fixed smoke port 18080 are
       # all machine-shared, so everything up to the release step stays inside the lock.
       - name: Acquire machine-wide UE lock
+        id: ue_lock
         shell: pwsh
         run: |
           & "$env:GITHUB_WORKSPACE\.github\scripts\ue-machine-lock.ps1" -Action Acquire -WaitMinutes 120
@@ -726,9 +727,12 @@ jobs:
         # See the plugin job's cleanup note. Removes ONLY this job's own regenerable
         # RUNNER_TEMP package + host transient logs; preserves the host
         # DDC / Intermediate / Binaries speed cache, the junction (self-heal above),
-        # and Docker (unused here; daemon shared with other runners).
+        # and Docker (unused here; daemon shared with other runners). The host logs are
+        # removed only while this job held the machine-wide UE lock.
         if: always()
         shell: pwsh
+        env:
+          UE_LOCK_OUTCOME: ${{ steps.ue_lock.outcome }}
         run: |
           $ErrorActionPreference = 'Continue'
           function Remove-Tree([string]$p) {
@@ -758,7 +762,7 @@ jobs:
           }
           Get-ChildItem -Path $env:RUNNER_TEMP -Filter 'UBT-*.log' -File -ErrorAction SilentlyContinue |
             Remove-Item -Force -ErrorAction SilentlyContinue
-          if (-not [string]::IsNullOrWhiteSpace($env:HOST_UPROJECT) -and (Test-Path -LiteralPath $env:HOST_UPROJECT)) {
+          if ($env:UE_LOCK_OUTCOME -eq 'success' -and -not [string]::IsNullOrWhiteSpace($env:HOST_UPROJECT) -and (Test-Path -LiteralPath $env:HOST_UPROJECT)) {
             $hostRoot = Split-Path -Parent $env:HOST_UPROJECT
             foreach ($sub in @('Saved\Logs','Saved\Crashes')) { Remove-Tree (Join-Path $hostRoot $sub) }
           }

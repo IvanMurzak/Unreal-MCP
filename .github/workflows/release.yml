@@ -314,6 +314,7 @@ jobs:
       # share UAT or the host junction. Held until the always() release step ending this job.
       # This job has no timeout-minutes (360 default), which covers the longer wait.
       - name: Acquire machine-wide UE lock
+        id: ue_lock
         shell: pwsh
         run: |
           & "$env:GITHUB_WORKSPACE\.github\scripts\ue-machine-lock.ps1" -Action Acquire -WaitMinutes 180
@@ -469,6 +470,8 @@ jobs:
         # Best-effort: a cleanup failure must NEVER red an otherwise-green run.
         if: always()
         shell: pwsh
+        env:
+          UE_LOCK_OUTCOME: ${{ steps.ue_lock.outcome }}
         run: |
           $ErrorActionPreference = 'Continue'
           function Remove-Tree([string]$p) {
@@ -485,8 +488,9 @@ jobs:
           Get-ChildItem -Path $env:RUNNER_TEMP -Filter 'UBT-*.log' -File -ErrorAction SilentlyContinue |
             Remove-Item -Force -ErrorAction SilentlyContinue
           # 3. Host project transient logs/crashes ONLY (unbounded growers; NOT the
-          #    DDC / Intermediate / Binaries speed caches).
-          if (-not [string]::IsNullOrWhiteSpace($env:HOST_UPROJECT) -and (Test-Path -LiteralPath $env:HOST_UPROJECT)) {
+          #    DDC / Intermediate / Binaries speed caches). Only while this job held the
+          #    machine-wide UE lock: otherwise the host may be another job's live editor.
+          if ($env:UE_LOCK_OUTCOME -eq 'success' -and -not [string]::IsNullOrWhiteSpace($env:HOST_UPROJECT) -and (Test-Path -LiteralPath $env:HOST_UPROJECT)) {
             $hostRoot = Split-Path -Parent $env:HOST_UPROJECT
             foreach ($sub in @('Saved\Logs','Saved\Crashes')) { Remove-Tree (Join-Path $hostRoot $sub) }
           }
