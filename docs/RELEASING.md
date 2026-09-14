@@ -473,7 +473,7 @@ machine-wide lock with `.github/scripts/ue-machine-lock.ps1`:
   handle on `C:\ProgramData\UnrealMCP-ci\ue.lock` through a small detached holder
   process, because the lock must outlive each step's own process. While it waits, it
   logs `waiting for the machine-wide UE lock ... held by: <repo> run <id> ...` once a
-  minute. The wait is bounded (120 min in PR jobs, 180 min in release jobs), and a
+  minute. The wait is bounded (60 min in PR jobs, 180 min in release jobs), and a
   PR job's `timeout-minutes` covers that wait, so an expired wait fails the step
   instead of cancelling the job. A cancel can wedge a self-hosted runner.
 - **Release** is the job's last step, `if: always()`, and never fails the job.
