@@ -1,0 +1,19 @@
+UnrealMCP/Source/UnrealMcpEditor/Private/Sidecar/UnrealMcpSidecarManager.cpp
+  s_53ce73f91e4281::t_6019f0965b8dc7 32-36
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "ea1491320309507e39afa279c8930aa7c8cd3935",
+  "prompts": {},
+  "sessions": {
+    "s_53ce73f91e4281": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e24c1167-2410-4c32-885c-4fd71d157405",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

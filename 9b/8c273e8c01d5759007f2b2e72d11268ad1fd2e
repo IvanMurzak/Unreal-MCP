@@ -1,0 +1,33 @@
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/SUnrealMcpExtensionsWindow.cpp
+  s_e3cea916442b5e::t_4e0e735bccdf9e 304-307
+  s_e3cea916442b5e::t_83b919c853378b 264-266,271-273,275
+  s_e3cea916442b5e::t_b15494d553b70b 243-245,249-251
+UnrealMCP/Source/UnrealMcpEditor/Private/Extensions/UnrealMcpExtensionInstaller.cpp
+  s_e3cea916442b5e::t_fa63a7ca611d38 535
+  s_e3cea916442b5e::t_9ee37e0a6ff520 415-416,425-439,443-448
+  s_e3cea916442b5e::t_50ff280b6b8745 473,484-485,491,493,495-497,499-500,511,516,522,525
+  s_e3cea916442b5e::t_521594c1869b4f 559-561
+  s_e3cea916442b5e::t_ce82eda487eeed 707-714,728
+  s_e3cea916442b5e::t_2201970f1e987d 614,616,618-620,622-623,633,638,644,646,651
+  s_e3cea916442b5e::t_59b2c6dd8f4d4c 371-373,375,377-396
+  s_e3cea916442b5e::t_f7435ca01c54ec 33-47
+  s_e3cea916442b5e::t_03a682e9f8efda 139,141
+UnrealMCP/Source/UnrealMcpEditor/Private/Extensions/UnrealMcpExtensionInstaller.h
+  s_e3cea916442b5e::t_590db0bdab9193 174-180
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "9b8c273e8c01d5759007f2b2e72d11268ad1fd2e",
+  "prompts": {},
+  "sessions": {
+    "s_e3cea916442b5e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c575ab56-73e6-4952-bb8b-fef415924e27",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

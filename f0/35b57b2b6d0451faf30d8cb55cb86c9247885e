@@ -1,0 +1,32 @@
+bridge/src/Auth/DeviceCodeAuthenticator.cs
+  s_908974782fafa1::t_142034d956be8d 1-234
+bridge/src/Ipc/IpcClient.cs
+  s_908974782fafa1::t_27ece836894780 393-414
+bridge/src/Ipc/IpcMessages.cs
+  s_908974782fafa1::t_c5162d493ccee5 110-143
+bridge/src/Host/SidecarHost.cs
+  s_908974782fafa1::t_7882184b888ada 12,14,19,263,310-311
+  s_908974782fafa1::t_95ea822bd4b9a5 210-215,221-227,229,237-262,264-309
+  s_908974782fafa1::t_ef9b602e87f9c8 59-64,70-72,80-82
+  s_908974782fafa1::t_92504245d44b23 321-323
+  s_908974782fafa1::t_e814eac1f8bf93 336
+  s_908974782fafa1::t_db87770762f4b0 156-159,162-166
+bridge/tests/DeviceCodeAuthenticatorTests.cs
+  s_908974782fafa1::t_fc6a6db3d4d2f8 1-158
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "f035b57b2b6d0451faf30d8cb55cb86c9247885e",
+  "prompts": {},
+  "sessions": {
+    "s_908974782fafa1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f1748397-e586-40bb-91a9-b89c0caebdf5",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

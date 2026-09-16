@@ -1,0 +1,51 @@
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/SUnrealMcpMainWindow.cpp
+  s_908974782fafa1::t_d56d7e4b42c62a 440-446
+  s_908974782fafa1::t_f69786682c45e6 237
+  s_908974782fafa1::t_ea878712845d62 1-87,90-236,238-358,366-369,371-439,447-535
+  s_908974782fafa1::t_37fb58101e767c 88-89
+  s_908974782fafa1::t_f6e703eba86872 359-365,370
+UnrealMCP/Source/UnrealMcpEditor/Private/UnrealMcpRuntime.cpp
+  s_908974782fafa1::t_684e8f072d247d 13-14,19-20
+  s_908974782fafa1::t_d7a0e4ec63ef0d 92-95,97-116,118-137,141-159
+  s_908974782fafa1::t_dd7025bb06bd3e 186-195
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpEditorViewModelSpec.cpp
+  s_908974782fafa1::t_64c74be5c1e7fa 1-223
+UnrealMCP/Source/UnrealMcpEditor/Private/UnrealMcpRuntime.h
+  s_908974782fafa1::t_0220973be4dfde 46-48
+  s_908974782fafa1::t_c079092269a77c 13-14
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/UnrealMcpEditorViewModel.h
+  s_908974782fafa1::t_6f56fce1939645 1-44,47-170
+  s_908974782fafa1::t_3ccbdd4be8570c 45-46
+UnrealMCP/Source/UnrealMcpEditor/Private/Bridge/UnrealMcpBridgeServer.h
+  s_908974782fafa1::t_2bfc385f5a4f1a 67-72,74-81,139
+  s_908974782fafa1::t_9b2991432e79cc 140-142
+UnrealMCP/Source/UnrealMcpEditor/Private/Bridge/UnrealMcpBridgeServer.cpp
+  s_908974782fafa1::t_7fa174eb5cc40d 33-37
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/UnrealMcpMainWindowTab.cpp
+  s_908974782fafa1::t_d5ae3edfd4e987 10,12-14
+  s_908974782fafa1::t_0e423702da1c6c 1-9,11,15-77
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/UnrealMcpEditorViewModel.cpp
+  s_908974782fafa1::t_87ef8a8897cf05 1-316
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/UnrealMcpMainWindowTab.h
+  s_908974782fafa1::t_1da17b77acc57d 1-53
+UnrealMCP/Source/UnrealMcpEditor/UnrealMcpEditor.Build.cs
+  s_908974782fafa1::t_c6c5ea6b9679a5 38-45
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/SUnrealMcpMainWindow.h
+  s_908974782fafa1::t_e57cc180ff609f 1-66
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "05146492e46c16424af6adea638f4966230e0424",
+  "prompts": {},
+  "sessions": {
+    "s_908974782fafa1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f1748397-e586-40bb-91a9-b89c0caebdf5",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

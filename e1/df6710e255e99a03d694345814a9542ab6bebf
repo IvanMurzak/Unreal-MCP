@@ -1,0 +1,19 @@
+UnrealMCP/Source/UnrealMcpRuntime/Private/Tools/UnrealMcpScopedRead.cpp
+  s_ccc717f86d7e3e::t_f371d00d9ac341 131-137
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "e1df6710e255e99a03d694345814a9542ab6bebf",
+  "prompts": {},
+  "sessions": {
+    "s_ccc717f86d7e3e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9c8ada08-e4d5-462c-b934-8bbd1f9565d6",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

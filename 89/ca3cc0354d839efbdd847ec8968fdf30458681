@@ -1,0 +1,27 @@
+bridge/tests/AgentConfigServiceTests.cs
+  s_94cae3b80679a2::t_bb87d72c0251b7 103-141
+bridge/src/Ipc/AgentConfigMessages.cs
+  s_94cae3b80679a2::t_77cad3e9dab6c9 127-128,131,134-135
+  s_94cae3b80679a2::t_22df96f38154ec 158-164,169-175
+bridge/src/AgentConfig/AgentConfigService.cs
+  s_94cae3b80679a2::t_eb8a2690c3c2b8 246-248,253-257,264,271-274
+  s_94cae3b80679a2::t_d9f438308dce4d 28
+bridge/src/com.IvanMurzak.Unreal.MCP.Bridge.csproj
+  s_94cae3b80679a2::t_5325eef482bec3 54-55,59-64,68
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.7",
+  "base_commit_sha": "89ca3cc0354d839efbdd847ec8968fdf30458681",
+  "prompts": {},
+  "sessions": {
+    "s_94cae3b80679a2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d15dc434-a705-4009-9c19-05eae0bfc388",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

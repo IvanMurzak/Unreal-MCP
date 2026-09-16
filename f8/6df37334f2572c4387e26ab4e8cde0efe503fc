@@ -1,0 +1,64 @@
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/UnrealMcpEditorViewModel.cpp
+  s_908974782fafa1::t_9dd2e249444d48 241-272
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/SUnrealMcpSettingsWindow.cpp
+  s_908974782fafa1::t_d9c001b66c637a 1-223
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/UnrealMcpEditorViewModel.h
+  s_908974782fafa1::t_3e4523f698a2c3 76-82
+  s_908974782fafa1::t_ce0fc6a3f6dc84 146-159
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/SUnrealMcpToolsWindow.h
+  s_908974782fafa1::t_bc05161ca80624 1-48
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/SUnrealMcpFeatureListWindow.h
+  s_908974782fafa1::t_2b725f4a1add11 1-41
+UnrealMCP/Source/UnrealMcpEditor/Public/UnrealMcpToolRegistry.h
+  s_908974782fafa1::t_f511804daeabf3 223-244
+UnrealMCP/Source/UnrealMcpEditor/Private/Tools/UnrealMcpToolRegistry.cpp
+  s_908974782fafa1::t_7e3b11939483c7 417-424,430-477
+UnrealMCP/Source/UnrealMcpEditor/Private/UnrealMcpRuntime.cpp
+  s_908974782fafa1::t_74b9b360e6553c 272
+  s_908974782fafa1::t_6d9644ffcf1967 140-151
+  s_908974782fafa1::t_66cd9f88601d69 196-223
+  s_908974782fafa1::t_8bba4129459be1 15-17
+  s_908974782fafa1::t_3aa4d03cdcc281 81-90
+  s_908974782fafa1::t_db1fb6ff36b37e 251-255
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/UnrealMcpAuxWindows.cpp
+  s_908974782fafa1::t_1966742c8df598 1-173
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/SUnrealMcpSettingsWindow.h
+  s_908974782fafa1::t_f9c529a91fa841 1-45
+UnrealMCP/Source/UnrealMcpEditor/Private/Config/UnrealMcpConfig.h
+  s_908974782fafa1::t_e97228962e84ab 84-90
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/UnrealMcpAuxWindows.h
+  s_908974782fafa1::t_97feb0617cf4e4 1-70
+UnrealMCP/Source/UnrealMcpEditor/Private/UnrealMcpRuntime.h
+  s_908974782fafa1::t_eaeb0f6d478741 47-48,51
+  s_908974782fafa1::t_f6609af1584c99 15
+UnrealMCP/Source/UnrealMcpEditor/Private/Config/UnrealMcpConfig.cpp
+  s_908974782fafa1::t_ecc06f12fbd0b2 329-333
+  s_908974782fafa1::t_3e7ad958dd1638 46-63
+  s_908974782fafa1::t_a3dfcfea931cfe 155-156
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/SUnrealMcpToolsWindow.cpp
+  s_908974782fafa1::t_ccf17081c859df 1-132
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpToolsWindowSpec.cpp
+  s_908974782fafa1::t_d008d2cbc4cfaa 1-9,11-189
+  s_908974782fafa1::t_dfb9451307f4f7 10
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/SUnrealMcpFeatureListWindow.cpp
+  s_908974782fafa1::t_9177876c1342f5 1-5,7-80
+  s_908974782fafa1::t_5bf545810afad6 6
+UnrealMCP/Source/UnrealMcpEditor/UnrealMcpEditor.Build.cs
+  s_908974782fafa1::t_12da8246f267db 45-47
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "f86df37334f2572c4387e26ab4e8cde0efe503fc",
+  "prompts": {},
+  "sessions": {
+    "s_908974782fafa1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f1748397-e586-40bb-91a9-b89c0caebdf5",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

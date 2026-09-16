@@ -1,0 +1,23 @@
+bridge/tests/AgentConfigServiceTests.cs
+  s_94cae3b80679a2::t_9172e3eb12ae5d 15
+  s_94cae3b80679a2::t_d697721d448743 294-305,307-308
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpToolRegistrySpec.cpp
+  s_94cae3b80679a2::t_706561b2286814 107-116
+  s_94cae3b80679a2::t_284e7ae463441b 96-98,102-103,106
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.8",
+  "base_commit_sha": "a05cff9a8acfba6b18812a01725e675dcd5bb059",
+  "prompts": {},
+  "sessions": {
+    "s_94cae3b80679a2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d15dc434-a705-4009-9c19-05eae0bfc388",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

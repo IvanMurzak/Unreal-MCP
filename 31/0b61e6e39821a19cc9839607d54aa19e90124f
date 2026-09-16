@@ -1,0 +1,41 @@
+UnrealMCP/Source/UnrealMcpRuntime/Public/UnrealMcpToolRegistry.h
+  s_ccc717f86d7e3e::t_9a4696ac84dbfe 11-13
+  s_234cdeef7a0e6d::t_b51dc330c29848 147-148,187-217,220,226,228-229,231,233-235,237,240-242,244,247-249,251,254-256,258,261-263,265,269
+UnrealMCP/Source/UnrealMcpRuntime/Public/UnrealMcpRegistry.h
+  s_ccc717f86d7e3e::t_68fedfb0ef5a54 1-13,29-367
+  s_ccc717f86d7e3e::t_817f8815018418 14-28
+UnrealMCP/Source/UnrealMcpRuntime/Private/Prompts/UnrealMcpPromptRegistry.cpp
+  s_234cdeef7a0e6d::t_53dbddb70b1437 115,117,123,125,142,144,146,151-157
+UnrealMCP/Source/UnrealMcpRuntime/Private/Resources/UnrealMcpResourceRegistry.cpp
+  s_234cdeef7a0e6d::t_6b678e19b720dc 41,43,60,62,78,80,82,87-93
+UnrealMCP/Source/UnrealMcpRuntime/Private/Tools/UnrealMcpToolRegistry.cpp
+  s_234cdeef7a0e6d::t_f27ff8ae2aa920 176,178,183,185,202,204,206,211-217
+UnrealMCP/Source/UnrealMcpRuntime/Public/UnrealMcpPromptRegistry.h
+  s_234cdeef7a0e6d::t_1a4e24bf8a0f5b 132-157,162,168,171,173,175-177,179,182,185-186,188,191,194
+UnrealMCP/Source/UnrealMcpRuntime/Public/UnrealMcpResourceRegistry.h
+  s_234cdeef7a0e6d::t_0445cc0695d215 145-171,174,180,183,185,187-189,191,194,197-198,200,203,206
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "310b61e6e39821a19cc9839607d54aa19e90124f",
+  "prompts": {},
+  "sessions": {
+    "s_234cdeef7a0e6d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a0618931793fbc4c8",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_ccc717f86d7e3e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9c8ada08-e4d5-462c-b934-8bbd1f9565d6",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

@@ -1,0 +1,25 @@
+samples/UnrealAIRuntimeSample/UnrealAIRuntimeSample.uplugin
+  s_3e0a2681fef788::t_9c28b4d69bd66a 1-29
+samples/UnrealAIRuntimeSample/Source/UnrealAIRuntimeSample/UnrealAIRuntimeSample.Build.cs
+  s_3e0a2681fef788::t_bf8ca667f5061a 1-32
+samples/UnrealAIRuntimeSample/Source/UnrealAIRuntimeSample/Private/UnrealAIRuntimeSampleModule.cpp
+  s_3e0a2681fef788::t_3a48db3b51fc00 1-148
+samples/UnrealAIRuntimeSample/README.md
+  s_3e0a2681fef788::t_d52507b99bc23c 1-71
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.8",
+  "base_commit_sha": "cd94f55c16d044e7f6d9b49621ef7cf760c9e3f9",
+  "prompts": {},
+  "sessions": {
+    "s_3e0a2681fef788": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a9715f3a-114a-4de7-815b-97526309448b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

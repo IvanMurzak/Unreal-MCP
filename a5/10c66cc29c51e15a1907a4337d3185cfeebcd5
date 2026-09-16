@@ -1,0 +1,29 @@
+.github/actionlint.yaml
+  s_908974782fafa1::t_ce3e48b5f00b0c 1-8
+.github/workflows/test_pull_request.yml
+  s_908974782fafa1::t_f636e34c7e5d19 1-168
+docs/RELEASING.md
+  s_908974782fafa1::t_d9ccca8fca9756 1-169
+.github/workflows/test_cli.yml
+  s_908974782fafa1::t_269c26d30b0bfb 1-48
+.github/workflows/release.yml
+  s_908974782fafa1::t_a117e9abce7a27 1-434
+README.md
+  s_908974782fafa1::t_6542322219b9d5 6
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "a510c66cc29c51e15a1907a4337d3185cfeebcd5",
+  "prompts": {},
+  "sessions": {
+    "s_908974782fafa1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f1748397-e586-40bb-91a9-b89c0caebdf5",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

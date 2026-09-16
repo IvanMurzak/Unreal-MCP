@@ -1,0 +1,28 @@
+.github/scripts/chain_leg_checks.py
+  s_de71e20c9d8602::t_d4fa218d7a1236 16-17
+  s_de71e20c9d8602::t_47b1cb3c626dd0 120-132
+.github/workflows/test_pull_request.yml
+  s_de71e20c9d8602::t_3b10d84c59c377 497
+  s_de71e20c9d8602::t_b32321392461c4 537-538
+  s_de71e20c9d8602::t_635aae83d813ef 115
+  s_de71e20c9d8602::t_98f237e9cc0f28 84-88
+  s_de71e20c9d8602::t_5a702497686a98 255-256
+  s_de71e20c9d8602::t_071790ee8d940b 205-207
+  s_de71e20c9d8602::t_f2306a4cf9a7fa 417
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ed133a2ee991525a11c004314a3c68a1bec0c505",
+  "prompts": {},
+  "sessions": {
+    "s_de71e20c9d8602": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b1fa7ae0-224c-4b0e-8499-22456e0d6a3f",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

@@ -1,0 +1,19 @@
+bridge/src/Ipc/IpcMessages.cs
+  s_ffe688343bca6a::t_b15c887bf642bf 46-48
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "6cbd0a5a15997da76df4dc0127ecb31742a7da60",
+  "prompts": {},
+  "sessions": {
+    "s_ffe688343bca6a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a98935c9eb9eff8b8",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

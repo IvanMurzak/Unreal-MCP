@@ -1,0 +1,49 @@
+UnrealMCP/Source/UnrealMcpRuntime/Private/UnrealMcpSupervisedProcess.cpp
+  s_ccc717f86d7e3e::t_0ad5433842e560 8
+  s_ccc717f86d7e3e::t_09f93eb714db10 1-7,9-91
+UnrealMCP/Source/UnrealMcpRuntime/Private/Sidecar/UnrealMcpSidecarManager.cpp
+  s_ccc717f86d7e3e::t_11a2c548c0acfc 8
+  s_ccc717f86d7e3e::t_8a5481d2b15db9 6
+  s_ccc717f86d7e3e::t_31a5deb18a4f4a 21
+  s_f4fba200a9b4a6::t_df967777b2a38c 39-41,152-154,160,241,301-307,314-317,322
+UnrealMCP/Source/UnrealMcpRuntime/Private/UnrealMcpSupervisedProcess.h
+  s_ccc717f86d7e3e::t_6bc3ecbf5093c7 8
+  s_ccc717f86d7e3e::t_1dbb0e336fe6fe 24-25,42,50-55,58
+  s_ccc717f86d7e3e::t_e1e0d7c165079f 31
+  s_ccc717f86d7e3e::t_2b7b497836d240 1-7,9-23,26-30,32-41,43-49,56-57,59-62
+UnrealMCP/Source/UnrealMcpRuntime/Private/UnrealMcpProcessUtil.cpp
+  s_ccc717f86d7e3e::t_ded48d0578e412 1-63
+UnrealMCP/Source/UnrealMcpEditor/Private/Server/UnrealMcpServerManager.cpp
+  s_ccc717f86d7e3e::t_9afa77dce49af1 7
+  s_f4fba200a9b4a6::t_adcec111bb8a6d 39,78-80,173-174,612,646,654-664,676-679,684
+UnrealMCP/Source/UnrealMcpRuntime/Private/UnrealMcpProcessUtil.h
+  s_ccc717f86d7e3e::t_7d5b64e989e6dc 1-31
+UnrealMCP/Source/UnrealMcpEditor/Private/Server/UnrealMcpServerManager.h
+  s_f4fba200a9b4a6::t_4b12fb2a013216 10,64,202-206
+UnrealMCP/Source/UnrealMcpRuntime/Private/Sidecar/UnrealMcpSidecarManager.h
+  s_f4fba200a9b4a6::t_377ca2b8f95284 8,59,134-137
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "76f87f498403e4e80fea88a4a2ce4609b757b5c7",
+  "prompts": {},
+  "sessions": {
+    "s_ccc717f86d7e3e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9c8ada08-e4d5-462c-b934-8bbd1f9565d6",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_f4fba200a9b4a6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a2e2283f5ac8c63a4",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

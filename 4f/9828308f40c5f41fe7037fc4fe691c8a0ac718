@@ -1,0 +1,21 @@
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpSerializationCheckSpec.cpp
+  s_ead1ecca7180ec::t_581c1e674e20ea 79-80
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/SUnrealMcpSerializationCheckWindow.cpp
+  s_ead1ecca7180ec::t_d5179e4dec4a0a 220
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.7",
+  "base_commit_sha": "4f9828308f40c5f41fe7037fc4fe691c8a0ac718",
+  "prompts": {},
+  "sessions": {
+    "s_ead1ecca7180ec": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "15b53224-c7bf-4a0c-a438-a39890763358",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

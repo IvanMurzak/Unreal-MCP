@@ -1,0 +1,24 @@
+UnrealMCP/Source/UnrealMcpEditor/Private/Tools/UnrealMcpAssetTools.cpp
+  s_908974782fafa1::t_0a1bceaad2e2b4 479-486
+  s_908974782fafa1::t_33c23dde0ff0f0 715-719,726
+  s_908974782fafa1::t_b006ddc8b57f7f 826-829,832
+  s_908974782fafa1::t_aab22846a4e509 673-681
+  s_908974782fafa1::t_61de713cdda7e7 737-741,743-745,756
+  s_908974782fafa1::t_9491b4988431a4 992-996,998
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "ac24cce307406018ddedb3fda6076df7ea53bd44",
+  "prompts": {},
+  "sessions": {
+    "s_908974782fafa1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f1748397-e586-40bb-91a9-b89c0caebdf5",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

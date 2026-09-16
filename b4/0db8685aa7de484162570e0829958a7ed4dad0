@@ -1,0 +1,21 @@
+cli/README.md
+  s_908974782fafa1::t_224542f36fb67c 80
+cli/tests/integration.test.ts
+  s_908974782fafa1::t_707e913164b591 2,6-7,10,22,31
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "b40db8685aa7de484162570e0829958a7ed4dad0",
+  "prompts": {},
+  "sessions": {
+    "s_908974782fafa1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f1748397-e586-40bb-91a9-b89c0caebdf5",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

@@ -1,0 +1,28 @@
+.github/workflows/release.yml
+  s_d5f619ffecbba9::t_a1c2a7a15d21b0 31
+  s_d5f619ffecbba9::t_74041fd154f4e9 335-348,697-706,708-709,713
+.github/workflows/test_pull_request.yml
+  s_d5f619ffecbba9::t_0d5e8067091d40 151-165,296,330-344
+UnrealMCP/Source/UnrealMcpEditor/Private/Tools/UnrealMcpBlueprintTools.cpp
+  s_d5f619ffecbba9::t_98fc7160fada00 35,37-39
+UnrealMCP/Source/UnrealMcpEditor/Private/Tools/UnrealMcpEditorTools.cpp
+  s_d5f619ffecbba9::t_f1db832c2f6c20 21,23-25
+docs/RELEASING.md
+  s_d5f619ffecbba9::t_a0b2279004cd13 72,86-88,358-359,361-365,369-373,412-415,428-430
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "63bc329657ccd26c7b556b29fa83b8e30178d8a4",
+  "prompts": {},
+  "sessions": {
+    "s_d5f619ffecbba9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f3e5d-2986-76a2-a12f-29eb073ed677",
+        "model": "gpt-5.5"
+      },
+      "human_author": null
+    }
+  }
+}

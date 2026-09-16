@@ -1,0 +1,29 @@
+cli/src/lib/enroll.ts
+  s_11aa3fabde92a6::t_861ac34f70b111 129-140
+cli/src/lib/download-server.ts
+  s_504631e34880cb::t_bb37f177a08eb0 388
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "94dabb6431688304c13292c7c6205ed2219346fe",
+  "prompts": {},
+  "sessions": {
+    "s_11aa3fabde92a6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d806f4f2-89c5-4d4b-85c5-acf7e4e37035",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_504631e34880cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-ada2afde1252b466d",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

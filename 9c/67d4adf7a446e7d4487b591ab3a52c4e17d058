@@ -1,0 +1,21 @@
+.github/workflows/test_pull_request.yml
+  s_c34224420978bf::t_4b45b0c9d25983 14,84,97-99,105,286
+docs/RELEASING.md
+  s_c34224420978bf::t_f41f755b444810 51,361-365
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "9c67d4adf7a446e7d4487b591ab3a52c4e17d058",
+  "prompts": {},
+  "sessions": {
+    "s_c34224420978bf": {
+      "agent_id": {
+        "tool": "github-copilot-cli",
+        "id": "2ddfc6c3-5016-4d25-a1b7-48742281f2bd",
+        "model": "gpt-5.4"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

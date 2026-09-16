@@ -1,0 +1,22 @@
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpExtensionsSpec.cpp
+  s_908974782fafa1::t_0e812ab1abead9 210-214,217
+  s_908974782fafa1::t_37d062ba6c4b69 246-247
+docs/EXTENSIONS.md
+  s_908974782fafa1::t_a28998d05cc1c9 46-47
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "149e6bdd05840530282abed4f95bf207eb814f77",
+  "prompts": {},
+  "sessions": {
+    "s_908974782fafa1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f1748397-e586-40bb-91a9-b89c0caebdf5",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

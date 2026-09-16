@@ -1,0 +1,39 @@
+UnrealMCP/Source/UnrealMcpRuntime/Private/Tools/UnrealMcpScopedRead.cpp
+  s_ccc717f86d7e3e::t_e90aec39022381 209
+  s_ccc717f86d7e3e::t_5a132dfeec5474 163,168
+  s_ccc717f86d7e3e::t_5bb7af1e114d92 1-9,14-16,18,20-25,27-31,33-41,43-47,49-66,68,70-77,79-103,105-134,136-162,164-167,169-208,210-225,227-232
+  s_ccc717f86d7e3e::t_391e06109d9467 135
+  s_ccc717f86d7e3e::t_70b6d28bb6c818 226
+  s_ccc717f86d7e3e::t_70779b1f9fdfb1 10-13,17,19,26,32,42,48,67,69,78,104
+UnrealMCP/Source/UnrealMcpRuntime/Private/Tools/UnrealMcpAssetScopedRead.cpp
+  s_ccc717f86d7e3e::t_d9d8432a858393 5,12-16
+UnrealMCP/Source/UnrealMcpRuntime/Private/Tools/UnrealMcpScopedRead.h
+  s_ccc717f86d7e3e::t_90947eef33bbab 1-83
+UnrealMCP/Source/UnrealMcpRuntime/Private/Tools/UnrealMcpPropertyJson.cpp
+  s_ccc717f86d7e3e::t_48938eefc50134 6
+  s_234cdeef7a0e6d::t_c950b25397de36 76-81
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "a9eddeda7802960084e539ef622cb833c9bbe9fc",
+  "prompts": {},
+  "sessions": {
+    "s_234cdeef7a0e6d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a0618931793fbc4c8",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_ccc717f86d7e3e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9c8ada08-e4d5-462c-b934-8bbd1f9565d6",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

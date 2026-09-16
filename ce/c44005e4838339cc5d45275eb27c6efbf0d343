@@ -1,0 +1,31 @@
+bridge/src/Ipc/IpcProtocol.cs
+  s_908974782fafa1::t_c88296c5fe1bea 40-47
+UnrealMCP/Source/UnrealMcpEditor/Private/Bridge/UnrealMcpBridgeServer.cpp
+  s_908974782fafa1::t_3cc24fa2a081b6 157-165
+bridge/src/Ipc/IpcClient.cs
+  s_908974782fafa1::t_88b60117826d5c 396
+  s_908974782fafa1::t_8dedcf050b3dd9 146
+  s_908974782fafa1::t_e6865ca60b6276 411
+  s_908974782fafa1::t_3c9b2b8b3cb8a2 311-315,317
+  s_908974782fafa1::t_60aeacfa633e61 47-49
+  s_908974782fafa1::t_502a9bfc969539 348-365
+bridge/src/Sidecar/HandshakeFailureTracker.cs
+  s_908974782fafa1::t_1de96da92a18d0 52-53,58-62,71-75,85-89
+  s_908974782fafa1::t_064ff269bd7b39 33-38
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "cec44005e4838339cc5d45275eb27c6efbf0d343",
+  "prompts": {},
+  "sessions": {
+    "s_908974782fafa1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f1748397-e586-40bb-91a9-b89c0caebdf5",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

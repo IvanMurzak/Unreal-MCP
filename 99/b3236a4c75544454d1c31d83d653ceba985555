@@ -1,0 +1,33 @@
+bridge/tests/BridgeArgumentsTests.cs
+  s_908974782fafa1::t_f8275a6660f6bd 1-80
+bridge/publish.ps1
+  s_908974782fafa1::t_60e1aee84ff20d 1-50
+bridge/Unreal-MCP-Bridge.sln
+  s_908974782fafa1::t_dd8d66978f1692 1-56
+bridge/src/com.IvanMurzak.Unreal.MCP.Bridge.csproj
+  s_908974782fafa1::t_60e5635276a733 1-33
+bridge/src/BridgeArguments.cs
+  s_908974782fafa1::t_5dfd82bf350c34 1-100
+bridge/tests/com.IvanMurzak.Unreal.MCP.Bridge.Tests.csproj
+  s_908974782fafa1::t_a257bfd569d1e3 1-22
+bridge/publish.sh
+  s_908974782fafa1::t_d667e921a84f8d 1-27
+bridge/src/Program.cs
+  s_908974782fafa1::t_9133b0829feeaa 1-44
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "99b3236a4c75544454d1c31d83d653ceba985555",
+  "prompts": {},
+  "sessions": {
+    "s_908974782fafa1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f1748397-e586-40bb-91a9-b89c0caebdf5",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

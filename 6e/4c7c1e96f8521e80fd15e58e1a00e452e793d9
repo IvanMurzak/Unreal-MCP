@@ -1,0 +1,37 @@
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/SUnrealMcpMainWindow.cpp
+  s_ead1ecca7180ec::t_1fa4178d9a3754 8
+  s_ead1ecca7180ec::t_1a30c5daeabeaa 38-41
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/UnrealMcpExternalLinks.h
+  s_ead1ecca7180ec::t_f4750421c44dcb 1-48
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpDevControlSpec.cpp
+  s_ead1ecca7180ec::t_cdb2937614ae19 320-386
+  s_ead1ecca7180ec::t_1e47d454de368f 123-163
+  s_ead1ecca7180ec::t_6562d379cb8bed 398-588
+scripts/window_smoke.py
+  s_ead1ecca7180ec::t_66a8477ecc3269 1-276
+UnrealMCP/Source/UnrealMcpEditor/Private/DevControl/UnrealMcpDevControlServer.cpp
+  s_ead1ecca7180ec::t_86402583e91c71 176,179-181,183
+  s_ead1ecca7180ec::t_5f60deb0261a55 415-465
+  s_ead1ecca7180ec::t_fd50b094bb1e51 367-385
+  s_ead1ecca7180ec::t_2ef2b4d7c2333b 64-103
+  s_ead1ecca7180ec::t_38b696727a2fb3 298-316,325-333
+  s_ead1ecca7180ec::t_67b2f54431e7ce 503,508-512,514,516,518,522-523
+  s_ead1ecca7180ec::t_257e70e3aab85d 480-497
+  s_ead1ecca7180ec::t_75ddf7b7dd6532 7
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.7",
+  "base_commit_sha": "6e4c7c1e96f8521e80fd15e58e1a00e452e793d9",
+  "prompts": {},
+  "sessions": {
+    "s_ead1ecca7180ec": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "15b53224-c7bf-4a0c-a438-a39890763358",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

@@ -1,0 +1,26 @@
+cli/src/commands/install-engine.ts
+  s_7ca8a226e944ee::t_8a0f43f9862015 34-37
+cli/src/lib/engine.ts
+  s_7ca8a226e944ee::t_ddab1eeeba1d0c 205-210
+  s_7ca8a226e944ee::t_f16323ae166208 237-241,243-246
+cli/src/utils/engine-discovery.ts
+  s_7ca8a226e944ee::t_32dde461df1036 27
+  s_7ca8a226e944ee::t_819f21e092e569 166-173
+  s_7ca8a226e944ee::t_895b3f42b0e6fb 109-116
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "10bba7d6518028591972b0553c2d3838361f75af",
+  "prompts": {},
+  "sessions": {
+    "s_7ca8a226e944ee": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5c789ba2-4580-4b69-b03f-4b499d4e3b5c",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

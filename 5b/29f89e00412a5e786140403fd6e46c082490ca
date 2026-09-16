@@ -1,0 +1,76 @@
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpAgentSkillsSpec.cpp
+  s_5601a2ed5b932a::t_c0efe0706df660 1-327
+UnrealMCP/Source/UnrealMcpEditor/Private/Agents/Impl/CodexConfigurator.h
+  s_5601a2ed5b932a::t_3ec69b13f7b311 42-43
+UnrealMCP/Source/UnrealMcpEditor/Private/Agents/Impl/CursorConfigurator.h
+  s_5601a2ed5b932a::t_267ba10dba605a 28-29
+UnrealMCP/Source/UnrealMcpEditor/Private/Agents/UnrealMcpSkillFileGenerator.h
+  s_5601a2ed5b932a::t_6b00d80847cd8f 1-80
+UnrealMCP/Source/UnrealMcpEditor/Private/Agents/Impl/VisualStudioCopilotConfigurator.h
+  s_5601a2ed5b932a::t_78fdb7a6193953 29-30
+UnrealMCP/Source/UnrealMcpEditor/Private/Config/UnrealMcpConfig.h
+  s_5601a2ed5b932a::t_6957fc8c7964f6 95-103
+UnrealMCP/Source/UnrealMcpEditor/Private/Agents/Impl/VisualStudioCodeCopilotConfigurator.h
+  s_5601a2ed5b932a::t_334207dc245799 29-30
+UnrealMCP/Source/UnrealMcpEditor/Private/Config/UnrealMcpConfig.cpp
+  s_5601a2ed5b932a::t_82507f4110e085 348-354
+  s_5601a2ed5b932a::t_8f7779093a62ff 48-49
+  s_5601a2ed5b932a::t_aa7ec5cf583bad 164-168
+UnrealMCP/Source/UnrealMcpEditor/Private/Agents/AiAgentConfigurator.cpp
+  s_5601a2ed5b932a::t_f3f658496d9c51 32-50
+  s_5601a2ed5b932a::t_3b768e26db828f 9
+UnrealMCP/Source/UnrealMcpEditor/Private/Agents/Impl/RiderConfigurator.h
+  s_5601a2ed5b932a::t_66a7d7caffbaf6 30-31
+UnrealMCP/Source/UnrealMcpEditor/Private/Agents/Impl/AntigravityConfigurator.h
+  s_5601a2ed5b932a::t_31e4d85b34c92a 36-37
+UnrealMCP/Source/UnrealMcpEditor/Private/Agents/Impl/ZooCodeConfigurator.h
+  s_5601a2ed5b932a::t_4136167064bb7e 30-31
+UnrealMCP/Source/UnrealMcpEditor/Private/Agents/Impl/GitHubCopilotCliConfigurator.h
+  s_5601a2ed5b932a::t_6c7c05c4082eac 31-33
+UnrealMCP/Source/UnrealMcpEditor/Private/Agents/Impl/CustomConfigurator.h
+  s_5601a2ed5b932a::t_e53eabcb2f2b47 29-42
+UnrealMCP/Source/UnrealMcpEditor/Private/Agents/Impl/ClaudeCodeConfigurator.h
+  s_5601a2ed5b932a::t_97fed883c191d1 28-29
+UnrealMCP/Source/UnrealMcpEditor/Private/Agents/Impl/ClineConfigurator.h
+  s_5601a2ed5b932a::t_a8f1b262f9cfcf 45-46
+UnrealMCP/Source/UnrealMcpEditor/Private/Agents/Impl/GeminiConfigurator.h
+  s_5601a2ed5b932a::t_eb6d28bae1f68b 27-28
+UnrealMCP/Source/UnrealMcpEditor/Private/Agents/Impl/OpenCodeConfigurator.h
+  s_5601a2ed5b932a::t_392a2ff7ad163f 33-34
+UnrealMCP/Source/UnrealMcpEditor/Private/Agents/Impl/KiloCodeConfigurator.h
+  s_5601a2ed5b932a::t_3dac6032c345ed 30-31
+UnrealMCP/Source/UnrealMcpEditor/Private/Agents/UnrealMcpSkillFileGenerator.cpp
+  s_5601a2ed5b932a::t_b4cdaf673c16f5 1-244
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/SUnrealMcpAgentConfigurators.h
+  s_5601a2ed5b932a::t_1a0d06ad546f04 82-90
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/SUnrealMcpAgentConfigurators.cpp
+  s_5601a2ed5b932a::t_709356cd70eb74 351-369,373-468
+  s_5601a2ed5b932a::t_22eabffaae8181 321-330
+  s_5601a2ed5b932a::t_6f58baf5af189b 370-372
+  s_5601a2ed5b932a::t_276fcf566e3f6e 8-10,20
+  s_5601a2ed5b932a::t_bf03ce1206d5fd 131-138
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/UnrealMcpEditorViewModel.h
+  s_5601a2ed5b932a::t_44d80746509a6d 171-192
+UnrealMCP/Source/UnrealMcpEditor/Private/Agents/AiAgentConfigurator.h
+  s_5601a2ed5b932a::t_1f046435d8aed5 86,89
+  s_5601a2ed5b932a::t_5792a902b884e0 76-85,87-88,90-96,98
+  s_5601a2ed5b932a::t_ba00679d0e2e46 97
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/UnrealMcpEditorViewModel.cpp
+  s_5601a2ed5b932a::t_842f086e05f954 285-323
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "5b29f89e00412a5e786140403fd6e46c082490ca",
+  "prompts": {},
+  "sessions": {
+    "s_5601a2ed5b932a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4a9d921c-49f2-4338-ab19-c42684cbc42e",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
