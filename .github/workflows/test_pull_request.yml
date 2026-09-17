@@ -462,7 +462,7 @@ jobs:
         id: chain_record
         if: always()
         shell: pwsh
-        run: ${{ env.CHAIN_PY }} .github/scripts/chain_feed.py record --node unreal-mcp --job plugin --edges none --engine unreal --engine-version ${{ matrix.ue }} --job-status ${{ job.status }} --out chain-leg.json
+        run: ${{ env.CHAIN_PY }} .github/scripts/chain_feed.py record --node unreal-mcp --job plugin --edges none --engine unreal --engine-version ${{ matrix.ue }} --tier T3 --job-status ${{ job.status }} --out chain-leg.json
 
       - name: chain leg artifact
         if: always() && steps.chain_record.outputs.artifact_name != ''
@@ -818,7 +818,7 @@ jobs:
         id: chain_record
         if: always()
         shell: pwsh
-        run: ${{ env.CHAIN_PY }} .github/scripts/chain_feed.py record --node unreal-mcp --job connection-smoke --edges nuget --edges server-binary --engine unreal --engine-version ${{ matrix.ue }} --job-status ${{ job.status }} "--warn=${{ env.CHAIN_PIN_DRIFT }}" --out chain-leg.json
+        run: ${{ env.CHAIN_PY }} .github/scripts/chain_feed.py record --node unreal-mcp --job connection-smoke --edges nuget --edges server-binary --engine unreal --engine-version ${{ matrix.ue }} --tier T3 --job-status ${{ job.status }} "--warn=${{ env.CHAIN_PIN_DRIFT }}" --out chain-leg.json
 
       - name: chain leg artifact
         if: always() && steps.chain_record.outputs.artifact_name != ''
