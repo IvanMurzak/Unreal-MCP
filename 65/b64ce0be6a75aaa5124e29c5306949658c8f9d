@@ -1,0 +1,26 @@
+.github/workflows/test_pull_request.yml
+  s_c7987960245c7b::t_b7d556362be878 254-261
+  s_c7987960245c7b::t_829f7d73fc25e8 577-582
+.github/scripts/clean-staged-bridge.ps1
+  s_c7987960245c7b::t_5b4189dce5b535 1-49
+.github/workflows/release.yml
+  s_c7987960245c7b::t_70469ee0524b89 287-293
+  s_c7987960245c7b::t_6a2e385e8cbced 767-772
+  s_c7987960245c7b::t_1186494a348eba 971-978
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "65b64ce0be6a75aaa5124e29c5306949658c8f9d",
+  "prompts": {},
+  "sessions": {
+    "s_c7987960245c7b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "370aad94-9c8a-4b3c-a63d-4982a83a2756",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
