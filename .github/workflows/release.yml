@@ -284,6 +284,13 @@ jobs:
           # GITHUB_TOKEN in the worktree's .git config after checkout.
           persist-credentials: false
           clean: false
+      # `clean: false` keeps gitignored files between jobs on this runner slot, and build-plugin-zip
+      # stages the self-contained bridge into gitignored plugin folders. Remove them so this
+      # BuildPlugin never packages a stale "bundled" bridge (see the script header).
+      - name: Clean staged bridge binaries (gitignored)
+        shell: pwsh
+        run: |
+          & "$env:GITHUB_WORKSPACE\.github\scripts\clean-staged-bridge.ps1"
       # Machine-wide UE serialization (#293): one lock for every self-hosted UE job on this
       # machine, whatever the engine version, so matrix legs, PR runs and chain dispatches never
       # share UAT or the host junction. Held until the always() release step ending this job.
@@ -757,6 +764,12 @@ jobs:
           # GITHUB_TOKEN in the worktree's .git config after checkout.
           persist-credentials: false
           clean: false
+      # Start from a slot with no leftover staged bridge (a killed earlier run may have skipped
+      # the always() clean at the end of this job). See the script header.
+      - name: Clean staged bridge binaries (gitignored)
+        shell: pwsh
+        run: |
+          & "$env:GITHUB_WORKSPACE\.github\scripts\clean-staged-bridge.ps1"
       # Download the signed per-RID publish dirs produced by the two
       # build-bridge-* jobs, merging all four RIDs under ./bridge-staging/<rid>/.
       # The two artifacts were rooted differently by upload-artifact:
@@ -954,6 +967,14 @@ jobs:
             Remove-Tree (Join-Path $env:RUNNER_TEMP $name)
           }
           Write-Host "Per-run release-packaging cleanup done."
+
+      # The staged bridge is gitignored and `clean: false` would hand it to the next job on this
+      # slot, where a PR plugin job would package it as a "bundled" bridge. Never let it leak.
+      - name: Clean staged bridge binaries (never leak to the next job on this slot)
+        if: always()
+        shell: pwsh
+        run: |
+          & "$env:GITHUB_WORKSPACE\.github\scripts\clean-staged-bridge.ps1"
 
       # Last step, so the BuildPlugin stays inside the machine-wide UE lock (#293).
       - name: Release machine-wide UE lock
