@@ -98,7 +98,7 @@ try {
             if ($LASTEXITCODE -ne 0) {
                 throw "bump-version.ps1 failed."
             }
-            Write-Host "Version bump prepared locally. Commit it on a release branch, open a PR, and merge to main to let release.yml publish." -ForegroundColor Green
+            Write-Host "Version bump prepared locally. Commit it on a release branch, open a PR, merge to main, then run -Mode publish (release.yml is dispatch-only)." -ForegroundColor Green
         }
 
         'dry-run' {
@@ -121,7 +121,7 @@ try {
             if ($LASTEXITCODE -ne 0) {
                 throw "Failed to dispatch release.yml publish."
             }
-            Write-Host "Publish dispatch sent on $Ref. release.yml will still self-gate if the version on main is already tagged or not release-eligible." -ForegroundColor Green
+            Write-Host "Publish dispatch sent on $Ref. release.yml fails in check-version if the version on main is already tagged or the UE runner is not ready." -ForegroundColor Green
             if ($Wait) {
                 Watch-LatestReleaseRun
             }

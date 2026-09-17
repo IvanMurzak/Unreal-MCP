@@ -314,6 +314,6 @@ CI runs on every PR via **`test_pull_request.yml`** (workflow name `test-pull-re
   also require `head.repo.full_name == github.repository`). The hosted bridge/server/cli legs always
   provide PR signal.
 
-`release.yml` is version-gated and **publishes nothing on a normal merge** — see
+`release.yml` is dispatch-only (`workflow_dispatch`, `dry_run` input) and **publishes nothing on a merge** — see
 [`docs/RELEASING.md`](docs/RELEASING.md). Keep this file, `docs/RELEASING.md`, and the infra
 `implement-task` profile `test.md` in lockstep with the actual workflow command surface.

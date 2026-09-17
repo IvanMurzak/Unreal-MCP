@@ -50,11 +50,11 @@ Then:
 2. open a PR
 3. merge it to `main`
 
-When that merge lands, `release.yml` sees the deliberate version bump and performs the real release automatically.
+The merge publishes nothing (`release.yml` is dispatch-only).
 
-## 3. Optional escape hatch
+## 3. Dispatch the real release
 
-If the release version is already on `main` and still untagged, you can manually dispatch the real release workflow:
+Once the untagged version is on `main`, dispatch the real release workflow:
 
 ```powershell
 .\commands\release-github.ps1 -Mode publish -Wait
@@ -66,7 +66,7 @@ That dispatches:
 gh workflow run release.yml --ref main -f dry_run=false
 ```
 
-The workflow still self-gates. If the version on `main` is already tagged or not release-eligible, the run will no-op safely.
+The workflow self-gates: if the version on `main` is already tagged, or the self-hosted UE runner is not ready, the run FAILS in `check-version` before any test or publish.
 
 ## What the wrapper script does not do
 
@@ -115,7 +115,7 @@ Those actions remain CI-owned or operator-reviewed on purpose.
    - prepare version bump
    - PR
    - merge to `main`
-   - let `release.yml` publish
+   - dispatch `release.yml` (`-Mode publish`)
 
 ## Recovery
 

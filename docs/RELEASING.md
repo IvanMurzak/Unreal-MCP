@@ -19,13 +19,12 @@ file's contract — it only wraps `commands/bump-version.ps1` and `release.yml`.
 
 The following actions are **deliberately operator-gated** and are **not** performed by a normal
 merge, by CI on a feature/docs PR, or by any automated task. GitHub Releases and npm publishes are
-now CI-backed once a deliberate version bump lands on `main`, but they still require an intentional
-operator release decision. Fab submission remains fully manual:
+CI-backed, but only a manual `workflow_dispatch` of `release.yml` on `main` publishes — merging a
+version bump publishes nothing. Fab submission remains fully manual:
 
-- [ ] **GitHub Release + `v<version>` tag.** Fires only when a deliberate `VersionName` bump lands on
-      `main` (run `commands/bump-version.ps1`, commit, merge) on an untagged version — or a manual
-      `workflow_dispatch` with `dry_run=false`. `release.yml`'s `check-version` gate keeps this inert
-      otherwise.
+- [ ] **GitHub Release + `v<version>` tag.** Land a deliberate `VersionName` bump on `main` (run
+      `commands/bump-version.ps1`, commit, merge), then dispatch `release.yml` on `main` with
+      `dry_run=false`. `check-version` FAILS the run if `v<version>` already exists.
 - [ ] **`unreal-mcp-cli` publish.** The initial npm bootstrap was manual; subsequent publishes are
       CI-owned through `release.yml`'s OIDC `publish-npm` job. Do **not** hand-publish from a feature
       branch or a normal docs/code PR. The historical one-time bootstrap runbook remains below for
@@ -40,9 +39,9 @@ operator release decision. Fab submission remains fully manual:
       `Source/ThirdParty/UnrealMcpBridge/<rid>/`, the distributed `.uplugin` ships no test module, and `FilterPlugin.ini`
       is complete — see [Fab source-submission readiness](#fab-epic-marketplace-source-submission-readiness-139187) below.
 
-A normal merge to `main` publishes nothing; the version gate keeps `release.yml` inert. The safe
-rehearsal is a `dry_run=true` dispatch (below), which exercises the test + artifact jobs and
-hard-skips every tag/Release/npm-publish job.
+A merge to `main` publishes nothing: `release.yml` has no `push` trigger. The safe rehearsal is a
+`dry_run=true` dispatch (below), which exercises every test + artifact job and skips every
+npm/tag/Release/Discord job.
 
 ## Workflows at a glance
 
@@ -50,7 +49,7 @@ hard-skips every tag/Release/npm-publish job.
 | --- | --- | --- |
 | `test_pull_request.yml` | `pull_request` to `main` (+ manual) | Fans out the PR test legs: bridge build+xUnit (ubuntu + windows), cli node 20/22, and — when a runner is registered — the UE 5.8 plugin BuildPlugin + Automation leg. |
 | `test_cli.yml` | `workflow_call` (reusable) | Builds + tests `unreal-mcp-cli` on Node 20 & 22. Called by both `test_pull_request.yml` and `release.yml`. |
-| `release.yml` | `push` to `main` (+ manual `workflow_dispatch`) | Version-gated release: builds + **code-signs** the self-contained bridge per RID, validates the plugin Automation leg across UE 5.5/5.6/5.7/5.8, publishes a dedicated **source** plugin asset for CLI/Fab installs, **bundles the signed sidecar into the packaged plugin** (BuildPlugin), and (only on a real version bump) cuts the GitHub Release + tag and publishes `unreal-mcp-cli` to npm. Exposes a `dry_run` input to rehearse everything without publishing. |
+| `release.yml` | manual `workflow_dispatch` **only** | Dispatch-only release: builds + **code-signs** the self-contained bridge per RID, validates the plugin Automation leg across UE 5.5/5.6/5.7/5.8, publishes a dedicated **source** plugin asset for CLI/Fab installs, **bundles the signed sidecar into the packaged plugin** (BuildPlugin), and (on a real run) publishes `unreal-mcp-cli` to npm, cuts the GitHub Release + tag, verifies both, and announces in Discord. `dry_run=true` rehearses everything without publishing. |
 
 ### The signed self-bootstrapping sidecar bundle (release.yml artifact graph)
 
@@ -294,25 +293,26 @@ to **already exist** — cut/verify the shared release first, then bump the pin 
 
 ## The release gate (why a normal merge never publishes)
 
-`release.yml` runs on every push to `main`, but is **inert unless a deliberate
-version bump landed**. The gate, computed in `check-version`:
+`release.yml` is **dispatch-only** (`on: workflow_dispatch`, input `dry_run`,
+default `false`). No merge ever starts it; the release train (or an operator)
+dispatches it on `main`. `check-version` runs the guards, in its first job:
 
-- `should_release` = **no `v<version>` tag exists yet** AND **this push bumped the
-  `VersionName` line** in `UnrealMCP/UnrealMCP.uplugin`.
-- `dry_run` = the run is a manual `workflow_dispatch` with `dry_run=true`.
-- `run_tests` = `should_release` OR `dry_run`.
+- **Ref guard** — a real run (`dry_run=false`) on any ref other than
+  `refs/heads/main` fails.
+- **Version files** — `cli/package.json`, `cli/package-lock.json` and the bridge
+  csproj must carry the `.uplugin` `VersionName`, else the run fails (partial bump).
+- **Version guard** — if `v<version>` already exists a real run **fails**; a dry run
+  warns and continues.
+- **Runner guard** — a real run with `vars.UNREAL_RUNNER_READY != 'true'` fails
+  (otherwise the self-hosted legs, and every publish job, would skip on a green run).
 
-Outcomes:
-
-| Event | `run_tests` | Publish (tag / Release / npm) |
-| --- | --- | --- |
-| Merge that does **not** bump `VersionName` (e.g. a feature or workflow-only PR) | ❌ skip | ❌ skip — **guaranteed no-op** |
-| `workflow_dispatch` with `dry_run=true` | ✅ run (rehearsal) | ❌ hard-skipped |
-| Merge that **bumps** `VersionName` to a new untagged version | ✅ run | ✅ **real release** |
-| `workflow_dispatch` with `dry_run=false` on an untagged version | ✅ run | ✅ real release (escape hatch) |
-
-Publish jobs are gated on `should_release == 'true' && dry_run != 'true'`, so a
-dry-run can never publish even though it shares the test/artifact jobs.
+Order: tests (`bridge`, `test-cli`, `plugin`) + builds (`build-bridge-*`,
+`build-plugin-zip`) → `sign-plugin-source` → `publish-npm` (skips if the version is
+already on npm) → `publish-release` (tag + GitHub Release) → `verify-release` (npm
+version live, tag present, all 7 assets attached) → `publish_discord`. Every job from
+`publish-npm` on carries a job-level `dry_run != 'true'` guard, so a dry run shows
+them skipped. Because the tag is created only after npm, a run that fails before
+`publish-release` can simply be re-dispatched.
 
 ## Dry-run procedure (rehearse the release without publishing)
 
@@ -333,7 +333,8 @@ Expected: `bridge`, `test-cli`, `build-bridge-macos`, `build-bridge-windows`
 succeed (the bridge build + sign jobs run on every rehearsal; with no secrets
 they produce unsigned-but-green artifacts); the `plugin` / `build-plugin-zip`
 legs run only if the self-hosted runner is registered (otherwise skipped);
-`publish-release` and `publish-npm` are **skipped**. A dry-run is the right way
+`sign-plugin-source` runs (it needs `MINISIGN_SECRET_KEY`); `publish-npm`,
+`publish-release`, `verify-release` and `publish_discord` are **skipped**. A dry-run is the right way
 to confirm the bundle staging works end-to-end: when the runner is ready,
 inspect `build-plugin-zip`'s log for the per-RID "Packaged bridge for <rid>: N
 file(s)." lines, then download both the `unreal-mcp-plugin-source-zip` artifact
@@ -341,7 +342,7 @@ file(s)." lines, then download both the `unreal-mcp-plugin-source-zip` artifact
 `EngineVersion` pin) and the `unreal-mcp-plugin-packaged-zip` artifact (to
 confirm `Binaries/ThirdParty/UnrealMcpBridge/<rid>/` is populated for all four
 RIDs).
-Verify the `publish-release` and `publish-npm` jobs were skipped. A dry-run should upload artifacts
+Verify the `publish-npm`, `publish-release`, `verify-release` and `publish_discord` jobs were skipped. A dry-run should upload artifacts
 only; it must not create a new tag, GitHub Release, or npm publish for the current `VersionName`.
 
 ## First npm publish (one-time, manual)
@@ -657,28 +658,25 @@ gh run rerun <run-id> --repo IvanMurzak/Unreal-MCP
 # gh run rerun <run-id> --failed
 ```
 
-**Post-tag failure (the full re-run will NOT recover it).** If `publish-release`
-already created the `v<version>` tag + GitHub Release but the run then failed
-(asset-upload error, or the expected `publish-npm` auth failure while no Trusted
-Publisher is configured), a full re-run cannot
-fix it: `check-version` now sees `tag_exists=true` → `should_release=false` →
-every job skips, so CI can never publish that version again. Recover one of two
-ways:
+**Failure before the tag.** `publish-npm` runs before `publish-release`, so any
+failure up to and including the npm publish leaves no `v<version>` tag: re-dispatch
+(or full re-run). `publish-npm` skips a version already on npm, so this is safe.
+
+**Post-tag failure (a re-run will NOT recover it).** If `publish-release` already
+created the `v<version>` tag (e.g. an asset-upload error, or `verify-release` then
+failed), `check-version`'s version guard fails every later real run of that version.
+Delete the tag + Release, then re-dispatch:
 
 ```bash
-# Option A — delete the tag + Release, then full re-run (CI republishes cleanly):
 gh release delete v<version> --repo IvanMurzak/Unreal-MCP --cleanup-tag --yes
-gh run rerun <run-id> --repo IvanMurzak/Unreal-MCP
-
-# Option B — keep the tag/Release and publish npm by hand from a clean checkout:
-cd cli && npm ci && npm run build && npm publish --access public
+gh workflow run release.yml --repo IvanMurzak/Unreal-MCP --ref main -f dry_run=false
 ```
 
 ## Operator gate summary
 
-- A normal merge to `main` publishes **nothing** (the version gate keeps it inert).
-- A real release is a **deliberate, operator-driven version bump** (run
-  `bump-version.ps1`, commit, merge) — or a manual `workflow_dispatch` with
-  `dry_run=false` on an untagged version.
+- A merge to `main` publishes **nothing** (`release.yml` is dispatch-only).
+- A real release is a **deliberate version bump** (run `bump-version.ps1`, commit,
+  merge) followed by a `workflow_dispatch` of `release.yml` on `main` with
+  `dry_run=false`.
 - The dry-run (`dry_run=true`) is the safe rehearsal and the only way the release
   pipeline is exercised before the owner intends to publish.
