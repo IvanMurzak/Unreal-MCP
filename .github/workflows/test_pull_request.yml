@@ -251,6 +251,14 @@ jobs:
           persist-credentials: false
           clean: false
 
+      # `clean: false` keeps gitignored files between jobs on this runner slot, and release.yml's
+      # build-plugin-zip stages the self-contained bridge into gitignored plugin folders. Remove
+      # them so BuildPlugin never packages a stale "bundled" bridge (see the script header).
+      - name: Clean staged bridge binaries (gitignored)
+        shell: pwsh
+        run: |
+          & "$env:GITHUB_WORKSPACE\.github\scripts\clean-staged-bridge.ps1"
+
       # Chain leg. This runner account has no Python on PATH; UE's bundled Python 3.11 is the
       # only interpreter, and it lives under "C:\Program Files\..." — a path with spaces that
       # ${{ env.CHAIN_PY }} (substituted UNQUOTED) would split. Junction its folder to a
@@ -565,6 +573,12 @@ jobs:
         with:
           persist-credentials: false
           clean: false
+
+      # Same stale-bridge guard as the plugin job: this job BuildPlugins into the host junction.
+      - name: Clean staged bridge binaries (gitignored)
+        shell: pwsh
+        run: |
+          & "$env:GITHUB_WORKSPACE\.github\scripts\clean-staged-bridge.ps1"
 
       # Chain leg — same space-free UE Python junction as the plugin job.
       - name: chain python (UE bundled, space-free path)
