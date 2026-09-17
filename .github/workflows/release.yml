@@ -8,8 +8,9 @@
 #
 # Release pipeline (Godot-MCP release.yml skeleton, adapted for the UE three-leg
 # mono-repo — docs/ARCHITECTURE.md §9.4). Shape:
-#   check-version (read VersionName, compute gate) -> test fan-out -> artifact
-#   build -> GATED publish (tag + GitHub Release + npm).
+#   check-version (read VersionName, ref/version/runner guards) -> test fan-out
+#   -> artifact build -> sign plugin-source -> GATED publish (npm -> tag + GitHub
+#   Release) -> verify-release -> Discord.
 #
 # ── Signed self-bootstrapping sidecar BUNDLE (docs/ARCHITECTURE.md §6, #51, #139) ──
 # The self-contained `unreal-mcp-bridge` is built + code-signed per RID, then
@@ -39,45 +40,45 @@
 # never `gh run rerun --failed` (a partial rerun loses the bridge artifacts).
 #
 # ── Gating (read docs/RELEASING.md for the full contract) ──────────────────
-# `UnrealMCP/UnrealMCP.uplugin` VersionName is the SINGLE source of truth for the
-# release version (commands/bump-version.ps1 keeps the other four files in sync).
+# DISPATCH-ONLY: the ONLY trigger is a manual `workflow_dispatch` (the release
+# train dispatches it on `main`). Merging a version bump to `main` publishes
+# NOTHING. `UnrealMCP/UnrealMCP.uplugin` VersionName is the SINGLE source of truth
+# for the release version (commands/bump-version.ps1 keeps the other files in
+# sync; check-version refuses a drifted cli/package.json or bridge csproj).
 #
-#   should_release = (no `v<version>` tag exists yet) AND (this push bumped the
-#                     VersionName line)
-#   dry_run        = workflow_dispatch was invoked with dry_run=true
-#   run_tests      = should_release OR dry_run
+# check-version guards (fail in the FIRST job, before any test/build spend):
+#   * ref guard     — a real run (dry_run=false) on any ref other than
+#                     refs/heads/main FAILS.
+#   * version guard — if tag `v<version>` already exists a real run FAILS (a
+#                     dispatch never "succeeds" having done nothing); a dry run
+#                     warns and continues.
+#   * runner guard  — a real run with vars.UNREAL_RUNNER_READY != 'true' FAILS
+#                     (otherwise the self-hosted plugin legs, and with them every
+#                     publish job, would SKIP and the run would still go green).
 #
-# Outcomes:
-#   * Plain merge to main that does NOT bump VersionName  -> should_release=false,
-#     dry_run=false -> run_tests=false -> EVERY job skips. Merging a workflow-only
-#     or feature PR is therefore a guaranteed no-op (no tests, no artifacts, no
-#     publish) — this is what keeps THIS PR's own merge inert.
-#   * workflow_dispatch with dry_run=true -> run_tests=true (rehearse tests +
-#     artifact builds, uploaded for inspection) while the tag/Release/npm jobs
-#     are HARD-SKIPPED. This is the only way this pipeline is exercised during
-#     the ci-workflows task — nothing is ever published.
-#   * Merge that bumps VersionName to a new (untagged) version -> should_release
-#     =true, dry_run=false -> the real release fires (operator action).
-#   * workflow_dispatch with dry_run=false on an untagged version -> real release
-#     escape hatch (re-run a release when the bump already landed).
+# dry_run=true runs every test + build job (artifacts uploaded for inspection)
+# and publishes NOTHING: publish-npm, publish-release (tag + Release),
+# verify-release and publish_discord all carry a job-level
+# `needs.check-version.outputs.dry_run != 'true'` guard and show as skipped.
 #
-# SAFETY: publish jobs are gated on `should_release == 'true' && dry_run !=
-# 'true'`. The npm publish uses OIDC Trusted Publishing (no NPM_TOKEN secret);
-# until the owner configures a Trusted Publisher for `unreal-mcp-cli`, that step
-# fails auth and nothing is published. The self-hosted plugin artifact leg is
-# gated on UNREAL_RUNNER_READY exactly like test_pull_request.yml.
+# Publish order (so a re-dispatch after a failed publish is possible):
+#   publish-npm (idempotent: skips if unreal-mcp-cli@<version> already exists)
+#   -> publish-release (creates tag v<version> + GitHub Release + assets)
+#   -> verify-release (npm version live + tag + all 7 release assets present)
+#   -> publish_discord.
+# A failure BEFORE publish-release leaves no tag, so the same version can simply
+# be re-dispatched. The npm publish uses OIDC Trusted Publishing (no NPM_TOKEN)
+# and MUST stay in this file (the Trusted Publisher is bound to release.yml).
 
 name: release
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
     inputs:
       dry_run:
-        description: "Rehearse the release (run tests + build artifacts) WITHOUT tagging, creating a GitHub Release, or publishing to npm."
+        description: "Rehearse the release (run every test + build job) WITHOUT publishing to npm, tagging, creating a GitHub Release, or announcing in Discord."
         required: false
-        default: true
+        default: false
         type: boolean
 
 # Least-privilege default for the whole workflow; the publish jobs elevate
@@ -93,19 +94,38 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # Read the release version from the .uplugin and decide whether THIS event
-  # should cut a release, only rehearse (dry-run), or do nothing.
+  # Read the release version from the .uplugin and run the ref / version /
+  # runner guards. A real run that cannot publish FAILS here, before any spend.
   check-version:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.get_version.outputs.version }}
       tag: ${{ steps.get_version.outputs.tag }}
       tag_exists: ${{ steps.tag_exists.outputs.exists }}
-      version_changed: ${{ steps.version_changed.outputs.changed }}
-      should_release: ${{ steps.gate.outputs.should_release }}
       dry_run: ${{ steps.gate.outputs.dry_run }}
-      run_tests: ${{ steps.gate.outputs.run_tests }}
     steps:
+      # Ref guard FIRST (before checkout): a real release only ever ships `main`.
+      - name: Resolve dry_run + ref guard
+        id: gate
+        env:
+          # Typed `inputs` context (boolean, default false). Normalised to the
+          # strings "true"/"false" so every downstream `if:` compares strings.
+          DRY_RUN_INPUT: ${{ inputs.dry_run }}
+          REF: ${{ github.ref }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          dry_run=false
+          if [ "${DRY_RUN_INPUT}" = "true" ]; then
+            dry_run=true
+          fi
+          echo "dry_run=${dry_run}" >> "$GITHUB_OUTPUT"
+          if [ "${dry_run}" != "true" ] && [ "${REF}" != "refs/heads/main" ]; then
+            echo "::error::A real release (dry_run=false) may only be dispatched on refs/heads/main; this run is on '${REF}'. Re-dispatch on main, or pass -f dry_run=true to rehearse."
+            exit 1
+          fi
+          echo "Gate: dry_run=${dry_run} ref=${REF}"
+
       - name: Checkout repository
         uses: actions/checkout@v5
         with:
@@ -134,10 +154,37 @@ jobs:
           echo "tag=v${version}" >> "$GITHUB_OUTPUT"
           echo "Release version: ${version} (tag v${version})"
 
-      - name: Check if tag exists
+      # Version-file lock-step (moved from the local release pipeline's classify
+      # pre-flight): commands/bump-version.ps1 writes the same version into the
+      # .uplugin, the bridge csproj and cli/package.json(+lock). A divergence means
+      # a partial/aborted bump — refuse rather than publish mismatched artifacts.
+      - name: Verify version files agree
+        env:
+          VERSION: ${{ steps.get_version.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cli_version="$(jq -r '.version' cli/package.json)"
+          lock_version="$(jq -r '.version' cli/package-lock.json)"
+          lock_root_version="$(jq -r '.packages[""].version' cli/package-lock.json)"
+          csproj_version="$(sed -nE 's|.*<Version>([^<]+)</Version>.*|\1|p' bridge/src/com.IvanMurzak.Unreal.MCP.Bridge.csproj | head -n1)"
+          echo "uplugin=${VERSION} cli/package.json=${cli_version} cli/package-lock.json=${lock_version}/${lock_root_version} bridge csproj=${csproj_version}"
+          bad=0
+          for pair in "cli/package.json:${cli_version}" "cli/package-lock.json:${lock_version}" "cli/package-lock.json(packages[\"\"]):${lock_root_version}" "bridge csproj:${csproj_version}"; do
+            if [ "${pair##*:}" != "${VERSION}" ]; then
+              echo "::error::${pair%:*} version '${pair##*:}' != UnrealMCP.uplugin VersionName '${VERSION}' (partial bump? re-run commands/bump-version.ps1 -NewVersion ${VERSION})."
+              bad=1
+            fi
+          done
+          if [ "${bad}" -ne 0 ]; then
+            exit 1
+          fi
+
+      - name: Check if tag exists (version guard)
         id: tag_exists
         env:
           TAG: ${{ steps.get_version.outputs.tag }}
+          DRY_RUN: ${{ steps.gate.outputs.dry_run }}
         shell: bash
         run: |
           set -euo pipefail
@@ -145,112 +192,42 @@ jobs:
           # complete — no third-party action needed (avoids an unpinned tag ref).
           if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
-            echo "Tag ${TAG} already exists."
+            if [ "${DRY_RUN}" = "true" ]; then
+              echo "::warning::Tag ${TAG} already exists — a real run of this version would FAIL here. Continuing the dry run."
+            else
+              echo "::error::Tag ${TAG} already exists — version ${TAG#v} is already released. Bump UnrealMCP.uplugin VersionName (commands/bump-version.ps1) and merge before dispatching a release."
+              exit 1
+            fi
           else
             echo "exists=false" >> "$GITHUB_OUTPUT"
             echo "Tag ${TAG} does not exist yet."
           fi
 
-      # Did THIS push bump the VersionName line? On push we diff before..after;
-      # a plain feature/workflow merge that does not touch that line yields
-      # changed=false (keeping the release inert). On workflow_dispatch there is
-      # no push diff, so report changed=true and rely on tag_exists + dry_run.
-      - name: Detect VersionName bump
-        id: version_changed
+      # Runner guard (moved from the local release pipeline's post-run check): the
+      # self-hosted plugin + build-plugin-zip legs are gated on UNREAL_RUNNER_READY.
+      # If they skip, every publish job skips too and the run concludes GREEN with
+      # nothing published. A real run refuses that up front.
+      - name: Runner guard (self-hosted UE runner must be ready)
         env:
-          EVENT_NAME: ${{ github.event_name }}
-          BEFORE_SHA: ${{ github.event.before }}
-          AFTER_SHA: ${{ github.sha }}
+          UNREAL_RUNNER_READY: ${{ vars.UNREAL_RUNNER_READY }}
+          DRY_RUN: ${{ steps.gate.outputs.dry_run }}
         shell: bash
         run: |
           set -euo pipefail
-          if [ "${EVENT_NAME}" != "push" ]; then
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-            echo "Non-push event (${EVENT_NAME}): bump check skipped (relying on tag_exists + dry_run)."
-            exit 0
-          fi
-          # Fail CLOSED: without a usable 'before' SHA we cannot prove a bump
-          # happened, so treat it as unchanged rather than firing a release.
-          if [ -z "${BEFORE_SHA}" ] || [ "${BEFORE_SHA}" = "0000000000000000000000000000000000000000" ]; then
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "No usable 'before' SHA — cannot confirm a bump; treating as unchanged (fail closed)."
-            exit 0
-          fi
-          # Compare the VersionName VALUE at the before/after SHAs (not merely
-          # whether the line was touched) — a whitespace/comment-only edit to the
-          # line must not count as a release-worthy bump.
-          read_version() {
-            git show "$1:UnrealMCP/UnrealMCP.uplugin" 2>/dev/null \
-              | grep -oE '"VersionName"[[:space:]]*:[[:space:]]*"[^"]+"' \
-              | head -n1 | sed -E 's/.*"VersionName"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/'
-          }
-          # `|| true` keeps a read failure (unfetchable SHA, .uplugin absent at
-          # that SHA, or no VersionName match) from tripping `set -e` via the
-          # command substitution before the fail-closed branches below can run.
-          before_version="$(read_version "${BEFORE_SHA}" || true)"
-          after_version="$(read_version "${AFTER_SHA}" || true)"
-          # Fail CLOSED when EITHER side is unreadable. An empty after_version is
-          # the obvious "can't read the current version" case. An empty
-          # before_version is subtler but just as dangerous: read_version can fail
-          # on the BEFORE side when a force-push to main makes github.event.before
-          # unfetchable, or the .uplugin did not yet exist at that SHA. Comparing
-          # empty != non-empty would score that as a bump and fire a REAL tag +
-          # Release with no deliberate version change. The legitimate "VersionName
-          # first introduced" case is intentionally NOT auto-released here — cut it
-          # via workflow_dispatch with dry_run=false (the documented escape hatch).
-          if [ -z "${after_version}" ] || [ -z "${before_version}" ]; then
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "Could not read VersionName at before=${BEFORE_SHA} / after=${AFTER_SHA} — treating as unchanged (fail closed)."
-          elif [ "${before_version}" != "${after_version}" ]; then
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-            echo "VersionName changed: '${before_version}' -> '${after_version}'."
+          if [ "${UNREAL_RUNNER_READY}" = "true" ]; then
+            echo "UNREAL_RUNNER_READY=true — the plugin Automation matrix and build-plugin-zip will run."
+          elif [ "${DRY_RUN}" = "true" ]; then
+            echo "::warning::vars.UNREAL_RUNNER_READY is not 'true' — the plugin + build-plugin-zip legs will SKIP in this dry run, and a real run would FAIL here."
           else
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "VersionName unchanged ('${after_version}') in ${BEFORE_SHA}..${AFTER_SHA} — release is a no-op."
+            echo "::error::vars.UNREAL_RUNNER_READY is not 'true' — the self-hosted plugin legs would skip and nothing would publish. Register the runner / set the variable before a real release."
+            exit 1
           fi
-
-      - name: Compute gate
-        id: gate
-        env:
-          TAG_EXISTS: ${{ steps.tag_exists.outputs.exists }}
-          VERSION_CHANGED: ${{ steps.version_changed.outputs.changed }}
-          EVENT_NAME: ${{ github.event_name }}
-          # Use the typed `inputs` context (default-applied) rather than the raw
-          # `github.event.inputs`, which is empty when the input is omitted via
-          # API/gh and would otherwise fail OPEN (dry_run=false -> real publish).
-          DRY_RUN_INPUT: ${{ inputs.dry_run }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          dry_run=false
-          if [ "${EVENT_NAME}" = "workflow_dispatch" ]; then
-            # Fail CLOSED: a manual dispatch is a dry-run UNLESS the input is
-            # explicitly the string "false". A missing/garbled input can never
-            # fire a real publish this way.
-            dry_run=true
-            if [ "${DRY_RUN_INPUT}" = "false" ]; then
-              dry_run=false
-            fi
-          fi
-          should_release=false
-          if [ "${TAG_EXISTS}" = "false" ] && [ "${VERSION_CHANGED}" = "true" ]; then
-            should_release=true
-          fi
-          run_tests=false
-          if [ "${should_release}" = "true" ] || [ "${dry_run}" = "true" ]; then
-            run_tests=true
-          fi
-          echo "dry_run=${dry_run}" >> "$GITHUB_OUTPUT"
-          echo "should_release=${should_release}" >> "$GITHUB_OUTPUT"
-          echo "run_tests=${run_tests}" >> "$GITHUB_OUTPUT"
-          echo "Gate: tag_exists=${TAG_EXISTS} version_changed=${VERSION_CHANGED} dry_run=${dry_run} -> should_release=${should_release}, run_tests=${run_tests}"
 
   # ── TEST GATE (runs on a real release OR a dry-run rehearsal) ──────────────
 
   bridge:
     name: bridge build + xUnit (${{ matrix.os }})
     needs: [check-version]
-    if: needs.check-version.outputs.run_tests == 'true'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -272,19 +249,17 @@ jobs:
 
   test-cli:
     needs: [check-version]
-    if: needs.check-version.outputs.run_tests == 'true'
     uses: ./.github/workflows/test_cli.yml
 
   # Plugin Automation gate — self-hosted, never red-by-absence (same
   # UNREAL_RUNNER_READY gate as test_pull_request.yml). For a REAL release the
-  # runner MUST be registered (UNREAL_RUNNER_READY=true) so this job runs;
-  # otherwise it is skipped and the publish jobs below (which `need` it) are
-  # skipped too — a safe default. For a dry-run the publish jobs are skipped
-  # regardless. See docs/RELEASING.md.
+  # runner MUST be registered (UNREAL_RUNNER_READY=true) — check-version FAILS a
+  # real run otherwise, so a skipped plugin leg can never yield a green run that
+  # published nothing. A dry run only warns. See docs/RELEASING.md.
   plugin:
     name: plugin BuildPlugin + Automation (UE ${{ matrix.ue }})
     needs: [check-version]
-    if: needs.check-version.outputs.run_tests == 'true' && vars.UNREAL_RUNNER_READY == 'true'
+    if: vars.UNREAL_RUNNER_READY == 'true'
     # Matrix covers the supported UE 5.5/5.6/5.7/5.8 set; the single self-hosted
     # runner (label `unreal-5-7`, legacy) executes the legs sequentially.
     # fail-fast:false so one engine's failure never cancels the others. Downstream
@@ -523,7 +498,6 @@ jobs:
   build-bridge-macos:
     name: build bridge (macos + linux, signed)
     needs: [check-version]
-    if: needs.check-version.outputs.run_tests == 'true'
     runs-on: macos-latest
     # Job-level env so the signing/notarization guards (`if: env.X != ''`) can
     # read these. A step's own `env:` is NOT visible to that same step's `if:` —
@@ -680,7 +654,6 @@ jobs:
   build-bridge-windows:
     name: build bridge (windows, signed)
     needs: [check-version]
-    if: needs.check-version.outputs.run_tests == 'true'
     runs-on: windows-latest
     # Job-level env so the Azure Trusted Signing guard (`if: env.AZURE_CLIENT_ID
     # != ''`) can read it — a step's own `env:` is not visible to that step's own
@@ -772,7 +745,7 @@ jobs:
   build-plugin-zip:
     name: build plugin release zips (UE 5.8)
     needs: [check-version, plugin, build-bridge-macos, build-bridge-windows]
-    if: needs.check-version.outputs.run_tests == 'true' && vars.UNREAL_RUNNER_READY == 'true'
+    if: vars.UNREAL_RUNNER_READY == 'true'
     runs-on: [self-hosted, windows, unreal-5-7]
     env:
       UE_ROOT: ${{ vars.UNREAL_ENGINE_PATH || 'C:\Program Files\Epic Games\UE_5.8' }}
@@ -989,14 +962,79 @@ jobs:
         run: |
           & "$env:GITHUB_WORKSPACE\.github\scripts\ue-machine-lock.ps1" -Action Release
 
-  # ── PUBLISH (gated on a REAL release: tag absent + version bumped, NOT a
-  #    dry-run). Every job here is hard-skipped during the ci-workflows dry-run. ─
+  # ── SIGN (no external side effect — runs on dry runs too, so a missing
+  #    MINISIGN_SECRET_KEY is caught by the rehearsal and BEFORE any publish). ─
+  sign-plugin-source:
+    name: sign plugin-source zip (minisign)
+    needs: [check-version, build-plugin-zip]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download source plugin zip
+        uses: actions/download-artifact@v8
+        with:
+          name: unreal-mcp-plugin-source-zip
+          path: ./assets
+      # Sign the plugin-SOURCE zip with the pinned publisher key so the CLI can
+      # VERIFY it before install (zero-config-engine-connect D12). A same-origin
+      # SHA256 is integrity-only (a release-asset attacker swaps the zip AND its
+      # checksum); a detached minisign (Ed25519) signature over an OFFLINE key is a
+      # real supply-chain control. The CLI's `plugin-signature.ts` verifies this
+      # `.minisig` against the baked-in `MINISIGN_PUBLIC_KEY`. FAIL-CLOSED: a real
+      # release MUST be signed, so this step errors when `MINISIGN_SECRET_KEY` is
+      # absent rather than publishing a source zip the CLI would then reject.
+      # ⚠ Provisioning is a follow-up (see docs/RELEASING.md "Plugin-source signing
+      # key"): mint a PASSWORDLESS keypair (`minisign -G -W`), add the secret-key
+      # file as the repo secret `MINISIGN_SECRET_KEY`, and bake the public key into
+      # `cli/src/lib/plugin-signature.ts`. Until then this step fails the release.
+      # It runs on dry runs too (it publishes nothing), so a rehearsal proves the
+      # key is usable before a real run reaches publish-npm.
+      - name: Sign the plugin-source zip (minisign)
+        env:
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+          VERSION: ${{ needs.check-version.outputs.version }}
+        run: |
+          set -euo pipefail
+          if [ -z "${MINISIGN_SECRET_KEY:-}" ]; then
+            echo "::error::MINISIGN_SECRET_KEY is not set. The plugin-source signing key must be provisioned before a release (docs/RELEASING.md 'Plugin-source signing key'). Refusing to publish an unsigned source zip the CLI would reject (fail-closed)."
+            exit 1
+          fi
+          zip="./assets/unreal-mcp-plugin-source-${VERSION}.zip"
+          if [ ! -f "$zip" ]; then
+            echo "::error::Source zip not found at $zip"
+            exit 1
+          fi
+          sudo apt-get update
+          sudo apt-get install -y minisign
+          keyfile="$RUNNER_TEMP/minisign.key"
+          printf '%s\n' "$MINISIGN_SECRET_KEY" > "$keyfile"
+          # The key is passwordless (minted with `minisign -G -W`), so signing does
+          # not prompt; `< /dev/null` guards against any interactive read on a CI
+          # runner with no tty. `-x` names the detached signature output.
+          minisign -S -s "$keyfile" -m "$zip" -x "${zip}.minisig" \
+            -t "unreal-mcp plugin source ${VERSION} signed by AI Game Dev release CI" < /dev/null
+          rm -f "$keyfile"
+          echo "Signed $zip -> ${zip}.minisig"
+          ls -la ./assets
+      - name: Upload plugin-source signature
+        uses: actions/upload-artifact@v7
+        with:
+          name: unreal-mcp-plugin-source-minisig
+          path: ./assets/unreal-mcp-plugin-source-${{ needs.check-version.outputs.version }}.zip.minisig
+          if-no-files-found: error
+          retention-days: 7
+
+  # ── PUBLISH (real runs only: every job below carries a job-level
+  #    `needs.check-version.outputs.dry_run != 'true'` guard, so a dry run shows
+  #    them all as skipped). Order: publish-npm -> publish-release (tag +
+  #    Release) -> verify-release -> publish_discord. ──────────────────────────
 
   # Create the GitHub Release + `v<version>` tag with the bridge zips, the
   # dedicated SOURCE install asset, and the PACKAGED BuildPlugin zip attached.
   # (Server zips are released from the shared GameDev-MCP-Server repo, not here.)
   publish-release:
     name: publish GitHub Release
+    # AFTER publish-npm (contract order: publish -> tag + Release), so a failed
+    # npm publish leaves no tag and the same version can be re-dispatched.
     needs:
       [
         check-version,
@@ -1006,8 +1044,10 @@ jobs:
         build-bridge-macos,
         build-bridge-windows,
         build-plugin-zip,
+        sign-plugin-source,
+        publish-npm,
       ]
-    if: needs.check-version.outputs.should_release == 'true' && needs.check-version.outputs.dry_run != 'true' && github.ref == 'refs/heads/main'
+    if: inputs.dry_run != true && needs.check-version.outputs.dry_run != 'true' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -1044,54 +1084,27 @@ jobs:
         with:
           name: unreal-mcp-plugin-packaged-zip
           path: ./assets
+      - name: Download plugin-source signature
+        uses: actions/download-artifact@v8
+        with:
+          name: unreal-mcp-plugin-source-minisig
+          path: ./assets
       - name: List assembled release assets
         run: ls -la ./assets
-      # Sign the plugin-SOURCE zip with the pinned publisher key so the CLI can
-      # VERIFY it before install (zero-config-engine-connect D12). A same-origin
-      # SHA256 is integrity-only (a release-asset attacker swaps the zip AND its
-      # checksum); a detached minisign (Ed25519) signature over an OFFLINE key is a
-      # real supply-chain control. The CLI's `plugin-signature.ts` verifies this
-      # `.minisig` against the baked-in `MINISIGN_PUBLIC_KEY`. FAIL-CLOSED: a real
-      # release MUST be signed, so this step errors when `MINISIGN_SECRET_KEY` is
-      # absent rather than publishing a source zip the CLI would then reject.
-      # ⚠ Provisioning is a follow-up (see docs/RELEASING.md "Plugin-source signing
-      # key"): mint a PASSWORDLESS keypair (`minisign -G -W`), add the secret-key
-      # file as the repo secret `MINISIGN_SECRET_KEY`, and bake the public key into
-      # `cli/src/lib/plugin-signature.ts`. Until then this step fails the release.
-      - name: Sign the plugin-source zip (minisign)
-        env:
-          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
-          VERSION: ${{ needs.check-version.outputs.version }}
-        run: |
-          set -euo pipefail
-          if [ -z "${MINISIGN_SECRET_KEY:-}" ]; then
-            echo "::error::MINISIGN_SECRET_KEY is not set. The plugin-source signing key must be provisioned before a release (docs/RELEASING.md 'Plugin-source signing key'). Refusing to publish an unsigned source zip the CLI would reject (fail-closed)."
-            exit 1
-          fi
-          zip="./assets/unreal-mcp-plugin-source-${VERSION}.zip"
-          if [ ! -f "$zip" ]; then
-            echo "::error::Source zip not found at $zip"
-            exit 1
-          fi
-          sudo apt-get update
-          sudo apt-get install -y minisign
-          keyfile="$RUNNER_TEMP/minisign.key"
-          printf '%s\n' "$MINISIGN_SECRET_KEY" > "$keyfile"
-          # The key is passwordless (minted with `minisign -G -W`), so signing does
-          # not prompt; `< /dev/null` guards against any interactive read on a CI
-          # runner with no tty. `-x` names the detached signature output.
-          minisign -S -s "$keyfile" -m "$zip" -x "${zip}.minisig" \
-            -t "unreal-mcp plugin source ${VERSION} signed by AI Game Dev release CI" < /dev/null
-          rm -f "$keyfile"
-          echo "Signed $zip -> ${zip}.minisig"
-          ls -la ./assets
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.check-version.outputs.tag }}
+          VERSION: ${{ needs.check-version.outputs.version }}
         run: |
           set -euo pipefail
           shopt -s nullglob
+          # Fail-closed: the CLI rejects an unsigned source zip (D12); the signature
+          # is produced by sign-plugin-source.
+          if [ ! -f "./assets/unreal-mcp-plugin-source-${VERSION}.zip.minisig" ]; then
+            echo "::error::Plugin-source signature ./assets/unreal-mcp-plugin-source-${VERSION}.zip.minisig is missing — refusing to create the Release."
+            exit 1
+          fi
           # Attach every zip AND the plugin-source `.minisig` signature (D12).
           files=(./assets/*.zip ./assets/*.minisig)
           if [ "${#files[@]}" -eq 0 ]; then
@@ -1149,20 +1162,17 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
   # Announce the just-cut GitHub Release in Discord (Unity-MCP parity — see the
-  # `publish_discord` job in Unity-MCP's release.yml). Deliberately ISOLATED:
-  # nothing downstream needs it, so a webhook hiccup surfaces as a red job for
-  # visibility but can never block or fail the release or the npm publish.
+  # `publish_discord` job in Unity-MCP's release.yml). LAST: nothing needs it, so a
+  # webhook hiccup surfaces as a red job for visibility but can never block the
+  # release or the npm publish (both already done).
   #
-  # Gated `always() && needs.publish-release.result == 'success'` so it fires ONLY
-  # for a release that actually published — a dry-run or a no-bump merge skips
-  # publish-release entirely (result == 'skipped'), so nothing is announced.
+  # Fires ONLY after publish-release AND verify-release succeeded (implicit
+  # success() on `needs`), and never on a dry run (job-level guard).
   publish_discord:
     name: announce release in Discord
     runs-on: ubuntu-latest
-    needs: [publish-release]
-    if: |
-      always() &&
-      needs.publish-release.result == 'success'
+    needs: [check-version, publish-release, verify-release]
+    if: inputs.dry_run != true && needs.check-version.outputs.dry_run != 'true'
     steps:
       - name: Send Release Notes to Discord
         env:
@@ -1307,12 +1317,24 @@ jobs:
           esac
 
   # Publish unreal-mcp-cli to npm via OIDC Trusted Publishing (no NPM_TOKEN secret).
-  # Gated on the GitHub Release having been created (i.e. a real, non-dry-run
-  # release). The cli version is aligned to the release version at publish time.
+  # The terminal publish leg of the plugin release; runs BEFORE the tag + GitHub
+  # Release so a failure here is re-dispatchable. Needs the COMPLETE test + build
+  # set. Idempotent: skips the publish when unreal-mcp-cli@<version> already exists.
+  # The cli version is aligned to the release version at publish time.
   publish-npm:
     name: publish unreal-mcp-cli to npm
-    needs: [check-version, publish-release]
-    if: needs.publish-release.outputs.published == 'true'
+    needs:
+      [
+        check-version,
+        bridge,
+        test-cli,
+        plugin,
+        build-bridge-macos,
+        build-bridge-windows,
+        build-plugin-zip,
+        sign-plugin-source,
+      ]
+    if: inputs.dry_run != true && needs.check-version.outputs.dry_run != 'true' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -1323,6 +1345,30 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
+      # Idempotency: HTTP 200 with a matching name+version => already published
+      # (e.g. a re-dispatch after a later job failed) => skip the publish step.
+      # 404 => not yet published. Anything else => fail rather than guess.
+      - name: Check whether unreal-mcp-cli@<version> is already on npm
+        id: npm_exists
+        working-directory: .
+        env:
+          VERSION: ${{ needs.check-version.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          body="$(mktemp)"
+          code="$(curl -sS -o "$body" -w '%{http_code}' "https://registry.npmjs.org/unreal-mcp-cli/${VERSION}")" || { echo "::error::npm registry query failed (curl)"; exit 1; }
+          if [ "$code" = "200" ] && [ "$(jq -r '.name + "@" + .version' "$body")" = "unreal-mcp-cli@${VERSION}" ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::unreal-mcp-cli@${VERSION} is already published — the publish step will be skipped."
+          elif [ "$code" = "404" ]; then
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "unreal-mcp-cli@${VERSION} is not on npm yet."
+          else
+            echo "::error::Unexpected npm registry response (HTTP ${code}) for unreal-mcp-cli@${VERSION}."
+            head -c 1000 "$body" || true
+            exit 1
+          fi
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
@@ -1346,4 +1392,77 @@ jobs:
       # (conventions.md). The owner removes that flag in the version-bump commit
       # that cuts the first real release; this step publishes the public package.
       - name: Publish to npm with provenance
+        if: steps.npm_exists.outputs.exists != 'true'
         run: npm publish --access public --provenance
+
+  # Post-publish verification (moved from the local release pipeline's
+  # wait-release-and-npm step). The run is green only if unreal-mcp-cli@<version>
+  # is queryable on npm AND the GitHub Release for v<version> carries every asset
+  # the CLI / consumers download.
+  verify-release:
+    name: verify published release
+    needs: [check-version, publish-npm, publish-release]
+    if: inputs.dry_run != true && needs.check-version.outputs.dry_run != 'true' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Verify unreal-mcp-cli@<version> is live on npm
+        env:
+          VERSION: ${{ needs.check-version.outputs.version }}
+        shell: bash
+        run: |
+          set -uo pipefail
+          url="https://registry.npmjs.org/unreal-mcp-cli/${VERSION}"
+          body="$(mktemp)"
+          deadline=$(( $(date +%s) + 300 ))
+          while :; do
+            code="$(curl -sS -o "$body" -w '%{http_code}' "$url" || echo "curl-failed")"
+            if [ "$code" = "200" ] && [ "$(jq -r '.name + "@" + .version' "$body" 2>/dev/null)" = "unreal-mcp-cli@${VERSION}" ]; then
+              echo "unreal-mcp-cli@${VERSION} is live on npm."
+              exit 0
+            fi
+            if [ "$(date +%s)" -ge "$deadline" ]; then
+              echo "::error::unreal-mcp-cli@${VERSION} is NOT queryable on npm after 300s (last HTTP ${code})."
+              exit 1
+            fi
+            echo "npm not serving ${VERSION} yet (HTTP ${code}); retrying in 30s..."
+            sleep 30
+          done
+      - name: Verify tag + GitHub Release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.check-version.outputs.tag }}
+          VERSION: ${{ needs.check-version.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_json="$(gh release view "${TAG}" --repo "${GITHUB_REPOSITORY}" --json tagName,isDraft,assets)"
+          tag_name="$(jq -r '.tagName' <<<"$release_json")"
+          is_draft="$(jq -r '.isDraft' <<<"$release_json")"
+          if [ "$tag_name" != "$TAG" ] || [ "$is_draft" != "false" ]; then
+            echo "::error::Release for ${TAG} is wrong: tagName=${tag_name} isDraft=${is_draft}."
+            exit 1
+          fi
+          if ! git ls-remote --exit-code --tags "https://github.com/${GITHUB_REPOSITORY}.git" "refs/tags/${TAG}" >/dev/null; then
+            echo "::error::Tag ${TAG} is not present on the remote."
+            exit 1
+          fi
+          names="$(jq -r '.assets[].name' <<<"$release_json")"
+          missing=0
+          for asset in \
+            "unreal-mcp-plugin-${VERSION}.zip" \
+            "unreal-mcp-plugin-source-${VERSION}.zip" \
+            "unreal-mcp-plugin-source-${VERSION}.zip.minisig" \
+            "unreal-mcp-bridge-win-x64.zip" \
+            "unreal-mcp-bridge-osx-arm64.zip" \
+            "unreal-mcp-bridge-osx-x64.zip" \
+            "unreal-mcp-bridge-linux-x64.zip"; do
+            if grep -qxF -- "$asset" <<<"$names"; then
+              echo "present: $asset"
+            else
+              echo "::error::Release ${TAG} is missing asset: $asset"
+              missing=1
+            fi
+          done
+          exit "$missing"
