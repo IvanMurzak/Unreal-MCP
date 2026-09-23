@@ -161,7 +161,9 @@ Updating in place must always leave you running the **new** code. The risk is UE
 
 Connection settings persist to `<Project>/Saved/Config/UnrealMcp/ai-game-developer-config.json` (`Saved/` is gitignored by every UE template, so tokens never land in VCS by default).
 
-> **Pinned MCP client URL.** `unreal-mcp-cli setup-mcp <agent>` writes an MCP client config that points at the **project-pinned** cloud URL `<base>/mcp/p/<pin>`, so the agent routes to **this** project's editor even when your account drives several. Pass `--no-pin` to write the bare `<base>/mcp` URL instead. The pin is a routing path segment only — the OAuth resource stays `<base>/mcp`, and OAuth-capable clients (Claude Code, Cursor, …) still run their own device-code login against it.
+> **Pinned MCP client URL.** `unreal-mcp-cli setup-mcp <agent>` writes an MCP client config that points at the **project-pinned** cloud URL `<base>/mcp/p/<pin>`, so the agent routes to **this** project's editor even when your account drives several. Pass `--no-pin` to write the bare `<base>/mcp` URL instead. The pin is a routing path segment only — the OAuth resource stays `<base>/mcp`.
+
+> **Project key.** When this machine is signed in (`unreal-mcp-cli login`, or the editor's Sign in), a Cloud config also carries `Authorization: Bearer agd_pk_…` — a non-expiring, revocable key bound to this project's pin — for every agent, so no agent needs its own OAuth. The key is cached in `~/.ai-game-dev/project-keys.json` and reused. Pass `--oauth` for a URL-only config (the agent signs in itself), or `--regenerate-key` to mint a new key and revoke the old one (the editor's AI agent panel has a **Regenerate key** button). Not signed in, or the server cannot mint a key ⇒ the URL-only config.
 
 > That's it. Ask your AI *"Spawn three cubes in a row and a point light above them"* and watch it happen. ✨
 

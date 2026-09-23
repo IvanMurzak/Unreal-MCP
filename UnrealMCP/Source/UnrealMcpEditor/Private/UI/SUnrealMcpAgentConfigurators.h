@@ -19,8 +19,11 @@ template <typename T> class SComboBox;
  * config, configure/remove/status, the per-transport UI content) lives in the shared
  * <c>com.IvanMurzak.McpPlugin.AgentConfig</c> library and is served by the sidecar over IPC. This panel only:
  *
- *   - sends requests (`agents-list` / `agent-status` / `agent-configure` / `agent-remove` / `agent-skills-path`)
- *     over IPC via the injected SendRequest sink (wired to FUnrealMcpBridgeServer::SendAgentConfigMessage);
+ *   - sends requests (`agents-list` / `agent-status` / `agent-configure` / `agent-remove` / `agent-skills-path` /
+ *     `agent-regenerate-key`) over IPC via the injected SendRequest sink (wired to
+ *     FUnrealMcpBridgeServer::SendAgentConfigMessage);
+ *   - shows whether the Cloud agent configs carry a project key (the sidecar reports `projectKeyStatus` on every
+ *     result — it owns the key; the panel never sees it) and offers "Regenerate key" (project-keys contract §7);
  *   - parses the `agent-config-result` DTO into FUnrealMcpAgentDescription / FAiAgentRichContentSection and
  *     renders it with the existing reusable widget templates (SUnrealMcpAgentWidgets);
  *   - drives an async pending/refresh state machine: Configure/Remove enter a pending state, the sidecar performs
@@ -138,6 +141,8 @@ private:
 	void WriteBackEditableValue(const FString& NewValue);
 	/** Ask the sidecar to GENERATE the per-tool SKILL.md files for the selected agent (§7 skills section). */
 	void RequestGenerateSkills();
+	/** Ask the sidecar to mint a fresh project key, rewrite the configured agents and revoke the old key (Cloud). */
+	void RequestRegenerateKey();
 
 	// --- Rendering. ---
 
@@ -145,6 +150,8 @@ private:
 	/** The links row (6.9.0 top-level Link items as hyperlinks; legacy Download/Tutorial buttons when none). */
 	TSharedRef<SWidget> MakeLinksRow();
 	TSharedRef<SWidget> MakeStatusRow();
+	/** The project-key row (status line + hint + Regenerate key button), shown in Cloud mode only. */
+	TSharedRef<SWidget> MakeProjectKeyRow();
 	/** The skills section (generate button + resolved path + last-run status), shown only when the agent supports skills. */
 	TSharedRef<SWidget> MakeSkillsSection();
 	TSharedRef<SWidget> MakeRichContentFoldout(const FAiAgentRichContentSection& Section);
@@ -155,4 +162,11 @@ private:
 	// The last skill-generation outcome for the selected agent (shown in the skills section; reset on selection change).
 	FString LastSkillsStatus;   // e.g. "Generated 62 file(s)" / a failure reason (empty = none run yet)
 	FString LastSkillsPath;     // the resolved absolute folder the sidecar wrote under (from the result)
+
+	// The sidecar-reported project-key state (contract §7) from the latest result that carried one:
+	// "in-use" / "none" / "signed-out" / "not-applicable" (empty = not reported yet), a user-facing hint, and the
+	// outcome line of the last Regenerate key. Never the key itself.
+	FString ProjectKeyStatus;
+	FString ProjectKeyHint;
+	FString LastKeyActionStatus;
 };

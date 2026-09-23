@@ -13,6 +13,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.Threading.Tasks;
 using com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig;
 using com.IvanMurzak.Unreal.MCP.Bridge.Ipc;
 using Xunit;
@@ -166,7 +167,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         }
 
         [Fact]
-        public void Status_ConnectionSettingDrift_NeedsReconfigure_Under73xTypedPortUrl()
+        public async Task Status_ConnectionSettingDrift_NeedsReconfigure_Under73xTypedPortUrl()
         {
             // McpPlugin 7.0 (mcp-authorize) made the written HTTP config URL project-DETERMINISTIC — a project pin
             // + a derived per-project port (SHA256(projectRoot) → 20000–29999) and NO embedded token — so the raw
@@ -187,7 +188,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             // the correct status is ReconfigureNeeded -- the pre-7.0 behaviour, restored deliberately by owner ruling
             // (the user's typed port must be honoured). This test now locks THAT contract.
             // Configure once so the entry lands on disk (project-local .mcp.json under the isolated temp _projectRoot)...
-            var configure = _service.HandleConfigure(new AgentConfigureRequestMessage
+            var configure = await _service.HandleConfigureAsync(new AgentConfigureRequestMessage
             {
                 RequestId = "r2c-cfg", AgentId = "claude-code", Transport = "streamableHttp",
                 Settings = Settings(host: "http://localhost:12345/mcp"),
@@ -227,7 +228,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         }
 
         [Fact]
-        public void Configure_ThenRemove_RoundTripsAConfigFileOnDisk()
+        public async Task Configure_ThenRemove_RoundTripsAConfigFileOnDisk()
         {
             // Claude Code writes the project-local .mcp.json under the project root — a deterministic, writable path.
             var status0 = _service.HandleStatus(new AgentStatusRequestMessage
@@ -236,7 +237,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             });
             Assert.False(status0.Description!.IsConfigured);
 
-            var configure = _service.HandleConfigure(new AgentConfigureRequestMessage
+            var configure = await _service.HandleConfigureAsync(new AgentConfigureRequestMessage
             {
                 RequestId = "c1", AgentId = "claude-code", Transport = "streamableHttp", Settings = Settings(),
             });
@@ -255,13 +256,13 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         }
 
         [Fact]
-        public void Configure_DefaultPath_WritesUrlOnly_NoBearer_EvenWhenAuthRequired()
+        public async Task Configure_DefaultPath_WritesUrlOnly_NoBearer_EvenWhenAuthRequired()
         {
             // mcp-authorize PR 5 (design 06, D11): the token is NO LONGER required input on the default path. Even with
             // authRequired set AND a token supplied, the default path (useAccessToken = false → native MCP OAuth) writes
             // a credential-free HTTP config — the client authorizes natively, so no bearer lands in .mcp.json.
             const string pat = "secret-pat-should-not-be-written";
-            var configure = _service.HandleConfigure(new AgentConfigureRequestMessage
+            var configure = await _service.HandleConfigureAsync(new AgentConfigureRequestMessage
             {
                 RequestId = "cfg-default", AgentId = "claude-code", Transport = "streamableHttp",
                 Settings = Settings(authRequired: true, token: pat, useAccessToken: false),
@@ -279,13 +280,13 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         }
 
         [Fact]
-        public void Configure_AdvancedAccessToken_WritesTheLegacyBearer()
+        public async Task Configure_AdvancedAccessToken_WritesTheLegacyBearer()
         {
             // mcp-authorize PR 5 (design 06, Flow C): the "Advanced: use access token" escape hatch (useAccessToken =
             // true, a token supplied) writes the legacy Bearer shape for clients that cannot do MCP OAuth — the PAT
             // lands in the config the shared library's HttpCredentialMode.AccessToken path produces.
             const string pat = "advanced-pat-abc123";
-            var configure = _service.HandleConfigure(new AgentConfigureRequestMessage
+            var configure = await _service.HandleConfigureAsync(new AgentConfigureRequestMessage
             {
                 RequestId = "cfg-advanced", AgentId = "claude-code", Transport = "streamableHttp",
                 Settings = Settings(authRequired: true, token: pat, useAccessToken: true),
@@ -322,9 +323,9 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         }
 
         [Fact]
-        public void Configure_CustomAgent_HasNoWritableFile_AndReportsClearly()
+        public async Task Configure_CustomAgent_HasNoWritableFile_AndReportsClearly()
         {
-            var result = _service.HandleConfigure(new AgentConfigureRequestMessage
+            var result = await _service.HandleConfigureAsync(new AgentConfigureRequestMessage
             {
                 RequestId = "c2", AgentId = "other-custom", Transport = "streamableHttp", Settings = Settings(),
             });

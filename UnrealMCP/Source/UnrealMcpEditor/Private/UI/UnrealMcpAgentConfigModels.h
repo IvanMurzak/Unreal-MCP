@@ -30,9 +30,9 @@ class FJsonObject;
  *  - Port        — the deterministic IPC port for this project (§1.1).
  *  - HttpUrl     — the resolved MCP-client URL the HTTP form points at: <effective host>/mcp.
  *  - bAuthRequired / Token — whether a bearer is sent and its real value (the REAL bearer — masking is the UI's job).
- *  - bUseAccessToken — mcp-authorize PR 5 (design 06, Flow C): whether the "Advanced: use access token" escape
- *                  hatch is active (Custom mode + Required auth + a non-empty token). The default path is native
- *                  MCP OAuth (URL-only, no bearer); ONLY this flag makes the sidecar write the legacy Bearer shape.
+ *  - bUseAccessToken — mcp-authorize PR 5 (design 06, Flow C): whether the plugin forwards its own secret
+ *                  (Custom mode + Token auth + a non-empty token). Custom Oauth/None are URL-only. In Cloud the
+ *                  sidecar writes the Bearer shape itself from the project key it gets-or-mints (contract §7).
  */
 struct FAiAgentConnectionInfo
 {

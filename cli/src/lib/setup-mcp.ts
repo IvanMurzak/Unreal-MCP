@@ -15,7 +15,15 @@ import { platform } from 'os';
 // routing segment and `derivePinV2` is the shared v2 ProjectIdentity pin
 // (`\`→`/`-normalized), so the CLI writes the SAME pinned URL the C# Editor
 // Configure and the sibling CLIs write for a given project.
-import { pinUrl, derivePinV2 } from '@baizor/gamedev-cli-core';
+import {
+  pinUrl,
+  derivePinV2,
+  isCloudUrl,
+  toAuthServerRoot,
+  createProjectKeyResolver,
+  unrealAdapter,
+  type ProjectKeyResult,
+} from '@baizor/gamedev-cli-core';
 import { resolveConnection, appendMcp } from '../utils/config.js';
 import { asError } from '../utils/error.js';
 import { generatePortFromDirectory } from '../utils/port.js';
@@ -33,7 +41,7 @@ import {
   SERVER_PATH_ENV_VAR,
 } from './download-server.js';
 import { emitProgress } from './progress.js';
-import type { McpTransport, SetupMcpOptions, SetupMcpResult } from './types.js';
+import type { McpTransport, SetupMcpCredential, SetupMcpOptions, SetupMcpResult } from './types.js';
 
 // Re-exported for compatibility: the §6 install-path resolver lives in
 // `download-server.ts` (single owner of the server-binary layout).
@@ -95,6 +103,8 @@ export async function setupMcp(opts: SetupMcpOptions): Promise<SetupMcpResult> {
     // Build the agent's server-entry props for the chosen transport.
     let props: Record<string, unknown>;
     let removeKeys: string[];
+    let credential: SetupMcpCredential = 'none';
+    let key: Extract<ProjectKeyResult, { kind: 'ok' }> | undefined;
 
     if (transport === 'stdio') {
       // stdio needs a LOCAL server binary. Resolution: the UNREAL_MCP_SERVER_PATH
@@ -140,20 +150,68 @@ export async function setupMcp(opts: SetupMcpOptions): Promise<SetupMcpResult> {
       // M8: the pin is a routing path segment, not part of the OAuth resource;
       // the canonical resource stays `<base>/mcp`.
       const canonicalUrl = appendMcp(conn.url);
-      const httpUrl = opts.noPin ? canonicalUrl : pinUrl(canonicalUrl, derivePinV2(projectDir));
+      const pin = derivePinV2(projectDir);
+      const httpUrl = opts.noPin ? canonicalUrl : pinUrl(canonicalUrl, pin);
       const token = conn.token ?? '';
-      // D11 / Flow A: OAuth-capable clients get a CREDENTIAL-FREE, URL-only config
-      // so they run their own native OAuth; a static Bearer header is emitted only
-      // for a non-OAuth client (`supportsOAuth:false`) or an EXPLICIT PAT opt-in
-      // (the caller passed `--token`) — Flow C. An ambient token (from the project
-      // `.env` / process env) never forces a header. See `shouldWriteAuthHeader`.
       const explicitPatOptIn = (opts.token ?? '').trim().length > 0;
-      const writeAuthHeader = shouldWriteAuthHeader({
+      const cloud = isCloudUrl(canonicalUrl);
+      if (opts.regenerateKey && (opts.oauth || explicitPatOptIn || !cloud || opts.dryRun)) {
+        throw new Error(
+          '--regenerate-key applies only to a Cloud http config without --oauth / --token / --dry-run ' +
+            '(project keys are not used for stdio or a local server).',
+        );
+      }
+
+      // Project keys (contract §7): a Cloud http config carries `Authorization: Bearer agd_pk_…` for
+      // EVERY client — a non-expiring key bound to this project's pin, reused from the machine cache or
+      // minted with the machine login. `--oauth` opts out; an explicit `--token` wins; no login / a
+      // refused mint (e.g. 404 while the server feature is off) falls back to the URL-only config.
+      if (cloud && !explicitPatOptIn && !opts.oauth) {
+        if (opts.dryRun) {
+          warnings.push('Dry run: the project key is not resolved, so the snippet is URL-only; a real run writes the project key when this machine is signed in.');
+        } else {
+          const resolver = opts.projectKeyResolver ?? createProjectKeyResolver(unrealAdapter);
+          const outcome = await resolver({
+            issuer: toAuthServerRoot(canonicalUrl),
+            pin,
+            engine: 'unreal',
+            label: projectDir,
+            machineName: opts.machineName,
+            regenerate: opts.regenerateKey === true,
+          });
+          if (outcome.kind === 'ok') {
+            key = outcome;
+            warnings.push(...outcome.warnings);
+          } else if (opts.regenerateKey) {
+            throw new Error(`Could not regenerate the project key: ${outcome.reason}`);
+          } else {
+            warnings.push(
+              `No project key written (${outcome.reason}) — the config is URL-only and the agent signs in with its own OAuth. ` +
+                'Sign in on this machine (`unreal-mcp-cli login`) and run setup-mcp again to write a project key.',
+            );
+          }
+        }
+      }
+
+      // D11 / Flow A: without a project key, OAuth-capable clients get a CREDENTIAL-FREE,
+      // URL-only config so they run their own native OAuth; a static Bearer header is emitted
+      // only for a non-OAuth client (`supportsOAuth:false`) or an EXPLICIT PAT opt-in (the
+      // caller passed `--token`) — Flow C. An ambient token (from the project `.env` / process
+      // env) never forces a header. See `shouldWriteAuthHeader`.
+      let secret = token;
+      let writeAuthHeader = shouldWriteAuthHeader({
         token,
         supportsOAuth: agent.supportsOAuth,
         explicitPatOptIn,
       });
-      props = agent.getHttpProps(httpUrl, token, writeAuthHeader);
+      if (key && !explicitPatOptIn) {
+        secret = key.key;
+        writeAuthHeader = true;
+        credential = 'project-key';
+      } else if (writeAuthHeader) {
+        credential = 'token';
+      }
+      props = agent.getHttpProps(httpUrl, secret, writeAuthHeader);
       removeKeys = agent.httpRemoveKeys;
     }
 
@@ -167,6 +225,17 @@ export async function setupMcp(opts: SetupMcpOptions): Promise<SetupMcpResult> {
       agent.configFormat === 'toml'
         ? writeTomlAgentConfig(configPath, agent.bodyPath, MCP_SERVER_NAME, props, removeKeys, opts.dryRun)
         : writeJsonAgentConfig(configPath, agent.bodyPath, MCP_SERVER_NAME, props, removeKeys, opts.dryRun);
+
+    // Regenerate (§7): the new key is cached and the config rewritten — only now revoke the old
+    // key. A revoke failure is reported, never fatal.
+    if (key?.revokePrevious && !opts.dryRun) {
+      try {
+        const revokeWarning = await key.revokePrevious();
+        if (revokeWarning) warnings.push(revokeWarning);
+      } catch (err) {
+        warnings.push(`Revoking the previous project key failed (${asError(err).message}).`);
+      }
+    }
 
     if (opts.dryRun) {
       emitProgress(opts.onProgress, { phase: 'done', message: 'Dry run — config not written.' });
@@ -190,6 +259,9 @@ export async function setupMcp(opts: SetupMcpOptions): Promise<SetupMcpResult> {
       configPath,
       transport,
       snippet,
+      credential,
+      projectKeyId: key?.keyId,
+      projectKeySource: key?.source,
       warnings,
       nextSteps,
     };

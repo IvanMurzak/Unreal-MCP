@@ -10,7 +10,9 @@ export const setupMcpCommand = new Command('setup-mcp')
   .option('-p, --path <dir>', 'Unreal project directory (defaults to cwd)')
   .option('--transport <t>', 'Transport: http | stdio (default http)')
   .option('--url <url>', 'Explicit MCP server URL override')
-  .option('--token <token>', 'Bearer token override')
+  .option('--token <token>', 'Bearer token override (wins over the Cloud project key)')
+  .option('--oauth', 'Cloud: write a URL-only config (the agent signs in with its own OAuth) instead of the project key')
+  .option('--regenerate-key', 'Cloud: mint a new project key for this project, write it, and revoke the previous one')
   .option('--no-pin', 'Write an unpinned <base>/mcp URL instead of the default pinned <base>/mcp/p/<pin>')
   .option('--dry-run', 'Print the snippet instead of writing it')
   .option('--list', 'List all supported agent ids and their config paths')
@@ -40,6 +42,8 @@ export const setupMcpCommand = new Command('setup-mcp')
       // Commander maps `--no-pin` to `pin === false`; the default (pinned) is `pin !== false`.
       noPin: opts.pin === false,
       dryRun: opts.dryRun,
+      oauth: opts.oauth === true,
+      regenerateKey: opts.regenerateKey === true,
     });
     ui.printWarnings(result.warnings);
     if (result.kind === 'failure') {
@@ -51,6 +55,13 @@ export const setupMcpCommand = new Command('setup-mcp')
       ui.info(result.snippet);
     } else {
       ui.success(`Wrote ${result.agentId} MCP config (${result.transport}) to ${result.configPath}`);
+      if (result.credential === 'project-key') {
+        ui.info(
+          opts.regenerateKey
+            ? '→ Wrote a new project key for this project (the previous key is revoked unless a warning above says otherwise).'
+            : `→ Uses this project's key (${result.projectKeySource === 'minted' ? 'newly created' : 'reused'}).`,
+        );
+      }
     }
     for (const step of result.nextSteps) ui.info(`→ ${step}`);
   });

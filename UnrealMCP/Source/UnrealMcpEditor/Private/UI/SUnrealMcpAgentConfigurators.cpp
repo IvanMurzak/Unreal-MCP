@@ -220,6 +220,18 @@ void SUnrealMcpAgentConfigurators::RequestGenerateSkills()
 	SendTracked(Request, TEXT("agent-generate-skills"), EPhase::Pending);
 }
 
+void SUnrealMcpAgentConfigurators::RequestRegenerateKey()
+{
+	// Project keys (contract §7): the sidecar owns the key — it mints a new one, rewrites every agent configured for
+	// this project, then revokes the old key. The selected agent id rides along so its refreshed description returns.
+	TSharedPtr<FJsonObject> Request = MakeShared<FJsonObject>();
+	Request->SetStringField(TEXT("agentId"), SelectedAgentId);
+	Request->SetStringField(TEXT("transport"), EffectiveTransportString());
+	Request->SetObjectField(TEXT("settings"), BuildSettings());
+	LastKeyActionStatus.Reset();
+	SendTracked(Request, TEXT("agent-regenerate-key"), EPhase::Pending);
+}
+
 void SUnrealMcpAgentConfigurators::WriteBackEditableValue(const FString& NewValue)
 {
 	if (SelectedAgentId.IsEmpty())
@@ -274,6 +286,25 @@ void SUnrealMcpAgentConfigurators::OnAgentConfigResult(const TSharedPtr<FJsonObj
 	PendingRequestType.Reset();
 	LastError = bOk ? FString() : Error;
 
+	// The sidecar reports the project-key state on every result that carried settings (absent from an older sidecar
+	// — then the row simply stays hidden).
+	FString KeyStatus;
+	if (Result->TryGetStringField(TEXT("projectKeyStatus"), KeyStatus))
+	{
+		ProjectKeyStatus = KeyStatus;
+		ProjectKeyHint.Reset();
+		Result->TryGetStringField(TEXT("projectKeyHint"), ProjectKeyHint);
+	}
+
+	if (Op == TEXT("agent-regenerate-key"))
+	{
+		const TArray<TSharedPtr<FJsonValue>>* Rewritten = nullptr;
+		const int32 RewrittenCount = Result->TryGetArrayField(TEXT("rewrittenAgents"), Rewritten) && Rewritten ? Rewritten->Num() : 0;
+		LastKeyActionStatus = bOk
+			? FString::Printf(TEXT("Created a new project key and updated %d agent config(s)."), RewrittenCount)
+			: FString();
+	}
+
 	if (Op == TEXT("agents-list"))
 	{
 		const TArray<TSharedPtr<FJsonValue>>* Agents = nullptr;
@@ -309,7 +340,7 @@ void SUnrealMcpAgentConfigurators::OnAgentConfigResult(const TSharedPtr<FJsonObj
 		return;
 	}
 
-	if (Op == TEXT("agent-status") || Op == TEXT("agent-configure") || Op == TEXT("agent-remove"))
+	if (Op == TEXT("agent-status") || Op == TEXT("agent-configure") || Op == TEXT("agent-remove") || Op == TEXT("agent-regenerate-key"))
 	{
 		const TSharedPtr<FJsonObject>* DescObj = nullptr;
 		if (Result->TryGetObjectField(TEXT("description"), DescObj) && DescObj)
@@ -418,6 +449,10 @@ void SUnrealMcpAgentConfigurators::RebuildAgentPanel()
 	// no detectable on-disk config (sidecar reports IsConfigured=false, configure returns a clear non-success), so
 	// only its rich-content snippet + EditableField drive it — still show the row, it self-disables sensibly.
 	AgentPanelContainer->AddSlot().AutoHeight().Padding(0, 6, 0, 0)[ MakeStatusRow() ];
+
+	// Project-key row (Cloud only): whether the agent configs carry a project key + Regenerate key.
+	if (!ProjectKeyStatus.IsEmpty() && ProjectKeyStatus != TEXT("not-applicable"))
+		AgentPanelContainer->AddSlot().AutoHeight().Padding(0, 6, 0, 0)[ MakeProjectKeyRow() ];
 
 	// A pending/working line while a configure/remove is in flight.
 	if (Phase == EPhase::Pending)
@@ -533,6 +568,7 @@ TSharedRef<SWidget> SUnrealMcpAgentConfigurators::MakeLinksRow()
 		[
 			SNew(SButton)
 			.Text(LOCTEXT("DownloadAgent", "Download / Docs"))
+			.ToolTipText(FText::Format(LOCTEXT("DownloadAgentHint", "Open the {0} download / docs page in your browser."), FText::FromString(SelectedDescription.AgentName)))
 			.OnClicked(UnrealMcpStyleWidgets::OpenUrlClicked(DownloadUrl))
 		];
 	}
@@ -542,6 +578,7 @@ TSharedRef<SWidget> SUnrealMcpAgentConfigurators::MakeLinksRow()
 		[
 			SNew(SButton)
 			.Text(LOCTEXT("TutorialAgent", "Tutorial"))
+			.ToolTipText(FText::Format(LOCTEXT("TutorialAgentHint", "Open the {0} setup tutorial in your browser."), FText::FromString(SelectedDescription.AgentName)))
 			.OnClicked(UnrealMcpStyleWidgets::OpenUrlClicked(TutorialUrl))
 		];
 	}
@@ -574,6 +611,7 @@ TSharedRef<SWidget> SUnrealMcpAgentConfigurators::MakeStatusRow()
 			SNew(SButton)
 			.IsEnabled(!bBusy)
 			.Text(bReconfigure ? LOCTEXT("Reconfigure", "Reconfigure") : LOCTEXT("Configure", "Configure"))
+			.ToolTipText(FText::Format(LOCTEXT("ConfigureHint", "Write the Unreal MCP entry into {0}'s config file."), FText::FromString(SelectedDescription.AgentName)))
 			.OnClicked_Lambda([this]() { RequestConfigure(); return FReply::Handled(); })
 		]
 		+ SHorizontalBox::Slot().AutoWidth().Padding(6, 0, 0, 0).VAlign(VAlign_Center)
@@ -582,8 +620,54 @@ TSharedRef<SWidget> SUnrealMcpAgentConfigurators::MakeStatusRow()
 			.IsEnabled(!bBusy)
 			.Visibility(bConfigured ? EVisibility::Visible : EVisibility::Collapsed)
 			.Text(LOCTEXT("RemoveAgent", "Remove"))
+			.ToolTipText(FText::Format(LOCTEXT("RemoveAgentHint", "Remove the Unreal MCP entry from {0}'s config file."), FText::FromString(SelectedDescription.AgentName)))
 			.OnClicked_Lambda([this]() { RequestRemove(); return FReply::Handled(); })
 		];
+}
+
+TSharedRef<SWidget> SUnrealMcpAgentConfigurators::MakeProjectKeyRow()
+{
+	const bool bBusy = Phase == EPhase::Pending || Phase == EPhase::Loading;
+	const bool bInUse = ProjectKeyStatus == TEXT("in-use");
+	const bool bSignedOut = ProjectKeyStatus == TEXT("signed-out");
+
+	FText StatusText;
+	if (bInUse)
+		StatusText = LOCTEXT("ProjectKeyInUse", "Project key: in use");
+	else if (bSignedOut)
+		StatusText = LOCTEXT("ProjectKeySignedOut", "Project key: not signed in (agents use their own OAuth)");
+	else
+		StatusText = LOCTEXT("ProjectKeyNone", "Project key: none (agents use their own OAuth)");
+
+	TSharedRef<SVerticalBox> Box = SNew(SVerticalBox)
+		+ SVerticalBox::Slot().AutoHeight()
+		[
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
+			[
+				SNew(STextBlock)
+				.Text(StatusText)
+				.ColorAndOpacity(FSlateColor(bInUse ? UnrealMcpAgentWidgets::ConfiguredColor() : UnrealMcpAgentWidgets::PendingColor()))
+			]
+			+ SHorizontalBox::Slot().AutoWidth().Padding(6, 0, 0, 0).VAlign(VAlign_Center)
+			[
+				SNew(SButton)
+				// Minting needs this machine's sign-in; while signed out the button stays visible but disabled.
+				.IsEnabled(!bBusy && !bSignedOut)
+				.Text(LOCTEXT("RegenerateKey", "Regenerate key"))
+				.ToolTipText(bSignedOut
+					? LOCTEXT("RegenerateKeySignedOutHint", "Sign in to ai-game.dev to create a project key for this project.")
+					: LOCTEXT("RegenerateKeyHint", "Create a new project key for this project, rewrite the configured AI agents' configs with it, and revoke the old key."))
+				.OnClicked_Lambda([this]() { RequestRegenerateKey(); return FReply::Handled(); })
+			]
+		];
+
+	if (!ProjectKeyHint.IsEmpty())
+		Box->AddSlot().AutoHeight().Padding(0, 2, 0, 0)[ UnrealMcpAgentWidgets::TemplateLabelDescription(FText::FromString(ProjectKeyHint)) ];
+	if (!LastKeyActionStatus.IsEmpty())
+		Box->AddSlot().AutoHeight().Padding(0, 2, 0, 0)[ UnrealMcpAgentWidgets::TemplateLabelDescription(FText::FromString(LastKeyActionStatus)) ];
+
+	return Box;
 }
 
 TSharedRef<SWidget> SUnrealMcpAgentConfigurators::MakeItemWidget(const FAiAgentRichContentItem& Item)

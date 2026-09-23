@@ -143,6 +143,9 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         // §7 AI-agent configurator service, backed by the shared com.IvanMurzak.McpPlugin.AgentConfig library
         // (the single cross-engine implementation). Serves the plugin's thin Slate panel over IPC.
         private readonly AgentConfigService _agentConfig;
+        // Project keys (contract §6/§7): one provider per issuer, so its single-flight gate spans concurrent requests.
+        private readonly object _projectKeyProviderLock = new();
+        private McpAgentConfig.ProjectKeyProvider? _projectKeyProvider;
 
         // §7 Cloud device-code flow (replaces PR #8's auth stubs). The authenticator is injectable so the xUnit
         // suite drives the flow against a fake HTTP handler; _authCts cancels an in-progress flow (auth-cancel).
@@ -247,7 +250,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             _config.CredentialProvider = ResolveBearerAsync;
             // Default to the real IPC send; SetStatusEmitterForTest swaps it in the xUnit suite.
             _statusEmitter = status => _ipc.SendToPluginAsync(status, CancellationToken.None);
-            _agentConfig = new AgentConfigService(loggerProvider?.CreateLogger(nameof(AgentConfigService)));
+            _agentConfig = new AgentConfigService(loggerProvider?.CreateLogger(nameof(AgentConfigService)), ResolveProjectKeyProvider);
 
             // A single owned HttpClient covers the default device authenticator AND the default token
             // refresher / exchange / revocation clients; the injected-* paths (xUnit) supply their own — either
@@ -404,6 +407,53 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         {
             var jwt = await provider.GetAccessTokenAsync().ConfigureAwait(false);
             return !string.IsNullOrEmpty(jwt) ? jwt : BearerToken;
+        }
+
+        /// <summary>
+        /// The project-key provider the agent-config service mints/reuses Cloud project keys with (project-keys
+        /// contract §6/§7), or <c>null</c> when this machine is not signed in (Cloud configs then stay URL-only). It
+        /// uses the sidecar's own proactively-refreshed plugin-family token, keys the cache by the ORIGIN of the
+        /// credential's server target (a local-stack login never mints against production), and caches the provider
+        /// per issuer so its single-flight gate spans concurrent Configure requests.
+        /// </summary>
+        private McpAgentConfig.ProjectKeyProvider? ResolveProjectKeyProvider()
+        {
+            var credentials = _credentialProvider;
+            var store = _credentialStore;
+            if (credentials == null || store == null || !credentials.IsSignedIn)
+                return null;
+
+            var issuer = ProjectKeyIssuer(credentials.ServerTarget);
+            lock (_projectKeyProviderLock)
+            {
+                if (_projectKeyProvider == null || _projectKeyProvider.Issuer != issuer)
+                {
+                    _projectKeyProvider = McpAgentConfig.ProjectKeyProvider.FromPluginCredentialProvider(
+                        credentials,
+                        issuer,
+                        new McpAgentConfig.ProjectKeyStore(store.BaseDirectory),
+                        _authHttpClient,
+                        _loggerProvider?.CreateLogger(nameof(McpAgentConfig.ProjectKeyProvider)));
+                }
+                return _projectKeyProvider;
+            }
+        }
+
+        /// <summary>The issuer origin for a credential's server target; the hosted default when absent/invalid.</summary>
+        internal static string ProjectKeyIssuer(string? serverTarget)
+        {
+            if (!string.IsNullOrWhiteSpace(serverTarget))
+            {
+                try
+                {
+                    return McpAgentConfig.ProjectKeyStore.NormalizeIssuerOrigin(serverTarget!);
+                }
+                catch (ArgumentException)
+                {
+                    // fall through to the hosted default
+                }
+            }
+            return McpAgentConfig.ProjectKeyProvider.DefaultIssuer;
         }
 
         /// <summary>
@@ -846,7 +896,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
                 AgentConfigResultMessage result;
                 try
                 {
-                    result = ServeAgentConfigRequest(type, node);
+                    result = await ServeAgentConfigRequestAsync(type, node).ConfigureAwait(false);
                 }
                 catch (Exception ex)
                 {
@@ -874,7 +924,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         /// Deserialize + dispatch one agent-config request to the matching <see cref="AgentConfigService"/> handler.
         /// Internal so the xUnit suite asserts the routing (and the produced DTO) without the IPC send.
         /// </summary>
-        internal AgentConfigResultMessage ServeAgentConfigRequest(string type, JsonObject node)
+        internal async Task<AgentConfigResultMessage> ServeAgentConfigRequestAsync(string type, JsonObject node)
         {
             switch (type)
             {
@@ -883,7 +933,10 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
                 case IpcProtocol.Type.AgentStatus:
                     return _agentConfig.HandleStatus(node.Deserialize<AgentStatusRequestMessage>(IpcProtocol.JsonOptions)!);
                 case IpcProtocol.Type.AgentConfigure:
-                    return _agentConfig.HandleConfigure(node.Deserialize<AgentConfigureRequestMessage>(IpcProtocol.JsonOptions)!);
+                    // Async: a Cloud configure may get-or-mint the project key (network + the cross-process cache lock).
+                    return await _agentConfig.HandleConfigureAsync(node.Deserialize<AgentConfigureRequestMessage>(IpcProtocol.JsonOptions)!).ConfigureAwait(false);
+                case IpcProtocol.Type.AgentRegenerateKey:
+                    return await _agentConfig.HandleRegenerateKeyAsync(node.Deserialize<AgentRegenerateKeyRequestMessage>(IpcProtocol.JsonOptions)!).ConfigureAwait(false);
                 case IpcProtocol.Type.AgentRemove:
                     return _agentConfig.HandleRemove(node.Deserialize<AgentRemoveRequestMessage>(IpcProtocol.JsonOptions)!);
                 case IpcProtocol.Type.AgentSkillsPath:

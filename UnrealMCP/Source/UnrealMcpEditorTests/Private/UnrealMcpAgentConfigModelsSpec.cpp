@@ -225,6 +225,8 @@ void FUnrealMcpAgentConfigModelsSpec::Define()
 			TestTrue("agent-skills-path", FUnrealMcpBridgeServer::IsValidAgentConfigVerb(TEXT("agent-skills-path")));
 			// The verb that was missing from the allow-list — the Generate button sends exactly this string.
 			TestTrue("agent-generate-skills", FUnrealMcpBridgeServer::IsValidAgentConfigVerb(TEXT("agent-generate-skills")));
+			// Project keys (contract §7): the "Regenerate key" button sends exactly this string.
+			TestTrue("agent-regenerate-key", FUnrealMcpBridgeServer::IsValidAgentConfigVerb(TEXT("agent-regenerate-key")));
 		});
 
 		It("rejects an unknown verb", [this]()

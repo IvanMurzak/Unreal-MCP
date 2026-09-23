@@ -12,6 +12,8 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using com.IvanMurzak.McpPlugin.AgentConfig;
 using com.IvanMurzak.McpPlugin.Common;
 using com.IvanMurzak.Unreal.MCP.Bridge.Ipc;
@@ -42,16 +44,33 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
     /// C++→sidecar payload. <see cref="SkillFileGenerator"/> does the writing; this service resolves the path.
     /// (Unrelated to the SignalR host's <c>GenerateSkillFiles = false</c>, which governs the .NET host's own
     /// auto-generation of skills for ITS static tools — the sidecar has none.)
+    ///
+    /// <para><b>Project keys</b> (project-keys contract §7): in Cloud mode an HTTP Configure writes
+    /// <c>Authorization: Bearer agd_pk_…</c> for EVERY agent — a non-expiring key bound to this project's pin,
+    /// obtained from <see cref="ProjectKeyProvider.GetOrMintAsync"/> (reused from the cache or minted with the
+    /// sidecar's machine credential). Not signed in, or the mint fails (e.g. the server's 404 while the feature is
+    /// off) ⇒ the URL-only OAuth config, never an error. Status/list requests attach only the CACHED key (no
+    /// network), so the status they report compares against what Configure writes. <see cref="HandleRegenerateKeyAsync"/>
+    /// mints a fresh key and rewrites every agent configured for this project. The get-or-mint may block on the
+    /// cross-process cache lock, which is why it only runs on the async (off-reader-thread) handlers.</para>
     /// </summary>
     public sealed class AgentConfigService
     {
+        /// <summary>The engine id recorded on a minted project key (contract §2).</summary>
+        public const string ProjectKeyEngine = "unreal";
+
         private readonly ILogger? _logger;
         private readonly SkillFileGenerator _skillGenerator;
+        private readonly Func<ProjectKeyProvider?>? _projectKeys;
 
-        public AgentConfigService(ILogger? logger = null)
+        /// <param name="logger">Optional diagnostics sink (never receives a secret).</param>
+        /// <param name="projectKeys">Returns the project-key provider for the signed-in machine account, or
+        /// <c>null</c> when this machine is not signed in (Cloud configs then stay URL-only).</param>
+        public AgentConfigService(ILogger? logger = null, Func<ProjectKeyProvider?>? projectKeys = null)
         {
             _logger = logger;
             _skillGenerator = new SkillFileGenerator(logger);
+            _projectKeys = projectKeys;
         }
 
         // --- Request handlers (one per plugin → sidecar request type). Each returns the terminal result the
@@ -65,8 +84,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
             if (request.Settings == null)
                 return Fail(result, "No settings provided for agents-list.");
 
-            var settings = MapSettings(request.Settings);
             var transport = ParseTransport(request.Transport);
+            var settings = AttachCachedProjectKey(MapSettings(request.Settings), transport, result);
 
             result.Agents = AiAgentConfiguratorRegistry.All
                 .Select(c => Describe(c, settings, transport))
@@ -86,15 +105,18 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
             if (configurator == null)
                 return Fail(result, $"Unknown agent id '{request.AgentId}'.");
 
-            var settings = MapSettings(request.Settings);
             var transport = ParseTransport(request.Transport);
+            var settings = AttachCachedProjectKey(MapSettings(request.Settings), transport, result);
             result.Description = Describe(configurator, settings, transport);
             result.Ok = true;
             return result;
         }
 
-        /// <summary>Write/merge the MCP entry into the agent's config file for the requested transport.</summary>
-        public AgentConfigResultMessage HandleConfigure(AgentConfigureRequestMessage request)
+        /// <summary>
+        /// Write/merge the MCP entry into the agent's config file for the requested transport. In Cloud mode the
+        /// HTTP entry carries the project key (get-or-mint; URL-only when none can be obtained).
+        /// </summary>
+        public async Task<AgentConfigResultMessage> HandleConfigureAsync(AgentConfigureRequestMessage request, CancellationToken cancellationToken = default)
         {
             var result = NewResult(request.RequestId, IpcProtocol.Type.AgentConfigure);
             if (request.Settings == null)
@@ -108,16 +130,20 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
             // configure so the (no-op for Custom) write + the refreshed description reflect the edited value.
             ApplyEditableValue(configurator, request.EditableValue);
 
-            var settings = MapSettings(request.Settings);
             var transport = ParseTransport(request.Transport);
+            // The Custom agent has no file to write, so it never needs a freshly minted key — the cached one (if any)
+            // is enough to render its snippet with the header present.
+            var settings = configurator is global::com.IvanMurzak.McpPlugin.AgentConfig.Impl.CustomConfigurator
+                ? AttachCachedProjectKey(MapSettings(request.Settings), transport, result)
+                : await AttachProjectKeyAsync(MapSettings(request.Settings), transport, regenerate: false, result, cancellationToken).ConfigureAwait(false);
             try
             {
-                // mcp-authorize PR 5 (design 06): the DEFAULT path is native MCP OAuth — the written HTTP config is
-                // credential-free (HttpCredentialMode.Oauth). Only the explicit "Advanced: use access token" opt-in
-                // (with a token) writes the legacy Bearer shape (Flow C) for the clients that cannot do MCP OAuth.
+                // Cloud + project key ⇒ the Bearer shape for every agent (contract §7). Otherwise the default is native
+                // MCP OAuth (credential-free, HttpCredentialMode.Oauth); only the explicit "Advanced: use access token"
+                // opt-in (with a token) writes the legacy PAT Bearer shape (Flow C).
                 var config = transport == McpTransport.stdio
                     ? configurator.GetStdioConfig(settings, _logger)
-                    : configurator.GetHttpConfig(settings, _logger, ResolveCredentialMode(request.Settings));
+                    : configurator.GetHttpConfig(settings, _logger, ResolveCredentialMode(settings, request.Settings));
                 result.Ok = config.Configure();
                 if (!result.Ok)
                     result.Error = $"Configure returned false for '{request.AgentId}' ({transport}).";
@@ -135,6 +161,65 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
 
             // Return the refreshed description so the panel updates without a follow-up status round-trip.
             result.Description = Describe(configurator, settings, transport);
+            return result;
+        }
+
+        /// <summary>
+        /// "Regenerate key" (project-keys contract §7, Cloud only): mint a fresh project key for this project's pin
+        /// (the provider overwrites the cache entry and revokes the key it replaced), then rewrite every agent whose
+        /// HTTP config is set up for this project so none keeps the old key. Returns the selected agent's refreshed
+        /// description plus the rewritten agent ids. Not signed in / mint failure ⇒ <c>ok == false</c> and nothing
+        /// changes (the old key stays cached and valid).
+        /// </summary>
+        public async Task<AgentConfigResultMessage> HandleRegenerateKeyAsync(AgentRegenerateKeyRequestMessage request, CancellationToken cancellationToken = default)
+        {
+            var result = NewResult(request.RequestId, IpcProtocol.Type.AgentRegenerateKey);
+            if (request.Settings == null)
+                return Fail(result, "No settings provided for agent-regenerate-key.");
+
+            var baseSettings = MapSettings(request.Settings);
+            if (baseSettings.ConnectionMode != McpConnectionMode.Cloud)
+                return Fail(result, "Project keys are used only in Cloud mode.");
+
+            // The agents configured with the CURRENT key (or URL-only) for this project — computed before the
+            // regenerate replaces the cached key, since "configured" compares against the key a config carries.
+            var withOldKey = AttachCachedProjectKey(baseSettings, McpTransport.streamableHttp, result: null);
+            var targets = AiAgentConfiguratorRegistry.All
+                .Where(c => IsHttpConfiguredForProject(c, withOldKey) || IsHttpConfiguredForProject(c, baseSettings))
+                .ToList();
+
+            var settings = await AttachProjectKeyAsync(baseSettings, McpTransport.streamableHttp, regenerate: true, result, cancellationToken).ConfigureAwait(false);
+            if (!settings.HasProjectKey)
+            {
+                return Fail(result, result.ProjectKeyStatus == ProjectKeyStatus.SignedOut
+                    ? "Sign in to ai-game.dev first — a project key is minted with this machine's sign-in."
+                    : "Could not create a new project key; the current key is unchanged.");
+            }
+
+            var rewritten = new List<string>();
+            foreach (var configurator in targets)
+            {
+                try
+                {
+                    if (configurator.GetHttpConfig(settings, _logger, McpHttpCredentialMode.AccessToken).Configure())
+                        rewritten.Add(configurator.AgentId);
+                    else
+                        _logger?.LogWarning("Rewriting '{Agent}' with the regenerated project key failed.", configurator.AgentId);
+                }
+                catch (Exception ex)
+                {
+                    _logger?.LogWarning("Rewriting '{Agent}' with the regenerated project key failed: {Message}", configurator.AgentId, ex.Message);
+                }
+            }
+            result.RewrittenAgents = rewritten;
+            result.Ok = true;
+
+            var selected = AiAgentConfiguratorRegistry.GetByAgentId(request.AgentId);
+            if (selected != null)
+            {
+                var transport = ParseTransport(request.Transport);
+                result.Description = Describe(selected, transport == McpTransport.stdio ? baseSettings : settings, transport);
+            }
             return result;
         }
 
@@ -320,13 +405,114 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
             dto != null && dto.UseAccessToken && !string.IsNullOrEmpty(dto.Token);
 
         /// <summary>
-        /// Resolve the HTTP credential mode for a request (mcp-authorize PR 5, design 06). The default is native MCP
-        /// OAuth (<see cref="McpHttpCredentialMode.Oauth"/>, URL-only — no embedded bearer); only the "Advanced: use
-        /// access token" opt-in (see <see cref="UsesAccessToken"/>) selects <see cref="McpHttpCredentialMode.AccessToken"/>
+        /// Resolve the HTTP credential mode for a request. A Cloud snapshot carrying a project key writes the Bearer
+        /// shape for every agent (project-keys contract §7). Otherwise the default is native MCP OAuth
+        /// (<see cref="McpHttpCredentialMode.Oauth"/>, URL-only — no embedded bearer); only the "Advanced: use access
+        /// token" opt-in (see <see cref="UsesAccessToken"/>) selects <see cref="McpHttpCredentialMode.AccessToken"/>
         /// so the legacy Bearer shape is written for clients that cannot do MCP OAuth.
         /// </summary>
-        private static McpHttpCredentialMode ResolveCredentialMode(AgentSettingsDto? dto) =>
-            UsesAccessToken(dto) ? McpHttpCredentialMode.AccessToken : McpHttpCredentialMode.Oauth;
+        private static McpHttpCredentialMode ResolveCredentialMode(AgentConfiguratorSettings settings, AgentSettingsDto? dto) =>
+            settings.HasProjectKey || UsesAccessToken(dto) ? McpHttpCredentialMode.AccessToken : McpHttpCredentialMode.Oauth;
+
+        // --- Project keys (contract §7) ----------------------------------------------------------------
+
+        /// <summary>Project keys apply only to a Cloud HTTP config (stdio and the local server are unchanged).</summary>
+        private static bool UsesProjectKey(AgentConfiguratorSettings settings, McpTransport transport) =>
+            settings.ConnectionMode == McpConnectionMode.Cloud && transport != McpTransport.stdio;
+
+        /// <summary>
+        /// Attach the CACHED project key (no network, no mint) so a status/list report compares against what Configure
+        /// writes. Records the key status on <paramref name="result"/> when one is given.
+        /// </summary>
+        private AgentConfiguratorSettings AttachCachedProjectKey(
+            AgentConfiguratorSettings settings, McpTransport transport, AgentConfigResultMessage? result)
+        {
+            if (!UsesProjectKey(settings, transport))
+                return SetKeyStatus(result, settings, ProjectKeyStatus.NotApplicable);
+            var provider = _projectKeys?.Invoke();
+            if (provider == null)
+                return SetKeyStatus(result, settings, ProjectKeyStatus.SignedOut);
+
+            string? key = null;
+            try
+            {
+                key = provider.Store.Get(provider.Issuer, settings.ProjectPin)?.Key;
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogDebug("Reading the project-key cache failed: {Message}", ex.Message);
+            }
+            return string.IsNullOrEmpty(key)
+                ? SetKeyStatus(result, settings, ProjectKeyStatus.None, "No project key yet — Configure creates one for this project.")
+                : SetKeyStatus(result, settings.WithProjectKey(key), ProjectKeyStatus.InUse);
+        }
+
+        /// <summary>
+        /// Get-or-mint (or, with <paramref name="regenerate"/>, force-mint) the project key and attach it. Never throws
+        /// for a key failure: no login / mint refused (e.g. 404 while the feature is off) / unreachable ⇒ the settings
+        /// come back without a key and the config stays URL-only.
+        /// </summary>
+        private async Task<AgentConfiguratorSettings> AttachProjectKeyAsync(
+            AgentConfiguratorSettings settings, McpTransport transport, bool regenerate,
+            AgentConfigResultMessage result, CancellationToken cancellationToken)
+        {
+            if (!UsesProjectKey(settings, transport))
+                return SetKeyStatus(result, settings, ProjectKeyStatus.NotApplicable);
+            var provider = _projectKeys?.Invoke();
+            if (provider == null)
+                return SetKeyStatus(result, settings, ProjectKeyStatus.SignedOut);
+
+            string? key = null;
+            try
+            {
+                var pin = settings.ProjectPin;
+                key = regenerate
+                    ? await provider.RegenerateAsync(pin, ProjectKeyEngine, Environment.MachineName, settings.ProjectRootPath, cancellationToken).ConfigureAwait(false)
+                    : await provider.GetOrMintAsync(pin, ProjectKeyEngine, Environment.MachineName, settings.ProjectRootPath, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (!(ex is OperationCanceledException))
+            {
+                _logger?.LogWarning("Project key {Action} failed: {Message}", regenerate ? "regenerate" : "get-or-mint", ex.Message);
+            }
+            return string.IsNullOrEmpty(key)
+                ? SetKeyStatus(result, settings, ProjectKeyStatus.None,
+                    "No project key could be obtained — the config is URL-only and the agent signs in with its own OAuth.")
+                : SetKeyStatus(result, settings.WithProjectKey(key), ProjectKeyStatus.InUse);
+        }
+
+        private static AgentConfiguratorSettings SetKeyStatus(
+            AgentConfigResultMessage? result, AgentConfiguratorSettings settings, string status, string? hint = null)
+        {
+            if (result != null)
+            {
+                result.ProjectKeyStatus = status;
+                result.ProjectKeyHint = hint ?? status switch
+                {
+                    ProjectKeyStatus.InUse => "Project key in use — Cloud agent configs carry a key bound to this project.",
+                    ProjectKeyStatus.SignedOut => "Not signed in — Cloud agent configs are URL-only and each agent signs in with its own OAuth. Sign in to use a project key.",
+                    _ => null,
+                };
+            }
+            return settings;
+        }
+
+        /// <summary>True when the agent's HTTP entry is present AND matches <paramref name="settings"/> (this project's
+        /// pinned URL + the key it carries) — i.e. it is an HTTP config for THIS project, not a stdio one or another
+        /// project's entry in a user-global file.</summary>
+        private bool IsHttpConfiguredForProject(AiAgentConfigurator configurator, AgentConfiguratorSettings settings)
+        {
+            if (configurator is global::com.IvanMurzak.McpPlugin.AgentConfig.Impl.CustomConfigurator)
+                return false;
+            try
+            {
+                return configurator.GetStatus(settings, McpTransport.streamableHttp, _logger) == ConfiguratorStatus.Configured;
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogDebug("Status of '{Agent}' could not be read: {Message}", configurator.AgentId, ex.Message);
+                return false;
+            }
+        }
 
         private static McpTransport ParseTransport(string? transport) =>
             string.Equals(transport, "stdio", StringComparison.OrdinalIgnoreCase)

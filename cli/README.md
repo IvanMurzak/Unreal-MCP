@@ -96,7 +96,7 @@ unreal-mcp-cli status
 | `remove-plugin [path]` | Remove the installed plugin |
 | `install-extension <id> [path]` | Install a third-party Unreal-MCP **extension** plugin into `<project>/Plugins/<name>`, enable it + its gating engine plugins (e.g. `Niagara`) in the `.uproject`, and (re)compile (on next editor open, or now with `--build`). `--source <dir>` installs from a local copy (offline/CI); `--version <x.y.z>` overrides the catalog pin. Idempotent. See [Extensions](#extensions) |
 | `configure` | Write `UNREAL_MCP_*` into `<project>/.env` and gitignore `.env` (§8) |
-| `setup-mcp <agent>` | Write an MCP client config snippet (claude-code, cursor, vscode-copilot). Over the default `http` transport it points the agent at the **project-pinned** cloud URL `<base>/mcp/p/<pin>` (so the agent routes to *this* project's editor); pass `--no-pin` for the bare `<base>/mcp` URL. OAuth-capable clients get a credential-free, URL-only config and run their own device-code login. With `--transport stdio` it instead downloads the pinned shared [`gamedev-mcp-server`](https://github.com/IvanMurzak/GameDev-MCP-Server) release into `<project>/Intermediate/UnrealMCP/server/<rid>/` (skipped when `UNREAL_MCP_SERVER_PATH` points at a local build) |
+| `setup-mcp <agent>` | Write an MCP client config snippet (claude-code, cursor, vscode-copilot). Over the default `http` transport it points the agent at the **project-pinned** cloud URL `<base>/mcp/p/<pin>` (so the agent routes to *this* project's editor); pass `--no-pin` for the bare `<base>/mcp` URL. When this machine is signed in, a Cloud config carries `Authorization: Bearer agd_pk_…` (this project's key, reused or minted) for every agent; `--oauth` writes a URL-only config instead (the agent runs its own login), `--regenerate-key` mints a new key and revokes the old one, and an explicit `--token` wins over both. With `--transport stdio` it instead downloads the pinned shared [`gamedev-mcp-server`](https://github.com/IvanMurzak/GameDev-MCP-Server) release into `<project>/Intermediate/UnrealMCP/server/<rid>/` (skipped when `UNREAL_MCP_SERVER_PATH` points at a local build) |
 | `login` | OAuth device-code auth against ai-game.dev. Signs in once per machine into the shared machine credential store (`~/.ai-game-dev/credentials.json`): the default mints the account (agent) credential and derives the tool credential from it. `--tools-only` mints a tool credential only (CI/automation runners — the desktop App cannot pick it up); `--yes` confirms switching the machine to a different account; `--path <dir>` writes a project-local `.env` instead |
 | `status` | Report project + plugin + connection + live reachability |
 | `wait-for-ready` | Block until the project's MCP server responds to a ping |
@@ -226,6 +226,8 @@ agent can drive the Unreal Editor. Core support today: **Claude Code**, **Cursor
 ```bash
 unreal-mcp-cli setup-mcp claude-code ./MyGame       # pinned <base>/mcp/p/<pin> URL (routes to this project)
 unreal-mcp-cli setup-mcp claude-code ./MyGame --no-pin   # bare, unpinned <base>/mcp URL instead
+unreal-mcp-cli setup-mcp claude-code -p ./MyGame --oauth           # URL-only; the agent signs in itself
+unreal-mcp-cli setup-mcp claude-code -p ./MyGame --regenerate-key  # new project key; the old one is revoked
 unreal-mcp-cli setup-mcp cursor ./MyGame --transport stdio
 ```
 

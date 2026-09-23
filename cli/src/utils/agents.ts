@@ -357,12 +357,14 @@ export const agentRegistry: readonly AgentDefinition[] = [
       command: serverPath,
       args: stdioArgs(port, auth, token),
     }),
-    getHttpProps: (url, _token, _authRequired) => ({
+    // Antigravity reads static headers from `headers` (project keys, contract §7).
+    getHttpProps: (url, token, authRequired) => ({
       disabled: false,
       serverUrl: url,
+      ...(authHeaders(token, authRequired) ? { headers: authHeaders(token, authRequired) } : {}),
     }),
     stdioRemoveKeys: ['url', 'serverUrl', 'type'],
-    httpRemoveKeys: ['command', 'args', 'url', 'type'],
+    httpRemoveKeys: ['command', 'args', 'url', 'type', 'headers'],
   },
 
   // ── Cline ───────────────────────────────────────────────────
@@ -448,11 +450,15 @@ export const agentRegistry: readonly AgentDefinition[] = [
       args: [`port=${port}`, `client-transport=stdio`, `authorization=${auth}`],
       tool_timeout_sec: 300,
     }),
-    getHttpProps: (url, _token, _authRequired) => ({
+    // Codex takes static http headers from the `http_headers` inline table (project keys, contract §7) —
+    // never the legacy `bearer_token_env_var` indirection. The TOML writer replaces the whole section, so a
+    // URL-only rewrite drops any previous header.
+    getHttpProps: (url, token, authRequired) => ({
       enabled: true,
       url,
       tool_timeout_sec: 300,
       startup_timeout_sec: 30,
+      ...(authHeaders(token, authRequired) ? { http_headers: authHeaders(token, authRequired) } : {}),
     }),
     stdioRemoveKeys: ['url', 'type', 'startup_timeout_sec'],
     httpRemoveKeys: ['command', 'args', 'type'],
@@ -706,8 +712,15 @@ function tomlValue(v: unknown): string {
   if (Array.isArray(v)) {
     return `[${v.map(tomlValue).join(', ')}]`;
   }
-  // null/undefined/object have no valid TOML scalar form here; emit a quoted
-  // string so we never produce an invalid bare token (defensive fallback).
+  if (v !== null && typeof v === 'object') {
+    // An inline table (Codex `http_headers = { Authorization = "Bearer …" }`).
+    const entries = Object.entries(v as Record<string, unknown>).map(
+      ([k, val]) => `${/^[A-Za-z0-9_-]+$/.test(k) ? k : tomlValue(k)} = ${tomlValue(val)}`,
+    );
+    return `{ ${entries.join(', ')} }`;
+  }
+  // null/undefined have no valid TOML scalar form here; emit a quoted string so
+  // we never produce an invalid bare token (defensive fallback).
   return `"${String(v).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 }
 

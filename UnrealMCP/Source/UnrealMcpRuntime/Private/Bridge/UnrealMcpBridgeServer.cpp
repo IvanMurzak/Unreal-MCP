@@ -51,6 +51,7 @@ namespace
 	const FString TypeAgentRemove = TEXT("agent-remove");
 	const FString TypeAgentSkillsPath = TEXT("agent-skills-path");
 	const FString TypeAgentGenerateSkills = TEXT("agent-generate-skills");
+	const FString TypeAgentRegenerateKey = TEXT("agent-regenerate-key");
 	const FString TypeAgentConfigResult = TEXT("agent-config-result");
 	// mcp-authorize PR 4 IPC verbs (design 04/06): the plugin → sidecar `project-config` request and the
 	// sidecar → plugin `project-config-result`. The sidecar resolves THIS project's {pin, derived local-server
@@ -1080,7 +1081,8 @@ bool FUnrealMcpBridgeServer::IsValidAgentConfigVerb(const FString& Type)
 	// silently breaks that UI action (issue #101: a missing `agent-generate-skills` made the Generate button
 	// flip the panel to Disconnected because the send was refused).
 	return Type == TypeAgentsList || Type == TypeAgentStatus || Type == TypeAgentConfigure ||
-		Type == TypeAgentRemove || Type == TypeAgentSkillsPath || Type == TypeAgentGenerateSkills;
+		Type == TypeAgentRemove || Type == TypeAgentSkillsPath || Type == TypeAgentGenerateSkills ||
+		Type == TypeAgentRegenerateKey;
 }
 
 bool FUnrealMcpBridgeServer::SendAgentConfigMessage(const TSharedPtr<FJsonObject>& Message)

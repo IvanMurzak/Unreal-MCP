@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { setupMcp, listAgentIds, shouldWriteAuthHeader } from '../src/lib/setup-mcp.js';
 import { agentRegistry, getAgentById, getAgentIds, MCP_SERVER_NAME } from '../src/utils/agents.js';
-import { derivePinV2 } from '@baizor/gamedev-cli-core';
+import { derivePinV2, type ProjectKeyRequest, type ProjectKeyResolver } from '@baizor/gamedev-cli-core';
 import { makeTempDir, rmTempDir } from './helpers.js';
 
 const dirs: string[] = [];
@@ -15,6 +15,9 @@ function tmp(): string {
   dirs.push(d);
   return d;
 }
+
+/** A project-key resolver for a machine with no login — keeps Cloud tests off the real machine store. */
+const noLogin: ProjectKeyResolver = async () => ({ kind: 'no-login', reason: 'not signed in' });
 
 // The full pinned roster (parity with unity/godot). Order-independent.
 const EXPECTED_IDS = [
@@ -159,7 +162,7 @@ describe('setupMcp — http transport', () => {
 
   it('appends `/mcp` exactly once (no double-append on a URL that already ends in /mcp)', async () => {
     const dir = tmp();
-    const r = await setupMcp({ agentId: 'claude-code', projectDir: dir, transport: 'http', url: 'http://h/mcp' });
+    const r = await setupMcp({ agentId: 'claude-code', projectDir: dir, transport: 'http', url: 'http://h/mcp', projectKeyResolver: noLogin });
     expect(r.kind).toBe('success');
     if (r.kind !== 'success') return;
     const written = JSON.parse(fs.readFileSync(r.configPath, 'utf-8'));
@@ -209,7 +212,7 @@ describe('setupMcp — http transport', () => {
   });
 });
 
-describe('setupMcp — D11 credential-free OAuth config (http)', () => {
+describe('setupMcp — D11 credential-free OAuth config (http, no machine login)', () => {
   // The flagship fix: OAuth-capable interactive clients must get a URL-only
   // `{type,url}` config with NO Authorization header, so the client performs its
   // own native RFC 9728 OAuth. A static Bearer header both 401s against the hosted
@@ -217,7 +220,7 @@ describe('setupMcp — D11 credential-free OAuth config (http)', () => {
   for (const agentId of ['claude-code', 'cursor', 'vscode-copilot']) {
     it(`writes URL-only ${agentId} config (no Authorization header) with no token`, async () => {
       const dir = tmp();
-      const r = await setupMcp({ agentId, projectDir: dir, transport: 'http', url: 'https://ai-game.dev' });
+      const r = await setupMcp({ agentId, projectDir: dir, transport: 'http', url: 'https://ai-game.dev', projectKeyResolver: noLogin });
       expect(r.kind).toBe('success');
       if (r.kind !== 'success') return;
       const written = JSON.parse(fs.readFileSync(r.configPath, 'utf-8'));
@@ -231,7 +234,7 @@ describe('setupMcp — D11 credential-free OAuth config (http)', () => {
 
   it('writes URL-only codex (TOML) config with no Authorization', async () => {
     const dir = tmp();
-    const r = await setupMcp({ agentId: 'codex', projectDir: dir, transport: 'http', url: 'https://ai-game.dev' });
+    const r = await setupMcp({ agentId: 'codex', projectDir: dir, transport: 'http', url: 'https://ai-game.dev', projectKeyResolver: noLogin });
     expect(r.kind).toBe('success');
     if (r.kind !== 'success') return;
     const content = fs.readFileSync(r.configPath, 'utf-8');
@@ -248,7 +251,7 @@ describe('setupMcp — D11 credential-free OAuth config (http)', () => {
       'UNREAL_MCP_HOST=https://ai-game.dev\nUNREAL_MCP_TOKEN=ambient-pat\n',
       'utf-8',
     );
-    const r = await setupMcp({ agentId: 'claude-code', projectDir: dir, transport: 'http' });
+    const r = await setupMcp({ agentId: 'claude-code', projectDir: dir, transport: 'http', projectKeyResolver: noLogin });
     expect(r.kind).toBe('success');
     if (r.kind !== 'success') return;
     const entry = JSON.parse(fs.readFileSync(r.configPath, 'utf-8')).mcpServers['unreal-mcp'];
@@ -266,12 +269,130 @@ describe('setupMcp — D11 credential-free OAuth config (http)', () => {
       }),
       'utf-8',
     );
-    const r = await setupMcp({ agentId: 'claude-code', projectDir: dir, transport: 'http', url: 'https://ai-game.dev' });
+    const r = await setupMcp({ agentId: 'claude-code', projectDir: dir, transport: 'http', url: 'https://ai-game.dev', projectKeyResolver: noLogin });
     expect(r.kind).toBe('success');
     if (r.kind !== 'success') return;
     const entry = JSON.parse(fs.readFileSync(r.configPath, 'utf-8')).mcpServers['unreal-mcp'];
     expect(entry.url).toBe(`https://ai-game.dev/mcp/p/${derivePinV2(dir)}`);
     expect(entry.headers).toBeUndefined();
+  });
+});
+
+describe('setupMcp — Cloud project key (contract §7)', () => {
+  const KEY = 'agd_pk_test_key';
+  function keyResolver(overrides: Partial<{ revokePrevious: () => Promise<string | undefined> }> = {}) {
+    const calls: ProjectKeyRequest[] = [];
+    const resolver: ProjectKeyResolver = async (request) => {
+      calls.push(request);
+      return { kind: 'ok', key: KEY, keyId: 'key-1', pin: request.pin, source: 'minted', warnings: [], ...overrides };
+    };
+    return { resolver, calls };
+  }
+
+  for (const agentId of ['claude-code', 'cursor', 'vscode-copilot', 'antigravity']) {
+    it(`writes Authorization: Bearer <project key> for ${agentId}`, async () => {
+      const dir = tmp();
+      const { resolver, calls } = keyResolver();
+      const r = await setupMcp({ agentId, projectDir: dir, transport: 'http', url: 'https://ai-game.dev', projectKeyResolver: resolver });
+      expect(r.kind).toBe('success');
+      if (r.kind !== 'success') return;
+      expect(r.credential).toBe('project-key');
+      expect(r.projectKeyId).toBe('key-1');
+      const entry = JSON.parse(fs.readFileSync(r.configPath, 'utf-8'))[getAgentById(agentId)!.bodyPath]['unreal-mcp'];
+      expect(entry.headers).toEqual({ Authorization: `Bearer ${KEY}` });
+      expect(entry.url ?? entry.serverUrl).toBe(`https://ai-game.dev/mcp/p/${derivePinV2(dir)}`);
+      // The key is bound to THIS project's pin, for the Unreal engine, against the AS root.
+      expect(calls).toEqual([
+        expect.objectContaining({ issuer: 'https://ai-game.dev', pin: derivePinV2(dir), engine: 'unreal', label: dir, regenerate: false }),
+      ]);
+    });
+  }
+
+  it('writes Codex http_headers (no bearer_token_env_var)', async () => {
+    const dir = tmp();
+    const r = await setupMcp({ agentId: 'codex', projectDir: dir, transport: 'http', url: 'https://ai-game.dev', projectKeyResolver: keyResolver().resolver });
+    expect(r.kind).toBe('success');
+    if (r.kind !== 'success') return;
+    const content = fs.readFileSync(r.configPath, 'utf-8');
+    expect(content).toContain(`http_headers = { Authorization = "Bearer ${KEY}" }`);
+    expect(content).not.toContain('bearer_token_env_var');
+  });
+
+  it('--oauth writes URL-only and strips a previous project-key header, without resolving a key', async () => {
+    const dir = tmp();
+    const { resolver, calls } = keyResolver();
+    await setupMcp({ agentId: 'claude-code', projectDir: dir, transport: 'http', url: 'https://ai-game.dev', projectKeyResolver: resolver });
+    const r = await setupMcp({ agentId: 'claude-code', projectDir: dir, transport: 'http', url: 'https://ai-game.dev', oauth: true, projectKeyResolver: resolver });
+    expect(r.kind).toBe('success');
+    if (r.kind !== 'success') return;
+    expect(r.credential).toBe('none');
+    expect(calls).toHaveLength(1);
+    const entry = JSON.parse(fs.readFileSync(r.configPath, 'utf-8')).mcpServers['unreal-mcp'];
+    expect(entry.headers).toBeUndefined();
+  });
+
+  it('an explicit --token wins over the project key', async () => {
+    const dir = tmp();
+    const { resolver, calls } = keyResolver();
+    const r = await setupMcp({ agentId: 'claude-code', projectDir: dir, transport: 'http', url: 'https://ai-game.dev', token: 'my-pat', projectKeyResolver: resolver });
+    expect(r.kind).toBe('success');
+    if (r.kind !== 'success') return;
+    expect(r.credential).toBe('token');
+    expect(calls).toHaveLength(0);
+    expect(JSON.parse(fs.readFileSync(r.configPath, 'utf-8')).mcpServers['unreal-mcp'].headers).toEqual({ Authorization: 'Bearer my-pat' });
+  });
+
+  it('a failed mint (e.g. 404 while the server feature is off) degrades to URL-only with a warning', async () => {
+    const dir = tmp();
+    const r = await setupMcp({
+      agentId: 'claude-code', projectDir: dir, transport: 'http', url: 'https://ai-game.dev',
+      projectKeyResolver: async () => ({ kind: 'error', reason: 'HTTP 404' }),
+    });
+    expect(r.kind).toBe('success');
+    if (r.kind !== 'success') return;
+    expect(r.credential).toBe('none');
+    expect(r.warnings.join(' ')).toContain('HTTP 404');
+    expect(JSON.parse(fs.readFileSync(r.configPath, 'utf-8')).mcpServers['unreal-mcp'].headers).toBeUndefined();
+  });
+
+  it('a local server URL never resolves a project key', async () => {
+    const dir = tmp();
+    const { resolver, calls } = keyResolver();
+    const r = await setupMcp({ agentId: 'claude-code', projectDir: dir, transport: 'http', url: 'http://localhost:5220', projectKeyResolver: resolver });
+    expect(r.kind).toBe('success');
+    expect(calls).toHaveLength(0);
+  });
+
+  it('--regenerate-key force-mints, writes the new key, then revokes the previous one', async () => {
+    const dir = tmp();
+    const order: string[] = [];
+    const { resolver, calls } = keyResolver({
+      revokePrevious: async () => {
+        order.push(fs.readFileSync(path.join(dir, '.mcp.json'), 'utf-8').includes(KEY) ? 'revoke-after-write' : 'revoke-before-write');
+        return undefined;
+      },
+    });
+    const r = await setupMcp({ agentId: 'claude-code', projectDir: dir, transport: 'http', url: 'https://ai-game.dev', regenerateKey: true, projectKeyResolver: resolver });
+    expect(r.kind).toBe('success');
+    expect(calls[0].regenerate).toBe(true);
+    expect(order).toEqual(['revoke-after-write']);
+  });
+
+  it('--regenerate-key fails (and writes nothing) when no key can be minted', async () => {
+    const dir = tmp();
+    const r = await setupMcp({ agentId: 'claude-code', projectDir: dir, transport: 'http', url: 'https://ai-game.dev', regenerateKey: true, projectKeyResolver: noLogin });
+    expect(r.kind).toBe('failure');
+    expect(fs.existsSync(path.join(dir, '.mcp.json'))).toBe(false);
+  });
+
+  it('--regenerate-key is refused with --oauth, for a local server, and in a dry run', async () => {
+    const dir = tmp();
+    const { resolver, calls } = keyResolver();
+    for (const extra of [{ oauth: true }, { url: 'http://localhost:5220' }, { dryRun: true }]) {
+      const r = await setupMcp({ agentId: 'claude-code', projectDir: dir, transport: 'http', url: 'https://ai-game.dev', regenerateKey: true, projectKeyResolver: resolver, ...extra });
+      expect(r.kind).toBe('failure');
+    }
+    expect(calls).toHaveLength(0);
   });
 });
 

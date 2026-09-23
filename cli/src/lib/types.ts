@@ -13,6 +13,7 @@
 //
 // No top-level side effects; no runtime deps beyond TypeScript types.
 
+import type { ProjectKeyResolver } from '@baizor/gamedev-cli-core';
 import type { MachineAuthOptions } from '../utils/config.js';
 import type { ExtensionDescriptor } from '../utils/extensions-catalog.js';
 import type { InstallSourceKind } from '../utils/extension-source.js';
@@ -427,8 +428,28 @@ export interface SetupMcpOptions {
   downloadServerImpl?: (opts: DownloadServerOptions) => Promise<DownloadServerResult>;
   /** Machine-store token-fallback injection (tests). See `MachineAuthOptions`. */
   machineAuth?: MachineAuthOptions;
+  /**
+   * `--oauth`: write a URL-only Cloud http config (the client runs its own native OAuth) instead of the
+   * default project-key `Authorization` header, removing any previously written header.
+   */
+  oauth?: boolean;
+  /**
+   * `--regenerate-key`: mint a fresh project key (overwriting the cached one), write it, then revoke the
+   * previous key (project-keys contract §7). Cloud http only; not with `--oauth` / `--token` / `--dry-run`.
+   */
+  regenerateKey?: boolean;
+  /** Display machine name recorded on a minted project key; defaults to `os.hostname()`. */
+  machineName?: string;
+  /**
+   * Resolves the Cloud project key. Defaults to cli-core's `createProjectKeyResolver(unrealAdapter)` over
+   * the machine credential store + `~/.ai-game-dev/project-keys.json`. Test injection.
+   */
+  projectKeyResolver?: ProjectKeyResolver;
   onProgress?: ProgressCallback;
 }
+
+/** The credential a written http config carries: an explicit PAT, a Cloud project key, or none (URL-only). */
+export type SetupMcpCredential = 'token' | 'project-key' | 'none';
 
 export interface SetupMcpSuccess {
   kind: 'success';
@@ -439,6 +460,12 @@ export interface SetupMcpSuccess {
   transport: McpTransport;
   /** The JSON snippet that was written. */
   snippet: string;
+  /** Which credential the config carries (`none` for stdio and URL-only http configs). */
+  credential: SetupMcpCredential;
+  /** The server-side id of the project key written (credential `project-key` only). */
+  projectKeyId?: string;
+  /** Whether the project key was reused from the cache or freshly minted. */
+  projectKeySource?: 'reused' | 'minted';
   warnings: string[];
   nextSteps: string[];
 }

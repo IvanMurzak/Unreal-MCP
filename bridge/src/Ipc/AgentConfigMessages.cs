@@ -137,6 +137,37 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
         [JsonPropertyName("settings")] public AgentSettingsDto? Settings { get; set; }
     }
 
+    /// <summary>
+    /// plugin → sidecar: "Regenerate key" (project-keys contract §7, Cloud mode only). The sidecar mints a fresh
+    /// project key for THIS project's pin (overwriting the cached entry and revoking the key it replaced), then
+    /// rewrites every agent whose HTTP config is present so none keeps the old key. <see cref="AgentId"/> is the
+    /// panel's selected agent — its refreshed description comes back in the result.
+    /// </summary>
+    public sealed class AgentRegenerateKeyRequestMessage
+    {
+        [JsonPropertyName("type")] public string Type { get; set; } = IpcProtocol.Type.AgentRegenerateKey;
+        [JsonPropertyName("requestId")] public string RequestId { get; set; } = string.Empty;
+        [JsonPropertyName("agentId")] public string AgentId { get; set; } = string.Empty;
+        [JsonPropertyName("transport")] public string Transport { get; set; } = "streamableHttp";
+        [JsonPropertyName("settings")] public AgentSettingsDto? Settings { get; set; }
+    }
+
+    /// <summary>
+    /// Whether the Cloud agent configs carry a project key (project-keys contract §7), sent on every agent-config
+    /// result so the panel can show it. Never carries the key itself.
+    /// </summary>
+    public static class ProjectKeyStatus
+    {
+        /// <summary>Local server or stdio transport — project keys do not apply.</summary>
+        public const string NotApplicable = "not-applicable";
+        /// <summary>Cloud, but this machine is not signed in: configs are URL-only (the agent signs in itself).</summary>
+        public const string SignedOut = "signed-out";
+        /// <summary>Cloud and signed in, but no key is cached / one could not be minted: configs are URL-only.</summary>
+        public const string None = "none";
+        /// <summary>Cloud: configs carry <c>Authorization: Bearer agd_pk_…</c> for this project's pin.</summary>
+        public const string InUse = "in-use";
+    }
+
     /// <summary>One UI item inside an <see cref="AgentSectionDto"/> (or a top-level <see cref="AgentConfiguratorDescriptionDto.Links"/>
     /// entry) — engine-agnostic, no UI handle.</summary>
     public sealed class AgentItemDto
@@ -223,5 +254,11 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
         [JsonPropertyName("filesWritten")] public int? FilesWritten { get; set; }
         /// <summary>Count of stale generator-owned folders pruned (generate-skills request only).</summary>
         [JsonPropertyName("filesPruned")] public int? FilesPruned { get; set; }
+        /// <summary>One of the <see cref="ProjectKeyStatus"/> values (every request that carries settings).</summary>
+        [JsonPropertyName("projectKeyStatus")] public string? ProjectKeyStatus { get; set; }
+        /// <summary>A short user-facing line explaining <see cref="ProjectKeyStatus"/> (never contains the key).</summary>
+        [JsonPropertyName("projectKeyHint")] public string? ProjectKeyHint { get; set; }
+        /// <summary>The agent ids whose config was rewritten with the new key (regenerate-key request only).</summary>
+        [JsonPropertyName("rewrittenAgents")] public List<string>? RewrittenAgents { get; set; }
     }
 }

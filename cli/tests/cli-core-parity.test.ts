@@ -76,7 +76,11 @@ describe('pinned setup-mcp parity vs the shared Configure policy (T4 DoD)', () =
   it('the http URL the CLI writes equals cli-core resolveSetupMcpPlan().resolvedUrl', async () => {
     const dir = tmp();
     const base = 'https://ai-game.dev';
-    const r = await setupMcp({ agentId: 'claude-code', projectDir: dir, transport: 'http', url: base });
+    // No machine login in the test (never the real ~/.ai-game-dev store): the parity is about the URL.
+    const r = await setupMcp({
+      agentId: 'claude-code', projectDir: dir, transport: 'http', url: base,
+      projectKeyResolver: async () => ({ kind: 'no-login', reason: 'test' }),
+    });
     expect(r.kind).toBe('success');
     if (r.kind !== 'success') return;
     const writtenUrl = JSON.parse(fs.readFileSync(r.configPath, 'utf-8')).mcpServers['unreal-mcp'].url;
