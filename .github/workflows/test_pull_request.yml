@@ -222,7 +222,7 @@ jobs:
     # signal stays on the latest supported engine while keeping the runner load
     # bounded. The runner label remains `unreal-5-7` for legacy reasons only.
     # fail-fast:false so one engine's failure never cancels the other's leg.
-    runs-on: [self-hosted, windows, unreal-5-7]
+    runs-on: [self-hosted, windows, unreal-5-7, rm-autoscale-win-x64]
     # A hang guard, not a budget. Expiry IS a GitHub-side cancel and can wedge this
     # self-hosted runner exactly like a manual cancel, so it is sized to fire only on a real
     # hang. Never cancel a slow job by hand: kill the step's process on the box instead.
@@ -556,7 +556,7 @@ jobs:
     name: connection + tool smoke (UE ${{ matrix.ue }}, custom server)
     needs: [plugin]
     if: ${{ vars.UNREAL_SMOKE_READY == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
-    runs-on: [self-hosted, windows, unreal-5-7]
+    runs-on: [self-hosted, windows, unreal-5-7, rm-autoscale-win-x64]
     # A hang guard, not a budget — see the plugin job: expiry is a GitHub-side cancel.
     # 90 = the machine-wide UE lock's 60-min bounded wait + the original 30-min guard.
     timeout-minutes: 90
