@@ -441,6 +441,13 @@ export interface SetupMcpOptions {
   /** Display machine name recorded on a minted project key; defaults to `os.hostname()`. */
   machineName?: string;
   /**
+   * `--regenerate-key` only: returns the cached project key being replaced for `(issuer, pin)`, read
+   * before the resolver overwrites it, so the project's other agent configs still holding it are
+   * rewritten to the new key before it is revoked. Defaults to cli-core's `ProjectKeyStore` (the
+   * `~/.ai-game-dev/project-keys.json` cache the default resolver writes); injectable for tests.
+   */
+  previousProjectKey?: (issuer: string, pin: string) => string | undefined;
+  /**
    * Resolves the Cloud project key. Defaults to cli-core's `createProjectKeyResolver(unrealAdapter)` over
    * the machine credential store + `~/.ai-game-dev/project-keys.json`. Test injection.
    */
@@ -454,11 +461,20 @@ export interface SetupMcpSuccess {
   kind: 'success';
   success: true;
   agentId: string;
-  /** Path the config was (or would be) written to. */
+  /** Path the (primary) config was (or would be) written to — `configPaths[0]`. */
   configPath: string;
+  /** Every config file written (Antigravity writes two: `~/.gemini/config/` and `~/.gemini/antigravity/`). */
+  configPaths: string[];
+  /**
+   * `--regenerate-key` only: the OTHER agent configs of this project that carried the previous key and
+   * now carry the new one (rewritten before the previous key is revoked). Empty otherwise.
+   */
+  rewrittenConfigPaths: string[];
   transport: McpTransport;
-  /** The JSON snippet that was written. */
+  /** The snippet that was written to `configPath`. */
   snippet: string;
+  /** The snippet written to each of `configPaths` (the files differ in the entries they preserve). */
+  snippets: { path: string; content: string }[];
   /** Which credential the config carries (`none` for stdio and URL-only http configs). */
   credential: SetupMcpCredential;
   /** The server-side id of the project key written (credential `project-key` only). */

@@ -31,6 +31,7 @@ export { setupMcp, listAgentIds } from './lib/setup-mcp.js';
 export {
   agentRegistry,
   getAgentById,
+  getAgentConfigPaths,
   getAgentIds,
   MCP_SERVER_NAME,
 } from './utils/agents.js';

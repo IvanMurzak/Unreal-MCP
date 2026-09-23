@@ -52,9 +52,13 @@ export const setupMcpCommand = new Command('setup-mcp')
       return;
     }
     if (opts.dryRun) {
-      ui.info(result.snippet);
+      for (const { path, content } of result.snippets) {
+        if (result.snippets.length > 1) ui.info(`${path}:`);
+        ui.info(content);
+      }
     } else {
-      ui.success(`Wrote ${result.agentId} MCP config (${result.transport}) to ${result.configPath}`);
+      ui.success(`Wrote ${result.agentId} MCP config (${result.transport}) to ${result.configPaths.join(' and ')}`);
+      for (const configPath of result.rewrittenConfigPaths) ui.info(`→ Also wrote the new project key to ${configPath}.`);
       if (result.credential === 'project-key') {
         ui.info(
           opts.regenerateKey

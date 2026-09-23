@@ -25,7 +25,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { agentRegistry } from './agents.js';
+import { agentRegistry, getAgentConfigPaths } from './agents.js';
 
 /** Matches a trailing `/p/<8-hex>` routing-pin segment (trailing slash tolerated). */
 const TRAILING_PIN_RE = /\/p\/[0-9a-fA-F]{8}\/?$/;
@@ -139,14 +139,16 @@ export function projectLocalAgentConfigPaths(projectDir: string): string[] {
   const withSep = root.endsWith(path.sep) ? root : root + path.sep;
   const seen = new Set<string>();
   for (const agent of agentRegistry) {
-    let configPath: string;
+    let configPaths: string[];
     try {
-      configPath = path.resolve(agent.getConfigPath(root));
+      configPaths = getAgentConfigPaths(agent, root).map((p) => path.resolve(p));
     } catch {
       continue;
     }
-    if (configPath === root || configPath.startsWith(withSep)) {
-      seen.add(configPath);
+    for (const configPath of configPaths) {
+      if (configPath === root || configPath.startsWith(withSep)) {
+        seen.add(configPath);
+      }
     }
   }
   return [...seen];
