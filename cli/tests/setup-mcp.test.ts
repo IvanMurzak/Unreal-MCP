@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import { setupMcp, listAgentIds, shouldWriteAuthHeader } from '../src/lib/setup-mcp.js';
@@ -7,7 +7,23 @@ import { derivePinV2, type ProjectKeyRequest, type ProjectKeyResolver } from '@b
 import { makeTempDir, rmTempDir } from './helpers.js';
 
 const dirs: string[] = [];
+// Global agent configs (Antigravity, Claude Desktop, Cline, Copilot CLI) resolve under os.homedir() /
+// APPDATA: point those at a temp dir so no test ever writes into the developer's real home.
+const HOME_KEYS = ['HOME', 'USERPROFILE', 'APPDATA', 'XDG_CONFIG_HOME'];
+const savedHome: Record<string, string | undefined> = {};
+beforeEach(() => {
+  const home = makeTempDir('unreal-mcp-cli-home-');
+  dirs.push(home);
+  for (const k of HOME_KEYS) {
+    savedHome[k] = process.env[k];
+    process.env[k] = home;
+  }
+});
 afterEach(() => {
+  for (const k of HOME_KEYS) {
+    if (savedHome[k] === undefined) delete process.env[k];
+    else process.env[k] = savedHome[k];
+  }
   while (dirs.length) rmTempDir(dirs.pop()!);
 });
 function tmp(): string {
