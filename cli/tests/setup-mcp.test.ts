@@ -342,6 +342,15 @@ describe('setupMcp — Cloud project key (contract §7)', () => {
     expect(JSON.parse(fs.readFileSync(r.configPath, 'utf-8')).mcpServers['unreal-mcp'].headers).toEqual({ Authorization: 'Bearer my-pat' });
   });
 
+  it('an explicit --token is never written into the Codex config file', async () => {
+    const dir = tmp();
+    const r = await setupMcp({ agentId: 'codex', projectDir: dir, transport: 'http', url: 'https://ai-game.dev', token: 'my-pat', projectKeyResolver: keyResolver().resolver });
+    expect(r.kind).toBe('success');
+    if (r.kind !== 'success') return;
+    expect(r.credential).toBe('none');
+    expect(fs.readFileSync(r.configPath, 'utf-8')).not.toContain('my-pat');
+  });
+
   it('a failed mint (e.g. 404 while the server feature is off) degrades to URL-only with a warning', async () => {
     const dir = tmp();
     const r = await setupMcp({
@@ -397,10 +406,10 @@ describe('setupMcp — Cloud project key (contract §7)', () => {
     expect(fs.existsSync(path.join(dir, '.mcp.json'))).toBe(false);
   });
 
-  it('--regenerate-key is refused with --oauth, for a local server, and in a dry run', async () => {
+  it('--regenerate-key is refused with --oauth, for a local server, in a dry run, and over stdio', async () => {
     const dir = tmp();
     const { resolver, calls } = keyResolver();
-    for (const extra of [{ oauth: true }, { url: 'http://localhost:5220' }, { dryRun: true }]) {
+    for (const extra of [{ oauth: true }, { url: 'http://localhost:5220' }, { dryRun: true }, { transport: 'stdio' as const }]) {
       const r = await setupMcp({ agentId: 'claude-code', projectDir: dir, transport: 'http', url: 'https://ai-game.dev', regenerateKey: true, projectKeyResolver: resolver, ...extra });
       expect(r.kind).toBe('failure');
     }

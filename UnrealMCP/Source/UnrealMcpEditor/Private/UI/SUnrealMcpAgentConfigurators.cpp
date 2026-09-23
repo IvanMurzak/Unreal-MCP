@@ -222,8 +222,9 @@ void SUnrealMcpAgentConfigurators::RequestGenerateSkills()
 
 void SUnrealMcpAgentConfigurators::RequestRegenerateKey()
 {
-	// Project keys (contract §7): the sidecar owns the key — it mints a new one, rewrites every agent configured for
-	// this project, then revokes the old key. The selected agent id rides along so its refreshed description returns.
+	// Project keys (contract §7): the sidecar owns the key — it mints a new one (the library revokes the replaced key
+	// as part of that step), then rewrites every agent configured for this project; a failed rewrite is reported in
+	// the key hint. The selected agent id rides along so its refreshed description returns.
 	TSharedPtr<FJsonObject> Request = MakeShared<FJsonObject>();
 	Request->SetStringField(TEXT("agentId"), SelectedAgentId);
 	Request->SetStringField(TEXT("transport"), EffectiveTransportString());
@@ -393,6 +394,7 @@ void SUnrealMcpAgentConfigurators::SetSelectedAgentId(const FString& InAgentId)
 	SelectedDescription = FUnrealMcpAgentDescription();
 	LastSkillsStatus.Reset();   // a prior agent's generation outcome is meaningless for the new selection
 	LastSkillsPath.Reset();
+	LastKeyActionStatus.Reset(); // the last Regenerate outcome is a one-shot notice, not a persistent state
 	if (IsViewModelValid())
 		ViewModel->SetSelectedAgentId(InAgentId);
 

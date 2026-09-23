@@ -90,7 +90,8 @@ public:
 
 	/**
 	 * Send a §7 AI-agent configurator request (`agents-list` / `agent-status` / `agent-configure` /
-	 * `agent-remove` / `agent-skills-path` / `agent-generate-skills`) to the connected sidecar, which serves it
+	 * `agent-remove` / `agent-skills-path` / `agent-generate-skills` / `agent-regenerate-key`) to the connected
+	 * sidecar, which serves it
 	 * against the shared com.IvanMurzak.McpPlugin.AgentConfig library and answers with an `agent-config-result`
 	 * routed back through the status sink. @p Message must carry a `type` of one of those verbs (see
 	 * IsValidAgentConfigVerb) and the request fields (requestId, agentId, transport, settings, …). Thread-safe;

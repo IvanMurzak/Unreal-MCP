@@ -432,7 +432,10 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
                         credentials,
                         issuer,
                         new McpAgentConfig.ProjectKeyStore(store.BaseDirectory),
-                        _authHttpClient,
+                        // The owned default client has HttpClient's 100 s timeout, which would hold the panel's
+                        // Configure in "Working…" for minutes against an unresponsive server (validate + mint);
+                        // null selects the library's shared 20 s client. An injected (test) client is kept.
+                        ReferenceEquals(_authHttpClient, _ownedHttpClient) ? null : _authHttpClient,
                         _loggerProvider?.CreateLogger(nameof(McpAgentConfig.ProjectKeyProvider)));
                 }
                 return _projectKeyProvider;

@@ -107,6 +107,17 @@ export async function setupMcp(opts: SetupMcpOptions): Promise<SetupMcpResult> {
     let credential: SetupMcpCredential = 'none';
     let key: Extract<ProjectKeyResult, { kind: 'ok' }> | undefined;
 
+    // Validated before the transport branch so a stdio run refuses `--regenerate-key` instead of
+    // silently succeeding without regenerating anything.
+    const explicitPatOptIn = (opts.token ?? '').trim().length > 0;
+    const cloud = transport === 'http' && isCloudUrl(appendMcp(conn.url));
+    if (opts.regenerateKey && (opts.oauth || explicitPatOptIn || !cloud || opts.dryRun)) {
+      throw new Error(
+        '--regenerate-key applies only to a Cloud http config without --oauth / --token / --dry-run ' +
+          '(project keys are not used for stdio or a local server).',
+      );
+    }
+
     if (transport === 'stdio') {
       // stdio needs a LOCAL server binary. Resolution: the UNREAL_MCP_SERVER_PATH
       // override wins (no download, no version check — §6 dev-override semantics,
@@ -156,14 +167,6 @@ export async function setupMcp(opts: SetupMcpOptions): Promise<SetupMcpResult> {
       const pin = derivePinV2(projectDir);
       const httpUrl = opts.noPin ? canonicalUrl : pinUrl(canonicalUrl, pin);
       const token = conn.token ?? '';
-      const explicitPatOptIn = (opts.token ?? '').trim().length > 0;
-      const cloud = isCloudUrl(canonicalUrl);
-      if (opts.regenerateKey && (opts.oauth || explicitPatOptIn || !cloud || opts.dryRun)) {
-        throw new Error(
-          '--regenerate-key applies only to a Cloud http config without --oauth / --token / --dry-run ' +
-            '(project keys are not used for stdio or a local server).',
-        );
-      }
 
       // Project keys (contract §7): a Cloud http config carries `Authorization: Bearer agd_pk_…` for
       // EVERY client — a non-expiring key bound to this project's pin, reused from the machine cache or
@@ -202,7 +205,9 @@ export async function setupMcp(opts: SetupMcpOptions): Promise<SetupMcpResult> {
       // caller passed `--token`) — Flow C. An ambient token (from the project `.env` / process
       // env) never forces a header. See `shouldWriteAuthHeader`.
       // A project key is only resolved without an explicit `--token`, so it never competes with one.
-      const writeAuthHeader = !!key || shouldWriteAuthHeader({ token, supportsOAuth: agent.supportsOAuth, explicitPatOptIn });
+      const writeAuthHeader =
+        !!key ||
+        (agent.patInHeader !== false && shouldWriteAuthHeader({ token, supportsOAuth: agent.supportsOAuth, explicitPatOptIn }));
       credential = key ? 'project-key' : writeAuthHeader ? 'token' : 'none';
       props = agent.getHttpProps(httpUrl, key?.key ?? token, writeAuthHeader);
       removeKeys = agent.httpRemoveKeys;

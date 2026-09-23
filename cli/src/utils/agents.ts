@@ -52,6 +52,12 @@ export interface AgentDefinition {
    * explicit PAT opt-in (Flow C) — see `lib/setup-mcp.ts` `shouldWriteAuthHeader`.
    */
   supportsOAuth: boolean;
+  /**
+   * `false` when a PAT (`--token`) must NOT be written into this client's config as a static header
+   * (Codex: the shared C# configurator keeps a PAT out of the file). A Cloud project key is always
+   * written. Default `true`.
+   */
+  patInHeader?: boolean;
   bodyPath: string;
   /** Resolve the absolute config-file path for a given project root. */
   getConfigPath(projectPath: string): string;
@@ -450,6 +456,8 @@ export const agentRegistry: readonly AgentDefinition[] = [
     configPathDisplay: '.codex/config.toml',
     configFormat: 'toml',
     supportsOAuth: true,
+    // A PAT never lands in `.codex/config.toml`; only the project key goes into `http_headers`.
+    patInHeader: false,
     bodyPath: 'mcp_servers',
     getConfigPath: (p) => path.join(p, '.codex', 'config.toml'),
     // Codex's stdio arg vector omits the bearer token (it is not accepted on

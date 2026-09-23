@@ -10,6 +10,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -134,8 +135,10 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
             var transport = ParseTransport(request.Transport);
             // The Custom agent has no file to write, so it never needs a freshly minted key — the cached one (if any)
             // is enough to render its snippet with the header present.
-            var settings = await AttachProjectKeyAsync(MapSettings(request.Settings), transport,
-                configurator is CustomConfigurator ? KeySource.Cached : KeySource.GetOrMint, result, cancellationToken).ConfigureAwait(false);
+            // The Custom agent has no file to write, so it never needs a freshly minted key.
+            var settings = configurator is CustomConfigurator
+                ? AttachCachedProjectKey(MapSettings(request.Settings), transport, result)
+                : await AttachProjectKeyAsync(MapSettings(request.Settings), transport, regenerate: false, result, cancellationToken).ConfigureAwait(false);
             try
             {
                 // Cloud + project key ⇒ the Bearer shape for every agent (contract §7). Otherwise the default is native
@@ -181,15 +184,11 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
             if (baseSettings.ConnectionMode != McpConnectionMode.Cloud)
                 return Fail(result, "Project keys are used only in Cloud mode.");
 
-            // The agents configured with the CURRENT key (or URL-only) for this project — computed before the
-            // regenerate replaces the cached key, since "configured" compares against the key a config carries.
-            var withOldKey = AttachCachedProjectKey(baseSettings, McpTransport.streamableHttp, new AgentConfigResultMessage());
-            var targets = AiAgentConfiguratorRegistry.All
-                .Where(c => IsHttpConfiguredForProject(c, withOldKey)
-                    || (withOldKey.HasProjectKey && IsHttpConfiguredForProject(c, baseSettings)))
-                .ToList();
+            // Every agent holding an HTTP entry routed to this project (whatever key it carries, or none) — the
+            // configs that must not keep the old key.
+            var targets = AiAgentConfiguratorRegistry.All.Where(c => HasPinnedHttpEntry(c, baseSettings)).ToList();
 
-            var settings = await AttachProjectKeyAsync(baseSettings, McpTransport.streamableHttp, KeySource.Regenerate, result, cancellationToken).ConfigureAwait(false);
+            var settings = await AttachProjectKeyAsync(baseSettings, McpTransport.streamableHttp, regenerate: true, result, cancellationToken).ConfigureAwait(false);
             if (!settings.HasProjectKey)
             {
                 return Fail(result, result.ProjectKeyStatus == ProjectKeyStatus.SignedOut
@@ -198,6 +197,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
             }
 
             var rewritten = new List<string>();
+            var failed = new List<string>();
             foreach (var configurator in targets)
             {
                 try
@@ -205,15 +205,23 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
                     if (configurator.GetHttpConfig(settings, _logger, settings.ResolveHttpCredentialMode()).Configure())
                         rewritten.Add(configurator.AgentId);
                     else
+                    {
+                        failed.Add(configurator.AgentName);
                         _logger?.LogWarning("Rewriting '{Agent}' with the regenerated project key failed.", configurator.AgentId);
+                    }
                 }
                 catch (Exception ex)
                 {
+                    failed.Add(configurator.AgentName);
                     _logger?.LogWarning("Rewriting '{Agent}' with the regenerated project key failed: {Message}", configurator.AgentId, ex.Message);
                 }
             }
             result.RewrittenAgents = rewritten;
             result.Ok = true;
+            // RegenerateAsync revokes the replaced key before returning, so an agent whose rewrite failed may now
+            // carry a dead key — say so in the key row instead of reporting a clean success.
+            if (failed.Count > 0)
+                result.ProjectKeyHint = $"Could not update: {string.Join(", ", failed)}. Their config still holds the previous (revoked) key — select each and press Configure.";
 
             var selected = AiAgentConfiguratorRegistry.GetByAgentId(request.AgentId);
             if (selected != null)
@@ -421,62 +429,81 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
         private static bool UsesProjectKey(AgentConfiguratorSettings settings, McpTransport transport) =>
             settings.ConnectionMode == McpConnectionMode.Cloud && transport != McpTransport.stdio;
 
-        /// <summary>Where <see cref="AttachProjectKeyAsync"/> takes the key from.</summary>
-        private enum KeySource
+        /// <summary>
+        /// Attach the CACHED key (synchronous file read — no network, no mint) so a status/list report compares against
+        /// what Configure writes. Records the key status on <paramref name="result"/>.
+        /// </summary>
+        private AgentConfiguratorSettings AttachCachedProjectKey(
+            AgentConfiguratorSettings settings, McpTransport transport, AgentConfigResultMessage result)
         {
-            /// <summary>The local cache only — no network, no mint (status / list).</summary>
-            Cached,
-            /// <summary><see cref="ProjectKeyProvider.GetOrMintAsync"/> (Configure).</summary>
-            GetOrMint,
-            /// <summary><see cref="ProjectKeyProvider.RegenerateAsync"/> (Regenerate key).</summary>
-            Regenerate,
+            if (!TryGetProjectKeyProvider(settings, transport, result, out var provider))
+                return settings;
+            string? key = null;
+            try
+            {
+                key = provider.Store.Get(provider.Issuer, settings.ProjectPin)?.Key;
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogDebug("Reading the project-key cache failed: {Message}", ex.Message);
+            }
+            return ApplyProjectKey(result, settings, key, "No project key yet — Configure creates one for this project.");
         }
 
-        /// <summary>Attach the CACHED key (completes synchronously — no network) so a status/list report compares
-        /// against what Configure writes.</summary>
-        private AgentConfiguratorSettings AttachCachedProjectKey(
-            AgentConfiguratorSettings settings, McpTransport transport, AgentConfigResultMessage result) =>
-            AttachProjectKeyAsync(settings, transport, KeySource.Cached, result, CancellationToken.None).GetAwaiter().GetResult();
-
         /// <summary>
-        /// Attach the project key from <paramref name="source"/> and record the key status on <paramref name="result"/>.
-        /// Never throws for a key failure: no login / mint refused (e.g. 404 while the feature is off) / unreachable ⇒
-        /// the settings come back without a key and the config stays URL-only.
+        /// Get-or-mint (or, with <paramref name="regenerate"/>, force-mint) the project key and attach it. Never throws
+        /// for a key failure: no login / mint refused (e.g. 404 while the feature is off) / unreachable ⇒ the settings
+        /// come back without a key and the config stays URL-only.
         /// </summary>
         private async Task<AgentConfiguratorSettings> AttachProjectKeyAsync(
-            AgentConfiguratorSettings settings, McpTransport transport, KeySource source,
+            AgentConfiguratorSettings settings, McpTransport transport, bool regenerate,
             AgentConfigResultMessage result, CancellationToken cancellationToken)
         {
-            if (!UsesProjectKey(settings, transport))
-                return SetKeyStatus(result, settings, ProjectKeyStatus.NotApplicable, null);
-            var provider = _projectKeys?.Invoke();
-            if (provider == null)
-                return SetKeyStatus(result, settings, ProjectKeyStatus.SignedOut,
-                    "Not signed in — Cloud agent configs are URL-only and each agent signs in with its own OAuth. Sign in to use a project key.");
-
+            if (!TryGetProjectKeyProvider(settings, transport, result, out var provider))
+                return settings;
             string? key = null;
             try
             {
                 var pin = settings.ProjectPin;
-                key = source switch
-                {
-                    KeySource.Cached => provider.Store.Get(provider.Issuer, pin)?.Key,
-                    KeySource.Regenerate => await provider.RegenerateAsync(pin, ProjectKeyEngine, Environment.MachineName, settings.ProjectRootPath, cancellationToken).ConfigureAwait(false),
-                    _ => await provider.GetOrMintAsync(pin, ProjectKeyEngine, Environment.MachineName, settings.ProjectRootPath, cancellationToken).ConfigureAwait(false),
-                };
+                key = regenerate
+                    ? await provider.RegenerateAsync(pin, ProjectKeyEngine, Environment.MachineName, settings.ProjectRootPath, cancellationToken).ConfigureAwait(false)
+                    : await provider.GetOrMintAsync(pin, ProjectKeyEngine, Environment.MachineName, settings.ProjectRootPath, cancellationToken).ConfigureAwait(false);
             }
             catch (Exception ex) when (!(ex is OperationCanceledException))
             {
-                _logger?.LogWarning("Project key ({Source}) failed: {Message}", source, ex.Message);
+                _logger?.LogWarning("Project key {Action} failed: {Message}", regenerate ? "regenerate" : "get-or-mint", ex.Message);
             }
-
-            if (!string.IsNullOrEmpty(key))
-                return SetKeyStatus(result, settings.WithProjectKey(key), ProjectKeyStatus.InUse,
-                    "Project key in use — Cloud agent configs carry a key bound to this project.");
-            return SetKeyStatus(result, settings, ProjectKeyStatus.None, source == KeySource.Cached
-                ? "No project key yet — Configure creates one for this project."
-                : "No project key could be obtained — the config is URL-only and the agent signs in with its own OAuth.");
+            return ApplyProjectKey(result, settings, key,
+                "No project key could be obtained — the config is URL-only and the agent signs in with its own OAuth.");
         }
+
+        /// <summary>The shared prologue: project keys apply (Cloud HTTP) and this machine is signed in. Otherwise
+        /// records NotApplicable / SignedOut and returns false.</summary>
+        private bool TryGetProjectKeyProvider(
+            AgentConfiguratorSettings settings, McpTransport transport, AgentConfigResultMessage result,
+            [NotNullWhen(true)] out ProjectKeyProvider? provider)
+        {
+            provider = null;
+            if (!UsesProjectKey(settings, transport))
+            {
+                SetKeyStatus(result, settings, ProjectKeyStatus.NotApplicable, null);
+                return false;
+            }
+            provider = _projectKeys?.Invoke();
+            if (provider != null)
+                return true;
+            SetKeyStatus(result, settings, ProjectKeyStatus.SignedOut,
+                "Not signed in — Cloud agent configs are URL-only and each agent signs in with its own OAuth. Sign in to use a project key.");
+            return false;
+        }
+
+        /// <summary>The shared epilogue: attach <paramref name="key"/> (InUse) or record None with <paramref name="noneHint"/>.</summary>
+        private static AgentConfiguratorSettings ApplyProjectKey(
+            AgentConfigResultMessage result, AgentConfiguratorSettings settings, string? key, string noneHint) =>
+            string.IsNullOrEmpty(key)
+                ? SetKeyStatus(result, settings, ProjectKeyStatus.None, noneHint)
+                : SetKeyStatus(result, settings.WithProjectKey(key), ProjectKeyStatus.InUse,
+                    "Project key in use — Cloud agent configs carry a key bound to this project.");
 
         private static AgentConfiguratorSettings SetKeyStatus(
             AgentConfigResultMessage result, AgentConfiguratorSettings settings, string status, string? hint)
@@ -486,19 +513,21 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
             return settings;
         }
 
-        /// <summary>True when the agent's HTTP entry is present AND matches <paramref name="settings"/> (this project's
-        /// pinned URL + the key it carries) — i.e. it is an HTTP config for THIS project, not a stdio one or another
-        /// project's entry in a user-global file.</summary>
-        private bool IsHttpConfiguredForProject(AiAgentConfigurator configurator, AgentConfiguratorSettings settings)
+        /// <summary>
+        /// True when the agent's config holds an MCP entry AND the file carries this project's pinned HTTP route
+        /// (<c>/p/&lt;pin&gt;</c>) — i.e. an HTTP config for THIS project whatever key it carries, so Regenerate rewrites
+        /// it even when its key is one the cache no longer knows (e.g. regenerated and revoked by another tool).
+        /// </summary>
+        private bool HasPinnedHttpEntry(AiAgentConfigurator configurator, AgentConfiguratorSettings settings)
         {
             try
             {
-                // The Custom agent's IsConfigured is always false (it has no file), so it is never a target.
-                return configurator.IsConfigured(settings, McpTransport.streamableHttp, _logger);
+                var http = configurator.GetHttpConfig(settings, _logger);
+                return http.IsDetected()
+                    && File.ReadAllText(http.ConfigPath).Contains("/p/" + settings.ProjectPin, StringComparison.OrdinalIgnoreCase);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is NotImplementedException || ex is IOException || ex is ArgumentException || ex is UnauthorizedAccessException)
             {
-                _logger?.LogDebug("Status of '{Agent}' could not be read: {Message}", configurator.AgentId, ex.Message);
                 return false;
             }
         }

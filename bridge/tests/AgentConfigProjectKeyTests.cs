@@ -206,6 +206,38 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         }
 
         [Fact]
+        public async Task RegenerateKey_RewritesAnEntryHoldingAnUnknownKey_ButLeavesStdioAlone()
+        {
+            var service = SignedIn();
+            await Configure(service, "claude-code");
+            // Cursor holds this project's pinned route with a key the cache never knew (e.g. regenerated and revoked
+            // by the CLI); Gemini is configured over stdio for this project.
+            var pin = AgentConfiguratorSettings.CreateForHost(_projectRoot, string.Empty, 0, 0, Issuer + "/mcp",
+                null, ConnectionMode.Cloud).ProjectPin;
+            var cursorPath = Path.Combine(_projectRoot, ".cursor", "mcp.json");
+            Directory.CreateDirectory(Path.GetDirectoryName(cursorPath)!);
+            File.WriteAllText(cursorPath, "{\"mcpServers\":{\"ai-game-developer\":{\"url\":\"" + Issuer + "/mcp/p/" + pin
+                + "\",\"headers\":{\"Authorization\":\"Bearer agd_pk_stale\"}}}}");
+            var gemini = await service.HandleConfigureAsync(new AgentConfigureRequestMessage
+            {
+                RequestId = "cfg-gemini", AgentId = "gemini", Transport = "stdio", Settings = Settings(),
+            });
+            Assert.True(gemini.Ok, gemini.Error);
+
+            var result = await service.HandleRegenerateKeyAsync(new AgentRegenerateKeyRequestMessage
+            {
+                RequestId = "regen", AgentId = "claude-code", Settings = Settings(),
+            });
+
+            Assert.True(result.Ok, result.Error);
+            Assert.Contains("cursor", result.RewrittenAgents!);
+            Assert.DoesNotContain("gemini", result.RewrittenAgents!);
+            var cursor = File.ReadAllText(cursorPath);
+            Assert.Contains(_server.KeyFor(2), cursor);
+            Assert.DoesNotContain("agd_pk_stale", cursor);
+        }
+
+        [Fact]
         public async Task RegenerateKey_SignedOut_Fails_AndChangesNothing()
         {
             await Configure(SignedOut(), "claude-code");
