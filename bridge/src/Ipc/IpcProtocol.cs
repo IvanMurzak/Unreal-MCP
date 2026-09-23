@@ -136,6 +136,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
             public const string AgentRemove = "agent-remove";     // remove the MCP entry (both transports)
             public const string AgentSkillsPath = "agent-skills-path"; // resolve the agent's skills folder (plugin writes the files)
             public const string AgentGenerateSkills = "agent-generate-skills"; // sidecar resolves the path + writes the SKILL.md files
+            public const string AgentRegenerateKey = "agent-regenerate-key"; // Cloud: mint a fresh project key, rewrite every configured agent, revoke the old key
             // plugin → sidecar: request THIS project's resolved connection identity (mcp-authorize PR 4). The
             // sidecar computes {pin, derived local-server port, serverTarget} from McpPlugin's ProjectIdentity +
             // the project marker and answers with a `project-config-result`. Carries the project root to resolve from.

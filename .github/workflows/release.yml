@@ -266,7 +266,7 @@ jobs:
     # artifact / publish jobs that `needs: [plugin]` wait for ALL legs — so a
     # release is gated on the plugin passing Automation across the full supported
     # engine matrix.
-    runs-on: [self-hosted, windows, unreal-5-7]
+    runs-on: [self-hosted, windows, unreal-5-7, rm-autoscale-win-x64]
     strategy:
       fail-fast: false
       max-parallel: 2
@@ -753,7 +753,7 @@ jobs:
     name: build plugin release zips (UE 5.8)
     needs: [check-version, plugin, build-bridge-macos, build-bridge-windows]
     if: vars.UNREAL_RUNNER_READY == 'true'
-    runs-on: [self-hosted, windows, unreal-5-7]
+    runs-on: [self-hosted, windows, unreal-5-7, rm-autoscale-win-x64]
     env:
       UE_ROOT: ${{ vars.UNREAL_ENGINE_PATH || 'C:\Program Files\Epic Games\UE_5.8' }}
     steps:

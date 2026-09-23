@@ -26,9 +26,11 @@ FAiAgentConnectionInfo FAiAgentConnectionInfo::FromPluginConfig(const FUnrealMcp
 		|| Config.AuthOption == EUnrealMcpAuthOption::Token;
 	Info.Token = Config.ResolveEffectiveToken();
 
-	// The "write Authorization: Bearer <secret>" credential mode maps ONLY to Custom Token mode with a non-empty
-	// secret (g5/g6 DoD: "token → URL + Authorization: Bearer <local-secret>"). Cloud + Oauth are native MCP OAuth
-	// (URL-only config, the client authorizes itself); None is anonymous. So only Token opts into the Bearer shape.
+	// This flag forwards a PLUGIN-held secret, which only Custom Token mode has (g5/g6 DoD: "token → URL +
+	// Authorization: Bearer <local-secret>"); Custom Oauth is native MCP OAuth and None is anonymous. Cloud does not
+	// need it: the sidecar writes `Authorization: Bearer agd_pk_…` for every agent from the project key it
+	// gets-or-mints itself (project-keys contract §7) and falls back to URL-only when signed out — the key never
+	// crosses IPC.
 	Info.bUseAccessToken = !bCloud
 		&& Config.AuthOption == EUnrealMcpAuthOption::Token
 		&& !Info.Token.IsEmpty();

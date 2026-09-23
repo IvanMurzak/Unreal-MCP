@@ -52,6 +52,12 @@ export interface AgentDefinition {
    * explicit PAT opt-in (Flow C) — see `lib/setup-mcp.ts` `shouldWriteAuthHeader`.
    */
   supportsOAuth: boolean;
+  /**
+   * `false` when a PAT (`--token`) must NOT be written into this client's config as a static header
+   * (Codex: the shared C# configurator keeps a PAT out of the file). A Cloud project key is always
+   * written. Default `true`.
+   */
+  patInHeader?: boolean;
   bodyPath: string;
   /** Resolve the absolute config-file path for a given project root. */
   getConfigPath(projectPath: string): string;
@@ -132,6 +138,16 @@ function authHeaders(
   return undefined;
 }
 
+/** Spreadable `{ [key]: { Authorization } }` (or `{}`) for an http server entry. */
+function withAuthHeaders(
+  token: string,
+  authRequired: boolean,
+  key = 'headers',
+): Record<string, Record<string, string>> {
+  const headers = authHeaders(token, authRequired);
+  return headers ? { [key]: headers } : {};
+}
+
 // ---------------------------------------------------------------------------
 // Agent Registry
 // ---------------------------------------------------------------------------
@@ -156,7 +172,7 @@ export const agentRegistry: readonly AgentDefinition[] = [
     getHttpProps: (url, token, authRequired) => ({
       type: 'http',
       url,
-      ...(authHeaders(token, authRequired) ? { headers: authHeaders(token, authRequired) } : {}),
+      ...withAuthHeaders(token, authRequired),
     }),
     stdioRemoveKeys: ['type', 'url'],
     httpRemoveKeys: ['command', 'args', 'headers'],
@@ -188,7 +204,7 @@ export const agentRegistry: readonly AgentDefinition[] = [
     getHttpProps: (url, token, authRequired) => ({
       type: 'http',
       url,
-      ...(authHeaders(token, authRequired) ? { headers: authHeaders(token, authRequired) } : {}),
+      ...withAuthHeaders(token, authRequired),
     }),
     stdioRemoveKeys: ['url'],
     httpRemoveKeys: ['command', 'args', 'headers'],
@@ -212,7 +228,7 @@ export const agentRegistry: readonly AgentDefinition[] = [
     getHttpProps: (url, token, authRequired) => ({
       type: 'http',
       url,
-      ...(authHeaders(token, authRequired) ? { headers: authHeaders(token, authRequired) } : {}),
+      ...withAuthHeaders(token, authRequired),
     }),
     stdioRemoveKeys: ['url'],
     httpRemoveKeys: ['command', 'args', 'headers'],
@@ -236,7 +252,7 @@ export const agentRegistry: readonly AgentDefinition[] = [
     getHttpProps: (url, token, authRequired) => ({
       type: 'http',
       url,
-      ...(authHeaders(token, authRequired) ? { headers: authHeaders(token, authRequired) } : {}),
+      ...withAuthHeaders(token, authRequired),
     }),
     stdioRemoveKeys: ['url'],
     httpRemoveKeys: ['command', 'args', 'headers'],
@@ -260,7 +276,7 @@ export const agentRegistry: readonly AgentDefinition[] = [
     getHttpProps: (url, token, authRequired) => ({
       type: 'http',
       url,
-      ...(authHeaders(token, authRequired) ? { headers: authHeaders(token, authRequired) } : {}),
+      ...withAuthHeaders(token, authRequired),
     }),
     stdioRemoveKeys: ['url'],
     httpRemoveKeys: ['command', 'args', 'headers'],
@@ -286,7 +302,7 @@ export const agentRegistry: readonly AgentDefinition[] = [
       enabled: true,
       type: 'http',
       url,
-      ...(authHeaders(token, authRequired) ? { headers: authHeaders(token, authRequired) } : {}),
+      ...withAuthHeaders(token, authRequired),
     }),
     stdioRemoveKeys: ['disabled', 'url'],
     httpRemoveKeys: ['disabled', 'command', 'args', 'headers'],
@@ -311,7 +327,7 @@ export const agentRegistry: readonly AgentDefinition[] = [
       type: 'http',
       url,
       tools: ['*'],
-      ...(authHeaders(token, authRequired) ? { headers: authHeaders(token, authRequired) } : {}),
+      ...withAuthHeaders(token, authRequired),
     }),
     stdioRemoveKeys: ['url', 'type'],
     httpRemoveKeys: ['command', 'args', 'headers'],
@@ -335,7 +351,7 @@ export const agentRegistry: readonly AgentDefinition[] = [
     getHttpProps: (url, token, authRequired) => ({
       type: 'http',
       url,
-      ...(authHeaders(token, authRequired) ? { headers: authHeaders(token, authRequired) } : {}),
+      ...withAuthHeaders(token, authRequired),
     }),
     stdioRemoveKeys: ['url'],
     httpRemoveKeys: ['command', 'args', 'headers'],
@@ -357,12 +373,14 @@ export const agentRegistry: readonly AgentDefinition[] = [
       command: serverPath,
       args: stdioArgs(port, auth, token),
     }),
-    getHttpProps: (url, _token, _authRequired) => ({
+    // Antigravity reads static headers from `headers` (project keys, contract §7).
+    getHttpProps: (url, token, authRequired) => ({
       disabled: false,
       serverUrl: url,
+      ...withAuthHeaders(token, authRequired),
     }),
     stdioRemoveKeys: ['url', 'serverUrl', 'type'],
-    httpRemoveKeys: ['command', 'args', 'url', 'type'],
+    httpRemoveKeys: ['command', 'args', 'url', 'type', 'headers'],
   },
 
   // ── Cline ───────────────────────────────────────────────────
@@ -399,7 +417,7 @@ export const agentRegistry: readonly AgentDefinition[] = [
     getHttpProps: (url, token, authRequired) => ({
       type: 'streamableHttp',
       url,
-      ...(authHeaders(token, authRequired) ? { headers: authHeaders(token, authRequired) } : {}),
+      ...withAuthHeaders(token, authRequired),
     }),
     stdioRemoveKeys: ['url'],
     httpRemoveKeys: ['command', 'args', 'headers'],
@@ -424,7 +442,7 @@ export const agentRegistry: readonly AgentDefinition[] = [
       type: 'remote',
       enabled: true,
       url,
-      ...(authHeaders(token, authRequired) ? { headers: authHeaders(token, authRequired) } : {}),
+      ...withAuthHeaders(token, authRequired),
     }),
     stdioRemoveKeys: ['url', 'args'],
     httpRemoveKeys: ['command', 'args', 'headers'],
@@ -438,6 +456,8 @@ export const agentRegistry: readonly AgentDefinition[] = [
     configPathDisplay: '.codex/config.toml',
     configFormat: 'toml',
     supportsOAuth: true,
+    // A PAT never lands in `.codex/config.toml`; only the project key goes into `http_headers`.
+    patInHeader: false,
     bodyPath: 'mcp_servers',
     getConfigPath: (p) => path.join(p, '.codex', 'config.toml'),
     // Codex's stdio arg vector omits the bearer token (it is not accepted on
@@ -448,11 +468,15 @@ export const agentRegistry: readonly AgentDefinition[] = [
       args: [`port=${port}`, `client-transport=stdio`, `authorization=${auth}`],
       tool_timeout_sec: 300,
     }),
-    getHttpProps: (url, _token, _authRequired) => ({
+    // Codex takes static http headers from the `http_headers` inline table (project keys, contract §7) —
+    // never the legacy `bearer_token_env_var` indirection. The TOML writer replaces the whole section, so a
+    // URL-only rewrite drops any previous header.
+    getHttpProps: (url, token, authRequired) => ({
       enabled: true,
       url,
       tool_timeout_sec: 300,
       startup_timeout_sec: 30,
+      ...withAuthHeaders(token, authRequired, 'http_headers'),
     }),
     stdioRemoveKeys: ['url', 'type', 'startup_timeout_sec'],
     httpRemoveKeys: ['command', 'args', 'type'],
@@ -478,7 +502,7 @@ export const agentRegistry: readonly AgentDefinition[] = [
       type: 'streamable-http',
       disabled: false,
       url,
-      ...(authHeaders(token, authRequired) ? { headers: authHeaders(token, authRequired) } : {}),
+      ...withAuthHeaders(token, authRequired),
     }),
     stdioRemoveKeys: ['url'],
     httpRemoveKeys: ['command', 'args', 'headers'],
@@ -502,7 +526,7 @@ export const agentRegistry: readonly AgentDefinition[] = [
     getHttpProps: (url, token, authRequired) => ({
       type: 'http',
       url,
-      ...(authHeaders(token, authRequired) ? { headers: authHeaders(token, authRequired) } : {}),
+      ...withAuthHeaders(token, authRequired),
     }),
     stdioRemoveKeys: ['url'],
     httpRemoveKeys: ['command', 'args', 'headers'],
@@ -706,8 +730,15 @@ function tomlValue(v: unknown): string {
   if (Array.isArray(v)) {
     return `[${v.map(tomlValue).join(', ')}]`;
   }
-  // null/undefined/object have no valid TOML scalar form here; emit a quoted
-  // string so we never produce an invalid bare token (defensive fallback).
+  if (v !== null && typeof v === 'object') {
+    // An inline table (Codex `http_headers = { Authorization = "Bearer …" }`).
+    const entries = Object.entries(v as Record<string, unknown>).map(
+      ([k, val]) => `${/^[A-Za-z0-9_-]+$/.test(k) ? k : tomlValue(k)} = ${tomlValue(val)}`,
+    );
+    return `{ ${entries.join(', ')} }`;
+  }
+  // null/undefined have no valid TOML scalar form here; emit a quoted string so
+  // we never produce an invalid bare token (defensive fallback).
   return `"${String(v).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 }
 

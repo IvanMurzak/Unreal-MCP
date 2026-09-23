@@ -10,6 +10,7 @@
 
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Threading.Tasks;
 using com.IvanMurzak.Unreal.MCP.Bridge.Host;
 using com.IvanMurzak.Unreal.MCP.Bridge.Ipc;
 using Xunit;
@@ -42,7 +43,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         }
 
         [Fact]
-        public void Dispatch_AgentsList_RoutesAndReturnsCorrelatedResult()
+        public async Task Dispatch_AgentsList_RoutesAndReturnsCorrelatedResult()
         {
             using var host = BuildHost();
             var request = new AgentsListRequestMessage
@@ -52,7 +53,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
                 Settings = new AgentSettingsDto { ProjectRootPath = "C:/tmp/proj", Host = "http://localhost:1/mcp" },
             };
 
-            var result = host.ServeAgentConfigRequest(IpcProtocol.Type.AgentsList, Parse(request));
+            var result = await host.ServeAgentConfigRequestAsync(IpcProtocol.Type.AgentsList, Parse(request));
 
             Assert.Equal("req-1", result.RequestId);
             Assert.Equal(IpcProtocol.Type.AgentsList, result.Op);
@@ -62,7 +63,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         }
 
         [Fact]
-        public void Dispatch_AgentStatus_RoutesToTheNamedAgent()
+        public async Task Dispatch_AgentStatus_RoutesToTheNamedAgent()
         {
             using var host = BuildHost();
             var request = new AgentStatusRequestMessage
@@ -73,7 +74,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
                 Settings = new AgentSettingsDto { ProjectRootPath = "C:/tmp/proj", Host = "http://localhost:1/mcp" },
             };
 
-            var result = host.ServeAgentConfigRequest(IpcProtocol.Type.AgentStatus, Parse(request));
+            var result = await host.ServeAgentConfigRequestAsync(IpcProtocol.Type.AgentStatus, Parse(request));
 
             Assert.Equal("req-2", result.RequestId);
             Assert.True(result.Ok);
@@ -81,12 +82,44 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         }
 
         [Fact]
-        public void Dispatch_UnknownType_ReturnsFailureResultNotThrow()
+        public async Task Dispatch_AgentRegenerateKey_Routes_AndFailsCleanlyWhenSignedOut()
+        {
+            // No machine credential store is wired here (the static-bearer test seam) — i.e. signed out — so the
+            // regenerate is refused with a correlated, non-throwing result instead of minting anything.
+            using var host = BuildHost();
+            var request = new AgentRegenerateKeyRequestMessage
+            {
+                RequestId = "req-4",
+                AgentId = "claude-code",
+                Settings = new AgentSettingsDto { ProjectRootPath = "C:/tmp/proj", Host = "https://ai-game.dev/mcp", ConnectionMode = "Cloud" },
+            };
+
+            var result = await host.ServeAgentConfigRequestAsync(IpcProtocol.Type.AgentRegenerateKey, Parse(request));
+
+            Assert.Equal("req-4", result.RequestId);
+            Assert.Equal(IpcProtocol.Type.AgentRegenerateKey, result.Op);
+            Assert.False(result.Ok);
+            Assert.Equal(ProjectKeyStatus.SignedOut, result.ProjectKeyStatus);
+        }
+
+        [Theory]
+        [InlineData(null, "https://ai-game.dev")]
+        [InlineData("", "https://ai-game.dev")]
+        [InlineData("not a url", "https://ai-game.dev")]
+        [InlineData("https://AI-Game.dev:443/mcp/", "https://ai-game.dev")]
+        [InlineData("http://agd.localhost/", "http://agd.localhost")]
+        public void ProjectKeyIssuer_IsTheCredentialServerTargetOrigin(string? serverTarget, string expected)
+        {
+            Assert.Equal(expected, SidecarHost.ProjectKeyIssuer(serverTarget));
+        }
+
+        [Fact]
+        public async Task Dispatch_UnknownType_ReturnsFailureResultNotThrow()
         {
             using var host = BuildHost();
             var node = new JsonObject { ["type"] = "agent-bogus", ["requestId"] = "req-3" };
 
-            var result = host.ServeAgentConfigRequest("agent-bogus", node);
+            var result = await host.ServeAgentConfigRequestAsync("agent-bogus", node);
 
             Assert.Equal("req-3", result.RequestId);
             Assert.False(result.Ok);
