@@ -13,7 +13,7 @@
 //
 // No top-level side effects; no runtime deps beyond TypeScript types.
 
-import type { ProjectKeyResolver } from '@baizor/gamedev-cli-core';
+import type { ProjectKeyResolver, ProjectKeyResult, SetupMcpCredential } from '@baizor/gamedev-cli-core';
 import type { MachineAuthOptions } from '../utils/config.js';
 import type { ExtensionDescriptor } from '../utils/extensions-catalog.js';
 import type { InstallSourceKind } from '../utils/extension-source.js';
@@ -448,8 +448,7 @@ export interface SetupMcpOptions {
   onProgress?: ProgressCallback;
 }
 
-/** The credential a written http config carries: an explicit PAT, a Cloud project key, or none (URL-only). */
-export type SetupMcpCredential = 'token' | 'project-key' | 'none';
+export type { SetupMcpCredential };
 
 export interface SetupMcpSuccess {
   kind: 'success';
@@ -465,7 +464,7 @@ export interface SetupMcpSuccess {
   /** The server-side id of the project key written (credential `project-key` only). */
   projectKeyId?: string;
   /** Whether the project key was reused from the cache or freshly minted. */
-  projectKeySource?: 'reused' | 'minted';
+  projectKeySource?: Extract<ProjectKeyResult, { kind: 'ok' }>['source'];
   warnings: string[];
   nextSteps: string[];
 }

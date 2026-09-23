@@ -378,6 +378,18 @@ describe('setupMcp — Cloud project key (contract §7)', () => {
     expect(order).toEqual(['revoke-after-write']);
   });
 
+  it('switching a keyed http config to stdio drops the project-key header', async () => {
+    const dir = tmp();
+    await setupMcp({ agentId: 'claude-code', projectDir: dir, transport: 'http', url: 'https://ai-game.dev', projectKeyResolver: keyResolver().resolver });
+    const r = await setupMcp({
+      agentId: 'claude-code', projectDir: dir, transport: 'stdio', env: {},
+      downloadServerImpl: async () => ({ kind: 'success', success: true, serverPath: path.join(dir, 'server'), source: 'download', version: '8.0.0', warnings: [] }),
+    });
+    expect(r.kind).toBe('success');
+    const content = fs.readFileSync(path.join(dir, '.mcp.json'), 'utf-8');
+    expect(content).not.toContain(KEY);
+  });
+
   it('--regenerate-key fails (and writes nothing) when no key can be minted', async () => {
     const dir = tmp();
     const r = await setupMcp({ agentId: 'claude-code', projectDir: dir, transport: 'http', url: 'https://ai-game.dev', regenerateKey: true, projectKeyResolver: noLogin });

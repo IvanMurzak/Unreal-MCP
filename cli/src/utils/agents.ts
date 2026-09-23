@@ -132,6 +132,16 @@ function authHeaders(
   return undefined;
 }
 
+/** Spreadable `{ [key]: { Authorization } }` (or `{}`) for an http server entry. */
+function withAuthHeaders(
+  token: string,
+  authRequired: boolean,
+  key = 'headers',
+): Record<string, Record<string, string>> {
+  const headers = authHeaders(token, authRequired);
+  return headers ? { [key]: headers } : {};
+}
+
 // ---------------------------------------------------------------------------
 // Agent Registry
 // ---------------------------------------------------------------------------
@@ -156,7 +166,7 @@ export const agentRegistry: readonly AgentDefinition[] = [
     getHttpProps: (url, token, authRequired) => ({
       type: 'http',
       url,
-      ...(authHeaders(token, authRequired) ? { headers: authHeaders(token, authRequired) } : {}),
+      ...withAuthHeaders(token, authRequired),
     }),
     stdioRemoveKeys: ['type', 'url'],
     httpRemoveKeys: ['command', 'args', 'headers'],
@@ -188,7 +198,7 @@ export const agentRegistry: readonly AgentDefinition[] = [
     getHttpProps: (url, token, authRequired) => ({
       type: 'http',
       url,
-      ...(authHeaders(token, authRequired) ? { headers: authHeaders(token, authRequired) } : {}),
+      ...withAuthHeaders(token, authRequired),
     }),
     stdioRemoveKeys: ['url'],
     httpRemoveKeys: ['command', 'args', 'headers'],
@@ -212,7 +222,7 @@ export const agentRegistry: readonly AgentDefinition[] = [
     getHttpProps: (url, token, authRequired) => ({
       type: 'http',
       url,
-      ...(authHeaders(token, authRequired) ? { headers: authHeaders(token, authRequired) } : {}),
+      ...withAuthHeaders(token, authRequired),
     }),
     stdioRemoveKeys: ['url'],
     httpRemoveKeys: ['command', 'args', 'headers'],
@@ -236,7 +246,7 @@ export const agentRegistry: readonly AgentDefinition[] = [
     getHttpProps: (url, token, authRequired) => ({
       type: 'http',
       url,
-      ...(authHeaders(token, authRequired) ? { headers: authHeaders(token, authRequired) } : {}),
+      ...withAuthHeaders(token, authRequired),
     }),
     stdioRemoveKeys: ['url'],
     httpRemoveKeys: ['command', 'args', 'headers'],
@@ -260,7 +270,7 @@ export const agentRegistry: readonly AgentDefinition[] = [
     getHttpProps: (url, token, authRequired) => ({
       type: 'http',
       url,
-      ...(authHeaders(token, authRequired) ? { headers: authHeaders(token, authRequired) } : {}),
+      ...withAuthHeaders(token, authRequired),
     }),
     stdioRemoveKeys: ['url'],
     httpRemoveKeys: ['command', 'args', 'headers'],
@@ -286,7 +296,7 @@ export const agentRegistry: readonly AgentDefinition[] = [
       enabled: true,
       type: 'http',
       url,
-      ...(authHeaders(token, authRequired) ? { headers: authHeaders(token, authRequired) } : {}),
+      ...withAuthHeaders(token, authRequired),
     }),
     stdioRemoveKeys: ['disabled', 'url'],
     httpRemoveKeys: ['disabled', 'command', 'args', 'headers'],
@@ -311,7 +321,7 @@ export const agentRegistry: readonly AgentDefinition[] = [
       type: 'http',
       url,
       tools: ['*'],
-      ...(authHeaders(token, authRequired) ? { headers: authHeaders(token, authRequired) } : {}),
+      ...withAuthHeaders(token, authRequired),
     }),
     stdioRemoveKeys: ['url', 'type'],
     httpRemoveKeys: ['command', 'args', 'headers'],
@@ -335,7 +345,7 @@ export const agentRegistry: readonly AgentDefinition[] = [
     getHttpProps: (url, token, authRequired) => ({
       type: 'http',
       url,
-      ...(authHeaders(token, authRequired) ? { headers: authHeaders(token, authRequired) } : {}),
+      ...withAuthHeaders(token, authRequired),
     }),
     stdioRemoveKeys: ['url'],
     httpRemoveKeys: ['command', 'args', 'headers'],
@@ -361,7 +371,7 @@ export const agentRegistry: readonly AgentDefinition[] = [
     getHttpProps: (url, token, authRequired) => ({
       disabled: false,
       serverUrl: url,
-      ...(authHeaders(token, authRequired) ? { headers: authHeaders(token, authRequired) } : {}),
+      ...withAuthHeaders(token, authRequired),
     }),
     stdioRemoveKeys: ['url', 'serverUrl', 'type'],
     httpRemoveKeys: ['command', 'args', 'url', 'type', 'headers'],
@@ -401,7 +411,7 @@ export const agentRegistry: readonly AgentDefinition[] = [
     getHttpProps: (url, token, authRequired) => ({
       type: 'streamableHttp',
       url,
-      ...(authHeaders(token, authRequired) ? { headers: authHeaders(token, authRequired) } : {}),
+      ...withAuthHeaders(token, authRequired),
     }),
     stdioRemoveKeys: ['url'],
     httpRemoveKeys: ['command', 'args', 'headers'],
@@ -426,7 +436,7 @@ export const agentRegistry: readonly AgentDefinition[] = [
       type: 'remote',
       enabled: true,
       url,
-      ...(authHeaders(token, authRequired) ? { headers: authHeaders(token, authRequired) } : {}),
+      ...withAuthHeaders(token, authRequired),
     }),
     stdioRemoveKeys: ['url', 'args'],
     httpRemoveKeys: ['command', 'args', 'headers'],
@@ -458,7 +468,7 @@ export const agentRegistry: readonly AgentDefinition[] = [
       url,
       tool_timeout_sec: 300,
       startup_timeout_sec: 30,
-      ...(authHeaders(token, authRequired) ? { http_headers: authHeaders(token, authRequired) } : {}),
+      ...withAuthHeaders(token, authRequired, 'http_headers'),
     }),
     stdioRemoveKeys: ['url', 'type', 'startup_timeout_sec'],
     httpRemoveKeys: ['command', 'args', 'type'],
@@ -484,7 +494,7 @@ export const agentRegistry: readonly AgentDefinition[] = [
       type: 'streamable-http',
       disabled: false,
       url,
-      ...(authHeaders(token, authRequired) ? { headers: authHeaders(token, authRequired) } : {}),
+      ...withAuthHeaders(token, authRequired),
     }),
     stdioRemoveKeys: ['url'],
     httpRemoveKeys: ['command', 'args', 'headers'],
@@ -508,7 +518,7 @@ export const agentRegistry: readonly AgentDefinition[] = [
     getHttpProps: (url, token, authRequired) => ({
       type: 'http',
       url,
-      ...(authHeaders(token, authRequired) ? { headers: authHeaders(token, authRequired) } : {}),
+      ...withAuthHeaders(token, authRequired),
     }),
     stdioRemoveKeys: ['url'],
     httpRemoveKeys: ['command', 'args', 'headers'],

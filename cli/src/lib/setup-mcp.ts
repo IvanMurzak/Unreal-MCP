@@ -23,6 +23,7 @@ import {
   createProjectKeyResolver,
   unrealAdapter,
   type ProjectKeyResult,
+  type SetupMcpCredential,
 } from '@baizor/gamedev-cli-core';
 import { resolveConnection, appendMcp } from '../utils/config.js';
 import { asError } from '../utils/error.js';
@@ -41,7 +42,7 @@ import {
   SERVER_PATH_ENV_VAR,
 } from './download-server.js';
 import { emitProgress } from './progress.js';
-import type { McpTransport, SetupMcpCredential, SetupMcpOptions, SetupMcpResult } from './types.js';
+import type { McpTransport, SetupMcpOptions, SetupMcpResult } from './types.js';
 
 // Re-exported for compatibility: the §6 install-path resolver lives in
 // `download-server.ts` (single owner of the server-binary layout).
@@ -136,7 +137,9 @@ export async function setupMcp(opts: SetupMcpOptions): Promise<SetupMcpResult> {
       const port = generatePortFromDirectory(projectDir);
       const auth = conn.token ? 'required' : 'none';
       props = agent.getStdioProps(serverPath, port, auth, conn.token ?? '');
-      removeKeys = agent.stdioRemoveKeys;
+      // A stdio entry never carries a static http header: drop one a previous Cloud http run wrote,
+      // or a live project key would linger in the file.
+      removeKeys = [...agent.stdioRemoveKeys, 'headers'];
     } else {
       // http — point the agent at the resolved `<host>/mcp` client URL. The
       // `/mcp` segment is appended ONCE here (idempotently, tolerating a URL
@@ -198,20 +201,10 @@ export async function setupMcp(opts: SetupMcpOptions): Promise<SetupMcpResult> {
       // only for a non-OAuth client (`supportsOAuth:false`) or an EXPLICIT PAT opt-in (the
       // caller passed `--token`) — Flow C. An ambient token (from the project `.env` / process
       // env) never forces a header. See `shouldWriteAuthHeader`.
-      let secret = token;
-      let writeAuthHeader = shouldWriteAuthHeader({
-        token,
-        supportsOAuth: agent.supportsOAuth,
-        explicitPatOptIn,
-      });
-      if (key && !explicitPatOptIn) {
-        secret = key.key;
-        writeAuthHeader = true;
-        credential = 'project-key';
-      } else if (writeAuthHeader) {
-        credential = 'token';
-      }
-      props = agent.getHttpProps(httpUrl, secret, writeAuthHeader);
+      // A project key is only resolved without an explicit `--token`, so it never competes with one.
+      const writeAuthHeader = !!key || shouldWriteAuthHeader({ token, supportsOAuth: agent.supportsOAuth, explicitPatOptIn });
+      credential = key ? 'project-key' : writeAuthHeader ? 'token' : 'none';
+      props = agent.getHttpProps(httpUrl, key?.key ?? token, writeAuthHeader);
       removeKeys = agent.httpRemoveKeys;
     }
 

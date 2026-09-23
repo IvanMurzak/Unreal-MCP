@@ -296,13 +296,11 @@ void SUnrealMcpAgentConfigurators::OnAgentConfigResult(const TSharedPtr<FJsonObj
 		Result->TryGetStringField(TEXT("projectKeyHint"), ProjectKeyHint);
 	}
 
-	if (Op == TEXT("agent-regenerate-key"))
+	if (Op == TEXT("agent-regenerate-key") && bOk)
 	{
 		const TArray<TSharedPtr<FJsonValue>>* Rewritten = nullptr;
 		const int32 RewrittenCount = Result->TryGetArrayField(TEXT("rewrittenAgents"), Rewritten) && Rewritten ? Rewritten->Num() : 0;
-		LastKeyActionStatus = bOk
-			? FString::Printf(TEXT("Created a new project key and updated %d agent config(s)."), RewrittenCount)
-			: FString();
+		LastKeyActionStatus = FString::Printf(TEXT("Created a new project key and updated %d agent config(s)."), RewrittenCount);
 	}
 
 	if (Op == TEXT("agents-list"))
@@ -561,6 +559,7 @@ TSharedRef<SWidget> SUnrealMcpAgentConfigurators::MakeLinksRow()
 
 	// Fallback (older sidecar with no Links): the legacy DownloadUrl/TutorialUrl button pair.
 	const FString DownloadUrl = SelectedDescription.DownloadUrl;
+	const FText AgentName = FText::FromString(SelectedDescription.AgentName);
 	const FString TutorialUrl = SelectedDescription.TutorialUrl;
 	if (!DownloadUrl.IsEmpty() && DownloadUrl != TEXT("NA"))
 	{
@@ -568,7 +567,7 @@ TSharedRef<SWidget> SUnrealMcpAgentConfigurators::MakeLinksRow()
 		[
 			SNew(SButton)
 			.Text(LOCTEXT("DownloadAgent", "Download / Docs"))
-			.ToolTipText(FText::Format(LOCTEXT("DownloadAgentHint", "Open the {0} download / docs page in your browser."), FText::FromString(SelectedDescription.AgentName)))
+			.ToolTipText(FText::Format(LOCTEXT("DownloadAgentHint", "Open the {0} download / docs page in your browser."), AgentName))
 			.OnClicked(UnrealMcpStyleWidgets::OpenUrlClicked(DownloadUrl))
 		];
 	}
@@ -578,7 +577,7 @@ TSharedRef<SWidget> SUnrealMcpAgentConfigurators::MakeLinksRow()
 		[
 			SNew(SButton)
 			.Text(LOCTEXT("TutorialAgent", "Tutorial"))
-			.ToolTipText(FText::Format(LOCTEXT("TutorialAgentHint", "Open the {0} setup tutorial in your browser."), FText::FromString(SelectedDescription.AgentName)))
+			.ToolTipText(FText::Format(LOCTEXT("TutorialAgentHint", "Open the {0} setup tutorial in your browser."), AgentName))
 			.OnClicked(UnrealMcpStyleWidgets::OpenUrlClicked(TutorialUrl))
 		];
 	}
@@ -594,6 +593,7 @@ TSharedRef<SWidget> SUnrealMcpAgentConfigurators::MakeStatusRow()
 	// stale, else "Configure". (When ReconfigureNeeded the sidecar also prepends a "Reconfiguration Required" Alert
 	// section, rendered below as an Alert-kind item.) Falls back to bIsConfigured if Status is absent (older sidecar).
 	const bool bReconfigure = SelectedDescription.Status == EAiAgentConfiguratorStatus::ReconfigureNeeded || bConfigured;
+	const FText AgentName = FText::FromString(SelectedDescription.AgentName);
 
 	return SNew(SHorizontalBox)
 		+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
@@ -611,7 +611,7 @@ TSharedRef<SWidget> SUnrealMcpAgentConfigurators::MakeStatusRow()
 			SNew(SButton)
 			.IsEnabled(!bBusy)
 			.Text(bReconfigure ? LOCTEXT("Reconfigure", "Reconfigure") : LOCTEXT("Configure", "Configure"))
-			.ToolTipText(FText::Format(LOCTEXT("ConfigureHint", "Write the Unreal MCP entry into {0}'s config file."), FText::FromString(SelectedDescription.AgentName)))
+			.ToolTipText(FText::Format(LOCTEXT("ConfigureHint", "Write the Unreal MCP entry into {0}'s config file."), AgentName))
 			.OnClicked_Lambda([this]() { RequestConfigure(); return FReply::Handled(); })
 		]
 		+ SHorizontalBox::Slot().AutoWidth().Padding(6, 0, 0, 0).VAlign(VAlign_Center)
@@ -620,7 +620,7 @@ TSharedRef<SWidget> SUnrealMcpAgentConfigurators::MakeStatusRow()
 			.IsEnabled(!bBusy)
 			.Visibility(bConfigured ? EVisibility::Visible : EVisibility::Collapsed)
 			.Text(LOCTEXT("RemoveAgent", "Remove"))
-			.ToolTipText(FText::Format(LOCTEXT("RemoveAgentHint", "Remove the Unreal MCP entry from {0}'s config file."), FText::FromString(SelectedDescription.AgentName)))
+			.ToolTipText(FText::Format(LOCTEXT("RemoveAgentHint", "Remove the Unreal MCP entry from {0}'s config file."), AgentName))
 			.OnClicked_Lambda([this]() { RequestRemove(); return FReply::Handled(); })
 		];
 }
@@ -635,9 +635,9 @@ TSharedRef<SWidget> SUnrealMcpAgentConfigurators::MakeProjectKeyRow()
 	if (bInUse)
 		StatusText = LOCTEXT("ProjectKeyInUse", "Project key: in use");
 	else if (bSignedOut)
-		StatusText = LOCTEXT("ProjectKeySignedOut", "Project key: not signed in (agents use their own OAuth)");
+		StatusText = LOCTEXT("ProjectKeySignedOut", "Project key: not signed in");
 	else
-		StatusText = LOCTEXT("ProjectKeyNone", "Project key: none (agents use their own OAuth)");
+		StatusText = LOCTEXT("ProjectKeyNone", "Project key: none");
 
 	TSharedRef<SVerticalBox> Box = SNew(SVerticalBox)
 		+ SVerticalBox::Slot().AutoHeight()
