@@ -355,11 +355,17 @@ namespace UnrealMcpEditorTools
 			.Description(TEXT("Read recent engine log lines captured by the plugin's GLog ring buffer "
 			                  "(capped at 10000). Filter by minimum severity ('Fatal'|'Error'|'Warning'|"
 			                  "'Display'|'Log'|'Verbose'|'VeryVerbose'|'All'), exact category, and a message "
-			                  "substring; 'limit' returns the most-recent N after filtering. Read-only."))
+			                  "substring. Every entry carries a 'sequence'. Without 'sinceSequence' (or 0), 'limit' "
+			                  "returns the most-recent N after filtering. To poll, pass the previous response's "
+			                  "'highestSequence' as 'sinceSequence': you get only newer entries, oldest first (if "
+			                  "more than 'limit' match you get the oldest page; continue from the new "
+			                  "'highestSequence'). If returned sequences are lower than your cursor, the log "
+			                  "restarted (editor restart). Read-only."))
 			.ParamString(TEXT("verbosity"), TEXT("Minimum severity to include (default 'All')."))
 			.ParamString(TEXT("category"), TEXT("Exact log category (e.g. 'LogTemp'); empty = all."))
 			.ParamString(TEXT("search"), TEXT("Case-insensitive message substring; empty = all."))
 			.ParamInt(TEXT("limit"), TEXT("Max entries to return (most-recent first-trimmed); default 100, <=0 = all."))
+			.ParamInt(TEXT("sinceSequence"), TEXT("Only entries with sequence > this (oldest first). 0 or absent = the most-recent 'limit' entries."))
 			.ReadOnlyHint(true)
 			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
 			{
@@ -375,13 +381,19 @@ namespace UnrealMcpEditorTools
 				const FString Search = Call.GetString(TEXT("search"));
 				const int32 Limit = (int32)Call.GetInt(TEXT("limit"), 100);
 
+				const int64 SinceSequence = Call.GetInt(TEXT("sinceSequence"), 0);
+
 				const FUnrealMcpLogCollector& Collector = FUnrealMcpLogCollector::Get();
-				const TArray<FUnrealMcpLogEntry> Slice = Collector.Snapshot(MinVerbosity, Category, Search, Limit);
+				int64 NextCursor = 0;
+				const TArray<FUnrealMcpLogEntry> Slice = SinceSequence > 0
+					? Collector.SnapshotSince(SinceSequence, MinVerbosity, Category, Search, Limit, &NextCursor)
+					: Collector.Snapshot(MinVerbosity, Category, Search, Limit, &NextCursor);
 
 				TArray<TSharedPtr<FJsonValue>> Lines;
 				for (const FUnrealMcpLogEntry& Entry : Slice)
 				{
 					TSharedPtr<FJsonObject> L = MakeShared<FJsonObject>();
+					L->SetNumberField(TEXT("sequence"), static_cast<double>(Entry.Sequence));
 					L->SetStringField(TEXT("timestamp"), Entry.Timestamp.ToIso8601());
 					L->SetStringField(TEXT("verbosity"), FUnrealMcpLogCollector::VerbosityToString(Entry.Verbosity));
 					L->SetStringField(TEXT("category"), Entry.Category.ToString());
@@ -392,6 +404,8 @@ namespace UnrealMcpEditorTools
 				TSharedPtr<FJsonObject> S = MakeShared<FJsonObject>();
 				S->SetNumberField(TEXT("count"), Lines.Num());
 				S->SetNumberField(TEXT("totalBuffered"), Collector.Num());
+				// The cursor to pass as the next 'sinceSequence' (see SnapshotSince for the exact rule).
+				S->SetNumberField(TEXT("highestSequence"), static_cast<double>(NextCursor));
 				S->SetArrayField(TEXT("logs"), Lines);
 				return FUnrealMcpToolResult::Success(
 					FString::Printf(TEXT("Returned %d log line(s) (%d buffered)."), Lines.Num(), Collector.Num()), S);

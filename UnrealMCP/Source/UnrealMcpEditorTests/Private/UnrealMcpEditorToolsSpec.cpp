@@ -232,6 +232,196 @@ void FUnrealMcpEditorToolsSpec::Define()
 		});
 	});
 
+	// console-get-logs `sinceSequence` cursor (taskflow agent-context-efficiency, row e1). The collector specs
+	// drive TEST-LOCAL, never-registered FUnrealMcpLogCollector instances, so they neither touch the live
+	// shared buffer nor depend on what else the editor is logging. The one tool-level spec uses the shared
+	// singleton but never calls Clear() and only matches its own unique needle.
+	Describe("console cursor", [this]()
+	{
+		auto Feed = [](FUnrealMcpLogCollector& C, const TCHAR* Category, const FString& Msg)
+		{
+			C.Serialize(*Msg, ELogVerbosity::Log, FName(Category));
+		};
+
+		auto Seqs = [](const TArray<FUnrealMcpLogEntry>& Slice)
+		{
+			TArray<int64> Out;
+			for (const FUnrealMcpLogEntry& E : Slice) Out.Add(E.Sequence);
+			return Out;
+		};
+
+		// Array equality with the two arrays in the failure message (no reliance on a TArray TestEqual overload).
+		auto SeqEq = [this](const TCHAR* What, const TArray<int64>& Actual, const TArray<int64>& Expected)
+		{
+			auto Join = [](const TArray<int64>& A)
+			{
+				FString Out;
+				for (int64 V : A) Out += FString::Printf(TEXT("%lld "), V);
+				return Out;
+			};
+			TestTrue(*FString::Printf(TEXT("%s (got [%s] expected [%s])"), What, *Join(Actual), *Join(Expected)), Actual == Expected);
+		};
+
+		It("assigns dense ascending sequences from 1 in capture order", [this, Feed, Seqs]()
+		{
+			FUnrealMcpLogCollector C;
+			TestEqual(TEXT("nothing captured yet"), C.HighestSequence(), (int64)0);
+			for (int32 I = 0; I < 5; ++I) Feed(C, TEXT("LogMcpSeq"), FString::Printf(TEXT("line %d"), I));
+
+			const TArray<int64> S = Seqs(C.SnapshotSince(0, ELogVerbosity::All, FString(), FString(), 0));
+			TestEqual(TEXT("five entries"), S.Num(), 5);
+			for (int32 I = 0; I < S.Num(); ++I)
+				TestEqual(*FString::Printf(TEXT("entry %d sequence"), I), S[I], (int64)(I + 1));
+			TestEqual(TEXT("high-water mark"), C.HighestSequence(), (int64)5);
+		});
+
+		It("pages with no gaps or duplicates: the union of pages equals the full filtered set", [this, Feed, Seqs, SeqEq]()
+		{
+			FUnrealMcpLogCollector C;
+			// Interleave matching (LogMcpA) and non-matching (LogMcpB) entries so a newest-page or
+			// filter-after-limit implementation drops or repeats matching entries.
+			TArray<int64> Expected;
+			for (int32 I = 0; I < 40; ++I)
+			{
+				const bool bMatch = (I % 3) != 1;
+				Feed(C, bMatch ? TEXT("LogMcpA") : TEXT("LogMcpB"), FString::Printf(TEXT("page line %d"), I));
+				if (bMatch) Expected.Add(I + 1);
+			}
+
+			TArray<int64> Union;
+			int64 Cursor = 0;
+			int32 Pages = 0;
+			for (; Pages < 50; ++Pages)
+			{
+				int64 Next = 0;
+				const TArray<FUnrealMcpLogEntry> Page = C.SnapshotSince(Cursor, ELogVerbosity::All, TEXT("LogMcpA"), FString(), 4, &Next);
+				if (Page.Num() == 0) { Cursor = Next; break; }
+				TestTrue(TEXT("page respects limit"), Page.Num() <= 4);
+				Union.Append(Seqs(Page));
+				TestTrue(TEXT("next cursor is at or past the page's last entry"), Next >= Page.Last().Sequence);
+				Cursor = Next;
+			}
+			TestTrue(TEXT("paging terminated"), Pages < 50);
+			SeqEq(TEXT("union of pages == the full matching set, oldest-first, no gaps/duplicates"), Union, Expected);
+			TestEqual(TEXT("final cursor is the high-water mark"), Cursor, C.HighestSequence());
+		});
+
+		It("keeps the counter across eviction and Clear", [this, Feed, Seqs]()
+		{
+			FUnrealMcpLogCollector C;
+			const int32 Total = FUnrealMcpLogCollector::MaxEntries + 5; // crosses the cap exactly once
+			for (int32 I = 0; I < Total; ++I) Feed(C, TEXT("LogMcpEvict"), FString::Printf(TEXT("e%d"), I));
+
+			TestTrue(TEXT("eviction happened"), C.Num() < Total);
+			TestEqual(TEXT("counter did not reset on eviction"), C.HighestSequence(), (int64)Total);
+
+			int64 Next = 0;
+			const TArray<FUnrealMcpLogEntry> Oldest = C.SnapshotSince(0, ELogVerbosity::All, FString(), FString(), 1, &Next);
+			TestEqual(TEXT("one entry"), Oldest.Num(), 1);
+			if (Oldest.Num() == 1)
+				TestEqual(TEXT("oldest retained is the first non-evicted sequence"), Oldest[0].Sequence, (int64)(FUnrealMcpLogCollector::EvictChunk + 1));
+
+			Feed(C, TEXT("LogMcpEvict"), TEXT("after eviction"));
+			TestEqual(TEXT("next entry continues the counter"), C.HighestSequence(), (int64)(Total + 1));
+
+			C.Clear();
+			Feed(C, TEXT("LogMcpEvict"), TEXT("after clear"));
+			const TArray<int64> AfterClear = Seqs(C.SnapshotSince(0, ELogVerbosity::All, FString(), FString(), 0));
+			TestEqual(TEXT("one entry after Clear"), AfterClear.Num(), 1);
+			if (AfterClear.Num() == 1)
+				TestEqual(TEXT("Clear does not reset the counter"), AfterClear[0], (int64)(Total + 2));
+		});
+
+		It("a cursor older than the retained history returns the oldest retained page", [this, Feed, Seqs, SeqEq]()
+		{
+			FUnrealMcpLogCollector C;
+			const int32 Total = FUnrealMcpLogCollector::MaxEntries + 5;
+			for (int32 I = 0; I < Total; ++I) Feed(C, TEXT("LogMcpEvict"), FString::Printf(TEXT("e%d"), I));
+
+			const TArray<int64> S = Seqs(C.SnapshotSince(10, ELogVerbosity::All, FString(), FString(), 3));
+			const int64 FirstRetained = (int64)FUnrealMcpLogCollector::EvictChunk + 1;
+			SeqEq(TEXT("three oldest retained entries"), S, TArray<int64>({ FirstRetained, FirstRetained + 1, FirstRetained + 2 }));
+		});
+
+		It("a stale cursor above the high-water mark (counter restarted) returns entries, not nothing", [this, Feed, Seqs, SeqEq]()
+		{
+			FUnrealMcpLogCollector C;
+			for (int32 I = 0; I < 5; ++I) Feed(C, TEXT("LogMcpStale"), FString::Printf(TEXT("s%d"), I));
+
+			int64 Next = 0;
+			const TArray<int64> S = Seqs(C.SnapshotSince(999, ELogVerbosity::All, FString(), FString(), 0, &Next));
+			SeqEq(TEXT("stale cursor returns the whole (oldest) page"), S, TArray<int64>({ 1, 2, 3, 4, 5 }));
+			TestEqual(TEXT("next cursor is the high-water mark"), Next, (int64)5);
+
+			// A cursor AT the high-water mark is "caught up": nothing new, cursor unchanged.
+			const TArray<FUnrealMcpLogEntry> None = C.SnapshotSince(5, ELogVerbosity::All, FString(), FString(), 0, &Next);
+			TestEqual(TEXT("caught-up cursor returns nothing"), None.Num(), 0);
+			TestEqual(TEXT("caught-up cursor stays put"), Next, (int64)5);
+		});
+
+		It("console-get-logs: sinceSequence returns only newer entries, oldest first, with sequence + highestSequence", [this, SeqEq]()
+		{
+			FUnrealMcpToolRegistry Registry; UnrealMcpEditorTools::Register(Registry);
+
+			// Shared singleton, NON-destructive: no Clear(), and every read filters on a unique needle.
+			FUnrealMcpLogCollector& Collector = FUnrealMcpLogCollector::Get();
+			const bool bWasRegistered = Collector.IsRegistered();
+			Collector.Startup();
+
+			const FString Needle = TEXT("McpCursorProbe_8e21");
+			for (int32 I = 0; I < 3; ++I)
+				UE_LOG(LogTemp, Display, TEXT("%s #%d"), *Needle, I);
+			GLog->Flush();
+
+			auto Fetch = [this, &Registry, &Needle](int64 Since, int32 Limit, TArray<int64>& OutSeqs, int64& OutHighest) -> bool
+			{
+				TSharedPtr<FJsonObject> A = Args();
+				A->SetStringField(TEXT("search"), Needle);
+				A->SetNumberField(TEXT("sinceSequence"), (double)Since);
+				A->SetNumberField(TEXT("limit"), (double)Limit);
+				const FUnrealMcpToolResult R = Run(Registry, TEXT("console-get-logs"), A);
+				OutSeqs.Reset(); OutHighest = -1;
+				if (!R.bSuccess || !R.Structured.IsValid()) return false;
+				double H = -1; R.Structured->TryGetNumberField(TEXT("highestSequence"), H); OutHighest = (int64)H;
+				const TArray<TSharedPtr<FJsonValue>>* Logs = nullptr;
+				if (!R.Structured->TryGetArrayField(TEXT("logs"), Logs)) return false;
+				for (const TSharedPtr<FJsonValue>& V : *Logs)
+				{
+					double S = -1;
+					const TSharedPtr<FJsonObject>* O = nullptr;
+					if (V->TryGetObject(O) && (*O)->TryGetNumberField(TEXT("sequence"), S)) OutSeqs.Add((int64)S);
+					else OutSeqs.Add(-1); // a log without 'sequence' must fail the asserts below
+				}
+				return true;
+			};
+
+			TArray<int64> All; int64 HighAll = -1;
+			TestTrue(TEXT("baseline call succeeds"), Fetch(0, 100, All, HighAll));
+			TestEqual(TEXT("all three probe lines captured"), All.Num(), 3);
+			if (All.Num() == 3)
+			{
+				TestTrue(TEXT("sequences ascending and positive"), All[0] > 0 && All[0] < All[1] && All[1] < All[2]);
+				TestTrue(TEXT("highestSequence covers the newest entry"), HighAll >= All[2]);
+
+				TArray<int64> After; int64 HighAfter = -1;
+				TestTrue(TEXT("cursor call succeeds"), Fetch(All[0], 100, After, HighAfter));
+				SeqEq(TEXT("only entries newer than the cursor, oldest first"), After, TArray<int64>({ All[1], All[2] }));
+
+				TArray<int64> Page; int64 HighPage = -1;
+				TestTrue(TEXT("limited cursor call succeeds"), Fetch(All[0], 1, Page, HighPage));
+				SeqEq(TEXT("overflow returns the OLDEST page"), Page, TArray<int64>({ All[1] }));
+				TestEqual(TEXT("cut page's highestSequence is its last entry (continue without a gap)"), HighPage, All[1]);
+
+				TArray<int64> Stale; int64 HighStale = -1;
+				TestTrue(TEXT("stale cursor call succeeds"), Fetch(HighAll + 1000000, 100, Stale, HighStale));
+				SeqEq(TEXT("stale cursor returns the entries, not nothing"), Stale, All);
+			}
+
+			if (!bWasRegistered)
+				Collector.Shutdown();
+		});
+	});
+
 	Describe("reflection", [this]()
 	{
 		It("discovers a known BlueprintCallable static method with signature + flags", [this]()

@@ -14,6 +14,12 @@
  */
 struct FUnrealMcpLogEntry
 {
+	/**
+	 * Monotonic capture sequence, 1-based, assigned under the collector lock together with storing the
+	 * entry. Never reset by eviction or `Clear()` (only a process/editor restart restarts it) — it is the
+	 * cursor `console-get-logs` `sinceSequence` pages on.
+	 */
+	int64 Sequence = 0;
 	FDateTime Timestamp;                 // wall-clock (UTC) at capture
 	ELogVerbosity::Type Verbosity = ELogVerbosity::Log;
 	FName Category;
@@ -86,7 +92,27 @@ public:
 	 * @param Limit          max entries returned (the most-recent @p Limit after filtering); <=0 → all.
 	 */
 	TArray<FUnrealMcpLogEntry> Snapshot(ELogVerbosity::Type MinVerbosity, const FString& CategoryFilter,
-		const FString& Search, int32 Limit) const;
+		const FString& Search, int32 Limit, int64* OutNextCursor = nullptr) const;
+
+	/**
+	 * Cursor read for `console-get-logs` `sinceSequence`: entries with `Sequence > SinceSequence`,
+	 * **oldest-first**, in the order cursor -> filters -> ascending -> limit. When more matching entries
+	 * exist than @p Limit, the OLDEST @p Limit are returned (so the caller can continue without a gap).
+	 *
+	 * A cursor ABOVE the current high-water mark means the counter restarted (editor restart) — it is
+	 * treated as if it were below everything, returning the oldest page. A cursor below the oldest
+	 * retained entry (evicted history) naturally returns the oldest retained page.
+	 *
+	 * @param OutNextCursor if non-null, receives the sequence the caller should pass next, computed under
+	 *                      the same lock as the slice: the last returned sequence when the page was cut
+	 *                      by @p Limit, otherwise the current high-water mark (everything newer than the
+	 *                      cursor was either returned or filtered out).
+	 */
+	TArray<FUnrealMcpLogEntry> SnapshotSince(int64 SinceSequence, ELogVerbosity::Type MinVerbosity,
+		const FString& CategoryFilter, const FString& Search, int32 Limit, int64* OutNextCursor = nullptr) const;
+
+	/** Highest sequence assigned so far (0 when nothing was ever captured). Survives eviction and `Clear()`. */
+	int64 HighestSequence() const;
 
 	/** Human-readable severity token for a verbosity ("Error", "Warning", "Display", "Log", …). */
 	static FString VerbosityToString(ELogVerbosity::Type Verbosity);
@@ -94,12 +120,18 @@ public:
 	/** Parse a severity token (case-insensitive) into a verbosity; returns false on an unknown token. */
 	static bool ParseVerbosity(const FString& Token, ELogVerbosity::Type& OutVerbosity);
 
-private:
+	/**
+	 * Construct a standalone, UNREGISTERED collector (never attached to `GLog`). The process singleton
+	 * is `Get()`; this exists so specs can drive `Serialize()` / eviction / cursor paging against a
+	 * private buffer without touching the live shared one.
+	 */
 	FUnrealMcpLogCollector() = default;
 
+private:
 	void Capture(const TCHAR* Message, ELogVerbosity::Type Verbosity, const FName& Category);
 
 	mutable FCriticalSection Lock;
 	TArray<FUnrealMcpLogEntry> Entries;   // oldest-first; evicts from the front past MaxEntries
+	int64 LastSequence = 0;               // high-water mark; only ever increases (not reset by eviction/Clear)
 	bool bRegistered = false;
 };

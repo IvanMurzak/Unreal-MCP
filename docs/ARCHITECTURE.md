@@ -70,7 +70,10 @@ Prompts/Resources ship empty-but-wired (§10), as designed.
   needs a GPU-backed editor (headless `-nullrhi` returns a structured error).
 - **LogCollector (#22).** `console-get-logs` / `console-clear-logs` are backed by a module-startup
   `FUnrealMcpLogCollector` — a `GLog` `FOutputDevice` ring buffer (the Godot `GodotLogCollector`
-  pattern), as §10 describes.
+  pattern), as §10 describes. Every captured line carries a monotonic `sequence` (assigned under the
+  collector lock; not reset by eviction or `console-clear-logs`, only by an editor restart), and
+  `console-get-logs` takes an optional `sinceSequence` cursor: only newer entries, oldest first, with a
+  `highestSequence` to pass back. A cursor above the current high-water mark (restart) returns the oldest page.
 - **Device-code auth (#24).** The cloud OAuth device-code flow shipped in the main window (Authorize
   → `auth-start` → `device-auth` events render the verification URL + user code; Cancel/Revoke wired),
   per §1.3 / §7 item 4.
