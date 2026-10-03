@@ -69,6 +69,9 @@ void FUnrealMcpLogCollector::Capture(const TCHAR* Message, ELogVerbosity::Type V
 	Entry.Message = Message;
 
 	FScopeLock ScopeLock(&Lock);
+	// Assigned under the same lock that stores the entry, so sequences are dense and ascending in
+	// buffer order even though GLog calls Serialize from many threads.
+	Entry.Sequence = ++LastSequence;
 	Entries.Add(MoveTemp(Entry));
 	if (Entries.Num() > MaxEntries)
 	{
@@ -96,11 +99,13 @@ int32 FUnrealMcpLogCollector::Num() const
 }
 
 TArray<FUnrealMcpLogEntry> FUnrealMcpLogCollector::Snapshot(ELogVerbosity::Type MinVerbosity,
-	const FString& CategoryFilter, const FString& Search, int32 Limit) const
+	const FString& CategoryFilter, const FString& Search, int32 Limit, int64* OutNextCursor) const
 {
 	TArray<FUnrealMcpLogEntry> Out;
 
 	FScopeLock ScopeLock(&Lock);
+	if (OutNextCursor)
+		*OutNextCursor = LastSequence;
 	// Walk newest-first so we can stop as soon as the requested Limit is satisfied — this bounds both
 	// the copy work and the lock-hold time (a full 10k buffer with limit=100 copies 100 entries, not
 	// 10k). Entries is oldest-first, so reverse the result below to restore the newest-last contract.
@@ -121,6 +126,60 @@ TArray<FUnrealMcpLogEntry> FUnrealMcpLogCollector::Snapshot(ELogVerbosity::Type 
 
 	// Out is currently newest-first; the documented contract is newest-last, so reverse in place.
 	Algo::Reverse(Out);
+	return Out;
+}
+
+int64 FUnrealMcpLogCollector::HighestSequence() const
+{
+	FScopeLock ScopeLock(&Lock);
+	return LastSequence;
+}
+
+TArray<FUnrealMcpLogEntry> FUnrealMcpLogCollector::SnapshotSince(int64 SinceSequence, ELogVerbosity::Type MinVerbosity,
+	const FString& CategoryFilter, const FString& Search, int32 Limit, int64* OutNextCursor) const
+{
+	TArray<FUnrealMcpLogEntry> Out;
+
+	FScopeLock ScopeLock(&Lock);
+
+	// Backstop for a restarted counter: a cursor above everything ever assigned cannot refer to this run's
+	// entries, so behave as if it were below everything (oldest page).
+	if (SinceSequence < 0 || SinceSequence > LastSequence)
+		SinceSequence = 0;
+
+	// Entries is ascending by Sequence, so binary-search the first entry strictly after the cursor.
+	int32 Lo = 0;
+	int32 Hi = Entries.Num();
+	while (Lo < Hi)
+	{
+		const int32 Mid = Lo + (Hi - Lo) / 2;
+		if (Entries[Mid].Sequence <= SinceSequence)
+			Lo = Mid + 1;
+		else
+			Hi = Mid;
+	}
+
+	bool bCutByLimit = false;
+	for (int32 Idx = Lo; Idx < Entries.Num(); ++Idx)
+	{
+		const FUnrealMcpLogEntry& Entry = Entries[Idx];
+		if (MinVerbosity != ELogVerbosity::All && Entry.Verbosity > MinVerbosity)
+			continue;
+		if (!CategoryFilter.IsEmpty() && !Entry.Category.ToString().Equals(CategoryFilter, ESearchCase::IgnoreCase))
+			continue;
+		if (!Search.IsEmpty() && !Entry.Message.Contains(Search, ESearchCase::IgnoreCase))
+			continue;
+		if (Limit > 0 && Out.Num() >= Limit)
+		{
+			// One more matching entry exists beyond the page: the page is cut, continue from its last entry.
+			bCutByLimit = true;
+			break;
+		}
+		Out.Add(Entry);
+	}
+
+	if (OutNextCursor)
+		*OutNextCursor = (bCutByLimit && Out.Num() > 0) ? Out.Last().Sequence : LastSequence;
 	return Out;
 }
 
