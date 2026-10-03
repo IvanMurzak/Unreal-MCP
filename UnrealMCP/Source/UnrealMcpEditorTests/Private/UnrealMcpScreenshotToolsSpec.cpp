@@ -193,6 +193,27 @@ void FUnrealMcpScreenshotToolsSpec::Define()
 
 	Describe("image content result shape (GPU-free)", [this]()
 	{
+		// The app never saw screenshots because a result carrying structured content makes McpPlugin.Server
+		// return {status, structured} and drop the content array. The screenshot tools must therefore return
+		// the image + a metadata text block and NO structured content.
+		It("MakeImageResult returns an image block and a metadata text block with no structured content", [this]()
+		{
+			const FUnrealMcpToolResult Result = UnrealMcpScreenshotTools::MakeImageResult(
+				TEXT("camera 'Cam1'"), 640, 480, TEXT("aGVsbG8="), 1234);
+
+			TestTrue(TEXT("success"), Result.bSuccess);
+			TestFalse(TEXT("no structured content (it would drop the image server-side)"), Result.Structured.IsValid());
+			TestEqual(TEXT("exactly one image block"), Result.Images.Num(), 1);
+			if (Result.Images.Num() == 1)
+			{
+				TestEqual(TEXT("base64 carried verbatim"), Result.Images[0].Base64Data, FString(TEXT("aGVsbG8=")));
+				TestEqual(TEXT("mimeType"), Result.Images[0].MimeType, FString(TEXT("image/png")));
+			}
+			TestTrue(TEXT("text carries the source"), Result.Message.Contains(TEXT("camera 'Cam1'")));
+			TestTrue(TEXT("text carries the dimensions"), Result.Message.Contains(TEXT("640x480")));
+			TestTrue(TEXT("text carries the mimeType"), Result.Message.Contains(TEXT("image/png")));
+			TestTrue(TEXT("text carries the byte size"), Result.Message.Contains(TEXT("1234")));
+		});
 		// Locks the wire shape the sidecar's ProxyResponseMapper depends on: SuccessWithImage must carry
 		// the supplied base64 + mimeType in an image block, alongside (after, per the bridge server's
 		// content-array ordering) the human-readable text block. The bridge server appends Images[] after
