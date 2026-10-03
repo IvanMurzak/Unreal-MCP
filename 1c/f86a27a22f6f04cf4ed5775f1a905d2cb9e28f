@@ -1,0 +1,19 @@
+tests/chain-fixtures/5.8/tools.jsonl
+  s_50681b1b3a239d::t_b1e364f74dc3dd 1-66
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1cf86a27a22f6f04cf4ed5775f1a905d2cb9e28f",
+  "prompts": {},
+  "sessions": {
+    "s_50681b1b3a239d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "s_50681b1b3a239d",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

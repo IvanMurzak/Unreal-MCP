@@ -1,0 +1,19 @@
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpRuntimeSubsystemSpec.cpp
+  s_3e0a2681fef788::t_9921b73428ebbd 120-130,134-164
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.8",
+  "base_commit_sha": "624cfbe8a04ceeaeaa23b53b7b808d971a96456e",
+  "prompts": {},
+  "sessions": {
+    "s_3e0a2681fef788": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a9715f3a-114a-4de7-815b-97526309448b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
