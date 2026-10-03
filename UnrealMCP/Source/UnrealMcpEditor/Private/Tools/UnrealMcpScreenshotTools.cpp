@@ -67,6 +67,17 @@ namespace UnrealMcpScreenshotTools
 		}
 	}
 
+	FUnrealMcpToolResult MakeImageResult(const FString& Source, int32 Width, int32 Height, const FString& Base64Png, int32 EncodedBytes)
+	{
+		// The image block plus ONE text block carrying the metadata, and deliberately NO structured content:
+		// McpPlugin.Server's DirectToolCallEndpoints returns `{status, structured}` and DROPS the content array
+		// (image included) whenever StructuredContent is set, so the screenshot never reached the app.
+		const FString Message = FString::Printf(TEXT("Captured %s (%dx%d, image/png, %d bytes)."),
+			*Source, Width, Height, EncodedBytes);
+		UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] %s"), *Message);
+		return FUnrealMcpToolResult::SuccessWithImage(Message, Base64Png, nullptr, TEXT("image/png"));
+	}
+
 	// ---- Local helpers ----------------------------------------------------------------------------
 
 	namespace
@@ -91,18 +102,6 @@ namespace UnrealMcpScreenshotTools
 		{
 			for (FColor& Pixel : Pixels)
 				Pixel.A = 255;
-		}
-
-		/** The structured block every screenshot tool returns alongside the image content. */
-		TSharedPtr<FJsonObject> MakeStructured(const FString& Source, int32 Width, int32 Height, int32 EncodedBytes)
-		{
-			TSharedPtr<FJsonObject> Structured = MakeShared<FJsonObject>();
-			Structured->SetStringField(TEXT("source"), Source);
-			Structured->SetNumberField(TEXT("width"), Width);
-			Structured->SetNumberField(TEXT("height"), Height);
-			Structured->SetStringField(TEXT("mimeType"), TEXT("image/png"));
-			Structured->SetNumberField(TEXT("byteSize"), EncodedBytes);
-			return Structured;
 		}
 
 		/** Resample a captured buffer to (DstW, DstH) when it differs from the source size. */
@@ -207,9 +206,7 @@ namespace UnrealMcpScreenshotTools
 			if (!EncodePngBase64(Pixels, OutW, OutH, Base64, Bytes, Error))
 				return FUnrealMcpToolResult::Error(Error);
 
-			const FString Message = FString::Printf(TEXT("Captured %s (%dx%d PNG, %d bytes)."), *Source, OutW, OutH, Bytes);
-			UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] %s"), *Message);
-			return FUnrealMcpToolResult::SuccessWithImage(Message, Base64, MakeStructured(Source, OutW, OutH, Bytes));
+			return MakeImageResult(Source, OutW, OutH, Base64, Bytes);
 		}
 
 		/**
@@ -319,9 +316,7 @@ namespace UnrealMcpScreenshotTools
 			if (!EncodePngBase64(Pixels, Width, Height, Base64, Bytes, Error))
 				return FUnrealMcpToolResult::Error(Error);
 
-			const FString Message = FString::Printf(TEXT("Captured %s (%dx%d PNG, %d bytes)."), *Source, Width, Height, Bytes);
-			UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] %s"), *Message);
-			return FUnrealMcpToolResult::SuccessWithImage(Message, Base64, MakeStructured(Source, Width, Height, Bytes));
+			return MakeImageResult(Source, Width, Height, Base64, Bytes);
 		}
 
 		/**

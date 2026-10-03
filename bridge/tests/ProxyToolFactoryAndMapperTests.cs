@@ -108,6 +108,31 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             Assert.Equal("pong", result.StructuredContent!["result"]!.GetValue<string>());
         }
 
+        // Screenshot tools return an image block + a metadata text block and NO structured content:
+        // McpPlugin.Server's direct tool-call endpoint answers {status, structured} and drops the content
+        // array whenever StructuredContent is set, so the mapper must not invent one for an image result.
+        [Fact]
+        public void Map_ImageResultWithoutStructured_KeepsImageBlockAndLeavesStructuredNull()
+        {
+            var msg = new ToolResponseMessage
+            {
+                Status = IpcProtocol.Status.Success,
+                Content = JsonNode.Parse(
+                    "[{\"type\":\"text\",\"text\":\"Captured viewport (64x32, image/png, 10 bytes).\"}," +
+                    "{\"type\":\"image\",\"data\":\"aGVsbG8=\",\"mimeType\":\"image/png\"}]")!.AsArray(),
+                Structured = null,
+            };
+
+            var result = ProxyResponseMapper.Map(msg, "req-img");
+
+            Assert.Null(result.StructuredContent);
+            Assert.Equal(2, result.Content.Count);
+            Assert.Equal("text", result.Content[0].Type);
+            Assert.Contains("64x32", result.Content[0].Text);
+            Assert.Equal("image", result.Content[1].Type);
+            Assert.Equal("aGVsbG8=", result.Content[1].Data);
+            Assert.Equal("image/png", result.Content[1].MimeType);
+        }
         [Fact]
         public void Map_ErrorStatusMapsToError()
         {
