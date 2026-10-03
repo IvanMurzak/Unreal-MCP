@@ -1,0 +1,25 @@
+.github/workflows/release.yml
+  s_cf39f5fb556145::t_b4b1427e1b759e 719-722,730,737-745
+  s_cf39f5fb556145::t_20c5c3bd082886 676-686
+  s_cf39f5fb556145::t_04ce484547c551 26-30
+  s_cf39f5fb556145::t_c31194e9bc9461 14,25,297,301-304,308,311-319,326-354,675,691,718,724,728,736
+.github/workflows/test_pull_request.yml
+  s_cf39f5fb556145::t_92cc0e65d09615 153,155-156,161-163,166,170-176
+  s_cf39f5fb556145::t_57c8bcb0a11e7f 146-152,154,157-160
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.8",
+  "base_commit_sha": "ec7c165e3edb3e602740dfab4d8c3c8d2faf956f",
+  "prompts": {},
+  "sessions": {
+    "s_cf39f5fb556145": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cae79e43-d299-489d-8250-d2c7017cba2e",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

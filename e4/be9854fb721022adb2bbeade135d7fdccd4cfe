@@ -1,0 +1,166 @@
+cli/src/commands/remove-plugin.ts
+  s_908974782fafa1::t_a3084c1e423a26 1-18
+cli/src/cli.ts
+  s_908974782fafa1::t_678a5d7c9b6b82 3-6,8-20,22-23
+cli/tests/setup-mcp.test.ts
+  s_908974782fafa1::t_d89dcc368e8214 1-59
+cli/src/commands/login.ts
+  s_908974782fafa1::t_12d81e9cf0c75f 1-27
+cli/tests/integration.test.ts
+  s_908974782fafa1::t_486cc92c5822dc 1-51
+cli/tests/fixtures/LauncherInstalled.dat
+  s_908974782fafa1::t_4fd7bfa96fd936 1-28
+cli/src/commands/wait-for-ready.ts
+  s_908974782fafa1::t_b6887dd0ce57f5 1-29
+cli/src/lib/run-tool.ts
+  s_908974782fafa1::t_ab800d53e4df1e 1-161
+cli/src/commands/install-engine.ts
+  s_908974782fafa1::t_c213da0dbb9c04 1-26
+cli/src/utils/env-file.ts
+  s_908974782fafa1::t_d52c3a0aa015be 1-219
+cli/src/commands/configure.ts
+  s_908974782fafa1::t_88cfbd369b5146 1-46
+cli/tests/run-tool.test.ts
+  s_908974782fafa1::t_aa2d9988704f32 1-69
+cli/src/commands/setup-mcp.ts
+  s_908974782fafa1::t_ddfc840b235c59 1-35
+cli/tests/launcher.test.ts
+  s_908974782fafa1::t_040767c8ff5d8c 1-90
+cli/src/lib/close.ts
+  s_908974782fafa1::t_c44fc9924f25be 1-55,61,63-152
+  s_908974782fafa1::t_13b21e0d77b892 56-60,62
+cli/src/lib/open.ts
+  s_908974782fafa1::t_72e60de0ca31f0 1-151
+cli/src/commands/close.ts
+  s_908974782fafa1::t_40fad967f0eaab 1-21
+cli/src/utils/project.ts
+  s_908974782fafa1::t_d7c5d8b54e1575 1-104
+cli/tests/setup-skills.test.ts
+  s_908974782fafa1::t_2c41ddb4a1e0ca 1-47
+cli/src/lib/install-plugin.ts
+  s_908974782fafa1::t_c54a93aaeec56c 1-123
+cli/src/lib/setup-mcp.ts
+  s_908974782fafa1::t_24598a3de42ede 1-136
+cli/src/lib/engine.ts
+  s_908974782fafa1::t_7afde17d82b757 1-49
+cli/tests/helpers.ts
+  s_908974782fafa1::t_63994cd6c026bc 44
+  s_908974782fafa1::t_de140d9b74b296 1-3,7-43,45-56
+  s_908974782fafa1::t_518632d0fcfa3e 4-6
+cli/tests/status.test.ts
+  s_908974782fafa1::t_98c3ace035f463 1-59
+cli/src/lib/status.ts
+  s_908974782fafa1::t_f57d74645c8409 1-3,5-11,13-19,24,26-65
+cli/src/utils/engine.ts
+  s_908974782fafa1::t_09f8f7889cbaad 28-31,34,37,39
+  s_908974782fafa1::t_5e9d1119b12656 1-27,32-33,35-36,38,40-153
+cli/src/utils/repo.ts
+  s_908974782fafa1::t_766fd417fe6855 1-29
+cli/src/commands/install-plugin.ts
+  s_908974782fafa1::t_ed6c11e45aef21 1-31
+cli/tests/env-file.test.ts
+  s_908974782fafa1::t_c25ddff9cc6038 1-138
+cli/tests/configure.test.ts
+  s_908974782fafa1::t_b8ea9b458a9da2 1-78
+cli/tests/create-project.test.ts
+  s_908974782fafa1::t_315ef9c2c7903c 1-83
+cli/tests/bootstrap-local.test.ts
+  s_908974782fafa1::t_f2ad86f4907e5a 1-65
+cli/tests/update.test.ts
+  s_908974782fafa1::t_4227b4d1e1e4a3 1-64
+cli/src/lib/create-project.ts
+  s_908974782fafa1::t_f5f64fa578f46b 1-228
+cli/src/commands/setup-skills.ts
+  s_908974782fafa1::t_52055e0d515ad9 1-26
+cli/src/lib/bootstrap-local.ts
+  s_908974782fafa1::t_567df87cc55044 1-120
+cli/tests/close.test.ts
+  s_908974782fafa1::t_b22b3640b50724 1-59
+cli/README.md
+  s_908974782fafa1::t_3b571fd3bd6058 7,9,11-28,30-46,53,55-57
+cli/src/commands/open.ts
+  s_908974782fafa1::t_c35033e425bf4a 1-40
+cli/src/commands/run-tool-builder.ts
+  s_908974782fafa1::t_92b0c2c47805bb 1-43
+cli/tests/open.test.ts
+  s_908974782fafa1::t_6e1e02755d18ad 79,87
+  s_908974782fafa1::t_4a458955b23e5d 62,71
+  s_908974782fafa1::t_fa99dd08972dd7 1-2,5,8-18,31-61,63-70,72-78,80-86,88-90
+  s_908974782fafa1::t_9ccfc753704c7d 3-4,6-7,19-30
+cli/tests/cli.test.ts
+  s_908974782fafa1::t_9b583c4c7267bc 11,14-15,19-37,39,43-45,48,54-63,65,68-72
+cli/src/utils/launcher.ts
+  s_908974782fafa1::t_f5c4452b5c85c8 46,49
+  s_908974782fafa1::t_2e3bc07e4185cf 1-45,47-48,50-151
+cli/src/utils/config.ts
+  s_908974782fafa1::t_81c8e4f54ad8a1 1-91
+cli/tests/login.test.ts
+  s_908974782fafa1::t_817c5a53ccec88 1-93
+cli/src/utils/probe.ts
+  s_908974782fafa1::t_41749770d8f62e 1-84
+cli/src/lib/update.ts
+  s_908974782fafa1::t_e1933aa2e73b5c 1-101
+cli/src/index.ts
+  s_908974782fafa1::t_4537db0fcb4c68 3-19,25-52,54-62,65
+cli/src/commands/run-system-tool.ts
+  s_908974782fafa1::t_c51ce2e4931a39 1-9
+cli/tests/project.test.ts
+  s_908974782fafa1::t_cb4d756838ddde 1-47
+cli/tests/install-plugin.test.ts
+  s_908974782fafa1::t_6c1758c9f3ac0d 1-70
+cli/src/commands/bootstrap-local.ts
+  s_908974782fafa1::t_7cf60678c11a56 1-44
+cli/src/commands/status.ts
+  s_908974782fafa1::t_08e4c0490851b1 3,6-36
+cli/src/lib/configure.ts
+  s_908974782fafa1::t_59f3929501ef5c 1-73,75-107
+  s_908974782fafa1::t_dc0e3c282becb7 74
+cli/src/lib/install-engine.ts
+  s_908974782fafa1::t_78d3a4b250e6d9 1-78
+cli/src/commands/create-project.ts
+  s_908974782fafa1::t_df2d807f6bfcd4 1-26
+cli/tests/wait-for-ready.test.ts
+  s_908974782fafa1::t_b6c469aeb047b9 1-57
+cli/src/lib/setup-skills.ts
+  s_908974782fafa1::t_dd088afb9eb091 1-91
+cli/src/lib.ts
+  s_908974782fafa1::t_db492920bfadce 1-2,4,11,13-21,23-51,53-113
+cli/src/lib/progress.ts
+  s_908974782fafa1::t_d903857fdeb052 1-11
+cli/src/commands/run-tool.ts
+  s_908974782fafa1::t_9bd136a2a084dc 1-9
+cli/tests/install-engine.test.ts
+  s_908974782fafa1::t_7d8925ec9b7dc4 1-39
+cli/src/lib/types.ts
+  s_908974782fafa1::t_9ce1b8bda0f59b 1-478
+cli/tests/port.test.ts
+  s_908974782fafa1::t_e126ee863aceea 1-20
+cli/src/utils/port.ts
+  s_908974782fafa1::t_b8aff416027cbc 1-23
+cli/src/lib/login.ts
+  s_908974782fafa1::t_e7b7f9741b1f3e 1-145
+cli/src/lib/wait-for-ready.ts
+  s_908974782fafa1::t_4d0d914c1199ec 1-72
+cli/src/commands/update.ts
+  s_908974782fafa1::t_21d253f1d2e708 1-35
+cli/tests/engine.test.ts
+  s_908974782fafa1::t_17f733e1ff260b 1-78
+cli/src/utils/ui.ts
+  s_908974782fafa1::t_796373a430067d 1-47
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "e4be9854fb721022adb2bbeade135d7fdccd4cfe",
+  "prompts": {},
+  "sessions": {
+    "s_908974782fafa1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f1748397-e586-40bb-91a9-b89c0caebdf5",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

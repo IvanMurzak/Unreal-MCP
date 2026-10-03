@@ -1,0 +1,48 @@
+cli/src/lib/login.ts
+  s_108893d58cbeb9::t_c05faef3e0773f 9-10,13
+  s_108893d58cbeb9::t_21496b61a08474 31-32,34-35,44-46,51,53-57,186-187
+  s_108893d58cbeb9::t_c965d76dda8928 4-8
+  s_108893d58cbeb9::t_3a2414c711263e 28-30
+  s_108893d58cbeb9::t_e161bcc9c3970e 183-185
+  s_108893d58cbeb9::t_045fdef44e39cc 188-190
+  s_b8c649b6458300::t_18ec43665597a4 135,139,145-148,178-182,191-227
+cli/tests/machine-credentials.test.ts
+  s_108893d58cbeb9::t_bd2bdf45ddd50e 1-105
+cli/tests/login.test.ts
+  s_108893d58cbeb9::t_cd2527112764aa 6,19-25,45,52,62-90,101,122
+cli/tests/port.test.ts
+  s_108893d58cbeb9::t_f4610b3d28464f 2,20-44,62
+  s_108893d58cbeb9::t_d2b7382e1a8647 45-47,59-61
+  s_b8c649b6458300::t_7bb68a2b058da6 48-58
+cli/src/commands/login.ts
+  s_108893d58cbeb9::t_d192f1f6d395f0 6-11
+  s_b8c649b6458300::t_643cb699d7e18c 30-34
+cli/src/utils/port.ts
+  s_108893d58cbeb9::t_0a90f0d1946b25 7-57,61-66,68-70,73-74
+cli/src/utils/machine-credentials.ts
+  s_108893d58cbeb9::t_8add69b7b78c04 1-205
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.13",
+  "base_commit_sha": "ce4ee301a6a3bc3e10b037f05f50c749b4bfd0ba",
+  "prompts": {},
+  "sessions": {
+    "s_108893d58cbeb9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "61727027-fa47-4c1b-b5da-419575b8d35d",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_b8c649b6458300": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a2575fa2df431f5dc",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

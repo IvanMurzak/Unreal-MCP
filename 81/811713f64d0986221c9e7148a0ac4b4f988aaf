@@ -1,0 +1,19 @@
+docs/RELEASING.md
+  s_595741b60ca1d6::t_9671b17668ff22 37
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "81811713f64d0986221c9e7148a0ac4b4f988aaf",
+  "prompts": {},
+  "sessions": {
+    "s_595741b60ca1d6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d07a825a-bbd0-4c62-89c9-32aaf87d478b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

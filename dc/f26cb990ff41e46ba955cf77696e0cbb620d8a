@@ -1,0 +1,43 @@
+cli/src/lib/status.ts
+  s_908974782fafa1::t_c1d96ee4a9ed6b 32-38
+cli/src/lib/login.ts
+  s_908974782fafa1::t_ed1eb57a2c1ac2 134-137
+  s_908974782fafa1::t_7d8d120e1b1231 145-148,150
+cli/src/utils/launcher.ts
+  s_908974782fafa1::t_ef4669f8564647 144-150
+cli/src/lib/install-engine.ts
+  s_908974782fafa1::t_d5fe9b67d17368 20-24,26-27
+  s_908974782fafa1::t_8b2abb25471be5 53
+cli/src/lib/install-plugin.ts
+  s_908974782fafa1::t_d5c325aa0d8803 10
+  s_908974782fafa1::t_c88d7be8227804 39-45
+cli/src/lib/open.ts
+  s_908974782fafa1::t_09d7256a26d37e 150-154
+cli/tests/setup-mcp.test.ts
+  s_908974782fafa1::t_5d85f1a3e71da1 78-88
+cli/tests/install-engine.test.ts
+  s_908974782fafa1::t_ae77d625417cb5 36-37
+cli/src/lib/setup-mcp.ts
+  s_908974782fafa1::t_6b0f77cae3fb77 140-141,144
+  s_908974782fafa1::t_86c9b3a53c0b0a 5-8
+  s_908974782fafa1::t_5e8ef43db9172a 46-51,55-57
+cli/src/lib/update.ts
+  s_908974782fafa1::t_c2ee375db4d364 43-51
+  s_908974782fafa1::t_7c074842af81f7 89-91,95
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "dcf26cb990ff41e46ba955cf77696e0cbb620d8a",
+  "prompts": {},
+  "sessions": {
+    "s_908974782fafa1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f1748397-e586-40bb-91a9-b89c0caebdf5",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

@@ -1,0 +1,87 @@
+UnrealMCP/Source/UnrealMcpEditor/Private/Extensions/UnrealMcpExtensionInstaller.h
+  s_e3cea916442b5e::t_c56aa9483d2776 1-155,164-178
+  s_e3cea916442b5e::t_18c2b10aace728 156-163
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/SUnrealMcpExtensionsWindow.cpp
+  s_e3cea916442b5e::t_d687472b0a417d 1-270,272,274,276,278-310
+  s_e3cea916442b5e::t_16b5c29ca9db82 271,273,275,277
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/UnrealMcpAuxWindows.cpp
+  s_e3cea916442b5e::t_eb8d0512b9ab1b 24
+  s_e3cea916442b5e::t_874a9a10eda8d0 30-31,37
+  s_c8ad59a3b8b7a9::t_d9503ec7de3430 54-66,109-115,142,201-218
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/UnrealMcpAuxWindows.h
+  s_e3cea916442b5e::t_ab9b5057307071 21
+  s_e3cea916442b5e::t_68b2f697a44600 24-26
+  s_e3cea916442b5e::t_df110c03c22117 22-23
+  s_e3cea916442b5e::t_bc3301f5d41da8 9-10,16-20
+  s_e3cea916442b5e::t_d5b9141f7a7c87 27-29
+  s_c8ad59a3b8b7a9::t_c8b393d1dc3137 30-33,62,82-83,101,107-108
+UnrealMCP/Source/UnrealMcpEditor/Private/Extensions/UnrealMcpUProjectPlugins.h
+  s_e3cea916442b5e::t_ffddab25423fd8 1-65
+UnrealMCP/Source/UnrealMcpEditor/Private/Extensions/UnrealMcpUProjectPlugins.cpp
+  s_e3cea916442b5e::t_377dd7af96618c 1-166
+UnrealMCP/Source/UnrealMcpEditor/Private/Extensions/UnrealMcpExtensionInstaller.cpp
+  s_e3cea916442b5e::t_67209ddbf82e61 272
+  s_e3cea916442b5e::t_8a46ed03ffd149 1-30,32-33,35-41,43-54,56-71,73-79,81-125,127-145,147-271,273-307,309-340,342-367,369-408,411,413-562,625-647,649-663,665-733,735-736,738-777,780-794
+  s_e3cea916442b5e::t_910764e643d9f2 409-410,412
+  s_e3cea916442b5e::t_37cc6d0025147c 563-624
+  s_e3cea916442b5e::t_b8706c5d067274 31
+  s_e3cea916442b5e::t_1055d3f9e8ea6d 34
+  s_e3cea916442b5e::t_0c4a1d83d502d1 42
+  s_e3cea916442b5e::t_a1121eab931d4e 55
+  s_e3cea916442b5e::t_0bf729b1cf4924 72
+  s_e3cea916442b5e::t_42d23f328bf1cf 80
+  s_e3cea916442b5e::t_9445fa8530161c 126
+  s_e3cea916442b5e::t_7e8d1cd669ecc6 146
+  s_e3cea916442b5e::t_7d95a44381fcfc 308
+  s_e3cea916442b5e::t_fd3f8e09eefcbe 341
+  s_e3cea916442b5e::t_d80b614794927f 368
+  s_e3cea916442b5e::t_06c7803e6f72df 648
+  s_e3cea916442b5e::t_2b70604f9307a6 664
+  s_e3cea916442b5e::t_072a62120895fb 734
+  s_e3cea916442b5e::t_603a2f10208051 737
+  s_e3cea916442b5e::t_c38fa7a68e31d2 778-779
+UnrealMCP/Source/UnrealMcpEditor/Private/Extensions/UnrealMcpExtensionCatalog.h
+  s_e3cea916442b5e::t_7fe80ee88263cb 1-93
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpExtensionInstallerSpec.cpp
+  s_e3cea916442b5e::t_27ac3c51a382d7 213
+  s_e3cea916442b5e::t_b8b68c63474733 1-10,12-102,107-194,196-212,214-236
+  s_e3cea916442b5e::t_714d90a2f0e41e 11
+  s_e3cea916442b5e::t_9d30ac8e536d70 195
+  s_e3cea916442b5e::t_da96122c764fa8 103-106
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/SUnrealMcpExtensionsWindow.h
+  s_e3cea916442b5e::t_2a6354427f241e 1-81
+UnrealMCP/Source/UnrealMcpEditor/Private/Extensions/UnrealMcpExtensionCatalog.cpp
+  s_e3cea916442b5e::t_5de26c5b6321e4 1-162
+UnrealMCP/Source/UnrealMcpEditor/Private/UnrealMcpEditorCoordinator.cpp
+  s_e3cea916442b5e::t_9bfef9b9f1c473 19,30,36,39-42,402,421
+  s_e3cea916442b5e::t_1d84df703a67d7 399-401
+  s_e3cea916442b5e::t_3db9cf86b21553 403-405,418-420
+  s_e3cea916442b5e::t_eaa3077bbec7e3 422-423
+  s_c8ad59a3b8b7a9::t_d5c34ef8fbc9ea 369-398,406-417,442-443
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpExtensionCatalogSpec.cpp
+  s_e3cea916442b5e::t_d9c06fd969b3f3 1-189
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "6881928197a4d538a43ebfcf1b09a2b50d946218",
+  "prompts": {},
+  "sessions": {
+    "s_c8ad59a3b8b7a9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-ade75c751e63cac68",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_e3cea916442b5e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c575ab56-73e6-4952-bb8b-fef415924e27",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

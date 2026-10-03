@@ -1,0 +1,43 @@
+cli/package-lock.json
+  s_7625f2ee5ca7b9::t_15783d6563d7fe 12,30-38
+cli/package.json
+  s_7625f2ee5ca7b9::t_ebe2b2b0fe0994 71
+cli/src/commands/setup-mcp.ts
+  s_7625f2ee5ca7b9::t_f78f66013e4914 14,40-41
+cli/src/lib/enroll.ts
+  s_7625f2ee5ca7b9::t_bf318017cbb045 25-31,174-176
+cli/src/lib/install-plugin.ts
+  s_7625f2ee5ca7b9::t_dd6383a6633c7e 11-15,96-98
+cli/src/lib/login.ts
+  s_7625f2ee5ca7b9::t_ce7fc7795d985e 1-16,19-30,48-52,57-58,82,95-123,127-128,131-141,143,157-159,163-169,179,184,186-190,192
+cli/src/lib/setup-mcp.ts
+  s_7625f2ee5ca7b9::t_c5d1934b7dfc56 14-18,130-138
+cli/src/lib/types.ts
+  s_7625f2ee5ca7b9::t_0bf4d905421dd6 391-395
+cli/tests/cli-core-parity.test.ts
+  s_7625f2ee5ca7b9::t_3a3ac3909edeb7 1-105
+cli/tests/enroll-b5.test.ts
+  s_7625f2ee5ca7b9::t_76398d188a1d21 1-83
+cli/tests/enroll.test.ts
+  s_7625f2ee5ca7b9::t_fb062d0cfef211 7,86-87
+cli/tests/login.test.ts
+  s_7625f2ee5ca7b9::t_12e944a530f132 7-12,30-61,64-76,80,88,93,120,135-136,138,141-142,144
+cli/tests/setup-mcp.test.ts
+  s_7625f2ee5ca7b9::t_7105ad805076ce 6,145-146,156,166-176,185,197,227,238,255,273
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "468004ee2e724d04724c6375433dca3441e005d3",
+  "prompts": {},
+  "sessions": {
+    "s_7625f2ee5ca7b9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "s_7625f2ee5ca7b9",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

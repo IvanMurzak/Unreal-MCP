@@ -1,0 +1,23 @@
+.github/workflows/release.yml
+  s_cf39f5fb556145::t_cfdd2c15b6904c 315-317
+.github/workflows/test_pull_request.yml
+  s_cf39f5fb556145::t_fb547c503016ad 133-135
+commands/test-module-uplugin.ps1
+  s_cf39f5fb556145::t_5f373a3a11ac7f 25-31
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.8",
+  "base_commit_sha": "4b11bedab0ee288ac73da172e51cc56da6c8b13e",
+  "prompts": {},
+  "sessions": {
+    "s_cf39f5fb556145": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cae79e43-d299-489d-8250-d2c7017cba2e",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
