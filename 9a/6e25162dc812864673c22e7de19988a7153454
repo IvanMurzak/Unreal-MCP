@@ -1,0 +1,22 @@
+README.md
+  s_3e0a2681fef788::t_3f3be72aaf7fcc 68
+  s_3e0a2681fef788::t_b66a0704f06b38 551-569
+docs/ARCHITECTURE.md
+  s_3e0a2681fef788::t_31edcba8006c7d 1236-1246
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.8",
+  "base_commit_sha": "9a6e25162dc812864673c22e7de19988a7153454",
+  "prompts": {},
+  "sessions": {
+    "s_3e0a2681fef788": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a9715f3a-114a-4de7-815b-97526309448b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

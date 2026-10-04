@@ -1,0 +1,28 @@
+build/entitlements.mac.plist
+  s_38e803809d6305::t_e18d44dc9c551d 1-20
+.github/workflows/release.yml
+  s_38e803809d6305::t_25c47bd95072ae 603-608,611,623-664,678-694
+  s_38e803809d6305::t_10d932d8b87c24 14-37
+  s_38e803809d6305::t_43a5f458c462cb 721-722,734-737,740-742,745
+  s_38e803809d6305::t_df208d2f9a5b90 356-367,369-374,377-388,398-402,404-583,586-593,738-739
+docs/RELEASING.md
+  s_38e803809d6305::t_be69d572d59da0 46-82
+  s_38e803809d6305::t_b4388cf313a152 336-376
+  s_38e803809d6305::t_190ef556a83af8 150-159
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "a3b9a0ff8bf26556838774e6b3796a41ba917466",
+  "prompts": {},
+  "sessions": {
+    "s_38e803809d6305": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "789581b9-30b9-4739-9727-9217906faee5",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

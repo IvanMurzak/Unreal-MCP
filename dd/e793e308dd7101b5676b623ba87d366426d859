@@ -1,0 +1,19 @@
+.github/workflows/release.yml
+  s_d5f619ffecbba9::t_15bf94948324a2 646-649,651,657,662-665,954-968
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "dde793e308dd7101b5676b623ba87d366426d859",
+  "prompts": {},
+  "sessions": {
+    "s_d5f619ffecbba9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f3e5d-2986-76a2-a12f-29eb073ed677",
+        "model": "gpt-5.5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

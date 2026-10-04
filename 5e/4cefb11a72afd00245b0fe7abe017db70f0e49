@@ -1,0 +1,53 @@
+cli/package.json
+  s_d6ec059f93235b::t_872704e84cd308 32
+cli/tests/blake2b.test.ts
+  s_d6ec059f93235b::t_25a623be315cd7 1-221
+docs/RELEASING.md
+  s_d6ec059f93235b::t_bfcf409f6367b2 113-140
+  s_d6ec059f93235b::t_a699a126c93461 141-142,146-148
+  s_d6ec059f93235b::t_16a36b46ea3017 143-145
+cli/tests/fixtures/unreal-mcp-plugin-source-0.14.0.zip.minisig
+  s_d6ec059f93235b::t_25a623be315cd7 1-4
+cli/scripts/verify-real-asset.mjs
+  s_d6ec059f93235b::t_aa17ca8d7c0ce6 1-93
+cli/src/lib/blake2b.ts
+  s_d6ec059f93235b::t_25a623be315cd7 1-292
+cli/tests/plugin-signature-digest.test.ts
+  s_d6ec059f93235b::t_25a623be315cd7 1-259,263,265-365
+  s_d6ec059f93235b::t_b668656ac944e7 260-262,264
+cli/src/lib/plugin-signature.ts
+  s_d6ec059f93235b::t_c841e0e05e756d 236-242
+  s_d6ec059f93235b::t_82006ab58c085e 97-98
+  s_d6ec059f93235b::t_51a2e1340beaae 361
+  s_d6ec059f93235b::t_eea07f2a410397 34-36,38-58,62-63
+  s_d6ec059f93235b::t_3dedd8f0e253ff 463-464,466-468
+  s_d6ec059f93235b::t_b31fedd7e68a38 465
+  s_d6ec059f93235b::t_1898a5d7fa68f2 362-376,390
+  s_d6ec059f93235b::t_0be2d1fdee72d3 408-413,423-425
+  s_d6ec059f93235b::t_979f5fbc3adbf3 132
+  s_d6ec059f93235b::t_817ed5c0b9169c 462
+  s_d6ec059f93235b::t_c7bc507e1a703b 421
+  s_d6ec059f93235b::t_54619ce29ce39d 179-200
+  s_d6ec059f93235b::t_95ee0c586096d2 435-446
+  s_d6ec059f93235b::t_32c341cf4811c2 381-384
+  s_d6ec059f93235b::t_5c43b843b0dbd6 139-164,170-171,176
+  s_d6ec059f93235b::t_8c3b678411a9b0 422
+  s_d6ec059f93235b::t_9662ebc761e73f 109-131,133-138,165-169,172-175,177-178
+  s_d6ec059f93235b::t_1646d867bac623 414-420
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "5e4cefb11a72afd00245b0fe7abe017db70f0e49",
+  "prompts": {},
+  "sessions": {
+    "s_d6ec059f93235b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "eaca8eb3-af38-4560-ab4d-ad86b87a1d9f",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

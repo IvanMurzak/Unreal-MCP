@@ -1,0 +1,19 @@
+Unreal-MCP-Server/src/Program.cs
+  s_505c78f0ea55bd::t_48a064aaf6023a 34-41
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "d1f656674d0ca7e03819a0d7223da457a50116c6",
+  "prompts": {},
+  "sessions": {
+    "s_505c78f0ea55bd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "675bbc25-d24f-4024-95c5-00cb874794e4",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

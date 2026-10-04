@@ -1,0 +1,23 @@
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/SUnrealMcpMainWindow.cpp
+  s_010c46d1df2a14::t_f73b99a28faf86 802,805-813,818-820
+  s_010c46d1df2a14::t_1923402520abae 572-584,592
+  s_010c46d1df2a14::t_e0bcb10ef9ec8b 92-94
+  s_010c46d1df2a14::t_6d5631d28b6aa4 272,279-294,298-299,304-310,313-314,317,319,323,325-330,804
+  s_010c46d1df2a14::t_97f200dd78f3a9 585-591
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.7",
+  "base_commit_sha": "6d95a48f4b5db7e8e642bef6b6d0d3d459bb5813",
+  "prompts": {},
+  "sessions": {
+    "s_010c46d1df2a14": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5abf135e-29a4-41c1-907c-855f83d24eff",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

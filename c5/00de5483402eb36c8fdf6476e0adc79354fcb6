@@ -1,0 +1,33 @@
+bridge/tests/Fakes.cs
+  s_7f4523e9095932::t_8d26ade5d3d344 51-55,68-70
+  s_7f4523e9095932::t_b8dd3163d771a1 92-94
+bridge/src/Host/SidecarHost.cs
+  s_7f4523e9095932::t_0e7586acb1be4f 27
+  s_7f4523e9095932::t_2ded4af8167f45 745-821
+  s_7f4523e9095932::t_94f6a1b37b6de1 106-118,744
+  s_7f4523e9095932::t_69d0c501e9ba66 999-1002
+  s_7f4523e9095932::t_006ff9616c60d3 250-255
+bridge/tests/SidecarHostConnectionDropTests.cs
+  s_7f4523e9095932::t_8930a35949f9ce 1-156
+bridge/tests/SidecarHostTransitionTests.cs
+  s_7f4523e9095932::t_60218722616f2e 180-195,202,207-215,217-225
+  s_7f4523e9095932::t_afbc2e60533008 12-13
+  s_7f4523e9095932::t_1e9111805b931f 176
+  s_7f4523e9095932::t_44bf3087a85ef2 159-175,177-179,196-201,203-206,216,226-227
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.8",
+  "base_commit_sha": "c500de5483402eb36c8fdf6476e0adc79354fcb6",
+  "prompts": {},
+  "sessions": {
+    "s_7f4523e9095932": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "aa21f842-865d-48f4-8178-22b22f44258b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
