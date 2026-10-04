@@ -1,0 +1,32 @@
+bridge/src/Tools/ManifestRegistrar.cs
+  s_3e0a2681fef788::t_52ccdf9c1e6b6f 47-58,60,66,73,81,83-89,91-97,99,101-103,105-114,123-128
+bridge/src/Ipc/PendingCallRegistry.cs
+  s_3e0a2681fef788::t_c36130906b2299 19,22-30,32,35,47,49,64,66,79,95,98,106-113
+bridge/src/Ipc/IpcClient.cs
+  s_3e0a2681fef788::t_b0d01482dc1277 59-65,67-71,73-79
+  s_3e0a2681fef788::t_587979c66722f0 299-331
+  s_3e0a2681fef788::t_ff1f7f2af6055a 489-499,501-509,511-527,532-538,540-548,554-562
+  s_3e0a2681fef788::t_28e79c67a34702 236,239
+  s_3e0a2681fef788::t_7c381b703057a5 41-44,235,238,298,550-553
+  s_3e0a2681fef788::t_3ebd73393cd0b2 198-204
+  s_3e0a2681fef788::t_1068038854ca3c 636-637
+bridge/src/Tools/ManifestRegistrarBase.cs
+  s_3e0a2681fef788::t_8994678deaf75e 17-32
+  s_3e0a2681fef788::t_f271036200cf8a 1-16,33-172
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.8",
+  "base_commit_sha": "6fdc79150270f1ff140ccb7bbeb1dc0136a27735",
+  "prompts": {},
+  "sessions": {
+    "s_3e0a2681fef788": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a9715f3a-114a-4de7-815b-97526309448b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

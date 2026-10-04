@@ -1,0 +1,21 @@
+UnrealMCP/Config/FilterPlugin.ini
+  s_7b161b3ff8874b::t_717bfc14e58ffb 29
+docs/RELEASING.md
+  s_7b161b3ff8874b::t_2bfe05820a163c 140,143
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "e17182a19f4da3ab58a393cec818075df526a6f4",
+  "prompts": {},
+  "sessions": {
+    "s_7b161b3ff8874b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a0da447c6078ddc81",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

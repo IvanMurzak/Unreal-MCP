@@ -1,0 +1,20 @@
+UnrealMCP/Source/UnrealMcpEditor/Private/Tools/UnrealMcpAssetTools.cpp
+  s_353b0dd9885d55::t_ef7e0f6cd42885 974-1002
+  s_353b0dd9885d55::t_5a22feaf82ea6b 15-16
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.8",
+  "base_commit_sha": "194d8c9cd3de7958090485023316a13c22159425",
+  "prompts": {},
+  "sessions": {
+    "s_353b0dd9885d55": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4a55577c-1ca7-4445-8aaf-ebfc2957260c",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

@@ -1,0 +1,19 @@
+bridge/src/Tools/ProxyTool.cs
+  s_52b955ca4fc207::t_605d271511152a 29-37
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "8566beb2f5faa36d0d8cf87fe3b0732a74980a63",
+  "prompts": {},
+  "sessions": {
+    "s_52b955ca4fc207": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-ad7e2fa4a07cbdabc",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

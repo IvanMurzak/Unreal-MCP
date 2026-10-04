@@ -1,0 +1,42 @@
+bridge/src/Ipc/IpcMessages.cs
+  s_ccc717f86d7e3e::t_12a609c67a3a2e 48
+  s_ccc717f86d7e3e::t_d6455999846d74 49-63
+  s_ccc717f86d7e3e::t_5bd0357e5e7ba3 64-69,71
+  s_ccc717f86d7e3e::t_90b988e8da4c28 43-47
+  s_ccc717f86d7e3e::t_918e7a92ed42ae 87-105,147,158-172,188,197-203
+bridge/src/Tools/ManifestDiff.cs
+  s_ccc717f86d7e3e::t_1de22885497ba2 17-22,26-29,31-32,36-37,39,41,53,58,60-61,68-70,72,77
+bridge/src/Tools/ManifestRegistrarBase.cs
+  s_ccc717f86d7e3e::t_15cf2a990c813b 12
+  s_52b955ca4fc207::t_570488a144647f 74,98-100,114-121
+bridge/src/Tools/ResourceManifestRegistrar.cs
+  s_ccc717f86d7e3e::t_57185f1ecf6a8f 90
+bridge/src/Tools/ManifestRegistrar.cs
+  s_52b955ca4fc207::t_f70ed5390725d9 84-85,90
+bridge/src/Tools/PromptManifestRegistrar.cs
+  s_52b955ca4fc207::t_9f3603d0d9544d 85
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "f8db0f4f553aaa9b3d84def50d49b63b6f9392e1",
+  "prompts": {},
+  "sessions": {
+    "s_52b955ca4fc207": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-ad7e2fa4a07cbdabc",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_ccc717f86d7e3e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9c8ada08-e4d5-462c-b934-8bbd1f9565d6",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
