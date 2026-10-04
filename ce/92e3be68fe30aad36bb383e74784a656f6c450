@@ -1,0 +1,40 @@
+cli/tests/download-server.test.ts
+  s_53ce73f91e4281::t_59a715932258e1 1-158,164-244
+  s_53ce73f91e4281::t_b96d6b044073aa 159-163
+cli/src/utils/env-file.ts
+  s_53ce73f91e4281::t_c4898426b280cd 34
+cli/tests/setup-mcp.test.ts
+  s_53ce73f91e4281::t_7fa708f4907bb5 64,66-77,80,86,90-151
+  s_53ce73f91e4281::t_29836834b620ca 30,35,152-153
+cli/src/lib.ts
+  s_53ce73f91e4281::t_d8ad72800ca311 102-105
+  s_53ce73f91e4281::t_35ff5201459815 21-31
+cli/src/lib/download-server.ts
+  s_53ce73f91e4281::t_d7a0dbb76ef22e 1-242
+cli/src/lib/setup-mcp.ts
+  s_53ce73f91e4281::t_83786fc286d71b 65,67-68
+  s_53ce73f91e4281::t_2e424208ddcfee 15-20,24-27,30
+  s_53ce73f91e4281::t_f8ea1a5b185814 113-143
+cli/src/lib/server-version.ts
+  s_53ce73f91e4281::t_05537ac816dc3c 1-12
+cli/src/lib/types.ts
+  s_53ce73f91e4281::t_63d8f1bc2a03a0 288-297
+  s_53ce73f91e4281::t_2d55d77d6984e8 495,497
+  s_53ce73f91e4281::t_8f85ee06e53f3b 324-366
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "ce92e3be68fe30aad36bb383e74784a656f6c450",
+  "prompts": {},
+  "sessions": {
+    "s_53ce73f91e4281": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e24c1167-2410-4c32-885c-4fd71d157405",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

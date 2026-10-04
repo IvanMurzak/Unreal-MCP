@@ -1,0 +1,40 @@
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpAgentConfiguratorSpec.cpp
+  s_5601a2ed5b932a::t_5e5c3bcdb7801a 40
+  s_5601a2ed5b932a::t_59c4e26637ba81 879-884,886-888,890,892-893,895-909
+  s_5601a2ed5b932a::t_91136b5e909df0 39
+  s_5601a2ed5b932a::t_23c523d6d94edb 847-878,885,889,891,894,910-912
+UnrealMCP/Source/UnrealMcpEditor/Private/Agents/TomlAiAgentConfig.h
+  s_5601a2ed5b932a::t_3aad8fe31f51fd 90-93
+  s_5601a2ed5b932a::t_3fb673af622f2f 87-89
+UnrealMCP/Source/UnrealMcpEditor/Private/Agents/TomlAiAgentConfig.cpp
+  s_5601a2ed5b932a::t_cff3b16324c5e8 447-449
+  s_5601a2ed5b932a::t_990b21ab28e1d2 186,188-190,195-197,199
+  s_5601a2ed5b932a::t_1ead7c581e5b98 332
+  s_5601a2ed5b932a::t_6628b223837eaa 395-396
+  s_5601a2ed5b932a::t_9ae69af4230f8b 318
+  s_5601a2ed5b932a::t_a5a5e0b89eaaf2 204-215
+  s_5601a2ed5b932a::t_a18774405c9290 291-297
+  s_5601a2ed5b932a::t_4d56ac46e40343 387,400
+  s_5601a2ed5b932a::t_62fa7a8001cd13 261-263
+  s_5601a2ed5b932a::t_037c7d6a7293e8 306-309,313-314
+  s_5601a2ed5b932a::t_bf260ff0603c5c 333-340,349,353
+  s_5601a2ed5b932a::t_1ae8c981895983 441-442,446
+UnrealMCP/Source/UnrealMcpEditor/Private/Agents/AiAgentConfig.h
+  s_5601a2ed5b932a::t_343bc8e19934b0 70-73
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "a5e14aac1f2361e596caeab3a619d847f21c34e4",
+  "prompts": {},
+  "sessions": {
+    "s_5601a2ed5b932a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4a9d921c-49f2-4338-ab19-c42684cbc42e",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

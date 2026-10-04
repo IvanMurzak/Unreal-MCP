@@ -1,0 +1,21 @@
+bridge/tests/ProxyResourceTests.cs
+  s_3e0a2681fef788::t_c7ac8369c5e455 4
+bridge/tests/ResourceManifestRegistrarTests.cs
+  s_3e0a2681fef788::t_92b23582a223f0 4
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.8",
+  "base_commit_sha": "f247f3b621ad8c628390e76a3e6173fddf9d1e4a",
+  "prompts": {},
+  "sessions": {
+    "s_3e0a2681fef788": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a9715f3a-114a-4de7-815b-97526309448b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

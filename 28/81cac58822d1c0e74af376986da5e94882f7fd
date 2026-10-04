@@ -1,0 +1,25 @@
+UnrealMCP/UnrealMCP.uplugin
+  s_2086146bd39850::t_5eaea5b557f7a0 4
+bridge/src/com.IvanMurzak.Unreal.MCP.Bridge.csproj
+  s_2086146bd39850::t_9a7444e5d71580 10
+cli/package-lock.json
+  s_2086146bd39850::t_b215f1b209298e 3,9
+cli/package.json
+  s_2086146bd39850::t_e43182a61e336b 3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "2881cac58822d1c0e74af376986da5e94882f7fd",
+  "prompts": {},
+  "sessions": {
+    "s_2086146bd39850": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f3e1e-f7e6-7cc0-bc78-47a7b817c730",
+        "model": "gpt-5.5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
