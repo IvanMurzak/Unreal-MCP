@@ -111,7 +111,7 @@ public:
 	TArray<FUnrealMcpLogEntry> SnapshotSince(int64 SinceSequence, ELogVerbosity::Type MinVerbosity,
 		const FString& CategoryFilter, const FString& Search, int32 Limit, int64* OutNextCursor = nullptr) const;
 
-	/** Highest sequence assigned so far (0 when nothing was ever captured). Survives eviction and `Clear()`. */
+	/** Highest sequence assigned so far (0 when nothing was ever captured). */
 	int64 HighestSequence() const;
 
 	/** Human-readable severity token for a verbosity ("Error", "Warning", "Display", "Log", …). */
@@ -130,8 +130,12 @@ public:
 private:
 	void Capture(const TCHAR* Message, ELogVerbosity::Type Verbosity, const FName& Category);
 
+	/** The verbosity / category / search filter shared by `Snapshot` and `SnapshotSince`. */
+	static bool MatchesFilters(const FUnrealMcpLogEntry& Entry, ELogVerbosity::Type MinVerbosity,
+		const FString& CategoryFilter, const FString& Search);
+
 	mutable FCriticalSection Lock;
 	TArray<FUnrealMcpLogEntry> Entries;   // oldest-first; evicts from the front past MaxEntries
-	int64 LastSequence = 0;               // high-water mark; only ever increases (not reset by eviction/Clear)
+	int64 LastSequence = 0;               // high-water mark; see FUnrealMcpLogEntry::Sequence
 	bool bRegistered = false;
 };

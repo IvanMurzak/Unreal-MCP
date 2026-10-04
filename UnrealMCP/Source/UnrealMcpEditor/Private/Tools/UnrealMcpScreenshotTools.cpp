@@ -69,13 +69,11 @@ namespace UnrealMcpScreenshotTools
 
 	FUnrealMcpToolResult MakeImageResult(const FString& Source, int32 Width, int32 Height, const FString& Base64Png, int32 EncodedBytes)
 	{
-		// The image block plus ONE text block carrying the metadata, and deliberately NO structured content:
-		// McpPlugin.Server's DirectToolCallEndpoints returns `{status, structured}` and DROPS the content array
-		// (image included) whenever StructuredContent is set, so the screenshot never reached the app.
+		// The metadata travels in the text block: SuccessWithImage carries no structured content (see there).
 		const FString Message = FString::Printf(TEXT("Captured %s (%dx%d, image/png, %d bytes)."),
 			*Source, Width, Height, EncodedBytes);
 		UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] %s"), *Message);
-		return FUnrealMcpToolResult::SuccessWithImage(Message, Base64Png, nullptr, TEXT("image/png"));
+		return FUnrealMcpToolResult::SuccessWithImage(Message, Base64Png);
 	}
 
 	// ---- Local helpers ----------------------------------------------------------------------------

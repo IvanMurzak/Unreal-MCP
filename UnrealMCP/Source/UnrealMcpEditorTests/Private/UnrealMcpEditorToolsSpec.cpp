@@ -255,9 +255,7 @@ void FUnrealMcpEditorToolsSpec::Define()
 		{
 			auto Join = [](const TArray<int64>& A)
 			{
-				FString Out;
-				for (int64 V : A) Out += FString::Printf(TEXT("%lld "), V);
-				return Out;
+				return FString::JoinBy(A, TEXT(" "), [](int64 V) { return LexToString(V); });
 			};
 			TestTrue(*FString::Printf(TEXT("%s (got [%s] expected [%s])"), What, *Join(Actual), *Join(Expected)), Actual == Expected);
 		};

@@ -3,6 +3,7 @@
 
 #include "UnrealMcpLogCollector.h"
 
+#include "Algo/BinarySearch.h"
 #include "Algo/Reverse.h"
 #include "Misc/OutputDeviceRedirector.h"   // GLog is an FOutputDeviceRedirector*; Add/RemoveOutputDevice deref the complete type
 
@@ -112,12 +113,7 @@ TArray<FUnrealMcpLogEntry> FUnrealMcpLogCollector::Snapshot(ELogVerbosity::Type 
 	for (int32 Idx = Entries.Num() - 1; Idx >= 0; --Idx)
 	{
 		const FUnrealMcpLogEntry& Entry = Entries[Idx];
-		// Lower numeric verbosity == more severe (Fatal=1 … VeryVerbose=7). Keep at-or-more-severe.
-		if (MinVerbosity != ELogVerbosity::All && Entry.Verbosity > MinVerbosity)
-			continue;
-		if (!CategoryFilter.IsEmpty() && !Entry.Category.ToString().Equals(CategoryFilter, ESearchCase::IgnoreCase))
-			continue;
-		if (!Search.IsEmpty() && !Entry.Message.Contains(Search, ESearchCase::IgnoreCase))
+		if (!MatchesFilters(Entry, MinVerbosity, CategoryFilter, Search))
 			continue;
 		Out.Add(Entry);
 		if (Limit > 0 && Out.Num() >= Limit)
@@ -144,43 +140,39 @@ TArray<FUnrealMcpLogEntry> FUnrealMcpLogCollector::SnapshotSince(int64 SinceSequ
 
 	// Backstop for a restarted counter: a cursor above everything ever assigned cannot refer to this run's
 	// entries, so behave as if it were below everything (oldest page).
-	if (SinceSequence < 0 || SinceSequence > LastSequence)
+	if (SinceSequence > LastSequence)
 		SinceSequence = 0;
 
-	// Entries is ascending by Sequence, so binary-search the first entry strictly after the cursor.
-	int32 Lo = 0;
-	int32 Hi = Entries.Num();
-	while (Lo < Hi)
-	{
-		const int32 Mid = Lo + (Hi - Lo) / 2;
-		if (Entries[Mid].Sequence <= SinceSequence)
-			Lo = Mid + 1;
-		else
-			Hi = Mid;
-	}
+	if (OutNextCursor)
+		*OutNextCursor = LastSequence;
 
-	bool bCutByLimit = false;
-	for (int32 Idx = Lo; Idx < Entries.Num(); ++Idx)
+	// Entries is ascending by Sequence: start at the first entry strictly after the cursor.
+	for (int32 Idx = Algo::UpperBoundBy(Entries, SinceSequence, &FUnrealMcpLogEntry::Sequence); Idx < Entries.Num(); ++Idx)
 	{
 		const FUnrealMcpLogEntry& Entry = Entries[Idx];
-		if (MinVerbosity != ELogVerbosity::All && Entry.Verbosity > MinVerbosity)
-			continue;
-		if (!CategoryFilter.IsEmpty() && !Entry.Category.ToString().Equals(CategoryFilter, ESearchCase::IgnoreCase))
-			continue;
-		if (!Search.IsEmpty() && !Entry.Message.Contains(Search, ESearchCase::IgnoreCase))
+		if (!MatchesFilters(Entry, MinVerbosity, CategoryFilter, Search))
 			continue;
 		if (Limit > 0 && Out.Num() >= Limit)
 		{
 			// One more matching entry exists beyond the page: the page is cut, continue from its last entry.
-			bCutByLimit = true;
+			if (OutNextCursor)
+				*OutNextCursor = Out.Last().Sequence;
 			break;
 		}
 		Out.Add(Entry);
 	}
-
-	if (OutNextCursor)
-		*OutNextCursor = (bCutByLimit && Out.Num() > 0) ? Out.Last().Sequence : LastSequence;
 	return Out;
+}
+
+bool FUnrealMcpLogCollector::MatchesFilters(const FUnrealMcpLogEntry& Entry, ELogVerbosity::Type MinVerbosity,
+	const FString& CategoryFilter, const FString& Search)
+{
+	// Lower numeric verbosity == more severe (Fatal=1 … VeryVerbose=7). Keep at-or-more-severe.
+	if (MinVerbosity != ELogVerbosity::All && Entry.Verbosity > MinVerbosity)
+		return false;
+	if (!CategoryFilter.IsEmpty() && !Entry.Category.ToString().Equals(CategoryFilter, ESearchCase::IgnoreCase))
+		return false;
+	return Search.IsEmpty() || Entry.Message.Contains(Search, ESearchCase::IgnoreCase);
 }
 
 FString FUnrealMcpLogCollector::VerbosityToString(ELogVerbosity::Type Verbosity)

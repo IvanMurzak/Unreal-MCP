@@ -123,11 +123,15 @@ struct UNREALMCPRUNTIME_API FUnrealMcpToolResult
 	{
 		return FUnrealMcpToolResult{ false, InMessage, nullptr };
 	}
-	/** Success carrying a single image content block (§10 screenshot family). */
+	/**
+	 * Success carrying a single image content block (§10 screenshot family). Deliberately takes NO structured
+	 * content: McpPlugin.Server's direct tool-call endpoint answers `{status, structured}` and drops the
+	 * content array (image included) whenever structured content is set. Put image metadata in @p InMessage.
+	 */
 	static FUnrealMcpToolResult SuccessWithImage(const FString& InMessage, const FString& InBase64Data,
-		const TSharedPtr<FJsonObject>& InStructured = nullptr, const FString& InMimeType = TEXT("image/png"))
+		const FString& InMimeType = TEXT("image/png"))
 	{
-		FUnrealMcpToolResult Result{ true, InMessage, InStructured };
+		FUnrealMcpToolResult Result{ true, InMessage, nullptr };
 		Result.Images.Add(FUnrealMcpImageContent{ InBase64Data, InMimeType });
 		return Result;
 	}

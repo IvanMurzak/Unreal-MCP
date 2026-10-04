@@ -222,7 +222,7 @@ void FUnrealMcpScreenshotToolsSpec::Define()
 		{
 			const FString Base64 = TEXT("aGVsbG8=");
 			const FString Mime = TEXT("image/png");
-			const FUnrealMcpToolResult Result = FUnrealMcpToolResult::SuccessWithImage(TEXT("captured"), Base64, nullptr, Mime);
+			const FUnrealMcpToolResult Result = FUnrealMcpToolResult::SuccessWithImage(TEXT("captured"), Base64, Mime);
 
 			TestTrue(TEXT("success"), Result.bSuccess);
 			TestEqual(TEXT("text block preserved"), Result.Message, FString(TEXT("captured")));
