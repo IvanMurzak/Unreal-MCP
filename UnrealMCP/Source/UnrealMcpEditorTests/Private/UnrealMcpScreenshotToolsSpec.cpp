@@ -38,7 +38,8 @@ namespace
 
 	// Source-compatibility pins for the DEPRECATED structured-content form of SuccessWithImage — the public
 	// signature third-party extensions compiled against through 0.19. Deleting or re-typing either overload
-	// fails the build here rather than in an extension author's project.
+	// fails the build here rather than in an extension author's project. (The nullptr pin only bites on a
+	// standard-conforming compiler — clang/GCC; MSVC resolves the nullptr call even without its overload.)
 PRAGMA_DISABLE_DEPRECATION_WARNINGS
 	using FLegacySuccessWithImageFn = FUnrealMcpToolResult (*)(const FString&, const FString&, const TSharedPtr<FJsonObject>&, const FString&);
 	static_assert(static_cast<FLegacySuccessWithImageFn>(&FUnrealMcpToolResult::SuccessWithImage) != nullptr,

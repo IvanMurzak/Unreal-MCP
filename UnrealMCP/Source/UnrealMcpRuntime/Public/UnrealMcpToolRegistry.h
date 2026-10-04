@@ -151,8 +151,10 @@ struct UNREALMCPRUNTIME_API FUnrealMcpToolResult
 
 	/**
 	 * DEPRECATED: the old form called with a literal `nullptr` structured argument. Without this exact-match
-	 * overload `SuccessWithImage(Msg, Base64, nullptr)` is ambiguous (nullptr converts to both FString and
-	 * TSharedPtr). Identical to SuccessWithImage(InMessage, InBase64Data, InMimeType).
+	 * overload `SuccessWithImage(Msg, Base64, nullptr)` is ambiguous on clang/GCC (Mac/Linux builds): nullptr
+	 * reaches FString through several char-pointer constructors and TSharedPtr through its null-tag one, two
+	 * indistinguishable user-defined conversions (MSVC is lenient and picks TSharedPtr). Identical to
+	 * SuccessWithImage(InMessage, InBase64Data, InMimeType).
 	 */
 	UE_DEPRECATED(5.5, "FUnrealMcpToolResult::SuccessWithImage no longer takes structured content. Drop the nullptr argument: SuccessWithImage(InMessage, InBase64Data, InMimeType).")
 	static FUnrealMcpToolResult SuccessWithImage(const FString& InMessage, const FString& InBase64Data,
