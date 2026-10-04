@@ -226,6 +226,7 @@ void FUnrealMcpScreenshotToolsSpec::Define()
 
 			TestTrue(TEXT("success"), Result.bSuccess);
 			TestEqual(TEXT("text block preserved"), Result.Message, FString(TEXT("captured")));
+			TestFalse(TEXT("an image result never carries structured content"), Result.Structured.IsValid());
 			TestEqual(TEXT("exactly one image block"), Result.Images.Num(), 1);
 			if (Result.Images.Num() == 1)
 			{

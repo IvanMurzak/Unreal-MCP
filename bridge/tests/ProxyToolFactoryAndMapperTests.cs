@@ -108,9 +108,10 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             Assert.Equal("pong", result.StructuredContent!["result"]!.GetValue<string>());
         }
 
-        // Screenshot tools return an image block + a metadata text block and NO structured content:
-        // McpPlugin.Server's direct tool-call endpoint answers {status, structured} and drops the content
-        // array whenever StructuredContent is set, so the mapper must not invent one for an image result.
+        // Characterizes the bridge half of the screenshot wire shape: the mapper passes the plugin's text +
+        // image blocks through and adds no structured content of its own (McpPlugin.Server drops the content
+        // array whenever StructuredContent is set). The plugin half — screenshots never SET structured
+        // content — is pinned by UnrealMcpScreenshotToolsSpec, not here.
         [Fact]
         public void Map_ImageResultWithoutStructured_KeepsImageBlockAndLeavesStructuredNull()
         {
