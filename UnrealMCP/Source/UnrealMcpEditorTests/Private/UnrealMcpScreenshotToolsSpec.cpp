@@ -38,7 +38,9 @@ namespace
 
 	// Pins the exact public signature of the DEPRECATED structured form (see the header): re-typing or deleting
 	// it fails the build here rather than in an extension author's project. The call forms (3/4-arg, nullptr)
-	// are pinned by the "deprecated SuccessWithImage" specs below simply by compiling.
+	// are pinned by the "deprecated SuccessWithImage" spec below simply by compiling — except that the nullptr
+	// overload only matters on clang/GCC, and this module is built by MSVC alone in CI, so CI cannot catch its
+	// removal (see the overload's doc comment).
 PRAGMA_DISABLE_DEPRECATION_WARNINGS
 	using FLegacySuccessWithImageFn = FUnrealMcpToolResult (*)(const FString&, const FString&, const TSharedPtr<FJsonObject>&, const FString&);
 	static_assert(std::is_same_v<FLegacySuccessWithImageFn, decltype(static_cast<FLegacySuccessWithImageFn>(&FUnrealMcpToolResult::SuccessWithImage))>,
