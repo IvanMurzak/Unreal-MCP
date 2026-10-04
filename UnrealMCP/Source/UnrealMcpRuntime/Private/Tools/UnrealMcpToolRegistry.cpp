@@ -63,6 +63,22 @@ FRotator FUnrealMcpToolCall::GetRotator(const FString& Key, const FRotator& Defa
 	return Result;
 }
 
+// --- FUnrealMcpToolResult -------------------------------------------------------------------------
+
+FUnrealMcpToolResult FUnrealMcpToolResult::SuccessWithImage(const FString& InMessage, const FString& InBase64Data,
+	const TSharedPtr<FJsonObject>& InStructured, const FString& InMimeType)
+{
+	// Deprecated structured form: fold the payload into the text block, never into StructuredContent (see header).
+	FString Message = InMessage;
+	if (InStructured.IsValid() && InStructured->Values.Num() > 0)
+	{
+		if (!Message.IsEmpty())
+			Message += TEXT("\n");
+		Message += UnrealMcpSerializeCondensed(InStructured);
+	}
+	return SuccessWithImage(Message, InBase64Data, InMimeType);
+}
+
 // --- Schema building ------------------------------------------------------------------------------
 // The §3.2 scalar + vector schema builders now live in the shared FUnrealMcpSchema TU (UnrealMcpSchema.h),
 // externally linked so the prompt registry + the editor tool families reuse the SAME definition.
