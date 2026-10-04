@@ -35,6 +35,17 @@ namespace
 	{
 		return Registry.Execute(Name, FUnrealMcpToolCall(Args));
 	}
+
+	// Pins the exact public signature of the DEPRECATED structured form (see the header): re-typing or deleting
+	// it fails the build here rather than in an extension author's project. The call forms (3/4-arg, nullptr)
+	// are pinned by the "deprecated SuccessWithImage" spec below simply by compiling — except that the nullptr
+	// overload only matters on clang/GCC, and this module is built by MSVC alone in CI, so CI cannot catch its
+	// removal (see the overload's doc comment).
+PRAGMA_DISABLE_DEPRECATION_WARNINGS
+	using FLegacySuccessWithImageFn = FUnrealMcpToolResult (*)(const FString&, const FString&, const TSharedPtr<FJsonObject>&, const FString&);
+	static_assert(std::is_same_v<FLegacySuccessWithImageFn, decltype(static_cast<FLegacySuccessWithImageFn>(&FUnrealMcpToolResult::SuccessWithImage))>,
+		"The deprecated SuccessWithImage(Message, Base64, TSharedPtr<FJsonObject> Structured, MimeType) overload must keep existing");
+PRAGMA_ENABLE_DEPRECATION_WARNINGS
 }
 
 void FUnrealMcpScreenshotToolsSpec::Define()
@@ -222,10 +233,11 @@ void FUnrealMcpScreenshotToolsSpec::Define()
 		{
 			const FString Base64 = TEXT("aGVsbG8=");
 			const FString Mime = TEXT("image/png");
-			const FUnrealMcpToolResult Result = FUnrealMcpToolResult::SuccessWithImage(TEXT("captured"), Base64, nullptr, Mime);
+			const FUnrealMcpToolResult Result = FUnrealMcpToolResult::SuccessWithImage(TEXT("captured"), Base64, Mime);
 
 			TestTrue(TEXT("success"), Result.bSuccess);
 			TestEqual(TEXT("text block preserved"), Result.Message, FString(TEXT("captured")));
+			TestFalse(TEXT("an image result never carries structured content"), Result.Structured.IsValid());
 			TestEqual(TEXT("exactly one image block"), Result.Images.Num(), 1);
 			if (Result.Images.Num() == 1)
 			{
@@ -240,6 +252,44 @@ void FUnrealMcpScreenshotToolsSpec::Define()
 			TestEqual(TEXT("one image block"), Result.Images.Num(), 1);
 			if (Result.Images.Num() == 1)
 				TestEqual(TEXT("default mimeType"), Result.Images[0].MimeType, FString(TEXT("image/png")));
+		});
+
+		// The DEPRECATED structured form (see the header): every call form is still an image result with NO
+		// structured content, the payload folded into the text block. One table, one set of assertions.
+		It("deprecated SuccessWithImage(Message, Base64, Structured[, MimeType]) folds the payload into the text", [this]()
+		{
+			const TSharedPtr<FJsonObject> Source = MakeShared<FJsonObject>();
+			Source->SetStringField(TEXT("source"), TEXT("Cam1"));
+			const TSharedPtr<FJsonObject> Width = MakeShared<FJsonObject>();
+			Width->SetNumberField(TEXT("width"), 64);
+			const TSharedPtr<FJsonObject> Ok = MakeShared<FJsonObject>();
+			Ok->SetBoolField(TEXT("ok"), true);
+			const TSharedPtr<FJsonObject> NullStructured;
+
+			struct FRow { const TCHAR* Label; FUnrealMcpToolResult Result; FString ExpectedMessage; FString ExpectedMime; };
+PRAGMA_DISABLE_DEPRECATION_WARNINGS
+			const FRow Rows[] = {
+				{ TEXT("4-arg"), FUnrealMcpToolResult::SuccessWithImage(TEXT("captured"), TEXT("aGVsbG8="), Source, TEXT("image/jpeg")), TEXT("captured\n{\"source\":\"Cam1\"}"), TEXT("image/jpeg") },
+				{ TEXT("3-arg"), FUnrealMcpToolResult::SuccessWithImage(TEXT("captured"), TEXT("aGVsbG8="), Width), TEXT("captured\n{\"width\":64}"), TEXT("image/png") },
+				{ TEXT("empty message"), FUnrealMcpToolResult::SuccessWithImage(FString(), TEXT("aGVsbG8="), Ok), TEXT("{\"ok\":true}"), TEXT("image/png") },
+				{ TEXT("nullptr"), FUnrealMcpToolResult::SuccessWithImage(TEXT("captured"), TEXT("aGVsbG8="), nullptr), TEXT("captured"), TEXT("image/png") },
+				{ TEXT("nullptr + mime"), FUnrealMcpToolResult::SuccessWithImage(TEXT("captured"), TEXT("aGVsbG8="), nullptr, TEXT("image/jpeg")), TEXT("captured"), TEXT("image/jpeg") },
+				{ TEXT("null TSharedPtr"), FUnrealMcpToolResult::SuccessWithImage(TEXT("captured"), TEXT("aGVsbG8="), NullStructured), TEXT("captured"), TEXT("image/png") },
+				{ TEXT("empty object"), FUnrealMcpToolResult::SuccessWithImage(TEXT("captured"), TEXT("aGVsbG8="), MakeShared<FJsonObject>()), TEXT("captured"), TEXT("image/png") },
+			};
+PRAGMA_ENABLE_DEPRECATION_WARNINGS
+			for (const FRow& Row : Rows)
+			{
+				const FUnrealMcpToolResult& Result = Row.Result;
+				TestTrue(FString::Printf(TEXT("%s: success"), Row.Label), Result.bSuccess);
+				TestFalse(FString::Printf(TEXT("%s: never structured content alongside an image"), Row.Label), Result.Structured.IsValid());
+				TestEqual(FString::Printf(TEXT("%s: text block"), Row.Label), Result.Message, Row.ExpectedMessage);
+				if (TestEqual(FString::Printf(TEXT("%s: exactly one image block"), Row.Label), Result.Images.Num(), 1))
+				{
+					TestEqual(FString::Printf(TEXT("%s: base64 carried verbatim"), Row.Label), Result.Images[0].Base64Data, FString(TEXT("aGVsbG8=")));
+					TestEqual(FString::Printf(TEXT("%s: mimeType"), Row.Label), Result.Images[0].MimeType, Row.ExpectedMime);
+				}
+			}
 		});
 	});
 }

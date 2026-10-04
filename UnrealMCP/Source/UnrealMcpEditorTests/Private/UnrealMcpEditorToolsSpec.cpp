@@ -255,9 +255,7 @@ void FUnrealMcpEditorToolsSpec::Define()
 		{
 			auto Join = [](const TArray<int64>& A)
 			{
-				FString Out;
-				for (int64 V : A) Out += FString::Printf(TEXT("%lld "), V);
-				return Out;
+				return FString::JoinBy(A, TEXT(" "), [](int64 V) { return LexToString(V); });
 			};
 			TestTrue(*FString::Printf(TEXT("%s (got [%s] expected [%s])"), What, *Join(Actual), *Join(Expected)), Actual == Expected);
 		};
@@ -278,12 +276,15 @@ void FUnrealMcpEditorToolsSpec::Define()
 		It("pages with no gaps or duplicates: the union of pages equals the full filtered set", [this, Feed, Seqs, SeqEq]()
 		{
 			FUnrealMcpLogCollector C;
-			// Interleave matching (LogMcpA) and non-matching (LogMcpB) entries so a newest-page or
-			// filter-after-limit implementation drops or repeats matching entries.
+			// Interleave matching (LogMcpA) and non-matching (LogMcpB) entries, with a run of six consecutive
+			// non-matching entries (longer than the page) in the middle and a non-matching tail. A newest-page
+			// implementation drops matching entries; a filter-AFTER-limit implementation returns an empty page
+			// on the long run (and the loop below stops there); a cursor that does not skip the filtered tail
+			// on the last page ends below the high-water mark.
 			TArray<int64> Expected;
 			for (int32 I = 0; I < 40; ++I)
 			{
-				const bool bMatch = (I % 3) != 1;
+				const bool bMatch = (I % 3) != 1 && (I < 10 || I > 15) && I < 37;
 				Feed(C, bMatch ? TEXT("LogMcpA") : TEXT("LogMcpB"), FString::Printf(TEXT("page line %d"), I));
 				if (bMatch) Expected.Add(I + 1);
 			}
@@ -297,6 +298,8 @@ void FUnrealMcpEditorToolsSpec::Define()
 				const TArray<FUnrealMcpLogEntry> Page = C.SnapshotSince(Cursor, ELogVerbosity::All, TEXT("LogMcpA"), FString(), 4, &Next);
 				if (Page.Num() == 0) { Cursor = Next; break; }
 				TestTrue(TEXT("page respects limit"), Page.Num() <= 4);
+				if (Next < C.HighestSequence())
+					TestEqual(TEXT("a page cut before the high-water mark is full"), Page.Num(), 4);
 				Union.Append(Seqs(Page));
 				TestTrue(TEXT("next cursor is at or past the page's last entry"), Next >= Page.Last().Sequence);
 				Cursor = Next;
@@ -359,6 +362,17 @@ void FUnrealMcpEditorToolsSpec::Define()
 			TestEqual(TEXT("caught-up cursor stays put"), Next, (int64)5);
 		});
 
+		It("without a cursor, Snapshot still returns the most-recent N, newest last", [this, Feed, Seqs, SeqEq]()
+		{
+			FUnrealMcpLogCollector C;
+			for (int32 I = 0; I < 5; ++I) Feed(C, TEXT("LogMcpRecent"), FString::Printf(TEXT("r%d"), I));
+
+			int64 Next = 0;
+			SeqEq(TEXT("the two most recent entries, newest last"),
+				Seqs(C.Snapshot(ELogVerbosity::All, FString(), FString(), 2, &Next)), TArray<int64>({ 4, 5 }));
+			TestEqual(TEXT("next cursor is the high-water mark"), Next, (int64)5);
+		});
+
 		It("console-get-logs: sinceSequence returns only newer entries, oldest first, with sequence + highestSequence", [this, SeqEq]()
 		{
 			FUnrealMcpToolRegistry Registry; UnrealMcpEditorTools::Register(Registry);
@@ -368,7 +382,8 @@ void FUnrealMcpEditorToolsSpec::Define()
 			const bool bWasRegistered = Collector.IsRegistered();
 			Collector.Startup();
 
-			const FString Needle = TEXT("McpCursorProbe_8e21");
+			// Unique per run: the buffer is not cleared, so a fixed needle would match a previous run's lines.
+			const FString Needle = FString::Printf(TEXT("McpCursorProbe_%s"), *FGuid::NewGuid().ToString(EGuidFormats::Digits));
 			for (int32 I = 0; I < 3; ++I)
 				UE_LOG(LogTemp, Display, TEXT("%s #%d"), *Needle, I);
 			GLog->Flush();
@@ -402,6 +417,15 @@ void FUnrealMcpEditorToolsSpec::Define()
 			{
 				TestTrue(TEXT("sequences ascending and positive"), All[0] > 0 && All[0] < All[1] && All[1] < All[2]);
 				TestTrue(TEXT("highestSequence covers the newest entry"), HighAll >= All[2]);
+
+				TArray<int64> Recent; int64 HighRecent = -1;
+				TestTrue(TEXT("limited no-cursor call succeeds"), Fetch(0, 1, Recent, HighRecent));
+				SeqEq(TEXT("without a cursor, limit keeps the MOST-RECENT entry"), Recent, TArray<int64>({ All[2] }));
+
+				TArray<int64> Idle; int64 HighIdle = -1;
+				TestTrue(TEXT("caught-up cursor call succeeds"), Fetch(HighAll, 100, Idle, HighIdle));
+				TestEqual(TEXT("caught-up cursor returns nothing"), Idle.Num(), 0);
+				TestTrue(TEXT("caught-up cursor does not move backwards"), HighIdle >= HighAll);
 
 				TArray<int64> After; int64 HighAfter = -1;
 				TestTrue(TEXT("cursor call succeeds"), Fetch(All[0], 100, After, HighAfter));

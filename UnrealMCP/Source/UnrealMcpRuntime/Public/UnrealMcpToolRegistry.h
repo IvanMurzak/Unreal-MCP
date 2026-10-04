@@ -123,13 +123,44 @@ struct UNREALMCPRUNTIME_API FUnrealMcpToolResult
 	{
 		return FUnrealMcpToolResult{ false, InMessage, nullptr };
 	}
-	/** Success carrying a single image content block (§10 screenshot family). */
+	/**
+	 * Success carrying a single image content block (§10 screenshot family). Deliberately takes NO structured
+	 * content: McpPlugin.Server's direct tool-call endpoint answers `{status, structured}` and drops the
+	 * content array (image included) whenever structured content is set. Put image metadata in @p InMessage.
+	 */
 	static FUnrealMcpToolResult SuccessWithImage(const FString& InMessage, const FString& InBase64Data,
-		const TSharedPtr<FJsonObject>& InStructured = nullptr, const FString& InMimeType = TEXT("image/png"))
+		const FString& InMimeType = TEXT("image/png"))
 	{
-		FUnrealMcpToolResult Result{ true, InMessage, InStructured };
+		FUnrealMcpToolResult Result{ true, InMessage, nullptr };
 		Result.Images.Add(FUnrealMcpImageContent{ InBase64Data, InMimeType });
 		return Result;
+	}
+
+	/**
+	 * DEPRECATED source-compatibility form of SuccessWithImage that still takes structured content (the
+	 * public signature through 0.19: `(Message, Base64, Structured, MimeType = "image/png")`), kept so third-party
+	 * extensions calling it with 3 or 4 arguments keep compiling. It returns exactly what the new form returns
+	 * — one image block, NO structured content — and does not drop the payload: like the screenshot tools'
+	 * metadata, @p InStructured is folded into the text block, appended to @p InMessage as condensed JSON on its
+	 * own line (`<message>\n{"k":v,...}`; just the JSON when the message is empty). A null or empty object adds
+	 * nothing. Migrate by moving the metadata into @p InMessage and calling the 3-argument form.
+	 */
+	UE_DEPRECATED(5.5, "Unreal-MCP (after 0.19): SuccessWithImage no longer takes structured content; it is folded into the text block as JSON. Put the metadata in InMessage and call SuccessWithImage(InMessage, InBase64Data, InMimeType).")
+	static FUnrealMcpToolResult SuccessWithImage(const FString& InMessage, const FString& InBase64Data,
+		const TSharedPtr<FJsonObject>& InStructured, const FString& InMimeType = TEXT("image/png"));
+
+	/**
+	 * DEPRECATED: the old form called with a literal `nullptr` structured argument. Without this exact-match
+	 * overload `SuccessWithImage(Msg, Base64, nullptr)` is ambiguous on clang/GCC (Mac/Linux builds): nullptr
+	 * reaches FString through several char-pointer constructors and TSharedPtr through its null-tag one, two
+	 * indistinguishable user-defined conversions (MSVC is lenient and picks TSharedPtr). Identical to
+	 * SuccessWithImage(InMessage, InBase64Data, InMimeType).
+	 */
+	UE_DEPRECATED(5.5, "Unreal-MCP (after 0.19): SuccessWithImage no longer takes structured content. Drop the nullptr argument: SuccessWithImage(InMessage, InBase64Data, InMimeType).")
+	static FUnrealMcpToolResult SuccessWithImage(const FString& InMessage, const FString& InBase64Data,
+		TYPE_OF_NULLPTR, const FString& InMimeType = TEXT("image/png"))
+	{
+		return SuccessWithImage(InMessage, InBase64Data, InMimeType);
 	}
 };
 

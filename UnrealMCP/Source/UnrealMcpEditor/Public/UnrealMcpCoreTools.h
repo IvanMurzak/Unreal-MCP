@@ -4,9 +4,9 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "UnrealMcpToolRegistry.h"
 
 class FUnrealMcpToolRegistry;
+struct FUnrealMcpToolResult;
 
 /**
  * Registration entry points for the EDITOR-only core tool families (docs/ARCHITECTURE.md §10). Exported
@@ -104,9 +104,8 @@ namespace UnrealMcpScreenshotTools
 
 	/**
 	 * Build a screenshot tool's success result: one image content block plus one text block carrying the
-	 * capture metadata (source, width, height, mimeType, encoded byte size) and NO structured content. A
-	 * result with structured content makes McpPlugin.Server return `{status, structured}` and drop the image.
-	 * GPU-free (spec-testable).
+	 * capture metadata (source, width, height, mimeType, encoded byte size); no structured content (see
+	 * FUnrealMcpToolResult::SuccessWithImage). GPU-free (spec-testable).
 	 */
 	UNREALMCPEDITOR_API FUnrealMcpToolResult MakeImageResult(const FString& Source, int32 Width, int32 Height, const FString& Base64Png, int32 EncodedBytes);
 }
