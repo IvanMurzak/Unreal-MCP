@@ -145,7 +145,7 @@ struct UNREALMCPRUNTIME_API FUnrealMcpToolResult
 	 * own line (`<message>\n{"k":v,...}`; just the JSON when the message is empty). A null or empty object adds
 	 * nothing. Migrate by moving the metadata into @p InMessage and calling the 3-argument form.
 	 */
-	UE_DEPRECATED(5.5, "FUnrealMcpToolResult::SuccessWithImage no longer takes structured content (an image result never carries it: McpPlugin.Server drops the image when structured content is set). The structured object is folded into the text block as JSON. Put the metadata in InMessage and call SuccessWithImage(InMessage, InBase64Data, InMimeType).")
+	UE_DEPRECATED(5.5, "Unreal-MCP (after 0.19): SuccessWithImage no longer takes structured content; it is folded into the text block as JSON. Put the metadata in InMessage and call SuccessWithImage(InMessage, InBase64Data, InMimeType).")
 	static FUnrealMcpToolResult SuccessWithImage(const FString& InMessage, const FString& InBase64Data,
 		const TSharedPtr<FJsonObject>& InStructured, const FString& InMimeType = TEXT("image/png"));
 
@@ -156,7 +156,7 @@ struct UNREALMCPRUNTIME_API FUnrealMcpToolResult
 	 * indistinguishable user-defined conversions (MSVC is lenient and picks TSharedPtr). Identical to
 	 * SuccessWithImage(InMessage, InBase64Data, InMimeType).
 	 */
-	UE_DEPRECATED(5.5, "FUnrealMcpToolResult::SuccessWithImage no longer takes structured content. Drop the nullptr argument: SuccessWithImage(InMessage, InBase64Data, InMimeType).")
+	UE_DEPRECATED(5.5, "Unreal-MCP (after 0.19): SuccessWithImage no longer takes structured content. Drop the nullptr argument: SuccessWithImage(InMessage, InBase64Data, InMimeType).")
 	static FUnrealMcpToolResult SuccessWithImage(const FString& InMessage, const FString& InBase64Data,
 		TYPE_OF_NULLPTR, const FString& InMimeType = TEXT("image/png"))
 	{
