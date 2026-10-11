@@ -261,12 +261,19 @@ jobs:
     needs: [check-version]
     if: vars.UNREAL_RUNNER_READY == 'true'
     # Matrix covers the supported UE 5.5/5.6/5.7/5.8 set; the single self-hosted
-    # runner (label `unreal-5-7`, legacy) executes the legs sequentially.
+    # pool runs the legs (each on a machine carrying that engine's `unreal-5-x` label).
     # fail-fast:false so one engine's failure never cancels the others. Downstream
     # artifact / publish jobs that `needs: [plugin]` wait for ALL legs — so a
     # release is gated on the plugin passing Automation across the full supported
     # engine matrix.
-    runs-on: [self-hosted, windows, unreal-5-7, rm-autoscale-win-x64]
+    # Engine-versioned runner label (unreal-5-8 for UE 5.8): the job only lands on a machine
+    # that has this engine installed. Expressions have no replace(), hence the lookup; an
+    # unmapped version yields e.g. `unreal-5.10`, which no runner carries (add it to the map).
+    runs-on:
+      - self-hosted
+      - windows
+      - rm-autoscale-win-x64
+      - ${{ fromJSON('{"5.5":"unreal-5-5","5.6":"unreal-5-6","5.7":"unreal-5-7","5.8":"unreal-5-8","5.9":"unreal-5-9"}')[matrix.ue] || format('unreal-{0}', matrix.ue) }}
     strategy:
       fail-fast: false
       max-parallel: 2
@@ -753,7 +760,9 @@ jobs:
     name: build plugin release zips (UE 5.8)
     needs: [check-version, plugin, build-bridge-macos, build-bridge-windows]
     if: vars.UNREAL_RUNNER_READY == 'true'
-    runs-on: [self-hosted, windows, unreal-5-7, rm-autoscale-win-x64]
+    # Engine-versioned runner label for the engine UE_ROOT defaults to (UE 5.8). If
+    # UNREAL_ENGINE_PATH ever points at another engine, change this label to match.
+    runs-on: [self-hosted, windows, rm-autoscale-win-x64, unreal-5-8]
     env:
       UE_ROOT: ${{ vars.UNREAL_ENGINE_PATH || 'C:\Program Files\Epic Games\UE_5.8' }}
     steps:
