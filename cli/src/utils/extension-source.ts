@@ -202,7 +202,7 @@ export async function resolveLatestExtensionVersion(
   try {
     const latestUrl = `https://${TRUSTED_DOWNLOAD_HOST}/${input.repo}/releases/latest`;
     const latest = await head(latestUrl);
-    const location = latest.status >= 300 && latest.status < 400 ? latest.headers?.get('location') : null;
+    const location = latest.status >= 300 && latest.status < 400 ? latest.headers.get('location') : null;
     if (!location) {
       return { kind: 'unresolved', reason: `no latest-release redirect from ${latestUrl} (HTTP ${latest.status})` };
     }

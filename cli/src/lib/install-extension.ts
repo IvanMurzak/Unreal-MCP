@@ -161,16 +161,18 @@ export async function installExtension(
     }
 
     // Never downgrade an installed newer copy implicitly — only --version may.
-    const keepInstalled =
+    let keepInstalled = false;
+    if (
       (versionSource === 'latest-release' || versionSource === 'catalog') &&
       fromVersion !== null &&
       toVersion !== null &&
-      compareSemver(stripLeadingV(fromVersion), stripLeadingV(toVersion)) > 0;
-    if (keepInstalled) {
+      compareSemver(stripLeadingV(fromVersion), stripLeadingV(toVersion)) > 0
+    ) {
       warnings.push(
         `Installed ${pluginName} ${fromVersion} is newer than ${toVersion}; keeping it. ` +
-          `Pass --version ${stripLeadingV(toVersion as string)} to downgrade.`,
+          `Pass --version ${stripLeadingV(toVersion)} to downgrade.`,
       );
+      keepInstalled = true;
       toVersion = fromVersion;
       versionSource = 'installed';
     }
