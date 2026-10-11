@@ -1,6 +1,6 @@
 # bridge/ — the .NET 9 sidecar `unreal-mcp-bridge` (McpPlugin host; IPC ⇄ SignalR relay)
 
-- `Unreal-MCP-Bridge.sln` — hand-authored and tracked (the one `.sln` that is committed).
+- `Unreal-MCP-Bridge.sln` — hand-authored, tracked solution (bridge + tests).
 - `src/` — `com.IvanMurzak.Unreal.MCP.Bridge.csproj`; `Ipc/` (NDJSON protocol + messages), `Host/`
   (`SidecarHost`), `Sidecar/` (lifecycle), `Tools/` (manifest registrars, `ProxyTool`/`ProxyPrompt`/
   `ProxyResource`, surface sinks, `SkillGenerateTool`), `AgentConfig/`, `Auth/`.
@@ -17,4 +17,4 @@ osx-arm64; PowerShell: `publish.ps1 [-Platforms <rid>...] [-NoZip]`). Output `br
 one apphost, no `.pdb`/loose DLLs. Self-contained engages only when a RID is given, so plain
 `dotnet build`/`test` yields `bin/<cfg>/net9.0/unreal-mcp-bridge.exe`, the path the live e2e
 (`UNREAL_MCP_BRIDGE_PATH`) uses. Release stages signed slices into
-`UnrealMCP/Source/ThirdParty/UnrealMcpBridge/<rid>/`; binaries are never committed.
+`UnrealMCP/Source/ThirdParty/UnrealMcpBridge/<rid>/`.

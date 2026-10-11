@@ -86,8 +86,7 @@ One semver for plugin / bridge / cli; `UnrealMCP/UnrealMCP.uplugin` `VersionName
 **Never bump from a feature task or hand-edit one alone** — the release flow owns versions
 ([`docs/RELEASING.md`](docs/RELEASING.md)). The consumed server version (`SERVER_VERSION`) is pinned
 separately and diverges on purpose; bump it only after that shared release exists. The plugin↔sidecar
-handshake is independent of it. NuGet pins `com.IvanMurzak.ReflectorNet` / `com.IvanMurzak.McpPlugin`
-are owned upstream — never bump them here (see `bridge/AGENTS.md`).
+handshake is independent of it. NuGet pins: see `bridge/AGENTS.md`.
 
 ## Conventions
 
