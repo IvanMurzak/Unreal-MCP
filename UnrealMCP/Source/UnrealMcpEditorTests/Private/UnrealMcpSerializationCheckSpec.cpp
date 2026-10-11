@@ -21,7 +21,7 @@
  * reflected object for a real UObject. The Slate window itself (target picker, output panel, Copy flash) is
  * windowed-verified by the operator; these specs lock the serialization contract underneath it.
  *
- * Helpers carry the spec-unique `SerChk` prefix (CLAUDE.md unity-build ODR rule).
+ * Helpers carry the spec-unique `SerChk` prefix (UnrealMCP/AGENTS.md unity-build ODR rule).
  */
 BEGIN_DEFINE_SPEC(FUnrealMcpSerializationCheckSpec, "UnrealMcp.SerializationCheck",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)

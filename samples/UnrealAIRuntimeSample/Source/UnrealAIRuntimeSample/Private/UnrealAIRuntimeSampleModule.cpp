@@ -20,7 +20,7 @@ namespace
 	 * access to Unreal-MCP's private FUnrealMcpWorldProvider, so a real game extension resolves the world
 	 * from the engine's world contexts (Engine-module only, runtime-safe), preferring a Game world and
 	 * falling back to a PIE world so the sample also works when exercised inside the editor's PIE session.
-	 * A sample-unique helper name per the unity-build ODR rule (docs/CLAUDE.md conventions).
+	 * A sample-unique helper name per the unity-build ODR rule (UnrealMCP/AGENTS.md).
 	 */
 	UWorld* RuntimeSampleResolveGameWorld()
 	{
