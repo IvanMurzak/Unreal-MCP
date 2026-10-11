@@ -22,7 +22,7 @@
 #include "Serialization/JsonWriter.h"
 #include "Policies/CondensedJsonPrintPolicy.h"
 
-// Unity-build ODR rule (CLAUDE.md): every file-local helper carries the family-unique `DevControl` prefix
+// Unity-build ODR rule (UnrealMCP/AGENTS.md): every file-local helper carries the family-unique `DevControl` prefix
 // so a same-name/same-signature helper in another unity-grouped .cpp cannot collide.
 namespace
 {

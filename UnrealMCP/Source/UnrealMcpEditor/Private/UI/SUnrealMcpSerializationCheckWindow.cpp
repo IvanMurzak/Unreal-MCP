@@ -40,7 +40,7 @@ using UnrealMcpAgentWidgets::TemplateLabelDescription;
 
 namespace
 {
-	// Unity-build ODR rule (CLAUDE.md): every file-local helper carries the family-unique `SerCheck` prefix
+	// Unity-build ODR rule (UnrealMCP/AGENTS.md): every file-local helper carries the family-unique `SerCheck` prefix
 	// so a same-name/same-signature helper in another unity-grouped .cpp cannot collide.
 
 	// Pretty-print a JSON object the way the Unity reference does (reflector .ToPrettyJson()). The tool

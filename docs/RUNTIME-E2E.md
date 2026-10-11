@@ -32,7 +32,7 @@ connect/disconnect/orphan-safety — in `UnrealMcpEditorTests/`).
 ## Prerequisites
 
 - UE 5.7 at `C:\Program Files\Epic Games\UE_5.7` (the testbed is wired via the
-  `Unreal-Test-Project/Plugins/UnrealMCP` junction — see the infra `CLAUDE.md`).
+  `Unreal-Test-Project/Plugins/UnrealMCP` junction — see the infra repo's `engine-testbeds` skill).
 - The shared `gamedev-mcp-server` binary (`SERVER_VERSION` in
   `cli/src/lib/server-version.ts`, currently `8.0.0`). Obtain it via the CLI's server command
   (it downloads + caches the pinned release), or build it locally from the

@@ -31,7 +31,7 @@ class FUnrealMcpToolRegistry;
  * WHY THE PLUGIN'S EDITOR MODULE, not the host project. A generated skill must see the tool registry
  * (`UnrealMcpToolRegistry.h`) and its `UNREALMCPRUNTIME_API` symbols. Putting it in a GAME module means
  * that module takes a hard dependency on `UnrealMcpRuntime`, which — per the plugin's own README/
- * CLAUDE.md — OVERRIDES a consumer's `TargetDenyList` and drags Unreal-MCP into packaged game builds.
+ * AGENTS.md — OVERRIDES a consumer's `TargetDenyList` and drags Unreal-MCP into packaged game builds.
  * The editor module already depends on the runtime module, is stripped from Game targets by Type, and is
  * rebuilt by the very same UBT invocation the user runs anyway.
  *

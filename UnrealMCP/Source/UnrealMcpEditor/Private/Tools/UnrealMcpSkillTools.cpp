@@ -22,7 +22,7 @@ namespace UnrealMcpSkillTools
 	{
 		// Unity-build ODR rule: every helper below is namespace-private to this file's anonymous namespace,
 		// but the module is unity-built, so the names must still be unique across the whole module. The
-		// `Skills` prefix is this family's unique stem (see CLAUDE.md "Unity-build ODR rule").
+		// `Skills` prefix is this family's unique stem (see UnrealMCP/AGENTS.md "Unity-build ODR rule").
 
 		/** The generated-file banner. Kept in one place so the specs and the generator cannot drift. */
 		const TCHAR* const SkillsGeneratedBanner =
@@ -267,7 +267,7 @@ namespace UnrealMcpSkillTools
 		Out += TEXT("#include \"Tools/UnrealMcpGeneratedSkills.h\"\n");
 		Out += TEXT("#include \"UnrealMcpToolRegistry.h\"\n");
 		Out += TEXT("\n");
-		// A tool-id-derived namespace keeps every generated symbol unique in the unity build (CLAUDE.md ODR rule).
+		// A tool-id-derived namespace keeps every generated symbol unique in the unity build (UnrealMCP/AGENTS.md ODR rule).
 		Out += FString::Printf(TEXT("namespace UnrealMcpGeneratedSkill_%s\n{\n"), *Symbol);
 		Out += TEXT("\tstatic void Register(FUnrealMcpToolRegistry& Registry)\n\t{\n");
 		Out += FString::Printf(TEXT("\t\tRegistry.Tool(TEXT(\"%s\"))\n"), *EscapeCppStringLiteral(Spec.ToolId));

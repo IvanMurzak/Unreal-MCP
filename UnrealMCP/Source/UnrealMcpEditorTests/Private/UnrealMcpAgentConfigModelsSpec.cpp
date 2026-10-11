@@ -23,7 +23,7 @@
 BEGIN_DEFINE_SPEC(FUnrealMcpAgentConfigModelsSpec, "UnrealMcp.AgentConfigModels",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 
-	// Family-unique helper (unity-build ODR rule, CLAUDE.md): build a DTO JSON object the way the sidecar does.
+	// Family-unique helper (unity-build ODR rule, UnrealMCP/AGENTS.md): build a DTO JSON object the way the sidecar does.
 	static TSharedPtr<FJsonObject> AgentConfigModelsParseObject(const FString& Json)
 	{
 		TSharedPtr<FJsonObject> Obj;

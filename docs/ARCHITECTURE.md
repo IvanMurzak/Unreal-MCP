@@ -993,7 +993,7 @@ Unreal-MCP/
 ├── docs/  (ARCHITECTURE.md ← this doc, RELEASING.md, EXTENSIONS.md, claude/)
 ├── .github/workflows/  (test_pull_request.yml, test_cli.yml, release.yml)
 ├── commands/bump-version.ps1
-├── CLAUDE.md  README.md  LICENSE  .gitignore  .editorconfig
+├── AGENTS.md  README.md  LICENSE  .gitignore  .editorconfig
 ```
 
 Infra side (separate tasks): `Unreal-Test-Project/` testbed in the infra repo (UE 5.7, minimal,

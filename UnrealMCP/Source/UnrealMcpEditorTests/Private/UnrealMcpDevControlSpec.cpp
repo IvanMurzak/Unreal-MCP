@@ -15,7 +15,7 @@
  * FUnrealMcpDevControlServer::RouteRequest performs — health/state snapshots, the inject + control verbs,
  * and the error surface (bad method / path / body) — all WITHOUT a live HTTP socket. The view-model is the
  * real one, wired with recording sinks so a spec can assert the mutators fired (it is drivable with no live
- * bridge, see its docblock). Helpers carry the spec-unique `DevCtl` prefix (CLAUDE.md unity-build ODR rule).
+ * bridge, see its docblock). Helpers carry the spec-unique `DevCtl` prefix (UnrealMCP/AGENTS.md unity-build ODR rule).
  */
 BEGIN_DEFINE_SPEC(FUnrealMcpDevControlSpec, "UnrealMcp.DevControl",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
