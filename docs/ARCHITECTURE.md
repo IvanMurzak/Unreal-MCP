@@ -361,7 +361,7 @@ sidecar-side diffing keeps the C++ side stateless about what the sidecar saw.
 
 ### 2.3 Exact additive API PR for MCP-Plugin-dotnet
 
-One small PR (additive only — no core rework; per `MCP-Plugin-dotnet/CLAUDE.md`, public-API
+One small PR (additive only — no core rework; per `MCP-Plugin-dotnet/AGENTS.md`, public-API
 changes cascade, so notify lead + release as a minor NuGet bump, e.g. 6.8.0):
 
 - `McpPlugin/src/Mcp/Tool/ProxyTool.cs` — `public sealed class ProxyTool : IRunTool`: ctor takes
