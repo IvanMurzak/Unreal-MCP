@@ -34,7 +34,7 @@ The runtime built-in surface is **`ping` only** (a system tool, so `tools/list` 
 the `UnrealMcp.RuntimeSubsystem` spec asserts the registry is exactly `{ping}`); all engine-development
 tools are editor-only, and games bring their own via `IUnrealMcpToolProvider`. Security gates, all in
 `Connect()` (§12.8): opt-in only; kill switch `UUnrealMcpRuntimeSettings::bRuntimeMcpEnabled`
-(`DefaultGame.ini`, default false); Shipping gate `bUnrealMcpAllowShipping` in `*.Build.cs`
+(Project Settings → Plugins → Unreal MCP (Runtime), `DefaultGame.ini`, default false); Shipping gate `bUnrealMcpAllowShipping` in `*.Build.cs`
 (default false → `UNREAL_MCP_ALLOW_SHIPPING=0`, also controls staging the sidecar into Shipping);
 loopback host unless `bAllowRemoteHost=true`; loopback IPC + stdin token. Desktop only (Win64/Mac/Linux).
 Consumers exclude the plugin from packaged games with a `TargetDenyList: ["Game","Client","Server"]` in
