@@ -166,6 +166,7 @@ export type {
   InstallExtensionSuccess,
   InstallExtensionFailure,
   ExtensionInstallOutcome,
+  ExtensionVersionSource,
   ExtensionBuildStep,
   InstallSourceKind,
   RunToolOptions,
@@ -243,4 +244,5 @@ export type {
 export type { SetupSkillsOptions, SetupSkillsResult } from './lib/setup-skills.js';
 export type { CloseOptions, CloseResult, RunningProcess } from './lib/close.js';
 export type { ExtensionDescriptor, ExtensionTool } from './utils/extensions-catalog.js';
-export type { InstallSource } from './utils/extension-source.js';
+export type { InstallSource, LatestReleaseResolution } from './utils/extension-source.js';
+export { resolveLatestExtensionVersion } from './utils/extension-source.js';

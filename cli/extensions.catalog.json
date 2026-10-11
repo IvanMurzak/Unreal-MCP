@@ -90,7 +90,7 @@
       "description": "AI tools for Unreal's Control Rig (list/inspect rig blueprints, controls, bones, and actor components).",
       "pluginName": "UnrealAIControlRig",
       "repo": "IvanMurzak/Unreal-AI-ControlRig",
-      "version": "0.1.1",
+      "version": "0.1.2",
       "minCoreVersion": "0.5.0",
       "enginePlugins": ["ControlRig"],
       "tools": [

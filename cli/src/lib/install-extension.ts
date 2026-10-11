@@ -9,16 +9,22 @@
 //   1. RESOLVE the `<id>` to a descriptor in the shared catalog
 //      (`extensions-catalog.ts`); or, when the id is unknown but `--source <dir>`
 //      is given, SYNTHESIZE a descriptor from that dir's `.uplugin`.
-//   2. RESOLVE the install source via the pluggable resolver
+//   2. RESOLVE the version: an explicit `--version` wins; otherwise the newest
+//      GitHub release of the extension repo is resolved ONLINE
+//      (`resolveLatestExtensionVersion`), and the catalog `version` (the last
+//      known release) is only the offline / failed-resolution fallback. An
+//      installed copy NEWER than that target is never downgraded implicitly —
+//      only an explicit `--version` downgrades.
+//   3. RESOLVE the install source via the pluggable resolver
 //      (`extension-source.ts`): `--source <dir>` (local/CI/offline) or the
 //      extension's GitHub-release zip (github.com-only, fail-closed). A future
 //      Fab channel slots in there without touching this file's callers.
-//   3. PLACE the plugin into `<project>/Plugins/<pluginName>/` (stage-then-swap,
+//   4. PLACE the plugin into `<project>/Plugins/<pluginName>/` (stage-then-swap,
 //      zip-slip-guarded, build-cache filtered) — idempotent.
-//   4. ENABLE the extension AND its gating engine plugins (e.g. Niagara, read
+//   5. ENABLE the extension AND its gating engine plugins (e.g. Niagara, read
 //      from the extension's own `.uplugin` `Plugins[]` ∪ the catalog hint) in the
 //      `.uproject` `Plugins[]` array.
-//   5. COMPILE: the extension ships as SOURCE; by default UE recompiles it on the
+//   6. COMPILE: the extension ships as SOURCE; by default UE recompiles it on the
 //      next editor open (`rebuildRequired: true`). `--build` opts into an eager
 //      UBT compile against the resolved engine.
 //
@@ -40,7 +46,12 @@ import {
   unknownExtensionMessage,
   type ExtensionDescriptor,
 } from '../utils/extensions-catalog.js';
-import { resolveInstallSource, stripLeadingV, type InstallSource } from '../utils/extension-source.js';
+import {
+  resolveInstallSource,
+  resolveLatestExtensionVersion,
+  stripLeadingV,
+  type InstallSource,
+} from '../utils/extension-source.js';
 import {
   isDesktopBuildPlatform,
   resolveDesktopBuildStep,
@@ -55,6 +66,7 @@ import { emitProgress } from './progress.js';
 import type {
   ExtensionBuildStep,
   ExtensionInstallOutcome,
+  ExtensionVersionSource,
   InstallExtensionOptions,
   InstallExtensionResult,
 } from './types.js';
@@ -98,7 +110,7 @@ export async function installExtension(
     let descriptor: ExtensionDescriptor;
     const fromCatalog = findExtension(opts.extensionId, catalog);
     if (fromCatalog) {
-      descriptor = applyVersionOverride(fromCatalog, versionOverride, warnings);
+      descriptor = applyVersionOverride(fromCatalog, versionOverride);
     } else if (sourceArg !== '') {
       descriptor = synthesizeDescriptorFromSource(opts.extensionId, sourceArg, versionOverride, warnings);
     } else {
@@ -112,16 +124,58 @@ export async function installExtension(
 
     const pluginName = descriptor.pluginName;
     const installedPath = path.join(projectDir, 'Plugins', pluginName);
-    const toVersion = hasVersion(descriptor) ? (descriptor.version as string) : null;
 
-    // What is already on disk? (drives idempotency + add-vs-update.)
+    // What is already on disk? (drives idempotency + add-vs-update + no-downgrade.)
     const installedUplugin = findUPluginFile(installedPath);
     const fromVersion = installedUplugin
       ? readUPluginVersionName(safeReadJson(installedUplugin))
       : null;
     const installedPresent = installedUplugin !== null;
 
-    // 2. Resolve the install source (the pluggable channel seam).
+    // 2. Resolve the target version: --version > latest release (online) > catalog fallback.
+    let toVersion = hasVersion(descriptor) ? (descriptor.version as string) : null;
+    let versionSource: ExtensionVersionSource =
+      versionOverride !== '' ? 'explicit' : sourceArg !== '' ? 'local' : 'catalog';
+    if (versionSource === 'catalog' && descriptor.repo) {
+      const latest = await resolveLatestExtensionVersion({
+        repo: descriptor.repo,
+        pluginName,
+        fetchImpl: opts.fetchImpl,
+        timeoutMs: opts.resolveTimeoutMs,
+      });
+      if (latest.kind === 'resolved') {
+        toVersion = latest.version;
+        versionSource = 'latest-release';
+        emitProgress(opts.onProgress, {
+          phase: 'info',
+          message: `Resolved latest ${pluginName} release: ${latest.version}`,
+        });
+      } else {
+        warnings.push(
+          `Could not resolve the latest ${pluginName} release (${latest.reason}); ` +
+            (toVersion !== null
+              ? `falling back to the catalog version ${toVersion}.`
+              : 'the catalog has no fallback version.'),
+        );
+      }
+    }
+
+    // Never downgrade an installed newer copy implicitly — only --version may.
+    const keepInstalled =
+      (versionSource === 'latest-release' || versionSource === 'catalog') &&
+      fromVersion !== null &&
+      toVersion !== null &&
+      compareSemver(stripLeadingV(fromVersion), stripLeadingV(toVersion)) > 0;
+    if (keepInstalled) {
+      warnings.push(
+        `Installed ${pluginName} ${fromVersion} is newer than ${toVersion}; keeping it. ` +
+          `Pass --version ${stripLeadingV(toVersion as string)} to downgrade.`,
+      );
+      toVersion = fromVersion;
+      versionSource = 'installed';
+    }
+
+    // 3. Resolve the install source (the pluggable channel seam).
     const source = resolveInstallSource({
       source: sourceArg,
       repo: descriptor.repo,
@@ -129,14 +183,16 @@ export async function installExtension(
       version: toVersion,
     });
 
-    // 3. Materialize the plugin files — only when needed (force, not present, or a
-    //    version mismatch when a target version is known).
+    // 4. Materialize the plugin files — only when needed (force, not present, or a
+    //    version mismatch when a target version is known), and never over a kept
+    //    newer install (its release may not even exist, e.g. a dev build).
     const materializeNeeded =
-      opts.force === true ||
-      !installedPresent ||
-      // Normalize a possible leading `v` on either side so `v1.0.0` (a .uplugin
-      // VersionName) and `1.0.0` (a catalog/--version pin) are not seen as a diff.
-      (toVersion !== null && stripLeadingV(fromVersion ?? '') !== stripLeadingV(toVersion));
+      !keepInstalled &&
+      (opts.force === true ||
+        !installedPresent ||
+        // Normalize a possible leading `v` on either side so `v1.0.0` (a .uplugin
+        // VersionName) and `1.0.0` (a release/--version) are not seen as a diff.
+        (toVersion !== null && stripLeadingV(fromVersion ?? '') !== stripLeadingV(toVersion)));
 
     if (materializeNeeded) {
       emitProgress(opts.onProgress, {
@@ -158,7 +214,7 @@ export async function installExtension(
       }
     }
 
-    // 4. Enable the extension + its gating engine plugins in the .uproject.
+    // 5. Enable the extension + its gating engine plugins in the .uproject.
     const effectiveUplugin = findUPluginFile(installedPath);
     const declaredDeps = effectiveUplugin ? parseUPluginDependencies(safeReadJson(effectiveUplugin)) : [];
     const gatingPlugins = unique([...declaredDeps, ...descriptor.enginePlugins]);
@@ -180,7 +236,7 @@ export async function installExtension(
     // minCoreVersion advisory (warn-only — never block an install on it).
     warnOnCoreVersionFloor(projectDir, descriptor, warnings);
 
-    // 5. Compile. Default: rely on UE's compile-on-next-open. `--build` runs UBT now.
+    // 6. Compile. Default: rely on UE's compile-on-next-open. `--build` runs UBT now.
     let built = false;
     if (opts.build === true) {
       built = await runUbtBuild(uproject.uprojectPath, uproject.projectName, uproject.engineAssociation, opts, warnings);
@@ -213,6 +269,7 @@ export async function installExtension(
       sourceKind: source.kind,
       fromVersion,
       toVersion,
+      versionSource,
       enabledPlugins: enable.addedOrFlipped,
       uprojectPath: uproject.uprojectPath,
       built,
@@ -228,19 +285,12 @@ export async function installExtension(
 // Descriptor resolution
 // ---------------------------------------------------------------------------
 
-/** Apply the `--version` override to a catalog descriptor (empty override is ignored). */
-function applyVersionOverride(
-  descriptor: ExtensionDescriptor,
-  version: string,
-  warnings: string[],
-): ExtensionDescriptor {
-  if (version === '') return descriptor;
-  if (descriptor.version !== null && descriptor.version !== version) {
-    warnings.push(
-      `--version ${version} overrides the catalog pin ${descriptor.pluginName}@${descriptor.version} for this install.`,
-    );
-  }
-  return { ...descriptor, version };
+/**
+ * Apply the `--version` override to a catalog descriptor (empty override is
+ * ignored). An explicit version skips latest-release resolution and may downgrade.
+ */
+function applyVersionOverride(descriptor: ExtensionDescriptor, version: string): ExtensionDescriptor {
+  return version === '' ? descriptor : { ...descriptor, version };
 }
 
 /**

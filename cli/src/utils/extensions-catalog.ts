@@ -63,7 +63,12 @@ export interface ExtensionDescriptor {
    * such an extension can still be installed via `--source <dir>`.
    */
   readonly repo: string | null;
-  /** Catalog-pinned version, or `null` for an unpinned (floating) entry. */
+  /**
+   * The LAST KNOWN released version — an offline fallback only. `install-extension`
+   * installs the newest release resolved online at install time and uses this
+   * value only when that resolution fails (offline, rate-limited, no matching
+   * asset). `null` = no fallback (the install then needs the network or `--version`).
+   */
   readonly version: string | null;
   /**
    * Minimum core Unreal-MCP plugin version this extension requires
@@ -274,7 +279,7 @@ export const EXTENSIONS_CATALOG: readonly ExtensionDescriptor[] = [
       "AI tools for Unreal's Control Rig (list/inspect rig blueprints, controls, bones, and actor components).",
     pluginName: 'UnrealAIControlRig',
     repo: 'IvanMurzak/Unreal-AI-ControlRig',
-    version: '0.1.1',
+    version: '0.1.2',
     minCoreVersion: '0.5.0',
     enginePlugins: ['ControlRig'],
     tools: [
@@ -307,7 +312,7 @@ export const EXTENSIONS_CATALOG: readonly ExtensionDescriptor[] = [
   },
 ] as const;
 
-/** True when a descriptor carries a concrete version pin (drives the up-to-date / update decision). */
+/** True when a descriptor carries a concrete (fallback) version. */
 export function hasVersion(descriptor: ExtensionDescriptor): boolean {
   return descriptor.version !== null && descriptor.version.trim() !== '';
 }

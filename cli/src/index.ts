@@ -25,7 +25,11 @@ program
   .name('unreal-mcp-cli')
   .description('Cross-platform CLI tool for Unreal-MCP operations')
   .version(PACKAGE_VERSION)
-  .option('-v, --verbose', 'Enable verbose diagnostic output');
+  .option('-v, --verbose', 'Enable verbose diagnostic output')
+  // Root options are parsed only BEFORE the subcommand, so a subcommand's own
+  // `--version <x.y.z>` (install-extension / install-plugin / update) reaches it
+  // instead of printing the CLI version.
+  .enablePositionalOptions();
 
 // The full 17-command surface (docs/ARCHITECTURE.md §9.1).
 const subcommands = [
