@@ -146,7 +146,7 @@ private:
  * tool/prompt traits in the KEY (Uri, not Name → KeyNoun "uri") and the validation (a resource has no param
  * specs; the key rule is the uri rule, not the kebab rule).
  */
-struct FUnrealMcpResourceRegistryTraits
+struct UNREALMCPRUNTIME_API FUnrealMcpResourceRegistryTraits
 {
 	static const FString& KeyOf(const FUnrealMcpRegisteredResource& Entry) { return Entry.Uri; }
 	static const TCHAR* KindNoun() { return TEXT("resource"); }

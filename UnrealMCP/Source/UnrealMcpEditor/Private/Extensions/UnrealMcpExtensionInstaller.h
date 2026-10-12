@@ -149,7 +149,7 @@ public:
 
 	/** The shallowest `*.uplugin` file under @p Dir (build-cache subtrees skipped), or empty. */
 	static UNREALMCPEDITOR_API FString FindUPluginFile(const FString& Dir);
-	/** Scan `<ProjectDir>/Plugins/*` for installed extension plugins (folder name + `.uplugin` VersionName). */
+	/** Scan each directory under `<ProjectDir>/Plugins` for installed extension plugins (folder name + `.uplugin` VersionName). */
 	static UNREALMCPEDITOR_API TArray<FUnrealMcpInstalledOnDisk> ScanInstalledPlugins(const FString& ProjectDir);
 	/** Copy a plugin source root into @p InstalledPath via stage-then-swap, filtering build-cache subtrees. */
 	static UNREALMCPEDITOR_API bool PlacePluginDir(const FString& SourcePluginRoot, const FString& InstalledPath, FString& OutError);

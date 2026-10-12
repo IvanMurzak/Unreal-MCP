@@ -267,8 +267,9 @@ signing the moment they are mirrored (see [Signing secrets](#signing-secrets-cod
 `UnrealMCP/UnrealMCP.uplugin` `VersionName` is the **single source of truth** for
 the release version. `release.yml`'s `check-version` job reads it.
 `commands/bump-version.ps1` rewrites the version across all version-bearing
-files in one shot (the `.uplugin`, the bridge csproj `<Version>`, and
-`cli/package.json` + lockfile):
+files in one shot (the `.uplugin`, the bridge csproj `<Version>`,
+`cli/package.json` + lockfile, and the `cli/src/version.ts` `PACKAGE_VERSION` constant —
+enforced equal to `cli/package.json` by `cli/tests/version.test.ts`):
 
 ```powershell
 .\commands\bump-version.ps1 -NewVersion "0.2.0"     # add -WhatIf to preview

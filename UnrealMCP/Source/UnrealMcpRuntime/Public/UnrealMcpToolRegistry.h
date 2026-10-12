@@ -258,7 +258,7 @@ private:
  * accessor (Name), validation (kebab name + bound handler + param specs), the manifest strings, and the
  * nouns used in collision-rejection messages + log lines.
  */
-struct FUnrealMcpToolRegistryTraits
+struct UNREALMCPRUNTIME_API FUnrealMcpToolRegistryTraits
 {
 	static const FString& KeyOf(const FUnrealMcpRegisteredTool& Entry) { return Entry.Name; }
 	static const TCHAR* KindNoun() { return TEXT("tool"); }

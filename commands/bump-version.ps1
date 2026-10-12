@@ -6,7 +6,8 @@
 .DESCRIPTION
     Updates the single shared semver across all version-bearing files (design
     docs/ARCHITECTURE.md §9.2): the UE plugin .uplugin VersionName, the bridge
-    csproj <Version>, and the cli npm package (package.json + package-lock.json).
+    csproj <Version>, and the cli npm package (package.json + package-lock.json +
+    the cli/src/version.ts PACKAGE_VERSION constant).
     Prevents human errors from hand-editing one of them alone. Supports preview
     mode for safe testing.
 
@@ -61,6 +62,12 @@ $VersionFiles = @(
         Pattern     = '"version":\s*"[\d\.]+(-[a-zA-Z0-9\-\.]+)?(\+[a-zA-Z0-9\-\.]+)?"'
         Replace     = '"version": "{VERSION}"'
         Description = "CLI npm package version"
+    },
+    @{
+        Path        = "cli/src/version.ts"
+        Pattern     = "PACKAGE_VERSION: string = '[\d\.]+(-[a-zA-Z0-9\-\.]+)?(\+[a-zA-Z0-9\-\.]+)?'"
+        Replace     = "PACKAGE_VERSION: string = '{VERSION}'"
+        Description = "CLI runtime PACKAGE_VERSION constant"
     }
 )
 

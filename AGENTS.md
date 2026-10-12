@@ -82,7 +82,8 @@ with `FUnrealMcpToolBuilder::ToolType(EUnrealMcpToolType::System)` and routed by
 ## Versioning
 
 One semver for plugin / bridge / cli; `UnrealMCP/UnrealMCP.uplugin` `VersionName` is the source of truth.
-`commands/bump-version.ps1` rewrites it plus the bridge csproj `<Version>` and `cli/package.json` (+ lock).
+`commands/bump-version.ps1` rewrites it plus the bridge csproj `<Version>`, `cli/package.json` (+ lock) and
+the `cli/src/version.ts` `PACKAGE_VERSION` constant (no runtime `package.json` read — it breaks bundled binaries).
 **Never bump from a feature task or hand-edit one alone** — the release flow owns versions
 ([`docs/RELEASING.md`](docs/RELEASING.md)). The consumed server version (`SERVER_VERSION`) is pinned
 separately and diverges on purpose; bump it only after that shared release exists. The plugin↔sidecar
