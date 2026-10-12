@@ -65,8 +65,8 @@ $VersionFiles = @(
     },
     @{
         Path        = "cli/src/version.ts"
-        Pattern     = "PACKAGE_VERSION = '[\d\.]+(-[a-zA-Z0-9\-\.]+)?(\+[a-zA-Z0-9\-\.]+)?'"
-        Replace     = "PACKAGE_VERSION = '{VERSION}'"
+        Pattern     = "PACKAGE_VERSION: string = '[\d\.]+(-[a-zA-Z0-9\-\.]+)?(\+[a-zA-Z0-9\-\.]+)?'"
+        Replace     = "PACKAGE_VERSION: string = '{VERSION}'"
         Description = "CLI runtime PACKAGE_VERSION constant"
     }
 )
