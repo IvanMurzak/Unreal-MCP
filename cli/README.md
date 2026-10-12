@@ -94,7 +94,7 @@ unreal-mcp-cli status
 | `close [path]` | Terminate the editor process running a project |
 | `install-plugin [path]` | Copy (or `--junction`) the UnrealMCP plugin into `<project>/Plugins` — default source = local repo checkout when present, else the version-matched GitHub source asset |
 | `remove-plugin [path]` | Remove the installed plugin |
-| `install-extension <id> [path]` | Install a third-party Unreal-MCP **extension** plugin into `<project>/Plugins/<name>`, enable it + its gating engine plugins (e.g. `Niagara`) in the `.uproject`, and (re)compile (on next editor open, or now with `--build`). `--source <dir>` installs from a local copy (offline/CI); `--version <x.y.z>` overrides the catalog pin. Idempotent. See [Extensions](#extensions) |
+| `install-extension <id> [path]` | Install a third-party Unreal-MCP **extension** plugin into `<project>/Plugins/<name>`, enable it + its gating engine plugins (e.g. `Niagara`) in the `.uproject`, and (re)compile (on next editor open, or now with `--build`). `--source <dir>` installs from a local copy (offline/CI); by default the **newest GitHub release** is installed (catalog version = offline fallback); `--version <x.y.z>` installs an exact version. Idempotent. Never downgrades implicitly. See [Extensions](#extensions) |
 | `configure` | Write `UNREAL_MCP_*` into `<project>/.env` and gitignore `.env` (§8) |
 | `setup-mcp <agent>` | Write an MCP client config snippet (claude-code, cursor, vscode-copilot). Over the default `http` transport it points the agent at the **project-pinned** cloud URL `<base>/mcp/p/<pin>` (so the agent routes to *this* project's editor); pass `--no-pin` for the bare `<base>/mcp` URL. When this machine is signed in, a Cloud config carries `Authorization: Bearer agd_pk_…` (this project's key, reused or minted) for every agent; `--oauth` writes a URL-only config instead (the agent runs its own login), `--regenerate-key` mints a new key and revokes the old one, and an explicit `--token` wins over both. With `--transport stdio` it instead downloads the pinned shared [`gamedev-mcp-server`](https://github.com/IvanMurzak/GameDev-MCP-Server) release into `<project>/Intermediate/UnrealMCP/server/<rid>/` (skipped when `UNREAL_MCP_SERVER_PATH` points at a local build) |
 | `login` | OAuth device-code auth against ai-game.dev. Signs in once per machine into the shared machine credential store (`~/.ai-game-dev/credentials.json`): the default mints the account (agent) credential and derives the tool credential from it. `--tools-only` mints a tool credential only (CI/automation runners — the desktop App cannot pick it up); `--yes` confirms switching the machine to a different account; `--path <dir>` writes a project-local `.env` instead |
@@ -143,7 +143,10 @@ An **extension** is a third-party UE C++ Editor (or Runtime) plugin that impleme
 to the core Unreal-MCP plugin. `install-extension` is the install channel for them:
 
 ```bash
-# From the extension's GitHub release (the default channel):
+# The newest GitHub release of the extension (the default channel):
+unreal-mcp-cli install-extension com.acme.niagara ./MyGame
+
+# An exact release version (may downgrade):
 unreal-mcp-cli install-extension com.acme.niagara ./MyGame --version 1.2.0
 
 # From a local copy (offline / CI / dev — mirrors godot-cli install-plugin --source):
@@ -153,7 +156,12 @@ unreal-mcp-cli install-extension com.acme.niagara ./MyGame --source ../Unreal-AI
 unreal-mcp-cli install-extension com.acme.niagara ./MyGame --source <dir> --build
 ```
 
-It (1) resolves `<id>` against the **shared extension catalog**, (2) places the plugin into
+It (1) resolves `<id>` against the **shared extension catalog**, then resolves the **newest release
+online** (the `https://github.com/<repo>/releases/latest` redirect — no API rate limit, never a draft or
+prerelease; the tag must be a plain `vX.Y.Z` and the release must carry `<pluginName>-<X.Y.Z>.zip`).
+The catalog `version` is only the **last known release**, used when that resolution fails (offline,
+no matching asset). An explicit `--version` skips resolution and wins; an installed copy newer than
+the resolved version is kept, never downgraded implicitly. (2) places the plugin into
 `<project>/Plugins/<pluginName>/`, (3) enables the extension **and its gating engine plugins** (e.g.
 `Niagara`, read from the extension's own `.uplugin` `Plugins[]` ∪ the catalog hint) in the `.uproject`,
 and (4) compiles it. It is **idempotent** — a re-run that finds the same version already installed and
@@ -164,7 +172,7 @@ catalog (`src/utils/extensions-catalog.ts`, the typed mirror of the source-of-tr
 `extensions.catalog.json` — `{ schemaVersion, extensions[] }`, the same shape as Godot's
 `addons/godot_mcp/extensions.catalog.json`; a parity test keeps the two in lockstep). Each
 `ExtensionDescriptor` carries `extensionId` (reverse-DNS resolve key), `name`, `pluginName` (the
-`Plugins/<pluginName>` folder), `repo` (GitHub release source), `version`, **`minCoreVersion`** (the
+`Plugins/<pluginName>` folder), `repo` (GitHub release source), `version` (last known release — offline fallback only), **`minCoreVersion`** (the
 minimum core Unreal-MCP version — surfaced as a warning when unmet), `enginePlugins` (gating plugins),
 and `tools`. The catalog currently lists **Niagara Tools** (`com.ivanmurzak.unreal-ai-niagara`);
 `--source <dir>` installs an unpublished or off-catalog extension regardless (the descriptor is then

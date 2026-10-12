@@ -425,7 +425,10 @@ The supported way to install a published (or local) extension into a user's Unre
 `installExtension`, parity with `installPlugin`):
 
 ```bash
-# From the extension's GitHub release (the default channel):
+# The newest GitHub release of the extension (the default channel):
+unreal-mcp-cli install-extension <extensionId> <project>
+
+# An exact release version (skips latest resolution; may downgrade):
 unreal-mcp-cli install-extension <extensionId> <project> --version <x.y.z>
 
 # From a local copy — offline / CI / dev (mirrors godot-cli install-plugin --source):
@@ -441,7 +444,13 @@ What it does, and why:
    `cli/src/utils/extensions-catalog.ts`, mirror of the future `extensions.catalog.json` —
    `{ schemaVersion, extensions[] }`; each descriptor carries `extensionId`, `pluginName`, `repo`,
    `version`, `minCoreVersion`, `enginePlugins`, `tools`). An unpublished extension installs anyway via
-   `--source` (the descriptor is synthesized from the source `.uplugin`).
+   `--source` (the descriptor is synthesized from the source `.uplugin`). The **version** installed is
+   the newest release of the extension repo, resolved online at install time via the
+   `github.com/<repo>/releases/latest` redirect (drafts/prereleases are never chosen; the tag must be a
+   plain `vX.Y.Z` with a `<pluginName>-<X.Y.Z>.zip` asset). The catalog `version` is only the last
+   known release — the fallback when resolution fails. `--version` wins; an installed newer copy is
+   never downgraded implicitly. So publishing release `vX.Y.Z` of your extension with that asset is all
+   it takes for users to get it — no CLI release needed.
 2. **Place** the plugin into `<project>/Plugins/<pluginName>/` (build-cache / VCS subtrees excluded;
    staged-then-swapped so a failed install never corrupts an existing one).
 3. **Enable** the extension **and its gating engine plugins** — e.g. an extension that uses Niagara

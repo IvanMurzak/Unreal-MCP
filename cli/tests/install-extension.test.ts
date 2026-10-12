@@ -17,6 +17,8 @@ import {
   releaseTag,
   stripLeadingV,
   assertTrustedDownloadUrl,
+  parsePlainReleaseTag,
+  resolveLatestExtensionVersion,
 } from '../src/utils/extension-source.js';
 import {
   parseUPluginDependencies,
@@ -86,6 +88,67 @@ function enc(s: string): Uint8Array {
   return new TextEncoder().encode(s);
 }
 
+interface FakeRequest {
+  url: string;
+  method: string;
+  redirect?: string;
+  signal?: AbortSignal;
+}
+
+/**
+ * A fake github.com for `fetchImpl`, routing by URL like the real site:
+ * - `HEAD https://github.com/<repo>/releases/latest` → 302 to `/releases/tag/<latestTag>`
+ *   (404 when `latestTag` is null — no published non-prerelease release);
+ * - `HEAD .../releases/download/<tag>/<asset>` → 302 to a CDN when the asset exists, else 404;
+ * - `GET  .../releases/download/<tag>/<asset>` → the plugin zip (VersionName = the tag's version).
+ * `failResolution` makes every HEAD reject (offline / DNS failure).
+ */
+function fakeGitHub(opts: {
+  latestTag?: string | null;
+  /** The release carries no matching `<pluginName>-<version>.zip` asset. */
+  missingAssets?: boolean;
+  failResolution?: boolean;
+  pluginPlugins?: string[];
+}) {
+  const requests: FakeRequest[] = [];
+  const downloads: string[] = [];
+  const fetchImpl = (async (url: string, init?: { method?: string; redirect?: string; signal?: AbortSignal }) => {
+    const method = init?.method ?? 'GET';
+    requests.push({ url, method, redirect: init?.redirect, signal: init?.signal });
+    const res = (status: number, location?: string) =>
+      ({ ok: status >= 200 && status < 300, status, statusText: String(status), headers: new Headers(location ? { location } : {}) }) as unknown as Response;
+    if (method === 'HEAD') {
+      if (opts.failResolution) throw new TypeError('fetch failed');
+      const latest = /^https:\/\/github\.com\/([^/]+\/[^/]+)\/releases\/latest$/.exec(url);
+      if (latest) {
+        return opts.latestTag ? res(302, `https://github.com/${latest[1]}/releases/tag/${opts.latestTag}`) : res(404);
+      }
+      if (url.includes('/releases/download/')) {
+        return opts.missingAssets ? res(404) : res(302, 'https://release-assets.githubusercontent.com/x');
+      }
+      return res(404);
+    }
+    const dl = /\/releases\/download\/v([^/]+)\/FooNiagara-[^/]+\.zip$/.exec(url);
+    if (!dl) return res(404);
+    downloads.push(url);
+    const uplugin: Record<string, unknown> = { FileVersion: 3, VersionName: dl[1] };
+    if (opts.pluginPlugins) uplugin.Plugins = opts.pluginPlugins.map((p) => ({ Name: p, Enabled: true }));
+    return zipResponse({
+      'FooNiagara/FooNiagara.uplugin': enc(JSON.stringify(uplugin)),
+      'FooNiagara/Source/FooNiagara/FooNiagara.cpp': enc('// marker'),
+    });
+  }) as unknown as typeof fetch;
+  return { fetchImpl, requests, downloads };
+}
+
+/** Plant an already-installed `Plugins/FooNiagara` at `version`. */
+function plantInstalled(project: string, version: string): string {
+  const dir = path.join(project, 'Plugins', 'FooNiagara');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'FooNiagara.uplugin'), JSON.stringify({ FileVersion: 3, VersionName: version }), 'utf-8');
+  return dir;
+}
+
 // ===========================================================================
 // catalog
 // ===========================================================================
@@ -120,7 +183,7 @@ describe('extensions-catalog', () => {
 
   it('install-extension resolves the Niagara id to the v0.1.0 release zip by id', () => {
     // Default-channel resolution: a user typing `install-extension <niagara-id>` (no --source,
-    // no --version) resolves to the catalog-pinned v0.1.0 GitHub-release zip.
+    // no --version) falls back to the catalog v0.1.0 GitHub-release zip when latest resolution fails.
     const niagara = findExtension('com.ivanmurzak.unreal-ai-niagara');
     expect(niagara).not.toBeNull();
     const source = resolveInstallSource({
@@ -411,37 +474,30 @@ describe('installExtension (download + failures)', () => {
 
   it('downloads + extracts the plugin zip from the (injected) GitHub release', async () => {
     const project = makeProject();
-    const upluginJson = JSON.stringify({ FileVersion: 3, VersionName: '1.0.0', Plugins: [{ Name: 'Niagara', Enabled: true }] });
-    const fetchImpl = (async (url: string) => {
-      expect(url).toBe('https://github.com/foo/Unreal-AI-Niagara/releases/download/v1.0.0/FooNiagara-1.0.0.zip');
-      return zipResponse({
-        'FooNiagara/FooNiagara.uplugin': enc(upluginJson),
-        'FooNiagara/Source/FooNiagara/FooNiagara.cpp': enc('// marker'),
-      });
-    }) as unknown as typeof fetch;
+    const fake = fakeGitHub({ latestTag: 'v1.0.0', pluginPlugins: ['Niagara'] });
 
-    const r = await installExtension({ projectDir: project, extensionId: 'com.foo.niagara', catalog, fetchImpl });
+    const r = await installExtension({ projectDir: project, extensionId: 'com.foo.niagara', catalog, fetchImpl: fake.fetchImpl });
     expect(r.kind).toBe('success');
     if (r.kind !== 'success') return;
+    expect(fake.downloads).toEqual([
+      'https://github.com/foo/Unreal-AI-Niagara/releases/download/v1.0.0/FooNiagara-1.0.0.zip',
+    ]);
     expect(r.outcome).toBe('added');
     expect(r.sourceKind).toBe('github-release');
     const installed = path.join(project, 'Plugins', 'FooNiagara');
     expect(fs.existsSync(path.join(installed, 'FooNiagara.uplugin'))).toBe(true);
+    expect(fs.existsSync(path.join(installed, 'Source', 'FooNiagara', 'FooNiagara.cpp'))).toBe(true);
     expect(r.enabledPlugins).toContain('Niagara');
   });
 
-  it('passes an abort signal (download timeout) to the release fetch', async () => {
+  it('passes an abort signal (timeout) to every release request', async () => {
     const project = makeProject();
-    const upluginJson = JSON.stringify({ FileVersion: 3, VersionName: '1.0.0' });
-    let seenSignal: unknown;
-    const fetchImpl = (async (_url: string, init?: { signal?: AbortSignal }) => {
-      seenSignal = init?.signal;
-      return zipResponse({ 'FooNiagara/FooNiagara.uplugin': enc(upluginJson) });
-    }) as unknown as typeof fetch;
+    const fake = fakeGitHub({ latestTag: 'v1.0.0' });
 
-    const r = await installExtension({ projectDir: project, extensionId: 'com.foo.niagara', catalog, fetchImpl });
+    const r = await installExtension({ projectDir: project, extensionId: 'com.foo.niagara', catalog, fetchImpl: fake.fetchImpl });
     expect(r.kind).toBe('success');
-    expect(seenSignal).toBeInstanceOf(AbortSignal);
+    expect(fake.requests.length).toBe(3); // latest HEAD, asset HEAD, zip GET
+    for (const req of fake.requests) expect(req.signal).toBeInstanceOf(AbortSignal);
   });
 
   it('fails (no throw) on an HTTP error from the release', async () => {
@@ -465,6 +521,213 @@ describe('installExtension (download + failures)', () => {
     const r = await installExtension({ projectDir: notProject, extensionId: 'com.foo.niagara', source });
     expect(r.kind).toBe('failure');
     if (r.kind === 'failure') expect(r.error.message).toMatch(/No .uproject/);
+  });
+});
+
+// ===========================================================================
+// Latest-release resolution — the catalog version is only an offline fallback
+// ===========================================================================
+
+describe('parsePlainReleaseTag', () => {
+  it('accepts only plain vX.Y.Z tags', () => {
+    expect(parsePlainReleaseTag('v0.1.2')).toBe('0.1.2');
+    expect(parsePlainReleaseTag('v10.20.30')).toBe('10.20.30');
+    expect(parsePlainReleaseTag('v1.2.0-beta.1')).toBeNull();
+    expect(parsePlainReleaseTag('v1.2.0+build')).toBeNull();
+    expect(parsePlainReleaseTag('1.2.0')).toBeNull();
+    expect(parsePlainReleaseTag('v1.2')).toBeNull();
+    expect(parsePlainReleaseTag('release-1')).toBeNull();
+    expect(parsePlainReleaseTag('')).toBeNull();
+  });
+});
+
+describe('resolveLatestExtensionVersion', () => {
+  const input = { repo: 'foo/Unreal-AI-Niagara', pluginName: 'FooNiagara' };
+
+  it('follows the /releases/latest redirect (HEAD, manual redirect) and verifies the asset', async () => {
+    const fake = fakeGitHub({ latestTag: 'v1.2.0' });
+    const r = await resolveLatestExtensionVersion({ ...input, fetchImpl: fake.fetchImpl });
+    expect(r).toEqual({ kind: 'resolved', version: '1.2.0' });
+    expect(fake.requests.map((q) => [q.method, q.redirect, q.url])).toEqual([
+      ['HEAD', 'manual', 'https://github.com/foo/Unreal-AI-Niagara/releases/latest'],
+      ['HEAD', 'manual', 'https://github.com/foo/Unreal-AI-Niagara/releases/download/v1.2.0/FooNiagara-1.2.0.zip'],
+    ]);
+  });
+
+  it('is unresolved (no throw) on a network failure', async () => {
+    const r = await resolveLatestExtensionVersion({ ...input, fetchImpl: fakeGitHub({ failResolution: true }).fetchImpl });
+    expect(r.kind).toBe('unresolved');
+    if (r.kind === 'unresolved') expect(r.reason).toMatch(/fetch failed/);
+  });
+
+  it('is unresolved when the release lacks the expected <Plugin>-<version>.zip asset', async () => {
+    const r = await resolveLatestExtensionVersion({
+      ...input,
+      fetchImpl: fakeGitHub({ latestTag: 'v1.2.0', missingAssets: true }).fetchImpl,
+    });
+    expect(r.kind).toBe('unresolved');
+    if (r.kind === 'unresolved') expect(r.reason).toMatch(/no FooNiagara-1\.2\.0\.zip asset/);
+  });
+
+  it('is unresolved for a prerelease-style or non-v tag', async () => {
+    for (const latestTag of ['v1.3.0-rc.1', '1.3.0']) {
+      const r = await resolveLatestExtensionVersion({ ...input, fetchImpl: fakeGitHub({ latestTag }).fetchImpl });
+      expect(r.kind).toBe('unresolved');
+      if (r.kind === 'unresolved') expect(r.reason).toMatch(/not a plain vX\.Y\.Z/);
+    }
+  });
+
+  it('is unresolved when the repo has no published release (404, no redirect)', async () => {
+    const r = await resolveLatestExtensionVersion({ ...input, fetchImpl: fakeGitHub({ latestTag: null }).fetchImpl });
+    expect(r.kind).toBe('unresolved');
+    if (r.kind === 'unresolved') expect(r.reason).toMatch(/HTTP 404/);
+  });
+
+  it('is unresolved when the redirect leaves the repo / github.com', async () => {
+    const fetchImpl = (async () =>
+      ({ ok: false, status: 302, headers: new Headers({ location: 'https://evil.test/foo/Unreal-AI-Niagara/releases/tag/v9.9.9' }) }) as unknown as Response) as unknown as typeof fetch;
+    const r = await resolveLatestExtensionVersion({ ...input, fetchImpl });
+    expect(r.kind).toBe('unresolved');
+    if (r.kind === 'unresolved') expect(r.reason).toMatch(/unexpected latest-release redirect/);
+  });
+});
+
+describe('installExtension (latest release vs catalog fallback)', () => {
+  // The catalog lists 1.0.0 as the last known release; the repo's newest is 1.2.0.
+  const catalog: ExtensionDescriptor[] = [
+    {
+      extensionId: 'com.foo.niagara',
+      name: 'Niagara Tools',
+      description: 'x',
+      pluginName: 'FooNiagara',
+      repo: 'foo/Unreal-AI-Niagara',
+      version: '1.0.0',
+      minCoreVersion: null,
+      enginePlugins: [],
+      tools: [],
+    },
+  ];
+  const zipUrl = (v: string) => `https://github.com/foo/Unreal-AI-Niagara/releases/download/v${v}/FooNiagara-${v}.zip`;
+  const installedVersion = (project: string) =>
+    readUPluginVersionName(JSON.parse(fs.readFileSync(path.join(project, 'Plugins', 'FooNiagara', 'FooNiagara.uplugin'), 'utf-8')));
+
+  it('installs the newest release resolved online, not the catalog version', async () => {
+    const project = makeProject();
+    const fake = fakeGitHub({ latestTag: 'v1.2.0' });
+    const r = await installExtension({ projectDir: project, extensionId: 'com.foo.niagara', catalog, fetchImpl: fake.fetchImpl });
+    expect(r.kind).toBe('success');
+    if (r.kind !== 'success') return;
+    expect(fake.downloads).toEqual([zipUrl('1.2.0')]);
+    expect(r.toVersion).toBe('1.2.0');
+    expect(r.versionSource).toBe('latest-release');
+    expect(r.warnings).toEqual([]);
+    expect(installedVersion(project)).toBe('1.2.0');
+  });
+
+  it('falls back to the catalog version on a network failure (with a warning)', async () => {
+    const project = makeProject();
+    // HEADs fail (offline resolution); the GET for the fallback zip still answers.
+    const fake = fakeGitHub({ failResolution: true });
+    const r = await installExtension({ projectDir: project, extensionId: 'com.foo.niagara', catalog, fetchImpl: fake.fetchImpl });
+    expect(r.kind).toBe('success');
+    if (r.kind !== 'success') return;
+    expect(fake.downloads).toEqual([zipUrl('1.0.0')]);
+    expect(r.toVersion).toBe('1.0.0');
+    expect(r.versionSource).toBe('catalog');
+    expect(r.warnings.join('\n')).toMatch(/falling back to the catalog version 1\.0\.0/);
+  });
+
+  it('falls back to the catalog version when the latest release has no matching asset', async () => {
+    const project = makeProject();
+    const fake = fakeGitHub({ latestTag: 'v1.2.0', missingAssets: true });
+    const r = await installExtension({ projectDir: project, extensionId: 'com.foo.niagara', catalog, fetchImpl: fake.fetchImpl });
+    expect(r.kind).toBe('success');
+    if (r.kind !== 'success') return;
+    expect(fake.downloads).toEqual([zipUrl('1.0.0')]);
+    expect(r.versionSource).toBe('catalog');
+  });
+
+  it('falls back to the catalog version when the latest tag is not a plain release', async () => {
+    const project = makeProject();
+    const fake = fakeGitHub({ latestTag: 'v1.3.0-beta.1' });
+    const r = await installExtension({ projectDir: project, extensionId: 'com.foo.niagara', catalog, fetchImpl: fake.fetchImpl });
+    expect(r.kind).toBe('success');
+    if (r.kind !== 'success') return;
+    expect(fake.downloads).toEqual([zipUrl('1.0.0')]);
+    expect(r.versionSource).toBe('catalog');
+  });
+
+  it('an explicit --version wins: no latest resolution, and it may downgrade', async () => {
+    const project = makeProject();
+    plantInstalled(project, '1.2.0');
+    const fake = fakeGitHub({ latestTag: 'v1.2.0' });
+    const r = await installExtension({
+      projectDir: project,
+      extensionId: 'com.foo.niagara',
+      catalog,
+      version: '0.9.0',
+      fetchImpl: fake.fetchImpl,
+    });
+    expect(r.kind).toBe('success');
+    if (r.kind !== 'success') return;
+    expect(fake.requests.some((q) => q.url.endsWith('/releases/latest'))).toBe(false);
+    expect(fake.downloads).toEqual([zipUrl('0.9.0')]);
+    expect(r.versionSource).toBe('explicit');
+    expect(r.outcome).toBe('updated');
+    expect(installedVersion(project)).toBe('0.9.0');
+  });
+
+  it('never downgrades an installed newer copy implicitly (even with --force)', async () => {
+    for (const force of [false, true]) {
+      const project = makeProject();
+      plantInstalled(project, '2.0.0');
+      const fake = fakeGitHub({ latestTag: 'v1.2.0' });
+      const r = await installExtension({ projectDir: project, extensionId: 'com.foo.niagara', catalog, force, fetchImpl: fake.fetchImpl });
+      expect(r.kind).toBe('success');
+      if (r.kind !== 'success') return;
+      expect(fake.downloads).toEqual([]);
+      expect(r.toVersion).toBe('2.0.0');
+      expect(r.versionSource).toBe('installed');
+      expect(r.outcome).toBe('enabled'); // files kept; only the .uproject enable entry was written
+      expect(r.warnings.join('\n')).toMatch(/newer than 1\.2\.0; keeping it/);
+      expect(installedVersion(project)).toBe('2.0.0');
+    }
+  });
+
+  it('updates an installed older copy to the latest release', async () => {
+    const project = makeProject();
+    plantInstalled(project, '1.0.0');
+    const fake = fakeGitHub({ latestTag: 'v1.2.0' });
+    const r = await installExtension({ projectDir: project, extensionId: 'com.foo.niagara', catalog, fetchImpl: fake.fetchImpl });
+    expect(r.kind).toBe('success');
+    if (r.kind !== 'success') return;
+    expect(r.outcome).toBe('updated');
+    expect(r.fromVersion).toBe('1.0.0');
+    expect(r.toVersion).toBe('1.2.0');
+    expect(installedVersion(project)).toBe('1.2.0');
+  });
+
+  it('is a no-op when the latest release is already installed and enabled', async () => {
+    const project = makeProject();
+    const first = await installExtension({ projectDir: project, extensionId: 'com.foo.niagara', catalog, fetchImpl: fakeGitHub({ latestTag: 'v1.2.0' }).fetchImpl });
+    expect(first.kind).toBe('success');
+    const fake = fakeGitHub({ latestTag: 'v1.2.0' });
+    const r = await installExtension({ projectDir: project, extensionId: 'com.foo.niagara', catalog, fetchImpl: fake.fetchImpl });
+    expect(r.kind).toBe('success');
+    if (r.kind !== 'success') return;
+    expect(r.outcome).toBe('already-up-to-date');
+    expect(fake.downloads).toEqual([]);
+  });
+
+  it('a --source install never resolves online', async () => {
+    const project = makeProject();
+    const fake = fakeGitHub({ latestTag: 'v1.2.0' });
+    const source = makeExtensionSource('FooNiagara', { version: '1.0.0' });
+    const r = await installExtension({ projectDir: project, extensionId: 'com.foo.niagara', catalog, source, fetchImpl: fake.fetchImpl });
+    expect(r.kind).toBe('success');
+    if (r.kind !== 'success') return;
+    expect(fake.requests).toEqual([]);
+    expect(r.versionSource).toBe('local');
   });
 });
 

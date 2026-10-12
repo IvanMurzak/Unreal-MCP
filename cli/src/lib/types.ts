@@ -790,6 +790,16 @@ export type BootstrapLocalResult = BootstrapLocalSuccess | BootstrapLocalFailure
 /** How an `install-extension` run ended (a `kind: 'success'` classification). */
 export type ExtensionInstallOutcome = 'added' | 'updated' | 'enabled' | 'already-up-to-date';
 
+/**
+ * Where `install-extension`'s target version came from:
+ * - `explicit` — the caller's `--version` (wins; may downgrade).
+ * - `latest-release` — the newest GitHub release, resolved online at install time (the normal path).
+ * - `catalog` — the catalog's last-known version (offline / failed-resolution fallback).
+ * - `installed` — an installed copy newer than the resolved target was kept (never downgraded implicitly).
+ * - `local` — a `--source <dir>` install (catalog version or the source `.uplugin` `VersionName`).
+ */
+export type ExtensionVersionSource = 'explicit' | 'latest-release' | 'catalog' | 'installed' | 'local';
+
 /** Re-export of the install-source channel discriminant for the public result. */
 export type { InstallSourceKind };
 
@@ -828,7 +838,11 @@ export interface InstallExtensionOptions {
    * GitHub-release download channel. Mirrors godot-cli `install-plugin --source`.
    */
   source?: string;
-  /** Override the catalog-pinned version (also the version requested from the GitHub release). Ignored when empty. */
+  /**
+   * Install exactly this version (the GitHub release requested), skipping
+   * latest-release resolution; may downgrade. Ignored when empty — the default
+   * installs the newest release, falling back to the catalog version.
+   */
   version?: string;
   /**
    * Compile the project via UBT after install. Default `false` — the extension
@@ -845,8 +859,10 @@ export interface InstallExtensionOptions {
    * `EXTENSIONS_CATALOG`. Injectable for tests.
    */
   catalog?: readonly ExtensionDescriptor[];
-  /** Inject the HTTP client (defaults to global `fetch`). Test injection. */
+  /** Inject the HTTP client (defaults to global `fetch`) for latest resolution + download. Test injection. */
   fetchImpl?: typeof fetch;
+  /** Per-request timeout of the latest-release resolution (two HEAD requests). Default 10000. */
+  resolveTimeoutMs?: number;
   /**
    * Abort the GitHub-release download if no response arrives within this many
    * milliseconds, so a stalled/slow server cannot hang the CLI indefinitely.
@@ -882,8 +898,10 @@ export interface InstallExtensionSuccess {
   sourceKind: InstallSourceKind;
   /** Version installed before this run: `null` when not previously installed. */
   fromVersion: string | null;
-  /** Version this install targeted: catalog pin / `--version` / the source `.uplugin`'s `VersionName`, or `null`. */
+  /** Version this install targeted (see `versionSource`), or `null`. */
   toVersion: string | null;
+  /** Where `toVersion` came from. */
+  versionSource: ExtensionVersionSource;
   /**
    * Plugins this run newly enabled in the `.uproject` — the extension and any
    * gating engine plugins it appended or flipped from disabled. Plugins that

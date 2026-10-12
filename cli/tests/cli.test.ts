@@ -74,6 +74,14 @@ describe('CLI integration', () => {
     expect(stdout.trim()).toMatch(/^\d+\.\d+\.\d+$/);
   });
 
+  it("a subcommand's own --version <x.y.z> reaches the subcommand (not the root version flag)", () => {
+    // Not a UE project → install-extension fails fast, before any network call.
+    const { stdout, exitCode } = runCli(['install-extension', 'com.x.y', cliTmp(), '--version', '9.9.9']);
+    expect(exitCode).toBe(1);
+    expect(stdout.trim()).not.toMatch(/^\d+\.\d+\.\d+$/);
+    expect(stdout).toMatch(/No \.uproject/);
+  });
+
   it('each command exposes its own --help (is registered + invokable)', () => {
     for (const cmd of ALL_COMMANDS) {
       const { stdout, exitCode } = runCli([cmd, '--help']);
