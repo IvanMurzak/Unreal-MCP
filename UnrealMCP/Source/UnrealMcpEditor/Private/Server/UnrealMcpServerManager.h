@@ -164,10 +164,13 @@ private:
 	 * terminates the local server when THIS editor process dies by ANY means — including a hard
 	 * TerminateProcess / crash that never runs FUnrealMcpEditorCoordinator::Shutdown's graceful stop. The job handle is
 	 * owned by the manager (JobHandle) for the manager's lifetime; the editor process's death closes the last
-	 * handle to it, tripping JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE. No-op on non-Windows (the graceful PreExit stop
-	 * and KillTree terminate cover those; a hard-kill orphan there is out of scope for this Windows testbed).
+	 * handle to it, tripping JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE. Declared only on Windows: FProcHandle::Get() is
+	 * a pid_t (not a pointer) on Mac/Linux, so the call sites are guarded too; non-Windows relies
+	 * on the graceful PreExit stop and KillTree terminate (a hard-kill orphan there is out of scope).
 	 */
+#if PLATFORM_WINDOWS
 	void BindProcessToKillOnCloseJob(void* ProcessHandle);
+#endif
 
 	/** {Project}/Intermediate/UnrealMCP/server/server.pid — survives a module reload for ReattachIfRunning. */
 	static FString PidFilePath();

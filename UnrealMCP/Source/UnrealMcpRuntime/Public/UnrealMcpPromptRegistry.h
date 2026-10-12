@@ -133,7 +133,7 @@ private:
  * of FUnrealMcpToolRegistryTraits: key accessor (Name), validation (kebab name + bound handler + param specs),
  * manifest strings, and the nouns for collision-rejection messages + log lines.
  */
-struct FUnrealMcpPromptRegistryTraits
+struct UNREALMCPRUNTIME_API FUnrealMcpPromptRegistryTraits
 {
 	static const FString& KeyOf(const FUnrealMcpRegisteredPrompt& Entry) { return Entry.Name; }
 	static const TCHAR* KindNoun() { return TEXT("prompt"); }

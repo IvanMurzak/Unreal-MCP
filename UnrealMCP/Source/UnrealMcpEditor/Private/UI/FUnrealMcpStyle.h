@@ -10,7 +10,7 @@
 
 /**
  * The "AI Game Developer" Slate style set (docs/ARCHITECTURE.md §7) — the C++/Slate analog of Unity-MCP's
- * shared USS (Editor/UI/uss/common/*.uss). It centralizes the palette, card/frame/input brushes, status-dot
+ * shared USS (the .uss files under Editor/UI/uss/common). It centralizes the palette, card/frame/input brushes, status-dot
  * brushes, the segmented-control + toggle-switch button styles, and the icon brushes (AI-cube logo, Discord,
  * GitHub, Star) so the main window stops hard-coding inline colours / default FAppStyle brushes and instead
  * reads one source of truth that matches the Unity reference 1:1.
@@ -18,7 +18,7 @@
  * Lifetime: a single shared FSlateStyleSet registered with FSlateStyleRegistry at module startup and
  * unregistered at shutdown. Initialize()/Shutdown() are idempotent (safe to call twice). Every colour
  * constant below is the EXACT value lifted from the Unity USS (see the issue's palette table); keep them in
- * lockstep with `Editor/UI/uss/common/*.uss` if the reference ever changes.
+ * lockstep with the `.uss` files under `Editor/UI/uss/common` if the reference ever changes.
  *
  * Usage: widgets read brushes via `FUnrealMcpStyle::Get().GetBrush("UnrealMcp.<Name>")` or the typed
  * accessors, and colours via the inline `static constexpr`/`static` palette helpers (no style-set lookup

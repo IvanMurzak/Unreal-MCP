@@ -504,15 +504,17 @@ bool FUnrealMcpServerManager::SpawnProcess(const FString& InBinaryPath)
 	// Bind the child to the kill-on-job-close job so it dies with the editor by ANY exit path (graceful, hard
 	// TerminateProcess, or crash) — the load-bearing guarantee for "Start then close editor → no orphan" when
 	// the engine's graceful OnEnginePreExit teardown never runs. The handle (HANDLE on Windows) is ProcHandle.Get().
+#if PLATFORM_WINDOWS
 	BindProcessToKillOnCloseJob(NewHandle.Get());
+#endif
 	WritePidFile(NewProcId);
 	UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] spawned local server pid=%u on port=%d."), NewProcId, ListenPort);
 	return true;
 }
 
+#if PLATFORM_WINDOWS
 void FUnrealMcpServerManager::BindProcessToKillOnCloseJob(void* ProcessHandle)
 {
-#if PLATFORM_WINDOWS
 	if (ProcessHandle == nullptr)
 		return;
 
@@ -552,10 +554,8 @@ void FUnrealMcpServerManager::BindProcessToKillOnCloseJob(void* ProcessHandle)
 	{
 		UE_LOG(LogUnrealMcp, Verbose, TEXT("[Unreal-MCP] local server bound to kill-on-close job."));
 	}
-#else
-	(void)ProcessHandle; // non-Windows: graceful PreExit stop + KillTree cover the supported cases.
-#endif
 }
+#endif
 
 bool FUnrealMcpServerManager::Start(int32 Port, const FString& InLaunchArgs)
 {
@@ -633,7 +633,9 @@ bool FUnrealMcpServerManager::ReattachIfRunning(int32 Port, const FString& InLau
 	}
 	// Re-bind the adopted survivor to a kill-on-close job so it too dies with THIS editor session by any exit
 	// path (the original spawning session's job died with that session's editor).
+#if PLATFORM_WINDOWS
 	BindProcessToKillOnCloseJob(Adopted.Get());
+#endif
 	// Reattach does NOT reset the restart counter (only a fresh Start does); Watchdog.Start resets the crash window.
 	StartWatchdog();
 	UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] reattached to existing local server pid=%d on port=%d."), SavedPid, Port);
