@@ -48,6 +48,8 @@ class MonorepoTests(unittest.TestCase):
 
         github = FakeGitHub()
         original = copy.deepcopy(github.index)
+        version = release.validate('UnrealAINiagara')['version']
+        tag = f'niagara-v{version}'
         with tempfile.TemporaryDirectory() as temporary:
             archive = release.package('UnrealAINiagara', Path(temporary))
             with patch.object(release, 'gh', github), patch.object(release.subprocess, 'check_output', return_value='sha\n'):
@@ -55,13 +57,27 @@ class MonorepoTests(unittest.TestCase):
                     release.publish('UnrealAINiagara', archive)
                 self.assertEqual(github.index_writes, 0)
                 self.assertEqual(github.index, original)
-                self.assertTrue(github.releases['niagara-v0.1.0']['draft'])
+                self.assertTrue(github.releases[tag]['draft'])
                 github.corrupt_download = False
                 release.publish('UnrealAINiagara', archive)
                 self.assertEqual(github.index_writes, 1)
-                self.assertFalse(github.releases['niagara-v0.1.0']['draft'])
+                self.assertFalse(github.releases[tag]['draft'])
                 entry = next(e for e in github.index['extensions'] if e['pluginName'] == 'UnrealAINiagara')
-                self.assertEqual(entry['releases']['0.1.0']['tag'], 'niagara-v0.1.0')
+                self.assertEqual(entry['releases'][version]['tag'], tag)
+                # A full retry retains the initial workflow's bootstrap input.
+                # The now-live index must be downloaded, preserving all history.
+                with patch.object(release.subprocess, 'run') as probe:
+                    probe.return_value.returncode = 0
+                    release.publish('UnrealAINiagara', archive, bootstrap=True)
+                self.assertEqual(github.index_writes, 2)
+                self.assertIn('0.1.0', next(e for e in github.index['extensions']
+                                          if e['pluginName'] == 'UnrealAINiagara')['releases'])
+                with patch.object(release.subprocess, 'run') as probe:
+                    probe.return_value.returncode = 1
+                    probe.return_value.stderr = b'HTTP 503: temporarily unavailable'
+                    with self.assertRaisesRegex(ValueError, 'Cannot determine'):
+                        release.publish('UnrealAINiagara', archive, bootstrap=True)
+                self.assertEqual(github.index_writes, 2)
 
     def test_misnested_new_extension_cannot_silently_escape_discovery(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -94,6 +110,8 @@ class MonorepoTests(unittest.TestCase):
             with zipfile.ZipFile(package) as archive:
                 names = archive.namelist()
                 self.assertTrue(any(n.endswith('UnrealAINiagara.uplugin') for n in names))
+                self.assertEqual(archive.read('UnrealAINiagara/README.md'),
+                                 (release.ROOT / 'extensions/UnrealAINiagara/README.md').read_bytes())
                 self.assertTrue(any(n.endswith('UnrealAINiagaraSpec.cpp') for n in names))
                 self.assertTrue(all(n.startswith('UnrealAINiagara/') for n in names))
                 self.assertFalse(any('/Binaries/' in n or '/Intermediate/' in n for n in names))
@@ -117,10 +135,11 @@ class MonorepoTests(unittest.TestCase):
     def test_published_versions_cannot_be_overwritten(self):
         index = release.read(release.ROOT / 'extensions-index.json')
         meta = release.validate('UnrealAINiagara')
-        index = release.update_index(index, meta, 'niagara-v0.1.0', 'a' * 64)
-        self.assertEqual(index, release.update_index(index, meta, 'niagara-v0.1.0', 'a' * 64))
+        tag = f"niagara-v{meta['version']}"
+        index = release.update_index(index, meta, tag, 'a' * 64)
+        self.assertEqual(index, release.update_index(index, meta, tag, 'a' * 64))
         with self.assertRaisesRegex(ValueError, 'immutable'):
-            release.update_index(index, meta, 'niagara-v0.1.0', 'b' * 64)
+            release.update_index(index, meta, tag, 'b' * 64)
 
     def test_isolated_profiles_have_no_sibling_files_and_preserve_spec_sources(self):
         with tempfile.TemporaryDirectory() as temporary:

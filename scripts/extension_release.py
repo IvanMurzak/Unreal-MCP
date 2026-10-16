@@ -93,7 +93,7 @@ def package(plugin: str, output: Path) -> Path:
     with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as bundle:
         for path in sorted(folder.rglob("*")):
             rel = path.relative_to(folder)
-            if not path.is_file() or rel.parts[0] not in {"Source", "Content", "Config", "Resources", f"{plugin}.uplugin", "LICENSE"}:
+            if not path.is_file() or rel.parts[0] not in {"Source", "Content", "Config", "Resources", f"{plugin}.uplugin", "LICENSE", "README.md"}:
                 continue
             if any(part in {"Binaries", "Intermediate", ".git", "Saved"} for part in rel.parts):
                 continue
@@ -145,10 +145,16 @@ def publish(plugin: str, archive: Path, *, bootstrap: bool = False) -> None:
         work = Path(temporary)
         index_path = work / "extensions-index.json"
         if bootstrap:
-            # Explicit one-time operator choice. Never silently reset a live index after network errors.
+            # A batch may have created the index before a later component failed.
+            # On a full workflow retry, continue from that live index, never reset it.
             exists = subprocess.run(["gh", "release", "view", INDEX_TAG, "--repo", REPO], capture_output=True)
             if exists.returncode == 0:
-                raise ValueError("Index already exists; omit --bootstrap-index")
+                bootstrap = False
+            else:
+                detail = exists.stderr.decode('utf-8', errors='replace')
+                if 'release not found' not in detail.lower() and 'HTTP 404' not in detail:
+                    raise ValueError('Cannot determine whether the live index exists: ' + detail[:300])
+        if bootstrap:
             index = read(ROOT / "extensions-index.json")
         else:
             gh("release", "download", INDEX_TAG, "--repo", REPO, "--pattern", "extensions-index.json", "--dir", str(work))
