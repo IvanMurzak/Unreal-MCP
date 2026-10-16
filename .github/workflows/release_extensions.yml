@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       plugin:
-        description: Plugin folder under extensions/ (versions are read from source)
+        description: Plugin name, comma-separated names, or all (versions are read from source)
         required: true
         type: string
       dry_run:
@@ -28,7 +28,7 @@ jobs:
   validate:
     runs-on: ubuntu-latest
     outputs:
-      plugin: ${{ steps.validate.outputs.plugin }}
+      plugins: ${{ steps.validate.outputs.plugins }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -39,17 +39,19 @@ jobs:
           PLUGIN: ${{ inputs.plugin }}
         run: |
           python3 - <<'PY'
-          import os, pathlib, sys
+          import json, os, sys
           sys.path.insert(0, 'scripts')
           import extension_release as release
-          plugin = os.environ['PLUGIN']
-          if plugin not in release.components():
+          requested = os.environ['PLUGIN']
+          plugins = list(release.components()) if requested == 'all' else list(dict.fromkeys(p.strip() for p in requested.split(',')))
+          if not plugins or any(p not in release.components() for p in plugins):
               raise SystemExit('Unknown extension')
           if os.environ['GITHUB_REF'] != 'refs/heads/main':
               raise SystemExit('Release workflow must run on main')
-          release.validate(plugin)
+          for plugin in plugins:
+              release.validate(plugin)
           with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
-              out.write(f'plugin={plugin}\n')
+              out.write('plugins=' + json.dumps(plugins) + '\n')
           PY
       - name: Test release and suite tooling
         run: python3 -m unittest discover -s scripts -p 'test_extension*.py'
@@ -87,7 +89,7 @@ jobs:
         shell: pwsh
         run: |
           $python = Join-Path $env:UE_ROOT 'Engine/Binaries/ThirdParty/Python3/Win64/python.exe'
-          & $python scripts/extension_suite.py --engine $env:UE_ROOT --mode full --result-file .artifacts/suite-result.json
+          & $python scripts/extension_suite.py --engine $env:UE_ROOT --mode full --ue-lock-held --result-file .artifacts/suite-result.json
           if ($LASTEXITCODE -ne 0) { throw 'Full extension suite failed' }
       - uses: actions/upload-artifact@v7
         with:
@@ -106,7 +108,7 @@ jobs:
       contents: write
     env:
       GH_TOKEN: ${{ github.token }}
-      PLUGIN: ${{ needs.validate.outputs.plugin }}
+      PLUGINS: ${{ needs.validate.outputs.plugins }}
       DRY_RUN: ${{ inputs.dry_run }}
       BOOTSTRAP: ${{ inputs.bootstrap_index }}
     steps:
@@ -116,12 +118,13 @@ jobs:
       - name: Package only the selected extension; publish after all gates pass
         run: |
           python3 - <<'PY'
-          import os, subprocess
+          import json, os, subprocess
           action = 'package' if os.environ['DRY_RUN'] == 'true' else 'publish'
-          args = ['python3', 'scripts/extension_release.py', action, '--plugin', os.environ['PLUGIN']]
-          if os.environ['BOOTSTRAP'] == 'true':
-              args.append('--bootstrap-index')
-          subprocess.run(args, check=True)
+          for number, plugin in enumerate(json.loads(os.environ['PLUGINS'])):
+              args = ['python3', 'scripts/extension_release.py', action, '--plugin', plugin]
+              if number == 0 and os.environ['BOOTSTRAP'] == 'true':
+                  args.append('--bootstrap-index')
+              subprocess.run(args, check=True)
           PY
       - uses: actions/upload-artifact@v7
         with:

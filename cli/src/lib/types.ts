@@ -792,6 +792,7 @@ export type ExtensionInstallOutcome = 'added' | 'updated' | 'enabled' | 'already
 
 /**
  * Where `install-extension`'s target version came from:
+ * - `index` — stable latest for this extension from the online index (or validated cache).
  * - `explicit` — the caller's `--version` (wins; may downgrade).
  * - `latest-release` — the newest GitHub release, resolved online at install time (the normal path).
  * - `catalog` — the catalog's last-known version (offline / failed-resolution fallback).

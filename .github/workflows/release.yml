@@ -336,13 +336,16 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $suiteArgs = @('--engine', $env:UE_ROOT, '--mode', 'verification', '--result-file', '.artifacts/suite-result.json')
+          $suiteArgs = @('--engine', $env:UE_ROOT, '--mode', 'verification', '--ue-lock-held', '--result-file', '.artifacts/suite-result.json')
           # Extensions currently support UE 5.7+; retain core-only gates on older engines.
           if ([version]'${{ matrix.ue }}' -lt [version]'5.7') { $suiteArgs += '--extensions' }
           & (Join-Path $env:UE_ROOT "Engine/Binaries/ThirdParty/Python3/Win64/python.exe") scripts/extension_suite.py @suiteArgs
-          if ($LASTEXITCODE -ne 0) { throw 'Extension suite failed' }
-          $result = Get-Content '.artifacts/suite-result.json' -Raw | ConvertFrom-Json
-          "REPORT_DIR=$($result.report)" >> $env:GITHUB_ENV
+          $suiteExit = $LASTEXITCODE
+          if (Test-Path '.artifacts/suite-result.json') {
+            $result = Get-Content '.artifacts/suite-result.json' -Raw | ConvertFrom-Json
+            "REPORT_DIR=$($result.report)" >> $env:GITHUB_ENV
+          }
+          if ($suiteExit -ne 0) { throw 'Extension suite failed' }
 
       - name: Upload Automation report on failure
         # REPORT_DIR is exported only at the END of the Automation step; an
@@ -391,10 +394,6 @@ jobs:
           # 3. Host project transient logs/crashes ONLY (unbounded growers; NOT the
           #    DDC / Intermediate / Binaries speed caches). Only while this job held the
           #    machine-wide UE lock: otherwise the host may be another job's live editor.
-          if ($env:UE_LOCK_OUTCOME -eq 'success' -and -not [string]::IsNullOrWhiteSpace($env:HOST_UPROJECT) -and (Test-Path -LiteralPath $env:HOST_UPROJECT)) {
-            $hostRoot = Split-Path -Parent $env:HOST_UPROJECT
-            foreach ($sub in @('Saved\Logs','Saved\Crashes')) { Remove-Tree (Join-Path $hostRoot $sub) }
-          }
           Write-Host "Per-run cleanup done (DDC / Intermediate / Binaries and Docker intentionally preserved)."
 
       # Last step, so the whole UE portion stays inside the machine-wide UE lock (#293).

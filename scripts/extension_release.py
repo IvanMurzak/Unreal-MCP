@@ -111,7 +111,8 @@ def update_index(index: dict, metadata: dict, tag: str, checksum: str) -> dict:
         entry = {**metadata, "releases": {}}
         result["extensions"].append(entry)
     version = metadata["version"]
-    release = {"repo": REPO, "tag": tag, "sha256": checksum}
+    release = {"repo": REPO, "tag": tag, "sha256": checksum,
+               "minCoreVersion": metadata["minCoreVersion"], "enginePlugins": metadata["enginePlugins"]}
     existing = entry["releases"].get(version)
     if existing and existing["repo"] == REPO and existing != release:
         raise ValueError("A published component version is immutable; bump its version")

@@ -1,5 +1,6 @@
 import copy
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -10,6 +11,20 @@ import extension_suite as suite
 
 
 class MonorepoTests(unittest.TestCase):
+    def test_default_output_is_absolute(self):
+        self.assertTrue(suite.default_output().is_absolute())
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows exclusive-file lock')
+    def test_local_ue_lock_excludes_a_second_holder_and_releases(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / 'ue.lock'
+            with suite.machine_lock(path=path):
+                with self.assertRaises(OSError):
+                    with suite.machine_lock(path=path, timeout_seconds=0):
+                        self.fail('A second holder acquired the lock')
+            with suite.machine_lock(path=path, timeout_seconds=0):
+                pass
+
     def test_package_is_deterministic_source_only_and_contains_one_plugin(self):
         with tempfile.TemporaryDirectory() as temporary:
             output = Path(temporary)

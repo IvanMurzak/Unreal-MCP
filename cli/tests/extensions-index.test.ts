@@ -23,7 +23,7 @@ function fixture() {
   }] };
 }
 
-function online(index: object) {
+function online(index: object, archiveVersion?: string) {
   const requests: string[] = [];
   const fetchImpl = (async (input: string | URL | Request) => {
     const url = String(input);
@@ -32,7 +32,7 @@ function online(index: object) {
     const m = /\/new-v([\d.]+)\/UnrealAINew-([\d.]+)\.zip$/.exec(url);
     if (!m || m[1] !== m[2]) return new Response('', { status: 404 });
     const bytes = zipSync({
-      'UnrealAINew/UnrealAINew.uplugin': new TextEncoder().encode(JSON.stringify({ FileVersion: 3, VersionName: m[1] })),
+      'UnrealAINew/UnrealAINew.uplugin': new TextEncoder().encode(JSON.stringify({ FileVersion: 3, VersionName: archiveVersion ?? m[1] })),
       'UnrealAINew/Source/marker.cpp': new TextEncoder().encode('// installed'),
     });
     return new Response(bytes as unknown as BodyInit);
@@ -62,6 +62,28 @@ describe('independent component index', () => {
       fetchImpl: github.fetchImpl, indexCachePath: path.join(temp(), 'index.json') });
     expect(result.kind === 'success' && result.toVersion).toBe('1.1.0');
     expect(github.requests[1]).toContain('/new-v1.1.0/');
+  });
+
+  it('uses the selected historical version dependencies instead of latest dependencies', async () => {
+    const project = temp(); writeUProject(project, 'Game', '5.8');
+    const index = fixture();
+    Object.assign(index.extensions[0].releases['1.1.0'], { enginePlugins: [], minCoreVersion: null });
+    const result = await installExtension({ projectDir: project, extensionId: 'UnrealAINew', version: '1.1.0',
+      fetchImpl: online(index).fetchImpl, indexCachePath: path.join(temp(), 'index.json') });
+    expect(result.kind).toBe('success');
+    const plugins = JSON.parse(fs.readFileSync(path.join(project, 'Game.uproject'), 'utf8')).Plugins;
+    expect(plugins.some((p: { Name: string }) => p.Name === 'Niagara')).toBe(false);
+  });
+
+  it('rejects a wrong archive version before replacing the installed plugin', async () => {
+    const project = temp(); writeUProject(project, 'Game', '5.8');
+    const installed = path.join(project, 'Plugins/UnrealAINew'); fs.mkdirSync(installed, { recursive: true });
+    const descriptor = path.join(installed, 'UnrealAINew.uplugin');
+    fs.writeFileSync(descriptor, JSON.stringify({ VersionName: '1.1.0' }));
+    const result = await installExtension({ projectDir: project, extensionId: 'UnrealAINew',
+      fetchImpl: online(fixture(), '9.9.9').fetchImpl, indexCachePath: path.join(temp(), 'index.json') });
+    expect(result.kind).toBe('failure');
+    expect(JSON.parse(fs.readFileSync(descriptor, 'utf8')).VersionName).toBe('1.1.0');
   });
 
   it('rejects an unpublished explicit version without downloading another asset', async () => {

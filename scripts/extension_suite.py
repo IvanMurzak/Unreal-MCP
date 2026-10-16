@@ -6,6 +6,7 @@ Python stdlib only; Windows UE toolchain. See docs/EXTENSION-MONOREPO.md.
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 import hashlib
 import json
 import os
@@ -19,6 +20,47 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 EXCLUDED = {"Binaries", "Intermediate", "Saved", "DerivedDataCache", ".git", ".vs", "node_modules"}
+
+
+@contextmanager
+def machine_lock(already_held: bool = False, *, path: Path | None = None, timeout_seconds: float = 3600):
+    """Use the SAME exclusive file handle as CI, including from interactive local runs."""
+    if already_held or os.name != "nt":
+        yield
+        return
+    import ctypes
+    from ctypes import wintypes
+    lock_path = path or Path(os.environ.get("ProgramData", "C:/ProgramData")) / "UnrealMCP-ci/ue.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    create = kernel.CreateFileW
+    create.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, ctypes.c_void_p,
+                       wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
+    create.restype = wintypes.HANDLE
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    deadline = time.monotonic() + timeout_seconds
+    announced = False
+    while True:
+        handle = create(str(lock_path), 0xC0000000, 0, None, 4, 0x80, None)
+        if handle != wintypes.HANDLE(-1).value:
+            break
+        error = ctypes.get_last_error()
+        if error not in (32, 33) or time.monotonic() > deadline:
+            raise OSError(error, f"Cannot acquire UE machine lock {lock_path}")
+        if not announced:
+            print("Waiting for the machine-wide UE lock (another local/CI build owns it)", flush=True)
+            announced = True
+        time.sleep(1)
+    try:
+        yield
+    finally:
+        kernel.CloseHandle(handle)
+
+
+def default_output() -> Path:
+    if os.name == "nt":
+        return Path(os.environ.get("SystemDrive", "C:") + "/wt/unreal-tests") / hashlib.sha256(str(ROOT).encode()).hexdigest()[:8]
+    return ROOT / ".artifacts/tests"
 
 
 def extensions() -> dict[str, Path]:
@@ -99,8 +141,12 @@ def build(engine: Path, project: Path) -> None:
     command = [str(engine / "Engine/Build/BatchFiles/Build.bat"), "UnrealMcpTestsEditor", "Win64", "Development",
                f"-Project={project}", "-WaitMutex", "-NoHotReloadFromIDE"]
     print(f"Building {project.parent} (no editor launch)", flush=True)
-    with (project.parent / "build.log").open("w", encoding="utf-8") as log:
-        subprocess.run(command, stdout=log, stderr=subprocess.STDOUT, check=True)
+    log_path = project.parent / "build.log"
+    with log_path.open("w", encoding="utf-8") as log:
+        completed = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT)
+    if completed.returncode:
+        print("\n".join(log_path.read_text(encoding="utf-8", errors="replace").splitlines()[-80:]), flush=True)
+        completed.check_returncode()
 
 
 def check_report(report: Path, selected: list[str], core_tests: bool = True) -> dict:
@@ -132,9 +178,11 @@ def kill_owned(process: subprocess.Popen) -> None:
 
 
 def automation(engine: Path, project: Path, selected: list[str], timeout: int,
-               server: Path | None = None, bridge: Path | None = None) -> dict:
+               server: Path | None = None, bridge: Path | None = None, result_file: Path | None = None) -> dict:
     report = project.parent / "Reports" / time.strftime("%Y%m%d-%H%M%S")
     report.mkdir(parents=True)
+    if result_file:
+        write_json(result_file, {"status": "running", "report": str(report)})
     env = os.environ.copy()
     # Inherit no credentials/remote endpoints from a developer or another task.
     for key in list(env):
@@ -173,7 +221,14 @@ def automation(engine: Path, project: Path, selected: list[str], timeout: int,
             if editor.poll() is not None or time.monotonic() > deadline:
                 raise ValueError(f"Editor exited or timed out without Automation report: {report}")
             time.sleep(1)
-        result = check_report(report / "index.json", selected)
+        while True:
+            try:
+                result = check_report(report / "index.json", selected)
+                break
+            except (json.JSONDecodeError, PermissionError):
+                if time.monotonic() > deadline:
+                    raise
+                time.sleep(0.1)
         if server:
             # Reuse this SAME editor, server and sidecar for every preserved E2E check.
             url = f"http://localhost:{port}"
@@ -207,38 +262,43 @@ def automation(engine: Path, project: Path, selected: list[str], timeout: int,
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--engine", type=Path, required=True)
-    parser.add_argument("--output", type=Path, default=(Path(os.environ.get("SystemDrive", "C:")) / "wt/unreal-tests" / hashlib.sha256(str(ROOT).encode()).hexdigest()[:8]) if os.name == "nt" else ROOT / ".artifacts/tests")
+    parser.add_argument("--output", type=Path, default=default_output())
     parser.add_argument("--extensions", nargs="*", help="Plugin names; default all")
     parser.add_argument("--mode", choices=["full", "verification", "isolated", "automation", "prepare"], default="full")
+    parser.add_argument("--ue-lock-held", action="store_true", help="CI only: caller already holds the machine-wide lock")
     parser.add_argument("--result-file", type=Path)
     parser.add_argument("--timeout", type=int, default=1800)
     parser.add_argument("--server", type=Path)
     parser.add_argument("--bridge", type=Path)
     args = parser.parse_args()
-    engine = args.engine.resolve()
-    selected = args.extensions if args.extensions is not None else list(extensions())
-    if any(n not in extensions() for n in selected):
-        parser.error("Unknown extension")
-    output = args.output.resolve()
-    if args.mode == "full" and (not args.server or not args.bridge):
-        from suite_dependencies import resolve
-        args.server, args.bridge = resolve(output)
-    if args.mode in ("full", "verification", "isolated"):
-        # No siblings are present in these copies, including their headers and DLLs.
-        for name in [None, *selected]:
-            project = prepare(engine, "isolated/" + (name or "core"), [name] if name else [], output, strict=True)
-            build(engine, project)
-    if args.mode != "isolated":
-        profile = "all" if selected == list(extensions()) else "selected-" + hashlib.sha256(",".join(selected).encode()).hexdigest()[:8]
-        project = prepare(engine, profile, selected, output, core_tests=True)
-        if args.mode != "prepare":
-            build(engine, project)
-            result = automation(engine, project, selected, args.timeout, args.server, args.bridge)
-            write_json(project.parent / "suite-result.json", result)
-            if args.result_file:
-                write_json(args.result_file, result)
-            print(json.dumps(result), flush=True)
-    return 0
+    with machine_lock(args.ue_lock_held):
+        engine = args.engine.resolve()
+        selected = args.extensions if args.extensions is not None else list(extensions())
+        if any(n not in extensions() for n in selected):
+            parser.error("Unknown extension")
+        output = args.output.resolve()
+        if args.result_file:
+            write_json(args.result_file, {"status": "running"})
+        if args.mode == "full" and (not args.server or not args.bridge):
+            from suite_dependencies import resolve
+            args.server, args.bridge = resolve(output)
+        if args.mode in ("full", "verification", "isolated"):
+            # No siblings are present in these copies, including their headers and DLLs.
+            for name in [None, *selected]:
+                project = prepare(engine, "isolated/" + (name or "core"), [name] if name else [], output, strict=True)
+                build(engine, project)
+        if args.mode != "isolated":
+            profile = "all" if selected == list(extensions()) else "selected-" + hashlib.sha256(",".join(selected).encode()).hexdigest()[:8]
+            project = prepare(engine, profile, selected, output, core_tests=True)
+            if args.mode != "prepare":
+                build(engine, project)
+                result = automation(engine, project, selected, args.timeout, args.server, args.bridge, args.result_file)
+                write_json(project.parent / "suite-result.json", result)
+                if args.result_file:
+                    write_json(args.result_file, result)
+                print(json.dumps(result), flush=True)
+        return 0
+
 
 
 if __name__ == "__main__":

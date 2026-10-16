@@ -104,7 +104,8 @@ export async function installExtension(
       );
     }
 
-    // 1. Resolve the descriptor (catalog, or synthesized from --source).
+    // 1. Resolve the live index, with validated cache and bundled legacy fallback.
+    // Injected catalogs and local sources keep their existing offline behavior.
     let catalog = opts.catalog ?? EXTENSIONS_CATALOG;
     const sourceArg = (opts.source ?? '').trim();
     let indexed: IndexedExtension | undefined;
@@ -112,9 +113,11 @@ export async function installExtension(
       const loaded = await loadExtensionsIndex({ fetchImpl: opts.fetchImpl, cachePath: opts.indexCachePath, timeoutMs: opts.resolveTimeoutMs });
       if (loaded.warning) warnings.push(loaded.warning);
       if (loaded.index) {
-        catalog = [...loaded.index.extensions, ...EXTENSIONS_CATALOG.filter(legacy =>
-          !loaded.index!.extensions.some(e => e.extensionId === legacy.extensionId))];
-        indexed = findExtension(opts.extensionId, loaded.index.extensions) as IndexedExtension | undefined;
+        const online = loaded.index.extensions;
+        catalog = [...online, ...EXTENSIONS_CATALOG.filter(legacy =>
+          !online.some(e => e.extensionId === legacy.extensionId))];
+        const found = findExtension(opts.extensionId, online);
+        indexed = online.find(e => e === found);
       }
     }
     const versionOverride = (opts.version ?? '').trim();
@@ -194,6 +197,12 @@ export async function installExtension(
     const indexedRelease = indexed && toVersion ? indexed.releases[stripLeadingV(toVersion)] : undefined;
     if (indexed && !indexedRelease && !keepInstalled) {
       throw new Error(`No published ${pluginName} release ${toVersion} in the extensions index.`);
+    }
+    if (indexedRelease) {
+      descriptor = { ...descriptor,
+        minCoreVersion: indexedRelease.minCoreVersion === undefined ? descriptor.minCoreVersion : indexedRelease.minCoreVersion,
+        enginePlugins: indexedRelease.enginePlugins ?? descriptor.enginePlugins,
+      };
     }
     const source = resolveInstallSource({
       source: sourceArg,
@@ -400,7 +409,7 @@ async function materialize(
       throw new Error(`Downloaded descriptor does not match ${pluginName}.`);
     }
     const archiveVersion = readUPluginVersionName(safeReadJson(upluginFile));
-    if (archiveVersion && stripLeadingV(archiveVersion) !== stripLeadingV(source.version)) {
+    if ((source.sha256 && !archiveVersion) || archiveVersion && stripLeadingV(archiveVersion) !== stripLeadingV(source.version)) {
       throw new Error(`Downloaded ${pluginName} version ${archiveVersion} does not match ${source.version}.`);
     }
     placePlugin(path.dirname(upluginFile), installedPath);

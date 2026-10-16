@@ -67,11 +67,13 @@ py -3 scripts/extension_release.py bump --plugin UnrealAINiagara --version 0.2.0
 py -3 scripts/extension_release.py package --plugin UnrealAINiagara
 ```
 
-After that PR is reviewed/merged, dispatch `release_extensions.yml` on main with the plugin name.
+After that PR is reviewed/merged, dispatch `release_extensions.yml` on main with one plugin name, comma-separated names, or `all`. A batch runs the shared
+suite once per engine, then publishes independent releases only for the selected components.
 Default `dry_run=true` runs all tooling checks, isolated builds, combined Automation and E2E on
 UE 5.7 + 5.8, then uploads the one package as an Actions artifact. Publication needs a separate,
 explicitly authorized dispatch with `dry_run=false`. Missing engine checks are never success/skipped
-release gates. The workflow serializes all component/index publication and holds the existing machine
+release gates. Local runs and CI use the same exclusive machine-wide file lock, so interactive builds cannot
+collide with CI UBT/AutomationTool. The workflow serializes all component/index publication and holds the existing machine
 UE lock during each engine run. The package must match the current default-branch source.
 
 The first publication uses `bootstrap_index=true` to initialize from the checked-in seed index.
@@ -85,6 +87,7 @@ release, never copied into the new one. Do not delete historical releases/index 
 
 `install-extension` loads the validated online index from the fixed public GitHub Releases URL. It
 resolves extension ID/name/pluginName from that index, so new extensions do not require a CLI release.
+Each historical release can carry its own minimum core version and engine-plugin dependencies.
 The index's `version` is stable latest for that extension; `releases` maps exact versions to repo/tag
 and optional SHA-256. `--version` selects history; the default never downgrades an installed newer
 version. Component archives are hash-checked when hashes exist, before modifying the installation.

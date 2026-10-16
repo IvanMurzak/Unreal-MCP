@@ -11,6 +11,8 @@ export interface IndexedRelease {
   readonly repo: string;
   readonly tag: string;
   readonly sha256?: string;
+  readonly minCoreVersion?: string | null;
+  readonly enginePlugins?: readonly string[];
 }
 
 export interface IndexedExtension extends ExtensionDescriptor {
@@ -55,6 +57,8 @@ export function parseExtensionsIndex(value: unknown): ExtensionsIndex {
         || typeof release.tag !== 'string'
         || !(release.tag === `v${version}` || /^[a-z][a-z0-9-]*-v/.test(release.tag) && release.tag.endsWith(`-v${version}`))
         || !/^[A-Za-z0-9.-]+$/.test(release.tag)
+        || (release.minCoreVersion !== undefined && release.minCoreVersion !== null && !VERSION.test(release.minCoreVersion))
+        || (release.enginePlugins !== undefined && (!Array.isArray(release.enginePlugins) || !release.enginePlugins.every((p: unknown) => typeof p === 'string' && NAME.test(p))))
         || (release.sha256 !== undefined && !/^[a-f0-9]{64}$/.test(release.sha256))) {
         throw new Error('Invalid extension release in index.');
       }
@@ -88,7 +92,7 @@ export async function loadExtensionsIndex(opts: {
     } catch {
       // A read-only cache must not prevent an online install.
     } finally {
-      fs.rmSync(temporary, { force: true });
+      try { fs.rmSync(temporary, { force: true }); } catch { /* Best-effort private cache cleanup. */ }
     }
     return { index };
   } catch (error) {
