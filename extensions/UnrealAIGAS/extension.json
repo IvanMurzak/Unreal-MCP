@@ -1,7 +1,7 @@
 {
   "extensionId": "com.ivanmurzak.unreal-ai-gas",
-  "name": "Unreal AI GAS",
-  "description": "An AI Game Developer (Unreal-MCP) extension contributing MCP tools an AI agent can call against the Unreal Editor.",
+  "name": "GAS Tools",
+  "description": "AI tools for Unreal's Gameplay Ability System (list abilities/effects/attribute sets, inspect an ability, grant an ability to an actor).",
   "pluginName": "UnrealAIGAS",
   "repo": "IvanMurzak/Unreal-MCP",
   "version": "0.1.0",

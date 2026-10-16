@@ -1,7 +1,7 @@
 {
   "extensionId": "com.ivanmurzak.unreal-ai-control-rig",
-  "name": "Unreal AI ControlRig",
-  "description": "An AI Game Developer (Unreal-MCP) extension contributing MCP tools an AI agent can call against the Unreal Editor.",
+  "name": "ControlRig Tools",
+  "description": "AI tools for Unreal's Control Rig (list/inspect rig blueprints, controls, bones, and actor components).",
   "pluginName": "UnrealAIControlRig",
   "repo": "IvanMurzak/Unreal-MCP",
   "version": "0.1.2",

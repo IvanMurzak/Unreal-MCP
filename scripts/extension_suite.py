@@ -12,7 +12,6 @@ import json
 import os
 from pathlib import Path
 import re
-import shutil
 import socket
 import subprocess
 import sys
@@ -67,10 +66,12 @@ def default_output() -> Path:
 
 def write_json(path: Path, value: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
+    text = json.dumps(value, indent=2) + "\n"
+    if not path.exists() or path.read_text(encoding="utf-8") != text:
+        path.write_text(text, encoding="utf-8")
 
 
-def copy_plugin(source: Path, dest: Path, strict: bool = False) -> None:
+def copy_plugin(source: Path, dest: Path, strict: bool = False, *, core_tests: bool = False) -> None:
     """Incremental source sync, preserving ONLY this profile's own build cache."""
     expected: set[Path] = set()
     for file in source.rglob("*"):
@@ -79,6 +80,10 @@ def copy_plugin(source: Path, dest: Path, strict: bool = False) -> None:
             continue
         expected.add(rel)
         data = file.read_bytes()
+        if core_tests and file.name == "UnrealMCP.uplugin":
+            descriptor = json.loads(data.decode("utf-8-sig"))
+            descriptor["Modules"].append({"Name": "UnrealMcpEditorTests", "Type": "Editor", "LoadingPhase": "Default"})
+            data = (json.dumps(descriptor, indent=2) + "\n").encode("utf-8")
         if strict and file.suffix == ".cs" and file.name.endswith(".Build.cs"):
             text = data.decode("utf-8-sig")
             text = re.sub(r"PCHUsage\s*=\s*[^;]+;", "PCHUsage = PCHUsageMode.NoPCHs;", text)
@@ -105,21 +110,24 @@ def prepare(engine: Path, profile: str, selected: list[str], output: Path, *, st
     identity = str(ROOT)
     if any(base.iterdir()) and (not marker.exists() or marker.read_text() != identity):
         raise ValueError(f"Refusing foreign build directory: {base}")
-    marker.write_text(identity)
+    if not marker.exists():
+        marker.write_text(identity)
     plugins = base / "Plugins"
     allowed = {"UnrealMCP", *selected}
     if plugins.exists() and any(p.name not in allowed for p in plugins.iterdir()):
         raise ValueError(f"Unexpected plugin in isolated profile {plugins}; use a fresh output directory")
-    copy_plugin(ROOT / "UnrealMCP", plugins / "UnrealMCP")
-    descriptor_path = plugins / "UnrealMCP/UnrealMCP.uplugin"
-    descriptor = json.loads(descriptor_path.read_text(encoding="utf-8-sig"))
-    if core_tests:
-        descriptor["Modules"].append({"Name": "UnrealMcpEditorTests", "Type": "Editor", "LoadingPhase": "Default"})
-    write_json(descriptor_path, descriptor)
+    copy_plugin(ROOT / "UnrealMCP", plugins / "UnrealMCP", core_tests=core_tests)
     for name in selected:
         copy_plugin(extensions()[name], plugins / name, strict)
     template = ROOT / "tests/host-project"
-    shutil.copytree(template, base, dirs_exist_ok=True)
+    # Do not touch identical Target.cs/Build.cs files: their timestamps invalidate UBT caches.
+    for file in template.rglob("*"):
+        if file.is_file():
+            target = base / file.relative_to(template)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            data = file.read_bytes()
+            if not target.exists() or target.read_bytes() != data:
+                target.write_bytes(data)
     project = base / "UnrealMcpTests.uproject"
     write_json(project, {"FileVersion": 3, "EngineAssociation": f"{version['MajorVersion']}.{version['MinorVersion']}",
                         "Modules": [{"Name": "UnrealMcpTests", "Type": "Runtime", "LoadingPhase": "Default"}],
@@ -130,8 +138,10 @@ def prepare(engine: Path, profile: str, selected: list[str], output: Path, *, st
     config = base / "Config/DefaultEngine.ini"
     config.parent.mkdir(exist_ok=True)
     group = ",".join(f'(Contains="{p}",MatchFromStart=True)' for p in filters)
-    config.write_text('[/Script/AutomationController.AutomationControllerSettings]\n'
-                      f'+Groups=(Name="UnrealMcpSuite",Filters=({group}))\n', encoding="utf-8")
+    config_text = ('[/Script/AutomationController.AutomationControllerSettings]\n'
+                   f'+Groups=(Name="UnrealMcpSuite",Filters=({group}))\n')
+    if not config.exists() or config.read_text(encoding="utf-8") != config_text:
+        config.write_text(config_text, encoding="utf-8")
     return project
 
 

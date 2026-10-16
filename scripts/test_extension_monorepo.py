@@ -140,6 +140,20 @@ class MonorepoTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'Unexpected plugin'):
                 suite.prepare(engine, 'isolated/Niagara', ['UnrealAINiagara'], root / 'out', strict=True)
 
+    def test_unchanged_profile_does_not_invalidate_ubt_caches(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            engine = root / 'engine'
+            suite.write_json(engine / 'Engine/Build/Build.version', {'MajorVersion': 5, 'MinorVersion': 8})
+            project = suite.prepare(engine, 'all', ['UnrealAINiagara'], root / 'out', core_tests=True)
+            files = [p for p in project.parent.rglob('*') if p.is_file()]
+            stamps = {p: p.stat().st_mtime_ns for p in files}
+            suite.prepare(engine, 'all', ['UnrealAINiagara'], root / 'out', core_tests=True)
+            self.assertEqual(stamps, {p: p.stat().st_mtime_ns for p in files})
+            descriptor = suite.extensions()['UnrealAINiagara'] / 'UnrealAINiagara.uplugin'
+            copied = project.parent / 'Plugins/UnrealAINiagara/UnrealAINiagara.uplugin'
+            self.assertEqual(descriptor.read_bytes(), copied.read_bytes())
+
     def test_report_gate_catches_missing_extension_and_missing_individual_test(self):
         with tempfile.TemporaryDirectory() as temporary:
             report = Path(temporary) / 'index.json'
@@ -173,6 +187,13 @@ class MonorepoTests(unittest.TestCase):
             for tool in metadata['tools']:
                 self.assertNotIn(tool['name'], tools)
                 tools.add(tool['name'])
+
+    def test_migrated_catalog_names_remain_valid_cli_install_aliases(self):
+        seed = release.read(release.ROOT / 'extensions-index.json')
+        for entry in seed['extensions']:
+            metadata = release.validate(entry['pluginName'])
+            self.assertEqual(metadata['extensionId'], entry['extensionId'])
+            self.assertEqual(metadata['name'], entry['name'])
 
 
 if __name__ == '__main__':

@@ -1,7 +1,7 @@
 {
   "extensionId": "com.ivanmurzak.unreal-ai-pcg",
-  "name": "Unreal AI PCG",
-  "description": "PCG (Procedural Content Generation) tools for AI agents: list and inspect PCG graphs, and add, inspect and generate PCG components on actors in the editor world.",
+  "name": "PCG Tools",
+  "description": "AI tools for Unreal's Procedural Content Generation (PCG) framework (list/inspect graphs, add & inspect PCG components, trigger generation).",
   "pluginName": "UnrealAIPCG",
   "repo": "IvanMurzak/Unreal-MCP",
   "version": "0.1.0",

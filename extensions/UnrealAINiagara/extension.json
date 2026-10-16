@@ -1,7 +1,7 @@
 {
   "extensionId": "com.ivanmurzak.unreal-ai-niagara",
-  "name": "Unreal AI Niagara",
-  "description": "Niagara VFX tools for AI agents: list and inspect Niagara systems and spawn a Niagara component in the editor world.",
+  "name": "Niagara Tools",
+  "description": "AI tools for Unreal's Niagara VFX system (list/inspect systems, spawn components).",
   "pluginName": "UnrealAINiagara",
   "repo": "IvanMurzak/Unreal-MCP",
   "version": "0.1.0",

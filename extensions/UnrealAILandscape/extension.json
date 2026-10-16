@@ -1,7 +1,7 @@
 {
   "extensionId": "com.ivanmurzak.unreal-ai-landscape",
-  "name": "Unreal AI Landscape",
-  "description": "An AI Game Developer (Unreal-MCP) extension contributing MCP tools an AI agent can call against the Unreal Editor.",
+  "name": "Landscape Tools",
+  "description": "AI tools for Unreal's Landscape + Water systems (inspect landscapes, water bodies & zones).",
   "pluginName": "UnrealAILandscape",
   "repo": "IvanMurzak/Unreal-MCP",
   "version": "0.1.0",

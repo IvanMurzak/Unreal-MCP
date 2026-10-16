@@ -1,7 +1,7 @@
 {
   "extensionId": "com.ivanmurzak.unreal-ai-enhanced-input",
-  "name": "Unreal AI EnhancedInput",
-  "description": "An AI Game Developer (Unreal-MCP) extension contributing MCP tools an AI agent can call against the Unreal Editor.",
+  "name": "EnhancedInput Tools",
+  "description": "AI tools for Unreal's Enhanced Input system (list/inspect Input Actions & Mapping Contexts, create actions/contexts, add key mappings).",
   "pluginName": "UnrealAIEnhancedInput",
   "repo": "IvanMurzak/Unreal-MCP",
   "version": "0.1.0",
