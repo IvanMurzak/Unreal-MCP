@@ -64,6 +64,20 @@ class MonorepoTests(unittest.TestCase):
                 self.assertFalse(github.releases[tag]['draft'])
                 entry = next(e for e in github.index['extensions'] if e['pluginName'] == 'UnrealAINiagara')
                 self.assertEqual(entry['releases'][version]['tag'], tag)
+                # A full retry retains the initial workflow's bootstrap input.
+                # The now-live index must be downloaded, preserving all history.
+                with patch.object(release.subprocess, 'run') as probe:
+                    probe.return_value.returncode = 0
+                    release.publish('UnrealAINiagara', archive, bootstrap=True)
+                self.assertEqual(github.index_writes, 2)
+                self.assertIn('0.1.0', next(e for e in github.index['extensions']
+                                          if e['pluginName'] == 'UnrealAINiagara')['releases'])
+                with patch.object(release.subprocess, 'run') as probe:
+                    probe.return_value.returncode = 1
+                    probe.return_value.stderr = b'HTTP 503: temporarily unavailable'
+                    with self.assertRaisesRegex(ValueError, 'Cannot determine'):
+                        release.publish('UnrealAINiagara', archive, bootstrap=True)
+                self.assertEqual(github.index_writes, 2)
 
     def test_misnested_new_extension_cannot_silently_escape_discovery(self):
         with tempfile.TemporaryDirectory() as temporary:
