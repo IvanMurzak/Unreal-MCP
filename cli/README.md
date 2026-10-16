@@ -51,6 +51,10 @@ Backed by **[ai-game.dev](https://ai-game.dev)**. See the
 
 # Quick Start
 
+> First-party extensions now use independent component releases and an online CLI index.
+> See [the monorepo test/release guide](../docs/EXTENSION-MONOREPO.md); it supersedes legacy per-repository release instructions below.
+
+
 Run without installing (`npx` caches the package between runs — use `unreal-mcp-cli@latest` to force the
 newest published version):
 

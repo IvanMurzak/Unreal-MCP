@@ -24,7 +24,7 @@ export const TRUSTED_DOWNLOAD_HOST = 'github.com';
  */
 export type InstallSource =
   | { readonly kind: 'local'; readonly dir: string }
-  | { readonly kind: 'github-release'; readonly url: string; readonly version: string; readonly repo: string };
+  | { readonly kind: 'github-release'; readonly url: string; readonly version: string; readonly repo: string; readonly sha256?: string };
 
 /** The channel discriminant, exported for the public result type. */
 export type InstallSourceKind = InstallSource['kind'];
@@ -61,9 +61,9 @@ export function extensionAssetName(pluginName: string, version: string): string 
  * The host is always `github.com` by construction; `assertTrustedDownloadUrl`
  * re-checks any caller-supplied URL before a network call. Pure string build.
  */
-export function extensionDownloadUrl(repo: string, pluginName: string, version: string): string {
+export function extensionDownloadUrl(repo: string, pluginName: string, version: string, tag?: string): string {
   const bare = stripLeadingV(version);
-  return `https://${TRUSTED_DOWNLOAD_HOST}/${repo}/releases/download/${releaseTag(version)}/${extensionAssetName(pluginName, bare)}`;
+  return `https://${TRUSTED_DOWNLOAD_HOST}/${repo}/releases/download/${tag ?? releaseTag(version)}/${extensionAssetName(pluginName, bare)}`;
 }
 
 /**
@@ -103,6 +103,8 @@ export interface ResolveInstallSourceInput {
   readonly pluginName: string;
   /** The version to download (`--version`, else the resolved latest release, else the catalog fallback). */
   readonly version: string | null;
+  readonly tag?: string;
+  readonly sha256?: string;
 }
 
 /**
@@ -126,9 +128,9 @@ export function resolveInstallSource(input: ResolveInstallSourceInput): InstallS
 
   const version = (input.version ?? '').trim();
   if (input.repo && version !== '') {
-    const url = extensionDownloadUrl(input.repo, input.pluginName, version);
+    const url = extensionDownloadUrl(input.repo, input.pluginName, version, input.tag);
     assertTrustedDownloadUrl(url); // fail-closed: github.com + https only.
-    return { kind: 'github-release', url, version, repo: input.repo };
+    return { kind: 'github-release', url, version, repo: input.repo, sha256: input.sha256 };
   }
 
   // Neither a local dir nor a resolvable release.

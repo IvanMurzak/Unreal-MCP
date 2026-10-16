@@ -46,6 +46,7 @@ Consumers exclude the plugin from packaged games with a `TargetDenyList: ["Game"
 | Path | What lives there / where new files go |
 | --- | --- |
 | `UnrealMCP/` | The UE plugin (modules, conventions, UE build/test: [`UnrealMCP/AGENTS.md`](UnrealMCP/AGENTS.md)) |
+| `extensions/` | Six optional first-party plugins, independent versions/releases ([guide](docs/EXTENSION-MONOREPO.md)) |
 | `bridge/` | .NET 9 sidecar + xUnit tests ([`bridge/AGENTS.md`](bridge/AGENTS.md)) |
 | `cli/` | `unreal-mcp-cli` npm package (TypeScript, commander, vitest): commands in `cli/src/commands/`, logic in `cli/src/lib/`, tests in `cli/tests/`. Published on npm; CI owns releases |
 | `samples/` | Example extension plugins: `UnrealAITemplate/` (editor, §5) and `UnrealAIRuntimeSample/` (runtime, §12.9) |
@@ -81,7 +82,8 @@ with `FUnrealMcpToolBuilder::ToolType(EUnrealMcpToolType::System)` and routed by
 
 ## Versioning
 
-One semver for plugin / bridge / cli; `UnrealMCP/UnrealMCP.uplugin` `VersionName` is the source of truth.
+Extensions have independent semvers and component-prefixed release tags; use `scripts/extension_release.py`.
+Core retains one semver for plugin / bridge / cli; `UnrealMCP/UnrealMCP.uplugin` `VersionName` is the source of truth.
 `commands/bump-version.ps1` rewrites it plus the bridge csproj `<Version>`, `cli/package.json` (+ lock) and
 the `cli/src/version.ts` `PACKAGE_VERSION` constant (no runtime `package.json` read — it breaks bundled binaries).
 **Never bump from a feature task or hand-edit one alone** — the release flow owns versions
@@ -110,3 +112,5 @@ Windows runners (each job asks for its engine's label, e.g. `unreal-5-8`), seria
 gated on `vars.UNREAL_RUNNER_READY` / `vars.UNREAL_SMOKE_READY == 'true'` and same-repo PRs — otherwise
 SKIPPED, never red. `release.yml` is `workflow_dispatch`-only (`dry_run` input; validates UE 5.5–5.8) and
 publishes nothing on merge. Keep this file and `docs/RELEASING.md` in sync with the workflows.
+
+Shared suite: `scripts/extension_suite.py --engine <UE> --mode full` builds in isolation, then runs all Automation/E2E in one editor per engine.

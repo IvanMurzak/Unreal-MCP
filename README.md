@@ -59,6 +59,10 @@ Unlike Unity and Godot (C# engines that host the .NET `McpPlugin` in-process), U
 
 # Table of contents
 
+> First-party extensions now use independent component releases and an online CLI index.
+> See [the monorepo test/release guide](docs/EXTENSION-MONOREPO.md); it supersedes legacy per-repository release instructions below.
+
+
 - [Requirements](#requirements)
 - [Install](#install)
 - [Updating the plugin](#updating-the-plugin)

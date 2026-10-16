@@ -88,3 +88,6 @@ Thumbs.db
 # `.pipeline/.hooks/` stays tracked; only its runtime siblings are ignored.
 .pipeline/.runtime/
 .pipeline/.stats/
+
+# Per-engine, per-profile suite builds and release packages
+.artifacts/

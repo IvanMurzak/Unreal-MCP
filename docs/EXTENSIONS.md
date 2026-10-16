@@ -1,5 +1,9 @@
 # Writing an Unreal-MCP Extension
 
+> First-party extensions now use independent component releases and an online CLI index.
+> See [the monorepo test/release guide](EXTENSION-MONOREPO.md); it supersedes legacy per-repository release instructions below.
+
+
 Unreal-MCP exposes the Unreal Editor to MCP-aware AI assistants as a set of **tools**, **prompts**, and
 **resources**. Any third-party UE plugin can contribute its own through a small, public,
 modular-feature-based contract — no fork, no link-time coupling, no load-order assumptions. This guide is the

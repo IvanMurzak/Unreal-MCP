@@ -792,13 +792,14 @@ export type ExtensionInstallOutcome = 'added' | 'updated' | 'enabled' | 'already
 
 /**
  * Where `install-extension`'s target version came from:
+ * - `index` — stable latest for this extension from the online index (or validated cache).
  * - `explicit` — the caller's `--version` (wins; may downgrade).
  * - `latest-release` — the newest GitHub release, resolved online at install time (the normal path).
  * - `catalog` — the catalog's last-known version (offline / failed-resolution fallback).
  * - `installed` — an installed copy newer than the resolved target was kept (never downgraded implicitly).
  * - `local` — a `--source <dir>` install (catalog version or the source `.uplugin` `VersionName`).
  */
-export type ExtensionVersionSource = 'explicit' | 'latest-release' | 'catalog' | 'installed' | 'local';
+export type ExtensionVersionSource = 'index' | 'explicit' | 'latest-release' | 'catalog' | 'installed' | 'local';
 
 /** Re-export of the install-source channel discriminant for the public result. */
 export type { InstallSourceKind };
@@ -823,6 +824,8 @@ export interface UbtBuildStep {
 export interface ExtensionBuildStep extends UbtBuildStep {}
 
 export interface InstallExtensionOptions {
+  /** Override the validated online-index cache location (also useful for isolated tests). */
+  indexCachePath?: string;
   /** Target Unreal project root (holds the `.uproject` + `Plugins/`). */
   projectDir: string;
   /**

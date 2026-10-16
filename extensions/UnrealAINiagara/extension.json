@@ -1,0 +1,27 @@
+{
+  "extensionId": "com.ivanmurzak.unreal-ai-niagara",
+  "name": "Niagara Tools",
+  "description": "AI tools for Unreal's Niagara VFX system (list/inspect systems, spawn components).",
+  "pluginName": "UnrealAINiagara",
+  "repo": "IvanMurzak/Unreal-MCP",
+  "version": "0.1.0",
+  "minCoreVersion": "0.5.0",
+  "enginePlugins": [
+    "Niagara"
+  ],
+  "tools": [
+    {
+      "name": "niagara-list-systems",
+      "description": "List every Niagara system asset in the project (Asset Registry; no asset loaded)."
+    },
+    {
+      "name": "niagara-get-system",
+      "description": "Inspect a single Niagara system (read-only): emitter count + per-emitter name/enabled."
+    },
+    {
+      "name": "niagara-spawn-component",
+      "description": "Spawn a Niagara component for a system into the editor world at a location."
+    }
+  ],
+  "_comment": "Install-catalog / compatibility manifest, shaped as ONE unreal-mcp-cli ExtensionDescriptor (cli/src/utils/extensions-catalog.ts) so it is directly liftable into the shared extensions.catalog.json { schemaVersion, extensions[] }. 'version' mirrors the .uplugin VersionName (kept in sync by commands/bump-version.ps1). 'minCoreVersion' is the lowest Unreal-MCP core version this extension supports (refreshed by commands/update-core.ps1). 'enginePlugins' are the gating engine plugins enabled in the .uproject alongside this extension. The install-extension resolver unions these with the materialized .uplugin Plugins[]."
+}
