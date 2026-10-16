@@ -4,7 +4,7 @@
   "description": "AI tools for Unreal's Niagara VFX system (list/inspect systems, spawn components).",
   "pluginName": "UnrealAINiagara",
   "repo": "IvanMurzak/Unreal-MCP",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "minCoreVersion": "0.5.0",
   "enginePlugins": [
     "Niagara"

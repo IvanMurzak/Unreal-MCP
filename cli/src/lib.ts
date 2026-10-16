@@ -246,3 +246,7 @@ export type { CloseOptions, CloseResult, RunningProcess } from './lib/close.js';
 export type { ExtensionDescriptor, ExtensionTool } from './utils/extensions-catalog.js';
 export type { InstallSource, LatestReleaseResolution } from './utils/extension-source.js';
 export { resolveLatestExtensionVersion } from './utils/extension-source.js';
+// Shared online catalog for consumers such as the desktop app. Installation and
+// browsing must resolve the same per-component release history.
+export { loadExtensionsIndex, EXTENSIONS_INDEX_URL } from './utils/extensions-index.js';
+export type { ExtensionsIndex, IndexedExtension, IndexedRelease } from './utils/extensions-index.js';

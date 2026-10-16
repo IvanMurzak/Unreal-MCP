@@ -4,7 +4,7 @@
   "description": "AI tools for Unreal's Enhanced Input system (list/inspect Input Actions & Mapping Contexts, create actions/contexts, add key mappings).",
   "pluginName": "UnrealAIEnhancedInput",
   "repo": "IvanMurzak/Unreal-MCP",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "minCoreVersion": "0.5.0",
   "enginePlugins": [
     "EnhancedInput"

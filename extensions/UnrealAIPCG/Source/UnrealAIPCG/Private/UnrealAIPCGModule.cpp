@@ -71,7 +71,7 @@ class FUnrealAIPCGProvider : public IUnrealMcpToolProvider
 public:
 	virtual FString GetExtensionId() const override { return TEXT("com.ivanmurzak.unreal-ai-pcg"); }
 	virtual FText GetDisplayName() const override { return NSLOCTEXT("UnrealAIPCG", "DisplayName", "Unreal AI PCG"); }
-	virtual FString GetExtensionVersion() const override { return TEXT("0.1.0"); }
+	virtual FString GetExtensionVersion() const override { return TEXT("0.1.1"); }
 
 	virtual void RegisterTools(FUnrealMcpToolRegistry& Registry) override
 	{
