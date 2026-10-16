@@ -1,0 +1,34 @@
+{
+  "FileVersion": 3,
+  "Version": 1,
+  "VersionName": "0.1.0",
+  "FriendlyName": "Unreal AI Niagara",
+  "Description": "An AI Game Developer (Unreal-MCP) extension. Implements IUnrealMcpToolProvider and contributes MCP tools that an AI agent can call against the Unreal Editor.",
+  "Category": "AI",
+  "CreatedBy": "IvanMurzak/Unreal-AI-Niagara",
+  "CreatedByURL": "https://github.com/IvanMurzak/Unreal-AI-Niagara",
+  "DocsURL": "https://github.com/IvanMurzak/Unreal-MCP/blob/main/docs/EXTENSIONS.md",
+  "MarketplaceURL": "",
+  "SupportURL": "https://github.com/IvanMurzak/Unreal-MCP/issues",
+  "CanContainContent": false,
+  "IsBetaVersion": true,
+  "IsExperimentalVersion": false,
+  "Installed": false,
+  "Modules": [
+    {
+      "Name": "UnrealAINiagara",
+      "Type": "Editor",
+      "LoadingPhase": "Default"
+    }
+  ],
+  "Plugins": [
+    {
+      "Name": "UnrealMCP",
+      "Enabled": true
+    },
+    {
+      "Name": "Niagara",
+      "Enabled": true
+    }
+  ]
+}

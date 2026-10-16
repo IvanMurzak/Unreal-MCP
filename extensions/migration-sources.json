@@ -1,0 +1,26 @@
+{
+  "UnrealAINiagara": {
+    "repository": "IvanMurzak/Unreal-AI-Niagara",
+    "commit": "023b4d20f2e65f6893a1a8c73b19f092eabbb178"
+  },
+  "UnrealAIEnhancedInput": {
+    "repository": "IvanMurzak/Unreal-AI-EnhancedInput",
+    "commit": "62bb8a773c4bce79e9120982085a123929c662fc"
+  },
+  "UnrealAIPCG": {
+    "repository": "IvanMurzak/Unreal-AI-PCG",
+    "commit": "e67a5027731b2f6923a9caaa64411d10f6b0155a"
+  },
+  "UnrealAIGAS": {
+    "repository": "IvanMurzak/Unreal-AI-GAS",
+    "commit": "087ec605bc8300f41350c40f3306936ce1129966"
+  },
+  "UnrealAILandscape": {
+    "repository": "IvanMurzak/Unreal-AI-Landscape",
+    "commit": "136425155dbf912098d2ef4828d9adcaf93e292f"
+  },
+  "UnrealAIControlRig": {
+    "repository": "IvanMurzak/Unreal-AI-ControlRig",
+    "commit": "24360473b4acad4c08a29fafe4c86585f666a1bd"
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "extensionId": "com.ivanmurzak.unreal-ai-enhanced-input",
+  "name": "Unreal AI EnhancedInput",
+  "description": "An AI Game Developer (Unreal-MCP) extension contributing MCP tools an AI agent can call against the Unreal Editor.",
+  "pluginName": "UnrealAIEnhancedInput",
+  "repo": "IvanMurzak/Unreal-MCP",
+  "version": "0.1.0",
+  "minCoreVersion": "0.1.0",
+  "enginePlugins": [
+    "EnhancedInput"
+  ],
+  "tools": [
+    {
+      "name": "enhanced-input-list",
+      "description": "List every Enhanced Input asset in the project (Asset Registry; no asset loaded): Input Actions and Mapping Contexts."
+    },
+    {
+      "name": "enhanced-input-get",
+      "description": "Inspect a single Enhanced Input asset (read-only): a UInputAction's value type, or a UInputMappingContext's key->action mappings."
+    },
+    {
+      "name": "enhanced-input-action-create",
+      "description": "Create a UInputAction asset (value type Boolean/Axis1D/Axis2D/Axis3D) at a content path."
+    },
+    {
+      "name": "enhanced-input-context-create",
+      "description": "Create a UInputMappingContext asset at a content path."
+    },
+    {
+      "name": "enhanced-input-add-mapping",
+      "description": "Add a key -> action mapping to a UInputMappingContext."
+    }
+  ],
+  "_comment": "Install-catalog / compatibility manifest, shaped as ONE unreal-mcp-cli ExtensionDescriptor (cli/src/utils/extensions-catalog.ts in Unreal-MCP) so it is directly liftable into the shared extensions.catalog.json { schemaVersion, extensions[] }. 'version' mirrors the .uplugin VersionName (kept in sync by commands/bump-version.ps1). 'minCoreVersion' is the lowest Unreal-MCP core version this extension supports (refreshed by commands/update-core.ps1). 'enginePlugins' are the gating engine plugins (e.g. ['Niagara']) enabled in the .uproject alongside this extension \u2014 populated by commands/init -FeaturePlugin. 'tools' lists the contributed tool ids/descriptions. The install-extension resolver unions enginePlugins with the materialized .uplugin Plugins[]."
+}

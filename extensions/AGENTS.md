@@ -1,0 +1,9 @@
+# extensions/
+
+- Each `UnrealAI<Feature>/` is an optional UE plugin: its own `.uplugin`, module, `extension.json`, tests and license.
+- `migration-sources.json` records the original public repo and exact imported commit; preserve provenance.
+- New first-party plugins go here, never as nested git submodules. Keep IDs/plugin names stable.
+- Source handlers/specs live under each plugin's `Source/`; live checks under `Tests/e2e/tools/`.
+- Version source: `.uplugin` `VersionName`; bump with `scripts/extension_release.py bump --plugin ... --version ...`.
+- Independent tags/ZIPs and the online index: `docs/EXTENSION-MONOREPO.md`.
+- Add test expectations to `tests/automation-inventory.json`; never lower them merely to pass a run.

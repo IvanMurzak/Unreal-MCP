@@ -36,6 +36,8 @@ import * as os from 'os';
 import * as path from 'path';
 import { spawn } from 'child_process';
 import { unzipSync } from 'fflate';
+import { createHash } from 'node:crypto';
+import { loadExtensionsIndex, type IndexedExtension } from '../utils/extensions-index.js';
 import { asError } from '../utils/error.js';
 import { readUProject } from '../utils/project.js';
 import { discoverEngine } from './engine.js';
@@ -103,8 +105,18 @@ export async function installExtension(
     }
 
     // 1. Resolve the descriptor (catalog, or synthesized from --source).
-    const catalog = opts.catalog ?? EXTENSIONS_CATALOG;
+    let catalog = opts.catalog ?? EXTENSIONS_CATALOG;
     const sourceArg = (opts.source ?? '').trim();
+    let indexed: IndexedExtension | undefined;
+    if (!sourceArg && !opts.catalog) {
+      const loaded = await loadExtensionsIndex({ fetchImpl: opts.fetchImpl, cachePath: opts.indexCachePath, timeoutMs: opts.resolveTimeoutMs });
+      if (loaded.warning) warnings.push(loaded.warning);
+      if (loaded.index) {
+        catalog = [...loaded.index.extensions, ...EXTENSIONS_CATALOG.filter(legacy =>
+          !loaded.index!.extensions.some(e => e.extensionId === legacy.extensionId))];
+        indexed = findExtension(opts.extensionId, loaded.index.extensions) as IndexedExtension | undefined;
+      }
+    }
     const versionOverride = (opts.version ?? '').trim();
 
     let descriptor: ExtensionDescriptor;
@@ -136,6 +148,7 @@ export async function installExtension(
     let toVersion = hasVersion(descriptor) ? (descriptor.version as string) : null;
     let versionSource: ExtensionVersionSource =
       versionOverride !== '' ? 'explicit' : sourceArg !== '' ? 'local' : 'catalog';
+    if (indexed && !versionOverride) versionSource = 'index';
     if (versionSource === 'catalog' && descriptor.repo) {
       const latest = await resolveLatestExtensionVersion({
         repo: descriptor.repo,
@@ -163,7 +176,7 @@ export async function installExtension(
     // Never downgrade an installed newer copy implicitly — only --version may.
     let keepInstalled = false;
     if (
-      (versionSource === 'latest-release' || versionSource === 'catalog') &&
+      (versionSource === 'latest-release' || versionSource === 'catalog' || versionSource === 'index') &&
       fromVersion !== null &&
       toVersion !== null &&
       compareSemver(stripLeadingV(fromVersion), stripLeadingV(toVersion)) > 0
@@ -178,11 +191,17 @@ export async function installExtension(
     }
 
     // 3. Resolve the install source (the pluggable channel seam).
+    const indexedRelease = indexed && toVersion ? indexed.releases[stripLeadingV(toVersion)] : undefined;
+    if (indexed && !indexedRelease && !keepInstalled) {
+      throw new Error(`No published ${pluginName} release ${toVersion} in the extensions index.`);
+    }
     const source = resolveInstallSource({
       source: sourceArg,
-      repo: descriptor.repo,
+      repo: indexedRelease?.repo ?? descriptor.repo,
       pluginName,
       version: toVersion,
+      tag: indexedRelease?.tag,
+      sha256: indexedRelease?.sha256,
     });
 
     // 4. Materialize the plugin files — only when needed (force, not present, or a
@@ -365,6 +384,9 @@ async function materialize(
     );
   }
   const zipBytes = new Uint8Array(await response.arrayBuffer());
+  if (source.sha256 && createHash('sha256').update(zipBytes).digest('hex') !== source.sha256) {
+    throw new Error('Extension archive checksum mismatch; the existing installation was not changed.');
+  }
   const staging = fs.mkdtempSync(path.join(os.tmpdir(), `unreal-mcp-ext-extract-`));
   try {
     extractZip(zipBytes, staging, warnings);
@@ -373,6 +395,13 @@ async function materialize(
       throw new Error(
         `Downloaded zip did not contain a .uplugin — ${source.url} is not a valid extension plugin release.`,
       );
+    }
+    if (path.basename(upluginFile, '.uplugin').toLowerCase() !== pluginName.toLowerCase()) {
+      throw new Error(`Downloaded descriptor does not match ${pluginName}.`);
+    }
+    const archiveVersion = readUPluginVersionName(safeReadJson(upluginFile));
+    if (archiveVersion && stripLeadingV(archiveVersion) !== stripLeadingV(source.version)) {
+      throw new Error(`Downloaded ${pluginName} version ${archiveVersion} does not match ${source.version}.`);
     }
     placePlugin(path.dirname(upluginFile), installedPath);
   } finally {

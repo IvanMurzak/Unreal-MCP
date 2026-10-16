@@ -1,5 +1,9 @@
 # Releasing Unreal-MCP
 
+> First-party extensions now use independent component releases and an online CLI index.
+> See [the monorepo test/release guide](EXTENSION-MONOREPO.md); it supersedes legacy per-repository release instructions below.
+
+
 This document is the operator runbook for the CI/CD workflows under
 `.github/workflows/`. It covers the PR test pipeline, the gated release pipeline,
 the self-hosted Unreal runner, the dry-run rehearsal procedure, and the required

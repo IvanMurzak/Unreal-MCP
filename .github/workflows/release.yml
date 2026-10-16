@@ -332,105 +332,17 @@ jobs:
               throw "Distributed package SHIPS UnrealMcpEditorTests — Fab review would flag it (C2 regression)."
             }
           }
-      - name: Resolve runner-local host project
+      - name: Isolated compilation + one-editor Automation suite
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $runnerRoot = Split-Path -Parent (Split-Path -Parent $env:RUNNER_TEMP)
-          $runnerLocalHost = Join-Path $runnerRoot 'host\UnrealTestProject\UnrealTestProject.uproject'
-          if (Test-Path $runnerLocalHost) {
-            "HOST_UPROJECT=$runnerLocalHost" >> $env:GITHUB_ENV
-            Write-Host "Using runner-local host project: $runnerLocalHost"
-          } elseif (-not [string]::IsNullOrWhiteSpace($env:HOST_UPROJECT) -and (Test-Path $env:HOST_UPROJECT)) {
-            Write-Host "Using UNREAL_HOST_PROJECT fallback: $env:HOST_UPROJECT"
-          } else {
-            throw "No host .uproject found. Expected runner-local '$runnerLocalHost' or a valid UNREAL_HOST_PROJECT repo variable."
-          }
-      - name: Run Automation specs (UnrealMcp. filter — test module rebuilt in)
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          if ([string]::IsNullOrWhiteSpace($env:HOST_UPROJECT)) {
-            throw "UNREAL_HOST_PROJECT repo variable is not set — the Automation pass needs a host .uproject with the UnrealMCP plugin enabled (see docs/RELEASING.md)."
-          }
-          # C2 (#139): the host's Plugins\UnrealMCP junctions to $RUNNER_TEMP\UnrealMCP-Package
-          # (docs/RELEASING.md). The distributed package is test-free, so transiently ADD the
-          # UnrealMcpEditorTests module, BuildPlugin into that junction target so the specs are
-          # present, run Automation, then ALWAYS revert in finally (toggle is idempotent).
-          $runUAT = Join-Path $env:UE_ROOT 'Engine\Build\BatchFiles\RunUAT.bat'
-          $toggle = Join-Path $env:GITHUB_WORKSPACE 'commands\test-module-uplugin.ps1'
-          $uplugin = Join-Path $env:GITHUB_WORKSPACE 'UnrealMCP\UnrealMCP.uplugin'
-          & $toggle -Action Add
-          try {
-            $package = Join-Path $env:RUNNER_TEMP 'UnrealMCP-Package'
-            if (Test-Path $package) { Remove-Item $package -Recurse -Force }
-            & $runUAT BuildPlugin -Plugin="$uplugin" -Package="$package" -TargetPlatforms=Win64 -Rocket
-            if ($LASTEXITCODE -ne 0) { throw "Automation BuildPlugin (with test module) failed with exit code $LASTEXITCODE" }
-            # SELF-HEAL the host's Plugins\UnrealMCP junction (docs/RELEASING.md invariant).
-            # It MUST point at THIS run's BuildPlugin output ($package =
-            # $RUNNER_TEMP\UnrealMCP-Package), which INCLUDES the UnrealMcpEditorTests
-            # module just built above so the UnrealMcp.* Automation specs register.
-            # Off-workflow dev tooling can silently repoint it at the Fab-clean submodule
-            # source (whose distributed .uplugin omits the test module -> 0 specs ->
-            # "index.json MISSING"); force-recreate it here so a clobbered junction
-            # auto-recovers. Idempotent: drop any existing reparse point/dir, then mklink /J.
-            $hostPluginsDir = Join-Path (Split-Path -Parent $env:HOST_UPROJECT) 'Plugins'
-            $hostJunction = Join-Path $hostPluginsDir 'UnrealMCP'
-            New-Item -ItemType Directory -Force -Path $hostPluginsDir | Out-Null
-            if (Test-Path -LiteralPath $hostJunction) {
-              cmd /c rmdir "$hostJunction" 2>$null
-              if (Test-Path -LiteralPath $hostJunction) { Remove-Item -LiteralPath $hostJunction -Recurse -Force }
-            }
-            cmd /c mklink /J "$hostJunction" "$package" | Write-Host
-            if ($LASTEXITCODE -ne 0) { throw "Failed to (re)create host junction $hostJunction -> $package (exit $LASTEXITCODE)" }
-            $resolved = (Get-Item -LiteralPath $hostJunction).Target
-            Write-Host "Host junction: $hostJunction -> $resolved (expected $package)"
-            # Rebuild the host's OWN game module for THIS matrix engine so the editor
-            # opens without an out-of-date-modules failure (the host's committed
-            # Binaries may be built for a different UE version, and an -unattended
-            # editor will NOT interactively rebuild). The plugin is already current
-            # via the BuildPlugin into the host's Plugins junction above. IMPORTANT:
-            # force -NoLiveCoding on the self-hosted service runner — UE 5.8's UBT
-            # can otherwise probe the global LiveCoding mutex and die with
-            # UnauthorizedAccessException under the service account.
-            $hostBuild = Join-Path $env:UE_ROOT 'Engine\Build\BatchFiles\Build.bat'
-            $hostTarget = [System.IO.Path]::GetFileNameWithoutExtension($env:HOST_UPROJECT) + 'Editor'
-            $hostBuildLog = Join-Path $env:RUNNER_TEMP "UBT-$hostTarget-$($env:GITHUB_JOB)-$($env:RUNNER_NAME).log"
-            & $hostBuild $hostTarget Win64 Development -project="$env:HOST_UPROJECT" -WaitMutex -NoLiveCoding -log="$hostBuildLog"
-            if ($LASTEXITCODE -ne 0) { throw "Host editor target ($hostTarget) build failed for UE_ROOT=$env:UE_ROOT (exit $LASTEXITCODE)" }
-            $editorCmd = Join-Path $env:UE_ROOT 'Engine\Binaries\Win64\UnrealEditor-Cmd.exe'
-            $reportDir = Join-Path $env:RUNNER_TEMP 'AutomationReport'
-            if (Test-Path $reportDir) { Remove-Item $reportDir -Recurse -Force }
-            & $editorCmd "$env:HOST_UPROJECT" -nullrhi -nosplash -unattended `
-              -ExecCmds="Automation RunTests UnrealMcp.; Quit" `
-              -ReportExportPath="$reportDir" -log
-            # The editor's exit code is unreliable for test verdicts (test.md
-            # Suite 3); the parsed index.json below is authoritative. Clear the
-            # exit code so pwsh's auto-appended `exit $LASTEXITCODE` does not red
-            # the step on a nonzero editor exit unrelated to a test failure.
-            $global:LASTEXITCODE = 0
-            echo "REPORT_DIR=$reportDir" >> $env:GITHUB_ENV
-          }
-          finally {
-            & $toggle -Action Remove
-          }
-      - name: Parse Automation report (index.json is authoritative)
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $index = Join-Path $env:REPORT_DIR 'index.json'
-          if (-not (Test-Path $index)) { throw "Automation index.json is MISSING at $index — treat as FAILURE." }
-          $report = Get-Content $index -Raw | ConvertFrom-Json
-          $failed = [int]$report.failed
-          $succeeded = [int]$report.succeeded
-          # UE counts specs that pass while emitting a warning under a SEPARATE
-          # succeededWithWarnings field; fold it into the pass tally so a
-          # clean-but-warned suite is not misread as the 0-specs case below.
-          $succeededWithWarnings = [int]$report.succeededWithWarnings
-          $passed = $succeeded + $succeededWithWarnings
-          Write-Host "Automation results: succeeded=$succeeded succeededWithWarnings=$succeededWithWarnings failed=$failed"
-          if ($failed -gt 0) { throw "$failed Automation test(s) failed." }
-          if ($passed -lt 1) { throw "No Automation tests succeeded — expected at least one UnrealMcp. spec." }
+          $suiteArgs = @('--engine', $env:UE_ROOT, '--mode', 'verification', '--result-file', '.artifacts/suite-result.json')
+          # Extensions currently support UE 5.7+; retain core-only gates on older engines.
+          if ([version]'${{ matrix.ue }}' -lt [version]'5.7') { $suiteArgs += '--extensions' }
+          & (Join-Path $env:UE_ROOT "Engine/Binaries/ThirdParty/Python3/Win64/python.exe") scripts/extension_suite.py @suiteArgs
+          if ($LASTEXITCODE -ne 0) { throw 'Extension suite failed' }
+          $result = Get-Content '.artifacts/suite-result.json' -Raw | ConvertFrom-Json
+          "REPORT_DIR=$($result.report)" >> $env:GITHUB_ENV
 
       - name: Upload Automation report on failure
         # REPORT_DIR is exported only at the END of the Automation step; an

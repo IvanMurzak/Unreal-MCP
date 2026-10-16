@@ -1002,6 +1002,10 @@ submodule registration only after the public-repo gate.
 
 ### 9.2 Versioning
 
+First-party optional plugins now live under `extensions/` with independent versions and tags.
+Their release/catalog and one-editor test design is specified in [EXTENSION-MONOREPO.md](EXTENSION-MONOREPO.md).
+The shared semver below applies only to core/bridge/CLI, not extensions.
+
 Single semver `MAJOR.MINOR.PATCH` shared by plugin (`.uplugin` `VersionName`), bridge and cli —
 `commands/bump-version.ps1` rewrites all of them (Unity/Godot convention). The plugin↔sidecar
 download URL embeds the version (§6) and the handshake double-checks it, so the pair can never
