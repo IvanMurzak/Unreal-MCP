@@ -39,6 +39,9 @@ struct FUnrealMcpCatalogEntry
 	FString Repo;
 	/** Catalog-pinned version, or empty for an unpinned entry. */
 	FString Version;
+	/** Component tag and optional archive digest from the online index. Empty for legacy catalogs. */
+	FString ReleaseTag;
+	FString ArchiveSha256;
 	/** Minimum core Unreal-MCP plugin version required (`min-core-version`); empty = no floor. */
 	FString MinCoreVersion;
 	/** Gating engine plugins (e.g. `Niagara`) enabled in the `.uproject` alongside the extension. */
@@ -64,11 +67,11 @@ public:
 	static UNREALMCPEDITOR_API const int32 SupportedSchemaVersion;
 
 	/**
-	 * The default catalog source URL: the raw `cli/extensions.catalog.json` on the Unreal-MCP repo's
-	 * default branch. This is the SINGLE source of truth shared with the CLI (a parity test keeps the
-	 * TS mirror in lockstep with the JSON), so the panel never carries a second drifting copy.
+	 * The same published online index the CLI uses. LegacyCatalogUrl remains the fallback during
+	 * migration or when the live index cannot be fetched. Component coordinates are parsed below.
 	 */
 	static UNREALMCPEDITOR_API FString DefaultCatalogUrl();
+	static UNREALMCPEDITOR_API FString LegacyCatalogUrl();
 
 	/**
 	 * Parse the shared catalog JSON `{ schemaVersion, extensions[] }` into typed entries. Returns false +

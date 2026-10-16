@@ -24,7 +24,11 @@ SLUGS = {"UnrealAINiagara": "niagara", "UnrealAIEnhancedInput": "enhanced-input"
 
 
 def components() -> dict[str, Path]:
-    return {p.stem: p.parent for p in sorted((ROOT / "extensions").glob("*/*.uplugin"))}
+    found = {p.stem: p.parent for p in sorted((ROOT / "extensions").glob("*/*.uplugin"))}
+    for metadata in (ROOT / "extensions").glob("*/extension.json"):
+        if metadata.parent.name not in found or found[metadata.parent.name] != metadata.parent:
+            raise ValueError(f"Extension metadata has no matching top-level plugin: {metadata}")
+    return found
 
 
 def slug(plugin: str) -> str:

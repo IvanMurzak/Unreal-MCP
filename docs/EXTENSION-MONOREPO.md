@@ -85,6 +85,9 @@ release, never copied into the new one. Do not delete historical releases/index 
 
 ## CLI catalog and migration
 
+The native Editor extensions panel also reads this index, uses component tags and verifies archive
+checksums, with the legacy catalog URL as its migration fallback.
+
 `install-extension` loads the validated online index from the fixed public GitHub Releases URL. It
 resolves extension ID/name/pluginName from that index, so new extensions do not require a CLI release.
 Each historical release can carry its own minimum core version and engine-plugin dependencies.

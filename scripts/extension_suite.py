@@ -18,6 +18,8 @@ import subprocess
 import sys
 import time
 
+from extension_release import components as extensions
+
 ROOT = Path(__file__).resolve().parents[1]
 EXCLUDED = {"Binaries", "Intermediate", "Saved", "DerivedDataCache", ".git", ".vs", "node_modules"}
 
@@ -61,10 +63,6 @@ def default_output() -> Path:
     if os.name == "nt":
         return Path(os.environ.get("SystemDrive", "C:") + "/wt/unreal-tests") / hashlib.sha256(str(ROOT).encode()).hexdigest()[:8]
     return ROOT / ".artifacts/tests"
-
-
-def extensions() -> dict[str, Path]:
-    return {p.stem: p.parent for p in sorted((ROOT / "extensions").glob("*/*.uplugin"))}
 
 
 def write_json(path: Path, value: object) -> None:

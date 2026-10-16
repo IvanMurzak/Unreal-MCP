@@ -4,6 +4,7 @@
 #include "Extensions/UnrealMcpExtensionCatalog.h"
 
 #include "Dom/JsonObject.h"
+#include "Internationalization/Regex.h"
 #include "Dom/JsonValue.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
@@ -12,9 +13,11 @@ const int32 FUnrealMcpExtensionCatalog::SupportedSchemaVersion = 1;
 
 FString FUnrealMcpExtensionCatalog::DefaultCatalogUrl()
 {
-	// Raw single-source-of-truth JSON on the repo's default branch. The CLI mirrors this JSON as a typed
-	// constant kept in lockstep by a parity test (cli/tests/extensions-catalog-parity.test.ts); the panel
-	// fetches the JSON directly so it never carries a second drifting copy.
+	return TEXT("https://github.com/IvanMurzak/Unreal-MCP/releases/download/extensions-index/extensions-index.json");
+}
+
+FString FUnrealMcpExtensionCatalog::LegacyCatalogUrl()
+{
 	return TEXT("https://raw.githubusercontent.com/IvanMurzak/Unreal-MCP/main/cli/extensions.catalog.json");
 }
 
@@ -46,6 +49,34 @@ bool FUnrealMcpExtensionCatalog::ParseEntry(
 	Obj->TryGetStringField(TEXT("repo"), OutEntry.Repo);
 	Obj->TryGetStringField(TEXT("version"), OutEntry.Version);
 	Obj->TryGetStringField(TEXT("minCoreVersion"), OutEntry.MinCoreVersion);
+	const TSharedPtr<FJsonObject>* Releases = nullptr;
+	if (Obj->TryGetObjectField(TEXT("releases"), Releases) && Releases && Releases->IsValid())
+	{
+		const TSharedPtr<FJsonObject>* Latest = nullptr;
+		if (!(*Releases)->TryGetObjectField(OutEntry.Version, Latest) || !Latest || !Latest->IsValid()
+			|| !(*Latest)->TryGetStringField(TEXT("repo"), OutEntry.Repo)
+			|| !(*Latest)->TryGetStringField(TEXT("tag"), OutEntry.ReleaseTag))
+		{
+			OutError = TEXT("the extension index is missing the selected release");
+			return false;
+		}
+		const FRegexPattern TagPattern(TEXT("^[A-Za-z0-9.-]+$"));
+		FRegexMatcher TagMatcher(TagPattern, OutEntry.ReleaseTag);
+		if (!TagMatcher.FindNext() || !(OutEntry.ReleaseTag == TEXT("v") + OutEntry.Version
+			|| OutEntry.ReleaseTag.EndsWith(TEXT("-v") + OutEntry.Version)))
+		{
+			OutError = TEXT("invalid extension release tag");
+			return false;
+		}
+		(*Latest)->TryGetStringField(TEXT("sha256"), OutEntry.ArchiveSha256);
+		const FRegexPattern HashPattern(TEXT("^[a-f0-9]{64}$"));
+		FRegexMatcher HashMatcher(HashPattern, OutEntry.ArchiveSha256);
+		if (!OutEntry.ArchiveSha256.IsEmpty() && !HashMatcher.FindNext())
+		{
+			OutError = TEXT("invalid extension archive checksum");
+			return false;
+		}
+	}
 	if (OutEntry.Name.IsEmpty())
 		OutEntry.Name = OutEntry.PluginName;
 

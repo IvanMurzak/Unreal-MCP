@@ -2,6 +2,7 @@
 // See the LICENSE file in the repository root for more information.
 
 #include "Extensions/UnrealMcpExtensionInstaller.h"
+#include "Server/UnrealMcpServerChecksum.h"
 #include "Extensions/UnrealMcpUProjectPlugins.h"
 #include "Extensions/UnrealMcpExtensionManager.h" // FUnrealMcpExtensionRecord (runtime module, reached via PrivateIncludePaths)
 #include "UnrealMcpLog.h"
@@ -136,9 +137,13 @@ FString FUnrealMcpExtensionInstaller::ExtensionAssetName(const FString& PluginNa
 
 FString FUnrealMcpExtensionInstaller::ExtensionDownloadUrl(const FString& Repo, const FString& PluginName, const FString& Version)
 {
-	// ExtensionAssetName strips the leading v internally, so pass Version through directly.
+	return ExtensionDownloadUrl(Repo, PluginName, Version, ReleaseTag(Version));
+}
+
+FString FUnrealMcpExtensionInstaller::ExtensionDownloadUrl(const FString& Repo, const FString& PluginName, const FString& Version, const FString& Tag)
+{
 	return FString::Printf(TEXT("https://%s/%s/releases/download/%s/%s"),
-		ExtInstTrustedDownloadHost, *Repo, *ReleaseTag(Version), *ExtensionAssetName(PluginName, Version));
+		ExtInstTrustedDownloadHost, *Repo, *(Tag.IsEmpty() ? ReleaseTag(Version) : Tag), *ExtensionAssetName(PluginName, Version));
 }
 
 bool FUnrealMcpExtensionInstaller::IsTrustedDownloadUrl(const FString& Url)
@@ -478,7 +483,7 @@ FString FUnrealMcpExtensionInstaller::ResolveLocalPluginRoot(const FString& Sour
 	return FPaths::GetPath(Uplugin);
 }
 
-bool FUnrealMcpExtensionInstaller::DownloadAndExtract(const FString& Url, double TimeoutSeconds, FString& OutPluginRoot, FString& OutExtractDir, FString& OutError)
+bool FUnrealMcpExtensionInstaller::DownloadAndExtract(const FString& Url, double TimeoutSeconds, FString& OutPluginRoot, FString& OutExtractDir, FString& OutError, const FString& ExpectedSha256)
 {
 	if (!IsTrustedDownloadUrl(Url))
 	{
@@ -531,6 +536,13 @@ bool FUnrealMcpExtensionInstaller::DownloadAndExtract(const FString& Url, double
 	{
 		OutError = FString::Printf(TEXT("extension download failed (HTTP %d) from %s. Verify the release exists, or install from a local source."),
 			State->ResponseCode, *Url);
+		return false;
+	}
+
+	if (!ExpectedSha256.IsEmpty() && !FUnrealMcpServerChecksum::DigestMatches(
+		ExpectedSha256, FUnrealMcpServerChecksum::ComputeSha256Hex(State->Bytes)))
+	{
+		OutError = TEXT("extension archive checksum mismatch; the installation was not changed");
 		return false;
 	}
 
@@ -730,9 +742,9 @@ FUnrealMcpInstallResult FUnrealMcpExtensionInstaller::Install(const FUnrealMcpIn
 		}
 		else if (!Options.Descriptor.Repo.TrimStartAndEnd().IsEmpty() && !ToVersion.IsEmpty())
 		{
-			const FString Url = ExtensionDownloadUrl(Options.Descriptor.Repo, PluginName, ToVersion);
+			const FString Url = ExtensionDownloadUrl(Options.Descriptor.Repo, PluginName, ToVersion, Options.Descriptor.ReleaseTag);
 			FString ExtractedRoot;
-			if (!DownloadAndExtract(Url, Options.DownloadTimeoutSeconds, ExtractedRoot, ExtractDirToClean, Err))
+			if (!DownloadAndExtract(Url, Options.DownloadTimeoutSeconds, ExtractedRoot, ExtractDirToClean, Err, Options.Descriptor.ArchiveSha256))
 			{
 				Result.Error = Err;
 				return Result;

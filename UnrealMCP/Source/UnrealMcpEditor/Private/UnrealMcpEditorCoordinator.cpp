@@ -373,7 +373,10 @@ void FUnrealMcpEditorCoordinator::Startup()
 	};
 	ExtWiring.CatalogFetcher = [](TArray<FUnrealMcpCatalogEntry>& Out, FString& Err) -> bool
 	{
-		return FUnrealMcpExtensionInstaller::FetchCatalogSync(FUnrealMcpExtensionCatalog::DefaultCatalogUrl(), 30.0, Out, Err);
+		if (FUnrealMcpExtensionInstaller::FetchCatalogSync(FUnrealMcpExtensionCatalog::DefaultCatalogUrl(), 30.0, Out, Err))
+			return true;
+		// First rollout/offline compatibility: legacy releases stay available.
+		return FUnrealMcpExtensionInstaller::FetchCatalogSync(FUnrealMcpExtensionCatalog::LegacyCatalogUrl(), 30.0, Out, Err);
 	};
 	ExtWiring.OnSetEnabled = [ExtMgrPtr](const FString& Id, bool bEnabled)
 	{

@@ -10,7 +10,7 @@
   "UnrealMcp.DevControl": 39,
   "UnrealMcp.Dispatch.GameThread": 5,
   "UnrealMcp.EditorViewModel": 43,
-  "UnrealMcp.ExtensionCatalog": 8,
+  "UnrealMcp.ExtensionCatalog": 10,
   "UnrealMcp.ExtensionInstaller": 11,
   "UnrealMcp.Extensions": 11,
   "UnrealMcp.Ipc.Ndjson": 5,

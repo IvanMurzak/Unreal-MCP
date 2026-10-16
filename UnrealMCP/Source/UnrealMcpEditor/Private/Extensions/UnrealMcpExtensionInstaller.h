@@ -123,6 +123,7 @@ public:
 	static UNREALMCPEDITOR_API FString ExtensionAssetName(const FString& PluginName, const FString& Version);
 	/** The github.com release-zip download URL for an extension version. Pure string build. */
 	static UNREALMCPEDITOR_API FString ExtensionDownloadUrl(const FString& Repo, const FString& PluginName, const FString& Version);
+	static UNREALMCPEDITOR_API FString ExtensionDownloadUrl(const FString& Repo, const FString& PluginName, const FString& Version, const FString& Tag);
 	/** Fail-closed host trust: true iff @p Url is https AND host is EXACTLY github.com. Pure. */
 	static UNREALMCPEDITOR_API bool IsTrustedDownloadUrl(const FString& Url);
 
@@ -181,7 +182,7 @@ private:
 	 * delete it once the plugin root has been consumed (it is set as soon as the temp dir is created, so a
 	 * post-creation extract failure still hands back a dir to clean).
 	 */
-	static bool DownloadAndExtract(const FString& Url, double TimeoutSeconds, FString& OutPluginRoot, FString& OutExtractDir, FString& OutError);
+	static bool DownloadAndExtract(const FString& Url, double TimeoutSeconds, FString& OutPluginRoot, FString& OutExtractDir, FString& OutError, const FString& ExpectedSha256);
 	/** Recursively copy @p SourceRoot → @p DestRoot, skipping build-cache / VCS subtrees. */
 	static bool CopyPluginTreeFiltered(const FString& SourceRoot, const FString& DestRoot, FString& OutError);
 };

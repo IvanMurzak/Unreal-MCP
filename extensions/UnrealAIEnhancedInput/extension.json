@@ -5,7 +5,7 @@
   "pluginName": "UnrealAIEnhancedInput",
   "repo": "IvanMurzak/Unreal-MCP",
   "version": "0.1.0",
-  "minCoreVersion": "0.1.0",
+  "minCoreVersion": "0.5.0",
   "enginePlugins": [
     "EnhancedInput"
   ],

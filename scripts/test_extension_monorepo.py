@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 import zipfile
 
 import extension_release as release
@@ -11,6 +12,65 @@ import extension_suite as suite
 
 
 class MonorepoTests(unittest.TestCase):
+    def test_bad_uploaded_archive_never_promotes_index_and_draft_retry_recovers(self):
+        class FakeGitHub:
+            def __init__(self):
+                self.index = release.read(release.ROOT / 'extensions-index.json')
+                self.releases = {}
+                self.index_writes = 0
+                self.corrupt_download = True
+
+            def __call__(self, *args):
+                if args[0] == 'api':
+                    return 'sha' if 'commits/HEAD' in args[1] else json.dumps(list(self.releases.values()))
+                verb, tag = args[1:3]
+                if verb == 'create':
+                    self.releases[tag] = {'tag_name': tag, 'draft': True, 'bytes': Path(args[-1]).read_bytes().hex()}
+                elif verb == 'download':
+                    output = Path(args[args.index('--dir') + 1])
+                    name = args[args.index('--pattern') + 1]
+                    if tag == release.INDEX_TAG:
+                        release.write(output / name, self.index)
+                    else:
+                        data = b'corrupted' if self.corrupt_download else bytes.fromhex(self.releases[tag]['bytes'])
+                        (output / name).write_bytes(data)
+                elif verb == 'edit':
+                    self.releases[tag]['draft'] = False
+                elif verb == 'upload':
+                    if tag == release.INDEX_TAG:
+                        self.index = release.read(Path(args[3]))
+                        self.index_writes += 1
+                    else:
+                        self.releases[tag]['bytes'] = Path(args[3]).read_bytes().hex()
+                else:
+                    raise AssertionError(args)
+                return ''
+
+        github = FakeGitHub()
+        original = copy.deepcopy(github.index)
+        with tempfile.TemporaryDirectory() as temporary:
+            archive = release.package('UnrealAINiagara', Path(temporary))
+            with patch.object(release, 'gh', github), patch.object(release.subprocess, 'check_output', return_value='sha\n'):
+                with self.assertRaisesRegex(ValueError, 'Uploaded archive differs'):
+                    release.publish('UnrealAINiagara', archive)
+                self.assertEqual(github.index_writes, 0)
+                self.assertEqual(github.index, original)
+                self.assertTrue(github.releases['niagara-v0.1.0']['draft'])
+                github.corrupt_download = False
+                release.publish('UnrealAINiagara', archive)
+                self.assertEqual(github.index_writes, 1)
+                self.assertFalse(github.releases['niagara-v0.1.0']['draft'])
+                entry = next(e for e in github.index['extensions'] if e['pluginName'] == 'UnrealAINiagara')
+                self.assertEqual(entry['releases']['0.1.0']['tag'], 'niagara-v0.1.0')
+
+    def test_misnested_new_extension_cannot_silently_escape_discovery(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / 'extensions/UnrealAINew').mkdir(parents=True)
+            release.write(root / 'extensions/UnrealAINew/extension.json', {'pluginName': 'UnrealAINew'})
+            with patch.object(release, 'ROOT', root), self.assertRaisesRegex(ValueError, 'no matching top-level plugin'):
+                release.components()
+
     def test_default_output_is_absolute(self):
         self.assertTrue(suite.default_output().is_absolute())
 

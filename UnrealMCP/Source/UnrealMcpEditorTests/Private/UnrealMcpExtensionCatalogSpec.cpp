@@ -8,7 +8,9 @@
 #include "Dom/JsonObject.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
+#include "Serialization/JsonWriter.h"
 #include "Extensions/UnrealMcpExtensionCatalog.h"
+#include "Extensions/UnrealMcpExtensionInstaller.h"
 #include "Extensions/UnrealMcpUProjectPlugins.h"
 
 /**
@@ -59,6 +61,50 @@ void FUnrealMcpExtensionCatalogSpec::Define()
 {
 	Describe("ParseCatalogJson", [this]()
 	{
+		It("resolves component tags and checksums from the selected indexed release", [this]()
+		{
+			TSharedPtr<FJsonObject> Root = CatalogSpecParseObject(CatalogSpecSampleJson());
+			TSharedPtr<FJsonObject> Entry = Root->GetArrayField(TEXT("extensions"))[0]->AsObject();
+			TSharedPtr<FJsonObject> Latest = MakeShared<FJsonObject>();
+			Latest->SetStringField(TEXT("repo"), TEXT("IvanMurzak/Unreal-MCP"));
+			Latest->SetStringField(TEXT("tag"), TEXT("niagara-v0.1.0"));
+			const FString Hash = TEXT("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+			Latest->SetStringField(TEXT("sha256"), Hash);
+			TSharedPtr<FJsonObject> Releases = MakeShared<FJsonObject>();
+			Releases->SetObjectField(TEXT("0.1.0"), Latest);
+			Entry->SetObjectField(TEXT("releases"), Releases);
+			auto Parse = [&Root](TArray<FUnrealMcpCatalogEntry>& Entries, FString& Error, FString& Warning)
+			{
+				FString Json;
+				FJsonSerializer::Serialize(Root.ToSharedRef(), TJsonWriterFactory<>::Create(&Json));
+				return FUnrealMcpExtensionCatalog::ParseCatalogJson(Json, Entries, Error, Warning);
+			};
+			TArray<FUnrealMcpCatalogEntry> Entries;
+			FString Error, Warning;
+			TestTrue(TEXT("indexed catalog parses"), Parse(Entries, Error, Warning));
+			if (Entries.Num() != 1) { AddError(TEXT("missing indexed entry")); return; }
+			TestEqual(TEXT("release repository"), Entries[0].Repo, FString(TEXT("IvanMurzak/Unreal-MCP")));
+			TestEqual(TEXT("release checksum"), Entries[0].ArchiveSha256, Hash);
+			TestEqual(TEXT("component download URL"), FUnrealMcpExtensionInstaller::ExtensionDownloadUrl(
+				Entries[0].Repo, Entries[0].PluginName, Entries[0].Version, Entries[0].ReleaseTag),
+				FString(TEXT("https://github.com/IvanMurzak/Unreal-MCP/releases/download/niagara-v0.1.0/UnrealAINiagara-0.1.0.zip")));
+			Latest->SetStringField(TEXT("tag"), TEXT("../niagara-v0.1.0"));
+			TestFalse(TEXT("unsafe release tag rejected"), Parse(Entries, Error, Warning));
+			Latest->SetStringField(TEXT("tag"), TEXT("niagara-v0.1.0"));
+			Latest->SetStringField(TEXT("sha256"), TEXT("bad-checksum"));
+			TestFalse(TEXT("malformed checksum rejected"), Parse(Entries, Error, Warning));
+			Releases->RemoveField(TEXT("0.1.0"));
+			TestFalse(TEXT("missing selected release rejected"), Parse(Entries, Error, Warning));
+		});
+
+		It("uses the online index with a separate legacy catalog fallback URL", [this]()
+		{
+			TestTrue(TEXT("default points at release index"), FUnrealMcpExtensionCatalog::DefaultCatalogUrl().EndsWith(
+				TEXT("/releases/download/extensions-index/extensions-index.json")));
+			TestTrue(TEXT("legacy source remains available"), FUnrealMcpExtensionCatalog::LegacyCatalogUrl().EndsWith(
+				TEXT("/main/cli/extensions.catalog.json")));
+		});
+
 		It("parses the shared catalog shape into typed entries", [this]()
 		{
 			TArray<FUnrealMcpCatalogEntry> Entries;
