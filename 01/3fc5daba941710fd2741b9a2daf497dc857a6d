@@ -1,0 +1,22 @@
+scripts/test_extension_monorepo.py
+  s_eb8bcde0be96a2::t_5dcbadda99fa2a 75-80
+  s_eb8bcde0be96a2::t_72168fa879b9ef 67-74
+scripts/extension_release.py
+  s_eb8bcde0be96a2::t_2e642a2275beef 148-149,152-157
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "013fc5daba941710fd2741b9a2daf497dc857a6d",
+  "prompts": {},
+  "sessions": {
+    "s_eb8bcde0be96a2": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14267-6fec-7a30-97a7-931925a48014",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
