@@ -93,7 +93,7 @@ def package(plugin: str, output: Path) -> Path:
     with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as bundle:
         for path in sorted(folder.rglob("*")):
             rel = path.relative_to(folder)
-            if not path.is_file() or rel.parts[0] not in {"Source", "Content", "Config", "Resources", f"{plugin}.uplugin", "LICENSE"}:
+            if not path.is_file() or rel.parts[0] not in {"Source", "Content", "Config", "Resources", f"{plugin}.uplugin", "LICENSE", "README.md"}:
                 continue
             if any(part in {"Binaries", "Intermediate", ".git", "Saved"} for part in rel.parts):
                 continue

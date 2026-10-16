@@ -110,6 +110,8 @@ class MonorepoTests(unittest.TestCase):
             with zipfile.ZipFile(package) as archive:
                 names = archive.namelist()
                 self.assertTrue(any(n.endswith('UnrealAINiagara.uplugin') for n in names))
+                self.assertEqual(archive.read('UnrealAINiagara/README.md'),
+                                 (release.ROOT / 'extensions/UnrealAINiagara/README.md').read_bytes())
                 self.assertTrue(any(n.endswith('UnrealAINiagaraSpec.cpp') for n in names))
                 self.assertTrue(all(n.startswith('UnrealAINiagara/') for n in names))
                 self.assertFalse(any('/Binaries/' in n or '/Intermediate/' in n for n in names))
