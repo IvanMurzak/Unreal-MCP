@@ -161,7 +161,10 @@ def check_report(report: Path, selected: list[str], core_tests: bool = True) -> 
     data = json.loads(report.read_text(encoding="utf-8-sig"))
     tests = data.get("tests", [])
     if not tests or data.get("failed", 0) or data.get("notRun", 0) or data.get("inProcess", 0):
-        raise ValueError(f"Incomplete/failed Automation report: {report}")
+        failures = [t for t in tests if t.get("state") not in ("Success", "SuccessWithWarnings")]
+        raise ValueError(f"Incomplete/failed Automation report: {report}; "
+                         f"counts={ {k: data.get(k) for k in ('succeeded', 'failed', 'notRun', 'inProcess')} }; "
+                         f"nonpassing={json.dumps(failures, ensure_ascii=False)[:16000]}")
     paths: list[str] = []
     for test in tests:
         if test.get("state") not in ("Success", "SuccessWithWarnings"):
@@ -181,7 +184,10 @@ def check_report(report: Path, selected: list[str], core_tests: bool = True) -> 
 
 def kill_owned(process: subprocess.Popen) -> None:
     if process.poll() is None:
-        subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"], check=False, capture_output=True)
+        stopped = subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"], check=False, capture_output=True)
+        if stopped.returncode and process.poll() is None:
+            print(f"Owned process {process.pid} tree stop failed: {stopped.stdout!r} {stopped.stderr!r}", flush=True)
+            process.kill()
     process.wait(timeout=30)
 
 
