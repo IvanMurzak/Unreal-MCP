@@ -35,7 +35,7 @@ public:
 	{
 		Context.AddApiClass(UUnrealAITemplateRqlApi::StaticClass(), TEXT("HelloOperations"));
 		Context.AddObjectSource(TEXT("hello"), TEXT("the sample's operations: call Greet(name) / Relabel(actor, label)"),
-			[]() -> UObject* { return GetMutableDefault<UUnrealAITemplateRqlApi>(); });
+			UUnrealAITemplateRqlApi::StaticClass(), []() -> UObject* { return GetMutableDefault<UUnrealAITemplateRqlApi>(); });
 		Context.AddJsonMember(AActor::StaticClass(), TEXT("TagCount"), TEXT("how many actor tags the actor has (sample member)"),
 			[](UObject* Object) -> TSharedPtr<FJsonValue>
 			{

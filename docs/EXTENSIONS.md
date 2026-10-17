@@ -44,7 +44,7 @@ public:
     {
         Context.AddAssetSource(TEXT("niagaraSystems"), TEXT("Niagara system assets"), UNiagaraSystem::StaticClass());
         Context.AddApiClass(UMyNiagaraOperations::StaticClass(), TEXT("NiagaraOperations"));   // every UFUNCTION -> `call`
-        Context.AddObjectSource(TEXT("niagara"), TEXT("Niagara operations"),
+        Context.AddObjectSource(TEXT("niagara"), TEXT("Niagara operations"), UMyNiagaraOperations::StaticClass(),
             []() -> UObject* { return GetMutableDefault<UMyNiagaraOperations>(); });
         Context.AddJsonMember(UNiagaraSystem::StaticClass(), TEXT("Emitters"), TEXT("emitters"), /* UObject* -> JSON */ ...);
         Context.AddGuide(TEXT("Niagara"), TEXT("... markdown with example queries ..."));
@@ -57,7 +57,7 @@ public:
 
 | Context call | Adds |
 | --- | --- |
-| `AddObjectSource` / `AddObjectListSource` / `AddAssetSource` | a source (where a query starts): one object, a list, or the project's assets of a class (at most 200, loaded lazily) |
+| `AddObjectSource` / `AddObjectListSource` / `AddAssetSource` | a source (where a query starts): one object, a list, or the project's assets of a class (at most 200, loaded lazily); the class argument types it in `rql-schema` |
 | `AddApiClass(Class, TypeName)` | every UFUNCTION of the class becomes callable with `call` (parameters and results convert like members) |
 | `ExposeProperties(Owner, Names, bWritable)` | properties reflection hides (not EditAnywhere / BlueprintVisible) as members |
 | `AddJsonMember` / `AddObjectListMember` | read-only computed members (JSON values, owning object lists) |
@@ -70,7 +70,8 @@ put the agent-facing description in the doc comment above each, and report failu
 create objects with `RF_Transactional` and `Modify()` what you change. `UnrealMcpRql::ResolveClass` / `LoadObject`
 resolve class names and asset paths. Object parameters accept asset paths, class names and actor labels as text.
 
-The editor republishes the rql-* tools (descriptions and the skill) when a module registers or unregisters; specs run
+The editor's Extensions window lists the module's extension (`GetExtensionId`) and can disable it; the rql-* tools
+(and their skill) are re-registered when a module registers, unregisters or is toggled. Specs run
 plans through `UnrealMcpRqlTools::ExecutePlan` (see any extension's `Private/Tests/*Spec.cpp`).
 
 ---

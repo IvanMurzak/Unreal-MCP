@@ -92,16 +92,16 @@ public:
 		using namespace UnrealAIGASRqlLocal;
 		Context.AddObjectListSource(TEXT("gasAbilities"),
 			TEXT("the class defaults of every Gameplay Ability class (native and the project's Blueprints), at most 200"),
-			[]() { return ClassDefaults(UGameplayAbility::StaticClass()); });
+			UGameplayAbility::StaticClass(), []() { return ClassDefaults(UGameplayAbility::StaticClass()); });
 		Context.AddObjectListSource(TEXT("gasEffects"),
 			TEXT("the class defaults of every Gameplay Effect class (native and the project's Blueprints), at most 200"),
-			[]() { return ClassDefaults(UGameplayEffect::StaticClass()); });
+			UGameplayEffect::StaticClass(), []() { return ClassDefaults(UGameplayEffect::StaticClass()); });
 		Context.AddObjectListSource(TEXT("gasAttributeSets"),
 			TEXT("the class defaults of every Attribute Set class (native and the project's Blueprints), at most 200"),
-			[]() { return ClassDefaults(UAttributeSet::StaticClass()); });
+			UAttributeSet::StaticClass(), []() { return ClassDefaults(UAttributeSet::StaticClass()); });
 		Context.AddApiClass(UUnrealAIGASRqlApi::StaticClass(), TEXT("GASOperations"));
 		Context.AddObjectSource(TEXT("gas"), TEXT("Gameplay Ability System operations: call GrantAbility(actor, abilityClass, level)"),
-			[]() -> UObject* { return GetMutableDefault<UUnrealAIGASRqlApi>(); });
+			UUnrealAIGASRqlApi::StaticClass(), []() -> UObject* { return GetMutableDefault<UUnrealAIGASRqlApi>(); });
 		Context.AddJsonMember(UAbilitySystemComponent::StaticClass(), TEXT("GrantedAbilities"),
 			TEXT("the abilities granted to this component: Ability (class), Level, Handle"),
 			[](UObject* Object) -> TSharedPtr<FJsonValue>

@@ -73,11 +73,11 @@ public:
 	{
 		using namespace UnrealAILandscapeRqlLocal;
 		Context.AddObjectListSource(TEXT("landscapes"), TEXT("the Landscape actors and streaming proxies of the editor world"),
-			[]() { return EditorActors<ALandscapeProxy>(); });
+			ALandscapeProxy::StaticClass(), []() { return EditorActors<ALandscapeProxy>(); });
 		Context.AddObjectListSource(TEXT("waterBodies"), TEXT("the Water body actors (river, lake, ocean, custom) of the editor world"),
-			[]() { return EditorActors<AWaterBody>(); });
+			AWaterBody::StaticClass(), []() { return EditorActors<AWaterBody>(); });
 		Context.AddObjectListSource(TEXT("waterZones"), TEXT("the Water zone actors of the editor world"),
-			[]() { return EditorActors<AWaterZone>(); });
+			AWaterZone::StaticClass(), []() { return EditorActors<AWaterZone>(); });
 
 		Context.AddJsonMember(ALandscapeProxy::StaticClass(), TEXT("Sections"),
 			TEXT("section layout: IsPrimary, ComponentCount, ComponentSizeQuads, SubsectionSizeQuads, NumSubsections"),

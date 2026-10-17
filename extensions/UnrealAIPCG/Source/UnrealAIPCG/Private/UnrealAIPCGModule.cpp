@@ -36,7 +36,7 @@ public:
 		Context.AddAssetSource(TEXT("pcgGraphs"), TEXT("PCG graph assets (PCGGraph) of the project, at most 200"), UPCGGraph::StaticClass());
 		Context.AddApiClass(UUnrealAIPCGRqlApi::StaticClass(), TEXT("PCGOperations"));
 		Context.AddObjectSource(TEXT("pcg"), TEXT("PCG operations: call AddComponent(actor, graph) / Generate(actor)"),
-			[]() -> UObject* { return GetMutableDefault<UUnrealAIPCGRqlApi>(); });
+			UUnrealAIPCGRqlApi::StaticClass(), []() -> UObject* { return GetMutableDefault<UUnrealAIPCGRqlApi>(); });
 		Context.AddJsonMember(UPCGGraph::StaticClass(), TEXT("Nodes"), TEXT("the graph's nodes: Name, Title"),
 			[](UObject* Object) -> TSharedPtr<FJsonValue>
 			{

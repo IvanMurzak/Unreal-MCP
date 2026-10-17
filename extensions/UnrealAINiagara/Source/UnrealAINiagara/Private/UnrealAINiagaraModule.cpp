@@ -35,7 +35,7 @@ public:
 			UNiagaraSystem::StaticClass());
 		Context.AddApiClass(UUnrealAINiagaraRqlApi::StaticClass(), TEXT("NiagaraOperations"));
 		Context.AddObjectSource(TEXT("niagara"), TEXT("Niagara operations: call SpawnSystem(system, location, label, autoActivate)"),
-			[]() -> UObject* { return GetMutableDefault<UUnrealAINiagaraRqlApi>(); });
+			UUnrealAINiagaraRqlApi::StaticClass(), []() -> UObject* { return GetMutableDefault<UUnrealAINiagaraRqlApi>(); });
 		Context.AddJsonMember(UNiagaraSystem::StaticClass(), TEXT("Emitters"), TEXT("the system's emitters: Name, Enabled"),
 			[](UObject* Object) -> TSharedPtr<FJsonValue>
 			{

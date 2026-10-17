@@ -39,7 +39,7 @@ public:
 		Context.AddApiClass(UUnrealAIEnhancedInputRqlApi::StaticClass(), TEXT("EnhancedInputOperations"));
 		Context.AddObjectSource(TEXT("enhancedInput"),
 			TEXT("Enhanced Input operations: call CreateAction(path, valueType) / CreateContext(path) / AddMapping(context, action, key) / RemoveMapping(context, action, key)"),
-			[]() -> UObject* { return GetMutableDefault<UUnrealAIEnhancedInputRqlApi>(); });
+			UUnrealAIEnhancedInputRqlApi::StaticClass(), []() -> UObject* { return GetMutableDefault<UUnrealAIEnhancedInputRqlApi>(); });
 		Context.AddJsonMember(UInputMappingContext::StaticClass(), TEXT("KeyMappings"), TEXT("the context's key mappings: Action, Key"),
 			[](UObject* Object) -> TSharedPtr<FJsonValue>
 			{
