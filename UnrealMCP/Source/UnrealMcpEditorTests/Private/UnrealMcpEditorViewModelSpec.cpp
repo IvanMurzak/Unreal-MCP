@@ -589,6 +589,26 @@ void FUnrealMcpEditorViewModelSpec::Define()
 			TestEqual("nothing pushed for the ignored authorized", Rec->PushCount, PushBefore);
 		});
 
+		It("keeps a sign-in that completes after a switch to Custom out of the connection token slot", [this]()
+		{
+			TSharedRef<FRecording> Rec = MakeShared<FRecording>();
+			TSharedRef<FUnrealMcpEditorViewModel> VM = MakeViewModel(Rec);
+
+			// Sign-in starts in Cloud, then the user switches to Custom before the browser flow completes.
+			VM->Authorize();
+			VM->SetConnectionMode(EUnrealMcpConnectionMode::Custom);
+			const int32 PushBefore = Rec->PushCount;
+
+			TSharedPtr<FJsonObject> Authorized = MakeShared<FJsonObject>();
+			Authorized->SetStringField(TEXT("state"), TEXT("authorized"));
+			Authorized->SetStringField(TEXT("token"), TEXT("account-token"));
+			VM->ApplyDeviceAuth(Authorized);
+
+			TestEqual("sign-in reported as authorized", static_cast<int32>(VM->GetDeviceAuthState()), static_cast<int32>(EUnrealMcpDeviceAuthState::Authorized));
+			TestFalse("account token not stored in the connection config", VM->HasCloudToken());
+			TestEqual("nothing pushed for the account token", Rec->PushCount, PushBefore);
+		});
+
 		It("CancelAuth keeps the Authorized indicator when a cloud token is already stored", [this]()
 		{
 			TSharedRef<FRecording> Rec = MakeShared<FRecording>();
