@@ -15,6 +15,12 @@ constexpr int32 UnrealMcpRqlMaxAssets = 200;
 /** Assets of @p Class (and subclasses) under @p Path ("/Game" when empty), sorted by path, loaded when read. */
 rql::Value UnrealMcpRqlAssetList(FUnrealMcpRqlTypes& Types, UClass* Class, const FString& Path);
 
+/**
+ * The class default objects of the subclasses of @p Base (loaded abstract classes left out; Blueprint classes that are not
+ * loaded yet load as the query reads them), sorted by class name, at most UnrealMcpRqlMaxAssets.
+ */
+rql::Value UnrealMcpRqlClassDefaultsList(FUnrealMcpRqlTypes& Types, UClass* Base);
+
 /** Text and list literals of the math structs: "(1, 2, 3)", "X=1 Y=2 Z=3", [1, 2, 3], "#ff8800" (colors). False (and no
  * error) for other structs and value kinds; false + @p OutError for a malformed literal. FUnrealMcpRqlTypes::CoerceStruct uses it. */
 bool UnrealMcpRqlParseMathStruct(UScriptStruct* Struct, const rql::Value& Value, void* Out, FString& OutError);

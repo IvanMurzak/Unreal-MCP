@@ -1,6 +1,6 @@
-# GAS Tools
+# GAS RQL module
 
-AI tools for Unreal's Gameplay Ability System (list abilities/effects/attribute sets, inspect an ability, grant an ability to an actor).
+RQL module for Unreal's Gameplay Ability System: query ability, effect and attribute-set classes and granted abilities, grant abilities to actors.
 
 An optional editor plugin in the [Unreal MCP monorepository](../../README.md), with its own module, version and release archive.
 

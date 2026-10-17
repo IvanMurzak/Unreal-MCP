@@ -14,7 +14,7 @@ editor's `rql-query` / `rql-mutate` / `rql-schema` tools instead of tools of its
 | UnrealAILandscape | Landscape / Water |
 | UnrealAIControlRig | Control Rig |
 
-RQL module inventories (`rql`) and version/dependency metadata live in each `extension.json`.
+Version and dependency metadata live in each `extension.json`; the RQL module itself (sources, operations, members) is listed by `rql-schema` and each README.
 See [the monorepo guide](../docs/EXTENSION-MONOREPO.md) for the shared test runner, independent
 release workflow, online index and migration compatibility. Original commits/licenses are preserved
 in `migration-sources.json` and each plugin's `LICENSE`.

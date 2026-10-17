@@ -5,10 +5,7 @@
 
 #include "CoreMinimal.h"
 #include "Misc/AutomationTest.h"
-#include "Features/IModularFeatures.h"
 #include "Dom/JsonObject.h"
-#include "Serialization/JsonReader.h"
-#include "Serialization/JsonSerializer.h"
 
 #include "IUnrealMcpRqlModule.h"
 #include "UnrealMcpRqlTools.h"
@@ -17,35 +14,11 @@
 //  UE Automation spec for the extension's RQL module (Unreal-MCP docs/rql.md "Extensions").
 //
 //  The spec discovers THIS extension's live module through IModularFeatures (the path Unreal-MCP uses) and runs RQL
-//  QueryPlans through the editor's RQL engine (UnrealMcpRqlTools::ExecutePlan). The C++ runtime has no text parser, so
+//  QueryPlans through the editor's RQL engine (UnrealMcpRqlTools::RunPlan). The C++ runtime has no text parser, so
 //  each plan is the one Rql.Parser produces for the query in the comment above it.
 //
 //  Run via:  Automation RunTests UnrealAINiagara
 // ============================================================================================
-
-namespace
-{
-	// Spec-unique helper names (the module is unity-built — keep file-local helpers uniquely named).
-	IUnrealMcpRqlModule* UnrealAINiagara_FindOwnModule()
-	{
-		for (IUnrealMcpRqlModule* Module : IModularFeatures::Get().GetModularFeatureImplementations<IUnrealMcpRqlModule>(
-			IUnrealMcpRqlModule::GetModularFeatureName()))
-		{
-			if (Module && Module->GetExtensionId() == TEXT("com.ivanmurzak.unreal-ai-niagara"))
-				return Module;
-		}
-		return nullptr;
-	}
-
-	TSharedPtr<FJsonObject> UnrealAINiagara_Run(const TCHAR* Plan, bool bMutate)
-	{
-		bool bOk = false;
-		const FString Json = UnrealMcpRqlTools::ExecutePlan(Plan, bMutate, false, bOk);
-		TSharedPtr<FJsonObject> Result;
-		FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(Json), Result);
-		return Result;
-	}
-}
 
 BEGIN_DEFINE_SPEC(FUnrealAINiagaraSpec, "UnrealAINiagara",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -57,7 +30,7 @@ void FUnrealAINiagaraSpec::Define()
 	{
 		It("registers this extension's RQL module as a modular feature", [this]()
 		{
-			IUnrealMcpRqlModule* Module = UnrealAINiagara_FindOwnModule();
+			IUnrealMcpRqlModule* Module = UnrealMcpRqlTools::FindModule(TEXT("com.ivanmurzak.unreal-ai-niagara"));
 			if (TestNotNull(TEXT("RQL module is registered"), Module))
 			{
 				TestEqual(TEXT("module name"), Module->GetRqlModuleName(), FString(TEXT("Niagara")));
@@ -79,8 +52,9 @@ void FUnrealAINiagaraSpec::Define()
 		It("answers a query (count of the project's Niagara systems)", [this]()
 		{
 			// niagaraSystems | count
-			const TSharedPtr<FJsonObject> Result = UnrealAINiagara_Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["niagaraSystems"]},"stages":[{"op":"count"}]})RQL"), false);
-			TestTrue(TEXT("query ok"), Result.IsValid() && Result->GetBoolField(TEXT("ok")));
+			TSharedPtr<FJsonObject> Result;
+			const bool bResultOk = UnrealMcpRqlTools::RunPlan(TEXT(R"RQL({"rql":"0.1","source":{"path":["niagaraSystems"]},"stages":[{"op":"count"}]})RQL"), false, &Result);
+			TestTrue(TEXT("query ok"), bResultOk);
 			TestTrue(TEXT("a count"), Result.IsValid() && Result->HasField(TEXT("value")));
 		});
 
@@ -98,9 +72,10 @@ void FUnrealAINiagaraSpec::Define()
 		It("fails defensively on a missing system and places nothing", [this]()
 		{
 			// niagara | call SpawnSystem("/Game/RqlSpecNoSuchSystem", "(0, 0, 0)", "RqlSpecFx")
-			const TSharedPtr<FJsonObject> Result = UnrealAINiagara_Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["niagara"]},"stages":[{"op":"call","method":"SpawnSystem","args":[{"lit":"/Game/RqlSpecNoSuchSystem"},{"lit":"(0, 0, 0)"},{"lit":"RqlSpecFx"}]}]})RQL"), true);
+			TSharedPtr<FJsonObject> Result;
+			const bool bResultOk = UnrealMcpRqlTools::RunPlan(TEXT(R"RQL({"rql":"0.1","source":{"path":["niagara"]},"stages":[{"op":"call","method":"SpawnSystem","args":[{"lit":"/Game/RqlSpecNoSuchSystem"},{"lit":"(0, 0, 0)"},{"lit":"RqlSpecFx"}]}]})RQL"), true, &Result);
 			TestTrue(TEXT("a well-formed result"), Result.IsValid());
-			TestFalse(TEXT("reported as a failure"), Result.IsValid() && Result->GetBoolField(TEXT("ok")));
+			TestFalse(TEXT("reported as a failure"), bResultOk);
 		});
 
 		It("is listed as an operation of the niagara source", [this]()

@@ -2,7 +2,6 @@
 // See the LICENSE file in the repository root for more information.
 
 #include "Modules/ModuleManager.h"
-#include "Features/IModularFeatures.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
 
@@ -15,29 +14,13 @@
 #include "Rigs/RigHierarchyDefines.h"            // FRigElementKey / ERigElementType / ERigControlType
 #include "Rigs/RigHierarchyElements.h"           // FRigBaseElement / FRigControlElement / FRigControlSettings
 
-DEFINE_LOG_CATEGORY_STATIC(LogUnrealAIControlRig, Log, All);
-
 namespace UnrealAIControlRigRqlLocal
 {
-	FString ElementTypeName(ERigElementType Type)
+	template <typename TEnum>
+	FString EnumName(TEnum Value)
 	{
-		switch (Type)
-		{
-			case ERigElementType::Bone:      return TEXT("Bone");
-			case ERigElementType::Null:      return TEXT("Null");
-			case ERigElementType::Control:   return TEXT("Control");
-			case ERigElementType::Curve:     return TEXT("Curve");
-			case ERigElementType::Reference: return TEXT("Reference");
-			case ERigElementType::Connector: return TEXT("Connector");
-			case ERigElementType::Socket:    return TEXT("Socket");
-			default:                         return TEXT("Unknown");
-		}
-	}
-
-	FString ControlTypeName(ERigControlType Type)
-	{
-		const UEnum* Enum = StaticEnum<ERigControlType>();
-		return Enum ? Enum->GetNameStringByValue(static_cast<int64>(Type)) : FString(TEXT("Unknown"));
+		const UEnum* Enum = StaticEnum<TEnum>();
+		return Enum ? Enum->GetNameStringByValue(static_cast<int64>(Value)) : FString(TEXT("Unknown"));
 	}
 
 	URigHierarchy* HierarchyOf(UObject* Object)
@@ -53,14 +36,14 @@ namespace UnrealAIControlRigRqlLocal
  * `controlRigs` asset source, a rig blueprint's element hierarchy (controls, bones, element counts — not reflected
  * properties), a component's bound rig, and the agent guide rendered into the unreal-rql skill.
  *
- * Keep GetExtensionVersion() in sync with the .uplugin VersionName (scripts/extension_release.py bump updates both).
+ * The version is the .uplugin VersionName.
  */
 class FUnrealAIControlRigRqlModule : public IUnrealMcpRqlModule
 {
 public:
 	virtual FString GetRqlModuleName() const override { return TEXT("ControlRig"); }
 	virtual FString GetExtensionId() const override { return TEXT("com.ivanmurzak.unreal-ai-control-rig"); }
-	virtual FString GetExtensionVersion() const override { return TEXT("0.1.3"); }
+	virtual FString GetExtensionVersion() const override { return UnrealMcpRql::PluginVersion(TEXT("UnrealAIControlRig")); }
 
 	virtual void ConfigureRql(FUnrealMcpRqlModuleContext& Context) override
 	{
@@ -92,7 +75,7 @@ public:
 					{
 						TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
 						Entry->SetStringField(TEXT("Name"), Key.Name.ToString());
-						Entry->SetStringField(TEXT("Type"), ElementTypeName(Key.Type));
+						Entry->SetStringField(TEXT("Type"), EnumName(Key.Type));
 						Elements.Add(MakeShared<FJsonValueObject>(Entry));
 					}
 				}
@@ -105,12 +88,11 @@ public:
 				TArray<TSharedPtr<FJsonValue>> Controls;
 				if (URigHierarchy* Hierarchy = HierarchyOf(Object))
 				{
-					for (const FRigElementKey& Key : Hierarchy->GetControlKeys(/*bTraverse=*/true))
+					for (const FRigControlElement* Control : Hierarchy->GetControls())
 					{
 						TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
-						Entry->SetStringField(TEXT("Name"), Key.Name.ToString());
-						const FRigControlElement* Control = Hierarchy->Find<FRigControlElement>(Key);
-						Entry->SetStringField(TEXT("ControlType"), Control ? ControlTypeName(Control->Settings.ControlType) : FString());
+						Entry->SetStringField(TEXT("Name"), Control->GetName());
+						Entry->SetStringField(TEXT("ControlType"), EnumName(Control->Settings.ControlType));
 						Controls.Add(MakeShared<FJsonValueObject>(Entry));
 					}
 				}
@@ -123,29 +105,29 @@ public:
 				TArray<TSharedPtr<FJsonValue>> Bones;
 				if (URigHierarchy* Hierarchy = HierarchyOf(Object))
 				{
-					for (const FRigElementKey& Key : Hierarchy->GetBoneKeys(/*bTraverse=*/true))
+					for (const FRigBoneElement* Bone : Hierarchy->GetBones())
 					{
-						const FRigElementKey Parent = Hierarchy->GetFirstParent(Key);
+						const FRigElementKey Parent = Hierarchy->GetFirstParent(Bone->GetKey());
 						TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
-						Entry->SetStringField(TEXT("Name"), Key.Name.ToString());
+						Entry->SetStringField(TEXT("Name"), Bone->GetName());
 						Entry->SetStringField(TEXT("Parent"), Parent.IsValid() ? Parent.Name.ToString() : FString());
 						Bones.Add(MakeShared<FJsonValueObject>(Entry));
 					}
 				}
 				return MakeShared<FJsonValueArray>(Bones);
 			});
-		Context.AddJsonMember(UControlRigComponent::StaticClass(), TEXT("BoundRig"),
-			TEXT("the class of the Control Rig the component runs (null when none is instanced)"),
-			[](UObject* Object) -> TSharedPtr<FJsonValue>
+		// The rig the component already runs, read from its reflected (transient) property: GetControlRig() would
+		// instantiate one during a read.
+		Context.AddObjectMember(UControlRigComponent::StaticClass(), TEXT("BoundRig"),
+			TEXT("the Control Rig the component runs (null when none is instanced)"), UControlRig::StaticClass(),
+			[](UObject* Object) -> UObject*
 			{
-				UControlRigComponent* Component = Cast<UControlRigComponent>(Object);
-				UControlRig* Rig = Component ? Component->GetControlRig() : nullptr;
-				return Rig ? StaticCastSharedRef<FJsonValue>(MakeShared<FJsonValueString>(Rig->GetClass()->GetName()))
-					: StaticCastSharedRef<FJsonValue>(MakeShared<FJsonValueNull>());
+				static const FObjectPropertyBase* Property = FindFProperty<FObjectPropertyBase>(UControlRigComponent::StaticClass(), TEXT("ControlRig"));
+				return Property && Object ? Property->GetObjectPropertyValue_InContainer(Object) : nullptr;
 			});
 		Context.AddGuide(TEXT("Control Rig"), TEXT(R"MD(Control Rig blueprints are assets: `controlRigs`. Their element hierarchy (bones, nulls, controls, curves) is in
 `Elements` (counts), `Hierarchy`, `Controls` and `Bones`; Control Rig components are components:
-`actors | get Components | where $ is ControlRigComponent` (`BoundRig` is the class of the running rig).
+`actors | get Components | where $ is ControlRigComponent` (`BoundRig` is the running rig instance).
 
 ```
 controlRigs | select $ref Name Elements
@@ -158,28 +140,4 @@ The hierarchy is read-only through RQL; author rigs in the Control Rig editor.)M
 	}
 };
 
-/** Editor module that owns the RQL module and registers it as a modular feature, so Unreal-MCP discovers it. */
-class FUnrealAIControlRigModule : public IModuleInterface
-{
-public:
-	virtual void StartupModule() override
-	{
-		RqlModule = MakeUnique<FUnrealAIControlRigRqlModule>();
-		IModularFeatures::Get().RegisterModularFeature(IUnrealMcpRqlModule::GetModularFeatureName(), RqlModule.Get());
-		UE_LOG(LogUnrealAIControlRig, Log, TEXT("[UnrealAIControlRig] registered RQL module '%s'."), *RqlModule->GetRqlModuleName());
-	}
-
-	virtual void ShutdownModule() override
-	{
-		if (RqlModule.IsValid())
-		{
-			IModularFeatures::Get().UnregisterModularFeature(IUnrealMcpRqlModule::GetModularFeatureName(), RqlModule.Get());
-			RqlModule.Reset();
-		}
-	}
-
-private:
-	TUniquePtr<FUnrealAIControlRigRqlModule> RqlModule;
-};
-
-IMPLEMENT_MODULE(FUnrealAIControlRigModule, UnrealAIControlRig)
+IMPLEMENT_MODULE(TUnrealMcpRqlEditorModule<FUnrealAIControlRigRqlModule>, UnrealAIControlRig)

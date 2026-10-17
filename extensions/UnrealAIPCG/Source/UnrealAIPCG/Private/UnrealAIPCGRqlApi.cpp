@@ -11,33 +11,20 @@
 
 UPCGComponent* UUnrealAIPCGRqlApi::AddComponent(AActor* Actor, UPCGGraph* Graph)
 {
-	if (!Actor)
-	{
-		UnrealMcpRql::Fail(TEXT("no actor (a label, name or ref)"));
-		return nullptr;
-	}
-	Actor->Modify();
-	UPCGComponent* Component = NewObject<UPCGComponent>(Actor, UPCGComponent::StaticClass(), NAME_None, RF_Transactional);
-	if (!Component)
-	{
-		UnrealMcpRql::Fail(FString::Printf(TEXT("could not add a PCG component to %s"), *Actor->GetActorNameOrLabel()));
-		return nullptr;
-	}
-	Actor->AddInstanceComponent(Component);
-	Component->RegisterComponent();
-	if (Graph)
-		Component->SetGraph(Graph);
-	return Component;
+	// The core AddComponent (instance component, transactional); the graph is bound before the component registers.
+	return Cast<UPCGComponent>(UnrealMcpRql::AddComponent(Actor, UPCGComponent::StaticClass(), FString(),
+		[Graph](UActorComponent* Component)
+		{
+			if (Graph)
+				CastChecked<UPCGComponent>(Component)->SetGraph(Graph);
+		}));
 }
 
 bool UUnrealAIPCGRqlApi::Generate(AActor* Actor)
 {
-	UPCGComponent* Component = Actor ? Actor->FindComponentByClass<UPCGComponent>() : nullptr;
+	UPCGComponent* Component = Actor->FindComponentByClass<UPCGComponent>();
 	if (!Component)
-	{
-		UnrealMcpRql::Fail(Actor ? FString::Printf(TEXT("%s has no PCG component"), *Actor->GetActorNameOrLabel()) : FString(TEXT("no actor")));
-		return false;
-	}
+		return UnrealMcpRql::Failed<bool>(FString::Printf(TEXT("%s has no PCG component"), *Actor->GetActorNameOrLabel()));
 	Component->Generate();
 	return true;
 }

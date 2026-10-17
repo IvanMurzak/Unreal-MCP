@@ -29,7 +29,7 @@ Every reflected type is queryable without a module: UClass / UScriptStruct / UEn
 (EditAnywhere / VisibleAnywhere / BlueprintVisible), so `actors | get Components | where $ is NiagaraComponent | set
 Asset = "/Game/VFX/NS_Fire"` works as soon as the engine plugin is loaded. A module adds what reflection does not show.
 Implement [`IUnrealMcpRqlModule`](../UnrealMCP/Source/UnrealMcpRql/Public/IUnrealMcpRqlModule.h) (module `UnrealMcpRql`)
-and register it as a modular feature:
+and let `TUnrealMcpRqlEditorModule` register it as a modular feature for the editor module's lifetime:
 
 ```cpp
 #include "IUnrealMcpRqlModule.h"
@@ -39,40 +39,48 @@ class FMyRqlModule : public IUnrealMcpRqlModule
 public:
     virtual FString GetRqlModuleName() const override { return TEXT("Niagara"); }
     virtual FString GetExtensionId() const override { return TEXT("com.example.niagara-ai"); }
-    virtual FString GetExtensionVersion() const override { return TEXT("1.0.0"); }
+    virtual FString GetExtensionVersion() const override { return UnrealMcpRql::PluginVersion(TEXT("MyNiagaraAI")); }
     virtual void ConfigureRql(FUnrealMcpRqlModuleContext& Context) override
     {
         Context.AddAssetSource(TEXT("niagaraSystems"), TEXT("Niagara system assets"), UNiagaraSystem::StaticClass());
-        Context.AddApiClass(UMyNiagaraOperations::StaticClass(), TEXT("NiagaraOperations"));   // every UFUNCTION -> `call`
-        Context.AddObjectSource(TEXT("niagara"), TEXT("Niagara operations"), UMyNiagaraOperations::StaticClass(),
-            []() -> UObject* { return GetMutableDefault<UMyNiagaraOperations>(); });
+        Context.AddApiSource(TEXT("niagara"), TEXT("Niagara operations"), UMyNiagaraOperations::StaticClass(),
+            TEXT("NiagaraOperations"));                                   // every UFUNCTION -> `call`
         Context.AddJsonMember(UNiagaraSystem::StaticClass(), TEXT("Emitters"), TEXT("emitters"), /* UObject* -> JSON */ ...);
         Context.AddGuide(TEXT("Niagara"), TEXT("... markdown with example queries ..."));
     }
 };
 
-// StartupModule:  IModularFeatures::Get().RegisterModularFeature(IUnrealMcpRqlModule::GetModularFeatureName(), Module);
-// ShutdownModule: IModularFeatures::Get().UnregisterModularFeature(IUnrealMcpRqlModule::GetModularFeatureName(), Module);
+IMPLEMENT_MODULE(TUnrealMcpRqlEditorModule<FMyRqlModule>, MyNiagaraAI)
 ```
 
 | Context call | Adds |
 | --- | --- |
 | `AddObjectSource` / `AddObjectListSource` / `AddAssetSource` | a source (where a query starts): one object, a list, or the project's assets of a class (at most 200, loaded lazily); the class argument types it in `rql-schema` |
+| `AddClassDefaultsSource(Name, Description, BaseClass)` | the class default objects of a base's subclasses (native and the project's Blueprints, at most 200; unloaded Blueprint classes load as the query reads them) |
 | `AddApiClass(Class, TypeName)` | every UFUNCTION of the class becomes callable with `call` (parameters and results convert like members) |
+| `AddApiSource(Name, Description, Class, TypeName)` | `AddApiClass` plus a source holding the class default object (`niagara \| call SpawnSystem(...)`) |
 | `ExposeProperties(Owner, Names, bWritable)` | properties reflection hides (not EditAnywhere / BlueprintVisible) as members |
-| `AddJsonMember` / `AddObjectListMember` | read-only computed members (JSON values, owning object lists) |
+| `AddJsonMember` / `AddObjectMember` / `AddObjectListMember` | read-only computed members (JSON values, one object reference, owning object lists) |
 | `AddGuide(Topic, Markdown)` | a section of the `unreal-rql` skill |
 
 Operations classes: declare the functions `UFUNCTION(BlueprintCallable, meta = (BlueprintInternalUseOnly = "true"))`
 (UHT records C++ default arguments for BlueprintCallable functions only; the meta keeps them out of Blueprint menus),
-put the agent-facing description in the doc comment above each, and report failures with `UnrealMcpRql::Fail(...)`
-(UFUNCTIONs cannot throw) after validating, before changing anything. A mutation runs in one editor transaction, so
-create objects with `RF_Transactional` and `Modify()` what you change. `UnrealMcpRql::ResolveClass` / `LoadObject`
-resolve class names and asset paths. Object parameters accept asset paths, class names and actor labels as text.
+put the agent-facing description in the doc comment above each, and report failures with
+`return UnrealMcpRql::Failed<T>(TEXT("..."));` (UFUNCTIONs cannot throw) after validating, before changing anything.
+Object and class parameters are required (RQL refuses null for them) unless the C++ default is `nullptr`, so the
+functions need no null guards for them. A mutation runs in one editor transaction, so create objects with
+`RF_Transactional` and `Modify()` what you change. Object parameters accept asset paths, class names and actor labels as
+text.
+
+Core helpers in `UnrealMcpRql` (they report failures with `Fail` and return null): `ResolveClass` / `LoadObject`
+(class names, asset paths), `EditorWorld()`, `SpawnActor(Class, Location, Rotation, Label, Parent)`,
+`AddComponent(Actor, Class, Name, Configure)` (the actor `AddComponent` method; `Configure` runs before the component
+registers), `CreateAsset(Class, Path)` (the `editor | call CreateAsset` rules and factory), `PluginVersion(PluginName)`.
 
 The editor's Extensions window lists the module's extension (`GetExtensionId`) and can disable it; the rql-* tools
-(and their skill) are re-registered when a module registers, unregisters or is toggled. Specs run
-plans through `UnrealMcpRqlTools::ExecutePlan` (see any extension's `Private/Tests/*Spec.cpp`).
+(and their skill) are re-registered when a module registers, unregisters or is toggled. Specs use
+`UnrealMcpRqlTools::FindModule(ExtensionId)` and `UnrealMcpRqlTools::RunPlan(Plan, bMutate, &Result)` (see any
+extension's `Private/Tests/*Spec.cpp`).
 
 ---
 

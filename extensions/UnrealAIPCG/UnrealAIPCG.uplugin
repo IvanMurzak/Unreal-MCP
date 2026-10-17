@@ -3,7 +3,7 @@
   "Version": 2,
   "VersionName": "0.1.1",
   "FriendlyName": "Unreal AI PCG",
-  "Description": "An AI Game Developer (Unreal-MCP) extension. Implements IUnrealMcpToolProvider and contributes MCP tools that an AI agent can call against the Unreal Editor.",
+  "Description": "RQL module for Unreal's Procedural Content Generation (PCG) framework: query graphs and PCG components, add components and run generation. An AI Game Developer (Unreal-MCP) extension: an IUnrealMcpRqlModule that agents use through rql-query / rql-mutate / rql-schema.",
   "Category": "AI",
   "CreatedBy": "IvanMurzak/Unreal-AI-PCG",
   "CreatedByURL": "https://github.com/IvanMurzak/Unreal-AI-PCG",

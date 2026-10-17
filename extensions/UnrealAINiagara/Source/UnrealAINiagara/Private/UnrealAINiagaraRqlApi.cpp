@@ -5,7 +5,6 @@
 
 #include "IUnrealMcpRqlModule.h"
 
-#include "Editor.h"
 #include "Engine/World.h"
 #include "NiagaraActor.h"
 #include "NiagaraComponent.h"
@@ -13,31 +12,17 @@
 
 AActor* UUnrealAINiagaraRqlApi::SpawnSystem(UNiagaraSystem* System, FVector Location, const FString& Label, bool bAutoActivate)
 {
-	if (!System)
-	{
-		UnrealMcpRql::Fail(TEXT("no Niagara system (pass niagaraSystems | ... or its path \"/Game/VFX/NS_Fire\")"));
+	// The core spawn (current level, transactional, labelled): Ctrl+Z removes it with the rest of the mutation.
+	AActor* Actor = UnrealMcpRql::SpawnActor(ANiagaraActor::StaticClass(), Location, FRotator::ZeroRotator, Label);
+	if (!Actor)
 		return nullptr;
-	}
-	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
-	if (!World)
-	{
-		UnrealMcpRql::Fail(TEXT("no editor world"));
-		return nullptr;
-	}
-	FActorSpawnParameters Params;
-	Params.ObjectFlags |= RF_Transactional; // recorded by the RQL mutation's transaction: Ctrl+Z removes it
-	ANiagaraActor* Actor = World->SpawnActor<ANiagaraActor>(ANiagaraActor::StaticClass(), Location, FRotator::ZeroRotator, Params);
-	UNiagaraComponent* Component = Actor ? Actor->FindComponentByClass<UNiagaraComponent>() : nullptr;
+	UNiagaraComponent* Component = Actor->FindComponentByClass<UNiagaraComponent>();
 	if (!Component)
 	{
-		if (Actor)
-			World->EditorDestroyActor(Actor, /*bShouldModifyLevel*/ true);
-		UnrealMcpRql::Fail(FString::Printf(TEXT("could not place %s"), *System->GetName()));
-		return nullptr;
+		Actor->GetWorld()->EditorDestroyActor(Actor, /*bShouldModifyLevel*/ true);
+		return UnrealMcpRql::Failed<AActor*>(FString::Printf(TEXT("could not place %s"), *System->GetName()));
 	}
 	Component->SetAutoActivate(bAutoActivate);
 	Component->SetAsset(System);
-	if (!Label.IsEmpty())
-		FActorLabelUtilities::SetActorLabelUnique(Actor, Label);
 	return Actor;
 }

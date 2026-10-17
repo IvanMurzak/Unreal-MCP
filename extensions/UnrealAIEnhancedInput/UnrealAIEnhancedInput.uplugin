@@ -3,7 +3,7 @@
   "Version": 2,
   "VersionName": "0.1.1",
   "FriendlyName": "Unreal AI EnhancedInput",
-  "Description": "An AI Game Developer (Unreal-MCP) extension. Implements IUnrealMcpToolProvider and contributes MCP tools that an AI agent can call against the Unreal Editor.",
+  "Description": "RQL module for Unreal's Enhanced Input system: query Input Actions and Mapping Contexts with their key mappings, create actions and contexts, map keys. An AI Game Developer (Unreal-MCP) extension: an IUnrealMcpRqlModule that agents use through rql-query / rql-mutate / rql-schema.",
   "Category": "AI",
   "CreatedBy": "IvanMurzak/Unreal-AI-EnhancedInput",
   "CreatedByURL": "https://github.com/IvanMurzak/Unreal-AI-EnhancedInput",

@@ -1,6 +1,6 @@
-# PCG Tools
+# PCG RQL module
 
-AI tools for Unreal's Procedural Content Generation (PCG) framework (list/inspect graphs, add & inspect PCG components, trigger generation).
+RQL module for Unreal's Procedural Content Generation (PCG) framework: query graphs and PCG components, add components and run generation.
 
 An optional editor plugin in the [Unreal MCP monorepository](../../README.md), with its own module, version and release archive.
 
@@ -33,7 +33,7 @@ The extension adds its feature to the editor's RQL data layer (`rql-query` / `rq
 | --- | --- |
 | Sources | `pcgGraphs`, `pcg` |
 | Operations (`call`) | `AddComponent`, `Generate` |
-| Members | `PCGGraph.Nodes`, `PCGComponent.Generation` |
+| Members | `PCGGraph.Nodes`, `PCGComponent.BoundGraph`, `PCGComponent.IsGenerating` |
 
 ```
 pcgGraphs | select Name Nodes

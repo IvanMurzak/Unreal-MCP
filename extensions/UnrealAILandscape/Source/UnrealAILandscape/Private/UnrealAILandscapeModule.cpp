@@ -2,13 +2,11 @@
 // See the LICENSE file in the repository root for more information.
 
 #include "Modules/ModuleManager.h"
-#include "Features/IModularFeatures.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
 
 #include "IUnrealMcpRqlModule.h"
 
-#include "Editor.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"               // TActorIterator
 #include "Landscape.h"                 // ALandscape (the primary landscape actor)
@@ -21,8 +19,6 @@
 #include "WaterSplineComponent.h"      // UWaterSplineComponent (a USplineComponent)
 #include "WaterZoneActor.h"            // AWaterZone
 
-DEFINE_LOG_CATEGORY_STATIC(LogUnrealAILandscape, Log, All);
-
 namespace UnrealAILandscapeRqlLocal
 {
 	/** Every actor of class T in the editor world (the persistent level and loaded sublevels). */
@@ -30,7 +26,7 @@ namespace UnrealAILandscapeRqlLocal
 	TArray<UObject*> EditorActors()
 	{
 		TArray<UObject*> Out;
-		UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+		UWorld* World = UnrealMcpRql::EditorWorld();
 		if (!World)
 			return Out;
 		for (TActorIterator<T> It(World); It; ++It)
@@ -60,14 +56,14 @@ namespace UnrealAILandscapeRqlLocal
  * the module adds world sources for them, the landscape section layout and paint layers and the water-body summary (not
  * reflected properties), and the agent guide rendered into the unreal-rql skill.
  *
- * Keep GetExtensionVersion() in sync with the .uplugin VersionName (scripts/extension_release.py bump updates both).
+ * The version is the .uplugin VersionName.
  */
 class FUnrealAILandscapeRqlModule : public IUnrealMcpRqlModule
 {
 public:
 	virtual FString GetRqlModuleName() const override { return TEXT("Landscape"); }
 	virtual FString GetExtensionId() const override { return TEXT("com.ivanmurzak.unreal-ai-landscape"); }
-	virtual FString GetExtensionVersion() const override { return TEXT("0.1.1"); }
+	virtual FString GetExtensionVersion() const override { return UnrealMcpRql::PluginVersion(TEXT("UnrealAILandscape")); }
 
 	virtual void ConfigureRql(FUnrealMcpRqlModuleContext& Context) override
 	{
@@ -79,6 +75,15 @@ public:
 		Context.AddObjectListSource(TEXT("waterZones"), TEXT("the Water zone actors of the editor world"),
 			AWaterZone::StaticClass(), []() { return EditorActors<AWaterZone>(); });
 
+		// The fields queries filter on are scalar members; `Sections` keeps the layout together for select output.
+		Context.AddJsonMember(ALandscapeProxy::StaticClass(), TEXT("IsPrimary"), TEXT("true for the landscape actor, false for a streaming proxy"),
+			[](UObject* Object) -> TSharedPtr<FJsonValue> { return MakeShared<FJsonValueBoolean>(Cast<ALandscape>(Object) != nullptr); });
+		Context.AddJsonMember(ALandscapeProxy::StaticClass(), TEXT("ComponentCount"), TEXT("how many landscape components the actor has"),
+			[](UObject* Object) -> TSharedPtr<FJsonValue>
+			{
+				const ALandscapeProxy* Proxy = Cast<ALandscapeProxy>(Object);
+				return MakeShared<FJsonValueNumber>(Proxy ? Proxy->LandscapeComponents.Num() : 0);
+			});
 		Context.AddJsonMember(ALandscapeProxy::StaticClass(), TEXT("Sections"),
 			TEXT("section layout: IsPrimary, ComponentCount, ComponentSizeQuads, SubsectionSizeQuads, NumSubsections"),
 			[](UObject* Object) -> TSharedPtr<FJsonValue>
@@ -106,8 +111,15 @@ public:
 				}
 				return MakeShared<FJsonValueArray>(Layers);
 			});
+		Context.AddJsonMember(AWaterBody::StaticClass(), TEXT("WaterType"), TEXT("the water body type: River, Lake, Ocean or Custom"),
+			[](UObject* Object) -> TSharedPtr<FJsonValue>
+			{
+				const AWaterBody* Body = Cast<AWaterBody>(Object);
+				const UWaterBodyComponent* Component = Body ? Body->GetWaterBodyComponent() : nullptr;
+				return MakeShared<FJsonValueString>(Component ? WaterBodyTypeName(Component->GetWaterBodyType()) : TEXT("Unknown"));
+			});
 		Context.AddJsonMember(AWaterBody::StaticClass(), TEXT("Water"),
-			TEXT("water body summary: Type, SplinePoints, Material, Zone"),
+			TEXT("water body summary: Type, SplinePoints"),
 			[](UObject* Object) -> TSharedPtr<FJsonValue>
 			{
 				TSharedPtr<FJsonObject> Out = MakeShared<FJsonObject>();
@@ -115,53 +127,40 @@ public:
 				if (UWaterBodyComponent* Component = Body ? Body->GetWaterBodyComponent() : nullptr)
 				{
 					const UWaterSplineComponent* Spline = Component->GetWaterSpline();
-					const UMaterialInterface* Material = Component->GetWaterMaterial();
-					const AWaterZone* Zone = Component->GetWaterZone();
 					Out->SetStringField(TEXT("Type"), WaterBodyTypeName(Component->GetWaterBodyType()));
 					Out->SetNumberField(TEXT("SplinePoints"), Spline ? Spline->GetNumberOfSplinePoints() : 0);
-					Out->SetStringField(TEXT("Material"), Material ? Material->GetPathName() : FString());
-					Out->SetStringField(TEXT("Zone"), Zone ? Zone->GetActorNameOrLabel() : FString());
 				}
 				return MakeShared<FJsonValueObject>(Out);
+			});
+		Context.AddObjectMember(AWaterBody::StaticClass(), TEXT("WaterMaterial"), TEXT("the water body's water material"),
+			UMaterialInterface::StaticClass(), [](UObject* Object) -> UObject*
+			{
+				const AWaterBody* Body = Cast<AWaterBody>(Object);
+				const UWaterBodyComponent* Component = Body ? Body->GetWaterBodyComponent() : nullptr;
+				return Component ? Component->GetWaterMaterial() : nullptr;
+			});
+		Context.AddObjectMember(AWaterBody::StaticClass(), TEXT("WaterZone"), TEXT("the water zone that renders the body"),
+			AWaterZone::StaticClass(), [](UObject* Object) -> UObject*
+			{
+				const AWaterBody* Body = Cast<AWaterBody>(Object);
+				const UWaterBodyComponent* Component = Body ? Body->GetWaterBodyComponent() : nullptr;
+				return Component ? Component->GetWaterZone() : nullptr;
 			});
 
 		Context.AddGuide(TEXT("Landscape and Water"), TEXT(R"MD(Landscapes, water bodies and water zones are actors of the editor world: `landscapes`, `waterBodies`, `waterZones`
 (the same actors as `actors | where $ is LandscapeProxy`). Their reflected properties are members (LandscapeMaterial,
-the water body's components, the zone's ZoneExtent, ...); `Sections`, `PaintLayers` and `Water` summarise what is not.
+the water body's components, the zone's ZoneExtent, ...); `IsPrimary`, `ComponentCount`, `PaintLayers`, `WaterType`,
+`WaterMaterial` and `WaterZone` add what is not, `Sections` and `Water` summarise it.
 
 ```
 landscapes | select $ref Label Sections PaintLayers LandscapeMaterial
-waterBodies | select Label Water Location
+waterBodies | where WaterType == "River" | select Label Water WaterZone Location
 waterZones | select Label Location ZoneExtent
-landscapes | where Sections.IsPrimary | set LandscapeMaterial = "/Game/Materials/M_Terrain"
+landscapes | where IsPrimary | set LandscapeMaterial = "/Game/Materials/M_Terrain"
 ```
 
 Sculpting and painting are not RQL operations; edit landscape heights and layers in Landscape mode.)MD"));
 	}
 };
 
-/** Editor module that owns the RQL module and registers it as a modular feature, so Unreal-MCP discovers it. */
-class FUnrealAILandscapeModule : public IModuleInterface
-{
-public:
-	virtual void StartupModule() override
-	{
-		RqlModule = MakeUnique<FUnrealAILandscapeRqlModule>();
-		IModularFeatures::Get().RegisterModularFeature(IUnrealMcpRqlModule::GetModularFeatureName(), RqlModule.Get());
-		UE_LOG(LogUnrealAILandscape, Log, TEXT("[UnrealAILandscape] registered RQL module '%s'."), *RqlModule->GetRqlModuleName());
-	}
-
-	virtual void ShutdownModule() override
-	{
-		if (RqlModule.IsValid())
-		{
-			IModularFeatures::Get().UnregisterModularFeature(IUnrealMcpRqlModule::GetModularFeatureName(), RqlModule.Get());
-			RqlModule.Reset();
-		}
-	}
-
-private:
-	TUniquePtr<FUnrealAILandscapeRqlModule> RqlModule;
-};
-
-IMPLEMENT_MODULE(FUnrealAILandscapeModule, UnrealAILandscape)
+IMPLEMENT_MODULE(TUnrealMcpRqlEditorModule<FUnrealAILandscapeRqlModule>, UnrealAILandscape)

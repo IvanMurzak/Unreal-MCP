@@ -1,6 +1,6 @@
-# EnhancedInput Tools
+# EnhancedInput RQL module
 
-AI tools for Unreal's Enhanced Input system (list/inspect Input Actions & Mapping Contexts, create actions/contexts, add key mappings).
+RQL module for Unreal's Enhanced Input system: query Input Actions and Mapping Contexts with their key mappings, create actions and contexts, map keys.
 
 An optional editor plugin in the [Unreal MCP monorepository](../../README.md), with its own module, version and release archive.
 

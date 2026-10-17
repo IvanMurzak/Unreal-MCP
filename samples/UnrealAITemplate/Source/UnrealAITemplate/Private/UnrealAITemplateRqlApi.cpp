@@ -14,12 +14,10 @@ FString UUnrealAITemplateRqlApi::Greet(const FString& Name)
 
 bool UUnrealAITemplateRqlApi::Relabel(AActor* Actor, const FString& Label)
 {
-	// Validate before changing anything: a failing call reports, and the RQL mutation changes nothing more.
-	if (!Actor || Label.TrimStartAndEnd().IsEmpty())
-	{
-		UnrealMcpRql::Fail(TEXT("an actor and a non-empty label are required"));
-		return false;
-	}
+	// Object parameters are required (the call is refused for null); validate the rest before changing anything: a failing
+	// call reports, and the RQL mutation changes nothing more.
+	if (Label.TrimStartAndEnd().IsEmpty())
+		return UnrealMcpRql::Failed<bool>(TEXT("a non-empty label is required"));
 	Actor->Modify();
 	Actor->SetActorLabel(Label);
 	return true;

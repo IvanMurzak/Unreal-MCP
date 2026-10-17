@@ -18,23 +18,16 @@ public class UnrealAINiagara : ModuleRules
 		{
 			"CoreUObject",
 			"Engine",
-			"Projects",
-			// FJsonValue for the module's JSON member (Emitters).
+			// FJsonValue: the Emitters member.
 			"Json",
-
-			// --- Unreal-MCP contract (REQUIRED) ---------------------------------------------------
-			// IUnrealMcpRqlModule.h (the RQL module seam: sources, operations, members, guides) and
-			// UnrealMcpRqlTools.h (the specs run plans) live in the Unreal-MCP plugin's UnrealMcpRql module. The
-			// matching `UnrealMCP` plugin dependency is declared in the .uplugin's "Plugins" array.
+			// The RQL module seam: IUnrealMcpRqlModule.h (sources, operations, members, guides, the editor-module template)
+			// and UnrealMcpRqlTools.h (the specs run plans) live in the Unreal-MCP plugin's UnrealMcpRql module; the
+			// matching `UnrealMCP` plugin dependency is in the .uplugin "Plugins" array.
 			"UnrealMcpRql",
 
-			// --- The feature's engine module (THE GATING) -----------------------------------------
-			// The extension won't compile or load without the engine plugin it targets.
+			// The gating engine plugin's runtime module (its { "Name": "Niagara" } entry is in the .uplugin "Plugins"
+			// array): UNiagaraSystem for the niagaraSystems source and Emitters, ANiagaraActor for SpawnSystem.
 			"Niagara",
-
-			// --- Support modules ----------------------------------------------------------------------
-			// UnrealEd: GEditor + the editor world and actor labels (SpawnSystem).
-			"UnrealEd",
 		});
 	}
 }

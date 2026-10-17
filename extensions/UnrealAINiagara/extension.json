@@ -10,18 +10,5 @@
     "Niagara"
   ],
   "tools": [],
-  "_comment": "Install-catalog / compatibility manifest, shaped as ONE unreal-mcp-cli ExtensionDescriptor (cli/src/utils/extensions-catalog.ts) so it is directly liftable into the shared extensions.catalog.json { schemaVersion, extensions[] }. 'tools' is empty since 1.0 of the core: the extension contributes an RQL module ('rql': its sources, operations and members, docs/rql.md) instead of MCP tools. 'version' mirrors the .uplugin VersionName (kept in sync by commands/bump-version.ps1). 'minCoreVersion' is the lowest Unreal-MCP core version this extension supports (refreshed by commands/update-core.ps1). 'enginePlugins' are the gating engine plugins enabled in the .uproject alongside this extension. The install-extension resolver unions these with the materialized .uplugin Plugins[].",
-  "rql": {
-    "module": "Niagara",
-    "sources": [
-      "niagaraSystems",
-      "niagara"
-    ],
-    "operations": [
-      "SpawnSystem"
-    ],
-    "members": [
-      "NiagaraSystem.Emitters"
-    ]
-  }
+  "_comment": "Install-catalog metadata (one unreal-mcp-cli ExtensionDescriptor). 'version' is the .uplugin VersionName; change both with `python scripts/extension_release.py bump --plugin <Plugin> --version <x.y.z>`. 'tools' is empty: the extension adds an RQL module (docs/rql.md), not MCP tools. 'minCoreVersion' is the lowest supported Unreal-MCP core; 'enginePlugins' are the engine plugins the installer enables."
 }

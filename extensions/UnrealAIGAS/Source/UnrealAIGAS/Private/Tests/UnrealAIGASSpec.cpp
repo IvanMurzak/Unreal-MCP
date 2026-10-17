@@ -5,10 +5,7 @@
 
 #include "CoreMinimal.h"
 #include "Misc/AutomationTest.h"
-#include "Features/IModularFeatures.h"
 #include "Dom/JsonObject.h"
-#include "Serialization/JsonReader.h"
-#include "Serialization/JsonSerializer.h"
 
 #include "IUnrealMcpRqlModule.h"
 #include "UnrealMcpRqlTools.h"
@@ -17,40 +14,11 @@
 //  UE Automation spec for the extension's RQL module (Unreal-MCP docs/rql.md "Extensions").
 //
 //  The spec discovers THIS extension's live module through IModularFeatures (the path Unreal-MCP uses) and runs RQL
-//  QueryPlans through the editor's RQL engine (UnrealMcpRqlTools::ExecutePlan). The C++ runtime has no text parser, so
+//  QueryPlans through the editor's RQL engine (UnrealMcpRqlTools::RunPlan). The C++ runtime has no text parser, so
 //  each plan is the one Rql.Parser produces for the query in the comment above it.
 //
 //  Run via:  Automation RunTests UnrealAIGAS
 // ============================================================================================
-
-namespace
-{
-	// Spec-unique helper names (the module is unity-built — keep file-local helpers uniquely named).
-	IUnrealMcpRqlModule* UnrealAIGAS_FindOwnModule()
-	{
-		for (IUnrealMcpRqlModule* Module : IModularFeatures::Get().GetModularFeatureImplementations<IUnrealMcpRqlModule>(
-			IUnrealMcpRqlModule::GetModularFeatureName()))
-		{
-			if (Module && Module->GetExtensionId() == TEXT("com.ivanmurzak.unreal-ai-gas"))
-				return Module;
-		}
-		return nullptr;
-	}
-
-	TSharedPtr<FJsonObject> UnrealAIGAS_Run(const FString& Plan, bool bMutate)
-	{
-		bool bOk = false;
-		const FString Json = UnrealMcpRqlTools::ExecutePlan(Plan, bMutate, false, bOk);
-		TSharedPtr<FJsonObject> Result;
-		FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(Json), Result);
-		return Result;
-	}
-
-	bool UnrealAIGAS_Ok(const TSharedPtr<FJsonObject>& Result)
-	{
-		return Result.IsValid() && Result->GetBoolField(TEXT("ok"));
-	}
-}
 
 BEGIN_DEFINE_SPEC(FUnrealAIGASSpec, "UnrealAIGAS",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -62,7 +30,7 @@ void FUnrealAIGASSpec::Define()
 	{
 		It("registers this extension's RQL module as a modular feature", [this]()
 		{
-			IUnrealMcpRqlModule* Module = UnrealAIGAS_FindOwnModule();
+			IUnrealMcpRqlModule* Module = UnrealMcpRqlTools::FindModule(TEXT("com.ivanmurzak.unreal-ai-gas"));
 			if (TestNotNull(TEXT("RQL module is registered"), Module))
 			{
 				TestEqual(TEXT("module name"), Module->GetRqlModuleName(), FString(TEXT("GAS")));
@@ -86,25 +54,28 @@ void FUnrealAIGASSpec::Define()
 		It("gasAbilities answers a query", [this]()
 		{
 			// gasAbilities | count
-			const TSharedPtr<FJsonObject> Result = UnrealAIGAS_Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["gasAbilities"]},"stages":[{"op":"count"}]})RQL"), false);
+			TSharedPtr<FJsonObject> Result;
+			const bool bResultOk = UnrealMcpRqlTools::RunPlan(TEXT(R"RQL({"rql":"0.1","source":{"path":["gasAbilities"]},"stages":[{"op":"count"}]})RQL"), false, &Result);
 			TestTrue(TEXT("a well-formed result"), Result.IsValid());
-			TestTrue(TEXT("succeeds"), UnrealAIGAS_Ok(Result));
+			TestTrue(TEXT("succeeds"), bResultOk);
 		});
 
 		It("gasEffects answers a query", [this]()
 		{
 			// gasEffects | count
-			const TSharedPtr<FJsonObject> Result = UnrealAIGAS_Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["gasEffects"]},"stages":[{"op":"count"}]})RQL"), false);
+			TSharedPtr<FJsonObject> Result;
+			const bool bResultOk = UnrealMcpRqlTools::RunPlan(TEXT(R"RQL({"rql":"0.1","source":{"path":["gasEffects"]},"stages":[{"op":"count"}]})RQL"), false, &Result);
 			TestTrue(TEXT("a well-formed result"), Result.IsValid());
-			TestTrue(TEXT("succeeds"), UnrealAIGAS_Ok(Result));
+			TestTrue(TEXT("succeeds"), bResultOk);
 		});
 
 		It("gasAttributeSets answers a query", [this]()
 		{
 			// gasAttributeSets | count
-			const TSharedPtr<FJsonObject> Result = UnrealAIGAS_Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["gasAttributeSets"]},"stages":[{"op":"count"}]})RQL"), false);
+			TSharedPtr<FJsonObject> Result;
+			const bool bResultOk = UnrealMcpRqlTools::RunPlan(TEXT(R"RQL({"rql":"0.1","source":{"path":["gasAttributeSets"]},"stages":[{"op":"count"}]})RQL"), false, &Result);
 			TestTrue(TEXT("a well-formed result"), Result.IsValid());
-			TestTrue(TEXT("succeeds"), UnrealAIGAS_Ok(Result));
+			TestTrue(TEXT("succeeds"), bResultOk);
 		});
 
 		It("describes AbilitySystemComponent with its GrantedAbilities member", [this]()
@@ -129,9 +100,10 @@ void FUnrealAIGASSpec::Define()
 		It("fails defensively on an unknown actor", [this]()
 		{
 			// gas | call GrantAbility("RqlSpecNoActor", "GameplayAbility")
-			const TSharedPtr<FJsonObject> Result = UnrealAIGAS_Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["gas"]},"stages":[{"op":"call","method":"GrantAbility","args":[{"lit":"RqlSpecNoActor"},{"lit":"GameplayAbility"}]}]})RQL"), true);
+			TSharedPtr<FJsonObject> Result;
+			const bool bResultOk = UnrealMcpRqlTools::RunPlan(TEXT(R"RQL({"rql":"0.1","source":{"path":["gas"]},"stages":[{"op":"call","method":"GrantAbility","args":[{"lit":"RqlSpecNoActor"},{"lit":"GameplayAbility"}]}]})RQL"), true, &Result);
 			TestTrue(TEXT("a well-formed result"), Result.IsValid());
-			TestFalse(TEXT("fails defensively"), UnrealAIGAS_Ok(Result));
+			TestFalse(TEXT("fails defensively"), bResultOk);
 		});
 	});
 }

@@ -5,10 +5,7 @@
 
 #include "CoreMinimal.h"
 #include "Misc/AutomationTest.h"
-#include "Features/IModularFeatures.h"
 #include "Dom/JsonObject.h"
-#include "Serialization/JsonReader.h"
-#include "Serialization/JsonSerializer.h"
 
 #include "IUnrealMcpRqlModule.h"
 #include "UnrealMcpRqlTools.h"
@@ -17,40 +14,11 @@
 //  UE Automation spec for the extension's RQL module (Unreal-MCP docs/rql.md "Extensions").
 //
 //  The spec discovers THIS extension's live module through IModularFeatures (the path Unreal-MCP uses) and runs RQL
-//  QueryPlans through the editor's RQL engine (UnrealMcpRqlTools::ExecutePlan). The C++ runtime has no text parser, so
+//  QueryPlans through the editor's RQL engine (UnrealMcpRqlTools::RunPlan). The C++ runtime has no text parser, so
 //  each plan is the one Rql.Parser produces for the query in the comment above it.
 //
 //  Run via:  Automation RunTests UnrealAILandscape
 // ============================================================================================
-
-namespace
-{
-	// Spec-unique helper names (the module is unity-built — keep file-local helpers uniquely named).
-	IUnrealMcpRqlModule* UnrealAILandscape_FindOwnModule()
-	{
-		for (IUnrealMcpRqlModule* Module : IModularFeatures::Get().GetModularFeatureImplementations<IUnrealMcpRqlModule>(
-			IUnrealMcpRqlModule::GetModularFeatureName()))
-		{
-			if (Module && Module->GetExtensionId() == TEXT("com.ivanmurzak.unreal-ai-landscape"))
-				return Module;
-		}
-		return nullptr;
-	}
-
-	TSharedPtr<FJsonObject> UnrealAILandscape_Run(const FString& Plan, bool bMutate)
-	{
-		bool bOk = false;
-		const FString Json = UnrealMcpRqlTools::ExecutePlan(Plan, bMutate, false, bOk);
-		TSharedPtr<FJsonObject> Result;
-		FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(Json), Result);
-		return Result;
-	}
-
-	bool UnrealAILandscape_Ok(const TSharedPtr<FJsonObject>& Result)
-	{
-		return Result.IsValid() && Result->GetBoolField(TEXT("ok"));
-	}
-}
 
 BEGIN_DEFINE_SPEC(FUnrealAILandscapeSpec, "UnrealAILandscape",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -62,7 +30,7 @@ void FUnrealAILandscapeSpec::Define()
 	{
 		It("registers this extension's RQL module as a modular feature", [this]()
 		{
-			IUnrealMcpRqlModule* Module = UnrealAILandscape_FindOwnModule();
+			IUnrealMcpRqlModule* Module = UnrealMcpRqlTools::FindModule(TEXT("com.ivanmurzak.unreal-ai-landscape"));
 			if (TestNotNull(TEXT("RQL module is registered"), Module))
 			{
 				TestEqual(TEXT("module name"), Module->GetRqlModuleName(), FString(TEXT("Landscape")));
@@ -85,25 +53,28 @@ void FUnrealAILandscapeSpec::Define()
 		It("landscapes answers a query", [this]()
 		{
 			// landscapes | count
-			const TSharedPtr<FJsonObject> Result = UnrealAILandscape_Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["landscapes"]},"stages":[{"op":"count"}]})RQL"), false);
+			TSharedPtr<FJsonObject> Result;
+			const bool bResultOk = UnrealMcpRqlTools::RunPlan(TEXT(R"RQL({"rql":"0.1","source":{"path":["landscapes"]},"stages":[{"op":"count"}]})RQL"), false, &Result);
 			TestTrue(TEXT("a well-formed result"), Result.IsValid());
-			TestTrue(TEXT("succeeds"), UnrealAILandscape_Ok(Result));
+			TestTrue(TEXT("succeeds"), bResultOk);
 		});
 
 		It("waterBodies answers a query", [this]()
 		{
 			// waterBodies | count
-			const TSharedPtr<FJsonObject> Result = UnrealAILandscape_Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["waterBodies"]},"stages":[{"op":"count"}]})RQL"), false);
+			TSharedPtr<FJsonObject> Result;
+			const bool bResultOk = UnrealMcpRqlTools::RunPlan(TEXT(R"RQL({"rql":"0.1","source":{"path":["waterBodies"]},"stages":[{"op":"count"}]})RQL"), false, &Result);
 			TestTrue(TEXT("a well-formed result"), Result.IsValid());
-			TestTrue(TEXT("succeeds"), UnrealAILandscape_Ok(Result));
+			TestTrue(TEXT("succeeds"), bResultOk);
 		});
 
 		It("waterZones answers a query", [this]()
 		{
 			// waterZones | count
-			const TSharedPtr<FJsonObject> Result = UnrealAILandscape_Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["waterZones"]},"stages":[{"op":"count"}]})RQL"), false);
+			TSharedPtr<FJsonObject> Result;
+			const bool bResultOk = UnrealMcpRqlTools::RunPlan(TEXT(R"RQL({"rql":"0.1","source":{"path":["waterZones"]},"stages":[{"op":"count"}]})RQL"), false, &Result);
 			TestTrue(TEXT("a well-formed result"), Result.IsValid());
-			TestTrue(TEXT("succeeds"), UnrealAILandscape_Ok(Result));
+			TestTrue(TEXT("succeeds"), bResultOk);
 		});
 	});
 
@@ -115,6 +86,8 @@ void FUnrealAILandscapeSpec::Define()
 			const FString Schema = UnrealMcpRqlTools::Schema(TEXT("LandscapeProxy"), bOk);
 			TestTrue(TEXT("schema ok"), bOk);
 			TestTrue(TEXT("lists name:Sections"), Schema.Contains(TEXT("\"name\":\"Sections\"")));
+			TestTrue(TEXT("lists name:IsPrimary"), Schema.Contains(TEXT("\"name\":\"IsPrimary\"")));
+			TestTrue(TEXT("lists name:ComponentCount"), Schema.Contains(TEXT("\"name\":\"ComponentCount\"")));
 			TestTrue(TEXT("lists name:PaintLayers"), Schema.Contains(TEXT("\"name\":\"PaintLayers\"")));
 		});
 
@@ -124,6 +97,8 @@ void FUnrealAILandscapeSpec::Define()
 			const FString Schema = UnrealMcpRqlTools::Schema(TEXT("WaterBody"), bOk);
 			TestTrue(TEXT("schema ok"), bOk);
 			TestTrue(TEXT("lists name:Water"), Schema.Contains(TEXT("\"name\":\"Water\"")));
+			TestTrue(TEXT("lists name:WaterType"), Schema.Contains(TEXT("\"name\":\"WaterType\"")));
+			TestTrue(TEXT("lists name:WaterZone"), Schema.Contains(TEXT("\"name\":\"WaterZone\"")));
 		});
 	});
 }

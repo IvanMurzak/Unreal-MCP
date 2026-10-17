@@ -1,6 +1,6 @@
-# ControlRig Tools
+# ControlRig RQL module
 
-AI tools for Unreal's Control Rig (list/inspect rig blueprints, controls, bones, and actor components).
+RQL module for Unreal's Control Rig: query Control Rig blueprints (element hierarchy, controls, bones) and Control Rig components.
 
 An optional editor plugin in the [Unreal MCP monorepository](../../README.md), with its own module, version and release archive.
 
@@ -32,7 +32,7 @@ The extension adds its feature to the editor's RQL data layer (`rql-query` / `rq
 | Kind | Names |
 | --- | --- |
 | Sources | `controlRigs` |
-| Members | `ControlRigBlueprint.Elements`, `ControlRigBlueprint.Hierarchy`, `ControlRigBlueprint.Controls`, `ControlRigBlueprint.Bones`, `ControlRigComponent.BoundRig` |
+| Members | `ControlRigBlueprint.Elements`, `ControlRigBlueprint.Hierarchy`, `ControlRigBlueprint.Controls`, `ControlRigBlueprint.Bones`, `ControlRigComponent.BoundRig` (the running rig) |
 
 ```
 controlRigs | select Name Elements

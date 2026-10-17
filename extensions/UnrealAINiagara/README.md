@@ -1,6 +1,6 @@
-# Niagara Tools
+# Niagara RQL module
 
-AI tools for Unreal's Niagara VFX system (list/inspect systems, spawn components).
+RQL module for Unreal's Niagara VFX system: query Niagara systems and their emitters, place systems in the level.
 
 An optional editor plugin in the [Unreal MCP monorepository](../../README.md), with its own module, version and release archive.
 

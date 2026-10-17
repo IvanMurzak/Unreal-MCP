@@ -5,10 +5,7 @@
 
 #include "CoreMinimal.h"
 #include "Misc/AutomationTest.h"
-#include "Features/IModularFeatures.h"
 #include "Dom/JsonObject.h"
-#include "Serialization/JsonReader.h"
-#include "Serialization/JsonSerializer.h"
 
 #include "IUnrealMcpRqlModule.h"
 #include "UnrealMcpRqlTools.h"
@@ -17,40 +14,11 @@
 //  UE Automation spec for the extension's RQL module (Unreal-MCP docs/rql.md "Extensions").
 //
 //  The spec discovers THIS extension's live module through IModularFeatures (the path Unreal-MCP uses) and runs RQL
-//  QueryPlans through the editor's RQL engine (UnrealMcpRqlTools::ExecutePlan). The C++ runtime has no text parser, so
+//  QueryPlans through the editor's RQL engine (UnrealMcpRqlTools::RunPlan). The C++ runtime has no text parser, so
 //  each plan is the one Rql.Parser produces for the query in the comment above it.
 //
 //  Run via:  Automation RunTests UnrealAIControlRig
 // ============================================================================================
-
-namespace
-{
-	// Spec-unique helper names (the module is unity-built — keep file-local helpers uniquely named).
-	IUnrealMcpRqlModule* UnrealAIControlRig_FindOwnModule()
-	{
-		for (IUnrealMcpRqlModule* Module : IModularFeatures::Get().GetModularFeatureImplementations<IUnrealMcpRqlModule>(
-			IUnrealMcpRqlModule::GetModularFeatureName()))
-		{
-			if (Module && Module->GetExtensionId() == TEXT("com.ivanmurzak.unreal-ai-control-rig"))
-				return Module;
-		}
-		return nullptr;
-	}
-
-	TSharedPtr<FJsonObject> UnrealAIControlRig_Run(const FString& Plan, bool bMutate)
-	{
-		bool bOk = false;
-		const FString Json = UnrealMcpRqlTools::ExecutePlan(Plan, bMutate, false, bOk);
-		TSharedPtr<FJsonObject> Result;
-		FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(Json), Result);
-		return Result;
-	}
-
-	bool UnrealAIControlRig_Ok(const TSharedPtr<FJsonObject>& Result)
-	{
-		return Result.IsValid() && Result->GetBoolField(TEXT("ok"));
-	}
-}
 
 BEGIN_DEFINE_SPEC(FUnrealAIControlRigSpec, "UnrealAIControlRig",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -62,7 +30,7 @@ void FUnrealAIControlRigSpec::Define()
 	{
 		It("registers this extension's RQL module as a modular feature", [this]()
 		{
-			IUnrealMcpRqlModule* Module = UnrealAIControlRig_FindOwnModule();
+			IUnrealMcpRqlModule* Module = UnrealMcpRqlTools::FindModule(TEXT("com.ivanmurzak.unreal-ai-control-rig"));
 			if (TestNotNull(TEXT("RQL module is registered"), Module))
 			{
 				TestEqual(TEXT("module name"), Module->GetRqlModuleName(), FString(TEXT("ControlRig")));
@@ -83,17 +51,19 @@ void FUnrealAIControlRigSpec::Define()
 		It("answers a query (count of the project's Control Rig blueprints)", [this]()
 		{
 			// controlRigs | count
-			const TSharedPtr<FJsonObject> Result = UnrealAIControlRig_Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["controlRigs"]},"stages":[{"op":"count"}]})RQL"), false);
+			TSharedPtr<FJsonObject> Result;
+			const bool bResultOk = UnrealMcpRqlTools::RunPlan(TEXT(R"RQL({"rql":"0.1","source":{"path":["controlRigs"]},"stages":[{"op":"count"}]})RQL"), false, &Result);
 			TestTrue(TEXT("a well-formed result"), Result.IsValid());
-			TestTrue(TEXT("succeeds"), UnrealAIControlRig_Ok(Result));
+			TestTrue(TEXT("succeeds"), bResultOk);
 		});
 
 		It("reads the hierarchy members of every rig", [this]()
 		{
 			// controlRigs | select Name Elements Controls Bones
-			const TSharedPtr<FJsonObject> Result = UnrealAIControlRig_Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["controlRigs"]},"stages":[{"op":"select","fields":[{"name":"Name","expr":{"path":["Name"]}},{"name":"Elements","expr":{"path":["Elements"]}},{"name":"Controls","expr":{"path":["Controls"]}},{"name":"Bones","expr":{"path":["Bones"]}}]}]})RQL"), false);
+			TSharedPtr<FJsonObject> Result;
+			const bool bResultOk = UnrealMcpRqlTools::RunPlan(TEXT(R"RQL({"rql":"0.1","source":{"path":["controlRigs"]},"stages":[{"op":"select","fields":[{"name":"Name","expr":{"path":["Name"]}},{"name":"Elements","expr":{"path":["Elements"]}},{"name":"Controls","expr":{"path":["Controls"]}},{"name":"Bones","expr":{"path":["Bones"]}}]}]})RQL"), false, &Result);
 			TestTrue(TEXT("a well-formed result"), Result.IsValid());
-			TestTrue(TEXT("succeeds"), UnrealAIControlRig_Ok(Result));
+			TestTrue(TEXT("succeeds"), bResultOk);
 		});
 	});
 

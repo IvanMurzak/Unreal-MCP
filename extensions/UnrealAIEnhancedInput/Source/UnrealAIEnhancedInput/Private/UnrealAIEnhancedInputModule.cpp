@@ -2,7 +2,6 @@
 // See the LICENSE file in the repository root for more information.
 
 #include "Modules/ModuleManager.h"
-#include "Features/IModularFeatures.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
 
@@ -13,22 +12,20 @@
 #include "InputAction.h"
 #include "InputMappingContext.h"
 
-DEFINE_LOG_CATEGORY_STATIC(LogUnrealAIEnhancedInput, Log, All);
-
 /**
  * The extension's RQL module (Unreal-MCP docs/rql.md "Extensions"): Enhanced Input is queried and changed with
  * rql-query / rql-mutate instead of dedicated tools. Reflection exposes UInputAction (ValueType, Triggers, Modifiers,
  * ...) and UInputMappingContext; the module adds the asset sources, the `enhancedInput` authoring operations, a
  * context's key mappings (not a reflected property) and the agent guide rendered into the unreal-rql skill.
  *
- * Keep GetExtensionVersion() in sync with the .uplugin VersionName (scripts/extension_release.py bump updates both).
+ * The version is the .uplugin VersionName.
  */
 class FUnrealAIEnhancedInputRqlModule : public IUnrealMcpRqlModule
 {
 public:
 	virtual FString GetRqlModuleName() const override { return TEXT("EnhancedInput"); }
 	virtual FString GetExtensionId() const override { return TEXT("com.ivanmurzak.unreal-ai-enhanced-input"); }
-	virtual FString GetExtensionVersion() const override { return TEXT("0.1.1"); }
+	virtual FString GetExtensionVersion() const override { return UnrealMcpRql::PluginVersion(TEXT("UnrealAIEnhancedInput")); }
 
 	virtual void ConfigureRql(FUnrealMcpRqlModuleContext& Context) override
 	{
@@ -36,10 +33,9 @@ public:
 			UInputAction::StaticClass());
 		Context.AddAssetSource(TEXT("inputContexts"), TEXT("Input Mapping Context assets (InputMappingContext) of the project, at most 200"),
 			UInputMappingContext::StaticClass());
-		Context.AddApiClass(UUnrealAIEnhancedInputRqlApi::StaticClass(), TEXT("EnhancedInputOperations"));
-		Context.AddObjectSource(TEXT("enhancedInput"),
+		Context.AddApiSource(TEXT("enhancedInput"),
 			TEXT("Enhanced Input operations: call CreateAction(path, valueType) / CreateContext(path) / AddMapping(context, action, key) / RemoveMapping(context, action, key)"),
-			UUnrealAIEnhancedInputRqlApi::StaticClass(), []() -> UObject* { return GetMutableDefault<UUnrealAIEnhancedInputRqlApi>(); });
+			UUnrealAIEnhancedInputRqlApi::StaticClass(), TEXT("EnhancedInputOperations"));
 		Context.AddJsonMember(UInputMappingContext::StaticClass(), TEXT("KeyMappings"), TEXT("the context's key mappings: Action, Key"),
 			[](UObject* Object) -> TSharedPtr<FJsonValue>
 			{
@@ -75,28 +71,4 @@ are unsaved: `editor | call SaveAll()`.)MD"));
 	}
 };
 
-/** Editor module that owns the RQL module and registers it as a modular feature, so Unreal-MCP discovers it. */
-class FUnrealAIEnhancedInputModule : public IModuleInterface
-{
-public:
-	virtual void StartupModule() override
-	{
-		RqlModule = MakeUnique<FUnrealAIEnhancedInputRqlModule>();
-		IModularFeatures::Get().RegisterModularFeature(IUnrealMcpRqlModule::GetModularFeatureName(), RqlModule.Get());
-		UE_LOG(LogUnrealAIEnhancedInput, Log, TEXT("[UnrealAIEnhancedInput] registered RQL module '%s'."), *RqlModule->GetRqlModuleName());
-	}
-
-	virtual void ShutdownModule() override
-	{
-		if (RqlModule.IsValid())
-		{
-			IModularFeatures::Get().UnregisterModularFeature(IUnrealMcpRqlModule::GetModularFeatureName(), RqlModule.Get());
-			RqlModule.Reset();
-		}
-	}
-
-private:
-	TUniquePtr<FUnrealAIEnhancedInputRqlModule> RqlModule;
-};
-
-IMPLEMENT_MODULE(FUnrealAIEnhancedInputModule, UnrealAIEnhancedInput)
+IMPLEMENT_MODULE(TUnrealMcpRqlEditorModule<FUnrealAIEnhancedInputRqlModule>, UnrealAIEnhancedInput)

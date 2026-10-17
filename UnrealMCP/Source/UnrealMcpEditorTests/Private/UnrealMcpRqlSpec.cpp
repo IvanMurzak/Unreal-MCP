@@ -470,6 +470,14 @@ void FUnrealMcpRqlSpec::Define()
 			TestTrue(TEXT("no component added"), Found.Num() == 1 && Found[0]->GetInstanceComponents().Num() == 0);
 		});
 
+		It("refuses null for an object parameter without a C++ default", [this]()
+		{
+			// editor | call SaveAsset(null)
+			const TSharedPtr<FJsonObject> Result = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"SaveAsset","args":[{"lit":null}]}]})RQL"), true);
+			TestFalse(TEXT("refused"), IsOk(Result));
+			TestTrue(*FString::Printf(TEXT("null is not allowed (%s)"), *Codes(Result)), Codes(Result).Contains(TEXT("null is not allowed")));
+		});
+
 		It("accepts #rrggbb colors and rejects non-hex ones", [this]()
 		{
 			SpawnLamp();

@@ -8,16 +8,18 @@ reflection does not show. It doubles as the working example of the [extension-au
 
 ## What it shows
 
-- Implementing `IUnrealMcpRqlModule` (`GetRqlModuleName` / `GetExtensionId` / `GetExtensionVersion` / `ConfigureRql`).
-- An operations class (`UUnrealAITemplateRqlApi`): every UFUNCTION becomes callable with `call` once the module calls
-  `AddApiClass`; its class default object is the `hello` source (`AddObjectSource`).
-- A computed member on every actor (`AddJsonMember`) and a guide for the `unreal-rql` skill (`AddGuide`).
-- Registering / unregistering the module as a modular feature in `StartupModule` / `ShutdownModule`.
+- Implementing `IUnrealMcpRqlModule` (`GetRqlModuleName` / `GetExtensionId` / `GetExtensionVersion` / `ConfigureRql`);
+  the version is the .uplugin VersionName (`UnrealMcpRql::PluginVersion`).
+- An operations class (`UUnrealAITemplateRqlApi`): `AddApiSource` makes every UFUNCTION callable with `call` and its
+  class default object the `hello` source; failures use `UnrealMcpRql::Failed`.
+- A computed member of a narrow class (`AddJsonMember` on static mesh components) and a guide for the `unreal-rql`
+  skill (`AddGuide`).
+- Registering the module as a modular feature for the editor module's lifetime: `TUnrealMcpRqlEditorModule`.
 
 ```
 hello | call Greet("Ada")
 hello | call Relabel("Cube", "Crate")
-actors | where TagCount > 0 | select Label Tags TagCount
+actors | get Components | where $ is StaticMeshComponent | where MaterialCount > 1 | select Owner.Label MaterialCount
 ```
 
 ## Layout

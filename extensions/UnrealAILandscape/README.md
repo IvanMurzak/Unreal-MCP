@@ -1,6 +1,6 @@
-# Landscape Tools
+# Landscape RQL module
 
-AI tools for Unreal's Landscape + Water systems (inspect landscapes, water bodies & zones).
+RQL module for Unreal's Landscape and Water systems: query landscapes (sections, paint layers), water bodies and water zones.
 
 An optional editor plugin in the [Unreal MCP monorepository](../../README.md), with its own module, version and release archive.
 
@@ -32,7 +32,7 @@ The extension adds its feature to the editor's RQL data layer (`rql-query` / `rq
 | Kind | Names |
 | --- | --- |
 | Sources | `landscapes`, `waterBodies`, `waterZones` |
-| Members | `LandscapeProxy.Sections`, `LandscapeProxy.PaintLayers`, `WaterBody.Water` |
+| Members | `LandscapeProxy.IsPrimary`, `LandscapeProxy.ComponentCount`, `LandscapeProxy.Sections`, `LandscapeProxy.PaintLayers`, `WaterBody.WaterType`, `WaterBody.WaterMaterial`, `WaterBody.WaterZone`, `WaterBody.Water` |
 
 ```
 landscapes | select Label Sections PaintLayers LandscapeMaterial

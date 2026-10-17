@@ -34,7 +34,6 @@
 #include "UObject/GCObjectScopeGuard.h"
 #include "UObject/Package.h"
 
-#include <type_traits>
 
 namespace UnrealMcpRqlEditorApiLocal
 {
@@ -43,14 +42,7 @@ namespace UnrealMcpRqlEditorApiLocal
 		return FModuleManager::LoadModuleChecked<FAssetToolsModule>(TEXT("AssetTools")).Get();
 	}
 
-	/** Report @p Message as the call's failure (UnrealMcpRql::Fail) and return the "nothing" value of the call. */
-	template <typename T = void>
-	T Failed(const FString& Message)
-	{
-		UnrealMcpRql::Fail(Message);
-		if constexpr (!std::is_void_v<T>)
-			return T();
-	}
+	using UnrealMcpRql::Failed;
 
 	/** Writes stay inside project / plugin content: /Engine, /Script and /Temp are refused. */
 	bool IsWritableRoot(const FString& Path)
@@ -115,14 +107,13 @@ namespace UnrealMcpRqlEditorApiLocal
 
 using namespace UnrealMcpRqlEditorApiLocal;
 
-AActor* UUnrealMcpRqlEditorApi::SpawnActor(const FString& ClassName, const FString& Label, FVector Location, FRotator Rotation, AActor* Parent)
+AActor* UnrealMcpRql::SpawnActor(UClass* Class, const FVector& Location, const FRotator& Rotation, const FString& Label, AActor* Parent)
 {
 	UWorld* World = FUnrealMcpObjectRef::GetEditorWorld();
 	if (!World)
 		return Failed<AActor*>(TEXT("no editor world"));
-	UClass* Class = FUnrealMcpObjectRef::ResolveClass(ClassName);
 	if (!Class || !Class->IsChildOf(AActor::StaticClass()))
-		return Failed<AActor*>(FString::Printf(TEXT("'%s' is not an actor class (try a class name such as \"PointLight\" or a Blueprint path)"), *ClassName));
+		return Failed<AActor*>(TEXT("not an actor class"));
 	if (Class->HasAnyClassFlags(CLASS_Abstract))
 		return Failed<AActor*>(FString::Printf(TEXT("'%s' is abstract"), *Class->GetName()));
 	// UWorld::SpawnActor rather than the editor actor subsystem: no viewport snapping (headless-safe). The open RQL
@@ -144,6 +135,14 @@ AActor* UUnrealMcpRqlEditorApi::SpawnActor(const FString& ClassName, const FStri
 		}
 	}
 	return Actor;
+}
+
+AActor* UUnrealMcpRqlEditorApi::SpawnActor(const FString& ClassName, const FString& Label, FVector Location, FRotator Rotation, AActor* Parent)
+{
+	UClass* Class = FUnrealMcpObjectRef::ResolveClass(ClassName);
+	if (!Class || !Class->IsChildOf(AActor::StaticClass()))
+		return Failed<AActor*>(FString::Printf(TEXT("'%s' is not an actor class (try a class name such as \"PointLight\" or a Blueprint path)"), *ClassName));
+	return UnrealMcpRql::SpawnActor(Class, Location, Rotation, Label, Parent);
 }
 
 UWorld* UUnrealMcpRqlEditorApi::OpenLevel(const FString& Path)
@@ -227,8 +226,8 @@ void UUnrealMcpRqlEditorApi::SaveAll()
 void UUnrealMcpRqlEditorApi::UnloadSublevel(ULevel* Level)
 {
 	UWorld* World = FUnrealMcpObjectRef::GetEditorWorld();
-	if (!World || !Level)
-		return Failed(TEXT("no level"));
+	if (!World)
+		return Failed(TEXT("no editor world"));
 	if (Level == World->PersistentLevel)
 		return Failed(TEXT("the persistent level cannot be unloaded"));
 	if (!UEditorLevelUtils::RemoveLevelFromWorld(Level))
@@ -292,13 +291,13 @@ void UUnrealMcpRqlEditorApi::RefreshAssets(const FString& Path, bool bForce)
 		.ScanPathsSynchronous({ Path.IsEmpty() ? FString(TEXT("/Game")) : Path }, bForce);
 }
 
-UObject* UUnrealMcpRqlEditorApi::CreateAsset(const FString& Path, const FString& ClassName)
+UObject* UnrealMcpRql::CreateAsset(UClass* Class, const FString& Path)
 {
 	FString Folder, Name;
-	UClass* Class = FUnrealMcpObjectRef::ResolveClass(ClassName);
 	if (!Class || Class->HasAnyClassFlags(CLASS_Abstract | CLASS_Deprecated | CLASS_NewerVersionExists)
 		|| Class->IsChildOf(AActor::StaticClass()) || Class->IsChildOf(UActorComponent::StaticClass()))
-		return Failed<UObject*>(FString::Printf(TEXT("'%s' is not an asset class (actors are spawned: SpawnActor)"), *ClassName));
+		return Failed<UObject*>(FString::Printf(TEXT("'%s' is not an asset class (actors are spawned: SpawnActor)"),
+			Class ? *Class->GetName() : TEXT("None")));
 	if (!ValidateNewAssetPath(Path, Folder, Name))
 		return nullptr;
 	// The factory of the Content Browser's "New" menu when one creates this class (materials, input actions, data
@@ -331,11 +330,17 @@ UObject* UUnrealMcpRqlEditorApi::CreateAsset(const FString& Path, const FString&
 	return Created ? Created : Failed<UObject*>(FString::Printf(TEXT("could not create a %s at '%s'"), *Class->GetName(), *Path));
 }
 
+UObject* UUnrealMcpRqlEditorApi::CreateAsset(const FString& Path, const FString& ClassName)
+{
+	UClass* Class = FUnrealMcpObjectRef::ResolveClass(ClassName);
+	if (!Class)
+		return Failed<UObject*>(FString::Printf(TEXT("'%s' is not an asset class (actors are spawned: SpawnActor)"), *ClassName));
+	return UnrealMcpRql::CreateAsset(Class, Path);
+}
+
 UMaterialInstanceConstant* UUnrealMcpRqlEditorApi::CreateMaterialInstance(const FString& Path, UMaterialInterface* Parent)
 {
 	FString Folder, Name;
-	if (!Parent)
-		return Failed<UMaterialInstanceConstant*>(TEXT("no parent material"));
 	if (!ValidateNewAssetPath(Path, Folder, Name))
 		return nullptr;
 	UMaterialInstanceConstantFactoryNew* Factory = NewObject<UMaterialInstanceConstantFactoryNew>();
@@ -388,8 +393,6 @@ TArray<UObject*> UUnrealMcpRqlEditorApi::ImportAsset(const FString& File, const 
 
 void UUnrealMcpRqlEditorApi::SaveAsset(UObject* Asset)
 {
-	if (!Asset)
-		return Failed(TEXT("no asset"));
 	if (!UEditorAssetLibrary::SaveLoadedAsset(Asset, /*bOnlyIfIsDirty*/ false))
 		Failed(FString::Printf(TEXT("could not save %s"), *Asset->GetPathName()));
 }

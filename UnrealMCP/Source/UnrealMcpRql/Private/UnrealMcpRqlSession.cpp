@@ -136,6 +136,36 @@ namespace UnrealMcpRqlSessionLocal
 			});
 		}
 
+		virtual void AddClassDefaultsSource(const FString& Name, const FString& Description, UClass* BaseClass) override
+		{
+			FUnrealMcpRqlTypes* Types = &Session.Types();
+			Session.AddSource(Name, Types->ForClass(BaseClass ? BaseClass : UObject::StaticClass()), /*bList*/ true, Description,
+				[Types, BaseClass]() { return UnrealMcpRqlClassDefaultsList(*Types, BaseClass); });
+		}
+
+		virtual void AddObjectMember(UClass* Class, const FString& Name, const FString& Description, UClass* ObjectClass,
+			TFunction<UObject*(UObject*)> Getter) override
+		{
+			const std::string MemberName = UnrealMcpRqlToStd(Name);
+			const std::string MemberDescription = UnrealMcpRqlToStd(Description);
+			Session.Types().AddClassHook(Class, [MemberName, MemberDescription, ObjectClass, Getter](FUnrealMcpRqlTypes& Types, rql::TypeDescriptor& Descriptor)
+			{
+				rql::MemberDescriptor Member;
+				Member.name = MemberName;
+				Member.description = MemberDescription;
+				Member.type = Types.ForClass(ObjectClass ? ObjectClass : UObject::StaticClass());
+				Member.nullable = true;
+				Member.owning = false;
+				Member.readonly = true;
+				FUnrealMcpRqlTypes* TypesPtr = &Types;
+				Member.getter = [TypesPtr, Getter](void* Self) -> rql::Value
+				{
+					return TypesPtr->WrapObject(Getter ? Getter(static_cast<UObject*>(Self)) : nullptr);
+				};
+				FUnrealMcpRqlTypes::SetMember(Descriptor, std::move(Member));
+			});
+		}
+
 		virtual void AddObjectListMember(UClass* Class, const FString& Name, const FString& Description, UClass* ElementClass,
 			TFunction<TArray<UObject*>(UObject*)> Getter) override
 		{
@@ -169,6 +199,12 @@ namespace UnrealMcpRqlSessionLocal
 }
 
 using namespace UnrealMcpRqlSessionLocal;
+
+void FUnrealMcpRqlModuleContext::AddApiSource(const FString& Name, const FString& Description, UClass* ApiClass, const FString& TypeName)
+{
+	AddApiClass(ApiClass, TypeName);
+	AddObjectSource(Name, Description, ApiClass, [ApiClass]() -> UObject* { return ApiClass ? ApiClass->GetDefaultObject() : nullptr; });
+}
 
 FUnrealMcpRqlSession::FUnrealMcpRqlSession()
 	: TypesPtr(MakeUnique<FUnrealMcpRqlTypes>())

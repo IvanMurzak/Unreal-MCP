@@ -7,6 +7,7 @@
 #include "Templates/Function.h"
 
 class FUnrealMcpToolRegistry;
+class FJsonObject;
 class IUnrealMcpRqlModule;
 
 /**
@@ -44,4 +45,12 @@ namespace UnrealMcpRqlTools
 
 	/** The `unreal-rql` skill markdown (core + installed modules). Game thread. */
 	UNREALMCPRQL_API FString SkillMarkdown();
+
+	// ---- spec helpers (an extension's Automation spec)
+
+	/** The registered RQL module of the extension @p ExtensionId; nullptr when none. */
+	UNREALMCPRQL_API IUnrealMcpRqlModule* FindModule(const FString& ExtensionId);
+
+	/** ExecutePlan without dry run: whether the QueryResult is ok; @p OutResult receives the parsed QueryResult JSON. */
+	UNREALMCPRQL_API bool RunPlan(const FString& PlanJson, bool bAllowMutation, TSharedPtr<FJsonObject>* OutResult = nullptr);
 }
