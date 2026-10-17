@@ -478,6 +478,16 @@ void FUnrealMcpRqlSpec::Define()
 			TestTrue(*FString::Printf(TEXT("null is not allowed (%s)"), *Codes(Result)), Codes(Result).Contains(TEXT("null is not allowed")));
 		});
 
+		It("refuses writes to class default objects (operations objects stay usable)", [this]()
+		{
+			const bool bBefore = GetDefault<APointLight>()->IsHidden();
+			// unreal.asset("/Script/Engine.Default__PointLight") | set bHidden = true
+			const TSharedPtr<FJsonObject> Result = Exec(TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"/Script/Engine.Default__PointLight"}]},"stages":[{"op":"set","assign":[{"target":{"path":["bHidden"]},"value":{"lit":true}}]}]})RQL"), true);
+			TestFalse(TEXT("refused"), IsOk(Result));
+			TestTrue(*FString::Printf(TEXT("says read-only (%s)"), *Codes(Result)), Codes(Result).Contains(TEXT("class default object")));
+			TestEqual(TEXT("the CDO is unchanged"), GetDefault<APointLight>()->IsHidden(), bBefore);
+		});
+
 		It("accepts #rrggbb colors and rejects non-hex ones", [this]()
 		{
 			SpawnLamp();

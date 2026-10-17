@@ -7,7 +7,7 @@
     Assert = {
         param($Result)
         $serialized = $Result | ConvertTo-Json -Depth 20 -Compress
-        if ($serialized -notmatch '\d') {
+        if ($serialized -notmatch '"text"\s*:\s*"\d+"|value\\?"\s*:\s*\d') {
             throw "expected the count of Attribute Set classes; got: $serialized"
         }
     }

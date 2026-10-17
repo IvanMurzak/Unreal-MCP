@@ -19,6 +19,7 @@
 #include "Tools/UnrealMcpObjectRef.h"
 #include "UObject/Package.h"
 
+#include <stdexcept>
 #include <string_view>
 
 namespace UnrealMcpRqlSessionLocal
@@ -250,8 +251,20 @@ void FUnrealMcpRqlSession::ConfigureMutations()
 	};
 	// One editor transaction per mutation (one Ctrl+Z step): owners are snapshotted before the first write. Objects the
 	// calls create with RF_Transactional (SpawnActor, AddComponent, ...) are recorded into the same transaction.
-	Policy.before_write = [this, OwnerOf](const std::vector<rql::MutationRecord>& Records)
+	Policy.before_write = [this, OwnerOf, TypeProvider](const std::vector<rql::MutationRecord>& Records)
 	{
+		// Class defaults and archetypes (the class-default sources' rows, a Blueprint's defaults) are read-only: an
+		// in-memory change to a CDO is not a saved edit and leaks into every new instance. API objects (`editor`, the
+		// extensions' operations) are class defaults by design and stay callable.
+		for (const rql::MutationRecord& Record : Records)
+		{
+			for (UObject* Object : { TypeProvider->AsObject(Record.item), TypeProvider->AsObject(Record.owner) })
+			{
+				if (Object && Object->IsTemplate() && !TypeProvider->IsApiClass(Object->GetClass()))
+					throw std::runtime_error(UnrealMcpRqlToStd(FString::Printf(
+						TEXT("%s is a class default object, read-only through RQL (edit the class or Blueprint instead)"), *Object->GetName())));
+			}
+		}
 		if (TransactionIndex == INDEX_NONE && GEditor)
 			TransactionIndex = GEditor->BeginTransaction(TEXT("UnrealMcp"), FText::FromString(TEXT("RQL mutation")), nullptr);
 		for (const rql::MutationRecord& Record : Records)

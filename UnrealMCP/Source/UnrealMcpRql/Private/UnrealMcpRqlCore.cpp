@@ -821,18 +821,17 @@ rql::Value UnrealMcpRqlAssetList(FUnrealMcpRqlTypes& Types, UClass* Class, const
 rql::Value UnrealMcpRqlClassDefaultsList(FUnrealMcpRqlTypes& Types, UClass* Base)
 {
 	TArray<FClassDefaultsList::FEntry> Entries;
-	TSet<FName> Seen;
+	// Keyed by the full class path: Blueprints of the same name in different folders are different classes.
+	TSet<FTopLevelAssetPath> Seen;
 	if (Base)
 	{
 		TArray<UClass*> Loaded;
 		GetDerivedClasses(Base, Loaded, /*bRecursive*/ true);
 		for (UClass* Class : Loaded)
 		{
+			Seen.Add(Class->GetClassPathName());
 			if (IsListedClass(Class) && !Class->HasAnyClassFlags(CLASS_Abstract))
-			{
 				Entries.Add({ Class->GetFName(), Class, FString() });
-				Seen.Add(Class->GetFName());
-			}
 		}
 		// The project's Blueprint classes that are not loaded yet (the asset registry knows them without loading).
 		IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
@@ -840,7 +839,7 @@ rql::Value UnrealMcpRqlClassDefaultsList(FUnrealMcpRqlTypes& Types, UClass* Base
 		Registry.GetDerivedClassNames({ Base->GetClassPathName() }, TSet<FTopLevelAssetPath>(), Derived);
 		for (const FTopLevelAssetPath& Path : Derived)
 		{
-			if (Seen.Contains(Path.GetAssetName()) || !Path.GetPackageName().ToString().StartsWith(TEXT("/Game")))
+			if (Seen.Contains(Path) || !Path.GetPackageName().ToString().StartsWith(TEXT("/Game")))
 				continue;
 			if (UClass* Class = FindObject<UClass>(Path)) // loaded after all (e.g. under another name)
 			{

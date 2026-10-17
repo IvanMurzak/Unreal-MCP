@@ -101,7 +101,10 @@ public:
 	/** The extension that ships the module (reverse-DNS id, e.g. "com.ivanmurzak.unreal-ai-niagara"); empty for none. */
 	virtual FString GetExtensionId() const { return FString(); }
 
-	/** The extension's version, kept equal to its .uplugin VersionName (scripts/extension_release.py checks it). */
+	/**
+	 * The extension's version: return UnrealMcpRql::PluginVersion(TEXT("<plugin>")), its .uplugin VersionName
+	 * (scripts/extension_release.py checks that the first-party extensions do).
+	 */
 	virtual FString GetExtensionVersion() const { return FString(); }
 
 	/** Register sources, operations, members and guides. Runs on the game thread whenever the engine is (re)built. */

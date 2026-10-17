@@ -22,8 +22,8 @@ class FUnrealMcpToolRegistry;
  * Unreal-MCP discovers every registered provider on boot (and subscribes to register/unregister
  * events for late-loaded / hot-unloaded plugins), merges their tools into the single tool registry
  * in deterministic order (sorted by ExtensionId), and surfaces the merged manifest to the sidecar
- * (§2.2). See docs/EXTENSIONS.md for the full author guide and samples/UnrealAITemplate for a
- * working example.
+ * (§2.2). See docs/EXTENSIONS.md for the full author guide and samples/UnrealAIRuntimeSample for a
+ * working example (editor data extensions contribute an IUnrealMcpRqlModule instead).
  *
  * Isolation (§5): UE builds without C++ exceptions, so isolation is descriptor-level, not
  * body-level. Each tool a provider declares is validated (name pattern, schema well-formedness,

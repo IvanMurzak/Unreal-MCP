@@ -176,9 +176,10 @@ class MonorepoTests(unittest.TestCase):
     def test_report_gate_catches_missing_extension_and_missing_individual_test(self):
         with tempfile.TemporaryDirectory() as temporary:
             report = Path(temporary) / 'index.json'
-            tests = [{'fullTestPath': f'UnrealAINiagara.case{i}', 'state': 'Success'} for i in range(4)]
+            minimum = release.read(release.ROOT / 'tests/automation-inventory.json')['UnrealAINiagara']
+            tests = [{'fullTestPath': f'UnrealAINiagara.case{i}', 'state': 'Success'} for i in range(minimum)]
             suite.write_json(report, {'failed': 0, 'tests': tests})
-            self.assertEqual(suite.check_report(report, ['UnrealAINiagara'], core_tests=False)['passed'], 4)
+            self.assertEqual(suite.check_report(report, ['UnrealAINiagara'], core_tests=False)['passed'], minimum)
             suite.write_json(report, {'failed': 0, 'tests': tests[:-1]})
             with self.assertRaisesRegex(ValueError, 'Missing Automation coverage'):
                 suite.check_report(report, ['UnrealAINiagara'], core_tests=False)
