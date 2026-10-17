@@ -240,12 +240,22 @@ void FUnrealMcpRqlSession::ConfigureMutations()
 void FUnrealMcpRqlSession::ConfigureModules()
 {
 	FModuleContext Context(*this);
+	TSet<FString> Configured;
 	for (IUnrealMcpRqlModule* Module : UnrealMcpRqlTools::Modules())
 	{
 		if (!UnrealMcpRqlTools::IsModuleEnabled(*Module))
 			continue; // its extension is disabled in the Extensions window
-		Module->ConfigureRql(Context);
 		const FString Extension = Module->GetExtensionId();
+		// One module per extension id, the first in Modules() order (the extension manager records the later ones as
+		// duplicates with an error): a second module would register the same sources and types again.
+		if (!Extension.IsEmpty())
+		{
+			bool bAlreadyConfigured = false;
+			Configured.Add(Extension, &bAlreadyConfigured);
+			if (bAlreadyConfigured)
+				continue;
+		}
+		Module->ConfigureRql(Context);
 		const FString Version = Module->GetExtensionVersion();
 		FString Report = FString::Printf(TEXT("`%s`"), *Module->GetRqlModuleName());
 		if (!Extension.IsEmpty())

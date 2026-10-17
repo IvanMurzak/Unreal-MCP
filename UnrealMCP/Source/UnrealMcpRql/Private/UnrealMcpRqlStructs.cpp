@@ -131,6 +131,11 @@ namespace UnrealMcpRqlStructsLocal
 		const FString Trimmed = UnrealMcpRqlFromStd(Text).TrimStartAndEnd();
 		if (!Trimmed.StartsWith(TEXT("#")) || (Trimmed.Len() != 7 && Trimmed.Len() != 9))
 			return false;
+		for (int32 Index = 1; Index < Trimmed.Len(); ++Index)
+		{
+			if (!FChar::IsHexDigit(Trimmed[Index]))
+				return false; // not a color: the number parse below reports the malformed literal
+		}
 		const FColor Color = FColor::FromHex(Trimmed);
 		if (Spec.Struct == TBaseStructure<FColor>::Get())
 		{

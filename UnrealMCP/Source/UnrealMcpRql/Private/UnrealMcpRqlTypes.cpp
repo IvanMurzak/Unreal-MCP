@@ -10,7 +10,6 @@
 #include "Containers/StringConv.h"
 #include "HAL/UnrealMemory.h"
 #include "Misc/OutputDeviceNull.h"
-#include "Misc/ScopeExit.h"
 #include "UObject/Class.h"
 #include "UObject/EnumProperty.h"
 #include "UObject/Object.h"
@@ -26,6 +25,7 @@
 #include "UObject/UObjectArray.h"
 #include "UObject/UnrealType.h"
 
+#include <cmath>
 #include <stdexcept>
 
 // ------------------------------------------------------------------ text
@@ -275,10 +275,10 @@ namespace UnrealMcpRqlTypesLocal
 				Types->Write(Property->ValueProp, Found, Value);
 				return;
 			}
-			const int32 Index = Helper.AddDefaultValue_Invalid_NeedsRehash();
-			Property->KeyProp->CopyCompleteValue(Helper.GetKeyPtr(Index), KeyValue.Ptr);
-			ON_SCOPE_EXIT { Helper.Rehash(); };
-			Types->Write(Property->ValueProp, Helper.GetValuePtr(Index), Value);
+			// Converted before the entry exists: a value that does not fit adds nothing.
+			FTempValue Item(Property->ValueProp);
+			Types->Write(Property->ValueProp, Item.Ptr, Value);
+			Helper.AddPair(KeyValue.Ptr, Item.Ptr);
 		}
 		void erase(const rql::Value& Key) override
 		{
@@ -625,6 +625,10 @@ void FUnrealMcpRqlTypes::AddPropertyMember(rql::TypeDescriptor& Descriptor, FPro
 	Member.nullable = bNullable;
 	Member.owning = IsOwning(Property);
 	Member.readonly = bOnObject ? !(bForceWritable || IsWritableOnClass(Property)) : false;
+	// Containers of an object are live views: an element write (set Tags[0] = ...) goes into a copy assigned back through
+	// the setter, so it gets the editor notifications and honours the member's read-only flag like a whole-container write.
+	Member.copy_on_read = bOnObject
+		&& (Property->IsA<FArrayProperty>() || Property->IsA<FSetProperty>() || Property->IsA<FMapProperty>());
 	FUnrealMcpRqlTypes* Self = this;
 	Member.getter = [Self, Property, Type](void* Container) -> rql::Value
 	{
@@ -918,11 +922,24 @@ void FUnrealMcpRqlTypes::Write(const FProperty* Property, void* ValuePtr, const 
 	{
 		const double Number = ToNumber(Value);
 		if (Numeric->IsFloatingPoint())
+		{
 			Numeric->SetFloatingPointPropertyValue(ValuePtr, Number);
-		else if (IsUnsigned(Property))
-			Numeric->SetIntPropertyValue(ValuePtr, static_cast<uint64>(FMath::Max(0.0, FMath::RoundToDouble(Number))));
+			return;
+		}
+		// Integers: out of range fails instead of wrapping (300 into a uint8 would store 44). The bounds are powers of
+		// two, exact as doubles; the upper one is exclusive.
+		const bool bUnsigned = IsUnsigned(Property);
+		const int32 Bits = Property->GetElementSize() * 8;
+		const double Rounded = FMath::RoundToDouble(Number);
+		const double Lower = bUnsigned ? 0.0 : -std::ldexp(1.0, Bits - 1);
+		const double Upper = bUnsigned ? std::ldexp(1.0, Bits) : std::ldexp(1.0, Bits - 1);
+		if (!FMath::IsFinite(Rounded) || Rounded < Lower || Rounded >= Upper)
+			Throw(FString::Printf(TEXT("%s is out of range for %s (%s integer of %d bits)"), *UnrealMcpRqlFromStd(rql::describe_value(Value)),
+				*Property->GetAuthoredName(), bUnsigned ? TEXT("an unsigned") : TEXT("a signed"), Bits));
+		if (bUnsigned)
+			Numeric->SetIntPropertyValue(ValuePtr, static_cast<uint64>(Rounded));
 		else
-			Numeric->SetIntPropertyValue(ValuePtr, static_cast<int64>(FMath::RoundToDouble(Number)));
+			Numeric->SetIntPropertyValue(ValuePtr, static_cast<int64>(Rounded));
 		return;
 	}
 	if (const FStrProperty* StrProperty = CastField<FStrProperty>(Property))
@@ -999,11 +1016,12 @@ void FUnrealMcpRqlTypes::Write(const FProperty* Property, void* ValuePtr, const 
 		const std::vector<rql::Value> Items = ListItems(Value);
 		FScriptSetHelper Helper(SetProperty, ValuePtr);
 		Helper.EmptyElements();
-		ON_SCOPE_EXIT { Helper.Rehash(); };
 		for (const rql::Value& Item : Items)
 		{
-			const int32 Index = Helper.AddDefaultValue_Invalid_NeedsRehash();
-			Write(SetProperty->ElementProp, Helper.GetElementPtr(Index), Item);
+			// Converted first, then added by hash: equal elements (["a", "a"], or names differing in case) collapse to one.
+			FTempValue Element(SetProperty->ElementProp);
+			Write(SetProperty->ElementProp, Element.Ptr, Item);
+			Helper.AddElement(Element.Ptr);
 		}
 		return;
 	}
@@ -1019,12 +1037,14 @@ void FUnrealMcpRqlTypes::Write(const FProperty* Property, void* ValuePtr, const 
 		});
 		FScriptMapHelper Helper(MapProperty, ValuePtr);
 		Helper.EmptyValues();
-		ON_SCOPE_EXIT { Helper.Rehash(); };
 		for (const std::pair<rql::Value, rql::Value>& Entry : Entries)
 		{
-			const int32 Index = Helper.AddDefaultValue_Invalid_NeedsRehash();
-			Write(MapProperty->KeyProp, Helper.GetKeyPtr(Index), Entry.first);
-			Write(MapProperty->ValueProp, Helper.GetValuePtr(Index), Entry.second);
+			// Converted first, then added by hash: keys that convert to the same key (FName case) keep the last value.
+			FTempValue Key(MapProperty->KeyProp);
+			FTempValue Item(MapProperty->ValueProp);
+			Write(MapProperty->KeyProp, Key.Ptr, Entry.first);
+			Write(MapProperty->ValueProp, Item.Ptr, Entry.second);
+			Helper.AddPair(Key.Ptr, Item.Ptr);
 		}
 		return;
 	}
@@ -1037,9 +1057,19 @@ void FUnrealMcpRqlTypes::WriteObjectProperty(UObject* Object, FProperty* Propert
 		Throw(TEXT("the object is gone"));
 	// The editor's own property-change path, so components refresh (transforms, render state) and Blueprint actors rerun
 	// their construction script — exactly as an edit in the Details panel.
+	// PreEditChange and PostEditChangeProperty always pair up: an actor unregisters its components in PreEditChange and
+	// re-registers them in PostEditChangeProperty, so a failing write must still send the post notification.
 	Object->PreEditChange(Property);
-	Write(Property, Property->ContainerPtrToValuePtr<void>(Object), Value);
 	FPropertyChangedEvent Event(Property, EPropertyChangeType::ValueSet);
+	try
+	{
+		Write(Property, Property->ContainerPtrToValuePtr<void>(Object), Value);
+	}
+	catch (...)
+	{
+		Object->PostEditChangeProperty(Event);
+		throw;
+	}
 	Object->PostEditChangeProperty(Event);
 }
 

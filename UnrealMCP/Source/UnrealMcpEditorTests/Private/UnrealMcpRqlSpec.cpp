@@ -9,14 +9,18 @@
 #include "UnrealMcpToolRegistry.h"
 #include "Tools/UnrealMcpLogCollector.h"
 
+#include "Components/AudioComponent.h"
+#include "Components/LODSyncComponent.h"
 #include "Components/PointLightComponent.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
 #include "Editor.h"
+#include "Engine/LevelStreamingVolume.h"
 #include "Engine/PointLight.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "GameFramework/Actor.h"
+#include "UObject/UObjectGlobals.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 
@@ -365,6 +369,119 @@ void FUnrealMcpRqlSpec::Define()
 			const TSharedPtr<FJsonObject> Asset = Exec(TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"/Engine/EngineMaterials/DefaultMaterial"}]},"stages":[{"op":"select","fields":[{"name":"Name","expr":{"path":["Name"]}},{"name":"Scalars","expr":{"path":["Scalars"]}}]}]})RQL"));
 			TestTrue(*FString::Printf(TEXT("asset ok (%s)"), *Codes(Asset)), IsOk(Asset));
 			TestEqual(TEXT("asset name"), CellText(Asset, 0, 0), FString(TEXT("DefaultMaterial")));
+		});
+	});
+
+	Describe("write rules", [this]()
+	{
+		It("writes container elements through the owner's setter (notified) and refuses read-only containers", [this]()
+		{
+			SpawnLamp();
+			TArray<AActor*> Found = Lamps();
+			if (!TestEqual(TEXT("spawned"), Found.Num(), 1))
+				return;
+			AActor* Lamp = Found[0];
+			// actors | where Label == "RqlSpecLamp" | set Tags = ["a", "b"]
+			TestTrue(TEXT("tags set"), IsOk(Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"RqlSpecLamp"}]}},{"op":"set","assign":[{"target":{"path":["Tags"]},"value":{"list":[{"lit":"a"},{"lit":"b"}]}}]}]})RQL"), true)));
+
+			int32 TagNotifications = 0;
+			const FDelegateHandle Handle = FCoreUObjectDelegates::OnObjectPropertyChanged.AddLambda(
+				[Lamp, &TagNotifications](UObject* Object, FPropertyChangedEvent& Event)
+				{
+					if (Object == Lamp && Event.GetMemberPropertyName() == GET_MEMBER_NAME_CHECKED(AActor, Tags))
+						++TagNotifications;
+				});
+			// actors | where Label == "RqlSpecLamp" | set Tags[0] = "z"
+			const TSharedPtr<FJsonObject> Element = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"RqlSpecLamp"}]}},{"op":"set","assign":[{"target":{"path":["Tags",{"index":0}]},"value":{"lit":"z"}}]}]})RQL"), true);
+			FCoreUObjectDelegates::OnObjectPropertyChanged.Remove(Handle);
+			TestTrue(*FString::Printf(TEXT("element set ok (%s)"), *Codes(Element)), IsOk(Element));
+			TestTrue(TEXT("element written"), Lamp->Tags.Num() == 2 && Lamp->Tags[0] == FName(TEXT("z")) && Lamp->Tags[1] == FName(TEXT("b")));
+			TestTrue(TEXT("the owner got PostEditChangeProperty"), TagNotifications >= 1);
+
+			// A VisibleAnywhere / BlueprintReadOnly array: its elements are read-only too.
+			UWorld* W = World();
+			ALevelStreamingVolume* Volume = W ? W->SpawnActor<ALevelStreamingVolume>() : nullptr;
+			if (!TestNotNull(TEXT("volume"), Volume))
+				return;
+			Volume->SetActorLabel(TEXT("RqlSpecLampRO"));
+			Volume->StreamingLevelNames.Add(TEXT("Keep"));
+			// actors | where Label == "RqlSpecLampRO" | set StreamingLevelNames[0] = "X"
+			const TSharedPtr<FJsonObject> ReadOnly = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"RqlSpecLampRO"}]}},{"op":"set","assign":[{"target":{"path":["StreamingLevelNames",{"index":0}]},"value":{"lit":"X"}}]}]})RQL"), true);
+			TestFalse(TEXT("read-only element refused"), IsOk(ReadOnly));
+			TestTrue(*FString::Printf(TEXT("readonly-member (%s)"), *Codes(ReadOnly)), Codes(ReadOnly).Contains(TEXT("readonly-member")));
+			TestEqual(TEXT("unchanged"), Volume->StreamingLevelNames[0], FName(TEXT("Keep")));
+		});
+
+		It("collapses duplicate set elements and map keys", [this]()
+		{
+			SpawnLamp();
+			// actors | where Label == "RqlSpecLamp" | call AddComponent("AudioComponent", "RqlSpecAudio")
+			TestTrue(TEXT("audio added"), IsOk(Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"RqlSpecLamp"}]}},{"op":"call","method":"AddComponent","args":[{"lit":"AudioComponent"},{"lit":"RqlSpecAudio"}]}]})RQL"), true)));
+			// actors | where Label == "RqlSpecLamp" | call AddComponent("LODSyncComponent", "RqlSpecSync")
+			TestTrue(TEXT("lod sync added"), IsOk(Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"RqlSpecLamp"}]}},{"op":"call","method":"AddComponent","args":[{"lit":"LODSyncComponent"},{"lit":"RqlSpecSync"}]}]})RQL"), true)));
+			// actors | where Label == "RqlSpecLamp" | get Components | where $ is AudioComponent | set ConcurrencySet = [null, null]
+			const TSharedPtr<FJsonObject> Set = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"RqlSpecLamp"}]}},{"op":"get","expr":{"path":["Components"]}},{"op":"where","pred":{"op":"is","args":[{"path":[]},{"lit":"AudioComponent"}]}},{"op":"set","assign":[{"target":{"path":["ConcurrencySet"]},"value":{"list":[{"lit":null},{"lit":null}]}}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("set write ok (%s)"), *Codes(Set)), IsOk(Set));
+			// actors | where Label == "RqlSpecLamp" | get Components | where $ is LODSyncComponent | set CustomLODMapping = {a: {}, A: {}}
+			const TSharedPtr<FJsonObject> Map = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"RqlSpecLamp"}]}},{"op":"get","expr":{"path":["Components"]}},{"op":"where","pred":{"op":"is","args":[{"path":[]},{"lit":"LODSyncComponent"}]}},{"op":"set","assign":[{"target":{"path":["CustomLODMapping"]},"value":{"object":[{"key":"a","value":{"object":[]}},{"key":"A","value":{"object":[]}}]}}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("map write ok (%s)"), *Codes(Map)), IsOk(Map));
+			TArray<AActor*> Found = Lamps();
+			if (!TestEqual(TEXT("one lamp"), Found.Num(), 1))
+				return;
+			const UAudioComponent* Audio = Found[0]->FindComponentByClass<UAudioComponent>();
+			const ULODSyncComponent* Sync = Found[0]->FindComponentByClass<ULODSyncComponent>();
+			TestTrue(TEXT("[null, null] is one element"), Audio && Audio->ConcurrencySet.Num() == 1);
+			TestTrue(TEXT("keys a / A (one FName) are one entry"), Sync && Sync->CustomLODMapping.Num() == 1);
+		});
+
+		It("rejects integers out of range instead of wrapping", [this]()
+		{
+			SpawnLamp();
+			TArray<AActor*> Found = Lamps();
+			if (!TestEqual(TEXT("spawned"), Found.Num(), 1))
+				return;
+			// actors | where Label == "RqlSpecLamp" | set InputPriority = 7
+			TestTrue(TEXT("in range ok"), IsOk(Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"RqlSpecLamp"}]}},{"op":"set","assign":[{"target":{"path":["InputPriority"]},"value":{"lit":7}}]}]})RQL"), true)));
+			// actors | where Label == "RqlSpecLamp" | set InputPriority = 3000000000
+			const TSharedPtr<FJsonObject> Big = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"RqlSpecLamp"}]}},{"op":"set","assign":[{"target":{"path":["InputPriority"]},"value":{"lit":3000000000}}]}]})RQL"), true);
+			TestFalse(TEXT("out of range fails"), IsOk(Big));
+			TestTrue(*FString::Printf(TEXT("says out of range (%s)"), *Codes(Big)), Codes(Big).Contains(TEXT("out of range")));
+			TestEqual(TEXT("value kept"), Found[0]->InputPriority, 7);
+		});
+
+		It("refuses level saves outside writable content and invalid component names", [this]()
+		{
+			// editor | call SaveLevel("/Engine/RqlSpecNope")
+			const TSharedPtr<FJsonObject> Save = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"SaveLevel","args":[{"lit":"/Engine/RqlSpecNope"}]}]})RQL"), true);
+			TestFalse(TEXT("SaveLevel to /Engine refused"), IsOk(Save));
+			TestTrue(*FString::Printf(TEXT("not writable (%s)"), *Codes(Save)), Codes(Save).Contains(TEXT("not a writable level path")));
+			// editor | call NewLevel("/Engine/RqlSpecNope")
+			UWorld* Before = World();
+			const TSharedPtr<FJsonObject> New = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"NewLevel","args":[{"lit":"/Engine/RqlSpecNope"}]}]})RQL"), true);
+			TestFalse(TEXT("NewLevel at /Engine refused"), IsOk(New));
+			TestTrue(TEXT("the editor world is kept"), World() == Before);
+
+			SpawnLamp();
+			// actors | where Label == "RqlSpecLamp" | call AddComponent("StaticMeshComponent", "bad name.x")
+			const TSharedPtr<FJsonObject> Bad = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"RqlSpecLamp"}]}},{"op":"call","method":"AddComponent","args":[{"lit":"StaticMeshComponent"},{"lit":"bad name.x"}]}]})RQL"), true);
+			TestFalse(TEXT("invalid name refused"), IsOk(Bad));
+			TestTrue(*FString::Printf(TEXT("says why (%s)"), *Codes(Bad)), Codes(Bad).Contains(TEXT("not a valid component name")));
+			TArray<AActor*> Found = Lamps();
+			TestTrue(TEXT("no component added"), Found.Num() == 1 && Found[0]->GetInstanceComponents().Num() == 0);
+		});
+
+		It("accepts #rrggbb colors and rejects non-hex ones", [this]()
+		{
+			SpawnLamp();
+			// actors | where Label == "RqlSpecLamp" | get Components | where $ is PointLightComponent | set LightColor = "#ff0000"
+			const TSharedPtr<FJsonObject> Red = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"RqlSpecLamp"}]}},{"op":"get","expr":{"path":["Components"]}},{"op":"where","pred":{"op":"is","args":[{"path":[]},{"lit":"PointLightComponent"}]}},{"op":"set","assign":[{"target":{"path":["LightColor"]},"value":{"lit":"#ff0000"}}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("hex ok (%s)"), *Codes(Red)), IsOk(Red));
+			// actors | where Label == "RqlSpecLamp" | get Components | where $ is PointLightComponent | set LightColor = "#zzzzzz"
+			const TSharedPtr<FJsonObject> Bad = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"RqlSpecLamp"}]}},{"op":"get","expr":{"path":["Components"]}},{"op":"where","pred":{"op":"is","args":[{"path":[]},{"lit":"PointLightComponent"}]}},{"op":"set","assign":[{"target":{"path":["LightColor"]},"value":{"lit":"#zzzzzz"}}]}]})RQL"), true);
+			TestFalse(TEXT("non-hex refused"), IsOk(Bad));
+			TArray<AActor*> Found = Lamps();
+			const UPointLightComponent* Light = Found.Num() == 1 ? Found[0]->FindComponentByClass<UPointLightComponent>() : nullptr;
+			TestTrue(TEXT("still red"), Light && Light->LightColor == FColor(255, 0, 0, 255));
 		});
 	});
 

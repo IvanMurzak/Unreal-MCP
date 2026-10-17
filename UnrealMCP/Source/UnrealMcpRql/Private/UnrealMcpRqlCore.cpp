@@ -456,6 +456,8 @@ namespace UnrealMcpRqlCoreLocal
 				if (!Class || !Class->IsChildOf(UActorComponent::StaticClass()) || Class->HasAnyClassFlags(CLASS_Abstract))
 					Throw(FString::Printf(TEXT("'%s' is not a component class (e.g. \"StaticMeshComponent\")"), *ClassName));
 				const FString Requested = TextArg(Args[1]);
+				if (!Requested.IsEmpty() && !FName::IsValidXName(Requested, INVALID_OBJECTNAME_CHARACTERS))
+					Throw(FString::Printf(TEXT("'%s' is not a valid component name (spaces and characters such as . : / , are not allowed)"), *Requested));
 				FName Name = Requested.IsEmpty() ? MakeUniqueObjectName(Actor, Class, Class->GetFName()) : FName(*Requested);
 				if (!Requested.IsEmpty() && StaticFindObjectFast(nullptr, Actor, Name))
 					Throw(FString::Printf(TEXT("%s already has a component named '%s'"), *Actor->GetActorLabel(), *Requested));

@@ -167,6 +167,8 @@ UWorld* UUnrealMcpRqlEditorApi::NewLevel(const FString& Path, const FString& Tem
 	{
 		if (!ToPackageName(Path, Package, Error))
 			return Failed<UWorld*>(Error);
+		if (!IsWritableRoot(Package))
+			return Failed<UWorld*>(FString::Printf(TEXT("'%s' is not a writable level path (use e.g. /Game/Maps/Name)"), *Package));
 		FString Existing;
 		if (FPackageName::DoesPackageExist(Package, &Existing) && !Existing.EndsWith(FPackageName::GetMapPackageExtension(), ESearchCase::IgnoreCase))
 			return Failed<UWorld*>(FString::Printf(TEXT("'%s' exists and is not a level"), *Package));
@@ -200,6 +202,8 @@ void UUnrealMcpRqlEditorApi::SaveLevel(const FString& Path)
 		FString Package, Error;
 		if (!ToPackageName(Path, Package, Error))
 			return Failed(Error);
+		if (!IsWritableRoot(Package))
+			return Failed(FString::Printf(TEXT("'%s' is not a writable level path (use e.g. /Game/Maps/Name)"), *Package));
 		if (!UEditorLoadingAndSavingUtils::SaveMap(World, Package))
 			Failed(FString::Printf(TEXT("could not save the level to '%s'"), *Package));
 		return;
