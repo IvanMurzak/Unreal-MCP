@@ -314,7 +314,24 @@ void FUnrealMcpConfigSpec::Define()
 			TestEqual(TEXT("mode"), Eff->GetStringField(TEXT("mode")), FString(TEXT("Custom")));
 			TestEqual(TEXT("host trailing slash trimmed"), Eff->GetStringField(TEXT("host")), FString(TEXT("http://localhost:5200")));
 			TestTrue(TEXT("token empty (Custom+None)"), Eff->GetStringField(TEXT("token")).IsEmpty());
+			TestEqual(TEXT("authOption none by default"), Eff->GetStringField(TEXT("authOption")), FString(TEXT("none")));
 			TestTrue(TEXT("keepConnected true by default"), Eff->GetBoolField(TEXT("keepConnected")));
+		});
+
+		It("carries the Custom auth option so the sidecar can scope the account token to loopback hosts", [this]()
+		{
+			FUnrealMcpConfig Config;
+			Config.ConnectionMode = EUnrealMcpConnectionMode::Custom;
+			Config.AuthOption = EUnrealMcpAuthOption::Oauth;
+			Config.CustomToken = TEXT("stale-local-secret");
+
+			const TSharedPtr<FJsonObject> Eff = Config.BuildEffectiveConnectionConfig();
+			TestEqual(TEXT("authOption oauth"), Eff->GetStringField(TEXT("authOption")), FString(TEXT("oauth")));
+			TestTrue(TEXT("no static bearer in oauth mode"), Eff->GetStringField(TEXT("token")).IsEmpty());
+			TestEqual(TEXT("explicit token for a non-loopback host"), Eff->GetStringField(TEXT("explicitToken")), FString(TEXT("stale-local-secret")));
+
+			Config.AuthOption = EUnrealMcpAuthOption::Token;
+			TestTrue(TEXT("no explicit token outside oauth"), Config.BuildEffectiveConnectionConfig()->GetStringField(TEXT("explicitToken")).IsEmpty());
 		});
 	});
 

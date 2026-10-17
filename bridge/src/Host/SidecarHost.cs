@@ -67,6 +67,9 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         private readonly string? _fallbackHost;
         private readonly string? _fallbackToken;
 
+        /// <summary>The env var the plugin and <see cref="Program"/> read the explicit bearer from.</summary>
+        internal const string EnvToken = "UNREAL_MCP_TOKEN";
+
         private readonly ConnectionConfig _config = new()
         {
             KeepConnected = true,
@@ -163,6 +166,16 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         // Task.Run worker while ApplyConnectionConfig writes it on the IPC reader thread.
         private volatile bool _isCloudMode;
 
+        // Whether the last applied connection config selected the Custom-mode "oauth" authorization. Gates the
+        // loopback-only account-token rule in ResolveBearerAsync (LoopbackTokenScope). Volatile: read on the SignalR
+        // dial thread while ApplyConnectionConfig writes it on the IPC reader thread.
+        private volatile bool _isCustomOAuth;
+
+        // The plugin's configured Custom token in oauth mode (the §8 config's "explicitToken": env, .env or the
+        // stored Custom token), kept apart from BearerToken, which can also hold a Cloud bearer or a device-flow
+        // account JWT. Null when the plugin sent none.
+        private volatile string? _customExplicitToken;
+
         // The plugin's effective CUSTOM-mode host (FUnrealMcpConfig::ResolveCustomHost()) as last pushed over the
         // §8 `config` message — the source of precedence level 2 for the local-server bind port (see
         // ProjectConnectionResolver.Resolve). Deliberately NOT _config.Host: that carries the Cloud /mcp suffix,
@@ -247,7 +260,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             // dial instead of reading a static ConnectionConfig.Token. ResolveBearerAsync returns the Cloud machine-
             // stored JWT when signed in, else the static bearer the plugin pushes over IPC (or the Build()-time env
             // fallback) — behavior-identical to the pre-7.0 static-token path when no credential store is wired.
-            _config.CredentialProvider = ResolveBearerAsync;
+            SetHost(_config.Host);
             // Default to the real IPC send; SetStatusEmitterForTest swaps it in the xUnit suite.
             _statusEmitter = status => _ipc.SendToPluginAsync(status, CancellationToken.None);
             _agentConfig = new AgentConfigService(loggerProvider?.CreateLogger(nameof(AgentConfigService)), ResolveProjectKeyProvider);
@@ -393,11 +406,19 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         /// signed in (device-flow sign-in or boot auto-adopt of a seeded store, D12), return its ES256 JWT — the
         /// provider proactively refreshes it before <c>exp</c>. Otherwise return the static bearer the plugin pushed
         /// over IPC (Custom mode) or the Build()-time env fallback — behavior-identical to the pre-mcp-authorize path.
-        /// A Custom-mode local token is never overridden by a cloud credential (the <see cref="_isCloudMode"/> guard).
+        /// A Custom-mode local token is never overridden by a cloud credential (the <see cref="_isCloudMode"/> guard),
+        /// except Custom + <c>oauth</c>: the account JWT for a loopback host only, otherwise the explicit token or a
+        /// refusal (<see cref="LoopbackTokenScope"/>).
         /// </summary>
-        private Task<string?> ResolveBearerAsync()
+        private Task<string?> ResolveBearerAsync(string dialHost)
         {
             var provider = _credentialProvider;
+            if (!_isCloudMode && _isCustomOAuth)
+                return LoopbackTokenScope.ResolveAsync(
+                    dialHost,
+                    async () => provider is { IsSignedIn: true } ? await provider.GetAccessTokenAsync().ConfigureAwait(false) : null,
+                    _customExplicitToken ?? _fallbackToken,
+                    EnvToken);
             if (provider != null && _isCloudMode && provider.IsSignedIn)
                 return ResolveCloudBearerAsync(provider);
             return Task.FromResult(BearerToken);
@@ -493,7 +514,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
                 return;
 
             if (!string.IsNullOrWhiteSpace(_fallbackHost))
-                _config.Host = _fallbackHost!;
+                SetHost(_fallbackHost!);
             if (!string.IsNullOrWhiteSpace(_fallbackToken))
                 BearerToken = _fallbackToken;
 
@@ -712,12 +733,17 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             var wasKeepConnected = _config.KeepConnected;
             var priorHost = _config.Host;
             var priorToken = BearerToken;
+            var priorCustomOAuth = _isCustomOAuth;
+            var priorExplicitToken = _customExplicitToken;
             ApplyConnectionConfig(config);
             _logger?.LogInformation("Applied updated connection config (mode-aware host {Host}).", _config.Host);
 
+            // A Custom auth-option or explicit-token change alters the bearer too (Custom + oauth), so it re-dials.
             var hostOrTokenChanged =
                 !string.Equals(priorHost, _config.Host, StringComparison.Ordinal) ||
-                !string.Equals(priorToken, BearerToken, StringComparison.Ordinal);
+                !string.Equals(priorToken, BearerToken, StringComparison.Ordinal) ||
+                priorCustomOAuth != _isCustomOAuth ||
+                !string.Equals(priorExplicitToken, _customExplicitToken, StringComparison.Ordinal);
 
             switch (DecideConfigTransition(wasKeepConnected, _config.KeepConnected, hostOrTokenChanged))
             {
@@ -776,6 +802,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             var host = ReadString(config, "host");
             var cloudUrl = ReadString(config, "cloudUrl");
             var token = ReadString(config, "token");
+            var authOption = ReadString(config, "authOption");
 
             // Mode-aware host selection: Cloud connects to cloudUrl, Custom to host (§8). Fall back to the
             // other field only when the mode's own field is blank, so a partial message still resolves a host.
@@ -785,6 +812,12 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             // must not silently flip us out of Cloud.
             if (mode != null)
                 _isCloudMode = isCloud;
+            // Custom-mode authorization ("none" / "oauth" / "token"); absent leaves the previous value (partial push).
+            if (authOption != null)
+                _isCustomOAuth = string.Equals(authOption, "oauth", StringComparison.OrdinalIgnoreCase);
+            var explicitToken = ReadString(config, "explicitToken");
+            if (explicitToken != null)
+                _customExplicitToken = string.IsNullOrEmpty(explicitToken) ? null : explicitToken;
 
             // Remember the raw Custom-mode host for the local-server bind-port precedence (level 2). Captured
             // BEFORE the mode-aware selection below so the Cloud /mcp suffix never reaches the port parser. An
@@ -805,7 +838,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
                 // (idempotent — never /mcp/mcp). Custom mode: use the host verbatim (a local/self-hosted
                 // server exposes the hub at the root, like Unity/Godot Custom). Device-auth strips this back
                 // off in StartDeviceAuth (the AS /oauth/... is NOT behind /mcp).
-                _config.Host = isCloud ? AppendCloudHubPath(selected!) : selected!;
+                SetHost(isCloud ? AppendCloudHubPath(selected!) : selected!);
 
             // Token: the plugin already applied mode+auth resolution (empty in Custom+None). An absent key
             // leaves the existing token; an explicit empty value clears it (anonymous connection). The resolved
@@ -816,6 +849,17 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
 
             if (config["keepConnected"] is JsonValue keepNode && keepNode.TryGetValue<bool>(out var keepConnected))
                 _config.KeepConnected = keepConnected;
+        }
+
+        /// <summary>
+        /// Set the dial host and bind the credential provider to it. McpPlugin reads the provider once per HubConnection
+        /// build, so a link keeps checking the host it actually dials even after the host changes (a reconnect of the
+        /// old link never sees the new host).
+        /// </summary>
+        private void SetHost(string host)
+        {
+            _config.Host = host;
+            _config.CredentialProvider = () => ResolveBearerAsync(host);
         }
 
         /// <summary>

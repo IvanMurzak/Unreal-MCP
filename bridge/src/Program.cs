@@ -93,7 +93,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge
                 loggerProvider,
                 fallbackHost: Environment.GetEnvironmentVariable("UNREAL_MCP_HOST")
                               ?? Environment.GetEnvironmentVariable("UNREAL_MCP_CLOUD_URL"),
-                fallbackToken: Environment.GetEnvironmentVariable("UNREAL_MCP_TOKEN"));
+                fallbackToken: Environment.GetEnvironmentVariable(SidecarHost.EnvToken));
             host.Build();
 
             // No-orphan watchdogs (§6) ------------------------------------------------------------------
