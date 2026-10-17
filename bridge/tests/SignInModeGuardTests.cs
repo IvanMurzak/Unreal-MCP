@@ -122,6 +122,48 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         }
 
         [Fact]
+        public async Task AuthRevokeInCustomMode_RevokesAtTheAccountServer_AndKeepsTheCustomToken()
+        {
+            // A legacy store without a server target: revocation falls back to the account server, never the Custom host.
+            new MachineCredentialStore(_storeDir).Write(new MachineCredentials
+            {
+                Families = new MachineCredentialFamilies
+                {
+                    Plugin = new MachineCredentialFamily
+                    {
+                        AccessToken = "plugin-jwt", RefreshToken = "plugin-refresh",
+                        ClientId = "unreal-mcp-plugin", Scope = "mcp:plugin",
+                    },
+                },
+            });
+            var revokeHosts = new RecordingHandler();
+            using var host = new SidecarHost(NewIpc(), "0.1.0", credentialStore: new MachineCredentialStore(_storeDir),
+                authHttpClient: new HttpClient(revokeHosts));
+            host.SetStatusEmitterForTest(_ => Task.CompletedTask);
+            host.ApplyConnectionConfig(Custom("https://my-server.example.com", "token", "local-secret"));
+
+            host.HandleAuthMessage(IpcProtocol.Type.AuthRevoke);
+            await host.PendingSignOut!.WaitAsync(TimeSpan.FromSeconds(10));
+
+            Assert.Equal(new[] { "ai-game.dev/oauth/revoke" }, revokeHosts.Requests);
+            Assert.False(new MachineCredentialStore(_storeDir).Exists);
+            Assert.False(host.CredentialProvider!.IsSignedIn);
+            Assert.Equal("local-secret", host.CurrentBearer);
+        }
+
+        private sealed class RecordingHandler : HttpMessageHandler
+        {
+            public System.Collections.Generic.List<string> Requests { get; } = new();
+
+            protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+            {
+                lock (Requests)
+                    Requests.Add(request.RequestUri!.Host + request.RequestUri.AbsolutePath);
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
+            }
+        }
+
+        [Fact]
         public async Task ModeSwitchDuringTheStoreCommit_KeepsTheAccountTokenInTheMachineStoreOnly()
         {
             var exchange = new MachineCredentialTests.FakeExchangeClient(MachineCredentialTests.PluginExchangeSuccess());

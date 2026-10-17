@@ -287,10 +287,19 @@ public:
 	UNREALMCPEDITOR_API void TickAuthTimeout(double NowSeconds);
 	/** Cancel an in-progress device-code flow (sends `auth-cancel`; also clears a queued/awaiting auth-start). */
 	UNREALMCPEDITOR_API void CancelAuth();
-	/** Revoke + clear the stored cloud token (sends `auth-revoke`, clears CloudToken, persists). */
+	/**
+	 * Sign out of the ai-game.dev account (sends `auth-revoke`, clears CloudToken, persists only if one was stored).
+	 * Works in both modes and never touches the Custom-mode token.
+	 */
 	UNREALMCPEDITOR_API void Revoke();
-	/** Whether a cloud bearer is currently stored (drives the Authorize/Revoke button visibility). */
+	/** Whether a cloud bearer is currently stored in the Cloud connection config. */
 	bool HasCloudToken() const { return !Config.CloudToken.IsEmpty(); }
+	/**
+	 * Whether an ai-game.dev account credential exists: a stored Cloud bearer, or a sign-in the sidecar reported as
+	 * authorized. A sign-in that completes in Custom mode lives only in the machine credential store, so it has no
+	 * CloudToken. Drives the Revoke button in both modes.
+	 */
+	bool IsAccountSignedIn() const { return HasCloudToken() || DeviceAuthState == EUnrealMcpDeviceAuthState::Authorized; }
 
 	// --- Live status feed (caller marshals these onto the game thread first, §7). ---
 

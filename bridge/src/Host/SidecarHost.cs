@@ -191,6 +191,10 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         // Volatile: written on the IPC reader thread, read from the project-config Task.Run worker.
         private string? _customHost;
 
+        // The account server base (the config's cloudUrl, no /mcp suffix), kept in every mode so sign-out never
+        // falls back to a Custom host. Volatile: written on the IPC reader thread, read by the sign-out task.
+        private string? _cloudBaseUrl;
+
         // §7 connected-AI-agent roster (issue #109). The plugin's "AI agents" status row reflects
         // StatusMessage.AiAgents; before this it was hardcoded empty. The roster is the formatted label list
         // ("AI agent: {ClientName} ({ClientVersion})") for the currently-connected MCP clients, sourced from
@@ -859,6 +863,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             // choice is a design call — analysis and options are in PR #251 for owner sequencing.
             if (host != null)
                 Volatile.Write(ref _customHost, string.IsNullOrWhiteSpace(host) ? null : host);
+            if (!string.IsNullOrWhiteSpace(cloudUrl))
+                Volatile.Write(ref _cloudBaseUrl, StripCloudHubPath(cloudUrl));
             var selected = isCloud ? cloudUrl : host;
             if (string.IsNullOrWhiteSpace(selected))
                 selected = isCloud ? host : cloudUrl;
@@ -1511,15 +1517,20 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         /// the 04 §2 lock-protocol delete path — all via the shared <see cref="MachineWideSignOut"/> helper —
         /// followed by the provider's local state reset. Never throws (runs detached from the IPC reader thread).
         /// </summary>
+        /// <summary>The account server base: the pushed cloudUrl, else the dial host only while in Cloud mode.</summary>
+        internal string ResolveAccountServerBase() =>
+            Volatile.Read(ref _cloudBaseUrl) ?? (_isCloudMode ? StripCloudHubPath(_config.Host) : string.Empty);
+
         private async Task RunMachineWideSignOutAsync()
         {
             try
             {
                 if (_credentialStore != null && _machineLock != null)
                 {
-                    var stripped = StripCloudHubPath(_config.Host);
+                    // Each family is revoked at its stored server target; this default covers a legacy store
+                    // without one. It is the account server, never the current host, which may be a Custom host.
                     var revocationClient = _injectedRevocationClient
-                        ?? new TokenRevocationClient(string.IsNullOrWhiteSpace(stripped) ? string.Empty : stripped, _authHttpClient);
+                        ?? new TokenRevocationClient(ResolveAccountServerBase(), _authHttpClient);
                     var result = await MachineWideSignOut.SignOutAsync(
                         _credentialStore, _machineLock, revocationClient, _authenticator.ClientId, _logger).ConfigureAwait(false);
                     if (result.Busy)

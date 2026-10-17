@@ -609,6 +609,77 @@ void FUnrealMcpEditorViewModelSpec::Define()
 			TestEqual("nothing pushed for the account token", Rec->PushCount, PushBefore);
 		});
 
+		It("offers Revoke for a sign-in that completes in Custom mode", [this]()
+		{
+			TSharedRef<FRecording> Rec = MakeShared<FRecording>();
+			TSharedRef<FUnrealMcpEditorViewModel> VM = MakeViewModel(Rec);
+			TestFalse("no account before sign-in", VM->IsAccountSignedIn());
+
+			VM->Authorize();
+			VM->SetConnectionMode(EUnrealMcpConnectionMode::Custom);
+			TSharedPtr<FJsonObject> Authorized = MakeShared<FJsonObject>();
+			Authorized->SetStringField(TEXT("state"), TEXT("authorized"));
+			Authorized->SetStringField(TEXT("token"), TEXT("account-token"));
+			VM->ApplyDeviceAuth(Authorized);
+
+			// The account lives in the machine credential store only, yet the Revoke affordance must be offered.
+			TestFalse("no per-connection cloud token", VM->HasCloudToken());
+			TestTrue("account signed in (Revoke visible)", VM->IsAccountSignedIn());
+			TestEqual("still in Custom mode", static_cast<int32>(VM->GetConnectionMode()), static_cast<int32>(EUnrealMcpConnectionMode::Custom));
+		});
+
+		It("Revoke in Custom mode signs the account out and keeps the Custom token", [this]()
+		{
+			TSharedRef<FRecording> Rec = MakeShared<FRecording>();
+			TSharedRef<FUnrealMcpEditorViewModel> VM = MakeViewModel(Rec);
+
+			// A Cloud sign-in stored a CloudToken; the user then switches to Custom with their own bearer token.
+			VM->Authorize();
+			TSharedPtr<FJsonObject> Authorized = MakeShared<FJsonObject>();
+			Authorized->SetStringField(TEXT("state"), TEXT("authorized"));
+			Authorized->SetStringField(TEXT("token"), TEXT("account-token"));
+			VM->ApplyDeviceAuth(Authorized);
+			VM->SetConnectionMode(EUnrealMcpConnectionMode::Custom);
+			VM->SetAuthOption(EUnrealMcpAuthOption::Token);
+			VM->SetCustomToken(TEXT("local-secret"));
+			TestTrue("account signed in before revoke", VM->IsAccountSignedIn());
+			Rec->AuthSent.Reset();
+
+			VM->Revoke();
+
+			TestFalse("account signed out", VM->IsAccountSignedIn());
+			TestFalse("cloud token cleared", VM->HasCloudToken());
+			TestEqual("auth-revoke sent once", Rec->AuthSent.Num(), 1);
+			TestTrue("auth-revoke sent", Rec->AuthSent.Contains(TEXT("auth-revoke")));
+			TestEqual("Custom token kept", VM->GetCustomToken(), FString(TEXT("local-secret")));
+			TestEqual("Custom token still pushed as the bearer", Rec->LastPushed.ResolveEffectiveToken(), FString(TEXT("local-secret")));
+			TestTrue("cleared cloud token pushed", Rec->LastPushed.CloudToken.IsEmpty());
+		});
+
+		It("Revoke in Custom mode works for a machine-store-only account (no stored cloud token)", [this]()
+		{
+			TSharedRef<FRecording> Rec = MakeShared<FRecording>();
+			TSharedRef<FUnrealMcpEditorViewModel> VM = MakeViewModel(Rec);
+			VM->SetConnectionMode(EUnrealMcpConnectionMode::Custom);
+			VM->SetAuthOption(EUnrealMcpAuthOption::Token);
+			VM->SetCustomToken(TEXT("local-secret"));
+
+			VM->Authorize();
+			TSharedPtr<FJsonObject> Authorized = MakeShared<FJsonObject>();
+			Authorized->SetStringField(TEXT("state"), TEXT("authorized"));
+			Authorized->SetStringField(TEXT("token"), TEXT("account-token"));
+			VM->ApplyDeviceAuth(Authorized);
+			TestTrue("account signed in before revoke", VM->IsAccountSignedIn());
+			const int32 PushBefore = Rec->PushCount;
+
+			VM->Revoke();
+
+			TestFalse("account signed out", VM->IsAccountSignedIn());
+			TestTrue("auth-revoke sent", Rec->AuthSent.Contains(TEXT("auth-revoke")));
+			TestEqual("Custom token kept", VM->GetCustomToken(), FString(TEXT("local-secret")));
+			TestEqual("no config push (no connection token changed)", Rec->PushCount, PushBefore);
+		});
+
 		It("CancelAuth keeps the Authorized indicator when a cloud token is already stored", [this]()
 		{
 			TSharedRef<FRecording> Rec = MakeShared<FRecording>();
