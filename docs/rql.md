@@ -56,7 +56,7 @@ agent ──query text──▶ unreal-mcp-bridge (sidecar, .NET)          Unrea
   `Map`, `Levels`, `PersistentLevel`, `CurrentLevel`; MaterialInterface `Scalars` / `Vectors` / `Textures` (parameter
   maps, writable on material instances).
 - **Methods** (`call`): Actor `Destroy()`, `Duplicate(Offset)`, `AddComponent(ClassName, Name)`; component
-  `Destroy()`; every `CallInEditor` function; every UFUNCTION of an API class (the `editor` operations, extension
+  `Destroy()`; every parameterless `CallInEditor` function (the Details panel's buttons); every UFUNCTION of an API class (the `editor` operations, extension
   operations). Parameters and results convert like members; UHT's recorded C++ defaults become RQL defaults.
 - **Identity**: `$ref` is `Type#<UObject::GetUniqueID()>` (session ids, like Unity's instance ids); `ref(…)` resolves
   them directly. Every object value carries a weak pointer, so destroyed (garbage) objects read as null and are never

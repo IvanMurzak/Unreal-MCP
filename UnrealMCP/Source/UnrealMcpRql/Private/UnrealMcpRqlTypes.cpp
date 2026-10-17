@@ -733,7 +733,9 @@ bool FUnrealMcpRqlTypes::IsCallable(UClass* Class, UFunction* Function) const
 		return true;
 	if (Function->HasAnyFunctionFlags(FUNC_Static | FUNC_Private | FUNC_Protected))
 		return false;
-	return Function->HasMetaData(TEXT("CallInEditor"));
+	// The Details panel's buttons: CallInEditor functions without parameters (other CallInEditor functions are internal
+	// callbacks that merely carry the flag).
+	return Function->HasMetaData(TEXT("CallInEditor")) && Function->NumParms == 0;
 }
 
 bool FUnrealMcpRqlTypes::AddFunctionMethod(rql::TypeDescriptor& Descriptor, UFunction* Function)
