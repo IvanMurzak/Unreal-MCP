@@ -83,8 +83,12 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             return host;
         }
 
-        private static JsonObject Custom(string host, string authOption, string token = "") =>
-            new() { ["mode"] = "Custom", ["host"] = host, ["cloudUrl"] = "https://ai-game.dev", ["token"] = token, ["authOption"] = authOption };
+        private static JsonObject Custom(string host, string authOption, string token = "", string explicitToken = "") =>
+            new()
+            {
+                ["mode"] = "Custom", ["host"] = host, ["cloudUrl"] = "https://ai-game.dev", ["token"] = token,
+                ["authOption"] = authOption, ["explicitToken"] = explicitToken,
+            };
 
         [Theory]
         [InlineData("http://localhost:5200")]
@@ -146,6 +150,26 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             custom.Remove("token"); // partial push: the stored cloud bearer stays in the sidecar's bearer slot
             host.ApplyConnectionConfig(custom);
             Assert.Throws<CredentialScopeException>(() => host.CurrentBearer);
+        }
+
+        [Fact]
+        public void CustomOAuth_Remote_UsesPluginExplicitToken_OverEnv()
+        {
+            using var host = SignedInHost(envToken: "env-token");
+            host.ApplyConnectionConfig(Custom("https://my-server.example.com", "oauth", explicitToken: "configured-token"));
+            Assert.Equal("configured-token", host.CurrentBearer);
+        }
+
+        [Fact]
+        public void ProviderBoundToOldHost_NeverSendsMachineJwtThere_AfterHostTurnsLoopback()
+        {
+            using var host = SignedInHost();
+            host.ApplyConnectionConfig(Custom("https://my-server.example.com", "oauth", explicitToken: "configured-token"));
+            var remoteLinkProvider = host.Config.CredentialProvider!; // what the live remote HubConnection holds
+            host.ApplyConnectionConfig(Custom("http://localhost:5200", "oauth"));
+            Assert.Equal("machine-jwt", host.CurrentBearer); // a new link to localhost
+            // The old link still checks its own (remote) host: refused, never the machine JWT.
+            Assert.Throws<CredentialScopeException>(() => remoteLinkProvider().GetAwaiter().GetResult());
         }
 
         private sealed class NoNetworkHandler : HttpMessageHandler

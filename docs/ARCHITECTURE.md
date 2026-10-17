@@ -234,7 +234,7 @@ Envelope: every message is a JSON object with a `type` field. `requestId` correl
 | sidecar → plugin | `resource-read` | `requestId`, `uri`, `timeoutMs` (§A.1) — IPC v2 |
 | plugin → sidecar | `resource-response` | `requestId`, `status`, `contents[]` (text XOR base64 blob + mimeType) (§A.1) — IPC v2 |
 | sidecar → plugin | `tool-cancel` | `requestId` — cooperative cancellation (§4); reused for prompt-get / resource-read |
-| plugin → sidecar | `config` | UI/config changed: connect/disconnect, mode, host, token, authOption, enabled-tools map |
+| plugin → sidecar | `config` | UI/config changed: connect/disconnect, mode, host, token, authOption, explicitToken, enabled-tools map |
 | sidecar → plugin | `status` | SignalR state for the UI: `connectionState`, `keepConnected`, `cloudAuthState`, `serverProcessState`, `aiAgents[]` |
 | plugin → sidecar | `auth-start` | begin the device-code flow (UI Authorize button) |
 | plugin → sidecar | `auth-cancel` | abort an in-progress device-code flow |
@@ -964,9 +964,9 @@ the connection-config task).
     `McpPlugin.AgentConfig` token-aware validator, mcp-authorize i1) so the user re-Configures.
   - Locked by the `UnrealMcp.Config` + `UnrealMcp.AgentConfigModels` Automation specs.
 - **Custom + `oauth` account-token scope (identical in every engine plugin).** The `config` message carries
-  `authOption`; in Custom + `oauth` the sidecar presents the machine-store ai-game.dev account token only to a
+  `authOption` and `explicitToken` (the configured Custom token, oauth mode only); in Custom + `oauth` the sidecar presents the machine-store ai-game.dev account token only to a
   loopback host (`localhost`, `127.0.0.0/8`, `::1`, decided by parsing the URL, never DNS). Any other host gets
-  `UNREAL_MCP_TOKEN`, or the dial fails with "Refusing to send your ai-game.dev account token to <host>; set
+  `explicitToken` (else the sidecar's `UNREAL_MCP_TOKEN`), or the dial fails with "Refusing to send your ai-game.dev account token to <host>; set
   UNREAL_MCP_TOKEN or use a localhost server" (`bridge/src/Host/LoopbackTokenScope.cs`).
 
 ---

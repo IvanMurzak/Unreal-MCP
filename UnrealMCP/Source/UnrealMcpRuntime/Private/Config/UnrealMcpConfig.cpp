@@ -478,8 +478,11 @@ TSharedPtr<FJsonObject> FUnrealMcpConfig::BuildEffectiveConnectionConfig() const
 	Obj->SetStringField(TEXT("host"), ResolveCustomHost());
 	Obj->SetStringField(TEXT("cloudUrl"), ResolveCloudBaseUrl());
 	Obj->SetStringField(TEXT("token"), ResolveEffectiveToken());
-	// The sidecar applies the Custom + oauth loopback-only account-token rule, so it needs the auth option.
+	// The sidecar applies the Custom + oauth loopback-only account-token rule: it needs the auth option and, for a
+	// non-loopback host, the configured Custom token (never the account token; "token" stays empty in oauth mode).
 	Obj->SetStringField(TEXT("authOption"), AuthOptionToString(AuthOption));
+	const bool bCustomOauth = ConnectionMode == EUnrealMcpConnectionMode::Custom && AuthOption == EUnrealMcpAuthOption::Oauth;
+	Obj->SetStringField(TEXT("explicitToken"), bCustomOauth ? CustomToken : FString());
 	Obj->SetBoolField(TEXT("keepConnected"), bKeepConnected);
 	return Obj;
 }

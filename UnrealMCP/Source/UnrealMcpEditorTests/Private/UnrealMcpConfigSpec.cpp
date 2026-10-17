@@ -328,6 +328,10 @@ void FUnrealMcpConfigSpec::Define()
 			const TSharedPtr<FJsonObject> Eff = Config.BuildEffectiveConnectionConfig();
 			TestEqual(TEXT("authOption oauth"), Eff->GetStringField(TEXT("authOption")), FString(TEXT("oauth")));
 			TestTrue(TEXT("no static bearer in oauth mode"), Eff->GetStringField(TEXT("token")).IsEmpty());
+			TestEqual(TEXT("explicit token for a non-loopback host"), Eff->GetStringField(TEXT("explicitToken")), FString(TEXT("stale-local-secret")));
+
+			Config.AuthOption = EUnrealMcpAuthOption::Token;
+			TestTrue(TEXT("no explicit token outside oauth"), Config.BuildEffectiveConnectionConfig()->GetStringField(TEXT("explicitToken")).IsEmpty());
 		});
 	});
 
