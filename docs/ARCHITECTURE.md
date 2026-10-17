@@ -972,7 +972,8 @@ the connection-config task).
   `authOption` and `explicitToken` (the configured Custom token, oauth mode only); in Custom + `oauth` the sidecar presents the machine-store ai-game.dev account token only to a
   loopback host (`localhost`, `127.0.0.0/8`, `::1`, decided by parsing the URL, never DNS). Any other host gets
   `explicitToken` (else the sidecar's `UNREAL_MCP_TOKEN`), or the dial fails with "Refusing to send your ai-game.dev account token to <host>; set
-  UNREAL_MCP_TOKEN or use a localhost server" (`bridge/src/Host/LoopbackTokenScope.cs`).
+  UNREAL_MCP_TOKEN or use a localhost server" (McpPlugin's shared `CustomOAuthCredentialPolicy` / `HostScope`, bound to
+  the dial host in `SidecarHost.SetHost`).
 - **Sign-in completion is mode-checked.** A device-code sign-in is always committed to the machine credential
   store against the server it started on. Its account token enters the connection token slot (sidecar
   `BearerToken`, plugin `CloudToken`) only if the connection is still in Cloud mode when it completes; after a

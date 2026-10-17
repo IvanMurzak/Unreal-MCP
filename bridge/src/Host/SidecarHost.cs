@@ -76,6 +76,9 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             // The sidecar does not author SKILL.md files — that is the plugin/agent's job. Disabling also
             // avoids the skills-path resolver throwing when no project root is set (MCP-Plugin issue #107).
             GenerateSkillFiles = false,
+            // ConnectionErrorHint stays null: the plugin discards the sidecar's stderr (its log reaches only
+            // Saved/Logs/UnrealMcpBridge.log, a diagnostics file, never the editor UI), the same binary serves
+            // runtime games with no MCP window, and the UI already shows the connection state via `status`.
         };
 
         // McpPlugin 7.0 removed the static ConnectionConfig.Token string; the connection layer now pulls the
@@ -173,8 +176,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         private volatile bool _isCloudMode;
 
         // Whether the last applied connection config selected the Custom-mode "oauth" authorization. Gates the
-        // loopback-only account-token rule in ResolveBearerAsync (LoopbackTokenScope). Volatile: read on the SignalR
-        // dial thread while ApplyConnectionConfig writes it on the IPC reader thread.
+        // loopback-only account-token rule in ResolveBearerAsync (McpPlugin CustomOAuthCredentialPolicy).
+        // Volatile: read on the SignalR dial thread while ApplyConnectionConfig writes it on the IPC reader thread.
         private volatile bool _isCustomOAuth;
 
         // The plugin's configured Custom token in oauth mode (the §8 config's "explicitToken": env, .env or the
@@ -418,7 +421,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         /// over IPC (Custom mode) or the Build()-time env fallback — behavior-identical to the pre-mcp-authorize path.
         /// A Custom-mode local token is never overridden by a cloud credential (the <see cref="_isCloudMode"/> guard),
         /// except Custom + <c>oauth</c>: the account JWT for a loopback host only, otherwise the explicit token or a
-        /// refusal (<see cref="LoopbackTokenScope"/>).
+        /// refusal (<see cref="CustomOAuthCredentialPolicy"/>).
         /// </summary>
         private Task<string?> ResolveBearerAsync(string dialHost)
         {
@@ -431,7 +434,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
                 slotToken = BearerToken;
             }
             if (!isCloudMode && _isCustomOAuth)
-                return LoopbackTokenScope.ResolveAsync(
+                return CustomOAuthCredentialPolicy.ResolveAsync(
                     dialHost,
                     async () => provider is { IsSignedIn: true } ? await provider.GetAccessTokenAsync().ConfigureAwait(false) : null,
                     _customExplicitToken ?? _fallbackToken,
@@ -1524,7 +1527,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             {
                 // The live link keeps the bearer it was opened with: re-dial below if it presented the account token.
                 var linkUsedAccount = _credentialProvider?.IsSignedIn == true
-                    && (_isCloudMode || (_isCustomOAuth && LoopbackTokenScope.IsLoopback(_config.Host)));
+                    && (_isCloudMode || (_isCustomOAuth && HostScope.IsLoopback(_config.Host)));
                 if (_credentialStore != null && _machineLock != null)
                 {
                     // Each family is revoked at its stored server target; this default covers a legacy store
@@ -1584,7 +1587,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             {
                 _logger?.LogInformation("Sign-in completed outside Cloud mode; the account token is not applied to the connection.");
                 // Only a signed-in machine credential gives the loopback re-dial a new bearer to present.
-                if (_isCustomOAuth && _credentialProvider?.IsSignedIn == true && LoopbackTokenScope.IsLoopback(_config.Host))
+                if (_isCustomOAuth && _credentialProvider?.IsSignedIn == true && HostScope.IsLoopback(_config.Host))
                     await ReconnectAndEmitStatusAsync().ConfigureAwait(false);
                 return;
             }

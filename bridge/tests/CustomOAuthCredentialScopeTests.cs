@@ -13,6 +13,7 @@ using System.Net.Http;
 using System.Text.Json.Nodes;
 using System.Threading;
 using System.Threading.Tasks;
+using com.IvanMurzak.McpPlugin;
 using com.IvanMurzak.McpPlugin.AgentConfig;
 using com.IvanMurzak.Unreal.MCP.Bridge.Host;
 using com.IvanMurzak.Unreal.MCP.Bridge.Ipc;
@@ -22,40 +23,11 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
 {
     /// <summary>
     /// Custom + oauth: the ai-game.dev account token reaches a loopback host only; any other host gets
-    /// <c>UNREAL_MCP_TOKEN</c> or the dial fails (<see cref="LoopbackTokenScope"/>).
+    /// <c>UNREAL_MCP_TOKEN</c> or the dial fails (McpPlugin <see cref="CustomOAuthCredentialPolicy"/>,
+    /// whose own suite covers the <see cref="HostScope"/> URL cases; these tests pin the sidecar wiring).
     /// </summary>
-    public class LoopbackTokenScopeTests : IDisposable
+    public class CustomOAuthCredentialScopeTests : IDisposable
     {
-        [Theory]
-        [InlineData("http://localhost")]
-        [InlineData("http://localhost:8080")]
-        [InlineData("https://LOCALHOST:443/hub")]
-        [InlineData("http://127.0.0.1:11111")]
-        [InlineData("http://127.255.255.254")]
-        [InlineData("http://[::1]")]
-        [InlineData("http://[::1]:8080")]
-        [InlineData("http://[::ffff:127.0.0.1]:8080")]
-        public void IsLoopback_True(string url) => Assert.True(LoopbackTokenScope.IsLoopback(url));
-
-        [Theory]
-        [InlineData(null)]
-        [InlineData("")]
-        [InlineData("localhost:8080")]
-        [InlineData("https://ai-game.dev")]
-        [InlineData("http://evil.com")]
-        [InlineData("http://localhost@evil.com")]
-        [InlineData("http://user:pass@localhost:8080")]
-        [InlineData("http://127.0.0.1.evil.com")]
-        [InlineData("http://localhost.evil.com")]
-        [InlineData("http://evil.localhost")]
-        [InlineData("http://localhost.")]
-        [InlineData("http://128.0.0.1")]
-        [InlineData("http://0.0.0.0")]
-        [InlineData("http://192.168.1.10:8080")]
-        [InlineData("http://[::2]")]
-        [InlineData("ftp://localhost")]
-        public void IsLoopback_False(string? url) => Assert.False(LoopbackTokenScope.IsLoopback(url));
-
         private readonly string _storeDir = Path.Combine(Path.GetTempPath(), "umcp-scope-" + Guid.NewGuid().ToString("N")[..12]);
 
         public void Dispose()
