@@ -779,6 +779,37 @@ void UnrealMcpRqlConfigureCore(FUnrealMcpRqlSession& Session)
 
 	UnrealMcpRqlAddStructAdapters(Session);
 
+	// Object references from text, as an edit field accepts them: an asset path ("/Game/Meshes/SM_Cube"), a class name
+	// for class references ("PointLight"), an actor label / name / path for actors. Only coerce: the adapter shapes no
+	// members, so UObject descriptors stay unadapted (their members fill lazily).
+	{
+		rql::TypeAdapter References;
+		References.name = "UObject references";
+		References.target = T.ForClass(UObject::StaticClass());
+		References.coerce = [Types](const rql::Value& Value, const rql::TypeDescriptor& Target, rql::Value& Result, std::string& Reason) -> rql::AdapterOutcome
+		{
+			UClass* Wanted = Types->ClassOf(&Target);
+			if (!Value.is_string() || !Wanted)
+				return rql::AdapterOutcome::NotHandled;
+			const FString Text = UnrealMcpRqlFromStd(Value.as_string()).TrimStartAndEnd();
+			UObject* Found = nullptr;
+			if (Wanted->IsChildOf(UClass::StaticClass()))
+				Found = UnrealMcpRqlResolveClass(Text);
+			else if (Wanted->IsChildOf(AActor::StaticClass()))
+				Found = FUnrealMcpObjectRef::ResolveActor(Text);
+			else
+				Found = UnrealMcpRqlLoadObject(Wanted, Text);
+			if (!Found || !Found->IsA(Wanted))
+			{
+				Reason = UnrealMcpRqlToStd(FString::Printf(TEXT("no %s '%s'"), *Wanted->GetName(), *Text));
+				return rql::AdapterOutcome::Failed;
+			}
+			Result = Types->WrapObject(Found);
+			return rql::AdapterOutcome::Ok;
+		};
+		Session.AddAdapter(std::move(References));
+	}
+
 	Session.AddSource(TEXT("actors"), TEXT("list of Actor"), TEXT("every actor of the editor world's loaded levels (hidden ones included)"), [Types]()
 	{
 		TArray<UObject*> Actors;

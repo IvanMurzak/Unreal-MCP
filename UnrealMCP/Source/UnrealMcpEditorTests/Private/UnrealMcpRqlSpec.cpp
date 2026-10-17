@@ -284,6 +284,22 @@ void FUnrealMcpRqlSpec::Define()
 			TestEqual(TEXT("the original is gone"), CountLamps(), 0);
 		});
 
+		It("accepts object references as text (an actor label for an Actor parameter)", [this]()
+		{
+			SpawnLamp();
+			// editor | call SpawnActor("PointLight", "RqlSpecLamp2", "(0, 0, 0)", "(0, 0, 0)", "RqlSpecLamp")
+			const TSharedPtr<FJsonObject> Child = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"SpawnActor","args":[{"lit":"PointLight"},{"lit":"RqlSpecLamp2"},{"lit":"(0, 0, 0)"},{"lit":"(0, 0, 0)"},{"lit":"RqlSpecLamp"}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("spawn with a parent ok (%s)"), *Codes(Child)), IsOk(Child));
+			AActor* Parent = nullptr;
+			AActor* Attached = nullptr;
+			for (AActor* Actor : Lamps())
+			{
+				if (Actor->GetActorLabel() == TEXT("RqlSpecLamp")) Parent = Actor;
+				if (Actor->GetActorLabel() == TEXT("RqlSpecLamp2")) Attached = Actor;
+			}
+			TestTrue(TEXT("attached to the actor named by its label"), Parent && Attached && Attached->GetAttachParentActor() == Parent);
+		});
+
 		It("resolves stable refs and unreal.find", [this]()
 		{
 			SpawnLamp();
