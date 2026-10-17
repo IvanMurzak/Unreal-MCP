@@ -86,9 +86,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         // transition tasks mutate it (the same cross-thread access the pre-7.0 auto-property already had).
         private string? _bearerToken;
 
-        // Guards the pair (_isCloudMode, BearerToken) so the slot can hold a device-flow account token only while
-        // the connection is in Cloud mode: a sign-in completing in parallel with a switch to Custom either lands
-        // before the switch (and is overwritten by the Custom push) or sees Custom and leaves the slot alone.
+        // Guards the pair (_isCloudMode, BearerToken): the slot holds a device-flow account token only in Cloud mode.
         private readonly object _connectionSlotLock = new();
 
         // unified-machine-auth e1 (design 03 F1/F6, 04 §2-§4): the shared machine credential store + the McpPlugin
@@ -827,18 +825,19 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             // must not silently flip us out of Cloud.
             lock (_connectionSlotLock)
             {
-                var leavingCloud = mode != null && _isCloudMode && !isCloud;
                 if (mode != null)
+                {
+                    // Leaving Cloud without a token drops the Cloud bearer (possibly the account token).
+                    if (_isCloudMode && !isCloud && token == null)
+                        BearerToken = null;
                     _isCloudMode = isCloud;
+                }
                 // Token: the plugin already applied mode+auth resolution (empty in Custom+None). An absent key
                 // leaves the existing token; an explicit empty value clears it (anonymous connection). The resolved
                 // bearer flows to SignalR through ConnectionConfig.CredentialProvider (McpPlugin 7.0), which reads
-                // this stored value on the next dial. Leaving Cloud without a token drops the Cloud bearer, which
-                // may be the ai-game.dev account token and must never reach a Custom host.
+                // this stored value on the next dial.
                 if (token != null)
                     BearerToken = string.IsNullOrEmpty(token) ? null : token;
-                else if (leavingCloud)
-                    BearerToken = null;
             }
             // Custom-mode authorization ("none" / "oauth" / "token"); absent leaves the previous value (partial push).
             if (authOption != null)
@@ -1234,7 +1233,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
                     ct).ConfigureAwait(false);
 
                 if (result.Success && result.Token != null)
-                    await CommitAuthorizedSessionAsync(result, ct, cloudUrl).ConfigureAwait(false);
+                    await CommitAuthorizedSessionAsync(result, cloudUrl, ct).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -1255,10 +1254,9 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         /// as the string overload — nothing is persisted once the flow was cancelled. Tokens are NEVER logged
         /// (§8). Internal so the bridge xUnit suite drives it without the whole HTTP flow.
         /// </summary>
-        /// <para><paramref name="authBaseUrl"/> is the authorization server the flow ran against, captured at
-        /// <c>auth-start</c>: the commit and the RFC 8693 exchange target it, never the host current at completion
-        /// (the user may have switched to a Custom host meanwhile). Defaults to the current host for tests.</para>
-        internal async Task CommitAuthorizedSessionAsync(DeviceAuthResult result, CancellationToken ct, string? authBaseUrl = null)
+        /// <para><paramref name="authBaseUrl"/>: the authorization server captured at <c>auth-start</c>, never the
+        /// host current at completion (the user may have switched to a Custom host meanwhile).</para>
+        internal async Task CommitAuthorizedSessionAsync(DeviceAuthResult result, string authBaseUrl, CancellationToken ct)
         {
             if (ct.IsCancellationRequested || result.Token == null)
                 return;
@@ -1275,8 +1273,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
                 var fullyCommitted = false;
                 try
                 {
-                    fullyCommitted = await CommitLoginFamiliesAsync(
-                        result, authBaseUrl ?? StripCloudHubPath(_config.Host), ct).ConfigureAwait(false);
+                    fullyCommitted = await CommitLoginFamiliesAsync(result, authBaseUrl, ct).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException) when (ct.IsCancellationRequested)
                 {
@@ -1553,10 +1550,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         {
             if (ct.IsCancellationRequested)
                 return;
-            // The account token goes into the connection slot only if the connection is in Cloud mode NOW (the user
-            // may have switched while the sign-in was in flight). Otherwise it stays in the machine credential store
-            // only: Custom + oauth re-dials so a loopback host picks it up (LoopbackTokenScope); Custom none/token
-            // keeps its own bearer untouched.
+            // The account token enters the slot only in Cloud mode at completion (docs/ARCHITECTURE.md §8); otherwise
+            // it stays in the machine store, and a Custom + oauth loopback link re-dials to pick it up.
             bool appliedToCloud;
             lock (_connectionSlotLock)
             {
@@ -1567,7 +1562,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             if (!appliedToCloud)
             {
                 _logger?.LogInformation("Sign-in completed outside Cloud mode; the account token stays in the machine credential store only.");
-                if (_isCustomOAuth)
+                if (_isCustomOAuth && LoopbackTokenScope.IsLoopback(_config.Host))
                     await ReconnectAndEmitStatusAsync().ConfigureAwait(false);
                 return;
             }

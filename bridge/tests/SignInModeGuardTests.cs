@@ -41,13 +41,15 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
 
         private static IpcClient NewIpc() => new("127.0.0.1", 39998, token: "ipc-token", sidecarVersion: "0.1.0");
 
-        private static JsonObject Cloud() =>
-            new() { ["mode"] = "Cloud", ["cloudUrl"] = "https://ai-game.dev", ["token"] = "" };
+        private const string AuthServer = "https://ai-game.dev";
+
+        private static JsonObject Cloud(string token = "") =>
+            new() { ["mode"] = "Cloud", ["cloudUrl"] = AuthServer, ["token"] = token };
 
         private static JsonObject Custom(string host, string authOption, string token = "", string explicitToken = "") =>
             new()
             {
-                ["mode"] = "Custom", ["host"] = host, ["cloudUrl"] = "https://ai-game.dev", ["token"] = token,
+                ["mode"] = "Custom", ["host"] = host, ["cloudUrl"] = AuthServer, ["token"] = token,
                 ["authOption"] = authOption, ["explicitToken"] = explicitToken,
             };
 
@@ -60,10 +62,6 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             host.LoginDerivationRetryDelayMs = 0;
             return host;
         }
-
-        private static TokenExchangeResult PluginExchangeSuccess() =>
-            TokenExchangeResult.Success("plugin-jwt", "plugin-refresh", DateTimeOffset.UtcNow.AddHours(1),
-                scope: "mcp:plugin", subject: "usr_1", issuedTokenType: "urn:ietf:params:oauth:token-type:access_token");
 
         [Theory]
         [InlineData("none", "", null)]
@@ -104,7 +102,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         public void LeavingCloudWithoutAToken_DropsTheCloudBearer()
         {
             using var host = NewHost();
-            host.ApplyConnectionConfig(new JsonObject { ["mode"] = "Cloud", ["cloudUrl"] = "https://ai-game.dev", ["token"] = "account-jwt" });
+            host.ApplyConnectionConfig(Cloud("account-jwt"));
             Assert.Equal("account-jwt", host.CurrentBearer);
 
             host.ApplyConnectionConfig(new JsonObject { ["mode"] = "Custom", ["host"] = "https://my-server.example.com" });
@@ -115,21 +113,19 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         [Fact]
         public async Task ModeSwitchDuringTheStoreCommit_KeepsTheAccountTokenInTheMachineStoreOnly()
         {
-            SidecarHost? hostRef = null;
-            var exchange = new CallbackExchangeClient(() =>
-                hostRef!.ApplyConnectionConfig(Custom("https://my-server.example.com", "token", "local-secret")));
+            var exchange = new MachineCredentialTests.FakeExchangeClient(MachineCredentialTests.PluginExchangeSuccess());
             using var host = NewHost(new MachineCredentialStore(_storeDir), exchange);
-            hostRef = host;
+            exchange.OnExchange = () => host.ApplyConnectionConfig(Custom("https://my-server.example.com", "token", "local-secret"));
             host.ApplyConnectionConfig(Cloud());
 
             await host.CommitAuthorizedSessionAsync(
                 DeviceAuthResult.Authorized("agent-jwt", "agent-refresh", DateTimeOffset.UtcNow.AddHours(1)),
-                CancellationToken.None);
+                AuthServer, CancellationToken.None);
 
             Assert.Equal("local-secret", host.CurrentBearer);
             var creds = new MachineCredentialStore(_storeDir).Read();
             Assert.Equal("agent-jwt", creds?.Families?.Agent?.AccessToken);
-            Assert.Equal("https://ai-game.dev", creds!.ServerTarget);
+            Assert.Equal(AuthServer, creds!.ServerTarget);
         }
 
         [Fact]
@@ -144,7 +140,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
                     polling.TrySetResult();
                     await release.Task.ConfigureAwait(false);
                 });
-            var exchange = new CallbackExchangeClient(() => { });
+            var exchange = new MachineCredentialTests.FakeExchangeClient(MachineCredentialTests.PluginExchangeSuccess());
             using var host = NewHost(new MachineCredentialStore(_storeDir), exchange, authenticator);
             host.ApplyConnectionConfig(Cloud());
 
@@ -154,27 +150,9 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             release.SetResult();
             await host.PendingDeviceAuth!.WaitAsync(TimeSpan.FromSeconds(10));
 
-            Assert.Equal("https://ai-game.dev", exchange.LastServerTarget);
-            Assert.Equal("https://ai-game.dev", new MachineCredentialStore(_storeDir).Read()!.ServerTarget);
+            Assert.Equal(AuthServer, exchange.LastServerTarget);
+            Assert.Equal(AuthServer, new MachineCredentialStore(_storeDir).Read()!.ServerTarget);
             Assert.Equal("local-secret", host.CurrentBearer);
-        }
-
-        // An RFC 8693 exchange fake that runs a callback mid-commit (to switch the connection mode) then succeeds.
-        private sealed class CallbackExchangeClient : ITokenExchangeClient
-        {
-            private readonly Action _onExchange;
-            public string? LastServerTarget { get; private set; }
-
-            public CallbackExchangeClient(Action onExchange) => _onExchange = onExchange;
-
-            public string ClientId => DeviceCodeAuthenticator.DefaultClientId;
-
-            public Task<TokenExchangeResult> ExchangeAsync(string subjectAccessToken, string? serverTarget, CancellationToken cancellationToken = default)
-            {
-                LastServerTarget = serverTarget;
-                _onExchange();
-                return Task.FromResult(PluginExchangeSuccess());
-            }
         }
 
         // The ai-game.dev device flow: authorization succeeds, the first token poll issues the credential. A request
