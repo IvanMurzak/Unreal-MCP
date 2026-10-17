@@ -3,7 +3,7 @@
   "Version": 1,
   "VersionName": "1.0.0",
   "FriendlyName": "Unreal AI Template (MCP extension sample)",
-  "Description": "Minimal standalone sample demonstrating the Unreal-MCP extensions contract (IUnrealMcpToolProvider, registered through IModularFeatures under the feature name 'UnrealMcpToolProvider'). Registers a single 'hello-extension' tool, proving the contract end-to-end. Doubles as the extension-author documentation's working example and the error-isolation test fixture (flip UNREAL_AI_TEMPLATE_INVALID_SCHEMA to 1 to emit an invalid descriptor).",
+  "Description": "Minimal standalone sample of an Unreal-MCP extension: an RQL module (IUnrealMcpRqlModule, registered through IModularFeatures under the feature name 'UnrealMcpRqlModule') that adds the 'hello' operations source (Greet, Relabel), a sample member and a guide to the editor's RQL data layer. Doubles as the extension-author documentation's working example.",
   "Category": "AI",
   "CreatedBy": "Ivan Murzak",
   "CreatedByURL": "https://github.com/IvanMurzak",

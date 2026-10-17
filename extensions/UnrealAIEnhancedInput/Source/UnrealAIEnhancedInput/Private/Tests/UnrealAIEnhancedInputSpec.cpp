@@ -5,62 +5,23 @@
 
 #include "CoreMinimal.h"
 #include "Misc/AutomationTest.h"
-#include "Features/IModularFeatures.h"
 #include "Dom/JsonObject.h"
 
-#include "IUnrealMcpToolProvider.h"
-#include "UnrealMcpToolRegistry.h"
+#include "IUnrealMcpRqlModule.h"
+#include "UnrealMcpRqlTools.h"
+#include "Misc/Guid.h"
+#include "Serialization/JsonSerializer.h"
+#include "Serialization/JsonWriter.h"
 
 // ============================================================================================
-//  UE Automation spec — ONE-TEST-PER-TOOL convention.
+//  UE Automation spec for the extension's RQL module (Unreal-MCP docs/rql.md "Extensions").
 //
-//  Every tool this extension contributes gets a focused Automation spec asserting it
-//  (a) registers under its kebab-case id and (b) returns a well-formed result. Read-only tools
-//  are exercised for a SUCCESS; the mutating / required-input tools are exercised for a
-//  well-formed, DEFENSIVE failure (a missing required input must yield FUnrealMcpToolResult::Error,
-//  never a crash or a silent success) — the deterministic assertion under a headless `-nullrhi`
-//  editor with no project assets (the missing-input guard returns BEFORE any asset load).
-//
-//  The spec discovers THIS extension's live provider through IModularFeatures (the exact path
-//  Unreal-MCP uses), registers its tools into a throwaway registry, and exercises them — so it
-//  validates the real shipped provider, not a stand-in.
+//  The spec discovers THIS extension's live module through IModularFeatures (the path Unreal-MCP uses) and runs RQL
+//  QueryPlans through the editor's RQL engine (UnrealMcpRqlTools::RunPlan). The C++ runtime has no text parser, so
+//  each plan is the one Rql.Parser produces for the query in the comment above it.
 //
 //  Run via:  Automation RunTests UnrealAIEnhancedInput
 // ============================================================================================
-
-namespace
-{
-	// Spec-unique helper names (the module is unity-built — keep file-local helpers uniquely named).
-	IUnrealMcpToolProvider* UnrealAIEnhancedInput_FindOwnProvider()
-	{
-		const TArray<IUnrealMcpToolProvider*> Providers =
-			IModularFeatures::Get().GetModularFeatureImplementations<IUnrealMcpToolProvider>(
-				IUnrealMcpToolProvider::GetModularFeatureName());
-		for (IUnrealMcpToolProvider* Provider : Providers)
-		{
-			if (Provider && Provider->GetExtensionId() == TEXT("com.ivanmurzak.unreal-ai-enhanced-input"))
-			{
-				return Provider;
-			}
-		}
-		return nullptr;
-	}
-
-	// Register the live provider's tools into a throwaway registry (the exact RegisterExtension path
-	// Unreal-MCP uses) so a test exercises the real shipped tool bodies.
-	bool UnrealAIEnhancedInput_BuildRegistry(FAutomationTestBase& Test, FUnrealMcpToolRegistry& OutRegistry)
-	{
-		IUnrealMcpToolProvider* Provider = UnrealAIEnhancedInput_FindOwnProvider();
-		if (!Provider)
-		{
-			Test.AddError(TEXT("extension provider not registered — cannot exercise its tools"));
-			return false;
-		}
-		OutRegistry.RegisterExtension(Provider->GetExtensionId(),
-			[Provider](FUnrealMcpToolRegistry& R) { Provider->RegisterTools(R); });
-		return true;
-	}
-}
 
 BEGIN_DEFINE_SPEC(FUnrealAIEnhancedInputSpec, "UnrealAIEnhancedInput",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -68,112 +29,108 @@ END_DEFINE_SPEC(FUnrealAIEnhancedInputSpec)
 
 void FUnrealAIEnhancedInputSpec::Define()
 {
-	Describe("provider registration", [this]()
+	Describe("RQL module", [this]()
 	{
-		It("registers this extension as a modular-feature tool provider", [this]()
+		It("registers this extension's RQL module as a modular feature", [this]()
 		{
-			IUnrealMcpToolProvider* Provider = UnrealAIEnhancedInput_FindOwnProvider();
-			TestNotNull(TEXT("extension provider is registered as a modular feature"), Provider);
-			if (Provider)
+			IUnrealMcpRqlModule* Module = UnrealMcpRqlTools::FindModule(TEXT("com.ivanmurzak.unreal-ai-enhanced-input"));
+			if (TestNotNull(TEXT("RQL module is registered"), Module))
 			{
-				TestEqual(TEXT("extension id matches the descriptor"),
-					Provider->GetExtensionId(), FString(TEXT("com.ivanmurzak.unreal-ai-enhanced-input")));
+				TestEqual(TEXT("module name"), Module->GetRqlModuleName(), FString(TEXT("EnhancedInput")));
+				TestFalse(TEXT("version reported"), Module->GetExtensionVersion().IsEmpty());
 			}
 		});
-	});
 
-	Describe("tool: enhanced-input-list", [this]()
-	{
-		It("registers and returns a well-formed { actionCount, contextCount, actions, contexts } success", [this]()
+		It("adds its sources and guide to the unreal-rql skill", [this]()
 		{
-			FUnrealMcpToolRegistry Registry;
-			if (!UnrealAIEnhancedInput_BuildRegistry(*this, Registry)) { return; }
-
-			TestTrue(TEXT("enhanced-input-list is registered"), Registry.HasTool(TEXT("enhanced-input-list")));
-
-			const FUnrealMcpToolResult Result =
-				Registry.Execute(TEXT("enhanced-input-list"), FUnrealMcpToolCall());
-
-			TestTrue(TEXT("tool reports success"), Result.bSuccess);
-			TestFalse(TEXT("tool returned a non-empty message"), Result.Message.IsEmpty());
-			TestTrue(TEXT("structured result carries 'actionCount', 'contextCount', 'actions' and 'contexts'"),
-				Result.Structured.IsValid()
-				&& Result.Structured->HasField(TEXT("actionCount"))
-				&& Result.Structured->HasField(TEXT("contextCount"))
-				&& Result.Structured->HasField(TEXT("actions"))
-				&& Result.Structured->HasField(TEXT("contexts")));
+			const FString Skill = UnrealMcpRqlTools::SkillMarkdown();
+			TestTrue(TEXT("| `inputActions` |"), Skill.Contains(TEXT("| `inputActions` |")));
+			TestTrue(TEXT("| `inputContexts` |"), Skill.Contains(TEXT("| `inputContexts` |")));
+			TestTrue(TEXT("| `enhancedInput` |"), Skill.Contains(TEXT("| `enhancedInput` |")));
+			TestTrue(TEXT("## Enhanced Input"), Skill.Contains(TEXT("## Enhanced Input")));
 		});
 	});
 
-	Describe("tool: enhanced-input-get", [this]()
+	Describe("sources", [this]()
 	{
-		It("registers and fails defensively on a missing 'path' (well-formed Error)", [this]()
+		It("inputActions answers a query", [this]()
 		{
-			FUnrealMcpToolRegistry Registry;
-			if (!UnrealAIEnhancedInput_BuildRegistry(*this, Registry)) { return; }
+			// inputActions | count
+			TSharedPtr<FJsonObject> Result;
+			const bool bResultOk = UnrealMcpRqlTools::RunPlan(TEXT(R"RQL({"rql":"0.1","source":{"path":["inputActions"]},"stages":[{"op":"count"}]})RQL"), false, &Result);
+			TestTrue(TEXT("a well-formed result"), Result.IsValid());
+			TestTrue(TEXT("succeeds"), bResultOk);
+		});
 
-			TestTrue(TEXT("enhanced-input-get is registered"), Registry.HasTool(TEXT("enhanced-input-get")));
+		It("inputContexts answers a query", [this]()
+		{
+			// inputContexts | count
+			TSharedPtr<FJsonObject> Result;
+			const bool bResultOk = UnrealMcpRqlTools::RunPlan(TEXT(R"RQL({"rql":"0.1","source":{"path":["inputContexts"]},"stages":[{"op":"count"}]})RQL"), false, &Result);
+			TestTrue(TEXT("a well-formed result"), Result.IsValid());
+			TestTrue(TEXT("succeeds"), bResultOk);
+		});
 
-			// No 'path' -> the handler must return a well-formed Error, not crash or succeed.
-			const FUnrealMcpToolResult Result =
-				Registry.Execute(TEXT("enhanced-input-get"), FUnrealMcpToolCall());
-
-			TestFalse(TEXT("missing 'path' is reported as a failure"), Result.bSuccess);
-			TestFalse(TEXT("failure carries a non-empty message"), Result.Message.IsEmpty());
+		It("describes InputMappingContext with its KeyMappings member", [this]()
+		{
+			bool bOk = false;
+			const FString Schema = UnrealMcpRqlTools::Schema(TEXT("InputMappingContext"), bOk);
+			TestTrue(TEXT("schema ok"), bOk);
+			TestTrue(TEXT("lists name:KeyMappings"), Schema.Contains(TEXT("\"name\":\"KeyMappings\"")));
 		});
 	});
 
-	Describe("tool: enhanced-input-action-create", [this]()
+	Describe("operations", [this]()
 	{
-		It("registers and fails defensively on a missing 'path' (well-formed Error)", [this]()
+		It("lists the authoring operations", [this]()
 		{
-			FUnrealMcpToolRegistry Registry;
-			if (!UnrealAIEnhancedInput_BuildRegistry(*this, Registry)) { return; }
-
-			TestTrue(TEXT("enhanced-input-action-create is registered"), Registry.HasTool(TEXT("enhanced-input-action-create")));
-
-			// No 'path' -> the handler must return a well-formed Error before creating anything.
-			const FUnrealMcpToolResult Result =
-				Registry.Execute(TEXT("enhanced-input-action-create"), FUnrealMcpToolCall());
-
-			TestFalse(TEXT("missing 'path' is reported as a failure"), Result.bSuccess);
-			TestFalse(TEXT("failure carries a non-empty message"), Result.Message.IsEmpty());
+			bool bOk = false;
+			const FString Schema = UnrealMcpRqlTools::Schema(TEXT("EnhancedInputOperations"), bOk);
+			TestTrue(TEXT("schema ok"), bOk);
+			TestTrue(TEXT("lists CreateAction("), Schema.Contains(TEXT("CreateAction(")));
+			TestTrue(TEXT("lists CreateContext("), Schema.Contains(TEXT("CreateContext(")));
+			TestTrue(TEXT("lists AddMapping("), Schema.Contains(TEXT("AddMapping(")));
+			TestTrue(TEXT("lists RemoveMapping("), Schema.Contains(TEXT("RemoveMapping(")));
 		});
-	});
 
-	Describe("tool: enhanced-input-context-create", [this]()
-	{
-		It("registers and fails defensively on a missing 'path' (well-formed Error)", [this]()
+		It("creates an action and a context, maps a key and refuses an unknown key", [this]()
 		{
-			FUnrealMcpToolRegistry Registry;
-			if (!UnrealAIEnhancedInput_BuildRegistry(*this, Registry)) { return; }
-
-			TestTrue(TEXT("enhanced-input-context-create is registered"), Registry.HasTool(TEXT("enhanced-input-context-create")));
-
-			// No 'path' -> the handler must return a well-formed Error before creating anything.
-			const FUnrealMcpToolResult Result =
-				Registry.Execute(TEXT("enhanced-input-context-create"), FUnrealMcpToolCall());
-
-			TestFalse(TEXT("missing 'path' is reported as a failure"), Result.bSuccess);
-			TestFalse(TEXT("failure carries a non-empty message"), Result.Message.IsEmpty());
+			const FString Id = FGuid::NewGuid().ToString(EGuidFormats::Digits);
+			const FString ActionPath = FString::Printf(TEXT("/Game/RqlSpec/IA_%s"), *Id);
+			const FString ContextPath = FString::Printf(TEXT("/Game/RqlSpec/IMC_%s"), *Id);
+			// enhancedInput | call CreateAction("<action>", "Axis2D")
+			TestTrue(TEXT("action created"), UnrealMcpRqlTools::RunPlan(FString::Printf(TEXT(R"RQL({"rql":"0.1","source":{"path":["enhancedInput"]},"stages":[{"op":"call","method":"CreateAction","args":[{"lit":"%s"},{"lit":"Axis2D"}]}]})RQL"), *ActionPath), true));
+			// unreal.asset("<action>") | select ValueType
+			TSharedPtr<FJsonObject> Action;
+			const bool bActionOk = UnrealMcpRqlTools::RunPlan(FString::Printf(TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"%s"}]},"stages":[{"op":"select","fields":[{"name":"ValueType","expr":{"path":["ValueType"]}}]}]})RQL"), *ActionPath), false, &Action);
+			TestTrue(TEXT("action read"), bActionOk);
+			FString ValueType;
+			if (Action.IsValid() && Action->HasField(TEXT("rows")) && Action->GetArrayField(TEXT("rows")).Num() == 1)
+				ValueType = Action->GetArrayField(TEXT("rows"))[0]->AsArray()[0]->AsString();
+			TestEqual(TEXT("value type written"), ValueType, FString(TEXT("Axis2D")));
+			// enhancedInput | call CreateContext("<context>")
+			TestTrue(TEXT("context created"), UnrealMcpRqlTools::RunPlan(FString::Printf(TEXT(R"RQL({"rql":"0.1","source":{"path":["enhancedInput"]},"stages":[{"op":"call","method":"CreateContext","args":[{"lit":"%s"}]}]})RQL"), *ContextPath), true));
+			// enhancedInput | call AddMapping("<context>", "<action>", "SpaceBar")
+			TestTrue(TEXT("key mapped"), UnrealMcpRqlTools::RunPlan(FString::Printf(TEXT(R"RQL({"rql":"0.1","source":{"path":["enhancedInput"]},"stages":[{"op":"call","method":"AddMapping","args":[{"lit":"%s"},{"lit":"%s"},{"lit":"SpaceBar"}]}]})RQL"), *ContextPath, *ActionPath), true));
+			// unreal.asset("<context>") | select KeyMappings
+			TSharedPtr<FJsonObject> Mappings;
+			const bool bMappingsOk = UnrealMcpRqlTools::RunPlan(FString::Printf(TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"%s"}]},"stages":[{"op":"select","fields":[{"name":"KeyMappings","expr":{"path":["KeyMappings"]}}]}]})RQL"), *ContextPath), false, &Mappings);
+			TestTrue(TEXT("context read"), bMappingsOk);
+			FString Text;
+			if (Mappings.IsValid())
+				FJsonSerializer::Serialize(Mappings.ToSharedRef(), TJsonWriterFactory<>::Create(&Text));
+			TestTrue(TEXT("the mapping is listed"), Text.Contains(TEXT("SpaceBar")));
+			// enhancedInput | call AddMapping("<context>", "<action>", "NoSuchKey")
+			TestFalse(TEXT("unknown key refused"), UnrealMcpRqlTools::RunPlan(FString::Printf(TEXT(R"RQL({"rql":"0.1","source":{"path":["enhancedInput"]},"stages":[{"op":"call","method":"AddMapping","args":[{"lit":"%s"},{"lit":"%s"},{"lit":"NoSuchKeyRqlSpec"}]}]})RQL"), *ContextPath, *ActionPath), true));
 		});
-	});
 
-	Describe("tool: enhanced-input-add-mapping", [this]()
-	{
-		It("registers and fails defensively on a missing 'contextPath' (well-formed Error)", [this]()
+		It("refuses an invalid asset path", [this]()
 		{
-			FUnrealMcpToolRegistry Registry;
-			if (!UnrealAIEnhancedInput_BuildRegistry(*this, Registry)) { return; }
-
-			TestTrue(TEXT("enhanced-input-add-mapping is registered"), Registry.HasTool(TEXT("enhanced-input-add-mapping")));
-
-			// No required inputs -> the handler must return a well-formed Error before loading any asset.
-			const FUnrealMcpToolResult Result =
-				Registry.Execute(TEXT("enhanced-input-add-mapping"), FUnrealMcpToolCall());
-
-			TestFalse(TEXT("missing 'contextPath' is reported as a failure"), Result.bSuccess);
-			TestFalse(TEXT("failure carries a non-empty message"), Result.Message.IsEmpty());
+			// enhancedInput | call CreateAction("/Engine/IA_RqlSpec")
+			TSharedPtr<FJsonObject> Result;
+			const bool bResultOk = UnrealMcpRqlTools::RunPlan(TEXT(R"RQL({"rql":"0.1","source":{"path":["enhancedInput"]},"stages":[{"op":"call","method":"CreateAction","args":[{"lit":"/Engine/IA_RqlSpec"}]}]})RQL"), true, &Result);
+			TestTrue(TEXT("a well-formed result"), Result.IsValid());
+			TestFalse(TEXT("fails defensively"), bResultOk);
 		});
 	});
 }

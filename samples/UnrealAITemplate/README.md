@@ -1,53 +1,46 @@
 # UnrealAITemplate
 
-A minimal, standalone Unreal Engine plugin demonstrating the **Unreal-MCP extensions contract**
-([`IUnrealMcpToolProvider`](../../UnrealMCP/Source/UnrealMcpEditor/Public/IUnrealMcpToolProvider.h)),
-registered through `IModularFeatures` under the feature name `UnrealMcpToolProvider`. It contributes a
-single `hello-extension` tool, proving the contract end-to-end, and doubles as the working example in
-the [extension-author guide](../../docs/EXTENSIONS.md) and the error-isolation test fixture.
+A minimal, standalone Unreal Engine plugin demonstrating an **Unreal-MCP extension**: an RQL module
+([`IUnrealMcpRqlModule`](../../UnrealMCP/Source/UnrealMcpRql/Public/IUnrealMcpRqlModule.h)) registered through
+`IModularFeatures` under the feature name `UnrealMcpRqlModule`. Extensions do not add tools: agents reach the editor
+through RQL (`rql-query` / `rql-mutate` / `rql-schema`, [`docs/rql.md`](../../docs/rql.md)), and a module adds what
+reflection does not show. It doubles as the working example of the [extension-author guide](../../docs/EXTENSIONS.md).
 
 ## What it shows
 
-- Implementing `IUnrealMcpToolProvider` (`GetExtensionId` / `GetDisplayName` / `GetExtensionVersion` /
-  `RegisterTools`).
-- Declaring a tool with the fluent `FUnrealMcpToolRegistry` builder.
-- Registering / unregistering the provider as a modular feature in the module's
-  `StartupModule` / `ShutdownModule`.
+- Implementing `IUnrealMcpRqlModule` (`GetRqlModuleName` / `GetExtensionId` / `GetExtensionVersion` / `ConfigureRql`);
+  the version is the .uplugin VersionName (`UnrealMcpRql::PluginVersion`).
+- An operations class (`UUnrealAITemplateRqlApi`): `AddApiSource` makes every UFUNCTION callable with `call` and its
+  class default object the `hello` source; failures use `UnrealMcpRql::Failed`.
+- A computed member of a narrow class (`AddJsonMember` on static mesh components) and a guide for the `unreal-rql`
+  skill (`AddGuide`).
+- Registering the module as a modular feature for the editor module's lifetime: `TUnrealMcpRqlEditorModule`.
+
+```
+hello | call Greet("Ada")
+hello | call Relabel("Cube", "Crate")
+actors | get Components | where $ is StaticMeshComponent | where MaterialCount > 1 | select Owner.Label MaterialCount
+```
 
 ## Layout
 
 ```
-UnrealAITemplate.uplugin                              # plugin descriptor (depends on the UnrealMCP plugin)
-Source/UnrealAITemplate/UnrealAITemplate.Build.cs     # module rules (depends on UnrealMcpEditor)
-Source/UnrealAITemplate/Private/UnrealAITemplateModule.cpp   # provider + module
+UnrealAITemplate.uplugin                                       # plugin descriptor (depends on the UnrealMCP plugin)
+Source/UnrealAITemplate/UnrealAITemplate.Build.cs              # module rules (depends on UnrealMcpRql)
+Source/UnrealAITemplate/Private/UnrealAITemplateModule.cpp     # the RQL module + the editor module
+Source/UnrealAITemplate/Private/UnrealAITemplateRqlApi.h/.cpp  # the operations class (UFUNCTIONs)
 ```
 
 ## Using it
 
-1. Copy or symlink this folder into a UE project's `Plugins/` directory **alongside the `UnrealMCP`
-   plugin** (the sample's module depends on `UnrealMcpEditor`).
+1. Copy or symlink this folder into a UE project's `Plugins/` directory **alongside the `UnrealMCP` plugin**.
 2. Enable both plugins and build the editor target.
-3. With an MCP client connected through the sidecar, `hello-extension` appears in the tool list and
-   returns a greeting.
+3. With an MCP client connected, `rql-schema` lists the `hello` source and `rql-mutate` runs `hello | call Greet("Ada")`;
+   `unreal-skill-generate` writes the guide into the `unreal-rql` skill.
 
-## Isolation fixture
+## Custom tools, prompts and resources
 
-Define `UNREAL_AI_TEMPLATE_INVALID_SCHEMA=1` (e.g. in the module's `Build.cs` via
-`PublicDefinitions.Add("UNREAL_AI_TEMPLATE_INVALID_SCHEMA=1")`) to make the provider additionally emit
-an **invalid** tool (an empty-named parameter — a malformed schema). Unreal-MCP drops only the invalid
-entry and records the failure on this extension's record; `hello-extension` stays registered. This is
-the §5 descriptor-validation isolation guarantee in action.
-
-## Prompts & resources
-
-This sample focuses on the **tool** contract. Prompts and resources use the exact sibling contracts —
-`IUnrealMcpPromptProvider` + `FUnrealMcpPromptRegistry` and `IUnrealMcpResourceProvider` +
-`FUnrealMcpResourceRegistry` (same `UnrealMcpRuntime` module, same modular-feature registration, same
-isolation rules). For runnable prompt/resource examples, see the shipped **core** families
-[`UnrealMcpCorePrompts.cpp`](../../UnrealMCP/Source/UnrealMcpRuntime/Private/Prompts/UnrealMcpCorePrompts.cpp)
-(`level-design-brief`) and
-[`UnrealMcpCoreResources.cpp`](../../UnrealMCP/Source/UnrealMcpRuntime/Private/Resources/UnrealMcpCoreResources.cpp)
-(`unreal://project/levels` + `unreal://project/icon`), and the authoring sections in
-[`docs/EXTENSIONS.md`](../../docs/EXTENSIONS.md).
-
-See [`docs/ARCHITECTURE.md`](../../docs/ARCHITECTURE.md) §5 + §A and [`docs/EXTENSIONS.md`](../../docs/EXTENSIONS.md).
+A dedicated MCP tool is still possible for what is not editor data (the same contracts the runtime sample uses):
+`IUnrealMcpToolProvider` + `FUnrealMcpToolRegistry`, and the sibling `IUnrealMcpPromptProvider` /
+`IUnrealMcpResourceProvider` (module `UnrealMcpRuntime`, same modular-feature registration, same isolation rules). See
+[`samples/UnrealAIRuntimeSample/`](../UnrealAIRuntimeSample) and [`docs/EXTENSIONS.md`](../../docs/EXTENSIONS.md).

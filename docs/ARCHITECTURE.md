@@ -630,9 +630,10 @@ public:
   `disabledTools[]`); a disabled extension's tools are kept out of the manifest entirely.
 - **UI:** extensions section in the main window (Unity analog `MainWindowEditor.Extensions.cs:175`)
   lists id, name, version, tool count, toggle, error badge.
-- **Template story:** `samples/UnrealAITemplate/` in-repo — a minimal standalone UE plugin with one
-  `hello-extension` tool, proving the contract end-to-end; doubles as the extension-author doc's
-  working example and the isolation test fixture (it can be switched to emit an invalid schema).
+- **Template story:** `samples/UnrealAITemplate/` in-repo — a minimal standalone UE plugin with an RQL
+  module (`IUnrealMcpRqlModule`: the `hello` operations source, a computed member, a guide; docs/rql.md);
+  doubles as the extension-author doc's working example. Editor extensions contribute RQL modules; the
+  tool contract above remains for non-data tools and the runtime (`samples/UnrealAIRuntimeSample/`).
 
 ---
 

@@ -8,7 +8,10 @@
 #include "UnrealMcpRqlSession.h"
 #include "UnrealMcpToolRegistry.h"
 
+#include "Dom/JsonObject.h"
 #include "Features/IModularFeatures.h"
+#include "Serialization/JsonReader.h"
+#include "Serialization/JsonSerializer.h"
 
 namespace UnrealMcpRqlToolsLocal
 {
@@ -115,6 +118,28 @@ namespace UnrealMcpRqlTools
 	{
 		const FString Id = Module.GetExtensionId();
 		return Id.IsEmpty() || !GEnabledExtensions.IsSet() || GEnabledExtensions->Contains(Id);
+	}
+
+	IUnrealMcpRqlModule* FindModule(const FString& ExtensionId)
+	{
+		for (IUnrealMcpRqlModule* Module : Modules())
+		{
+			if (Module->GetExtensionId() == ExtensionId)
+				return Module;
+		}
+		return nullptr;
+	}
+
+	bool RunPlan(const FString& PlanJson, bool bAllowMutation, TSharedPtr<FJsonObject>* OutResult)
+	{
+		bool bOk = false;
+		const FString Json = ExecutePlan(PlanJson, bAllowMutation, /*bDryRun*/ false, bOk);
+		if (OutResult)
+		{
+			OutResult->Reset();
+			FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(Json), *OutResult);
+		}
+		return bOk;
 	}
 
 	FString ExecutePlan(const FString& PlanJson, bool bAllowMutation, bool bDryRun, bool& bOutOk)

@@ -49,7 +49,7 @@ Consumers exclude the plugin from packaged games with a `TargetDenyList: ["Game"
 | `extensions/` | Six optional first-party plugins, independent versions/releases ([guide](docs/EXTENSION-MONOREPO.md)) |
 | `bridge/` | .NET 9 sidecar + xUnit tests ([`bridge/AGENTS.md`](bridge/AGENTS.md)) |
 | `cli/` | `unreal-mcp-cli` npm package (TypeScript, commander, vitest): commands in `cli/src/commands/`, logic in `cli/src/lib/`, tests in `cli/tests/`. Published on npm; CI owns releases |
-| `samples/` | Example extension plugins: `UnrealAITemplate/` (editor, §5) and `UnrealAIRuntimeSample/` (runtime, §12.9) |
+| `samples/` | Example extension plugins: `UnrealAITemplate/` (editor RQL module, docs/rql.md) and `UnrealAIRuntimeSample/` (runtime tools, §12.9) |
 | `commands/` | Repo PowerShell tooling: `bump-version.ps1`, `release-github.ps1`, `test-module-uplugin.ps1` |
 | `scripts/` | Python smokes run by CI (`connection_smoke.py`, `server_smoke.py`, `window_smoke.py`) |
 | `tests/chain-fixtures/` | Byte-compared T2 chain fixtures (LF-pinned in `.gitattributes`) |

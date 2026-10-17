@@ -5,6 +5,7 @@
 #include "UnrealMcpRqlEditorApi.h"
 #include "UnrealMcpRqlSources.h"
 #include "UnrealMcpRqlUtil.h"
+#include "IUnrealMcpRqlModule.h"
 #include "Tools/UnrealMcpLogCollector.h"
 #include "Tools/UnrealMcpObjectRef.h"
 
@@ -331,6 +332,53 @@ namespace UnrealMcpRqlCoreLocal
 		D.display_explicit = true;
 	}
 
+	/** UnrealMcpRql::AddComponent with the failure as text (the actor method throws it, the exported helper Fail()s it). */
+	UActorComponent* AddActorComponent(AActor* Actor, UClass* Class, const FString& Requested, const TFunction<void(UActorComponent*)>& Configure,
+		FString& OutError)
+	{
+		if (!Actor)
+		{
+			OutError = TEXT("no actor");
+			return nullptr;
+		}
+		if (!Class || !Class->IsChildOf(UActorComponent::StaticClass()) || Class->HasAnyClassFlags(CLASS_Abstract))
+		{
+			OutError = FString::Printf(TEXT("'%s' is not a component class (e.g. \"StaticMeshComponent\")"), Class ? *Class->GetName() : TEXT("None"));
+			return nullptr;
+		}
+		if (!Requested.IsEmpty() && !FName::IsValidXName(Requested, INVALID_OBJECTNAME_CHARACTERS))
+		{
+			OutError = FString::Printf(TEXT("'%s' is not a valid component name (spaces and characters such as . : / , are not allowed)"), *Requested);
+			return nullptr;
+		}
+		const FName Name = Requested.IsEmpty() ? MakeUniqueObjectName(Actor, Class, Class->GetFName()) : FName(*Requested);
+		if (!Requested.IsEmpty() && StaticFindObjectFast(nullptr, Actor, Name))
+		{
+			OutError = FString::Printf(TEXT("%s already has a component named '%s'"), *Actor->GetActorLabel(), *Requested);
+			return nullptr;
+		}
+		Actor->Modify();
+		UActorComponent* Component = NewObject<UActorComponent>(Actor, Class, Name, RF_Transactional);
+		if (!Component)
+		{
+			OutError = FString::Printf(TEXT("could not create %s"), *Class->GetName());
+			return nullptr;
+		}
+		Actor->AddInstanceComponent(Component);
+		if (USceneComponent* Scene = Cast<USceneComponent>(Component))
+		{
+			if (USceneComponent* Root = Actor->GetRootComponent())
+				Scene->AttachToComponent(Root, FAttachmentTransformRules::KeepRelativeTransform);
+			else
+				Actor->SetRootComponent(Scene);
+		}
+		if (Configure)
+			Configure(Component);
+		Component->OnComponentCreated();
+		Component->RegisterComponent();
+		return Component;
+	}
+
 	/** A world-transform member of actors (Location / Rotation / Scale): the struct value, written through its root component. */
 	template <typename TValue>
 	rql::MemberDescriptor TransformMember(FUnrealMcpRqlTypes& T, const char* Name, const char* Description,
@@ -450,31 +498,14 @@ namespace UnrealMcpRqlCoreLocal
 			ComponentType,
 			[Types](void* Self, const std::vector<rql::Value>& Args) -> rql::Value
 			{
-				AActor* Actor = static_cast<AActor*>(Self);
 				const FString ClassName = TextArg(Args[0]);
 				UClass* Class = FUnrealMcpObjectRef::ResolveClass(ClassName);
-				if (!Class || !Class->IsChildOf(UActorComponent::StaticClass()) || Class->HasAnyClassFlags(CLASS_Abstract))
+				if (!Class || !Class->IsChildOf(UActorComponent::StaticClass()))
 					Throw(FString::Printf(TEXT("'%s' is not a component class (e.g. \"StaticMeshComponent\")"), *ClassName));
-				const FString Requested = TextArg(Args[1]);
-				if (!Requested.IsEmpty() && !FName::IsValidXName(Requested, INVALID_OBJECTNAME_CHARACTERS))
-					Throw(FString::Printf(TEXT("'%s' is not a valid component name (spaces and characters such as . : / , are not allowed)"), *Requested));
-				FName Name = Requested.IsEmpty() ? MakeUniqueObjectName(Actor, Class, Class->GetFName()) : FName(*Requested);
-				if (!Requested.IsEmpty() && StaticFindObjectFast(nullptr, Actor, Name))
-					Throw(FString::Printf(TEXT("%s already has a component named '%s'"), *Actor->GetActorLabel(), *Requested));
-				Actor->Modify();
-				UActorComponent* Component = NewObject<UActorComponent>(Actor, Class, Name, RF_Transactional);
+				FString Error;
+				UActorComponent* Component = AddActorComponent(static_cast<AActor*>(Self), Class, TextArg(Args[1]), nullptr, Error);
 				if (!Component)
-					Throw(FString::Printf(TEXT("could not create %s"), *Class->GetName()));
-				Actor->AddInstanceComponent(Component);
-				if (USceneComponent* Scene = Cast<USceneComponent>(Component))
-				{
-					if (USceneComponent* Root = Actor->GetRootComponent())
-						Scene->AttachToComponent(Root, FAttachmentTransformRules::KeepRelativeTransform);
-					else
-						Actor->SetRootComponent(Scene);
-				}
-				Component->OnComponentCreated();
-				Component->RegisterComponent();
+					Throw(Error);
 				return Types->WrapObject(Component);
 			}, "add a component by class name (scene components attach to the root); returns it"));
 	}
@@ -656,6 +687,47 @@ namespace UnrealMcpRqlCoreLocal
 		std::sort(Items.GetData(), Items.GetData() + Items.Num(), Less);
 	}
 
+	/** A class listings show: not deprecated / replaced / hidden, not a Blueprint compiler's skeleton or leftover. */
+	bool IsListedClass(const UClass* Class)
+	{
+		if (!Class || Class->HasAnyClassFlags(CLASS_Deprecated | CLASS_NewerVersionExists | CLASS_Hidden))
+			return false;
+		const FString Name = Class->GetName();
+		return !Name.StartsWith(TEXT("SKEL_")) && !Name.StartsWith(TEXT("REINST_")) && !Name.StartsWith(TEXT("TRASHCLASS_"));
+	}
+
+	/** Class default objects of a base: loaded classes, plus Blueprint classes by path that load as the query reads them. */
+	class FClassDefaultsList final : public rql::IListAdapter
+	{
+	public:
+		struct FEntry
+		{
+			FName Name;               // the class name (sort key)
+			UClass* Class = nullptr;  // loaded
+			FString Path;             // else the generated class path, loaded on read
+		};
+
+		FClassDefaultsList(FUnrealMcpRqlTypes* InTypes, TArray<FEntry> InEntries, const rql::TypeDescriptor* InType)
+			: Types(InTypes), Entries(MoveTemp(InEntries)), Type(InType)
+		{
+		}
+		size_t size() const override { return static_cast<size_t>(Entries.Num()); }
+		rql::Value at(size_t Index) const override
+		{
+			if (static_cast<int32>(Index) >= Entries.Num())
+				return rql::Value::missing();
+			const FEntry& Entry = Entries[static_cast<int32>(Index)];
+			UClass* Class = Entry.Class ? Entry.Class : Cast<UClass>(FUnrealMcpObjectRef::LoadObjectQuiet(UClass::StaticClass(), Entry.Path));
+			return Class ? Types->WrapObject(Class->GetDefaultObject()) : rql::Value::null();
+		}
+		const rql::TypeDescriptor* type() const override { return Type; }
+
+	private:
+		FUnrealMcpRqlTypes* Types;
+		TArray<FEntry> Entries;
+		const rql::TypeDescriptor* Type;
+	};
+
 	rql::Value ErrorValue(const char* Code, const FString& Message)
 	{
 		return rql::Value::error(Code, UnrealMcpRqlToStd(Message));
@@ -702,14 +774,8 @@ namespace UnrealMcpRqlCoreLocal
 		TArray<UClass*> Found;
 		for (UClass* Class : Candidates)
 		{
-			if (Class->HasAnyClassFlags(CLASS_Deprecated | CLASS_NewerVersionExists | CLASS_Hidden))
-				continue;
-			const FString Name = Class->GetName();
-			if (Name.StartsWith(TEXT("SKEL_")) || Name.StartsWith(TEXT("REINST_")) || Name.StartsWith(TEXT("TRASHCLASS_")))
-				continue;
-			if (!Filter.IsEmpty() && !Name.Contains(Filter))
-				continue;
-			Found.Add(Class);
+			if (IsListedClass(Class) && (Filter.IsEmpty() || Class->GetName().Contains(Filter)))
+				Found.Add(Class);
 		}
 		SortAndCap(Found, 500, [](const UClass* A, const UClass* B) { return A->GetFName().LexicalLess(B->GetFName()); });
 		std::vector<rql::Value> Items;
@@ -750,6 +816,46 @@ rql::Value UnrealMcpRqlAssetList(FUnrealMcpRqlTypes& Types, UClass* Class, const
 	});
 	const rql::TypeDescriptor* Element = Types.ForClass(Class ? Class : UObject::StaticClass());
 	return rql::Value::list(std::make_shared<FAssetList>(&Types, MoveTemp(Assets), Types.Registry().list_type(Element, true)));
+}
+
+rql::Value UnrealMcpRqlClassDefaultsList(FUnrealMcpRqlTypes& Types, UClass* Base)
+{
+	TArray<FClassDefaultsList::FEntry> Entries;
+	// Keyed by the full class path: Blueprints of the same name in different folders are different classes.
+	TSet<FTopLevelAssetPath> Seen;
+	if (Base)
+	{
+		TArray<UClass*> Loaded;
+		GetDerivedClasses(Base, Loaded, /*bRecursive*/ true);
+		for (UClass* Class : Loaded)
+		{
+			Seen.Add(Class->GetClassPathName());
+			if (IsListedClass(Class) && !Class->HasAnyClassFlags(CLASS_Abstract))
+				Entries.Add({ Class->GetFName(), Class, FString() });
+		}
+		// The project's Blueprint classes that are not loaded yet (the asset registry knows them without loading).
+		IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
+		TSet<FTopLevelAssetPath> Derived;
+		Registry.GetDerivedClassNames({ Base->GetClassPathName() }, TSet<FTopLevelAssetPath>(), Derived);
+		for (const FTopLevelAssetPath& Path : Derived)
+		{
+			if (Seen.Contains(Path) || !Path.GetPackageName().ToString().StartsWith(TEXT("/Game")))
+				continue;
+			if (UClass* Class = FindObject<UClass>(Path)) // loaded after all (e.g. under another name)
+			{
+				if (IsListedClass(Class) && !Class->HasAnyClassFlags(CLASS_Abstract))
+					Entries.Add({ Class->GetFName(), Class, FString() });
+				continue;
+			}
+			Entries.Add({ Path.GetAssetName(), nullptr, Path.ToString() });
+		}
+	}
+	SortAndCap(Entries, UnrealMcpRqlMaxAssets, [](const FClassDefaultsList::FEntry& A, const FClassDefaultsList::FEntry& B)
+	{
+		return A.Name.LexicalLess(B.Name);
+	});
+	const rql::TypeDescriptor* Element = Types.ForClass(Base ? Base : UObject::StaticClass());
+	return rql::Value::list(std::make_shared<FClassDefaultsList>(&Types, MoveTemp(Entries), Types.Registry().list_type(Element, true)));
 }
 
 void UnrealMcpRqlConfigureCore(FUnrealMcpRqlSession& Session)
@@ -861,4 +967,13 @@ void UnrealMcpRqlConfigureCore(FUnrealMcpRqlSession& Session)
 		[Types](const std::vector<rql::Value>& Args) { return FindAssets(Args, *Types); });
 	Session.AddFunction(TEXT("unreal.classes"), TEXT("classes deriving from a base (default \"Actor\") whose name contains a filter: Name Path Parent Abstract Blueprint (at most 500)"),
 		[ClassInfoType](const std::vector<rql::Value>& Args) { return ListClasses(Args, ClassInfoType); });
+}
+
+UActorComponent* UnrealMcpRql::AddComponent(AActor* Actor, UClass* Class, const FString& Name, TFunction<void(UActorComponent*)> Configure)
+{
+	FString Error;
+	UActorComponent* Component = UnrealMcpRqlCoreLocal::AddActorComponent(Actor, Class, Name, Configure, Error);
+	if (!Component)
+		Fail(Error);
+	return Component;
 }

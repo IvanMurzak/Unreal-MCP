@@ -4,8 +4,11 @@
 > See [the monorepo test/release guide](EXTENSION-MONOREPO.md); it supersedes legacy per-repository release instructions below.
 
 
-Unreal-MCP exposes the Unreal Editor to MCP-aware AI assistants as a set of **tools**, **prompts**, and
-**resources**. Any third-party UE plugin can contribute its own through a small, public,
+Unreal-MCP exposes the Unreal Editor to MCP-aware AI assistants through its **RQL data layer**
+(`rql-query` / `rql-mutate` / `rql-schema`, [`docs/rql.md`](rql.md)) plus a few **tools**, **prompts**, and
+**resources**. An extension for an engine feature contributes an **RQL module** (next section), not tools: agents
+query and change the feature with the same language as everything else. Custom tools remain possible for what is not
+editor data (and for the runtime, in-game surface). Any third-party UE plugin can contribute its own through a small, public,
 modular-feature-based contract — no fork, no link-time coupling, no load-order assumptions. This guide is the
 authoritative author reference. The tool design rationale lives in [`docs/ARCHITECTURE.md`](ARCHITECTURE.md)
 §5; the prompt/resource design is in §A.
@@ -15,11 +18,75 @@ shape (provider interface + fluent registry builder + modular-feature registrati
 their own sections below — read the tool section first, then the deltas.
 
 A complete, buildable example accompanies this guide:
-[`samples/UnrealAITemplate/`](../samples/UnrealAITemplate).
+[`samples/UnrealAITemplate/`](../samples/UnrealAITemplate) (an RQL module); the first-party extensions under
+[`extensions/`](../extensions) are RQL modules too.
 
 ---
 
-## The contract
+## RQL modules (the default for editor extensions)
+
+Every reflected type is queryable without a module: UClass / UScriptStruct / UEnum members come from FProperty
+(EditAnywhere / VisibleAnywhere / BlueprintVisible), so `actors | get Components | where $ is NiagaraComponent | set
+Asset = "/Game/VFX/NS_Fire"` works as soon as the engine plugin is loaded. A module adds what reflection does not show.
+Implement [`IUnrealMcpRqlModule`](../UnrealMCP/Source/UnrealMcpRql/Public/IUnrealMcpRqlModule.h) (module `UnrealMcpRql`)
+and let `TUnrealMcpRqlEditorModule` register it as a modular feature for the editor module's lifetime:
+
+```cpp
+#include "IUnrealMcpRqlModule.h"
+
+class FMyRqlModule : public IUnrealMcpRqlModule
+{
+public:
+    virtual FString GetRqlModuleName() const override { return TEXT("Niagara"); }
+    virtual FString GetExtensionId() const override { return TEXT("com.example.niagara-ai"); }
+    virtual FString GetExtensionVersion() const override { return UnrealMcpRql::PluginVersion(TEXT("MyNiagaraAI")); }
+    virtual void ConfigureRql(FUnrealMcpRqlModuleContext& Context) override
+    {
+        Context.AddAssetSource(TEXT("niagaraSystems"), TEXT("Niagara system assets"), UNiagaraSystem::StaticClass());
+        Context.AddApiSource(TEXT("niagara"), TEXT("Niagara operations"), UMyNiagaraOperations::StaticClass(),
+            TEXT("NiagaraOperations"));                                   // every UFUNCTION -> `call`
+        Context.AddJsonMember(UNiagaraSystem::StaticClass(), TEXT("Emitters"), TEXT("emitters"), /* UObject* -> JSON */ ...);
+        Context.AddGuide(TEXT("Niagara"), TEXT("... markdown with example queries ..."));
+    }
+};
+
+IMPLEMENT_MODULE(TUnrealMcpRqlEditorModule<FMyRqlModule>, MyNiagaraAI)
+```
+
+| Context call | Adds |
+| --- | --- |
+| `AddObjectSource` / `AddObjectListSource` / `AddAssetSource` | a source (where a query starts): one object, a list, or the project's assets of a class (at most 200, loaded lazily); the class argument types it in `rql-schema` |
+| `AddClassDefaultsSource(Name, Description, BaseClass)` | the class default objects of a base's subclasses (native and the project's Blueprints, at most 200; unloaded Blueprint classes load as the query reads them) |
+| `AddApiClass(Class, TypeName)` | every UFUNCTION of the class becomes callable with `call` (parameters and results convert like members) |
+| `AddApiSource(Name, Description, Class, TypeName)` | `AddApiClass` plus a source holding the class default object (`niagara \| call SpawnSystem(...)`) |
+| `ExposeProperties(Owner, Names, bWritable)` | properties reflection hides (not EditAnywhere / BlueprintVisible) as members |
+| `AddJsonMember` / `AddObjectMember` / `AddObjectListMember` | read-only computed members (JSON values, one object reference, owning object lists) |
+| `AddGuide(Topic, Markdown)` | a section of the `unreal-rql` skill |
+
+Operations classes: declare the functions `UFUNCTION(BlueprintCallable, meta = (BlueprintInternalUseOnly = "true"))`
+(UHT records C++ default arguments for BlueprintCallable functions only; the meta keeps them out of Blueprint menus),
+put the agent-facing description in the doc comment above each, and report failures with
+`return UnrealMcpRql::Failed<T>(TEXT("..."));` (UFUNCTIONs cannot throw) after validating, before changing anything.
+Object and class parameters are required (RQL refuses null for them) unless the C++ default is `nullptr`, so the
+functions need no null guards for them. A mutation runs in one editor transaction, so create objects with
+`RF_Transactional` and `Modify()` what you change. Object parameters accept asset paths, class names and actor labels as
+text.
+
+Core helpers in `UnrealMcpRql` (they report failures with `Fail` and return null): `ResolveClass` / `LoadObject`
+(class names, asset paths), `EditorWorld()`, `SpawnActor(Class, Location, Rotation, Label, Parent)`,
+`AddComponent(Actor, Class, Name, Configure)` (the actor `AddComponent` method; `Configure` runs before the component
+registers), `CreateAsset(Class, Path)` (the `editor | call CreateAsset` rules and factory), `PluginVersion(PluginName)`.
+
+The editor's Extensions window lists the module's extension (`GetExtensionId`) and can disable it; the rql-* tools
+(and their skill) are re-registered when a module registers, unregisters or is toggled. Specs use
+`UnrealMcpRqlTools::FindModule(ExtensionId)` and `UnrealMcpRqlTools::RunPlan(Plan, bMutate, &Result)` (see any
+extension's `Private/Tests/*Spec.cpp`).
+
+---
+
+## Custom tools: the contract
+
+For what is not editor data (and for the runtime, in-game surface) an extension can still contribute MCP tools.
 
 Implement a single interface —
 [`IUnrealMcpToolProvider`](../UnrealMCP/Source/UnrealMcpRuntime/Public/IUnrealMcpToolProvider.h), the
@@ -413,9 +480,9 @@ than one contract (tools + prompts + resources) and be registered under each.
 ## Reference examples
 
 - [`samples/UnrealAITemplate/`](../samples/UnrealAITemplate) — the **editor** extension sample: a complete,
-  buildable `Type=Editor` plugin with a `hello-extension` tool. It also carries a compile-time switch
-  (`UNREAL_AI_TEMPLATE_INVALID_SCHEMA=1`) that emits an intentionally invalid tool so you can observe the
-  isolation behaviour first-hand.
+  buildable `Type=Editor` plugin with an RQL module (the `hello` operations source, a computed member, a guide).
+- [`extensions/`](../extensions) — the first-party RQL modules (Niagara, Enhanced Input, GAS, Landscape / Water, PCG,
+  Control Rig).
 - [`samples/UnrealAIRuntimeSample/`](../samples/UnrealAIRuntimeSample) — the **runtime (in-game)** extension
   sample: a `Type=Runtime` plugin whose `game-time-dilation` tool reads/sets the live `UWorld`'s
   `AWorldSettings::TimeDilation`, callable in a running game over a runtime MCP connection (§12.9).

@@ -102,6 +102,8 @@ public:
 
 	void AddClassHook(UClass* Class, FClassHook Hook);
 	void AddApiClass(UClass* Class, const FString& TypeName);
+	/** Whether @p Class was registered with AddApiClass (its class default object is an operations object). */
+	bool IsApiClass(const UClass* Class) const { return Class && ApiClasses.Contains(const_cast<UClass*>(Class)); }
 	void ExposeProperties(UStruct* Owner, const TArray<FName>& Names, bool bWritable);
 
 	/** Add or replace a member of a descriptor (hooks use it). */

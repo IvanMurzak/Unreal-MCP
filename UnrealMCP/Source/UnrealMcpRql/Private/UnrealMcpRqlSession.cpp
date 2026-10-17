@@ -19,6 +19,7 @@
 #include "Tools/UnrealMcpObjectRef.h"
 #include "UObject/Package.h"
 
+#include <stdexcept>
 #include <string_view>
 
 namespace UnrealMcpRqlSessionLocal
@@ -136,6 +137,36 @@ namespace UnrealMcpRqlSessionLocal
 			});
 		}
 
+		virtual void AddClassDefaultsSource(const FString& Name, const FString& Description, UClass* BaseClass) override
+		{
+			FUnrealMcpRqlTypes* Types = &Session.Types();
+			Session.AddSource(Name, Types->ForClass(BaseClass ? BaseClass : UObject::StaticClass()), /*bList*/ true, Description,
+				[Types, BaseClass]() { return UnrealMcpRqlClassDefaultsList(*Types, BaseClass); });
+		}
+
+		virtual void AddObjectMember(UClass* Class, const FString& Name, const FString& Description, UClass* ObjectClass,
+			TFunction<UObject*(UObject*)> Getter) override
+		{
+			const std::string MemberName = UnrealMcpRqlToStd(Name);
+			const std::string MemberDescription = UnrealMcpRqlToStd(Description);
+			Session.Types().AddClassHook(Class, [MemberName, MemberDescription, ObjectClass, Getter](FUnrealMcpRqlTypes& Types, rql::TypeDescriptor& Descriptor)
+			{
+				rql::MemberDescriptor Member;
+				Member.name = MemberName;
+				Member.description = MemberDescription;
+				Member.type = Types.ForClass(ObjectClass ? ObjectClass : UObject::StaticClass());
+				Member.nullable = true;
+				Member.owning = false;
+				Member.readonly = true;
+				FUnrealMcpRqlTypes* TypesPtr = &Types;
+				Member.getter = [TypesPtr, Getter](void* Self) -> rql::Value
+				{
+					return TypesPtr->WrapObject(Getter ? Getter(static_cast<UObject*>(Self)) : nullptr);
+				};
+				FUnrealMcpRqlTypes::SetMember(Descriptor, std::move(Member));
+			});
+		}
+
 		virtual void AddObjectListMember(UClass* Class, const FString& Name, const FString& Description, UClass* ElementClass,
 			TFunction<TArray<UObject*>(UObject*)> Getter) override
 		{
@@ -169,6 +200,12 @@ namespace UnrealMcpRqlSessionLocal
 }
 
 using namespace UnrealMcpRqlSessionLocal;
+
+void FUnrealMcpRqlModuleContext::AddApiSource(const FString& Name, const FString& Description, UClass* ApiClass, const FString& TypeName)
+{
+	AddApiClass(ApiClass, TypeName);
+	AddObjectSource(Name, Description, ApiClass, [ApiClass]() -> UObject* { return ApiClass ? ApiClass->GetDefaultObject() : nullptr; });
+}
 
 FUnrealMcpRqlSession::FUnrealMcpRqlSession()
 	: TypesPtr(MakeUnique<FUnrealMcpRqlTypes>())
@@ -214,8 +251,20 @@ void FUnrealMcpRqlSession::ConfigureMutations()
 	};
 	// One editor transaction per mutation (one Ctrl+Z step): owners are snapshotted before the first write. Objects the
 	// calls create with RF_Transactional (SpawnActor, AddComponent, ...) are recorded into the same transaction.
-	Policy.before_write = [this, OwnerOf](const std::vector<rql::MutationRecord>& Records)
+	Policy.before_write = [this, OwnerOf, TypeProvider](const std::vector<rql::MutationRecord>& Records)
 	{
+		// Class defaults and archetypes (the class-default sources' rows, a Blueprint's defaults) are read-only: an
+		// in-memory change to a CDO is not a saved edit and leaks into every new instance. API objects (`editor`, the
+		// extensions' operations) are class defaults by design and stay callable.
+		for (const rql::MutationRecord& Record : Records)
+		{
+			for (UObject* Object : { TypeProvider->AsObject(Record.item), TypeProvider->AsObject(Record.owner) })
+			{
+				if (Object && Object->IsTemplate() && !TypeProvider->IsApiClass(Object->GetClass()))
+					throw std::runtime_error(UnrealMcpRqlToStd(FString::Printf(
+						TEXT("%s is a class default object, read-only through RQL (edit the class or Blueprint instead)"), *Object->GetName())));
+			}
+		}
 		if (TransactionIndex == INDEX_NONE && GEditor)
 			TransactionIndex = GEditor->BeginTransaction(TEXT("UnrealMcp"), FText::FromString(TEXT("RQL mutation")), nullptr);
 		for (const rql::MutationRecord& Record : Records)

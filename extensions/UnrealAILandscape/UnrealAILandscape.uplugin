@@ -3,7 +3,7 @@
   "Version": 2,
   "VersionName": "0.1.1",
   "FriendlyName": "Unreal AI Landscape",
-  "Description": "An AI Game Developer (Unreal-MCP) extension. Implements IUnrealMcpToolProvider and contributes MCP tools that an AI agent can call against the Unreal Editor.",
+  "Description": "RQL module for Unreal's Landscape and Water systems: query landscapes (sections, paint layers), water bodies and water zones. An AI Game Developer (Unreal-MCP) extension: an IUnrealMcpRqlModule that agents use through rql-query / rql-mutate / rql-schema.",
   "Category": "AI",
   "CreatedBy": "IvanMurzak/Unreal-AI-Landscape",
   "CreatedByURL": "https://github.com/IvanMurzak/Unreal-AI-Landscape",

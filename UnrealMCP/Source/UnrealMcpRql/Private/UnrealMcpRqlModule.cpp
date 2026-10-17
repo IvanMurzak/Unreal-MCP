@@ -4,6 +4,7 @@
 #include "IUnrealMcpRqlModule.h"
 #include "UnrealMcpRqlTypes.h"
 
+#include "Interfaces/IPluginManager.h"
 #include "Modules/ModuleManager.h"
 #include "Tools/UnrealMcpObjectRef.h"
 
@@ -37,6 +38,17 @@ UClass* UnrealMcpRql::ResolveClass(const FString& Name)
 UObject* UnrealMcpRql::LoadObject(UClass* Class, const FString& Path)
 {
 	return FUnrealMcpObjectRef::LoadObjectQuiet(Class, Path);
+}
+
+UWorld* UnrealMcpRql::EditorWorld()
+{
+	return FUnrealMcpObjectRef::GetEditorWorld();
+}
+
+FString UnrealMcpRql::PluginVersion(const FString& PluginName)
+{
+	const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(PluginName);
+	return Plugin.IsValid() ? Plugin->GetDescriptor().VersionName : FString();
 }
 
 void UnrealMcpRqlBeginCall()

@@ -18,39 +18,17 @@ public class UnrealAIGAS : ModuleRules
 		{
 			"CoreUObject",
 			"Engine",
-			"Projects",
-			// "Json" is needed because the public registry header (UnrealMcpToolRegistry.h) includes
-			// Dom/JsonObject.h, and the sample handler builds a structured result with FJsonObject.
+			// FJsonValue: the GrantedAbilities member.
 			"Json",
+			// The RQL module seam: IUnrealMcpRqlModule.h (sources, operations, members, guides, the editor-module template)
+			// and UnrealMcpRqlTools.h (the specs run plans) live in the Unreal-MCP plugin's UnrealMcpRql module; the
+			// matching `UnrealMCP` plugin dependency is in the .uplugin "Plugins" array.
+			"UnrealMcpRql",
 
-			// --- Unreal-MCP contract (REQUIRED) ---------------------------------------------------
-			// The extension contract (IUnrealMcpToolProvider.h) + tool registry (UnrealMcpToolRegistry.h)
-			// live in the Unreal-MCP plugin's RUNTIME module. UnrealMcpEditor re-exports those headers
-			// and gives editor-only API access (most tools touch the editor). Keep both — they are the
-			// spine of every extension. The matching `UnrealMCP` plugin dependency is declared in the
-			// .uplugin's "Plugins" array.
-			"UnrealMcpRuntime",
-			"UnrealMcpEditor",
-
-			// --- Your feature's engine modules (THE GATING) ---------------------------------------
-			// This dependency IS the "gating": the extension won't compile or load without the engine
-			// plugin it targets. The GATING plugin (GameplayAbilities) is declared in the .uplugin
-			// "Plugins" array; here we depend on its RUNTIME module, which carries every type the tools
-			// touch (UGameplayAbility, UGameplayEffect, UAttributeSet, UAbilitySystemComponent,
-			// FGameplayAbilitySpec). The plugin's editor module is "GameplayAbilitiesEditor"
-			// (Type=UncookedOnly), but NONE of these tools call an editor-only GAS API, so it is NOT a
-			// dependency here (the iter-01 scaffold seeded it; dropped per the verify-real-module-names rule).
+			// The gating engine plugin's runtime module (its { "Name": "GameplayAbilities" } entry is in the .uplugin
+			// "Plugins" array): UGameplayAbility / UGameplayEffect / UAttributeSet for the class-default sources,
+			// UAbilitySystemComponent for GrantedAbilities and the GrantAbility operation.
 			"GameplayAbilities",
-
-			// --- Support modules this extension's tools call ----------------------------------------
-			// GameplayTags : FGameplayTagContainer / FGameplayTag string-ify in gas-inspect-ability
-			//                (a public dep of GameplayAbilities, declared explicitly since we use it directly).
-			// AssetRegistry: enumerate UGameplayAbility / UGameplayEffect / UAttributeSet subclasses
-			//                without loading them (the three gas-list-* tools, via GetDerivedClassNames).
-			// UnrealEd     : GEditor + the editor world context for gas-grant-ability.
-			"GameplayTags",
-			"AssetRegistry",
-			"UnrealEd",
 		});
 	}
 }

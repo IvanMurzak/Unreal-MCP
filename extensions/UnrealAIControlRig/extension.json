@@ -1,35 +1,14 @@
 {
   "extensionId": "com.ivanmurzak.unreal-ai-control-rig",
   "name": "ControlRig Tools",
-  "description": "AI tools for Unreal's Control Rig (list/inspect rig blueprints, controls, bones, and actor components).",
+  "description": "RQL module for Unreal's Control Rig: query Control Rig blueprints (element hierarchy, controls, bones) and Control Rig components.",
   "pluginName": "UnrealAIControlRig",
   "repo": "IvanMurzak/Unreal-MCP",
   "version": "0.1.3",
-  "minCoreVersion": "0.5.0",
+  "minCoreVersion": "1.0.0",
   "enginePlugins": [
     "ControlRig"
   ],
-  "tools": [
-    {
-      "name": "control-rig-list",
-      "description": "Lists every Control Rig blueprint (UControlRigBlueprint) asset in the project via the Asset Registry, without loading any of them. Optionally filter by a content-path prefix. Returns { count, controlRigs:[{ name, path }] }."
-    },
-    {
-      "name": "control-rig-get",
-      "description": "Inspects a single Control Rig blueprint asset (read-only) and reports its rig element hierarchy. Returns { path, name, boneCount, nullCount, controlCount, curveCount, elementCount, elements:[{ name, type }] }."
-    },
-    {
-      "name": "control-rig-list-controls",
-      "description": "Lists the control elements of a Control Rig blueprint (read-only), each with its control type (e.g. Float, Transform, Bool). Returns { path, controlCount, controls:[{ name, controlType }] }."
-    },
-    {
-      "name": "control-rig-list-bones",
-      "description": "Lists the bone elements of a Control Rig blueprint (read-only), each with its immediate parent bone (empty for a root). Returns { path, boneCount, bones:[{ name, parent }] }."
-    },
-    {
-      "name": "control-rig-get-component",
-      "description": "Inspects the Control Rig component of an actor in the active editor world (read-only). Looks the actor up by its label. Returns { actorName, componentName, controlRigClass } or a defensive error if the actor or component is not found."
-    }
-  ],
-  "_comment": "Install-catalog / compatibility manifest, shaped as ONE unreal-mcp-cli ExtensionDescriptor (cli/src/utils/extensions-catalog.ts in Unreal-MCP) so it is directly liftable into the shared extensions.catalog.json { schemaVersion, extensions[] }. 'version' mirrors the .uplugin VersionName (kept in sync by commands/bump-version.ps1). 'minCoreVersion' is the lowest Unreal-MCP core version this extension supports (refreshed by commands/update-core.ps1). 'enginePlugins' are the gating engine plugins (e.g. ['Niagara']) enabled in the .uproject alongside this extension \u2014 populated by commands/init -FeaturePlugin. 'tools' lists the contributed tool ids/descriptions. The install-extension resolver unions enginePlugins with the materialized .uplugin Plugins[]."
+  "tools": [],
+  "_comment": "Install-catalog metadata (one unreal-mcp-cli ExtensionDescriptor). 'version' is the .uplugin VersionName; change both with `python scripts/extension_release.py bump --plugin <Plugin> --version <x.y.z>`. 'tools' is empty: the extension adds an RQL module (docs/rql.md), not MCP tools. 'minCoreVersion' is the lowest supported Unreal-MCP core; 'enginePlugins' are the engine plugins the installer enables."
 }

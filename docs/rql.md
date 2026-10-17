@@ -137,12 +137,18 @@ manifest push.
 Reflection already exposes every type the extension's engine plugin defines, so a module adds what reflection does not:
 
 - sources: `AddObjectSource(name, description, UClass*, getter)`, `AddObjectListSource(name, description, UClass*,
-  getter)`, `AddAssetSource(name, description, UClass*)` — the class types the source in `rql-schema`;
-- operations: `AddApiClass(UClass*, "TypeName")` — every UFUNCTION of the class becomes callable (declare them
-  `UFUNCTION(BlueprintCallable, meta = (BlueprintInternalUseOnly = "true"))` so UHT records default arguments; the doc
-  comment is the description; failures via `UnrealMcpRql::Fail`), usually with its class default object as a source;
-- members: `ExposeProperties` (properties reflection hides), `AddJsonMember`, `AddObjectListMember`;
+  getter)`, `AddAssetSource(name, description, UClass*)`, `AddClassDefaultsSource(name, description, UClass* base)` —
+  the class types the source in `rql-schema`;
+- operations: `AddApiSource(name, description, UClass*, "TypeName")` (or `AddApiClass` alone) — every UFUNCTION of the
+  class becomes callable (declare them `UFUNCTION(BlueprintCallable, meta = (BlueprintInternalUseOnly = "true"))` so
+  UHT records default arguments; the doc comment is the description; failures via `UnrealMcpRql::Failed<T>`; object
+  parameters are required unless their C++ default is `nullptr`);
+- members: `ExposeProperties` (properties reflection hides), `AddJsonMember`, `AddObjectMember`, `AddObjectListMember`;
 - `AddGuide(topic, markdown)`, rendered into the `unreal-rql` skill.
+
+`IMPLEMENT_MODULE(TUnrealMcpRqlEditorModule<FMyRqlModule>, MyModule)` registers the module for the editor module's
+lifetime; `UnrealMcpRql::SpawnActor` / `AddComponent` / `CreateAsset` / `EditorWorld` / `PluginVersion` share the core
+operations' rules (docs/EXTENSIONS.md).
 
 ## Tests
 

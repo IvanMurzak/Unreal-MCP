@@ -3,7 +3,7 @@
   "Version": 2,
   "VersionName": "0.1.3",
   "FriendlyName": "Unreal AI ControlRig",
-  "Description": "An AI Game Developer (Unreal-MCP) extension. Implements IUnrealMcpToolProvider and contributes MCP tools that an AI agent can call against the Unreal Editor.",
+  "Description": "RQL module for Unreal's Control Rig: query Control Rig blueprints (element hierarchy, controls, bones) and Control Rig components. An AI Game Developer (Unreal-MCP) extension: an IUnrealMcpRqlModule that agents use through rql-query / rql-mutate / rql-schema.",
   "Category": "AI",
   "CreatedBy": "IvanMurzak/Unreal-AI-ControlRig",
   "CreatedByURL": "https://github.com/IvanMurzak/Unreal-AI-ControlRig",

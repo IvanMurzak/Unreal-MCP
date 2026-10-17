@@ -40,6 +40,7 @@ public class UnrealMcpRql : ModuleRules
 		PrivateDependencyModuleNames.AddRange(new string[]
 		{
 			"Json",
+			"Projects", // IPluginManager: UnrealMcpRql::PluginVersion
 			"UnrealEd",
 			"AssetRegistry",
 			"AssetTools",

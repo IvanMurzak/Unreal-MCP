@@ -18,36 +18,17 @@ public class UnrealAIPCG : ModuleRules
 		{
 			"CoreUObject",
 			"Engine",
-			"Projects",
-			// "Json" is needed because the public registry header (UnrealMcpToolRegistry.h) includes
-			// Dom/JsonObject.h, and the sample handler builds a structured result with FJsonObject.
+			// FJsonValue: the Nodes / IsGenerating members.
 			"Json",
+			// The RQL module seam: IUnrealMcpRqlModule.h (sources, operations, members, guides, the editor-module template)
+			// and UnrealMcpRqlTools.h (the specs run plans) live in the Unreal-MCP plugin's UnrealMcpRql module; the
+			// matching `UnrealMCP` plugin dependency is in the .uplugin "Plugins" array.
+			"UnrealMcpRql",
 
-			// --- Unreal-MCP contract (REQUIRED) ---------------------------------------------------
-			// The extension contract (IUnrealMcpToolProvider.h) + tool registry (UnrealMcpToolRegistry.h)
-			// live in the Unreal-MCP plugin's RUNTIME module. UnrealMcpEditor re-exports those headers
-			// and gives editor-only API access (most tools touch the editor). Keep both — they are the
-			// spine of every extension. The matching `UnrealMCP` plugin dependency is declared in the
-			// .uplugin's "Plugins" array.
-			"UnrealMcpRuntime",
-			"UnrealMcpEditor",
-
-			// --- Your feature's engine modules (THE GATING) ---------------------------------------
-			// This dependency IS the "gating": the extension won't compile or load without the engine
-			// plugin it targets. The PCG plugin's modules are PCG (Runtime), PCGEditor (Editor) and
-			// PCGCompute (Runtime) — every type this extension wraps (UPCGGraph, UPCGComponent,
-			// UPCGNode) lives in the RUNTIME `PCG` module, so we depend on that ONE module. We do NOT
-			// depend on `PCGEditor`: it exists, but no tool here calls an editor-only PCG API (the
-			// asset-authoring graph editor), and a bogus editor-module dep fails the UBT build. The
-			// matching { "Name": "PCG" } entry is wired into the .uplugin "Plugins" array.
+			// The gating engine plugin's runtime module (its { "Name": "PCG" } entry is in the .uplugin "Plugins" array):
+			// UPCGGraph for the pcgGraphs source and Nodes, UPCGComponent for BoundGraph and the AddComponent / Generate
+			// operations.
 			"PCG",
-
-			// --- Support modules this extension's tools call ----------------------------------------
-			// AssetRegistry: enumerate UPCGGraph assets without loading them (pcg-list-graphs).
-			// UnrealEd: GEditor + the editor world context for the actor/component tools
-			// (pcg-add-component / pcg-get-component / pcg-generate).
-			"AssetRegistry",
-			"UnrealEd",
 		});
 	}
 }

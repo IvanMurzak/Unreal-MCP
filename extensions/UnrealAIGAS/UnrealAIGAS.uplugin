@@ -3,7 +3,7 @@
   "Version": 2,
   "VersionName": "0.1.1",
   "FriendlyName": "Unreal AI GAS",
-  "Description": "An AI Game Developer (Unreal-MCP) extension. Implements IUnrealMcpToolProvider and contributes MCP tools that an AI agent can call against the Unreal Editor.",
+  "Description": "RQL module for Unreal's Gameplay Ability System: query ability, effect and attribute-set classes and granted abilities, grant abilities to actors. An AI Game Developer (Unreal-MCP) extension: an IUnrealMcpRqlModule that agents use through rql-query / rql-mutate / rql-schema.",
   "Category": "AI",
   "CreatedBy": "IvanMurzak/Unreal-AI-GAS",
   "CreatedByURL": "https://github.com/IvanMurzak/Unreal-AI-GAS",

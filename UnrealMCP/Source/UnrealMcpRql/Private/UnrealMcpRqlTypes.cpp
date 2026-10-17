@@ -700,8 +700,11 @@ void FUnrealMcpRqlTypes::AddFunctionMethod(rql::TypeDescriptor& Descriptor, UFun
 		rql::ParamDescriptor Parameter;
 		Parameter.name = UnrealMcpRqlToStd(Property->GetAuthoredName());
 		Parameter.type = Type;
-		Parameter.nullable = bNullable;
 		const FString DefaultKey = FString(TEXT("CPP_Default_")) + Property->GetName();
+		// An object / class parameter is required unless C++ gives it a default (only nullptr is possible): the engine
+		// refuses null for it, so functions need no "no actor" guards. Soft references (paths) stay nullable.
+		Parameter.nullable = bNullable && (!Property->IsA<FObjectPropertyBase>() || Property->IsA<FSoftObjectProperty>()
+			|| Function->HasMetaData(*DefaultKey));
 		if (Function->HasMetaData(*DefaultKey))
 		{
 			// UHT records C++ default arguments as text; values it cannot import (e.g. FVector::ZeroVector) read as the

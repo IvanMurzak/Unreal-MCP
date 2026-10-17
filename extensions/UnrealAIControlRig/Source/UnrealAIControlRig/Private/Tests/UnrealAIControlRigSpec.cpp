@@ -5,62 +5,20 @@
 
 #include "CoreMinimal.h"
 #include "Misc/AutomationTest.h"
-#include "Features/IModularFeatures.h"
 #include "Dom/JsonObject.h"
 
-#include "IUnrealMcpToolProvider.h"
-#include "UnrealMcpToolRegistry.h"
+#include "IUnrealMcpRqlModule.h"
+#include "UnrealMcpRqlTools.h"
 
 // ============================================================================================
-//  UE Automation spec — ONE-TEST-PER-TOOL convention.
+//  UE Automation spec for the extension's RQL module (Unreal-MCP docs/rql.md "Extensions").
 //
-//  Every tool this extension contributes gets a focused Automation spec asserting it
-//  (a) registers under its kebab-case id and (b) returns a well-formed result. The read-only,
-//  no-required-input tool (control-rig-list) is exercised for a SUCCESS; the required-input
-//  inspector tools are exercised for a well-formed, DEFENSIVE failure (a missing required input
-//  must yield FUnrealMcpToolResult::Error, never a crash) — the deterministic assertion under a
-//  headless `-nullrhi` editor with no project assets.
-//
-//  The spec discovers THIS extension's live provider through IModularFeatures (the exact path
-//  Unreal-MCP uses), registers its tools into a throwaway registry, and exercises them — so it
-//  validates the real shipped provider, not a stand-in.
+//  The spec discovers THIS extension's live module through IModularFeatures (the path Unreal-MCP uses) and runs RQL
+//  QueryPlans through the editor's RQL engine (UnrealMcpRqlTools::RunPlan). The C++ runtime has no text parser, so
+//  each plan is the one Rql.Parser produces for the query in the comment above it.
 //
 //  Run via:  Automation RunTests UnrealAIControlRig
 // ============================================================================================
-
-namespace
-{
-	// Spec-unique helper names (the module is unity-built — keep file-local helpers uniquely named).
-	IUnrealMcpToolProvider* UnrealAIControlRig_FindOwnProvider()
-	{
-		const TArray<IUnrealMcpToolProvider*> Providers =
-			IModularFeatures::Get().GetModularFeatureImplementations<IUnrealMcpToolProvider>(
-				IUnrealMcpToolProvider::GetModularFeatureName());
-		for (IUnrealMcpToolProvider* Provider : Providers)
-		{
-			if (Provider && Provider->GetExtensionId() == TEXT("com.ivanmurzak.unreal-ai-control-rig"))
-			{
-				return Provider;
-			}
-		}
-		return nullptr;
-	}
-
-	// Register the live provider's tools into a throwaway registry (the exact RegisterExtension path
-	// Unreal-MCP uses) so a test exercises the real shipped tool bodies.
-	bool UnrealAIControlRig_BuildRegistry(FAutomationTestBase& Test, FUnrealMcpToolRegistry& OutRegistry)
-	{
-		IUnrealMcpToolProvider* Provider = UnrealAIControlRig_FindOwnProvider();
-		if (!Provider)
-		{
-			Test.AddError(TEXT("extension provider not registered — cannot exercise its tools"));
-			return false;
-		}
-		OutRegistry.RegisterExtension(Provider->GetExtensionId(),
-			[Provider](FUnrealMcpToolRegistry& R) { Provider->RegisterTools(R); });
-		return true;
-	}
-}
 
 BEGIN_DEFINE_SPEC(FUnrealAIControlRigSpec, "UnrealAIControlRig",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -68,108 +26,66 @@ END_DEFINE_SPEC(FUnrealAIControlRigSpec)
 
 void FUnrealAIControlRigSpec::Define()
 {
-	Describe("provider registration", [this]()
+	Describe("RQL module", [this]()
 	{
-		It("registers this extension as a modular-feature tool provider", [this]()
+		It("registers this extension's RQL module as a modular feature", [this]()
 		{
-			IUnrealMcpToolProvider* Provider = UnrealAIControlRig_FindOwnProvider();
-			TestNotNull(TEXT("extension provider is registered as a modular feature"), Provider);
-			if (Provider)
+			IUnrealMcpRqlModule* Module = UnrealMcpRqlTools::FindModule(TEXT("com.ivanmurzak.unreal-ai-control-rig"));
+			if (TestNotNull(TEXT("RQL module is registered"), Module))
 			{
-				TestEqual(TEXT("extension id matches the descriptor"),
-					Provider->GetExtensionId(), FString(TEXT("com.ivanmurzak.unreal-ai-control-rig")));
+				TestEqual(TEXT("module name"), Module->GetRqlModuleName(), FString(TEXT("ControlRig")));
+				TestFalse(TEXT("version reported"), Module->GetExtensionVersion().IsEmpty());
 			}
 		});
-	});
 
-	Describe("tool: control-rig-list", [this]()
-	{
-		It("registers and returns a well-formed { count, controlRigs } success", [this]()
+		It("adds its sources and guide to the unreal-rql skill", [this]()
 		{
-			FUnrealMcpToolRegistry Registry;
-			if (!UnrealAIControlRig_BuildRegistry(*this, Registry)) { return; }
-
-			TestTrue(TEXT("control-rig-list is registered"), Registry.HasTool(TEXT("control-rig-list")));
-
-			const FUnrealMcpToolResult Result =
-				Registry.Execute(TEXT("control-rig-list"), FUnrealMcpToolCall());
-
-			TestTrue(TEXT("tool reports success"), Result.bSuccess);
-			TestFalse(TEXT("tool returned a non-empty message"), Result.Message.IsEmpty());
-			TestTrue(TEXT("structured result carries 'count' and 'controlRigs'"),
-				Result.Structured.IsValid()
-				&& Result.Structured->HasField(TEXT("count"))
-				&& Result.Structured->HasField(TEXT("controlRigs")));
+			const FString Skill = UnrealMcpRqlTools::SkillMarkdown();
+			TestTrue(TEXT("| `controlRigs` |"), Skill.Contains(TEXT("| `controlRigs` |")));
+			TestTrue(TEXT("## Control Rig"), Skill.Contains(TEXT("## Control Rig")));
 		});
 	});
 
-	Describe("tool: control-rig-get", [this]()
+	Describe("source: controlRigs", [this]()
 	{
-		It("registers and fails defensively on a missing 'path' (well-formed Error)", [this]()
+		It("answers a query (count of the project's Control Rig blueprints)", [this]()
 		{
-			FUnrealMcpToolRegistry Registry;
-			if (!UnrealAIControlRig_BuildRegistry(*this, Registry)) { return; }
+			// controlRigs | count
+			TSharedPtr<FJsonObject> Result;
+			const bool bResultOk = UnrealMcpRqlTools::RunPlan(TEXT(R"RQL({"rql":"0.1","source":{"path":["controlRigs"]},"stages":[{"op":"count"}]})RQL"), false, &Result);
+			TestTrue(TEXT("a well-formed result"), Result.IsValid());
+			TestTrue(TEXT("succeeds"), bResultOk);
+		});
 
-			TestTrue(TEXT("control-rig-get is registered"), Registry.HasTool(TEXT("control-rig-get")));
-
-			// No 'path' -> the handler must return a well-formed Error, not crash or succeed.
-			const FUnrealMcpToolResult Result =
-				Registry.Execute(TEXT("control-rig-get"), FUnrealMcpToolCall());
-
-			TestFalse(TEXT("missing 'path' is reported as a failure"), Result.bSuccess);
-			TestFalse(TEXT("failure carries a non-empty message"), Result.Message.IsEmpty());
+		It("reads the hierarchy members of every rig", [this]()
+		{
+			// controlRigs | select Name Elements Controls Bones
+			TSharedPtr<FJsonObject> Result;
+			const bool bResultOk = UnrealMcpRqlTools::RunPlan(TEXT(R"RQL({"rql":"0.1","source":{"path":["controlRigs"]},"stages":[{"op":"select","fields":[{"name":"Name","expr":{"path":["Name"]}},{"name":"Elements","expr":{"path":["Elements"]}},{"name":"Controls","expr":{"path":["Controls"]}},{"name":"Bones","expr":{"path":["Bones"]}}]}]})RQL"), false, &Result);
+			TestTrue(TEXT("a well-formed result"), Result.IsValid());
+			TestTrue(TEXT("succeeds"), bResultOk);
 		});
 	});
 
-	Describe("tool: control-rig-list-controls", [this]()
+	Describe("members", [this]()
 	{
-		It("registers and fails defensively on a missing 'path' (well-formed Error)", [this]()
+		It("describes ControlRigBlueprint with its hierarchy members", [this]()
 		{
-			FUnrealMcpToolRegistry Registry;
-			if (!UnrealAIControlRig_BuildRegistry(*this, Registry)) { return; }
-
-			TestTrue(TEXT("control-rig-list-controls is registered"), Registry.HasTool(TEXT("control-rig-list-controls")));
-
-			const FUnrealMcpToolResult Result =
-				Registry.Execute(TEXT("control-rig-list-controls"), FUnrealMcpToolCall());
-
-			TestFalse(TEXT("missing 'path' is reported as a failure"), Result.bSuccess);
-			TestFalse(TEXT("failure carries a non-empty message"), Result.Message.IsEmpty());
+			bool bOk = false;
+			const FString Schema = UnrealMcpRqlTools::Schema(TEXT("ControlRigBlueprint"), bOk);
+			TestTrue(TEXT("schema ok"), bOk);
+			TestTrue(TEXT("lists name:Elements"), Schema.Contains(TEXT("\"name\":\"Elements\"")));
+			TestTrue(TEXT("lists name:Hierarchy"), Schema.Contains(TEXT("\"name\":\"Hierarchy\"")));
+			TestTrue(TEXT("lists name:Controls"), Schema.Contains(TEXT("\"name\":\"Controls\"")));
+			TestTrue(TEXT("lists name:Bones"), Schema.Contains(TEXT("\"name\":\"Bones\"")));
 		});
-	});
 
-	Describe("tool: control-rig-list-bones", [this]()
-	{
-		It("registers and fails defensively on a missing 'path' (well-formed Error)", [this]()
+		It("describes ControlRigComponent with its BoundRig member", [this]()
 		{
-			FUnrealMcpToolRegistry Registry;
-			if (!UnrealAIControlRig_BuildRegistry(*this, Registry)) { return; }
-
-			TestTrue(TEXT("control-rig-list-bones is registered"), Registry.HasTool(TEXT("control-rig-list-bones")));
-
-			const FUnrealMcpToolResult Result =
-				Registry.Execute(TEXT("control-rig-list-bones"), FUnrealMcpToolCall());
-
-			TestFalse(TEXT("missing 'path' is reported as a failure"), Result.bSuccess);
-			TestFalse(TEXT("failure carries a non-empty message"), Result.Message.IsEmpty());
-		});
-	});
-
-	Describe("tool: control-rig-get-component", [this]()
-	{
-		It("registers and fails defensively on a missing 'actorName' (well-formed Error)", [this]()
-		{
-			FUnrealMcpToolRegistry Registry;
-			if (!UnrealAIControlRig_BuildRegistry(*this, Registry)) { return; }
-
-			TestTrue(TEXT("control-rig-get-component is registered"), Registry.HasTool(TEXT("control-rig-get-component")));
-
-			// No 'actorName' -> the handler must return a well-formed Error before touching the world.
-			const FUnrealMcpToolResult Result =
-				Registry.Execute(TEXT("control-rig-get-component"), FUnrealMcpToolCall());
-
-			TestFalse(TEXT("missing 'actorName' is reported as a failure"), Result.bSuccess);
-			TestFalse(TEXT("failure carries a non-empty message"), Result.Message.IsEmpty());
+			bool bOk = false;
+			const FString Schema = UnrealMcpRqlTools::Schema(TEXT("ControlRigComponent"), bOk);
+			TestTrue(TEXT("schema ok"), bOk);
+			TestTrue(TEXT("lists name:BoundRig"), Schema.Contains(TEXT("\"name\":\"BoundRig\"")));
 		});
 	});
 }

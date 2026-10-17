@@ -5,61 +5,20 @@
 
 #include "CoreMinimal.h"
 #include "Misc/AutomationTest.h"
-#include "Features/IModularFeatures.h"
 #include "Dom/JsonObject.h"
 
-#include "IUnrealMcpToolProvider.h"
-#include "UnrealMcpToolRegistry.h"
+#include "IUnrealMcpRqlModule.h"
+#include "UnrealMcpRqlTools.h"
 
 // ============================================================================================
-//  UE Automation spec — ONE-TEST-PER-TOOL convention.
+//  UE Automation spec for the extension's RQL module (Unreal-MCP docs/rql.md "Extensions").
 //
-//  Every tool this extension contributes gets a focused Automation spec asserting it
-//  (a) registers under its kebab-case id and (b) returns a well-formed result. Read-only tools
-//  are exercised for a SUCCESS; the mutating / required-input tools are exercised for a
-//  well-formed, DEFENSIVE failure (bad input must yield FUnrealMcpToolResult::Error, never a
-//  crash) — the deterministic assertion under a headless `-nullrhi` editor with no project assets.
-//
-//  The spec discovers THIS extension's live provider through IModularFeatures (the exact path
-//  Unreal-MCP uses), registers its tools into a throwaway registry, and exercises them — so it
-//  validates the real shipped provider, not a stand-in.
+//  The spec discovers THIS extension's live module through IModularFeatures (the path Unreal-MCP uses) and runs RQL
+//  QueryPlans through the editor's RQL engine (UnrealMcpRqlTools::RunPlan). The C++ runtime has no text parser, so
+//  each plan is the one Rql.Parser produces for the query in the comment above it.
 //
 //  Run via:  Automation RunTests UnrealAIPCG
 // ============================================================================================
-
-namespace
-{
-	// Spec-unique helper names (the module is unity-built — keep file-local helpers uniquely named).
-	IUnrealMcpToolProvider* UnrealAIPCG_FindOwnProvider()
-	{
-		const TArray<IUnrealMcpToolProvider*> Providers =
-			IModularFeatures::Get().GetModularFeatureImplementations<IUnrealMcpToolProvider>(
-				IUnrealMcpToolProvider::GetModularFeatureName());
-		for (IUnrealMcpToolProvider* Provider : Providers)
-		{
-			if (Provider && Provider->GetExtensionId() == TEXT("com.ivanmurzak.unreal-ai-pcg"))
-			{
-				return Provider;
-			}
-		}
-		return nullptr;
-	}
-
-	// Register the live provider's tools into a throwaway registry (the exact RegisterExtension path
-	// Unreal-MCP uses) so a test exercises the real shipped tool bodies.
-	bool UnrealAIPCG_BuildRegistry(FAutomationTestBase& Test, FUnrealMcpToolRegistry& OutRegistry)
-	{
-		IUnrealMcpToolProvider* Provider = UnrealAIPCG_FindOwnProvider();
-		if (!Provider)
-		{
-			Test.AddError(TEXT("extension provider not registered — cannot exercise its tools"));
-			return false;
-		}
-		OutRegistry.RegisterExtension(Provider->GetExtensionId(),
-			[Provider](FUnrealMcpToolRegistry& R) { Provider->RegisterTools(R); });
-		return true;
-	}
-}
 
 BEGIN_DEFINE_SPEC(FUnrealAIPCGSpec, "UnrealAIPCG",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -67,110 +26,83 @@ END_DEFINE_SPEC(FUnrealAIPCGSpec)
 
 void FUnrealAIPCGSpec::Define()
 {
-	Describe("provider registration", [this]()
+	Describe("RQL module", [this]()
 	{
-		It("registers this extension as a modular-feature tool provider", [this]()
+		It("registers this extension's RQL module as a modular feature", [this]()
 		{
-			IUnrealMcpToolProvider* Provider = UnrealAIPCG_FindOwnProvider();
-			TestNotNull(TEXT("extension provider is registered as a modular feature"), Provider);
-			if (Provider)
+			IUnrealMcpRqlModule* Module = UnrealMcpRqlTools::FindModule(TEXT("com.ivanmurzak.unreal-ai-pcg"));
+			if (TestNotNull(TEXT("RQL module is registered"), Module))
 			{
-				TestEqual(TEXT("extension id matches the descriptor"),
-					Provider->GetExtensionId(), FString(TEXT("com.ivanmurzak.unreal-ai-pcg")));
+				TestEqual(TEXT("module name"), Module->GetRqlModuleName(), FString(TEXT("PCG")));
+				TestFalse(TEXT("version reported"), Module->GetExtensionVersion().IsEmpty());
 			}
 		});
-	});
 
-	Describe("tool: pcg-list-graphs", [this]()
-	{
-		It("registers and returns a well-formed { count, graphs } success", [this]()
+		It("adds its sources and guide to the unreal-rql skill", [this]()
 		{
-			FUnrealMcpToolRegistry Registry;
-			if (!UnrealAIPCG_BuildRegistry(*this, Registry)) { return; }
-
-			TestTrue(TEXT("pcg-list-graphs is registered"), Registry.HasTool(TEXT("pcg-list-graphs")));
-
-			const FUnrealMcpToolResult Result =
-				Registry.Execute(TEXT("pcg-list-graphs"), FUnrealMcpToolCall());
-
-			TestTrue(TEXT("tool reports success"), Result.bSuccess);
-			TestFalse(TEXT("tool returned a non-empty message"), Result.Message.IsEmpty());
-			TestTrue(TEXT("structured result carries 'count' and 'graphs'"),
-				Result.Structured.IsValid()
-				&& Result.Structured->HasField(TEXT("count"))
-				&& Result.Structured->HasField(TEXT("graphs")));
+			const FString Skill = UnrealMcpRqlTools::SkillMarkdown();
+			TestTrue(TEXT("| `pcgGraphs` |"), Skill.Contains(TEXT("| `pcgGraphs` |")));
+			TestTrue(TEXT("| `pcg` |"), Skill.Contains(TEXT("| `pcg` |")));
+			TestTrue(TEXT("## PCG"), Skill.Contains(TEXT("## PCG")));
 		});
 	});
 
-	Describe("tool: pcg-get-graph", [this]()
+	Describe("sources and members", [this]()
 	{
-		It("registers and fails defensively on a missing 'path' (well-formed Error)", [this]()
+		It("pcgGraphs answers a query", [this]()
 		{
-			FUnrealMcpToolRegistry Registry;
-			if (!UnrealAIPCG_BuildRegistry(*this, Registry)) { return; }
+			// pcgGraphs | count
+			TSharedPtr<FJsonObject> Result;
+			const bool bResultOk = UnrealMcpRqlTools::RunPlan(TEXT(R"RQL({"rql":"0.1","source":{"path":["pcgGraphs"]},"stages":[{"op":"count"}]})RQL"), false, &Result);
+			TestTrue(TEXT("a well-formed result"), Result.IsValid());
+			TestTrue(TEXT("succeeds"), bResultOk);
+		});
 
-			TestTrue(TEXT("pcg-get-graph is registered"), Registry.HasTool(TEXT("pcg-get-graph")));
+		It("describes PCGGraph with its Nodes member", [this]()
+		{
+			bool bOk = false;
+			const FString Schema = UnrealMcpRqlTools::Schema(TEXT("PCGGraph"), bOk);
+			TestTrue(TEXT("schema ok"), bOk);
+			TestTrue(TEXT("lists name:Nodes"), Schema.Contains(TEXT("\"name\":\"Nodes\"")));
+		});
 
-			// No 'path' -> the handler must return a well-formed Error, not crash or succeed.
-			const FUnrealMcpToolResult Result =
-				Registry.Execute(TEXT("pcg-get-graph"), FUnrealMcpToolCall());
-
-			TestFalse(TEXT("missing 'path' is reported as a failure"), Result.bSuccess);
-			TestFalse(TEXT("failure carries a non-empty message"), Result.Message.IsEmpty());
+		It("describes PCGComponent with its BoundGraph and IsGenerating members", [this]()
+		{
+			bool bOk = false;
+			const FString Schema = UnrealMcpRqlTools::Schema(TEXT("PCGComponent"), bOk);
+			TestTrue(TEXT("schema ok"), bOk);
+			TestTrue(TEXT("lists name:BoundGraph"), Schema.Contains(TEXT("\"name\":\"BoundGraph\"")));
+			TestTrue(TEXT("lists name:IsGenerating"), Schema.Contains(TEXT("\"name\":\"IsGenerating\"")));
 		});
 	});
 
-	Describe("tool: pcg-add-component", [this]()
+	Describe("operations", [this]()
 	{
-		It("registers and fails defensively on a missing 'actorName' (well-formed Error)", [this]()
+		It("lists AddComponent and Generate", [this]()
 		{
-			FUnrealMcpToolRegistry Registry;
-			if (!UnrealAIPCG_BuildRegistry(*this, Registry)) { return; }
-
-			TestTrue(TEXT("pcg-add-component is registered"), Registry.HasTool(TEXT("pcg-add-component")));
-
-			// No 'actorName' -> the handler must return a well-formed Error before touching the world.
-			const FUnrealMcpToolResult Result =
-				Registry.Execute(TEXT("pcg-add-component"), FUnrealMcpToolCall());
-
-			TestFalse(TEXT("missing 'actorName' is reported as a failure"), Result.bSuccess);
-			TestFalse(TEXT("failure carries a non-empty message"), Result.Message.IsEmpty());
+			bool bOk = false;
+			const FString Schema = UnrealMcpRqlTools::Schema(TEXT("PCGOperations"), bOk);
+			TestTrue(TEXT("schema ok"), bOk);
+			TestTrue(TEXT("lists AddComponent("), Schema.Contains(TEXT("AddComponent(")));
+			TestTrue(TEXT("lists Generate("), Schema.Contains(TEXT("Generate(")));
 		});
-	});
 
-	Describe("tool: pcg-get-component", [this]()
-	{
-		It("registers and fails defensively on a missing 'actorName' (well-formed Error)", [this]()
+		It("AddComponent fails defensively on an unknown actor", [this]()
 		{
-			FUnrealMcpToolRegistry Registry;
-			if (!UnrealAIPCG_BuildRegistry(*this, Registry)) { return; }
-
-			TestTrue(TEXT("pcg-get-component is registered"), Registry.HasTool(TEXT("pcg-get-component")));
-
-			// No 'actorName' -> the handler must return a well-formed Error, not crash or succeed.
-			const FUnrealMcpToolResult Result =
-				Registry.Execute(TEXT("pcg-get-component"), FUnrealMcpToolCall());
-
-			TestFalse(TEXT("missing 'actorName' is reported as a failure"), Result.bSuccess);
-			TestFalse(TEXT("failure carries a non-empty message"), Result.Message.IsEmpty());
+			// pcg | call AddComponent("RqlSpecNoActor")
+			TSharedPtr<FJsonObject> Result;
+			const bool bResultOk = UnrealMcpRqlTools::RunPlan(TEXT(R"RQL({"rql":"0.1","source":{"path":["pcg"]},"stages":[{"op":"call","method":"AddComponent","args":[{"lit":"RqlSpecNoActor"}]}]})RQL"), true, &Result);
+			TestTrue(TEXT("a well-formed result"), Result.IsValid());
+			TestFalse(TEXT("fails defensively"), bResultOk);
 		});
-	});
 
-	Describe("tool: pcg-generate", [this]()
-	{
-		It("registers and fails defensively on a missing 'actorName' (well-formed Error)", [this]()
+		It("Generate fails defensively on an unknown actor", [this]()
 		{
-			FUnrealMcpToolRegistry Registry;
-			if (!UnrealAIPCG_BuildRegistry(*this, Registry)) { return; }
-
-			TestTrue(TEXT("pcg-generate is registered"), Registry.HasTool(TEXT("pcg-generate")));
-
-			// No 'actorName' -> the handler must return a well-formed Error before touching the world.
-			const FUnrealMcpToolResult Result =
-				Registry.Execute(TEXT("pcg-generate"), FUnrealMcpToolCall());
-
-			TestFalse(TEXT("missing 'actorName' is reported as a failure"), Result.bSuccess);
-			TestFalse(TEXT("failure carries a non-empty message"), Result.Message.IsEmpty());
+			// pcg | call Generate("RqlSpecNoActor")
+			TSharedPtr<FJsonObject> Result;
+			const bool bResultOk = UnrealMcpRqlTools::RunPlan(TEXT(R"RQL({"rql":"0.1","source":{"path":["pcg"]},"stages":[{"op":"call","method":"Generate","args":[{"lit":"RqlSpecNoActor"}]}]})RQL"), true, &Result);
+			TestTrue(TEXT("a well-formed result"), Result.IsValid());
+			TestFalse(TEXT("fails defensively"), bResultOk);
 		});
 	});
 }

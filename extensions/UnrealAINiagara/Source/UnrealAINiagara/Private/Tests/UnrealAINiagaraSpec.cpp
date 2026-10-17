@@ -5,61 +5,20 @@
 
 #include "CoreMinimal.h"
 #include "Misc/AutomationTest.h"
-#include "Features/IModularFeatures.h"
 #include "Dom/JsonObject.h"
 
-#include "IUnrealMcpToolProvider.h"
-#include "UnrealMcpToolRegistry.h"
+#include "IUnrealMcpRqlModule.h"
+#include "UnrealMcpRqlTools.h"
 
 // ============================================================================================
-//  UE Automation spec — ONE-TEST-PER-TOOL convention.
+//  UE Automation spec for the extension's RQL module (Unreal-MCP docs/rql.md "Extensions").
 //
-//  Every tool this extension contributes gets a focused Automation spec asserting it
-//  (a) registers under its kebab-case id and (b) returns a well-formed result. Read-only tools
-//  are exercised for a SUCCESS; the mutating / required-input tools are exercised for a
-//  well-formed, DEFENSIVE failure (bad input must yield FUnrealMcpToolResult::Error, never a
-//  crash) — the deterministic assertion under a headless `-nullrhi` editor with no project assets.
-//
-//  The spec discovers THIS extension's live provider through IModularFeatures (the exact path
-//  Unreal-MCP uses), registers its tools into a throwaway registry, and exercises them — so it
-//  validates the real shipped provider, not a stand-in.
+//  The spec discovers THIS extension's live module through IModularFeatures (the path Unreal-MCP uses) and runs RQL
+//  QueryPlans through the editor's RQL engine (UnrealMcpRqlTools::RunPlan). The C++ runtime has no text parser, so
+//  each plan is the one Rql.Parser produces for the query in the comment above it.
 //
 //  Run via:  Automation RunTests UnrealAINiagara
 // ============================================================================================
-
-namespace
-{
-	// Spec-unique helper names (the module is unity-built — keep file-local helpers uniquely named).
-	IUnrealMcpToolProvider* UnrealAINiagara_FindOwnProvider()
-	{
-		const TArray<IUnrealMcpToolProvider*> Providers =
-			IModularFeatures::Get().GetModularFeatureImplementations<IUnrealMcpToolProvider>(
-				IUnrealMcpToolProvider::GetModularFeatureName());
-		for (IUnrealMcpToolProvider* Provider : Providers)
-		{
-			if (Provider && Provider->GetExtensionId() == TEXT("com.ivanmurzak.unreal-ai-niagara"))
-			{
-				return Provider;
-			}
-		}
-		return nullptr;
-	}
-
-	// Register the live provider's tools into a throwaway registry (the exact RegisterExtension path
-	// Unreal-MCP uses) so a test exercises the real shipped tool bodies.
-	bool UnrealAINiagara_BuildRegistry(FAutomationTestBase& Test, FUnrealMcpToolRegistry& OutRegistry)
-	{
-		IUnrealMcpToolProvider* Provider = UnrealAINiagara_FindOwnProvider();
-		if (!Provider)
-		{
-			Test.AddError(TEXT("extension provider not registered — cannot exercise its tools"));
-			return false;
-		}
-		OutRegistry.RegisterExtension(Provider->GetExtensionId(),
-			[Provider](FUnrealMcpToolRegistry& R) { Provider->RegisterTools(R); });
-		return true;
-	}
-}
 
 BEGIN_DEFINE_SPEC(FUnrealAINiagaraSpec, "UnrealAINiagara",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -67,74 +26,64 @@ END_DEFINE_SPEC(FUnrealAINiagaraSpec)
 
 void FUnrealAINiagaraSpec::Define()
 {
-	Describe("provider registration", [this]()
+	Describe("RQL module", [this]()
 	{
-		It("registers this extension as a modular-feature tool provider", [this]()
+		It("registers this extension's RQL module as a modular feature", [this]()
 		{
-			IUnrealMcpToolProvider* Provider = UnrealAINiagara_FindOwnProvider();
-			TestNotNull(TEXT("extension provider is registered as a modular feature"), Provider);
-			if (Provider)
+			IUnrealMcpRqlModule* Module = UnrealMcpRqlTools::FindModule(TEXT("com.ivanmurzak.unreal-ai-niagara"));
+			if (TestNotNull(TEXT("RQL module is registered"), Module))
 			{
-				TestEqual(TEXT("extension id matches the descriptor"),
-					Provider->GetExtensionId(), FString(TEXT("com.ivanmurzak.unreal-ai-niagara")));
+				TestEqual(TEXT("module name"), Module->GetRqlModuleName(), FString(TEXT("Niagara")));
+				TestFalse(TEXT("version reported"), Module->GetExtensionVersion().IsEmpty());
 			}
 		});
-	});
 
-	Describe("tool: niagara-list-systems", [this]()
-	{
-		It("registers and returns a well-formed { count, systems } success", [this]()
+		It("adds its sources and guide to the unreal-rql skill", [this]()
 		{
-			FUnrealMcpToolRegistry Registry;
-			if (!UnrealAINiagara_BuildRegistry(*this, Registry)) { return; }
-
-			TestTrue(TEXT("niagara-list-systems is registered"), Registry.HasTool(TEXT("niagara-list-systems")));
-
-			const FUnrealMcpToolResult Result =
-				Registry.Execute(TEXT("niagara-list-systems"), FUnrealMcpToolCall());
-
-			TestTrue(TEXT("tool reports success"), Result.bSuccess);
-			TestFalse(TEXT("tool returned a non-empty message"), Result.Message.IsEmpty());
-			TestTrue(TEXT("structured result carries 'count' and 'systems'"),
-				Result.Structured.IsValid()
-				&& Result.Structured->HasField(TEXT("count"))
-				&& Result.Structured->HasField(TEXT("systems")));
+			const FString Skill = UnrealMcpRqlTools::SkillMarkdown();
+			TestTrue(TEXT("niagaraSystems source"), Skill.Contains(TEXT("| `niagaraSystems` |")));
+			TestTrue(TEXT("niagara operations source"), Skill.Contains(TEXT("| `niagara` |")));
+			TestTrue(TEXT("guide section"), Skill.Contains(TEXT("## Niagara")));
 		});
 	});
 
-	Describe("tool: niagara-get-system", [this]()
+	Describe("source: niagaraSystems", [this]()
 	{
-		It("registers and fails defensively on a missing 'path' (well-formed Error)", [this]()
+		It("answers a query (count of the project's Niagara systems)", [this]()
 		{
-			FUnrealMcpToolRegistry Registry;
-			if (!UnrealAINiagara_BuildRegistry(*this, Registry)) { return; }
+			// niagaraSystems | count
+			TSharedPtr<FJsonObject> Result;
+			const bool bResultOk = UnrealMcpRqlTools::RunPlan(TEXT(R"RQL({"rql":"0.1","source":{"path":["niagaraSystems"]},"stages":[{"op":"count"}]})RQL"), false, &Result);
+			TestTrue(TEXT("query ok"), bResultOk);
+			TestTrue(TEXT("a count"), Result.IsValid() && Result->HasField(TEXT("value")));
+		});
 
-			TestTrue(TEXT("niagara-get-system is registered"), Registry.HasTool(TEXT("niagara-get-system")));
-
-			// No 'path' -> the handler must return a well-formed Error, not crash or succeed.
-			const FUnrealMcpToolResult Result =
-				Registry.Execute(TEXT("niagara-get-system"), FUnrealMcpToolCall());
-
-			TestFalse(TEXT("missing 'path' is reported as a failure"), Result.bSuccess);
-			TestFalse(TEXT("failure carries a non-empty message"), Result.Message.IsEmpty());
+		It("describes NiagaraSystem with its Emitters member", [this]()
+		{
+			bool bOk = false;
+			const FString Schema = UnrealMcpRqlTools::Schema(TEXT("NiagaraSystem"), bOk);
+			TestTrue(TEXT("schema ok"), bOk);
+			TestTrue(TEXT("Emitters member"), Schema.Contains(TEXT("\"name\":\"Emitters\"")));
 		});
 	});
 
-	Describe("tool: niagara-spawn-component", [this]()
+	Describe("operation: SpawnSystem", [this]()
 	{
-		It("registers and fails defensively on a missing 'systemPath' (well-formed Error)", [this]()
+		It("fails defensively on a missing system and places nothing", [this]()
 		{
-			FUnrealMcpToolRegistry Registry;
-			if (!UnrealAINiagara_BuildRegistry(*this, Registry)) { return; }
+			// niagara | call SpawnSystem("/Game/RqlSpecNoSuchSystem", "(0, 0, 0)", "RqlSpecFx")
+			TSharedPtr<FJsonObject> Result;
+			const bool bResultOk = UnrealMcpRqlTools::RunPlan(TEXT(R"RQL({"rql":"0.1","source":{"path":["niagara"]},"stages":[{"op":"call","method":"SpawnSystem","args":[{"lit":"/Game/RqlSpecNoSuchSystem"},{"lit":"(0, 0, 0)"},{"lit":"RqlSpecFx"}]}]})RQL"), true, &Result);
+			TestTrue(TEXT("a well-formed result"), Result.IsValid());
+			TestFalse(TEXT("reported as a failure"), bResultOk);
+		});
 
-			TestTrue(TEXT("niagara-spawn-component is registered"), Registry.HasTool(TEXT("niagara-spawn-component")));
-
-			// No 'systemPath' -> the handler must return a well-formed Error before touching the world.
-			const FUnrealMcpToolResult Result =
-				Registry.Execute(TEXT("niagara-spawn-component"), FUnrealMcpToolCall());
-
-			TestFalse(TEXT("missing 'systemPath' is reported as a failure"), Result.bSuccess);
-			TestFalse(TEXT("failure carries a non-empty message"), Result.Message.IsEmpty());
+		It("is listed as an operation of the niagara source", [this]()
+		{
+			bool bOk = false;
+			const FString Schema = UnrealMcpRqlTools::Schema(TEXT("NiagaraOperations"), bOk);
+			TestTrue(TEXT("schema ok"), bOk);
+			TestTrue(TEXT("SpawnSystem listed"), Schema.Contains(TEXT("SpawnSystem(")));
 		});
 	});
 }

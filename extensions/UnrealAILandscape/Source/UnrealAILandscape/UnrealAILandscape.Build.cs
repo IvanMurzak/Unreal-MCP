@@ -18,34 +18,18 @@ public class UnrealAILandscape : ModuleRules
 		{
 			"CoreUObject",
 			"Engine",
-			"Projects",
-			// "Json" is needed because the public registry header (UnrealMcpToolRegistry.h) includes
-			// Dom/JsonObject.h, and every handler builds a structured result with FJsonObject.
+			// FJsonValue: the Sections / PaintLayers / Water members.
 			"Json",
+			// The RQL module seam: IUnrealMcpRqlModule.h (sources, operations, members, guides, the editor-module template)
+			// and UnrealMcpRqlTools.h (the specs run plans) live in the Unreal-MCP plugin's UnrealMcpRql module; the
+			// matching `UnrealMCP` plugin dependency is in the .uplugin "Plugins" array.
+			"UnrealMcpRql",
 
-			// --- Unreal-MCP contract (REQUIRED) ---------------------------------------------------
-			// The extension contract (IUnrealMcpToolProvider.h) + tool registry (UnrealMcpToolRegistry.h)
-			// live in the Unreal-MCP plugin's RUNTIME module. UnrealMcpEditor re-exports those headers
-			// and gives editor-only API access (most tools touch the editor). Keep both — they are the
-			// spine of every extension. The matching `UnrealMCP` plugin dependency is declared in the
-			// .uplugin's "Plugins" array.
-			"UnrealMcpRuntime",
-			"UnrealMcpEditor",
-
-			// --- Editor support ------------------------------------------------------------------
-			// UnrealEd: GEditor + GetEditorWorldContext().World() — every tool inspects the active
-			// editor world. (Editor.h lives in UnrealEd.)
-			"UnrealEd",
-
-			// --- Feature engine modules (THE GATING) ---------------------------------------------
-			// "Water" is the gating ENGINE PLUGIN (its runtime module). This dependency IS the gate:
-			// the extension won't compile or load without the Water plugin present in the host project.
-			// The matching { "Name": "Water" } entry is declared in the .uplugin "Plugins" array.
-			// (No "WaterEditor": every tool here reads runtime Water classes — AWaterBody /
-			// UWaterBodyComponent / AWaterZone / UWaterSplineComponent — so no editor-only Water API is
-			// touched. "Landscape" below is a BUILT-IN engine module, NOT a plugin, so it takes a plain
-			// module dependency and NO .uplugin "Plugins" entry.)
+			// The gating engine plugin's runtime module (its { "Name": "Water" } entry is in the .uplugin "Plugins"
+			// array): AWaterBody / AWaterZone for the waterBodies / waterZones sources and the Water members.
 			"Water",
+			// A built-in engine module (no .uplugin entry): ALandscapeProxy / ULandscapeInfo for the landscapes source
+			// and the Sections / PaintLayers members.
 			"Landscape",
 		});
 	}
