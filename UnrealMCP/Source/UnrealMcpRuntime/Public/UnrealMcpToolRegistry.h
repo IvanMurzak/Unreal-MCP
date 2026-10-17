@@ -181,6 +181,12 @@ struct UNREALMCPRUNTIME_API FUnrealMcpRegisteredTool
 	 * FUnrealMcpToolBuilder::SkillDescription(); shipped to the sidecar in ToDescriptorJson() as `skillDescription`.
 	 */
 	FString SkillDescription;
+	/**
+	 * An optional dedicated skill BODY (the [AiSkillBody] analog): the generated SKILL.md uses it instead of the full
+	 * Description. Shipped as `skillBody` only when set, so tools without one keep their descriptor (and schema hash)
+	 * unchanged. Declared via FUnrealMcpToolBuilder::SkillBody(). The rql-query tool carries the `unreal-rql` skill here.
+	 */
+	FString SkillBody;
 	TArray<FUnrealMcpParamSpec> Params;
 	TSharedPtr<FJsonObject> OutputSchema;
 	/**
@@ -221,6 +227,8 @@ public:
 	FUnrealMcpToolBuilder& Description(const FString& InDescription);
 	/** Set the SHORT skill description (the [AiSkillDescription] analog → SKILL.md front-matter). Optional. */
 	FUnrealMcpToolBuilder& SkillDescription(const FString& InSkillDescription);
+	/** Set the skill BODY (the [AiSkillBody] analog → SKILL.md body instead of the Description). Optional. */
+	FUnrealMcpToolBuilder& SkillBody(const FString& InSkillBody);
 	FUnrealMcpToolBuilder& ParamString(const FString& Name, const FString& Desc, EUnrealMcpParamRequirement Req = EUnrealMcpParamRequirement::Optional);
 	FUnrealMcpToolBuilder& ParamInt(const FString& Name, const FString& Desc, EUnrealMcpParamRequirement Req = EUnrealMcpParamRequirement::Optional);
 	FUnrealMcpToolBuilder& ParamNumber(const FString& Name, const FString& Desc, EUnrealMcpParamRequirement Req = EUnrealMcpParamRequirement::Optional);

@@ -16,6 +16,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using com.IvanMurzak.Unreal.MCP.Bridge.Ipc;
+using com.IvanMurzak.Unreal.MCP.Bridge.Tools;
 using Microsoft.Extensions.Logging;
 
 namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
@@ -173,6 +174,26 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
                 }
             }
 
+            // The unreal-rql skill (docs/rql.md): the RQL guide with the sources and guides of the installed modules, which
+            // the plugin ships as rql-query's skill body (kept out of tools/list by ProxyToolFactory).
+            var rql = ordered.FirstOrDefault(t => t.Name == RqlBridge.QueryTool && !string.IsNullOrWhiteSpace(t.SkillBody));
+            if (rql != null)
+            {
+                currentFolders.Add(RqlBridge.SkillName);
+                var dir = Path.Combine(skillsRootAbsolute, RqlBridge.SkillName);
+                var file = Path.Combine(dir, "SKILL.md");
+                try
+                {
+                    Directory.CreateDirectory(dir);
+                    File.WriteAllText(file, BuildRqlSkillMarkdown(rql), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+                    written++;
+                }
+                catch (Exception ex)
+                {
+                    _logger?.LogWarning("Failed to write skill file '{File}': {Message}", file, ex.Message);
+                }
+            }
+
             // NEVER prune on an empty document set. `currentFolders` is empty here, so the prune below would
             // delete EVERY skill folder under the root. Two ways to reach it, and §2.4 made the second one
             // routine: (a) the plugin has not pushed a manifest yet (the catalog is genuinely empty), and
@@ -307,7 +328,10 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
             // mirrored here so a tool that authors a richer skill body uses it, with a clean fallback otherwise.
             lines.Add($"# {title}");
             lines.Add(string.Empty);
-            var body = !string.IsNullOrWhiteSpace(tool.SkillBody) ? tool.SkillBody! : (tool.Description ?? string.Empty);
+            // rql-query's skill body is the separate unreal-rql skill (BuildRqlSkillMarkdown), not this tool's page.
+            var body = tool.Name != RqlBridge.QueryTool && !string.IsNullOrWhiteSpace(tool.SkillBody)
+                ? tool.SkillBody!
+                : (tool.Description ?? string.Empty);
             if (!string.IsNullOrEmpty(body))
             {
                 lines.Add(body.Trim());
@@ -370,6 +394,28 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
             lines.Add("```");
             lines.Add(string.Empty);
 
+            return string.Join("\n", lines);
+        }
+
+        /// <summary>
+        /// The <c>unreal-rql</c> SKILL.md (Unity-MCP's <c>unity-rql</c> analog): the provenance front matter, then the RQL
+        /// guide the plugin composed into rql-query's skill body (language, editor operations, live sources / functions,
+        /// module guides, installed modules). Pure (no disk).
+        /// </summary>
+        public static string BuildRqlSkillMarkdown(ToolDescriptor rqlQuery)
+        {
+            var lines = new List<string>
+            {
+                "---",
+                $"name: {RqlBridge.SkillName}",
+                $"description: \"{EscapeYamlQuoted(SingleLineCapped(RqlBridge.SkillDescription, MaxSkillDescriptionLength))}\"",
+                $"{ProvenanceBlockKey}:",
+                $"  {ProvenanceKey}: {ProvenanceValue}",
+                "---",
+                string.Empty,
+                (rqlQuery.SkillBody ?? string.Empty).Trim(),
+                string.Empty,
+            };
             return string.Join("\n", lines);
         }
 

@@ -22,6 +22,7 @@ public class UnrealMcpEditorTests : ModuleRules
 			// config §8, sidecar §6, bridge §1, extensions §5, AssetScopedRead/PropertyJson/LogCollector)
 			// moved to the runtime module. Depend on it so those UNREALMCPRUNTIME_API symbols link.
 			"UnrealMcpRuntime",
+			"UnrealMcpRql",   // the RQL data layer specs (UnrealMcpRqlSpec.cpp) drive UnrealMcpRqlTools directly
 			"BlueprintGraph", // UK2Node_Event — asserting add-event produced an ENABLED node (§10)
 			"HTTPServer",     // the dev-control server header (FUnrealMcpDevControlServer) includes HttpRouteHandle.h
 		});

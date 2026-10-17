@@ -22,6 +22,10 @@ public class UnrealMcpEditor : ModuleRules
 			"UnrealMcpRuntime",
 		});
 
+		// The RQL data layer (docs/rql.md): rql-query / rql-mutate / rql-schema and the IUnrealMcpRqlModule extension
+		// seam. A separate module because it compiles the vendored RQL runtime with C++ exceptions enabled.
+		PrivateDependencyModuleNames.Add("UnrealMcpRql");
+
 		// Reach the runtime module's PRIVATE headers (Bridge/, Dispatch/, Config/, Sidecar/, Extensions/,
 		// Tools/UnrealMcpWorldProvider.h, Tools/UnrealMcpLogCollector.h, …) so the editor coordinator can
 		// construct + wire those subsystems directly. The types are UNREALMCPRUNTIME_API-exported, so

@@ -1,0 +1,1167 @@
+// Copyright (c) 2026 Ivan Murzak. Licensed under the Apache License, Version 2.0.
+// See the LICENSE file in the repository root for more information.
+
+#include "UnrealMcpRqlTypes.h"
+
+#include "UnrealMcpRqlSources.h"
+
+#include "Containers/StringConv.h"
+#include "HAL/UnrealMemory.h"
+#include "Misc/OutputDeviceNull.h"
+#include "Misc/PackageName.h"
+#include "Misc/ScopeExit.h"
+#include "UObject/Class.h"
+#include "UObject/EnumProperty.h"
+#include "UObject/Object.h"
+#include "UObject/PropertyPortFlags.h"
+#include "UObject/SoftObjectPath.h"
+#include "UObject/SoftObjectPtr.h"
+#if __has_include("UObject/StrProperty.h")
+#include "UObject/StrProperty.h" // FStrProperty moved out of UnrealType.h in UE 5.6+
+#endif
+#include "UObject/TextProperty.h"
+#include "UObject/UObjectGlobals.h"
+#include "UObject/UObjectIterator.h"
+#include "UObject/UnrealType.h"
+
+#include <stdexcept>
+
+// ------------------------------------------------------------------ text
+
+std::string UnrealMcpRqlToStd(const FString& Text)
+{
+	FTCHARToUTF8 Converted(*Text);
+	return std::string(reinterpret_cast<const char*>(Converted.Get()), static_cast<size_t>(Converted.Length()));
+}
+
+FString UnrealMcpRqlFromStd(const std::string& Text)
+{
+	FUTF8ToTCHAR Converted(reinterpret_cast<const ANSICHAR*>(Text.data()), static_cast<int32>(Text.size()));
+	return FString(Converted.Length(), Converted.Get());
+}
+
+UObject* UnrealMcpRqlLoadObject(UClass* Class, const FString& InPath)
+{
+	FString Path = InPath.TrimStartAndEnd();
+	if (Path.IsEmpty() || !Class)
+		return nullptr;
+	// "/Game/Materials/M_Red" names a package: its main asset is "/Game/Materials/M_Red.M_Red".
+	if (Path.StartsWith(TEXT("/")) && !Path.Contains(TEXT(".")))
+		Path = Path + TEXT(".") + FPackageName::GetShortName(Path);
+	if (UObject* Found = StaticFindObject(Class, nullptr, *Path))
+		return Found;
+	// Probe first: loading a missing package logs an engine error (an Automation failure) even with LOAD_NoWarn.
+	const FString Package = FPackageName::ObjectPathToPackageName(Path);
+	if (!FPackageName::IsValidLongPackageName(Package) || !FPackageName::DoesPackageExist(Package))
+		return nullptr;
+	return StaticLoadObject(Class, nullptr, *Path, {}, LOAD_NoWarn | LOAD_Quiet);
+}
+
+UClass* UnrealMcpRqlResolveClass(const FString& InName)
+{
+	const FString Name = InName.TrimStartAndEnd();
+	if (Name.IsEmpty())
+		return nullptr;
+	if (Name.Contains(TEXT("/")))
+	{
+		// "/Script/Engine.PointLight" or a Blueprint asset "/Game/BP_Enemy" (its generated class).
+		if (UClass* ByPath = Cast<UClass>(UnrealMcpRqlLoadObject(UClass::StaticClass(), Name)))
+			return ByPath;
+		if (UObject* Asset = UnrealMcpRqlLoadObject(UObject::StaticClass(), Name))
+		{
+			if (FObjectPropertyBase* Generated = FindFProperty<FObjectPropertyBase>(Asset->GetClass(), TEXT("GeneratedClass")))
+				return Cast<UClass>(Generated->GetObjectPropertyValue_InContainer(Asset));
+		}
+		return nullptr;
+	}
+	// Short names without the engine's "use a path" warning (FindFirstObject with logging off).
+	if (UClass* Found = FindFirstObject<UClass>(*Name, EFindFirstObjectOptions::NativeFirst, ELogVerbosity::NoLogging))
+		return Found;
+	if (Name.Len() > 1 && (Name[0] == TEXT('A') || Name[0] == TEXT('U')) && FChar::IsUpper(Name[1]))
+		return FindFirstObject<UClass>(*Name.Mid(1), EFindFirstObjectOptions::NativeFirst, ELogVerbosity::NoLogging);
+	return nullptr;
+}
+
+namespace UnrealMcpRqlTypesLocal
+{
+	[[noreturn]] void Throw(const FString& Message)
+	{
+		throw std::runtime_error(UnrealMcpRqlToStd(Message));
+	}
+
+	void* IdentityCast(void* Pointer)
+	{
+		return Pointer;
+	}
+
+	/** Objects handed out as values, by GetUniqueID() — resolves "Type#<id>" refs across tool calls without a scan. */
+	TMap<int32, TWeakObjectPtr<UObject>>& HandedOut()
+	{
+		static TMap<int32, TWeakObjectPtr<UObject>> Map;
+		return Map;
+	}
+
+	/** Struct memory owned by a shared_ptr (struct values are copies, RQL writes them back through the owner). */
+	std::shared_ptr<void> MakeStructData(UScriptStruct* Struct, const void* Source)
+	{
+		const int32 Size = FMath::Max(Struct->GetStructureSize(), 1);
+		void* Memory = FMemory::Malloc(Size, FMath::Max(Struct->GetMinAlignment(), 1));
+		FMemory::Memzero(Memory, Size);
+		Struct->InitializeStruct(Memory);
+		if (Source)
+			Struct->CopyScriptStruct(Memory, Source);
+		return std::shared_ptr<void>(Memory, [Struct](void* Pointer)
+		{
+			Struct->DestroyStruct(Pointer);
+			FMemory::Free(Pointer);
+		});
+	}
+
+	/** One initialized property value on the heap (map keys, defaults), destroyed with the scope. */
+	struct FTempValue
+	{
+		const FProperty* Property;
+		void* Ptr;
+
+		explicit FTempValue(const FProperty* InProperty)
+			: Property(InProperty)
+		{
+			const int32 Size = FMath::Max(Property->GetSize(), 1);
+			Ptr = FMemory::Malloc(Size, FMath::Max(Property->GetMinAlignment(), 1));
+			FMemory::Memzero(Ptr, Size);
+			Property->InitializeValue(Ptr);
+		}
+		~FTempValue()
+		{
+			Property->DestroyValue(Ptr);
+			FMemory::Free(Ptr);
+		}
+		FTempValue(const FTempValue&) = delete;
+		FTempValue& operator=(const FTempValue&) = delete;
+	};
+
+	bool IsUnsigned(const FProperty* Property)
+	{
+		return Property->IsA<FByteProperty>() || Property->IsA<FUInt16Property>() || Property->IsA<FUInt32Property>()
+			|| Property->IsA<FUInt64Property>();
+	}
+
+	bool IsOwning(const FProperty* Property)
+	{
+		if (!Property->IsA<FObjectPropertyBase>() && !Property->IsA<FArrayProperty>() && !Property->IsA<FSetProperty>()
+			&& !Property->IsA<FMapProperty>())
+			return true; // values (numbers, strings, structs) are part of their owner
+		return Property->HasAnyPropertyFlags(CPF_InstancedReference | CPF_PersistentInstance | CPF_ContainsInstancedReference);
+	}
+
+	bool IsExposedOnClass(const FProperty* Property)
+	{
+		return !Property->HasAnyPropertyFlags(CPF_Deprecated) && Property->HasAnyPropertyFlags(CPF_Edit | CPF_BlueprintVisible);
+	}
+
+	bool IsWritableOnClass(const FProperty* Property)
+	{
+		if (Property->HasAnyPropertyFlags(CPF_Edit) && !Property->HasAnyPropertyFlags(CPF_EditConst))
+			return true;
+		return Property->HasAnyPropertyFlags(CPF_BlueprintVisible) && !Property->HasAnyPropertyFlags(CPF_BlueprintReadOnly);
+	}
+
+	double ToNumber(const rql::Value& Value)
+	{
+		if (Value.is_number())
+			return Value.as_number();
+		if (Value.is_bool())
+			return Value.as_bool() ? 1.0 : 0.0;
+		if (Value.is_enum())
+			return static_cast<double>(Value.enum_value());
+		if (Value.is_string())
+		{
+			double Parsed = 0.0;
+			if (LexTryParseString(Parsed, *UnrealMcpRqlFromStd(Value.as_string())))
+				return Parsed;
+		}
+		Throw(FString::Printf(TEXT("expected a number, got %s"), *UnrealMcpRqlFromStd(rql::describe_value(Value))));
+	}
+
+	bool ToBool(const rql::Value& Value)
+	{
+		if (Value.is_bool())
+			return Value.as_bool();
+		if (Value.is_number())
+			return Value.as_number() != 0.0;
+		if (Value.is_string())
+		{
+			const FString Text = UnrealMcpRqlFromStd(Value.as_string());
+			if (Text.Equals(TEXT("true"), ESearchCase::IgnoreCase)) return true;
+			if (Text.Equals(TEXT("false"), ESearchCase::IgnoreCase)) return false;
+		}
+		Throw(FString::Printf(TEXT("expected true or false, got %s"), *UnrealMcpRqlFromStd(rql::describe_value(Value))));
+	}
+
+	FString ToText(const rql::Value& Value)
+	{
+		if (Value.is_string())
+			return UnrealMcpRqlFromStd(Value.as_string());
+		if (Value.is_null())
+			return FString();
+		if (Value.is_number() || Value.is_bool() || Value.is_enum())
+			return UnrealMcpRqlFromStd(rql::to_text(Value));
+		Throw(FString::Printf(TEXT("expected text, got %s"), *UnrealMcpRqlFromStd(rql::describe_value(Value))));
+	}
+
+	int64 ToEnumValue(const UEnum* Enum, const rql::Value& Value)
+	{
+		if (Value.is_enum() || Value.is_number())
+			return Value.is_enum() ? Value.enum_value() : static_cast<int64>(Value.as_number());
+		if (Value.is_string())
+		{
+			const FString Name = UnrealMcpRqlFromStd(Value.as_string());
+			const int32 Count = Enum->NumEnums();
+			for (int32 Index = 0; Index < Count; ++Index)
+			{
+				if (Enum->GetNameStringByIndex(Index).Equals(Name, ESearchCase::IgnoreCase))
+					return Enum->GetValueByIndex(Index);
+			}
+			const int64 ByFullName = Enum->GetValueByNameString(Name);
+			if (ByFullName != INDEX_NONE)
+				return ByFullName;
+		}
+		Throw(FString::Printf(TEXT("'%s' is not a value of %s"), *UnrealMcpRqlFromStd(rql::describe_value(Value)), *Enum->GetName()));
+	}
+
+	/** A value read from a temporary buffer must not keep views into it. */
+	rql::Value Detached(const rql::Value& Value)
+	{
+		return rql::snapshot(Value);
+	}
+}
+
+using namespace UnrealMcpRqlTypesLocal;
+
+// ------------------------------------------------------------------ container adapters
+
+namespace UnrealMcpRqlTypesLocal
+{
+	/** A live TArray property value. Element writes go straight into the array (the owner is notified on commit). */
+	class FArrayAdapter final : public rql::IListAdapter
+	{
+	public:
+		FArrayAdapter(FUnrealMcpRqlTypes* InTypes, const FArrayProperty* InProperty, void* InData, const rql::TypeDescriptor* InType)
+			: Types(InTypes), Property(InProperty), Data(InData), Type(InType)
+		{
+		}
+
+		size_t size() const override
+		{
+			FScriptArrayHelper Helper(Property, Data);
+			return static_cast<size_t>(Helper.Num());
+		}
+		rql::Value at(size_t Index) const override
+		{
+			FScriptArrayHelper Helper(Property, Data);
+			if (static_cast<int32>(Index) >= Helper.Num())
+				return rql::Value::missing();
+			return Types->Read(Property->Inner, Helper.GetRawPtr(static_cast<int32>(Index)));
+		}
+		const rql::TypeDescriptor* type() const override { return Type; }
+		const void* identity() const override { return Data; }
+		bool writable() const override { return true; }
+		void set(size_t Index, const rql::Value& Value) override
+		{
+			FScriptArrayHelper Helper(Property, Data);
+			if (static_cast<int32>(Index) >= Helper.Num())
+				Throw(FString::Printf(TEXT("index %d is out of range (%d elements)"), static_cast<int32>(Index), Helper.Num()));
+			Types->Write(Property->Inner, Helper.GetRawPtr(static_cast<int32>(Index)), Value);
+		}
+
+	private:
+		FUnrealMcpRqlTypes* Types;
+		const FArrayProperty* Property;
+		void* Data;
+		const rql::TypeDescriptor* Type;
+	};
+
+	/** A live TMap property value (iteration in the map's own order, which is deterministic). */
+	class FMapAdapter final : public rql::IMapAdapter
+	{
+	public:
+		FMapAdapter(FUnrealMcpRqlTypes* InTypes, const FMapProperty* InProperty, void* InData, const rql::TypeDescriptor* InType)
+			: Types(InTypes), Property(InProperty), Data(InData), Type(InType)
+		{
+		}
+
+		size_t size() const override
+		{
+			FScriptMapHelper Helper(Property, Data);
+			return static_cast<size_t>(Helper.Num());
+		}
+		void for_each(const std::function<bool(const rql::Value&, const rql::Value&)>& Fn) const override
+		{
+			FScriptMapHelper Helper(Property, Data);
+			for (int32 Index = 0, Max = Helper.GetMaxIndex(); Index < Max; ++Index)
+			{
+				if (!Helper.IsValidIndex(Index))
+					continue;
+				if (!Fn(Types->Read(Property->KeyProp, Helper.GetKeyPtr(Index)), Types->Read(Property->ValueProp, Helper.GetValuePtr(Index))))
+					return;
+			}
+		}
+		rql::MapLookup find(const rql::Value& Key, rql::Value& Out) const override
+		{
+			FTempValue KeyValue(Property->KeyProp);
+			try
+			{
+				Types->Write(Property->KeyProp, KeyValue.Ptr, Key);
+			}
+			catch (const std::exception&)
+			{
+				return rql::MapLookup::BadKey;
+			}
+			FScriptMapHelper Helper(Property, Data);
+			uint8* Found = Helper.FindValueFromHash(KeyValue.Ptr);
+			if (!Found)
+				return rql::MapLookup::NotFound;
+			Out = Types->Read(Property->ValueProp, Found);
+			return rql::MapLookup::Found;
+		}
+		const rql::TypeDescriptor* type() const override { return Type; }
+		const void* identity() const override { return Data; }
+		bool writable() const override { return true; }
+		bool accepts_key(const rql::Value& Key) const override
+		{
+			FTempValue KeyValue(Property->KeyProp);
+			try
+			{
+				Types->Write(Property->KeyProp, KeyValue.Ptr, Key);
+				return true;
+			}
+			catch (const std::exception&)
+			{
+				return false;
+			}
+		}
+		void set(const rql::Value& Key, const rql::Value& Value) override
+		{
+			FTempValue KeyValue(Property->KeyProp);
+			Types->Write(Property->KeyProp, KeyValue.Ptr, Key);
+			FScriptMapHelper Helper(Property, Data);
+			if (uint8* Found = Helper.FindValueFromHash(KeyValue.Ptr))
+			{
+				Types->Write(Property->ValueProp, Found, Value);
+				return;
+			}
+			const int32 Index = Helper.AddDefaultValue_Invalid_NeedsRehash();
+			Property->KeyProp->CopyCompleteValue(Helper.GetKeyPtr(Index), KeyValue.Ptr);
+			ON_SCOPE_EXIT { Helper.Rehash(); };
+			Types->Write(Property->ValueProp, Helper.GetValuePtr(Index), Value);
+		}
+		void erase(const rql::Value& Key) override
+		{
+			FTempValue KeyValue(Property->KeyProp);
+			Types->Write(Property->KeyProp, KeyValue.Ptr, Key);
+			FScriptMapHelper Helper(Property, Data);
+			Helper.RemovePair(KeyValue.Ptr);
+		}
+
+	private:
+		FUnrealMcpRqlTypes* Types;
+		const FMapProperty* Property;
+		void* Data;
+		const rql::TypeDescriptor* Type;
+	};
+}
+
+// ------------------------------------------------------------------ registry
+
+FUnrealMcpRqlTypes::FUnrealMcpRqlTypes()
+	: RegistryPtr(std::make_unique<rql::TypeRegistry>())
+{
+}
+
+FUnrealMcpRqlTypes::~FUnrealMcpRqlTypes() = default;
+
+rql::TypeDescriptor& FUnrealMcpRqlTypes::Shell(const void* Key, const FString& Name, rql::TypeKind Kind)
+{
+	rql::TypeDescriptor* Descriptor = RegistryPtr->descriptor_for(Key);
+	Descriptor->name = UnrealMcpRqlToStd(Name);
+	Descriptor->friendly = Descriptor->name;
+	Descriptor->kind = Kind;
+	Descriptor->registered = true;
+	return *Descriptor;
+}
+
+const rql::TypeDescriptor* FUnrealMcpRqlTypes::ForClass(UClass* Class)
+{
+	if (!Class)
+		return nullptr;
+	if (rql::TypeDescriptor** Found = Classes.Find(Class))
+		return *Found;
+	const FString* Renamed = ApiClasses.Find(Class);
+	rql::TypeDescriptor& Descriptor = Shell(Class, Renamed && !Renamed->IsEmpty() ? *Renamed : Class->GetName(), rql::TypeKind::Object);
+	Classes.Add(Class, &Descriptor);
+	ClassByDescriptor.Add(&Descriptor, Class);
+	if (UClass* Super = Class->GetSuperClass())
+	{
+		Descriptor.base = ForClass(Super);
+		Descriptor.to_base = &IdentityCast; // UObject classes are single-inheritance: one pointer for every base
+		Descriptor.from_base = &IdentityCast;
+	}
+	return &Descriptor;
+}
+
+const rql::TypeDescriptor* FUnrealMcpRqlTypes::ForStruct(UScriptStruct* Struct)
+{
+	if (!Struct)
+		return nullptr;
+	if (rql::TypeDescriptor** Found = Structs.Find(Struct))
+		return *Found;
+	rql::TypeDescriptor& Descriptor = Shell(Struct, Struct->GetName(), rql::TypeKind::Struct);
+	Descriptor.copy = [Struct](const void* Source) { return MakeStructData(Struct, Source); };
+	Descriptor.create = [Struct]() { return MakeStructData(Struct, nullptr); };
+	Structs.Add(Struct, &Descriptor);
+	StructByDescriptor.Add(&Descriptor, Struct);
+	return &Descriptor;
+}
+
+const rql::TypeDescriptor* FUnrealMcpRqlTypes::ForEnum(UEnum* Enum)
+{
+	if (!Enum)
+		return nullptr;
+	if (rql::TypeDescriptor** Found = Enums.Find(Enum))
+		return *Found;
+	rql::TypeDescriptor& Descriptor = Shell(Enum, Enum->GetName(), rql::TypeKind::Enum);
+	const int32 Count = Enum->ContainsExistingMax() ? Enum->NumEnums() - 1 : Enum->NumEnums();
+	for (int32 Index = 0; Index < Count; ++Index)
+	{
+		if (Enum->HasMetaData(TEXT("Hidden"), Index))
+			continue;
+		Descriptor.enum_values.emplace_back(UnrealMcpRqlToStd(Enum->GetNameStringByIndex(Index)), Enum->GetValueByIndex(Index));
+	}
+	Enums.Add(Enum, &Descriptor);
+	return &Descriptor;
+}
+
+const rql::TypeDescriptor* FUnrealMcpRqlTypes::ForProperty(const FProperty* Property, bool& bOutNullable)
+{
+	bOutNullable = false;
+	if (!Property)
+		return nullptr;
+	if (Property->IsA<FBoolProperty>())
+		return rql::builtin::bool_type();
+	if (const FEnumProperty* EnumProperty = CastField<FEnumProperty>(Property))
+		return ForEnum(EnumProperty->GetEnum());
+	if (const FByteProperty* ByteProperty = CastField<FByteProperty>(Property))
+	{
+		if (ByteProperty->Enum)
+			return ForEnum(ByteProperty->Enum);
+	}
+	if (const FNumericProperty* Numeric = CastField<FNumericProperty>(Property))
+	{
+		if (Numeric->IsFloatingPoint())
+			return Property->GetElementSize() == 4 ? rql::builtin::single_type() : rql::builtin::double_type();
+		return rql::builtin::number_type(true, !IsUnsigned(Property), static_cast<size_t>(Property->GetElementSize()));
+	}
+	if (Property->IsA<FStrProperty>() || Property->IsA<FNameProperty>() || Property->IsA<FTextProperty>())
+		return rql::builtin::string_type();
+	if (Property->IsA<FSoftObjectProperty>()) // before FObjectPropertyBase: a soft reference reads as its path
+	{
+		bOutNullable = true;
+		return rql::builtin::string_type();
+	}
+	if (const FObjectPropertyBase* ObjectProperty = CastField<FObjectPropertyBase>(Property))
+	{
+		bOutNullable = true;
+		return ForClass(ObjectProperty->PropertyClass);
+	}
+	if (const FStructProperty* StructProperty = CastField<FStructProperty>(Property))
+		return ForStruct(StructProperty->Struct);
+	if (const FArrayProperty* ArrayProperty = CastField<FArrayProperty>(Property))
+	{
+		bool bElementNullable = false;
+		const rql::TypeDescriptor* Element = ForProperty(ArrayProperty->Inner, bElementNullable);
+		return Element ? RegistryPtr->list_type(Element, bElementNullable) : nullptr;
+	}
+	if (const FSetProperty* SetProperty = CastField<FSetProperty>(Property))
+	{
+		bool bElementNullable = false;
+		const rql::TypeDescriptor* Element = ForProperty(SetProperty->ElementProp, bElementNullable);
+		return Element ? RegistryPtr->list_type(Element, bElementNullable) : nullptr;
+	}
+	if (const FMapProperty* MapProperty = CastField<FMapProperty>(Property))
+	{
+		bool bKeyNullable = false;
+		bool bValueNullable = false;
+		const rql::TypeDescriptor* Key = ForProperty(MapProperty->KeyProp, bKeyNullable);
+		const rql::TypeDescriptor* Value = ForProperty(MapProperty->ValueProp, bValueNullable);
+		return Key && Value ? RegistryPtr->map_type(Key, Value, bValueNullable) : nullptr;
+	}
+	return nullptr; // delegates, interfaces, field paths, optionals: not exposed
+}
+
+UClass* FUnrealMcpRqlTypes::ClassOf(const rql::TypeDescriptor* Descriptor) const
+{
+	UClass* const* Found = Descriptor ? ClassByDescriptor.Find(Descriptor) : nullptr;
+	return Found ? *Found : nullptr;
+}
+
+void FUnrealMcpRqlTypes::AddNativeType(const rql::TypeDescriptor* Descriptor)
+{
+	if (Descriptor)
+		NativeTypes.AddUnique(Descriptor);
+}
+
+const rql::TypeDescriptor* FUnrealMcpRqlTypes::FindByName(const FString& InName)
+{
+	const FString Name = InName.TrimStartAndEnd();
+	if (Name.IsEmpty())
+		return nullptr;
+	const std::string Wanted = UnrealMcpRqlToStd(Name);
+	for (const rql::TypeDescriptor* Native : NativeTypes)
+	{
+		if (rql::iequals(Native->name, Wanted))
+			return Native;
+	}
+	for (const TPair<UClass*, FString>& Api : ApiClasses)
+	{
+		if (!Api.Value.IsEmpty() && Api.Value.Equals(Name, ESearchCase::IgnoreCase))
+			return ForClass(Api.Key);
+	}
+	auto TryFind = [this](const FString& Candidate) -> const rql::TypeDescriptor*
+	{
+		if (Candidate.Contains(TEXT("/")) || Candidate.Contains(TEXT(".")))
+		{
+			if (UClass* ByPath = FindObject<UClass>(nullptr, *Candidate))
+				return ForClass(ByPath);
+			if (UScriptStruct* StructByPath = FindObject<UScriptStruct>(nullptr, *Candidate))
+				return ForStruct(StructByPath);
+			if (UEnum* EnumByPath = FindObject<UEnum>(nullptr, *Candidate))
+				return ForEnum(EnumByPath);
+			return nullptr;
+		}
+		if (UClass* Class = FindFirstObject<UClass>(*Candidate, EFindFirstObjectOptions::NativeFirst, ELogVerbosity::NoLogging))
+			return ForClass(Class);
+		if (UScriptStruct* Struct = FindFirstObject<UScriptStruct>(*Candidate, EFindFirstObjectOptions::NativeFirst, ELogVerbosity::NoLogging))
+			return ForStruct(Struct);
+		if (UEnum* Enum = FindFirstObject<UEnum>(*Candidate, EFindFirstObjectOptions::NativeFirst, ELogVerbosity::NoLogging))
+			return ForEnum(Enum);
+		return nullptr;
+	};
+	if (const rql::TypeDescriptor* Found = TryFind(Name))
+		return Found;
+	// C++ spellings: AStaticMeshActor, UStaticMeshComponent, FVector, ECollisionChannel.
+	if (Name.Len() > 1 && (Name[0] == TEXT('A') || Name[0] == TEXT('U') || Name[0] == TEXT('F') || Name[0] == TEXT('E'))
+		&& FChar::IsUpper(Name[1]))
+		return TryFind(Name.Mid(1));
+	return nullptr;
+}
+
+// ------------------------------------------------------------------ members and methods
+
+void FUnrealMcpRqlTypes::SetMember(rql::TypeDescriptor& Descriptor, rql::MemberDescriptor Member)
+{
+	for (rql::MemberDescriptor& Existing : Descriptor.members)
+	{
+		if (Existing.name == Member.name)
+		{
+			Existing = std::move(Member);
+			return;
+		}
+	}
+	Descriptor.members.push_back(std::move(Member));
+}
+
+void FUnrealMcpRqlTypes::AddMethod(rql::TypeDescriptor& Descriptor, rql::MethodDescriptor Method)
+{
+	for (rql::MethodDescriptor& Existing : Descriptor.methods)
+	{
+		if (Existing.name == Method.name && Existing.params.size() == Method.params.size())
+		{
+			Existing = std::move(Method);
+			return;
+		}
+	}
+	Descriptor.methods.push_back(std::move(Method));
+}
+
+rql::ParamDescriptor FUnrealMcpRqlTypes::Param(const char* Name, const rql::TypeDescriptor* Type, bool bNullable)
+{
+	rql::ParamDescriptor Result;
+	Result.name = Name;
+	Result.type = Type;
+	Result.nullable = bNullable;
+	return Result;
+}
+
+rql::ParamDescriptor FUnrealMcpRqlTypes::OptionalParam(const char* Name, const rql::TypeDescriptor* Type, rql::Value Default, bool bNullable)
+{
+	rql::ParamDescriptor Result = Param(Name, Type, bNullable);
+	Result.has_default = true;
+	Result.default_value = std::move(Default);
+	return Result;
+}
+
+void FUnrealMcpRqlTypes::AddClassHook(UClass* Class, FClassHook Hook)
+{
+	if (Class && Hook)
+		Hooks.Add(Class, MoveTemp(Hook));
+}
+
+void FUnrealMcpRqlTypes::AddApiClass(UClass* Class, const FString& TypeName)
+{
+	if (Class)
+		ApiClasses.Add(Class, TypeName);
+}
+
+void FUnrealMcpRqlTypes::ExposeProperties(UStruct* Owner, const TArray<FName>& Names, bool bWritable)
+{
+	if (!Owner)
+		return;
+	TMap<FName, bool>& ForOwner = Exposed.FindOrAdd(Owner);
+	for (const FName& Name : Names)
+		ForOwner.Add(Name, bWritable);
+}
+
+void FUnrealMcpRqlTypes::Fill(const rql::TypeDescriptor* Constant)
+{
+	if (!Constant || Filled.Contains(Constant))
+		return;
+	rql::TypeDescriptor* Descriptor = const_cast<rql::TypeDescriptor*>(Constant); // ours: created by Shell()
+	if (UClass* Class = ClassOf(Constant))
+	{
+		Filled.Add(Constant);
+		FillClass(*Descriptor, Class);
+	}
+	else if (UScriptStruct* const* Struct = StructByDescriptor.Find(Constant))
+	{
+		Filled.Add(Constant);
+		FillStruct(*Descriptor, *Struct);
+	}
+}
+
+void FUnrealMcpRqlTypes::FillClass(rql::TypeDescriptor& Descriptor, UClass* Class)
+{
+	if (Descriptor.base)
+	{
+		Fill(Descriptor.base);
+		// Every UObject class has one pointer for all its bases (IdentityCast), so inherited members and methods are
+		// used as they are.
+		Descriptor.members = Descriptor.base->members;
+		Descriptor.methods = Descriptor.base->methods;
+		Descriptor.id_name = Descriptor.base->id_name;
+		Descriptor.id_explicit = Descriptor.base->id_explicit;
+		Descriptor.display_name = Descriptor.base->display_name;
+		Descriptor.display_explicit = Descriptor.base->display_explicit;
+	}
+	const TMap<FName, bool>* Forced = Exposed.Find(Class);
+	for (TFieldIterator<FProperty> It(Class, EFieldIteratorFlags::ExcludeSuper); It; ++It)
+	{
+		FProperty* Property = *It;
+		const bool* ForcedWritable = Forced ? Forced->Find(Property->GetFName()) : nullptr;
+		if (!ForcedWritable && !IsExposedOnClass(Property))
+			continue;
+		AddPropertyMember(Descriptor, Property, /*bOnObject*/ true, ForcedWritable && *ForcedWritable);
+	}
+	for (TFieldIterator<UFunction> It(Class, EFieldIteratorFlags::ExcludeSuper); It; ++It)
+	{
+		if (IsCallable(Class, *It))
+			AddFunctionMethod(Descriptor, *It);
+	}
+	TArray<FClassHook*> ClassHooks;
+	Hooks.MultiFindPointer(Class, ClassHooks, /*bMaintainOrder*/ true);
+	for (FClassHook* Hook : ClassHooks)
+		(*Hook)(*this, Descriptor);
+}
+
+void FUnrealMcpRqlTypes::FillStruct(rql::TypeDescriptor& Descriptor, UScriptStruct* Struct)
+{
+	for (TFieldIterator<FProperty> It(Struct); It; ++It) // structs are data: every property, base structs included
+	{
+		FProperty* Property = *It;
+		if (Property->HasAnyPropertyFlags(CPF_Deprecated))
+			continue;
+		AddPropertyMember(Descriptor, Property, /*bOnObject*/ false, /*bForceWritable*/ true);
+	}
+	Descriptor.id_name.clear();
+	Descriptor.id_explicit = true;
+	Descriptor.display_name.clear();
+	Descriptor.display_explicit = true;
+}
+
+bool FUnrealMcpRqlTypes::AddPropertyMember(rql::TypeDescriptor& Descriptor, FProperty* Property, bool bOnObject, bool bForceWritable)
+{
+	if (Property->GetSize() != Property->GetElementSize())
+		return false; // fixed-size C arrays (int32 X[4]) are not exposed
+	bool bNullable = false;
+	const rql::TypeDescriptor* Type = ForProperty(Property, bNullable);
+	if (!Type)
+		return false;
+
+	rql::MemberDescriptor Member;
+	Member.name = UnrealMcpRqlToStd(Property->GetAuthoredName());
+	Member.type = Type;
+	Member.nullable = bNullable;
+	Member.owning = IsOwning(Property);
+	Member.readonly = bOnObject ? !(bForceWritable || IsWritableOnClass(Property)) : false;
+	FUnrealMcpRqlTypes* Self = this;
+	Member.getter = [Self, Property](void* Container) -> rql::Value
+	{
+		return Self->Read(Property, Property->ContainerPtrToValuePtr<void>(Container));
+	};
+	if (bOnObject)
+	{
+		Member.setter = [Self, Property](void* Container, const rql::Value& Value)
+		{
+			Self->WriteObjectProperty(static_cast<UObject*>(Container), Property, Value);
+		};
+	}
+	else
+	{
+		Member.setter = [Self, Property](void* Container, const rql::Value& Value)
+		{
+			Self->Write(Property, Property->ContainerPtrToValuePtr<void>(Container), Value);
+		};
+	}
+	SetMember(Descriptor, std::move(Member));
+	return true;
+}
+
+bool FUnrealMcpRqlTypes::IsCallable(UClass* Class, UFunction* Function) const
+{
+	if (!Function || Function->HasAnyFunctionFlags(FUNC_Delegate))
+		return false;
+	if (ApiClasses.Contains(Class))
+		return true;
+	if (Function->HasAnyFunctionFlags(FUNC_Static | FUNC_Private | FUNC_Protected))
+		return false;
+	return Function->HasMetaData(TEXT("CallInEditor"));
+}
+
+bool FUnrealMcpRqlTypes::AddFunctionMethod(rql::TypeDescriptor& Descriptor, UFunction* Function)
+{
+	rql::MethodDescriptor Method;
+	FString Name = Function->GetName();
+	if (Name.StartsWith(TEXT("K2_")))
+		Name.RightChopInline(3);
+	Method.name = UnrealMcpRqlToStd(Name);
+	FString ToolTip = Function->GetMetaData(TEXT("ToolTip"));
+	ToolTip.ReplaceInline(TEXT("\r"), TEXT(" "));
+	ToolTip.ReplaceInline(TEXT("\n"), TEXT(" "));
+	Method.description = UnrealMcpRqlToStd(ToolTip.TrimStartAndEnd());
+
+	TArray<FProperty*> Inputs;
+	TArray<FProperty*> Outputs;
+	FProperty* Return = nullptr;
+	for (TFieldIterator<FProperty> It(Function); It && It->HasAnyPropertyFlags(CPF_Parm); ++It)
+	{
+		FProperty* Property = *It;
+		bool bNullable = false;
+		const rql::TypeDescriptor* Type = ForProperty(Property, bNullable);
+		if (!Type)
+			return false; // a parameter RQL cannot express: the function is not offered
+		if (Property->HasAnyPropertyFlags(CPF_ReturnParm))
+		{
+			Return = Property;
+			Method.result = Type;
+			continue;
+		}
+		if (Property->HasAnyPropertyFlags(CPF_OutParm) && !Property->HasAnyPropertyFlags(CPF_ReferenceParm | CPF_ConstParm))
+		{
+			Outputs.Add(Property);
+			continue;
+		}
+		rql::ParamDescriptor Parameter;
+		Parameter.name = UnrealMcpRqlToStd(Property->GetAuthoredName());
+		Parameter.type = Type;
+		Parameter.nullable = bNullable;
+		const FString DefaultKey = FString(TEXT("CPP_Default_")) + Property->GetName();
+		if (Function->HasMetaData(*DefaultKey))
+		{
+			// UHT records C++ default arguments as text; values it cannot import (e.g. FVector::ZeroVector) read as the
+			// type's zero value, which is what those defaults are.
+			FTempValue Default(Property);
+			FOutputDeviceNull Ignore;
+			const FString DefaultText = Function->GetMetaData(*DefaultKey);
+			if (!DefaultText.IsEmpty())
+				Property->ImportText_Direct(*DefaultText, Default.Ptr, nullptr, PPF_None, &Ignore);
+			Parameter.has_default = true;
+			Parameter.default_value = Detached(Read(Property, Default.Ptr));
+		}
+		Method.params.push_back(std::move(Parameter));
+		Inputs.Add(Property);
+	}
+	if (!Return && Outputs.Num() == 1)
+	{
+		bool bNullable = false;
+		Method.result = ForProperty(Outputs[0], bNullable);
+	}
+	else if (!Return && Outputs.Num() > 1)
+	{
+		Method.result = rql::builtin::any_type();
+	}
+
+	FUnrealMcpRqlTypes* Self = this;
+	Method.invoke = [Self, Function, Inputs, Outputs, Return](void* Target, const std::vector<rql::Value>& Args) -> rql::Value
+	{
+		if (Args.size() != static_cast<size_t>(Inputs.Num()))
+			Throw(FString::Printf(TEXT("%s expects %d argument(s), got %d"), *Function->GetName(), Inputs.Num(), static_cast<int32>(Args.size())));
+		UObject* Object = static_cast<UObject*>(Target);
+		if (Function->HasAnyFunctionFlags(FUNC_Static))
+			Object = Function->GetOuterUClass()->GetDefaultObject();
+		if (!Object)
+			Throw(TEXT("no object to call on"));
+
+		const int32 Size = FMath::Max<int32>(Function->ParmsSize, 1);
+		uint8* Params = static_cast<uint8*>(FMemory::Malloc(Size, 16));
+		FMemory::Memzero(Params, Size);
+		for (TFieldIterator<FProperty> It(Function); It && It->HasAnyPropertyFlags(CPF_Parm); ++It)
+			It->InitializeValue_InContainer(Params);
+		ON_SCOPE_EXIT
+		{
+			for (TFieldIterator<FProperty> It(Function); It && It->HasAnyPropertyFlags(CPF_Parm); ++It)
+				It->DestroyValue_InContainer(Params);
+			FMemory::Free(Params);
+		};
+		for (int32 Index = 0; Index < Inputs.Num(); ++Index)
+			Self->Write(Inputs[Index], Inputs[Index]->ContainerPtrToValuePtr<void>(Params), Args[static_cast<size_t>(Index)]);
+
+		UnrealMcpRqlBeginCall();
+		Object->ProcessEvent(Function, Params);
+		FString Failure;
+		if (UnrealMcpRqlEndCall(Failure))
+			Throw(Failure);
+
+		if (Return)
+			return Detached(Self->Read(Return, Return->ContainerPtrToValuePtr<void>(Params)));
+		if (Outputs.Num() == 1)
+			return Detached(Self->Read(Outputs[0], Outputs[0]->ContainerPtrToValuePtr<void>(Params)));
+		if (Outputs.Num() > 1)
+		{
+			std::vector<std::pair<rql::Value, rql::Value>> Entries;
+			for (FProperty* Output : Outputs)
+				Entries.emplace_back(rql::Value::string(UnrealMcpRqlToStd(Output->GetAuthoredName())),
+					Detached(Self->Read(Output, Output->ContainerPtrToValuePtr<void>(Params))));
+			return rql::Value::map(std::make_shared<rql::OwnedMap>(nullptr, std::move(Entries)));
+		}
+		return rql::Value::null();
+	};
+	AddMethod(Descriptor, std::move(Method));
+	return true;
+}
+
+// ------------------------------------------------------------------ values
+
+rql::Value FUnrealMcpRqlTypes::WrapObject(UObject* Object)
+{
+	if (!Object || !IsValid(Object))
+		return rql::Value::null();
+	const rql::TypeDescriptor* Descriptor = ForClass(Object->GetClass());
+	Fill(Descriptor);
+	HandedOut().Add(static_cast<int32>(Object->GetUniqueID()), Object);
+	return rql::Value::object(Descriptor, Object, std::make_shared<FWeakObjectPtr>(Object));
+}
+
+rql::Value FUnrealMcpRqlTypes::WrapObjects(const TArray<UObject*>& Objects)
+{
+	std::vector<rql::Value> Items;
+	Items.reserve(static_cast<size_t>(Objects.Num()));
+	for (UObject* Object : Objects)
+	{
+		if (Object && IsValid(Object))
+			Items.push_back(WrapObject(Object));
+	}
+	return rql::Value::list_of(std::move(Items));
+}
+
+rql::Value FUnrealMcpRqlTypes::WrapStruct(UScriptStruct* Struct, const void* Data)
+{
+	const rql::TypeDescriptor* Descriptor = ForStruct(Struct);
+	if (!Descriptor)
+		return rql::Value::null();
+	Fill(Descriptor);
+	return rql::Value::structure(Descriptor, MakeStructData(Struct, Data));
+}
+
+UObject* FUnrealMcpRqlTypes::AsObject(const rql::Value& Value) const
+{
+	if (!Value.is_object() || !IsObjectType(Value.type()) || !IsAlive(Value))
+		return nullptr;
+	return static_cast<UObject*>(Value.ptr());
+}
+
+bool FUnrealMcpRqlTypes::IsAlive(const rql::Value& Value) const
+{
+	if (!Value.is_object() || !IsObjectType(Value.type()))
+		return true;
+	const FWeakObjectPtr* Weak = static_cast<const FWeakObjectPtr*>(Value.holder().get());
+	return !Weak || Weak->IsValid();
+}
+
+UObject* FUnrealMcpRqlTypes::FindById(int32 Id) const
+{
+	if (TWeakObjectPtr<UObject>* Known = HandedOut().Find(Id))
+	{
+		UObject* Object = Known->Get();
+		if (Object && static_cast<int32>(Object->GetUniqueID()) == Id)
+			return Object;
+		HandedOut().Remove(Id);
+	}
+	for (TObjectIterator<UObject> It; It; ++It)
+	{
+		if (static_cast<int32>(It->GetUniqueID()) == Id)
+			return IsValid(*It) ? *It : nullptr;
+	}
+	return nullptr;
+}
+
+rql::Value FUnrealMcpRqlTypes::Read(const FProperty* Property, const void* ValuePtr)
+{
+	if (const FBoolProperty* BoolProperty = CastField<FBoolProperty>(Property))
+		return rql::Value::boolean(BoolProperty->GetPropertyValue(ValuePtr));
+	if (const FEnumProperty* EnumProperty = CastField<FEnumProperty>(Property))
+		return rql::Value::enumeration(ForEnum(EnumProperty->GetEnum()), EnumProperty->GetUnderlyingProperty()->GetSignedIntPropertyValue(ValuePtr));
+	if (const FByteProperty* ByteProperty = CastField<FByteProperty>(Property))
+	{
+		if (ByteProperty->Enum)
+			return rql::Value::enumeration(ForEnum(ByteProperty->Enum), static_cast<int64>(ByteProperty->GetPropertyValue(ValuePtr)));
+	}
+	if (const FNumericProperty* Numeric = CastField<FNumericProperty>(Property))
+	{
+		bool bNullable = false;
+		const rql::TypeDescriptor* Type = ForProperty(Property, bNullable);
+		if (Numeric->IsFloatingPoint())
+			return rql::Value::number(Numeric->GetFloatingPointPropertyValue(ValuePtr), Type);
+		if (IsUnsigned(Property))
+			return rql::Value::number(static_cast<double>(Numeric->GetUnsignedIntPropertyValue(ValuePtr)), Type);
+		return rql::Value::number(static_cast<double>(Numeric->GetSignedIntPropertyValue(ValuePtr)), Type);
+	}
+	if (const FStrProperty* StrProperty = CastField<FStrProperty>(Property))
+		return rql::Value::string(UnrealMcpRqlToStd(StrProperty->GetPropertyValue(ValuePtr)));
+	if (const FNameProperty* NameProperty = CastField<FNameProperty>(Property))
+		return rql::Value::string(UnrealMcpRqlToStd(NameProperty->GetPropertyValue(ValuePtr).ToString()));
+	if (const FTextProperty* TextProperty = CastField<FTextProperty>(Property))
+		return rql::Value::string(UnrealMcpRqlToStd(TextProperty->GetPropertyValue(ValuePtr).ToString()));
+	if (Property->IsA<FSoftObjectProperty>())
+	{
+		const FSoftObjectPtr& Soft = *static_cast<const FSoftObjectPtr*>(ValuePtr);
+		const FString Path = Soft.ToSoftObjectPath().ToString();
+		return Path.IsEmpty() ? rql::Value::null() : rql::Value::string(UnrealMcpRqlToStd(Path));
+	}
+	if (const FObjectPropertyBase* ObjectProperty = CastField<FObjectPropertyBase>(Property))
+		return WrapObject(ObjectProperty->GetObjectPropertyValue(ValuePtr));
+	if (const FStructProperty* StructProperty = CastField<FStructProperty>(Property))
+		return WrapStruct(StructProperty->Struct, ValuePtr);
+	if (const FArrayProperty* ArrayProperty = CastField<FArrayProperty>(Property))
+	{
+		bool bNullable = false;
+		const rql::TypeDescriptor* Type = ForProperty(Property, bNullable);
+		return rql::Value::list(std::make_shared<FArrayAdapter>(this, ArrayProperty, const_cast<void*>(ValuePtr), Type));
+	}
+	if (const FSetProperty* SetProperty = CastField<FSetProperty>(Property))
+	{
+		FScriptSetHelper Helper(SetProperty, ValuePtr);
+		std::vector<rql::Value> Items;
+		for (int32 Index = 0, Max = Helper.GetMaxIndex(); Index < Max; ++Index)
+		{
+			if (Helper.IsValidIndex(Index))
+				Items.push_back(Read(SetProperty->ElementProp, Helper.GetElementPtr(Index)));
+		}
+		return rql::Value::list_of(std::move(Items));
+	}
+	if (const FMapProperty* MapProperty = CastField<FMapProperty>(Property))
+	{
+		bool bNullable = false;
+		const rql::TypeDescriptor* Type = ForProperty(Property, bNullable);
+		return rql::Value::map(std::make_shared<FMapAdapter>(this, MapProperty, const_cast<void*>(ValuePtr), Type));
+	}
+	return rql::Value::missing();
+}
+
+void FUnrealMcpRqlTypes::Write(const FProperty* Property, void* ValuePtr, const rql::Value& Value)
+{
+	if (const FBoolProperty* BoolProperty = CastField<FBoolProperty>(Property))
+	{
+		BoolProperty->SetPropertyValue(ValuePtr, ToBool(Value));
+		return;
+	}
+	if (const FEnumProperty* EnumProperty = CastField<FEnumProperty>(Property))
+	{
+		EnumProperty->GetUnderlyingProperty()->SetIntPropertyValue(ValuePtr, ToEnumValue(EnumProperty->GetEnum(), Value));
+		return;
+	}
+	if (const FByteProperty* ByteProperty = CastField<FByteProperty>(Property))
+	{
+		if (ByteProperty->Enum)
+		{
+			ByteProperty->SetPropertyValue(ValuePtr, static_cast<uint8>(ToEnumValue(ByteProperty->Enum, Value)));
+			return;
+		}
+	}
+	if (const FNumericProperty* Numeric = CastField<FNumericProperty>(Property))
+	{
+		const double Number = ToNumber(Value);
+		if (Numeric->IsFloatingPoint())
+			Numeric->SetFloatingPointPropertyValue(ValuePtr, Number);
+		else if (IsUnsigned(Property))
+			Numeric->SetIntPropertyValue(ValuePtr, static_cast<uint64>(FMath::Max(0.0, FMath::RoundToDouble(Number))));
+		else
+			Numeric->SetIntPropertyValue(ValuePtr, static_cast<int64>(FMath::RoundToDouble(Number)));
+		return;
+	}
+	if (const FStrProperty* StrProperty = CastField<FStrProperty>(Property))
+	{
+		StrProperty->SetPropertyValue(ValuePtr, ToText(Value));
+		return;
+	}
+	if (const FNameProperty* NameProperty = CastField<FNameProperty>(Property))
+	{
+		NameProperty->SetPropertyValue(ValuePtr, FName(*ToText(Value)));
+		return;
+	}
+	if (const FTextProperty* TextProperty = CastField<FTextProperty>(Property))
+	{
+		TextProperty->SetPropertyValue(ValuePtr, FText::FromString(ToText(Value)));
+		return;
+	}
+	if (Property->IsA<FSoftObjectProperty>())
+	{
+		FSoftObjectPtr& Soft = *static_cast<FSoftObjectPtr*>(ValuePtr);
+		if (Value.is_null())
+			Soft = FSoftObjectPtr();
+		else if (UObject* Object = AsObject(Value))
+			Soft = FSoftObjectPtr(Object);
+		else
+			Soft = FSoftObjectPtr(FSoftObjectPath(ToText(Value)));
+		return;
+	}
+	if (const FObjectPropertyBase* ObjectProperty = CastField<FObjectPropertyBase>(Property))
+	{
+		UObject* Object = nullptr;
+		if (!Value.is_null())
+		{
+			Object = AsObject(Value);
+			if (!Object && Value.is_string())
+			{
+				// Asset paths are accepted for references: set StaticMesh = "/Game/Meshes/Cube.Cube".
+				const FString Path = UnrealMcpRqlFromStd(Value.as_string());
+				Object = UnrealMcpRqlLoadObject(ObjectProperty->PropertyClass, Path);
+				if (!Object)
+					Throw(FString::Printf(TEXT("no %s at '%s'"), *ObjectProperty->PropertyClass->GetName(), *Path));
+			}
+			if (!Object)
+				Throw(FString::Printf(TEXT("expected a %s, got %s"), *ObjectProperty->PropertyClass->GetName(),
+					*UnrealMcpRqlFromStd(rql::describe_value(Value))));
+			if (!Object->IsA(ObjectProperty->PropertyClass))
+				Throw(FString::Printf(TEXT("%s is not a %s"), *Object->GetName(), *ObjectProperty->PropertyClass->GetName()));
+			if (const FClassProperty* ClassProperty = CastField<FClassProperty>(Property))
+			{
+				const UClass* AsClass = Cast<UClass>(Object);
+				if (ClassProperty->MetaClass && (!AsClass || !AsClass->IsChildOf(ClassProperty->MetaClass)))
+					Throw(FString::Printf(TEXT("%s is not a subclass of %s"), *Object->GetName(), *ClassProperty->MetaClass->GetName()));
+			}
+		}
+		ObjectProperty->SetObjectPropertyValue(ValuePtr, Object);
+		return;
+	}
+	if (const FStructProperty* StructProperty = CastField<FStructProperty>(Property))
+	{
+		const rql::TypeDescriptor* Descriptor = ForStruct(StructProperty->Struct);
+		if (Value.is_struct() && Value.type() == Descriptor)
+		{
+			StructProperty->Struct->CopyScriptStruct(ValuePtr, Value.ptr());
+			return;
+		}
+		if (Value.is_string() || Value.is_list())
+		{
+			// "(1, 2, 3)", [1, 2, 3], "#ff8800" for the math structs (values that did not pass through RQL's coercion).
+			FString Error;
+			if (UnrealMcpRqlParseMathStruct(StructProperty->Struct, Value, ValuePtr, Error))
+				return;
+			if (!Error.IsEmpty())
+				Throw(Error);
+		}
+		if (Value.is_map())
+		{
+			// An object literal {X: 1, Y: 2}: named members over the current value.
+			UScriptStruct* Struct = StructProperty->Struct;
+			Value.map().for_each([this, Struct, ValuePtr](const rql::Value& Key, const rql::Value& Item)
+			{
+				const FString MemberName = ToText(Key);
+				for (TFieldIterator<FProperty> It(Struct); It; ++It)
+				{
+					if (It->GetAuthoredName().Equals(MemberName, ESearchCase::IgnoreCase))
+					{
+						Write(*It, It->ContainerPtrToValuePtr<void>(ValuePtr), Item);
+						return true;
+					}
+				}
+				Throw(FString::Printf(TEXT("%s has no member '%s'"), *Struct->GetName(), *MemberName));
+			});
+			return;
+		}
+		Throw(FString::Printf(TEXT("expected a %s, got %s"), *StructProperty->Struct->GetName(), *UnrealMcpRqlFromStd(rql::describe_value(Value))));
+	}
+	if (const FArrayProperty* ArrayProperty = CastField<FArrayProperty>(Property))
+	{
+		if (!Value.is_list())
+			Throw(FString::Printf(TEXT("expected a list, got %s"), *UnrealMcpRqlFromStd(rql::describe_value(Value))));
+		std::vector<rql::Value> Items; // copy first: the source may be a view of this very array
+		for (size_t Index = 0, Count = Value.list().size(); Index < Count; ++Index)
+			Items.push_back(rql::snapshot(Value.list().at(Index)));
+		FScriptArrayHelper Helper(ArrayProperty, ValuePtr);
+		Helper.Resize(static_cast<int32>(Items.size()));
+		for (size_t Index = 0; Index < Items.size(); ++Index)
+			Write(ArrayProperty->Inner, Helper.GetRawPtr(static_cast<int32>(Index)), Items[Index]);
+		return;
+	}
+	if (const FSetProperty* SetProperty = CastField<FSetProperty>(Property))
+	{
+		if (!Value.is_list())
+			Throw(FString::Printf(TEXT("expected a list, got %s"), *UnrealMcpRqlFromStd(rql::describe_value(Value))));
+		std::vector<rql::Value> Items;
+		for (size_t Index = 0, Count = Value.list().size(); Index < Count; ++Index)
+			Items.push_back(rql::snapshot(Value.list().at(Index)));
+		FScriptSetHelper Helper(SetProperty, ValuePtr);
+		Helper.EmptyElements();
+		ON_SCOPE_EXIT { Helper.Rehash(); };
+		for (const rql::Value& Item : Items)
+		{
+			const int32 Index = Helper.AddDefaultValue_Invalid_NeedsRehash();
+			Write(SetProperty->ElementProp, Helper.GetElementPtr(Index), Item);
+		}
+		return;
+	}
+	if (const FMapProperty* MapProperty = CastField<FMapProperty>(Property))
+	{
+		if (!Value.is_map())
+			Throw(FString::Printf(TEXT("expected a map, got %s"), *UnrealMcpRqlFromStd(rql::describe_value(Value))));
+		std::vector<std::pair<rql::Value, rql::Value>> Entries;
+		Value.map().for_each([&Entries](const rql::Value& Key, const rql::Value& Item)
+		{
+			Entries.emplace_back(rql::snapshot(Key), rql::snapshot(Item));
+			return true;
+		});
+		FScriptMapHelper Helper(MapProperty, ValuePtr);
+		Helper.EmptyValues();
+		ON_SCOPE_EXIT { Helper.Rehash(); };
+		for (const std::pair<rql::Value, rql::Value>& Entry : Entries)
+		{
+			const int32 Index = Helper.AddDefaultValue_Invalid_NeedsRehash();
+			Write(MapProperty->KeyProp, Helper.GetKeyPtr(Index), Entry.first);
+			Write(MapProperty->ValueProp, Helper.GetValuePtr(Index), Entry.second);
+		}
+		return;
+	}
+	Throw(FString::Printf(TEXT("%s cannot be written"), *Property->GetAuthoredName()));
+}
+
+void FUnrealMcpRqlTypes::WriteObjectProperty(UObject* Object, FProperty* Property, const rql::Value& Value)
+{
+	if (!Object)
+		Throw(TEXT("the object is gone"));
+	// The editor's own property-change path, so components refresh (transforms, render state) and Blueprint actors rerun
+	// their construction script — exactly as an edit in the Details panel.
+	Object->PreEditChange(Property);
+	Write(Property, Property->ContainerPtrToValuePtr<void>(Object), Value);
+	FPropertyChangedEvent Event(Property, EPropertyChangeType::ValueSet);
+	Object->PostEditChangeProperty(Event);
+}

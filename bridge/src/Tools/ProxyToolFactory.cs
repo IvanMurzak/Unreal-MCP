@@ -36,7 +36,9 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
                 title: descriptor.Title,
                 description: descriptor.Description,
                 skillDescription: descriptor.SkillDescription,
-                skillBody: descriptor.SkillBody,
+                // rql-query's skill body is the whole unreal-rql skill (written by the skill generator, which reads the
+                // descriptor catalog): tools/list does not carry it.
+                skillBody: toolName == RqlBridge.QueryTool ? null : descriptor.SkillBody,
                 inputSchema: descriptor.InputSchema,
                 outputSchema: descriptor.OutputSchema,
                 readOnlyHint: descriptor.ReadOnlyHint,
@@ -46,12 +48,17 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
                 handler: async (requestId, namedParameters, cancellationToken) =>
                 {
                     var arguments = ToArguments(namedParameters);
+                    // RQL (docs/rql.md): the C++ runtime executes plans, so the query text is parsed here; a parse error
+                    // is the agent's answer without a round trip.
+                    if (RqlBridge.IsQueryTool(toolName) && RqlBridge.AddPlan(arguments) is ResponseCallTool parseError)
+                        return parseError.SetRequestID(requestId);
                     try
                     {
                         var response = await channel
                             .CallToolAsync(toolName, arguments, timeoutMs, cancellationToken)
                             .ConfigureAwait(false);
-                        return ProxyResponseMapper.Map(response, requestId);
+                        var mapped = ProxyResponseMapper.Map(response, requestId);
+                        return RqlBridge.IsRqlTool(toolName) ? RqlBridge.Render(toolName, mapped) : mapped;
                     }
                     catch (IpcDisconnectedException ex)
                     {

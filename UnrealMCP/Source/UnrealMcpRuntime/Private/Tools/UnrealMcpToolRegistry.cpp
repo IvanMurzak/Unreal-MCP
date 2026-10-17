@@ -121,6 +121,9 @@ TSharedPtr<FJsonObject> FUnrealMcpRegisteredTool::ToDescriptorJson() const
 	// Description (the sidecar generator uses this verbatim for the YAML `description:`; the full Description still
 	// becomes the SKILL.md body). Never empty so the front-matter always has a meaningful short value.
 	Desc->SetStringField(TEXT("skillDescription"), SkillDescription.IsEmpty() ? Title : SkillDescription);
+	// Only when declared: a tool without a dedicated body keeps a byte-identical descriptor (and schema hash).
+	if (!SkillBody.IsEmpty())
+		Desc->SetStringField(TEXT("skillBody"), SkillBody);
 	Desc->SetObjectField(TEXT("inputSchema"), BuildInputSchema());
 	if (OutputSchema.IsValid())
 		Desc->SetObjectField(TEXT("outputSchema"), OutputSchema);
@@ -164,6 +167,7 @@ FUnrealMcpToolBuilder::FUnrealMcpToolBuilder(FUnrealMcpToolRegistry& InRegistry,
 FUnrealMcpToolBuilder& FUnrealMcpToolBuilder::Title(const FString& InTitle) { Tool.Title = InTitle; return *this; }
 FUnrealMcpToolBuilder& FUnrealMcpToolBuilder::Description(const FString& InDescription) { Tool.Description = InDescription; return *this; }
 FUnrealMcpToolBuilder& FUnrealMcpToolBuilder::SkillDescription(const FString& InSkillDescription) { Tool.SkillDescription = InSkillDescription; return *this; }
+FUnrealMcpToolBuilder& FUnrealMcpToolBuilder::SkillBody(const FString& InSkillBody) { Tool.SkillBody = InSkillBody; return *this; }
 
 FUnrealMcpToolBuilder& FUnrealMcpToolBuilder::ParamString(const FString& Name, const FString& Desc, EUnrealMcpParamRequirement Req)
 {

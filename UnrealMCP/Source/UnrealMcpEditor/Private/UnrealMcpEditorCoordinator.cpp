@@ -4,6 +4,7 @@
 #include "UnrealMcpEditorCoordinator.h"
 #include "UnrealMcpLog.h"
 #include "UnrealMcpCoreTools.h"
+#include "UnrealMcpRqlTools.h"
 #include "UnrealMcpRuntimeCoreTools.h"
 #include "UnrealMcpRuntimeCorePrompts.h"
 #include "UnrealMcpRuntimeCoreResources.h"
@@ -78,11 +79,11 @@ void FUnrealMcpEditorCoordinator::Startup()
 	// game; a game adds its own runtime tools via an IUnrealMcpToolProvider extension (RegisterToolProvider).
 	UnrealMcpPingTool::Register(*Registry); // runtime-safe liveness probe (UnrealMcpRuntimeCoreTools.h)
 	// --- Editor-only families (UnrealMcpCoreTools.h) ---
-	UnrealMcpActorTools::Register(*Registry); // §10 actor / component family
+	// docs/rql.md: the RQL data layer — rql-query / rql-mutate / rql-schema replace the actor / object / asset / level /
+	// editor-state / selection / console-log / reflection tools (the UnrealMcpRql module).
+	UnrealMcpRqlTools::Register(*Registry);
 	UnrealMcpBlueprintTools::Register(*Registry); // §10 flagship Blueprint family (CORE)
-	UnrealMcpAssetTools::Register(*Registry); // §10 asset / Content-Browser family (issue #10)
-	UnrealMcpEditorTools::Register(*Registry); // §10 editor / console / reflection family (issue #19)
-	UnrealMcpLevelTools::Register(*Registry); // §10 level / map family (issue #16, Unity Scene.* analog)
+	UnrealMcpEditorTools::Register(*Registry); // §10 console family: console-run-command
 	UnrealMcpScreenshotTools::Register(*Registry); // §10 screenshot / viewport-capture family (issue #17)
 	UnrealMcpSourceTools::Register(*Registry); // §10 C++ source / script family (issue #18)
 	UnrealMcpSkillTools::Register(*Registry); // §2.4 skill authoring — `unreal-skill-create` (SYSTEM surface)
@@ -133,6 +134,14 @@ void FUnrealMcpEditorCoordinator::Startup()
 		PromptRegistry.Get(), // §A.2 kind-aware: also merge prompt-provider extensions into the prompt registry
 		ResourceRegistry.Get()); // §A.2 kind-aware: also merge resource-provider extensions into the resource registry
 	ExtensionManager->Startup();
+
+	// An extension's RQL module (IUnrealMcpRqlModule) loading or unloading republishes the rql-* tools (their skill lists
+	// the module's sources and guides): push the manifest like an extension rebuild does.
+	UnrealMcpRqlTools::Attach(*Registry, [this]()
+	{
+		if (BridgeServer.IsValid())
+			BridgeServer->PushManifest();
+	});
 
 	const FString ProjectPath = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir());
 	const FString EngineVersion = FEngineVersion::Current().ToString();
@@ -675,6 +684,8 @@ void FUnrealMcpEditorCoordinator::Shutdown()
 	// an empty list instead of dereferencing the soon-to-be-freed extension manager. Mirrors the aux-windows guard.
 	if (ExtProvidersAlive.IsValid())
 		*ExtProvidersAlive = false;
+
+	UnrealMcpRqlTools::Detach(); // the registry below is about to be freed
 
 	if (PreExitHandle.IsValid())
 	{

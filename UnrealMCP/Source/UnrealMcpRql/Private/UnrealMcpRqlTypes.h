@@ -1,0 +1,134 @@
+// Copyright (c) 2026 Ivan Murzak. Licensed under the Apache License, Version 2.0.
+// See the LICENSE file in the repository root for more information.
+
+#pragma once
+
+#include "CoreMinimal.h"
+#include "UObject/WeakObjectPtr.h"
+#include "UnrealMcpRqlInclude.h"
+
+#include <memory>
+#include <string>
+#include <vector>
+
+class FProperty;
+class UClass;
+class UEnum;
+class UFunction;
+class UObject;
+class UScriptStruct;
+class UStruct;
+
+/** An object by path (already loaded, else loaded quietly); nullptr when there is none of @p Class. */
+UObject* UnrealMcpRqlLoadObject(UClass* Class, const FString& Path);
+
+/** A class by short name ("PointLight", "AStaticMeshActor"), class path or Blueprint asset path; nullptr when none. */
+UClass* UnrealMcpRqlResolveClass(const FString& Name);
+
+/** Bracket a UFUNCTION call made by RQL: UnrealMcpRql::Fail() inside it makes EndCall return true with the message. */
+void UnrealMcpRqlBeginCall();
+bool UnrealMcpRqlEndCall(FString& OutFailure);
+
+/** FString <-> UTF-8 std::string (RQL text is UTF-8). */
+std::string UnrealMcpRqlToStd(const FString& Text);
+FString UnrealMcpRqlFromStd(const std::string& Text);
+
+/**
+ * The Unreal provider of the RQL C++ runtime (RQL cpp/README.md "Provider seam"): type descriptors built at runtime from
+ * UClass / UScriptStruct / UEnum / FProperty / UFunction, TArray / TSet / TMap adapters and UObject liveness.
+ *
+ * Descriptors are keyed by the reflected type (the UStruct / UEnum pointer is the RQL type key) and filled on first use:
+ * reflection reaches thousands of classes, a query touches a few. Members and methods of a class are filled before the
+ * first object of it becomes a value, so the engine only ever reads complete descriptors. UObject descriptors carry no
+ * RQL type adapter (adapted views are cached per type), which is what makes the lazy fill safe.
+ *
+ * Exposed: class properties that are EditAnywhere / VisibleAnywhere / BlueprintVisible (writable unless EditConst or
+ * BlueprintReadOnly-only), every struct property, plus computed members registered by hooks (Id, Name, Path on every
+ * object, the actor transform, components, children, …). Callable: CallInEditor functions, every UFUNCTION of an API
+ * class, and the methods hooks add. Game-thread only.
+ */
+class FUnrealMcpRqlTypes
+{
+public:
+	/** Adds members / methods to the descriptor of one class (and, by inheritance, of its subclasses). */
+	using FClassHook = TFunction<void(FUnrealMcpRqlTypes& Types, rql::TypeDescriptor& Descriptor)>;
+
+	FUnrealMcpRqlTypes();
+	~FUnrealMcpRqlTypes();
+
+	rql::TypeRegistry& Registry() { return *RegistryPtr; }
+
+	// ---- descriptors
+
+	const rql::TypeDescriptor* ForClass(UClass* Class);
+	const rql::TypeDescriptor* ForStruct(UScriptStruct* Struct);
+	const rql::TypeDescriptor* ForEnum(UEnum* Enum);
+	/** The declared RQL type of a property value; nullptr = unsupported (the property is skipped). */
+	const rql::TypeDescriptor* ForProperty(const FProperty* Property, bool& bOutNullable);
+	/** Reflected (or registered native) type by short name ("StaticMeshActor", "Vector", "LogEntry"); U/A/F/E prefixes tolerated. */
+	const rql::TypeDescriptor* FindByName(const FString& Name);
+	/** Make sure a (possibly lazily created) descriptor has its members and methods. */
+	void Fill(const rql::TypeDescriptor* Descriptor);
+	UClass* ClassOf(const rql::TypeDescriptor* Descriptor) const;
+	bool IsObjectType(const rql::TypeDescriptor* Descriptor) const { return ClassOf(Descriptor) != nullptr; }
+
+	// ---- values
+
+	/** The object as an RQL value of its most-derived class (null for nullptr); holds a weak pointer for liveness. */
+	rql::Value WrapObject(UObject* Object);
+	rql::Value WrapObjects(const TArray<UObject*>& Objects);
+	/** A copy of struct memory as an RQL struct value. */
+	rql::Value WrapStruct(UScriptStruct* Struct, const void* Data);
+	/** The UObject behind an object value; nullptr for null and non-UObject values. */
+	UObject* AsObject(const rql::Value& Value) const;
+	/** Liveness without dereferencing a destroyed object (the weak pointer the value carries). */
+	bool IsAlive(const rql::Value& Value) const;
+	/** An object handed out before (stable ref "Type#<id>"), else a slow scan of all objects; nullptr when gone. */
+	UObject* FindById(int32 Id) const;
+
+	rql::Value Read(const FProperty* Property, const void* ValuePtr);
+	/** Convert and store; throws std::runtime_error with a message for the agent when the value does not fit. */
+	void Write(const FProperty* Property, void* ValuePtr, const rql::Value& Value);
+	/** Write a property of an object with the editor notifications (PreEditChange / PostEditChangeProperty). */
+	void WriteObjectProperty(UObject* Object, FProperty* Property, const rql::Value& Value);
+
+	// ---- extension points (registered before the first query; inherited by subclasses)
+
+	void AddClassHook(UClass* Class, FClassHook Hook);
+	void AddApiClass(UClass* Class, const FString& TypeName);
+	void ExposeProperties(UStruct* Owner, const TArray<FName>& Names, bool bWritable);
+
+	/** Add or replace a member of a descriptor (hooks use it). */
+	static void SetMember(rql::TypeDescriptor& Descriptor, rql::MemberDescriptor Member);
+	static void AddMethod(rql::TypeDescriptor& Descriptor, rql::MethodDescriptor Method);
+	static rql::ParamDescriptor Param(const char* Name, const rql::TypeDescriptor* Type, bool bNullable = false);
+	static rql::ParamDescriptor OptionalParam(const char* Name, const rql::TypeDescriptor* Type, rql::Value Default, bool bNullable = false);
+
+	/** Native (non-reflected) descriptors registered by the host (log entries, class infos), for FindByName. */
+	void AddNativeType(const rql::TypeDescriptor* Descriptor);
+
+	/** Every class descriptor created so far (schema listings). */
+	const TMap<UClass*, rql::TypeDescriptor*>& ClassDescriptors() const { return Classes; }
+
+private:
+	std::unique_ptr<rql::TypeRegistry> RegistryPtr;
+
+	TMap<UClass*, rql::TypeDescriptor*> Classes;
+	TMap<UScriptStruct*, rql::TypeDescriptor*> Structs;
+	TMap<UEnum*, rql::TypeDescriptor*> Enums;
+	TMap<const rql::TypeDescriptor*, UClass*> ClassByDescriptor;
+	TMap<const rql::TypeDescriptor*, UScriptStruct*> StructByDescriptor;
+	TSet<const rql::TypeDescriptor*> Filled;
+	TArray<const rql::TypeDescriptor*> NativeTypes;
+
+	TMultiMap<UClass*, FClassHook> Hooks;
+	TMap<UClass*, FString> ApiClasses;
+	TMap<UStruct*, TMap<FName, bool>> Exposed;
+
+	rql::TypeDescriptor& Shell(const void* Key, const FString& Name, rql::TypeKind Kind);
+	void FillClass(rql::TypeDescriptor& Descriptor, UClass* Class);
+	void FillStruct(rql::TypeDescriptor& Descriptor, UScriptStruct* Struct);
+	bool AddPropertyMember(rql::TypeDescriptor& Descriptor, FProperty* Property, bool bOnObject, bool bForceWritable);
+	bool AddFunctionMethod(rql::TypeDescriptor& Descriptor, UFunction* Function);
+	bool IsCallable(UClass* Class, UFunction* Function) const;
+};

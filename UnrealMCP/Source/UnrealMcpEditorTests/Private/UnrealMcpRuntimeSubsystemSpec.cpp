@@ -243,20 +243,15 @@ void FUnrealMcpRuntimeSubsystemSpec::Define()
 
 			// --- Every engine-development tool MUST be ABSENT from the runtime built-in manifest. ---
 			const TCHAR* const EditorOnlyForbidden[] = {
-				// actor / component family (now editor-only)
-				TEXT("actor-create"), TEXT("actor-destroy"), TEXT("object-get-data"), TEXT("object-modify"),
-				// console + reflection (now editor-only)
-				TEXT("console-get-logs"), TEXT("console-clear-logs"), TEXT("console-run-command"),
-				TEXT("reflection-method-find"), TEXT("reflection-method-call"),
-				// screenshot (now editor-only)
+				// the RQL data layer (editor-only: it reads and changes the editor world)
+				TEXT("rql-query"), TEXT("rql-mutate"), TEXT("rql-schema"),
+				// console (editor-only)
+				TEXT("console-run-command"),
+				// screenshot (editor-only)
 				TEXT("screenshot-viewport"), TEXT("screenshot-isolated"),
 				TEXT("screenshot-game-view"), TEXT("screenshot-camera"),
-				// level read + write (now editor-only)
-				TEXT("level-get-data"), TEXT("level-create"), TEXT("level-open"), TEXT("level-save"),
-				TEXT("level-list-loaded"), TEXT("level-set-current"), TEXT("level-unload-sublevel"),
-				// representative asset / blueprint / editor-application / source family members
-				TEXT("asset-find"), TEXT("blueprint-create"), TEXT("editor-application-get-state"),
-				TEXT("editor-selection-get"), TEXT("source-compile")
+				// representative blueprint / source family members
+				TEXT("blueprint-create"), TEXT("source-compile")
 			};
 			for (const TCHAR* Name : EditorOnlyForbidden)
 				TestFalse(FString::Printf(TEXT("runtime manifest does NOT have engine-dev tool %s"), Name), Registry.HasTool(Name));
