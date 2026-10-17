@@ -649,7 +649,7 @@ namespace UnrealMcpRqlCoreLocal
 
 	// ---------------------------------------------------------------- functions
 
-	rql::Value Error(const char* Code, const FString& Message)
+	rql::Value ErrorValue(const char* Code, const FString& Message)
 	{
 		return rql::Value::error(Code, UnrealMcpRqlToStd(Message));
 	}
@@ -657,28 +657,28 @@ namespace UnrealMcpRqlCoreLocal
 	rql::Value FindActor(const std::vector<rql::Value>& Args, FUnrealMcpRqlTypes& Types)
 	{
 		if (Args.size() != 1 || !Args[0].is_string() || Args[0].as_string().empty())
-			return Error("type-mismatch", TEXT("unreal.find(label) expects an actor label, name or path"));
+			return ErrorValue("type-mismatch", TEXT("unreal.find(label) expects an actor label, name or path"));
 		const FString Key = UnrealMcpRqlFromStd(Args[0].as_string());
 		AActor* Actor = FUnrealMcpObjectRef::ResolveActor(Key);
-		return Actor ? Types.WrapObject(Actor) : Error("not-found", FString::Printf(TEXT("no actor with the label, name or path '%s'"), *Key));
+		return Actor ? Types.WrapObject(Actor) : ErrorValue("not-found", FString::Printf(TEXT("no actor with the label, name or path '%s'"), *Key));
 	}
 
 	rql::Value LoadAsset(const std::vector<rql::Value>& Args, FUnrealMcpRqlTypes& Types)
 	{
 		if (Args.size() != 1 || !Args[0].is_string())
-			return Error("type-mismatch", TEXT("unreal.asset(path) expects an asset path such as \"/Game/Materials/M_Red\""));
+			return ErrorValue("type-mismatch", TEXT("unreal.asset(path) expects an asset path such as \"/Game/Materials/M_Red\""));
 		return Types.WrapObject(UnrealMcpRqlLoadObject(UObject::StaticClass(), UnrealMcpRqlFromStd(Args[0].as_string())));
 	}
 
 	rql::Value FindAssets(const std::vector<rql::Value>& Args, FUnrealMcpRqlTypes& Types)
 	{
 		if (Args.empty() || Args.size() > 2 || !Args[0].is_string() || (Args.size() == 2 && !Args[1].is_string()))
-			return Error("type-mismatch", TEXT("unreal.assets(class, path?) expects a class name such as \"Material\" and an optional content path"));
+			return ErrorValue("type-mismatch", TEXT("unreal.assets(class, path?) expects a class name such as \"Material\" and an optional content path"));
 		FString ClassName = UnrealMcpRqlFromStd(Args[0].as_string()).TrimStartAndEnd();
 		ClassName.RemoveFromStart(TEXT("t:"));
 		UClass* Class = ClassName.IsEmpty() ? UObject::StaticClass() : UnrealMcpRqlResolveClass(ClassName);
 		if (!Class)
-			return Error("not-found", FString::Printf(TEXT("no class '%s'"), *ClassName));
+			return ErrorValue("not-found", FString::Printf(TEXT("no class '%s'"), *ClassName));
 		return UnrealMcpRqlAssetList(Types, Class, Args.size() == 2 ? UnrealMcpRqlFromStd(Args[1].as_string()) : FString());
 	}
 
@@ -688,7 +688,7 @@ namespace UnrealMcpRqlCoreLocal
 		const FString Filter = Args.size() > 1 && Args[1].is_string() ? UnrealMcpRqlFromStd(Args[1].as_string()) : FString();
 		UClass* Base = UnrealMcpRqlResolveClass(BaseName);
 		if (!Base)
-			return Error("not-found", FString::Printf(TEXT("no class '%s'"), *BaseName));
+			return ErrorValue("not-found", FString::Printf(TEXT("no class '%s'"), *BaseName));
 		TArray<UClass*> Found;
 		for (TObjectIterator<UClass> It; It; ++It)
 		{

@@ -67,7 +67,7 @@ void FUnrealMcpEditorCoordinator::Startup()
 	});
 
 	// §10 editor/reflection family: start the GLog ring-buffer collector BEFORE anything else so the
-	// earliest startup log lines are already captured for console-get-logs. Shutdown() deregisters it.
+	// earliest startup log lines are already captured for the RQL `console` source. Shutdown() deregisters it.
 	FUnrealMcpLogCollector::Get().Startup();
 
 	Registry = MakeUnique<FUnrealMcpToolRegistry>();

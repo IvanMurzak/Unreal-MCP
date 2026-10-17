@@ -33,16 +33,19 @@ delivered it. Identifiers below (tool ids, command names, env vars, paths) were 
 | §9.3 Test strategy | implemented | bridge xUnit + cli vitest + plugin Automation specs (#13–#25), CI wiring #28 |
 | §9.4 CI (`test_pull_request` / `release` / `test_cli`) | implemented | #28 |
 | §10 system tools (3: `ping`, `unreal-skill-create`, `unreal-skill-generate` — see §2.4) | implemented | #4 + owner ruling 2026-07-25 |
-| §10 actor & component family (13) | implemented | #14 |
-| §10 asset family (11) | implemented | #15 (issue #10) |
+| §10 RQL data layer (3: `rql-query`, `rql-mutate`, `rql-schema` — [`docs/rql.md`](rql.md)) | implemented | `UnrealMcpRql` module; supersedes the actor, asset, level and editor/reflection families |
+| §10 actor & component family (13) | superseded by RQL | #14 |
+| §10 asset family (11) | superseded by RQL | #15 (issue #10) |
 | §10 blueprint family (11) | implemented | #13 |
 | §10 source family (6) | implemented | #23 |
 | §10 screenshot family (4) | implemented | #21 |
-| §10 editor/reflection family (9) | implemented | #22 |
-| §10 level family (7) | implemented | #25 |
+| §10 editor/reflection family (9) | superseded by RQL except `console-run-command` (the console family, 1) | #22 |
+| §10 level family (7) | superseded by RQL | #25 |
 
-**Total shipped: 61 STANDARD core tools across 7 families, plus 3 SYSTEM tools (§2.4)** (counts verified
-from the registration source).
+**Total shipped: 25 STANDARD core tools across 5 families (rql 3, blueprint 11, console 1, source 6,
+screenshot 4), plus 3 SYSTEM tools (§2.4)** (counts verified from the registration source). The §10 sections
+below describe the superseded families as they were designed; their operations are RQL queries now
+([`docs/rql.md`](rql.md) maps each removed tool to its query).
 Prompts/Resources ship empty-but-wired (§10), as designed.
 
 ### Drift corrected against the implementation
@@ -390,7 +393,7 @@ A tool is served on exactly one of two surfaces, mirroring the shared
 
 | surface | reachable at | in `tools/list`? | for |
 | --- | --- | --- | --- |
-| **Standard** (default) | `/api/tools/<name>` + MCP `tools/call` | yes | the 61 authoring tools an AI agent drives |
+| **Standard** (default) | `/api/tools/<name>` + MCP `tools/call` | yes | the 25 authoring tools an AI agent drives |
 | **System** | `/api/system-tools/<name>` **only** | **no** | host plumbing a CLIENT drives: liveness, skill authoring |
 
 **The system tools are `ping`, `unreal-skill-create`, `unreal-skill-generate`** — the same three, with

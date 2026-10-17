@@ -136,7 +136,7 @@ TSharedRef<SWidget> SUnrealMcpSerializationCheckWindow::BuildInformationFoldout(
 		TemplateLabelDescription(LOCTEXT("InfoBody",
 			"Pick a target by its actor label or object path (or press \"Use selection\" to fill it from the "
 			"current editor selection), then press Serialize. The object is serialized to JSON in-process via "
-			"the same reflection-based converter the object-get-data / actor-get-data MCP tools use — no sidecar "
+			"the plugin's reflection-based JSON converter (FUnrealMcpPropertyJson) — no sidecar "
 			"round-trip. Recursive ON emits the full reflected property graph; OFF emits only the object's "
 			"identity and top-level fields. Copy puts the JSON on the clipboard.")),
 		/*bInitiallyExpanded*/ false);
@@ -260,7 +260,7 @@ FReply SUnrealMcpSerializationCheckWindow::OnSerializeClicked()
 
 	const double StartSeconds = FPlatformTime::Seconds();
 
-	// In-process serialization (§3.2) via the converter the object-get-data / actor-get-data tools use.
+	// In-process serialization (§3.2) via the plugin's reflection-based JSON converter (FUnrealMcpPropertyJson).
 	// Recursive OFF: only the object's identity + top-level scalar fields are wanted, so request the
 	// non-object leaves. SerializeObject has no `recursive` arg (FJsonObjectConverter always walks the
 	// reflected graph), so the shallow variant prunes nested object fields AFTER serialization — matching

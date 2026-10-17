@@ -3,9 +3,11 @@
 Packaging ships only `Source/`, `Config/`, `Resources/`, `*.uplugin` and `Config/FilterPlugin.ini` entries,
 so this file stays out of the package; keep agent notes out of `Source/`.
 
-- `UnrealMCP.uplugin` — modules `UnrealMcpRuntime` (Runtime) then `UnrealMcpEditor` (Editor), both LoadingPhase Default. **No `EngineVersion` pin** (it is an exact-build match). Never add `UnrealMcpEditorTests` to it (Fab flags shipped test modules, §6.7).
+- `UnrealMCP.uplugin` — modules `UnrealMcpRuntime` (Runtime), `UnrealMcpRql` (Editor), then `UnrealMcpEditor` (Editor), all LoadingPhase Default. **No `EngineVersion` pin** (it is an exact-build match). Never add `UnrealMcpEditorTests` to it (Fab flags shipped test modules, §6.7).
 - `Source/UnrealMcpRuntime/` — infra that cooks into games: `Public/` = extension contracts (`IUnrealMcp*Provider.h`, `UnrealMcp*Registry.h`; re-exported by the editor module, so editor and runtime extensions share them), runtime subsystem/settings, core `Register` entry points; `Private/` = `Bridge/` (TCP + NDJSON), `Dispatch/`, `Tools/`, `Sidecar/`, `Config/`, `Extensions/`, `Prompts/`, `Resources/`.
 - `Source/UnrealMcpEditor/Private/` — editor-only: `Tools/` (one `UnrealMcp<Family>Tools.cpp` per family), `UI/` (Slate), `Server/` (local server manager), `DevControl/`, `Extensions/`.
+- `Source/UnrealMcpRql/` — the RQL data layer ([`docs/rql.md`](../docs/rql.md)): the Unreal provider (`UnrealMcpRqlTypes`), the per-call session + core sources / members / methods (`UnrealMcpRqlSession`, `UnrealMcpRqlCore`), the `editor` operations (`UnrealMcpRqlEditorApi`), the rql-* tools, `Public/IUnrealMcpRqlModule.h` (the extension seam). Exceptions on, no unity build, no PCH; RQL types stay private to it.
+- `Source/ThirdParty/RQL/` — the vendored RQL C++ runtime (unmodified, **PolyForm Shield 1.0.0**, see its README); compiled only through `UnrealMcpRql/Private/Vendor/`.
 - `Source/UnrealMcpEditorTests/` — Automation specs (`WITH_DEV_AUTOMATION_TESTS`, prefix `UnrealMcp.`); new specs go here, no top-level test folder.
 - `Source/ThirdParty/UnrealMcpBridge/<rid>/` — release-staged sidecar binaries (gitignored; `RuntimeDependencies` copy them to `Binaries/ThirdParty/...`).
 

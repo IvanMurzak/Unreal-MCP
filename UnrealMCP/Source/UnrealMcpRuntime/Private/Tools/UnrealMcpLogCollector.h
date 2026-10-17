@@ -17,7 +17,7 @@ struct FUnrealMcpLogEntry
 	/**
 	 * Monotonic capture sequence, 1-based, assigned under the collector lock together with storing the
 	 * entry. Never reset by eviction or `Clear()` (only a process/editor restart restarts it) — it is the
-	 * cursor `console-get-logs` `sinceSequence` pages on.
+	 * cursor queries page on (`console | where Sequence > N`, the RQL `console` source).
 	 */
 	int64 Sequence = 0;
 	FDateTime Timestamp;                 // wall-clock (UTC) at capture
@@ -27,8 +27,8 @@ struct FUnrealMcpLogEntry
 };
 
 /**
- * Process-wide `GLog` listener feeding `console-get-logs` / `console-clear-logs`
- * (docs/ARCHITECTURE.md §10). An `FOutputDevice` registered with `GLog` at module startup; every
+ * Process-wide `GLog` listener feeding the RQL `console` source and `editor | call ClearConsole()`
+ * (docs/rql.md; docs/ARCHITECTURE.md §10). An `FOutputDevice` registered with `GLog` at module startup; every
  * engine log line is mirrored into a capped ring buffer (default 10k entries) carrying severity,
  * category and timestamp. Tool handlers read filtered/paginated slices on the game thread.
  *
@@ -95,7 +95,7 @@ public:
 		const FString& Search, int32 Limit, int64* OutNextCursor = nullptr) const;
 
 	/**
-	 * Cursor read for `console-get-logs` `sinceSequence`: entries with `Sequence > SinceSequence`,
+	 * Cursor read (`sinceSequence`): entries with `Sequence > SinceSequence`,
 	 * **oldest-first**, in the order cursor -> filters -> ascending -> limit. When more matching entries
 	 * exist than @p Limit, the OLDEST @p Limit are returned (so the caller can continue without a gap).
 	 *

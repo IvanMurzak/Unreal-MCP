@@ -10,9 +10,6 @@
     "`ping` is a SYSTEM tool, absent from tools/list, and is not part of the fixture."
   ],
   "calls": [
-    { "name": "editor-application-get-state", "args": {} },
-    { "name": "level-list-loaded", "args": {} },
-    { "name": "actor-find", "args": {} },
-    { "name": "actor-component-list-all", "args": {} }
+    { "name": "rql-schema", "args": {} }
   ]
 }

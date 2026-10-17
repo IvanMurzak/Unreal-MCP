@@ -67,8 +67,9 @@ public class UnrealMcpEditor : ModuleRules
 			"WorkspaceMenuStructure",
 			"InputCore",
 			"ApplicationCore",
-			// Asset / Content-Browser tool family (docs/ARCHITECTURE.md §10, issue #10):
-			//  - AssetRegistry            -> asset-find / asset-get-data / asset-refresh queries
+			// Asset / material APIs the Blueprint, source and screenshot families use (the asset data tools moved to
+			// the UnrealMcpRql module, docs/rql.md):
+			//  - AssetRegistry            -> asset lookups
 			//  - AssetTools               -> CreateAsset (material instance) + ImportAssetTasks
 			//  - MaterialEditor           -> UMaterialEditingLibrary (instance param read/write)
 			//  - EditorScriptingUtilities -> UEditorAssetLibrary (copy/move/delete/folder/load)

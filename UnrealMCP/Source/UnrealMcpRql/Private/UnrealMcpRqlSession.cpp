@@ -191,19 +191,19 @@ FUnrealMcpRqlSession::FUnrealMcpRqlSession()
 {
 	rql::Engine& RqlEngine = *EnginePtr;
 	RqlEngine.runtime_name = "unreal";
-	FUnrealMcpRqlTypes* Types = TypesPtr.Get();
+	FUnrealMcpRqlTypes* TypeProvider = TypesPtr.Get();
 	// Liveness from the weak pointer every object value carries: a destroyed (garbage) actor reads as null.
-	RqlEngine.is_alive = [Types](const rql::Value& Object) { return Types->IsAlive(Object); };
+	RqlEngine.is_alive = [TypeProvider](const rql::Value& Object) { return TypeProvider->IsAlive(Object); };
 	// "PointLight#1234": the id is UObject::GetUniqueID(), resolved without searching the sources.
-	RqlEngine.resolve_stable_ref = [Types](const std::string& Type, const std::string& Id) -> rql::Value
+	RqlEngine.resolve_stable_ref = [TypeProvider](const std::string& Type, const std::string& Id) -> rql::Value
 	{
 		int32 Parsed = 0;
 		if (!LexTryParseString(Parsed, *UnrealMcpRqlFromStd(Id)))
 			return rql::Value::missing();
-		UObject* Object = Types->FindById(Parsed);
+		UObject* Object = TypeProvider->FindById(Parsed);
 		if (!Object)
 			return rql::Value::missing();
-		rql::Value Wrapped = Types->WrapObject(Object);
+		rql::Value Wrapped = TypeProvider->WrapObject(Object);
 		return Wrapped.type() && Wrapped.type()->is_a(Type) ? Wrapped : rql::Value::missing();
 	};
 	ConfigureMutations();
@@ -221,11 +221,11 @@ void FUnrealMcpRqlSession::ConfigureMutations()
 {
 	rql::MutationPolicy& Policy = EnginePtr->mutations();
 	Policy.enabled = true;
-	FUnrealMcpRqlTypes* Types = TypesPtr.Get();
-	auto OwnerOf = [Types](const rql::MutationRecord& Record) -> UObject*
+	FUnrealMcpRqlTypes* TypeProvider = TypesPtr.Get();
+	auto OwnerOf = [TypeProvider](const rql::MutationRecord& Record) -> UObject*
 	{
-		UObject* Owner = Types->AsObject(Record.owner);
-		return Owner ? Owner : Types->AsObject(Record.item);
+		UObject* Owner = TypeProvider->AsObject(Record.owner);
+		return Owner ? Owner : TypeProvider->AsObject(Record.item);
 	};
 	// One editor transaction per mutation (one Ctrl+Z step): owners are snapshotted before the first write. Objects the
 	// calls create with RF_Transactional (SpawnActor, AddComponent, ...) are recorded into the same transaction.
@@ -427,9 +427,11 @@ FString FUnrealMcpRqlSession::Schema(const FString& TypeName, bool& bOutOk)
 			}
 		}
 	}
+	// Most frequent first, then by name: deterministic output (the chain fixture records it).
 	auto ByCount = [](TMap<FString, int32>& Counts)
 	{
-		Counts.ValueSort([](int32 A, int32 B) { return A > B; });
+		Counts.KeySort([](const FString& A, const FString& B) { return A < B; });
+		Counts.ValueStableSort([](int32 A, int32 B) { return A > B; });
 	};
 	ByCount(ActorClasses);
 	ByCount(ComponentClasses);
@@ -475,13 +477,13 @@ FString FUnrealMcpRqlSession::Schema(const FString& TypeName, bool& bOutOk)
 			Root.set("candidates", std::move(Candidates));
 			return UnrealMcpRqlFromStd(Root.dump());
 		}
-		rql::Json Types = rql::Json::array();
-		Types.push(Describe(Found));
-		Root.set("types", std::move(Types));
+		rql::Json TypeList = rql::Json::array();
+		TypeList.push(Describe(Found));
+		Root.set("types", std::move(TypeList));
 		return UnrealMcpRqlFromStd(Root.dump());
 	}
 
-	rql::Json Sources = rql::Json::array();
+	rql::Json SourceList = rql::Json::array();
 	for (const FEntry& Entry : SourceEntries)
 	{
 		FString Type = Entry.Type;
@@ -504,19 +506,19 @@ FString FUnrealMcpRqlSession::Schema(const FString& TypeName, bool& bOutOk)
 		Item.set("type", UnrealMcpRqlToStd(Type));
 		if (!Entry.Description.IsEmpty())
 			Item.set("description", UnrealMcpRqlToStd(Entry.Description));
-		Sources.push(std::move(Item));
+		SourceList.push(std::move(Item));
 	}
-	Root.set("sources", std::move(Sources));
+	Root.set("sources", std::move(SourceList));
 
-	rql::Json Functions = rql::Json::array();
+	rql::Json FunctionList = rql::Json::array();
 	for (const FEntry& Entry : FunctionEntries)
 	{
 		rql::Json Item = rql::Json::object();
 		Item.set("name", UnrealMcpRqlToStd(Entry.Name));
 		Item.set("description", UnrealMcpRqlToStd(Entry.Description));
-		Functions.push(std::move(Item));
+		FunctionList.push(std::move(Item));
 	}
-	Root.set("functions", std::move(Functions));
+	Root.set("functions", std::move(FunctionList));
 
 	auto Present = [](const TMap<FString, int32>& Counts)
 	{
@@ -538,10 +540,10 @@ FString FUnrealMcpRqlSession::Schema(const FString& TypeName, bool& bOutOk)
 
 	// Actor in full, then SceneComponent without the members every component shares (as Unity-MCP shows GameObject and
 	// Transform): together they explain the member names agents meet first.
-	rql::Json Types = rql::Json::array();
-	Types.push(Describe(T.ForClass(AActor::StaticClass())));
-	Types.push(Describe(T.ForClass(USceneComponent::StaticClass())));
-	Root.set("types", std::move(Types));
+	rql::Json TypeList = rql::Json::array();
+	TypeList.push(Describe(T.ForClass(AActor::StaticClass())));
+	TypeList.push(Describe(T.ForClass(USceneComponent::StaticClass())));
+	Root.set("types", std::move(TypeList));
 	return UnrealMcpRqlFromStd(Root.dump());
 }
 

@@ -189,10 +189,10 @@ def mcp_call_tool(url: str, token: str | None, sid: str | None, name: str, args:
 
 
 SMOKE_BATTERY = [
-    ("editor-application-get-state", lambda nonce: {}),
-    ("level-list-loaded", lambda nonce: {}),
-    ("actor-find", lambda nonce: {}),
-    ("actor-component-list-all", lambda nonce: {}),
+    # docs/rql.md: the editor data tools are RQL now. rql-schema (no args) is read-only and exercises the whole
+    # chain the data layer uses — the sidecar's RQL renderer, the C++ RQL session, the reflection provider and the
+    # editor world (the classes present in the host project's level).
+    ("rql-schema", lambda nonce: {}),
 ]
 
 # `ping` is a SYSTEM tool (docs/ARCHITECTURE.md §2.4, owner ruling 2026-07-25), so it is deliberately

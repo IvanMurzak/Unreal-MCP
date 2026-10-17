@@ -15,10 +15,10 @@ class FUnrealMcpToolRegistry;
  * served at `/api/system-tools/ping` and is NOT advertised in `tools/list` — a packaged game that registers
  * no tools of its own therefore presents an EMPTY `tools/list` to an AI agent (§12.7), even though the
  * registry still contains exactly {ping}. Every engine-development tool family — actor/component,
- * console/reflection, screenshot, level-read/write, blueprint, asset, source, editor-application/selection —
+ * the RQL data layer (rql-query / rql-mutate / rql-schema), console, screenshot, blueprint, source —
  * is EDITOR-ONLY and registered by the editor coordinator from the editor module's UnrealMcpCoreTools.h
  * (those tools drive the editor: undo transactions, the asset registry, Blueprint compilation, the editor
- * world — and several are RCE-class, e.g. reflection-method-call / console-run-command — so they do not
+ * world — and several are RCE-class, e.g. rql-mutate / console-run-command — so they do not
  * belong compiled into a shipped game by default).
  *
  * A game that wants runtime MCP tools brings its own: register an IUnrealMcpToolProvider via

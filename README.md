@@ -40,14 +40,15 @@ Unreal-MCP is the Unreal Engine counterpart of [Unity-MCP](https://github.com/Iv
 
 Unlike Unity and Godot (C# engines that host the .NET `McpPlugin` in-process), Unreal's editor is **C++** — so the .NET MCP host runs as an auto-managed **sidecar process** (`unreal-mcp-bridge`) that the plugin spawns and talks to over a localhost IPC channel. The full design lives in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) (see the §0 system-overview diagram).
 
-> **Status: beta.** The plugin, the .NET sidecar, the `unreal-mcp-cli`, the AI Game Developer editor UI, and **61 built-in tools across 7 families** (plus 3 system tools) have shipped and are exercised by CI. The `unreal-mcp-cli` is **published on npm** — install the plugin with it (Option B below); the Fab / Epic Marketplace listing for the precompiled plugin is coming soon (Option A). Pixel-capture (screenshot) tools need a GPU-backed editor; everything else runs headless.
+> **Status: beta.** The plugin, the .NET sidecar, the `unreal-mcp-cli`, the AI Game Developer editor UI, and **25 built-in tools across 5 families** (plus 3 system tools) — the editor data layer is one query language, [RQL](docs/rql.md) have shipped and are exercised by CI. The `unreal-mcp-cli` is **published on npm** — install the plugin with it (Option B below); the Fab / Epic Marketplace listing for the precompiled plugin is coming soon (Option A). Pixel-capture (screenshot) tools need a GPU-backed editor; everything else runs headless.
 
 > **[💬 Join our Discord Server](https://discord.gg/cfbdMZX99G)** — Ask questions, showcase your work, and connect with other developers!
 
 ## ![Features](https://github.com/IvanMurzak/Unreal-MCP/blob/main/docs/img/promo/hazzard-features.svg?raw=true)
 
 - ✔️ **AI agents** — Use the best agents from **Anthropic**, **OpenAI**, **Google**, or any other provider with no vendor lock-in
-- ✔️ **61 built-in Tools** — A wide range of [MCP Tools](#tools) across **7 families** for operating the Unreal Editor
+- ✔️ **RQL data layer** — query and change actors, components, assets, levels and editor state with one language ([`rql-query` / `rql-mutate` / `rql-schema`](#tools))
+- ✔️ **25 built-in Tools** — [MCP Tools](#tools) across **5 families** for operating the Unreal Editor
 - ✔️ **Blueprint authoring** — Create, edit, and **compile** Blueprints with a structured error/warning feedback loop the AI can act on
 - ✔️ **C++ edit & compile** — Read, scaffold, and edit project C++, then compile (Live Coding or UBT) with a structured error report
 - ✔️ **Visual feedback** — Capture viewport, game-view, camera, and isolated-actor screenshots the LLM can inspect directly
@@ -67,7 +68,7 @@ Unlike Unity and Godot (C# engines that host the .NET `McpPlugin` in-process), U
 - [Install](#install)
 - [Updating the plugin](#updating-the-plugin)
 - [First run](#first-run)
-- [Tools](#tools) — all 7 families, 61 tools (+ 3 system tools)
+- [Tools](#tools) — all 5 families, 25 tools (+ 3 system tools)
 - [Per-tool enable / disable](#per-tool-enable--disable)
 - [`unreal-mcp-cli`](#unreal-mcp-cli)
 - [Customize Tools, Prompts & Resources](#customize-tools-prompts--resources)
@@ -175,28 +176,24 @@ Connection settings persist to `<Project>/Saved/Config/UnrealMcp/ai-game-develop
 
 # Tools
 
-Unreal-MCP ships **61 built-in ("core") tools** across **7 families** that your AI can call, plus **3 system tools** it cannot (see below). Tool ids are kebab-case (`actor-create`, `blueprint-compile`), matching the Unity/Godot naming convention. Extensions can add more (see [Customize Tools, Prompts & Resources](#customize-tools-prompts--resources)).
+Unreal-MCP ships **25 built-in ("core") tools** across **5 families** that your AI can call, plus **3 system tools** it cannot (see below). Tool ids are kebab-case (`rql-query`, `blueprint-compile`), matching the Unity/Godot naming convention. Extensions can add more (see [Customize Tools, Prompts & Resources](#customize-tools-prompts--resources)).
 
-> This list is generated from the STANDARD-surface registration sources (`UnrealMCP/Source/UnrealMcpEditor/Private/Tools/UnrealMcp*Tools.cpp`, excluding `UnrealMcpSkillTools.cpp` — its tool is a system tool, listed separately below). Counts: actor 13, blueprint 11, asset 11, editor/reflection 9, level 7, source 6, screenshot 4 = **61**.
+> This list is generated from the STANDARD-surface registration sources (`UnrealMCP/Source/UnrealMcpEditor/Private/Tools/UnrealMcp*Tools.cpp`, excluding `UnrealMcpSkillTools.cpp` — its tool is a system tool, listed separately below — plus `UnrealMCP/Source/UnrealMcpRql/Private/UnrealMcpRqlTools.cpp`). Counts: rql 3, blueprint 11, console 1, source 6, screenshot 4 = **25**.
 
 <details>
-  <summary><b>Actor &amp; component family (13)</b></summary>
+  <summary><b>RQL — the data layer (3)</b></summary>
+
+One query language for the whole editor instead of one tool per operation ([`docs/rql.md`](docs/rql.md)): find actors,
+components and assets, read members, filter, aggregate, and change them in one call. It replaces the former actor,
+object, asset, level, editor-state, selection, console-log and reflection tools.
 
 | Tool id | What it does |
 | --- | --- |
-| `actor-create` | Spawn an actor from a class path (native or Blueprint), with optional name/location/rotation/parent |
-| `actor-destroy` | Destroy an actor |
-| `actor-duplicate` | Duplicate an actor |
-| `actor-find` | Find actors, with scoped reads (`paths`/`viewQuery`) |
-| `actor-modify` | Write actor `FProperty` values (including transform) |
-| `actor-set-parent` | Attach an actor to a parent |
-| `actor-component-add` | Add a component to an actor |
-| `actor-component-destroy` | Destroy a component |
-| `actor-component-get` | Read a component's data |
-| `actor-component-modify` | Modify a component's properties |
-| `actor-component-list-all` | List available `UActorComponent` classes (paginated) |
-| `object-get-data` | Read any `UObject` by path |
-| `object-modify` | Modify any `UObject` by path |
+| `rql-query` | Read-only RQL query over the live editor (`actors | where $ is PointLight | select $ref Label Intensity`); compact table results |
+| `rql-mutate` | RQL query ending with `set` / `call` (`... | set Location = "(0, 0, 100)"`, `editor | call SpawnActor("PointLight")`): all-or-nothing, one undo step, `dry_run` previews |
+| `rql-schema` | Sources, functions and the classes in the editor world; `type` lists one type's members and methods |
+
+The `unreal-rql` skill (written by `unreal-skill-generate`) teaches the language and lists what installed extensions add.
 
 </details>
 
@@ -220,53 +217,14 @@ Unreal-MCP ships **61 built-in ("core") tools** across **7 families** that your 
 </details>
 
 <details>
-  <summary><b>Asset / Content-Browser family (11)</b></summary>
+  <summary><b>Console family (1)</b></summary>
 
 | Tool id | What it does |
 | --- | --- |
-| `asset-find` | Search the AssetRegistry by name/class/path/tags |
-| `asset-get-data` | Read an asset's data (scoped reads supported) |
-| `asset-create-folder` | Create a Content folder |
-| `asset-copy` | Copy an asset |
-| `asset-move` | Move / rename an asset |
-| `asset-delete` | Delete an asset |
-| `asset-refresh` | Rescan asset paths |
-| `asset-material-create` | Create a Material Instance from a parent material |
-| `asset-material-modify` | Set scalar/vector/texture material-instance parameters |
-| `asset-material-get-data` | Read material graph/parameter info (the "shader" analog) |
-| `asset-import` | Import FBX/textures via `AssetImportTask` |
-
-</details>
-
-<details>
-  <summary><b>Editor / console / reflection family (9)</b></summary>
-
-| Tool id | What it does |
-| --- | --- |
-| `editor-application-get-state` | Read editor application state (PIE, etc.) |
-| `editor-application-set-state` | Start / stop / pause Play-In-Editor |
-| `editor-selection-get` | Read the current editor selection |
-| `editor-selection-set` | Set the editor selection |
-| `console-get-logs` | Read recent editor logs from the `LogCollector` ring buffer |
-| `console-clear-logs` | Clear the captured-log ring buffer |
 | `console-run-command` | Run a console command / CVar |
-| `reflection-method-find` | Discover callable `UFunction`s (returns invocation schemas) |
-| `reflection-method-call` | Invoke a `UFunction` (static or instance, incl. `CallInEditor`) |
 
-</details>
-
-<details>
-  <summary><b>Level / map family (7)</b></summary>
-
-| Tool id | What it does |
-| --- | --- |
-| `level-create` | Create a new level |
-| `level-open` | Open a level |
-| `level-save` | Save the level (save-as via optional path) |
-| `level-get-data` | Actor-tree snapshot of a level (scoped reads) |
-| `level-list-loaded` | List persistent + streaming sublevels (World-Partition aware, read-only) |
-| `level-set-current` | Set the current/active level |
-| `level-unload-sublevel` | Unload a streaming sublevel |
+Logs, PIE state and the selection are RQL: `console | where Verbosity == "Error"`, `editor | set IsPlaying = true`,
+`editor | set Selection = [...]`.
 
 </details>
 
@@ -563,7 +521,7 @@ The complete, buildable example is [`samples/UnrealAIRuntimeSample/`](samples/Un
 
 A runtime connection ships exactly **one** built-in tool: **`ping`** (a liveness probe). `ping` is a [system tool](#tools), so it answers at `POST /api/system-tools/ping` and is not advertised to an AI agent — meaning a packaged game that registers nothing of its own presents an **empty** tool list, which is an honest description of it. Everything a runtime AI agent can do is **bring-your-own**: register your own tools via the extension bus above (`RegisterToolProvider`) and they appear normally.
 
-All of the engine-development families — the actor / component family, `object-get-data` / `object-modify`, `level-get-data`, the console / reflection tools, every screenshot tool, plus Blueprint authoring, asset / Content-Browser operations, C++ source edit & compile, level create/open/save, and editor-application state — are **editor-only** (the [61 editor tools](#tools)). They drive the editor and several are RCE-class (e.g. `reflection-method-call`, `console-run-command`), so they are not compiled into a shipped game by default. There is no editor in a packaged game, so the runtime built-in surface is intentionally just `ping` + whatever tools your game registers.
+All of the engine-development families — the RQL data layer (`rql-query` / `rql-mutate` / `rql-schema` over actors, components, assets, levels, the console and editor state), every screenshot tool, plus Blueprint authoring, C++ source edit & compile, and `console-run-command` — are **editor-only** (the [25 editor tools](#tools)). They drive the editor and several are RCE-class (e.g. `rql-mutate`, `console-run-command`), so they are not compiled into a shipped game by default. There is no editor in a packaged game, so the runtime built-in surface is intentionally just `ping` + whatever tools your game registers.
 
 ## <a id="editor-only-exclude-from-packaged-games"></a>Editor-only — exclude Unreal-MCP from packaged games
 
@@ -586,7 +544,7 @@ For **runtime (in-game)** usage instead, leave the deny-list **off**: the `Unrea
 
 ## <a id="runtime-security-contract"></a>Security contract
 
-A runtime connection is **remote control of a running game** (`actor-create`, `object-modify`, arbitrary CVars via `console-run-command`, arbitrary `UFunction`s via `reflection-method-call`) — RCE-class if it were reachable in a shipped product. The runtime surface is therefore locked down by **five layered mitigations** ([`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §12.8), all enforced inside `Connect()`:
+A runtime connection is **remote control of a running game** (spawning actors, writing any reflected property, arbitrary CVars via `console-run-command`, calling `UFunction`s) — RCE-class if it were reachable in a shipped product. The runtime surface is therefore locked down by **five layered mitigations** ([`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §12.8), all enforced inside `Connect()`:
 
 1. **Opt-in only.** The subsystem auto-instantiates but **never auto-connects** — there is no auto-dial on load and no config-asset auto-connect. A connection only ever happens through an explicit `Connect()` call.
 2. **Kill switch, default OFF.** `UUnrealMcpRuntimeSettings::bRuntimeMcpEnabled` (Project Settings → Plugins → **Unreal MCP (Runtime)**) defaults to **`false`**. While it is off, every `Connect()` is rejected and no sidecar is spawned. It is a **Game** config setting (`DefaultGame.ini`, section `[/Script/UnrealMcpRuntime.UnrealMcpRuntimeSettings]`), so it travels into the packaged build where the gate must take effect. Turning it on does **not** auto-connect — an explicit `Connect()` is still required.
@@ -631,7 +589,7 @@ The plugin reads configuration with the precedence **process env → `<Project>/
 - **Screenshot tools return a structured error.** Pixel capture needs a GPU-backed editor — they cannot render under headless `-nullrhi`.
 - **No sidecar / sidecar keeps restarting.** Check the bridge status in the **Connection** section (`Running (restarts: N)` / `Stopped`). If the log shows `no sidecar binary resolved for rid <rid> …`, neither a bundled binary nor `UNREAL_MCP_BRIDGE_PATH` resolved — in a packaged release this means the plugin was packaged without your platform's bridge (reinstall the correct build); in a from-source build, set `UNREAL_MCP_BRIDGE_PATH` or run `unreal-mcp-cli bootstrap-local` to build one from source. (The sidecar is bundled inside packaged releases and auto-spawned, §6 — there is no download-on-first-run.)
 - **Ports.** IPC uses a deterministic per-project port in `30000–39999` and probes forward (then an ephemeral port) on a collision; the local server uses a deterministic hash port in `20000–29999` with no probing — the CLI derives the same number without reading any config, and the server binds the exact requested port. The exact number is a debugging nicety, not a requirement.
-- **Logs.** Use the main window's **Open log file** action, the `console-get-logs` tool, or the editor Output Log (`LogUnrealMcp` category).
+- **Logs.** Use the main window's **Open log file** action, an RQL query (`console | where Verbosity == "Error"`), or the editor Output Log (`LogUnrealMcp` category).
 
 ![AI Game Developer — Unreal MCP](https://github.com/IvanMurzak/Unreal-MCP/blob/main/docs/img/promo/hazzard-divider.svg?raw=true)
 
