@@ -1517,10 +1517,6 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         /// the 04 §2 lock-protocol delete path — all via the shared <see cref="MachineWideSignOut"/> helper —
         /// followed by the provider's local state reset. Never throws (runs detached from the IPC reader thread).
         /// </summary>
-        /// <summary>The account server base: the pushed cloudUrl, else the dial host only while in Cloud mode.</summary>
-        internal string ResolveAccountServerBase() =>
-            Volatile.Read(ref _cloudBaseUrl) ?? (_isCloudMode ? StripCloudHubPath(_config.Host) : string.Empty);
-
         private async Task RunMachineWideSignOutAsync()
         {
             try
@@ -1528,9 +1524,10 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
                 if (_credentialStore != null && _machineLock != null)
                 {
                     // Each family is revoked at its stored server target; this default covers a legacy store
-                    // without one. It is the account server, never the current host, which may be a Custom host.
+                    // without one. It is the account server (the pushed cloudUrl), never a Custom host.
+                    var accountServer = Volatile.Read(ref _cloudBaseUrl) ?? (_isCloudMode ? StripCloudHubPath(_config.Host) : string.Empty);
                     var revocationClient = _injectedRevocationClient
-                        ?? new TokenRevocationClient(ResolveAccountServerBase(), _authHttpClient);
+                        ?? new TokenRevocationClient(accountServer, _authHttpClient);
                     var result = await MachineWideSignOut.SignOutAsync(
                         _credentialStore, _machineLock, revocationClient, _authenticator.ClientId, _logger).ConfigureAwait(false);
                     if (result.Busy)
@@ -1642,8 +1639,9 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         /// Resolve the cloud sign-in indicator for a status emit (mcp-authorize PR 5, design 06 / D12). Cloud mode
         /// reports <c>"Authorized"</c> when EITHER an in-session bearer was issued (an in-editor device flow) OR the
         /// machine credential provider is actually SIGNED IN off the shared store (zero-button sign-in — a CLI
-        /// login, an enrollment, or another engine/project signed in once-per-machine). <c>null</c> in Custom mode,
-        /// or when no credential of either kind is present. Pure + static so the bridge xUnit suite locks the
+        /// login, an enrollment, or another engine/project signed in once-per-machine). In Custom mode only the machine
+        /// sign-in counts (the slot holds the user's Custom token there), so the editor can offer Revoke in either
+        /// mode. <c>null</c> when no credential of either kind is present. Pure + static so the bridge xUnit suite locks the
         /// matrix without a live SignalR link or machine store.
         /// <para><b>The third argument must be a plugin-plane signed-in signal, never bare store existence</b>
         /// (review e1-B1; design 04 §1: "<c>Exists</c> alone must never be used as a signed-in signal"). An
@@ -1652,7 +1650,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         /// hub will reject. Call sites pass <c>PluginCredentialProvider.IsSignedIn</c>.</para>
         /// </summary>
         internal static string? ResolveCloudAuthState(bool isCloudMode, bool hasSessionBearer, bool machineCredentialSignedIn) =>
-            isCloudMode && (hasSessionBearer || machineCredentialSignedIn) ? "Authorized" : null;
+            (isCloudMode && hasSessionBearer) || machineCredentialSignedIn ? "Authorized" : null;
 
         /// <summary>Fully disconnect SignalR (auth-revoke / Disconnect), then surface a Disconnected status.</summary>
         private async Task HandleDisconnectAsync(CancellationToken ct)
@@ -2008,9 +2006,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
                         return;
                     }
                     _logger?.LogInformation(ok ? "SignalR connected." : "SignalR initial connect returned false; client will keep retrying.");
-                    // §7 live status: surface the connection result to the plugin's view-model. Only a CLOUD-mode
-                    // credential is a cloud authorization — a Custom-mode token is a local bearer and must NOT light
-                    // the "Authorized" indicator (ApplyStatus latches it and never demotes). mcp-authorize PR 5
+                    // §7 live status: surface the connection result to the plugin's view-model. A Custom-mode slot
+                    // token is a local bearer and must NOT light the "Authorized" indicator (ApplyStatus latches it and never demotes). mcp-authorize PR 5
                     // (design 06, D12): the machine credential PROVIDER being signed in ALSO counts, so a
                     // zero-button boot (sign-in done out-of-editor: a CLI login, an enrollment, another engine/project)
                     // surfaces the signed-in state without an in-editor device flow. The signal is the provider's

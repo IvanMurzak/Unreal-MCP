@@ -974,7 +974,8 @@ the connection-config task).
   switch to Custom it stays in the machine store only (Custom + `oauth` re-dials and applies the loopback rule
   above). Leaving Cloud drops the Cloud bearer from the slot.
 - **Sign-out works in both modes.** The window offers Revoke whenever an account credential exists (a stored
-  `CloudToken`, or a sign-in the sidecar reported as authorized), in Cloud mode in the Cloud auth row and in
+  `CloudToken`, or a sign-in the sidecar reported as authorized; `status.cloudAuthState` reports a signed-in machine
+  credential in every mode), in Cloud mode in the Cloud auth row and in
   Custom mode in a "Signed in to AI Game Dev" row. `auth-revoke` revokes each stored family at its stored server
   target (fallback: the pushed `cloudUrl`, never a Custom host), deletes the machine store, and clears the
   sidecar `BearerToken` only in Cloud mode, so a Custom bearer token is never touched.
