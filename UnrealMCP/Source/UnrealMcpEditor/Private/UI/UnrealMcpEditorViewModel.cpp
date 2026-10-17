@@ -426,8 +426,12 @@ void FUnrealMcpEditorViewModel::ApplyDeviceAuth(const TSharedPtr<FJsonObject>& D
 			// written to the §8 config store) and the bridge's effective config never learns it, so a "Restart
 			// bridge" re-pushes a token-less config and silently drops the authorized session. Guard on change
 			// so a repeated `authorized` poll update does not churn the store / re-push every tick.
+			// Only while the connection is still in Cloud mode: a sign-in that completes after the user switched to
+			// Custom stays in the machine credential store (the sidecar committed it there) and never lands in a
+			// per-connection token slot (Unity/Godot semantics).
 			FString Token;
-			if (DeviceAuth->TryGetStringField(TEXT("token"), Token) && !Token.IsEmpty() && Config.CloudToken != Token)
+			if (Config.ConnectionMode == EUnrealMcpConnectionMode::Cloud
+				&& DeviceAuth->TryGetStringField(TEXT("token"), Token) && !Token.IsEmpty() && Config.CloudToken != Token)
 			{
 				Config.CloudToken = Token;
 				PersistAndPush();

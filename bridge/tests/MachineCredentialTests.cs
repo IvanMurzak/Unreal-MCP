@@ -61,6 +61,9 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
 
             public FakeExchangeClient(params TokenExchangeResult[] results) => _results = new Queue<TokenExchangeResult>(results);
 
+            /// <summary>Runs inside each exchange call (e.g. to switch the connection mode mid-commit).</summary>
+            public Action? OnExchange { get; set; }
+
             public string ClientId => DeviceCodeAuthenticator.DefaultClientId;
 
             public Task<TokenExchangeResult> ExchangeAsync(string subjectAccessToken, string? serverTarget, CancellationToken cancellationToken = default)
@@ -68,6 +71,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
                 Calls++;
                 LastSubjectToken = subjectAccessToken;
                 LastServerTarget = serverTarget;
+                OnExchange?.Invoke();
                 var result = _results.Count > 1 ? _results.Dequeue() : _results.Peek();
                 return Task.FromResult(result);
             }
@@ -105,7 +109,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             host.ApplyConnectionConfig(CloudConfig());
 
             var result = DeviceAuthResult.Authorized("agent-jwt", "agent-refresh", DateTimeOffset.UtcNow.AddHours(1));
-            await host.CommitAuthorizedSessionAsync(result, CancellationToken.None);
+            await host.CommitAuthorizedSessionAsync(result, "https://ai-game.dev", CancellationToken.None);
 
             // The v2 document (04 §1): agent family stamped with the presented clientId + mcp:agent scope (D8),
             // plugin family from the exchange stamped with the exchanging client's own id + mcp:plugin, the
@@ -159,7 +163,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             host.ApplyConnectionConfig(CloudConfig());
 
             var result = DeviceAuthResult.Authorized("agent-jwt", "agent-refresh", DateTimeOffset.UtcNow.AddHours(1));
-            await host.CommitAuthorizedSessionAsync(result, CancellationToken.None);
+            await host.CommitAuthorizedSessionAsync(result, "https://ai-game.dev", CancellationToken.None);
 
             var creds = new MachineCredentialStore(dir).Read();
             Assert.NotNull(creds?.Families?.Agent);                       // the agent family survived (F1 failure path)
@@ -199,7 +203,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
 
             await host.CommitAuthorizedSessionAsync(
                 DeviceAuthResult.Authorized("agent-jwt", "agent-refresh", DateTimeOffset.UtcNow.AddHours(1)),
-                CancellationToken.None);
+                "https://ai-game.dev", CancellationToken.None);
 
             Assert.NotEmpty(statuses); // the terminal status DID go out (the claim below cannot pass vacuously)
             Assert.DoesNotContain(statuses, s => s.CloudAuthState == "Authorized");
@@ -221,7 +225,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
 
             await host.CommitAuthorizedSessionAsync(
                 DeviceAuthResult.Authorized("agent-jwt", "agent-refresh", DateTimeOffset.UtcNow.AddHours(1)),
-                CancellationToken.None);
+                "https://ai-game.dev", CancellationToken.None);
 
             Assert.Contains(statuses, s => s.CloudAuthState == "Authorized");
         }
@@ -302,7 +306,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             host.SetStatusEmitterForTest(_ => Task.CompletedTask);
             host.ApplyConnectionConfig(CloudConfig());
 
-            await host.CommitAuthorizedSessionAsync(DeviceAuthResult.Authorized("jwt-only", refreshToken: null), CancellationToken.None);
+            await host.CommitAuthorizedSessionAsync(DeviceAuthResult.Authorized("jwt-only", refreshToken: null), "https://ai-game.dev", CancellationToken.None);
 
             Assert.False(new MachineCredentialStore(dir).Exists);
         }

@@ -12,6 +12,7 @@ using System;
 using System.Collections.Generic;
 using System.Net;
 using System.Net.Http;
+using System.Text.Json.Nodes;
 using System.Threading;
 using System.Threading.Tasks;
 using com.IvanMurzak.Unreal.MCP.Bridge.Auth;
@@ -225,6 +226,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             // user just cancelled/revoked. (Port 39998 is never dialed — the guard returns before SignalR.)
             var ipc = new IpcClient("127.0.0.1", 39998, token: "ipc-token", sidecarVersion: "0.1.0");
             using var host = new SidecarHost(ipc, "0.1.0");
+            host.ApplyConnectionConfig(new JsonObject { ["mode"] = "Cloud", ["cloudUrl"] = "https://ai-game.dev" });
 
             using var cts = new CancellationTokenSource();
             cts.Cancel();
@@ -279,6 +281,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             // commit still COMMITS the token and leaves keepConnected false. (Port 39998 is never dialed.)
             var ipc = new IpcClient("127.0.0.1", 39998, token: "ipc-token", sidecarVersion: "0.1.0");
             using var host = new SidecarHost(ipc, "0.1.0");
+            host.ApplyConnectionConfig(new JsonObject { ["mode"] = "Cloud", ["cloudUrl"] = "https://ai-game.dev" });
             host.Config.KeepConnected = false;
 
             await host.CommitAuthorizedSessionAsync("cloud-bearer-abc", CancellationToken.None);
