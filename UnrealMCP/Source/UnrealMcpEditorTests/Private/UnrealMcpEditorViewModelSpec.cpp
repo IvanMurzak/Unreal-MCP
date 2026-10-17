@@ -677,6 +677,32 @@ void FUnrealMcpEditorViewModelSpec::Define()
 			TestTrue("cleared cloud token pushed", Rec->LastPushed.CloudToken.IsEmpty());
 		});
 
+		It("keeps Revoke for a machine-store account after a cancelled or failed re-authorize", [this]()
+		{
+			TSharedRef<FRecording> Rec = MakeShared<FRecording>();
+			TSharedRef<FUnrealMcpEditorViewModel> VM = MakeViewModel(Rec);
+			VM->SetConnectionMode(EUnrealMcpConnectionMode::Custom);
+			CompleteSignIn(VM);
+			TestFalse("machine-store account (no cloud token)", VM->HasCloudToken());
+
+			VM->Authorize();
+			VM->CancelAuth();
+			TestTrue("still signed in after cancel", VM->IsAccountSignedIn());
+
+			VM->Authorize();
+			TSharedPtr<FJsonObject> Failed = MakeShared<FJsonObject>();
+			Failed->SetStringField(TEXT("state"), TEXT("failed"));
+			VM->ApplyDeviceAuth(Failed);
+			TestTrue("still signed in after a failed re-authorize", VM->IsAccountSignedIn());
+
+			// A dead machine credential (SignInRequired) is recovered by Authorize, not offered for Revoke.
+			TSharedPtr<FJsonObject> Status = MakeShared<FJsonObject>();
+			Status->SetStringField(TEXT("connectionState"), TEXT("Connecting"));
+			Status->SetStringField(TEXT("cloudAuthState"), TEXT("SignInRequired"));
+			VM->ApplyStatus(Status);
+			TestFalse("not signed in after SignInRequired", VM->IsAccountSignedIn());
+		});
+
 		It("Revoke in Custom mode works for a machine-store-only account (no stored cloud token)", [this]()
 		{
 			TSharedRef<FRecording> Rec = MakeShared<FRecording>();

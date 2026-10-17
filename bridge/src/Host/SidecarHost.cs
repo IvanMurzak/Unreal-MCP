@@ -1231,7 +1231,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             // ApplyConnectionConfig suffixed the Cloud host with /mcp for the SignalR hub; the device-code flow
             // hits the AS ({base}/oauth/device_authorization + /oauth/token), which is NOT behind the /mcp nginx
             // prefix, so strip it back off to recover the base (https://ai-game.dev). A no-op for a host without the suffix.
-            var cloudUrl = StripCloudHubPath(_config.Host);
+            // The account server (the pushed cloudUrl) even in Custom mode, where _config.Host is the Custom host.
+            var cloudUrl = Volatile.Read(ref _cloudBaseUrl) ?? StripCloudHubPath(_config.Host);
             _logger?.LogInformation("auth-start received; beginning device-code flow against {Host}.", cloudUrl);
             PendingDeviceAuth = RunDeviceAuthAsync(cloudUrl, cts.Token);
         }
@@ -1521,6 +1522,9 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         {
             try
             {
+                // The live link keeps the bearer it was opened with: re-dial below if it presented the account token.
+                var linkUsedAccount = _credentialProvider?.IsSignedIn == true
+                    && (_isCloudMode || (_isCustomOAuth && LoopbackTokenScope.IsLoopback(_config.Host)));
                 if (_credentialStore != null && _machineLock != null)
                 {
                     // Each family is revoked at its stored server target; this default covers a legacy store
@@ -1543,6 +1547,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
                 // revocation needs the stored refresh tokens BEFORE they are unlinked.
                 _credentialProvider?.SignOut();
                 _logger?.LogInformation("Cloud sign-out complete (auth-revoke): in-memory bearer cleared, provider signed out.");
+                if (linkUsedAccount)
+                    await ReconnectAndEmitStatusAsync().ConfigureAwait(false);
             }
             catch (Exception ex)
             {

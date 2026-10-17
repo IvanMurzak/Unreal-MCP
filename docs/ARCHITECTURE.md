@@ -978,7 +978,9 @@ the connection-config task).
   credential in every mode), in Cloud mode in the Cloud auth row and in
   Custom mode in a "Signed in to AI Game Dev" row. `auth-revoke` revokes each stored family at its stored server
   target (fallback: the pushed `cloudUrl`, never a Custom host), deletes the machine store, and clears the
-  sidecar `BearerToken` only in Cloud mode, so a Custom bearer token is never touched.
+  sidecar `BearerToken` only in Cloud mode, so a Custom bearer token is never touched. A link that presented the account token
+  (Cloud, or Custom + `oauth` on a loopback host) re-dials so it drops that token. Known limit: a sign-out made
+  outside the editor mid-session is not reported, so Revoke stays offered (harmless, idempotent) until restart.
 
 ---
 

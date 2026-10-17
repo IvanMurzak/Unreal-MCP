@@ -296,10 +296,12 @@ public:
 	bool HasCloudToken() const { return !Config.CloudToken.IsEmpty(); }
 	/**
 	 * Whether an ai-game.dev account credential exists: a stored Cloud bearer, or a sign-in the sidecar reported as
-	 * authorized. A sign-in that completes in Custom mode lives only in the machine credential store, so it has no
-	 * CloudToken. Drives the Revoke button in both modes.
+	 * authorized (latched until Revoke or SignInRequired, so a cancelled or failed re-authorize keeps it). A sign-in that completes in
+	 * Custom mode lives only in the machine credential store, so it has no CloudToken. Drives the Revoke button in
+	 * both modes. Known limit: a sign-out made outside this editor mid-session is not reported, so the latch stays
+	 * set until the next editor start; Revoke is idempotent, so pressing it then is harmless.
 	 */
-	bool IsAccountSignedIn() const { return HasCloudToken() || DeviceAuthState == EUnrealMcpDeviceAuthState::Authorized; }
+	bool IsAccountSignedIn() const { return HasCloudToken() || bAccountSignedIn; }
 
 	// --- Live status feed (caller marshals these onto the game thread first, §7). ---
 
@@ -402,6 +404,8 @@ private:
 
 	EUnrealMcpConnectionState ConnectionState = EUnrealMcpConnectionState::Disconnected;
 	EUnrealMcpDeviceAuthState DeviceAuthState = EUnrealMcpDeviceAuthState::Idle;
+	/** Set when a sign-in completes or the sidecar reports an authorized account; cleared by Revoke or SignInRequired. */
+	bool bAccountSignedIn = false;
 	FString DeviceVerificationUrl;
 	FString DeviceUserCode;
 	FString DeviceAuthError;
