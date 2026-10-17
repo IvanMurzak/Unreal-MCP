@@ -433,14 +433,16 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
                     _customExplicitToken ?? _fallbackToken,
                     EnvToken);
             if (provider != null && isCloudMode && provider.IsSignedIn)
-                return ResolveCloudBearerAsync(provider);
+                return ResolveCloudBearerAsync(provider, slotToken);
             return Task.FromResult(slotToken);
         }
 
-        private async Task<string?> ResolveCloudBearerAsync(PluginCredentialProvider provider)
+        // slotToken is the Cloud bearer snapshotted together with the mode: re-reading BearerToken after the await
+        // could pick up a Custom token pushed meanwhile and send it to the Cloud host.
+        private static async Task<string?> ResolveCloudBearerAsync(PluginCredentialProvider provider, string? slotToken)
         {
             var jwt = await provider.GetAccessTokenAsync().ConfigureAwait(false);
-            return !string.IsNullOrEmpty(jwt) ? jwt : BearerToken;
+            return !string.IsNullOrEmpty(jwt) ? jwt : slotToken;
         }
 
         /// <summary>
@@ -934,8 +936,13 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
                     break;
                 case IpcProtocol.Type.AuthRevoke:
                     _authCts?.Cancel();
-                    // Clear the stored cloud bearer so a subsequent (re)connect is anonymous until re-authorized.
-                    BearerToken = null;
+                    // Clear the stored cloud bearer so a subsequent (re)connect is anonymous until re-authorized. In
+                    // Custom mode the slot holds the plugin's Custom token, never the account token, so it stays.
+                    lock (_connectionSlotLock)
+                    {
+                        if (_isCloudMode)
+                            BearerToken = null;
+                    }
                     // unified-machine-auth F6 (e1): machine-wide sign-out — best-effort RFC 7009 revocation of EVERY
                     // stored family's refresh token (each with its STORED clientId; the component default for a
                     // v1-adopted legacy family, F6.2), then the 04 §2 lock-protocol delete path. Runs on a background
@@ -1561,8 +1568,9 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             }
             if (!appliedToCloud)
             {
-                _logger?.LogInformation("Sign-in completed outside Cloud mode; the account token stays in the machine credential store only.");
-                if (_isCustomOAuth && LoopbackTokenScope.IsLoopback(_config.Host))
+                _logger?.LogInformation("Sign-in completed outside Cloud mode; the account token is not applied to the connection.");
+                // Only a signed-in machine credential gives the loopback re-dial a new bearer to present.
+                if (_isCustomOAuth && _credentialProvider?.IsSignedIn == true && LoopbackTokenScope.IsLoopback(_config.Host))
                     await ReconnectAndEmitStatusAsync().ConfigureAwait(false);
                 return;
             }

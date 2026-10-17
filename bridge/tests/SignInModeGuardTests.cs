@@ -111,6 +111,17 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         }
 
         [Fact]
+        public void AuthRevokeInCustomMode_KeepsTheCustomToken()
+        {
+            using var host = NewHost();
+            host.ApplyConnectionConfig(Custom("https://my-server.example.com", "token", "local-secret"));
+
+            host.HandleAuthMessage(IpcProtocol.Type.AuthRevoke);
+
+            Assert.Equal("local-secret", host.CurrentBearer);
+        }
+
+        [Fact]
         public async Task ModeSwitchDuringTheStoreCommit_KeepsTheAccountTokenInTheMachineStoreOnly()
         {
             var exchange = new MachineCredentialTests.FakeExchangeClient(MachineCredentialTests.PluginExchangeSuccess());
