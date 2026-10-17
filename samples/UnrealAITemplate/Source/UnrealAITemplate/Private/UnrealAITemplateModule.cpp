@@ -3,94 +3,79 @@
 
 #include "Modules/ModuleManager.h"
 #include "Features/IModularFeatures.h"
+#include "Dom/JsonObject.h"
+#include "Dom/JsonValue.h"
+#include "GameFramework/Actor.h"
 
-#include "IUnrealMcpToolProvider.h"
-#include "UnrealMcpToolRegistry.h"
+#include "IUnrealMcpRqlModule.h"
+#include "UnrealAITemplateRqlApi.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogUnrealAITemplate, Log, All);
 
-// Flip to 1 to make the sample emit an ADDITIONAL invalid tool descriptor (an empty-named parameter,
-// which is a malformed schema). This exercises the §5 descriptor-validation isolation path: Unreal-MCP
-// drops the invalid entry and records the failure on this extension's record, while the valid
-// 'hello-extension' tool below stays registered and other extensions are unaffected.
-#ifndef UNREAL_AI_TEMPLATE_INVALID_SCHEMA
-#define UNREAL_AI_TEMPLATE_INVALID_SCHEMA 0
-#endif
-
 /**
- * The sample extension's tool provider — a textbook implementation of the Unreal-MCP extension
- * contract (docs/ARCHITECTURE.md §5, docs/EXTENSIONS.md). It contributes one `hello-extension` tool.
+ * The sample extension's RQL module — a textbook implementation of the Unreal-MCP extension seam for editor data
+ * (docs/rql.md "Extensions", docs/EXTENSIONS.md). An extension does not add tools: agents reach its feature through
+ * rql-query / rql-mutate. Every reflected type is already queryable; a module adds what reflection does not show:
+ *
+ *  - sources (where agents start a query) — here the `hello` operations object;
+ *  - operations — every UFUNCTION of an API class (AddApiClass);
+ *  - members — here a JSON member on every actor (AddJsonMember); ExposeProperties / AddObjectListMember also exist;
+ *  - a guide, rendered into the `unreal-rql` skill.
+ *
+ * Keep GetExtensionVersion() in sync with the .uplugin VersionName.
  */
-class FUnrealAITemplateProvider : public IUnrealMcpToolProvider
+class FUnrealAITemplateRqlModule : public IUnrealMcpRqlModule
 {
 public:
+	virtual FString GetRqlModuleName() const override { return TEXT("Template"); }
 	virtual FString GetExtensionId() const override { return TEXT("com.ivanmurzak.unreal-ai-template"); }
-	virtual FText GetDisplayName() const override { return NSLOCTEXT("UnrealAITemplate", "DisplayName", "Unreal AI Template"); }
 	virtual FString GetExtensionVersion() const override { return TEXT("1.0.0"); }
 
-	virtual void RegisterTools(FUnrealMcpToolRegistry& Registry) override
+	virtual void ConfigureRql(FUnrealMcpRqlModuleContext& Context) override
 	{
-		Registry.Tool(TEXT("hello-extension"))
-			.Title(TEXT("Hello Extension"))
-			.Description(TEXT("Sample extension tool proving the IUnrealMcpToolProvider contract end-to-end. "
-			                  "Returns a friendly greeting, optionally addressed to 'name'."))
-			.ParamString(TEXT("name"), TEXT("Who to greet. Defaults to 'world'."))
-			.ReadOnlyHint(true)
-			.IdempotentHint(true)
-			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
+		Context.AddApiClass(UUnrealAITemplateRqlApi::StaticClass(), TEXT("HelloOperations"));
+		Context.AddObjectSource(TEXT("hello"), TEXT("the sample's operations: call Greet(name) / Relabel(actor, label)"),
+			[]() -> UObject* { return GetMutableDefault<UUnrealAITemplateRqlApi>(); });
+		Context.AddJsonMember(AActor::StaticClass(), TEXT("TagCount"), TEXT("how many actor tags the actor has (sample member)"),
+			[](UObject* Object) -> TSharedPtr<FJsonValue>
 			{
-				// Runs ON the game thread (the dispatcher guarantees it, §4).
-				const FString Name = Call.Has(TEXT("name")) ? Call.GetString(TEXT("name")) : TEXT("world");
-				const FString Greeting = FString::Printf(TEXT("Hello, %s! — from the Unreal-MCP extension sample."), *Name);
-
-				TSharedPtr<FJsonObject> Structured = MakeShared<FJsonObject>();
-				Structured->SetStringField(TEXT("greeting"), Greeting);
-				return FUnrealMcpToolResult::Success(Greeting, Structured);
+				const AActor* Actor = Cast<AActor>(Object);
+				return MakeShared<FJsonValueNumber>(Actor ? Actor->Tags.Num() : 0);
 			});
-
-#if UNREAL_AI_TEMPLATE_INVALID_SCHEMA
-		// Isolation fixture: an empty-named parameter is a malformed schema. Unreal-MCP drops THIS entry
-		// and records the error on this extension; 'hello-extension' above remains registered.
-		Registry.Tool(TEXT("hello-broken"))
-			.Title(TEXT("Hello Broken"))
-			.Description(TEXT("Intentionally invalid tool used to demonstrate descriptor-validation isolation."))
-			.ParamString(TEXT(""), TEXT("Empty-named parameter -> malformed schema."))
-			.Handle([](const FUnrealMcpToolCall&) -> FUnrealMcpToolResult
-			{
-				return FUnrealMcpToolResult::Success(TEXT("unreachable"));
-			});
-#endif
+		Context.AddGuide(TEXT("Template (sample extension)"), TEXT(R"MD(```
+hello | call Greet("Ada")                         returns the greeting
+hello | call Relabel("Cube", "Crate")             relabel an actor (label, name or ref)
+actors | where TagCount > 0 | select Label Tags TagCount
+```)MD"));
 	}
 };
 
 /**
- * Editor module that owns the provider and registers it as a modular feature, so Unreal-MCP discovers
- * it (on boot via initial enumeration, or live via the OnModularFeatureRegistered event when this
- * plugin loads after Unreal-MCP). Unregistering on shutdown triggers a registry rebuild + manifest
- * revision bump on the Unreal-MCP side.
+ * Editor module that owns the RQL module and registers it as a modular feature, so Unreal-MCP discovers it (on boot,
+ * or live when this plugin loads after Unreal-MCP — the rql-* tools are republished either way). Unregistering on
+ * shutdown republishes them without the module.
  */
 class FUnrealAITemplateModule : public IModuleInterface
 {
 public:
 	virtual void StartupModule() override
 	{
-		Provider = MakeUnique<FUnrealAITemplateProvider>();
-		IModularFeatures::Get().RegisterModularFeature(IUnrealMcpToolProvider::GetModularFeatureName(), Provider.Get());
-		UE_LOG(LogUnrealAITemplate, Log, TEXT("[UnrealAITemplate] registered MCP tool provider '%s'."), *Provider->GetExtensionId());
+		RqlModule = MakeUnique<FUnrealAITemplateRqlModule>();
+		IModularFeatures::Get().RegisterModularFeature(IUnrealMcpRqlModule::GetModularFeatureName(), RqlModule.Get());
+		UE_LOG(LogUnrealAITemplate, Log, TEXT("[UnrealAITemplate] registered RQL module '%s'."), *RqlModule->GetRqlModuleName());
 	}
 
 	virtual void ShutdownModule() override
 	{
-		if (Provider.IsValid())
+		if (RqlModule.IsValid())
 		{
-			IModularFeatures::Get().UnregisterModularFeature(IUnrealMcpToolProvider::GetModularFeatureName(), Provider.Get());
-			Provider.Reset();
-			UE_LOG(LogUnrealAITemplate, Log, TEXT("[UnrealAITemplate] unregistered MCP tool provider."));
+			IModularFeatures::Get().UnregisterModularFeature(IUnrealMcpRqlModule::GetModularFeatureName(), RqlModule.Get());
+			RqlModule.Reset();
 		}
 	}
 
 private:
-	TUniquePtr<FUnrealAITemplateProvider> Provider;
+	TUniquePtr<FUnrealAITemplateRqlModule> RqlModule;
 };
 
 IMPLEMENT_MODULE(FUnrealAITemplateModule, UnrealAITemplate)

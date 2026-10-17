@@ -7,59 +7,48 @@
 #include "Misc/AutomationTest.h"
 #include "Features/IModularFeatures.h"
 #include "Dom/JsonObject.h"
+#include "Serialization/JsonReader.h"
+#include "Serialization/JsonSerializer.h"
 
-#include "IUnrealMcpToolProvider.h"
-#include "UnrealMcpToolRegistry.h"
+#include "IUnrealMcpRqlModule.h"
+#include "UnrealMcpRqlTools.h"
 
 // ============================================================================================
-//  UE Automation spec — ONE-TEST-PER-TOOL convention.
+//  UE Automation spec for the extension's RQL module (Unreal-MCP docs/rql.md "Extensions").
 //
-//  Every tool this extension contributes gets a focused Automation spec asserting it
-//  (a) registers under its kebab-case id and (b) returns a well-formed result. The read-only
-//  LIST tools are exercised for a SUCCESS (deterministic under a headless `-nullrhi` editor with
-//  an empty world — the active editor world is available, so they return count 0). The required-
-//  input GET tools are exercised for a DEFENSIVE failure (a missing 'name' must yield
-//  FUnrealMcpToolResult::Error, never a crash) — the deterministic assertion that needs no seeded
-//  actor or world state.
-//
-//  The spec discovers THIS extension's live provider through IModularFeatures (the exact path
-//  Unreal-MCP uses), registers its tools into a throwaway registry, and exercises them — so it
-//  validates the real shipped provider, not a stand-in.
+//  The spec discovers THIS extension's live module through IModularFeatures (the path Unreal-MCP uses) and runs RQL
+//  QueryPlans through the editor's RQL engine (UnrealMcpRqlTools::ExecutePlan). The C++ runtime has no text parser, so
+//  each plan is the one Rql.Parser produces for the query in the comment above it.
 //
 //  Run via:  Automation RunTests UnrealAILandscape
 // ============================================================================================
 
 namespace
 {
-	// Module-unique helper names (the module is unity-built — keep file-local helpers uniquely named).
-	IUnrealMcpToolProvider* UnrealAILandscape_FindOwnProvider()
+	// Spec-unique helper names (the module is unity-built — keep file-local helpers uniquely named).
+	IUnrealMcpRqlModule* UnrealAILandscape_FindOwnModule()
 	{
-		const TArray<IUnrealMcpToolProvider*> Providers =
-			IModularFeatures::Get().GetModularFeatureImplementations<IUnrealMcpToolProvider>(
-				IUnrealMcpToolProvider::GetModularFeatureName());
-		for (IUnrealMcpToolProvider* Provider : Providers)
+		for (IUnrealMcpRqlModule* Module : IModularFeatures::Get().GetModularFeatureImplementations<IUnrealMcpRqlModule>(
+			IUnrealMcpRqlModule::GetModularFeatureName()))
 		{
-			if (Provider && Provider->GetExtensionId() == TEXT("com.ivanmurzak.unreal-ai-landscape"))
-			{
-				return Provider;
-			}
+			if (Module && Module->GetExtensionId() == TEXT("com.ivanmurzak.unreal-ai-landscape"))
+				return Module;
 		}
 		return nullptr;
 	}
 
-	// Register the live provider's tools into a throwaway registry (the exact RegisterExtension path
-	// Unreal-MCP uses) so a test exercises the real shipped tool bodies.
-	bool UnrealAILandscape_BuildRegistry(FAutomationTestBase& Test, FUnrealMcpToolRegistry& OutRegistry)
+	TSharedPtr<FJsonObject> UnrealAILandscape_Run(const FString& Plan, bool bMutate)
 	{
-		IUnrealMcpToolProvider* Provider = UnrealAILandscape_FindOwnProvider();
-		if (!Provider)
-		{
-			Test.AddError(TEXT("extension provider not registered — cannot exercise its tools"));
-			return false;
-		}
-		OutRegistry.RegisterExtension(Provider->GetExtensionId(),
-			[Provider](FUnrealMcpToolRegistry& R) { Provider->RegisterTools(R); });
-		return true;
+		bool bOk = false;
+		const FString Json = UnrealMcpRqlTools::ExecutePlan(Plan, bMutate, false, bOk);
+		TSharedPtr<FJsonObject> Result;
+		FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(Json), Result);
+		return Result;
+	}
+
+	bool UnrealAILandscape_Ok(const TSharedPtr<FJsonObject>& Result)
+	{
+		return Result.IsValid() && Result->GetBoolField(TEXT("ok"));
 	}
 }
 
@@ -69,116 +58,72 @@ END_DEFINE_SPEC(FUnrealAILandscapeSpec)
 
 void FUnrealAILandscapeSpec::Define()
 {
-	Describe("provider registration", [this]()
+	Describe("RQL module", [this]()
 	{
-		It("registers this extension as a modular-feature tool provider", [this]()
+		It("registers this extension's RQL module as a modular feature", [this]()
 		{
-			IUnrealMcpToolProvider* Provider = UnrealAILandscape_FindOwnProvider();
-			TestNotNull(TEXT("extension provider is registered as a modular feature"), Provider);
-			if (Provider)
+			IUnrealMcpRqlModule* Module = UnrealAILandscape_FindOwnModule();
+			if (TestNotNull(TEXT("RQL module is registered"), Module))
 			{
-				TestEqual(TEXT("extension id matches the descriptor"),
-					Provider->GetExtensionId(), FString(TEXT("com.ivanmurzak.unreal-ai-landscape")));
+				TestEqual(TEXT("module name"), Module->GetRqlModuleName(), FString(TEXT("Landscape")));
+				TestFalse(TEXT("version reported"), Module->GetExtensionVersion().IsEmpty());
 			}
 		});
-	});
 
-	Describe("tool: landscape-list-actors", [this]()
-	{
-		It("registers and returns a well-formed { count, actors } success", [this]()
+		It("adds its sources and guide to the unreal-rql skill", [this]()
 		{
-			FUnrealMcpToolRegistry Registry;
-			if (!UnrealAILandscape_BuildRegistry(*this, Registry)) { return; }
-
-			TestTrue(TEXT("landscape-list-actors is registered"), Registry.HasTool(TEXT("landscape-list-actors")));
-
-			const FUnrealMcpToolResult Result =
-				Registry.Execute(TEXT("landscape-list-actors"), FUnrealMcpToolCall());
-
-			TestTrue(TEXT("tool reports success"), Result.bSuccess);
-			TestFalse(TEXT("tool returned a non-empty message"), Result.Message.IsEmpty());
-			TestTrue(TEXT("structured result carries 'count' and 'actors'"),
-				Result.Structured.IsValid()
-				&& Result.Structured->HasField(TEXT("count"))
-				&& Result.Structured->HasField(TEXT("actors")));
+			const FString Skill = UnrealMcpRqlTools::SkillMarkdown();
+			TestTrue(TEXT("| `landscapes` |"), Skill.Contains(TEXT("| `landscapes` |")));
+			TestTrue(TEXT("| `waterBodies` |"), Skill.Contains(TEXT("| `waterBodies` |")));
+			TestTrue(TEXT("| `waterZones` |"), Skill.Contains(TEXT("| `waterZones` |")));
+			TestTrue(TEXT("## Landscape and Water"), Skill.Contains(TEXT("## Landscape and Water")));
 		});
 	});
 
-	Describe("tool: landscape-get-actor", [this]()
+	Describe("sources", [this]()
 	{
-		It("registers and fails defensively on a missing 'name' (well-formed Error)", [this]()
+		It("landscapes answers a query", [this]()
 		{
-			FUnrealMcpToolRegistry Registry;
-			if (!UnrealAILandscape_BuildRegistry(*this, Registry)) { return; }
+			// landscapes | count
+			const TSharedPtr<FJsonObject> Result = UnrealAILandscape_Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["landscapes"]},"stages":[{"op":"count"}]})RQL"), false);
+			TestTrue(TEXT("a well-formed result"), Result.IsValid());
+			TestTrue(TEXT("succeeds"), UnrealAILandscape_Ok(Result));
+		});
 
-			TestTrue(TEXT("landscape-get-actor is registered"), Registry.HasTool(TEXT("landscape-get-actor")));
+		It("waterBodies answers a query", [this]()
+		{
+			// waterBodies | count
+			const TSharedPtr<FJsonObject> Result = UnrealAILandscape_Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["waterBodies"]},"stages":[{"op":"count"}]})RQL"), false);
+			TestTrue(TEXT("a well-formed result"), Result.IsValid());
+			TestTrue(TEXT("succeeds"), UnrealAILandscape_Ok(Result));
+		});
 
-			// No 'name' -> the handler must return a well-formed Error, not crash or succeed.
-			const FUnrealMcpToolResult Result =
-				Registry.Execute(TEXT("landscape-get-actor"), FUnrealMcpToolCall());
-
-			TestFalse(TEXT("missing 'name' is reported as a failure"), Result.bSuccess);
-			TestFalse(TEXT("failure carries a non-empty message"), Result.Message.IsEmpty());
+		It("waterZones answers a query", [this]()
+		{
+			// waterZones | count
+			const TSharedPtr<FJsonObject> Result = UnrealAILandscape_Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["waterZones"]},"stages":[{"op":"count"}]})RQL"), false);
+			TestTrue(TEXT("a well-formed result"), Result.IsValid());
+			TestTrue(TEXT("succeeds"), UnrealAILandscape_Ok(Result));
 		});
 	});
 
-	Describe("tool: landscape-list-water-bodies", [this]()
+	Describe("members", [this]()
 	{
-		It("registers and returns a well-formed { count, waterBodies } success", [this]()
+		It("describes LandscapeProxy with its Sections and PaintLayers members", [this]()
 		{
-			FUnrealMcpToolRegistry Registry;
-			if (!UnrealAILandscape_BuildRegistry(*this, Registry)) { return; }
-
-			TestTrue(TEXT("landscape-list-water-bodies is registered"), Registry.HasTool(TEXT("landscape-list-water-bodies")));
-
-			const FUnrealMcpToolResult Result =
-				Registry.Execute(TEXT("landscape-list-water-bodies"), FUnrealMcpToolCall());
-
-			TestTrue(TEXT("tool reports success"), Result.bSuccess);
-			TestFalse(TEXT("tool returned a non-empty message"), Result.Message.IsEmpty());
-			TestTrue(TEXT("structured result carries 'count' and 'waterBodies'"),
-				Result.Structured.IsValid()
-				&& Result.Structured->HasField(TEXT("count"))
-				&& Result.Structured->HasField(TEXT("waterBodies")));
+			bool bOk = false;
+			const FString Schema = UnrealMcpRqlTools::Schema(TEXT("LandscapeProxy"), bOk);
+			TestTrue(TEXT("schema ok"), bOk);
+			TestTrue(TEXT("lists name:Sections"), Schema.Contains(TEXT("\"name\":\"Sections\"")));
+			TestTrue(TEXT("lists name:PaintLayers"), Schema.Contains(TEXT("\"name\":\"PaintLayers\"")));
 		});
-	});
 
-	Describe("tool: landscape-get-water-body", [this]()
-	{
-		It("registers and fails defensively on a missing 'name' (well-formed Error)", [this]()
+		It("describes WaterBody with its Water member", [this]()
 		{
-			FUnrealMcpToolRegistry Registry;
-			if (!UnrealAILandscape_BuildRegistry(*this, Registry)) { return; }
-
-			TestTrue(TEXT("landscape-get-water-body is registered"), Registry.HasTool(TEXT("landscape-get-water-body")));
-
-			// No 'name' -> the handler must return a well-formed Error before touching the world.
-			const FUnrealMcpToolResult Result =
-				Registry.Execute(TEXT("landscape-get-water-body"), FUnrealMcpToolCall());
-
-			TestFalse(TEXT("missing 'name' is reported as a failure"), Result.bSuccess);
-			TestFalse(TEXT("failure carries a non-empty message"), Result.Message.IsEmpty());
-		});
-	});
-
-	Describe("tool: landscape-list-water-zones", [this]()
-	{
-		It("registers and returns a well-formed { count, waterZones } success", [this]()
-		{
-			FUnrealMcpToolRegistry Registry;
-			if (!UnrealAILandscape_BuildRegistry(*this, Registry)) { return; }
-
-			TestTrue(TEXT("landscape-list-water-zones is registered"), Registry.HasTool(TEXT("landscape-list-water-zones")));
-
-			const FUnrealMcpToolResult Result =
-				Registry.Execute(TEXT("landscape-list-water-zones"), FUnrealMcpToolCall());
-
-			TestTrue(TEXT("tool reports success"), Result.bSuccess);
-			TestFalse(TEXT("tool returned a non-empty message"), Result.Message.IsEmpty());
-			TestTrue(TEXT("structured result carries 'count' and 'waterZones'"),
-				Result.Structured.IsValid()
-				&& Result.Structured->HasField(TEXT("count"))
-				&& Result.Structured->HasField(TEXT("waterZones")));
+			bool bOk = false;
+			const FString Schema = UnrealMcpRqlTools::Schema(TEXT("WaterBody"), bOk);
+			TestTrue(TEXT("schema ok"), bOk);
+			TestTrue(TEXT("lists name:Water"), Schema.Contains(TEXT("\"name\":\"Water\"")));
 		});
 	});
 }

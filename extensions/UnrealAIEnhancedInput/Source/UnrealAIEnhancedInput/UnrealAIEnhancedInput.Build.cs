@@ -19,18 +19,14 @@ public class UnrealAIEnhancedInput : ModuleRules
 			"CoreUObject",
 			"Engine",
 			"Projects",
-			// "Json" is needed because the public registry header (UnrealMcpToolRegistry.h) includes
-			// Dom/JsonObject.h, and the sample handler builds a structured result with FJsonObject.
+			// FJsonValue for the module's JSON members.
 			"Json",
 
 			// --- Unreal-MCP contract (REQUIRED) ---------------------------------------------------
-			// The extension contract (IUnrealMcpToolProvider.h) + tool registry (UnrealMcpToolRegistry.h)
-			// live in the Unreal-MCP plugin's RUNTIME module. UnrealMcpEditor re-exports those headers
-			// and gives editor-only API access (most tools touch the editor). Keep both — they are the
-			// spine of every extension. The matching `UnrealMCP` plugin dependency is declared in the
-			// .uplugin's "Plugins" array.
-			"UnrealMcpRuntime",
-			"UnrealMcpEditor",
+			// IUnrealMcpRqlModule.h (the RQL module seam: sources, operations, members, guides) and
+			// UnrealMcpRqlTools.h (the specs run plans) live in the Unreal-MCP plugin's UnrealMcpRql module. The
+			// matching `UnrealMCP` plugin dependency is declared in the .uplugin's "Plugins" array.
+			"UnrealMcpRql",
 
 			// --- The gating engine module (THE GATING) --------------------------------------------
 			// This dependency IS the "gating": the extension won't compile or load without the engine

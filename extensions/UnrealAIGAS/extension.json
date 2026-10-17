@@ -1,35 +1,29 @@
 {
   "extensionId": "com.ivanmurzak.unreal-ai-gas",
   "name": "GAS Tools",
-  "description": "AI tools for Unreal's Gameplay Ability System (list abilities/effects/attribute sets, inspect an ability, grant an ability to an actor).",
+  "description": "RQL module for Unreal's Gameplay Ability System: query ability, effect and attribute-set classes and granted abilities, grant abilities to actors.",
   "pluginName": "UnrealAIGAS",
   "repo": "IvanMurzak/Unreal-MCP",
   "version": "0.1.1",
-  "minCoreVersion": "0.5.0",
+  "minCoreVersion": "1.0.0",
   "enginePlugins": [
     "GameplayAbilities"
   ],
-  "tools": [
-    {
-      "name": "gas-list-abilities",
-      "description": "Lists every Gameplay Ability class (UGameplayAbility subclass \u2014 native C++ and Blueprint) known to the project via the Asset Registry, without loading any of them. Optionally filter by a class-path prefix."
-    },
-    {
-      "name": "gas-list-effects",
-      "description": "Lists every Gameplay Effect class (UGameplayEffect subclass \u2014 native C++ and Blueprint) known to the project via the Asset Registry, without loading any of them. Optionally filter by a class-path prefix."
-    },
-    {
-      "name": "gas-list-attribute-sets",
-      "description": "Lists every Attribute Set class (UAttributeSet subclass \u2014 native C++ and Blueprint) known to the project via the Asset Registry, without loading any of them. Optionally filter by a class-path prefix."
-    },
-    {
-      "name": "gas-inspect-ability",
-      "description": "Inspects a single Gameplay Ability class (read-only) by loading its class default object and reporting its configuration: ability/cancel/block gameplay tags, the cost and cooldown Gameplay Effect classes, and the instancing policy."
-    },
-    {
-      "name": "gas-grant-ability",
-      "description": "Grants a Gameplay Ability to a named actor's AbilitySystemComponent in the active editor world (the actor must already own an AbilitySystemComponent)."
-    }
-  ],
-  "_comment": "Install-catalog / compatibility manifest, shaped as ONE unreal-mcp-cli ExtensionDescriptor (cli/src/utils/extensions-catalog.ts in Unreal-MCP) so it is directly liftable into the shared extensions.catalog.json { schemaVersion, extensions[] }. 'version' mirrors the .uplugin VersionName (kept in sync by commands/bump-version.ps1). 'minCoreVersion' is the lowest Unreal-MCP core version this extension supports (refreshed by commands/update-core.ps1). 'enginePlugins' are the gating engine plugins (e.g. ['Niagara']) enabled in the .uproject alongside this extension \u2014 populated by commands/init -FeaturePlugin. 'tools' lists the contributed tool ids/descriptions. The install-extension resolver unions enginePlugins with the materialized .uplugin Plugins[]."
+  "tools": [],
+  "_comment": "Install-catalog / compatibility manifest, shaped as ONE unreal-mcp-cli ExtensionDescriptor (cli/src/utils/extensions-catalog.ts in Unreal-MCP) so it is directly liftable into the shared extensions.catalog.json { schemaVersion, extensions[] }. 'tools' is empty since 1.0 of the core: the extension contributes an RQL module ('rql': its sources, operations and members, docs/rql.md) instead of MCP tools. 'version' mirrors the .uplugin VersionName (kept in sync by commands/bump-version.ps1). 'minCoreVersion' is the lowest Unreal-MCP core version this extension supports (refreshed by commands/update-core.ps1). 'enginePlugins' are the gating engine plugins (e.g. ['Niagara']) enabled in the .uproject alongside this extension \u2014 populated by commands/init -FeaturePlugin. 'tools' lists the contributed tool ids/descriptions. The install-extension resolver unions enginePlugins with the materialized .uplugin Plugins[].",
+  "rql": {
+    "module": "GAS",
+    "sources": [
+      "gasAbilities",
+      "gasEffects",
+      "gasAttributeSets",
+      "gas"
+    ],
+    "operations": [
+      "GrantAbility"
+    ],
+    "members": [
+      "AbilitySystemComponent.GrantedAbilities"
+    ]
+  }
 }

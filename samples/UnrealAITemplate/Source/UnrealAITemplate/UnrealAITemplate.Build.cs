@@ -19,14 +19,14 @@ public class UnrealAITemplate : ModuleRules
 			"CoreUObject",
 			"Engine",
 			"Projects",
-			// "Json" is needed because the public registry header (UnrealMcpToolRegistry.h) includes
-			// Dom/JsonObject.h, and the sample's handler builds a structured result with FJsonObject.
+			// FJsonValue for the sample's JSON member.
 			"Json",
-			// The extension contract (IUnrealMcpToolProvider.h) + tool registry (UnrealMcpToolRegistry.h)
-			// live in the Unreal-MCP plugin's RUNTIME module (docs/ARCHITECTURE.md §12.1) — extensions are
-			// runtime-available (IModularFeatures, §5/§12.9), so the sample depends on the runtime module,
-			// not the editor module.
-			"UnrealMcpRuntime",
+			// The RQL module seam (IUnrealMcpRqlModule.h) lives in the Unreal-MCP plugin's UnrealMcpRql module; the
+			// matching `UnrealMCP` plugin dependency is declared in the .uplugin "Plugins" array. Add your feature's
+			// engine modules here (e.g. "Niagara") — that dependency gates the extension on the engine plugin.
+			"UnrealMcpRql",
+			// GEditor / the editor world for operations that touch it.
+			"UnrealEd",
 		});
 	}
 }

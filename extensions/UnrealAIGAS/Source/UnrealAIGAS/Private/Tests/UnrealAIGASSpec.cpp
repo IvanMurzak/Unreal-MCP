@@ -7,22 +7,18 @@
 #include "Misc/AutomationTest.h"
 #include "Features/IModularFeatures.h"
 #include "Dom/JsonObject.h"
+#include "Serialization/JsonReader.h"
+#include "Serialization/JsonSerializer.h"
 
-#include "IUnrealMcpToolProvider.h"
-#include "UnrealMcpToolRegistry.h"
+#include "IUnrealMcpRqlModule.h"
+#include "UnrealMcpRqlTools.h"
 
 // ============================================================================================
-//  UE Automation spec — ONE-TEST-PER-TOOL convention.
+//  UE Automation spec for the extension's RQL module (Unreal-MCP docs/rql.md "Extensions").
 //
-//  Every tool this extension contributes gets a focused Automation spec asserting it
-//  (a) registers under its kebab-case id and (b) returns a well-formed result. Read-only tools
-//  are exercised for a SUCCESS; the mutating / required-input tools are exercised for a
-//  well-formed, DEFENSIVE failure (bad input must yield FUnrealMcpToolResult::Error, never a
-//  crash) — the deterministic assertion under a headless `-nullrhi` editor with no project assets.
-//
-//  The spec discovers THIS extension's live provider through IModularFeatures (the exact path
-//  Unreal-MCP uses), registers its tools into a throwaway registry, and exercises them — so it
-//  validates the real shipped provider, not a stand-in.
+//  The spec discovers THIS extension's live module through IModularFeatures (the path Unreal-MCP uses) and runs RQL
+//  QueryPlans through the editor's RQL engine (UnrealMcpRqlTools::ExecutePlan). The C++ runtime has no text parser, so
+//  each plan is the one Rql.Parser produces for the query in the comment above it.
 //
 //  Run via:  Automation RunTests UnrealAIGAS
 // ============================================================================================
@@ -30,34 +26,29 @@
 namespace
 {
 	// Spec-unique helper names (the module is unity-built — keep file-local helpers uniquely named).
-	IUnrealMcpToolProvider* UnrealAIGAS_FindOwnProvider()
+	IUnrealMcpRqlModule* UnrealAIGAS_FindOwnModule()
 	{
-		const TArray<IUnrealMcpToolProvider*> Providers =
-			IModularFeatures::Get().GetModularFeatureImplementations<IUnrealMcpToolProvider>(
-				IUnrealMcpToolProvider::GetModularFeatureName());
-		for (IUnrealMcpToolProvider* Provider : Providers)
+		for (IUnrealMcpRqlModule* Module : IModularFeatures::Get().GetModularFeatureImplementations<IUnrealMcpRqlModule>(
+			IUnrealMcpRqlModule::GetModularFeatureName()))
 		{
-			if (Provider && Provider->GetExtensionId() == TEXT("com.ivanmurzak.unreal-ai-gas"))
-			{
-				return Provider;
-			}
+			if (Module && Module->GetExtensionId() == TEXT("com.ivanmurzak.unreal-ai-gas"))
+				return Module;
 		}
 		return nullptr;
 	}
 
-	// Register the live provider's tools into a throwaway registry (the exact RegisterExtension path
-	// Unreal-MCP uses) so a test exercises the real shipped tool bodies.
-	bool UnrealAIGAS_BuildRegistry(FAutomationTestBase& Test, FUnrealMcpToolRegistry& OutRegistry)
+	TSharedPtr<FJsonObject> UnrealAIGAS_Run(const FString& Plan, bool bMutate)
 	{
-		IUnrealMcpToolProvider* Provider = UnrealAIGAS_FindOwnProvider();
-		if (!Provider)
-		{
-			Test.AddError(TEXT("extension provider not registered — cannot exercise its tools"));
-			return false;
-		}
-		OutRegistry.RegisterExtension(Provider->GetExtensionId(),
-			[Provider](FUnrealMcpToolRegistry& R) { Provider->RegisterTools(R); });
-		return true;
+		bool bOk = false;
+		const FString Json = UnrealMcpRqlTools::ExecutePlan(Plan, bMutate, false, bOk);
+		TSharedPtr<FJsonObject> Result;
+		FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(Json), Result);
+		return Result;
+	}
+
+	bool UnrealAIGAS_Ok(const TSharedPtr<FJsonObject>& Result)
+	{
+		return Result.IsValid() && Result->GetBoolField(TEXT("ok"));
 	}
 }
 
@@ -67,116 +58,80 @@ END_DEFINE_SPEC(FUnrealAIGASSpec)
 
 void FUnrealAIGASSpec::Define()
 {
-	Describe("provider registration", [this]()
+	Describe("RQL module", [this]()
 	{
-		It("registers this extension as a modular-feature tool provider", [this]()
+		It("registers this extension's RQL module as a modular feature", [this]()
 		{
-			IUnrealMcpToolProvider* Provider = UnrealAIGAS_FindOwnProvider();
-			TestNotNull(TEXT("extension provider is registered as a modular feature"), Provider);
-			if (Provider)
+			IUnrealMcpRqlModule* Module = UnrealAIGAS_FindOwnModule();
+			if (TestNotNull(TEXT("RQL module is registered"), Module))
 			{
-				TestEqual(TEXT("extension id matches the descriptor"),
-					Provider->GetExtensionId(), FString(TEXT("com.ivanmurzak.unreal-ai-gas")));
+				TestEqual(TEXT("module name"), Module->GetRqlModuleName(), FString(TEXT("GAS")));
+				TestFalse(TEXT("version reported"), Module->GetExtensionVersion().IsEmpty());
 			}
 		});
-	});
 
-	Describe("tool: gas-list-abilities", [this]()
-	{
-		It("registers and returns a well-formed { count, abilities } success", [this]()
+		It("adds its sources and guide to the unreal-rql skill", [this]()
 		{
-			FUnrealMcpToolRegistry Registry;
-			if (!UnrealAIGAS_BuildRegistry(*this, Registry)) { return; }
-
-			TestTrue(TEXT("gas-list-abilities is registered"), Registry.HasTool(TEXT("gas-list-abilities")));
-
-			const FUnrealMcpToolResult Result =
-				Registry.Execute(TEXT("gas-list-abilities"), FUnrealMcpToolCall());
-
-			TestTrue(TEXT("tool reports success"), Result.bSuccess);
-			TestFalse(TEXT("tool returned a non-empty message"), Result.Message.IsEmpty());
-			TestTrue(TEXT("structured result carries 'count' and 'abilities'"),
-				Result.Structured.IsValid()
-				&& Result.Structured->HasField(TEXT("count"))
-				&& Result.Structured->HasField(TEXT("abilities")));
+			const FString Skill = UnrealMcpRqlTools::SkillMarkdown();
+			TestTrue(TEXT("| `gasAbilities` |"), Skill.Contains(TEXT("| `gasAbilities` |")));
+			TestTrue(TEXT("| `gasEffects` |"), Skill.Contains(TEXT("| `gasEffects` |")));
+			TestTrue(TEXT("| `gasAttributeSets` |"), Skill.Contains(TEXT("| `gasAttributeSets` |")));
+			TestTrue(TEXT("| `gas` |"), Skill.Contains(TEXT("| `gas` |")));
+			TestTrue(TEXT("## Gameplay Ability System"), Skill.Contains(TEXT("## Gameplay Ability System")));
 		});
 	});
 
-	Describe("tool: gas-list-effects", [this]()
+	Describe("sources", [this]()
 	{
-		It("registers and returns a well-formed { count, effects } success", [this]()
+		It("gasAbilities answers a query", [this]()
 		{
-			FUnrealMcpToolRegistry Registry;
-			if (!UnrealAIGAS_BuildRegistry(*this, Registry)) { return; }
+			// gasAbilities | count
+			const TSharedPtr<FJsonObject> Result = UnrealAIGAS_Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["gasAbilities"]},"stages":[{"op":"count"}]})RQL"), false);
+			TestTrue(TEXT("a well-formed result"), Result.IsValid());
+			TestTrue(TEXT("succeeds"), UnrealAIGAS_Ok(Result));
+		});
 
-			TestTrue(TEXT("gas-list-effects is registered"), Registry.HasTool(TEXT("gas-list-effects")));
+		It("gasEffects answers a query", [this]()
+		{
+			// gasEffects | count
+			const TSharedPtr<FJsonObject> Result = UnrealAIGAS_Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["gasEffects"]},"stages":[{"op":"count"}]})RQL"), false);
+			TestTrue(TEXT("a well-formed result"), Result.IsValid());
+			TestTrue(TEXT("succeeds"), UnrealAIGAS_Ok(Result));
+		});
 
-			const FUnrealMcpToolResult Result =
-				Registry.Execute(TEXT("gas-list-effects"), FUnrealMcpToolCall());
+		It("gasAttributeSets answers a query", [this]()
+		{
+			// gasAttributeSets | count
+			const TSharedPtr<FJsonObject> Result = UnrealAIGAS_Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["gasAttributeSets"]},"stages":[{"op":"count"}]})RQL"), false);
+			TestTrue(TEXT("a well-formed result"), Result.IsValid());
+			TestTrue(TEXT("succeeds"), UnrealAIGAS_Ok(Result));
+		});
 
-			TestTrue(TEXT("tool reports success"), Result.bSuccess);
-			TestFalse(TEXT("tool returned a non-empty message"), Result.Message.IsEmpty());
-			TestTrue(TEXT("structured result carries 'count' and 'effects'"),
-				Result.Structured.IsValid()
-				&& Result.Structured->HasField(TEXT("count"))
-				&& Result.Structured->HasField(TEXT("effects")));
+		It("describes AbilitySystemComponent with its GrantedAbilities member", [this]()
+		{
+			bool bOk = false;
+			const FString Schema = UnrealMcpRqlTools::Schema(TEXT("AbilitySystemComponent"), bOk);
+			TestTrue(TEXT("schema ok"), bOk);
+			TestTrue(TEXT("lists name:GrantedAbilities"), Schema.Contains(TEXT("\"name\":\"GrantedAbilities\"")));
 		});
 	});
 
-	Describe("tool: gas-list-attribute-sets", [this]()
+	Describe("operation: GrantAbility", [this]()
 	{
-		It("registers and returns a well-formed { count, attributeSets } success", [this]()
+		It("is listed as an operation of the gas source", [this]()
 		{
-			FUnrealMcpToolRegistry Registry;
-			if (!UnrealAIGAS_BuildRegistry(*this, Registry)) { return; }
-
-			TestTrue(TEXT("gas-list-attribute-sets is registered"), Registry.HasTool(TEXT("gas-list-attribute-sets")));
-
-			const FUnrealMcpToolResult Result =
-				Registry.Execute(TEXT("gas-list-attribute-sets"), FUnrealMcpToolCall());
-
-			TestTrue(TEXT("tool reports success"), Result.bSuccess);
-			TestFalse(TEXT("tool returned a non-empty message"), Result.Message.IsEmpty());
-			TestTrue(TEXT("structured result carries 'count' and 'attributeSets'"),
-				Result.Structured.IsValid()
-				&& Result.Structured->HasField(TEXT("count"))
-				&& Result.Structured->HasField(TEXT("attributeSets")));
+			bool bOk = false;
+			const FString Schema = UnrealMcpRqlTools::Schema(TEXT("GASOperations"), bOk);
+			TestTrue(TEXT("schema ok"), bOk);
+			TestTrue(TEXT("lists GrantAbility("), Schema.Contains(TEXT("GrantAbility(")));
 		});
-	});
 
-	Describe("tool: gas-inspect-ability", [this]()
-	{
-		It("registers and fails defensively on a missing 'path' (well-formed Error)", [this]()
+		It("fails defensively on an unknown actor", [this]()
 		{
-			FUnrealMcpToolRegistry Registry;
-			if (!UnrealAIGAS_BuildRegistry(*this, Registry)) { return; }
-
-			TestTrue(TEXT("gas-inspect-ability is registered"), Registry.HasTool(TEXT("gas-inspect-ability")));
-
-			// No 'path' -> the handler must return a well-formed Error, not crash or succeed.
-			const FUnrealMcpToolResult Result =
-				Registry.Execute(TEXT("gas-inspect-ability"), FUnrealMcpToolCall());
-
-			TestFalse(TEXT("missing 'path' is reported as a failure"), Result.bSuccess);
-			TestFalse(TEXT("failure carries a non-empty message"), Result.Message.IsEmpty());
-		});
-	});
-
-	Describe("tool: gas-grant-ability", [this]()
-	{
-		It("registers and fails defensively on a missing 'actor'/'abilityClass' (well-formed Error)", [this]()
-		{
-			FUnrealMcpToolRegistry Registry;
-			if (!UnrealAIGAS_BuildRegistry(*this, Registry)) { return; }
-
-			TestTrue(TEXT("gas-grant-ability is registered"), Registry.HasTool(TEXT("gas-grant-ability")));
-
-			// No 'actor'/'abilityClass' -> the handler must return a well-formed Error before touching the world.
-			const FUnrealMcpToolResult Result =
-				Registry.Execute(TEXT("gas-grant-ability"), FUnrealMcpToolCall());
-
-			TestFalse(TEXT("missing required inputs are reported as a failure"), Result.bSuccess);
-			TestFalse(TEXT("failure carries a non-empty message"), Result.Message.IsEmpty());
+			// gas | call GrantAbility("RqlSpecNoActor", "GameplayAbility")
+			const TSharedPtr<FJsonObject> Result = UnrealAIGAS_Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["gas"]},"stages":[{"op":"call","method":"GrantAbility","args":[{"lit":"RqlSpecNoActor"},{"lit":"GameplayAbility"}]}]})RQL"), true);
+			TestTrue(TEXT("a well-formed result"), Result.IsValid());
+			TestFalse(TEXT("fails defensively"), UnrealAIGAS_Ok(Result));
 		});
 	});
 }

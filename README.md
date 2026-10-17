@@ -328,9 +328,19 @@ The full 16-command surface:
 
 All three kinds use the **same** small, public, **modular-feature-based contract** — a provider interface plus a fluent registry builder, both living in the `UnrealMcpRuntime` module (re-exported by `UnrealMcpEditor`, so the same contract serves editor and [runtime](#runtime-usage-in-game) extensions). The full author guide is [`docs/EXTENSIONS.md`](docs/EXTENSIONS.md).
 
+## RQL modules (editor data)
+
+An extension for an engine feature contributes an **RQL module** rather than tools: implement
+[`IUnrealMcpRqlModule`](UnrealMCP/Source/UnrealMcpRql/Public/IUnrealMcpRqlModule.h) and register sources (e.g. the
+project's Niagara systems), operations (the UFUNCTIONs of an operations class, called with `call`), computed members
+and a guide for the `unreal-rql` skill. Agents then reach the feature through `rql-query` / `rql-mutate` like the rest
+of the editor ([`docs/rql.md`](docs/rql.md), [`docs/EXTENSIONS.md`](docs/EXTENSIONS.md#rql-modules-the-default-for-editor-extensions)).
+The first-party extensions in [`extensions/`](extensions/) and the template [`samples/UnrealAITemplate/`](samples/UnrealAITemplate)
+are RQL modules.
+
 ## Tools
 
-Implement [`IUnrealMcpToolProvider`](UnrealMCP/Source/UnrealMcpRuntime/Public/IUnrealMcpToolProvider.h) and declare your tools with the fluent [`FUnrealMcpToolRegistry`](UnrealMCP/Source/UnrealMcpRuntime/Public/UnrealMcpToolRegistry.h) builder:
+For what is not editor data, implement [`IUnrealMcpToolProvider`](UnrealMCP/Source/UnrealMcpRuntime/Public/IUnrealMcpToolProvider.h) and declare your tools with the fluent [`FUnrealMcpToolRegistry`](UnrealMCP/Source/UnrealMcpRuntime/Public/UnrealMcpToolRegistry.h) builder:
 
 ```cpp
 #include "IUnrealMcpToolProvider.h"
@@ -458,7 +468,7 @@ IModularFeatures::Get().RegisterModularFeature(
 
 - **Full author guide:** [`docs/EXTENSIONS.md`](docs/EXTENSIONS.md) — the contract for tools, prompts, and resources, the builders, lifecycle, ordering, isolation semantics, and versioning.
 - **Design:** [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §5 (tools) + **§A** (the prompt/resource registration path).
-- **Working samples:** [`samples/UnrealAITemplate/`](samples/UnrealAITemplate) — a complete, buildable **editor** extension plugin with a `hello-extension` tool and a compile-time switch (`UNREAL_AI_TEMPLATE_INVALID_SCHEMA=1`) that demonstrates the isolation behaviour first-hand; [`samples/UnrealAIRuntimeSample/`](samples/UnrealAIRuntimeSample) — the **runtime (in-game)** counterpart, a `Type=Runtime` plugin whose `game-time-dilation` tool reads/sets the live world's time dilation, callable in a running game over a runtime MCP connection ([`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §12.9; see EXTENSIONS.md "Runtime usage"). For prompts and resources, the shipped **core** families ([`UnrealMcpCorePrompts.cpp`](UnrealMCP/Source/UnrealMcpRuntime/Private/Prompts/UnrealMcpCorePrompts.cpp) `level-design-brief`, [`UnrealMcpCoreResources.cpp`](UnrealMCP/Source/UnrealMcpRuntime/Private/Resources/UnrealMcpCoreResources.cpp) `unreal://project/levels` + `unreal://project/icon`) are the runnable reference.
+- **Working samples:** [`samples/UnrealAITemplate/`](samples/UnrealAITemplate) — a complete, buildable **editor** extension plugin with an RQL module (the `hello` operations source, a computed member, a guide); [`samples/UnrealAIRuntimeSample/`](samples/UnrealAIRuntimeSample) — the **runtime (in-game)** counterpart, a `Type=Runtime` plugin whose `game-time-dilation` tool reads/sets the live world's time dilation, callable in a running game over a runtime MCP connection ([`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §12.9; see EXTENSIONS.md "Runtime usage"). For prompts and resources, the shipped **core** families ([`UnrealMcpCorePrompts.cpp`](UnrealMCP/Source/UnrealMcpRuntime/Private/Prompts/UnrealMcpCorePrompts.cpp) `level-design-brief`, [`UnrealMcpCoreResources.cpp`](UnrealMCP/Source/UnrealMcpRuntime/Private/Resources/UnrealMcpCoreResources.cpp) `unreal://project/levels` + `unreal://project/icon`) are the runnable reference.
 
 ![AI Game Developer — Unreal MCP](https://github.com/IvanMurzak/Unreal-MCP/blob/main/docs/img/promo/hazzard-divider.svg?raw=true)
 
@@ -624,7 +634,7 @@ An `MCP Tool` is a function the LLM can call to interact with Unreal. These tool
 | [`UnrealMCP/`](UnrealMCP/) | The UE editor plugin (C++, module `UnrealMcpEditor`, UE 5.5+ floor, developed against 5.7, verified on 5.8) |
 | [`bridge/`](bridge/) | The .NET 9 sidecar (`unreal-mcp-bridge`) — McpPlugin host, IPC ⇄ SignalR relay |
 | [`cli/`](cli/) | `unreal-mcp-cli` npm package (TypeScript) — 16 commands |
-| [`samples/UnrealAITemplate/`](samples/UnrealAITemplate/) | Editor extension template plugin (`hello-extension`) |
+| [`samples/UnrealAITemplate/`](samples/UnrealAITemplate/) | Editor extension template plugin (an RQL module: `hello` operations) |
 | [`samples/UnrealAIRuntimeSample/`](samples/UnrealAIRuntimeSample/) | Runtime (in-game) extension sample (`game-time-dilation`, `Type=Runtime`) |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | The authoritative architecture design |
 | [`docs/EXTENSIONS.md`](docs/EXTENSIONS.md) | Extension author guide |
