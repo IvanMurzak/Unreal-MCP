@@ -3,8 +3,6 @@
 
 #include "UnrealMcpLogCollector.h"
 
-#include "Algo/BinarySearch.h"
-#include "Algo/Reverse.h"
 #include "Misc/OutputDeviceRedirector.h"   // GLog is an FOutputDeviceRedirector*; Add/RemoveOutputDevice deref the complete type
 
 FUnrealMcpLogCollector& FUnrealMcpLogCollector::Get()
@@ -99,80 +97,11 @@ int32 FUnrealMcpLogCollector::Num() const
 	return Entries.Num();
 }
 
-TArray<FUnrealMcpLogEntry> FUnrealMcpLogCollector::Snapshot(ELogVerbosity::Type MinVerbosity,
-	const FString& CategoryFilter, const FString& Search, int32 Limit, int64* OutNextCursor) const
-{
-	TArray<FUnrealMcpLogEntry> Out;
-
-	FScopeLock ScopeLock(&Lock);
-	if (OutNextCursor)
-		*OutNextCursor = LastSequence;
-	// Walk newest-first so we can stop as soon as the requested Limit is satisfied — this bounds both
-	// the copy work and the lock-hold time (a full 10k buffer with limit=100 copies 100 entries, not
-	// 10k). Entries is oldest-first, so reverse the result below to restore the newest-last contract.
-	for (int32 Idx = Entries.Num() - 1; Idx >= 0; --Idx)
-	{
-		const FUnrealMcpLogEntry& Entry = Entries[Idx];
-		if (!MatchesFilters(Entry, MinVerbosity, CategoryFilter, Search))
-			continue;
-		Out.Add(Entry);
-		if (Limit > 0 && Out.Num() >= Limit)
-			break;
-	}
-
-	// Out is currently newest-first; the documented contract is newest-last, so reverse in place.
-	Algo::Reverse(Out);
-	return Out;
-}
-
-int64 FUnrealMcpLogCollector::HighestSequence() const
+TArray<FUnrealMcpLogEntry> FUnrealMcpLogCollector::Snapshot(int32 Limit) const
 {
 	FScopeLock ScopeLock(&Lock);
-	return LastSequence;
-}
-
-TArray<FUnrealMcpLogEntry> FUnrealMcpLogCollector::SnapshotSince(int64 SinceSequence, ELogVerbosity::Type MinVerbosity,
-	const FString& CategoryFilter, const FString& Search, int32 Limit, int64* OutNextCursor) const
-{
-	TArray<FUnrealMcpLogEntry> Out;
-
-	FScopeLock ScopeLock(&Lock);
-
-	// Backstop for a restarted counter: a cursor above everything ever assigned cannot refer to this run's
-	// entries, so behave as if it were below everything (oldest page).
-	if (SinceSequence > LastSequence)
-		SinceSequence = 0;
-
-	if (OutNextCursor)
-		*OutNextCursor = LastSequence;
-
-	// Entries is ascending by Sequence: start at the first entry strictly after the cursor.
-	for (int32 Idx = Algo::UpperBoundBy(Entries, SinceSequence, &FUnrealMcpLogEntry::Sequence); Idx < Entries.Num(); ++Idx)
-	{
-		const FUnrealMcpLogEntry& Entry = Entries[Idx];
-		if (!MatchesFilters(Entry, MinVerbosity, CategoryFilter, Search))
-			continue;
-		if (Limit > 0 && Out.Num() >= Limit)
-		{
-			// One more matching entry exists beyond the page: the page is cut, continue from its last entry.
-			if (OutNextCursor)
-				*OutNextCursor = Out.Last().Sequence;
-			break;
-		}
-		Out.Add(Entry);
-	}
-	return Out;
-}
-
-bool FUnrealMcpLogCollector::MatchesFilters(const FUnrealMcpLogEntry& Entry, ELogVerbosity::Type MinVerbosity,
-	const FString& CategoryFilter, const FString& Search)
-{
-	// Lower numeric verbosity == more severe (Fatal=1 … VeryVerbose=7). Keep at-or-more-severe.
-	if (MinVerbosity != ELogVerbosity::All && Entry.Verbosity > MinVerbosity)
-		return false;
-	if (!CategoryFilter.IsEmpty() && !Entry.Category.ToString().Equals(CategoryFilter, ESearchCase::IgnoreCase))
-		return false;
-	return Search.IsEmpty() || Entry.Message.Contains(Search, ESearchCase::IgnoreCase);
+	const int32 Start = Limit > 0 ? FMath::Max(0, Entries.Num() - Limit) : 0;
+	return TArray<FUnrealMcpLogEntry>(Entries.GetData() + Start, Entries.Num() - Start);
 }
 
 FString FUnrealMcpLogCollector::VerbosityToString(ELogVerbosity::Type Verbosity)
@@ -181,17 +110,4 @@ FString FUnrealMcpLogCollector::VerbosityToString(ELogVerbosity::Type Verbosity)
 	// off the flag bits first (the `&` yields an int, so cast back to the enum). A captured GLog entry always
 	// carries one of those real verbosities.
 	return ::ToString(static_cast<ELogVerbosity::Type>(Verbosity & ELogVerbosity::VerbosityMask));
-}
-
-bool FUnrealMcpLogCollector::ParseVerbosity(const FString& Token, ELogVerbosity::Type& OutVerbosity)
-{
-	if (Token.Equals(TEXT("Fatal"), ESearchCase::IgnoreCase))            { OutVerbosity = ELogVerbosity::Fatal; return true; }
-	if (Token.Equals(TEXT("Error"), ESearchCase::IgnoreCase))           { OutVerbosity = ELogVerbosity::Error; return true; }
-	if (Token.Equals(TEXT("Warning"), ESearchCase::IgnoreCase))         { OutVerbosity = ELogVerbosity::Warning; return true; }
-	if (Token.Equals(TEXT("Display"), ESearchCase::IgnoreCase))         { OutVerbosity = ELogVerbosity::Display; return true; }
-	if (Token.Equals(TEXT("Log"), ESearchCase::IgnoreCase))             { OutVerbosity = ELogVerbosity::Log; return true; }
-	if (Token.Equals(TEXT("Verbose"), ESearchCase::IgnoreCase))         { OutVerbosity = ELogVerbosity::Verbose; return true; }
-	if (Token.Equals(TEXT("VeryVerbose"), ESearchCase::IgnoreCase))     { OutVerbosity = ELogVerbosity::VeryVerbose; return true; }
-	if (Token.Equals(TEXT("All"), ESearchCase::IgnoreCase))             { OutVerbosity = ELogVerbosity::All; return true; }
-	return false;
 }

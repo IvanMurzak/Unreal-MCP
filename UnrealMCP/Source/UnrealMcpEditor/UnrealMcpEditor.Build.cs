@@ -67,16 +67,9 @@ public class UnrealMcpEditor : ModuleRules
 			"WorkspaceMenuStructure",
 			"InputCore",
 			"ApplicationCore",
-			// Asset / material APIs the Blueprint, source and screenshot families use (the asset data tools moved to
-			// the UnrealMcpRql module, docs/rql.md):
-			//  - AssetRegistry            -> asset lookups
-			//  - AssetTools               -> CreateAsset (material instance) + ImportAssetTasks
-			//  - MaterialEditor           -> UMaterialEditingLibrary (instance param read/write)
-			//  - EditorScriptingUtilities -> UEditorAssetLibrary (copy/move/delete/folder/load)
+			// Asset lookups of the Blueprint family (the asset / material data tools moved to the UnrealMcpRql module,
+			// docs/rql.md).
 			"AssetRegistry",
-			"AssetTools",
-			"MaterialEditor",
-			"EditorScriptingUtilities",
 			// Blueprint tool family (§10): FKismetEditorUtilities / FBlueprintEditorUtils / FCompilerResultsLog
 			// live in UnrealEd; the K2 pin-type schema + event/function K2 nodes live in BlueprintGraph; the
 			// compiler backend (EBlueprintCompileOptions) in KismetCompiler. (AssetRegistry shared above.)

@@ -4,10 +4,10 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Dom/JsonObject.h"   // TSharedPtr<FJsonObject> appears by-value in the UNREALMCPRUNTIME_API signatures below
 
 class AActor;
-class UActorComponent;
+class UClass;
+class UObject;
 class UWorld;
 
 /**
@@ -25,11 +25,16 @@ namespace FUnrealMcpObjectRef
 	UNREALMCPRUNTIME_API UWorld* GetEditorWorld();
 
 	/**
-	 * Resolve a class reference to a UClass*. Accepts, in order:
-	 *   - a soft class path (`/Script/Engine.PointLight`, `/Game/BP/BP_Foo.BP_Foo_C`),
-	 *   - a loadable object path that is itself a UClass or a UBlueprint (returns its GeneratedClass),
-	 *   - a short native type name (`StaticMeshActor`, `PointLight`).
-	 * Returns null when nothing matches.
+	 * An object of @p Class by path: a package ("/Game/Materials/M_Red", its main asset) or an object path
+	 * ("/Game/Materials/M_Red.M_Red"). Already-loaded objects first; otherwise the package is probed before it is loaded,
+	 * so a miss logs nothing (loading a missing package logs an engine error even with LOAD_NoWarn). Null when none.
+	 */
+	UNREALMCPRUNTIME_API UObject* LoadObjectQuiet(UClass* Class, const FString& Path);
+
+	/**
+	 * Resolve a class reference to a UClass*: a class path (`/Script/Engine.PointLight`,
+	 * `/Game/BP/BP_Foo.BP_Foo_C`), a Blueprint asset path (`/Game/BP/BP_Foo`, its generated class) or a short type
+	 * name (`PointLight`, `AStaticMeshActor`: the C++ A/U prefix is tolerated). Quiet: a miss logs nothing.
 	 */
 	UNREALMCPRUNTIME_API UClass* ResolveClass(const FString& ClassRef);
 
@@ -40,19 +45,16 @@ namespace FUnrealMcpObjectRef
 	 */
 	UNREALMCPRUNTIME_API AActor* ResolveActor(const FString& ActorRef, UWorld* World = nullptr);
 
-	/** Resolve a component on @p Actor by component name or readable name. Null when not found. */
-	UNREALMCPRUNTIME_API UActorComponent* ResolveComponent(AActor* Actor, const FString& ComponentRef);
+	/**
+	 * The one text -> object rule for a reference of type @p Wanted (an edit field's rule): a class reference by class
+	 * name or path (ResolveClass), an actor by label / name / path (ResolveActor), anything else by asset path
+	 * (LoadObjectQuiet). Null when nothing matches or the match is not a @p Wanted.
+	 */
+	UNREALMCPRUNTIME_API UObject* ResolveReference(UClass* Wanted, const FString& Text);
 
 	/**
-	 * Resolve a generic UObject by object path (`/Game/Folder/Asset.Asset`) or, when @p World is given,
-	 * by an actor reference first (so `object-get-data` can target a live actor by label). Returns null
-	 * when nothing matches.
+	 * Resolve a generic UObject by an actor reference first (so a live actor can be targeted by label), then by
+	 * object path (LoadObjectQuiet). Returns null when nothing matches.
 	 */
 	UNREALMCPRUNTIME_API UObject* ResolveObject(const FString& ObjectRef, UWorld* World = nullptr);
-
-	/** A short JSON identity block for an actor: { name, label, class, path }. */
-	UNREALMCPRUNTIME_API TSharedPtr<FJsonObject> ActorIdentity(const AActor* Actor);
-
-	/** A short JSON identity block for a component: { name, class, path }. */
-	UNREALMCPRUNTIME_API TSharedPtr<FJsonObject> ComponentIdentity(const UActorComponent* Component);
 }

@@ -149,7 +149,7 @@ void FUnrealMcpRqlSpec::Define()
 
 	Describe("tools", [this]()
 	{
-		It("registers rql-query, rql-mutate and rql-schema as standard core tools with the unreal-rql skill body", [this]()
+		It("registers rql-query, rql-mutate and rql-schema as standard core tools; rql-query ships the unreal-rql skill", [this]()
 		{
 			FUnrealMcpToolRegistry Registry;
 			UnrealMcpRqlTools::Register(Registry);
@@ -162,10 +162,15 @@ void FUnrealMcpRqlSpec::Define()
 			TestTrue(TEXT("query is read-only"), Query->bReadOnlyHint);
 			TestTrue(TEXT("mutate is destructive"), Mutate->bDestructiveHint);
 			TestTrue(TEXT("standard surface"), Query->ToolType == EUnrealMcpToolType::Standard);
-			TestTrue(TEXT("skill body is the RQL guide"), Query->SkillBody.Contains(TEXT("# RQL - query and change the Unreal Editor")));
-			TestTrue(TEXT("skill lists the core sources"), Query->SkillBody.Contains(TEXT("| `actors` |")));
-			TestTrue(TEXT("descriptor ships the skill body"), Query->ToDescriptorJson()->HasField(TEXT("skillBody")));
-			TestFalse(TEXT("other tools ship none"), Schema->ToDescriptorJson()->HasField(TEXT("skillBody")));
+			TestEqual(TEXT("rql roles"), Query->Rql + Mutate->Rql + Schema->Rql, FString(TEXT("querymutateschema")));
+			if (!TestEqual(TEXT("one skill"), Query->Skills.Num(), 1))
+				return;
+			TestEqual(TEXT("skill name"), Query->Skills[0].Name, FString(TEXT("unreal-rql")));
+			TestTrue(TEXT("skill is the RQL guide"), Query->Skills[0].Markdown.Contains(TEXT("# RQL - query and change the Unreal Editor")));
+			TestTrue(TEXT("skill lists the core sources"), Query->Skills[0].Markdown.Contains(TEXT("| `actors` |")));
+			const TSharedPtr<FJsonObject> Descriptor = Query->ToDescriptorJson();
+			TestTrue(TEXT("descriptor ships the skill and the role"), Descriptor->HasField(TEXT("skills")) && Descriptor->GetStringField(TEXT("rql")) == TEXT("query"));
+			TestFalse(TEXT("other tools ship no skill"), Schema->ToDescriptorJson()->HasField(TEXT("skills")));
 		});
 
 		It("answers a call without a parsed plan with an unsupported diagnostic", [this]()
@@ -309,10 +314,20 @@ void FUnrealMcpRqlSpec::Define()
 			// unreal.find("RqlSpecLamp") | select Label
 			const TSharedPtr<FJsonObject> ByName = Exec(TEXT(R"RQL({"rql":"0.1","source":{"call":"find","on":{"path":["unreal"]},"args":[{"lit":"RqlSpecLamp"}]},"stages":[{"op":"select","fields":[{"name":"Label","expr":{"path":["Label"]}}]}]})RQL"));
 			TestEqual(*FString::Printf(TEXT("unreal.find (%s)"), *Codes(ByName)), CellText(ByName, 0, 0), FString(TEXT("RqlSpecLamp")));
+			// unreal.find("RqlSpecLamp") | select $ref
+			const TSharedPtr<FJsonObject> RefRow = Exec(TEXT(R"RQL({"rql":"0.1","source":{"call":"find","on":{"path":["unreal"]},"args":[{"lit":"RqlSpecLamp"}]},"stages":[{"op":"select","fields":[{"name":"$ref","expr":{"path":[{"meta":"ref"}]}}]}]})RQL"));
+			const FString Ref = CellText(RefRow, 0, 0);
+			TestTrue(*FString::Printf(TEXT("a PointLight ref (%s)"), *Ref), Ref.StartsWith(TEXT("PointLight#")));
 			// ref("PointLight#<id>") | select Label
-			const FString RefPlan = FString::Printf(TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"PointLight#%u"}]},"stages":[{"op":"select","fields":[{"name":"Label","expr":{"path":["Label"]}}]}]})RQL"), Found[0]->GetUniqueID());
+			const FString RefPlan = FString::Printf(TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"%s"}]},"stages":[{"op":"select","fields":[{"name":"Label","expr":{"path":["Label"]}}]}]})RQL"), *Ref);
 			const TSharedPtr<FJsonObject> ByRef = Exec(RefPlan);
 			TestEqual(*FString::Printf(TEXT("ref (%s)"), *Codes(ByRef)), CellText(ByRef, 0, 0), FString(TEXT("RqlSpecLamp")));
+
+			// A destroyed actor's ref never resolves to another object (the id carries the slot's serial number).
+			Found[0]->GetWorld()->EditorDestroyActor(Found[0], true);
+			SpawnLamp();
+			const TSharedPtr<FJsonObject> Stale = Exec(RefPlan);
+			TestEqual(TEXT("a stale ref finds nothing"), RowCount(Stale), 0);
 		});
 
 		It("writes and reads the editor selection", [this]()
@@ -381,7 +396,8 @@ void FUnrealMcpRqlSpec::Define()
 			{
 				const TSharedPtr<FJsonObject> Entry = Light->GetArrayField(TEXT("types"))[0]->AsObject();
 				TestEqual(TEXT("type"), Entry->GetObjectField(TEXT("type"))->GetStringField(TEXT("name")), FString(TEXT("PointLight")));
-				TestEqual(TEXT("shared base"), Entry->GetObjectField(TEXT("shared"))->GetStringField(TEXT("name")), FString(TEXT("Actor")));
+				TestEqual(TEXT("shared = the base"), Entry->GetObjectField(TEXT("shared"))->GetStringField(TEXT("name")),
+					APointLight::StaticClass()->GetSuperClass()->GetName());
 			}
 			const TSharedPtr<FJsonObject> Vector = Parse(UnrealMcpRqlTools::Schema(TEXT("FVector"), bOk));
 			TestTrue(TEXT("C++ spelling resolves the struct"), bOk && Vector.IsValid());

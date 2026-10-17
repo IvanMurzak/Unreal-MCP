@@ -12,7 +12,9 @@
 #include "Editor.h"
 #include "EngineUtils.h"
 #include "Engine/World.h"
-#include "Features/IModularFeatures.h"
+#include "UnrealMcpRqlTools.h"
+
+#include "Dom/JsonObject.h"
 #include "GameFramework/Actor.h"
 #include "Tools/UnrealMcpObjectRef.h"
 #include "UObject/Package.h"
@@ -63,24 +65,10 @@ namespace UnrealMcpRqlSessionLocal
 		}
 	}
 
-	FString TypeLabel(const rql::Value& Value)
+	FString TypeLabel(const FUnrealMcpRqlSession::FEntry& Entry)
 	{
-		if (Value.is_list())
-		{
-			const rql::TypeDescriptor* Declared = Value.list().type();
-			if (Declared && Declared->element)
-				return FString(TEXT("list of ")) + UnrealMcpRqlFromStd(Declared->element->friendly_name());
-			if (Value.list().size() > 0)
-			{
-				const rql::Value First = Value.list().at(0);
-				if (First.type())
-					return FString(TEXT("list of ")) + UnrealMcpRqlFromStd(First.type()->name);
-			}
-			return TEXT("list");
-		}
-		if (Value.type())
-			return UnrealMcpRqlFromStd(Value.type()->name);
-		return Value.is_null() ? FString(TEXT("null")) : UnrealMcpRqlFromStd(rql::type_name_of(Value));
+		const FString Name = Entry.Type ? UnrealMcpRqlFromStd(Entry.Type->name) : FString(TEXT("any"));
+		return Entry.bList ? FString(TEXT("list of ")) + Name : Name;
 	}
 
 	FString Cell(const FString& Text)
@@ -94,29 +82,26 @@ namespace UnrealMcpRqlSessionLocal
 	public:
 		explicit FModuleContext(FUnrealMcpRqlSession& InSession) : Session(InSession) {}
 
-		virtual void AddObjectSource(const FString& Name, const FString& Description, TFunction<UObject*()> Getter) override
+		virtual void AddObjectSource(const FString& Name, const FString& Description, UClass* Class, TFunction<UObject*()> Getter) override
 		{
 			FUnrealMcpRqlTypes* Types = &Session.Types();
-			Session.AddSource(Name, FString(), Description, [Types, Getter]() { return Types->WrapObject(Getter ? Getter() : nullptr); });
+			Session.AddSource(Name, Types->ForClass(Class ? Class : UObject::StaticClass()), /*bList*/ false, Description,
+				[Types, Getter]() { return Types->WrapObject(Getter ? Getter() : nullptr); });
 		}
 
-		virtual void AddObjectListSource(const FString& Name, const FString& Description, TFunction<TArray<UObject*>()> Getter) override
+		virtual void AddObjectListSource(const FString& Name, const FString& Description, UClass* ElementClass,
+			TFunction<TArray<UObject*>()> Getter) override
 		{
 			FUnrealMcpRqlTypes* Types = &Session.Types();
-			Session.AddSource(Name, FString(), Description, [Types, Getter]()
-			{
-				return Types->WrapObjects(Getter ? Getter() : TArray<UObject*>());
-			});
+			Session.AddSource(Name, Types->ForClass(ElementClass ? ElementClass : UObject::StaticClass()), /*bList*/ true, Description,
+				[Types, Getter]() { return Types->WrapObjects(Getter ? Getter() : TArray<UObject*>()); });
 		}
 
 		virtual void AddAssetSource(const FString& Name, const FString& Description, UClass* AssetClass) override
 		{
 			FUnrealMcpRqlTypes* Types = &Session.Types();
-			const FString Type = AssetClass ? FString(TEXT("list of ")) + AssetClass->GetName() : FString(TEXT("list"));
-			Session.AddSource(Name, Type, Description, [Types, AssetClass]()
-			{
-				return UnrealMcpRqlAssetList(*Types, AssetClass, FString());
-			});
+			Session.AddSource(Name, Types->ForClass(AssetClass ? AssetClass : UObject::StaticClass()), /*bList*/ true, Description,
+				[Types, AssetClass]() { return UnrealMcpRqlAssetList(*Types, AssetClass, FString()); });
 		}
 
 		virtual void AddApiClass(UClass* Class, const FString& TypeName) override
@@ -194,13 +179,13 @@ FUnrealMcpRqlSession::FUnrealMcpRqlSession()
 	FUnrealMcpRqlTypes* TypeProvider = TypesPtr.Get();
 	// Liveness from the weak pointer every object value carries: a destroyed (garbage) actor reads as null.
 	RqlEngine.is_alive = [TypeProvider](const rql::Value& Object) { return TypeProvider->IsAlive(Object); };
-	// "PointLight#1234": the id is UObject::GetUniqueID(), resolved without searching the sources.
+	// "PointLight#1234": the id is FUnrealMcpRqlTypes::IdOf (object slot + serial), resolved without searching the sources.
 	RqlEngine.resolve_stable_ref = [TypeProvider](const std::string& Type, const std::string& Id) -> rql::Value
 	{
-		int32 Parsed = 0;
+		int64 Parsed = 0;
 		if (!LexTryParseString(Parsed, *UnrealMcpRqlFromStd(Id)))
 			return rql::Value::missing();
-		UObject* Object = TypeProvider->FindById(Parsed);
+		UObject* Object = FUnrealMcpRqlTypes::FindById(Parsed);
 		if (!Object)
 			return rql::Value::missing();
 		rql::Value Wrapped = TypeProvider->WrapObject(Object);
@@ -254,14 +239,11 @@ void FUnrealMcpRqlSession::ConfigureMutations()
 
 void FUnrealMcpRqlSession::ConfigureModules()
 {
-	TArray<IUnrealMcpRqlModule*> Modules = IModularFeatures::Get().GetModularFeatureImplementations<IUnrealMcpRqlModule>(
-		IUnrealMcpRqlModule::GetModularFeatureName());
-	Modules.Sort([](const IUnrealMcpRqlModule& A, const IUnrealMcpRqlModule& B) { return A.GetRqlModuleName() < B.GetRqlModuleName(); });
 	FModuleContext Context(*this);
-	for (IUnrealMcpRqlModule* Module : Modules)
+	for (IUnrealMcpRqlModule* Module : UnrealMcpRqlTools::Modules())
 	{
-		if (!Module)
-			continue;
+		if (!UnrealMcpRqlTools::IsModuleEnabled(*Module))
+			continue; // its extension is disabled in the Extensions window
 		Module->ConfigureRql(Context);
 		const FString Extension = Module->GetExtensionId();
 		const FString Version = Module->GetExtensionVersion();
@@ -279,16 +261,17 @@ void FUnrealMcpRqlSession::CloseTransaction()
 	TransactionIndex = INDEX_NONE;
 }
 
-void FUnrealMcpRqlSession::AddSource(const FString& Name, const FString& Type, const FString& Description, std::function<rql::Value()> Getter)
+void FUnrealMcpRqlSession::AddSource(const FString& Name, const rql::TypeDescriptor* Type, bool bList, const FString& Description,
+	std::function<rql::Value()> Getter)
 {
 	EnginePtr->add_source(UnrealMcpRqlToStd(Name), std::move(Getter), UnrealMcpRqlToStd(Description));
-	SourceEntries.Add({ Name, Type, Description });
+	SourceEntries.Add({ Name, Type, bList, Description });
 }
 
 void FUnrealMcpRqlSession::AddFunction(const FString& Name, const FString& Description, rql::FunctionHandler Handler)
 {
 	EnginePtr->add_function(UnrealMcpRqlToStd(Name), std::move(Handler));
-	FunctionEntries.Add({ Name, FString(), Description });
+	FunctionEntries.Add({ Name, nullptr, false, Description });
 }
 
 void FUnrealMcpRqlSession::AddGuide(const FString& Topic, const FString& Markdown)
@@ -408,77 +391,58 @@ bool FUnrealMcpRqlSession::FunctionSource(rql::QueryPlan& Plan, rql::QueryResult
 
 FString FUnrealMcpRqlSession::Schema(const FString& TypeName, bool& bOutOk)
 {
-	FUnrealMcpRqlTypes& T = *TypesPtr;
 	rql::Json Root = rql::Json::object();
 	bOutOk = true;
 
-	// The classes present in the editor world (with counts), like Unity's component types of the loaded scenes.
+	// The classes present in the editor world (with counts), like Unity's component types of the loaded scenes: only for
+	// the overview and the unknown-type candidates. Most frequent first, then by name (the chain fixture records it).
 	TMap<FString, int32> ActorClasses;
 	TMap<FString, int32> ComponentClasses;
-	if (UWorld* World = FUnrealMcpObjectRef::GetEditorWorld())
+	auto CountPresentClasses = [&ActorClasses, &ComponentClasses]()
 	{
-		for (TActorIterator<AActor> It(World); It; ++It)
+		if (UWorld* World = FUnrealMcpObjectRef::GetEditorWorld())
 		{
-			AActor* Actor = *It;
-			if (!IsValid(Actor))
-				continue;
-			ActorClasses.FindOrAdd(Actor->GetClass()->GetName())++;
-			TArray<UActorComponent*> Components;
-			Actor->GetComponents(Components);
-			for (UActorComponent* Component : Components)
+			for (TActorIterator<AActor> It(World); It; ++It)
 			{
-				if (Component)
+				AActor* Actor = *It;
+				if (!IsValid(Actor))
+					continue;
+				ActorClasses.FindOrAdd(Actor->GetClass()->GetName())++;
+				Actor->ForEachComponent(/*bIncludeFromChildActors*/ false, [&ComponentClasses](UActorComponent* Component)
+				{
 					ComponentClasses.FindOrAdd(Component->GetClass()->GetName())++;
+				});
 			}
 		}
-	}
-	// Most frequent first, then by name: deterministic output (the chain fixture records it).
-	auto ByCount = [](TMap<FString, int32>& Counts)
-	{
-		Counts.KeySort([](const FString& A, const FString& B) { return A < B; });
-		Counts.ValueStableSort([](int32 A, int32 B) { return A > B; });
+		for (TMap<FString, int32>* Counts : { &ActorClasses, &ComponentClasses })
+		{
+			Counts->KeySort([](const FString& A, const FString& B) { return A < B; });
+			Counts->ValueStableSort([](int32 A, int32 B) { return A > B; });
+		}
 	};
-	ByCount(ActorClasses);
-	ByCount(ComponentClasses);
 
 	const FString Wanted = TypeName.TrimStartAndEnd();
 	if (!Wanted.IsEmpty())
 	{
-		const rql::TypeDescriptor* Found = T.FindByName(Wanted);
+		const rql::TypeDescriptor* Found = TypesPtr->FindByName(Wanted);
 		if (!Found)
 		{
 			// A source name ("console") stands for the type of its items.
-			for (const FEntry& Entry : SourceEntries)
-			{
-				if (!Entry.Name.Equals(Wanted, ESearchCase::IgnoreCase))
-					continue;
-				const rql::SourceRegistration* Source = EnginePtr->find_source(UnrealMcpRqlToStd(Entry.Name));
-				try
-				{
-					const rql::Value Value = Source ? Source->getter() : rql::Value();
-					if (Value.is_list() && Value.list().size() > 0)
-						Found = Value.list().at(0).type();
-					else if (Value.is_list() && Value.list().type())
-						Found = Value.list().type()->element;
-					else
-						Found = Value.type();
-				}
-				catch (const std::exception&)
-				{
-					Found = nullptr;
-				}
-			}
+			if (const FEntry* Source = SourceEntries.FindByPredicate([&Wanted](const FEntry& Entry) { return Entry.Name.Equals(Wanted, ESearchCase::IgnoreCase); }))
+				Found = Source->Type;
 		}
 		if (!Found || Found->kind == rql::TypeKind::Scalar)
 		{
+			CountPresentClasses();
 			bOutOk = false;
 			Root.set("error", "unknown-type");
 			Root.set("name", UnrealMcpRqlToStd(Wanted));
 			rql::Json Candidates = rql::Json::array();
-			for (const TPair<FString, int32>& Pair : ActorClasses)
-				Candidates.push(rql::Json(UnrealMcpRqlToStd(Pair.Key)));
-			for (const TPair<FString, int32>& Pair : ComponentClasses)
-				Candidates.push(rql::Json(UnrealMcpRqlToStd(Pair.Key)));
+			for (const TMap<FString, int32>* Counts : { &ActorClasses, &ComponentClasses })
+			{
+				for (const TPair<FString, int32>& Pair : *Counts)
+					Candidates.push(rql::Json(UnrealMcpRqlToStd(Pair.Key)));
+			}
 			Root.set("candidates", std::move(Candidates));
 			return UnrealMcpRqlFromStd(Root.dump());
 		}
@@ -491,24 +455,9 @@ FString FUnrealMcpRqlSession::Schema(const FString& TypeName, bool& bOutOk)
 	rql::Json SourceList = rql::Json::array();
 	for (const FEntry& Entry : SourceEntries)
 	{
-		FString Type = Entry.Type;
-		if (Type.IsEmpty())
-		{
-			if (const rql::SourceRegistration* Source = EnginePtr->find_source(UnrealMcpRqlToStd(Entry.Name)))
-			{
-				try
-				{
-					Type = TypeLabel(Source->getter());
-				}
-				catch (const std::exception&)
-				{
-					Type = TEXT("?");
-				}
-			}
-		}
 		rql::Json Item = rql::Json::object();
 		Item.set("name", UnrealMcpRqlToStd(Entry.Name));
-		Item.set("type", UnrealMcpRqlToStd(Type));
+		Item.set("type", UnrealMcpRqlToStd(TypeLabel(Entry)));
 		if (!Entry.Description.IsEmpty())
 			Item.set("description", UnrealMcpRqlToStd(Entry.Description));
 		SourceList.push(std::move(Item));
@@ -525,6 +474,7 @@ FString FUnrealMcpRqlSession::Schema(const FString& TypeName, bool& bOutOk)
 	}
 	Root.set("functions", std::move(FunctionList));
 
+	CountPresentClasses();
 	auto Present = [](const TMap<FString, int32>& Counts)
 	{
 		rql::Json List = rql::Json::array();
@@ -543,11 +493,10 @@ FString FUnrealMcpRqlSession::Schema(const FString& TypeName, bool& bOutOk)
 	Root.set("actorClasses", Present(ActorClasses));
 	Root.set("componentClasses", Present(ComponentClasses));
 
-	// Actor in full, then SceneComponent without the members every component shares (as Unity-MCP shows GameObject and
-	// Transform): together they explain the member names agents meet first.
+	// Actor and SceneComponent (as Unity-MCP shows GameObject and Transform): the member names agents meet first.
 	rql::Json TypeList = rql::Json::array();
-	TypeList.push(Describe(T.ForClass(AActor::StaticClass())));
-	TypeList.push(Describe(T.ForClass(USceneComponent::StaticClass())));
+	TypeList.push(Describe(TypesPtr->ForClass(AActor::StaticClass())));
+	TypeList.push(Describe(TypesPtr->ForClass(USceneComponent::StaticClass())));
 	Root.set("types", std::move(TypeList));
 	return UnrealMcpRqlFromStd(Root.dump());
 }
@@ -559,20 +508,11 @@ rql::Json FUnrealMcpRqlSession::Describe(const rql::TypeDescriptor* Type)
 		return Entry;
 	TypesPtr->Fill(Type);
 	Entry.set("type", EnginePtr->describe_type(*Type));
-	// The base whose members are summarised once ("+ inherited: ..."): Actor for actors, ActorComponent for components.
-	if (UClass* Class = TypesPtr->ClassOf(Type))
+	// The base: the sidecar lists the type's own members and summarises the inherited ones ("+ inherited from <base>").
+	if (Type->base)
 	{
-		UClass* Shared = nullptr;
-		if (Class != AActor::StaticClass() && Class->IsChildOf(AActor::StaticClass()))
-			Shared = AActor::StaticClass();
-		else if (Class != UActorComponent::StaticClass() && Class->IsChildOf(UActorComponent::StaticClass()))
-			Shared = UActorComponent::StaticClass();
-		if (Shared)
-		{
-			const rql::TypeDescriptor* SharedType = TypesPtr->ForClass(Shared);
-			TypesPtr->Fill(SharedType);
-			Entry.set("shared", EnginePtr->describe_type(*SharedType));
-		}
+		TypesPtr->Fill(Type->base);
+		Entry.set("shared", EnginePtr->describe_type(*Type->base));
 	}
 	return Entry;
 }

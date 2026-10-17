@@ -90,7 +90,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         {
             var json = "{\"rql\":\"0.1\",\"ok\":true,\"kind\":\"rows\",\"columns\":[\"$ref\",\"Label\",\"Location\"]," +
                        "\"rows\":[[{\"$ref\":\"PointLight#5\",\"name\":\"Lamp\"},\"Lamp\",\"(1, 2, 3)\"]],\"total\":1}";
-            var text = Rendered(RqlBridge.Render(RqlBridge.QueryTool, Text(json)));
+            var text = Rendered(RqlBridge.Render(RqlBridge.QueryRole, Text(json)));
             Assert.Equal("1 result\n$ref|Label|Location\nPointLight#5(Lamp)|Lamp|(1, 2, 3)", text);
         }
 
@@ -99,7 +99,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         {
             var json = "{\"rql\":\"0.1\",\"ok\":false,\"diagnostics\":[{\"severity\":\"error\",\"code\":\"readonly-member\"," +
                        "\"message\":\"Name is read-only\",\"hint\":\"set Label instead\"}]}";
-            var response = RqlBridge.Render(RqlBridge.MutateTool, Text(json, ResponseStatus.Error));
+            var response = RqlBridge.Render(RqlBridge.MutateRole, Text(json, ResponseStatus.Error));
             Assert.Equal(ResponseStatus.Error, response.Status);
             Assert.Equal("error readonly-member: Name is read-only — hint: set Label instead", Rendered(response));
         }
@@ -110,24 +110,24 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             var dry = "{\"rql\":\"0.1\",\"ok\":true,\"kind\":\"rows\",\"columns\":[\"$ref\",\"member\",\"old\",\"new\"]," +
                       "\"rows\":[[\"PointLight#5\",\"Intensity\",5000,10000]],\"dryRun\":true}";
             Assert.StartsWith("DRY RUN — nothing changed; 1 result\n$ref|member|old|new\nPointLight#5|Intensity|5000|10000",
-                Rendered(RqlBridge.Render(RqlBridge.MutateTool, Text(dry))));
+                Rendered(RqlBridge.Render(RqlBridge.MutateRole, Text(dry))));
 
             var cut = "{\"rql\":\"0.1\",\"ok\":true,\"kind\":\"rows\",\"columns\":[\"Label\"],\"rows\":[[\"a\"],[\"b\"]],\"total\":70,\"truncated\":true}";
-            Assert.StartsWith("2 of 70 (truncated;", Rendered(RqlBridge.Render(RqlBridge.QueryTool, Text(cut))));
+            Assert.StartsWith("2 of 70 (truncated;", Rendered(RqlBridge.Render(RqlBridge.QueryRole, Text(cut))));
         }
 
         [Fact]
         public void Render_Scalars()
         {
             var json = "{\"rql\":\"0.1\",\"ok\":true,\"kind\":\"scalar\",\"value\":3}";
-            Assert.Equal("3", Rendered(RqlBridge.Render(RqlBridge.QueryTool, Text(json))));
+            Assert.Equal("3", Rendered(RqlBridge.Render(RqlBridge.QueryRole, Text(json))));
         }
 
         [Fact]
         public void Render_LeavesNonRqlAnswersAlone()
         {
             var response = Text("bridge disconnected", ResponseStatus.Error);
-            Assert.Same(response, RqlBridge.Render(RqlBridge.QueryTool, response));
+            Assert.Same(response, RqlBridge.Render(RqlBridge.QueryRole, response));
             Assert.Equal("bridge disconnected", Rendered(response));
         }
 
@@ -190,7 +190,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
                     ["text"] = "{\"rql\":\"0.1\",\"ok\":true,\"kind\":\"scalar\",\"value\":2}",
                 }),
             });
-            var proxy = ProxyToolFactory.Create(new ToolDescriptor { Name = RqlBridge.QueryTool, SkillBody = "# RQL" }, channel);
+            var skill = new ToolSkillDescriptor { Name = "unreal-rql", Description = "d", Markdown = "# RQL" };
+            var proxy = ProxyToolFactory.Create(new ToolDescriptor { Name = "rql-query", Rql = RqlBridge.QueryRole, Skills = new List<ToolSkillDescriptor> { skill } }, channel);
             Assert.Null(proxy.SkillBody); // the unreal-rql skill stays out of tools/list
 
             var response = await proxy.Run("req", Args("{\"query\":\"actors | count\"}"));
@@ -204,7 +205,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         public async Task Proxy_ParseErrorsNeverReachThePlugin()
         {
             var channel = new FakeToolCallChannel();
-            var proxy = ProxyToolFactory.Create(new ToolDescriptor { Name = RqlBridge.MutateTool }, channel);
+            var proxy = ProxyToolFactory.Create(new ToolDescriptor { Name = "rql-mutate", Rql = RqlBridge.MutateRole }, channel);
             var response = await proxy.Run("req", Args("{\"query\":\"actors | set\"}"));
             Assert.Equal(0, channel.Calls);
             Assert.Equal(ResponseStatus.Error, response.Status);
@@ -229,23 +230,45 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         // ------------------------------------------------------------ unreal-rql skill
 
         [Fact]
-        public void SkillGenerator_WritesTheUnrealRqlSkillFromTheQueryToolsSkillBody()
+        public void Descriptor_CarriesTheRqlRoleAndTheShippedSkills()
         {
+            var descriptor = JsonSerializer.Deserialize<ToolDescriptor>(
+                @"{""name"": ""rql-query"", ""rql"": ""query"", ""skills"": [{""name"": ""unreal-rql"", ""description"": ""d"", ""markdown"": ""# RQL""}]}")!;
+            Assert.Equal(RqlBridge.QueryRole, descriptor.Rql);
+            Assert.Equal("unreal-rql", Assert.Single(descriptor.Skills!).Name);
+            Assert.True(RqlBridge.ParsesQuery(descriptor.Rql));
+            Assert.False(RqlBridge.ParsesQuery(RqlBridge.SchemaRole));
+
+            // A new skill text is a changed entry (the registrar re-registers it; the generator writes the new skill).
+            var changed = JsonSerializer.Deserialize<ToolDescriptor>(
+                @"{""name"": ""rql-query"", ""rql"": ""query"", ""skills"": [{""name"": ""unreal-rql"", ""description"": ""d"", ""markdown"": ""# RQL 2""}]}")!;
+            Assert.NotEqual(descriptor.StructuralSignature, changed.StructuralSignature);
+        }
+
+        [Fact]
+        public void SkillGenerator_WritesTheSkillsAToolShips()
+        {
+            var skill = new ToolSkillDescriptor
+            {
+                Name = "unreal-rql",
+                Description = "How to read and change anything in the Unreal Editor with RQL.",
+                Markdown = "# RQL - query and change the Unreal Editor\n\nbody",
+            };
             var tools = new List<ToolDescriptor>
             {
-                new ToolDescriptor { Name = RqlBridge.QueryTool, Title = "RQL / Query", Description = "Run a read-only RQL query.", SkillBody = "# RQL - query and change the Unreal Editor\n\nbody" },
-                new ToolDescriptor { Name = RqlBridge.SchemaTool, Title = "RQL / Schema", Description = "List types." },
+                new ToolDescriptor { Name = "rql-query", Title = "RQL / Query", Description = "Run a read-only RQL query.", Rql = RqlBridge.QueryRole, Skills = new List<ToolSkillDescriptor> { skill } },
+                new ToolDescriptor { Name = "rql-schema", Title = "RQL / Schema", Description = "List types.", Rql = RqlBridge.SchemaRole },
             };
             var result = new SkillFileGenerator().Generate(tools, _root);
             Assert.True(result.Success, result.Error);
             Assert.Equal(3, result.FilesWritten);
 
-            var skill = File.ReadAllText(Path.Combine(_root, RqlBridge.SkillName, "SKILL.md"));
-            Assert.StartsWith("---\nname: unreal-rql\ndescription: \"How to read and change anything in the Unreal Editor with RQL", skill);
-            Assert.Contains("\nmetadata:\n  generated-by: mcp-plugin-dotnet\n---\n\n# RQL - query and change the Unreal Editor\n\nbody\n", skill);
+            var written = File.ReadAllText(Path.Combine(_root, "unreal-rql", "SKILL.md"));
+            Assert.Equal("---\nname: unreal-rql\ndescription: \"How to read and change anything in the Unreal Editor with RQL.\"\n"
+                + "metadata:\n  generated-by: mcp-plugin-dotnet\n---\n\n# RQL - query and change the Unreal Editor\n\nbody\n", written);
 
             // The tool's own page documents the tool (its description), not the whole guide.
-            var page = File.ReadAllText(Path.Combine(_root, RqlBridge.QueryTool, "SKILL.md"));
+            var page = File.ReadAllText(Path.Combine(_root, "rql-query", "SKILL.md"));
             Assert.Contains("Run a read-only RQL query.", page);
             Assert.DoesNotContain("# RQL - query and change", page);
         }

@@ -4,7 +4,6 @@
 #include "UnrealMcpRqlEditorApi.h"
 
 #include "IUnrealMcpRqlModule.h"
-#include "UnrealMcpRqlTypes.h"
 #include "Tools/UnrealMcpLogCollector.h"
 #include "Tools/UnrealMcpObjectRef.h"
 
@@ -34,18 +33,23 @@
 #include "Modules/ModuleManager.h"
 #include "UObject/GCObjectScopeGuard.h"
 #include "UObject/Package.h"
-#include "UObject/UObjectIterator.h"
+
+#include <type_traits>
 
 namespace UnrealMcpRqlEditorApiLocal
 {
-	IAssetRegistry& AssetRegistry()
-	{
-		return FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
-	}
-
 	IAssetTools& AssetTools()
 	{
 		return FModuleManager::LoadModuleChecked<FAssetToolsModule>(TEXT("AssetTools")).Get();
+	}
+
+	/** Report @p Message as the call's failure (UnrealMcpRql::Fail) and return the "nothing" value of the call. */
+	template <typename T = void>
+	T Failed(const FString& Message)
+	{
+		UnrealMcpRql::Fail(Message);
+		if constexpr (!std::is_void_v<T>)
+			return T();
 	}
 
 	/** Writes stay inside project / plugin content: /Engine, /Script and /Temp are refused. */
@@ -59,24 +63,7 @@ namespace UnrealMcpRqlEditorApiLocal
 		return true;
 	}
 
-	/** "/Game/Foo/Bar" (or "/Game/Foo/Bar.Bar") into "/Game/Foo" + "Bar". */
-	bool SplitAssetPath(const FString& InPath, FString& OutFolder, FString& OutName)
-	{
-		FString Work = InPath.TrimStartAndEnd();
-		int32 Dot = INDEX_NONE;
-		if (Work.FindChar(TEXT('.'), Dot))
-			Work.LeftInline(Dot);
-		while (Work.EndsWith(TEXT("/")))
-			Work.LeftChopInline(1);
-		int32 Slash = INDEX_NONE;
-		if (!Work.FindLastChar(TEXT('/'), Slash) || Slash <= 0 || Slash == Work.Len() - 1)
-			return false;
-		OutFolder = Work.Left(Slash);
-		OutName = Work.Mid(Slash + 1);
-		return true;
-	}
-
-	/** Long package name of a level asset path; false + reason for a malformed path. */
+	/** Long package name of an asset path ("/Game/Maps/Arena" or its object path); false + reason for a malformed path. */
 	bool ToPackageName(const FString& Path, FString& OutPackage, FString& OutError)
 	{
 		OutPackage = Path.TrimStartAndEnd();
@@ -87,6 +74,22 @@ namespace UnrealMcpRqlEditorApiLocal
 			OutError = FString::Printf(TEXT("'%s' is not a valid asset path (expected e.g. '/Game/Maps/Arena')"), *Path);
 			return false;
 		}
+		return true;
+	}
+
+	/**
+	 * The folder and name of a new asset at @p Path: a valid, writable (project / plugin) package path where no asset is
+	 * yet. False after reporting why (UnrealMcpRql::Fail).
+	 */
+	bool ValidateNewAssetPath(const FString& Path, FString& OutFolder, FString& OutName)
+	{
+		FString Package, Error;
+		if (!ToPackageName(Path, Package, Error) || !IsWritableRoot(Package))
+			return Failed<bool>(FString::Printf(TEXT("'%s' is not a writable asset path (use e.g. /Game/Folder/Name)"), *Path));
+		if (UEditorAssetLibrary::DoesAssetExist(Package))
+			return Failed<bool>(FString::Printf(TEXT("'%s' already exists"), *Package));
+		OutFolder = FPackageName::GetLongPackagePath(Package);
+		OutName = FPackageName::GetShortName(Package);
 		return true;
 	}
 
@@ -108,44 +111,27 @@ namespace UnrealMcpRqlEditorApiLocal
 		}
 		return true;
 	}
-
-	UWorld* EditorWorld()
-	{
-		return FUnrealMcpObjectRef::GetEditorWorld();
-	}
 }
 
 using namespace UnrealMcpRqlEditorApiLocal;
 
 AActor* UUnrealMcpRqlEditorApi::SpawnActor(const FString& ClassName, const FString& Label, FVector Location, FRotator Rotation, AActor* Parent)
 {
-	UWorld* World = EditorWorld();
+	UWorld* World = FUnrealMcpObjectRef::GetEditorWorld();
 	if (!World)
-	{
-		UnrealMcpRql::Fail(TEXT("no editor world"));
-		return nullptr;
-	}
-	UClass* Class = UnrealMcpRqlResolveClass(ClassName);
+		return Failed<AActor*>(TEXT("no editor world"));
+	UClass* Class = FUnrealMcpObjectRef::ResolveClass(ClassName);
 	if (!Class || !Class->IsChildOf(AActor::StaticClass()))
-	{
-		UnrealMcpRql::Fail(FString::Printf(TEXT("'%s' is not an actor class (try a class name such as \"PointLight\" or a Blueprint path)"), *ClassName));
-		return nullptr;
-	}
+		return Failed<AActor*>(FString::Printf(TEXT("'%s' is not an actor class (try a class name such as \"PointLight\" or a Blueprint path)"), *ClassName));
 	if (Class->HasAnyClassFlags(CLASS_Abstract))
-	{
-		UnrealMcpRql::Fail(FString::Printf(TEXT("'%s' is abstract"), *Class->GetName()));
-		return nullptr;
-	}
+		return Failed<AActor*>(FString::Printf(TEXT("'%s' is abstract"), *Class->GetName()));
 	// UWorld::SpawnActor rather than the editor actor subsystem: no viewport snapping (headless-safe). The open RQL
 	// transaction records the transactional actor, so Ctrl+Z removes it.
 	FActorSpawnParameters Params;
 	Params.ObjectFlags |= RF_Transactional;
 	AActor* Actor = World->SpawnActor<AActor>(Class, Location, Rotation, Params);
 	if (!Actor)
-	{
-		UnrealMcpRql::Fail(FString::Printf(TEXT("could not spawn %s"), *Class->GetName()));
-		return nullptr;
-	}
+		return Failed<AActor*>(FString::Printf(TEXT("could not spawn %s"), *Class->GetName()));
 	if (!Label.IsEmpty())
 		FActorLabelUtilities::SetActorLabelUnique(Actor, Label);
 	if (Parent)
@@ -154,8 +140,7 @@ AActor* UUnrealMcpRqlEditorApi::SpawnActor(const FString& ClassName, const FStri
 		if (Actor->GetAttachParentActor() != Parent)
 		{
 			World->EditorDestroyActor(Actor, /*bShouldModifyLevel*/ true);
-			UnrealMcpRql::Fail(FString::Printf(TEXT("could not attach to %s (the new actor has no root component)"), *Parent->GetActorLabel()));
-			return nullptr;
+			return Failed<AActor*>(FString::Printf(TEXT("could not attach to %s (the new actor has no root component)"), *Parent->GetActorLabel()));
 		}
 	}
 	return Actor;
@@ -164,54 +149,34 @@ AActor* UUnrealMcpRqlEditorApi::SpawnActor(const FString& ClassName, const FStri
 UWorld* UUnrealMcpRqlEditorApi::OpenLevel(const FString& Path)
 {
 	if (!GEditor)
-	{
-		UnrealMcpRql::Fail(TEXT("no editor"));
-		return nullptr;
-	}
+		return Failed<UWorld*>(TEXT("no editor"));
 	FString File, Error;
 	if (!LevelFile(Path, File, Error))
-	{
-		UnrealMcpRql::Fail(Error);
-		return nullptr;
-	}
+		return Failed<UWorld*>(Error);
 	UWorld* Opened = UEditorLoadingAndSavingUtils::LoadMap(File);
-	if (!Opened)
-		UnrealMcpRql::Fail(FString::Printf(TEXT("could not open '%s'"), *Path));
-	return Opened;
+	return Opened ? Opened : Failed<UWorld*>(FString::Printf(TEXT("could not open '%s'"), *Path));
 }
 
 UWorld* UUnrealMcpRqlEditorApi::NewLevel(const FString& Path, const FString& Template)
 {
 	if (!GEditor)
-	{
-		UnrealMcpRql::Fail(TEXT("no editor"));
-		return nullptr;
-	}
+		return Failed<UWorld*>(TEXT("no editor"));
 	// Validate everything before the current world is replaced.
 	FString Package, Error;
 	if (!Path.IsEmpty())
 	{
 		if (!ToPackageName(Path, Package, Error))
-		{
-			UnrealMcpRql::Fail(Error);
-			return nullptr;
-		}
+			return Failed<UWorld*>(Error);
 		FString Existing;
 		if (FPackageName::DoesPackageExist(Package, &Existing) && !Existing.EndsWith(FPackageName::GetMapPackageExtension(), ESearchCase::IgnoreCase))
-		{
-			UnrealMcpRql::Fail(FString::Printf(TEXT("'%s' exists and is not a level"), *Package));
-			return nullptr;
-		}
+			return Failed<UWorld*>(FString::Printf(TEXT("'%s' exists and is not a level"), *Package));
 	}
 	UWorld* World = nullptr;
 	if (!Template.IsEmpty())
 	{
 		FString TemplateFile;
 		if (!LevelFile(Template, TemplateFile, Error))
-		{
-			UnrealMcpRql::Fail(Error);
-			return nullptr;
-		}
+			return Failed<UWorld*>(Error);
 		World = UEditorLoadingAndSavingUtils::NewMapFromTemplate(TemplateFile, /*bSaveExistingMap*/ false);
 	}
 	else
@@ -219,215 +184,134 @@ UWorld* UUnrealMcpRqlEditorApi::NewLevel(const FString& Path, const FString& Tem
 		World = GEditor->NewMap(); // the engine automation's headless-safe in-memory world
 	}
 	if (!World)
-	{
-		UnrealMcpRql::Fail(TEXT("could not create the level"));
-		return nullptr;
-	}
+		return Failed<UWorld*>(TEXT("could not create the level"));
 	if (!Package.IsEmpty() && !UEditorLoadingAndSavingUtils::SaveMap(World, Package))
 		UnrealMcpRql::Fail(FString::Printf(TEXT("created the level but could not save it to '%s'"), *Package));
 	return World;
 }
 
-bool UUnrealMcpRqlEditorApi::SaveLevel(const FString& Path)
+void UUnrealMcpRqlEditorApi::SaveLevel(const FString& Path)
 {
-	UWorld* World = EditorWorld();
+	UWorld* World = FUnrealMcpObjectRef::GetEditorWorld();
 	if (!World)
-	{
-		UnrealMcpRql::Fail(TEXT("no editor world"));
-		return false;
-	}
+		return Failed(TEXT("no editor world"));
 	if (!Path.IsEmpty())
 	{
 		FString Package, Error;
 		if (!ToPackageName(Path, Package, Error))
-		{
-			UnrealMcpRql::Fail(Error);
-			return false;
-		}
+			return Failed(Error);
 		if (!UEditorLoadingAndSavingUtils::SaveMap(World, Package))
-		{
-			UnrealMcpRql::Fail(FString::Printf(TEXT("could not save the level to '%s'"), *Package));
-			return false;
-		}
-		return true;
+			Failed(FString::Printf(TEXT("could not save the level to '%s'"), *Package));
+		return;
 	}
 	// A never-saved level would open the interactive Save-As dialog (modal UI on the game thread): refuse instead.
 	const ULevel* Current = World->GetCurrentLevel();
 	const UPackage* Package = Current ? Current->GetOutermost() : nullptr;
 	if (!Package || !FPackageName::DoesPackageExist(Package->GetName()))
-	{
-		UnrealMcpRql::Fail(TEXT("the current level was never saved: call SaveLevel(\"/Game/Maps/Name\")"));
-		return false;
-	}
+		return Failed(TEXT("the current level was never saved: call SaveLevel(\"/Game/Maps/Name\")"));
 	if (!UEditorLoadingAndSavingUtils::SaveCurrentLevel())
-	{
-		UnrealMcpRql::Fail(TEXT("the current level could not be saved (checkout or write failure)"));
-		return false;
-	}
-	return true;
+		Failed(TEXT("the current level could not be saved (checkout or write failure)"));
 }
 
-bool UUnrealMcpRqlEditorApi::SaveAll()
+void UUnrealMcpRqlEditorApi::SaveAll()
 {
 	// Never-saved maps would prompt for a location: SaveDirtyPackages skips the prompt when it cannot ask.
 	if (!UEditorLoadingAndSavingUtils::SaveDirtyPackages(/*bSaveMapPackages*/ true, /*bSaveContentPackages*/ true))
-	{
-		UnrealMcpRql::Fail(TEXT("some packages could not be saved (never-saved levels need SaveLevel(path))"));
-		return false;
-	}
-	return true;
+		Failed(TEXT("some packages could not be saved (never-saved levels need SaveLevel(path))"));
 }
 
-bool UUnrealMcpRqlEditorApi::UnloadSublevel(ULevel* Level)
+void UUnrealMcpRqlEditorApi::UnloadSublevel(ULevel* Level)
 {
-	UWorld* World = EditorWorld();
+	UWorld* World = FUnrealMcpObjectRef::GetEditorWorld();
 	if (!World || !Level)
-	{
-		UnrealMcpRql::Fail(TEXT("no level"));
-		return false;
-	}
+		return Failed(TEXT("no level"));
 	if (Level == World->PersistentLevel)
-	{
-		UnrealMcpRql::Fail(TEXT("the persistent level cannot be unloaded"));
-		return false;
-	}
+		return Failed(TEXT("the persistent level cannot be unloaded"));
 	if (!UEditorLevelUtils::RemoveLevelFromWorld(Level))
-	{
-		UnrealMcpRql::Fail(TEXT("could not unload the sublevel"));
-		return false;
-	}
-	return true;
+		Failed(TEXT("could not unload the sublevel"));
 }
 
 UObject* UUnrealMcpRqlEditorApi::CopyAsset(const FString& Source, const FString& Destination)
 {
 	FString Folder, Name;
 	if (!UEditorAssetLibrary::DoesAssetExist(Source))
-		UnrealMcpRql::Fail(FString::Printf(TEXT("no asset at '%s'"), *Source));
-	else if (!SplitAssetPath(Destination, Folder, Name) || !IsWritableRoot(Destination))
-		UnrealMcpRql::Fail(FString::Printf(TEXT("'%s' is not a writable asset path (use e.g. /Game/...)"), *Destination));
-	else if (UEditorAssetLibrary::DoesAssetExist(Destination))
-		UnrealMcpRql::Fail(FString::Printf(TEXT("'%s' already exists"), *Destination));
-	else if (UObject* Copy = UEditorAssetLibrary::DuplicateAsset(Source, Destination))
-		return Copy;
-	else
-		UnrealMcpRql::Fail(FString::Printf(TEXT("could not copy '%s'"), *Source));
-	return nullptr;
+		return Failed<UObject*>(FString::Printf(TEXT("no asset at '%s'"), *Source));
+	if (!ValidateNewAssetPath(Destination, Folder, Name))
+		return nullptr;
+	UObject* Copy = UEditorAssetLibrary::DuplicateAsset(Source, Destination);
+	return Copy ? Copy : Failed<UObject*>(FString::Printf(TEXT("could not copy '%s'"), *Source));
 }
 
-bool UUnrealMcpRqlEditorApi::MoveAsset(const FString& Source, const FString& Destination)
+void UUnrealMcpRqlEditorApi::MoveAsset(const FString& Source, const FString& Destination)
 {
 	FString Folder, Name;
 	if (!UEditorAssetLibrary::DoesAssetExist(Source))
-		UnrealMcpRql::Fail(FString::Printf(TEXT("no asset at '%s'"), *Source));
-	else if (!IsWritableRoot(Source) || !SplitAssetPath(Destination, Folder, Name) || !IsWritableRoot(Destination))
-		UnrealMcpRql::Fail(TEXT("both paths must be writable asset paths (e.g. /Game/...)"));
-	else if (UEditorAssetLibrary::DoesAssetExist(Destination))
-		UnrealMcpRql::Fail(FString::Printf(TEXT("'%s' already exists"), *Destination));
-	else if (UEditorAssetLibrary::RenameAsset(Source, Destination))
-		return true;
-	else
-		UnrealMcpRql::Fail(FString::Printf(TEXT("could not move '%s'"), *Source));
-	return false;
+		return Failed(FString::Printf(TEXT("no asset at '%s'"), *Source));
+	if (!IsWritableRoot(Source))
+		return Failed(FString::Printf(TEXT("'%s' is engine content"), *Source));
+	if (ValidateNewAssetPath(Destination, Folder, Name) && !UEditorAssetLibrary::RenameAsset(Source, Destination))
+		Failed(FString::Printf(TEXT("could not move '%s'"), *Source));
 }
 
-bool UUnrealMcpRqlEditorApi::DeleteAsset(const FString& Path, bool bForce)
+void UUnrealMcpRqlEditorApi::DeleteAsset(const FString& Path, bool bForce)
 {
 	if (!UEditorAssetLibrary::DoesAssetExist(Path))
-	{
-		UnrealMcpRql::Fail(FString::Printf(TEXT("no asset at '%s'"), *Path));
-		return false;
-	}
+		return Failed(FString::Printf(TEXT("no asset at '%s'"), *Path));
 	if (!IsWritableRoot(Path))
-	{
-		UnrealMcpRql::Fail(FString::Printf(TEXT("'%s' is engine content"), *Path));
-		return false;
-	}
+		return Failed(FString::Printf(TEXT("'%s' is engine content"), *Path));
 	if (!bForce)
 	{
-		const FAssetData Data = UEditorAssetLibrary::FindAssetData(Path);
-		TArray<FName> Referencers;
-		if (!Data.PackageName.IsNone())
-			AssetRegistry().GetReferencers(Data.PackageName, Referencers);
-		Referencers.Remove(Data.PackageName);
+		TArray<FString> Referencers = UEditorAssetLibrary::FindPackageReferencersForAsset(Path);
+		Referencers.Remove(UEditorAssetLibrary::FindAssetData(Path).PackageName.ToString());
 		if (Referencers.Num() > 0)
 		{
-			TArray<FString> Names;
-			for (int32 Index = 0; Index < FMath::Min(Referencers.Num(), 5); ++Index)
-				Names.Add(Referencers[Index].ToString());
-			UnrealMcpRql::Fail(FString::Printf(TEXT("referenced by %d package(s) (%s); pass bForce = true to delete anyway"),
-				Referencers.Num(), *FString::Join(Names, TEXT(", "))));
-			return false;
+			const TArray<FString> Shown(Referencers.GetData(), FMath::Min(Referencers.Num(), 5));
+			return Failed(FString::Printf(TEXT("referenced by %d package(s) (%s); pass bForce = true to delete anyway"),
+				Referencers.Num(), *FString::Join(Shown, TEXT(", "))));
 		}
 	}
 	if (!UEditorAssetLibrary::DeleteAsset(Path))
-	{
-		UnrealMcpRql::Fail(FString::Printf(TEXT("could not delete '%s'"), *Path));
-		return false;
-	}
-	return true;
+		Failed(FString::Printf(TEXT("could not delete '%s'"), *Path));
 }
 
-bool UUnrealMcpRqlEditorApi::CreateFolder(const FString& Path)
+void UUnrealMcpRqlEditorApi::CreateFolder(const FString& Path)
 {
 	if (!IsWritableRoot(Path) || !Path.StartsWith(TEXT("/")))
-	{
-		UnrealMcpRql::Fail(FString::Printf(TEXT("'%s' is not a writable content path (e.g. /Game/Props)"), *Path));
-		return false;
-	}
-	if (UEditorAssetLibrary::DoesDirectoryExist(Path))
-		return true;
-	if (!UEditorAssetLibrary::MakeDirectory(Path))
-	{
-		UnrealMcpRql::Fail(FString::Printf(TEXT("could not create '%s'"), *Path));
-		return false;
-	}
-	return true;
+		return Failed(FString::Printf(TEXT("'%s' is not a writable content path (e.g. /Game/Props)"), *Path));
+	if (!UEditorAssetLibrary::DoesDirectoryExist(Path) && !UEditorAssetLibrary::MakeDirectory(Path))
+		Failed(FString::Printf(TEXT("could not create '%s'"), *Path));
 }
 
-bool UUnrealMcpRqlEditorApi::RefreshAssets(const FString& Path, bool bForce)
+void UUnrealMcpRqlEditorApi::RefreshAssets(const FString& Path, bool bForce)
 {
-	AssetRegistry().ScanPathsSynchronous({ Path.IsEmpty() ? FString(TEXT("/Game")) : Path }, bForce);
-	return true;
+	FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get()
+		.ScanPathsSynchronous({ Path.IsEmpty() ? FString(TEXT("/Game")) : Path }, bForce);
 }
 
 UObject* UUnrealMcpRqlEditorApi::CreateAsset(const FString& Path, const FString& ClassName)
 {
 	FString Folder, Name;
-	UClass* Class = UnrealMcpRqlResolveClass(ClassName);
+	UClass* Class = FUnrealMcpObjectRef::ResolveClass(ClassName);
 	if (!Class || Class->HasAnyClassFlags(CLASS_Abstract | CLASS_Deprecated | CLASS_NewerVersionExists)
 		|| Class->IsChildOf(AActor::StaticClass()) || Class->IsChildOf(UActorComponent::StaticClass()))
-	{
-		UnrealMcpRql::Fail(FString::Printf(TEXT("'%s' is not an asset class (actors are spawned: SpawnActor)"), *ClassName));
+		return Failed<UObject*>(FString::Printf(TEXT("'%s' is not an asset class (actors are spawned: SpawnActor)"), *ClassName));
+	if (!ValidateNewAssetPath(Path, Folder, Name))
 		return nullptr;
-	}
-	if (!SplitAssetPath(Path, Folder, Name) || !IsWritableRoot(Path))
+	// The factory of the Content Browser's "New" menu when one creates this class (materials, input actions, data
+	// tables, ...): it sets the asset up as that menu does. Otherwise a plain object in a new package.
+	UClass* FactoryClass = nullptr;
+	for (const UFactory* Default : AssetTools().GetNewAssetFactories())
 	{
-		UnrealMcpRql::Fail(FString::Printf(TEXT("'%s' is not a writable asset path (e.g. /Game/Data/DA_Item)"), *Path));
-		return nullptr;
-	}
-	if (UEditorAssetLibrary::DoesAssetExist(Path))
-	{
-		UnrealMcpRql::Fail(FString::Printf(TEXT("'%s' already exists"), *Path));
-		return nullptr;
-	}
-	// The editor's own factory when one creates this class from nothing (materials, input actions, data tables, ...):
-	// it sets the asset up as the Content Browser's "New" menu does. Otherwise a plain object in a new package.
-	UFactory* Factory = nullptr;
-	for (TObjectIterator<UClass> It; It; ++It)
-	{
-		if (!It->IsChildOf(UFactory::StaticClass()) || It->HasAnyClassFlags(CLASS_Abstract | CLASS_Deprecated | CLASS_NewerVersionExists))
-			continue;
-		const UFactory* Default = It->GetDefaultObject<UFactory>();
-		if (Default && Default->CanCreateNew() && Default->GetSupportedClass() == Class)
+		if (Default && Default->GetSupportedClass() == Class)
 		{
-			Factory = NewObject<UFactory>(GetTransientPackage(), *It);
+			FactoryClass = Default->GetClass();
 			break;
 		}
 	}
 	UObject* Created = nullptr;
-	if (Factory)
+	if (FactoryClass)
 	{
+		UFactory* Factory = NewObject<UFactory>(GetTransientPackage(), FactoryClass);
 		FGCObjectScopeGuard FactoryGuard(Factory);
 		Created = AssetTools().CreateAsset(Name, Folder, Class, Factory);
 	}
@@ -440,52 +324,30 @@ UObject* UUnrealMcpRqlEditorApi::CreateAsset(const FString& Path, const FString&
 			Package->MarkPackageDirty();
 		}
 	}
-	if (!Created)
-		UnrealMcpRql::Fail(FString::Printf(TEXT("could not create a %s at '%s'"), *Class->GetName(), *Path));
-	return Created;
+	return Created ? Created : Failed<UObject*>(FString::Printf(TEXT("could not create a %s at '%s'"), *Class->GetName(), *Path));
 }
 
 UMaterialInstanceConstant* UUnrealMcpRqlEditorApi::CreateMaterialInstance(const FString& Path, UMaterialInterface* Parent)
 {
 	FString Folder, Name;
 	if (!Parent)
-	{
-		UnrealMcpRql::Fail(TEXT("no parent material"));
+		return Failed<UMaterialInstanceConstant*>(TEXT("no parent material"));
+	if (!ValidateNewAssetPath(Path, Folder, Name))
 		return nullptr;
-	}
-	if (!SplitAssetPath(Path, Folder, Name) || !IsWritableRoot(Path))
-	{
-		UnrealMcpRql::Fail(FString::Printf(TEXT("'%s' is not a writable asset path (e.g. /Game/Materials/MI_Red)"), *Path));
-		return nullptr;
-	}
-	if (UEditorAssetLibrary::DoesAssetExist(Path))
-	{
-		UnrealMcpRql::Fail(FString::Printf(TEXT("'%s' already exists"), *Path));
-		return nullptr;
-	}
 	UMaterialInstanceConstantFactoryNew* Factory = NewObject<UMaterialInstanceConstantFactoryNew>();
 	FGCObjectScopeGuard FactoryGuard(Factory);
 	Factory->InitialParent = Parent;
 	UMaterialInstanceConstant* Created = Cast<UMaterialInstanceConstant>(
 		AssetTools().CreateAsset(Name, Folder, UMaterialInstanceConstant::StaticClass(), Factory));
-	if (!Created)
-		UnrealMcpRql::Fail(FString::Printf(TEXT("could not create '%s'"), *Path));
-	return Created;
+	return Created ? Created : Failed<UMaterialInstanceConstant*>(FString::Printf(TEXT("could not create '%s'"), *Path));
 }
 
 TArray<UObject*> UUnrealMcpRqlEditorApi::ImportAsset(const FString& File, const FString& Destination, const FString& Name, bool bReplaceExisting)
 {
-	TArray<UObject*> Imported;
 	if (!FPaths::FileExists(File))
-	{
-		UnrealMcpRql::Fail(FString::Printf(TEXT("no file '%s'"), *File));
-		return Imported;
-	}
+		return Failed<TArray<UObject*>>(FString::Printf(TEXT("no file '%s'"), *File));
 	if (!IsWritableRoot(Destination) || !Destination.StartsWith(TEXT("/")))
-	{
-		UnrealMcpRql::Fail(FString::Printf(TEXT("'%s' is not a writable content folder (e.g. /Game/Imported)"), *Destination));
-		return Imported;
-	}
+		return Failed<TArray<UObject*>>(FString::Printf(TEXT("'%s' is not a writable content folder (e.g. /Game/Imported)"), *Destination));
 	UAssetImportTask* Task = NewObject<UAssetImportTask>();
 	FGCObjectScopeGuard TaskGuard(Task);
 	Task->Filename = File;
@@ -509,6 +371,7 @@ TArray<UObject*> UUnrealMcpRqlEditorApi::ImportAsset(const FString& File, const 
 			Interchange->Set(true, ECVF_SetByCode);
 	};
 	AssetTools().ImportAssetTasks({ Task });
+	TArray<UObject*> Imported;
 	for (UObject* Object : Task->GetObjects())
 	{
 		if (Object)
@@ -519,19 +382,12 @@ TArray<UObject*> UUnrealMcpRqlEditorApi::ImportAsset(const FString& File, const 
 	return Imported;
 }
 
-bool UUnrealMcpRqlEditorApi::SaveAsset(UObject* Asset)
+void UUnrealMcpRqlEditorApi::SaveAsset(UObject* Asset)
 {
 	if (!Asset)
-	{
-		UnrealMcpRql::Fail(TEXT("no asset"));
-		return false;
-	}
+		return Failed(TEXT("no asset"));
 	if (!UEditorAssetLibrary::SaveLoadedAsset(Asset, /*bOnlyIfIsDirty*/ false))
-	{
-		UnrealMcpRql::Fail(FString::Printf(TEXT("could not save %s"), *Asset->GetPathName()));
-		return false;
-	}
-	return true;
+		Failed(FString::Printf(TEXT("could not save %s"), *Asset->GetPathName()));
 }
 
 int32 UUnrealMcpRqlEditorApi::ClearConsole()

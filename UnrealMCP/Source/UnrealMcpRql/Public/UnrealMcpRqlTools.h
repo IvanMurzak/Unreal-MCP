@@ -7,6 +7,7 @@
 #include "Templates/Function.h"
 
 class FUnrealMcpToolRegistry;
+class IUnrealMcpRqlModule;
 
 /**
  * The RQL tool family (docs/rql.md): rql-query, rql-mutate, rql-schema — the data layer of the editor, in place of the
@@ -19,17 +20,21 @@ class FUnrealMcpToolRegistry;
  */
 namespace UnrealMcpRqlTools
 {
-	/** Register the three tools into @p Registry (core tools). */
+	/** Register (or re-register: same-named entries are replaced) the three tools into @p Registry (core tools). */
 	UNREALMCPRQL_API void Register(FUnrealMcpToolRegistry& Registry);
 
-	/**
-	 * Republish the tools into @p Registry whenever the set of RQL modules changes (an extension loads / unloads: the
-	 * tool texts and the unreal-rql skill list what modules add), then call @p OnChanged (push the manifest).
-	 */
-	UNREALMCPRQL_API void Attach(FUnrealMcpToolRegistry& Registry, TFunction<void()> OnChanged);
+	/** The registered RQL modules (IUnrealMcpRqlModule modular features), sorted by module name. */
+	UNREALMCPRQL_API TArray<IUnrealMcpRqlModule*> Modules();
 
-	/** Stop republishing (the coordinator's shutdown, before the registry is destroyed). */
-	UNREALMCPRQL_API void Detach();
+	/**
+	 * The extensions whose RQL modules are enabled (the editor's extension manager runs this from its module pass, then
+	 * re-registers the tools: their skill lists what the modules add). A module without an extension id always loads;
+	 * until the first call every module does.
+	 */
+	UNREALMCPRQL_API void SetEnabledExtensions(const TSet<FString>& ExtensionIds);
+
+	/** Whether @p Module takes part in RQL sessions (SetEnabledExtensions). */
+	UNREALMCPRQL_API bool IsModuleEnabled(const IUnrealMcpRqlModule& Module);
 
 	/** Execute a QueryPlan JSON on a fresh session; returns the QueryResult JSON. Game thread. (Specs drive this.) */
 	UNREALMCPRQL_API FString ExecutePlan(const FString& PlanJson, bool bAllowMutation, bool bDryRun, bool& bOutOk);

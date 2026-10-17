@@ -31,24 +31,15 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
     /// </summary>
     public static class RqlBridge
     {
-        public const string QueryTool = "rql-query";
-        public const string MutateTool = "rql-mutate";
-        public const string SchemaTool = "rql-schema";
+        /// <summary>The <see cref="ToolDescriptor.Rql"/> roles the plugin declares on its rql-* tools.</summary>
+        public const string QueryRole = "query";
+        public const string MutateRole = "mutate";
+        public const string SchemaRole = "schema";
         public const string QueryArgument = "query";
         public const string PlanArgument = "plan";
 
-        /// <summary>The skill the rql-query tool's <c>skillBody</c> carries (<see cref="AgentConfig.SkillFileGenerator"/>).</summary>
-        public const string SkillName = "unreal-rql";
-
-        /// <summary>The unreal-rql skill's front-matter description (Unity-MCP's unity-rql skill, for Unreal).</summary>
-        public const string SkillDescription =
-            "How to read and change anything in the Unreal Editor with RQL (rql-query / rql-mutate / rql-schema): the query " +
-            "language, operators, sources (actors, components, assets, levels, console logs, editor state), editor operations " +
-            "(spawn actors, add components, levels, assets, selection, Play In Editor) and what installed extensions add.";
-
-        public static bool IsQueryTool(string toolName) => toolName == QueryTool || toolName == MutateTool;
-
-        public static bool IsRqlTool(string toolName) => IsQueryTool(toolName) || toolName == SchemaTool;
+        /// <summary>Whether a tool of this RQL role takes RQL text that the sidecar parses into a plan.</summary>
+        public static bool ParsesQuery(string? role) => role == QueryRole || role == MutateRole;
 
         /// <summary>
         /// Parse <c>arguments.query</c> and store its plan as <c>arguments.plan</c>. Returns null on success, or the error
@@ -69,7 +60,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
         /// The plugin's answer for an RQL tool as agent text, keeping its status. An answer that is not RQL JSON (an IPC
         /// error, a disconnected bridge) is returned unchanged.
         /// </summary>
-        public static ResponseCallTool Render(string toolName, ResponseCallTool response)
+        public static ResponseCallTool Render(string role, ResponseCallTool response)
         {
             var text = response.Content?.FirstOrDefault(c => c.Type == Consts.ContentType.Text)?.Text;
             if (string.IsNullOrEmpty(text))
@@ -81,7 +72,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
                 return response;
 
             string rendered;
-            if (toolName == SchemaTool)
+            if (role == SchemaRole)
                 rendered = RenderSchema(json);
             else if (json.ContainsKey("ok"))
                 rendered = AgentFormat.Render(ParseResult(json), OutputFormat.Table);
@@ -113,19 +104,24 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
                     _ => (ResultKind?)null,
                 };
             }
+            // The parsed answer is ours: its nodes are detached and moved into the result (no deep copies).
             if (json["columns"] is JsonArray columns)
                 result.Columns = columns.Select(c => c?.GetValue<string>() ?? "").ToList();
             if (json["rows"] is JsonArray rows)
-                result.Rows = rows.Select(r => r is JsonArray cells ? cells.Select(c => c?.DeepClone()).ToArray() : Array.Empty<JsonNode?>()).ToList();
+                result.Rows = Detach(rows).Select(r => r is JsonArray cells ? Detach(cells).ToArray() : Array.Empty<JsonNode?>()).ToList();
             if (json["items"] is JsonArray items)
-                result.Items = items.Select(i => i?.DeepClone()).ToList();
+                result.Items = Detach(items).ToList();
             if (json.TryGetPropertyValue("value", out var value))
             {
                 result.HasValue = true;
-                result.Value = value?.DeepClone();
+                json.Remove("value");
+                result.Value = value;
             }
             if (json["types"] is JsonArray types)
-                result.Types = (JsonArray)types.DeepClone();
+            {
+                json.Remove("types");
+                result.Types = types;
+            }
             if (json["total"] is JsonValue total && total.TryGetValue<long>(out var t))
                 result.Total = t;
             result.Truncated = Bool(json, "truncated");
@@ -143,6 +139,14 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
                 }
             }
             return result;
+        }
+
+        /// <summary>The elements of <paramref name="array"/>, removed from it so they can join another tree.</summary>
+        private static List<JsonNode?> Detach(JsonArray array)
+        {
+            var nodes = array.ToList();
+            array.Clear();
+            return nodes;
         }
 
         // ------------------------------------------------------------ schema JSON -> compact text

@@ -19,7 +19,7 @@ public class UnrealMcpEditorTests : ModuleRules
 			"Json",
 			"UnrealMcpEditor",
 			// docs/ARCHITECTURE.md §12.3: the infra the specs drive directly (Ndjson §1.2, dispatcher §4,
-			// config §8, sidecar §6, bridge §1, extensions §5, AssetScopedRead/PropertyJson/LogCollector)
+			// config §8, sidecar §6, bridge §1, extensions §5, PropertyJson/LogCollector)
 			// moved to the runtime module. Depend on it so those UNREALMCPRUNTIME_API symbols link.
 			"UnrealMcpRuntime",
 			"UnrealMcpRql",   // the RQL data layer specs (UnrealMcpRqlSpec.cpp) drive UnrealMcpRqlTools directly
@@ -29,7 +29,7 @@ public class UnrealMcpEditorTests : ModuleRules
 
 		// Reach BOTH modules' PRIVATE headers so the Automation specs can drive their internals directly.
 		// The runtime path resolves the moved-down reach-ins (Bridge/, Dispatch/, Config/, Sidecar/,
-		// Extensions/, Tools/UnrealMcpAssetScopedRead.h, Tools/UnrealMcpPropertyJson.h,
+		// Extensions/, Tools/UnrealMcpPropertyJson.h,
 		// Tools/UnrealMcpLogCollector.h); the editor path keeps the editor-staying ones (DevControl/,
 		// Server/, UI/, Tools/UnrealMcpSourceTools.h). Each type is *_API-exported, so symbols link via
 		// the module dependencies above; these only open the include paths.

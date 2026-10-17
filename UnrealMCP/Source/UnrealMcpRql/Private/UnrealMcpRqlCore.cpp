@@ -4,6 +4,7 @@
 #include "UnrealMcpRqlSession.h"
 #include "UnrealMcpRqlEditorApi.h"
 #include "UnrealMcpRqlSources.h"
+#include "UnrealMcpRqlUtil.h"
 #include "Tools/UnrealMcpLogCollector.h"
 #include "Tools/UnrealMcpObjectRef.h"
 
@@ -30,53 +31,29 @@
 #include "Selection.h"
 #include "UObject/Package.h"
 #include "UObject/UObjectGlobals.h"
-#include "UObject/UObjectIterator.h"
+#include "UObject/UObjectHash.h"
 
-#include <stdexcept>
+#include <algorithm>
 #include <string>
 #include <vector>
 
+UWorld* UnrealMcpRqlUtil::EditorWorld()
+{
+	return FUnrealMcpObjectRef::GetEditorWorld();
+}
+
+void UnrealMcpRqlUtil::MakeLevelCurrent(ULevel* Level)
+{
+	if (!Level)
+		Throw(TEXT("expected a level"));
+	UEditorLevelUtils::MakeLevelCurrent(Level, /*bEvenIfLocked*/ false);
+	if (!Level->GetWorld() || Level->GetWorld()->GetCurrentLevel() != Level)
+		Throw(TEXT("the level could not be made current (locked?)"));
+}
+
 namespace UnrealMcpRqlCoreLocal
 {
-	[[noreturn]] void Throw(const FString& Message)
-	{
-		throw std::runtime_error(UnrealMcpRqlToStd(Message));
-	}
-
-	rql::Value Str(const FString& Text)
-	{
-		return rql::Value::string(UnrealMcpRqlToStd(Text));
-	}
-
-	FString TextArg(const rql::Value& Value)
-	{
-		if (Value.is_string())
-			return UnrealMcpRqlFromStd(Value.as_string());
-		if (Value.is_null() || Value.is_missing())
-			return FString();
-		return UnrealMcpRqlFromStd(rql::to_text(Value));
-	}
-
-	bool BoolArg(const rql::Value& Value)
-	{
-		if (Value.is_bool())
-			return Value.as_bool();
-		if (Value.is_number())
-			return Value.as_number() != 0.0;
-		Throw(TEXT("expected true or false"));
-	}
-
-	template <typename T>
-	T StructArg(FUnrealMcpRqlTypes& Types, UScriptStruct* Struct, const rql::Value& Value)
-	{
-		if (Value.is_struct() && Value.type() == Types.ForStruct(Struct) && Value.ptr())
-			return *static_cast<const T*>(Value.ptr());
-		T Parsed;
-		FString Error;
-		if (UnrealMcpRqlParseMathStruct(Struct, Value, &Parsed, Error))
-			return Parsed;
-		Throw(Error.IsEmpty() ? FString::Printf(TEXT("expected a %s"), *Struct->GetName()) : Error);
-	}
+	using namespace UnrealMcpRqlUtil;
 
 	rql::MemberDescriptor Member(const char* Name, const rql::TypeDescriptor* Type, rql::Getter Get, rql::Setter Set = {},
 		const char* Description = "", bool bOwning = false, bool bNullable = false)
@@ -107,11 +84,6 @@ namespace UnrealMcpRqlCoreLocal
 
 	const rql::TypeDescriptor* StringType() { return rql::builtin::string_type(); }
 	const rql::TypeDescriptor* BoolType() { return rql::builtin::bool_type(); }
-
-	UWorld* EditorWorld()
-	{
-		return FUnrealMcpObjectRef::GetEditorWorld();
-	}
 
 	FString ShortPackageName(const UObject* Object)
 	{
@@ -181,6 +153,36 @@ namespace UnrealMcpRqlCoreLocal
 		const rql::TypeDescriptor* Type;
 	};
 
+	/** The captured log (a snapshot), converted to LogEntry values only as the query reads them. */
+	class FConsoleList final : public rql::IListAdapter
+	{
+	public:
+		FConsoleList(TArray<FUnrealMcpLogEntry> InEntries, const rql::TypeDescriptor* InEntryType, const rql::TypeDescriptor* InType)
+			: Entries(MoveTemp(InEntries)), EntryType(InEntryType), Type(InType)
+		{
+		}
+		size_t size() const override { return static_cast<size_t>(Entries.Num()); }
+		rql::Value at(size_t Index) const override
+		{
+			if (static_cast<int32>(Index) >= Entries.Num())
+				return rql::Value::missing();
+			const FUnrealMcpLogEntry& Entry = Entries[static_cast<int32>(Index)];
+			auto Item = std::make_shared<FLogEntry>();
+			Item->Sequence = Entry.Sequence;
+			Item->Time = UnrealMcpRqlToStd(Entry.Timestamp.ToIso8601());
+			Item->Verbosity = UnrealMcpRqlToStd(FUnrealMcpLogCollector::VerbosityToString(Entry.Verbosity));
+			Item->Category = UnrealMcpRqlToStd(Entry.Category.ToString());
+			Item->Message = UnrealMcpRqlToStd(Entry.Message);
+			return rql::Value::structure(EntryType, std::static_pointer_cast<void>(Item));
+		}
+		const rql::TypeDescriptor* type() const override { return Type; }
+
+	private:
+		TArray<FUnrealMcpLogEntry> Entries;
+		const rql::TypeDescriptor* EntryType;
+		const rql::TypeDescriptor* Type;
+	};
+
 	// ---------------------------------------------------------------- material parameters
 
 	/** Scalars / Vectors / Textures of a material by parameter name; writable on material instances (constant). */
@@ -234,8 +236,7 @@ namespace UnrealMcpRqlCoreLocal
 				UMaterialEditingLibrary::SetMaterialInstanceScalarParameterValue(Instance, Name, static_cast<float>(Value.as_number()));
 				break;
 			case EKind::Vector:
-				UMaterialEditingLibrary::SetMaterialInstanceVectorParameterValue(Instance, Name,
-					StructArg<FLinearColor>(*Types, TBaseStructure<FLinearColor>::Get(), Value));
+				UMaterialEditingLibrary::SetMaterialInstanceVectorParameterValue(Instance, Name, StructArg<FLinearColor>(*Types, Value));
 				break;
 			case EKind::Texture:
 			{
@@ -255,30 +256,34 @@ namespace UnrealMcpRqlCoreLocal
 		EKind Kind;
 		const rql::TypeDescriptor* Type;
 
-		TArray<FName> Names() const
+		mutable TOptional<TArray<FName>> CachedNames;
+
+		/** The parameter names, read once per value (a material's parameters do not change during a query). */
+		const TArray<FName>& Names() const
 		{
-			TArray<FName> Out;
-			switch (Kind)
+			if (!CachedNames.IsSet())
 			{
-			case EKind::Scalar: UMaterialEditingLibrary::GetScalarParameterNames(Material, Out); break;
-			case EKind::Vector: UMaterialEditingLibrary::GetVectorParameterNames(Material, Out); break;
-			case EKind::Texture: UMaterialEditingLibrary::GetTextureParameterNames(Material, Out); break;
+				TArray<FName> Out;
+				switch (Kind)
+				{
+				case EKind::Scalar: UMaterialEditingLibrary::GetScalarParameterNames(Material, Out); break;
+				case EKind::Vector: UMaterialEditingLibrary::GetVectorParameterNames(Material, Out); break;
+				case EKind::Texture: UMaterialEditingLibrary::GetTextureParameterNames(Material, Out); break;
+				}
+				CachedNames = MoveTemp(Out);
 			}
-			return Out;
+			return CachedNames.GetValue();
 		}
 
+		/** The parameter named by @p Key (FName equality: case-insensitive, no new name entries for unknown keys). */
 		bool Resolve(const rql::Value& Key, FName& Out) const
 		{
-			const FString Wanted = TextArg(Key);
-			for (const FName& Name : Names())
-			{
-				if (Name.ToString().Equals(Wanted, ESearchCase::IgnoreCase))
-				{
-					Out = Name;
-					return true;
-				}
-			}
-			return false;
+			const FName Wanted(*TextArg(Key), FNAME_Find);
+			const FName* Found = Wanted.IsNone() ? nullptr : Names().FindByKey(Wanted);
+			if (!Found)
+				return false;
+			Out = *Found;
+			return true;
 		}
 
 		rql::Value Get(const FName& Name) const
@@ -312,11 +317,11 @@ namespace UnrealMcpRqlCoreLocal
 
 	void ObjectMembers(FUnrealMcpRqlTypes&, rql::TypeDescriptor& D)
 	{
-		const rql::TypeDescriptor* Int = rql::builtin::number_type(true, true, 4);
-		FUnrealMcpRqlTypes::SetMember(D, Member("Id", Int, [](void* Self)
+		const rql::TypeDescriptor* Int = rql::builtin::number_type(true, true, 8);
+		FUnrealMcpRqlTypes::SetMember(D, Member("Id", Int, [Int](void* Self)
 		{
-			return rql::Value::number(static_cast<double>(static_cast<UObject*>(Self)->GetUniqueID()), rql::builtin::number_type(true, true, 4));
-		}, {}, "session id: $ref is Type#Id"));
+			return rql::Value::number(static_cast<double>(FUnrealMcpRqlTypes::IdOf(static_cast<UObject*>(Self))), Int);
+		}, {}, "object id for this editor session: $ref is Type#Id"));
 		FUnrealMcpRqlTypes::SetMember(D, Member("Name", StringType(), [](void* Self) { return Str(static_cast<UObject*>(Self)->GetName()); }));
 		FUnrealMcpRqlTypes::SetMember(D, Member("Path", StringType(), [](void* Self) { return Str(static_cast<UObject*>(Self)->GetPathName()); },
 			{}, "object path (assets: \"/Game/Materials/M_Red.M_Red\")"));
@@ -326,51 +331,45 @@ namespace UnrealMcpRqlCoreLocal
 		D.display_explicit = true;
 	}
 
+	/** A world-transform member of actors (Location / Rotation / Scale): the struct value, written through its root component. */
+	template <typename TValue>
+	rql::MemberDescriptor TransformMember(FUnrealMcpRqlTypes& T, const char* Name, const char* Description,
+		TValue (*Get)(const AActor*), void (*Set)(AActor*, const TValue&))
+	{
+		FUnrealMcpRqlTypes* Types = &T;
+		UScriptStruct* Struct = TBaseStructure<TValue>::Get();
+		return Member(Name, T.ForStruct(Struct),
+			[Types, Struct, Get](void* Self) { const TValue Value = Get(static_cast<AActor*>(Self)); return Types->WrapStruct(Struct, &Value); },
+			[Types, Set](void* Self, const rql::Value& Value)
+			{
+				AActor* Actor = static_cast<AActor*>(Self);
+				if (!Actor->GetRootComponent())
+					Throw(FString::Printf(TEXT("%s has no root component (no transform)"), *Actor->GetActorLabel()));
+				Set(Actor, StructArg<TValue>(*Types, Value));
+			}, Description);
+	}
+
 	void ActorMembers(FUnrealMcpRqlTypes& T, rql::TypeDescriptor& D)
 	{
 		FUnrealMcpRqlTypes* Types = &T;
-		UScriptStruct* VectorStruct = TBaseStructure<FVector>::Get();
-		UScriptStruct* RotatorStruct = TBaseStructure<FRotator>::Get();
-		const rql::TypeDescriptor* Vector = T.ForStruct(VectorStruct);
-		const rql::TypeDescriptor* Rotator = T.ForStruct(RotatorStruct);
+		const rql::TypeDescriptor* Vector = T.ForStruct(TBaseStructure<FVector>::Get());
 		const rql::TypeDescriptor* ActorType = T.ForClass(AActor::StaticClass());
 		const rql::TypeDescriptor* ComponentType = T.ForClass(UActorComponent::StaticClass());
 		const rql::TypeDescriptor* LevelType = T.ForClass(ULevel::StaticClass());
-
-		auto RequireRoot = [](AActor* Actor)
-		{
-			if (!Actor->GetRootComponent())
-				Throw(FString::Printf(TEXT("%s has no root component (no transform)"), *Actor->GetActorLabel()));
-		};
 
 		FUnrealMcpRqlTypes::SetMember(D, Member("Label", StringType(),
 			[](void* Self) { return Str(static_cast<AActor*>(Self)->GetActorLabel()); },
 			[](void* Self, const rql::Value& Value) { static_cast<AActor*>(Self)->SetActorLabel(TextArg(Value)); },
 			"the name shown in the Outliner"));
-		FUnrealMcpRqlTypes::SetMember(D, Member("Location", Vector,
-			[Types, VectorStruct](void* Self) { const FVector Value = static_cast<AActor*>(Self)->GetActorLocation(); return Types->WrapStruct(VectorStruct, &Value); },
-			[Types, VectorStruct, RequireRoot](void* Self, const rql::Value& Value)
-			{
-				AActor* Actor = static_cast<AActor*>(Self);
-				RequireRoot(Actor);
-				Actor->SetActorLocation(StructArg<FVector>(*Types, VectorStruct, Value));
-			}, "world location"));
-		FUnrealMcpRqlTypes::SetMember(D, Member("Rotation", Rotator,
-			[Types, RotatorStruct](void* Self) { const FRotator Value = static_cast<AActor*>(Self)->GetActorRotation(); return Types->WrapStruct(RotatorStruct, &Value); },
-			[Types, RotatorStruct, RequireRoot](void* Self, const rql::Value& Value)
-			{
-				AActor* Actor = static_cast<AActor*>(Self);
-				RequireRoot(Actor);
-				Actor->SetActorRotation(StructArg<FRotator>(*Types, RotatorStruct, Value));
-			}, "world rotation (pitch, yaw, roll)"));
-		FUnrealMcpRqlTypes::SetMember(D, Member("Scale", Vector,
-			[Types, VectorStruct](void* Self) { const FVector Value = static_cast<AActor*>(Self)->GetActorScale3D(); return Types->WrapStruct(VectorStruct, &Value); },
-			[Types, VectorStruct, RequireRoot](void* Self, const rql::Value& Value)
-			{
-				AActor* Actor = static_cast<AActor*>(Self);
-				RequireRoot(Actor);
-				Actor->SetActorScale3D(StructArg<FVector>(*Types, VectorStruct, Value));
-			}, "world scale"));
+		FUnrealMcpRqlTypes::SetMember(D, TransformMember<FVector>(T, "Location", "world location",
+			[](const AActor* Actor) { return Actor->GetActorLocation(); },
+			[](AActor* Actor, const FVector& Value) { Actor->SetActorLocation(Value); }));
+		FUnrealMcpRqlTypes::SetMember(D, TransformMember<FRotator>(T, "Rotation", "world rotation (pitch, yaw, roll)",
+			[](const AActor* Actor) { return Actor->GetActorRotation(); },
+			[](AActor* Actor, const FRotator& Value) { Actor->SetActorRotation(Value); }));
+		FUnrealMcpRqlTypes::SetMember(D, TransformMember<FVector>(T, "Scale", "world scale",
+			[](const AActor* Actor) { return Actor->GetActorScale3D(); },
+			[](AActor* Actor, const FVector& Value) { Actor->SetActorScale3D(Value); }));
 		FUnrealMcpRqlTypes::SetMember(D, Member("Components", T.Registry().list_type(ComponentType, true),
 			[Types](void* Self)
 			{
@@ -426,15 +425,15 @@ namespace UnrealMcpRqlCoreLocal
 			return rql::Value::null();
 		}, "remove the actor from its level (undoable)"));
 
-		rql::Value ZeroOffset = T.WrapStruct(VectorStruct, &FVector::ZeroVector);
+		rql::Value ZeroOffset = T.WrapStruct(TBaseStructure<FVector>::Get(), &FVector::ZeroVector);
 		FUnrealMcpRqlTypes::AddMethod(D, Method("Duplicate", { FUnrealMcpRqlTypes::OptionalParam("Offset", Vector, ZeroOffset) }, ActorType,
-			[Types, VectorStruct](void* Self, const std::vector<rql::Value>& Args) -> rql::Value
+			[Types](void* Self, const std::vector<rql::Value>& Args) -> rql::Value
 			{
 				AActor* Source = static_cast<AActor*>(Self);
 				UWorld* World = Source->GetWorld();
 				if (!World)
 					Throw(TEXT("the actor has no world"));
-				const FVector Offset = StructArg<FVector>(*Types, VectorStruct, Args[0]);
+				const FVector Offset = StructArg<FVector>(*Types, Args[0]);
 				FActorSpawnParameters Params;
 				Params.Template = Source;
 				Params.ObjectFlags |= RF_Transactional;
@@ -453,7 +452,7 @@ namespace UnrealMcpRqlCoreLocal
 			{
 				AActor* Actor = static_cast<AActor*>(Self);
 				const FString ClassName = TextArg(Args[0]);
-				UClass* Class = UnrealMcpRqlResolveClass(ClassName);
+				UClass* Class = FUnrealMcpObjectRef::ResolveClass(ClassName);
 				if (!Class || !Class->IsChildOf(UActorComponent::StaticClass()) || Class->HasAnyClassFlags(CLASS_Abstract))
 					Throw(FString::Printf(TEXT("'%s' is not a component class (e.g. \"StaticMeshComponent\")"), *ClassName));
 				const FString Requested = TextArg(Args[1]);
@@ -513,12 +512,9 @@ namespace UnrealMcpRqlCoreLocal
 			},
 			[](void* Self, const rql::Value& Value)
 			{
-				ULevel* Level = static_cast<ULevel*>(Self);
 				if (!BoolArg(Value))
 					Throw(TEXT("make another level current instead"));
-				UEditorLevelUtils::MakeLevelCurrent(Level, /*bEvenIfLocked*/ false);
-				if (!Level->GetWorld() || Level->GetWorld()->GetCurrentLevel() != Level)
-					Throw(TEXT("the level could not be made current (locked?)"));
+				MakeLevelCurrent(static_cast<ULevel*>(Self));
 			}, "new actors spawn into the current level"));
 		FUnrealMcpRqlTypes::SetMember(D, Member("IsVisible", BoolType(), [](void* Self) { return rql::Value::boolean(static_cast<ULevel*>(Self)->bIsVisible); }));
 		FUnrealMcpRqlTypes::SetMember(D, Member("Actors", T.Registry().list_type(T.ForClass(AActor::StaticClass()), true),
@@ -552,7 +548,7 @@ namespace UnrealMcpRqlCoreLocal
 				ULevel* Level = Cast<ULevel>(Types->AsObject(Value));
 				if (!Level || Level->GetWorld() != static_cast<UWorld*>(Self))
 					Throw(TEXT("expected a level of this world"));
-				UEditorLevelUtils::MakeLevelCurrent(Level, /*bEvenIfLocked*/ false);
+				MakeLevelCurrent(Level);
 			}, "", false, true));
 		D.display_name = "Map";
 		D.display_explicit = true;
@@ -637,10 +633,7 @@ namespace UnrealMcpRqlCoreLocal
 			[Types](void*) { UWorld* World = EditorWorld(); return Types->WrapObject(World ? World->GetCurrentLevel() : nullptr); },
 			[Types](void*, const rql::Value& Value)
 			{
-				ULevel* Level = Cast<ULevel>(Types->AsObject(Value));
-				if (!Level)
-					Throw(TEXT("expected a level"));
-				UEditorLevelUtils::MakeLevelCurrent(Level, /*bEvenIfLocked*/ false);
+				MakeLevelCurrent(Cast<ULevel>(Types->AsObject(Value)));
 			}, "the level new actors spawn into", false, true));
 		// The identity members of every object are noise on the operations object.
 		D.id_name.clear();
@@ -648,6 +641,18 @@ namespace UnrealMcpRqlCoreLocal
 	}
 
 	// ---------------------------------------------------------------- functions
+
+	/** The first @p Limit items of @p Items in @p Less order (a partial sort: only the kept items are ordered). */
+	template <typename T, typename TLess>
+	void SortAndCap(TArray<T>& Items, int32 Limit, TLess Less)
+	{
+		if (Items.Num() > Limit)
+		{
+			std::nth_element(Items.GetData(), Items.GetData() + Limit, Items.GetData() + Items.Num(), Less);
+			Items.SetNum(Limit);
+		}
+		std::sort(Items.GetData(), Items.GetData() + Items.Num(), Less);
+	}
 
 	rql::Value ErrorValue(const char* Code, const FString& Message)
 	{
@@ -667,7 +672,7 @@ namespace UnrealMcpRqlCoreLocal
 	{
 		if (Args.size() != 1 || !Args[0].is_string())
 			return ErrorValue("type-mismatch", TEXT("unreal.asset(path) expects an asset path such as \"/Game/Materials/M_Red\""));
-		return Types.WrapObject(UnrealMcpRqlLoadObject(UObject::StaticClass(), UnrealMcpRqlFromStd(Args[0].as_string())));
+		return Types.WrapObject(FUnrealMcpObjectRef::LoadObjectQuiet(UObject::StaticClass(), UnrealMcpRqlFromStd(Args[0].as_string())));
 	}
 
 	rql::Value FindAssets(const std::vector<rql::Value>& Args, FUnrealMcpRqlTypes& Types)
@@ -676,24 +681,26 @@ namespace UnrealMcpRqlCoreLocal
 			return ErrorValue("type-mismatch", TEXT("unreal.assets(class, path?) expects a class name such as \"Material\" and an optional content path"));
 		FString ClassName = UnrealMcpRqlFromStd(Args[0].as_string()).TrimStartAndEnd();
 		ClassName.RemoveFromStart(TEXT("t:"));
-		UClass* Class = ClassName.IsEmpty() ? UObject::StaticClass() : UnrealMcpRqlResolveClass(ClassName);
+		UClass* Class = ClassName.IsEmpty() ? UObject::StaticClass() : FUnrealMcpObjectRef::ResolveClass(ClassName);
 		if (!Class)
 			return ErrorValue("not-found", FString::Printf(TEXT("no class '%s'"), *ClassName));
 		return UnrealMcpRqlAssetList(Types, Class, Args.size() == 2 ? UnrealMcpRqlFromStd(Args[1].as_string()) : FString());
 	}
 
-	rql::Value ListClasses(const std::vector<rql::Value>& Args, FUnrealMcpRqlTypes& Types, const rql::TypeDescriptor* ClassInfoType)
+	rql::Value ListClasses(const std::vector<rql::Value>& Args, const rql::TypeDescriptor* ClassInfoType)
 	{
 		const FString BaseName = !Args.empty() && Args[0].is_string() ? UnrealMcpRqlFromStd(Args[0].as_string()) : FString(TEXT("Actor"));
 		const FString Filter = Args.size() > 1 && Args[1].is_string() ? UnrealMcpRqlFromStd(Args[1].as_string()) : FString();
-		UClass* Base = UnrealMcpRqlResolveClass(BaseName);
+		UClass* Base = FUnrealMcpObjectRef::ResolveClass(BaseName);
 		if (!Base)
 			return ErrorValue("not-found", FString::Printf(TEXT("no class '%s'"), *BaseName));
+		TArray<UClass*> Candidates;
+		GetDerivedClasses(Base, Candidates, /*bRecursive*/ true);
+		Candidates.Add(Base);
 		TArray<UClass*> Found;
-		for (TObjectIterator<UClass> It; It; ++It)
+		for (UClass* Class : Candidates)
 		{
-			UClass* Class = *It;
-			if (!Class->IsChildOf(Base) || Class->HasAnyClassFlags(CLASS_Deprecated | CLASS_NewerVersionExists | CLASS_Hidden))
+			if (Class->HasAnyClassFlags(CLASS_Deprecated | CLASS_NewerVersionExists | CLASS_Hidden))
 				continue;
 			const FString Name = Class->GetName();
 			if (Name.StartsWith(TEXT("SKEL_")) || Name.StartsWith(TEXT("REINST_")) || Name.StartsWith(TEXT("TRASHCLASS_")))
@@ -702,12 +709,11 @@ namespace UnrealMcpRqlCoreLocal
 				continue;
 			Found.Add(Class);
 		}
-		Found.Sort([](const UClass& A, const UClass& B) { return A.GetName() < B.GetName(); });
+		SortAndCap(Found, 500, [](const UClass* A, const UClass* B) { return A->GetFName().LexicalLess(B->GetFName()); });
 		std::vector<rql::Value> Items;
+		Items.reserve(static_cast<size_t>(Found.Num()));
 		for (UClass* Class : Found)
 		{
-			if (Items.size() >= 500)
-				break;
 			auto Info = std::make_shared<FClassInfo>();
 			Info->Name = UnrealMcpRqlToStd(Class->GetName());
 			Info->Path = UnrealMcpRqlToStd(Class->GetPathName());
@@ -716,7 +722,6 @@ namespace UnrealMcpRqlCoreLocal
 			Info->Blueprint = Class->ClassGeneratedBy != nullptr;
 			Items.push_back(rql::Value::structure(ClassInfoType, std::static_pointer_cast<void>(Info)));
 		}
-		(void)Types;
 		return rql::Value::list_of(std::move(Items));
 	}
 }
@@ -736,9 +741,11 @@ rql::Value UnrealMcpRqlAssetList(FUnrealMcpRqlTypes& Types, UClass* Class, const
 	Filter.bRecursivePaths = true;
 	TArray<FAssetData> Assets;
 	Registry.GetAssets(Filter, Assets);
-	Assets.Sort([](const FAssetData& A, const FAssetData& B) { return A.GetObjectPathString() < B.GetObjectPathString(); });
-	if (Assets.Num() > UnrealMcpRqlMaxAssets)
-		Assets.SetNum(UnrealMcpRqlMaxAssets);
+	// By package, then asset name (FName order: no string building per comparison); only the kept assets are sorted.
+	SortAndCap(Assets, UnrealMcpRqlMaxAssets, [](const FAssetData& A, const FAssetData& B)
+	{
+		return A.PackageName != B.PackageName ? A.PackageName.LexicalLess(B.PackageName) : A.AssetName.LexicalLess(B.AssetName);
+	});
 	const rql::TypeDescriptor* Element = Types.ForClass(Class ? Class : UObject::StaticClass());
 	return rql::Value::list(std::make_shared<FAssetList>(&Types, MoveTemp(Assets), Types.Registry().list_type(Element, true)));
 }
@@ -792,14 +799,8 @@ void UnrealMcpRqlConfigureCore(FUnrealMcpRqlSession& Session)
 			if (!Value.is_string() || !Wanted)
 				return rql::AdapterOutcome::NotHandled;
 			const FString Text = UnrealMcpRqlFromStd(Value.as_string()).TrimStartAndEnd();
-			UObject* Found = nullptr;
-			if (Wanted->IsChildOf(UClass::StaticClass()))
-				Found = UnrealMcpRqlResolveClass(Text);
-			else if (Wanted->IsChildOf(AActor::StaticClass()))
-				Found = FUnrealMcpObjectRef::ResolveActor(Text);
-			else
-				Found = UnrealMcpRqlLoadObject(Wanted, Text);
-			if (!Found || !Found->IsA(Wanted))
+			UObject* Found = FUnrealMcpObjectRef::ResolveReference(Wanted, Text);
+			if (!Found)
 			{
 				Reason = UnrealMcpRqlToStd(FString::Printf(TEXT("no %s '%s'"), *Wanted->GetName(), *Text));
 				return rql::AdapterOutcome::Failed;
@@ -810,7 +811,8 @@ void UnrealMcpRqlConfigureCore(FUnrealMcpRqlSession& Session)
 		Session.AddAdapter(std::move(References));
 	}
 
-	Session.AddSource(TEXT("actors"), TEXT("list of Actor"), TEXT("every actor of the editor world's loaded levels (hidden ones included)"), [Types]()
+	const rql::TypeDescriptor* ActorType = T.ForClass(AActor::StaticClass());
+	Session.AddSource(TEXT("actors"), ActorType, /*bList*/ true, TEXT("every actor of the editor world's loaded levels (hidden ones included)"), [Types]()
 	{
 		TArray<UObject*> Actors;
 		if (UWorld* World = EditorWorld())
@@ -823,42 +825,30 @@ void UnrealMcpRqlConfigureCore(FUnrealMcpRqlSession& Session)
 		}
 		return Types->WrapObjects(Actors);
 	});
-	Session.AddSource(TEXT("levels"), TEXT("list of Level"), TEXT("the loaded levels of the editor world (Map, IsPersistent, IsCurrent, IsVisible, Actors)"), [Types]()
+	Session.AddSource(TEXT("levels"), T.ForClass(ULevel::StaticClass()), /*bList*/ true, TEXT("the loaded levels of the editor world (Map, IsPersistent, IsCurrent, IsVisible, Actors)"), [Types]()
 	{
 		UWorld* World = EditorWorld();
 		return Types->WrapObjects(World ? TArray<UObject*>(World->GetLevels()) : TArray<UObject*>());
 	});
-	Session.AddSource(TEXT("world"), TEXT("World"), TEXT("the editor world (Levels, PersistentLevel, CurrentLevel)"), [Types]()
+	Session.AddSource(TEXT("world"), T.ForClass(UWorld::StaticClass()), /*bList*/ false, TEXT("the editor world (Levels, PersistentLevel, CurrentLevel)"), [Types]()
 	{
 		return Types->WrapObject(EditorWorld());
 	});
-	Session.AddSource(TEXT("selection"), TEXT("list of Actor"), TEXT("the actors selected in the editor (write it: editor | set Selection = [...])"), [Types]()
+	Session.AddSource(TEXT("selection"), ActorType, /*bList*/ true, TEXT("the actors selected in the editor (write it: editor | set Selection = [...])"), [Types]()
 	{
 		return Types->WrapObjects(SelectedActors());
 	});
-	Session.AddSource(TEXT("editor"), TEXT("Editor"),
+	Session.AddSource(TEXT("editor"), T.ForClass(UUnrealMcpRqlEditorApi::StaticClass()), /*bList*/ false,
 		TEXT("editor state (IsPlaying, IsPaused, Selection, World, CurrentLevel) and operations: call SpawnActor / OpenLevel / NewLevel / "
 			"SaveLevel / SaveAll / UnloadSublevel / CreateAsset / CopyAsset / MoveAsset / DeleteAsset / CreateFolder / RefreshAssets / "
 			"CreateMaterialInstance / ImportAsset / SaveAsset / ClearConsole"), [Types]()
 	{
 		return Types->WrapObject(GetMutableDefault<UUnrealMcpRqlEditorApi>());
 	});
-	Session.AddSource(TEXT("console"), TEXT("list of LogEntry"), TEXT("editor log entries captured since startup, oldest first (Sequence, Time, Verbosity, Category, Message)"), [LogEntryType]()
+	const rql::TypeDescriptor* ConsoleType = Registry.list_type(LogEntryType, false);
+	Session.AddSource(TEXT("console"), LogEntryType, /*bList*/ true, TEXT("editor log entries captured since startup, oldest first (Sequence, Time, Verbosity, Category, Message)"), [LogEntryType, ConsoleType]()
 	{
-		const TArray<FUnrealMcpLogEntry> Entries = FUnrealMcpLogCollector::Get().Snapshot(ELogVerbosity::All, FString(), FString(), 0);
-		std::vector<rql::Value> Items;
-		Items.reserve(static_cast<size_t>(Entries.Num()));
-		for (const FUnrealMcpLogEntry& Entry : Entries)
-		{
-			auto Item = std::make_shared<FLogEntry>();
-			Item->Sequence = Entry.Sequence;
-			Item->Time = UnrealMcpRqlToStd(Entry.Timestamp.ToIso8601());
-			Item->Verbosity = UnrealMcpRqlToStd(FUnrealMcpLogCollector::VerbosityToString(Entry.Verbosity));
-			Item->Category = UnrealMcpRqlToStd(Entry.Category.ToString());
-			Item->Message = UnrealMcpRqlToStd(Entry.Message);
-			Items.push_back(rql::Value::structure(LogEntryType, std::static_pointer_cast<void>(Item)));
-		}
-		return rql::Value::list_of(std::move(Items));
+		return rql::Value::list(std::make_shared<FConsoleList>(FUnrealMcpLogCollector::Get().Snapshot(), LogEntryType, ConsoleType));
 	});
 
 	Session.AddFunction(TEXT("unreal.find"), TEXT("the actor with this label, name or path in the editor world"),
@@ -868,5 +858,5 @@ void UnrealMcpRqlConfigureCore(FUnrealMcpRqlSession& Session)
 	Session.AddFunction(TEXT("unreal.assets"), TEXT("assets of a class (\"Material\", \"StaticMesh\", \"Blueprint\") under a content path (default /Game), at most 200, loaded as the query reads them"),
 		[Types](const std::vector<rql::Value>& Args) { return FindAssets(Args, *Types); });
 	Session.AddFunction(TEXT("unreal.classes"), TEXT("classes deriving from a base (default \"Actor\") whose name contains a filter: Name Path Parent Abstract Blueprint (at most 500)"),
-		[Types, ClassInfoType](const std::vector<rql::Value>& Args) { return ListClasses(Args, *Types, ClassInfoType); });
+		[ClassInfoType](const std::vector<rql::Value>& Args) { return ListClasses(Args, ClassInfoType); });
 }

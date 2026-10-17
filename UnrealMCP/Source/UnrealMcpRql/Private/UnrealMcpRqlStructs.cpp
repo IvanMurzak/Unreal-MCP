@@ -14,8 +14,9 @@
 #include "Math/Vector4.h"
 #include "UObject/Class.h"
 
-#include <cstdlib>
+#include <exception>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace UnrealMcpRqlStructsLocal
@@ -94,29 +95,33 @@ namespace UnrealMcpRqlStructsLocal
 		return nullptr;
 	}
 
-	/** Every number in a text such as "(1, 2.5, -3)", "X=1 Y=2 Z=3" or "P=0 Y=90 R=0". */
+	/** Every number in a text such as "(1, 2.5, -3)", "X=1 Y=2 Z=3" or "P=0 Y=90 R=0" (locale-independent). */
 	std::vector<double> Numbers(const std::string& Text)
 	{
+		auto Starts = [](char C) { return (C >= '0' && C <= '9') || C == '-' || C == '+' || C == '.'; };
+		auto Continues = [&Starts](char C) { return Starts(C) || C == 'e' || C == 'E'; };
 		std::vector<double> Out;
-		const char* Cursor = Text.c_str();
-		while (*Cursor)
+		size_t Cursor = 0;
+		while (Cursor < Text.size())
 		{
-			const char C = *Cursor;
-			const bool bStarts = (C >= '0' && C <= '9') || C == '-' || C == '+' || C == '.';
-			if (!bStarts)
+			if (!Starts(Text[Cursor]))
 			{
 				++Cursor;
 				continue;
 			}
-			char* End = nullptr;
-			const double Value = std::strtod(Cursor, &End);
-			if (End == Cursor)
+			size_t End = Cursor + 1;
+			while (End < Text.size() && Continues(Text[End]))
+				++End;
+			double Value = 0.0;
+			if (rql::parse_double(std::string_view(Text).substr(Cursor, End - Cursor), Value))
 			{
-				++Cursor;
-				continue;
+				Out.push_back(Value);
+				Cursor = End;
 			}
-			Out.push_back(Value);
-			Cursor = End;
+			else
+			{
+				++Cursor; // a lone sign or dot
+			}
 		}
 		return Out;
 	}
@@ -195,11 +200,6 @@ namespace UnrealMcpRqlStructsLocal
 
 using namespace UnrealMcpRqlStructsLocal;
 
-bool UnrealMcpRqlIsMathStruct(const UScriptStruct* Struct)
-{
-	return Find(Struct) != nullptr;
-}
-
 bool UnrealMcpRqlParseMathStruct(UScriptStruct* Struct, const rql::Value& Value, void* Out, FString& OutError)
 {
 	const FMathStruct* Spec = Find(Struct);
@@ -236,10 +236,13 @@ void UnrealMcpRqlAddStructAdapters(FUnrealMcpRqlSession& Session)
 			if (!Value.is_string() && !Value.is_list())
 				return rql::AdapterOutcome::NotHandled; // structs and {X: 1} literals: RQL's own coercion
 			rql::Value Built = Types->WrapStruct(SpecPtr->Struct, nullptr);
-			FString Error;
-			if (!UnrealMcpRqlParseMathStruct(SpecPtr->Struct, Value, Built.ptr(), Error))
+			try
 			{
-				Reason = UnrealMcpRqlToStd(Error.IsEmpty() ? FString(TEXT("not a ")) + SpecPtr->Struct->GetName() : Error);
+				Types->CoerceStruct(SpecPtr->Struct, Value, Built.ptr());
+			}
+			catch (const std::exception& Error)
+			{
+				Reason = Error.what();
 				return rql::AdapterOutcome::Failed;
 			}
 			Result = Built;

@@ -118,6 +118,12 @@ Levels, assets, editor state:
 			"members (name type; ro = read-only) and methods. Use it before querying an unfamiliar class.";
 	}
 
+	/** The skill rql-query ships (FUnrealMcpToolBuilder::Skill): the one place its name and description live. */
+	inline const char* SkillName()
+	{
+		return "unreal-rql";
+	}
+
 	inline const char* SkillDescription()
 	{
 		return "How to read and change anything in the Unreal Editor with RQL (rql-query / rql-mutate / rql-schema): the query "

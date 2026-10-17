@@ -395,6 +395,52 @@ void FUnrealMcpExtensionsSpec::Define()
 			TestEqual(TEXT("exactly one errored record"), ErroredCount, 1);
 		});
 	});
+
+	Describe("module pass", [this]()
+	{
+		It("records module-only extensions, gates them with the disabled set and applies the enabled ids", [this]()
+		{
+			const FString ConfigPath = MakeTempConfigPath();
+			FUnrealMcpToolRegistry Registry;
+			int32 OnChangedCount = 0;
+			FUnrealMcpExtensionManager Manager(Registry, [&OnChangedCount]() { ++OnChangedCount; }, ConfigPath);
+			FMockToolProvider Tools(TEXT("both.ext"), [](FUnrealMcpToolRegistry& R) { AddSimpleTool(R, TEXT("both-tool")); });
+			Manager.SetProviderSourceForTesting([&Tools]() { return TArray<IUnrealMcpToolProvider*>{ &Tools }; });
+			TSet<FString> Applied;
+			int32 ApplyCount = 0;
+			Manager.SetModulePass(TEXT("UnrealMcpTestModulePass"),
+				[]()
+				{
+					return TArray<FUnrealMcpExtensionModule>{
+						{ TEXT("module.ext"), FText::FromString(TEXT("Module")), TEXT("2.0.0") },
+						{ TEXT("both.ext"), FText::FromString(TEXT("Both")), TEXT("1.0.0") },
+						{ TEXT("Bad Id"), FText::FromString(TEXT("Bad")), TEXT("1.0.0") },
+					};
+				},
+				[&Applied, &ApplyCount](const TSet<FString>& EnabledIds) { Applied = EnabledIds; ++ApplyCount; });
+			Manager.Startup();
+
+			TestEqual(TEXT("applied once on startup"), ApplyCount, 1);
+			TestTrue(TEXT("valid modules applied"), Applied.Contains(TEXT("module.ext")) && Applied.Contains(TEXT("both.ext")));
+			TestFalse(TEXT("an invalid id is not applied"), Applied.Contains(TEXT("Bad Id")));
+			const FUnrealMcpExtensionRecord* ModuleRecord = Manager.FindExtension(TEXT("module.ext"));
+			TestTrue(TEXT("a module-only extension has a row"), ModuleRecord && ModuleRecord->Version == TEXT("2.0.0") && ModuleRecord->ToolCount == 0);
+			const FUnrealMcpExtensionRecord* BothRecord = Manager.FindExtension(TEXT("both.ext"));
+			TestTrue(TEXT("one row per id (the tool provider's)"), BothRecord && BothRecord->ToolCount == 1);
+			const FUnrealMcpExtensionRecord* BadRecord = Manager.FindExtension(TEXT("Bad Id"));
+			TestTrue(TEXT("the invalid id is recorded with an error"), BadRecord && BadRecord->HasError());
+			TestEqual(TEXT("records sorted by id"), Manager.GetExtensions()[0].Id, FString(TEXT("Bad Id")));
+
+			Manager.SetExtensionEnabled(TEXT("module.ext"), false);
+			TestEqual(TEXT("re-applied on the toggle"), ApplyCount, 2);
+			TestFalse(TEXT("the disabled module is left out"), Applied.Contains(TEXT("module.ext")));
+			TestTrue(TEXT("the others stay"), Applied.Contains(TEXT("both.ext")));
+			TestEqual(TEXT("one notify for the toggle"), OnChangedCount, 1);
+
+			Manager.Shutdown();
+			IFileManager::Get().Delete(*ConfigPath, /*RequireExists*/ false, /*EvenReadOnly*/ true);
+		});
+	});
 }
 
 #endif // WITH_DEV_AUTOMATION_TESTS

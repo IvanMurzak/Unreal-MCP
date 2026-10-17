@@ -4,6 +4,7 @@
 #include "UnrealMcpEditorCoordinator.h"
 #include "UnrealMcpLog.h"
 #include "UnrealMcpCoreTools.h"
+#include "IUnrealMcpRqlModule.h"
 #include "UnrealMcpRqlTools.h"
 #include "UnrealMcpRuntimeCoreTools.h"
 #include "UnrealMcpRuntimeCorePrompts.h"
@@ -133,15 +134,26 @@ void FUnrealMcpEditorCoordinator::Startup()
 		/*InConfigPath*/ FString(),
 		PromptRegistry.Get(), // §A.2 kind-aware: also merge prompt-provider extensions into the prompt registry
 		ResourceRegistry.Get()); // §A.2 kind-aware: also merge resource-provider extensions into the resource registry
+	// docs/rql.md "Extensions": extensions' RQL modules (IUnrealMcpRqlModule) are a pass of the same rebuild, so the
+	// Extensions window lists and disables them like tool providers, and a module coming or going re-registers the
+	// rql-* tools (their skill lists the modules' sources and guides) before the one manifest push.
+	ExtensionManager->SetModulePass(IUnrealMcpRqlModule::GetModularFeatureName(),
+		[]()
+		{
+			TArray<FUnrealMcpExtensionModule> Modules;
+			for (const IUnrealMcpRqlModule* Module : UnrealMcpRqlTools::Modules())
+			{
+				if (!Module->GetExtensionId().IsEmpty())
+					Modules.Add({ Module->GetExtensionId(), FText::FromString(Module->GetRqlModuleName()), Module->GetExtensionVersion() });
+			}
+			return Modules;
+		},
+		[this](const TSet<FString>& EnabledIds)
+		{
+			UnrealMcpRqlTools::SetEnabledExtensions(EnabledIds);
+			UnrealMcpRqlTools::Register(*Registry);
+		});
 	ExtensionManager->Startup();
-
-	// An extension's RQL module (IUnrealMcpRqlModule) loading or unloading republishes the rql-* tools (their skill lists
-	// the module's sources and guides): push the manifest like an extension rebuild does.
-	UnrealMcpRqlTools::Attach(*Registry, [this]()
-	{
-		if (BridgeServer.IsValid())
-			BridgeServer->PushManifest();
-	});
 
 	const FString ProjectPath = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir());
 	const FString EngineVersion = FEngineVersion::Current().ToString();
@@ -684,8 +696,6 @@ void FUnrealMcpEditorCoordinator::Shutdown()
 	// an empty list instead of dereferencing the soon-to-be-freed extension manager. Mirrors the aux-windows guard.
 	if (ExtProvidersAlive.IsValid())
 		*ExtProvidersAlive = false;
-
-	UnrealMcpRqlTools::Detach(); // the registry below is about to be freed
 
 	if (PreExitHandle.IsValid())
 	{

@@ -71,12 +71,10 @@ Prompts/Resources ship empty-but-wired (§10), as designed.
   content** (`content[]` with an `image` entry), as anticipated by §1.2's "binary payloads travel as
   base64 strings inside JSON". Dimensions clamp to default 1024 / hard cap 2048 per side; capture
   needs a GPU-backed editor (headless `-nullrhi` returns a structured error).
-- **LogCollector (#22).** `console-get-logs` / `console-clear-logs` are backed by a module-startup
-  `FUnrealMcpLogCollector` — a `GLog` `FOutputDevice` ring buffer (the Godot `GodotLogCollector`
-  pattern), as §10 describes. Every captured line carries a monotonic `sequence` (assigned under the
-  collector lock; not reset by eviction or `console-clear-logs`, only by an editor restart), and
-  `console-get-logs` takes an optional `sinceSequence` cursor: only newer entries, oldest first, with a
-  `highestSequence` to pass back. A cursor above the current high-water mark (restart) returns the oldest page.
+- **LogCollector (#22).** The RQL `console` source (docs/rql.md) and `editor | call ClearConsole()` are backed by a
+  module-startup `FUnrealMcpLogCollector` — a `GLog` `FOutputDevice` ring buffer (the Godot `GodotLogCollector`
+  pattern), as §10 describes. Every captured line carries a monotonic `Sequence` (assigned under the collector lock;
+  not reset by eviction or Clear, only by an editor restart), so `console | where Sequence > N` pages without gaps.
 - **Device-code auth (#24).** The cloud OAuth device-code flow shipped in the main window (Authorize
   → `auth-start` → `device-auth` events render the verification URL + user code; Cancel/Revoke wired),
   per §1.3 / §7 item 4.
@@ -339,6 +337,10 @@ Tool descriptor (one entry in `tool-manifest.tools[]`), shaped to fill `IRunTool
  "readOnlyHint":false,"destructiveHint":false,"idempotentHint":false,"openWorldHint":false,
  "enabled":true,"extensionId":"core","schemaHash":"sha256:…"}
 ```
+
+Optional fields, present only when set: `"rql": "query" | "mutate" | "schema"` on the rql-* tools (the sidecar parses
+`query` into `plan` and renders the answer, docs/rql.md) and `"skills": [{"name", "description", "markdown"}]` — skills
+a tool ships beside its own page, written by the skill generator (rql-query ships `unreal-rql`).
 
 Sidecar flow on each `tool-manifest` (revision N):
 
@@ -1221,7 +1223,7 @@ Register). `UnrealMcpCoreTools.h` stays editor (the editor-only families' Regist
 MOVES to UnrealMcpRuntime (from `UnrealMcpEditor/Private/`): `Bridge/UnrealMcpBridgeServer.*`+
 `Bridge/UnrealMcpNdjson.*`; `Dispatch/UnrealMcpGameThreadDispatcher.*` (no GEditor);
 `Tools/UnrealMcpToolRegistry.cpp`+`Public/UnrealMcpToolRegistry.h`; `Tools/UnrealMcpObjectRef.*`
-(world abstraction via §12.6); `Tools/UnrealMcpPropertyJson.*`+`Tools/UnrealMcpAssetScopedRead.*`;
+(world abstraction via §12.6); `Tools/UnrealMcpPropertyJson.*`;
 `Sidecar/UnrealMcpSidecarManager.*`; `Config/UnrealMcpConfig.*`; `Extensions/UnrealMcpExtensionManager.*`+
 `Public/IUnrealMcpToolProvider.h`; `Tools/UnrealMcpLogCollector.*`; `Tools/UnrealMcpPingTool.cpp`;
 `UnrealMcpLog.*`.

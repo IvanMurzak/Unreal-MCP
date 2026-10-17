@@ -265,7 +265,7 @@ FReply SUnrealMcpSerializationCheckWindow::OnSerializeClicked()
 	// non-object leaves. SerializeObject has no `recursive` arg (FJsonObjectConverter always walks the
 	// reflected graph), so the shallow variant prunes nested object fields AFTER serialization — matching
 	// Unity's recursive=false "shallow" intent without forking the serialization path.
-	TSharedPtr<FJsonObject> Json = FUnrealMcpPropertyJson::SerializeObject(Target, /*Paths*/ {});
+	TSharedPtr<FJsonObject> Json = FUnrealMcpPropertyJson::SerializeObject(Target);
 	if (!Json.IsValid())
 		Json = MakeShared<FJsonObject>();
 

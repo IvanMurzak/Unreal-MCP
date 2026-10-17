@@ -7,6 +7,8 @@
 #include "UnrealMcpSchema.h"
 #include "UnrealMcpValidation.h"
 
+#include "Dom/JsonValue.h"
+
 // --- FUnrealMcpToolCall accessors -----------------------------------------------------------------
 
 FString FUnrealMcpToolCall::GetString(const FString& Key, const FString& Default) const
@@ -121,9 +123,22 @@ TSharedPtr<FJsonObject> FUnrealMcpRegisteredTool::ToDescriptorJson() const
 	// Description (the sidecar generator uses this verbatim for the YAML `description:`; the full Description still
 	// becomes the SKILL.md body). Never empty so the front-matter always has a meaningful short value.
 	Desc->SetStringField(TEXT("skillDescription"), SkillDescription.IsEmpty() ? Title : SkillDescription);
-	// Only when declared: a tool without a dedicated body keeps a byte-identical descriptor (and schema hash).
-	if (!SkillBody.IsEmpty())
-		Desc->SetStringField(TEXT("skillBody"), SkillBody);
+	// Only when declared: other tools keep a byte-identical descriptor (and schema hash).
+	if (Skills.Num() > 0)
+	{
+		TArray<TSharedPtr<FJsonValue>> SkillList;
+		for (const FUnrealMcpToolSkill& Skill : Skills)
+		{
+			TSharedPtr<FJsonObject> Item = MakeShared<FJsonObject>();
+			Item->SetStringField(TEXT("name"), Skill.Name);
+			Item->SetStringField(TEXT("description"), Skill.Description);
+			Item->SetStringField(TEXT("markdown"), Skill.Markdown);
+			SkillList.Add(MakeShared<FJsonValueObject>(Item));
+		}
+		Desc->SetArrayField(TEXT("skills"), SkillList);
+	}
+	if (!Rql.IsEmpty())
+		Desc->SetStringField(TEXT("rql"), Rql);
 	Desc->SetObjectField(TEXT("inputSchema"), BuildInputSchema());
 	if (OutputSchema.IsValid())
 		Desc->SetObjectField(TEXT("outputSchema"), OutputSchema);
@@ -167,7 +182,12 @@ FUnrealMcpToolBuilder::FUnrealMcpToolBuilder(FUnrealMcpToolRegistry& InRegistry,
 FUnrealMcpToolBuilder& FUnrealMcpToolBuilder::Title(const FString& InTitle) { Tool.Title = InTitle; return *this; }
 FUnrealMcpToolBuilder& FUnrealMcpToolBuilder::Description(const FString& InDescription) { Tool.Description = InDescription; return *this; }
 FUnrealMcpToolBuilder& FUnrealMcpToolBuilder::SkillDescription(const FString& InSkillDescription) { Tool.SkillDescription = InSkillDescription; return *this; }
-FUnrealMcpToolBuilder& FUnrealMcpToolBuilder::SkillBody(const FString& InSkillBody) { Tool.SkillBody = InSkillBody; return *this; }
+FUnrealMcpToolBuilder& FUnrealMcpToolBuilder::Skill(const FString& Name, const FString& Description, const FString& Markdown)
+{
+	Tool.Skills.Add(FUnrealMcpToolSkill{ Name, Description, Markdown });
+	return *this;
+}
+FUnrealMcpToolBuilder& FUnrealMcpToolBuilder::Rql(const FString& Role) { Tool.Rql = Role; return *this; }
 
 FUnrealMcpToolBuilder& FUnrealMcpToolBuilder::ParamString(const FString& Name, const FString& Desc, EUnrealMcpParamRequirement Req)
 {

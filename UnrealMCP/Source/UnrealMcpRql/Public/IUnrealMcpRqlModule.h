@@ -25,11 +25,15 @@ class UNREALMCPRQL_API FUnrealMcpRqlModuleContext
 public:
 	virtual ~FUnrealMcpRqlModuleContext() = default;
 
-	/** A source whose value is one object, e.g. an operations object: `niagara | call SpawnSystem(...)`. */
-	virtual void AddObjectSource(const FString& Name, const FString& Description, TFunction<UObject*()> Getter) = 0;
+	/**
+	 * A source whose value is one object of @p Class, e.g. an operations object: `niagara | call SpawnSystem(...)`.
+	 * @p Class types the source in rql-schema (the getter is not run for it).
+	 */
+	virtual void AddObjectSource(const FString& Name, const FString& Description, UClass* Class, TFunction<UObject*()> Getter) = 0;
 
-	/** A source whose value is a list of objects, e.g. the Landscape actors of the editor world. */
-	virtual void AddObjectListSource(const FString& Name, const FString& Description, TFunction<TArray<UObject*>()> Getter) = 0;
+	/** A source whose value is a list of @p ElementClass objects, e.g. the Landscape actors of the editor world. */
+	virtual void AddObjectListSource(const FString& Name, const FString& Description, UClass* ElementClass,
+		TFunction<TArray<UObject*>()> Getter) = 0;
 
 	/** A source listing the project assets of @p AssetClass (and subclasses), loaded lazily, at most 200 per query. */
 	virtual void AddAssetSource(const FString& Name, const FString& Description, UClass* AssetClass) = 0;
@@ -58,8 +62,9 @@ public:
 
 /**
  * The extension seam of the RQL data layer: an extension registers an implementation as a modular feature under
- * GetModularFeatureName() (IModularFeatures::Get().RegisterModularFeature) and unregisters it on shutdown. The editor
- * rebuilds its RQL engine and republishes the rql-* tools whenever the set of modules changes.
+ * GetModularFeatureName() (IModularFeatures::Get().RegisterModularFeature) and unregisters it on shutdown. The editor's
+ * extension manager republishes the rql-* tools whenever the set of modules changes; an extension disabled in the
+ * Extensions window contributes nothing (GetExtensionId names it there).
  */
 class UNREALMCPRQL_API IUnrealMcpRqlModule : public IModularFeature
 {

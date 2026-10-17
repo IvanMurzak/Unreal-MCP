@@ -30,7 +30,7 @@ struct FUnrealMcpLogEntry
  * Process-wide `GLog` listener feeding the RQL `console` source and `editor | call ClearConsole()`
  * (docs/rql.md; docs/ARCHITECTURE.md §10). An `FOutputDevice` registered with `GLog` at module startup; every
  * engine log line is mirrored into a capped ring buffer (default 10k entries) carrying severity,
- * category and timestamp. Tool handlers read filtered/paginated slices on the game thread.
+ * category and timestamp. The RQL `console` source reads a snapshot on the game thread and filters it with RQL.
  *
  * Thread-safety: `GLog->Serialize` is called from arbitrary threads, so every buffer mutation/read is
  * guarded by a critical section and `CanBeUsedOnAnyThread()` returns true. The capture path NEVER logs
@@ -83,56 +83,21 @@ public:
 	/** Current retained entry count. */
 	int32 Num() const;
 
-	/**
-	 * Copy a filtered, newest-last snapshot of the buffer under the lock.
-	 * @param MinVerbosity   keep entries at this severity or MORE severe (lower numeric value); pass
-	 *                       `ELogVerbosity::All` to keep everything.
-	 * @param CategoryFilter case-insensitive exact category match; empty keeps all categories.
-	 * @param Search         case-insensitive substring match on the message; empty keeps all.
-	 * @param Limit          max entries returned (the most-recent @p Limit after filtering); <=0 → all.
-	 */
-	TArray<FUnrealMcpLogEntry> Snapshot(ELogVerbosity::Type MinVerbosity, const FString& CategoryFilter,
-		const FString& Search, int32 Limit, int64* OutNextCursor = nullptr) const;
-
-	/**
-	 * Cursor read (`sinceSequence`): entries with `Sequence > SinceSequence`,
-	 * **oldest-first**, in the order cursor -> filters -> ascending -> limit. When more matching entries
-	 * exist than @p Limit, the OLDEST @p Limit are returned (so the caller can continue without a gap).
-	 *
-	 * A cursor ABOVE the current high-water mark means the counter restarted (editor restart) — it is
-	 * treated as if it were below everything, returning the oldest page. A cursor below the oldest
-	 * retained entry (evicted history) naturally returns the oldest retained page.
-	 *
-	 * @param OutNextCursor if non-null, receives the sequence the caller should pass next, computed under
-	 *                      the same lock as the slice: the last returned sequence when the page was cut
-	 *                      by @p Limit, otherwise the current high-water mark (everything newer than the
-	 *                      cursor was either returned or filtered out).
-	 */
-	TArray<FUnrealMcpLogEntry> SnapshotSince(int64 SinceSequence, ELogVerbosity::Type MinVerbosity,
-		const FString& CategoryFilter, const FString& Search, int32 Limit, int64* OutNextCursor = nullptr) const;
-
-	/** Highest sequence assigned so far (0 when nothing was ever captured). */
-	int64 HighestSequence() const;
+	/** Copy of the retained entries, oldest first: the most recent @p Limit, or all of them when @p Limit <= 0. */
+	TArray<FUnrealMcpLogEntry> Snapshot(int32 Limit = 0) const;
 
 	/** Human-readable severity token for a verbosity ("Error", "Warning", "Display", "Log", …). */
 	static FString VerbosityToString(ELogVerbosity::Type Verbosity);
 
-	/** Parse a severity token (case-insensitive) into a verbosity; returns false on an unknown token. */
-	static bool ParseVerbosity(const FString& Token, ELogVerbosity::Type& OutVerbosity);
-
 	/**
 	 * Construct a standalone, UNREGISTERED collector (never attached to `GLog`). The process singleton
-	 * is `Get()`; this exists so specs can drive `Serialize()` / eviction / cursor paging against a
+	 * is `Get()`; this exists so specs can drive `Serialize()` / eviction against a
 	 * private buffer without touching the live shared one.
 	 */
 	FUnrealMcpLogCollector() = default;
 
 private:
 	void Capture(const TCHAR* Message, ELogVerbosity::Type Verbosity, const FName& Category);
-
-	/** The verbosity / category / search filter shared by `Snapshot` and `SnapshotSince`. */
-	static bool MatchesFilters(const FUnrealMcpLogEntry& Entry, ELogVerbosity::Type MinVerbosity,
-		const FString& CategoryFilter, const FString& Search);
 
 	mutable FCriticalSection Lock;
 	TArray<FUnrealMcpLogEntry> Entries;   // oldest-first; evicts from the front past MaxEntries

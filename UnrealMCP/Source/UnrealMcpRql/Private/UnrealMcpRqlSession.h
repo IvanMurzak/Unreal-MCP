@@ -22,10 +22,13 @@
 class FUnrealMcpRqlSession
 {
 public:
+	/** A source or function as rql-schema and the skill list it. */
 	struct FEntry
 	{
 		FString Name;
-		FString Type;
+		/** A source's value type: the element type of a list source (bList), else the type of its one value. */
+		const rql::TypeDescriptor* Type = nullptr;
+		bool bList = false;
 		FString Description;
 	};
 
@@ -35,7 +38,6 @@ public:
 	FUnrealMcpRqlSession& operator=(const FUnrealMcpRqlSession&) = delete;
 
 	FUnrealMcpRqlTypes& Types() { return *TypesPtr; }
-	rql::Engine& Engine() { return *EnginePtr; }
 
 	/** Execute a canonical QueryPlan (JSON); returns the QueryResult JSON (spec form, no stats). */
 	FString Execute(const FString& PlanJson, bool bAllowMutation, bool bDryRun, bool& bOutOk);
@@ -48,13 +50,12 @@ public:
 
 	// ---- registration (core module + extension modules)
 
-	void AddSource(const FString& Name, const FString& Type, const FString& Description, std::function<rql::Value()> Getter);
+	/** A source whose value is @p Type (bList: a list of @p Type); the type labels it in rql-schema (never the getter). */
+	void AddSource(const FString& Name, const rql::TypeDescriptor* Type, bool bList, const FString& Description,
+		std::function<rql::Value()> Getter);
 	void AddFunction(const FString& Name, const FString& Description, rql::FunctionHandler Handler);
 	void AddGuide(const FString& Topic, const FString& Markdown);
 	void AddAdapter(rql::TypeAdapter Adapter);
-
-	const TArray<FEntry>& Sources() const { return SourceEntries; }
-	const TArray<FEntry>& Functions() const { return FunctionEntries; }
 
 private:
 	TUniquePtr<FUnrealMcpRqlTypes> TypesPtr;
@@ -67,7 +68,7 @@ private:
 
 	/** A host function as the query source (unreal.assets("Material") | ...): evaluated into a source. True = failed. */
 	bool FunctionSource(rql::QueryPlan& Plan, rql::QueryResult& OutFailure);
-	/** {"type": descriptor, "shared": the base summarised once} for rql-schema. */
+	/** {"type": descriptor, "shared": its base, whose members the sidecar summarises once} for rql-schema. */
 	rql::Json Describe(const rql::TypeDescriptor* Type);
 	void ConfigureMutations();
 	void ConfigureModules();

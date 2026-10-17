@@ -167,6 +167,14 @@ struct UNREALMCPRUNTIME_API FUnrealMcpToolResult
 /** Signature of a tool handler: runs on the game thread, returns a terminal result synchronously. */
 using FUnrealMcpToolHandler = TFunction<FUnrealMcpToolResult(const FUnrealMcpToolCall&)>;
 
+/** A skill shipped by a tool (FUnrealMcpRegisteredTool::Skills). */
+struct FUnrealMcpToolSkill
+{
+	FString Name;
+	FString Description;
+	FString Markdown;
+};
+
 /** A fully compiled tool: descriptor (manifest shape) + handler. */
 struct UNREALMCPRUNTIME_API FUnrealMcpRegisteredTool
 {
@@ -182,11 +190,16 @@ struct UNREALMCPRUNTIME_API FUnrealMcpRegisteredTool
 	 */
 	FString SkillDescription;
 	/**
-	 * An optional dedicated skill BODY (the [AiSkillBody] analog): the generated SKILL.md uses it instead of the full
-	 * Description. Shipped as `skillBody` only when set, so tools without one keep their descriptor (and schema hash)
-	 * unchanged. Declared via FUnrealMcpToolBuilder::SkillBody(). The rql-query tool carries the `unreal-rql` skill here.
+	 * Skills the tool ships beside its own tool page: the sidecar writes each as `<skills>/<Name>/SKILL.md` (front matter
+	 * from Name + Description, then Markdown). rql-query ships the `unreal-rql` skill. Shipped as `skills` only when set,
+	 * so other tools keep their descriptor (and schema hash) unchanged. Declared via FUnrealMcpToolBuilder::Skill().
 	 */
-	FString SkillBody;
+	TArray<FUnrealMcpToolSkill> Skills;
+	/**
+	 * The RQL role of an rql-* tool (docs/rql.md): "query" / "mutate" (the sidecar parses the `query` text into the
+	 * `plan` argument) or "schema", and the sidecar renders the answer as RQL text. Shipped as `rql` only when set.
+	 */
+	FString Rql;
 	TArray<FUnrealMcpParamSpec> Params;
 	TSharedPtr<FJsonObject> OutputSchema;
 	/**
@@ -227,8 +240,10 @@ public:
 	FUnrealMcpToolBuilder& Description(const FString& InDescription);
 	/** Set the SHORT skill description (the [AiSkillDescription] analog → SKILL.md front-matter). Optional. */
 	FUnrealMcpToolBuilder& SkillDescription(const FString& InSkillDescription);
-	/** Set the skill BODY (the [AiSkillBody] analog → SKILL.md body instead of the Description). Optional. */
-	FUnrealMcpToolBuilder& SkillBody(const FString& InSkillBody);
+	/** Ship a skill beside the tool page (`<skills>/<Name>/SKILL.md`). Optional. */
+	FUnrealMcpToolBuilder& Skill(const FString& Name, const FString& Description, const FString& Markdown);
+	/** Mark an rql-* tool: "query" / "mutate" / "schema" (FUnrealMcpRegisteredTool::Rql). Optional. */
+	FUnrealMcpToolBuilder& Rql(const FString& Role);
 	FUnrealMcpToolBuilder& ParamString(const FString& Name, const FString& Desc, EUnrealMcpParamRequirement Req = EUnrealMcpParamRequirement::Optional);
 	FUnrealMcpToolBuilder& ParamInt(const FString& Name, const FString& Desc, EUnrealMcpParamRequirement Req = EUnrealMcpParamRequirement::Optional);
 	FUnrealMcpToolBuilder& ParamNumber(const FString& Name, const FString& Desc, EUnrealMcpParamRequirement Req = EUnrealMcpParamRequirement::Optional);

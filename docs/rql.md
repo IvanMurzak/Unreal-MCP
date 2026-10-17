@@ -58,9 +58,13 @@ agent ──query text──▶ unreal-mcp-bridge (sidecar, .NET)          Unrea
 - **Methods** (`call`): Actor `Destroy()`, `Duplicate(Offset)`, `AddComponent(ClassName, Name)`; component
   `Destroy()`; every parameterless `CallInEditor` function (the Details panel's buttons); every UFUNCTION of an API class (the `editor` operations, extension
   operations). Parameters and results convert like members; UHT's recorded C++ defaults become RQL defaults.
-- **Identity**: `$ref` is `Type#<UObject::GetUniqueID()>` (session ids, like Unity's instance ids); `ref(…)` resolves
-  them directly. Every object value carries a weak pointer, so destroyed (garbage) objects read as null and are never
-  dereferenced.
+- **Identity**: `$ref` is `Type#<Id>`, the `Id` of the object's slot in the object array plus that slot's serial number
+  (editor-session ids, like Unity's instance ids); `ref(…)` resolves them directly, and a ref to a destroyed object never
+  resolves to a new object that reuses the slot. Every object value carries a weak pointer, so destroyed (garbage)
+  objects read as null and are never dereferenced.
+- **References from text**: an object parameter or member accepts what an edit field accepts — an asset path, a class
+  name or path for class references, an actor label / name / path for actors (`FUnrealMcpObjectRef::ResolveReference`,
+  the same class resolver as `blueprint-*`).
 - **Math structs** (`Vector`, `Vector2D`, `Vector4`, `Rotator`, `Quat`, `LinearColor`, `Color`, `IntPoint`,
   `IntVector`) have RQL type adapters: they print as `(x, y, z)` and accept `"(1, 2, 3)"`, `[1, 2, 3]`, `{X: 1, …}`;
   colors also `"#ff8800"`.
@@ -117,17 +121,23 @@ Kept as tools: `blueprint-*` (Blueprint authoring is Unreal's script surface, li
 manifest (`ProxyTool`, plain JSON-schema parameters), so there is nothing for it to bind and no `ToolFormat` setting —
 the kept tools take simple arguments already.
 
-**Skill.** rql-query's descriptor carries the `unreal-rql` skill (the guide, the live sources and functions, the
-guides of installed RQL modules) as `skillBody`; `unreal-skill-generate` writes it as `unreal-rql/SKILL.md`, and the
-sidecar keeps it out of `tools/list`.
+**Descriptor.** The plugin marks its tools in the manifest: `"rql": "query" | "mutate" | "schema"` tells the sidecar
+to parse `query` into `plan` (query / mutate) and to render the answer, and rql-query ships the `unreal-rql` skill (the
+guide, the live sources and functions, the guides of installed RQL modules) as `"skills": [{name, description,
+markdown}]`. `unreal-skill-generate` writes every shipped skill as `<name>/SKILL.md`; skills never reach `tools/list`.
+The skill's name, description and body live in the plugin (`UnrealMcpRqlGuide.h`, the session's skill markdown).
 
 ## Extensions
 
 An extension contributes an `IUnrealMcpRqlModule` (`UnrealMCP/Source/UnrealMcpRql/Public/IUnrealMcpRqlModule.h`),
-registered as a modular feature; the editor republishes the rql-* tools (texts and skill) when modules come or go.
+registered as a modular feature. The editor's extension manager runs a module pass in the same rebuild as tool
+providers: the Extensions window lists the module's extension (`GetExtensionId`, `GetExtensionVersion`), disabling it
+there leaves the module out, and a module coming or going re-registers the rql-* tools (their skill) before the one
+manifest push.
 Reflection already exposes every type the extension's engine plugin defines, so a module adds what reflection does not:
 
-- sources: `AddObjectSource`, `AddObjectListSource`, `AddAssetSource(name, description, UClass*)`;
+- sources: `AddObjectSource(name, description, UClass*, getter)`, `AddObjectListSource(name, description, UClass*,
+  getter)`, `AddAssetSource(name, description, UClass*)` — the class types the source in `rql-schema`;
 - operations: `AddApiClass(UClass*, "TypeName")` — every UFUNCTION of the class becomes callable (declare them
   `UFUNCTION(BlueprintCallable, meta = (BlueprintInternalUseOnly = "true"))` so UHT records default arguments; the doc
   comment is the description; failures via `UnrealMcpRql::Fail`), usually with its class default object as a source;
@@ -140,7 +150,9 @@ Reflection already exposes every type the extension's engine plugin defines, so 
   mutations (set, dry run, read-only, permission), components, calls (spawn, add component, duplicate, destroy), refs,
   selection, levels, console, assets, schema. The C++ runtime has no parser, so each case carries the plan Rql.Parser
   produces for its query (in the comment above it).
-- `bridge/tests/RqlBridgeTests.cs`: plans, result and schema rendering, the proxy wiring, the `unreal-rql` skill file.
+- `bridge/tests/RqlBridgeTests.cs`: plans, result and schema rendering, the descriptor fields, the proxy wiring, the
+  shipped skill file.
+- `UnrealMcpExtensionsSpec.cpp` (`UnrealMcp.Extensions`): the module pass (records, disabled set, enabled ids).
 - The connection smoke (`scripts/connection_smoke.py`) and the chain battery call `rql-schema` over MCP.
 
 A local Mac run: build a host project with the plugin (`RunUBT.sh <Host>Editor Mac Development -project=…`), then

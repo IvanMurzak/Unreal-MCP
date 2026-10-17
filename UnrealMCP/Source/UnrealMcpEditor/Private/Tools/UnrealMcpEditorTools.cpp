@@ -6,7 +6,6 @@
 #include "Tools/UnrealMcpObjectRef.h"
 
 #include "Dom/JsonObject.h"
-#include "Editor.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #if __has_include("Misc/StringOutputDevice.h")

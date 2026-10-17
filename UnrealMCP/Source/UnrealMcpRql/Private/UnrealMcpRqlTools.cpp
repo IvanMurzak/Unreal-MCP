@@ -3,14 +3,17 @@
 
 #include "UnrealMcpRqlTools.h"
 
+#include "IUnrealMcpRqlModule.h"
 #include "UnrealMcpRqlGuide.h"
 #include "UnrealMcpRqlSession.h"
 #include "UnrealMcpToolRegistry.h"
 
+#include "Features/IModularFeatures.h"
+
 namespace UnrealMcpRqlToolsLocal
 {
-	FUnrealMcpToolRegistry* GRegistry = nullptr;
-	TFunction<void()> GToolsChanged;
+	/** SetEnabledExtensions; unset = every module. */
+	TOptional<TSet<FString>> GEnabledExtensions;
 
 	FString Text(const char* Utf8)
 	{
@@ -45,9 +48,9 @@ namespace UnrealMcpRqlToolsLocal
 			.Description(Text(UnrealMcpRqlGuide::QueryIntro()) + TEXT("\n\n") + Text(UnrealMcpRqlGuide::Language()) + TEXT("\n\n")
 				+ Text(UnrealMcpRqlGuide::QueryExamples()))
 			.SkillDescription(Text(UnrealMcpRqlGuide::QueryBlurb()))
-			// The full unreal-rql skill (sources and guides of the installed modules): the sidecar writes it as the
-			// `unreal-rql` SKILL.md and keeps it out of tools/list.
-			.SkillBody(Skill)
+			// The unreal-rql skill (sources and guides of the installed modules): the sidecar writes it beside the tool pages.
+			.Skill(Text(UnrealMcpRqlGuide::SkillName()), Text(UnrealMcpRqlGuide::SkillDescription()), Skill)
+			.Rql(TEXT("query"))
 			.ParamString(TEXT("query"), TEXT("RQL query, e.g. actors | where $ is PointLight | select $ref Label Location"),
 				EUnrealMcpParamRequirement::Required)
 			.ReadOnlyHint(true)
@@ -60,6 +63,7 @@ namespace UnrealMcpRqlToolsLocal
 				+ Text(UnrealMcpRqlGuide::MutateExamples()) + Text(UnrealMcpRqlGuide::MutateOutro()) + TEXT("\n\n")
 				+ Text(UnrealMcpRqlGuide::QuerySyntaxShort()))
 			.SkillDescription(Text(UnrealMcpRqlGuide::MutateBlurb()))
+			.Rql(TEXT("mutate"))
 			.ParamString(TEXT("query"), TEXT("RQL query ending with a set or call stage, e.g. actors | where Label == \"Player\" | set HiddenInEditor = true"),
 				EUnrealMcpParamRequirement::Required)
 			.ParamBool(TEXT("dry_run"), TEXT("true = preview the receipt without changing anything"))
@@ -71,6 +75,7 @@ namespace UnrealMcpRqlToolsLocal
 			.Title(TEXT("RQL / Schema"))
 			.Description(Text(UnrealMcpRqlGuide::SchemaDescription()))
 			.SkillDescription(Text(UnrealMcpRqlGuide::SchemaBlurb()))
+			.Rql(TEXT("schema"))
 			.ParamString(TEXT("type"), TEXT("Optional type name, e.g. \"PointLight\", \"StaticMeshComponent\", \"Vector\""))
 			.ReadOnlyHint(true)
 			.OpenWorldHint(false)
@@ -92,26 +97,24 @@ namespace UnrealMcpRqlTools
 		RegisterTools(Registry);
 	}
 
-	void Attach(FUnrealMcpToolRegistry& Registry, TFunction<void()> OnChanged)
+	TArray<IUnrealMcpRqlModule*> Modules()
 	{
-		GRegistry = &Registry;
-		GToolsChanged = MoveTemp(OnChanged);
+		TArray<IUnrealMcpRqlModule*> Out = IModularFeatures::Get().GetModularFeatureImplementations<IUnrealMcpRqlModule>(
+			IUnrealMcpRqlModule::GetModularFeatureName());
+		Out.RemoveAll([](const IUnrealMcpRqlModule* Module) { return Module == nullptr; });
+		Out.Sort([](const IUnrealMcpRqlModule& A, const IUnrealMcpRqlModule& B) { return A.GetRqlModuleName() < B.GetRqlModuleName(); });
+		return Out;
 	}
 
-	void Detach()
+	void SetEnabledExtensions(const TSet<FString>& ExtensionIds)
 	{
-		GRegistry = nullptr;
-		GToolsChanged = nullptr;
+		GEnabledExtensions = ExtensionIds;
 	}
 
-	/** The module set changed (UnrealMcpRqlModule.cpp): rebuild the descriptions and push them. */
-	void Republish()
+	bool IsModuleEnabled(const IUnrealMcpRqlModule& Module)
 	{
-		if (!GRegistry)
-			return;
-		RegisterTools(*GRegistry); // core path: replaces the same-named entries and bumps the revision
-		if (GToolsChanged)
-			GToolsChanged();
+		const FString Id = Module.GetExtensionId();
+		return Id.IsEmpty() || !GEnabledExtensions.IsSet() || GEnabledExtensions->Contains(Id);
 	}
 
 	FString ExecutePlan(const FString& PlanJson, bool bAllowMutation, bool bDryRun, bool& bOutOk)

@@ -19,12 +19,6 @@ class UObject;
 class UScriptStruct;
 class UStruct;
 
-/** An object by path (already loaded, else loaded quietly); nullptr when there is none of @p Class. */
-UObject* UnrealMcpRqlLoadObject(UClass* Class, const FString& Path);
-
-/** A class by short name ("PointLight", "AStaticMeshActor"), class path or Blueprint asset path; nullptr when none. */
-UClass* UnrealMcpRqlResolveClass(const FString& Name);
-
 /** Bracket a UFUNCTION call made by RQL: UnrealMcpRql::Fail() inside it makes EndCall return true with the message. */
 void UnrealMcpRqlBeginCall();
 bool UnrealMcpRqlEndCall(FString& OutFailure);
@@ -83,14 +77,26 @@ public:
 	UObject* AsObject(const rql::Value& Value) const;
 	/** Liveness without dereferencing a destroyed object (the weak pointer the value carries). */
 	bool IsAlive(const rql::Value& Value) const;
-	/** An object handed out before (stable ref "Type#<id>"), else a slow scan of all objects; nullptr when gone. */
-	UObject* FindById(int32 Id) const;
+	/**
+	 * The session-independent id of an object (the `Id` member, stable ref "Type#<id>"): its object-array index and the
+	 * slot's serial number, so a ref to a destroyed object never resolves to another object that reuses the slot.
+	 */
+	static int64 IdOf(const UObject* Object);
+	/** The live object with this id (IdOf); nullptr when it is gone. No search. */
+	static UObject* FindById(int64 Id);
 
-	rql::Value Read(const FProperty* Property, const void* ValuePtr);
+	/** The RQL value of a property value. @p Type: the property's ForProperty type when the caller has it (else computed). */
+	rql::Value Read(const FProperty* Property, const void* ValuePtr, const rql::TypeDescriptor* Type = nullptr);
 	/** Convert and store; throws std::runtime_error with a message for the agent when the value does not fit. */
 	void Write(const FProperty* Property, void* ValuePtr, const rql::Value& Value);
 	/** Write a property of an object with the editor notifications (PreEditChange / PostEditChangeProperty). */
 	void WriteObjectProperty(UObject* Object, FProperty* Property, const rql::Value& Value);
+	/**
+	 * The one struct coercion (property writes, method arguments, the math-struct adapters): a struct value of the type, a
+	 * math-struct literal ("(1, 2, 3)", [1, 2, 3], "#ff8800") or a {Member: value} literal written over @p Out. Throws
+	 * std::runtime_error when the value does not fit.
+	 */
+	void CoerceStruct(UScriptStruct* Struct, const rql::Value& Value, void* Out);
 
 	// ---- extension points (registered before the first query; inherited by subclasses)
 
@@ -106,9 +112,6 @@ public:
 
 	/** Native (non-reflected) descriptors registered by the host (log entries, class infos), for FindByName. */
 	void AddNativeType(const rql::TypeDescriptor* Descriptor);
-
-	/** Every class descriptor created so far (schema listings). */
-	const TMap<UClass*, rql::TypeDescriptor*>& ClassDescriptors() const { return Classes; }
 
 private:
 	std::unique_ptr<rql::TypeRegistry> RegistryPtr;
@@ -128,7 +131,7 @@ private:
 	rql::TypeDescriptor& Shell(const void* Key, const FString& Name, rql::TypeKind Kind);
 	void FillClass(rql::TypeDescriptor& Descriptor, UClass* Class);
 	void FillStruct(rql::TypeDescriptor& Descriptor, UScriptStruct* Struct);
-	bool AddPropertyMember(rql::TypeDescriptor& Descriptor, FProperty* Property, bool bOnObject, bool bForceWritable);
-	bool AddFunctionMethod(rql::TypeDescriptor& Descriptor, UFunction* Function);
+	void AddPropertyMember(rql::TypeDescriptor& Descriptor, FProperty* Property, bool bOnObject, bool bForceWritable);
+	void AddFunctionMethod(rql::TypeDescriptor& Descriptor, UFunction* Function);
 	bool IsCallable(UClass* Class, UFunction* Function) const;
 };

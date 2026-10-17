@@ -83,7 +83,7 @@ void FUnrealMcpSerializationCheckSpec::Define()
 			if (!Actor)
 				return;
 
-			const TSharedPtr<FJsonObject> Json = FUnrealMcpPropertyJson::SerializeObject(Actor, /*Paths*/ {});
+			const TSharedPtr<FJsonObject> Json = FUnrealMcpPropertyJson::SerializeObject(Actor);
 			TestTrue("json valid", Json.IsValid());
 			if (Json.IsValid())
 				TestTrue("non-empty reflected object", Json->Values.Num() > 0);
@@ -91,7 +91,7 @@ void FUnrealMcpSerializationCheckSpec::Define()
 
 		It("returns an empty object for a null target (no crash)", [this]()
 		{
-			const TSharedPtr<FJsonObject> Json = FUnrealMcpPropertyJson::SerializeObject(nullptr, /*Paths*/ {});
+			const TSharedPtr<FJsonObject> Json = FUnrealMcpPropertyJson::SerializeObject(nullptr);
 			TestTrue("json valid", Json.IsValid());
 			if (Json.IsValid())
 				TestEqual("empty", Json->Values.Num(), 0);
