@@ -137,6 +137,17 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             Assert.Throws<CredentialScopeException>(() => host.CurrentBearer);
         }
 
+        [Fact]
+        public void CustomOAuth_Remote_NeverTreatsAStoredCloudBearerAsExplicit()
+        {
+            using var host = SignedInHost();
+            host.ApplyConnectionConfig(new JsonObject { ["mode"] = "Cloud", ["cloudUrl"] = "https://ai-game.dev", ["token"] = "cloud-bearer" });
+            var custom = Custom("https://my-server.example.com", "oauth");
+            custom.Remove("token"); // partial push: the stored cloud bearer stays in the sidecar's bearer slot
+            host.ApplyConnectionConfig(custom);
+            Assert.Throws<CredentialScopeException>(() => host.CurrentBearer);
+        }
+
         private sealed class NoNetworkHandler : HttpMessageHandler
         {
             protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)

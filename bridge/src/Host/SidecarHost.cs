@@ -67,6 +67,9 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         private readonly string? _fallbackHost;
         private readonly string? _fallbackToken;
 
+        /// <summary>The env var the plugin and <see cref="Program"/> read the explicit bearer from.</summary>
+        internal const string EnvToken = "UNREAL_MCP_TOKEN";
+
         private readonly ConnectionConfig _config = new()
         {
             KeepConnected = true,
@@ -405,14 +408,13 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         private Task<string?> ResolveBearerAsync()
         {
             var provider = _credentialProvider;
-            // Custom + oauth: the machine-store account token reaches a loopback host only; any other host gets the
-            // explicit token (UNREAL_MCP_TOKEN) or LoopbackTokenScope throws, failing the dial (never anonymous).
+            // The explicit token is the env one only: BearerToken can also hold a device-flow account JWT.
             if (!_isCloudMode && _isCustomOAuth)
                 return LoopbackTokenScope.ResolveAsync(
                     _config.Host,
                     async () => provider is { IsSignedIn: true } ? await provider.GetAccessTokenAsync().ConfigureAwait(false) : null,
-                    BearerToken ?? _fallbackToken,
-                    "UNREAL_MCP_TOKEN");
+                    _fallbackToken,
+                    EnvToken);
             if (provider != null && _isCloudMode && provider.IsSignedIn)
                 return ResolveCloudBearerAsync(provider);
             return Task.FromResult(BearerToken);
