@@ -19,6 +19,8 @@
 #include "Engine/Level.h"
 #include "Engine/LevelStreaming.h"
 #include "Engine/World.h"
+#include "Components/ActorComponent.h"
+#include "Factories/Factory.h"
 #include "Factories/MaterialInstanceConstantFactoryNew.h"
 #include "FileHelpers.h"
 #include "GameFramework/Actor.h"
@@ -32,6 +34,7 @@
 #include "Modules/ModuleManager.h"
 #include "UObject/GCObjectScopeGuard.h"
 #include "UObject/Package.h"
+#include "UObject/UObjectIterator.h"
 
 namespace UnrealMcpRqlEditorApiLocal
 {
@@ -386,6 +389,60 @@ bool UUnrealMcpRqlEditorApi::RefreshAssets(const FString& Path, bool bForce)
 {
 	AssetRegistry().ScanPathsSynchronous({ Path.IsEmpty() ? FString(TEXT("/Game")) : Path }, bForce);
 	return true;
+}
+
+UObject* UUnrealMcpRqlEditorApi::CreateAsset(const FString& Path, const FString& ClassName)
+{
+	FString Folder, Name;
+	UClass* Class = UnrealMcpRqlResolveClass(ClassName);
+	if (!Class || Class->HasAnyClassFlags(CLASS_Abstract | CLASS_Deprecated | CLASS_NewerVersionExists)
+		|| Class->IsChildOf(AActor::StaticClass()) || Class->IsChildOf(UActorComponent::StaticClass()))
+	{
+		UnrealMcpRql::Fail(FString::Printf(TEXT("'%s' is not an asset class (actors are spawned: SpawnActor)"), *ClassName));
+		return nullptr;
+	}
+	if (!SplitAssetPath(Path, Folder, Name) || !IsWritableRoot(Path))
+	{
+		UnrealMcpRql::Fail(FString::Printf(TEXT("'%s' is not a writable asset path (e.g. /Game/Data/DA_Item)"), *Path));
+		return nullptr;
+	}
+	if (UEditorAssetLibrary::DoesAssetExist(Path))
+	{
+		UnrealMcpRql::Fail(FString::Printf(TEXT("'%s' already exists"), *Path));
+		return nullptr;
+	}
+	// The editor's own factory when one creates this class from nothing (materials, input actions, data tables, ...):
+	// it sets the asset up as the Content Browser's "New" menu does. Otherwise a plain object in a new package.
+	UFactory* Factory = nullptr;
+	for (TObjectIterator<UClass> It; It; ++It)
+	{
+		if (!It->IsChildOf(UFactory::StaticClass()) || It->HasAnyClassFlags(CLASS_Abstract | CLASS_Deprecated | CLASS_NewerVersionExists))
+			continue;
+		const UFactory* Default = It->GetDefaultObject<UFactory>();
+		if (Default && Default->CanCreateNew() && Default->GetSupportedClass() == Class)
+		{
+			Factory = NewObject<UFactory>(GetTransientPackage(), *It);
+			break;
+		}
+	}
+	UObject* Created = nullptr;
+	if (Factory)
+	{
+		FGCObjectScopeGuard FactoryGuard(Factory);
+		Created = AssetTools().CreateAsset(Name, Folder, Class, Factory);
+	}
+	else if (UPackage* Package = CreatePackage(*(Folder / Name)))
+	{
+		Created = NewObject<UObject>(Package, Class, *Name, RF_Public | RF_Standalone | RF_Transactional);
+		if (Created)
+		{
+			FAssetRegistryModule::AssetCreated(Created);
+			Package->MarkPackageDirty();
+		}
+	}
+	if (!Created)
+		UnrealMcpRql::Fail(FString::Printf(TEXT("could not create a %s at '%s'"), *Class->GetName(), *Path));
+	return Created;
 }
 
 UMaterialInstanceConstant* UUnrealMcpRqlEditorApi::CreateMaterialInstance(const FString& Path, UMaterialInterface* Parent)

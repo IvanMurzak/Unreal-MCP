@@ -263,7 +263,12 @@ void FUnrealMcpRqlSession::ConfigureModules()
 		if (!Module)
 			continue;
 		Module->ConfigureRql(Context);
-		ModuleReports.Add(Module->GetRqlModuleName());
+		const FString Extension = Module->GetExtensionId();
+		const FString Version = Module->GetExtensionVersion();
+		FString Report = FString::Printf(TEXT("`%s`"), *Module->GetRqlModuleName());
+		if (!Extension.IsEmpty())
+			Report += FString::Printf(TEXT(" - %s %s"), *Extension, *Version);
+		ModuleReports.Add(Report);
 	}
 }
 
@@ -605,6 +610,6 @@ FString FUnrealMcpRqlSession::SkillMarkdown() const
 		Out += FString::Printf(TEXT("\n## %s\n\n%s\n"), *Guide.Key, *Guide.Value.TrimStartAndEnd());
 	Out += TEXT("\n## Installed RQL modules\n\n- `Core`\n");
 	for (const FString& Module : ModuleReports)
-		Out += FString::Printf(TEXT("- `%s`\n"), *Module);
+		Out += FString::Printf(TEXT("- %s\n"), *Module);
 	return Out;
 }

@@ -1043,7 +1043,9 @@ void FUnrealMcpRqlTypes::Write(const FProperty* Property, void* ValuePtr, const 
 			{
 				// Asset paths are accepted for references: set StaticMesh = "/Game/Meshes/Cube.Cube".
 				const FString Path = UnrealMcpRqlFromStd(Value.as_string());
-				Object = UnrealMcpRqlLoadObject(ObjectProperty->PropertyClass, Path);
+				// Classes by name too: set ActorClass = "PointLight" (a TSubclassOf / UClass* reference).
+				Object = Property->IsA<FClassProperty>() ? UnrealMcpRqlResolveClass(Path)
+					: UnrealMcpRqlLoadObject(ObjectProperty->PropertyClass, Path);
 				if (!Object)
 					Throw(FString::Printf(TEXT("no %s at '%s'"), *ObjectProperty->PropertyClass->GetName(), *Path));
 			}

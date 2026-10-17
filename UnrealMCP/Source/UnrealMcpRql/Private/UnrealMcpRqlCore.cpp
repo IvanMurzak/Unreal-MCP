@@ -807,7 +807,7 @@ void UnrealMcpRqlConfigureCore(FUnrealMcpRqlSession& Session)
 	});
 	Session.AddSource(TEXT("editor"), TEXT("Editor"),
 		TEXT("editor state (IsPlaying, IsPaused, Selection, World, CurrentLevel) and operations: call SpawnActor / OpenLevel / NewLevel / "
-			"SaveLevel / SaveAll / UnloadSublevel / CopyAsset / MoveAsset / DeleteAsset / CreateFolder / RefreshAssets / "
+			"SaveLevel / SaveAll / UnloadSublevel / CreateAsset / CopyAsset / MoveAsset / DeleteAsset / CreateFolder / RefreshAssets / "
 			"CreateMaterialInstance / ImportAsset / SaveAsset / ClearConsole"), [Types]()
 	{
 		return Types->WrapObject(GetMutableDefault<UUnrealMcpRqlEditorApi>());

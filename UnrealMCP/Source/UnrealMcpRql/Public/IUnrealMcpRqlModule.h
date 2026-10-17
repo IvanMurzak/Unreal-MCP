@@ -71,12 +71,24 @@ public:
 	/** Stable module name shown in the `unreal-rql` skill, e.g. "Niagara". */
 	virtual FString GetRqlModuleName() const = 0;
 
+	/** The extension that ships the module (reverse-DNS id, e.g. "com.ivanmurzak.unreal-ai-niagara"); empty for none. */
+	virtual FString GetExtensionId() const { return FString(); }
+
+	/** The extension's version, kept equal to its .uplugin VersionName (scripts/extension_release.py checks it). */
+	virtual FString GetExtensionVersion() const { return FString(); }
+
 	/** Register sources, operations, members and guides. Runs on the game thread whenever the engine is (re)built. */
 	virtual void ConfigureRql(FUnrealMcpRqlModuleContext& Context) = 0;
 };
 
 namespace UnrealMcpRql
 {
+	/** A class by short name ("PointLight", "AStaticMeshActor"), class path or Blueprint asset path; nullptr when none. */
+	UNREALMCPRQL_API UClass* ResolveClass(const FString& Name);
+
+	/** An object of @p Class by path ("/Game/Materials/M_Red" or its object path), loaded quietly; nullptr when none. */
+	UNREALMCPRQL_API UObject* LoadObject(UClass* Class, const FString& Path);
+
 	/**
 	 * Fail the UFUNCTION that RQL is calling right now with @p Message (UFUNCTIONs cannot throw). The `call` stage reports
 	 * it as an error. Changes the function already made stay (as with any failing call); validate before changing.

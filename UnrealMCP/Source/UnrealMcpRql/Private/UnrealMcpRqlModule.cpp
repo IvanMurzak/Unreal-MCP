@@ -36,6 +36,16 @@ void UnrealMcpRql::Fail(const FString& Message)
 	GCallFailure = Message.IsEmpty() ? FString(TEXT("the call failed")) : Message;
 }
 
+UClass* UnrealMcpRql::ResolveClass(const FString& Name)
+{
+	return UnrealMcpRqlResolveClass(Name);
+}
+
+UObject* UnrealMcpRql::LoadObject(UClass* Class, const FString& Path)
+{
+	return UnrealMcpRqlLoadObject(Class, Path);
+}
+
 void UnrealMcpRqlBeginCall()
 {
 	using namespace UnrealMcpRqlModuleLocal;

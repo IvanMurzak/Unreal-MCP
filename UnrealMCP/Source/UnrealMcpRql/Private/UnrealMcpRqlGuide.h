@@ -80,6 +80,7 @@ Levels, assets, editor state:
   editor | call OpenLevel("/Game/Maps/Arena")        editor | call NewLevel("/Game/Maps/New")
   editor | call SaveLevel()        editor | call SaveAll()        levels | where Map == "Sub" | set IsCurrent = true
   editor | call CreateMaterialInstance("/Game/Materials/MI_Glow", "/Game/Materials/M_Base")
+  editor | call CreateAsset("/Game/Data/DA_Sword", "WeaponData")         any asset class (the editor's factory when it has one)
   editor | call CopyAsset("/Game/A", "/Game/B")    MoveAsset / DeleteAsset / CreateFolder("/Game/Props") / ImportAsset("C:/art/crate.fbx", "/Game/Props")
   editor | set Selection = [ref("StaticMeshActor#1234")]        editor | set IsPlaying = true
 )RQL";

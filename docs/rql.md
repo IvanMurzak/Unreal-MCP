@@ -82,7 +82,7 @@ agent ──query text──▶ unreal-mcp-bridge (sidecar, .NET)          Unrea
 | `actors` | every actor of the editor world's loaded levels |
 | `levels`, `world` | the loaded levels, the editor world |
 | `selection` | the selected actors (`editor | set Selection = [...]` writes it) |
-| `editor` | editor state (`IsPlaying`, `IsPaused` — writable, `Selection`, `World`, `CurrentLevel`) and operations: `SpawnActor`, `OpenLevel`, `NewLevel`, `SaveLevel`, `SaveAll`, `UnloadSublevel`, `CopyAsset`, `MoveAsset`, `DeleteAsset`, `CreateFolder`, `RefreshAssets`, `CreateMaterialInstance`, `ImportAsset`, `SaveAsset`, `ClearConsole` |
+| `editor` | editor state (`IsPlaying`, `IsPaused` — writable, `Selection`, `World`, `CurrentLevel`) and operations: `SpawnActor`, `OpenLevel`, `NewLevel`, `SaveLevel`, `SaveAll`, `UnloadSublevel`, `CreateAsset`, `CopyAsset`, `MoveAsset`, `DeleteAsset`, `CreateFolder`, `RefreshAssets`, `CreateMaterialInstance`, `ImportAsset`, `SaveAsset`, `ClearConsole` |
 | `console` | editor log entries (`Sequence`, `Time`, `Verbosity`, `Category`, `Message`) |
 | `unreal.find(label)` | an actor by label, name or path |
 | `unreal.asset(path)`, `unreal.assets(class, path?)` | one asset; assets of a class (at most 200, loaded as read) |
@@ -97,7 +97,7 @@ agent ──query text──▶ unreal-mcp-bridge (sidecar, .NET)          Unrea
 | `actor-create`, `actor-destroy`, `actor-duplicate`, `actor-set-parent` | `editor | call SpawnActor(...)`, `call Destroy()`, `call Duplicate(offset)`, `set Parent = ref(...)` |
 | `actor-component-add`, `actor-component-destroy`, `actor-component-list-all` | `call AddComponent(class, name)`, `… | get Components | where $ is X | call Destroy()`, `unreal.classes("ActorComponent")` |
 | `asset-find`, `asset-get-data` | `unreal.assets("Material", "/Game/...")`, `unreal.asset(path)` |
-| `asset-copy` / `-move` / `-delete` / `-create-folder` / `-refresh` / `-import` | `editor | call CopyAsset / MoveAsset / DeleteAsset / CreateFolder / RefreshAssets / ImportAsset` |
+| `asset-copy` / `-move` / `-delete` / `-create-folder` / `-refresh` / `-import` | `editor | call CopyAsset / MoveAsset / DeleteAsset / CreateFolder / RefreshAssets / ImportAsset` (and `CreateAsset(path, class)` for any asset class) |
 | `asset-material-create`, `-modify`, `-get-data` | `editor | call CreateMaterialInstance(path, parent)`, `Scalars["…"]`, `Vectors["…"]`, `Textures["…"]` |
 | `level-create` / `-open` / `-save` / `-set-current` / `-unload-sublevel` / `-list-loaded` | `editor | call NewLevel / OpenLevel / SaveLevel / UnloadSublevel`, `levels` (`set IsCurrent = true`) |
 | `editor-application-get-state` / `-set-state` | `editor` `IsPlaying`, `IsPaused` (writable) |

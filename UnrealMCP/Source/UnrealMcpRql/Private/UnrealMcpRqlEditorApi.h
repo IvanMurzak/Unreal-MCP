@@ -73,6 +73,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Unreal MCP|RQL", meta = (BlueprintInternalUseOnly = "true"))
 	bool RefreshAssets(const FString& Path = TEXT("/Game"), bool bForce = false);
 
+	/** create an asset of a class ("InputAction", "Material", "DataAsset subclass", ...) at Path ("/Game/Input/IA_Jump") with the class's editor factory when it has one; returns it */
+	UFUNCTION(BlueprintCallable, Category = "Unreal MCP|RQL", meta = (BlueprintInternalUseOnly = "true"))
+	UObject* CreateAsset(const FString& Path, const FString& ClassName);
+
 	/** create a material instance at Path from a parent material (unreal.asset(path) or its path); returns it */
 	UFUNCTION(BlueprintCallable, Category = "Unreal MCP|RQL", meta = (BlueprintInternalUseOnly = "true"))
 	UMaterialInstanceConstant* CreateMaterialInstance(const FString& Path, UMaterialInterface* Parent);
