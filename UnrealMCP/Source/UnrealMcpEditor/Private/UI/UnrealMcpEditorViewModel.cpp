@@ -324,8 +324,10 @@ void FUnrealMcpEditorViewModel::ApplyStatus(const TSharedPtr<FJsonObject>& Statu
 	if (Status->TryGetStringField(TEXT("cloudAuthState"), CloudAuthState))
 	{
 		if (CloudAuthState.Equals(TEXT("Authorized"), ESearchCase::IgnoreCase))
+		{
 			DeviceAuthState = EUnrealMcpDeviceAuthState::Authorized;
 			bAccountSignedIn = true;
+		}
 		else if (CloudAuthState.Equals(TEXT("SignInRequired"), ESearchCase::IgnoreCase))
 			HandleSignInRequired();
 	}
