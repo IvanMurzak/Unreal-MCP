@@ -34,6 +34,14 @@ struct FUnrealMcpExtensionRecord
 	bool HasError() const { return !Error.IsEmpty(); }
 };
 
+/** An extension module of a kind this module cannot see (an RQL module of UnrealMcpRql), listed by the module pass. */
+struct FUnrealMcpExtensionModule
+{
+	FString Id;
+	FText DisplayName;
+	FString Version;
+};
+
 /**
  * Discovers IUnrealMcpToolProvider modular features, merges their tools into the plugin's single
  * FUnrealMcpToolRegistry in deterministic order (sorted by ExtensionId), isolates invalid/duplicate
@@ -96,6 +104,16 @@ public:
 	/** Rebuild from an explicit provider list — deterministic, no global IModularFeatures (test seam). */
 	void RebuildFromProviders(const TArray<IUnrealMcpToolProvider*>& Providers, bool bNotify = true);
 
+	/**
+	 * The module pass (docs/rql.md "Extensions"): extensions that contribute through a modular feature this module cannot
+	 * see, e.g. the RQL modules. On every rebuild @p List names the modules present (modules without an extension id are
+	 * not listed); the manager records them like tool providers (one row per extension id, the same validation and
+	 * DisabledExtensions gating), then calls @p Apply with the enabled ids, before the single OnChanged. A change of the
+	 * @p FeatureName modular feature rebuilds. Set before Startup().
+	 */
+	void SetModulePass(FName FeatureName, TFunction<TArray<FUnrealMcpExtensionModule>()> List,
+		TFunction<void(const TSet<FString>& EnabledIds)> Apply);
+
 	/** Override the TOOL provider source used by Startup/SetExtensionEnabled rebuilds (test seam; default = live discovery). */
 	void SetProviderSourceForTesting(TFunction<TArray<IUnrealMcpToolProvider*>()> InSource) { ProviderSource = MoveTemp(InSource); }
 
@@ -122,6 +140,9 @@ private:
 	 *  No-op when ResourceRegistry == nullptr. Also driven from RebuildFromProviders under the single guard/notify. */
 	void RebuildResourceProviders();
 
+	/** The module pass of a rebuild (SetModulePass): records the listed modules, then applies the enabled ids. */
+	void RebuildModulePass();
+
 	void OnFeatureRegistered(const FName& Type, IModularFeature* Feature);
 	void OnFeatureUnregistered(const FName& Type, IModularFeature* Feature);
 	/** Shared body of the register/unregister handlers: if @p Type is one of the (wired) provider kinds, log
@@ -141,6 +162,10 @@ private:
 	TFunction<TArray<IUnrealMcpToolProvider*>()> ProviderSource;
 	TFunction<TArray<IUnrealMcpPromptProvider*>()> PromptProviderSource;
 	TFunction<TArray<IUnrealMcpResourceProvider*>()> ResourceProviderSource;
+
+	FName ModuleFeatureName;
+	TFunction<TArray<FUnrealMcpExtensionModule>()> ModuleList;
+	TFunction<void(const TSet<FString>&)> ModuleApply;
 
 	TArray<FUnrealMcpExtensionRecord> Records;
 	TSet<FString> DisabledExtensions;

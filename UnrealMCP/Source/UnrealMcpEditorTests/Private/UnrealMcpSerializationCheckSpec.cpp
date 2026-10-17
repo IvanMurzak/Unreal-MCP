@@ -16,8 +16,8 @@
  * Serialization Check window specs (docs/ARCHITECTURE.md §7, Unity's SerializationCheckWindow parity): the
  * HEADLESS-provable core of the window WITHOUT launching Slate — (1) the Recursive=OFF shallow filter
  * (SUnrealMcpSerializationCheckWindow::ShallowFilter, pure JSON→JSON), and (2) that the in-process
- * serialization path the window uses (FUnrealMcpPropertyJson::SerializeObject — the SAME converter the
- * object-get-data / actor-get-data tools use, NOT a sidecar/ReflectorNet round-trip) yields a non-empty
+ * serialization path the window uses (FUnrealMcpPropertyJson::SerializeObject — the converter the former
+ * object-get-data / actor-get-data tools used, NOT a sidecar/ReflectorNet round-trip) yields a non-empty
  * reflected object for a real UObject. The Slate window itself (target picker, output panel, Copy flash) is
  * windowed-verified by the operator; these specs lock the serialization contract underneath it.
  *
@@ -83,7 +83,7 @@ void FUnrealMcpSerializationCheckSpec::Define()
 			if (!Actor)
 				return;
 
-			const TSharedPtr<FJsonObject> Json = FUnrealMcpPropertyJson::SerializeObject(Actor, /*Paths*/ {});
+			const TSharedPtr<FJsonObject> Json = FUnrealMcpPropertyJson::SerializeObject(Actor);
 			TestTrue("json valid", Json.IsValid());
 			if (Json.IsValid())
 				TestTrue("non-empty reflected object", Json->Values.Num() > 0);
@@ -91,7 +91,7 @@ void FUnrealMcpSerializationCheckSpec::Define()
 
 		It("returns an empty object for a null target (no crash)", [this]()
 		{
-			const TSharedPtr<FJsonObject> Json = FUnrealMcpPropertyJson::SerializeObject(nullptr, /*Paths*/ {});
+			const TSharedPtr<FJsonObject> Json = FUnrealMcpPropertyJson::SerializeObject(nullptr);
 			TestTrue("json valid", Json.IsValid());
 			if (Json.IsValid())
 				TestEqual("empty", Json->Values.Num(), 0);

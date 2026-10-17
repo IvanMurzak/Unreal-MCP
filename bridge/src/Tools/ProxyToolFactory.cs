@@ -29,6 +29,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
         public static ProxyTool Create(ToolDescriptor descriptor, IToolCallChannel channel)
         {
             var toolName = descriptor.Name;
+            var rql = descriptor.Rql; // docs/rql.md: the plugin marks its rql-* tools
             var timeoutMs = IpcProtocol.DefaultToolTimeoutMs;
 
             return new ProxyTool(
@@ -46,12 +47,17 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
                 handler: async (requestId, namedParameters, cancellationToken) =>
                 {
                     var arguments = ToArguments(namedParameters);
+                    // RQL (docs/rql.md): the C++ runtime executes plans, so the query text is parsed here; a parse error
+                    // is the agent's answer without a round trip.
+                    if (RqlBridge.ParsesQuery(rql) && RqlBridge.AddPlan(arguments) is ResponseCallTool parseError)
+                        return parseError.SetRequestID(requestId);
                     try
                     {
                         var response = await channel
                             .CallToolAsync(toolName, arguments, timeoutMs, cancellationToken)
                             .ConfigureAwait(false);
-                        return ProxyResponseMapper.Map(response, requestId);
+                        var mapped = ProxyResponseMapper.Map(response, requestId);
+                        return rql != null ? RqlBridge.Render(rql, mapped) : mapped;
                     }
                     catch (IpcDisconnectedException ex)
                     {

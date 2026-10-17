@@ -4,6 +4,8 @@
 #include "UnrealMcpEditorCoordinator.h"
 #include "UnrealMcpLog.h"
 #include "UnrealMcpCoreTools.h"
+#include "IUnrealMcpRqlModule.h"
+#include "UnrealMcpRqlTools.h"
 #include "UnrealMcpRuntimeCoreTools.h"
 #include "UnrealMcpRuntimeCorePrompts.h"
 #include "UnrealMcpRuntimeCoreResources.h"
@@ -66,7 +68,7 @@ void FUnrealMcpEditorCoordinator::Startup()
 	});
 
 	// §10 editor/reflection family: start the GLog ring-buffer collector BEFORE anything else so the
-	// earliest startup log lines are already captured for console-get-logs. Shutdown() deregisters it.
+	// earliest startup log lines are already captured for the RQL `console` source. Shutdown() deregisters it.
 	FUnrealMcpLogCollector::Get().Startup();
 
 	Registry = MakeUnique<FUnrealMcpToolRegistry>();
@@ -78,11 +80,11 @@ void FUnrealMcpEditorCoordinator::Startup()
 	// game; a game adds its own runtime tools via an IUnrealMcpToolProvider extension (RegisterToolProvider).
 	UnrealMcpPingTool::Register(*Registry); // runtime-safe liveness probe (UnrealMcpRuntimeCoreTools.h)
 	// --- Editor-only families (UnrealMcpCoreTools.h) ---
-	UnrealMcpActorTools::Register(*Registry); // §10 actor / component family
+	// docs/rql.md: the RQL data layer — rql-query / rql-mutate / rql-schema replace the actor / object / asset / level /
+	// editor-state / selection / console-log / reflection tools (the UnrealMcpRql module).
+	UnrealMcpRqlTools::Register(*Registry);
 	UnrealMcpBlueprintTools::Register(*Registry); // §10 flagship Blueprint family (CORE)
-	UnrealMcpAssetTools::Register(*Registry); // §10 asset / Content-Browser family (issue #10)
-	UnrealMcpEditorTools::Register(*Registry); // §10 editor / console / reflection family (issue #19)
-	UnrealMcpLevelTools::Register(*Registry); // §10 level / map family (issue #16, Unity Scene.* analog)
+	UnrealMcpEditorTools::Register(*Registry); // §10 console family: console-run-command
 	UnrealMcpScreenshotTools::Register(*Registry); // §10 screenshot / viewport-capture family (issue #17)
 	UnrealMcpSourceTools::Register(*Registry); // §10 C++ source / script family (issue #18)
 	UnrealMcpSkillTools::Register(*Registry); // §2.4 skill authoring — `unreal-skill-create` (SYSTEM surface)
@@ -132,6 +134,25 @@ void FUnrealMcpEditorCoordinator::Startup()
 		/*InConfigPath*/ FString(),
 		PromptRegistry.Get(), // §A.2 kind-aware: also merge prompt-provider extensions into the prompt registry
 		ResourceRegistry.Get()); // §A.2 kind-aware: also merge resource-provider extensions into the resource registry
+	// docs/rql.md "Extensions": extensions' RQL modules (IUnrealMcpRqlModule) are a pass of the same rebuild, so the
+	// Extensions window lists and disables them like tool providers, and a module coming or going re-registers the
+	// rql-* tools (their skill lists the modules' sources and guides) before the one manifest push.
+	ExtensionManager->SetModulePass(IUnrealMcpRqlModule::GetModularFeatureName(),
+		[]()
+		{
+			TArray<FUnrealMcpExtensionModule> Modules;
+			for (const IUnrealMcpRqlModule* Module : UnrealMcpRqlTools::Modules())
+			{
+				if (!Module->GetExtensionId().IsEmpty())
+					Modules.Add({ Module->GetExtensionId(), FText::FromString(Module->GetRqlModuleName()), Module->GetExtensionVersion() });
+			}
+			return Modules;
+		},
+		[this](const TSet<FString>& EnabledIds)
+		{
+			UnrealMcpRqlTools::SetEnabledExtensions(EnabledIds);
+			UnrealMcpRqlTools::Register(*Registry);
+		});
 	ExtensionManager->Startup();
 
 	const FString ProjectPath = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir());

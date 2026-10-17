@@ -346,6 +346,10 @@ void FUnrealMcpExtensionManager::RebuildFromProviders(const TArray<IUnrealMcpToo
 	//     below covers all three kinds. No-op when ResourceRegistry == nullptr.
 	RebuildResourceProviders();
 
+	// 3.7 MODULE pass (SetModulePass): the RQL modules of extensions, gated by the same DisabledExtensions set and
+	//     recorded in Records[] (an RQL-only extension has its row), inside the same guard / single OnChanged.
+	RebuildModulePass();
+
 	// 4. Notify the owner to re-push the manifest(s) (§2.2 / §A.1 — tool + prompt + resource).
 	if (bNotify && OnChanged)
 		OnChanged();
@@ -399,6 +403,58 @@ void FUnrealMcpExtensionManager::RebuildResourceProviders()
 		});
 }
 
+void FUnrealMcpExtensionManager::SetModulePass(FName FeatureName, TFunction<TArray<FUnrealMcpExtensionModule>()> List,
+	TFunction<void(const TSet<FString>& EnabledIds)> Apply)
+{
+	ModuleFeatureName = FeatureName;
+	ModuleList = MoveTemp(List);
+	ModuleApply = MoveTemp(Apply);
+}
+
+void FUnrealMcpExtensionManager::RebuildModulePass()
+{
+	if (!ModuleList || !ModuleApply)
+		return;
+
+	TArray<FUnrealMcpExtensionModule> Modules = ModuleList();
+	Modules.StableSort([](const FUnrealMcpExtensionModule& A, const FUnrealMcpExtensionModule& B) { return A.Id < B.Id; });
+
+	TSet<FString> EnabledIds;
+	TSet<FString> SeenIds;
+	for (const FUnrealMcpExtensionModule& Module : Modules)
+	{
+		// An extension that also provides tools already has its row (and its enable state); one row per id.
+		const bool bHasRecord = FindExtension(Module.Id) != nullptr;
+		FUnrealMcpExtensionRecord Record;
+		Record.Id = Module.Id;
+		Record.DisplayName = Module.DisplayName;
+		Record.Version = Module.Version;
+
+		FString IdError;
+		if (!IsValidExtensionId(Module.Id, IdError) || SeenIds.Contains(Module.Id))
+		{
+			Record.bEnabled = false;
+			Record.Error = IdError.IsEmpty()
+				? FString::Printf(TEXT("duplicate module extension id '%s' — this module was skipped"), *Module.Id)
+				: IdError;
+			UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] module extension rejected: %s."), *Record.Error);
+			if (!bHasRecord)
+				Records.Add(MoveTemp(Record));
+			continue;
+		}
+		SeenIds.Add(Module.Id);
+
+		Record.bEnabled = !DisabledExtensions.Contains(Module.Id);
+		if (Record.bEnabled)
+			EnabledIds.Add(Module.Id);
+		if (!bHasRecord)
+			Records.Add(MoveTemp(Record));
+	}
+	Records.StableSort([](const FUnrealMcpExtensionRecord& A, const FUnrealMcpExtensionRecord& B) { return A.Id < B.Id; });
+
+	ModuleApply(EnabledIds);
+}
+
 void FUnrealMcpExtensionManager::HandleFeatureChange(const FName& Type, const TCHAR* Verb)
 {
 	// The single OnModularFeature(Un)Registered subscription receives EVERY feature type; rebuild when the type is
@@ -411,6 +467,8 @@ void FUnrealMcpExtensionManager::HandleFeatureChange(const FName& Type, const TC
 		Kind = TEXT("prompt");
 	else if (ResourceRegistry != nullptr && Type == IUnrealMcpResourceProvider::GetModularFeatureName())
 		Kind = TEXT("resource");
+	else if (ModuleApply && Type == ModuleFeatureName)
+		Kind = TEXT("module");
 
 	if (Kind == nullptr)
 		return;

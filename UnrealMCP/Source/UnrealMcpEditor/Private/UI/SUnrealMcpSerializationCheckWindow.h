@@ -21,8 +21,8 @@ class STextBlock;
  *
  * Serialization path (the §22.5/§3.2 in-process JSON converter — NOT a sidecar round-trip): Unreal serializes
  * objects to JSON in-process via FUnrealMcpPropertyJson::SerializeObject (FJsonObjectConverter over the object's
- * reflected FProperties), the SAME path the `object-get-data` / `actor-get-data` tools use to return Unreal
- * object data over MCP. ReflectorNet lives in the .NET sidecar and only wraps the MCP wire layer — the editor
+ * reflected FProperties), the converter the former object-get-data / actor-get-data tools used (object data
+ * over MCP is RQL now, docs/rql.md). ReflectorNet lives in the .NET sidecar and only wraps the MCP wire layer — the editor
  * plugin never needs it to serialize a UObject — so this window calls SerializeObject directly on the game
  * thread. The Recursive toggle mirrors Unity's `recursive` flag: when OFF, only the top-level scalar fields are
  * kept and every nested object/array field is DROPPED (no identity/path/name fallback — see ShallowFilter); when

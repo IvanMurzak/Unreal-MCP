@@ -22,6 +22,10 @@ public class UnrealMcpEditor : ModuleRules
 			"UnrealMcpRuntime",
 		});
 
+		// The RQL data layer (docs/rql.md): rql-query / rql-mutate / rql-schema and the IUnrealMcpRqlModule extension
+		// seam. A separate module because it compiles the vendored RQL runtime with C++ exceptions enabled.
+		PrivateDependencyModuleNames.Add("UnrealMcpRql");
+
 		// Reach the runtime module's PRIVATE headers (Bridge/, Dispatch/, Config/, Sidecar/, Extensions/,
 		// Tools/UnrealMcpWorldProvider.h, Tools/UnrealMcpLogCollector.h, …) so the editor coordinator can
 		// construct + wire those subsystems directly. The types are UNREALMCPRUNTIME_API-exported, so
@@ -63,15 +67,9 @@ public class UnrealMcpEditor : ModuleRules
 			"WorkspaceMenuStructure",
 			"InputCore",
 			"ApplicationCore",
-			// Asset / Content-Browser tool family (docs/ARCHITECTURE.md §10, issue #10):
-			//  - AssetRegistry            -> asset-find / asset-get-data / asset-refresh queries
-			//  - AssetTools               -> CreateAsset (material instance) + ImportAssetTasks
-			//  - MaterialEditor           -> UMaterialEditingLibrary (instance param read/write)
-			//  - EditorScriptingUtilities -> UEditorAssetLibrary (copy/move/delete/folder/load)
+			// Asset lookups of the Blueprint family (the asset / material data tools moved to the UnrealMcpRql module,
+			// docs/rql.md).
 			"AssetRegistry",
-			"AssetTools",
-			"MaterialEditor",
-			"EditorScriptingUtilities",
 			// Blueprint tool family (§10): FKismetEditorUtilities / FBlueprintEditorUtils / FCompilerResultsLog
 			// live in UnrealEd; the K2 pin-type schema + event/function K2 nodes live in BlueprintGraph; the
 			// compiler backend (EBlueprintCompileOptions) in KismetCompiler. (AssetRegistry shared above.)

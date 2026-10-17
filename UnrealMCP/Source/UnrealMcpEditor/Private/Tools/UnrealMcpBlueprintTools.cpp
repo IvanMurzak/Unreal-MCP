@@ -4,7 +4,7 @@
 #include "UnrealMcpCoreTools.h"
 #include "UnrealMcpToolRegistry.h"
 #include "UnrealMcpLog.h"
-#include "Tools/UnrealMcpObjectRef.h"   // the de-facto standard class resolver (FUnrealMcpObjectRef::ResolveClass)
+#include "Tools/UnrealMcpObjectRef.h"   // the shared class resolver (FUnrealMcpObjectRef::ResolveClass)
 
 #include "Engine/Blueprint.h"
 #include "Engine/BlueprintGeneratedClass.h"
@@ -49,12 +49,8 @@ namespace
 {
 	// ---- Resolution helpers ----------------------------------------------------------------------
 	//
-	// Class resolution uses the shared FUnrealMcpObjectRef::ResolveClass (Tools/UnrealMcpObjectRef.h) — the
-	// de-facto standard the actor/asset/level families already use. It is a strict superset of the resolver this
-	// file once carried locally: it ADDS an FSoftClassPath::TryLoadClass step (resolves native + generated
-	// Blueprint class paths without a scan) and a FindFirstObject fallback on top of the
-	// TryFindTypeSlow + object/Blueprint-asset load chain. Broadening the Blueprint family's resolution to match
-	// is the intended convergence.
+	// Class resolution uses the shared FUnrealMcpObjectRef::ResolveClass (Tools/UnrealMcpObjectRef.h), the one resolver
+	// RQL uses too, so `blueprint-create` and `editor | call SpawnActor("X")` accept the same class references.
 
 	/** Resolve a UBlueprint by object path. Prefers an already-in-memory object (assets created earlier
 	 *  this session are registered with the AssetRegistry but not saved to disk), then falls back to load. */

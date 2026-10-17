@@ -71,7 +71,10 @@ Consumers exclude the plugin from packaged games with a `TargetDenyList: ["Game"
 
 ## Tool / prompt / resource surface
 
-Built-in editor tools come in 7 families; the README holds the canonical, source-generated inventory.
+Built-in editor tools come in 5 families; the README holds the canonical, source-generated inventory. The editor
+data layer is RQL ([`docs/rql.md`](docs/rql.md)): `rql-query` / `rql-mutate` / `rql-schema` (module `UnrealMcpRql`;
+the sidecar parses the query text, the vendored C++ runtime executes the plan) — add editor data access as RQL members,
+sources or operations (or an extension's `IUnrealMcpRqlModule`), not as new per-operation tools.
 Tool ids are kebab-case, validated `^[a-z0-9]+(-[a-z0-9]+)*$`. Each tool is `Standard` (`tools/list` +
 `/api/tools/<name>`) or `System` (`/api/system-tools/<name>` only, never shown to the AI — §2.4), declared
 with `FUnrealMcpToolBuilder::ToolType(EUnrealMcpToolType::System)` and routed by the sidecar's

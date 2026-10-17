@@ -158,18 +158,17 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
             {
                 var folderName = SanitizeSkillFolderName(tool.Name);
                 currentFolders.Add(folderName);
-                var dir = Path.Combine(skillsRootAbsolute, folderName);
-                var file = Path.Combine(dir, "SKILL.md");
-                try
-                {
-                    Directory.CreateDirectory(dir);
-                    // UTF-8 without BOM (portable docs), matching the C++ generator's ForceUTF8WithoutBOM.
-                    File.WriteAllText(file, BuildSkillMarkdown(tool), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+                if (WriteSkill(skillsRootAbsolute, folderName, BuildSkillMarkdown(tool)))
                     written++;
-                }
-                catch (Exception ex)
+                // Skills the tool ships beside its page (rql-query: unreal-rql, docs/rql.md), named and written by the plugin.
+                foreach (var skill in tool.Skills ?? new List<ToolSkillDescriptor>())
                 {
-                    _logger?.LogWarning("Failed to write skill file '{File}': {Message}", file, ex.Message);
+                    if (string.IsNullOrWhiteSpace(skill.Name) || string.IsNullOrWhiteSpace(skill.Markdown))
+                        continue;
+                    var skillFolder = SanitizeSkillFolderName(skill.Name);
+                    currentFolders.Add(skillFolder);
+                    if (WriteSkill(skillsRootAbsolute, skillFolder, BuildShippedSkillMarkdown(skill)))
+                        written++;
                 }
             }
 
@@ -202,6 +201,43 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
                 written, result.FilesPruned, skillsRootAbsolute);
             return result;
         }
+
+        /// <summary>Write <c>&lt;root&gt;/&lt;folder&gt;/SKILL.md</c> (UTF-8 without BOM, as the C++ generator did). Never throws.</summary>
+        private bool WriteSkill(string skillsRootAbsolute, string folderName, string markdown)
+        {
+            var dir = Path.Combine(skillsRootAbsolute, folderName);
+            var file = Path.Combine(dir, "SKILL.md");
+            try
+            {
+                Directory.CreateDirectory(dir);
+                File.WriteAllText(file, markdown, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning("Failed to write skill file '{File}': {Message}", file, ex.Message);
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// The YAML front matter of a generated SKILL.md: <c>name</c>, the capped single-line <c>description</c>, then the
+        /// provenance marker (see <see cref="ProvenanceKey"/>), followed by the blank line before the body. The marker is
+        /// the LAST block INSIDE the front matter (a consumer parses the front matter only), indented two spaces (a nested
+        /// mapping) and written RAW from the constants, never through <see cref="EscapeYamlQuoted"/> (which would collapse
+        /// the mapping into a quoted string). The description cannot break out of its scalar to forge it — see
+        /// <see cref="SingleLineCapped"/> for the mechanism and its limits.
+        /// </summary>
+        private static List<string> FrontMatter(string name, string description) => new List<string>
+        {
+            "---",
+            $"name: {name}",
+            $"description: \"{EscapeYamlQuoted(SingleLineCapped(description, MaxSkillDescriptionLength))}\"",
+            $"{ProvenanceBlockKey}:",
+            $"  {ProvenanceKey}: {ProvenanceValue}",
+            "---",
+            string.Empty,
+        };
 
         /// <summary>
         /// Remove stale generator-owned skill folders under <paramref name="skillsRootAbsolute"/> — immediate child
@@ -280,27 +316,9 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
             // forward-compatible: the moment the C++ manifest starts emitting skillDescription, the front-matter
             // uses it without any further change here.
             var shortDesc = !string.IsNullOrWhiteSpace(tool.SkillDescription) ? tool.SkillDescription! : (tool.Description ?? string.Empty);
-            var yamlDesc = EscapeYamlQuoted(SingleLineCapped(shortDesc, MaxSkillDescriptionLength));
             var title = string.IsNullOrEmpty(tool.Title) ? tool.Name : tool.Title!;
 
-            var lines = new List<string>();
-
-            // YAML front-matter.
-            lines.Add("---");
-            lines.Add($"name: {folderName}");
-            lines.Add($"description: \"{yamlDesc}\"");
-            // Provenance marker (what it is FOR: see ProvenanceKey / ProvenanceValue). Three mechanical
-            // constraints hold here: it is the LAST block INSIDE the front matter, immediately before the
-            // closing `---`, because a consumer parses the front matter only and would never see it below;
-            // the two-space indent is what makes it a nested mapping rather than a sibling scalar; and it is
-            // written RAW from the constants, never through EscapeYamlQuoted, which escapes a single scalar
-            // and would collapse the nested mapping into a quoted string. Nothing tool-derived reaches these
-            // two lines, and the description above cannot break out of its own scalar to forge them — see
-            // SingleLineCapped for the mechanism and its limits.
-            lines.Add($"{ProvenanceBlockKey}:");
-            lines.Add($"  {ProvenanceKey}: {ProvenanceValue}");
-            lines.Add("---");
-            lines.Add(string.Empty);
+            var lines = FrontMatter(folderName, shortDesc);
 
             // Title + the body: the dedicated skill body ([AiSkillBody] analog the manifest carries as `skillBody`)
             // when present, else the full Description. The shared lib's [AiSkillBody]/[AiSkillDescription] split is
@@ -370,6 +388,18 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
             lines.Add("```");
             lines.Add(string.Empty);
 
+            return string.Join("\n", lines);
+        }
+
+        /// <summary>
+        /// A skill a tool ships (<see cref="ToolDescriptor.Skills"/>, e.g. rql-query's <c>unreal-rql</c>): the generated front
+        /// matter from its name and description, then its markdown as the plugin composed it. Pure (no disk).
+        /// </summary>
+        public static string BuildShippedSkillMarkdown(ToolSkillDescriptor skill)
+        {
+            var lines = FrontMatter(SanitizeSkillFolderName(skill.Name), skill.Description ?? string.Empty);
+            lines.Add((skill.Markdown ?? string.Empty).Trim());
+            lines.Add(string.Empty);
             return string.Join("\n", lines);
         }
 

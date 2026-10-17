@@ -51,7 +51,7 @@
 
   <!--
     Reused NuGet pins — normally owned by the upstream release pipelines and kept in lockstep
-    with Godot-MCP (Godot-MCP.csproj). Current: McpPlugin 8.7.1 + ReflectorNet 5.4.2.
+    with Godot-MCP (Godot-MCP.csproj). Current: McpPlugin 8.8.1 + ReflectorNet 5.4.2 + Rql 0.1.1.
     The MCP/reflection stack is NOT forked. Historical context: the 6.8.0 bump consumed the new
     shared engine-agnostic com.IvanMurzak.McpPlugin.AgentConfig module (the AI-agent configurators
     + the AgentConfiguratorDescription UI-DTO) so the sidecar hosts the AI-agent configuration
@@ -96,6 +96,10 @@
     dead-credential reconnect flood. The sidecar's existing SignInRequired status emit pairs with the
     UE-side D4 consumer (#285) shipped in this same release. ReflectorNet floor stays 5.4.0 (8.3.0
     keeps it), so the explicit pin is unchanged.
+    ⚠ DEVIATION (RQL data layer, docs/rql.md — one-time owner-approved exception to "pins are train-owned"):
+    McpPlugin 8.7.1 -> 8.8.1 (the release Unity-MCP 1.0 adopted RQL on; ReflectorNet floor stays 5.4.2) and the new
+    com.IvanMurzak.Rql 0.1.1 (RQL parser + contracts + agent format, PolyForm Shield 1.0.0): the sidecar parses the
+    rql-query / rql-mutate text into QueryPlans for the C++ executor and renders the results.
   -->
   <!--
     Local-LIB dev toggle (auth-fixes f1b — parity with the GameDev-MCP-Server + Unity/Godot
@@ -130,7 +134,16 @@
 
   <ItemGroup Condition="'$(UseLocalMcpPlugin)' != 'true'">
     <PackageReference Include="com.IvanMurzak.ReflectorNet" Version="5.4.2" />
-    <PackageReference Include="com.IvanMurzak.McpPlugin" Version="8.7.1" />
+    <PackageReference Include="com.IvanMurzak.McpPlugin" Version="8.8.1" />
+  </ItemGroup>
+
+  <!--
+    RQL (docs/rql.md): Rql.Parser turns the agent's query text into the canonical QueryPlan the C++ runtime executes
+    (RQL ADR-0003: no text parser in C++); Rql.Execution's AgentFormat renders the C++ QueryResult JSON as compact rows.
+    Referenced in both build modes (the local-LIB toggle only swaps McpPlugin / ReflectorNet).
+  -->
+  <ItemGroup>
+    <PackageReference Include="com.IvanMurzak.Rql" Version="0.1.1" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(UseLocalMcpPlugin)' == 'true'">

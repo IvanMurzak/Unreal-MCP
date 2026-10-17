@@ -33,16 +33,19 @@ delivered it. Identifiers below (tool ids, command names, env vars, paths) were 
 | §9.3 Test strategy | implemented | bridge xUnit + cli vitest + plugin Automation specs (#13–#25), CI wiring #28 |
 | §9.4 CI (`test_pull_request` / `release` / `test_cli`) | implemented | #28 |
 | §10 system tools (3: `ping`, `unreal-skill-create`, `unreal-skill-generate` — see §2.4) | implemented | #4 + owner ruling 2026-07-25 |
-| §10 actor & component family (13) | implemented | #14 |
-| §10 asset family (11) | implemented | #15 (issue #10) |
+| §10 RQL data layer (3: `rql-query`, `rql-mutate`, `rql-schema` — [`docs/rql.md`](rql.md)) | implemented | `UnrealMcpRql` module; supersedes the actor, asset, level and editor/reflection families |
+| §10 actor & component family (13) | superseded by RQL | #14 |
+| §10 asset family (11) | superseded by RQL | #15 (issue #10) |
 | §10 blueprint family (11) | implemented | #13 |
 | §10 source family (6) | implemented | #23 |
 | §10 screenshot family (4) | implemented | #21 |
-| §10 editor/reflection family (9) | implemented | #22 |
-| §10 level family (7) | implemented | #25 |
+| §10 editor/reflection family (9) | superseded by RQL except `console-run-command` (the console family, 1) | #22 |
+| §10 level family (7) | superseded by RQL | #25 |
 
-**Total shipped: 61 STANDARD core tools across 7 families, plus 3 SYSTEM tools (§2.4)** (counts verified
-from the registration source).
+**Total shipped: 25 STANDARD core tools across 5 families (rql 3, blueprint 11, console 1, source 6,
+screenshot 4), plus 3 SYSTEM tools (§2.4)** (counts verified from the registration source). The §10 sections
+below describe the superseded families as they were designed; their operations are RQL queries now
+([`docs/rql.md`](rql.md) maps each removed tool to its query).
 Prompts/Resources ship empty-but-wired (§10), as designed.
 
 ### Drift corrected against the implementation
@@ -68,12 +71,10 @@ Prompts/Resources ship empty-but-wired (§10), as designed.
   content** (`content[]` with an `image` entry), as anticipated by §1.2's "binary payloads travel as
   base64 strings inside JSON". Dimensions clamp to default 1024 / hard cap 2048 per side; capture
   needs a GPU-backed editor (headless `-nullrhi` returns a structured error).
-- **LogCollector (#22).** `console-get-logs` / `console-clear-logs` are backed by a module-startup
-  `FUnrealMcpLogCollector` — a `GLog` `FOutputDevice` ring buffer (the Godot `GodotLogCollector`
-  pattern), as §10 describes. Every captured line carries a monotonic `sequence` (assigned under the
-  collector lock; not reset by eviction or `console-clear-logs`, only by an editor restart), and
-  `console-get-logs` takes an optional `sinceSequence` cursor: only newer entries, oldest first, with a
-  `highestSequence` to pass back. A cursor above the current high-water mark (restart) returns the oldest page.
+- **LogCollector (#22).** The RQL `console` source (docs/rql.md) and `editor | call ClearConsole()` are backed by a
+  module-startup `FUnrealMcpLogCollector` — a `GLog` `FOutputDevice` ring buffer (the Godot `GodotLogCollector`
+  pattern), as §10 describes. Every captured line carries a monotonic `Sequence` (assigned under the collector lock;
+  not reset by eviction or Clear, only by an editor restart), so `console | where Sequence > N` pages without gaps.
 - **Device-code auth (#24).** The cloud OAuth device-code flow shipped in the main window (Authorize
   → `auth-start` → `device-auth` events render the verification URL + user code; Cancel/Revoke wired),
   per §1.3 / §7 item 4.
@@ -337,6 +338,10 @@ Tool descriptor (one entry in `tool-manifest.tools[]`), shaped to fill `IRunTool
  "enabled":true,"extensionId":"core","schemaHash":"sha256:…"}
 ```
 
+Optional fields, present only when set: `"rql": "query" | "mutate" | "schema"` on the rql-* tools (the sidecar parses
+`query` into `plan` and renders the answer, docs/rql.md) and `"skills": [{"name", "description", "markdown"}]` — skills
+a tool ships beside its own page, written by the skill generator (rql-query ships `unreal-rql`).
+
 Sidecar flow on each `tool-manifest` (revision N):
 
 1. Diff against the previously applied manifest by `name` + `schemaHash`
@@ -390,7 +395,7 @@ A tool is served on exactly one of two surfaces, mirroring the shared
 
 | surface | reachable at | in `tools/list`? | for |
 | --- | --- | --- | --- |
-| **Standard** (default) | `/api/tools/<name>` + MCP `tools/call` | yes | the 61 authoring tools an AI agent drives |
+| **Standard** (default) | `/api/tools/<name>` + MCP `tools/call` | yes | the 25 authoring tools an AI agent drives |
 | **System** | `/api/system-tools/<name>` **only** | **no** | host plumbing a CLIENT drives: liveness, skill authoring |
 
 **The system tools are `ping`, `unreal-skill-create`, `unreal-skill-generate`** — the same three, with
@@ -1236,7 +1241,7 @@ Register). `UnrealMcpCoreTools.h` stays editor (the editor-only families' Regist
 MOVES to UnrealMcpRuntime (from `UnrealMcpEditor/Private/`): `Bridge/UnrealMcpBridgeServer.*`+
 `Bridge/UnrealMcpNdjson.*`; `Dispatch/UnrealMcpGameThreadDispatcher.*` (no GEditor);
 `Tools/UnrealMcpToolRegistry.cpp`+`Public/UnrealMcpToolRegistry.h`; `Tools/UnrealMcpObjectRef.*`
-(world abstraction via §12.6); `Tools/UnrealMcpPropertyJson.*`+`Tools/UnrealMcpAssetScopedRead.*`;
+(world abstraction via §12.6); `Tools/UnrealMcpPropertyJson.*`;
 `Sidecar/UnrealMcpSidecarManager.*`; `Config/UnrealMcpConfig.*`; `Extensions/UnrealMcpExtensionManager.*`+
 `Public/IUnrealMcpToolProvider.h`; `Tools/UnrealMcpLogCollector.*`; `Tools/UnrealMcpPingTool.cpp`;
 `UnrealMcpLog.*`.

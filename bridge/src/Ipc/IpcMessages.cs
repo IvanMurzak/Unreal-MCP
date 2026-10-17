@@ -10,6 +10,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 
@@ -78,6 +79,19 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
         [JsonPropertyName("description")] public string? Description { get; set; }
         [JsonPropertyName("skillDescription")] public string? SkillDescription { get; set; }
         [JsonPropertyName("skillBody")] public string? SkillBody { get; set; }
+
+        /// <summary>
+        /// Skills the tool ships beside its own tool page (<c>&lt;skills&gt;/&lt;name&gt;/SKILL.md</c>), e.g. rql-query's
+        /// <c>unreal-rql</c>. Written by <see cref="AgentConfig.SkillFileGenerator"/>; never part of <c>tools/list</c>.
+        /// </summary>
+        [JsonPropertyName("skills")] public List<ToolSkillDescriptor>? Skills { get; set; }
+
+        /// <summary>
+        /// The RQL role of an rql-* tool (docs/rql.md): <c>"query"</c> / <c>"mutate"</c> (the sidecar parses the
+        /// <c>query</c> text into the <c>plan</c> argument) or <c>"schema"</c>; the sidecar renders the answer as RQL text.
+        /// Absent for every other tool.
+        /// </summary>
+        [JsonPropertyName("rql")] public string? Rql { get; set; }
         [JsonPropertyName("inputSchema")] public JsonNode? InputSchema { get; set; }
         [JsonPropertyName("outputSchema")] public JsonNode? OutputSchema { get; set; }
         [JsonPropertyName("readOnlyHint")] public bool? ReadOnlyHint { get; set; }
@@ -124,12 +138,21 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
                 // registrar removes the old proxy and re-adds it on the other manager (§2.2 changed-entry path).
                 var input = InputSchema?.ToJsonString() ?? "null";
                 var output = OutputSchema?.ToJsonString() ?? "null";
+                var skills = Skills == null ? "" : string.Join("", Skills.Select(s => s.Name + s.Description + s.Markdown));
                 return string.Join("",
-                    Name, Title, Description, SkillDescription, SkillBody,
+                    Name, Title, Description, SkillDescription, SkillBody, skills, Rql,
                     input, output,
                     ReadOnlyHint, DestructiveHint, IdempotentHint, OpenWorldHint, ExtensionId, IsSystem);
             }
         }
+    }
+
+    /// <summary>One entry of <see cref="ToolDescriptor.Skills"/>: a skill's front matter (name, description) and its body.</summary>
+    public sealed class ToolSkillDescriptor
+    {
+        [JsonPropertyName("name")] public string Name { get; set; } = string.Empty;
+        [JsonPropertyName("description")] public string? Description { get; set; }
+        [JsonPropertyName("markdown")] public string? Markdown { get; set; }
     }
 
     /// <summary>plugin → sidecar: full tool-set snapshot. The sidecar diffs it against the last applied (§2.2).</summary>

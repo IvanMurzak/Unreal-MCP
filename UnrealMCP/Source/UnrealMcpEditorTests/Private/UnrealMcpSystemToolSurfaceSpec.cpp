@@ -9,6 +9,7 @@
 #include "Dom/JsonValue.h"
 
 #include "UnrealMcpCoreTools.h"
+#include "UnrealMcpRqlTools.h"
 #include "UnrealMcpRuntimeCoreTools.h"
 #include "UnrealMcpToolRegistry.h"
 #include "Tools/UnrealMcpSkillTools.h"
@@ -163,12 +164,12 @@ void FUnrealMcpSystemToolSurfaceSpec::Define()
 
 	Describe("the editor tool families stay on the standard surface", [this]()
 	{
-		It("leaves every actor-family tool standard", [this]()
+		It("leaves every RQL tool standard", [this]()
 		{
-			// Guards the opposite regression: the new flag must not leak onto the authoring families, which an
-			// AI agent absolutely must keep seeing in tools/list.
+			// Guards the opposite regression: the new flag must not leak onto the data layer, which an AI agent
+			// absolutely must keep seeing in tools/list.
 			FUnrealMcpToolRegistry Registry;
-			UnrealMcpActorTools::Register(Registry);
+			UnrealMcpRqlTools::Register(Registry);
 
 			int32 SystemCount = 0;
 			for (const FString& Name : Registry.GetToolNamesSorted())
@@ -178,7 +179,7 @@ void FUnrealMcpSystemToolSurfaceSpec::Define()
 					++SystemCount;
 			}
 			TestTrue(TEXT("family registered something"), Registry.Num() > 0);
-			TestEqual(TEXT("no system tools in the actor family"), SystemCount, 0);
+			TestEqual(TEXT("no system tools in the RQL family"), SystemCount, 0);
 		});
 
 		It("declares unreal-skill-create on the system surface", [this]()
