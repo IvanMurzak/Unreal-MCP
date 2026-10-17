@@ -176,8 +176,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         private volatile bool _isCloudMode;
 
         // Whether the last applied connection config selected the Custom-mode "oauth" authorization. Gates the
-        // loopback-only account-token rule in ResolveBearerAsync (McpPlugin CustomOAuthCredentialPolicy). Volatile: read on the SignalR
-        // dial thread while ApplyConnectionConfig writes it on the IPC reader thread.
+        // loopback-only account-token rule in ResolveBearerAsync (McpPlugin CustomOAuthCredentialPolicy).
+        // Volatile: read on the SignalR dial thread while ApplyConnectionConfig writes it on the IPC reader thread.
         private volatile bool _isCustomOAuth;
 
         // The plugin's configured Custom token in oauth mode (the §8 config's "explicitToken": env, .env or the

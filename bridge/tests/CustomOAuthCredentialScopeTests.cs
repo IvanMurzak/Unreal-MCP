@@ -23,40 +23,11 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
 {
     /// <summary>
     /// Custom + oauth: the ai-game.dev account token reaches a loopback host only; any other host gets
-    /// <c>UNREAL_MCP_TOKEN</c> or the dial fails (McpPlugin <see cref="CustomOAuthCredentialPolicy"/>).
+    /// <c>UNREAL_MCP_TOKEN</c> or the dial fails (McpPlugin <see cref="CustomOAuthCredentialPolicy"/>,
+    /// whose own suite covers the <see cref="HostScope"/> URL cases; these tests pin the sidecar wiring).
     /// </summary>
     public class CustomOAuthCredentialScopeTests : IDisposable
     {
-        [Theory]
-        [InlineData("http://localhost")]
-        [InlineData("http://localhost:8080")]
-        [InlineData("https://LOCALHOST:443/hub")]
-        [InlineData("http://127.0.0.1:11111")]
-        [InlineData("http://127.255.255.254")]
-        [InlineData("http://[::1]")]
-        [InlineData("http://[::1]:8080")]
-        [InlineData("http://[::ffff:127.0.0.1]:8080")]
-        public void IsLoopback_True(string url) => Assert.True(HostScope.IsLoopback(url));
-
-        [Theory]
-        [InlineData(null)]
-        [InlineData("")]
-        [InlineData("localhost:8080")]
-        [InlineData("https://ai-game.dev")]
-        [InlineData("http://evil.com")]
-        [InlineData("http://localhost@evil.com")]
-        [InlineData("http://user:pass@localhost:8080")]
-        [InlineData("http://127.0.0.1.evil.com")]
-        [InlineData("http://localhost.evil.com")]
-        [InlineData("http://evil.localhost")]
-        [InlineData("http://localhost.")]
-        [InlineData("http://128.0.0.1")]
-        [InlineData("http://0.0.0.0")]
-        [InlineData("http://192.168.1.10:8080")]
-        [InlineData("http://[::2]")]
-        [InlineData("ftp://localhost")]
-        public void IsLoopback_False(string? url) => Assert.False(HostScope.IsLoopback(url));
-
         private readonly string _storeDir = Path.Combine(Path.GetTempPath(), "umcp-scope-" + Guid.NewGuid().ToString("N")[..12]);
 
         public void Dispose()
@@ -171,14 +142,6 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             Assert.Equal("machine-jwt", host.CurrentBearer); // a new link to localhost
             // The old link still checks its own (remote) host: refused, never the machine JWT.
             Assert.Throws<CredentialScopeException>(() => remoteLinkProvider().GetAwaiter().GetResult());
-        }
-
-        [Fact]
-        public void ConnectionErrorHint_IsNotSet()
-        {
-            // McpPlugin 8.9 makes the post-error hint consumer-supplied; the sidecar's log never reaches the editor UI.
-            using var host = SignedInHost();
-            Assert.Null(host.Config.ConnectionErrorHint);
         }
 
         private sealed class NoNetworkHandler : HttpMessageHandler
