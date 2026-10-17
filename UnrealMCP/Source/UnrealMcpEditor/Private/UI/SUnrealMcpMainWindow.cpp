@@ -265,6 +265,8 @@ TSharedRef<SWidget> SUnrealMcpMainWindow::BuildConnectionSection()
 		]
 		// Cloud auth row (masked token + Revoke / Authorize) — visible only in Cloud mode.
 		+ SVerticalBox::Slot().AutoHeight().Padding(0, 8, 0, 0)[ BuildCloudAuthRow() ]
+		// Custom-mode account row (signed-in label + Revoke) — visible only in Custom mode while signed in.
+		+ SVerticalBox::Slot().AutoHeight().Padding(0, 8, 0, 0)[ BuildCustomAccountRow() ]
 		// Custom Server URL + validation (NOT part of the dot cluster) — visible only in Custom mode.
 		+ SVerticalBox::Slot().AutoHeight().Padding(0, 8, 0, 0)[ BuildCustomServerSection() ]
 		// The connection cluster (Unity's .connection-timeline): a 2-column layout where the LEFT column is one
@@ -515,39 +517,19 @@ TSharedRef<SWidget> SUnrealMcpMainWindow::BuildCloudAuthRow()
 				SNew(STextBlock)
 				.Text_Lambda([this]()
 				{
-					if (!IsViewModelValid() || !ViewModel->HasCloudToken())
+					if (!IsViewModelValid() || !ViewModel->IsAccountSignedIn())
 						return LOCTEXT("NoCloudToken", "Not authorized");
+					// Signed in through the machine credential store only: no per-connection token to mask.
+					if (!ViewModel->HasCloudToken())
+						return LOCTEXT("SignedInNoToken", "Signed in");
 					return FText::FromString(FUnrealMcpEditorViewModel::MaskTokenForDisplay(ViewModel->GetConfig().CloudToken, /*bReveal*/ false));
 				})
 			]
 		]
-		// Revoke (red) — only when a token is stored.
+		// Revoke (red) — only while an account credential exists.
 		+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 6, 0)
 		[
-			SNew(SBox)
-			.Visibility_Lambda([this]()
-			{
-				return (IsViewModelValid() && ViewModel->HasCloudToken()) ? EVisibility::Visible : EVisibility::Collapsed;
-			})
-			[
-				UnrealMcpStyleWidgets::StyledTextButton("UnrealMcp.Button.Alert", LOCTEXT("Revoke", "Revoke"),
-					FOnClicked::CreateLambda([this]()
-					{
-						// unified-machine-auth F6.1 (task e1): sign-out is MACHINE-WIDE — the sidecar revokes
-						// every stored credential family and deletes the shared machine store, signing out
-						// every AI Game Dev tool on this machine — so confirm before sending auth-revoke.
-						// The DevControl /action revoke path stays unprompted (automation must never block
-						// on a modal); this dialog guards only the human button.
-						if (IsViewModelValid()
-							&& FMessageDialog::Open(EAppMsgType::YesNo, LOCTEXT("RevokeConfirm",
-								"Sign out of AI Game Dev on this machine?\n\nThis signs out every tool that shares this machine's credential (engine plugins, CLIs, and the desktop app)."))
-								== EAppReturnType::Yes)
-						{
-							ViewModel->Revoke();
-						}
-						return FReply::Handled();
-					}))
-			]
+			BuildRevokeButton()
 		]
 		// Authorize / Cancel.
 		+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
@@ -643,7 +625,7 @@ TSharedRef<SWidget> SUnrealMcpMainWindow::BuildCloudAuthRow()
 				return (IsViewModelValid() && ViewModel->GetDeviceAuthState() == EUnrealMcpDeviceAuthState::Authorized)
 					? EVisibility::Visible : EVisibility::Collapsed;
 			})
-			.Text(LOCTEXT("Authorized", "Authorized — cloud token stored."))
+			.Text(LOCTEXT("Authorized", "Authorized — signed in to AI Game Dev."))
 		]
 		// Failure reason.
 		+ SVerticalBox::Slot().AutoHeight().Padding(0, 6, 0, 0)
@@ -683,6 +665,59 @@ TSharedRef<SWidget> SUnrealMcpMainWindow::BuildCloudAuthRow()
 			? EVisibility::Visible : EVisibility::Collapsed;
 	}));
 	return CloudBody;
+}
+
+TSharedRef<SWidget> SUnrealMcpMainWindow::BuildRevokeButton()
+{
+	return SNew(SBox)
+		.Visibility_Lambda([this]()
+		{
+			return (IsViewModelValid() && ViewModel->IsAccountSignedIn()) ? EVisibility::Visible : EVisibility::Collapsed;
+		})
+		[
+			UnrealMcpStyleWidgets::StyledTextButton("UnrealMcp.Button.Alert", LOCTEXT("Revoke", "Revoke"),
+				FOnClicked::CreateLambda([this]()
+				{
+					// unified-machine-auth F6.1 (task e1): sign-out is MACHINE-WIDE — the sidecar revokes
+					// every stored credential family and deletes the shared machine store, signing out
+					// every AI Game Dev tool on this machine — so confirm before sending auth-revoke.
+					// The DevControl /action revoke path stays unprompted (automation must never block
+					// on a modal); this dialog guards only the human button.
+					if (IsViewModelValid()
+						&& FMessageDialog::Open(EAppMsgType::YesNo, LOCTEXT("RevokeConfirm",
+							"Sign out of AI Game Dev on this machine?\n\nThis signs out every tool that shares this machine's credential (engine plugins, CLIs, and the desktop app)."))
+							== EAppReturnType::Yes)
+					{
+						ViewModel->Revoke();
+					}
+					return FReply::Handled();
+				}))
+		];
+}
+
+TSharedRef<SWidget> SUnrealMcpMainWindow::BuildCustomAccountRow()
+{
+	// A sign-in can complete while the connection is in Custom mode, where the Cloud auth row is hidden. This row
+	// keeps that account visible and revocable; Revoke never touches the Custom token.
+	TSharedRef<SHorizontalBox> Row = SNew(SHorizontalBox)
+		+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center).Padding(0, 0, 6, 0)
+		[
+			SNew(STextBlock)
+			.TextStyle(&FUnrealMcpStyle::Get().GetWidgetStyle<FTextBlockStyle>("UnrealMcp.Text.Description"))
+			.Text(LOCTEXT("CustomAccountSignedIn", "Signed in to AI Game Dev"))
+		]
+		+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+		[
+			BuildRevokeButton()
+		];
+
+	Row->SetVisibility(MakeAttributeLambda([this]() -> EVisibility
+	{
+		return (IsViewModelValid() && ViewModel->GetConnectionMode() == EUnrealMcpConnectionMode::Custom
+			&& ViewModel->IsAccountSignedIn())
+			? EVisibility::Visible : EVisibility::Collapsed;
+	}));
+	return Row;
 }
 
 TSharedRef<SWidget> SUnrealMcpMainWindow::BuildCustomServerSection()

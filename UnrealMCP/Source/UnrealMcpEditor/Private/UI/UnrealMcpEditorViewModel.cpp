@@ -285,6 +285,7 @@ void FUnrealMcpEditorViewModel::Revoke()
 	// was actually dropped.
 	const bool bHadToken = !Config.CloudToken.IsEmpty();
 	Config.CloudToken.Reset();
+	bAccountSignedIn = false;
 	DeviceAuthState = EUnrealMcpDeviceAuthState::Idle;
 	DeviceVerificationUrl.Reset();
 	DeviceUserCode.Reset();
@@ -323,7 +324,10 @@ void FUnrealMcpEditorViewModel::ApplyStatus(const TSharedPtr<FJsonObject>& Statu
 	if (Status->TryGetStringField(TEXT("cloudAuthState"), CloudAuthState))
 	{
 		if (CloudAuthState.Equals(TEXT("Authorized"), ESearchCase::IgnoreCase))
+		{
 			DeviceAuthState = EUnrealMcpDeviceAuthState::Authorized;
+			bAccountSignedIn = true;
+		}
 		else if (CloudAuthState.Equals(TEXT("SignInRequired"), ESearchCase::IgnoreCase))
 			HandleSignInRequired();
 	}
@@ -362,6 +366,7 @@ void FUnrealMcpEditorViewModel::HandleSignInRequired()
 	// connection cannot come up instead of an eternally amber dot). The window shows the companion line +
 	// the manual Authorize button while in this state.
 	DeviceAuthState = EUnrealMcpDeviceAuthState::SignInRequired;
+	bAccountSignedIn = false; // the machine credential is dead; recovery is Authorize, not Revoke
 
 	// D4 recovery-ladder step 2 — involve the user, unattended, at most ONCE per editor session per reason
 	// class (step 3, the carousel guard — Unity c1 parity): initiate the SIDECAR-owned device flow so its
@@ -420,6 +425,7 @@ void FUnrealMcpEditorViewModel::ApplyDeviceAuth(const TSharedPtr<FJsonObject>& D
 			if (DeviceAuthState == EUnrealMcpDeviceAuthState::Idle)
 				return;
 			DeviceAuthState = EUnrealMcpDeviceAuthState::Authorized;
+			bAccountSignedIn = true;
 			DeviceAuthError.Reset();
 			// The sidecar stored the token; mirror its presence so the UI flips to the Revoke affordance, and
 			// PERSIST + PUSH it (like Revoke does): without this the bearer is lost on editor restart (never

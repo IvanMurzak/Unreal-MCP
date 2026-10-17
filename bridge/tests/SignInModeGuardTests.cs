@@ -122,6 +122,82 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         }
 
         [Fact]
+        public async Task AuthRevokeInCustomMode_RevokesAtTheAccountServer_AndKeepsTheCustomToken()
+        {
+            // A legacy store without a server target: revocation falls back to the account server, never the Custom host.
+            new MachineCredentialStore(_storeDir).Write(new MachineCredentials
+            {
+                Families = new MachineCredentialFamilies
+                {
+                    Plugin = new MachineCredentialFamily
+                    {
+                        AccessToken = "plugin-jwt", RefreshToken = "plugin-refresh",
+                        ClientId = "unreal-mcp-plugin", Scope = "mcp:plugin",
+                    },
+                },
+            });
+            var revokeHosts = new RecordingHandler();
+            using var host = new SidecarHost(NewIpc(), "0.1.0", credentialStore: new MachineCredentialStore(_storeDir),
+                authHttpClient: new HttpClient(revokeHosts));
+            host.SetStatusEmitterForTest(_ => Task.CompletedTask);
+            host.ApplyConnectionConfig(Custom("https://my-server.example.com", "token", "local-secret"));
+
+            host.HandleAuthMessage(IpcProtocol.Type.AuthRevoke);
+            await host.PendingSignOut!.WaitAsync(TimeSpan.FromSeconds(10));
+
+            Assert.Equal(new[] { "ai-game.dev/oauth/revoke" }, revokeHosts.Requests);
+            Assert.False(new MachineCredentialStore(_storeDir).Exists);
+            Assert.False(host.CredentialProvider!.IsSignedIn);
+            Assert.Equal("local-secret", host.CurrentBearer);
+        }
+
+        [Theory]
+        [InlineData("oauth", "http://localhost:8080", true)]
+        [InlineData("token", "http://localhost:8080", false)]
+        [InlineData("oauth", "https://my-server.example.com", false)]
+        public async Task AuthRevoke_RedialsOnlyALinkThatPresentedTheAccountToken(string authOption, string customHost, bool expectRedial)
+        {
+            new MachineCredentialStore(_storeDir).Write(new MachineCredentials
+            {
+                ServerTarget = AuthServer,
+                Families = new MachineCredentialFamilies
+                {
+                    Plugin = new MachineCredentialFamily
+                    {
+                        AccessToken = "plugin-jwt", RefreshToken = "plugin-refresh",
+                        ClientId = "unreal-mcp-plugin", Scope = "mcp:plugin",
+                    },
+                },
+            });
+            using var host = new SidecarHost(NewIpc(), "0.1.0", credentialStore: new MachineCredentialStore(_storeDir),
+                revocationClient: new MachineCredentialTests.FakeRevocationClient());
+            var statuses = 0;
+            host.SetStatusEmitterForTest(_ => { Interlocked.Increment(ref statuses); return Task.CompletedTask; });
+            var config = Custom(customHost, authOption, authOption == "token" ? "local-secret" : "", explicitToken: "remote-secret");
+            config["keepConnected"] = false; // the re-dial then only emits its status, no network
+            host.ApplyConnectionConfig(config);
+            Assert.True(host.CredentialProvider!.IsSignedIn);
+
+            host.HandleAuthMessage(IpcProtocol.Type.AuthRevoke);
+            await host.PendingSignOut!.WaitAsync(TimeSpan.FromSeconds(10));
+
+            Assert.False(host.CredentialProvider!.IsSignedIn);
+            Assert.Equal(expectRedial ? 1 : 0, statuses);
+        }
+
+        private sealed class RecordingHandler : HttpMessageHandler
+        {
+            public System.Collections.Generic.List<string> Requests { get; } = new();
+
+            protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+            {
+                lock (Requests)
+                    Requests.Add(request.RequestUri!.Host + request.RequestUri.AbsolutePath);
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
+            }
+        }
+
+        [Fact]
         public async Task ModeSwitchDuringTheStoreCommit_KeepsTheAccountTokenInTheMachineStoreOnly()
         {
             var exchange = new MachineCredentialTests.FakeExchangeClient(MachineCredentialTests.PluginExchangeSuccess());

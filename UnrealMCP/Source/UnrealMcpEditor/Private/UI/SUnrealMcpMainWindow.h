@@ -91,6 +91,10 @@ private:
 	TSharedRef<SWidget> BuildConnectionCluster();
 	// The Cloud auth controls (masked token + Revoke/Authorize), shown inline in the Connection card in Cloud mode.
 	TSharedRef<SWidget> BuildCloudAuthRow();
+	// The red Revoke (machine-wide sign-out) button, visible while an account credential exists (any mode).
+	TSharedRef<SWidget> BuildRevokeButton();
+	// The Custom-mode account row ("Signed in to AI Game Dev" + Revoke), visible only while signed in.
+	TSharedRef<SWidget> BuildCustomAccountRow();
 	// The Custom Server URL row + validation (Custom-only; NOT part of the dot cluster).
 	TSharedRef<SWidget> BuildCustomServerSection();
 	// The MCP-server sub-card body (Start, Transport, none/required, masked token + New) — Custom-only. Its

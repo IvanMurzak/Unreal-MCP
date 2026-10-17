@@ -162,11 +162,11 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         // plugin-plane IsSignedIn, NEVER bare store existence — an agent-only store (a failed F1 derivation's
         // leftover) exists without being signed in.
         [Theory]
-        // Custom mode is never a cloud authorization — neither a local bearer nor a store sign-in lights it.
+        // Custom mode: a local bearer never lights it; a machine sign-in does (so the editor can offer Revoke).
         [InlineData(false, false, false, null)]
         [InlineData(false, true, false, null)]
-        [InlineData(false, false, true, null)]
-        [InlineData(false, true, true, null)]
+        [InlineData(false, false, true, "Authorized")]
+        [InlineData(false, true, true, "Authorized")]
         // Cloud mode with no credential of either kind → not signed in.
         [InlineData(true, false, false, null)]
         // Cloud mode with an in-session bearer (in-editor device flow) → signed in.

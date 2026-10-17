@@ -191,6 +191,10 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         // Volatile: written on the IPC reader thread, read from the project-config Task.Run worker.
         private string? _customHost;
 
+        // The account server base (the config's cloudUrl, no /mcp suffix), kept in every mode so sign-out never
+        // falls back to a Custom host. Volatile: written on the IPC reader thread, read by the sign-out task.
+        private string? _cloudBaseUrl;
+
         // §7 connected-AI-agent roster (issue #109). The plugin's "AI agents" status row reflects
         // StatusMessage.AiAgents; before this it was hardcoded empty. The roster is the formatted label list
         // ("AI agent: {ClientName} ({ClientVersion})") for the currently-connected MCP clients, sourced from
@@ -859,6 +863,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             // choice is a design call — analysis and options are in PR #251 for owner sequencing.
             if (host != null)
                 Volatile.Write(ref _customHost, string.IsNullOrWhiteSpace(host) ? null : host);
+            if (!string.IsNullOrWhiteSpace(cloudUrl))
+                Volatile.Write(ref _cloudBaseUrl, StripCloudHubPath(cloudUrl));
             var selected = isCloud ? cloudUrl : host;
             if (string.IsNullOrWhiteSpace(selected))
                 selected = isCloud ? host : cloudUrl;
@@ -1225,7 +1231,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             // ApplyConnectionConfig suffixed the Cloud host with /mcp for the SignalR hub; the device-code flow
             // hits the AS ({base}/oauth/device_authorization + /oauth/token), which is NOT behind the /mcp nginx
             // prefix, so strip it back off to recover the base (https://ai-game.dev). A no-op for a host without the suffix.
-            var cloudUrl = StripCloudHubPath(_config.Host);
+            // The account server (the pushed cloudUrl) even in Custom mode, where _config.Host is the Custom host.
+            var cloudUrl = Volatile.Read(ref _cloudBaseUrl) ?? StripCloudHubPath(_config.Host);
             _logger?.LogInformation("auth-start received; beginning device-code flow against {Host}.", cloudUrl);
             PendingDeviceAuth = RunDeviceAuthAsync(cloudUrl, cts.Token);
         }
@@ -1515,11 +1522,16 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         {
             try
             {
+                // The live link keeps the bearer it was opened with: re-dial below if it presented the account token.
+                var linkUsedAccount = _credentialProvider?.IsSignedIn == true
+                    && (_isCloudMode || (_isCustomOAuth && LoopbackTokenScope.IsLoopback(_config.Host)));
                 if (_credentialStore != null && _machineLock != null)
                 {
-                    var stripped = StripCloudHubPath(_config.Host);
+                    // Each family is revoked at its stored server target; this default covers a legacy store
+                    // without one. It is the account server (the pushed cloudUrl), never a Custom host.
+                    var accountServer = Volatile.Read(ref _cloudBaseUrl) ?? (_isCloudMode ? StripCloudHubPath(_config.Host) : string.Empty);
                     var revocationClient = _injectedRevocationClient
-                        ?? new TokenRevocationClient(string.IsNullOrWhiteSpace(stripped) ? string.Empty : stripped, _authHttpClient);
+                        ?? new TokenRevocationClient(accountServer, _authHttpClient);
                     var result = await MachineWideSignOut.SignOutAsync(
                         _credentialStore, _machineLock, revocationClient, _authenticator.ClientId, _logger).ConfigureAwait(false);
                     if (result.Busy)
@@ -1535,6 +1547,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
                 // revocation needs the stored refresh tokens BEFORE they are unlinked.
                 _credentialProvider?.SignOut();
                 _logger?.LogInformation("Cloud sign-out complete (auth-revoke): in-memory bearer cleared, provider signed out.");
+                if (linkUsedAccount)
+                    await ReconnectAndEmitStatusAsync().ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -1631,8 +1645,9 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         /// Resolve the cloud sign-in indicator for a status emit (mcp-authorize PR 5, design 06 / D12). Cloud mode
         /// reports <c>"Authorized"</c> when EITHER an in-session bearer was issued (an in-editor device flow) OR the
         /// machine credential provider is actually SIGNED IN off the shared store (zero-button sign-in — a CLI
-        /// login, an enrollment, or another engine/project signed in once-per-machine). <c>null</c> in Custom mode,
-        /// or when no credential of either kind is present. Pure + static so the bridge xUnit suite locks the
+        /// login, an enrollment, or another engine/project signed in once-per-machine). In Custom mode only the machine
+        /// sign-in counts (the slot holds the user's Custom token there), so the editor can offer Revoke in either
+        /// mode. <c>null</c> when no credential of either kind is present. Pure + static so the bridge xUnit suite locks the
         /// matrix without a live SignalR link or machine store.
         /// <para><b>The third argument must be a plugin-plane signed-in signal, never bare store existence</b>
         /// (review e1-B1; design 04 §1: "<c>Exists</c> alone must never be used as a signed-in signal"). An
@@ -1641,7 +1656,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         /// hub will reject. Call sites pass <c>PluginCredentialProvider.IsSignedIn</c>.</para>
         /// </summary>
         internal static string? ResolveCloudAuthState(bool isCloudMode, bool hasSessionBearer, bool machineCredentialSignedIn) =>
-            isCloudMode && (hasSessionBearer || machineCredentialSignedIn) ? "Authorized" : null;
+            (isCloudMode && hasSessionBearer) || machineCredentialSignedIn ? "Authorized" : null;
 
         /// <summary>Fully disconnect SignalR (auth-revoke / Disconnect), then surface a Disconnected status.</summary>
         private async Task HandleDisconnectAsync(CancellationToken ct)
@@ -1997,9 +2012,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
                         return;
                     }
                     _logger?.LogInformation(ok ? "SignalR connected." : "SignalR initial connect returned false; client will keep retrying.");
-                    // §7 live status: surface the connection result to the plugin's view-model. Only a CLOUD-mode
-                    // credential is a cloud authorization — a Custom-mode token is a local bearer and must NOT light
-                    // the "Authorized" indicator (ApplyStatus latches it and never demotes). mcp-authorize PR 5
+                    // §7 live status: surface the connection result to the plugin's view-model. A Custom-mode slot
+                    // token is a local bearer and must NOT light the "Authorized" indicator (ApplyStatus latches it and never demotes). mcp-authorize PR 5
                     // (design 06, D12): the machine credential PROVIDER being signed in ALSO counts, so a
                     // zero-button boot (sign-in done out-of-editor: a CLI login, an enrollment, another engine/project)
                     // surfaces the signed-in state without an in-editor device flow. The signal is the provider's
