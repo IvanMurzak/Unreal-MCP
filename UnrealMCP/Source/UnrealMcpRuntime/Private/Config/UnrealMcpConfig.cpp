@@ -478,6 +478,8 @@ TSharedPtr<FJsonObject> FUnrealMcpConfig::BuildEffectiveConnectionConfig() const
 	Obj->SetStringField(TEXT("host"), ResolveCustomHost());
 	Obj->SetStringField(TEXT("cloudUrl"), ResolveCloudBaseUrl());
 	Obj->SetStringField(TEXT("token"), ResolveEffectiveToken());
+	// The sidecar applies the Custom + oauth loopback-only account-token rule, so it needs the auth option.
+	Obj->SetStringField(TEXT("authOption"), AuthOptionToString(AuthOption));
 	Obj->SetBoolField(TEXT("keepConnected"), bKeepConnected);
 	return Obj;
 }

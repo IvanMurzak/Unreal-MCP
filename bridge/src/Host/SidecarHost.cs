@@ -163,6 +163,11 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         // Task.Run worker while ApplyConnectionConfig writes it on the IPC reader thread.
         private volatile bool _isCloudMode;
 
+        // Whether the last applied connection config selected the Custom-mode "oauth" authorization. Gates the
+        // loopback-only account-token rule in ResolveBearerAsync (LoopbackTokenScope). Volatile: read on the SignalR
+        // dial thread while ApplyConnectionConfig writes it on the IPC reader thread.
+        private volatile bool _isCustomOAuth;
+
         // The plugin's effective CUSTOM-mode host (FUnrealMcpConfig::ResolveCustomHost()) as last pushed over the
         // §8 `config` message — the source of precedence level 2 for the local-server bind port (see
         // ProjectConnectionResolver.Resolve). Deliberately NOT _config.Host: that carries the Cloud /mcp suffix,
@@ -393,11 +398,21 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         /// signed in (device-flow sign-in or boot auto-adopt of a seeded store, D12), return its ES256 JWT — the
         /// provider proactively refreshes it before <c>exp</c>. Otherwise return the static bearer the plugin pushed
         /// over IPC (Custom mode) or the Build()-time env fallback — behavior-identical to the pre-mcp-authorize path.
-        /// A Custom-mode local token is never overridden by a cloud credential (the <see cref="_isCloudMode"/> guard).
+        /// A Custom-mode local token is never overridden by a cloud credential (the <see cref="_isCloudMode"/> guard),
+        /// except Custom + <c>oauth</c>: the account JWT for a loopback host only, otherwise the explicit token or a
+        /// refusal (<see cref="LoopbackTokenScope"/>).
         /// </summary>
         private Task<string?> ResolveBearerAsync()
         {
             var provider = _credentialProvider;
+            // Custom + oauth: the machine-store account token reaches a loopback host only; any other host gets the
+            // explicit token (UNREAL_MCP_TOKEN) or LoopbackTokenScope throws, failing the dial (never anonymous).
+            if (!_isCloudMode && _isCustomOAuth)
+                return LoopbackTokenScope.ResolveAsync(
+                    _config.Host,
+                    async () => provider is { IsSignedIn: true } ? await provider.GetAccessTokenAsync().ConfigureAwait(false) : null,
+                    BearerToken ?? _fallbackToken,
+                    "UNREAL_MCP_TOKEN");
             if (provider != null && _isCloudMode && provider.IsSignedIn)
                 return ResolveCloudBearerAsync(provider);
             return Task.FromResult(BearerToken);
@@ -776,6 +791,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             var host = ReadString(config, "host");
             var cloudUrl = ReadString(config, "cloudUrl");
             var token = ReadString(config, "token");
+            var authOption = ReadString(config, "authOption");
 
             // Mode-aware host selection: Cloud connects to cloudUrl, Custom to host (§8). Fall back to the
             // other field only when the mode's own field is blank, so a partial message still resolves a host.
@@ -785,6 +801,9 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             // must not silently flip us out of Cloud.
             if (mode != null)
                 _isCloudMode = isCloud;
+            // Custom-mode authorization ("none" / "oauth" / "token"); absent leaves the previous value (partial push).
+            if (authOption != null)
+                _isCustomOAuth = string.Equals(authOption, "oauth", StringComparison.OrdinalIgnoreCase);
 
             // Remember the raw Custom-mode host for the local-server bind-port precedence (level 2). Captured
             // BEFORE the mode-aware selection below so the Cloud /mcp suffix never reaches the port parser. An
