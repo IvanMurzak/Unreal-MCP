@@ -1,0 +1,75 @@
+UnrealMCP/Source/UnrealMcpRuntime/Private/UnrealMcpSchema.cpp
+  s_ccc717f86d7e3e::t_67afa1478102a8 1-79
+UnrealMCP/Source/UnrealMcpRuntime/Private/Prompts/UnrealMcpPromptRegistry.cpp
+  s_ccc717f86d7e3e::t_d95ee75e5838d6 7
+  s_ccc717f86d7e3e::t_8ee251c066b28d 11-12
+  s_ccc717f86d7e3e::t_5ecfe9438dc176 8
+  s_ccc717f86d7e3e::t_9a6b3526f63bbf 6
+  s_f4fba200a9b4a6::t_7694acea6a6c7c 36,98,124-126,131-132,151,252,299,304,325,331
+UnrealMCP/Source/UnrealMcpRuntime/Private/Tools/UnrealMcpToolRegistry.cpp
+  s_ccc717f86d7e3e::t_3cbf6890c07642 6
+  s_ccc717f86d7e3e::t_b8c0e28d262853 7
+  s_ccc717f86d7e3e::t_117190ac126f59 8
+  s_f4fba200a9b4a6::t_c47173129864fa 67-68,84,155,185-187,192,211,321,370-372,377,398,404
+UnrealMCP/Source/UnrealMcpRuntime/Public/UnrealMcpEnablementFilter.h
+  s_ccc717f86d7e3e::t_68704b0cde8129 1-55
+UnrealMCP/Source/UnrealMcpRuntime/Private/UnrealMcpDescriptorHash.h
+  s_ccc717f86d7e3e::t_09c97df1fcdd75 1-22
+UnrealMCP/Source/UnrealMcpRuntime/Private/UnrealMcpValidation.cpp
+  s_ccc717f86d7e3e::t_a47dbedde94652 1-74
+UnrealMCP/Source/UnrealMcpRuntime/Private/UnrealMcpToolArgs.h
+  s_ccc717f86d7e3e::t_aed32038606b47 1-17,24-26
+  s_ccc717f86d7e3e::t_5607af918e33f0 18-23
+UnrealMCP/Source/UnrealMcpRuntime/Private/Resources/UnrealMcpResourceRegistry.cpp
+  s_ccc717f86d7e3e::t_79a35c9be77139 6
+  s_f4fba200a9b4a6::t_4d6c1832efeeab 50-52,188,235,240,261,267
+UnrealMCP/Source/UnrealMcpRuntime/Private/UnrealMcpToolArgs.cpp
+  s_ccc717f86d7e3e::t_f22c07048455b6 31-36
+  s_ccc717f86d7e3e::t_cae682d56eccd1 1-30,37-39
+UnrealMCP/Source/UnrealMcpRuntime/Private/UnrealMcpSchema.h
+  s_ccc717f86d7e3e::t_5a4378e76b4aa8 1-40
+UnrealMCP/Source/UnrealMcpRuntime/Private/UnrealMcpDescriptorHash.cpp
+  s_ccc717f86d7e3e::t_fbc0a70cc43cd6 10-17
+  s_ccc717f86d7e3e::t_c3139269598280 1-4,6-9,19-27
+  s_ccc717f86d7e3e::t_26fa0b62e0cc40 5,18
+UnrealMCP/Source/UnrealMcpRuntime/Private/UnrealMcpValidation.h
+  s_ccc717f86d7e3e::t_daeaa9fd5ea291 1-31
+UnrealMCP/Source/UnrealMcpRuntime/Public/UnrealMcpResourceRegistry.h
+  s_ccc717f86d7e3e::t_03f39ead7fbe9d 229-231
+UnrealMCP/Source/UnrealMcpRuntime/Public/UnrealMcpToolRegistry.h
+  s_ccc717f86d7e3e::t_2da4183dba0c9b 10,296-299
+UnrealMCP/Source/UnrealMcpRuntime/Public/UnrealMcpPromptRegistry.h
+  s_421944529f445d::t_4fec75d29f2d90 217-219
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "826817b456842ad868bee7c14081abf04123c63a",
+  "prompts": {},
+  "sessions": {
+    "s_421944529f445d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a6aefd38cc8701e73",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_ccc717f86d7e3e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9c8ada08-e4d5-462c-b934-8bbd1f9565d6",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_f4fba200a9b4a6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a2e2283f5ac8c63a4",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

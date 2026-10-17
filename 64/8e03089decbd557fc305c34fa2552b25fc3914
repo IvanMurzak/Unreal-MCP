@@ -1,0 +1,25 @@
+cli/src/lib/types.ts
+  s_353b0dd9885d55::t_acd32cde03562b 105-106
+cli/src/lib/open.ts
+  s_353b0dd9885d55::t_e1ab8d9258cf03 90
+  s_353b0dd9885d55::t_2e0d6f080a7d2c 48
+cli/src/commands/open.ts
+  s_353b0dd9885d55::t_482691c5eb5148 19
+  s_353b0dd9885d55::t_ba242e4916549f 33
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.8",
+  "base_commit_sha": "648e03089decbd557fc305c34fa2552b25fc3914",
+  "prompts": {},
+  "sessions": {
+    "s_353b0dd9885d55": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4a55577c-1ca7-4445-8aaf-ebfc2957260c",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

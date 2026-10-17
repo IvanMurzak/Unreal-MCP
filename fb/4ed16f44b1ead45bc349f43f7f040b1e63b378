@@ -1,0 +1,35 @@
+cli/src/lib/update.ts
+  s_f8c946d3776b4c::t_da959a4dee2d72 9,19-27,40-45,114,120,124,132-161,163
+cli/src/lib.ts
+  s_f8c946d3776b4c::t_da959a4dee2d72 37,128-133
+cli/tests/clean-plugin.test.ts
+  s_f8c946d3776b4c::t_da959a4dee2d72 1-101
+cli/tests/update.test.ts
+  s_f8c946d3776b4c::t_da959a4dee2d72 23-57,117-214
+cli/src/lib/clean-plugin.ts
+  s_f8c946d3776b4c::t_da959a4dee2d72 1-134
+cli/src/commands/update.ts
+  s_f8c946d3776b4c::t_da959a4dee2d72 15-53
+cli/src/lib/install-plugin.ts
+  s_f8c946d3776b4c::t_da959a4dee2d72 9,21-22,64-84,96-133
+cli/tests/install-plugin.test.ts
+  s_f8c946d3776b4c::t_da959a4dee2d72 50-68
+cli/README.md
+  s_f8c946d3776b4c::t_da959a4dee2d72 32-37,55
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "fb4ed16f44b1ead45bc349f43f7f040b1e63b378",
+  "prompts": {},
+  "sessions": {
+    "s_f8c946d3776b4c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "46361c9f-abee-4334-b388-4eb4e8828b42",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

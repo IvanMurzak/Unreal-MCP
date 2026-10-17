@@ -1,0 +1,19 @@
+bridge/src/Tools/ProxyResourceList.cs
+  s_52b955ca4fc207::t_3931b6e42726f7 28-32,35-41,50-54
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "4b9a985c45f8434b0139b9732176893a7b9e93cc",
+  "prompts": {},
+  "sessions": {
+    "s_52b955ca4fc207": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-ad7e2fa4a07cbdabc",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

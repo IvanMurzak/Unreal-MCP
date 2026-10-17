@@ -1,0 +1,39 @@
+cli/src/index.ts
+  s_908974782fafa1::t_1638006fd962c9 1-21
+cli/tests/cli.test.ts
+  s_908974782fafa1::t_10da1726a06752 1-56
+cli/README.md
+  s_908974782fafa1::t_39ac7244d4a0a9 1-28
+cli/bin/unreal-cli.js
+  s_908974782fafa1::t_8f7506d724bc0a 1-2
+cli/src/commands/status.ts
+  s_908974782fafa1::t_fb6ba9f0dcdbc1 1-13
+cli/src/cli.ts
+  s_908974782fafa1::t_26d307c931e0ce 1-7
+cli/package.json
+  s_908974782fafa1::t_c1f34631ff0693 1-71
+cli/src/lib/status.ts
+  s_908974782fafa1::t_9dc5a7260cbd8a 1-20
+cli/tsconfig.json
+  s_908974782fafa1::t_cf129eb1d55b63 1-17
+cli/src/lib.ts
+  s_908974782fafa1::t_8a4e4815e7f5c9 1-15
+cli/src/version.ts
+  s_908974782fafa1::t_b2bcd4d75fcb03 1-9
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "cd90bea53cc85e15331ce5ed4c053b10f69d65fc",
+  "prompts": {},
+  "sessions": {
+    "s_908974782fafa1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f1748397-e586-40bb-91a9-b89c0caebdf5",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

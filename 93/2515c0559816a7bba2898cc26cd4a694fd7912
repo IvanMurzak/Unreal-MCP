@@ -1,0 +1,58 @@
+bridge/src/Host/SidecarHost.cs
+  s_5b742bf37a2587::t_c3c4a7e95813da 822-828
+  s_5b742bf37a2587::t_e44db452dd5bf8 232-233
+  s_5b742bf37a2587::t_a99d973888fb0a 314-315,327-328
+  s_5b742bf37a2587::t_c341721d2756ba 273-281,283-285,288-291
+  s_5b742bf37a2587::t_4e2dd1833a375b 252-257,259,262
+  s_5b742bf37a2587::t_1b49681a3e0de1 86-87,92-95,97-98,102-110,114-122,1149,1399-1400
+  s_5b742bf37a2587::t_7aa7b0a5f11703 1125-1135,1142,1146-1148,1150,1154-1156,1163-1191,1193-1338,1347-1351,1357-1377,1379-1398
+  s_5b742bf37a2587::t_068b8c2b2470d0 1378
+  s_5b742bf37a2587::t_9917ce8a288aa8 1339-1346,1352-1356
+  s_5b742bf37a2587::t_b812cd805ed02a 286
+  s_5b742bf37a2587::t_e5ee3fe479acce 234-235
+  s_5b742bf37a2587::t_f480cff82c9780 316-317,329-330
+  s_5b742bf37a2587::t_79422e583cfa72 154-156
+  s_5b742bf37a2587::t_3c257608234872 1192
+  s_5b742bf37a2587::t_e98a595b6934b7 359-365
+bridge/tests/MachineAuthAdoptionTests.cs
+  s_5b742bf37a2587::t_f2b25e7ca01d1e 110-112,118
+  s_5b742bf37a2587::t_cff034ab62fe09 1-109,113-117,119-319
+bridge/tests/SidecarHostProdWiringTests.cs
+  s_5b742bf37a2587::t_3938d9ddf53a45 20
+  s_5b742bf37a2587::t_351f760c8ee12f 149-166
+  s_5b742bf37a2587::t_91e06c114da9a5 135-137,141
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/SUnrealMcpMainWindow.cpp
+  s_5b742bf37a2587::t_be18c224ecf188 536-547
+  s_5b742bf37a2587::t_64e9913763e60a 26
+bridge/src/Auth/DeviceCodeAuthenticator.cs
+  s_5b742bf37a2587::t_6377ee9cbd22d2 277
+  s_5b742bf37a2587::t_2bcb5f90a75de8 49-56
+  s_5b742bf37a2587::t_79925f7aae0ef8 80,91-98
+  s_5b742bf37a2587::t_6f98e7cb379708 196
+  s_5b742bf37a2587::t_788655f15c4969 294-296,299-300
+  s_5b742bf37a2587::t_50478cf1b3de9d 24-27,30,32-34,99
+bridge/tests/DeviceCodeAuthenticatorTests.cs
+  s_5b742bf37a2587::t_72bccba9c25a1a 25,28-31
+  s_5b742bf37a2587::t_6a776e2ef635db 114-117,120
+bridge/tests/MachineCredentialTests.cs
+  s_5b742bf37a2587::t_df408b93704ba8 236,239,241-243,248-260,262-264,268-269,271-276,280-312
+  s_5b742bf37a2587::t_47e0ceadc142a8 20
+  s_5b742bf37a2587::t_6199616b1c12ac 30-37,53-55,57-60,62-66,68-72,74,76-81,83-84,88-91,93,96,98-102,104-105,107-108,110-141,145,147-149,151-158,161,164-168,170-176,184-185,313-314
+  s_5b742bf37a2587::t_ce6a983262de16 12
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "932515c0559816a7bba2898cc26cd4a694fd7912",
+  "prompts": {},
+  "sessions": {
+    "s_5b742bf37a2587": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ba723765-770d-456d-823d-c53d8073ed95",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

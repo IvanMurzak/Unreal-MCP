@@ -1,0 +1,33 @@
+extensions/UnrealAIControlRig/README.md
+  s_eb8bcde0be96a2::t_d1235ef55c7e72 1-44
+extensions/UnrealAIEnhancedInput/README.md
+  s_eb8bcde0be96a2::t_f8f5d1725b4ec4 1-44
+extensions/UnrealAIGAS/README.md
+  s_eb8bcde0be96a2::t_ac9b425ef78933 1-44
+extensions/UnrealAILandscape/README.md
+  s_eb8bcde0be96a2::t_063143b171158a 1-44
+extensions/UnrealAINiagara/README.md
+  s_eb8bcde0be96a2::t_578c433e5c9383 1-42
+extensions/UnrealAIPCG/README.md
+  s_eb8bcde0be96a2::t_ead75a397d1089 1-44
+scripts/extension_release.py
+  s_eb8bcde0be96a2::t_de44ca75630883 96
+scripts/test_extension_monorepo.py
+  s_eb8bcde0be96a2::t_9cbb408d886117 113-114
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d01f517780a302f799c974126fcfd2a0a79a0498",
+  "prompts": {},
+  "sessions": {
+    "s_eb8bcde0be96a2": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14267-6fec-7a30-97a7-931925a48014",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

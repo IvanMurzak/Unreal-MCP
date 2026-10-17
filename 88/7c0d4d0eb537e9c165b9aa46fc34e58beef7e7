@@ -1,0 +1,53 @@
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/UnrealMcpEditorViewModel.cpp
+  s_22693b636f3172::t_0222188dff5456 35-44,46-64
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/SUnrealMcpMainWindow.h
+  s_22693b636f3172::t_5bda06d907c1e2 57-58
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/SUnrealMcpAgentConfigurators.h
+  s_22693b636f3172::t_e123ef4f34da42 87-92
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/UnrealMcpEditorViewModel.h
+  s_22693b636f3172::t_0160f5a1963273 110-128
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpConfigSpec.cpp
+  s_22693b636f3172::t_c31ad51dcc7a27 284-338
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/SUnrealMcpAgentConfigurators.cpp
+  s_22693b636f3172::t_3ffacf9c3cd4d6 236-245,249-258,274-318
+  s_22693b636f3172::t_534630fc6f683e 329-332,334-347,349-416,418-435
+  s_22693b636f3172::t_98c79175f2c115 6,17,417
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpAgentConfiguratorSpec.cpp
+  s_22693b636f3172::t_edb4d3f272f929 940-1004
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/SUnrealMcpMainWindow.cpp
+  s_22693b636f3172::t_1bf97873bea421 395-404
+  s_22693b636f3172::t_90048ed012ea2f 479-528
+UnrealMCP/Source/UnrealMcpEditor/Private/Config/UnrealMcpConfig.cpp
+  s_22693b636f3172::t_52b46ad20d5ac3 391-421
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/SUnrealMcpAgentWidgets.h
+  s_22693b636f3172::t_d4491e0ed1a251 1-224
+UnrealMCP/Source/UnrealMcpEditor/Private/Config/UnrealMcpConfig.h
+  s_22693b636f3172::t_879fab5da47836 30-44
+  s_22693b636f3172::t_f06637a51650bf 176-198
+UnrealMCP/Source/UnrealMcpEditor/Private/Agents/AiAgentConfigurator.cpp
+  s_22693b636f3172::t_a057a8b2d09e95 180-215
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpEditorViewModelSpec.cpp
+  s_22693b636f3172::t_8a368b913b776c 400-452
+UnrealMCP/Source/UnrealMcpEditor/Private/Agents/AiAgentConfigurator.h
+  s_22693b636f3172::t_b333f3a9c50582 44-82
+  s_22693b636f3172::t_dac54d09f34f68 165-170,172
+  s_22693b636f3172::t_6c589b3dcf0129 161-164,171,173
+UnrealMCP/Source/UnrealMcpEditor/Private/Agents/Impl/ClaudeCodeConfigurator.h
+  s_22693b636f3172::t_e1eb483894d9c0 28,31-97
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "887c0d4d0eb537e9c165b9aa46fc34e58beef7e7",
+  "prompts": {},
+  "sessions": {
+    "s_22693b636f3172": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c07809a2-615b-47aa-afa6-1d2832f8909c",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

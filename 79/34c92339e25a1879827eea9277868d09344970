@@ -1,0 +1,19 @@
+CLAUDE.md
+  s_ccc717f86d7e3e::t_b1e7e16a496edc 3-12,15-20,22-54,60-68,71-111,119-121,139-142,174-178,200-209,212-213,216,222-225,233-236,240-242,244-250,254-261,263-266,273-276,280-284
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "7934c92339e25a1879827eea9277868d09344970",
+  "prompts": {},
+  "sessions": {
+    "s_ccc717f86d7e3e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9c8ada08-e4d5-462c-b934-8bbd1f9565d6",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
