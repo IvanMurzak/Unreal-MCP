@@ -66,8 +66,17 @@ agent ──query text──▶ unreal-mcp-bridge (sidecar, .NET)          Unrea
   name or path for class references, an actor label / name / path for actors (`FUnrealMcpObjectRef::ResolveReference`,
   the same class resolver as `blueprint-*`).
 - **Math structs** (`Vector`, `Vector2D`, `Vector4`, `Rotator`, `Quat`, `LinearColor`, `Color`, `IntPoint`,
-  `IntVector`) have RQL type adapters: they print as `(x, y, z)` and accept `"(1, 2, 3)"`, `[1, 2, 3]`, `{X: 1, …}`;
-  colors also `"#ff8800"`.
+  `IntVector`) have RQL type adapters: they print as `(x, y, z)` and accept `"(1, 2, 3)"`, `[1, 2, 3]`, `{X: 1, …}`
+  (an object literal builds a new value: members it does not name are zero); colors also `"#ff8800"`. They compare
+  with those forms too (`where Location == "(0, 0, 100)"`, components within 1e-5).
+- **Gameplay tags** read and write as text: `FGameplayTag` as `"Ability.Fire"` (`""` = none), `FGameplayTagContainer`
+  as `["Ability.Fire", "State.Stunned"]` (or `"A.B, C.D"`), validated against the registered tags (an unknown tag fails
+  and names similar ones); containers are rebuilt with `AddTag`, so their parent-tag cache stays right. Members:
+  `Tag.Parent`, `Tags.Names`, `Tags.Num`; `==` compares with text / lists (containers as sets). `FGameplayTagQuery`
+  shows its `Description` and is read-only.
+- **Struct members are known before a value is read**: a struct type's members are filled when a member of that type is
+  added (and when an object literal constructs it), so `where Row.Damage > 3` and `set Row = {Damage: 5}` work on a
+  struct the session never read.
 - **Per-call session**: each tool call builds a fresh engine and type cache (cheap: descriptors fill lazily). A
   Blueprint compile, hot reload or user-defined struct edit recreates `FProperty` / `UFunction` objects, so no
   descriptor may outlive the call that built it.
@@ -75,9 +84,9 @@ agent ──query text──▶ unreal-mcp-bridge (sidecar, .NET)          Unrea
   their packages marked dirty after. Unlike Unity-MCP, `rql-mutate` does **not** save to disk: Unreal edits stay
   unsaved until `editor | call SaveAll()` / `SaveLevel()` / `SaveAsset(…)` (saving in Unreal can raise source-control
   checkouts and Save-As dialogs, which an unattended tool call must not).
-- **Function sources**: RQL text lets a host function start a query (`unreal.assets("Material") | …`); the C++ runtime
-  starts only at sources and `ref(…)`, so the session evaluates such a call (literal arguments) once and runs the query
-  on a source holding its value.
+- **Function sources**: RQL text lets a host function start a query (`unreal.assets("Material") | …`, also with a member
+  path after it: `unreal.asset("/Game/BP_Door").EventGraph | …`); the C++ runtime starts only at sources and `ref(…)`,
+  so the session evaluates such a call (literal arguments) once and runs the query on a source holding its value.
 
 ### Sources and functions (core module)
 
@@ -91,6 +100,64 @@ agent ──query text──▶ unreal-mcp-bridge (sidecar, .NET)          Unrea
 | `unreal.find(label)` | an actor by label, name or path |
 | `unreal.asset(path)`, `unreal.assets(class, path?)` | one asset; assets of a class (at most 200, loaded as read) |
 | `unreal.classes(base?, filter?)` | classes deriving from a base |
+| `dataTables` | the project's DataTables (see [DataTables](#datatables)) |
+| `gameplayTags` | every registered gameplay tag: `Name`, `Comment`, `Source` (ini), `Parent`, `Children`, `Explicit`, `Restricted` |
+| `settings`, `unreal.settings(section)` | Project Settings / Editor Preferences sections and their objects (see [Settings](#settings)) |
+| `blueprints` | the project's Blueprints (see [Blueprint graphs](#blueprint-graphs)) |
+
+The `editor` operations also include `CreateDataTable(path, rowStruct)` and, for gameplay tags,
+`AddGameplayTag(name, comment?, source?)`, `RemoveGameplayTag(name)`, `RenameGameplayTag(name, newName)` (written to
+the tag ini at once through the GameplayTagsEditor plugin, not undoable; a rename leaves a redirector).
+
+### DataTables
+
+`UDataTable::RowMap` is not a `UPROPERTY`, so reflection does not see a table's rows. The core module adds:
+
+- `Rows`: a map from row name (case-insensitive) to the row struct. `set Rows["Sword"].Damage = 12` writes the row in
+  place; `set Rows["Bow"] = {Damage: 7}` adds a row (a failing write removes it again); `get Rows | where Value.Damage > 10
+  | select Key` streams the rows as entries.
+- `RowNames`, `RowCount`, `RowStructName` (pass it to `rql-schema` for the row members).
+- `call AddRow(name, values?)`, `RemoveRow(name)`, `RenameRow(name, newName)`, `DuplicateRow(name, newName)`: the
+  `FDataTableEditorUtils` functions the DataTable editor's buttons call (row names are validated; values that do not fit
+  leave no half-made row).
+
+Row writes run in the mutation's transaction (the table is `Modify()`d first, so Ctrl+Z restores the rows), call
+`HandleDataTableChanged` and notify open DataTable editors. Composite tables and `UCurveTable` are not covered.
+
+### Settings
+
+`settings` lists the sections of the Project Settings ("Project") and Editor Preferences ("Editor") windows (`Container`,
+`Category`, `Section`, `DisplayName`, `Description`) with `Object`, the object the section edits; `unreal.settings(name)`
+returns that object by section name, display name or class name (`unreal.settings("Maps & Modes") | set GameDefaultMap =
+"/Game/Maps/Arena"`). Settings objects are class defaults, read-only elsewhere in RQL; here their **config** properties
+are writable (a non-config property is refused: it would be lost on restart) and each mutation is saved the way the
+settings editor saves it: one property into `Default<Config>.ini` for project (default-config) classes, the whole section
+otherwise; legacy input mappings rebuild their key maps. Config files are not part of the editor transaction: a settings
+write is saved at once and Ctrl+Z does not revert it. Source control is not checked out (read-only ini files are made
+writable).
+
+### Blueprint graphs
+
+- `UBlueprint`: `Graphs` (event graphs, functions, macros), `EventGraph`, `Status` (`UpToDate`, `Dirty`, `Error`, …);
+  `call Compile()` returns `{Succeeded, Errors, Warnings, Messages: [{Severity, Message, Node}]}` (a failed compile is a
+  result, not an error; `Node` is the node's `$ref`) and `call AddFunction(name)` adds a function graph.
+- `UEdGraph`: `Nodes`, `Kind` (`EventGraph`, `Function`, `Macro`, `Delegate`), `Blueprint`; node calls (each returns the
+  node; `X` / `Y` place it, default: the editor's next free spot): `AddCallFunction("PrintString" |
+  "KismetMathLibrary.Add_IntInt" | a function of the Blueprint)`, `AddVariableGet(name)`, `AddVariableSet(name)`,
+  `AddEvent("BeginPlay")` (overridable events of the parent class; enables the editor's placeholder node when there is
+  one), `AddCustomEvent(name)`, `AddCast(class)`, `AddNode("Branch" | "Sequence" | "Self" | a standard macro such as
+  "ForLoop", "ForEachLoop", "DoOnce", "Gate")`.
+- `UEdGraphNode`: `Title`, `X`, `Y`, `Comment`, `Enabled` (writable), `Error` (the last compile's message), `Graph`,
+  `Pins`; calls `Connect(pin, target, targetPin)`, `Disconnect(…)`, `BreakLinks(pin?)`, `SetPinDefault(pin, value)`,
+  `Destroy()`. Pins are named by pin name or display name; `exec` / `out` name the execution pins.
+- `EdGraphPin` (a host object, not a UObject: it holds its node and pin id): `Name`, `DisplayName`, `Direction`, `Type`
+  (as the editor names it), `IsExec`, `DefaultValue` (writable: text, numbers, bools, `"(1, 2, 3)"`, an asset path for
+  object pins), `LinkedTo`, `Node`; calls `Connect(otherPin)`, `Disconnect(otherPin)`, `BreakLinks()`.
+
+Connections go through the K2 schema (`CanCreateConnection` / `TryCreateConnection`, the checks of a drag between pins),
+defaults through `IsPinDefaultValid` / `TrySetDefaultValue`. Every change is undoable (one transaction per mutation) and
+marks the Blueprint modified; nothing compiles until `call Compile()` (which runs outside the transaction). The
+`blueprint-*` tools stay for variables, components, class defaults and spawning.
 
 ## Tools
 
@@ -152,6 +219,14 @@ operations' rules (docs/EXTENSIONS.md).
 
 ## Tests
 
+- `UnrealMcpRqlAdaptersSpec.cpp` (`UnrealMcp.Tools.Rql.Adapters`): every existing adapter on a fixture object with one
+  property of each kind (`UnrealMcpRqlSpecFixtures.h`): the nine math structs (text, lists, literals, equality, errors),
+  references, arrays / sets / maps, scalars and enums (ranges, rollback, undo), asset and class-defaults lists, the
+  console, material parameter maps, the seven class hooks and every registration of the extension seam.
+- `UnrealMcpRqlDataModelsSpec.cpp` (`UnrealMcp.Tools.Rql.DataModels`): DataTable rows (edit, add / rename / duplicate /
+  remove, validation, undo, save and reload), gameplay tags (tag ini edits, text conversion, parent tags, rows with tags),
+  settings (sections, ini writes, refusals, dry run) and Blueprint graphs (nodes, pins, defaults, connections, compile
+  errors, undo).
 - `UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpRqlSpec.cpp` (`UnrealMcp.Tools.Rql`): the tools, queries,
   mutations (set, dry run, read-only, permission), components, calls (spawn, add component, duplicate, destroy), refs,
   selection, levels, console, assets, schema. The C++ runtime has no parser, so each case carries the plan Rql.Parser

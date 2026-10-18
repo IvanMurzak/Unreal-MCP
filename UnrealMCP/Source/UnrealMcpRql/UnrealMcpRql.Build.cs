@@ -46,6 +46,14 @@ public class UnrealMcpRql : ModuleRules
 			"AssetTools",
 			"MaterialEditor",
 			"EditorScriptingUtilities",
+			// Data models reflection does not reach (docs/rql.md): DataTable rows (FDataTableEditorUtils lives in UnrealEd),
+			// gameplay tags (GameplayTags; the tag ini editing of the GameplayTagsEditor plugin), Project Settings
+			// sections (Settings) and Blueprint graphs (BlueprintGraph / Kismet: K2 nodes, schema, compile).
+			"GameplayTags",
+			"GameplayTagsEditor",
+			"Settings",
+			"BlueprintGraph",
+			"KismetCompiler",
 		});
 	}
 }

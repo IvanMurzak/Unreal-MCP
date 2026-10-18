@@ -19,6 +19,9 @@
 #include "Engine/LevelStreaming.h"
 #include "Engine/World.h"
 #include "Components/ActorComponent.h"
+#include "DataTableEditorUtils.h"
+#include "Engine/DataTable.h"
+#include "Factories/DataTableFactory.h"
 #include "Factories/Factory.h"
 #include "Factories/MaterialInstanceConstantFactoryNew.h"
 #include "FileHelpers.h"
@@ -27,6 +30,7 @@
 #include "IAssetTools.h"
 #include "Materials/MaterialInstanceConstant.h"
 #include "Materials/MaterialInterface.h"
+#include "Misc/ITransaction.h"
 #include "Misc/PackageName.h"
 #include "Misc/Paths.h"
 #include "Misc/ScopeExit.h"
@@ -400,4 +404,37 @@ void UUnrealMcpRqlEditorApi::SaveAsset(UObject* Asset)
 int32 UUnrealMcpRqlEditorApi::ClearConsole()
 {
 	return FUnrealMcpLogCollector::Get().Clear();
+}
+
+UDataTable* UUnrealMcpRqlEditorApi::CreateDataTable(const FString& Path, const FString& RowStruct)
+{
+	const FString Wanted = RowStruct.TrimStartAndEnd();
+	UScriptStruct* Struct = nullptr;
+	if (Wanted.Contains(TEXT("/")))
+		Struct = Cast<UScriptStruct>(UnrealMcpRql::LoadObject(UScriptStruct::StaticClass(), Wanted));
+	else
+	{
+		const FString Bare = Wanted.Len() > 1 && Wanted[0] == TEXT('F') && FChar::IsUpper(Wanted[1]) ? Wanted.Mid(1) : Wanted;
+		for (const FString& Candidate : { Wanted, Bare })
+		{
+			if (!Struct)
+				Struct = FindFirstObject<UScriptStruct>(*Candidate, EFindFirstObjectOptions::NativeFirst, ELogVerbosity::NoLogging);
+		}
+	}
+	if (!Struct || !FDataTableEditorUtils::IsValidTableStruct(Struct))
+		return Failed<UDataTable*>(FString::Printf(TEXT("'%s' is not a struct DataTable rows can use (a struct deriving from FTableRowBase, or a user-defined struct)"), *Wanted));
+	FString Folder, Name;
+	if (!ValidateNewAssetPath(Path, Folder, Name))
+		return nullptr;
+	UDataTableFactory* Factory = NewObject<UDataTableFactory>();
+	FGCObjectScopeGuard FactoryGuard(Factory);
+	Factory->Struct = Struct;
+	UDataTable* Table = nullptr;
+	{
+		// Not recorded in the mutation's transaction: the factory creates the table before it assigns the row struct, and a
+		// transaction snapshot of a table without one logs an error (creating an asset is not an undoable edit anyway).
+		TGuardValue<ITransaction*> NoUndo(GUndo, nullptr);
+		Table = Cast<UDataTable>(AssetTools().CreateAsset(Name, Folder, UDataTable::StaticClass(), Factory));
+	}
+	return Table ? Table : Failed<UDataTable*>(FString::Printf(TEXT("could not create a DataTable at '%s'"), *Path));
 }

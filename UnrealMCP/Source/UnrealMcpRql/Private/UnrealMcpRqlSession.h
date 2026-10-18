@@ -57,6 +57,14 @@ public:
 	void AddGuide(const FString& Topic, const FString& Markdown);
 	void AddAdapter(rql::TypeAdapter Adapter);
 
+	/** Runs before the first write of a mutation (after the read-only checks); throwing vetoes the whole mutation. */
+	using FMutationHook = std::function<void(const std::vector<rql::MutationRecord>& Records)>;
+	void AddBeforeWrite(FMutationHook Hook);
+	/** Runs after every write of a mutation succeeded (not on dry run or rollback): persistence, notifications. */
+	void AddCommitted(FMutationHook Hook);
+	/** Class default objects this predicate accepts are writable (settings objects); other templates stay read-only. */
+	void AllowTemplateWrites(TFunction<bool(const UObject*)> Predicate);
+
 private:
 	TUniquePtr<FUnrealMcpRqlTypes> TypesPtr;
 	std::unique_ptr<rql::Engine> EnginePtr;
@@ -64,6 +72,9 @@ private:
 	TArray<FEntry> FunctionEntries;
 	TArray<TPair<FString, FString>> Guides;
 	TArray<FString> ModuleReports;
+	TArray<FMutationHook> BeforeWriteHooks;
+	TArray<FMutationHook> CommittedHooks;
+	TArray<TFunction<bool(const UObject*)>> WritableTemplates;
 	int32 TransactionIndex = INDEX_NONE;
 
 	/** A host function as the query source (unreal.assets("Material") | ...): evaluated into a source. True = failed. */

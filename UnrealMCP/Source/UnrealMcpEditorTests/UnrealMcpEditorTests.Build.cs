@@ -25,6 +25,13 @@ public class UnrealMcpEditorTests : ModuleRules
 			"UnrealMcpRql",   // the RQL data layer specs (UnrealMcpRqlSpec.cpp) drive UnrealMcpRqlTools directly
 			"BlueprintGraph", // UK2Node_Event — asserting add-event produced an ENABLED node (§10)
 			"HTTPServer",     // the dev-control server header (FUnrealMcpDevControlServer) includes HttpRouteHandle.h
+			// The RQL data-model specs: test fixtures (gameplay tag / settings properties), the Settings sections, the
+			// assets they create and clean up (EditorScriptingUtilities, AssetRegistry).
+			"DeveloperSettings",
+			"GameplayTags",
+			"Settings",
+			"AssetRegistry",
+			"EditorScriptingUtilities",
 		});
 
 		// Reach BOTH modules' PRIVATE headers so the Automation specs can drive their internals directly.

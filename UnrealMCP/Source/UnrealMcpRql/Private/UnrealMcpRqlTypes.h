@@ -46,6 +46,11 @@ class FUnrealMcpRqlTypes
 public:
 	/** Adds members / methods to the descriptor of one class (and, by inheritance, of its subclasses). */
 	using FClassHook = TFunction<void(FUnrealMcpRqlTypes& Types, rql::TypeDescriptor& Descriptor)>;
+	/**
+	 * A text / list form of one struct for CoerceStruct (gameplay tags: "A.B.C", ["A.B", "C"]): true when it handled the
+	 * value and wrote @p Out; false to fall through; throws std::runtime_error when the value has the form but does not fit.
+	 */
+	using FStructParser = TFunction<bool(FUnrealMcpRqlTypes& Types, const rql::Value& Value, void* Out)>;
 
 	FUnrealMcpRqlTypes();
 	~FUnrealMcpRqlTypes();
@@ -101,6 +106,14 @@ public:
 	// ---- extension points (registered before the first query; inherited by subclasses)
 
 	void AddClassHook(UClass* Class, FClassHook Hook);
+	/** Reshape the members of one struct after its reflected members are filled (exact struct, no inheritance). */
+	void AddStructHook(UScriptStruct* Struct, FClassHook Hook);
+	void AddStructParser(UScriptStruct* Struct, FStructParser Parser);
+	/**
+	 * A mutable descriptor of a host-defined object type (no UClass behind it, e.g. a Blueprint graph pin), keyed by
+	 * @p Key, registered so FindByName and rql-schema know it. Values: rql::Value::object(descriptor, ptr, keep_alive).
+	 */
+	rql::TypeDescriptor& NativeObjectType(const void* Key, const FString& Name, const FString& Description);
 	void AddApiClass(UClass* Class, const FString& TypeName);
 	/** Whether @p Class was registered with AddApiClass (its class default object is an operations object). */
 	bool IsApiClass(const UClass* Class) const { return Class && ApiClasses.Contains(const_cast<UClass*>(Class)); }
@@ -127,6 +140,8 @@ private:
 	TArray<const rql::TypeDescriptor*> NativeTypes;
 
 	TMultiMap<UClass*, FClassHook> Hooks;
+	TMultiMap<UScriptStruct*, FClassHook> StructHooks;
+	TMap<UScriptStruct*, FStructParser> StructParsers;
 	TMap<UClass*, FString> ApiClasses;
 	TMap<UStruct*, TMap<FName, bool>> Exposed;
 

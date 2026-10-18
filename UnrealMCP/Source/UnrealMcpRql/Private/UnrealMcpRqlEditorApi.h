@@ -10,6 +10,7 @@
 
 class AActor;
 class ULevel;
+class UDataTable;
 class UMaterialInstanceConstant;
 class UMaterialInterface;
 class UWorld;
@@ -93,4 +94,20 @@ public:
 	/** clear the captured editor log (the console source); returns how many entries were removed */
 	UFUNCTION(BlueprintCallable, Category = "Unreal MCP|RQL", meta = (BlueprintInternalUseOnly = "true"))
 	int32 ClearConsole();
+
+	/** add a gameplay tag ("Ability.Fire") to the project's tag list (Config/DefaultGameplayTags.ini, or Source: another tag ini such as "Abilities.ini"); written to disk at once, not undoable */
+	UFUNCTION(BlueprintCallable, Category = "Unreal MCP|RQL", meta = (BlueprintInternalUseOnly = "true"))
+	void AddGameplayTag(const FString& Name, const FString& Comment = TEXT(""), const FString& Source = TEXT(""));
+
+	/** remove a gameplay tag from its tag ini (refused while assets reference it, or when C++ / a DataTable declares it); written at once, not undoable */
+	UFUNCTION(BlueprintCallable, Category = "Unreal MCP|RQL", meta = (BlueprintInternalUseOnly = "true"))
+	void RemoveGameplayTag(const FString& Name);
+
+	/** rename a gameplay tag (and its children) in its tag ini, leaving a redirector from the old name; written at once, not undoable */
+	UFUNCTION(BlueprintCallable, Category = "Unreal MCP|RQL", meta = (BlueprintInternalUseOnly = "true"))
+	void RenameGameplayTag(const FString& Name, const FString& NewName);
+
+	/** create a DataTable at Path whose rows are RowStruct (a struct name such as "GameplayTagTableRow", or a user-defined struct asset path); returns it, unsaved */
+	UFUNCTION(BlueprintCallable, Category = "Unreal MCP|RQL", meta = (BlueprintInternalUseOnly = "true"))
+	UDataTable* CreateDataTable(const FString& Path, const FString& RowStruct);
 };

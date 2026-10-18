@@ -253,6 +253,32 @@ void UnrealMcpRqlAddStructAdapters(FUnrealMcpRqlSession& Session)
 			Result = Built;
 			return rql::AdapterOutcome::Ok;
 		};
+		// Equality with the text and list forms (where Location == "(0, 0, 100)"), approximate like RQL's .NET tuple
+		// adapters: components within 1e-5.
+		Adapter.equals = [SpecPtr](const rql::Value& Value, const rql::Value& Other) -> std::optional<bool>
+		{
+			if (!Value.is_struct() || !Value.ptr())
+				return std::nullopt;
+			double Mine[4] = { 0, 0, 0, 0 };
+			double Theirs[4] = { 0, 0, 0, 0 };
+			SpecPtr->Get(Value.ptr(), Mine);
+			if (Other.is_struct() && Other.type() == Value.type() && Other.ptr())
+				SpecPtr->Get(Other.ptr(), Theirs);
+			else if (Other.is_string() || Other.is_list())
+			{
+				FString Ignored;
+				if (!Components(*SpecPtr, Other, Theirs, Ignored))
+					return false; // not this struct's form: not equal
+			}
+			else
+				return std::nullopt;
+			for (int32 Index = 0; Index < SpecPtr->Count; ++Index)
+			{
+				if (!(FMath::Abs(Mine[Index] - Theirs[Index]) <= 1e-5))
+					return false;
+			}
+			return true;
+		};
 		Session.AddAdapter(std::move(Adapter));
 	}
 }

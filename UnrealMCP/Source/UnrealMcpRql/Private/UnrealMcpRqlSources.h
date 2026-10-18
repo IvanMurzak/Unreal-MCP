@@ -27,3 +27,15 @@ bool UnrealMcpRqlParseMathStruct(UScriptStruct* Struct, const rql::Value& Value,
 
 /** RQL type adapters for the math structs: "(x, y, z)" output, text / list literals on writes. */
 void UnrealMcpRqlAddStructAdapters(FUnrealMcpRqlSession& Session);
+
+/** DataTable rows: UDataTable `Rows` (row name -> row struct), RowNames, RowCount, row calls; the `dataTables` source. */
+void UnrealMcpRqlAddDataTables(FUnrealMcpRqlSession& Session);
+
+/** Gameplay tags as text ("A.B.C") / lists, validated against the tag tree; the `gameplayTags` source. */
+void UnrealMcpRqlAddGameplayTags(FUnrealMcpRqlSession& Session);
+
+/** Project Settings / Editor Preferences sections: the `settings` source and unreal.settings(name); writes saved to config. */
+void UnrealMcpRqlAddSettings(FUnrealMcpRqlSession& Session);
+
+/** Blueprint graphs: Graphs / Nodes / Pins, node creation, pin connections, Compile; the `blueprints` source. */
+void UnrealMcpRqlAddBlueprints(FUnrealMcpRqlSession& Session);

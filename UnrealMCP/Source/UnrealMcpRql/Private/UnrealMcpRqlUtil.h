@@ -7,7 +7,9 @@
 #include "UnrealMcpRqlTypes.h"
 #include "UObject/Class.h"
 
+#include <functional>
 #include <stdexcept>
+#include <vector>
 
 class ULevel;
 class UWorld;
@@ -58,6 +60,56 @@ namespace UnrealMcpRqlUtil
 				return false;
 		}
 		ThrowMismatch(TEXT("true or false"), Value);
+	}
+
+	/** A computed member (read-only without a setter). */
+	inline rql::MemberDescriptor Member(const char* Name, const rql::TypeDescriptor* Type, rql::Getter Get, rql::Setter Set = {},
+		const char* Description = "", bool bOwning = false, bool bNullable = false)
+	{
+		rql::MemberDescriptor Result;
+		Result.name = Name;
+		Result.type = Type;
+		Result.getter = MoveTemp(Get);
+		Result.setter = MoveTemp(Set);
+		Result.readonly = !Result.setter;
+		Result.description = Description;
+		Result.owning = bOwning;
+		Result.nullable = bNullable;
+		return Result;
+	}
+
+	/** A `call` method of a host type (@p Result nullptr = void). */
+	inline rql::MethodDescriptor Method(const char* Name, std::vector<rql::ParamDescriptor> Params, const rql::TypeDescriptor* Result,
+		std::function<rql::Value(void*, const std::vector<rql::Value>&)> Invoke, const char* Description)
+	{
+		rql::MethodDescriptor Out;
+		Out.name = Name;
+		Out.params = std::move(Params);
+		Out.result = Result;
+		Out.invoke = std::move(Invoke);
+		Out.description = Description;
+		return Out;
+	}
+
+	/** The list items of an RQL list value (throws for anything else). */
+	inline std::vector<rql::Value> Items(const rql::Value& Value)
+	{
+		if (!Value.is_list())
+			ThrowMismatch(TEXT("a list"), Value);
+		std::vector<rql::Value> Out;
+		for (size_t Index = 0, Count = Value.list().size(); Index < Count; ++Index)
+			Out.push_back(Value.list().at(Index));
+		return Out;
+	}
+
+	/** RQL list of strings. */
+	inline rql::Value StrList(const TArray<FString>& Texts)
+	{
+		std::vector<rql::Value> Out;
+		Out.reserve(static_cast<size_t>(Texts.Num()));
+		for (const FString& Text : Texts)
+			Out.push_back(Str(Text));
+		return rql::Value::list_of(std::move(Out));
 	}
 
 	/** The editor world (null outside the editor). */

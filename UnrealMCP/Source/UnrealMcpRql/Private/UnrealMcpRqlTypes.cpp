@@ -342,7 +342,10 @@ const rql::TypeDescriptor* FUnrealMcpRqlTypes::ForStruct(UScriptStruct* Struct)
 		return *Found;
 	rql::TypeDescriptor& Descriptor = Shell(Struct, Struct->GetName(), rql::TypeKind::Struct);
 	Descriptor.copy = [Struct](const void* Source) { return MakeStructData(Struct, Source); };
-	Descriptor.create = [Struct]() { return MakeStructData(Struct, nullptr); };
+	// An object literal ({Damage: 5}) constructs the struct before reading its members: fill them first, the struct may
+	// not have been read yet in this session.
+	const rql::TypeDescriptor* Constructed = &Descriptor;
+	Descriptor.create = [this, Struct, Constructed]() { Fill(Constructed); return MakeStructData(Struct, nullptr); };
 	Structs.Add(Struct, &Descriptor);
 	StructByDescriptor.Add(&Descriptor, Struct);
 	return &Descriptor;
@@ -529,6 +532,28 @@ void FUnrealMcpRqlTypes::AddClassHook(UClass* Class, FClassHook Hook)
 		Hooks.Add(Class, MoveTemp(Hook));
 }
 
+void FUnrealMcpRqlTypes::AddStructHook(UScriptStruct* Struct, FClassHook Hook)
+{
+	if (Struct && Hook)
+		StructHooks.Add(Struct, MoveTemp(Hook));
+}
+
+void FUnrealMcpRqlTypes::AddStructParser(UScriptStruct* Struct, FStructParser Parser)
+{
+	if (Struct && Parser)
+		StructParsers.Add(Struct, MoveTemp(Parser));
+}
+
+rql::TypeDescriptor& FUnrealMcpRqlTypes::NativeObjectType(const void* Key, const FString& Name, const FString& Description)
+{
+	rql::TypeDescriptor& Descriptor = Shell(Key, Name, rql::TypeKind::Object);
+	Descriptor.description = UnrealMcpRqlToStd(Description);
+	Descriptor.id_name.clear();
+	Descriptor.id_explicit = true;
+	AddNativeType(&Descriptor);
+	return Descriptor;
+}
+
 void FUnrealMcpRqlTypes::AddApiClass(UClass* Class, const FString& TypeName)
 {
 	if (Class)
@@ -608,6 +633,10 @@ void FUnrealMcpRqlTypes::FillStruct(rql::TypeDescriptor& Descriptor, UScriptStru
 	Descriptor.id_explicit = true;
 	Descriptor.display_name.clear();
 	Descriptor.display_explicit = true;
+	TArray<FClassHook*> Reshape;
+	StructHooks.MultiFindPointer(Struct, Reshape, /*bMaintainOrder*/ true);
+	for (FClassHook* Hook : Reshape)
+		(*Hook)(*this, Descriptor);
 }
 
 void FUnrealMcpRqlTypes::AddPropertyMember(rql::TypeDescriptor& Descriptor, FProperty* Property, bool bOnObject, bool bForceWritable)
@@ -618,6 +647,16 @@ void FUnrealMcpRqlTypes::AddPropertyMember(rql::TypeDescriptor& Descriptor, FPro
 	const rql::TypeDescriptor* Type = ForProperty(Property, bNullable);
 	if (!Type)
 		return;
+	// Struct members (and struct elements / values of containers) get their members now: a query can name them before a
+	// value of the struct was ever read (where Row.Damage > 3, set Row = {Damage: 5}). Filled is set before filling, so
+	// self-referencing structs (TArray<FSelf>) terminate.
+	for (const rql::TypeDescriptor* Value = Type; Value; Value = Value->element)
+	{
+		if (Value->kind == rql::TypeKind::Struct)
+			Fill(Value);
+		if (Value->kind != rql::TypeKind::List && Value->kind != rql::TypeKind::Map)
+			break;
+	}
 
 	rql::MemberDescriptor Member;
 	Member.name = UnrealMcpRqlToStd(Property->GetAuthoredName());
@@ -1086,6 +1125,11 @@ void FUnrealMcpRqlTypes::CoerceStruct(UScriptStruct* Struct, const rql::Value& V
 	{
 		Struct->CopyScriptStruct(Out, Value.ptr());
 		return;
+	}
+	if (const FStructParser* Parser = StructParsers.Find(Struct))
+	{
+		if ((*Parser)(*this, Value, Out))
+			return;
 	}
 	if (Value.is_string() || Value.is_list())
 	{
