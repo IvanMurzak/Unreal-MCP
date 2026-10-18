@@ -109,7 +109,8 @@ handshake is independent of it. NuGet pins: see `bridge/AGENTS.md`.
 
 `test_pull_request.yml` (`test-pull-request`) on PRs into `main`: bridge build + xUnit (ubuntu + windows),
 `test-cli` on Node 20 and 22 (`test_cli.yml`), and two UE jobs — `plugin BuildPlugin + Automation` and
-`connection + tool smoke` (matrix `ue: ['5.8']`, `UE_ROOT` derived from it). UE jobs run on self-hosted
+`connection + tool smoke` (plugin matrix `ue: ['5.5', '5.6', '5.7', '5.8']` like `release.yml`, smoke `['5.8']`;
+`UE_ROOT` derived from it). UE jobs run on self-hosted
 Windows runners (each job asks for its engine's label, e.g. `unreal-5-8`), serialized by the machine-wide lock
 `.github/scripts/ue-machine-lock.ps1` ([RELEASING](docs/RELEASING.md#machine-wide-ue-lock)), and are
 gated on `vars.UNREAL_RUNNER_READY` / `vars.UNREAL_SMOKE_READY == 'true'` and same-repo PRs — otherwise

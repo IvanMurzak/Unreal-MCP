@@ -9,6 +9,7 @@
 
 #include "Containers/StringConv.h"
 #include "HAL/UnrealMemory.h"
+#include "Misc/EngineVersionComparison.h"
 #include "Misc/OutputDeviceNull.h"
 #include "UObject/Class.h"
 #include "UObject/EnumProperty.h"
@@ -839,7 +840,11 @@ UObject* FUnrealMcpRqlTypes::FindById(int64 Id)
 	FUObjectItem* Item = GUObjectArray.IndexToValidObject(Index, /*bEvenIfGarbage*/ false);
 	if (!Item || Item->GetSerialNumber() != Serial)
 		return nullptr; // gone, or the slot now holds another object
+#if UE_VERSION_OLDER_THAN(5, 6, 0)
+	UObject* Object = static_cast<UObject*>(Item->Object); // FUObjectItem::GetObject() arrived in UE 5.6
+#else
 	UObject* Object = static_cast<UObject*>(Item->GetObject());
+#endif
 	return IsValid(Object) ? Object : nullptr;
 }
 

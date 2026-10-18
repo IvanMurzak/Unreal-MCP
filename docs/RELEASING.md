@@ -444,10 +444,10 @@ installed engine. The release matrix validates UE 5.5/5.6/5.7/5.8.
 > workflows prefer that runner-local host and keep `UNREAL_HOST_PROJECT` only as
 > a fallback. That keeps parallel Automation jobs from sharing one mutable
 > `Plugins\UnrealMCP` junction while still exercising the packaged plugin. The
-> `plugin BuildPlugin + Automation (UE <ver>)` coverage now splits by workflow:
-> `test_pull_request.yml` runs **UE 5.8 only** for same-repo PRs, while
-> `release.yml` runs `matrix.ue: ['5.5', '5.6', '5.7', '5.8']` on real releases
-> and dry-runs, capped at two parallel Unreal engines to avoid MSVC PCH virtual
+> `plugin BuildPlugin + Automation (UE <ver>)` leg runs the same
+> `matrix.ue: ['5.5', '5.6', '5.7', '5.8']` in `test_pull_request.yml` (same-repo
+> PRs) and `release.yml` (real releases and dry-runs), so an API missing on an older
+> engine fails the PR instead of the release. `release.yml` is capped at two parallel Unreal engines to avoid MSVC PCH virtual
 > memory exhaustion on the local machine. The host game module is rebuilt per
 > engine on each runner-local host. The
 > PR smoke job waits for the plugin job, because both use UE 5.8 `RunUAT` on the

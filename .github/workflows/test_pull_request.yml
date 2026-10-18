@@ -11,7 +11,7 @@
 # disabled so every leg reports independently:
 #   (a) bridge  — dotnet build + xUnit on hosted ubuntu-latest + windows-latest
 #   (b) cli     — unreal-mcp-cli node 20/22 tests via the reusable test_cli.yml
-#   (c) plugin  — UE 5.8 BuildPlugin + Automation specs (UnrealMcp. filter) on a
+#   (c) plugin  — UE 5.5–5.8 BuildPlugin + Automation specs (UnrealMcp. filter) on a
 #                 SELF-HOSTED windows runner labelled `unreal-<major>-<minor>` (e.g. `unreal-5-8`)
 #   (d) connection-smoke — live relay round-trip (client -> gamedev-mcp-server ->
 #                 sidecar -> plugin -> editor -> tool), self-hosted, gated on a
@@ -218,9 +218,9 @@ jobs:
     # checked-out code on the self-hosted runner (see docs/RELEASING.md). Manual
     # dispatches (trusted) are unaffected by the fork clause.
     if: ${{ vars.UNREAL_RUNNER_READY == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
-    # PR-gating is intentionally scoped to UE 5.8 ONLY so the self-hosted PR
-    # signal stays on the latest supported engine while keeping the runner load
-    # bounded.
+    # PR-gating covers the same UE 5.5–5.8 set as release.yml: an API missing on an
+    # older engine (e.g. FUObjectItem::GetObject() before 5.6) must fail the PR, not
+    # the release. Each leg is a few minutes and the machine lock serializes them.
     # fail-fast:false so one engine's failure never cancels the other's leg.
     # Engine-versioned runner label (unreal-5-8 for UE 5.8): the job only lands on a machine
     # that has this engine installed. Expressions have no replace(), hence the lookup; an
@@ -239,7 +239,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        ue: ['5.7', '5.8']
+        ue: ['5.5', '5.6', '5.7', '5.8']
     env:
       # Engine path is driven by the matrix (standard Epic install layout).
       UE_ROOT: C:\Program Files\Epic Games\UE_${{ matrix.ue }}
