@@ -835,11 +835,15 @@ UObject* FUnrealMcpRqlTypes::FindById(int64 Id)
 	if (Id <= 0)
 		return nullptr;
 	const int32 Index = static_cast<int32>(Id % IdIndexSpan);
-	const int32 Serial = static_cast<int32>(Id / IdIndexSpan);
+	const int64 Serial = Id / IdIndexSpan;
+	// Serial 0 marks a slot with no allocated serial (IdOf never issues it): "Type#5" must not match index 5.
+	if (Serial <= 0 || Serial > MAX_int32)
+		return nullptr;
 	FUObjectItem* Item = GUObjectArray.IndexToValidObject(Index, /*bEvenIfGarbage*/ false);
 	if (!Item || Item->GetSerialNumber() != Serial)
 		return nullptr; // gone, or the slot now holds another object
-	UObject* Object = static_cast<UObject*>(Item->GetObject());
+	// FIndexToObject, not FUObjectItem::GetObject(): the latter only exists from UE 5.6.
+	UObject* Object = static_cast<UObject*>(FIndexToObject::IndexToObject(Index, /*bEvenIfGarbage*/ false));
 	return IsValid(Object) ? Object : nullptr;
 }
 
