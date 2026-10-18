@@ -13,6 +13,7 @@
 #include "Components/PanelWidget.h"
 #include "Components/Widget.h"
 #include "Kismet2/BlueprintEditorUtils.h"
+#include "Misc/EngineVersionComparison.h"
 
 #include <vector>
 
@@ -29,6 +30,26 @@ namespace UnrealMcpRqlWidgetsLocal
 	UBaseWidgetBlueprint* BlueprintOf(const UObject* Object)
 	{
 		return Object ? const_cast<UBaseWidgetBlueprint*>(Object->GetTypedOuter<UBaseWidgetBlueprint>()) : nullptr;
+	}
+
+	/** A widget's variable GUID, as the Designer registers it (the compiler checks every widget has one). */
+	void RegisterVariable(UWidgetBlueprint* Blueprint, FName Name)
+	{
+#if UE_VERSION_OLDER_THAN(5, 6, 0)
+		if (!Blueprint->WidgetVariableNameToGuidMap.Contains(Name))
+			Blueprint->WidgetVariableNameToGuidMap.Add(Name, FGuid::NewGuid());
+#else
+		Blueprint->OnVariableAdded(Name);
+#endif
+	}
+
+	void UnregisterVariable(UWidgetBlueprint* Blueprint, FName Name)
+	{
+#if UE_VERSION_OLDER_THAN(5, 6, 0)
+		Blueprint->WidgetVariableNameToGuidMap.Remove(Name);
+#else
+		Blueprint->OnVariableRemoved(Name);
+#endif
 	}
 
 	UWidgetTree* RequireTree(UBaseWidgetBlueprint* Blueprint)
@@ -96,7 +117,7 @@ namespace UnrealMcpRqlWidgetsLocal
 		Widget->SetFlags(RF_Transactional);
 		// The editor registers every new widget as a variable of the Blueprint (its GUID: the compiler needs it).
 		if (UWidgetBlueprint* Designer = Cast<UWidgetBlueprint>(Blueprint))
-			Designer->OnVariableAdded(Widget->GetFName());
+			RegisterVariable(Designer, Widget->GetFName());
 		if (Panel)
 		{
 			Panel->Modify();
@@ -135,7 +156,7 @@ namespace UnrealMcpRqlWidgetsLocal
 			Gone->Modify();
 			Gone->Rename(nullptr, GetTransientPackage(), REN_DontCreateRedirectors);
 			if (Designer)
-				Designer->OnVariableRemoved(Name);
+				UnregisterVariable(Designer, Name);
 		}
 		FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
 	}
