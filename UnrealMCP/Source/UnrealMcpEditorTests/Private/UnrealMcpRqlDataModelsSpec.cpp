@@ -34,6 +34,7 @@
 #include "ISettingsModule.h"
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "Kismet2/KismetEditorUtilities.h"
+#include "Misc/EngineVersionComparison.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "Modules/ModuleManager.h"
@@ -210,7 +211,9 @@ BEGIN_DEFINE_SPEC(FUnrealMcpRqlDataModelsSpec, "UnrealMcp.Tools.Rql.DataModels",
 			if (UGameplayTagsList* List = Source->SourceTagList)
 			{
 				List->GameplayTagList.Reset();
-				List->GameplayTagRedirects.Reset();
+#if !UE_VERSION_OLDER_THAN(5, 6, 0)
+				List->GameplayTagRedirects.Reset(); // per-source redirectors (UE 5.6+; before, only the settings have them)
+#endif
 			}
 		}
 		// RenameGameplayTag may leave redirectors in the project's GameplayTags settings too: drop the specs' ones.
@@ -494,6 +497,9 @@ void FUnrealMcpRqlDataModelsSpec::Define()
 			TestEqual(*FString::Printf(TEXT("Maps & Modes (%s)"), *UnrealMcpRqlSpecHelpers::Codes(Maps)), UnrealMcpRqlSpecHelpers::CellText(Maps, 0, 2), FString(TEXT("GameMapsSettings")));
 			const TSharedPtr<FJsonObject> Editor = Run(/* settings | where Container == "Editor" | count */ TEXT(R"RQL({"rql":"0.1","source":{"path":["settings"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Container"]},{"lit":"Editor"}]}},{"op":"count"}]})RQL"));
 			TestTrue(TEXT("editor preferences listed"), UnrealMcpRqlSpecHelpers::Number(Editor) >= 1.0);
+			const TSharedPtr<FJsonObject> Map = Run(/* unreal.settings("Maps & Modes") | select GameDefaultMap */ TEXT(R"RQL({"rql":"0.1","source":{"call":"settings","on":{"path":["unreal"]},"args":[{"lit":"Maps & Modes"}]},"stages":[{"op":"select","fields":[{"name":"GameDefaultMap","expr":{"path":["GameDefaultMap"]}}]}]})RQL"));
+			TestTrue(*FString::Printf(TEXT("a soft path setting reads as a path (%s)"), *UnrealMcpRqlSpecHelpers::CellText(Map)),
+				UnrealMcpRqlSpecHelpers::CellText(Map).IsEmpty() || UnrealMcpRqlSpecHelpers::CellText(Map).StartsWith(TEXT("/")));
 			const TSharedPtr<FJsonObject> ByName = Run(/* unreal.settings("GameMapsSettings") | select $type */ TEXT(R"RQL({"rql":"0.1","source":{"call":"settings","on":{"path":["unreal"]},"args":[{"lit":"GameMapsSettings"}]},"stages":[{"op":"select","fields":[{"name":"$type","expr":{"path":[{"meta":"type"}]}}]}]})RQL"));
 			TestEqual(TEXT("unreal.settings by class name"), UnrealMcpRqlSpecHelpers::CellText(ByName), FString(TEXT("GameMapsSettings")));
 			const TSharedPtr<FJsonObject> Unknown = Run(/* unreal.settings("NoSuchRqlSection") | count */ TEXT(R"RQL({"rql":"0.1","source":{"call":"settings","on":{"path":["unreal"]},"args":[{"lit":"NoSuchRqlSection"}]},"stages":[{"op":"count"}]})RQL"));

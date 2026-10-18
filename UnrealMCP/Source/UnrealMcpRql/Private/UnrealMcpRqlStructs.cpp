@@ -3,6 +3,7 @@
 
 #include "UnrealMcpRqlSession.h"
 #include "UnrealMcpRqlSources.h"
+#include "UnrealMcpRqlUtil.h"
 
 #include "Math/Color.h"
 #include "Math/IntPoint.h"
@@ -13,6 +14,8 @@
 #include "Math/Vector2D.h"
 #include "Math/Vector4.h"
 #include "UObject/Class.h"
+#include "UObject/SoftObjectPath.h"
+#include "UObject/Object.h"
 
 #include <exception>
 #include <string>
@@ -217,9 +220,104 @@ bool UnrealMcpRqlParseMathStruct(UScriptStruct* Struct, const rql::Value& Value,
 	return true;
 }
 
+namespace UnrealMcpRqlStructsLocal
+{
+	/**
+	 * Soft object / class paths (FSoftObjectPath, FSoftClassPath: GameDefaultMap, a class to spawn ...) as text:
+	 * "/Game/Maps/Arena.Arena" out, a path, an object or "" in. Paths are not checked for an existing asset (they are
+	 * soft: the asset may not be loaded or not exist yet), the same rule as soft object properties.
+	 */
+	void AddSoftPathAdapter(FUnrealMcpRqlSession& Session, UScriptStruct* Struct)
+	{
+		FUnrealMcpRqlTypes* Types = &Session.Types();
+		const rql::TypeDescriptor* Descriptor = Types->ForStruct(Struct);
+		if (!Descriptor)
+			return;
+		// Text is the whole value: no raw members (AssetPath / SubPathString) to write past the adapter.
+		Types->AddStructHook(Struct, [](FUnrealMcpRqlTypes&, rql::TypeDescriptor& D)
+		{
+			D.members.clear();
+			FUnrealMcpRqlTypes::SetMember(D, UnrealMcpRqlUtil::Member("Path", rql::builtin::string_type(), [](void* Self)
+			{
+				return UnrealMcpRqlUtil::Str(static_cast<const FSoftObjectPath*>(Self)->ToString());
+			}, {}, "the path text"));
+			FUnrealMcpRqlTypes::SetMember(D, UnrealMcpRqlUtil::Member("Package", rql::builtin::string_type(), [](void* Self)
+			{
+				return UnrealMcpRqlUtil::Str(static_cast<const FSoftObjectPath*>(Self)->GetLongPackageName());
+			}, {}, "the package (\"/Game/Maps/Arena\")"));
+		});
+		Types->AddStructParser(Struct, [](FUnrealMcpRqlTypes& T, const rql::Value& Value, void* Out) -> bool
+		{
+			FSoftObjectPath& Path = *static_cast<FSoftObjectPath*>(Out);
+			if (Value.is_null() || (Value.is_string() && Value.as_string().empty()))
+			{
+				Path.Reset();
+				return true;
+			}
+			if (UObject* Object = T.AsObject(Value))
+			{
+				Path = FSoftObjectPath(Object);
+				return true;
+			}
+			if (!Value.is_string())
+				return false;
+			Path.SetPath(UnrealMcpRqlFromStd(Value.as_string()).TrimStartAndEnd());
+			return true;
+		});
+		rql::TypeAdapter Adapter;
+		Adapter.name = UnrealMcpRqlToStd(Struct->GetName());
+		Adapter.target = Descriptor;
+		Adapter.description = UnrealMcpRqlToStd(Struct->GetName()) + ": an asset path as text (\"/Game/Maps/Arena.Arena\"), an object, or \"\" for none";
+		Adapter.encode = [](const rql::Value& Value, const rql::EncodeContext&) -> std::optional<rql::Json>
+		{
+			if (!Value.is_struct() || !Value.ptr())
+				return std::nullopt;
+			const FSoftObjectPath& Path = *static_cast<const FSoftObjectPath*>(Value.ptr());
+			return Path.IsNull() ? rql::Json() : rql::Json(UnrealMcpRqlToStd(Path.ToString()));
+		};
+		Adapter.coerce = [Types, Struct](const rql::Value& Value, const rql::TypeDescriptor&, rql::Value& Result, std::string& Reason) -> rql::AdapterOutcome
+		{
+			if (!Value.is_string() && !Value.is_null() && !Value.is_object())
+				return rql::AdapterOutcome::NotHandled;
+			rql::Value Built = Types->WrapStruct(Struct, nullptr);
+			try
+			{
+				Types->CoerceStruct(Struct, Value, Built.ptr());
+			}
+			catch (const std::exception& Error)
+			{
+				Reason = Error.what();
+				return rql::AdapterOutcome::Failed;
+			}
+			Result = Built;
+			return rql::AdapterOutcome::Ok;
+		};
+		Adapter.equals = [](const rql::Value& Value, const rql::Value& Other) -> std::optional<bool>
+		{
+			if (!Value.is_struct() || !Value.ptr())
+				return std::nullopt;
+			const FSoftObjectPath& Path = *static_cast<const FSoftObjectPath*>(Value.ptr());
+			if (Other.is_null())
+				return Path.IsNull();
+			if (!Other.is_string())
+				return std::nullopt;
+			const FString Text = UnrealMcpRqlFromStd(Other.as_string()).TrimStartAndEnd();
+			// "/Game/Maps/Arena" matches "/Game/Maps/Arena.Arena" (the package path an edit field shows).
+			return Path.ToString().Equals(Text, ESearchCase::IgnoreCase) || Path.GetLongPackageName().Equals(Text, ESearchCase::IgnoreCase);
+		};
+		Session.AddAdapter(std::move(Adapter));
+	}
+}
+
 void UnrealMcpRqlAddStructAdapters(FUnrealMcpRqlSession& Session)
 {
 	FUnrealMcpRqlTypes* Types = &Session.Types();
+	// The reflected structs of FSoftObjectPath / FSoftClassPath (no TBaseStructure for them).
+	for (const TCHAR* Path : { TEXT("/Script/CoreUObject.SoftObjectPath"), TEXT("/Script/CoreUObject.SoftClassPath") })
+	{
+		if (UScriptStruct* Struct = FindObject<UScriptStruct>(nullptr, Path))
+			AddSoftPathAdapter(Session, Struct);
+	}
 	for (const FMathStruct& Spec : MathStructs())
 	{
 		const rql::TypeDescriptor* Descriptor = Types->ForStruct(Spec.Struct);

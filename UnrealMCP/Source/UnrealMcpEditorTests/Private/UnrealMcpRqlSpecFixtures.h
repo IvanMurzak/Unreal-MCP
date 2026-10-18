@@ -13,6 +13,7 @@
 #include "Math/IntVector.h"
 #include "Templates/SubclassOf.h"
 #include "UObject/Object.h"
+#include "UObject/SoftObjectPath.h"
 #include "UObject/SoftObjectPtr.h"
 
 #include "UnrealMcpRqlSpecFixtures.generated.h"
@@ -85,6 +86,8 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Spec") TObjectPtr<UObject> Reference;
 	UPROPERTY(EditAnywhere, Category = "Spec") TSubclassOf<AActor> ActorClass;
 	UPROPERTY(EditAnywhere, Category = "Spec") TSoftObjectPtr<UObject> Soft;
+	UPROPERTY(EditAnywhere, Category = "Spec") FSoftObjectPath SoftPath;
+	UPROPERTY(EditAnywhere, Category = "Spec") FSoftClassPath SoftClass;
 
 	// Gameplay tags.
 	UPROPERTY(EditAnywhere, Category = "Spec") FGameplayTag Tag;

@@ -74,6 +74,9 @@ agent ──query text──▶ unreal-mcp-bridge (sidecar, .NET)          Unrea
   and names similar ones); containers are rebuilt with `AddTag`, so their parent-tag cache stays right. Members:
   `Tag.Parent`, `Tags.Names`, `Tags.Num`; `==` compares with text / lists (containers as sets). `FGameplayTagQuery`
   shows its `Description` and is read-only.
+- **Soft paths** (`FSoftObjectPath`, `FSoftClassPath`: `GameDefaultMap`, classes to spawn) read and write as text
+  (`"/Game/Maps/Arena.Arena"`, `""` = none, or an object); they compare with the path or its package
+  (`where GameDefaultMap == "/Game/Maps/Arena"`); members `Path`, `Package`.
 - **Struct members are known before a value is read**: a struct type's members are filled when a member of that type is
   added (and when an object literal constructs it), so `where Row.Damage > 3` and `set Row = {Damage: 5}` work on a
   struct the session never read.

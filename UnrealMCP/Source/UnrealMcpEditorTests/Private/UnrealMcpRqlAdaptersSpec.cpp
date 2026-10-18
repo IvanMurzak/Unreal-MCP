@@ -55,6 +55,13 @@ BEGIN_DEFINE_SPEC(FUnrealMcpRqlAdaptersSpec, "UnrealMcp.Tools.Rql.Adapters",
 		TestEqual(*FString::Printf(TEXT("%s: reads back"), What), UnrealMcpRqlSpecHelpers::CellText(Read), Expected);
 	}
 
+	/** A mutation that must succeed. */
+	void Must(const FString& Plan)
+	{
+		const TSharedPtr<FJsonObject> Result = Run(Plan, true);
+		TestTrue(*FString::Printf(TEXT("mutation ok (%s)"), *UnrealMcpRqlSpecHelpers::Codes(Result)), UnrealMcpRqlSpecHelpers::IsOk(Result));
+	}
+
 	/** A mutation that must fail with a diagnostic containing @p Expected. */
 	void Refuses(const TCHAR* What, const FString& Plan, const FString& Expected)
 	{
@@ -260,6 +267,23 @@ void FUnrealMcpRqlAdaptersSpec::Define()
 			SetsTo(TEXT("null clears"), /* ref("UnrealMcpRqlSpecFixture#@F@") | set Reference = null, Soft = null */ TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"UnrealMcpRqlSpecFixture#@F@"}]},"stages":[{"op":"set","assign":[{"target":{"path":["Reference"]},"value":{"lit":null}},{"target":{"path":["Soft"]},"value":{"lit":null}}]}]})RQL"),
 				/* ref("UnrealMcpRqlSpecFixture#@F@") | select Reference */ TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"UnrealMcpRqlSpecFixture#@F@"}]},"stages":[{"op":"select","fields":[{"name":"Reference","expr":{"path":["Reference"]}}]}]})RQL"), TEXT(""));
 			TestTrue(TEXT("both cleared"), Fixture->Reference == nullptr && Fixture->Soft.IsNull());
+		});
+
+		It("reads and writes soft object / class paths as text", [this]()
+		{
+			SetsTo(TEXT("a path"), /* ref("UnrealMcpRqlSpecFixture#@F@") | set SoftPath = "/Engine/EngineMaterials/DefaultMaterial.DefaultMaterial" */ TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"UnrealMcpRqlSpecFixture#@F@"}]},"stages":[{"op":"set","assign":[{"target":{"path":["SoftPath"]},"value":{"lit":"/Engine/EngineMaterials/DefaultMaterial.DefaultMaterial"}}]}]})RQL"),
+				/* ref("UnrealMcpRqlSpecFixture#@F@") | select SoftPath */ TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"UnrealMcpRqlSpecFixture#@F@"}]},"stages":[{"op":"select","fields":[{"name":"SoftPath","expr":{"path":["SoftPath"]}}]}]})RQL"), TEXT("/Engine/EngineMaterials/DefaultMaterial.DefaultMaterial"));
+			TestEqual(TEXT("stored"), Fixture->SoftPath.ToString(), FString(TEXT("/Engine/EngineMaterials/DefaultMaterial.DefaultMaterial")));
+			const TSharedPtr<FJsonObject> Package = Run(/* ref("UnrealMcpRqlSpecFixture#@F@") | where SoftPath == "/Engine/EngineMaterials/DefaultMaterial" | select SoftPath.Package */ TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"UnrealMcpRqlSpecFixture#@F@"}]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["SoftPath"]},{"lit":"/Engine/EngineMaterials/DefaultMaterial"}]}},{"op":"select","fields":[{"name":"SoftPath.Package","expr":{"path":["SoftPath","Package"]}}]}]})RQL"));
+			TestEqual(TEXT("compares with the package path"), UnrealMcpRqlSpecHelpers::CellText(Package), FString(TEXT("/Engine/EngineMaterials/DefaultMaterial")));
+			Run(/* ref("UnrealMcpRqlSpecFixture#@F@") | set Reference = "/Engine/EngineMaterials/WorldGridMaterial" */ TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"UnrealMcpRqlSpecFixture#@F@"}]},"stages":[{"op":"set","assign":[{"target":{"path":["Reference"]},"value":{"lit":"/Engine/EngineMaterials/WorldGridMaterial"}}]}]})RQL"), true);
+			SetsTo(TEXT("an object"), /* ref("UnrealMcpRqlSpecFixture#@F@") | set SoftPath = Reference */ TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"UnrealMcpRqlSpecFixture#@F@"}]},"stages":[{"op":"set","assign":[{"target":{"path":["SoftPath"]},"value":{"path":["Reference"]}}]}]})RQL"),
+				/* ref("UnrealMcpRqlSpecFixture#@F@") | select SoftPath */ TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"UnrealMcpRqlSpecFixture#@F@"}]},"stages":[{"op":"select","fields":[{"name":"SoftPath","expr":{"path":["SoftPath"]}}]}]})RQL"), TEXT("/Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial"));
+			SetsTo(TEXT("a class path"), /* ref("UnrealMcpRqlSpecFixture#@F@") | set SoftClass = "/Script/Engine.PointLight" */ TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"UnrealMcpRqlSpecFixture#@F@"}]},"stages":[{"op":"set","assign":[{"target":{"path":["SoftClass"]},"value":{"lit":"/Script/Engine.PointLight"}}]}]})RQL"),
+				/* ref("UnrealMcpRqlSpecFixture#@F@") | select SoftClass */ TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"UnrealMcpRqlSpecFixture#@F@"}]},"stages":[{"op":"select","fields":[{"name":"SoftClass","expr":{"path":["SoftClass"]}}]}]})RQL"), TEXT("/Script/Engine.PointLight"));
+			Must(/* ref("UnrealMcpRqlSpecFixture#@F@") | set SoftPath = "", SoftClass = "" */ TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"UnrealMcpRqlSpecFixture#@F@"}]},"stages":[{"op":"set","assign":[{"target":{"path":["SoftPath"]},"value":{"lit":""}},{"target":{"path":["SoftClass"]},"value":{"lit":""}}]}]})RQL"));
+			TestTrue(TEXT("cleared"), Fixture->SoftPath.IsNull() && Fixture->SoftClass.IsNull());
+			Refuses(TEXT("raw members are not writable"), /* ref("UnrealMcpRqlSpecFixture#@F@") | set SoftPath.Path = "x" */ TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"UnrealMcpRqlSpecFixture#@F@"}]},"stages":[{"op":"set","assign":[{"target":{"path":["SoftPath","Path"]},"value":{"lit":"x"}}]}]})RQL"), TEXT("readonly-member"));
 		});
 
 		It("refuses missing objects and classes of the wrong base", [this]()
