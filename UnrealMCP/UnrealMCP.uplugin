@@ -10,7 +10,7 @@
   "DocsURL": "https://github.com/IvanMurzak/Unreal-MCP",
   "MarketplaceURL": "",
   "SupportURL": "https://github.com/IvanMurzak/Unreal-MCP/issues",
-  "CanContainContent": false,
+  "CanContainContent": true,
   "IsBetaVersion": true,
   "IsExperimentalVersion": false,
   "Installed": false,
@@ -37,6 +37,10 @@
   "Plugins": [
     {
       "Name": "EditorScriptingUtilities",
+      "Enabled": true
+    },
+    {
+      "Name": "PythonScriptPlugin",
       "Enabled": true
     }
   ]

@@ -81,6 +81,10 @@ public class UnrealMcpEditor : ModuleRules
 			"ImageWrapper",
 			"RenderCore",
 			"RHI",
+			// Python tool family: `python-execute` runs agent code through IPythonScriptPlugin::ExecPythonCommandEx with the
+			// vendored code_exec runtime (Content/Python). PythonScriptPlugin is an Editor-only (UncookedOnly) engine plugin
+			// enabled by UnrealMCP.uplugin, so it never reaches a packaged game.
+			"PythonScriptPlugin",
 		});
 
 		// C++ source / script tool family (docs/ARCHITECTURE.md §10, issue #18): source-compile prefers

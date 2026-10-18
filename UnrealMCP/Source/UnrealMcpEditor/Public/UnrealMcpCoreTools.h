@@ -38,6 +38,19 @@ namespace UnrealMcpEditorTools
 }
 
 /**
+ * The Python tool family: `python-execute` runs agent Python inside the editor through PythonScriptPlugin and the
+ * vendored code_exec runtime (Content/Python, IvanMurzak/Code-Exec): last expression = result, print = logs, errors in
+ * snippet.py coordinates. Registered in the boot path; also exercised in isolation by specs.
+ */
+namespace UnrealMcpPythonTools
+{
+	UNREALMCPEDITOR_API void Register(FUnrealMcpToolRegistry& Registry);
+
+	/** Folder that relative `include` paths resolve against: <Project>/.ai-game-dev/snippets. */
+	UNREALMCPEDITOR_API FString GetPythonIncludeRoot();
+}
+
+/**
  * The screenshot / viewport-capture tool family (docs/ARCHITECTURE.md §10 "screenshot family", issue
  * #17). Four kebab-case CORE tools that return a base64 PNG as MCP image content so an LLM can directly
  * inspect what the editor/game is rendering: `screenshot-viewport` (active editor viewport),
