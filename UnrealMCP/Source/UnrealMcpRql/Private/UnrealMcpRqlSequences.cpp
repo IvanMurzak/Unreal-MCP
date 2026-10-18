@@ -214,17 +214,28 @@ namespace UnrealMcpRqlSequencesLocal
 			Names.Add(Name);
 			if (bDone || !Name.Equals(Wanted.TrimStartAndEnd(), ESearchCase::IgnoreCase))
 				return;
+			// AddCubicKey inserts next to a key at the same frame: drop that key first, so the new one replaces it.
 			if (IsDouble(Type))
 			{
 				const double Number = NumberArg(Value, TEXT("a number"));
 				Section->Modify();
-				static_cast<FMovieSceneDoubleChannel*>(Channel)->AddCubicKey(Time, Number);
+				FMovieSceneDoubleChannel* DoubleChannel = static_cast<FMovieSceneDoubleChannel*>(Channel);
+				TMovieSceneChannelData<FMovieSceneDoubleValue> Data = DoubleChannel->GetData();
+				const int32 Existing = Data.FindKey(Time);
+				if (Existing != INDEX_NONE)
+					Data.RemoveKey(Existing);
+				DoubleChannel->AddCubicKey(Time, Number);
 			}
 			else if (IsFloat(Type))
 			{
 				const double Number = NumberArg(Value, TEXT("a number"));
 				Section->Modify();
-				static_cast<FMovieSceneFloatChannel*>(Channel)->AddCubicKey(Time, static_cast<float>(Number));
+				FMovieSceneFloatChannel* FloatChannel = static_cast<FMovieSceneFloatChannel*>(Channel);
+				TMovieSceneChannelData<FMovieSceneFloatValue> Data = FloatChannel->GetData();
+				const int32 Existing = Data.FindKey(Time);
+				if (Existing != INDEX_NONE)
+					Data.RemoveKey(Existing);
+				FloatChannel->AddCubicKey(Time, static_cast<float>(Number));
 			}
 			else if (IsBool(Type))
 			{

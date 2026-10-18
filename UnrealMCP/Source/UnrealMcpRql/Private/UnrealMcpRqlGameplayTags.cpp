@@ -84,7 +84,7 @@ namespace UnrealMcpRqlGameplayTagsLocal
 		for (const rql::Value& Item : Items(Value))
 		{
 			if (!Item.is_string())
-				ThrowMismatch(TEXT("a list of tag names"), Value);
+				ThrowMismatch(TEXT("a tag name"), Item);
 			Out.Add(UnrealMcpRqlFromStd(Item.as_string()));
 		}
 		return Out;
@@ -193,6 +193,17 @@ namespace UnrealMcpRqlGameplayTagsLocal
 	IGameplayTagsEditorModule* TagsEditor()
 	{
 		return FModuleManager::LoadModulePtr<IGameplayTagsEditorModule>(TEXT("GameplayTagsEditor"));
+	}
+
+	/** Whether a tag source (an ini, DataTable or native declaration) declares @p Tag, not only its children. */
+	bool IsExplicitTag(FName Tag)
+	{
+		FString Comment;
+		FName Source;
+		bool bExplicit = false;
+		bool bRestricted = false;
+		bool bAllowChildren = false;
+		return UGameplayTagsManager::Get().GetTagEditorData(Tag, Comment, Source, bExplicit, bRestricted, bAllowChildren) && bExplicit;
 	}
 
 	/** A dictionary tag (one some ini, DataTable or native declaration defines), or a failure. */
@@ -393,9 +404,11 @@ void UUnrealMcpRqlEditorApi::RemoveGameplayTag(const FString& Name)
 	TSharedPtr<FGameplayTagNode> Node = UGameplayTagsManager::Get().FindTagNode(Tag);
 	if (!Node.IsValid())
 		return UnrealMcpRql::Fail(FString::Printf(TEXT("'%s' is not a gameplay tag"), *Name));
+	const bool bWasExplicit = IsExplicitTag(Tag);
 	FTagLogCapture Log;
 	Editor->DeleteTagsFromINI({ Node }); // the log-only variant: failures are logged, not shown as toasts
-	if (UGameplayTagsManager::Get().IsDictionaryTag(Tag))
+	// An explicit tag with children is removed from its ini but lives on implicitly (as the tag editor's Delete leaves it).
+	if (UGameplayTagsManager::Get().IsDictionaryTag(Tag) && (!bWasExplicit || IsExplicitTag(Tag)))
 	{
 		// Still there: referenced by assets, declared in C++ / a DataTable, or implicit (children keep it).
 		const FString Why = Log.Joined();

@@ -5,6 +5,7 @@
 #include "UnrealMcpRqlSources.h"
 #include "UnrealMcpRqlUtil.h"
 
+#include "Engine/Blueprint.h"
 #include "Math/Color.h"
 #include "Math/IntPoint.h"
 #include "Math/IntVector.h"
@@ -269,7 +270,8 @@ namespace UnrealMcpRqlStructsLocal
 				return UnrealMcpRqlUtil::Str(static_cast<const FSoftObjectPath*>(Self)->GetLongPackageName());
 			}, {}, "the package (\"/Game/Maps/Arena\")"));
 		});
-		Types->AddStructParser(Struct, [](FUnrealMcpRqlTypes& T, const rql::Value& Value, void* Out) -> bool
+		const bool bClassPath = Struct->GetFName() == FName(TEXT("SoftClassPath"));
+		Types->AddStructParser(Struct, [bClassPath](FUnrealMcpRqlTypes& T, const rql::Value& Value, void* Out) -> bool
 		{
 			FSoftObjectPath& Path = *static_cast<FSoftObjectPath*>(Out);
 			if (Value.is_null() || (Value.is_string() && Value.as_string().empty()))
@@ -279,12 +281,24 @@ namespace UnrealMcpRqlStructsLocal
 			}
 			if (UObject* Object = T.AsObject(Value))
 			{
+				// A class path holds a class: a Blueprint stands for its generated class, other objects do not fit.
+				if (bClassPath && !Object->IsA<UClass>())
+				{
+					const UBlueprint* Blueprint = Cast<UBlueprint>(Object);
+					if (!Blueprint || !Blueprint->GeneratedClass)
+						UnrealMcpRqlUtil::Throw(FString::Printf(TEXT("%s is not a class (a class path takes a class or a Blueprint)"), *Object->GetName()));
+					Object = Blueprint->GeneratedClass;
+				}
 				Path = FSoftObjectPath(Object);
 				return true;
 			}
 			if (!Value.is_string())
 				return false;
-			Path.SetPath(UnrealMcpRqlFromStd(Value.as_string()).TrimStartAndEnd());
+			// SetPath silently resets text that is not an object path ("Arena", "Game/Maps/Arena"): refuse it instead.
+			const FString Text = UnrealMcpRqlFromStd(Value.as_string()).TrimStartAndEnd();
+			Path.SetPath(Text);
+			if (Path.IsNull() && !Text.IsEmpty() && !Text.Equals(TEXT("None")))
+				UnrealMcpRqlUtil::Throw(FString::Printf(TEXT("'%s' is not an object path (\"/Game/Maps/Arena.Arena\")"), *Text));
 			return true;
 		});
 		rql::TypeAdapter Adapter;

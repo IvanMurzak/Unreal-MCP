@@ -25,6 +25,7 @@
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "Kismet2/CompilerResultsLog.h"
 #include "Kismet2/KismetEditorUtilities.h"
+#include "Kismet2/Kismet2NameValidators.h"
 #include "Logging/TokenizedMessage.h"
 #include "Misc/UObjectToken.h"
 #include "Misc/ITransaction.h"
@@ -360,6 +361,15 @@ namespace UnrealMcpRqlBlueprintsLocal
 		return Node;
 	}
 
+	/** A name no variable, function, graph, component or other object of @p Blueprint uses (the editor's own name check). */
+	void RequireFreeName(UBlueprint* Blueprint, const FString& Name, const TCHAR* What)
+	{
+		if (Name.IsEmpty() || !FName::IsValidXName(Name, INVALID_OBJECTNAME_CHARACTERS))
+			Throw(FString::Printf(TEXT("'%s' is not a valid %s name"), *Name, What));
+		if (FKismetNameValidator(Blueprint).IsValid(Name) != EValidatorResult::Ok)
+			Throw(FString::Printf(TEXT("%s already has a variable, function, graph, event or component named '%s'"), *Blueprint->GetName(), *Name));
+	}
+
 	void RequireEventGraph(UEdGraph* Graph)
 	{
 		if (GraphKind(Graph) != TEXT("EventGraph"))
@@ -566,10 +576,8 @@ namespace UnrealMcpRqlBlueprintsLocal
 			{
 				UBlueprint* Blueprint = static_cast<UBlueprint*>(Self);
 				const FString Name = TextArg(Args[0]).TrimStartAndEnd();
-				if (Name.IsEmpty() || !FName::IsValidXName(Name, INVALID_OBJECTNAME_CHARACTERS))
-					Throw(FString::Printf(TEXT("'%s' is not a valid function name"), *Name));
-				if (FindObject<UEdGraph>(Blueprint, *Name) || FindCallable(Blueprint->SkeletonGeneratedClass, Name))
-					Throw(FString::Printf(TEXT("%s already has a graph or function '%s'"), *Blueprint->GetName(), *Name));
+				// CreateNewGraph renames the graph onto its name: a non-graph object of that name would be a fatal error.
+				RequireFreeName(Blueprint, Name, TEXT("function"));
 				Blueprint->Modify();
 				UEdGraph* Graph = FBlueprintEditorUtils::CreateNewGraph(Blueprint, FName(*Name), UEdGraph::StaticClass(), UEdGraphSchema_K2::StaticClass());
 				FBlueprintEditorUtils::AddFunctionGraph<UClass>(Blueprint, Graph, /*bIsUserCreated*/ true, nullptr);
@@ -658,8 +666,15 @@ namespace UnrealMcpRqlBlueprintsLocal
 						*Node->GetClass()->GetName(), static_cast<long long>(FUnrealMcpRqlTypes::IdOf(Node))));
 				if (Node)
 				{
+					const bool bGhost = Node->IsAutomaticallyPlacedGhostNode();
 					Node->Modify();
 					Node->SetEnabledState(ENodeEnabledState::Enabled, /*bUserAction*/ false);
+					if (bGhost)
+					{
+						// The placeholder's "This node is disabled ..." comment goes with it, as connecting a pin does.
+						Node->NodeComment.Empty();
+						Node->bCommentBubbleVisible = false;
+					}
 					const FVector2D At = Place(Target, Args[1], Args[2]);
 					if (Args[1].is_number() || Args[2].is_number())
 					{
@@ -685,9 +700,8 @@ namespace UnrealMcpRqlBlueprintsLocal
 				RequireEventGraph(Target);
 				UBlueprint* Blueprint = RequireBlueprint(Target);
 				const FString Name = TextArg(Args[0]).TrimStartAndEnd();
-				if (Name.IsEmpty() || !FName::IsValidXName(Name, INVALID_OBJECTNAME_CHARACTERS))
-					Throw(FString::Printf(TEXT("'%s' is not a valid event name"), *Name));
-				if (FindCallable(Blueprint->SkeletonGeneratedClass, Name) || FBlueprintEditorUtils::FindCustomEventNode(Blueprint, FName(*Name)))
+				RequireFreeName(Blueprint, Name, TEXT("event"));
+				if (FBlueprintEditorUtils::FindCustomEventNode(Blueprint, FName(*Name)))
 					Throw(FString::Printf(TEXT("%s already has a function or event '%s'"), *Blueprint->GetName(), *Name));
 				const FName EventName(*Name);
 				return Types->WrapObject(CreateNode<UK2Node_CustomEvent>(Target, Place(Target, Args[1], Args[2]),

@@ -8,11 +8,13 @@
 
 #include "BaseWidgetBlueprint.h"
 #include "WidgetBlueprint.h"
+#include "Blueprint/UserWidget.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/PanelSlot.h"
 #include "Components/PanelWidget.h"
 #include "Components/Widget.h"
 #include "Kismet2/BlueprintEditorUtils.h"
+#include "Kismet2/Kismet2NameValidators.h"
 #include "Misc/EngineVersionComparison.h"
 
 #include <vector>
@@ -104,6 +106,9 @@ namespace UnrealMcpRqlWidgetsLocal
 				Throw(FString::Printf(TEXT("'%s' is not a valid widget name"), *Trimmed));
 			if (Tree->FindWidget(FName(*Trimmed)) || FindObject<UObject>(Tree, *Trimmed))
 				Throw(FString::Printf(TEXT("%s already has a widget named '%s'"), *Blueprint->GetName(), *Trimmed));
+			// A widget is a variable of the Blueprint: no variable, function or graph may have its name either.
+			if (FKismetNameValidator(Blueprint).IsValid(Trimmed) != EValidatorResult::Ok)
+				Throw(FString::Printf(TEXT("%s already has a variable, function or graph named '%s'"), *Blueprint->GetName(), *Trimmed));
 		}
 
 		Blueprint->Modify();
@@ -112,9 +117,17 @@ namespace UnrealMcpRqlWidgetsLocal
 		UWidget* Widget = Tree->ConstructWidget<UWidget>(Class, Trimmed.IsEmpty() ? NAME_None : FName(*Trimmed));
 		if (!Widget)
 			Throw(FString::Printf(TEXT("could not create a %s"), *Class->GetName()));
+		UWidgetBlueprint* Designer = Cast<UWidgetBlueprint>(Blueprint);
+		// A User Widget that is (or contains) this Blueprint would nest itself without end: the Designer refuses it too.
+		UUserWidget* UserWidget = Cast<UUserWidget>(Widget);
+		if (UserWidget && Designer && !Designer->IsWidgetFreeFromCircularReferences(UserWidget))
+		{
+			Widget->Rename(nullptr, GetTransientPackage(), REN_DontCreateRedirectors);
+			Throw(FString::Printf(TEXT("a %s inside %s would be a circular reference"), *Class->GetName(), *Blueprint->GetName()));
+		}
 		Widget->SetFlags(RF_Transactional);
 		// The editor registers every new widget as a variable of the Blueprint (its GUID: the compiler needs it).
-		if (UWidgetBlueprint* Designer = Cast<UWidgetBlueprint>(Blueprint))
+		if (Designer)
 			RegisterVariable(Designer, Widget->GetFName());
 		if (Panel)
 		{
@@ -142,8 +155,7 @@ namespace UnrealMcpRqlWidgetsLocal
 		// RemoveWidget detaches it from its parent panel (or clears the root) and keeps the children with it.
 		// The widget and every widget under it leave the Blueprint's variables.
 		TArray<UWidget*> Removed{ Widget };
-		if (UPanelWidget* Panel = Cast<UPanelWidget>(Widget))
-			UWidgetTree::GetChildWidgets(Panel, Removed);
+		UWidgetTree::GetChildWidgets(Widget, Removed); // panel children and named-slot contents
 		if (!Tree->RemoveWidget(Widget))
 			Throw(FString::Printf(TEXT("%s is not in the widget tree"), *Widget->GetName()));
 		UWidgetBlueprint* Designer = Cast<UWidgetBlueprint>(Blueprint);
