@@ -767,7 +767,9 @@ jobs:
             'UnrealMCP.uplugin',
             'Config',
             'Resources',
+            'Content',
             'Source\UnrealMcpRuntime',
+            'Source\UnrealMcpRql',
             'Source\UnrealMcpEditor',
             'Source\ThirdParty',
             'ThirdPartyNotices.txt'

@@ -41,8 +41,9 @@ delivered it. Identifiers below (tool ids, command names, env vars, paths) were 
 | §10 screenshot family (4) | implemented | #21 |
 | §10 editor/reflection family (9) | superseded by RQL except `console-run-command` (the console family, 1) | #22 |
 | §10 level family (7) | superseded by RQL | #25 |
+| Python family (1) | implemented: `python-execute` (PythonScriptPlugin + vendored Code-Exec `code_exec`) | — |
 
-**Total shipped: 25 STANDARD core tools across 5 families (rql 3, blueprint 11, console 1, source 6,
+**Total shipped: 26 STANDARD core tools across 6 families (rql 3, blueprint 11, console 1, python 1, source 6,
 screenshot 4), plus 3 SYSTEM tools (§2.4)** (counts verified from the registration source). The §10 sections
 below describe the superseded families as they were designed; their operations are RQL queries now
 ([`docs/rql.md`](rql.md) maps each removed tool to its query).

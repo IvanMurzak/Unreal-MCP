@@ -113,6 +113,20 @@ UnrealMcpRql editor module. PolyForm Shield permits any use, including in
 commercial products, except providing a product that competes with the
 licensor's products.
 
+--------------------------------------------------------------------------
+9. Code-Exec: the code_exec Python runtime
+--------------------------------------------------------------------------
+Version   : 0.2.0, vendored from commit fe1cb57
+Publisher : Ivan Murzak
+License   : PolyForm Shield License 1.0.0 (NOT Apache-2.0)
+Source    : https://github.com/IvanMurzak/Code-Exec
+License   : https://polyformproject.org/licenses/shield/1.0.0
+
+The python-execute tool's runtime, shipped as unmodified source under
+Content/Python/unreal_mcp/_vendor/code_exec/ (see VENDORED.md there) and run inside the
+editor's Python (PythonScriptPlugin).
+Required Notice: Copyright (c) 2026 Ivan Murzak (https://github.com/IvanMurzak)
+
 ==========================================================================
 MIT License (applies to the MIT-licensed components listed above)
 ==========================================================================

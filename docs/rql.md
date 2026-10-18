@@ -110,7 +110,7 @@ agent ──query text──▶ unreal-mcp-bridge (sidecar, .NET)          Unrea
 | `reflection-method-find` / `-call` | `rql-schema(type)` (members and methods), `call` on `CallInEditor` functions and the exposed operations |
 
 Kept as tools: `blueprint-*` (Blueprint authoring is Unreal's script surface, like Unity-MCP's `script-*`),
-`source-*`, `screenshot-*`, `console-run-command`, and the system tools `ping`, `unreal-skill-create`,
+`source-*`, `screenshot-*`, `console-run-command`, `python-execute` (code, not data access), and the system tools `ping`, `unreal-skill-create`,
 `unreal-skill-generate`. The runtime (packaged game) surface is unchanged: `ping` only.
 
 `reflection-method-call` could invoke any BlueprintCallable function; RQL `call` is an allowlist (as in Unity-MCP):

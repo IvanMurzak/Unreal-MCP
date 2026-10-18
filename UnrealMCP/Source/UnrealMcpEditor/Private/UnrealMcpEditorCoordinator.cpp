@@ -85,6 +85,7 @@ void FUnrealMcpEditorCoordinator::Startup()
 	UnrealMcpRqlTools::Register(*Registry);
 	UnrealMcpBlueprintTools::Register(*Registry); // §10 flagship Blueprint family (CORE)
 	UnrealMcpEditorTools::Register(*Registry); // §10 console family: console-run-command
+	UnrealMcpPythonTools::Register(*Registry); // python-execute (PythonScriptPlugin + vendored code_exec)
 	UnrealMcpScreenshotTools::Register(*Registry); // §10 screenshot / viewport-capture family (issue #17)
 	UnrealMcpSourceTools::Register(*Registry); // §10 C++ source / script family (issue #18)
 	UnrealMcpSkillTools::Register(*Registry); // §2.4 skill authoring — `unreal-skill-create` (SYSTEM surface)
