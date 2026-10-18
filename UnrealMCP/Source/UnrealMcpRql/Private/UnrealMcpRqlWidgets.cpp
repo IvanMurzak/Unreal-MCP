@@ -32,22 +32,20 @@ namespace UnrealMcpRqlWidgetsLocal
 		return Object ? const_cast<UBaseWidgetBlueprint*>(Object->GetTypedOuter<UBaseWidgetBlueprint>()) : nullptr;
 	}
 
-	/** A widget's variable GUID, as the Designer registers it (the compiler checks every widget has one). */
+	/**
+	 * A widget's variable GUID, as the Designer registers it (from UE 5.6 the compiler checks every widget has one; UE 5.5
+	 * widget Blueprints keep no such map).
+	 */
 	void RegisterVariable(UWidgetBlueprint* Blueprint, FName Name)
 	{
-#if UE_VERSION_OLDER_THAN(5, 6, 0)
-		if (!Blueprint->WidgetVariableNameToGuidMap.Contains(Name))
-			Blueprint->WidgetVariableNameToGuidMap.Add(Name, FGuid::NewGuid());
-#else
+#if !UE_VERSION_OLDER_THAN(5, 6, 0)
 		Blueprint->OnVariableAdded(Name);
 #endif
 	}
 
 	void UnregisterVariable(UWidgetBlueprint* Blueprint, FName Name)
 	{
-#if UE_VERSION_OLDER_THAN(5, 6, 0)
-		Blueprint->WidgetVariableNameToGuidMap.Remove(Name);
-#else
+#if !UE_VERSION_OLDER_THAN(5, 6, 0)
 		Blueprint->OnVariableRemoved(Name);
 #endif
 	}
