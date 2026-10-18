@@ -1,0 +1,38 @@
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpRuntimeSubsystemSpec.cpp
+  s_a4bd5ddb53fd2d::t_348801c36d9e42 250-251
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpPythonToolsSpec.cpp
+  s_a4bd5ddb53fd2d::t_48548cb6828590 70-73
+UnrealMCP/Source/UnrealMcpEditor/Private/Tools/UnrealMcpPythonTools.cpp
+  s_a4bd5ddb53fd2d::t_3163526089f404 91
+  s_a4bd5ddb53fd2d::t_6f97e6f8a459d9 6
+  s_a4bd5ddb53fd2d::t_a38001135d6c92 99-103,105-112,114-115,125-128
+tests/chain-fixtures/5.8/tools.jsonl
+  s_a4bd5ddb53fd2d::t_a6151b94778f24 14
+UnrealMCP/Content/Python/unreal_mcp/python_execute.py
+  s_a4bd5ddb53fd2d::t_13de382a6407be 22-24,26,29,35
+  s_a4bd5ddb53fd2d::t_a6151b94778f24 18-19
+UnrealMCP/Content/Python/unreal_mcp/_vendor/code_exec/VENDORED.md
+  s_a4bd5ddb53fd2d::t_e46f79cddff069 4
+UnrealMCP/Content/Python/unreal_mcp/_vendor/code_exec/__init__.py
+  s_a4bd5ddb53fd2d::t_492a21084bec9f 14
+UnrealMCP/ThirdPartyNotices.txt
+  s_a4bd5ddb53fd2d::t_dbb897ce257ad9 119
+UnrealMCP/UnrealMCP.uplugin
+  s_a4bd5ddb53fd2d::t_ebade2a442d7ad 44-45
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c3c12af51082c16bd08aa37bdad56c28ad1d4a27",
+  "prompts": {},
+  "sessions": {
+    "s_a4bd5ddb53fd2d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "97ee1b50-e171-4dcb-8ce1-b70a7701b61f",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
