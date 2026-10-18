@@ -205,7 +205,7 @@ jobs:
       lock: ${{ inputs.lock }}
       lock_hash8: ${{ inputs.lock_hash8 }}
 
-  # (c) plugin — UE 5.8 BuildPlugin (also validates marketplace packaging) +
+  # (c) plugin — UE 5.5–5.8 BuildPlugin (also validates marketplace packaging) +
   # Automation specs on the self-hosted runner. Gated on UNREAL_RUNNER_READY so
   # it never reds a PR by runner absence (see header). The job parses the
   # exported Automation index.json (NOT the editor exit code, which is
