@@ -39,3 +39,9 @@ void UnrealMcpRqlAddSettings(FUnrealMcpRqlSession& Session);
 
 /** Blueprint graphs: Graphs / Nodes / Pins, node creation, pin connections, Compile; the `blueprints` source. */
 void UnrealMcpRqlAddBlueprints(FUnrealMcpRqlSession& Session);
+
+/** UMG: Widget Blueprint widget trees (RootWidget, Widgets, AddWidget), panel Children, widget Parent / Destroy. */
+void UnrealMcpRqlAddWidgets(FUnrealMcpRqlSession& Session);
+
+/** Level Sequences: bindings, tracks, sections and channel keys in display frames; the `levelSequences` source. */
+void UnrealMcpRqlAddSequences(FUnrealMcpRqlSession& Session);

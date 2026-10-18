@@ -870,6 +870,8 @@ void UnrealMcpRqlConfigureCore(FUnrealMcpRqlSession& Session)
 	UnrealMcpRqlAddDataTables(Session);
 	UnrealMcpRqlAddSettings(Session);
 	UnrealMcpRqlAddBlueprints(Session);
+	UnrealMcpRqlAddWidgets(Session);
+	UnrealMcpRqlAddSequences(Session);
 
 	// Object references from text, as an edit field accepts them: an asset path ("/Game/Meshes/SM_Cube"), a class name
 	// for class references ("PointLight"), an actor label / name / path for actors. Only coerce: the adapter shapes no

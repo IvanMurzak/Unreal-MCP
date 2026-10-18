@@ -104,6 +104,8 @@ agent ──query text──▶ unreal-mcp-bridge (sidecar, .NET)          Unrea
 | `gameplayTags` | every registered gameplay tag: `Name`, `Comment`, `Source` (ini), `Parent`, `Children`, `Explicit`, `Restricted` |
 | `settings`, `unreal.settings(section)` | Project Settings / Editor Preferences sections and their objects (see [Settings](#settings)) |
 | `blueprints` | the project's Blueprints (see [Blueprint graphs](#blueprint-graphs)) |
+| `widgetBlueprints` | the project's Widget Blueprints (see [Widget Blueprints](#widget-blueprints)) |
+| `levelSequences` | the project's Level Sequences (see [Level Sequences](#level-sequences)) |
 
 The `editor` operations also include `CreateDataTable(path, rowStruct)` and, for gameplay tags,
 `AddGameplayTag(name, comment?, source?)`, `RemoveGameplayTag(name)`, `RenameGameplayTag(name, newName)` (written to
@@ -158,6 +160,37 @@ Connections go through the K2 schema (`CanCreateConnection` / `TryCreateConnecti
 defaults through `IsPinDefaultValid` / `TrySetDefaultValue`. Every change is undoable (one transaction per mutation) and
 marks the Blueprint modified; nothing compiles until `call Compile()` (which runs outside the transaction). The
 `blueprint-*` tools stay for variables, components, class defaults and spawning.
+
+### Widget Blueprints
+
+A Widget Blueprint's widgets live in its `WidgetTree`, which reflection does not expose; the widgets are UObjects whose
+properties (and `Slot`, the widget's layout in its panel: `set Slot.LayoutData.Offsets.Left = 24`) are reflected as usual.
+
+- `UBaseWidgetBlueprint`: `RootWidget`, `Widgets` (every widget of the tree), `call AddWidget(class, name?, parent?)` (into
+  a panel, or as the root of an empty tree), and the Blueprint members (`Compile`, `Status`, `Graphs` …).
+- `UWidget`: `Parent`, `WidgetBlueprint`, `call AddChild(class, name?)` (panels), `call Destroy()` (with its children);
+  `UPanelWidget`: `Children` (so `RootWidget | recurse Children` walks the tree).
+
+New widgets are registered as Blueprint variables and removed ones leave the tree, as the Designer does; structure
+changes mark the Blueprint structurally modified and property edits mark it modified (compile to apply them). The
+widgets of a Widget Blueprint are templates of its generated class but its design data: writable here, unlike other
+class defaults.
+
+### Level Sequences
+
+Frames are at the sequence's display rate (what the Sequencer shows), converted to and from its tick resolution.
+
+- `ULevelSequence`: `DisplayRate`, `Start`, `End` (playback range, writable), `Bindings`, `Tracks` (tracks not bound to an
+  object); `call AddActor(actor)` (a possessable binding, like dragging the actor into the Sequencer) and
+  `call AddTrack(class)`.
+- `SequenceBinding` (a host object: the sequence and the binding's GUID): `Name`, `Guid`, `Kind` (`Possessable` /
+  `Spawnable`), `Class`, `Tracks`; `call AddTrack("Transform" | "Visibility" | a track class)` — every new track gets a
+  section over the playback range.
+- `UMovieSceneTrack`: `Sections`, `DisplayName`, `call AddSection()`; `UMovieSceneSection`: `Start`, `End` (writable),
+  `Channels` (`[{Name, Type, Keys: [{Frame, Value}]}]`, names as the Sequencer shows them: `Location.X`, `Rotation.Z`),
+  `call AddKey(channel, frame, value)` (double / float / bool channels; a key outside the section grows it).
+
+Every change is undoable (one transaction per mutation). Spawnables are listed but not created.
 
 ## Tools
 
@@ -225,8 +258,9 @@ operations' rules (docs/EXTENSIONS.md).
   console, material parameter maps, the seven class hooks and every registration of the extension seam.
 - `UnrealMcpRqlDataModelsSpec.cpp` (`UnrealMcp.Tools.Rql.DataModels`): DataTable rows (edit, add / rename / duplicate /
   remove, validation, undo, save and reload), gameplay tags (tag ini edits, text conversion, parent tags, rows with tags),
-  settings (sections, ini writes, refusals, dry run) and Blueprint graphs (nodes, pins, defaults, connections, compile
-  errors, undo).
+  settings (sections, ini writes, refusals, dry run), Blueprint graphs (nodes, pins, defaults, connections, compile
+  errors, undo), Widget Blueprints (tree, properties, slots, removal, compile, undo) and Level Sequences (bindings,
+  tracks, sections, keys, ranges, undo).
 - `UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpRqlSpec.cpp` (`UnrealMcp.Tools.Rql`): the tools, queries,
   mutations (set, dry run, read-only, permission), components, calls (spawn, add component, duplicate, destroy), refs,
   selection, levels, console, assets, schema. The C++ runtime has no parser, so each case carries the plan Rql.Parser

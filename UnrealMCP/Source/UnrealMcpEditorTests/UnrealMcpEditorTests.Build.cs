@@ -32,6 +32,10 @@ public class UnrealMcpEditorTests : ModuleRules
 			"Settings",
 			"AssetRegistry",
 			"EditorScriptingUtilities",
+			"UMG",
+			"UMGEditor",
+			"LevelSequence",
+			"MovieScene",
 		});
 
 		// Reach BOTH modules' PRIVATE headers so the Automation specs can drive their internals directly.

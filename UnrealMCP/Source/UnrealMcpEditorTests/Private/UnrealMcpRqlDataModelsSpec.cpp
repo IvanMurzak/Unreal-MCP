@@ -10,6 +10,15 @@
 #include "UnrealMcpRqlTools.h"
 
 #include "AssetRegistry/AssetRegistryModule.h"
+#include "Blueprint/UserWidget.h"
+#include "Blueprint/WidgetBlueprintGeneratedClass.h"
+#include "Blueprint/WidgetTree.h"
+#include "Components/CanvasPanelSlot.h"
+#include "Components/TextBlock.h"
+#include "EngineUtils.h"
+#include "LevelSequence.h"
+#include "MovieScene.h"
+#include "WidgetBlueprint.h"
 #include "EdGraph/EdGraph.h"
 #include "EdGraph/EdGraphNode.h"
 #include "EdGraphSchema_K2.h"
@@ -51,7 +60,8 @@ BEGIN_DEFINE_SPEC(FUnrealMcpRqlDataModelsSpec, "UnrealMcp.Tools.Rql.DataModels",
 	TSharedPtr<FJsonObject> Run(const FString& Plan, bool bMutate = false,
 		std::initializer_list<TPair<const TCHAR*, FString>> Values = {})
 	{
-		FString Filled = UnrealMcpRqlSpecHelpers::Fill(Plan, { { TEXT("DT"), Table }, { TEXT("BP"), Blueprint } });
+		FString Filled = UnrealMcpRqlSpecHelpers::Fill(Plan, { { TEXT("DT"), Table }, { TEXT("BP"), Blueprint },
+			{ TEXT("WBP"), WidgetBlueprintPath }, { TEXT("LS"), SequencePath } });
 		return UnrealMcpRqlSpecHelpers::Exec(*this, UnrealMcpRqlSpecHelpers::Fill(Filled, Values), bMutate);
 	}
 
@@ -105,6 +115,47 @@ BEGIN_DEFINE_SPEC(FUnrealMcpRqlDataModelsSpec, "UnrealMcp.Tools.Rql.DataModels",
 		FAssetRegistryModule::AssetCreated(Made);
 		Created.Add(Made);
 		return Made;
+	}
+
+	FString WidgetBlueprintPath;
+	FString SequencePath;
+
+	/** An empty Widget Blueprint (no root widget), as a Blueprint created from UserWidget. */
+	UWidgetBlueprint* MakeWidgetBlueprint()
+	{
+		UPackage* Package = CreatePackage(*WidgetBlueprintPath);
+		UWidgetBlueprint* Made = Cast<UWidgetBlueprint>(FKismetEditorUtilities::CreateBlueprint(UUserWidget::StaticClass(), Package,
+			*FPackageName::GetShortName(WidgetBlueprintPath), BPTYPE_Normal, UWidgetBlueprint::StaticClass(), UWidgetBlueprintGeneratedClass::StaticClass()));
+		if (Made)
+		{
+			FAssetRegistryModule::AssetCreated(Made);
+			Created.Add(Made);
+		}
+		return Made;
+	}
+
+	/** A Level Sequence at 30 fps, frames 0..150. */
+	ULevelSequence* MakeSequence()
+	{
+		UPackage* Package = CreatePackage(*SequencePath);
+		ULevelSequence* Made = NewObject<ULevelSequence>(Package, *FPackageName::GetShortName(SequencePath), RF_Public | RF_Standalone | RF_Transactional);
+		Made->Initialize();
+		Made->GetMovieScene()->SetDisplayRate(FFrameRate(30, 1));
+		FAssetRegistryModule::AssetCreated(Made);
+		Created.Add(Made);
+		return Made;
+	}
+
+	static void DestroySpecActors()
+	{
+		UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+		if (!World)
+			return;
+		for (TActorIterator<AActor> It(World); It; ++It)
+		{
+			if (IsValid(*It) && It->GetActorLabel().StartsWith(TEXT("RqlSeqLamp")))
+				World->EditorDestroyActor(*It, true);
+		}
 	}
 
 	static FString SettingsIni()
@@ -186,6 +237,8 @@ void FUnrealMcpRqlDataModelsSpec::Define()
 		++Serial;
 		Table = FString::Printf(TEXT("/Game/RqlSpecData/DT_Spec%d_%d"), Serial, FMath::Rand());
 		Blueprint = FString::Printf(TEXT("/Game/RqlSpecData/BP_Spec%d_%d"), Serial, FMath::Rand());
+		WidgetBlueprintPath = FString::Printf(TEXT("/Game/RqlSpecData/WBP_Spec%d_%d"), Serial, FMath::Rand());
+		SequencePath = FString::Printf(TEXT("/Game/RqlSpecData/LS_Spec%d_%d"), Serial, FMath::Rand());
 	});
 	AfterEach([this]()
 	{
@@ -194,6 +247,7 @@ void FUnrealMcpRqlDataModelsSpec::Define()
 		Created.Reset();
 		if (UDataTable* Made = FindTable())
 			DropObject(Made);
+		DestroySpecActors();
 		if (GEditor)
 			GEditor->ResetTransaction(FText::FromString(TEXT("RQL data model specs")));
 	});
@@ -624,6 +678,121 @@ void FUnrealMcpRqlDataModelsSpec::Define()
 			TestEqual(TEXT("redo restores it"), Graph->Nodes.Num(), Before + 1);
 			Must(TEXT("disabled"), /* ref("@N@") | set Enabled = false */ TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"@N@"}]},"stages":[{"op":"set","assign":[{"target":{"path":["Enabled"]},"value":{"lit":false}}]}]})RQL"), { { TEXT("N"), Print } });
 			TestFalse(TEXT("node disabled"), PrintNode->IsNodeEnabled());
+		});
+	});
+
+	Describe("Widget Blueprints", [this]()
+	{
+		It("builds a widget tree, edits widgets and slots, removes widgets, compiles and undoes", [this]()
+		{
+			UWidgetBlueprint* Made = MakeWidgetBlueprint();
+			if (!TestNotNull(TEXT("widget blueprint"), Made))
+				return;
+			const TSharedPtr<FJsonObject> Empty = Run(/* unreal.asset("@WBP@") | select RootWidget Widgets */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@WBP@"}]},"stages":[{"op":"select","fields":[{"name":"RootWidget","expr":{"path":["RootWidget"]}},{"name":"Widgets","expr":{"path":["Widgets"]}}]}]})RQL"));
+			TestEqual(TEXT("no root yet"), UnrealMcpRqlSpecHelpers::CellText(Empty, 0, 0), FString());
+			const FString Root = ResultRef(Must(TEXT("root"), /* unreal.asset("@WBP@") | call AddWidget("CanvasPanel", "Root") */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@WBP@"}]},"stages":[{"op":"call","method":"AddWidget","args":[{"lit":"CanvasPanel"},{"lit":"Root"}]}]})RQL")));
+			TestTrue(TEXT("a canvas"), Root.StartsWith(TEXT("CanvasPanel#")));
+			Refuses(TEXT("a second root"), /* unreal.asset("@WBP@") | call AddWidget("Border") */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@WBP@"}]},"stages":[{"op":"call","method":"AddWidget","args":[{"lit":"Border"}]}]})RQL"), TEXT("already has a root widget"));
+			const FString Title = ResultRef(Must(TEXT("child of the root"), /* ref("@R@") | call AddChild("TextBlock", "Title") */ TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"@R@"}]},"stages":[{"op":"call","method":"AddChild","args":[{"lit":"TextBlock"},{"lit":"Title"}]}]})RQL"), { { TEXT("R"), Root } }));
+			Refuses(TEXT("a text block is no panel"), /* ref("@T@") | call AddChild("Button") */ TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"@T@"}]},"stages":[{"op":"call","method":"AddChild","args":[{"lit":"Button"}]}]})RQL"), TEXT("not a panel"), { { TEXT("T"), Title } });
+			Refuses(TEXT("a taken name"), /* ref("@R@") | call AddChild("TextBlock", "Title") */ TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"@R@"}]},"stages":[{"op":"call","method":"AddChild","args":[{"lit":"TextBlock"},{"lit":"Title"}]}]})RQL"), TEXT("already has a widget named 'Title'"), { { TEXT("R"), Root } });
+			Refuses(TEXT("not a widget class"), /* ref("@R@") | call AddChild("PointLight") */ TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"@R@"}]},"stages":[{"op":"call","method":"AddChild","args":[{"lit":"PointLight"}]}]})RQL"), TEXT("not a widget class"), { { TEXT("R"), Root } });
+			const FString List = ResultRef(Must(TEXT("a panel by parent argument"), /* unreal.asset("@WBP@") | call AddWidget("VerticalBox", "List", ref("@R@")) */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@WBP@"}]},"stages":[{"op":"call","method":"AddWidget","args":[{"lit":"VerticalBox"},{"lit":"List"},{"call":"ref","args":[{"lit":"@R@"}]}]}]})RQL"), { { TEXT("R"), Root } }));
+			Must(TEXT("first button"), /* ref("@L@") | call AddChild("Button", "Ok") */ TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"@L@"}]},"stages":[{"op":"call","method":"AddChild","args":[{"lit":"Button"},{"lit":"Ok"}]}]})RQL"), { { TEXT("L"), List } });
+			Must(TEXT("second button"), /* ref("@L@") | call AddChild("Button", "Cancel") */ TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"@L@"}]},"stages":[{"op":"call","method":"AddChild","args":[{"lit":"Button"},{"lit":"Cancel"}]}]})RQL"), { { TEXT("L"), List } });
+			const TSharedPtr<FJsonObject> Count = Run(/* unreal.asset("@WBP@") | get Widgets | count */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@WBP@"}]},"stages":[{"op":"get","expr":{"path":["Widgets"]}},{"op":"count"}]})RQL"));
+			TestEqual(TEXT("five widgets"), UnrealMcpRqlSpecHelpers::Number(Count), 5.0);
+			const TSharedPtr<FJsonObject> Children = Run(/* ref("@L@") | get Children | select Name Parent.Name */ TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"@L@"}]},"stages":[{"op":"get","expr":{"path":["Children"]}},{"op":"select","fields":[{"name":"Name","expr":{"path":["Name"]}},{"name":"Parent.Name","expr":{"path":["Parent","Name"]}}]}]})RQL"), false, { { TEXT("L"), List } });
+			TestEqual(TEXT("children in order"), UnrealMcpRqlSpecHelpers::CellText(Children, 1, 0), FString(TEXT("Cancel")));
+			TestEqual(TEXT("their parent"), UnrealMcpRqlSpecHelpers::CellText(Children, 0, 1), FString(TEXT("List")));
+			const TSharedPtr<FJsonObject> Tree = Run(/* unreal.asset("@WBP@") | get RootWidget | recurse Children | select $depth Name */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@WBP@"}]},"stages":[{"op":"get","expr":{"path":["RootWidget"]}},{"op":"recurse","via":[{"path":["Children"]}]},{"op":"select","fields":[{"name":"$depth","expr":{"path":[{"meta":"depth"}]}},{"name":"Name","expr":{"path":["Name"]}}]}]})RQL"));
+			TestEqual(TEXT("recurse walks the tree"), UnrealMcpRqlSpecHelpers::RowCount(Tree), 5);
+
+			Must(TEXT("a widget property"), /* ref("@T@") | set Text = "Hello RQL" */ TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"@T@"}]},"stages":[{"op":"set","assign":[{"target":{"path":["Text"]},"value":{"lit":"Hello RQL"}}]}]})RQL"), { { TEXT("T"), Title } });
+			UTextBlock* Text = Cast<UTextBlock>(Made->WidgetTree->FindWidget(TEXT("Title")));
+			TestTrue(TEXT("text stored"), Text && Text->GetText().ToString() == TEXT("Hello RQL"));
+			Must(TEXT("its canvas slot"), /* ref("@T@") | set Slot.LayoutData.Offsets.Left = 24 */ TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"@T@"}]},"stages":[{"op":"set","assign":[{"target":{"path":["Slot","LayoutData","Offsets","Left"]},"value":{"lit":24}}]}]})RQL"), { { TEXT("T"), Title } });
+			const UCanvasPanelSlot* Slot = Text ? Cast<UCanvasPanelSlot>(Text->Slot) : nullptr;
+			TestTrue(TEXT("slot stored"), Slot && FMath::IsNearlyEqual(Slot->GetLayout().Offsets.Left, 24.0f));
+			const TSharedPtr<FJsonObject> Status = Run(/* unreal.asset("@WBP@") | select Status */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@WBP@"}]},"stages":[{"op":"select","fields":[{"name":"Status","expr":{"path":["Status"]}}]}]})RQL"));
+			TestEqual(TEXT("the Blueprint is marked modified"), UnrealMcpRqlSpecHelpers::CellText(Status), FString(TEXT("Dirty")));
+
+			Must(TEXT("a widget removed"), /* unreal.asset("@WBP@") | get Widgets | where Name == "Cancel" | call Destroy() */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@WBP@"}]},"stages":[{"op":"get","expr":{"path":["Widgets"]}},{"op":"where","pred":{"op":"==","args":[{"path":["Name"]},{"lit":"Cancel"}]}},{"op":"call","method":"Destroy","args":[]}]})RQL"));
+			const TSharedPtr<FJsonObject> After = Run(/* ref("@L@") | get Children | count */ TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"@L@"}]},"stages":[{"op":"get","expr":{"path":["Children"]}},{"op":"count"}]})RQL"), false, { { TEXT("L"), List } });
+			TestEqual(TEXT("one button left"), UnrealMcpRqlSpecHelpers::Number(After), 1.0);
+			const TSharedPtr<FJsonObject> Compiled = Must(TEXT("compile"), /* unreal.asset("@WBP@") | call Compile() */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@WBP@"}]},"stages":[{"op":"call","method":"Compile","args":[]}]})RQL"));
+			TestTrue(*FString::Printf(TEXT("compiles (%s)"), *UnrealMcpRqlSpecHelpers::CellText(Compiled, 0, 2)), UnrealMcpRqlSpecHelpers::CellText(Compiled, 0, 2).Contains(TEXT("\"Succeeded\":true")));
+
+			if (!GEditor)
+				return;
+			Must(TEXT("one more for undo"), /* ref("@L@") | call AddChild("Image", "Icon") */ TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"@L@"}]},"stages":[{"op":"call","method":"AddChild","args":[{"lit":"Image"},{"lit":"Icon"}]}]})RQL"), { { TEXT("L"), List } });
+			TestNotNull(TEXT("added"), Made->WidgetTree->FindWidget(TEXT("Icon")));
+			GEditor->UndoTransaction();
+			const TSharedPtr<FJsonObject> Undone = Run(/* ref("@L@") | get Children | where Name == "Icon" | count */ TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"@L@"}]},"stages":[{"op":"get","expr":{"path":["Children"]}},{"op":"where","pred":{"op":"==","args":[{"path":["Name"]},{"lit":"Icon"}]}},{"op":"count"}]})RQL"), false, { { TEXT("L"), List } });
+			TestEqual(TEXT("undo takes it out of the panel"), UnrealMcpRqlSpecHelpers::Number(Undone), 0.0);
+		});
+	});
+
+	Describe("Level Sequences", [this]()
+	{
+		It("binds actors, adds tracks and sections, keys channels and edits ranges", [this]()
+		{
+			ULevelSequence* Sequence = MakeSequence();
+			Must(TEXT("playback range"), /* unreal.asset("@LS@") | set Start = 0, End = 150 */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@LS@"}]},"stages":[{"op":"set","assign":[{"target":{"path":["Start"]},"value":{"lit":0}},{"target":{"path":["End"]},"value":{"lit":150}}]}]})RQL"));
+			const TSharedPtr<FJsonObject> Range = Run(/* unreal.asset("@LS@") | select DisplayRate Start End */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@LS@"}]},"stages":[{"op":"select","fields":[{"name":"DisplayRate","expr":{"path":["DisplayRate"]}},{"name":"Start","expr":{"path":["Start"]}},{"name":"End","expr":{"path":["End"]}}]}]})RQL"));
+			TestTrue(*FString::Printf(TEXT("30 fps (%s)"), *UnrealMcpRqlSpecHelpers::CellText(Range, 0, 0)), UnrealMcpRqlSpecHelpers::CellText(Range, 0, 0).Contains(TEXT("30")));
+			TestEqual(TEXT("start"), UnrealMcpRqlSpecHelpers::CellText(Range, 0, 1), FString(TEXT("0")));
+			TestEqual(TEXT("end"), UnrealMcpRqlSpecHelpers::CellText(Range, 0, 2), FString(TEXT("150")));
+			Refuses(TEXT("start after end"), /* unreal.asset("@LS@") | set Start = 200 */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@LS@"}]},"stages":[{"op":"set","assign":[{"target":{"path":["Start"]},"value":{"lit":200}}]}]})RQL"), TEXT("Start must be before End"));
+
+			Must(TEXT("an actor"), /* editor | call SpawnActor("PointLight", "RqlSeqLamp") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"SpawnActor","args":[{"lit":"PointLight"},{"lit":"RqlSeqLamp"}]}]})RQL"));
+			const TSharedPtr<FJsonObject> Bound = Must(TEXT("bound"), /* unreal.asset("@LS@") | call AddActor(unreal.find("RqlSeqLamp")) */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@LS@"}]},"stages":[{"op":"call","method":"AddActor","args":[{"call":"find","on":{"path":["unreal"]},"args":[{"lit":"RqlSeqLamp"}]}]}]})RQL"));
+			TestTrue(TEXT("returns the binding"), UnrealMcpRqlSpecHelpers::CellText(Bound, 0, 2).Contains(TEXT("RqlSeqLamp")) || UnrealMcpRqlSpecHelpers::CellText(Bound, 0, 2).StartsWith(TEXT("SequenceBinding")));
+			Refuses(TEXT("bound twice"), /* unreal.asset("@LS@") | call AddActor(unreal.find("RqlSeqLamp")) */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@LS@"}]},"stages":[{"op":"call","method":"AddActor","args":[{"call":"find","on":{"path":["unreal"]},"args":[{"lit":"RqlSeqLamp"}]}]}]})RQL"), TEXT("already bound"));
+			const TSharedPtr<FJsonObject> Bindings = Run(/* unreal.asset("@LS@") | get Bindings | select Name Kind Class */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@LS@"}]},"stages":[{"op":"get","expr":{"path":["Bindings"]}},{"op":"select","fields":[{"name":"Name","expr":{"path":["Name"]}},{"name":"Kind","expr":{"path":["Kind"]}},{"name":"Class","expr":{"path":["Class"]}}]}]})RQL"));
+			TestEqual(TEXT("binding name"), UnrealMcpRqlSpecHelpers::CellText(Bindings, 0, 0), FString(TEXT("RqlSeqLamp")));
+			TestEqual(TEXT("possessable"), UnrealMcpRqlSpecHelpers::CellText(Bindings, 0, 1), FString(TEXT("Possessable")));
+			TestEqual(TEXT("class"), UnrealMcpRqlSpecHelpers::CellText(Bindings, 0, 2), FString(TEXT("PointLight")));
+
+			Must(TEXT("transform track"), /* unreal.asset("@LS@") | get Bindings | call AddTrack("Transform") */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@LS@"}]},"stages":[{"op":"get","expr":{"path":["Bindings"]}},{"op":"call","method":"AddTrack","args":[{"lit":"Transform"}]}]})RQL"));
+			Refuses(TEXT("not a track class"), /* unreal.asset("@LS@") | get Bindings | call AddTrack("PointLight") */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@LS@"}]},"stages":[{"op":"get","expr":{"path":["Bindings"]}},{"op":"call","method":"AddTrack","args":[{"lit":"PointLight"}]}]})RQL"), TEXT("not a track class"));
+			const TSharedPtr<FJsonObject> Section = Run(/* unreal.asset("@LS@") | get Bindings | get Tracks | get Sections | select Start End */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@LS@"}]},"stages":[{"op":"get","expr":{"path":["Bindings"]}},{"op":"get","expr":{"path":["Tracks"]}},{"op":"get","expr":{"path":["Sections"]}},{"op":"select","fields":[{"name":"Start","expr":{"path":["Start"]}},{"name":"End","expr":{"path":["End"]}}]}]})RQL"));
+			TestEqual(TEXT("section over the playback range"), UnrealMcpRqlSpecHelpers::CellText(Section, 0, 0), FString(TEXT("0")));
+			TestEqual(TEXT("section end"), UnrealMcpRqlSpecHelpers::CellText(Section, 0, 1), FString(TEXT("150")));
+
+			Must(TEXT("a key"), /* unreal.asset("@LS@") | get Bindings | get Tracks | get Sections | call AddKey("Location.X", 30, 100) */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@LS@"}]},"stages":[{"op":"get","expr":{"path":["Bindings"]}},{"op":"get","expr":{"path":["Tracks"]}},{"op":"get","expr":{"path":["Sections"]}},{"op":"call","method":"AddKey","args":[{"lit":"Location.X"},{"lit":30},{"lit":100}]}]})RQL"));
+			Must(TEXT("another key"), /* unreal.asset("@LS@") | get Bindings | get Tracks | get Sections | call AddKey("location.x", 60, 250.5) */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@LS@"}]},"stages":[{"op":"get","expr":{"path":["Bindings"]}},{"op":"get","expr":{"path":["Tracks"]}},{"op":"get","expr":{"path":["Sections"]}},{"op":"call","method":"AddKey","args":[{"lit":"location.x"},{"lit":60},{"lit":250.5}]}]})RQL"));
+			const TSharedPtr<FJsonObject> Channels = Run(/* unreal.asset("@LS@") | get Bindings | get Tracks | get Sections | select Channels */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@LS@"}]},"stages":[{"op":"get","expr":{"path":["Bindings"]}},{"op":"get","expr":{"path":["Tracks"]}},{"op":"get","expr":{"path":["Sections"]}},{"op":"select","fields":[{"name":"Channels","expr":{"path":["Channels"]}}]}]})RQL"));
+			const FString ChannelText = UnrealMcpRqlSpecHelpers::CellText(Channels);
+			TestTrue(*FString::Printf(TEXT("keys read back (%s)"), *ChannelText.Left(400)), ChannelText.Contains(TEXT("\"Frame\":30")) && ChannelText.Contains(TEXT("250.5")));
+			Refuses(TEXT("unknown channel"), /* unreal.asset("@LS@") | get Bindings | get Tracks | get Sections | call AddKey("Nope", 1, 1) */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@LS@"}]},"stages":[{"op":"get","expr":{"path":["Bindings"]}},{"op":"get","expr":{"path":["Tracks"]}},{"op":"get","expr":{"path":["Sections"]}},{"op":"call","method":"AddKey","args":[{"lit":"Nope"},{"lit":1},{"lit":1}]}]})RQL"), TEXT("Location.X"));
+			Refuses(TEXT("a text value"), /* unreal.asset("@LS@") | get Bindings | get Tracks | get Sections | call AddKey("Location.X", 1, "far") */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@LS@"}]},"stages":[{"op":"get","expr":{"path":["Bindings"]}},{"op":"get","expr":{"path":["Tracks"]}},{"op":"get","expr":{"path":["Sections"]}},{"op":"call","method":"AddKey","args":[{"lit":"Location.X"},{"lit":1},{"lit":"far"}]}]})RQL"), TEXT("a number"));
+			Must(TEXT("a key past the end grows the section"), /* unreal.asset("@LS@") | get Bindings | get Tracks | get Sections | call AddKey("Location.Y", 200, 5) */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@LS@"}]},"stages":[{"op":"get","expr":{"path":["Bindings"]}},{"op":"get","expr":{"path":["Tracks"]}},{"op":"get","expr":{"path":["Sections"]}},{"op":"call","method":"AddKey","args":[{"lit":"Location.Y"},{"lit":200},{"lit":5}]}]})RQL"));
+			const TSharedPtr<FJsonObject> Grown = Run(/* unreal.asset("@LS@") | get Bindings | get Tracks | get Sections | select End */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@LS@"}]},"stages":[{"op":"get","expr":{"path":["Bindings"]}},{"op":"get","expr":{"path":["Tracks"]}},{"op":"get","expr":{"path":["Sections"]}},{"op":"select","fields":[{"name":"End","expr":{"path":["End"]}}]}]})RQL"));
+			TestTrue(TEXT("section grown"), FCString::Atoi(*UnrealMcpRqlSpecHelpers::CellText(Grown)) >= 200);
+			Must(TEXT("section range"), /* unreal.asset("@LS@") | get Bindings | get Tracks | get Sections | set Start = 10 */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@LS@"}]},"stages":[{"op":"get","expr":{"path":["Bindings"]}},{"op":"get","expr":{"path":["Tracks"]}},{"op":"get","expr":{"path":["Sections"]}},{"op":"set","assign":[{"target":{"path":["Start"]},"value":{"lit":10}}]}]})RQL"));
+
+			Must(TEXT("visibility"), /* unreal.asset("@LS@") | get Bindings | call AddTrack("Visibility") */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@LS@"}]},"stages":[{"op":"get","expr":{"path":["Bindings"]}},{"op":"call","method":"AddTrack","args":[{"lit":"Visibility"}]}]})RQL"));
+			const TSharedPtr<FJsonObject> Bool = Run(/* unreal.asset("@LS@") | get Bindings | get Tracks | where $type == "MovieSceneVisibilityTrack" | get Sections | select Channels */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@LS@"}]},"stages":[{"op":"get","expr":{"path":["Bindings"]}},{"op":"get","expr":{"path":["Tracks"]}},{"op":"where","pred":{"op":"==","args":[{"path":[{"meta":"type"}]},{"lit":"MovieSceneVisibilityTrack"}]}},{"op":"get","expr":{"path":["Sections"]}},{"op":"select","fields":[{"name":"Channels","expr":{"path":["Channels"]}}]}]})RQL"));
+			const TSharedPtr<FJsonObject> BoolName = UnrealMcpRqlSpecHelpers::Parse(UnrealMcpRqlSpecHelpers::CellText(Bool).Mid(1).LeftChop(1));
+			const FString Channel = BoolName.IsValid() ? BoolName->GetStringField(TEXT("Name")) : FString();
+			Must(TEXT("a bool key"), /* unreal.asset("@LS@") | get Bindings | get Tracks | where $type == "MovieSceneVisibilityTrack" | get Sections | call AddKey("@C@", 15, false) */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@LS@"}]},"stages":[{"op":"get","expr":{"path":["Bindings"]}},{"op":"get","expr":{"path":["Tracks"]}},{"op":"where","pred":{"op":"==","args":[{"path":[{"meta":"type"}]},{"lit":"MovieSceneVisibilityTrack"}]}},{"op":"get","expr":{"path":["Sections"]}},{"op":"call","method":"AddKey","args":[{"lit":"@C@"},{"lit":15},{"lit":false}]}]})RQL"), { { TEXT("C"), Channel } });
+			const TSharedPtr<FJsonObject> BoolKeys = Run(/* unreal.asset("@LS@") | get Bindings | get Tracks | where $type == "MovieSceneVisibilityTrack" | get Sections | select Channels */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@LS@"}]},"stages":[{"op":"get","expr":{"path":["Bindings"]}},{"op":"get","expr":{"path":["Tracks"]}},{"op":"where","pred":{"op":"==","args":[{"path":[{"meta":"type"}]},{"lit":"MovieSceneVisibilityTrack"}]}},{"op":"get","expr":{"path":["Sections"]}},{"op":"select","fields":[{"name":"Channels","expr":{"path":["Channels"]}}]}]})RQL"));
+			TestTrue(*FString::Printf(TEXT("bool key (%s)"), *UnrealMcpRqlSpecHelpers::CellText(BoolKeys)), UnrealMcpRqlSpecHelpers::CellText(BoolKeys).Contains(TEXT("\"Value\":false")));
+
+			Must(TEXT("an unbound track"), /* unreal.asset("@LS@") | call AddTrack("CameraCut") */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@LS@"}]},"stages":[{"op":"call","method":"AddTrack","args":[{"lit":"CameraCut"}]}]})RQL"));
+			const TSharedPtr<FJsonObject> Tracks = Run(/* unreal.asset("@LS@") | get Tracks | select $type */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@LS@"}]},"stages":[{"op":"get","expr":{"path":["Tracks"]}},{"op":"select","fields":[{"name":"$type","expr":{"path":[{"meta":"type"}]}}]}]})RQL"));
+			TestEqual(TEXT("camera cut track"), UnrealMcpRqlSpecHelpers::CellText(Tracks), FString(TEXT("MovieSceneCameraCutTrack")));
+			const TSharedPtr<FJsonObject> Listed = Run(/* levelSequences | where Path contains "@LS@" | count */ TEXT(R"RQL({"rql":"0.1","source":{"path":["levelSequences"]},"stages":[{"op":"where","pred":{"op":"contains","args":[{"path":["Path"]},{"lit":"@LS@"}]}},{"op":"count"}]})RQL"));
+			TestEqual(TEXT("levelSequences source"), UnrealMcpRqlSpecHelpers::Number(Listed), 1.0);
+			TestTrue(TEXT("the sequence is dirty"), Sequence->GetOutermost()->IsDirty());
+
+			if (!GEditor)
+				return;
+			Must(TEXT("a key to undo"), /* unreal.asset("@LS@") | get Bindings | get Tracks | where $type == "MovieScene3DTransformTrack" | get Sections | call AddKey("Location.Z", 90, 7) */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@LS@"}]},"stages":[{"op":"get","expr":{"path":["Bindings"]}},{"op":"get","expr":{"path":["Tracks"]}},{"op":"where","pred":{"op":"==","args":[{"path":[{"meta":"type"}]},{"lit":"MovieScene3DTransformTrack"}]}},{"op":"get","expr":{"path":["Sections"]}},{"op":"call","method":"AddKey","args":[{"lit":"Location.Z"},{"lit":90},{"lit":7}]}]})RQL"));
+			GEditor->UndoTransaction();
+			const TSharedPtr<FJsonObject> Undone = Run(/* unreal.asset("@LS@") | get Bindings | get Tracks | where $type == "MovieScene3DTransformTrack" | get Sections | select Channels */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@LS@"}]},"stages":[{"op":"get","expr":{"path":["Bindings"]}},{"op":"get","expr":{"path":["Tracks"]}},{"op":"where","pred":{"op":"==","args":[{"path":[{"meta":"type"}]},{"lit":"MovieScene3DTransformTrack"}]}},{"op":"get","expr":{"path":["Sections"]}},{"op":"select","fields":[{"name":"Channels","expr":{"path":["Channels"]}}]}]})RQL"));
+			TestFalse(TEXT("undo removes the key"), UnrealMcpRqlSpecHelpers::CellText(Undone).Contains(TEXT("\"Frame\":90")));
 		});
 	});
 }
