@@ -123,7 +123,7 @@ Source    : https://github.com/IvanMurzak/Code-Exec
 License   : https://polyformproject.org/licenses/shield/1.0.0
 
 The python-execute tool's runtime, shipped as unmodified source under
-Content/Python/code_exec/ (see VENDORED.md there) and run inside the
+Content/Python/unreal_mcp/_vendor/code_exec/ (see VENDORED.md there) and run inside the
 editor's Python (PythonScriptPlugin).
 Required Notice: Copyright (c) 2026 Ivan Murzak (https://github.com/IvanMurzak)
 

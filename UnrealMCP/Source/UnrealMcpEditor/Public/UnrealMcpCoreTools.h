@@ -39,15 +39,13 @@ namespace UnrealMcpEditorTools
 
 /**
  * The Python tool family: `python-execute` runs agent Python inside the editor through PythonScriptPlugin and the
- * vendored code_exec runtime (Content/Python, IvanMurzak/Code-Exec): last expression = result, print = logs, errors in
- * snippet.py coordinates. Registered in the boot path; also exercised in isolation by specs.
+ * Code-Exec runtime vendored in Content/Python/unreal_mcp/_vendor (IvanMurzak/Code-Exec): last expression = result,
+ * print / unreal.log = logs, errors in snippet.py coordinates, request and response travel as base64. Registered in the
+ * boot path; also exercised in isolation by specs.
  */
 namespace UnrealMcpPythonTools
 {
 	UNREALMCPEDITOR_API void Register(FUnrealMcpToolRegistry& Registry);
-
-	/** Folder that relative `include` paths resolve against: <Project>/.ai-game-dev/snippets. */
-	UNREALMCPEDITOR_API FString GetPythonIncludeRoot();
 }
 
 /**

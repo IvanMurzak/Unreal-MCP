@@ -72,7 +72,7 @@ Consumers exclude the plugin from packaged games with a `TargetDenyList: ["Game"
 ## Tool / prompt / resource surface
 
 Built-in editor tools come in 6 families (Python: `python-execute`, PythonScriptPlugin + the Code-Exec runtime vendored in
-`UnrealMCP/Content/Python/code_exec` — copy it from IvanMurzak/Code-Exec, never edit it here); the README holds the canonical, source-generated inventory. The editor
+`UnrealMCP/Content/Python/unreal_mcp/_vendor/code_exec` — copy it from IvanMurzak/Code-Exec, never edit it here); the README holds the canonical, source-generated inventory. The editor
 data layer is RQL ([`docs/rql.md`](docs/rql.md)): `rql-query` / `rql-mutate` / `rql-schema` (module `UnrealMcpRql`;
 the sidecar parses the query text, the vendored C++ runtime executes the plan) — add editor data access as RQL members,
 sources or operations (or an extension's `IUnrealMcpRqlModule`), not as new per-operation tools.

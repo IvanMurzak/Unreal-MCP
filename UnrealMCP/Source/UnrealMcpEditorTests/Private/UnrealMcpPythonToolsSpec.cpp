@@ -66,6 +66,10 @@ void FUnrealMcpPythonToolsSpec::Define()
 		TestTrue(TEXT("success"), R.bSuccess);
 		TestTrue(TEXT("object path"), R.Message.StartsWith(TEXT("/Engine/BasicShapes/Cube.Cube")));
 		TestTrue(TEXT("logs in message"), R.Message.Contains(TEXT("hello from python")));
+
+		const FUnrealMcpToolResult Logged = Run(TEXT("unreal.log('noted via unreal.log')\n1"));
+		TestTrue(TEXT("unreal.log success"), Logged.bSuccess);
+		TestTrue(TEXT("unreal.log in logs"), Logged.Message.Contains(TEXT("[info] noted via unreal.log")));
 	});
 
 	It("reports syntax errors at snippet lines and runtime errors with their frames", [this]()

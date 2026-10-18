@@ -2,20 +2,20 @@
 # See the LICENSE file in the repository root for more information.
 """Glue between the `python-execute` tool (C++, UnrealMcpPythonTools.cpp) and the vendored code_exec runtime.
 
-The tool calls ``run(<base64 JSON request>)``; the response is printed as ONE line behind MARKER, which the C++ side
-picks out of the captured Python log output. Unreal objects in results become their object paths.
+The tool evaluates ``run(<base64 JSON request>)`` (EvaluateStatement) and reads the returned base64 JSON response from
+the command result: base64 has nothing to escape, so its Python repr is just the string in quotes.
 """
 
+import base64
 import json
 
-import code_exec
 import unreal
 
-MARKER = "__UNREAL_MCP_PYTHON__"
+from unreal_mcp._vendor import code_exec
 
 
 def _plain(value):
-    """Unreal values -> JSON-friendly ones (objects by path, structs / enums by their text)."""
+    """Unreal values -> JSON-friendly ones: objects by path, structs / enums by text, containers recursively."""
     if isinstance(value, unreal.Object):
         return value.get_path_name()
     if isinstance(value, (unreal.StructBase, unreal.EnumBase)):
@@ -28,20 +28,19 @@ def _plain(value):
 
 
 def _convert(value):
-    if isinstance(value, unreal.Object):
-        return value.get_path_name()
-    if isinstance(value, (unreal.StructBase, unreal.EnumBase)):
-        return str(value)
-    if isinstance(value, (list, tuple, dict, unreal.Array, unreal.Map)):
+    plain = _plain(value)
+    if plain is value and not isinstance(value, (unreal.Array, unreal.Map)):
+        return NotImplemented  # nothing Unreal-specific: code_exec's default conversion applies
+    if isinstance(plain, (list, dict)):
         try:
-            return json.dumps(_plain(value))
+            return json.dumps(plain)
         except (TypeError, ValueError):
             return str(value)
-    return NotImplemented
+    return plain
 
 
 code_exec.set_value_converter(_convert)
 
 
 def run(payload_b64):
-    print(MARKER + code_exec.run_b64(payload_b64))
+    return base64.b64encode(code_exec.run_b64(payload_b64).encode("utf-8")).decode("ascii")
