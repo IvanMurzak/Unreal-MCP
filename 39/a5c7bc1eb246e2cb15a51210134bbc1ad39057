@@ -1,0 +1,68 @@
+UnrealMCP/Source/UnrealMcpEditor/Private/UnrealMcpRuntime.cpp
+  s_94cae3b80679a2::t_ea6cf086fc3a3b 289-292
+bridge/tests/AgentConfigServiceTests.cs
+  s_94cae3b80679a2::t_59eeaf6720b8e0 12
+  s_94cae3b80679a2::t_b396133720487e 203-236
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/UnrealMcpMainWindowTab.cpp
+  s_94cae3b80679a2::t_ba93448914553b 27-28,38,96
+  s_94cae3b80679a2::t_b0750e14008ab3 81,87-92,97-100
+UnrealMCP/Source/UnrealMcpEditor/Private/Bridge/UnrealMcpBridgeServer.cpp
+  s_94cae3b80679a2::t_4bf96490fdc7d7 719-721,723-734
+  s_94cae3b80679a2::t_4f78b78e9680f3 343-346
+  s_94cae3b80679a2::t_b3daa56361be3a 38-44,341,718
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/SUnrealMcpAgentConfigurators.h
+  s_94cae3b80679a2::t_e365663488d3e3 9,12,17-20,22-32,34-37,39-41,47,49,51,53-59,65-78,83,85,88,90-91,93,96-116,120-127,129-130,132-138,141-145,148-151
+  s_94cae3b80679a2::t_3a9925e765def2 139-140,146-147,152-155
+bridge/src/AgentConfig/AgentConfigService.cs
+  s_94cae3b80679a2::t_8b40d6972c50be 38-43
+  s_94cae3b80679a2::t_4102546771b49d 48,53
+  s_94cae3b80679a2::t_7b49e45f44769c 201-232
+UnrealMCP/Source/UnrealMcpEditor/Private/Bridge/UnrealMcpBridgeServer.h
+  s_94cae3b80679a2::t_f728f2629f5f2a 74-83
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/UnrealMcpMainWindowTab.h
+  s_94cae3b80679a2::t_169f14c12f2007 8,11,13,44
+  s_94cae3b80679a2::t_e2a24efcdb40ef 45,52-56,65-68
+bridge/src/Ipc/AgentConfigMessages.cs
+  s_94cae3b80679a2::t_881237e48a5475 98-100,112-122
+  s_94cae3b80679a2::t_97a101fba5fd5a 182,184-187
+bridge/src/Ipc/IpcProtocol.cs
+  s_94cae3b80679a2::t_81404c556e34e6 77
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/SUnrealMcpAgentConfigurators.cpp
+  s_94cae3b80679a2::t_a74752c7f99b58 468-472,474-475,479,481,483-484,487-488,490,492-494,496-497,500-503,506-507,509-514,516,518-523,526
+  s_94cae3b80679a2::t_df01ac2453feb5 205-217
+  s_94cae3b80679a2::t_c777730c7a0c6f 9-14,21,30,35,37-38,56,58-59,62-66,72-74,85-86,88,90-92,101-103,105,108,110-114,116-159,161,164,166-174,176-181,183-204,218-272,274-319,321,343-345,348-350,352,355,357-359,362-368,371-372,380,384-394,399-406,408,410-419,421-424,440-446,448,451-452,456-457,461,465-467,529,531-533,535-536,539-544,546,548-551,553,555-559,561,563-565,567-582,584-590,592,594-598,600-601
+  s_94cae3b80679a2::t_c3896b3a51f76d 322-342
+  s_94cae3b80679a2::t_808c333b2df8b4 360-361
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/SUnrealMcpMainWindow.cpp
+  s_94cae3b80679a2::t_3f300365ae0ab6 31,74,831,833
+  s_94cae3b80679a2::t_9044042e960744 834-835,837-840
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/SUnrealMcpMainWindow.h
+  s_94cae3b80679a2::t_da18c52bafd292 10-13
+  s_94cae3b80679a2::t_8f222ac0d003de 40-44,49-54,61
+bridge/src/Host/SidecarHost.cs
+  s_94cae3b80679a2::t_afd9002d7a76a3 423-429
+bridge/src/Tools/ManifestRegistrar.cs
+  s_94cae3b80679a2::t_da050815f5aee6 71-78
+bridge/src/Ipc/IpcClient.cs
+  s_94cae3b80679a2::t_10262904ba938f 289
+bridge/src/AgentConfig/SkillFileGenerator.cs
+  s_94cae3b80679a2::t_449c9e105329b5 1-358
+bridge/tests/SkillFileGeneratorTests.cs
+  s_94cae3b80679a2::t_b0e4b919724ba7 1-166
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.7",
+  "base_commit_sha": "39a5c7bc1eb246e2cb15a51210134bbc1ad39057",
+  "prompts": {},
+  "sessions": {
+    "s_94cae3b80679a2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d15dc434-a705-4009-9c19-05eae0bfc388",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

@@ -1,0 +1,45 @@
+UnrealMCP/Source/UnrealMcpEditor/Private/Bridge/UnrealMcpBridgeServer.cpp
+  s_908974782fafa1::t_ab5230e2643a6d 307,321-337
+  s_908974782fafa1::t_5089458b1ca93e 288
+  s_908974782fafa1::t_f0475663374fe5 539,541-547
+  s_908974782fafa1::t_d0a303040fa624 265
+  s_908974782fafa1::t_ae47f312d8a9b3 252
+  s_908974782fafa1::t_1514837c090032 459-490,495-496,498-499,501-509
+UnrealMCP/Source/UnrealMcpEditor/Private/Sidecar/UnrealMcpSidecarManager.cpp
+  s_908974782fafa1::t_9a2debeca30e61 168-173
+  s_908974782fafa1::t_9d2cb1e2778438 218-230
+UnrealMCP/Source/UnrealMcpEditor/Private/UnrealMcpRuntime.cpp
+  s_908974782fafa1::t_ecf58f78a3a3ec 66-70,72-73,76,79-86
+bridge/src/Ipc/IpcClient.cs
+  s_908974782fafa1::t_d8b8faa9fd5796 317-319
+  s_908974782fafa1::t_f84243ecf512c1 283-300
+bridge/src/Program.cs
+  s_908974782fafa1::t_e2505967a56b16 144
+  s_908974782fafa1::t_458f500f791447 94
+  s_908974782fafa1::t_4d41d41d08ea86 124-125
+  s_908974782fafa1::t_7ef2f4769ebba9 171-183
+  s_908974782fafa1::t_52fd4cb653da43 58-62
+  s_908974782fafa1::t_25177c2491850f 105,112-113
+UnrealMCP/Source/UnrealMcpEditor/Private/Sidecar/UnrealMcpSidecarManager.h
+  s_908974782fafa1::t_4a02e0eb3ab7d5 36-53
+UnrealMCP/Source/UnrealMcpEditor/Private/Dispatch/UnrealMcpGameThreadDispatcher.cpp
+  s_908974782fafa1::t_df6abf6066b005 81,83-93
+UnrealMCP/Source/UnrealMcpEditor/Private/Bridge/UnrealMcpBridgeServer.h
+  s_908974782fafa1::t_abac3d355bddb9 64-65,72
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "195bc381a3416a098426b436bf01dc23ae95df26",
+  "prompts": {},
+  "sessions": {
+    "s_908974782fafa1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f1748397-e586-40bb-91a9-b89c0caebdf5",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

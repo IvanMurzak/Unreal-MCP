@@ -1,0 +1,22 @@
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpResourceExtensionPassSpec.cpp
+  s_3e0a2681fef788::t_c52de4deca2bd8 1-7,11-122
+  s_3e0a2681fef788::t_f6337fdf5d5892 8-10
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpResourceRegistrySpec.cpp
+  s_3e0a2681fef788::t_c4ddba5859b085 1-248
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.8",
+  "base_commit_sha": "654421d408822a4ed7fa6de8418d5588a133fa24",
+  "prompts": {},
+  "sessions": {
+    "s_3e0a2681fef788": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a9715f3a-114a-4de7-815b-97526309448b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

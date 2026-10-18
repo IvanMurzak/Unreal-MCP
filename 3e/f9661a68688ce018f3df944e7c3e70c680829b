@@ -1,0 +1,61 @@
+UnrealMCP/Source/UnrealMcpRuntime/UnrealMcpRuntime.Build.cs
+  s_bf4f1c6b9df583::t_74494a0828b3c6 10-11
+  s_e3239cf02087b8::t_f8ed564e798767 82-88,91-98,120-123,134
+UnrealMCP/Source/ThirdParty/UnrealMcpBridge/README.md
+  s_bf4f1c6b9df583::t_f0e38ea9dc2c60 1-26
+UnrealMCP/Config/FilterPlugin.ini
+  s_bf4f1c6b9df583::t_abf4913d4d04c2 10-12,14
+  s_e3239cf02087b8::t_a169e4b8f400ab 15-24
+.github/workflows/release.yml
+  s_e3239cf02087b8::t_082086e429b03e 26-28,719-728,733,760-764,766,770,780-781,785-786
+.gitignore
+  s_e3239cf02087b8::t_80326cdbe0ae0d 26-27,34-38
+CLAUDE.md
+  s_e3239cf02087b8::t_a4c46a23ec56e3 174-177,283
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpSidecarManagerSpec.cpp
+  s_e3239cf02087b8::t_81fd71928cdd58 111,113,118,120-123,132,134,141
+UnrealMCP/Source/UnrealMcpRuntime/Private/Sidecar/UnrealMcpSidecarManager.cpp
+  s_e3239cf02087b8::t_3536c8f87da366 51-53,61-64,72-73,81-82,105,108-109,131-133
+UnrealMCP/Source/UnrealMcpRuntime/Private/Sidecar/UnrealMcpSidecarManager.h
+  s_e3239cf02087b8::t_96d47b8bf84e43 17-18,87-91,97-98
+UnrealMCP/UnrealMCP.uplugin
+  s_e3239cf02087b8::t_f77b63e4efc163 21-22,27-28
+docs/ARCHITECTURE.md
+  s_e3239cf02087b8::t_55a6bb357e4f38 563-568,573-578,581-583,585-587,594,615,623-624,684-687,689,692,694-695,698-701,703-706,712-720
+UnrealMCP/ThirdPartyNotices.txt
+  s_f7858427a8c722::t_8fb65be9ce2b94 12-13
+docs/RELEASING.md
+  s_f7858427a8c722::t_132bfbe8fa2367 35-36,69-72,77,79,106,110,117,120-121,125,130,134,136,147-151,158-164,167-168
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "3ef9661a68688ce018f3df944e7c3e70c680829b",
+  "prompts": {},
+  "sessions": {
+    "s_bf4f1c6b9df583": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "884c60e3-25ac-40a5-a0a8-b9fdccbb0b52",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_e3239cf02087b8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "83b4675f-ba2b-4933-b50d-dc086f47c446",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_f7858427a8c722": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a07b56ac11132d023",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

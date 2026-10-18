@@ -1,0 +1,32 @@
+.github/scripts/chain_leg_checks.py
+  s_de71e20c9d8602::t_761c750a632348 1-35,39-169
+  s_de71e20c9d8602::t_b0141f59b2cf0a 36-38
+.github/workflows/test_cli.yml
+  s_de71e20c9d8602::t_0a313ef90f4455 12-17,22-32,38-41,46-47,64-82,86-91,97-116
+.github/workflows/test_pull_request.yml
+  s_de71e20c9d8602::t_5aa28bd8c9548e 228-257
+  s_de71e20c9d8602::t_b96c539e417324 203-205
+  s_de71e20c9d8602::t_b6219154c365b6 493-494,509-555
+  s_de71e20c9d8602::t_cb3ca62fa5cf5b 33-49,54-62,64-66,69-72,77-86,88-89,175,556,676,711
+  s_de71e20c9d8602::t_bcef194204c855 98-99,113-142,152-174,177-178,181-183
+  s_de71e20c9d8602::t_958421760c12a2 413-427,451-455
+  s_de71e20c9d8602::t_39158986e8aacb 650-659,663-675,677-683,699-710,712-714
+.github/scripts/chain_feed.py
+  s_de71e20c9d8602::t_e87299bf64e128 1-2954
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "312464dbe9220a195b8a0b067655d4a2cc788e34",
+  "prompts": {},
+  "sessions": {
+    "s_de71e20c9d8602": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b1fa7ae0-224c-4b0e-8499-22456e0d6a3f",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

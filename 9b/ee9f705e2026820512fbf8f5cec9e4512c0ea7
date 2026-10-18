@@ -1,0 +1,22 @@
+.github/workflows/test_pull_request.yml
+  s_f8c946d3776b4c::t_0ecc43d07c7440 16-19,22-23
+  s_f8c946d3776b4c::t_ace244a207c462 178-242
+scripts/connection_smoke.py
+  s_f8c946d3776b4c::t_f2be68cf4b0823 1-446
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "9bee9f705e2026820512fbf8f5cec9e4512c0ea7",
+  "prompts": {},
+  "sessions": {
+    "s_f8c946d3776b4c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "46361c9f-abee-4334-b388-4eb4e8828b42",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

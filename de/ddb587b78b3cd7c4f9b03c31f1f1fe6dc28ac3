@@ -1,0 +1,51 @@
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpDevControlSpec.cpp
+  s_ead1ecca7180ec::t_b5b837f50cb926 263-278
+  s_ead1ecca7180ec::t_df656f595f7380 111-113
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/UnrealMcpAuxWindows.cpp
+  s_ead1ecca7180ec::t_f8b089db93c527 26
+  s_ead1ecca7180ec::t_24ae757ac34008 6
+  s_ead1ecca7180ec::t_02ee6aa9b6c8ca 143
+  s_ead1ecca7180ec::t_10ad3f6078f0cf 209-227
+  s_ead1ecca7180ec::t_5150212a44b948 101-106
+UnrealMCP/Source/UnrealMcpEditor/Private/DevControl/UnrealMcpDevControlServer.cpp
+  s_ead1ecca7180ec::t_c0eff022f23fde 6
+  s_ead1ecca7180ec::t_3afe085a28a891 341,346-347,353
+  s_ead1ecca7180ec::t_f7adc2b42bef0e 252-254
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/SUnrealMcpMainWindow.cpp
+  s_ead1ecca7180ec::t_b58c208d886b1d 679-685
+  s_ead1ecca7180ec::t_8cec03bd33c179 7
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpSerializationCheckSpec.cpp
+  s_ead1ecca7180ec::t_6e22e310560bc9 1-102
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/UnrealMcpAuxWindows.h
+  s_ead1ecca7180ec::t_24fa7696a14c12 81
+  s_ead1ecca7180ec::t_8400da629a971d 41-49
+  s_ead1ecca7180ec::t_1790e725dd76fe 23-24
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/SUnrealMcpSerializationCheckWindow.h
+  s_ead1ecca7180ec::t_f8c4fbdf05b212 43-50
+  s_ead1ecca7180ec::t_75b68e13a36045 1-42,51-64,67-83
+  s_ead1ecca7180ec::t_683fc21868d272 65-66
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/SUnrealMcpSerializationCheckWindow.cpp
+  s_ead1ecca7180ec::t_79e706791ed265 1-11,13-26,28-91,107-180,182-272,274-303,310
+  s_ead1ecca7180ec::t_fa87ef62a835a6 181
+  s_ead1ecca7180ec::t_f68a9cc81b166a 304-309
+  s_ead1ecca7180ec::t_c4d82ac8c8ebfd 273
+  s_ead1ecca7180ec::t_e07637ffa6299f 12
+  s_ead1ecca7180ec::t_64b008cc42e279 92-106
+  s_ead1ecca7180ec::t_dc4528b6311ebe 27
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.7",
+  "base_commit_sha": "deddb587b78b3cd7c4f9b03c31f1f1fe6dc28ac3",
+  "prompts": {},
+  "sessions": {
+    "s_ead1ecca7180ec": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "15b53224-c7bf-4a0c-a438-a39890763358",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

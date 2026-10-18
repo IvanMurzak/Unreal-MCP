@@ -1,0 +1,27 @@
+bridge/publish.ps1
+  s_38e803809d6305::t_cf00b99325be3b 3,5-14,19-20,27-28,31,43,45-47,55-63
+bridge/src/com.IvanMurzak.Unreal.MCP.Bridge.csproj
+  s_38e803809d6305::t_46543da2bc5ba0 35
+  s_38e803809d6305::t_c75eb04740aef0 20-23,26,32-34,36-37,39-42,48-51
+  s_38e803809d6305::t_90b2969081e3f6 24-25,27-31,38,43-47
+bridge/publish.sh
+  s_38e803809d6305::t_28d4905206c4da 3-14,22-62,67,69,72-75
+CLAUDE.md
+  s_38e803809d6305::t_3ac23bd4af2f66 80-94
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "e495ebd512d2b8a426e22a4c44fd43e48d453b18",
+  "prompts": {},
+  "sessions": {
+    "s_38e803809d6305": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "789581b9-30b9-4739-9727-9217906faee5",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

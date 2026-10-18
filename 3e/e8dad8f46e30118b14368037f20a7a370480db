@@ -1,0 +1,33 @@
+.github/workflows/test_pull_request.yml
+  s_3aad055156f2d9::t_e1f470e158bea9 14,221-223,242
+AGENTS.md
+  s_be319aa0129387::t_41956bdbd81a7d 112-113
+UnrealMCP/Source/UnrealMcpRql/Private/UnrealMcpRqlTypes.cpp
+  s_3aad055156f2d9::t_147e5c1677ea1f 12,843-845,847
+docs/RELEASING.md
+  s_be319aa0129387::t_fb4045a23fc288 447-450
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "3ee8dad8f46e30118b14368037f20a7a370480db",
+  "prompts": {},
+  "sessions": {
+    "s_3aad055156f2d9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14cf3-2efc-74e3-aa18-fc3324f70846",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_be319aa0129387": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4973661e-fb8b-4b77-ad37-428f038b740d",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

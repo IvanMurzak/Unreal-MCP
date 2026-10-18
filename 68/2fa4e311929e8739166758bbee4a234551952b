@@ -1,0 +1,51 @@
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpConfigSpec.cpp
+  s_908974782fafa1::t_701622590191cc 1-241
+UnrealMCP/Source/UnrealMcpEditor/Private/Bridge/UnrealMcpBridgeServer.cpp
+  s_908974782fafa1::t_0bc3c99511d212 538-547
+  s_908974782fafa1::t_945ac706b52b3c 585-637
+  s_908974782fafa1::t_9e5a83d2a549ac 32
+  s_908974782fafa1::t_fe97db754eaab5 83-84,90-93
+  s_908974782fafa1::t_11f88f61ffd836 353-356,360
+UnrealMCP/Source/UnrealMcpEditor/Private/Bridge/UnrealMcpBridgeServer.h
+  s_908974782fafa1::t_07b414f82073e3 40-43,45-46,57-66
+  s_908974782fafa1::t_534fcf00c0230d 86
+  s_908974782fafa1::t_d706c68db80ebf 117-122
+UnrealMCP/Source/UnrealMcpEditor/Private/Config/UnrealMcpConfig.cpp
+  s_908974782fafa1::t_a54bdf1b1454c7 1-439,450-515
+  s_908974782fafa1::t_2f62dcd008224c 440-449
+bridge/src/Ipc/IpcClient.cs
+  s_908974782fafa1::t_a6552d4ed2e7e4 64-77
+  s_908974782fafa1::t_221438aaac8f06 262-268,272-277
+bridge/src/Host/SidecarHost.cs
+  s_908974782fafa1::t_c0ad0ac00b658e 13,206-207
+  s_908974782fafa1::t_a6f4a21ea93457 116,124-126,140-183,190-205
+  s_908974782fafa1::t_2bb0cd6833a701 184-189
+  s_908974782fafa1::t_ccb9cf0d21e418 227
+  s_908974782fafa1::t_eefb2a56fadecd 228
+  s_908974782fafa1::t_388bcc1b2fe0ba 117
+UnrealMCP/Source/UnrealMcpEditor/Private/Config/UnrealMcpConfig.h
+  s_908974782fafa1::t_765f65f017d0c5 160-170
+  s_908974782fafa1::t_662a5d68c47709 1-159,171-193
+bridge/tests/ConnectionConfigTests.cs
+  s_908974782fafa1::t_ae476ebc2f4cc3 1-137
+UnrealMCP/Source/UnrealMcpEditor/Private/UnrealMcpRuntime.cpp
+  s_908974782fafa1::t_01b044581227c5 8
+  s_908974782fafa1::t_3026e86cca14e2 38-66,71
+  s_908974782fafa1::t_5f616642955670 16
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "682fa4e311929e8739166758bbee4a234551952b",
+  "prompts": {},
+  "sessions": {
+    "s_908974782fafa1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f1748397-e586-40bb-91a9-b89c0caebdf5",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
