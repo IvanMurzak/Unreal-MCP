@@ -220,8 +220,9 @@ jobs:
     if: ${{ vars.UNREAL_RUNNER_READY == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     # PR-gating covers the same UE 5.5–5.8 set as release.yml: an API missing on an
     # older engine (e.g. FUObjectItem::GetObject() before 5.6) must fail the PR, not
-    # the release. Each leg is a few minutes and the machine lock serializes them.
-    # fail-fast:false so one engine's failure never cancels the other's leg.
+    # the release. max-parallel: 2 as in release.yml: the machine lock serializes the UE
+    # work anyway, so queued legs stay off a runner and off the lock's bounded wait.
+    # fail-fast:false so one engine's failure never cancels the other legs.
     # Engine-versioned runner label (unreal-5-8 for UE 5.8): the job only lands on a machine
     # that has this engine installed. Expressions have no replace(), hence the lookup; an
     # unmapped version yields e.g. `unreal-5.10`, which no runner carries (add it to the map).
@@ -238,6 +239,7 @@ jobs:
     timeout-minutes: 120
     strategy:
       fail-fast: false
+      max-parallel: 2
       matrix:
         ue: ['5.5', '5.6', '5.7', '5.8']
     env:
@@ -247,7 +249,7 @@ jobs:
       # available (the runner's local Unreal-Test-Project analog). Required for
       # the Automation pass; BuildPlugin alone does not need it. A "Sync host to
       # UE_ROOT" step below rebuilds the host's own game module for the matrix
-      # engine, so one host project serves both engines.
+      # engine, so one host project serves every engine.
       HOST_UPROJECT: ${{ vars.UNREAL_HOST_PROJECT }}
     steps:
       - name: Checkout repository
