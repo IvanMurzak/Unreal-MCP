@@ -67,6 +67,10 @@ void FUnrealMcpPythonToolsSpec::Define()
 		TestTrue(TEXT("object path"), R.Message.StartsWith(TEXT("/Engine/BasicShapes/Cube.Cube")));
 		TestTrue(TEXT("logs in message"), R.Message.Contains(TEXT("hello from python")));
 
+		const FUnrealMcpToolResult Struct = Run(TEXT("unreal.Vector(1, 2, 3)"));
+		TestTrue(TEXT("struct success"), Struct.bSuccess);
+		TestTrue(TEXT("struct as UE text"), Struct.Message.StartsWith(TEXT("(X=1.")) && !Struct.Message.Contains(TEXT("0x")));
+
 		const FUnrealMcpToolResult Logged = Run(TEXT("unreal.log('noted via unreal.log')\n1"));
 		TestTrue(TEXT("unreal.log success"), Logged.bSuccess);
 		TestTrue(TEXT("unreal.log in logs"), Logged.Message.Contains(TEXT("[info] noted via unreal.log")));

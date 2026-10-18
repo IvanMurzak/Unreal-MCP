@@ -3,6 +3,7 @@
 
 #include "UnrealMcpCoreTools.h"
 #include "UnrealMcpSchema.h"
+#include "UnrealMcpToolArgs.h"
 #include "UnrealMcpToolRegistry.h"
 
 #include "Dom/JsonObject.h"
@@ -87,6 +88,7 @@ namespace UnrealMcpPythonTools
 			                                "\\nlen(actors.get_all_level_actors())\""), EUnrealMcpParamRequirement::Required)
 			.Param(TEXT("include"), TEXT("array"), TEXT(""), EUnrealMcpParamRequirement::Optional,
 				FUnrealMcpSchema::StringArray(TEXT("Helper .py files or folders, relative to <Project>/.ai-game-dev/snippets or absolute.")))
+			.DestructiveHint(true)
 			.OpenWorldHint(true)
 			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
 			{
@@ -94,13 +96,23 @@ namespace UnrealMcpPythonTools
 				if (Code.TrimStartAndEnd().IsEmpty())
 					return FUnrealMcpToolResult::Error(TEXT("Missing required 'code'."));
 
+				FString IncludeError;
+				const TArray<FString> Include = FUnrealMcpToolArgs::GetStringArray(Call, TEXT("include"), IncludeError);
+				if (!IncludeError.IsEmpty())
+					return FUnrealMcpToolResult::Error(FString::Printf(TEXT("InvalidRequest: %s"), *IncludeError));
+
 				IPythonScriptPlugin* Python = IPythonScriptPlugin::Get();
-				if (Python == nullptr || !Python->IsPythonAvailable())
-					return FUnrealMcpToolResult::Error(TEXT("NotAvailable: Python is not available in this editor (PythonScriptPlugin disabled or failed to start)."));
-#if !UE_VERSION_OLDER_THAN(5, 6, 0)
-				if (!Python->IsPythonInitialized() && !Python->ForceEnablePythonAtRuntime())
-					return FUnrealMcpToolResult::Error(TEXT("NotAvailable: Python is not initialized in this editor."));
+#if UE_VERSION_OLDER_THAN(5, 6, 0)
+				const bool bPythonReady = Python != nullptr && Python->IsPythonAvailable();
+#else
+				// ForceEnablePythonAtRuntime overrides the "enabled by default" settings, but it returns true even when the
+				// interpreter did not come up: IsPythonInitialized afterwards is the real check.
+				if (Python != nullptr && !Python->IsPythonInitialized())
+					Python->ForceEnablePythonAtRuntime();
+				const bool bPythonReady = Python != nullptr && Python->IsPythonInitialized();
 #endif
+				if (!bPythonReady)
+					return FUnrealMcpToolResult::Error(TEXT("NotAvailable: Python is not available in this editor (PythonScriptPlugin disabled or failed to start)."));
 				if (!PythonRuntimeInstalled())
 					return FUnrealMcpToolResult::Error(TEXT("NotAvailable: the plugin's Content/Python folder (the code_exec runtime) is missing."));
 
@@ -110,9 +122,10 @@ namespace UnrealMcpPythonTools
 				TArray<TSharedPtr<FJsonValue>> Imports;
 				Imports.Add(MakeShared<FJsonValueString>(TEXT("unreal")));
 				Request->SetArrayField(TEXT("imports"), Imports);
-				const TArray<TSharedPtr<FJsonValue>>* Include = nullptr;
-				if (Call.Arguments->TryGetArrayField(TEXT("include"), Include))
-					Request->SetArrayField(TEXT("include"), *Include);
+				TArray<TSharedPtr<FJsonValue>> IncludeValues;
+				for (const FString& Path : Include)
+					IncludeValues.Add(MakeShared<FJsonValueString>(Path));
+				Request->SetArrayField(TEXT("include"), IncludeValues);
 				const FTCHARToUTF8 Utf8(*UnrealMcpSerializeCondensed(Request));
 
 				// base64 both ways: agent code is never quoted into Python source, and the response never needs unescaping.

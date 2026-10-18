@@ -15,21 +15,24 @@ from unreal_mcp._vendor import code_exec
 
 
 def _plain(value):
-    """Unreal values -> JSON-friendly ones: objects by path, structs / enums by text, containers recursively."""
+    """Unreal values -> JSON-friendly ones: objects by path, structs by UE text, enums by str(), containers
+    recursively (str() of a struct or an object is its repr, which carries a memory address)."""
     if isinstance(value, unreal.Object):
         return value.get_path_name()
-    if isinstance(value, (unreal.StructBase, unreal.EnumBase)):
+    if isinstance(value, unreal.StructBase):
+        return value.export_text()
+    if isinstance(value, unreal.EnumBase):
         return str(value)
-    if isinstance(value, (list, tuple, unreal.Array)):
+    if isinstance(value, (list, tuple, unreal.Array, unreal.FixedArray, unreal.Set)):
         return [_plain(item) for item in value]
     if isinstance(value, (dict, unreal.Map)):
-        return {str(key): _plain(item) for key, item in value.items()}
+        return {str(_plain(key)): _plain(item) for key, item in value.items()}
     return value
 
 
 def _convert(value):
     plain = _plain(value)
-    if plain is value and not isinstance(value, (unreal.Array, unreal.Map)):
+    if plain is value:
         return NotImplemented  # nothing Unreal-specific: code_exec's default conversion applies
     if isinstance(plain, (list, dict)):
         try:

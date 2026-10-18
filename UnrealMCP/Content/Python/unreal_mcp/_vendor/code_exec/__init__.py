@@ -11,4 +11,4 @@ fixtures/golden/python.json.
 from .runner import run, run_json, run_b64, set_value_converter, SNIPPET_FILE
 
 __all__ = ["run", "run_json", "run_b64", "set_value_converter", "SNIPPET_FILE"]
-__version__ = "0.1.0"
+__version__ = "0.2.0"

@@ -41,7 +41,8 @@
     },
     {
       "Name": "PythonScriptPlugin",
-      "Enabled": true
+      "Enabled": true,
+      "TargetAllowList": [ "Editor" ]
     }
   ]
 }
