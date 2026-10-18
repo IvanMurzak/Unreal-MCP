@@ -220,6 +220,29 @@ bool UnrealMcpRqlParseMathStruct(UScriptStruct* Struct, const rql::Value& Value,
 	return true;
 }
 
+std::function<rql::AdapterOutcome(const rql::Value&, const rql::TypeDescriptor&, rql::Value&, std::string&)>
+	UnrealMcpRqlStructCoerce(FUnrealMcpRqlTypes& Types, UScriptStruct* Struct, std::function<bool(const rql::Value&)> Accepts)
+{
+	FUnrealMcpRqlTypes* TypesPtr = &Types;
+	return [TypesPtr, Struct, Accepts](const rql::Value& Value, const rql::TypeDescriptor&, rql::Value& Result, std::string& Reason)
+	{
+		if (!Accepts(Value))
+			return rql::AdapterOutcome::NotHandled;
+		rql::Value Built = TypesPtr->WrapStruct(Struct, nullptr);
+		try
+		{
+			TypesPtr->CoerceStruct(Struct, Value, Built.ptr());
+		}
+		catch (const std::exception& Error)
+		{
+			Reason = Error.what();
+			return rql::AdapterOutcome::Failed;
+		}
+		Result = Built;
+		return rql::AdapterOutcome::Ok;
+	};
+}
+
 namespace UnrealMcpRqlStructsLocal
 {
 	/**
@@ -275,23 +298,8 @@ namespace UnrealMcpRqlStructsLocal
 			const FSoftObjectPath& Path = *static_cast<const FSoftObjectPath*>(Value.ptr());
 			return Path.IsNull() ? rql::Json() : rql::Json(UnrealMcpRqlToStd(Path.ToString()));
 		};
-		Adapter.coerce = [Types, Struct](const rql::Value& Value, const rql::TypeDescriptor&, rql::Value& Result, std::string& Reason) -> rql::AdapterOutcome
-		{
-			if (!Value.is_string() && !Value.is_null() && !Value.is_object())
-				return rql::AdapterOutcome::NotHandled;
-			rql::Value Built = Types->WrapStruct(Struct, nullptr);
-			try
-			{
-				Types->CoerceStruct(Struct, Value, Built.ptr());
-			}
-			catch (const std::exception& Error)
-			{
-				Reason = Error.what();
-				return rql::AdapterOutcome::Failed;
-			}
-			Result = Built;
-			return rql::AdapterOutcome::Ok;
-		};
+		Adapter.coerce = UnrealMcpRqlStructCoerce(*Types, Struct,
+			[](const rql::Value& Value) { return Value.is_string() || Value.is_null() || Value.is_object(); });
 		Adapter.equals = [](const rql::Value& Value, const rql::Value& Other) -> std::optional<bool>
 		{
 			if (!Value.is_struct() || !Value.ptr())
@@ -334,23 +342,8 @@ void UnrealMcpRqlAddStructAdapters(FUnrealMcpRqlSession& Session)
 				return std::nullopt;
 			return rql::Json(Format(*SpecPtr, Value.ptr()));
 		};
-		Adapter.coerce = [Types, SpecPtr](const rql::Value& Value, const rql::TypeDescriptor&, rql::Value& Result, std::string& Reason) -> rql::AdapterOutcome
-		{
-			if (!Value.is_string() && !Value.is_list())
-				return rql::AdapterOutcome::NotHandled; // structs and {X: 1} literals: RQL's own coercion
-			rql::Value Built = Types->WrapStruct(SpecPtr->Struct, nullptr);
-			try
-			{
-				Types->CoerceStruct(SpecPtr->Struct, Value, Built.ptr());
-			}
-			catch (const std::exception& Error)
-			{
-				Reason = Error.what();
-				return rql::AdapterOutcome::Failed;
-			}
-			Result = Built;
-			return rql::AdapterOutcome::Ok;
-		};
+		// Structs and {X: 1} literals: RQL's own coercion.
+		Adapter.coerce = UnrealMcpRqlStructCoerce(*Types, Spec.Struct, [](const rql::Value& Value) { return Value.is_string() || Value.is_list(); });
 		// Equality with the text and list forms (where Location == "(0, 0, 100)"), approximate like RQL's .NET tuple
 		// adapters: components within 1e-5.
 		Adapter.equals = [SpecPtr](const rql::Value& Value, const rql::Value& Other) -> std::optional<bool>

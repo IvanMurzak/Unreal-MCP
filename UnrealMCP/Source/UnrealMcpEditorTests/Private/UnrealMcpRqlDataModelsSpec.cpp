@@ -176,20 +176,6 @@ BEGIN_DEFINE_SPEC(FUnrealMcpRqlDataModelsSpec, "UnrealMcp.Tools.Rql.DataModels",
 		return Text;
 	}
 
-	static void DropObject(UObject* Object)
-	{
-		if (!IsValid(Object))
-			return;
-		UPackage* Package = Object->GetOutermost();
-		Object->ClearFlags(RF_Public | RF_Standalone);
-		Object->MarkAsGarbage();
-		if (Package)
-		{
-			Package->SetDirtyFlag(false);
-			Package->MarkAsGarbage();
-		}
-	}
-
 	/** Remove every gameplay tag of the specs (their ini source too) and refresh the tag tree. */
 	void DropTags()
 	{
@@ -246,10 +232,10 @@ void FUnrealMcpRqlDataModelsSpec::Define()
 	AfterEach([this]()
 	{
 		for (UObject* Object : Created)
-			DropObject(Object);
+			UnrealMcpRqlSpecHelpers::DropObject(Object);
 		Created.Reset();
 		if (UDataTable* Made = FindTable())
-			DropObject(Made);
+			UnrealMcpRqlSpecHelpers::DropObject(Made);
 		DestroySpecActors();
 		if (GEditor)
 			GEditor->ResetTransaction(FText::FromString(TEXT("RQL data model specs")));

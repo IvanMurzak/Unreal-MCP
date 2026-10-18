@@ -13,6 +13,7 @@
 #include "Policies/CondensedJsonPrintPolicy.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
+#include "UObject/Package.h"
 #include "UnrealMcpRqlTools.h"
 
 /**
@@ -108,6 +109,22 @@ namespace UnrealMcpRqlSpecHelpers
 		if (Result.IsValid())
 			Result->TryGetNumberField(TEXT("value"), Value);
 		return Value;
+	}
+
+	/** Throw away an object a spec created in its own package (unsaved): unpublished, garbage, its package clean. */
+	inline void DropObject(UObject* Object)
+	{
+		if (!IsValid(Object))
+			return;
+		UPackage* Package = Object->GetOutermost();
+		Object->ClearFlags(RF_Public | RF_Standalone);
+		Object->MarkAsGarbage();
+		if (Package)
+		{
+			Package->SetDirtyFlag(false);
+			Package->ClearFlags(RF_Standalone);
+			Package->MarkAsGarbage();
+		}
 	}
 
 	/** A plan with "@KEY@" placeholders filled in (ids that exist only at run time). */

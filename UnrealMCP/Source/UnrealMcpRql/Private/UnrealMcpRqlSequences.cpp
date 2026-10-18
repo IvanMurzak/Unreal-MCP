@@ -361,9 +361,9 @@ namespace UnrealMcpRqlSequencesLocal
 		FUnrealMcpRqlTypes::SetMember(D, Member("Guid", String, [Handle](void* Self) { return Str(Handle(Self)->Guid.ToString()); }));
 		FUnrealMcpRqlTypes::SetMember(D, Member("Kind", String, [Handle](void* Self)
 		{
-			const UMovieScene* Scene = SceneOf(Handle(Self)->Sequence.Get());
-			UMovieScene* Mutable = const_cast<UMovieScene*>(Scene);
-			return Str(Mutable->FindPossessable(Handle(Self)->Guid) ? TEXT("Possessable") : Mutable->FindSpawnable(Handle(Self)->Guid) ? TEXT("Spawnable") : TEXT("Other"));
+			UMovieScene* Scene = SceneOf(Handle(Self)->Sequence.Get());
+			const FGuid& Guid = Handle(Self)->Guid;
+			return Str(Scene->FindPossessable(Guid) ? TEXT("Possessable") : Scene->FindSpawnable(Guid) ? TEXT("Spawnable") : TEXT("Other"));
 		}, {}, "Possessable (an object of the level) or Spawnable (spawned by the sequence)"));
 		FUnrealMcpRqlTypes::SetMember(D, Member("Class", String, [Handle](void* Self)
 		{

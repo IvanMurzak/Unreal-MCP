@@ -27,14 +27,7 @@ namespace UnrealMcpRqlDataTablesLocal
 	FName ExistingRow(const UDataTable* Table, const FString& Key)
 	{
 		const FName Wanted(*Key, FNAME_Find);
-		if (Wanted.IsNone())
-			return NAME_None;
-		for (const TPair<FName, uint8*>& Row : Table->GetRowMap())
-		{
-			if (Row.Key == Wanted)
-				return Row.Key;
-		}
-		return NAME_None;
+		return !Wanted.IsNone() && Table->GetRowMap().Contains(Wanted) ? Wanted : NAME_None;
 	}
 
 	/** A row name agents may create: not empty, not taken, no characters FName rejects. */

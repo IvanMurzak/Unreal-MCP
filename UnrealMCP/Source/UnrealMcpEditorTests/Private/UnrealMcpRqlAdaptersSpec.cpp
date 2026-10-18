@@ -118,24 +118,9 @@ BEGIN_DEFINE_SPEC(FUnrealMcpRqlAdaptersSpec, "UnrealMcp.Tools.Rql.Adapters",
 		TestFalse(TEXT("the fixture has an id"), FixtureId.IsEmpty());
 	}
 
-	static void DropObject(UObject* Object)
-	{
-		if (!Object)
-			return;
-		UPackage* Package = Object->GetOutermost();
-		Object->ClearFlags(RF_Public | RF_Standalone);
-		Object->MarkAsGarbage();
-		if (Package)
-		{
-			Package->SetDirtyFlag(false);
-			Package->ClearFlags(RF_Standalone);
-			Package->MarkAsGarbage();
-		}
-	}
-
 	void DropFixture()
 	{
-		DropObject(Fixture);
+		UnrealMcpRqlSpecHelpers::DropObject(Fixture);
 		Fixture = nullptr;
 		FixtureId.Reset();
 	}
@@ -465,7 +450,7 @@ void FUnrealMcpRqlAdaptersSpec::Define()
 			const TSharedPtr<FJsonObject> Base = UnrealMcpRqlSpecHelpers::Exec(*this, UnrealMcpRqlSpecHelpers::Fill(
 				/* unreal.asset("/Engine/BasicShapes/BasicShapeMaterial") | set Vectors["@P@"] = "#ff0000" */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"/Engine/BasicShapes/BasicShapeMaterial"}]},"stages":[{"op":"set","assign":[{"target":{"path":["Vectors",{"key":"@P@"}]},"value":{"lit":"#ff0000"}}]}]})RQL"), { { TEXT("P"), Parameter } }), true);
 			TestFalse(TEXT("a base material is not writable"), UnrealMcpRqlSpecHelpers::IsOk(Base));
-			DropObject(Instance);
+			UnrealMcpRqlSpecHelpers::DropObject(Instance);
 		});
 	});
 

@@ -251,23 +251,8 @@ void UnrealMcpRqlAddGameplayTags(FUnrealMcpRqlSession& Session)
 	const rql::TypeDescriptor* ContainerType = T.ForStruct(ContainerStruct);
 	auto Coerce = [Types](UScriptStruct* Struct)
 	{
-		return [Types, Struct](const rql::Value& Value, const rql::TypeDescriptor&, rql::Value& Result, std::string& Reason) -> rql::AdapterOutcome
-		{
-			if (!Value.is_string() && !Value.is_list() && !Value.is_null())
-				return rql::AdapterOutcome::NotHandled;
-			rql::Value Built = Types->WrapStruct(Struct, nullptr);
-			try
-			{
-				Types->CoerceStruct(Struct, Value, Built.ptr());
-			}
-			catch (const std::exception& Error)
-			{
-				Reason = Error.what();
-				return rql::AdapterOutcome::Failed;
-			}
-			Result = Built;
-			return rql::AdapterOutcome::Ok;
-		};
+		return UnrealMcpRqlStructCoerce(*Types, Struct,
+			[](const rql::Value& Value) { return Value.is_string() || Value.is_list() || Value.is_null(); });
 	};
 	{
 		rql::TypeAdapter Adapter;

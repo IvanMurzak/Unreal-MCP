@@ -6,6 +6,9 @@
 #include "CoreMinimal.h"
 #include "UnrealMcpRqlTypes.h"
 
+#include <functional>
+#include <string>
+
 class FUnrealMcpRqlSession;
 class UScriptStruct;
 
@@ -24,6 +27,13 @@ rql::Value UnrealMcpRqlClassDefaultsList(FUnrealMcpRqlTypes& Types, UClass* Base
 /** Text and list literals of the math structs: "(1, 2, 3)", "X=1 Y=2 Z=3", [1, 2, 3], "#ff8800" (colors). False (and no
  * error) for other structs and value kinds; false + @p OutError for a malformed literal. FUnrealMcpRqlTypes::CoerceStruct uses it. */
 bool UnrealMcpRqlParseMathStruct(UScriptStruct* Struct, const rql::Value& Value, void* Out, FString& OutError);
+
+/**
+ * An adapter `coerce` that builds a @p Struct value through FUnrealMcpRqlTypes::CoerceStruct (math literals, struct
+ * parsers) from the value kinds @p Accepts takes; other values fall through to RQL's own coercion.
+ */
+std::function<rql::AdapterOutcome(const rql::Value&, const rql::TypeDescriptor&, rql::Value&, std::string&)>
+	UnrealMcpRqlStructCoerce(FUnrealMcpRqlTypes& Types, UScriptStruct* Struct, std::function<bool(const rql::Value&)> Accepts);
 
 /** RQL type adapters for the math structs: "(x, y, z)" output, text / list literals on writes. */
 void UnrealMcpRqlAddStructAdapters(FUnrealMcpRqlSession& Session);
