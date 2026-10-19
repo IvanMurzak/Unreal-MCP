@@ -132,8 +132,8 @@ export async function close(opts: CloseOptions = {}): Promise<CloseResult> {
   }
 }
 
-/** Best-effort platform process listing. Never throws — `[]` on failure. */
-function listProcesses(os: NodeJS.Platform): RunningProcess[] {
+/** Best-effort listing of `UnrealEditor*` processes (pid + command line). Never throws — `[]` on failure. */
+export function listProcesses(os: NodeJS.Platform = platform() as NodeJS.Platform): RunningProcess[] {
   try {
     if (os === 'win32') {
       // CIM CommandLine via PowerShell — CSV pid|cmdline.

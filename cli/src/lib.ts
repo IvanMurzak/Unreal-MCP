@@ -16,6 +16,21 @@ export { configureAgent } from './lib/configure-agent.js';
 export { enrollPlugin } from './lib/enroll.js';
 export { openProject, buildOpenEnv } from './lib/open.js';
 export { close, selectEditorProcesses } from './lib/close.js';
+export { execPython, readPythonResponse, PYTHON_EXECUTE_TOOL, DEFAULT_EXEC_TIMEOUT_MS } from './lib/exec.js';
+export type { ExecPythonOptions, ExecPythonResult, ExecPythonSuccess, ExecPythonFailure, PythonLogLine } from './lib/exec.js';
+export {
+  createUnrealSession,
+  resolveSessionConnection,
+  sessionEditorEnv,
+  openEditorSession,
+  closeOwnedSession,
+  prepareGuiOpen,
+  readSessionLease,
+  EDITOR_QUIT_TOOL,
+  DEFAULT_SESSION_READY_TIMEOUT_MS,
+  DEFAULT_SESSION_CLOSE_TIMEOUT_MS,
+} from './lib/session.js';
+export type { SessionConnection, UnrealSessionOptions, SessionCommandOptions, SessionCommandResult } from './lib/session.js';
 export { createProject, renderProjectTemplate, validateModuleName } from './lib/create-project.js';
 export { installPlugin, removePlugin } from './lib/install-plugin.js';
 export { installExtension } from './lib/install-extension.js';

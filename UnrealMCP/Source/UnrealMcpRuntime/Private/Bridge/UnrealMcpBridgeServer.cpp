@@ -533,13 +533,18 @@ void FUnrealMcpBridgeServer::HandleToolCall(const TSharedPtr<FJsonObject>& Messa
 	const bool bRemoveOnDone = bTrackCancel;
 
 	InFlightCalls.Increment();
+	const bool bCountsAsActivity = ToolName != TEXT("ping");
+	if (bCountsAsActivity)
+		++ToolActivityCount;
 
 	Dispatcher.Dispatch(
 		Call,
 		[this, CapturedTool](const FUnrealMcpToolCall& C) { return Registry.Execute(CapturedTool, C); },
 		FTimespan::FromMilliseconds(TimeoutMs))
-		.Next([this, CapturedRequestId, bRemoveOnDone](FUnrealMcpToolResult Result)
+		.Next([this, CapturedRequestId, bRemoveOnDone, bCountsAsActivity](FUnrealMcpToolResult Result)
 		{
+			if (bCountsAsActivity)
+				++ToolActivityCount;
 			TSharedPtr<FJsonObject> Response = MakeShared<FJsonObject>();
 			Response->SetStringField(TEXT("type"), TypeToolResponse);
 			Response->SetStringField(TEXT("requestId"), CapturedRequestId);

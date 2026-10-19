@@ -3,6 +3,7 @@ import { PACKAGE_VERSION } from './version.js';
 import { configureStyledHelp, setVerbose } from './utils/ui.js';
 import { bootstrapLocalCommand } from './commands/bootstrap-local.js';
 import { closeCommand } from './commands/close.js';
+import { execCommand } from './commands/exec.js';
 import { configureCommand } from './commands/configure.js';
 import { createProjectCommand } from './commands/create-project.js';
 import { installEngineCommand } from './commands/install-engine.js';
@@ -31,11 +32,12 @@ program
   // instead of printing the CLI version.
   .enablePositionalOptions();
 
-// The full 17-command surface (docs/ARCHITECTURE.md §9.1).
+// The full command surface (docs/ARCHITECTURE.md §9.1).
 const subcommands = [
   createProjectCommand,
   openCommand,
   closeCommand,
+  execCommand,
   installPluginCommand,
   removePluginCommand,
   installExtensionCommand,
