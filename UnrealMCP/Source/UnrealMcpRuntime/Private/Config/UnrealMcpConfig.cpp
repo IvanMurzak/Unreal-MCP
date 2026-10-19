@@ -2,6 +2,7 @@
 // See the LICENSE file in the repository root for more information.
 
 #include "UnrealMcpConfig.h"
+#include "UnrealMcpLog.h"
 
 #include "Misc/Paths.h"
 #include "Misc/FileHelper.h"
@@ -313,12 +314,20 @@ void FUnrealMcpConfig::ApplyOne(const FString& EnvName, const FString& Source)
 	}
 	else if (EnvName == EnvToolTimeout)
 	{
-		// Milliseconds; a non-numeric or non-positive value is ignored (the existing value stays).
-		const int64 Value = Source.IsNumeric() ? FCString::Atoi64(*Source) : 0;
+		// Milliseconds, digits only; anything else keeps the existing value.
+		bool bDigits = !Source.IsEmpty() && Source.Len() <= 10;
+		for (const TCHAR Char : Source)
+			bDigits = bDigits && FChar::IsDigit(Char);
+		const int64 Value = bDigits ? FCString::Atoi64(*Source) : 0;
 		if (Value > 0 && Value <= MAX_int32)
 		{
 			ToolTimeoutMs = static_cast<int32>(Value);
 			OverriddenKeys.Add(KeyToolTimeoutMs);
+		}
+		else
+		{
+			UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] ignoring %s='%s': expected a positive whole number of milliseconds; keeping %d."),
+				EnvToolTimeout, *Source, ToolTimeoutMs);
 		}
 	}
 	else if (EnvName == EnvTools)
@@ -473,6 +482,11 @@ FString FUnrealMcpConfig::ResolveCustomHost() const
 {
 	const FString Trimmed = TrimSlash(CustomHost.TrimStartAndEnd());
 	return Trimmed.IsEmpty() ? FString(DefaultCustomHost) : Trimmed;
+}
+
+int32 FUnrealMcpConfig::ResolveServerPluginTimeoutMs() const
+{
+	return static_cast<int32>(FMath::Min<int64>(static_cast<int64>(ToolTimeoutMs) + ServerPluginTimeoutMarginMs, MAX_int32));
 }
 
 FString FUnrealMcpConfig::ResolveEffectiveToken() const

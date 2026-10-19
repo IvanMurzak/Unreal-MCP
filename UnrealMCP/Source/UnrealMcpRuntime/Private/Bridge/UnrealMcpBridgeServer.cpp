@@ -497,8 +497,8 @@ void FUnrealMcpBridgeServer::HandleToolCall(const TSharedPtr<FJsonObject>& Messa
 
 	int32 TimeoutMs = FUnrealMcpConfig::DefaultToolTimeoutMs;
 	double TimeoutValue;
-	if (Message->TryGetNumberField(TEXT("timeoutMs"), TimeoutValue) && TimeoutValue > 0)
-		TimeoutMs = static_cast<int32>(TimeoutValue);
+	if (Message->TryGetNumberField(TEXT("timeoutMs"), TimeoutValue) && TimeoutValue >= 1.0)
+		TimeoutMs = static_cast<int32>(FMath::Min(TimeoutValue, static_cast<double>(MAX_int32)));
 
 	TSharedPtr<FJsonObject> Arguments = MakeShared<FJsonObject>();
 	const TSharedPtr<FJsonObject>* ArgsPtr;
@@ -627,8 +627,8 @@ void FUnrealMcpBridgeServer::HandlePromptGet(const TSharedPtr<FJsonObject>& Mess
 
 	int32 TimeoutMs = DefaultRequestTimeoutMs;
 	double TimeoutValue;
-	if (Message->TryGetNumberField(TEXT("timeoutMs"), TimeoutValue) && TimeoutValue > 0)
-		TimeoutMs = static_cast<int32>(TimeoutValue);
+	if (Message->TryGetNumberField(TEXT("timeoutMs"), TimeoutValue) && TimeoutValue >= 1.0)
+		TimeoutMs = static_cast<int32>(FMath::Min(TimeoutValue, static_cast<double>(MAX_int32)));
 
 	TSharedPtr<FJsonObject> Arguments = MakeShared<FJsonObject>();
 	const TSharedPtr<FJsonObject>* ArgsPtr;
@@ -761,8 +761,8 @@ void FUnrealMcpBridgeServer::HandleResourceRead(const TSharedPtr<FJsonObject>& M
 
 	int32 TimeoutMs = DefaultRequestTimeoutMs;
 	double TimeoutValue;
-	if (Message->TryGetNumberField(TEXT("timeoutMs"), TimeoutValue) && TimeoutValue > 0)
-		TimeoutMs = static_cast<int32>(TimeoutValue);
+	if (Message->TryGetNumberField(TEXT("timeoutMs"), TimeoutValue) && TimeoutValue >= 1.0)
+		TimeoutMs = static_cast<int32>(FMath::Min(TimeoutValue, static_cast<double>(MAX_int32)));
 
 	// Per-call cancel flag (§4) — reuse the SAME CancelFlags map as tool-calls (the generic tool-cancel by
 	// requestId covers all kinds, §A.1). Shared ownership keeps it alive past the map-entry removal.

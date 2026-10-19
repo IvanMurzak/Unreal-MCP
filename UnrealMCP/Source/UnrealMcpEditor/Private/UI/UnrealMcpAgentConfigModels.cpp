@@ -10,6 +10,7 @@ FAiAgentConnectionInfo FAiAgentConnectionInfo::FromPluginConfig(const FUnrealMcp
 	FAiAgentConnectionInfo Info;
 	Info.ServerPath = InServerPath;
 	Info.Port = InPort;
+	Info.PluginTimeoutMs = Config.ResolveServerPluginTimeoutMs();
 
 	const bool bCloud = Config.ConnectionMode == EUnrealMcpConnectionMode::Cloud;
 

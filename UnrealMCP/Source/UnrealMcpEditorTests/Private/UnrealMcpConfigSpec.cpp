@@ -585,12 +585,22 @@ void FUnrealMcpConfigSpec::Define()
 
 		It("ignores a non-numeric or non-positive override", [this]()
 		{
-			for (const TCHAR* Bad : { TEXT("abc"), TEXT("0"), TEXT("-5"), TEXT("99999999999") })
+			for (const TCHAR* Bad : { TEXT("abc"), TEXT("0"), TEXT("-5"), TEXT("+5"), TEXT("12.5"), TEXT("1e5"), TEXT("99999999999") })
 			{
 				FUnrealMcpConfig Config;
 				Config.ApplyOverrides({}, MakeEnvReader({ { TEXT("UNREAL_MCP_TOOL_TIMEOUT"), Bad } }));
 				TestEqual(FString::Printf(TEXT("'%s' ignored"), Bad), Config.ToolTimeoutMs, 300000);
 			}
+		});
+
+		It("derives the server plugin-timeout from the tool timeout plus a margin", [this]()
+		{
+			FUnrealMcpConfig Config;
+			TestEqual(TEXT("default"), Config.ResolveServerPluginTimeoutMs(), 310000);
+			Config.ToolTimeoutMs = 10000;
+			TestEqual(TEXT("lowered"), Config.ResolveServerPluginTimeoutMs(), 20000);
+			Config.ToolTimeoutMs = MAX_int32;
+			TestEqual(TEXT("clamped"), Config.ResolveServerPluginTimeoutMs(), MAX_int32);
 		});
 
 		It("is a recognized .env key", [this]()

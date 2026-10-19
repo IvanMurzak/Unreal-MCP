@@ -84,6 +84,12 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             Assert.Equal(12345, channel.LastTimeoutMs);
         }
 
+        [Theory]
+        [InlineData(1000, 6000)]
+        [InlineData(int.MaxValue, int.MaxValue - 1)]
+        public void Backstop_AddsGraceWithoutOverflow(int timeoutMs, int expected)
+            => Assert.Equal(expected, IpcClient.BackstopDelayMs(timeoutMs));
+
         [Fact]
         public void Host_DefaultsToToolTimeoutDefault()
         {

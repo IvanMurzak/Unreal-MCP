@@ -579,16 +579,22 @@ Godot's `GodotMainThread`:
   server attaches a continuation (`.Next(…)`) that serializes `tool-response` back through the
   writer mutex. Slow tools therefore never stall heartbeats — `ping`/`pong` stays on the IPC thread.
 - **Timeout:** per-call (`tool-call.timeoutMs`). The sidecar stamps the plugin-pushed `toolTimeoutMs`
-  (`UNREAL_MCP_TOOL_TIMEOUT`, §8; default 300 s, the McpPlugin server's tool-timeout default) on every
-  tool call; prompt-get / resource-read keep 30 s. A parallel timer fires the promise with a structured timeout error;
+  (`UNREAL_MCP_TOOL_TIMEOUT`, §8; default 300 s) on every
+  tool call; prompt-get / resource-read keep 30 s. The MCP server has its own limits: it waits
+  `plugin-timeout` per attempt (and the released server re-sends the call after it), and caps a tool
+  call at 5 min. So the editor passes `toolTimeoutMs` + 10 s as `plugin-timeout` to the local server it
+  starts and to the agent configs it writes. Once McpPlugin ships a separate `tool-timeout` (and stops
+  re-sending), pass that too. A parallel timer fires the promise with a structured timeout error;
   the flag set on `FUnrealMcpToolCall::CancelRequested` (a `FThreadSafeBool`) lets long tool bodies
   exit early at their own checkpoints. A game-thread task cannot be force-killed — an abandoned
   body finishes silently, logs at `Verbose`, and its late result is dropped (requestId already
   completed; double-set of the promise is guarded).
 - **Cancellation:** `tool-cancel` sets the same flag — one cooperative mechanism for both paths.
 - **No late runs:** a body whose call already timed out or was cancelled while it waited in the
-  game-thread queue is skipped (error "cancelled before it started; it was not run"), so a caller
-  that gave up never gets a late or duplicate execution.
+  game-thread queue is skipped (error "cancelled before it started; it was not run"). This covers
+  the call's own timeout and `tool-cancel`; a server re-send is a new call and is not deduplicated here.
+- **Watchdog:** one process-lifetime thread enforces every pending call's deadline (no pooled thread is
+  held per call).
 - **Async tools** (e.g. `source-compile` waiting on UBT, `blueprint-compile` follow-ups) return a
   `TFuture` from the handler itself; the dispatcher chains rather than blocks, so the game thread
   is only occupied for the synchronous slice.

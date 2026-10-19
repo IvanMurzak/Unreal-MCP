@@ -5,6 +5,10 @@
 #include "UnrealMcpLog.h"
 #include "Async/Async.h"
 #include "HAL/Event.h"
+#include "HAL/Runnable.h"
+#include "HAL/RunnableThread.h"
+#include "Misc/CoreDelegates.h"
+#include "Misc/ScopeLock.h"
 
 #include <atomic>
 
@@ -12,7 +16,7 @@ namespace
 {
 	/**
 	 * Shared completion state for one dispatched call. The promise is completed by whichever path wins
-	 * the atomic guard first — the game-thread body or the timeout watcher — so it is never set twice.
+	 * the atomic guard first — the game-thread body or the timeout watchdog — so it is never set twice.
 	 */
 	struct FDispatchState
 	{
@@ -28,22 +32,103 @@ namespace
 	};
 
 	/**
-	 * A pooled FEvent whose lifetime is shared by the body and the timeout watcher. Whichever finishes
-	 * LAST releases the last reference, and only then is the event returned to the pool — so a slow body
-	 * that triggers the event after the watcher already gave up can never poke a recycled event.
+	 * One thread that enforces every pending call's deadline. Tool calls may run for minutes, so a
+	 * per-call waiter on the shared GThreadPool would hold pool workers (also used for asset and DDC
+	 * work) for the whole call. Process-lifetime: created on first use and never destroyed, so a late
+	 * deadline can never touch a freed watchdog; it stops on engine pre-exit.
 	 */
-	struct FSharedPooledEvent
+	class FUnrealMcpDispatchWatchdog final : public FRunnable
 	{
-		FEvent* Event;
-		FSharedPooledEvent() : Event(FPlatformProcess::GetSynchEventFromPool(/*bIsManualReset*/ true)) {}
-		~FSharedPooledEvent()
+	public:
+		static FUnrealMcpDispatchWatchdog& Get()
 		{
-			if (Event != nullptr)
-			{
-				FPlatformProcess::ReturnSynchEventToPool(Event);
-				Event = nullptr;
-			}
+			static FUnrealMcpDispatchWatchdog* Instance = new FUnrealMcpDispatchWatchdog();
+			return *Instance;
 		}
+
+		/** Complete @p State with a timeout error (and set @p CancelFlag) unless it completes first. */
+		void Watch(const TSharedRef<FDispatchState, ESPMode::ThreadSafe>& State,
+			TSharedPtr<const FThreadSafeBool, ESPMode::ThreadSafe> CancelFlag, uint32 TimeoutMs)
+		{
+			{
+				FScopeLock Lock(&Mutex);
+				Entries.Add({ FPlatformTime::Seconds() + TimeoutMs / 1000.0, TimeoutMs, State, MoveTemp(CancelFlag) });
+			}
+			Wake->Trigger();
+		}
+
+		virtual uint32 Run() override
+		{
+			while (!bStop)
+			{
+				TArray<FEntry> Expired;
+				double NextDeadline = FPlatformTime::Seconds() + 1.0;
+				{
+					FScopeLock Lock(&Mutex);
+					const double Now = FPlatformTime::Seconds();
+					for (int32 Index = Entries.Num() - 1; Index >= 0; --Index)
+					{
+						FEntry& Entry = Entries[Index];
+						if (Entry.State->bCompleted)
+							Entries.RemoveAtSwap(Index);
+						else if (Entry.Deadline <= Now)
+						{
+							Expired.Add(MoveTemp(Entry));
+							Entries.RemoveAtSwap(Index);
+						}
+						else
+							NextDeadline = FMath::Min(NextDeadline, Entry.Deadline);
+					}
+				}
+
+				// Outside the lock: completing the promise runs the bridge's continuation on this thread.
+				for (FEntry& Entry : Expired)
+				{
+					// Cooperative cancel so a still-running body can bail at IsCancelled() (§4), and a body
+					// still queued is skipped. The shared flag outlives the bridge's CancelFlags entry.
+					if (Entry.CancelFlag.IsValid())
+						const_cast<FThreadSafeBool&>(*Entry.CancelFlag) = true;
+					Entry.State->Complete(FUnrealMcpToolResult::Error(
+						FString::Printf(TEXT("Tool call timed out after %u ms."), Entry.TimeoutMs)));
+				}
+
+				const double WaitSeconds = FMath::Max(NextDeadline - FPlatformTime::Seconds(), 0.0);
+				Wake->Wait(static_cast<uint32>(FMath::CeilToDouble(WaitSeconds * 1000.0)));
+			}
+			return 0;
+		}
+
+		/** False when the platform has no threads; then deadlines are not enforced. */
+		bool IsRunning() const { return Thread != nullptr; }
+
+	private:
+		struct FEntry
+		{
+			double Deadline;
+			uint32 TimeoutMs;
+			TSharedRef<FDispatchState, ESPMode::ThreadSafe> State;
+			TSharedPtr<const FThreadSafeBool, ESPMode::ThreadSafe> CancelFlag;
+		};
+
+		FUnrealMcpDispatchWatchdog()
+			: Wake(FPlatformProcess::GetSynchEventFromPool(/*bIsManualReset*/ false))
+		{
+			if (FPlatformProcess::SupportsMultithreading())
+				Thread = FRunnableThread::Create(this, TEXT("UnrealMcpDispatchWatchdog"), 64 * 1024, TPri_BelowNormal);
+			if (Thread == nullptr)
+				UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] no watchdog thread; tool-call timeouts are not enforced."));
+			FCoreDelegates::OnEnginePreExit.AddLambda([this]()
+			{
+				bStop = true;
+				Wake->Trigger();
+			});
+		}
+
+		FCriticalSection Mutex;
+		TArray<FEntry> Entries;
+		FEvent* Wake;
+		FRunnableThread* Thread = nullptr;
+		std::atomic<bool> bStop{ false };
 	};
 }
 
@@ -53,10 +138,9 @@ TFuture<FUnrealMcpToolResult> FUnrealMcpGameThreadDispatcher::Dispatch(
 	FTimespan Timeout)
 {
 	TSharedRef<FDispatchState, ESPMode::ThreadSafe> State = MakeShared<FDispatchState, ESPMode::ThreadSafe>();
-	TSharedRef<FSharedPooledEvent, ESPMode::ThreadSafe> Done = MakeShared<FSharedPooledEvent, ESPMode::ThreadSafe>();
 	TFuture<FUnrealMcpToolResult> Future = State->Promise.GetFuture();
 
-	auto RunBody = [State, Body = MoveTemp(Body), Call, Done]() mutable
+	auto RunBody = [State, Body = MoveTemp(Body), Call]() mutable
 	{
 		// The caller already timed out or cancelled while this call was queued: never run it late.
 		const bool bAbandoned = State->bCompleted || Call.IsCancelled();
@@ -64,7 +148,6 @@ TFuture<FUnrealMcpToolResult> FUnrealMcpGameThreadDispatcher::Dispatch(
 			? FUnrealMcpToolResult::Error(TEXT("Tool call was cancelled before it started; it was not run."))
 			: Body(Call);
 		State->Complete(MoveTemp(Result));
-		Done->Event->Trigger();
 	};
 
 	if (IsInGameThread())
@@ -73,28 +156,11 @@ TFuture<FUnrealMcpToolResult> FUnrealMcpGameThreadDispatcher::Dispatch(
 		return Future;
 	}
 
-	AsyncTask(ENamedThreads::GameThread, [RunBody = MoveTemp(RunBody)]() mutable { RunBody(); });
-
-	// Arm the watcher for the marshalled body. Both lambdas hold a ref to the pooled event, so it is returned
-	// to the pool only after BOTH have finished — never while a still-pending body might trigger it.
+	// Arm the deadline before posting so a body that finishes instantly is simply pruned by the watchdog.
 	const uint32 TimeoutMs = static_cast<uint32>(
 		FMath::Clamp<int64>(static_cast<int64>(Timeout.GetTotalMilliseconds()), 1, static_cast<int64>(MAX_uint32)));
+	FUnrealMcpDispatchWatchdog::Get().Watch(State, Call.CancelRequested, TimeoutMs);
 
-	Async(EAsyncExecution::ThreadPool, [State, Done, TimeoutMs, Call]()
-	{
-		if (Done->Event->Wait(TimeoutMs))
-			return; // the body finished first and already completed the promise — nothing to time out.
-
-		// Timed out before the body finished. Signal cooperative cancellation so a still-running game-thread
-		// body can observe IsCancelled() and bail (§4 — the registry header documents CancelRequested as
-		// "set by a tool-cancel OR a timeout"; until now only tool-cancel set it). The captured Call copy
-		// holds the shared cancel flag alive, so this stays valid even after the bridge drops its CancelFlags
-		// map entry. Then complete the future with the timeout error; if the body completes in the meantime,
-		// its Complete() is a no-op (single-completion guard).
-		if (Call.CancelRequested.IsValid())
-			const_cast<FThreadSafeBool&>(*Call.CancelRequested) = true;
-		State->Complete(FUnrealMcpToolResult::Error(FString::Printf(TEXT("Tool call timed out after %u ms."), TimeoutMs)));
-	});
-
+	AsyncTask(ENamedThreads::GameThread, [RunBody = MoveTemp(RunBody)]() mutable { RunBody(); });
 	return Future;
 }

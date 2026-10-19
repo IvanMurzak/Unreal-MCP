@@ -538,12 +538,13 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
 
             if (timeoutMs > 0)
             {
+                var backstopMs = BackstopDelayMs(timeoutMs);
                 using var backstopCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                var completed = await Task.WhenAny(task, Task.Delay(timeoutMs + IpcProtocol.CallTimeoutGraceMs, backstopCts.Token)).ConfigureAwait(false);
+                var completed = await Task.WhenAny(task, Task.Delay(backstopMs, backstopCts.Token)).ConfigureAwait(false);
                 backstopCts.Cancel();
                 if (completed != task && !cancellationToken.IsCancellationRequested)
                 {
-                    var timeout = new TimeoutException($"{what} call timed out after {timeoutMs + IpcProtocol.CallTimeoutGraceMs} ms with no IPC response.");
+                    var timeout = new TimeoutException($"{what} call timed out after {backstopMs} ms with no IPC response.");
                     _ = SafeAwait(SendAsync(new ToolCancelMessage { RequestId = requestId }, CancellationToken.None));
                     registry.TryFail(requestId, timeout);
                     throw timeout;
@@ -552,6 +553,10 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
 
             return await task.ConfigureAwait(false);
         }
+
+        /// <summary>The local backstop: <paramref name="timeoutMs"/> plus the grace, clamped so it cannot overflow.</summary>
+        internal static int BackstopDelayMs(int timeoutMs) =>
+            (int)Math.Min((long)timeoutMs + IpcProtocol.CallTimeoutGraceMs, int.MaxValue - 1);
 
         /// <summary>
         /// Send a sidecar→plugin message (the §7 <c>device-auth</c> / <c>status</c> feed) over the live IPC

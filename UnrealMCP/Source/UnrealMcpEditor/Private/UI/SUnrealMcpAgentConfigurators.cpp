@@ -126,7 +126,7 @@ TSharedPtr<FJsonObject> SUnrealMcpAgentConfigurators::BuildSettings() const
 	Settings->SetStringField(TEXT("projectRootPath"), ProjectRoot);
 	Settings->SetStringField(TEXT("executableFullPath"), Connection.ServerPath);
 	Settings->SetNumberField(TEXT("port"), Connection.Port);
-	Settings->SetNumberField(TEXT("timeoutMs"), 30000);
+	Settings->SetNumberField(TEXT("timeoutMs"), Connection.PluginTimeoutMs);
 	Settings->SetStringField(TEXT("host"), Connection.HttpUrl);
 	// mcp-authorize PR 5 (design 06, D11): the DEFAULT path is native MCP OAuth — the sidecar writes a
 	// credential-free config, so DON'T forward the bearer there ("HTTP configs: stop embedding tokens"). The REAL
