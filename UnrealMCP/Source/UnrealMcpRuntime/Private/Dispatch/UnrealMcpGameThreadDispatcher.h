@@ -22,8 +22,9 @@ class UNREALMCPRUNTIME_API FUnrealMcpGameThreadDispatcher
 public:
 	/**
 	 * Run @p Body on the game thread (inline when already on it, §4) and return a future for its result.
-	 * A parallel watcher completes the future with a timeout error after @p Timeout if the body has not
-	 * finished. The future is always completed exactly once.
+	 * A shared watchdog thread completes the future with a timeout error after @p Timeout if the body has not
+	 * finished. The future is always completed exactly once. A body that has not started by the time the call
+	 * timed out or was cancelled (@p Call's cancel flag) is skipped, never run late.
 	 */
 	TFuture<FUnrealMcpToolResult> Dispatch(
 		FUnrealMcpToolCall Call,

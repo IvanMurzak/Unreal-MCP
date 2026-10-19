@@ -33,7 +33,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
         /// <summary>The derived per-project local-server port the server listens on (the port the plugin already resolved via project-config).</summary>
         [JsonPropertyName("port")] public int Port { get; set; }
         /// <summary>Plugin timeout in milliseconds (the server's <c>plugin-timeout</c> launch arg).</summary>
-        [JsonPropertyName("pluginTimeoutMs")] public int PluginTimeoutMs { get; set; } = IpcProtocol.DefaultToolTimeoutMs;
+        [JsonPropertyName("pluginTimeoutMs")] public int PluginTimeoutMs { get; set; } = IpcProtocol.DefaultRequestTimeoutMs;
         /// <summary>The auth mode, lowercase: <c>none</c> / <c>oauth</c> / <c>token</c> (the shared AuthOption enum names). Unknown → none (crash-safe loopback default).</summary>
         [JsonPropertyName("authMode")] public string AuthMode { get; set; } = "none";
         /// <summary>The offline shared secret for <c>token</c> mode (NEVER logged). Ignored in none/oauth.</summary>

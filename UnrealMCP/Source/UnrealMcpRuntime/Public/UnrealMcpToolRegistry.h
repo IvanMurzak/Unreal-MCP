@@ -114,6 +114,9 @@ struct UNREALMCPRUNTIME_API FUnrealMcpToolResult
 	FString Message;                       // human-readable text content block
 	TSharedPtr<FJsonObject> Structured;    // structured content (may be null)
 	TArray<FUnrealMcpImageContent> Images; // image content blocks, appended after the text block (§1.3)
+	// Not terminal: the dispatcher runs the handler again on a later game-thread tick, until the call's
+	// timeout. For a dependency that comes up after the editor (e.g. Python's first tick). See RetryLater.
+	bool bRetryLater = false;
 
 	static FUnrealMcpToolResult Success(const FString& InMessage, const TSharedPtr<FJsonObject>& InStructured = nullptr)
 	{
@@ -122,6 +125,16 @@ struct UNREALMCPRUNTIME_API FUnrealMcpToolResult
 	static FUnrealMcpToolResult Error(const FString& InMessage)
 	{
 		return FUnrealMcpToolResult{ false, InMessage, nullptr };
+	}
+	/**
+	 * "Not ready yet, ask me again": the game-thread dispatcher re-runs the handler on a later tick (it never
+	 * blocks the game thread) until it returns a terminal result or the call times out. @p InReason is logged.
+	 */
+	static FUnrealMcpToolResult RetryLater(const FString& InReason)
+	{
+		FUnrealMcpToolResult Result{ false, InReason, nullptr };
+		Result.bRetryLater = true;
+		return Result;
 	}
 	/**
 	 * Success carrying a single image content block (§10 screenshot family). Deliberately takes NO structured

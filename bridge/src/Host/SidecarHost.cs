@@ -361,6 +361,11 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         public IMcpPlugin? Plugin => _plugin;
         public ConnectionConfig Config => _config;
 
+        private volatile int _toolTimeoutMs = IpcProtocol.DefaultToolTimeoutMs;
+
+        /// <summary>The per-tool-call timeout, set by the <c>toolTimeoutMs</c> config field (§8).</summary>
+        public int ToolTimeoutMs => _toolTimeoutMs;
+
         /// <summary>
         /// The static bearer the sidecar currently holds — the value <see cref="ConnectionConfig.CredentialProvider"/>
         /// returns to the connection layer (McpPlugin 7.0 replaced the old <c>ConnectionConfig.Token</c> string with
@@ -596,7 +601,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             _registrar = new ManifestRegistrar(
                 toolSink,
                 _ipc,
-                _loggerProvider?.CreateLogger(nameof(ManifestRegistrar)));
+                _loggerProvider?.CreateLogger(nameof(ManifestRegistrar)),
+                () => ToolTimeoutMs);
 
             // Wire the registrar BEFORE the IPC loop can deliver a manifest.
             _ipc.Registrar = _registrar;
@@ -880,6 +886,9 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
 
             if (config["keepConnected"] is JsonValue keepNode && keepNode.TryGetValue<bool>(out var keepConnected))
                 _config.KeepConnected = keepConnected;
+            // Absent or non-positive leaves the current value (partial pushes, older plugins).
+            if (config["toolTimeoutMs"] is JsonValue timeoutNode && timeoutNode.TryGetValue<int>(out var toolTimeoutMs) && toolTimeoutMs > 0)
+                _toolTimeoutMs = toolTimeoutMs;
         }
 
         /// <summary>

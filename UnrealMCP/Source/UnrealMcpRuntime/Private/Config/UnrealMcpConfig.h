@@ -82,6 +82,7 @@ public:
 	static UNREALMCPRUNTIME_API const TCHAR* EnvTransport;      // UNREAL_MCP_TRANSPORT
 	static UNREALMCPRUNTIME_API const TCHAR* EnvLogLevel;       // UNREAL_MCP_LOG_LEVEL
 	static UNREALMCPRUNTIME_API const TCHAR* EnvBridgePath;     // UNREAL_MCP_BRIDGE_PATH (dev-only, §6)
+	static UNREALMCPRUNTIME_API const TCHAR* EnvToolTimeout;    // UNREAL_MCP_TOOL_TIMEOUT (milliseconds)
 
 	// --- Defaults. ---
 	static UNREALMCPRUNTIME_API const TCHAR* DefaultCloudBaseUrl; // https://ai-game.dev
@@ -90,6 +91,10 @@ public:
 	static UNREALMCPRUNTIME_API const TCHAR* DefaultCustomHost;
 	static UNREALMCPRUNTIME_API const TCHAR* DefaultLogLevel;     // Info
 	static UNREALMCPRUNTIME_API const TCHAR* DefaultTransport;    // http
+	/** Per-tool-call timeout default; mirrors the sidecar's IpcProtocol.DefaultToolTimeoutMs. */
+	static constexpr int32 DefaultToolTimeoutMs = 300000;
+	/** Added to the tool timeout for the server's `plugin-timeout`, so the editor's own timeout answers first. */
+	static constexpr int32 ServerPluginTimeoutMarginMs = 10000;
 
 	// --- Live (post-override) backing fields, serialized to the camelCase JSON keys in the comments. ---
 	EUnrealMcpConnectionMode ConnectionMode = EUnrealMcpConnectionMode::Cloud; // "connectionMode"
@@ -102,6 +107,8 @@ public:
 	FString LogLevel;          // "logLevel"
 	FString Transport;         // "transport"
 	bool bStartServer = false; // "startServer"
+	// "toolTimeoutMs" — per-tool-call timeout pushed to the sidecar (UNREAL_MCP_TOOL_TIMEOUT override). Only positive values are accepted.
+	int32 ToolTimeoutMs = DefaultToolTimeoutMs;
 	TArray<FString> EnabledTools; // "enabledTools" (UNREAL_MCP_TOOLS override; empty = no override)
 	// "disabledTools" — the per-tool enable-map persisted by the §7 MCP Tools window. Names listed here are
 	// hidden from the served manifest (excluded by the registry on boot + on every UI toggle). A blocklist,
@@ -175,7 +182,7 @@ public:
 
 	/**
 	 * Build the effective connection config the plugin pushes to the sidecar (§1.3 `config` / handshake-ack):
-	 * resolves mode → host/cloudUrl, and mode+auth → token. Keys: mode, host, cloudUrl, token, keepConnected.
+	 * resolves mode → host/cloudUrl, and mode+auth → token. Keys: mode, host, cloudUrl, token, authOption, explicitToken, keepConnected, toolTimeoutMs.
 	 * The token is the resolved bearer (empty in Custom+None) — the sidecar sends it verbatim, never re-resolves.
 	 */
 	UNREALMCPRUNTIME_API TSharedPtr<FJsonObject> BuildEffectiveConnectionConfig() const;
@@ -215,6 +222,12 @@ public:
 	UNREALMCPRUNTIME_API FString ResolveCloudBaseUrl() const;
 	/** The resolved Custom-mode host (CustomHost or DefaultCustomHost), trailing slash trimmed. */
 	UNREALMCPRUNTIME_API FString ResolveCustomHost() const;
+	/**
+	 * The `plugin-timeout` for the MCP server (local launch args, agent configs): ToolTimeoutMs plus
+	 * ServerPluginTimeoutMarginMs. The released McpPlugin server waits that long per attempt and then
+	 * RE-SENDS the call (up to 10 times), so a shorter value runs a long tool call several times.
+	 */
+	UNREALMCPRUNTIME_API int32 ResolveServerPluginTimeoutMs() const;
 	/** The mode+auth-resolved bearer token: Cloud→CloudToken, Custom→(None?empty:CustomToken). */
 	UNREALMCPRUNTIME_API FString ResolveEffectiveToken() const;
 

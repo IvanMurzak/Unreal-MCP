@@ -28,7 +28,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
         public static ProxyPrompt Create(PromptDescriptor descriptor, IPromptCallChannel channel)
         {
             var promptName = descriptor.Name;
-            var timeoutMs = IpcProtocol.DefaultToolTimeoutMs;
+            var timeoutMs = IpcProtocol.DefaultRequestTimeoutMs;
             var role = ParseRole(descriptor.Role) ?? Role.User;
 
             return new ProxyPrompt(

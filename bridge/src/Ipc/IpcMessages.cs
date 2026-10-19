@@ -268,7 +268,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
         [JsonPropertyName("requestId")] public string RequestId { get; set; } = string.Empty;
         [JsonPropertyName("prompt")] public string Prompt { get; set; } = string.Empty;
         [JsonPropertyName("arguments")] public JsonObject? Arguments { get; set; }
-        [JsonPropertyName("timeoutMs")] public int TimeoutMs { get; set; } = IpcProtocol.DefaultToolTimeoutMs;
+        [JsonPropertyName("timeoutMs")] public int TimeoutMs { get; set; } = IpcProtocol.DefaultRequestTimeoutMs;
     }
 
     /// <summary>One rendered prompt message (≈ <c>ResponseGetPrompt.Messages[]</c>, §A.1): a role + content text.</summary>
@@ -296,7 +296,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
         [JsonPropertyName("type")] public string Type { get; set; } = IpcProtocol.Type.ResourceRead;
         [JsonPropertyName("requestId")] public string RequestId { get; set; } = string.Empty;
         [JsonPropertyName("uri")] public string Uri { get; set; } = string.Empty;
-        [JsonPropertyName("timeoutMs")] public int TimeoutMs { get; set; } = IpcProtocol.DefaultToolTimeoutMs;
+        [JsonPropertyName("timeoutMs")] public int TimeoutMs { get; set; } = IpcProtocol.DefaultRequestTimeoutMs;
     }
 
     /// <summary>

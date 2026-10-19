@@ -118,6 +118,113 @@ void FUnrealMcpDispatcherSpec::Define()
 			});
 		});
 
+		// A call the caller already cancelled must not run when the game thread reaches it.
+		It("skips a body whose call was cancelled before it ran", [this]()
+		{
+			FUnrealMcpGameThreadDispatcher Dispatcher;
+			FUnrealMcpToolCall Call;
+			Call.CancelRequested = MakeShared<FThreadSafeBool, ESPMode::ThreadSafe>(true);
+			bool bBodyRan = false;
+
+			const FUnrealMcpToolResult Result = Dispatcher.Dispatch(
+				Call,
+				[&bBodyRan](const FUnrealMcpToolCall&)
+				{
+					bBodyRan = true;
+					return FUnrealMcpToolResult::Success(TEXT("ran"));
+				},
+				FTimespan::FromSeconds(5)).Get();
+
+			TestFalse(TEXT("body did not run"), bBodyRan);
+			TestFalse(TEXT("error result"), Result.bSuccess);
+			TestTrue(TEXT("says it was not run"), Result.Message.Contains(TEXT("not run")));
+		});
+
+		// A call that timed out while queued behind a slow body must be dropped, not run late once the
+		// game thread frees up (the duplicate / late execution case).
+		LatentIt("skips a queued body after its call timed out", FTimespan::FromSeconds(15), [this](const FDoneDelegate& Done)
+		{
+			Async(EAsyncExecution::Thread, [this, Done]()
+			{
+				FUnrealMcpGameThreadDispatcher Dispatcher;
+				TSharedRef<FThreadSafeBool, ESPMode::ThreadSafe> bLateBodyRan = MakeShared<FThreadSafeBool, ESPMode::ThreadSafe>(false);
+
+				// Occupies the game thread for 1 s.
+				TFuture<FUnrealMcpToolResult> Slow = Dispatcher.Dispatch(
+					FUnrealMcpToolCall(),
+					[](const FUnrealMcpToolCall&)
+					{
+						FPlatformProcess::Sleep(1.0f);
+						return FUnrealMcpToolResult::Success(TEXT("slow"));
+					},
+					FTimespan::FromSeconds(10));
+
+				// Queued behind it with a 100 ms timeout; the flag mirrors the bridge's per-call cancel flag.
+				FUnrealMcpToolCall Queued;
+				Queued.CancelRequested = MakeShared<FThreadSafeBool, ESPMode::ThreadSafe>(false);
+				TFuture<FUnrealMcpToolResult> Late = Dispatcher.Dispatch(
+					Queued,
+					[bLateBodyRan](const FUnrealMcpToolCall&)
+					{
+						bLateBodyRan.Get() = true;
+						return FUnrealMcpToolResult::Success(TEXT("late"));
+					},
+					FTimespan::FromMilliseconds(100));
+
+				const FUnrealMcpToolResult LateResult = Late.Get();
+				TestFalse(TEXT("queued call timed out"), LateResult.bSuccess);
+				TestTrue(TEXT("slow call succeeded"), Slow.Get().bSuccess);
+
+				// The slow body has finished, so the game thread has (or soon will have) reached the queued one.
+				FPlatformProcess::Sleep(0.5f);
+				TestFalse(TEXT("timed-out body never ran"), static_cast<bool>(bLateBodyRan.Get()));
+				Done.Execute();
+			});
+		});
+
+		// A body that is not ready yet (RetryLater) is run again on a later tick, never blocking the game thread.
+		LatentIt("re-runs a body that asks to retry until it returns a result", FTimespan::FromSeconds(15), [this](const FDoneDelegate& Done)
+		{
+			Async(EAsyncExecution::Thread, [this, Done]()
+			{
+				FUnrealMcpGameThreadDispatcher Dispatcher;
+				TSharedRef<FThreadSafeCounter, ESPMode::ThreadSafe> Attempts = MakeShared<FThreadSafeCounter, ESPMode::ThreadSafe>();
+				const FUnrealMcpToolResult Result = Dispatcher.Dispatch(
+					FUnrealMcpToolCall(),
+					[Attempts](const FUnrealMcpToolCall&)
+					{
+						return Attempts->Increment() < 3
+							? FUnrealMcpToolResult::RetryLater(TEXT("not yet"))
+							: FUnrealMcpToolResult::Success(TEXT("ready"));
+					},
+					FTimespan::FromSeconds(10)).Get();
+
+				TestTrue(TEXT("success"), Result.bSuccess);
+				TestEqual(TEXT("message"), Result.Message, FString(TEXT("ready")));
+				TestEqual(TEXT("ran three times"), Attempts->GetValue(), 3);
+				Done.Execute();
+			});
+		});
+
+		LatentIt("times out a body that never stops asking to retry", FTimespan::FromSeconds(15), [this](const FDoneDelegate& Done)
+		{
+			Async(EAsyncExecution::Thread, [this, Done]()
+			{
+				FUnrealMcpGameThreadDispatcher Dispatcher;
+				FUnrealMcpToolCall Call;
+				Call.CancelRequested = MakeShared<FThreadSafeBool, ESPMode::ThreadSafe>(false);
+				const FUnrealMcpToolResult Result = Dispatcher.Dispatch(
+					Call,
+					[](const FUnrealMcpToolCall&) { return FUnrealMcpToolResult::RetryLater(TEXT("never")); },
+					FTimespan::FromMilliseconds(500)).Get();
+
+				TestFalse(TEXT("error"), Result.bSuccess);
+				TestTrue(TEXT("timed out"), Result.Message.Contains(TEXT("timed out")));
+				TestTrue(TEXT("cancel flag set"), Call.IsCancelled());
+				Done.Execute();
+			});
+		});
+
 		// HandleToolCancel flips the shared cancel flag that the bridge stores; assert FUnrealMcpToolCall
 		// observes that flip (and stays false with no flag / a clear flag).
 		It("reflects the shared cancel flag through IsCancelled()", [this]()
