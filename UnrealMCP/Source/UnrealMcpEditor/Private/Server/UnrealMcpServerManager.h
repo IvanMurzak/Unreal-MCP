@@ -36,6 +36,22 @@ public:
 	/** Env var that overrides the resolved server binary path (skips cache + download). Mirrors the CLI's UNREAL_MCP_SERVER_PATH. */
 	static UNREALMCPEDITOR_API const TCHAR* ServerPathEnvVar;
 
+	/**
+	 * The first server version built on McpPlugin.Server 8.11.0: it honours `tool-timeout` and sends a tool call once.
+	 * Older servers bound a tool call by `plugin-timeout` per attempt and re-send it (see ResolveServerPluginTimeoutMs).
+	 */
+	static UNREALMCPEDITOR_API const TCHAR* MinServerVersionWithToolTimeout;
+
+	/** Whether dotted version @p Version (optional `v` prefix and `-suffix`) is >= @p Minimum. Unparseable -> false. Pure. */
+	static UNREALMCPEDITOR_API bool IsServerVersionAtLeast(const FString& Version, const FString& Minimum);
+
+	/**
+	 * Whether the server the editor launches (and writes into agent configs) honours `tool-timeout`: the pinned
+	 * ServerVersion is >= MinServerVersionWithToolTimeout and no ServerPathEnvVar override points at a binary of unknown
+	 * version. False means "assume an older server", the safe side.
+	 */
+	static UNREALMCPEDITOR_API bool ServerHasToolTimeout();
+
 	UNREALMCPEDITOR_API FUnrealMcpServerManager();
 	UNREALMCPEDITOR_API ~FUnrealMcpServerManager();
 

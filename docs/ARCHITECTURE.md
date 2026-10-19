@@ -580,11 +580,18 @@ Godot's `GodotMainThread`:
   writer mutex. Slow tools therefore never stall heartbeats — `ping`/`pong` stays on the IPC thread.
 - **Timeout:** per-call (`tool-call.timeoutMs`). The sidecar stamps the plugin-pushed `toolTimeoutMs`
   (`UNREAL_MCP_TOOL_TIMEOUT`, §8; default 300 s) on every
-  tool call; prompt-get / resource-read keep 30 s. The MCP server has its own limits: it waits
-  `plugin-timeout` per attempt (and the released server re-sends the call after it), and caps a tool
-  call at 5 min. So the editor passes `toolTimeoutMs` + 10 s as `plugin-timeout` to the local server it
-  starts and to the agent configs it writes. Once McpPlugin ships a separate `tool-timeout` (and stops
-  re-sending), pass that too. A parallel timer fires the promise with a structured timeout error;
+  tool call; prompt-get / resource-read keep 30 s. The MCP server has its own limit. A server on
+  McpPlugin.Server 8.11.0+ sends a tool call once and waits `tool-timeout` for it; `plugin-timeout` is
+  only its connection timeout. An older server waits `plugin-timeout` per attempt, re-sends the call
+  after it (up to 10 times), and caps a tool call at 5 min. The editor always passes `toolTimeoutMs` as
+  `tool-timeout` to the local server it starts (older servers ignore it). `plugin-timeout` is 10 s when
+  `FUnrealMcpServerManager::ServerHasToolTimeout()` (pinned `ServerVersion` >=
+  `MinServerVersionWithToolTimeout`, no `UNREAL_MCP_SERVER_PATH` override), else `toolTimeoutMs` + 10 s so
+  an older server does not give up or re-send first. Agent configs written by the shared McpPlugin
+  writer carry only `plugin-timeout` (a new server defaults `tool-timeout` to max(300 s, plugin-timeout)),
+  so they keep `toolTimeoutMs` + 10 s when the tool timeout is above 300 s. The sidecar (McpPlugin 8.11.0)
+  also answers a re-sent tool call (same request id, running or finished within 5 min) with the first
+  run's result. A parallel timer fires the promise with a structured timeout error;
   the flag set on `FUnrealMcpToolCall::CancelRequested` (a `FThreadSafeBool`) lets long tool bodies
   exit early at their own checkpoints. A game-thread task cannot be force-killed — an abandoned
   body finishes silently, logs at `Verbose`, and its late result is dropped (requestId already
@@ -592,7 +599,7 @@ Godot's `GodotMainThread`:
 - **Cancellation:** `tool-cancel` sets the same flag — one cooperative mechanism for both paths.
 - **No late runs:** a body whose call already timed out or was cancelled while it waited in the
   game-thread queue is skipped (error "cancelled before it started; it was not run"). This covers
-  the call's own timeout and `tool-cancel`; a server re-send is a new call and is not deduplicated here.
+  the call's own timeout and `tool-cancel`; a server re-send is deduplicated earlier, in the sidecar.
 - **Watchdog:** one process-lifetime thread enforces every pending call's deadline (no pooled thread is
   held per call).
 - **Not ready yet:** a handler may return `FUnrealMcpToolResult::RetryLater(reason)`; the dispatcher runs it

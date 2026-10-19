@@ -52,7 +52,7 @@
   <!--
     Reused NuGet pins — normally owned by the upstream release pipelines and kept in lockstep
     with Godot-MCP (Godot-MCP.csproj), except where a ⚠ DEVIATION entry below records an owner-approved
-    early adoption. Current: McpPlugin 8.9.0 + ReflectorNet 5.4.2 + Rql 0.1.1.
+    early adoption. Current: McpPlugin 8.11.0 + ReflectorNet 5.4.2 + Rql 0.1.1.
     The MCP/reflection stack is NOT forked. Historical context: the 6.8.0 bump consumed the new
     shared engine-agnostic com.IvanMurzak.McpPlugin.AgentConfig module (the AI-agent configurators
     + the AgentConfiguratorDescription UI-DTO) so the sidecar hosts the AI-agent configuration
@@ -105,6 +105,11 @@
     McpPlugin 8.8.1 -> 8.9.0 adopts the shared Custom+oauth loopback rule
     (CustomOAuthCredentialPolicy / HostScope, replacing the bridge's local copy) and the consumer-supplied
     ConnectionConfig.ConnectionErrorHint (no more Unity-worded hint after SignalR errors). ReflectorNet floor stays 5.4.2.
+    ⚠ DEVIATION (owner-approved, outside the train; Godot-MCP keeps its train-owned pin until the next train):
+    McpPlugin 8.9.0 -> 8.11.0 (MCP-Plugin-dotnet #266): the plugin side answers a re-sent tool call (same request id,
+    still running or finished within 5 min) with the first run's result instead of running it again, and the
+    tool-timeout server arg name (Consts.MCP.Server.Args.ToolTimeout) the sidecar appends to local-server launch args.
+    ReflectorNet floor stays 5.4.2.
   -->
   <!--
     Local-LIB dev toggle (auth-fixes f1b — parity with the GameDev-MCP-Server + Unity/Godot
@@ -139,7 +144,7 @@
 
   <ItemGroup Condition="'$(UseLocalMcpPlugin)' != 'true'">
     <PackageReference Include="com.IvanMurzak.ReflectorNet" Version="5.4.2" />
-    <PackageReference Include="com.IvanMurzak.McpPlugin" Version="8.9.0" />
+    <PackageReference Include="com.IvanMurzak.McpPlugin" Version="8.11.0" />
   </ItemGroup>
 
   <!--

@@ -1213,6 +1213,9 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
                     token: request.Token,
                     authIssuer: request.AuthIssuer,
                     publicUrl: request.PublicUrl);
+                // The shared builder has no tool-timeout parameter yet; servers before McpPlugin.Server 8.11.0 ignore it.
+                if (request.ToolTimeoutMs > 0)
+                    args += $" {Consts.MCP.Server.Args.ToolTimeout}={request.ToolTimeoutMs}";
                 return new ServerLaunchArgsResultMessage
                 {
                     RequestId = request.RequestId,

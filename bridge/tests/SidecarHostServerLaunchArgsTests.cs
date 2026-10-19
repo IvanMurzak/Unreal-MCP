@@ -35,7 +35,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         }
 
         private static JsonObject Request(string requestId, string authMode, int port = 20123, int timeoutMs = 10000,
-            string? token = null, string? authIssuer = null, string? publicUrl = null)
+            string? token = null, string? authIssuer = null, string? publicUrl = null, int? toolTimeoutMs = null)
         {
             var node = new JsonObject
             {
@@ -48,6 +48,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             if (token != null) node["token"] = token;
             if (authIssuer != null) node["authIssuer"] = authIssuer;
             if (publicUrl != null) node["publicUrl"] = publicUrl;
+            if (toolTimeoutMs != null) node["toolTimeoutMs"] = toolTimeoutMs;
             return node;
         }
 
@@ -56,13 +57,15 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         {
             var request = new ServerLaunchArgsRequestMessage
             {
-                RequestId = "req-1", Port = 20123, PluginTimeoutMs = 10000, AuthMode = "token", Token = "secret123",
+                RequestId = "req-1", Port = 20123, PluginTimeoutMs = 10000, ToolTimeoutMs = 300000, AuthMode = "token", Token = "secret123",
             };
             var reqJson = JsonSerializer.Serialize(request, IpcProtocol.JsonOptions);
             var reqBack = JsonSerializer.Deserialize<ServerLaunchArgsRequestMessage>(reqJson, IpcProtocol.JsonOptions)!;
             Assert.Equal(IpcProtocol.Type.ServerLaunchArgs, reqBack.Type);
             Assert.Equal("req-1", reqBack.RequestId);
             Assert.Equal(20123, reqBack.Port);
+            Assert.Equal(300000, reqBack.ToolTimeoutMs);
+            Assert.Contains("\"toolTimeoutMs\":300000", reqJson);
             Assert.Equal("token", reqBack.AuthMode);
             Assert.Equal("secret123", reqBack.Token);
 
@@ -90,6 +93,28 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             Assert.Contains("auth=none", result.Args!);              // target-state key (not legacy `authorization=`)
             Assert.DoesNotContain("token=", result.Args!);
             Assert.DoesNotContain("authorization=", result.Args!);
+        }
+
+        [Fact]
+        public void BuildServerLaunchArgsResult_ToolTimeout_AppendsToolTimeoutArg()
+        {
+            using var host = BuildHost();
+
+            var result = host.BuildServerLaunchArgsResult(Request("r-tt", "token", token: "secret123", toolTimeoutMs: 600000));
+
+            Assert.True(result.Ok);
+            Assert.Contains("plugin-timeout=10000", result.Args!);
+            Assert.EndsWith(" tool-timeout=600000", result.Args!);
+        }
+
+        [Fact]
+        public void BuildServerLaunchArgsResult_NoToolTimeout_OmitsToolTimeoutArg()
+        {
+            using var host = BuildHost();
+
+            // An older plugin sends no toolTimeoutMs: the args keep their pre-8.11 shape.
+            Assert.DoesNotContain("tool-timeout", host.BuildServerLaunchArgsResult(Request("r-nt", "none")).Args!);
+            Assert.DoesNotContain("tool-timeout", host.BuildServerLaunchArgsResult(Request("r-zt", "none", toolTimeoutMs: 0)).Args!);
         }
 
         [Fact]

@@ -33,6 +33,8 @@
 // (SERVER_VERSION) and Unity's McpServerManager.ServerVersion — the three plugins consume the SAME server.
 const TCHAR* FUnrealMcpServerManager::ServerVersion = TEXT("9.2.11");
 const TCHAR* FUnrealMcpServerManager::ServerPathEnvVar = TEXT("UNREAL_MCP_SERVER_PATH");
+// GameDev-MCP-Server 9.2.12 is the last release on McpPlugin.Server < 8.11.0; the next one carries 8.11.0.
+const TCHAR* FUnrealMcpServerManager::MinServerVersionWithToolTimeout = TEXT("9.2.13");
 
 namespace
 {
@@ -161,6 +163,55 @@ void FUnrealMcpServerManager::PrepareBinaryForSpawn(const FString& Path)
 {
 	// §6.6: ensure the apphost is executable (shared +x helper — no-op on Windows). Not fatal on failure.
 	FUnrealMcpProcessUtil::MakeExecutable(Path);
+}
+
+bool FUnrealMcpServerManager::IsServerVersionAtLeast(const FString& Version, const FString& Minimum)
+{
+	auto Parse = [](FString Text, TArray<int32>& Out) -> bool
+	{
+		Text.TrimStartAndEndInline();
+		Text.RemoveFromStart(TEXT("v"));
+		int32 Dash = INDEX_NONE;
+		if (Text.FindChar(TEXT('-'), Dash))
+			Text.LeftInline(Dash);
+		TArray<FString> Parts;
+		Text.ParseIntoArray(Parts, TEXT("."), /*InCullEmpty*/ false);
+		if (Parts.Num() == 0)
+			return false;
+		for (const FString& Part : Parts)
+		{
+			for (const TCHAR Ch : Part)
+			{
+				if (!FChar::IsDigit(Ch))
+					return false;
+			}
+			if (Part.IsEmpty())
+				return false;
+			Out.Add(FCString::Atoi(*Part));
+		}
+		return true;
+	};
+
+	TArray<int32> Have;
+	TArray<int32> Need;
+	if (!Parse(Version, Have) || !Parse(Minimum, Need))
+		return false;
+	for (int32 Index = 0; Index < FMath::Max(Have.Num(), Need.Num()); ++Index)
+	{
+		const int32 A = Have.IsValidIndex(Index) ? Have[Index] : 0;
+		const int32 B = Need.IsValidIndex(Index) ? Need[Index] : 0;
+		if (A != B)
+			return A > B;
+	}
+	return true;
+}
+
+bool FUnrealMcpServerManager::ServerHasToolTimeout()
+{
+	const FString Override = FPlatformMisc::GetEnvironmentVariable(ServerPathEnvVar);
+	if (!Override.IsEmpty() && FPaths::FileExists(Override))
+		return false; // a dev/CI binary of unknown version (ResolveBinaryPath prefers it)
+	return IsServerVersionAtLeast(ServerVersion, MinServerVersionWithToolTimeout);
 }
 
 FString FUnrealMcpServerManager::ResolveBinaryPath() const

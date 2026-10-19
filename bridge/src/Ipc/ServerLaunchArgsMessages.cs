@@ -34,6 +34,11 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
         [JsonPropertyName("port")] public int Port { get; set; }
         /// <summary>Plugin timeout in milliseconds (the server's <c>plugin-timeout</c> launch arg).</summary>
         [JsonPropertyName("pluginTimeoutMs")] public int PluginTimeoutMs { get; set; } = IpcProtocol.DefaultRequestTimeoutMs;
+        /// <summary>
+        /// How long the server may wait for one tool call, in milliseconds (the server's <c>tool-timeout</c> launch
+        /// arg, McpPlugin.Server 8.11.0+; older servers ignore it). 0 or absent (an older plugin) omits the arg.
+        /// </summary>
+        [JsonPropertyName("toolTimeoutMs")] public int ToolTimeoutMs { get; set; }
         /// <summary>The auth mode, lowercase: <c>none</c> / <c>oauth</c> / <c>token</c> (the shared AuthOption enum names). Unknown → none (crash-safe loopback default).</summary>
         [JsonPropertyName("authMode")] public string AuthMode { get; set; } = "none";
         /// <summary>The offline shared secret for <c>token</c> mode (NEVER logged). Ignored in none/oauth.</summary>
@@ -57,7 +62,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
         [JsonPropertyName("ok")] public bool Ok { get; set; }
         /// <summary>A short human-readable failure reason on <c>ok == false</c> (never a secret).</summary>
         [JsonPropertyName("error")] public string? Error { get; set; }
-        /// <summary>The composed launch-arg string on <c>ok == true</c> (e.g. <c>port=20123 plugin-timeout=10000 client-transport=streamableHttp auth=token token=…</c>).</summary>
+        /// <summary>The composed launch-arg string on <c>ok == true</c> (e.g. <c>port=20123 plugin-timeout=10000 client-transport=streamableHttp auth=token token=… tool-timeout=300000</c>).</summary>
         [JsonPropertyName("args")] public string? Args { get; set; }
     }
 }

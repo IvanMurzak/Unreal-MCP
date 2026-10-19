@@ -19,9 +19,9 @@ const PYTHON_NOT_AVAILABLE_PREFIX = 'NotAvailable: Python is not available';
 export const PYTHON_STARTUP_GRACE_MS = 30_000;
 const PYTHON_STARTUP_RETRY_MS = 1_000;
 /**
- * Client-side tool call timeout: a Python snippet may build or save assets. Meant to pair with a 300 s server-side
- * plugin timeout (the editor is to pass the tool timeout as `plugin-timeout` when it starts the server), staying
- * above it so the server's own timeout error would arrive first.
+ * Client-side tool call timeout: a Python snippet may build or save assets. Stays above the editor's default 300 s
+ * tool timeout (`UNREAL_MCP_TOOL_TIMEOUT`, passed to the server as `tool-timeout`) so the server's own timeout error
+ * arrives first.
  */
 export const DEFAULT_EXEC_TIMEOUT_MS = 310_000;
 

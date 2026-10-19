@@ -154,6 +154,52 @@ void FUnrealMcpServerManagerSpec::Define()
 		});
 	});
 
+	Describe("IsServerVersionAtLeast", [this]()
+	{
+		It("compares dotted versions numerically", [this]()
+		{
+			TestTrue(TEXT("equal"), FUnrealMcpServerManager::IsServerVersionAtLeast(TEXT("9.2.13"), TEXT("9.2.13")));
+			TestTrue(TEXT("newer patch"), FUnrealMcpServerManager::IsServerVersionAtLeast(TEXT("9.2.14"), TEXT("9.2.13")));
+			TestTrue(TEXT("newer minor"), FUnrealMcpServerManager::IsServerVersionAtLeast(TEXT("9.10.0"), TEXT("9.2.13")));
+			TestTrue(TEXT("newer major"), FUnrealMcpServerManager::IsServerVersionAtLeast(TEXT("10.0.0"), TEXT("9.2.13")));
+			TestFalse(TEXT("older patch"), FUnrealMcpServerManager::IsServerVersionAtLeast(TEXT("9.2.12"), TEXT("9.2.13")));
+			TestFalse(TEXT("older minor"), FUnrealMcpServerManager::IsServerVersionAtLeast(TEXT("9.1.99"), TEXT("9.2.13")));
+			TestTrue(TEXT("missing part = 0"), FUnrealMcpServerManager::IsServerVersionAtLeast(TEXT("9.3"), TEXT("9.2.13")));
+		});
+
+		It("accepts a v prefix and drops a pre-release suffix", [this]()
+		{
+			TestTrue(TEXT("v prefix"), FUnrealMcpServerManager::IsServerVersionAtLeast(TEXT("v9.2.13"), TEXT("9.2.13")));
+			TestTrue(TEXT("suffix"), FUnrealMcpServerManager::IsServerVersionAtLeast(TEXT("9.2.13-rc.1"), TEXT("9.2.13")));
+		});
+
+		It("treats an unparseable version as too old", [this]()
+		{
+			TestFalse(TEXT("empty"), FUnrealMcpServerManager::IsServerVersionAtLeast(TEXT(""), TEXT("9.2.13")));
+			TestFalse(TEXT("garbage"), FUnrealMcpServerManager::IsServerVersionAtLeast(TEXT("latest"), TEXT("9.2.13")));
+			TestFalse(TEXT("empty part"), FUnrealMcpServerManager::IsServerVersionAtLeast(TEXT("10..0"), TEXT("9.2.13")));
+		});
+	});
+
+	Describe("ServerHasToolTimeout", [this]()
+	{
+		It("follows the pinned server version", [this]()
+		{
+			ServerSpecCleanup();
+			TestEqual(TEXT("pinned version decides"), FUnrealMcpServerManager::ServerHasToolTimeout(),
+				FUnrealMcpServerManager::IsServerVersionAtLeast(FUnrealMcpServerManager::ServerVersion,
+					FUnrealMcpServerManager::MinServerVersionWithToolTimeout));
+		});
+
+		It("assumes an older server when UNREAL_MCP_SERVER_PATH points at a binary", [this]()
+		{
+			const FString Fake = ServerSpecMakeFakeBinary(TEXT("override-server.bin"));
+			FPlatformMisc::SetEnvironmentVar(TEXT("UNREAL_MCP_SERVER_PATH"), *Fake);
+			TestFalse(TEXT("override -> unknown version"), FUnrealMcpServerManager::ServerHasToolTimeout());
+			ServerSpecCleanup();
+		});
+	});
+
 	Describe("ResolveBinaryPath", [this]()
 	{
 		It("returns the UNREAL_MCP_SERVER_PATH override when it points at an existing file", [this]()

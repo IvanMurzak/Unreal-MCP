@@ -306,7 +306,7 @@ void FUnrealMcpEditorCoordinator::Startup()
 		// IPC; ApplyServerLaunchArgsResult runs Start with the returned string. Returns true = start INITIATED (the
 		// server-running sink polls IsRunning to reflect the actual state once the async Start completes).
 		const FUnrealMcpConfig Live = FUnrealMcpConfig::LoadAndResolve();
-		CoordinatorForStart->RequestServerLaunchArgs(ServerPort, Live.ResolveServerPluginTimeoutMs(), Live, EServerLaunch::Start);
+		CoordinatorForStart->RequestServerLaunchArgs(ServerPort, Live, EServerLaunch::Start);
 		return true;
 	};
 	ViewModel->OnStopLocalServer = [ServerPtr]()
@@ -482,7 +482,8 @@ void FUnrealMcpEditorCoordinator::Startup()
 		{
 			const FUnrealMcpConfig Live = FUnrealMcpConfig::LoadAndResolve();
 			const int32 Port = BridgeServerPtr ? BridgeServerPtr->GetBoundPort() : 0;
-			return FAiAgentConnectionInfo::FromPluginConfig(Live, /*ServerPath*/ FString(), Port);
+			return FAiAgentConnectionInfo::FromPluginConfig(Live, /*ServerPath*/ FString(), Port,
+				FUnrealMcpServerManager::ServerHasToolTimeout());
 		},
 		// §7 (issue #101) AI Agent Configurators: send a configurator request to the sidecar over IPC. Returns
 		// false when no sidecar is connected — the thin panel then shows its graceful "bridge not connected"
@@ -617,13 +618,13 @@ void FUnrealMcpEditorCoordinator::ApplyProjectConfigResult(const TSharedPtr<FJso
 		// g5/g6 consolidation: the reattach's launch args (used by the watchdog respawn) are also sidecar-composed —
 		// request them; ApplyServerLaunchArgsResult calls ReattachIfRunning with the returned string.
 		// UNREAL_MCP_START_SERVER / `startServer` (e.g. `unreal-mcp-cli exec`): no survivor → start one.
-		RequestServerLaunchArgs(DerivedPort, Live.ResolveServerPluginTimeoutMs(), Live,
+		RequestServerLaunchArgs(DerivedPort, Live,
 			Live.bStartServer ? EServerLaunch::ReattachOrStart : EServerLaunch::Reattach);
 	}
 	bLocalServerReattachAttempted = true;
 }
 
-void FUnrealMcpEditorCoordinator::RequestServerLaunchArgs(int32 Port, int32 PluginTimeoutMs, const FUnrealMcpConfig& Live, EServerLaunch Mode)
+void FUnrealMcpEditorCoordinator::RequestServerLaunchArgs(int32 Port, const FUnrealMcpConfig& Live, EServerLaunch Mode)
 {
 	// mcp-authorize g5/g6 consolidation. Game thread. Forward the resolved connection facts to the sidecar's SHARED
 	// ServerLaunchArguments builder; the C++ side NEVER assembles the arg string. The token/issuer/public-url are the
@@ -648,9 +649,13 @@ void FUnrealMcpEditorCoordinator::RequestServerLaunchArgs(int32 Port, int32 Plug
 			PublicUrl = FString::Printf(TEXT("http://localhost:%d/mcp/p/%s"), Port, *DerivedLocalServerPin);
 	}
 
+	// `tool-timeout` bounds a tool call on a new server (older ones ignore it); `plugin-timeout` keeps an older
+	// server's per-attempt wait above the tool timeout (FUnrealMcpConfig::ResolveServerPluginTimeoutMs).
+	const int32 PluginTimeoutMs = Live.ResolveServerPluginTimeoutMs(FUnrealMcpServerManager::ServerHasToolTimeout());
+
 	const FString RequestId = FGuid::NewGuid().ToString();
 	PendingServerLaunches.Add(RequestId, FPendingServerLaunch{ Port, Mode });
-	if (!BridgeServer->SendServerLaunchArgsRequest(RequestId, Port, PluginTimeoutMs, AuthMode, Token, AuthIssuer, PublicUrl))
+	if (!BridgeServer->SendServerLaunchArgsRequest(RequestId, Port, PluginTimeoutMs, Live.ToolTimeoutMs, AuthMode, Token, AuthIssuer, PublicUrl))
 	{
 		PendingServerLaunches.Remove(RequestId);
 		UE_LOG(LogUnrealMcp, Warning,

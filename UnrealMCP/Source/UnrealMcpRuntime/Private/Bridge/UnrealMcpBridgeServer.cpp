@@ -1130,7 +1130,7 @@ bool FUnrealMcpBridgeServer::SendProjectConfigRequest(const FString& RequestId, 
 }
 
 bool FUnrealMcpBridgeServer::SendServerLaunchArgsRequest(
-	const FString& RequestId, int32 InPort, int32 InPluginTimeoutMs, const FString& InAuthMode,
+	const FString& RequestId, int32 InPort, int32 InPluginTimeoutMs, int32 InToolTimeoutMs, const FString& InAuthMode,
 	const FString& InToken, const FString& InAuthIssuer, const FString& InPublicUrl)
 {
 	// mcp-authorize g5/g6 consolidation: ask the sidecar to COMPOSE the local-server launch-arg string via the
@@ -1146,6 +1146,7 @@ bool FUnrealMcpBridgeServer::SendServerLaunchArgsRequest(
 	Message->SetStringField(TEXT("requestId"), RequestId);
 	Message->SetNumberField(TEXT("port"), InPort);
 	Message->SetNumberField(TEXT("pluginTimeoutMs"), InPluginTimeoutMs);
+	Message->SetNumberField(TEXT("toolTimeoutMs"), InToolTimeoutMs);
 	Message->SetStringField(TEXT("authMode"), InAuthMode);
 	if (!InToken.IsEmpty())
 		Message->SetStringField(TEXT("token"), InToken);

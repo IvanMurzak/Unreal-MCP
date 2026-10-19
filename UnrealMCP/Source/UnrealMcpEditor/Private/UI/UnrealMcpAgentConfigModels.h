@@ -43,11 +43,15 @@ struct FAiAgentConnectionInfo
 	FString Token;
 	// mcp-authorize PR 5: the explicit "Advanced: use access token" opt-in (Flow C). False on the default OAuth path.
 	bool bUseAccessToken = false;
-	// The server's per-attempt wait for the plugin (`plugin-timeout`), derived from the tool timeout.
+	// The stdio server's `plugin-timeout` (FUnrealMcpConfig::ResolveServerPluginTimeoutMs; see FromPluginConfig).
 	int32 PluginTimeoutMs = FUnrealMcpConfig::DefaultToolTimeoutMs + FUnrealMcpConfig::ServerPluginTimeoutMarginMs;
 
-	/** Resolve the connection facts from the live plugin config (the same builder the panel/runtime used pre-#101). */
-	static UNREALMCPEDITOR_API FAiAgentConnectionInfo FromPluginConfig(const FUnrealMcpConfig& Config, const FString& InServerPath, int32 InPort);
+	/**
+	 * Resolve the connection facts from the live plugin config (the same builder the panel/runtime used pre-#101).
+	 * @p bServerHasToolTimeout: the configured server honours `tool-timeout` (FUnrealMcpServerManager::ServerHasToolTimeout).
+	 */
+	static UNREALMCPEDITOR_API FAiAgentConnectionInfo FromPluginConfig(const FUnrealMcpConfig& Config, const FString& InServerPath, int32 InPort,
+		bool bServerHasToolTimeout = false);
 };
 
 /**

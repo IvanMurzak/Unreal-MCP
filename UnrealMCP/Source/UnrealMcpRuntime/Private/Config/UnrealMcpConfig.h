@@ -93,8 +93,10 @@ public:
 	static UNREALMCPRUNTIME_API const TCHAR* DefaultTransport;    // http
 	/** Per-tool-call timeout default; mirrors the sidecar's IpcProtocol.DefaultToolTimeoutMs. */
 	static constexpr int32 DefaultToolTimeoutMs = 300000;
-	/** Added to the tool timeout for the server's `plugin-timeout`, so the editor's own timeout answers first. */
+	/** Added to the tool timeout for an older server's `plugin-timeout`, so the editor's own timeout answers first. */
 	static constexpr int32 ServerPluginTimeoutMarginMs = 10000;
+	/** The server's `plugin-timeout` when it also honours `tool-timeout`: a plain connection timeout (McpPlugin's default). */
+	static constexpr int32 ServerConnectionTimeoutMs = 10000;
 
 	// --- Live (post-override) backing fields, serialized to the camelCase JSON keys in the comments. ---
 	EUnrealMcpConnectionMode ConnectionMode = EUnrealMcpConnectionMode::Cloud; // "connectionMode"
@@ -223,11 +225,13 @@ public:
 	/** The resolved Custom-mode host (CustomHost or DefaultCustomHost), trailing slash trimmed. */
 	UNREALMCPRUNTIME_API FString ResolveCustomHost() const;
 	/**
-	 * The `plugin-timeout` for the MCP server (local launch args, agent configs): ToolTimeoutMs plus
-	 * ServerPluginTimeoutMarginMs. The released McpPlugin server waits that long per attempt and then
-	 * RE-SENDS the call (up to 10 times), so a shorter value runs a long tool call several times.
+	 * The `plugin-timeout` for the MCP server (local launch args, agent configs). A server that honours
+	 * `tool-timeout` (McpPlugin.Server 8.11.0+, @p bServerHasToolTimeout) sends a tool call once and bounds it by
+	 * `tool-timeout`, so `plugin-timeout` is only the connection timeout (ServerConnectionTimeoutMs). An older
+	 * server waits `plugin-timeout` per attempt and then RE-SENDS the call (up to 10 times), so it gets
+	 * ToolTimeoutMs plus ServerPluginTimeoutMarginMs, or a long call times out early.
 	 */
-	UNREALMCPRUNTIME_API int32 ResolveServerPluginTimeoutMs() const;
+	UNREALMCPRUNTIME_API int32 ResolveServerPluginTimeoutMs(bool bServerHasToolTimeout) const;
 	/** The mode+auth-resolved bearer token: Cloud→CloudToken, Custom→(None?empty:CustomToken). */
 	UNREALMCPRUNTIME_API FString ResolveEffectiveToken() const;
 

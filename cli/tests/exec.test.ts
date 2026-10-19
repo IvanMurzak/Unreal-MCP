@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import type { SessionProcessOps } from '@baizor/gamedev-cli-core';
-import { execPython, readPythonResponse, toolErrorText, PYTHON_EXECUTE_TOOL } from '../src/lib/exec.js';
+import { DEFAULT_EXEC_TIMEOUT_MS, execPython, readPythonResponse, toolErrorText, PYTHON_EXECUTE_TOOL } from '../src/lib/exec.js';
 import {
   closeOwnedSession,
   createUnrealSession,
@@ -80,6 +80,12 @@ function userEditor(dir: string, editors: ReturnType<typeof fakeEditors>) {
   editors.alive.add(42);
   return () => [{ pid: 42, commandLine: `"C:/UE/UnrealEditor.exe" "${path.join(dir, 'Game.uproject')}"` }];
 }
+
+describe('DEFAULT_EXEC_TIMEOUT_MS', () => {
+  it('outlasts the editor tool timeout the server gets as tool-timeout (UNREAL_MCP_TOOL_TIMEOUT default 300000)', () => {
+    expect(DEFAULT_EXEC_TIMEOUT_MS).toBeGreaterThan(300_000);
+  });
+});
 
 describe('execPython', () => {
   it('reuses a running editor without launching one', async () => {

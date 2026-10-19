@@ -254,6 +254,16 @@ void FUnrealMcpAgentConfigModelsSpec::Define()
 			TestFalse("authRequired", Info.bAuthRequired);
 		});
 
+		It("passes the tool timeout as plugin-timeout unless the server honours tool-timeout", [this]()
+		{
+			FUnrealMcpConfig Config;
+			TestEqual("older server", FAiAgentConnectionInfo::FromPluginConfig(Config, FString(), 0).PluginTimeoutMs, 310000);
+			TestEqual("new server", FAiAgentConnectionInfo::FromPluginConfig(Config, FString(), 0, true).PluginTimeoutMs, 10000);
+			// Agent configs cannot carry tool-timeout; a new server defaults it to max(300000, plugin-timeout).
+			Config.ToolTimeoutMs = 600000;
+			TestEqual("new server, long tool timeout", FAiAgentConnectionInfo::FromPluginConfig(Config, FString(), 0, true).PluginTimeoutMs, 610000);
+		});
+
 		It("forces auth in Cloud mode", [this]()
 		{
 			FUnrealMcpConfig Config;
