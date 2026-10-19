@@ -1,4 +1,4 @@
-import { Command } from 'commander';
+import { Command, Option } from 'commander';
 import { close } from '../lib/close.js';
 import { closeOwnedSession } from '../lib/session.js';
 import * as ui from '../utils/ui.js';
@@ -8,8 +8,10 @@ export const closeCommand = new Command('close')
   .argument('[path]', 'Unreal project directory (defaults to cwd)')
   .option('--owned-only', 'Only close an editor the CLI started (exec / open --headless): it saves and quits; an editor the user opened is never touched')
   .option('--force', 'With --owned-only: kill the CLI-owned editor when it does not quit in time')
+  // Deprecated, hidden: only for a lease without the server URL (an editor started by CLI 0.23).
+  .addOption(new Option('--url <url>', 'With --owned-only: the server of an editor whose lease does not record it').hideHelp())
   .option('--token <token>', 'With --owned-only: bearer token override')
-  .action(async (pathArg: string | undefined, opts: { ownedOnly?: boolean; force?: boolean; token?: string }) => {
+  .action(async (pathArg: string | undefined, opts: { ownedOnly?: boolean; force?: boolean; url?: string; token?: string }) => {
     if (opts.ownedOnly === true) {
       await closeOwned(pathArg, opts);
       return;
@@ -28,8 +30,8 @@ export const closeCommand = new Command('close')
     ui.success(`Terminated ${result.terminated.length} editor process(es): ${result.terminated.join(', ')}`);
   });
 
-async function closeOwned(pathArg: string | undefined, opts: { force?: boolean; token?: string }): Promise<void> {
-  const outcome = await closeOwnedSession({ projectDir: pathArg, force: opts.force === true, token: opts.token });
+async function closeOwned(pathArg: string | undefined, opts: { force?: boolean; url?: string; token?: string }): Promise<void> {
+  const outcome = await closeOwnedSession({ projectDir: pathArg, force: opts.force === true, url: opts.url, token: opts.token });
   if (outcome.kind === 'failure') {
     ui.error(outcome.message);
     process.exitCode = 1;

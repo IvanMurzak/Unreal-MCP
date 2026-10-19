@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import type { SessionProcessOps } from '@baizor/gamedev-cli-core';
 import { execPython, readPythonResponse, toolErrorText, PYTHON_EXECUTE_TOOL } from '../src/lib/exec.js';
@@ -285,6 +286,68 @@ describe('execPython', () => {
     expect(editors.spawned).toHaveLength(0);
   });
 
+  it('never probes the server of a stale lease (its URL may now serve another project)', async () => {
+    const dir = project();
+    const editors = fakeEditors();
+    fs.mkdirSync(path.join(dir, '.ai-game-dev'), { recursive: true });
+    fs.writeFileSync(path.join(dir, '.ai-game-dev', 'session.json'), JSON.stringify({
+      pid: 999, nonce: 'stale', engine: 'unreal', mode: 'headless', startedAt: new Date().toISOString(), ownedBy: 'cli',
+      hostId: os.hostname(), processStart: 'start-999', serverUrl: 'http://127.0.0.1:5999',
+    }));
+    const pinged: string[] = [];
+    const fetchImpl = (async (input: string | URL | Request) => {
+      const url = String(input);
+      pinged.push(url);
+      const up = url.startsWith('http://127.0.0.1:5999') || editors.alive.size > 0;
+      return new Response('{}', { status: up ? 200 : 503 });
+    }) as typeof fetch;
+    const invoke = okTool();
+    const result = await execPython({
+      projectDir: dir,
+      code: '1',
+      url: CONNECTION.url,
+      invoke,
+      sessionOptions: { ...coldSeams(editors), probeReady: undefined, fetchImpl },
+    });
+    expect(result).toMatchObject({ kind: 'success', source: 'started', baseUrl: CONNECTION.url });
+    expect(pinged.some((url) => url.includes(':5999'))).toBe(false);
+    expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ url: CONNECTION.url }));
+  });
+
+  it('reaches a live CLI-owned editor on the server its lease names', async () => {
+    const dir = project();
+    const editors = fakeEditors();
+    const fetchImpl = (async (input: string | URL | Request) =>
+      new Response('{}', { status: String(input).startsWith('http://127.0.0.1:5177') && editors.alive.size > 0 ? 200 : 503 })) as typeof fetch;
+    const first = await execPython({
+      projectDir: dir, code: '1', url: 'http://127.0.0.1:5177', invoke: okTool(),
+      sessionOptions: { ...coldSeams(editors), probeReady: undefined, fetchImpl },
+    });
+    expect(first).toMatchObject({ kind: 'success', source: 'started' });
+    const second = await execPython({
+      projectDir: dir, code: '1', url: CONNECTION.url, invoke: okTool(),
+      sessionOptions: { ...coldSeams(editors), probeReady: undefined, fetchImpl },
+    });
+    expect(second).toMatchObject({ kind: 'success', source: 'running', baseUrl: 'http://127.0.0.1:5177' });
+    expect(editors.spawned).toHaveLength(1);
+  });
+
+  it('ignores a cached editor listing whose editor has quit', async () => {
+    const dir = project();
+    const editors = fakeEditors();
+    const result = await execPython({
+      projectDir: dir,
+      code: '1',
+      url: CONNECTION.url,
+      invoke: okTool(),
+      sessionOptions: {
+        ...coldSeams(editors),
+        listProcessesImpl: () => [{ pid: 43, commandLine: `"C:/UE/UnrealEditor.exe" "${path.join(dir, 'Game.uproject')}"` }],
+      },
+    });
+    expect(result).toMatchObject({ kind: 'success', source: 'started' });
+  });
+
   it('rejects a remote --url (readiness must probe the local server)', async () => {
     const result = await execPython({ projectDir: project(), code: '1', url: 'https://ai-game.dev/mcp' });
     expect(result).toMatchObject({ kind: 'failure', reason: 'invalid-input' });
@@ -354,6 +417,26 @@ describe('closeOwned (editor-quit)', () => {
     const result = await closeOwnedSession({ projectDir: dir, timeoutMs: 1000, ...seams });
     expect(result).toMatchObject({ kind: 'success', result: { kind: 'closed', pid: 1000 } });
     expect(quit).toHaveBeenCalledWith(expect.objectContaining({ toolName: EDITOR_QUIT_TOOL, url: 'http://127.0.0.1:5177' }));
+  });
+
+  it('falls back to --url for a lease without a server URL (CLI 0.23)', async () => {
+    const dir = project();
+    const editors = fakeEditors();
+    const quit = vi.fn(async (options: RunToolOptions): Promise<RunToolResult> => {
+      editors.alive.clear();
+      return { kind: 'success', success: true, endpoint: options.toolName, httpStatus: 200, data: { status: 'success' } };
+    });
+    const pid = await editors.ops.spawnDetached!('UnrealEditor.exe', [], { cwd: dir, env: {}, hideWindow: true });
+    fs.mkdirSync(path.join(dir, '.ai-game-dev'), { recursive: true });
+    fs.writeFileSync(path.join(dir, '.ai-game-dev', 'session.json'), JSON.stringify({
+      pid, nonce: 'old', engine: 'unreal', mode: 'headless', startedAt: new Date().toISOString(), ownedBy: 'cli',
+      hostId: os.hostname(), processStart: `start-${pid}`,
+    }));
+    const result = await closeOwnedSession({
+      projectDir: dir, url: 'http://127.0.0.1:5166', timeoutMs: 1000, processOps: editors.ops, listProcessesImpl: () => [], invokeSystemTool: quit,
+    });
+    expect(result).toMatchObject({ kind: 'success', result: { kind: 'closed', pid } });
+    expect(quit).toHaveBeenCalledWith(expect.objectContaining({ url: 'http://127.0.0.1:5166', input: { nonce: 'old' } }));
   });
 
   it('never touches an editor without our lease', async () => {

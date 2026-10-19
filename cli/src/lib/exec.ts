@@ -14,8 +14,9 @@ import type { RunToolFailure, RunToolOptions, RunToolResult } from './types.js';
 
 export const PYTHON_EXECUTE_TOOL = 'python-execute';
 /**
- * Client-side tool call timeout: a Python snippet may build or save assets. Above the server's 300 s plugin timeout
- * (the editor passes the tool timeout as `plugin-timeout`), so the server's own timeout error arrives first.
+ * Client-side tool call timeout: a Python snippet may build or save assets. Meant to pair with a 300 s server-side
+ * plugin timeout (the editor is to pass the tool timeout as `plugin-timeout` when it starts the server), staying
+ * above it so the server's own timeout error would arrive first.
  */
 export const DEFAULT_EXEC_TIMEOUT_MS = 310_000;
 

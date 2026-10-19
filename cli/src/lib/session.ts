@@ -55,8 +55,8 @@ export interface SessionConnection {
   url: string;
   /** Bearer for that server (never a cloud token). */
   token?: string;
-  /** The plugin connection mode a started editor gets (always {@link SESSION_CONNECTION_MODE}). */
-  connectionMode: typeof SESSION_CONNECTION_MODE;
+  /** The plugin connection mode a started editor gets. Default {@link SESSION_CONNECTION_MODE}. */
+  connectionMode?: string;
 }
 
 /**
@@ -87,7 +87,8 @@ export async function resolveSessionConnection(
     const resolved = await resolveConnection({ projectDir, url: bound, token: overrides.token });
     return { url: resolved.url, token: resolved.token, connectionMode: SESSION_CONNECTION_MODE };
   }
-  const resolved = await resolveConnection({ projectDir, token: overrides.token });
+  // A session never uses a cloud token: keep Cloud-mode resolution off the machine store (no token refresh).
+  const resolved = await resolveConnection({ projectDir, token: overrides.token, machineAuth: { readToken: async () => undefined } });
   if (isAbsoluteLoopbackHost(resolved.url)) {
     return { url: resolveCustomHostUrl(resolved.url, projectDir), token: resolved.token, connectionMode: SESSION_CONNECTION_MODE };
   }
@@ -104,7 +105,7 @@ export function sessionEditorEnv(connection: SessionConnection, explicitToken?: 
   // buildOpenEnv returns undefined only under `noConnect`.
   return buildOpenEnv({
     host: stripTrailingSlash(connection.url),
-    connectionMode: connection.connectionMode,
+    connectionMode: connection.connectionMode ?? SESSION_CONNECTION_MODE,
     transport: 'http',
     startServer: true,
     keepConnected: true,
@@ -133,6 +134,8 @@ export interface UnrealSessionOptions {
   onStatus?: (message: string) => void;
   // --- Test seams (defaults wire to the real system) ---
   probeReady?: () => Promise<string | undefined>;
+  /** HTTP for the default readiness probe. */
+  fetchImpl?: typeof fetch;
   editorBinary?: string | (() => string | Promise<string>);
   /** Replaces the pre-launch build (runs under the startup lock, only when this call launches). */
   beforeLaunch?: (projectRoot: string) => Promise<void>;
@@ -167,7 +170,9 @@ export function createUnrealSession(options: UnrealSessionOptions): EditorSessio
   const findRunningEditor = async (root: string): Promise<number | false> => {
     const project = readUProject(root);
     if (project === null) return false;
-    return selectEditorProcesses(listEditors(), project.projectDir, project.uprojectPath)[0]?.pid ?? false;
+    // The listing may be a few seconds old: skip an editor that quit since.
+    const live = selectEditorProcesses(listEditors(), project.projectDir, project.uprojectPath).find((p) => ops.isAlive(p.pid));
+    return live?.pid ?? false;
   };
 
   // A windowless editor never sees WM_CLOSE: ask our plugin, on the server it was started against, to save and quit.
@@ -197,26 +202,41 @@ export function createUnrealSession(options: UnrealSessionOptions): EditorSessio
       ? undefined
       : (options.beforeLaunch ?? (async () => buildBeforeLaunch(await resolveEngine(), options.onStatus)));
 
-  // An editor started earlier (e.g. with another --url) still answers on the server its lease names.
-  const leaseUrl = readSessionLease(projectRoot)?.serverUrl;
-  const probeUrls = leaseUrl !== undefined && leaseUrl !== connection.url ? [connection.url, leaseUrl] : [connection.url];
+  // An editor started earlier with another --url answers on the server its lease names, but only a lease cli-core
+  // verifies live is ours: a stale one's URL may belong to another project's editor now. Verified once per lease.
+  const probeLocal = mcpReadinessProbe({ urls: [connection.url], token: connection.token, fetchImpl: options.fetchImpl });
+  let verified: { nonce: string; probe?: () => Promise<string | undefined> } | undefined;
+  const probeLeased = async (): Promise<(() => Promise<string | undefined>) | undefined> => {
+    const lease = readSessionLease(projectRoot);
+    if (lease?.serverUrl === undefined || lease.serverUrl === connection.url) return undefined;
+    if (verified?.nonce !== lease.nonce) {
+      const live = (await session.ownedSession())?.nonce === lease.nonce;
+      verified = {
+        nonce: lease.nonce,
+        ...(live ? { probe: mcpReadinessProbe({ urls: [connection.url, lease.serverUrl], token: connection.token, fetchImpl: options.fetchImpl }) } : {}),
+      };
+    }
+    return verified.probe;
+  };
+  const probeReady = async (): Promise<string | undefined> => ((await probeLeased()) ?? probeLocal)();
   const readyTimeoutMs = options.readyTimeoutMs ?? UNREAL_SESSION_READY_TIMEOUT_MS;
 
-  return new EditorSession<string>({
+  const session: EditorSession<string> = new EditorSession<string>({
     adapter,
     projectRoot,
-    probeReady: options.probeReady ?? mcpReadinessProbe({ urls: probeUrls, token: connection.token }),
+    probeReady: options.probeReady ?? probeReady,
     editorBinary: options.editorBinary ?? (async () => (await resolveEngine()).editorPath),
     ...(beforeLaunch ? { beforeLaunch } : {}),
     env: { ...sessionEditorEnv(connection, options.token), ...options.env },
     serverUrl: connection.url,
-    connectionMode: connection.connectionMode,
+    connectionMode: connection.connectionMode ?? SESSION_CONNECTION_MODE,
     ...(options.idleSeconds !== undefined ? { idleSeconds: options.idleSeconds } : {}),
     readyTimeoutMs,
     foreignReadyTimeoutMs: Math.min(options.foreignReadyTimeoutMs ?? UNREAL_SESSION_FOREIGN_READY_TIMEOUT_MS, readyTimeoutMs),
     ...(options.onStatus ? { onStatus: options.onStatus } : {}),
     ...(options.processOps ? { processOps: options.processOps } : {}),
   });
+  return session;
 }
 
 /** The project and the engine that opens it (resolved once a launch is decided). */
@@ -339,9 +359,12 @@ export function openEditorSession(
   });
 }
 
-/** `close --owned-only`: save and quit the editor only when this project's CLI lease names it (on the lease's server). */
+/**
+ * `close --owned-only`: save and quit the editor only when this project's CLI lease names it, through the server the
+ * lease records. `url` is only a fallback for a lease without one (written by CLI 0.23 / cli-core 0.7.0).
+ */
 export function closeOwnedSession(
-  options: LeaseSessionOptions & { timeoutMs?: number; force?: boolean },
+  options: SessionCommandOptions & { timeoutMs?: number; force?: boolean },
 ): Promise<SessionCommandResult<{ result: CloseOwnedResult }>> {
   return withSession(options, async (session) => ({
     result: await session.closeOwned({ timeoutMs: options.timeoutMs ?? UNREAL_SESSION_CLOSE_TIMEOUT_MS, force: options.force }),
