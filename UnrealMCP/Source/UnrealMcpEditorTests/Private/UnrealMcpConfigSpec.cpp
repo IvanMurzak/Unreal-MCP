@@ -560,6 +560,45 @@ void FUnrealMcpConfigSpec::Define()
 				static_cast<int32>(Config.GetTransportMethod()), static_cast<int32>(EUnrealMcpTransportMethod::Stdio));
 		});
 	});
+
+	Describe("tool timeout (UNREAL_MCP_TOOL_TIMEOUT)", [this]()
+	{
+		It("defaults to 300000 ms and reaches the sidecar in the effective config", [this]()
+		{
+			FUnrealMcpConfig Config;
+			TestEqual(TEXT("default"), Config.ToolTimeoutMs, 300000);
+			TestEqual(TEXT("pushed to the sidecar"),
+				static_cast<int32>(Config.BuildEffectiveConnectionConfig()->GetNumberField(TEXT("toolTimeoutMs"))), 300000);
+		});
+
+		It("reads the persisted value and lets the env override it without persisting the override", [this]()
+		{
+			TSharedPtr<FJsonObject> Disk = MakeShared<FJsonObject>();
+			Disk->SetNumberField(TEXT("toolTimeoutMs"), 120000);
+			FUnrealMcpConfig Config = FromDiskJson(Disk);
+			TestEqual(TEXT("file value"), Config.ToolTimeoutMs, 120000);
+
+			Config.ApplyOverrides({}, MakeEnvReader({ { TEXT("UNREAL_MCP_TOOL_TIMEOUT"), TEXT("45000") } }));
+			TestEqual(TEXT("env override"), Config.ToolTimeoutMs, 45000);
+			TestTrue(TEXT("overridden"), Config.IsOverridden(TEXT("toolTimeoutMs")));
+		});
+
+		It("ignores a non-numeric or non-positive override", [this]()
+		{
+			for (const TCHAR* Bad : { TEXT("abc"), TEXT("0"), TEXT("-5"), TEXT("99999999999") })
+			{
+				FUnrealMcpConfig Config;
+				Config.ApplyOverrides({}, MakeEnvReader({ { TEXT("UNREAL_MCP_TOOL_TIMEOUT"), Bad } }));
+				TestEqual(FString::Printf(TEXT("'%s' ignored"), Bad), Config.ToolTimeoutMs, 300000);
+			}
+		});
+
+		It("is a recognized .env key", [this]()
+		{
+			const TMap<FString, FString> Parsed = FUnrealMcpConfig::ParseEnvLines(TArray<FString>{ TEXT("UNREAL_MCP_TOOL_TIMEOUT=60000") });
+			TestEqual(TEXT(".env value kept"), Parsed.FindRef(TEXT("UNREAL_MCP_TOOL_TIMEOUT")), FString(TEXT("60000")));
+		});
+	});
 }
 
 #endif // WITH_DEV_AUTOMATION_TESTS

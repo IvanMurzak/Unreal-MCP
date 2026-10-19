@@ -114,6 +114,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         public string? LastTool { get; private set; }
         public JsonObject? LastArguments { get; private set; }
         public int Calls { get; private set; }
+        public int LastTimeoutMs { get; private set; }
 
         public FakeToolCallChannel(Func<string, JsonObject?, ToolResponseMessage>? responder = null)
             => _responder = responder;
@@ -123,6 +124,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             Calls++;
             LastTool = tool;
             LastArguments = arguments;
+            LastTimeoutMs = timeoutMs;
             if (!Connected)
                 throw new IpcDisconnectedException();
 

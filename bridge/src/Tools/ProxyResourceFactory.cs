@@ -29,7 +29,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
             // AND the route a resources/read resolves — set BOTH Name and Route to the uri. The descriptor's
             // human-friendly `name` is surfaced as the resources/list display name via ProxyResourceList instead.
             var displayName = string.IsNullOrEmpty(descriptor.Name) ? uri : descriptor.Name!;
-            var timeoutMs = IpcProtocol.DefaultToolTimeoutMs;
+            var timeoutMs = IpcProtocol.DefaultRequestTimeoutMs;
 
             var content = new ProxyResourceContent(uri, channel, timeoutMs);
             var list = new ProxyResourceList(uri, displayName, descriptor.Enabled, descriptor.MimeType, descriptor.Description);

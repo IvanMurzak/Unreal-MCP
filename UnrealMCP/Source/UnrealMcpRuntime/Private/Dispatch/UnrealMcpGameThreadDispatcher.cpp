@@ -58,6 +58,16 @@ TFuture<FUnrealMcpToolResult> FUnrealMcpGameThreadDispatcher::Dispatch(
 
 	auto RunBody = [State, Body = MoveTemp(Body), Call, Done]() mutable
 	{
+		// The caller may have given up while this call waited in the game-thread queue: the watcher already
+		// delivered the timeout error, or a tool-cancel arrived. Running the body now would apply side effects
+		// nobody waits for (a late, possibly duplicate execution), so skip it.
+		if (State->bCompleted || Call.IsCancelled())
+		{
+			State->Complete(FUnrealMcpToolResult::Error(TEXT("Tool call was cancelled before it started; it was not run.")));
+			Done->Event->Trigger();
+			return;
+		}
+
 		FUnrealMcpToolResult Result = Body(Call);
 		State->Complete(MoveTemp(Result));
 		Done->Event->Trigger();
@@ -91,7 +101,7 @@ TFuture<FUnrealMcpToolResult> FUnrealMcpGameThreadDispatcher::Dispatch(
 		// its Complete() is a no-op (single-completion guard).
 		if (Call.CancelRequested.IsValid())
 			const_cast<FThreadSafeBool&>(*Call.CancelRequested) = true;
-		State->Complete(FUnrealMcpToolResult::Error(TEXT("Tool call timed out.")));
+		State->Complete(FUnrealMcpToolResult::Error(FString::Printf(TEXT("Tool call timed out after %u ms."), TimeoutMs)));
 	});
 
 	return Future;

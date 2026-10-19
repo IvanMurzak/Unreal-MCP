@@ -72,8 +72,18 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
         /// <summary>A peer is declared dead after this much silence (§1.3).</summary>
         public const int HeartbeatTimeoutMs = 15000;
 
-        /// <summary>Default per-tool-call timeout when the message omits one (§4).</summary>
-        public const int DefaultToolTimeoutMs = 30000;
+        /// <summary>
+        /// Default per-tool-call timeout (§4): 5 min, the McpPlugin server's tool-timeout default. Long
+        /// <c>python-execute</c> snippets and asset work need minutes. The plugin overrides it with the
+        /// <c>toolTimeoutMs</c> field of the <c>config</c> message (<c>UNREAL_MCP_TOOL_TIMEOUT</c>, §8).
+        /// </summary>
+        public const int DefaultToolTimeoutMs = 300000;
+
+        /// <summary>
+        /// Default timeout for the short request kinds (prompt-get, resource-read) and the server
+        /// plugin-timeout / agent-config defaults. Tool calls use <see cref="DefaultToolTimeoutMs"/>.
+        /// </summary>
+        public const int DefaultRequestTimeoutMs = 30000;
 
         /// <summary>
         /// Grace added to a tool-call's <c>timeoutMs</c> for the sidecar-side local backstop. The plugin

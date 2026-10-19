@@ -8,6 +8,7 @@
 └───────────────────────────────────────────────────────────────────┘
 */
 
+using System;
 using System.Collections.Generic;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -26,11 +27,14 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
     /// </summary>
     public static class ProxyToolFactory
     {
-        public static ProxyTool Create(ToolDescriptor descriptor, IToolCallChannel channel)
+        /// <param name="toolTimeoutMs">
+        /// Reads the per-call timeout at call time, so a <c>config</c> push (<c>UNREAL_MCP_TOOL_TIMEOUT</c>, §8)
+        /// reaches already-registered proxies. Null means <see cref="IpcProtocol.DefaultToolTimeoutMs"/>.
+        /// </param>
+        public static ProxyTool Create(ToolDescriptor descriptor, IToolCallChannel channel, Func<int>? toolTimeoutMs = null)
         {
             var toolName = descriptor.Name;
             var rql = descriptor.Rql; // docs/rql.md: the plugin marks its rql-* tools
-            var timeoutMs = IpcProtocol.DefaultToolTimeoutMs;
 
             return new ProxyTool(
                 name: toolName,
@@ -53,6 +57,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
                         return parseError.SetRequestID(requestId);
                     try
                     {
+                        var timeoutMs = toolTimeoutMs?.Invoke() ?? IpcProtocol.DefaultToolTimeoutMs;
                         var response = await channel
                             .CallToolAsync(toolName, arguments, timeoutMs, cancellationToken)
                             .ConfigureAwait(false);

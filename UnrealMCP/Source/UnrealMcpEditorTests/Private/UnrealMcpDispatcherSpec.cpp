@@ -8,6 +8,8 @@
 #include "Dispatch/UnrealMcpGameThreadDispatcher.h"
 #include "Async/Async.h"
 
+#include <atomic>
+
 /**
  * Game-thread dispatcher specs (docs/ARCHITECTURE.md §4). Proves the load-bearing DoD claim: a tool
  * body always runs on the game thread, even when dispatched from a background thread (marshalled), and
@@ -114,6 +116,70 @@ void FUnrealMcpDispatcherSpec::Define()
 				// Give the late body time to run and (attempt to) complete the promise a second time; the
 				// guard must absorb it without altering the already-delivered result or faulting.
 				FPlatformProcess::Sleep(1.5f);
+				Done.Execute();
+			});
+		});
+
+		// A call the caller already cancelled must not run when the game thread reaches it.
+		It("skips a body whose call was cancelled before it ran", [this]()
+		{
+			FUnrealMcpGameThreadDispatcher Dispatcher;
+			FUnrealMcpToolCall Call;
+			Call.CancelRequested = MakeShared<FThreadSafeBool, ESPMode::ThreadSafe>(true);
+			bool bBodyRan = false;
+
+			const FUnrealMcpToolResult Result = Dispatcher.Dispatch(
+				Call,
+				[&bBodyRan](const FUnrealMcpToolCall&)
+				{
+					bBodyRan = true;
+					return FUnrealMcpToolResult::Success(TEXT("ran"));
+				},
+				FTimespan::FromSeconds(5)).Get();
+
+			TestFalse(TEXT("body did not run"), bBodyRan);
+			TestFalse(TEXT("error result"), Result.bSuccess);
+			TestTrue(TEXT("says it was not run"), Result.Message.Contains(TEXT("not run")));
+		});
+
+		// A call that timed out while queued behind a slow body must be dropped, not run late once the
+		// game thread frees up (the duplicate / late execution case).
+		LatentIt("skips a queued body after its call timed out", FTimespan::FromSeconds(15), [this](const FDoneDelegate& Done)
+		{
+			Async(EAsyncExecution::Thread, [this, Done]()
+			{
+				FUnrealMcpGameThreadDispatcher Dispatcher;
+				TSharedRef<std::atomic<bool>, ESPMode::ThreadSafe> bLateBodyRan = MakeShared<std::atomic<bool>, ESPMode::ThreadSafe>(false);
+
+				// Occupies the game thread for 1 s.
+				TFuture<FUnrealMcpToolResult> Slow = Dispatcher.Dispatch(
+					FUnrealMcpToolCall(),
+					[](const FUnrealMcpToolCall&)
+					{
+						FPlatformProcess::Sleep(1.0f);
+						return FUnrealMcpToolResult::Success(TEXT("slow"));
+					},
+					FTimespan::FromSeconds(10));
+
+				// Queued behind it with a 100 ms timeout; the flag mirrors the bridge's per-call cancel flag.
+				FUnrealMcpToolCall Queued;
+				Queued.CancelRequested = MakeShared<FThreadSafeBool, ESPMode::ThreadSafe>(false);
+				TFuture<FUnrealMcpToolResult> Late = Dispatcher.Dispatch(
+					Queued,
+					[bLateBodyRan](const FUnrealMcpToolCall&)
+					{
+						*bLateBodyRan = true;
+						return FUnrealMcpToolResult::Success(TEXT("late"));
+					},
+					FTimespan::FromMilliseconds(100));
+
+				const FUnrealMcpToolResult LateResult = Late.Get();
+				TestFalse(TEXT("queued call timed out"), LateResult.bSuccess);
+				TestTrue(TEXT("slow call succeeded"), Slow.Get().bSuccess);
+
+				// The slow body has finished, so the game thread has (or soon will have) reached the queued one.
+				FPlatformProcess::Sleep(0.5f);
+				TestFalse(TEXT("timed-out body never ran"), bLateBodyRan->load());
 				Done.Execute();
 			});
 		});

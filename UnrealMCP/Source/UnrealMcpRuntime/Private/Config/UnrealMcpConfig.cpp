@@ -22,6 +22,7 @@ const TCHAR* FUnrealMcpConfig::EnvStartServer    = TEXT("UNREAL_MCP_START_SERVER
 const TCHAR* FUnrealMcpConfig::EnvTransport      = TEXT("UNREAL_MCP_TRANSPORT");
 const TCHAR* FUnrealMcpConfig::EnvLogLevel       = TEXT("UNREAL_MCP_LOG_LEVEL");
 const TCHAR* FUnrealMcpConfig::EnvBridgePath     = TEXT("UNREAL_MCP_BRIDGE_PATH");
+const TCHAR* FUnrealMcpConfig::EnvToolTimeout    = TEXT("UNREAL_MCP_TOOL_TIMEOUT");
 
 // --- Defaults. ---
 const TCHAR* FUnrealMcpConfig::DefaultCloudBaseUrl = TEXT("https://ai-game.dev");
@@ -54,6 +55,7 @@ namespace
 	const TCHAR* KeyLogLevel       = TEXT("logLevel");
 	const TCHAR* KeyTransport      = TEXT("transport");
 	const TCHAR* KeyStartServer    = TEXT("startServer");
+	const TCHAR* KeyToolTimeoutMs  = TEXT("toolTimeoutMs");
 	const TCHAR* KeyEnabledTools   = TEXT("enabledTools");
 	const TCHAR* KeyDisabledTools  = TEXT("disabledTools");
 	const TCHAR* KeySelectedAgentId = TEXT("selectedAgentId");
@@ -179,6 +181,8 @@ void FUnrealMcpConfig::LoadFromJson(const TSharedPtr<FJsonObject>& Json)
 		if (Json->TryGetStringField(KeyLogLevel, Str))  LogLevel = Str;
 		if (Json->TryGetStringField(KeyTransport, Str)) Transport = Str;
 		if (Json->TryGetBoolField(KeyStartServer, bFlag)) bStartServer = bFlag;
+		int32 Number = 0;
+		if (Json->TryGetNumberField(KeyToolTimeoutMs, Number) && Number > 0) ToolTimeoutMs = Number;
 
 		ReadStringArrayField(Json, KeyEnabledTools, EnabledTools);
 		ReadStringArrayField(Json, KeyDisabledTools, DisabledTools);
@@ -233,7 +237,7 @@ void FUnrealMcpConfig::ApplyOverrides(const TMap<FString, FString>& DotEnv, cons
 	// mode. The token is therefore applied LAST. (Same ordering as GodotMcpEnvFile.Apply.)
 	const TCHAR* OrderedNames[] = {
 		EnvConnectionMode, EnvHost, EnvCloudUrl, EnvAuthOption, EnvKeepConnected,
-		EnvLogLevel, EnvTransport, EnvStartServer, EnvTools, EnvToken
+		EnvLogLevel, EnvTransport, EnvStartServer, EnvToolTimeout, EnvTools, EnvToken
 	};
 
 	for (const TCHAR* Name : OrderedNames)
@@ -307,6 +311,16 @@ void FUnrealMcpConfig::ApplyOne(const FString& EnvName, const FString& Source)
 			OverriddenKeys.Add(KeyStartServer);
 		}
 	}
+	else if (EnvName == EnvToolTimeout)
+	{
+		// Milliseconds; a non-numeric or non-positive value is ignored (the existing value stays).
+		const int64 Value = Source.IsNumeric() ? FCString::Atoi64(*Source) : 0;
+		if (Value > 0 && Value <= MAX_int32)
+		{
+			ToolTimeoutMs = static_cast<int32>(Value);
+			OverriddenKeys.Add(KeyToolTimeoutMs);
+		}
+	}
 	else if (EnvName == EnvTools)
 	{
 		// Accept comma- or semicolon-separated tool ids: normalize ';' → ',' first, then split once so a
@@ -357,6 +371,7 @@ TSharedPtr<FJsonObject> FUnrealMcpConfig::ToJson() const
 	Obj->SetStringField(KeyLogLevel, LogLevel);
 	Obj->SetStringField(KeyTransport, Transport);
 	Obj->SetBoolField(KeyStartServer, bStartServer);
+	Obj->SetNumberField(KeyToolTimeoutMs, ToolTimeoutMs);
 
 	TArray<TSharedPtr<FJsonValue>> Tools;
 	for (const FString& Tool : EnabledTools)
@@ -484,6 +499,8 @@ TSharedPtr<FJsonObject> FUnrealMcpConfig::BuildEffectiveConnectionConfig() const
 	const bool bCustomOauth = ConnectionMode == EUnrealMcpConnectionMode::Custom && AuthOption == EUnrealMcpAuthOption::Oauth;
 	Obj->SetStringField(TEXT("explicitToken"), bCustomOauth ? CustomToken : FString());
 	Obj->SetBoolField(TEXT("keepConnected"), bKeepConnected);
+	// The sidecar stamps this on every tool-call; the dispatcher honours it per call (§4).
+	Obj->SetNumberField(TEXT("toolTimeoutMs"), ToolTimeoutMs);
 	return Obj;
 }
 
@@ -517,7 +534,7 @@ TMap<FString, FString> FUnrealMcpConfig::ParseEnvLines(const TArray<FString>& Li
 {
 	static const TCHAR* RecognizedKeys[] = {
 		EnvConnectionMode, EnvHost, EnvCloudUrl, EnvToken, EnvAuthOption, EnvKeepConnected,
-		EnvTools, EnvStartServer, EnvTransport, EnvLogLevel, EnvBridgePath
+		EnvTools, EnvStartServer, EnvTransport, EnvLogLevel, EnvBridgePath, EnvToolTimeout
 	};
 
 	TMap<FString, FString> Result;

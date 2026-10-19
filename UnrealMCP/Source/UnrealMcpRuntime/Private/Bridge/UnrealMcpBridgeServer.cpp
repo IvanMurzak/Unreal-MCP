@@ -76,7 +76,10 @@ namespace
 	constexpr int32 PromptsResourcesMinVersion = 2;
 	constexpr int32 HeartbeatIntervalSeconds = 5;
 	constexpr int32 HeartbeatTimeoutSeconds = 15;
-	constexpr int32 DefaultToolTimeoutMs = 30000;
+	// Fallbacks for a message that omits timeoutMs (the sidecar always sends one). Tool calls get the long
+	// default (python-execute and asset work can run for minutes); prompt/resource reads stay short.
+	constexpr int32 DefaultToolTimeoutMs = 300000;
+	constexpr int32 DefaultRequestTimeoutMs = 30000;
 
 	FString SerializeCondensed(const TSharedPtr<FJsonObject>& Object)
 	{
@@ -623,7 +626,7 @@ void FUnrealMcpBridgeServer::HandlePromptGet(const TSharedPtr<FJsonObject>& Mess
 		return;
 	}
 
-	int32 TimeoutMs = DefaultToolTimeoutMs;
+	int32 TimeoutMs = DefaultRequestTimeoutMs;
 	double TimeoutValue;
 	if (Message->TryGetNumberField(TEXT("timeoutMs"), TimeoutValue) && TimeoutValue > 0)
 		TimeoutMs = static_cast<int32>(TimeoutValue);
@@ -757,7 +760,7 @@ void FUnrealMcpBridgeServer::HandleResourceRead(const TSharedPtr<FJsonObject>& M
 		return;
 	}
 
-	int32 TimeoutMs = DefaultToolTimeoutMs;
+	int32 TimeoutMs = DefaultRequestTimeoutMs;
 	double TimeoutValue;
 	if (Message->TryGetNumberField(TEXT("timeoutMs"), TimeoutValue) && TimeoutValue > 0)
 		TimeoutMs = static_cast<int32>(TimeoutValue);

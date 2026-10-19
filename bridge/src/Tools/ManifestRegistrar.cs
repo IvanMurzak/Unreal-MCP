@@ -8,6 +8,7 @@
 └───────────────────────────────────────────────────────────────────┘
 */
 
+using System;
 using System.Collections.Generic;
 using com.IvanMurzak.McpPlugin;
 using com.IvanMurzak.Unreal.MCP.Bridge.Ipc;
@@ -61,12 +62,14 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
     {
         private readonly IProxyToolSink _sink;
         private readonly IToolCallChannel _channel;
+        private readonly Func<int>? _toolTimeoutMs;
 
-        public ManifestRegistrar(IProxyToolSink sink, IToolCallChannel channel, ILogger? logger = null)
+        public ManifestRegistrar(IProxyToolSink sink, IToolCallChannel channel, ILogger? logger = null, Func<int>? toolTimeoutMs = null)
             : base(logger)
         {
             _sink = sink;
             _channel = channel;
+            _toolTimeoutMs = toolTimeoutMs;
         }
 
         /// <summary>Names of the tools currently registered by this registrar (test/inspection aid).</summary>
@@ -92,7 +95,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
         protected override void SinkRemove(string key) => _sink.RemoveTool(key);
 
         protected override void SinkAdd(ToolDescriptor descriptor) =>
-            _sink.AddTool(descriptor.Name, ProxyToolFactory.Create(descriptor, _channel));
+            _sink.AddTool(descriptor.Name, ProxyToolFactory.Create(descriptor, _channel, _toolTimeoutMs));
 
         protected override void SinkSetEnabled(string key, bool enabled) => _sink.SetToolEnabled(key, enabled);
     }

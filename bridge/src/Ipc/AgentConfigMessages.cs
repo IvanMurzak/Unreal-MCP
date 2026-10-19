@@ -41,7 +41,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
         /// <summary>The MCP server port (stdio transport arg).</summary>
         [JsonPropertyName("port")] public int Port { get; set; }
         /// <summary>Plugin timeout in milliseconds (stdio transport arg).</summary>
-        [JsonPropertyName("timeoutMs")] public int TimeoutMs { get; set; } = IpcProtocol.DefaultToolTimeoutMs;
+        [JsonPropertyName("timeoutMs")] public int TimeoutMs { get; set; } = IpcProtocol.DefaultRequestTimeoutMs;
         /// <summary>The streamableHttp server URL (http transport <c>url</c>).</summary>
         [JsonPropertyName("host")] public string Host { get; set; } = string.Empty;
         /// <summary>

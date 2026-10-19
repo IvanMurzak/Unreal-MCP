@@ -578,13 +578,17 @@ Godot's `GodotMainThread`:
 - **The IPC reader thread never executes tool bodies** and never blocks on the future: the bridge
   server attaches a continuation (`.Next(…)`) that serializes `tool-response` back through the
   writer mutex. Slow tools therefore never stall heartbeats — `ping`/`pong` stays on the IPC thread.
-- **Timeout:** per-call (`tool-call.timeoutMs`, default 30 s, sidecar passes through the MCP
-  server's plugin-timeout). A parallel timer fires the promise with a structured timeout error;
+- **Timeout:** per-call (`tool-call.timeoutMs`). The sidecar stamps the plugin-pushed `toolTimeoutMs`
+  (`UNREAL_MCP_TOOL_TIMEOUT`, §8; default 300 s, the McpPlugin server's tool-timeout default) on every
+  tool call; prompt-get / resource-read keep 30 s. A parallel timer fires the promise with a structured timeout error;
   the flag set on `FUnrealMcpToolCall::CancelRequested` (a `FThreadSafeBool`) lets long tool bodies
   exit early at their own checkpoints. A game-thread task cannot be force-killed — an abandoned
   body finishes silently, logs at `Verbose`, and its late result is dropped (requestId already
   completed; double-set of the promise is guarded).
 - **Cancellation:** `tool-cancel` sets the same flag — one cooperative mechanism for both paths.
+- **No late runs:** a body whose call already timed out or was cancelled while it waited in the
+  game-thread queue is skipped (error "cancelled before it started; it was not run"), so a caller
+  that gave up never gets a late or duplicate execution.
 - **Async tools** (e.g. `source-compile` waiting on UBT, `blueprint-compile` follow-ups) return a
   `TFuture` from the handler itself; the dispatcher chains rather than blocks, so the game thread
   is only occupied for the synchronous slice.
@@ -923,7 +927,8 @@ renamed `UNREAL_MCP_*`):
 `UNREAL_MCP_CONNECTION_MODE` (Cloud|Custom), `UNREAL_MCP_HOST`, `UNREAL_MCP_CLOUD_URL`,
 `UNREAL_MCP_TOKEN`, `UNREAL_MCP_AUTH_OPTION` (none|required), `UNREAL_MCP_KEEP_CONNECTED`,
 `UNREAL_MCP_TOOLS` (enabled-tools override list), `UNREAL_MCP_START_SERVER`,
-`UNREAL_MCP_TRANSPORT` (stdio|http), `UNREAL_MCP_LOG_LEVEL`, plus dev-only
+`UNREAL_MCP_TRANSPORT` (stdio|http), `UNREAL_MCP_LOG_LEVEL`, `UNREAL_MCP_TOOL_TIMEOUT` (per-tool-call
+timeout in ms, default 300000; reaches the sidecar as `toolTimeoutMs` in the `config` message, §4), plus dev-only
 `UNREAL_MCP_BRIDGE_PATH` (§6). `worktree.py` gains `UNREAL_MCP_*` emission (small infra PR, per
 the connection-config task).
 
