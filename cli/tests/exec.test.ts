@@ -348,6 +348,29 @@ describe('execPython', () => {
     expect(result).toMatchObject({ kind: 'success', source: 'started' });
   });
 
+  it('retries while a fresh editor has not initialized Python yet, but not a running one', async () => {
+    const notYet = { kind: 'failure', success: false, endpoint: 'x', reason: 'http-error', httpStatus: 500, message: 'Internal Server Error',
+      data: { error: 'NotAvailable: Python is not available in this editor (PythonScriptPlugin disabled or failed to start).' } } as RunToolResult;
+    const ok: RunToolResult = { kind: 'success', success: true, endpoint: 'x', httpStatus: 200, data: { status: 'success', structured: { success: true, value: '3', logs: [] } } };
+    const flaky = () => vi.fn<(o: RunToolOptions) => Promise<RunToolResult>>().mockResolvedValueOnce(notYet).mockResolvedValue(ok);
+
+    const editors = fakeEditors();
+    const fresh = flaky();
+    const started = await execPython({
+      projectDir: project(), code: '1', url: CONNECTION.url, invoke: fresh, sleep: async () => {}, sessionOptions: coldSeams(editors),
+    });
+    expect(started).toMatchObject({ kind: 'success', source: 'started' });
+    expect(fresh).toHaveBeenCalledTimes(2);
+
+    const running = flaky();
+    const warm = await execPython({
+      projectDir: project(), code: '1', url: CONNECTION.url, invoke: running, sleep: async () => {},
+      sessionOptions: { ...coldSeams(fakeEditors()), probeReady: async () => CONNECTION.url },
+    });
+    expect(warm).toMatchObject({ kind: 'failure', reason: 'tool-failed' });
+    expect(running).toHaveBeenCalledTimes(1);
+  });
+
   it('rejects a remote --url (readiness must probe the local server)', async () => {
     const result = await execPython({ projectDir: project(), code: '1', url: 'https://ai-game.dev/mcp' });
     expect(result).toMatchObject({ kind: 'failure', reason: 'invalid-input' });
