@@ -10,7 +10,6 @@ import {
   EditorSession,
   EditorSessionError,
   defaultSessionProcessOps,
-  isProcessAlive,
   mcpReadinessProbe,
   parseSessionLease,
   unrealAdapter,
@@ -172,10 +171,9 @@ export function createUnrealSession(options: UnrealSessionOptions): EditorSessio
 
   // EditorSession resolves the binary as soon as the warm probe fails, even when it then joins an editor that is
   // still starting; never build next to a running editor (its modules are loaded and Live Coding refuses).
-  const editorStarting = async (): Promise<boolean> => {
-    const lease = session.readLease();
-    return (lease !== undefined && isProcessAlive(lease.pid)) || (await findRunningEditor(projectRoot));
-  };
+  // A lease counts only while it is provably live (a crashed editor's pid may be reused by another process).
+  const editorStarting = async (): Promise<boolean> =>
+    (await session.ownedSession()) !== undefined || (await findRunningEditor(projectRoot));
 
   const session: EditorSession<string> = new EditorSession<string>({
     adapter,

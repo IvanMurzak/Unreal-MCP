@@ -47,10 +47,10 @@ public:
 	 */
 	static constexpr double StallThresholdSeconds = 60.0;
 
-FUnrealMcpIdleTimer(double InTimeoutSeconds, double Now);
+	FUnrealMcpIdleTimer(double InTimeoutSeconds, double Now);
 
 	/** @p LastUserInput: the time of the last user interaction (0 when none); the same clock as @p Now. */
-bool ShouldQuit(double Now, uint64 ToolActivity, bool bBusy, double LastUserInput = 0.0);
+	bool ShouldQuit(double Now, uint64 ToolActivity, bool bBusy, double LastUserInput = 0.0);
 
 private:
 	double TimeoutSeconds;
@@ -94,6 +94,9 @@ public:
 
 	/** `<ProjectDir>/.ai-game-dev/session.json` (the cli-core lease path). Pure. */
 	static FString LeasePath(const FString& ProjectDir);
+
+	/** Whether the lease at @p Path parses and its `nonce` equals @p Nonce (case-sensitive; false for an empty nonce). */
+	static bool LeaseCarriesNonce(const FString& Path, const FString& Nonce);
 
 	/** Delete the lease at @p Path only when it parses and its `nonce` equals @p Nonce (compare-and-delete). */
 	static bool RemoveLeaseIfOwned(const FString& Path, const FString& Nonce);

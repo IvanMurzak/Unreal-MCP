@@ -132,6 +132,13 @@ void FUnrealMcpEditorSessionSpec::Define()
 			TestTrue(TEXT("still there"), FPaths::FileExists(Path));
 		});
 
+		It("compares the nonce case-sensitively", [this]()
+		{
+			const FString Path = SessionSpecWriteLease(TEXT("abcdef"));
+			TestFalse(TEXT("other case"), FUnrealMcpEditorSession::LeaseCarriesNonce(Path, TEXT("ABCDEF")));
+			TestTrue(TEXT("same nonce"), FUnrealMcpEditorSession::LeaseCarriesNonce(Path, TEXT("abcdef")));
+		});
+
 		It("keeps a lease it cannot parse and ignores a missing one", [this]()
 		{
 			const FString Path = FUnrealMcpEditorSession::LeasePath(SessionSpecTempDir);

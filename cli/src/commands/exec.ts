@@ -64,7 +64,8 @@ export const execCommand = new Command('exec')
       code = readCode(codeArg, options.file);
     } catch (err) {
       ui.error(err instanceof Error ? err.message : String(err));
-      process.exit(1);
+      process.exitCode = 1;
+      return;
     }
 
     // Progress only on a terminal: piped stdout carries the result alone.
@@ -91,7 +92,9 @@ export const execCommand = new Command('exec')
     if (result.kind === 'failure') {
       ui.error(result.reason === 'session' ? `No ready Unreal Editor: ${result.message}` : result.message);
       if (options.raw && result.toolFailure?.data !== undefined) ui.json(result.toolFailure.data);
-      process.exit(1);
+      // exitCode, not exit(): an async stdout / stderr pipe still flushes what was written above.
+      process.exitCode = 1;
+      return;
     }
 
     if (options.raw) {
@@ -102,7 +105,8 @@ export const execCommand = new Command('exec')
     for (const log of response.logs) process.stderr.write(`[${log.level}] ${log.message}\n`);
     if (!response.ok) {
       ui.error(response.value);
-      process.exit(1);
+      process.exitCode = 1;
+      return;
     }
     console.log(response.value);
   });

@@ -43,23 +43,6 @@ export const openCommand = new Command('open')
       await openSession(pathArg, opts);
       return;
     }
-    // A GUI over our own headless editor: stop that one first (a second editor on the project would fail).
-    const prepared = await prepareGuiOpen({ projectDir: pathArg, url: opts.url, token: opts.token });
-    if (prepared.kind === 'failure') {
-      ui.error(prepared.message);
-      process.exitCode = 1;
-      return;
-    }
-    if (prepared.result.kind === 'already-open') {
-      ui.success(`The Unreal Editor started by the CLI is already open with a window (PID: ${prepared.result.pid})`);
-      return;
-    }
-    if (prepared.result.kind === 'still-running') {
-      ui.error(`The headless editor started by the CLI (PID ${prepared.result.pid}) did not quit; run \`close --owned-only --force\`.`);
-      process.exitCode = 1;
-      return;
-    }
-    if (prepared.result.stoppedPid !== undefined) ui.info(`Closed the headless editor started by the CLI (PID ${prepared.result.stoppedPid}).`);
     const startupDismissTimeoutMs = parsePositiveIntFlag(
       opts.startupDismissTimeoutMs,
       '--startup-dismiss-timeout-ms',
@@ -70,6 +53,7 @@ export const openCommand = new Command('open')
       '--startup-dismiss-poll-interval-ms',
       1000,
     );
+    if (!(await stopOwnHeadlessEditor(pathArg, opts))) return;
     const spinner = ui.startSpinner('Opening Unreal project...');
     const result = await openProject({
       projectDir: pathArg,
@@ -110,9 +94,35 @@ export const openCommand = new Command('open')
     ui.label('engine', result.engineRoot);
   });
 
+/**
+ * A window over our own headless editor: stop that one first (a second editor on the project would fail).
+ * False when the open must not go on (already open with a window, or the headless editor did not quit).
+ */
+async function stopOwnHeadlessEditor(pathArg: string | undefined, opts: Record<string, unknown>): Promise<boolean> {
+  const prepared = await prepareGuiOpen({ projectDir: pathArg, url: opts.url as string | undefined, token: opts.token as string | undefined });
+  if (prepared.kind === 'failure') {
+    ui.error(prepared.message);
+    process.exitCode = 1;
+    return false;
+  }
+  if (prepared.result.kind === 'already-open') {
+    ui.success(`The Unreal Editor started by the CLI is already open with a window (PID: ${prepared.result.pid})`);
+    return false;
+  }
+  if (prepared.result.kind === 'still-running') {
+    ui.error(`The headless editor started by the CLI (PID ${prepared.result.pid}) did not quit; run \`close --owned-only --force\`.`);
+    process.exitCode = 1;
+    return false;
+  }
+  if (prepared.result.stoppedPid !== undefined) ui.info(`Closed the headless editor started by the CLI (PID ${prepared.result.stoppedPid}).`);
+  return true;
+}
+
 async function openSession(pathArg: string | undefined, opts: Record<string, unknown>): Promise<void> {
   const idleSeconds = opts.idle === undefined ? undefined : parseIntFlag(opts.idle as string, '--idle', { min: 0 });
   const mode = opts.headless === true ? 'headless' : 'window';
+  // `open --idle` asks for a window: a warm headless editor would otherwise be reused and no window would open.
+  if (mode === 'window' && !(await stopOwnHeadlessEditor(pathArg, opts))) return;
   const spinner = ui.startSpinner(mode === 'headless' ? 'Opening Unreal project (headless)...' : 'Opening Unreal project...');
   const result = await openEditorSession({
     projectDir: pathArg,

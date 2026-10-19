@@ -86,7 +86,9 @@ void FUnrealMcpEditorSession::Start(TFunction<uint64()> InToolActivity, TFunctio
 {
 	ToolActivity = MoveTemp(InToolActivity);
 	InFlightCalls = MoveTemp(InInFlightCalls);
-	if (Env.IdleSeconds <= 0 || IsRunningCommandlet())
+	// Only an editor a CLI session started: AIGD_SESSION_* is inherited by any editor this one launches (File > Open
+	// Project), which must never idle out.
+	if (Env.IdleSeconds <= 0 || !Env.IsCliOwned() || IsRunningCommandlet())
 		return;
 
 	IdleTimer.Emplace(static_cast<double>(Env.IdleSeconds), FPlatformTime::Seconds());
@@ -110,8 +112,15 @@ bool FUnrealMcpEditorSession::Tick(float /*DeltaTime*/)
 		return true;
 
 	IdleTimer.Reset();
-	RequestQuit(FString::Printf(TEXT("no tool calls for %ds"), Env.IdleSeconds));
 	TickHandle.Reset(); // returning false removes the ticker
+	// The CLI wrote the lease right after the launch: an editor whose project holds no lease with our nonce is not
+	// the one that session started (e.g. it inherited the environment) and stays open.
+	if (!LeaseCarriesNonce(LeasePath(ProjectDir), Env.Nonce))
+	{
+		UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] idle shutdown skipped: the project's CLI session lease does not name this editor."));
+		return false;
+	}
+	RequestQuit(FString::Printf(TEXT("no tool calls for %ds"), Env.IdleSeconds));
 	return false;
 }
 
@@ -174,7 +183,7 @@ void FUnrealMcpEditorSession::RegisterTools(FUnrealMcpToolRegistry& Registry)
 				return FUnrealMcpToolResult::Error(TEXT("The editor is already shutting down."));
 			if (!Session->Env.IsCliOwned())
 				return FUnrealMcpToolResult::Error(TEXT("NotOwned: this editor was not started by a CLI session; close it yourself."));
-			if (Call.GetString(TEXT("nonce")) != Session->Env.Nonce)
+			if (!Call.GetString(TEXT("nonce")).Equals(Session->Env.Nonce, ESearchCase::CaseSensitive))
 				return FUnrealMcpToolResult::Error(TEXT("NotOwned: the nonce does not match this editor's session."));
 			if (Session->bDisarmed)
 				return FUnrealMcpToolResult::Error(TEXT("The editor is already shutting down."));
@@ -188,7 +197,7 @@ FString FUnrealMcpEditorSession::LeasePath(const FString& InProjectDir)
 	return FPaths::Combine(InProjectDir, TEXT(".ai-game-dev"), TEXT("session.json"));
 }
 
-bool FUnrealMcpEditorSession::RemoveLeaseIfOwned(const FString& Path, const FString& Nonce)
+bool FUnrealMcpEditorSession::LeaseCarriesNonce(const FString& Path, const FString& Nonce)
 {
 	if (Nonce.IsEmpty())
 		return false;
@@ -199,8 +208,13 @@ bool FUnrealMcpEditorSession::RemoveLeaseIfOwned(const FString& Path, const FStr
 	if (!FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(Text), Lease) || !Lease.IsValid())
 		return false;
 	FString LeaseNonce;
-	if (!Lease->TryGetStringField(TEXT("nonce"), LeaseNonce) || LeaseNonce != Nonce)
-		return false; // another session's lease (a newer editor) — never ours to remove
+	return Lease->TryGetStringField(TEXT("nonce"), LeaseNonce) && LeaseNonce.Equals(Nonce, ESearchCase::CaseSensitive);
+}
+
+bool FUnrealMcpEditorSession::RemoveLeaseIfOwned(const FString& Path, const FString& Nonce)
+{
+	if (!LeaseCarriesNonce(Path, Nonce))
+		return false; // absent, unparseable or another session's lease (a newer editor) — never ours to remove
 	return IFileManager::Get().Delete(*Path, /*RequireExists*/ true, /*EvenReadOnly*/ false, /*Quiet*/ true);
 }
 
