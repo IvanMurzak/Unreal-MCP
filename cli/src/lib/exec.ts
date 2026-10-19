@@ -8,7 +8,7 @@ import {
   type WaitedEditorSource,
 } from '@baizor/gamedev-cli-core';
 import { runTool } from './run-tool.js';
-import { isToolSuccess, openProjectSession, type UnrealSessionOptions } from './session.js';
+import { isToolSuccess, openProjectSession, sessionFailureMessage, type UnrealSessionOptions } from './session.js';
 import { asError } from '../utils/error.js';
 import type { RunToolFailure, RunToolOptions, RunToolResult } from './types.js';
 
@@ -94,20 +94,14 @@ export async function execPython(options: ExecPythonOptions): Promise<ExecPython
   try {
     ready = await session.ensure({ mode: options.window ? 'window' : 'headless' });
   } catch (err) {
-    const error = asError(err);
-    const foreign = err instanceof EditorSessionError && err.reason === 'not-ready' && err.source === 'foreign';
+    const sessionError = err instanceof EditorSessionError ? err : undefined;
     return {
       kind: 'failure',
       success: false,
       reason: 'session',
-      ...(err instanceof EditorSessionError ? { sessionReason: err.reason, sessionSource: err.source } : {}),
-      // An editor the user opened in Cloud mode (or on another server) never answers locally: say so and name the URL.
-      message: foreign
-        ? `An Unreal Editor you opened has the project, but its MCP server does not answer at ${connection.url} ` +
-          '(Cloud mode, or connected to another server?). Switch its AI Game Developer connection to Custom (local), ' +
-          'or close that editor so exec can start its own.'
-        : `${error.message} (local MCP server: ${connection.url})`,
-      error,
+      ...(sessionError ? { sessionReason: sessionError.reason, sessionSource: sessionError.source } : {}),
+      message: sessionFailureMessage(err, connection.url),
+      error: asError(err),
     };
   }
 

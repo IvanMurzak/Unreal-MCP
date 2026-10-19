@@ -21,6 +21,7 @@ import {
   type PrepareWindowResult,
   type SessionLease,
   type SessionProcessOps,
+  type WaitedEditorSource,
 } from '@baizor/gamedev-cli-core';
 import { discoverEngine } from './engine.js';
 import { listProcesses, selectEditorProcesses, type RunningProcess } from './close.js';
@@ -74,9 +75,10 @@ export async function resolveSessionConnection(
     }
     const bound = resolveCustomHostUrl(url, projectDir);
     const typed = tryGetExplicitPort(url);
-    if (typed !== undefined && typed !== tryGetExplicitPort(bound)) {
+    const pinned = tryGetExplicitPort(bound);
+    if (typed !== undefined && typed !== pinned) {
       throw new Error(
-        `--url ${url} names port ${typed}, but the project pins port ${tryGetExplicitPort(bound)} ` +
+        `--url ${url} names port ${typed}, but the project pins port ${pinned} ` +
           '(portOverride in .ai-game-dev/project.json), which the editor serves: drop --url or change the portOverride.',
       );
     }
@@ -183,11 +185,12 @@ export function createUnrealSession(options: UnrealSessionOptions): EditorSessio
   const editor: EditorLaunchSpec = { ...unrealAdapter.editor!, requestClose, findRunningEditor };
   const adapter: EngineAdapter = { ...unrealAdapter, editor };
 
-  let engine: Promise<{ engineRoot: string; editorPath: string }> | undefined;
-  const resolveEngine = (): Promise<{ engineRoot: string; editorPath: string }> =>
-    (engine ??= resolveUnrealEngine(options, projectRoot));
+  let engine: Promise<UnrealEngine> | undefined;
+  const resolveEngine = (): Promise<UnrealEngine> => (engine ??= resolveUnrealEngine(options, projectRoot));
   const beforeLaunch =
-    options.beforeLaunch ?? (async (root: string) => buildBeforeLaunch(root, (await resolveEngine()).engineRoot, options.onStatus));
+    options.build === false
+      ? undefined
+      : (options.beforeLaunch ?? (async () => buildBeforeLaunch(await resolveEngine(), options.onStatus)));
 
   // An editor started earlier (e.g. with another --url) still answers on the server its lease names.
   const leaseUrl = readSessionLease(projectRoot)?.serverUrl;
@@ -199,7 +202,7 @@ export function createUnrealSession(options: UnrealSessionOptions): EditorSessio
     projectRoot,
     probeReady: options.probeReady ?? mcpReadinessProbe({ urls: probeUrls, token: connection.token }),
     editorBinary: options.editorBinary ?? (async () => (await resolveEngine()).editorPath),
-    ...(options.build !== false ? { beforeLaunch } : {}),
+    ...(beforeLaunch ? { beforeLaunch } : {}),
     env: { ...sessionEditorEnv(connection, options.token), ...options.env },
     serverUrl: connection.url,
     connectionMode: SESSION_CONNECTION_MODE,
@@ -211,10 +214,14 @@ export function createUnrealSession(options: UnrealSessionOptions): EditorSessio
   });
 }
 
-async function resolveUnrealEngine(
-  options: UnrealSessionOptions,
-  projectRoot: string,
-): Promise<{ engineRoot: string; editorPath: string }> {
+/** The project and the engine that opens it (resolved once a launch is decided). */
+interface UnrealEngine {
+  project: UProjectInfo;
+  engineRoot: string;
+  editorPath: string;
+}
+
+async function resolveUnrealEngine(options: UnrealSessionOptions, projectRoot: string): Promise<UnrealEngine> {
   const project = readUProject(projectRoot);
   if (!project) throw new Error(`No .uproject found at ${projectRoot}`);
   const resolution = discoverEngine({
@@ -224,13 +231,11 @@ async function resolveUnrealEngine(
     noCache: options.noCache,
   });
   if (resolution.kind === 'unresolved') throw new Error(resolution.message);
-  return { engineRoot: resolution.engineRoot, editorPath: resolution.editorPath };
+  return { project, engineRoot: resolution.engineRoot, editorPath: resolution.editorPath };
 }
 
 /** The UBT build of the editor modules, when needed. Runs under the startup lock: parallel callers never build twice. */
-async function buildBeforeLaunch(projectRoot: string, engineRoot: string, onStatus?: (message: string) => void): Promise<void> {
-  const project = readUProject(projectRoot);
-  if (!project) throw new Error(`No .uproject found at ${projectRoot}`);
+async function buildBeforeLaunch({ project, engineRoot }: UnrealEngine, onStatus?: (message: string) => void): Promise<void> {
   const warnings: string[] = [];
   await maybeBuildBeforeOpen(
     {
@@ -252,9 +257,20 @@ export interface SessionCommandOptions extends Partial<Omit<UnrealSessionOptions
   url?: string;
 }
 
+/** Options of a command that reaches the CLI-owned editor through its lease (no `--url`). */
+export type LeaseSessionOptions = Omit<SessionCommandOptions, 'url'>;
+
 export type SessionCommandResult<T> =
   | ({ kind: 'success'; success: true; projectDir: string } & T)
-  | { kind: 'failure'; success: false; message: string; reason?: EditorSessionErrorReason; error: Error };
+  | {
+      kind: 'failure';
+      success: false;
+      message: string;
+      reason?: EditorSessionErrorReason;
+      /** Which editor the session waited for (`foreign` = one the user opened). */
+      source?: WaitedEditorSource;
+      error: Error;
+    };
 
 /** The project (root or `.uproject` path, default cwd); throws naming the path when there is none. */
 export function resolveProject(projectDir: string | undefined): UProjectInfo {
@@ -273,21 +289,38 @@ export async function openProjectSession(
   return { projectDir, connection, session: createUnrealSession({ ...options, projectDir, connection }) };
 }
 
+/**
+ * The message for a session that could not provide a ready editor. An editor the user opened in Cloud mode (or on
+ * another server) never answers locally: say so; otherwise name the local URL that was probed.
+ */
+export function sessionFailureMessage(err: unknown, url: string): string {
+  if (err instanceof EditorSessionError && err.reason === 'not-ready' && err.source === 'foreign') {
+    return (
+      `An Unreal Editor you opened has the project, but its MCP server does not answer at ${url} ` +
+      '(Cloud mode, or connected to another server?). Switch its AI Game Developer connection to Custom (local), ' +
+      'or close that editor so the CLI can start its own.'
+    );
+  }
+  const { message } = asError(err);
+  return err instanceof EditorSessionError ? `${message} (local MCP server: ${url})` : message;
+}
+
 async function withSession<T>(
   options: SessionCommandOptions,
   run: (session: EditorSession<string>) => Promise<T>,
 ): Promise<SessionCommandResult<T>> {
+  let url: string | undefined;
   try {
-    const { projectDir, session } = await openProjectSession(options);
+    const { projectDir, connection, session } = await openProjectSession(options);
+    url = connection.url;
     return { kind: 'success', success: true, projectDir, ...(await run(session)) };
   } catch (err) {
-    const error = asError(err);
     return {
       kind: 'failure',
       success: false,
-      message: error.message,
-      ...(err instanceof EditorSessionError ? { reason: err.reason } : {}),
-      error,
+      message: url === undefined ? asError(err).message : sessionFailureMessage(err, url),
+      ...(err instanceof EditorSessionError ? { reason: err.reason, source: err.source } : {}),
+      error: asError(err),
     };
   }
 }
@@ -304,7 +337,7 @@ export function openEditorSession(
 
 /** `close --owned-only`: save and quit the editor only when this project's CLI lease names it (on the lease's server). */
 export function closeOwnedSession(
-  options: Omit<SessionCommandOptions, 'url'> & { timeoutMs?: number; force?: boolean },
+  options: LeaseSessionOptions & { timeoutMs?: number; force?: boolean },
 ): Promise<SessionCommandResult<{ result: CloseOwnedResult }>> {
   return withSession(options, async (session) => ({
     result: await session.closeOwned({ timeoutMs: options.timeoutMs ?? UNREAL_SESSION_CLOSE_TIMEOUT_MS, force: options.force }),
@@ -313,7 +346,7 @@ export function closeOwnedSession(
 
 /** A GUI `open`: close our headless editor first, if one holds the project. No lease → nothing to do. */
 export async function prepareGuiOpen(
-  options: Omit<SessionCommandOptions, 'url'> & { timeoutMs?: number },
+  options: LeaseSessionOptions & { timeoutMs?: number },
 ): Promise<SessionCommandResult<{ result: PrepareWindowResult }>> {
   const input = path.resolve(options.projectDir ?? process.cwd());
   const projectDir = readUProject(input)?.projectDir ?? input;

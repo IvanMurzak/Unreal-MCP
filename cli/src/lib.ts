@@ -24,6 +24,7 @@ export {
   resolveProject,
   resolveSessionConnection,
   sessionEditorEnv,
+  sessionFailureMessage,
   openEditorSession,
   closeOwnedSession,
   prepareGuiOpen,
@@ -33,7 +34,13 @@ export {
   UNREAL_SESSION_FOREIGN_READY_TIMEOUT_MS,
   UNREAL_SESSION_CLOSE_TIMEOUT_MS,
 } from './lib/session.js';
-export type { SessionConnection, UnrealSessionOptions, SessionCommandOptions, SessionCommandResult } from './lib/session.js';
+export type {
+  SessionConnection,
+  UnrealSessionOptions,
+  SessionCommandOptions,
+  LeaseSessionOptions,
+  SessionCommandResult,
+} from './lib/session.js';
 export { createProject, renderProjectTemplate, validateModuleName } from './lib/create-project.js';
 export { installPlugin, removePlugin } from './lib/install-plugin.js';
 export { installExtension } from './lib/install-extension.js';
