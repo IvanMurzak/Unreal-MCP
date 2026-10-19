@@ -482,8 +482,7 @@ void FUnrealMcpEditorCoordinator::Startup()
 		{
 			const FUnrealMcpConfig Live = FUnrealMcpConfig::LoadAndResolve();
 			const int32 Port = BridgeServerPtr ? BridgeServerPtr->GetBoundPort() : 0;
-			return FAiAgentConnectionInfo::FromPluginConfig(Live, /*ServerPath*/ FString(), Port,
-				FUnrealMcpServerManager::ServerHasToolTimeout());
+			return FAiAgentConnectionInfo::FromPluginConfig(Live, /*ServerPath*/ FString(), Port);
 		},
 		// §7 (issue #101) AI Agent Configurators: send a configurator request to the sidecar over IPC. Returns
 		// false when no sidecar is connected — the thin panel then shows its graceful "bridge not connected"
@@ -654,7 +653,7 @@ void FUnrealMcpEditorCoordinator::RequestServerLaunchArgs(int32 Port, const FUnr
 
 	const FString RequestId = FGuid::NewGuid().ToString();
 	PendingServerLaunches.Add(RequestId, FPendingServerLaunch{ Port, Mode });
-	if (!BridgeServer->SendServerLaunchArgsRequest(RequestId, Port, PluginTimeoutMs, Live.ToolTimeoutMs, AuthMode, Token, AuthIssuer, PublicUrl))
+	if (!BridgeServer->SendServerLaunchArgsRequest(RequestId, Port, PluginTimeoutMs, Live.ResolveServerToolTimeoutMs(), AuthMode, Token, AuthIssuer, PublicUrl))
 	{
 		PendingServerLaunches.Remove(RequestId);
 		UE_LOG(LogUnrealMcp, Warning,

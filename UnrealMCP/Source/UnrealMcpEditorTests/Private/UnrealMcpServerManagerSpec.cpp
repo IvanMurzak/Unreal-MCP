@@ -170,6 +170,7 @@ void FUnrealMcpServerManagerSpec::Define()
 
 	Describe("ServerHasToolTimeout", [this]()
 	{
+		// Vacuous while the pin is below MinServerVersionWithToolTimeout; guards the override once the train bumps it.
 		It("assumes an older server when UNREAL_MCP_SERVER_PATH points at a binary", [this]()
 		{
 			const FString Fake = ServerSpecMakeFakeBinary(TEXT("override-server.bin"));

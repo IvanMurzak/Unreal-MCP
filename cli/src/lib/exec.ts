@@ -19,11 +19,11 @@ const PYTHON_NOT_AVAILABLE_PREFIX = 'NotAvailable: Python is not available';
 export const PYTHON_STARTUP_GRACE_MS = 30_000;
 const PYTHON_STARTUP_RETRY_MS = 1_000;
 /**
- * Client-side tool call timeout: a Python snippet may build or save assets. Stays above the editor's default 300 s
- * tool timeout (`UNREAL_MCP_TOOL_TIMEOUT`, passed to the server as `tool-timeout`) so the server's own timeout error
- * arrives first.
+ * Client-side tool call timeout: a Python snippet may build or save assets. Stays above the server's wait for the
+ * editor's default 300 s tool timeout (`UNREAL_MCP_TOOL_TIMEOUT` + 10 s, passed as `tool-timeout`) so the editor's
+ * or the server's own timeout error arrives first.
  */
-export const DEFAULT_EXEC_TIMEOUT_MS = 310_000;
+export const DEFAULT_EXEC_TIMEOUT_MS = 320_000;
 
 export interface ExecPythonOptions {
   /** Project root or `.uproject` path; defaults to `process.cwd()`. */
@@ -36,7 +36,7 @@ export interface ExecPythonOptions {
   /** A started editor quits after this many seconds without tool calls. Default 300; `0` = never. */
   idleSeconds?: number;
   readyTimeoutMs?: number;
-  /** Tool call timeout. Default 310000. */
+  /** Tool call timeout. Default 320000. */
   timeoutMs?: number;
   /** Local server URL / token overrides. */
   url?: string;

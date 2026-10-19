@@ -48,6 +48,13 @@ namespace
 			TEXT("https://github.com/IvanMurzak/GameDev-MCP-Server/releases/download/v%s/gamedev-mcp-server-%s.zip"),
 			*Version, *Rid);
 	}
+
+	// The UNREAL_MCP_SERVER_PATH dev/CI override when it is set and points at an existing file, else empty.
+	FString ExistingServerPathOverride()
+	{
+		const FString Override = FPlatformMisc::GetEnvironmentVariable(FUnrealMcpServerManager::ServerPathEnvVar);
+		return !Override.IsEmpty() && FPaths::FileExists(Override) ? Override : FString();
+	}
 }
 
 FUnrealMcpServerManager::FUnrealMcpServerManager() = default;
@@ -183,8 +190,7 @@ bool FUnrealMcpServerManager::IsServerVersionAtLeast(const FString& Version, con
 bool FUnrealMcpServerManager::ServerHasToolTimeout()
 {
 	static const bool bPinnedHasToolTimeout = IsServerVersionAtLeast(ServerVersion, MinServerVersionWithToolTimeout);
-	const FString Override = FPlatformMisc::GetEnvironmentVariable(ServerPathEnvVar);
-	if (!Override.IsEmpty() && FPaths::FileExists(Override))
+	if (!ExistingServerPathOverride().IsEmpty())
 		return false; // a dev/CI binary of unknown version (ResolveBinaryPath prefers it)
 	return bPinnedHasToolTimeout;
 }
@@ -193,8 +199,8 @@ FString FUnrealMcpServerManager::ResolveBinaryPath() const
 {
 	// 1. Dev/CI override — wins when set + present (mirrors the sidecar's UNREAL_MCP_BRIDGE_PATH and the CLI's
 	//    UNREAL_MCP_SERVER_PATH). Skips the version check, exactly like download-server.ts's override branch.
-	const FString Override = FPlatformMisc::GetEnvironmentVariable(ServerPathEnvVar);
-	if (!Override.IsEmpty() && FPaths::FileExists(Override))
+	const FString Override = ExistingServerPathOverride();
+	if (!Override.IsEmpty())
 		return Override;
 
 	// 2. Cached binary under the §6 install dir whose `version` marker matches the pin → reuse (no network).

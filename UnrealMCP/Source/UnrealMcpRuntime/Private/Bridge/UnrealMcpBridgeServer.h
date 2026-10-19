@@ -134,7 +134,7 @@ public:
 	 * gamedev-mcp-server launch-arg string via the SHARED com.IvanMurzak.McpPlugin.ServerLaunch.ServerLaunchArguments
 	 * builder (none/oauth/token) and answers with a `server-launch-args-result` routed back through the status sink.
 	 * This is the g6 consolidation: the C++ FUnrealMcpServerManager delegates arg-building rather than duplicating the
-	 * shared logic. @p RequestId correlates the response; @p InToolTimeoutMs becomes the server's `tool-timeout` arg; @p AuthMode is the lowercase mode ("none"/"oauth"/"token");
+	 * shared logic. @p RequestId correlates the response; @p InToolTimeoutMs becomes the server's `tool-timeout` arg (FUnrealMcpConfig::ResolveServerToolTimeoutMs); @p AuthMode is the lowercase mode ("none"/"oauth"/"token");
 	 * @p Token (token mode) / @p AuthIssuer + @p PublicUrl (oauth mode) are the mode-specific credentials (@p Token
 	 * travels only over this loopback IPC, never argv, never logged). Thread-safe; no-op (returns false) when no
 	 * sidecar is connected/handshaken.

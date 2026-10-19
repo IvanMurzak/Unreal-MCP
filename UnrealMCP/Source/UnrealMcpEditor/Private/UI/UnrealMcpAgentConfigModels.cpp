@@ -5,16 +5,12 @@
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
 
-FAiAgentConnectionInfo FAiAgentConnectionInfo::FromPluginConfig(const FUnrealMcpConfig& Config, const FString& InServerPath, int32 InPort,
-	bool bServerHasToolTimeout)
+FAiAgentConnectionInfo FAiAgentConnectionInfo::FromPluginConfig(const FUnrealMcpConfig& Config, const FString& InServerPath, int32 InPort)
 {
 	FAiAgentConnectionInfo Info;
 	Info.ServerPath = InServerPath;
 	Info.Port = InPort;
-	// The shared agent-config writer emits only `plugin-timeout`, never `tool-timeout`, and a new server defaults
-	// tool-timeout to max(300000, plugin-timeout): a tool timeout above that default still rides on plugin-timeout.
-	Info.PluginTimeoutMs = Config.ResolveServerPluginTimeoutMs(
-		bServerHasToolTimeout && Config.ToolTimeoutMs <= FUnrealMcpConfig::DefaultToolTimeoutMs);
+	Info.PluginTimeoutMs = Config.ResolveServerToolTimeoutMs(); // right for old and new servers (see ResolveServerPluginTimeoutMs)
 
 	const bool bCloud = Config.ConnectionMode == EUnrealMcpConnectionMode::Cloud;
 

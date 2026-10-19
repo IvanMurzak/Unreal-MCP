@@ -247,28 +247,18 @@ void FUnrealMcpAgentConfigModelsSpec::Define()
 			Config.CustomHost = TEXT("http://localhost:8080");
 			Config.AuthOption = EUnrealMcpAuthOption::None;
 
-			const FAiAgentConnectionInfo Info = FAiAgentConnectionInfo::FromPluginConfig(Config, /*ServerPath*/ TEXT("C:/srv.exe"), /*Port*/ 31234, false);
+			const FAiAgentConnectionInfo Info = FAiAgentConnectionInfo::FromPluginConfig(Config, /*ServerPath*/ TEXT("C:/srv.exe"), /*Port*/ 31234);
 			TestEqual("port", Info.Port, 31234);
 			TestEqual("serverPath", Info.ServerPath, FString(TEXT("C:/srv.exe")));
 			TestEqual("httpUrl", Info.HttpUrl, FString(TEXT("http://localhost:8080/mcp")));
 			TestFalse("authRequired", Info.bAuthRequired);
 		});
 
-		It("passes the tool timeout as plugin-timeout unless the server honours tool-timeout", [this]()
-		{
-			FUnrealMcpConfig Config;
-			TestEqual("older server", FAiAgentConnectionInfo::FromPluginConfig(Config, FString(), 0, false).PluginTimeoutMs, 310000);
-			TestEqual("new server", FAiAgentConnectionInfo::FromPluginConfig(Config, FString(), 0, true).PluginTimeoutMs, 10000);
-			// Agent configs cannot carry tool-timeout; a new server defaults it to max(300000, plugin-timeout).
-			Config.ToolTimeoutMs = 600000;
-			TestEqual("new server, long tool timeout", FAiAgentConnectionInfo::FromPluginConfig(Config, FString(), 0, true).PluginTimeoutMs, 610000);
-		});
-
 		It("forces auth in Cloud mode", [this]()
 		{
 			FUnrealMcpConfig Config;
 			Config.ConnectionMode = EUnrealMcpConnectionMode::Cloud;
-			const FAiAgentConnectionInfo Info = FAiAgentConnectionInfo::FromPluginConfig(Config, FString(), 0, false);
+			const FAiAgentConnectionInfo Info = FAiAgentConnectionInfo::FromPluginConfig(Config, FString(), 0);
 			TestTrue("cloud requires auth", Info.bAuthRequired);
 			TestTrue("httpUrl ends with /mcp", Info.HttpUrl.EndsWith(TEXT("/mcp")));
 		});
@@ -282,7 +272,7 @@ void FUnrealMcpAgentConfigModelsSpec::Define()
 			Config.ConnectionMode = EUnrealMcpConnectionMode::Custom;
 			Config.CustomHost = TEXT("http://localhost:8080");
 			Config.AuthOption = EUnrealMcpAuthOption::None;
-			const FAiAgentConnectionInfo Info = FAiAgentConnectionInfo::FromPluginConfig(Config, FString(), 31234, false);
+			const FAiAgentConnectionInfo Info = FAiAgentConnectionInfo::FromPluginConfig(Config, FString(), 31234);
 			TestFalse("no escape hatch on default path", Info.bUseAccessToken);
 		});
 
@@ -293,7 +283,7 @@ void FUnrealMcpAgentConfigModelsSpec::Define()
 			Config.CustomHost = TEXT("http://localhost:8080");
 			Config.AuthOption = EUnrealMcpAuthOption::Oauth;
 			Config.CustomToken = TEXT("pat-secret-value"); // stored but NOT written as a bearer in Oauth mode
-			const FAiAgentConnectionInfo Info = FAiAgentConnectionInfo::FromPluginConfig(Config, FString(), 31234, false);
+			const FAiAgentConnectionInfo Info = FAiAgentConnectionInfo::FromPluginConfig(Config, FString(), 31234);
 			TestTrue("oauth requires auth", Info.bAuthRequired);
 			TestFalse("no bearer written in oauth mode", Info.bUseAccessToken);
 		});
@@ -305,7 +295,7 @@ void FUnrealMcpAgentConfigModelsSpec::Define()
 			Config.CustomHost = TEXT("http://localhost:8080");
 			Config.AuthOption = EUnrealMcpAuthOption::Token;
 			Config.CustomToken = TEXT("pat-secret-value");
-			const FAiAgentConnectionInfo Info = FAiAgentConnectionInfo::FromPluginConfig(Config, FString(), 31234, false);
+			const FAiAgentConnectionInfo Info = FAiAgentConnectionInfo::FromPluginConfig(Config, FString(), 31234);
 			TestTrue("escape hatch active", Info.bUseAccessToken);
 			TestEqual("token forwarded", Info.Token, FString(TEXT("pat-secret-value")));
 		});
@@ -320,7 +310,7 @@ void FUnrealMcpAgentConfigModelsSpec::Define()
 			Config.ConnectionMode = EUnrealMcpConnectionMode::Custom;
 			Config.AuthOption = EUnrealMcpAuthOption::Token;
 			Config.CustomToken = TEXT("shared-local-secret");
-			const FAiAgentConnectionInfo Info = FAiAgentConnectionInfo::FromPluginConfig(Config, FString(), 31234, false);
+			const FAiAgentConnectionInfo Info = FAiAgentConnectionInfo::FromPluginConfig(Config, FString(), 31234);
 			TestEqual("client bearer == resolved effective token", Info.Token, Config.ResolveEffectiveToken());
 			TestEqual("resolved token is the stored secret", Config.ResolveEffectiveToken(), FString(TEXT("shared-local-secret")));
 		});
@@ -331,7 +321,7 @@ void FUnrealMcpAgentConfigModelsSpec::Define()
 			Config.ConnectionMode = EUnrealMcpConnectionMode::Custom;
 			Config.AuthOption = EUnrealMcpAuthOption::Token;
 			Config.CustomToken = FString();
-			const FAiAgentConnectionInfo Info = FAiAgentConnectionInfo::FromPluginConfig(Config, FString(), 31234, false);
+			const FAiAgentConnectionInfo Info = FAiAgentConnectionInfo::FromPluginConfig(Config, FString(), 31234);
 			TestFalse("no token → no escape hatch", Info.bUseAccessToken);
 		});
 
@@ -340,7 +330,7 @@ void FUnrealMcpAgentConfigModelsSpec::Define()
 			FUnrealMcpConfig Config;
 			Config.ConnectionMode = EUnrealMcpConnectionMode::Cloud;
 			Config.CloudToken = TEXT("cloud-bearer-value");
-			const FAiAgentConnectionInfo Info = FAiAgentConnectionInfo::FromPluginConfig(Config, FString(), 0, false);
+			const FAiAgentConnectionInfo Info = FAiAgentConnectionInfo::FromPluginConfig(Config, FString(), 0);
 			TestFalse("cloud never uses the PAT escape hatch", Info.bUseAccessToken);
 		});
 	});

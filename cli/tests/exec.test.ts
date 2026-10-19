@@ -82,8 +82,8 @@ function userEditor(dir: string, editors: ReturnType<typeof fakeEditors>) {
 }
 
 describe('DEFAULT_EXEC_TIMEOUT_MS', () => {
-  it('outlasts the editor tool timeout the server gets as tool-timeout (UNREAL_MCP_TOOL_TIMEOUT default 300000)', () => {
-    expect(DEFAULT_EXEC_TIMEOUT_MS).toBeGreaterThan(300_000);
+  it('outlasts the server tool-timeout for the default editor tool timeout (300000 + 10000 margin)', () => {
+    expect(DEFAULT_EXEC_TIMEOUT_MS).toBeGreaterThan(310_000);
   });
 });
 
