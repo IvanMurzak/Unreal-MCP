@@ -1,12 +1,10 @@
 // `exec` — run Python in the project's Unreal Editor through `python-execute`, starting a warm headless editor
 // (`-RenderOffscreen`) when none is running. Library-safe: never prints, never exits.
 
-import * as path from 'path';
 import { EditorSessionError, type EditorSessionErrorReason, type EnsureSource } from '@baizor/gamedev-cli-core';
 import { runTool } from './run-tool.js';
-import { createUnrealSession, resolveSessionConnection, type UnrealSessionOptions } from './session.js';
+import { isToolSuccess, openProjectSession, type UnrealSessionOptions } from './session.js';
 import { asError } from '../utils/error.js';
-import { readUProject } from '../utils/project.js';
 import type { RunToolFailure, RunToolOptions, RunToolResult } from './types.js';
 
 export const PYTHON_EXECUTE_TOOL = 'python-execute';
@@ -66,30 +64,24 @@ export type ExecPythonResult = ExecPythonSuccess | ExecPythonFailure;
  * otherwise one is started headless (or with a window) that saves and quits after `idleSeconds` without tool calls.
  */
 export async function execPython(options: ExecPythonOptions): Promise<ExecPythonResult> {
-  const project = readUProject(path.resolve(options.projectDir ?? process.cwd()));
-  if (!project) {
-    return { kind: 'failure', success: false, reason: 'invalid-input', message: `No .uproject found at ${path.resolve(options.projectDir ?? process.cwd())}` };
-  }
-
-  let connection;
+  let opened;
   try {
-    connection = await resolveSessionConnection(project.projectDir, { url: options.url, token: options.token });
+    opened = await openProjectSession({
+      projectDir: options.projectDir,
+      url: options.url,
+      token: options.token,
+      idleSeconds: options.idleSeconds,
+      readyTimeoutMs: options.readyTimeoutMs,
+      engineRoot: options.engineRoot,
+      build: options.build,
+      onStatus: options.onStatus,
+      ...options.sessionOptions,
+    });
   } catch (err) {
     const error = asError(err);
     return { kind: 'failure', success: false, reason: 'invalid-input', message: error.message, error };
   }
-
-  const session = createUnrealSession({
-    projectDir: project.projectDir,
-    connection,
-    env: options.token ? { UNREAL_MCP_TOKEN: options.token } : undefined,
-    idleSeconds: options.idleSeconds,
-    readyTimeoutMs: options.readyTimeoutMs,
-    engineRoot: options.engineRoot,
-    build: options.build,
-    onStatus: options.onStatus,
-    ...options.sessionOptions,
-  });
+  const { connection, session } = opened;
 
   let ready: { ready: string; source: EnsureSource };
   try {
@@ -150,11 +142,11 @@ export function readPythonResponse(data: unknown): { ok: boolean; value: string;
       .filter((log) => typeof log?.message === 'string')
       .map((log) => ({ level: typeof log.level === 'string' ? log.level : 'info', message: log.message as string }));
     const value = structured.value === undefined ? 'null' : typeof structured.value === 'string' ? structured.value : JSON.stringify(structured.value);
-    return { ok: response?.status !== 'error' && structured.success !== false, value, logs };
+    return { ok: isToolSuccess(data) && structured.success !== false, value, logs };
   }
   const texts = (response?.content ?? []).filter((c) => c?.type === 'text' && typeof c.text === 'string').map((c) => c.text!);
   return {
-    ok: response?.status === undefined || response.status === 'success',
+    ok: isToolSuccess(data),
     value: texts.length > 0 ? texts.join('\n') : data === undefined ? '' : JSON.stringify(data),
     logs: [],
   };

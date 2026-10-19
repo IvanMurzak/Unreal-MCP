@@ -20,6 +20,8 @@ export { execPython, readPythonResponse, PYTHON_EXECUTE_TOOL, DEFAULT_EXEC_TIMEO
 export type { ExecPythonOptions, ExecPythonResult, ExecPythonSuccess, ExecPythonFailure, PythonLogLine } from './lib/exec.js';
 export {
   createUnrealSession,
+  openProjectSession,
+  resolveProject,
   resolveSessionConnection,
   sessionEditorEnv,
   openEditorSession,
@@ -27,8 +29,8 @@ export {
   prepareGuiOpen,
   readSessionLease,
   EDITOR_QUIT_TOOL,
-  DEFAULT_SESSION_READY_TIMEOUT_MS,
-  DEFAULT_SESSION_CLOSE_TIMEOUT_MS,
+  UNREAL_SESSION_READY_TIMEOUT_MS,
+  UNREAL_SESSION_CLOSE_TIMEOUT_MS,
 } from './lib/session.js';
 export type { SessionConnection, UnrealSessionOptions, SessionCommandOptions, SessionCommandResult } from './lib/session.js';
 export { createProject, renderProjectTemplate, validateModuleName } from './lib/create-project.js';

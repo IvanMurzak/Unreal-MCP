@@ -533,18 +533,21 @@ void FUnrealMcpBridgeServer::HandleToolCall(const TSharedPtr<FJsonObject>& Messa
 	const bool bRemoveOnDone = bTrackCancel;
 
 	InFlightCalls.Increment();
-	const bool bCountsAsActivity = ToolName != TEXT("ping");
-	if (bCountsAsActivity)
-		++ToolActivityCount;
 
 	Dispatcher.Dispatch(
 		Call,
-		[this, CapturedTool](const FUnrealMcpToolCall& C) { return Registry.Execute(CapturedTool, C); },
-		FTimespan::FromMilliseconds(TimeoutMs))
-		.Next([this, CapturedRequestId, bRemoveOnDone, bCountsAsActivity](FUnrealMcpToolResult Result)
+		[this, CapturedTool](const FUnrealMcpToolCall& C)
 		{
-			if (bCountsAsActivity)
+			FUnrealMcpToolResult Result = Registry.Execute(CapturedTool, C);
+			// Game thread, so the registry read is safe. System tools (ping, editor-quit, ...) are host plumbing, not work.
+			const FUnrealMcpRegisteredTool* Tool = Registry.Find(CapturedTool);
+			if (Tool != nullptr && Tool->ToolType != EUnrealMcpToolType::System)
 				++ToolActivityCount;
+			return Result;
+		},
+		FTimespan::FromMilliseconds(TimeoutMs))
+		.Next([this, CapturedRequestId, bRemoveOnDone](FUnrealMcpToolResult Result)
+		{
 			TSharedPtr<FJsonObject> Response = MakeShared<FJsonObject>();
 			Response->SetStringField(TEXT("type"), TypeToolResponse);
 			Response->SetStringField(TEXT("requestId"), CapturedRequestId);

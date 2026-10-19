@@ -141,8 +141,10 @@ export function listProcesses(os: NodeJS.Platform = platform() as NodeJS.Platfor
         'powershell',
         [
           '-NoProfile',
+          '-NonInteractive',
           '-Command',
-          "Get-CimInstance Win32_Process | Where-Object { $_.Name -like 'UnrealEditor*' } | ForEach-Object { \"$($_.ProcessId)|$($_.CommandLine)\" }",
+          // Filtered by the CIM query itself: no per-process objects for the rest of the system.
+          "Get-CimInstance Win32_Process -Filter \"Name LIKE 'UnrealEditor%'\" -Property ProcessId,CommandLine | ForEach-Object { \"$($_.ProcessId)|$($_.CommandLine)\" }",
         ],
         { encoding: 'utf-8', timeout: 30000 },
       );

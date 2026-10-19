@@ -20,11 +20,6 @@
 #include "Serialization/JsonSerializer.h"
 #include "UObject/Package.h"
 
-const TCHAR* FUnrealMcpSessionEnv::IdleSecondsVar = TEXT("AIGD_SESSION_IDLE_SECONDS");
-const TCHAR* FUnrealMcpSessionEnv::OwnerVar = TEXT("AIGD_SESSION_OWNER");
-const TCHAR* FUnrealMcpSessionEnv::NonceVar = TEXT("AIGD_SESSION_NONCE");
-const TCHAR* FUnrealMcpEditorSession::QuitToolName = TEXT("editor-quit");
-
 // --- FUnrealMcpSessionEnv -------------------------------------------------------------------------
 
 FUnrealMcpSessionEnv FUnrealMcpSessionEnv::Parse(const FString& IdleRaw, const FString& OwnerRaw, const FString& NonceRaw)

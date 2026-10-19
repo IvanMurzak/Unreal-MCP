@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import type { SessionProcessOps } from '@baizor/gamedev-cli-core';
-import { execPython, readPythonResponse, PYTHON_EXECUTE_TOOL } from '../src/lib/exec.js';
+import { execPython, readPythonResponse, toolErrorText, PYTHON_EXECUTE_TOOL } from '../src/lib/exec.js';
 import {
   closeOwnedSession,
   createUnrealSession,
@@ -315,8 +315,7 @@ describe('readCode', () => {
 });
 
 describe('toolErrorText', () => {
-  it('prefers the error the server returned for a failed tool', async () => {
-    const { toolErrorText } = await import('../src/lib/exec.js');
+  it('prefers the error the server returned for a failed tool', () => {
     const failure = { kind: 'failure', success: false, endpoint: 'x', reason: 'http-error', httpStatus: 500, message: 'Internal Server Error' } as const;
     expect(toolErrorText({ ...failure, data: { error: 'Runtime: ZeroDivisionError: division by zero' } })).toBe('Runtime: ZeroDivisionError: division by zero');
     expect(toolErrorText(failure)).toBe('Internal Server Error');

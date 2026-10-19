@@ -59,9 +59,8 @@ public:
 	bool IsClientConnected() const { return bClientConnected; }
 
 	/**
-	 * Bumps when a tool call starts and again when it is answered, not counting the `ping` liveness probe (a probe is
-	 * not work, and the CLI and the desktop app ping on their own schedule). The idle-shutdown activity signal of a CLI
-	 * session: a long call that ends between two idle checks still restarts the idle clock. Thread-safe.
+	 * Bumps when a standard (non-System) tool call finishes; System tools such as the `ping` probe are host plumbing, not
+	 * work. The idle-shutdown activity signal of a CLI session (a running call shows as GetInFlightCallCount). Thread-safe.
 	 */
 	uint64 GetToolActivityCount() const { return ToolActivityCount.load(); }
 
@@ -286,7 +285,7 @@ private:
 	FCriticalSection CancelMutex;
 	TMap<FString, TSharedRef<FThreadSafeBool, ESPMode::ThreadSafe>> CancelFlags;
 	FThreadSafeCounter InFlightCalls;      // dispatched calls whose continuation has not yet completed
-	std::atomic<uint64> ToolActivityCount{ 0 }; // starts + answers of tool calls other than `ping` (GetToolActivityCount)
+	std::atomic<uint64> ToolActivityCount{ 0 }; // finished standard tool calls (GetToolActivityCount)
 
 	TFuture<void> HeartbeatFuture;
 	FThreadSafeBool bHeartbeatStop = false;

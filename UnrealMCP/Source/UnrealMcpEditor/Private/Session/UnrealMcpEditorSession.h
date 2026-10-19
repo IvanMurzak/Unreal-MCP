@@ -15,11 +15,11 @@ class FUnrealMcpToolRegistry;
 struct UNREALMCPEDITOR_API FUnrealMcpSessionEnv
 {
 	/** Seconds without a tool call after which the editor saves and quits. Unset / not a positive integer = off. */
-	static const TCHAR* IdleSecondsVar; // AIGD_SESSION_IDLE_SECONDS
+	static constexpr const TCHAR* IdleSecondsVar = TEXT("AIGD_SESSION_IDLE_SECONDS");
 	/** `cli` when a CLI session (not the user) started this editor. */
-	static const TCHAR* OwnerVar;       // AIGD_SESSION_OWNER
+	static constexpr const TCHAR* OwnerVar = TEXT("AIGD_SESSION_OWNER");
 	/** The nonce of the session lease (`<Project>/.ai-game-dev/session.json`) the CLI wrote for this editor. */
-	static const TCHAR* NonceVar;       // AIGD_SESSION_NONCE
+	static constexpr const TCHAR* NonceVar = TEXT("AIGD_SESSION_NONCE");
 
 	int32 IdleSeconds = 0;
 	FString Owner;
@@ -35,7 +35,7 @@ struct UNREALMCPEDITOR_API FUnrealMcpSessionEnv
 
 /**
  * Idle bookkeeping without engine APIs (the Unity-MCP IdleShutdownTimer port). Activity is any change of the tool
- * activity counter (a call started or was answered), a busy editor (a call in flight, play-in-editor, asset
+ * activity counter (a standard tool call finished), a busy editor (a call in flight, play-in-editor, asset
  * compilation), a long stalled tick (the game thread was blocked) or user input newer than the last activity.
  */
 class UNREALMCPEDITOR_API FUnrealMcpIdleTimer
@@ -69,7 +69,7 @@ class UNREALMCPEDITOR_API FUnrealMcpEditorSession : public TSharedFromThis<FUnre
 {
 public:
 	/** The system tool the CLI calls to quit an editor it started. */
-	static const TCHAR* QuitToolName; // editor-quit
+	static constexpr const TCHAR* QuitToolName = TEXT("editor-quit");
 
 	FUnrealMcpEditorSession(const FUnrealMcpSessionEnv& InEnv, const FString& InProjectDir);
 	~FUnrealMcpEditorSession();
@@ -92,8 +92,6 @@ public:
 	/** Save, then ask the engine to exit, on the next tick (so a tool answer still goes out). Game thread. */
 	void RequestQuit(const FString& Reason);
 
-	const FUnrealMcpSessionEnv& GetEnv() const { return Env; }
-
 	/** `<ProjectDir>/.ai-game-dev/session.json` (the cli-core lease path). Pure. */
 	static FString LeasePath(const FString& ProjectDir);
 
@@ -103,10 +101,10 @@ public:
 	/** Whether a dirty package has a place on disk (not /Temp, /Memory, transient or PIE): the ones idle shutdown saves. */
 	static bool HasSavablePath(const FString& PackageName);
 
+private:
 	/** Save every dirty map and content package that has a path; an untitled map has nowhere to go. */
 	static void SaveDirtyPackagesWithPath();
 
-private:
 	bool Tick(float DeltaTime);
 
 	FUnrealMcpSessionEnv Env;

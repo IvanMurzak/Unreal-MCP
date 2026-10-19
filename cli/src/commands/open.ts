@@ -4,6 +4,7 @@ import { openProject } from '../lib/open.js';
 import { openEditorSession, prepareGuiOpen } from '../lib/session.js';
 import type { AuthOption, McpTransport } from '../lib/types.js';
 import * as ui from '../utils/ui.js';
+import { parseIntFlag } from '../utils/flags.js';
 
 export const openCommand = new Command('open')
   .description('Launch the Unreal Editor for a project, wiring MCP connection env vars and pre-building native modules on desktop platforms when needed')
@@ -138,26 +139,6 @@ async function openSession(pathArg: string | undefined, opts: Record<string, unk
   ui.label('server', result.url);
 }
 
-/** Parse a whole-number flag of at least `min`; prints and exits on a bad value. */
-export function parseIntFlag(rawValue: string, flagName: string, { min }: { min: number }): number {
-  const parsed = /^\d+$/.test(rawValue.trim()) ? Number.parseInt(rawValue, 10) : Number.NaN;
-  if (!Number.isSafeInteger(parsed) || parsed < min) {
-    ui.error(`${flagName} must be a whole number${min > 0 ? ` of at least ${min}` : ''}`);
-    process.exit(1);
-  }
-  return parsed;
-}
-
-function parsePositiveIntFlag(
-  rawValue: string | undefined,
-  flagName: string,
-  defaultValue: number,
-): number {
-  if (rawValue === undefined) return defaultValue;
-  const parsed = Number.parseInt(rawValue, 10);
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    ui.error(`${flagName} must be a positive integer`);
-    process.exit(1);
-  }
-  return parsed;
+function parsePositiveIntFlag(rawValue: string | undefined, flagName: string, defaultValue: number): number {
+  return rawValue === undefined ? defaultValue : parseIntFlag(rawValue, flagName, { min: 1 });
 }

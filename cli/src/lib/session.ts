@@ -28,21 +28,21 @@ import {
 } from '@baizor/gamedev-cli-core';
 import { discoverEngine } from './engine.js';
 import { listProcesses, selectEditorProcesses, type RunningProcess } from './close.js';
-import { maybeBuildBeforeOpen } from './open.js';
+import { buildOpenEnv, maybeBuildBeforeOpen } from './open.js';
 import { runSystemTool } from './run-tool.js';
 import { resolveConnection, stripTrailingSlash } from '../utils/config.js';
 import { asError } from '../utils/error.js';
 import { isAbsoluteLoopbackHost, resolveLocalBindPort } from '../utils/port.js';
 import { readProjectMarker } from '../utils/project-marker.js';
-import { readUProject } from '../utils/project.js';
+import { readUProject, type UProjectInfo } from '../utils/project.js';
 import type { RunToolOptions, RunToolResult } from './types.js';
 
 /** The plugin's system tool that saves and quits an editor a CLI session started. */
 export const EDITOR_QUIT_TOOL = 'editor-quit';
 /** A cold start compiles shaders on a fresh project: wait longer than cli-core's 5-minute default. */
-export const DEFAULT_SESSION_READY_TIMEOUT_MS = 600_000;
+export const UNREAL_SESSION_READY_TIMEOUT_MS = 600_000;
 /** How long `close --owned-only` waits for the editor to save and exit. */
-export const DEFAULT_SESSION_CLOSE_TIMEOUT_MS = 60_000;
+export const UNREAL_SESSION_CLOSE_TIMEOUT_MS = 60_000;
 
 /** The project's LOCAL MCP server: the one a CLI-started editor serves and the only one readiness may probe. */
 export interface SessionConnection {
@@ -79,20 +79,22 @@ export async function resolveSessionConnection(
  * project config the plugin reads.
  */
 export function sessionEditorEnv(connection: SessionConnection, explicitToken?: string): Record<string, string> {
-  return {
-    UNREAL_MCP_CONNECTION_MODE: 'Custom',
-    UNREAL_MCP_HOST: stripTrailingSlash(connection.url),
-    UNREAL_MCP_TRANSPORT: 'http',
-    UNREAL_MCP_START_SERVER: 'true',
-    UNREAL_MCP_KEEP_CONNECTED: 'true',
-    ...(explicitToken ? { UNREAL_MCP_TOKEN: explicitToken } : {}),
-  };
+  // A host infers Custom mode; buildOpenEnv returns undefined only under `noConnect`.
+  return buildOpenEnv({
+    host: stripTrailingSlash(connection.url),
+    transport: 'http',
+    startServer: true,
+    keepConnected: true,
+    ...(explicitToken ? { token: explicitToken } : {}),
+  })!;
 }
 
 export interface UnrealSessionOptions {
   /** The project root (the directory holding the `.uproject`). */
   projectDir: string;
   connection: SessionConnection;
+  /** An explicit token (`--token`): handed to a started editor as UNREAL_MCP_TOKEN. */
+  token?: string;
   /** Extra environment for a started editor (on top of {@link sessionEditorEnv}). */
   env?: Record<string, string>;
   /** Idle seconds before a started editor quits; `0` = never. Default 300. */
@@ -131,9 +133,17 @@ export function isToolSuccess(data: unknown): boolean {
 export function createUnrealSession(options: UnrealSessionOptions): EditorSession<string> {
   const projectRoot = path.resolve(options.projectDir);
   const ops: SessionProcessOps = { ...defaultSessionProcessOps, ...options.processOps };
-  const listEditors = options.listProcessesImpl ?? (() => listProcesses());
   const invoke = options.invokeSystemTool ?? runSystemTool;
   const { connection } = options;
+
+  // One cold `ensure` asks "is an editor running?" up to three times within seconds (binary resolver + two locked
+  // rounds); each real listing spawns PowerShell, so share one for a few seconds.
+  const listProcessesImpl = options.listProcessesImpl ?? (() => listProcesses());
+  let listed: { at: number; processes: RunningProcess[] } | undefined;
+  const listEditors = (): RunningProcess[] => {
+    if (listed === undefined || Date.now() - listed.at > 5_000) listed = { at: Date.now(), processes: listProcessesImpl() };
+    return listed.processes;
+  };
 
   const findRunningEditor = async (root: string): Promise<boolean> => {
     const project = readUProject(root);
@@ -142,8 +152,8 @@ export function createUnrealSession(options: UnrealSessionOptions): EditorSessio
 
   // A windowless editor never sees WM_CLOSE: ask our plugin to save and quit. The lease nonce proves to the plugin
   // that the caller owns the session. Fall back to the OS polite quit (enough for a window).
-  const requestClose = async (pid: number, root: string): Promise<boolean> => {
-    const lease = readSessionLease(root);
+  const requestClose = async (pid: number): Promise<boolean> => {
+    const lease = session.readLease();
     if (lease?.pid === pid) {
       const result = await invoke({
         toolName: EDITOR_QUIT_TOOL,
@@ -163,21 +173,22 @@ export function createUnrealSession(options: UnrealSessionOptions): EditorSessio
   // EditorSession resolves the binary as soon as the warm probe fails, even when it then joins an editor that is
   // still starting; never build next to a running editor (its modules are loaded and Live Coding refuses).
   const editorStarting = async (): Promise<boolean> => {
-    const lease = readSessionLease(projectRoot);
+    const lease = session.readLease();
     return (lease !== undefined && isProcessAlive(lease.pid)) || (await findRunningEditor(projectRoot));
   };
 
-  return new EditorSession<string>({
+  const session: EditorSession<string> = new EditorSession<string>({
     adapter,
     projectRoot,
     probeReady: options.probeReady ?? mcpReadinessProbe({ urls: [connection.url], token: connection.token }),
     editorBinary: options.editorBinary ?? (() => resolveEditorBinary(options, projectRoot, editorStarting)),
-    env: { ...sessionEditorEnv(connection), ...options.env },
+    env: { ...sessionEditorEnv(connection, options.token), ...options.env },
     ...(options.idleSeconds !== undefined ? { idleSeconds: options.idleSeconds } : {}),
-    readyTimeoutMs: options.readyTimeoutMs ?? DEFAULT_SESSION_READY_TIMEOUT_MS,
+    readyTimeoutMs: options.readyTimeoutMs ?? UNREAL_SESSION_READY_TIMEOUT_MS,
     ...(options.onStatus ? { onStatus: options.onStatus } : {}),
     ...(options.processOps ? { processOps: options.processOps } : {}),
   });
+  return session;
 }
 
 async function resolveEditorBinary(
@@ -215,30 +226,38 @@ async function resolveEditorBinary(
 export interface SessionCommandOptions extends Partial<Omit<UnrealSessionOptions, 'projectDir' | 'connection'>> {
   /** Project root or `.uproject` path; defaults to `process.cwd()`. */
   projectDir?: string;
+  /** Local server URL override (loopback only). */
   url?: string;
-  token?: string;
 }
 
 export type SessionCommandResult<T> =
   | ({ kind: 'success'; success: true; projectDir: string } & T)
   | { kind: 'failure'; success: false; message: string; reason?: EditorSessionErrorReason; error: Error };
 
+/** The project (root or `.uproject` path, default cwd); throws naming the path when there is none. */
+export function resolveProject(projectDir: string | undefined): UProjectInfo {
+  const input = path.resolve(projectDir ?? process.cwd());
+  const project = readUProject(input);
+  if (!project) throw new Error(`No .uproject found at ${input}`);
+  return project;
+}
+
+/** Resolve the project and its local connection, and build its session. Throws on a bad project or `--url`. */
+export async function openProjectSession(
+  options: SessionCommandOptions,
+): Promise<{ projectDir: string; connection: SessionConnection; session: EditorSession<string> }> {
+  const { projectDir } = resolveProject(options.projectDir);
+  const connection = await resolveSessionConnection(projectDir, { url: options.url, token: options.token });
+  return { projectDir, connection, session: createUnrealSession({ ...options, projectDir, connection }) };
+}
+
 async function withSession<T>(
   options: SessionCommandOptions,
-  run: (session: EditorSession<string>, projectDir: string) => Promise<T>,
+  run: (session: EditorSession<string>) => Promise<T>,
 ): Promise<SessionCommandResult<T>> {
   try {
-    const input = path.resolve(options.projectDir ?? process.cwd());
-    const project = readUProject(input);
-    if (!project) throw new Error(`No .uproject found at ${input}`);
-    const connection = await resolveSessionConnection(project.projectDir, { url: options.url, token: options.token });
-    const session = createUnrealSession({
-      ...options,
-      projectDir: project.projectDir,
-      connection,
-      env: { ...(options.token ? { UNREAL_MCP_TOKEN: options.token } : {}), ...options.env },
-    });
-    return { kind: 'success', success: true, projectDir: project.projectDir, ...(await run(session, project.projectDir)) };
+    const { projectDir, session } = await openProjectSession(options);
+    return { kind: 'success', success: true, projectDir, ...(await run(session)) };
   } catch (err) {
     const error = asError(err);
     return {
@@ -266,7 +285,7 @@ export function closeOwnedSession(
   options: SessionCommandOptions & { timeoutMs?: number; force?: boolean },
 ): Promise<SessionCommandResult<{ result: CloseOwnedResult }>> {
   return withSession(options, async (session) => ({
-    result: await session.closeOwned({ timeoutMs: options.timeoutMs ?? DEFAULT_SESSION_CLOSE_TIMEOUT_MS, force: options.force }),
+    result: await session.closeOwned({ timeoutMs: options.timeoutMs ?? UNREAL_SESSION_CLOSE_TIMEOUT_MS, force: options.force }),
   }));
 }
 
@@ -276,10 +295,11 @@ export async function prepareGuiOpen(
 ): Promise<SessionCommandResult<{ result: PrepareWindowResult }>> {
   const input = path.resolve(options.projectDir ?? process.cwd());
   const projectDir = readUProject(input)?.projectDir ?? input;
+  // Before any session exists: no lease means nothing of ours to stop (and no connection to resolve).
   if (readSessionLease(projectDir) === undefined) {
     return { kind: 'success', success: true, projectDir, result: { kind: 'proceed' } };
   }
   return withSession(options, async (session) => ({
-    result: await session.prepareWindowOpen({ timeoutMs: options.timeoutMs ?? DEFAULT_SESSION_CLOSE_TIMEOUT_MS }),
+    result: await session.prepareWindowOpen({ timeoutMs: options.timeoutMs ?? UNREAL_SESSION_CLOSE_TIMEOUT_MS }),
   }));
 }

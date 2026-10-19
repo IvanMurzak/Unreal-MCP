@@ -114,17 +114,16 @@ private:
 
 	// mcp-authorize g5/g6 consolidation: in-flight `server-launch-args` requests keyed by requestId. The
 	// OnStartLocalServer sink (and the one-time reattach) send an IPC request for the composed launch args and
-	// record the {port, bReattach} here; ApplyServerLaunchArgsResult pops the entry and runs Start/Reattach with the
+	// record the {port, mode} here; ApplyServerLaunchArgsResult pops the entry and runs Start/Reattach with the
 	// returned string. Game-thread only (both the send and the marshalled result run there) — no lock needed.
-	// bStartIfMissing: a reattach that finds no survivor starts a server instead (UNREAL_MCP_START_SERVER / startServer).
-	struct FPendingServerLaunch { int32 Port = -1; bool bReattach = false; bool bStartIfMissing = false; };
+	// ReattachOrStart: a reattach that finds no survivor starts a server instead (UNREAL_MCP_START_SERVER / startServer).
+	enum class EServerLaunch : uint8 { Start, Reattach, ReattachOrStart };
+	struct FPendingServerLaunch { int32 Port = -1; EServerLaunch Mode = EServerLaunch::Start; };
 	TMap<FString, FPendingServerLaunch> PendingServerLaunches;
 
 	// Compose + send a `server-launch-args` IPC request for @p Live's resolved auth mode and, on the async result,
-	// Start (or, when @p bReattach, ReattachIfRunning) the local server on @p Port with the sidecar-built args;
-	// @p bStartIfMissing makes a reattach that finds nothing start a new server.
-	void RequestServerLaunchArgs(int32 Port, int32 PluginTimeoutMs, const class FUnrealMcpConfig& Live, bool bReattach,
-		bool bStartIfMissing = false);
+	// Start / ReattachIfRunning (per @p Mode) the local server on @p Port with the sidecar-built args.
+	void RequestServerLaunchArgs(int32 Port, int32 PluginTimeoutMs, const class FUnrealMcpConfig& Live, EServerLaunch Mode);
 
 	FDelegateHandle PreExitHandle;
 	bool bStarted = false;

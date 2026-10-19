@@ -306,7 +306,7 @@ void FUnrealMcpEditorCoordinator::Startup()
 		// IPC; ApplyServerLaunchArgsResult runs Start with the returned string. Returns true = start INITIATED (the
 		// server-running sink polls IsRunning to reflect the actual state once the async Start completes).
 		const FUnrealMcpConfig Live = FUnrealMcpConfig::LoadAndResolve();
-		CoordinatorForStart->RequestServerLaunchArgs(ServerPort, /*PluginTimeoutMs*/ 10000, Live, /*bReattach*/ false);
+		CoordinatorForStart->RequestServerLaunchArgs(ServerPort, /*PluginTimeoutMs*/ 10000, Live, EServerLaunch::Start);
 		return true;
 	};
 	ViewModel->OnStopLocalServer = [ServerPtr]()
@@ -617,13 +617,13 @@ void FUnrealMcpEditorCoordinator::ApplyProjectConfigResult(const TSharedPtr<FJso
 		// g5/g6 consolidation: the reattach's launch args (used by the watchdog respawn) are also sidecar-composed —
 		// request them; ApplyServerLaunchArgsResult calls ReattachIfRunning with the returned string.
 		// UNREAL_MCP_START_SERVER / `startServer` (e.g. `unreal-mcp-cli exec`): no survivor → start one.
-		RequestServerLaunchArgs(DerivedPort, /*PluginTimeoutMs*/ 10000, Live, /*bReattach*/ true, /*bStartIfMissing*/ Live.bStartServer);
+		RequestServerLaunchArgs(DerivedPort, /*PluginTimeoutMs*/ 10000, Live,
+			Live.bStartServer ? EServerLaunch::ReattachOrStart : EServerLaunch::Reattach);
 	}
 	bLocalServerReattachAttempted = true;
 }
 
-void FUnrealMcpEditorCoordinator::RequestServerLaunchArgs(int32 Port, int32 PluginTimeoutMs, const FUnrealMcpConfig& Live, bool bReattach,
-	bool bStartIfMissing)
+void FUnrealMcpEditorCoordinator::RequestServerLaunchArgs(int32 Port, int32 PluginTimeoutMs, const FUnrealMcpConfig& Live, EServerLaunch Mode)
 {
 	// mcp-authorize g5/g6 consolidation. Game thread. Forward the resolved connection facts to the sidecar's SHARED
 	// ServerLaunchArguments builder; the C++ side NEVER assembles the arg string. The token/issuer/public-url are the
@@ -649,7 +649,7 @@ void FUnrealMcpEditorCoordinator::RequestServerLaunchArgs(int32 Port, int32 Plug
 	}
 
 	const FString RequestId = FGuid::NewGuid().ToString();
-	PendingServerLaunches.Add(RequestId, FPendingServerLaunch{ Port, bReattach, bStartIfMissing });
+	PendingServerLaunches.Add(RequestId, FPendingServerLaunch{ Port, Mode });
 	if (!BridgeServer->SendServerLaunchArgsRequest(RequestId, Port, PluginTimeoutMs, AuthMode, Token, AuthIssuer, PublicUrl))
 	{
 		PendingServerLaunches.Remove(RequestId);
@@ -692,7 +692,8 @@ void FUnrealMcpEditorCoordinator::ApplyServerLaunchArgsResult(const TSharedPtr<F
 		return;
 	}
 
-	if (!Pending.bReattach || (!ServerManager->ReattachIfRunning(Pending.Port, Args) && Pending.bStartIfMissing))
+	if (Pending.Mode == EServerLaunch::Start
+		|| (!ServerManager->ReattachIfRunning(Pending.Port, Args) && Pending.Mode == EServerLaunch::ReattachOrStart))
 		ServerManager->Start(Pending.Port, Args);
 }
 

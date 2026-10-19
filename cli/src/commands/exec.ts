@@ -2,9 +2,9 @@ import * as fs from 'fs';
 import { Command } from 'commander';
 import { DEFAULT_SESSION_IDLE_SECONDS } from '@baizor/gamedev-cli-core';
 import { DEFAULT_EXEC_TIMEOUT_MS, execPython, readPythonResponse } from '../lib/exec.js';
-import { DEFAULT_SESSION_READY_TIMEOUT_MS } from '../lib/session.js';
+import { UNREAL_SESSION_READY_TIMEOUT_MS } from '../lib/session.js';
 import * as ui from '../utils/ui.js';
-import { parseIntFlag } from './open.js';
+import { parseIntFlag } from '../utils/flags.js';
 
 interface ExecCliOptions {
   path?: string;
@@ -48,7 +48,7 @@ export const execCommand = new Command('exec')
   .option('--include <path>', 'Helper .py file or folder, relative to <Project>/.ai-game-dev/snippets (repeatable)', collect, [])
   .option('--window', 'Start the editor with a window instead of headless (only when none is running)')
   .option('--idle <seconds>', 'An editor started by exec saves and quits after this many idle seconds (0 = never)', String(DEFAULT_SESSION_IDLE_SECONDS))
-  .option('--ready-timeout <ms>', 'How long to wait for a started editor to become ready', String(DEFAULT_SESSION_READY_TIMEOUT_MS))
+  .option('--ready-timeout <ms>', 'How long to wait for a started editor to become ready', String(UNREAL_SESSION_READY_TIMEOUT_MS))
   .option('--timeout <ms>', 'Tool call timeout in milliseconds', String(DEFAULT_EXEC_TIMEOUT_MS))
   .option('--raw', 'Print the raw tool response JSON')
   .option('--url <url>', 'Local MCP server URL override')
@@ -87,14 +87,13 @@ export const execCommand = new Command('exec')
       },
     });
 
+    spinner?.stop();
     if (result.kind === 'failure') {
-      spinner?.stop();
       ui.error(result.reason === 'session' ? `No ready Unreal Editor: ${result.message}` : result.message);
       if (options.raw && result.toolFailure?.data !== undefined) ui.json(result.toolFailure.data);
       process.exit(1);
     }
 
-    spinner?.stop();
     if (options.raw) {
       ui.json(result.data);
       return;
