@@ -51,7 +51,7 @@ struct FAiAgentConnectionInfo
 	 * @p bServerHasToolTimeout: the configured server honours `tool-timeout` (FUnrealMcpServerManager::ServerHasToolTimeout).
 	 */
 	static UNREALMCPEDITOR_API FAiAgentConnectionInfo FromPluginConfig(const FUnrealMcpConfig& Config, const FString& InServerPath, int32 InPort,
-		bool bServerHasToolTimeout = false);
+		bool bServerHasToolTimeout);
 };
 
 /**

@@ -649,8 +649,7 @@ void FUnrealMcpEditorCoordinator::RequestServerLaunchArgs(int32 Port, const FUnr
 			PublicUrl = FString::Printf(TEXT("http://localhost:%d/mcp/p/%s"), Port, *DerivedLocalServerPin);
 	}
 
-	// `tool-timeout` bounds a tool call on a new server (older ones ignore it); `plugin-timeout` keeps an older
-	// server's per-attempt wait above the tool timeout (FUnrealMcpConfig::ResolveServerPluginTimeoutMs).
+	// See FUnrealMcpConfig::ResolveServerPluginTimeoutMs; older servers ignore `tool-timeout`.
 	const int32 PluginTimeoutMs = Live.ResolveServerPluginTimeoutMs(FUnrealMcpServerManager::ServerHasToolTimeout());
 
 	const FString RequestId = FGuid::NewGuid().ToString();

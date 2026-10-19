@@ -585,9 +585,8 @@ Godot's `GodotMainThread`:
   only its connection timeout. An older server waits `plugin-timeout` per attempt, re-sends the call
   after it (up to 10 times), and caps a tool call at 5 min. The editor always passes `toolTimeoutMs` as
   `tool-timeout` to the local server it starts (older servers ignore it). `plugin-timeout` is 10 s when
-  `FUnrealMcpServerManager::ServerHasToolTimeout()` (pinned `ServerVersion` >=
-  `MinServerVersionWithToolTimeout`, no `UNREAL_MCP_SERVER_PATH` override), else `toolTimeoutMs` + 10 s so
-  an older server does not give up or re-send first. Agent configs written by the shared McpPlugin
+  the pinned server version is new enough and no `UNREAL_MCP_SERVER_PATH` override is set, else
+  `toolTimeoutMs` + 10 s so an older server does not give up or re-send first. Agent configs written by the shared McpPlugin
   writer carry only `plugin-timeout` (a new server defaults `tool-timeout` to max(300 s, plugin-timeout)),
   so they keep `toolTimeoutMs` + 10 s when the tool timeout is above 300 s. The sidecar (McpPlugin 8.11.0)
   also answers a re-sent tool call (same request id, running or finished within 5 min) with the first

@@ -167,39 +167,13 @@ void FUnrealMcpServerManager::PrepareBinaryForSpawn(const FString& Path)
 
 bool FUnrealMcpServerManager::IsServerVersionAtLeast(const FString& Version, const FString& Minimum)
 {
-	auto Parse = [](FString Text, TArray<int32>& Out) -> bool
-	{
-		Text.TrimStartAndEndInline();
-		Text.RemoveFromStart(TEXT("v"));
-		int32 Dash = INDEX_NONE;
-		if (Text.FindChar(TEXT('-'), Dash))
-			Text.LeftInline(Dash);
-		TArray<FString> Parts;
-		Text.ParseIntoArray(Parts, TEXT("."), /*InCullEmpty*/ false);
-		if (Parts.Num() == 0)
-			return false;
-		for (const FString& Part : Parts)
-		{
-			for (const TCHAR Ch : Part)
-			{
-				if (!FChar::IsDigit(Ch))
-					return false;
-			}
-			if (Part.IsEmpty())
-				return false;
-			Out.Add(FCString::Atoi(*Part));
-		}
-		return true;
-	};
-
-	TArray<int32> Have;
-	TArray<int32> Need;
-	if (!Parse(Version, Have) || !Parse(Minimum, Need))
-		return false;
+	TArray<FString> Have, Need;
+	Version.ParseIntoArray(Have, TEXT("."));
+	Minimum.ParseIntoArray(Need, TEXT("."));
 	for (int32 Index = 0; Index < FMath::Max(Have.Num(), Need.Num()); ++Index)
 	{
-		const int32 A = Have.IsValidIndex(Index) ? Have[Index] : 0;
-		const int32 B = Need.IsValidIndex(Index) ? Need[Index] : 0;
+		const int32 A = Have.IsValidIndex(Index) ? FCString::Atoi(*Have[Index]) : 0;
+		const int32 B = Need.IsValidIndex(Index) ? FCString::Atoi(*Need[Index]) : 0;
 		if (A != B)
 			return A > B;
 	}
@@ -208,10 +182,11 @@ bool FUnrealMcpServerManager::IsServerVersionAtLeast(const FString& Version, con
 
 bool FUnrealMcpServerManager::ServerHasToolTimeout()
 {
+	static const bool bPinnedHasToolTimeout = IsServerVersionAtLeast(ServerVersion, MinServerVersionWithToolTimeout);
 	const FString Override = FPlatformMisc::GetEnvironmentVariable(ServerPathEnvVar);
 	if (!Override.IsEmpty() && FPaths::FileExists(Override))
 		return false; // a dev/CI binary of unknown version (ResolveBinaryPath prefers it)
-	return IsServerVersionAtLeast(ServerVersion, MinServerVersionWithToolTimeout);
+	return bPinnedHasToolTimeout;
 }
 
 FString FUnrealMcpServerManager::ResolveBinaryPath() const
