@@ -58,33 +58,25 @@ TFuture<FUnrealMcpToolResult> FUnrealMcpGameThreadDispatcher::Dispatch(
 
 	auto RunBody = [State, Body = MoveTemp(Body), Call, Done]() mutable
 	{
-		// The caller may have given up while this call waited in the game-thread queue: the watcher already
-		// delivered the timeout error, or a tool-cancel arrived. Running the body now would apply side effects
-		// nobody waits for (a late, possibly duplicate execution), so skip it.
-		if (State->bCompleted || Call.IsCancelled())
-		{
-			State->Complete(FUnrealMcpToolResult::Error(TEXT("Tool call was cancelled before it started; it was not run.")));
-			Done->Event->Trigger();
-			return;
-		}
-
-		FUnrealMcpToolResult Result = Body(Call);
+		// The caller already timed out or cancelled while this call was queued: never run it late.
+		const bool bAbandoned = State->bCompleted || Call.IsCancelled();
+		FUnrealMcpToolResult Result = bAbandoned
+			? FUnrealMcpToolResult::Error(TEXT("Tool call was cancelled before it started; it was not run."))
+			: Body(Call);
 		State->Complete(MoveTemp(Result));
 		Done->Event->Trigger();
 	};
 
 	if (IsInGameThread())
 	{
-		RunBody();
-	}
-	else
-	{
-		AsyncTask(ENamedThreads::GameThread, [RunBody = MoveTemp(RunBody)]() mutable { RunBody(); });
+		RunBody(); // completes the promise synchronously; nothing left to time out.
+		return Future;
 	}
 
-	// Always arm the watcher. When the body already completed, the event is already triggered and Wait()
-	// returns immediately. Both lambdas hold a ref to the pooled event, so it is returned to the pool only
-	// after BOTH have finished — never while a still-pending body might trigger it.
+	AsyncTask(ENamedThreads::GameThread, [RunBody = MoveTemp(RunBody)]() mutable { RunBody(); });
+
+	// Arm the watcher for the marshalled body. Both lambdas hold a ref to the pooled event, so it is returned
+	// to the pool only after BOTH have finished — never while a still-pending body might trigger it.
 	const uint32 TimeoutMs = static_cast<uint32>(
 		FMath::Clamp<int64>(static_cast<int64>(Timeout.GetTotalMilliseconds()), 1, static_cast<int64>(MAX_uint32)));
 

@@ -7,6 +7,7 @@
 #include "UnrealMcpPromptRegistry.h"
 #include "UnrealMcpResourceRegistry.h"
 #include "Dispatch/UnrealMcpGameThreadDispatcher.h"
+#include "Config/UnrealMcpConfig.h"
 #include "UnrealMcpLog.h"
 
 #include "Common/TcpListener.h"
@@ -76,9 +77,7 @@ namespace
 	constexpr int32 PromptsResourcesMinVersion = 2;
 	constexpr int32 HeartbeatIntervalSeconds = 5;
 	constexpr int32 HeartbeatTimeoutSeconds = 15;
-	// Fallbacks for a message that omits timeoutMs (the sidecar always sends one). Tool calls get the long
-	// default (python-execute and asset work can run for minutes); prompt/resource reads stay short.
-	constexpr int32 DefaultToolTimeoutMs = 300000;
+	// Fallback for a prompt/resource message that omits timeoutMs (the sidecar always sends one).
 	constexpr int32 DefaultRequestTimeoutMs = 30000;
 
 	FString SerializeCondensed(const TSharedPtr<FJsonObject>& Object)
@@ -496,7 +495,7 @@ void FUnrealMcpBridgeServer::HandleToolCall(const TSharedPtr<FJsonObject>& Messa
 	Message->TryGetStringField(TEXT("requestId"), RequestId);
 	Message->TryGetStringField(TEXT("tool"), ToolName);
 
-	int32 TimeoutMs = DefaultToolTimeoutMs;
+	int32 TimeoutMs = FUnrealMcpConfig::DefaultToolTimeoutMs;
 	double TimeoutValue;
 	if (Message->TryGetNumberField(TEXT("timeoutMs"), TimeoutValue) && TimeoutValue > 0)
 		TimeoutMs = static_cast<int32>(TimeoutValue);

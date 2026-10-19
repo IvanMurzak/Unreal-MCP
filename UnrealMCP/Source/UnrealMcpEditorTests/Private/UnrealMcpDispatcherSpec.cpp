@@ -8,8 +8,6 @@
 #include "Dispatch/UnrealMcpGameThreadDispatcher.h"
 #include "Async/Async.h"
 
-#include <atomic>
-
 /**
  * Game-thread dispatcher specs (docs/ARCHITECTURE.md §4). Proves the load-bearing DoD claim: a tool
  * body always runs on the game thread, even when dispatched from a background thread (marshalled), and
@@ -149,7 +147,7 @@ void FUnrealMcpDispatcherSpec::Define()
 			Async(EAsyncExecution::Thread, [this, Done]()
 			{
 				FUnrealMcpGameThreadDispatcher Dispatcher;
-				TSharedRef<std::atomic<bool>, ESPMode::ThreadSafe> bLateBodyRan = MakeShared<std::atomic<bool>, ESPMode::ThreadSafe>(false);
+				TSharedRef<FThreadSafeBool, ESPMode::ThreadSafe> bLateBodyRan = MakeShared<FThreadSafeBool, ESPMode::ThreadSafe>(false);
 
 				// Occupies the game thread for 1 s.
 				TFuture<FUnrealMcpToolResult> Slow = Dispatcher.Dispatch(
@@ -168,7 +166,7 @@ void FUnrealMcpDispatcherSpec::Define()
 					Queued,
 					[bLateBodyRan](const FUnrealMcpToolCall&)
 					{
-						*bLateBodyRan = true;
+						bLateBodyRan.Get() = true;
 						return FUnrealMcpToolResult::Success(TEXT("late"));
 					},
 					FTimespan::FromMilliseconds(100));
@@ -179,7 +177,7 @@ void FUnrealMcpDispatcherSpec::Define()
 
 				// The slow body has finished, so the game thread has (or soon will have) reached the queued one.
 				FPlatformProcess::Sleep(0.5f);
-				TestFalse(TEXT("timed-out body never ran"), bLateBodyRan->load());
+				TestFalse(TEXT("timed-out body never ran"), static_cast<bool>(bLateBodyRan.Get()));
 				Done.Execute();
 			});
 		});

@@ -91,7 +91,7 @@ public:
 	static UNREALMCPRUNTIME_API const TCHAR* DefaultCustomHost;
 	static UNREALMCPRUNTIME_API const TCHAR* DefaultLogLevel;     // Info
 	static UNREALMCPRUNTIME_API const TCHAR* DefaultTransport;    // http
-	/** How long one tool call may run before it fails with a timeout (5 min, the McpPlugin server's tool-timeout default). */
+	/** Per-tool-call timeout default; mirrors the sidecar's IpcProtocol.DefaultToolTimeoutMs. */
 	static constexpr int32 DefaultToolTimeoutMs = 300000;
 
 	// --- Live (post-override) backing fields, serialized to the camelCase JSON keys in the comments. ---

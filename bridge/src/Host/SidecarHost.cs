@@ -363,11 +363,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
 
         private volatile int _toolTimeoutMs = IpcProtocol.DefaultToolTimeoutMs;
 
-        /// <summary>
-        /// The per-tool-call timeout stamped on every <c>tool-call</c> (§4). The plugin sets it through the
-        /// <c>toolTimeoutMs</c> field of the <c>config</c> message (<c>UNREAL_MCP_TOOL_TIMEOUT</c>, §8); a plugin
-        /// that does not send it keeps <see cref="IpcProtocol.DefaultToolTimeoutMs"/>.
-        /// </summary>
+        /// <summary>The per-tool-call timeout, set by the <c>toolTimeoutMs</c> config field (§8).</summary>
         public int ToolTimeoutMs => _toolTimeoutMs;
 
         /// <summary>
