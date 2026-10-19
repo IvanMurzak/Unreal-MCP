@@ -1,9 +1,8 @@
 // Editor sessions for `exec`, `open --headless` and `close --owned-only` (Code-Exec plan §4.6): cli-core's
-// `EditorSession` plus the Unreal pieces — the editor binary (engine discovery + the pre-launch build), the local
-// connection a started editor serves, the `editor-quit` close request a windowless editor needs, and the scan for an
-// editor the user opened. Library-safe: never prints, never exits.
+// `EditorSession` plus the Unreal pieces — the editor binary (engine discovery), the pre-launch UBT build (run under
+// the session's startup lock), the local connection a started editor serves, the `editor-quit` close request a
+// windowless editor needs, and the scan for an editor the user opened. Library-safe: never prints, never exits.
 
-import * as fs from 'fs';
 import * as path from 'path';
 import { platform } from 'os';
 import {
@@ -11,10 +10,8 @@ import {
   EditorSessionError,
   defaultSessionProcessOps,
   mcpReadinessProbe,
-  parseSessionLease,
+  readSessionLease,
   unrealAdapter,
-  SESSION_DIR_NAME,
-  SESSION_LEASE_FILE_NAME,
   type CloseOwnedResult,
   type EditorLaunchSpec,
   type EditorSessionErrorReason,
@@ -24,52 +21,79 @@ import {
   type PrepareWindowResult,
   type SessionLease,
   type SessionProcessOps,
+  type WaitedEditorSource,
 } from '@baizor/gamedev-cli-core';
 import { discoverEngine } from './engine.js';
 import { listProcesses, selectEditorProcesses, type RunningProcess } from './close.js';
 import { buildOpenEnv, maybeBuildBeforeOpen } from './open.js';
 import { runSystemTool } from './run-tool.js';
-import { resolveConnection, stripTrailingSlash } from '../utils/config.js';
+import { resolveConnection, resolveCustomHostUrl, stripTrailingSlash } from '../utils/config.js';
 import { asError } from '../utils/error.js';
-import { isAbsoluteLoopbackHost, resolveLocalBindPort } from '../utils/port.js';
+import { isAbsoluteLoopbackHost, resolveLocalBindPort, tryGetExplicitPort } from '../utils/port.js';
 import { readProjectMarker } from '../utils/project-marker.js';
 import { readUProject, type UProjectInfo } from '../utils/project.js';
 import type { RunToolOptions, RunToolResult } from './types.js';
+
+export { readSessionLease };
 
 /** The plugin's system tool that saves and quits an editor a CLI session started. */
 export const EDITOR_QUIT_TOOL = 'editor-quit';
 /** A cold start compiles shaders on a fresh project: wait longer than cli-core's 5-minute default. */
 export const UNREAL_SESSION_READY_TIMEOUT_MS = 600_000;
+/**
+ * How long to wait for an editor the user opened (not started by the CLI) to answer on the local server. One in
+ * Cloud mode, or connected elsewhere, never does: fail fast instead of waiting out the cold-start timeout.
+ */
+export const UNREAL_SESSION_FOREIGN_READY_TIMEOUT_MS = 60_000;
 /** How long `close --owned-only` waits for the editor to save and exit. */
 export const UNREAL_SESSION_CLOSE_TIMEOUT_MS = 60_000;
+/** Connection mode of a session: a CLI-started editor always serves the project's local server. */
+export const SESSION_CONNECTION_MODE = 'Custom';
 
 /** The project's LOCAL MCP server: the one a CLI-started editor serves and the only one readiness may probe. */
 export interface SessionConnection {
   url: string;
   /** Bearer for that server (never a cloud token). */
   token?: string;
+  /** The plugin connection mode a started editor gets. Default {@link SESSION_CONNECTION_MODE}. */
+  connectionMode?: string;
 }
 
 /**
- * Resolve the local server of a project. A loopback URL from the usual chain (`--url`, env, `.env`, plugin config)
- * is used as is; otherwise (Cloud mode, a remote host) the project's deterministic local port. A cloud relay answers
- * whether or not this editor runs, so it can never stand in for readiness. Throws on a non-loopback `--url`.
+ * Resolve the local server of a project, on the port its sidecar binds (marker `portOverride` → port typed into the
+ * host → the deterministic port). A loopback URL from the usual chain (`--url`, env, `.env`, plugin config) keeps its
+ * host; otherwise (Cloud mode, a remote host) the project's local port is used: a cloud relay answers whether or not
+ * this editor runs, so it can never stand in for readiness. Throws on a non-loopback `--url`, and on a `--url` whose
+ * port the project's `portOverride` overrules (the editor would serve another port than the one probed).
  */
 export async function resolveSessionConnection(
   projectDir: string,
   overrides: { url?: string; token?: string } = {},
 ): Promise<SessionConnection> {
-  if (overrides.url !== undefined && overrides.url.trim().length > 0) {
-    if (!isAbsoluteLoopbackHost(overrides.url)) {
-      throw new Error(`--url must be a local (loopback) server for an editor session: ${overrides.url}`);
+  const url = overrides.url?.trim();
+  if (url) {
+    if (!isAbsoluteLoopbackHost(url)) {
+      throw new Error(`--url must be a local (loopback) server for an editor session: ${url}`);
     }
-    const resolved = await resolveConnection({ projectDir, url: overrides.url, token: overrides.token });
-    return { url: resolved.url, token: resolved.token };
+    const bound = resolveCustomHostUrl(url, projectDir);
+    const typed = tryGetExplicitPort(url);
+    const pinned = tryGetExplicitPort(bound);
+    if (typed !== undefined && typed !== pinned) {
+      throw new Error(
+        `--url ${url} names port ${typed}, but the project pins port ${pinned} ` +
+          '(portOverride in .ai-game-dev/project.json), which the editor serves: drop --url or change the portOverride.',
+      );
+    }
+    const resolved = await resolveConnection({ projectDir, url: bound, token: overrides.token });
+    return { url: resolved.url, token: resolved.token, connectionMode: SESSION_CONNECTION_MODE };
   }
-  const resolved = await resolveConnection({ projectDir, token: overrides.token });
-  if (isAbsoluteLoopbackHost(resolved.url)) return { url: resolved.url, token: resolved.token };
+  // A session never uses a cloud token: keep Cloud-mode resolution off the machine store (no token refresh).
+  const resolved = await resolveConnection({ projectDir, token: overrides.token, machineAuth: { readToken: async () => undefined } });
+  if (isAbsoluteLoopbackHost(resolved.url)) {
+    return { url: resolveCustomHostUrl(resolved.url, projectDir), token: resolved.token, connectionMode: SESSION_CONNECTION_MODE };
+  }
   const { port } = resolveLocalBindPort({ projectDir, markerPortOverride: readProjectMarker(projectDir)?.portOverride });
-  return { url: `http://localhost:${port}`, token: overrides.token };
+  return { url: `http://localhost:${port}`, token: overrides.token, connectionMode: SESSION_CONNECTION_MODE };
 }
 
 /**
@@ -78,9 +102,10 @@ export async function resolveSessionConnection(
  * project config the plugin reads.
  */
 export function sessionEditorEnv(connection: SessionConnection, explicitToken?: string): Record<string, string> {
-  // A host infers Custom mode; buildOpenEnv returns undefined only under `noConnect`.
+  // buildOpenEnv returns undefined only under `noConnect`.
   return buildOpenEnv({
     host: stripTrailingSlash(connection.url),
+    connectionMode: connection.connectionMode ?? SESSION_CONNECTION_MODE,
     transport: 'http',
     startServer: true,
     keepConnected: true,
@@ -99,6 +124,8 @@ export interface UnrealSessionOptions {
   /** Idle seconds before a started editor quits; `0` = never. Default 300. */
   idleSeconds?: number;
   readyTimeoutMs?: number;
+  /** Wait for an editor the user opened. Default {@link UNREAL_SESSION_FOREIGN_READY_TIMEOUT_MS} (capped by `readyTimeoutMs`). */
+  foreignReadyTimeoutMs?: number;
   /** Engine root override (source builds). */
   engineRoot?: string;
   /** Compile native modules before a launch when needed. Default `true`. */
@@ -107,19 +134,14 @@ export interface UnrealSessionOptions {
   onStatus?: (message: string) => void;
   // --- Test seams (defaults wire to the real system) ---
   probeReady?: () => Promise<string | undefined>;
+  /** HTTP for the default readiness probe. */
+  fetchImpl?: typeof fetch;
   editorBinary?: string | (() => string | Promise<string>);
+  /** Replaces the pre-launch build (runs under the startup lock, only when this call launches). */
+  beforeLaunch?: (projectRoot: string) => Promise<void>;
   processOps?: Partial<SessionProcessOps>;
   listProcessesImpl?: () => RunningProcess[];
   invokeSystemTool?: (options: RunToolOptions) => Promise<RunToolResult>;
-}
-
-/** The project's lease as stored (not validated); undefined when absent or unreadable. */
-export function readSessionLease(projectDir: string): SessionLease | undefined {
-  try {
-    return parseSessionLease(fs.readFileSync(path.join(projectDir, SESSION_DIR_NAME, SESSION_LEASE_FILE_NAME), 'utf-8'));
-  } catch {
-    return undefined;
-  }
 }
 
 /** Whether a direct tool response reports success (`{ status: "success" | "error", ... }`). */
@@ -135,8 +157,8 @@ export function createUnrealSession(options: UnrealSessionOptions): EditorSessio
   const invoke = options.invokeSystemTool ?? runSystemTool;
   const { connection } = options;
 
-  // One cold `ensure` asks "is an editor running?" up to three times within seconds (binary resolver + two locked
-  // rounds); each real listing spawns PowerShell, so share one for a few seconds.
+  // A cold `ensure` asks "is an editor running?" in each locked round (before and after resolving the binary); each
+  // real listing spawns PowerShell, so share one for a few seconds.
   const listProcessesImpl = options.listProcessesImpl ?? (() => listProcesses());
   let listed: { at: number; processes: RunningProcess[] } | undefined;
   const listEditors = (): RunningProcess[] => {
@@ -144,19 +166,23 @@ export function createUnrealSession(options: UnrealSessionOptions): EditorSessio
     return listed.processes;
   };
 
-  const findRunningEditor = async (root: string): Promise<boolean> => {
+  // The pid lets the session notice cheaply when that editor quits while it waits for it.
+  const findRunningEditor = async (root: string): Promise<number | false> => {
     const project = readUProject(root);
-    return project !== null && selectEditorProcesses(listEditors(), project.projectDir, project.uprojectPath).length > 0;
+    if (project === null) return false;
+    // The listing may be a few seconds old: skip an editor that quit since.
+    const live = selectEditorProcesses(listEditors(), project.projectDir, project.uprojectPath).find((p) => ops.isAlive(p.pid));
+    return live?.pid ?? false;
   };
 
-  // A windowless editor never sees WM_CLOSE: ask our plugin to save and quit. The lease nonce proves to the plugin
-  // that the caller owns the session. Fall back to the OS polite quit (enough for a window).
-  const requestClose = async (pid: number): Promise<boolean> => {
-    const lease = session.readLease();
+  // A windowless editor never sees WM_CLOSE: ask our plugin, on the server it was started against, to save and quit.
+  // The lease nonce proves to the plugin that the caller owns the session. Fall back to the OS polite quit (enough
+  // for a window).
+  const requestClose = async (pid: number, _root: string, lease?: SessionLease): Promise<boolean> => {
     if (lease?.pid === pid) {
       const result = await invoke({
         toolName: EDITOR_QUIT_TOOL,
-        url: connection.url,
+        url: lease.serverUrl ?? connection.url,
         ...(connection.token ? { token: connection.token } : {}),
         input: { nonce: lease.nonce },
         timeoutMs: 15_000,
@@ -169,31 +195,58 @@ export function createUnrealSession(options: UnrealSessionOptions): EditorSessio
   const editor: EditorLaunchSpec = { ...unrealAdapter.editor!, requestClose, findRunningEditor };
   const adapter: EngineAdapter = { ...unrealAdapter, editor };
 
-  // EditorSession resolves the binary as soon as the warm probe fails, even when it then joins an editor that is
-  // still starting; never build next to a running editor (its modules are loaded and Live Coding refuses).
-  // A lease counts only while it is provably live (a crashed editor's pid may be reused by another process).
-  const editorStarting = async (): Promise<boolean> =>
-    (await session.ownedSession()) !== undefined || (await findRunningEditor(projectRoot));
+  let engine: Promise<UnrealEngine> | undefined;
+  const resolveEngine = (): Promise<UnrealEngine> => (engine ??= resolveUnrealEngine(options, projectRoot));
+  const beforeLaunch =
+    options.build === false
+      ? undefined
+      : (options.beforeLaunch ?? (async () => buildBeforeLaunch(await resolveEngine(), options.onStatus)));
+
+  // An editor started earlier with another --url answers on the server its lease names, but only a lease cli-core
+  // verifies live is ours: a stale one's URL may belong to another project's editor now. Verified once per lease.
+  const probeLocal = mcpReadinessProbe({ urls: [connection.url], token: connection.token, fetchImpl: options.fetchImpl });
+  let verified: { nonce: string; probe?: () => Promise<string | undefined> } | undefined;
+  const probeLeased = async (): Promise<(() => Promise<string | undefined>) | undefined> => {
+    const lease = readSessionLease(projectRoot);
+    if (lease?.serverUrl === undefined || lease.serverUrl === connection.url) return undefined;
+    if (verified?.nonce !== lease.nonce) {
+      const live = (await session.ownedSession())?.nonce === lease.nonce;
+      verified = {
+        nonce: lease.nonce,
+        ...(live ? { probe: mcpReadinessProbe({ urls: [connection.url, lease.serverUrl], token: connection.token, fetchImpl: options.fetchImpl }) } : {}),
+      };
+    }
+    return verified.probe;
+  };
+  const probeReady = async (): Promise<string | undefined> => ((await probeLeased()) ?? probeLocal)();
+  const readyTimeoutMs = options.readyTimeoutMs ?? UNREAL_SESSION_READY_TIMEOUT_MS;
 
   const session: EditorSession<string> = new EditorSession<string>({
     adapter,
     projectRoot,
-    probeReady: options.probeReady ?? mcpReadinessProbe({ urls: [connection.url], token: connection.token }),
-    editorBinary: options.editorBinary ?? (() => resolveEditorBinary(options, projectRoot, editorStarting)),
+    probeReady: options.probeReady ?? probeReady,
+    editorBinary: options.editorBinary ?? (async () => (await resolveEngine()).editorPath),
+    ...(beforeLaunch ? { beforeLaunch } : {}),
     env: { ...sessionEditorEnv(connection, options.token), ...options.env },
+    serverUrl: connection.url,
+    connectionMode: connection.connectionMode ?? SESSION_CONNECTION_MODE,
     ...(options.idleSeconds !== undefined ? { idleSeconds: options.idleSeconds } : {}),
-    readyTimeoutMs: options.readyTimeoutMs ?? UNREAL_SESSION_READY_TIMEOUT_MS,
+    readyTimeoutMs,
+    foreignReadyTimeoutMs: Math.min(options.foreignReadyTimeoutMs ?? UNREAL_SESSION_FOREIGN_READY_TIMEOUT_MS, readyTimeoutMs),
     ...(options.onStatus ? { onStatus: options.onStatus } : {}),
     ...(options.processOps ? { processOps: options.processOps } : {}),
   });
   return session;
 }
 
-async function resolveEditorBinary(
-  options: UnrealSessionOptions,
-  projectRoot: string,
-  editorStarting: () => Promise<boolean>,
-): Promise<string> {
+/** The project and the engine that opens it (resolved once a launch is decided). */
+interface UnrealEngine {
+  project: UProjectInfo;
+  engineRoot: string;
+  editorPath: string;
+}
+
+async function resolveUnrealEngine(options: UnrealSessionOptions, projectRoot: string): Promise<UnrealEngine> {
   const project = readUProject(projectRoot);
   if (!project) throw new Error(`No .uproject found at ${projectRoot}`);
   const resolution = discoverEngine({
@@ -203,22 +256,23 @@ async function resolveEditorBinary(
     noCache: options.noCache,
   });
   if (resolution.kind === 'unresolved') throw new Error(resolution.message);
+  return { project, engineRoot: resolution.engineRoot, editorPath: resolution.editorPath };
+}
 
-  if (options.build !== false && !(await editorStarting())) {
-    const warnings: string[] = [];
-    await maybeBuildBeforeOpen(
-      {
-        projectDir: project.projectDir,
-        projectName: project.projectName,
-        uprojectPath: project.uprojectPath,
-        engineRoot: resolution.engineRoot,
-        onProgress: (event) => options.onStatus?.(event.message),
-      },
-      warnings,
-    );
-    for (const warning of warnings) options.onStatus?.(warning);
-  }
-  return resolution.editorPath;
+/** The UBT build of the editor modules, when needed. Runs under the startup lock: parallel callers never build twice. */
+async function buildBeforeLaunch({ project, engineRoot }: UnrealEngine, onStatus?: (message: string) => void): Promise<void> {
+  const warnings: string[] = [];
+  await maybeBuildBeforeOpen(
+    {
+      projectDir: project.projectDir,
+      projectName: project.projectName,
+      uprojectPath: project.uprojectPath,
+      engineRoot,
+      onProgress: (event) => onStatus?.(event.message),
+    },
+    warnings,
+  );
+  for (const warning of warnings) onStatus?.(warning);
 }
 
 export interface SessionCommandOptions extends Partial<Omit<UnrealSessionOptions, 'projectDir' | 'connection'>> {
@@ -228,9 +282,20 @@ export interface SessionCommandOptions extends Partial<Omit<UnrealSessionOptions
   url?: string;
 }
 
+/** Options of a command that reaches the CLI-owned editor through its lease (no `--url`). */
+export type LeaseSessionOptions = Omit<SessionCommandOptions, 'url'>;
+
 export type SessionCommandResult<T> =
   | ({ kind: 'success'; success: true; projectDir: string } & T)
-  | { kind: 'failure'; success: false; message: string; reason?: EditorSessionErrorReason; error: Error };
+  | {
+      kind: 'failure';
+      success: false;
+      message: string;
+      reason?: EditorSessionErrorReason;
+      /** Which editor the session waited for (`foreign` = one the user opened). */
+      source?: WaitedEditorSource;
+      error: Error;
+    };
 
 /** The project (root or `.uproject` path, default cwd); throws naming the path when there is none. */
 export function resolveProject(projectDir: string | undefined): UProjectInfo {
@@ -249,21 +314,37 @@ export async function openProjectSession(
   return { projectDir, connection, session: createUnrealSession({ ...options, projectDir, connection }) };
 }
 
+/** Unreal hint for an editor the user opened that never answers on the local server. */
+const FOREIGN_NOT_READY_HINT =
+  'An Unreal Editor in Cloud mode never answers there: switch its AI Game Developer connection to Custom (local).';
+
+/**
+ * The message for a session that could not provide a ready editor: cli-core's message plus the local URL that was
+ * probed, and for an editor the user opened that never answered, the Unreal Cloud-mode hint.
+ */
+export function sessionFailureMessage(err: unknown, url: string): string {
+  const { message } = asError(err);
+  if (!(err instanceof EditorSessionError)) return message;
+  const foreign = err.reason === 'not-ready' && err.source === 'foreign';
+  return `${message} (local MCP server: ${url})${foreign ? `. ${FOREIGN_NOT_READY_HINT}` : ''}`;
+}
+
 async function withSession<T>(
   options: SessionCommandOptions,
   run: (session: EditorSession<string>) => Promise<T>,
 ): Promise<SessionCommandResult<T>> {
+  let url: string | undefined;
   try {
-    const { projectDir, session } = await openProjectSession(options);
+    const { projectDir, connection, session } = await openProjectSession(options);
+    url = connection.url;
     return { kind: 'success', success: true, projectDir, ...(await run(session)) };
   } catch (err) {
-    const error = asError(err);
     return {
       kind: 'failure',
       success: false,
-      message: error.message,
-      ...(err instanceof EditorSessionError ? { reason: err.reason } : {}),
-      error,
+      message: url === undefined ? asError(err).message : sessionFailureMessage(err, url),
+      ...(err instanceof EditorSessionError ? { reason: err.reason, source: err.source } : {}),
+      error: asError(err),
     };
   }
 }
@@ -278,7 +359,10 @@ export function openEditorSession(
   });
 }
 
-/** `close --owned-only`: save and quit the editor only when this project's CLI lease names it. */
+/**
+ * `close --owned-only`: save and quit the editor only when this project's CLI lease names it, through the server the
+ * lease records. `url` is only a fallback for a lease without one (written by CLI 0.23 / cli-core 0.7.0).
+ */
 export function closeOwnedSession(
   options: SessionCommandOptions & { timeoutMs?: number; force?: boolean },
 ): Promise<SessionCommandResult<{ result: CloseOwnedResult }>> {
@@ -289,7 +373,7 @@ export function closeOwnedSession(
 
 /** A GUI `open`: close our headless editor first, if one holds the project. No lease → nothing to do. */
 export async function prepareGuiOpen(
-  options: SessionCommandOptions & { timeoutMs?: number },
+  options: LeaseSessionOptions & { timeoutMs?: number },
 ): Promise<SessionCommandResult<{ result: PrepareWindowResult }>> {
   const input = path.resolve(options.projectDir ?? process.cwd());
   const projectDir = readUProject(input)?.projectDir ?? input;

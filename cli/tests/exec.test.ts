@@ -1,11 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import type { SessionProcessOps } from '@baizor/gamedev-cli-core';
 import { execPython, readPythonResponse, toolErrorText, PYTHON_EXECUTE_TOOL } from '../src/lib/exec.js';
 import {
   closeOwnedSession,
   createUnrealSession,
+  openEditorSession,
   EDITOR_QUIT_TOOL,
   readSessionLease,
   resolveSessionConnection,
@@ -13,6 +15,7 @@ import {
 } from '../src/lib/session.js';
 import { readCode } from '../src/commands/exec.js';
 import { PLUGIN_CONFIG_RELATIVE_PATH, resolveConnection } from '../src/utils/config.js';
+import { generatePortFromDirectory } from '../src/utils/port.js';
 import type { RunToolOptions, RunToolResult } from '../src/lib/types.js';
 import { makeTempDir, rmTempDir, writeUProject } from './helpers.js';
 
@@ -64,7 +67,19 @@ function okTool(data: unknown = { status: 'success', structured: { success: true
   }));
 }
 
-const CONNECTION = { url: 'http://localhost:5199' };
+const CONNECTION = { url: 'http://localhost:5199', connectionMode: 'Custom' as const };
+const noBuild = async (): Promise<void> => {};
+
+/** Session seams of a cold project: the fake process table, no build, no editor of the user's. */
+function coldSeams(editors: ReturnType<typeof fakeEditors>) {
+  return { probeReady: editors.probeReady, processOps: editors.ops, editorBinary: 'UnrealEditor.exe', beforeLaunch: noBuild, listProcessesImpl: () => [] };
+}
+
+/** An editor the user opened on the project (pid 42, alive). */
+function userEditor(dir: string, editors: ReturnType<typeof fakeEditors>) {
+  editors.alive.add(42);
+  return () => [{ pid: 42, commandLine: `"C:/UE/UnrealEditor.exe" "${path.join(dir, 'Game.uproject')}"` }];
+}
 
 describe('execPython', () => {
   it('reuses a running editor without launching one', async () => {
@@ -76,7 +91,7 @@ describe('execPython', () => {
       code: '1 + 2',
       url: CONNECTION.url,
       invoke,
-      sessionOptions: { probeReady: async () => 'http://localhost:5199', processOps: editors.ops, editorBinary: 'UnrealEditor.exe' },
+      sessionOptions: { probeReady: async () => 'http://localhost:5199', processOps: editors.ops, editorBinary: 'UnrealEditor.exe', beforeLaunch: noBuild },
     });
     expect(result.kind).toBe('success');
     if (result.kind === 'success') expect(result.source).toBe('running');
@@ -97,7 +112,7 @@ describe('execPython', () => {
       url: CONNECTION.url,
       idleSeconds: 120,
       invoke,
-      sessionOptions: { probeReady: editors.probeReady, processOps: editors.ops, editorBinary: 'UnrealEditor.exe', listProcessesImpl: () => [] },
+      sessionOptions: coldSeams(editors),
     });
     expect(result.kind).toBe('success');
     if (result.kind === 'success') expect(result.source).toBe('started');
@@ -129,7 +144,7 @@ describe('execPython', () => {
       url: CONNECTION.url,
       window: true,
       invoke: okTool(),
-      sessionOptions: { probeReady: editors.probeReady, processOps: editors.ops, editorBinary: 'UnrealEditor.exe', listProcessesImpl: () => [] },
+      sessionOptions: coldSeams(editors),
     });
     expect(editors.spawned[0]!.args).toEqual([path.join(dir, 'Game.uproject')]);
     expect(editors.spawned[0]!.hideWindow).toBe(false);
@@ -144,7 +159,7 @@ describe('execPython', () => {
       code: '1',
       url: CONNECTION.url,
       invoke: okTool(),
-      sessionOptions: { probeReady: editors.probeReady, processOps: editors.ops, editorBinary: 'UnrealEditor.exe', listProcessesImpl: () => [] },
+      sessionOptions: coldSeams(editors),
     });
     const results = await Promise.all([run(), run()]);
     expect(results.map((r) => r.kind)).toEqual(['success', 'success']);
@@ -164,8 +179,8 @@ describe('execPython', () => {
       sessionOptions: {
         probeReady: async () => (++probes >= 3 ? 'http://localhost:5199' : undefined),
         processOps: editors.ops,
-        editorBinary: 'UnrealEditor.exe',
-        listProcessesImpl: () => [{ pid: 42, commandLine: `"C:/UE/UnrealEditor.exe" "${path.join(dir, 'Game.uproject')}"` }],
+        editorBinary: 'UnrealEditor.exe', beforeLaunch: noBuild,
+        listProcessesImpl: userEditor(dir, editors),
       },
     });
     expect(result.kind).toBe('success');
@@ -182,10 +197,178 @@ describe('execPython', () => {
       code: '1',
       url: CONNECTION.url,
       invoke: okTool(),
-      sessionOptions: { probeReady: editors.probeReady, processOps: editors.ops, editorBinary: 'UnrealEditor.exe', listProcessesImpl: () => [] },
+      sessionOptions: coldSeams(editors),
     });
     expect(result).toMatchObject({ kind: 'failure', reason: 'session', sessionReason: 'exited' });
     expect(readSessionLease(dir)).toBeUndefined();
+  });
+
+  it('runs the pre-launch build once, under the startup lock, for two parallel cold calls', async () => {
+    const dir = project();
+    const editors = fakeEditors(3);
+    let builds = 0;
+    let building = false;
+    const build = async (): Promise<void> => {
+      expect(building).toBe(false);
+      building = true;
+      builds += 1;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      building = false;
+    };
+    const run = () => execPython({
+      projectDir: dir,
+      code: '1',
+      url: CONNECTION.url,
+      invoke: okTool(),
+      sessionOptions: { ...coldSeams(editors), beforeLaunch: build },
+    });
+    const results = await Promise.all([run(), run()]);
+    expect(results.map((r) => r.kind)).toEqual(['success', 'success']);
+    expect(builds).toBe(1);
+    expect(editors.spawned).toHaveLength(1);
+  });
+
+  it('does not launch when the pre-launch build fails', async () => {
+    const dir = project();
+    const editors = fakeEditors();
+    const result = await execPython({
+      projectDir: dir,
+      code: '1',
+      url: CONNECTION.url,
+      invoke: okTool(),
+      sessionOptions: {
+        probeReady: editors.probeReady, processOps: editors.ops, editorBinary: 'UnrealEditor.exe', listProcessesImpl: () => [],
+        beforeLaunch: async () => { throw new Error('Pre-launch build failed: UBT exited with code 6'); },
+      },
+    });
+    expect(result).toMatchObject({ kind: 'failure', reason: 'session' });
+    expect(result.kind === 'failure' && result.message).toMatch(/Pre-launch build failed/);
+    expect(editors.spawned).toHaveLength(0);
+    expect(readSessionLease(dir)).toBeUndefined();
+  });
+
+  it('records the server URL and connection mode in the lease and keeps the session files out of git', async () => {
+    const dir = project();
+    const editors = fakeEditors();
+    await execPython({
+      projectDir: dir,
+      code: '1',
+      url: 'http://127.0.0.1:5188',
+      invoke: okTool(),
+      sessionOptions: coldSeams(editors),
+    });
+    expect(readSessionLease(dir)).toMatchObject({ serverUrl: 'http://127.0.0.1:5188', connectionMode: 'Custom' });
+    const gitignore = fs.readFileSync(path.join(dir, '.ai-game-dev', '.gitignore'), 'utf-8');
+    expect(gitignore).toMatch(/session\.json/);
+  });
+
+  it('fails fast when an editor the user opened never answers on the local server (e.g. Cloud mode)', async () => {
+    const dir = project();
+    const editors = fakeEditors();
+    const started = Date.now();
+    const result = await execPython({
+      projectDir: dir,
+      code: '1',
+      url: CONNECTION.url,
+      invoke: okTool(),
+      sessionOptions: {
+        probeReady: async () => undefined,
+        processOps: editors.ops,
+        editorBinary: 'UnrealEditor.exe',
+        beforeLaunch: noBuild,
+        foreignReadyTimeoutMs: 50,
+        listProcessesImpl: userEditor(dir, editors),
+      },
+    });
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(result).toMatchObject({ kind: 'failure', reason: 'session', sessionReason: 'not-ready', sessionSource: 'foreign' });
+    expect(result.kind === 'failure' && result.message).toMatch(/not started by the CLI[\s\S]*Cloud mode/);
+    expect(editors.spawned).toHaveLength(0);
+  });
+
+  it('never probes the server of a stale lease (its URL may now serve another project)', async () => {
+    const dir = project();
+    const editors = fakeEditors();
+    fs.mkdirSync(path.join(dir, '.ai-game-dev'), { recursive: true });
+    fs.writeFileSync(path.join(dir, '.ai-game-dev', 'session.json'), JSON.stringify({
+      pid: 999, nonce: 'stale', engine: 'unreal', mode: 'headless', startedAt: new Date().toISOString(), ownedBy: 'cli',
+      hostId: os.hostname(), processStart: 'start-999', serverUrl: 'http://127.0.0.1:5999',
+    }));
+    const pinged: string[] = [];
+    const fetchImpl = (async (input: string | URL | Request) => {
+      const url = String(input);
+      pinged.push(url);
+      const up = url.startsWith('http://127.0.0.1:5999') || editors.alive.size > 0;
+      return new Response('{}', { status: up ? 200 : 503 });
+    }) as typeof fetch;
+    const invoke = okTool();
+    const result = await execPython({
+      projectDir: dir,
+      code: '1',
+      url: CONNECTION.url,
+      invoke,
+      sessionOptions: { ...coldSeams(editors), probeReady: undefined, fetchImpl },
+    });
+    expect(result).toMatchObject({ kind: 'success', source: 'started', baseUrl: CONNECTION.url });
+    expect(pinged.some((url) => url.includes(':5999'))).toBe(false);
+    expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ url: CONNECTION.url }));
+  });
+
+  it('reaches a live CLI-owned editor on the server its lease names', async () => {
+    const dir = project();
+    const editors = fakeEditors();
+    const fetchImpl = (async (input: string | URL | Request) =>
+      new Response('{}', { status: String(input).startsWith('http://127.0.0.1:5177') && editors.alive.size > 0 ? 200 : 503 })) as typeof fetch;
+    const first = await execPython({
+      projectDir: dir, code: '1', url: 'http://127.0.0.1:5177', invoke: okTool(),
+      sessionOptions: { ...coldSeams(editors), probeReady: undefined, fetchImpl },
+    });
+    expect(first).toMatchObject({ kind: 'success', source: 'started' });
+    const second = await execPython({
+      projectDir: dir, code: '1', url: CONNECTION.url, invoke: okTool(),
+      sessionOptions: { ...coldSeams(editors), probeReady: undefined, fetchImpl },
+    });
+    expect(second).toMatchObject({ kind: 'success', source: 'running', baseUrl: 'http://127.0.0.1:5177' });
+    expect(editors.spawned).toHaveLength(1);
+  });
+
+  it('ignores a cached editor listing whose editor has quit', async () => {
+    const dir = project();
+    const editors = fakeEditors();
+    const result = await execPython({
+      projectDir: dir,
+      code: '1',
+      url: CONNECTION.url,
+      invoke: okTool(),
+      sessionOptions: {
+        ...coldSeams(editors),
+        listProcessesImpl: () => [{ pid: 43, commandLine: `"C:/UE/UnrealEditor.exe" "${path.join(dir, 'Game.uproject')}"` }],
+      },
+    });
+    expect(result).toMatchObject({ kind: 'success', source: 'started' });
+  });
+
+  it('retries while a fresh editor has not initialized Python yet, but not a running one', async () => {
+    const notYet = { kind: 'failure', success: false, endpoint: 'x', reason: 'http-error', httpStatus: 500, message: 'Internal Server Error',
+      data: { error: 'NotAvailable: Python is not available in this editor (PythonScriptPlugin disabled or failed to start).' } } as RunToolResult;
+    const ok: RunToolResult = { kind: 'success', success: true, endpoint: 'x', httpStatus: 200, data: { status: 'success', structured: { success: true, value: '3', logs: [] } } };
+    const flaky = () => vi.fn<(o: RunToolOptions) => Promise<RunToolResult>>().mockResolvedValueOnce(notYet).mockResolvedValue(ok);
+
+    const editors = fakeEditors();
+    const fresh = flaky();
+    const started = await execPython({
+      projectDir: project(), code: '1', url: CONNECTION.url, invoke: fresh, sleep: async () => {}, sessionOptions: coldSeams(editors),
+    });
+    expect(started).toMatchObject({ kind: 'success', source: 'started' });
+    expect(fresh).toHaveBeenCalledTimes(2);
+
+    const running = flaky();
+    const warm = await execPython({
+      projectDir: project(), code: '1', url: CONNECTION.url, invoke: running, sleep: async () => {},
+      sessionOptions: { ...coldSeams(fakeEditors()), probeReady: async () => CONNECTION.url },
+    });
+    expect(warm).toMatchObject({ kind: 'failure', reason: 'tool-failed' });
+    expect(running).toHaveBeenCalledTimes(1);
   });
 
   it('rejects a remote --url (readiness must probe the local server)', async () => {
@@ -210,7 +393,7 @@ describe('closeOwned (editor-quit)', () => {
     });
     const session = createUnrealSession({
       projectDir: dir, connection: CONNECTION, probeReady: editors.probeReady, processOps: editors.ops,
-      editorBinary: 'UnrealEditor.exe', listProcessesImpl: () => [], invokeSystemTool: quit,
+      editorBinary: 'UnrealEditor.exe', beforeLaunch: noBuild, listProcessesImpl: () => [], invokeSystemTool: quit,
     });
     await session.ensure();
     const nonce = readSessionLease(dir)!.nonce;
@@ -231,17 +414,76 @@ describe('closeOwned (editor-quit)', () => {
     }) as RunToolResult);
     const session = createUnrealSession({
       projectDir: dir, connection: CONNECTION, probeReady: editors.probeReady, processOps: editors.ops,
-      editorBinary: 'UnrealEditor.exe', listProcessesImpl: () => [], invokeSystemTool: unreachable,
+      editorBinary: 'UnrealEditor.exe', beforeLaunch: noBuild, listProcessesImpl: () => [], invokeSystemTool: unreachable,
     });
     await session.ensure();
     expect(await session.closeOwned({ timeoutMs: 1000 })).toMatchObject({ kind: 'closed' });
     expect(editors.alive.size).toBe(0);
   });
 
+  it('closes without --url: editor-quit goes to the server named by the lease', async () => {
+    const dir = project();
+    const editors = fakeEditors();
+    const quit = vi.fn(async (options: RunToolOptions): Promise<RunToolResult> => {
+      editors.alive.clear();
+      return { kind: 'success', success: true, endpoint: options.toolName, httpStatus: 200, data: { status: 'success' } };
+    });
+    const seams = { processOps: editors.ops, listProcessesImpl: () => [], invokeSystemTool: quit };
+    const started = await execPython({
+      projectDir: dir,
+      code: '1',
+      url: 'http://127.0.0.1:5177',
+      invoke: okTool(),
+      sessionOptions: { ...seams, probeReady: editors.probeReady, editorBinary: 'UnrealEditor.exe', beforeLaunch: noBuild },
+    });
+    expect(started.kind).toBe('success');
+    const result = await closeOwnedSession({ projectDir: dir, timeoutMs: 1000, ...seams });
+    expect(result).toMatchObject({ kind: 'success', result: { kind: 'closed', pid: 1000 } });
+    expect(quit).toHaveBeenCalledWith(expect.objectContaining({ toolName: EDITOR_QUIT_TOOL, url: 'http://127.0.0.1:5177' }));
+  });
+
+  it('falls back to --url for a lease without a server URL (CLI 0.23)', async () => {
+    const dir = project();
+    const editors = fakeEditors();
+    const quit = vi.fn(async (options: RunToolOptions): Promise<RunToolResult> => {
+      editors.alive.clear();
+      return { kind: 'success', success: true, endpoint: options.toolName, httpStatus: 200, data: { status: 'success' } };
+    });
+    const pid = await editors.ops.spawnDetached!('UnrealEditor.exe', [], { cwd: dir, env: {}, hideWindow: true });
+    fs.mkdirSync(path.join(dir, '.ai-game-dev'), { recursive: true });
+    fs.writeFileSync(path.join(dir, '.ai-game-dev', 'session.json'), JSON.stringify({
+      pid, nonce: 'old', engine: 'unreal', mode: 'headless', startedAt: new Date().toISOString(), ownedBy: 'cli',
+      hostId: os.hostname(), processStart: `start-${pid}`,
+    }));
+    const result = await closeOwnedSession({
+      projectDir: dir, url: 'http://127.0.0.1:5166', timeoutMs: 1000, processOps: editors.ops, listProcessesImpl: () => [], invokeSystemTool: quit,
+    });
+    expect(result).toMatchObject({ kind: 'success', result: { kind: 'closed', pid } });
+    expect(quit).toHaveBeenCalledWith(expect.objectContaining({ url: 'http://127.0.0.1:5166', input: { nonce: 'old' } }));
+  });
+
   it('never touches an editor without our lease', async () => {
     const dir = project();
-    const result = await closeOwnedSession({ projectDir: dir, url: CONNECTION.url });
+    const result = await closeOwnedSession({ projectDir: dir });
     expect(result).toMatchObject({ kind: 'success', result: { kind: 'not-owned', staleLeaseRemoved: false } });
+  });
+});
+
+describe('openEditorSession', () => {
+  it('names a Cloud-mode editor the user opened, like exec', async () => {
+    const dir = project();
+    const editors = fakeEditors();
+    const result = await openEditorSession({
+      projectDir: dir,
+      mode: 'headless',
+      url: CONNECTION.url,
+      ...coldSeams(editors),
+      probeReady: async () => undefined,
+      foreignReadyTimeoutMs: 50,
+      listProcessesImpl: userEditor(dir, editors),
+    });
+    expect(result).toMatchObject({ kind: 'failure', reason: 'not-ready', source: 'foreign' });
+    expect(result.kind === 'failure' && result.message).toMatch(/not started by the CLI[\s\S]*Cloud mode/);
   });
 });
 
@@ -249,7 +491,7 @@ describe('session connection', () => {
   it('keeps a loopback URL and builds the started editor env from it', async () => {
     const dir = project();
     const connection = await resolveSessionConnection(dir, { url: 'http://127.0.0.1:5188/', token: 't' });
-    expect(connection).toEqual({ url: 'http://127.0.0.1:5188', token: 't' });
+    expect(connection).toEqual({ url: 'http://127.0.0.1:5188', token: 't', connectionMode: 'Custom' });
     expect(sessionEditorEnv(connection, 't')).toEqual({
       UNREAL_MCP_CONNECTION_MODE: 'Custom',
       UNREAL_MCP_HOST: 'http://127.0.0.1:5188',
@@ -258,6 +500,22 @@ describe('session connection', () => {
       UNREAL_MCP_KEEP_CONNECTED: 'true',
       UNREAL_MCP_TOKEN: 't',
     });
+  });
+
+  it('fills in the bound port for a port-less --url', async () => {
+    const dir = project();
+    const connection = await resolveSessionConnection(dir, { url: 'http://localhost' });
+    expect(connection.url).toBe(`http://localhost:${generatePortFromDirectory(dir)}`);
+  });
+
+  it('rejects a --url whose port the project portOverride overrules, and follows the override otherwise', async () => {
+    const dir = project();
+    fs.mkdirSync(path.join(dir, '.ai-game-dev'), { recursive: true });
+    fs.writeFileSync(path.join(dir, '.ai-game-dev', 'project.json'), JSON.stringify({ portOverride: 27001 }));
+    await expect(resolveSessionConnection(dir, { url: 'http://localhost:5199' })).rejects.toThrow(/portOverride/);
+    expect((await resolveSessionConnection(dir, { url: 'http://localhost:27001' })).url).toBe('http://localhost:27001');
+    expect((await resolveSessionConnection(dir, { url: 'http://localhost' })).url).toBe('http://localhost:27001');
+    expect((await resolveSessionConnection(dir)).url).toBe('http://localhost:27001');
   });
 
   it('uses the deterministic local port for a Cloud-mode project, never the cloud URL or its token', async () => {

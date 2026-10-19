@@ -203,7 +203,7 @@ export function stripTrailingSlash(url: string): string {
  * deliberate levels-1+3-only divergence for non-loopback hosts. Pure given the marker on
  * disk.
  */
-function resolveCustomHostUrl(host: string, projectDir: string): string {
+export function resolveCustomHostUrl(host: string, projectDir: string): string {
   const stripped = stripTrailingSlash(host);
   if (!isAbsoluteLoopbackHost(stripped)) return stripped;
 

@@ -1,15 +1,29 @@
 // `exec` — run Python in the project's Unreal Editor through `python-execute`, starting a warm headless editor
 // (`-RenderOffscreen`) when none is running. Library-safe: never prints, never exits.
 
-import { EditorSessionError, type EditorSessionErrorReason, type EnsureSource } from '@baizor/gamedev-cli-core';
+import {
+  EditorSessionError,
+  type EditorSessionErrorReason,
+  type EnsureSource,
+  type WaitedEditorSource,
+} from '@baizor/gamedev-cli-core';
 import { runTool } from './run-tool.js';
-import { isToolSuccess, openProjectSession, type UnrealSessionOptions } from './session.js';
+import { isToolSuccess, openProjectSession, sessionFailureMessage, type UnrealSessionOptions } from './session.js';
 import { asError } from '../utils/error.js';
 import type { RunToolFailure, RunToolOptions, RunToolResult } from './types.js';
 
 export const PYTHON_EXECUTE_TOOL = 'python-execute';
-/** Tool call timeout: a Python snippet may build or save assets. */
-export const DEFAULT_EXEC_TIMEOUT_MS = 180_000;
+/** The plugin's answer while PythonScriptPlugin is not initialized (UnrealMcpPythonTools.cpp). */
+const PYTHON_NOT_AVAILABLE_PREFIX = 'NotAvailable: Python is not available';
+/** How long a fresh editor (started or joined by this call) gets for Python to come up after MCP answers. */
+export const PYTHON_STARTUP_GRACE_MS = 30_000;
+const PYTHON_STARTUP_RETRY_MS = 1_000;
+/**
+ * Client-side tool call timeout: a Python snippet may build or save assets. Meant to pair with a 300 s server-side
+ * plugin timeout (the editor is to pass the tool timeout as `plugin-timeout` when it starts the server), staying
+ * above it so the server's own timeout error would arrive first.
+ */
+export const DEFAULT_EXEC_TIMEOUT_MS = 310_000;
 
 export interface ExecPythonOptions {
   /** Project root or `.uproject` path; defaults to `process.cwd()`. */
@@ -22,7 +36,7 @@ export interface ExecPythonOptions {
   /** A started editor quits after this many seconds without tool calls. Default 300; `0` = never. */
   idleSeconds?: number;
   readyTimeoutMs?: number;
-  /** Tool call timeout. Default 180000. */
+  /** Tool call timeout. Default 310000. */
   timeoutMs?: number;
   /** Local server URL / token overrides. */
   url?: string;
@@ -33,6 +47,7 @@ export interface ExecPythonOptions {
   /** Test seams: session hooks and the tool call. */
   sessionOptions?: Partial<UnrealSessionOptions>;
   invoke?: (options: RunToolOptions) => Promise<RunToolResult>;
+  sleep?: (ms: number) => Promise<void>;
 }
 
 export interface ExecPythonSuccess {
@@ -52,6 +67,8 @@ export interface ExecPythonFailure {
   /** `invalid-input`: bad project / URL; `session`: no ready editor (see `sessionReason`); `tool-failed`: the call failed. */
   reason: 'invalid-input' | 'session' | 'tool-failed';
   sessionReason?: EditorSessionErrorReason;
+  /** Which editor the session waited for (`foreign` = one the user opened). */
+  sessionSource?: WaitedEditorSource;
   toolFailure?: RunToolFailure;
   message: string;
   error?: Error;
@@ -87,31 +104,47 @@ export async function execPython(options: ExecPythonOptions): Promise<ExecPython
   try {
     ready = await session.ensure({ mode: options.window ? 'window' : 'headless' });
   } catch (err) {
-    const error = asError(err);
+    const sessionError = err instanceof EditorSessionError ? err : undefined;
     return {
       kind: 'failure',
       success: false,
       reason: 'session',
-      ...(err instanceof EditorSessionError ? { sessionReason: err.reason } : {}),
-      // An editor the user opened without the local server never answers there: name the URL that was probed.
-      message: `${error.message} (local MCP server: ${connection.url})`,
-      error,
+      ...(sessionError ? { sessionReason: sessionError.reason, sessionSource: sessionError.source } : {}),
+      message: sessionFailureMessage(err, connection.url),
+      error: asError(err),
     };
   }
 
   options.onStatus?.('Running...');
   const invoke = options.invoke ?? runTool;
-  const result = await invoke({
+  const call = (): Promise<RunToolResult> => invoke({
     toolName: PYTHON_EXECUTE_TOOL,
     url: ready.ready,
     ...(connection.token ? { token: connection.token } : {}),
     input: { code: options.code, ...(options.include && options.include.length > 0 ? { include: options.include } : {}) },
     timeoutMs: options.timeoutMs ?? DEFAULT_EXEC_TIMEOUT_MS,
   });
+  let result = await call();
+  // A just-started editor serves MCP before PythonScriptPlugin is up: give a fresh editor a short grace period.
+  if (ready.source === 'started' || ready.source === 'owned') {
+    const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+    const deadline = Date.now() + PYTHON_STARTUP_GRACE_MS;
+    while (pythonNotYetAvailable(result) && Date.now() < deadline) {
+      options.onStatus?.('Waiting for Python in the editor...');
+      await sleep(PYTHON_STARTUP_RETRY_MS);
+      result = await call();
+    }
+  }
   if (result.kind === 'failure') {
     return { kind: 'failure', success: false, reason: 'tool-failed', toolFailure: result, message: toolErrorText(result), error: result.error };
   }
   return { kind: 'success', success: true, baseUrl: ready.ready, source: ready.source, data: result.data };
+}
+
+/** Whether `python-execute` answered that the editor's Python interpreter is not (yet) initialized. */
+export function pythonNotYetAvailable(result: RunToolResult): boolean {
+  const text = result.kind === 'failure' ? toolErrorText(result) : readPythonResponse(result.data).value;
+  return text.startsWith(PYTHON_NOT_AVAILABLE_PREFIX);
 }
 
 /** A failed call's own error (the server answers a tool error as HTTP 500 `{ "error": "<text>" }`), else the HTTP reason. */

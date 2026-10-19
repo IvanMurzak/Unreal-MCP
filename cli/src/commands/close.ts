@@ -1,4 +1,4 @@
-import { Command } from 'commander';
+import { Command, Option } from 'commander';
 import { close } from '../lib/close.js';
 import { closeOwnedSession } from '../lib/session.js';
 import * as ui from '../utils/ui.js';
@@ -8,7 +8,8 @@ export const closeCommand = new Command('close')
   .argument('[path]', 'Unreal project directory (defaults to cwd)')
   .option('--owned-only', 'Only close an editor the CLI started (exec / open --headless): it saves and quits; an editor the user opened is never touched')
   .option('--force', 'With --owned-only: kill the CLI-owned editor when it does not quit in time')
-  .option('--url <url>', 'With --owned-only: the local MCP server URL the session uses (as given to exec / open)')
+  // Deprecated, hidden: only for a lease without the server URL (an editor started by CLI 0.23).
+  .addOption(new Option('--url <url>', 'With --owned-only: the server of an editor whose lease does not record it').hideHelp())
   .option('--token <token>', 'With --owned-only: bearer token override')
   .action(async (pathArg: string | undefined, opts: { ownedOnly?: boolean; force?: boolean; url?: string; token?: string }) => {
     if (opts.ownedOnly === true) {
