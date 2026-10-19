@@ -99,7 +99,7 @@ export const openCommand = new Command('open')
  * False when the open must not go on (already open with a window, or the headless editor did not quit).
  */
 async function stopOwnHeadlessEditor(pathArg: string | undefined, opts: Record<string, unknown>): Promise<boolean> {
-  const prepared = await prepareGuiOpen({ projectDir: pathArg, url: opts.url as string | undefined, token: opts.token as string | undefined });
+  const prepared = await prepareGuiOpen({ projectDir: pathArg, token: opts.token as string | undefined });
   if (prepared.kind === 'failure') {
     ui.error(prepared.message);
     process.exitCode = 1;

@@ -8,9 +8,8 @@ export const closeCommand = new Command('close')
   .argument('[path]', 'Unreal project directory (defaults to cwd)')
   .option('--owned-only', 'Only close an editor the CLI started (exec / open --headless): it saves and quits; an editor the user opened is never touched')
   .option('--force', 'With --owned-only: kill the CLI-owned editor when it does not quit in time')
-  .option('--url <url>', 'With --owned-only: the local MCP server URL the session uses (as given to exec / open)')
   .option('--token <token>', 'With --owned-only: bearer token override')
-  .action(async (pathArg: string | undefined, opts: { ownedOnly?: boolean; force?: boolean; url?: string; token?: string }) => {
+  .action(async (pathArg: string | undefined, opts: { ownedOnly?: boolean; force?: boolean; token?: string }) => {
     if (opts.ownedOnly === true) {
       await closeOwned(pathArg, opts);
       return;
@@ -29,8 +28,8 @@ export const closeCommand = new Command('close')
     ui.success(`Terminated ${result.terminated.length} editor process(es): ${result.terminated.join(', ')}`);
   });
 
-async function closeOwned(pathArg: string | undefined, opts: { force?: boolean; url?: string; token?: string }): Promise<void> {
-  const outcome = await closeOwnedSession({ projectDir: pathArg, force: opts.force === true, url: opts.url, token: opts.token });
+async function closeOwned(pathArg: string | undefined, opts: { force?: boolean; token?: string }): Promise<void> {
+  const outcome = await closeOwnedSession({ projectDir: pathArg, force: opts.force === true, token: opts.token });
   if (outcome.kind === 'failure') {
     ui.error(outcome.message);
     process.exitCode = 1;

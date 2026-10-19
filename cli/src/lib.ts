@@ -30,6 +30,7 @@ export {
   readSessionLease,
   EDITOR_QUIT_TOOL,
   UNREAL_SESSION_READY_TIMEOUT_MS,
+  UNREAL_SESSION_FOREIGN_READY_TIMEOUT_MS,
   UNREAL_SESSION_CLOSE_TIMEOUT_MS,
 } from './lib/session.js';
 export type { SessionConnection, UnrealSessionOptions, SessionCommandOptions, SessionCommandResult } from './lib/session.js';

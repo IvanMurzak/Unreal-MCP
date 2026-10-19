@@ -1,7 +1,12 @@
 // `exec` — run Python in the project's Unreal Editor through `python-execute`, starting a warm headless editor
 // (`-RenderOffscreen`) when none is running. Library-safe: never prints, never exits.
 
-import { EditorSessionError, type EditorSessionErrorReason, type EnsureSource } from '@baizor/gamedev-cli-core';
+import {
+  EditorSessionError,
+  type EditorSessionErrorReason,
+  type EnsureSource,
+  type WaitedEditorSource,
+} from '@baizor/gamedev-cli-core';
 import { runTool } from './run-tool.js';
 import { isToolSuccess, openProjectSession, type UnrealSessionOptions } from './session.js';
 import { asError } from '../utils/error.js';
@@ -52,6 +57,8 @@ export interface ExecPythonFailure {
   /** `invalid-input`: bad project / URL; `session`: no ready editor (see `sessionReason`); `tool-failed`: the call failed. */
   reason: 'invalid-input' | 'session' | 'tool-failed';
   sessionReason?: EditorSessionErrorReason;
+  /** Which editor the session waited for (`foreign` = one the user opened). */
+  sessionSource?: WaitedEditorSource;
   toolFailure?: RunToolFailure;
   message: string;
   error?: Error;
@@ -88,13 +95,18 @@ export async function execPython(options: ExecPythonOptions): Promise<ExecPython
     ready = await session.ensure({ mode: options.window ? 'window' : 'headless' });
   } catch (err) {
     const error = asError(err);
+    const foreign = err instanceof EditorSessionError && err.reason === 'not-ready' && err.source === 'foreign';
     return {
       kind: 'failure',
       success: false,
       reason: 'session',
-      ...(err instanceof EditorSessionError ? { sessionReason: err.reason } : {}),
-      // An editor the user opened without the local server never answers there: name the URL that was probed.
-      message: `${error.message} (local MCP server: ${connection.url})`,
+      ...(err instanceof EditorSessionError ? { sessionReason: err.reason, sessionSource: err.source } : {}),
+      // An editor the user opened in Cloud mode (or on another server) never answers locally: say so and name the URL.
+      message: foreign
+        ? `An Unreal Editor you opened has the project, but its MCP server does not answer at ${connection.url} ` +
+          '(Cloud mode, or connected to another server?). Switch its AI Game Developer connection to Custom (local), ' +
+          'or close that editor so exec can start its own.'
+        : `${error.message} (local MCP server: ${connection.url})`,
       error,
     };
   }
