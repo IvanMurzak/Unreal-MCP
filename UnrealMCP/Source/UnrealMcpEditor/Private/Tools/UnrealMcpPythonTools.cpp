@@ -108,7 +108,13 @@ namespace UnrealMcpPythonTools
 				// ForceEnablePythonAtRuntime overrides the "enabled by default" settings, but it returns true even when the
 				// interpreter did not come up: IsPythonInitialized afterwards is the real check.
 				if (Python != nullptr && !Python->IsPythonInitialized())
+				{
 					Python->ForceEnablePythonAtRuntime();
+					// On a fresh editor Python is configured at the end of engine init and finishes initializing on its
+					// first tick. Until then ask the dispatcher to retry on a later tick (bounded by the call's timeout).
+					if (!Python->IsPythonConfigured() || (Python->IsPythonAvailable() && !Python->IsPythonInitialized()))
+						return FUnrealMcpToolResult::RetryLater(TEXT("Python is still starting."));
+				}
 				const bool bPythonReady = Python != nullptr && Python->IsPythonInitialized();
 #endif
 				if (!bPythonReady)

@@ -182,6 +182,49 @@ void FUnrealMcpDispatcherSpec::Define()
 			});
 		});
 
+		// A body that is not ready yet (RetryLater) is run again on a later tick, never blocking the game thread.
+		LatentIt("re-runs a body that asks to retry until it returns a result", FTimespan::FromSeconds(15), [this](const FDoneDelegate& Done)
+		{
+			Async(EAsyncExecution::Thread, [this, Done]()
+			{
+				FUnrealMcpGameThreadDispatcher Dispatcher;
+				TSharedRef<FThreadSafeCounter, ESPMode::ThreadSafe> Attempts = MakeShared<FThreadSafeCounter, ESPMode::ThreadSafe>();
+				const FUnrealMcpToolResult Result = Dispatcher.Dispatch(
+					FUnrealMcpToolCall(),
+					[Attempts](const FUnrealMcpToolCall&)
+					{
+						return Attempts->Increment() < 3
+							? FUnrealMcpToolResult::RetryLater(TEXT("not yet"))
+							: FUnrealMcpToolResult::Success(TEXT("ready"));
+					},
+					FTimespan::FromSeconds(10)).Get();
+
+				TestTrue(TEXT("success"), Result.bSuccess);
+				TestEqual(TEXT("message"), Result.Message, FString(TEXT("ready")));
+				TestEqual(TEXT("ran three times"), Attempts->GetValue(), 3);
+				Done.Execute();
+			});
+		});
+
+		LatentIt("times out a body that never stops asking to retry", FTimespan::FromSeconds(15), [this](const FDoneDelegate& Done)
+		{
+			Async(EAsyncExecution::Thread, [this, Done]()
+			{
+				FUnrealMcpGameThreadDispatcher Dispatcher;
+				FUnrealMcpToolCall Call;
+				Call.CancelRequested = MakeShared<FThreadSafeBool, ESPMode::ThreadSafe>(false);
+				const FUnrealMcpToolResult Result = Dispatcher.Dispatch(
+					Call,
+					[](const FUnrealMcpToolCall&) { return FUnrealMcpToolResult::RetryLater(TEXT("never")); },
+					FTimespan::FromMilliseconds(500)).Get();
+
+				TestFalse(TEXT("error"), Result.bSuccess);
+				TestTrue(TEXT("timed out"), Result.Message.Contains(TEXT("timed out")));
+				TestTrue(TEXT("cancel flag set"), Call.IsCancelled());
+				Done.Execute();
+			});
+		});
+
 		// HandleToolCancel flips the shared cancel flag that the bridge stores; assert FUnrealMcpToolCall
 		// observes that flip (and stays false with no flag / a clear flag).
 		It("reflects the shared cancel flag through IsCancelled()", [this]()

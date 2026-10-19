@@ -595,6 +595,10 @@ Godot's `GodotMainThread`:
   the call's own timeout and `tool-cancel`; a server re-send is a new call and is not deduplicated here.
 - **Watchdog:** one process-lifetime thread enforces every pending call's deadline (no pooled thread is
   held per call).
+- **Not ready yet:** a handler may return `FUnrealMcpToolResult::RetryLater(reason)`; the dispatcher runs it
+  again on a later tick (core ticker, ~100 ms) until it returns a result or the call times out, never
+  blocking the game thread. `python-execute` uses it while Python finishes starting on a fresh editor
+  (UE 5.6+); it answers `NotAvailable` only when Python is disabled or failed to start.
 - **Async tools** (e.g. `source-compile` waiting on UBT, `blueprint-compile` follow-ups) return a
   `TFuture` from the handler itself; the dispatcher chains rather than blocks, so the game thread
   is only occupied for the synchronous slice.

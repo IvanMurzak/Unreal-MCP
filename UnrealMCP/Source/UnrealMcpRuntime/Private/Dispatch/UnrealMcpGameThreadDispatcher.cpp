@@ -9,6 +9,7 @@
 #include "HAL/RunnableThread.h"
 #include "Misc/CoreDelegates.h"
 #include "Misc/ScopeLock.h"
+#include "Containers/Ticker.h"
 
 #include <atomic>
 
@@ -132,6 +133,51 @@ namespace
 	};
 }
 
+namespace
+{
+	/** One dispatched call: runs on the game thread, again on a later tick while the body asks to retry. */
+	struct FUnrealMcpDispatchJob : TSharedFromThis<FUnrealMcpDispatchJob, ESPMode::ThreadSafe>
+	{
+		TSharedRef<FDispatchState, ESPMode::ThreadSafe> State;
+		FUnrealMcpToolCall Call;
+		TFunction<FUnrealMcpToolResult(const FUnrealMcpToolCall&)> Body;
+
+		FUnrealMcpDispatchJob(TSharedRef<FDispatchState, ESPMode::ThreadSafe> InState, FUnrealMcpToolCall InCall,
+			TFunction<FUnrealMcpToolResult(const FUnrealMcpToolCall&)> InBody)
+			: State(MoveTemp(InState)), Call(MoveTemp(InCall)), Body(MoveTemp(InBody))
+		{
+		}
+
+		void Run()
+		{
+			// The caller already timed out or cancelled: never run it late.
+			if (State->bCompleted || Call.IsCancelled())
+			{
+				State->Complete(FUnrealMcpToolResult::Error(TEXT("Tool call was cancelled before it started; it was not run.")));
+				return;
+			}
+
+			FUnrealMcpToolResult Result = Body(Call);
+			if (!Result.bRetryLater)
+			{
+				State->Complete(MoveTemp(Result));
+				return;
+			}
+
+			// Not ready (e.g. Python before its first tick). A ticker runs on a later frame, so the engine keeps
+			// ticking in between; the watchdog bounds the wait.
+			UE_LOG(LogUnrealMcp, Verbose, TEXT("[Unreal-MCP] tool call not ready, retrying: %s"), *Result.Message);
+			FTSTicker::GetCoreTicker().AddTicker(
+				FTickerDelegate::CreateLambda([Self = AsShared()](float)
+				{
+					Self->Run();
+					return false;
+				}),
+				0.1f);
+		}
+	};
+}
+
 TFuture<FUnrealMcpToolResult> FUnrealMcpGameThreadDispatcher::Dispatch(
 	FUnrealMcpToolCall Call,
 	TFunction<FUnrealMcpToolResult(const FUnrealMcpToolCall&)> Body,
@@ -139,28 +185,22 @@ TFuture<FUnrealMcpToolResult> FUnrealMcpGameThreadDispatcher::Dispatch(
 {
 	TSharedRef<FDispatchState, ESPMode::ThreadSafe> State = MakeShared<FDispatchState, ESPMode::ThreadSafe>();
 	TFuture<FUnrealMcpToolResult> Future = State->Promise.GetFuture();
-
-	auto RunBody = [State, Body = MoveTemp(Body), Call]() mutable
-	{
-		// The caller already timed out or cancelled while this call was queued: never run it late.
-		const bool bAbandoned = State->bCompleted || Call.IsCancelled();
-		FUnrealMcpToolResult Result = bAbandoned
-			? FUnrealMcpToolResult::Error(TEXT("Tool call was cancelled before it started; it was not run."))
-			: Body(Call);
-		State->Complete(MoveTemp(Result));
-	};
+	const uint32 TimeoutMs = static_cast<uint32>(
+		FMath::Clamp<int64>(static_cast<int64>(Timeout.GetTotalMilliseconds()), 1, static_cast<int64>(MAX_uint32)));
+	TSharedPtr<const FThreadSafeBool, ESPMode::ThreadSafe> CancelFlag = Call.CancelRequested;
+	TSharedRef<FUnrealMcpDispatchJob, ESPMode::ThreadSafe> Job =
+		MakeShared<FUnrealMcpDispatchJob, ESPMode::ThreadSafe>(State, MoveTemp(Call), MoveTemp(Body));
 
 	if (IsInGameThread())
 	{
-		RunBody(); // completes the promise synchronously; nothing left to time out.
+		Job->Run();
+		if (!State->bCompleted) // the body asked to retry on a later tick
+			FUnrealMcpDispatchWatchdog::Get().Watch(State, CancelFlag, TimeoutMs);
 		return Future;
 	}
 
 	// Arm the deadline before posting so a body that finishes instantly is simply pruned by the watchdog.
-	const uint32 TimeoutMs = static_cast<uint32>(
-		FMath::Clamp<int64>(static_cast<int64>(Timeout.GetTotalMilliseconds()), 1, static_cast<int64>(MAX_uint32)));
-	FUnrealMcpDispatchWatchdog::Get().Watch(State, Call.CancelRequested, TimeoutMs);
-
-	AsyncTask(ENamedThreads::GameThread, [RunBody = MoveTemp(RunBody)]() mutable { RunBody(); });
+	FUnrealMcpDispatchWatchdog::Get().Watch(State, CancelFlag, TimeoutMs);
+	AsyncTask(ENamedThreads::GameThread, [Job]() { Job->Run(); });
 	return Future;
 }
