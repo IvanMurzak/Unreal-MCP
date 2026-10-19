@@ -420,6 +420,9 @@ def download_server(version: str, cache_dir: Path) -> Path | None:
         return None
     # win-x64 zips are flat; *nix zips nest under <rid>/ — find the binary at the shallowest depth.
     found = sorted(cache_dir.rglob(SERVER_BASENAME), key=lambda p: len(p.parts))
+    if found and os.name != "nt":
+        # zipfile drops the Unix mode bits: make the server executable again (macOS / Linux).
+        found[0].chmod(found[0].stat().st_mode | 0o111)
     return found[0] if found else None
 
 

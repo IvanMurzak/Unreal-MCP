@@ -3,7 +3,9 @@
 
 #include "UnrealMcpRqlSession.h"
 #include "UnrealMcpRqlSources.h"
+#include "UnrealMcpRqlUtil.h"
 
+#include "Engine/Blueprint.h"
 #include "Math/Color.h"
 #include "Math/IntPoint.h"
 #include "Math/IntVector.h"
@@ -13,6 +15,8 @@
 #include "Math/Vector2D.h"
 #include "Math/Vector4.h"
 #include "UObject/Class.h"
+#include "UObject/SoftObjectPath.h"
+#include "UObject/Object.h"
 
 #include <exception>
 #include <string>
@@ -217,9 +221,125 @@ bool UnrealMcpRqlParseMathStruct(UScriptStruct* Struct, const rql::Value& Value,
 	return true;
 }
 
+std::function<rql::AdapterOutcome(const rql::Value&, const rql::TypeDescriptor&, rql::Value&, std::string&)>
+	UnrealMcpRqlStructCoerce(FUnrealMcpRqlTypes& Types, UScriptStruct* Struct, std::function<bool(const rql::Value&)> Accepts)
+{
+	FUnrealMcpRqlTypes* TypesPtr = &Types;
+	return [TypesPtr, Struct, Accepts](const rql::Value& Value, const rql::TypeDescriptor&, rql::Value& Result, std::string& Reason)
+	{
+		if (!Accepts(Value))
+			return rql::AdapterOutcome::NotHandled;
+		rql::Value Built = TypesPtr->WrapStruct(Struct, nullptr);
+		try
+		{
+			TypesPtr->CoerceStruct(Struct, Value, Built.ptr());
+		}
+		catch (const std::exception& Error)
+		{
+			Reason = Error.what();
+			return rql::AdapterOutcome::Failed;
+		}
+		Result = Built;
+		return rql::AdapterOutcome::Ok;
+	};
+}
+
+namespace UnrealMcpRqlStructsLocal
+{
+	/**
+	 * Soft object / class paths (FSoftObjectPath, FSoftClassPath: GameDefaultMap, a class to spawn ...) as text:
+	 * "/Game/Maps/Arena.Arena" out, a path, an object or "" in. Paths are not checked for an existing asset (they are
+	 * soft: the asset may not be loaded or not exist yet), the same rule as soft object properties.
+	 */
+	void AddSoftPathAdapter(FUnrealMcpRqlSession& Session, UScriptStruct* Struct)
+	{
+		FUnrealMcpRqlTypes* Types = &Session.Types();
+		const rql::TypeDescriptor* Descriptor = Types->ForStruct(Struct);
+		if (!Descriptor)
+			return;
+		// Text is the whole value: no raw members (AssetPath / SubPathString) to write past the adapter.
+		Types->AddStructHook(Struct, [](FUnrealMcpRqlTypes&, rql::TypeDescriptor& D)
+		{
+			D.members.clear();
+			FUnrealMcpRqlTypes::SetMember(D, UnrealMcpRqlUtil::Member("Path", rql::builtin::string_type(), [](void* Self)
+			{
+				return UnrealMcpRqlUtil::Str(static_cast<const FSoftObjectPath*>(Self)->ToString());
+			}, {}, "the path text"));
+			FUnrealMcpRqlTypes::SetMember(D, UnrealMcpRqlUtil::Member("Package", rql::builtin::string_type(), [](void* Self)
+			{
+				return UnrealMcpRqlUtil::Str(static_cast<const FSoftObjectPath*>(Self)->GetLongPackageName());
+			}, {}, "the package (\"/Game/Maps/Arena\")"));
+		});
+		const bool bClassPath = Struct->GetFName() == FName(TEXT("SoftClassPath"));
+		Types->AddStructParser(Struct, [bClassPath](FUnrealMcpRqlTypes& T, const rql::Value& Value, void* Out) -> bool
+		{
+			FSoftObjectPath& Path = *static_cast<FSoftObjectPath*>(Out);
+			if (Value.is_null() || (Value.is_string() && Value.as_string().empty()))
+			{
+				Path.Reset();
+				return true;
+			}
+			if (UObject* Object = T.AsObject(Value))
+			{
+				// A class path holds a class: a Blueprint stands for its generated class, other objects do not fit.
+				if (bClassPath && !Object->IsA<UClass>())
+				{
+					const UBlueprint* Blueprint = Cast<UBlueprint>(Object);
+					if (!Blueprint || !Blueprint->GeneratedClass)
+						UnrealMcpRqlUtil::Throw(FString::Printf(TEXT("%s is not a class (a class path takes a class or a Blueprint)"), *Object->GetName()));
+					Object = Blueprint->GeneratedClass;
+				}
+				Path = FSoftObjectPath(Object);
+				return true;
+			}
+			if (!Value.is_string())
+				return false;
+			// SetPath silently resets text that is not an object path ("Arena", "Game/Maps/Arena"): refuse it instead.
+			const FString Text = UnrealMcpRqlFromStd(Value.as_string()).TrimStartAndEnd();
+			Path.SetPath(Text);
+			if (Path.IsNull() && !Text.IsEmpty() && !Text.Equals(TEXT("None")))
+				UnrealMcpRqlUtil::Throw(FString::Printf(TEXT("'%s' is not an object path (\"/Game/Maps/Arena.Arena\")"), *Text));
+			return true;
+		});
+		rql::TypeAdapter Adapter;
+		Adapter.name = UnrealMcpRqlToStd(Struct->GetName());
+		Adapter.target = Descriptor;
+		Adapter.description = UnrealMcpRqlToStd(Struct->GetName()) + ": an asset path as text (\"/Game/Maps/Arena.Arena\"), an object, or \"\" for none";
+		Adapter.encode = [](const rql::Value& Value, const rql::EncodeContext&) -> std::optional<rql::Json>
+		{
+			if (!Value.is_struct() || !Value.ptr())
+				return std::nullopt;
+			const FSoftObjectPath& Path = *static_cast<const FSoftObjectPath*>(Value.ptr());
+			return Path.IsNull() ? rql::Json() : rql::Json(UnrealMcpRqlToStd(Path.ToString()));
+		};
+		Adapter.coerce = UnrealMcpRqlStructCoerce(*Types, Struct,
+			[](const rql::Value& Value) { return Value.is_string() || Value.is_null() || Value.is_object(); });
+		Adapter.equals = [](const rql::Value& Value, const rql::Value& Other) -> std::optional<bool>
+		{
+			if (!Value.is_struct() || !Value.ptr())
+				return std::nullopt;
+			const FSoftObjectPath& Path = *static_cast<const FSoftObjectPath*>(Value.ptr());
+			if (Other.is_null())
+				return Path.IsNull();
+			if (!Other.is_string())
+				return std::nullopt;
+			const FString Text = UnrealMcpRqlFromStd(Other.as_string()).TrimStartAndEnd();
+			// "/Game/Maps/Arena" matches "/Game/Maps/Arena.Arena" (the package path an edit field shows).
+			return Path.ToString().Equals(Text, ESearchCase::IgnoreCase) || Path.GetLongPackageName().Equals(Text, ESearchCase::IgnoreCase);
+		};
+		Session.AddAdapter(std::move(Adapter));
+	}
+}
+
 void UnrealMcpRqlAddStructAdapters(FUnrealMcpRqlSession& Session)
 {
 	FUnrealMcpRqlTypes* Types = &Session.Types();
+	// The reflected structs of FSoftObjectPath / FSoftClassPath (no TBaseStructure for them).
+	for (const TCHAR* Path : { TEXT("/Script/CoreUObject.SoftObjectPath"), TEXT("/Script/CoreUObject.SoftClassPath") })
+	{
+		if (UScriptStruct* Struct = FindObject<UScriptStruct>(nullptr, Path))
+			AddSoftPathAdapter(Session, Struct);
+	}
 	for (const FMathStruct& Spec : MathStructs())
 	{
 		const rql::TypeDescriptor* Descriptor = Types->ForStruct(Spec.Struct);
@@ -236,22 +356,33 @@ void UnrealMcpRqlAddStructAdapters(FUnrealMcpRqlSession& Session)
 				return std::nullopt;
 			return rql::Json(Format(*SpecPtr, Value.ptr()));
 		};
-		Adapter.coerce = [Types, SpecPtr](const rql::Value& Value, const rql::TypeDescriptor&, rql::Value& Result, std::string& Reason) -> rql::AdapterOutcome
+		// Structs and {X: 1} literals: RQL's own coercion.
+		Adapter.coerce = UnrealMcpRqlStructCoerce(*Types, Spec.Struct, [](const rql::Value& Value) { return Value.is_string() || Value.is_list(); });
+		// Equality with the text and list forms (where Location == "(0, 0, 100)"), approximate like RQL's .NET tuple
+		// adapters: components within 1e-5.
+		Adapter.equals = [SpecPtr](const rql::Value& Value, const rql::Value& Other) -> std::optional<bool>
 		{
-			if (!Value.is_string() && !Value.is_list())
-				return rql::AdapterOutcome::NotHandled; // structs and {X: 1} literals: RQL's own coercion
-			rql::Value Built = Types->WrapStruct(SpecPtr->Struct, nullptr);
-			try
+			if (!Value.is_struct() || !Value.ptr())
+				return std::nullopt;
+			double Mine[4] = { 0, 0, 0, 0 };
+			double Theirs[4] = { 0, 0, 0, 0 };
+			SpecPtr->Get(Value.ptr(), Mine);
+			if (Other.is_struct() && Other.type() == Value.type() && Other.ptr())
+				SpecPtr->Get(Other.ptr(), Theirs);
+			else if (Other.is_string() || Other.is_list())
 			{
-				Types->CoerceStruct(SpecPtr->Struct, Value, Built.ptr());
+				FString Ignored;
+				if (!Components(*SpecPtr, Other, Theirs, Ignored))
+					return false; // not this struct's form: not equal
 			}
-			catch (const std::exception& Error)
+			else
+				return std::nullopt;
+			for (int32 Index = 0; Index < SpecPtr->Count; ++Index)
 			{
-				Reason = Error.what();
-				return rql::AdapterOutcome::Failed;
+				if (!(FMath::Abs(Mine[Index] - Theirs[Index]) <= 1e-5))
+					return false;
 			}
-			Result = Built;
-			return rql::AdapterOutcome::Ok;
+			return true;
 		};
 		Session.AddAdapter(std::move(Adapter));
 	}

@@ -40,6 +40,10 @@
       "Enabled": true
     },
     {
+      "Name": "GameplayTagsEditor",
+      "Enabled": true
+    },
+    {
       "Name": "PythonScriptPlugin",
       "Enabled": true,
       "TargetAllowList": [ "Editor" ]

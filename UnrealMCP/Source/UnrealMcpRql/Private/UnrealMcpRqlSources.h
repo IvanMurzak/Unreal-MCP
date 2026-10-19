@@ -6,6 +6,9 @@
 #include "CoreMinimal.h"
 #include "UnrealMcpRqlTypes.h"
 
+#include <functional>
+#include <string>
+
 class FUnrealMcpRqlSession;
 class UScriptStruct;
 
@@ -25,5 +28,30 @@ rql::Value UnrealMcpRqlClassDefaultsList(FUnrealMcpRqlTypes& Types, UClass* Base
  * error) for other structs and value kinds; false + @p OutError for a malformed literal. FUnrealMcpRqlTypes::CoerceStruct uses it. */
 bool UnrealMcpRqlParseMathStruct(UScriptStruct* Struct, const rql::Value& Value, void* Out, FString& OutError);
 
+/**
+ * An adapter `coerce` that builds a @p Struct value through FUnrealMcpRqlTypes::CoerceStruct (math literals, struct
+ * parsers) from the value kinds @p Accepts takes; other values fall through to RQL's own coercion.
+ */
+std::function<rql::AdapterOutcome(const rql::Value&, const rql::TypeDescriptor&, rql::Value&, std::string&)>
+	UnrealMcpRqlStructCoerce(FUnrealMcpRqlTypes& Types, UScriptStruct* Struct, std::function<bool(const rql::Value&)> Accepts);
+
 /** RQL type adapters for the math structs: "(x, y, z)" output, text / list literals on writes. */
 void UnrealMcpRqlAddStructAdapters(FUnrealMcpRqlSession& Session);
+
+/** DataTable rows: UDataTable `Rows` (row name -> row struct), RowNames, RowCount, row calls; the `dataTables` source. */
+void UnrealMcpRqlAddDataTables(FUnrealMcpRqlSession& Session);
+
+/** Gameplay tags as text ("A.B.C") / lists, validated against the tag tree; the `gameplayTags` source. */
+void UnrealMcpRqlAddGameplayTags(FUnrealMcpRqlSession& Session);
+
+/** Project Settings / Editor Preferences sections: the `settings` source and unreal.settings(name); writes saved to config. */
+void UnrealMcpRqlAddSettings(FUnrealMcpRqlSession& Session);
+
+/** Blueprint graphs: Graphs / Nodes / Pins, node creation, pin connections, Compile; the `blueprints` source. */
+void UnrealMcpRqlAddBlueprints(FUnrealMcpRqlSession& Session);
+
+/** UMG: Widget Blueprint widget trees (RootWidget, Widgets, AddWidget), panel Children, widget Parent / Destroy. */
+void UnrealMcpRqlAddWidgets(FUnrealMcpRqlSession& Session);
+
+/** Level Sequences: bindings, tracks, sections and channel keys in display frames; the `levelSequences` source. */
+void UnrealMcpRqlAddSequences(FUnrealMcpRqlSession& Session);

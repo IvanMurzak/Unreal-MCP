@@ -193,6 +193,11 @@ object, asset, level, editor-state, selection, console-log and reflection tools.
 | `rql-mutate` | RQL query ending with `set` / `call` (`... | set Location = "(0, 0, 100)"`, `editor | call SpawnActor("PointLight")`): all-or-nothing, one undo step, `dry_run` previews |
 | `rql-schema` | Sources, functions and the classes in the editor world; `type` lists one type's members and methods |
 
+Beyond reflected properties, RQL reaches DataTable rows (`dataTables`, `Rows["Sword"].Damage`), gameplay tags as text
+(`gameplayTags`, `set Tags = ["Ability.Fire"]`), Project Settings saved to their ini (`unreal.settings("Maps & Modes")`)
+Blueprint graphs (`EventGraph | call AddCallFunction("PrintString")`, pin connections, `call Compile()`), Widget Blueprint
+trees (`call AddWidget("Button", "Ok", parent)`) and Level Sequences (bindings, tracks, `call AddKey("Location.X", 30, 100)`).
+
 The `unreal-rql` skill (written by `unreal-skill-generate`) teaches the language and lists what installed extensions add.
 
 </details>

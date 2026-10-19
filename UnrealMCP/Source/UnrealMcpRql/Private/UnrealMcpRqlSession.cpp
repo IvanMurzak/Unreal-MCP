@@ -251,7 +251,16 @@ void FUnrealMcpRqlSession::ConfigureMutations()
 	};
 	// One editor transaction per mutation (one Ctrl+Z step): owners are snapshotted before the first write. Objects the
 	// calls create with RF_Transactional (SpawnActor, AddComponent, ...) are recorded into the same transaction.
-	Policy.before_write = [this, OwnerOf, TypeProvider](const std::vector<rql::MutationRecord>& Records)
+	auto IsWritableTemplate = [this](const UObject* Object)
+	{
+		for (const TFunction<bool(const UObject*)>& Predicate : WritableTemplates)
+		{
+			if (Predicate(Object))
+				return true;
+		}
+		return false;
+	};
+	Policy.before_write = [this, OwnerOf, TypeProvider, IsWritableTemplate](const std::vector<rql::MutationRecord>& Records)
 	{
 		// Class defaults and archetypes (the class-default sources' rows, a Blueprint's defaults) are read-only: an
 		// in-memory change to a CDO is not a saved edit and leaks into every new instance. API objects (`editor`, the
@@ -260,11 +269,13 @@ void FUnrealMcpRqlSession::ConfigureMutations()
 		{
 			for (UObject* Object : { TypeProvider->AsObject(Record.item), TypeProvider->AsObject(Record.owner) })
 			{
-				if (Object && Object->IsTemplate() && !TypeProvider->IsApiClass(Object->GetClass()))
+				if (Object && Object->IsTemplate() && !TypeProvider->IsApiClass(Object->GetClass()) && !IsWritableTemplate(Object))
 					throw std::runtime_error(UnrealMcpRqlToStd(FString::Printf(
 						TEXT("%s is a class default object, read-only through RQL (edit the class or Blueprint instead)"), *Object->GetName())));
 			}
 		}
+		for (const FMutationHook& Hook : BeforeWriteHooks)
+			Hook(Records);
 		if (TransactionIndex == INDEX_NONE && GEditor)
 			TransactionIndex = GEditor->BeginTransaction(TEXT("UnrealMcp"), FText::FromString(TEXT("RQL mutation")), nullptr);
 		for (const rql::MutationRecord& Record : Records)
@@ -275,7 +286,7 @@ void FUnrealMcpRqlSession::ConfigureMutations()
 		}
 	};
 	// Property writes already ran the editor's PreEditChange / PostEditChangeProperty; mark what changed as unsaved.
-	Policy.committed = [OwnerOf](const std::vector<rql::MutationRecord>& Records)
+	Policy.committed = [this, OwnerOf](const std::vector<rql::MutationRecord>& Records)
 	{
 		for (const rql::MutationRecord& Record : Records)
 		{
@@ -283,6 +294,8 @@ void FUnrealMcpRqlSession::ConfigureMutations()
 			if (IsProjectObject(Owner))
 				Owner->MarkPackageDirty();
 		}
+		for (const FMutationHook& Hook : CommittedHooks)
+			Hook(Records);
 	};
 }
 
@@ -338,6 +351,21 @@ void FUnrealMcpRqlSession::AddGuide(const FString& Topic, const FString& Markdow
 	Guides.Add(TPair<FString, FString>(Topic, Markdown));
 }
 
+void FUnrealMcpRqlSession::AddBeforeWrite(FMutationHook Hook)
+{
+	BeforeWriteHooks.Add(MoveTemp(Hook));
+}
+
+void FUnrealMcpRqlSession::AddCommitted(FMutationHook Hook)
+{
+	CommittedHooks.Add(MoveTemp(Hook));
+}
+
+void FUnrealMcpRqlSession::AllowTemplateWrites(TFunction<bool(const UObject*)> Predicate)
+{
+	WritableTemplates.Add(MoveTemp(Predicate));
+}
+
 void FUnrealMcpRqlSession::AddAdapter(rql::TypeAdapter Adapter)
 {
 	TypesPtr->Fill(Adapter.target); // adapted views are cached per type: the descriptor must be complete first
@@ -369,9 +397,16 @@ FString FUnrealMcpRqlSession::Execute(const FString& PlanJson, bool bAllowMutati
 bool FUnrealMcpRqlSession::FunctionSource(rql::QueryPlan& Plan, rql::QueryResult& OutFailure)
 {
 	// The C++ runtime starts queries at a source or ref(...); RQL text also lets a host function start one, as in
-	// unreal.assets("Material") | select Name. Evaluate such a call once (its arguments are literals) and run the query on
-	// a source named after the function holding the value.
-	const rql::ExprPtr Source = Plan.source;
+	// unreal.assets("Material") | select Name, optionally followed by a member path (unreal.asset("/Game/BP").EventGraph).
+	// Evaluate such a call once (its arguments are literals) and run the query on a source named after the function
+	// holding the value, navigating the member path from there.
+	rql::ExprPtr Source = Plan.source;
+	std::vector<rql::Segment> Members;
+	if (Source && Source->kind == rql::ExprKind::Path && Source->on && Source->on->kind == rql::ExprKind::Call)
+	{
+		Members = Source->segments;
+		Source = Source->on;
+	}
 	if (!Source || Source->kind != rql::ExprKind::Call || !Source->on || Source->on->kind != rql::ExprKind::Path || Source->on->on)
 		return false;
 	std::string Name;
@@ -444,7 +479,18 @@ bool FUnrealMcpRqlSession::FunctionSource(rql::QueryPlan& Plan, rql::QueryResult
 		return true;
 	}
 	EnginePtr->add_source(Name, [Value]() { return Value; });
-	Plan.source = rql::plan::path(Name);
+	if (Members.empty())
+	{
+		Plan.source = rql::plan::path(Name);
+		return false;
+	}
+	std::vector<rql::Segment> Path;
+	rql::Segment Head;
+	Head.kind = rql::SegmentKind::Member;
+	Head.name = Name;
+	Path.push_back(Head);
+	Path.insert(Path.end(), Members.begin(), Members.end());
+	Plan.source = rql::plan::path(std::move(Path));
 	return false;
 }
 

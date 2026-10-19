@@ -56,33 +56,6 @@ namespace UnrealMcpRqlCoreLocal
 {
 	using namespace UnrealMcpRqlUtil;
 
-	rql::MemberDescriptor Member(const char* Name, const rql::TypeDescriptor* Type, rql::Getter Get, rql::Setter Set = {},
-		const char* Description = "", bool bOwning = false, bool bNullable = false)
-	{
-		rql::MemberDescriptor Result;
-		Result.name = Name;
-		Result.type = Type;
-		Result.getter = MoveTemp(Get);
-		Result.setter = MoveTemp(Set);
-		Result.readonly = !Result.setter;
-		Result.description = Description;
-		Result.owning = bOwning;
-		Result.nullable = bNullable;
-		return Result;
-	}
-
-	rql::MethodDescriptor Method(const char* Name, std::vector<rql::ParamDescriptor> Params, const rql::TypeDescriptor* Result,
-		std::function<rql::Value(void*, const std::vector<rql::Value>&)> Invoke, const char* Description)
-	{
-		rql::MethodDescriptor Out;
-		Out.name = Name;
-		Out.params = std::move(Params);
-		Out.result = Result;
-		Out.invoke = std::move(Invoke);
-		Out.description = Description;
-		return Out;
-	}
-
 	const rql::TypeDescriptor* StringType() { return rql::builtin::string_type(); }
 	const rql::TypeDescriptor* BoolType() { return rql::builtin::bool_type(); }
 
@@ -893,6 +866,12 @@ void UnrealMcpRqlConfigureCore(FUnrealMcpRqlSession& Session)
 	T.AddNativeType(ClassInfoType);
 
 	UnrealMcpRqlAddStructAdapters(Session);
+	UnrealMcpRqlAddGameplayTags(Session);
+	UnrealMcpRqlAddDataTables(Session);
+	UnrealMcpRqlAddSettings(Session);
+	UnrealMcpRqlAddBlueprints(Session);
+	UnrealMcpRqlAddWidgets(Session);
+	UnrealMcpRqlAddSequences(Session);
 
 	// Object references from text, as an edit field accepts them: an asset path ("/Game/Meshes/SM_Cube"), a class name
 	// for class references ("PointLight"), an actor label / name / path for actors. Only coerce: the adapter shapes no
@@ -949,7 +928,8 @@ void UnrealMcpRqlConfigureCore(FUnrealMcpRqlSession& Session)
 	Session.AddSource(TEXT("editor"), T.ForClass(UUnrealMcpRqlEditorApi::StaticClass()), /*bList*/ false,
 		TEXT("editor state (IsPlaying, IsPaused, Selection, World, CurrentLevel) and operations: call SpawnActor / OpenLevel / NewLevel / "
 			"SaveLevel / SaveAll / UnloadSublevel / CreateAsset / CopyAsset / MoveAsset / DeleteAsset / CreateFolder / RefreshAssets / "
-			"CreateMaterialInstance / ImportAsset / SaveAsset / ClearConsole"), [Types]()
+			"CreateMaterialInstance / ImportAsset / SaveAsset / ClearConsole / CreateDataTable / AddGameplayTag / RemoveGameplayTag / "
+			"RenameGameplayTag"), [Types]()
 	{
 		return Types->WrapObject(GetMutableDefault<UUnrealMcpRqlEditorApi>());
 	});

@@ -28,7 +28,7 @@ namespace UnrealMcpRqlGuide
 	inline const char* Language()
 	{
 		return R"RQL(RQL: source | stage | stage ...
-Sources: actors (every actor of the editor world's loaded levels), levels, world, selection, console (editor log entries), editor (editor state and operations), plus the sources of installed extensions (rql-schema lists them). Assets: unreal.assets("Material") or unreal.assets("StaticMesh", "/Game/Props") (at most 200, loaded lazily), unreal.asset("/Game/Materials/M_Red"). ref("PointLight#1234") resolves a $ref; unreal.find("Lamp") an actor by label, name or path; unreal.classes("ActorComponent", "Light") lists classes.
+Sources: actors (every actor of the editor world's loaded levels), levels, world, selection, console (editor log entries), editor (editor state and operations), dataTables, gameplayTags, settings (Project Settings / Editor Preferences sections), blueprints, widgetBlueprints, levelSequences, plus the sources of installed extensions (rql-schema lists them). Assets: unreal.assets("Material") or unreal.assets("StaticMesh", "/Game/Props") (at most 200, loaded lazily), unreal.asset("/Game/Materials/M_Red"). ref("PointLight#1234") resolves a $ref; unreal.find("Lamp") an actor by label, name or path; unreal.classes("ActorComponent", "Light") lists classes; unreal.settings("Maps & Modes") a settings object. A member path may follow a function: unreal.asset("/Game/BP_Door").EventGraph.
 Stages:
   where <predicate>                  filter
   select a b.c alias=(expr)          project columns (wrap computed expressions in parentheses)
@@ -40,7 +40,7 @@ Stages:
 Expressions: == != < <= > >= and or not + - * / %; contains, starts-with, ends-with (case-insensitive); matches "regex"; x in [a, b]; x is null; x is not null; $ is PointLight (includes subclasses); has(member). Literals: numbers, "strings", true/false/null, lists [a, b], objects {X: 1, Y: 2}.
 Paths: a.b.c, list[0], map["key"]; .member on a list maps over its elements. List methods: .any(pred) .all(pred) .count([pred]) .sum(e) .min(e) .max(e) .first([pred]); inside them bare names refer to the element, falling back to the outer item.
 Meta: $ (current item), $ref (stable id such as PointLight#1234), $type, $path, $index, $depth. Enums compare to strings (Mobility == "Movable"); == on strings is case-sensitive.
-Unreal: every object has Id, Name, Path. Actor has Label, Location, Rotation, Scale (world transform), Components (list), Children (attached actors), Parent, Folder, Level, HiddenInEditor. Other members are the reflected properties (UPROPERTY EditAnywhere / VisibleAnywhere / BlueprintVisible) under their C++ names (bHidden, Intensity, RelativeLocation, StaticMesh); find them via actors | get Components | where $ is PointLightComponent. Vectors, rotators and colors print as (x, y, z) (rotators (pitch, yaw, roll)); write "(1, 2, 3)", [1, 2, 3] or {X: 1, Y: 2, Z: 3}; colors also "#ff8800". Object references accept ref("..."), unreal.asset(path) or an asset path "/Game/Meshes/SM_Cube". Material parameters: Scalars["Roughness"], Vectors["BaseColor"], Textures["Albedo"]. Destroyed objects read as null (where StaticMesh == null finds empty references). Navigate with paths or get; select only projects output columns.
+Unreal: every object has Id, Name, Path. Actor has Label, Location, Rotation, Scale (world transform), Components (list), Children (attached actors), Parent, Folder, Level, HiddenInEditor. Other members are the reflected properties (UPROPERTY EditAnywhere / VisibleAnywhere / BlueprintVisible) under their C++ names (bHidden, Intensity, RelativeLocation, StaticMesh); find them via actors | get Components | where $ is PointLightComponent. Vectors, rotators and colors print as (x, y, z) (rotators (pitch, yaw, roll)); write "(1, 2, 3)", [1, 2, 3] or {X: 1, Y: 2, Z: 3}; colors also "#ff8800". Object references accept ref("..."), unreal.asset(path) or an asset path "/Game/Meshes/SM_Cube". Material parameters: Scalars["Roughness"], Vectors["BaseColor"], Textures["Albedo"]. Gameplay tags are text: Tag == "Ability.Fire", set Tags = ["Ability.Fire", "State.Stunned"] (registered tags only). DataTable rows: Rows["Sword"].Damage (RowNames, RowStructName). Blueprints: Graphs / EventGraph -> Nodes -> Pins (Name Direction Type DefaultValue LinkedTo). Widget Blueprints: RootWidget / Widgets, panels have Children, widgets Parent and Slot. Level Sequences: Bindings -> Tracks -> Sections -> Channels (frames at the display rate). Destroyed objects read as null (where StaticMesh == null finds empty references). Navigate with paths or get; select only projects output columns.
 Results come back as compact rows (header line, then col|col). Long results are truncated - refine with where/first or use count. Unknown members produce warnings with suggestions; rql-schema(type) lists a type's members.)RQL";
 	}
 
@@ -53,7 +53,11 @@ Results come back as compact rows (header line, then col|col). Long results are 
   unreal.assets("MaterialInstanceConstant") | select Name Scalars Vectors
   console | where Verbosity == "Error" | sort Sequence desc | first 5 | select Message
   levels | select Map IsPersistent IsCurrent IsVisible
-  editor | select IsPlaying IsPaused Selection)RQL";
+  editor | select IsPlaying IsPaused Selection
+  unreal.asset("/Game/Data/DT_Weapons") | get Rows | where Value.Damage > 10 | select Key Value.Damage
+  gameplayTags | where Name starts-with "Ability." | select Name Comment
+  settings | where Container == "Project" | select Category Section DisplayName
+  unreal.asset("/Game/BP_Door").EventGraph | get Nodes | select $ref Title Pins.Name)RQL";
 	}
 
 	inline const char* MutateStages()
@@ -83,6 +87,18 @@ Levels, assets, editor state:
   editor | call CreateAsset("/Game/Data/DA_Sword", "WeaponData")         any asset class (the editor's factory when it has one)
   editor | call CopyAsset("/Game/A", "/Game/B")    MoveAsset / DeleteAsset / CreateFolder("/Game/Props") / ImportAsset("C:/art/crate.fbx", "/Game/Props")
   editor | set Selection = [ref("StaticMeshActor#1234")]        editor | set IsPlaying = true
+Data, tags, settings (settings are saved to their ini at once, tag edits too; neither is undoable):
+  unreal.asset("/Game/Data/DT_Weapons") | set Rows["Sword"].Damage = 12        call AddRow("Bow", {Damage: 7}) / RemoveRow / RenameRow / DuplicateRow
+  editor | call CreateDataTable("/Game/Data/DT_Weapons", "WeaponRow")      editor | call AddGameplayTag("Ability.Fire", "fire ability")
+  unreal.settings("Maps & Modes") | set GameDefaultMap = "/Game/Maps/Arena"
+Blueprint graphs (each Add* returns the node; connect by pin name; Compile returns errors with the node's $ref):
+  unreal.asset("/Game/BP_Door").EventGraph | call AddEvent("BeginPlay")      AddCallFunction("PrintString") / AddVariableGet("Health") / AddNode("Branch")
+  ref("K2Node_Event#12") | call Connect("then", ref("K2Node_CallFunction#34"), "execute")     ref("K2Node_CallFunction#34") | call SetPinDefault("InString", "Hi")
+  unreal.asset("/Game/BP_Door") | call Compile()
+Widgets and sequences:
+  unreal.asset("/Game/UI/WBP_Menu") | call AddWidget("Button", "Play", ref("VerticalBox#56"))      ref("TextBlock#78") | set Text = "Play"
+  unreal.asset("/Game/Cine/LS_Intro") | call AddActor(unreal.find("Door"))      ... | get Bindings | where Name == "Door" | call AddTrack("Transform")
+  unreal.asset("/Game/Cine/LS_Intro") | get Bindings | get Tracks | get Sections | call AddKey("Location.Z", 30, 200)
 )RQL";
 	}
 
@@ -127,7 +143,8 @@ Levels, assets, editor state:
 	inline const char* SkillDescription()
 	{
 		return "How to read and change anything in the Unreal Editor with RQL (rql-query / rql-mutate / rql-schema): the query "
-			"language, operators, sources (actors, components, assets, levels, console logs, editor state), editor operations "
-			"(spawn actors, add components, levels, assets, selection, Play In Editor) and what installed extensions add.";
+			"language, operators, sources (actors, components, assets, levels, console logs, editor state, DataTable rows, gameplay "
+			"tags, Project Settings, Blueprint graphs), editor operations (spawn actors, add components, levels, assets, "
+			"selection, Play In Editor, Blueprint nodes and pins) and what installed extensions add.";
 	}
 }
