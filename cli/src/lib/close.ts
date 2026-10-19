@@ -132,8 +132,8 @@ export async function close(opts: CloseOptions = {}): Promise<CloseResult> {
   }
 }
 
-/** Best-effort platform process listing. Never throws — `[]` on failure. */
-function listProcesses(os: NodeJS.Platform): RunningProcess[] {
+/** Best-effort listing of `UnrealEditor*` processes (pid + command line). Never throws — `[]` on failure. */
+export function listProcesses(os: NodeJS.Platform = platform() as NodeJS.Platform): RunningProcess[] {
   try {
     if (os === 'win32') {
       // CIM CommandLine via PowerShell — CSV pid|cmdline.
@@ -141,8 +141,10 @@ function listProcesses(os: NodeJS.Platform): RunningProcess[] {
         'powershell',
         [
           '-NoProfile',
+          '-NonInteractive',
           '-Command',
-          "Get-CimInstance Win32_Process | Where-Object { $_.Name -like 'UnrealEditor*' } | ForEach-Object { \"$($_.ProcessId)|$($_.CommandLine)\" }",
+          // Filtered by the CIM query itself: no per-process objects for the rest of the system.
+          "Get-CimInstance Win32_Process -Filter \"Name LIKE 'UnrealEditor%'\" -Property ProcessId,CommandLine | ForEach-Object { \"$($_.ProcessId)|$($_.CommandLine)\" }",
         ],
         { encoding: 'utf-8', timeout: 30000 },
       );

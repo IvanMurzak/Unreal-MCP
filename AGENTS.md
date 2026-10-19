@@ -81,7 +81,7 @@ Tool ids are kebab-case, validated `^[a-z0-9]+(-[a-z0-9]+)*$`. Each tool is `Sta
 with `FUnrealMcpToolBuilder::ToolType(EUnrealMcpToolType::System)` and routed by the sidecar's
 `SurfaceRoutingToolSink`. System tools: `ping`, `unreal-skill-create` (writes a C++ tool file into
 `UnrealMcpEditor/Private/Tools/Skills/`; live only after a rebuild), `unreal-skill-generate`
-(sidecar-side, `bridge/src/Tools/SkillGenerateTool.cs`). Core prompt `level-design-brief`; core resources
+(sidecar-side, `bridge/src/Tools/SkillGenerateTool.cs`), `editor-quit` (CLI sessions, below). Core prompt `level-design-brief`; core resources
 `unreal://project/levels`, `unreal://project/icon` (fixed URIs only).
 
 ## Versioning

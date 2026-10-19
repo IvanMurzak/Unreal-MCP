@@ -7,6 +7,7 @@
 
 export { bootstrapLocalCommand } from './commands/bootstrap-local.js';
 export { closeCommand } from './commands/close.js';
+export { execCommand } from './commands/exec.js';
 export { configureCommand } from './commands/configure.js';
 export { createProjectCommand } from './commands/create-project.js';
 export { installEngineCommand } from './commands/install-engine.js';

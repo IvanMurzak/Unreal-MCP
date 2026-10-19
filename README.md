@@ -124,7 +124,7 @@ unreal-mcp-cli login ./YourProject
 unreal-mcp-cli open ./YourProject
 ```
 
-See [`cli/README.md`](cli/README.md) for the full 16-command reference.
+See [`cli/README.md`](cli/README.md) for the full 18-command reference.
 
 ## Option C — manual
 
@@ -277,17 +277,18 @@ Captures return a base64 **PNG as MCP image content** so the LLM can inspect the
 </details>
 
 <details>
-  <summary><b>System tools (3) — NOT exposed to your AI</b></summary>
+  <summary><b>System tools (4) — NOT exposed to your AI</b></summary>
 
 These are **system tools**: host plumbing the `unreal-mcp-cli` and the desktop app drive directly over
 `POST /api/system-tools/<name>`. They are deliberately absent from MCP `tools/list`, so they never appear
-to (or spend tokens in) an AI session — the same split Unity and Godot use for the same three tools.
+to (or spend tokens in) an AI session — the same split Unity and Godot use for their system tools.
 
 | Tool id | What it does |
 | --- | --- |
 | `ping` | Liveness probe — round-trips the plugin ⇄ sidecar ⇄ server chain |
 | `unreal-skill-create` | Generate a new MCP tool as a C++ file in the plugin's editor module. **Requires an editor rebuild** before the new tool is callable (Live Coding, or rebuild the project) — the result says so explicitly. Needs a source install of the plugin |
 | `unreal-skill-generate` | Regenerate every `SKILL.md` from the registered tools into a project-relative skills folder (default `.claude/skills`) |
+| `editor-quit` | Save dirty packages that have a path and quit an editor a CLI session started (`unreal-mcp-cli close --owned-only`). Refuses unless `nonce` matches the session lease, so it never closes an editor you opened |
 
 </details>
 
@@ -317,13 +318,14 @@ A cross-platform Node CLI (`unreal-mcp-cli`) that scaffolds projects, installs t
 
 > Published on npm — install with `npm install -g unreal-mcp-cli`, or run a one-off with `npx unreal-mcp-cli@latest <command>`.
 
-The full 16-command surface:
+The full 18-command surface:
 
 | Command | What it does |
 | --- | --- |
 | `create-project` | Scaffold a minimal Unreal Engine C++ project |
-| `open` | Launch the Unreal Editor for a project, wiring MCP connection env vars |
-| `close` | Terminate the Unreal Editor process running a project |
+| `open` | Launch the Unreal Editor for a project, wiring MCP connection env vars (`--headless`: a CLI-owned windowless editor) |
+| `close` | Terminate the Unreal Editor process running a project (`--owned-only`: only an editor the CLI started; it saves and quits) |
+| `exec` | Run Python in the editor (`python-execute`); starts a warm headless editor (`-RenderOffscreen`) when none is running, which saves and quits after `--idle` seconds without tool calls |
 | `install-plugin` | Install the UnrealMCP plugin into `<project>/Plugins` (copy or `--junction`) from a local checkout or the version-matched GitHub source asset |
 | `remove-plugin` | Remove the UnrealMCP plugin from `<project>/Plugins` |
 | `configure` | Write `UNREAL_MCP_*` values into `<project>/.env` and gitignore `.env` |
@@ -599,11 +601,13 @@ The plugin reads configuration with the precedence **process env → `<Project>/
 | `UNREAL_MCP_AUTH_OPTION` | `none` or `oauth` (local server auth) |
 | `UNREAL_MCP_KEEP_CONNECTED` | Persist/restore the connected state |
 | `UNREAL_MCP_TOOLS` | Enabled-tools override (whitelist; empty = no filter) |
-| `UNREAL_MCP_START_SERVER` | Parsed and persisted as the `startServer` config flag (Custom mode); auto-spawning the local `gamedev-mcp-server` is **planned, not yet wired** — no code consumes this flag today, so start the server yourself (e.g. `unreal-mcp-cli`). |
+| `UNREAL_MCP_START_SERVER` | `true`: the editor starts the local `gamedev-mcp-server` itself once the bridge reports the project's port (Custom mode + http only; persisted as `startServer`) and stops it on exit. `unreal-mcp-cli exec` / `open --headless` set it. |
 | `UNREAL_MCP_TRANSPORT` | `stdio` or `http` |
 | `UNREAL_MCP_LOG_LEVEL` | Log verbosity |
 | `UNREAL_MCP_BRIDGE_PATH` | Path to a sidecar binary — the **dev/CI override**; wins over the bundled binary (§6). A packaged release auto-resolves the bundled sidecar, so end users never set this; from-source builds use it. |
 | `UNREAL_MCP_SERVER_PATH` | Path to a local `gamedev-mcp-server` binary (read by `unreal-mcp-cli`, not the plugin) — skips the server download + version check (§6). |
+| `AIGD_SESSION_IDLE_SECONDS` | Set by `unreal-mcp-cli` on an editor it starts: after this many seconds without tool calls (calls in flight, play-in-editor, asset compilation and user input count as activity) the editor saves dirty packages that have a path and quits. Only armed together with `AIGD_SESSION_OWNER=cli` and a nonce, and only while the project lease still names this editor; unset = never. |
+| `AIGD_SESSION_OWNER` / `AIGD_SESSION_NONCE` | `cli` and the nonce of `<project>/.ai-game-dev/session.json`: mark an editor a CLI session started. Only such an editor accepts `editor-quit`, and on exit it removes the lease if it still carries its nonce. |
 
 > **Never commit `.env`.** A project-root `.env` can hold `UNREAL_MCP_TOKEN`, and UE project templates ship no `.gitignore`. `unreal-mcp-cli configure` appends `.env` to the target project's `.gitignore`; this repo's own scaffold already gitignores it. The sidecar IPC token travels over stdin (never argv) and is never logged.
 
@@ -651,7 +655,7 @@ An `MCP Tool` is a function the LLM can call to interact with Unreal. These tool
 | --- | --- |
 | [`UnrealMCP/`](UnrealMCP/) | The UE editor plugin (C++, module `UnrealMcpEditor`, UE 5.5+ floor, developed against 5.7, verified on 5.8) |
 | [`bridge/`](bridge/) | The .NET 9 sidecar (`unreal-mcp-bridge`) — McpPlugin host, IPC ⇄ SignalR relay |
-| [`cli/`](cli/) | `unreal-mcp-cli` npm package (TypeScript) — 16 commands |
+| [`cli/`](cli/) | `unreal-mcp-cli` npm package (TypeScript) — 18 commands |
 | [`samples/UnrealAITemplate/`](samples/UnrealAITemplate/) | Editor extension template plugin (an RQL module: `hello` operations) |
 | [`samples/UnrealAIRuntimeSample/`](samples/UnrealAIRuntimeSample/) | Runtime (in-game) extension sample (`game-time-dilation`, `Type=Runtime`) |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | The authoritative architecture design |

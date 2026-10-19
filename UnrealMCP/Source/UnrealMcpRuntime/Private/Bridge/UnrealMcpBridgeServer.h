@@ -58,6 +58,15 @@ public:
 	int32 GetBoundPort() const { return BoundPort; }
 	bool IsClientConnected() const { return bClientConnected; }
 
+	/**
+	 * Bumps when a standard (non-System) tool call finishes; System tools such as the `ping` probe are host plumbing, not
+	 * work. The idle-shutdown activity signal of a CLI session (a running call shows as GetInFlightCallCount). Thread-safe.
+	 */
+	uint64 GetToolActivityCount() const { return ToolActivityCount.load(); }
+
+	/** Tool / prompt / resource calls dispatched and not answered yet (a long call keeps a CLI session awake). Thread-safe. */
+	int32 GetInFlightCallCount() const { return InFlightCalls.GetValue(); }
+
 	/** Re-push the tool manifest (call after the registry changes, §2.2 hot reload). No-op when disconnected. */
 	void PushManifest();
 
@@ -276,6 +285,7 @@ private:
 	FCriticalSection CancelMutex;
 	TMap<FString, TSharedRef<FThreadSafeBool, ESPMode::ThreadSafe>> CancelFlags;
 	FThreadSafeCounter InFlightCalls;      // dispatched calls whose continuation has not yet completed
+	std::atomic<uint64> ToolActivityCount{ 0 }; // finished standard tool calls (GetToolActivityCount)
 
 	TFuture<void> HeartbeatFuture;
 	FThreadSafeBool bHeartbeatStop = false;

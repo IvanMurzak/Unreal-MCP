@@ -536,7 +536,15 @@ void FUnrealMcpBridgeServer::HandleToolCall(const TSharedPtr<FJsonObject>& Messa
 
 	Dispatcher.Dispatch(
 		Call,
-		[this, CapturedTool](const FUnrealMcpToolCall& C) { return Registry.Execute(CapturedTool, C); },
+		[this, CapturedTool](const FUnrealMcpToolCall& C)
+		{
+			FUnrealMcpToolResult Result = Registry.Execute(CapturedTool, C);
+			// Game thread, so the registry read is safe. System tools (ping, editor-quit, ...) are host plumbing, not work.
+			const FUnrealMcpRegisteredTool* Tool = Registry.Find(CapturedTool);
+			if (Tool != nullptr && Tool->ToolType != EUnrealMcpToolType::System)
+				++ToolActivityCount;
+			return Result;
+		},
 		FTimespan::FromMilliseconds(TimeoutMs))
 		.Next([this, CapturedRequestId, bRemoveOnDone](FUnrealMcpToolResult Result)
 		{

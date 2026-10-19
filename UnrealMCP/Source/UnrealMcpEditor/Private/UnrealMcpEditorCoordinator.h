@@ -17,6 +17,7 @@ class FUnrealMcpEditorViewModel;
 class FUnrealMcpMainWindowTab;
 class FUnrealMcpAuxWindows;
 class FUnrealMcpDevControlServer;
+class FUnrealMcpEditorSession;
 
 /**
  * Plugin-lifetime EDITOR coordinator (docs/ARCHITECTURE.md §0, §12.3 Model A). Builds the runtime-owned
@@ -76,6 +77,9 @@ private:
 	// Force-stopped in Shutdown so no gamedev-mcp-server orphans on editor close.
 	TUniquePtr<FUnrealMcpServerManager> ServerManager;
 	TUniquePtr<FUnrealMcpExtensionManager> ExtensionManager;
+	// Code-Exec plan §4.6: the editor half of a CLI session (idle shutdown, `editor-quit`, lease cleanup). Shared so
+	// the `editor-quit` handler and the idle ticker hold it weakly; inert for an editor no CLI started.
+	TSharedPtr<FUnrealMcpEditorSession> Session;
 
 	// §7 UI: the main-window view-model (shared so the nomad tab's widget binds to it) and its tab spawner,
 	// plus the four §7 auxiliary windows (MCP Tools / Prompts / Resources / Settings) sharing the same view-model.
@@ -110,14 +114,16 @@ private:
 
 	// mcp-authorize g5/g6 consolidation: in-flight `server-launch-args` requests keyed by requestId. The
 	// OnStartLocalServer sink (and the one-time reattach) send an IPC request for the composed launch args and
-	// record the {port, bReattach} here; ApplyServerLaunchArgsResult pops the entry and runs Start/Reattach with the
+	// record the {port, mode} here; ApplyServerLaunchArgsResult pops the entry and runs Start/Reattach with the
 	// returned string. Game-thread only (both the send and the marshalled result run there) — no lock needed.
-	struct FPendingServerLaunch { int32 Port = -1; bool bReattach = false; };
+	// ReattachOrStart: a reattach that finds no survivor starts a server instead (UNREAL_MCP_START_SERVER / startServer).
+	enum class EServerLaunch : uint8 { Start, Reattach, ReattachOrStart };
+	struct FPendingServerLaunch { int32 Port = -1; EServerLaunch Mode = EServerLaunch::Start; };
 	TMap<FString, FPendingServerLaunch> PendingServerLaunches;
 
 	// Compose + send a `server-launch-args` IPC request for @p Live's resolved auth mode and, on the async result,
-	// Start (or, when @p bReattach, ReattachIfRunning) the local server on @p Port with the sidecar-built args.
-	void RequestServerLaunchArgs(int32 Port, int32 PluginTimeoutMs, const class FUnrealMcpConfig& Live, bool bReattach);
+	// Start / ReattachIfRunning (per @p Mode) the local server on @p Port with the sidecar-built args.
+	void RequestServerLaunchArgs(int32 Port, int32 PluginTimeoutMs, const class FUnrealMcpConfig& Live, EServerLaunch Mode);
 
 	FDelegateHandle PreExitHandle;
 	bool bStarted = false;

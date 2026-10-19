@@ -42,6 +42,7 @@ const ALL_COMMANDS = [
   'create-project',
   'open',
   'close',
+  'exec',
   'install-plugin',
   'remove-plugin',
   'install-extension',
@@ -59,7 +60,7 @@ const ALL_COMMANDS = [
 ];
 
 describe('CLI integration', () => {
-  it('--help lists every one of the 17 commands', () => {
+  it('--help lists every one of the 18 commands', () => {
     const { stdout, exitCode } = runCli(['--help']);
     expect(exitCode).toBe(0);
     expect(stdout).toContain('unreal-mcp-cli');

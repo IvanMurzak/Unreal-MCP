@@ -233,7 +233,7 @@ export async function openProject(opts: OpenProjectOptions): Promise<OpenProject
   }
 }
 
-interface PreLaunchBuildOptions {
+export interface PreLaunchBuildOptions {
   projectDir: string;
   projectName: string;
   uprojectPath: string;
@@ -243,7 +243,8 @@ interface PreLaunchBuildOptions {
   onProgress?: OpenProjectOptions['onProgress'];
 }
 
-async function maybeBuildBeforeOpen(
+/** Compile native modules before a launch when the project or the core plugin needs it (desktop only). */
+export async function maybeBuildBeforeOpen(
   opts: PreLaunchBuildOptions,
   warnings: string[],
 ): Promise<void> {

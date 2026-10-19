@@ -29,6 +29,7 @@
 #include "Tools/UnrealMcpSkillTools.h"
 #include "Tools/UnrealMcpWorldProvider.h"
 #include "DevControl/UnrealMcpDevControlServer.h"
+#include "Session/UnrealMcpEditorSession.h"
 
 #include "Editor.h"
 #include "Misc/App.h"
@@ -97,6 +98,11 @@ void FUnrealMcpEditorCoordinator::Startup()
 	// the ONE wiring line generated skills need — adding or deleting one never edits this file again.
 	UnrealMcpGeneratedSkills::Register(*Registry);
 
+	// Code-Exec plan §4.6: an editor a CLI session started quits itself when idle and on `editor-quit` (SYSTEM surface).
+	Session = MakeShared<FUnrealMcpEditorSession>(FUnrealMcpSessionEnv::FromProcess(),
+		FPaths::ConvertRelativePathToFull(FPaths::ProjectDir()));
+	Session->RegisterTools(*Registry);
+
 	// §A.1 prompt registry (P1): the prompt sibling of the tool registry, built on the SAME Model A path. The
 	// core prompt family registers before the bridge starts accepting so the first prompt-manifest a v2 sidecar
 	// reads on handshake already includes it. The §8 config has EnabledTools/DisabledTools for tools but NO
@@ -113,6 +119,10 @@ void FUnrealMcpEditorCoordinator::Startup()
 
 	Dispatcher = MakeUnique<FUnrealMcpGameThreadDispatcher>();
 	BridgeServer = MakeUnique<FUnrealMcpBridgeServer>(*Registry, *Dispatcher, PromptRegistry.Get(), ResourceRegistry.Get());
+	{
+		FUnrealMcpBridgeServer* Bridge = BridgeServer.Get(); // outlives the session's ticker: Shutdown disarms it first
+		Session->Start([Bridge]() { return Bridge->GetToolActivityCount(); }, [Bridge]() { return Bridge->GetInFlightCallCount(); });
+	}
 
 	// Discover 3rd-party extension tool providers (§5) and merge them into the registry BEFORE the bridge
 	// starts accepting, so the first manifest a sidecar reads on handshake already includes them. Late
@@ -296,7 +306,7 @@ void FUnrealMcpEditorCoordinator::Startup()
 		// IPC; ApplyServerLaunchArgsResult runs Start with the returned string. Returns true = start INITIATED (the
 		// server-running sink polls IsRunning to reflect the actual state once the async Start completes).
 		const FUnrealMcpConfig Live = FUnrealMcpConfig::LoadAndResolve();
-		CoordinatorForStart->RequestServerLaunchArgs(ServerPort, /*PluginTimeoutMs*/ 10000, Live, /*bReattach*/ false);
+		CoordinatorForStart->RequestServerLaunchArgs(ServerPort, /*PluginTimeoutMs*/ 10000, Live, EServerLaunch::Start);
 		return true;
 	};
 	ViewModel->OnStopLocalServer = [ServerPtr]()
@@ -606,12 +616,14 @@ void FUnrealMcpEditorCoordinator::ApplyProjectConfigResult(const TSharedPtr<FJso
 	{
 		// g5/g6 consolidation: the reattach's launch args (used by the watchdog respawn) are also sidecar-composed —
 		// request them; ApplyServerLaunchArgsResult calls ReattachIfRunning with the returned string.
-		RequestServerLaunchArgs(DerivedPort, /*PluginTimeoutMs*/ 10000, Live, /*bReattach*/ true);
+		// UNREAL_MCP_START_SERVER / `startServer` (e.g. `unreal-mcp-cli exec`): no survivor → start one.
+		RequestServerLaunchArgs(DerivedPort, /*PluginTimeoutMs*/ 10000, Live,
+			Live.bStartServer ? EServerLaunch::ReattachOrStart : EServerLaunch::Reattach);
 	}
 	bLocalServerReattachAttempted = true;
 }
 
-void FUnrealMcpEditorCoordinator::RequestServerLaunchArgs(int32 Port, int32 PluginTimeoutMs, const FUnrealMcpConfig& Live, bool bReattach)
+void FUnrealMcpEditorCoordinator::RequestServerLaunchArgs(int32 Port, int32 PluginTimeoutMs, const FUnrealMcpConfig& Live, EServerLaunch Mode)
 {
 	// mcp-authorize g5/g6 consolidation. Game thread. Forward the resolved connection facts to the sidecar's SHARED
 	// ServerLaunchArguments builder; the C++ side NEVER assembles the arg string. The token/issuer/public-url are the
@@ -637,7 +649,7 @@ void FUnrealMcpEditorCoordinator::RequestServerLaunchArgs(int32 Port, int32 Plug
 	}
 
 	const FString RequestId = FGuid::NewGuid().ToString();
-	PendingServerLaunches.Add(RequestId, FPendingServerLaunch{ Port, bReattach });
+	PendingServerLaunches.Add(RequestId, FPendingServerLaunch{ Port, Mode });
 	if (!BridgeServer->SendServerLaunchArgsRequest(RequestId, Port, PluginTimeoutMs, AuthMode, Token, AuthIssuer, PublicUrl))
 	{
 		PendingServerLaunches.Remove(RequestId);
@@ -680,9 +692,8 @@ void FUnrealMcpEditorCoordinator::ApplyServerLaunchArgsResult(const TSharedPtr<F
 		return;
 	}
 
-	if (Pending.bReattach)
-		ServerManager->ReattachIfRunning(Pending.Port, Args);
-	else
+	if (Pending.Mode == EServerLaunch::Start
+		|| (!ServerManager->ReattachIfRunning(Pending.Port, Args) && Pending.Mode == EServerLaunch::ReattachOrStart))
 		ServerManager->Start(Pending.Port, Args);
 }
 
@@ -703,6 +714,10 @@ void FUnrealMcpEditorCoordinator::Shutdown()
 		FCoreDelegates::OnEnginePreExit.Remove(PreExitHandle);
 		PreExitHandle.Reset();
 	}
+
+	// Disarm the idle ticker before the bridge it reads goes away; the lease is removed at the very end.
+	if (Session.IsValid())
+		Session->Disarm();
 
 	// §1.5 graceful teardown ordering. Doing SidecarManager->Stop() (TerminateProc KillTree) BEFORE the
 	// bridge sends its `shutdown` Bye would mean the graceful path only ever worked for a MANUALLY launched
@@ -796,6 +811,13 @@ void FUnrealMcpEditorCoordinator::Shutdown()
 	// captured lambda is GEditor-free of captured state (it reads the global), but clearing keeps the
 	// provider's lifecycle symmetric with Startup. Idempotent.
 	FUnrealMcpWorldProvider::ClearWorldResolver();
+
+	// Code-Exec plan §4.6: the editor is all but gone (sidecar and local server stopped) — remove our CLI lease.
+	if (Session.IsValid())
+	{
+		Session->Shutdown();
+		Session.Reset();
+	}
 
 	// §10 editor/reflection family: deregister the GLog listener LAST so no dangling FOutputDevice remains
 	// on GLog — an orphaned device crashes the editor on exit. Idempotent (safe if Startup never ran).

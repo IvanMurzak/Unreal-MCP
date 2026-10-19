@@ -1,11 +1,17 @@
 import { Command } from 'commander';
+import { DEFAULT_SESSION_IDLE_SECONDS } from '@baizor/gamedev-cli-core';
 import { openProject } from '../lib/open.js';
+import { openEditorSession, prepareGuiOpen } from '../lib/session.js';
 import type { AuthOption, McpTransport } from '../lib/types.js';
 import * as ui from '../utils/ui.js';
+import { parseIntFlag } from '../utils/flags.js';
 
 export const openCommand = new Command('open')
   .description('Launch the Unreal Editor for a project, wiring MCP connection env vars and pre-building native modules on desktop platforms when needed')
   .argument('[path]', 'Unreal project directory (defaults to cwd)')
+  .option('--headless', 'Start a windowless editor (-RenderOffscreen) owned by the CLI and wait until it is ready; a running editor is reused')
+  .option('--url <url>', 'With --headless / --idle: the local MCP server URL the editor serves (default: the local port of the project)')
+  .option('--idle <seconds>', `A CLI-owned editor saves and quits after this many seconds without tool calls (0 = never; default ${DEFAULT_SESSION_IDLE_SECONDS} with --headless)`)
   .option('--engine-root <dir>', 'Explicit engine install root (source builds)')
   .option('--no-build', 'Skip the pre-launch build on desktop platforms (default: auto-build when native modules need compilation)')
   .option(
@@ -33,6 +39,10 @@ export const openCommand = new Command('open')
   .option('--start-server', 'UNREAL_MCP_START_SERVER=true')
   .option('--connection-mode <mode>', 'UNREAL_MCP_CONNECTION_MODE: Custom | Cloud | (default empty = plugin default)')
   .action(async (pathArg: string | undefined, opts) => {
+    if (opts.headless === true || opts.idle !== undefined) {
+      await openSession(pathArg, opts);
+      return;
+    }
     const startupDismissTimeoutMs = parsePositiveIntFlag(
       opts.startupDismissTimeoutMs,
       '--startup-dismiss-timeout-ms',
@@ -43,6 +53,7 @@ export const openCommand = new Command('open')
       '--startup-dismiss-poll-interval-ms',
       1000,
     );
+    if (!(await stopOwnHeadlessEditor(pathArg, opts))) return;
     const spinner = ui.startSpinner('Opening Unreal project...');
     const result = await openProject({
       projectDir: pathArg,
@@ -83,16 +94,61 @@ export const openCommand = new Command('open')
     ui.label('engine', result.engineRoot);
   });
 
-function parsePositiveIntFlag(
-  rawValue: string | undefined,
-  flagName: string,
-  defaultValue: number,
-): number {
-  if (rawValue === undefined) return defaultValue;
-  const parsed = Number.parseInt(rawValue, 10);
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    ui.error(`${flagName} must be a positive integer`);
-    process.exit(1);
+/**
+ * A window over our own headless editor: stop that one first (a second editor on the project would fail).
+ * False when the open must not go on (already open with a window, or the headless editor did not quit).
+ */
+async function stopOwnHeadlessEditor(pathArg: string | undefined, opts: Record<string, unknown>): Promise<boolean> {
+  const prepared = await prepareGuiOpen({ projectDir: pathArg, url: opts.url as string | undefined, token: opts.token as string | undefined });
+  if (prepared.kind === 'failure') {
+    ui.error(prepared.message);
+    process.exitCode = 1;
+    return false;
   }
-  return parsed;
+  if (prepared.result.kind === 'already-open') {
+    ui.success(`The Unreal Editor started by the CLI is already open with a window (PID: ${prepared.result.pid})`);
+    return false;
+  }
+  if (prepared.result.kind === 'still-running') {
+    ui.error(`The headless editor started by the CLI (PID ${prepared.result.pid}) did not quit; run \`close --owned-only --force\`.`);
+    process.exitCode = 1;
+    return false;
+  }
+  if (prepared.result.stoppedPid !== undefined) ui.info(`Closed the headless editor started by the CLI (PID ${prepared.result.stoppedPid}).`);
+  return true;
+}
+
+async function openSession(pathArg: string | undefined, opts: Record<string, unknown>): Promise<void> {
+  const idleSeconds = opts.idle === undefined ? undefined : parseIntFlag(opts.idle as string, '--idle', { min: 0 });
+  const mode = opts.headless === true ? 'headless' : 'window';
+  // `open --idle` asks for a window: a warm headless editor would otherwise be reused and no window would open.
+  if (mode === 'window' && !(await stopOwnHeadlessEditor(pathArg, opts))) return;
+  const spinner = ui.startSpinner(mode === 'headless' ? 'Opening Unreal project (headless)...' : 'Opening Unreal project...');
+  const result = await openEditorSession({
+    projectDir: pathArg,
+    mode,
+    idleSeconds,
+    engineRoot: opts.engineRoot as string | undefined,
+    build: opts.build !== false,
+    noCache: opts.cache === false,
+    url: opts.url as string | undefined,
+    token: opts.token as string | undefined,
+    onStatus: (message) => {
+      ui.verbose(message);
+      spinner.text = message;
+    },
+  });
+  if (result.kind === 'failure') {
+    spinner.error(result.message);
+    process.exitCode = 1;
+    return;
+  }
+  spinner.success(result.source === 'started'
+    ? `Started the Unreal Editor (${mode}, PID: ${result.pid ?? 'unknown'})`
+    : `The Unreal Editor is already running (${result.source})`);
+  ui.label('server', result.url);
+}
+
+function parsePositiveIntFlag(rawValue: string | undefined, flagName: string, defaultValue: number): number {
+  return rawValue === undefined ? defaultValue : parseIntFlag(rawValue, flagName, { min: 1 });
 }
