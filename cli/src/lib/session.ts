@@ -47,14 +47,16 @@ export const UNREAL_SESSION_READY_TIMEOUT_MS = 600_000;
 export const UNREAL_SESSION_FOREIGN_READY_TIMEOUT_MS = 60_000;
 /** How long `close --owned-only` waits for the editor to save and exit. */
 export const UNREAL_SESSION_CLOSE_TIMEOUT_MS = 60_000;
-/** Lease `connectionMode` of a CLI-started editor (it always serves the local server). */
-const SESSION_CONNECTION_MODE = 'Custom';
+/** Connection mode of a session: a CLI-started editor always serves the project's local server. */
+export const SESSION_CONNECTION_MODE = 'Custom';
 
 /** The project's LOCAL MCP server: the one a CLI-started editor serves and the only one readiness may probe. */
 export interface SessionConnection {
   url: string;
   /** Bearer for that server (never a cloud token). */
   token?: string;
+  /** The plugin connection mode a started editor gets (always {@link SESSION_CONNECTION_MODE}). */
+  connectionMode: typeof SESSION_CONNECTION_MODE;
 }
 
 /**
@@ -83,12 +85,14 @@ export async function resolveSessionConnection(
       );
     }
     const resolved = await resolveConnection({ projectDir, url: bound, token: overrides.token });
-    return { url: resolved.url, token: resolved.token };
+    return { url: resolved.url, token: resolved.token, connectionMode: SESSION_CONNECTION_MODE };
   }
   const resolved = await resolveConnection({ projectDir, token: overrides.token });
-  if (isAbsoluteLoopbackHost(resolved.url)) return { url: resolveCustomHostUrl(resolved.url, projectDir), token: resolved.token };
+  if (isAbsoluteLoopbackHost(resolved.url)) {
+    return { url: resolveCustomHostUrl(resolved.url, projectDir), token: resolved.token, connectionMode: SESSION_CONNECTION_MODE };
+  }
   const { port } = resolveLocalBindPort({ projectDir, markerPortOverride: readProjectMarker(projectDir)?.portOverride });
-  return { url: `http://localhost:${port}`, token: overrides.token };
+  return { url: `http://localhost:${port}`, token: overrides.token, connectionMode: SESSION_CONNECTION_MODE };
 }
 
 /**
@@ -97,9 +101,10 @@ export async function resolveSessionConnection(
  * project config the plugin reads.
  */
 export function sessionEditorEnv(connection: SessionConnection, explicitToken?: string): Record<string, string> {
-  // A host infers Custom mode; buildOpenEnv returns undefined only under `noConnect`.
+  // buildOpenEnv returns undefined only under `noConnect`.
   return buildOpenEnv({
     host: stripTrailingSlash(connection.url),
+    connectionMode: connection.connectionMode,
     transport: 'http',
     startServer: true,
     keepConnected: true,
@@ -205,7 +210,7 @@ export function createUnrealSession(options: UnrealSessionOptions): EditorSessio
     ...(beforeLaunch ? { beforeLaunch } : {}),
     env: { ...sessionEditorEnv(connection, options.token), ...options.env },
     serverUrl: connection.url,
-    connectionMode: SESSION_CONNECTION_MODE,
+    connectionMode: connection.connectionMode,
     ...(options.idleSeconds !== undefined ? { idleSeconds: options.idleSeconds } : {}),
     readyTimeoutMs,
     foreignReadyTimeoutMs: Math.min(options.foreignReadyTimeoutMs ?? UNREAL_SESSION_FOREIGN_READY_TIMEOUT_MS, readyTimeoutMs),
@@ -289,20 +294,19 @@ export async function openProjectSession(
   return { projectDir, connection, session: createUnrealSession({ ...options, projectDir, connection }) };
 }
 
+/** Unreal hint for an editor the user opened that never answers on the local server. */
+const FOREIGN_NOT_READY_HINT =
+  'An Unreal Editor in Cloud mode never answers there: switch its AI Game Developer connection to Custom (local).';
+
 /**
- * The message for a session that could not provide a ready editor. An editor the user opened in Cloud mode (or on
- * another server) never answers locally: say so; otherwise name the local URL that was probed.
+ * The message for a session that could not provide a ready editor: cli-core's message plus the local URL that was
+ * probed, and for an editor the user opened that never answered, the Unreal Cloud-mode hint.
  */
 export function sessionFailureMessage(err: unknown, url: string): string {
-  if (err instanceof EditorSessionError && err.reason === 'not-ready' && err.source === 'foreign') {
-    return (
-      `An Unreal Editor you opened has the project, but its MCP server does not answer at ${url} ` +
-      '(Cloud mode, or connected to another server?). Switch its AI Game Developer connection to Custom (local), ' +
-      'or close that editor so the CLI can start its own.'
-    );
-  }
   const { message } = asError(err);
-  return err instanceof EditorSessionError ? `${message} (local MCP server: ${url})` : message;
+  if (!(err instanceof EditorSessionError)) return message;
+  const foreign = err.reason === 'not-ready' && err.source === 'foreign';
+  return `${message} (local MCP server: ${url})${foreign ? `. ${FOREIGN_NOT_READY_HINT}` : ''}`;
 }
 
 async function withSession<T>(

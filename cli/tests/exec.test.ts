@@ -66,7 +66,7 @@ function okTool(data: unknown = { status: 'success', structured: { success: true
   }));
 }
 
-const CONNECTION = { url: 'http://localhost:5199' };
+const CONNECTION = { url: 'http://localhost:5199', connectionMode: 'Custom' as const };
 const noBuild = async (): Promise<void> => {};
 
 /** Session seams of a cold project: the fake process table, no build, no editor of the user's. */
@@ -281,7 +281,7 @@ describe('execPython', () => {
     });
     expect(Date.now() - started).toBeLessThan(5_000);
     expect(result).toMatchObject({ kind: 'failure', reason: 'session', sessionReason: 'not-ready', sessionSource: 'foreign' });
-    expect(result.kind === 'failure' && result.message).toMatch(/Cloud mode/);
+    expect(result.kind === 'failure' && result.message).toMatch(/not started by the CLI[\s\S]*Cloud mode/);
     expect(editors.spawned).toHaveLength(0);
   });
 
@@ -377,7 +377,7 @@ describe('openEditorSession', () => {
       listProcessesImpl: userEditor(dir, editors),
     });
     expect(result).toMatchObject({ kind: 'failure', reason: 'not-ready', source: 'foreign' });
-    expect(result.kind === 'failure' && result.message).toMatch(/Cloud mode/);
+    expect(result.kind === 'failure' && result.message).toMatch(/not started by the CLI[\s\S]*Cloud mode/);
   });
 });
 
@@ -385,7 +385,7 @@ describe('session connection', () => {
   it('keeps a loopback URL and builds the started editor env from it', async () => {
     const dir = project();
     const connection = await resolveSessionConnection(dir, { url: 'http://127.0.0.1:5188/', token: 't' });
-    expect(connection).toEqual({ url: 'http://127.0.0.1:5188', token: 't' });
+    expect(connection).toEqual({ url: 'http://127.0.0.1:5188', token: 't', connectionMode: 'Custom' });
     expect(sessionEditorEnv(connection, 't')).toEqual({
       UNREAL_MCP_CONNECTION_MODE: 'Custom',
       UNREAL_MCP_HOST: 'http://127.0.0.1:5188',

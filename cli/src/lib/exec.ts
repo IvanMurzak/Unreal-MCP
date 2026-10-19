@@ -13,8 +13,11 @@ import { asError } from '../utils/error.js';
 import type { RunToolFailure, RunToolOptions, RunToolResult } from './types.js';
 
 export const PYTHON_EXECUTE_TOOL = 'python-execute';
-/** Tool call timeout: a Python snippet may build or save assets. */
-export const DEFAULT_EXEC_TIMEOUT_MS = 180_000;
+/**
+ * Client-side tool call timeout: a Python snippet may build or save assets. Above the server's 300 s plugin timeout
+ * (the editor passes the tool timeout as `plugin-timeout`), so the server's own timeout error arrives first.
+ */
+export const DEFAULT_EXEC_TIMEOUT_MS = 310_000;
 
 export interface ExecPythonOptions {
   /** Project root or `.uproject` path; defaults to `process.cwd()`. */
@@ -27,7 +30,7 @@ export interface ExecPythonOptions {
   /** A started editor quits after this many seconds without tool calls. Default 300; `0` = never. */
   idleSeconds?: number;
   readyTimeoutMs?: number;
-  /** Tool call timeout. Default 180000. */
+  /** Tool call timeout. Default 310000. */
   timeoutMs?: number;
   /** Local server URL / token overrides. */
   url?: string;
