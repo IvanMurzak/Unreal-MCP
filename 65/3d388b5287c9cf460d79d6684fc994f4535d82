@@ -1,0 +1,61 @@
+README.md
+  s_5f9a753ce320b5::t_e1be9d2d804236 607
+UnrealMCP/Source/UnrealMcpEditor/Private/Server/UnrealMcpServerManager.cpp
+  s_5f9a753ce320b5::t_61c729f0701c23 36-37,168-216
+UnrealMCP/Source/UnrealMcpEditor/Private/Server/UnrealMcpServerManager.h
+  s_5f9a753ce320b5::t_eaa091103eb000 39-54
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/UnrealMcpAgentConfigModels.cpp
+  s_5f9a753ce320b5::t_f4d4f960c1aff8 8-9,14-17
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/UnrealMcpAgentConfigModels.h
+  s_5f9a753ce320b5::t_fb2923d38ecf1a 46,49-54
+UnrealMCP/Source/UnrealMcpEditor/Private/UnrealMcpEditorCoordinator.cpp
+  s_5f9a753ce320b5::t_6e46b9c405639f 309,485-486,621,627,652-655,658
+UnrealMCP/Source/UnrealMcpEditor/Private/UnrealMcpEditorCoordinator.h
+  s_5f9a753ce320b5::t_068be1f6ad18e4 126
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpAgentConfigModelsSpec.cpp
+  s_5f9a753ce320b5::t_ed7e020917549a 257-266
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpConfigSpec.cpp
+  s_5f9a753ce320b5::t_6e619ef96e7df6 596,599,601,603-611
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpServerManagerSpec.cpp
+  s_5f9a753ce320b5::t_16c70668a80673 157-202
+UnrealMCP/Source/UnrealMcpRuntime/Private/Bridge/UnrealMcpBridgeServer.cpp
+  s_5f9a753ce320b5::t_1728726f3fd096 1133,1149
+UnrealMCP/Source/UnrealMcpRuntime/Private/Bridge/UnrealMcpBridgeServer.h
+  s_5f9a753ce320b5::t_b55578860e8baf 137,143
+UnrealMCP/Source/UnrealMcpRuntime/Private/Config/UnrealMcpConfig.cpp
+  s_5f9a753ce320b5::t_f50ecc9b9017a0 487,489-490
+UnrealMCP/Source/UnrealMcpRuntime/Private/Config/UnrealMcpConfig.h
+  s_5f9a753ce320b5::t_f75a7c1a8df52f 96,98-99,228-232,234
+bridge/src/Host/SidecarHost.cs
+  s_5f9a753ce320b5::t_2ac75b1ce73c22 1216-1218
+bridge/src/Ipc/IpcProtocol.cs
+  s_5f9a753ce320b5::t_42cf2e2e3068ab 78-79
+bridge/src/Ipc/ServerLaunchArgsMessages.cs
+  s_5f9a753ce320b5::t_11d96ffc3dd728 37-41,65
+bridge/src/com.IvanMurzak.Unreal.MCP.Bridge.csproj
+  s_5f9a753ce320b5::t_448af280436440 55,108-112,147
+bridge/tests/SidecarHostServerLaunchArgsTests.cs
+  s_5f9a753ce320b5::t_f2b0bac0730c03 38,51,60,67-68,98-119
+cli/src/lib/exec.ts
+  s_5f9a753ce320b5::t_b03e333133a3b7 22-24
+cli/tests/exec.test.ts
+  s_5f9a753ce320b5::t_49c2d4998a3575 6,84-89
+docs/ARCHITECTURE.md
+  s_5f9a753ce320b5::t_4acd9ef070b842 583-594,602
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "653d388b5287c9cf460d79d6684fc994f4535d82",
+  "prompts": {},
+  "sessions": {
+    "s_5f9a753ce320b5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7ee65e8c-aca3-452e-9397-46e1aceea5e9",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
