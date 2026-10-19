@@ -123,7 +123,7 @@ private:
 
 	// Compose + send a `server-launch-args` IPC request for @p Live's resolved auth mode and, on the async result,
 	// Start / ReattachIfRunning (per @p Mode) the local server on @p Port with the sidecar-built args.
-	void RequestServerLaunchArgs(int32 Port, int32 PluginTimeoutMs, const class FUnrealMcpConfig& Live, EServerLaunch Mode);
+	void RequestServerLaunchArgs(int32 Port, const class FUnrealMcpConfig& Live, EServerLaunch Mode);
 
 	FDelegateHandle PreExitHandle;
 	bool bStarted = false;

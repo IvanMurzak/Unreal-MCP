@@ -306,7 +306,7 @@ void FUnrealMcpEditorCoordinator::Startup()
 		// IPC; ApplyServerLaunchArgsResult runs Start with the returned string. Returns true = start INITIATED (the
 		// server-running sink polls IsRunning to reflect the actual state once the async Start completes).
 		const FUnrealMcpConfig Live = FUnrealMcpConfig::LoadAndResolve();
-		CoordinatorForStart->RequestServerLaunchArgs(ServerPort, Live.ResolveServerPluginTimeoutMs(), Live, EServerLaunch::Start);
+		CoordinatorForStart->RequestServerLaunchArgs(ServerPort, Live, EServerLaunch::Start);
 		return true;
 	};
 	ViewModel->OnStopLocalServer = [ServerPtr]()
@@ -617,13 +617,13 @@ void FUnrealMcpEditorCoordinator::ApplyProjectConfigResult(const TSharedPtr<FJso
 		// g5/g6 consolidation: the reattach's launch args (used by the watchdog respawn) are also sidecar-composed —
 		// request them; ApplyServerLaunchArgsResult calls ReattachIfRunning with the returned string.
 		// UNREAL_MCP_START_SERVER / `startServer` (e.g. `unreal-mcp-cli exec`): no survivor → start one.
-		RequestServerLaunchArgs(DerivedPort, Live.ResolveServerPluginTimeoutMs(), Live,
+		RequestServerLaunchArgs(DerivedPort, Live,
 			Live.bStartServer ? EServerLaunch::ReattachOrStart : EServerLaunch::Reattach);
 	}
 	bLocalServerReattachAttempted = true;
 }
 
-void FUnrealMcpEditorCoordinator::RequestServerLaunchArgs(int32 Port, int32 PluginTimeoutMs, const FUnrealMcpConfig& Live, EServerLaunch Mode)
+void FUnrealMcpEditorCoordinator::RequestServerLaunchArgs(int32 Port, const FUnrealMcpConfig& Live, EServerLaunch Mode)
 {
 	// mcp-authorize g5/g6 consolidation. Game thread. Forward the resolved connection facts to the sidecar's SHARED
 	// ServerLaunchArguments builder; the C++ side NEVER assembles the arg string. The token/issuer/public-url are the
@@ -648,9 +648,12 @@ void FUnrealMcpEditorCoordinator::RequestServerLaunchArgs(int32 Port, int32 Plug
 			PublicUrl = FString::Printf(TEXT("http://localhost:%d/mcp/p/%s"), Port, *DerivedLocalServerPin);
 	}
 
+	// See FUnrealMcpConfig::ResolveServerPluginTimeoutMs; older servers ignore `tool-timeout`.
+	const int32 PluginTimeoutMs = Live.ResolveServerPluginTimeoutMs(FUnrealMcpServerManager::ServerHasToolTimeout());
+
 	const FString RequestId = FGuid::NewGuid().ToString();
 	PendingServerLaunches.Add(RequestId, FPendingServerLaunch{ Port, Mode });
-	if (!BridgeServer->SendServerLaunchArgsRequest(RequestId, Port, PluginTimeoutMs, AuthMode, Token, AuthIssuer, PublicUrl))
+	if (!BridgeServer->SendServerLaunchArgsRequest(RequestId, Port, PluginTimeoutMs, Live.ResolveServerToolTimeoutMs(), AuthMode, Token, AuthIssuer, PublicUrl))
 	{
 		PendingServerLaunches.Remove(RequestId);
 		UE_LOG(LogUnrealMcp, Warning,

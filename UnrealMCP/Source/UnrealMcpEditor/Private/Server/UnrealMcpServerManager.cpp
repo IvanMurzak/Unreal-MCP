@@ -33,6 +33,8 @@
 // (SERVER_VERSION) and Unity's McpServerManager.ServerVersion — the three plugins consume the SAME server.
 const TCHAR* FUnrealMcpServerManager::ServerVersion = TEXT("9.2.11");
 const TCHAR* FUnrealMcpServerManager::ServerPathEnvVar = TEXT("UNREAL_MCP_SERVER_PATH");
+// GameDev-MCP-Server 9.2.12 is the last release on McpPlugin.Server < 8.11.0; the next one carries 8.11.0.
+const TCHAR* FUnrealMcpServerManager::MinServerVersionWithToolTimeout = TEXT("9.2.13");
 
 namespace
 {
@@ -45,6 +47,13 @@ namespace
 		return FString::Printf(
 			TEXT("https://github.com/IvanMurzak/GameDev-MCP-Server/releases/download/v%s/gamedev-mcp-server-%s.zip"),
 			*Version, *Rid);
+	}
+
+	// The UNREAL_MCP_SERVER_PATH dev/CI override when it is set and points at an existing file, else empty.
+	FString ExistingServerPathOverride()
+	{
+		const FString Override = FPlatformMisc::GetEnvironmentVariable(FUnrealMcpServerManager::ServerPathEnvVar);
+		return !Override.IsEmpty() && FPaths::FileExists(Override) ? Override : FString();
 	}
 }
 
@@ -163,12 +172,35 @@ void FUnrealMcpServerManager::PrepareBinaryForSpawn(const FString& Path)
 	FUnrealMcpProcessUtil::MakeExecutable(Path);
 }
 
+bool FUnrealMcpServerManager::IsServerVersionAtLeast(const FString& Version, const FString& Minimum)
+{
+	TArray<FString> Have, Need;
+	Version.ParseIntoArray(Have, TEXT("."));
+	Minimum.ParseIntoArray(Need, TEXT("."));
+	for (int32 Index = 0; Index < FMath::Max(Have.Num(), Need.Num()); ++Index)
+	{
+		const int32 A = Have.IsValidIndex(Index) ? FCString::Atoi(*Have[Index]) : 0;
+		const int32 B = Need.IsValidIndex(Index) ? FCString::Atoi(*Need[Index]) : 0;
+		if (A != B)
+			return A > B;
+	}
+	return true;
+}
+
+bool FUnrealMcpServerManager::ServerHasToolTimeout()
+{
+	static const bool bPinnedHasToolTimeout = IsServerVersionAtLeast(ServerVersion, MinServerVersionWithToolTimeout);
+	if (!ExistingServerPathOverride().IsEmpty())
+		return false; // a dev/CI binary of unknown version (ResolveBinaryPath prefers it)
+	return bPinnedHasToolTimeout;
+}
+
 FString FUnrealMcpServerManager::ResolveBinaryPath() const
 {
 	// 1. Dev/CI override — wins when set + present (mirrors the sidecar's UNREAL_MCP_BRIDGE_PATH and the CLI's
 	//    UNREAL_MCP_SERVER_PATH). Skips the version check, exactly like download-server.ts's override branch.
-	const FString Override = FPlatformMisc::GetEnvironmentVariable(ServerPathEnvVar);
-	if (!Override.IsEmpty() && FPaths::FileExists(Override))
+	const FString Override = ExistingServerPathOverride();
+	if (!Override.IsEmpty())
 		return Override;
 
 	// 2. Cached binary under the §6 install dir whose `version` marker matches the pin → reuse (no network).

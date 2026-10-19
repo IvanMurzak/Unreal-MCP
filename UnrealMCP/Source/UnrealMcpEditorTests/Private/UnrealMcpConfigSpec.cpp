@@ -593,14 +593,24 @@ void FUnrealMcpConfigSpec::Define()
 			}
 		});
 
-		It("derives the server plugin-timeout from the tool timeout plus a margin", [this]()
+		It("derives the server tool-timeout (and an older server's plugin-timeout) from the tool timeout plus a margin", [this]()
 		{
 			FUnrealMcpConfig Config;
-			TestEqual(TEXT("default"), Config.ResolveServerPluginTimeoutMs(), 310000);
+			TestEqual(TEXT("default"), Config.ResolveServerToolTimeoutMs(), 310000);
+			TestEqual(TEXT("default, older server"), Config.ResolveServerPluginTimeoutMs(false), 310000);
 			Config.ToolTimeoutMs = 10000;
-			TestEqual(TEXT("lowered"), Config.ResolveServerPluginTimeoutMs(), 20000);
+			TestEqual(TEXT("lowered"), Config.ResolveServerToolTimeoutMs(), 20000);
+			TestEqual(TEXT("lowered, older server"), Config.ResolveServerPluginTimeoutMs(false), 20000);
 			Config.ToolTimeoutMs = MAX_int32;
-			TestEqual(TEXT("clamped"), Config.ResolveServerPluginTimeoutMs(), MAX_int32);
+			TestEqual(TEXT("clamped"), Config.ResolveServerToolTimeoutMs(), MAX_int32);
+		});
+
+		It("uses the connection timeout as plugin-timeout for a server that honours tool-timeout", [this]()
+		{
+			FUnrealMcpConfig Config;
+			TestEqual(TEXT("default"), Config.ResolveServerPluginTimeoutMs(true), 10000);
+			Config.ToolTimeoutMs = 900000;
+			TestEqual(TEXT("raised"), Config.ResolveServerPluginTimeoutMs(true), 10000);
 		});
 
 		It("is a recognized .env key", [this]()

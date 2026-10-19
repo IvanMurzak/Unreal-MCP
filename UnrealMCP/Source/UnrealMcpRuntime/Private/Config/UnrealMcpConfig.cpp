@@ -484,9 +484,14 @@ FString FUnrealMcpConfig::ResolveCustomHost() const
 	return Trimmed.IsEmpty() ? FString(DefaultCustomHost) : Trimmed;
 }
 
-int32 FUnrealMcpConfig::ResolveServerPluginTimeoutMs() const
+int32 FUnrealMcpConfig::ResolveServerToolTimeoutMs() const
 {
 	return static_cast<int32>(FMath::Min<int64>(static_cast<int64>(ToolTimeoutMs) + ServerPluginTimeoutMarginMs, MAX_int32));
+}
+
+int32 FUnrealMcpConfig::ResolveServerPluginTimeoutMs(bool bServerHasToolTimeout) const
+{
+	return bServerHasToolTimeout ? ServerConnectionTimeoutMs : ResolveServerToolTimeoutMs();
 }
 
 FString FUnrealMcpConfig::ResolveEffectiveToken() const
