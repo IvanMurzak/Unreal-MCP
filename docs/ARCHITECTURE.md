@@ -588,7 +588,7 @@ Godot's `GodotMainThread`:
   answers first. `plugin-timeout` is 10 s when the pinned server version is new enough and no
   `UNREAL_MCP_SERVER_PATH` override is set, else `toolTimeoutMs` + 10 s so an older server does not give
   up or re-send first. Agent configs written by the shared McpPlugin writer carry only `plugin-timeout`,
-  so they always get `toolTimeoutMs` + 10 s (a new server defaults `tool-timeout` to max(300 s, plugin-timeout)). The sidecar (McpPlugin 8.11.0)
+  so they always get `toolTimeoutMs` + 10 s (a new server defaults `tool-timeout` to max(300 s, plugin-timeout)). The sidecar (McpPlugin 8.11.0+)
   also answers a re-sent tool call (same request id, running or finished within 5 min) with the first
   run's result. A parallel timer fires the promise with a structured timeout error;
   the flag set on `FUnrealMcpToolCall::CancelRequested` (a `FThreadSafeBool`) lets long tool bodies
