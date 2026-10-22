@@ -31,7 +31,7 @@
 
 // Single source of the consumed shared-server version. Kept in lockstep with cli/src/lib/server-version.ts
 // (SERVER_VERSION) and Unity's McpServerManager.ServerVersion — the three plugins consume the SAME server.
-const TCHAR* FUnrealMcpServerManager::ServerVersion = TEXT("9.2.13");
+const TCHAR* FUnrealMcpServerManager::ServerVersion = TEXT("9.2.14");
 const TCHAR* FUnrealMcpServerManager::ServerPathEnvVar = TEXT("UNREAL_MCP_SERVER_PATH");
 // GameDev-MCP-Server 9.2.12 is the last release on McpPlugin.Server < 8.11.0; the next one carries 8.11.0.
 const TCHAR* FUnrealMcpServerManager::MinServerVersionWithToolTimeout = TEXT("9.2.13");
