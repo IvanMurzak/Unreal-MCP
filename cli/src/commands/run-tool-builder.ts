@@ -1,4 +1,5 @@
 import { Command } from 'commander';
+import { readFileSync } from 'fs';
 import type { RunToolOptions, RunToolResult } from '../lib/types.js';
 import * as ui from '../utils/ui.js';
 
@@ -22,14 +23,27 @@ export function buildRunToolCommand(spec: RunToolCommandSpec): Command {
     .option('--url <url>', 'Explicit MCP server URL override')
     .option('--token <token>', 'Bearer token override')
     .option('--input <json>', 'Tool arguments as a JSON string')
+    .option('--input-file <file>', 'Read JSON arguments from a file, or - for stdin')
     .option('--timeout <ms>', 'Request timeout in ms (default 60000)', (v) => parseInt(v, 10))
     .action(async (toolName: string, opts) => {
+      let input: string | undefined = opts.input;
+      try {
+        if (opts.input !== undefined && opts.inputFile !== undefined)
+          throw new Error('Use either --input or --input-file, not both.');
+        if (opts.inputFile !== undefined)
+          input = readFileSync(opts.inputFile === '-' ? 0 : opts.inputFile, 'utf-8');
+        if (input !== undefined) JSON.parse(input);
+      } catch (error) {
+        ui.error(`Invalid tool input: ${error instanceof Error ? error.message : String(error)}`);
+        process.exitCode = 1;
+        return;
+      }
       const result = await spec.invoke({
         toolName,
-        projectDir: opts.path,
+        projectDir: opts.path ?? process.cwd(),
         url: opts.url,
         token: opts.token,
-        input: opts.input,
+        input,
         timeoutMs: opts.timeout,
       });
       if (result.kind === 'failure') {

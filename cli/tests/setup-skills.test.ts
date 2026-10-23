@@ -36,7 +36,7 @@ describe('setupSkills', () => {
     expect(docs[0]).toContain('`unreal-cli` skill');
     expect(docs[0]).toContain('`ai-game-dev-app`');
     expect(docs[0]).not.toContain('npm install');
-    expect(docs[1]).toContain('npm install -g unreal-mcp-cli');
+    expect(docs[1]).toContain(process.platform === 'win32' ? 'npm.cmd install -g unreal-mcp-cli' : 'npm install -g unreal-mcp-cli');
     expect(docs[2]).toContain('Blender');
     expect(docs[2]).not.toContain('npm install');
 
