@@ -42,8 +42,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             Assert.Contains(windows ? "npm.cmd install -g unreal-mcp-cli" : "npm install -g unreal-mcp-cli", guide);
             Assert.Contains("run-tool rql-schema --input '{}'", guide);
             Assert.DoesNotContain("<tool-name>", guide);
-            Assert.DoesNotContain("@SHELL@", guide);
-            Assert.DoesNotContain("@unreal-mcp-cli@", guide);
+            Assert.DoesNotMatch("@[A-Z_]+@", guide);
             Assert.DoesNotContain("<<'EOF'", guide);
         }
 
