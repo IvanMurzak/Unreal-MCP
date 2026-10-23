@@ -40,7 +40,8 @@ export type SetupSkillsResult = SetupSkillsSuccess | SetupSkillsFailure;
 const SKILL_REL_PATH = path.join('.claude', 'skills', 'unreal-mcp', 'SKILL.md');
 
 /** Render the skill markdown. Pure — exported for tests. */
-export function renderSkill(url: string): string {
+export function renderSkill(url: string, platform: NodeJS.Platform = process.platform): string {
+  const cli = platform === 'win32' ? 'unreal-mcp-cli.cmd' : 'unreal-mcp-cli';
   return `---
 name: unreal-mcp
 description: Drive the Unreal Editor for this project through the Unreal-MCP server. Use when the user wants to create/modify actors, blueprints, levels, or run editor tools in Unreal.
@@ -51,9 +52,9 @@ ${skillMetadataLines().join('\n')}
 
 This project is wired to a local Unreal-MCP server at \`${url}\`.
 
-- Probe readiness: \`unreal-mcp-cli status\`
-- Invoke a tool: \`unreal-mcp-cli run-tool <tool-name> --input '{...}'\`
-- The editor must be running with the UnrealMCP plugin enabled (see \`unreal-mcp-cli open\`).
+- Probe readiness: \`${cli} status\`
+- Invoke a tool: \`${cli} run-tool rql-schema --input '{}'\`
+- The editor must be running with the UnrealMCP plugin enabled (see \`${cli} open\`).
 
 ${SKILL_REFERENCES}
 `;

@@ -306,7 +306,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
         /// FUnrealMcpSkillFileGenerator::BuildSkillMarkdown shape; the param table + JSON Schema fence are derived
         /// from <see cref="ToolDescriptor.InputSchema"/> (the C++ generator read the same data off its registry).
         /// </summary>
-        public static string BuildSkillMarkdown(ToolDescriptor tool, IReadOnlyDictionary<string, string>? metadata = null)
+        public static string BuildSkillMarkdown(ToolDescriptor tool, IReadOnlyDictionary<string, string>? metadata = null, bool? windows = null)
         {
             var folderName = SanitizeSkillFolderName(tool.Name);
             // YAML `description:` ← the dedicated short skill description ([AiSkillDescription] analog the manifest
@@ -382,9 +382,9 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
             // ## How to Call — the plain unreal-mcp-cli form. Token discipline (§8): NO token at all.
             lines.Add("## How to Call");
             lines.Add(string.Empty);
-            lines.Add("```bash");
-            lines.Add($"unreal-mcp-cli run-tool {tool.Name} --input '{{ ... }}'");
-            lines.Add("```");
+            var json = new SchemaExamples().Create(tool.InputSchema);
+            lines.Add("Replace example argument values with values appropriate to the task.");
+            lines.Add(BuiltinSkillGuides.ToolCommand("run-tool", tool.Name, json, windows ?? BuiltinSkillGuides.IsWindows));
             lines.Add(string.Empty);
             lines.Add(BuiltinSkillGuides.References);
 
@@ -403,6 +403,12 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
             if (skill.Name != BuiltinSkillGuides.CliSkillName && skill.Name != BuiltinSkillGuides.AppSkillName)
                 lines.Add(BuiltinSkillGuides.References);
             return string.Join("\n", lines);
+        }
+
+        // Reuse the framework's schema examples instead of emitting invalid placeholder JSON.
+        private sealed class SchemaExamples : SharedSkillFileGenerator
+        {
+            public string Create(JsonNode? schema) => BuildInputExample(schema);
         }
 
         // --- Input-schema → param table -------------------------------------------------------------
