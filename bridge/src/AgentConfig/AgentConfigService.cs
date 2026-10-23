@@ -68,10 +68,11 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
         /// <param name="logger">Optional diagnostics sink (never receives a secret).</param>
         /// <param name="projectKeys">Returns the project-key provider for the signed-in machine account, or
         /// <c>null</c> when this machine is not signed in (Cloud configs then stay URL-only).</param>
-        public AgentConfigService(ILogger? logger = null, Func<ProjectKeyProvider?>? projectKeys = null)
+        public AgentConfigService(ILogger? logger = null, Func<ProjectKeyProvider?>? projectKeys = null,
+            IReadOnlyDictionary<string, string>? skillMetadata = null)
         {
             _logger = logger;
-            _skillGenerator = new SkillFileGenerator(logger);
+            _skillGenerator = new SkillFileGenerator(logger, skillMetadata);
             _projectKeys = projectKeys;
         }
 

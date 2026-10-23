@@ -8,6 +8,7 @@ import { resolveConnection, type MachineAuthOptions } from '../utils/config.js';
 import { asError } from '../utils/error.js';
 import { emitProgress } from './progress.js';
 import type { ProgressCallback } from './types.js';
+import { buildGuideFiles, skillMetadataLines, SKILL_REFERENCES } from './skill-guides.js';
 
 export interface SetupSkillsOptions {
   projectDir?: string;
@@ -43,6 +44,7 @@ export function renderSkill(url: string): string {
   return `---
 name: unreal-mcp
 description: Drive the Unreal Editor for this project through the Unreal-MCP server. Use when the user wants to create/modify actors, blueprints, levels, or run editor tools in Unreal.
+${skillMetadataLines().join('\n')}
 ---
 
 # Unreal-MCP
@@ -52,6 +54,8 @@ This project is wired to a local Unreal-MCP server at \`${url}\`.
 - Probe readiness: \`unreal-mcp-cli status\`
 - Invoke a tool: \`unreal-mcp-cli run-tool <tool-name> --input '{...}'\`
 - The editor must be running with the UnrealMCP plugin enabled (see \`unreal-mcp-cli open\`).
+
+${SKILL_REFERENCES}
 `;
 }
 
@@ -76,9 +80,18 @@ export async function setupSkills(opts: SetupSkillsOptions = {}): Promise<SetupS
     const skillPath = path.join(projectDir, SKILL_REL_PATH);
     emitProgress(opts.onProgress, { phase: 'start', message: `Writing skill to ${skillPath}` });
 
+    let guidesWritten = false;
+    for (const file of buildGuideFiles()) {
+      const guidePath = path.join(projectDir, '.claude', 'skills', file.relativePath);
+      if (fs.existsSync(guidePath) && !opts.force) continue;
+      fs.mkdirSync(path.dirname(guidePath), { recursive: true });
+      fs.writeFileSync(guidePath, file.content, 'utf-8');
+      guidesWritten = true;
+    }
+
     if (fs.existsSync(skillPath) && !opts.force) {
       emitProgress(opts.onProgress, { phase: 'done', message: 'Skill already exists (use --force to overwrite).' });
-      return { kind: 'success', success: true, skillPath, written: false, warnings };
+      return { kind: 'success', success: true, skillPath, written: guidesWritten, warnings };
     }
 
     fs.mkdirSync(path.dirname(skillPath), { recursive: true });

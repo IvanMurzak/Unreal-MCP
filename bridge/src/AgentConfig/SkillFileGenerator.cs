@@ -17,6 +17,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using com.IvanMurzak.Unreal.MCP.Bridge.Ipc;
 using Microsoft.Extensions.Logging;
+using SharedSkillFileGenerator = com.IvanMurzak.McpPlugin.Skills.SkillFileGenerator;
 
 namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
 {
@@ -64,42 +65,24 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
         public const string ProvenanceBlockKey = "metadata";
 
         /// <summary>
-        /// Key, nested under <see cref="ProvenanceBlockKey"/>, marking a SKILL.md as written by a generator
-        /// rather than hand-authored by a user. It exists so a consumer that dedups generated skills against
-        /// the live tool catalog can tell the two apart and leave user-authored files alone; such a consumer
-        /// is expected to be fail-open (an unmarked file is kept). No consumer exists in this repository yet,
-        /// so the marker is currently inert here — and note that <see cref="PruneStaleSkillFolders"/> is NOT
-        /// one: it deletes on the presence of a SKILL.md, not on this marker.
-        /// <para>
-        /// Matching a marked file back to a catalog entry relies on the front matter's <c>name:</c> — see
-        /// <see cref="SanitizeSkillFolderName"/>, which is the identity on the kebab-case ids the registry
-        /// validates and lossy on anything else.
-        /// </para>
+        /// Generator provenance inside metadata. This does not control App visibility;
+        /// the host supplies the separate <c>ai-game-dev: exclude</c> policy entry.
         /// </summary>
         public const string ProvenanceKey = "generated-by";
 
         /// <summary>
         /// Value written for <see cref="ProvenanceKey"/>. Deliberately carries NO version and NO timestamp, so
         /// regenerating an unchanged tool rewrites a byte-identical file.
-        /// <para>
-        /// The same two lines that <c>com.IvanMurzak.McpPlugin.Skills.SkillFileGenerator</c> emits — verified
-        /// against the MCP-Plugin-dotnet source at the time of writing, and NOT present in the released 8.3.0
-        /// this bridge pins, so nothing here fails if the shared value drifts. Re-check at the next McpPlugin
-        /// bump, and prefer emitting from the shared constants once a release carries them.
-        /// </para>
-        /// <para>
-        /// Same line CONTENT, not the same bytes: the shared generator uses <c>AppendLine</c>, so its
-        /// terminator is <c>Environment.NewLine</c>, while this one joins with <c>"\n"</c>. A consumer must
-        /// therefore match the marker per line, never as one raw byte run.
-        /// </para>
         /// </summary>
-        public const string ProvenanceValue = "mcp-plugin-dotnet";
+        public const string ProvenanceValue = "unreal-mcp";
 
         private readonly ILogger? _logger;
+        private readonly IReadOnlyDictionary<string, string>? _metadata;
 
-        public SkillFileGenerator(ILogger? logger = null)
+        public SkillFileGenerator(ILogger? logger = null, IReadOnlyDictionary<string, string>? metadata = null)
         {
             _logger = logger;
+            _metadata = metadata;
         }
 
         /// <summary>Outcome of a generation run (for the IPC result + the panel's status line + the tests).</summary>
@@ -158,7 +141,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
             {
                 var folderName = SanitizeSkillFolderName(tool.Name);
                 currentFolders.Add(folderName);
-                if (WriteSkill(skillsRootAbsolute, folderName, BuildSkillMarkdown(tool)))
+                if (WriteSkill(skillsRootAbsolute, folderName, BuildSkillMarkdown(tool, _metadata)))
                     written++;
                 // Skills the tool ships beside its page (rql-query: unreal-rql, docs/rql.md), named and written by the plugin.
                 foreach (var skill in tool.Skills ?? new List<ToolSkillDescriptor>())
@@ -167,7 +150,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
                         continue;
                     var skillFolder = SanitizeSkillFolderName(skill.Name);
                     currentFolders.Add(skillFolder);
-                    if (WriteSkill(skillsRootAbsolute, skillFolder, BuildShippedSkillMarkdown(skill)))
+                    if (WriteSkill(skillsRootAbsolute, skillFolder, BuildShippedSkillMarkdown(skill, _metadata)))
                         written++;
                 }
             }
@@ -185,6 +168,18 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
                     ? "No tools in the catalog yet (the plugin has not pushed a tool manifest) — nothing generated, nothing pruned."
                     : $"All {tools.Count} tool(s) in the catalog are SYSTEM tools (§2.4), which are never documented — nothing generated, nothing pruned.";
                 return result;
+            }
+
+            foreach (var skill in BuiltinSkillGuides.All())
+            {
+                currentFolders.Add(skill.Name);
+                if (WriteSkill(skillsRootAbsolute, skill.Name, BuildShippedSkillMarkdown(skill, _metadata)))
+                    written++;
+                else
+                {
+                    result.Error = $"Failed to write the standalone '{skill.Name}' skill; references would be incomplete.";
+                    return result;
+                }
             }
 
             result.FilesPruned = PruneStaleSkillFolders(skillsRootAbsolute, currentFolders);
@@ -222,22 +217,26 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
 
         /// <summary>
         /// The YAML front matter of a generated SKILL.md: <c>name</c>, the capped single-line <c>description</c>, then the
-        /// provenance marker (see <see cref="ProvenanceKey"/>), followed by the blank line before the body. The marker is
-        /// the LAST block INSIDE the front matter (a consumer parses the front matter only), indented two spaces (a nested
-        /// mapping) and written RAW from the constants, never through <see cref="EscapeYamlQuoted"/> (which would collapse
-        /// the mapping into a quoted string). The description cannot break out of its scalar to forge it — see
-        /// <see cref="SingleLineCapped"/> for the mechanism and its limits.
+        /// global metadata, encoded by the shared library's YAML writer. The description cannot break out of its scalar
+        /// to forge metadata — see <see cref="SingleLineCapped"/> for the mechanism and its limits.
         /// </summary>
-        private static List<string> FrontMatter(string name, string description) => new List<string>
+        private static List<string> FrontMatter(string name, string description, IReadOnlyDictionary<string, string>? metadata = null)
         {
-            "---",
-            $"name: {name}",
-            $"description: \"{EscapeYamlQuoted(SingleLineCapped(description, MaxSkillDescriptionLength))}\"",
-            $"{ProvenanceBlockKey}:",
-            $"  {ProvenanceKey}: {ProvenanceValue}",
-            "---",
-            string.Empty,
-        };
+            var entries = new Dictionary<string, string> { [ProvenanceKey] = ProvenanceValue };
+            if (metadata != null)
+                foreach (var entry in metadata) entries[entry.Key] = entry.Value;
+            var yaml = new StringBuilder();
+            SharedSkillFileGenerator.AppendMetadata(yaml, entries);
+            var lines = new List<string>
+            {
+                "---", $"name: {name}",
+                $"description: \"{EscapeYamlQuoted(SingleLineCapped(description, MaxSkillDescriptionLength))}\"",
+            };
+            lines.AddRange(yaml.ToString().Replace("\r\n", "\n").TrimEnd('\n').Split('\n'));
+            lines.Add("---");
+            lines.Add(string.Empty);
+            return lines;
+        }
 
         /// <summary>
         /// Remove stale generator-owned skill folders under <paramref name="skillsRootAbsolute"/> — immediate child
@@ -307,7 +306,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
         /// FUnrealMcpSkillFileGenerator::BuildSkillMarkdown shape; the param table + JSON Schema fence are derived
         /// from <see cref="ToolDescriptor.InputSchema"/> (the C++ generator read the same data off its registry).
         /// </summary>
-        public static string BuildSkillMarkdown(ToolDescriptor tool)
+        public static string BuildSkillMarkdown(ToolDescriptor tool, IReadOnlyDictionary<string, string>? metadata = null)
         {
             var folderName = SanitizeSkillFolderName(tool.Name);
             // YAML `description:` ← the dedicated short skill description ([AiSkillDescription] analog the manifest
@@ -318,7 +317,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
             var shortDesc = !string.IsNullOrWhiteSpace(tool.SkillDescription) ? tool.SkillDescription! : (tool.Description ?? string.Empty);
             var title = string.IsNullOrEmpty(tool.Title) ? tool.Name : tool.Title!;
 
-            var lines = FrontMatter(folderName, shortDesc);
+            var lines = FrontMatter(folderName, shortDesc, metadata);
 
             // Title + the body: the dedicated skill body ([AiSkillBody] analog the manifest carries as `skillBody`)
             // when present, else the full Description. The shared lib's [AiSkillBody]/[AiSkillDescription] split is
@@ -387,6 +386,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
             lines.Add($"unreal-mcp-cli run-tool {tool.Name} --input '{{ ... }}'");
             lines.Add("```");
             lines.Add(string.Empty);
+            lines.Add(BuiltinSkillGuides.References);
 
             return string.Join("\n", lines);
         }
@@ -395,11 +395,13 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
         /// A skill a tool ships (<see cref="ToolDescriptor.Skills"/>, e.g. rql-query's <c>unreal-rql</c>): the generated front
         /// matter from its name and description, then its markdown as the plugin composed it. Pure (no disk).
         /// </summary>
-        public static string BuildShippedSkillMarkdown(ToolSkillDescriptor skill)
+        public static string BuildShippedSkillMarkdown(ToolSkillDescriptor skill, IReadOnlyDictionary<string, string>? metadata = null)
         {
-            var lines = FrontMatter(SanitizeSkillFolderName(skill.Name), skill.Description ?? string.Empty);
+            var lines = FrontMatter(SanitizeSkillFolderName(skill.Name), skill.Description ?? string.Empty, metadata);
             lines.Add((skill.Markdown ?? string.Empty).Trim());
             lines.Add(string.Empty);
+            if (skill.Name != BuiltinSkillGuides.CliSkillName && skill.Name != BuiltinSkillGuides.AppSkillName)
+                lines.Add(BuiltinSkillGuides.References);
             return string.Join("\n", lines);
         }
 

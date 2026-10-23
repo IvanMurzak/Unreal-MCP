@@ -152,7 +152,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
 
             Assert.NotNull(response.StructuredContent);
             var structured = response.StructuredContent!;
-            Assert.Equal(1, structured["filesWritten"]!.GetValue<int>());
+            Assert.Equal(3, structured["filesWritten"]!.GetValue<int>());
             Assert.Equal(2, structured["toolsConsidered"]!.GetValue<int>());
             Assert.Contains("skills", structured["skillsPath"]!.GetValue<string>());
         }

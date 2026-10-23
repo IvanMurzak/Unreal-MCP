@@ -145,7 +145,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             var result = gen.Generate(tools, _root);
 
             Assert.True(result.Success);
-            Assert.Equal(2, result.FilesWritten);
+            Assert.Equal(4, result.FilesWritten);
             Assert.True(File.Exists(DemoSkillPath));
             Assert.True(File.Exists(Path.Combine(_root, "ping", "SKILL.md")));
             // The written content is the same as the pure builder produced.
@@ -187,7 +187,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             var result = gen.Generate(tools, _root);
 
             Assert.True(result.Success);
-            Assert.Equal(1, result.FilesWritten);
+            Assert.Equal(3, result.FilesWritten);
             Assert.True(Directory.Exists(Path.Combine(_root, "demo-tool")));
             // A system tool is never documented — writing it would re-expose it through the skills channel.
             Assert.False(Directory.Exists(Path.Combine(_root, "ping")));
@@ -254,13 +254,13 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         // matter:
         //
         //     metadata:
-        //       generated-by: mcp-plugin-dotnet
+        //       generated-by: unreal-mcp
         //
         // The two-space indent is load-bearing — it is what makes this a nested YAML mapping rather than a
         // sibling scalar — so these assertions compare whole lines POSITIONALLY and UN-TRIMMED.
 
         private const string MarkerBlockLine = "metadata:";
-        private const string MarkerEntryLine = "  generated-by: mcp-plugin-dotnet";
+        private const string MarkerEntryLine = "  generated-by: unreal-mcp";
 
         /// <summary>
         /// Assert a marker line occurs exactly once in <paramref name="region"/>. `Assert.Equal(1, n)` and

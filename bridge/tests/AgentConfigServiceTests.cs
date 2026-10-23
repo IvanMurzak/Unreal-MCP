@@ -395,7 +395,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
 
             Assert.True(result.Ok);
             Assert.Equal(IpcProtocol.Type.AgentGenerateSkills, result.Op);
-            Assert.Equal(2, result.FilesWritten);
+            Assert.Equal(4, result.FilesWritten);
             Assert.NotNull(result.SkillsPath);
             Assert.True(File.Exists(Path.Combine(result.SkillsPath!, "actor-create", "SKILL.md")));
             Assert.True(File.Exists(Path.Combine(result.SkillsPath!, "ping", "SKILL.md")));

@@ -261,11 +261,11 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             };
             var result = new SkillFileGenerator().Generate(tools, _root);
             Assert.True(result.Success, result.Error);
-            Assert.Equal(3, result.FilesWritten);
+            Assert.Equal(5, result.FilesWritten);
 
             var written = File.ReadAllText(Path.Combine(_root, "unreal-rql", "SKILL.md"));
             Assert.Equal("---\nname: unreal-rql\ndescription: \"How to read and change anything in the Unreal Editor with RQL.\"\n"
-                + "metadata:\n  generated-by: mcp-plugin-dotnet\n---\n\n# RQL - query and change the Unreal Editor\n\nbody\n", written);
+                + "metadata:\n  generated-by: unreal-mcp\n---\n\n# RQL - query and change the Unreal Editor\n\nbody\n\n> CLI installation and usage: see the `unreal-cli` skill.\n> If this task needs unavailable asset-generation or Blender tools, consult `ai-game-dev-app` for an optional integrated workflow.\n", written);
 
             // The tool's own page documents the tool (its description), not the whole guide.
             var page = File.ReadAllText(Path.Combine(_root, "rql-query", "SKILL.md"));

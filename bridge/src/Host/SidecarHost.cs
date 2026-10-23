@@ -276,7 +276,10 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             SetHost(_config.Host);
             // Default to the real IPC send; SetStatusEmitterForTest swaps it in the xUnit suite.
             _statusEmitter = status => _ipc.SendToPluginAsync(status, CancellationToken.None);
-            _agentConfig = new AgentConfigService(loggerProvider?.CreateLogger(nameof(AgentConfigService)), ResolveProjectKeyProvider);
+            _config.SkillMetadata["generated-by"] = "unreal-mcp";
+            _config.SkillMetadata["ai-game-dev"] = "exclude";
+            _agentConfig = new AgentConfigService(loggerProvider?.CreateLogger(nameof(AgentConfigService)),
+                ResolveProjectKeyProvider, _config.SkillMetadata);
 
             // A single owned HttpClient covers the default device authenticator AND the default token
             // refresher / exchange / revocation clients; the injected-* paths (xUnit) supply their own — either
@@ -568,7 +571,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             builder.AddTool(SkillGenerateTool.ToolId, SkillGenerateTool.Create(
                 toolCatalog: () => _registrar?.AppliedDescriptors,
                 projectRoot: () => _config.ProjectRootPath,
-                generator: new SkillFileGenerator(_loggerProvider?.CreateLogger(nameof(SkillFileGenerator)))));
+                generator: new SkillFileGenerator(_loggerProvider?.CreateLogger(nameof(SkillFileGenerator)), _config.SkillMetadata)));
 
             _plugin = builder.Build(_reflector);
 
