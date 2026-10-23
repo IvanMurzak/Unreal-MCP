@@ -65,34 +65,14 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
         public const string ProvenanceBlockKey = "metadata";
 
         /// <summary>
-        /// Key, nested under <see cref="ProvenanceBlockKey"/>, marking a SKILL.md as written by a generator
-        /// rather than hand-authored by a user. It exists so a consumer that dedups generated skills against
-        /// the live tool catalog can tell the two apart and leave user-authored files alone; such a consumer
-        /// is expected to be fail-open (an unmarked file is kept). No consumer exists in this repository yet,
-        /// so the marker is currently inert here — and note that <see cref="PruneStaleSkillFolders"/> is NOT
-        /// one: it deletes on the presence of a SKILL.md, not on this marker.
-        /// <para>
-        /// Matching a marked file back to a catalog entry relies on the front matter's <c>name:</c> — see
-        /// <see cref="SanitizeSkillFolderName"/>, which is the identity on the kebab-case ids the registry
-        /// validates and lossy on anything else.
-        /// </para>
+        /// Generator provenance inside metadata. This does not control App visibility;
+        /// the host supplies the separate <c>ai-game-dev: exclude</c> policy entry.
         /// </summary>
         public const string ProvenanceKey = "generated-by";
 
         /// <summary>
         /// Value written for <see cref="ProvenanceKey"/>. Deliberately carries NO version and NO timestamp, so
         /// regenerating an unchanged tool rewrites a byte-identical file.
-        /// <para>
-        /// The same two lines that <c>com.IvanMurzak.McpPlugin.Skills.SkillFileGenerator</c> emits — verified
-        /// against the MCP-Plugin-dotnet source at the time of writing, and NOT present in the released 8.3.0
-        /// this bridge pins, so nothing here fails if the shared value drifts. Re-check at the next McpPlugin
-        /// bump, and prefer emitting from the shared constants once a release carries them.
-        /// </para>
-        /// <para>
-        /// Same line CONTENT, not the same bytes: the shared generator uses <c>AppendLine</c>, so its
-        /// terminator is <c>Environment.NewLine</c>, while this one joins with <c>"\n"</c>. A consumer must
-        /// therefore match the marker per line, never as one raw byte run.
-        /// </para>
         /// </summary>
         public const string ProvenanceValue = "unreal-mcp";
 
@@ -237,11 +217,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
 
         /// <summary>
         /// The YAML front matter of a generated SKILL.md: <c>name</c>, the capped single-line <c>description</c>, then the
-        /// provenance marker (see <see cref="ProvenanceKey"/>), followed by the blank line before the body. The marker is
-        /// the LAST block INSIDE the front matter (a consumer parses the front matter only), indented two spaces (a nested
-        /// mapping) and written RAW from the constants, never through <see cref="EscapeYamlQuoted"/> (which would collapse
-        /// the mapping into a quoted string). The description cannot break out of its scalar to forge it — see
-        /// <see cref="SingleLineCapped"/> for the mechanism and its limits.
+        /// global metadata, encoded by the shared library's YAML writer. The description cannot break out of its scalar
+        /// to forge metadata — see <see cref="SingleLineCapped"/> for the mechanism and its limits.
         /// </summary>
         private static List<string> FrontMatter(string name, string description, IReadOnlyDictionary<string, string>? metadata = null)
         {
