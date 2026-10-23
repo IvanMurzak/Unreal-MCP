@@ -71,10 +71,12 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             };
         }
 
-        [Fact]
-        public void BuildSkillMarkdown_EmitsFrontMatterTitleTableSchemaAndCallForm()
+        [Theory]
+        [InlineData(false)]
+        [InlineData(true)]
+        public void BuildSkillMarkdown_EmitsFrontMatterTitleTableSchemaAndCallForm(bool windows)
         {
-            var md = SkillFileGenerator.BuildSkillMarkdown(DemoTool());
+            var md = SkillFileGenerator.BuildSkillMarkdown(DemoTool(), windows: windows);
 
             Assert.StartsWith("---", md);
             Assert.Contains("name: demo-tool", md);
@@ -88,7 +90,14 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             Assert.Contains("How many \\| with a pipe.", md);
             Assert.Contains("### Input JSON Schema", md);
             Assert.Contains("**Hints:** read-only, idempotent", md);
-            Assert.Contains("unreal-mcp-cli run-tool demo-tool", md);
+            Assert.Contains(windows ? "unreal-mcp-cli.cmd run-tool demo-tool" : "unreal-mcp-cli run-tool demo-tool", md);
+            Assert.DoesNotContain(windows ? "```bash" : "```powershell", md);
+            var exampleStart = windows ? md.IndexOf("@'\n", StringComparison.Ordinal) + 3
+                : md.IndexOf("--input '", StringComparison.Ordinal) + 9;
+            var exampleEnd = md.IndexOf(windows ? "\n'@)" : "'\n", exampleStart, StringComparison.Ordinal);
+            var example = JsonNode.Parse(md.Substring(exampleStart, exampleEnd - exampleStart))!.AsObject();
+            Assert.True(example.ContainsKey("name"));
+            Assert.True(example.ContainsKey("count"));
             // Token discipline (§8): a skill file is pure docs — no token/secret anywhere.
             Assert.DoesNotContain("token", md, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("Bearer", md);
