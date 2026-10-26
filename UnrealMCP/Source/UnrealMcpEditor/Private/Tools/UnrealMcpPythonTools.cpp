@@ -75,7 +75,8 @@ namespace UnrealMcpPythonTools
 
 	/**
 	 * Output budget per call (characters): a runaway print loop or a huge value must not flood the agent's context. The
-	 * code_exec runtime (Code-Exec contract §6) already clips the value, the error and its own logs to these numbers; the
+	 * code_exec runtime (Code-Exec contract §6) already clips the value, the error and its own logs to these numbers (the
+	 * logs to a little less, see PythonRuntimeLogChars); the
 	 * caps here cover what the plugin adds afterwards: unreal.log*() output, engine messages and a failed bootstrap. The
 	 * numbers equal the runtime's defaults and are sent explicitly, so both layers read one set.
 	 */
@@ -93,21 +94,31 @@ namespace UnrealMcpPythonTools
 			*Text.Left(Max), Max, Text.Len(), Hint);
 	}
 
-	/** Clips long lines, then keeps the first and the last lines within the budget and says how many were left out. */
-	static void PythonCapLogs(TArray<TSharedPtr<FJsonValue>>& Logs)
+	/**
+	 * Clips the long lines the plugin added (from FirstOwn on: the runtime's lines are clipped already, and clipping them
+	 * again would misreport their length), then keeps the first and the last lines within the budget and says how many
+	 * were left out. Returns whether anything was shortened.
+	 */
+	static bool PythonCapLogs(TArray<TSharedPtr<FJsonValue>>& Logs, int32 FirstOwn)
 	{
 		int32 Total = 0;
+		bool bClipped = false;
 		TArray<int32> Sizes;
-		for (const TSharedPtr<FJsonValue>& Value : Logs)
+		for (int32 Index = 0; Index < Logs.Num(); ++Index)
 		{
-			const TSharedPtr<FJsonObject> Log = Value->AsObject();
-			const FString Message = PythonClip(Log->GetStringField(TEXT("message")), PythonMaxLogLineChars, TEXT("print less"));
-			Log->SetStringField(TEXT("message"), Message);
+			const TSharedPtr<FJsonObject> Log = Logs[Index]->AsObject();
+			FString Message = Log->GetStringField(TEXT("message"));
+			if (Index >= FirstOwn && Message.Len() > PythonMaxLogLineChars)
+			{
+				Message = PythonClip(Message, PythonMaxLogLineChars, TEXT("print less"));
+				Log->SetStringField(TEXT("message"), Message);
+				bClipped = true;
+			}
 			Sizes.Add(Message.Len() + PythonLogLineOverhead);
 			Total += Sizes.Last();
 		}
 		if (Total <= PythonMaxLogChars)
-			return;
+			return bClipped;
 		const int32 HeadBudget = PythonMaxLogChars * 3 / 4;
 		int32 Head = 0, Used = 0;
 		while (Head < Logs.Num() && Used + Sizes[Head] <= HeadBudget)
@@ -120,6 +131,7 @@ namespace UnrealMcpPythonTools
 			Tail - Head, PythonMaxLogChars)));
 		Kept.Append(Logs.GetData() + Tail, Logs.Num() - Tail);
 		Logs = MoveTemp(Kept);
+		return true;
 	}
 
 	/** The EvaluateStatement result is the repr of a base64 string: the payload between the quotes, nothing escaped. */
@@ -245,10 +257,25 @@ namespace UnrealMcpPythonTools
 
 				// unreal.log*() and engine messages raised during the call bypass sys.stdout: add them to the logs.
 				TArray<TSharedPtr<FJsonValue>> Logs = Response->GetArrayField(TEXT("logs"));
+				const int32 FirstOwn = Logs.Num();
 				for (const FPythonLogOutputEntry& Entry : Command.LogOutput)
 					Logs.Add(PythonLogEntry(PythonLogLevel(Entry.Type), Entry.Output.TrimEnd()));
 				PythonAddEngineLogs(LogSequence, Logs);
-				PythonCapLogs(Logs);
+				if (PythonCapLogs(Logs, FirstOwn))
+				{
+					// The response says which fields a limit shortened, in the order value, logs, error (contract §6).
+					const TArray<TSharedPtr<FJsonValue>>* Truncated = nullptr;
+					TArray<FString> Fields;
+					if (Response->TryGetArrayField(TEXT("truncated"), Truncated))
+						for (const TSharedPtr<FJsonValue>& Field : *Truncated)
+							Fields.Add(Field->AsString());
+					if (!Fields.Contains(TEXT("logs")))
+						Fields.Insert(TEXT("logs"), Fields.Contains(TEXT("value")) ? 1 : 0);
+					TArray<TSharedPtr<FJsonValue>> Values;
+					for (const FString& Field : Fields)
+						Values.Add(MakeShared<FJsonValueString>(Field));
+					Response->SetArrayField(TEXT("truncated"), Values);
+				}
 				Response->SetArrayField(TEXT("logs"), Logs);
 				FString Value; // already clipped by the runtime (maxValueChars), as the error is (maxErrorChars)
 				const bool bHasValue = Response->TryGetStringField(TEXT("value"), Value);

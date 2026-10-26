@@ -163,6 +163,19 @@ void FUnrealMcpPythonToolsSpec::Define()
 		TestTrue(TEXT("structured value clipped too"), R.Structured.IsValid() && R.Structured->TryGetStringField(TEXT("value"), Value) && Value.Len() < 21000);
 	});
 
+	It("clips a long line once, and reports the plugin's own cuts in 'truncated'", [this]()
+	{
+		const FUnrealMcpToolResult Printed = Run(TEXT("print('x' * 5000)"));
+		TestTrue(TEXT("print clipped by the runtime, real length"), Printed.Message.Contains(TEXT("[truncated: 2000 of 5000 characters shown; print less]")));
+		TestFalse(TEXT("not clipped a second time"), Printed.Message.Contains(TEXT("of 2058 characters")));
+
+		const FUnrealMcpToolResult Logged = Run(TEXT("unreal.log('z' * 5000)\n1"));
+		TestTrue(TEXT("unreal.log line clipped by the plugin"), Logged.Message.Contains(TEXT("[truncated: 2000 of 5000 characters shown; print less]")));
+		const TArray<TSharedPtr<FJsonValue>>* Truncated = nullptr;
+		TestTrue(TEXT("truncated says logs"), Logged.Structured.IsValid() && Logged.Structured->TryGetArrayField(TEXT("truncated"), Truncated)
+			&& Truncated->Num() == 1 && (*Truncated)[0]->AsString() == TEXT("logs"));
+	});
+
 	It("returns engine warnings and errors logged while the snippet ran", [this]()
 	{
 		// A warning, not an error: Automation rewrites expected errors to Verbose before log devices see them. An empty
