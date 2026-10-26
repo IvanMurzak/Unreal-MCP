@@ -104,6 +104,20 @@ TArray<FUnrealMcpLogEntry> FUnrealMcpLogCollector::Snapshot(int32 Limit) const
 	return TArray<FUnrealMcpLogEntry>(Entries.GetData() + Start, Entries.Num() - Start);
 }
 
+TArray<FUnrealMcpLogEntry> FUnrealMcpLogCollector::SnapshotAfter(int64 AfterSequence) const
+{
+	FScopeLock ScopeLock(&Lock);
+	// Sequences are dense and ascending in buffer order, so the first newer entry is found by arithmetic.
+	const int32 Start = Entries.Num() == 0 ? 0 : (int32)FMath::Clamp<int64>(AfterSequence - Entries[0].Sequence + 1, 0, Entries.Num());
+	return TArray<FUnrealMcpLogEntry>(Entries.GetData() + Start, Entries.Num() - Start);
+}
+
+int64 FUnrealMcpLogCollector::GetLastSequence() const
+{
+	FScopeLock ScopeLock(&Lock);
+	return LastSequence;
+}
+
 FString FUnrealMcpLogCollector::VerbosityToString(ELogVerbosity::Type Verbosity)
 {
 	// Defer to the engine's verbosity→name mapping (Fatal/Error/Warning/Display/Log/Verbose/VeryVerbose), masking

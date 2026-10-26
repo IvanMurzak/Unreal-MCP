@@ -128,17 +128,19 @@ AActor* UnrealMcpRql::SpawnActor(UClass* Class, const FVector& Location, const F
 	AActor* Actor = World->SpawnActor<AActor>(Class, Location, Rotation, Params);
 	if (!Actor)
 		return Failed<AActor*>(FString::Printf(TEXT("could not spawn %s"), *Class->GetName()));
-	if (!Actor->GetRootComponent())
+	// A class without a root component (a plain Actor) has no transform: the location would be dropped and nothing
+	// could attach to it. Give it the scene root the editor's Empty Actor gets (UActorFactoryEmptyActor).
+	if (!Actor->GetRootComponent() && !UnrealMcpRql::AddComponent(Actor, USceneComponent::StaticClass(),
+		USceneComponent::GetDefaultSceneRootVariableName().ToString(), [&Location, &Rotation](UActorComponent* Component)
+		{
+			USceneComponent* Root = CastChecked<USceneComponent>(Component);
+			Root->Mobility = EComponentMobility::Movable;
+			Root->bVisualizeComponent = true;
+			Root->SetWorldLocationAndRotation(Location, Rotation);
+		}))
 	{
-		// A class without one (a plain Actor) has no transform: the location would be dropped and nothing could attach
-		// to it. Give it the scene root the editor's Empty Actor gets (UActorFactoryEmptyActor).
-		USceneComponent* Root = NewObject<USceneComponent>(Actor, USceneComponent::GetDefaultSceneRootVariableName(), RF_Transactional);
-		Root->Mobility = EComponentMobility::Movable;
-		Root->bVisualizeComponent = true;
-		Root->SetWorldLocationAndRotation(Location, Rotation);
-		Actor->SetRootComponent(Root);
-		Actor->AddInstanceComponent(Root);
-		Root->RegisterComponent();
+		World->EditorDestroyActor(Actor, /*bShouldModifyLevel*/ true);
+		return nullptr;
 	}
 	if (!Label.IsEmpty())
 		FActorLabelUtilities::SetActorLabelUnique(Actor, Label);
@@ -148,9 +150,8 @@ AActor* UnrealMcpRql::SpawnActor(UClass* Class, const FVector& Location, const F
 		if (Actor->GetAttachParentActor() != Parent)
 		{
 			World->EditorDestroyActor(Actor, /*bShouldModifyLevel*/ true);
-			return Failed<AActor*>(Parent->GetRootComponent()
-				? FString::Printf(TEXT("could not attach to %s"), *Parent->GetActorLabel())
-				: FString::Printf(TEXT("could not attach to %s: it has no root component (no transform); give it one with AddComponent(\"SceneComponent\", \"Root\")"), *Parent->GetActorLabel()));
+			return Failed<AActor*>(FString::Printf(TEXT("could not attach to %s%s"), *Parent->GetActorLabel(), Parent->GetRootComponent() ? TEXT("")
+				: TEXT(": it has no root component (no transform); give it one with AddComponent(\"SceneComponent\", \"Root\")")));
 		}
 	}
 	return Actor;

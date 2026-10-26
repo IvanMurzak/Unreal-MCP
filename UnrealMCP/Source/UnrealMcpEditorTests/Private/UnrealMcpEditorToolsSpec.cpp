@@ -128,6 +128,22 @@ void FUnrealMcpEditorToolsSpec::Define()
 			const TArray<FUnrealMcpLogEntry> Recent = C.Snapshot(2);
 			TestTrue(TEXT("entries 4 and 5"), Recent.Num() == 2 && Recent[0].Sequence == 4 && Recent[1].Sequence == 5);
 		});
+
+		It("reads only the entries after a sequence, also after eviction and Clear", [this, Feed]()
+		{
+			FUnrealMcpLogCollector C;
+			TestEqual(TEXT("no line yet"), C.GetLastSequence(), (int64)0);
+			for (int32 I = 0; I < 5; ++I) Feed(C, FString::Printf(TEXT("a%d"), I));
+			const TArray<FUnrealMcpLogEntry> New = C.SnapshotAfter(3);
+			TestTrue(TEXT("entries 4 and 5"), New.Num() == 2 && New[0].Sequence == 4 && New[1].Sequence == 5);
+			TestEqual(TEXT("everything after 0"), C.SnapshotAfter(0).Num(), 5);
+			TestEqual(TEXT("nothing after the last"), C.SnapshotAfter(C.GetLastSequence()).Num(), 0);
+			C.Clear();
+			Feed(C, TEXT("after"));
+			const TArray<FUnrealMcpLogEntry> AfterClear = C.SnapshotAfter(5);
+			TestTrue(TEXT("a cursor older than the buffer reads it all"), AfterClear.Num() == 1 && AfterClear[0].Sequence == 6);
+			TestEqual(TEXT("last sequence survives Clear"), C.GetLastSequence(), (int64)6);
+		});
 	});
 }
 
