@@ -29,7 +29,7 @@ class UUnrealMcpRqlEditorApi : public UObject
 	GENERATED_BODY()
 
 public:
-	/** spawn an actor in the current level from a class name ("PointLight"), class path or Blueprint asset path; Label, Location, Rotation and Parent are optional; returns the actor */
+	/** spawn an actor in the current level from a class name ("PointLight"), class path or Blueprint asset path; Label, Location, Rotation (final; omitted keeps the class default, a SpotLight points down) and Parent are optional; returns the actor */
 	UFUNCTION(BlueprintCallable, Category = "Unreal MCP|RQL", meta = (BlueprintInternalUseOnly = "true"))
 	AActor* SpawnActor(const FString& ClassName, const FString& Label = TEXT(""), FVector Location = FVector::ZeroVector,
 		FRotator Rotation = FRotator::ZeroRotator, AActor* Parent = nullptr);

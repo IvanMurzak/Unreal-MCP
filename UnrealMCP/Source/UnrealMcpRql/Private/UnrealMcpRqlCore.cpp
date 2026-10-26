@@ -425,9 +425,16 @@ namespace UnrealMcpRqlCoreLocal
 					Throw(FString::Printf(TEXT("could not attach %s (no root component)"), *Actor->GetActorLabel()));
 			}, "the actor this one is attached to (keeps the world transform; null detaches)", false, true));
 		FUnrealMcpRqlTypes::SetMember(D, Member("Folder", StringType(),
-			[](void* Self) { return Str(static_cast<AActor*>(Self)->GetFolderPath().ToString()); },
-			[](void* Self, const rql::Value& Value) { static_cast<AActor*>(Self)->SetFolderPath(FName(*TextArg(Value))); },
-			"Outliner folder"));
+			[](void* Self)
+			{
+				const FName Folder = static_cast<AActor*>(Self)->GetFolderPath();
+				return Folder.IsNone() ? rql::Value::null() : Str(Folder.ToString());
+			},
+			[](void* Self, const rql::Value& Value)
+			{
+				static_cast<AActor*>(Self)->SetFolderPath(Value.is_null() ? NAME_None : FName(*TextArg(Value)));
+			},
+			"Outliner folder (null: none)", /*bOwning*/ false, /*bNullable*/ true));
 		FUnrealMcpRqlTypes::SetMember(D, Member("Level", LevelType,
 			[Types](void* Self) { return Types->WrapObject(static_cast<AActor*>(Self)->GetLevel()); }, {}, "", false, true));
 		FUnrealMcpRqlTypes::SetMember(D, Member("HiddenInEditor", BoolType(),
@@ -462,6 +469,10 @@ namespace UnrealMcpRqlCoreLocal
 				AActor* Copy = World->SpawnActor<AActor>(Source->GetClass(), Transform, Params);
 				if (!Copy)
 					Throw(FString::Printf(TEXT("could not duplicate %s"), *Source->GetActorLabel()));
+				// The template's root keeps its relative transform, which SpawnActor composes with Transform: an
+				// unattached source would get its transform applied twice. Put the copy where it belongs.
+				Copy->SetActorTransform(Transform, /*bSweep*/ false, nullptr, ETeleportType::TeleportPhysics);
+				Copy->PostEditMove(/*bFinished*/ true); // construction scripts ran at the composed transform
 				FActorLabelUtilities::SetActorLabelUnique(Copy, Source->GetActorLabel());
 				return Types->WrapObject(Copy);
 			}, "copy the actor, moved by Offset; returns the copy"));

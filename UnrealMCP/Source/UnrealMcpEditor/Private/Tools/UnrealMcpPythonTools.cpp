@@ -73,6 +73,47 @@ namespace UnrealMcpPythonTools
 				TEXT("%d more engine warning(s)/error(s): read them with rql-query on the console source"), Matched - PythonMaxEngineLogs)));
 	}
 
+	/** Output budget per call (characters): a runaway print loop or a huge value must not flood the agent's context. */
+	static constexpr int32 PythonMaxValueChars = 20000;
+	static constexpr int32 PythonMaxLogChars = 20000;
+	static constexpr int32 PythonMaxLogLineChars = 2000;
+	static constexpr int32 PythonLogLineOverhead = 12; // the newline and "[warning] " around each message in the text form
+
+	static FString PythonClip(const FString& Text, int32 Max, const TCHAR* Hint)
+	{
+		return Text.Len() <= Max ? Text : FString::Printf(TEXT("%s... [truncated: %d of %d characters shown; %s]"),
+			*Text.Left(Max), Max, Text.Len(), Hint);
+	}
+
+	/** Clips long lines, then keeps the first and the last lines within the budget and says how many were left out. */
+	static void PythonCapLogs(TArray<TSharedPtr<FJsonValue>>& Logs)
+	{
+		int32 Total = 0;
+		TArray<int32> Sizes;
+		for (const TSharedPtr<FJsonValue>& Value : Logs)
+		{
+			const TSharedPtr<FJsonObject> Log = Value->AsObject();
+			const FString Message = PythonClip(Log->GetStringField(TEXT("message")), PythonMaxLogLineChars, TEXT("print less"));
+			Log->SetStringField(TEXT("message"), Message);
+			Sizes.Add(Message.Len() + PythonLogLineOverhead);
+			Total += Sizes.Last();
+		}
+		if (Total <= PythonMaxLogChars)
+			return;
+		const int32 HeadBudget = PythonMaxLogChars * 3 / 4;
+		int32 Head = 0, Used = 0;
+		while (Head < Logs.Num() && Used + Sizes[Head] <= HeadBudget)
+			Used += Sizes[Head++];
+		int32 Tail = Logs.Num();
+		while (Tail > Head && Used + Sizes[Tail - 1] <= PythonMaxLogChars)
+			Used += Sizes[--Tail];
+		TArray<TSharedPtr<FJsonValue>> Kept(Logs.GetData(), Head);
+		Kept.Add(PythonLogEntry(TEXT("warning"), FString::Printf(TEXT("... %d log line(s) left out (output over %d characters): print less, or return a summary"),
+			Tail - Head, PythonMaxLogChars)));
+		Kept.Append(Logs.GetData() + Tail, Logs.Num() - Tail);
+		Logs = MoveTemp(Kept);
+	}
+
 	/** The EvaluateStatement result is the repr of a base64 string: the payload between the quotes, nothing escaped. */
 	static TSharedPtr<FJsonObject> PythonDecodeResponse(const FString& CommandResult)
 	{
@@ -118,7 +159,7 @@ namespace UnrealMcpPythonTools
 			                  "plain statements; the LAST EXPRESSION is the result (objects come back as their paths). "
 			                  "print() and unreal.log*() output is returned as logs; errors point at snippet.py lines. Each "
 			                  "call starts from a fresh namespace, and its edits are one undo step (so the snippet itself cannot run TRANSACTION UNDO). Engine warnings and errors raised while it "
-			                  "runs are returned as logs too. 'include': helper files/folders (relative to "
+			                  "runs are returned as logs too. Output is capped (~20k characters each for the value and the logs). 'include': helper files/folders (relative to "
 			                  "<Project>/.ai-game-dev/snippets): folders are importable, files run before the code. Blueprint "
 			                  "graph wiring is not available from Python: use the blueprint-* tools for that."))
 			.ParamString(TEXT("code"), TEXT("Python code. Example: \"actors = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)"
@@ -186,22 +227,29 @@ namespace UnrealMcpPythonTools
 
 				const TSharedPtr<FJsonObject> Response = bRan ? PythonDecodeResponse(Command.CommandResult) : nullptr;
 				if (!Response.IsValid())
-					return FUnrealMcpToolResult::Error(FString::Printf(TEXT("Python bootstrap failed: %s"), *Command.CommandResult));
+					return FUnrealMcpToolResult::Error(FString::Printf(TEXT("Python bootstrap failed: %s"),
+						*PythonClip(Command.CommandResult, PythonMaxValueChars, TEXT("see the editor log"))));
 
 				// unreal.log*() and engine messages raised during the call bypass sys.stdout: add them to the logs.
 				TArray<TSharedPtr<FJsonValue>> Logs = Response->GetArrayField(TEXT("logs"));
 				for (const FPythonLogOutputEntry& Entry : Command.LogOutput)
 					Logs.Add(PythonLogEntry(PythonLogLevel(Entry.Type), Entry.Output.TrimEnd()));
 				PythonAddEngineLogs(LogSequence, Logs);
+				PythonCapLogs(Logs);
 				Response->SetArrayField(TEXT("logs"), Logs);
+				FString Value;
+				const bool bHasValue = Response->TryGetStringField(TEXT("value"), Value);
+				if (bHasValue)
+				{
+					Value = PythonClip(Value, PythonMaxValueChars, TEXT("return a slice or a summary"));
+					Response->SetStringField(TEXT("value"), Value);
+				}
 
 				const FString Details = PythonDetails(Response);
 				if (!Response->GetBoolField(TEXT("success")))
 					return FUnrealMcpToolResult::Error(FString::Printf(TEXT("%s: %s%s"),
-						*Response->GetStringField(TEXT("errorKind")), *Response->GetStringField(TEXT("error")), *Details));
+						*Response->GetStringField(TEXT("errorKind")), *PythonClip(Response->GetStringField(TEXT("error")), PythonMaxValueChars, TEXT("raise a shorter message")), *Details));
 
-				FString Value;
-				const bool bHasValue = Response->TryGetStringField(TEXT("value"), Value);
 				return FUnrealMcpToolResult::Success((bHasValue ? Value : TEXT("null")) + Details, Response);
 			});
 	}

@@ -565,6 +565,11 @@ namespace UnrealMcpRqlBlueprintsLocal
 		{
 			return Str(StatusText(static_cast<UBlueprint*>(Self)->Status));
 		}, {}, "compile status: UpToDate, UpToDateWithWarnings, Dirty (changed since the last compile), Error"));
+		FUnrealMcpRqlTypes::SetMember(D, Member("ParentClass", String, [](void* Self)
+		{
+			const UClass* Parent = static_cast<UBlueprint*>(Self)->ParentClass;
+			return Parent ? Str(Parent->GetName()) : rql::Value::null();
+		}, {}, "the class it derives from (Actor, Character, BP_Base_C, ...)", /*bOwning*/ false, /*bNullable*/ true));
 
 		FUnrealMcpRqlTypes::AddMethod(D, Method("Compile", {}, rql::builtin::any_type(),
 			[](void* Self, const std::vector<rql::Value>&) -> rql::Value

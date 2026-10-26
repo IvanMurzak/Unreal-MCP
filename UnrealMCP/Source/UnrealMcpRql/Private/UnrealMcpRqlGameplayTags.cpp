@@ -10,6 +10,7 @@
 #include "GameplayTagContainer.h"
 #include "GameplayTagsEditorModule.h"
 #include "GameplayTagsManager.h"
+#include "Misc/EngineVersionComparison.h"
 #include "Misc/OutputDevice.h"
 #include "Modules/ModuleManager.h"
 
@@ -206,6 +207,23 @@ namespace UnrealMcpRqlGameplayTagsLocal
 		return UGameplayTagsManager::Get().GetTagEditorData(Tag, Comment, Source, bExplicit, bRestricted, bAllowChildren) && bExplicit;
 	}
 
+	/** The engine's tag-string check plus empty segments ("A..B"), which it lets through and which make a nameless tag. */
+	bool IsValidTagName(const FString& Tag, FText& OutError, FString* OutFixed = nullptr)
+	{
+		if (Tag.Contains(TEXT("..")))
+		{
+			OutError = FText::FromString(TEXT("empty segment between dots"));
+			if (OutFixed)
+			{
+				TArray<FString> Parts;
+				Tag.ParseIntoArray(Parts, TEXT("."));
+				*OutFixed = FString::Join(Parts, TEXT("."));
+			}
+			return false;
+		}
+		return UGameplayTagsManager::Get().IsValidGameplayTagString(Tag, &OutError, OutFixed);
+	}
+
 	/** A dictionary tag (one some ini, DataTable or native declaration defines), or a failure. */
 	bool RequireDictionaryTag(const FString& Name, FName& Out)
 	{
@@ -376,7 +394,7 @@ void UUnrealMcpRqlEditorApi::AddGameplayTag(const FString& Name, const FString& 
 	const FString Tag = Name.TrimStartAndEnd();
 	FText Error;
 	FString Fixed;
-	if (Tag.IsEmpty() || !Manager.IsValidGameplayTagString(Tag, &Error, &Fixed))
+	if (Tag.IsEmpty() || !IsValidTagName(Tag, Error, &Fixed))
 		return UnrealMcpRql::Fail(FString::Printf(TEXT("'%s' is not a valid gameplay tag: %s%s"), *Tag, *Error.ToString(),
 			Fixed.IsEmpty() || Fixed == Tag ? TEXT("") : *FString::Printf(TEXT(" (try \"%s\")"), *Fixed)));
 	if (Manager.IsDictionaryTag(FName(*Tag)))
@@ -425,15 +443,72 @@ void UUnrealMcpRqlEditorApi::RenameGameplayTag(const FString& Name, const FStrin
 	UGameplayTagsManager& Manager = UGameplayTagsManager::Get();
 	const FString Target = NewName.TrimStartAndEnd();
 	FText Error;
-	if (Target.IsEmpty() || !Manager.IsValidGameplayTagString(Target, &Error))
+	if (Target.IsEmpty() || !IsValidTagName(Target, Error))
 		return UnrealMcpRql::Fail(FString::Printf(TEXT("'%s' is not a valid gameplay tag: %s"), *Target, *Error.ToString()));
 	if (Manager.IsDictionaryTag(FName(*Target)))
 		return UnrealMcpRql::Fail(FString::Printf(TEXT("the gameplay tag '%s' already exists"), *Target));
 	IGameplayTagsEditorModule* Editor = TagsEditor();
 	if (!Editor)
 		return UnrealMcpRql::Fail(TEXT("the GameplayTagsEditor plugin is not loaded"));
+	FString Comment;
+	FName Source;
+	bool bExplicit = false, bRestricted = false, bAllowChildren = false;
+	Manager.GetTagEditorData(Tag, Comment, Source, bExplicit, bRestricted, bAllowChildren);
+	// The listed descendants move with the tag. Each must live in a tag ini the editor can rewrite: the engine renames a
+	// native / DataTable tag through a null tag list (a crash) and leaves a restricted one in place.
+	const FString OldPrefix = Tag.ToString() + TEXT(".");
+	FGameplayTagContainer Listed;
+	Manager.RequestAllGameplayTags(Listed, /*OnlyIncludeDictionaryTags*/ true); // not ...ChildrenInDictionary: on 5.6 its names carry a number suffix ("A.B_645")
+	TArray<FString> Children;
+	for (const FGameplayTag& Child : Listed.GetGameplayTagArray())
+	{
+		const FString ChildName = Child.ToString();
+		if (!ChildName.StartsWith(OldPrefix, ESearchCase::CaseSensitive))
+			continue;
+		FString ChildComment;
+		FName ChildSource;
+		bool bChildExplicit = false, bChildRestricted = false, bChildAllowChildren = false;
+		Manager.GetTagEditorData(Child.GetTagName(), ChildComment, ChildSource, bChildExplicit, bChildRestricted, bChildAllowChildren);
+		const FGameplayTagSource* Found = Manager.FindTagSource(ChildSource);
+		if (bChildRestricted || !Found || !Found->SourceTagList)
+			return UnrealMcpRql::Fail(FString::Printf(TEXT("cannot rename '%s': its child '%s' is %s, not in a tag ini; rename or remove it there first"),
+				*Tag.ToString(), *ChildName, bChildRestricted ? TEXT("a restricted tag") : *FString::Printf(TEXT("declared by %s"), *ChildSource.ToString())));
+		Children.Add(ChildName);
+	}
+	// Parents before children, so each renamed parent is written as a tag of its own.
+	Children.Sort([](const FString& A, const FString& B)
+	{
+		int32 DotsA = 0, DotsB = 0;
+		for (const TCHAR C : A) DotsA += C == TEXT('.');
+		for (const TCHAR C : B) DotsB += C == TEXT('.');
+		return DotsA < DotsB;
+	});
 	FTagLogCapture Log;
-	if (!Editor->RenameTagInINI(Tag.ToString(), Target) || !Manager.IsDictionaryTag(FName(*Target)))
+	TArray<FString> Failed;
+#if UE_VERSION_OLDER_THAN(5, 7, 0)
+	// Before 5.7 the engine renames the tag alone: rename the descendants first, as 5.7 does.
+	for (const FString& ChildName : Children)
+	{
+		if (!Editor->RenameTagInINI(ChildName, Target + ChildName.RightChop(Tag.ToString().Len())))
+			Failed.Add(ChildName);
+	}
+#endif
+	const bool bRenamed = Editor->RenameTagInINI(Tag.ToString(), Target);
+	// The engine renames the children first; the new parent then exists implicitly, so it never writes it and the tag
+	// would lose its entry and comment. Write it as the renamed tag.
+	if (bRenamed && bExplicit && !Manager.IsDictionaryTag(FName(*Target)))
+		Editor->AddNewGameplayTagToINI(Target, Comment, Source, bRestricted, bAllowChildren);
+	// Every descendant must exist under the new name.
+	for (const FString& ChildName : Children)
+	{
+		if (!Failed.Contains(ChildName) && !Manager.FindTagNode(FName(*(Target + ChildName.RightChop(Tag.ToString().Len())))).IsValid())
+			Failed.Add(ChildName);
+	}
+	if (bRenamed && Failed.Num() > 0)
+		return UnrealMcpRql::Fail(FString::Printf(TEXT("renamed '%s' to '%s', but not its children %s%s"), *Tag.ToString(), *Target,
+			*FString::Join(Failed, TEXT(", ")), Log.Joined().IsEmpty() ? TEXT("") : *(TEXT(": ") + Log.Joined())));
+	// An explicit tag must stay explicit; an implicit one (only its children are listed) stays implicit.
+	if (!bRenamed || !(bExplicit ? Manager.IsDictionaryTag(FName(*Target)) : Manager.FindTagNode(FName(*Target)).IsValid()))
 		return UnrealMcpRql::Fail(FString::Printf(TEXT("could not rename '%s' to '%s'%s"), *Tag.ToString(), *Target,
 			Log.Joined().IsEmpty() ? TEXT("") : *(TEXT(": ") + Log.Joined())));
 }

@@ -18,6 +18,7 @@
 #include "UObject/SoftObjectPath.h"
 #include "UObject/Object.h"
 
+#include <cstdio>
 #include <exception>
 #include <string>
 #include <string_view>
@@ -192,6 +193,22 @@ namespace UnrealMcpRqlStructsLocal
 		return true;
 	}
 
+	/**
+	 * A double without the noise transform math leaves (-9.999999999999998, 7.8e-47): 12 significant digits, and 0 below
+	 * 1e-9. For display only; NaN and infinities pass through.
+	 */
+	double Tidy(double Value)
+	{
+		if (!FMath::IsFinite(Value))
+			return Value;
+		if (FMath::Abs(Value) < 1e-9)
+			return 0.0;
+		char Text[32];
+		std::snprintf(Text, sizeof(Text), "%.12g", Value);
+		double Parsed = Value;
+		return rql::parse_double(Text, Parsed) ? Parsed : Value;
+	}
+
 	std::string Format(const FMathStruct& Spec, const void* Data)
 	{
 		double Parts[4] = { 0, 0, 0, 0 };
@@ -201,7 +218,8 @@ namespace UnrealMcpRqlStructsLocal
 		{
 			if (Index > 0)
 				Out += ", ";
-			Out += rql::to_text(rql::Value::number(Parts[Index], Spec.bSingle ? rql::builtin::single_type() : rql::builtin::double_type()));
+			Out += rql::to_text(rql::Value::number(Spec.bSingle || Spec.Struct == TBaseStructure<FQuat>::Get() ? Parts[Index] : Tidy(Parts[Index]),
+				Spec.bSingle ? rql::builtin::single_type() : rql::builtin::double_type()));
 		}
 		return Out + ")";
 	}
@@ -358,9 +376,9 @@ void UnrealMcpRqlAddStructAdapters(FUnrealMcpRqlSession& Session)
 		};
 		// Structs and {X: 1} literals: RQL's own coercion.
 		Adapter.coerce = UnrealMcpRqlStructCoerce(*Types, Spec.Struct, [](const rql::Value& Value) { return Value.is_string() || Value.is_list(); });
-		// Equality with the text and list forms (where Location == "(0, 0, 100)"), approximate like RQL's .NET tuple
-		// adapters: components within 1e-5.
-		Adapter.equals = [SpecPtr](const rql::Value& Value, const rql::Value& Other) -> std::optional<bool>
+		// Equality with the text, list and object forms (where Location == "(0, 0, 100)" / {X: 0, Y: 0, Z: 100}),
+		// approximate like RQL's .NET tuple adapters: components within 1e-5.
+		Adapter.equals = [SpecPtr, Types](const rql::Value& Value, const rql::Value& Other) -> std::optional<bool>
 		{
 			if (!Value.is_struct() || !Value.ptr())
 				return std::nullopt;
@@ -374,6 +392,20 @@ void UnrealMcpRqlAddStructAdapters(FUnrealMcpRqlSession& Session)
 				FString Ignored;
 				if (!Components(*SpecPtr, Other, Theirs, Ignored))
 					return false; // not this struct's form: not equal
+			}
+			else if (Other.is_map() && Other.map().object_literal())
+			{
+				// {X: 100, Z: 300}: the named members over this value, as a write applies them (the others match).
+				rql::Value Built = Types->WrapStruct(SpecPtr->Struct, Value.ptr());
+				try
+				{
+					Types->CoerceStruct(SpecPtr->Struct, Other, Built.ptr());
+				}
+				catch (const std::exception&)
+				{
+					return false; // not this struct's members: not equal
+				}
+				SpecPtr->Get(Built.ptr(), Theirs);
 			}
 			else
 				return std::nullopt;

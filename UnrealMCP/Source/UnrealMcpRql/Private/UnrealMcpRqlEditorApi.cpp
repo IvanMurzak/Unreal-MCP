@@ -36,6 +36,7 @@
 #include "Misc/Paths.h"
 #include "Misc/ScopeExit.h"
 #include "Modules/ModuleManager.h"
+#include "ObjectTools.h"
 #include "UObject/GCObjectScopeGuard.h"
 #include "UObject/Package.h"
 
@@ -128,6 +129,13 @@ AActor* UnrealMcpRql::SpawnActor(UClass* Class, const FVector& Location, const F
 	AActor* Actor = World->SpawnActor<AActor>(Class, Location, Rotation, Params);
 	if (!Actor)
 		return Failed<AActor*>(FString::Printf(TEXT("could not spawn %s"), *Class->GetName()));
+	// SpawnActor composes the class's default root rotation (a SpotLight's -90 pitch) with Rotation. A rotation the
+	// caller gave is the final one; none keeps the class default (a SpotLight points down).
+	if (!Rotation.IsZero() && Actor->GetRootComponent())
+	{
+		Actor->SetActorRotation(Rotation, ETeleportType::TeleportPhysics);
+		Actor->PostEditMove(/*bFinished*/ true); // construction scripts ran at the composed rotation
+	}
 	// A class without a root component (a plain Actor) has no transform: the location would be dropped and nothing
 	// could attach to it. Give it the scene root the editor's Empty Actor gets (UActorFactoryEmptyActor).
 	if (!Actor->GetRootComponent() && !UnrealMcpRql::AddComponent(Actor, USceneComponent::StaticClass(),
@@ -310,8 +318,27 @@ void UUnrealMcpRqlEditorApi::DeleteAsset(const FString& Path, bool bForce)
 		return Failed(FString::Printf(TEXT("'%s' is engine content"), *Path));
 	if (!bForce)
 	{
+		const FAssetData Data = UEditorAssetLibrary::FindAssetData(Path);
 		TArray<FString> Referencers = UEditorAssetLibrary::FindPackageReferencersForAsset(Path);
-		Referencers.Remove(UEditorAssetLibrary::FindAssetData(Path).PackageName.ToString());
+		Referencers.Remove(Data.PackageName.ToString());
+		// The asset registry knows saved references only: an unsaved asset that uses this one (a new material
+		// instance's parent) shows up in memory alone. The memory scan walks every object: only when needed.
+		UObject* Loaded = Referencers.Num() == 0 ? Data.FastGetAsset(/*bLoad*/ false) : nullptr;
+		if (Loaded)
+		{
+			bool bReferenced = false, bReferencedByUndo = false;
+			FReferencerInformationList Memory;
+			ObjectTools::GatherObjectReferencersForDeletion(Loaded, bReferenced, bReferencedByUndo, &Memory);
+			// bReferenced: something reachable other than the undo buffer holds it (the list also has garbage).
+			if (!bReferenced)
+				Memory.ExternalReferences.Reset();
+			for (const FReferencerInformation& Info : Memory.ExternalReferences)
+			{
+				const UPackage* Package = Info.Referencer ? Info.Referencer->GetPackage() : nullptr;
+				if (Package && Package != Loaded->GetPackage() && Package != GetTransientPackage() && !Package->HasAnyFlags(RF_Transient))
+					Referencers.AddUnique(Package->GetName());
+			}
+		}
 		if (Referencers.Num() > 0)
 		{
 			const TArray<FString> Shown(Referencers.GetData(), FMath::Min(Referencers.Num(), 5));
@@ -340,10 +367,13 @@ void UUnrealMcpRqlEditorApi::RefreshAssets(const FString& Path, bool bForce)
 UObject* UnrealMcpRql::CreateAsset(UClass* Class, const FString& Path)
 {
 	FString Folder, Name;
-	if (!Class || Class->HasAnyClassFlags(CLASS_Abstract | CLASS_Deprecated | CLASS_NewerVersionExists)
+	if (!Class || Class->HasAnyClassFlags(CLASS_Deprecated | CLASS_NewerVersionExists)
 		|| Class->IsChildOf(AActor::StaticClass()) || Class->IsChildOf(UActorComponent::StaticClass()))
 		return Failed<UObject*>(FString::Printf(TEXT("'%s' is not an asset class (actors are spawned: SpawnActor)"),
 			Class ? *Class->GetName() : TEXT("None")));
+	if (Class->HasAnyClassFlags(CLASS_Abstract))
+		return Failed<UObject*>(FString::Printf(TEXT("'%s' is abstract: create one of its subclasses (unreal.classes(\"%s\") lists them)"),
+			*Class->GetName(), *Class->GetName()));
 	if (!ValidateNewAssetPath(Path, Folder, Name))
 		return nullptr;
 	// The factory of the Content Browser's "New" menu when one creates this class (materials, input actions, data
@@ -433,7 +463,14 @@ TArray<UObject*> UUnrealMcpRqlEditorApi::ImportAsset(const FString& File, const 
 			Imported.Add(Object);
 	}
 	if (Imported.Num() == 0)
-		UnrealMcpRql::Fail(FString::Printf(TEXT("the import of '%s' produced no assets"), *File));
+	{
+		// An existing asset of the same name is skipped without bReplaceExisting: name that, not an empty import.
+		const FString Existing = Destination / (Name.IsEmpty() ? ObjectTools::SanitizeObjectName(FPaths::GetBaseFilename(File)) : Name);
+		if (!bReplaceExisting && UEditorAssetLibrary::DoesAssetExist(Existing))
+			UnrealMcpRql::Fail(FString::Printf(TEXT("'%s' already exists; pass bReplaceExisting = true to reimport over it, or a Name for a new asset"), *Existing));
+		else
+			UnrealMcpRql::Fail(FString::Printf(TEXT("the import of '%s' produced no assets"), *File));
+	}
 	return Imported;
 }
 
