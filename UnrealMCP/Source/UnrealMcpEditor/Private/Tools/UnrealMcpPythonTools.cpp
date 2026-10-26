@@ -227,7 +227,8 @@ namespace UnrealMcpPythonTools
 
 				const TSharedPtr<FJsonObject> Response = bRan ? PythonDecodeResponse(Command.CommandResult) : nullptr;
 				if (!Response.IsValid())
-					return FUnrealMcpToolResult::Error(FString::Printf(TEXT("Python bootstrap failed: %s"), *Command.CommandResult));
+					return FUnrealMcpToolResult::Error(FString::Printf(TEXT("Python bootstrap failed: %s"),
+						*PythonClip(Command.CommandResult, PythonMaxValueChars, TEXT("see the editor log"))));
 
 				// unreal.log*() and engine messages raised during the call bypass sys.stdout: add them to the logs.
 				TArray<TSharedPtr<FJsonValue>> Logs = Response->GetArrayField(TEXT("logs"));
@@ -247,7 +248,7 @@ namespace UnrealMcpPythonTools
 				const FString Details = PythonDetails(Response);
 				if (!Response->GetBoolField(TEXT("success")))
 					return FUnrealMcpToolResult::Error(FString::Printf(TEXT("%s: %s%s"),
-						*Response->GetStringField(TEXT("errorKind")), *Response->GetStringField(TEXT("error")), *Details));
+						*Response->GetStringField(TEXT("errorKind")), *PythonClip(Response->GetStringField(TEXT("error")), PythonMaxValueChars, TEXT("raise a shorter message")), *Details));
 
 				return FUnrealMcpToolResult::Success((bHasValue ? Value : TEXT("null")) + Details, Response);
 			});

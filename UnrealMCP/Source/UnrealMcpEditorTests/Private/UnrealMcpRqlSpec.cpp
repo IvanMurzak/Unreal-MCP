@@ -358,25 +358,27 @@ void FUnrealMcpRqlSpec::Define()
 
 		It("refuses deleting an asset unsaved assets use, and names abstract classes and existing imports", [this]()
 		{
-			auto Drop = []()
+			// A fresh folder per run: dropped assets stay in the asset registry until the editor restarts.
+			const FString Folder = FString::Printf(TEXT("/Game/RqlSpecDelete/Run%s"), *FGuid::NewGuid().ToString(EGuidFormats::Digits));
+			auto Plan = [&Folder](const TCHAR* Json) { return FString(Json).Replace(TEXT("/Game/RqlSpecDelete"), *Folder); };
+			auto Drop = [&Folder]()
 			{
 				for (const TCHAR* Name : { TEXT("MI_Child"), TEXT("M_Base"), TEXT("RqlSpecPixel") })
-					UnrealMcpRqlSpecHelpers::DropObject(FindObject<UObject>(nullptr, *FString::Printf(TEXT("/Game/RqlSpecDelete/%s.%s"), Name, Name)));
+					UnrealMcpRqlSpecHelpers::DropObject(FindObject<UObject>(nullptr, *FString::Printf(TEXT("%s/%s.%s"), *Folder, Name, Name)));
 			};
-			Drop();
 			// editor | call CreateAsset("/Game/RqlSpecDelete/M_Base", "Material")
-			const TSharedPtr<FJsonObject> Base = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"CreateAsset","args":[{"lit":"/Game/RqlSpecDelete/M_Base"},{"lit":"Material"}]}]})RQL"), true);
+			const TSharedPtr<FJsonObject> Base = Exec(Plan(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"CreateAsset","args":[{"lit":"/Game/RqlSpecDelete/M_Base"},{"lit":"Material"}]}]})RQL")), true);
 			// editor | call CreateMaterialInstance("/Game/RqlSpecDelete/MI_Child", "/Game/RqlSpecDelete/M_Base")
-			const TSharedPtr<FJsonObject> Child = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"CreateMaterialInstance","args":[{"lit":"/Game/RqlSpecDelete/MI_Child"},{"lit":"/Game/RqlSpecDelete/M_Base"}]}]})RQL"), true);
+			const TSharedPtr<FJsonObject> Child = Exec(Plan(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"CreateMaterialInstance","args":[{"lit":"/Game/RqlSpecDelete/MI_Child"},{"lit":"/Game/RqlSpecDelete/M_Base"}]}]})RQL")), true);
 			TestTrue(*FString::Printf(TEXT("created (%s %s)"), *Codes(Base), *Codes(Child)), IsOk(Base) && IsOk(Child));
 			// editor | call DeleteAsset("/Game/RqlSpecDelete/M_Base")
-			const TSharedPtr<FJsonObject> Deleted = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"DeleteAsset","args":[{"lit":"/Game/RqlSpecDelete/M_Base"}]}]})RQL"), true);
+			const TSharedPtr<FJsonObject> Deleted = Exec(Plan(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"DeleteAsset","args":[{"lit":"/Game/RqlSpecDelete/M_Base"}]}]})RQL")), true);
 			TestFalse(TEXT("delete refused"), IsOk(Deleted));
-			TestTrue(*FString::Printf(TEXT("names the unsaved referencer (%s)"), *Codes(Deleted)), Codes(Deleted).Contains(TEXT("/Game/RqlSpecDelete/MI_Child")));
-			TestNotNull(TEXT("the material is still there"), FindObject<UObject>(nullptr, TEXT("/Game/RqlSpecDelete/M_Base.M_Base")));
+			TestTrue(*FString::Printf(TEXT("names the unsaved referencer (%s)"), *Codes(Deleted)), Codes(Deleted).Contains(Folder + TEXT("/MI_Child")));
+			TestNotNull(TEXT("the material is still there"), FindObject<UObject>(nullptr, *(Folder + TEXT("/M_Base.M_Base"))));
 
 			// editor | call CreateAsset("/Game/RqlSpecDelete/DA_Abstract", "PrimaryDataAsset")
-			const TSharedPtr<FJsonObject> Abstract = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"CreateAsset","args":[{"lit":"/Game/RqlSpecDelete/DA_Abstract"},{"lit":"PrimaryDataAsset"}]}]})RQL"), true);
+			const TSharedPtr<FJsonObject> Abstract = Exec(Plan(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"CreateAsset","args":[{"lit":"/Game/RqlSpecDelete/DA_Abstract"},{"lit":"PrimaryDataAsset"}]}]})RQL")), true);
 			TestTrue(*FString::Printf(TEXT("abstract named (%s)"), *Codes(Abstract)), !IsOk(Abstract) && Codes(Abstract).Contains(TEXT("is abstract")));
 
 			// A 1x1 PNG, imported twice: the second time it exists.
@@ -386,7 +388,7 @@ void FUnrealMcpRqlSpec::Define()
 			const FString File = FPaths::ConvertRelativePathToFull(FPaths::Combine(FPaths::ProjectIntermediateDir(), TEXT("RqlSpec"), TEXT("RqlSpecPixel.png")));
 			TestTrue(TEXT("png written"), FFileHelper::SaveArrayToFile(TArrayView<const uint8>(Png, UE_ARRAY_COUNT(Png)), *File));
 			// editor | call ImportAsset("@FILE@", "/Game/RqlSpecDelete")
-			const FString Import = FString(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"ImportAsset","args":[{"lit":"@FILE@"},{"lit":"/Game/RqlSpecDelete"}]}]})RQL")).Replace(TEXT("@FILE@"), *File);
+			const FString Import = Plan(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"ImportAsset","args":[{"lit":"@FILE@"},{"lit":"/Game/RqlSpecDelete"}]}]})RQL")).Replace(TEXT("@FILE@"), *File);
 			const TSharedPtr<FJsonObject> First = Exec(Import, true);
 			TestTrue(*FString::Printf(TEXT("first import (%s)"), *Codes(First)), IsOk(First));
 			const TSharedPtr<FJsonObject> Second = Exec(Import, true);

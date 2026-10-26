@@ -132,7 +132,10 @@ AActor* UnrealMcpRql::SpawnActor(UClass* Class, const FVector& Location, const F
 	// SpawnActor composes the class's default root rotation (a SpotLight's -90 pitch) with Rotation. A rotation the
 	// caller gave is the final one; none keeps the class default (a SpotLight points down).
 	if (!Rotation.IsZero() && Actor->GetRootComponent())
+	{
 		Actor->SetActorRotation(Rotation, ETeleportType::TeleportPhysics);
+		Actor->PostEditMove(/*bFinished*/ true); // construction scripts ran at the composed rotation
+	}
 	// A class without a root component (a plain Actor) has no transform: the location would be dropped and nothing
 	// could attach to it. Give it the scene root the editor's Empty Actor gets (UActorFactoryEmptyActor).
 	if (!Actor->GetRootComponent() && !UnrealMcpRql::AddComponent(Actor, USceneComponent::StaticClass(),
@@ -326,6 +329,9 @@ void UUnrealMcpRqlEditorApi::DeleteAsset(const FString& Path, bool bForce)
 			bool bReferenced = false, bReferencedByUndo = false;
 			FReferencerInformationList Memory;
 			ObjectTools::GatherObjectReferencersForDeletion(Loaded, bReferenced, bReferencedByUndo, &Memory);
+			// bReferenced: something reachable other than the undo buffer holds it (the list also has garbage).
+			if (!bReferenced)
+				Memory.ExternalReferences.Reset();
 			for (const FReferencerInformation& Info : Memory.ExternalReferences)
 			{
 				const UPackage* Package = Info.Referencer ? Info.Referencer->GetPackage() : nullptr;

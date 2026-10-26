@@ -18,6 +18,7 @@
 #include "UObject/SoftObjectPath.h"
 #include "UObject/Object.h"
 
+#include <cstdio>
 #include <exception>
 #include <string>
 #include <string_view>
@@ -192,6 +193,22 @@ namespace UnrealMcpRqlStructsLocal
 		return true;
 	}
 
+	/**
+	 * A double without the noise transform math leaves (-9.999999999999998, 7.8e-47): 12 significant digits, and 0 below
+	 * 1e-9. For display only; NaN and infinities pass through.
+	 */
+	double Tidy(double Value)
+	{
+		if (!FMath::IsFinite(Value))
+			return Value;
+		if (FMath::Abs(Value) < 1e-9)
+			return 0.0;
+		char Text[32];
+		std::snprintf(Text, sizeof(Text), "%.12g", Value);
+		double Parsed = Value;
+		return rql::parse_double(Text, Parsed) ? Parsed : Value;
+	}
+
 	std::string Format(const FMathStruct& Spec, const void* Data)
 	{
 		double Parts[4] = { 0, 0, 0, 0 };
@@ -201,9 +218,7 @@ namespace UnrealMcpRqlStructsLocal
 		{
 			if (Index > 0)
 				Out += ", ";
-			// Rounded to 1e-6: transform math leaves noise such as -9.999999999999998 or 7.8e-47 in doubles.
-			const double Rounded = !Spec.bSingle && FMath::Abs(Parts[Index]) < 1e9 ? FMath::RoundToDouble(Parts[Index] * 1e6) / 1e6 : Parts[Index]; // NaN, huge: as is
-			Out += rql::to_text(rql::Value::number(Rounded == 0.0 ? 0.0 : Rounded,
+			Out += rql::to_text(rql::Value::number(Spec.bSingle || Spec.Struct == TBaseStructure<FQuat>::Get() ? Parts[Index] : Tidy(Parts[Index]),
 				Spec.bSingle ? rql::builtin::single_type() : rql::builtin::double_type()));
 		}
 		return Out + ")";
@@ -380,8 +395,8 @@ void UnrealMcpRqlAddStructAdapters(FUnrealMcpRqlSession& Session)
 			}
 			else if (Other.is_map() && Other.map().object_literal())
 			{
-				// {X: 100, Y: 0, Z: 300}: built as a write builds it (members it leaves out are 0).
-				rql::Value Built = Types->WrapStruct(SpecPtr->Struct, nullptr);
+				// {X: 100, Z: 300}: the named members over this value, as a write applies them (the others match).
+				rql::Value Built = Types->WrapStruct(SpecPtr->Struct, Value.ptr());
 				try
 				{
 					Types->CoerceStruct(SpecPtr->Struct, Other, Built.ptr());

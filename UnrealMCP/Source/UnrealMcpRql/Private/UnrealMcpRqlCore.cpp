@@ -472,6 +472,7 @@ namespace UnrealMcpRqlCoreLocal
 				// The template's root keeps its relative transform, which SpawnActor composes with Transform: an
 				// unattached source would get its transform applied twice. Put the copy where it belongs.
 				Copy->SetActorTransform(Transform, /*bSweep*/ false, nullptr, ETeleportType::TeleportPhysics);
+				Copy->PostEditMove(/*bFinished*/ true); // construction scripts ran at the composed transform
 				FActorLabelUtilities::SetActorLabelUnique(Copy, Source->GetActorLabel());
 				return Types->WrapObject(Copy);
 			}, "copy the actor, moved by Offset; returns the copy"));

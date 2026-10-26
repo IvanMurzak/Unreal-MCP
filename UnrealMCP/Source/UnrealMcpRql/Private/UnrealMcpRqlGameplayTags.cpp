@@ -459,7 +459,8 @@ void UUnrealMcpRqlEditorApi::RenameGameplayTag(const FString& Name, const FStrin
 	// would lose its entry and comment. Write it as the renamed tag.
 	if (bRenamed && bExplicit && !Manager.IsDictionaryTag(FName(*Target)))
 		Editor->AddNewGameplayTagToINI(Target, Comment, Source, bRestricted, bAllowChildren);
-	if (!bRenamed || !Manager.FindTagNode(FName(*Target)).IsValid())
+	// An explicit tag must stay explicit; an implicit one (only its children are listed) stays implicit.
+	if (!bRenamed || !(bExplicit ? Manager.IsDictionaryTag(FName(*Target)) : Manager.FindTagNode(FName(*Target)).IsValid()))
 		return UnrealMcpRql::Fail(FString::Printf(TEXT("could not rename '%s' to '%s'%s"), *Tag.ToString(), *Target,
 			Log.Joined().IsEmpty() ? TEXT("") : *(TEXT(": ") + Log.Joined())));
 }
