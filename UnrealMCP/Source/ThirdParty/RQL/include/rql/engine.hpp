@@ -46,7 +46,7 @@ struct MutationRecord {
     Value owner;   // the object whose state changes: the last reference object on the written path
     std::string member;  // the written path (set) or the method signature (call)
     Value old_value;     // set only
-    Value new_value;     // set only
+    Value new_value;     // set only: planned value (before_write), read-back value (committed)
     const MethodDescriptor* method = nullptr;  // call only
 };
 using MutationHook = std::function<void(const std::vector<MutationRecord>& records)>;
@@ -63,7 +63,8 @@ struct MutationPolicy {
     /// exception) vetoes the whole mutation → permission-denied, nothing changed.
     MutationHook before_write;
     /// After every write succeeded (not on dry-run or rollback; for a failing call, the calls that completed):
-    /// e.g. mark the owners dirty. Throwing → getter-threw warning; the writes stay applied.
+    /// e.g. mark the owners dirty. Records carry the value read back after the write (what the setter stored).
+    /// Throwing → hook-threw warning; the writes stay applied.
     MutationHook committed;
 };
 

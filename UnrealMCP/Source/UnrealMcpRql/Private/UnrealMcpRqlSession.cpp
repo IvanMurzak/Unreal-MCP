@@ -470,7 +470,7 @@ bool FUnrealMcpRqlSession::FunctionSource(rql::QueryPlan& Plan, rql::QueryResult
 	}
 	catch (const std::exception& Error)
 	{
-		OutFailure = rql::QueryResult::fail({ rql::Diagnostic::error("getter-threw", Name + " threw: " + Error.what()) });
+		OutFailure = rql::QueryResult::fail({ rql::Diagnostic::error("function-threw", Name + "() threw: " + Error.what()) });
 		return true;
 	}
 	if (Value.is_error())

@@ -75,7 +75,8 @@ std::function<void*(void*)> MemberTable::upcaster() const {
 }
 
 MemberTable& MemberTable::method(std::string name, std::vector<ParamDescriptor> params, const TypeDescriptor* returns,
-                                 std::function<Value(void* self, const std::vector<Value>& args)> invoke, std::string description) {
+                                 std::function<Value(void* self, const std::vector<Value>& args)> invoke, std::string description,
+                                 CallValidator validate) {
     if (name.empty()) throw std::logic_error("method name required");
     if (!invoke) throw std::logic_error("method '" + name + "' needs an implementation");
     MethodDescriptor m;
@@ -85,8 +86,11 @@ MemberTable& MemberTable::method(std::string name, std::vector<ParamDescriptor> 
     m.description = std::move(description);
     if (auto up = upcaster()) {
         m.invoke = [up, invoke = std::move(invoke)](void* self, const std::vector<Value>& args) { return invoke(up(self), args); };
+        if (validate)
+            m.validate = [up, validate = std::move(validate)](void* self, const std::vector<Value>& args) { return validate(up(self), args); };
     } else {
         m.invoke = std::move(invoke);
+        m.validate = std::move(validate);
     }
     for (auto& existing : methods_) {
         if (existing.name == m.name && existing.params.size() == m.params.size()) {

@@ -169,7 +169,7 @@ Slot slot_of(Exec& x, const Value& container, const Segment& seg, const std::str
             for (auto& mm : tv->members()) names.push_back(mm.name);
         auto close = suggest_closest(name, names, 3);
         throw RqlException("unknown-member", "no member '" + name + "' on " + type_name,
-                           !close.empty() ? "did you mean " + join(close, " / ") + "?" : "members: " + join(names, " "));
+                           !close.empty() ? "did you mean " + join(close, " / ") + "?" : member_list_hint(names));
     }
     s.kind = Slot::Member;
     s.member = m;
@@ -309,10 +309,34 @@ void before_write(Exec& x, const std::vector<MutationRecord>& records) {
         throw RqlException("permission-denied", "the host rejected the change before anything was written: " + *failure);
 }
 
-/// Notification after the writes succeeded: a failing hook → getter-threw warning, writes stay applied.
+/// Notification after the writes succeeded: a failing hook → hook-threw warning, writes stay applied.
 void committed(Exec& x, const std::vector<MutationRecord>& records) {
     if (auto failure = run_hook(x, x.engine.mutations().committed, records))
-        x.diagnostics.push_back(Diagnostic::warning("getter-threw", "host commit hook threw: " + *failure + "; the writes were applied"));
+        x.diagnostics.push_back(Diagnostic::warning("hook-threw", "host commit hook threw: " + *failure + "; the writes were applied"));
+}
+
+/// The written member's value after the writes, navigated fresh (what the host stored, spec §8); the planned
+/// value plus one getter-threw warning when it cannot be read.
+Value read_back(Exec& x, const PlannedWrite& w) {
+    std::string failure;
+    try {
+        Value cur = w.item;
+        const std::vector<Segment>& segs = *w.segments;
+        for (size_t i = 0;; ++i) {
+            Slot slot = slot_of(x, cur, segs[i], w.label);
+            Value v = slot.get(cur);
+            if (i + 1 == segs.size()) return snapshot(v);
+            if (v.is_null() || v.is_missing()) return w.new_value;
+            cur = read_through(slot, v);  // a private copy of a copy-on-read value, as when the write was planned
+        }
+    } catch (const std::exception& ex) {
+        failure = ex.what();
+    } catch (...) {
+        failure = "non-standard exception";
+    }
+    x.warn_once("getter-threw", "reading back '" + w.label + "' after the write failed (" + failure + "); the receipt shows the planned value",
+                "read-back");
+    return w.new_value;
 }
 
 /// Build `target` (object or struct) from an object literal (spec §4.5): concrete type (`"$type"`),
@@ -515,6 +539,19 @@ std::optional<Value> coerce(Exec& x, const Value& v, const TypeDescriptor* targe
     return std::nullopt;
 }
 
+namespace {
+
+/// A value as the query wrote it (99, "Tag", true), for invalid-value messages; other kinds by description.
+std::string value_text(const Value& v) {
+    if (v.is_null()) return "null";
+    if (v.is_string()) return "\"" + v.as_string() + "\"";
+    if (v.is_bool()) return v.as_bool() ? "true" : "false";
+    if (v.is_number()) return format_double(v.as_number());
+    return describe_value(v);
+}
+
+}  // namespace
+
 QueryResult run_set(Exec& x, Compiler& c, Encoder& enc, Stream& stream, const Stage& s) {
     check_policy(x, "set");
     struct Assign {
@@ -540,23 +577,22 @@ QueryResult run_set(Exec& x, Compiler& c, Encoder& enc, Stream& stream, const St
                                        (nv.error_detail().empty() ? nv.error_code() : nv.error_detail()));
             Value container, owner;
             Slot slot = resolve(x, item, a.target->segments, container, owner);
-            if (slot.kind == Slot::MapKey && container.map().fixed_keys()) {
-                Value existing;
-                if (container.map().find(slot.key, existing) != MapLookup::Found)
-                    throw RqlException("coercion-failed", "cannot set '" + a.label + "' on " + x.ref_of(item) + ": no entry '" + to_text(slot.key) +
-                                                              "' (virtual maps accept writes to existing keys only)");
-            }
             check_writable(x, slot, a.label, item, "");
             std::string why;
             auto coerced = coerce(x, nv, slot.type, slot.nullable, why);
             if (!coerced)
                 throw RqlException("coercion-failed", "cannot assign " + describe_value(nv) + " to '" + a.label + "' (" +
                                                           (slot.type ? slot.type->friendly_name() : std::string("object")) + "): " + why);
-            // Adapter validation runs before any write (spec §13): members and virtual-map entries.
-            const std::string rejected = slot.validate(container, *coerced);
+            // Adapter validation runs before any write (spec §13): members and virtual-map entries. Virtual maps
+            // accept writes to existing entries only (a new key could not be removed again on rollback).
+            std::string rejected;
+            Value existing;
+            if (slot.kind == Slot::MapKey && container.map().fixed_keys() && container.map().find(slot.key, existing) != MapLookup::Found)
+                rejected = "no entry '" + to_text(slot.key) + "'";
+            else
+                rejected = slot.validate(container, *coerced);
             if (!rejected.empty())
-                throw RqlException("coercion-failed",
-                                   "cannot assign " + describe_value(nv) + " to '" + a.label + "' on " + x.ref_of(item) + ": " + rejected);
+                throw RqlException("invalid-value", "invalid value " + value_text(nv) + " for '" + a.label + "' on " + x.ref_of(item) + ": " + rejected);
             writes.push_back({item, &a.target->segments, a.label, snapshot(safe_get(slot, container, a.label)), *coerced, owner});
         }
     }
@@ -583,6 +619,11 @@ QueryResult run_set(Exec& x, Compiler& c, Encoder& enc, Stream& stream, const St
                                            std::to_string(rollback_failures) + " of them - state may be partially modified";
             if (!self_restored) rolled += "; restoring '" + writes[applied].label + "' itself also failed, so it may be partially modified";
             throw RqlException("coercion-failed", "write '" + writes[applied].label + "' failed (" + *failure + "); " + rolled);
+        }
+        // The receipt (and the committed hook) report what the host stored, which a setter may have clamped (spec §8).
+        for (size_t k = 0; k < writes.size(); ++k) {
+            writes[k].new_value = read_back(x, writes[k]);
+            if (!records.empty()) records[k].new_value = writes[k].new_value;
         }
     }
     committed(x, records);
@@ -673,6 +714,15 @@ QueryResult run_call(Exec& x, Compiler& c, Encoder& enc, Stream& stream, const S
             throw RqlException("coercion-failed", "cannot call " + s.method + " on " + x.ref_of(item) + ": " + why,
                                "signature: " + join(cs, ", "));
         }
+        // The method's own check, for every target before the first call (and on dry runs): all-or-nothing (spec §8).
+        if (chosen->validate) {
+            std::string rejected;
+            if (auto failure = capture_failure([&] { rejected = chosen->validate(item.ptr(), coerced); }))
+                rejected = "its check threw: " + *failure;
+            if (!rejected.empty())
+                throw RqlException("invalid-value", "cannot call " + t->signature(*chosen) + " on " + x.ref_of(item) + ": " + rejected +
+                                                        "; nothing was called");
+        }
         planned.push_back({item, chosen, std::move(coerced)});
     }
 
@@ -688,7 +738,7 @@ QueryResult run_call(Exec& x, Compiler& c, Encoder& enc, Stream& stream, const S
             if (auto failure = capture_failure([&] { result = p.method->invoke(p.item.ptr(), p.args); })) {
                 // Completed calls are not rolled back, so the host still learns about them.
                 if (!records.empty()) committed(x, std::vector<MutationRecord>(records.begin(), records.begin() + static_cast<std::ptrdiff_t>(done)));
-                throw RqlException("getter-threw", p.method->name + " on " + x.ref_of(p.item) + " threw: " + *failure + "; " +
+                throw RqlException("call-threw", p.method->name + " on " + x.ref_of(p.item) + " threw: " + *failure + "; " +
                                                        std::to_string(done) + " earlier call(s) completed and are NOT rolled back");
             }
         }

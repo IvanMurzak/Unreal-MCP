@@ -87,6 +87,9 @@ struct ParamDescriptor {
     Value default_value;
 };
 
+/// Check of a planned call (target, coerced arguments, defaults filled in): a rejection reason, or empty to accept.
+using CallValidator = std::function<std::string(void* self, const std::vector<Value>& args)>;
+
 struct MethodDescriptor {
     std::string name;
     std::vector<ParamDescriptor> params;
@@ -94,6 +97,9 @@ struct MethodDescriptor {
     std::function<Value(void* self, const std::vector<Value>& args)> invoke;
     bool callable = true;  // false: known but not allowlisted (call → permission-denied)
     std::string description;
+    /// Optional (empty = no check). `call` runs it for every target before the first call, on dry runs too:
+    /// a rejection (or a throwing check) fails the stage with invalid-value and nothing is called (spec §8).
+    CallValidator validate;
 };
 
 class TypeDescriptor {
@@ -638,6 +644,10 @@ public:
             MethodDescriptor c = m;
             auto inv = m.invoke;
             c.invoke = [inv, up](void* self, const std::vector<Value>& a) { return inv(up(self), a); };
+            if (m.validate) {
+                CallValidator val = m.validate;
+                c.validate = [val, up](void* self, const std::vector<Value>& a) { return val(up(self), a); };
+            }
             d_->methods.push_back(std::move(c));
         }
         if (!d_->id_explicit) { d_->id_name = b->id_name; d_->id_explicit = b->id_explicit; }
@@ -767,6 +777,12 @@ public:
     ClassBuilder& method(std::string name, R (C::*fn)(A...) const noexcept, std::vector<std::string> param_names = {}, std::string description = {}) {
         return add_method<R, A...>(std::move(name), [fn](T& t, A... a) -> R { return (t.*fn)(std::forward<A>(a)...); },
                                    std::move(param_names), std::move(description));
+    }
+    /// Validator of the last method: v(T&, coerced args) returns a rejection reason, empty to accept (spec §8).
+    ClassBuilder& validate_call(std::function<std::string(T&, const std::vector<Value>&)> v) {
+        if (!d_->methods.empty() && v)
+            d_->methods.back().validate = [v](void* self, const std::vector<Value>& args) { return v(*static_cast<T*>(self), args); };
+        return *this;
     }
     /// Mark the last method as known but not callable (call → permission-denied).
     ClassBuilder& not_callable() {

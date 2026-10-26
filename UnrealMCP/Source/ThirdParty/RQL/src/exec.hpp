@@ -9,6 +9,7 @@
 #include <regex>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "rql/engine.hpp"
@@ -153,7 +154,12 @@ public:
     std::vector<Diagnostic> diagnostics;
     std::vector<std::unique_ptr<MemberSite>> sites;
     std::vector<std::unique_ptr<IsSite>> is_sites;
-    std::unordered_map<std::string, std::shared_ptr<std::regex>> regex_cache;
+    /// A compiled pattern, or (regex null) the compile error of an invalid one.
+    struct CachedRegex {
+        std::shared_ptr<std::regex> re;
+        std::string error;
+    };
+    std::unordered_map<std::string, CachedRegex> regex_cache;
     std::unordered_map<std::string, Value> ref_cache;  // fallback ref() search results
 
     /// View of a type for this query. Adapter-free engines: one flag check, the descriptor itself.
@@ -201,10 +207,13 @@ public:
     void visit();
     void check_time() const;
     void getter_threw(const std::string& member, const std::string& what);
+    /// Adds a warning once per `key` (default: code + message), however often it recurs.
+    void warn_once(const std::string& code, const std::string& message, const std::string& key = {});
     double elapsed_ms() const;
 
 private:
     std::chrono::steady_clock::time_point start_;
+    std::unordered_set<std::string> warned_;
     bool has_adapters_ = false;
     bool liveness_ = false;
     std::array<bool, kCapabilities> caps_{};
@@ -237,6 +246,13 @@ size_t distinct_hash(Exec& x, const Value& v);
 bool elements(const Value& v, std::vector<Value>& out);
 size_t collection_size(const Value& v);
 std::vector<std::string> suggest_closest(const std::string& name, const std::vector<std::string>& candidates, size_t max);
+/// Optimal string alignment distance (Levenshtein plus adjacent transposition, each cost 1).
+size_t osa_distance(const std::string& a, const std::string& b);
+/// "members: a b c … (N more)" with at most 12 names (spec §10).
+std::string member_list_hint(const std::vector<std::string>& names);
+/// Registered extension function named by a call (`ns.fn(...)` parsed as a method on a dotted path, or a
+/// dotted function name), or nullptr.
+const FunctionHandler* extension_function(Exec& x, const Expr& c, std::string& name);
 std::string join(const std::vector<std::string>& parts, const std::string& sep);
 Value member_of(Exec& x, const Value& v, MemberSite& site);
 
@@ -255,7 +271,7 @@ private:
     Eval compile_call(const Expr& c);
     Eval compile_function(const Expr& c);
     Eval compile_method(const Expr& c);
-    Eval compile_extension(const FunctionHandler& fn, const std::vector<ExprPtr>& args);
+    Eval compile_extension(const std::string& name, const FunctionHandler& fn, const std::vector<ExprPtr>& args);
     void arity(const Expr& c, size_t min, size_t max);
 };
 
