@@ -95,6 +95,23 @@ void FUnrealMcpPythonToolsSpec::Define()
 		TestFalse(TEXT("missing code rejected"), Run(TEXT("  ")).bSuccess);
 	});
 
+	It("reports KeyboardInterrupt and other BaseExceptions as Runtime errors, never as a bootstrap failure", [this]()
+	{
+		const FUnrealMcpToolResult Interrupt = Run(TEXT("def stop():\n    raise KeyboardInterrupt('stop')\nstop()"));
+		TestFalse(TEXT("fails"), Interrupt.bSuccess);
+		TestTrue(*FString::Printf(TEXT("Runtime: KeyboardInterrupt (%s)"), *Interrupt.Message.Left(300)),
+			Interrupt.Message.StartsWith(TEXT("Runtime: KeyboardInterrupt: stop")));
+		TestTrue(TEXT("snippet frame"), Interrupt.Message.Contains(TEXT("snippet.py\", line 2, in stop")));
+		TestFalse(TEXT("no runner internals"), Interrupt.Message.Contains(TEXT("runner.py")));
+
+		for (const TCHAR* Code : { TEXT("raise GeneratorExit()"), TEXT("class Halt(BaseException):\n    pass\nraise Halt('x')"), TEXT("import sys\nsys.exit(0)") })
+		{
+			const FUnrealMcpToolResult R = Run(Code);
+			TestTrue(*FString::Printf(TEXT("Runtime for %s"), Code), !R.bSuccess && R.Message.StartsWith(TEXT("Runtime: ")));
+		}
+		TestTrue(TEXT("the interpreter still works"), Run(TEXT("6 * 7")).Message.StartsWith(TEXT("42")));
+	});
+
 	It("imports helpers from an include folder", [this]()
 	{
 		const FString Folder = FPaths::Combine(FPaths::ProjectIntermediateDir(), TEXT("UnrealMcpPythonSpec"), FGuid::NewGuid().ToString());
@@ -144,6 +161,19 @@ void FUnrealMcpPythonToolsSpec::Define()
 		TestTrue(TEXT("last line kept"), R.Message.Contains(TEXT("[info] line 4999 ")));
 		FString Value;
 		TestTrue(TEXT("structured value clipped too"), R.Structured.IsValid() && R.Structured->TryGetStringField(TEXT("value"), Value) && Value.Len() < 21000);
+	});
+
+	It("clips a long line once, and reports the plugin's own cuts in 'truncated'", [this]()
+	{
+		const FUnrealMcpToolResult Printed = Run(TEXT("print('x' * 5000)"));
+		TestTrue(TEXT("print clipped by the runtime, real length"), Printed.Message.Contains(TEXT("[truncated: 2000 of 5000 characters shown; print less]")));
+		TestFalse(TEXT("not clipped a second time"), Printed.Message.Contains(TEXT("of 2058 characters")));
+
+		const FUnrealMcpToolResult Logged = Run(TEXT("unreal.log('z' * 5000)\n1"));
+		TestTrue(TEXT("unreal.log line clipped by the plugin"), Logged.Message.Contains(TEXT("[truncated: 2000 of 5000 characters shown; print less]")));
+		const TArray<TSharedPtr<FJsonValue>>* Truncated = nullptr;
+		TestTrue(TEXT("truncated says logs"), Logged.Structured.IsValid() && Logged.Structured->TryGetArrayField(TEXT("truncated"), Truncated)
+			&& Truncated->Num() == 1 && (*Truncated)[0]->AsString() == TEXT("logs"));
 	});
 
 	It("returns engine warnings and errors logged while the snippet ran", [this]()

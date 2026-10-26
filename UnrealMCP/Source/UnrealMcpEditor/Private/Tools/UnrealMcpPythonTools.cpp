@@ -73,11 +73,20 @@ namespace UnrealMcpPythonTools
 				TEXT("%d more engine warning(s)/error(s): read them with rql-query on the console source"), Matched - PythonMaxEngineLogs)));
 	}
 
-	/** Output budget per call (characters): a runaway print loop or a huge value must not flood the agent's context. */
+	/**
+	 * Output budget per call (characters): a runaway print loop or a huge value must not flood the agent's context. The
+	 * code_exec runtime (Code-Exec contract §6) already clips the value, the error and its own logs to these numbers (the
+	 * logs to a little less, see PythonRuntimeLogChars); the
+	 * caps here cover what the plugin adds afterwards: unreal.log*() output, engine messages and a failed bootstrap. The
+	 * numbers equal the runtime's defaults and are sent explicitly, so both layers read one set.
+	 */
 	static constexpr int32 PythonMaxValueChars = 20000;
 	static constexpr int32 PythonMaxLogChars = 20000;
 	static constexpr int32 PythonMaxLogLineChars = 2000;
-	static constexpr int32 PythonLogLineOverhead = 12; // the newline and "[warning] " around each message in the text form
+	static constexpr int32 PythonLogLineOverhead = 12; // the newline and "[warning] " around each message in the text form (as Code-Exec counts)
+	// The runtime's own logs get a smaller budget: room for its one "left out" entry (about 120 characters with the 12 of
+	// overhead, rounded up), so the plugin cap below never cuts the runtime's output a second time.
+	static constexpr int32 PythonRuntimeLogChars = PythonMaxLogChars - 256;
 
 	static FString PythonClip(const FString& Text, int32 Max, const TCHAR* Hint)
 	{
@@ -85,21 +94,31 @@ namespace UnrealMcpPythonTools
 			*Text.Left(Max), Max, Text.Len(), Hint);
 	}
 
-	/** Clips long lines, then keeps the first and the last lines within the budget and says how many were left out. */
-	static void PythonCapLogs(TArray<TSharedPtr<FJsonValue>>& Logs)
+	/**
+	 * Clips the long lines the plugin added (from FirstOwn on: the runtime's lines are clipped already, and clipping them
+	 * again would misreport their length), then keeps the first and the last lines within the budget and says how many
+	 * were left out. Returns whether anything was shortened.
+	 */
+	static bool PythonCapLogs(TArray<TSharedPtr<FJsonValue>>& Logs, int32 FirstOwn)
 	{
 		int32 Total = 0;
+		bool bClipped = false;
 		TArray<int32> Sizes;
-		for (const TSharedPtr<FJsonValue>& Value : Logs)
+		for (int32 Index = 0; Index < Logs.Num(); ++Index)
 		{
-			const TSharedPtr<FJsonObject> Log = Value->AsObject();
-			const FString Message = PythonClip(Log->GetStringField(TEXT("message")), PythonMaxLogLineChars, TEXT("print less"));
-			Log->SetStringField(TEXT("message"), Message);
+			const TSharedPtr<FJsonObject> Log = Logs[Index]->AsObject();
+			FString Message = Log->GetStringField(TEXT("message"));
+			if (Index >= FirstOwn && Message.Len() > PythonMaxLogLineChars)
+			{
+				Message = PythonClip(Message, PythonMaxLogLineChars, TEXT("print less"));
+				Log->SetStringField(TEXT("message"), Message);
+				bClipped = true;
+			}
 			Sizes.Add(Message.Len() + PythonLogLineOverhead);
 			Total += Sizes.Last();
 		}
 		if (Total <= PythonMaxLogChars)
-			return;
+			return bClipped;
 		const int32 HeadBudget = PythonMaxLogChars * 3 / 4;
 		int32 Head = 0, Used = 0;
 		while (Head < Logs.Num() && Used + Sizes[Head] <= HeadBudget)
@@ -112,6 +131,7 @@ namespace UnrealMcpPythonTools
 			Tail - Head, PythonMaxLogChars)));
 		Kept.Append(Logs.GetData() + Tail, Logs.Num() - Tail);
 		Logs = MoveTemp(Kept);
+		return true;
 	}
 
 	/** The EvaluateStatement result is the repr of a base64 string: the payload between the quotes, nothing escaped. */
@@ -203,6 +223,11 @@ namespace UnrealMcpPythonTools
 				TSharedPtr<FJsonObject> Request = MakeShared<FJsonObject>();
 				Request->SetStringField(TEXT("code"), Code);
 				Request->SetStringField(TEXT("includeRoot"), PythonIncludeRoot());
+				Request->SetBoolField(TEXT("includeOutsideRoot"), true); // the tool documents absolute include paths
+				Request->SetNumberField(TEXT("maxValueChars"), PythonMaxValueChars);
+				Request->SetNumberField(TEXT("maxLogChars"), PythonRuntimeLogChars);
+				Request->SetNumberField(TEXT("maxLogLineChars"), PythonMaxLogLineChars);
+				Request->SetNumberField(TEXT("maxErrorChars"), PythonMaxValueChars);
 				TArray<TSharedPtr<FJsonValue>> Imports;
 				Imports.Add(MakeShared<FJsonValueString>(TEXT("unreal")));
 				Request->SetArrayField(TEXT("imports"), Imports);
@@ -232,23 +257,33 @@ namespace UnrealMcpPythonTools
 
 				// unreal.log*() and engine messages raised during the call bypass sys.stdout: add them to the logs.
 				TArray<TSharedPtr<FJsonValue>> Logs = Response->GetArrayField(TEXT("logs"));
+				const int32 FirstOwn = Logs.Num();
 				for (const FPythonLogOutputEntry& Entry : Command.LogOutput)
 					Logs.Add(PythonLogEntry(PythonLogLevel(Entry.Type), Entry.Output.TrimEnd()));
 				PythonAddEngineLogs(LogSequence, Logs);
-				PythonCapLogs(Logs);
-				Response->SetArrayField(TEXT("logs"), Logs);
-				FString Value;
-				const bool bHasValue = Response->TryGetStringField(TEXT("value"), Value);
-				if (bHasValue)
+				if (PythonCapLogs(Logs, FirstOwn))
 				{
-					Value = PythonClip(Value, PythonMaxValueChars, TEXT("return a slice or a summary"));
-					Response->SetStringField(TEXT("value"), Value);
+					// The response says which fields a limit shortened, in the order value, logs, error (contract §6).
+					const TArray<TSharedPtr<FJsonValue>>* Truncated = nullptr;
+					TArray<FString> Fields;
+					if (Response->TryGetArrayField(TEXT("truncated"), Truncated))
+						for (const TSharedPtr<FJsonValue>& Field : *Truncated)
+							Fields.Add(Field->AsString());
+					if (!Fields.Contains(TEXT("logs")))
+						Fields.Insert(TEXT("logs"), Fields.Contains(TEXT("value")) ? 1 : 0);
+					TArray<TSharedPtr<FJsonValue>> Values;
+					for (const FString& Field : Fields)
+						Values.Add(MakeShared<FJsonValueString>(Field));
+					Response->SetArrayField(TEXT("truncated"), Values);
 				}
+				Response->SetArrayField(TEXT("logs"), Logs);
+				FString Value; // already clipped by the runtime (maxValueChars), as the error is (maxErrorChars)
+				const bool bHasValue = Response->TryGetStringField(TEXT("value"), Value);
 
 				const FString Details = PythonDetails(Response);
 				if (!Response->GetBoolField(TEXT("success")))
 					return FUnrealMcpToolResult::Error(FString::Printf(TEXT("%s: %s%s"),
-						*Response->GetStringField(TEXT("errorKind")), *PythonClip(Response->GetStringField(TEXT("error")), PythonMaxValueChars, TEXT("raise a shorter message")), *Details));
+						*Response->GetStringField(TEXT("errorKind")), *Response->GetStringField(TEXT("error")), *Details));
 
 				return FUnrealMcpToolResult::Success((bHasValue ? Value : TEXT("null")) + Details, Response);
 			});
