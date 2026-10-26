@@ -454,18 +454,43 @@ void UUnrealMcpRqlEditorApi::RenameGameplayTag(const FString& Name, const FStrin
 	FName Source;
 	bool bExplicit = false, bRestricted = false, bAllowChildren = false;
 	Manager.GetTagEditorData(Tag, Comment, Source, bExplicit, bRestricted, bAllowChildren);
-	FTagLogCapture Log;
-#if UE_VERSION_OLDER_THAN(5, 7, 0)
-	// Before 5.7 the engine renames the tag alone: rename the listed descendants first, as 5.7 does. (All tags, not
-	// RequestGameplayTagChildrenInDictionary: on 5.6 its tags carry a number suffix, "A.B_645", that is no tag name.)
+	// The listed descendants move with the tag. Each must live in a tag ini the editor can rewrite: the engine renames a
+	// native / DataTable tag through a null tag list (a crash) and leaves a restricted one in place.
 	const FString OldPrefix = Tag.ToString() + TEXT(".");
 	FGameplayTagContainer Listed;
-	Manager.RequestAllGameplayTags(Listed, /*OnlyIncludeDictionaryTags*/ true);
+	Manager.RequestAllGameplayTags(Listed, /*OnlyIncludeDictionaryTags*/ true); // not ...ChildrenInDictionary: on 5.6 its names carry a number suffix ("A.B_645")
+	TArray<FString> Children;
 	for (const FGameplayTag& Child : Listed.GetGameplayTagArray())
 	{
 		const FString ChildName = Child.ToString();
-		if (ChildName.StartsWith(OldPrefix, ESearchCase::CaseSensitive))
-			Editor->RenameTagInINI(ChildName, Target + ChildName.RightChop(Tag.ToString().Len()));
+		if (!ChildName.StartsWith(OldPrefix, ESearchCase::CaseSensitive))
+			continue;
+		FString ChildComment;
+		FName ChildSource;
+		bool bChildExplicit = false, bChildRestricted = false, bChildAllowChildren = false;
+		Manager.GetTagEditorData(Child.GetTagName(), ChildComment, ChildSource, bChildExplicit, bChildRestricted, bChildAllowChildren);
+		const FGameplayTagSource* Found = Manager.FindTagSource(ChildSource);
+		if (bChildRestricted || !Found || !Found->SourceTagList)
+			return UnrealMcpRql::Fail(FString::Printf(TEXT("cannot rename '%s': its child '%s' is %s, not in a tag ini; rename or remove it there first"),
+				*Tag.ToString(), *ChildName, bChildRestricted ? TEXT("a restricted tag") : *FString::Printf(TEXT("declared by %s"), *ChildSource.ToString())));
+		Children.Add(ChildName);
+	}
+	// Parents before children, so each renamed parent is written as a tag of its own.
+	Children.Sort([](const FString& A, const FString& B)
+	{
+		int32 DotsA = 0, DotsB = 0;
+		for (const TCHAR C : A) DotsA += C == TEXT('.');
+		for (const TCHAR C : B) DotsB += C == TEXT('.');
+		return DotsA < DotsB;
+	});
+	FTagLogCapture Log;
+	TArray<FString> Failed;
+#if UE_VERSION_OLDER_THAN(5, 7, 0)
+	// Before 5.7 the engine renames the tag alone: rename the descendants first, as 5.7 does.
+	for (const FString& ChildName : Children)
+	{
+		if (!Editor->RenameTagInINI(ChildName, Target + ChildName.RightChop(Tag.ToString().Len())))
+			Failed.Add(ChildName);
 	}
 #endif
 	const bool bRenamed = Editor->RenameTagInINI(Tag.ToString(), Target);
@@ -473,6 +498,15 @@ void UUnrealMcpRqlEditorApi::RenameGameplayTag(const FString& Name, const FStrin
 	// would lose its entry and comment. Write it as the renamed tag.
 	if (bRenamed && bExplicit && !Manager.IsDictionaryTag(FName(*Target)))
 		Editor->AddNewGameplayTagToINI(Target, Comment, Source, bRestricted, bAllowChildren);
+	// Every descendant must exist under the new name.
+	for (const FString& ChildName : Children)
+	{
+		if (!Failed.Contains(ChildName) && !Manager.FindTagNode(FName(*(Target + ChildName.RightChop(Tag.ToString().Len())))).IsValid())
+			Failed.Add(ChildName);
+	}
+	if (bRenamed && Failed.Num() > 0)
+		return UnrealMcpRql::Fail(FString::Printf(TEXT("renamed '%s' to '%s', but not its children %s%s"), *Tag.ToString(), *Target,
+			*FString::Join(Failed, TEXT(", ")), Log.Joined().IsEmpty() ? TEXT("") : *(TEXT(": ") + Log.Joined())));
 	// An explicit tag must stay explicit; an implicit one (only its children are listed) stays implicit.
 	if (!bRenamed || !(bExplicit ? Manager.IsDictionaryTag(FName(*Target)) : Manager.FindTagNode(FName(*Target)).IsValid()))
 		return UnrealMcpRql::Fail(FString::Printf(TEXT("could not rename '%s' to '%s'%s"), *Tag.ToString(), *Target,
