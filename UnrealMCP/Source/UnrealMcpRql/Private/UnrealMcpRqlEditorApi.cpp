@@ -237,6 +237,9 @@ void UUnrealMcpRqlEditorApi::SaveLevel(const FString& Path)
 	const UPackage* Package = Current ? Current->GetOutermost() : nullptr;
 	if (!Package || !FPackageName::DoesPackageExist(Package->GetName()))
 		return Failed(TEXT("the current level was never saved: call SaveLevel(\"/Game/Maps/Name\")"));
+	// As the editor scripting libraries do: in an -unattended editor PromptForCheckoutAndSave cancels every save unless a
+	// script is marked as running, and in a windowed one the mark keeps the save free of prompts.
+	TGuardValue<bool> UnattendedScriptGuard(GIsRunningUnattendedScript, true);
 	if (!UEditorLoadingAndSavingUtils::SaveCurrentLevel())
 		Failed(TEXT("the current level could not be saved (checkout or write failure)"));
 }
