@@ -76,14 +76,15 @@ namespace UnrealMcpPythonTools
 	/**
 	 * Output budget per call (characters): a runaway print loop or a huge value must not flood the agent's context. The
 	 * code_exec runtime (Code-Exec contract §6) already clips the value, the error and its own logs to these numbers; the
-	 * caps here cover what the plugin adds afterwards: unreal.log*() output, engine messages and a failed bootstrap.
+	 * caps here cover what the plugin adds afterwards: unreal.log*() output, engine messages and a failed bootstrap. The
+	 * numbers equal the runtime's defaults and are sent explicitly, so both layers read one set.
 	 */
 	static constexpr int32 PythonMaxValueChars = 20000;
 	static constexpr int32 PythonMaxLogChars = 20000;
 	static constexpr int32 PythonMaxLogLineChars = 2000;
 	static constexpr int32 PythonLogLineOverhead = 12; // the newline and "[warning] " around each message in the text form (as Code-Exec counts)
-	// The runtime's own logs get a slightly smaller budget, so its "left out" entry fits and the plugin cap below never
-	// cuts its output a second time when the plugin adds nothing.
+	// The runtime's own logs get a smaller budget: room for its one "left out" entry (about 120 characters with the 12 of
+	// overhead, rounded up), so the plugin cap below never cuts the runtime's output a second time.
 	static constexpr int32 PythonRuntimeLogChars = PythonMaxLogChars - 256;
 
 	static FString PythonClip(const FString& Text, int32 Max, const TCHAR* Hint)
