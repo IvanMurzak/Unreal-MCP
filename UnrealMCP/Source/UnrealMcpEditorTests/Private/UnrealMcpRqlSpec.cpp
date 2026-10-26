@@ -350,10 +350,10 @@ void FUnrealMcpRqlSpec::Define()
 			TestEqual(TEXT("rotation without noise"), CellText(Read, 0, 1), FString(TEXT("(-46, 0, 0)")));
 			// actors | where Label == "RqlSpecLamp" and Folder is null | count
 			const TSharedPtr<FJsonObject> NoFolder = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"and","args":[{"op":"==","args":[{"path":["Label"]},{"lit":"RqlSpecLamp"}]},{"op":"==","args":[{"path":["Folder"]},{"lit":null}]}]}},{"op":"count"}]})RQL"));
-			TestEqual(TEXT("is null finds it"), NoFolder.IsValid() ? NoFolder->GetNumberField(TEXT("value")) : -1.0, 1.0);
+			TestEqual(TEXT("is null finds it"), UnrealMcpRqlSpecHelpers::Number(NoFolder), 1.0);
 			// actors | where Label == "RqlSpecLamp" and Location == {X: 1, Y: 2, Z: 3} | count
 			const TSharedPtr<FJsonObject> ByObject = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"and","args":[{"op":"==","args":[{"path":["Label"]},{"lit":"RqlSpecLamp"}]},{"op":"==","args":[{"path":["Location"]},{"object":[{"key":"X","value":{"lit":1}},{"key":"Y","value":{"lit":2}},{"key":"Z","value":{"lit":3}}]}]}]}},{"op":"count"}]})RQL"));
-			TestEqual(*FString::Printf(TEXT("Location == object literal (%s)"), *Codes(ByObject)), ByObject.IsValid() ? ByObject->GetNumberField(TEXT("value")) : -1.0, 1.0);
+			TestEqual(*FString::Printf(TEXT("Location == object literal (%s)"), *Codes(ByObject)), UnrealMcpRqlSpecHelpers::Number(ByObject), 1.0);
 		});
 
 		It("refuses deleting an asset unsaved assets use, and names abstract classes and existing imports", [this]()

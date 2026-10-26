@@ -77,6 +77,7 @@ namespace UnrealMcpPythonTools
 	static constexpr int32 PythonMaxValueChars = 20000;
 	static constexpr int32 PythonMaxLogChars = 20000;
 	static constexpr int32 PythonMaxLogLineChars = 2000;
+	static constexpr int32 PythonLogLineOverhead = 12; // the newline and "[warning] " around each message in the text form
 
 	static FString PythonClip(const FString& Text, int32 Max, const TCHAR* Hint)
 	{
@@ -94,7 +95,7 @@ namespace UnrealMcpPythonTools
 			const TSharedPtr<FJsonObject> Log = Value->AsObject();
 			const FString Message = PythonClip(Log->GetStringField(TEXT("message")), PythonMaxLogLineChars, TEXT("print less"));
 			Log->SetStringField(TEXT("message"), Message);
-			Sizes.Add(Message.Len() + 12);
+			Sizes.Add(Message.Len() + PythonLogLineOverhead);
 			Total += Sizes.Last();
 		}
 		if (Total <= PythonMaxLogChars)
@@ -237,7 +238,7 @@ namespace UnrealMcpPythonTools
 				Response->SetArrayField(TEXT("logs"), Logs);
 				FString Value;
 				const bool bHasValue = Response->TryGetStringField(TEXT("value"), Value);
-				if (bHasValue && Value.Len() > PythonMaxValueChars)
+				if (bHasValue)
 				{
 					Value = PythonClip(Value, PythonMaxValueChars, TEXT("return a slice or a summary"));
 					Response->SetStringField(TEXT("value"), Value);

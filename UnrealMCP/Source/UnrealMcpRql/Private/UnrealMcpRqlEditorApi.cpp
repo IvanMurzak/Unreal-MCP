@@ -317,9 +317,11 @@ void UUnrealMcpRqlEditorApi::DeleteAsset(const FString& Path, bool bForce)
 	{
 		const FAssetData Data = UEditorAssetLibrary::FindAssetData(Path);
 		TArray<FString> Referencers = UEditorAssetLibrary::FindPackageReferencersForAsset(Path);
+		Referencers.Remove(Data.PackageName.ToString());
 		// The asset registry knows saved references only: an unsaved asset that uses this one (a new material
-		// instance's parent) shows up in memory alone.
-		if (UObject* Loaded = Data.FastGetAsset(/*bLoad*/ false))
+		// instance's parent) shows up in memory alone. The memory scan walks every object: only when needed.
+		UObject* Loaded = Referencers.Num() == 0 ? Data.FastGetAsset(/*bLoad*/ false) : nullptr;
+		if (Loaded)
 		{
 			bool bReferenced = false, bReferencedByUndo = false;
 			FReferencerInformationList Memory;
@@ -327,11 +329,10 @@ void UUnrealMcpRqlEditorApi::DeleteAsset(const FString& Path, bool bForce)
 			for (const FReferencerInformation& Info : Memory.ExternalReferences)
 			{
 				const UPackage* Package = Info.Referencer ? Info.Referencer->GetPackage() : nullptr;
-				if (Package && Package != GetTransientPackage() && !Package->HasAnyFlags(RF_Transient))
+				if (Package && Package != Loaded->GetPackage() && Package != GetTransientPackage() && !Package->HasAnyFlags(RF_Transient))
 					Referencers.AddUnique(Package->GetName());
 			}
 		}
-		Referencers.Remove(Data.PackageName.ToString());
 		if (Referencers.Num() > 0)
 		{
 			const TArray<FString> Shown(Referencers.GetData(), FMath::Min(Referencers.Num(), 5));
@@ -360,13 +361,13 @@ void UUnrealMcpRqlEditorApi::RefreshAssets(const FString& Path, bool bForce)
 UObject* UnrealMcpRql::CreateAsset(UClass* Class, const FString& Path)
 {
 	FString Folder, Name;
-	if (Class && Class->HasAnyClassFlags(CLASS_Abstract))
-		return Failed<UObject*>(FString::Printf(TEXT("'%s' is abstract: create one of its subclasses (unreal.classes(\"%s\") lists them)"),
-			*Class->GetName(), *Class->GetName()));
-	if (!Class || Class->HasAnyClassFlags(CLASS_Abstract | CLASS_Deprecated | CLASS_NewerVersionExists)
+	if (!Class || Class->HasAnyClassFlags(CLASS_Deprecated | CLASS_NewerVersionExists)
 		|| Class->IsChildOf(AActor::StaticClass()) || Class->IsChildOf(UActorComponent::StaticClass()))
 		return Failed<UObject*>(FString::Printf(TEXT("'%s' is not an asset class (actors are spawned: SpawnActor)"),
 			Class ? *Class->GetName() : TEXT("None")));
+	if (Class->HasAnyClassFlags(CLASS_Abstract))
+		return Failed<UObject*>(FString::Printf(TEXT("'%s' is abstract: create one of its subclasses (unreal.classes(\"%s\") lists them)"),
+			*Class->GetName(), *Class->GetName()));
 	if (!ValidateNewAssetPath(Path, Folder, Name))
 		return nullptr;
 	// The factory of the Content Browser's "New" menu when one creates this class (materials, input actions, data
