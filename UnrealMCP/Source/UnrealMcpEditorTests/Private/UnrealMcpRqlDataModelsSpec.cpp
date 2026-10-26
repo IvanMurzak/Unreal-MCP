@@ -387,7 +387,25 @@ void FUnrealMcpRqlDataModelsSpec::Define()
 			Refuses(TEXT("rename onto a tag"), /* editor | call RenameGameplayTag("RqlSpec.Weapon.Blade", "RqlSpec.State.Stunned") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"RenameGameplayTag","args":[{"lit":"RqlSpec.Weapon.Blade"},{"lit":"RqlSpec.State.Stunned"}]}]})RQL"), TEXT("already exists"));
 			Must(TEXT("removed"), /* editor | call RemoveGameplayTag("RqlSpec.State.Stunned") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"RemoveGameplayTag","args":[{"lit":"RqlSpec.State.Stunned"}]}]})RQL"));
 			TestFalse(TEXT("gone"), UGameplayTagsManager::Get().IsDictionaryTag(TEXT("RqlSpec.State.Stunned")));
+			Refuses(TEXT("empty segment"), /* editor | call AddGameplayTag("RqlSpec..Bad", "", "RqlSpecTags.ini") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"AddGameplayTag","args":[{"lit":"RqlSpec..Bad"},{"lit":""},{"lit":"RqlSpecTags.ini"}]}]})RQL"), TEXT("empty segment"));
 			Refuses(TEXT("remove an unknown tag"), /* editor | call RemoveGameplayTag("RqlSpec.Nothing") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"RemoveGameplayTag","args":[{"lit":"RqlSpec.Nothing"}]}]})RQL"), TEXT("is not a gameplay tag"));
+		});
+
+		It("renames a tag with children: the renamed tag stays explicit with its comment", [this]()
+		{
+			DropTags();
+			Must(TEXT("parent"), /* editor | call AddGameplayTag("RqlSpec.Gear", "gear", "RqlSpecTags.ini") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"AddGameplayTag","args":[{"lit":"RqlSpec.Gear"},{"lit":"gear"},{"lit":"RqlSpecTags.ini"}]}]})RQL"));
+			Must(TEXT("child"), /* editor | call AddGameplayTag("RqlSpec.Gear.Helmet", "", "RqlSpecTags.ini") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"AddGameplayTag","args":[{"lit":"RqlSpec.Gear.Helmet"},{"lit":""},{"lit":"RqlSpecTags.ini"}]}]})RQL"));
+			Must(TEXT("renamed"), /* editor | call RenameGameplayTag("RqlSpec.Gear", "RqlSpec.Kit") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"RenameGameplayTag","args":[{"lit":"RqlSpec.Gear"},{"lit":"RqlSpec.Kit"}]}]})RQL"));
+			const TSharedPtr<FJsonObject> Rows = Run(/* gameplayTags | where Name starts-with "RqlSpec.Kit" | select Name Explicit Comment */ TEXT(R"RQL({"rql":"0.1","source":{"path":["gameplayTags"]},"stages":[{"op":"where","pred":{"op":"starts-with","args":[{"path":["Name"]},{"lit":"RqlSpec.Kit"}]}},{"op":"select","fields":[{"name":"Name","expr":{"path":["Name"]}},{"name":"Explicit","expr":{"path":["Explicit"]}},{"name":"Comment","expr":{"path":["Comment"]}}]}]})RQL"));
+			TestEqual(TEXT("the tag and its child"), UnrealMcpRqlSpecHelpers::RowCount(Rows), 2);
+			TestEqual(TEXT("the renamed tag"), UnrealMcpRqlSpecHelpers::CellText(Rows, 0, 0), FString(TEXT("RqlSpec.Kit")));
+			TestEqual(TEXT("still explicit"), UnrealMcpRqlSpecHelpers::CellText(Rows, 0, 1), FString(TEXT("true")));
+			TestEqual(TEXT("comment kept"), UnrealMcpRqlSpecHelpers::CellText(Rows, 0, 2), FString(TEXT("gear")));
+			TestEqual(TEXT("the renamed child"), UnrealMcpRqlSpecHelpers::CellText(Rows, 1, 0), FString(TEXT("RqlSpec.Kit.Helmet")));
+			// The old name stays resolvable through the redirector the rename leaves; its entry is gone.
+			TestFalse(TEXT("the old entry is gone"), FileText(TagIni()).Contains(TEXT("Tag=\"RqlSpec.Gear\"")));
+			TestTrue(TEXT("written to the ini"), FileText(TagIni()).Contains(TEXT("Tag=\"RqlSpec.Kit\"")));
 		});
 
 		It("reads and writes tag properties as text, validated and with parent tags", [this]()
@@ -542,6 +560,8 @@ void FUnrealMcpRqlDataModelsSpec::Define()
 			TestEqual(TEXT("the event graph"), UnrealMcpRqlSpecHelpers::CellText(Graphs, 0, 1), FString(TEXT("EventGraph")));
 			const TSharedPtr<FJsonObject> Status = Run(/* unreal.asset("@BP@") | select Status EventGraph.Name */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@BP@"}]},"stages":[{"op":"select","fields":[{"name":"Status","expr":{"path":["Status"]}},{"name":"EventGraph.Name","expr":{"path":["EventGraph","Name"]}}]}]})RQL"));
 			TestEqual(TEXT("compiled"), UnrealMcpRqlSpecHelpers::CellText(Status, 0, 0), FString(TEXT("UpToDate")));
+			const TSharedPtr<FJsonObject> Parent = Run(/* unreal.asset("@BP@") | select ParentClass */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@BP@"}]},"stages":[{"op":"select","fields":[{"name":"ParentClass","expr":{"path":["ParentClass"]}}]}]})RQL"));
+			TestEqual(*FString::Printf(TEXT("parent class (%s)"), *UnrealMcpRqlSpecHelpers::Codes(Parent)), UnrealMcpRqlSpecHelpers::CellText(Parent, 0, 0), FString(TEXT("Actor")));
 			const TSharedPtr<FJsonObject> Listed = Run(/* blueprints | where Path contains "@BP@" | count */ TEXT(R"RQL({"rql":"0.1","source":{"path":["blueprints"]},"stages":[{"op":"where","pred":{"op":"contains","args":[{"path":["Path"]},{"lit":"@BP@"}]}},{"op":"count"}]})RQL"));
 			TestEqual(TEXT("blueprints source"), UnrealMcpRqlSpecHelpers::Number(Listed), 1.0);
 

@@ -206,6 +206,23 @@ namespace UnrealMcpRqlGameplayTagsLocal
 		return UGameplayTagsManager::Get().GetTagEditorData(Tag, Comment, Source, bExplicit, bRestricted, bAllowChildren) && bExplicit;
 	}
 
+	/** The engine's tag-string check plus empty segments ("A..B"), which it lets through and which make a nameless tag. */
+	bool IsValidTagName(const FString& Tag, FText& OutError, FString* OutFixed = nullptr)
+	{
+		if (Tag.Contains(TEXT("..")))
+		{
+			OutError = FText::FromString(TEXT("empty segment between dots"));
+			if (OutFixed)
+			{
+				TArray<FString> Parts;
+				Tag.ParseIntoArray(Parts, TEXT("."));
+				*OutFixed = FString::Join(Parts, TEXT("."));
+			}
+			return false;
+		}
+		return UGameplayTagsManager::Get().IsValidGameplayTagString(Tag, &OutError, OutFixed);
+	}
+
 	/** A dictionary tag (one some ini, DataTable or native declaration defines), or a failure. */
 	bool RequireDictionaryTag(const FString& Name, FName& Out)
 	{
@@ -376,7 +393,7 @@ void UUnrealMcpRqlEditorApi::AddGameplayTag(const FString& Name, const FString& 
 	const FString Tag = Name.TrimStartAndEnd();
 	FText Error;
 	FString Fixed;
-	if (Tag.IsEmpty() || !Manager.IsValidGameplayTagString(Tag, &Error, &Fixed))
+	if (Tag.IsEmpty() || !IsValidTagName(Tag, Error, &Fixed))
 		return UnrealMcpRql::Fail(FString::Printf(TEXT("'%s' is not a valid gameplay tag: %s%s"), *Tag, *Error.ToString(),
 			Fixed.IsEmpty() || Fixed == Tag ? TEXT("") : *FString::Printf(TEXT(" (try \"%s\")"), *Fixed)));
 	if (Manager.IsDictionaryTag(FName(*Tag)))
@@ -425,15 +442,24 @@ void UUnrealMcpRqlEditorApi::RenameGameplayTag(const FString& Name, const FStrin
 	UGameplayTagsManager& Manager = UGameplayTagsManager::Get();
 	const FString Target = NewName.TrimStartAndEnd();
 	FText Error;
-	if (Target.IsEmpty() || !Manager.IsValidGameplayTagString(Target, &Error))
+	if (Target.IsEmpty() || !IsValidTagName(Target, Error))
 		return UnrealMcpRql::Fail(FString::Printf(TEXT("'%s' is not a valid gameplay tag: %s"), *Target, *Error.ToString()));
 	if (Manager.IsDictionaryTag(FName(*Target)))
 		return UnrealMcpRql::Fail(FString::Printf(TEXT("the gameplay tag '%s' already exists"), *Target));
 	IGameplayTagsEditorModule* Editor = TagsEditor();
 	if (!Editor)
 		return UnrealMcpRql::Fail(TEXT("the GameplayTagsEditor plugin is not loaded"));
+	FString Comment;
+	FName Source;
+	bool bExplicit = false, bRestricted = false, bAllowChildren = false;
+	Manager.GetTagEditorData(Tag, Comment, Source, bExplicit, bRestricted, bAllowChildren);
 	FTagLogCapture Log;
-	if (!Editor->RenameTagInINI(Tag.ToString(), Target) || !Manager.IsDictionaryTag(FName(*Target)))
+	const bool bRenamed = Editor->RenameTagInINI(Tag.ToString(), Target);
+	// The engine renames the children first; the new parent then exists implicitly, so it never writes it and the tag
+	// would lose its entry and comment. Write it as the renamed tag.
+	if (bRenamed && bExplicit && !Manager.IsDictionaryTag(FName(*Target)))
+		Editor->AddNewGameplayTagToINI(Target, Comment, Source, bRestricted, bAllowChildren);
+	if (!bRenamed || !Manager.FindTagNode(FName(*Target)).IsValid())
 		return UnrealMcpRql::Fail(FString::Printf(TEXT("could not rename '%s' to '%s'%s"), *Tag.ToString(), *Target,
 			Log.Joined().IsEmpty() ? TEXT("") : *(TEXT(": ") + Log.Joined())));
 }

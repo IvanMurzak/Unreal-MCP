@@ -133,6 +133,19 @@ void FUnrealMcpPythonToolsSpec::Define()
 		World->EditorDestroyActor(Lamp, true);
 	});
 
+	It("caps runaway output: the first and last log lines, a clipped value, and says so", [this]()
+	{
+		const FUnrealMcpToolResult R = Run(TEXT("for i in range(5000):\n    print('line', i, 'x' * 50)\n'y' * 50000"));
+		TestTrue(TEXT("success"), R.bSuccess);
+		TestTrue(*FString::Printf(TEXT("bounded (%d characters)"), R.Message.Len()), R.Message.Len() < 50000);
+		TestTrue(TEXT("value clipped"), R.Message.Contains(TEXT("[truncated: 20000 of 50000 characters shown")));
+		TestTrue(TEXT("lines left out"), R.Message.Contains(TEXT("log line(s) left out")));
+		TestTrue(TEXT("first line kept"), R.Message.Contains(TEXT("[info] line 0 ")));
+		TestTrue(TEXT("last line kept"), R.Message.Contains(TEXT("[info] line 4999 ")));
+		FString Value;
+		TestTrue(TEXT("structured value clipped too"), R.Structured.IsValid() && R.Structured->TryGetStringField(TEXT("value"), Value) && Value.Len() < 21000);
+	});
+
 	It("returns engine warnings and errors logged while the snippet ran", [this]()
 	{
 		// A warning, not an error: Automation rewrites expected errors to Verbose before log devices see them. An empty

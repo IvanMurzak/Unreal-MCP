@@ -89,6 +89,21 @@ namespace UnrealMcpRqlStructsLocal
 		return Specs;
 	}
 
+	/** The component a member name of an object literal stands for ({X: 1}, {Pitch: 90}, {R: 1}), INDEX_NONE if none. */
+	int32 ComponentIndex(const FMathStruct& Spec, const FString& Name)
+	{
+		static const TCHAR* const Axes[] = { TEXT("X"), TEXT("Y"), TEXT("Z"), TEXT("W") };
+		static const TCHAR* const Angles[] = { TEXT("Pitch"), TEXT("Yaw"), TEXT("Roll") };
+		static const TCHAR* const Channels[] = { TEXT("R"), TEXT("G"), TEXT("B"), TEXT("A") };
+		const TCHAR* const* Names = Spec.bColor ? Channels : Spec.Struct == TBaseStructure<FRotator>::Get() ? Angles : Axes;
+		for (int32 Index = 0; Index < Spec.Count; ++Index)
+		{
+			if (Name.Equals(Names[Index], ESearchCase::IgnoreCase))
+				return Index;
+		}
+		return INDEX_NONE;
+	}
+
 	const FMathStruct* Find(const UScriptStruct* Struct)
 	{
 		for (const FMathStruct& Spec : MathStructs())
@@ -201,7 +216,10 @@ namespace UnrealMcpRqlStructsLocal
 		{
 			if (Index > 0)
 				Out += ", ";
-			Out += rql::to_text(rql::Value::number(Parts[Index], Spec.bSingle ? rql::builtin::single_type() : rql::builtin::double_type()));
+			// Rounded to 1e-6: transform math leaves noise such as -9.999999999999998 or 7.8e-47 in doubles.
+			const double Rounded = Spec.bSingle || !(FMath::Abs(Parts[Index]) < 1e9) ? Parts[Index] : FMath::RoundToDouble(Parts[Index] * 1e6) / 1e6;
+			Out += rql::to_text(rql::Value::number(Rounded == 0.0 ? 0.0 : Rounded,
+				Spec.bSingle ? rql::builtin::single_type() : rql::builtin::double_type()));
 		}
 		return Out + ")";
 	}
@@ -358,8 +376,8 @@ void UnrealMcpRqlAddStructAdapters(FUnrealMcpRqlSession& Session)
 		};
 		// Structs and {X: 1} literals: RQL's own coercion.
 		Adapter.coerce = UnrealMcpRqlStructCoerce(*Types, Spec.Struct, [](const rql::Value& Value) { return Value.is_string() || Value.is_list(); });
-		// Equality with the text and list forms (where Location == "(0, 0, 100)"), approximate like RQL's .NET tuple
-		// adapters: components within 1e-5.
+		// Equality with the text, list and object forms (where Location == "(0, 0, 100)" / {X: 0, Y: 0, Z: 100}),
+		// approximate like RQL's .NET tuple adapters: components within 1e-5.
 		Adapter.equals = [SpecPtr](const rql::Value& Value, const rql::Value& Other) -> std::optional<bool>
 		{
 			if (!Value.is_struct() || !Value.ptr())
@@ -374,6 +392,21 @@ void UnrealMcpRqlAddStructAdapters(FUnrealMcpRqlSession& Session)
 				FString Ignored;
 				if (!Components(*SpecPtr, Other, Theirs, Ignored))
 					return false; // not this struct's form: not equal
+			}
+			else if (Other.is_map() && Other.map().object_literal())
+			{
+				// {X: 100, Y: 0, Z: 300}: components by name (members it leaves out are 0, an unknown one is not equal).
+				bool bKnown = true;
+				Other.map().for_each([SpecPtr, &Theirs, &bKnown](const rql::Value& Key, const rql::Value& Item)
+				{
+					const int32 Index = Key.is_string() && Item.is_number() ? ComponentIndex(*SpecPtr, UnrealMcpRqlFromStd(Key.as_string())) : INDEX_NONE;
+					if (Index == INDEX_NONE)
+						return bKnown = false;
+					Theirs[Index] = Item.as_number();
+					return true;
+				});
+				if (!bKnown)
+					return false;
 			}
 			else
 				return std::nullopt;

@@ -20,6 +20,10 @@
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "GameFramework/Actor.h"
+#include "HAL/FileManager.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
+#include "UnrealMcpRqlSpecHelpers.h"
 #include "UObject/UObjectGlobals.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
@@ -291,6 +295,104 @@ void FUnrealMcpRqlSpec::Define()
 			const TSharedPtr<FJsonObject> Destroyed = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"RqlSpecLamp"}]}},{"op":"call","method":"Destroy","args":[]}]})RQL"), true);
 			TestTrue(*FString::Printf(TEXT("destroy ok (%s)"), *Codes(Destroyed)), IsOk(Destroyed));
 			TestEqual(TEXT("the original is gone"), CountLamps(), 0);
+		});
+
+		It("duplicates an actor at its own world transform plus the offset", [this]()
+		{
+			SpawnLamp();
+			TArray<AActor*> Found = Lamps();
+			if (!TestEqual(TEXT("one lamp"), Found.Num(), 1))
+				return;
+			// A root transform that is not identity: SpawnActor with a template would apply it twice.
+			Found[0]->SetActorLocationAndRotation(FVector(0, 0, 150), FRotator(0, 45, 0));
+			Found[0]->SetActorScale3D(FVector(2, 2, 0.5));
+			// actors | where Label == "RqlSpecLamp" | call Duplicate("(300, 0, 0)")
+			const TSharedPtr<FJsonObject> Copied = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"RqlSpecLamp"}]}},{"op":"call","method":"Duplicate","args":[{"lit":"(300, 0, 0)"}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("duplicate ok (%s)"), *Codes(Copied)), IsOk(Copied));
+			AActor* Copy = nullptr;
+			for (AActor* Actor : Lamps())
+				Copy = Actor != Found[0] ? Actor : Copy;
+			if (!TestNotNull(TEXT("the copy"), Copy))
+				return;
+			TestTrue(*FString::Printf(TEXT("location + offset (%s)"), *Copy->GetActorLocation().ToString()), Copy->GetActorLocation().Equals(FVector(300, 0, 150), 0.01));
+			TestTrue(*FString::Printf(TEXT("same scale (%s)"), *Copy->GetActorScale3D().ToString()), Copy->GetActorScale3D().Equals(FVector(2, 2, 0.5), 0.001));
+			TestTrue(*FString::Printf(TEXT("same rotation (%s)"), *Copy->GetActorRotation().ToString()), Copy->GetActorRotation().Equals(FRotator(0, 45, 0), 0.01));
+		});
+
+		It("spawns with the given rotation as the final one, and keeps the class default without one", [this]()
+		{
+			// editor | call SpawnActor("SpotLight", "RqlSpecLampSpot", "(0, 0, 300)", "(-90, 0, 0)")
+			const TSharedPtr<FJsonObject> Rotated = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"SpawnActor","args":[{"lit":"SpotLight"},{"lit":"RqlSpecLampSpot"},{"lit":"(0, 0, 300)"},{"lit":"(-90, 0, 0)"}]}]})RQL"), true);
+			// editor | call SpawnActor("SpotLight", "RqlSpecLampSpotDefault", "(0, 0, 300)")
+			const TSharedPtr<FJsonObject> Default = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"SpawnActor","args":[{"lit":"SpotLight"},{"lit":"RqlSpecLampSpotDefault"},{"lit":"(0, 0, 300)"}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("spawned (%s %s)"), *Codes(Rotated), *Codes(Default)), IsOk(Rotated) && IsOk(Default));
+			TestEqual(TEXT("two spot lights"), Lamps().Num(), 2);
+			for (AActor* Actor : Lamps())
+			{
+				// Both point down: the given -90 pitch, and the SpotLight's own default.
+				TestTrue(*FString::Printf(TEXT("%s points down (%s)"), *Actor->GetActorLabel(), *Actor->GetActorForwardVector().ToString()),
+					Actor->GetActorForwardVector().Equals(FVector(0, 0, -1), 0.001));
+			}
+		});
+
+		It("reads Folder as null without a folder, and compares and prints transforms cleanly", [this]()
+		{
+			SpawnLamp();
+			TArray<AActor*> Found = Lamps();
+			if (!TestEqual(TEXT("one lamp"), Found.Num(), 1))
+				return;
+			// A quaternion round trip leaves double noise (-46.000000000000036) in the rotator.
+			Found[0]->SetActorRotation(FQuat(FRotator(-46, 0, 0)));
+			// actors | where Label == "RqlSpecLamp" | select Folder Rotation
+			const TSharedPtr<FJsonObject> Read = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"RqlSpecLamp"}]}},{"op":"select","fields":[{"name":"Folder","expr":{"path":["Folder"]}},{"name":"Rotation","expr":{"path":["Rotation"]}}]}]})RQL"));
+			const TSharedPtr<FJsonValue> Folder = Cell(Read, 0, 0);
+			TestTrue(*FString::Printf(TEXT("folder null (%s)"), *Codes(Read)), Folder.IsValid() && Folder->IsNull());
+			TestEqual(TEXT("rotation without noise"), CellText(Read, 0, 1), FString(TEXT("(-46, 0, 0)")));
+			// actors | where Label == "RqlSpecLamp" and Folder is null | count
+			const TSharedPtr<FJsonObject> NoFolder = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"and","args":[{"op":"==","args":[{"path":["Label"]},{"lit":"RqlSpecLamp"}]},{"op":"==","args":[{"path":["Folder"]},{"lit":null}]}]}},{"op":"count"}]})RQL"));
+			TestEqual(TEXT("is null finds it"), NoFolder.IsValid() ? NoFolder->GetNumberField(TEXT("value")) : -1.0, 1.0);
+			// actors | where Label == "RqlSpecLamp" and Location == {X: 1, Y: 2, Z: 3} | count
+			const TSharedPtr<FJsonObject> ByObject = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"and","args":[{"op":"==","args":[{"path":["Label"]},{"lit":"RqlSpecLamp"}]},{"op":"==","args":[{"path":["Location"]},{"object":[{"key":"X","value":{"lit":1}},{"key":"Y","value":{"lit":2}},{"key":"Z","value":{"lit":3}}]}]}]}},{"op":"count"}]})RQL"));
+			TestEqual(*FString::Printf(TEXT("Location == object literal (%s)"), *Codes(ByObject)), ByObject.IsValid() ? ByObject->GetNumberField(TEXT("value")) : -1.0, 1.0);
+		});
+
+		It("refuses deleting an asset unsaved assets use, and names abstract classes and existing imports", [this]()
+		{
+			auto Drop = []()
+			{
+				for (const TCHAR* Name : { TEXT("MI_Child"), TEXT("M_Base"), TEXT("RqlSpecPixel") })
+					UnrealMcpRqlSpecHelpers::DropObject(FindObject<UObject>(nullptr, *FString::Printf(TEXT("/Game/RqlSpecDelete/%s.%s"), Name, Name)));
+			};
+			Drop();
+			// editor | call CreateAsset("/Game/RqlSpecDelete/M_Base", "Material")
+			const TSharedPtr<FJsonObject> Base = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"CreateAsset","args":[{"lit":"/Game/RqlSpecDelete/M_Base"},{"lit":"Material"}]}]})RQL"), true);
+			// editor | call CreateMaterialInstance("/Game/RqlSpecDelete/MI_Child", "/Game/RqlSpecDelete/M_Base")
+			const TSharedPtr<FJsonObject> Child = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"CreateMaterialInstance","args":[{"lit":"/Game/RqlSpecDelete/MI_Child"},{"lit":"/Game/RqlSpecDelete/M_Base"}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("created (%s %s)"), *Codes(Base), *Codes(Child)), IsOk(Base) && IsOk(Child));
+			// editor | call DeleteAsset("/Game/RqlSpecDelete/M_Base")
+			const TSharedPtr<FJsonObject> Deleted = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"DeleteAsset","args":[{"lit":"/Game/RqlSpecDelete/M_Base"}]}]})RQL"), true);
+			TestFalse(TEXT("delete refused"), IsOk(Deleted));
+			TestTrue(*FString::Printf(TEXT("names the unsaved referencer (%s)"), *Codes(Deleted)), Codes(Deleted).Contains(TEXT("/Game/RqlSpecDelete/MI_Child")));
+			TestNotNull(TEXT("the material is still there"), FindObject<UObject>(nullptr, TEXT("/Game/RqlSpecDelete/M_Base.M_Base")));
+
+			// editor | call CreateAsset("/Game/RqlSpecDelete/DA_Abstract", "PrimaryDataAsset")
+			const TSharedPtr<FJsonObject> Abstract = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"CreateAsset","args":[{"lit":"/Game/RqlSpecDelete/DA_Abstract"},{"lit":"PrimaryDataAsset"}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("abstract named (%s)"), *Codes(Abstract)), !IsOk(Abstract) && Codes(Abstract).Contains(TEXT("is abstract")));
+
+			// A 1x1 PNG, imported twice: the second time it exists.
+			static const uint8 Png[] = { 0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A,0x00,0x00,0x00,0x0D,0x49,0x48,0x44,0x52,0x00,0x00,0x00,0x01,0x00,0x00,0x00,0x01,
+				0x08,0x02,0x00,0x00,0x00,0x90,0x77,0x53,0xDE,0x00,0x00,0x00,0x0C,0x49,0x44,0x41,0x54,0x08,0xD7,0x63,0xF8,0xCF,0xC0,0x00,0x00,0x03,0x01,0x01,
+				0x00,0x18,0xDD,0x8D,0xB0,0x00,0x00,0x00,0x00,0x49,0x45,0x4E,0x44,0xAE,0x42,0x60,0x82 };
+			const FString File = FPaths::ConvertRelativePathToFull(FPaths::Combine(FPaths::ProjectIntermediateDir(), TEXT("RqlSpec"), TEXT("RqlSpecPixel.png")));
+			TestTrue(TEXT("png written"), FFileHelper::SaveArrayToFile(TArrayView<const uint8>(Png, UE_ARRAY_COUNT(Png)), *File));
+			// editor | call ImportAsset("@FILE@", "/Game/RqlSpecDelete")
+			const FString Import = FString(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"ImportAsset","args":[{"lit":"@FILE@"},{"lit":"/Game/RqlSpecDelete"}]}]})RQL")).Replace(TEXT("@FILE@"), *File);
+			const TSharedPtr<FJsonObject> First = Exec(Import, true);
+			TestTrue(*FString::Printf(TEXT("first import (%s)"), *Codes(First)), IsOk(First));
+			const TSharedPtr<FJsonObject> Second = Exec(Import, true);
+			TestTrue(*FString::Printf(TEXT("second import says it exists (%s)"), *Codes(Second)), !IsOk(Second) && Codes(Second).Contains(TEXT("already exists")));
+			IFileManager::Get().Delete(*File, false, true);
+			Drop();
 		});
 
 		It("accepts object references as text (an actor label for an Actor parameter)", [this]()
