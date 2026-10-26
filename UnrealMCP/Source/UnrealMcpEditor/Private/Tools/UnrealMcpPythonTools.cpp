@@ -73,11 +73,18 @@ namespace UnrealMcpPythonTools
 				TEXT("%d more engine warning(s)/error(s): read them with rql-query on the console source"), Matched - PythonMaxEngineLogs)));
 	}
 
-	/** Output budget per call (characters): a runaway print loop or a huge value must not flood the agent's context. */
+	/**
+	 * Output budget per call (characters): a runaway print loop or a huge value must not flood the agent's context. The
+	 * code_exec runtime (Code-Exec contract §6) already clips the value, the error and its own logs to these numbers; the
+	 * caps here cover what the plugin adds afterwards: unreal.log*() output, engine messages and a failed bootstrap.
+	 */
 	static constexpr int32 PythonMaxValueChars = 20000;
 	static constexpr int32 PythonMaxLogChars = 20000;
 	static constexpr int32 PythonMaxLogLineChars = 2000;
-	static constexpr int32 PythonLogLineOverhead = 12; // the newline and "[warning] " around each message in the text form
+	static constexpr int32 PythonLogLineOverhead = 12; // the newline and "[warning] " around each message in the text form (as Code-Exec counts)
+	// The runtime's own logs get a slightly smaller budget, so its "left out" entry fits and the plugin cap below never
+	// cuts its output a second time when the plugin adds nothing.
+	static constexpr int32 PythonRuntimeLogChars = PythonMaxLogChars - 256;
 
 	static FString PythonClip(const FString& Text, int32 Max, const TCHAR* Hint)
 	{
@@ -203,6 +210,11 @@ namespace UnrealMcpPythonTools
 				TSharedPtr<FJsonObject> Request = MakeShared<FJsonObject>();
 				Request->SetStringField(TEXT("code"), Code);
 				Request->SetStringField(TEXT("includeRoot"), PythonIncludeRoot());
+				Request->SetBoolField(TEXT("includeOutsideRoot"), true); // the tool documents absolute include paths
+				Request->SetNumberField(TEXT("maxValueChars"), PythonMaxValueChars);
+				Request->SetNumberField(TEXT("maxLogChars"), PythonRuntimeLogChars);
+				Request->SetNumberField(TEXT("maxLogLineChars"), PythonMaxLogLineChars);
+				Request->SetNumberField(TEXT("maxErrorChars"), PythonMaxValueChars);
 				TArray<TSharedPtr<FJsonValue>> Imports;
 				Imports.Add(MakeShared<FJsonValueString>(TEXT("unreal")));
 				Request->SetArrayField(TEXT("imports"), Imports);
@@ -237,18 +249,13 @@ namespace UnrealMcpPythonTools
 				PythonAddEngineLogs(LogSequence, Logs);
 				PythonCapLogs(Logs);
 				Response->SetArrayField(TEXT("logs"), Logs);
-				FString Value;
+				FString Value; // already clipped by the runtime (maxValueChars), as the error is (maxErrorChars)
 				const bool bHasValue = Response->TryGetStringField(TEXT("value"), Value);
-				if (bHasValue)
-				{
-					Value = PythonClip(Value, PythonMaxValueChars, TEXT("return a slice or a summary"));
-					Response->SetStringField(TEXT("value"), Value);
-				}
 
 				const FString Details = PythonDetails(Response);
 				if (!Response->GetBoolField(TEXT("success")))
 					return FUnrealMcpToolResult::Error(FString::Printf(TEXT("%s: %s%s"),
-						*Response->GetStringField(TEXT("errorKind")), *PythonClip(Response->GetStringField(TEXT("error")), PythonMaxValueChars, TEXT("raise a shorter message")), *Details));
+						*Response->GetStringField(TEXT("errorKind")), *Response->GetStringField(TEXT("error")), *Details));
 
 				return FUnrealMcpToolResult::Success((bHasValue ? Value : TEXT("null")) + Details, Response);
 			});
