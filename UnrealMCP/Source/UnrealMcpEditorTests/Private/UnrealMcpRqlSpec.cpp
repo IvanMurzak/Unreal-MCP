@@ -309,6 +309,28 @@ void FUnrealMcpRqlSpec::Define()
 			TestTrue(TEXT("attached to the actor named by its label"), Parent && Attached && Attached->GetAttachParentActor() == Parent);
 		});
 
+		It("gives a spawned class without a root component a scene root, so it keeps its location and can be a parent", [this]()
+		{
+			// editor | call SpawnActor("Actor", "RqlSpecLampRig", "(100, 200, 0)")
+			const TSharedPtr<FJsonObject> Rig = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"SpawnActor","args":[{"lit":"Actor"},{"lit":"RqlSpecLampRig"},{"lit":"(100, 200, 0)"}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("spawn a plain Actor ok (%s)"), *Codes(Rig)), IsOk(Rig));
+			// editor | call SpawnActor("PointLight", "RqlSpecLamp", "(0, 0, 0)", "(0, 0, 0)", unreal.find("RqlSpecLampRig"))
+			const TSharedPtr<FJsonObject> Child = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"SpawnActor","args":[{"lit":"PointLight"},{"lit":"RqlSpecLamp"},{"lit":"(0, 0, 0)"},{"lit":"(0, 0, 0)"},{"call":"find","on":{"path":["unreal"]},"args":[{"lit":"RqlSpecLampRig"}]}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("spawn under it ok (%s)"), *Codes(Child)), IsOk(Child));
+			AActor* Parent = nullptr;
+			AActor* Attached = nullptr;
+			for (AActor* Actor : Lamps())
+			{
+				if (Actor->GetActorLabel() == TEXT("RqlSpecLampRig")) Parent = Actor;
+				if (Actor->GetActorLabel() == TEXT("RqlSpecLamp")) Attached = Actor;
+			}
+			if (!TestTrue(TEXT("both spawned"), Parent && Attached))
+				return;
+			TestTrue(TEXT("the plain Actor has a root"), Parent->GetRootComponent() != nullptr);
+			TestEqual(TEXT("and kept its location"), Parent->GetActorLocation(), FVector(100, 200, 0));
+			TestTrue(TEXT("the child is attached"), Attached->GetAttachParentActor() == Parent);
+		});
+
 		It("resolves stable refs and unreal.find", [this]()
 		{
 			SpawnLamp();

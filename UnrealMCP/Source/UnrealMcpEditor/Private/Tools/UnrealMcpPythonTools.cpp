@@ -5,9 +5,11 @@
 #include "UnrealMcpSchema.h"
 #include "UnrealMcpToolArgs.h"
 #include "UnrealMcpToolRegistry.h"
+#include "Tools/UnrealMcpLogCollector.h"
 
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
+#include "Editor.h"
 #include "IPythonScriptPlugin.h"
 #include "Interfaces/IPluginManager.h"
 #include "Misc/Base64.h"
@@ -35,6 +37,55 @@ namespace UnrealMcpPythonTools
 	static const TCHAR* PythonLogLevel(EPythonLogOutputType Type)
 	{
 		return Type == EPythonLogOutputType::Error ? TEXT("error") : Type == EPythonLogOutputType::Warning ? TEXT("warning") : TEXT("info");
+	}
+
+	/** Engine warnings / errors returned per call; the rest is counted (the console source has them all). */
+	static constexpr int32 PythonMaxEngineLogs = 20;
+
+	/** Sequence of the newest captured log line (flushed first): lines after it were logged while the snippet ran. */
+	static int64 PythonLastLogSequence()
+	{
+		GLog->Flush();
+		const TArray<FUnrealMcpLogEntry> Last = FUnrealMcpLogCollector::Get().Snapshot(1);
+		return Last.Num() > 0 ? Last[0].Sequence : 0;
+	}
+
+	/**
+	 * Warnings and errors other categories logged after @p AfterSequence (a failed LoadAsset, a refused property
+	 * write): Command.LogOutput carries only LogPython, so without them a snippet fails silently with a null result.
+	 */
+	static void PythonAddEngineLogs(int64 AfterSequence, TArray<TSharedPtr<FJsonValue>>& Logs)
+	{
+		FUnrealMcpLogCollector& Collector = FUnrealMcpLogCollector::Get();
+		if (!Collector.IsRegistered())
+			return;
+		GLog->Flush();
+		static const FName LogPythonCategory(TEXT("LogPython"));
+		int32 Skipped = 0;
+		int32 Added = 0;
+		for (const FUnrealMcpLogEntry& Entry : Collector.Snapshot(FUnrealMcpLogCollector::EvictChunk))
+		{
+			const ELogVerbosity::Type Verbosity = (ELogVerbosity::Type)(Entry.Verbosity & ELogVerbosity::VerbosityMask);
+			if (Entry.Sequence <= AfterSequence || Entry.Category == LogPythonCategory || Verbosity > ELogVerbosity::Warning)
+				continue;
+			if (Added == PythonMaxEngineLogs)
+			{
+				++Skipped;
+				continue;
+			}
+			TSharedPtr<FJsonObject> Log = MakeShared<FJsonObject>();
+			Log->SetStringField(TEXT("level"), Verbosity == ELogVerbosity::Warning ? TEXT("warning") : TEXT("error"));
+			Log->SetStringField(TEXT("message"), FString::Printf(TEXT("%s: %s"), *Entry.Category.ToString(), *Entry.Message.TrimEnd()));
+			Logs.Add(MakeShared<FJsonValueObject>(Log));
+			++Added;
+		}
+		if (Skipped > 0)
+		{
+			TSharedPtr<FJsonObject> Log = MakeShared<FJsonObject>();
+			Log->SetStringField(TEXT("level"), TEXT("warning"));
+			Log->SetStringField(TEXT("message"), FString::Printf(TEXT("%d more engine warning(s)/error(s): read them with rql-query on the console source"), Skipped));
+			Logs.Add(MakeShared<FJsonValueObject>(Log));
+		}
 	}
 
 	/** The EvaluateStatement result is the repr of a base64 string: the payload between the quotes, nothing escaped. */
@@ -81,7 +132,8 @@ namespace UnrealMcpPythonTools
 			.Description(TEXT("Run Python inside the Unreal Editor (PythonScriptPlugin, full `unreal` API, pre-imported). Write "
 			                  "plain statements; the LAST EXPRESSION is the result (objects come back as their paths). "
 			                  "print() and unreal.log*() output is returned as logs; errors point at snippet.py lines. Each "
-			                  "call starts from a fresh namespace. 'include': helper files/folders (relative to "
+			                  "call starts from a fresh namespace, and its edits are one undo step. Engine warnings and errors raised while it "
+			                  "runs are returned as logs too. 'include': helper files/folders (relative to "
 			                  "<Project>/.ai-game-dev/snippets): folders are importable, files run before the code. Blueprint "
 			                  "graph wiring is not available from Python: use the blueprint-* tools for that."))
 			.ParamString(TEXT("code"), TEXT("Python code. Example: \"actors = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)"
@@ -140,7 +192,13 @@ namespace UnrealMcpPythonTools
 				Command.Flags = EPythonCommandFlags::Unattended;
 				Command.Command = FString::Printf(TEXT("__import__('unreal_mcp.python_execute', fromlist=['run']).run('%s')"),
 					*FBase64::Encode(reinterpret_cast<const uint8*>(Utf8.Get()), Utf8.Length()));
+				// One undo step, as rql-mutate: Ctrl+Z reverts the snippet's recorded edits, not the user's previous action.
+				// The transaction buffer drops it again when nothing was recorded (a read-only snippet).
+				const int64 LogSequence = PythonLastLogSequence();
+				const int32 Transaction = GEditor ? GEditor->BeginTransaction(TEXT("UnrealMcp"), FText::FromString(TEXT("python-execute")), nullptr) : INDEX_NONE;
 				const bool bRan = Python->ExecPythonCommandEx(Command);
+				if (Transaction != INDEX_NONE)
+					GEditor->EndTransaction();
 
 				const TSharedPtr<FJsonObject> Response = bRan ? PythonDecodeResponse(Command.CommandResult) : nullptr;
 				if (!Response.IsValid())
@@ -155,6 +213,7 @@ namespace UnrealMcpPythonTools
 					Log->SetStringField(TEXT("message"), Entry.Output.TrimEnd());
 					Logs.Add(MakeShared<FJsonValueObject>(Log));
 				}
+				PythonAddEngineLogs(LogSequence, Logs);
 				Response->SetArrayField(TEXT("logs"), Logs);
 
 				const FString Details = PythonDetails(Response);

@@ -5,23 +5,28 @@
 
 namespace FUnrealMcpWorldProvider
 {
-	// File-static so the runtime module owns no GEditor reference. The resolver is installed once on the
-	// game thread during plugin startup and invoked on the game thread by tool bodies (§4), so a plain
-	// static needs no synchronization. A family-unique name (GWorldResolver) per the unity-build ODR rule.
-	static TFunction<UWorld*()> GUnrealMcpWorldResolver;
+	// File-static so the runtime module owns no GEditor reference. Installed and invoked on the game thread
+	// (§4), so a plain static needs no synchronization. Family-unique names per the unity-build ODR rule.
+	struct FUnrealMcpWorldResolverEntry
+	{
+		const void* Owner;
+		TFunction<UWorld*()> Resolver;
+	};
+	static TArray<FUnrealMcpWorldResolverEntry> GUnrealMcpWorldResolvers;
 
 	UWorld* GetActiveWorld()
 	{
-		return GUnrealMcpWorldResolver ? GUnrealMcpWorldResolver() : nullptr;
+		return GUnrealMcpWorldResolvers.Num() > 0 ? GUnrealMcpWorldResolvers.Last().Resolver() : nullptr;
 	}
 
-	void SetWorldResolver(TFunction<UWorld*()> Resolver)
+	void SetWorldResolver(const void* Owner, TFunction<UWorld*()> Resolver)
 	{
-		GUnrealMcpWorldResolver = MoveTemp(Resolver);
+		ClearWorldResolver(Owner);
+		GUnrealMcpWorldResolvers.Add({ Owner, MoveTemp(Resolver) });
 	}
 
-	void ClearWorldResolver()
+	void ClearWorldResolver(const void* Owner)
 	{
-		GUnrealMcpWorldResolver = nullptr;
+		GUnrealMcpWorldResolvers.RemoveAll([Owner](const FUnrealMcpWorldResolverEntry& Entry) { return Entry.Owner == Owner; });
 	}
 }
