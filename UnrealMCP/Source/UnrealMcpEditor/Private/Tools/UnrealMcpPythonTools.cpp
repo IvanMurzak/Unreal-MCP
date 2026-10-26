@@ -51,17 +51,18 @@ namespace UnrealMcpPythonTools
 	}
 
 	/**
-	 * Warnings and errors other categories logged after @p AfterSequence (a failed LoadAsset, a refused property
-	 * write): Command.LogOutput carries only LogPython, so without them a snippet fails silently with a null result.
+	 * Warnings and errors other categories logged on the game thread (where the snippet runs; background threads'
+	 * lines are not its doing) after @p AfterSequence: a failed LoadAsset, a refused property write. Command.LogOutput
+	 * carries only LogPython, so without them a snippet fails silently with a null result. The collector is an
+	 * unbuffered GLog device, so it already holds every line logged synchronously: no flush needed.
 	 */
 	static void PythonAddEngineLogs(int64 AfterSequence, TArray<TSharedPtr<FJsonValue>>& Logs)
 	{
 		static const FName LogPythonCategory(TEXT("LogPython"));
-		GLog->FlushThreadedLogs();
 		int32 Matched = 0;
 		for (const FUnrealMcpLogEntry& Entry : FUnrealMcpLogCollector::Get().SnapshotAfter(AfterSequence))
 		{
-			if (Entry.Category == LogPythonCategory || Entry.Verbosity > ELogVerbosity::Warning)
+			if (!Entry.bGameThread || Entry.Category == LogPythonCategory || Entry.Verbosity > ELogVerbosity::Warning)
 				continue;
 			if (++Matched <= PythonMaxEngineLogs)
 				Logs.Add(PythonLogEntry(Entry.Verbosity == ELogVerbosity::Warning ? TEXT("warning") : TEXT("error"),
@@ -116,7 +117,7 @@ namespace UnrealMcpPythonTools
 			.Description(TEXT("Run Python inside the Unreal Editor (PythonScriptPlugin, full `unreal` API, pre-imported). Write "
 			                  "plain statements; the LAST EXPRESSION is the result (objects come back as their paths). "
 			                  "print() and unreal.log*() output is returned as logs; errors point at snippet.py lines. Each "
-			                  "call starts from a fresh namespace, and its edits are one undo step. Engine warnings and errors raised while it "
+			                  "call starts from a fresh namespace, and its edits are one undo step (so the snippet itself cannot run TRANSACTION UNDO). Engine warnings and errors raised while it "
 			                  "runs are returned as logs too. 'include': helper files/folders (relative to "
 			                  "<Project>/.ai-game-dev/snippets): folders are importable, files run before the code. Blueprint "
 			                  "graph wiring is not available from Python: use the blueprint-* tools for that."))
@@ -177,7 +178,6 @@ namespace UnrealMcpPythonTools
 				Command.Command = FString::Printf(TEXT("__import__('unreal_mcp.python_execute', fromlist=['run']).run('%s')"),
 					*FBase64::Encode(reinterpret_cast<const uint8*>(Utf8.Get()), Utf8.Length()));
 				// One undo step, as rql-mutate (the transaction buffer drops it when a read-only snippet recorded nothing).
-				GLog->FlushThreadedLogs();
 				const int64 LogSequence = FUnrealMcpLogCollector::Get().GetLastSequence();
 				const int32 Transaction = GEditor ? GEditor->BeginTransaction(TEXT("UnrealMcp"), FText::FromString(TEXT("python-execute")), nullptr) : INDEX_NONE;
 				const bool bRan = Python->ExecPythonCommandEx(Command);

@@ -129,7 +129,7 @@ void FUnrealMcpEditorToolsSpec::Define()
 			TestTrue(TEXT("entries 4 and 5"), Recent.Num() == 2 && Recent[0].Sequence == 4 && Recent[1].Sequence == 5);
 		});
 
-		It("reads only the entries after a sequence, also after eviction and Clear", [this, Feed]()
+		It("reads only the entries after a sequence, also after Clear", [this, Feed]()
 		{
 			FUnrealMcpLogCollector C;
 			TestEqual(TEXT("no line yet"), C.GetLastSequence(), (int64)0);

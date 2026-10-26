@@ -149,9 +149,14 @@ AActor* UnrealMcpRql::SpawnActor(UClass* Class, const FVector& Location, const F
 		Actor->AttachToActor(Parent, FAttachmentTransformRules::KeepWorldTransform);
 		if (Actor->GetAttachParentActor() != Parent)
 		{
+			const USceneComponent* ParentRoot = Parent->GetRootComponent();
+			const FString Reason = !ParentRoot
+				? FString(TEXT(": it has no root component (no transform); give it one with AddComponent(\"SceneComponent\", \"Root\")"))
+				: Actor->GetRootComponent()->Mobility == EComponentMobility::Static && ParentRoot->Mobility != EComponentMobility::Static
+				? FString::Printf(TEXT(": a Static %s cannot attach to a non-Static parent (set the parent's Mobility to Static)"), *Class->GetName())
+				: FString();
 			World->EditorDestroyActor(Actor, /*bShouldModifyLevel*/ true);
-			return Failed<AActor*>(FString::Printf(TEXT("could not attach to %s%s"), *Parent->GetActorLabel(), Parent->GetRootComponent() ? TEXT("")
-				: TEXT(": it has no root component (no transform); give it one with AddComponent(\"SceneComponent\", \"Root\")")));
+			return Failed<AActor*>(FString::Printf(TEXT("could not attach to %s%s"), *Parent->GetActorLabel(), *Reason));
 		}
 	}
 	return Actor;

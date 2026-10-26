@@ -61,8 +61,8 @@ void FUnrealMcpEditorCoordinator::Startup()
 	// §12.6: install the EDITOR world resolver into the runtime module BEFORE any tool body can run. The
 	// runtime module's FUnrealMcpObjectRef::GetEditorWorld() now delegates to FUnrealMcpWorldProvider; this
 	// resolver preserves today's behaviour byte-for-byte (`GEditor ? GEditor->GetEditorWorldContext().World()
-	// : nullptr`). Cleared in Shutdown(). The runtime bootstrap subsystem (R3) installs a game-world resolver
-	// instead; in the editor this coordinator owns the resolver.
+	// : nullptr`). Cleared in Shutdown(). In PIE the runtime bootstrap subsystem (R3) stacks a game-world resolver on
+	// top of it and removes only its own at PIE end.
 	FUnrealMcpWorldProvider::SetWorldResolver(this, []() -> UWorld*
 	{
 		return GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;

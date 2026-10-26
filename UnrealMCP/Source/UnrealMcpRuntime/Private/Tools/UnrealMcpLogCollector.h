@@ -24,6 +24,7 @@ struct FUnrealMcpLogEntry
 	ELogVerbosity::Type Verbosity = ELogVerbosity::Log;
 	FName Category;
 	FString Message;
+	bool bGameThread = false;            // logged on the game thread (where tool calls run)
 };
 
 /**

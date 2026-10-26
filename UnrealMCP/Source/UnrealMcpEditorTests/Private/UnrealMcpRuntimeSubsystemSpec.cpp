@@ -23,8 +23,8 @@
  *    subsystem object — those two gates run BEFORE the listener-armed gate, so a NewObject suffices to
  *    prove they reject (and that the security invariant "no connect path without an explicit, gated call"
  *    holds even for a fully-defaulted project — kill switch off → Connect false);
- *  - the §12.6 world-provider switching: a runtime-style resolver installs and GetActiveWorld follows it,
- *    ClearWorldResolver returns to the null (no-resolver) state.
+ *  - the §12.6 world-provider stack: the latest owner's resolver answers, and clearing it returns to the
+ *    previous owner's (an editor -> PIE -> editor handoff).
  *
  * The live sidecar connect → server → ping wire path is the live-e2e / PIE runbook (test.md Suite 7), not
  * unit-asserted here (no headless sidecar+server harness in a dev checkout).

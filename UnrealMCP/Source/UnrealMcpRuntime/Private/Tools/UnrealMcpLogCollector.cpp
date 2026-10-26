@@ -66,6 +66,7 @@ void FUnrealMcpLogCollector::Capture(const TCHAR* Message, ELogVerbosity::Type V
 	Entry.Verbosity = Type;
 	Entry.Category = Category;
 	Entry.Message = Message;
+	Entry.bGameThread = IsInGameThread();
 
 	FScopeLock ScopeLock(&Lock);
 	// Assigned under the same lock that stores the entry, so sequences are dense and ascending in
