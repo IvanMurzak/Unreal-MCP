@@ -221,6 +221,9 @@ void UUnrealMcpRqlEditorApi::SaveLevel(const FString& Path)
 	UWorld* World = FUnrealMcpObjectRef::GetEditorWorld();
 	if (!World)
 		return Failed(TEXT("no editor world"));
+	// As the editor scripting libraries do: in an -unattended editor PromptForCheckoutAndSave cancels every save unless a
+	// script is marked as running, and in a windowed one the mark keeps the save free of prompts and failure dialogs.
+	TGuardValue<bool> UnattendedScriptGuard(GIsRunningUnattendedScript, true);
 	if (!Path.IsEmpty())
 	{
 		FString Package, Error;
@@ -233,15 +236,30 @@ void UUnrealMcpRqlEditorApi::SaveLevel(const FString& Path)
 		return;
 	}
 	// A never-saved level would open the interactive Save-As dialog (modal UI on the game thread): refuse instead.
-	const ULevel* Current = World->GetCurrentLevel();
-	const UPackage* Package = Current ? Current->GetOutermost() : nullptr;
-	if (!Package || !FPackageName::DoesPackageExist(Package->GetName()))
+	ULevel* Current = World->GetCurrentLevel();
+	UPackage* LevelPackage = Current ? Current->GetPackage() : nullptr;
+	if (!LevelPackage || !FPackageName::DoesPackageExist(LevelPackage->GetName()))
 		return Failed(TEXT("the current level was never saved: call SaveLevel(\"/Game/Maps/Name\")"));
-	// As the editor scripting libraries do: in an -unattended editor PromptForCheckoutAndSave cancels every save unless a
-	// script is marked as running, and in a windowed one the mark keeps the save free of prompts.
-	TGuardValue<bool> UnattendedScriptGuard(GIsRunningUnattendedScript, true);
-	if (!UEditorLoadingAndSavingUtils::SaveCurrentLevel())
-		Failed(TEXT("the current level could not be saved (checkout or write failure)"));
+	// SaveCurrentLevel reports only a cancel as failure (a package that failed to save, e.g. a read-only file whose
+	// checkout failed, still returns true), so a package left dirty is the failure signal.
+	TArray<UPackage*> Dirty;
+	if (LevelPackage->IsDirty())
+		Dirty.Add(LevelPackage);
+	for (UPackage* External : Current->GetLoadedExternalObjectPackages())
+	{
+		if (External->IsDirty())
+			Dirty.Add(External);
+	}
+	const bool bSaved = UEditorLoadingAndSavingUtils::SaveCurrentLevel();
+	TArray<FString> Unsaved;
+	for (UPackage* Package : Dirty)
+	{
+		if (Package->IsDirty() && !UPackage::IsEmptyPackage(Package))
+			Unsaved.Add(Package->GetName());
+	}
+	if (!bSaved || Unsaved.Num() > 0)
+		Failed(FString::Printf(TEXT("the current level could not be saved (checkout or write failure)%s%s"),
+			Unsaved.Num() > 0 ? TEXT(": ") : TEXT(""), *FString::Join(Unsaved, TEXT(", "))));
 }
 
 void UUnrealMcpRqlEditorApi::SaveAll()
