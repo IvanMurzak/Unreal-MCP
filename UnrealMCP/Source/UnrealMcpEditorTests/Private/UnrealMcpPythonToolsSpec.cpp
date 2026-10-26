@@ -8,6 +8,9 @@
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "HAL/FileManager.h"
+#include "Editor.h"
+#include "Engine/PointLight.h"
+#include "Components/PointLightComponent.h"
 #include "UnrealMcpCoreTools.h"
 #include "UnrealMcpToolRegistry.h"
 #include "Dom/JsonObject.h"
@@ -101,6 +104,45 @@ void FUnrealMcpPythonToolsSpec::Define()
 		TestTrue(TEXT("success"), R.bSuccess);
 		TestTrue(TEXT("value 42"), R.Message.StartsWith(TEXT("42")));
 		IFileManager::Get().DeleteDirectory(*Folder, false, true);
+	});
+
+	It("makes a snippet's edits one undo step, and a read-only snippet adds none", [this]()
+	{
+		UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+		if (!TestNotNull(TEXT("editor world"), World))
+			return;
+		// Spawned here, not from Python: EditorActorSubsystem spawning crashes a -nullrhi editor inside the engine.
+		FActorSpawnParameters Params;
+		Params.ObjectFlags |= RF_Transactional;
+		APointLight* Lamp = World->SpawnActor<APointLight>(FVector::ZeroVector, FRotator::ZeroRotator, Params);
+		if (!TestNotNull(TEXT("lamp spawned"), Lamp))
+			return;
+		Lamp->SetActorLabel(TEXT("McpPythonSpecLamp"));
+		Lamp->PointLightComponent->Intensity = 1.f;
+		const FString Find = TEXT("lamp = [a for a in unreal.get_editor_subsystem(unreal.EditorActorSubsystem).get_all_level_actors() "
+		                          "if a.get_actor_label() == 'McpPythonSpecLamp'][0]\n"
+		                          "light = lamp.get_component_by_class(unreal.PointLightComponent)\n");
+
+		TestTrue(TEXT("edit ok"), Run(Find + TEXT("light.set_editor_property('intensity', 7.0)")).bSuccess);
+		TestEqual(TEXT("edited"), Lamp->PointLightComponent->Intensity, 7.f);
+		TestTrue(TEXT("read-only ok"), Run(Find + TEXT("light.intensity")).bSuccess);
+
+		// The read-only snippet left no transaction behind, so one undo reverts the edit.
+		TestTrue(TEXT("undo"), GEditor->UndoTransaction());
+		TestEqual(TEXT("undone"), Lamp->PointLightComponent->Intensity, 1.f);
+		World->EditorDestroyActor(Lamp, true);
+	});
+
+	It("returns engine warnings and errors logged while the snippet ran", [this]()
+	{
+		// A warning, not an error: Automation rewrites expected errors to Verbose before log devices see them. An empty
+		// list returns before ConsolidateAssets touches anything.
+		const FUnrealMcpToolResult R = Run(TEXT("unreal.EditorAssetLibrary.consolidate_assets(unreal.load_asset('/Engine/BasicShapes/Cube'), [])"));
+		TestTrue(TEXT("success"), R.bSuccess);
+		TestTrue(TEXT("engine line in logs"), R.Message.Contains(TEXT("[warning] LogEditorAssetSubsystem: ConsolidateAssets: No assets to consolidate.")));
+
+		const FUnrealMcpToolResult Quiet = Run(TEXT("1 + 1"));
+		TestFalse(TEXT("earlier lines are not repeated"), Quiet.Message.Contains(TEXT("ConsolidateAssets")));
 	});
 }
 

@@ -56,7 +56,7 @@ void UUnrealMcpRuntimeSubsystem::Initialize(FSubsystemCollectionBase& Collection
 	// §12.6: install the RUNTIME world resolver BEFORE any tool body can run, so a runtime tool resolves the
 	// live game world (not the editor world). Held weakly via `this` — the subsystem outlives every tool call
 	// (it owns the bridge), and Deinitialize clears the resolver, so the captured `this` never dangles.
-	FUnrealMcpWorldProvider::SetWorldResolver([this]() -> UWorld*
+	FUnrealMcpWorldProvider::SetWorldResolver(this, [this]() -> UWorld*
 	{
 		const UGameInstance* GI = GetGameInstance();
 		return GI ? GI->GetWorld() : nullptr;
@@ -179,8 +179,8 @@ void UUnrealMcpRuntimeSubsystem::Deinitialize()
 	}
 	BoundPort = -1;
 
-	// §12.6: drop the runtime world resolver so no stale `this`-capturing lambda survives this subsystem.
-	FUnrealMcpWorldProvider::ClearWorldResolver();
+	// §12.6: drop our world resolver (only ours: see FUnrealMcpWorldProvider) so no stale `this` lambda survives.
+	FUnrealMcpWorldProvider::ClearWorldResolver(this);
 
 	Super::Deinitialize();
 }

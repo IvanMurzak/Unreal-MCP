@@ -1348,8 +1348,8 @@ module:
 ```cpp
 namespace FUnrealMcpWorldProvider {
   UNREALMCPRUNTIME_API UWorld* GetActiveWorld();
-  UNREALMCPRUNTIME_API void SetWorldResolver(TFunction<UWorld*()>);
-  UNREALMCPRUNTIME_API void ClearWorldResolver();
+  UNREALMCPRUNTIME_API void SetWorldResolver(const void* Owner, TFunction<UWorld*()>);
+  UNREALMCPRUNTIME_API void ClearWorldResolver(const void* Owner);
 }
 ```
 **R1 ships this provider** and rewires `FUnrealMcpObjectRef::GetEditorWorld()` → `GetActiveWorld()`
@@ -1357,6 +1357,10 @@ delegating to the injected resolver. The EDITOR coordinator installs
 `[]{return GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;}` in Startup (preserves today's
 behaviour byte-for-byte) and clears it in Shutdown — so the runtime module itself holds NO GEditor
 reference. The RUNTIME subsystem (R3) installs `[this]{return GetGameInstance()->GetWorld();}` instead.
+Resolvers are keyed by owner and stacked: the latest one answers and clearing an owner's resolver hands
+the world back to the previous one. In the editor, PIE's game instance creates the runtime subsystem, so
+during PIE the tools resolve the PIE world and the editor world again once PIE ends (a plain global used
+to be cleared at PIE end, leaving every editor tool without a world until restart).
 PIE subtlety (verify on 5.7): the editor resolver may later return `GEditor->PlayWorld` when set, so
 editor-driven tools follow the user into PIE (matches Unity) — deferred until the runtime families need it.
 

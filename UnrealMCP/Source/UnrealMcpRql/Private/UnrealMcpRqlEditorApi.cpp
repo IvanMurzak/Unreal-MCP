@@ -19,6 +19,7 @@
 #include "Engine/LevelStreaming.h"
 #include "Engine/World.h"
 #include "Components/ActorComponent.h"
+#include "Components/SceneComponent.h"
 #include "DataTableEditorUtils.h"
 #include "Engine/DataTable.h"
 #include "Factories/DataTableFactory.h"
@@ -127,6 +128,20 @@ AActor* UnrealMcpRql::SpawnActor(UClass* Class, const FVector& Location, const F
 	AActor* Actor = World->SpawnActor<AActor>(Class, Location, Rotation, Params);
 	if (!Actor)
 		return Failed<AActor*>(FString::Printf(TEXT("could not spawn %s"), *Class->GetName()));
+	// A class without a root component (a plain Actor) has no transform: the location would be dropped and nothing
+	// could attach to it. Give it the scene root the editor's Empty Actor gets (UActorFactoryEmptyActor).
+	if (!Actor->GetRootComponent() && !UnrealMcpRql::AddComponent(Actor, USceneComponent::StaticClass(),
+		USceneComponent::GetDefaultSceneRootVariableName().ToString(), [&Location, &Rotation](UActorComponent* Component)
+		{
+			USceneComponent* Root = CastChecked<USceneComponent>(Component);
+			Root->Mobility = EComponentMobility::Movable;
+			Root->bVisualizeComponent = true;
+			Root->SetWorldLocationAndRotation(Location, Rotation);
+		}))
+	{
+		World->EditorDestroyActor(Actor, /*bShouldModifyLevel*/ true);
+		return nullptr;
+	}
 	if (!Label.IsEmpty())
 		FActorLabelUtilities::SetActorLabelUnique(Actor, Label);
 	if (Parent)
@@ -134,8 +149,14 @@ AActor* UnrealMcpRql::SpawnActor(UClass* Class, const FVector& Location, const F
 		Actor->AttachToActor(Parent, FAttachmentTransformRules::KeepWorldTransform);
 		if (Actor->GetAttachParentActor() != Parent)
 		{
+			const USceneComponent* ParentRoot = Parent->GetRootComponent();
+			const FString Reason = !ParentRoot
+				? FString(TEXT(": it has no root component (no transform); give it one with AddComponent(\"SceneComponent\", \"Root\")"))
+				: Actor->GetRootComponent()->Mobility == EComponentMobility::Static && ParentRoot->Mobility != EComponentMobility::Static
+				? FString::Printf(TEXT(": a Static %s cannot attach to a non-Static parent (set the parent's Mobility to Static)"), *Class->GetName())
+				: FString();
 			World->EditorDestroyActor(Actor, /*bShouldModifyLevel*/ true);
-			return Failed<AActor*>(FString::Printf(TEXT("could not attach to %s (the new actor has no root component)"), *Parent->GetActorLabel()));
+			return Failed<AActor*>(FString::Printf(TEXT("could not attach to %s%s"), *Parent->GetActorLabel(), *Reason));
 		}
 	}
 	return Actor;
@@ -200,6 +221,9 @@ void UUnrealMcpRqlEditorApi::SaveLevel(const FString& Path)
 	UWorld* World = FUnrealMcpObjectRef::GetEditorWorld();
 	if (!World)
 		return Failed(TEXT("no editor world"));
+	// As the editor scripting libraries do: in an -unattended editor PromptForCheckoutAndSave cancels every save unless a
+	// script is marked as running, and in a windowed one the mark keeps the save free of prompts and failure dialogs.
+	TGuardValue<bool> UnattendedScriptGuard(GIsRunningUnattendedScript, true);
 	if (!Path.IsEmpty())
 	{
 		FString Package, Error;
@@ -212,12 +236,30 @@ void UUnrealMcpRqlEditorApi::SaveLevel(const FString& Path)
 		return;
 	}
 	// A never-saved level would open the interactive Save-As dialog (modal UI on the game thread): refuse instead.
-	const ULevel* Current = World->GetCurrentLevel();
-	const UPackage* Package = Current ? Current->GetOutermost() : nullptr;
-	if (!Package || !FPackageName::DoesPackageExist(Package->GetName()))
+	ULevel* Current = World->GetCurrentLevel();
+	UPackage* LevelPackage = Current ? Current->GetPackage() : nullptr;
+	if (!LevelPackage || !FPackageName::DoesPackageExist(LevelPackage->GetName()))
 		return Failed(TEXT("the current level was never saved: call SaveLevel(\"/Game/Maps/Name\")"));
-	if (!UEditorLoadingAndSavingUtils::SaveCurrentLevel())
-		Failed(TEXT("the current level could not be saved (checkout or write failure)"));
+	// SaveCurrentLevel reports only a cancel as failure (a package that failed to save, e.g. a read-only file whose
+	// checkout failed, still returns true), so a package left dirty is the failure signal.
+	TArray<UPackage*> Dirty;
+	if (LevelPackage->IsDirty())
+		Dirty.Add(LevelPackage);
+	for (UPackage* External : Current->GetLoadedExternalObjectPackages())
+	{
+		if (External->IsDirty())
+			Dirty.Add(External);
+	}
+	const bool bSaved = UEditorLoadingAndSavingUtils::SaveCurrentLevel();
+	TArray<FString> Unsaved;
+	for (UPackage* Package : Dirty)
+	{
+		if (Package->IsDirty() && !UPackage::IsEmptyPackage(Package))
+			Unsaved.Add(Package->GetName());
+	}
+	if (!bSaved || Unsaved.Num() > 0)
+		Failed(FString::Printf(TEXT("the current level could not be saved (checkout or write failure)%s%s"),
+			Unsaved.Num() > 0 ? TEXT(": ") : TEXT(""), *FString::Join(Unsaved, TEXT(", "))));
 }
 
 void UUnrealMcpRqlEditorApi::SaveAll()

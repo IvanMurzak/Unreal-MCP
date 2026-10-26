@@ -61,9 +61,9 @@ void FUnrealMcpEditorCoordinator::Startup()
 	// §12.6: install the EDITOR world resolver into the runtime module BEFORE any tool body can run. The
 	// runtime module's FUnrealMcpObjectRef::GetEditorWorld() now delegates to FUnrealMcpWorldProvider; this
 	// resolver preserves today's behaviour byte-for-byte (`GEditor ? GEditor->GetEditorWorldContext().World()
-	// : nullptr`). Cleared in Shutdown(). The runtime bootstrap subsystem (R3) installs a game-world resolver
-	// instead; in the editor this coordinator owns the resolver.
-	FUnrealMcpWorldProvider::SetWorldResolver([]() -> UWorld*
+	// : nullptr`). Cleared in Shutdown(). In PIE the runtime bootstrap subsystem (R3) stacks a game-world resolver on
+	// top of it and removes only its own at PIE end.
+	FUnrealMcpWorldProvider::SetWorldResolver(this, []() -> UWorld*
 	{
 		return GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
 	});
@@ -813,7 +813,7 @@ void FUnrealMcpEditorCoordinator::Shutdown()
 	// §12.6: drop the editor world resolver so no stale GEditor-capturing lambda survives teardown. The
 	// captured lambda is GEditor-free of captured state (it reads the global), but clearing keeps the
 	// provider's lifecycle symmetric with Startup. Idempotent.
-	FUnrealMcpWorldProvider::ClearWorldResolver();
+	FUnrealMcpWorldProvider::ClearWorldResolver(this);
 
 	// Code-Exec plan §4.6: the editor is all but gone (sidecar and local server stopped) — remove our CLI lease.
 	if (Session.IsValid())

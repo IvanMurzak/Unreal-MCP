@@ -24,6 +24,7 @@ struct FUnrealMcpLogEntry
 	ELogVerbosity::Type Verbosity = ELogVerbosity::Log;
 	FName Category;
 	FString Message;
+	bool bGameThread = false;            // logged on the game thread (where tool calls run)
 };
 
 /**
@@ -85,6 +86,12 @@ public:
 
 	/** Copy of the retained entries, oldest first: the most recent @p Limit, or all of them when @p Limit <= 0. */
 	TArray<FUnrealMcpLogEntry> Snapshot(int32 Limit = 0) const;
+
+	/** Copy of the retained entries captured after @p AfterSequence, oldest first (a cursor read: only the new lines). */
+	TArray<FUnrealMcpLogEntry> SnapshotAfter(int64 AfterSequence) const;
+
+	/** The newest capture sequence (0 before the first line); unlike the buffer, `Clear()` does not reset it. */
+	int64 GetLastSequence() const;
 
 	/** Human-readable severity token for a verbosity ("Error", "Warning", "Display", "Log", …). */
 	static FString VerbosityToString(ELogVerbosity::Type Verbosity);

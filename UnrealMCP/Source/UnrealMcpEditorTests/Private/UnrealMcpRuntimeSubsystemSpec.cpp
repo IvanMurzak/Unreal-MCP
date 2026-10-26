@@ -8,7 +8,6 @@
 #include "UObject/Package.h"
 #include "Engine/World.h"
 #include "Engine/GameInstance.h" // a transient UGameInstance as the subsystem's Outer (ClassWithin=UGameInstance)
-#include "Editor.h" // GEditor — the spec restores the editor world resolver after exercising the runtime one
 
 #include "UnrealMcpRuntimeSubsystem.h"
 #include "UnrealMcpRuntimeSettings.h"
@@ -24,8 +23,8 @@
  *    subsystem object — those two gates run BEFORE the listener-armed gate, so a NewObject suffices to
  *    prove they reject (and that the security invariant "no connect path without an explicit, gated call"
  *    holds even for a fully-defaulted project — kill switch off → Connect false);
- *  - the §12.6 world-provider switching: a runtime-style resolver installs and GetActiveWorld follows it,
- *    ClearWorldResolver returns to the null (no-resolver) state.
+ *  - the §12.6 world-provider stack: the latest owner's resolver answers, and clearing it returns to the
+ *    previous owner's (an editor -> PIE -> editor handoff).
  *
  * The live sidecar connect → server → ping wire path is the live-e2e / PIE runbook (test.md Suite 7), not
  * unit-asserted here (no headless sidecar+server harness in a dev checkout).
@@ -165,61 +164,56 @@ void FUnrealMcpRuntimeSubsystemSpec::Define()
 
 	Describe("World resolver switching (§12.6)", [this]()
 	{
-		// Save + restore the global resolver so these tests do not perturb the editor coordinator's installed
-		// resolver (this spec runs inside a live editor where the coordinator already set the editor resolver).
-		It("a runtime-style resolver is honoured by GetActiveWorld, and ClearWorldResolver returns to null", [this]()
+		// These tests stack their own owners on top of the editor coordinator's resolver (this spec runs inside a live
+		// editor) and remove only those, so the coordinator's resolver is never touched.
+		It("the latest resolver answers, and clearing it returns to the previous one", [this]()
 		{
+			UWorld* Before = FUnrealMcpWorldProvider::GetActiveWorld();
 			UWorld* FakeWorld = NewObject<UWorld>(GetTransientPackage());
+			int32 Owner = 0;
 
-			// Install a runtime-style resolver (the subsystem installs `[this]{ GetGameInstance()->GetWorld() }`;
-			// here we inject a fixed world to assert the provider plumbing follows whatever resolver is set).
-			FUnrealMcpWorldProvider::SetWorldResolver([FakeWorld]() -> UWorld* { return FakeWorld; });
-			TestEqual(TEXT("GetActiveWorld follows the installed resolver"),
-				FUnrealMcpWorldProvider::GetActiveWorld(), FakeWorld);
+			FUnrealMcpWorldProvider::SetWorldResolver(&Owner, [FakeWorld]() -> UWorld* { return FakeWorld; });
+			TestEqual(TEXT("GetActiveWorld follows the installed resolver"), FUnrealMcpWorldProvider::GetActiveWorld(), FakeWorld);
 
-			FUnrealMcpWorldProvider::ClearWorldResolver();
-			TestNull(TEXT("after Clear, GetActiveWorld is null"), FUnrealMcpWorldProvider::GetActiveWorld());
-
-			// Re-install the editor resolver so the rest of the suite (which may resolve worlds) is unaffected.
-			FUnrealMcpWorldProvider::SetWorldResolver([]() -> UWorld*
-			{
-				return GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
-			});
+			FUnrealMcpWorldProvider::ClearWorldResolver(&Owner);
+			TestEqual(TEXT("after Clear, the previous resolver answers again"), FUnrealMcpWorldProvider::GetActiveWorld(), Before);
+			FUnrealMcpWorldProvider::ClearWorldResolver(&Owner);
+			TestEqual(TEXT("Clear is idempotent"), FUnrealMcpWorldProvider::GetActiveWorld(), Before);
 		});
 
-		It("swaps editor<->runtime resolvers and GetActiveWorld follows whichever is active (§12.6 dual-bootstrap)", [this]()
+		It("an editor -> PIE -> editor handoff restores the editor world, whatever order owners leave in (§12.6 dual-bootstrap)", [this]()
 		{
-			// R6 (issue #127): the §12.6 design point is that the SAME runtime module is driven by an EDITOR
-			// resolver (FUnrealMcpEditorCoordinator -> editor world) or a RUNTIME resolver (the subsystem ->
-			// GetGameInstance()->GetWorld()), and GetActiveWorld() routes to whichever bootstrap installed
-			// last. We inject two distinct fixture worlds standing in for "the editor world" and "the live
-			// game world" and assert the swap is honoured both directions — the headless proxy for the
-			// editor->PIE->packaged resolver handoff the runbook exercises live.
-			UWorld* EditorFixtureWorld  = NewObject<UWorld>(GetTransientPackage());
-			UWorld* RuntimeFixtureWorld = NewObject<UWorld>(GetTransientPackage());
-			TestNotEqual(TEXT("the two fixture worlds are distinct"), EditorFixtureWorld, RuntimeFixtureWorld);
+			// The regression this guards: PIE's game instance creates the runtime subsystem, which installs a game-world
+			// resolver over the editor one; its Deinitialize used to clear the single global, so after PIE every editor
+			// tool resolved a null world until the editor restarted.
+			UWorld* Before = FUnrealMcpWorldProvider::GetActiveWorld();
+			UWorld* EditorFixtureWorld = NewObject<UWorld>(GetTransientPackage());
+			UWorld* PieFixtureWorld = NewObject<UWorld>(GetTransientPackage());
+			UWorld* SecondPieFixtureWorld = NewObject<UWorld>(GetTransientPackage());
+			int32 EditorOwner = 0, PieOwner = 0, SecondPieOwner = 0;
 
-			// Editor bootstrap installs its resolver.
-			FUnrealMcpWorldProvider::SetWorldResolver([EditorFixtureWorld]() -> UWorld* { return EditorFixtureWorld; });
-			TestEqual(TEXT("editor resolver -> editor world"),
-				FUnrealMcpWorldProvider::GetActiveWorld(), EditorFixtureWorld);
+			FUnrealMcpWorldProvider::SetWorldResolver(&EditorOwner, [EditorFixtureWorld]() -> UWorld* { return EditorFixtureWorld; });
+			TestEqual(TEXT("editor resolver -> editor world"), FUnrealMcpWorldProvider::GetActiveWorld(), EditorFixtureWorld);
 
-			// Runtime bootstrap installs its resolver (e.g. a packaged game's UGameInstanceSubsystem) — the
-			// later install wins, exactly as the runtime subsystem's Initialize() overrides any editor resolver.
-			FUnrealMcpWorldProvider::SetWorldResolver([RuntimeFixtureWorld]() -> UWorld* { return RuntimeFixtureWorld; });
-			TestEqual(TEXT("runtime resolver -> runtime/game world"),
-				FUnrealMcpWorldProvider::GetActiveWorld(), RuntimeFixtureWorld);
+			FUnrealMcpWorldProvider::SetWorldResolver(&PieOwner, [PieFixtureWorld]() -> UWorld* { return PieFixtureWorld; });
+			TestEqual(TEXT("PIE starts -> game world"), FUnrealMcpWorldProvider::GetActiveWorld(), PieFixtureWorld);
 
-			// And back to the editor resolver (a runtime teardown re-installing the editor resolver).
-			FUnrealMcpWorldProvider::SetWorldResolver([EditorFixtureWorld]() -> UWorld* { return EditorFixtureWorld; });
-			TestEqual(TEXT("swapped back -> editor world"),
-				FUnrealMcpWorldProvider::GetActiveWorld(), EditorFixtureWorld);
+			FUnrealMcpWorldProvider::ClearWorldResolver(&PieOwner);
+			TestEqual(TEXT("PIE ends -> editor world again"), FUnrealMcpWorldProvider::GetActiveWorld(), EditorFixtureWorld);
 
-			// Restore the live editor resolver so the rest of the suite is unaffected.
-			FUnrealMcpWorldProvider::SetWorldResolver([]() -> UWorld*
-			{
-				return GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
-			});
+			// Two PIE clients ending in the order they started: the later one still answers until it leaves.
+			FUnrealMcpWorldProvider::SetWorldResolver(&PieOwner, [PieFixtureWorld]() -> UWorld* { return PieFixtureWorld; });
+			FUnrealMcpWorldProvider::SetWorldResolver(&SecondPieOwner, [SecondPieFixtureWorld]() -> UWorld* { return SecondPieFixtureWorld; });
+			FUnrealMcpWorldProvider::ClearWorldResolver(&PieOwner);
+			TestEqual(TEXT("first client gone -> second client's world"), FUnrealMcpWorldProvider::GetActiveWorld(), SecondPieFixtureWorld);
+			FUnrealMcpWorldProvider::ClearWorldResolver(&SecondPieOwner);
+			TestEqual(TEXT("both gone -> editor world"), FUnrealMcpWorldProvider::GetActiveWorld(), EditorFixtureWorld);
+
+			// Re-installing an owner replaces its resolver instead of stacking a second one.
+			FUnrealMcpWorldProvider::SetWorldResolver(&EditorOwner, [PieFixtureWorld]() -> UWorld* { return PieFixtureWorld; });
+			TestEqual(TEXT("re-install replaces"), FUnrealMcpWorldProvider::GetActiveWorld(), PieFixtureWorld);
+			FUnrealMcpWorldProvider::ClearWorldResolver(&EditorOwner);
+			TestEqual(TEXT("one clear removes the owner"), FUnrealMcpWorldProvider::GetActiveWorld(), Before);
 		});
 	});
 

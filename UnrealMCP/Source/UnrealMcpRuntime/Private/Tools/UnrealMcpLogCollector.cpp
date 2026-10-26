@@ -66,6 +66,7 @@ void FUnrealMcpLogCollector::Capture(const TCHAR* Message, ELogVerbosity::Type V
 	Entry.Verbosity = Type;
 	Entry.Category = Category;
 	Entry.Message = Message;
+	Entry.bGameThread = IsInGameThread();
 
 	FScopeLock ScopeLock(&Lock);
 	// Assigned under the same lock that stores the entry, so sequences are dense and ascending in
@@ -102,6 +103,20 @@ TArray<FUnrealMcpLogEntry> FUnrealMcpLogCollector::Snapshot(int32 Limit) const
 	FScopeLock ScopeLock(&Lock);
 	const int32 Start = Limit > 0 ? FMath::Max(0, Entries.Num() - Limit) : 0;
 	return TArray<FUnrealMcpLogEntry>(Entries.GetData() + Start, Entries.Num() - Start);
+}
+
+TArray<FUnrealMcpLogEntry> FUnrealMcpLogCollector::SnapshotAfter(int64 AfterSequence) const
+{
+	FScopeLock ScopeLock(&Lock);
+	// Sequences are dense and ascending in buffer order, so the first newer entry is found by arithmetic.
+	const int32 Start = Entries.Num() == 0 ? 0 : (int32)FMath::Clamp<int64>(AfterSequence - Entries[0].Sequence + 1, 0, Entries.Num());
+	return TArray<FUnrealMcpLogEntry>(Entries.GetData() + Start, Entries.Num() - Start);
+}
+
+int64 FUnrealMcpLogCollector::GetLastSequence() const
+{
+	FScopeLock ScopeLock(&Lock);
+	return LastSequence;
 }
 
 FString FUnrealMcpLogCollector::VerbosityToString(ELogVerbosity::Type Verbosity)
