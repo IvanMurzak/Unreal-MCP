@@ -10,6 +10,7 @@
 #include "GameplayTagContainer.h"
 #include "GameplayTagsEditorModule.h"
 #include "GameplayTagsManager.h"
+#include "Misc/EngineVersionComparison.h"
 #include "Misc/OutputDevice.h"
 #include "Modules/ModuleManager.h"
 
@@ -454,6 +455,19 @@ void UUnrealMcpRqlEditorApi::RenameGameplayTag(const FString& Name, const FStrin
 	bool bExplicit = false, bRestricted = false, bAllowChildren = false;
 	Manager.GetTagEditorData(Tag, Comment, Source, bExplicit, bRestricted, bAllowChildren);
 	FTagLogCapture Log;
+#if UE_VERSION_OLDER_THAN(5, 7, 0)
+	// Before 5.7 the engine renames the tag alone: rename the listed descendants first, as 5.7 does. (All tags, not
+	// RequestGameplayTagChildrenInDictionary: on 5.6 its tags carry a number suffix, "A.B_645", that is no tag name.)
+	const FString OldPrefix = Tag.ToString() + TEXT(".");
+	FGameplayTagContainer Listed;
+	Manager.RequestAllGameplayTags(Listed, /*OnlyIncludeDictionaryTags*/ true);
+	for (const FGameplayTag& Child : Listed.GetGameplayTagArray())
+	{
+		const FString ChildName = Child.ToString();
+		if (ChildName.StartsWith(OldPrefix, ESearchCase::CaseSensitive))
+			Editor->RenameTagInINI(ChildName, Target + ChildName.RightChop(Tag.ToString().Len()));
+	}
+#endif
 	const bool bRenamed = Editor->RenameTagInINI(Tag.ToString(), Target);
 	// The engine renames the children first; the new parent then exists implicitly, so it never writes it and the tag
 	// would lose its entry and comment. Write it as the renamed tag.
