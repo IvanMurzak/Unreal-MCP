@@ -1,0 +1,23 @@
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpIpcVersionSpec.cpp
+  s_3e0a2681fef788::t_9a5dcf97020e77 1-67
+bridge/tests/IpcProtocolV2Tests.cs
+  s_3e0a2681fef788::t_81ac6b19167502 169-173
+  s_3e0a2681fef788::t_d6a14ebe625a9f 1-144,146-168,174-186
+  s_3e0a2681fef788::t_0a90c0f1163e11 145
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.8",
+  "base_commit_sha": "8789e860ef08fcb6039de85667b30a3e1630632d",
+  "prompts": {},
+  "sessions": {
+    "s_3e0a2681fef788": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a9715f3a-114a-4de7-815b-97526309448b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

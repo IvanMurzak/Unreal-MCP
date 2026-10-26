@@ -1,0 +1,23 @@
+UnrealMCP/Source/UnrealMcpEditor/Private/Agents/JsonAiAgentConfig.cpp
+  s_5601a2ed5b932a::t_a031d382ffdbbc 148-150
+  s_5601a2ed5b932a::t_9330f5c25d507b 242-243
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpAgentConfiguratorSpec.cpp
+  s_5601a2ed5b932a::t_2653000f98ae36 245-284
+  s_5601a2ed5b932a::t_9b49070e5505ea 73-88
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "8abda74c7f12ff758822e4320080d939313a6340",
+  "prompts": {},
+  "sessions": {
+    "s_5601a2ed5b932a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4a9d921c-49f2-4338-ab19-c42684cbc42e",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

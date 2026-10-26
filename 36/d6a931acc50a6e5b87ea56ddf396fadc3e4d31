@@ -1,0 +1,53 @@
+cli/src/lib/types.ts
+  s_7ca8a226e944ee::t_f89cd5e3029afc 414-467
+  s_7ca8a226e944ee::t_158485e15c711a 105-106
+cli/src/utils/engine-cache.ts
+  s_7ca8a226e944ee::t_71f1dfc8914ace 1-177
+cli/src/commands/install-engine.ts
+  s_7ca8a226e944ee::t_6d24b5d98da1e3 3-4,11-16,27-51
+cli/src/lib/open.ts
+  s_7ca8a226e944ee::t_8d2e5aefb05009 94-100,104-105
+  s_7ca8a226e944ee::t_310b1f810ee4ce 9
+  s_7ca8a226e944ee::t_1c3f2f00d297db 127-134,137
+  s_7ca8a226e944ee::t_ecb76f1b8c91f0 173,179-187
+cli/src/lib/auto-install-engine.ts
+  s_7ca8a226e944ee::t_cce51822210ff3 1-124
+cli/src/utils/engine-discovery.ts
+  s_7ca8a226e944ee::t_5aeb5fc400ccb6 254-263
+  s_7ca8a226e944ee::t_8f62a9a5aced7b 1-253,264-327
+cli/tests/auto-install-engine.test.ts
+  s_7ca8a226e944ee::t_29a4ec95a603a6 1-83
+cli/src/lib/engine.ts
+  s_7ca8a226e944ee::t_b1212da721a441 1-14,23-40,42,59-61,83-142,144-259
+  s_7ca8a226e944ee::t_045545404cbf38 16
+  s_7ca8a226e944ee::t_9936eb368dc21d 143
+cli/src/commands/open.ts
+  s_7ca8a226e944ee::t_c5f119f070ce47 23
+  s_7ca8a226e944ee::t_e3d5ab36b1d865 10
+cli/src/lib.ts
+  s_7ca8a226e944ee::t_c5f6d599a25ed8 44,47-53,60-77
+  s_7ca8a226e944ee::t_75de6db01e63e9 136-138
+  s_7ca8a226e944ee::t_70b4261aa2e70b 152-166
+cli/tests/engine-cache.test.ts
+  s_7ca8a226e944ee::t_1f935e97e58dfc 1-132
+cli/tests/engine-discovery.test.ts
+  s_7ca8a226e944ee::t_2900daddb204d7 1-178
+cli/tests/engine-chain.test.ts
+  s_7ca8a226e944ee::t_6d803fc7ef08a3 1-203
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "36d6a931acc50a6e5b87ea56ddf396fadc3e4d31",
+  "prompts": {},
+  "sessions": {
+    "s_7ca8a226e944ee": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5c789ba2-4580-4b69-b03f-4b499d4e3b5c",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

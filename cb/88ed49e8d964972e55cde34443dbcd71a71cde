@@ -1,0 +1,52 @@
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/SUnrealMcpMainWindow.cpp
+  s_010c46d1df2a14::t_98996fc6c835ef 28
+  s_010c46d1df2a14::t_4ea66ec7b53525 110-122
+  s_010c46d1df2a14::t_dd813ec07b629a 492-497,504-505,508
+  s_010c46d1df2a14::t_8bfe365202f032 556-569
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/UnrealMcpEditorViewModel.cpp
+  s_010c46d1df2a14::t_56824e437aa6ef 154-160,165-226,231-232
+UnrealMCP/Source/UnrealMcpEditor/Private/DevControl/UnrealMcpDevControlServer.cpp
+  s_010c46d1df2a14::t_9a3037a2a347fa 17
+  s_010c46d1df2a14::t_4565ca8fd685e7 98
+  s_010c46d1df2a14::t_0a5311856f1758 552
+UnrealMCP/Source/UnrealMcpEditor/Private/UnrealMcpRuntime.cpp
+  s_010c46d1df2a14::t_9f39c4afa35251 231-242
+  s_010c46d1df2a14::t_992254c420518d 397,399-400
+  s_010c46d1df2a14::t_be4d74a3bbbf9f 154-168
+  s_010c46d1df2a14::t_da5204ff6fc0c5 409
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/UnrealMcpEditorViewModel.h
+  s_010c46d1df2a14::t_ebf6f3cd1a8dcf 217-241
+  s_010c46d1df2a14::t_2434823cc6c11a 33-38
+  s_010c46d1df2a14::t_5ac458d2328bec 345-354
+  s_010c46d1df2a14::t_9d1da63b341af7 77-78,81-90
+UnrealMCP/Source/UnrealMcpEditor/Private/Bridge/UnrealMcpBridgeServer.h
+  s_010c46d1df2a14::t_c86c7e6a60747e 83-91
+  s_010c46d1df2a14::t_d692afa33fc1c8 153-157
+UnrealMCP/Source/UnrealMcpEditor/Private/Bridge/UnrealMcpBridgeServer.cpp
+  s_010c46d1df2a14::t_db3a9a61009871 398-408
+  s_010c46d1df2a14::t_9e4c7f30c7f29f 716-721
+scripts/window_smoke.py
+  s_010c46d1df2a14::t_0ef5262df4d29f 212-218,220-221
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpEditorViewModelSpec.cpp
+  s_010c46d1df2a14::t_8c2fac43109629 50-60
+  s_010c46d1df2a14::t_03280f9a20e1c2 29-37
+  s_010c46d1df2a14::t_08620f8f38ad28 275,279-282,284,286-380
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/SUnrealMcpMainWindow.h
+  s_010c46d1df2a14::t_095457b29567dd 106-109
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.7",
+  "base_commit_sha": "cb88ed49e8d964972e55cde34443dbcd71a71cde",
+  "prompts": {},
+  "sessions": {
+    "s_010c46d1df2a14": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5abf135e-29a4-41c1-907c-855f83d24eff",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

@@ -1,0 +1,33 @@
+cli/tests/engine-discovery.test.ts
+  s_ccc717f86d7e3e::t_d86e45b1323a91 15-18
+  s_ccc717f86d7e3e::t_9b62b558394b9b 19-23,27
+  s_421944529f445d::t_228124aa10162e 93-99,103,120-135
+cli/src/utils/engine-discovery.ts
+  s_421944529f445d::t_66d8726559f950 37-38,51-57,233-234
+cli/tests/engine-chain.test.ts
+  s_421944529f445d::t_fc2df6f00ab89a 168,192,216,273
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "d0229699a0f80f04f30ff7212342ad9ce1832d2d",
+  "prompts": {},
+  "sessions": {
+    "s_421944529f445d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a6aefd38cc8701e73",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_ccc717f86d7e3e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9c8ada08-e4d5-462c-b934-8bbd1f9565d6",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

@@ -1,0 +1,95 @@
+cli/tests/install-plugin.test.ts
+  s_115bb8040eea72::t_bbef5c306921f1 8
+  s_115bb8040eea72::t_85fc73fec7d0b8 28-33
+  s_29041d7e9c8e1c::t_8fe4cb6d7753b4 35-40,45-46,132-141,166-174
+cli/tests/minisign-fixture.ts
+  s_115bb8040eea72::t_bca765e211f666 1-60
+cli/tests/plugin-source.test.ts
+  s_115bb8040eea72::t_c1af264bed072c 37,42
+  s_115bb8040eea72::t_683f2444849281 8-9,16,28-36,38,40-41,43-49,54-55,65-71,91-93,95-102,113-148,151-155,160-161,164-165,169-175
+  s_115bb8040eea72::t_4c4d69f707d50a 176-198
+cli/tests/update.test.ts
+  s_115bb8040eea72::t_920f78485c093a 8
+  s_29041d7e9c8e1c::t_57c5ddb2113f63 26,28,31-33,159,162,169
+cli/tests/plugin-signature.test.ts
+  s_115bb8040eea72::t_e289006ed06209 1-164
+cli/src/lib/plugin-source.ts
+  s_115bb8040eea72::t_b31004ea2aa98d 26-31
+  s_115bb8040eea72::t_bdd561c53dd2ab 47-53,56-62
+  s_115bb8040eea72::t_53bdfa45727ddd 88-98,100,155,161,172
+  s_a0187f20d63fae::t_1b4fe76a3ce7df 99,101,152-154,156-160,162-171,173,178-183,208,225-259
+cli/src/lib/plugin-signature.ts
+  s_115bb8040eea72::t_641e8d85d45590 1-301
+.github/workflows/release.yml
+  s_adc1f643c631a0::t_d1d533c6cb208a 1013-1051,1059-1060
+cli/README.md
+  s_da2164df1dd72a::t_cc1df0534a5ad3 77-80,84
+cli/src/commands/install-plugin.ts
+  s_a0187f20d63fae::t_a65649eb91d169 26,39,73
+cli/src/commands/update.ts
+  s_adc1f643c631a0::t_b6b7f2bc209535 9,18,26
+cli/src/lib/install-plugin.ts
+  s_a0187f20d63fae::t_9a01c9a3d76745 103,105
+cli/src/lib/update.ts
+  s_adc1f643c631a0::t_e07eb08d4d2183 26-30,44-49,109,112,142,144
+docs/RELEASING.md
+  s_4bcfc9cc3d05e9::t_474bf6c823136f 89-131,515
+cli/src/lib/types.ts
+  s_29041d7e9c8e1c::t_7d8b70a709febe 245-249,274-279
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "e551f86f8f00a64a2286490ca1ec89e7fb0d115f",
+  "prompts": {},
+  "sessions": {
+    "s_115bb8040eea72": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f56e7dac-1d4f-4704-b7f3-da0b5d588798",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_29041d7e9c8e1c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-aafe3aaf234a7a812",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_4bcfc9cc3d05e9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "480e3fcd-19cf-405f-b23d-709a5f03a6d8",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_a0187f20d63fae": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "92a83b9b-471a-4dfb-a4d5-cc213d191839",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_adc1f643c631a0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d1052a8b-c122-46b7-bbcd-810a348ce13e",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_da2164df1dd72a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ecd280e2-56e8-4d9b-b55c-90d0cf973d74",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

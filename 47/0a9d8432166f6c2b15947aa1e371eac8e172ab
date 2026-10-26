@@ -1,0 +1,25 @@
+UnrealMCP/UnrealMCP.uplugin
+  s_e3cea916442b5e::t_b7611ff59560da 4
+bridge/src/com.IvanMurzak.Unreal.MCP.Bridge.csproj
+  s_e3cea916442b5e::t_9288b8ae0b0510 10
+cli/package-lock.json
+  s_e3cea916442b5e::t_dbe1f0d0330601 3,9
+cli/package.json
+  s_e3cea916442b5e::t_da8e41f754c442 3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "470a9d8432166f6c2b15947aa1e371eac8e172ab",
+  "prompts": {},
+  "sessions": {
+    "s_e3cea916442b5e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c575ab56-73e6-4952-bb8b-fef415924e27",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

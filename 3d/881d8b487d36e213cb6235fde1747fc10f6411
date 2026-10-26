@@ -1,0 +1,21 @@
+cli/src/lib/install-extension.ts
+  s_e19ebe83cb6110::t_26fefb85c138f4 164-165,169-170,173,175
+cli/src/utils/extension-source.ts
+  s_e19ebe83cb6110::t_3d67b82b6c0e59 205
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "3d881d8b487d36e213cb6235fde1747fc10f6411",
+  "prompts": {},
+  "sessions": {
+    "s_e19ebe83cb6110": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "514df444-7709-4c0d-be94-41a9023e64ee",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

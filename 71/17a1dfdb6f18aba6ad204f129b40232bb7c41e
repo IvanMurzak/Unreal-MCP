@@ -1,0 +1,19 @@
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpServerManagerSpec.cpp
+  s_f9af47c7136029::t_e9a3870b61d025 178
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "7117a1dfdb6f18aba6ad204f129b40232bb7c41e",
+  "prompts": {},
+  "sessions": {
+    "s_f9af47c7136029": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a7cc6ca8933795986",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

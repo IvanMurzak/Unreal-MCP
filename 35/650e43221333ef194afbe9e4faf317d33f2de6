@@ -1,0 +1,18 @@
+.github/actionlint.yaml
+  h_8325a340bf5897 9
+.github/workflows/release.yml
+  h_8325a340bf5897 311,767
+.github/workflows/test_pull_request.yml
+  h_8325a340bf5897 122,351
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "35650e43221333ef194afbe9e4faf317d33f2de6",
+  "prompts": {},
+  "humans": {
+    "h_8325a340bf5897": {
+      "author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
