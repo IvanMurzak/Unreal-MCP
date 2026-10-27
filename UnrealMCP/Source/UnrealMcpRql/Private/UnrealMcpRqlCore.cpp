@@ -604,7 +604,9 @@ namespace UnrealMcpRqlCoreLocal
 		FUnrealMcpRqlTypes* Types = &T;
 		const rql::TypeDescriptor* ActorType = T.ForClass(AActor::StaticClass());
 		FUnrealMcpRqlTypes::SetMember(D, Member("IsPlaying", BoolType(),
-			[](void*) { return rql::Value::boolean(GEditor && GEditor->IsPlaySessionInProgress()); },
+			// A requested stop counts as stopped (RequestEndPlayMap acts on the next tick), so the receipt's read-back
+			// value of set IsPlaying = false is false (RQL reads written members back after the write).
+			[](void*) { return rql::Value::boolean(GEditor && GEditor->IsPlaySessionInProgress() && !GEditor->ShouldEndPlayMap()); },
 			[](void*, const rql::Value& Value)
 			{
 				if (!GEditor)

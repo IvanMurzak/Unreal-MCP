@@ -80,7 +80,8 @@ registers), `CreateAsset(Class, Path)` (the `editor | call CreateAsset` rules an
 The editor's Extensions window lists the module's extension (`GetExtensionId`) and can disable it; the rql-* tools
 (and their skill) are re-registered when a module registers, unregisters or is toggled. Specs use
 `UnrealMcpRqlTools::FindModule(ExtensionId)` and `UnrealMcpRqlTools::RunPlan(Plan, bMutate, &Result)` (see any
-extension's `Private/Tests/*Spec.cpp`).
+extension's `Private/Tests/*Spec.cpp`); pass `bMutate` only for plans ending in `set` / `call` (RQL refuses a mutation
+request without one as `invalid-plan`).
 
 ---
 

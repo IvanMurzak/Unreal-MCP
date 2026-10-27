@@ -396,10 +396,10 @@ FString FUnrealMcpRqlSession::Execute(const FString& PlanJson, bool bAllowMutati
 
 bool FUnrealMcpRqlSession::FunctionSource(rql::QueryPlan& Plan, rql::QueryResult& OutFailure)
 {
-	// The C++ runtime starts queries at a source or ref(...); RQL text also lets a host function start one, as in
-	// unreal.assets("Material") | select Name, optionally followed by a member path (unreal.asset("/Game/BP").EventGraph).
-	// Evaluate such a call once (its arguments are literals) and run the query on a source named after the function
-	// holding the value, navigating the member path from there.
+	// RQL text lets a host function start a query, as in unreal.assets("Material") | select Name, optionally followed by
+	// a member path (unreal.asset("/Game/BP").EventGraph). The C++ runtime (0.2.0) runs a bare function call itself but
+	// not the member-path form, so the session handles both the same way: evaluate the call once (its arguments are
+	// literals) and run the query on a source named after the function holding the value, navigating the member path.
 	rql::ExprPtr Source = Plan.source;
 	std::vector<rql::Segment> Members;
 	if (Source && Source->kind == rql::ExprKind::Path && Source->on && Source->on->kind == rql::ExprKind::Call)

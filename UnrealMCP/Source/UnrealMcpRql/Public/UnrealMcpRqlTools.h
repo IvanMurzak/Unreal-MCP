@@ -37,7 +37,10 @@ namespace UnrealMcpRqlTools
 	/** Whether @p Module takes part in RQL sessions (SetEnabledExtensions). */
 	UNREALMCPRQL_API bool IsModuleEnabled(const IUnrealMcpRqlModule& Module);
 
-	/** Execute a QueryPlan JSON on a fresh session; returns the QueryResult JSON. Game thread. (Specs drive this.) */
+	/**
+	 * Execute a QueryPlan JSON on a fresh session; returns the QueryResult JSON. Game thread. (Specs drive this.)
+	 * With @p bAllowMutation the plan must end in a set or call stage (RQL 0.2.0: otherwise invalid-plan).
+	 */
 	UNREALMCPRQL_API FString ExecutePlan(const FString& PlanJson, bool bAllowMutation, bool bDryRun, bool& bOutOk);
 
 	/** The rql-schema JSON for @p TypeName (empty = overview). Game thread. */
@@ -51,6 +54,9 @@ namespace UnrealMcpRqlTools
 	/** The registered RQL module of the extension @p ExtensionId; nullptr when none. */
 	UNREALMCPRQL_API IUnrealMcpRqlModule* FindModule(const FString& ExtensionId);
 
-	/** ExecutePlan without dry run: whether the QueryResult is ok; @p OutResult receives the parsed QueryResult JSON. */
+	/**
+	 * ExecutePlan without dry run: whether the QueryResult is ok; @p OutResult receives the parsed QueryResult JSON.
+	 * Pass @p bAllowMutation only for plans that end in set / call (read plans with it fail with invalid-plan).
+	 */
 	UNREALMCPRQL_API bool RunPlan(const FString& PlanJson, bool bAllowMutation, TSharedPtr<FJsonObject>* OutResult = nullptr);
 }
