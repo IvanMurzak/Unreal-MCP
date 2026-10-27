@@ -7,6 +7,7 @@
 #include "Misc/AutomationTest.h"
 #include "Dispatch/UnrealMcpGameThreadDispatcher.h"
 #include "Async/Async.h"
+#include "Containers/Ticker.h"
 
 /**
  * Game-thread dispatcher specs (docs/ARCHITECTURE.md §4). Proves the load-bearing DoD claim: a tool
@@ -64,6 +65,32 @@ void FUnrealMcpDispatcherSpec::Define()
 				TestTrue(TEXT("dispatched off the game thread"), bCalledOffGameThread);
 				TestTrue(TEXT("body ran on the game thread"), bBodyOnGameThread);
 				TestTrue(TEXT("success"), Result.bSuccess);
+				Done.Execute();
+			});
+		});
+
+		// A body that waits on game-thread tasks itself (an Interchange import from python-execute) asserted the task
+		// graph's recursion guard and crashed the editor when the body ran inside the game thread's task queue.
+		LatentIt("runs an off-thread call at the end of a frame: outside the task queue and the ticker, which its body may pump", FTimespan::FromSeconds(15), [this](const FDoneDelegate& Done)
+		{
+			Async(EAsyncExecution::Thread, [this, Done]()
+			{
+				FUnrealMcpGameThreadDispatcher Dispatcher;
+				// Shared, not a stack bool: a timed-out body could still run after this thread returned.
+				TSharedRef<FThreadSafeBool, ESPMode::ThreadSafe> bInsideTaskQueue = MakeShared<FThreadSafeBool, ESPMode::ThreadSafe>(true);
+				const FUnrealMcpToolResult Result = Dispatcher.Dispatch(
+					FUnrealMcpToolCall(),
+					[bInsideTaskQueue](const FUnrealMcpToolCall&)
+					{
+						*bInsideTaskQueue = FTaskGraphInterface::Get().IsThreadProcessingTasks(ENamedThreads::GameThread);
+						// What HLOD builds and material baking do while they wait: neither may be re-entered from here.
+						FTaskGraphInterface::Get().ProcessThreadUntilIdle(ENamedThreads::GameThread);
+						FTSTicker::GetCoreTicker().Tick(0.f);
+						return FUnrealMcpToolResult::Success(TEXT("ok"));
+					},
+					FTimespan::FromSeconds(10)).Get();
+				TestTrue(TEXT("success"), Result.bSuccess);
+				TestFalse(TEXT("the body did not run inside the game thread's task processing"), static_cast<bool>(*bInsideTaskQueue));
 				Done.Execute();
 			});
 		});

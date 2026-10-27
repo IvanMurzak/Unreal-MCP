@@ -147,6 +147,20 @@ void FUnrealMcpPythonToolsSpec::Define()
 		// The read-only snippet left no transaction behind, so one undo reverts the edit.
 		TestTrue(TEXT("undo"), GEditor->UndoTransaction());
 		TestEqual(TEXT("undone"), Lamp->PointLightComponent->Intensity, 1.f);
+		TestFalse(TEXT("a recorded edit gets no no-undo note"), Run(Find + TEXT("light.set_editor_property('intensity', 3.0)")).Message.Contains(TEXT("recorded no undo step")));
+
+		// A direct setter records nothing (no Modify): the result says so, since an undo would revert the previous edit.
+		const FUnrealMcpToolResult Direct = Run(Find + TEXT("lamp.set_actor_location(unreal.Vector(0, 0, 321), False, False)"));
+		TestTrue(TEXT("direct setter ok"), Direct.bSuccess);
+		TestEqual(TEXT("moved"), Lamp->GetActorLocation().Z, 321.0);
+		TestTrue(*FString::Printf(TEXT("warns that nothing was recorded (%s)"), *Direct.Message.Left(500)), Direct.Message.Contains(TEXT("recorded no undo step")));
+		const FUnrealMcpToolResult Modified = Run(Find + TEXT("lamp.modify()\nlamp.set_actor_location(unreal.Vector(0, 0, 654), False, False)"));
+		TestFalse(TEXT("modify() first records it: no note"), Modified.Message.Contains(TEXT("recorded no undo step")));
+		// A record without changes (the actor Modify()'d by a no-op write; the location lives on the root component) is
+		// dropped with the transaction: still nothing to undo, still the note.
+		const FUnrealMcpToolResult Unchanged = Run(Find + TEXT("lamp.set_editor_property('tags', lamp.tags)\nlamp.set_actor_location(unreal.Vector(0, 0, 987), False, False)"));
+		TestTrue(*FString::Printf(TEXT("a change-less record still warns (%s)"), *Unchanged.Message.Left(500)), Unchanged.Message.Contains(TEXT("recorded no undo step")));
+		TestFalse(TEXT("a read-only snippet gets no note"), Run(Find + TEXT("lamp.get_actor_location().z")).Message.Contains(TEXT("recorded no undo step")));
 		World->EditorDestroyActor(Lamp, true);
 	});
 

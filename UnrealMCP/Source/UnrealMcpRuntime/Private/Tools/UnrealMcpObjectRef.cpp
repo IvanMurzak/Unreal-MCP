@@ -5,9 +5,12 @@
 #include "UnrealMcpWorldProvider.h"
 
 #include "Engine/Blueprint.h"
+#include "Engine/Level.h"
+#include "Engine/World.h"
 #include "EngineUtils.h"            // TActorIterator
 #include "GameFramework/Actor.h"
 #include "Misc/PackageName.h"
+#include "UObject/Package.h"
 #include "UObject/UObjectGlobals.h"
 
 namespace
@@ -24,6 +27,29 @@ namespace
 #else
 		return Actor->GetName();
 #endif
+	}
+
+	/** A level loaded in the active world by its map name ("Sub_A"), package ("/Game/Maps/Sub_A") or object path. */
+	ULevel* ObjectRefLoadedLevel(const FString& Text)
+	{
+		UWorld* World = FUnrealMcpWorldProvider::GetActiveWorld();
+		if (!World)
+			return nullptr;
+		// A package or object path names one level; a short map name only when exactly one loaded level has it.
+		const FString Package = FPackageName::ObjectPathToPackageName(Text);
+		ULevel* ByShortName = nullptr;
+		int32 ShortMatches = 0;
+		for (ULevel* Level : World->GetLevels())
+		{
+			if (!Level)
+				continue;
+			const FString LevelPackage = Level->GetOutermost()->GetName();
+			if (LevelPackage.Equals(Package, ESearchCase::IgnoreCase) || Level->GetPathName().Equals(Text, ESearchCase::IgnoreCase))
+				return Level;
+			if (FPackageName::GetShortName(LevelPackage).Equals(Text, ESearchCase::IgnoreCase) && ShortMatches++ == 0)
+				ByShortName = Level;
+		}
+		return ShortMatches == 1 ? ByShortName : nullptr;
 	}
 }
 
@@ -120,6 +146,8 @@ namespace FUnrealMcpObjectRef
 			Found = ResolveClass(Text);
 		else if (Wanted->IsChildOf(AActor::StaticClass()))
 			Found = ResolveActor(Text);
+		else if (Wanted->IsChildOf(ULevel::StaticClass()))
+			Found = ObjectRefLoadedLevel(Text);
 		else
 			Found = LoadObjectQuiet(Wanted, Text);
 		return Found && Found->IsA(Wanted) ? Found : nullptr;

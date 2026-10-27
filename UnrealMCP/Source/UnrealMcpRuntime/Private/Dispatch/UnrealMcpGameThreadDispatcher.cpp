@@ -3,13 +3,13 @@
 
 #include "UnrealMcpGameThreadDispatcher.h"
 #include "UnrealMcpLog.h"
-#include "Async/Async.h"
 #include "HAL/Event.h"
+#include "HAL/PlatformProcess.h"
+#include "HAL/PlatformTime.h"
 #include "HAL/Runnable.h"
 #include "HAL/RunnableThread.h"
 #include "Misc/CoreDelegates.h"
 #include "Misc/ScopeLock.h"
-#include "Containers/Ticker.h"
 
 #include <atomic>
 
@@ -164,18 +164,84 @@ namespace
 				return;
 			}
 
-			// Not ready (e.g. Python before its first tick). A ticker runs on a later frame, so the engine keeps
-			// ticking in between; the watchdog bounds the wait.
+			// Not ready (e.g. Python before its first tick): again on a later frame, so the engine keeps ticking in
+			// between; the watchdog bounds the wait.
 			UE_LOG(LogUnrealMcp, Verbose, TEXT("[Unreal-MCP] tool call not ready, retrying: %s"), *Result.Message);
-			FTSTicker::GetCoreTicker().AddTicker(
-				FTickerDelegate::CreateLambda([Self = AsShared()](float)
-				{
-					Self->Run();
-					return false;
-				}),
-				0.1f);
+			Schedule(0.1f);
 		}
+
+		/** Run on the game thread at the end of a frame (after @p Delay seconds): see FUnrealMcpEndOfFrameQueue. */
+		void Schedule(float Delay = 0.f);
 	};
+
+	/**
+	 * Where off-thread calls run: the game thread at the end of a frame (FCoreDelegates::OnEndFrame, right after the
+	 * core ticker), outside both the task graph's game-thread processing and the ticker. A body run from a game-thread
+	 * AsyncTask that waits on game-thread tasks itself (an Interchange import from python-execute) tripped the task graph's
+	 * recursion guard; one run from the core ticker that ticks the ticker itself (HLOD builds, material baking) breaks
+	 * the ticker's non-reentrant Tick. Both crashed the editor. Process-lifetime, like the watchdog; the delegate is
+	 * removed on engine pre-exit (queued calls then end by their timeouts).
+	 */
+	class FUnrealMcpEndOfFrameQueue
+	{
+	public:
+		static FUnrealMcpEndOfFrameQueue& Get()
+		{
+			static FUnrealMcpEndOfFrameQueue* Instance = new FUnrealMcpEndOfFrameQueue();
+			return *Instance;
+		}
+
+		/** Thread-safe. */
+		void Add(TSharedRef<FUnrealMcpDispatchJob, ESPMode::ThreadSafe> Job, double NotBefore)
+		{
+			FScopeLock Lock(&Mutex);
+			Pending.Add({ MoveTemp(Job), NotBefore });
+		}
+
+	private:
+		struct FEntry
+		{
+			TSharedRef<FUnrealMcpDispatchJob, ESPMode::ThreadSafe> Job;
+			double NotBefore;
+		};
+
+		FUnrealMcpEndOfFrameQueue()
+		{
+			EndFrame = FCoreDelegates::OnEndFrame.AddRaw(this, &FUnrealMcpEndOfFrameQueue::Drain);
+			FCoreDelegates::OnEnginePreExit.AddLambda([this]() { FCoreDelegates::OnEndFrame.Remove(EndFrame); });
+		}
+
+		void Drain()
+		{
+			TArray<FEntry> Due;
+			{
+				FScopeLock Lock(&Mutex);
+				const double Now = FPlatformTime::Seconds();
+				for (int32 Index = 0; Index < Pending.Num(); )
+				{
+					if (Pending[Index].NotBefore <= Now)
+					{
+						Due.Add(MoveTemp(Pending[Index]));
+						Pending.RemoveAt(Index); // keeps arrival order (FIFO)
+					}
+					else
+						++Index;
+				}
+			}
+			// Outside the lock: a body may dispatch (and so enqueue) again; that call runs on a later frame.
+			for (FEntry& Entry : Due)
+				Entry.Job->Run();
+		}
+
+		FCriticalSection Mutex;
+		TArray<FEntry> Pending;
+		FDelegateHandle EndFrame;
+	};
+
+	void FUnrealMcpDispatchJob::Schedule(float Delay)
+	{
+		FUnrealMcpEndOfFrameQueue::Get().Add(AsShared(), FPlatformTime::Seconds() + Delay);
+	}
 }
 
 TFuture<FUnrealMcpToolResult> FUnrealMcpGameThreadDispatcher::Dispatch(
@@ -201,6 +267,6 @@ TFuture<FUnrealMcpToolResult> FUnrealMcpGameThreadDispatcher::Dispatch(
 
 	// Arm the deadline before posting so a body that finishes instantly is simply pruned by the watchdog.
 	FUnrealMcpDispatchWatchdog::Get().Watch(State, CancelFlag, TimeoutMs);
-	AsyncTask(ENamedThreads::GameThread, [Job]() { Job->Run(); });
+	Job->Schedule();
 	return Future;
 }

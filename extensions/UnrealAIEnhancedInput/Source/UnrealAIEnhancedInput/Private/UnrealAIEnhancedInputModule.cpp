@@ -2,6 +2,7 @@
 // See the LICENSE file in the repository root for more information.
 
 #include "Modules/ModuleManager.h"
+#include "Misc/EngineVersionComparison.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
 
@@ -22,6 +23,23 @@
  */
 class FUnrealAIEnhancedInputRqlModule : public IUnrealMcpRqlModule
 {
+	/** A context's live key mappings (GetMappings: the 5.7+ DefaultKeyMappings, the Mappings array before) as [{Action, Key}]. */
+	static TSharedPtr<FJsonValue> KeyMappingsJson(UObject* Object)
+	{
+		TArray<TSharedPtr<FJsonValue>> Mappings;
+		if (const UInputMappingContext* MappingContext = Cast<UInputMappingContext>(Object))
+		{
+			for (const FEnhancedActionKeyMapping& Mapping : MappingContext->GetMappings())
+			{
+				TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
+				Entry->SetStringField(TEXT("Action"), Mapping.Action ? Mapping.Action->GetName() : FString());
+				Entry->SetStringField(TEXT("Key"), Mapping.Key.GetFName().ToString());
+				Mappings.Add(MakeShared<FJsonValueObject>(Entry));
+			}
+		}
+		return MakeShared<FJsonValueArray>(Mappings);
+	}
+
 public:
 	virtual FString GetRqlModuleName() const override { return TEXT("EnhancedInput"); }
 	virtual FString GetExtensionId() const override { return TEXT("com.ivanmurzak.unreal-ai-enhanced-input"); }
@@ -36,22 +54,14 @@ public:
 		Context.AddApiSource(TEXT("enhancedInput"),
 			TEXT("Enhanced Input operations: call CreateAction(path, valueType) / CreateContext(path) / AddMapping(context, action, key) / RemoveMapping(context, action, key)"),
 			UUnrealAIEnhancedInputRqlApi::StaticClass(), TEXT("EnhancedInputOperations"));
-		Context.AddJsonMember(UInputMappingContext::StaticClass(), TEXT("KeyMappings"), TEXT("the context's key mappings: Action, Key"),
-			[](UObject* Object) -> TSharedPtr<FJsonValue>
-			{
-				TArray<TSharedPtr<FJsonValue>> Mappings;
-				if (const UInputMappingContext* MappingContext = Cast<UInputMappingContext>(Object))
-				{
-					for (const FEnhancedActionKeyMapping& Mapping : MappingContext->GetMappings())
-					{
-						TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
-						Entry->SetStringField(TEXT("Action"), Mapping.Action ? Mapping.Action->GetName() : FString());
-						Entry->SetStringField(TEXT("Key"), Mapping.Key.GetFName().ToString());
-						Mappings.Add(MakeShared<FJsonValueObject>(Entry));
-					}
-				}
-				return MakeShared<FJsonValueArray>(Mappings);
-			});
+		Context.AddJsonMember(UInputMappingContext::StaticClass(), TEXT("KeyMappings"), TEXT("the context's key mappings: Action, Key"), &KeyMappingsJson);
+#if !UE_VERSION_OLDER_THAN(5, 7, 0)
+		// Since UE 5.7 the reflected `Mappings` array is deprecated and stays empty (the mappings moved to DefaultKeyMappings):
+		// an agent reading it saw [] beside a working mapping. It reads the live mappings too. (Before 5.7 it IS the live,
+		// editable array: left as reflected.)
+		Context.AddJsonMember(UInputMappingContext::StaticClass(), TEXT("Mappings"), TEXT("the context's key mappings: Action, Key (same as KeyMappings)"),
+			&KeyMappingsJson);
+#endif
 		Context.AddGuide(TEXT("Enhanced Input"), TEXT(R"MD(Input Actions and Mapping Contexts are assets: `inputActions`, `inputContexts` (or `unreal.asset("/Game/Input/IA_Jump")`).
 An action's members are its reflected properties (ValueType, Triggers, Modifiers, bConsumeInput, ...); a context lists its
 bindings in `KeyMappings`.

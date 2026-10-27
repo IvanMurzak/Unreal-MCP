@@ -9,6 +9,7 @@
 #include "UnrealMcpRuntimeCoreTools.h" // UnrealMcpPingTool::Register moved to the runtime module (§12.1)
 #include "UnrealMcpToolRegistry.h"
 #include "Dom/JsonObject.h"
+#include "Dom/JsonValue.h"
 
 /** Tool registry + ping specs (docs/ARCHITECTURE.md §2.2, §3.3, §10). */
 BEGIN_DEFINE_SPEC(FUnrealMcpToolRegistrySpec, "UnrealMcp.Tools.Registry",
@@ -62,6 +63,35 @@ void FUnrealMcpToolRegistrySpec::Define()
 			FUnrealMcpToolRegistry Registry;
 			const FUnrealMcpToolResult Result = Registry.Execute(TEXT("does-not-exist"), FUnrealMcpToolCall());
 			TestFalse(TEXT("not success"), Result.bSuccess);
+		});
+
+		It("refuses a call missing a required parameter before the handler runs, naming it and what was sent", [this]()
+		{
+			FUnrealMcpToolRegistry Registry;
+			bool bHandlerRan = false;
+			Registry.Tool(TEXT("registry-spec-required"))
+				.ParamString(TEXT("path"), TEXT("asset path"), EUnrealMcpParamRequirement::Required)
+				.ParamString(TEXT("name"), TEXT("optional name"), EUnrealMcpParamRequirement::Optional)
+				.Handle([&bHandlerRan](const FUnrealMcpToolCall&) { bHandlerRan = true; return FUnrealMcpToolResult::Success(TEXT("ran")); });
+
+			TSharedPtr<FJsonObject> Misspelled = MakeShared<FJsonObject>();
+			Misspelled->SetStringField(TEXT("blueprint"), TEXT("/Game/BP"));
+			const FUnrealMcpToolResult Missing = Registry.Execute(TEXT("registry-spec-required"), FUnrealMcpToolCall(Misspelled));
+			TestFalse(TEXT("refused"), Missing.bSuccess);
+			TestFalse(TEXT("the handler did not run"), bHandlerRan);
+			TestTrue(*FString::Printf(TEXT("names the parameter, the declared ones and the sent ones (%s)"), *Missing.Message),
+				Missing.Message.Contains(TEXT("Missing required 'path'")) && Missing.Message.Contains(TEXT("parameters: path, name"))
+				&& Missing.Message.Contains(TEXT("sent: blueprint")));
+
+			TSharedPtr<FJsonObject> Null = MakeShared<FJsonObject>();
+			Null->SetField(TEXT("path"), MakeShared<FJsonValueNull>());
+			TestTrue(TEXT("a JSON null counts as missing"), Registry.Execute(TEXT("registry-spec-required"), FUnrealMcpToolCall(Null)).Message.Contains(TEXT("Missing required 'path'")));
+			TestFalse(TEXT("the handler still did not run"), bHandlerRan);
+
+			TSharedPtr<FJsonObject> Given = MakeShared<FJsonObject>();
+			Given->SetStringField(TEXT("path"), TEXT("/Game/BP"));
+			TestTrue(TEXT("runs with the required parameter (optional ones may be absent)"),
+				Registry.Execute(TEXT("registry-spec-required"), FUnrealMcpToolCall(Given)).bSuccess && bHandlerRan);
 		});
 	});
 

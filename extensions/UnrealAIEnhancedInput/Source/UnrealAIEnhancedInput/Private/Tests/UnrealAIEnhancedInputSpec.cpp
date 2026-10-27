@@ -120,6 +120,13 @@ void FUnrealAIEnhancedInputSpec::Define()
 			if (Mappings.IsValid())
 				FJsonSerializer::Serialize(Mappings.ToSharedRef(), TJsonWriterFactory<>::Create(&Text));
 			TestTrue(TEXT("the mapping is listed"), Text.Contains(TEXT("SpaceBar")));
+			// unreal.asset("<context>") | select Mappings — the live mappings on every version (since 5.7 the reflected array is deprecated and empty)
+			TSharedPtr<FJsonObject> Reflected;
+			TestTrue(TEXT("Mappings read"), UnrealMcpRqlTools::RunPlan(FString::Printf(TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"%s"}]},"stages":[{"op":"select","fields":[{"name":"Mappings","expr":{"path":["Mappings"]}}]}]})RQL"), *ContextPath), false, &Reflected));
+			FString ReflectedText;
+			if (Reflected.IsValid())
+				FJsonSerializer::Serialize(Reflected.ToSharedRef(), TJsonWriterFactory<>::Create(&ReflectedText));
+			TestTrue(*FString::Printf(TEXT("Mappings lists the mapping too (%s)"), *ReflectedText.Left(300)), ReflectedText.Contains(TEXT("SpaceBar")));
 			// enhancedInput | call AddMapping("<context>", "<action>", "NoSuchKey")
 			TestFalse(TEXT("unknown key refused"), UnrealMcpRqlTools::RunPlan(FString::Printf(TEXT(R"RQL({"rql":"0.1","source":{"path":["enhancedInput"]},"stages":[{"op":"call","method":"AddMapping","args":[{"lit":"%s"},{"lit":"%s"},{"lit":"NoSuchKeyRqlSpec"}]}]})RQL"), *ContextPath, *ActionPath), true));
 		});

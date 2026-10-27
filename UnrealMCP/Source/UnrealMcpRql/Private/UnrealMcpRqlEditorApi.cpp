@@ -18,7 +18,10 @@
 #include "EditorLevelUtils.h"
 #include "Engine/Level.h"
 #include "Engine/LevelStreaming.h"
+#include "Engine/LevelStreamingAlwaysLoaded.h"
+#include "Engine/LevelStreamingDynamic.h"
 #include "Engine/World.h"
+#include "LevelUtils.h"
 #include "Components/ActorComponent.h"
 #include "Components/SceneComponent.h"
 #include "DataTableEditorUtils.h"
@@ -358,6 +361,43 @@ void UUnrealMcpRqlEditorApi::SaveAll()
 	// Never-saved maps would prompt for a location: SaveDirtyPackages skips the prompt when it cannot ask.
 	if (!UEditorLoadingAndSavingUtils::SaveDirtyPackages(/*bSaveMapPackages*/ true, /*bSaveContentPackages*/ true))
 		Failed(TEXT("some packages could not be saved (never-saved levels need SaveLevel(path))"));
+}
+
+ULevel* UUnrealMcpRqlEditorApi::AddSublevel(const FString& Path, const FString& Streaming)
+{
+	UWorld* World = FUnrealMcpObjectRef::GetEditorWorld();
+	if (!World)
+		return Failed<ULevel*>(TEXT("no editor world"));
+	if (World->IsPartitionedWorld())
+		return Failed<ULevel*>(TEXT("a World Partition world streams by cells, not sublevels (use data layers, or a level without World Partition)"));
+	const FString Package = FPackageName::ObjectPathToPackageName(Path.TrimStartAndEnd());
+	FString File;
+	if (!FPackageName::IsValidLongPackageName(Package) || !FPackageName::DoesPackageExist(Package, &File)
+		|| !FPaths::GetExtension(File, /*bIncludeDot*/ true).Equals(FPackageName::GetMapPackageExtension(), ESearchCase::IgnoreCase))
+		return Failed<ULevel*>(FString::Printf(TEXT("no saved level (map) at '%s' (save it first: editor | call SaveLevel())"), *Path));
+	if (Package == World->GetOutermost()->GetName())
+		return Failed<ULevel*>(TEXT("a level cannot be its own sublevel"));
+	// The engine asks with a modal dialog (not skipped when unattended) when the world already streams that package.
+	if (FLevelUtils::FindStreamingLevel(World, *Package))
+		return Failed<ULevel*>(FString::Printf(TEXT("'%s' is already a sublevel of this world"), *Package));
+	const FString Kind = Streaming.TrimStartAndEnd();
+	UClass* StreamingClass = Kind.IsEmpty() || Kind.Equals(TEXT("Dynamic"), ESearchCase::IgnoreCase) ? ULevelStreamingDynamic::StaticClass()
+		: Kind.Equals(TEXT("AlwaysLoaded"), ESearchCase::IgnoreCase) ? ULevelStreamingAlwaysLoaded::StaticClass() : nullptr;
+	if (!StreamingClass)
+		return Failed<ULevel*>(FString::Printf(TEXT("unknown streaming '%s' (Dynamic or AlwaysLoaded)"), *Streaming));
+	// AddLevelToWorld makes the new level current: keep the current level where it was (spawns keep their target).
+	ULevel* Current = World->GetCurrentLevel();
+	ULevelStreaming* Added = UEditorLevelUtils::AddLevelToWorld(World, *Package, StreamingClass);
+	ULevel* Level = Added ? Added->GetLoadedLevel() : nullptr;
+	if (!Level)
+	{
+		if (Added)
+			UEditorLevelUtils::RemoveInvalidLevelFromWorld(Added); // no broken entry left behind
+		return Failed<ULevel*>(FString::Printf(TEXT("could not load '%s' as a sublevel"), *Package));
+	}
+	if (Current && Current != World->GetCurrentLevel())
+		UEditorLevelUtils::MakeLevelCurrent(Current, /*bEvenIfLocked*/ false);
+	return Level;
 }
 
 void UUnrealMcpRqlEditorApi::UnloadSublevel(ULevel* Level)

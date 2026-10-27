@@ -24,6 +24,10 @@
 #include "EngineUtils.h"
 #include "GameFramework/Actor.h"
 #include "HAL/FileManager.h"
+#include "EditorLevelUtils.h"
+#include "Engine/Level.h"
+#include "Layers/LayersSubsystem.h"
+#include "Misc/PackageName.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "UnrealMcpRqlSpecHelpers.h"
@@ -338,6 +342,49 @@ void FUnrealMcpRqlSpec::Define()
 			}
 		});
 
+		It("writes Layers through the Layers subsystem: missing layers are created, removed ones leave the actor, undo restores", [this]()
+		{
+			SpawnLamp();
+			TArray<AActor*> Found = Lamps();
+			ULayersSubsystem* LayersSubsystem = GEditor ? GEditor->GetEditorSubsystem<ULayersSubsystem>() : nullptr;
+			if (!TestEqual(TEXT("one lamp"), Found.Num(), 1) || !TestNotNull(TEXT("layers subsystem"), LayersSubsystem))
+				return;
+			AActor* Lamp = Found[0];
+			if (Lamp->GetLevel()->bIsPartitioned)
+			{
+				// A World Partition world (the full suite can leave one open): actors there take data layers, not editor layers.
+				// actors | where Label == "RqlSpecLamp" | set Layers = ["RqlSpecLayerB"]
+				const TSharedPtr<FJsonObject> Refused = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"RqlSpecLamp"}]}},{"op":"set","assign":[{"target":{"path":["Layers"]},"value":{"list":[{"lit":"RqlSpecLayerB"}]}}]}]})RQL"), true);
+				TestTrue(*FString::Printf(TEXT("refused, naming data layers (%s)"), *Codes(Refused)), !IsOk(Refused) && Codes(Refused).Contains(TEXT("data layers")));
+				return;
+			}
+			// A raw name already on the actor (what a plain property write used to leave) gets its layer created too.
+			Lamp->Layers.Add(TEXT("RqlSpecLayerA"));
+			// actors | where Label == "RqlSpecLamp" | set Layers = ["RqlSpecLayerA", "RqlSpecLayerB"]
+			const TSharedPtr<FJsonObject> Both = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"RqlSpecLamp"}]}},{"op":"set","assign":[{"target":{"path":["Layers"]},"value":{"list":[{"lit":"RqlSpecLayerA"},{"lit":"RqlSpecLayerB"}]}}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("set (%s)"), *Codes(Both)), IsOk(Both));
+			TestTrue(TEXT("layer A exists in the world (the Layers panel lists it)"), LayersSubsystem->IsLayer(TEXT("RqlSpecLayerA")));
+			TestTrue(TEXT("layer B exists"), LayersSubsystem->IsLayer(TEXT("RqlSpecLayerB")));
+			TestTrue(TEXT("the actor is in layer A"), LayersSubsystem->GetActorsFromLayer(TEXT("RqlSpecLayerA")).Contains(Lamp));
+			// actors | where Label == "RqlSpecLamp" | set Layers = ["RqlSpecLayerB"]
+			const TSharedPtr<FJsonObject> OnlyB = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"RqlSpecLamp"}]}},{"op":"set","assign":[{"target":{"path":["Layers"]},"value":{"list":[{"lit":"RqlSpecLayerB"}]}}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("replaced (%s)"), *Codes(OnlyB)), IsOk(OnlyB));
+			TestFalse(TEXT("left layer A"), LayersSubsystem->GetActorsFromLayer(TEXT("RqlSpecLayerA")).Contains(Lamp));
+			TestTrue(TEXT("still in layer B"), LayersSubsystem->GetActorsFromLayer(TEXT("RqlSpecLayerB")).Contains(Lamp));
+			// actors | where Label == "RqlSpecLamp" | select Layers
+			const TSharedPtr<FJsonObject> Read = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"RqlSpecLamp"}]}},{"op":"select","fields":[{"name":"Layers","expr":{"path":["Layers"]}}]}]})RQL"));
+			const TSharedPtr<FJsonValue> Names = Cell(Read, 0, 0);
+			TestTrue(*FString::Printf(TEXT("reads the names (%s)"), *Codes(Read)), Names.IsValid() && Names->Type == EJson::Array
+				&& Names->AsArray().Num() == 1 && Names->AsArray()[0]->AsString() == TEXT("RqlSpecLayerB"));
+			// actors | where Label == "RqlSpecLamp" | set Layers = [""]
+			const TSharedPtr<FJsonObject> Empty = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"RqlSpecLamp"}]}},{"op":"set","assign":[{"target":{"path":["Layers"]},"value":{"list":[{"lit":""}]}}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("an empty name is refused (%s)"), *Codes(Empty)), !IsOk(Empty) && Codes(Empty).Contains(TEXT("cannot be empty")));
+			GEditor->UndoTransaction();
+			TestTrue(TEXT("undo puts the actor back in layer A"), Lamp->Layers.Contains(FName(TEXT("RqlSpecLayerA"))) && Lamp->Layers.Contains(FName(TEXT("RqlSpecLayerB"))));
+			LayersSubsystem->DeleteLayer(TEXT("RqlSpecLayerA"));
+			LayersSubsystem->DeleteLayer(TEXT("RqlSpecLayerB"));
+		});
+
 		It("reads Folder as null without a folder, and compares and prints transforms cleanly", [this]()
 		{
 			SpawnLamp();
@@ -522,6 +569,43 @@ void FUnrealMcpRqlSpec::Define()
 			const TSharedPtr<FJsonObject> Short = Exec(/* unreal.find("RqlSpecLampBox") | get Components | where $ is StaticMeshComponent | set StaticMesh = "Cube" */ TEXT(R"RQL({"rql":"0.1","source":{"call":"find","on":{"path":["unreal"]},"args":[{"lit":"RqlSpecLampBox"}]},"stages":[{"op":"get","expr":{"path":["Components"]}},{"op":"where","pred":{"op":"is","args":[{"path":[]},{"lit":"StaticMeshComponent"}]}},{"op":"set","assign":[{"target":{"path":["StaticMesh"]},"value":{"lit":"Cube"}}]}]})RQL"), true);
 			TestFalse(TEXT("a bare mesh name does not resolve"), IsOk(Short));
 			TestTrue(*FString::Printf(TEXT("suggests the path (%s)"), *Codes(Short)), Codes(Short).Contains(TEXT("did you mean /Engine/BasicShapes/Cube")));
+		});
+
+		It("names a level by its map name, refuses bad sublevels and shows / hides a level", [this]()
+		{
+			UWorld* W = World();
+			if (!TestNotNull(TEXT("editor world"), W))
+				return;
+			const FString Package = W->PersistentLevel->GetOutermost()->GetName();
+			// The full suite can leave a World Partition world open: AddSublevel is refused there first, for every path.
+			const bool bPartitioned = W->IsPartitionedWorld();
+			auto Says = [bPartitioned](const TCHAR* Expected) { return FString(bPartitioned ? TEXT("World Partition") : Expected); };
+			auto With = [&Package](const TCHAR* Plan)
+			{
+				return FString(Plan).Replace(TEXT("@MAP@"), *FPackageName::GetShortName(Package)).Replace(TEXT("@PKG@"), *Package);
+			};
+			// editor | call UnloadSublevel("@MAP@") — the map name resolves to the level (it used to be "no Level '<name>'")
+			const TSharedPtr<FJsonObject> Unload = Exec(With(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"UnloadSublevel","args":[{"lit":"@MAP@"}]}]})RQL")), true);
+			TestTrue(*FString::Printf(TEXT("resolved, then refused as the persistent level (%s)"), *Codes(Unload)), !IsOk(Unload) && Codes(Unload).Contains(TEXT("persistent level cannot be unloaded")));
+			// editor | call AddSublevel("/Game/RqlSpecNoSuchLevel")
+			const TSharedPtr<FJsonObject> Missing = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"AddSublevel","args":[{"lit":"/Game/RqlSpecNoSuchLevel"}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("an unsaved level is refused (%s)"), *Codes(Missing)), !IsOk(Missing) && Codes(Missing).Contains(Says(TEXT("no saved level"))));
+			// editor | call AddSublevel("/Engine/BasicShapes/Cube") — a package that is not a map leaves no broken streaming entry
+			const int32 StreamingBefore = W->GetStreamingLevels().Num();
+			const TSharedPtr<FJsonObject> NotMap = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"AddSublevel","args":[{"lit":"/Engine/BasicShapes/Cube"}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("a non-map package is refused (%s)"), *Codes(NotMap)), !IsOk(NotMap) && Codes(NotMap).Contains(Says(TEXT("no saved level (map)"))));
+			TestEqual(TEXT("no streaming entry added"), W->GetStreamingLevels().Num(), StreamingBefore);
+			// editor | call AddSublevel("@PKG@")
+			const TSharedPtr<FJsonObject> Self = Exec(With(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"AddSublevel","args":[{"lit":"@PKG@"}]}]})RQL")), true);
+			TestTrue(*FString::Printf(TEXT("the world's own level is refused (%s)"), *Codes(Self)), !IsOk(Self) && Codes(Self).Contains(Says(TEXT("its own sublevel"))));
+			// levels | where IsPersistent | set IsVisible = false
+			const TSharedPtr<FJsonObject> Hide = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["levels"]},"stages":[{"op":"where","pred":{"path":["IsPersistent"]}},{"op":"set","assign":[{"target":{"path":["IsVisible"]},"value":{"lit":false}}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("hidden (%s)"), *Codes(Hide)), IsOk(Hide) && !W->PersistentLevel->bIsVisible);
+			// levels | where IsPersistent | set IsVisible = true
+			const TSharedPtr<FJsonObject> Show = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["levels"]},"stages":[{"op":"where","pred":{"path":["IsPersistent"]}},{"op":"set","assign":[{"target":{"path":["IsVisible"]},"value":{"lit":true}}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("shown again (%s)"), *Codes(Show)), IsOk(Show) && W->PersistentLevel->bIsVisible);
+			if (!W->PersistentLevel->bIsVisible)
+				UEditorLevelUtils::SetLevelVisibility(W->PersistentLevel, true, false);
 		});
 
 		It("lists levels, console entries and assets", [this]()

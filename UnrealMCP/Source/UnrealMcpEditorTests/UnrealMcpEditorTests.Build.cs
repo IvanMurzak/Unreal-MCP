@@ -36,6 +36,7 @@ public class UnrealMcpEditorTests : ModuleRules
 			"UMGEditor",
 			"LevelSequence",
 			"MovieScene",
+			"MovieSceneTracks", // property / visibility track classes in the Level Sequence specs
 		});
 
 		// Reach BOTH modules' PRIVATE headers so the Automation specs can drive their internals directly.

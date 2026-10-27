@@ -24,6 +24,7 @@
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "GameFramework/Actor.h"
+#include "Layers/LayersSubsystem.h"
 #include "MaterialEditingLibrary.h"
 #include "Materials/MaterialInstanceConstant.h"
 #include "Materials/MaterialInterface.h"
@@ -371,6 +372,39 @@ namespace UnrealMcpRqlCoreLocal
 			}, Description);
 	}
 
+	/** Make @p Actor a member of exactly the named layers (creating missing ones), through the Layers subsystem. */
+	void SetActorLayers(AActor* Actor, const rql::Value& Value)
+	{
+		TArray<FName> Wanted;
+		for (const rql::Value& Item : Items(Value))
+		{
+			if (!Item.is_string())
+				ThrowMismatch(TEXT("a layer name"), Item);
+			const FString Name = TextArg(Item).TrimStartAndEnd();
+			if (Name.IsEmpty())
+				Throw(TEXT("a layer name cannot be empty"));
+			Wanted.AddUnique(FName(*Name));
+		}
+		ULayersSubsystem* Layers = GEditor ? GEditor->GetEditorSubsystem<ULayersSubsystem>() : nullptr;
+		if (!Layers)
+			Throw(TEXT("the editor's Layers subsystem is not available"));
+		if (Actor->GetLevel() && Actor->GetLevel()->bIsPartitioned)
+			Throw(FString::Printf(TEXT("%s is in a World Partition level: editor layers do not apply there (World Partition uses data layers)"), *Actor->GetActorLabel()));
+		if (!Layers->IsActorValidForLayer(Actor))
+			Throw(FString::Printf(TEXT("%s cannot be put on a layer (only actors of the editor world's levels can)"), *Actor->GetActorLabel()));
+		TArray<FName> Removed;
+		for (const FName& Layer : Actor->Layers)
+			if (!Wanted.Contains(Layer))
+				Removed.Add(Layer);
+		if (Removed.Num())
+			Layers->RemoveActorFromLayers(Actor, Removed);
+		// AddActorToLayers skips names the actor already holds, so a layer named by an earlier raw write would stay missing.
+		for (const FName& Layer : Wanted)
+			if (!Layers->IsLayer(Layer))
+				Layers->CreateLayer(Layer);
+		Layers->AddActorToLayers(Actor, Wanted);
+	}
+
 	void ActorMembers(FUnrealMcpRqlTypes& T, rql::TypeDescriptor& D)
 	{
 		FUnrealMcpRqlTypes* Types = &T;
@@ -437,6 +471,18 @@ namespace UnrealMcpRqlCoreLocal
 				static_cast<AActor*>(Self)->SetFolderPath(Value.is_null() ? NAME_None : FName(*TextArg(Value)));
 			},
 			"Outliner folder (null: none)", /*bOwning*/ false, /*bNullable*/ true));
+		// AActor::Layers is the raw name list: writing it as a property leaves the world without the layer (the Layers panel
+		// never lists it), so writes go through the Layers subsystem, as the panel's "Add Selected Actors" does.
+		FUnrealMcpRqlTypes::SetMember(D, Member("Layers", T.Registry().list_type(StringType(), false),
+			[](void* Self)
+			{
+				TArray<FString> Names;
+				for (const FName& Layer : static_cast<AActor*>(Self)->Layers)
+					Names.Add(Layer.ToString());
+				return StrList(Names);
+			},
+			[](void* Self, const rql::Value& Value) { SetActorLayers(static_cast<AActor*>(Self), Value); },
+			"editor layers (the Layers panel): set Layers = [\"Props\"] creates missing layers and moves the actor into exactly these"));
 		FUnrealMcpRqlTypes::SetMember(D, Member("Level", LevelType,
 			[Types](void* Self) { return Types->WrapObject(static_cast<AActor*>(Self)->GetLevel()); }, {}, "", false, true));
 		FUnrealMcpRqlTypes::SetMember(D, Member("HiddenInEditor", BoolType(),
@@ -560,7 +606,16 @@ namespace UnrealMcpRqlCoreLocal
 					Throw(TEXT("make another level current instead"));
 				MakeLevelCurrent(static_cast<ULevel*>(Self));
 			}, "new actors spawn into the current level"));
-		FUnrealMcpRqlTypes::SetMember(D, Member("IsVisible", BoolType(), [](void* Self) { return rql::Value::boolean(static_cast<ULevel*>(Self)->bIsVisible); }));
+		FUnrealMcpRqlTypes::SetMember(D, Member("IsVisible", BoolType(), [](void* Self) { return rql::Value::boolean(static_cast<ULevel*>(Self)->bIsVisible); },
+			[](void* Self, const rql::Value& Value)
+			{
+				ULevel* Level = static_cast<ULevel*>(Self);
+				const bool bVisible = BoolArg(Value);
+				// The Levels panel's eye: shows / hides the level's actors in the editor (recorded for undo, marks the map unsaved).
+				UEditorLevelUtils::SetLevelVisibility(Level, bVisible, /*bForceLayersVisible*/ false);
+				if (Level->bIsVisible != bVisible)
+					Throw(FString::Printf(TEXT("could not %s the level"), bVisible ? TEXT("show") : TEXT("hide")));
+			}, "shown in the editor (the Levels panel's eye; set IsVisible = false hides a sublevel's actors)"));
 		FUnrealMcpRqlTypes::SetMember(D, Member("Actors", T.Registry().list_type(T.ForClass(AActor::StaticClass()), true),
 			[Types](void* Self)
 			{
@@ -999,7 +1054,7 @@ void UnrealMcpRqlConfigureCore(FUnrealMcpRqlSession& Session)
 	});
 	Session.AddSource(TEXT("editor"), T.ForClass(UUnrealMcpRqlEditorApi::StaticClass()), /*bList*/ false,
 		TEXT("editor state (IsPlaying, IsPaused, Selection, World, CurrentLevel) and operations: call SpawnActor / OpenLevel / NewLevel / "
-			"SaveLevel / SaveAll / UnloadSublevel / CreateAsset / CopyAsset / MoveAsset / DeleteAsset / CreateFolder / RefreshAssets / "
+			"SaveLevel / SaveAll / AddSublevel / UnloadSublevel / CreateAsset / CopyAsset / MoveAsset / DeleteAsset / CreateFolder / RefreshAssets / "
 			"CreateMaterialInstance / ImportAsset / SaveAsset / ClearConsole / CreateDataTable / AddGameplayTag / RemoveGameplayTag / "
 			"RenameGameplayTag"), [Types]()
 	{

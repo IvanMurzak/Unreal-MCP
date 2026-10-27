@@ -18,7 +18,7 @@ connect/disconnect/orphan-safety — in `UnrealMcpEditorTests/`).
   §12.8 security gates (kill switch, loopback-host policy), the §12.6 editor↔runtime
   world-resolver swap, connect/disconnect lifecycle + orphan-safety (`Disconnect` is a clean
   no-op when never connected; a rejected `Connect` orphans nothing; `Get(nullptr)` is null),
-  the runtime-vs-editor tool-manifest separation (runtime set == 22, editor-only tools
+  the runtime-vs-editor tool-manifest separation (the runtime's built-in registry is exactly `{ping}`, editor-only tools
   absent), and the sidecar binary resolver (RID mapping, bundled-path composition,
   `UNREAL_MCP_BRIDGE_PATH` override, graceful-degrade). The bridge xUnit
   `ConnectionConfigTests.AbsentFields_PreserveEnvFallback` proves the
@@ -32,9 +32,9 @@ connect/disconnect/orphan-safety — in `UnrealMcpEditorTests/`).
 ## Prerequisites
 
 - UE 5.7 at `C:\Program Files\Epic Games\UE_5.7` (the testbed is wired via the
-  `Unreal-Test-Project/Plugins/UnrealMCP` junction — see the infra repo's `engine-testbeds` skill).
+  `engines/unreal/test-project/Plugins/UnrealMCP` junction — see the infra repo's `engine-testbeds` skill).
 - The shared `gamedev-mcp-server` binary (`SERVER_VERSION` in
-  `cli/src/lib/server-version.ts`, currently `8.0.0`). Obtain it via the CLI's server command
+  `cli/src/lib/server-version.ts`). Obtain it via the CLI's server command
   (it downloads + caches the pinned release), or build it locally from the
   [GameDev-MCP-Server](https://github.com/IvanMurzak/GameDev-MCP-Server) repo and point
   `UNREAL_MCP_SERVER_PATH` at the result.
@@ -97,7 +97,7 @@ Leave it running. The runtime game will dial `http://localhost:<port>` in **Cust
    ```bash
    "C:/Program Files/Epic Games/UE_5.7/Engine/Build/BatchFiles/RunUAT.bat" \
      BuildCookRun \
-     -project="<infra_root>/Unreal-Test-Project/UnrealTestProject.uproject" \
+     -project="<software>/engines/unreal/test-project/UnrealTestProject.uproject" \
      -noP4 -platform=Win64 -clientconfig=Development \
      -build -cook -stage -pak -archive \
      -archivedirectory="C:/tmp/UTPStage"
@@ -153,7 +153,7 @@ the self-hosted Windows runner, not a per-PR gate**:
 
 - **Per-PR CI** runs the deterministic gates only: the bridge xUnit suite (incl. the
   env-fallback test), the cli suite, and — when `UNREAL_RUNNER_READY=true` — the self-hosted
-  `plugin BuildPlugin + Automation (UE 5.7)` job, which runs the runtime Automation specs
+  `plugin BuildPlugin + Automation` jobs (UE 5.5–5.8), which run the runtime Automation specs
   (security gates, resolver swap, connect/disconnect/orphan-safety, manifest separation,
   sidecar resolver). These need no running server and no packaged game.
 - **The live packaged / PIE round-trips in this runbook are operator / nightly steps.** They
@@ -166,8 +166,10 @@ the self-hosted Windows runner, not a per-PR gate**:
 
 `docs/ARCHITECTURE.md` §12.10 requires the **UE 5.5 floor to be EXERCISED** (a packaged
 Development build on a 5.5 install) before claiming it. **This is NOT yet claimed.** All
-runtime e2e to date has been verified on **UE 5.7 only** (the sole engine installed on the
-dev/CI machine). The relevant runtime APIs (`UGameInstanceSubsystem`, `UWorld::SpawnActor`,
+runtime e2e to date has been verified on **UE 5.7 only** (5.5, 5.6 and 5.8 are installed on the dev/CI
+machine now, but this runbook has not been run on them). Last 5.7 run (2026-10-27): PIE and a packaged
+Development build both connected over `UnrealMcp.Connect`, served an empty `tools/list` and the system `ping`,
+and the game's sidecar exited when PIE stopped / the game was closed. The relevant runtime APIs (`UGameInstanceSubsystem`, `UWorld::SpawnActor`,
 `UGameViewportClient`) are documented as stable 5.5→5.7, and screenshot APIs are
 version-checked; but per the §11 honesty rule, 5.5 support is recorded as
 **"not yet verified — 5.7 only"** until a 5.5 install runs this runbook.

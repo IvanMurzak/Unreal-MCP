@@ -54,9 +54,11 @@ agent ──query text──▶ unreal-mcp-bridge (sidecar, .NET)          Unrea
   actors rerun their construction script).
 - **Computed members** (core module): every object `Id`, `Name`, `Path`; Actor `Label`, `Location`, `Rotation`,
   `Scale`, `Components`, `Children`, `Parent` (writable: attach / detach; a refused attach names the reason, e.g. a Static
-  actor under a Movable parent), `Folder`, `Level`, `HiddenInEditor`, `Selected` (writable: adds to / removes from the
+  actor under a Movable parent), `Folder`, `Layers` (writable through the Layers subsystem, as the Layers panel
+  does: missing layers are created, the actor ends up in exactly the listed ones; refused in World Partition levels, which use data layers),
+  `Level`, `HiddenInEditor`, `Selected` (writable: adds to / removes from the
   editor selection; neither it nor `HiddenInEditor` marks the level unsaved); component `Owner` (and `Name`: a Blueprint's
-  component templates read under their variable name, without the `_GEN_VARIABLE` suffix); Level `Map`, `Package`, `IsPersistent`, `IsCurrent` (writable), `IsVisible`, `Actors`; World
+  component templates read under their variable name, without the `_GEN_VARIABLE` suffix); Level `Map`, `Package`, `IsPersistent`, `IsCurrent` (writable), `IsVisible` (writable: the Levels panel's eye), `Actors`; World
   `Map`, `Levels`, `PersistentLevel`, `CurrentLevel`; MaterialInterface `Scalars` / `Vectors` / `Textures` (parameter
   maps, writable on material instances).
 - **Methods** (`call`): Actor `Destroy()`, `Duplicate(Offset)`, `AddComponent(ClassName, Name)`; component
@@ -116,7 +118,7 @@ agent ──query text──▶ unreal-mcp-bridge (sidecar, .NET)          Unrea
 | `actors` | every actor of the editor world's loaded levels |
 | `levels`, `world` | the loaded levels, the editor world |
 | `selection` | the selected actors (`editor | set Selection = [...]` writes it) |
-| `editor` | editor state (`IsPlaying`, `IsPaused` — writable, `Selection`, `World`, `CurrentLevel`) and operations: `SpawnActor` (a class, Blueprint name or path, or an asset to place: a StaticMesh path gives a StaticMeshActor), `OpenLevel`, `NewLevel`, `SaveLevel`, `SaveAll`, `UnloadSublevel`, `CreateAsset`, `CopyAsset`, `MoveAsset`, `DeleteAsset`, `CreateFolder`, `RefreshAssets`, `CreateMaterialInstance`, `ImportAsset`, `SaveAsset`, `ClearConsole` |
+| `editor` | editor state (`IsPlaying`, `IsPaused` — writable, `Selection`, `World`, `CurrentLevel`) and operations: `SpawnActor` (a class, Blueprint name or path, or an asset to place: a StaticMesh path gives a StaticMeshActor), `OpenLevel`, `NewLevel`, `SaveLevel`, `SaveAll`, `AddSublevel` (a saved map as a streaming sublevel; not undoable, the current level stays; refused in World Partition worlds), `UnloadSublevel` (a level by its map name), `CreateAsset`, `CopyAsset`, `MoveAsset`, `DeleteAsset`, `CreateFolder`, `RefreshAssets`, `CreateMaterialInstance`, `ImportAsset`, `SaveAsset`, `ClearConsole` |
 | `console` | editor log entries (`Sequence`, `Time`, `Verbosity`, `Category`, `Message`) |
 | `unreal.find(label)` | an actor by label, name or path |
 | `unreal.asset(path)`, `unreal.assets(class, path?)` | one asset; assets of a class (at most 200, loaded as read) |
@@ -221,8 +223,14 @@ Frames are at the sequence's display rate (what the Sequencer shows), converted 
   object); `call AddActor(actor)` (a possessable binding, like dragging the actor into the Sequencer) and
   `call AddTrack(class)`.
 - `SequenceBinding` (a host object: the sequence and the binding's GUID): `Name`, `Guid`, `Kind` (`Possessable` /
-  `Spawnable`), `Class`, `Tracks`; `call AddTrack("Transform" | "Visibility" | a track class)` — every new track gets a
-  section over the playback range.
+  `Spawnable`), `Class`, `Tracks`; `call AddTrack("Transform" | "Visibility" | a track class | a property)` — every new track gets a
+  section over the playback range. A property (`"Intensity"`, `"LightColor"`, `"LightComponent0.Intensity"`: an animatable
+  — `Interp` — property of the bound actor or of one of its components) gets the property track of its type (float, double,
+  bool, color, vector) bound to it, on the component's binding when the property is a component's (made as the
+  Sequencer makes it); its single channel is named after the property (`AddKey("Intensity", 60, 5000)`). A bare property
+  track class (`MovieSceneFloatTrack`) is refused, since it would animate nothing; `Visibility` keys the actor's
+  `bHidden` (a component's `bHiddenInGame`), as the Sequencer's Visibility track does; its channel is `Visible` (true =
+  visible).
 - `UMovieSceneTrack`: `Sections`, `DisplayName`, `call AddSection()`; `UMovieSceneSection`: `Start`, `End` (writable),
   `Channels` (`[{Name, Type, Keys: [{Frame, Value}]}]`, names as the Sequencer shows them: `Location.X`, `Rotation.Yaw`),
   `call AddKey(channel, frame, value)` (the channel by that name, or by its internal name: `Rotation.Z` is the yaw) (double / float / bool channels; a key outside the section grows it).
@@ -240,7 +248,7 @@ Every change is undoable (one transaction per mutation). Spawnables are listed b
 | `asset-find`, `asset-get-data` | `unreal.assets("Material", "/Game/...")`, `unreal.asset(path)` |
 | `asset-copy` / `-move` / `-delete` / `-create-folder` / `-refresh` / `-import` | `editor | call CopyAsset / MoveAsset / DeleteAsset / CreateFolder / RefreshAssets / ImportAsset` (and `CreateAsset(path, class)` for any asset class) |
 | `asset-material-create`, `-modify`, `-get-data` | `editor | call CreateMaterialInstance(path, parent)`, `Scalars["…"]`, `Vectors["…"]`, `Textures["…"]` |
-| `level-create` / `-open` / `-save` / `-set-current` / `-unload-sublevel` / `-list-loaded` | `editor | call NewLevel / OpenLevel / SaveLevel / UnloadSublevel`, `levels` (`set IsCurrent = true`) |
+| `level-create` / `-open` / `-save` / `-set-current` / `-unload-sublevel` / `-list-loaded` | `editor | call NewLevel / OpenLevel / SaveLevel / AddSublevel / UnloadSublevel`, `levels` (`set IsCurrent = true`, `set IsVisible = false`) |
 | `editor-application-get-state` / `-set-state` | `editor` `IsPlaying`, `IsPaused` (writable) |
 | `editor-selection-get` / `-set` | `selection`, `editor | set Selection = [...]` |
 | `console-get-logs` / `console-clear-logs` | `console` source (`where Verbosity == "Error"`, `Sequence > N`), `editor | call ClearConsole()` |
