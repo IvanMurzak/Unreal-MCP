@@ -52,6 +52,10 @@ agent ──query text──▶ unreal-mcp-bridge (sidecar, .NET)          Unrea
   (instanced sub-objects are owning, others references), soft references as paths. Writes go through the editor's
   `PreEditChange` / `PostEditChangeProperty`, as an edit in the Details panel does (components refresh, Blueprint
   actors rerun their construction script).
+- **Blueprint actors' components**: an edit of a placed Blueprint actor's component reruns its construction script,
+  which rebuilds the construction-script components; the next writes of the same mutation and the receipt follow the
+  rebuilt component. A relative-transform write also updates the component's world transform (some components, e.g.
+  Niagara, do not re-register on edit).
 - **Computed members** (core module): every object `Id`, `Name`, `Path`; Actor `Label`, `Location`, `Rotation`,
   `Scale`, `Components`, `Children`, `Parent` (writable: attach / detach; a refused attach names the reason, e.g. a Static
   actor under a Movable parent), `Folder`, `Layers` (writable through the Layers subsystem, as the Layers panel
@@ -94,7 +98,8 @@ agent ──query text──▶ unreal-mcp-bridge (sidecar, .NET)          Unrea
 - **Per-call session**: each tool call builds a fresh engine and type cache (cheap: descriptors fill lazily). A
   Blueprint compile, hot reload or user-defined struct edit recreates `FProperty` / `UFunction` objects, so no
   descriptor may outlive the call that built it.
-- **Mutations** run in one editor transaction (one Ctrl+Z step); owners are `Modify()`d before the first write and
+- **Mutations** run in one editor transaction (one Ctrl+Z step, named `RQL: <query>` in the Undo History, so `TRANSACTION UNDO`
+  says which change it reverts; `python-execute` steps are named after the snippet's first statement); owners are `Modify()`d before the first write and
   their packages marked dirty after. The receipt's `new` column is the value read back after the write (what the
   setter and the class's `PostEditChangeProperty` left); `rql-mutate` refuses a query without `set` / `call`, and a
   throwing operation is `call-threw`. Unlike Unity-MCP, `rql-mutate` does **not** save to disk: Unreal edits stay
@@ -133,10 +138,10 @@ agent ──query text──▶ unreal-mcp-bridge (sidecar, .NET)          Unrea
 | `actors` | every actor of the editor world's loaded levels |
 | `levels`, `world` | the loaded levels, the editor world |
 | `selection` | the selected actors (`editor | set Selection = [...]` writes it) |
-| `editor` | editor state (`IsPlaying`, `IsPaused` — writable, `Selection`, `World`, `CurrentLevel`) and operations: `SpawnActor` (a class, Blueprint name or path, or an asset to place: a StaticMesh path gives a StaticMeshActor), `OpenLevel`, `NewLevel`, `SaveLevel`, `SaveAll`, `AddSublevel` (a saved map as a streaming sublevel; not undoable, the current level stays; refused in World Partition worlds), `UnloadSublevel` (a level by its map name), `CreateAsset`, `CopyAsset`, `MoveAsset`, `DeleteAsset`, `CreateFolder`, `RefreshAssets`, `CreateMaterialInstance`, `ImportAsset`, `SaveAsset`, `ClearConsole` |
+| `editor` | editor state (`IsPlaying`, `IsPaused` — writable, `Selection`, `World`, `CurrentLevel`) and operations: `SpawnActor` (a class, Blueprint name or path, or an asset to place: a StaticMesh path gives a StaticMeshActor; a volume class gets the editor's 200 cm box brush, sized with `Scale`), `OpenLevel`, `NewLevel`, `SaveLevel`, `SaveAll`, `AddSublevel` (a saved map as a streaming sublevel; not undoable, the current level stays; refused in World Partition worlds), `UnloadSublevel` (a level by its map name), `CreateAsset`, `CopyAsset`, `MoveAsset`, `DeleteAsset`, `CreateFolder`, `RefreshAssets`, `CreateMaterialInstance`, `ImportAsset`, `SaveAsset`, `ClearConsole` |
 | `console` | editor log entries (`Sequence`, `Time`, `Verbosity`, `Category`, `Message`) |
 | `unreal.find(label)` | an actor by label, name or path |
-| `unreal.asset(path)`, `unreal.assets(class, path?)` | one asset; assets of a class (at most 200, loaded as read) |
+| `unreal.asset(path)`, `unreal.assets(class, path?)` | one asset; assets of a class (at most 200, loaded as read; without a path: `/Game`, or in rql-query every content root (engine, plugins) when the project has none of the class) |
 | `unreal.classes(base?, filter?)` | classes deriving from a base |
 | `dataTables` | the project's DataTables (see [DataTables](#datatables)) |
 | `gameplayTags` | every registered gameplay tag: `Name`, `Comment`, `Source` (ini), `Parent`, `Children`, `Explicit`, `Restricted` |
@@ -169,7 +174,8 @@ Row writes run in the mutation's transaction (the table is `Modify()`d first, so
 
 `settings` lists the sections of the Project Settings ("Project") and Editor Preferences ("Editor") windows (`Container`,
 `Category`, `Section`, `DisplayName`, `Description`) with `Object`, the object the section edits; `unreal.settings(name)`
-returns that object by section name, display name or class name (`unreal.settings("Maps & Modes") | set GameDefaultMap =
+returns that object by section name, display name or class name (the auto-discovered `UDeveloperSettings` sections
+such as Physics, Rendering and Collision are registered first, as the settings window does; UE 5.6+) (`unreal.settings("Maps & Modes") | set GameDefaultMap =
 "/Game/Maps/Arena"`). Settings objects are class defaults, read-only elsewhere in RQL; here their **config** properties
 are writable (a non-config property is refused: it would be lost on restart) and each mutation is saved the way the
 settings editor saves it: one property into `Default<Config>.ini` for project (default-config) classes, the whole section

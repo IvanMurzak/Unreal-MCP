@@ -9,6 +9,7 @@
 
 #include "Containers/StringConv.h"
 #include "Components/ActorComponent.h"
+#include "Components/SceneComponent.h"
 #include "Engine/BlueprintGeneratedClass.h"
 #include "Engine/World.h"
 #include "Engine/LevelScriptActor.h"
@@ -338,9 +339,30 @@ namespace UnrealMcpRqlTypesLocal
 FUnrealMcpRqlTypes::FUnrealMcpRqlTypes()
 	: RegistryPtr(std::make_unique<rql::TypeRegistry>())
 {
+	ObjectsReplacedHandle = FCoreUObjectDelegates::OnObjectsReplaced.AddRaw(this, &FUnrealMcpRqlTypes::OnObjectsReplaced);
 }
 
-FUnrealMcpRqlTypes::~FUnrealMcpRqlTypes() = default;
+FUnrealMcpRqlTypes::~FUnrealMcpRqlTypes()
+{
+	FCoreUObjectDelegates::OnObjectsReplaced.Remove(ObjectsReplacedHandle);
+}
+
+void FUnrealMcpRqlTypes::OnObjectsReplaced(const TMap<UObject*, UObject*>& OldToNew)
+{
+	for (const TPair<UObject*, UObject*>& Pair : OldToNew)
+	{
+		if (!Pair.Key || !Pair.Value)
+			continue;
+		// Earlier copies lead to the newest one: a weak pointer to a discarded copy no longer resolves.
+		const TWeakObjectPtr<UObject> Discarded(Pair.Key);
+		for (TPair<const UObject*, TWeakObjectPtr<UObject>>& Entry : Replaced)
+		{
+			if (Entry.Value.HasSameIndexAndSerialNumber(Discarded)) // == would match any two invalid pointers
+				Entry.Value = Pair.Value;
+		}
+		Replaced.Add(Pair.Key, Pair.Value);
+	}
+}
 
 rql::TypeDescriptor& FUnrealMcpRqlTypes::Shell(const void* Key, const FString& Name, rql::TypeKind Kind)
 {
@@ -802,9 +824,11 @@ void FUnrealMcpRqlTypes::AddPropertyMember(rql::TypeDescriptor& Descriptor, FPro
 	Member.copy_on_read = bOnObject
 		&& (Property->IsA<FArrayProperty>() || Property->IsA<FSetProperty>() || Property->IsA<FMapProperty>());
 	FUnrealMcpRqlTypes* Self = this;
-	Member.getter = [Self, Property, Type](void* Container) -> rql::Value
+	// On an object, read the live one: the receipt reads a value back after a write that may have rebuilt the component.
+	Member.getter = [Self, Property, Type, bOnObject](void* Container) -> rql::Value
 	{
-		return Self->Read(Property, Property->ContainerPtrToValuePtr<void>(Container), Type);
+		void* Owner = bOnObject ? Self->LiveObject(static_cast<UObject*>(Container)) : Container;
+		return Self->Read(Property, Property->ContainerPtrToValuePtr<void>(Owner), Type);
 	};
 	if (bOnObject)
 	{
@@ -1230,9 +1254,25 @@ void FUnrealMcpRqlTypes::Write(const FProperty* Property, void* ValuePtr, const 
 	Throw(FString::Printf(TEXT("%s cannot be written"), *Property->GetAuthoredName()));
 }
 
+UObject* FUnrealMcpRqlTypes::LiveObject(UObject* Object) const
+{
+	if (Object && !IsValid(Object))
+	{
+		// Same class only: a Blueprint compile also reports replacements (reinstanced objects of a new class layout), which
+		// the descriptor's FProperty offsets do not fit.
+		const TWeakObjectPtr<UObject>* Newest = Replaced.Find(Object);
+		if (Newest && Newest->IsValid() && Newest->Get()->GetClass() == Object->GetClass())
+			return Newest->Get();
+	}
+	return Object;
+}
+
 void FUnrealMcpRqlTypes::WriteObjectProperty(UObject* Object, FProperty* Property, const rql::Value& Value)
 {
-	if (!Object)
+	// A previous write of this mutation may have rebuilt the component (set A = 1, B = 2 on a Blueprint actor's component):
+	// write into the one the actor has now, not into the discarded copy.
+	Object = LiveObject(Object);
+	if (!Object || !IsValid(Object))
 		Throw(TEXT("the object is gone"));
 	// A placed Blueprint actor resets such a property to the class default whenever its construction script reruns (every
 	// edit does): the write would report success and then vanish. Play In Editor actors do not rerun it.
@@ -1270,6 +1310,16 @@ void FUnrealMcpRqlTypes::WriteObjectProperty(UObject* Object, FProperty* Propert
 	}
 	Object->PostEditChangeProperty(Event);
 	const void* New = Property->ContainerPtrToValuePtr<void>(Object);
+	// A raw write of a relative transform (the Details panel's transform rows call the setters instead) only moves a
+	// component that re-registers in PostEditChangeProperty; some never do (Niagara). Recompute its world transform, as
+	// SetRelativeLocation does. PostEditChangeProperty may have rebuilt it (a Blueprint actor's construction script).
+	const FName Name = Property->GetFName();
+	if (Name == USceneComponent::GetRelativeLocationPropertyName() || Name == USceneComponent::GetRelativeRotationPropertyName()
+		|| Name == USceneComponent::GetRelativeScale3DPropertyName())
+	{
+		if (USceneComponent* Scene = Cast<USceneComponent>(LiveObject(Object)); IsValid(Scene) && Scene->IsRegistered())
+			Scene->UpdateComponentToWorld();
+	}
 	for (UObject* Instance : Instances)
 	{
 		// Direct instances only (a child Blueprint's template holds its own value), never the running Play In Editor copies.

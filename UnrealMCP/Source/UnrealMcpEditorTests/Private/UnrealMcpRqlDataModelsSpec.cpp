@@ -47,6 +47,7 @@
 #include "GameplayTagsSettings.h"
 #include "HAL/FileManager.h"
 #include "ISettingsModule.h"
+#include "PhysicsEngine/PhysicsSettings.h"
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "Kismet2/KismetEditorUtilities.h"
 #include "Misc/EngineVersionComparison.h"
@@ -594,6 +595,16 @@ void FUnrealMcpRqlDataModelsSpec::Define()
 			}
 		});
 
+		It("lists the auto-discovered developer settings (Physics) without a settings window having been opened", [this]()
+		{
+#if !UE_VERSION_OLDER_THAN(5, 6, 0)
+			const TSharedPtr<FJsonObject> Physics = Run(/* unreal.settings("Physics") | select DefaultGravityZ */ TEXT(R"RQL({"rql":"0.1","source":{"call":"settings","on":{"path":["unreal"]},"args":[{"lit":"Physics"}]},"stages":[{"op":"select","fields":[{"name":"DefaultGravityZ","expr":{"path":["DefaultGravityZ"]}}]}]})RQL"));
+			TestTrue(*FString::Printf(TEXT("the Physics section resolves (%s)"), *UnrealMcpRqlSpecHelpers::Codes(Physics)), UnrealMcpRqlSpecHelpers::IsOk(Physics));
+			const TSharedPtr<FJsonValue> Gravity = UnrealMcpRqlSpecHelpers::Cell(Physics, 0, 0);
+			TestTrue(TEXT("its gravity reads"), Gravity.IsValid() && FMath::IsNearlyEqual(Gravity->AsNumber(), GetDefault<UPhysicsSettings>()->DefaultGravityZ));
+#endif
+		});
+
 		It("lists Project Settings and Editor Preferences sections with their objects", [this]()
 		{
 			const TSharedPtr<FJsonObject> Maps = Run(/* settings | where Container == "Project" and Section == "Maps" | select Category DisplayName Object.$type */ TEXT(R"RQL({"rql":"0.1","source":{"path":["settings"]},"stages":[{"op":"where","pred":{"op":"and","args":[{"op":"==","args":[{"path":["Container"]},{"lit":"Project"}]},{"op":"==","args":[{"path":["Section"]},{"lit":"Maps"}]}]}},{"op":"select","fields":[{"name":"Category","expr":{"path":["Category"]}},{"name":"DisplayName","expr":{"path":["DisplayName"]}},{"name":"Object.$type","expr":{"path":["Object",{"meta":"type"}]}}]}]})RQL"));
@@ -840,6 +851,34 @@ void FUnrealMcpRqlDataModelsSpec::Define()
 			// Read the component again: the placed actor's construction script may have rebuilt it.
 			const UStaticMeshComponent* Restored = IsValid(Follower) ? Follower->FindComponentByClass<UStaticMeshComponent>() : nullptr;
 			TestTrue(TEXT("and the placed actor"), Restored && Restored->GetStaticMesh() == nullptr);
+		});
+
+		It("writes several members of a placed actor's construction-script component in one set (each write rebuilds it)", [this]()
+		{
+			UBlueprint* Made = MakeBlueprint();
+			USCS_Node* Node = Made->SimpleConstructionScript->CreateNode(UStaticMeshComponent::StaticClass(), TEXT("RqlMesh"));
+			Made->SimpleConstructionScript->AddNode(Node);
+			FKismetEditorUtilities::CompileBlueprint(Made);
+			Must(TEXT("spawned"), /* editor | call SpawnActor("@BPNAME@", "RqlSeqLampBP", "(1000, 0, 0)") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"SpawnActor","args":[{"lit":"@BPNAME@"},{"lit":"RqlSeqLampBP"},{"lit":"(1000, 0, 0)"}]}]})RQL"), { { TEXT("BPNAME"), FPackageName::GetShortName(Blueprint) } });
+			const TSharedPtr<FJsonObject> Receipt = Must(TEXT("three members in one set"), /* unreal.find("RqlSeqLampBP") | get Components | where Name == "RqlMesh" | set RelativeLocation = "(0, 0, 500)", RelativeScale3D = "(2, 2, 2)", bVisible = false */ TEXT(R"RQL({"rql":"0.1","source":{"call":"find","on":{"path":["unreal"]},"args":[{"lit":"RqlSeqLampBP"}]},"stages":[{"op":"get","expr":{"path":["Components"]}},{"op":"where","pred":{"op":"==","args":[{"path":["Name"]},{"lit":"RqlMesh"}]}},{"op":"set","assign":[{"target":{"path":["RelativeLocation"]},"value":{"lit":"(0, 0, 500)"}},{"target":{"path":["RelativeScale3D"]},"value":{"lit":"(2, 2, 2)"}},{"target":{"path":["bVisible"]},"value":{"lit":false}}]}]})RQL"));
+			UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+			AActor* Placed = nullptr;
+			for (TActorIterator<AActor> It(World); It; ++It)
+			{
+				if (It->GetActorLabel() == TEXT("RqlSeqLampBP"))
+					Placed = *It;
+			}
+			if (!TestNotNull(TEXT("placed"), Placed))
+				return;
+			const UStaticMeshComponent* Mesh = Placed->FindComponentByClass<UStaticMeshComponent>();
+			if (!TestNotNull(TEXT("its mesh component"), Mesh))
+				return;
+			TestEqual(TEXT("the first member stuck"), Mesh->GetRelativeLocation(), FVector(0, 0, 500));
+			TestEqual(TEXT("the second member reached the live component"), Mesh->GetRelativeScale3D(), FVector(2, 2, 2));
+			TestFalse(TEXT("and the third (each write rebuilt the component again)"), Mesh->IsVisible());
+			// The receipt reads the values back from the live component, not from the discarded copy.
+			TestEqual(TEXT("receipt: new location"), UnrealMcpRqlSpecHelpers::CellText(Receipt, 0, 3), FString(TEXT("(0, 0, 500)")));
+			TestEqual(TEXT("receipt: new scale"), UnrealMcpRqlSpecHelpers::CellText(Receipt, 1, 3), FString(TEXT("(2, 2, 2)")));
 		});
 
 		It("refuses writing a variable that is not Instance Editable on a placed actor (it would be reset)", [this]()

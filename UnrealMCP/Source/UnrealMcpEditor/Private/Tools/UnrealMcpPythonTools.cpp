@@ -103,6 +103,25 @@ namespace UnrealMcpPythonTools
 		return Matcher.FindNext();
 	}
 
+	/**
+	 * The undo-step title of a run: "python-execute: " and the first line of the code that is not an import or a comment
+	 * (at most 80 characters), so the Undo History and TRANSACTION UNDO say which run they revert.
+	 */
+	static FString PythonUndoTitle(const FString& Code)
+	{
+		static constexpr int32 MaxChars = 80;
+		TArray<FString> Lines;
+		Code.ParseIntoArrayLines(Lines);
+		for (const FString& Raw : Lines)
+		{
+			const FString Line = Raw.TrimStartAndEnd();
+			if (Line.IsEmpty() || Line.StartsWith(TEXT("#")) || Line.StartsWith(TEXT("import ")) || Line.StartsWith(TEXT("from ")))
+				continue;
+			return TEXT("python-execute: ") + (Line.Len() > MaxChars ? Line.Left(MaxChars - 3) + TEXT("...") : Line);
+		}
+		return TEXT("python-execute");
+	}
+
 	static FString PythonClip(const FString& Text, int32 Max, const TCHAR* Hint)
 	{
 		return Text.Len() <= Max ? Text : FString::Printf(TEXT("%s... [truncated: %d of %d characters shown; %s]"),
@@ -262,7 +281,7 @@ namespace UnrealMcpPythonTools
 					*FBase64::Encode(reinterpret_cast<const uint8*>(Utf8.Get()), Utf8.Length()));
 				// One undo step, as rql-mutate (the transaction buffer drops it when a read-only snippet recorded nothing).
 				const int64 LogSequence = FUnrealMcpLogCollector::Get().GetLastSequence();
-				const int32 Transaction = GEditor ? GEditor->BeginTransaction(TEXT("UnrealMcp"), FText::FromString(TEXT("python-execute")), nullptr) : INDEX_NONE;
+				const int32 Transaction = GEditor ? GEditor->BeginTransaction(TEXT("UnrealMcp"), FText::FromString(PythonUndoTitle(Code)), nullptr) : INDEX_NONE;
 				// Only Modify()'d objects with actual changes record: after a run of direct setters (set_actor_location)
 				// the transaction is dropped as empty, and an undo would revert the PREVIOUS edit. Our own (top-level)
 				// transaction is the last queue entry; whether it survives EndTransaction tells (nested: unknowable).

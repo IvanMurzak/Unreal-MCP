@@ -27,6 +27,7 @@
 #include "DataTableEditorUtils.h"
 #include "ActorFactories/ActorFactory.h"
 #include "AssetSelection.h"
+#include "Builders/CubeBuilder.h"
 #include "Engine/Blueprint.h"
 #include "Engine/DataTable.h"
 #include "Factories/DataTableFactory.h"
@@ -34,6 +35,7 @@
 #include "Factories/MaterialInstanceConstantFactoryNew.h"
 #include "FileHelpers.h"
 #include "GameFramework/Actor.h"
+#include "GameFramework/Volume.h"
 #include "HAL/IConsoleManager.h"
 #include "IAssetTools.h"
 #include "Materials/MaterialInstanceConstant.h"
@@ -208,6 +210,10 @@ AActor* UnrealMcpRql::SpawnActor(UClass* Class, const FVector& Location, const F
 	AActor* Actor = World->SpawnActor<AActor>(Class, Location, Rotation, Params);
 	if (!Actor)
 		return Failed<AActor*>(FString::Printf(TEXT("could not spawn %s"), *Class->GetName()));
+	// A volume is its brush: spawned bare it has no shape, so a NavMeshBoundsVolume / TriggerVolume / PostProcessVolume
+	// would bound nothing. Give it the editor's default box (200 cm, as the Place Actors panel does); Scale sizes it.
+	if (AVolume* Volume = Cast<AVolume>(Actor); Volume && !Volume->Brush)
+		UActorFactory::CreateBrushForVolumeActor(Volume, NewObject<UCubeBuilder>());
 	return FinishSpawnedActor(Actor, Location, Rotation, Label, Parent);
 }
 

@@ -49,6 +49,12 @@ public:
 	 */
 	FString Execute(const FString& PlanJson, bool bAllowMutation, bool bDryRun, bool& bOutOk, int32 MaxTargets = 0);
 
+	/**
+	 * The query text a mutation names its undo step after ("RQL: actors | ... | set ..."), so the Undo History and
+	 * TRANSACTION UNDO say which change they revert. Empty: "RQL mutation".
+	 */
+	void SetUndoTitle(const FString& QueryText);
+
 	/** rql-schema data: sources, functions, present classes and type descriptors (JSON the sidecar renders). */
 	FString Schema(const FString& TypeName, bool& bOutOk);
 
@@ -87,6 +93,7 @@ private:
 	TArray<FMutationHook> CommittedHooks;
 	TArray<TFunction<bool(const UObject*)>> WritableTemplates;
 	int32 TransactionIndex = INDEX_NONE;
+	FString UndoTitle = TEXT("RQL mutation");
 
 	/** A host function as the query source (unreal.assets("Material") | ...): evaluated into a source. True = failed. */
 	bool FunctionSource(rql::QueryPlan& Plan, rql::QueryResult& OutFailure);

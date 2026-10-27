@@ -16,7 +16,7 @@ class UScriptStruct;
 constexpr int32 UnrealMcpRqlMaxAssets = 200;
 
 /** Assets of @p Class (and subclasses) under @p Path ("/Game" when empty), sorted by path, loaded when read. */
-rql::Value UnrealMcpRqlAssetList(FUnrealMcpRqlTypes& Types, UClass* Class, const FString& Path);
+rql::Value UnrealMcpRqlAssetList(FUnrealMcpRqlTypes& Types, UClass* Class, const FString& Path, bool bAllRootsWhenEmpty = false);
 
 /**
  * The class default objects of the subclasses of @p Base (loaded abstract classes left out; Blueprint classes that are not

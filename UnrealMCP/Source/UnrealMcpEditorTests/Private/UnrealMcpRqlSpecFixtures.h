@@ -4,6 +4,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Components/SceneComponent.h"
 #include "Engine/DataTable.h"
 #include "Engine/DeveloperSettings.h"
 #include "GameFramework/Actor.h"
@@ -115,6 +116,23 @@ public:
 		Super::PostEditChangeProperty(Event);
 		++PostEditCount;
 	}
+};
+
+/**
+ * A scene component that does not re-register around a property edit (as UNiagaraComponent): a raw write of its
+ * RelativeLocation moves it only when the writer recomputes the world transform itself.
+ */
+UCLASS(ClassGroup = Spec, meta = (BlueprintSpawnableComponent))
+class UUnrealMcpRqlSpecStillComponent : public USceneComponent
+{
+	GENERATED_BODY()
+
+public:
+#if WITH_EDITOR
+	using USceneComponent::PreEditChange;
+	virtual void PreEditChange(FProperty* Property) override { UObject::PreEditChange(Property); }
+	virtual void PostEditChangeProperty(FPropertyChangedEvent& Event) override { UObject::PostEditChangeProperty(Event); }
+#endif
 };
 
 /** Operations of the specs' RQL module (AddApiSource): defaults recorded by UHT, failures through UnrealMcpRql::Fail. */

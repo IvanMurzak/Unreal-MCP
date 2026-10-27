@@ -342,7 +342,7 @@ void FUnrealMcpRqlSession::ConfigureMutations()
 	Policy.before_write = [this, OwnerOf, ViewStateActor](const std::vector<rql::MutationRecord>& Records)
 	{
 		if (TransactionIndex == INDEX_NONE && GEditor)
-			TransactionIndex = GEditor->BeginTransaction(TEXT("UnrealMcp"), FText::FromString(TEXT("RQL mutation")), nullptr);
+			TransactionIndex = GEditor->BeginTransaction(TEXT("UnrealMcp"), FText::FromString(UndoTitle), nullptr);
 		for (const rql::MutationRecord& Record : Records)
 		{
 			UObject* Owner = OwnerOf(Record);
@@ -393,6 +393,17 @@ void FUnrealMcpRqlSession::ConfigureModules()
 	}
 }
 
+void FUnrealMcpRqlSession::SetUndoTitle(const FString& QueryText)
+{
+	// One line (whitespace runs as one space), at most 120 characters.
+	static constexpr int32 MaxChars = 120;
+	TArray<FString> Words;
+	QueryText.ParseIntoArrayWS(Words);
+	const FString Query = FString::Join(Words, TEXT(" "));
+	if (!Query.IsEmpty())
+		UndoTitle = TEXT("RQL: ") + (Query.Len() > MaxChars ? Query.Left(MaxChars - 3) + TEXT("...") : Query);
+}
+
 void FUnrealMcpRqlSession::CloseTransaction()
 {
 	if (TransactionIndex != INDEX_NONE && GEditor)
@@ -441,6 +452,7 @@ void FUnrealMcpRqlSession::AddAdapter(rql::TypeAdapter Adapter)
 
 FString FUnrealMcpRqlSession::Execute(const FString& PlanJson, bool bAllowMutation, bool bDryRun, bool& bOutOk, int32 MaxTargets)
 {
+	Types().SetMutationRequest(bAllowMutation);
 	const std::string Text = UnrealMcpRqlToStd(PlanJson);
 	rql::QueryPlan Plan;
 	rql::Diagnostic Error;
