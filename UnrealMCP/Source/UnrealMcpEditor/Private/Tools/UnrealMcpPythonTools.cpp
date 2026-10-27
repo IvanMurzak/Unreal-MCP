@@ -263,17 +263,17 @@ namespace UnrealMcpPythonTools
 				// One undo step, as rql-mutate (the transaction buffer drops it when a read-only snippet recorded nothing).
 				const int64 LogSequence = FUnrealMcpLogCollector::Get().GetLastSequence();
 				const int32 Transaction = GEditor ? GEditor->BeginTransaction(TEXT("UnrealMcp"), FText::FromString(TEXT("python-execute")), nullptr) : INDEX_NONE;
+				// Only Modify()'d objects with actual changes record: after a run of direct setters (set_actor_location)
+				// the transaction is dropped as empty, and an undo would revert the PREVIOUS edit. Our own (top-level)
+				// transaction is the last queue entry; whether it survives EndTransaction tells (nested: unknowable).
+				FGuid OwnTransaction;
+				if (Transaction == 0 && GEditor->Trans && GEditor->Trans->GetQueueLength() > 0)
+					if (const FTransaction* Current = GEditor->Trans->GetTransaction(GEditor->Trans->GetQueueLength() - 1))
+						OwnTransaction = Current->GetContext().TransactionId;
 				const bool bRan = Python->ExecPythonCommandEx(Command);
-				int32 Recorded = 0;
 				if (Transaction != INDEX_NONE)
-				{
-					// Only objects Modify()'d are recorded: direct setters (set_actor_location) record nothing, so an undo
-					// after such a run would revert the PREVIOUS edit. Count the records before the transaction closes.
-					if (GEditor->Trans && GEditor->Trans->GetQueueLength() > 0)
-						if (const FTransaction* Current = GEditor->Trans->GetTransaction(GEditor->Trans->GetQueueLength() - 1))
-							Recorded = Current->GetRecordCount();
 					GEditor->EndTransaction();
-				}
+				const bool bRecordedNothing = OwnTransaction.IsValid() && GEditor->Trans->FindTransactionIndex(OwnTransaction) == INDEX_NONE;
 
 				const TSharedPtr<FJsonObject> Response = bRan ? PythonDecodeResponse(Command.CommandResult) : nullptr;
 				if (!Response.IsValid())
@@ -286,7 +286,7 @@ namespace UnrealMcpPythonTools
 				for (const FPythonLogOutputEntry& Entry : Command.LogOutput)
 					Logs.Add(PythonLogEntry(PythonLogLevel(Entry.Type), Entry.Output.TrimEnd()));
 				PythonAddEngineLogs(LogSequence, Logs);
-				if (Transaction != INDEX_NONE && Recorded == 0 && Response->GetBoolField(TEXT("success")) && PythonLooksMutating(Code))
+				if (bRecordedNothing && Response->GetBoolField(TEXT("success")) && PythonLooksMutating(Code))
 					Logs.Add(PythonLogEntry(TEXT("warning"), PythonNoUndoNote));
 				if (PythonCapLogs(Logs, FirstOwn))
 				{

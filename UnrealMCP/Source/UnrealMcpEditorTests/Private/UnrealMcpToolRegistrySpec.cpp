@@ -9,6 +9,7 @@
 #include "UnrealMcpRuntimeCoreTools.h" // UnrealMcpPingTool::Register moved to the runtime module (§12.1)
 #include "UnrealMcpToolRegistry.h"
 #include "Dom/JsonObject.h"
+#include "Dom/JsonValue.h"
 
 /** Tool registry + ping specs (docs/ARCHITECTURE.md §2.2, §3.3, §10). */
 BEGIN_DEFINE_SPEC(FUnrealMcpToolRegistrySpec, "UnrealMcp.Tools.Registry",
@@ -81,6 +82,11 @@ void FUnrealMcpToolRegistrySpec::Define()
 			TestTrue(*FString::Printf(TEXT("names the parameter, the declared ones and the sent ones (%s)"), *Missing.Message),
 				Missing.Message.Contains(TEXT("Missing required 'path'")) && Missing.Message.Contains(TEXT("parameters: path, name"))
 				&& Missing.Message.Contains(TEXT("sent: blueprint")));
+
+			TSharedPtr<FJsonObject> Null = MakeShared<FJsonObject>();
+			Null->SetField(TEXT("path"), MakeShared<FJsonValueNull>());
+			TestTrue(TEXT("a JSON null counts as missing"), Registry.Execute(TEXT("registry-spec-required"), FUnrealMcpToolCall(Null)).Message.Contains(TEXT("Missing required 'path'")));
+			TestFalse(TEXT("the handler still did not run"), bHandlerRan);
 
 			TSharedPtr<FJsonObject> Given = MakeShared<FJsonObject>();
 			Given->SetStringField(TEXT("path"), TEXT("/Game/BP"));

@@ -24,7 +24,6 @@
 #include "Tracks/MovieSceneColorTrack.h"
 #include "Tracks/MovieSceneDoubleTrack.h"
 #include "Tracks/MovieSceneFloatTrack.h"
-#include "Tracks/MovieSceneIntegerTrack.h"
 #include "Tracks/MovieScenePropertyTrack.h"
 #include "Tracks/MovieSceneVectorTrack.h"
 #include "Tracks/MovieSceneVisibilityTrack.h"
@@ -179,8 +178,6 @@ namespace UnrealMcpRqlSequencesLocal
 			return UMovieSceneDoubleTrack::StaticClass();
 		if (Property->IsA<FBoolProperty>())
 			return UMovieSceneBoolTrack::StaticClass();
-		if (Property->IsA<FIntProperty>())
-			return UMovieSceneIntegerTrack::StaticClass();
 		if (const FStructProperty* Struct = CastField<FStructProperty>(Property))
 		{
 			if (Struct->Struct == TBaseStructure<FLinearColor>::Get() || Struct->Struct == TBaseStructure<FColor>::Get())
@@ -232,7 +229,7 @@ namespace UnrealMcpRqlSequencesLocal
 	}
 
 	/** An animatable property of @p Bound or (for an actor) of one of its components: "Intensity", "LightComponent0.Intensity". */
-	TPair<UObject*, FProperty*> FindAnimatable(UObject* Bound, const FString& Path)
+	TPair<UObject*, FProperty*> FindAnimatable(UObject* Bound, const FString& Path, bool bThrowIfMissing = true)
 	{
 		FString Owner, Name = Path.TrimStartAndEnd();
 		if (Name.Contains(TEXT(".")))
@@ -247,7 +244,7 @@ namespace UnrealMcpRqlSequencesLocal
 			{
 				const bool bNamed = Owner.IsEmpty() || Component->GetName().Equals(Owner, ESearchCase::IgnoreCase)
 					|| Component->GetClass()->GetName().Equals(Owner, ESearchCase::IgnoreCase)
-					|| (Component->GetClass()->GetName() + TEXT("Component")).Equals(Owner, ESearchCase::IgnoreCase);
+					|| Component->GetClass()->GetName().Equals(Owner + TEXT("Component"), ESearchCase::IgnoreCase);
 				if (bNamed)
 					Objects.Add(Component);
 			}
@@ -275,6 +272,8 @@ namespace UnrealMcpRqlSequencesLocal
 				Names.Add(Hit.Key->GetName() + TEXT(".") + Hit.Value->GetName());
 			Throw(FString::Printf(TEXT("'%s' is a property of several components of %s: name one (%s)"), *Path, *Label, *FString::Join(Names, TEXT(", "))));
 		}
+		if (!bThrowIfMissing)
+			return { nullptr, nullptr };
 		Available.Sort();
 		if (Available.Num() > 25)
 		{
@@ -312,15 +311,9 @@ namespace UnrealMcpRqlSequencesLocal
 	UMovieSceneTrack* AddBindingTrack(ULevelSequence* Sequence, const FGuid& Guid, const FString& What)
 	{
 		UMovieScene* Scene = SceneOf(Sequence);
-		if (UClass* Class = FindTrackClass(What))
+		UClass* Class = FindTrackClass(What);
+		if (Class && Class->IsChildOf(UMovieSceneVisibilityTrack::StaticClass()))
 		{
-			if (!Class->IsChildOf(UMovieSceneVisibilityTrack::StaticClass()))
-			{
-				if (NeedsProperty(Class))
-					Throw(FString::Printf(TEXT("%s needs the property it animates: call AddTrack(\"<property>\") instead (e.g. AddTrack(\"Intensity\")); the track class follows from the property's type"),
-						*Class->GetName()));
-				return AddTrackTo(Scene, &Guid, What);
-			}
 			// The Sequencer's Visibility track keys the actor's "Actor Hidden In Game" (a component's bHiddenInGame).
 			const FMovieScenePossessable* Possessable = Scene->FindPossessable(Guid);
 			const UClass* BoundClass = Possessable ? Possessable->GetPossessedObjectClass() : nullptr;
@@ -329,26 +322,38 @@ namespace UnrealMcpRqlSequencesLocal
 			Track->SetPropertyNameAndPath(Hidden, Hidden.ToString());
 			return Track;
 		}
+		if (Class && !NeedsProperty(Class))
+			return AddTrackTo(Scene, &Guid, What);
+		// A property, or a name that only resolves to a property track class ("Color" -> MovieSceneColorTrack): a property
+		// of that name wins, else the class alone is refused (it would animate nothing).
 		UObject* Bound = BoundObject(Sequence, Guid);
-		if (!Bound)
+		const TPair<UObject*, FProperty*> Target = Bound ? FindAnimatable(Bound, What, /*bThrowIfMissing*/ Class == nullptr) : TPair<UObject*, FProperty*>(nullptr, nullptr);
+		if (!Target.Key)
+		{
+			if (Class)
+				Throw(FString::Printf(TEXT("%s needs the property it animates: call AddTrack(\"<property>\") instead (e.g. AddTrack(\"Intensity\")); the track class follows from the property's type"),
+					*Class->GetName()));
 			Throw(FString::Printf(TEXT("'%s' is not a track class, and the bound object is not in the editor world, so its properties cannot be looked up"), *What));
-		const TPair<UObject*, FProperty*> Target = FindAnimatable(Bound, What);
+		}
 		FGuid TrackGuid = Guid;
 		if (Target.Key != Bound)
 			TrackGuid = ComponentBinding(Sequence, Guid, CastChecked<AActor>(Bound), CastChecked<UActorComponent>(Target.Key));
+		const FMovieSceneBinding* Binding = Scene->FindBinding(TrackGuid);
+		if (!Binding)
+			Throw(FString::Printf(TEXT("the binding of %s is missing from the movie scene (a damaged sequence): rebind it"), *Target.Key->GetName()));
 		const FName Property = Target.Value->GetFName();
-		for (UMovieSceneTrack* Existing : Scene->FindBinding(TrackGuid)->GetTracks())
+		for (UMovieSceneTrack* Existing : Binding->GetTracks())
 		{
 			const UMovieScenePropertyTrack* PropertyTrack = Cast<UMovieScenePropertyTrack>(Existing);
 			if (PropertyTrack && PropertyTrack->GetPropertyName() == Property)
 				Throw(FString::Printf(TEXT("%s already has a %s track: key it (get Tracks | get Sections | call AddKey(\"%s\", frame, value))"),
 					*Target.Key->GetName(), *Property.ToString(), *Property.ToString()));
 		}
-		UClass* Class = PropertyTrackClass(Target.Value);
+		UClass* PropertyClass = PropertyTrackClass(Target.Value);
 		Scene->Modify();
-		UMovieScenePropertyTrack* Track = Cast<UMovieScenePropertyTrack>(Scene->AddTrack(Class, TrackGuid));
+		UMovieScenePropertyTrack* Track = Cast<UMovieScenePropertyTrack>(Scene->AddTrack(PropertyClass, TrackGuid));
 		if (!Track)
-			Throw(FString::Printf(TEXT("could not add a %s"), *Class->GetName()));
+			Throw(FString::Printf(TEXT("could not add a %s"), *PropertyClass->GetName()));
 		Track->SetFlags(RF_Transactional);
 		Track->SetPropertyNameAndPath(Property, Property.ToString());
 		if (UMovieSceneDoubleVectorTrack* Vector = Cast<UMovieSceneDoubleVectorTrack>(Track))
@@ -368,7 +373,9 @@ namespace UnrealMcpRqlSequencesLocal
 		FMovieSceneChannelProxy& Proxy = Section->GetChannelProxy();
 		// A property track's single channel carries no name (float, bool ... sections): it is named after the property.
 		const UMovieScenePropertyTrack* PropertyTrack = Section->GetTypedOuter<UMovieScenePropertyTrack>();
-		const FString PropertyName = PropertyTrack && !PropertyTrack->GetPropertyName().IsNone() ? PropertyTrack->GetPropertyName().ToString() : FString();
+		// A Visibility section's bool is inverted (true = visible) although the track binds bHidden: it is named Visible.
+		const FString PropertyName = Cast<UMovieSceneVisibilityTrack>(PropertyTrack) ? FString(TEXT("Visible"))
+			: PropertyTrack && !PropertyTrack->GetPropertyName().IsNone() ? PropertyTrack->GetPropertyName().ToString() : FString();
 		for (const FMovieSceneChannelEntry& Entry : Proxy.GetAllEntries())
 		{
 			const FName Type = Entry.GetChannelTypeName();
@@ -715,7 +722,7 @@ namespace UnrealMcpRqlSequencesLocal
 			{
 				AddKey(Section(Self), TextArg(Args[0]), NumberArg(Args[1], TEXT("a frame number")), Args[2]);
 				return rql::Value::null();
-			}, "key a channel (\"Location.X\", \"Bool\") at a frame: a number, or true / false for bool channels; replaces a key at that frame"));
+			}, "key a channel (\"Location.X\", \"Intensity\", \"Visible\") at a frame: a number, or true / false for bool channels; replaces a key at that frame"));
 	}
 }
 

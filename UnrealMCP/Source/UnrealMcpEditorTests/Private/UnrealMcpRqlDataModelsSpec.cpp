@@ -991,7 +991,7 @@ void FUnrealMcpRqlDataModelsSpec::Define()
 			Refuses(TEXT("a bare property track class"), /* unreal.asset("@LS@") | get Bindings | where Name == "RqlSeqLamp" | call AddTrack("MovieSceneFloatTrack") */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@LS@"}]},"stages":[{"op":"get","expr":{"path":["Bindings"]}},{"op":"where","pred":{"op":"==","args":[{"path":["Name"]},{"lit":"RqlSeqLamp"}]}},{"op":"call","method":"AddTrack","args":[{"lit":"MovieSceneFloatTrack"}]}]})RQL"), TEXT("AddTrack(\"Intensity\")"));
 			Refuses(TEXT("an unbound property track"), /* unreal.asset("@LS@") | call AddTrack("MovieSceneFloatTrack") */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@LS@"}]},"stages":[{"op":"call","method":"AddTrack","args":[{"lit":"MovieSceneFloatTrack"}]}]})RQL"), TEXT("bind the actor"));
 			// An unknown name lists what can be animated (the light component's Interp properties).
-			Refuses(TEXT("an unknown property"), /* unreal.asset("@LS@") | get Bindings | where Name == "RqlSeqLamp" | call AddTrack("NoSuchThing") */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@LS@"}]},"stages":[{"op":"get","expr":{"path":["Bindings"]}},{"op":"where","pred":{"op":"==","args":[{"path":["Name"]},{"lit":"RqlSeqLamp"}]}},{"op":"call","method":"AddTrack","args":[{"lit":"NoSuchThing"}]}]})RQL"), TEXT("LightComponent0.Intensity"));
+			Refuses(TEXT("an unknown property"), /* unreal.asset("@LS@") | get Bindings | where Name == "RqlSeqLamp" | call AddTrack("NoSuchThing") */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@LS@"}]},"stages":[{"op":"get","expr":{"path":["Bindings"]}},{"op":"where","pred":{"op":"==","args":[{"path":["Name"]},{"lit":"RqlSeqLamp"}]}},{"op":"call","method":"AddTrack","args":[{"lit":"NoSuchThing"}]}]})RQL"), TEXT("animatable properties: "));
 
 			const TSharedPtr<FJsonObject> Added = Must(TEXT("intensity"), /* unreal.asset("@LS@") | get Bindings | where Name == "RqlSeqLamp" | call AddTrack("Intensity") */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@LS@"}]},"stages":[{"op":"get","expr":{"path":["Bindings"]}},{"op":"where","pred":{"op":"==","args":[{"path":["Name"]},{"lit":"RqlSeqLamp"}]}},{"op":"call","method":"AddTrack","args":[{"lit":"Intensity"}]}]})RQL"));
 			TestTrue(*FString::Printf(TEXT("returns a float track (%s)"), *UnrealMcpRqlSpecHelpers::CellText(Added, 0, 2)), UnrealMcpRqlSpecHelpers::CellText(Added, 0, 2).StartsWith(TEXT("MovieSceneFloatTrack")));
@@ -1014,6 +1014,8 @@ void FUnrealMcpRqlDataModelsSpec::Define()
 					Bound.Add(Track->GetClass()->GetName() + TEXT(":") + Property->GetPropertyName().ToString());
 			Bound.Sort();
 			TestEqual(TEXT("tracks bound to their properties"), FString::Join(Bound, TEXT(",")), FString(TEXT("MovieSceneColorTrack:LightColor,MovieSceneFloatTrack:Intensity")));
+			if (!GEditor)
+				return;
 			AActor* Lamp = nullptr;
 			for (TActorIterator<AActor> It(GEditor->GetEditorWorldContext().World()); It; ++It)
 				if (It->GetActorLabel() == TEXT("RqlSeqLamp"))
@@ -1035,6 +1037,9 @@ void FUnrealMcpRqlDataModelsSpec::Define()
 				if (const UMovieSceneVisibilityTrack* Found = Cast<UMovieSceneVisibilityTrack>(Track))
 					Visibility = Found;
 			TestTrue(TEXT("visibility bound to bHidden"), Visibility && Visibility->GetPropertyName() == FName(TEXT("bHidden")));
+			// Its bool is inverted (true = visible), so the channel is named Visible, not after bHidden.
+			const FString VisibleChannel = UnrealMcpRqlSpecHelpers::CellText(Run(/* unreal.asset("@LS@") | get Bindings | where Name == "RqlSeqLamp" | get Tracks | where $type == "MovieSceneVisibilityTrack" | get Sections | select Channels */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@LS@"}]},"stages":[{"op":"get","expr":{"path":["Bindings"]}},{"op":"where","pred":{"op":"==","args":[{"path":["Name"]},{"lit":"RqlSeqLamp"}]}},{"op":"get","expr":{"path":["Tracks"]}},{"op":"where","pred":{"op":"==","args":[{"path":[{"meta":"type"}]},{"lit":"MovieSceneVisibilityTrack"}]}},{"op":"get","expr":{"path":["Sections"]}},{"op":"select","fields":[{"name":"Channels","expr":{"path":["Channels"]}}]}]})RQL")));
+			TestTrue(*FString::Printf(TEXT("the visibility channel is Visible (%s)"), *VisibleChannel), VisibleChannel.Contains(TEXT("\"Name\":\"Visible\"")));
 
 			if (!GEditor)
 				return;

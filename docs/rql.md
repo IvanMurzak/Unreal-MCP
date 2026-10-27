@@ -225,10 +225,11 @@ Frames are at the sequence's display rate (what the Sequencer shows), converted 
   `Spawnable`), `Class`, `Tracks`; `call AddTrack("Transform" | "Visibility" | a track class | a property)` — every new track gets a
   section over the playback range. A property (`"Intensity"`, `"LightColor"`, `"LightComponent0.Intensity"`: an animatable
   — `Interp` — property of the bound actor or of one of its components) gets the property track of its type (float, double,
-  bool, int, color, vector) bound to it, on the component's binding when the property is a component's (made as the
+  bool, color, vector) bound to it, on the component's binding when the property is a component's (made as the
   Sequencer makes it); its single channel is named after the property (`AddKey("Intensity", 60, 5000)`). A bare property
   track class (`MovieSceneFloatTrack`) is refused, since it would animate nothing; `Visibility` keys the actor's
-  `bHidden` (a component's `bHiddenInGame`), as the Sequencer's Visibility track does.
+  `bHidden` (a component's `bHiddenInGame`), as the Sequencer's Visibility track does; its channel is `Visible` (true =
+  visible).
 - `UMovieSceneTrack`: `Sections`, `DisplayName`, `call AddSection()`; `UMovieSceneSection`: `Start`, `End` (writable),
   `Channels` (`[{Name, Type, Keys: [{Frame, Value}]}]`, names as the Sequencer shows them: `Location.X`, `Rotation.Yaw`),
   `call AddKey(channel, frame, value)` (the channel by that name, or by its internal name: `Rotation.Z` is the yaw) (double / float / bool channels; a key outside the section grows it).

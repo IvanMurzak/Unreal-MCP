@@ -396,6 +396,10 @@ namespace UnrealMcpRqlCoreLocal
 				Removed.Add(Layer);
 		if (Removed.Num())
 			Layers->RemoveActorFromLayers(Actor, Removed);
+		// AddActorToLayers skips names the actor already holds, so a layer named by an earlier raw write would stay missing.
+		for (const FName& Layer : Wanted)
+			if (!Layers->IsLayer(Layer))
+				Layers->CreateLayer(Layer);
 		Layers->AddActorToLayers(Actor, Wanted);
 	}
 

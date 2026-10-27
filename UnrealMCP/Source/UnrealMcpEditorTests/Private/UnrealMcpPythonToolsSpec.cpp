@@ -156,6 +156,10 @@ void FUnrealMcpPythonToolsSpec::Define()
 		TestTrue(*FString::Printf(TEXT("warns that nothing was recorded (%s)"), *Direct.Message.Left(500)), Direct.Message.Contains(TEXT("recorded no undo step")));
 		const FUnrealMcpToolResult Modified = Run(Find + TEXT("lamp.modify()\nlamp.set_actor_location(unreal.Vector(0, 0, 654), False, False)"));
 		TestFalse(TEXT("modify() first records it: no note"), Modified.Message.Contains(TEXT("recorded no undo step")));
+		// A record without changes (the actor Modify()'d by a no-op write; the location lives on the root component) is
+		// dropped with the transaction: still nothing to undo, still the note.
+		const FUnrealMcpToolResult Unchanged = Run(Find + TEXT("lamp.set_editor_property('tags', lamp.tags)\nlamp.set_actor_location(unreal.Vector(0, 0, 987), False, False)"));
+		TestTrue(*FString::Printf(TEXT("a change-less record still warns (%s)"), *Unchanged.Message.Left(500)), Unchanged.Message.Contains(TEXT("recorded no undo step")));
 		TestFalse(TEXT("a read-only snippet gets no note"), Run(Find + TEXT("lamp.get_actor_location().z")).Message.Contains(TEXT("recorded no undo step")));
 		World->EditorDestroyActor(Lamp, true);
 	});

@@ -280,7 +280,8 @@ FUnrealMcpToolResult FUnrealMcpToolRegistry::Execute(const FString& Name, const 
 	// it and what was sent, instead of reaching the handler as an empty value ("Blueprint not found at ''").
 	for (const FUnrealMcpParamSpec& Param : Found->Params)
 	{
-		if (Param.Requirement != EUnrealMcpParamRequirement::Required || Call.Has(Param.Name))
+		const TSharedPtr<FJsonValue> Given = Param.Requirement == EUnrealMcpParamRequirement::Required ? Call.Arguments->TryGetField(Param.Name) : nullptr;
+		if (Param.Requirement != EUnrealMcpParamRequirement::Required || (Given.IsValid() && Given->Type != EJson::Null))
 			continue;
 		TArray<FString> Declared, Sent;
 		for (const FUnrealMcpParamSpec& Each : Found->Params)

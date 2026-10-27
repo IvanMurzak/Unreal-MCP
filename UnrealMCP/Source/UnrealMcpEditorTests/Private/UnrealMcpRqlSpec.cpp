@@ -347,6 +347,8 @@ void FUnrealMcpRqlSpec::Define()
 			if (!TestEqual(TEXT("one lamp"), Found.Num(), 1) || !TestNotNull(TEXT("layers subsystem"), LayersSubsystem))
 				return;
 			AActor* Lamp = Found[0];
+			// A raw name already on the actor (what a plain property write used to leave) gets its layer created too.
+			Lamp->Layers.Add(TEXT("RqlSpecLayerA"));
 			// actors | where Label == "RqlSpecLamp" | set Layers = ["RqlSpecLayerA", "RqlSpecLayerB"]
 			const TSharedPtr<FJsonObject> Both = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"RqlSpecLamp"}]}},{"op":"set","assign":[{"target":{"path":["Layers"]},"value":{"list":[{"lit":"RqlSpecLayerA"},{"lit":"RqlSpecLayerB"}]}}]}]})RQL"), true);
 			TestTrue(*FString::Printf(TEXT("set (%s)"), *Codes(Both)), IsOk(Both));
