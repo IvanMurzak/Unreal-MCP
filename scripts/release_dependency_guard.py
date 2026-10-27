@@ -15,9 +15,10 @@ What it checks (everything the core, extension and CLI releases ship):
     version (any `-` suffix) or a version not listed on nuget.org fails, and so does a local
     (non-URL) restore source (`RestoreAdditionalProjectSources`, `nuget.config`), e.g. `prerelease-packages`;
   * the vendored RQL C++ runtime: its README must record the published `com.IvanMurzak.Rql` release it
-    was copied from (`com.IvanMurzak.Rql` <version>: not a pre-release, listed on nuget.org) and that version must
+    was copied from (`com.IvanMurzak.Rql` <version>: not a pre-release, listed on nuget.org), that version must
     equal the sidecar's `com.IvanMurzak.Rql` pin (the C++ runtime executes the plans the sidecar's RQL
-    parses). The README marker is all there is: the copied sources carry no version of their own;
+    parses), and its recorded commit must be the `<repository commit>` of that package's nuspec. The
+    copied sources carry no version of their own, so the README is what is checked;
   * the vendored Code-Exec Python runtime (`_vendor/code_exec/VENDORED.md`): a published
     `com.IvanMurzak.CodeExec` release;
   * every extension's `minCoreVersion` (`extensions/*/extension.json`) and the npm dependencies of
@@ -44,15 +45,17 @@ from typing import Callable, Iterable, Optional
 
 ROOT = Path(__file__).resolve().parents[1]
 NUGET_INDEX_URL = "https://api.nuget.org/v3-flatcontainer/{id}/index.json"
+NUGET_NUSPEC_URL = "https://api.nuget.org/v3-flatcontainer/{id}/{version}/{id}.nuspec"
 
 # MSBuild item types that pin a NuGet package version.
-PACKAGE_ITEMS = {"PackageReference", "PackageVersion", "GlobalPackageReference"}
+PACKAGE_ITEMS = {"PackageReference", "PackageVersion", "GlobalPackageReference", "PackageDownload"}
 # MSBuild properties that add NuGet restore sources.
 RESTORE_SOURCE_PROPERTIES = {"RestoreSources", "RestoreAdditionalProjectSources", "RestoreFallbackFolders"}
-SKIP_DIRS = {"bin", "obj", "node_modules", ".git", "publish"}
+SKIP_DIRS = {"bin", "obj", "node_modules", "publish", "prerelease-packages"}
 PROPERTY_RE = re.compile(r"\$\(([A-Za-z_][A-Za-z0-9_.-]*)\)")
 NPM_PRERELEASE_RE = re.compile(r"\d+\.\d+\.\d+-")
-NPM_NON_REGISTRY_PREFIXES = ("file:", "link:", "git", "http:", "https:", "github:", "workspace:", "portal:")
+# A registry semver spec (`1.2.3`, `^1.2`, `~1`, `>=1 <2`, `v1.2.3`); dist-tags, paths, git and URLs are not.
+NPM_REGISTRY_SPEC_RE = re.compile(r"^\s*[0-9^~<>=v]")
 
 
 @dataclass(frozen=True)
@@ -98,6 +101,15 @@ class NuGetRegistry:
         if isinstance(cached, RegistryError):
             raise cached
         return cached
+
+    def source_commit(self, package: str, version: str) -> Optional[str]:
+        """The `<repository commit>` a published package was packed from (None: no nuspec / no commit)."""
+        key = package.lower()
+        body = self._fetch(NUGET_NUSPEC_URL.format(id=key, version=normalize_nuget_version(version)))
+        if body is None:
+            return None
+        repository = next((e for e in ET.fromstring(body).iter() if _local(e.tag) == "repository"), None)
+        return None if repository is None else repository.get("commit")
 
 
 def _http_get(url: str) -> Optional[bytes]:
@@ -148,8 +160,11 @@ def nuget_versions_in(spec: str) -> tuple[list[str], Optional[str]]:
     if spec[0] in "[(":
         if spec[-1] not in "])":
             return [], f"malformed version range '{spec}'"
-        bounds = [b.strip() for b in spec[1:-1].split(",")]
-        return [b for b in bounds if b], None
+        lower, _, upper = (b.strip() for b in spec[1:-1].partition(","))
+        if "," not in spec:  # `[1.2.3]`: exactly that version
+            return [lower], None
+        # The lower bound is what restore picks; an exclusive upper bound need not exist (yet).
+        return [b for b in (lower, upper if spec[-1] == "]" else "") if b], None
     return [spec], None
 
 
@@ -207,15 +222,16 @@ def walk(directory: Path) -> Iterable[Path]:
     """Files of a project's folder, not descending into build output or another project's folder."""
     for entry in sorted(directory.iterdir()):
         if entry.is_dir():
-            if entry.name not in SKIP_DIRS and not any(entry.glob("*.csproj")):
+            if entry.name not in SKIP_DIRS and not entry.name.startswith(".") and not any(entry.glob("*.csproj")):
                 yield from walk(entry)
         else:
             yield entry
 
 
-def read_properties(files: list[Path]) -> dict[str, str]:
-    """Static `<PropertyGroup>` values over the chain; later files win (MSBuild evaluation order)."""
-    properties: dict[str, str] = {}
+def read_properties(files: list[Path]) -> dict[str, list[str]]:
+    """Every static `<PropertyGroup>` definition over the chain (Conditions are not evaluated, so a
+    property set more than once keeps every value it may take)."""
+    properties: dict[str, list[str]] = {}
     for path in files:
         try:
             tree = ET.parse(path)
@@ -226,37 +242,53 @@ def read_properties(files: list[Path]) -> dict[str, str]:
                 continue
             for prop in group:
                 if isinstance(prop.tag, str) and prop.text is not None:
-                    properties[_local(prop.tag)] = prop.text.strip()
+                    values = properties.setdefault(_local(prop.tag), [])
+                    if prop.text.strip() not in values:
+                        values.append(prop.text.strip())
     return properties
 
 
-def resolve(value: str, properties: dict[str, str], file: Path) -> str:
-    """Expand `$(Name)` from static properties; unknown names stay as `$(Name)`."""
+def resolve(value: str, properties: dict[str, list[str]], file: Path) -> list[str]:
+    """Every expansion of the `$(Name)`s in `value` over the static definitions; an unknown name stays
+    as `$(Name)` (the caller reports it)."""
     builtins = {"MSBuildThisFileDirectory": str(file.parent) + os.sep, "MSBuildProjectDirectory": str(file.parent)}
-    for _ in range(16):
-        expanded = PROPERTY_RE.sub(
-            lambda m: builtins.get(m.group(1), properties.get(m.group(1), m.group(0))), value)
-        if expanded == value:
-            break
-        value = expanded
-    return value
+    results: set[str] = set()
+    pending = [(value, 0)]
+    while pending:
+        current, depth = pending.pop()
+        match = PROPERTY_RE.search(current)
+        name = match.group(1) if match else ""
+        options = [builtins[name]] if name in builtins else properties.get(name)
+        if not match or not options or depth >= 16:
+            results.add(current)
+            continue
+        pending += [(current[:match.start()] + option + current[match.end():], depth + 1) for option in options]
+    return sorted(results)
 
 
 def is_url(source: str) -> bool:
     return re.match(r"^[a-z][a-z0-9+.-]*://", source, re.IGNORECASE) is not None and not source.lower().startswith("file:")
 
 
+def item_version(element: ET.Element) -> Optional[str]:
+    """The version an item pins; `VersionOverride` wins over `Version` (central package management)."""
+    for name in ("VersionOverride", "Version", "version"):
+        if element.get(name) is not None:
+            return element.get(name)
+    for name in ("VersionOverride", "Version"):
+        child = next((c for c in element if isinstance(c.tag, str) and _local(c.tag) == name), None)
+        if child is not None and child.text:
+            return child.text.strip()
+    return None
+
+
 def scan_msbuild(projects: list[Path], root: Path) -> tuple[list[Pin], list[Problem]]:
     pins: list[Pin] = []
     problems: list[Problem] = []
-    seen: set[Path] = set()
     for project in (p.resolve() for p in projects):
         chain = msbuild_chain(project, root)
         properties = read_properties(chain)
-        for path in chain:
-            if path in seen:
-                continue
-            seen.add(path)
+        for path in chain:  # a shared props file is read per project: its `$(X)` may differ per project
             text = path.read_text(encoding="utf-8-sig")
             try:
                 document = ET.fromstring(text)
@@ -269,28 +301,24 @@ def scan_msbuild(projects: list[Path], root: Path) -> tuple[list[Pin], list[Prob
                 name = _local(element.tag)
                 if name in PACKAGE_ITEMS or (name == "dependency" and path.suffix == ".nuspec"):
                     package = element.get("Include") or element.get("Update") or element.get("id")
-                    raw = element.get("Version") or element.get("VersionOverride") or element.get("version")
-                    if raw is None:
-                        child = next((c for c in element if isinstance(c.tag, str) and _local(c.tag) == "Version"), None)
-                        raw = child.text.strip() if child is not None and child.text else None
+                    raw = item_version(element)
                     if not package or raw is None:
                         continue  # a version-less reference takes its pin from a PackageVersion scanned here too
                     line = line_of(text, f'"{package}"', raw) or line_of(text, package, raw)
-                    version = resolve(raw, properties, path)
-                    if PROPERTY_RE.search(version):
-                        problems.append(Problem(path, line, f"{package}: cannot resolve version '{raw}'"))
-                        continue
-                    versions, error = nuget_versions_in(version)
-                    if error:
-                        problems.append(Problem(path, line, f"{package}: {error}"))
-                    pins.extend(Pin("nuget", package, v, path, line) for v in versions)
+                    for version in resolve(raw, properties, path):
+                        if PROPERTY_RE.search(version):
+                            problems.append(Problem(path, line, f"{package}: cannot resolve version '{raw}'"))
+                            continue
+                        versions, error = nuget_versions_in(version)
+                        if error:
+                            problems.append(Problem(path, line, f"{package}: {error}"))
+                        pins.extend(Pin("nuget", package, v, path, line) for v in versions)
                 elif name in RESTORE_SOURCE_PROPERTIES and element.text:
                     for entry in element.text.split(";"):
                         entry = entry.strip()
                         if not entry or entry == f"$({name})":
                             continue
-                        source = resolve(entry, properties, path)
-                        if not is_url(source):
+                        if not all(is_url(source) for source in resolve(entry, properties, path)):
                             problems.append(Problem(path, line_of(text, f"<{name}"),
                                                     f"{name} adds the local NuGet feed '{entry}' "
                                                     f"(a release must restore from nuget.org only; delete the "
@@ -331,7 +359,7 @@ def scan_package_json(path: Path) -> tuple[list[Pin], list[Problem]]:
     for section in ("dependencies", "optionalDependencies"):
         for package, spec in (data.get(section) or {}).items():
             line = line_of(text, f'"{package}"')
-            if spec.startswith(NPM_NON_REGISTRY_PREFIXES) or spec.startswith((".", "/")):
+            if not isinstance(spec, str) or not NPM_REGISTRY_SPEC_RE.match(spec):
                 problems.append(Problem(path, line, f"{package}: '{spec}' is not a registry version"))
             else:
                 pins.append(Pin("semver", package, spec, path, line))
@@ -372,6 +400,7 @@ def require(path: Path, problems: list[Problem]) -> bool:
 RQL_PACKAGE = "com.IvanMurzak.Rql"
 RQL_VENDORED = Path("UnrealMCP/Source/ThirdParty/RQL/README.md")
 CODE_EXEC_VENDORED = Path("UnrealMCP/Content/Python/unreal_mcp/_vendor/code_exec/VENDORED.md")
+RQL_COMMIT_RE = re.compile(r"commit\s+`([0-9a-fA-F]{7,40})`")
 RQL_MARKER_RE = re.compile(r"`com\.IvanMurzak\.Rql`\s*`?\s*([0-9][0-9A-Za-z.+-]*[0-9A-Za-z])")
 VENDORED_RELEASE_RE = re.compile(r"release\s+\*\*([^*\s]+)\*\*")
 
@@ -421,9 +450,34 @@ def collect(root: Path) -> tuple[list[Pin], list[Problem]]:
     return pins, problems
 
 
+def check_vendored_rql_commit(root: Path, pins: list[Pin], registry: NuGetRegistry) -> list[Problem]:
+    """The README's commit must be the one the published package was packed from: a re-vendor from an
+    unreleased commit that keeps the old version marker would otherwise pass."""
+    readme = root / RQL_VENDORED
+    marker = next((p for p in pins if p.file == readme and p.package == RQL_PACKAGE), None)
+    if marker is None or is_prerelease(marker.version):
+        return []  # no marker / a pre-release marker is already reported
+    text = readme.read_text(encoding="utf-8-sig")
+    commit = RQL_COMMIT_RE.search(text)
+    if not commit:
+        return [Problem(readme, marker.line, "vendored RQL C++ runtime: no source commit (commit `<sha>`) recorded")]
+    try:
+        published = registry.source_commit(RQL_PACKAGE, marker.version)
+    except (RegistryError, ET.ParseError) as error:
+        return [Problem(readme, marker.line, f"{RQL_PACKAGE} {marker.version}: cannot read the nuspec on nuget.org ({error})")]
+    if published is None:
+        return []  # an unpublished version is reported by check_pins; a nuspec without a commit cannot be compared
+    if not published.lower().startswith(commit.group(1).lower()):
+        return [Problem(readme, text.count("\n", 0, commit.start()) + 1,
+                        f"vendored RQL C++ runtime is commit {commit.group(1)} but {RQL_PACKAGE} {marker.version} "
+                        f"was packed from {published[:12]} (copy the sources of that release)")]
+    return []
+
+
 def run(root: Path, registry: NuGetRegistry) -> tuple[list[Pin], list[Problem]]:
     pins, problems = collect(root)
-    problems += check_pins(pins, registry)
+    pins = list(dict.fromkeys(pins))
+    problems += check_pins(pins, registry) + check_vendored_rql_commit(root, pins, registry)
     unique = sorted(set(problems), key=lambda p: (rel(p.file, root), p.line, p.message))
     return pins, unique
 

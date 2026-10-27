@@ -14,6 +14,9 @@ PUBLISHED = {
     "com.ivanmurzak.rql": ["0.1.0", "0.2.0"],
     "com.ivanmurzak.codeexec": ["0.3.0"],
 }
+RQL_COMMITS = {"0.1.0": "aaaa1111", "0.2.0": "b36b8e44f5952ea808af0918347774de5da69b6f"}
+NUSPEC = '<package xmlns="http://schemas.microsoft.com/packaging/2013/05/nuspec.xsd"><metadata>' \
+         '<id>com.IvanMurzak.Rql</id><repository type="git" commit="%s" /></metadata></package>'
 
 BRIDGE_CSPROJ = """<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup><Version>0.25.0</Version><RqlVersion>%s</RqlVersion></PropertyGroup>
@@ -41,6 +44,10 @@ def fake_registry(published=PUBLISHED, fail=False):
     def fetch(url):
         if fail:
             raise guard.RegistryError("offline")
+        if url.endswith(".nuspec"):
+            package, version = url.split("/")[-3:-1]
+            commit = RQL_COMMITS.get(version) if package == "com.ivanmurzak.rql" else None
+            return None if commit is None else (NUSPEC % commit).encode()
         versions = published.get(url.split("/")[-2])
         return None if versions is None else json.dumps({"versions": versions}).encode()
     return guard.NuGetRegistry(fetch)
@@ -90,14 +97,34 @@ class GuardTests(unittest.TestCase):
 
     def test_vendored_rql_must_match_the_sidecar_pin_and_be_published(self):
         self.fixture(vendored_rql=RQL_PUBLISHED % "0.1.0")
-        self.assertEqual([(guard.RQL_VENDORED.as_posix(),
-                           "vendored RQL C++ runtime is com.IvanMurzak.Rql 0.1.0 but the sidecar pins 0.2.0")], self.problems())
+        self.assertIn((guard.RQL_VENDORED.as_posix(),
+                       "vendored RQL C++ runtime is com.IvanMurzak.Rql 0.1.0 but the sidecar pins 0.2.0"), self.problems())
         self.fixture(vendored_rql=RQL_PUBLISHED % "0.3.0-dev.1")
         self.assertIn((guard.RQL_VENDORED.as_posix(), "com.IvanMurzak.Rql 0.3.0-dev.1 is a pre-release version"), self.problems())
         self.fixture(vendored_rql="- Source: https://github.com/IvanMurzak/RQL, commit `abc`.\n")
         self.assertEqual([(guard.RQL_VENDORED.as_posix(),
                            "vendored com.IvanMurzak.Rql: no release version marker (copy it from a published release)")],
                          self.problems())
+
+    def test_vendored_rql_commit_must_be_the_released_one(self):
+        self.fixture(vendored_rql=(RQL_PUBLISHED % "0.2.0").replace("b36b8e44f5952ea808af0918347774de5da69b6f", "602ce7c"))
+        self.assertEqual([(guard.RQL_VENDORED.as_posix(), "vendored RQL C++ runtime is commit 602ce7c but "
+                           "com.IvanMurzak.Rql 0.2.0 was packed from b36b8e44f595 (copy the sources of that release)")],
+                         self.problems())
+        self.fixture(vendored_rql=(RQL_PUBLISHED % "0.2.0").replace("b36b8e44f5952ea808af0918347774de5da69b6f", "b36b8e4"))
+        self.assertEqual([], self.problems())  # a short sha of the released commit is fine
+        self.fixture(vendored_rql="- Source: RQL (`com.IvanMurzak.Rql` 0.2.0).\n")
+        self.assertEqual([(guard.RQL_VENDORED.as_posix(),
+                           "vendored RQL C++ runtime: no source commit (commit `<sha>`) recorded")], self.problems())
+
+    def test_npm_unresolved_property_and_missing_file(self):
+        self.write("cli/package.json", json.dumps({"dependencies": {"fflate": "next"}}))
+        self.write("bridge/src/com.IvanMurzak.Unreal.MCP.Bridge.csproj", BRIDGE_CSPROJ.replace("$(RqlVersion)", "$(Nope)") % "0.2.0")
+        (self.root / guard.CODE_EXEC_VENDORED).unlink()
+        self.assertEqual({("cli/package.json", "fflate: 'next' is not a registry version"),
+                          ("bridge/src/com.IvanMurzak.Unreal.MCP.Bridge.csproj", "com.IvanMurzak.Rql: cannot resolve version '$(Nope)'"),
+                          (guard.CODE_EXEC_VENDORED.as_posix(), "expected file is missing (update release_dependency_guard.py)")},
+                         set(self.problems()))
 
     def test_unpublished_stable_pin_fails(self):
         self.fixture(rql="0.9.0")
@@ -109,7 +136,7 @@ class GuardTests(unittest.TestCase):
     def test_registry_outage_fails_closed(self):
         problems = self.problems(fake_registry(fail=True))
         self.assertTrue(problems)
-        self.assertTrue(all("cannot verify on nuget.org" in m for _, m in problems))
+        self.assertTrue(all("cannot verify on nuget.org" in m or "cannot read the nuspec" in m for _, m in problems))
 
     def test_code_exec_and_extension_core_floor(self):
         self.fixture(code_exec="0.4.0-dev.2", min_core="1.1.0-beta")
