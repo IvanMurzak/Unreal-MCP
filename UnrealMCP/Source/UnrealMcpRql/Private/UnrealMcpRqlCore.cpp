@@ -24,6 +24,7 @@
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "GameFramework/Actor.h"
+#include "Layers/LayersSubsystem.h"
 #include "MaterialEditingLibrary.h"
 #include "Materials/MaterialInstanceConstant.h"
 #include "Materials/MaterialInterface.h"
@@ -371,6 +372,33 @@ namespace UnrealMcpRqlCoreLocal
 			}, Description);
 	}
 
+	/** Make @p Actor a member of exactly the named layers (creating missing ones), through the Layers subsystem. */
+	void SetActorLayers(AActor* Actor, const rql::Value& Value)
+	{
+		TArray<FName> Wanted;
+		for (const rql::Value& Item : Items(Value))
+		{
+			if (!Item.is_string())
+				ThrowMismatch(TEXT("a layer name"), Item);
+			const FString Name = TextArg(Item).TrimStartAndEnd();
+			if (Name.IsEmpty())
+				Throw(TEXT("a layer name cannot be empty"));
+			Wanted.AddUnique(FName(*Name));
+		}
+		ULayersSubsystem* Layers = GEditor ? GEditor->GetEditorSubsystem<ULayersSubsystem>() : nullptr;
+		if (!Layers)
+			Throw(TEXT("the editor's Layers subsystem is not available"));
+		if (!Layers->IsActorValidForLayer(Actor))
+			Throw(FString::Printf(TEXT("%s cannot be put on a layer (only actors of the editor world's levels can)"), *Actor->GetActorLabel()));
+		TArray<FName> Removed;
+		for (const FName& Layer : Actor->Layers)
+			if (!Wanted.Contains(Layer))
+				Removed.Add(Layer);
+		if (Removed.Num())
+			Layers->RemoveActorFromLayers(Actor, Removed);
+		Layers->AddActorToLayers(Actor, Wanted);
+	}
+
 	void ActorMembers(FUnrealMcpRqlTypes& T, rql::TypeDescriptor& D)
 	{
 		FUnrealMcpRqlTypes* Types = &T;
@@ -437,6 +465,18 @@ namespace UnrealMcpRqlCoreLocal
 				static_cast<AActor*>(Self)->SetFolderPath(Value.is_null() ? NAME_None : FName(*TextArg(Value)));
 			},
 			"Outliner folder (null: none)", /*bOwning*/ false, /*bNullable*/ true));
+		// AActor::Layers is the raw name list: writing it as a property leaves the world without the layer (the Layers panel
+		// never lists it), so writes go through the Layers subsystem, as the panel's "Add Selected Actors" does.
+		FUnrealMcpRqlTypes::SetMember(D, Member("Layers", T.Registry().list_type(StringType(), false),
+			[](void* Self)
+			{
+				TArray<FString> Names;
+				for (const FName& Layer : static_cast<AActor*>(Self)->Layers)
+					Names.Add(Layer.ToString());
+				return StrList(Names);
+			},
+			[](void* Self, const rql::Value& Value) { SetActorLayers(static_cast<AActor*>(Self), Value); },
+			"editor layers (the Layers panel): set Layers = [\"Props\"] creates missing layers and moves the actor into exactly these"));
 		FUnrealMcpRqlTypes::SetMember(D, Member("Level", LevelType,
 			[Types](void* Self) { return Types->WrapObject(static_cast<AActor*>(Self)->GetLevel()); }, {}, "", false, true));
 		FUnrealMcpRqlTypes::SetMember(D, Member("HiddenInEditor", BoolType(),

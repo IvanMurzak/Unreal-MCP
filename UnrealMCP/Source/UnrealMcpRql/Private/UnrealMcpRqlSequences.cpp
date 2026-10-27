@@ -10,12 +10,23 @@
 #include "Channels/MovieSceneChannelProxy.h"
 #include "Channels/MovieSceneDoubleChannel.h"
 #include "Channels/MovieSceneFloatChannel.h"
+#include "Components/ActorComponent.h"
+#include "Components/SceneComponent.h"
+#include "EngineUtils.h"
 #include "GameFramework/Actor.h"
 #include "LevelSequence.h"
 #include "MovieScene.h"
+#include "MovieScenePossessable.h"
 #include "MovieSceneSection.h"
 #include "MovieSceneTrack.h"
 #include "Tracks/MovieScene3DTransformTrack.h"
+#include "Tracks/MovieSceneBoolTrack.h"
+#include "Tracks/MovieSceneColorTrack.h"
+#include "Tracks/MovieSceneDoubleTrack.h"
+#include "Tracks/MovieSceneFloatTrack.h"
+#include "Tracks/MovieSceneIntegerTrack.h"
+#include "Tracks/MovieScenePropertyTrack.h"
+#include "Tracks/MovieSceneVectorTrack.h"
 #include "Tracks/MovieSceneVisibilityTrack.h"
 
 #include <memory>
@@ -99,7 +110,8 @@ namespace UnrealMcpRqlSequencesLocal
 		return Value.as_number();
 	}
 
-	UClass* TrackClass(const FString& Name)
+	/** The track class a name means ("Transform", "Visibility", "CameraCut", "MovieSceneFloatTrack"); nullptr when none. */
+	UClass* FindTrackClass(const FString& Name)
 	{
 		const FString Trimmed = Name.TrimStartAndEnd();
 		if (Trimmed.Equals(TEXT("Transform"), ESearchCase::IgnoreCase))
@@ -107,10 +119,18 @@ namespace UnrealMcpRqlSequencesLocal
 		if (Trimmed.Equals(TEXT("Visibility"), ESearchCase::IgnoreCase))
 			return UMovieSceneVisibilityTrack::StaticClass();
 		UClass* Class = FUnrealMcpObjectRef::ResolveClass(Trimmed);
-		if (!Class)
+		if (!Class || !Class->IsChildOf(UMovieSceneTrack::StaticClass()))
 			Class = FUnrealMcpObjectRef::ResolveClass(FString(TEXT("MovieScene")) + Trimmed + TEXT("Track"));
 		if (!Class || !Class->IsChildOf(UMovieSceneTrack::StaticClass()) || Class->HasAnyClassFlags(CLASS_Abstract))
-			Throw(FString::Printf(TEXT("'%s' is not a track class (\"Transform\", \"Visibility\", \"MovieSceneFloatTrack\", ...)"), *Trimmed));
+			return nullptr;
+		return Class;
+	}
+
+	UClass* TrackClass(const FString& Name)
+	{
+		UClass* Class = FindTrackClass(Name);
+		if (!Class)
+			Throw(FString::Printf(TEXT("'%s' is not a track class (\"Transform\", \"Visibility\", \"CameraCut\", ...)"), *Name.TrimStartAndEnd()));
 		return Class;
 	}
 
@@ -127,14 +147,207 @@ namespace UnrealMcpRqlSequencesLocal
 		return Section;
 	}
 
+	/** A property track animates nothing until it names its property (Transform names its own; Visibility is set by AddBindingTrack). */
+	bool NeedsProperty(const UClass* Class)
+	{
+		return Class->IsChildOf(UMovieScenePropertyTrack::StaticClass()) && !Class->IsChildOf(UMovieScene3DTransformTrack::StaticClass());
+	}
+
 	UMovieSceneTrack* AddTrackTo(UMovieScene* Scene, const FGuid* Binding, const FString& ClassName)
 	{
 		UClass* Class = TrackClass(ClassName);
+		if (!Binding && NeedsProperty(Class))
+			Throw(FString::Printf(TEXT("%s animates a property of a bound object: bind the actor (AddActor) and call AddTrack(\"<property>\") on its binding, e.g. AddTrack(\"Intensity\")"),
+				*Class->GetName()));
 		Scene->Modify();
 		UMovieSceneTrack* Track = Binding ? Scene->AddTrack(Class, *Binding) : Scene->AddTrack(Class);
 		if (!Track)
 			Throw(FString::Printf(TEXT("could not add a %s"), *Class->GetName()));
 		Track->SetFlags(RF_Transactional);
+		AddSection(Scene, Track);
+		return Track;
+	}
+
+	// ---------------------------------------------------------------- property tracks
+
+	/** The property track class the Sequencer uses for a property (nullptr: no track animates it). */
+	UClass* PropertyTrackClass(const FProperty* Property)
+	{
+		if (Property->IsA<FFloatProperty>())
+			return UMovieSceneFloatTrack::StaticClass();
+		if (Property->IsA<FDoubleProperty>())
+			return UMovieSceneDoubleTrack::StaticClass();
+		if (Property->IsA<FBoolProperty>())
+			return UMovieSceneBoolTrack::StaticClass();
+		if (Property->IsA<FIntProperty>())
+			return UMovieSceneIntegerTrack::StaticClass();
+		if (const FStructProperty* Struct = CastField<FStructProperty>(Property))
+		{
+			if (Struct->Struct == TBaseStructure<FLinearColor>::Get() || Struct->Struct == TBaseStructure<FColor>::Get())
+				return UMovieSceneColorTrack::StaticClass();
+			if (Struct->Struct == TBaseStructure<FVector>::Get())
+				return UMovieSceneDoubleVectorTrack::StaticClass();
+		}
+		return nullptr;
+	}
+
+	/** Keyable in the Sequencer: marked Interp (the "+ Track" property menu) and of a type a property track animates. */
+	bool IsAnimatable(const FProperty* Property)
+	{
+		return Property->HasAnyPropertyFlags(CPF_Interp) && PropertyTrackClass(Property) != nullptr;
+	}
+
+	/** The object a binding possesses in the editor world: an actor, or a component of a bound actor (nullptr: not found). */
+	UObject* BoundObject(ULevelSequence* Sequence, const FGuid& Guid)
+	{
+		UWorld* World = EditorWorld();
+		UMovieScene* Scene = SceneOf(Sequence);
+		const FMovieScenePossessable* Possessable = Scene->FindPossessable(Guid);
+		if (!World || !Possessable)
+			return nullptr;
+		if (Possessable->GetParent().IsValid())
+		{
+			AActor* Owner = Cast<AActor>(BoundObject(Sequence, Possessable->GetParent()));
+			for (UActorComponent* Component : TInlineComponentArray<UActorComponent*>(Owner))
+				if (Component->GetName() == Possessable->GetName() && Sequence->FindBindingFromObject(Component, Owner) == Guid)
+					return Component;
+			return nullptr;
+		}
+		// The possessable is named after the actor's label when bound; confirm candidates of its class with the sequence.
+		const UClass* Class = Possessable->GetPossessedObjectClass();
+		AActor* Fallback = nullptr;
+		for (TActorIterator<AActor> It(World); It; ++It)
+		{
+			if (Class && !It->IsA(Class))
+				continue;
+			if (It->GetActorLabel() == Possessable->GetName() && Sequence->FindBindingFromObject(*It, World) == Guid)
+				return *It;
+			if (!Fallback && Sequence->FindBindingFromObject(*It, World) == Guid)
+				Fallback = *It;
+		}
+		return Fallback;
+	}
+
+	/** An animatable property of @p Bound or (for an actor) of one of its components: "Intensity", "LightComponent0.Intensity". */
+	TPair<UObject*, FProperty*> FindAnimatable(UObject* Bound, const FString& Path)
+	{
+		FString Owner, Name = Path.TrimStartAndEnd();
+		if (Name.Contains(TEXT(".")))
+			Name.Split(TEXT("."), &Owner, &Name);
+		TArray<UObject*> Objects;
+		if (Owner.IsEmpty())
+			Objects.Add(Bound);
+		TArray<FString> Available;
+		if (AActor* Actor = Cast<AActor>(Bound))
+		{
+			for (UActorComponent* Component : TInlineComponentArray<UActorComponent*>(Actor))
+			{
+				const bool bNamed = Owner.IsEmpty() || Component->GetName().Equals(Owner, ESearchCase::IgnoreCase)
+					|| Component->GetClass()->GetName().Equals(Owner, ESearchCase::IgnoreCase)
+					|| (Component->GetClass()->GetName() + TEXT("Component")).Equals(Owner, ESearchCase::IgnoreCase);
+				if (bNamed)
+					Objects.Add(Component);
+			}
+		}
+		TArray<TPair<UObject*, FProperty*>> Hits;
+		for (UObject* Object : Objects)
+		{
+			for (TFieldIterator<FProperty> It(Object->GetClass()); It; ++It)
+			{
+				if (!IsAnimatable(*It))
+					continue;
+				const FString Shown = Object == Bound ? It->GetName() : Object->GetName() + TEXT(".") + It->GetName();
+				Available.AddUnique(Shown);
+				if (It->GetName().Equals(Name, ESearchCase::IgnoreCase))
+					Hits.Add({ Object, *It });
+			}
+		}
+		if (Hits.Num() == 1)
+			return Hits[0];
+		const FString Label = Cast<AActor>(Bound) ? Cast<AActor>(Bound)->GetActorLabel() : Bound->GetName();
+		if (Hits.Num() > 1)
+		{
+			TArray<FString> Names;
+			for (const TPair<UObject*, FProperty*>& Hit : Hits)
+				Names.Add(Hit.Key->GetName() + TEXT(".") + Hit.Value->GetName());
+			Throw(FString::Printf(TEXT("'%s' is a property of several components of %s: name one (%s)"), *Path, *Label, *FString::Join(Names, TEXT(", "))));
+		}
+		Available.Sort();
+		if (Available.Num() > 25)
+		{
+			Available.SetNum(25);
+			Available.Add(TEXT("..."));
+		}
+		Throw(FString::Printf(TEXT("'%s' is not a track class nor an animatable property of %s (track classes: \"Transform\", \"Visibility\"; animatable properties: %s)"),
+			*Path, *Label, Available.Num() ? *FString::Join(Available, TEXT(", ")) : TEXT("none")));
+	}
+
+	/** The binding of a component of a bound actor, made as the Sequencer makes it (a child possessable) when missing. */
+	FGuid ComponentBinding(ULevelSequence* Sequence, const FGuid& ActorGuid, AActor* Actor, UActorComponent* Component)
+	{
+		UMovieScene* Scene = SceneOf(Sequence);
+		for (int32 Index = 0; Index < Scene->GetPossessableCount(); ++Index)
+		{
+			const FMovieScenePossessable& Child = Scene->GetPossessable(Index);
+			if (Child.GetParent() == ActorGuid && Child.GetName() == Component->GetName())
+				return Child.GetGuid();
+		}
+		Sequence->Modify();
+		Scene->Modify();
+		const FGuid Guid = Scene->AddPossessable(Component->GetName(), Component->GetClass());
+		if (FMovieScenePossessable* Possessable = Scene->FindPossessable(Guid))
+			Possessable->SetParent(ActorGuid, Scene);
+		Sequence->BindPossessableObject(Guid, *Component, Actor);
+		return Guid;
+	}
+
+	/**
+	 * AddTrack on a binding: a track class ("Transform", "Visibility", "MovieSceneFloatTrack" refused without a property),
+	 * or a property to animate ("Intensity", "LightComponent0.Intensity"): the property track of its type, bound to the
+	 * property, on the actor's binding or on its component's (created as the Sequencer does).
+	 */
+	UMovieSceneTrack* AddBindingTrack(ULevelSequence* Sequence, const FGuid& Guid, const FString& What)
+	{
+		UMovieScene* Scene = SceneOf(Sequence);
+		UObject* Bound = BoundObject(Sequence, Guid);
+		if (UClass* Class = FindTrackClass(What))
+		{
+			if (!Class->IsChildOf(UMovieSceneVisibilityTrack::StaticClass()))
+			{
+				if (NeedsProperty(Class))
+					Throw(FString::Printf(TEXT("%s needs the property it animates: call AddTrack(\"<property>\") instead (e.g. AddTrack(\"Intensity\")); the track class follows from the property's type"),
+						*Class->GetName()));
+				return AddTrackTo(Scene, &Guid, What);
+			}
+			// The Sequencer's Visibility track keys the actor's "Actor Hidden In Game" (a component's bHiddenInGame).
+			UMovieScenePropertyTrack* Track = Cast<UMovieScenePropertyTrack>(AddTrackTo(Scene, &Guid, What));
+			const FName Hidden = Cast<USceneComponent>(Bound) ? FName(TEXT("bHiddenInGame")) : FName(TEXT("bHidden"));
+			Track->SetPropertyNameAndPath(Hidden, Hidden.ToString());
+			return Track;
+		}
+		if (!Bound)
+			Throw(FString::Printf(TEXT("'%s' is not a track class, and the bound object is not in the editor world, so its properties cannot be looked up"), *What));
+		const TPair<UObject*, FProperty*> Target = FindAnimatable(Bound, What);
+		FGuid TrackGuid = Guid;
+		if (Target.Key != Bound)
+			TrackGuid = ComponentBinding(Sequence, Guid, CastChecked<AActor>(Bound), CastChecked<UActorComponent>(Target.Key));
+		const FName Property = Target.Value->GetFName();
+		for (UMovieSceneTrack* Existing : Scene->FindBinding(TrackGuid)->GetTracks())
+		{
+			const UMovieScenePropertyTrack* PropertyTrack = Cast<UMovieScenePropertyTrack>(Existing);
+			if (PropertyTrack && PropertyTrack->GetPropertyName() == Property)
+				Throw(FString::Printf(TEXT("%s already has a %s track: key it (get Tracks | get Sections | call AddKey(\"%s\", frame, value))"),
+					*Target.Key->GetName(), *Property.ToString(), *Property.ToString()));
+		}
+		UClass* Class = PropertyTrackClass(Target.Value);
+		Scene->Modify();
+		UMovieScenePropertyTrack* Track = Cast<UMovieScenePropertyTrack>(Scene->AddTrack(Class, TrackGuid));
+		if (!Track)
+			Throw(FString::Printf(TEXT("could not add a %s"), *Class->GetName()));
+		Track->SetFlags(RF_Transactional);
+		Track->SetPropertyNameAndPath(Property, Property.ToString());
+		if (UMovieSceneDoubleVectorTrack* Vector = Cast<UMovieSceneDoubleVectorTrack>(Track))
+			Vector->SetNumChannelsUsed(3);
 		AddSection(Scene, Track);
 		return Track;
 	}
@@ -148,6 +361,9 @@ namespace UnrealMcpRqlSequencesLocal
 	void ForEachChannel(UMovieSceneSection* Section, TFunctionRef<void(const FString&, const FString&, FMovieSceneChannel*, FName)> Visit)
 	{
 		FMovieSceneChannelProxy& Proxy = Section->GetChannelProxy();
+		// A property track's single channel carries no name (float, bool ... sections): it is named after the property.
+		const UMovieScenePropertyTrack* PropertyTrack = Section->GetTypedOuter<UMovieScenePropertyTrack>();
+		const FString PropertyName = PropertyTrack && !PropertyTrack->GetPropertyName().IsNone() ? PropertyTrack->GetPropertyName().ToString() : FString();
 		for (const FMovieSceneChannelEntry& Entry : Proxy.GetAllEntries())
 		{
 			const FName Type = Entry.GetChannelTypeName();
@@ -164,10 +380,13 @@ namespace UnrealMcpRqlSequencesLocal
 				{
 					const FString Display = Meta[Index].DisplayText.ToString();
 					const FString Group = Meta[Index].Group.ToString();
-					Internal = Meta[Index].Name.ToString();
+					Internal = Meta[Index].Name.IsNone() ? FString() : Meta[Index].Name.ToString();
 					Name = Display.IsEmpty() ? Internal : (Group.IsEmpty() ? Display : Group + TEXT(".") + Display);
 				}
 #endif
+				if (Name.IsEmpty() || (Internal.IsEmpty() && Name.StartsWith(Type.ToString())))
+					Name = PropertyName.IsEmpty() ? FString::Printf(TEXT("%s%d"), *Type.ToString(), Index)
+						: Channels.Num() == 1 ? PropertyName : FString::Printf(TEXT("%s%d"), *PropertyName, Index);
 				Visit(Name, Internal, Channels[Index], Type);
 			}
 		}
@@ -410,8 +629,8 @@ namespace UnrealMcpRqlSequencesLocal
 			{
 				FBindingHandle* Bound = Handle(Self);
 				Bound->Require();
-				return Types->WrapObject(AddTrackTo(SceneOf(Bound->Sequence.Get()), &Bound->Guid, TextArg(Args[0])));
-			}, "add a track (\"Transform\", \"Visibility\", a track class) with a section over the playback range; returns it"));
+				return Types->WrapObject(AddBindingTrack(Bound->Sequence.Get(), Bound->Guid, TextArg(Args[0])));
+			}, "add a track with a section over the playback range: \"Transform\", \"Visibility\", or a property to animate (\"Intensity\", \"LightColor\", \"LightComponent0.Intensity\": the actor's or a component's, keyed in the section's channel of that name); returns it"));
 	}
 
 	void TrackMembers(FUnrealMcpRqlTypes& T, rql::TypeDescriptor& D)

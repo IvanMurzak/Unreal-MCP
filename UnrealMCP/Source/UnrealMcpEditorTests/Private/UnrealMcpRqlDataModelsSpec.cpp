@@ -14,10 +14,14 @@
 #include "Blueprint/WidgetBlueprintGeneratedClass.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/CanvasPanelSlot.h"
+#include "Components/PointLightComponent.h"
 #include "Components/TextBlock.h"
 #include "EngineUtils.h"
 #include "LevelSequence.h"
 #include "MovieScene.h"
+#include "MovieScenePossessable.h"
+#include "Tracks/MovieScenePropertyTrack.h"
+#include "Tracks/MovieSceneVisibilityTrack.h"
 #include "WidgetBlueprint.h"
 #include "EdGraph/EdGraph.h"
 #include "EdGraph/EdGraphNode.h"
@@ -976,6 +980,71 @@ void FUnrealMcpRqlDataModelsSpec::Define()
 			GEditor->UndoTransaction();
 			const TSharedPtr<FJsonObject> Undone = Run(/* unreal.asset("@LS@") | get Bindings | get Tracks | where $type == "MovieScene3DTransformTrack" | get Sections | select Channels */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@LS@"}]},"stages":[{"op":"get","expr":{"path":["Bindings"]}},{"op":"get","expr":{"path":["Tracks"]}},{"op":"where","pred":{"op":"==","args":[{"path":[{"meta":"type"}]},{"lit":"MovieScene3DTransformTrack"}]}},{"op":"get","expr":{"path":["Sections"]}},{"op":"select","fields":[{"name":"Channels","expr":{"path":["Channels"]}}]}]})RQL"));
 			TestFalse(TEXT("undo removes the key"), UnrealMcpRqlSpecHelpers::CellText(Undone).Contains(TEXT("\"Frame\":90")));
+		});
+
+		It("animates a property: the property track of its type on the component's binding, keyed by the property name", [this]()
+		{
+			ULevelSequence* Sequence = MakeSequence();
+			Must(TEXT("an actor"), /* editor | call SpawnActor("PointLight", "RqlSeqLamp") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"SpawnActor","args":[{"lit":"PointLight"},{"lit":"RqlSeqLamp"}]}]})RQL"));
+			Must(TEXT("bound"), /* unreal.asset("@LS@") | call AddActor(unreal.find("RqlSeqLamp")) */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@LS@"}]},"stages":[{"op":"call","method":"AddActor","args":[{"call":"find","on":{"path":["unreal"]},"args":[{"lit":"RqlSeqLamp"}]}]}]})RQL"));
+			// A property track class alone animates nothing: refused on a binding and unbound, naming the property form.
+			Refuses(TEXT("a bare property track class"), /* unreal.asset("@LS@") | get Bindings | where Name == "RqlSeqLamp" | call AddTrack("MovieSceneFloatTrack") */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@LS@"}]},"stages":[{"op":"get","expr":{"path":["Bindings"]}},{"op":"where","pred":{"op":"==","args":[{"path":["Name"]},{"lit":"RqlSeqLamp"}]}},{"op":"call","method":"AddTrack","args":[{"lit":"MovieSceneFloatTrack"}]}]})RQL"), TEXT("AddTrack(\"Intensity\")"));
+			Refuses(TEXT("an unbound property track"), /* unreal.asset("@LS@") | call AddTrack("MovieSceneFloatTrack") */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@LS@"}]},"stages":[{"op":"call","method":"AddTrack","args":[{"lit":"MovieSceneFloatTrack"}]}]})RQL"), TEXT("bind the actor"));
+			// An unknown name lists what can be animated (the light component's Interp properties).
+			Refuses(TEXT("an unknown property"), /* unreal.asset("@LS@") | get Bindings | where Name == "RqlSeqLamp" | call AddTrack("NoSuchThing") */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@LS@"}]},"stages":[{"op":"get","expr":{"path":["Bindings"]}},{"op":"where","pred":{"op":"==","args":[{"path":["Name"]},{"lit":"RqlSeqLamp"}]}},{"op":"call","method":"AddTrack","args":[{"lit":"NoSuchThing"}]}]})RQL"), TEXT("LightComponent0.Intensity"));
+
+			const TSharedPtr<FJsonObject> Added = Must(TEXT("intensity"), /* unreal.asset("@LS@") | get Bindings | where Name == "RqlSeqLamp" | call AddTrack("Intensity") */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@LS@"}]},"stages":[{"op":"get","expr":{"path":["Bindings"]}},{"op":"where","pred":{"op":"==","args":[{"path":["Name"]},{"lit":"RqlSeqLamp"}]}},{"op":"call","method":"AddTrack","args":[{"lit":"Intensity"}]}]})RQL"));
+			TestTrue(*FString::Printf(TEXT("returns a float track (%s)"), *UnrealMcpRqlSpecHelpers::CellText(Added, 0, 2)), UnrealMcpRqlSpecHelpers::CellText(Added, 0, 2).StartsWith(TEXT("MovieSceneFloatTrack")));
+			Must(TEXT("a component property by path"), /* unreal.asset("@LS@") | get Bindings | where Name == "RqlSeqLamp" | call AddTrack("LightComponent0.LightColor") */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@LS@"}]},"stages":[{"op":"get","expr":{"path":["Bindings"]}},{"op":"where","pred":{"op":"==","args":[{"path":["Name"]},{"lit":"RqlSeqLamp"}]}},{"op":"call","method":"AddTrack","args":[{"lit":"LightComponent0.LightColor"}]}]})RQL"));
+			Refuses(TEXT("the same property twice"), /* unreal.asset("@LS@") | get Bindings | where Name == "RqlSeqLamp" | call AddTrack("Intensity") */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@LS@"}]},"stages":[{"op":"get","expr":{"path":["Bindings"]}},{"op":"where","pred":{"op":"==","args":[{"path":["Name"]},{"lit":"RqlSeqLamp"}]}},{"op":"call","method":"AddTrack","args":[{"lit":"Intensity"}]}]})RQL"), TEXT("already has"));
+
+			// The movie scene: one child possessable for the component, holding both property tracks, bound to their properties.
+			UMovieScene* Scene = Sequence->GetMovieScene();
+			const FMovieScenePossessable* Component = nullptr;
+			for (int32 Index = 0; Index < Scene->GetPossessableCount(); ++Index)
+				if (Scene->GetPossessable(Index).GetParent().IsValid())
+					Component = &Scene->GetPossessable(Index);
+			if (!TestNotNull(TEXT("a component binding under the actor"), Component))
+				return;
+			TestEqual(TEXT("named after the component"), Component->GetName(), FString(TEXT("LightComponent0")));
+			const FMovieSceneBinding* Binding = Scene->FindBinding(Component->GetGuid());
+			TArray<FString> Bound;
+			for (UMovieSceneTrack* Track : Binding ? Binding->GetTracks() : TArray<UMovieSceneTrack*>())
+				if (const UMovieScenePropertyTrack* Property = Cast<UMovieScenePropertyTrack>(Track))
+					Bound.Add(Track->GetClass()->GetName() + TEXT(":") + Property->GetPropertyName().ToString());
+			Bound.Sort();
+			TestEqual(TEXT("tracks bound to their properties"), FString::Join(Bound, TEXT(",")), FString(TEXT("MovieSceneColorTrack:LightColor,MovieSceneFloatTrack:Intensity")));
+			AActor* Lamp = nullptr;
+			for (TActorIterator<AActor> It(GEditor->GetEditorWorldContext().World()); It; ++It)
+				if (It->GetActorLabel() == TEXT("RqlSeqLamp"))
+					Lamp = *It;
+			UActorComponent* Light = Lamp ? Lamp->GetComponentByClass<UPointLightComponent>() : nullptr;
+			TestTrue(TEXT("the component binding resolves to the light component"), Light && Sequence->FindBindingFromObject(Light, Lamp->GetWorld()) == Component->GetGuid());
+
+			Must(TEXT("key at 0"), /* unreal.asset("@LS@") | get Bindings | where Name == "LightComponent0" | get Tracks | where $type == "MovieSceneFloatTrack" | get Sections | call AddKey("Intensity", 0, 0) */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@LS@"}]},"stages":[{"op":"get","expr":{"path":["Bindings"]}},{"op":"where","pred":{"op":"==","args":[{"path":["Name"]},{"lit":"LightComponent0"}]}},{"op":"get","expr":{"path":["Tracks"]}},{"op":"where","pred":{"op":"==","args":[{"path":[{"meta":"type"}]},{"lit":"MovieSceneFloatTrack"}]}},{"op":"get","expr":{"path":["Sections"]}},{"op":"call","method":"AddKey","args":[{"lit":"Intensity"},{"lit":0},{"lit":0}]}]})RQL"));
+			Must(TEXT("key at 60"), /* unreal.asset("@LS@") | get Bindings | where Name == "LightComponent0" | get Tracks | where $type == "MovieSceneFloatTrack" | get Sections | call AddKey("Intensity", 60, 5000) */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@LS@"}]},"stages":[{"op":"get","expr":{"path":["Bindings"]}},{"op":"where","pred":{"op":"==","args":[{"path":["Name"]},{"lit":"LightComponent0"}]}},{"op":"get","expr":{"path":["Tracks"]}},{"op":"where","pred":{"op":"==","args":[{"path":[{"meta":"type"}]},{"lit":"MovieSceneFloatTrack"}]}},{"op":"get","expr":{"path":["Sections"]}},{"op":"call","method":"AddKey","args":[{"lit":"Intensity"},{"lit":60},{"lit":5000}]}]})RQL"));
+			const FString Channels = UnrealMcpRqlSpecHelpers::CellText(Run(/* unreal.asset("@LS@") | get Bindings | where Name == "LightComponent0" | get Tracks | where $type == "MovieSceneFloatTrack" | get Sections | select Channels */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@LS@"}]},"stages":[{"op":"get","expr":{"path":["Bindings"]}},{"op":"where","pred":{"op":"==","args":[{"path":["Name"]},{"lit":"LightComponent0"}]}},{"op":"get","expr":{"path":["Tracks"]}},{"op":"where","pred":{"op":"==","args":[{"path":[{"meta":"type"}]},{"lit":"MovieSceneFloatTrack"}]}},{"op":"get","expr":{"path":["Sections"]}},{"op":"select","fields":[{"name":"Channels","expr":{"path":["Channels"]}}]}]})RQL")));
+			TestTrue(*FString::Printf(TEXT("the float channel is named Intensity and holds both keys (%s)"), *Channels.Left(600)),
+				Channels.Contains(TEXT("\"Name\":\"Intensity\"")) && Channels.Contains(TEXT("\"Frame\":60")) && Channels.Contains(TEXT("5000")));
+
+			// Visibility keys the actor's bHidden, as the Sequencer's Visibility track does.
+			Must(TEXT("visibility"), /* unreal.asset("@LS@") | get Bindings | where Name == "RqlSeqLamp" | call AddTrack("Visibility") */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@LS@"}]},"stages":[{"op":"get","expr":{"path":["Bindings"]}},{"op":"where","pred":{"op":"==","args":[{"path":["Name"]},{"lit":"RqlSeqLamp"}]}},{"op":"call","method":"AddTrack","args":[{"lit":"Visibility"}]}]})RQL"));
+			const FMovieSceneBinding* ActorBinding = Scene->FindBinding(Component->GetParent());
+			const UMovieSceneVisibilityTrack* Visibility = nullptr;
+			for (UMovieSceneTrack* Track : ActorBinding ? ActorBinding->GetTracks() : TArray<UMovieSceneTrack*>())
+				if (const UMovieSceneVisibilityTrack* Found = Cast<UMovieSceneVisibilityTrack>(Track))
+					Visibility = Found;
+			TestTrue(TEXT("visibility bound to bHidden"), Visibility && Visibility->GetPropertyName() == FName(TEXT("bHidden")));
+
+			if (!GEditor)
+				return;
+			const int32 Before = Scene->GetPossessableCount();
+			GEditor->UndoTransaction(); // visibility
+			GEditor->UndoTransaction(); // key at 60
+			GEditor->UndoTransaction(); // key at 0
+			GEditor->UndoTransaction(); // light color
+			GEditor->UndoTransaction(); // intensity (and the component binding)
+			TestEqual(TEXT("undo removes the component binding"), Scene->GetPossessableCount(), Before - 1);
 		});
 	});
 }

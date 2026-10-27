@@ -24,6 +24,7 @@
 #include "EngineUtils.h"
 #include "GameFramework/Actor.h"
 #include "HAL/FileManager.h"
+#include "Layers/LayersSubsystem.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "UnrealMcpRqlSpecHelpers.h"
@@ -336,6 +337,39 @@ void FUnrealMcpRqlSpec::Define()
 				TestTrue(*FString::Printf(TEXT("%s points down (%s)"), *Actor->GetActorLabel(), *Actor->GetActorForwardVector().ToString()),
 					Actor->GetActorForwardVector().Equals(FVector(0, 0, -1), 0.001));
 			}
+		});
+
+		It("writes Layers through the Layers subsystem: missing layers are created, removed ones leave the actor, undo restores", [this]()
+		{
+			SpawnLamp();
+			TArray<AActor*> Found = Lamps();
+			ULayersSubsystem* LayersSubsystem = GEditor ? GEditor->GetEditorSubsystem<ULayersSubsystem>() : nullptr;
+			if (!TestEqual(TEXT("one lamp"), Found.Num(), 1) || !TestNotNull(TEXT("layers subsystem"), LayersSubsystem))
+				return;
+			AActor* Lamp = Found[0];
+			// actors | where Label == "RqlSpecLamp" | set Layers = ["RqlSpecLayerA", "RqlSpecLayerB"]
+			const TSharedPtr<FJsonObject> Both = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"RqlSpecLamp"}]}},{"op":"set","assign":[{"target":{"path":["Layers"]},"value":{"list":[{"lit":"RqlSpecLayerA"},{"lit":"RqlSpecLayerB"}]}}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("set (%s)"), *Codes(Both)), IsOk(Both));
+			TestTrue(TEXT("layer A exists in the world (the Layers panel lists it)"), LayersSubsystem->IsLayer(TEXT("RqlSpecLayerA")));
+			TestTrue(TEXT("layer B exists"), LayersSubsystem->IsLayer(TEXT("RqlSpecLayerB")));
+			TestTrue(TEXT("the actor is in layer A"), LayersSubsystem->GetActorsFromLayer(TEXT("RqlSpecLayerA")).Contains(Lamp));
+			// actors | where Label == "RqlSpecLamp" | set Layers = ["RqlSpecLayerB"]
+			const TSharedPtr<FJsonObject> OnlyB = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"RqlSpecLamp"}]}},{"op":"set","assign":[{"target":{"path":["Layers"]},"value":{"list":[{"lit":"RqlSpecLayerB"}]}}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("replaced (%s)"), *Codes(OnlyB)), IsOk(OnlyB));
+			TestFalse(TEXT("left layer A"), LayersSubsystem->GetActorsFromLayer(TEXT("RqlSpecLayerA")).Contains(Lamp));
+			TestTrue(TEXT("still in layer B"), LayersSubsystem->GetActorsFromLayer(TEXT("RqlSpecLayerB")).Contains(Lamp));
+			// actors | where Label == "RqlSpecLamp" | select Layers
+			const TSharedPtr<FJsonObject> Read = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"RqlSpecLamp"}]}},{"op":"select","fields":[{"name":"Layers","expr":{"path":["Layers"]}}]}]})RQL"));
+			const TSharedPtr<FJsonValue> Names = Cell(Read, 0, 0);
+			TestTrue(*FString::Printf(TEXT("reads the names (%s)"), *Codes(Read)), Names.IsValid() && Names->Type == EJson::Array
+				&& Names->AsArray().Num() == 1 && Names->AsArray()[0]->AsString() == TEXT("RqlSpecLayerB"));
+			// actors | where Label == "RqlSpecLamp" | set Layers = [""]
+			const TSharedPtr<FJsonObject> Empty = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"RqlSpecLamp"}]}},{"op":"set","assign":[{"target":{"path":["Layers"]},"value":{"list":[{"lit":""}]}}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("an empty name is refused (%s)"), *Codes(Empty)), !IsOk(Empty) && Codes(Empty).Contains(TEXT("cannot be empty")));
+			GEditor->UndoTransaction();
+			TestTrue(TEXT("undo puts the actor back in layer A"), Lamp->Layers.Contains(FName(TEXT("RqlSpecLayerA"))) && Lamp->Layers.Contains(FName(TEXT("RqlSpecLayerB"))));
+			LayersSubsystem->DeleteLayer(TEXT("RqlSpecLayerA"));
+			LayersSubsystem->DeleteLayer(TEXT("RqlSpecLayerB"));
 		});
 
 		It("reads Folder as null without a folder, and compares and prints transforms cleanly", [this]()

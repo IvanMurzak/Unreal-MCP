@@ -63,6 +63,30 @@ void FUnrealMcpToolRegistrySpec::Define()
 			const FUnrealMcpToolResult Result = Registry.Execute(TEXT("does-not-exist"), FUnrealMcpToolCall());
 			TestFalse(TEXT("not success"), Result.bSuccess);
 		});
+
+		It("refuses a call missing a required parameter before the handler runs, naming it and what was sent", [this]()
+		{
+			FUnrealMcpToolRegistry Registry;
+			bool bHandlerRan = false;
+			Registry.Tool(TEXT("registry-spec-required"))
+				.ParamString(TEXT("path"), TEXT("asset path"), EUnrealMcpParamRequirement::Required)
+				.ParamString(TEXT("name"), TEXT("optional name"), EUnrealMcpParamRequirement::Optional)
+				.Handle([&bHandlerRan](const FUnrealMcpToolCall&) { bHandlerRan = true; return FUnrealMcpToolResult::Success(TEXT("ran")); });
+
+			TSharedPtr<FJsonObject> Misspelled = MakeShared<FJsonObject>();
+			Misspelled->SetStringField(TEXT("blueprint"), TEXT("/Game/BP"));
+			const FUnrealMcpToolResult Missing = Registry.Execute(TEXT("registry-spec-required"), FUnrealMcpToolCall(Misspelled));
+			TestFalse(TEXT("refused"), Missing.bSuccess);
+			TestFalse(TEXT("the handler did not run"), bHandlerRan);
+			TestTrue(*FString::Printf(TEXT("names the parameter, the declared ones and the sent ones (%s)"), *Missing.Message),
+				Missing.Message.Contains(TEXT("Missing required 'path'")) && Missing.Message.Contains(TEXT("parameters: path, name"))
+				&& Missing.Message.Contains(TEXT("sent: blueprint")));
+
+			TSharedPtr<FJsonObject> Given = MakeShared<FJsonObject>();
+			Given->SetStringField(TEXT("path"), TEXT("/Game/BP"));
+			TestTrue(TEXT("runs with the required parameter (optional ones may be absent)"),
+				Registry.Execute(TEXT("registry-spec-required"), FUnrealMcpToolCall(Given)).bSuccess && bHandlerRan);
+		});
 	});
 
 	Describe("manifest JSON", [this]()

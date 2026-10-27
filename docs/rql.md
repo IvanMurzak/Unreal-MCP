@@ -54,7 +54,8 @@ agent ──query text──▶ unreal-mcp-bridge (sidecar, .NET)          Unrea
   actors rerun their construction script).
 - **Computed members** (core module): every object `Id`, `Name`, `Path`; Actor `Label`, `Location`, `Rotation`,
   `Scale`, `Components`, `Children`, `Parent` (writable: attach / detach; a refused attach names the reason, e.g. a Static
-  actor under a Movable parent), `Folder`, `Level`, `HiddenInEditor`, `Selected` (writable: adds to / removes from the
+  actor under a Movable parent), `Folder`, `Layers` (writable through the Layers subsystem, as the Layers panel
+  does: missing layers are created, the actor ends up in exactly the listed ones), `Level`, `HiddenInEditor`, `Selected` (writable: adds to / removes from the
   editor selection; neither it nor `HiddenInEditor` marks the level unsaved); component `Owner` (and `Name`: a Blueprint's
   component templates read under their variable name, without the `_GEN_VARIABLE` suffix); Level `Map`, `Package`, `IsPersistent`, `IsCurrent` (writable), `IsVisible`, `Actors`; World
   `Map`, `Levels`, `PersistentLevel`, `CurrentLevel`; MaterialInterface `Scalars` / `Vectors` / `Textures` (parameter
@@ -221,8 +222,13 @@ Frames are at the sequence's display rate (what the Sequencer shows), converted 
   object); `call AddActor(actor)` (a possessable binding, like dragging the actor into the Sequencer) and
   `call AddTrack(class)`.
 - `SequenceBinding` (a host object: the sequence and the binding's GUID): `Name`, `Guid`, `Kind` (`Possessable` /
-  `Spawnable`), `Class`, `Tracks`; `call AddTrack("Transform" | "Visibility" | a track class)` — every new track gets a
-  section over the playback range.
+  `Spawnable`), `Class`, `Tracks`; `call AddTrack("Transform" | "Visibility" | a track class | a property)` — every new track gets a
+  section over the playback range. A property (`"Intensity"`, `"LightColor"`, `"LightComponent0.Intensity"`: an animatable
+  — `Interp` — property of the bound actor or of one of its components) gets the property track of its type (float, double,
+  bool, int, color, vector) bound to it, on the component's binding when the property is a component's (made as the
+  Sequencer makes it); its single channel is named after the property (`AddKey("Intensity", 60, 5000)`). A bare property
+  track class (`MovieSceneFloatTrack`) is refused, since it would animate nothing; `Visibility` keys the actor's
+  `bHidden` (a component's `bHiddenInGame`), as the Sequencer's Visibility track does.
 - `UMovieSceneTrack`: `Sections`, `DisplayName`, `call AddSection()`; `UMovieSceneSection`: `Start`, `End` (writable),
   `Channels` (`[{Name, Type, Keys: [{Frame, Value}]}]`, names as the Sequencer shows them: `Location.X`, `Rotation.Yaw`),
   `call AddKey(channel, frame, value)` (the channel by that name, or by its internal name: `Rotation.Z` is the yaw) (double / float / bool channels; a key outside the section grows it).

@@ -10,8 +10,10 @@
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
 #include "Editor.h"
+#include "Editor/TransBuffer.h"
 #include "IPythonScriptPlugin.h"
 #include "Interfaces/IPluginManager.h"
+#include "Internationalization/Regex.h"
 #include "Misc/Base64.h"
 #include "Misc/EngineVersionComparison.h"
 #include "Misc/Paths.h"
@@ -87,6 +89,19 @@ namespace UnrealMcpPythonTools
 	// The runtime's own logs get a smaller budget: room for its one "left out" entry (about 120 characters with the 12 of
 	// overhead, rounded up), so the plugin cap below never cuts the runtime's output a second time.
 	static constexpr int32 PythonRuntimeLogChars = PythonMaxLogChars - 256;
+
+	/** Said when a snippet that calls setters recorded nothing for undo (UE records only objects that were Modify()'d). */
+	static const TCHAR* PythonNoUndoNote = TEXT("this run recorded no undo step: direct setters (set_actor_location, set_actor_scale3d ...) "
+		"do not record undo or mark the level unsaved, so TRANSACTION UNDO would revert the PREVIOUS edit instead. Call obj.modify() "
+		"before changing an object, or use set_editor_property / rql-mutate, when the change must be undoable and saved.");
+
+	/** Whether the code calls a setter-like API (set_*, add_*, attach_*, destroy_*, spawn_*): the no-undo note is only worth it then. */
+	static bool PythonLooksMutating(const FString& Code)
+	{
+		static const FRegexPattern Pattern(TEXT("\\.(set_|add_|attach_|destroy_|spawn_|k2_set)[A-Za-z0-9_]*\\s*\\("));
+		FRegexMatcher Matcher(Pattern, Code);
+		return Matcher.FindNext();
+	}
 
 	static FString PythonClip(const FString& Text, int32 Max, const TCHAR* Hint)
 	{
@@ -178,7 +193,9 @@ namespace UnrealMcpPythonTools
 			.Description(TEXT("Run Python inside the Unreal Editor (PythonScriptPlugin, full `unreal` API, pre-imported). Write "
 			                  "plain statements; the LAST EXPRESSION is the result (objects come back as their paths). "
 			                  "print() and unreal.log*() output is returned as logs; errors point at snippet.py lines. Each "
-			                  "call starts from a fresh namespace, and its edits are one undo step (so the snippet itself cannot run TRANSACTION UNDO). Engine warnings and errors raised while it "
+			                  "call starts from a fresh namespace. Its recorded edits are one undo step (so the snippet itself cannot run TRANSACTION UNDO); only "
+			                  "objects that are Modify()'d record (set_editor_property, editor subsystems, obj.modify() first): direct setters such as "
+			                  "set_actor_location are neither undoable nor marked unsaved. Engine warnings and errors raised while it "
 			                  "runs are returned as logs too. Output is capped (~20k characters each for the value and the logs). 'include': helper files/folders (relative to "
 			                  "<Project>/.ai-game-dev/snippets): folders are importable, files run before the code. Blueprint "
 			                  "graph wiring is not available from Python: use the blueprint-* tools for that."))
@@ -247,8 +264,16 @@ namespace UnrealMcpPythonTools
 				const int64 LogSequence = FUnrealMcpLogCollector::Get().GetLastSequence();
 				const int32 Transaction = GEditor ? GEditor->BeginTransaction(TEXT("UnrealMcp"), FText::FromString(TEXT("python-execute")), nullptr) : INDEX_NONE;
 				const bool bRan = Python->ExecPythonCommandEx(Command);
+				int32 Recorded = 0;
 				if (Transaction != INDEX_NONE)
+				{
+					// Only objects Modify()'d are recorded: direct setters (set_actor_location) record nothing, so an undo
+					// after such a run would revert the PREVIOUS edit. Count the records before the transaction closes.
+					if (GEditor->Trans && GEditor->Trans->GetQueueLength() > 0)
+						if (const FTransaction* Current = GEditor->Trans->GetTransaction(GEditor->Trans->GetQueueLength() - 1))
+							Recorded = Current->GetRecordCount();
 					GEditor->EndTransaction();
+				}
 
 				const TSharedPtr<FJsonObject> Response = bRan ? PythonDecodeResponse(Command.CommandResult) : nullptr;
 				if (!Response.IsValid())
@@ -261,6 +286,8 @@ namespace UnrealMcpPythonTools
 				for (const FPythonLogOutputEntry& Entry : Command.LogOutput)
 					Logs.Add(PythonLogEntry(PythonLogLevel(Entry.Type), Entry.Output.TrimEnd()));
 				PythonAddEngineLogs(LogSequence, Logs);
+				if (Transaction != INDEX_NONE && Recorded == 0 && Response->GetBoolField(TEXT("success")) && PythonLooksMutating(Code))
+					Logs.Add(PythonLogEntry(TEXT("warning"), PythonNoUndoNote));
 				if (PythonCapLogs(Logs, FirstOwn))
 				{
 					// The response says which fields a limit shortened, in the order value, logs, error (contract §6).

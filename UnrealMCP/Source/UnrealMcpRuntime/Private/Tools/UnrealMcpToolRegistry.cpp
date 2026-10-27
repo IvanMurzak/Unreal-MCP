@@ -276,5 +276,20 @@ FUnrealMcpToolResult FUnrealMcpToolRegistry::Execute(const FString& Name, const 
 	if (Found == nullptr)
 		return FUnrealMcpToolResult::Error(Error);
 
+	// A required parameter the call did not send (often a misspelled name: 'blueprint' for 'path') fails here, naming
+	// it and what was sent, instead of reaching the handler as an empty value ("Blueprint not found at ''").
+	for (const FUnrealMcpParamSpec& Param : Found->Params)
+	{
+		if (Param.Requirement != EUnrealMcpParamRequirement::Required || Call.Has(Param.Name))
+			continue;
+		TArray<FString> Declared, Sent;
+		for (const FUnrealMcpParamSpec& Each : Found->Params)
+			Declared.Add(Each.Name);
+		for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : Call.Arguments->Values)
+			Sent.Add(Pair.Key);
+		return FUnrealMcpToolResult::Error(FString::Printf(TEXT("Missing required '%s' (parameters: %s; sent: %s)."), *Param.Name,
+			*FString::Join(Declared, TEXT(", ")), Sent.Num() ? *FString::Join(Sent, TEXT(", ")) : TEXT("none")));
+	}
+
 	return Found->Handler(Call);
 }
