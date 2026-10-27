@@ -304,6 +304,12 @@ dispatches it on `main`. `check-version` runs the guards, in its first job:
 
 - **Ref guard** — a real run (`dry_run=false`) on any ref other than
   `refs/heads/main` fails.
+- **Dependency guard** — `scripts/release_dependency_guard.py` fails every run (dry runs
+  too) while a shipped pin is a pre-release or not on nuget.org: the sidecar's NuGet pins
+  (a local restore feed such as `bridge/prerelease-packages/` fails too), the vendored RQL C++
+  runtime (its README must name the published `com.IvanMurzak.Rql` release, equal to the
+  sidecar pin), the vendored Code-Exec release, the extensions' `minCoreVersion` and the CLI's
+  npm dependencies. `release_extensions.yml` runs it first as well.
 - **Version files** — `cli/package.json`, `cli/package-lock.json` and the bridge
   csproj must carry the `.uplugin` `VersionName`, else the run fails (partial bump).
 - **Version guard** — if `v<version>` already exists a real run **fails**; a dry run

@@ -117,9 +117,9 @@ jobs:
       - name: Run tests
         run: npm test
 
-      - name: Test monorepo release and suite tooling
+      - name: Test monorepo release, release-guard and suite tooling
         working-directory: ${{ github.workspace }}
-        run: ${{ env.CHAIN_PY }} -m unittest discover -s scripts -p "test_extension*.py"
+        run: ${{ env.CHAIN_PY }} -m unittest discover -s scripts -p "test_*.py"
 
       - name: chain pin drift
         if: always() && env.CHAIN_ACTIVE == '1'

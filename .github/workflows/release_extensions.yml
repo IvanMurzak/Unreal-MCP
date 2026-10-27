@@ -33,6 +33,9 @@ jobs:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
+      # Extensions build against the core: every pin it ships must be a published release (dry runs fail too).
+      - name: Release dependency guard (no pre-release / unpublished pins)
+        run: python3 scripts/release_dependency_guard.py
       - name: Validate component and publication branch
         id: validate
         env:
@@ -54,7 +57,7 @@ jobs:
               out.write('plugins=' + json.dumps(plugins) + '\n')
           PY
       - name: Test release and suite tooling
-        run: python3 -m unittest discover -s scripts -p 'test_extension*.py'
+        run: python3 -m unittest discover -s scripts -p 'test_*.py'
 
   test:
     needs: validate

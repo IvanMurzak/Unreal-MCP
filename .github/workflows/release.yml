@@ -132,6 +132,14 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
 
+      # Dependency guard: the sidecar's NuGet pins, the vendored RQL C++ runtime and Code-Exec
+      # releases, the extensions' minCoreVersion and the CLI's npm deps must all be published
+      # releases, restored without a local feed. FAILS every run (dry runs too) while main
+      # consumes a pre-release dependency, e.g. RQL from bridge/prerelease-packages/.
+      - name: Release dependency guard (no pre-release / unpublished pins)
+        shell: bash
+        run: python3 scripts/release_dependency_guard.py
+
       - name: Get version from .uplugin VersionName
         id: get_version
         shell: bash
