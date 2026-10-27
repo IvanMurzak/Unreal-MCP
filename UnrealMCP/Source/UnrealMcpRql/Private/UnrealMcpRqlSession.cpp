@@ -24,6 +24,27 @@
 
 namespace UnrealMcpRqlSessionLocal
 {
+	/** A query as an undo-step title: whitespace runs as one space, at most 120 characters. */
+	FString UnrealMcpUndoTitleText(const FString& Query)
+	{
+		static constexpr int32 MaxChars = 120;
+		FString Out;
+		bool bSpace = false;
+		for (const TCHAR Char : Query.TrimStartAndEnd())
+		{
+			if (FChar::IsWhitespace(Char))
+			{
+				bSpace = true;
+				continue;
+			}
+			if (bSpace && !Out.IsEmpty())
+				Out.AppendChar(TEXT(' '));
+			bSpace = false;
+			Out.AppendChar(Char);
+		}
+		return Out.Len() > MaxChars ? Out.Left(MaxChars - 3) + TEXT("...") : Out;
+	}
+
 	/** Objects whose changes belong to the project (not class defaults of compiled-in classes, not transient helpers). */
 	bool IsProjectObject(const UObject* Object)
 	{
@@ -342,7 +363,8 @@ void FUnrealMcpRqlSession::ConfigureMutations()
 	Policy.before_write = [this, OwnerOf, ViewStateActor](const std::vector<rql::MutationRecord>& Records)
 	{
 		if (TransactionIndex == INDEX_NONE && GEditor)
-			TransactionIndex = GEditor->BeginTransaction(TEXT("UnrealMcp"), FText::FromString(TEXT("RQL mutation")), nullptr);
+			TransactionIndex = GEditor->BeginTransaction(TEXT("UnrealMcp"), FText::FromString(UndoTitle.IsEmpty() ? FString(TEXT("RQL mutation"))
+				: TEXT("RQL: ") + UnrealMcpUndoTitleText(UndoTitle)), nullptr);
 		for (const rql::MutationRecord& Record : Records)
 		{
 			UObject* Owner = OwnerOf(Record);

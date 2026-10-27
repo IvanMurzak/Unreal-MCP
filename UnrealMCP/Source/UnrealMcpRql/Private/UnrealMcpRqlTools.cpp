@@ -42,6 +42,7 @@ namespace UnrealMcpRqlToolsLocal
 		// max_targets below 1 (or absent) keeps the default; above the ceiling the engine caps it.
 		const int64 MaxTargets = bAllowMutation ? Call.GetInt(TEXT("max_targets"), 0) : 0;
 		FUnrealMcpRqlSession Session;
+		Session.SetUndoTitle(Call.GetString(TEXT("query")));
 		const FString Json = Session.Execute(Plan, bAllowMutation, bDryRun, bOk, static_cast<int32>(FMath::Clamp<int64>(MaxTargets, 0, MAX_int32)));
 		return bOk ? FUnrealMcpToolResult::Success(Json) : FUnrealMcpToolResult::Error(Json);
 	}

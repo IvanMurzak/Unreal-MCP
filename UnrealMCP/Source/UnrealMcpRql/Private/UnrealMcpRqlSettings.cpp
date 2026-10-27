@@ -10,8 +10,10 @@
 #include "HAL/PlatformFileManager.h"
 #include "ISettingsCategory.h"
 #include "ISettingsContainer.h"
+#include "ISettingsEditorModule.h"
 #include "ISettingsModule.h"
 #include "ISettingsSection.h"
+#include "Misc/EngineVersionComparison.h"
 #include "Misc/Paths.h"
 #include "Modules/ModuleManager.h"
 #include "UObject/UnrealType.h"
@@ -57,6 +59,15 @@ namespace UnrealMcpRqlSettingsLocal
 		ISettingsModule* Module = FModuleManager::GetModulePtr<ISettingsModule>(TEXT("Settings"));
 		if (!Module)
 			return Out;
+		// Most sections (Physics, Rendering, Collision, Audio, plugin settings) are UDeveloperSettings that the
+		// SettingsEditor module registers only once a settings window has been opened: register them now, so the
+		// source does not depend on whether someone opened Project Settings in this editor session.
+		if (ISettingsEditorModule* SettingsEditor = FModuleManager::LoadModulePtr<ISettingsEditorModule>(TEXT("SettingsEditor")))
+		{
+#if !UE_VERSION_OLDER_THAN(5, 6, 0)
+			SettingsEditor->UpdateSettings(/*bForce*/ true);
+#endif
+		}
 		for (const FName ContainerName : { FName(TEXT("Project")), FName(TEXT("Editor")) })
 		{
 			TSharedPtr<ISettingsContainer> Container = Module->GetContainer(ContainerName);

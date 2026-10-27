@@ -9,6 +9,7 @@
 #include "Misc/Paths.h"
 #include "HAL/FileManager.h"
 #include "Editor.h"
+#include "Editor/Transactor.h"
 #include "Engine/PointLight.h"
 #include "Components/PointLightComponent.h"
 #include "UnrealMcpCoreTools.h"
@@ -143,6 +144,9 @@ void FUnrealMcpPythonToolsSpec::Define()
 		TestTrue(TEXT("edit ok"), Run(Find + TEXT("light.set_editor_property('intensity', 7.0)")).bSuccess);
 		TestEqual(TEXT("edited"), Lamp->PointLightComponent->Intensity, 7.f);
 		TestTrue(TEXT("read-only ok"), Run(Find + TEXT("light.intensity")).bSuccess);
+		// The step is named after the snippet's first statement, so the Undo History says which run it reverts.
+		const FString Title = GEditor->Trans ? GEditor->Trans->GetUndoContext().Title.ToString() : FString();
+		TestTrue(*FString::Printf(TEXT("undo step named after the code (%s)"), *Title), Title.StartsWith(TEXT("python-execute: lamp = [a for a in")));
 
 		// The read-only snippet left no transaction behind, so one undo reverts the edit.
 		TestTrue(TEXT("undo"), GEditor->UndoTransaction());

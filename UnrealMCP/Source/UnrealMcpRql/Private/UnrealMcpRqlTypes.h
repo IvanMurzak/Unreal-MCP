@@ -107,6 +107,11 @@ public:
 	/** Write a property of an object with the editor notifications (PreEditChange / PostEditChangeProperty). */
 	void WriteObjectProperty(UObject* Object, FProperty* Property, const rql::Value& Value);
 	/**
+	 * @p Object, or the component that replaced it during this call: an edit of a Blueprint actor's component reruns the
+	 * construction script, which rebuilds the construction-script components, so a stream item can point at the old one.
+	 */
+	UObject* LiveObject(UObject* Object) const;
+	/**
 	 * The one struct coercion (property writes, method arguments, the math-struct adapters): a struct value of the type, a
 	 * math-struct literal ("(1, 2, 3)", [1, 2, 3], "#ff8800") or a {Member: value} literal written over @p Out. Throws
 	 * std::runtime_error when the value does not fit.
@@ -162,6 +167,7 @@ private:
 	TMap<UClass*, FString> ApiClasses;
 	TMap<UStruct*, TMap<FName, bool>> Exposed;
 	TMap<FString, bool> KnownMemberNames; // IsKnownMemberName; FString keys compare case-insensitively
+	TMap<const UObject*, TWeakObjectPtr<UObject>> Replaced; // LiveObject: rebuilt component -> its replacement
 
 	rql::TypeDescriptor& Shell(const void* Key, const FString& Name, rql::TypeKind Kind);
 	void FillClass(rql::TypeDescriptor& Descriptor, UClass* Class);

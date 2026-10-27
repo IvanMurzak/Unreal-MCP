@@ -15,6 +15,9 @@
 #include "Components/PointLightComponent.h"
 #include "Editor.h"
 #include "EditorAssetLibrary.h"
+#include "AssetRegistry/AssetRegistryModule.h"
+#include "AssetRegistry/IAssetRegistry.h"
+#include "Engine/Font.h"
 #include "Engine/Level.h"
 #include "Engine/Light.h"
 #include "Engine/PointLight.h"
@@ -446,6 +449,26 @@ void FUnrealMcpRqlAdaptersSpec::Define()
 			const TSharedPtr<FJsonObject> Classes = UnrealMcpRqlSpecHelpers::Exec(*this, /* unreal.classes("Light", "Point") | select Name Parent Abstract Blueprint */ TEXT(R"RQL({"rql":"0.1","source":{"call":"classes","on":{"path":["unreal"]},"args":[{"lit":"Light"},{"lit":"Point"}]},"stages":[{"op":"select","fields":[{"name":"Name","expr":{"path":["Name"]}},{"name":"Parent","expr":{"path":["Parent"]}},{"name":"Abstract","expr":{"path":["Abstract"]}},{"name":"Blueprint","expr":{"path":["Blueprint"]}}]}]})RQL"));
 			TestTrue(*FString::Printf(TEXT("unreal.classes (%s)"), *UnrealMcpRqlSpecHelpers::Codes(Classes)), UnrealMcpRqlSpecHelpers::RowCount(Classes) >= 1);
 			TestEqual(TEXT("PointLight listed"), UnrealMcpRqlSpecHelpers::CellText(Classes, 0, 0), FString(TEXT("PointLight")));
+		});
+
+		It("lists engine and plugin content when the project has no asset of the class and no path is given", [this]()
+		{
+			// Fonts ship in /Engine/EngineFonts; a project without one of its own gets those instead of an empty list.
+			TArray<FAssetData> InGame;
+			FARFilter Filter;
+			Filter.ClassPaths.Add(UFont::StaticClass()->GetClassPathName());
+			Filter.PackagePaths.Add(FName(TEXT("/Game")));
+			Filter.bRecursivePaths = true;
+			FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get().GetAssets(Filter, InGame);
+			if (InGame.Num() > 0)
+			{
+				AddInfo(TEXT("the host project has fonts of its own: the fallback does not apply"));
+				return;
+			}
+			const TSharedPtr<FJsonObject> Fonts = UnrealMcpRqlSpecHelpers::Exec(*this, /* unreal.assets("Font") | where Path starts-with "/Engine/" | count */ TEXT(R"RQL({"rql":"0.1","source":{"call":"assets","on":{"path":["unreal"]},"args":[{"lit":"Font"}]},"stages":[{"op":"where","pred":{"op":"starts-with","args":[{"path":["Path"]},{"lit":"/Engine/"}]}},{"op":"count"}]})RQL"));
+			TestTrue(*FString::Printf(TEXT("engine fonts (%s)"), *UnrealMcpRqlSpecHelpers::Codes(Fonts)), UnrealMcpRqlSpecHelpers::Number(Fonts) >= 1.0);
+			const TSharedPtr<FJsonObject> GameOnly = UnrealMcpRqlSpecHelpers::Exec(*this, /* unreal.assets("Font", "/Game") | count */ TEXT(R"RQL({"rql":"0.1","source":{"call":"assets","on":{"path":["unreal"]},"args":[{"lit":"Font"},{"lit":"/Game"}]},"stages":[{"op":"count"}]})RQL"));
+			TestEqual(TEXT("an explicit path stays exact"), UnrealMcpRqlSpecHelpers::Number(GameOnly), 0.0);
 		});
 
 		It("reads the console newest first", [this]()

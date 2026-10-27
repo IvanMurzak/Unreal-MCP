@@ -9,6 +9,7 @@
 
 #include "Containers/StringConv.h"
 #include "Components/ActorComponent.h"
+#include "Components/SceneComponent.h"
 #include "Engine/BlueprintGeneratedClass.h"
 #include "Engine/World.h"
 #include "Engine/LevelScriptActor.h"
@@ -802,10 +803,21 @@ void FUnrealMcpRqlTypes::AddPropertyMember(rql::TypeDescriptor& Descriptor, FPro
 	Member.copy_on_read = bOnObject
 		&& (Property->IsA<FArrayProperty>() || Property->IsA<FSetProperty>() || Property->IsA<FMapProperty>());
 	FUnrealMcpRqlTypes* Self = this;
-	Member.getter = [Self, Property, Type](void* Container) -> rql::Value
+	if (bOnObject)
 	{
-		return Self->Read(Property, Property->ContainerPtrToValuePtr<void>(Container), Type);
-	};
+		// The receipt reads the value back after the write: from the replacement when the write rebuilt the component.
+		Member.getter = [Self, Property, Type](void* Container) -> rql::Value
+		{
+			return Self->Read(Property, Property->ContainerPtrToValuePtr<void>(Self->LiveObject(static_cast<UObject*>(Container))), Type);
+		};
+	}
+	else
+	{
+		Member.getter = [Self, Property, Type](void* Container) -> rql::Value
+		{
+			return Self->Read(Property, Property->ContainerPtrToValuePtr<void>(Container), Type);
+		};
+	}
 	if (bOnObject)
 	{
 		Member.setter = [Self, Property](void* Container, const rql::Value& Value)
@@ -1230,9 +1242,24 @@ void FUnrealMcpRqlTypes::Write(const FProperty* Property, void* ValuePtr, const 
 	Throw(FString::Printf(TEXT("%s cannot be written"), *Property->GetAuthoredName()));
 }
 
+UObject* FUnrealMcpRqlTypes::LiveObject(UObject* Object) const
+{
+	while (Object && !IsValid(Object))
+	{
+		const TWeakObjectPtr<UObject>* Next = Replaced.Find(Object);
+		if (!Next || !Next->IsValid())
+			break;
+		Object = Next->Get();
+	}
+	return Object;
+}
+
 void FUnrealMcpRqlTypes::WriteObjectProperty(UObject* Object, FProperty* Property, const rql::Value& Value)
 {
-	if (!Object)
+	// A previous write of this mutation may have rebuilt the component (set A = 1, B = 2 on a Blueprint actor's component):
+	// write into the one the actor has now, not into the discarded copy.
+	Object = LiveObject(Object);
+	if (!Object || !IsValid(Object))
 		Throw(TEXT("the object is gone"));
 	// A placed Blueprint actor resets such a property to the class default whenever its construction script reruns (every
 	// edit does): the write would report success and then vanish. Play In Editor actors do not rerun it.
@@ -1257,6 +1284,9 @@ void FUnrealMcpRqlTypes::WriteObjectProperty(UObject* Object, FProperty* Propert
 		Old.Emplace(Property);
 		Property->CopyCompleteValue(Old->Ptr, Property->ContainerPtrToValuePtr<void>(Object));
 	}
+	UActorComponent* WrittenComponent = Cast<UActorComponent>(Object);
+	AActor* WrittenOwner = WrittenComponent ? WrittenComponent->GetOwner() : nullptr;
+	const FName WrittenName = WrittenComponent ? WrittenComponent->GetFName() : NAME_None;
 	Object->PreEditChange(Property);
 	FPropertyChangedEvent Event(Property, EPropertyChangeType::ValueSet);
 	try
@@ -1270,6 +1300,32 @@ void FUnrealMcpRqlTypes::WriteObjectProperty(UObject* Object, FProperty* Propert
 	}
 	Object->PostEditChangeProperty(Event);
 	const void* New = Property->ContainerPtrToValuePtr<void>(Object);
+	// PostEditChangeProperty reran a Blueprint actor's construction script: its construction-script components were
+	// rebuilt (under the same names) and this one discarded. Later writes and the receipt go to the replacement.
+	if (WrittenComponent && !IsValid(WrittenComponent) && IsValid(WrittenOwner))
+	{
+		for (UActorComponent* Candidate : WrittenOwner->GetComponents())
+		{
+			if (IsValid(Candidate) && Candidate->GetFName() == WrittenName)
+			{
+				// Every earlier copy now leads to the newest one (a weak pointer to a discarded copy no longer resolves).
+				const TWeakObjectPtr<UObject> Discarded(WrittenComponent);
+				for (TPair<const UObject*, TWeakObjectPtr<UObject>>& Entry : Replaced)
+				{
+					if (Entry.Value == Discarded)
+						Entry.Value = Candidate;
+				}
+				Replaced.Add(WrittenComponent, Candidate);
+				WrittenComponent = Candidate;
+				break;
+			}
+		}
+	}
+	// A raw write of RelativeLocation / RelativeRotation / RelativeScale3D (what the Details panel's transform rows set
+	// through the setters) only moves a component that re-registers in PostEditChangeProperty; some never do (Niagara),
+	// so their world transform would stay where it was. Recompute it, as SetRelativeLocation does.
+	if (USceneComponent* Scene = Cast<USceneComponent>(WrittenComponent); IsValid(Scene) && Scene->IsRegistered())
+		Scene->UpdateComponentToWorld();
 	for (UObject* Instance : Instances)
 	{
 		// Direct instances only (a child Blueprint's template holds its own value), never the running Play In Editor copies.

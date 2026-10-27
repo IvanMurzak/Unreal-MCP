@@ -6,6 +6,7 @@
 #include "CoreMinimal.h"
 #include "Misc/AutomationTest.h"
 #include "UnrealMcpRqlTools.h"
+#include "UnrealMcpCoreTools.h"
 #include "UnrealMcpToolRegistry.h"
 #include "Tools/UnrealMcpLogCollector.h"
 
@@ -20,6 +21,8 @@
 #include "Editor.h"
 #include "Engine/LevelStreamingVolume.h"
 #include "Engine/PointLight.h"
+#include "Engine/TriggerVolume.h"
+#include "UnrealMcpRqlSpecFixtures.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "GameFramework/Actor.h"
@@ -195,6 +198,32 @@ void FUnrealMcpRqlSpec::Define()
 			const TSharedPtr<FJsonObject> Descriptor = Query->ToDescriptorJson();
 			TestTrue(TEXT("descriptor ships the skill and the role"), Descriptor->HasField(TEXT("skills")) && Descriptor->GetStringField(TEXT("rql")) == TEXT("query"));
 			TestFalse(TEXT("other tools ship no skill"), Schema->ToDescriptorJson()->HasField(TEXT("skills")));
+		});
+
+		It("names a mutation's undo step after its query, and TRANSACTION UNDO reports which step it reverted", [this]()
+		{
+			FUnrealMcpLogCollector& Collector = FUnrealMcpLogCollector::Get();
+			const bool bWasRegistered = Collector.IsRegistered();
+			Collector.Startup();
+			FUnrealMcpToolRegistry Registry;
+			UnrealMcpRqlTools::Register(Registry);
+			UnrealMcpEditorTools::Register(Registry);
+			const FString Query = TEXT("editor | call SpawnActor(\"PointLight\", \"RqlSpecLamp\", \"(1, 2, 3)\")");
+			TSharedPtr<FJsonObject> Args = MakeShared<FJsonObject>();
+			Args->SetStringField(TEXT("query"), Query);
+			Args->SetStringField(TEXT("plan"), TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"SpawnActor","args":[{"lit":"PointLight"},{"lit":"RqlSpecLamp"},{"lit":"(1, 2, 3)"}]}]})RQL"));
+			const FUnrealMcpToolResult Spawned = Registry.Execute(TEXT("rql-mutate"), FUnrealMcpToolCall(Args));
+			TestTrue(*FString::Printf(TEXT("spawned (%s)"), *Spawned.Message), Spawned.bSuccess);
+			TestEqual(TEXT("one lamp"), CountLamps(), 1);
+
+			TSharedPtr<FJsonObject> Undo = MakeShared<FJsonObject>();
+			Undo->SetStringField(TEXT("command"), TEXT("TRANSACTION UNDO"));
+			const FUnrealMcpToolResult Undone = Registry.Execute(TEXT("console-run-command"), FUnrealMcpToolCall(Undo));
+			TestTrue(TEXT("undo ran"), Undone.bSuccess);
+			TestTrue(*FString::Printf(TEXT("the result names the reverted step (%s)"), *Undone.Message), Undone.Message.Contains(TEXT("RQL: ") + Query));
+			TestEqual(TEXT("the lamp is gone"), CountLamps(), 0);
+			if (!bWasRegistered)
+				Collector.Shutdown();
 		});
 
 		It("answers a call without a parsed plan with an unsupported diagnostic", [this]()
@@ -565,6 +594,41 @@ void FUnrealMcpRqlSpec::Define()
 			const TSharedPtr<FJsonObject> Material = Exec(/* editor | call SpawnActor("/Engine/EngineMaterials/DefaultMaterial", "RqlSpecLampNo") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"SpawnActor","args":[{"lit":"/Engine/EngineMaterials/DefaultMaterial"},{"lit":"RqlSpecLampNo"}]}]})RQL"), true);
 			TestFalse(TEXT("a material is not placeable"), IsOk(Material));
 			TestTrue(*FString::Printf(TEXT("says why (%s)"), *Codes(Material)), Codes(Material).Contains(TEXT("cannot be placed")));
+		});
+
+		It("gives a spawned volume the editor's default box brush, so it bounds something", [this]()
+		{
+			const TSharedPtr<FJsonObject> Spawned = Exec(/* editor | call SpawnActor("TriggerVolume", "RqlSpecLampVolume", "(0, 0, 100)") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"SpawnActor","args":[{"lit":"TriggerVolume"},{"lit":"RqlSpecLampVolume"},{"lit":"(0, 0, 100)"}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("spawn ok (%s)"), *Codes(Spawned)), IsOk(Spawned));
+			ATriggerVolume* Volume = nullptr;
+			for (AActor* Actor : Lamps())
+				Volume = Volume ? Volume : Cast<ATriggerVolume>(Actor);
+			if (!TestNotNull(TEXT("a trigger volume"), Volume))
+				return;
+			TestNotNull(TEXT("it has a brush"), Volume->Brush.Get());
+			FVector Origin, Extent;
+			Volume->GetActorBounds(/*bOnlyCollidingComponents*/ false, Origin, Extent);
+			TestTrue(*FString::Printf(TEXT("a 200 cm box (extent %s)"), *Extent.ToString()), Extent.Equals(FVector(100, 100, 100), 1.0));
+			TestTrue(*FString::Printf(TEXT("around its location (origin %s)"), *Origin.ToString()), Origin.Equals(FVector(0, 0, 100), 1.0));
+		});
+
+		It("moves a component that does not re-register on edit (Niagara-like) when its relative transform is written", [this]()
+		{
+			SpawnLamp();
+			// actors | where Label == "RqlSpecLamp" | call AddComponent("UnrealMcpRqlSpecStillComponent", "Still")
+			const TSharedPtr<FJsonObject> Added = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"RqlSpecLamp"}]}},{"op":"call","method":"AddComponent","args":[{"lit":"UnrealMcpRqlSpecStillComponent"},{"lit":"Still"}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("add ok (%s)"), *Codes(Added)), IsOk(Added));
+			// actors | where Label == "RqlSpecLamp" | get Components | where $ is UnrealMcpRqlSpecStillComponent | set RelativeLocation = "(0, 0, 500)"
+			const TSharedPtr<FJsonObject> Moved = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"RqlSpecLamp"}]}},{"op":"get","expr":{"path":["Components"]}},{"op":"where","pred":{"op":"is","args":[{"path":[]},{"lit":"UnrealMcpRqlSpecStillComponent"}]}},{"op":"set","assign":[{"target":{"path":["RelativeLocation"]},"value":{"lit":"(0, 0, 500)"}}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("set ok (%s)"), *Codes(Moved)), IsOk(Moved));
+			TArray<AActor*> Found = Lamps();
+			const UUnrealMcpRqlSpecStillComponent* Still = Found.Num() == 1 ? Found[0]->FindComponentByClass<UUnrealMcpRqlSpecStillComponent>() : nullptr;
+			if (!TestNotNull(TEXT("the component"), Still))
+				return;
+			TestEqual(TEXT("relative location written"), Still->GetRelativeLocation(), FVector(0, 0, 500));
+			// The lamp's root is at (1, 2, 3): the world transform must follow the write.
+			TestTrue(*FString::Printf(TEXT("world location follows (%s)"), *Still->GetComponentLocation().ToString()),
+				Still->GetComponentLocation().Equals(FVector(1, 2, 503), 0.01));
 		});
 
 		It("explains a refused attach (a Static actor under a Movable parent) and suggests asset paths", [this]()
