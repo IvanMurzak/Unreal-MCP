@@ -50,6 +50,7 @@ Results come back as compact rows (header line, then col|col). Long results are 
 		return R"RQL(Examples:
   actors | where Label contains "Enemy" | select $ref Label Location
   actors | get Components | where $ is PointLightComponent and Intensity > 2 | select Owner.Label Intensity LightColor
+  actors | get Components | where $ is LightComponentBase and CastShadows | sort Intensity desc | select Owner.Label $type Intensity      every light kind (sky lights too)
   actors | where Parent == null | recurse Children | select $depth Label
   unreal.assets("MaterialInstanceConstant") | select Name Scalars Vectors
   console | where Verbosity == "Error" | sort Sequence desc | first 5 | select Message
