@@ -609,11 +609,11 @@ namespace UnrealMcpRqlCoreLocal
 			{
 				ULevel* Level = static_cast<ULevel*>(Self);
 				const bool bVisible = BoolArg(Value);
-				// The Levels panel's eye: shows / hides the level's actors in the editor (a view state, not undoable).
+				// The Levels panel's eye: shows / hides the level's actors in the editor (recorded for undo, marks the map unsaved).
 				UEditorLevelUtils::SetLevelVisibility(Level, bVisible, /*bForceLayersVisible*/ false);
 				if (Level->bIsVisible != bVisible)
 					Throw(FString::Printf(TEXT("could not %s the level"), bVisible ? TEXT("show") : TEXT("hide")));
-			}, "shown in the editor (the Levels panel's eye; set IsVisible = false hides a sublevel's actors, not undoable)"));
+			}, "shown in the editor (the Levels panel's eye; set IsVisible = false hides a sublevel's actors)"));
 		FUnrealMcpRqlTypes::SetMember(D, Member("Actors", T.Registry().list_type(T.ForClass(AActor::StaticClass()), true),
 			[Types](void* Self)
 			{

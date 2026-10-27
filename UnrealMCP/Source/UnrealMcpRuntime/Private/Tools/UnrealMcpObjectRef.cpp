@@ -34,15 +34,21 @@ namespace
 		UWorld* World = FUnrealMcpWorldProvider::GetActiveWorld();
 		if (!World)
 			return nullptr;
+		// A package or object path names one level; a short map name only when exactly one loaded level has it.
 		const FString Package = FPackageName::ObjectPathToPackageName(Text);
+		ULevel* ByShortName = nullptr;
+		int32 ShortMatches = 0;
 		for (ULevel* Level : World->GetLevels())
 		{
-			const FString LevelPackage = Level ? Level->GetOutermost()->GetName() : FString();
-			if (Level && (FPackageName::GetShortName(LevelPackage).Equals(Text, ESearchCase::IgnoreCase)
-				|| LevelPackage.Equals(Package, ESearchCase::IgnoreCase) || Level->GetPathName().Equals(Text, ESearchCase::IgnoreCase)))
+			if (!Level)
+				continue;
+			const FString LevelPackage = Level->GetOutermost()->GetName();
+			if (LevelPackage.Equals(Package, ESearchCase::IgnoreCase) || Level->GetPathName().Equals(Text, ESearchCase::IgnoreCase))
 				return Level;
+			if (FPackageName::GetShortName(LevelPackage).Equals(Text, ESearchCase::IgnoreCase) && ShortMatches++ == 0)
+				ByShortName = Level;
 		}
-		return nullptr;
+		return ShortMatches == 1 ? ByShortName : nullptr;
 	}
 }
 

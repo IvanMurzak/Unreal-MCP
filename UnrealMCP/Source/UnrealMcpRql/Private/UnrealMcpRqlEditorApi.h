@@ -50,7 +50,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Unreal MCP|RQL", meta = (BlueprintInternalUseOnly = "true"))
 	void SaveAll();
 
-	/** add a saved level ("/Game/Maps/Sub_A") to the editor world as a streaming sublevel (Streaming: "Dynamic", or "AlwaysLoaded"); returns the loaded level */
+	/** add a saved level ("/Game/Maps/Sub_A") to the editor world as a streaming sublevel (Streaming: "Dynamic", or "AlwaysLoaded"); returns the loaded level (not undoable: UnloadSublevel removes it; the current level stays) */
 	UFUNCTION(BlueprintCallable, Category = "Unreal MCP|RQL", meta = (BlueprintInternalUseOnly = "true"))
 	ULevel* AddSublevel(const FString& Path, const FString& Streaming = TEXT("Dynamic"));
 

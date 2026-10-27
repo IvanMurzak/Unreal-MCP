@@ -579,6 +579,11 @@ void FUnrealMcpRqlSpec::Define()
 			// editor | call AddSublevel("/Game/RqlSpecNoSuchLevel")
 			const TSharedPtr<FJsonObject> Missing = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"AddSublevel","args":[{"lit":"/Game/RqlSpecNoSuchLevel"}]}]})RQL"), true);
 			TestTrue(*FString::Printf(TEXT("an unsaved level is refused (%s)"), *Codes(Missing)), !IsOk(Missing) && Codes(Missing).Contains(TEXT("no saved level")));
+			// editor | call AddSublevel("/Engine/BasicShapes/Cube") — a package that is not a map leaves no broken streaming entry
+			const int32 StreamingBefore = W->GetStreamingLevels().Num();
+			const TSharedPtr<FJsonObject> NotMap = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"AddSublevel","args":[{"lit":"/Engine/BasicShapes/Cube"}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("a non-map package is refused (%s)"), *Codes(NotMap)), !IsOk(NotMap) && Codes(NotMap).Contains(TEXT("no saved level (map)")));
+			TestEqual(TEXT("no streaming entry added"), W->GetStreamingLevels().Num(), StreamingBefore);
 			// editor | call AddSublevel("@PKG@")
 			const TSharedPtr<FJsonObject> Self = Exec(With(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"AddSublevel","args":[{"lit":"@PKG@"}]}]})RQL")), true);
 			TestTrue(*FString::Printf(TEXT("the world's own level is refused (%s)"), *Codes(Self)), !IsOk(Self) && Codes(Self).Contains(TEXT("its own sublevel")));
