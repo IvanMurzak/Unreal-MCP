@@ -389,7 +389,7 @@ namespace UnrealMcpRqlCoreLocal
 		if (!Layers)
 			Throw(TEXT("the editor's Layers subsystem is not available"));
 		if (Actor->GetLevel() && Actor->GetLevel()->bIsPartitioned)
-			Throw(FString::Printf(TEXT("%s is in a World Partition level: editor layers do not apply there (use data layers: DataLayerAssets)"), *Actor->GetActorLabel()));
+			Throw(FString::Printf(TEXT("%s is in a World Partition level: editor layers do not apply there (World Partition uses data layers)"), *Actor->GetActorLabel()));
 		if (!Layers->IsActorValidForLayer(Actor))
 			Throw(FString::Printf(TEXT("%s cannot be put on a layer (only actors of the editor world's levels can)"), *Actor->GetActorLabel()));
 		TArray<FName> Removed;
