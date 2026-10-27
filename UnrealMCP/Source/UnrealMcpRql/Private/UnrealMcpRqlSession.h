@@ -57,9 +57,13 @@ public:
 	void AddGuide(const FString& Topic, const FString& Markdown);
 	void AddAdapter(rql::TypeAdapter Adapter);
 
-	/** Runs before the first write of a mutation (after the read-only checks); throwing vetoes the whole mutation. */
+	/**
+	 * Checks every planned change of a set / call stage at once (RQL MutationPolicy::validate_batch), before anything is
+	 * written or called, dry runs included. A non-empty reason refuses the whole stage (invalid-value), nothing changed.
+	 */
+	using FBatchValidator = std::function<FString(const std::vector<rql::MutationRecord>& Records)>;
+	void AddBatchValidator(FBatchValidator Validator);
 	using FMutationHook = std::function<void(const std::vector<rql::MutationRecord>& Records)>;
-	void AddBeforeWrite(FMutationHook Hook);
 	/** Runs after every write of a mutation succeeded (not on dry run or rollback): persistence, notifications. */
 	void AddCommitted(FMutationHook Hook);
 	/** Class default objects this predicate accepts are writable (settings objects); other templates stay read-only. */
@@ -72,7 +76,7 @@ private:
 	TArray<FEntry> FunctionEntries;
 	TArray<TPair<FString, FString>> Guides;
 	TArray<FString> ModuleReports;
-	TArray<FMutationHook> BeforeWriteHooks;
+	TArray<FBatchValidator> BatchValidators;
 	TArray<FMutationHook> CommittedHooks;
 	TArray<TFunction<bool(const UObject*)>> WritableTemplates;
 	int32 TransactionIndex = INDEX_NONE;

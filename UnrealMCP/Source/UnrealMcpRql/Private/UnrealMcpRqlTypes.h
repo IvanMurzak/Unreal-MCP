@@ -8,6 +8,7 @@
 #include "UnrealMcpRqlInclude.h"
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -102,6 +103,13 @@ public:
 	 * std::runtime_error when the value does not fit.
 	 */
 	void CoerceStruct(UScriptStruct* Struct, const rql::Value& Value, void* Out);
+	/**
+	 * The engine's own text form of a reflected struct (ExportText / the editor's Copy, e.g. FAnchors
+	 * "(Minimum=(X=0.5,Y=0),Maximum=(X=0.5,Y=0))") as a struct value: RQL's MutationPolicy::coerce_text for structs that no
+	 * adapter coerces. nullopt when @p Type is not a reflected struct or the text is not a "(...)" form; @p OutReason set
+	 * when it is one that does not import.
+	 */
+	std::optional<rql::Value> ParseStructText(const rql::TypeDescriptor& Type, const std::string& Text, std::string& OutReason);
 
 	// ---- extension points (registered before the first query; inherited by subclasses)
 

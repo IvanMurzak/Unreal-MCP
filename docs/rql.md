@@ -22,7 +22,8 @@ agent ──query text──▶ unreal-mcp-bridge (sidecar, .NET)          Unrea
                       AgentFormat: QueryResult → compact rows ◀──IPC tool-response: QueryResult JSON── over live UObjects
 ```
 
-- **Sidecar** (`bridge/src/Tools/RqlBridge.cs`, NuGet `com.IvanMurzak.Rql` 0.2.0): for `rql-query` / `rql-mutate` it
+- **Sidecar** (`bridge/src/Tools/RqlBridge.cs`, NuGet `com.IvanMurzak.Rql` 0.3.0-dev.602ce7c — a temporary pre-release
+  packed from RQL main 602ce7c and committed under `bridge/prerelease-packages/` until the cascade release): for `rql-query` / `rql-mutate` it
   parses `query` with `RqlParser` and adds `PlanCodec.Serialize(plan)` as the `plan` argument (a syntax error is
   answered without a round trip). The plugin answers with the QueryResult JSON; the sidecar renders it with
   `AgentFormat.Render(…, Table)` — byte-for-byte the agent output of Unity-MCP's rql tools. `rql-schema` answers with
@@ -73,6 +74,10 @@ agent ──query text──▶ unreal-mcp-bridge (sidecar, .NET)          Unrea
   `IntVector`) have RQL type adapters: they print as `(x, y, z)` and accept `"(1, 2, 3)"`, `[1, 2, 3]`, `{X: 1, …}`
   (an object literal builds a new value: members it does not name are zero); colors also `"#ff8800"`. They compare
   with those forms too (`where Location == "(0, 0, 100)"`, components within 1e-5).
+- **UE's text form for any other struct**: a string in the form the editor's Copy / `ExportText` writes is imported with
+  `UScriptStruct::ImportText` (RQL's `MutationPolicy::coerce_text`), so `set Slot.LayoutData.Anchors =
+  "(Minimum=(X=0.5,Y=0),Maximum=(X=0.5,Y=0))"` works on structs without an adapter; text that does not import (an
+  unknown member, trailing text) fails with `coercion-failed` and UE's message.
 - **Gameplay tags** read and write as text: `FGameplayTag` as `"Ability.Fire"` (`""` = none), `FGameplayTagContainer`
   as `["Ability.Fire", "State.Stunned"]` (or `"A.B, C.D"`), validated against the registered tags (an unknown tag fails
   and names similar ones); containers are rebuilt with `AddTag`, so their parent-tag cache stays right. Members:
@@ -93,6 +98,12 @@ agent ──query text──▶ unreal-mcp-bridge (sidecar, .NET)          Unrea
   throwing operation is `call-threw`. Unlike Unity-MCP, `rql-mutate` does **not** save to disk: Unreal edits stay
   unsaved until `editor | call SaveAll()` / `SaveLevel()` / `SaveAsset(…)` (saving in Unreal can raise source-control
   checkouts and Save-As dialogs, which an unattended tool call must not).
+- **Batch checks** (RQL's `MutationPolicy::validate_batch`): every planned change of a `set` / `call` stage is checked at
+  once before anything runs, dry runs included, and a refusal is `invalid-value` with nothing changed: class default
+  objects are read-only (except settings objects and API objects), a settings write must hit a config property, and one
+  object reached twice by the same `call` (`actors | get Parent | call Destroy()` over siblings) is refused (`| distinct`
+  first) — a call cannot be rolled back, so running it twice would break all-or-nothing. Hints never advise
+  `budgets.*` (the tools take no budgets), and a `ref("Name")` hint names `unreal.find("…")`.
 - **Function sources**: RQL text lets a host function start a query (`unreal.assets("Material") | …`, also with a member
   path after it: `unreal.asset("/Game/BP_Door").EventGraph | …`); the C++ runtime runs a bare function call but not
   the member-path form, so the session evaluates such a call (literal arguments) once and runs the query on a source
@@ -127,7 +138,8 @@ the tag ini at once through the GameplayTagsEditor plugin, not undoable; a renam
 
 - `Rows`: a map from row name (case-insensitive) to the row struct. `set Rows["Sword"].Damage = 12` writes the row in
   place; `set Rows["Bow"] = {Damage: 7}` adds a row (a failing write removes it again); `get Rows | where Value.Damage > 10
-  | select Key` streams the rows as entries.
+  | select Key` streams the rows as entries, and `get Rows | where Value.Damage > 10 | set Value.Damage = Value.Damage * 2`
+  writes through the table (each entry is the key-path write `Rows["<row>"].Damage`; the receipt names the table).
 - `RowNames`, `RowCount`, `RowStructName` (pass it to `rql-schema` for the row members).
 - `call AddRow(name, values?)`, `RemoveRow(name)`, `RenameRow(name, newName)`, `DuplicateRow(name, newName)`: the
   `FDataTableEditorUtils` functions the DataTable editor's buttons call (row names are validated; values that do not fit

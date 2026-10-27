@@ -1240,3 +1240,25 @@ void FUnrealMcpRqlTypes::CoerceStruct(UScriptStruct* Struct, const rql::Value& V
 	}
 	ThrowMismatch(*FString::Printf(TEXT("a %s"), *Struct->GetName()), Value);
 }
+
+std::optional<rql::Value> FUnrealMcpRqlTypes::ParseStructText(const rql::TypeDescriptor& Type, const std::string& Text, std::string& OutReason)
+{
+	UScriptStruct* const* Found = StructByDescriptor.Find(&Type);
+	const FString Source = UnrealMcpRqlFromStd(Text).TrimStartAndEnd();
+	if (!Found || !Source.StartsWith(TEXT("(")))
+		return std::nullopt;
+	UScriptStruct* Struct = *Found;
+	std::shared_ptr<void> Data = MakeStructData(Struct, nullptr);
+	FStringOutputDevice Errors;
+	const TCHAR* End = Struct->ImportText(*Source, Data.get(), nullptr, PPF_None, &Errors, Struct->GetName());
+	FString Rest = End ? FString(End).TrimStartAndEnd() : FString();
+	if (!End || !Rest.IsEmpty() || !Errors.IsEmpty())
+	{
+		const FString Why = !Errors.IsEmpty() ? FString(Errors).TrimStartAndEnd()
+			: !End ? FString(TEXT("it does not parse")) : FString::Printf(TEXT("unexpected text after the closing parenthesis: %s"), *Rest);
+		OutReason = UnrealMcpRqlToStd(FString::Printf(TEXT("'%s' is not a %s in Unreal's text form (%s)"), *Source, *Struct->GetName(), *Why));
+		return std::nullopt;
+	}
+	Fill(&Type);
+	return rql::Value::structure(&Type, std::move(Data));
+}

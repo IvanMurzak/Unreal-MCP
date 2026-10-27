@@ -48,8 +48,11 @@ struct MutationRecord {
     Value old_value;     // set only
     Value new_value;     // set only: planned value (before_write), read-back value (committed)
     const MethodDescriptor* method = nullptr;  // call only
+    std::vector<Value> args;                   // call only: the coerced arguments (defaults filled in)
 };
 using MutationHook = std::function<void(const std::vector<MutationRecord>& records)>;
+/// Batch validation: a refusal reason, or "" to accept.
+using BatchValidator = std::function<std::string(const std::vector<MutationRecord>& records)>;
 
 struct MutationPolicy {
     /// Host-level switch. Requests must additionally set QueryOptions::allow_mutation.
@@ -59,6 +62,16 @@ struct MutationPolicy {
     int max_targets = 20;
     /// Host ceiling no request's maxMutationTargets can exceed.
     int hard_max_targets = 1000;
+    /// Batch validation (spec §8): every planned change of a set / call stage at once (targets, members or methods,
+    /// coerced values or arguments), after each target passed its own checks and before anything is written or
+    /// called — on dry runs too. A non-empty reason (or a throw) refuses the whole stage → invalid-value, nothing changed.
+    BatchValidator validate_batch;
+    /// Replaces the mutation-limit hint (spec §10): (stage "set"/"call", target limit) → hint; "" keeps the built-in one.
+    std::function<std::string(const std::string& op, int limit)> limit_hint;
+    /// Host text coercion (spec §8): converts a string written to a struct / object type that no type adapter coerces
+    /// (e.g. Unreal's ExportText form "(Minimum=(X=0.5,Y=0),Maximum=(X=0.5,Y=0))"). Return the value; nullopt when the
+    /// type is not handled (the built-in rules then report the failure); set `reason` (or throw) to refuse.
+    std::function<std::optional<Value>(const TypeDescriptor& type, const std::string& text, std::string& reason)> coerce_text;
     /// After planning, before any write (not on dry-run): e.g. record undo for the owners. Throwing (any
     /// exception) vetoes the whole mutation → permission-denied, nothing changed.
     MutationHook before_write;
@@ -79,6 +92,9 @@ struct EngineDefaults {
     int hard_max_visited = 5000000;
     int hard_max_rows = 10000;
     int hard_timeout_ms = 30000;
+    /// Whether the host's callers can pass request budgets (budgets.*). Hosts whose tools take no budgets argument
+    /// set it to false, so error hints never advise raising a budget the caller cannot reach (spec §10).
+    bool budgets_adjustable = true;
 };
 
 class Engine {
@@ -103,6 +119,9 @@ public:
     std::function<Value(const std::string& type, const std::string& id)> resolve_stable_ref;
     /// When false, $path is tracked only for plans that reference $path.
     bool always_track_paths = false;
+    /// How callers find an object by name on this host, e.g. unreal.find("Floor"); ref() hints name it (spec §7).
+    /// Empty: the hints suggest a generic query.
+    std::string find_hint;
 
     // Every Engine member function is noexcept: exceptions used internally never cross this API.
     // Registration with an invalid name is ignored and reported through last_error().

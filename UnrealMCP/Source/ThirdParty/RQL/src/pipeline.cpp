@@ -60,7 +60,8 @@ Exec::Exec(Engine& e, const Budgets& b, const QueryOptions& o, const QueryPlan& 
 void Exec::visit() {
     if (++visited > max_visited)
         throw RqlException("budget-exceeded", "visited more than " + std::to_string(max_visited) + " objects",
-                           "narrow the source (e.g. a specific scene), filter earlier, lower recurse max-depth, or raise budgets.maxVisited");
+                           std::string("narrow the source (e.g. a specific scene), filter earlier or lower recurse max-depth") +
+                               (engine.defaults().budgets_adjustable ? ", or raise budgets.maxVisited" : ""));
     if ((visited & 1023) == 0) check_time();
 }
 
@@ -70,7 +71,8 @@ double Exec::elapsed_ms() const {
 
 void Exec::check_time() const {
     if (elapsed_ms() > timeout_ms)
-        throw RqlException("timeout", "query exceeded " + std::to_string(timeout_ms) + " ms", "narrow the query or raise budgets.timeoutMs");
+        throw RqlException("timeout", "query exceeded " + std::to_string(timeout_ms) + " ms",
+                           std::string("narrow the query") + (engine.defaults().budgets_adjustable ? " or raise budgets.timeoutMs" : ""));
 }
 
 void Exec::getter_threw(const std::string& member, const std::string& what) {
@@ -81,14 +83,14 @@ void Exec::warn_once(const std::string& code, const std::string& message, const 
     if (warned_.insert(key.empty() ? code + "\n" + message : key).second) diagnostics.push_back(Diagnostic::warning(code, message));
 }
 
-namespace {
-
 void set_scope(Exec& x, const Item& it, int64_t index) {
     x.current = it.value;
     x.current_path = it.path;
     x.current_depth = it.depth;
     x.index = index;
 }
+
+namespace {
 
 // ------------------------------------------------------------------ plan scan
 
@@ -144,7 +146,9 @@ std::optional<std::string> path_suffix(const Expr& e) {
 /// Lists → elements, maps → entries, one-column rows → their value, else the value; null/missing dropped.
 class ExpandStream final : public Stream {
 public:
-    ExpandStream(Exec& x, Value v, PathPtr path, bool count) : x_(x), path_(std::move(path)), count_(count) {
+    /// origin: where a map value read by get lives; null = the map itself. Streamed entries remember it (spec §8).
+    ExpandStream(Exec& x, Value v, PathPtr path, bool count, std::shared_ptr<const EntryOrigin> origin = nullptr)
+        : x_(x), path_(std::move(path)), count_(count), origin_(std::move(origin)) {
         while (v.is_row() && v.row().values.size() == 1) {
             Value inner = v.row().values[0];
             v = inner;
@@ -189,7 +193,8 @@ public:
                 if (i_ >= entries_.size()) { mode_ = Done; return false; }
                 if (count_) x_.visit();
                 auto& e = entries_[i_++];
-                out = Item{Value::entry(e.first, e.second), path_ ? path_key(path_, e.first) : nullptr, -1};
+                if (!origin_) origin_ = std::make_shared<const EntryOrigin>(EntryOrigin{v_, {}, Value()});
+                out = Item{Value::entry(e.first, e.second, origin_), path_ ? path_key(path_, e.first) : nullptr, -1};
                 return true;
             }
         }
@@ -206,6 +211,7 @@ private:
     size_t i_ = 0;
     bool loaded_ = false;
     std::vector<std::pair<Value, Value>> entries_;
+    std::shared_ptr<const EntryOrigin> origin_;
 };
 
 class SourceStream final : public Stream {
@@ -409,8 +415,9 @@ private:
 
 class GetStream final : public Stream {
 public:
-    GetStream(Exec& x, StreamPtr in, Eval eval, std::optional<std::string> suffix)
-        : x_(x), in_(std::move(in)), eval_(std::move(eval)), suffix_(std::move(suffix)) {}
+    /// segments: the get expression when it is a plain path (members, [i], ["k"]), else null (spec §8).
+    GetStream(Exec& x, StreamPtr in, Eval eval, std::optional<std::string> suffix, const std::vector<Segment>* segments)
+        : x_(x), in_(std::move(in)), eval_(std::move(eval)), suffix_(std::move(suffix)), segments_(segments) {}
     bool next(Item& out) override {
         for (;;) {
             if (sub_ && sub_->next(out)) return true;
@@ -425,15 +432,35 @@ public:
                 continue;
             }
             PathPtr p = x_.track_paths && it.path && suffix_ ? path_text(it.path, *suffix_) : nullptr;
-            sub_ = std::make_unique<ExpandStream>(x_, std::move(v), std::move(p), true);
+            std::shared_ptr<const EntryOrigin> origin = v.is_map() ? origin_of(it.value, v) : nullptr;
+            sub_ = std::make_unique<ExpandStream>(x_, std::move(v), std::move(p), true, std::move(origin));
         }
     }
 
 private:
+    /// Where map `map`, read from `from`, lives (spec §8): the plain get path from the item — or, for an entry item, the
+    /// entry's path continued through [key] — else the map itself.
+    std::shared_ptr<const EntryOrigin> origin_of(const Value& from, const Value& map) const {
+        if (from.is_entry()) {
+            const auto& o = from.entry().origin;
+            const Value& key = from.entry().key;
+            if (!o || !segments_ || segments_->empty() || is_member(segments_->front(), "key") || !(key.is_string() || key.is_number()))
+                return std::make_shared<const EntryOrigin>(EntryOrigin{map, {}, o ? o->holder : Value()});
+            EntryOrigin out{o->root, o->prefix, o->holder};
+            out.prefix.push_back(Segment::for_key(key.is_number() ? Literal::number(key.as_number()) : Literal::string(key.as_string())));
+            out.prefix.insert(out.prefix.end(), segments_->begin() + (is_member(segments_->front(), "value") ? 1 : 0), segments_->end());
+            return std::make_shared<const EntryOrigin>(std::move(out));
+        }
+        Value holder = from.is_row() ? Value() : from;
+        if (!holder.is_missing() && segments_) return std::make_shared<const EntryOrigin>(EntryOrigin{holder, *segments_, holder});
+        return std::make_shared<const EntryOrigin>(EntryOrigin{map, {}, holder});
+    }
+
     Exec& x_;
     StreamPtr in_;
     Eval eval_;
     std::optional<std::string> suffix_;
+    const std::vector<Segment>* segments_;
     StreamPtr sub_;
     int64_t i_ = 0;
 };
@@ -477,28 +504,43 @@ private:
 
 class GroupByStream final : public Stream {
 public:
-    GroupByStream(Exec& x, StreamPtr in, Eval key) : x_(x), in_(std::move(in)), key_(std::move(key)) {}
+    /// One row per distinct key tuple (first appearance order): the key columns, then count (spec §5).
+    GroupByStream(Exec& x, StreamPtr in, std::vector<Eval> keys, std::vector<std::string> key_columns)
+        : x_(x), in_(std::move(in)), keys_(std::move(keys)), key_columns_(std::move(key_columns)) {}
     bool next(Item& out) override {
         if (!done_) {
             done_ = true;
+            // The key tuple is a row of the key columns: rows hash and compare by their values, like distinct.
+            auto key_cols = std::make_shared<const std::vector<std::string>>(key_columns_);
             std::unordered_map<Value, size_t, ValueHash, ValueEq> index(16, ValueHash{&x_}, ValueEq{&x_});
-            std::vector<std::pair<Value, double>> groups;
+            std::vector<std::pair<Value, double>> groups;  // key row, count
             Item it;
             int64_t i = 0;
             while (in_->next(it)) {
                 set_scope(x_, it, i++);
-                Value k = key_(x_);
-                if (k.is_missing() || k.is_unknown()) k = Value::null();
-                auto f = index.find(k);
+                std::vector<Value> tuple;
+                for (auto& key : keys_) {
+                    Value k = key(x_);
+                    if (k.is_missing() || k.is_unknown()) k = Value::null();
+                    tuple.push_back(std::move(k));
+                }
+                Value row = Value::row(key_cols, std::move(tuple));
+                auto f = index.find(row);
                 if (f != index.end()) {
                     groups[f->second].second += 1;
                 } else {
-                    index.emplace(k, groups.size());
-                    groups.emplace_back(k, 1.0);
+                    index.emplace(row, groups.size());
+                    groups.emplace_back(std::move(row), 1.0);
                 }
             }
-            auto cols = std::make_shared<const std::vector<std::string>>(std::vector<std::string>{"key", "count"});
-            for (auto& g : groups) rows_.push_back(Value::row(cols, {g.first, Value::number(g.second)}));
+            std::vector<std::string> names = key_columns_;
+            names.push_back("count");
+            auto cols = std::make_shared<const std::vector<std::string>>(std::move(names));
+            for (auto& g : groups) {
+                std::vector<Value> values = g.first.row().values;
+                values.push_back(Value::number(g.second));
+                rows_.push_back(Value::row(cols, std::move(values)));
+            }
         }
         if (pos_ >= rows_.size()) return false;
         out = Item{rows_[pos_++], nullptr, -1};
@@ -508,7 +550,8 @@ public:
 private:
     Exec& x_;
     StreamPtr in_;
-    Eval key_;
+    std::vector<Eval> keys_;
+    std::vector<std::string> key_columns_;
     bool done_ = false;
     std::vector<Value> rows_;
     size_t pos_ = 0;
@@ -747,9 +790,26 @@ StreamPtr apply_stage(Exec& x, Compiler& c, StreamPtr in, const Stage& st) {
         }
         case StageKind::First: return std::make_unique<FirstStream>(std::move(in), st.n);
         case StageKind::Skip: return std::make_unique<SkipStream>(std::move(in), st.n);
-        case StageKind::Get: return std::make_unique<GetStream>(x, std::move(in), c.compile(*st.expr), path_suffix(*st.expr));
+        case StageKind::Get: {
+            const Expr& e = *st.expr;
+            bool plain = e.kind == ExprKind::Path && !e.on &&
+                         std::none_of(e.segments.begin(), e.segments.end(), [](const Segment& s) { return s.kind == SegmentKind::Meta; });
+            return std::make_unique<GetStream>(x, std::move(in), c.compile(e), path_suffix(e), plain ? &e.segments : nullptr);
+        }
         case StageKind::Distinct: return std::make_unique<DistinctStream>(x, std::move(in), st.expr ? c.compile(*st.expr) : Eval());
-        case StageKind::GroupBy: return std::make_unique<GroupByStream>(x, std::move(in), c.compile(*st.expr));
+        case StageKind::GroupBy: {
+            std::vector<Eval> keys;
+            std::vector<std::string> names;
+            if (st.expr) {
+                keys.push_back(c.compile(*st.expr));
+                names.push_back("key");
+            }
+            for (auto& f : st.fields) {
+                keys.push_back(c.compile(*f.expr));
+                names.push_back(f.name);
+            }
+            return std::make_unique<GroupByStream>(x, std::move(in), std::move(keys), std::move(names));
+        }
         case StageKind::Recurse: {
             std::vector<RecurseStream::Via> via;
             for (auto& v : st.via) via.push_back({c.compile(*v), path_suffix(*v)});
@@ -811,7 +871,13 @@ std::vector<std::string> last_columns(const QueryPlan& p) {
             for (auto& f : st.fields) cols.push_back(f.name);
             return cols;
         }
-        if (st.kind == StageKind::GroupBy) return {"key", "count"};
+        if (st.kind == StageKind::GroupBy) {
+            if (st.expr) return {"key", "count"};
+            std::vector<std::string> cols;
+            for (auto& f : st.fields) cols.push_back(f.name);
+            cols.push_back("count");
+            return cols;
+        }
     }
     return {};
 }
@@ -945,7 +1011,7 @@ void add_warnings(Exec& x, QueryResult& r, bool only_general) {
                 for (auto& m : view.members()) known.push_back(m.name);
             }
             for (auto& st : x.plan.stages)
-                if (st.kind == StageKind::Select)
+                if (st.kind == StageKind::Select || st.kind == StageKind::GroupBy)
                     for (auto& f : st.fields) {
                         known.push_back(f.name);
                         // select Owner.Label | sort Owner.Label navigates no Owner (the dotted path names the column)

@@ -346,6 +346,43 @@ void FUnrealMcpRqlDataModelsSpec::Define()
 			TestTrue(TEXT("add redone"), Data->FindRowUnchecked(TEXT("Sword")) != nullptr);
 		});
 
+		// RQL main 602ce7c: a set on the entries `get Rows` streams writes through the table (plans: Rql.Parser 0.3.0-dev.602ce7c).
+		It("writes rows streamed as entries through the table: dry run, write, notification, undo", [this]()
+		{
+			Must(TEXT("table"), /* editor | call CreateDataTable("@DT@", "UnrealMcpRqlSpecRow") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"CreateDataTable","args":[{"lit":"@DT@"},{"lit":"UnrealMcpRqlSpecRow"}]}]})RQL"));
+			UDataTable* Data = FindTable();
+			if (!TestNotNull(TEXT("table"), Data))
+				return;
+			Must(TEXT("strong row"), /* unreal.asset("@DT@") | call AddRow("Sword", {Damage: 12}) */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@DT@"}]},"stages":[{"op":"call","method":"AddRow","args":[{"lit":"Sword"},{"object":[{"key":"Damage","value":{"lit":12}}]}]}]})RQL"));
+			Must(TEXT("weak row"), /* unreal.asset("@DT@") | call AddRow("Shield", {Damage: 1}) */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@DT@"}]},"stages":[{"op":"call","method":"AddRow","args":[{"lit":"Shield"},{"object":[{"key":"Damage","value":{"lit":1}}]}]}]})RQL"));
+			auto Damage = [Data](const TCHAR* Row)
+			{
+				const FUnrealMcpRqlSpecRow* Found = Data->FindRow<FUnrealMcpRqlSpecRow>(Row, TEXT("spec"));
+				return Found ? Found->Damage : -1;
+			};
+			const FString Double = /* unreal.asset("@DT@") | get Rows | where Value.Damage > 10 | set Value.Damage = Value.Damage * 2 */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@DT@"}]},"stages":[{"op":"get","expr":{"path":["Rows"]}},{"op":"where","pred":{"op":">","args":[{"path":["Value","Damage"]},{"lit":10}]}},{"op":"set","assign":[{"target":{"path":["Value","Damage"]},"value":{"op":"*","args":[{"path":["Value","Damage"]},{"lit":2}]}}]}]})RQL");
+
+			const TSharedPtr<FJsonObject> Dry = UnrealMcpRqlSpecHelpers::Exec(*this, UnrealMcpRqlSpecHelpers::Fill(Double, { { TEXT("DT"), Table } }), true, /*bDryRun*/ true);
+			TestTrue(*FString::Printf(TEXT("dry run ok (%s)"), *UnrealMcpRqlSpecHelpers::Codes(Dry)), UnrealMcpRqlSpecHelpers::IsOk(Dry));
+			TestEqual(TEXT("dry run: one receipt row"), UnrealMcpRqlSpecHelpers::RowCount(Dry), 1);
+			TestEqual(TEXT("dry run changed nothing"), Damage(TEXT("Sword")), 12);
+
+			int32 Changes = 0;
+			const FDelegateHandle Handle = Data->OnDataTableChanged().AddLambda([&Changes]() { ++Changes; });
+			ON_SCOPE_EXIT { Data->OnDataTableChanged().Remove(Handle); };
+			const TSharedPtr<FJsonObject> Written = Must(TEXT("entries written"), Double);
+			TestTrue(*FString::Printf(TEXT("the receipt names the table (%s)"), *UnrealMcpRqlSpecHelpers::CellText(Written, 0, 0)),
+				UnrealMcpRqlSpecHelpers::CellText(Written, 0, 0).StartsWith(TEXT("DataTable#")));
+			TestTrue(TEXT("the matching row doubled, the other kept"), Damage(TEXT("Sword")) == 24 && Damage(TEXT("Shield")) == 1);
+			TestTrue(TEXT("the table was notified"), Changes > 0);
+			TestTrue(TEXT("the package is dirty"), Data->GetOutermost()->IsDirty());
+			if (GEditor)
+			{
+				GEditor->UndoTransaction();
+				TestEqual(TEXT("one undo step restores the row"), Damage(TEXT("Sword")), 12);
+			}
+		});
+
 		It("saves rows to disk: a reloaded table has them", [this]()
 		{
 			Must(TEXT("table"), /* editor | call CreateDataTable("@DT@", "UnrealMcpRqlSpecRow") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"CreateDataTable","args":[{"lit":"@DT@"},{"lit":"UnrealMcpRqlSpecRow"}]}]})RQL"));

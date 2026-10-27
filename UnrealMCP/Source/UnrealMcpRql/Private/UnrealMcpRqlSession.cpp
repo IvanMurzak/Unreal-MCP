@@ -213,6 +213,9 @@ FUnrealMcpRqlSession::FUnrealMcpRqlSession()
 {
 	rql::Engine& RqlEngine = *EnginePtr;
 	RqlEngine.runtime_name = "unreal";
+	// rql-query / rql-mutate take no budgets argument: hints must not advise raising budgets.*. ref("Name") hints name the finder.
+	RqlEngine.defaults().budgets_adjustable = false;
+	RqlEngine.find_hint = "unreal.find(\"\xE2\x80\xA6\")";
 	FUnrealMcpRqlTypes* TypeProvider = TypesPtr.Get();
 	// Liveness from the weak pointer every object value carries: a destroyed (garbage) actor reads as null.
 	RqlEngine.is_alive = [TypeProvider](const rql::Value& Object) { return TypeProvider->IsAlive(Object); };
@@ -278,7 +281,8 @@ void FUnrealMcpRqlSession::ConfigureMutations()
 		}
 		return false;
 	};
-	Policy.before_write = [this, OwnerOf, ViewStateActor, TypeProvider, IsWritableTemplate](const std::vector<rql::MutationRecord>& Records)
+	// The checks that need the planned changes (dry runs report them too): the core one, then the modules' validators.
+	Policy.validate_batch = [this, TypeProvider, IsWritableTemplate](const std::vector<rql::MutationRecord>& Records) -> std::string
 	{
 		// Class defaults and archetypes (the class-default sources' rows, a Blueprint's defaults) are read-only: an
 		// in-memory change to a CDO is not a saved edit and leaks into every new instance. API objects (`editor`, the
@@ -288,12 +292,42 @@ void FUnrealMcpRqlSession::ConfigureMutations()
 			for (UObject* Object : { TypeProvider->AsObject(Record.item), TypeProvider->AsObject(Record.owner) })
 			{
 				if (Object && Object->IsTemplate() && !TypeProvider->IsApiClass(Object->GetClass()) && !IsWritableTemplate(Object))
-					throw std::runtime_error(UnrealMcpRqlToStd(FString::Printf(
-						TEXT("%s is a class default object, read-only through RQL (edit the class or Blueprint instead)"), *Object->GetName())));
+					return UnrealMcpRqlToStd(FString::Printf(
+						TEXT("%s is a class default object, read-only through RQL (edit the class or Blueprint instead)"), *Object->GetName()));
 			}
 		}
-		for (const FMutationHook& Hook : BeforeWriteHooks)
-			Hook(Records);
+		// A call cannot be undone generically: one object reached twice (actors | get Parent | call Destroy() over two
+		// siblings) would run the call twice, and a second call failing after the first changed the editor breaks the
+		// all-or-nothing promise. Refuse the duplicate before anything runs.
+		TSet<TPair<const void*, const rql::MethodDescriptor*>> Called;
+		for (const rql::MutationRecord& Record : Records)
+		{
+			if (!Record.method || !Record.item.is_object() || !Record.item.ptr())
+				continue;
+			bool bTwice = false;
+			Called.Add(TPair<const void*, const rql::MethodDescriptor*>(Record.item.ptr(), Record.method), &bTwice);
+			if (bTwice)
+			{
+				const UObject* Object = TypeProvider->AsObject(Record.item);
+				return UnrealMcpRqlToStd(FString::Printf(TEXT("%s would run twice on %s (it is in the stream more than once: "
+					"add | distinct before call)"), *UnrealMcpRqlFromStd(Record.method->name), Object ? *Object->GetName() : TEXT("one object")));
+			}
+		}
+		for (const FBatchValidator& Validator : BatchValidators)
+		{
+			const FString Reason = Validator(Records);
+			if (!Reason.IsEmpty())
+				return UnrealMcpRqlToStd(Reason);
+		}
+		return std::string();
+	};
+	// UE's own text form for structs without an RQL adapter (the editor's Copy): Anchors = "(Minimum=(X=0.5,Y=0),...)".
+	Policy.coerce_text = [TypeProvider](const rql::TypeDescriptor& Type, const std::string& Text, std::string& Reason)
+	{
+		return TypeProvider->ParseStructText(Type, Text, Reason);
+	};
+	Policy.before_write = [this, OwnerOf, ViewStateActor](const std::vector<rql::MutationRecord>& Records)
+	{
 		if (TransactionIndex == INDEX_NONE && GEditor)
 			TransactionIndex = GEditor->BeginTransaction(TEXT("UnrealMcp"), FText::FromString(TEXT("RQL mutation")), nullptr);
 		for (const rql::MutationRecord& Record : Records)
@@ -371,9 +405,9 @@ void FUnrealMcpRqlSession::AddGuide(const FString& Topic, const FString& Markdow
 	Guides.Add(TPair<FString, FString>(Topic, Markdown));
 }
 
-void FUnrealMcpRqlSession::AddBeforeWrite(FMutationHook Hook)
+void FUnrealMcpRqlSession::AddBatchValidator(FBatchValidator Validator)
 {
-	BeforeWriteHooks.Add(MoveTemp(Hook));
+	BatchValidators.Add(MoveTemp(Validator));
 }
 
 void FUnrealMcpRqlSession::AddCommitted(FMutationHook Hook)

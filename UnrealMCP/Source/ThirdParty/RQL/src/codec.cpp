@@ -33,6 +33,23 @@ bool is_core_stage(const std::string& op, StageKind* kind) {
     return false;
 }
 
+std::string group_by_problem(const std::vector<SelectField>& keys) {
+    auto upper = [](std::string s) {
+        for (auto& ch : s)
+            if (ch >= 'a' && ch <= 'z') ch = static_cast<char>(ch - 32);
+        return s;
+    };
+    std::vector<std::string> seen{"COUNT"};
+    for (auto& k : keys) {
+        std::string u = upper(k.name);
+        if (std::find(seen.begin(), seen.end(), u) != seen.end())
+            return u == "COUNT" ? "group-by key column 'count' clashes with the count column; name the key: group-by n=count"
+                                : "group-by key column '" + k.name + "' appears twice; name the keys: group-by a=..., b=...";
+        seen.push_back(u);
+    }
+    return "";
+}
+
 bool is_expression_op(const std::string& op) {
     for (auto* o : kExprOps)
         if (op == o) return true;
@@ -169,22 +186,23 @@ Json segment_json(const Segment& s) {
     return o;
 }
 
+Json fields_json(const std::vector<SelectField>& fields) {
+    Json a = Json::array();
+    for (auto& f : fields) {
+        Json fo = Json::object();
+        fo.set("name", f.name);
+        fo.set("expr", encode_expr(*f.expr));
+        a.push(std::move(fo));
+    }
+    return a;
+}
+
 Json stage_json(const Stage& s) {
     Json o = Json::object();
     o.set("op", s.op);
     switch (s.kind) {
         case StageKind::Where: o.set("pred", encode_expr(*s.expr)); break;
-        case StageKind::Select: {
-            Json a = Json::array();
-            for (auto& f : s.fields) {
-                Json fo = Json::object();
-                fo.set("name", f.name);
-                fo.set("expr", encode_expr(*f.expr));
-                a.push(std::move(fo));
-            }
-            o.set("fields", std::move(a));
-            break;
-        }
+        case StageKind::Select: o.set("fields", fields_json(s.fields)); break;
         case StageKind::Sort: {
             Json a = Json::array();
             for (auto& k : s.keys) {
@@ -205,9 +223,12 @@ Json stage_json(const Stage& s) {
         case StageKind::Min:
         case StageKind::Max:
         case StageKind::Avg:
-        case StageKind::GroupBy:
         case StageKind::Distinct:
             if (s.expr) o.set("expr", encode_expr(*s.expr));
+            break;
+        case StageKind::GroupBy:
+            if (s.expr) o.set("expr", encode_expr(*s.expr));
+            else o.set("fields", fields_json(s.fields));  // several / named keys (spec §5)
             break;
         case StageKind::Recurse:
             if (!s.via.empty()) o.set("via", expr_array(s.via));
@@ -393,6 +414,20 @@ bool read_true_flag(const Json& obj, const char* name, const std::string& ctx) {
     invalid(ctx + "." + name + " must be a boolean");
 }
 
+/// select fields / group-by keys: a non-empty array of {name, expr}.
+std::vector<SelectField> decode_fields(const Json& arr, const std::string& op) {
+    if (!arr.is_array() || arr.size() == 0) invalid(op + ".fields must be a non-empty array");
+    std::vector<SelectField> fields;
+    for (auto& f : arr.items()) {
+        if (!f.is_object()) invalid(op + " field must be an object");
+        allow_only(f, op + " field", {"name", "expr"});
+        const Json& name = required(f, "name", "field");
+        if (!name.is_string()) invalid("field.name must be a string");
+        fields.push_back({name.as_string(), decode_expr(required(f, "expr", "field"))});
+    }
+    return fields;
+}
+
 Stage read_stage(const Json& s) {
     if (!s.is_object()) invalid("stage must be an object");
     const Json& opEl = required(s, "op", "stage");
@@ -426,19 +461,10 @@ Stage read_stage(const Json& s) {
             allow_only(s, ctx, {"op", "pred"});
             st.expr = decode_expr(required(s, "pred", ctx));
             break;
-        case StageKind::Select: {
+        case StageKind::Select:
             allow_only(s, ctx, {"op", "fields"});
-            const Json& arr = required(s, "fields", ctx);
-            if (!arr.is_array() || arr.size() == 0) invalid("select.fields must be a non-empty array");
-            for (auto& f : arr.items()) {
-                if (!f.is_object()) invalid("select field must be an object");
-                allow_only(f, "select field", {"name", "expr"});
-                const Json& name = required(f, "name", "field");
-                if (!name.is_string()) invalid("field.name must be a string");
-                st.fields.push_back({name.as_string(), decode_expr(required(f, "expr", "field"))});
-            }
+            st.fields = decode_fields(required(s, "fields", ctx), op);
             break;
-        }
         case StageKind::Sort: {
             allow_only(s, ctx, {"op", "keys"});
             const Json& arr = required(s, "keys", ctx);
@@ -467,10 +493,23 @@ Stage read_stage(const Json& s) {
         case StageKind::Min:
         case StageKind::Max:
         case StageKind::Avg:
-        case StageKind::GroupBy:
             allow_only(s, ctx, {"op", "expr"});
             st.expr = decode_expr(required(s, "expr", ctx));
             break;
+        case StageKind::GroupBy: {
+            allow_only(s, ctx, {"op", "expr", "fields"});
+            const Json* gf = s.find("fields");
+            const Json* ge = s.find("expr");
+            if ((gf != nullptr) == (ge != nullptr)) invalid("group-by needs exactly one of 'expr' (one key) or 'fields' (named keys)");
+            if (ge) {
+                st.expr = decode_expr(*ge);
+                break;
+            }
+            st.fields = decode_fields(*gf, op);
+            std::string problem = group_by_problem(st.fields);
+            if (!problem.empty()) invalid(problem);
+            break;
+        }
         case StageKind::Distinct:
             allow_only(s, ctx, {"op", "expr"});
             if (const Json* de = s.find("expr")) st.expr = decode_expr(*de);

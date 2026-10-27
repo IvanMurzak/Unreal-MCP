@@ -70,8 +70,8 @@ struct Assignment { ExprPtr target; ExprPtr value; };  // target is a Path expr
 struct Stage {
     StageKind kind = StageKind::Where;
     std::string op;
-    ExprPtr expr;                       // where pred; get/sum/min/max/avg/group-by; distinct (optional)
-    std::vector<SelectField> fields;    // select
+    ExprPtr expr;                       // where pred; get/sum/min/max/avg; group-by with one key; distinct (optional)
+    std::vector<SelectField> fields;    // select; group-by with several / named keys (expr null)
     std::vector<SortKey> keys;          // sort
     int n = 0;                          // first / skip
     bool has_via = false;               // recurse: via present (even if empty)
@@ -96,6 +96,8 @@ struct QueryPlan {
 
 /// Core stage names (everything else must be namespaced: ns.stage).
 bool is_core_stage(const std::string& op, StageKind* kind = nullptr);
+/// Why these group-by keys cannot form columns (duplicate names case-insensitively, or a key named count), or "".
+std::string group_by_problem(const std::vector<SelectField>& keys);
 /// Expression operators of the plan schema.
 bool is_expression_op(const std::string& op);
 
