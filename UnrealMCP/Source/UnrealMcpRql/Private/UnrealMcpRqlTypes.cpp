@@ -1280,7 +1280,7 @@ std::optional<rql::Value> FUnrealMcpRqlTypes::ParseStructText(const rql::TypeDes
 					bKnown = It->GetName().Equals(Name, ESearchCase::IgnoreCase) || It->GetAuthoredName().Equals(Name, ESearchCase::IgnoreCase);
 				if (!bKnown)
 				{
-					OutReason = UnrealMcpRqlToStd(FString::Printf(TEXT("'%s' is not a %s in Unreal's text form (%s has no member '%s')"),
+					OutReason = UnrealMcpRqlToStd(FString::Printf(TEXT("'%s' is not Unreal's text form of %s (%s has no member '%s')"),
 						*Source, *Struct->GetName(), *Struct->GetName(), *Name));
 					return std::nullopt;
 				}
@@ -1303,7 +1303,7 @@ std::optional<rql::Value> FUnrealMcpRqlTypes::ParseStructText(const rql::TypeDes
 	{
 		const FString Why = !Errors.Text.IsEmpty() ? Errors.Text.TrimStartAndEnd()
 			: !End ? FString(TEXT("it does not parse")) : FString::Printf(TEXT("unexpected text after the closing parenthesis: %s"), *Rest);
-		OutReason = UnrealMcpRqlToStd(FString::Printf(TEXT("'%s' is not a %s in Unreal's text form (%s)"), *Source, *Struct->GetName(), *Why));
+		OutReason = UnrealMcpRqlToStd(FString::Printf(TEXT("'%s' is not Unreal's text form of %s (%s)"), *Source, *Struct->GetName(), *Why));
 		return std::nullopt;
 	}
 	Fill(&Type);

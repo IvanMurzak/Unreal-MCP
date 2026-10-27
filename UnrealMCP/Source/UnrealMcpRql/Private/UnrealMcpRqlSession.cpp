@@ -309,8 +309,10 @@ void FUnrealMcpRqlSession::ConfigureMutations()
 			if (bTwice)
 			{
 				const UObject* Object = TypeProvider->AsObject(Record.item);
+				const AActor* Actor = Cast<AActor>(Object);
+				const FString Name = Actor ? Actor->GetActorLabel() : Object ? Object->GetName() : FString(TEXT("one object"));
 				return UnrealMcpRqlToStd(FString::Printf(TEXT("%s would run twice on %s (it is in the stream more than once: "
-					"add | distinct before call)"), *UnrealMcpRqlFromStd(Record.method->name), Object ? *Object->GetName() : TEXT("one object")));
+					"add | distinct before call)"), *UnrealMcpRqlFromStd(Record.method->name), *Name));
 			}
 		}
 		for (const FBatchValidator& Validator : BatchValidators)
