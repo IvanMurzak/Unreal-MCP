@@ -3,7 +3,6 @@
 
 #include "UnrealMcpGameThreadDispatcher.h"
 #include "UnrealMcpLog.h"
-#include "Async/Async.h"
 #include "HAL/Event.h"
 #include "HAL/Runnable.h"
 #include "HAL/RunnableThread.h"
@@ -167,13 +166,21 @@ namespace
 			// Not ready (e.g. Python before its first tick). A ticker runs on a later frame, so the engine keeps
 			// ticking in between; the watchdog bounds the wait.
 			UE_LOG(LogUnrealMcp, Verbose, TEXT("[Unreal-MCP] tool call not ready, retrying: %s"), *Result.Message);
-			FTSTicker::GetCoreTicker().AddTicker(
-				FTickerDelegate::CreateLambda([Self = AsShared()](float)
-				{
-					Self->Run();
-					return false;
-				}),
-				0.1f);
+			Schedule(0.1f);
+		}
+
+		/**
+		 * Run on the main loop's core ticker (thread-safe to add to). A game-thread AsyncTask would run the body INSIDE
+		 * the task graph's game-thread queue, and a body that waits on game-thread tasks itself (an Interchange import
+		 * from python-execute, an asset compile) then trips the task graph's recursion guard and crashes the editor.
+		 */
+		void Schedule(float Delay = 0.f)
+		{
+			FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda([Self = AsShared()](float)
+			{
+				Self->Run();
+				return false;
+			}), Delay);
 		}
 	};
 }
@@ -201,13 +208,6 @@ TFuture<FUnrealMcpToolResult> FUnrealMcpGameThreadDispatcher::Dispatch(
 
 	// Arm the deadline before posting so a body that finishes instantly is simply pruned by the watchdog.
 	FUnrealMcpDispatchWatchdog::Get().Watch(State, CancelFlag, TimeoutMs);
-	// The core ticker (thread-safe to add to) runs the body from the main loop. A game-thread AsyncTask would run it
-	// INSIDE the task graph's game-thread queue, and a body that waits on game-thread tasks itself (an Interchange
-	// import from python-execute, an asset compile) then trips the task graph's recursion guard and crashes the editor.
-	FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda([Job](float)
-	{
-		Job->Run();
-		return false;
-	}));
+	Job->Schedule();
 	return Future;
 }
