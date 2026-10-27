@@ -9,6 +9,7 @@
 #include "UnrealMcpRqlEditorApi.generated.h"
 
 class AActor;
+class AVolume;
 class ULevel;
 class UDataTable;
 class UMaterialInstanceConstant;
@@ -118,3 +119,6 @@ public:
 
 /** Why AttachToActor left @p Actor unattached from @p Parent, as an agent-facing ": reason" suffix ("" when unknown). */
 FString UnrealMcpRqlAttachFailure(const AActor* Actor, const AActor* Parent);
+
+/** Give @p Volume a box brush of @p HalfExtent (cm, local space), replacing its brush; undoable inside a transaction. */
+void UnrealMcpRqlBuildVolumeBox(AVolume* Volume, const FVector& HalfExtent);

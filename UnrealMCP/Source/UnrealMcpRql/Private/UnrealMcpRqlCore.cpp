@@ -20,23 +20,19 @@
 #include "EditorLevelUtils.h"
 #include "Engine/Blueprint.h"
 #include "Engine/Level.h"
+#include "Engine/Polys.h"
 #include "Engine/SimpleConstructionScript.h"
 #include "Engine/Texture.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
-#include "ActorFactories/ActorFactory.h"
-#include "Builders/CubeBuilder.h"
-#include "Components/BrushComponent.h"
-#include "Engine/Polys.h"
 #include "GameFramework/Actor.h"
 #include "GameFramework/Volume.h"
-#include "Model.h"
-#include "UObject/GCObjectScopeGuard.h"
 #include "Layers/LayersSubsystem.h"
 #include "MaterialEditingLibrary.h"
 #include "Materials/MaterialInstanceConstant.h"
 #include "Materials/MaterialInterface.h"
 #include "Misc/PackageName.h"
+#include "Model.h"
 #include "Modules/ModuleManager.h"
 #include "PlayInEditorDataTypes.h"
 #include "Selection.h"
@@ -68,6 +64,7 @@ namespace UnrealMcpRqlCoreLocal
 
 	const rql::TypeDescriptor* StringType() { return rql::builtin::string_type(); }
 	const rql::TypeDescriptor* BoolType() { return rql::builtin::bool_type(); }
+	const rql::TypeDescriptor* IntType() { return rql::builtin::number_of<int32>(); }
 
 	FString ShortPackageName(const UObject* Object)
 	{
@@ -629,15 +626,7 @@ namespace UnrealMcpRqlCoreLocal
 				const FVector Extent = StructArg<FVector>(*Types, Value);
 				if (!(Extent.X > 0.0 && Extent.Y > 0.0 && Extent.Z > 0.0))
 					Throw(TEXT("every half-size of BrushExtent must be > 0, e.g. \"(1000, 1000, 500)\""));
-				// Rebuilt as the editor's box brush (what the Brush Settings' Cube builder makes), centred on the actor.
-				UCubeBuilder* Builder = NewObject<UCubeBuilder>();
-				FGCObjectScopeGuard BuilderGuard(Builder);
-				Builder->X = static_cast<float>(2.0 * Extent.X);
-				Builder->Y = static_cast<float>(2.0 * Extent.Y);
-				Builder->Z = static_cast<float>(2.0 * Extent.Z);
-				if (UBrushComponent* Component = Volume->GetBrushComponent())
-					Component->Modify();
-				UActorFactory::CreateBrushForVolumeActor(Volume, Builder);
+				UnrealMcpRqlBuildVolumeBox(Volume, Extent);
 			},
 			"half-size of the volume's box brush in local space, cm (null = no brush: the volume has no shape); assigning rebuilds "
 			"it as a box of that half-size (Scale still multiplies it; undoable)", false, true));
@@ -752,41 +741,41 @@ namespace UnrealMcpRqlCoreLocal
 	}
 
 	/**
-	 * Queue indices of the undoable (@p bRedo false: newest first) or redoable (true: next redo first) transactions. The
-	 * queue holds the done ones, then the GetUndoCount() undone ones at its end; an undo barrier stops undo before it.
+	 * The undoable (@p bRedo false) or redoable (true) transactions as queue indices [First, End). The queue holds the done
+	 * ones, then the GetUndoCount() undone ones at its end; an undo barrier stops undo before it. Empty without an editor.
 	 */
-	TArray<int32> UndoRange(bool bRedo)
+	void UndoBounds(const UTransactor* Trans, bool bRedo, int32& First, int32& End)
 	{
-		TArray<int32> Indices;
-		const UTransactor* Trans = GEditor ? GEditor->Trans.Get() : nullptr;
+		First = End = 0;
 		if (!Trans)
-			return Indices;
-		const int32 Length = Trans->GetQueueLength();
-		const int32 Done = Length - Trans->GetUndoCount();
-		if (bRedo)
-		{
-			for (int32 Index = Done; Index < Length; ++Index)
-				Indices.Add(Index);
-		}
-		else
-		{
-			const int32 First = FMath::Max(0, Trans->GetCurrentUndoBarrier());
-			for (int32 Index = Done - 1; Index >= First; --Index)
-				Indices.Add(Index);
-		}
-		return Indices;
+			return;
+		const int32 Done = Trans->GetQueueLength() - Trans->GetUndoCount();
+		First = bRedo ? Done : FMath::Clamp(Trans->GetCurrentUndoBarrier(), 0, Done);
+		End = bRedo ? Trans->GetQueueLength() : Done;
 	}
 
-	/** The titles of UndoRange(@p bRedo), at most @p Limit. */
+	const UTransactor* Transactor()
+	{
+		return GEditor ? GEditor->Trans.Get() : nullptr;
+	}
+
+	int32 UndoSteps(bool bRedo)
+	{
+		int32 First, End;
+		UndoBounds(Transactor(), bRedo, First, End);
+		return End - First;
+	}
+
+	/** The titles of the undoable (newest first) or redoable (next redo first) transactions, at most @p Limit. */
 	TArray<FString> UndoTitles(bool bRedo, int32 Limit = 100)
 	{
+		const UTransactor* Trans = Transactor();
+		int32 First, End;
+		UndoBounds(Trans, bRedo, First, End);
 		TArray<FString> Titles;
-		const UTransactor* Trans = GEditor ? GEditor->Trans.Get() : nullptr;
-		for (const int32 Index : UndoRange(bRedo))
+		for (int32 Step = 0; Step < End - First && Titles.Num() < Limit; ++Step)
 		{
-			if (Titles.Num() >= Limit)
-				break;
-			const FTransaction* Transaction = Trans->GetTransaction(Index);
+			const FTransaction* Transaction = Trans->GetTransaction(bRedo ? First + Step : End - 1 - Step);
 			Titles.Add(Transaction ? Transaction->GetTitle().ToString() : FString());
 		}
 		return Titles;
@@ -849,17 +838,16 @@ namespace UnrealMcpRqlCoreLocal
 			}, "the level new actors spawn into", false, true));
 		// The editor's transaction buffer (Edit > Undo History), so an agent can tell what Ctrl+Z / Ctrl+Y would revert.
 		const rql::TypeDescriptor* Titles = T.Registry().list_type(StringType(), false);
-		const rql::TypeDescriptor* IntType = rql::builtin::number_of<int32>();
 		FUnrealMcpRqlTypes::SetMember(D, Member("UndoHistory", Titles,
 			[](void*) { return StrList(UndoTitles(/*bRedo*/ false)); }, {},
 			"titles of the transactions Undo would revert, the next one first (RQL mutations are \"RQL: <query>\"); at most 100"));
 		FUnrealMcpRqlTypes::SetMember(D, Member("RedoHistory", Titles,
 			[](void*) { return StrList(UndoTitles(/*bRedo*/ true)); }, {},
 			"titles of the undone transactions Redo would restore, the next one first; at most 100"));
-		FUnrealMcpRqlTypes::SetMember(D, Member("UndoCount", IntType,
-			[](void*) { return rql::Value::number(UndoRange(/*bRedo*/ false).Num()); }, {}, "how many steps can be undone"));
-		FUnrealMcpRqlTypes::SetMember(D, Member("RedoCount", IntType,
-			[](void*) { return rql::Value::number(UndoRange(/*bRedo*/ true).Num()); }, {}, "how many undone steps can be redone"));
+		FUnrealMcpRqlTypes::SetMember(D, Member("UndoCount", IntType(),
+			[](void*) { return rql::Value::number(UndoSteps(/*bRedo*/ false)); }, {}, "how many steps can be undone"));
+		FUnrealMcpRqlTypes::SetMember(D, Member("RedoCount", IntType(),
+			[](void*) { return rql::Value::number(UndoSteps(/*bRedo*/ true)); }, {}, "how many undone steps can be redone"));
 		FUnrealMcpRqlTypes::SetMember(D, Member("NextUndo", StringType(),
 			[](void*) { const TArray<FString> Next = UndoTitles(/*bRedo*/ false, 1); return Next.Num() ? Str(Next[0]) : rql::Value::null(); }, {},
 			"title of the transaction Undo reverts next (null = nothing to undo)", false, true));
