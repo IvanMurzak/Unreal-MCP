@@ -375,12 +375,10 @@ ULevel* UUnrealMcpRqlEditorApi::AddSublevel(const FString& Path, const FString& 
 	for (ULevel* Loaded : World->GetLevels())
 		if (Loaded && Loaded->GetOutermost()->GetName() == Package)
 			return Failed<ULevel*>(FString::Printf(TEXT("'%s' is already loaded in this world"), *Package));
-	UClass* StreamingClass = nullptr;
-	if (Streaming.TrimStartAndEnd().Equals(TEXT("Dynamic"), ESearchCase::IgnoreCase) || Streaming.TrimStartAndEnd().IsEmpty())
-		StreamingClass = ULevelStreamingDynamic::StaticClass();
-	else if (Streaming.TrimStartAndEnd().Equals(TEXT("AlwaysLoaded"), ESearchCase::IgnoreCase))
-		StreamingClass = ULevelStreamingAlwaysLoaded::StaticClass();
-	else
+	const FString Kind = Streaming.TrimStartAndEnd();
+	UClass* StreamingClass = Kind.IsEmpty() || Kind.Equals(TEXT("Dynamic"), ESearchCase::IgnoreCase) ? ULevelStreamingDynamic::StaticClass()
+		: Kind.Equals(TEXT("AlwaysLoaded"), ESearchCase::IgnoreCase) ? ULevelStreamingAlwaysLoaded::StaticClass() : nullptr;
+	if (!StreamingClass)
 		return Failed<ULevel*>(FString::Printf(TEXT("unknown streaming '%s' (Dynamic or AlwaysLoaded)"), *Streaming));
 	ULevelStreaming* Added = UEditorLevelUtils::AddLevelToWorld(World, *Package, StreamingClass);
 	ULevel* Level = Added ? Added->GetLoadedLevel() : nullptr;
