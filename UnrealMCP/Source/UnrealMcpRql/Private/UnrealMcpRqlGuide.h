@@ -136,9 +136,10 @@ Widgets and sequences:
 	inline const char* MutateOutro()
 	{
 		return "Object literals build values: set Settings = {Speed: 2}. At most 200 targets per call by default: pass max_targets "
-			"(up to 1000) for a bigger edit, it stays one all-or-nothing undo step; beyond 1000 split it with first N / skip N. A member "
-			"no target has (a typo) is an error and changes nothing; a member that only other classes of the stream have is a no-match "
-			"(0 changes, warning).";
+			"(up to 1000) for a bigger edit, it stays one all-or-nothing undo step; beyond 1000 split it with first N / skip N. A misspelt "
+			"member in where / get that leaves set / call nothing to change is an error (nothing changed); a real member no remaining "
+			"item has is a no-match (0 changes, warning). Filter before setting a member only some classes have: where $ is "
+			"LightComponentBase (or has(Intensity)) | set Intensity = ...";
 	}
 
 	inline const char* SchemaDescription()

@@ -860,7 +860,7 @@ void FUnrealMcpRqlSpec::Define()
 	// Rql.Parser 0.3.0-dev.7dd3b29.
 	Describe("target limit, conditional and typos in mutations", [this]()
 	{
-		It("changes 200 targets by default, more with max_targets, never more than 1000", [this]()
+		It("accepts 200 targets by default, refuses 300 until max_targets raises it, never more than 1000", [this]()
 		{
 			UWorld* W = World();
 			if (!TestNotNull(TEXT("editor world"), W))
@@ -896,13 +896,21 @@ void FUnrealMcpRqlSpec::Define()
 			const FString Hints = UnrealMcpRqlSpecHelpers::Hints(OverDefault);
 			TestTrue(*FString::Printf(TEXT("the hint raises max_targets (%s)"), *Hints), Hints.Contains(TEXT("max_targets = 300")));
 			TestFalse(*FString::Printf(TEXT("no budgets advice (%s)"), *Hints), Hints.Contains(TEXT("budgets")));
+			auto HiddenA = []()
+			{
+				int32 Hidden = 0;
+				for (AActor* Actor : Lamps())
+					Hidden += Actor->GetActorLabel().StartsWith(TEXT("RqlSpecLampManyA")) && Actor->IsTemporarilyHiddenInEditor() ? 1 : 0;
+				return Hidden;
+			};
+			TestEqual(TEXT("refused: nothing hidden"), HiddenA(), 0);
+
+			const TSharedPtr<FJsonObject> AtDefault = Mutate(/* actors | where Label starts-with "RqlSpecLampManyA" | first 200 | set HiddenInEditor = true */ TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"starts-with","args":[{"path":["Label"]},{"lit":"RqlSpecLampManyA"}]}},{"op":"first","n":200},{"op":"set","assign":[{"target":{"path":["HiddenInEditor"]},"value":{"lit":true}}]}]})RQL"), 0, /*bDryRun*/ true);
+			TestTrue(*FString::Printf(TEXT("200 pass the default (%s)"), *Codes(AtDefault)), IsOk(AtDefault));
 
 			const TSharedPtr<FJsonObject> Raised = Mutate(HideA, 300, /*bDryRun*/ false);
 			TestTrue(*FString::Printf(TEXT("max_targets = 300 changes all (%s)"), *Codes(Raised)), IsOk(Raised));
-			int32 Hidden = 0;
-			for (AActor* Actor : Lamps())
-				Hidden += Actor->GetActorLabel().StartsWith(TEXT("RqlSpecLampManyA")) && Actor->IsTemporarilyHiddenInEditor() ? 1 : 0;
-			TestEqual(TEXT("300 hidden"), Hidden, 300);
+			TestEqual(TEXT("300 hidden"), HiddenA(), 300);
 
 			const TSharedPtr<FJsonObject> OverCeiling = Mutate(HideAll, 5000, /*bDryRun*/ true);
 			TestTrue(*FString::Printf(TEXT("1001 > the ceiling 1000 (%s)"), *Codes(OverCeiling)),
@@ -922,11 +930,10 @@ void FUnrealMcpRqlSpec::Define()
 
 		It("fails a mutation emptied by a typo and keeps a polymorphic no-match ok", [this]()
 		{
-			SpawnLamp();
 			if (!TestTrue(TEXT("mesh actor"), SpawnMesh()))
 				return;
 
-			const TSharedPtr<FJsonObject> Typo = Exec(/* actors | where Label == "RqlSpecLamp" | get RootComponnt | set Mobility = "Movable" */ TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"RqlSpecLamp"}]}},{"op":"get","expr":{"path":["RootComponnt"]}},{"op":"set","assign":[{"target":{"path":["Mobility"]},"value":{"lit":"Movable"}}]}]})RQL"), true);
+			const TSharedPtr<FJsonObject> Typo = Exec(/* actors | where Label == "RqlSpecLampMesh" | get RootComponnt | set Mobility = "Movable" */ TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"RqlSpecLampMesh"}]}},{"op":"get","expr":{"path":["RootComponnt"]}},{"op":"set","assign":[{"target":{"path":["Mobility"]},"value":{"lit":"Movable"}}]}]})RQL"), true);
 			TestFalse(TEXT("a typo fails"), IsOk(Typo));
 			TestTrue(*FString::Printf(TEXT("unknown-member error (%s)"), *Codes(Typo)), Codes(Typo).Contains(TEXT("unknown-member")) && Codes(Typo).Contains(TEXT("nothing was changed")));
 
@@ -938,6 +945,11 @@ void FUnrealMcpRqlSpec::Define()
 			const TSharedPtr<FJsonObject> NoMatch = Exec(/* actors | where Label == "RqlSpecLampMesh" | get Components | where Intensity > 0 | set Intensity = 5 */ TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"RqlSpecLampMesh"}]}},{"op":"get","expr":{"path":["Components"]}},{"op":"where","pred":{"op":">","args":[{"path":["Intensity"]},{"lit":0}]}},{"op":"set","assign":[{"target":{"path":["Intensity"]},"value":{"lit":5}}]}]})RQL"), true);
 			TestTrue(*FString::Printf(TEXT("polymorphic no-match stays ok (%s)"), *Codes(NoMatch)), IsOk(NoMatch));
 			TestEqual(TEXT("nothing changed"), RowCount(NoMatch), 0);
+
+			// ReadOnlyValue / Small are members of the spec fixture class only, which no source reaches: only the host hook
+			// knows the name, so this case fails without is_known_member.
+			const TSharedPtr<FJsonObject> HostKnown = Exec(/* actors | where Label == "RqlSpecLampMesh" | get Components | where ReadOnlyValue > 0 | set Small = 1 */ TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"RqlSpecLampMesh"}]}},{"op":"get","expr":{"path":["Components"]}},{"op":"where","pred":{"op":">","args":[{"path":["ReadOnlyValue"]},{"lit":0}]}},{"op":"set","assign":[{"target":{"path":["Small"]},"value":{"lit":1}}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("a member only the host knows stays a no-match (%s)"), *Codes(HostKnown)), IsOk(HostKnown));
 		});
 
 		It("names rql-schema in the no-match hint", [this]()

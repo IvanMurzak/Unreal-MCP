@@ -69,9 +69,10 @@ public:
 	const rql::TypeDescriptor* FindByName(const FString& Name);
 	/**
 	 * Whether some type has a member of this name (case-insensitive): a property of any loaded class or struct that the fill
-	 * would expose (component and actor classes, Blueprint classes, ...) or a member of a descriptor this session filled (hook members
-	 * such as Label or Scalars). RQL's Engine::is_known_member: a mutation whose items all lack such a name is a
-	 * polymorphic no-match (ok, nothing changed), not a typo. Builds no descriptor; answers are cached per session.
+	 * would expose (component and actor classes, Blueprint classes, user-defined struct fields by their authored name) or a
+	 * member a descriptor gets from its hooks (hook members
+	 * such as Label or Scalars; the hooked types are filled to find them). RQL's Engine::is_known_member: a mutation that a
+	 * read of such a name emptied is a polymorphic no-match (ok, nothing changed), not a typo. Answers are cached per session.
 	 */
 	bool IsKnownMemberName(const FString& Name);
 

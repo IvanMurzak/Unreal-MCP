@@ -27,6 +27,11 @@
 #include "UObject/TextProperty.h"
 #include "UObject/UObjectGlobals.h"
 #include "UObject/UObjectIterator.h"
+#if __has_include("StructUtils/UserDefinedStruct.h")
+#include "StructUtils/UserDefinedStruct.h" // moved from Engine/ to CoreUObject in UE 5.8
+#else
+#include "Engine/UserDefinedStruct.h"
+#endif
 #include "UObject/StructOnScope.h"
 #include "UObject/UObjectArray.h"
 #include "UObject/UnrealType.h"
@@ -637,26 +642,52 @@ bool FUnrealMcpRqlTypes::IsKnownMemberName(const FString& Name)
 				return true;
 		}
 		// The properties FillClass / FillStruct would make members, on every loaded class and struct. FName lookup ignores
-		// case, and a name no FName was ever made of is no property, so a typo costs one name-table lookup.
+		// case, and a name no FName was ever made of is no property of a native type (a typo costs one name-table lookup).
 		const FName Wanted(*Name, FNAME_Find);
-		if (Wanted.IsNone())
-			return false;
-		for (TObjectIterator<UClass> It; It; ++It)
+		if (!Wanted.IsNone())
 		{
-			const TMap<FName, bool>* Forced = Exposed.Find(*It);
-			for (TFieldIterator<FProperty> Property(*It, EFieldIteratorFlags::ExcludeSuper); Property; ++Property)
+			for (TObjectIterator<UClass> It; It; ++It)
 			{
-				if (Property->GetFName() == Wanted && (IsExposedOnClass(*Property) || (Forced && Forced->Contains(Wanted))))
-					return true;
+				const TMap<FName, bool>* Forced = Exposed.Find(*It);
+				for (TFieldIterator<FProperty> Property(*It, EFieldIteratorFlags::ExcludeSuper); Property; ++Property)
+				{
+					if (Property->GetFName() == Wanted && (IsExposedOnClass(*Property) || (Forced && Forced->Contains(Wanted))))
+						return true;
+				}
 			}
 		}
 		for (TObjectIterator<UScriptStruct> It; It; ++It)
 		{
+			// User-defined struct fields are members under their authored name (Health), not their FName (Health_12_3F9A...).
+			const bool bUserDefined = It->IsA<UUserDefinedStruct>();
+			if (Wanted.IsNone() && !bUserDefined)
+				continue;
 			for (TFieldIterator<FProperty> Property(*It, EFieldIteratorFlags::ExcludeSuper); Property; ++Property)
 			{
-				if (Property->GetFName() == Wanted && !Property->HasAnyPropertyFlags(CPF_Deprecated))
+				const bool bNamed = bUserDefined ? Property->GetAuthoredName().Equals(Name, ESearchCase::IgnoreCase) : Property->GetFName() == Wanted;
+				if (bNamed && !Property->HasAnyPropertyFlags(CPF_Deprecated))
 					return true;
 			}
+		}
+		// Members only class / struct hooks add (Scalars on materials, Blueprint graphs, extension members), on types this
+		// session has not filled yet. The engine asks while it reports diagnostics, after the streams ran, so filling is safe.
+		TArray<UClass*> HookedClasses;
+		Hooks.GetKeys(HookedClasses);
+		for (UClass* Class : HookedClasses)
+		{
+			const rql::TypeDescriptor* Descriptor = ForClass(Class);
+			Fill(Descriptor);
+			if (Descriptor && Descriptor->find(Member))
+				return true;
+		}
+		TArray<UScriptStruct*> HookedStructs;
+		StructHooks.GetKeys(HookedStructs);
+		for (UScriptStruct* Struct : HookedStructs)
+		{
+			const rql::TypeDescriptor* Descriptor = ForStruct(Struct);
+			Fill(Descriptor);
+			if (Descriptor && Descriptor->find(Member))
+				return true;
 		}
 		return false;
 	};

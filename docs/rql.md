@@ -110,12 +110,15 @@ agent ──query text──▶ unreal-mcp-bridge (sidecar, .NET)          Unrea
 - **Target limit**: `rql-mutate` changes at most 200 targets per call by default (a mutation is one undo step whatever its
   size, RQL spec §8); its `max_targets` argument raises the limit for one call up to the ceiling of 1000
   (`MutationPolicy::limit_argument`, mapped to `Budgets::max_mutation_targets`). Over the limit nothing changes and
-  `mutation-limit` names the match count and `max_targets`.
-- **Typos in mutations**: when no item reaches `set` / `call` because a member read missed on every item and no type
-  declares the name, the `unknown-member` warning is an error (`ok=false`, nothing changed). Streams are polymorphic
-  (`actors | get Components`), so the session's `Engine::is_known_member` accepts the property names of every loaded
-  class and struct (and the members it built): `get Components | set Intensity = …` over actors without lights stays a
-  no-match (ok, 0 changes) while `get RootComponnt | set …` fails.
+  `mutation-limit` names the match count (or "more than 1000") and, while the limit is below 1000, `max_targets`;
+  at the ceiling it suggests `first N` / `skip N` batches.
+- **Typos in mutations**: when no item reaches `set` / `call` because a member read (`where` / `get`) missed on every
+  item and no type declares the name, the `unknown-member` warning is an error (`ok=false`, nothing changed). Streams
+  are polymorphic (`actors | get Components`), so the session's `Engine::is_known_member` accepts the exposed property
+  names of every loaded class and struct (user-defined struct fields by authored name) and the members hooks add:
+  `get Components | where Intensity > 0 | set Intensity = …` over actors without lights stays a no-match (ok, 0
+  changes) while `get RootComponnt | set …` fails. A `set` that reaches targets lacking the member is still an
+  `unknown-member` error: filter first (`where $ is LightComponentBase`).
 - **Enums** read as entry names and accept the entry name, the editor's display name (`UMETA(DisplayName)`, RQL enum
   aliases; one that spells another entry's name is skipped), `Type::Name` or the number.
 - **Function sources**: RQL text lets a host function start a query (`unreal.assets("Material") | …`, also with a member
