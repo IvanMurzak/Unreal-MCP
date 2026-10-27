@@ -120,7 +120,7 @@ void FUnrealAIEnhancedInputSpec::Define()
 			if (Mappings.IsValid())
 				FJsonSerializer::Serialize(Mappings.ToSharedRef(), TJsonWriterFactory<>::Create(&Text));
 			TestTrue(TEXT("the mapping is listed"), Text.Contains(TEXT("SpaceBar")));
-			// unreal.asset("<context>") | select Mappings — the reflected array is deprecated (empty) since 5.6: it reads the live mappings
+			// unreal.asset("<context>") | select Mappings — the live mappings on every version (since 5.7 the reflected array is deprecated and empty)
 			TSharedPtr<FJsonObject> Reflected;
 			TestTrue(TEXT("Mappings read"), UnrealMcpRqlTools::RunPlan(FString::Printf(TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"%s"}]},"stages":[{"op":"select","fields":[{"name":"Mappings","expr":{"path":["Mappings"]}}]}]})RQL"), *ContextPath), false, &Reflected));
 			FString ReflectedText;
