@@ -18,7 +18,7 @@ connect/disconnect/orphan-safety — in `UnrealMcpEditorTests/`).
   §12.8 security gates (kill switch, loopback-host policy), the §12.6 editor↔runtime
   world-resolver swap, connect/disconnect lifecycle + orphan-safety (`Disconnect` is a clean
   no-op when never connected; a rejected `Connect` orphans nothing; `Get(nullptr)` is null),
-  the runtime-vs-editor tool-manifest separation (the runtime registry is exactly `{ping}`, editor-only tools
+  the runtime-vs-editor tool-manifest separation (the runtime's built-in registry is exactly `{ping}`, editor-only tools
   absent), and the sidecar binary resolver (RID mapping, bundled-path composition,
   `UNREAL_MCP_BRIDGE_PATH` override, graceful-degrade). The bridge xUnit
   `ConnectionConfigTests.AbsentFields_PreserveEnvFallback` proves the
@@ -153,7 +153,7 @@ the self-hosted Windows runner, not a per-PR gate**:
 
 - **Per-PR CI** runs the deterministic gates only: the bridge xUnit suite (incl. the
   env-fallback test), the cli suite, and — when `UNREAL_RUNNER_READY=true` — the self-hosted
-  `plugin BuildPlugin + Automation (UE 5.7)` job, which runs the runtime Automation specs
+  `plugin BuildPlugin + Automation` jobs (UE 5.5–5.8), which run the runtime Automation specs
   (security gates, resolver swap, connect/disconnect/orphan-safety, manifest separation,
   sidecar resolver). These need no running server and no packaged game.
 - **The live packaged / PIE round-trips in this runbook are operator / nightly steps.** They

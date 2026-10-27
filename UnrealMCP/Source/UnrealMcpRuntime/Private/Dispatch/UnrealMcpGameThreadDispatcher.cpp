@@ -4,12 +4,12 @@
 #include "UnrealMcpGameThreadDispatcher.h"
 #include "UnrealMcpLog.h"
 #include "HAL/Event.h"
+#include "HAL/PlatformProcess.h"
 #include "HAL/PlatformTime.h"
 #include "HAL/Runnable.h"
 #include "HAL/RunnableThread.h"
 #include "Misc/CoreDelegates.h"
 #include "Misc/ScopeLock.h"
-#include "Containers/Ticker.h"
 
 #include <atomic>
 
