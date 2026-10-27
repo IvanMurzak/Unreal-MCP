@@ -270,8 +270,6 @@ void FUnrealMcpRqlSession::ConfigureMutations()
 	{
 		return ViewStateActor(Record) ? nullptr : WrittenObject(Record);
 	};
-	// One editor transaction per mutation (one Ctrl+Z step): owners are snapshotted before the first write. Objects the
-	// calls create with RF_Transactional (SpawnActor, AddComponent, ...) are recorded into the same transaction.
 	auto IsWritableTemplate = [this](const UObject* Object)
 	{
 		for (const TFunction<bool(const UObject*)>& Predicate : WritableTemplates)
@@ -305,7 +303,7 @@ void FUnrealMcpRqlSession::ConfigureMutations()
 			if (!Record.method || !Record.item.is_object() || !Record.item.ptr())
 				continue;
 			bool bTwice = false;
-			Called.Add(TPair<const void*, const rql::MethodDescriptor*>(Record.item.ptr(), Record.method), &bTwice);
+			Called.Add({ Record.item.ptr(), Record.method }, &bTwice);
 			if (bTwice)
 			{
 				const UObject* Object = TypeProvider->AsObject(Record.item);
@@ -328,6 +326,8 @@ void FUnrealMcpRqlSession::ConfigureMutations()
 	{
 		return TypeProvider->ParseStructText(Type, Text, Reason);
 	};
+	// One editor transaction per mutation (one Ctrl+Z step): owners are snapshotted before the first write. Objects the
+	// calls create with RF_Transactional (SpawnActor, AddComponent, ...) are recorded into the same transaction.
 	Policy.before_write = [this, OwnerOf, ViewStateActor](const std::vector<rql::MutationRecord>& Records)
 	{
 		if (TransactionIndex == INDEX_NONE && GEditor)

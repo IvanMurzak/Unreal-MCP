@@ -697,16 +697,17 @@ void FUnrealMcpRqlSpec::Define()
 			for (AActor* Lamp : Lamps())
 			{
 				// A, B, C in label order (spawned A, C, B): $index is the position in the sorted stream entering set.
-				const double Expected = 100.0 * (Lamp->GetActorLabel()[Lamp->GetActorLabel().Len() - 1] - TEXT('A'));
-				TestEqual(*FString::Printf(TEXT("%s X"), *Lamp->GetActorLabel()), Lamp->GetActorLocation().X, Expected);
+				const FString Label = Lamp->GetActorLabel();
+				TestEqual(*FString::Printf(TEXT("%s X"), *Label), Lamp->GetActorLocation().X, 100.0 * (Label[Label.Len() - 1] - TEXT('A')));
 			}
 
 			const TSharedPtr<FJsonObject> Groups = Exec(/* actors | where Label starts-with "RqlSpecLamp" | group-by $type, far=(Location.X > 50) */ TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"starts-with","args":[{"path":["Label"]},{"lit":"RqlSpecLamp"}]}},{"op":"group-by","fields":[{"name":"$type","expr":{"path":[{"meta":"type"}]}},{"name":"far","expr":{"op":">","args":[{"path":["Location","X"]},{"lit":50}]}}]}]})RQL"));
 			TestTrue(*FString::Printf(TEXT("group-by ok (%s)"), *Codes(Groups)), IsOk(Groups));
 			TArray<FString> Columns;
-			if (Groups.IsValid() && Groups->HasTypedField<EJson::Array>(TEXT("columns")))
+			const TArray<TSharedPtr<FJsonValue>>* ColumnValues = nullptr;
+			if (Groups.IsValid() && Groups->TryGetArrayField(TEXT("columns"), ColumnValues))
 			{
-				for (const TSharedPtr<FJsonValue>& Column : Groups->GetArrayField(TEXT("columns")))
+				for (const TSharedPtr<FJsonValue>& Column : *ColumnValues)
 					Columns.Add(Column->AsString());
 			}
 			TestEqual(TEXT("one column per key, then count"), FString::Join(Columns, TEXT(",")), FString(TEXT("$type,far,count")));
@@ -753,31 +754,18 @@ void FUnrealMcpRqlSpec::Define()
 
 		It("hints without budgets.* and names unreal.find for a ref given a name", [this]()
 		{
-			auto Hints = [](const TSharedPtr<FJsonObject>& Result)
-			{
-				TArray<FString> Out;
-				const TArray<TSharedPtr<FJsonValue>>* Diagnostics = nullptr;
-				if (Result.IsValid() && Result->TryGetArrayField(TEXT("diagnostics"), Diagnostics))
-				{
-					for (const TSharedPtr<FJsonValue>& Diagnostic : *Diagnostics)
-					{
-						FString Hint;
-						if (Diagnostic->AsObject()->TryGetStringField(TEXT("hint"), Hint))
-							Out.Add(Hint);
-					}
-				}
-				return FString::Join(Out, TEXT("; "));
-			};
 			// More than 20 objects reach set (the limit is checked as targets arrive, before members are resolved).
 			const TSharedPtr<FJsonObject> Limit = Exec(/* unreal.assets("Material", "/Engine") | set Name = "x" */ TEXT(R"RQL({"rql":"0.1","source":{"call":"assets","on":{"path":["unreal"]},"args":[{"lit":"Material"},{"lit":"/Engine"}]},"stages":[{"op":"set","assign":[{"target":{"path":["Name"]},"value":{"lit":"x"}}]}]})RQL"), true, true);
 			TestTrue(*FString::Printf(TEXT("mutation-limit (%s)"), *Codes(Limit)), Codes(Limit).Contains(TEXT("mutation-limit")));
-			TestTrue(*FString::Printf(TEXT("suggests batches (%s)"), *Hints(Limit)), Hints(Limit).Contains(TEXT("first 20")));
-			TestFalse(*FString::Printf(TEXT("no budgets advice (%s)"), *Hints(Limit)), Hints(Limit).Contains(TEXT("budgets")));
+			const FString LimitHints = UnrealMcpRqlSpecHelpers::Hints(Limit);
+			TestTrue(*FString::Printf(TEXT("suggests batches (%s)"), *LimitHints), LimitHints.Contains(TEXT("first 20")));
+			TestFalse(*FString::Printf(TEXT("no budgets advice (%s)"), *LimitHints), LimitHints.Contains(TEXT("budgets")));
 
 			SpawnLamp();
 			const TSharedPtr<FJsonObject> ByName = Exec(/* ref("RqlSpecLamp") | select Label */ TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"RqlSpecLamp"}]},"stages":[{"op":"select","fields":[{"name":"Label","expr":{"path":["Label"]}}]}]})RQL"));
 			TestFalse(TEXT("a name is not a ref"), IsOk(ByName));
-			TestTrue(*FString::Printf(TEXT("the hint names the finder (%s)"), *Hints(ByName)), Hints(ByName).Contains(TEXT("unreal.find(")));
+			const FString ByNameHints = UnrealMcpRqlSpecHelpers::Hints(ByName);
+			TestTrue(*FString::Printf(TEXT("the hint names the finder (%s)"), *ByNameHints), ByNameHints.Contains(TEXT("unreal.find(")));
 		});
 	});
 

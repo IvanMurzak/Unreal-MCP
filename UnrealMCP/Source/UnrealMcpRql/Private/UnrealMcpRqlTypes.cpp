@@ -1241,6 +1241,47 @@ void FUnrealMcpRqlTypes::CoerceStruct(UScriptStruct* Struct, const rql::Value& V
 	ThrowMismatch(*FString::Printf(TEXT("a %s"), *Struct->GetName()), Value);
 }
 
+/**
+ * The first top-level "Name=" of a "(...)" text form that names no member of @p Struct (C++ or authored name), or "":
+ * ImportText skips a member it does not know without a word, so ParseStructText names it, as the {Member: value} form does.
+ */
+static FString UnrealMcpRqlFirstUnknownTextMember(UScriptStruct* Struct, const FString& Source)
+{
+	int32 Depth = 0;
+	bool bQuoted = false;
+	for (int32 Index = 0; Index < Source.Len(); ++Index)
+	{
+		const TCHAR Char = Source[Index];
+		if (bQuoted)
+		{
+			if (Char == TEXT('\\'))
+				++Index;
+			else if (Char == TEXT('"'))
+				bQuoted = false;
+			continue;
+		}
+		if (Char == TEXT('"'))
+			bQuoted = true;
+		else if (Char == TEXT(')'))
+			--Depth;
+		else if ((Char == TEXT('(') && ++Depth == 1) || (Char == TEXT(',') && Depth == 1))
+		{
+			int32 End = Index + 1;
+			while (End < Source.Len() && Source[End] != TEXT('=') && Source[End] != TEXT(',') && Source[End] != TEXT('(') && Source[End] != TEXT(')'))
+				++End;
+			if (End >= Source.Len() || Source[End] != TEXT('='))
+				continue; // not "Name=" (a static-array element "Member(1)=" is left to ImportText)
+			const FString Name = Source.Mid(Index + 1, End - Index - 1).TrimStartAndEnd();
+			bool bKnown = Name.IsEmpty();
+			for (TFieldIterator<FProperty> It(Struct); It && !bKnown; ++It)
+				bKnown = It->GetName().Equals(Name, ESearchCase::IgnoreCase) || It->GetAuthoredName().Equals(Name, ESearchCase::IgnoreCase);
+			if (!bKnown)
+				return Name;
+		}
+	}
+	return FString();
+}
+
 std::optional<rql::Value> FUnrealMcpRqlTypes::ParseStructText(const rql::TypeDescriptor& Type, const std::string& Text, std::string& OutReason)
 {
 	UScriptStruct* const* Found = StructByDescriptor.Find(&Type);
@@ -1248,44 +1289,11 @@ std::optional<rql::Value> FUnrealMcpRqlTypes::ParseStructText(const rql::TypeDes
 	if (!Found || !Source.StartsWith(TEXT("(")))
 		return std::nullopt;
 	UScriptStruct* Struct = *Found;
-	// ImportText skips a member it does not know without a word: name the first one, as the {Member: value} form does.
+	const FString Unknown = UnrealMcpRqlFirstUnknownTextMember(Struct, Source);
+	if (!Unknown.IsEmpty())
 	{
-		int32 Depth = 0;
-		bool bQuoted = false;
-		for (int32 Index = 0; Index < Source.Len(); ++Index)
-		{
-			const TCHAR Char = Source[Index];
-			if (bQuoted)
-			{
-				if (Char == TEXT('\\'))
-					++Index;
-				else if (Char == TEXT('"'))
-					bQuoted = false;
-				continue;
-			}
-			if (Char == TEXT('"'))
-				bQuoted = true;
-			else if (Char == TEXT(')'))
-				--Depth;
-			else if ((Char == TEXT('(') && ++Depth == 1) || (Char == TEXT(',') && Depth == 1))
-			{
-				int32 End = Index + 1;
-				while (End < Source.Len() && Source[End] != TEXT('=') && Source[End] != TEXT(',') && Source[End] != TEXT('(') && Source[End] != TEXT(')'))
-					++End;
-				if (End >= Source.Len() || Source[End] != TEXT('='))
-					continue; // not "Name=" (a static-array element "Member(1)=" is left to ImportText)
-				const FString Name = Source.Mid(Index + 1, End - Index - 1).TrimStartAndEnd();
-				bool bKnown = Name.IsEmpty();
-				for (TFieldIterator<FProperty> It(Struct); It && !bKnown; ++It)
-					bKnown = It->GetName().Equals(Name, ESearchCase::IgnoreCase) || It->GetAuthoredName().Equals(Name, ESearchCase::IgnoreCase);
-				if (!bKnown)
-				{
-					OutReason = UnrealMcpRqlToStd(FString::Printf(TEXT("'%s' is not Unreal's text form of %s (%s has no member '%s')"),
-						*Source, *Struct->GetName(), *Struct->GetName(), *Name));
-					return std::nullopt;
-				}
-			}
-		}
+		OutReason = UnrealMcpRqlToStd(FString::Printf(TEXT("'%s' is not Unreal's text form of %s (no member '%s')"), *Source, *Struct->GetName(), *Unknown));
+		return std::nullopt;
 	}
 	std::shared_ptr<void> Data = MakeStructData(Struct, nullptr);
 	// What ImportText reports (an unknown member, a bad value); UE 5.5-5.7 differ in where FStringOutputDevice lives.
