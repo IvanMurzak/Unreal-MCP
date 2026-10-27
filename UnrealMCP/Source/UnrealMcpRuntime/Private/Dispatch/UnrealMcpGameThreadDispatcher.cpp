@@ -4,6 +4,7 @@
 #include "UnrealMcpGameThreadDispatcher.h"
 #include "UnrealMcpLog.h"
 #include "HAL/Event.h"
+#include "HAL/PlatformTime.h"
 #include "HAL/Runnable.h"
 #include "HAL/RunnableThread.h"
 #include "Misc/CoreDelegates.h"

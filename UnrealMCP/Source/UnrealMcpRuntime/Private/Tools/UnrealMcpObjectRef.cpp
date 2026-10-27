@@ -10,6 +10,7 @@
 #include "EngineUtils.h"            // TActorIterator
 #include "GameFramework/Actor.h"
 #include "Misc/PackageName.h"
+#include "UObject/Package.h"
 #include "UObject/UObjectGlobals.h"
 
 namespace
