@@ -49,24 +49,11 @@ bool UnrealMcpPinTypes::Make(const FString& InType, bool bIsArray, FEdGraphPinTy
 		Set(UEdGraphSchema_K2::PC_Struct, NAME_None, TBaseStructure<FLinearColor>::Get());
 	else
 	{
-		// Object / class / struct: a class (object reference), else a struct path, else a struct name ("GameplayTag",
-		// "FGameplayTag").
-		UScriptStruct* Struct = nullptr;
+		// Object / class / struct: a class (an object reference), else a struct.
 		if (UClass* Class = FUnrealMcpObjectRef::ResolveClass(Type))
-		{
 			Set(UEdGraphSchema_K2::PC_Object, NAME_None, Class);
-		}
-		else if (Type.Contains(TEXT("/")) && (Struct = LoadObject<UScriptStruct>(nullptr, *Type, nullptr, LOAD_NoWarn | LOAD_Quiet)) != nullptr)
-		{
+		else if (UScriptStruct* Struct = ResolveStruct(Type))
 			Set(UEdGraphSchema_K2::PC_Struct, NAME_None, Struct);
-		}
-		else if (!Type.Contains(TEXT("/"))
-			&& ((Struct = FindFirstObject<UScriptStruct>(*Type, EFindFirstObjectOptions::NativeFirst, ELogVerbosity::NoLogging)) != nullptr
-				|| (Type.Len() > 1 && Type[0] == TEXT('F') && FChar::IsUpper(Type[1])
-					&& (Struct = FindFirstObject<UScriptStruct>(*Type.Mid(1), EFindFirstObjectOptions::NativeFirst, ELogVerbosity::NoLogging)) != nullptr)))
-		{
-			Set(UEdGraphSchema_K2::PC_Struct, NAME_None, Struct);
-		}
 		else
 		{
 			OutError = FString::Printf(TEXT("unknown variable type '%s' (expected a primitive, a math struct, or a resolvable object/struct path)"), *Type);
@@ -76,6 +63,20 @@ bool UnrealMcpPinTypes::Make(const FString& InType, bool bIsArray, FEdGraphPinTy
 
 	OutPinType.ContainerType = bIsArray ? EPinContainerType::Array : EPinContainerType::None;
 	return true;
+}
+
+UScriptStruct* UnrealMcpPinTypes::ResolveStruct(const FString& InText)
+{
+	const FString Text = InText.TrimStartAndEnd();
+	if (Text.IsEmpty())
+		return nullptr;
+	if (Text.Contains(TEXT("/")))
+		return Cast<UScriptStruct>(FUnrealMcpObjectRef::LoadObjectQuiet(UScriptStruct::StaticClass(), Text));
+	if (UScriptStruct* Found = FindFirstObject<UScriptStruct>(*Text, EFindFirstObjectOptions::NativeFirst, ELogVerbosity::NoLogging))
+		return Found;
+	if (Text.Len() > 1 && Text[0] == TEXT('F') && FChar::IsUpper(Text[1]))
+		return FindFirstObject<UScriptStruct>(*Text.Mid(1), EFindFirstObjectOptions::NativeFirst, ELogVerbosity::NoLogging);
+	return nullptr;
 }
 
 FString UnrealMcpPinTypes::ToString(const FEdGraphPinType& PinType)

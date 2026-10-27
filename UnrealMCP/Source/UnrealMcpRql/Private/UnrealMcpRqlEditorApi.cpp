@@ -4,6 +4,7 @@
 #include "UnrealMcpRqlEditorApi.h"
 
 #include "IUnrealMcpRqlModule.h"
+#include "UnrealMcpPinTypes.h"
 #include "Tools/UnrealMcpLogCollector.h"
 #include "Tools/UnrealMcpObjectRef.h"
 
@@ -54,7 +55,44 @@ namespace UnrealMcpRqlEditorApiLocal
 	using UnrealMcpRql::Failed;
 
 	/** The tail of every spawn: the final rotation, a root for root-less classes, the label and the parent. */
-	AActor* FinishSpawnedActor(AActor* Actor, const FVector& Location, const FRotator& Rotation, const FString& Label, AActor* Parent);
+	AActor* FinishSpawnedActor(AActor* Actor, const FVector& Location, const FRotator& Rotation, const FString& Label, AActor* Parent)
+	{
+		UWorld* World = Actor->GetWorld();
+		// SpawnActor composes the class's default root rotation (a SpotLight's -90 pitch) with Rotation. A rotation the
+		// caller gave is the final one; none keeps the class default (a SpotLight points down).
+		if (!Rotation.IsZero() && Actor->GetRootComponent())
+		{
+			Actor->SetActorRotation(Rotation, ETeleportType::TeleportPhysics);
+			Actor->PostEditMove(/*bFinished*/ true); // construction scripts ran at the composed rotation
+		}
+		// A class without a root component (a plain Actor) has no transform: the location would be dropped and nothing
+		// could attach to it. Give it the scene root the editor's Empty Actor gets (UActorFactoryEmptyActor).
+		if (!Actor->GetRootComponent() && !UnrealMcpRql::AddComponent(Actor, USceneComponent::StaticClass(),
+			USceneComponent::GetDefaultSceneRootVariableName().ToString(), [&Location, &Rotation](UActorComponent* Component)
+			{
+				USceneComponent* Root = CastChecked<USceneComponent>(Component);
+				Root->Mobility = EComponentMobility::Movable;
+				Root->bVisualizeComponent = true;
+				Root->SetWorldLocationAndRotation(Location, Rotation);
+			}))
+		{
+			World->EditorDestroyActor(Actor, /*bShouldModifyLevel*/ true);
+			return nullptr;
+		}
+		if (!Label.IsEmpty())
+			FActorLabelUtilities::SetActorLabelUnique(Actor, Label);
+		if (Parent)
+		{
+			Actor->AttachToActor(Parent, FAttachmentTransformRules::KeepWorldTransform);
+			if (Actor->GetAttachParentActor() != Parent)
+			{
+				const FString Reason = UnrealMcpRqlAttachFailure(Actor, Parent);
+				World->EditorDestroyActor(Actor, /*bShouldModifyLevel*/ true);
+				return Failed<AActor*>(FString::Printf(TEXT("could not attach to %s%s"), *Parent->GetActorLabel(), *Reason));
+			}
+		}
+		return Actor;
+	}
 
 	/** The generated class of the one Blueprint asset named @p Name ("BP_Door"), when exactly one actor Blueprint has it. */
 	UClass* BlueprintClassByName(const FString& Name)
@@ -160,46 +198,6 @@ AActor* UnrealMcpRql::SpawnActor(UClass* Class, const FVector& Location, const F
 	if (!Actor)
 		return Failed<AActor*>(FString::Printf(TEXT("could not spawn %s"), *Class->GetName()));
 	return FinishSpawnedActor(Actor, Location, Rotation, Label, Parent);
-}
-
-AActor* UnrealMcpRqlEditorApiLocal::FinishSpawnedActor(AActor* Actor, const FVector& Location, const FRotator& Rotation,
-	const FString& Label, AActor* Parent)
-{
-	UWorld* World = Actor->GetWorld();
-	// SpawnActor composes the class's default root rotation (a SpotLight's -90 pitch) with Rotation. A rotation the
-	// caller gave is the final one; none keeps the class default (a SpotLight points down).
-	if (!Rotation.IsZero() && Actor->GetRootComponent())
-	{
-		Actor->SetActorRotation(Rotation, ETeleportType::TeleportPhysics);
-		Actor->PostEditMove(/*bFinished*/ true); // construction scripts ran at the composed rotation
-	}
-	// A class without a root component (a plain Actor) has no transform: the location would be dropped and nothing
-	// could attach to it. Give it the scene root the editor's Empty Actor gets (UActorFactoryEmptyActor).
-	if (!Actor->GetRootComponent() && !UnrealMcpRql::AddComponent(Actor, USceneComponent::StaticClass(),
-		USceneComponent::GetDefaultSceneRootVariableName().ToString(), [&Location, &Rotation](UActorComponent* Component)
-		{
-			USceneComponent* Root = CastChecked<USceneComponent>(Component);
-			Root->Mobility = EComponentMobility::Movable;
-			Root->bVisualizeComponent = true;
-			Root->SetWorldLocationAndRotation(Location, Rotation);
-		}))
-	{
-		World->EditorDestroyActor(Actor, /*bShouldModifyLevel*/ true);
-		return nullptr;
-	}
-	if (!Label.IsEmpty())
-		FActorLabelUtilities::SetActorLabelUnique(Actor, Label);
-	if (Parent)
-	{
-		Actor->AttachToActor(Parent, FAttachmentTransformRules::KeepWorldTransform);
-		if (Actor->GetAttachParentActor() != Parent)
-		{
-			const FString Reason = UnrealMcpRqlAttachFailure(Actor, Parent);
-			World->EditorDestroyActor(Actor, /*bShouldModifyLevel*/ true);
-			return Failed<AActor*>(FString::Printf(TEXT("could not attach to %s%s"), *Parent->GetActorLabel(), *Reason));
-		}
-	}
-	return Actor;
 }
 
 FString UnrealMcpRqlAttachFailure(const AActor* Actor, const AActor* Parent)
@@ -560,18 +558,7 @@ int32 UUnrealMcpRqlEditorApi::ClearConsole()
 UDataTable* UUnrealMcpRqlEditorApi::CreateDataTable(const FString& Path, const FString& RowStruct)
 {
 	const FString Wanted = RowStruct.TrimStartAndEnd();
-	UScriptStruct* Struct = nullptr;
-	if (Wanted.Contains(TEXT("/")))
-		Struct = Cast<UScriptStruct>(UnrealMcpRql::LoadObject(UScriptStruct::StaticClass(), Wanted));
-	else
-	{
-		const FString Bare = Wanted.Len() > 1 && Wanted[0] == TEXT('F') && FChar::IsUpper(Wanted[1]) ? Wanted.Mid(1) : Wanted;
-		for (const FString& Candidate : { Wanted, Bare })
-		{
-			if (!Struct)
-				Struct = FindFirstObject<UScriptStruct>(*Candidate, EFindFirstObjectOptions::NativeFirst, ELogVerbosity::NoLogging);
-		}
-	}
+	UScriptStruct* Struct = UnrealMcpPinTypes::ResolveStruct(Wanted);
 	if (!Struct || !FDataTableEditorUtils::IsValidTableStruct(Struct))
 		return Failed<UDataTable*>(FString::Printf(TEXT("'%s' is not a struct DataTable rows can use (a struct deriving from FTableRowBase, or a user-defined struct)"), *Wanted));
 	FString Folder, Name;

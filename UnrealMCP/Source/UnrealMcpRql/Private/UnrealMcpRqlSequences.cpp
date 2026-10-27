@@ -213,62 +213,61 @@ namespace UnrealMcpRqlSequencesLocal
 		const UMovieScene* Scene = SceneOf(Section);
 		const FFrameNumber Time = ToTick(Scene, Frame);
 		TArray<FString> Names;
-		bool bDone = false;
 		const FString Key = Wanted.TrimStartAndEnd();
-		// The display name first; the internal name ("Rotation.Z" for the yaw) only when no display name matches.
-		bool bDisplayMatch = false;
-		ForEachChannel(Section, [&](const FString& Name, const FString&, FMovieSceneChannel*, FName)
-		{
-			bDisplayMatch |= Name.Equals(Key, ESearchCase::IgnoreCase);
-		});
+		// The channel shown under that name, else the one with that internal name ("Rotation.Z" is the yaw).
+		struct FHit { FString Name; FMovieSceneChannel* Channel = nullptr; FName Type; };
+		FHit ByDisplay, ByInternal;
 		ForEachChannel(Section, [&](const FString& Name, const FString& Internal, FMovieSceneChannel* Channel, FName Type)
 		{
 			Names.Add(Name);
-			const FString& Candidate = bDisplayMatch ? Name : Internal;
-			if (bDone || Candidate.IsEmpty() || !Candidate.Equals(Key, ESearchCase::IgnoreCase))
-				return;
-			// AddCubicKey inserts next to a key at the same frame: drop that key first, so the new one replaces it.
-			if (IsDouble(Type))
-			{
-				const double Number = NumberArg(Value, TEXT("a number"));
-				Section->Modify();
-				FMovieSceneDoubleChannel* DoubleChannel = static_cast<FMovieSceneDoubleChannel*>(Channel);
-				TMovieSceneChannelData<FMovieSceneDoubleValue> Data = DoubleChannel->GetData();
-				const int32 Existing = Data.FindKey(Time);
-				if (Existing != INDEX_NONE)
-					Data.RemoveKey(Existing);
-				DoubleChannel->AddCubicKey(Time, Number);
-			}
-			else if (IsFloat(Type))
-			{
-				const double Number = NumberArg(Value, TEXT("a number"));
-				Section->Modify();
-				FMovieSceneFloatChannel* FloatChannel = static_cast<FMovieSceneFloatChannel*>(Channel);
-				TMovieSceneChannelData<FMovieSceneFloatValue> Data = FloatChannel->GetData();
-				const int32 Existing = Data.FindKey(Time);
-				if (Existing != INDEX_NONE)
-					Data.RemoveKey(Existing);
-				FloatChannel->AddCubicKey(Time, static_cast<float>(Number));
-			}
-			else if (IsBool(Type))
-			{
-				const bool bValue = BoolArg(Value);
-				Section->Modify();
-				TMovieSceneChannelData<bool> Data = static_cast<FMovieSceneBoolChannel*>(Channel)->GetData();
-				const int32 Existing = Data.FindKey(Time);
-				if (Existing != INDEX_NONE)
-					Data.GetValues()[Existing] = bValue;
-				else
-					Data.AddKey(Time, bValue);
-			}
-			else
-			{
-				Throw(FString::Printf(TEXT("channel '%s' (%s) is not a number or bool channel"), *Name, *Type.ToString()));
-			}
-			bDone = true;
+			if (!ByDisplay.Channel && Name.Equals(Key, ESearchCase::IgnoreCase))
+				ByDisplay = { Name, Channel, Type };
+			else if (!ByInternal.Channel && !Internal.IsEmpty() && Internal.Equals(Key, ESearchCase::IgnoreCase))
+				ByInternal = { Name, Channel, Type };
 		});
-		if (!bDone)
+		const FHit& Hit = ByDisplay.Channel ? ByDisplay : ByInternal;
+		if (!Hit.Channel)
 			Throw(FString::Printf(TEXT("%s has no channel '%s' (channels: %s)"), *Section->GetName(), *Wanted, *FString::Join(Names, TEXT(", "))));
+		FMovieSceneChannel* Channel = Hit.Channel;
+		const FName Type = Hit.Type;
+		// AddCubicKey inserts next to a key at the same frame: drop that key first, so the new one replaces it.
+		if (IsDouble(Type))
+		{
+			const double Number = NumberArg(Value, TEXT("a number"));
+			Section->Modify();
+			FMovieSceneDoubleChannel* DoubleChannel = static_cast<FMovieSceneDoubleChannel*>(Channel);
+			TMovieSceneChannelData<FMovieSceneDoubleValue> Data = DoubleChannel->GetData();
+			const int32 Existing = Data.FindKey(Time);
+			if (Existing != INDEX_NONE)
+				Data.RemoveKey(Existing);
+			DoubleChannel->AddCubicKey(Time, Number);
+		}
+		else if (IsFloat(Type))
+		{
+			const double Number = NumberArg(Value, TEXT("a number"));
+			Section->Modify();
+			FMovieSceneFloatChannel* FloatChannel = static_cast<FMovieSceneFloatChannel*>(Channel);
+			TMovieSceneChannelData<FMovieSceneFloatValue> Data = FloatChannel->GetData();
+			const int32 Existing = Data.FindKey(Time);
+			if (Existing != INDEX_NONE)
+				Data.RemoveKey(Existing);
+			FloatChannel->AddCubicKey(Time, static_cast<float>(Number));
+		}
+		else if (IsBool(Type))
+		{
+			const bool bValue = BoolArg(Value);
+			Section->Modify();
+			TMovieSceneChannelData<bool> Data = static_cast<FMovieSceneBoolChannel*>(Channel)->GetData();
+			const int32 Existing = Data.FindKey(Time);
+			if (Existing != INDEX_NONE)
+				Data.GetValues()[Existing] = bValue;
+			else
+				Data.AddKey(Time, bValue);
+		}
+		else
+		{
+			Throw(FString::Printf(TEXT("channel '%s' (%s) is not a number or bool channel"), *Hit.Name, *Type.ToString()));
+		}
 		// A key outside the section grows it, as keying in the Sequencer does.
 		if (Section->HasStartFrame() && Section->HasEndFrame() && !Section->GetRange().Contains(Time))
 			Section->ExpandToFrame(Time);

@@ -4,8 +4,8 @@
 #include "UnrealMcpCoreTools.h"
 #include "UnrealMcpToolRegistry.h"
 #include "UnrealMcpLog.h"
-#include "Tools/UnrealMcpObjectRef.h"
-#include "UnrealMcpPinTypes.h"   // the shared class resolver (FUnrealMcpObjectRef::ResolveClass)
+#include "Tools/UnrealMcpObjectRef.h"   // the shared class resolver (FUnrealMcpObjectRef::ResolveClass)
+#include "UnrealMcpPinTypes.h"
 
 #include "Engine/Blueprint.h"
 #include "Engine/BlueprintGeneratedClass.h"

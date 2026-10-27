@@ -102,11 +102,16 @@ namespace UnrealMcpRqlTypesLocal
 		return !Property->HasAnyPropertyFlags(CPF_Deprecated) && Property->HasAnyPropertyFlags(CPF_Edit | CPF_BlueprintVisible);
 	}
 
+	bool IsBlueprintWritable(const FProperty* Property)
+	{
+		return Property->HasAnyPropertyFlags(CPF_BlueprintVisible) && !Property->HasAnyPropertyFlags(CPF_BlueprintReadOnly);
+	}
+
 	bool IsWritableOnClass(const FProperty* Property)
 	{
 		if (Property->HasAnyPropertyFlags(CPF_Edit) && !Property->HasAnyPropertyFlags(CPF_EditConst))
 			return true;
-		return Property->HasAnyPropertyFlags(CPF_BlueprintVisible) && !Property->HasAnyPropertyFlags(CPF_BlueprintReadOnly);
+		return IsBlueprintWritable(Property);
 	}
 
 	/**
@@ -127,8 +132,7 @@ namespace UnrealMcpRqlTypesLocal
 		if (Property->ContainsInstancedObjectProperty() && !bContainer)
 			return false;
 		const bool bInstanceEditable = Property->HasAnyPropertyFlags(CPF_Edit) && !Property->HasAnyPropertyFlags(CPF_DisableEditOnInstance);
-		const bool bBlueprintWritable = Property->HasAnyPropertyFlags(CPF_BlueprintVisible) && !Property->HasAnyPropertyFlags(CPF_BlueprintReadOnly);
-		return !bInstanceEditable && bBlueprintWritable;
+		return !bInstanceEditable && IsBlueprintWritable(Property);
 	}
 
 	double ToNumber(const rql::Value& Value)
@@ -1143,10 +1147,10 @@ void FUnrealMcpRqlTypes::WriteObjectProperty(UObject* Object, FProperty* Propert
 	TArray<UObject*> Instances;
 	if (Object->HasAnyFlags(RF_ArchetypeObject) && !Object->HasAnyFlags(RF_ClassDefaultObject))
 		Object->GetArchetypeInstances(Instances);
-	TUniquePtr<FTempValue> Old;
+	TOptional<FTempValue> Old;
 	if (Instances.Num() > 0)
 	{
-		Old = MakeUnique<FTempValue>(Property);
+		Old.Emplace(Property);
 		Property->CopyCompleteValue(Old->Ptr, Property->ContainerPtrToValuePtr<void>(Object));
 	}
 	Object->PreEditChange(Property);
