@@ -62,12 +62,10 @@ namespace UnrealMcpRqlSettingsLocal
 		// Most sections (Physics, Rendering, Collision, Audio, plugin settings) are UDeveloperSettings that the
 		// SettingsEditor module registers only once a settings window has been opened: register them now, so the
 		// source does not depend on whether someone opened Project Settings in this editor session.
-		if (ISettingsEditorModule* SettingsEditor = FModuleManager::LoadModulePtr<ISettingsEditorModule>(TEXT("SettingsEditor")))
-		{
 #if !UE_VERSION_OLDER_THAN(5, 6, 0)
+		if (ISettingsEditorModule* SettingsEditor = FModuleManager::LoadModulePtr<ISettingsEditorModule>(TEXT("SettingsEditor")))
 			SettingsEditor->UpdateSettings(/*bForce*/ true);
 #endif
-		}
 		for (const FName ContainerName : { FName(TEXT("Project")), FName(TEXT("Editor")) })
 		{
 			TSharedPtr<ISettingsContainer> Container = Module->GetContainer(ContainerName);

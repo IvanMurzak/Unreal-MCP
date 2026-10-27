@@ -107,8 +107,9 @@ public:
 	/** Write a property of an object with the editor notifications (PreEditChange / PostEditChangeProperty). */
 	void WriteObjectProperty(UObject* Object, FProperty* Property, const rql::Value& Value);
 	/**
-	 * @p Object, or the component that replaced it during this call: an edit of a Blueprint actor's component reruns the
-	 * construction script, which rebuilds the construction-script components, so a stream item can point at the old one.
+	 * @p Object, or the object that replaced it during this call: an edit of a Blueprint actor's component reruns the
+	 * construction script, which rebuilds the construction-script components, so a stream item can point at the old one
+	 * (the engine reports the replacement through FCoreUObjectDelegates::OnObjectsReplaced).
 	 */
 	UObject* LiveObject(UObject* Object) const;
 	/**
@@ -167,7 +168,9 @@ private:
 	TMap<UClass*, FString> ApiClasses;
 	TMap<UStruct*, TMap<FName, bool>> Exposed;
 	TMap<FString, bool> KnownMemberNames; // IsKnownMemberName; FString keys compare case-insensitively
-	TMap<const UObject*, TWeakObjectPtr<UObject>> Replaced; // LiveObject: rebuilt component -> its replacement
+	TMap<const UObject*, TWeakObjectPtr<UObject>> Replaced; // LiveObject: replaced object -> its newest replacement
+	FDelegateHandle ObjectsReplacedHandle;
+	void OnObjectsReplaced(const TMap<UObject*, UObject*>& OldToNew);
 
 	rql::TypeDescriptor& Shell(const void* Key, const FString& Name, rql::TypeKind Kind);
 	void FillClass(rql::TypeDescriptor& Descriptor, UClass* Class);

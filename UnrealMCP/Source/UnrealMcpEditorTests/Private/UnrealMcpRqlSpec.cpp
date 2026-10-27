@@ -602,7 +602,10 @@ void FUnrealMcpRqlSpec::Define()
 			TestTrue(*FString::Printf(TEXT("spawn ok (%s)"), *Codes(Spawned)), IsOk(Spawned));
 			ATriggerVolume* Volume = nullptr;
 			for (AActor* Actor : Lamps())
-				Volume = Volume ? Volume : Cast<ATriggerVolume>(Actor);
+			{
+				if ((Volume = Cast<ATriggerVolume>(Actor)) != nullptr)
+					break;
+			}
 			if (!TestNotNull(TEXT("a trigger volume"), Volume))
 				return;
 			TestNotNull(TEXT("it has a brush"), Volume->Brush.Get());

@@ -826,23 +826,11 @@ namespace UnrealMcpRqlCoreLocal
 		UClass* Class = ClassName.IsEmpty() ? UObject::StaticClass() : FUnrealMcpObjectRef::ResolveClass(ClassName);
 		if (!Class)
 			return ErrorValue("not-found", FString::Printf(TEXT("no class '%s'"), *ClassName));
-		FString Path = Args.size() == 2 ? UnrealMcpRqlFromStd(Args[1].as_string()) : FString();
-		// No path and no such asset in the project: engine and plugin content ("/Niagara/...", "/Engine/...") rather than
-		// an empty list that reads as "the editor has none".
-		if (Path.IsEmpty() && Class != UObject::StaticClass())
-		{
-			IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
-			FARFilter InGame;
-			InGame.ClassPaths.Add(Class->GetClassPathName());
-			InGame.bRecursiveClasses = true;
-			InGame.PackagePaths.Add(FName(TEXT("/Game")));
-			InGame.bRecursivePaths = true;
-			TArray<FAssetData> Found;
-			Registry.GetAssets(InGame, Found);
-			if (Found.Num() == 0)
-				Path = TEXT("/");
-		}
-		return UnrealMcpRqlAssetList(Types, Class, Path);
+		// No path: /Game, or engine and plugin content ("/Niagara/...") when the project has no asset of the class, rather
+		// than an empty list that reads as "the editor has none".
+		const bool bPath = Args.size() == 2;
+		return UnrealMcpRqlAssetList(Types, Class, bPath ? UnrealMcpRqlFromStd(Args[1].as_string()) : FString(),
+			/*bAllRootsWhenEmpty*/ !bPath && Class != UObject::StaticClass());
 	}
 
 	rql::Value ListClasses(const std::vector<rql::Value>& Args, const rql::TypeDescriptor* ClassInfoType)
@@ -880,7 +868,7 @@ namespace UnrealMcpRqlCoreLocal
 
 using namespace UnrealMcpRqlCoreLocal;
 
-rql::Value UnrealMcpRqlAssetList(FUnrealMcpRqlTypes& Types, UClass* Class, const FString& Path)
+rql::Value UnrealMcpRqlAssetList(FUnrealMcpRqlTypes& Types, UClass* Class, const FString& Path, bool bAllRootsWhenEmpty)
 {
 	IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
 	FARFilter Filter;
@@ -889,13 +877,15 @@ rql::Value UnrealMcpRqlAssetList(FUnrealMcpRqlTypes& Types, UClass* Class, const
 		Filter.ClassPaths.Add(Class->GetClassPathName());
 		Filter.bRecursiveClasses = true;
 	}
-	if (Path != TEXT("/")) // "/": every mounted content root
-	{
-		Filter.PackagePaths.Add(FName(*(Path.IsEmpty() ? FString(TEXT("/Game")) : Path)));
-		Filter.bRecursivePaths = true;
-	}
+	Filter.PackagePaths.Add(FName(*(Path.IsEmpty() ? FString(TEXT("/Game")) : Path)));
+	Filter.bRecursivePaths = true;
 	TArray<FAssetData> Assets;
 	Registry.GetAssets(Filter, Assets);
+	if (Assets.Num() == 0 && bAllRootsWhenEmpty)
+	{
+		Filter.PackagePaths.Reset(); // every mounted content root
+		Registry.GetAssets(Filter, Assets);
+	}
 	// By package, then asset name (FName order: no string building per comparison); only the kept assets are sorted.
 	SortAndCap(Assets, UnrealMcpRqlMaxAssets, [](const FAssetData& A, const FAssetData& B)
 	{
