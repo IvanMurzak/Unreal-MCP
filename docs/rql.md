@@ -57,7 +57,7 @@ agent ──query text──▶ unreal-mcp-bridge (sidecar, .NET)          Unrea
   actor under a Movable parent), `Folder`, `Layers` (writable through the Layers subsystem, as the Layers panel
   does: missing layers are created, the actor ends up in exactly the listed ones), `Level`, `HiddenInEditor`, `Selected` (writable: adds to / removes from the
   editor selection; neither it nor `HiddenInEditor` marks the level unsaved); component `Owner` (and `Name`: a Blueprint's
-  component templates read under their variable name, without the `_GEN_VARIABLE` suffix); Level `Map`, `Package`, `IsPersistent`, `IsCurrent` (writable), `IsVisible`, `Actors`; World
+  component templates read under their variable name, without the `_GEN_VARIABLE` suffix); Level `Map`, `Package`, `IsPersistent`, `IsCurrent` (writable), `IsVisible` (writable: the Levels panel's eye, not undoable), `Actors`; World
   `Map`, `Levels`, `PersistentLevel`, `CurrentLevel`; MaterialInterface `Scalars` / `Vectors` / `Textures` (parameter
   maps, writable on material instances).
 - **Methods** (`call`): Actor `Destroy()`, `Duplicate(Offset)`, `AddComponent(ClassName, Name)`; component
@@ -117,7 +117,7 @@ agent ──query text──▶ unreal-mcp-bridge (sidecar, .NET)          Unrea
 | `actors` | every actor of the editor world's loaded levels |
 | `levels`, `world` | the loaded levels, the editor world |
 | `selection` | the selected actors (`editor | set Selection = [...]` writes it) |
-| `editor` | editor state (`IsPlaying`, `IsPaused` — writable, `Selection`, `World`, `CurrentLevel`) and operations: `SpawnActor` (a class, Blueprint name or path, or an asset to place: a StaticMesh path gives a StaticMeshActor), `OpenLevel`, `NewLevel`, `SaveLevel`, `SaveAll`, `UnloadSublevel`, `CreateAsset`, `CopyAsset`, `MoveAsset`, `DeleteAsset`, `CreateFolder`, `RefreshAssets`, `CreateMaterialInstance`, `ImportAsset`, `SaveAsset`, `ClearConsole` |
+| `editor` | editor state (`IsPlaying`, `IsPaused` — writable, `Selection`, `World`, `CurrentLevel`) and operations: `SpawnActor` (a class, Blueprint name or path, or an asset to place: a StaticMesh path gives a StaticMeshActor), `OpenLevel`, `NewLevel`, `SaveLevel`, `SaveAll`, `AddSublevel`, `UnloadSublevel` (a level by its map name), `CreateAsset`, `CopyAsset`, `MoveAsset`, `DeleteAsset`, `CreateFolder`, `RefreshAssets`, `CreateMaterialInstance`, `ImportAsset`, `SaveAsset`, `ClearConsole` |
 | `console` | editor log entries (`Sequence`, `Time`, `Verbosity`, `Category`, `Message`) |
 | `unreal.find(label)` | an actor by label, name or path |
 | `unreal.asset(path)`, `unreal.assets(class, path?)` | one asset; assets of a class (at most 200, loaded as read) |
@@ -247,7 +247,7 @@ Every change is undoable (one transaction per mutation). Spawnables are listed b
 | `asset-find`, `asset-get-data` | `unreal.assets("Material", "/Game/...")`, `unreal.asset(path)` |
 | `asset-copy` / `-move` / `-delete` / `-create-folder` / `-refresh` / `-import` | `editor | call CopyAsset / MoveAsset / DeleteAsset / CreateFolder / RefreshAssets / ImportAsset` (and `CreateAsset(path, class)` for any asset class) |
 | `asset-material-create`, `-modify`, `-get-data` | `editor | call CreateMaterialInstance(path, parent)`, `Scalars["…"]`, `Vectors["…"]`, `Textures["…"]` |
-| `level-create` / `-open` / `-save` / `-set-current` / `-unload-sublevel` / `-list-loaded` | `editor | call NewLevel / OpenLevel / SaveLevel / UnloadSublevel`, `levels` (`set IsCurrent = true`) |
+| `level-create` / `-open` / `-save` / `-set-current` / `-unload-sublevel` / `-list-loaded` | `editor | call NewLevel / OpenLevel / SaveLevel / AddSublevel / UnloadSublevel`, `levels` (`set IsCurrent = true`, `set IsVisible = false`) |
 | `editor-application-get-state` / `-set-state` | `editor` `IsPlaying`, `IsPaused` (writable) |
 | `editor-selection-get` / `-set` | `selection`, `editor | set Selection = [...]` |
 | `console-get-logs` / `console-clear-logs` | `console` source (`where Verbosity == "Error"`, `Sequence > N`), `editor | call ClearConsole()` |

@@ -5,6 +5,8 @@
 #include "UnrealMcpWorldProvider.h"
 
 #include "Engine/Blueprint.h"
+#include "Engine/Level.h"
+#include "Engine/World.h"
 #include "EngineUtils.h"            // TActorIterator
 #include "GameFramework/Actor.h"
 #include "Misc/PackageName.h"
@@ -24,6 +26,23 @@ namespace
 #else
 		return Actor->GetName();
 #endif
+	}
+
+	/** A level loaded in the active world by its map name ("Sub_A"), package ("/Game/Maps/Sub_A") or object path. */
+	ULevel* ObjectRefLoadedLevel(const FString& Text)
+	{
+		UWorld* World = FUnrealMcpWorldProvider::GetActiveWorld();
+		if (!World)
+			return nullptr;
+		const FString Package = FPackageName::ObjectPathToPackageName(Text);
+		for (ULevel* Level : World->GetLevels())
+		{
+			const FString LevelPackage = Level ? Level->GetOutermost()->GetName() : FString();
+			if (Level && (FPackageName::GetShortName(LevelPackage).Equals(Text, ESearchCase::IgnoreCase)
+				|| LevelPackage.Equals(Package, ESearchCase::IgnoreCase) || Level->GetPathName().Equals(Text, ESearchCase::IgnoreCase)))
+				return Level;
+		}
+		return nullptr;
 	}
 }
 
@@ -120,6 +139,8 @@ namespace FUnrealMcpObjectRef
 			Found = ResolveClass(Text);
 		else if (Wanted->IsChildOf(AActor::StaticClass()))
 			Found = ResolveActor(Text);
+		else if (Wanted->IsChildOf(ULevel::StaticClass()))
+			Found = ObjectRefLoadedLevel(Text);
 		else
 			Found = LoadObjectQuiet(Wanted, Text);
 		return Found && Found->IsA(Wanted) ? Found : nullptr;

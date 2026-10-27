@@ -24,7 +24,10 @@
 #include "EngineUtils.h"
 #include "GameFramework/Actor.h"
 #include "HAL/FileManager.h"
+#include "EditorLevelUtils.h"
+#include "Engine/Level.h"
 #include "Layers/LayersSubsystem.h"
+#include "Misc/PackageName.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "UnrealMcpRqlSpecHelpers.h"
@@ -558,6 +561,35 @@ void FUnrealMcpRqlSpec::Define()
 			const TSharedPtr<FJsonObject> Short = Exec(/* unreal.find("RqlSpecLampBox") | get Components | where $ is StaticMeshComponent | set StaticMesh = "Cube" */ TEXT(R"RQL({"rql":"0.1","source":{"call":"find","on":{"path":["unreal"]},"args":[{"lit":"RqlSpecLampBox"}]},"stages":[{"op":"get","expr":{"path":["Components"]}},{"op":"where","pred":{"op":"is","args":[{"path":[]},{"lit":"StaticMeshComponent"}]}},{"op":"set","assign":[{"target":{"path":["StaticMesh"]},"value":{"lit":"Cube"}}]}]})RQL"), true);
 			TestFalse(TEXT("a bare mesh name does not resolve"), IsOk(Short));
 			TestTrue(*FString::Printf(TEXT("suggests the path (%s)"), *Codes(Short)), Codes(Short).Contains(TEXT("did you mean /Engine/BasicShapes/Cube")));
+		});
+
+		It("names a level by its map name, refuses bad sublevels and shows / hides a level", [this]()
+		{
+			UWorld* W = World();
+			if (!TestNotNull(TEXT("editor world"), W))
+				return;
+			const FString Package = W->PersistentLevel->GetOutermost()->GetName();
+			auto With = [&Package](const TCHAR* Plan)
+			{
+				return FString(Plan).Replace(TEXT("@MAP@"), *FPackageName::GetShortName(Package)).Replace(TEXT("@PKG@"), *Package);
+			};
+			// editor | call UnloadSublevel("@MAP@") — the map name resolves to the level (it used to be "no Level '<name>'")
+			const TSharedPtr<FJsonObject> Unload = Exec(With(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"UnloadSublevel","args":[{"lit":"@MAP@"}]}]})RQL")), true);
+			TestTrue(*FString::Printf(TEXT("resolved, then refused as the persistent level (%s)"), *Codes(Unload)), !IsOk(Unload) && Codes(Unload).Contains(TEXT("persistent level cannot be unloaded")));
+			// editor | call AddSublevel("/Game/RqlSpecNoSuchLevel")
+			const TSharedPtr<FJsonObject> Missing = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"AddSublevel","args":[{"lit":"/Game/RqlSpecNoSuchLevel"}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("an unsaved level is refused (%s)"), *Codes(Missing)), !IsOk(Missing) && Codes(Missing).Contains(TEXT("no saved level")));
+			// editor | call AddSublevel("@PKG@")
+			const TSharedPtr<FJsonObject> Self = Exec(With(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"AddSublevel","args":[{"lit":"@PKG@"}]}]})RQL")), true);
+			TestTrue(*FString::Printf(TEXT("the world's own level is refused (%s)"), *Codes(Self)), !IsOk(Self) && Codes(Self).Contains(TEXT("its own sublevel")));
+			// levels | where IsPersistent | set IsVisible = false
+			const TSharedPtr<FJsonObject> Hide = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["levels"]},"stages":[{"op":"where","pred":{"path":["IsPersistent"]}},{"op":"set","assign":[{"target":{"path":["IsVisible"]},"value":{"lit":false}}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("hidden (%s)"), *Codes(Hide)), IsOk(Hide) && !W->PersistentLevel->bIsVisible);
+			// levels | where IsPersistent | set IsVisible = true
+			const TSharedPtr<FJsonObject> Show = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["levels"]},"stages":[{"op":"where","pred":{"path":["IsPersistent"]}},{"op":"set","assign":[{"target":{"path":["IsVisible"]},"value":{"lit":true}}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("shown again (%s)"), *Codes(Show)), IsOk(Show) && W->PersistentLevel->bIsVisible);
+			if (!W->PersistentLevel->bIsVisible)
+				UEditorLevelUtils::SetLevelVisibility(W->PersistentLevel, true, false);
 		});
 
 		It("lists levels, console entries and assets", [this]()

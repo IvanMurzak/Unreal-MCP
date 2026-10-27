@@ -604,7 +604,16 @@ namespace UnrealMcpRqlCoreLocal
 					Throw(TEXT("make another level current instead"));
 				MakeLevelCurrent(static_cast<ULevel*>(Self));
 			}, "new actors spawn into the current level"));
-		FUnrealMcpRqlTypes::SetMember(D, Member("IsVisible", BoolType(), [](void* Self) { return rql::Value::boolean(static_cast<ULevel*>(Self)->bIsVisible); }));
+		FUnrealMcpRqlTypes::SetMember(D, Member("IsVisible", BoolType(), [](void* Self) { return rql::Value::boolean(static_cast<ULevel*>(Self)->bIsVisible); },
+			[](void* Self, const rql::Value& Value)
+			{
+				ULevel* Level = static_cast<ULevel*>(Self);
+				const bool bVisible = BoolArg(Value);
+				// The Levels panel's eye: shows / hides the level's actors in the editor (a view state, not undoable).
+				UEditorLevelUtils::SetLevelVisibility(Level, bVisible, /*bForceLayersVisible*/ false);
+				if (Level->bIsVisible != bVisible)
+					Throw(FString::Printf(TEXT("could not %s the level"), bVisible ? TEXT("show") : TEXT("hide")));
+			}, "shown in the editor (the Levels panel's eye; set IsVisible = false hides a sublevel's actors, not undoable)"));
 		FUnrealMcpRqlTypes::SetMember(D, Member("Actors", T.Registry().list_type(T.ForClass(AActor::StaticClass()), true),
 			[Types](void* Self)
 			{
@@ -1043,7 +1052,7 @@ void UnrealMcpRqlConfigureCore(FUnrealMcpRqlSession& Session)
 	});
 	Session.AddSource(TEXT("editor"), T.ForClass(UUnrealMcpRqlEditorApi::StaticClass()), /*bList*/ false,
 		TEXT("editor state (IsPlaying, IsPaused, Selection, World, CurrentLevel) and operations: call SpawnActor / OpenLevel / NewLevel / "
-			"SaveLevel / SaveAll / UnloadSublevel / CreateAsset / CopyAsset / MoveAsset / DeleteAsset / CreateFolder / RefreshAssets / "
+			"SaveLevel / SaveAll / AddSublevel / UnloadSublevel / CreateAsset / CopyAsset / MoveAsset / DeleteAsset / CreateFolder / RefreshAssets / "
 			"CreateMaterialInstance / ImportAsset / SaveAsset / ClearConsole / CreateDataTable / AddGameplayTag / RemoveGameplayTag / "
 			"RenameGameplayTag"), [Types]()
 	{

@@ -18,6 +18,8 @@
 #include "EditorLevelUtils.h"
 #include "Engine/Level.h"
 #include "Engine/LevelStreaming.h"
+#include "Engine/LevelStreamingAlwaysLoaded.h"
+#include "Engine/LevelStreamingDynamic.h"
 #include "Engine/World.h"
 #include "Components/ActorComponent.h"
 #include "Components/SceneComponent.h"
@@ -358,6 +360,31 @@ void UUnrealMcpRqlEditorApi::SaveAll()
 	// Never-saved maps would prompt for a location: SaveDirtyPackages skips the prompt when it cannot ask.
 	if (!UEditorLoadingAndSavingUtils::SaveDirtyPackages(/*bSaveMapPackages*/ true, /*bSaveContentPackages*/ true))
 		Failed(TEXT("some packages could not be saved (never-saved levels need SaveLevel(path))"));
+}
+
+ULevel* UUnrealMcpRqlEditorApi::AddSublevel(const FString& Path, const FString& Streaming)
+{
+	UWorld* World = FUnrealMcpObjectRef::GetEditorWorld();
+	if (!World)
+		return Failed<ULevel*>(TEXT("no editor world"));
+	const FString Package = FPackageName::ObjectPathToPackageName(Path.TrimStartAndEnd());
+	if (!FPackageName::IsValidLongPackageName(Package) || !FPackageName::DoesPackageExist(Package))
+		return Failed<ULevel*>(FString::Printf(TEXT("no saved level at '%s' (save it first: editor | call SaveLevel())"), *Path));
+	if (Package == World->GetOutermost()->GetName())
+		return Failed<ULevel*>(TEXT("a level cannot be its own sublevel"));
+	for (ULevel* Loaded : World->GetLevels())
+		if (Loaded && Loaded->GetOutermost()->GetName() == Package)
+			return Failed<ULevel*>(FString::Printf(TEXT("'%s' is already loaded in this world"), *Package));
+	UClass* StreamingClass = nullptr;
+	if (Streaming.TrimStartAndEnd().Equals(TEXT("Dynamic"), ESearchCase::IgnoreCase) || Streaming.TrimStartAndEnd().IsEmpty())
+		StreamingClass = ULevelStreamingDynamic::StaticClass();
+	else if (Streaming.TrimStartAndEnd().Equals(TEXT("AlwaysLoaded"), ESearchCase::IgnoreCase))
+		StreamingClass = ULevelStreamingAlwaysLoaded::StaticClass();
+	else
+		return Failed<ULevel*>(FString::Printf(TEXT("unknown streaming '%s' (Dynamic or AlwaysLoaded)"), *Streaming));
+	ULevelStreaming* Added = UEditorLevelUtils::AddLevelToWorld(World, *Package, StreamingClass);
+	ULevel* Level = Added ? Added->GetLoadedLevel() : nullptr;
+	return Level ? Level : Failed<ULevel*>(FString::Printf(TEXT("could not add '%s' as a sublevel (a World Partition world streams by cells, not sublevels)"), *Package));
 }
 
 void UUnrealMcpRqlEditorApi::UnloadSublevel(ULevel* Level)
