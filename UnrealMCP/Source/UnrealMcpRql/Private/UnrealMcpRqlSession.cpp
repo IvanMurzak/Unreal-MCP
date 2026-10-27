@@ -452,6 +452,7 @@ void FUnrealMcpRqlSession::AddAdapter(rql::TypeAdapter Adapter)
 
 FString FUnrealMcpRqlSession::Execute(const FString& PlanJson, bool bAllowMutation, bool bDryRun, bool& bOutOk, int32 MaxTargets)
 {
+	Types().SetMutationRequest(bAllowMutation);
 	const std::string Text = UnrealMcpRqlToStd(PlanJson);
 	rql::QueryPlan Plan;
 	rql::Diagnostic Error;

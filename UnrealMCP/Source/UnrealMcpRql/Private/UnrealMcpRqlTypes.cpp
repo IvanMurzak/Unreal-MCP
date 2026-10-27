@@ -357,7 +357,7 @@ void FUnrealMcpRqlTypes::OnObjectsReplaced(const TMap<UObject*, UObject*>& OldTo
 		const TWeakObjectPtr<UObject> Discarded(Pair.Key);
 		for (TPair<const UObject*, TWeakObjectPtr<UObject>>& Entry : Replaced)
 		{
-			if (Entry.Value == Discarded)
+			if (Entry.Value.HasSameIndexAndSerialNumber(Discarded)) // == would match any two invalid pointers
 				Entry.Value = Pair.Value;
 		}
 		Replaced.Add(Pair.Key, Pair.Value);
@@ -1258,7 +1258,10 @@ UObject* FUnrealMcpRqlTypes::LiveObject(UObject* Object) const
 {
 	if (Object && !IsValid(Object))
 	{
-		if (const TWeakObjectPtr<UObject>* Newest = Replaced.Find(Object); Newest && Newest->IsValid())
+		// Same class only: a Blueprint compile also reports replacements (reinstanced objects of a new class layout), which
+		// the descriptor's FProperty offsets do not fit.
+		const TWeakObjectPtr<UObject>* Newest = Replaced.Find(Object);
+		if (Newest && Newest->IsValid() && Newest->Get()->GetClass() == Object->GetClass())
 			return Newest->Get();
 	}
 	return Object;

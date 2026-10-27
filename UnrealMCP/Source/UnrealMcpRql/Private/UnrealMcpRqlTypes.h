@@ -112,6 +112,9 @@ public:
 	 * (the engine reports the replacement through FCoreUObjectDelegates::OnObjectsReplaced).
 	 */
 	UObject* LiveObject(UObject* Object) const;
+	/** Whether this call may change the editor (rql-mutate): read-only conveniences that widen a query stay off then. */
+	bool IsMutationRequest() const { return bMutationRequest; }
+	void SetMutationRequest(bool bMutation) { bMutationRequest = bMutation; }
 	/**
 	 * The one struct coercion (property writes, method arguments, the math-struct adapters): a struct value of the type, a
 	 * math-struct literal ("(1, 2, 3)", [1, 2, 3], "#ff8800") or a {Member: value} literal written over @p Out. Throws
@@ -170,6 +173,7 @@ private:
 	TMap<FString, bool> KnownMemberNames; // IsKnownMemberName; FString keys compare case-insensitively
 	TMap<const UObject*, TWeakObjectPtr<UObject>> Replaced; // LiveObject: replaced object -> its newest replacement
 	FDelegateHandle ObjectsReplacedHandle;
+	bool bMutationRequest = false;
 	void OnObjectsReplaced(const TMap<UObject*, UObject*>& OldToNew);
 
 	rql::TypeDescriptor& Shell(const void* Key, const FString& Name, rql::TypeKind Kind);

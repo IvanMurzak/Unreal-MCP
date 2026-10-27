@@ -469,6 +469,11 @@ void FUnrealMcpRqlAdaptersSpec::Define()
 			TestTrue(*FString::Printf(TEXT("engine fonts (%s)"), *UnrealMcpRqlSpecHelpers::Codes(Fonts)), UnrealMcpRqlSpecHelpers::Number(Fonts) >= 1.0);
 			const TSharedPtr<FJsonObject> GameOnly = UnrealMcpRqlSpecHelpers::Exec(*this, /* unreal.assets("Font", "/Game") | count */ TEXT(R"RQL({"rql":"0.1","source":{"call":"assets","on":{"path":["unreal"]},"args":[{"lit":"Font"},{"lit":"/Game"}]},"stages":[{"op":"count"}]})RQL"));
 			TestEqual(TEXT("an explicit path stays exact"), UnrealMcpRqlSpecHelpers::Number(GameOnly), 0.0);
+			// A mutation never widens to engine content (dry run: a failure here changes nothing).
+			bool bOk = false;
+			const FString Json = UnrealMcpRqlTools::ExecutePlan(/* unreal.assets("Font") | set LegacyFontSize = 10 */ TEXT(R"RQL({"rql":"0.1","source":{"call":"assets","on":{"path":["unreal"]},"args":[{"lit":"Font"}]},"stages":[{"op":"set","assign":[{"target":{"path":["LegacyFontSize"]},"value":{"lit":10}}]}]})RQL"),
+				/*bAllowMutation*/ true, /*bDryRun*/ true, bOk);
+			TestTrue(*FString::Printf(TEXT("a mutation reaches no engine font (%s)"), *Json.Left(300)), bOk && !Json.Contains(TEXT("Font#")));
 		});
 
 		It("reads the console newest first", [this]()

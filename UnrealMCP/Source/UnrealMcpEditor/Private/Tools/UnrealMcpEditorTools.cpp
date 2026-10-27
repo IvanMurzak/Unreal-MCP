@@ -30,6 +30,8 @@ namespace UnrealMcpEditorToolsLocal
 	/** Log lines a console command printed, at most this many (the rest: the console source). */
 	static constexpr int32 ConsoleMaxLogLines = 30;
 	static constexpr int32 ConsoleMaxLogLineChars = 300;
+	/** Output text in the result (the full text stays in the structured 'output' field). */
+	static constexpr int32 ConsoleMaxOutputChars = 8000;
 
 	/**
 	 * The game-thread log lines logged while the command ran: many commands report only there, not to the output device
@@ -92,8 +94,13 @@ namespace UnrealMcpEditorTools
 					LogValues.Add(MakeShared<FJsonValueString>(Line));
 				S->SetArrayField(TEXT("log"), LogValues);
 				FString Text = FString::Printf(TEXT("Ran '%s' (%s)."), *Command, bHandled ? TEXT("handled") : TEXT("not handled"));
-				if (!Output.IsEmpty())
-					Text += TEXT("\nOutput:\n") + Output.TrimEnd();
+				if (const FString Printed = Output.TrimEnd(); !Printed.IsEmpty())
+				{
+					using namespace UnrealMcpEditorToolsLocal;
+					Text += TEXT("\nOutput:\n") + (Printed.Len() <= ConsoleMaxOutputChars ? Printed : Printed.Left(ConsoleMaxOutputChars)
+						+ FString::Printf(TEXT("\n[truncated: %d of %d characters shown; the full text is in the structured 'output' field]"),
+							ConsoleMaxOutputChars, Printed.Len()));
+				}
 				if (LogLines.Num() > 0)
 					Text += TEXT("\nLog:\n") + FString::Join(LogLines, TEXT("\n"));
 				if (MoreLogLines > 0)
