@@ -153,7 +153,7 @@ writable).
 - `UBlueprint`: `Components` (the component templates its Simple Construction Script adds, under their variable names:
   their reflected defaults are writable — `unreal.asset("/Game/BP_Coin").Components | where Name == "Mesh" | set
   StaticMesh = "/Engine/BasicShapes/Sphere"` — and placed actors whose component still holds the old value follow, as
-  after an edit in the Components panel; inherited native components are not listed), `Graphs` (event graphs,
+  after an edit in the Components panel; components inherited from a native class or a parent Blueprint are not listed), `Graphs` (event graphs,
   functions, macros), `EventGraph`, `Status` (`UpToDate`, `Dirty`, `Error`, …);
   `call Compile()` returns `{Succeeded, Errors, Warnings, Messages: [{Severity, Message, Node}]}` (a failed compile is a
   result, not an error; `Node` is the node's `$ref`) and `call AddFunction(name)` adds a function graph.

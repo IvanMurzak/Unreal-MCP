@@ -485,7 +485,9 @@ namespace UnrealMcpBlueprintTools
 
 				const FString NewName = Call.GetString(TEXT("newName"));
 				const FString NewType = Call.GetString(TEXT("newType"));
-				const bool bSetInstanceEditable = Call.Has(TEXT("instanceEditable"));
+				// A JSON null (a client sending every optional field) is no request to change the flag.
+				bool bInstanceEditable = false;
+				const bool bSetInstanceEditable = Call.Arguments->TryGetBoolField(TEXT("instanceEditable"), bInstanceEditable);
 				if (NewName.IsEmpty() && NewType.IsEmpty() && !bSetInstanceEditable)
 					return FUnrealMcpToolResult::Error(TEXT("provide at least one of 'newName', 'newType' or 'instanceEditable'."));
 
@@ -519,7 +521,7 @@ namespace UnrealMcpBlueprintTools
 					EffectiveName = FName(*NewName);
 				}
 				if (bSetInstanceEditable)
-					BlueprintToolsSetInstanceEditable(Blueprint, EffectiveName, Call.GetBool(TEXT("instanceEditable")));
+					BlueprintToolsSetInstanceEditable(Blueprint, EffectiveName, bInstanceEditable);
 
 				return FUnrealMcpToolResult::Success(
 					FString::Printf(TEXT("Modified variable '%s' on '%s' (now '%s')."), *VarName, *Blueprint->GetName(), *EffectiveName.ToString()));

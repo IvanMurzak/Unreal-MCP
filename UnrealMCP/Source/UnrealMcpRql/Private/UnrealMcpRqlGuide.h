@@ -126,7 +126,7 @@ Widgets and sequences:
 
 	inline const char* MutateOutro()
 	{
-		return "Object literals build values: set Settings = {Speed: 2}. At most 20 targets per call: split a bigger edit with first 20 / skip 20.";
+		return "Object literals build values: set Settings = {Speed: 2}. At most 20 targets per call: split a bigger edit with first 20 (repeat while the filter still matches) or first 20 / skip 20.";
 	}
 
 	inline const char* SchemaDescription()

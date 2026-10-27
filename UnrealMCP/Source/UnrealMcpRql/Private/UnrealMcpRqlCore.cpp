@@ -452,7 +452,11 @@ namespace UnrealMcpRqlCoreLocal
 				AActor* Actor = static_cast<AActor*>(Self);
 				if (Actor->GetWorld() != EditorWorld())
 					Throw(FString::Printf(TEXT("%s is not in the editor world"), *Actor->GetActorLabel()));
-				GEditor->SelectActor(Actor, BoolArg(Value), /*bNotify*/ true);
+				const bool bSelect = BoolArg(Value);
+				GEditor->SelectActor(Actor, bSelect, /*bNotify*/ true, /*bSelectEvenIfHidden*/ true);
+				if (Actor->IsSelected() != bSelect)
+					Throw(FString::Printf(TEXT("the editor refused to %s %s (a locked actor, or one inside a level instance)"),
+						bSelect ? TEXT("select") : TEXT("deselect"), *Actor->GetActorLabel()));
 			}, "selected in the editor (set Selected = true adds to the selection; editor | set Selection = [...] replaces it)"));
 		D.display_name = "Label";
 		D.display_explicit = true;

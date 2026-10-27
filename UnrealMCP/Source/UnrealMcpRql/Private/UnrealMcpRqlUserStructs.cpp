@@ -107,7 +107,7 @@ namespace UnrealMcpRqlUserStructsLocal
 				// AddVariable appends a field with a generated name: give it the requested one.
 				FStructVariableDescription& Added = FStructureEditorUtils::GetVarDesc(Struct).Last();
 				const FGuid Guid = Added.VarGuid;
-				if (!FStructureEditorUtils::RenameVariable(Struct, Guid, Name))
+				if (!Added.FriendlyName.Equals(Name, ESearchCase::CaseSensitive) && !FStructureEditorUtils::RenameVariable(Struct, Guid, Name))
 				{
 					FStructureEditorUtils::RemoveVariable(Struct, Guid);
 					Throw(FString::Printf(TEXT("'%s' is not a valid field name"), *Name));

@@ -8,7 +8,9 @@
 #include "Tools/UnrealMcpObjectRef.h"
 
 #include "Containers/StringConv.h"
+#include "Components/ActorComponent.h"
 #include "Engine/BlueprintGeneratedClass.h"
+#include "Engine/World.h"
 #include "Engine/LevelScriptActor.h"
 #include "GameFramework/Actor.h"
 #include "HAL/UnrealMemory.h"
@@ -115,15 +117,15 @@ namespace UnrealMcpRqlTypesLocal
 	}
 
 	/**
-	 * A variable a Blueprint actor class declares that AActor::ResetPropertiesForConstruction copies back from the class
-	 * default before every construction script run: Blueprint-writable but not editable per instance (a new Blueprint
-	 * variable without "Instance Editable"). Level script actors and delegates are not reset.
+	 * A property of a Blueprint actor class that AActor::ResetPropertiesForConstruction copies back from the class default
+	 * before every construction script run: Blueprint-writable but not editable per instance (a new Blueprint variable
+	 * without "Instance Editable", a native EditDefaultsOnly + BlueprintReadWrite one). Only Blueprint classes rerun their
+	 * construction script; level script actors and delegates are not reset.
 	 */
-	bool IsResetByConstruction(const FProperty* Property)
+	bool IsResetByConstruction(const UClass* ActorClass, const FProperty* Property)
 	{
-		const UClass* Owner = Property->GetOwnerClass();
-		if (!Owner || !Cast<UBlueprintGeneratedClass>(Owner) || !Owner->IsChildOf(AActor::StaticClass())
-			|| Owner->IsChildOf(ALevelScriptActor::StaticClass()))
+		if (!ActorClass || !Cast<UBlueprintGeneratedClass>(ActorClass) || !ActorClass->IsChildOf(AActor::StaticClass())
+			|| ActorClass->IsChildOf(ALevelScriptActor::StaticClass()))
 			return false;
 		if (Property->IsA<FDelegateProperty>() || Property->IsA<FMulticastDelegateProperty>())
 			return false;
@@ -693,11 +695,9 @@ void FUnrealMcpRqlTypes::AddPropertyMember(rql::TypeDescriptor& Descriptor, FPro
 	Member.nullable = bNullable;
 	Member.owning = IsOwning(Property);
 	Member.readonly = bOnObject ? !(bForceWritable || IsWritableOnClass(Property)) : false;
-	if (bOnObject && !bForceWritable && !Member.readonly && IsResetByConstruction(Property))
+	if (bOnObject && !bForceWritable && !Member.readonly && IsResetByConstruction(Property->GetOwnerClass(), Property))
 	{
-		// A placed Blueprint actor resets this variable to the class default whenever its construction script reruns
-		// (every edit does), so a write would report success and then vanish.
-		Member.readonly = true;
+		// Writable on actors in Play In Editor; WriteObjectProperty refuses it on placed (editor) actors.
 		Member.description = "not Instance Editable: placed actors always use the Blueprint default; change it with "
 			"blueprint-set-default, or make the variable Instance Editable (blueprint-modify-variable instanceEditable=true)";
 	}
@@ -1138,14 +1138,22 @@ void FUnrealMcpRqlTypes::WriteObjectProperty(UObject* Object, FProperty* Propert
 {
 	if (!Object)
 		Throw(TEXT("the object is gone"));
+	// A placed Blueprint actor resets such a property to the class default whenever its construction script reruns (every
+	// edit does): the write would report success and then vanish. Play In Editor actors do not rerun it.
+	if (const AActor* Actor = Cast<AActor>(Object); Actor && !Object->IsTemplate() && !(Actor->GetWorld() && Actor->GetWorld()->IsGameWorld())
+		&& IsResetByConstruction(Actor->GetClass(), Property))
+		Throw(FString::Printf(TEXT("'%s' is not Instance Editable, so placed %s actors always use the Blueprint default: change the "
+			"default with blueprint-set-default, or make the variable Instance Editable first (blueprint-modify-variable instanceEditable=true)"),
+			*Property->GetAuthoredName(), *Actor->GetClass()->GetName()));
 	// The editor's own property-change path, so components refresh (transforms, render state) and Blueprint actors rerun
 	// their construction script — exactly as an edit in the Details panel.
 	// PreEditChange and PostEditChangeProperty always pair up: an actor unregisters its components in PreEditChange and
 	// re-registers them in PostEditChangeProperty, so a failing write must still send the post notification.
 	// An archetype (a Blueprint's component template) passes the change on to the objects made from it that still hold
 	// its old value, as the Details panel does: placed actors follow a new default unless they override it.
+	// Instanced sub-objects are not copied over (each owner needs its own): the construction rerun rebuilds those.
 	TArray<UObject*> Instances;
-	if (Object->HasAnyFlags(RF_ArchetypeObject) && !Object->HasAnyFlags(RF_ClassDefaultObject))
+	if (Object->HasAnyFlags(RF_ArchetypeObject) && !Object->HasAnyFlags(RF_ClassDefaultObject) && !Property->ContainsInstancedObjectProperty())
 		Object->GetArchetypeInstances(Instances);
 	TOptional<FTempValue> Old;
 	if (Instances.Num() > 0)
@@ -1168,12 +1176,21 @@ void FUnrealMcpRqlTypes::WriteObjectProperty(UObject* Object, FProperty* Propert
 	const void* New = Property->ContainerPtrToValuePtr<void>(Object);
 	for (UObject* Instance : Instances)
 	{
-		if (!IsValid(Instance) || Instance->HasAnyFlags(RF_ClassDefaultObject) || Instance->GetClass() != Object->GetClass())
+		// Direct instances only (a child Blueprint's template holds its own value), never the running Play In Editor copies.
+		if (!IsValid(Instance) || Instance->HasAnyFlags(RF_ClassDefaultObject) || Instance->GetArchetype() != Object
+			|| Instance->GetClass() != Object->GetClass() || (Instance->GetWorld() && Instance->GetWorld()->IsGameWorld()))
 			continue;
 		void* Current = Property->ContainerPtrToValuePtr<void>(Instance);
 		if (!Property->Identical(Current, Old->Ptr))
 			continue; // the instance overrides this value: keep it
-		Instance->Modify();
+		// As FComponentEditorUtils::ApplyDefaultValueChange: a component the construction script made is rebuilt on undo
+		// through its owner, so the owner is recorded instead of the component.
+		UActorComponent* Component = Cast<UActorComponent>(Instance);
+		AActor* Owner = Component ? Component->GetOwner() : nullptr;
+		if (Owner)
+			Owner->Modify();
+		if (!Component || !Component->IsCreatedByConstructionScript())
+			Instance->Modify();
 		Instance->PreEditChange(Property);
 		Property->CopyCompleteValue(Current, New);
 		FPropertyChangedEvent InstanceEvent(Property, EPropertyChangeType::ValueSet);

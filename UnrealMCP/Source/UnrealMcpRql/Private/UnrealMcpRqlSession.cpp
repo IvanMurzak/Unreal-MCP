@@ -244,15 +244,28 @@ void FUnrealMcpRqlSession::ConfigureMutations()
 	rql::MutationPolicy& Policy = EnginePtr->mutations();
 	Policy.enabled = true;
 	FUnrealMcpRqlTypes* TypeProvider = TypesPtr.Get();
-	// The object whose saved state a record changes: null for editor view state (an actor's selection or its temporary
-	// viewport hiding), which is not saved with the level and must not mark it unsaved.
-	auto OwnerOf = [TypeProvider](const rql::MutationRecord& Record) -> UObject*
+	auto WrittenObject = [TypeProvider](const rql::MutationRecord& Record) -> UObject*
 	{
-		if (!Record.method && (Record.member == "Selected" || Record.member == "HiddenInEditor")
-			&& Cast<AActor>(TypeProvider->AsObject(Record.item)))
-			return nullptr;
 		UObject* Owner = TypeProvider->AsObject(Record.owner);
 		return Owner ? Owner : TypeProvider->AsObject(Record.item);
+	};
+	// The actor whose editor view state (its selection, its temporary viewport hiding) a record sets: not saved with the
+	// level, so it must not mark the level unsaved. The core members only: a class property of that name is saved data.
+	auto ViewStateActor = [WrittenObject](const rql::MutationRecord& Record) -> AActor*
+	{
+		if (Record.method)
+			return nullptr;
+		FString Member = UnrealMcpRqlFromStd(Record.member);
+		Member.Split(TEXT("."), nullptr, &Member, ESearchCase::CaseSensitive, ESearchDir::FromEnd);
+		if (!Member.Equals(TEXT("Selected"), ESearchCase::IgnoreCase) && !Member.Equals(TEXT("HiddenInEditor"), ESearchCase::IgnoreCase))
+			return nullptr;
+		AActor* Actor = Cast<AActor>(WrittenObject(Record));
+		return Actor && !FindFProperty<FProperty>(Actor->GetClass(), *Member) ? Actor : nullptr;
+	};
+	// The object whose saved state a record changes (null for view state).
+	auto OwnerOf = [WrittenObject, ViewStateActor](const rql::MutationRecord& Record) -> UObject*
+	{
+		return ViewStateActor(Record) ? nullptr : WrittenObject(Record);
 	};
 	// One editor transaction per mutation (one Ctrl+Z step): owners are snapshotted before the first write. Objects the
 	// calls create with RF_Transactional (SpawnActor, AddComponent, ...) are recorded into the same transaction.
@@ -265,7 +278,7 @@ void FUnrealMcpRqlSession::ConfigureMutations()
 		}
 		return false;
 	};
-	Policy.before_write = [this, OwnerOf, TypeProvider, IsWritableTemplate](const std::vector<rql::MutationRecord>& Records)
+	Policy.before_write = [this, OwnerOf, ViewStateActor, TypeProvider, IsWritableTemplate](const std::vector<rql::MutationRecord>& Records)
 	{
 		// Class defaults and archetypes (the class-default sources' rows, a Blueprint's defaults) are read-only: an
 		// in-memory change to a CDO is not a saved edit and leaks into every new instance. API objects (`editor`, the
@@ -288,6 +301,8 @@ void FUnrealMcpRqlSession::ConfigureMutations()
 			UObject* Owner = OwnerOf(Record);
 			if (IsProjectObject(Owner))
 				Owner->Modify();
+			else if (AActor* Actor = ViewStateActor(Record))
+				Actor->Modify(/*bAlwaysMarkDirty*/ false); // undoable, without marking the level unsaved
 		}
 	};
 	// Property writes already ran the editor's PreEditChange / PostEditChangeProperty; mark what changed as unsaved.

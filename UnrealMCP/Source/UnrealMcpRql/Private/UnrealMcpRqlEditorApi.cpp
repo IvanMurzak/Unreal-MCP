@@ -94,8 +94,11 @@ namespace UnrealMcpRqlEditorApiLocal
 		return Actor;
 	}
 
-	/** The generated class of the one Blueprint asset named @p Name ("BP_Door"), when exactly one actor Blueprint has it. */
-	UClass* BlueprintClassByName(const FString& Name)
+	/**
+	 * The generated class of the one actor Blueprint asset named @p Name ("BP_Door"); null when there is none, or when
+	 * several have the name (their paths in @p OutAmbiguous).
+	 */
+	UClass* BlueprintClassByName(const FString& Name, TArray<FString>& OutAmbiguous)
 	{
 		if (Name.IsEmpty() || Name.Contains(TEXT("/")) || Name.Contains(TEXT(".")))
 			return nullptr;
@@ -103,6 +106,7 @@ namespace UnrealMcpRqlEditorApiLocal
 		TArray<FAssetData> Found;
 		Registry.GetAssetsByClass(UBlueprint::StaticClass()->GetClassPathName(), Found, /*bSearchSubClasses*/ true);
 		UClass* Match = nullptr;
+		TArray<FString> Paths;
 		for (const FAssetData& Data : Found)
 		{
 			if (!Data.AssetName.ToString().Equals(Name, ESearchCase::IgnoreCase))
@@ -111,9 +115,13 @@ namespace UnrealMcpRqlEditorApiLocal
 			UClass* Class = Blueprint ? Blueprint->GeneratedClass.Get() : nullptr;
 			if (!Class || !Class->IsChildOf(AActor::StaticClass()))
 				continue;
-			if (Match)
-				return nullptr; // ambiguous: the caller asks for the path
+			Paths.Add(Data.PackageName.ToString());
 			Match = Class;
+		}
+		if (Paths.Num() > 1)
+		{
+			OutAmbiguous = MoveTemp(Paths);
+			return nullptr;
 		}
 		return Match;
 	}
@@ -223,9 +231,14 @@ AActor* UUnrealMcpRqlEditorApi::SpawnActor(const FString& ClassName, const FStri
 		if (Class->IsChildOf(AActor::StaticClass()))
 			return UnrealMcpRql::SpawnActor(Class, Location, Rotation, Label, Parent);
 	}
-	else if (UClass* Blueprint = BlueprintClassByName(ClassName))
+	else
 	{
-		return UnrealMcpRql::SpawnActor(Blueprint, Location, Rotation, Label, Parent);
+		TArray<FString> Ambiguous;
+		if (UClass* Blueprint = BlueprintClassByName(ClassName, Ambiguous))
+			return UnrealMcpRql::SpawnActor(Blueprint, Location, Rotation, Label, Parent);
+		if (Ambiguous.Num() > 0)
+			return Failed<AActor*>(FString::Printf(TEXT("several Blueprints are named '%s': use a path (%s)"), *ClassName,
+				*FString::Join(Ambiguous, TEXT(", "))));
 	}
 	// An asset the editor can place (a mesh dragged into the viewport becomes a StaticMeshActor showing it).
 	if (ClassName.StartsWith(TEXT("/")))

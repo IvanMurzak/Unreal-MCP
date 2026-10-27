@@ -775,6 +775,7 @@ void FUnrealMcpRqlDataModelsSpec::Define()
 			Overrider->SetActorLabel(TEXT("RqlSeqLampBPOverride"));
 			UStaticMesh* Cone = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cone.Cone"));
 			Overrider->FindComponentByClass<UStaticMeshComponent>()->SetStaticMesh(Cone);
+			Made->GetOutermost()->SetDirtyFlag(false);
 
 			Must(TEXT("template mesh"), /* unreal.asset("@BP@").Components | where Name == "RqlMesh" | set StaticMesh = "/Engine/BasicShapes/Sphere" */ TEXT(R"RQL({"rql":"0.1","source":{"path":["Components"],"on":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@BP@"}]}},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Name"]},{"lit":"RqlMesh"}]}},{"op":"set","assign":[{"target":{"path":["StaticMesh"]},"value":{"lit":"/Engine/BasicShapes/Sphere"}}]}]})RQL"));
 			UStaticMeshComponent* Template = Cast<UStaticMeshComponent>(Node->ComponentTemplate);
@@ -797,19 +798,22 @@ void FUnrealMcpRqlDataModelsSpec::Define()
 		{
 			UBlueprint* Made = MakeBlueprint();
 			Must(TEXT("spawned"), /* editor | call SpawnActor("@BPNAME@", "RqlSeqLampBP") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"SpawnActor","args":[{"lit":"@BPNAME@"},{"lit":"RqlSeqLampBP"}]}]})RQL"), { { TEXT("BPNAME"), FPackageName::GetShortName(Blueprint) } });
-			Refuses(TEXT("not instance editable"), /* unreal.find("RqlSeqLampBP") | set Health = 5 */ TEXT(R"RQL({"rql":"0.1","source":{"call":"find","on":{"path":["unreal"]},"args":[{"lit":"RqlSeqLampBP"}]},"stages":[{"op":"set","assign":[{"target":{"path":["Health"]},"value":{"lit":5}}]}]})RQL"), TEXT("readonly-member"));
+			Refuses(TEXT("not Instance Editable"), /* unreal.find("RqlSeqLampBP") | set Health = 5 */ TEXT(R"RQL({"rql":"0.1","source":{"call":"find","on":{"path":["unreal"]},"args":[{"lit":"RqlSeqLampBP"}]},"stages":[{"op":"set","assign":[{"target":{"path":["Health"]},"value":{"lit":5}}]}]})RQL"), TEXT("is not Instance Editable"));
 			FBlueprintEditorUtils::SetBlueprintOnlyEditableFlag(Made, TEXT("Health"), /*bNewFlag*/ false);
 			FKismetEditorUtilities::CompileBlueprint(Made);
 			Must(TEXT("instance editable now"), /* unreal.find("RqlSeqLampBP") | set Health = 5 */ TEXT(R"RQL({"rql":"0.1","source":{"call":"find","on":{"path":["unreal"]},"args":[{"lit":"RqlSeqLampBP"}]},"stages":[{"op":"set","assign":[{"target":{"path":["Health"]},"value":{"lit":5}}]}]})RQL"));
 			UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+			bool bFound = false;
 			for (TActorIterator<AActor> It(World); It; ++It)
 			{
 				if (It->GetActorLabel() == TEXT("RqlSeqLampBP"))
 				{
+					bFound = true;
 					const FDoubleProperty* Health = FindFProperty<FDoubleProperty>(It->GetClass(), TEXT("Health"));
 					TestTrue(TEXT("the value stuck"), Health && Health->GetPropertyValue_InContainer(*It) == 5.0);
 				}
 			}
+			TestTrue(TEXT("the placed actor is still there"), bFound);
 		});
 	});
 
