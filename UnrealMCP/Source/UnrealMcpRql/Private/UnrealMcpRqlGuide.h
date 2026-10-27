@@ -40,7 +40,7 @@ Stages:
 Expressions: == != < <= > >= and or not + - * / %; contains, starts-with, ends-with, matches "regex" (all case-insensitive); x in [a, b]; x is null; x is not null; $ is PointLight (includes subclasses); has(member); functions abs round floor ceil sqrt pow min(a, b) max(a, b) len lower upper coalesce. After select, sort / where use the column names (sort Owner.Label). Literals: numbers, "strings", true/false/null, lists [a, b], objects {X: 1, Y: 2}.
 Paths: a.b.c, list[0], map["key"]; .member on a list maps over its elements. List methods: .any(pred) .all(pred) .count([pred]) .sum(e) .min(e) .max(e) .first([pred]); inside them bare names refer to the element, falling back to the outer item.
 Meta: $ (current item), $ref (stable id such as PointLight#1234), $type, $path, $index, $depth. Enums compare to strings (Mobility == "Movable"); == on strings is case-sensitive.
-Unreal: every object has Id, Name, Path. Actor has Label, Location, Rotation, Scale (world transform), Components (list), Children (attached actors), Parent, Folder, Level, HiddenInEditor. Other members are the reflected properties (UPROPERTY EditAnywhere / VisibleAnywhere / BlueprintVisible) under their C++ names (bHidden, Intensity, RelativeLocation, StaticMesh); find them via actors | get Components | where $ is PointLightComponent. Vectors, rotators and colors print as (x, y, z) (rotators (pitch, yaw, roll)); write "(1, 2, 3)", [1, 2, 3] or {X: 1, Y: 2, Z: 3}; colors also "#ff8800". Object references accept ref("..."), unreal.asset(path) or an asset path "/Game/Meshes/SM_Cube". Material parameters: Scalars["Roughness"], Vectors["BaseColor"], Textures["Albedo"]. Gameplay tags are text: Tag == "Ability.Fire", set Tags = ["Ability.Fire", "State.Stunned"] (registered tags only). DataTable rows: Rows["Sword"].Damage (RowNames, RowStructName). Blueprints: Graphs / EventGraph -> Nodes -> Pins (Name Direction Type DefaultValue LinkedTo). Widget Blueprints: RootWidget / Widgets, panels have Children, widgets Parent and Slot. Level Sequences: Bindings -> Tracks -> Sections -> Channels (frames at the display rate). Destroyed objects read as null (where StaticMesh == null finds empty references). Navigate with paths or get; select only projects output columns.
+Unreal: every object has Id, Name, Path. Actor has Label, Location, Rotation, Scale (world transform), Components (list), Children (attached actors), Parent, Folder, Level, HiddenInEditor, Selected. Other members are the reflected properties (UPROPERTY EditAnywhere / VisibleAnywhere / BlueprintVisible) under their C++ names (bHidden, Intensity, RelativeLocation, StaticMesh); find them via actors | get Components | where $ is PointLightComponent. Vectors, rotators and colors print as (x, y, z) (rotators (pitch, yaw, roll)); write "(1, 2, 3)", [1, 2, 3] or {X: 1, Y: 2, Z: 3}; colors also "#ff8800". Object references accept ref("..."), unreal.asset(path) or an asset path "/Game/Meshes/SM_Cube". Material parameters: Scalars["Roughness"], Vectors["BaseColor"], Textures["Albedo"]. Gameplay tags are text: Tag == "Ability.Fire", set Tags = ["Ability.Fire", "State.Stunned"] (registered tags only). DataTable rows: Rows["Sword"].Damage (RowNames, RowStructName). Blueprints: Components (the components it adds; their defaults: StaticMesh, ...), Graphs / EventGraph -> Nodes -> Pins (Name Direction Type DefaultValue LinkedTo). User-defined structs: Fields. Widget Blueprints: RootWidget / Widgets, panels have Children, widgets Parent and Slot. Level Sequences: Bindings -> Tracks -> Sections -> Channels (frames at the display rate). Destroyed objects read as null (where StaticMesh == null finds empty references). Navigate with paths or get; select only projects output columns.
 Results come back as compact rows (header line, then col|col). Long results are truncated - refine with where/first or use count. Unknown members produce warnings with suggestions; rql-schema(type) lists a type's members.)RQL";
 	}
 
@@ -86,19 +86,21 @@ Levels, assets, editor state:
   editor | call CreateMaterialInstance("/Game/Materials/MI_Glow", "/Game/Materials/M_Base")
   editor | call CreateAsset("/Game/Data/DA_Sword", "WeaponData")         any asset class (the editor's factory when it has one)
   editor | call CopyAsset("/Game/A", "/Game/B")    MoveAsset / DeleteAsset / CreateFolder("/Game/Props") / ImportAsset("C:/art/crate.fbx", "/Game/Props")
-  editor | set Selection = [ref("StaticMeshActor#1234")]        editor | set IsPlaying = true
+  editor | set Selection = [ref("StaticMeshActor#1234")]        actors | where $ is PointLight | set Selected = true        editor | set IsPlaying = true
 Data, tags, settings (settings are saved to their ini at once, tag edits too; neither is undoable):
   unreal.asset("/Game/Data/DT_Weapons") | set Rows["Sword"].Damage = 12        call AddRow("Bow", {Damage: 7}) / RemoveRow / RenameRow / DuplicateRow
   editor | call CreateDataTable("/Game/Data/DT_Weapons", "WeaponRow")      editor | call AddGameplayTag("Ability.Fire", "fire ability")
+  editor | call CreateAsset("/Game/Data/S_Enemy", "UserDefinedStruct")      unreal.asset("/Game/Data/S_Enemy") | call AddField("Health", "float", 100)   RemoveField / RenameField / SetFieldDefault
   unreal.settings("Maps & Modes") | set GameDefaultMap = "/Game/Maps/Arena"
-Blueprint graphs (each Add* returns the node; connect by pin name; Compile returns errors with the node's $ref):
+Blueprints (component defaults reach placed actors that keep the old value; each graph Add* returns the node; connect by pin name; Compile returns errors with the node's $ref):
+  unreal.asset("/Game/BP_Coin").Components | where Name == "Mesh" | set StaticMesh = "/Engine/BasicShapes/Sphere"
   unreal.asset("/Game/BP_Door").EventGraph | call AddEvent("BeginPlay")      AddCallFunction("PrintString") / AddVariableGet("Health") / AddNode("Branch")
   ref("K2Node_Event#12") | call Connect("then", ref("K2Node_CallFunction#34"), "execute")     ref("K2Node_CallFunction#34") | call SetPinDefault("InString", "Hi")
   unreal.asset("/Game/BP_Door") | call Compile()
 Widgets and sequences:
   unreal.asset("/Game/UI/WBP_Menu") | call AddWidget("Button", "Play", ref("VerticalBox#56"))      ref("TextBlock#78") | set Text = "Play"
   unreal.asset("/Game/Cine/LS_Intro") | call AddActor(unreal.find("Door"))      ... | get Bindings | where Name == "Door" | call AddTrack("Transform")
-  unreal.asset("/Game/Cine/LS_Intro") | get Bindings | get Tracks | get Sections | call AddKey("Location.Z", 30, 200)
+  unreal.asset("/Game/Cine/LS_Intro") | get Bindings | get Tracks | get Sections | call AddKey("Location.Z", 30, 200)    channels: Location.X, Rotation.Yaw, Scale.Z ...
 )RQL";
 	}
 
@@ -117,14 +119,14 @@ Widgets and sequences:
 	{
 		return "Change the live Unreal Editor with an RQL query whose last stage is set or call. All-or-nothing: every target and "
 			"value is checked before anything is written; a failure changes nothing. One undo step in the editor (Ctrl+Z). Changes "
-			"are not saved to disk: call SaveLevel / SaveAll / SaveAsset when the user wants them saved. dry_run=true returns the "
+			"are not saved to disk: when the user wants them saved, run editor | call SaveAsset(\"/Game/Path\") (one asset), SaveLevel() or SaveAll(). dry_run=true returns the "
 			"receipt ($ref, member, old, new) without changing anything. Do exactly the change requested; a read-only member fails "
 			"with readonly-member instead of being approximated.";
 	}
 
 	inline const char* MutateOutro()
 	{
-		return "Object literals build values: set Settings = {Speed: 2}. At most 20 targets per call.";
+		return "Object literals build values: set Settings = {Speed: 2}. At most 20 targets per call: split a bigger edit with first 20 / skip 20.";
 	}
 
 	inline const char* SchemaDescription()

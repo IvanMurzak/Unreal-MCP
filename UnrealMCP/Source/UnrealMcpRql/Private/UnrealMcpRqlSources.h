@@ -24,6 +24,13 @@ rql::Value UnrealMcpRqlAssetList(FUnrealMcpRqlTypes& Types, UClass* Class, const
  */
 rql::Value UnrealMcpRqlClassDefaultsList(FUnrealMcpRqlTypes& Types, UClass* Base);
 
+/**
+ * " (did you mean /Engine/BasicShapes/Cube?)": up to three asset paths of @p Class whose name matches the last part of
+ * @p Text ("Cube", "/Game/Mehses/Cube"), for a reference that resolved to nothing; "" when there is none (or for actor and
+ * class references, which do not name assets).
+ */
+FString UnrealMcpRqlSimilarAssets(UClass* Class, const FString& Text);
+
 /** Text and list literals of the math structs: "(1, 2, 3)", "X=1 Y=2 Z=3", [1, 2, 3], "#ff8800" (colors). False (and no
  * error) for other structs and value kinds; false + @p OutError for a malformed literal. FUnrealMcpRqlTypes::CoerceStruct uses it. */
 bool UnrealMcpRqlParseMathStruct(UScriptStruct* Struct, const rql::Value& Value, void* Out, FString& OutError);
@@ -40,6 +47,9 @@ void UnrealMcpRqlAddStructAdapters(FUnrealMcpRqlSession& Session);
 
 /** DataTable rows: UDataTable `Rows` (row name -> row struct), RowNames, RowCount, row calls; the `dataTables` source. */
 void UnrealMcpRqlAddDataTables(FUnrealMcpRqlSession& Session);
+
+/** User-defined structs: UUserDefinedStruct `Fields` and the Struct editor's AddField / RemoveField / RenameField / SetFieldDefault. */
+void UnrealMcpRqlAddUserStructs(FUnrealMcpRqlSession& Session);
 
 /** Gameplay tags as text ("A.B.C") / lists, validated against the tag tree; the `gameplayTags` source. */
 void UnrealMcpRqlAddGameplayTags(FUnrealMcpRqlSession& Session);

@@ -371,7 +371,9 @@ void UnrealMcpRqlAddGameplayTags(FUnrealMcpRqlSession& Session)
 			bool bAllowChildren = false;
 			if (Manager.GetTagEditorData(Tag.GetTagName(), Comment, Source, bExplicit, bRestricted, bAllowChildren))
 			{
-				Info->Comment = UnrealMcpRqlToStd(Comment);
+				// An implicit parent ("Enemy" of "Enemy.Elite") has no entry of its own: the engine hands it the comment of the
+				// child that created it, which is not the parent's.
+				Info->Comment = bExplicit ? UnrealMcpRqlToStd(Comment) : std::string();
 				Info->Source = Source.IsNone() ? std::string() : UnrealMcpRqlToStd(Source.ToString());
 				Info->Explicit = bExplicit;
 				Info->Restricted = bRestricted;

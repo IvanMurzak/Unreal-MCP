@@ -244,8 +244,13 @@ void FUnrealMcpRqlSession::ConfigureMutations()
 	rql::MutationPolicy& Policy = EnginePtr->mutations();
 	Policy.enabled = true;
 	FUnrealMcpRqlTypes* TypeProvider = TypesPtr.Get();
+	// The object whose saved state a record changes: null for editor view state (an actor's selection or its temporary
+	// viewport hiding), which is not saved with the level and must not mark it unsaved.
 	auto OwnerOf = [TypeProvider](const rql::MutationRecord& Record) -> UObject*
 	{
+		if (!Record.method && (Record.member == "Selected" || Record.member == "HiddenInEditor")
+			&& Cast<AActor>(TypeProvider->AsObject(Record.item)))
+			return nullptr;
 		UObject* Owner = TypeProvider->AsObject(Record.owner);
 		return Owner ? Owner : TypeProvider->AsObject(Record.item);
 	};

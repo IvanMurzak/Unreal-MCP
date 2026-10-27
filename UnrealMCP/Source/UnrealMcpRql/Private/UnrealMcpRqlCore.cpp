@@ -19,6 +19,7 @@
 #include "EditorLevelUtils.h"
 #include "Engine/Blueprint.h"
 #include "Engine/Level.h"
+#include "Engine/SimpleConstructionScript.h"
 #include "Engine/Texture.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
@@ -422,7 +423,8 @@ namespace UnrealMcpRqlCoreLocal
 					Throw(FString::Printf(TEXT("attaching %s to %s would create a cycle"), *Actor->GetActorLabel(), *Parent->GetActorLabel()));
 				Actor->AttachToActor(Parent, FAttachmentTransformRules::KeepWorldTransform);
 				if (Actor->GetAttachParentActor() != Parent)
-					Throw(FString::Printf(TEXT("could not attach %s (no root component)"), *Actor->GetActorLabel()));
+					Throw(FString::Printf(TEXT("could not attach %s to %s%s"), *Actor->GetActorLabel(), *Parent->GetActorLabel(),
+						*UnrealMcpRqlAttachFailure(Actor, Parent)));
 			}, "the actor this one is attached to (keeps the world transform; null detaches)", false, true));
 		FUnrealMcpRqlTypes::SetMember(D, Member("Folder", StringType(),
 			[](void* Self)
@@ -441,6 +443,17 @@ namespace UnrealMcpRqlCoreLocal
 			[](void* Self) { return rql::Value::boolean(static_cast<AActor*>(Self)->IsTemporarilyHiddenInEditor()); },
 			[](void* Self, const rql::Value& Value) { static_cast<AActor*>(Self)->SetIsTemporarilyHiddenInEditor(BoolArg(Value)); },
 			"hidden in the editor viewport (the Outliner eye)"));
+		FUnrealMcpRqlTypes::SetMember(D, Member("Selected", BoolType(),
+			[](void* Self) { return rql::Value::boolean(static_cast<AActor*>(Self)->IsSelected()); },
+			[](void* Self, const rql::Value& Value)
+			{
+				if (!GEditor)
+					Throw(TEXT("no editor"));
+				AActor* Actor = static_cast<AActor*>(Self);
+				if (Actor->GetWorld() != EditorWorld())
+					Throw(FString::Printf(TEXT("%s is not in the editor world"), *Actor->GetActorLabel()));
+				GEditor->SelectActor(Actor, BoolArg(Value), /*bNotify*/ true);
+			}, "selected in the editor (set Selected = true adds to the selection; editor | set Selection = [...] replaces it)"));
 		D.display_name = "Label";
 		D.display_explicit = true;
 
@@ -497,6 +510,16 @@ namespace UnrealMcpRqlCoreLocal
 	void ComponentMembers(FUnrealMcpRqlTypes& T, rql::TypeDescriptor& D)
 	{
 		FUnrealMcpRqlTypes* Types = &T;
+		// A Blueprint's component templates are objects named "<Variable>_GEN_VARIABLE": they read under the variable name,
+		// the name the components made from them have in placed actors.
+		FUnrealMcpRqlTypes::SetMember(D, Member("Name", StringType(), [](void* Self)
+		{
+			const UActorComponent* Component = static_cast<UActorComponent*>(Self);
+			FString Name = Component->GetName();
+			if (Component->HasAnyFlags(RF_ArchetypeObject))
+				Name.RemoveFromEnd(USimpleConstructionScript::ComponentTemplateNameSuffix);
+			return Str(Name);
+		}));
 		FUnrealMcpRqlTypes::SetMember(D, Member("Owner", T.ForClass(AActor::StaticClass()),
 			[Types](void* Self) { return Types->WrapObject(static_cast<UActorComponent*>(Self)->GetOwner()); }, {}, "the owning actor", false, true));
 		FUnrealMcpRqlTypes::AddMethod(D, Method("Destroy", {}, nullptr, [](void* Self, const std::vector<rql::Value>&) -> rql::Value
@@ -804,6 +827,37 @@ rql::Value UnrealMcpRqlAssetList(FUnrealMcpRqlTypes& Types, UClass* Class, const
 	return rql::Value::list(std::make_shared<FAssetList>(&Types, MoveTemp(Assets), Types.Registry().list_type(Element, true)));
 }
 
+FString UnrealMcpRqlSimilarAssets(UClass* Class, const FString& Text)
+{
+	if (!Class || Class == UObject::StaticClass() || Class->IsChildOf(AActor::StaticClass()) || Class->IsChildOf(UClass::StaticClass()))
+		return FString();
+	// The asset name the text means: the last path part, without an object suffix ("/Game/A/SM_Rock.SM_Rock").
+	FString Name = Text.TrimStartAndEnd();
+	Name.Split(TEXT("/"), nullptr, &Name, ESearchCase::CaseSensitive, ESearchDir::FromEnd);
+	Name.Split(TEXT("."), &Name, nullptr);
+	if (Name.IsEmpty())
+		return FString();
+	IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
+	TArray<FAssetData> Assets;
+	Registry.GetAssetsByClass(Class->GetClassPathName(), Assets, /*bSearchSubClasses*/ true);
+	TArray<FString> Exact, Partial;
+	for (const FAssetData& Data : Assets)
+	{
+		const FString AssetName = Data.AssetName.ToString();
+		if (AssetName.Equals(Name, ESearchCase::IgnoreCase))
+			Exact.Add(Data.PackageName.ToString());
+		else if ((Name.Len() >= 3 && AssetName.Contains(Name)) || (AssetName.Len() >= 4 && Name.Contains(AssetName)))
+			Partial.Add(Data.PackageName.ToString());
+	}
+	TArray<FString>& Hits = Exact.Num() > 0 ? Exact : Partial;
+	if (Hits.Num() == 0)
+		return FString();
+	Hits.Sort();
+	if (Hits.Num() > 3)
+		Hits.SetNum(3);
+	return FString::Printf(TEXT(" (did you mean %s?)"), *FString::Join(Hits, TEXT(", ")));
+}
+
 rql::Value UnrealMcpRqlClassDefaultsList(FUnrealMcpRqlTypes& Types, UClass* Base)
 {
 	TArray<FClassDefaultsList::FEntry> Entries;
@@ -881,6 +935,7 @@ void UnrealMcpRqlConfigureCore(FUnrealMcpRqlSession& Session)
 	UnrealMcpRqlAddStructAdapters(Session);
 	UnrealMcpRqlAddGameplayTags(Session);
 	UnrealMcpRqlAddDataTables(Session);
+	UnrealMcpRqlAddUserStructs(Session);
 	UnrealMcpRqlAddSettings(Session);
 	UnrealMcpRqlAddBlueprints(Session);
 	UnrealMcpRqlAddWidgets(Session);
@@ -902,7 +957,7 @@ void UnrealMcpRqlConfigureCore(FUnrealMcpRqlSession& Session)
 			UObject* Found = FUnrealMcpObjectRef::ResolveReference(Wanted, Text);
 			if (!Found)
 			{
-				Reason = UnrealMcpRqlToStd(FString::Printf(TEXT("no %s '%s'"), *Wanted->GetName(), *Text));
+				Reason = UnrealMcpRqlToStd(FString::Printf(TEXT("no %s '%s'%s"), *Wanted->GetName(), *Text, *UnrealMcpRqlSimilarAssets(Wanted, Text)));
 				return rql::AdapterOutcome::Failed;
 			}
 			Result = Types->WrapObject(Found);

@@ -376,6 +376,46 @@ void FUnrealMcpBlueprintToolsSpec::Define()
 			// A second add for the same event must be rejected (no duplicate ghost node).
 			TestFalse(TEXT("duplicate event rejected"), Run(Registry, TEXT("blueprint-add-event"), AddEvent).bSuccess);
 		});
+
+		It("sets Instance Editable on add-variable and toggles it with modify-variable", [this]()
+		{
+			FUnrealMcpToolRegistry Registry;
+			UnrealMcpBlueprintTools::Register(Registry);
+			const FString ObjectPath = CreateBlueprint(Registry);
+			UBlueprint* Blueprint = FindObject<UBlueprint>(nullptr, *ObjectPath);
+			if (!TestNotNull(TEXT("blueprint resolved"), Blueprint))
+				return;
+			auto IsInstanceEditable = [Blueprint](const TCHAR* Name)
+			{
+				const int32 Index = FBlueprintEditorUtils::FindNewVariableIndex(Blueprint, Name);
+				return Index != INDEX_NONE && !(Blueprint->NewVariables[Index].PropertyFlags & CPF_DisableEditOnInstance);
+			};
+
+			TSharedPtr<FJsonObject> Editable = Args();
+			Editable->SetStringField(TEXT("path"), ObjectPath);
+			Editable->SetStringField(TEXT("name"), TEXT("Bonus"));
+			Editable->SetStringField(TEXT("type"), TEXT("int"));
+			Editable->SetBoolField(TEXT("instanceEditable"), true);
+			TestTrue(TEXT("added instance editable"), Run(Registry, TEXT("blueprint-add-variable"), Editable).bSuccess);
+			TestTrue(TEXT("Bonus is instance editable"), IsInstanceEditable(TEXT("Bonus")));
+
+			TSharedPtr<FJsonObject> Plain = Args();
+			Plain->SetStringField(TEXT("path"), ObjectPath);
+			Plain->SetStringField(TEXT("name"), TEXT("Points"));
+			Plain->SetStringField(TEXT("type"), TEXT("int"));
+			TestTrue(TEXT("added"), Run(Registry, TEXT("blueprint-add-variable"), Plain).bSuccess);
+			TestFalse(TEXT("default: not instance editable (as in the editor)"), IsInstanceEditable(TEXT("Points")));
+
+			TSharedPtr<FJsonObject> Toggle = Args();
+			Toggle->SetStringField(TEXT("path"), ObjectPath);
+			Toggle->SetStringField(TEXT("name"), TEXT("Points"));
+			Toggle->SetBoolField(TEXT("instanceEditable"), true);
+			TestTrue(TEXT("modify with only instanceEditable"), Run(Registry, TEXT("blueprint-modify-variable"), Toggle).bSuccess);
+			TestTrue(TEXT("Points is instance editable now"), IsInstanceEditable(TEXT("Points")));
+			Toggle->SetBoolField(TEXT("instanceEditable"), false);
+			TestTrue(TEXT("and back"), Run(Registry, TEXT("blueprint-modify-variable"), Toggle).bSuccess);
+			TestFalse(TEXT("Points is class-default only again"), IsInstanceEditable(TEXT("Points")));
+		});
 	});
 }
 

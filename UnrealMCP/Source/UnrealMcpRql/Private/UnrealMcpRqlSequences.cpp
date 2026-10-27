@@ -141,8 +141,11 @@ namespace UnrealMcpRqlSequencesLocal
 
 	// ---------------------------------------------------------------- channels
 
-	/** Visit every keyable channel of a section with its display name ("Location.X", "Bool", "Weight"). */
-	void ForEachChannel(UMovieSceneSection* Section, TFunctionRef<void(const FString&, FMovieSceneChannel*, FName)> Visit)
+	/**
+	 * Visit every keyable channel of a section with its display name ("Location.X", "Rotation.Yaw", "Bool", "Weight") and
+	 * its internal name ("Rotation.Z", the name Python and the channel metadata use; empty when there is none).
+	 */
+	void ForEachChannel(UMovieSceneSection* Section, TFunctionRef<void(const FString&, const FString&, FMovieSceneChannel*, FName)> Visit)
 	{
 		FMovieSceneChannelProxy& Proxy = Section->GetChannelProxy();
 		for (const FMovieSceneChannelEntry& Entry : Proxy.GetAllEntries())
@@ -155,15 +158,17 @@ namespace UnrealMcpRqlSequencesLocal
 			for (int32 Index = 0; Index < Channels.Num(); ++Index)
 			{
 				FString Name = FString::Printf(TEXT("%s%d"), *Type.ToString(), Index);
+				FString Internal;
 #if WITH_EDITOR
 				if (Meta.IsValidIndex(Index))
 				{
 					const FString Display = Meta[Index].DisplayText.ToString();
 					const FString Group = Meta[Index].Group.ToString();
-					Name = Display.IsEmpty() ? Meta[Index].Name.ToString() : (Group.IsEmpty() ? Display : Group + TEXT(".") + Display);
+					Internal = Meta[Index].Name.ToString();
+					Name = Display.IsEmpty() ? Internal : (Group.IsEmpty() ? Display : Group + TEXT(".") + Display);
 				}
 #endif
-				Visit(Name, Channels[Index], Type);
+				Visit(Name, Internal, Channels[Index], Type);
 			}
 		}
 	}
@@ -209,10 +214,18 @@ namespace UnrealMcpRqlSequencesLocal
 		const FFrameNumber Time = ToTick(Scene, Frame);
 		TArray<FString> Names;
 		bool bDone = false;
-		ForEachChannel(Section, [&](const FString& Name, FMovieSceneChannel* Channel, FName Type)
+		const FString Key = Wanted.TrimStartAndEnd();
+		// The display name first; the internal name ("Rotation.Z" for the yaw) only when no display name matches.
+		bool bDisplayMatch = false;
+		ForEachChannel(Section, [&](const FString& Name, const FString&, FMovieSceneChannel*, FName)
+		{
+			bDisplayMatch |= Name.Equals(Key, ESearchCase::IgnoreCase);
+		});
+		ForEachChannel(Section, [&](const FString& Name, const FString& Internal, FMovieSceneChannel* Channel, FName Type)
 		{
 			Names.Add(Name);
-			if (bDone || !Name.Equals(Wanted.TrimStartAndEnd(), ESearchCase::IgnoreCase))
+			const FString& Candidate = bDisplayMatch ? Name : Internal;
+			if (bDone || Candidate.IsEmpty() || !Candidate.Equals(Key, ESearchCase::IgnoreCase))
 				return;
 			// AddCubicKey inserts next to a key at the same frame: drop that key first, so the new one replaces it.
 			if (IsDouble(Type))
@@ -462,7 +475,7 @@ namespace UnrealMcpRqlSequencesLocal
 			UMovieSceneSection* Target = Section(Self);
 			const UMovieScene* Scene = SceneOf(Target);
 			std::vector<rql::Value> Out;
-			ForEachChannel(Target, [&Out, Scene](const FString& Name, FMovieSceneChannel* Channel, FName Type)
+			ForEachChannel(Target, [&Out, Scene](const FString& Name, const FString&, FMovieSceneChannel* Channel, FName Type)
 			{
 				std::vector<std::pair<rql::Value, rql::Value>> Entry;
 				Entry.emplace_back(Str(TEXT("Name")), Str(Name));

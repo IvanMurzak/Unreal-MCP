@@ -12,6 +12,10 @@
 #include "EdGraphSchema_K2.h"
 #include "EdGraphToken.h"
 #include "Engine/Blueprint.h"
+#include "Engine/BlueprintGeneratedClass.h"
+#include "Engine/SCS_Node.h"
+#include "Engine/SimpleConstructionScript.h"
+#include "Components/ActorComponent.h"
 #include "K2Node_CallFunction.h"
 #include "K2Node_CustomEvent.h"
 #include "K2Node_DynamicCast.h"
@@ -75,6 +79,23 @@ namespace UnrealMcpRqlBlueprintsLocal
 			return FBlueprintEditorUtils::FindBlueprintForNode(Node);
 		if (const UEdGraph* Graph = Cast<UEdGraph>(Object))
 			return FBlueprintEditorUtils::FindBlueprintForGraph(Graph);
+		return nullptr;
+	}
+
+	/** The Blueprint whose Simple Construction Script holds @p Object as a component template (null otherwise). */
+	UBlueprint* ComponentTemplateBlueprint(const UObject* Object)
+	{
+		const UActorComponent* Component = Cast<UActorComponent>(Object);
+		if (!Component || !Component->HasAnyFlags(RF_ArchetypeObject))
+			return nullptr;
+		UBlueprint* Blueprint = UBlueprint::GetBlueprintFromClass(Cast<UBlueprintGeneratedClass>(Component->GetOuter()));
+		if (!Blueprint || !Blueprint->SimpleConstructionScript)
+			return nullptr;
+		for (const USCS_Node* Node : Blueprint->SimpleConstructionScript->GetAllNodes())
+		{
+			if (Node && Node->ComponentTemplate == Component)
+				return Blueprint;
+		}
 		return nullptr;
 	}
 
@@ -571,6 +592,23 @@ namespace UnrealMcpRqlBlueprintsLocal
 			return Parent ? Str(Parent->GetName()) : rql::Value::null();
 		}, {}, "the class it derives from (Actor, Character, BP_Base_C, ...)", /*bOwning*/ false, /*bNullable*/ true));
 
+		FUnrealMcpRqlTypes::SetMember(D, Member("Components", T.Registry().list_type(T.ForClass(UActorComponent::StaticClass()), true),
+			[Types](void* Self)
+			{
+				TArray<UObject*> Templates;
+				const UBlueprint* Blueprint = static_cast<UBlueprint*>(Self);
+				if (Blueprint->SimpleConstructionScript)
+				{
+					for (USCS_Node* Node : Blueprint->SimpleConstructionScript->GetAllNodes())
+					{
+						if (Node && Node->ComponentTemplate)
+							Templates.Add(Node->ComponentTemplate);
+					}
+				}
+				return Types->WrapObjects(Templates);
+			}, {}, "the components the Blueprint adds (its Components panel; Name = the variable name): their defaults are "
+			"writable (set StaticMesh = ...), placed actors that keep the old value follow; add / remove them with "
+			"blueprint-add-component / blueprint-remove-component", /*bOwning*/ true));
 		FUnrealMcpRqlTypes::AddMethod(D, Method("Compile", {}, rql::builtin::any_type(),
 			[](void* Self, const std::vector<rql::Value>&) -> rql::Value
 			{
@@ -914,6 +952,19 @@ void UnrealMcpRqlAddBlueprints(FUnrealMcpRqlSession& Session)
 	T.AddClassHook(UEdGraph::StaticClass(), &GraphMembers);
 	T.AddClassHook(UEdGraphNode::StaticClass(), [Pin](FUnrealMcpRqlTypes& Types, rql::TypeDescriptor& D) { NodeMembers(Types, D, Pin); });
 	Session.AddSource(TEXT("blueprints"), T.ForClass(UBlueprint::StaticClass()), /*bList*/ true,
-		TEXT("the project's Blueprints (Graphs, EventGraph, Status; call Compile / AddFunction); graphs list Nodes, nodes list Pins"),
+		TEXT("the project's Blueprints (Components, Graphs, EventGraph, Status; call Compile / AddFunction); graphs list Nodes, nodes list Pins"),
 		[Types]() { return UnrealMcpRqlAssetList(*Types, UBlueprint::StaticClass(), FString()); });
+	// A Blueprint's component templates are its design data (the Components panel edits them), unlike other templates.
+	Session.AllowTemplateWrites([](const UObject* Object) { return ComponentTemplateBlueprint(Object) != nullptr; });
+	Session.AddCommitted([Types](const std::vector<rql::MutationRecord>& Records)
+	{
+		TSet<UBlueprint*> Touched;
+		for (const rql::MutationRecord& Record : Records)
+		{
+			if (UBlueprint* Blueprint = Record.method ? nullptr : ComponentTemplateBlueprint(Types->AsObject(Record.owner)))
+				Touched.Add(Blueprint);
+		}
+		for (UBlueprint* Blueprint : Touched)
+			FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
+	});
 }

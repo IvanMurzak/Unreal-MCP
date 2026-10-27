@@ -21,6 +21,9 @@
 #include "Components/ActorComponent.h"
 #include "Components/SceneComponent.h"
 #include "DataTableEditorUtils.h"
+#include "ActorFactories/ActorFactory.h"
+#include "AssetSelection.h"
+#include "Engine/Blueprint.h"
 #include "Engine/DataTable.h"
 #include "Factories/DataTableFactory.h"
 #include "Factories/Factory.h"
@@ -49,6 +52,33 @@ namespace UnrealMcpRqlEditorApiLocal
 	}
 
 	using UnrealMcpRql::Failed;
+
+	/** The tail of every spawn: the final rotation, a root for root-less classes, the label and the parent. */
+	AActor* FinishSpawnedActor(AActor* Actor, const FVector& Location, const FRotator& Rotation, const FString& Label, AActor* Parent);
+
+	/** The generated class of the one Blueprint asset named @p Name ("BP_Door"), when exactly one actor Blueprint has it. */
+	UClass* BlueprintClassByName(const FString& Name)
+	{
+		if (Name.IsEmpty() || Name.Contains(TEXT("/")) || Name.Contains(TEXT(".")))
+			return nullptr;
+		IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
+		TArray<FAssetData> Found;
+		Registry.GetAssetsByClass(UBlueprint::StaticClass()->GetClassPathName(), Found, /*bSearchSubClasses*/ true);
+		UClass* Match = nullptr;
+		for (const FAssetData& Data : Found)
+		{
+			if (!Data.AssetName.ToString().Equals(Name, ESearchCase::IgnoreCase))
+				continue;
+			const UBlueprint* Blueprint = Cast<UBlueprint>(Data.GetAsset());
+			UClass* Class = Blueprint ? Blueprint->GeneratedClass.Get() : nullptr;
+			if (!Class || !Class->IsChildOf(AActor::StaticClass()))
+				continue;
+			if (Match)
+				return nullptr; // ambiguous: the caller asks for the path
+			Match = Class;
+		}
+		return Match;
+	}
 
 	/** Writes stay inside project / plugin content: /Engine, /Script and /Temp are refused. */
 	bool IsWritableRoot(const FString& Path)
@@ -129,6 +159,13 @@ AActor* UnrealMcpRql::SpawnActor(UClass* Class, const FVector& Location, const F
 	AActor* Actor = World->SpawnActor<AActor>(Class, Location, Rotation, Params);
 	if (!Actor)
 		return Failed<AActor*>(FString::Printf(TEXT("could not spawn %s"), *Class->GetName()));
+	return FinishSpawnedActor(Actor, Location, Rotation, Label, Parent);
+}
+
+AActor* UnrealMcpRqlEditorApiLocal::FinishSpawnedActor(AActor* Actor, const FVector& Location, const FRotator& Rotation,
+	const FString& Label, AActor* Parent)
+{
+	UWorld* World = Actor->GetWorld();
 	// SpawnActor composes the class's default root rotation (a SpotLight's -90 pitch) with Rotation. A rotation the
 	// caller gave is the final one; none keeps the class default (a SpotLight points down).
 	if (!Rotation.IsZero() && Actor->GetRootComponent())
@@ -157,12 +194,7 @@ AActor* UnrealMcpRql::SpawnActor(UClass* Class, const FVector& Location, const F
 		Actor->AttachToActor(Parent, FAttachmentTransformRules::KeepWorldTransform);
 		if (Actor->GetAttachParentActor() != Parent)
 		{
-			const USceneComponent* ParentRoot = Parent->GetRootComponent();
-			const FString Reason = !ParentRoot
-				? FString(TEXT(": it has no root component (no transform); give it one with AddComponent(\"SceneComponent\", \"Root\")"))
-				: Actor->GetRootComponent()->Mobility == EComponentMobility::Static && ParentRoot->Mobility != EComponentMobility::Static
-				? FString::Printf(TEXT(": a Static %s cannot attach to a non-Static parent (set the parent's Mobility to Static)"), *Class->GetName())
-				: FString();
+			const FString Reason = UnrealMcpRqlAttachFailure(Actor, Parent);
 			World->EditorDestroyActor(Actor, /*bShouldModifyLevel*/ true);
 			return Failed<AActor*>(FString::Printf(TEXT("could not attach to %s%s"), *Parent->GetActorLabel(), *Reason));
 		}
@@ -170,12 +202,52 @@ AActor* UnrealMcpRql::SpawnActor(UClass* Class, const FVector& Location, const F
 	return Actor;
 }
 
+FString UnrealMcpRqlAttachFailure(const AActor* Actor, const AActor* Parent)
+{
+	const USceneComponent* Root = Actor ? Actor->GetRootComponent() : nullptr;
+	const USceneComponent* ParentRoot = Parent ? Parent->GetRootComponent() : nullptr;
+	if (!Root)
+		return TEXT(": it has no root component (no transform)");
+	if (!ParentRoot)
+		return FString::Printf(TEXT(": %s has no root component (no transform); give it one with AddComponent(\"SceneComponent\", \"Root\")"),
+			*Parent->GetActorLabel());
+	// The engine refuses a Static component under a non-Static one (it could not follow its parent's movement).
+	if (Root->Mobility == EComponentMobility::Static && ParentRoot->Mobility != EComponentMobility::Static)
+		return FString::Printf(TEXT(": a Static %s cannot attach to a %s parent (set the parent's root Mobility to Static, or this actor's to Movable)"),
+			*Actor->GetClass()->GetName(), ParentRoot->Mobility == EComponentMobility::Movable ? TEXT("Movable") : TEXT("Stationary"));
+	return FString();
+}
+
 AActor* UUnrealMcpRqlEditorApi::SpawnActor(const FString& ClassName, const FString& Label, FVector Location, FRotator Rotation, AActor* Parent)
 {
-	UClass* Class = FUnrealMcpObjectRef::ResolveClass(ClassName);
-	if (!Class || !Class->IsChildOf(AActor::StaticClass()))
-		return Failed<AActor*>(FString::Printf(TEXT("'%s' is not an actor class (try a class name such as \"PointLight\" or a Blueprint path)"), *ClassName));
-	return UnrealMcpRql::SpawnActor(Class, Location, Rotation, Label, Parent);
+	if (UClass* Class = FUnrealMcpObjectRef::ResolveClass(ClassName))
+	{
+		if (Class->IsChildOf(AActor::StaticClass()))
+			return UnrealMcpRql::SpawnActor(Class, Location, Rotation, Label, Parent);
+	}
+	else if (UClass* Blueprint = BlueprintClassByName(ClassName))
+	{
+		return UnrealMcpRql::SpawnActor(Blueprint, Location, Rotation, Label, Parent);
+	}
+	// An asset the editor can place (a mesh dragged into the viewport becomes a StaticMeshActor showing it).
+	if (ClassName.StartsWith(TEXT("/")))
+	{
+		if (UObject* Asset = UnrealMcpRql::LoadObject(UObject::StaticClass(), ClassName); Asset && !Asset->IsA<UClass>() && !Asset->IsA<UBlueprint>())
+		{
+			UWorld* World = FUnrealMcpObjectRef::GetEditorWorld();
+			UActorFactory* Factory = FActorFactoryAssetProxy::GetFactoryForAssetObject(Asset);
+			if (!World || !Factory)
+				return Failed<AActor*>(FString::Printf(TEXT("'%s' is a %s, which cannot be placed in a level"), *ClassName, *Asset->GetClass()->GetName()));
+			FActorSpawnParameters Params;
+			Params.ObjectFlags |= RF_Transactional;
+			AActor* Actor = Factory->CreateActor(Asset, World->GetCurrentLevel(), FTransform(Rotation, Location), Params);
+			if (!Actor)
+				return Failed<AActor*>(FString::Printf(TEXT("could not place '%s'"), *ClassName));
+			return FinishSpawnedActor(Actor, Location, Rotation, Label, Parent);
+		}
+	}
+	return Failed<AActor*>(FString::Printf(TEXT("'%s' is not an actor class (try a class name such as \"PointLight\", a Blueprint "
+		"name or path, or an asset to place such as a StaticMesh path)"), *ClassName));
 }
 
 UWorld* UUnrealMcpRqlEditorApi::OpenLevel(const FString& Path)

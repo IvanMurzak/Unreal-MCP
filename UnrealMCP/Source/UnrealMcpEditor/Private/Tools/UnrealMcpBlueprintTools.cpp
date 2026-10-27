@@ -4,7 +4,8 @@
 #include "UnrealMcpCoreTools.h"
 #include "UnrealMcpToolRegistry.h"
 #include "UnrealMcpLog.h"
-#include "Tools/UnrealMcpObjectRef.h"   // the shared class resolver (FUnrealMcpObjectRef::ResolveClass)
+#include "Tools/UnrealMcpObjectRef.h"
+#include "UnrealMcpPinTypes.h"   // the shared class resolver (FUnrealMcpObjectRef::ResolveClass)
 
 #include "Engine/Blueprint.h"
 #include "Engine/BlueprintGeneratedClass.h"
@@ -79,96 +80,11 @@ namespace
 		return false;
 	}
 
-	// ---- §3.2 pin-type mapping (forward: type string -> FEdGraphPinType) --------------------------
-
-	/** Map a friendly type token to a Blueprint pin type (§3.2). Recognised primitives plus the common
-	 *  math structs; anything else is treated as an object/class/struct path. Returns false when the
-	 *  token names an object/struct path that cannot be resolved. `bIsArray` wraps it in an array. */
-	bool MakePinType(const FString& InType, bool bIsArray, FEdGraphPinType& OutPinType, FString& OutError)
+	/** The editor's "Instance Editable" eye: placed actors keep their own value instead of the class default. */
+	void BlueprintToolsSetInstanceEditable(UBlueprint* Blueprint, FName VarName, bool bInstanceEditable)
 	{
-		const FString Type = InType.TrimStartAndEnd();
-		const FString Lower = Type.ToLower();
-
-		auto Set = [&OutPinType](FName Category, FName SubCategory, UObject* SubObject)
-		{
-			OutPinType = FEdGraphPinType();
-			OutPinType.PinCategory = Category;
-			OutPinType.PinSubCategory = SubCategory;
-			OutPinType.PinSubCategoryObject = SubObject;
-		};
-
-		if (Lower == TEXT("bool") || Lower == TEXT("boolean"))
-			Set(UEdGraphSchema_K2::PC_Boolean, NAME_None, nullptr);
-		else if (Lower == TEXT("int") || Lower == TEXT("integer") || Lower == TEXT("int32"))
-			Set(UEdGraphSchema_K2::PC_Int, NAME_None, nullptr);
-		else if (Lower == TEXT("int64"))
-			Set(UEdGraphSchema_K2::PC_Int64, NAME_None, nullptr);
-		else if (Lower == TEXT("byte"))
-			Set(UEdGraphSchema_K2::PC_Byte, NAME_None, nullptr);
-		else if (Lower == TEXT("float") || Lower == TEXT("double") || Lower == TEXT("number") || Lower == TEXT("real"))
-			Set(UEdGraphSchema_K2::PC_Real, UEdGraphSchema_K2::PC_Double, nullptr);
-		else if (Lower == TEXT("string"))
-			Set(UEdGraphSchema_K2::PC_String, NAME_None, nullptr);
-		else if (Lower == TEXT("name"))
-			Set(UEdGraphSchema_K2::PC_Name, NAME_None, nullptr);
-		else if (Lower == TEXT("text"))
-			Set(UEdGraphSchema_K2::PC_Text, NAME_None, nullptr);
-		else if (Lower == TEXT("vector"))
-			Set(UEdGraphSchema_K2::PC_Struct, NAME_None, TBaseStructure<FVector>::Get());
-		else if (Lower == TEXT("vector2d"))
-			Set(UEdGraphSchema_K2::PC_Struct, NAME_None, TBaseStructure<FVector2D>::Get());
-		else if (Lower == TEXT("rotator"))
-			Set(UEdGraphSchema_K2::PC_Struct, NAME_None, TBaseStructure<FRotator>::Get());
-		else if (Lower == TEXT("transform"))
-			Set(UEdGraphSchema_K2::PC_Struct, NAME_None, TBaseStructure<FTransform>::Get());
-		else if (Lower == TEXT("color") || Lower == TEXT("linearcolor"))
-			Set(UEdGraphSchema_K2::PC_Struct, NAME_None, TBaseStructure<FLinearColor>::Get());
-		else
-		{
-			// Object / class / struct path: resolve to a UClass (object ref) or a UScriptStruct.
-			if (UClass* Class = FUnrealMcpObjectRef::ResolveClass(Type))
-				Set(UEdGraphSchema_K2::PC_Object, NAME_None, Class);
-			else if (UScriptStruct* Struct = LoadObject<UScriptStruct>(nullptr, *Type, nullptr, LOAD_NoWarn | LOAD_Quiet))
-				Set(UEdGraphSchema_K2::PC_Struct, NAME_None, Struct);
-			else
-			{
-				OutError = FString::Printf(TEXT("unknown variable type '%s' (expected a primitive, a math struct, or a resolvable object/struct path)"), *Type);
-				return false;
-			}
-		}
-
-		OutPinType.ContainerType = bIsArray ? EPinContainerType::Array : EPinContainerType::None;
-		return true;
-	}
-
-	// ---- §3.2 pin-type mapping (reverse: FEdGraphPinType -> friendly string) for blueprint-get -----
-
-	FString PinTypeToString(const FEdGraphPinType& PinType)
-	{
-		const FName Cat = PinType.PinCategory;
-		FString Base;
-		if (Cat == UEdGraphSchema_K2::PC_Boolean) Base = TEXT("bool");
-		else if (Cat == UEdGraphSchema_K2::PC_Int) Base = TEXT("int");
-		else if (Cat == UEdGraphSchema_K2::PC_Int64) Base = TEXT("int64");
-		else if (Cat == UEdGraphSchema_K2::PC_Byte) Base = TEXT("byte");
-		else if (Cat == UEdGraphSchema_K2::PC_Real) Base = TEXT("float"); // float/double both map to PC_Real (PC_Float/PC_Double are legacy-unreachable here)
-		else if (Cat == UEdGraphSchema_K2::PC_String) Base = TEXT("string");
-		else if (Cat == UEdGraphSchema_K2::PC_Name) Base = TEXT("name");
-		else if (Cat == UEdGraphSchema_K2::PC_Text) Base = TEXT("text");
-		else if (Cat == UEdGraphSchema_K2::PC_Struct)
-			Base = PinType.PinSubCategoryObject.IsValid() ? PinType.PinSubCategoryObject->GetName() : TEXT("struct");
-		else if (Cat == UEdGraphSchema_K2::PC_Object || Cat == UEdGraphSchema_K2::PC_Class)
-			Base = PinType.PinSubCategoryObject.IsValid() ? PinType.PinSubCategoryObject->GetName() : TEXT("object");
-		else
-			Base = Cat.ToString();
-
-		if (PinType.ContainerType == EPinContainerType::Array)
-			return Base + TEXT("[]");
-		if (PinType.ContainerType == EPinContainerType::Set)
-			return Base + TEXT("{}");
-		if (PinType.ContainerType == EPinContainerType::Map)
-			return Base + TEXT("<map>");
-		return Base;
+		FBlueprintEditorUtils::SetBlueprintOnlyEditableFlag(Blueprint, VarName, !bInstanceEditable);
+		FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
 	}
 
 	// ---- Result helpers --------------------------------------------------------------------------
@@ -196,7 +112,7 @@ namespace UnrealMcpBlueprintTools
 			                  "asset (e.g. '/Game/MCP/BP_Thing'); the object-path form ('/Game/MCP/BP_Thing.BP_Thing') "
 			                  "is also accepted and normalised. 'parentClass' is a native class path or short name "
 			                  "(e.g. '/Script/Engine.Actor' or 'Actor'). The asset is registered in-session; "
-			                  "saving to disk is out of scope for the MVP."))
+			                  "save it with rql-mutate: editor | call SaveAsset(\"/Game/MCP/BP_Thing\")."))
 			.ParamString(TEXT("path"), TEXT("/Game package path for the new Blueprint asset (object-path form also accepted)."), EUnrealMcpParamRequirement::Required)
 			.ParamString(TEXT("parentClass"), TEXT("Parent UClass path or short name. Defaults to Actor."))
 			.DestructiveHint(false).ReadOnlyHint(false)
@@ -293,7 +209,7 @@ namespace UnrealMcpBlueprintTools
 				{
 					TSharedPtr<FJsonObject> V = MakeShared<FJsonObject>();
 					V->SetStringField(TEXT("name"), Var.VarName.ToString());
-					V->SetStringField(TEXT("type"), PinTypeToString(Var.VarType));
+					V->SetStringField(TEXT("type"), UnrealMcpPinTypes::ToString(Var.VarType));
 					V->SetBoolField(TEXT("isArray"), Var.VarType.ContainerType == EPinContainerType::Array);
 					if (!Var.DefaultValue.IsEmpty())
 						V->SetStringField(TEXT("default"), Var.DefaultValue);
@@ -389,7 +305,9 @@ namespace UnrealMcpBlueprintTools
 			.Title(TEXT("Add Blueprint Component"))
 			.Description(TEXT("Add a component to a Blueprint's Simple Construction Script (the public SCS surface). "
 			                  "'componentClass' is a UActorComponent subclass path or short name. Optionally attach "
-			                  "under an existing scene-component node named by 'parentComponent'."))
+			                  "under an existing scene-component node named by 'parentComponent'. Set the component's "
+			                  "defaults (mesh, material, size) with rql-mutate: unreal.asset(path).Components | where Name == "
+			                  "\"Mesh\" | set StaticMesh = \"/Engine/BasicShapes/Sphere\"."))
 			.ParamString(TEXT("path"), TEXT("Blueprint asset object path."), EUnrealMcpParamRequirement::Required)
 			.ParamString(TEXT("componentClass"), TEXT("UActorComponent subclass path or short name."), EUnrealMcpParamRequirement::Required)
 			.ParamString(TEXT("name"), TEXT("Variable name for the new component."), EUnrealMcpParamRequirement::Required)
@@ -493,12 +411,15 @@ namespace UnrealMcpBlueprintTools
 			.Description(TEXT("Add a typed member variable via FBlueprintEditorUtils::AddMemberVariable using the "
 			                  "§3.2 pin-type mapping. 'type' accepts a primitive (bool/int/int64/byte/float/string/"
 			                  "name/text), a math struct (vector/vector2d/rotator/transform/color), or an object/"
-			                  "struct path. Set 'isArray' for an array variable."))
+			                  "struct path. Set 'isArray' for an array variable. Set 'instanceEditable' to give placed "
+			                  "actors their own value (otherwise every instance uses the default and rql-mutate refuses the "
+			                  "write as read-only)."))
 			.ParamString(TEXT("path"), TEXT("Blueprint asset object path."), EUnrealMcpParamRequirement::Required)
 			.ParamString(TEXT("name"), TEXT("New variable name."), EUnrealMcpParamRequirement::Required)
 			.ParamString(TEXT("type"), TEXT("Variable type token (see description)."), EUnrealMcpParamRequirement::Required)
 			.ParamBool(TEXT("isArray"), TEXT("Wrap the type in an array. Defaults to false."))
 			.ParamString(TEXT("defaultValue"), TEXT("Optional default value (UE text format)."))
+			.ParamBool(TEXT("instanceEditable"), TEXT("Editable per placed actor (the editor's 'Instance Editable' eye). Defaults to false."))
 			.DestructiveHint(false).ReadOnlyHint(false)
 			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
 			{
@@ -521,29 +442,36 @@ namespace UnrealMcpBlueprintTools
 
 				FEdGraphPinType PinType;
 				FString PinError;
-				if (!MakePinType(Call.GetString(TEXT("type")), Call.GetBool(TEXT("isArray")), PinType, PinError))
+				if (!UnrealMcpPinTypes::Make(Call.GetString(TEXT("type")), Call.GetBool(TEXT("isArray")), PinType, PinError))
 					return FUnrealMcpToolResult::Error(PinError);
 
 				const FString DefaultValue = Call.GetString(TEXT("defaultValue"));
 				if (!FBlueprintEditorUtils::AddMemberVariable(Blueprint, FName(*VarName), PinType, DefaultValue))
 					return FUnrealMcpToolResult::Error(FString::Printf(TEXT("AddMemberVariable failed for '%s' (type may be unsupported as a member variable)."), *VarName));
+				const bool bInstanceEditable = Call.GetBool(TEXT("instanceEditable"));
+				if (bInstanceEditable)
+					BlueprintToolsSetInstanceEditable(Blueprint, FName(*VarName), true);
 
 				TSharedPtr<FJsonObject> Out = MakeShared<FJsonObject>();
 				Out->SetStringField(TEXT("variable"), VarName);
-				Out->SetStringField(TEXT("type"), PinTypeToString(PinType));
+				Out->SetStringField(TEXT("type"), UnrealMcpPinTypes::ToString(PinType));
+				Out->SetBoolField(TEXT("instanceEditable"), bInstanceEditable);
 				return FUnrealMcpToolResult::Success(
-					FString::Printf(TEXT("Added variable '%s' (%s) to '%s'."), *VarName, *PinTypeToString(PinType), *Blueprint->GetName()), Out);
+					FString::Printf(TEXT("Added variable '%s' (%s%s) to '%s'."), *VarName, *UnrealMcpPinTypes::ToString(PinType),
+						bInstanceEditable ? TEXT(", instance editable") : TEXT(""), *Blueprint->GetName()), Out);
 			});
 
 		Registry.Tool(TEXT("blueprint-modify-variable"))
 			.Title(TEXT("Modify Blueprint Variable"))
-			.Description(TEXT("Rename and/or retype an existing member variable. Provide 'newName' to rename and/or "
-			                  "'newType' (with optional 'isArray') to change its pin type."))
+			.Description(TEXT("Rename, retype and/or change the Instance Editable flag of an existing member variable. "
+			                  "Provide 'newName' to rename, 'newType' (with optional 'isArray') to change its pin type, "
+			                  "'instanceEditable' to let placed actors hold their own value (compile afterwards)."))
 			.ParamString(TEXT("path"), TEXT("Blueprint asset object path."), EUnrealMcpParamRequirement::Required)
 			.ParamString(TEXT("name"), TEXT("Existing variable name."), EUnrealMcpParamRequirement::Required)
 			.ParamString(TEXT("newName"), TEXT("Optional new variable name."))
 			.ParamString(TEXT("newType"), TEXT("Optional new type token (see blueprint-add-variable)."))
 			.ParamBool(TEXT("isArray"), TEXT("Array flag applied with 'newType'. Defaults to false."))
+			.ParamBool(TEXT("instanceEditable"), TEXT("Optional: true = editable per placed actor, false = class default only."))
 			.DestructiveHint(false).ReadOnlyHint(false)
 			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
 			{
@@ -557,8 +485,9 @@ namespace UnrealMcpBlueprintTools
 
 				const FString NewName = Call.GetString(TEXT("newName"));
 				const FString NewType = Call.GetString(TEXT("newType"));
-				if (NewName.IsEmpty() && NewType.IsEmpty())
-					return FUnrealMcpToolResult::Error(TEXT("provide at least one of 'newName' or 'newType'."));
+				const bool bSetInstanceEditable = Call.Has(TEXT("instanceEditable"));
+				if (NewName.IsEmpty() && NewType.IsEmpty() && !bSetInstanceEditable)
+					return FUnrealMcpToolResult::Error(TEXT("provide at least one of 'newName', 'newType' or 'instanceEditable'."));
 
 				FName EffectiveName = FName(*VarName);
 
@@ -580,7 +509,7 @@ namespace UnrealMcpBlueprintTools
 				{
 					FEdGraphPinType PinType;
 					FString PinError;
-					if (!MakePinType(NewType, Call.GetBool(TEXT("isArray")), PinType, PinError))
+					if (!UnrealMcpPinTypes::Make(NewType, Call.GetBool(TEXT("isArray")), PinType, PinError))
 						return FUnrealMcpToolResult::Error(PinError);
 					FBlueprintEditorUtils::ChangeMemberVariableType(Blueprint, EffectiveName, PinType);
 				}
@@ -589,6 +518,8 @@ namespace UnrealMcpBlueprintTools
 					FBlueprintEditorUtils::RenameMemberVariable(Blueprint, EffectiveName, FName(*NewName));
 					EffectiveName = FName(*NewName);
 				}
+				if (bSetInstanceEditable)
+					BlueprintToolsSetInstanceEditable(Blueprint, EffectiveName, Call.GetBool(TEXT("instanceEditable")));
 
 				return FUnrealMcpToolResult::Success(
 					FString::Printf(TEXT("Modified variable '%s' on '%s' (now '%s')."), *VarName, *Blueprint->GetName(), *EffectiveName.ToString()));
