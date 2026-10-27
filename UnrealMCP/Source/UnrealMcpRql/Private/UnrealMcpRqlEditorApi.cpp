@@ -584,12 +584,32 @@ TArray<UObject*> UUnrealMcpRqlEditorApi::ImportAsset(const FString& File, const 
 		if (bInterchange)
 			Interchange->Set(true, ECVF_SetByCode);
 	};
+	// The task lists only the primary asset (the mesh of an FBX): the materials, textures and skeleton the importer creates
+	// next to it are the assets the destination folder gains, found by diffing the registry.
+	IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
+	const auto AssetsUnder = [&Registry, &Destination]()
+	{
+		TArray<FAssetData> Found;
+		Registry.GetAssetsByPath(FName(*Destination), Found, /*bRecursive*/ true, /*bIncludeOnlyOnDiskAssets*/ false);
+		TSet<FSoftObjectPath> Paths;
+		for (const FAssetData& Data : Found)
+			Paths.Add(Data.GetSoftObjectPath());
+		return Paths;
+	};
+	const TSet<FSoftObjectPath> Before = AssetsUnder();
 	AssetTools().ImportAssetTasks({ Task });
 	TArray<UObject*> Imported;
 	for (UObject* Object : Task->GetObjects())
 	{
 		if (Object)
-			Imported.Add(Object);
+			Imported.AddUnique(Object);
+	}
+	TArray<FSoftObjectPath> Created = AssetsUnder().Difference(Before).Array();
+	Created.Sort([](const FSoftObjectPath& A, const FSoftObjectPath& B) { return A.ToString() < B.ToString(); });
+	for (const FSoftObjectPath& Path : Created)
+	{
+		if (UObject* Object = Path.TryLoad())
+			Imported.AddUnique(Object);
 	}
 	if (Imported.Num() == 0)
 	{

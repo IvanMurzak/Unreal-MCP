@@ -4,6 +4,9 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "CoreMinimal.h"
+#include "AssetRegistry/AssetRegistryModule.h"
+#include "AssetRegistry/IAssetRegistry.h"
+#include "Modules/ModuleManager.h"
 #include "Misc/AutomationTest.h"
 #include "UnrealMcpRqlTools.h"
 #include "UnrealMcpCoreTools.h"
@@ -19,6 +22,7 @@
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
 #include "Editor.h"
+#include "ScopedTransaction.h"
 #include "Engine/LevelStreamingVolume.h"
 #include "Engine/PointLight.h"
 #include "Engine/TriggerVolume.h"
@@ -485,6 +489,39 @@ void FUnrealMcpRqlSpec::Define()
 			Drop();
 		});
 
+		It("lists every asset an import creates, not only the mesh", [this]()
+		{
+			const FString Folder = FString::Printf(TEXT("/Game/RqlSpecImport/Run%s"), *FGuid::NewGuid().ToString(EGuidFormats::Digits));
+			// A one-triangle OBJ with a material: the importer makes the mesh and a material next to it.
+			const FString File = FPaths::ConvertRelativePathToFull(FPaths::Combine(FPaths::ProjectIntermediateDir(), TEXT("RqlSpec"), TEXT("RqlSpecTri.obj")));
+			TestTrue(TEXT("obj written"), FFileHelper::SaveStringToFile(
+				TEXT("v 0 0 0\nv 100 0 0\nv 0 100 0\nvn 0 0 1\nvt 0 0\nvt 1 0\nvt 0 1\nusemtl RqlSpecRed\nf 1/1/1 2/2/1 3/3/1\n"), *File));
+			// editor | call ImportAsset("@FILE@", "@FOLDER@")
+			const FString Import = FString(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"ImportAsset","args":[{"lit":"@FILE@"},{"lit":"@FOLDER@"}]}]})RQL"))
+				.Replace(TEXT("@FILE@"), *File).Replace(TEXT("@FOLDER@"), *Folder);
+			const TSharedPtr<FJsonObject> Imported = Exec(Import, true);
+			TestTrue(*FString::Printf(TEXT("import ok (%s)"), *Codes(Imported)), IsOk(Imported));
+			const TSharedPtr<FJsonValue> Result = Cell(Imported, 0, 2);
+			TArray<FString> Refs;
+			if (Result.IsValid() && Result->Type == EJson::Array)
+			{
+				for (const TSharedPtr<FJsonValue>& Item : Result->AsArray())
+				{
+					FString Ref;
+					if (Item->Type == EJson::Object && Item->AsObject()->TryGetStringField(TEXT("$ref"), Ref))
+						Refs.Add(Ref);
+				}
+			}
+			const FString Listed = FString::Join(Refs, TEXT(", "));
+			TestTrue(*FString::Printf(TEXT("the mesh first (%s)"), *Listed), Refs.Num() > 0 && Refs[0].StartsWith(TEXT("StaticMesh#")));
+			TestTrue(*FString::Printf(TEXT("and the material it created (%s)"), *Listed), Refs.ContainsByPredicate([](const FString& Ref) { return Ref.StartsWith(TEXT("Material")); }));
+			IFileManager::Get().Delete(*File, false, true);
+			TArray<FAssetData> Created;
+			FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get().GetAssetsByPath(FName(*Folder), Created, /*bRecursive*/ true);
+			for (const FAssetData& Data : Created)
+				UnrealMcpRqlSpecHelpers::DropObject(Data.FastGetAsset(/*bLoad*/ false));
+		});
+
 		It("accepts object references as text (an actor label for an Actor parameter)", [this]()
 		{
 			SpawnLamp();
@@ -613,6 +650,74 @@ void FUnrealMcpRqlSpec::Define()
 			Volume->GetActorBounds(/*bOnlyCollidingComponents*/ false, Origin, Extent);
 			TestTrue(*FString::Printf(TEXT("a 200 cm box (extent %s)"), *Extent.ToString()), Extent.Equals(FVector(100, 100, 100), 1.0));
 			TestTrue(*FString::Printf(TEXT("around its location (origin %s)"), *Origin.ToString()), Origin.Equals(FVector(0, 0, 100), 1.0));
+		});
+
+		It("reads and rebuilds a volume's brush through BrushExtent, and tells a brushless volume apart", [this]()
+		{
+			// editor | call SpawnActor("TriggerVolume", "RqlSpecLampVolume", "(0, 0, 100)")
+			const TSharedPtr<FJsonObject> Spawned = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"SpawnActor","args":[{"lit":"TriggerVolume"},{"lit":"RqlSpecLampVolume"},{"lit":"(0, 0, 100)"}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("spawn ok (%s)"), *Codes(Spawned)), IsOk(Spawned));
+			ATriggerVolume* Bare = World() ? World()->SpawnActor<ATriggerVolume>() : nullptr;
+			if (!TestNotNull(TEXT("a bare volume"), Bare))
+				return;
+			Bare->SetActorLabel(TEXT("RqlSpecLampBare"));
+			// actors | where Label starts-with "RqlSpecLampVolume" or Label == "RqlSpecLampBare" | sort Label | select Label BrushExtent BrushBounds
+			const FString ReadPlan = TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"or","args":[{"op":"starts-with","args":[{"path":["Label"]},{"lit":"RqlSpecLampVolume"}]},{"op":"==","args":[{"path":["Label"]},{"lit":"RqlSpecLampBare"}]}]}},{"op":"sort","keys":[{"expr":{"path":["Label"]},"desc":false}]},{"op":"select","fields":[{"name":"Label","expr":{"path":["Label"]}},{"name":"BrushExtent","expr":{"path":["BrushExtent"]}},{"name":"BrushBounds","expr":{"path":["BrushBounds"]}}]}]})RQL");
+			const TSharedPtr<FJsonObject> Read = Exec(ReadPlan);
+			TestEqual(*FString::Printf(TEXT("two volumes (%s)"), *Codes(Read)), RowCount(Read), 2);
+			TestEqual(TEXT("bare first"), CellText(Read, 0, 0), FString(TEXT("RqlSpecLampBare")));
+			TestTrue(TEXT("a volume without a brush reads null"), Cell(Read, 0, 1).IsValid() && Cell(Read, 0, 1)->IsNull());
+			TestEqual(TEXT("the default box brush"), CellText(Read, 1, 1), FString(TEXT("(100, 100, 100)")));
+			const TSharedPtr<FJsonValue> Bounds = Cell(Read, 1, 2);
+			TestTrue(*FString::Printf(TEXT("world bounds around the location (%s)"), *Codes(Read)), Bounds.IsValid() && Bounds->Type == EJson::Object
+				&& Bounds->AsObject()->GetStringField(TEXT("Max")) == TEXT("(100, 100, 200)"));
+
+			// actors | where Label starts-with "RqlSpecLamp" and $ is Volume | set BrushExtent = "(300, 200, 50)"
+			const TSharedPtr<FJsonObject> Resized = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"and","args":[{"op":"starts-with","args":[{"path":["Label"]},{"lit":"RqlSpecLamp"}]},{"op":"is","args":[{"path":[]},{"lit":"Volume"}]}]}},{"op":"set","assign":[{"target":{"path":["BrushExtent"]},"value":{"lit":"(300, 200, 50)"}}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("resize ok (%s)"), *Codes(Resized)), IsOk(Resized));
+			FVector Origin, Extent;
+			Bare->GetActorBounds(/*bOnlyCollidingComponents*/ false, Origin, Extent);
+			TestTrue(*FString::Printf(TEXT("the bare volume got a box (extent %s)"), *Extent.ToString()), Extent.Equals(FVector(300, 200, 50), 1.0));
+			GEditor->UndoTransaction();
+			const TSharedPtr<FJsonObject> Undone = Exec(ReadPlan);
+			TestTrue(TEXT("undo leaves the bare volume brushless"), Cell(Undone, 0, 1).IsValid() && Cell(Undone, 0, 1)->IsNull());
+			TestEqual(TEXT("undo restores the default box"), CellText(Undone, 1, 1), FString(TEXT("(100, 100, 100)")));
+
+			// actors | where Label == "RqlSpecLampBare" | set BrushExtent = "(0, 10, 10)"
+			const TSharedPtr<FJsonObject> Flat = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"RqlSpecLampBare"}]}},{"op":"set","assign":[{"target":{"path":["BrushExtent"]},"value":{"lit":"(0, 10, 10)"}}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("a zero half-size is refused (%s)"), *Codes(Flat)), !IsOk(Flat) && Codes(Flat).Contains(TEXT("> 0")));
+		});
+
+		It("reads the undo history: what Undo and Redo would revert next", [this]()
+		{
+			SpawnLamp(); // an RQL mutation: one transaction ("RQL mutation" when no query text names it)
+			TArray<AActor*> Found = Lamps();
+			if (!TestEqual(TEXT("one lamp"), Found.Num(), 1))
+				return;
+			{
+				const FScopedTransaction Transaction(FText::FromString(TEXT("RqlSpec move")));
+				Found[0]->Modify();
+				Found[0]->SetActorLocation(FVector(5, 5, 5));
+			}
+			// editor | select NextUndo UndoHistory UndoCount NextRedo RedoHistory RedoCount
+			const FString ReadPlan = TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"select","fields":[{"name":"NextUndo","expr":{"path":["NextUndo"]}},{"name":"UndoHistory","expr":{"path":["UndoHistory"]}},{"name":"UndoCount","expr":{"path":["UndoCount"]}},{"name":"NextRedo","expr":{"path":["NextRedo"]}},{"name":"RedoHistory","expr":{"path":["RedoHistory"]}},{"name":"RedoCount","expr":{"path":["RedoCount"]}}]}]})RQL");
+			const TSharedPtr<FJsonObject> Before = Exec(ReadPlan);
+			TestEqual(*FString::Printf(TEXT("the move is next to undo (%s)"), *Codes(Before)), CellText(Before, 0, 0), FString(TEXT("RqlSpec move")));
+			const TSharedPtr<FJsonValue> History = Cell(Before, 0, 1);
+			TestTrue(TEXT("history lists it first, then the spawn"), History.IsValid() && History->Type == EJson::Array && History->AsArray().Num() >= 2
+				&& History->AsArray()[0]->AsString() == TEXT("RqlSpec move") && History->AsArray()[1]->AsString().StartsWith(TEXT("RQL")));
+			TestTrue(TEXT("count covers them"), Cell(Before, 0, 2).IsValid() && static_cast<int32>(Cell(Before, 0, 2)->AsNumber()) >= 2);
+			TestTrue(TEXT("nothing to redo"), Cell(Before, 0, 3).IsValid() && Cell(Before, 0, 3)->IsNull());
+
+			TestTrue(TEXT("undo"), GEditor->UndoTransaction());
+			const TSharedPtr<FJsonObject> After = Exec(ReadPlan);
+			TestEqual(TEXT("the move is next to redo"), CellText(After, 0, 3), FString(TEXT("RqlSpec move")));
+			const TSharedPtr<FJsonValue> Redo = Cell(After, 0, 4);
+			TestTrue(TEXT("redo history lists it"), Redo.IsValid() && Redo->Type == EJson::Array && Redo->AsArray().Num() == 1
+				&& Redo->AsArray()[0]->AsString() == TEXT("RqlSpec move"));
+			TestTrue(TEXT("one redo"), Cell(After, 0, 5).IsValid() && static_cast<int32>(Cell(After, 0, 5)->AsNumber()) == 1);
+			TestTrue(TEXT("the spawn is next to undo"), CellText(After, 0, 0).StartsWith(TEXT("RQL")));
+			TestTrue(TEXT("redo"), GEditor->RedoTransaction());
 		});
 
 		It("moves a component that does not re-register on edit (Niagara-like) when its relative transform is written", [this]()

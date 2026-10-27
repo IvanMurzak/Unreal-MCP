@@ -16,6 +16,7 @@
 #include "Components/ActorComponent.h"
 #include "Components/SceneComponent.h"
 #include "Editor.h"
+#include "Editor/Transactor.h"
 #include "EditorLevelUtils.h"
 #include "Engine/Blueprint.h"
 #include "Engine/Level.h"
@@ -23,7 +24,14 @@
 #include "Engine/Texture.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
+#include "ActorFactories/ActorFactory.h"
+#include "Builders/CubeBuilder.h"
+#include "Components/BrushComponent.h"
+#include "Engine/Polys.h"
 #include "GameFramework/Actor.h"
+#include "GameFramework/Volume.h"
+#include "Model.h"
+#include "UObject/GCObjectScopeGuard.h"
 #include "Layers/LayersSubsystem.h"
 #include "MaterialEditingLibrary.h"
 #include "Materials/MaterialInstanceConstant.h"
@@ -585,6 +593,68 @@ namespace UnrealMcpRqlCoreLocal
 		}, "remove a component added to this actor instance"));
 	}
 
+	/** The local-space box of a volume's brush polygons (invalid when it has no brush or no polygons). */
+	FBox VolumeBrushBox(const AVolume* Volume)
+	{
+		FBox Box(ForceInit);
+		if (Volume->Brush && Volume->Brush->Polys)
+		{
+			for (const FPoly& Poly : Volume->Brush->Polys->Element)
+				for (const FVector3f& Vertex : Poly.Vertices)
+					Box += FVector(Vertex);
+		}
+		return Box;
+	}
+
+	void VolumeMembers(FUnrealMcpRqlTypes& T, rql::TypeDescriptor& D)
+	{
+		FUnrealMcpRqlTypes* Types = &T;
+		UScriptStruct* VectorStruct = TBaseStructure<FVector>::Get();
+		// FBox has no TBaseStructure specialization in every supported engine version: its reflected struct by path.
+		UScriptStruct* BoxStruct = FindObject<UScriptStruct>(nullptr, TEXT("/Script/CoreUObject.Box"));
+		// A volume is its brush: without one (placed from code, or a broken copy) it has no shape, so a NavMeshBoundsVolume
+		// builds no navigation and a TriggerVolume never overlaps; null tells that apart from a small box.
+		FUnrealMcpRqlTypes::SetMember(D, Member("BrushExtent", T.ForStruct(VectorStruct),
+			[Types, VectorStruct](void* Self)
+			{
+				const FBox Box = VolumeBrushBox(static_cast<AVolume*>(Self));
+				if (!Box.IsValid)
+					return rql::Value::null();
+				const FVector Extent = Box.GetExtent();
+				return Types->WrapStruct(VectorStruct, &Extent);
+			},
+			[Types](void* Self, const rql::Value& Value)
+			{
+				AVolume* Volume = static_cast<AVolume*>(Self);
+				const FVector Extent = StructArg<FVector>(*Types, Value);
+				if (!(Extent.X > 0.0 && Extent.Y > 0.0 && Extent.Z > 0.0))
+					Throw(TEXT("every half-size of BrushExtent must be > 0, e.g. \"(1000, 1000, 500)\""));
+				// Rebuilt as the editor's box brush (what the Brush Settings' Cube builder makes), centred on the actor.
+				UCubeBuilder* Builder = NewObject<UCubeBuilder>();
+				FGCObjectScopeGuard BuilderGuard(Builder);
+				Builder->X = static_cast<float>(2.0 * Extent.X);
+				Builder->Y = static_cast<float>(2.0 * Extent.Y);
+				Builder->Z = static_cast<float>(2.0 * Extent.Z);
+				if (UBrushComponent* Component = Volume->GetBrushComponent())
+					Component->Modify();
+				UActorFactory::CreateBrushForVolumeActor(Volume, Builder);
+			},
+			"half-size of the volume's box brush in local space, cm (null = no brush: the volume has no shape); assigning rebuilds "
+			"it as a box of that half-size (Scale still multiplies it; undoable)", false, true));
+		if (!BoxStruct)
+			return;
+		FUnrealMcpRqlTypes::SetMember(D, Member("BrushBounds", T.ForStruct(BoxStruct),
+			[Types, BoxStruct](void* Self)
+			{
+				const AVolume* Volume = static_cast<AVolume*>(Self);
+				const FBox Local = VolumeBrushBox(Volume);
+				if (!Local.IsValid)
+					return rql::Value::null();
+				const FBox World = Local.TransformBy(Volume->GetActorTransform());
+				return Types->WrapStruct(BoxStruct, &World);
+			}, {}, "world-space box the brush covers (Min, Max; null = no brush)", false, true));
+	}
+
 	void LevelMembers(FUnrealMcpRqlTypes& T, rql::TypeDescriptor& D)
 	{
 		FUnrealMcpRqlTypes* Types = &T;
@@ -681,6 +751,47 @@ namespace UnrealMcpRqlCoreLocal
 		}
 	}
 
+	/**
+	 * Queue indices of the undoable (@p bRedo false: newest first) or redoable (true: next redo first) transactions. The
+	 * queue holds the done ones, then the GetUndoCount() undone ones at its end; an undo barrier stops undo before it.
+	 */
+	TArray<int32> UndoRange(bool bRedo)
+	{
+		TArray<int32> Indices;
+		const UTransactor* Trans = GEditor ? GEditor->Trans.Get() : nullptr;
+		if (!Trans)
+			return Indices;
+		const int32 Length = Trans->GetQueueLength();
+		const int32 Done = Length - Trans->GetUndoCount();
+		if (bRedo)
+		{
+			for (int32 Index = Done; Index < Length; ++Index)
+				Indices.Add(Index);
+		}
+		else
+		{
+			const int32 First = FMath::Max(0, Trans->GetCurrentUndoBarrier());
+			for (int32 Index = Done - 1; Index >= First; --Index)
+				Indices.Add(Index);
+		}
+		return Indices;
+	}
+
+	/** The titles of UndoRange(@p bRedo), at most @p Limit. */
+	TArray<FString> UndoTitles(bool bRedo, int32 Limit = 100)
+	{
+		TArray<FString> Titles;
+		const UTransactor* Trans = GEditor ? GEditor->Trans.Get() : nullptr;
+		for (const int32 Index : UndoRange(bRedo))
+		{
+			if (Titles.Num() >= Limit)
+				break;
+			const FTransaction* Transaction = Trans->GetTransaction(Index);
+			Titles.Add(Transaction ? Transaction->GetTitle().ToString() : FString());
+		}
+		return Titles;
+	}
+
 	void EditorMembers(FUnrealMcpRqlTypes& T, rql::TypeDescriptor& D)
 	{
 		FUnrealMcpRqlTypes* Types = &T;
@@ -736,6 +847,25 @@ namespace UnrealMcpRqlCoreLocal
 			{
 				MakeLevelCurrent(Cast<ULevel>(Types->AsObject(Value)));
 			}, "the level new actors spawn into", false, true));
+		// The editor's transaction buffer (Edit > Undo History), so an agent can tell what Ctrl+Z / Ctrl+Y would revert.
+		const rql::TypeDescriptor* Titles = T.Registry().list_type(StringType(), false);
+		const rql::TypeDescriptor* IntType = rql::builtin::number_of<int32>();
+		FUnrealMcpRqlTypes::SetMember(D, Member("UndoHistory", Titles,
+			[](void*) { return StrList(UndoTitles(/*bRedo*/ false)); }, {},
+			"titles of the transactions Undo would revert, the next one first (RQL mutations are \"RQL: <query>\"); at most 100"));
+		FUnrealMcpRqlTypes::SetMember(D, Member("RedoHistory", Titles,
+			[](void*) { return StrList(UndoTitles(/*bRedo*/ true)); }, {},
+			"titles of the undone transactions Redo would restore, the next one first; at most 100"));
+		FUnrealMcpRqlTypes::SetMember(D, Member("UndoCount", IntType,
+			[](void*) { return rql::Value::number(UndoRange(/*bRedo*/ false).Num()); }, {}, "how many steps can be undone"));
+		FUnrealMcpRqlTypes::SetMember(D, Member("RedoCount", IntType,
+			[](void*) { return rql::Value::number(UndoRange(/*bRedo*/ true).Num()); }, {}, "how many undone steps can be redone"));
+		FUnrealMcpRqlTypes::SetMember(D, Member("NextUndo", StringType(),
+			[](void*) { const TArray<FString> Next = UndoTitles(/*bRedo*/ false, 1); return Next.Num() ? Str(Next[0]) : rql::Value::null(); }, {},
+			"title of the transaction Undo reverts next (null = nothing to undo)", false, true));
+		FUnrealMcpRqlTypes::SetMember(D, Member("NextRedo", StringType(),
+			[](void*) { const TArray<FString> Next = UndoTitles(/*bRedo*/ true, 1); return Next.Num() ? Str(Next[0]) : rql::Value::null(); }, {},
+			"title of the transaction Redo restores next (null = nothing to redo)", false, true));
 		// The identity members of every object are noise on the operations object.
 		D.id_name.clear();
 		D.display_name.clear();
@@ -976,6 +1106,7 @@ void UnrealMcpRqlConfigureCore(FUnrealMcpRqlSession& Session)
 	T.AddClassHook(UObject::StaticClass(), &ObjectMembers);
 	T.AddClassHook(AActor::StaticClass(), &ActorMembers);
 	T.AddClassHook(UActorComponent::StaticClass(), &ComponentMembers);
+	T.AddClassHook(AVolume::StaticClass(), &VolumeMembers);
 	T.AddClassHook(ULevel::StaticClass(), &LevelMembers);
 	T.AddClassHook(UWorld::StaticClass(), &WorldMembers);
 	T.AddClassHook(UMaterialInterface::StaticClass(), &MaterialMembers);
@@ -1063,7 +1194,7 @@ void UnrealMcpRqlConfigureCore(FUnrealMcpRqlSession& Session)
 		return Types->WrapObjects(SelectedActors());
 	});
 	Session.AddSource(TEXT("editor"), T.ForClass(UUnrealMcpRqlEditorApi::StaticClass()), /*bList*/ false,
-		TEXT("editor state (IsPlaying, IsPaused, Selection, World, CurrentLevel) and operations: call SpawnActor / OpenLevel / NewLevel / "
+		TEXT("editor state (IsPlaying, IsPaused, Selection, World, CurrentLevel, NextUndo / UndoHistory / RedoHistory) and operations: call SpawnActor / OpenLevel / NewLevel / "
 			"SaveLevel / SaveAll / AddSublevel / UnloadSublevel / CreateAsset / CopyAsset / MoveAsset / DeleteAsset / CreateFolder / RefreshAssets / "
 			"CreateMaterialInstance / ImportAsset / SaveAsset / ClearConsole / CreateDataTable / AddGameplayTag / RemoveGameplayTag / "
 			"RenameGameplayTag"), [Types]()
