@@ -611,7 +611,7 @@ namespace UnrealMcpRqlCoreLocal
 		UScriptStruct* BoxStruct = FindObject<UScriptStruct>(nullptr, TEXT("/Script/CoreUObject.Box"));
 		// A volume is its brush: without one (placed from code, or a broken copy) it has no shape, so a NavMeshBoundsVolume
 		// builds no navigation and a TriggerVolume never overlaps; null tells that apart from a small box.
-		FUnrealMcpRqlTypes::SetMember(D, Member("BrushExtent", T.ForStruct(VectorStruct),
+		rql::MemberDescriptor Extent = Member("BrushExtent", T.ForStruct(VectorStruct),
 			[Types, VectorStruct](void* Self)
 			{
 				const FBox Box = VolumeBrushBox(static_cast<AVolume*>(Self));
@@ -622,14 +622,37 @@ namespace UnrealMcpRqlCoreLocal
 			},
 			[Types](void* Self, const rql::Value& Value)
 			{
+				// The engine's rollback writes the old value back through this setter: null (no brush) and the current extent
+				// change nothing, so a refused or rolled-back write never turns a cylinder or custom brush into a box.
+				if (Value.is_null())
+					return;
 				AVolume* Volume = static_cast<AVolume*>(Self);
-				const FVector Extent = StructArg<FVector>(*Types, Value);
-				if (!(Extent.X > 0.0 && Extent.Y > 0.0 && Extent.Z > 0.0))
-					Throw(TEXT("every half-size of BrushExtent must be > 0, e.g. \"(1000, 1000, 500)\""));
-				UnrealMcpRqlBuildVolumeBox(Volume, Extent);
+				const FVector Wanted = StructArg<FVector>(*Types, Value);
+				const FBox Current = VolumeBrushBox(Volume);
+				if (Current.IsValid && Current.GetExtent().Equals(Wanted, UE_KINDA_SMALL_NUMBER))
+					return;
+				UnrealMcpRqlBuildVolumeBox(Volume, Wanted);
 			},
 			"half-size of the volume's box brush in local space, cm (null = no brush: the volume has no shape); assigning rebuilds "
-			"it as a box of that half-size (Scale still multiplies it; undoable)", false, true));
+			"it as a box of that half-size (Scale still multiplies it; undoable)", false, true);
+		// Checked before any write, dry runs included.
+		Extent.validate = [Types](void*, const rql::Value& Value) -> std::string
+		{
+			if (Value.is_null())
+				return "a volume needs a brush: give BrushExtent a half-size such as \"(1000, 1000, 500)\"";
+			try
+			{
+				const FVector Wanted = StructArg<FVector>(*Types, Value);
+				if (Wanted.X > 0.0 && Wanted.Y > 0.0 && Wanted.Z > 0.0)
+					return std::string();
+			}
+			catch (const std::exception& Error)
+			{
+				return Error.what();
+			}
+			return "every half-size of BrushExtent must be > 0, e.g. \"(1000, 1000, 500)\"";
+		};
+		FUnrealMcpRqlTypes::SetMember(D, MoveTemp(Extent));
 		if (!BoxStruct)
 			return;
 		FUnrealMcpRqlTypes::SetMember(D, Member("BrushBounds", T.ForStruct(BoxStruct),
@@ -744,17 +767,18 @@ namespace UnrealMcpRqlCoreLocal
 	 * The undoable (@p bRedo false) or redoable (true) transactions as queue indices [First, End). The queue holds the done
 	 * ones, then the GetUndoCount() undone ones at its end; an undo barrier stops undo before it. Empty without an editor.
 	 */
-	void UndoBounds(const UTransactor* Trans, bool bRedo, int32& First, int32& End)
+	void UndoBounds(UTransactor* Trans, bool bRedo, int32& First, int32& End)
 	{
 		First = End = 0;
 		if (!Trans)
 			return;
 		const int32 Done = Trans->GetQueueLength() - Trans->GetUndoCount();
 		First = bRedo ? Done : FMath::Clamp(Trans->GetCurrentUndoBarrier(), 0, Done);
-		End = bRedo ? Trans->GetQueueLength() : Done;
+		// Read inside a mutation, the queue ends with that mutation's own open transaction: not a step Undo can take yet.
+		End = bRedo ? Trans->GetQueueLength() : FMath::Max(First, Done - (Trans->IsActive() ? 1 : 0));
 	}
 
-	const UTransactor* Transactor()
+	UTransactor* Transactor()
 	{
 		return GEditor ? GEditor->Trans.Get() : nullptr;
 	}
@@ -769,7 +793,7 @@ namespace UnrealMcpRqlCoreLocal
 	/** The titles of the undoable (newest first) or redoable (next redo first) transactions, at most @p Limit. */
 	TArray<FString> UndoTitles(bool bRedo, int32 Limit = 100)
 	{
-		const UTransactor* Trans = Transactor();
+		UTransactor* Trans = Transactor();
 		int32 First, End;
 		UndoBounds(Trans, bRedo, First, End);
 		TArray<FString> Titles;

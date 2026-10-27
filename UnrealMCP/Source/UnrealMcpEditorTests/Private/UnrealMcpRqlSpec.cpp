@@ -498,7 +498,7 @@ void FUnrealMcpRqlSpec::Define()
 				TEXT("v 0 0 0\nv 100 0 0\nv 0 100 0\nvn 0 0 1\nvt 0 0\nvt 1 0\nvt 0 1\nusemtl RqlSpecRed\nf 1/1/1 2/2/1 3/3/1\n"), *File));
 			// editor | call ImportAsset("@FILE@", "@FOLDER@")
 			const FString Import = FString(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"ImportAsset","args":[{"lit":"@FILE@"},{"lit":"@FOLDER@"}]}]})RQL"))
-				.Replace(TEXT("@FILE@"), *File).Replace(TEXT("@FOLDER@"), *Folder);
+				.Replace(TEXT("@FILE@"), *File).Replace(TEXT("@FOLDER@"), *(Folder + TEXT("/"))); // a trailing slash works too
 			const TSharedPtr<FJsonObject> Imported = Exec(Import, true);
 			TestTrue(*FString::Printf(TEXT("import ok (%s)"), *Codes(Imported)), IsOk(Imported));
 			const TSharedPtr<FJsonValue> Result = Cell(Imported, 0, 2);
@@ -686,6 +686,9 @@ void FUnrealMcpRqlSpec::Define()
 			// actors | where Label == "RqlSpecLampBare" | set BrushExtent = "(0, 10, 10)"
 			const TSharedPtr<FJsonObject> Flat = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"RqlSpecLampBare"}]}},{"op":"set","assign":[{"target":{"path":["BrushExtent"]},"value":{"lit":"(0, 10, 10)"}}]}]})RQL"), true);
 			TestTrue(*FString::Printf(TEXT("a zero half-size is refused (%s)"), *Codes(Flat)), !IsOk(Flat) && Codes(Flat).Contains(TEXT("> 0")));
+			const TSharedPtr<FJsonObject> FlatDry = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"RqlSpecLampBare"}]}},{"op":"set","assign":[{"target":{"path":["BrushExtent"]},"value":{"lit":"(0, 10, 10)"}}]}]})RQL"), true, /*bDryRun*/ true);
+			TestFalse(*FString::Printf(TEXT("and refused on a dry run too (%s)"), *Codes(FlatDry)), IsOk(FlatDry));
+			TestTrue(TEXT("the refusal left the bare volume brushless"), Bare->Brush == nullptr);
 		});
 
 		It("reads the undo history: what Undo and Redo would revert next", [this]()

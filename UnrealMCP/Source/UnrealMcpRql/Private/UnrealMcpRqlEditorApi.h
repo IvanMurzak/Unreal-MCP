@@ -87,7 +87,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Unreal MCP|RQL", meta = (BlueprintInternalUseOnly = "true"))
 	UMaterialInstanceConstant* CreateMaterialInstance(const FString& Path, UMaterialInterface* Parent);
 
-	/** import a file (FBX, PNG, …) from disk into a content folder; Name renames the asset; returns every asset it created or replaced (the imported one first, then the materials, textures, skeleton … the importer made next to it) */
+	/** import a file (FBX, PNG, …) from disk into a content folder; Name renames the asset; returns the imported asset first, then every other asset the import created in the folder (materials, textures, skeleton …) */
 	UFUNCTION(BlueprintCallable, Category = "Unreal MCP|RQL", meta = (BlueprintInternalUseOnly = "true"))
 	TArray<UObject*> ImportAsset(const FString& File, const FString& Destination, const FString& Name = TEXT(""),
 		bool bReplaceExisting = false);

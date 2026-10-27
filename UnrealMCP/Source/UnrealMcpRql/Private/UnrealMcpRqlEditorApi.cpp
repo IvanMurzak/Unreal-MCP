@@ -574,12 +574,16 @@ TArray<UObject*> UUnrealMcpRqlEditorApi::ImportAsset(const FString& File, const 
 {
 	if (!FPaths::FileExists(File))
 		return Failed<TArray<UObject*>>(FString::Printf(TEXT("no file '%s'"), *File));
-	if (!IsWritableRoot(Destination) || !Destination.StartsWith(TEXT("/")))
+	// The registry's package paths have no trailing slash: "/Game/Props/" would find no created assets.
+	FString Folder = Destination;
+	while (Folder.Len() > 1 && Folder.EndsWith(TEXT("/")))
+		Folder.LeftChopInline(1);
+	if (!IsWritableRoot(Folder) || !Folder.StartsWith(TEXT("/")))
 		return Failed<TArray<UObject*>>(FString::Printf(TEXT("'%s' is not a writable content folder (e.g. /Game/Imported)"), *Destination));
 	UAssetImportTask* Task = NewObject<UAssetImportTask>();
 	FGCObjectScopeGuard TaskGuard(Task);
 	Task->Filename = File;
-	Task->DestinationPath = Destination;
+	Task->DestinationPath = Folder;
 	if (!Name.IsEmpty())
 		Task->DestinationName = Name;
 	Task->bAutomated = true;
@@ -601,10 +605,10 @@ TArray<UObject*> UUnrealMcpRqlEditorApi::ImportAsset(const FString& File, const 
 	// The task lists only the primary asset (the mesh of an FBX): the materials, textures and skeleton the importer creates
 	// next to it are the assets the destination folder gains, found by diffing the registry.
 	IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
-	const auto AssetsUnder = [&Registry, &Destination]()
+	const auto AssetsUnder = [&Registry, &Folder]()
 	{
 		TArray<FAssetData> Found;
-		Registry.GetAssetsByPath(FName(*Destination), Found, /*bRecursive*/ true, /*bIncludeOnlyOnDiskAssets*/ false);
+		Registry.GetAssetsByPath(FName(*Folder), Found, /*bRecursive*/ true, /*bIncludeOnlyOnDiskAssets*/ false);
 		TSet<FSoftObjectPath> Paths;
 		for (const FAssetData& Data : Found)
 			Paths.Add(Data.GetSoftObjectPath());
@@ -628,7 +632,7 @@ TArray<UObject*> UUnrealMcpRqlEditorApi::ImportAsset(const FString& File, const 
 	if (Imported.Num() == 0)
 	{
 		// An existing asset of the same name is skipped without bReplaceExisting: name that, not an empty import.
-		const FString Existing = Destination / (Name.IsEmpty() ? ObjectTools::SanitizeObjectName(FPaths::GetBaseFilename(File)) : Name);
+		const FString Existing = Folder / (Name.IsEmpty() ? ObjectTools::SanitizeObjectName(FPaths::GetBaseFilename(File)) : Name);
 		if (!bReplaceExisting && UEditorAssetLibrary::DoesAssetExist(Existing))
 			UnrealMcpRql::Fail(FString::Printf(TEXT("'%s' already exists; pass bReplaceExisting = true to reimport over it, or a Name for a new asset"), *Existing));
 		else
