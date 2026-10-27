@@ -26,6 +26,17 @@
 #include "Engine/Blueprint.h"
 #include "Engine/BlueprintGeneratedClass.h"
 #include "Engine/DataTable.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/SCS_Node.h"
+#include "Engine/SimpleConstructionScript.h"
+#include "Engine/StaticMesh.h"
+#if __has_include("StructUtils/UserDefinedStruct.h")
+#include "StructUtils/UserDefinedStruct.h" // moved from Engine/ to CoreUObject in UE 5.8
+#else
+#include "Engine/UserDefinedStruct.h"
+#endif
+#include "Kismet2/StructureEditorUtils.h"
+#include "UserDefinedStructure/UserDefinedStructEditorData.h"
 #include "GameFramework/Actor.h"
 #include "GameplayTagContainer.h"
 #include "GameplayTagsManager.h"
@@ -231,12 +242,14 @@ void FUnrealMcpRqlDataModelsSpec::Define()
 	});
 	AfterEach([this]()
 	{
+		// Actors first: placed instances of a spec Blueprint must not outlive their class (a garbage class with live
+		// instances breaks the next garbage collection).
+		DestroySpecActors();
 		for (UObject* Object : Created)
 			UnrealMcpRqlSpecHelpers::DropObject(Object);
 		Created.Reset();
 		if (UDataTable* Made = FindTable())
 			UnrealMcpRqlSpecHelpers::DropObject(Made);
-		DestroySpecActors();
 		if (GEditor)
 			GEditor->ResetTransaction(FText::FromString(TEXT("RQL data model specs")));
 	});
@@ -356,6 +369,41 @@ void FUnrealMcpRqlDataModelsSpec::Define()
 		});
 	});
 
+	Describe("user-defined structs", [this]()
+	{
+		It("adds, removes, renames fields and sets defaults; a DataTable of the struct uses them", [this]()
+		{
+			const FString Struct = Table + TEXT("_Row");
+			const TPair<const TCHAR*, FString> Path(TEXT("UDS"), Struct);
+			UPackage* Package = CreatePackage(*Struct);
+			UUserDefinedStruct* Made = FStructureEditorUtils::CreateUserDefinedStruct(Package, *FPackageName::GetShortName(Struct), RF_Public | RF_Standalone | RF_Transactional);
+			if (!TestNotNull(TEXT("struct"), Made))
+				return;
+			FAssetRegistryModule::AssetCreated(Made);
+			Created.Add(Made);
+			const FString Initial = FStructureEditorUtils::GetVarDesc(Made)[0].FriendlyName;
+
+			Must(TEXT("a float field"), /* unreal.asset("@UDS@") | call AddField("Health", "float", 100) */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@UDS@"}]},"stages":[{"op":"call","method":"AddField","args":[{"lit":"Health"},{"lit":"float"},{"lit":100}]}]})RQL"), { Path });
+			Must(TEXT("an int field"), /* unreal.asset("@UDS@") | call AddField("Tier", "int") */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@UDS@"}]},"stages":[{"op":"call","method":"AddField","args":[{"lit":"Tier"},{"lit":"int"}]}]})RQL"), { Path });
+			Must(TEXT("the initial field removed"), /* unreal.asset("@UDS@") | call RemoveField("@INITIAL@") */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@UDS@"}]},"stages":[{"op":"call","method":"RemoveField","args":[{"lit":"@INITIAL@"}]}]})RQL"), { Path, { TEXT("INITIAL"), Initial } });
+			Must(TEXT("renamed"), /* unreal.asset("@UDS@") | call RenameField("Tier", "Level") */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@UDS@"}]},"stages":[{"op":"call","method":"RenameField","args":[{"lit":"Tier"},{"lit":"Level"}]}]})RQL"), { Path });
+			Must(TEXT("default"), /* unreal.asset("@UDS@") | call SetFieldDefault("Level", 3) */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@UDS@"}]},"stages":[{"op":"call","method":"SetFieldDefault","args":[{"lit":"Level"},{"lit":3}]}]})RQL"), { Path });
+			Refuses(TEXT("unknown type"), /* unreal.asset("@UDS@") | call AddField("Speed", "NoSuchType") */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@UDS@"}]},"stages":[{"op":"call","method":"AddField","args":[{"lit":"Speed"},{"lit":"NoSuchType"}]}]})RQL"), TEXT("unknown variable type"), { Path });
+			Refuses(TEXT("a taken name"), /* unreal.asset("@UDS@") | call AddField("health", "int") */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@UDS@"}]},"stages":[{"op":"call","method":"AddField","args":[{"lit":"health"},{"lit":"int"}]}]})RQL"), TEXT("already has a field"), { Path });
+			Refuses(TEXT("an unknown field"), /* unreal.asset("@UDS@") | call RemoveField("Nope") */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@UDS@"}]},"stages":[{"op":"call","method":"RemoveField","args":[{"lit":"Nope"}]}]})RQL"), TEXT("fields: Health, Level"), { Path });
+			const FString Fields = UnrealMcpRqlSpecHelpers::CellText(Run(/* unreal.asset("@UDS@") | select Fields */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@UDS@"}]},"stages":[{"op":"select","fields":[{"name":"Fields","expr":{"path":["Fields"]}}]}]})RQL"), false, { Path }));
+			TestTrue(*FString::Printf(TEXT("fields (%s)"), *Fields), Fields.Contains(TEXT("\"Name\":\"Health\",\"Type\":\"float\""))
+				&& Fields.Contains(TEXT("\"Name\":\"Level\",\"Type\":\"int\",\"Default\":\"3\"")) && !Fields.Contains(Initial));
+
+			Must(TEXT("a table of the struct"), /* editor | call CreateDataTable("@DT@", "@UDS@") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"CreateDataTable","args":[{"lit":"@DT@"},{"lit":"@UDS@"}]}]})RQL"), { Path });
+			Must(TEXT("a row with the fields"), /* unreal.asset("@DT@") | call AddRow("Orc", {Health: 120, Level: 2}) */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@DT@"}]},"stages":[{"op":"call","method":"AddRow","args":[{"lit":"Orc"},{"object":[{"key":"Health","value":{"lit":120}},{"key":"Level","value":{"lit":2}}]}]}]})RQL"), { Path });
+			const TSharedPtr<FJsonObject> Rows = Run(/* unreal.asset("@DT@") | get Rows | select Key Value.Health Value.Level */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@DT@"}]},"stages":[{"op":"get","expr":{"path":["Rows"]}},{"op":"select","fields":[{"name":"Key","expr":{"path":["Key"]}},{"name":"Value.Health","expr":{"path":["Value","Health"]}},{"name":"Value.Level","expr":{"path":["Value","Level"]}}]}]})RQL"));
+			TestEqual(TEXT("row"), UnrealMcpRqlSpecHelpers::CellText(Rows, 0, 0), FString(TEXT("Orc")));
+			TestEqual(TEXT("health"), UnrealMcpRqlSpecHelpers::CellText(Rows, 0, 1), FString(TEXT("120")));
+			TestEqual(TEXT("level"), UnrealMcpRqlSpecHelpers::CellText(Rows, 0, 2), FString(TEXT("2")));
+		});
+	});
+
 	Describe("gameplay tags", [this]()
 	{
 		BeforeEach([this]()
@@ -389,6 +437,15 @@ void FUnrealMcpRqlDataModelsSpec::Define()
 			TestFalse(TEXT("gone"), UGameplayTagsManager::Get().IsDictionaryTag(TEXT("RqlSpec.State.Stunned")));
 			Refuses(TEXT("empty segment"), /* editor | call AddGameplayTag("RqlSpec..Bad", "", "RqlSpecTags.ini") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"AddGameplayTag","args":[{"lit":"RqlSpec..Bad"},{"lit":""},{"lit":"RqlSpecTags.ini"}]}]})RQL"), TEXT("empty segment"));
 			Refuses(TEXT("remove an unknown tag"), /* editor | call RemoveGameplayTag("RqlSpec.Nothing") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"RemoveGameplayTag","args":[{"lit":"RqlSpec.Nothing"}]}]})RQL"), TEXT("is not a gameplay tag"));
+		});
+
+		It("gives an implicit parent tag no comment (not the comment of the child that created it)", [this]()
+		{
+			DropTags();
+			Must(TEXT("child"), /* editor | call AddGameplayTag("RqlSpec.Implicit.Child", "only the child", "RqlSpecTags.ini") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"AddGameplayTag","args":[{"lit":"RqlSpec.Implicit.Child"},{"lit":"only the child"},{"lit":"RqlSpecTags.ini"}]}]})RQL"));
+			const TSharedPtr<FJsonObject> Parent = Run(/* gameplayTags | where Name == "RqlSpec.Implicit" | select Comment Explicit */ TEXT(R"RQL({"rql":"0.1","source":{"path":["gameplayTags"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Name"]},{"lit":"RqlSpec.Implicit"}]}},{"op":"select","fields":[{"name":"Comment","expr":{"path":["Comment"]}},{"name":"Explicit","expr":{"path":["Explicit"]}}]}]})RQL"));
+			TestEqual(TEXT("no comment"), UnrealMcpRqlSpecHelpers::CellText(Parent, 0, 0), FString());
+			TestEqual(TEXT("implicit"), UnrealMcpRqlSpecHelpers::CellText(Parent, 0, 1), FString(TEXT("false")));
 		});
 
 		It("renames a tag with children: the renamed tag stays explicit with its comment", [this]()
@@ -693,6 +750,79 @@ void FUnrealMcpRqlDataModelsSpec::Define()
 		});
 	});
 
+	Describe("Blueprint components and variables", [this]()
+	{
+		It("edits component defaults: placed actors that keep the old value follow, overrides stay, undo restores", [this]()
+		{
+			UBlueprint* Made = MakeBlueprint();
+			USCS_Node* Node = Made->SimpleConstructionScript->CreateNode(UStaticMeshComponent::StaticClass(), TEXT("RqlMesh"));
+			Made->SimpleConstructionScript->AddNode(Node);
+			FKismetEditorUtilities::CompileBlueprint(Made);
+			const FString Name = FPackageName::GetShortName(Blueprint);
+
+			const TSharedPtr<FJsonObject> Listed = Run(/* unreal.asset("@BP@") | get Components | select Name $type */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@BP@"}]},"stages":[{"op":"get","expr":{"path":["Components"]}},{"op":"select","fields":[{"name":"Name","expr":{"path":["Name"]}},{"name":"$type","expr":{"path":[{"meta":"type"}]}}]}]})RQL"));
+			TestEqual(TEXT("one component"), UnrealMcpRqlSpecHelpers::RowCount(Listed), 1);
+			TestEqual(TEXT("read under its variable name"), UnrealMcpRqlSpecHelpers::CellText(Listed, 0, 0), FString(TEXT("RqlMesh")));
+			TestEqual(TEXT("its class"), UnrealMcpRqlSpecHelpers::CellText(Listed, 0, 1), FString(TEXT("StaticMeshComponent")));
+
+			Must(TEXT("spawned by Blueprint name"), /* editor | call SpawnActor("@BPNAME@", "RqlSeqLampBP") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"SpawnActor","args":[{"lit":"@BPNAME@"},{"lit":"RqlSeqLampBP"}]}]})RQL"), { { TEXT("BPNAME"), Name } });
+			UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+			AActor* Follower = nullptr;
+			for (TActorIterator<AActor> It(World); It; ++It)
+			{
+				if (It->GetActorLabel() == TEXT("RqlSeqLampBP"))
+					Follower = *It;
+			}
+			if (!TestNotNull(TEXT("placed"), Follower) || !TestTrue(TEXT("of the Blueprint's class"), Follower->GetClass() == Made->GeneratedClass))
+				return;
+			FActorSpawnParameters Params;
+			Params.ObjectFlags |= RF_Transactional;
+			AActor* Overrider = World->SpawnActor<AActor>(Made->GeneratedClass, FTransform::Identity, Params);
+			Overrider->SetActorLabel(TEXT("RqlSeqLampBPOverride"));
+			UStaticMesh* Cone = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cone.Cone"));
+			Overrider->FindComponentByClass<UStaticMeshComponent>()->SetStaticMesh(Cone);
+			Made->GetOutermost()->SetDirtyFlag(false);
+
+			Must(TEXT("template mesh"), /* unreal.asset("@BP@").Components | where Name == "RqlMesh" | set StaticMesh = "/Engine/BasicShapes/Sphere" */ TEXT(R"RQL({"rql":"0.1","source":{"path":["Components"],"on":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@BP@"}]}},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Name"]},{"lit":"RqlMesh"}]}},{"op":"set","assign":[{"target":{"path":["StaticMesh"]},"value":{"lit":"/Engine/BasicShapes/Sphere"}}]}]})RQL"));
+			UStaticMeshComponent* Template = Cast<UStaticMeshComponent>(Node->ComponentTemplate);
+			TestTrue(TEXT("the template has the mesh"), Template && Template->GetStaticMesh() && Template->GetStaticMesh()->GetName() == TEXT("Sphere"));
+			const UStaticMeshComponent* FollowerMesh = Follower->FindComponentByClass<UStaticMeshComponent>();
+			TestTrue(TEXT("the placed actor follows"), FollowerMesh && FollowerMesh->GetStaticMesh() && FollowerMesh->GetStaticMesh()->GetName() == TEXT("Sphere"));
+			TestTrue(TEXT("an override stays"), Overrider->FindComponentByClass<UStaticMeshComponent>()->GetStaticMesh() == Cone);
+			TestTrue(TEXT("the Blueprint is modified"), Made->GetOutermost()->IsDirty());
+
+			if (!GEditor)
+				return;
+			GEditor->UndoTransaction();
+			TestTrue(TEXT("undo restores the template"), Template && Template->GetStaticMesh() == nullptr);
+			// Read the component again: the placed actor's construction script may have rebuilt it.
+			const UStaticMeshComponent* Restored = IsValid(Follower) ? Follower->FindComponentByClass<UStaticMeshComponent>() : nullptr;
+			TestTrue(TEXT("and the placed actor"), Restored && Restored->GetStaticMesh() == nullptr);
+		});
+
+		It("refuses writing a variable that is not Instance Editable on a placed actor (it would be reset)", [this]()
+		{
+			UBlueprint* Made = MakeBlueprint();
+			Must(TEXT("spawned"), /* editor | call SpawnActor("@BPNAME@", "RqlSeqLampBP") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"SpawnActor","args":[{"lit":"@BPNAME@"},{"lit":"RqlSeqLampBP"}]}]})RQL"), { { TEXT("BPNAME"), FPackageName::GetShortName(Blueprint) } });
+			Refuses(TEXT("not Instance Editable"), /* unreal.find("RqlSeqLampBP") | set Health = 5 */ TEXT(R"RQL({"rql":"0.1","source":{"call":"find","on":{"path":["unreal"]},"args":[{"lit":"RqlSeqLampBP"}]},"stages":[{"op":"set","assign":[{"target":{"path":["Health"]},"value":{"lit":5}}]}]})RQL"), TEXT("is not Instance Editable"));
+			FBlueprintEditorUtils::SetBlueprintOnlyEditableFlag(Made, TEXT("Health"), /*bNewFlag*/ false);
+			FKismetEditorUtilities::CompileBlueprint(Made);
+			Must(TEXT("instance editable now"), /* unreal.find("RqlSeqLampBP") | set Health = 5 */ TEXT(R"RQL({"rql":"0.1","source":{"call":"find","on":{"path":["unreal"]},"args":[{"lit":"RqlSeqLampBP"}]},"stages":[{"op":"set","assign":[{"target":{"path":["Health"]},"value":{"lit":5}}]}]})RQL"));
+			UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+			bool bFound = false;
+			for (TActorIterator<AActor> It(World); It; ++It)
+			{
+				if (It->GetActorLabel() == TEXT("RqlSeqLampBP"))
+				{
+					bFound = true;
+					const FDoubleProperty* Health = FindFProperty<FDoubleProperty>(It->GetClass(), TEXT("Health"));
+					TestTrue(TEXT("the value stuck"), Health && Health->GetPropertyValue_InContainer(*It) == 5.0);
+				}
+			}
+			TestTrue(TEXT("the placed actor is still there"), bFound);
+		});
+	});
+
 	Describe("Widget Blueprints", [this]()
 	{
 		It("builds a widget tree, edits widgets and slots, removes widgets, compiles and undoes", [this]()
@@ -779,6 +909,9 @@ void FUnrealMcpRqlDataModelsSpec::Define()
 			TestTrue(*FString::Printf(TEXT("keys read back (%s)"), *ChannelText.Left(400)), ChannelText.Contains(TEXT("\"Frame\":30")) && ChannelText.Contains(TEXT("250.5")));
 			Refuses(TEXT("unknown channel"), /* unreal.asset("@LS@") | get Bindings | get Tracks | get Sections | call AddKey("Nope", 1, 1) */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@LS@"}]},"stages":[{"op":"get","expr":{"path":["Bindings"]}},{"op":"get","expr":{"path":["Tracks"]}},{"op":"get","expr":{"path":["Sections"]}},{"op":"call","method":"AddKey","args":[{"lit":"Nope"},{"lit":1},{"lit":1}]}]})RQL"), TEXT("Location.X"));
 			Refuses(TEXT("a text value"), /* unreal.asset("@LS@") | get Bindings | get Tracks | get Sections | call AddKey("Location.X", 1, "far") */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@LS@"}]},"stages":[{"op":"get","expr":{"path":["Bindings"]}},{"op":"get","expr":{"path":["Tracks"]}},{"op":"get","expr":{"path":["Sections"]}},{"op":"call","method":"AddKey","args":[{"lit":"Location.X"},{"lit":1},{"lit":"far"}]}]})RQL"), TEXT("a number"));
+			Must(TEXT("an internal channel name keys the same channel"), /* unreal.asset("@LS@") | get Bindings | get Tracks | get Sections | call AddKey("Rotation.Z", 10, 45) */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@LS@"}]},"stages":[{"op":"get","expr":{"path":["Bindings"]}},{"op":"get","expr":{"path":["Tracks"]}},{"op":"get","expr":{"path":["Sections"]}},{"op":"call","method":"AddKey","args":[{"lit":"Rotation.Z"},{"lit":10},{"lit":45}]}]})RQL"));
+			const FString Yaw = UnrealMcpRqlSpecHelpers::CellText(Run(/* unreal.asset("@LS@") | get Bindings | get Tracks | get Sections | get Channels | where Name == "Rotation.Yaw" | select Keys */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@LS@"}]},"stages":[{"op":"get","expr":{"path":["Bindings"]}},{"op":"get","expr":{"path":["Tracks"]}},{"op":"get","expr":{"path":["Sections"]}},{"op":"get","expr":{"path":["Channels"]}},{"op":"where","pred":{"op":"==","args":[{"path":["Name"]},{"lit":"Rotation.Yaw"}]}},{"op":"select","fields":[{"name":"Keys","expr":{"path":["Keys"]}}]}]})RQL")));
+			TestTrue(*FString::Printf(TEXT("Rotation.Z is the yaw (%s)"), *Yaw), Yaw.Contains(TEXT("\"Frame\":10")) && Yaw.Contains(TEXT("\"Value\":45")));
 			Must(TEXT("a key past the end grows the section"), /* unreal.asset("@LS@") | get Bindings | get Tracks | get Sections | call AddKey("Location.Y", 200, 5) */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@LS@"}]},"stages":[{"op":"get","expr":{"path":["Bindings"]}},{"op":"get","expr":{"path":["Tracks"]}},{"op":"get","expr":{"path":["Sections"]}},{"op":"call","method":"AddKey","args":[{"lit":"Location.Y"},{"lit":200},{"lit":5}]}]})RQL"));
 			const TSharedPtr<FJsonObject> Grown = Run(/* unreal.asset("@LS@") | get Bindings | get Tracks | get Sections | select End */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@LS@"}]},"stages":[{"op":"get","expr":{"path":["Bindings"]}},{"op":"get","expr":{"path":["Tracks"]}},{"op":"get","expr":{"path":["Sections"]}},{"op":"select","fields":[{"name":"End","expr":{"path":["End"]}}]}]})RQL"));
 			TestTrue(TEXT("section grown"), FCString::Atoi(*UnrealMcpRqlSpecHelpers::CellText(Grown)) >= 200);

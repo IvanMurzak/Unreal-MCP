@@ -141,8 +141,11 @@ namespace UnrealMcpRqlSequencesLocal
 
 	// ---------------------------------------------------------------- channels
 
-	/** Visit every keyable channel of a section with its display name ("Location.X", "Bool", "Weight"). */
-	void ForEachChannel(UMovieSceneSection* Section, TFunctionRef<void(const FString&, FMovieSceneChannel*, FName)> Visit)
+	/**
+	 * Visit every keyable channel of a section with its display name ("Location.X", "Rotation.Yaw", "Bool", "Weight") and
+	 * its internal name ("Rotation.Z", the name Python and the channel metadata use; empty when there is none).
+	 */
+	void ForEachChannel(UMovieSceneSection* Section, TFunctionRef<void(const FString&, const FString&, FMovieSceneChannel*, FName)> Visit)
 	{
 		FMovieSceneChannelProxy& Proxy = Section->GetChannelProxy();
 		for (const FMovieSceneChannelEntry& Entry : Proxy.GetAllEntries())
@@ -155,15 +158,17 @@ namespace UnrealMcpRqlSequencesLocal
 			for (int32 Index = 0; Index < Channels.Num(); ++Index)
 			{
 				FString Name = FString::Printf(TEXT("%s%d"), *Type.ToString(), Index);
+				FString Internal;
 #if WITH_EDITOR
 				if (Meta.IsValidIndex(Index))
 				{
 					const FString Display = Meta[Index].DisplayText.ToString();
 					const FString Group = Meta[Index].Group.ToString();
-					Name = Display.IsEmpty() ? Meta[Index].Name.ToString() : (Group.IsEmpty() ? Display : Group + TEXT(".") + Display);
+					Internal = Meta[Index].Name.ToString();
+					Name = Display.IsEmpty() ? Internal : (Group.IsEmpty() ? Display : Group + TEXT(".") + Display);
 				}
 #endif
-				Visit(Name, Channels[Index], Type);
+				Visit(Name, Internal, Channels[Index], Type);
 			}
 		}
 	}
@@ -208,54 +213,61 @@ namespace UnrealMcpRqlSequencesLocal
 		const UMovieScene* Scene = SceneOf(Section);
 		const FFrameNumber Time = ToTick(Scene, Frame);
 		TArray<FString> Names;
-		bool bDone = false;
-		ForEachChannel(Section, [&](const FString& Name, FMovieSceneChannel* Channel, FName Type)
+		const FString Key = Wanted.TrimStartAndEnd();
+		// The channel shown under that name, else the one with that internal name ("Rotation.Z" is the yaw).
+		struct FHit { FString Name; FMovieSceneChannel* Channel = nullptr; FName Type; };
+		FHit ByDisplay, ByInternal;
+		ForEachChannel(Section, [&](const FString& Name, const FString& Internal, FMovieSceneChannel* Channel, FName Type)
 		{
 			Names.Add(Name);
-			if (bDone || !Name.Equals(Wanted.TrimStartAndEnd(), ESearchCase::IgnoreCase))
-				return;
-			// AddCubicKey inserts next to a key at the same frame: drop that key first, so the new one replaces it.
-			if (IsDouble(Type))
-			{
-				const double Number = NumberArg(Value, TEXT("a number"));
-				Section->Modify();
-				FMovieSceneDoubleChannel* DoubleChannel = static_cast<FMovieSceneDoubleChannel*>(Channel);
-				TMovieSceneChannelData<FMovieSceneDoubleValue> Data = DoubleChannel->GetData();
-				const int32 Existing = Data.FindKey(Time);
-				if (Existing != INDEX_NONE)
-					Data.RemoveKey(Existing);
-				DoubleChannel->AddCubicKey(Time, Number);
-			}
-			else if (IsFloat(Type))
-			{
-				const double Number = NumberArg(Value, TEXT("a number"));
-				Section->Modify();
-				FMovieSceneFloatChannel* FloatChannel = static_cast<FMovieSceneFloatChannel*>(Channel);
-				TMovieSceneChannelData<FMovieSceneFloatValue> Data = FloatChannel->GetData();
-				const int32 Existing = Data.FindKey(Time);
-				if (Existing != INDEX_NONE)
-					Data.RemoveKey(Existing);
-				FloatChannel->AddCubicKey(Time, static_cast<float>(Number));
-			}
-			else if (IsBool(Type))
-			{
-				const bool bValue = BoolArg(Value);
-				Section->Modify();
-				TMovieSceneChannelData<bool> Data = static_cast<FMovieSceneBoolChannel*>(Channel)->GetData();
-				const int32 Existing = Data.FindKey(Time);
-				if (Existing != INDEX_NONE)
-					Data.GetValues()[Existing] = bValue;
-				else
-					Data.AddKey(Time, bValue);
-			}
-			else
-			{
-				Throw(FString::Printf(TEXT("channel '%s' (%s) is not a number or bool channel"), *Name, *Type.ToString()));
-			}
-			bDone = true;
+			if (!ByDisplay.Channel && Name.Equals(Key, ESearchCase::IgnoreCase))
+				ByDisplay = { Name, Channel, Type };
+			else if (!ByInternal.Channel && !Internal.IsEmpty() && Internal.Equals(Key, ESearchCase::IgnoreCase))
+				ByInternal = { Name, Channel, Type };
 		});
-		if (!bDone)
+		const FHit& Hit = ByDisplay.Channel ? ByDisplay : ByInternal;
+		if (!Hit.Channel)
 			Throw(FString::Printf(TEXT("%s has no channel '%s' (channels: %s)"), *Section->GetName(), *Wanted, *FString::Join(Names, TEXT(", "))));
+		FMovieSceneChannel* Channel = Hit.Channel;
+		const FName Type = Hit.Type;
+		// AddCubicKey inserts next to a key at the same frame: drop that key first, so the new one replaces it.
+		if (IsDouble(Type))
+		{
+			const double Number = NumberArg(Value, TEXT("a number"));
+			Section->Modify();
+			FMovieSceneDoubleChannel* DoubleChannel = static_cast<FMovieSceneDoubleChannel*>(Channel);
+			TMovieSceneChannelData<FMovieSceneDoubleValue> Data = DoubleChannel->GetData();
+			const int32 Existing = Data.FindKey(Time);
+			if (Existing != INDEX_NONE)
+				Data.RemoveKey(Existing);
+			DoubleChannel->AddCubicKey(Time, Number);
+		}
+		else if (IsFloat(Type))
+		{
+			const double Number = NumberArg(Value, TEXT("a number"));
+			Section->Modify();
+			FMovieSceneFloatChannel* FloatChannel = static_cast<FMovieSceneFloatChannel*>(Channel);
+			TMovieSceneChannelData<FMovieSceneFloatValue> Data = FloatChannel->GetData();
+			const int32 Existing = Data.FindKey(Time);
+			if (Existing != INDEX_NONE)
+				Data.RemoveKey(Existing);
+			FloatChannel->AddCubicKey(Time, static_cast<float>(Number));
+		}
+		else if (IsBool(Type))
+		{
+			const bool bValue = BoolArg(Value);
+			Section->Modify();
+			TMovieSceneChannelData<bool> Data = static_cast<FMovieSceneBoolChannel*>(Channel)->GetData();
+			const int32 Existing = Data.FindKey(Time);
+			if (Existing != INDEX_NONE)
+				Data.GetValues()[Existing] = bValue;
+			else
+				Data.AddKey(Time, bValue);
+		}
+		else
+		{
+			Throw(FString::Printf(TEXT("channel '%s' (%s) is not a number or bool channel"), *Hit.Name, *Type.ToString()));
+		}
 		// A key outside the section grows it, as keying in the Sequencer does.
 		if (Section->HasStartFrame() && Section->HasEndFrame() && !Section->GetRange().Contains(Time))
 			Section->ExpandToFrame(Time);
@@ -462,7 +474,7 @@ namespace UnrealMcpRqlSequencesLocal
 			UMovieSceneSection* Target = Section(Self);
 			const UMovieScene* Scene = SceneOf(Target);
 			std::vector<rql::Value> Out;
-			ForEachChannel(Target, [&Out, Scene](const FString& Name, FMovieSceneChannel* Channel, FName Type)
+			ForEachChannel(Target, [&Out, Scene](const FString& Name, const FString&, FMovieSceneChannel* Channel, FName Type)
 			{
 				std::vector<std::pair<rql::Value, rql::Value>> Entry;
 				Entry.emplace_back(Str(TEXT("Name")), Str(Name));

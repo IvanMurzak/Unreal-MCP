@@ -46,13 +46,16 @@ agent ──query text──▶ unreal-mcp-bridge (sidecar, .NET)          Unrea
   `StaticMeshComponent`, `BP_Enemy_C`, structs `Vector`, enums `EComponentMobility`); `rql-schema` accepts the C++
   spellings too (`APointLight`, `FVector`).
 - **Members**: class properties that are EditAnywhere / VisibleAnywhere / BlueprintVisible (writable unless `EditConst`
-  or BlueprintReadOnly-only), every struct property, `TArray` / `TSet` / `TMap` as lists and maps, object references
+  or BlueprintReadOnly-only; a Blueprint actor's variable that is not Instance Editable is read-only on placed actors,
+  since `AActor::ResetPropertiesForConstruction` resets it to the class default on every construction script run), every struct property, `TArray` / `TSet` / `TMap` as lists and maps, object references
   (instanced sub-objects are owning, others references), soft references as paths. Writes go through the editor's
   `PreEditChange` / `PostEditChangeProperty`, as an edit in the Details panel does (components refresh, Blueprint
   actors rerun their construction script).
 - **Computed members** (core module): every object `Id`, `Name`, `Path`; Actor `Label`, `Location`, `Rotation`,
-  `Scale`, `Components`, `Children`, `Parent` (writable: attach / detach), `Folder`, `Level`, `HiddenInEditor`;
-  component `Owner`; Level `Map`, `Package`, `IsPersistent`, `IsCurrent` (writable), `IsVisible`, `Actors`; World
+  `Scale`, `Components`, `Children`, `Parent` (writable: attach / detach; a refused attach names the reason, e.g. a Static
+  actor under a Movable parent), `Folder`, `Level`, `HiddenInEditor`, `Selected` (writable: adds to / removes from the
+  editor selection; neither it nor `HiddenInEditor` marks the level unsaved); component `Owner` (and `Name`: a Blueprint's
+  component templates read under their variable name, without the `_GEN_VARIABLE` suffix); Level `Map`, `Package`, `IsPersistent`, `IsCurrent` (writable), `IsVisible`, `Actors`; World
   `Map`, `Levels`, `PersistentLevel`, `CurrentLevel`; MaterialInterface `Scalars` / `Vectors` / `Textures` (parameter
   maps, writable on material instances).
 - **Methods** (`call`): Actor `Destroy()`, `Duplicate(Offset)`, `AddComponent(ClassName, Name)`; component
@@ -64,7 +67,8 @@ agent ──query text──▶ unreal-mcp-bridge (sidecar, .NET)          Unrea
   objects read as null and are never dereferenced.
 - **References from text**: an object parameter or member accepts what an edit field accepts — an asset path, a class
   name or path for class references, an actor label / name / path for actors (`FUnrealMcpObjectRef::ResolveReference`,
-  the same class resolver as `blueprint-*`).
+  the same class resolver as `blueprint-*`). An asset reference that resolves to nothing suggests up to three asset paths
+  of that class with a matching name (`no StaticMesh 'Cube' (did you mean /Engine/BasicShapes/Cube, ...?)`).
 - **Math structs** (`Vector`, `Vector2D`, `Vector4`, `Rotator`, `Quat`, `LinearColor`, `Color`, `IntPoint`,
   `IntVector`) have RQL type adapters: they print as `(x, y, z)` and accept `"(1, 2, 3)"`, `[1, 2, 3]`, `{X: 1, …}`
   (an object literal builds a new value: members it does not name are zero); colors also `"#ff8800"`. They compare
@@ -101,7 +105,7 @@ agent ──query text──▶ unreal-mcp-bridge (sidecar, .NET)          Unrea
 | `actors` | every actor of the editor world's loaded levels |
 | `levels`, `world` | the loaded levels, the editor world |
 | `selection` | the selected actors (`editor | set Selection = [...]` writes it) |
-| `editor` | editor state (`IsPlaying`, `IsPaused` — writable, `Selection`, `World`, `CurrentLevel`) and operations: `SpawnActor`, `OpenLevel`, `NewLevel`, `SaveLevel`, `SaveAll`, `UnloadSublevel`, `CreateAsset`, `CopyAsset`, `MoveAsset`, `DeleteAsset`, `CreateFolder`, `RefreshAssets`, `CreateMaterialInstance`, `ImportAsset`, `SaveAsset`, `ClearConsole` |
+| `editor` | editor state (`IsPlaying`, `IsPaused` — writable, `Selection`, `World`, `CurrentLevel`) and operations: `SpawnActor` (a class, Blueprint name or path, or an asset to place: a StaticMesh path gives a StaticMeshActor), `OpenLevel`, `NewLevel`, `SaveLevel`, `SaveAll`, `UnloadSublevel`, `CreateAsset`, `CopyAsset`, `MoveAsset`, `DeleteAsset`, `CreateFolder`, `RefreshAssets`, `CreateMaterialInstance`, `ImportAsset`, `SaveAsset`, `ClearConsole` |
 | `console` | editor log entries (`Sequence`, `Time`, `Verbosity`, `Category`, `Message`) |
 | `unreal.find(label)` | an actor by label, name or path |
 | `unreal.asset(path)`, `unreal.assets(class, path?)` | one asset; assets of a class (at most 200, loaded as read) |
@@ -146,7 +150,11 @@ writable).
 
 ### Blueprint graphs
 
-- `UBlueprint`: `Graphs` (event graphs, functions, macros), `EventGraph`, `Status` (`UpToDate`, `Dirty`, `Error`, …);
+- `UBlueprint`: `Components` (the component templates its Simple Construction Script adds, under their variable names:
+  their reflected defaults are writable — `unreal.asset("/Game/BP_Coin").Components | where Name == "Mesh" | set
+  StaticMesh = "/Engine/BasicShapes/Sphere"` — and placed actors whose component still holds the old value follow, as
+  after an edit in the Components panel; components inherited from a native class or a parent Blueprint are not listed), `Graphs` (event graphs,
+  functions, macros), `EventGraph`, `Status` (`UpToDate`, `Dirty`, `Error`, …);
   `call Compile()` returns `{Succeeded, Errors, Warnings, Messages: [{Severity, Message, Node}]}` (a failed compile is a
   result, not an error; `Node` is the node's `$ref`) and `call AddFunction(name)` adds a function graph.
 - `UEdGraph`: `Nodes`, `Kind` (`EventGraph`, `Function`, `Macro`, `Delegate`), `Blueprint`; node calls (each returns the
@@ -182,6 +190,17 @@ changes mark the Blueprint structurally modified and property edits mark it modi
 widgets of a Widget Blueprint are templates of its generated class but its design data: writable here, unlike other
 class defaults.
 
+### User-defined structs
+
+A user-defined struct (the struct asset a DataTable row or a Blueprint variable uses when the project has no C++ struct)
+keeps its fields in the Struct editor's data, which reflection does not expose. `UUserDefinedStruct` gets `Fields`
+(`[{Name, Type, Default}]`) and `call AddField(name, type, default?)`, `RemoveField(name)` (a struct keeps at least one
+field), `RenameField(name, newName)`, `SetFieldDefault(name, value)`, through `FStructureEditorUtils`: the struct recompiles
+and the DataTables and Blueprints using it update, as after an edit in the Struct editor. Types are the tokens of
+`blueprint-add-variable` (`UnrealMcpPinTypes`: `bool`, `int`, `float`, `string`, `vector`, a struct such as
+`GameplayTag`, a class such as `StaticMesh`). `editor | call CreateAsset(path, "UserDefinedStruct")` makes one (with the
+editor's initial `MemberVar_0` field), `CreateDataTable(path, structPath)` a table of it.
+
 ### Level Sequences
 
 Frames are at the sequence's display rate (what the Sequencer shows), converted to and from its tick resolution.
@@ -193,8 +212,8 @@ Frames are at the sequence's display rate (what the Sequencer shows), converted 
   `Spawnable`), `Class`, `Tracks`; `call AddTrack("Transform" | "Visibility" | a track class)` — every new track gets a
   section over the playback range.
 - `UMovieSceneTrack`: `Sections`, `DisplayName`, `call AddSection()`; `UMovieSceneSection`: `Start`, `End` (writable),
-  `Channels` (`[{Name, Type, Keys: [{Frame, Value}]}]`, names as the Sequencer shows them: `Location.X`, `Rotation.Z`),
-  `call AddKey(channel, frame, value)` (double / float / bool channels; a key outside the section grows it).
+  `Channels` (`[{Name, Type, Keys: [{Frame, Value}]}]`, names as the Sequencer shows them: `Location.X`, `Rotation.Yaw`),
+  `call AddKey(channel, frame, value)` (the channel by that name, or by its internal name: `Rotation.Z` is the yaw) (double / float / bool channels; a key outside the section grows it).
 
 Every change is undoable (one transaction per mutation). Spawnables are listed but not created.
 
@@ -263,7 +282,8 @@ operations' rules (docs/EXTENSIONS.md).
   references, arrays / sets / maps, scalars and enums (ranges, rollback, undo), asset and class-defaults lists, the
   console, material parameter maps, the seven class hooks and every registration of the extension seam.
 - `UnrealMcpRqlDataModelsSpec.cpp` (`UnrealMcp.Tools.Rql.DataModels`): DataTable rows (edit, add / rename / duplicate /
-  remove, validation, undo, save and reload), gameplay tags (tag ini edits, text conversion, parent tags, rows with tags),
+  remove, validation, undo, save and reload), user-defined struct fields, gameplay tags (tag ini edits, text conversion,
+  parent tags and their comments, rows with tags), Blueprint component defaults and Instance Editable variables,
   settings (sections, ini writes, refusals, dry run), Blueprint graphs (nodes, pins, defaults, connections, compile
   errors, undo), Widget Blueprints (tree, properties, slots, removal, compile, undo) and Level Sequences (bindings,
   tracks, sections, keys, ranges, undo).

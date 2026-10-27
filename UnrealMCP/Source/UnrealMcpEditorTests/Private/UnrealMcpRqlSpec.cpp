@@ -12,6 +12,9 @@
 #include "Components/AudioComponent.h"
 #include "Components/LODSyncComponent.h"
 #include "Components/PointLightComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMesh.h"
+#include "Engine/StaticMeshActor.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
 #include "Editor.h"
@@ -471,6 +474,54 @@ void FUnrealMcpRqlSpec::Define()
 			const TSharedPtr<FJsonObject> Read = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"select","fields":[{"name":"Selection","expr":{"path":["Selection"]}}]}]})RQL"));
 			const TSharedPtr<FJsonValue> Selection = Cell(Read, 0, 0);
 			TestTrue(TEXT("selection reads back"), Selection.IsValid() && Selection->Type == EJson::Array && Selection->AsArray().Num() == 1);
+		});
+
+		It("selects actors by query through Selected, without marking the level unsaved", [this]()
+		{
+			SpawnLamp();
+			Exec(/* editor | call SpawnActor("Actor", "RqlSpecLampGroup") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"SpawnActor","args":[{"lit":"Actor"},{"lit":"RqlSpecLampGroup"}]}]})RQL"), true);
+			UPackage* LevelPackage = World() ? World()->GetOutermost() : nullptr;
+			if (LevelPackage)
+				LevelPackage->SetDirtyFlag(false);
+			const TSharedPtr<FJsonObject> Set = Exec(/* actors | where Label starts-with "RqlSpecLamp" | set Selected = true */ TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"starts-with","args":[{"path":["Label"]},{"lit":"RqlSpecLamp"}]}},{"op":"set","assign":[{"target":{"path":["Selected"]},"value":{"lit":true}}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("select ok (%s)"), *Codes(Set)), IsOk(Set));
+			TestEqual(TEXT("both selected"), GEditor ? GEditor->GetSelectedActorCount() : 0, 2);
+			TestEqual(TEXT("Selected reads back"), static_cast<int32>(Exec(/* actors | where Label starts-with "RqlSpecLamp" and Selected | count */ TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"and","args":[{"op":"starts-with","args":[{"path":["Label"]},{"lit":"RqlSpecLamp"}]},{"path":["Selected"]}]}},{"op":"count"}]})RQL"))->GetNumberField(TEXT("value"))), 2);
+			TestFalse(TEXT("selection is not a level edit"), LevelPackage && LevelPackage->IsDirty());
+		});
+
+		It("places an asset: a StaticMesh path spawns a StaticMeshActor showing it; other assets are refused", [this]()
+		{
+			const TSharedPtr<FJsonObject> Box = Exec(/* editor | call SpawnActor("/Engine/BasicShapes/Cube", "RqlSpecLampBox", "(300, 0, 0)") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"SpawnActor","args":[{"lit":"/Engine/BasicShapes/Cube"},{"lit":"RqlSpecLampBox"},{"lit":"(300, 0, 0)"}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("spawn from a mesh ok (%s)"), *Codes(Box)), IsOk(Box));
+			AActor* Placed = nullptr;
+			for (AActor* Actor : Lamps())
+			{
+				if (Actor->GetActorLabel() == TEXT("RqlSpecLampBox"))
+					Placed = Actor;
+			}
+			if (!TestNotNull(TEXT("placed"), Placed))
+				return;
+			const UStaticMeshComponent* Mesh = Placed->FindComponentByClass<UStaticMeshComponent>();
+			TestTrue(TEXT("a StaticMeshActor"), Placed->IsA<AStaticMeshActor>());
+			TestTrue(TEXT("showing the mesh"), Mesh && Mesh->GetStaticMesh() && Mesh->GetStaticMesh()->GetName() == TEXT("Cube"));
+			TestEqual(TEXT("at the location"), Placed->GetActorLocation(), FVector(300, 0, 0));
+			const TSharedPtr<FJsonObject> Material = Exec(/* editor | call SpawnActor("/Engine/EngineMaterials/DefaultMaterial", "RqlSpecLampNo") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"SpawnActor","args":[{"lit":"/Engine/EngineMaterials/DefaultMaterial"},{"lit":"RqlSpecLampNo"}]}]})RQL"), true);
+			TestFalse(TEXT("a material is not placeable"), IsOk(Material));
+			TestTrue(*FString::Printf(TEXT("says why (%s)"), *Codes(Material)), Codes(Material).Contains(TEXT("cannot be placed")));
+		});
+
+		It("explains a refused attach (a Static actor under a Movable parent) and suggests asset paths", [this]()
+		{
+			Exec(/* editor | call SpawnActor("/Engine/BasicShapes/Cube", "RqlSpecLampBox", "(300, 0, 0)") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"SpawnActor","args":[{"lit":"/Engine/BasicShapes/Cube"},{"lit":"RqlSpecLampBox"},{"lit":"(300, 0, 0)"}]}]})RQL"), true);
+			Exec(/* editor | call SpawnActor("Actor", "RqlSpecLampGroup") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"SpawnActor","args":[{"lit":"Actor"},{"lit":"RqlSpecLampGroup"}]}]})RQL"), true);
+			const TSharedPtr<FJsonObject> Attach = Exec(/* unreal.find("RqlSpecLampBox") | set Parent = unreal.find("RqlSpecLampGroup") */ TEXT(R"RQL({"rql":"0.1","source":{"call":"find","on":{"path":["unreal"]},"args":[{"lit":"RqlSpecLampBox"}]},"stages":[{"op":"set","assign":[{"target":{"path":["Parent"]},"value":{"call":"find","on":{"path":["unreal"]},"args":[{"lit":"RqlSpecLampGroup"}]}}]}]})RQL"), true);
+			TestFalse(TEXT("refused"), IsOk(Attach));
+			TestTrue(*FString::Printf(TEXT("names the mobility (%s)"), *Codes(Attach)), Codes(Attach).Contains(TEXT("Mobility"))
+				&& !Codes(Attach).Contains(TEXT("no root component")));
+			const TSharedPtr<FJsonObject> Short = Exec(/* unreal.find("RqlSpecLampBox") | get Components | where $ is StaticMeshComponent | set StaticMesh = "Cube" */ TEXT(R"RQL({"rql":"0.1","source":{"call":"find","on":{"path":["unreal"]},"args":[{"lit":"RqlSpecLampBox"}]},"stages":[{"op":"get","expr":{"path":["Components"]}},{"op":"where","pred":{"op":"is","args":[{"path":[]},{"lit":"StaticMeshComponent"}]}},{"op":"set","assign":[{"target":{"path":["StaticMesh"]},"value":{"lit":"Cube"}}]}]})RQL"), true);
+			TestFalse(TEXT("a bare mesh name does not resolve"), IsOk(Short));
+			TestTrue(*FString::Printf(TEXT("suggests the path (%s)"), *Codes(Short)), Codes(Short).Contains(TEXT("did you mean /Engine/BasicShapes/Cube")));
 		});
 
 		It("lists levels, console entries and assets", [this]()
