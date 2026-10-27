@@ -1248,13 +1248,60 @@ std::optional<rql::Value> FUnrealMcpRqlTypes::ParseStructText(const rql::TypeDes
 	if (!Found || !Source.StartsWith(TEXT("(")))
 		return std::nullopt;
 	UScriptStruct* Struct = *Found;
-	std::shared_ptr<void> Data = MakeStructData(Struct, nullptr);
-	FStringOutputDevice Errors;
-	const TCHAR* End = Struct->ImportText(*Source, Data.get(), nullptr, PPF_None, &Errors, Struct->GetName());
-	FString Rest = End ? FString(End).TrimStartAndEnd() : FString();
-	if (!End || !Rest.IsEmpty() || !Errors.IsEmpty())
+	// ImportText skips a member it does not know without a word: name the first one, as the {Member: value} form does.
 	{
-		const FString Why = !Errors.IsEmpty() ? FString(Errors).TrimStartAndEnd()
+		int32 Depth = 0;
+		bool bQuoted = false;
+		for (int32 Index = 0; Index < Source.Len(); ++Index)
+		{
+			const TCHAR Char = Source[Index];
+			if (bQuoted)
+			{
+				if (Char == TEXT('\\'))
+					++Index;
+				else if (Char == TEXT('"'))
+					bQuoted = false;
+				continue;
+			}
+			if (Char == TEXT('"'))
+				bQuoted = true;
+			else if (Char == TEXT(')'))
+				--Depth;
+			else if ((Char == TEXT('(') && ++Depth == 1) || (Char == TEXT(',') && Depth == 1))
+			{
+				int32 End = Index + 1;
+				while (End < Source.Len() && Source[End] != TEXT('=') && Source[End] != TEXT(',') && Source[End] != TEXT('(') && Source[End] != TEXT(')'))
+					++End;
+				if (End >= Source.Len() || Source[End] != TEXT('='))
+					continue; // not "Name=" (a static-array element "Member(1)=" is left to ImportText)
+				const FString Name = Source.Mid(Index + 1, End - Index - 1).TrimStartAndEnd();
+				bool bKnown = Name.IsEmpty();
+				for (TFieldIterator<FProperty> It(Struct); It && !bKnown; ++It)
+					bKnown = It->GetName().Equals(Name, ESearchCase::IgnoreCase) || It->GetAuthoredName().Equals(Name, ESearchCase::IgnoreCase);
+				if (!bKnown)
+				{
+					OutReason = UnrealMcpRqlToStd(FString::Printf(TEXT("'%s' is not a %s in Unreal's text form (%s has no member '%s')"),
+						*Source, *Struct->GetName(), *Struct->GetName(), *Name));
+					return std::nullopt;
+				}
+			}
+		}
+	}
+	std::shared_ptr<void> Data = MakeStructData(Struct, nullptr);
+	// What ImportText reports (an unknown member, a bad value); UE 5.5-5.7 differ in where FStringOutputDevice lives.
+	struct FImportErrors final : FOutputDevice
+	{
+		FString Text;
+		virtual void Serialize(const TCHAR* Message, ELogVerbosity::Type, const FName&) override
+		{
+			Text += Text.IsEmpty() ? FString(Message) : FString(TEXT(" ")) + Message;
+		}
+	} Errors;
+	const TCHAR* End = Struct->ImportText(*Source, Data.get(), nullptr, PPF_None, &Errors, Struct->GetName());
+	const FString Rest = End ? FString(End).TrimStartAndEnd() : FString();
+	if (!End || !Rest.IsEmpty() || !Errors.Text.IsEmpty())
+	{
+		const FString Why = !Errors.Text.IsEmpty() ? Errors.Text.TrimStartAndEnd()
 			: !End ? FString(TEXT("it does not parse")) : FString::Printf(TEXT("unexpected text after the closing parenthesis: %s"), *Rest);
 		OutReason = UnrealMcpRqlToStd(FString::Printf(TEXT("'%s' is not a %s in Unreal's text form (%s)"), *Source, *Struct->GetName(), *Why));
 		return std::nullopt;

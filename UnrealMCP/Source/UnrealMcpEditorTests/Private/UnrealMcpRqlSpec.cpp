@@ -768,7 +768,8 @@ void FUnrealMcpRqlSpec::Define()
 				}
 				return FString::Join(Out, TEXT("; "));
 			};
-			const TSharedPtr<FJsonObject> Limit = Exec(/* unreal.classes("Actor") | set Name = "x" */ TEXT(R"RQL({"rql":"0.1","source":{"call":"classes","on":{"path":["unreal"]},"args":[{"lit":"Actor"}]},"stages":[{"op":"set","assign":[{"target":{"path":["Name"]},"value":{"lit":"x"}}]}]})RQL"), true, true);
+			// More than 20 objects reach set (the limit is checked as targets arrive, before members are resolved).
+			const TSharedPtr<FJsonObject> Limit = Exec(/* unreal.assets("Material", "/Engine") | set Name = "x" */ TEXT(R"RQL({"rql":"0.1","source":{"call":"assets","on":{"path":["unreal"]},"args":[{"lit":"Material"},{"lit":"/Engine"}]},"stages":[{"op":"set","assign":[{"target":{"path":["Name"]},"value":{"lit":"x"}}]}]})RQL"), true, true);
 			TestTrue(*FString::Printf(TEXT("mutation-limit (%s)"), *Codes(Limit)), Codes(Limit).Contains(TEXT("mutation-limit")));
 			TestTrue(*FString::Printf(TEXT("suggests batches (%s)"), *Hints(Limit)), Hints(Limit).Contains(TEXT("first 20")));
 			TestFalse(*FString::Printf(TEXT("no budgets advice (%s)"), *Hints(Limit)), Hints(Limit).Contains(TEXT("budgets")));
