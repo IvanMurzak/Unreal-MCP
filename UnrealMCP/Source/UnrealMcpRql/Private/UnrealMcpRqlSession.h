@@ -39,8 +39,15 @@ public:
 
 	FUnrealMcpRqlTypes& Types() { return *TypesPtr; }
 
-	/** Execute a canonical QueryPlan (JSON); returns the QueryResult JSON (spec form, no stats). */
-	FString Execute(const FString& PlanJson, bool bAllowMutation, bool bDryRun, bool& bOutOk);
+	/** rql-mutate's default target limit and the ceiling its max_targets argument can raise it to (RQL spec 8). */
+	static constexpr int32 DefaultMaxTargets = 200;
+	static constexpr int32 HardMaxTargets = 1000;
+
+	/**
+	 * Execute a canonical QueryPlan (JSON); returns the QueryResult JSON (spec form, no stats). @p MaxTargets > 0 sets this
+	 * request's target limit (capped at HardMaxTargets); 0 keeps DefaultMaxTargets.
+	 */
+	FString Execute(const FString& PlanJson, bool bAllowMutation, bool bDryRun, bool& bOutOk, int32 MaxTargets = 0);
 
 	/** rql-schema data: sources, functions, present classes and type descriptors (JSON the sidecar renders). */
 	FString Schema(const FString& TypeName, bool& bOutOk);

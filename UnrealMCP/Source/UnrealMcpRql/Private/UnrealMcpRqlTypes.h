@@ -67,6 +67,14 @@ public:
 	const rql::TypeDescriptor* ForProperty(const FProperty* Property, bool& bOutNullable);
 	/** Reflected (or registered native) type by short name ("StaticMeshActor", "Vector", "LogEntry"); U/A/F/E prefixes tolerated. */
 	const rql::TypeDescriptor* FindByName(const FString& Name);
+	/**
+	 * Whether some type has a member of this name (case-insensitive): a reflected property of any loaded class or struct
+	 * (component and actor classes, Blueprint classes, ...) or a member of a descriptor this session filled (hook members
+	 * such as Label or Scalars). RQL's Engine::is_known_member: a mutation whose items all lack such a name is a
+	 * polymorphic no-match (ok, nothing changed), not a typo. Builds no descriptor; answers are cached per session.
+	 */
+	bool IsKnownMemberName(const FString& Name);
+
 	/** Make sure a (possibly lazily created) descriptor has its members and methods. */
 	void Fill(const rql::TypeDescriptor* Descriptor);
 	UClass* ClassOf(const rql::TypeDescriptor* Descriptor) const;
@@ -152,6 +160,7 @@ private:
 	TMap<UScriptStruct*, FStructParser> StructParsers;
 	TMap<UClass*, FString> ApiClasses;
 	TMap<UStruct*, TMap<FName, bool>> Exposed;
+	TMap<FString, bool> KnownMemberNames; // IsKnownMemberName; FString keys compare case-insensitively
 
 	rql::TypeDescriptor& Shell(const void* Key, const FString& Name, rql::TypeKind Kind);
 	void FillClass(rql::TypeDescriptor& Descriptor, UClass* Class);

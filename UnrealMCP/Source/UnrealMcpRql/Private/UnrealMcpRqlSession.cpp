@@ -213,12 +213,18 @@ FUnrealMcpRqlSession::FUnrealMcpRqlSession()
 {
 	rql::Engine& RqlEngine = *EnginePtr;
 	RqlEngine.runtime_name = "unreal";
-	// rql-query / rql-mutate take no budgets argument: hints must not advise raising budgets.*. ref("Name") hints name the finder.
+	// rql-query / rql-mutate take no budgets argument: hints must not advise raising budgets.* (rql-mutate's target limit
+	// has its own argument, MutationPolicy::limit_argument). ref("Name") hints name the finder, type-list hints the schema tool.
 	RqlEngine.defaults().budgets_adjustable = false;
 	RqlEngine.find_hint = "unreal.find(\"\xE2\x80\xA6\")";
+	RqlEngine.schema_hint = "rql-schema";
 	FUnrealMcpRqlTypes* TypeProvider = TypesPtr.Get();
 	// Liveness from the weak pointer every object value carries: a destroyed (garbage) actor reads as null.
 	RqlEngine.is_alive = [TypeProvider](const rql::Value& Object) { return TypeProvider->IsAlive(Object); };
+	// Member names of every reflected class and struct: streams are polymorphic (actors | get Components), so a set whose
+	// items all lack a member some component class has is a no-match, not a typo (RQL spec 8: a typo that empties a
+	// mutation is an error).
+	RqlEngine.is_known_member = [TypeProvider](const std::string& Name) { return TypeProvider->IsKnownMemberName(UnrealMcpRqlFromStd(Name)); };
 	// "PointLight#1234": the id is FUnrealMcpRqlTypes::IdOf (object slot + serial), resolved without searching the sources.
 	RqlEngine.resolve_stable_ref = [TypeProvider](const std::string& Type, const std::string& Id) -> rql::Value
 	{
@@ -246,6 +252,11 @@ void FUnrealMcpRqlSession::ConfigureMutations()
 {
 	rql::MutationPolicy& Policy = EnginePtr->mutations();
 	Policy.enabled = true;
+	// A mutation is one undo step whatever its size, so the default target limit is an editor's (RQL spec 8 target
+	// limit); rql-mutate's max_targets raises it per call up to the ceiling, and the mutation-limit hint names it.
+	Policy.max_targets = DefaultMaxTargets;
+	Policy.hard_max_targets = HardMaxTargets;
+	Policy.limit_argument = "max_targets";
 	FUnrealMcpRqlTypes* TypeProvider = TypesPtr.Get();
 	auto WrittenObject = [TypeProvider](const rql::MutationRecord& Record) -> UObject*
 	{
@@ -428,7 +439,7 @@ void FUnrealMcpRqlSession::AddAdapter(rql::TypeAdapter Adapter)
 	EnginePtr->add_adapter(std::move(Adapter));
 }
 
-FString FUnrealMcpRqlSession::Execute(const FString& PlanJson, bool bAllowMutation, bool bDryRun, bool& bOutOk)
+FString FUnrealMcpRqlSession::Execute(const FString& PlanJson, bool bAllowMutation, bool bDryRun, bool& bOutOk, int32 MaxTargets)
 {
 	const std::string Text = UnrealMcpRqlToStd(PlanJson);
 	rql::QueryPlan Plan;
@@ -443,7 +454,10 @@ FString FUnrealMcpRqlSession::Execute(const FString& PlanJson, bool bAllowMutati
 		rql::QueryOptions Options;
 		Options.allow_mutation = bAllowMutation;
 		Options.dry_run = bDryRun;
-		Result = EnginePtr->execute(Plan, rql::Budgets(), Options);
+		rql::Budgets Budgets;
+		if (MaxTargets > 0)
+			Budgets.max_mutation_targets = MaxTargets; // the engine caps it at hard_max_targets
+		Result = EnginePtr->execute(Plan, Budgets, Options);
 	}
 	CloseTransaction();
 	bOutOk = Result.ok;

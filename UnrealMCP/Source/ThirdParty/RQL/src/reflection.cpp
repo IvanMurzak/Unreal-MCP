@@ -227,23 +227,87 @@ bool TypeDescriptor::enum_defined(int64_t v) const {
     return false;
 }
 
-bool TypeDescriptor::enum_parse(const std::string& text, int64_t& out) const {
-    std::string s = text;
-    while (!s.empty() && s.front() == ' ') s.erase(s.begin());
-    while (!s.empty() && s.back() == ' ') s.pop_back();
-    for (auto& e : enum_values) {
-        if (iequals(e.first, s)) {
-            out = e.second;
-            return true;
+namespace {
+
+/// An entry name without its entry prefix (text up to and including the first '_'); empty when it has none.
+std::string without_entry_prefix(const std::string& name) {
+    size_t i = name.find('_');
+    return i != std::string::npos && i > 0 && i + 1 < name.size() ? name.substr(i + 1) : std::string();
+}
+
+bool is_space(char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v'; }
+
+}  // namespace
+
+TypeDescriptor::EnumMatch TypeDescriptor::enum_resolve(const std::string& text) const {
+    EnumMatch m;
+    size_t b = 0, e = text.size();
+    while (b < e && is_space(text[b])) ++b;
+    while (e > b && is_space(text[e - 1])) --e;
+    const std::string s = text.substr(b, e - b);
+    // Integer text is the underlying value.
+    size_t digits = !s.empty() && (s[0] == '-' || s[0] == '+') ? 1 : 0;
+    if (digits < s.size() && s.find_first_not_of("0123456789", digits) == std::string::npos) {
+        try {
+            m.value = std::stoll(s[0] == '+' ? s.substr(1) : s);
+            m.status = EnumMatch::Found;
+            return m;
+        } catch (...) {  // out of range: not a value
         }
     }
-    double d = 0;
-    if (!s.empty() && (s[0] == '-' || s[0] == '+' || (s[0] >= '0' && s[0] <= '9')) &&
-        parse_double(s[0] == '+' ? s.substr(1) : s, d) && std::floor(d) == d) {
-        out = static_cast<int64_t>(d);
-        return true;
+    // One step: the entries whose name (or alias, not in the prefix step) matches; names listed in declaration order.
+    std::vector<std::pair<std::string, int64_t>> found;
+    auto step = [&](const std::string& t, bool ignore_case, bool prefix) {
+        found.clear();
+        auto add = [&](const std::string& entry_name, int64_t v) {
+            for (auto& f : found)
+                if (f.first == entry_name) return;
+            found.emplace_back(entry_name, v);
+        };
+        auto eq = [&](const std::string& n) { return !n.empty() && (ignore_case ? iequals(n, t) : n == t); };
+        for (auto& ev : enum_values)
+            if (eq(prefix ? without_entry_prefix(ev.first) : ev.first)) add(ev.first, ev.second);
+        if (!prefix)
+            for (auto& a : enum_aliases)
+                if (eq(a.first)) {
+                    std::string entry;
+                    if (enum_name(a.second, entry)) add(entry, a.second);
+                }
+        return !found.empty();
+    };
+    bool any = step(s, false, false);
+    if (!any) {
+        size_t q = s.rfind("::");
+        size_t cut = q != std::string::npos ? q + 2 : s.rfind('.') + 1;  // npos + 1 == 0: unqualified
+        if (cut > 0 && cut < s.size()) {
+            const std::string part = s.substr(cut);
+            any = step(part, false, false) || step(part, true, false) || step(part, true, true);
+        }
     }
-    return false;
+    if (!any) any = step(s, true, false) || step(s, true, true);
+    if (!any) {
+        m.why = enum_expected();
+        return m;
+    }
+    // Distinct entries: names sharing one value are one entry.
+    for (auto& f : found) {
+        if (f.second != found[0].second) {
+            m.status = EnumMatch::Ambiguous;
+            m.why = "\"" + s + "\" is ambiguous for " + name + ": ";
+            for (size_t i = 0; i < found.size(); ++i) m.why += (i ? ", " : "") + found[i].first;
+            return m;
+        }
+    }
+    m.status = EnumMatch::Found;
+    m.value = found[0].second;
+    return m;
+}
+
+bool TypeDescriptor::enum_parse(const std::string& text, int64_t& out) const {
+    EnumMatch m = enum_resolve(text);
+    if (m.status != EnumMatch::Found) return false;
+    out = m.value;
+    return true;
 }
 
 std::string TypeDescriptor::enum_names() const {

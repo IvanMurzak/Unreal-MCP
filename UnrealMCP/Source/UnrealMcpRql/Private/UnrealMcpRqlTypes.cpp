@@ -26,10 +26,12 @@
 #endif
 #include "UObject/TextProperty.h"
 #include "UObject/UObjectGlobals.h"
+#include "UObject/UObjectIterator.h"
 #include "UObject/StructOnScope.h"
 #include "UObject/UObjectArray.h"
 #include "UObject/UnrealType.h"
 
+#include <algorithm>
 #include <cmath>
 #include <stdexcept>
 
@@ -396,6 +398,21 @@ const rql::TypeDescriptor* FUnrealMcpRqlTypes::ForEnum(UEnum* Enum)
 			continue;
 		Descriptor.enum_values.emplace_back(UnrealMcpRqlToStd(Enum->GetNameStringByIndex(Index)), Enum->GetValueByIndex(Index));
 	}
+#if WITH_METADATA
+	// The editor's display names (UMETA(DisplayName = "No Collision")) resolve like entry names (RQL enum aliases). One
+	// that spells another entry's name is left out: it would make that name ambiguous.
+	for (int32 Index = 0; Index < Count; ++Index)
+	{
+		const FString Display = Enum->HasMetaData(TEXT("Hidden"), Index) ? FString() : Enum->GetMetaData(TEXT("DisplayName"), Index);
+		if (Display.IsEmpty())
+			continue;
+		const std::string Alias = UnrealMcpRqlToStd(Display);
+		const bool bIsEntryName = std::any_of(Descriptor.enum_values.begin(), Descriptor.enum_values.end(),
+			[&Display](const std::pair<std::string, int64_t>& Entry) { return Display.Equals(UnrealMcpRqlFromStd(Entry.first), ESearchCase::IgnoreCase); });
+		if (!bIsEntryName)
+			Descriptor.enum_aliases.emplace_back(Alias, Enum->GetValueByIndex(Index));
+	}
+#endif
 	Enums.Add(Enum, &Descriptor);
 	return &Descriptor;
 }
@@ -598,6 +615,36 @@ void FUnrealMcpRqlTypes::ExposeProperties(UStruct* Owner, const TArray<FName>& N
 	TMap<FName, bool>& ForOwner = Exposed.FindOrAdd(Owner);
 	for (const FName& Name : Names)
 		ForOwner.Add(Name, bWritable);
+}
+
+bool FUnrealMcpRqlTypes::IsKnownMemberName(const FString& Name)
+{
+	if (Name.IsEmpty())
+		return false;
+	if (const bool* Cached = KnownMemberNames.Find(Name))
+		return *Cached;
+	// The descriptors this session filled (hook members: Label, Components, Scalars, ...) and the native types.
+	const std::string Member = UnrealMcpRqlToStd(Name);
+	bool bKnown = false;
+	for (const rql::TypeDescriptor* Descriptor : Filled)
+		bKnown = bKnown || Descriptor->find(Member) != nullptr;
+	for (const rql::TypeDescriptor* Descriptor : NativeTypes)
+		bKnown = bKnown || (Descriptor && Descriptor->find(Member) != nullptr);
+	// Reflected properties of every loaded class and struct. FName lookup ignores case, and a name no FName was ever
+	// made of is no property, so a typo costs one name-table lookup.
+	const FName Wanted(*Name, FNAME_Find);
+	if (!bKnown && !Wanted.IsNone())
+	{
+		for (TObjectIterator<UStruct> It; It && !bKnown; ++It)
+		{
+			if (It->IsA<UFunction>())
+				continue; // parameters, not members
+			for (TFieldIterator<FProperty> Property(*It, EFieldIteratorFlags::ExcludeSuper); Property && !bKnown; ++Property)
+				bKnown = Property->GetFName() == Wanted;
+		}
+	}
+	KnownMemberNames.Add(Name, bKnown);
+	return bKnown;
 }
 
 void FUnrealMcpRqlTypes::Fill(const rql::TypeDescriptor* Constant)

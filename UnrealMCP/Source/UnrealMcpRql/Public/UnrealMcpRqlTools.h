@@ -43,6 +43,12 @@ namespace UnrealMcpRqlTools
 	 */
 	UNREALMCPRQL_API FString ExecutePlan(const FString& PlanJson, bool bAllowMutation, bool bDryRun, bool& bOutOk);
 
+	/**
+	 * ExecutePlan with rql-mutate's max_targets: @p MaxTargets > 0 is this request's target limit (default 200, capped at
+	 * 1000); 0 keeps the default.
+	 */
+	UNREALMCPRQL_API FString ExecutePlan(const FString& PlanJson, bool bAllowMutation, bool bDryRun, int32 MaxTargets, bool& bOutOk);
+
 	/** The rql-schema JSON for @p TypeName (empty = overview). Game thread. */
 	UNREALMCPRQL_API FString Schema(const FString& TypeName, bool& bOutOk);
 

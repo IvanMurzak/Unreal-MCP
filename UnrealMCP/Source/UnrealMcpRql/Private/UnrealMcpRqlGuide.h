@@ -38,9 +38,9 @@ Stages:
   recurse Children [max-depth=N] [include-self=false]   walk a hierarchy (input items included by default)
   distinct [expr] | sum expr | min expr | max expr | avg expr
   group-by expr                      rows key|count; group-by a, b (or kind=$type) gives one column per key, then count
-Expressions: == != < <= > >= and or not + - * / %; contains, starts-with, ends-with, matches "regex" (all case-insensitive); x in [a, b]; x is null; x is not null; $ is PointLight (includes subclasses); has(member); functions abs round floor ceil sqrt pow min(a, b) max(a, b) len lower upper coalesce; text: replace(s, from, to) (case-insensitive), replace-regex(s, pattern, repl) ($1 = group 1), substring(s, start[, length]), split(s, sep), trim(s), pad(v, width[, fill]) - also as methods: Label.replace("Old", "New"), Label.substring(0, 4), Index.pad(3). After select, sort / where use the column names (sort Owner.Label). Literals: numbers, "strings", true/false/null, lists [a, b], objects {X: 1, Y: 2}.
+Expressions: == != < <= > >= and or not + - * / %; contains, starts-with, ends-with, matches "regex" (all case-insensitive); x in [a, b]; x is null; x is not null; $ is PointLight (includes subclasses); has(member); functions abs round floor ceil sqrt pow min(a, b) max(a, b) len lower upper coalesce; conditional: cond ? a : b or if(cond, a, b) (only the taken branch runs; not true = else; in select wrap it: kind=($ is PointLight ? "point" : "other")); text: replace(s, from, to) (case-insensitive), replace-regex(s, pattern, repl) ($1 = group 1), substring(s, start[, length]), split(s, sep), trim(s), pad(v, width[, fill]) - also as methods: Label.replace("Old", "New"), Label.substring(0, 4), Index.pad(3). After select, sort / where use the column names (sort Owner.Label). Literals: numbers, "strings", true/false/null, lists [a, b], objects {X: 1, Y: 2}.
 Paths: a.b.c, list[0], map["key"]; .member on a list maps over its elements. List methods: .any(pred) .all(pred) .count([pred]) .sum(e) .min(e) .max(e) .first([pred]); inside them bare names refer to the element, falling back to the outer item.
-Meta: $ (current item), $ref (stable id such as PointLight#1234), $type, $path, $index, $depth. Enums compare to strings (Mobility == "Movable"); == on strings is case-sensitive.
+Meta: $ (current item), $ref (stable id such as PointLight#1234), $type, $path, $index, $depth. Enums compare to strings: the entry name, the editor's display name or the number (Mobility == "Movable"); == on strings is case-sensitive.
 Unreal: every object has Id, Name, Path. Actor has Label, Location, Rotation, Scale (world transform), Components (list), Children (attached actors), Parent, Folder, Level, HiddenInEditor, Selected. Other members are the reflected properties (UPROPERTY EditAnywhere / VisibleAnywhere / BlueprintVisible) under their C++ names (bHidden, Intensity, RelativeLocation, StaticMesh); find them via actors | get Components | where $ is PointLightComponent (every light: $ is LightComponentBase; LightComponent leaves out sky lights). Vectors, rotators and colors print as (x, y, z) (rotators (pitch, yaw, roll)); write "(1, 2, 3)", [1, 2, 3] or {X: 1, Y: 2, Z: 3}; colors also "#ff8800". Object references accept ref("..."), unreal.asset(path) or an asset path "/Game/Meshes/SM_Cube". Material parameters: Scalars["Roughness"], Vectors["BaseColor"], Textures["Albedo"]. Gameplay tags are text: Tag == "Ability.Fire", set Tags = ["Ability.Fire", "State.Stunned"] (registered tags only). DataTable rows: Rows["Sword"].Damage (RowNames, RowStructName). Blueprints: Components (the components it adds; their defaults: StaticMesh, ...), Graphs / EventGraph -> Nodes -> Pins (Name Direction Type DefaultValue LinkedTo). User-defined structs: Fields. Widget Blueprints: RootWidget / Widgets, panels have Children, widgets Parent and Slot. Level Sequences: Bindings -> Tracks -> Sections -> Channels (frames at the display rate). Destroyed objects read as null (where StaticMesh == null finds empty references). Navigate with paths or get; select only projects output columns.
 Results come back as compact rows (header line, then col|col). Long results are truncated - refine with where/first or use count. Unknown members produce warnings with suggestions; rql-schema(type) lists a type's members.)RQL";
 	}
@@ -78,6 +78,7 @@ Results come back as compact rows (header line, then col|col). Long results are 
   actors | where Label starts-with "Enemy" | set HiddenInEditor = true
   actors | where Label starts-with "Pillar_" | set Label = Label.replace("Pillar_", "Column_")      bulk rename
   actors | where Label starts-with "Crate" | sort Label | set Location.X = $index * 200              spread along X
+  actors | get Components | where $ is LightComponentBase | set Intensity = (Intensity > 5000 ? 5000 : Intensity)    clamp
   ref("Button#34") | set Slot.LayoutData.Anchors = "(Minimum=(X=0.5,Y=0),Maximum=(X=0.5,Y=0))"   structs also take UE's text form (the editor's Copy)
   unreal.asset("/Game/Materials/MI_Red") | set Scalars["Roughness"] = 0.2, Vectors["BaseColor"] = "(1, 0, 0, 1)"
 Create / add / remove (call; the receipt's result column holds the new object's $ref for follow-up queries):
@@ -114,7 +115,7 @@ Widgets and sequences:
 
 	inline const char* QuerySyntaxShort()
 	{
-		return R"RQL(Query part: the RQL of rql-query (full guide and the sources in its description); unreal.assets("Material"), unreal.asset(path), unreal.find("Label"), ref("PointLight#1234"). Stages: where, select, sort, first N, get <path>, recurse Children. Operators: == != < > and or not, contains, starts-with, $ is PointLight. Paths a.b.c, list[0], map["key"]. Vectors/colors as "(1, 2, 3)" or "#ff8800"; enums as strings.)RQL";
+		return R"RQL(Query part: the RQL of rql-query (full guide and the sources in its description); unreal.assets("Material"), unreal.asset(path), unreal.find("Label"), ref("PointLight#1234"). Stages: where, select, sort, first N, get <path>, recurse Children. Operators: == != < > and or not, contains, starts-with, $ is PointLight, cond ? a : b. Paths a.b.c, list[0], map["key"]. Vectors/colors as "(1, 2, 3)" or "#ff8800"; enums as strings.)RQL";
 	}
 
 	inline const char* QueryIntro()
@@ -134,7 +135,10 @@ Widgets and sequences:
 
 	inline const char* MutateOutro()
 	{
-		return "Object literals build values: set Settings = {Speed: 2}. At most 20 targets per call: split a bigger edit with first 20 (repeat while the filter still matches) or first 20 / skip 20.";
+		return "Object literals build values: set Settings = {Speed: 2}. At most 200 targets per call by default: pass max_targets "
+			"(up to 1000) for a bigger edit, it stays one all-or-nothing undo step; beyond 1000 split it with first N / skip N. A member "
+			"no target has (a typo) is an error and changes nothing; a member that only other classes of the stream have is a no-match "
+			"(0 changes, warning).";
 	}
 
 	inline const char* SchemaDescription()
