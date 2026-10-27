@@ -60,6 +60,23 @@ namespace UnrealMcpRqlSpecHelpers
 		return FString::Join(Out, TEXT("; "));
 	}
 
+	/** The hints of a result's diagnostics, joined with "; ". */
+	inline FString Hints(const TSharedPtr<FJsonObject>& Result)
+	{
+		TArray<FString> Out;
+		const TArray<TSharedPtr<FJsonValue>>* Diagnostics = nullptr;
+		if (Result.IsValid() && Result->TryGetArrayField(TEXT("diagnostics"), Diagnostics))
+		{
+			for (const TSharedPtr<FJsonValue>& Diagnostic : *Diagnostics)
+			{
+				FString Hint;
+				if (Diagnostic->AsObject()->TryGetStringField(TEXT("hint"), Hint))
+					Out.Add(Hint);
+			}
+		}
+		return FString::Join(Out, TEXT("; "));
+	}
+
 	inline int32 RowCount(const TSharedPtr<FJsonObject>& Result)
 	{
 		const TArray<TSharedPtr<FJsonValue>>* Rows = nullptr;

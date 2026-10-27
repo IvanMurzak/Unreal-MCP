@@ -680,6 +680,95 @@ void FUnrealMcpRqlSpec::Define()
 		});
 	});
 
+	// RQL 602ce7c: target scope in set values, string functions, multi-key group-by, batch checks and host hints. Plans
+	// from Rql.Parser 0.3.0-dev.602ce7c.
+	Describe("target scope, functions, group-by and batch checks", [this]()
+	{
+		It("spreads targets with $index, renames with replace and groups by two keys", [this]()
+		{
+			Exec(/* editor | call SpawnActor("PointLight", "RqlSpecLampA", "(0, 0, 500)") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"SpawnActor","args":[{"lit":"PointLight"},{"lit":"RqlSpecLampA"},{"lit":"(0, 0, 500)"}]}]})RQL"), true);
+			Exec(/* editor | call SpawnActor("PointLight", "RqlSpecLampC", "(0, 0, 500)") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"SpawnActor","args":[{"lit":"PointLight"},{"lit":"RqlSpecLampC"},{"lit":"(0, 0, 500)"}]}]})RQL"), true);
+			Exec(/* editor | call SpawnActor("PointLight", "RqlSpecLampB", "(0, 0, 500)") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"SpawnActor","args":[{"lit":"PointLight"},{"lit":"RqlSpecLampB"},{"lit":"(0, 0, 500)"}]}]})RQL"), true);
+			if (!TestEqual(TEXT("three lamps"), Lamps().Num(), 3))
+				return;
+
+			const TSharedPtr<FJsonObject> Spread = Exec(/* actors | where Label starts-with "RqlSpecLamp" | sort Label | set Location.X = $index * 100 */ TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"starts-with","args":[{"path":["Label"]},{"lit":"RqlSpecLamp"}]}},{"op":"sort","keys":[{"expr":{"path":["Label"]}}]},{"op":"set","assign":[{"target":{"path":["Location","X"]},"value":{"op":"*","args":[{"path":[{"meta":"index"}]},{"lit":100}]}}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("spread ok (%s)"), *Codes(Spread)), IsOk(Spread));
+			for (AActor* Lamp : Lamps())
+			{
+				// A, B, C in label order (spawned A, C, B): $index is the position in the sorted stream entering set.
+				const FString Label = Lamp->GetActorLabel();
+				TestEqual(*FString::Printf(TEXT("%s X"), *Label), Lamp->GetActorLocation().X, 100.0 * (Label[Label.Len() - 1] - TEXT('A')));
+			}
+
+			const TSharedPtr<FJsonObject> Groups = Exec(/* actors | where Label starts-with "RqlSpecLamp" | group-by $type, far=(Location.X > 50) */ TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"starts-with","args":[{"path":["Label"]},{"lit":"RqlSpecLamp"}]}},{"op":"group-by","fields":[{"name":"$type","expr":{"path":[{"meta":"type"}]}},{"name":"far","expr":{"op":">","args":[{"path":["Location","X"]},{"lit":50}]}}]}]})RQL"));
+			TestTrue(*FString::Printf(TEXT("group-by ok (%s)"), *Codes(Groups)), IsOk(Groups));
+			TArray<FString> Columns;
+			const TArray<TSharedPtr<FJsonValue>>* ColumnValues = nullptr;
+			if (Groups.IsValid() && Groups->TryGetArrayField(TEXT("columns"), ColumnValues))
+			{
+				for (const TSharedPtr<FJsonValue>& Column : *ColumnValues)
+					Columns.Add(Column->AsString());
+			}
+			TestEqual(TEXT("one column per key, then count"), FString::Join(Columns, TEXT(",")), FString(TEXT("$type,far,count")));
+			TestEqual(TEXT("two groups (near A; far B and C)"), RowCount(Groups), 2);
+			double FarCount = -1.0;
+			for (int32 Row = 0; Row < RowCount(Groups); ++Row)
+			{
+				const TSharedPtr<FJsonValue> Far = Cell(Groups, Row, 1);
+				if (Far.IsValid() && Far->Type == EJson::Boolean && Far->AsBool() && Cell(Groups, Row, 2).IsValid())
+					FarCount = Cell(Groups, Row, 2)->AsNumber();
+			}
+			TestEqual(TEXT("the far group counts two"), FarCount, 2.0);
+
+			const TSharedPtr<FJsonObject> Renamed = Exec(/* actors | where Label starts-with "RqlSpecLamp" | set Label = Label.replace("RqlSpecLamp", "RqlSpecLampRenamed_") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"starts-with","args":[{"path":["Label"]},{"lit":"RqlSpecLamp"}]}},{"op":"set","assign":[{"target":{"path":["Label"]},"value":{"call":"replace","on":{"path":["Label"]},"args":[{"lit":"RqlSpecLamp"},{"lit":"RqlSpecLampRenamed_"}]}}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("rename ok (%s)"), *Codes(Renamed)), IsOk(Renamed));
+			TArray<FString> Labels;
+			for (AActor* Lamp : Lamps())
+				Labels.Add(Lamp->GetActorLabel());
+			Labels.Sort();
+			TestEqual(TEXT("renamed labels"), FString::Join(Labels, TEXT(",")), FString(TEXT("RqlSpecLampRenamed_A,RqlSpecLampRenamed_B,RqlSpecLampRenamed_C")));
+		});
+
+		It("refuses a call that would reach one object twice, on a dry run too, and accepts it after distinct", [this]()
+		{
+			Exec(/* editor | call SpawnActor("PointLight", "RqlSpecLampA", "(0, 0, 500)") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"SpawnActor","args":[{"lit":"PointLight"},{"lit":"RqlSpecLampA"},{"lit":"(0, 0, 500)"}]}]})RQL"), true);
+			Exec(/* editor | call SpawnActor("PointLight", "RqlSpecLampB", "(0, 0, 500)") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"SpawnActor","args":[{"lit":"PointLight"},{"lit":"RqlSpecLampB"},{"lit":"(0, 0, 500)"}]}]})RQL"), true);
+			Exec(/* editor | call SpawnActor("PointLight", "RqlSpecLampC", "(0, 0, 500)") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"SpawnActor","args":[{"lit":"PointLight"},{"lit":"RqlSpecLampC"},{"lit":"(0, 0, 500)"}]}]})RQL"), true);
+			const TSharedPtr<FJsonObject> Attach = Exec(/* actors | where Label == "RqlSpecLampB" or Label == "RqlSpecLampC" | set Parent = unreal.find("RqlSpecLampA") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"or","args":[{"op":"==","args":[{"path":["Label"]},{"lit":"RqlSpecLampB"}]},{"op":"==","args":[{"path":["Label"]},{"lit":"RqlSpecLampC"}]}]}},{"op":"set","assign":[{"target":{"path":["Parent"]},"value":{"call":"find","on":{"path":["unreal"]},"args":[{"lit":"RqlSpecLampA"}]}}]}]})RQL"), true);
+			if (!TestTrue(*FString::Printf(TEXT("attached (%s)"), *Codes(Attach)), IsOk(Attach)))
+				return;
+
+			for (const bool bDryRun : { true, false })
+			{
+				const TSharedPtr<FJsonObject> Twice = Exec(/* actors | where Label == "RqlSpecLampB" or Label == "RqlSpecLampC" | get Parent | call Duplicate() */ TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"or","args":[{"op":"==","args":[{"path":["Label"]},{"lit":"RqlSpecLampB"}]},{"op":"==","args":[{"path":["Label"]},{"lit":"RqlSpecLampC"}]}]}},{"op":"get","expr":{"path":["Parent"]}},{"op":"call","method":"Duplicate","args":[]}]})RQL"), true, bDryRun);
+				TestFalse(*FString::Printf(TEXT("refused (dry run %d)"), bDryRun), IsOk(Twice));
+				TestTrue(*FString::Printf(TEXT("invalid-value naming the duplicate (%s)"), *Codes(Twice)),
+					Codes(Twice).Contains(TEXT("invalid-value")) && Codes(Twice).Contains(TEXT("Duplicate would run twice")) && Codes(Twice).Contains(TEXT("distinct")));
+				TestEqual(TEXT("nothing duplicated"), Lamps().Num(), 3);
+			}
+			const TSharedPtr<FJsonObject> Once = Exec(/* actors | where Label == "RqlSpecLampB" or Label == "RqlSpecLampC" | get Parent | distinct | call Duplicate() */ TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"or","args":[{"op":"==","args":[{"path":["Label"]},{"lit":"RqlSpecLampB"}]},{"op":"==","args":[{"path":["Label"]},{"lit":"RqlSpecLampC"}]}]}},{"op":"get","expr":{"path":["Parent"]}},{"op":"distinct"},{"op":"call","method":"Duplicate","args":[]}]})RQL"), true, true);
+			TestTrue(*FString::Printf(TEXT("distinct passes the batch check (%s)"), *Codes(Once)), IsOk(Once));
+			TestEqual(TEXT("one receipt row"), RowCount(Once), 1);
+		});
+
+		It("hints without budgets.* and names unreal.find for a ref given a name", [this]()
+		{
+			// More than 20 objects reach set (the limit is checked as targets arrive, before members are resolved).
+			const TSharedPtr<FJsonObject> Limit = Exec(/* unreal.assets("Material", "/Engine") | set Name = "x" */ TEXT(R"RQL({"rql":"0.1","source":{"call":"assets","on":{"path":["unreal"]},"args":[{"lit":"Material"},{"lit":"/Engine"}]},"stages":[{"op":"set","assign":[{"target":{"path":["Name"]},"value":{"lit":"x"}}]}]})RQL"), true, true);
+			TestTrue(*FString::Printf(TEXT("mutation-limit (%s)"), *Codes(Limit)), Codes(Limit).Contains(TEXT("mutation-limit")));
+			const FString LimitHints = UnrealMcpRqlSpecHelpers::Hints(Limit);
+			TestTrue(*FString::Printf(TEXT("suggests batches (%s)"), *LimitHints), LimitHints.Contains(TEXT("first 20")));
+			TestFalse(*FString::Printf(TEXT("no budgets advice (%s)"), *LimitHints), LimitHints.Contains(TEXT("budgets")));
+
+			SpawnLamp();
+			const TSharedPtr<FJsonObject> ByName = Exec(/* ref("RqlSpecLamp") | select Label */ TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"RqlSpecLamp"}]},"stages":[{"op":"select","fields":[{"name":"Label","expr":{"path":["Label"]}}]}]})RQL"));
+			TestFalse(TEXT("a name is not a ref"), IsOk(ByName));
+			const FString ByNameHints = UnrealMcpRqlSpecHelpers::Hints(ByName);
+			TestTrue(*FString::Printf(TEXT("the hint names the finder (%s)"), *ByNameHints), ByNameHints.Contains(TEXT("unreal.find(")));
+		});
+	});
+
 	Describe("schema", [this]()
 	{
 		It("lists sources, functions, present classes and the Actor members", [this]()

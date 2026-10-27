@@ -82,6 +82,12 @@ Value Value::entry(Value key, Value value) {
     return v;
 }
 
+Value Value::entry(Value key, Value value, std::shared_ptr<const EntryOrigin> origin) {
+    Value v = entry(std::move(key), std::move(value));
+    std::static_pointer_cast<EntryData>(v.holder_)->origin = std::move(origin);
+    return v;
+}
+
 Value Value::row(std::shared_ptr<const std::vector<std::string>> columns, std::vector<Value> values) {
     Value v;
     v.kind_ = Kind::Row;

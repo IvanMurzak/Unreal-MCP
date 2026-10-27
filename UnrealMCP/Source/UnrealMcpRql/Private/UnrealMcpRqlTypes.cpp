@@ -1199,6 +1199,83 @@ void FUnrealMcpRqlTypes::WriteObjectProperty(UObject* Object, FProperty* Propert
 	}
 }
 
+/**
+ * The first top-level "Name=" of a "(...)" text form that names no member of @p Struct (C++ or authored name), or "":
+ * ImportText skips a member it does not know without a word, so ParseStructText names it, as the {Member: value} form does.
+ */
+static FString UnrealMcpRqlFirstUnknownTextMember(UScriptStruct* Struct, const FString& Source)
+{
+	int32 Depth = 0;
+	bool bQuoted = false;
+	for (int32 Index = 0; Index < Source.Len(); ++Index)
+	{
+		const TCHAR Char = Source[Index];
+		if (bQuoted)
+		{
+			if (Char == TEXT('\\'))
+				++Index;
+			else if (Char == TEXT('"'))
+				bQuoted = false;
+			continue;
+		}
+		if (Char == TEXT('"'))
+			bQuoted = true;
+		else if (Char == TEXT(')'))
+			--Depth;
+		else if ((Char == TEXT('(') && ++Depth == 1) || (Char == TEXT(',') && Depth == 1))
+		{
+			int32 End = Index + 1;
+			while (End < Source.Len() && Source[End] != TEXT('=') && Source[End] != TEXT(',') && Source[End] != TEXT('(') && Source[End] != TEXT(')'))
+				++End;
+			if (End >= Source.Len() || Source[End] != TEXT('='))
+				continue; // not "Name=" (a static-array element "Member(1)=" is left to ImportText)
+			const FString Name = Source.Mid(Index + 1, End - Index - 1).TrimStartAndEnd();
+			bool bKnown = Name.IsEmpty();
+			for (TFieldIterator<FProperty> It(Struct); It && !bKnown; ++It)
+				bKnown = It->GetName().Equals(Name, ESearchCase::IgnoreCase) || It->GetAuthoredName().Equals(Name, ESearchCase::IgnoreCase);
+			if (!bKnown)
+				return Name;
+		}
+	}
+	return FString();
+}
+
+/**
+ * UE's own text form of @p Struct ("(Minimum=(X=0.5,Y=0),Maximum=(X=0.5,Y=0))", what the editor's Copy and ExportText
+ * write) imported over @p Out; false with @p OutWhy when it names an unknown member, does not parse or has text after it.
+ */
+static bool UnrealMcpRqlImportStructText(UScriptStruct* Struct, const FString& Source, void* Out, FString& OutWhy)
+{
+	const FString Unknown = UnrealMcpRqlFirstUnknownTextMember(Struct, Source);
+	if (!Unknown.IsEmpty())
+	{
+		OutWhy = FString::Printf(TEXT("no member '%s'"), *Unknown);
+		return false;
+	}
+	// What ImportText reports (a bad value); UE 5.5-5.7 differ in where FStringOutputDevice lives.
+	struct FImportErrors final : FOutputDevice
+	{
+		FString Text;
+		virtual void Serialize(const TCHAR* Message, ELogVerbosity::Type, const FName&) override
+		{
+			Text += Text.IsEmpty() ? FString(Message) : FString(TEXT(" ")) + Message;
+		}
+	} Errors;
+	const TCHAR* End = Struct->ImportText(*Source, Out, nullptr, PPF_None, &Errors, Struct->GetName());
+	const FString Rest = End ? FString(End).TrimStartAndEnd() : FString();
+	if (End && Rest.IsEmpty() && Errors.Text.IsEmpty())
+		return true;
+	OutWhy = !Errors.Text.IsEmpty() ? Errors.Text.TrimStartAndEnd()
+		: !End ? FString(TEXT("it does not parse")) : FString::Printf(TEXT("unexpected text after the closing parenthesis: %s"), *Rest);
+	return false;
+}
+
+/** Whether @p Text is a "(Name=value, ...)" text form (not a math literal such as "(1, 2, 3)"). */
+static bool UnrealMcpRqlIsNamedTextForm(const FString& Text)
+{
+	return Text.StartsWith(TEXT("(")) && Text.Contains(TEXT("="));
+}
+
 void FUnrealMcpRqlTypes::CoerceStruct(UScriptStruct* Struct, const rql::Value& Value, void* Out)
 {
 	if (Value.is_struct() && Value.type() == ForStruct(Struct) && Value.ptr())
@@ -1210,6 +1287,18 @@ void FUnrealMcpRqlTypes::CoerceStruct(UScriptStruct* Struct, const rql::Value& V
 	{
 		if ((*Parser)(*this, Value, Out))
 			return;
+	}
+	if (Value.is_string())
+	{
+		// UE's named text form for any struct, the math structs included (an FColor copies as "(B=0,G=0,R=255,A=255)").
+		const FString Text = UnrealMcpRqlFromStd(Value.as_string()).TrimStartAndEnd();
+		if (UnrealMcpRqlIsNamedTextForm(Text))
+		{
+			FString Why;
+			if (!UnrealMcpRqlImportStructText(Struct, Text, Out, Why))
+				Throw(FString::Printf(TEXT("'%s' is not Unreal's text form of %s (%s)"), *Text, *Struct->GetName(), *Why));
+			return;
+		}
 	}
 	if (Value.is_string() || Value.is_list())
 	{
@@ -1239,4 +1328,21 @@ void FUnrealMcpRqlTypes::CoerceStruct(UScriptStruct* Struct, const rql::Value& V
 		return;
 	}
 	ThrowMismatch(*FString::Printf(TEXT("a %s"), *Struct->GetName()), Value);
+}
+
+std::optional<rql::Value> FUnrealMcpRqlTypes::ParseStructText(const rql::TypeDescriptor& Type, const std::string& Text, std::string& OutReason)
+{
+	UScriptStruct* const* Found = StructByDescriptor.Find(&Type);
+	const FString Source = UnrealMcpRqlFromStd(Text).TrimStartAndEnd();
+	if (!Found || !Source.StartsWith(TEXT("(")))
+		return std::nullopt;
+	std::shared_ptr<void> Data = MakeStructData(*Found, nullptr);
+	FString Why;
+	if (!UnrealMcpRqlImportStructText(*Found, Source, Data.get(), Why))
+	{
+		OutReason = UnrealMcpRqlToStd(FString::Printf(TEXT("'%s' is not Unreal's text form of %s (%s)"), *Source, *(*Found)->GetName(), *Why));
+		return std::nullopt;
+	}
+	Fill(&Type);
+	return rql::Value::structure(&Type, std::move(Data));
 }

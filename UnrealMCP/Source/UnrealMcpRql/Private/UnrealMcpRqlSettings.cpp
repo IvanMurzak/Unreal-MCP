@@ -233,22 +233,23 @@ void UnrealMcpRqlAddSettings(FUnrealMcpRqlSession& Session)
 
 	// Settings objects are class defaults by design: writable here, saved after the mutation.
 	Session.AllowTemplateWrites([Index](const UObject* Object) { return Index->Find(Object) != nullptr; });
-	Session.AddBeforeWrite([Types, Index](const std::vector<rql::MutationRecord>& Records)
+	Session.AddBatchValidator([Types, Index](const std::vector<rql::MutationRecord>& Records) -> FString
 	{
 		for (const rql::MutationRecord& Record : Records)
 		{
 			UObject* Owner = Types->AsObject(Record.owner);
 			if (!Owner || Record.method || !Index->Find(Owner))
 				continue;
-			if (Types->AsObject(Record.item) != Owner)
-				continue; // written through a reference: the whole section is saved
+			const UObject* ItemObject = Types->AsObject(Record.item);
+			if (ItemObject && ItemObject != Owner)
+				continue; // written through a reference: the whole section is saved (a map entry has no object item)
 			const FString Root = RootMember(Record.member);
 			FProperty* Property = FindMemberProperty(Owner->GetClass(), Root);
 			if (Property && !Property->HasAnyPropertyFlags(CPF_Config))
-				throw std::runtime_error(UnrealMcpRqlToStd(FString::Printf(
-					TEXT("%s.%s is not a config property: it would not be saved (only config settings are writable)"),
-					*Owner->GetClass()->GetName(), *Root)));
+				return FString::Printf(TEXT("%s.%s is not a config property: it would not be saved (only config settings are writable)"),
+					*Owner->GetClass()->GetName(), *Root);
 		}
+		return FString();
 	});
 	Session.AddCommitted([Types, Index](const std::vector<rql::MutationRecord>& Records)
 	{
@@ -262,7 +263,8 @@ void UnrealMcpRqlAddSettings(FUnrealMcpRqlSession& Session)
 			const FSection* Section = Owner ? Index->Find(Owner) : nullptr;
 			if (!Section)
 				continue;
-			FProperty* Property = !Record.method && Types->AsObject(Record.item) == Owner
+			const UObject* ItemObject = Types->AsObject(Record.item);
+			FProperty* Property = !Record.method && (!ItemObject || ItemObject == Owner)
 				? FindMemberProperty(Owner->GetClass(), RootMember(Record.member)) : nullptr;
 			bool bAlready = false;
 			Saved.Add(TPair<UObject*, FProperty*>(Owner, Property), &bAlready);

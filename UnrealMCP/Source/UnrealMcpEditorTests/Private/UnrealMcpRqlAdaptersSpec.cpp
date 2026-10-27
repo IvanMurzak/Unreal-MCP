@@ -366,6 +366,42 @@ void FUnrealMcpRqlAdaptersSpec::Define()
 			TestEqual(*FString::Printf(TEXT("struct members in a filter (%s)"), *UnrealMcpRqlSpecHelpers::Codes(Filter)), UnrealMcpRqlSpecHelpers::Number(Filter), 1.0);
 		});
 
+		// Plans from Rql.Parser 0.3.0-dev.602ce7c (RQL main 602ce7c: MutationPolicy::coerce_text, map-entry writes).
+		It("imports UE's text form for structs without an adapter, and refuses text that does not import", [this]()
+		{
+			SetsTo(TEXT("ExportText form"), /* ref("UnrealMcpRqlSpecFixture#@F@") | set Row = "(Damage=5,Label=\"text form\",Offset=(X=1,Y=2,Z=3))" */ TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"UnrealMcpRqlSpecFixture#@F@"}]},"stages":[{"op":"set","assign":[{"target":{"path":["Row"]},"value":{"lit":"(Damage=5,Label=\"text form\",Offset=(X=1,Y=2,Z=3))"}}]}]})RQL"),
+				/* ref("UnrealMcpRqlSpecFixture#@F@") | select Row.Label */ TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"UnrealMcpRqlSpecFixture#@F@"}]},"stages":[{"op":"select","fields":[{"name":"Row.Label","expr":{"path":["Row","Label"]}}]}]})RQL"), TEXT("text form"));
+			TestTrue(TEXT("every member imported"), Fixture->Row.Damage == 5 && Fixture->Row.Offset.Equals(FVector(1, 2, 3)));
+			Refuses(TEXT("an unknown member"), /* ref("UnrealMcpRqlSpecFixture#@F@") | set Row = "(Nope=1)" */ TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"UnrealMcpRqlSpecFixture#@F@"}]},"stages":[{"op":"set","assign":[{"target":{"path":["Row"]},"value":{"lit":"(Nope=1)"}}]}]})RQL"), TEXT("Unreal's text form"));
+			Refuses(TEXT("trailing text"), /* ref("UnrealMcpRqlSpecFixture#@F@") | set Row = "(Damage=5) trailing" */ TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"UnrealMcpRqlSpecFixture#@F@"}]},"stages":[{"op":"set","assign":[{"target":{"path":["Row"]},"value":{"lit":"(Damage=5) trailing"}}]}]})RQL"), TEXT("trailing"));
+			TestEqual(TEXT("refusals left the row"), Fixture->Row.Damage, 5);
+			// The math structs too: members by name, not by position (an FColor copies as B, G, R, A).
+			Must(/* ref("UnrealMcpRqlSpecFixture#@F@") | set Color = "(B=0,G=0,R=255,A=255)", Vector = "(X=1,Y=2,Z=3)" */ TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"UnrealMcpRqlSpecFixture#@F@"}]},"stages":[{"op":"set","assign":[{"target":{"path":["Color"]},"value":{"lit":"(B=0,G=0,R=255,A=255)"}},{"target":{"path":["Vector"]},"value":{"lit":"(X=1,Y=2,Z=3)"}}]}]})RQL"));
+			TestTrue(TEXT("FColor by member name"), Fixture->Color == FColor(255, 0, 0, 255));
+			TestTrue(TEXT("FVector by member name"), Fixture->Vector.Equals(FVector(1, 2, 3)));
+		});
+
+		It("writes map entries streamed by get through the owning map", [this]()
+		{
+			Must(/* ref("UnrealMcpRqlSpecFixture#@F@") | set Scores = {a: 1, b: 2, c: 3} */ TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"UnrealMcpRqlSpecFixture#@F@"}]},"stages":[{"op":"set","assign":[{"target":{"path":["Scores"]},"value":{"object":[{"key":"a","value":{"lit":1}},{"key":"b","value":{"lit":2}},{"key":"c","value":{"lit":3}}]}}]}]})RQL"));
+			const int32 EditsBefore = Fixture->PostEditCount;
+			const TSharedPtr<FJsonObject> Scaled = Run(/* ref("UnrealMcpRqlSpecFixture#@F@") | get Scores | where Value > 1 | set Value = Value * 10 */ TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"UnrealMcpRqlSpecFixture#@F@"}]},"stages":[{"op":"get","expr":{"path":["Scores"]}},{"op":"where","pred":{"op":">","args":[{"path":["Value"]},{"lit":1}]}},{"op":"set","assign":[{"target":{"path":["Value"]},"value":{"op":"*","args":[{"path":["Value"]},{"lit":10}]}}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("entry write ok (%s)"), *UnrealMcpRqlSpecHelpers::Codes(Scaled)), UnrealMcpRqlSpecHelpers::IsOk(Scaled));
+			TestEqual(TEXT("one receipt row per entry"), UnrealMcpRqlSpecHelpers::RowCount(Scaled), 2);
+			TestTrue(TEXT("the receipt names the owner"), UnrealMcpRqlSpecHelpers::CellText(Scaled, 0, 0).StartsWith(TEXT("UnrealMcpRqlSpecFixture#")));
+			const int32* A = Fixture->Scores.Find(TEXT("a"));
+			const int32* B = Fixture->Scores.Find(TEXT("b"));
+			const int32* C = Fixture->Scores.Find(TEXT("c"));
+			TestTrue(TEXT("matching values scaled, the other kept"), A && B && C && *A == 1 && *B == 20 && *C == 30);
+			TestTrue(TEXT("written through the owner's editor notification"), Fixture->PostEditCount > EditsBefore);
+
+			Must(/* ref("UnrealMcpRqlSpecFixture#@F@") | set Spots = {home: "(1, 2, 3)", away: "(4, 5, 6)"} */ TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"UnrealMcpRqlSpecFixture#@F@"}]},"stages":[{"op":"set","assign":[{"target":{"path":["Spots"]},"value":{"object":[{"key":"home","value":{"lit":"(1, 2, 3)"}},{"key":"away","value":{"lit":"(4, 5, 6)"}}]}}]}]})RQL"));
+			Must(/* ref("UnrealMcpRqlSpecFixture#@F@") | get Spots | where Key == "away" | set Value.Z = 60 */ TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"UnrealMcpRqlSpecFixture#@F@"}]},"stages":[{"op":"get","expr":{"path":["Spots"]}},{"op":"where","pred":{"op":"==","args":[{"path":["Key"]},{"lit":"away"}]}},{"op":"set","assign":[{"target":{"path":["Value","Z"]},"value":{"lit":60}}]}]})RQL"));
+			const FVector* Away = Fixture->Spots.Find(TEXT("away"));
+			const FVector* Home = Fixture->Spots.Find(TEXT("home"));
+			TestTrue(TEXT("a struct member of an entry written back"), Away && Away->Equals(FVector(4, 5, 60)) && Home && Home->Equals(FVector(1, 2, 3)));
+		});
+
 		It("rolls a failing set back as a whole", [this]()
 		{
 			Fixture->Small = 1;

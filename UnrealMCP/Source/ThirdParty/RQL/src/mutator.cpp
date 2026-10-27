@@ -17,16 +17,70 @@ void check_policy(Exec& x, const std::string& op) {
         throw RqlException("permission-denied", "'" + op + "' requires a mutation request (use the mutate tool / options.allowMutation)");
 }
 
-std::vector<Value> targets(Exec& x, Stream& stream, const std::string& op) {
-    std::vector<Value> list;
+/// A target with the scope its expressions see: its path, depth and position in the stage's input (spec §8).
+struct Target {
+    Item item;
+    int64_t index;
+};
+
+/// `$`, `$index`, `$path` and `$depth` in a set value / call argument are the target's (spec §8).
+void enter_scope(Exec& x, const Target& t) { set_scope(x, t.item, t.index); }
+
+std::string mutation_limit_hint(const std::string& op, int limit, int ceiling) {
+    std::string n = std::to_string(limit);
+    std::string h = "narrow the query (where / ref(...)) or split the change into batches of " + n + ": \xE2\x80\xA6 | first " + n + " | " + op +
+                    " \xE2\x80\xA6, then \xE2\x80\xA6 | skip " + n + " | first " + n + " | " + op + " \xE2\x80\xA6 (repeat plain first " + n +
+                    " instead when the change removes the items from your where)";
+    if (ceiling > limit) h += "; or raise budgets.maxMutationTargets (host ceiling " + std::to_string(ceiling) + ")";
+    return h;
+}
+
+/// The host's batch validation (spec §8): every planned change at once, before any write or call, dry runs too.
+void validate_batch(Exec& x, const std::string& op, const std::vector<MutationRecord>& batch) {
+    const BatchValidator& validate = x.engine.mutations().validate_batch;
+    if (!validate || batch.empty()) return;
+    std::string rejected;
+    try {
+        rejected = validate(batch);
+    } catch (const std::exception& ex) {
+        rejected = std::string("the batch check threw: ") + ex.what();
+    } catch (...) {
+        rejected = "the batch check threw";
+    }
+    if (!rejected.empty())
+        throw RqlException("invalid-value", "the host refused this '" + op + "' of " + std::to_string(batch.size()) + " change(s): " + rejected +
+                                                "; nothing was changed");
+}
+
+void check_limit(Exec& x, size_t count, const std::string& op) {
+    if (static_cast<int64_t>(count) <= x.max_mutation_targets) return;
+    const MutationPolicy& m = x.engine.mutations();
+    const int limit = static_cast<int>(x.max_mutation_targets);
+    std::string hint = m.limit_hint ? m.limit_hint(op, limit) : std::string();
+    if (hint.empty()) hint = mutation_limit_hint(op, limit, x.engine.defaults().budgets_adjustable ? m.hard_max_targets : 0);
+    throw RqlException("mutation-limit", "more than " + std::to_string(limit) + " objects matched '" + op + "'; nothing was changed", hint);
+}
+
+std::vector<Target> targets(Exec& x, Stream& stream, const std::string& op) {
+    std::vector<Target> list;
     Item it;
+    int64_t index = -1;
     while (stream.next(it)) {
+        ++index;  // skipped null/destroyed items keep their positions: $index is the position in the stage's input
         // Null and destroyed items are skipped (spec §13: a destroyed object reads as null).
         if (it.value.is_null() || x.is_dead(it.value)) continue;
         if (it.value.is_row())
             throw RqlException("invalid-plan", "'" + op + "' needs objects, not projected rows; remove 'select' before '" + op + "'");
-        if (it.value.is_entry())
-            throw RqlException("invalid-plan", "'" + op + "' cannot target map entries; set the map member with a key path instead (Stats[\"key\"] = ...)");
+        if (it.value.is_entry()) {
+            if (op != "set" || !it.value.entry().origin)
+                throw RqlException("invalid-plan",
+                                   op == "set" ? "'set' cannot target these map entries (they do not come from a map it can write to); set the map member "
+                                                 "with a key path instead (Stats[\"key\"] = ...)"
+                                               : "'" + op + "' cannot target map entries; call the method on the values instead: ... | get Value | " + op + " ...");
+            list.push_back({it, index});  // set Value... writes through the entry's map (spec §8)
+            check_limit(x, list.size(), op);
+            continue;
+        }
         const Value& v = it.value;
         bool handle = false;
         if (v.is_struct()) {
@@ -37,28 +91,29 @@ std::vector<Value> targets(Exec& x, Stream& stream, const std::string& op) {
             throw RqlException("invalid-plan",
                                "'" + op + "' needs objects with identity; '" + type_name_of(v) + "' items are value copies, so the change would be lost",
                                "set the member from its owner instead, e.g. objects | where ... | set Transform.Position.x = 0");
-        list.push_back(it.value);
-        if (static_cast<int64_t>(list.size()) > x.max_mutation_targets)
-            throw RqlException("mutation-limit",
-                               "more than " + std::to_string(x.max_mutation_targets) + " objects matched '" + op + "'; nothing was changed",
-                               "narrow the query (where / first / ref(...)) or raise budgets.maxMutationTargets if the bulk change is intended");
+        list.push_back({it, index});
+        check_limit(x, list.size(), op);
     }
     return list;
 }
 
-std::string label_of(const Expr& p) {
+std::string raw_label(const std::vector<Segment>& segs) {
     std::string s;
-    for (size_t i = 0; i < p.segments.size(); ++i) {
-        const Segment& seg = p.segments[i];
+    for (size_t i = 0; i < segs.size(); ++i) {
+        const Segment& seg = segs[i];
         s += seg.kind == SegmentKind::Member ? (i == 0 ? "" : ".") + seg.name : seg.to_string();
     }
     return s;
 }
 
-std::string raw_label(const std::vector<Segment>& segs) {
-    std::string s;
-    for (auto& seg : segs) s += seg.to_string();
-    return s;
+std::string label_of(const Expr& p) { return raw_label(p.segments); }
+
+/// A set target only replaces an existing element; adding one means assigning the whole list.
+std::string list_grow_hint(const std::string& label, const Segment& seg) {
+    size_t at = label.rfind(seg.to_string());
+    std::string list = at != std::string::npos && at > 0 ? label.substr(0, at) : "List";
+    return "an indexed set replaces an existing element only; to add elements assign the whole list: set " + list + " = append(" + list +
+           ", value), set " + list + " = insert(" + list + ", " + std::to_string(seg.index) + ", value) or set " + list + " = [ ... ]";
 }
 
 struct Slot {
@@ -147,7 +202,8 @@ Slot slot_of(Exec& x, const Value& container, const Segment& seg, const std::str
         int64_t i = seg.index < 0 ? n + seg.index : seg.index;
         if (i < 0 || i >= n)
             throw RqlException("invalid-plan",
-                               "'" + label + "': index " + std::to_string(seg.index) + " out of range (count " + std::to_string(n) + ")");
+                               "'" + label + "': index " + std::to_string(seg.index) + " out of range (count " + std::to_string(n) + ")",
+                               list_grow_hint(label, seg));
         s.kind = Slot::ListIndex;
         s.index = seg.index;
         const TypeDescriptor* lt = container.list().type();
@@ -270,13 +326,32 @@ void assign(Exec& x, const Value& root, const std::vector<Segment>& segs, const 
 }
 
 struct PlannedWrite {
-    Value item;
+    Value item;  // where the write navigates from: the target, or the map of a streamed entry (write_root)
     const std::vector<Segment>* segments;
     std::string label;
     Value old_value;
     Value new_value;
     Value owner;
+    Value target;        // the stream item (host records)
+    std::string ref;     // the receipt's $ref: the target's, or for an entry the owner of the change (spec §8)
+    std::shared_ptr<const std::vector<Segment>> owned;  // rewritten entry segments (`segments` points into it)
 };
+
+/// Where a set target writes (spec §8): for a map entry streamed from a map, `Value.p` (or `p`, which reads through to
+/// the value like member access) rewritten to `prefix[key].p` from the entry's origin root — the ordinary write path from
+/// the object the map was read from.
+std::shared_ptr<const std::vector<Segment>> entry_segments(const Value& entry, const std::vector<Segment>& segs, const std::string& label) {
+    if (is_member(segs[0], "key"))
+        throw RqlException("readonly-member", "'" + label + "': a map entry's key cannot be set", "keys are fixed: set the value (set Value... = ...) or assign the whole map");
+    const Value& key = entry.entry().key;
+    if (!key.is_string() && !key.is_number())
+        throw RqlException("invalid-plan", "'" + label + "': this runtime writes through map entries with string or number keys only",
+                           "set the map member with a key path instead (Map[\"key\"] = ...)");
+    auto out = std::make_shared<std::vector<Segment>>(entry.entry().origin->prefix);
+    out->push_back(Segment::for_key(key.is_number() ? Literal::number(key.as_number()) : Literal::string(key.as_string())));
+    out->insert(out->end(), segs.begin() + (is_member(segs[0], "value") ? 1 : 0), segs.end());
+    return out;
+}
 
 /// Runs f; the failure message of any exception (std or not), nullopt on success. Host callbacks
 /// (setters, methods, hooks) must never leak an exception past the engine.
@@ -439,6 +514,24 @@ std::optional<Value> coerce(Exec& x, const Value& v, const TypeDescriptor* targe
             case AdapterOutcome::NotHandled: break;
         }
     }
+    // The host's text form for struct / object types no adapter handled (spec §8).
+    const auto& coerce_text = x.engine.mutations().coerce_text;
+    if (coerce_text && v.is_string() && (target->kind == TypeKind::Struct || target->kind == TypeKind::Object)) {
+        std::string reason;
+        std::optional<Value> parsed;
+        if (auto failure = capture_failure([&] { parsed = coerce_text(*target, v.as_string(), reason); })) {
+            why = *failure;
+            return std::nullopt;
+        }
+        if (!reason.empty()) {
+            why = reason;
+            return std::nullopt;
+        }
+        if (parsed && !parsed->is_null() && !parsed->is_missing()) {
+            if (!is_instance_of(*parsed, target)) throw std::logic_error("the host's text coercion returned " + type_name_of(*parsed) + ", not " + target->name);
+            return parsed;
+        }
+    }
     if (v.is_map() && v.map().object_literal()) {
         // Object literals (spec §4.5): maps are built entry by entry below; objects / structs are constructed.
         if (target->kind == TypeKind::Object || target->kind == TypeKind::Struct) return construct(x, v, target, why);
@@ -561,27 +654,37 @@ QueryResult run_set(Exec& x, Compiler& c, Encoder& enc, Stream& stream, const St
     };
     std::vector<Assign> assigns;
     for (auto& a : s.assign) assigns.push_back({a.target.get(), c.compile(*a.value), label_of(*a.target)});
-    std::vector<Value> items = targets(x, stream, "set");
+    std::vector<Target> items = targets(x, stream, "set");
     std::vector<PlannedWrite> writes;
-    for (auto& item : items) {
+    for (auto& t : items) {
+        const Value& item = t.item.value;
+        const EntryOrigin* origin = item.is_entry() ? item.entry().origin.get() : nullptr;
+        const std::string item_ref = origin ? x.ref_of(origin->holder.is_missing() ? origin->root : origin->holder) : x.ref_of(item);
+        // Without a path from the object the map was read from, the write starts at the map: that object (when known) still
+        // owns the change unless an object inside the value does.
+        const bool holder_owns = origin && origin->prefix.empty() && !origin->holder.is_missing();
         for (auto& a : assigns) {
-            x.current = item;
-            x.current_path = nullptr;
-            x.current_depth = -1;
+            // A streamed map entry writes through its map: [key].path on the map (spec §8).
+            std::shared_ptr<const std::vector<Segment>> owned = origin ? entry_segments(item, a.target->segments, a.label) : nullptr;
+            const Value& root = origin ? origin->root : item;
+            const std::vector<Segment>& segs = owned ? *owned : a.target->segments;
+            const std::string label = origin ? raw_label(segs) : a.label;
+            enter_scope(x, t);
             Value nv = a.value(x);
             if (nv.is_missing() || nv.is_unknown())
-                throw RqlException("coercion-failed", "value for '" + a.label + "' on " + x.ref_of(item) + " is missing");
+                throw RqlException("coercion-failed", "value for '" + label + "' on " + item_ref + " is missing");
             if (nv.is_error())
                 throw RqlException(nv.error_code() == "stale-ref" ? "stale-ref" : "coercion-failed",
-                                   "value for '" + a.label + "' on " + x.ref_of(item) + " failed: " +
+                                   "value for '" + label + "' on " + item_ref + " failed: " +
                                        (nv.error_detail().empty() ? nv.error_code() : nv.error_detail()));
             Value container, owner;
-            Slot slot = resolve(x, item, a.target->segments, container, owner);
-            check_writable(x, slot, a.label, item, "");
+            Slot slot = resolve(x, root, segs, container, owner);
+            if (holder_owns && owner.is_map()) owner = origin->holder;
+            check_writable(x, slot, label, root, "");
             std::string why;
             auto coerced = coerce(x, nv, slot.type, slot.nullable, why);
             if (!coerced)
-                throw RqlException("coercion-failed", "cannot assign " + describe_value(nv) + " to '" + a.label + "' (" +
+                throw RqlException("coercion-failed", "cannot assign " + describe_value(nv) + " to '" + label + "' (" +
                                                           (slot.type ? slot.type->friendly_name() : std::string("object")) + "): " + why);
             // Adapter validation runs before any write (spec §13): members and virtual-map entries. Virtual maps
             // accept writes to existing entries only (a new key could not be removed again on rollback).
@@ -592,14 +695,20 @@ QueryResult run_set(Exec& x, Compiler& c, Encoder& enc, Stream& stream, const St
             else
                 rejected = slot.validate(container, *coerced);
             if (!rejected.empty())
-                throw RqlException("invalid-value", "invalid value " + value_text(nv) + " for '" + a.label + "' on " + x.ref_of(item) + ": " + rejected);
-            writes.push_back({item, &a.target->segments, a.label, snapshot(safe_get(slot, container, a.label)), *coerced, owner});
+                throw RqlException("invalid-value", "invalid value " + value_text(nv) + " for '" + label + "' on " + item_ref + ": " + rejected);
+            writes.push_back({root, &segs, label, snapshot(safe_get(slot, container, label)), *coerced, owner, item, origin ? x.ref_of(owner) : item_ref, owned});
         }
     }
 
-    std::vector<MutationRecord> records;  // built once, shared by both hooks
-    if (has_hooks(x))
-        for (auto& w : writes) records.push_back({w.item, w.owner, w.label, w.old_value, w.new_value, nullptr});
+    auto to_records = [&] {
+        std::vector<MutationRecord> out;
+        for (auto& w : writes) out.push_back({w.target, w.owner, w.label, w.old_value, w.new_value, nullptr, {}});
+        return out;
+    };
+    std::vector<MutationRecord> records;  // built once, shared by the batch validator and both hooks
+    if (x.engine.mutations().validate_batch || has_hooks(x)) records = to_records();
+    validate_batch(x, "set", records);
+    if (!has_hooks(x)) records.clear();
     before_write(x, records);
     if (!x.options.dry_run) {
         size_t applied = 0;
@@ -629,7 +738,7 @@ QueryResult run_set(Exec& x, Compiler& c, Encoder& enc, Stream& stream, const St
     committed(x, records);
 
     std::vector<std::vector<Value>> rows;
-    for (auto& w : writes) rows.push_back({Value::string(x.ref_of(w.item)), Value::string(w.label), w.old_value, w.new_value});
+    for (auto& w : writes) rows.push_back({Value::string(w.ref), Value::string(w.label), w.old_value, w.new_value});
     QueryResult r = enc.rows({"$ref", "member", "old", "new"}, rows);
     r.dry_run = x.options.dry_run;
     return r;
@@ -639,14 +748,15 @@ QueryResult run_call(Exec& x, Compiler& c, Encoder& enc, Stream& stream, const S
     check_policy(x, "call");
     std::vector<Eval> args;
     for (auto& a : s.args) args.push_back(c.compile(*a));
-    std::vector<Value> items = targets(x, stream, "call");
+    std::vector<Target> items = targets(x, stream, "call");
     struct Planned {
         Value item;
         const MethodDescriptor* method;
         std::vector<Value> args;
     };
     std::vector<Planned> planned;
-    for (auto& item : items) {
+    for (auto& target : items) {
+        const Value& item = target.item.value;
         const TypeDescriptor* t = (item.is_object() || item.is_struct()) ? item.type() : nullptr;
         std::vector<const MethodDescriptor*> candidates;
         bool exists = false;
@@ -670,8 +780,7 @@ QueryResult run_call(Exec& x, Compiler& c, Encoder& enc, Stream& stream, const S
         if (candidates.empty())
             throw RqlException(exists ? "permission-denied" : "unknown-function", "no callable method '" + s.method + "' on " + tn,
                                !sigs.empty() ? "callable: " + join(sigs, ", ") : tn + " has no callable methods");
-        x.current = item;
-        x.current_depth = -1;
+        enter_scope(x, target);
         std::vector<Value> vals;
         for (auto& a : args) vals.push_back(a(x));
         const MethodDescriptor* chosen = nullptr;
@@ -726,9 +835,15 @@ QueryResult run_call(Exec& x, Compiler& c, Encoder& enc, Stream& stream, const S
         planned.push_back({item, chosen, std::move(coerced)});
     }
 
-    std::vector<MutationRecord> records;  // built once, shared by both hooks
-    if (has_hooks(x))
-        for (auto& p : planned) records.push_back({p.item, p.item, p.item.type()->signature(*p.method), Value(), Value(), p.method});
+    auto call_records = [&] {
+        std::vector<MutationRecord> out;
+        for (auto& p : planned) out.push_back({p.item, p.item, p.item.type()->signature(*p.method), Value(), Value(), p.method, p.args});
+        return out;
+    };
+    std::vector<MutationRecord> records;  // built once, shared by the batch validator and both hooks
+    if (x.engine.mutations().validate_batch || has_hooks(x)) records = call_records();
+    validate_batch(x, "call", records);
+    if (!has_hooks(x)) records.clear();
     before_write(x, records);
     std::vector<std::vector<Value>> rows;
     size_t done = 0;

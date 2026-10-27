@@ -734,6 +734,13 @@ std::string invalid_regex_message(const std::string& pattern, const std::string&
     return "invalid regex \"" + pattern + "\": " + error;
 }
 
+/// A literal pattern that does not compile fails the query before it runs (spec §4.1).
+void check_literal_regex(Exec& x, const Expr* pattern) {
+    if (!pattern || pattern->kind != ExprKind::Lit || pattern->lit.type != Literal::Type::String) return;
+    const Exec::CachedRegex cached = compiled_regex(x, pattern->lit.s);
+    if (!cached.re) throw RqlException("invalid-regex", invalid_regex_message(pattern->lit.s, cached.error));
+}
+
 std::optional<bool> matches_op(Exec& x, const Value& a, const Value& b) {
     if (!a.is_string() || !b.is_string()) return std::nullopt;
     const std::string& pattern = b.as_string();
@@ -839,11 +846,7 @@ Eval Compiler::compile_op_args(const std::string& op, const ExprPtr& ae, const E
     if (op == "starts-with") return [a, b](Exec& x) { Value l = a(x); return tri(string_test(l, b(x), true)); };
     if (op == "ends-with") return [a, b](Exec& x) { Value l = a(x); return tri(string_test(l, b(x), false)); };
     if (op == "matches") {
-        // A literal pattern that does not compile fails the query before it runs (spec §4.1).
-        if (be && be->kind == ExprKind::Lit && be->lit.type == Literal::Type::String) {
-            const Exec::CachedRegex cached = compiled_regex(x_, be->lit.s);
-            if (!cached.re) throw RqlException("invalid-regex", invalid_regex_message(be->lit.s, cached.error));
-        }
+        check_literal_regex(x_, be.get());
         return [a, b](Exec& x) {
             Value l = a(x);
             Value r = tri(matches_op(x, l, b(x)));
@@ -905,9 +908,191 @@ namespace {
 const char* kCoreFunctions[] = {"has", "is-null", "len", "lower", "upper", "abs", "round", "floor", "ceil", "sqrt", "pow", "min", "max",
                                 "coalesce", "ref",
                                 "append", "insert", "remove-at", "without",
+                                "replace", "replace-regex", "substring", "split", "trim", "pad",
                                 "contains", "starts-with", "ends-with", "matches"};
 const char* kCoreMethods[] = {"any", "all", "count", "sum", "min", "max", "avg", "first", "keys", "values",
-                              "contains", "starts-with", "ends-with", "matches", "lower", "upper", "len"};
+                              "contains", "starts-with", "ends-with", "matches", "lower", "upper", "len",
+                              "replace", "replace-regex", "substring", "split", "trim", "pad"};
+
+// ------------------------------------------------------------------ string functions (spec §4.3)
+
+bool is_string_function(const std::string& name) {
+    return name == "replace" || name == "replace-regex" || name == "substring" || name == "split" || name == "trim" || name == "pad";
+}
+
+/// The widest result pad builds.
+constexpr int64_t kMaxPadWidth = 1024;
+
+/// An integral number a double holds exactly (up to 2^53).
+bool integral_arg(const Value& v, int64_t& n) {
+    double d;
+    if (!try_number(v, d) || std::isnan(d) || std::floor(d) != d || std::fabs(d) > 9007199254740992.0) return false;  // up to 2^53; positions beyond the text are clamped
+    n = static_cast<int64_t>(d);
+    return true;
+}
+
+/// Byte offset of the UTF-16 position `units` in UTF-8 text (positions count UTF-16 code units, like len).
+/// Counting exactly like utf16_length (continuation bytes add nothing, a lead byte from 0xF0 adds 2); a position inside
+/// a surrogate pair rounds up to the end of the character.
+size_t utf8_offset(const std::string& s, int64_t units) {
+    int64_t u = 0;
+    for (size_t i = 0; i < s.size(); ++i) {
+        unsigned char ch = static_cast<unsigned char>(s[i]);
+        if ((ch & 0xC0) == 0x80) continue;  // continuation byte
+        if (u >= units) return i;
+        u += ch >= 0xF0 ? 2 : 1;
+    }
+    return s.size();
+}
+
+/// Whether position `at` of UTF-8 text `s` falls inside a character (on a continuation byte).
+bool splits_character(const std::string& s, std::string::const_iterator at) {
+    return at != s.cend() && (static_cast<unsigned char>(*at) & 0xC0) == 0x80;
+}
+
+/// Start offsets of every non-overlapping occurrence of `needle` in `hay`, left to right, ASCII case-insensitive
+/// (like contains; folding ASCII keeps byte offsets).
+std::vector<size_t> ifind_all(const std::string& hay, const std::string& needle) {
+    const std::string h = ascii_lower(hay), n = ascii_lower(needle);
+    std::vector<size_t> hits;
+    for (size_t at = h.find(n); at != std::string::npos; at = h.find(n, at + n.size())) hits.push_back(at);
+    return hits;
+}
+
+/// Portable replacement text: $0-$9 insert a group (empty when absent), $$ a dollar, any other $ is literal.
+std::string expand_replacement(const std::smatch& m, const std::string& repl) {
+    std::string out;
+    for (size_t i = 0; i < repl.size(); ++i) {
+        char ch = repl[i];
+        if (ch == '$' && i + 1 < repl.size()) {
+            char next = repl[i + 1];
+            if (next == '$') {
+                out += '$';
+                ++i;
+                continue;
+            }
+            if (next >= '0' && next <= '9') {
+                size_t g = static_cast<size_t>(next - '0');
+                if (g < m.size() && m[g].matched) out += m[g].str();
+                ++i;
+                continue;
+            }
+        }
+        out += ch;
+    }
+    return out;
+}
+
+Value string_function(Exec& x, const std::string& name, const std::vector<Value>& vals) {
+    if (name == "pad") {
+        // A number pads its text form: pad(3, 2) -> "03".
+        const Value& v = vals[0];
+        if (!v.is_string() && !v.is_number()) return Value::error("type-mismatch", "pad() needs a string or a number, got " + describe_value(v));
+        std::string text = v.is_string() ? v.as_string() : to_text(v);
+        int64_t width = 0;
+        if (!integral_arg(vals[1], width) || width < 0 || width > kMaxPadWidth)
+            return Value::error("type-mismatch", "pad() width must be an integer from 0 to " + std::to_string(kMaxPadWidth));
+        std::string fill = "0";
+        if (vals.size() > 2) {
+            if (!vals[2].is_string() || utf16_length(vals[2].as_string()) != 1)
+                return Value::error("type-mismatch", "pad() fill must be a one-character string");
+            fill = vals[2].as_string();
+        }
+        std::string prefix;
+        for (int64_t have = static_cast<int64_t>(utf16_length(text)); have < width; ++have) prefix += fill;
+        return Value::string(prefix + text);
+    }
+    if (!vals[0].is_string()) return Value::error("type-mismatch", name + "() needs a string, got " + describe_value(vals[0]));
+    const std::string& s = vals[0].as_string();
+    if (name == "trim") {
+        static const char* ws = " \t\n\r\v\f";
+        size_t a = s.find_first_not_of(ws);
+        if (a == std::string::npos) return Value::string("");
+        size_t b = s.find_last_not_of(ws);
+        return Value::string(s.substr(a, b - a + 1));
+    }
+    if (name == "replace" || name == "split") {
+        if (!vals[1].is_string() || (name == "replace" && !vals[2].is_string())) return Value::error("type-mismatch", name + "() needs string arguments");
+        const std::string& from = vals[1].as_string();
+        if (name == "split") {
+            if (from.empty()) return Value::error("type-mismatch", "split() needs a non-empty separator");
+            std::vector<Value> parts;
+            size_t start = 0;
+            for (size_t at : ifind_all(s, from)) {
+                parts.push_back(Value::string(s.substr(start, at - start)));
+                start = at + from.size();
+            }
+            parts.push_back(Value::string(s.substr(start)));
+            return Value::list_of(std::move(parts));
+        }
+        if (from.empty()) return vals[0];
+        const std::string& to = vals[2].as_string();
+        std::string out;
+        size_t pos = 0;
+        for (size_t hit : ifind_all(s, from)) {
+            out.append(s, pos, hit - pos);
+            out += to;
+            pos = hit + from.size();
+        }
+        out.append(s, pos, std::string::npos);
+        return Value::string(out);
+    }
+    if (name == "substring") {
+        int64_t start = 0, want = 0;
+        if (!integral_arg(vals[1], start) || (vals.size() > 2 && !integral_arg(vals[2], want)))
+            return Value::error("type-mismatch", "substring() needs integral start and length");
+        if (vals.size() > 2 && want < 0) return Value::error("type-mismatch", "substring() length must not be negative");
+        const int64_t n = static_cast<int64_t>(utf16_length(s));
+        if (start < 0) start += n;
+        start = std::max<int64_t>(0, std::min(n, start));
+        int64_t count = n - start;
+        if (vals.size() > 2) count = std::min(count, want);
+        size_t a = utf8_offset(s, start);
+        size_t b = utf8_offset(s, start + count);
+        return Value::string(s.substr(a, b - a));
+    }
+    // replace-regex
+    if (!vals[1].is_string() || !vals[2].is_string()) return Value::error("type-mismatch", "replace-regex() needs string arguments");
+    const std::string& pattern = vals[1].as_string();
+    const Exec::CachedRegex cached = compiled_regex(x, pattern);
+    if (!cached.re) {
+        std::string detail = invalid_regex_message(pattern, cached.error);
+        x.warn_once("invalid-regex", detail, "invalid-regex");
+        return Value::error("invalid-regex", detail);
+    }
+    const std::string& repl = vals[2].as_string();
+    try {
+        std::string out;
+        auto last = s.cbegin();
+        for (std::sregex_iterator it(s.cbegin(), s.cend(), *cached.re), end; it != end; ++it) {
+            const std::smatch& m = *it;
+            // std::regex works on bytes: a match that would split a UTF-8 character is skipped (spec §12).
+            if (splits_character(s, m[0].first) || splits_character(s, m[0].second)) continue;
+            out.append(last, m[0].first);
+            out += expand_replacement(m, repl);
+            last = m[0].second;
+        }
+        out.append(last, s.cend());
+        return Value::string(out);
+    } catch (const std::regex_error& ex) {
+        std::string detail = "regex \"" + pattern + "\" failed on a value (" + ex.what() + "); simplify the pattern";
+        x.warn_once("timeout", detail, "regex-timeout");
+        return Value::error("timeout", detail);
+    }
+}
+
+/// The ref() hint: malformed text is usually a name, not a $ref (spec §7).
+std::string ref_hint(const Engine& e, const std::string& reference) {
+    std::string t = reference;
+    size_t a = t.find_first_not_of(" \t\r\n");
+    size_t b = t.find_last_not_of(" \t\r\n");
+    t = a == std::string::npos ? std::string() : t.substr(a, b - a + 1);
+    size_t i = t.find_first_of("#@");
+    std::string find = !e.find_hint.empty() ? "look it up with " + e.find_hint : "look it up by name: \xE2\x80\xA6 | where Name == \"\xE2\x80\xA6\"";
+    return i == std::string::npos || i == 0 || i == t.size() - 1
+               ? "ref() takes a $ref from a query result (Type#id), not a name; " + find
+               : "the object may be gone or its $ref stale; re-query it (" + find + ") to get a fresh $ref";
+}
 
 Value len_of(const Value& v) {
     if (v.is_null()) return Value::missing();
@@ -1221,7 +1406,7 @@ Eval Compiler::compile_function(const Expr& c) {
                     std::string err;
                     Value o = x.resolve_ref(r.as_string(), err);
                     if (o.is_missing()) {
-                        x.diagnostics.push_back(Diagnostic::error("stale-ref", err, "re-query to obtain a fresh $ref"));
+                        x.diagnostics.push_back(Diagnostic::error("stale-ref", err, ref_hint(x.engine, r.as_string())));
                         return Value::error("stale-ref", err);
                     }
                     found.push_back(o);
@@ -1233,6 +1418,11 @@ Eval Compiler::compile_function(const Expr& c) {
     if (name == "contains" || name == "starts-with" || name == "ends-with" || name == "matches") {
         arity(c, 2, 2);
         return compile_op_args(name, c.args[0], c.args[1]);
+    }
+    if (is_string_function(name)) {
+        std::vector<const Expr*> args;
+        for (auto& a : c.args) args.push_back(a.get());
+        return compile_string_function(c, name, args, 0);
     }
     std::vector<std::string> known;
     for (auto* f : kCoreFunctions) known.push_back(f);
@@ -1281,9 +1471,37 @@ Eval Compiler::compile_method(const Expr& c) {
         arity(c, 0, 0);
         return [on](Exec& x) { return len_of(on(x)); };
     }
+    if (is_string_function(name)) {
+        std::vector<const Expr*> args{c.on.get()};
+        for (auto& a : c.args) args.push_back(a.get());
+        return compile_string_function(c, name, args, 1);
+    }
     std::vector<std::string> known;
     for (auto* m : kCoreMethods) known.push_back(m);
     throw RqlException("unknown-function", "unknown method '" + c.name + "'", "methods: " + join(known, " "));
+}
+
+Eval Compiler::compile_string_function(const Expr& c, const std::string& name, const std::vector<const Expr*>& argExprs, size_t receiver) {
+    size_t min = 1, max = 1;
+    if (name == "replace" || name == "replace-regex") min = max = 3;
+    else if (name == "substring" || name == "pad") min = 2, max = 3;
+    else if (name == "split") min = max = 2;
+    arity(c, min - receiver, max - receiver);
+    if (name == "replace-regex") check_literal_regex(x_, argExprs[1]);
+    std::vector<Eval> args;
+    for (auto* e : argExprs) args.push_back(compile(*e));
+    bool regex = name == "replace-regex";
+    return [args, name, regex](Exec& x) {
+        std::vector<Value> vals;
+        for (auto& a : args) {
+            Value v = a(x);
+            if (v.is_null() || v.is_absent()) return v;  // null / missing / error propagate (first one)
+            vals.push_back(std::move(v));
+        }
+        Value r = string_function(x, name, vals);
+        if (regex) x.check_time();
+        return r;
+    };
 }
 
 }  // namespace detail

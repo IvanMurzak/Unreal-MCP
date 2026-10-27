@@ -36,8 +36,9 @@ Stages:
   first N | skip N | count
   get <path>                         replace each item by a member (lists are flattened)
   recurse Children [max-depth=N] [include-self=false]   walk a hierarchy (input items included by default)
-  distinct [expr] | group-by expr | sum expr | min expr | max expr | avg expr
-Expressions: == != < <= > >= and or not + - * / %; contains, starts-with, ends-with, matches "regex" (all case-insensitive); x in [a, b]; x is null; x is not null; $ is PointLight (includes subclasses); has(member); functions abs round floor ceil sqrt pow min(a, b) max(a, b) len lower upper coalesce. After select, sort / where use the column names (sort Owner.Label). Literals: numbers, "strings", true/false/null, lists [a, b], objects {X: 1, Y: 2}.
+  distinct [expr] | sum expr | min expr | max expr | avg expr
+  group-by expr                      rows key|count; group-by a, b (or kind=$type) gives one column per key, then count
+Expressions: == != < <= > >= and or not + - * / %; contains, starts-with, ends-with, matches "regex" (all case-insensitive); x in [a, b]; x is null; x is not null; $ is PointLight (includes subclasses); has(member); functions abs round floor ceil sqrt pow min(a, b) max(a, b) len lower upper coalesce; text: replace(s, from, to) (case-insensitive), replace-regex(s, pattern, repl) ($1 = group 1), substring(s, start[, length]), split(s, sep), trim(s), pad(v, width[, fill]) - also as methods: Label.replace("Old", "New"), Label.substring(0, 4), Index.pad(3). After select, sort / where use the column names (sort Owner.Label). Literals: numbers, "strings", true/false/null, lists [a, b], objects {X: 1, Y: 2}.
 Paths: a.b.c, list[0], map["key"]; .member on a list maps over its elements. List methods: .any(pred) .all(pred) .count([pred]) .sum(e) .min(e) .max(e) .first([pred]); inside them bare names refer to the element, falling back to the outer item.
 Meta: $ (current item), $ref (stable id such as PointLight#1234), $type, $path, $index, $depth. Enums compare to strings (Mobility == "Movable"); == on strings is case-sensitive.
 Unreal: every object has Id, Name, Path. Actor has Label, Location, Rotation, Scale (world transform), Components (list), Children (attached actors), Parent, Folder, Level, HiddenInEditor, Selected. Other members are the reflected properties (UPROPERTY EditAnywhere / VisibleAnywhere / BlueprintVisible) under their C++ names (bHidden, Intensity, RelativeLocation, StaticMesh); find them via actors | get Components | where $ is PointLightComponent. Vectors, rotators and colors print as (x, y, z) (rotators (pitch, yaw, roll)); write "(1, 2, 3)", [1, 2, 3] or {X: 1, Y: 2, Z: 3}; colors also "#ff8800". Object references accept ref("..."), unreal.asset(path) or an asset path "/Game/Meshes/SM_Cube". Material parameters: Scalars["Roughness"], Vectors["BaseColor"], Textures["Albedo"]. Gameplay tags are text: Tag == "Ability.Fire", set Tags = ["Ability.Fire", "State.Stunned"] (registered tags only). DataTable rows: Rows["Sword"].Damage (RowNames, RowStructName). Blueprints: Components (the components it adds; their defaults: StaticMesh, ...), Graphs / EventGraph -> Nodes -> Pins (Name Direction Type DefaultValue LinkedTo). User-defined structs: Fields. Widget Blueprints: RootWidget / Widgets, panels have Children, widgets Parent and Slot. Level Sequences: Bindings -> Tracks -> Sections -> Channels (frames at the display rate). Destroyed objects read as null (where StaticMesh == null finds empty references). Navigate with paths or get; select only projects output columns.
@@ -63,6 +64,7 @@ Results come back as compact rows (header line, then col|col). Long results are 
 	inline const char* MutateStages()
 	{
 		return R"RQL(  set path = expr, ...   assign members (paths may go through structs: set Location.Z = Location.Z + 100)
+                         values see each target: $ (the target), $index (its position in the stream entering set / call)
   call Method(args)      invoke a method the tools expose
 )RQL";
 	}
@@ -73,6 +75,9 @@ Results come back as compact rows (header line, then col|col). Long results are 
   actors | where Label == "Player" | set Location = "(0, 0, 100)"
   actors | get Components | where $ is PointLightComponent | set Intensity = Intensity * 2, LightColor = "#ffcc88"
   actors | where Label starts-with "Enemy" | set HiddenInEditor = true
+  actors | where Label starts-with "Pillar_" | set Label = Label.replace("Pillar_", "Column_")      bulk rename
+  actors | where Label starts-with "Crate" | sort Label | set Location.X = $index * 200              spread along X
+  ref("Button#34") | set Slot.LayoutData.Anchors = "(Minimum=(X=0.5,Y=0),Maximum=(X=0.5,Y=0))"   structs also take UE's text form (the editor's Copy)
   unreal.asset("/Game/Materials/MI_Red") | set Scalars["Roughness"] = 0.2, Vectors["BaseColor"] = "(1, 0, 0, 1)"
 Create / add / remove (call; the receipt's result column holds the new object's $ref for follow-up queries):
   editor | call SpawnActor("PointLight", "Lamp", "(0, 0, 300)")          class, label, location, rotation, parent
@@ -89,6 +94,7 @@ Levels, assets, editor state:
   editor | set Selection = [ref("StaticMeshActor#1234")]        actors | where $ is PointLight | set Selected = true        editor | set IsPlaying = true
 Data, tags, settings (settings are saved to their ini at once, tag edits too; neither is undoable):
   unreal.asset("/Game/Data/DT_Weapons") | set Rows["Sword"].Damage = 12        call AddRow("Bow", {Damage: 7}) / RemoveRow / RenameRow / DuplicateRow
+  unreal.asset("/Game/Data/DT_Weapons") | get Rows | where Value.Damage > 10 | set Value.Damage = Value.Damage * 2     rows (map entries) as targets
   editor | call CreateDataTable("/Game/Data/DT_Weapons", "WeaponRow")      editor | call AddGameplayTag("Ability.Fire", "fire ability")
   editor | call CreateAsset("/Game/Data/S_Enemy", "UserDefinedStruct")      unreal.asset("/Game/Data/S_Enemy") | call AddField("Health", "float", 100)   RemoveField / RenameField / SetFieldDefault
   unreal.settings("Maps & Modes") | set GameDefaultMap = "/Game/Maps/Arena"

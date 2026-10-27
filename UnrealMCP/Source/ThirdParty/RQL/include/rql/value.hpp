@@ -67,6 +67,7 @@ struct ErrorInfo {
 };
 
 struct EntryData;
+struct EntryOrigin;
 struct RowData;
 
 class Value {
@@ -91,6 +92,8 @@ public:
     static Value map(std::shared_ptr<IMapAdapter> map);
     static Value list_of(std::vector<Value> items);  // owned list
     static Value entry(Value key, Value value);
+    /// An entry streamed from a map, remembering it (spec §8).
+    static Value entry(Value key, Value value, std::shared_ptr<const EntryOrigin> origin);
     static Value row(std::shared_ptr<const std::vector<std::string>> columns, std::vector<Value> values);
 
     Kind kind() const { return kind_; }
@@ -146,6 +149,7 @@ private:
 struct EntryData {
     Value key;
     Value value;
+    std::shared_ptr<const EntryOrigin> origin;  // engine-internal: where the map of a streamed entry lives (spec §8)
 };
 
 struct RowData {
