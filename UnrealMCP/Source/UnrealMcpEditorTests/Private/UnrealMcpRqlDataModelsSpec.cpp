@@ -242,12 +242,14 @@ void FUnrealMcpRqlDataModelsSpec::Define()
 	});
 	AfterEach([this]()
 	{
+		// Actors first: placed instances of a spec Blueprint must not outlive their class (a garbage class with live
+		// instances breaks the next garbage collection).
+		DestroySpecActors();
 		for (UObject* Object : Created)
 			UnrealMcpRqlSpecHelpers::DropObject(Object);
 		Created.Reset();
 		if (UDataTable* Made = FindTable())
 			UnrealMcpRqlSpecHelpers::DropObject(Made);
-		DestroySpecActors();
 		if (GEditor)
 			GEditor->ResetTransaction(FText::FromString(TEXT("RQL data model specs")));
 	});
