@@ -22,7 +22,7 @@ agent ──query text──▶ unreal-mcp-bridge (sidecar, .NET)          Unrea
                       AgentFormat: QueryResult → compact rows ◀──IPC tool-response: QueryResult JSON── over live UObjects
 ```
 
-- **Sidecar** (`bridge/src/Tools/RqlBridge.cs`, NuGet `com.IvanMurzak.Rql` 0.1.1): for `rql-query` / `rql-mutate` it
+- **Sidecar** (`bridge/src/Tools/RqlBridge.cs`, NuGet `com.IvanMurzak.Rql` 0.2.0): for `rql-query` / `rql-mutate` it
   parses `query` with `RqlParser` and adds `PlanCodec.Serialize(plan)` as the `plan` argument (a syntax error is
   answered without a round trip). The plugin answers with the QueryResult JSON; the sidecar renders it with
   `AgentFormat.Render(…, Table)` — byte-for-byte the agent output of Unity-MCP's rql tools. `rql-schema` answers with
@@ -84,12 +84,15 @@ agent ──query text──▶ unreal-mcp-bridge (sidecar, .NET)          Unrea
   Blueprint compile, hot reload or user-defined struct edit recreates `FProperty` / `UFunction` objects, so no
   descriptor may outlive the call that built it.
 - **Mutations** run in one editor transaction (one Ctrl+Z step); owners are `Modify()`d before the first write and
-  their packages marked dirty after. Unlike Unity-MCP, `rql-mutate` does **not** save to disk: Unreal edits stay
+  their packages marked dirty after. The receipt's `new` column is the value read back after the write (what the
+  setter and the class's `PostEditChangeProperty` left); `rql-mutate` refuses a query without `set` / `call`, and a
+  throwing operation is `call-threw`. Unlike Unity-MCP, `rql-mutate` does **not** save to disk: Unreal edits stay
   unsaved until `editor | call SaveAll()` / `SaveLevel()` / `SaveAsset(…)` (saving in Unreal can raise source-control
   checkouts and Save-As dialogs, which an unattended tool call must not).
 - **Function sources**: RQL text lets a host function start a query (`unreal.assets("Material") | …`, also with a member
-  path after it: `unreal.asset("/Game/BP_Door").EventGraph | …`); the C++ runtime starts only at sources and `ref(…)`,
-  so the session evaluates such a call (literal arguments) once and runs the query on a source holding its value.
+  path after it: `unreal.asset("/Game/BP_Door").EventGraph | …`); the C++ runtime runs a bare function call but not
+  the member-path form, so the session evaluates such a call (literal arguments) once and runs the query on a source
+  holding its value.
 
 ### Sources and functions (core module)
 

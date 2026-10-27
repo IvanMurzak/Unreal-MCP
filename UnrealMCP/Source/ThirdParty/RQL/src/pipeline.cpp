@@ -77,6 +77,10 @@ void Exec::getter_threw(const std::string& member, const std::string& what) {
     if (getter_errors++ == 0) first_getter_error = "getter '" + member + "' threw: " + what;
 }
 
+void Exec::warn_once(const std::string& code, const std::string& message, const std::string& key) {
+    if (warned_.insert(key.empty() ? code + "\n" + message : key).second) diagnostics.push_back(Diagnostic::warning(code, message));
+}
+
 namespace {
 
 void set_scope(Exec& x, const Item& it, int64_t index) {
@@ -217,6 +221,15 @@ public:
                 Value v = ref_(x_);
                 if (v.is_error()) return false;  // diagnostic already recorded
                 inner_ = std::make_unique<ExpandStream>(x_, v, nullptr, true);
+            } else if (!reg_) {
+                // A host function as the source.
+                x_.current = Value::null();
+                x_.current_path = nullptr;
+                Value v = x_.live(ref_(x_));
+                if (v.is_error())
+                    throw RqlException(v.error_code(), "source " + text_ + "(...) failed: " +
+                                                           (v.error_detail().empty() ? v.error_code() : v.error_detail()));
+                inner_ = std::make_unique<ExpandStream>(x_, v, x_.track_paths ? path_text(nullptr, text_ + "(\xE2\x80\xA6)") : nullptr, true);
             } else {
                 Value root = reg_->getter();
                 Value value = root;
@@ -699,8 +712,16 @@ StreamPtr compile_source(Exec& x, Compiler& c, const Expr& src) {
         Eval ev = c.compile(src);
         return std::make_unique<SourceStream>(x, nullptr, Eval(), "", true, ev);
     }
-    throw RqlException("unknown-source", "query must start with a source name (e.g. world) or ref(\"Type#id\")",
-                       "sources: " + join(source_names(), " "));
+    // A host extension function may produce the input too (spec §2).
+    std::string fn_name;
+    if (extension_function(x, src, fn_name)) {
+        Eval ev = c.compile(src);
+        return std::make_unique<SourceStream>(x, nullptr, Eval(), fn_name, false, ev);
+    }
+    std::vector<std::string> fns;
+    for (auto& kv : x.engine.functions()) fns.push_back(kv.first);
+    throw RqlException("unknown-source", "query must start with a source name (e.g. world), ref(\"Type#id\") or a host function",
+                       "sources: " + join(source_names(), " ") + (fns.empty() ? std::string() : "; functions: " + join(fns, " ")));
 }
 
 StreamPtr apply_stage(Exec& x, Compiler& c, StreamPtr in, const Stage& st) {
@@ -925,7 +946,12 @@ void add_warnings(Exec& x, QueryResult& r, bool only_general) {
             }
             for (auto& st : x.plan.stages)
                 if (st.kind == StageKind::Select)
-                    for (auto& f : st.fields) known.push_back(f.name);
+                    for (auto& f : st.fields) {
+                        known.push_back(f.name);
+                        // select Owner.Label | sort Owner.Label navigates no Owner (the dotted path names the column)
+                        size_t dot = f.name.find('.');
+                        if (dot != std::string::npos && dot > 0) known.push_back(f.name.substr(0, dot));
+                    }
         }
         bool is_known = false;
         for (auto& k : known)
@@ -962,10 +988,7 @@ void add_warnings(Exec& x, QueryResult& r, bool only_general) {
         auto close = suggest_closest(site.name, candidates, 3);
         std::string hint;
         if (!close.empty()) hint = "did you mean " + join(close, " / ") + "?";
-        else if (!candidates.empty()) {
-            std::vector<std::string> first(candidates.begin(), candidates.begin() + static_cast<std::ptrdiff_t>(std::min<size_t>(24, candidates.size())));
-            hint = "members: " + join(first, " ");
-        }
+        else if (!candidates.empty()) hint = member_list_hint(candidates);
         if (close.empty() && !site.name.empty() && site.name[0] >= 'A' && site.name[0] <= 'Z')
             hint += (hint.empty() ? "" : "; ") + std::string("if '") + site.name + "' is a value, quote it: \"" + site.name + "\"";
         r.diagnostics.push_back(Diagnostic::warning("unknown-member", "no member '" + site.name + "' on " + join(type_names, ", "), hint));
@@ -973,6 +996,11 @@ void add_warnings(Exec& x, QueryResult& r, bool only_general) {
 }
 
 QueryResult run_core(Exec& x) {
+    // A mutation request never doubles as a query (spec §8).
+    if (x.options.allow_mutation &&
+        (x.plan.stages.empty() || (x.plan.stages.back().kind != StageKind::Set && x.plan.stages.back().kind != StageKind::Call)))
+        throw RqlException("invalid-plan", "a mutation request must end with a set or call stage; nothing was changed",
+                           "add '| set Member = value' or '| call Method(...)', or use the query tool to read");
     Compiler c(x);
     // Pre-compile all stages (binding errors surface before any traversal).
     StreamPtr stream = compile_source(x, c, *x.plan.source);
@@ -1031,6 +1059,14 @@ QueryResult fail_with(Exec& x, const RqlException& ex) {
         if (d.severity == Severity::Error && d.code != ex.code()) diags.push_back(d);
     QueryResult r = QueryResult::fail(std::move(diags));
     add_warnings(x, r, true);
+    // A warning that the failure repeats (a throwing source function warns, then fails with the same detail) is dropped.
+    const std::string failure = ex.what();
+    r.diagnostics.erase(std::remove_if(r.diagnostics.begin(), r.diagnostics.end(),
+                                       [&](const Diagnostic& d) {
+                                           return d.severity == Severity::Warning && d.code == ex.code() &&
+                                                  failure.find(d.message) != std::string::npos;
+                                       }),
+                        r.diagnostics.end());
     return r;
 }
 

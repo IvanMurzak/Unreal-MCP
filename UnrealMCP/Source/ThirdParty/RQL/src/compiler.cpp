@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <functional>
+#include <limits>
 
 #include "exec.hpp"
 
@@ -21,18 +22,6 @@ std::string join(const std::vector<std::string>& parts, const std::string& sep) 
 }
 
 namespace {
-
-size_t levenshtein(const std::string& a, const std::string& b) {
-    std::vector<size_t> prev(b.size() + 1), cur(b.size() + 1);
-    for (size_t j = 0; j <= b.size(); ++j) prev[j] = j;
-    for (size_t i = 1; i <= a.size(); ++i) {
-        cur[0] = i;
-        for (size_t j = 1; j <= b.size(); ++j)
-            cur[j] = std::min({prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] == b[j - 1] ? 0 : 1)});
-        std::swap(prev, cur);
-    }
-    return prev[b.size()];
-}
 
 bool icontains(const std::string& hay, const std::string& needle) {
     return ascii_lower(hay).find(ascii_lower(needle)) != std::string::npos;
@@ -62,14 +51,41 @@ int cmp_double(double a, double b) {
 
 }  // namespace
 
+size_t osa_distance(const std::string& a, const std::string& b) {
+    // Three rolling rows: the transposition step looks two rows back.
+    std::vector<size_t> back(b.size() + 1), prev(b.size() + 1), cur(b.size() + 1);
+    for (size_t j = 0; j <= b.size(); ++j) prev[j] = j;
+    for (size_t i = 1; i <= a.size(); ++i) {
+        cur[0] = i;
+        for (size_t j = 1; j <= b.size(); ++j) {
+            size_t v = std::min({prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] == b[j - 1] ? 0 : 1)});
+            if (i > 1 && j > 1 && a[i - 1] == b[j - 2] && a[i - 2] == b[j - 1]) v = std::min(v, back[j - 2] + 1);
+            cur[j] = v;
+        }
+        std::swap(back, prev);
+        std::swap(prev, cur);
+    }
+    return prev[b.size()];
+}
+
+std::string member_list_hint(const std::vector<std::string>& names) {
+    constexpr size_t kMaxListed = 12;
+    std::vector<std::string> shown(names.begin(), names.begin() + static_cast<std::ptrdiff_t>(std::min(kMaxListed, names.size())));
+    std::string s = "members: " + join(shown, " ");
+    if (names.size() > kMaxListed) s += " \xE2\x80\xA6 (" + std::to_string(names.size() - kMaxListed) + " more)";
+    return s;
+}
+
 std::vector<std::string> suggest_closest(const std::string& name, const std::vector<std::string>& candidates, size_t max) {
     struct C { std::string c; size_t d; bool sub; };
     std::vector<C> cs;
     std::string lower = ascii_lower(name);
     size_t limit = std::max<size_t>(1, name.size() / 3);
     for (auto& c : candidates) {
-        size_t d = levenshtein(lower, ascii_lower(c));
-        bool sub = icontains(c, name) || icontains(name, c);
+        size_t d = osa_distance(lower, ascii_lower(c));
+        // Containment signals a typo or a partial name: the candidate contains the name (at least 3 characters),
+        // or the name contains a candidate at least half its length (so "NoSuchType" does not suggest "Type").
+        bool sub = (name.size() >= 3 && icontains(c, name)) || (c.size() * 2 >= name.size() && icontains(name, c));
         if (sub || d <= limit) cs.push_back({c, d, sub});
     }
     std::stable_sort(cs.begin(), cs.end(), [](const C& a, const C& b) {
@@ -215,6 +231,8 @@ std::optional<int> rql_compare(Exec& x, const Value& a, const Value& b) {
 
 bool distinct_equal(Exec& x, const Value& a, const Value& b) {
     if (a.is_null() || b.is_null()) return a.is_null() && b.is_null();
+    if (a.is_missing() || b.is_missing()) return a.is_missing() && b.is_missing();  // singletons in .NET
+    if (a.is_unknown() || b.is_unknown()) return a.is_unknown() && b.is_unknown();
     if (a.is_number() && b.is_number())  // NaN groups with NaN
         return a.as_number() == b.as_number() || (std::isnan(a.as_number()) && std::isnan(b.as_number()));
     if (a.is_enum() && b.is_enum()) return a.type() == b.type() && a.enum_value() == b.enum_value();
@@ -233,6 +251,14 @@ bool distinct_equal(Exec& x, const Value& a, const Value& b) {
             }
             if (!distinct_equal(x, ma, mb)) return false;
         }
+        return true;
+    }
+    if (a.is_row() && b.is_row()) {  // projected rows by their column values (spec §5)
+        const auto& ra = a.row().values;
+        const auto& rb = b.row().values;
+        if (ra.size() != rb.size()) return false;
+        for (size_t i = 0; i < ra.size(); ++i)
+            if (!distinct_equal(x, ra[i], rb[i])) return false;
         return true;
     }
     return same_identity(a, b);
@@ -261,6 +287,12 @@ size_t distinct_hash(Exec& x, const Value& v) {
             }
             return h;
         }
+        case Value::Kind::Row: {
+            const auto& values = v.row().values;
+            size_t h = values.size();
+            for (auto& el : values) h = h * 31 + distinct_hash(x, el);
+            return h;
+        }
         default: {
             const void *a, *b;
             if (v.identity(a, b)) return std::hash<const void*>()(a) * 31 + std::hash<const void*>()(b);
@@ -275,21 +307,38 @@ Value reduce(Exec& x, const std::vector<Value>& values, const std::string& kind)
     bool minmax = kind == "min" || kind == "max";
     Value best;
     bool has_best = false;
+    int64_t ignored = 0;
+    std::string first_ignored;
     for (auto& val : values) {
+        // null / missing are skipped silently; any other skipped value (error / unknown included) is counted (spec §4.3).
+        if (val.is_null() || val.is_missing()) continue;
+        bool used;
         if (minmax) {
-            if (val.is_null() || val.is_absent()) continue;
             // Numbers, strings, enums — and any value whose type has an ordering adapter (spec §13).
-            if (!val.is_number() && !val.is_string() && !val.is_enum() && x.adapters_for(val, Capability::Compare).empty()) continue;
-            if (!has_best) { best = val; has_best = true; continue; }
-            auto c = rql_compare(x, val, best);
-            if (!c) continue;
-            if ((kind == "min" && *c < 0) || (kind == "max" && *c > 0)) best = val;
-            continue;
+            used = !val.is_absent() &&
+                   (val.is_number() || val.is_string() || val.is_enum() || !x.adapters_for(val, Capability::Compare).empty());
+            if (used && !has_best) {
+                best = val;
+                has_best = true;
+            } else if (used) {
+                auto c = rql_compare(x, val, best);
+                if (!c) used = false;
+                else if ((kind == "min" && *c < 0) || (kind == "max" && *c > 0)) best = val;
+            }
+        } else {
+            double d;
+            used = try_number(val, d);
+            if (used) {
+                sum += d;
+                ++n;
+            }
         }
-        double d;
-        if (!try_number(val, d)) continue;
-        sum += d;
-        ++n;
+        if (!used && ignored++ == 0) first_ignored = describe_value(val);
+    }
+    if (ignored > 0) {
+        const char* what = minmax ? "value(s) not comparable with the others" : "non-numeric value(s)";
+        x.warn_once("type-mismatch", kind + " ignored " + std::to_string(ignored) + " " + what + " (first: " + first_ignored + ")",
+                    "aggregate:" + kind);
     }
     if (kind == "sum") return Value::number(sum);
     if (kind == "avg") return n == 0 ? Value::null() : Value::number(sum / static_cast<double>(n));
@@ -545,6 +594,21 @@ Eval Compiler::compile_path(const Expr& p) {
                 break;
         }
     }
+    if (relative && p.segments.size() > 1 &&
+        std::all_of(p.segments.begin(), p.segments.end(), [](const Segment& s) { return s.kind == SegmentKind::Member; })) {
+        // After `select Owner.Label`, the path Owner.Label names that column (spec §3), not Owner on the row.
+        std::vector<std::string> names;
+        for (auto& s : p.segments) names.push_back(s.name);
+        std::string column = join(names, ".");
+        Eval navigate = cur;
+        return [column, navigate](Exec& x) {
+            if (x.current.is_row()) {
+                int i = x.current.row().index_of(column);
+                if (i >= 0) return x.current.row().values[static_cast<size_t>(i)];
+            }
+            return navigate(x);
+        };
+    }
     return cur;
 }
 
@@ -652,25 +716,39 @@ std::optional<bool> string_test(const Value& a, const Value& b, bool starts) {
     return starts ? s.compare(0, t.size(), t) == 0 : s.compare(s.size() - t.size(), t.size(), t) == 0;
 }
 
+Exec::CachedRegex compiled_regex(Exec& x, const std::string& pattern) {
+    auto it = x.regex_cache.find(pattern);
+    if (it != x.regex_cache.end()) return it->second;
+    Exec::CachedRegex made;
+    try {
+        made.re = std::make_shared<std::regex>(pattern, std::regex::ECMAScript | std::regex::icase);
+    } catch (const std::regex_error& ex) {
+        made.error = ex.what();
+        if (made.error.empty()) made.error = "the pattern does not compile";
+    }
+    if (x.regex_cache.size() < 256) x.regex_cache[pattern] = made;
+    return made;
+}
+
+std::string invalid_regex_message(const std::string& pattern, const std::string& error) {
+    return "invalid regex \"" + pattern + "\": " + error;
+}
+
 std::optional<bool> matches_op(Exec& x, const Value& a, const Value& b) {
     if (!a.is_string() || !b.is_string()) return std::nullopt;
     const std::string& pattern = b.as_string();
-    std::shared_ptr<std::regex> re;
-    auto it = x.regex_cache.find(pattern);
-    if (it != x.regex_cache.end()) {
-        re = it->second;
-    } else {
-        try {
-            re = std::make_shared<std::regex>(pattern, std::regex::ECMAScript | std::regex::icase);
-        } catch (const std::regex_error&) {
-            re = nullptr;
-        }
-        if (x.regex_cache.size() < 256) x.regex_cache[pattern] = re;
+    const Exec::CachedRegex cached = compiled_regex(x, pattern);
+    const std::shared_ptr<std::regex>& re = cached.re;
+    if (!re) {
+        x.warn_once("invalid-regex", invalid_regex_message(pattern, cached.error) + "; such values count as unknown", "invalid-regex");
+        return std::nullopt;
     }
-    if (!re) return std::nullopt;
     try {
         return std::regex_search(a.as_string(), *re);
-    } catch (const std::regex_error&) {
+    } catch (const std::regex_error& ex) {
+        // std::regex has no time limit: complexity / stack exhaustion stands in for the .NET match timeout.
+        x.warn_once("timeout", "regex \"" + pattern + "\" failed on a value (" + ex.what() +
+                                   "); such values count as unknown (simplify the pattern)", "regex-timeout");
         return std::nullopt;
     }
 }
@@ -760,13 +838,19 @@ Eval Compiler::compile_op_args(const std::string& op, const ExprPtr& ae, const E
     if (op == "contains") return [a, b](Exec& x) { Value l = a(x); return tri(contains_op(x, l, b(x))); };
     if (op == "starts-with") return [a, b](Exec& x) { Value l = a(x); return tri(string_test(l, b(x), true)); };
     if (op == "ends-with") return [a, b](Exec& x) { Value l = a(x); return tri(string_test(l, b(x), false)); };
-    if (op == "matches")
+    if (op == "matches") {
+        // A literal pattern that does not compile fails the query before it runs (spec §4.1).
+        if (be && be->kind == ExprKind::Lit && be->lit.type == Literal::Type::String) {
+            const Exec::CachedRegex cached = compiled_regex(x_, be->lit.s);
+            if (!cached.re) throw RqlException("invalid-regex", invalid_regex_message(be->lit.s, cached.error));
+        }
         return [a, b](Exec& x) {
             Value l = a(x);
             Value r = tri(matches_op(x, l, b(x)));
             x.check_time();  // a per-match bound alone does not bound the whole query
             return r;
         };
+    }
     if (op == "in") return [a, b](Exec& x) { Value l = a(x); return tri(in_op(x, l, b(x))); };
     if (op == "is") {
         IsSite* site = nullptr;
@@ -818,7 +902,8 @@ Eval Compiler::compile_op_args(const std::string& op, const ExprPtr& ae, const E
 
 namespace {
 
-const char* kCoreFunctions[] = {"has", "is-null", "len", "lower", "upper", "abs", "round", "floor", "ceil", "coalesce", "ref",
+const char* kCoreFunctions[] = {"has", "is-null", "len", "lower", "upper", "abs", "round", "floor", "ceil", "sqrt", "pow", "min", "max",
+                                "coalesce", "ref",
                                 "append", "insert", "remove-at", "without",
                                 "contains", "starts-with", "ends-with", "matches"};
 const char* kCoreMethods[] = {"any", "all", "count", "sum", "min", "max", "avg", "first", "keys", "values",
@@ -842,6 +927,19 @@ Value num_of(const Value& v, double (*f)(double)) {
     double d;
     if (!try_number(v, d)) return Value::error("type-mismatch");
     return Value::number(f(d));
+}
+
+/// Like .NET Math.Min / Math.Max: NaN when either argument is NaN; -0 orders below +0.
+double math_min(double a, double b) {
+    if (std::isnan(a) || std::isnan(b)) return std::numeric_limits<double>::quiet_NaN();
+    if (a == b) return std::signbit(a) ? a : b;
+    return a < b ? a : b;
+}
+
+double math_max(double a, double b) {
+    if (std::isnan(a) || std::isnan(b)) return std::numeric_limits<double>::quiet_NaN();
+    if (a == b) return std::signbit(a) ? b : a;
+    return a > b ? a : b;
 }
 
 double round_away(double v, int digits) {
@@ -931,45 +1029,60 @@ void Compiler::arity(const Expr& c, size_t min, size_t max) {
     }
 }
 
-Eval Compiler::compile_call(const Expr& c) {
-    // ns.fn(x) parses as method fn on path ns: rewrite when a namespaced function is registered (spec §9).
-    if (c.on && c.on->kind == ExprKind::Path && !c.on->on && !c.on->segments.empty()) {
-        bool all_members = true;
-        std::vector<std::string> parts;
-        for (auto& s : c.on->segments) {
-            if (s.kind != SegmentKind::Member) all_members = false;
-            parts.push_back(s.name);
-        }
-        if (all_members) {
-            auto it = x_.engine.functions().find(join(parts, ".") + "." + c.name);
-            if (it != x_.engine.functions().end()) return compile_extension(it->second, c.args);
-        }
+const FunctionHandler* extension_function(Exec& x, const Expr& c, std::string& name) {
+    if (c.kind != ExprKind::Call) return nullptr;
+    const auto& fns = x.engine.functions();
+    if (!c.on) {
+        if (c.name.find('.') == std::string::npos) return nullptr;
+        auto it = fns.find(c.name);
+        if (it == fns.end()) return nullptr;
+        name = it->first;
+        return &it->second;
     }
+    // ns.fn(x) parses as method fn on path ns: rewrite when a namespaced function is registered (spec §9).
+    if (c.on->kind != ExprKind::Path || c.on->on || c.on->segments.empty()) return nullptr;
+    std::vector<std::string> parts;
+    for (auto& s : c.on->segments) {
+        if (s.kind != SegmentKind::Member) return nullptr;
+        parts.push_back(s.name);
+    }
+    auto it = fns.find(join(parts, ".") + "." + c.name);
+    if (it == fns.end()) return nullptr;
+    name = it->first;
+    return &it->second;
+}
+
+Eval Compiler::compile_call(const Expr& c) {
+    std::string ext;
+    if (const FunctionHandler* fn = extension_function(x_, c, ext)) return compile_extension(ext, *fn, c.args);
     if (!c.on) return compile_function(c);
     return compile_method(c);
 }
 
-Eval Compiler::compile_extension(const FunctionHandler& fn, const std::vector<ExprPtr>& argExprs) {
+Eval Compiler::compile_extension(const std::string& name, const FunctionHandler& fn, const std::vector<ExprPtr>& argExprs) {
     std::vector<Eval> args;
     for (auto& a : argExprs) args.push_back(compile(*a));
-    return [fn, args](Exec& x) {
+    return [name, fn, args](Exec& x) {
         std::vector<Value> vals;
         vals.reserve(args.size());
         for (auto& a : args) vals.push_back(a(x));
+        std::string what;
         try {
             return fn(vals);
         } catch (const std::exception& ex) {
-            return Value::error("getter-threw", ex.what());
+            what = ex.what();
+        } catch (...) {
+            what = "non-standard exception";
         }
+        // spec §9: an error value for the call plus one warning per function.
+        std::string detail = name + "() threw: " + what;
+        x.warn_once("function-threw", detail, "function-threw:" + name);
+        return Value::error("function-threw", detail);
     };
 }
 
 Eval Compiler::compile_function(const Expr& c) {
     std::string name = ascii_lower(c.name);
-    if (c.name.find('.') != std::string::npos) {
-        auto it = x_.engine.functions().find(c.name);
-        if (it != x_.engine.functions().end()) return compile_extension(it->second, c.args);
-    }
     if (name == "has") {
         arity(c, 1, 1);
         Eval a = compile(*c.args[0]);
@@ -991,13 +1104,34 @@ Eval Compiler::compile_function(const Expr& c) {
         bool up = name == "upper";
         return [a, up](Exec& x) { return case_of(a(x), up); };
     }
-    if (name == "abs" || name == "floor" || name == "ceil") {
+    if (name == "abs" || name == "floor" || name == "ceil" || name == "sqrt") {
         arity(c, 1, 1);
         Eval a = compile(*c.args[0]);
-        double (*f)(double) = name == "abs" ? static_cast<double (*)(double)>(std::fabs)
+        double (*f)(double) = name == "abs"     ? static_cast<double (*)(double)>(std::fabs)
                               : name == "floor" ? static_cast<double (*)(double)>(std::floor)
-                                                : static_cast<double (*)(double)>(std::ceil);
+                              : name == "ceil"  ? static_cast<double (*)(double)>(std::ceil)
+                                                : static_cast<double (*)(double)>(std::sqrt);  // IEEE: sqrt(-1) is NaN
         return [a, f](Exec& x) { return num_of(a(x), f); };
+    }
+    if (name == "pow" || name == "min" || name == "max") {
+        if (name == "pow") arity(c, 2, 2);
+        else arity(c, 2, 64);
+        std::vector<Eval> args;
+        for (auto& e : c.args) args.push_back(compile(*e));
+        double (*f)(double, double) = name == "pow"   ? static_cast<double (*)(double, double)>(std::pow)
+                                      : name == "min" ? math_min
+                                                      : math_max;
+        return [args, f, name](Exec& x) -> Value {
+            double acc = 0;
+            for (size_t i = 0; i < args.size(); ++i) {
+                Value v = args[i](x);
+                if (v.is_null() || v.is_absent()) return v;  // the first null / missing / error / unknown argument
+                double d;
+                if (!try_number(v, d)) return Value::error("type-mismatch", name + "() expects numbers, got " + describe_value(v));
+                acc = i == 0 ? d : f(acc, d);
+            }
+            return Value::number(acc);
+        };
     }
     if (name == "round") {
         arity(c, 1, 2);

@@ -28,7 +28,8 @@ void validate_name(const std::string& name, bool require_namespace) {
 
 const char* kCoreStageNames[] = {"where", "select", "sort", "first", "skip", "count", "describe", "get", "sum",
                                  "min", "max", "avg", "group-by", "distinct", "recurse", "set", "call"};
-const char* kFunctionNames[] = {"has", "is-null", "len", "lower", "upper", "abs", "round", "floor", "ceil", "coalesce", "ref",
+const char* kFunctionNames[] = {"has", "is-null", "len", "lower", "upper", "abs", "round", "floor", "ceil", "sqrt", "pow", "min", "max",
+                                "coalesce", "ref",
                                 "contains", "starts-with", "ends-with", "matches"};
 const char* kMethodNames[] = {"any", "all", "count", "sum", "min", "max", "avg", "first", "keys", "values",
                               "contains", "starts-with", "ends-with", "matches", "lower", "upper", "len"};

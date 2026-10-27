@@ -189,16 +189,20 @@ public:
 
     /// Add (or replace, same name and arity) a callable method. `self` is a pointer to the adapter's
     /// target type; args arrive coerced to the parameter types (defaults filled in). `returns` nullptr =
-    /// no result. The receipt / describe show "name(type param, ...)".
+    /// no result. The receipt / describe show "name(type param, ...)". `validate` (optional) checks a planned
+    /// call before any call is made, on dry runs too: a rejection reason, or empty to accept (spec §8).
     MemberTable& method(std::string name, std::vector<ParamDescriptor> params, const TypeDescriptor* returns,
-                        std::function<Value(void* self, const std::vector<Value>& args)> invoke, std::string description = {});
-    /// Typed: f(T&, const std::vector<Value>& args) -> Value.
+                        std::function<Value(void* self, const std::vector<Value>& args)> invoke, std::string description = {},
+                        CallValidator validate = {});
+    /// Typed: f(T&, const std::vector<Value>& args) -> Value; validate(T&, args) -> reason or empty.
     template <class T, class F>
     MemberTable& method(std::string name, std::vector<ParamDescriptor> params, const TypeDescriptor* returns, F f,
-                        std::string description = {}) {
+                        std::string description = {}, std::function<std::string(T&, const std::vector<Value>&)> validate = {}) {
+        CallValidator v;
+        if (validate) v = [validate](void* self, const std::vector<Value>& args) { return validate(*static_cast<T*>(self), args); };
         return method(std::move(name), std::move(params), returns,
                       [f](void* self, const std::vector<Value>& args) -> Value { return f(*static_cast<T*>(self), args); },
-                      std::move(description));
+                      std::move(description), std::move(v));
     }
     /// Remove callable methods by name (all overloads). Every name must exist (else internal-error).
     MemberTable& hide_methods(const std::vector<std::string>& names);

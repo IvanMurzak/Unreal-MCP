@@ -33,7 +33,7 @@
  * methods and the `editor` operations, executed in EditorContext so GEditor and the editor world are live.
  *
  * The C++ runtime has no RQL text parser (the sidecar parses), so each case carries the canonical QueryPlan of the query
- * in its comment, produced by Rql.Parser (com.IvanMurzak.Rql 0.1.1, PlanCodec.Serialize). Every case works on actors
+ * in its comment, produced by Rql.Parser (com.IvanMurzak.Rql 0.2.0, PlanCodec.Serialize). Every case works on actors
  * labelled "RqlSpecLamp*" and removes them afterwards.
  */
 BEGIN_DEFINE_SPEC(FUnrealMcpRqlSpec, "UnrealMcp.Tools.Rql",
