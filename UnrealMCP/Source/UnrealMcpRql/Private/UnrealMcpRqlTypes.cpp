@@ -31,7 +31,6 @@
 #include "UObject/UObjectArray.h"
 #include "UObject/UnrealType.h"
 
-#include <algorithm>
 #include <cmath>
 #include <stdexcept>
 
@@ -392,25 +391,25 @@ const rql::TypeDescriptor* FUnrealMcpRqlTypes::ForEnum(UEnum* Enum)
 		return *Found;
 	rql::TypeDescriptor& Descriptor = Shell(Enum, Enum->GetName(), rql::TypeKind::Enum);
 	const int32 Count = Enum->ContainsExistingMax() ? Enum->NumEnums() - 1 : Enum->NumEnums();
+	TArray<int32> Visible;
+	TSet<FString> EntryNames; // FString hashes and compares case-insensitively
 	for (int32 Index = 0; Index < Count; ++Index)
 	{
 		if (Enum->HasMetaData(TEXT("Hidden"), Index))
 			continue;
-		Descriptor.enum_values.emplace_back(UnrealMcpRqlToStd(Enum->GetNameStringByIndex(Index)), Enum->GetValueByIndex(Index));
+		const FString Name = Enum->GetNameStringByIndex(Index);
+		Visible.Add(Index);
+		EntryNames.Add(Name);
+		Descriptor.enum_values.emplace_back(UnrealMcpRqlToStd(Name), Enum->GetValueByIndex(Index));
 	}
 #if WITH_METADATA
 	// The editor's display names (UMETA(DisplayName = "No Collision")) resolve like entry names (RQL enum aliases). One
 	// that spells another entry's name is left out: it would make that name ambiguous.
-	for (int32 Index = 0; Index < Count; ++Index)
+	for (const int32 Index : Visible)
 	{
-		const FString Display = Enum->HasMetaData(TEXT("Hidden"), Index) ? FString() : Enum->GetMetaData(TEXT("DisplayName"), Index);
-		if (Display.IsEmpty())
-			continue;
-		const std::string Alias = UnrealMcpRqlToStd(Display);
-		const bool bIsEntryName = std::any_of(Descriptor.enum_values.begin(), Descriptor.enum_values.end(),
-			[&Display](const std::pair<std::string, int64_t>& Entry) { return Display.Equals(UnrealMcpRqlFromStd(Entry.first), ESearchCase::IgnoreCase); });
-		if (!bIsEntryName)
-			Descriptor.enum_aliases.emplace_back(Alias, Enum->GetValueByIndex(Index));
+		const FString Display = Enum->GetMetaData(TEXT("DisplayName"), Index);
+		if (!Display.IsEmpty() && !EntryNames.Contains(Display))
+			Descriptor.enum_aliases.emplace_back(UnrealMcpRqlToStd(Display), Enum->GetValueByIndex(Index));
 	}
 #endif
 	Enums.Add(Enum, &Descriptor);
@@ -623,26 +622,45 @@ bool FUnrealMcpRqlTypes::IsKnownMemberName(const FString& Name)
 		return false;
 	if (const bool* Cached = KnownMemberNames.Find(Name))
 		return *Cached;
-	// The descriptors this session filled (hook members: Label, Components, Scalars, ...) and the native types.
-	const std::string Member = UnrealMcpRqlToStd(Name);
-	bool bKnown = false;
-	for (const rql::TypeDescriptor* Descriptor : Filled)
-		bKnown = bKnown || Descriptor->find(Member) != nullptr;
-	for (const rql::TypeDescriptor* Descriptor : NativeTypes)
-		bKnown = bKnown || (Descriptor && Descriptor->find(Member) != nullptr);
-	// Reflected properties of every loaded class and struct. FName lookup ignores case, and a name no FName was ever
-	// made of is no property, so a typo costs one name-table lookup.
-	const FName Wanted(*Name, FNAME_Find);
-	if (!bKnown && !Wanted.IsNone())
+	auto Lookup = [this, &Name]()
 	{
-		for (TObjectIterator<UStruct> It; It && !bKnown; ++It)
+		// The descriptors this session filled (hook members: Label, Components, Scalars, ...) and the native types.
+		const std::string Member = UnrealMcpRqlToStd(Name);
+		for (const rql::TypeDescriptor* Descriptor : Filled)
 		{
-			if (It->IsA<UFunction>())
-				continue; // parameters, not members
-			for (TFieldIterator<FProperty> Property(*It, EFieldIteratorFlags::ExcludeSuper); Property && !bKnown; ++Property)
-				bKnown = Property->GetFName() == Wanted;
+			if (Descriptor->find(Member))
+				return true;
 		}
-	}
+		for (const rql::TypeDescriptor* Descriptor : NativeTypes)
+		{
+			if (Descriptor && Descriptor->find(Member))
+				return true;
+		}
+		// The properties FillClass / FillStruct would make members, on every loaded class and struct. FName lookup ignores
+		// case, and a name no FName was ever made of is no property, so a typo costs one name-table lookup.
+		const FName Wanted(*Name, FNAME_Find);
+		if (Wanted.IsNone())
+			return false;
+		for (TObjectIterator<UClass> It; It; ++It)
+		{
+			const TMap<FName, bool>* Forced = Exposed.Find(*It);
+			for (TFieldIterator<FProperty> Property(*It, EFieldIteratorFlags::ExcludeSuper); Property; ++Property)
+			{
+				if (Property->GetFName() == Wanted && (IsExposedOnClass(*Property) || (Forced && Forced->Contains(Wanted))))
+					return true;
+			}
+		}
+		for (TObjectIterator<UScriptStruct> It; It; ++It)
+		{
+			for (TFieldIterator<FProperty> Property(*It, EFieldIteratorFlags::ExcludeSuper); Property; ++Property)
+			{
+				if (Property->GetFName() == Wanted && !Property->HasAnyPropertyFlags(CPF_Deprecated))
+					return true;
+			}
+		}
+		return false;
+	};
+	const bool bKnown = Lookup();
 	KnownMemberNames.Add(Name, bKnown);
 	return bKnown;
 }

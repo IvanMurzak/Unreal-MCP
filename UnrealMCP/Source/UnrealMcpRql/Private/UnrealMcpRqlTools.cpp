@@ -41,8 +41,8 @@ namespace UnrealMcpRqlToolsLocal
 		const bool bDryRun = bAllowMutation && Call.GetBool(TEXT("dry_run"), false);
 		// max_targets below 1 (or absent) keeps the default; above the ceiling the engine caps it.
 		const int64 MaxTargets = bAllowMutation ? Call.GetInt(TEXT("max_targets"), 0) : 0;
-		const FString Json = UnrealMcpRqlTools::ExecutePlan(Plan, bAllowMutation, bDryRun,
-			static_cast<int32>(FMath::Clamp<int64>(MaxTargets, 0, FUnrealMcpRqlSession::HardMaxTargets)), bOk);
+		FUnrealMcpRqlSession Session;
+		const FString Json = Session.Execute(Plan, bAllowMutation, bDryRun, bOk, static_cast<int32>(FMath::Clamp<int64>(MaxTargets, 0, MAX_int32)));
 		return bOk ? FUnrealMcpToolResult::Success(Json) : FUnrealMcpToolResult::Error(Json);
 	}
 
@@ -74,7 +74,8 @@ namespace UnrealMcpRqlToolsLocal
 			.ParamString(TEXT("query"), TEXT("RQL query ending with a set or call stage, e.g. actors | where Label == \"Player\" | set HiddenInEditor = true"),
 				EUnrealMcpParamRequirement::Required)
 			.ParamBool(TEXT("dry_run"), TEXT("true = preview the receipt without changing anything"))
-			.ParamInt(TEXT("max_targets"), TEXT("Most objects set / call may change in this call (default 200, at most 1000); raise it for a bigger bulk edit"))
+			.ParamInt(TEXT("max_targets"), FString::Printf(TEXT("Most objects set / call may change in this call (default %d, at most %d); raise it for a bigger bulk edit"),
+				FUnrealMcpRqlSession::DefaultMaxTargets, FUnrealMcpRqlSession::HardMaxTargets))
 			.DestructiveHint(true)
 			.OpenWorldHint(false)
 			.Handle([](const FUnrealMcpToolCall& Call) { return Run(Call, /*bAllowMutation*/ true); });
@@ -149,13 +150,8 @@ namespace UnrealMcpRqlTools
 
 	FString ExecutePlan(const FString& PlanJson, bool bAllowMutation, bool bDryRun, bool& bOutOk)
 	{
-		return ExecutePlan(PlanJson, bAllowMutation, bDryRun, /*MaxTargets*/ 0, bOutOk);
-	}
-
-	FString ExecutePlan(const FString& PlanJson, bool bAllowMutation, bool bDryRun, int32 MaxTargets, bool& bOutOk)
-	{
 		FUnrealMcpRqlSession Session;
-		return Session.Execute(PlanJson, bAllowMutation, bDryRun, bOutOk, MaxTargets);
+		return Session.Execute(PlanJson, bAllowMutation, bDryRun, bOutOk);
 	}
 
 	FString Schema(const FString& TypeName, bool& bOutOk)

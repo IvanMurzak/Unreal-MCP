@@ -148,6 +148,15 @@ BEGIN_DEFINE_SPEC(FUnrealMcpRqlSpec, "UnrealMcp.Tools.Rql",
 		return Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"SpawnActor","args":[{"lit":"PointLight"},{"lit":"RqlSpecLamp"},{"lit":"(1, 2, 3)"}]}]})RQL"), true);
 	}
 
+	/** A StaticMeshActor labelled "RqlSpecLampMesh" (removed by Cleanup); whether it spawned. */
+	static bool SpawnMesh()
+	{
+		AStaticMeshActor* Mesh = World() ? World()->SpawnActor<AStaticMeshActor>() : nullptr;
+		if (Mesh)
+			Mesh->SetActorLabel(TEXT("RqlSpecLampMesh"));
+		return Mesh != nullptr;
+	}
+
 	/** actors | where Label == "RqlSpecLamp" | count */
 	int32 CountLamps()
 	{
@@ -903,10 +912,8 @@ void FUnrealMcpRqlSpec::Define()
 		It("selects with cond ? a : b", [this]()
 		{
 			SpawnLamp();
-			AStaticMeshActor* Mesh = World() ? World()->SpawnActor<AStaticMeshActor>() : nullptr;
-			if (!TestNotNull(TEXT("mesh actor"), Mesh))
+			if (!TestTrue(TEXT("mesh actor"), SpawnMesh()))
 				return;
-			Mesh->SetActorLabel(TEXT("RqlSpecLampMesh"));
 			const TSharedPtr<FJsonObject> Kinds = Exec(/* actors | where Label starts-with "RqlSpecLamp" | sort Label | select Label kind = ($ is PointLight ? "point" : "other") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"starts-with","args":[{"path":["Label"]},{"lit":"RqlSpecLamp"}]}},{"op":"sort","keys":[{"expr":{"path":["Label"]}}]},{"op":"select","fields":[{"name":"Label","expr":{"path":["Label"]}},{"name":"kind","expr":{"call":"if","args":[{"op":"is","args":[{"path":[]},{"lit":"PointLight"}]},{"lit":"point"},{"lit":"other"}]}}]}]})RQL"));
 			TestTrue(*FString::Printf(TEXT("ok (%s)"), *Codes(Kinds)), IsOk(Kinds));
 			TestEqual(TEXT("the lamp"), CellText(Kinds, 0, 1), FString(TEXT("point")));
@@ -916,10 +923,8 @@ void FUnrealMcpRqlSpec::Define()
 		It("fails a mutation emptied by a typo and keeps a polymorphic no-match ok", [this]()
 		{
 			SpawnLamp();
-			AStaticMeshActor* Mesh = World() ? World()->SpawnActor<AStaticMeshActor>() : nullptr;
-			if (!TestNotNull(TEXT("mesh actor"), Mesh))
+			if (!TestTrue(TEXT("mesh actor"), SpawnMesh()))
 				return;
-			Mesh->SetActorLabel(TEXT("RqlSpecLampMesh"));
 
 			const TSharedPtr<FJsonObject> Typo = Exec(/* actors | where Label == "RqlSpecLamp" | get RootComponnt | set Mobility = "Movable" */ TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"RqlSpecLamp"}]}},{"op":"get","expr":{"path":["RootComponnt"]}},{"op":"set","assign":[{"target":{"path":["Mobility"]},"value":{"lit":"Movable"}}]}]})RQL"), true);
 			TestFalse(TEXT("a typo fails"), IsOk(Typo));
