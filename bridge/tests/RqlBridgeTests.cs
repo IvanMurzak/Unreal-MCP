@@ -67,6 +67,30 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         }
 
         [Fact]
+        public void AddPlan_ParsesTheConditionalAndKeepsTheOtherArguments()
+        {
+            // RQL 7dd3b29: cond ? a : b is the core function if (the plugin's C++ runtime runs it); rql-mutate's max_targets
+            // and dry_run travel to the plugin untouched.
+            var args = new JsonObject
+            {
+                ["query"] = "actors | select kind = ($ is PointLight ? \"point\" : \"other\")",
+                ["max_targets"] = 300,
+                ["dry_run"] = true,
+            };
+            Assert.Null(RqlBridge.AddPlan(args));
+            var plan = JsonNode.Parse(args["plan"]!.GetValue<string>())!.AsObject();
+            var expr = plan["stages"]![0]!["fields"]![0]!["expr"]!;
+            Assert.Equal("if", expr["call"]!.GetValue<string>());
+            Assert.Equal(3, expr["args"]!.AsArray().Count);
+            Assert.Equal(300, args["max_targets"]!.GetValue<int>());
+            Assert.True(args["dry_run"]!.GetValue<bool>());
+
+            var incomplete = RqlBridge.AddPlan(new JsonObject { ["query"] = "actors | select k = ($ is PointLight ? \"point\")" });
+            Assert.NotNull(incomplete);
+            Assert.Contains("syntax-error", incomplete!.Content!.Single().Text);
+        }
+
+        [Fact]
         public void AddPlan_AnswersSyntaxErrorsLikeAFailingQuery()
         {
             var error = RqlBridge.AddPlan(new JsonObject { ["query"] = "actors | where (" });

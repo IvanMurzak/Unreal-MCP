@@ -123,6 +123,7 @@ struct MemberSite {
     std::vector<const TypeDescriptor*> miss_types;
     std::vector<std::string> row_columns;  // columns of a multi-column row that lacked the member
     bool bare = false;                     // first segment of a relative path (no `on`)
+    bool guarded = false;                  // read inside has(): never the cause of an empty mutation (spec §8)
     const TypeDescriptor* cached_type = nullptr;
     const MemberDescriptor* cached_member = nullptr;
     explicit MemberSite(std::string n) : name(std::move(n)) {}
@@ -273,6 +274,7 @@ public:
 
 private:
     Exec& x_;
+    int guarded_ = 0;  // depth of has() arguments being compiled: their member sites are guards (spec §8)
     Eval compile_path(const Expr& p);
     Eval compile_meta(const std::string& name, Eval prev, bool of_current_item);
     Eval compile_meta_core(const std::string& name, Eval prev, bool of_current_item);

@@ -763,7 +763,10 @@ StreamPtr compile_source(Exec& x, Compiler& c, const Expr& src) {
     }
     std::vector<std::string> fns;
     for (auto& kv : x.engine.functions()) fns.push_back(kv.first);
-    throw RqlException("unknown-source", "query must start with a source name (e.g. world), ref(\"Type#id\") or a host function",
+    const auto& sources = x.engine.sources();
+    throw RqlException("unknown-source",
+                       "query must start with a source name" + (sources.empty() ? std::string() : " (e.g. " + sources.front().name + ")") +
+                           ", ref(\"Type#id\") or a host function",
                        "sources: " + join(source_names(), " ") + (fns.empty() ? std::string() : "; functions: " + join(fns, " ")));
 }
 
@@ -976,18 +979,30 @@ std::vector<std::string> holders(Exec& x, const std::string& type_name) {
     return out;
 }
 
-void add_warnings(Exec& x, QueryResult& r, bool only_general) {
+bool host_knows_member(Exec& x, const std::string& name) {
+    if (!x.engine.is_known_member) return false;
+    try {
+        return x.engine.is_known_member(name);
+    } catch (...) {
+        return false;
+    }
+}
+
+/// Adds the warnings; returns the unknown-member warnings for names no known type declares (certain typos, spec §8).
+std::vector<Diagnostic> add_warnings(Exec& x, QueryResult& r, bool only_general) {
+    std::vector<Diagnostic> typos;
     for (auto& d : x.diagnostics)
         if (d.severity == Severity::Warning) r.diagnostics.push_back(d);
     if (x.getter_errors > 0)
         r.diagnostics.push_back(Diagnostic::warning(
             "getter-threw", std::to_string(x.getter_errors) + " member read(s) failed; first: " + x.first_getter_error));
-    if (only_general) return;
+    if (only_general) return typos;
     for (auto& site : x.is_sites) {
         if (site->matched > 0 || site->evaluated == 0) continue;
         auto h = holders(x, site->type_name);
         std::string hint = !h.empty() ? site->type_name + " objects are reached via " + join(h, ", ")
-                                      : "no reachable type is named '" + site->type_name + "'; use rql_schema / describe to list types";
+                                      : "no reachable type is named '" + site->type_name + "'; list the types with " +
+                                            (x.engine.schema_hint.empty() ? std::string("the schema tool") : x.engine.schema_hint);
         r.diagnostics.push_back(Diagnostic::warning("no-match",
                                                     "none of the " + std::to_string(site->evaluated) + " tested item(s) is a " +
                                                         site->type_name + " (saw " + join(site->seen, ", ") + ")",
@@ -999,9 +1014,7 @@ void add_warnings(Exec& x, QueryResult& r, bool only_general) {
     // no reachable type declares and no select produces is certainly a typo (spec §10).
     bool known_ready = false;
     std::vector<std::string> known;
-    for (auto& sp : x.sites) {
-        MemberSite& site = *sp;
-        if (!site.bare || site.hits > 0 || site.misses > 0 || is_reported(site.name)) continue;
+    auto ensure_known = [&]() {
         if (!known_ready) {
             known_ready = true;
             known = {"key", "value", "count", "Count", "Length"};
@@ -1019,10 +1032,19 @@ void add_warnings(Exec& x, QueryResult& r, bool only_general) {
                         if (dot != std::string::npos && dot > 0) known.push_back(f.name.substr(0, dot));
                     }
         }
-        bool is_known = false;
+    };
+    auto is_known = [&](const std::string& name) {
+        ensure_known();
         for (auto& k : known)
-            if (iequals(k, site.name)) { is_known = true; break; }
-        if (is_known) continue;
+            if (iequals(k, name)) return true;
+        return host_knows_member(x, name);
+    };
+    for (auto& sp : x.sites) {
+        MemberSite& site = *sp;
+        if (!site.bare || site.hits > 0 || site.misses > 0 || is_reported(site.name)) continue;
+        // Another read of the name found it (e.g. `where X > n | set X = X + 1` on an emptied stream).
+        if (std::any_of(x.sites.begin(), x.sites.end(), [&](const auto& o) { return o->hits > 0 && iequals(o->name, site.name); })) continue;
+        if (is_known(site.name)) continue;
         reported.push_back(site.name);
         std::vector<std::string> uniq;
         for (auto& k : known)
@@ -1040,7 +1062,8 @@ void add_warnings(Exec& x, QueryResult& r, bool only_general) {
         if (!site.row_columns.empty() && site.miss_types.empty()) {
             r.diagnostics.push_back(Diagnostic::warning(
                 "unknown-member", "no column '" + site.name + "' in the projected rows (columns: " + join(site.row_columns, ", ") + ")",
-                "select produces rows with only the listed columns; to navigate into objects use the path in the source or `get Path`"));
+                "select produces rows with only the listed columns; to navigate into objects select the full path (select "
+                "Path.Member) or put `get Path` before the select"));
             continue;
         }
         std::vector<std::string> type_names, candidates;
@@ -1058,7 +1081,15 @@ void add_warnings(Exec& x, QueryResult& r, bool only_general) {
         if (close.empty() && !site.name.empty() && site.name[0] >= 'A' && site.name[0] <= 'Z')
             hint += (hint.empty() ? "" : "; ") + std::string("if '") + site.name + "' is a value, quote it: \"" + site.name + "\"";
         r.diagnostics.push_back(Diagnostic::warning("unknown-member", "no member '" + site.name + "' on " + join(type_names, ", "), hint));
+        // Missing on every evaluated item, yet another type may have it (polymorphic streams): only a name no known
+        // type declares is a certain typo; has() guards and never-evaluated names (left so by a filter that matched
+        // nothing) are not. Only a mutation needs to know (see run_pipeline).
+        bool found_elsewhere =  // another read of the name found it
+            std::any_of(x.sites.begin(), x.sites.end(), [&](const auto& o) { return o->hits > 0 && iequals(o->name, site.name); });
+        if (x.options.allow_mutation && !site.guarded && !site.miss_types.empty() && !found_elsewhere && !is_known(site.name))
+            typos.push_back(r.diagnostics.back());
     }
+    return typos;
 }
 
 QueryResult run_core(Exec& x) {
@@ -1165,7 +1196,17 @@ QueryResult run_pipeline(Exec& x) {
         }
         return QueryResult::fail(std::move(errs));
     }
-    add_warnings(x, result, false);
+    auto typos = add_warnings(x, result, false);
+    // A mutation that reached no target because a misspelt member emptied its stream is an error, not "0 changes"
+    // (spec §8): the unknown-member warnings for names no known type declares become errors.
+    if (!typos.empty() && x.options.allow_mutation && !x.plan.stages.empty() && (!result.rows || result.rows->empty())) {
+        std::string op = x.plan.stages.back().kind == StageKind::Call ? "call" : "set";
+        for (auto& d : typos) {
+            d.severity = Severity::Error;
+            d.message += "; no item reached '" + op + "', nothing was changed";
+        }
+        return QueryResult::fail(std::move(typos));
+    }
     return result;
 }
 

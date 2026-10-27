@@ -22,8 +22,8 @@ agent ──query text──▶ unreal-mcp-bridge (sidecar, .NET)          Unrea
                       AgentFormat: QueryResult → compact rows ◀──IPC tool-response: QueryResult JSON── over live UObjects
 ```
 
-- **Sidecar** (`bridge/src/Tools/RqlBridge.cs`, NuGet `com.IvanMurzak.Rql` 0.3.0-dev.602ce7c — a temporary pre-release
-  packed from RQL main 602ce7c and committed under `bridge/prerelease-packages/` until the cascade release): for `rql-query` / `rql-mutate` it
+- **Sidecar** (`bridge/src/Tools/RqlBridge.cs`, NuGet `com.IvanMurzak.Rql` 0.3.0-dev.7dd3b29 — a temporary pre-release
+  packed from RQL main 7dd3b29 and committed under `bridge/prerelease-packages/` until the cascade release): for `rql-query` / `rql-mutate` it
   parses `query` with `RqlParser` and adds `PlanCodec.Serialize(plan)` as the `plan` argument (a syntax error is
   answered without a round trip). The plugin answers with the QueryResult JSON; the sidecar renders it with
   `AgentFormat.Render(…, Table)` — byte-for-byte the agent output of Unity-MCP's rql tools. `rql-schema` answers with
@@ -105,7 +105,22 @@ agent ──query text──▶ unreal-mcp-bridge (sidecar, .NET)          Unrea
   objects are read-only (except settings objects and API objects), a settings write must hit a config property, and one
   object reached twice by the same `call` (`actors | get Parent | call Destroy()` over siblings) is refused (`| distinct`
   first) — a call cannot be rolled back, so running it twice would break all-or-nothing. Hints never advise
-  `budgets.*` (the tools take no budgets), and a `ref("Name")` hint names `unreal.find("…")`.
+  `budgets.*` (the tools take no budgets), a `ref("Name")` hint names `unreal.find("…")`, and a hint that sends the
+  caller to the type list names `rql-schema` (`Engine::schema_hint`).
+- **Target limit**: `rql-mutate` changes at most 200 targets per call by default (a mutation is one undo step whatever its
+  size, RQL spec §8); its `max_targets` argument raises the limit for one call up to the ceiling of 1000
+  (`MutationPolicy::limit_argument`, mapped to `Budgets::max_mutation_targets`). Over the limit nothing changes and
+  `mutation-limit` names the match count (or "more than 1000") and, while the limit is below 1000, `max_targets`;
+  at the ceiling it suggests `first N` / `skip N` batches.
+- **Typos in mutations**: when no item reaches `set` / `call` because a member read (`where` / `get`) missed on every
+  item and no type declares the name, the `unknown-member` warning is an error (`ok=false`, nothing changed). Streams
+  are polymorphic (`actors | get Components`), so the session's `Engine::is_known_member` accepts the exposed property
+  names of every loaded class and struct (user-defined struct fields by authored name) and the members hooks add:
+  `get Components | where Intensity > 0 | set Intensity = …` over actors without lights stays a no-match (ok, 0
+  changes) while `get RootComponnt | set …` fails. A `set` that reaches targets lacking the member is still an
+  `unknown-member` error: filter first (`where $ is LightComponentBase`).
+- **Enums** read as entry names and accept the entry name, the editor's display name (`UMETA(DisplayName)`, RQL enum
+  aliases; one that spells another entry's name is skipped), `Type::Name` or the number.
 - **Function sources**: RQL text lets a host function start a query (`unreal.assets("Material") | …`, also with a member
   path after it: `unreal.asset("/Game/BP_Door").EventGraph | …`); the C++ runtime runs a bare function call but not
   the member-path form, so the session evaluates such a call (literal arguments) once and runs the query on a source

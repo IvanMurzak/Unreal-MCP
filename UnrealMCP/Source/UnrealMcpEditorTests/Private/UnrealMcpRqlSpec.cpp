@@ -148,6 +148,15 @@ BEGIN_DEFINE_SPEC(FUnrealMcpRqlSpec, "UnrealMcp.Tools.Rql",
 		return Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"SpawnActor","args":[{"lit":"PointLight"},{"lit":"RqlSpecLamp"},{"lit":"(1, 2, 3)"}]}]})RQL"), true);
 	}
 
+	/** A StaticMeshActor labelled "RqlSpecLampMesh" (removed by Cleanup); whether it spawned. */
+	static bool SpawnMesh()
+	{
+		AStaticMeshActor* Mesh = World() ? World()->SpawnActor<AStaticMeshActor>() : nullptr;
+		if (Mesh)
+			Mesh->SetActorLabel(TEXT("RqlSpecLampMesh"));
+		return Mesh != nullptr;
+	}
+
 	/** actors | where Label == "RqlSpecLamp" | count */
 	int32 CountLamps()
 	{
@@ -836,20 +845,120 @@ void FUnrealMcpRqlSpec::Define()
 			TestEqual(TEXT("one receipt row"), RowCount(Once), 1);
 		});
 
-		It("hints without budgets.* and names unreal.find for a ref given a name", [this]()
+		It("names unreal.find for a ref given a name", [this]()
 		{
-			// More than 20 objects reach set (the limit is checked as targets arrive, before members are resolved).
-			const TSharedPtr<FJsonObject> Limit = Exec(/* unreal.assets("Material", "/Engine") | set Name = "x" */ TEXT(R"RQL({"rql":"0.1","source":{"call":"assets","on":{"path":["unreal"]},"args":[{"lit":"Material"},{"lit":"/Engine"}]},"stages":[{"op":"set","assign":[{"target":{"path":["Name"]},"value":{"lit":"x"}}]}]})RQL"), true, true);
-			TestTrue(*FString::Printf(TEXT("mutation-limit (%s)"), *Codes(Limit)), Codes(Limit).Contains(TEXT("mutation-limit")));
-			const FString LimitHints = UnrealMcpRqlSpecHelpers::Hints(Limit);
-			TestTrue(*FString::Printf(TEXT("suggests batches (%s)"), *LimitHints), LimitHints.Contains(TEXT("first 20")));
-			TestFalse(*FString::Printf(TEXT("no budgets advice (%s)"), *LimitHints), LimitHints.Contains(TEXT("budgets")));
-
+			// The mutation-limit hint (max_targets, never budgets.*) is covered by "target limit" below.
 			SpawnLamp();
 			const TSharedPtr<FJsonObject> ByName = Exec(/* ref("RqlSpecLamp") | select Label */ TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"RqlSpecLamp"}]},"stages":[{"op":"select","fields":[{"name":"Label","expr":{"path":["Label"]}}]}]})RQL"));
 			TestFalse(TEXT("a name is not a ref"), IsOk(ByName));
 			const FString ByNameHints = UnrealMcpRqlSpecHelpers::Hints(ByName);
 			TestTrue(*FString::Printf(TEXT("the hint names the finder (%s)"), *ByNameHints), ByNameHints.Contains(TEXT("unreal.find(")));
+		});
+	});
+
+	// RQL a258ba9 (target limit) and 7dd3b29 (conditional, typos that empty a mutation, host-named hints). Plans from
+	// Rql.Parser 0.3.0-dev.7dd3b29.
+	Describe("target limit, conditional and typos in mutations", [this]()
+	{
+		It("accepts 200 targets by default, refuses 300 until max_targets raises it, never more than 1000", [this]()
+		{
+			UWorld* W = World();
+			if (!TestNotNull(TEXT("editor world"), W))
+				return;
+			// 300 + 701 = 1001 plain actors (Cleanup removes them: their labels start with RqlSpecLamp).
+			for (int32 Index = 0; Index < 1001; ++Index)
+			{
+				AActor* Actor = W->SpawnActor<AActor>();
+				if (Actor)
+					Actor->SetActorLabel(FString::Printf(TEXT("RqlSpecLampMany%s_%d"), Index < 300 ? TEXT("A") : TEXT("B"), Index));
+			}
+			auto Mutate = [this](const TCHAR* Plan, int32 MaxTargets, bool bDryRun)
+			{
+				FUnrealMcpToolRegistry Registry;
+				UnrealMcpRqlTools::Register(Registry);
+				TSharedPtr<FJsonObject> Args = MakeShared<FJsonObject>();
+				Args->SetStringField(TEXT("query"), TEXT("(the text the sidecar parsed)")); // required; the handler runs the plan
+				Args->SetStringField(TEXT("plan"), Plan);
+				Args->SetBoolField(TEXT("dry_run"), bDryRun);
+				if (MaxTargets > 0)
+					Args->SetNumberField(TEXT("max_targets"), MaxTargets);
+				const FUnrealMcpToolResult Result = Registry.Execute(TEXT("rql-mutate"), FUnrealMcpToolCall(Args));
+				const TSharedPtr<FJsonObject> Json = Parse(Result.Message);
+				TestEqual(TEXT("tool status matches the result"), Result.bSuccess, IsOk(Json));
+				return Json;
+			};
+			const TCHAR* HideA = /* actors | where Label starts-with "RqlSpecLampManyA" | set HiddenInEditor = true */ TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"starts-with","args":[{"path":["Label"]},{"lit":"RqlSpecLampManyA"}]}},{"op":"set","assign":[{"target":{"path":["HiddenInEditor"]},"value":{"lit":true}}]}]})RQL");
+			const TCHAR* HideAll = /* actors | where Label starts-with "RqlSpecLampMany" | set HiddenInEditor = true */ TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"starts-with","args":[{"path":["Label"]},{"lit":"RqlSpecLampMany"}]}},{"op":"set","assign":[{"target":{"path":["HiddenInEditor"]},"value":{"lit":true}}]}]})RQL");
+
+			const TSharedPtr<FJsonObject> OverDefault = Mutate(HideA, 0, /*bDryRun*/ false);
+			TestTrue(*FString::Printf(TEXT("300 > the default 200 (%s)"), *Codes(OverDefault)),
+				Codes(OverDefault).Contains(TEXT("mutation-limit")) && Codes(OverDefault).Contains(TEXT("300 objects")) && Codes(OverDefault).Contains(TEXT("limit of 200")));
+			const FString Hints = UnrealMcpRqlSpecHelpers::Hints(OverDefault);
+			TestTrue(*FString::Printf(TEXT("the hint raises max_targets (%s)"), *Hints), Hints.Contains(TEXT("max_targets = 300")));
+			TestFalse(*FString::Printf(TEXT("no budgets advice (%s)"), *Hints), Hints.Contains(TEXT("budgets")));
+			auto HiddenA = []()
+			{
+				int32 Hidden = 0;
+				for (AActor* Actor : Lamps())
+					Hidden += Actor->GetActorLabel().StartsWith(TEXT("RqlSpecLampManyA")) && Actor->IsTemporarilyHiddenInEditor() ? 1 : 0;
+				return Hidden;
+			};
+			TestEqual(TEXT("refused: nothing hidden"), HiddenA(), 0);
+
+			const TSharedPtr<FJsonObject> AtDefault = Mutate(/* actors | where Label starts-with "RqlSpecLampManyA" | first 200 | set HiddenInEditor = true */ TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"starts-with","args":[{"path":["Label"]},{"lit":"RqlSpecLampManyA"}]}},{"op":"first","n":200},{"op":"set","assign":[{"target":{"path":["HiddenInEditor"]},"value":{"lit":true}}]}]})RQL"), 0, /*bDryRun*/ true);
+			TestTrue(*FString::Printf(TEXT("200 pass the default (%s)"), *Codes(AtDefault)), IsOk(AtDefault));
+
+			const TSharedPtr<FJsonObject> Raised = Mutate(HideA, 300, /*bDryRun*/ false);
+			TestTrue(*FString::Printf(TEXT("max_targets = 300 changes all (%s)"), *Codes(Raised)), IsOk(Raised));
+			TestEqual(TEXT("300 hidden"), HiddenA(), 300);
+
+			const TSharedPtr<FJsonObject> OverCeiling = Mutate(HideAll, 5000, /*bDryRun*/ true);
+			TestTrue(*FString::Printf(TEXT("1001 > the ceiling 1000 (%s)"), *Codes(OverCeiling)),
+				Codes(OverCeiling).Contains(TEXT("mutation-limit")) && Codes(OverCeiling).Contains(TEXT("1000")));
+		});
+
+		It("selects with cond ? a : b", [this]()
+		{
+			SpawnLamp();
+			if (!TestTrue(TEXT("mesh actor"), SpawnMesh()))
+				return;
+			const TSharedPtr<FJsonObject> Kinds = Exec(/* actors | where Label starts-with "RqlSpecLamp" | sort Label | select Label kind = ($ is PointLight ? "point" : "other") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"starts-with","args":[{"path":["Label"]},{"lit":"RqlSpecLamp"}]}},{"op":"sort","keys":[{"expr":{"path":["Label"]}}]},{"op":"select","fields":[{"name":"Label","expr":{"path":["Label"]}},{"name":"kind","expr":{"call":"if","args":[{"op":"is","args":[{"path":[]},{"lit":"PointLight"}]},{"lit":"point"},{"lit":"other"}]}}]}]})RQL"));
+			TestTrue(*FString::Printf(TEXT("ok (%s)"), *Codes(Kinds)), IsOk(Kinds));
+			TestEqual(TEXT("the lamp"), CellText(Kinds, 0, 1), FString(TEXT("point")));
+			TestEqual(TEXT("the mesh"), CellText(Kinds, 1, 1), FString(TEXT("other")));
+		});
+
+		It("fails a mutation emptied by a typo and keeps a polymorphic no-match ok", [this]()
+		{
+			if (!TestTrue(TEXT("mesh actor"), SpawnMesh()))
+				return;
+
+			const TSharedPtr<FJsonObject> Typo = Exec(/* actors | where Label == "RqlSpecLampMesh" | get RootComponnt | set Mobility = "Movable" */ TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"RqlSpecLampMesh"}]}},{"op":"get","expr":{"path":["RootComponnt"]}},{"op":"set","assign":[{"target":{"path":["Mobility"]},"value":{"lit":"Movable"}}]}]})RQL"), true);
+			TestFalse(TEXT("a typo fails"), IsOk(Typo));
+			TestTrue(*FString::Printf(TEXT("unknown-member error (%s)"), *Codes(Typo)), Codes(Typo).Contains(TEXT("unknown-member")) && Codes(Typo).Contains(TEXT("nothing was changed")));
+
+			const TSharedPtr<FJsonObject> FilterTypo = Exec(/* actors | where Label == "RqlSpecLampMesh" | get Components | where Intensty > 0 | set Intensity = 5 */ TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"RqlSpecLampMesh"}]}},{"op":"get","expr":{"path":["Components"]}},{"op":"where","pred":{"op":">","args":[{"path":["Intensty"]},{"lit":0}]}},{"op":"set","assign":[{"target":{"path":["Intensity"]},"value":{"lit":5}}]}]})RQL"), true);
+			TestFalse(*FString::Printf(TEXT("a typo in the filter fails (%s)"), *Codes(FilterTypo)), IsOk(FilterTypo));
+
+			// Intensity is a light component property: the mesh actor's components lack it, no item reaches set, and that
+			// is a no-match (RQL Engine::is_known_member from the reflected property names), not a typo.
+			const TSharedPtr<FJsonObject> NoMatch = Exec(/* actors | where Label == "RqlSpecLampMesh" | get Components | where Intensity > 0 | set Intensity = 5 */ TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"RqlSpecLampMesh"}]}},{"op":"get","expr":{"path":["Components"]}},{"op":"where","pred":{"op":">","args":[{"path":["Intensity"]},{"lit":0}]}},{"op":"set","assign":[{"target":{"path":["Intensity"]},"value":{"lit":5}}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("polymorphic no-match stays ok (%s)"), *Codes(NoMatch)), IsOk(NoMatch));
+			TestEqual(TEXT("nothing changed"), RowCount(NoMatch), 0);
+
+			// ReadOnlyValue / Small are members of the spec fixture class only, which no source reaches: only the host hook
+			// knows the name, so this case fails without is_known_member.
+			const TSharedPtr<FJsonObject> HostKnown = Exec(/* actors | where Label == "RqlSpecLampMesh" | get Components | where ReadOnlyValue > 0 | set Small = 1 */ TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"RqlSpecLampMesh"}]}},{"op":"get","expr":{"path":["Components"]}},{"op":"where","pred":{"op":">","args":[{"path":["ReadOnlyValue"]},{"lit":0}]}},{"op":"set","assign":[{"target":{"path":["Small"]},"value":{"lit":1}}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("a member only the host knows stays a no-match (%s)"), *Codes(HostKnown)), IsOk(HostKnown));
+		});
+
+		It("names rql-schema in the no-match hint", [this]()
+		{
+			SpawnLamp();
+			const TSharedPtr<FJsonObject> Unknown = Exec(/* actors | where $ is NoSuchRqlSpecType */ TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"is","args":[{"path":[]},{"lit":"NoSuchRqlSpecType"}]}}]})RQL"));
+			const FString Hints = UnrealMcpRqlSpecHelpers::Hints(Unknown);
+			TestTrue(*FString::Printf(TEXT("hint names rql-schema (%s)"), *Hints), Hints.Contains(TEXT("rql-schema")));
+			TestFalse(*FString::Printf(TEXT("not the generic tool name (%s)"), *Hints), Hints.Contains(TEXT("rql_schema")));
 		});
 	});
 

@@ -52,7 +52,7 @@
   <!--
     Reused NuGet pins — normally owned by the upstream release pipelines and kept in lockstep
     with Godot-MCP (Godot-MCP.csproj), except where a ⚠ DEVIATION entry below records an owner-approved
-    early adoption. Current: McpPlugin 8.13.1 + ReflectorNet 5.5.0 + Rql 0.3.0-dev.602ce7c (temporary pre-release).
+    early adoption. Current: McpPlugin 8.13.1 + ReflectorNet 5.5.0 + Rql 0.3.0-dev.7dd3b29 (temporary pre-release).
     The MCP/reflection stack is NOT forked. Historical context: the 6.8.0 bump consumed the new
     shared engine-agnostic com.IvanMurzak.McpPlugin.AgentConfig module (the AI-agent configurators
     + the AgentConfiguratorDescription UI-DTO) so the sidecar hosts the AI-agent configuration
@@ -118,8 +118,8 @@
     com.IvanMurzak.Rql 0.1.1 -> 0.2.0, together with the re-vendored C++ runtime (ThirdParty/RQL): the parser knows the
     new functions, and AgentFormat prints display numbers and keeps emoji raw in quoted cells.
     ⚠ TEMPORARY PRE-RELEASE PIN (owner rule: between test waves RQL is not released; plugins consume its main commit):
-    com.IvanMurzak.Rql 0.2.0 -> 0.3.0-dev.602ce7c, packed from RQL main 602ce7c with RQL's own pack step
-    (dotnet pack dotnet/Rql.Package -p:Version=0.3.0-dev.602ce7c) and committed under bridge/prerelease-packages/,
+    com.IvanMurzak.Rql 0.2.0 -> 0.3.0-dev.7dd3b29, packed from RQL main 7dd3b29 with RQL's own pack step (earlier 602ce7c)
+    (dotnet pack dotnet/Rql.Package -p:Version=0.3.0-dev.7dd3b29) and committed under bridge/prerelease-packages/,
     which bridge/Directory.Build.props adds as a restore source for the bridge and its tests (no nuget.config: the
     repo-root one belongs to the chain feed). It matches the re-vendored C++ runtime (ThirdParty/RQL, same commit). At the cascade release:
     set the published version here, delete bridge/prerelease-packages/ and bridge/Directory.Build.props.
@@ -166,7 +166,7 @@
     Referenced in both build modes (the local-LIB toggle only swaps McpPlugin / ReflectorNet).
   -->
   <ItemGroup>
-    <PackageReference Include="com.IvanMurzak.Rql" Version="0.3.0-dev.602ce7c" />
+    <PackageReference Include="com.IvanMurzak.Rql" Version="0.3.0-dev.7dd3b29" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(UseLocalMcpPlugin)' == 'true'">

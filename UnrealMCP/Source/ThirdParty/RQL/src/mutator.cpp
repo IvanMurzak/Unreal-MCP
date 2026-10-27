@@ -26,13 +26,23 @@ struct Target {
 /// `$`, `$index`, `$path` and `$depth` in a set value / call argument are the target's (spec §8).
 void enter_scope(Exec& x, const Target& t) { set_scope(x, t.item, t.index); }
 
-std::string mutation_limit_hint(const std::string& op, int limit, int ceiling) {
-    std::string n = std::to_string(limit);
-    std::string h = "narrow the query (where / ref(...)) or split the change into batches of " + n + ": \xE2\x80\xA6 | first " + n + " | " + op +
-                    " \xE2\x80\xA6, then \xE2\x80\xA6 | skip " + n + " | first " + n + " | " + op + " \xE2\x80\xA6 (repeat plain first " + n +
-                    " instead when the change removes the items from your where)";
-    if (ceiling > limit) h += "; or raise budgets.maxMutationTargets (host ceiling " + std::to_string(ceiling) + ")";
-    return h;
+/// The mutation-limit hint (spec §10). When callers can raise the limit (`argument` non-empty) and the ceiling is above
+/// it: raise it to the `matched` count (one all-or-nothing call), or (count unknown: more matched than the ceiling) to
+/// the ceiling in batches of the ceiling. Otherwise: batches of `limit`.
+std::string mutation_limit_hint(const std::string& op, int limit, std::optional<int> matched, const std::string& argument, int ceiling) {
+    const std::string narrow = "narrow the query (where / ref(...))";
+    auto batches = [&](int count) {
+        std::string n = std::to_string(count);
+        return "split the change into batches of " + n + ": \xE2\x80\xA6 | first " + n + " | " + op + " \xE2\x80\xA6, then \xE2\x80\xA6 | skip " + n +
+               " | first " + n + " | " + op + " \xE2\x80\xA6 (repeat plain first " + n + " instead when the change removes the items from your where)";
+    };
+    if (argument.empty() || ceiling <= limit) return narrow + " or " + batches(limit);
+    if (matched) {
+        std::string c = std::to_string(*matched);
+        return "pass " + argument + " = " + c + " (host ceiling " + std::to_string(ceiling) + ") to change all " + c +
+               " in one all-or-nothing call (a dry run previews it); or " + narrow;
+    }
+    return "pass " + argument + " = " + std::to_string(ceiling) + " (the host ceiling) and " + batches(ceiling) + "; or " + narrow;
 }
 
 /// The host's batch validation (spec §8): every planned change at once, before any write or call, dry runs too.
@@ -52,13 +62,30 @@ void validate_batch(Exec& x, const std::string& op, const std::vector<MutationRe
                                                 "; nothing was changed");
 }
 
-void check_limit(Exec& x, size_t count, const std::string& op) {
-    if (static_cast<int64_t>(count) <= x.max_mutation_targets) return;
+/// mutation-limit (spec §8, §10) once `matched` targets passed the limit: counts the rest of the stage's input up to the
+/// host ceiling (counting only) so the message states how many items matched, and builds the hint for the host's limit
+/// argument.
+[[noreturn]] void limit_exceeded(Exec& x, Stream& rest, int64_t matched, const std::string& op) {
     const MutationPolicy& m = x.engine.mutations();
     const int limit = static_cast<int>(x.max_mutation_targets);
+    const int64_t ceiling = std::max<int64_t>(m.hard_max_targets, limit);
+    // A budget error while counting propagates: it, not the limit, is what the caller must fix first.
+    Item it;
+    while (matched <= ceiling && rest.next(it))
+        if (!it.value.is_null() && !x.is_dead(it.value)) ++matched;
+    const bool ended = matched <= ceiling;
+    const std::string op_q = "'" + op + "'";
+    std::string message = ended ? std::to_string(matched) + " objects matched " + op_q + ", more than the limit of " + std::to_string(limit) + "; nothing was changed"
+                                : "more than " + std::to_string(ceiling) + " objects matched " + op_q + " (the limit is " + std::to_string(limit) +
+                                      "); nothing was changed";
     std::string hint = m.limit_hint ? m.limit_hint(op, limit) : std::string();
-    if (hint.empty()) hint = mutation_limit_hint(op, limit, x.engine.defaults().budgets_adjustable ? m.hard_max_targets : 0);
-    throw RqlException("mutation-limit", "more than " + std::to_string(limit) + " objects matched '" + op + "'; nothing was changed", hint);
+    if (hint.empty()) {
+        std::string argument = !m.limit_argument.empty() ? m.limit_argument
+                               : x.engine.defaults().budgets_adjustable ? std::string("budgets.maxMutationTargets")
+                                                                         : std::string();
+        hint = mutation_limit_hint(op, limit, ended ? std::optional<int>(static_cast<int>(matched)) : std::nullopt, argument, static_cast<int>(ceiling));
+    }
+    throw RqlException("mutation-limit", message, hint);
 }
 
 std::vector<Target> targets(Exec& x, Stream& stream, const std::string& op) {
@@ -78,7 +105,7 @@ std::vector<Target> targets(Exec& x, Stream& stream, const std::string& op) {
                                                  "with a key path instead (Stats[\"key\"] = ...)"
                                                : "'" + op + "' cannot target map entries; call the method on the values instead: ... | get Value | " + op + " ...");
             list.push_back({it, index});  // set Value... writes through the entry's map (spec §8)
-            check_limit(x, list.size(), op);
+            if (static_cast<int64_t>(list.size()) > x.max_mutation_targets) limit_exceeded(x, stream, static_cast<int64_t>(list.size()), op);
             continue;
         }
         const Value& v = it.value;
@@ -92,7 +119,7 @@ std::vector<Target> targets(Exec& x, Stream& stream, const std::string& op) {
                                "'" + op + "' needs objects with identity; '" + type_name_of(v) + "' items are value copies, so the change would be lost",
                                "set the member from its owner instead, e.g. objects | where ... | set Transform.Position.x = 0");
         list.push_back({it, index});
-        check_limit(x, list.size(), op);
+        if (static_cast<int64_t>(list.size()) > x.max_mutation_targets) limit_exceeded(x, stream, static_cast<int64_t>(list.size()), op);
     }
     return list;
 }
@@ -575,12 +602,17 @@ std::optional<Value> coerce(Exec& x, const Value& v, const TypeDescriptor* targe
                 default: return v;
             }
         case TypeKind::Enum: {
-            int64_t e = 0;
-            if (v.is_string() && target->enum_parse(v.as_string(), e) && target->enum_defined(e)) return Value::enumeration(target, e);
+            if (v.is_string()) {
+                // Enum name resolution (spec §8): exact, qualified, case-insensitive, entry prefix; ambiguity refused.
+                TypeDescriptor::EnumMatch m = target->enum_resolve(v.as_string());
+                if (m.status == TypeDescriptor::EnumMatch::Found && target->enum_defined(m.value)) return Value::enumeration(target, m.value);
+                why = m.status == TypeDescriptor::EnumMatch::Found ? target->enum_expected() : m.why;
+                return std::nullopt;
+            }
             double d;
             if (try_number(v, d) && std::floor(d) == d && target->enum_defined(static_cast<int64_t>(d)))
                 return Value::enumeration(target, static_cast<int64_t>(d));
-            why = "expected one of " + target->enum_names();
+            why = target->enum_expected();
             return std::nullopt;
         }
         case TypeKind::Object:
@@ -744,6 +776,30 @@ QueryResult run_set(Exec& x, Compiler& c, Encoder& enc, Stream& stream, const St
     return r;
 }
 
+/// Sources whose value is a single object with a callable method of this name, as hint text, or "" (spec §10).
+std::string sources_with_callable(Exec& x, const std::string& method) {
+    std::vector<std::string> names;
+    for (auto& s : x.engine.sources()) {
+        Value v;
+        try {
+            v = x.live(s.getter());
+        } catch (...) {
+            continue;
+        }
+        if (!v.is_object() || !v.type()) continue;
+        const TypeView view = x.view(v.type());
+        for (auto& m : view.methods())
+            if (m.callable && iequals(m.name, method)) {
+                names.push_back(s.name);
+                break;
+            }
+    }
+    if (names.empty()) return {};
+    if (names.size() == 1)
+        return "; the source '" + names[0] + "' has " + method + ": " + names[0] + " | call " + method + "(\xE2\x80\xA6)";
+    return "; sources with " + method + ": " + join(names, ", ") + " (e.g. " + names[0] + " | call " + method + "(\xE2\x80\xA6))";
+}
+
 QueryResult run_call(Exec& x, Compiler& c, Encoder& enc, Stream& stream, const Stage& s) {
     check_policy(x, "call");
     std::vector<Eval> args;
@@ -779,7 +835,8 @@ QueryResult run_call(Exec& x, Compiler& c, Encoder& enc, Stream& stream, const S
         std::string tn = type_name_of(item);
         if (candidates.empty())
             throw RqlException(exists ? "permission-denied" : "unknown-function", "no callable method '" + s.method + "' on " + tn,
-                               !sigs.empty() ? "callable: " + join(sigs, ", ") : tn + " has no callable methods");
+                               (!sigs.empty() ? "callable: " + join(sigs, ", ") : tn + " has no callable methods") +
+                                   (exists ? std::string() : sources_with_callable(x, s.method)));
         enter_scope(x, target);
         std::vector<Value> vals;
         for (auto& a : args) vals.push_back(a(x));

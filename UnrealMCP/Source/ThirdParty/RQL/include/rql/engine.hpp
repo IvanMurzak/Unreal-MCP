@@ -59,9 +59,17 @@ struct MutationPolicy {
     bool enabled = false;
     /// Optional extra allow-check per (declaring object type, member) → permission-denied when false.
     std::function<bool(const TypeDescriptor& owner, const MemberDescriptor& member)> can_write;
+    /// Default per-request target limit (spec §8 target limit): requests may raise it up to hard_max_targets. It guards
+    /// the breadth of a change, not its correctness (all-or-nothing, rollback and dry runs hold at any size): hosts that
+    /// record a whole stage as one undo step (editors) should use a larger default, e.g. 200.
     int max_targets = 20;
-    /// Host ceiling no request's maxMutationTargets can exceed.
+    /// Host ceiling no request's maxMutationTargets can exceed (bounds one stage's planning, receipts and undo memory).
     int hard_max_targets = 1000;
+    /// The name under which this host's callers raise the target limit, e.g. a tool argument "max_targets" that the
+    /// host maps to Budgets::max_mutation_targets (spec §10). The mutation-limit hint advises it whether or not
+    /// EngineDefaults::budgets_adjustable is set. Empty: "budgets.maxMutationTargets" when budgets are adjustable,
+    /// otherwise callers cannot raise the limit and the hint only suggests narrowing or batches.
+    std::string limit_argument;
     /// Batch validation (spec §8): every planned change of a set / call stage at once (targets, members or methods,
     /// coerced values or arguments), after each target passed its own checks and before anything is written or
     /// called — on dry runs too. A non-empty reason (or a throw) refuses the whole stage → invalid-value, nothing changed.
@@ -93,7 +101,8 @@ struct EngineDefaults {
     int hard_max_rows = 10000;
     int hard_timeout_ms = 30000;
     /// Whether the host's callers can pass request budgets (budgets.*). Hosts whose tools take no budgets argument
-    /// set it to false, so error hints never advise raising a budget the caller cannot reach (spec §10).
+    /// set it to false, so error hints never advise raising a budget the caller cannot reach (spec §10). The target
+    /// limit has its own switch, MutationPolicy::limit_argument.
     bool budgets_adjustable = true;
 };
 
@@ -122,6 +131,13 @@ public:
     /// How callers find an object by name on this host, e.g. unreal.find("Floor"); ref() hints name it (spec §7).
     /// Empty: the hints suggest a generic query.
     std::string find_hint;
+    /// How callers list types and their members on this host, e.g. "rql-schema" (a tool name); hints name it (spec §10).
+    /// Empty: the hints say "the schema tool".
+    std::string schema_hint;
+    /// Whether some type the host knows has a member of this name (case-insensitive), beyond the types reachable from the
+    /// sources. A name known here is never reported as a certain typo: neither by the static unknown-member check nor as
+    /// the cause of an empty mutation (spec §8). Unset: only the reachable types count. A throwing hook counts as false.
+    std::function<bool(const std::string& name)> is_known_member;
 
     // Every Engine member function is noexcept: exceptions used internally never cross this API.
     // Registration with an invalid name is ignored and reported through last_error().

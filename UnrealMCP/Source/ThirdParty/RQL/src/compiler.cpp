@@ -149,9 +149,9 @@ namespace {
 
 std::optional<bool> enum_equal(const Value& e, const Value& other) {
     if (other.is_string()) {
-        std::string n;
-        if (!e.type()->enum_name(e.enum_value(), n)) n = std::to_string(e.enum_value());
-        return iequals(n, other.as_string());
+        // The entry the string resolves to (spec §8 enum name resolution); unresolved or ambiguous is not equal.
+        int64_t v = 0;
+        return e.type()->enum_parse(other.as_string(), v) && v == e.enum_value();
     }
     if (other.is_number()) return static_cast<double>(e.enum_value()) == other.as_number();
     if (other.is_enum()) return e.type() == other.type() && e.enum_value() == other.enum_value();
@@ -557,6 +557,7 @@ Eval Compiler::compile_path(const Expr& p) {
                 x_.sites.push_back(std::make_unique<MemberSite>(seg.name));
                 MemberSite* site = x_.sites.back().get();
                 site->bare = first;
+                site->guarded = guarded_ > 0;
                 if (first) {
                     // Lexical scope chain: inside collection-method arguments a bare name missing on the
                     // element resolves against the enclosing item(s), innermost first (spec §3).
@@ -906,7 +907,7 @@ Eval Compiler::compile_op_args(const std::string& op, const ExprPtr& ae, const E
 namespace {
 
 const char* kCoreFunctions[] = {"has", "is-null", "len", "lower", "upper", "abs", "round", "floor", "ceil", "sqrt", "pow", "min", "max",
-                                "coalesce", "ref",
+                                "coalesce", "if", "ref",
                                 "append", "insert", "remove-at", "without",
                                 "replace", "replace-regex", "substring", "split", "trim", "pad",
                                 "contains", "starts-with", "ends-with", "matches"};
@@ -1270,6 +1271,11 @@ Eval Compiler::compile_function(const Expr& c) {
     std::string name = ascii_lower(c.name);
     if (name == "has") {
         arity(c, 1, 1);
+        struct Guard {
+            int& depth;
+            explicit Guard(int& d) : depth(d) { ++depth; }
+            ~Guard() { --depth; }
+        } guard(guarded_);
         Eval a = compile(*c.args[0]);
         return [a](Exec& x) { return Value::boolean(!a(x).is_missing()); };
     }
@@ -1389,6 +1395,12 @@ Eval Compiler::compile_function(const Expr& c) {
             }
             return Value::null();
         };
+    }
+    if (name == "if") {
+        // Lazy: only the taken branch runs; a condition that is not true (false or unknown) takes the else branch.
+        arity(c, 3, 3);
+        Eval cond = compile(*c.args[0]), then = compile(*c.args[1]), otherwise = compile(*c.args[2]);
+        return [cond, then, otherwise](Exec& x) { return truth(cond(x)) == std::optional<bool>(true) ? then(x) : otherwise(x); };
     }
     if (name == "ref") {
         arity(c, 1, 64);

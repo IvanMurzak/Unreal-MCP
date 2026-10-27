@@ -27,8 +27,9 @@ UENUM()
 enum class EUnrealMcpRqlSpecMode : uint8
 {
 	Idle,
-	Walk,
-	Run,
+	// Display names are RQL enum aliases ("Sprint" = Run); Walk's "Run" spells another entry's name and is skipped.
+	Walk UMETA(DisplayName = "Run"),
+	Run UMETA(DisplayName = "Sprint"),
 };
 
 USTRUCT()

@@ -124,6 +124,10 @@ public:
     bool id_explicit = false, display_explicit = false;
 
     std::vector<std::pair<std::string, int64_t>> enum_values;
+    /// Host alias names of enum entries (spec §8 enum name resolution), e.g. an editor's display names ("Fill" for
+    /// HAlign_Fill): alias → entry value. They resolve like entry names (exactly, then ignoring case) in writes, map keys
+    /// and comparisons; encoding keeps the entry name.
+    std::vector<std::pair<std::string, int64_t>> enum_aliases;
 
     const TypeDescriptor* element = nullptr;  // list element / map value
     bool element_nullable = false;
@@ -163,9 +167,20 @@ public:
     bool member_writable(const MemberDescriptor& m) const;
 
     bool enum_name(int64_t v, std::string& out) const;
-    bool enum_parse(const std::string& text, int64_t& out) const;  // case-insensitive name or integer text
+    /// Enum name resolution (spec §8): how a string written to, used as a key of, or compared with this enum picks one
+    /// entry — integer text, then exact name or alias, the part after a `Type::` / `Type.` qualifier, ignoring case,
+    /// ignoring the entry prefix (`HAlign_`). Several entries at the deciding step are ambiguous.
+    struct EnumMatch {
+        enum Status { Found, NotFound, Ambiguous } status = NotFound;
+        int64_t value = 0;
+        std::string why;  // NotFound / Ambiguous: "expected one of …" / "\"x\" is ambiguous for T: A, B"
+    };
+    EnumMatch enum_resolve(const std::string& text) const;
+    /// enum_resolve found exactly one entry (or integer text).
+    bool enum_parse(const std::string& text, int64_t& out) const;
     bool enum_defined(int64_t v) const;
     std::string enum_names() const;  // "A, B, C"
+    std::string enum_expected() const { return "expected one of " + enum_names(); }
 
     std::string friendly_name() const;
     std::string signature(const MethodDescriptor& m) const;
@@ -860,6 +875,11 @@ public:
     EnumBuilder(TypeRegistry&, TypeDescriptor& d) : d_(&d) {}
     EnumBuilder& value(std::string name, T v) {
         d_->enum_values.emplace_back(std::move(name), static_cast<int64_t>(v));
+        return *this;
+    }
+    /// A host alias name for an entry (spec §8 enum name resolution), e.g. an editor's display name.
+    EnumBuilder& alias(std::string name, T v) {
+        d_->enum_aliases.emplace_back(std::move(name), static_cast<int64_t>(v));
         return *this;
     }
     EnumBuilder& describe(std::string text) { d_->description = std::move(text); return *this; }

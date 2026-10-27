@@ -26,6 +26,12 @@
 #endif
 #include "UObject/TextProperty.h"
 #include "UObject/UObjectGlobals.h"
+#include "UObject/UObjectIterator.h"
+#if __has_include("StructUtils/UserDefinedStruct.h")
+#include "StructUtils/UserDefinedStruct.h" // moved from Engine/ to CoreUObject in UE 5.8
+#else
+#include "Engine/UserDefinedStruct.h"
+#endif
 #include "UObject/StructOnScope.h"
 #include "UObject/UObjectArray.h"
 #include "UObject/UnrealType.h"
@@ -390,12 +396,27 @@ const rql::TypeDescriptor* FUnrealMcpRqlTypes::ForEnum(UEnum* Enum)
 		return *Found;
 	rql::TypeDescriptor& Descriptor = Shell(Enum, Enum->GetName(), rql::TypeKind::Enum);
 	const int32 Count = Enum->ContainsExistingMax() ? Enum->NumEnums() - 1 : Enum->NumEnums();
+	TArray<int32> Visible;
+	TSet<FString> EntryNames; // FString hashes and compares case-insensitively
 	for (int32 Index = 0; Index < Count; ++Index)
 	{
 		if (Enum->HasMetaData(TEXT("Hidden"), Index))
 			continue;
-		Descriptor.enum_values.emplace_back(UnrealMcpRqlToStd(Enum->GetNameStringByIndex(Index)), Enum->GetValueByIndex(Index));
+		const FString Name = Enum->GetNameStringByIndex(Index);
+		Visible.Add(Index);
+		EntryNames.Add(Name);
+		Descriptor.enum_values.emplace_back(UnrealMcpRqlToStd(Name), Enum->GetValueByIndex(Index));
 	}
+#if WITH_METADATA
+	// The editor's display names (UMETA(DisplayName = "No Collision")) resolve like entry names (RQL enum aliases). One
+	// that spells another entry's name is left out: it would make that name ambiguous.
+	for (const int32 Index : Visible)
+	{
+		const FString Display = Enum->GetMetaData(TEXT("DisplayName"), Index);
+		if (!Display.IsEmpty() && !EntryNames.Contains(Display))
+			Descriptor.enum_aliases.emplace_back(UnrealMcpRqlToStd(Display), Enum->GetValueByIndex(Index));
+	}
+#endif
 	Enums.Add(Enum, &Descriptor);
 	return &Descriptor;
 }
@@ -598,6 +619,81 @@ void FUnrealMcpRqlTypes::ExposeProperties(UStruct* Owner, const TArray<FName>& N
 	TMap<FName, bool>& ForOwner = Exposed.FindOrAdd(Owner);
 	for (const FName& Name : Names)
 		ForOwner.Add(Name, bWritable);
+}
+
+bool FUnrealMcpRqlTypes::IsKnownMemberName(const FString& Name)
+{
+	if (Name.IsEmpty())
+		return false;
+	if (const bool* Cached = KnownMemberNames.Find(Name))
+		return *Cached;
+	auto Lookup = [this, &Name]()
+	{
+		// The descriptors this session filled (hook members: Label, Components, Scalars, ...) and the native types.
+		const std::string Member = UnrealMcpRqlToStd(Name);
+		for (const rql::TypeDescriptor* Descriptor : Filled)
+		{
+			if (Descriptor->find(Member))
+				return true;
+		}
+		for (const rql::TypeDescriptor* Descriptor : NativeTypes)
+		{
+			if (Descriptor && Descriptor->find(Member))
+				return true;
+		}
+		// The properties FillClass / FillStruct would make members, on every loaded class and struct. FName lookup ignores
+		// case, and a name no FName was ever made of is no property of a native type (a typo costs one name-table lookup).
+		const FName Wanted(*Name, FNAME_Find);
+		if (!Wanted.IsNone())
+		{
+			for (TObjectIterator<UClass> It; It; ++It)
+			{
+				const TMap<FName, bool>* Forced = Exposed.Find(*It);
+				for (TFieldIterator<FProperty> Property(*It, EFieldIteratorFlags::ExcludeSuper); Property; ++Property)
+				{
+					if (Property->GetFName() == Wanted && (IsExposedOnClass(*Property) || (Forced && Forced->Contains(Wanted))))
+						return true;
+				}
+			}
+		}
+		for (TObjectIterator<UScriptStruct> It; It; ++It)
+		{
+			// User-defined struct fields are members under their authored name (Health), not their FName (Health_12_3F9A...).
+			const bool bUserDefined = It->IsA<UUserDefinedStruct>();
+			if (Wanted.IsNone() && !bUserDefined)
+				continue;
+			for (TFieldIterator<FProperty> Property(*It, EFieldIteratorFlags::ExcludeSuper); Property; ++Property)
+			{
+				const bool bNamed = bUserDefined ? Property->GetAuthoredName().Equals(Name, ESearchCase::IgnoreCase) : Property->GetFName() == Wanted;
+				if (bNamed && !Property->HasAnyPropertyFlags(CPF_Deprecated))
+					return true;
+			}
+		}
+		// Members only class / struct hooks add (Scalars on materials, Blueprint graphs, extension members), on types this
+		// session has not filled yet. The engine asks while it reports diagnostics, after the streams ran, so filling is safe.
+		TArray<UClass*> HookedClasses;
+		Hooks.GetKeys(HookedClasses);
+		for (UClass* Class : HookedClasses)
+		{
+			const rql::TypeDescriptor* Descriptor = ForClass(Class);
+			Fill(Descriptor);
+			if (Descriptor && Descriptor->find(Member))
+				return true;
+		}
+		TArray<UScriptStruct*> HookedStructs;
+		StructHooks.GetKeys(HookedStructs);
+		for (UScriptStruct* Struct : HookedStructs)
+		{
+			const rql::TypeDescriptor* Descriptor = ForStruct(Struct);
+			Fill(Descriptor);
+			if (Descriptor && Descriptor->find(Member))
+				return true;
+		}
+		return false;
+	};
+	const bool bKnown = Lookup();
+	KnownMemberNames.Add(Name, bKnown);
+	return bKnown;
 }
 
 void FUnrealMcpRqlTypes::Fill(const rql::TypeDescriptor* Constant)
