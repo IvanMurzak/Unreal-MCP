@@ -6,7 +6,11 @@
 #include "UnrealMcpRqlUtil.h"
 #include "UnrealMcpPinTypes.h"
 
+#if __has_include("StructUtils/UserDefinedStruct.h")
+#include "StructUtils/UserDefinedStruct.h" // moved from Engine/ to CoreUObject in UE 5.8
+#else
 #include "Engine/UserDefinedStruct.h"
+#endif
 #include "Kismet2/StructureEditorUtils.h"
 #include "UserDefinedStructure/UserDefinedStructEditorData.h"
 

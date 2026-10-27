@@ -30,7 +30,11 @@
 #include "Engine/SCS_Node.h"
 #include "Engine/SimpleConstructionScript.h"
 #include "Engine/StaticMesh.h"
+#if __has_include("StructUtils/UserDefinedStruct.h")
+#include "StructUtils/UserDefinedStruct.h" // moved from Engine/ to CoreUObject in UE 5.8
+#else
 #include "Engine/UserDefinedStruct.h"
+#endif
 #include "Kismet2/StructureEditorUtils.h"
 #include "UserDefinedStructure/UserDefinedStructEditorData.h"
 #include "GameFramework/Actor.h"
