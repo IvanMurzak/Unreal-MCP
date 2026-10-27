@@ -350,6 +350,14 @@ void FUnrealMcpRqlSpec::Define()
 			if (!TestEqual(TEXT("one lamp"), Found.Num(), 1) || !TestNotNull(TEXT("layers subsystem"), LayersSubsystem))
 				return;
 			AActor* Lamp = Found[0];
+			if (Lamp->GetLevel()->bIsPartitioned)
+			{
+				// A World Partition world (the full suite can leave one open): actors there take data layers, not editor layers.
+				// actors | where Label == "RqlSpecLamp" | set Layers = ["RqlSpecLayerB"]
+				const TSharedPtr<FJsonObject> Refused = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"RqlSpecLamp"}]}},{"op":"set","assign":[{"target":{"path":["Layers"]},"value":{"list":[{"lit":"RqlSpecLayerB"}]}}]}]})RQL"), true);
+				TestTrue(*FString::Printf(TEXT("refused, naming data layers (%s)"), *Codes(Refused)), !IsOk(Refused) && Codes(Refused).Contains(TEXT("data layers")));
+				return;
+			}
 			// A raw name already on the actor (what a plain property write used to leave) gets its layer created too.
 			Lamp->Layers.Add(TEXT("RqlSpecLayerA"));
 			// actors | where Label == "RqlSpecLamp" | set Layers = ["RqlSpecLayerA", "RqlSpecLayerB"]
@@ -569,6 +577,9 @@ void FUnrealMcpRqlSpec::Define()
 			if (!TestNotNull(TEXT("editor world"), W))
 				return;
 			const FString Package = W->PersistentLevel->GetOutermost()->GetName();
+			// The full suite can leave a World Partition world open: AddSublevel is refused there first, for every path.
+			const bool bPartitioned = W->IsPartitionedWorld();
+			auto Says = [bPartitioned](const TCHAR* Expected) { return FString(bPartitioned ? TEXT("World Partition") : Expected); };
 			auto With = [&Package](const TCHAR* Plan)
 			{
 				return FString(Plan).Replace(TEXT("@MAP@"), *FPackageName::GetShortName(Package)).Replace(TEXT("@PKG@"), *Package);
@@ -578,15 +589,17 @@ void FUnrealMcpRqlSpec::Define()
 			TestTrue(*FString::Printf(TEXT("resolved, then refused as the persistent level (%s)"), *Codes(Unload)), !IsOk(Unload) && Codes(Unload).Contains(TEXT("persistent level cannot be unloaded")));
 			// editor | call AddSublevel("/Game/RqlSpecNoSuchLevel")
 			const TSharedPtr<FJsonObject> Missing = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"AddSublevel","args":[{"lit":"/Game/RqlSpecNoSuchLevel"}]}]})RQL"), true);
-			TestTrue(*FString::Printf(TEXT("an unsaved level is refused (%s)"), *Codes(Missing)), !IsOk(Missing) && Codes(Missing).Contains(TEXT("no saved level")));
+			TestTrue(*FString::Printf(TEXT("an unsaved level is refused (%s)"), *Codes(Missing)), !IsOk(Missing) && Codes(Missing).Contains(Says(TEXT("no saved level"))));
 			// editor | call AddSublevel("/Engine/BasicShapes/Cube") — a package that is not a map leaves no broken streaming entry
 			const int32 StreamingBefore = W->GetStreamingLevels().Num();
 			const TSharedPtr<FJsonObject> NotMap = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"AddSublevel","args":[{"lit":"/Engine/BasicShapes/Cube"}]}]})RQL"), true);
-			TestTrue(*FString::Printf(TEXT("a non-map package is refused (%s)"), *Codes(NotMap)), !IsOk(NotMap) && Codes(NotMap).Contains(TEXT("no saved level (map)")));
+			TestTrue(*FString::Printf(TEXT("a non-map package is refused (%s)"), *Codes(NotMap)), !IsOk(NotMap) && Codes(NotMap).Contains(Says(TEXT("no saved level (map)"))));
 			TestEqual(TEXT("no streaming entry added"), W->GetStreamingLevels().Num(), StreamingBefore);
 			// editor | call AddSublevel("@PKG@")
 			const TSharedPtr<FJsonObject> Self = Exec(With(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"AddSublevel","args":[{"lit":"@PKG@"}]}]})RQL")), true);
-			TestTrue(*FString::Printf(TEXT("the world's own level is refused (%s)"), *Codes(Self)), !IsOk(Self) && Codes(Self).Contains(TEXT("its own sublevel")));
+			TestTrue(*FString::Printf(TEXT("the world's own level is refused (%s)"), *Codes(Self)), !IsOk(Self) && Codes(Self).Contains(Says(TEXT("its own sublevel"))));
+			if (bPartitioned)
+				return; // a partitioned persistent level is not hidden as a whole: the eye applies to sublevels
 			// levels | where IsPersistent | set IsVisible = false
 			const TSharedPtr<FJsonObject> Hide = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["levels"]},"stages":[{"op":"where","pred":{"path":["IsPersistent"]}},{"op":"set","assign":[{"target":{"path":["IsVisible"]},"value":{"lit":false}}]}]})RQL"), true);
 			TestTrue(*FString::Printf(TEXT("hidden (%s)"), *Codes(Hide)), IsOk(Hide) && !W->PersistentLevel->bIsVisible);

@@ -55,7 +55,8 @@ agent ──query text──▶ unreal-mcp-bridge (sidecar, .NET)          Unrea
 - **Computed members** (core module): every object `Id`, `Name`, `Path`; Actor `Label`, `Location`, `Rotation`,
   `Scale`, `Components`, `Children`, `Parent` (writable: attach / detach; a refused attach names the reason, e.g. a Static
   actor under a Movable parent), `Folder`, `Layers` (writable through the Layers subsystem, as the Layers panel
-  does: missing layers are created, the actor ends up in exactly the listed ones), `Level`, `HiddenInEditor`, `Selected` (writable: adds to / removes from the
+  does: missing layers are created, the actor ends up in exactly the listed ones; refused in World Partition levels, which use data layers),
+  `Level`, `HiddenInEditor`, `Selected` (writable: adds to / removes from the
   editor selection; neither it nor `HiddenInEditor` marks the level unsaved); component `Owner` (and `Name`: a Blueprint's
   component templates read under their variable name, without the `_GEN_VARIABLE` suffix); Level `Map`, `Package`, `IsPersistent`, `IsCurrent` (writable), `IsVisible` (writable: the Levels panel's eye), `Actors`; World
   `Map`, `Levels`, `PersistentLevel`, `CurrentLevel`; MaterialInterface `Scalars` / `Vectors` / `Textures` (parameter
