@@ -77,7 +77,7 @@ Results come back as compact rows (header line, then col|col). Long results are 
   actors | where Label starts-with "Enemy" | set HiddenInEditor = true
   actors | where Label starts-with "Pillar_" | set Label = Label.replace("Pillar_", "Column_")      bulk rename
   actors | where Label starts-with "Crate" | sort Label | set Location.X = $index * 200              spread along X
-  ref("Button#34") | set Slot.LayoutData.Anchors = "(Minimum=(X=0.5,Y=0),Maximum=(X=0.5,Y=0))"   any struct also takes UE's text form (the editor's Copy)
+  ref("Button#34") | set Slot.LayoutData.Anchors = "(Minimum=(X=0.5,Y=0),Maximum=(X=0.5,Y=0))"   structs also take UE's text form (the editor's Copy)
   unreal.asset("/Game/Materials/MI_Red") | set Scalars["Roughness"] = 0.2, Vectors["BaseColor"] = "(1, 0, 0, 1)"
 Create / add / remove (call; the receipt's result column holds the new object's $ref for follow-up queries):
   editor | call SpawnActor("PointLight", "Lamp", "(0, 0, 300)")          class, label, location, rotation, parent

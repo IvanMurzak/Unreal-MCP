@@ -297,13 +297,13 @@ void FUnrealMcpRqlSession::ConfigureMutations()
 		// A call cannot be undone generically: one object reached twice (actors | get Parent | call Destroy() over two
 		// siblings) would run the call twice, and a second call failing after the first changed the editor breaks the
 		// all-or-nothing promise. Refuse the duplicate before anything runs.
-		TSet<TPair<const void*, const rql::MethodDescriptor*>> Called;
+		TSet<TPair<const void*, FString>> Called;
 		for (const rql::MutationRecord& Record : Records)
 		{
 			if (!Record.method || !Record.item.is_object() || !Record.item.ptr())
 				continue;
 			bool bTwice = false;
-			Called.Add({ Record.item.ptr(), Record.method }, &bTwice);
+			Called.Add({ Record.item.ptr(), UnrealMcpRqlFromStd(Record.method->name).ToLower() }, &bTwice);
 			if (bTwice)
 			{
 				const UObject* Object = TypeProvider->AsObject(Record.item);

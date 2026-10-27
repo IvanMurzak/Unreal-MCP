@@ -370,6 +370,7 @@ void FUnrealMcpRqlDataModelsSpec::Define()
 			int32 Changes = 0;
 			const FDelegateHandle Handle = Data->OnDataTableChanged().AddLambda([&Changes]() { ++Changes; });
 			ON_SCOPE_EXIT { Data->OnDataTableChanged().Remove(Handle); };
+			Data->GetOutermost()->SetDirtyFlag(false); // CreateDataTable / AddRow dirtied it: the entry write must do it again
 			const TSharedPtr<FJsonObject> Written = Must(TEXT("entries written"), Double);
 			TestTrue(*FString::Printf(TEXT("the receipt names the table (%s)"), *UnrealMcpRqlSpecHelpers::CellText(Written, 0, 0)),
 				UnrealMcpRqlSpecHelpers::CellText(Written, 0, 0).StartsWith(TEXT("DataTable#")));

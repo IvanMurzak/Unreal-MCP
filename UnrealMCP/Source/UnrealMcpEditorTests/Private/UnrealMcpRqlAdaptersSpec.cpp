@@ -375,6 +375,10 @@ void FUnrealMcpRqlAdaptersSpec::Define()
 			Refuses(TEXT("an unknown member"), /* ref("UnrealMcpRqlSpecFixture#@F@") | set Row = "(Nope=1)" */ TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"UnrealMcpRqlSpecFixture#@F@"}]},"stages":[{"op":"set","assign":[{"target":{"path":["Row"]},"value":{"lit":"(Nope=1)"}}]}]})RQL"), TEXT("Unreal's text form"));
 			Refuses(TEXT("trailing text"), /* ref("UnrealMcpRqlSpecFixture#@F@") | set Row = "(Damage=5) trailing" */ TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"UnrealMcpRqlSpecFixture#@F@"}]},"stages":[{"op":"set","assign":[{"target":{"path":["Row"]},"value":{"lit":"(Damage=5) trailing"}}]}]})RQL"), TEXT("trailing"));
 			TestEqual(TEXT("refusals left the row"), Fixture->Row.Damage, 5);
+			// The math structs too: members by name, not by position (an FColor copies as B, G, R, A).
+			Must(/* ref("UnrealMcpRqlSpecFixture#@F@") | set Color = "(B=0,G=0,R=255,A=255)", Vector = "(X=1,Y=2,Z=3)" */ TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"UnrealMcpRqlSpecFixture#@F@"}]},"stages":[{"op":"set","assign":[{"target":{"path":["Color"]},"value":{"lit":"(B=0,G=0,R=255,A=255)"}},{"target":{"path":["Vector"]},"value":{"lit":"(X=1,Y=2,Z=3)"}}]}]})RQL"));
+			TestTrue(TEXT("FColor by member name"), Fixture->Color == FColor(255, 0, 0, 255));
+			TestTrue(TEXT("FVector by member name"), Fixture->Vector.Equals(FVector(1, 2, 3)));
 		});
 
 		It("writes map entries streamed by get through the owning map", [this]()

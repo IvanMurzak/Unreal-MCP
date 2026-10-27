@@ -240,8 +240,9 @@ void UnrealMcpRqlAddSettings(FUnrealMcpRqlSession& Session)
 			UObject* Owner = Types->AsObject(Record.owner);
 			if (!Owner || Record.method || !Index->Find(Owner))
 				continue;
-			if (Types->AsObject(Record.item) != Owner)
-				continue; // written through a reference: the whole section is saved
+			const UObject* ItemObject = Types->AsObject(Record.item);
+			if (ItemObject && ItemObject != Owner)
+				continue; // written through a reference: the whole section is saved (a map entry has no object item)
 			const FString Root = RootMember(Record.member);
 			FProperty* Property = FindMemberProperty(Owner->GetClass(), Root);
 			if (Property && !Property->HasAnyPropertyFlags(CPF_Config))
@@ -262,7 +263,8 @@ void UnrealMcpRqlAddSettings(FUnrealMcpRqlSession& Session)
 			const FSection* Section = Owner ? Index->Find(Owner) : nullptr;
 			if (!Section)
 				continue;
-			FProperty* Property = !Record.method && Types->AsObject(Record.item) == Owner
+			const UObject* ItemObject = Types->AsObject(Record.item);
+			FProperty* Property = !Record.method && (!ItemObject || ItemObject == Owner)
 				? FindMemberProperty(Owner->GetClass(), RootMember(Record.member)) : nullptr;
 			bool bAlready = false;
 			Saved.Add(TPair<UObject*, FProperty*>(Owner, Property), &bAlready);

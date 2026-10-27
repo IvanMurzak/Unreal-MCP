@@ -5,6 +5,11 @@
     under bridge/ (the sidecar and its tests) restores from it in addition to the configured sources.
     Delete this file and prerelease-packages/ when the pin moves back to a published nuget.org version.
   -->
+  <!-- Keep any Directory.Build.props above this folder in effect (MSBuild imports only the nearest one). -->
+  <PropertyGroup>
+    <_UnrealMcpParentBuildProps>$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))</_UnrealMcpParentBuildProps>
+  </PropertyGroup>
+  <Import Project="$(_UnrealMcpParentBuildProps)" Condition="'$(_UnrealMcpParentBuildProps)' != ''" />
   <PropertyGroup>
     <RestoreAdditionalProjectSources>$(RestoreAdditionalProjectSources);$(MSBuildThisFileDirectory)prerelease-packages</RestoreAdditionalProjectSources>
   </PropertyGroup>
