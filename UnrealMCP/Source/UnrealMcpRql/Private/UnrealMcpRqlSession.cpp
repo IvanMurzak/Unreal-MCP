@@ -473,6 +473,11 @@ bool FUnrealMcpRqlSession::FunctionSource(rql::QueryPlan& Plan, rql::QueryResult
 		OutFailure = rql::QueryResult::fail({ rql::Diagnostic::error("function-threw", Name + "() threw: " + Error.what()) });
 		return true;
 	}
+	catch (...)
+	{
+		OutFailure = rql::QueryResult::fail({ rql::Diagnostic::error("function-threw", Name + "() threw: non-standard exception") });
+		return true;
+	}
 	if (Value.is_error())
 	{
 		OutFailure = rql::QueryResult::fail({ rql::Diagnostic::error(Value.error_code(), Value.error_detail()) });

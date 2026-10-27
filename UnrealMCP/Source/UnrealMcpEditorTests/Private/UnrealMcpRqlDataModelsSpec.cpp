@@ -45,7 +45,7 @@
 /**
  * The data models reflection does not reach (docs/rql.md): DataTable rows, gameplay tags, Project Settings sections and
  * Blueprint graphs. Each case reads, writes, checks the validation errors, undo, dirty marking and what reaches disk
- * (the saved and reloaded asset, the written ini). Plans come from Rql.Parser 0.1.1 (the query is the comment before
+ * (the saved and reloaded asset, the written ini). Plans come from Rql.Parser 0.2.0 (the query is the comment before
  * each); "@NAME@" placeholders are filled with ids and paths known only at run time.
  */
 BEGIN_DEFINE_SPEC(FUnrealMcpRqlDataModelsSpec, "UnrealMcp.Tools.Rql.DataModels",

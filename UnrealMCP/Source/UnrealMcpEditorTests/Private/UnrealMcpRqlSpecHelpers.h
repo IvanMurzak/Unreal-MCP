@@ -18,7 +18,7 @@
 
 /**
  * Shared helpers of the RQL specs that run canonical QueryPlans (the C++ runtime has no text parser; each case carries
- * the plan Rql.Parser 0.1.1 produces for the query in the comment next to it).
+ * the plan Rql.Parser 0.2.0 produces for the query in the comment next to it).
  */
 namespace UnrealMcpRqlSpecHelpers
 {

@@ -30,7 +30,7 @@
  * The existing adapters of the RQL data layer (docs/rql.md): the nine math-struct adapters, the UObject references
  * adapter, TArray / TSet / TMap, scalars and enums, the asset and class-defaults lists, the material parameter maps,
  * the seven class hooks (Object, Actor, ActorComponent, Level, World, MaterialInterface, Editor) and every registration
- * of the extension seam (IUnrealMcpRqlModule). Plans come from Rql.Parser 0.1.1 (the query is the comment before each).
+ * of the extension seam (IUnrealMcpRqlModule). Plans come from Rql.Parser 0.2.0 (the query is the comment before each).
  * A fixture object (UUnrealMcpRqlSpecFixture, in a /Game/RqlSpecAdapters package) holds one property of every kind.
  */
 BEGIN_DEFINE_SPEC(FUnrealMcpRqlAdaptersSpec, "UnrealMcp.Tools.Rql.Adapters",
