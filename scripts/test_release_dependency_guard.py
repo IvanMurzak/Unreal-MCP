@@ -84,8 +84,7 @@ class GuardTests(unittest.TestCase):
         problems = self.problems()
         self.assertIn(("bridge/src/com.IvanMurzak.Unreal.MCP.Bridge.csproj",
                        "com.IvanMurzak.Rql 0.3.0-dev.602ce7c is a pre-release version"), problems)
-        self.assertIn((guard.RQL_VENDORED.as_posix(),
-                       "vendored RQL C++ runtime is marked unreleased (copy it from a published RQL release)"), problems)
+        self.assertIn((guard.RQL_VENDORED.as_posix(), "com.IvanMurzak.Rql 0.3.0-dev.602ce7c is a pre-release version"), problems)
         self.assertTrue(any(f == "bridge/Directory.Build.props" and "prerelease-packages" in m for f, m in problems))
         self.assertFalse(any("xunit" in m for _, m in problems))  # the test project ships nothing
 
@@ -97,7 +96,8 @@ class GuardTests(unittest.TestCase):
         self.assertIn((guard.RQL_VENDORED.as_posix(), "com.IvanMurzak.Rql 0.3.0-dev.1 is a pre-release version"), self.problems())
         self.fixture(vendored_rql="- Source: https://github.com/IvanMurzak/RQL, commit `abc`.\n")
         self.assertEqual([(guard.RQL_VENDORED.as_posix(),
-                           "vendored RQL C++ runtime: no `com.IvanMurzak.Rql` <version> release marker")], self.problems())
+                           "vendored com.IvanMurzak.Rql: no release version marker (copy it from a published release)")],
+                         self.problems())
 
     def test_unpublished_stable_pin_fails(self):
         self.fixture(rql="0.9.0")

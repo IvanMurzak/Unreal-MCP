@@ -15,7 +15,7 @@ What it checks (everything the core, extension and CLI releases ship):
     version (any `-` suffix) or a version not listed on nuget.org fails, and so does a local
     (non-URL) restore source (`RestoreAdditionalProjectSources`, `nuget.config`), e.g. `prerelease-packages`;
   * the vendored RQL C++ runtime: its README must record the published `com.IvanMurzak.Rql` release it
-    was copied from (not "unreleased", not a pre-release, listed on nuget.org) and that version must
+    was copied from (`com.IvanMurzak.Rql` <version>: not a pre-release, listed on nuget.org) and that version must
     equal the sidecar's `com.IvanMurzak.Rql` pin (the C++ runtime executes the plans the sidecar's RQL
     parses). The README marker is all there is: the copied sources carry no version of their own;
   * the vendored Code-Exec Python runtime (`_vendor/code_exec/VENDORED.md`): a published
@@ -49,7 +49,6 @@ NUGET_INDEX_URL = "https://api.nuget.org/v3-flatcontainer/{id}/index.json"
 PACKAGE_ITEMS = {"PackageReference", "PackageVersion", "GlobalPackageReference"}
 # MSBuild properties that add NuGet restore sources.
 RESTORE_SOURCE_PROPERTIES = {"RestoreSources", "RestoreAdditionalProjectSources", "RestoreFallbackFolders"}
-NUGET_CONFIG_NAMES = {"nuget.config"}
 SKIP_DIRS = {"bin", "obj", "node_modules", ".git", "publish"}
 PROPERTY_RE = re.compile(r"\$\(([A-Za-z_][A-Za-z0-9_.-]*)\)")
 NPM_PRERELEASE_RE = re.compile(r"\d+\.\d+\.\d+-")
@@ -60,7 +59,7 @@ NPM_NON_REGISTRY_PREFIXES = ("file:", "link:", "git", "http:", "https:", "github
 class Pin:
     """One dependency version as written in a shipped file."""
 
-    ecosystem: str  # "nuget" (pre-release + nuget.org check), "npm" / "core" (pre-release check)
+    ecosystem: str  # "nuget": pre-release + nuget.org check; "semver": pre-release check only
     package: str
     version: str
     file: Path
@@ -83,16 +82,22 @@ class NuGetRegistry:
 
     def __init__(self, fetch: Optional[Callable[[str], Optional[bytes]]] = None) -> None:
         self._fetch = fetch or _http_get
-        self._cache: dict[str, Optional[set[str]]] = {}
+        self._cache: dict[str, Optional[set[str]] | RegistryError] = {}
 
     def versions(self, package: str) -> Optional[set[str]]:
         key = package.lower()
         if key not in self._cache:
-            body = self._fetch(NUGET_INDEX_URL.format(id=key))
-            self._cache[key] = None if body is None else {
-                normalize_nuget_version(v) for v in json.loads(body.decode("utf-8")).get("versions", [])
-            }
-        return self._cache[key]
+            try:
+                body = self._fetch(NUGET_INDEX_URL.format(id=key))
+                self._cache[key] = None if body is None else {
+                    normalize_nuget_version(v) for v in json.loads(body.decode("utf-8")).get("versions", [])
+                }
+            except RegistryError as error:  # remembered: one retry cycle per package, not per pin
+                self._cache[key] = error
+        cached = self._cache[key]
+        if isinstance(cached, RegistryError):
+            raise cached
+        return cached
 
 
 def _http_get(url: str) -> Optional[bytes]:
@@ -108,7 +113,8 @@ def _http_get(url: str) -> Optional[bytes]:
             last = error
         except (urllib.error.URLError, TimeoutError, OSError) as error:
             last = error
-        time.sleep(2 ** attempt)
+        if attempt < 2:
+            time.sleep(2 ** attempt)
     raise RegistryError(f"{url}: {last}")
 
 
@@ -253,11 +259,11 @@ def scan_msbuild(projects: list[Path], root: Path) -> tuple[list[Pin], list[Prob
             seen.add(path)
             text = path.read_text(encoding="utf-8-sig")
             try:
-                tree = ET.ElementTree(ET.fromstring(text))
+                document = ET.fromstring(text)
             except ET.ParseError as error:
                 problems.append(Problem(path, 1, f"cannot parse MSBuild/nuspec XML: {error}"))
                 continue
-            for element in tree.getroot().iter():
+            for element in document.iter():
                 if not isinstance(element.tag, str):
                     continue
                 name = _local(element.tag)
@@ -297,7 +303,7 @@ def scan_nuget_configs(projects: list[Path], root: Path) -> list[Problem]:
     directories = {d for project in projects for d in ancestors(project.parent, root)}
     for directory in sorted(directories):
         for entry in directory.iterdir():
-            if entry.is_file() and entry.name.lower() in NUGET_CONFIG_NAMES:
+            if entry.is_file() and entry.name.lower() == "nuget.config":
                 text = entry.read_text(encoding="utf-8-sig")
                 try:
                     tree = ET.fromstring(text)
@@ -316,13 +322,6 @@ def scan_nuget_configs(projects: list[Path], root: Path) -> list[Problem]:
 # --- other pin sources ------------------------------------------------------------------------
 
 
-def scan_regex_pins(path: Path, pattern: re.Pattern[str], ecosystem: str = "nuget") -> list[Pin]:
-    """Pins written as code (`pattern` captures the package id and the version)."""
-    text = path.read_text(encoding="utf-8-sig")
-    return [Pin(ecosystem, m.group(1), m.group(2), path, text.count("\n", 0, m.start()) + 1)
-            for m in pattern.finditer(text)]
-
-
 def scan_package_json(path: Path) -> tuple[list[Pin], list[Problem]]:
     """`dependencies` / `optionalDependencies` (what installs with the package; dev dependencies do not)."""
     text = path.read_text(encoding="utf-8-sig")
@@ -335,7 +334,7 @@ def scan_package_json(path: Path) -> tuple[list[Pin], list[Problem]]:
             if spec.startswith(NPM_NON_REGISTRY_PREFIXES) or spec.startswith((".", "/")):
                 problems.append(Problem(path, line, f"{package}: '{spec}' is not a registry version"))
             else:
-                pins.append(Pin("npm", package, spec, path, line))
+                pins.append(Pin("semver", package, spec, path, line))
     return pins, problems
 
 
@@ -377,27 +376,13 @@ RQL_MARKER_RE = re.compile(r"`com\.IvanMurzak\.Rql`\s*`?\s*([0-9][0-9A-Za-z.+-]*
 VENDORED_RELEASE_RE = re.compile(r"release\s+\*\*([^*\s]+)\*\*")
 
 
-def scan_vendored(path: Path, package: str) -> tuple[list[Pin], list[Problem]]:
-    """A vendored source copy records the release it came from (`release **x.y.z**`)."""
+def scan_vendored(path: Path, package: str, marker: re.Pattern[str] = VENDORED_RELEASE_RE) -> tuple[list[Pin], list[Problem]]:
+    """A vendored source copy records the package release it came from (`marker` captures the version)."""
     text = path.read_text(encoding="utf-8-sig")
-    match = VENDORED_RELEASE_RE.search(text)
-    if "unreleased" in text.lower():
-        return [], [Problem(path, line_of(text.lower(), "unreleased"), f"vendored {package} is marked unreleased")]
+    match = marker.search(text)
     if not match:
-        return [], [Problem(path, 1, f"vendored {package}: no `release **<version>**` marker")]
+        return [], [Problem(path, 1, f"vendored {package}: no release version marker (copy it from a published release)")]
     return [Pin("nuget", package, match.group(1), path, text.count("\n", 0, match.start()) + 1)], []
-
-
-def scan_vendored_rql(path: Path) -> tuple[list[Pin], list[Problem]]:
-    """The vendored C++ runtime: the README's `Source:` line names the RQL package release it came from."""
-    text = path.read_text(encoding="utf-8-sig")
-    if "unreleased" in text.lower():
-        return [], [Problem(path, line_of(text.lower(), "unreleased"),
-                            "vendored RQL C++ runtime is marked unreleased (copy it from a published RQL release)")]
-    match = RQL_MARKER_RE.search(text)
-    if not match:
-        return [], [Problem(path, 1, f"vendored RQL C++ runtime: no `{RQL_PACKAGE}` <version> release marker")]
-    return [Pin("nuget", RQL_PACKAGE, match.group(1), path, text.count("\n", 0, match.start()) + 1)], []
 
 
 def collect(root: Path) -> tuple[list[Pin], list[Problem]]:
@@ -410,7 +395,7 @@ def collect(root: Path) -> tuple[list[Pin], list[Problem]]:
     problems += msbuild_problems + scan_nuget_configs(projects, root)
     bridge_rql = {p.version for p in pins if p.package.lower() == RQL_PACKAGE.lower()}
     if require(root / RQL_VENDORED, problems):
-        rql_pins, rql_problems = scan_vendored_rql(root / RQL_VENDORED)
+        rql_pins, rql_problems = scan_vendored(root / RQL_VENDORED, RQL_PACKAGE, RQL_MARKER_RE)
         pins += rql_pins
         problems += rql_problems
         for pin in rql_pins:
@@ -425,7 +410,7 @@ def collect(root: Path) -> tuple[list[Pin], list[Problem]]:
         text = descriptor.read_text(encoding="utf-8-sig")
         minimum = json.loads(text).get("minCoreVersion")
         if minimum:
-            pins.append(Pin("core", "Unreal-MCP core (minCoreVersion)", minimum, descriptor, line_of(text, '"minCoreVersion"')))
+            pins.append(Pin("semver", "Unreal-MCP core (minCoreVersion)", minimum, descriptor, line_of(text, '"minCoreVersion"')))
     cli_package = root / "cli" / "package.json"
     if require(cli_package, problems):
         npm_pins, npm_problems = scan_package_json(cli_package)
