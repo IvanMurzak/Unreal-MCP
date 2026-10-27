@@ -208,24 +208,27 @@ namespace UnrealMcpRqlSequencesLocal
 		if (Possessable->GetParent().IsValid())
 		{
 			AActor* Owner = Cast<AActor>(BoundObject(Sequence, Possessable->GetParent()));
+			if (!Owner)
+				return nullptr;
 			for (UActorComponent* Component : TInlineComponentArray<UActorComponent*>(Owner))
 				if (Component->GetName() == Possessable->GetName() && Sequence->FindBindingFromObject(Component, Owner) == Guid)
 					return Component;
 			return nullptr;
 		}
-		// The possessable is named after the actor's label when bound; confirm candidates of its class with the sequence.
+		// Asking the sequence is costly (a transient playback state per object): try the actors still labelled as the
+		// possessable (named after the label when bound) first, then the rest of its class.
 		const UClass* Class = Possessable->GetPossessedObjectClass();
-		AActor* Fallback = nullptr;
-		for (TActorIterator<AActor> It(World); It; ++It)
+		for (const bool bLabelled : { true, false })
 		{
-			if (Class && !It->IsA(Class))
-				continue;
-			if (It->GetActorLabel() == Possessable->GetName() && Sequence->FindBindingFromObject(*It, World) == Guid)
-				return *It;
-			if (!Fallback && Sequence->FindBindingFromObject(*It, World) == Guid)
-				Fallback = *It;
+			for (TActorIterator<AActor> It(World); It; ++It)
+			{
+				if ((Class && !It->IsA(Class)) || (It->GetActorLabel() == Possessable->GetName()) != bLabelled)
+					continue;
+				if (Sequence->FindBindingFromObject(*It, World) == Guid)
+					return *It;
+			}
 		}
-		return Fallback;
+		return nullptr;
 	}
 
 	/** An animatable property of @p Bound or (for an actor) of one of its components: "Intensity", "LightComponent0.Intensity". */
@@ -309,7 +312,6 @@ namespace UnrealMcpRqlSequencesLocal
 	UMovieSceneTrack* AddBindingTrack(ULevelSequence* Sequence, const FGuid& Guid, const FString& What)
 	{
 		UMovieScene* Scene = SceneOf(Sequence);
-		UObject* Bound = BoundObject(Sequence, Guid);
 		if (UClass* Class = FindTrackClass(What))
 		{
 			if (!Class->IsChildOf(UMovieSceneVisibilityTrack::StaticClass()))
@@ -320,11 +322,14 @@ namespace UnrealMcpRqlSequencesLocal
 				return AddTrackTo(Scene, &Guid, What);
 			}
 			// The Sequencer's Visibility track keys the actor's "Actor Hidden In Game" (a component's bHiddenInGame).
+			const FMovieScenePossessable* Possessable = Scene->FindPossessable(Guid);
+			const UClass* BoundClass = Possessable ? Possessable->GetPossessedObjectClass() : nullptr;
 			UMovieScenePropertyTrack* Track = Cast<UMovieScenePropertyTrack>(AddTrackTo(Scene, &Guid, What));
-			const FName Hidden = Cast<USceneComponent>(Bound) ? FName(TEXT("bHiddenInGame")) : FName(TEXT("bHidden"));
+			const FName Hidden = BoundClass && BoundClass->IsChildOf(USceneComponent::StaticClass()) ? FName(TEXT("bHiddenInGame")) : FName(TEXT("bHidden"));
 			Track->SetPropertyNameAndPath(Hidden, Hidden.ToString());
 			return Track;
 		}
+		UObject* Bound = BoundObject(Sequence, Guid);
 		if (!Bound)
 			Throw(FString::Printf(TEXT("'%s' is not a track class, and the bound object is not in the editor world, so its properties cannot be looked up"), *What));
 		const TPair<UObject*, FProperty*> Target = FindAnimatable(Bound, What);
