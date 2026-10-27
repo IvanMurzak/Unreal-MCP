@@ -68,6 +68,28 @@ void FUnrealMcpDispatcherSpec::Define()
 			});
 		});
 
+		// A body that waits on game-thread tasks itself (an Interchange import from python-execute) asserted the task
+		// graph's recursion guard and crashed the editor when the body ran inside the game thread's task queue.
+		LatentIt("runs an off-thread call from the main loop, not inside the game thread's task queue", FTimespan::FromSeconds(15), [this](const FDoneDelegate& Done)
+		{
+			Async(EAsyncExecution::Thread, [this, Done]()
+			{
+				FUnrealMcpGameThreadDispatcher Dispatcher;
+				bool bInsideTaskQueue = true;
+				const FUnrealMcpToolResult Result = Dispatcher.Dispatch(
+					FUnrealMcpToolCall(),
+					[&bInsideTaskQueue](const FUnrealMcpToolCall&)
+					{
+						bInsideTaskQueue = FTaskGraphInterface::Get().IsThreadProcessingTasks(ENamedThreads::GameThread);
+						return FUnrealMcpToolResult::Success(TEXT("ok"));
+					},
+					FTimespan::FromSeconds(10)).Get();
+				TestTrue(TEXT("success"), Result.bSuccess);
+				TestFalse(TEXT("the body did not run inside the game thread's task processing"), bInsideTaskQueue);
+				Done.Execute();
+			});
+		});
+
 		LatentIt("completes with a timeout error when the body never finishes", FTimespan::FromSeconds(15), [this](const FDoneDelegate& Done)
 		{
 			Async(EAsyncExecution::Thread, [this, Done]()

@@ -201,6 +201,13 @@ TFuture<FUnrealMcpToolResult> FUnrealMcpGameThreadDispatcher::Dispatch(
 
 	// Arm the deadline before posting so a body that finishes instantly is simply pruned by the watchdog.
 	FUnrealMcpDispatchWatchdog::Get().Watch(State, CancelFlag, TimeoutMs);
-	AsyncTask(ENamedThreads::GameThread, [Job]() { Job->Run(); });
+	// The core ticker (thread-safe to add to) runs the body from the main loop. A game-thread AsyncTask would run it
+	// INSIDE the task graph's game-thread queue, and a body that waits on game-thread tasks itself (an Interchange
+	// import from python-execute, an asset compile) then trips the task graph's recursion guard and crashes the editor.
+	FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda([Job](float)
+	{
+		Job->Run();
+		return false;
+	}));
 	return Future;
 }
