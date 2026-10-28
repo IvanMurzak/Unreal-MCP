@@ -141,6 +141,8 @@ struct UNREALMCPRUNTIME_API FUnrealMcpPromptRegistryTraits
 	static const TCHAR* KeyNoun() { return TEXT("name"); }
 	static const TCHAR* ManifestType() { return TEXT("prompt-manifest"); }
 	static const TCHAR* ManifestArrayKey() { return TEXT("prompts"); }
+	/** The §7 blocklist disables a prompt (see TUnrealMcpRegistry). */
+	static constexpr bool bBlocklistHides = false;
 	/** True iff @p Name is a valid kebab-case prompt id (same rule as the tool registry). */
 	static bool IsValidKey(const FString& Name);
 	/** Validate a prompt descriptor for the §5 isolation contract. Returns false + a reason on the first problem. */
@@ -190,7 +192,7 @@ public:
 	/** Set the §8 env whitelist. Mirrors the tool registry's SetEnabledToolsFilter exactly. Game-thread only. */
 	void SetEnabledPromptsFilter(const TArray<FString>& EnabledPrompts) { SetWhitelistFilter(EnabledPrompts); }
 
-	/** Apply the persisted §7 per-prompt enable-map (blocklist). Mirrors the tool registry's ApplyDisabledTools. Game-thread only. */
+	/** Apply the persisted §7 per-prompt enable-map (blocklist): a listed prompt is disabled. Game-thread only. */
 	void ApplyDisabledPrompts(const TArray<FString>& DisabledNames) { ApplyBlocklist(DisabledNames); }
 
 	/**

@@ -58,13 +58,15 @@ namespace
 	const TCHAR* KeyStartServer    = TEXT("startServer");
 	const TCHAR* KeyToolTimeoutMs  = TEXT("toolTimeoutMs");
 	const TCHAR* KeyEnabledTools   = TEXT("enabledTools");
-	const TCHAR* KeyDisabledTools  = TEXT("disabledTools");
+	const TCHAR* KeyHiddenTools    = TEXT("hiddenTools");
+	// The pre-rename key of hiddenTools: still read (merged in), never written.
+	const TCHAR* KeyLegacyDisabledTools = TEXT("disabledTools");
 	const TCHAR* KeySelectedAgentId = TEXT("selectedAgentId");
 	const TCHAR* KeySkillAutoGenerateAgents = TEXT("skillAutoGenerateAgents");
 	const TCHAR* KeySkillsPath     = TEXT("skillsPath");
 
 	// Read a JSON array field into a string array (skipping empty/non-string entries). Shared by the
-	// enabledTools / disabledTools list fields so their parsing stays identical.
+	// enabledTools / hiddenTools list fields so their parsing stays identical.
 	void ReadStringArrayField(const TSharedPtr<FJsonObject>& Json, const TCHAR* Key, TArray<FString>& Out)
 	{
 		const TArray<TSharedPtr<FJsonValue>>* Values = nullptr;
@@ -186,7 +188,13 @@ void FUnrealMcpConfig::LoadFromJson(const TSharedPtr<FJsonObject>& Json)
 		if (Json->TryGetNumberField(KeyToolTimeoutMs, Number) && Number > 0) ToolTimeoutMs = Number;
 
 		ReadStringArrayField(Json, KeyEnabledTools, EnabledTools);
-		ReadStringArrayField(Json, KeyDisabledTools, DisabledTools);
+		ReadStringArrayField(Json, KeyHiddenTools, HiddenTools);
+		// A config written before the Enabled -> Visible rename keeps its per-tool toggles under "disabledTools".
+		// Merge them in; the next Save() writes them under "hiddenTools" only.
+		TArray<FString> LegacyHidden;
+		ReadStringArrayField(Json, KeyLegacyDisabledTools, LegacyHidden);
+		for (const FString& Tool : LegacyHidden)
+			HiddenTools.AddUnique(Tool);
 
 		// Pure UI persistence (no env override). A blank/missing value keeps the default selection.
 		if (Json->TryGetStringField(KeySelectedAgentId, Str) && !Str.IsEmpty())
@@ -387,10 +395,10 @@ TSharedPtr<FJsonObject> FUnrealMcpConfig::ToJson() const
 		Tools.Add(MakeShared<FJsonValueString>(Tool));
 	Obj->SetArrayField(KeyEnabledTools, Tools);
 
-	TArray<TSharedPtr<FJsonValue>> Disabled;
-	for (const FString& Tool : DisabledTools)
-		Disabled.Add(MakeShared<FJsonValueString>(Tool));
-	Obj->SetArrayField(KeyDisabledTools, Disabled);
+	TArray<TSharedPtr<FJsonValue>> Hidden;
+	for (const FString& Tool : HiddenTools)
+		Hidden.Add(MakeShared<FJsonValueString>(Tool));
+	Obj->SetArrayField(KeyHiddenTools, Hidden);
 
 	Obj->SetStringField(KeySelectedAgentId, SelectedAgentId);
 

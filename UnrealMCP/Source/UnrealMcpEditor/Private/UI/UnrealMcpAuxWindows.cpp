@@ -68,7 +68,7 @@ void FUnrealMcpAuxWindows::Register(
 
 	TabManager.RegisterNomadTabSpawner(ToolsTabId, FOnSpawnTab::CreateRaw(this, &FUnrealMcpAuxWindows::SpawnToolsTab))
 		.SetDisplayName(LOCTEXT("ToolsTabTitle", "MCP Tools"))
-		.SetTooltipText(LOCTEXT("ToolsTabTooltip", "List and enable/disable the registered MCP tools."))
+		.SetTooltipText(LOCTEXT("ToolsTabTooltip", "List the registered MCP tools and choose which are visible in tools/list."))
 		.SetGroup(Group)
 		.SetIcon(FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Settings"));
 

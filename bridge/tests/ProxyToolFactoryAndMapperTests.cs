@@ -79,11 +79,11 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         }
 
         [Fact]
-        public void Create_PropagatesEnabledFlag()
+        public void Create_PropagatesVisibleFlag()
         {
             var channel = new FakeToolCallChannel();
-            var proxy = ProxyToolFactory.Create(new ToolDescriptor { Name = "ping", Enabled = false }, channel);
-            Assert.False(proxy.Enabled);
+            var proxy = ProxyToolFactory.Create(new ToolDescriptor { Name = "ping", Visible = false }, channel);
+            Assert.False(proxy.Visible);
         }
     }
 

@@ -9,6 +9,7 @@
 */
 
 using System.Linq;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Threading.Tasks;
 using com.IvanMurzak.McpPlugin;
@@ -58,7 +59,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
 
             Assert.True(tm!.HasTool("ping"));
             Assert.Contains(tm.GetAllTools(), t => t.Name == "ping");
-            Assert.True(tm.EnabledToolsCount >= 1);
+            Assert.True(tm.VisibleToolsCount >= 1);
         }
 
         [Fact]
@@ -82,6 +83,40 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             Assert.Equal(ResponseStatus.Success, result.Status);
             Assert.Equal("pong", result.StructuredContent!["result"]!.GetValue<string>());
             Assert.Equal("ping", channel.LastTool);
+        }
+
+        [Fact]
+        public async Task HiddenTool_IsNotListedButStillRuns()
+        {
+            var plugin = BuildPlugin();
+            var tm = plugin.McpManager.ToolManager!;
+            var channel = new FakeToolCallChannel((tool, args) => new ToolResponseMessage
+            {
+                Status = IpcProtocol.Status.Success,
+                Content = JsonNode.Parse("[{\"type\":\"text\",\"text\":\"pong\"}]")!.AsArray(),
+            });
+            var registrar = new ManifestRegistrar(new ToolManagerSink(tm), channel);
+
+            // The plugin keeps the IPC wire key "enabled" for the tool's Visible flag.
+            var manifest = JsonSerializer.Deserialize<ToolManifestMessage>(
+                """{"type":"tool-manifest","revision":1,"tools":[{"name":"ping","enabled":false,"schemaHash":"h1"}]}""",
+                IpcProtocol.JsonOptions)!;
+            Assert.False(Assert.Single(manifest.Tools).Visible);
+            registrar.Apply(manifest);
+
+            Assert.True(tm.HasTool("ping"));
+            Assert.False(tm.IsToolVisible("ping"));
+            Assert.Equal(0, tm.VisibleToolsCount);
+
+            // Hidden only from tools/list: a call by name still reaches the plugin.
+            var result = await tm.GetAllTools().First(t => t.Name == "ping").Run("req-1", null);
+            Assert.Equal(ResponseStatus.Success, result.Status);
+            Assert.Equal("ping", channel.LastTool);
+
+            // A visibility-only change (same schema hash) shows it again without re-registering.
+            registrar.Apply(new ToolManifestMessage { Revision = 2, Tools = { new ToolDescriptor { Name = "ping", SchemaHash = "h1", Visible = true } } });
+            Assert.True(tm.IsToolVisible("ping"));
+            Assert.Equal(1, tm.VisibleToolsCount);
         }
 
         [Fact]

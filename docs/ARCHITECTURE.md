@@ -59,15 +59,17 @@ Prompts/Resources ship empty-but-wired (§10), as designed.
   `UseLocalMcpPlugin` switch is wired today). A future upstream 6.8.0 ProxyTool can replace the local
   copy through its own pipeline; until then, §2.3/§9.2's "≥ 6.8.0" is forward-looking, not the
   shipped state.
-- **§8 effective-served semantics.** The served tool set is computed as: served **iff** the tool
-  passes the `enabledTools` **whitelist** (empty whitelist = no filter; `UNREAL_MCP_TOOLS` overrides
-  it) **AND** is not in the `disabledTools` **blocklist** (the per-tool UI toggles). Both sets are
-  retained members, so a registration or an extension hot-reload re-applies them — a rebuilt tool
-  inherits the retained toggle and cannot silently re-enable. See
-  `FUnrealMcpToolRegistry::ShouldToolBeEnabled`.
-- **Execute()-level enable gate (#29).** A disabled tool is excluded from the served manifest **and**
-  rejected at the execution boundary (`FUnrealMcpToolRegistry::Execute` returns
-  `"Tool '<name>' is disabled."`), so a stale `tools/list` that still names it can never run it.
+- **§8 served vs. visible.** A tool is **served** iff it passes the `enabledTools` **whitelist** (empty
+  whitelist = no filter; `UNREAL_MCP_TOOLS` overrides it), and **listed in `tools/list`** iff it is served
+  **AND** not in the `hiddenTools` list (the per-tool **Visible** checkboxes; a config from before the
+  Enabled → Visible rename is read from `disabledTools`, and the next save writes `hiddenTools`). A hidden
+  tool stays in the manifest (descriptor `enabled: false` — the wire key is unchanged) and still runs when
+  called by name: Visible is listing-only, like McpPlugin's `IRunTool.Visible`. Both settings are retained
+  members, so a registration or an extension hot-reload re-applies them. See `TUnrealMcpRegistry::ApplyFilter`.
+- **Execute()-level whitelist gate (#29).** A tool the whitelist does not serve is excluded from the
+  manifest **and** rejected at the execution boundary (`FUnrealMcpToolRegistry::Execute` returns
+  `"Tool '<name>' is disabled."`), so a stale `tools/list` that still names it can never run it. A hidden
+  tool is not gated.
 - **Image-content channel (#21).** The screenshot family returns a base64 **PNG as MCP image
   content** (`content[]` with an `image` entry), as anticipated by §1.2's "binary payloads travel as
   base64 strings inside JSON". Dimensions clamp to default 1024 / hard cap 2048 per side; capture
@@ -319,7 +321,7 @@ Spot-verified in MCP-Plugin-dotnet source (feasibility probe confirmed accurate)
   raw JSON — no ReflectorNet/MethodInfo binding required (`IRunTool.cs:20–86`).
 - Runtime mutation after `Build()`: `IMcpPlugin.McpManager.ToolManager` (`IMcpPlugin.cs:20`,
   `IMcpManager.cs:36`) exposes `AddTool(name, IRunTool)` / `RemoveTool(name)` /
-  `SetToolEnabled(name, bool)`, each firing `_onToolsUpdated` (`McpToolManager.cs:73–121`) which
+  `SetToolVisible(name, bool)` (formerly `SetToolEnabled`), each firing `_onToolsUpdated` (`McpToolManager.cs:73–121`) which
   cascades to the server's tools-list-changed notification.
 - `AddTool` **skips** (returns false, warns) when the name exists (`McpToolManager.cs:75–79`) —
   so a *changed* tool must be `RemoveTool` → `AddTool`.
@@ -348,7 +350,7 @@ Sidecar flow on each `tool-manifest` (revision N):
 1. Diff against the previously applied manifest by `name` + `schemaHash`
    (hash = SHA256 of the canonicalized descriptor minus `enabled`):
    removed → `ToolManager.RemoveTool`; added → `ToolManager.AddTool`; changed → `RemoveTool`+`AddTool`;
-   enabled-flag-only change → `SetToolEnabled`.
+   `enabled`-flag-only change (the tool's Visible flag) → `SetToolVisible`.
 2. Each added tool is a `ProxyTool : IRunTool` whose `Run` serializes a `tool-call` IPC message,
    awaits the matching `tool-response` (or forwards `CancellationToken` as `tool-cancel`), and maps
    it to `ResponseCallTool`.
@@ -362,7 +364,7 @@ Sidecar flow on each `tool-manifest` (revision N):
    unknown or already-completed `requestId`s are silently dropped on both sides.
 
 Hot reload: the plugin bumps `revision` and re-sends the full manifest whenever the registry
-changes (extension plugin loaded/unloaded §5, per-tool enable toggled in UI §7). Full-snapshot +
+changes (extension plugin loaded/unloaded §5, per-tool Visible toggled in UI §7). Full-snapshot +
 sidecar-side diffing keeps the C++ side stateless about what the sidecar saw.
 
 ### 2.3 Exact additive API PR for MCP-Plugin-dotnet
@@ -649,8 +651,9 @@ public:
   failure shown on its UI row — never blocking other extensions. Tool-body crashes are editor
   crashes regardless of family (same as any UE plugin code); the registry adds `ensure`-level
   guards around handler invocation results.
-- **Per-extension enable/disable:** persisted in the §8 config (`disabledExtensions[]`,
-  `disabledTools[]`); a disabled extension's tools are kept out of the manifest entirely.
+- **Per-extension enable/disable:** persisted in the §8 config (`disabledExtensions[]`); a disabled
+  extension's tools are kept out of the manifest entirely. (Per-tool `hiddenTools[]` only hides a tool from
+  `tools/list`.)
 - **UI:** extensions section in the main window (Unity analog `MainWindowEditor.Extensions.cs:175`)
   lists id, name, version, tool count, toggle, error badge.
 - **Template story:** `samples/UnrealAITemplate/` in-repo — a minimal standalone UE plugin with an RQL
@@ -881,7 +884,7 @@ under **Window → AI Game Developer** plus a toolbar button. Tab ids:
 | Tab id | Window | Unity source mapped |
 |---|---|---|
 | `UnrealMcpMainWindow` | AI Game Developer (main) | `MainWindowEditor.*` |
-| `UnrealMcpToolsWindow` | MCP Tools (list + per-tool toggles, token counts) | `McpToolsWindow.cs` |
+| `UnrealMcpToolsWindow` | MCP Tools (list + per-tool Visible toggles, token counts) | `McpToolsWindow.cs` |
 | `UnrealMcpPromptsWindow` | MCP Prompts | `McpPromptsWindow` |
 | `UnrealMcpResourcesWindow` | MCP Resources | `McpResourcesWindow` |
 

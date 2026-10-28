@@ -19,8 +19,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
     /// <summary>Manifest application + the §2.2 revision guard + the §1.5 reconnect reset.</summary>
     public class ManifestRegistrarTests
     {
-        private static ToolDescriptor Tool(string name, string hash, bool enabled = true) =>
-            new() { Name = name, SchemaHash = hash, Enabled = enabled };
+        private static ToolDescriptor Tool(string name, string hash, bool visible = true) =>
+            new() { Name = name, SchemaHash = hash, Visible = visible };
 
         private static ToolManifestMessage Manifest(int revision, params ToolDescriptor[] tools) =>
             new() { Revision = revision, Tools = tools.ToList() };
@@ -63,13 +63,13 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         }
 
         [Fact]
-        public void Apply_TogglesEnabledOnly()
+        public void Apply_TogglesVisibleOnly()
         {
             var (reg, sink) = New();
-            reg.Apply(Manifest(1, Tool("ping", "h1", enabled: true)));
-            reg.Apply(Manifest(2, Tool("ping", "h1", enabled: false)));
+            reg.Apply(Manifest(1, Tool("ping", "h1", visible: true)));
+            reg.Apply(Manifest(2, Tool("ping", "h1", visible: false)));
             Assert.True(sink.HasTool("ping"));
-            Assert.False(sink.Enabled["ping"]);
+            Assert.False(sink.Visible["ping"]);
         }
 
         [Fact]

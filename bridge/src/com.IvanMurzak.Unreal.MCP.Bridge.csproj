@@ -52,7 +52,7 @@
   <!--
     Reused NuGet pins — normally owned by the upstream release pipelines and kept in lockstep
     with Godot-MCP (Godot-MCP.csproj), except where a ⚠ DEVIATION entry below records an owner-approved
-    early adoption. Current: McpPlugin 8.14.0-dev.36320da (temporary pre-release) + ReflectorNet 5.5.0 + Rql 0.3.0-dev.2877579 (temporary pre-release).
+    early adoption. Current: McpPlugin 8.14.0-dev.e8985d5 (temporary pre-release) + ReflectorNet 5.5.0 + Rql 0.3.0-dev.2877579 (temporary pre-release).
     The MCP/reflection stack is NOT forked. Historical context: the 6.8.0 bump consumed the new
     shared engine-agnostic com.IvanMurzak.McpPlugin.AgentConfig module (the AI-agent configurators
     + the AgentConfiguratorDescription UI-DTO) so the sidecar hosts the AI-agent configuration
@@ -128,6 +128,10 @@
     .Server, copied unchanged). It brings ConnectionConfig.ClientRole (the sidecar declares itself an editor, or a runtime
     for a game's runtime-mode connection) and the server's tool-call error codes. ReflectorNet floor stays 5.5.0. At the
     cascade release: set the published McpPlugin version here and drop its three packages from bridge/prerelease-packages/.
+    ⚠ TEMPORARY PRE-RELEASE PIN (same owner rule, same feed): 8.14.0-dev.36320da -> 8.14.0-dev.e8985d5 (MCP-Plugin-dotnet
+    #278, main e8985d5; the three packages copied unchanged from GameDev-MCP-Server main 7befeeb prerelease-packages/). It
+    renames the per-tool flag Enabled -> Visible (IRunTool.Visible, IToolManager.SetToolVisible / VisibleToolsCount; the old
+    names stay [Obsolete] aliases): the flag only decides whether a tool is listed in tools/list, tools/call still runs it.
   -->
   <!--
     Local-LIB dev toggle (auth-fixes f1b — parity with the GameDev-MCP-Server + Unity/Godot
@@ -162,7 +166,7 @@
 
   <ItemGroup Condition="'$(UseLocalMcpPlugin)' != 'true'">
     <PackageReference Include="com.IvanMurzak.ReflectorNet" Version="5.5.0" />
-    <PackageReference Include="com.IvanMurzak.McpPlugin" Version="8.14.0-dev.36320da" />
+    <PackageReference Include="com.IvanMurzak.McpPlugin" Version="8.14.0-dev.e8985d5" />
   </ItemGroup>
 
   <!--

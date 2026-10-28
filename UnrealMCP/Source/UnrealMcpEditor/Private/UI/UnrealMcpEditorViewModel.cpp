@@ -469,36 +469,35 @@ void FUnrealMcpEditorViewModel::ApplyDeviceAuth(const TSharedPtr<FJsonObject>& D
 		OnOpenBrowser(DeviceVerificationUrl);
 }
 
-// --- §7 per-tool enable-map ------------------------------------------------------------------------
+// --- §7 per-tool Visible toggles -------------------------------------------------------------------
 
-bool FUnrealMcpEditorViewModel::IsToolDisabled(const FString& ToolName) const
+bool FUnrealMcpEditorViewModel::IsToolHidden(const FString& ToolName) const
 {
-	return Config.DisabledTools.Contains(ToolName);
+	return Config.HiddenTools.Contains(ToolName);
 }
 
-void FUnrealMcpEditorViewModel::SetToolEnabled(const FString& ToolName, bool bEnabled)
+void FUnrealMcpEditorViewModel::SetToolVisible(const FString& ToolName, bool bVisible)
 {
-	const bool bCurrentlyDisabled = Config.DisabledTools.Contains(ToolName);
-	const bool bWantDisabled = !bEnabled;
-	if (bCurrentlyDisabled == bWantDisabled)
+	const bool bCurrentlyHidden = Config.HiddenTools.Contains(ToolName);
+	if (bCurrentlyHidden == !bVisible)
 		return; // already in the requested state — no persist / no manifest churn.
 
-	if (bWantDisabled)
-		Config.DisabledTools.AddUnique(ToolName);
+	if (bVisible)
+		Config.HiddenTools.Remove(ToolName);
 	else
-		Config.DisabledTools.Remove(ToolName);
+		Config.HiddenTools.AddUnique(ToolName);
 
-	// Persist the blocklist to the §8 store FIRST (so the choice survives a restart even if the manifest push
-	// races a teardown), then ask the runtime to re-apply enablement to the registry + re-push the manifest.
-	// Note: this deliberately does NOT call OnPushConfig — tool enablement is a manifest (§2.2) concern, not a
+	// Persist the list to the §8 store FIRST (so the choice survives a restart even if the manifest push races a
+	// teardown), then ask the runtime to re-apply it to the registry + re-push the manifest.
+	// Note: this deliberately does NOT call OnPushConfig — tool visibility is a manifest (§2.2) concern, not a
 	// §1.3 `config` (connection) concern; pushing the connection config here would be a spurious sidecar re-dial.
 	if (OnPersistConfig)
 		OnPersistConfig(Config);
-	if (OnToolEnablementChanged)
-		OnToolEnablementChanged(Config.DisabledTools);
+	if (OnToolVisibilityChanged)
+		OnToolVisibilityChanged(Config.HiddenTools);
 
 	UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] tool '%s' %s via the MCP Tools window."),
-		*ToolName, bEnabled ? TEXT("enabled") : TEXT("disabled"));
+		*ToolName, bVisible ? TEXT("shown in tools/list") : TEXT("hidden from tools/list (still callable by name)"));
 }
 
 void FUnrealMcpEditorViewModel::SetSelectedAgentId(const FString& InAgentId)
@@ -508,7 +507,7 @@ void FUnrealMcpEditorViewModel::SetSelectedAgentId(const FString& InAgentId)
 	Config.SelectedAgentId = InAgentId;
 
 	// Persist-only: the dropdown selection is pure presentation state. Deliberately NO OnPushConfig — the
-	// selection does not change the live connection (mirrors SetToolEnabled's "manifest-only, not config" note).
+	// selection does not change the live connection (mirrors SetToolVisible's "manifest-only, not config" note).
 	if (OnPersistConfig)
 		OnPersistConfig(Config);
 }

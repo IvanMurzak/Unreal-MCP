@@ -105,7 +105,7 @@ void FUnrealMcpEditorCoordinator::Startup()
 
 	// §A.1 prompt registry (P1): the prompt sibling of the tool registry, built on the SAME Model A path. The
 	// core prompt family registers before the bridge starts accepting so the first prompt-manifest a v2 sidecar
-	// reads on handshake already includes it. The §8 config has EnabledTools/DisabledTools for tools but NO
+	// reads on handshake already includes it. The §8 config has EnabledTools/HiddenTools for tools but NO
 	// EnabledPrompts/DisabledPrompts field today, so no prompt filter is applied at boot (all-enabled default).
 	PromptRegistry = MakeUnique<FUnrealMcpPromptRegistry>();
 	UnrealMcpCorePrompts::Register(*PromptRegistry);
@@ -184,16 +184,17 @@ void FUnrealMcpEditorCoordinator::Startup()
 
 	const FUnrealMcpConfig Config = FUnrealMcpConfig::LoadAndResolve(DotEnv);
 
-	// §7/§8 enable-map: apply the §8 `enabledTools` env whitelist and the persisted §7 `disabledTools` blocklist to
-	// the registry BEFORE the bridge starts accepting, so the FIRST manifest a sidecar reads on handshake already
-	// reflects them (excluded ProxyTools are never created sidecar-side, so they never appear in tools/list). The
-	// registry RETAINS both filters, so a later §5 extension hot-reload re-applies them to the rebuilt tools.
+	// §7/§8: apply the §8 `enabledTools` env whitelist and the persisted §7 `hiddenTools` Visible toggles to the
+	// registry BEFORE the bridge starts accepting, so the FIRST manifest a sidecar reads on handshake already reflects
+	// them (a tool outside the whitelist is not in the manifest; a hidden tool is, flagged hidden, so the sidecar
+	// leaves it out of tools/list but still runs it when called by name). The registry RETAINS both, so a later §5
+	// extension hot-reload re-applies them to the rebuilt tools.
 	Registry->SetEnabledToolsFilter(Config.EnabledTools);
-	Registry->ApplyDisabledTools(Config.DisabledTools);
-	if (Config.DisabledTools.Num() > 0)
+	Registry->ApplyHiddenTools(Config.HiddenTools);
+	if (Config.HiddenTools.Num() > 0)
 	{
-		UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] applied %d disabled tool(s) from the §8 enable-map (%d/%d tools enabled)."),
-			Config.DisabledTools.Num(), Registry->NumEnabled(), Registry->Num());
+		UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] applied %d hidden tool(s) from the §8 config (%d/%d tools visible in tools/list)."),
+			Config.HiddenTools.Num(), Registry->NumVisibleTools(), Registry->Num());
 	}
 
 	const TSharedPtr<FJsonObject> EffectiveConfig = Config.BuildEffectiveConnectionConfig();
@@ -318,15 +319,15 @@ void FUnrealMcpEditorCoordinator::Startup()
 	{
 		return ServerPtr && ServerPtr->IsRunning();
 	};
-	// §7 per-tool enable-map: a Tools-window toggle re-applies the disabled set to the registry and re-pushes the
-	// manifest so the sidecar's tools/list drops/restores the toggled tool over the wire (§2.2). The view-model
+	// §7 per-tool Visible toggle: a Tools-window toggle re-applies the hidden set to the registry and re-pushes the
+	// manifest so the sidecar's tools/list hides/shows the toggled tool over the wire (§2.2). The view-model
 	// already persisted the choice to the §8 store before invoking this; here we only mutate the live registry +
 	// push. Runs on the game thread (the UI calls it there), matching the §2.2 dynamic-re-registration contract.
 	FUnrealMcpToolRegistry* RegistryPtr = Registry.Get();
-	ViewModel->OnToolEnablementChanged = [RegistryPtr, BridgeServerPtr](const TArray<FString>& DisabledTools)
+	ViewModel->OnToolVisibilityChanged = [RegistryPtr, BridgeServerPtr](const TArray<FString>& HiddenTools)
 	{
 		if (RegistryPtr)
-			RegistryPtr->ApplyDisabledTools(DisabledTools);
+			RegistryPtr->ApplyHiddenTools(HiddenTools);
 		if (BridgeServerPtr)
 			BridgeServerPtr->PushManifest();
 	};
@@ -767,7 +768,7 @@ void FUnrealMcpEditorCoordinator::Shutdown()
 		ViewModel->OnSendAuth = nullptr;
 		ViewModel->OnEnsureSidecarStarted = nullptr; // issue #99: captures the raw sidecar-manager pointer freed below
 		ViewModel->OnOpenBrowser = nullptr;
-		ViewModel->OnToolEnablementChanged = nullptr; // captures the raw registry/bridge pointers freed below
+		ViewModel->OnToolVisibilityChanged = nullptr; // captures the raw registry/bridge pointers freed below
 		// §7 in-UI local-server sinks capture the raw FUnrealMcpServerManager* freed below — null before that.
 		ViewModel->OnStartLocalServer = nullptr;
 		ViewModel->OnStopLocalServer = nullptr;

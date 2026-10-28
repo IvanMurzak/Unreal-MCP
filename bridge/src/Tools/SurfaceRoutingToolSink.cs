@@ -27,7 +27,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
     /// (revision guard, reconnect reset, remove → changed → add → toggle) completely untouched: the registrar
     /// still sees one flat tool set keyed by name, exactly as before. The only thing this class must remember
     /// is WHICH surface each registered name landed on, because <see cref="RemoveTool"/> and
-    /// <see cref="SetToolEnabled"/> are given a bare name with no descriptor. A tool that CHANGES surface
+    /// <see cref="SetToolVisible"/> are given a bare name with no descriptor. A tool that CHANGES surface
     /// arrives as a §2.2 "changed" entry (ToolType is part of the descriptor's structural signature), i.e.
     /// remove-then-add — and the remove consults the recorded surface, so the old proxy is dropped from the
     /// manager it actually lived on.
@@ -92,15 +92,15 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
             return _standard.RemoveTool(name) | _system.RemoveTool(name);
         }
 
-        public bool SetToolEnabled(string name, bool enabled)
+        public bool SetToolVisible(string name, bool visible)
         {
             if (_routed.TryGetValue(name, out var surface))
             {
                 return surface == McpToolType.System
-                    ? _system.SetToolEnabled(name, enabled)
-                    : _standard.SetToolEnabled(name, enabled);
+                    ? _system.SetToolVisible(name, visible)
+                    : _standard.SetToolVisible(name, visible);
             }
-            return _standard.SetToolEnabled(name, enabled) | _system.SetToolEnabled(name, enabled);
+            return _standard.SetToolVisible(name, visible) | _system.SetToolVisible(name, visible);
         }
     }
 }

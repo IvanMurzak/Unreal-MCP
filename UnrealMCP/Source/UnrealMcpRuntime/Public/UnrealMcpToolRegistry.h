@@ -235,7 +235,13 @@ struct UNREALMCPRUNTIME_API FUnrealMcpRegisteredTool
 	bool bDestructiveHint = false;
 	bool bIdempotentHint = false;
 	bool bOpenWorldHint = false;
+	/** Served at all: false only when the §8 `enabledTools` whitelist excludes the tool (not in the manifest, refused by Execute). */
 	bool bEnabled = true;
+	/**
+	 * Listed in tools/list — the §7 per-tool Visible toggle (`hiddenTools`). Listing only: a hidden tool stays in the
+	 * manifest (wire key `enabled: false`, excluded from the schema hash) and still runs when called by name.
+	 */
+	bool bVisible = true;
 	FString ExtensionId = TEXT("core");
 	FString SchemaHash;
 	FUnrealMcpToolHandler Handler;
@@ -311,6 +317,8 @@ struct UNREALMCPRUNTIME_API FUnrealMcpToolRegistryTraits
 	static const TCHAR* KeyNoun() { return TEXT("name"); }
 	static const TCHAR* ManifestType() { return TEXT("tool-manifest"); }
 	static const TCHAR* ManifestArrayKey() { return TEXT("tools"); }
+	/** The §7 blocklist (`hiddenTools`) only hides a tool from tools/list; it still runs when called by name. */
+	static constexpr bool bBlocklistHides = true;
 	/** True iff @p Name is a valid kebab-case tool id (non-empty; lowercase letters/digits with single internal hyphens). */
 	static bool IsValidKey(const FString& Name);
 	/** Validate a tool descriptor for the §5 isolation contract. Returns false + a reason on the first problem. */
@@ -353,35 +361,45 @@ public:
 
 	/**
 	 * True iff @p Name passes the §8 EnabledTools whitelist gate — the STATIC env-driven dimension of the
-	 * served predicate, independent of the §7 runtime blocklist. The §7 MCP Tools window reads this to surface
-	 * whitelist-gated tools, which the per-tool UI toggle cannot re-enable.
+	 * served predicate, independent of the §7 Visible toggle. The §7 MCP Tools window reads this to surface
+	 * whitelist-gated tools, which the per-tool Visible toggle cannot serve.
 	 */
 	bool PassesEnabledToolsWhitelist(const FString& Name) const { return PassesWhitelist(Name); }
 
 	/**
-	 * Set one tool's enabled flag directly — a GRANULAR helper, NOT the production §7 toggle (that path is
-	 * view-model → OnToolEnablementChanged → ApplyDisabledTools, a whole-blocklist re-apply). Used by tests +
-	 * any future single-tool caller. Does NOT update the retained whitelist/blocklist. Game-thread only.
+	 * Set one tool's Visible flag directly — a GRANULAR helper, NOT the production §7 toggle (that path is
+	 * view-model → OnToolVisibilityChanged → ApplyHiddenTools, a whole-list re-apply). Used by tests + any future
+	 * single-tool caller. Does NOT update the retained whitelist/blocklist. Game-thread only.
 	 */
-	bool SetToolEnabled(const FString& Name, bool bEnabled) { return SetEnabled(Name, bEnabled); }
+	bool SetToolVisible(const FString& Name, bool bVisible) { return SetVisible(Name, bVisible); }
+	/** Count of tools that are served and listed in tools/list. */
+	int32 NumVisibleTools() const { return NumVisible(); }
+
+	UE_DEPRECATED(5.5, "Renamed to SetToolVisible: the per-tool flag only controls whether a tool is listed in tools/list; tools/call still runs it.")
+	bool SetToolEnabled(const FString& Name, bool bEnabled) { return SetToolVisible(Name, bEnabled); }
 
 	/**
 	 * Set the §8 env whitelist (UNREAL_MCP_TOOLS / Config.EnabledTools). RETAINED, re-evaluated on every
-	 * re-registration + ApplyDisabledTools re-apply. Combined effective rule (§8): served iff (whitelist empty
-	 * OR in whitelist) AND NOT in the blocklist. Game-thread only.
+	 * re-registration + ApplyHiddenTools re-apply. A tool outside a non-empty whitelist is not served at all (not in
+	 * the manifest, refused by Execute); the Visible toggle cannot override that. Game-thread only.
 	 */
 	void SetEnabledToolsFilter(const TArray<FString>& EnabledTools) { SetWhitelistFilter(EnabledTools); }
 
 	/**
-	 * Apply the persisted §7 per-tool enable-map (the MCP Tools window's `disabledTools` blocklist). RETAINED,
-	 * so an extension hot-reload that re-registers tools FRESH re-applies the blocklist rather than resurrecting
-	 * a disabled one; re-applying never clobbers the whitelist. Idempotent. Game-thread only.
+	 * Apply the persisted §7 per-tool Visible toggles (the MCP Tools window's `hiddenTools` list). A hidden tool is
+	 * left out of tools/list but stays in the manifest and still runs when called by name. RETAINED, so an extension
+	 * hot-reload that re-registers tools FRESH re-applies it rather than showing a hidden one again; re-applying never
+	 * clobbers the whitelist. Idempotent. Game-thread only.
 	 */
-	void ApplyDisabledTools(const TArray<FString>& DisabledNames) { ApplyBlocklist(DisabledNames); }
+	void ApplyHiddenTools(const TArray<FString>& HiddenNames) { ApplyBlocklist(HiddenNames); }
+
+	UE_DEPRECATED(5.5, "Renamed to ApplyHiddenTools: a listed tool is only hidden from tools/list; tools/call still runs it.")
+	void ApplyDisabledTools(const TArray<FString>& HiddenNames) { ApplyHiddenTools(HiddenNames); }
 
 	/**
 	 * Execute a tool by name on the CURRENT thread (the dispatcher has already marshalled to the game
-	 * thread). Returns an error result for an unknown / disabled tool. The handler owns argument interpretation.
+	 * thread). Returns an error result for an unknown tool or one the §8 whitelist does not serve; a tool hidden by
+	 * the Visible toggle runs like any other. The handler owns argument interpretation.
 	 */
 	FUnrealMcpToolResult Execute(const FString& Name, const FUnrealMcpToolCall& Call) const;
 };

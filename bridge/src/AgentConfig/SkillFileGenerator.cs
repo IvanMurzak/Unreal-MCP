@@ -99,7 +99,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
         /// Generate one SKILL.md per tool in <paramref name="tools"/> under <paramref name="skillsRootAbsolute"/>.
         /// Creates the folder tree, overwrites existing files (idempotent), prunes stale generator-owned folders.
         /// Never throws — a write failure is reported in the result. Every tool is documented regardless of its
-        /// enabled flag (the docs stay useful even for a tool hidden at runtime).
+        /// visible flag (the docs stay useful even for a tool hidden from tools/list).
         ///
         /// <para>
         /// SYSTEM tools are the ONE exclusion (docs/ARCHITECTURE.md §2.4): a skill file is agent-facing

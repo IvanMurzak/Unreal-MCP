@@ -154,6 +154,8 @@ struct UNREALMCPRUNTIME_API FUnrealMcpResourceRegistryTraits
 	static const TCHAR* KeyNoun() { return TEXT("uri"); }
 	static const TCHAR* ManifestType() { return TEXT("resource-manifest"); }
 	static const TCHAR* ManifestArrayKey() { return TEXT("resources"); }
+	/** The §7 blocklist disables a resource (see TUnrealMcpRegistry). */
+	static constexpr bool bBlocklistHides = false;
 	/** True iff @p Uri is a valid resource URI (non-empty, no control/whitespace chars). */
 	static bool IsValidKey(const FString& Uri);
 	/** Validate a resource descriptor for the §5 isolation contract. Returns false + a reason on the first problem. */
@@ -202,7 +204,7 @@ public:
 	/** Set the §8 env whitelist. Mirrors the tool registry's SetEnabledToolsFilter exactly. Game-thread only. */
 	void SetEnabledResourcesFilter(const TArray<FString>& EnabledResources) { SetWhitelistFilter(EnabledResources); }
 
-	/** Apply the persisted §7 per-resource enable-map (blocklist). Mirrors the tool registry's ApplyDisabledTools. Game-thread only. */
+	/** Apply the persisted §7 per-resource enable-map (blocklist): a listed resource is disabled. Game-thread only. */
 	void ApplyDisabledResources(const TArray<FString>& DisabledUris) { ApplyBlocklist(DisabledUris); }
 
 	/**

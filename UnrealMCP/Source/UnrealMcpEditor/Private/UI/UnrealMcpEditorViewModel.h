@@ -110,12 +110,12 @@ public:
 	/** Open a verification URL in the system browser (device-code flow). */
 	TFunction<void(const FString& /*Url*/)> OnOpenBrowser;
 	/**
-	 * Apply the §7 per-tool enable-map change: the runtime re-applies the disabled set to the tool registry and
-	 * re-pushes the manifest so the sidecar's tools/list drops/restores the toggled tool over the wire. Invoked
-	 * with the CURRENT persisted disabled-tool name list. Optional; a spec may wire a recording stub. This is
-	 * distinct from OnPushConfig: tool enablement travels via the tool-manifest (§2.2), NOT the §1.3 `config`.
+	 * Apply a §7 per-tool Visible toggle: the runtime re-applies the hidden set to the tool registry and re-pushes the
+	 * manifest so the sidecar's tools/list hides/shows the toggled tool over the wire (a hidden tool still runs when
+	 * called by name). Invoked with the CURRENT persisted hidden-tool name list. Optional; a spec may wire a recording
+	 * stub. This is distinct from OnPushConfig: tool visibility travels via the tool-manifest (§2.2), NOT the §1.3 `config`.
 	 */
-	TFunction<void(const TArray<FString>& /*DisabledTools*/)> OnToolEnablementChanged;
+	TFunction<void(const TArray<FString>& /*HiddenTools*/)> OnToolVisibilityChanged;
 
 	// --- Local MCP-server (gamedev-mcp-server) control sinks (§7 in-UI Start, issue #95). ---
 
@@ -313,19 +313,19 @@ public:
 	/** Connected AI-agent labels surfaced in the §7 AI-agents section (from the last `status`). */
 	const TArray<FString>& GetAiAgents() const { return AiAgents; }
 
-	// --- §7 per-tool enable-map (the MCP Tools window). ---
+	// --- §7 per-tool Visible toggles (the MCP Tools window). ---
 
-	/** The persisted §8 disabled-tool blocklist (names the user turned off; empty = all enabled). */
-	const TArray<FString>& GetDisabledTools() const { return Config.DisabledTools; }
-	/** Whether @p ToolName is currently disabled (present in the §8 disabled-tool blocklist). */
-	UNREALMCPEDITOR_API bool IsToolDisabled(const FString& ToolName) const;
+	/** The persisted §8 hidden-tool list (names the user hid from tools/list; empty = all visible). */
+	const TArray<FString>& GetHiddenTools() const { return Config.HiddenTools; }
+	/** Whether @p ToolName is currently hidden from tools/list (present in the §8 hidden-tool list). */
+	UNREALMCPEDITOR_API bool IsToolHidden(const FString& ToolName) const;
 	/**
-	 * Toggle one tool's enabled state (the §7 MCP Tools window per-tool checkbox). Mutates the §8 disabled-tool
-	 * blocklist, persists the config (OnPersistConfig — so the choice survives an editor restart), then fires
-	 * OnToolEnablementChanged so the runtime excludes/restores the tool in the served manifest. A no-op change
-	 * (already in the requested state) does nothing. Game-thread only.
+	 * Show/hide one tool in tools/list (the §7 MCP Tools window per-tool Visible checkbox). A hidden tool still runs
+	 * when called by name. Mutates the §8 hidden-tool list, persists the config (OnPersistConfig — so the choice
+	 * survives an editor restart), then fires OnToolVisibilityChanged so the runtime re-flags the tool in the served
+	 * manifest. A no-op change (already in the requested state) does nothing. Game-thread only.
 	 */
-	UNREALMCPEDITOR_API void SetToolEnabled(const FString& ToolName, bool bEnabled);
+	UNREALMCPEDITOR_API void SetToolVisible(const FString& ToolName, bool bVisible);
 
 	// --- §7 AI agent configurators panel (persisted dropdown selection). ---
 

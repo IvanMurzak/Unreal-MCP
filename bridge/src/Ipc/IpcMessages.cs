@@ -98,7 +98,17 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
         [JsonPropertyName("destructiveHint")] public bool? DestructiveHint { get; set; }
         [JsonPropertyName("idempotentHint")] public bool? IdempotentHint { get; set; }
         [JsonPropertyName("openWorldHint")] public bool? OpenWorldHint { get; set; }
-        [JsonPropertyName("enabled")] public bool Enabled { get; set; } = true;
+
+        /// <summary>
+        /// Whether the tool is listed in <c>tools/list</c> (the Tools window's per-tool Visible toggle). Listing only:
+        /// a hidden tool still runs when called by name. The IPC wire key stays <c>"enabled"</c>: it is the key the
+        /// prompt and resource descriptors share, the plugin's schema hash already excludes it (§2.2), and keeping it
+        /// leaves the plugin ⇄ sidecar protocol unchanged.
+        /// </summary>
+        [JsonPropertyName("enabled")] public bool Visible { get; set; } = true;
+
+        /// <inheritdoc />
+        bool IManifestDescriptor.Enabled { get => Visible; set => Visible = value; }
 
         /// <summary>
         /// The served SURFACE (docs/ARCHITECTURE.md §2.4): <c>"standard"</c> (default) or <c>"system"</c>. The

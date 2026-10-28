@@ -48,7 +48,10 @@ struct UNREALMCPRUNTIME_API FUnrealMcpExtensionRegistrationResult
  *
  * A `TTraits` policy supplies the kind-specific statics (key accessor, validation, manifest strings,
  * noun). `TEntry` must expose: `bool bEnabled`, `FString ExtensionId`, `FString SchemaHash`, and
- * `TSharedPtr<FJsonObject> ToDescriptorJson() const`.
+ * `TSharedPtr<FJsonObject> ToDescriptorJson() const`. `TTraits::bBlocklistHides` picks what the §7 blocklist does:
+ * false (prompts / resources) — a listed entry is disabled (excluded from the manifest, refused at dispatch);
+ * true (tools) — a listed entry only gets `bVisible = false` (still in the manifest, flagged hidden, still dispatched),
+ * so `TEntry` must then also expose `bool bVisible`.
  *
  * Threading contract (unchanged from the originals): NOT thread-safe. All mutation happens at startup
  * before the bridge accepts, so the bridge may read `BuildManifestJson()` from its IPC reader thread on
@@ -166,10 +169,10 @@ public:
 		InEntry.SchemaHash = ComputeSchemaHash(InEntry);
 		const FString Key = TTraits::KeyOf(InEntry);
 		// §7/§8 retention: a (re-)registered entry inherits the retained whitelist/blocklist immediately, so an
-		// extension hot-reload (remove + re-register FRESH, bEnabled defaulting true) cannot resurrect an entry
-		// the user disabled, and a non-empty §8 whitelist still hides a non-whitelisted entry a rebuild re-adds.
-		// The schema hash above excludes the enabled flag (§2.2), so flipping bEnabled here does not perturb it.
-		InEntry.bEnabled = ShouldBeEnabled(Key);
+		// extension hot-reload (remove + re-register FRESH, flags defaulting true) cannot resurrect an entry the
+		// user disabled / hid, and a non-empty §8 whitelist still excludes a non-whitelisted entry a rebuild re-adds.
+		// The schema hash above excludes the enabled flag (§2.2), so flipping the flags here does not perturb it.
+		ApplyFilter(Key, InEntry);
 		Entries.Add(Key, MoveTemp(InEntry));
 		++Revision;
 		UE_LOG(LogUnrealMcp, Verbose, TEXT("[Unreal-MCP] registered %s '%s' (revision %d)."), TTraits::KindNoun(), *Key, Revision);
@@ -266,6 +269,50 @@ public:
 	}
 
 	/**
+	 * Set one entry's Visible flag directly (only kinds whose traits set `bBlocklistHides`, i.e. tools; a no-op
+	 * returning false otherwise) — a GRANULAR helper like SetEnabled, NOT the production §7 toggle. A hidden entry
+	 * stays in BuildManifestJson flagged `enabled: false` (the wire key) and stays dispatchable. Bumps the revision
+	 * on a real change. Unknown key / no-op change: returns false. Game-thread only.
+	 */
+	bool SetVisible(const FString& Key, bool bVisible)
+	{
+		if constexpr (TTraits::bBlocklistHides)
+		{
+			TEntry* Found = Entries.Find(Key);
+			if (Found == nullptr || Found->bVisible == bVisible)
+				return false;
+			Found->bVisible = bVisible;
+			++Revision;
+			UE_LOG(LogUnrealMcp, Verbose, TEXT("[Unreal-MCP] %s '%s' %s (revision %d)."),
+				TTraits::KindNoun(), *Key, bVisible ? TEXT("visible") : TEXT("hidden"), Revision);
+			return true;
+		}
+		else
+		{
+			return false;
+		}
+	}
+
+	/** Count of entries that are served AND listed (equals NumEnabled for kinds without a Visible flag). */
+	int32 NumVisible() const
+	{
+		if constexpr (TTraits::bBlocklistHides)
+		{
+			int32 Count = 0;
+			for (const TPair<FString, TEntry>& Pair : Entries)
+			{
+				if (Pair.Value.bEnabled && Pair.Value.bVisible)
+					++Count;
+			}
+			return Count;
+		}
+		else
+		{
+			return NumEnabled();
+		}
+	}
+
+	/**
 	 * True iff @p Key passes the §8 whitelist gate (the whitelist is empty, or the key is listed) — the
 	 * STATIC env-driven dimension of the served predicate, independent of the §7 blocklist.
 	 */
@@ -285,8 +332,8 @@ public:
 	}
 
 	/**
-	 * Apply the persisted §7 per-entry enable-map (blocklist): every entry whose key is in @p BlockedKeys is
-	 * disabled, the rest follow the §8 whitelist gate. RETAINED, so an extension hot-reload that re-registers
+	 * Apply the persisted §7 per-entry map (blocklist): every entry whose key is in @p BlockedKeys is disabled (tools:
+	 * hidden from the list but still served, see `bBlocklistHides`), the rest follow the §8 whitelist gate. RETAINED, so an extension hot-reload that re-registers
 	 * entries FRESH re-applies the blocklist rather than resurrecting a disabled one. Recomputes against BOTH
 	 * the retained whitelist and this blocklist, so re-applying the blocklist never clobbers the whitelist.
 	 * Idempotent; bumps the revision once if any flag changed. Game-thread only.
@@ -330,18 +377,39 @@ protected:
 	 */
 	bool ShouldBeEnabled(const FString& Key) const { return Enablement.ShouldBeEnabled(Key); }
 
-	/** Re-evaluate every registered entry's bEnabled against ShouldBeEnabled; bumps the revision once if any changed. */
+	/**
+	 * Apply the retained filter to one entry; returns true when a flag changed. Prompts / resources: served iff
+	 * ShouldBeEnabled. Tools (`bBlocklistHides`): served iff the §8 whitelist passes, and the §7 blocklist only clears
+	 * `bVisible` — a hidden tool is still in the manifest (flagged hidden) and still runs when called by name.
+	 */
+	bool ApplyFilter(const FString& Key, TEntry& Entry) const
+	{
+		if constexpr (TTraits::bBlocklistHides)
+		{
+			const bool bServed = Enablement.PassesWhitelist(Key);
+			const bool bVisible = !Enablement.IsBlocked(Key);
+			const bool bChanged = Entry.bEnabled != bServed || Entry.bVisible != bVisible;
+			Entry.bEnabled = bServed;
+			Entry.bVisible = bVisible;
+			return bChanged;
+		}
+		else
+		{
+			const bool bServed = ShouldBeEnabled(Key);
+			const bool bChanged = Entry.bEnabled != bServed;
+			Entry.bEnabled = bServed;
+			return bChanged;
+		}
+	}
+
+	/** Re-apply the retained filter to every registered entry; bumps the revision once if any flag changed. */
 	void RecomputeEnablement()
 	{
 		bool bAnyChanged = false;
 		for (TPair<FString, TEntry>& Pair : Entries)
 		{
-			const bool bShouldEnable = ShouldBeEnabled(Pair.Key);
-			if (Pair.Value.bEnabled != bShouldEnable)
-			{
-				Pair.Value.bEnabled = bShouldEnable;
+			if (ApplyFilter(Pair.Key, Pair.Value))
 				bAnyChanged = true;
-			}
 		}
 		if (bAnyChanged)
 			++Revision;

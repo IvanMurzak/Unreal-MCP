@@ -11,9 +11,11 @@
  *
  *   - Whitelist (§8, the env `UNREAL_MCP_TOOLS` / `Config.EnabledTools` dimension): when EMPTY there is no filter
  *     (the common case — every entry passes the whitelist gate); when non-empty only listed keys pass.
- *   - Blocklist (§7, the persisted per-entry disable-map the MCP window writes): a listed key is always disabled.
+ *   - Blocklist (§7, the persisted per-entry map the MCP window writes): for prompts / resources a listed key is
+ *     disabled; for TOOLS it is the per-tool Visible toggle (`hiddenTools`) — a listed tool is only hidden from
+ *     tools/list and still runs when called by name (the tool registry's traits set `bBlocklistHides`).
  *
- * The combined effective-served rule is `(whitelist empty OR member) AND NOT blocklisted`. All three registries
+ * The combined effective-served rule is `(whitelist empty OR member) AND NOT blocklisted` (tools: whitelist only). All three registries
  * carried verbatim copies of these two TSet<FString> members plus the `PassesWhitelist` / `ShouldBeEnabled`
  * predicates; this one small value type replaces the triplication. It is RETAINED on the registry so a later
  * re-registration (extension hot-reload) and every blocklist re-apply re-evaluate against both sets — a blocklist
@@ -26,13 +28,19 @@ struct UNREALMCPRUNTIME_API FUnrealMcpEnablementFilter
 {
 	/** §8 env whitelist; EMPTY means "no filter" (every key passes the whitelist gate). */
 	TSet<FString> Whitelist;
-	/** §7 persisted blocklist (the window's `disabled*` map); a member key is always disabled. */
+	/** §7 persisted blocklist (prompts / resources: disabled; tools: the `hiddenTools` map, hidden from the list only). */
 	TSet<FString> Blocklist;
 
 	/** The STATIC §8 whitelist dimension alone: passes iff the whitelist is empty OR contains @p Key. */
 	bool PassesWhitelist(const FString& Key) const
 	{
 		return Whitelist.IsEmpty() || Whitelist.Contains(Key);
+	}
+
+	/** True iff @p Key is in the §7 blocklist. */
+	bool IsBlocked(const FString& Key) const
+	{
+		return Blocklist.Contains(Key);
 	}
 
 	/** The combined effective-served predicate: served iff (whitelist empty OR member) AND NOT blocklisted. */

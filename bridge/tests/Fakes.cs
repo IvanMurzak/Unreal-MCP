@@ -141,7 +141,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
     public sealed class FakeToolSink : IProxyToolSink
     {
         public readonly Dictionary<string, ProxyTool> Tools = new();
-        public readonly Dictionary<string, bool> Enabled = new();
+        public readonly Dictionary<string, bool> Visible = new();
 
         public bool HasTool(string name) => Tools.ContainsKey(name);
 
@@ -150,21 +150,21 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             if (Tools.ContainsKey(name))
                 return false;
             Tools[name] = tool;
-            Enabled[name] = tool.Enabled;
+            Visible[name] = tool.Visible;
             return true;
         }
 
         public bool RemoveTool(string name)
         {
-            Enabled.Remove(name);
+            Visible.Remove(name);
             return Tools.Remove(name);
         }
 
-        public bool SetToolEnabled(string name, bool enabled)
+        public bool SetToolVisible(string name, bool visible)
         {
             if (!Tools.ContainsKey(name))
                 return false;
-            Enabled[name] = enabled;
+            Visible[name] = visible;
             return true;
         }
     }

@@ -54,7 +54,7 @@ Unlike Unity and Godot (C# engines that host the .NET `McpPlugin` in-process), U
 - ✔️ **Visual feedback** — Capture viewport, game-view, camera, and isolated-actor screenshots the LLM can inspect directly
 - ✔️ **Custom Tools, Prompts & Resources** — Register **your own** AI Tools, prompt templates, and resources from any UE plugin with **no fork** — one public, modular-feature contract ([Customize Tools, Prompts & Resources](#customize-tools-prompts--resources))
 - ✔️ **Cloud or self-hosted** — Connect to `ai-game.dev` out of the box, or point at your own [GameDev-MCP-Server](https://github.com/IvanMurzak/GameDev-MCP-Server)
-- ✔️ **Per-tool enable / disable** — Flip any tool on or off from the **MCP Tools** window; the toggle is enforced at the execution boundary, not just hidden
+- ✔️ **Per-tool visibility** — Choose which tools are listed in `tools/list` from the **MCP Tools** window (a hidden tool still runs when called by name)
 
 ![AI Game Developer — Unreal MCP](https://github.com/IvanMurzak/Unreal-MCP/blob/main/docs/img/promo/hazzard-divider.svg?raw=true)
 
@@ -69,7 +69,7 @@ Unlike Unity and Godot (C# engines that host the .NET `McpPlugin` in-process), U
 - [Updating the plugin](#updating-the-plugin)
 - [First run](#first-run)
 - [Tools](#tools) — all 6 families, 26 tools (+ 3 system tools)
-- [Per-tool enable / disable](#per-tool-enable--disable)
+- [Per-tool visibility](#per-tool-visibility)
 - [`unreal-mcp-cli`](#unreal-mcp-cli)
 - [Customize Tools, Prompts & Resources](#customize-tools-prompts--resources)
 - [Runtime usage (in-game)](#runtime-usage-in-game)
@@ -294,21 +294,18 @@ to (or spend tokens in) an AI session — the same split Unity and Godot use for
 
 ![AI Game Developer — Unreal MCP](https://github.com/IvanMurzak/Unreal-MCP/blob/main/docs/img/promo/hazzard-divider.svg?raw=true)
 
-# Per-tool enable / disable
+# Per-tool visibility
 
-Every tool can be individually enabled or disabled from the **MCP Tools** window — the standalone **MCP Tools** tab (registered under the editor's **Tools** menu). The window shows each tool's title, family, and description, plus an "N / M tools enabled" summary line. Disabling a tool:
+Every tool has a **Visible** checkbox in the **MCP Tools** window — the standalone **MCP Tools** tab (registered under the editor's **Tools** menu). The window shows each tool's title, family, and description, plus an "N / M tools visible" summary line. **Visible** only decides whether the tool is **listed in the MCP `tools/list`**, i.e. whether AI agents see it. It is not an access control: a hidden tool still runs when a client calls it by name (`tools/call`).
 
-- **removes it from the served manifest entirely** — it never appears in the MCP `tools/list`; and
-- is **enforced at the execution boundary too** — even if a stale `tools/list` is dispatched, a disabled tool is rejected at `Execute()` rather than run.
+Two settings apply (see ARCHITECTURE §7/§8):
 
-Two filters combine to decide whether a tool is served (see ARCHITECTURE §7/§8):
+- the **`enabledTools` whitelist** (overridable via `UNREAL_MCP_TOOLS`) decides whether a tool is **served at all** — when non-empty, only listed tools are served, and any other tool is neither listed nor callable (`Execute()` refuses it); empty means "no filter";
+- the **`hiddenTools` list** — the Visible checkboxes you flip in the UI — hides a served tool from `tools/list`.
 
-- a **whitelist** (`enabledTools`, overridable via `UNREAL_MCP_TOOLS`) — when non-empty, only listed tools are served; empty means "no filter"; **and**
-- a **blocklist** (`disabledTools`) — the per-tool toggles you flip in the UI.
+Both are persisted across editor sessions and survive an extension hot-reload (a re-registered tool inherits the retained setting, so a rebuild never shows a tool you hid). A config file from an older plugin version keeps working: its `disabledTools` list is read as `hiddenTools`, and the next save writes `hiddenTools`.
 
-A tool is served **iff** it passes the whitelist **and** is not in the blocklist. Both sets are persisted across editor sessions and survive an extension hot-reload (a re-registered tool inherits the retained toggle, so a rebuild can never silently re-enable a tool you disabled).
-
-All connection settings live in the single **AI Game Developer** main window's Connection section (there is no separate Settings tab or Project-Settings page — Unity-MCP parity). The **MCP Prompts** and **MCP Resources** windows are wired but ship empty in this release — each renders a subdued empty-state message (the "N / M enabled" summary is unique to the Tools window).
+All connection settings live in the single **AI Game Developer** main window's Connection section (there is no separate Settings tab or Project-Settings page — Unity-MCP parity). The **MCP Prompts** and **MCP Resources** windows are wired but ship empty in this release — each renders a subdued empty-state message (the "N / M visible" summary is unique to the Tools window).
 
 ![AI Game Developer — Unreal MCP](https://github.com/IvanMurzak/Unreal-MCP/blob/main/docs/img/promo/hazzard-divider.svg?raw=true)
 
@@ -482,7 +479,7 @@ IModularFeatures::Get().RegisterModularFeature(
 - **Auto-discovery & hot-reload.** Unreal-MCP enumerates every registered provider (`UnrealMcpToolProvider` / `UnrealMcpPromptProvider` / `UnrealMcpResourceProvider`) on boot, and subscribes to register/unregister events — so loading or unloading your plugin at any time triggers a **registry rebuild** and a **manifest revision bump**, and the sidecar diffs the new manifest and adds/removes the affected tools / prompts / resources automatically. You never push anything yourself.
 - **Deterministic merge.** Providers are merged in ascending `GetExtensionId()` order; within one provider, entries register in declaration order. Your `GetExtensionId()` is stamped onto everything you contribute (don't call `.ExtensionId(...)` yourself).
 - **Per-extension isolation.** Each descriptor is validated (a tool/prompt needs a kebab-case name + well-formed schema + bound handler; a resource needs a non-empty URI + handler). An **invalid** or **duplicate** entry (duplicate tool/prompt **name**, or duplicate resource **URI**) is dropped/rejected and the reason is recorded on **your** extension's record — your other valid entries, and every other extension, are unaffected. (UE builds without C++ exceptions, so isolation is descriptor-level, not handler-body-level; validate inputs and fail gracefully with the `Error(...)` result helpers.)
-- **Toggles & enable/disable.** Extension-contributed tools are toggled in the **MCP Tools** window like the built-ins; a disabled extension contributes nothing to any manifest. (The **MCP Prompts** / **MCP Resources** windows are wired but still render empty in this release — see [Per-tool enable / disable](#per-tool-enable--disable) — so prompt/resource toggling from the UI is a follow-up; registration and use work today.)
+- **Toggles & enable/disable.** Extension-contributed tools get the same **Visible** checkbox in the **MCP Tools** window as the built-ins; a disabled extension contributes nothing to any manifest. (The **MCP Prompts** / **MCP Resources** windows are wired but still render empty in this release — see [Per-tool visibility](#per-tool-visibility) — so prompt/resource toggling from the UI is a follow-up; registration and use work today.)
 
 **Learn more:**
 
