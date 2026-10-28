@@ -202,17 +202,21 @@ void FUnrealMcpSourceToolsSpec::Define()
 
 	Describe("compile summary", [this]()
 	{
-		It("says why UBT stopped and that a compiler-clean build is not live in the running editor", [this]()
+		It("says why UBT stopped and what that means for the running editor", [this]()
 		{
 			const FString Locked = UnrealMcpSourceTools::DescribeUbtResult(TEXT("GameEditor"), 0, 0, 6, 52.0,
 				TEXT("Building GameEditor...\n[3/4] Link UnrealEditor-Game.dll\nLINK : fatal error LNK1104: cannot open file 'UnrealEditor-Game.dll'\nTotal time 52s\n"));
 			TestTrue(*FString::Printf(TEXT("counts and code (%s)"), *Locked), Locked.StartsWith(TEXT("Compile (GameEditor, UBT): 0 error(s), 0 warning(s); return code 6")));
 			TestTrue(TEXT("the reason line"), Locked.Contains(TEXT("UBT: LINK : fatal error LNK1104")));
-			TestTrue(TEXT("not live until Live Coding or a restart"), Locked.Contains(TEXT("NOT live yet")) && Locked.Contains(TEXT("restart")));
+			TestTrue(TEXT("not live: build with the editor closed"), Locked.Contains(TEXT("NOT live")) && Locked.Contains(TEXT("editor closed")));
+
+			const FString LiveCoding = UnrealMcpSourceTools::DescribeUbtResult(TEXT("GameEditor"), 0, 0, 6, 2.0,
+				TEXT("Unable to build while Live Coding is active. Exit the editor and game, or press Ctrl+Alt+F11 if iterating on code in the editor or game\n"));
+			TestTrue(TEXT("Live Coding refusal: nothing was built"), LiveCoding.Contains(TEXT("UBT: Unable to build while Live Coding is active")) && LiveCoding.Contains(TEXT("Nothing was built")));
 
 			const FString Broken = UnrealMcpSourceTools::DescribeUbtResult(TEXT("GameEditor"), 2, 0, 6, 10.0,
 				TEXT("Foo.cpp(3): error C2143: syntax error\nResult: Failed (OtherCompilationError)\n"));
-			TestTrue(TEXT("a broken build names its last failure"), Broken.Contains(TEXT("UBT: Result: Failed")));
+			TestTrue(*FString::Printf(TEXT("a broken build names the compiler error (%s)"), *Broken), Broken.Contains(TEXT("UBT: Foo.cpp(3): error C2143")));
 			TestFalse(TEXT("a broken build says nothing about loading"), Broken.Contains(TEXT("NOT live")));
 
 			const FString Clean = UnrealMcpSourceTools::DescribeUbtResult(TEXT("GameEditor"), 0, 1, 0, 30.0, TEXT("Result: Succeeded\n"));
@@ -248,7 +252,7 @@ void FUnrealMcpSourceToolsSpec::Define()
 			const FUnrealMcpToolResult CreateResult = RunSourceTool(Registry, TEXT("source-create-class"), Create);
 			TestTrue(TEXT("create succeeded"), CreateResult.bSuccess);
 			TestTrue(*FString::Printf(TEXT("says a new class needs a restart, a Blueprint does not (%s)"), *CreateResult.Message),
-				CreateResult.Message.Contains(TEXT("only after a restart")) && CreateResult.Message.Contains(TEXT("Blueprint")));
+				CreateResult.Message.Contains(TEXT("cannot load a new C++ class")) && CreateResult.Message.Contains(TEXT("Blueprint")));
 			const FString HeaderRel = TempModule / TEXT("SpecPawnThing.h");
 			TestTrue(TEXT("header on disk"), FPaths::FileExists(UnrealMcpSourceTools::GetProjectSourceRoot() / HeaderRel));
 

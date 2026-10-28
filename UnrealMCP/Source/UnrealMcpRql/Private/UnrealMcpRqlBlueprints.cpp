@@ -464,11 +464,11 @@ namespace UnrealMcpRqlBlueprintsLocal
 		if (!Property || !Property->HasAnyPropertyFlags(CPF_BlueprintVisible))
 		{
 			// A widget the Designer added is a variable only when its Is Variable box is ticked (text blocks start unticked).
-			const UWidgetBlueprint* Widgets = Cast<UWidgetBlueprint>(Blueprint);
+			const UBaseWidgetBlueprint* Widgets = Cast<UBaseWidgetBlueprint>(Blueprint);
 			const UWidget* Widget = Widgets && Widgets->WidgetTree ? Widgets->WidgetTree->FindWidget(FName(*Trimmed)) : nullptr;
 			if (Widget && !Widget->bIsVariable)
 				Throw(FString::Printf(TEXT("the widget '%s' of %s is not a variable yet: unreal.asset(\"%s\").Widgets | where Name == \"%s\" | set IsVariable = true"),
-					*Trimmed, *Blueprint->GetName(), *Blueprint->GetPathName(), *Trimmed));
+					*Widget->GetName(), *Blueprint->GetName(), *Blueprint->GetOutermost()->GetName(), *Widget->GetName()));
 			Throw(FString::Printf(TEXT("%s has no Blueprint variable '%s' (add one with blueprint-add-variable)"), *Blueprint->GetName(), *Trimmed));
 		}
 		if (bWrite && Property->HasAnyPropertyFlags(CPF_BlueprintReadOnly))

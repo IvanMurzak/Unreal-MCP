@@ -17,6 +17,7 @@
 #include "Components/PointLightComponent.h"
 #include "Components/TextBlock.h"
 #include "EngineUtils.h"
+#include "EditorAssetLibrary.h"
 #include "FileHelpers.h"
 #include "LevelSequence.h"
 #include "MovieScene.h"
@@ -986,6 +987,13 @@ void FUnrealMcpRqlDataModelsSpec::Define()
 			Must(TEXT("made a variable"), /* unreal.asset("@WBP@").Widgets | where Name == "Label" | set IsVariable = true */ TEXT(R"RQL({"rql":"0.1","source":{"path":["Widgets"],"on":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@WBP@"}]}},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Name"]},{"lit":"Label"}]}},{"op":"set","assign":[{"target":{"path":["IsVariable"]},"value":{"lit":true}}]}]})RQL"));
 			UWidget* Label = Made->WidgetTree->FindWidget(TEXT("Label"));
 			TestTrue(TEXT("the widget is a variable"), Label && Label->bIsVariable);
+			if (GEditor)
+			{
+				GEditor->UndoTransaction();
+				TestTrue(TEXT("undo makes it no variable again"), Label && !Label->bIsVariable);
+				GEditor->RedoTransaction();
+				TestTrue(TEXT("redo makes it a variable"), Label && Label->bIsVariable);
+			}
 			const FString Get = ResultRef(Must(TEXT("a graph reads it"), /* unreal.asset("@WBP@").EventGraph | call AddVariableGet("Label") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["EventGraph"],"on":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@WBP@"}]}},"stages":[{"op":"call","method":"AddVariableGet","args":[{"lit":"Label"}]}]})RQL")));
 			TestTrue(TEXT("a get node"), Get.StartsWith(TEXT("K2Node_VariableGet#")));
 			const TSharedPtr<FJsonObject> Compiled = Must(TEXT("compile"), /* unreal.asset("@WBP@") | call Compile() */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@WBP@"}]},"stages":[{"op":"call","method":"Compile","args":[]}]})RQL"));
@@ -993,39 +1001,47 @@ void FUnrealMcpRqlDataModelsSpec::Define()
 			TestTrue(*FString::Printf(TEXT("compiles (%s)"), *CompileResult), CompileResult.Contains(TEXT("\"Succeeded\":true")));
 			TestNotNull(TEXT("the generated class has the member"), FindFProperty<FObjectProperty>(Made->GeneratedClass, TEXT("Label")));
 
-			if (!GEditor)
-				return;
-			GEditor->UndoTransaction(); // the compile call's step
-			GEditor->UndoTransaction(); // the get node
-			GEditor->UndoTransaction(); // Is Variable
-			Label = Made->WidgetTree->FindWidget(TEXT("Label"));
-			TestTrue(TEXT("undo makes it no variable again"), Label && !Label->bIsVariable);
 		});
 	});
 
 	Describe("levels", [this]()
 	{
-		It("copies a level to a file that opens at once", [this]()
+		It("copies a level to a file that opens at once; an unsaved level is named as such", [this]()
 		{
+			UWorld* Start = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+			if (!Start || Start->GetOutermost()->IsDirty())
+			{
+				AddInfo(TEXT("skipped: the open level has unsaved changes (opening another level would drop them)"));
+				return;
+			}
+			// The other specs expect the editor's own level back (a saved map): reopen it at the end.
+			const FString Original = Start->GetOutermost()->GetName();
 			const FString Level = FString::Printf(TEXT("/Game/RqlSpecData/LV_Spec%d_%d"), Serial, FMath::Rand());
 			const FString Copy = Level + TEXT("_Copy");
-			// The other specs expect the editor's own level back (a saved map): reopen it at the end.
-			UWorld* Start = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
-			const FString Original = Start ? Start->GetOutermost()->GetName() : FString();
+			const FString Unsaved = Level + TEXT("_Unsaved");
 			Must(TEXT("a saved level"), /* editor | call NewLevel("@LV@") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"NewLevel","args":[{"lit":"@LV@"}]}]})RQL"), { { TEXT("LV"), Level } });
 			Must(TEXT("copied"), /* editor | call CopyAsset("@LV@", "@CP@") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"CopyAsset","args":[{"lit":"@LV@"},{"lit":"@CP@"}]}]})RQL"), { { TEXT("LV"), Level }, { TEXT("CP"), Copy } });
-			const FString File = FPackageName::LongPackageNameToFilename(Copy, FPackageName::GetMapPackageExtension());
-			TestTrue(TEXT("the copy is saved"), IFileManager::Get().FileExists(*File));
+			TestTrue(TEXT("the copy is saved"), FPackageName::DoesPackageExist(Copy));
 			Must(TEXT("the copy opens"), /* editor | call OpenLevel("@CP@") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"OpenLevel","args":[{"lit":"@CP@"}]}]})RQL"), { { TEXT("CP"), Copy } });
-			UWorld* Opened = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+			UWorld* Opened = GEditor->GetEditorWorldContext().World();
 			TestTrue(TEXT("the editor shows the copy"), Opened && Opened->GetOutermost()->GetName() == Copy);
+			// A level copied outside RQL stays in memory: OpenLevel says so instead of "no level".
+			UEditorAssetLibrary::DuplicateAsset(Level, Unsaved);
+			Refuses(TEXT("an unsaved level"), /* editor | call OpenLevel("@UN@") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"OpenLevel","args":[{"lit":"@UN@"}]}]})RQL"), TEXT("is not saved yet"), { { TEXT("UN"), Unsaved } });
 
-			if (!Original.IsEmpty() && FPackageName::DoesPackageExist(Original))
+			if (FPackageName::DoesPackageExist(Original))
 				UEditorLoadingAndSavingUtils::LoadMap(Original);
 			else
 				Must(TEXT("an unsaved level again"), /* editor | call NewLevel("") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"NewLevel","args":[{"lit":""}]}]})RQL"));
-			Run(/* editor | call DeleteAsset("@LV@", true) */ TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"DeleteAsset","args":[{"lit":"@LV@"},{"lit":true}]}]})RQL"), true, { { TEXT("LV"), Level } });
-			Run(/* editor | call DeleteAsset("@CP@", true) */ TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"DeleteAsset","args":[{"lit":"@CP@"},{"lit":true}]}]})RQL"), true, { { TEXT("CP"), Copy } });
+			const TSharedPtr<FJsonObject> DropLevel = Run(/* editor | call DeleteAsset("@LV@", true) */ TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"DeleteAsset","args":[{"lit":"@LV@"},{"lit":true}]}]})RQL"), true, { { TEXT("LV"), Level } });
+			const TSharedPtr<FJsonObject> DropCopy = Run(/* editor | call DeleteAsset("@CP@", true) */ TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"DeleteAsset","args":[{"lit":"@CP@"},{"lit":true}]}]})RQL"), true, { { TEXT("CP"), Copy } });
+			Run(/* editor | call DeleteAsset("@UN@", true) */ TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"DeleteAsset","args":[{"lit":"@UN@"},{"lit":true}]}]})RQL"), true, { { TEXT("UN"), Unsaved } });
+			TestTrue(*FString::Printf(TEXT("the level is deleted (%s)"), *UnrealMcpRqlSpecHelpers::Codes(DropLevel)), UnrealMcpRqlSpecHelpers::IsOk(DropLevel));
+			TestTrue(*FString::Printf(TEXT("the copy is deleted (%s)"), *UnrealMcpRqlSpecHelpers::Codes(DropCopy)), UnrealMcpRqlSpecHelpers::IsOk(DropCopy));
+			// Never leave map files behind in the testbed, even when a delete failed.
+			CollectGarbage(GARBAGE_COLLECTION_KEEPFLAGS);
+			for (const FString& Package : { Level, Copy, Unsaved })
+				IFileManager::Get().Delete(*FPackageName::LongPackageNameToFilename(Package, FPackageName::GetMapPackageExtension()), false, true, true);
 		});
 	});
 

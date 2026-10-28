@@ -59,23 +59,34 @@ namespace UnrealMcpSourceTools
 			*Target, ErrorCount, WarningCount, ReturnCode, Seconds);
 		if (ReturnCode == 0)
 			return Text;
-		// The agent reads this line, not the structured fields: say why UBT stopped and what it means.
+		// The agent reads this line, not the structured fields: say why UBT stopped and what it means. The most telling
+		// line first (UBT's refusal, a fatal or link error), else the last error-looking line that is not a warning.
 		TArray<FString> Lines;
 		Output.ParseIntoArrayLines(Lines);
-		for (int32 Index = Lines.Num() - 1; Index >= 0; --Index)
+		const TCHAR* const Telling[] = { TEXT("Unable to build"), TEXT("fatal error"), TEXT(": error LNK"), TEXT(": error"), TEXT("ERROR:"), TEXT("Result: Failed") };
+		FString Reason;
+		for (const TCHAR* Pattern : Telling)
 		{
-			const FString Line = Lines[Index].TrimStartAndEnd();
-			if (Line.Contains(TEXT("error"), ESearchCase::IgnoreCase) || Line.Contains(TEXT("Unable to"), ESearchCase::IgnoreCase)
-				|| Line.Contains(TEXT("failed"), ESearchCase::IgnoreCase))
+			for (const FString& Raw : Lines)
 			{
-				Text += FString::Printf(TEXT(" UBT: %s"), *Line.Left(300));
-				break;
+				const FString Line = Raw.TrimStartAndEnd();
+				if (Line.Contains(Pattern) && !Line.Contains(TEXT("warning"), ESearchCase::IgnoreCase))
+				{
+					Reason = Line.Left(300);
+					break;
+				}
 			}
+			if (!Reason.IsEmpty())
+				break;
 		}
-		if (ErrorCount == 0)
-			Text += TEXT(" The code compiled but this running editor keeps its module loaded, so new or changed C++ "
-				"(new classes too) is NOT live yet: it needs Live Coding (an interactive editor) or an editor restart. "
-				"A Blueprint is live after blueprint-compile.");
+		if (!Reason.IsEmpty())
+			Text += FString::Printf(TEXT(" UBT: %s"), *Reason);
+		// What a failed build in a running editor means for the code the agent waits for.
+		if (Reason.Contains(TEXT("Live Coding is active")))
+			Text += TEXT(" Nothing was built: compile through Live Coding (useLiveCoding true) or close the editor and build.");
+		else if (Reason.Contains(TEXT("LNK1104")) || Reason.Contains(TEXT("cannot open file")))
+			Text += TEXT(" Nothing new is loaded: this running editor holds its module DLL, so new or changed C++ is NOT live; "
+				"build with the editor closed and reopen it (a Blueprint is live after blueprint-compile).");
 		return Text;
 	}
 
@@ -516,7 +527,7 @@ namespace UnrealMcpSourceTools
 				Structured->SetStringField(TEXT("cpp"), CppPath.RelPath);
 				Structured->SetBoolField(TEXT("isUClass"), Tpl.bUClass);
 				return FUnrealMcpToolResult::Success(
-					FString::Printf(TEXT("Created %s%s (%s.h + %s.cpp) in module '%s'. Run source-compile to build it; a running editor loads a new C++ class only after a restart (Live Coding does not pick up new source files), while a Blueprint class is usable at once."),
+					FString::Printf(TEXT("Created %s%s (%s.h + %s.cpp) in module '%s'. Run source-compile to build it; a running editor cannot load a new C++ class (build with the editor closed, then reopen it), while a Blueprint class is usable at once."),
 						*Tpl.Prefix, *ClassName, *ClassName, *ClassName, *Module),
 					Structured);
 			});

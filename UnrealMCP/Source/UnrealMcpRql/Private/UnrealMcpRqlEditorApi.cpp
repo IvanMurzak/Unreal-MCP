@@ -444,9 +444,12 @@ UObject* UUnrealMcpRqlEditorApi::CopyAsset(const FString& Source, const FString&
 	UObject* Copy = UEditorAssetLibrary::DuplicateAsset(Source, Destination);
 	if (!Copy)
 		return Failed<UObject*>(FString::Printf(TEXT("could not copy '%s'"), *Source));
-	// A level opens from its file only (OpenLevel, AddSublevel): a copied level is saved at once, as a new map is.
-	if (Copy->IsA<UWorld>() && !UEditorAssetLibrary::SaveLoadedAsset(Copy, /*bOnlyIfIsDirty*/ false))
-		return Failed<UObject*>(FString::Printf(TEXT("copied the level to '%s' but could not save it"), *Destination));
+	// A level opens from its file only (OpenLevel, AddSublevel): a copied level is saved at once, as a new map is. SaveMap
+	// writes its external packages (one file per actor) and built data with it.
+	FString Package, Error;
+	if (UWorld* World = Cast<UWorld>(Copy); World && (!ToPackageName(Destination, Package, Error) || !UEditorLoadingAndSavingUtils::SaveMap(World, Package)))
+		return Failed<UObject*>(FString::Printf(TEXT("copied the level to '%s' but could not save it: the copy is in memory only "
+			"(editor | call SaveAsset(\"%s\") or DeleteAsset(\"%s\", true))"), *Destination, *Destination, *Destination));
 	return Copy;
 }
 
