@@ -1,6 +1,5 @@
 import copy
 import json
-import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -90,7 +89,6 @@ class MonorepoTests(unittest.TestCase):
     def test_default_output_is_absolute(self):
         self.assertTrue(suite.default_output().is_absolute())
 
-    @unittest.skipUnless(os.name == 'nt', 'Windows exclusive-file lock')
     def test_local_ue_lock_excludes_a_second_holder_and_releases(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / 'ue.lock'

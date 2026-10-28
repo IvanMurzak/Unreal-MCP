@@ -17,7 +17,10 @@
     lock, and a job-level group keeps only ONE pending job and cancels the older one.
     See docs/RELEASING.md "Machine-wide UE lock".
 
-    The lock is an exclusive OS file handle on a fixed machine path. A job must keep holding it
+    The lock is an exclusive OS file handle on a fixed machine path: a share-Read handle on Windows,
+    and on macOS/Linux a share-None handle, which .NET backs with an exclusive flock() (a share-Read
+    handle takes no lock there at all). It is the same flock() scripts/extension_suite.py takes for a
+    local run, so CI and local runs exclude each other on every OS. A job must keep holding it
     across several steps, and every step is its own process, so a small detached HOLDER process owns
     the handle:
 
@@ -30,8 +33,10 @@
     when the holder exits, and the holder exits when the job's Runner.Worker process is gone, when
     the runner's orphan-process cleanup kills it at job end, or after -MaxHoldMinutes.
 
-    The holder is started through ShellExecute, which inherits no handles. A child that inherited the
-    step's stdout pipe would keep the pipe open and the runner would wait on the Acquire step forever.
+    The holder must inherit none of the step's handles: a child that inherited the step's stdout pipe
+    would keep the pipe open and the runner would wait on the Acquire step forever. On Windows it is
+    started through ShellExecute, which inherits no handles; elsewhere its standard streams are
+    redirected to pipes of its own (.NET opens every other descriptor close-on-exec).
 #>
 [CmdletBinding()]
 param(
@@ -40,7 +45,8 @@ param(
     [string] $Action,
 
     # One fixed path for every runner on the machine, whatever its account, workspace, or engine.
-    [string] $LockPath = 'C:\ProgramData\UnrealMCP-ci\ue.lock',
+    # Default: C:\ProgramData\UnrealMCP-ci\ue.lock on Windows, /var/tmp/UnrealMCP-ci/ue.lock elsewhere.
+    [string] $LockPath = '',
 
     # The bounded wait. The job's timeout-minutes must exceed this plus the job's own work, because
     # a job timeout is a GitHub-side cancel, which can wedge a self-hosted runner.
@@ -66,7 +72,13 @@ if ([string]::IsNullOrWhiteSpace($StateDir)) {
 # A trailing backslash before the closing quote of the holder's -StateDir "..." argument would
 # escape that quote and scramble every argument after it.
 $StateDir = $StateDir.TrimEnd('\')
+if ([string]::IsNullOrWhiteSpace($LockPath)) {
+    $LockPath = if ($IsWindows) { 'C:\ProgramData\UnrealMCP-ci\ue.lock' } else { '/var/tmp/UnrealMCP-ci/ue.lock' }
+}
 $LockPath = $LockPath.TrimEnd('\')
+# The POSIX lock file cannot be read while it is held (a reader's shared flock() is refused), so
+# the owner is also written beside it.
+$ownerSidecar = "$LockPath.owner"
 $pidFile = Join-Path $StateDir 'holder.pid'
 $ownerFile = Join-Path $StateDir 'owner'
 $logFile = Join-Path $StateDir 'holder.log'
@@ -116,7 +128,7 @@ function Test-WatchAlive {
 
 function Read-LockOwner {
     try {
-        $text = (Read-SharedText $LockPath).Trim()
+        $text = (Read-SharedText $(if ($IsWindows) { $LockPath } else { $ownerSidecar })).Trim()
         if ($text) { return $text }
         return '(owner not recorded yet)'
     }
@@ -140,6 +152,13 @@ function Initialize-LockFolder {
     $dir = Split-Path -Parent $LockPath
     if (Test-Path -LiteralPath $dir) { return }
     New-Item -ItemType Directory -Force -Path $dir | Out-Null
+    if (-not $IsWindows) {
+        # Sticky and world-writable like /tmp, so a runner under any account can create the lock file
+        # (each holder then opens it to everyone, see Invoke-Hold). Best effort, as icacls below.
+        & chmod 1777 $dir
+        if ($LASTEXITCODE -ne 0) { Write-HolderLog "chmod could not open $dir to every account (exit $LASTEXITCODE); runners under other accounts may be denied the lock" }
+        return
+    }
     # The first runner to create the folder owns it. Grant Modify to every account a runner on this
     # machine can run as (Authenticated Users, LOCAL SERVICE, NETWORK SERVICE; SYSTEM gets Full),
     # otherwise a lock file created under one account would be read-only to the next one, and that
@@ -160,16 +179,20 @@ function Invoke-Hold {
         if (Test-Path -LiteralPath $releaseFile) { Write-HolderLog 'release requested before the lock was acquired; giving up'; return 5 }
         if (-not (Test-WatchAlive)) { Write-HolderLog "watched process $WatchPid exited before the lock was acquired; giving up"; return 4 }
         try {
-            # Share Read only: another holder asking for ReadWrite gets a sharing violation, while
-            # Read-LockOwner can still read who holds the lock.
-            $stream = [IO.FileStream]::new($LockPath, [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::Read)
+            # Windows: share Read only, so another holder asking for ReadWrite gets a sharing violation
+            # while Read-LockOwner can still read who holds the lock. Elsewhere: share None, the only
+            # mode .NET backs with an exclusive flock().
+            $share = if ($IsWindows) { [IO.FileShare]::Read } else { [IO.FileShare]::None }
+            $stream = [IO.FileStream]::new($LockPath, [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, $share)
         }
         catch {
             $inner = Get-InnermostException $_.Exception
             $code = $inner.HResult -band 0xFFFF
-            # 32 = ERROR_SHARING_VIOLATION, 33 = ERROR_LOCK_VIOLATION: the lock is held. Anything
-            # else (access denied, bad path) will never clear by waiting, so fail at once.
-            if (-not ($inner -is [IO.IOException]) -or ($code -ne 32 -and $code -ne 33)) {
+            # The lock is held: Windows 32 = ERROR_SHARING_VIOLATION, 33 = ERROR_LOCK_VIOLATION; POSIX
+            # EWOULDBLOCK from flock(), 35 on macOS, 11 on Linux. Anything else (access denied, bad
+            # path) will never clear by waiting, so fail at once.
+            $held = if ($IsWindows) { @(32, 33) } elseif ($IsMacOS) { @(35) } else { @(11) }
+            if (-not ($inner -is [IO.IOException]) -or $code -notin $held) {
                 $msg = "cannot open $LockPath ($($inner.GetType().FullName)): $($inner.Message)"
                 Write-HolderLog $msg
                 Write-FileAtomic $failedFile $msg
@@ -197,6 +220,12 @@ function Invoke-Hold {
         $stream.SetLength(0)
         $stream.Write($bytes, 0, $bytes.Length)
         $stream.Flush($true)
+        if (-not $IsWindows) {
+            # Let the next holder open the file whatever its account (the folder is 1777).
+            & chmod 0666 $LockPath 2>$null
+            # Best effort: in the sticky folder another account's stale sidecar cannot be replaced.
+            try { Write-FileAtomic $ownerSidecar $utf8.GetString($bytes) } catch { Write-HolderLog "could not record the owner in $ownerSidecar ($($_.Exception.Message))" }
+        }
         $msg = 'acquired the machine-wide UE lock {0} after waiting {1:N1} min' -f $LockPath, ($heldSince - $started).TotalMinutes
         Write-HolderLog $msg
         Write-FileAtomic $acquiredFile $msg
@@ -209,6 +238,7 @@ function Invoke-Hold {
     }
     finally {
         try { $stream.SetLength(0) } catch { }
+        if (-not $IsWindows) { try { Write-FileAtomic $ownerSidecar '' } catch { } }
         $stream.Dispose()
     }
     Write-HolderLog ('released the machine-wide UE lock after holding it {0:N1} min ({1})' -f ([DateTime]::UtcNow - $heldSince).TotalMinutes, $why)
@@ -219,11 +249,19 @@ function Invoke-Hold {
 function Find-RunnerWorker {
     try {
         $id = $PID
-        for ($i = 0; $i -lt 10 -and $id -gt 0; $i++) {
-            $proc = Get-CimInstance -ClassName Win32_Process -Filter "ProcessId = $id" -ErrorAction Stop
-            if ($null -eq $proc) { break }
-            if ($proc.Name -ieq 'Runner.Worker.exe') { return [int]$proc.ProcessId }
-            $id = [int]$proc.ParentProcessId
+        for ($i = 0; $i -lt 10 -and $id -gt 1; $i++) {
+            if ($IsWindows) {
+                $proc = Get-CimInstance -ClassName Win32_Process -Filter "ProcessId = $id" -ErrorAction Stop
+                if ($null -eq $proc) { break }
+                if ($proc.Name -ieq 'Runner.Worker.exe') { return [int]$proc.ProcessId }
+                $id = [int]$proc.ParentProcessId
+                continue
+            }
+            # `ps` prints the parent pid, then the executable path (which may contain spaces).
+            $line = (& ps -o ppid= -o comm= -p $id 2>$null | Select-Object -First 1)
+            if (-not $line -or $line.Trim() -notmatch '^(\d+)\s+(.+)$') { break }
+            if ((Split-Path -Leaf $Matches[2]) -ceq 'Runner.Worker') { return $id }
+            $id = [int]$Matches[1]
         }
     }
     catch { }
@@ -245,10 +283,20 @@ function Invoke-Acquire {
     Write-FileAtomic $ownerFile $owner
 
     $psi = [Diagnostics.ProcessStartInfo]::new((Get-Process -Id $PID).Path)
-    $psi.UseShellExecute = $true
-    $psi.WindowStyle = [Diagnostics.ProcessWindowStyle]::Hidden
+    if ($IsWindows) {
+        $psi.UseShellExecute = $true
+        $psi.WindowStyle = [Diagnostics.ProcessWindowStyle]::Hidden
+    }
+    else {
+        # ShellExecute means "open with the desktop" here. Give the holder pipes of its own instead
+        # of the step's stdio (see the header); it writes only to its log file.
+        $psi.UseShellExecute = $false
+        $psi.RedirectStandardInput = $true
+        $psi.RedirectStandardOutput = $true
+        $psi.RedirectStandardError = $true
+    }
     # Not the step's working directory: the holder must not keep the workspace folder open.
-    $psi.WorkingDirectory = [Environment]::SystemDirectory
+    $psi.WorkingDirectory = if ($IsWindows) { [Environment]::SystemDirectory } else { '/' }
     $psi.Arguments = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -Action Hold -LockPath "{1}" -StateDir "{2}" -WaitMinutes {3} -MaxHoldMinutes {4} -WatchPid {5}' -f $PSCommandPath, $LockPath, $StateDir, $WaitMinutes, $MaxHoldMinutes, $watch
     $holder = [Diagnostics.Process]::Start($psi)
     # The start time lets Release tell this holder apart from a later process that reused its pid.

@@ -194,8 +194,9 @@ namespace UnrealMcpRqlStructsLocal
 	}
 
 	/**
-	 * A double without the noise transform math leaves (-9.999999999999998, 7.8e-47): 12 significant digits, and 0 below
-	 * 1e-9. For display only; NaN and infinities pass through.
+	 * A double without the noise transform math leaves (-9.999999999999998, 7.8e-47): 9 significant digits, and 0 below
+	 * 1e-9. Not more: the arm64 (Mac) quaternion round trip of -46 degrees is -45.9999999942, noise in the 10th digit.
+	 * For display only; NaN and infinities pass through.
 	 */
 	double Tidy(double Value)
 	{
@@ -204,7 +205,7 @@ namespace UnrealMcpRqlStructsLocal
 		if (FMath::Abs(Value) < 1e-9)
 			return 0.0;
 		char Text[32];
-		std::snprintf(Text, sizeof(Text), "%.12g", Value);
+		std::snprintf(Text, sizeof(Text), "%.9g", Value);
 		double Parsed = Value;
 		return rql::parse_double(Text, Parsed) ? Parsed : Value;
 	}

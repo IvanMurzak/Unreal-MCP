@@ -7,7 +7,8 @@ Third-party plugins and the external Unreal-AI-Template repository remain suppor
 
 ## Local verification
 
-On Windows, with the UE toolchain, Node 22 and Python 3.10+:
+On Windows, macOS or Linux, with the UE toolchain, Node 22 and Python 3.10+ (examples are Windows;
+on macOS the engine is e.g. `'/Users/Shared/Epic Games/UE_5.8'`):
 
 ```powershell
 npm ci --prefix cli

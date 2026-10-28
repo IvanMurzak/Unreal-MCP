@@ -435,12 +435,23 @@ again unless recovering a post-tag failure (see "Re-running a release" below).
 ## Self-hosted Unreal runner
 
 The plugin leg (compile + Automation specs) needs local Unreal Engine installs,
-which are not available on GitHub-hosted runners. It runs on a **self-hosted
-Windows runner** (runner-manager selector `rm-autoscale-win-x64`). Every self-hosted
-job also asks for the engine-versioned label of the engine it builds with —
-`unreal-<major>-<minor>`, e.g. `unreal-5-8` for UE 5.8 — so a job only lands on a
-machine that has that engine installed. A runner advertises one such label per
-installed engine. The release matrix validates UE 5.5/5.6/5.7/5.8.
+which are not available on GitHub-hosted runners. Every self-hosted job asks for
+the engine-versioned label of the engine it builds with — `unreal-<major>-<minor>`,
+e.g. `unreal-5-8` for UE 5.8 — so a job only lands on a machine that has that engine
+installed. A runner advertises one such label per installed engine. The release
+matrix validates UE 5.5/5.6/5.7/5.8.
+
+**Which OS.** The `plugin` jobs (`test_pull_request.yml`, `release.yml`) and
+`release_extensions.yml`'s `test` ask only for `self-hosted` + the engine label, so a
+Windows, macOS or Linux runner can take them. `.github/scripts/ue-env.ps1` resolves
+that runner's engine (`UE_ROOT_<major>_<minor>` in the runner's environment, else the
+Epic Launcher default: `C:\Program Files\Epic Games\UE_x.y` on Windows,
+`/Users/Shared/Epic Games/UE_x.y` on macOS; Linux has no default) and builds for the
+host platform (`Win64`, `Mac`, `Linux`). A runner needs PowerShell 7 (`pwsh`) on
+PATH. `connection-smoke` and `build-plugin-zip` (the Win64 Fab package) stay on the
+**Windows runner** (runner-manager selector `rm-autoscale-win-x64`). Because a 5.7/5.8
+leg may land on either OS, an MSVC-only or clang-only compile error shows up only on
+the OS that happened to take the leg.
 
 > **Status (2026-06-11): the runner is LIVE.** Self-hosted Windows runners
 > (labels `self-hosted`, `Windows`, `X64`, `rm-autoscale-win-x64`, `unreal-5-x`) are registered against
@@ -484,7 +495,8 @@ So every self-hosted UE job (`plugin` and `connection-smoke` in
 machine-wide lock with `.github/scripts/ue-machine-lock.ps1`:
 
 - **Acquire** runs just before the job's first UE step. It holds an exclusive OS file
-  handle on `C:\ProgramData\UnrealMCP-ci\ue.lock` through a small detached holder
+  handle on `C:\ProgramData\UnrealMCP-ci\ue.lock` (macOS/Linux:
+  `/var/tmp/UnrealMCP-ci/ue.lock`, an exclusive `flock()`) through a small detached holder
   process, because the lock must outlive each step's own process. While it waits, it
   logs `waiting for the machine-wide UE lock ... held by: <repo> run <id> ...` once a
   minute. The wait is bounded (60 min in PR jobs, 180 min in release jobs), and a
@@ -501,6 +513,7 @@ machine-wide lock with `.github/scripts/ue-machine-lock.ps1`:
 - The first job to create `C:\ProgramData\UnrealMCP-ci\` grants Modify to
   Authenticated Users, LOCAL SERVICE and NETWORK SERVICE (SYSTEM: Full), so runners
   under different accounts can all open the lock. An existing folder is left as-is.
+  On macOS/Linux the folder is made `1777` and each holder opens the file to everyone.
 
 The lock spans every engine version, so it also serializes the release matrix
 legs, which `max-parallel: 2` would otherwise run two at a time. It is the
@@ -539,6 +552,12 @@ Defense in depth at the repository-settings level (operator):
   on a machine holding secrets you would not hand to an untrusted PR author.
 
 ### Registration steps (operator)
+
+A macOS or Linux runner only needs the engines installed (see *Which OS* above),
+`pwsh`, and the labels `self-hosted` + one `unreal-<major>-<minor>` per engine; with
+runner-manager: `runner-manager repo add IvanMurzak/Unreal-MCP --host-label <host>
+--max-capacity 1 --label unreal-5-8 --label unreal-5-7`, then `repo add-label … --label
+self-hosted`. The Windows runner, which also serves the Windows-only jobs:
 
 1. On a Windows machine with UE 5.5, 5.6, 5.7, and 5.8 installed at the standard
    Epic paths (`C:\Program Files\Epic Games\UE_5.5` through `UE_5.8`), register a

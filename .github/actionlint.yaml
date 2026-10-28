@@ -1,6 +1,7 @@
 # actionlint configuration (https://github.com/rhysd/actionlint).
-# Declare the custom self-hosted runner labels the UE jobs ask for (the runner-manager
-# selector plus one engine-versioned `unreal-<major>-<minor>` label per supported engine)
+# Declare the custom self-hosted runner labels the UE jobs ask for (one engine-versioned
+# `unreal-<major>-<minor>` label per supported engine, plus the Windows runner-manager selector
+# the Windows-only jobs, connection-smoke and build-plugin-zip, still ask for)
 # so actionlint does not flag them as unknown. The runner is registered by the owner
 # (see docs/RELEASING.md) and is gated on vars.UNREAL_RUNNER_READY so its absence
 # never reds a PR.

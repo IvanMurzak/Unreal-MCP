@@ -1,7 +1,7 @@
 """Build plugins in isolation, then run their Automation tests in ONE editor process.
 
 All writable plugin copies are scoped to engine version + profile. No shared testbed is edited.
-Python stdlib only; Windows UE toolchain. See docs/EXTENSION-MONOREPO.md.
+Python stdlib only; the host OS's UE toolchain (Windows, macOS or Linux). See docs/EXTENSION-MONOREPO.md.
 """
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ import json
 import os
 from pathlib import Path
 import re
+import signal
 import socket
 import subprocess
 import sys
@@ -21,13 +22,44 @@ from extension_release import components as extensions
 
 ROOT = Path(__file__).resolve().parents[1]
 EXCLUDED = {"Binaries", "Intermediate", "Saved", "DerivedDataCache", ".git", ".vs", "node_modules"}
+# This host's UBT platform, Build script and editor binary, relative to the engine root.
+if os.name == "nt":
+    UE_PLATFORM, UE_BUILD, UE_EDITOR = "Win64", "Engine/Build/BatchFiles/Build.bat", "Engine/Binaries/Win64/UnrealEditor-Cmd.exe"
+elif sys.platform == "darwin":
+    UE_PLATFORM, UE_BUILD, UE_EDITOR = "Mac", "Engine/Build/BatchFiles/Mac/Build.sh", "Engine/Binaries/Mac/UnrealEditor-Cmd"
+else:
+    UE_PLATFORM, UE_BUILD, UE_EDITOR = "Linux", "Engine/Build/BatchFiles/Linux/Build.sh", "Engine/Binaries/Linux/UnrealEditor-Cmd"
 
 
 @contextmanager
 def machine_lock(already_held: bool = False, *, path: Path | None = None, timeout_seconds: float = 3600):
     """Use the SAME exclusive file handle as CI, including from interactive local runs."""
-    if already_held or os.name != "nt":
+    if already_held:
         yield
+        return
+    if os.name != "nt":
+        # .github/scripts/ue-machine-lock.ps1 holds an exclusive flock() on this same file.
+        import fcntl
+        lock_path = path or Path("/var/tmp/UnrealMCP-ci/ue.lock")
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        deadline = time.monotonic() + timeout_seconds
+        announced = False
+        with lock_path.open("a+b") as handle:
+            while True:
+                try:
+                    fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    if time.monotonic() > deadline:
+                        raise OSError(f"Cannot acquire UE machine lock {lock_path}") from None
+                    if not announced:
+                        print("Waiting for the machine-wide UE lock (another local/CI build owns it)", flush=True)
+                        announced = True
+                    time.sleep(1)
+            try:
+                yield
+            finally:
+                fcntl.flock(handle, fcntl.LOCK_UN)
         return
     import ctypes
     from ctypes import wintypes
@@ -146,7 +178,7 @@ def prepare(engine: Path, profile: str, selected: list[str], output: Path, *, st
 
 
 def build(engine: Path, project: Path) -> None:
-    command = [str(engine / "Engine/Build/BatchFiles/Build.bat"), "UnrealMcpTestsEditor", "Win64", "Development",
+    command = [str(engine / UE_BUILD), "UnrealMcpTestsEditor", UE_PLATFORM, "Development",
                f"-Project={project}", "-WaitMutex", "-NoHotReloadFromIDE"]
     print(f"Building {project.parent} (no editor launch)", flush=True)
     log_path = project.parent / "build.log"
@@ -183,7 +215,13 @@ def check_report(report: Path, selected: list[str], core_tests: bool = True) -> 
 
 
 def kill_owned(process: subprocess.Popen) -> None:
-    if process.poll() is None:
+    if process.poll() is None and os.name != "nt":
+        # Started with start_new_session=True: its pid is the group id of its whole tree.
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    elif process.poll() is None:
         stopped = subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"], check=False, capture_output=True)
         if stopped.returncode and process.poll() is None:
             print(f"Owned process {process.pid} tree stop failed: {stopped.stdout!r} {stopped.stderr!r}", flush=True)
@@ -214,7 +252,8 @@ def automation(engine: Path, project: Path, selected: list[str], timeout: int,
             port = sock.getsockname()[1]
         server_log = (report / "server.log").open("w")
         server_proc = subprocess.Popen([str(server), "--port", str(port), "--client-transport", "streamableHttp"],
-                                       stdout=server_log, stderr=subprocess.STDOUT, cwd=server.parent)
+                                       stdout=server_log, stderr=subprocess.STDOUT, cwd=server.parent,
+                                       start_new_session=os.name != "nt")
         print(f"Started owned server PID {server_proc.pid}", flush=True)
         if not smoke.wait_port(port, 40):
             kill_owned(server_proc)
@@ -222,13 +261,14 @@ def automation(engine: Path, project: Path, selected: list[str], timeout: int,
             raise ValueError("Local MCP server failed to start")
         env.update(UNREAL_MCP_HOST=f"http://localhost:{port}", UNREAL_MCP_KEEP_CONNECTED="true",
                    UNREAL_MCP_BRIDGE_PATH=str(bridge))
-    command = [str(engine / "Engine/Binaries/Win64/UnrealEditor-Cmd.exe"), str(project),
+    command = [str(engine / UE_EDITOR), str(project),
                "-nullrhi", "-nosplash", "-unattended", "-NoSound", "-log",
                "-ExecCmds=Automation RunTests Group:UnrealMcpSuite", f"-ReportExportPath={report}",
                f"-abslog={report / 'editor.log'}"]
     editor = None
     try:
-        editor = subprocess.Popen(command, env=env, cwd=project.parent, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+        editor = subprocess.Popen(command, env=env, cwd=project.parent, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT,
+                                  start_new_session=os.name != "nt")
         print(f"Started ONE owned editor PID {editor.pid}; report {report}", flush=True)
         deadline = time.monotonic() + timeout
         while not (report / "index.json").exists():
