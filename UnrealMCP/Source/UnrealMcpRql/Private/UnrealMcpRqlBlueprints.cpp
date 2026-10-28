@@ -22,10 +22,12 @@
 #include "K2Node_Event.h"
 #include "K2Node_ExecutionSequence.h"
 #include "K2Node_IfThenElse.h"
+#include "K2Node_InputKey.h"
 #include "K2Node_MacroInstance.h"
 #include "K2Node_Self.h"
 #include "K2Node_VariableGet.h"
 #include "K2Node_VariableSet.h"
+#include "AssetRegistry/AssetRegistryModule.h"
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "Kismet2/CompilerResultsLog.h"
 #include "Kismet2/KismetEditorUtilities.h"
@@ -411,7 +413,12 @@ namespace UnrealMcpRqlBlueprintsLocal
 	{
 		if (!Class)
 			return nullptr;
-		for (const FString& Candidate : { Name, FString(TEXT("K2_")) + Name })
+		// UE 5 math works in doubles: "Add_FloatFloat" (the UE 4 name, and the editor's "float + float" title) is Add_DoubleDouble.
+		TArray<FString, TInlineAllocator<3>> Candidates{ Name, FString(TEXT("K2_")) + Name };
+		const FString Double = Name.Replace(TEXT("Float"), TEXT("Double"), ESearchCase::CaseSensitive);
+		if (Double != Name && Class->HasAnyClassFlags(CLASS_Native)) // engine libraries only, never a Blueprint's own functions
+			Candidates.Add(Double);
+		for (const FString& Candidate : Candidates)
 		{
 			UFunction* Function = Class->FindFunctionByName(FName(*Candidate, FNAME_Find));
 			if (Function && Function->HasAnyFunctionFlags(FUNC_BlueprintCallable | FUNC_BlueprintPure))
@@ -447,21 +454,30 @@ namespace UnrealMcpRqlBlueprintsLocal
 			*Text, *Blueprint->GetName()));
 	}
 
+	/** A variable of @p Class the graphs can see: by name, else by its authored name in any case. */
+	FProperty* FindBlueprintVariable(UClass* Class, const FString& Name)
+	{
+		FProperty* Property = Class ? FindFProperty<FProperty>(Class, FName(*Name, FNAME_Find)) : nullptr;
+		for (TFieldIterator<FProperty> It(Class); Class && It && !Property; ++It)
+		{
+			if (It->GetAuthoredName().Equals(Name, ESearchCase::IgnoreCase))
+				Property = *It;
+		}
+		return Property && Property->HasAnyPropertyFlags(CPF_BlueprintVisible) ? Property : nullptr;
+	}
+
+	void RequireWritable(const FProperty* Property, bool bWrite)
+	{
+		if (bWrite && Property->HasAnyPropertyFlags(CPF_BlueprintReadOnly))
+			Throw(FString::Printf(TEXT("%s is read-only in Blueprints"), *Property->GetAuthoredName()));
+	}
+
 	/** A variable get / set node needs a variable the Blueprint (or its parent class) exposes to Blueprints. */
 	FName RequireVariable(UBlueprint* Blueprint, const FString& Name, bool bWrite)
 	{
 		const FString Trimmed = Name.TrimStartAndEnd();
-		UClass* Own = Blueprint->SkeletonGeneratedClass ? Blueprint->SkeletonGeneratedClass : Blueprint->GeneratedClass;
-		FProperty* Property = Own ? FindFProperty<FProperty>(Own, FName(*Trimmed, FNAME_Find)) : nullptr;
+		FProperty* Property = FindBlueprintVariable(Blueprint->SkeletonGeneratedClass ? Blueprint->SkeletonGeneratedClass : Blueprint->GeneratedClass, Trimmed);
 		if (!Property)
-		{
-			for (TFieldIterator<FProperty> It(Own); It && !Property; ++It)
-			{
-				if (It->GetAuthoredName().Equals(Trimmed, ESearchCase::IgnoreCase))
-					Property = *It;
-			}
-		}
-		if (!Property || !Property->HasAnyPropertyFlags(CPF_BlueprintVisible))
 		{
 			// A widget the Designer added is a variable only when its Is Variable box is ticked (text blocks start unticked).
 			const UBaseWidgetBlueprint* Widgets = Cast<UBaseWidgetBlueprint>(Blueprint);
@@ -471,9 +487,78 @@ namespace UnrealMcpRqlBlueprintsLocal
 					*Widget->GetName(), *Blueprint->GetName(), *Blueprint->GetOutermost()->GetName(), *Widget->GetName()));
 			Throw(FString::Printf(TEXT("%s has no Blueprint variable '%s' (add one with blueprint-add-variable)"), *Blueprint->GetName(), *Trimmed));
 		}
-		if (bWrite && Property->HasAnyPropertyFlags(CPF_BlueprintReadOnly))
-			Throw(FString::Printf(TEXT("%s is read-only in Blueprints"), *Trimmed));
+		RequireWritable(Property, bWrite);
 		return Property->GetFName();
+	}
+
+	/**
+	 * The generated class of the one Blueprint asset named @p Name ("BP_Player"), loading it: a short name finds only
+	 * loaded classes otherwise. Several Blueprints with the name are an error naming their paths.
+	 */
+	UClass* GraphBlueprintClassByName(const FString& Name)
+	{
+		if (Name.IsEmpty() || Name.Contains(TEXT("/")))
+			return nullptr;
+		IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
+		TArray<FAssetData> Found;
+		Registry.GetAssetsByClass(UBlueprint::StaticClass()->GetClassPathName(), Found, /*bSearchSubClasses*/ true);
+		TArray<FAssetData> Named = Found.FilterByPredicate([&Name](const FAssetData& Data) { return Data.AssetName.ToString().Equals(Name, ESearchCase::IgnoreCase); });
+		if (Named.Num() > 1)
+		{
+			TArray<FString> Paths;
+			for (const FAssetData& Data : Named)
+				Paths.Add(Data.PackageName.ToString());
+			Throw(FString::Printf(TEXT("several Blueprints are named '%s' (%s): name one by path"), *Name, *FString::Join(Paths, TEXT(", "))));
+		}
+		const UBlueprint* Blueprint = Named.Num() == 1 ? Cast<UBlueprint>(Named[0].GetAsset()) : nullptr;
+		return Blueprint ? Blueprint->GeneratedClass.Get() : nullptr;
+	}
+
+	/** A variable of the Blueprint (Property null), or of another class ("BP_Player.Score", "BP_Player_C.Score", "/Game/BP_Player.Score"). */
+	struct FGraphVariable
+	{
+		FProperty* Property = nullptr;
+		FName Name;
+	};
+
+	FGraphVariable RequireGraphVariable(UBlueprint* Blueprint, const FString& Spec, bool bWrite)
+	{
+		FString ClassPart, VariablePart;
+		const FString Text = Spec.TrimStartAndEnd();
+		if (!Text.Split(TEXT("."), &ClassPart, &VariablePart, ESearchCase::CaseSensitive, ESearchDir::FromEnd) || ClassPart.IsEmpty()
+			|| VariablePart.IsEmpty())
+			return { nullptr, RequireVariable(Blueprint, Text, bWrite) };
+		UClass* Class = FUnrealMcpObjectRef::ResolveClass(ClassPart);
+		if (!Class && !ClassPart.EndsWith(TEXT("_C")))
+			Class = FUnrealMcpObjectRef::ResolveClass(ClassPart + TEXT("_C"));
+		if (!Class)
+			Class = GraphBlueprintClassByName(ClassPart.EndsWith(TEXT("_C")) ? ClassPart.LeftChop(2) : ClassPart);
+		if (!Class)
+			Throw(FString::Printf(TEXT("no class '%s' (a Blueprint by name or path, e.g. \"BP_Player.Score\")"), *ClassPart));
+		UClass* Own = Blueprint->SkeletonGeneratedClass ? Blueprint->SkeletonGeneratedClass : Blueprint->GeneratedClass;
+		if (UBlueprint* Other = Cast<UBlueprint>(Class->ClassGeneratedBy); Other && Other->SkeletonGeneratedClass)
+			Class = Other->SkeletonGeneratedClass; // the variables added since the last compile too
+		// The Blueprint's own or inherited variable ("MyBP.Health", "Actor.bHidden"): a self node, as the editor makes.
+		if (Class == Own || (Own && Own->IsChildOf(Class)))
+			return { nullptr, RequireVariable(Blueprint, VariablePart, bWrite) };
+		FProperty* Property = FindBlueprintVariable(Class, VariablePart);
+		if (!Property)
+			Throw(FString::Printf(TEXT("%s has no Blueprint variable '%s'"), *Class->GetName(), *VariablePart));
+		// The editor hides another class's Private and Protected variables from this graph.
+		if (Property->HasMetaData(FBlueprintMetadata::MD_Private) || Property->HasMetaData(FBlueprintMetadata::MD_Protected))
+			Throw(FString::Printf(TEXT("%s.%s is private to its Blueprint (untick Private on the variable to read it from others)"),
+				*Class->GetName(), *Property->GetAuthoredName()));
+		RequireWritable(Property, bWrite);
+		return { Property, Property->GetFName() };
+	}
+
+	/** The node reads the Blueprint's own variable, or another class's through a Target pin that takes the object. */
+	void SetVariableReference(FMemberReference& Reference, const FGraphVariable& Variable)
+	{
+		if (Variable.Property)
+			Reference.SetFromField<FProperty>(Variable.Property, /*bIsConsideredSelfContext*/ false); // with its GUID: survives renames
+		else
+			Reference.SetSelfMember(Variable.Name);
 	}
 
 	UBlueprint* StandardMacros()
@@ -681,18 +766,18 @@ namespace UnrealMcpRqlBlueprintsLocal
 			[Types, Graph](void* Self, const std::vector<rql::Value>& Args) -> rql::Value
 			{
 				UEdGraph* Target = Graph(Self);
-				const FName Variable = RequireVariable(RequireBlueprint(Target), TextArg(Args[0]), /*bWrite*/ false);
+				const FGraphVariable Variable = RequireGraphVariable(RequireBlueprint(Target), TextArg(Args[0]), /*bWrite*/ false);
 				return Types->WrapObject(CreateNode<UK2Node_VariableGet>(Target, Place(Target, Args[1], Args[2]),
-					[Variable](UK2Node_VariableGet* Node) { Node->VariableReference.SetSelfMember(Variable); }));
-			}, "add a Get node for a variable of the Blueprint; returns the node"));
+					[Variable](UK2Node_VariableGet* Node) { SetVariableReference(Node->VariableReference, Variable); }));
+			}, "add a Get node for a variable of the Blueprint, or of another class (\"BP_Player.Score\": connect the object to its Target pin); returns the node"));
 		FUnrealMcpRqlTypes::AddMethod(D, Method("AddVariableSet", WithPlace({ FUnrealMcpRqlTypes::Param("Variable", String) }), NodeType,
 			[Types, Graph](void* Self, const std::vector<rql::Value>& Args) -> rql::Value
 			{
 				UEdGraph* Target = Graph(Self);
-				const FName Variable = RequireVariable(RequireBlueprint(Target), TextArg(Args[0]), /*bWrite*/ true);
+				const FGraphVariable Variable = RequireGraphVariable(RequireBlueprint(Target), TextArg(Args[0]), /*bWrite*/ true);
 				return Types->WrapObject(CreateNode<UK2Node_VariableSet>(Target, Place(Target, Args[1], Args[2]),
-					[Variable](UK2Node_VariableSet* Node) { Node->VariableReference.SetSelfMember(Variable); }));
-			}, "add a Set node for a variable of the Blueprint; returns the node"));
+					[Variable](UK2Node_VariableSet* Node) { SetVariableReference(Node->VariableReference, Variable); }));
+			}, "add a Set node for a variable of the Blueprint, or of another class (\"BP_Player.Score\": connect the object to its Target pin); returns the node"));
 		FUnrealMcpRqlTypes::AddMethod(D, Method("AddEvent", WithPlace({ FUnrealMcpRqlTypes::Param("Event", String) }), NodeType,
 			[Types, Graph](void* Self, const std::vector<rql::Value>& Args) -> rql::Value
 			{
@@ -747,6 +832,20 @@ namespace UnrealMcpRqlBlueprintsLocal
 						Created->bOverrideFunction = true;
 					}));
 			}, "add (or enable) an overridable event of the parent class: \"BeginPlay\", \"Tick\", \"ActorBeginOverlap\"; returns the node"));
+		FUnrealMcpRqlTypes::AddMethod(D, Method("AddInputKey", WithPlace({ FUnrealMcpRqlTypes::Param("Key", String) }), NodeType,
+			[Types, Graph](void* Self, const std::vector<rql::Value>& Args) -> rql::Value
+			{
+				UEdGraph* Target = Graph(Self);
+				RequireEventGraph(Target);
+				const FString KeyName = TextArg(Args[0]).TrimStartAndEnd();
+				const FKey Key{ FName(*KeyName) };
+				if (!Key.IsValid())
+					Throw(FString::Printf(TEXT("'%s' is not a key name (W, A, S, D, SpaceBar, LeftMouseButton, Gamepad_FaceButton_Bottom, ...)"), *KeyName));
+				if (Key.IsAnalog() || Key.IsDeprecated() || !Key.IsBindableInBlueprints())
+					Throw(FString::Printf(TEXT("'%s' is not a key with Pressed / Released (an axis such as MouseX is read with GetInputAxisKeyValue)"), *KeyName));
+				return Types->WrapObject(CreateNode<UK2Node_InputKey>(Target, Place(Target, Args[1], Args[2]),
+					[Key](UK2Node_InputKey* Node) { Node->InputKey = Key; }));
+			}, "add a key event (\"W\", \"SpaceBar\"): Pressed / Released exec pins, fires on the pawn the player controls (or an actor with input enabled); returns the node"));
 		FUnrealMcpRqlTypes::AddMethod(D, Method("AddCustomEvent", WithPlace({ FUnrealMcpRqlTypes::Param("Name", String) }), NodeType,
 			[Types, Graph](void* Self, const std::vector<rql::Value>& Args) -> rql::Value
 			{
