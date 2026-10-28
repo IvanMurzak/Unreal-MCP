@@ -989,7 +989,8 @@ void FUnrealMcpRqlDataModelsSpec::Define()
 			const FString Get = ResultRef(Must(TEXT("a graph reads it"), /* unreal.asset("@WBP@").EventGraph | call AddVariableGet("Label") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["EventGraph"],"on":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@WBP@"}]}},"stages":[{"op":"call","method":"AddVariableGet","args":[{"lit":"Label"}]}]})RQL")));
 			TestTrue(TEXT("a get node"), Get.StartsWith(TEXT("K2Node_VariableGet#")));
 			const TSharedPtr<FJsonObject> Compiled = Must(TEXT("compile"), /* unreal.asset("@WBP@") | call Compile() */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@WBP@"}]},"stages":[{"op":"call","method":"Compile","args":[]}]})RQL"));
-			TestTrue(*FString::Printf(TEXT("compiles (%s)"), *UnrealMcpRqlSpecHelpers::CellText(Compiled, 0, 2)), UnrealMcpRqlSpecHelpers::CellText(Compiled, 0, 2).Contains(TEXT("\"Succeeded\":true")));
+			const FString CompileResult = UnrealMcpRqlSpecHelpers::CellText(Compiled, 0, 2);
+			TestTrue(*FString::Printf(TEXT("compiles (%s)"), *CompileResult), CompileResult.Contains(TEXT("\"Succeeded\":true")));
 			TestNotNull(TEXT("the generated class has the member"), FindFProperty<FObjectProperty>(Made->GeneratedClass, TEXT("Label")));
 
 			if (!GEditor)

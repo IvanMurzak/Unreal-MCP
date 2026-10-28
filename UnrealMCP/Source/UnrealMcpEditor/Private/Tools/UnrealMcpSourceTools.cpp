@@ -962,8 +962,7 @@ namespace UnrealMcpSourceTools
 				// failure, or a UBT configuration error) without flooding the response.
 				Structured->SetStringField(TEXT("outputTail"), Combined.Right(4000));
 
-				const FString Text = DescribeUbtResult(TargetName, ErrorCount, WarningCount, ReturnCode, Elapsed, Combined);
-				return FUnrealMcpToolResult::Success(Text, Structured);
+				return FUnrealMcpToolResult::Success(DescribeUbtResult(TargetName, ErrorCount, WarningCount, ReturnCode, Elapsed, Combined), Structured);
 			});
 	}
 }

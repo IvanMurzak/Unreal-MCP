@@ -181,8 +181,8 @@ namespace UnrealMcpRqlEditorApiLocal
 			return false;
 		if (!FPackageName::DoesPackageExist(Package, &OutFile))
 		{
-			const UPackage* Loaded = FindPackage(nullptr, *Package);
-			OutError = Loaded && UWorld::FindWorldInPackage(const_cast<UPackage*>(Loaded))
+			UPackage* Loaded = FindPackage(nullptr, *Package);
+			OutError = Loaded && UWorld::FindWorldInPackage(Loaded)
 				? FString::Printf(TEXT("the level '%s' is not saved yet: editor | call SaveAsset(\"%s\") first"), *Package, *Package)
 				: FString::Printf(TEXT("no level at '%s'"), *Package);
 			return false;
