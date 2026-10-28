@@ -1009,40 +1009,36 @@ void FUnrealMcpRqlDataModelsSpec::Define()
 	{
 		It("copies a level to a file that opens at once; an unsaved level is named as such", [this]()
 		{
-			UWorld* Start = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
-			// Opening another level drops the open one's unsaved changes: fine in an unattended (CI) run, not in someone's editor.
-			if (!Start || (Start->GetOutermost()->IsDirty() && !FApp::IsUnattended()))
-			{
-				AddInfo(TEXT("skipped: the open level has unsaved changes (opening another level would drop them)"));
-				return;
-			}
-			// The other specs expect the editor's own level back (a saved map): reopen it at the end.
-			const FString Original = Start->GetOutermost()->GetName();
-			const FString Level = FString::Printf(TEXT("/Game/RqlSpecData/LV_Spec%d_%d"), Serial, FMath::Rand());
-			const FString Copy = Level + TEXT("_Copy");
-			const FString Unsaved = Level + TEXT("_Unsaved");
-			Must(TEXT("a saved level"), /* editor | call NewLevel("@LV@") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"NewLevel","args":[{"lit":"@LV@"}]}]})RQL"), { { TEXT("LV"), Level } });
-			Must(TEXT("copied"), /* editor | call CopyAsset("@LV@", "@CP@") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"CopyAsset","args":[{"lit":"@LV@"},{"lit":"@CP@"}]}]})RQL"), { { TEXT("LV"), Level }, { TEXT("CP"), Copy } });
+			// The source is an engine template map that is not open, so the editor world stays as it is (later specs depend on it).
+			const FString Source = TEXT("/Engine/Maps/Templates/Template_Default");
+			const FString Copy = FString::Printf(TEXT("/Game/RqlSpecData/LV_Spec%d_%d"), Serial, FMath::Rand());
+			const FString Unsaved = Copy + TEXT("_Unsaved");
+			Must(TEXT("copied"), /* editor | call CopyAsset("@LV@", "@CP@") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"CopyAsset","args":[{"lit":"@LV@"},{"lit":"@CP@"}]}]})RQL"), { { TEXT("LV"), Source }, { TEXT("CP"), Copy } });
 			TestTrue(TEXT("the copy is saved"), FPackageName::DoesPackageExist(Copy));
-			Must(TEXT("the copy opens"), /* editor | call OpenLevel("@CP@") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"OpenLevel","args":[{"lit":"@CP@"}]}]})RQL"), { { TEXT("CP"), Copy } });
-			UWorld* Opened = GEditor->GetEditorWorldContext().World();
-			TestTrue(TEXT("the editor shows the copy"), Opened && Opened->GetOutermost()->GetName() == Copy);
 			// A level copied outside RQL stays in memory: OpenLevel says so instead of "no level".
-			UEditorAssetLibrary::DuplicateAsset(Level, Unsaved);
+			UEditorAssetLibrary::DuplicateAsset(Source, Unsaved);
 			Refuses(TEXT("an unsaved level"), /* editor | call OpenLevel("@UN@") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"OpenLevel","args":[{"lit":"@UN@"}]}]})RQL"), TEXT("is not saved yet"), { { TEXT("UN"), Unsaved } });
 
-			if (FPackageName::DoesPackageExist(Original))
+			// Opening the copy replaces the editor world: only when the open level is a saved map that can come back.
+			UWorld* Start = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+			const FString Original = Start ? Start->GetOutermost()->GetName() : FString();
+			if (Start && FPackageName::DoesPackageExist(Original) && (!Start->GetOutermost()->IsDirty() || FApp::IsUnattended()))
+			{
+				Must(TEXT("the copy opens"), /* editor | call OpenLevel("@CP@") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"OpenLevel","args":[{"lit":"@CP@"}]}]})RQL"), { { TEXT("CP"), Copy } });
+				UWorld* Opened = GEditor->GetEditorWorldContext().World();
+				TestTrue(TEXT("the editor shows the copy"), Opened && Opened->GetOutermost()->GetName() == Copy);
 				UEditorLoadingAndSavingUtils::LoadMap(Original);
+			}
 			else
-				Must(TEXT("an unsaved level again"), /* editor | call NewLevel("") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"NewLevel","args":[{"lit":""}]}]})RQL"));
-			const TSharedPtr<FJsonObject> DropLevel = Run(/* editor | call DeleteAsset("@LV@", true) */ TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"DeleteAsset","args":[{"lit":"@LV@"},{"lit":true}]}]})RQL"), true, { { TEXT("LV"), Level } });
+			{
+				AddInfo(TEXT("opening the copy skipped: the open level is not a saved map (or has unsaved changes)"));
+			}
 			const TSharedPtr<FJsonObject> DropCopy = Run(/* editor | call DeleteAsset("@CP@", true) */ TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"DeleteAsset","args":[{"lit":"@CP@"},{"lit":true}]}]})RQL"), true, { { TEXT("CP"), Copy } });
 			Run(/* editor | call DeleteAsset("@UN@", true) */ TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"DeleteAsset","args":[{"lit":"@UN@"},{"lit":true}]}]})RQL"), true, { { TEXT("UN"), Unsaved } });
-			TestTrue(*FString::Printf(TEXT("the level is deleted (%s)"), *UnrealMcpRqlSpecHelpers::Codes(DropLevel)), UnrealMcpRqlSpecHelpers::IsOk(DropLevel));
 			TestTrue(*FString::Printf(TEXT("the copy is deleted (%s)"), *UnrealMcpRqlSpecHelpers::Codes(DropCopy)), UnrealMcpRqlSpecHelpers::IsOk(DropCopy));
 			// Never leave map files behind in the testbed, even when a delete failed.
 			CollectGarbage(GARBAGE_COLLECTION_KEEPFLAGS);
-			for (const FString& Package : { Level, Copy, Unsaved })
+			for (const FString& Package : { Copy, Unsaved })
 				IFileManager::Get().Delete(*FPackageName::LongPackageNameToFilename(Package, FPackageName::GetMapPackageExtension()), false, true, true);
 		});
 	});
