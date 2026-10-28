@@ -1,7 +1,7 @@
 {
   "extensionId": "com.ivanmurzak.unreal-ai-landscape",
   "name": "Landscape Tools",
-  "description": "RQL module for Unreal's Landscape and Water systems: query landscapes (sections, paint layers), water bodies and water zones.",
+  "description": "RQL module for Unreal's Landscape and Water systems: create, sculpt and paint landscapes; query landscapes (sections, paint layers), water bodies and water zones.",
   "pluginName": "UnrealAILandscape",
   "repo": "IvanMurzak/Unreal-MCP",
   "version": "0.1.1",

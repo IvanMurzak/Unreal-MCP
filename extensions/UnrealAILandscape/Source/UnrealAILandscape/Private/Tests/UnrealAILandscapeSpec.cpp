@@ -10,6 +10,19 @@
 #include "IUnrealMcpRqlModule.h"
 #include "UnrealMcpRqlTools.h"
 
+#include "EngineUtils.h"
+#include "Landscape.h"
+#include "LandscapeDataAccess.h"
+#include "LandscapeEdit.h"
+#include "LandscapeEditLayer.h"
+#include "LandscapeInfo.h"
+#include "LandscapeLayerInfoObject.h"
+#include "Materials/Material.h"
+#include "Materials/MaterialExpressionLandscapeLayerBlend.h"
+#include "Misc/Guid.h"
+#include "Serialization/JsonSerializer.h"
+#include "Serialization/JsonWriter.h"
+
 // ============================================================================================
 //  UE Automation spec for the extension's RQL module (Unreal-MCP docs/rql.md "Extensions").
 //
@@ -75,6 +88,110 @@ void FUnrealAILandscapeSpec::Define()
 			const bool bResultOk = UnrealMcpRqlTools::RunPlan(TEXT(R"RQL({"rql":"0.1","source":{"path":["waterZones"]},"stages":[{"op":"count"}]})RQL"), false, &Result);
 			TestTrue(TEXT("a well-formed result"), Result.IsValid());
 			TestTrue(TEXT("succeeds"), bResultOk);
+		});
+	});
+
+	Describe("operations", [this]()
+	{
+		It("lists the landscape operations", [this]()
+		{
+			bool bOk = false;
+			const FString Schema = UnrealMcpRqlTools::Schema(TEXT("LandscapeOperations"), bOk);
+			TestTrue(TEXT("schema ok"), bOk);
+			for (const TCHAR* Method : { TEXT("Create"), TEXT("Sculpt"), TEXT("Paint"), TEXT("CreateLayerMaterial") })
+				TestTrue(*FString::Printf(TEXT("lists %s"), Method), Schema.Contains(FString(Method) + TEXT("(")));
+		});
+
+		It("creates a landscape with a layer material, raises a hill and paints a layer; refuses bad input", [this]()
+		{
+			const FString Id = FGuid::NewGuid().ToString(EGuidFormats::Digits);
+			const FString Label = TEXT("RqlSpecTerrain_") + Id;
+			const FString MaterialPath = TEXT("/Game/RqlSpec/M_Terrain_") + Id;
+			auto Run = [&Label, &MaterialPath](const TCHAR* Plan, bool bMutate, TSharedPtr<FJsonObject>* Out = nullptr)
+			{
+				return UnrealMcpRqlTools::RunPlan(FString(Plan).Replace(TEXT("@LABEL@"), *Label).Replace(TEXT("@MAT@"), *MaterialPath), bMutate, Out);
+			};
+			// landscape | call CreateLayerMaterial("@MAT@", "Grass #3a7d2c, Rock")
+			TestTrue(TEXT("layer material created"), Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["landscape"]},"stages":[{"op":"call","method":"CreateLayerMaterial","args":[{"lit":"@MAT@"},{"lit":"Grass #3a7d2c, Rock"}]}]})RQL"), true));
+			UMaterial* Material = LoadObject<UMaterial>(nullptr, *MaterialPath);
+			UMaterialExpressionLandscapeLayerBlend* Blend = nullptr;
+			if (TestNotNull(TEXT("the material exists"), Material))
+			{
+				for (UMaterialExpression* Expression : Material->GetExpressions())
+					Blend = Blend ? Blend : Cast<UMaterialExpressionLandscapeLayerBlend>(Expression);
+			}
+			if (TestNotNull(TEXT("a Landscape Layer Blend"), Blend))
+			{
+				TestEqual(TEXT("two layers"), Blend->Layers.Num(), 2);
+				TestEqual(TEXT("first layer"), Blend->Layers.Num() > 0 ? Blend->Layers[0].LayerName : FName(NAME_None), FName(TEXT("Grass")));
+				TestTrue(TEXT("Grass is green"), Blend->Layers.Num() > 0 && Blend->Layers[0].ConstLayerInput.Y > Blend->Layers[0].ConstLayerInput.X);
+			}
+			// landscape | call Create("@LABEL@", [0, 0, 0], 20, "@MAT@")
+			TestTrue(TEXT("landscape created"), Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["landscape"]},"stages":[{"op":"call","method":"Create","args":[{"lit":"@LABEL@"},{"list":[{"lit":0},{"lit":0},{"lit":0}]},{"lit":20},{"lit":"@MAT@"}]}]})RQL"), true));
+			ALandscape* Landscape = nullptr;
+			for (TActorIterator<ALandscape> It(UnrealMcpRql::EditorWorld()); It; ++It)
+				Landscape = It->GetActorLabel() == Label ? *It : Landscape;
+			if (!TestNotNull(TEXT("the landscape is in the editor world"), Landscape))
+				return;
+			TestTrue(TEXT("it has components"), Landscape->LandscapeComponents.Num() > 0);
+			TestTrue(TEXT("the material is assigned"), Landscape->LandscapeMaterial.Get() == Material);
+			FVector Origin, Extent;
+			Landscape->GetActorBounds(false, Origin, Extent);
+			TestTrue(*FString::Printf(TEXT("20 m wide (%.0f x %.0f cm), centred (%.0f, %.0f)"), Extent.X * 2, Extent.Y * 2, Origin.X, Origin.Y),
+				FMath::IsNearlyEqual(Extent.X * 2, 2000.0, 60.0) && FMath::IsNearlyEqual(Extent.Y * 2, 2000.0, 60.0) && FMath::Abs(Origin.X) < 60.0 && FMath::Abs(Origin.Y) < 60.0);
+
+			// landscape | call Sculpt(unreal.find("@LABEL@"), [0, 0, 0], 500, 300)
+			TestTrue(TEXT("hill raised"), Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["landscape"]},"stages":[{"op":"call","method":"Sculpt","args":[{"call":"find","on":{"path":["unreal"]},"args":[{"lit":"@LABEL@"}]},{"list":[{"lit":0},{"lit":0},{"lit":0}]},{"lit":500},{"lit":300}]}]})RQL"), true));
+			ULandscapeInfo* Info = Landscape->GetLandscapeInfo();
+			FIntRect Whole;
+			if (TestTrue(TEXT("landscape extent"), Info && Info->GetLandscapeExtent(Whole)))
+			{
+				FHeightmapAccessor<false> Heights(Info);
+				if (const ULandscapeEditLayerBase* EditLayer = Landscape->GetEditLayerConst(0))
+					Heights.SetEditLayer(EditLayer->GetGuid());
+				TArray<uint16> Data;
+				Data.SetNumZeroed(Whole.Width() + 1);
+				const int32 Row = (Whole.Min.Y + Whole.Max.Y) / 2;
+				Heights.GetDataFast(Whole.Min.X, Row, Whole.Max.X, Row, Data.GetData());
+				const double ZScale = Landscape->GetActorScale3D().Z * LANDSCAPE_ZSCALE;
+				const double Centre = (static_cast<double>(Data[Data.Num() / 2]) - LandscapeDataAccess::MidValue) * ZScale;
+				const double Edge = (static_cast<double>(Data[0]) - LandscapeDataAccess::MidValue) * ZScale;
+				TestTrue(*FString::Printf(TEXT("the centre rose about 3 m (%.1f cm)"), Centre), FMath::IsNearlyEqual(Centre, 300.0, 25.0));
+				TestTrue(*FString::Printf(TEXT("the edge stayed flat (%.1f cm)"), Edge), FMath::Abs(Edge) < 1.0);
+			}
+
+			// landscape | call Paint(unreal.find("@LABEL@"), "Grass", [0, 0, 0], 0)
+			TestTrue(TEXT("layer painted"), Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["landscape"]},"stages":[{"op":"call","method":"Paint","args":[{"call":"find","on":{"path":["unreal"]},"args":[{"lit":"@LABEL@"}]},{"lit":"Grass"},{"list":[{"lit":0},{"lit":0},{"lit":0}]},{"lit":0}]}]})RQL"), true));
+			// landscapes | where Label == "@LABEL@" | select PaintLayers ComponentCount LandscapeMaterial
+			TSharedPtr<FJsonObject> Layers;
+			Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["landscapes"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"@LABEL@"}]}},{"op":"select","fields":[{"name":"PaintLayers","expr":{"path":["PaintLayers"]}},{"name":"ComponentCount","expr":{"path":["ComponentCount"]}},{"name":"LandscapeMaterial","expr":{"path":["LandscapeMaterial"]}}]}]})RQL"), false, &Layers);
+			FString LayersText;
+			if (Layers.IsValid())
+				FJsonSerializer::Serialize(Layers.ToSharedRef(), TJsonWriterFactory<>::Create(&LayersText));
+			TestTrue(*FString::Printf(TEXT("PaintLayers lists Grass (%s)"), *LayersText.Left(300)), LayersText.Contains(TEXT("Grass")));
+			const int32 GrassIndex = Info ? Info->GetLayerInfoIndex(FName(TEXT("Grass"))) : INDEX_NONE;
+			ULandscapeLayerInfoObject* Grass = GrassIndex != INDEX_NONE ? Info->Layers[GrassIndex].LayerInfoObj.Get() : nullptr;
+			if (TestNotNull(TEXT("the Grass layer info"), Grass))
+			{
+				TAlphamapAccessor<false> Weights(Info, Grass);
+				if (const ULandscapeEditLayerBase* EditLayer = Landscape->GetEditLayerConst(0))
+					Weights.SetEditLayer(EditLayer->GetGuid());
+				uint8 Weight = 0;
+				const int32 X = (Whole.Min.X + Whole.Max.X) / 2;
+				const int32 Y = (Whole.Min.Y + Whole.Max.Y) / 2;
+				Weights.GetDataFast(X, Y, X, Y, &Weight);
+				TestEqual(TEXT("full Grass weight in the middle"), static_cast<int32>(Weight), 255);
+			}
+
+			// landscape | call Create("@LABEL@x", [0, 0, 0], 3)
+			TestFalse(TEXT("a 3 m landscape is refused"), Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["landscape"]},"stages":[{"op":"call","method":"Create","args":[{"lit":"@LABEL@x"},{"list":[{"lit":0},{"lit":0},{"lit":0}]},{"lit":3}]}]})RQL"), true));
+			// landscape | call CreateLayerMaterial("@MAT@x", "Grass #zz")
+			TestFalse(TEXT("a bad colour is refused"), Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["landscape"]},"stages":[{"op":"call","method":"CreateLayerMaterial","args":[{"lit":"@MAT@x"},{"lit":"Grass #zz"}]}]})RQL"), true));
+			TestNull(TEXT("no material for the refused call"), FindObject<UMaterial>(nullptr, *(MaterialPath + TEXT("x.M_Terrain_") + Id + TEXT("x"))));
+			// landscape | call Sculpt(unreal.find("@LABEL@"), [0, 0, 0], 0, 300)
+			TestFalse(TEXT("a zero radius is refused"), Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["landscape"]},"stages":[{"op":"call","method":"Sculpt","args":[{"call":"find","on":{"path":["unreal"]},"args":[{"lit":"@LABEL@"}]},{"list":[{"lit":0},{"lit":0},{"lit":0}]},{"lit":0},{"lit":300}]}]})RQL"), true));
+
+			Landscape->Destroy();
 		});
 	});
 
