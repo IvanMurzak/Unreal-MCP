@@ -17,6 +17,7 @@
 #include "EditorAssetLibrary.h"
 #include "EditorLevelUtils.h"
 #include "Engine/Level.h"
+#include "Engine/MapBuildDataRegistry.h"
 #include "Engine/LevelStreaming.h"
 #include "Engine/LevelStreamingAlwaysLoaded.h"
 #include "Engine/LevelStreamingDynamic.h"
@@ -444,12 +445,19 @@ UObject* UUnrealMcpRqlEditorApi::CopyAsset(const FString& Source, const FString&
 	UObject* Copy = UEditorAssetLibrary::DuplicateAsset(Source, Destination);
 	if (!Copy)
 		return Failed<UObject*>(FString::Printf(TEXT("could not copy '%s'"), *Source));
-	// A level opens from its file only (OpenLevel, AddSublevel): a copied level is saved at once, as a new map is. SaveMap
-	// writes its external packages (one file per actor) and built data with it.
-	FString Package, Error;
-	if (UWorld* World = Cast<UWorld>(Copy); World && (!ToPackageName(Destination, Package, Error) || !UEditorLoadingAndSavingUtils::SaveMap(World, Package)))
-		return Failed<UObject*>(FString::Printf(TEXT("copied the level to '%s' but could not save it: the copy is in memory only "
+	// A level opens from its file only (OpenLevel, AddSublevel): a copied level is saved at once, as a new map is, with its
+	// external packages (one file per actor) and built data. (Not SaveMap: with it, opening the copy afterwards tripped the
+	// editor's world-leak check and crashed the editor.)
+	if (UWorld* World = Cast<UWorld>(Copy))
+	{
+		TArray<UPackage*> Packages{ World->GetPackage() };
+		Packages.Append(World->GetPackage()->GetExternalPackages());
+		if (World->PersistentLevel && World->PersistentLevel->MapBuildData)
+			Packages.AddUnique(World->PersistentLevel->MapBuildData->GetPackage());
+		if (!UEditorLoadingAndSavingUtils::SavePackages(Packages, /*bOnlyDirty*/ false))
+			return Failed<UObject*>(FString::Printf(TEXT("copied the level to '%s' but could not save it: the copy is in memory only "
 			"(editor | call SaveAsset(\"%s\") or DeleteAsset(\"%s\", true))"), *Destination, *Destination, *Destination));
+	}
 	return Copy;
 }
 

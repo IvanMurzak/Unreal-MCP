@@ -1009,7 +1009,8 @@ void FUnrealMcpRqlDataModelsSpec::Define()
 		It("copies a level to a file that opens at once; an unsaved level is named as such", [this]()
 		{
 			UWorld* Start = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
-			if (!Start || Start->GetOutermost()->IsDirty())
+			// Opening another level drops the open one's unsaved changes: fine in an unattended (CI) run, not in someone's editor.
+			if (!Start || (Start->GetOutermost()->IsDirty() && !FApp::IsUnattended()))
 			{
 				AddInfo(TEXT("skipped: the open level has unsaved changes (opening another level would drop them)"));
 				return;
