@@ -445,13 +445,13 @@ UObject* UUnrealMcpRqlEditorApi::CopyAsset(const FString& Source, const FString&
 	UObject* Copy = UEditorAssetLibrary::DuplicateAsset(Source, Destination);
 	if (!Copy)
 		return Failed<UObject*>(FString::Printf(TEXT("could not copy '%s'"), *Source));
-	// A level opens from its file only (OpenLevel, AddSublevel): a copied level is saved at once, as a new map is, with its
-	// external packages (one file per actor) and built data. (Not SaveMap: with it, opening the copy afterwards tripped the
-	// editor's world-leak check and crashed the editor.)
+	// A level opens from its file only (OpenLevel, AddSublevel): a copied level is saved at once, as a new map is. Saving
+	// the world package writes its external packages (one file per actor); its built data lives in a package of its own.
+	// (UEditorLoadingAndSavingUtils::SaveMap(World, Path) is not used: in testing, opening the copy saved that way tripped
+	// the editor's world-leak check, a fatal error.)
 	if (UWorld* World = Cast<UWorld>(Copy))
 	{
 		TArray<UPackage*> Packages{ World->GetPackage() };
-		Packages.Append(World->GetPackage()->GetExternalPackages());
 		if (World->PersistentLevel && World->PersistentLevel->MapBuildData)
 			Packages.AddUnique(World->PersistentLevel->MapBuildData->GetPackage());
 		if (!UEditorLoadingAndSavingUtils::SavePackages(Packages, /*bOnlyDirty*/ false))

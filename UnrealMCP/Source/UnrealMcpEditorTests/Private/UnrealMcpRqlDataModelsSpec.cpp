@@ -19,6 +19,7 @@
 #include "EngineUtils.h"
 #include "EditorAssetLibrary.h"
 #include "FileHelpers.h"
+#include "Misc/App.h"
 #include "LevelSequence.h"
 #include "MovieScene.h"
 #include "MovieScenePossessable.h"
