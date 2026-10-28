@@ -316,9 +316,11 @@ namespace UnrealMcpRqlEditorApiLocal
 				OutError = FString::Printf(TEXT("'%s' is a %s, which cannot be placed in a level"), *Name, *Asset->GetClass()->GetName());
 				return false;
 			}
-			if (bAssetOnly && !Asset)
+			if (bAssetOnly)
 			{
-				OutError = FString::Printf(TEXT("no asset at '%s'"), *Name);
+				OutError = !Asset ? FString::Printf(TEXT("no asset at '%s'"), *Name)
+					: Asset->IsA<UClass>() ? FString::Printf(TEXT("'%s' is a class, not an asset: use SpawnActor"), *Name)
+					: FString::Printf(TEXT("'%s' is a %s, which cannot be placed in a level"), *Name, *Asset->GetClass()->GetName());
 				return false;
 			}
 		}

@@ -92,15 +92,17 @@ namespace UnrealMcpPythonTools
 	static constexpr int32 PythonRuntimeLogChars = PythonMaxLogChars - 256;
 
 	/**
-	 * The snippet's time budget (Code-Exec timeoutMs): the call's timeout (UNREAL_MCP_TOOL_TIMEOUT) less a margin for the
-	 * queue before the run and the reply after it, so code_exec's watchdog stops an endless loop and frees the game thread
-	 * before the dispatcher gives up on the call. Never 0, which would mean no bound.
+	 * The snippet's time budget (Code-Exec timeoutMs): what is left of the call's timeout (UNREAL_MCP_TOOL_TIMEOUT; the call
+	 * may have waited for the game thread or for Python to start) less a margin for the reply, so code_exec's watchdog stops
+	 * an endless loop and frees the game thread before the dispatcher gives up on the call. Never 0, which means no bound.
 	 */
-	static int32 PythonTimeBudgetMs(int32 CallTimeoutMs)
+	static int32 PythonTimeBudgetMs(const FUnrealMcpToolCall& Call)
 	{
-		const int32 Call = CallTimeoutMs > 0 ? CallTimeoutMs : FUnrealMcpConfig::DefaultToolTimeoutMs; // none: a direct call (tests)
-		const int32 Margin = FMath::Clamp(Call / 10, 2000, 15000);
-		return FMath::Max(Call - Margin, 1000);
+		const int32 Timeout = Call.TimeoutMs > 0 ? Call.TimeoutMs : FUnrealMcpConfig::DefaultToolTimeoutMs; // none: a direct call (tests)
+		const double Waited = Call.ReceivedSeconds > 0.0 ? (FPlatformTime::Seconds() - Call.ReceivedSeconds) * 1000.0 : 0.0;
+		const int32 Left = FMath::Max(Timeout - FMath::RoundToInt(Waited), 1);
+		const int32 Margin = FMath::Clamp(Timeout / 10, 2000, 15000);
+		return FMath::Max(Left - Margin, FMath::Max(Left / 2, 1));
 	}
 
 	/** Said when a snippet that calls setters recorded nothing for undo (UE records only objects that were Modify()'d). */
@@ -279,7 +281,7 @@ namespace UnrealMcpPythonTools
 				Request->SetNumberField(TEXT("maxLogChars"), PythonRuntimeLogChars);
 				Request->SetNumberField(TEXT("maxLogLineChars"), PythonMaxLogLineChars);
 				Request->SetNumberField(TEXT("maxErrorChars"), PythonMaxValueChars);
-				Request->SetNumberField(TEXT("timeoutMs"), PythonTimeBudgetMs(Call.TimeoutMs));
+				Request->SetNumberField(TEXT("timeoutMs"), PythonTimeBudgetMs(Call));
 				TArray<TSharedPtr<FJsonValue>> Imports;
 				Imports.Add(MakeShared<FJsonValueString>(TEXT("unreal")));
 				Request->SetArrayField(TEXT("imports"), Imports);

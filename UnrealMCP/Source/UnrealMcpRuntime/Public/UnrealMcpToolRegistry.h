@@ -85,6 +85,8 @@ struct UNREALMCPRUNTIME_API FUnrealMcpToolCall
 	 * dispatcher's "timed out".
 	 */
 	int32 TimeoutMs = 0;
+	/** When the call arrived (FPlatformTime::Seconds()), so a handler bounds its work by the time left; 0 when unknown. */
+	double ReceivedSeconds = 0.0;
 
 	FUnrealMcpToolCall() : Arguments(MakeShared<FJsonObject>()) {}
 	explicit FUnrealMcpToolCall(const TSharedPtr<FJsonObject>& InArgs)

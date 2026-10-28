@@ -58,6 +58,7 @@ describe('runTool', () => {
     const plain = (async () =>
       fakeResponse({ ok: false, status: 502, statusText: 'Bad Gateway', body: 'upstream down' })) as unknown as typeof fetch;
     const p = await runTool({ toolName: 'rql-query', url: 'http://h', fetchImpl: plain });
+    expect(p.kind).toBe('failure');
     if (p.kind === 'failure') expect(p.message).toBe('Bad Gateway');
   });
 

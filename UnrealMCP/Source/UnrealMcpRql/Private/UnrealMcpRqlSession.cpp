@@ -314,12 +314,19 @@ void FUnrealMcpRqlSession::ConfigureMutations()
 		{
 			if (!Record.method || !Record.item.is_object() || !Record.item.ptr())
 				continue;
-			// An operations object (`editor`, an extension's) runs once per stream item by design: range(0, 300) | call
-			// editor.SpawnActor(...) creates 300 actors.
+			// An operations object (`editor`, an extension's) is called once per stream item by design (range(0, 300) | call
+			// editor.SpawnActor(...) creates 300 actors): the same operation twice with the same arguments is the duplicate
+			// (DeleteAsset("/Game/X") twice), except a spawn, where identical arguments still mean another actor.
+			FString Key = UnrealMcpRqlFromStd(Record.method->name).ToLower();
 			if (const UObject* Receiver = TypeProvider->AsObject(Record.item); Receiver && TypeProvider->IsApiClass(Receiver->GetClass()))
-				continue;
+			{
+				if (Key.StartsWith(TEXT("spawn")))
+					continue;
+				for (const rql::Value& Argument : Record.args)
+					Key += TEXT("|") + UnrealMcpRqlFromStd(rql::to_text(Argument));
+			}
 			bool bTwice = false;
-			Called.Add({ Record.item.ptr(), UnrealMcpRqlFromStd(Record.method->name).ToLower() }, &bTwice);
+			Called.Add({ Record.item.ptr(), Key }, &bTwice);
 			if (bTwice)
 			{
 				const UObject* Object = TypeProvider->AsObject(Record.item);

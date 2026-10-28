@@ -1369,6 +1369,12 @@ void FUnrealMcpRqlSpec::Define()
 			// editor | call SpawnActorFromAsset("PointLight", "RqlSpecLampNotAsset")
 			const TSharedPtr<FJsonObject> NotAsset = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"SpawnActorFromAsset","args":[{"lit":"PointLight"},{"lit":"RqlSpecLampNotAsset"}]}]})RQL"), true);
 			TestTrue(*FString::Printf(TEXT("a class name is no asset path (%s)"), *Codes(NotAsset)), !IsOk(NotAsset) && Codes(NotAsset).Contains(TEXT("not an asset path")));
+			// editor | call SpawnActorFromAsset("/Script/Engine.PointLight", "RqlSpecLampClass")
+			const TSharedPtr<FJsonObject> ClassPath = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"SpawnActorFromAsset","args":[{"lit":"/Script/Engine.PointLight"},{"lit":"RqlSpecLampClass"}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("a class path points at SpawnActor (%s)"), *Codes(ClassPath)), !IsOk(ClassPath) && Codes(ClassPath).Contains(TEXT("use SpawnActor")));
+			// [1, 2] | call editor.DeleteAsset("/Game/RqlSpecNoSuchAsset")
+			const TSharedPtr<FJsonObject> Twice = Exec(TEXT(R"RQL({"rql":"0.1","source":{"list":[{"lit":1},{"lit":2}]},"stages":[{"op":"call","method":"DeleteAsset","on":{"path":["editor"]},"args":[{"lit":"/Game/RqlSpecNoSuchAsset"}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("the same operation with the same arguments twice is refused before it runs (%s)"), *Codes(Twice)), !IsOk(Twice) && Codes(Twice).Contains(TEXT("would run twice")));
 		});
 
 		It("computes vectors and rotators component-wise: Scale * 1.5, Location + [0, 0, 100]; Scale + 1 is refused", [this]()

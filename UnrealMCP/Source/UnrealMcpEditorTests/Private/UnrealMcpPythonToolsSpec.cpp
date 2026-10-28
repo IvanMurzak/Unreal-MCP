@@ -117,13 +117,13 @@ void FUnrealMcpPythonToolsSpec::Define()
 
 	It("stops an endless loop before the call's timeout and leaves the editor usable", [this]()
 	{
-		// A 3 s call timeout leaves the snippet a 1 s budget (the margin covers the queue and the reply).
+		// A 3 s call timeout leaves the snippet half of it: the 2 s margin would leave less (the margin covers the reply).
 		const double Start = FPlatformTime::Seconds();
 		const FUnrealMcpToolResult R = Run(TEXT("while True:\n    pass"), {}, 3000);
 		const double Elapsed = FPlatformTime::Seconds() - Start;
 		TestFalse(TEXT("an error"), R.bSuccess);
 		TestTrue(*FString::Printf(TEXT("a Timeout naming the budget (%s)"), *R.Message), R.Message.StartsWith(TEXT("Timeout:"))
-			&& R.Message.Contains(TEXT("time budget of 1000 ms")));
+			&& R.Message.Contains(TEXT("time budget of 1500 ms")));
 		TestTrue(*FString::Printf(TEXT("stopped within the call's timeout (%.1f s)"), Elapsed), Elapsed < 3.0);
 		const FUnrealMcpToolResult After = Run(TEXT("6 * 7"));
 		TestTrue(TEXT("the next run works"), After.bSuccess && After.Message.StartsWith(TEXT("42")));
