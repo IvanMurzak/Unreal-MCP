@@ -9,8 +9,8 @@
     Machine-wide mutex for the self-hosted Unreal Engine CI jobs.
 
 .DESCRIPTION
-    An autoscaler on the self-hosted Unreal machine registers several ephemeral `runner-manager-*`
-    runners on that ONE machine. They share one UE install per engine (AutomationTool refuses a
+    runner-manager registers ephemeral `runner-manager-*` runners on each Unreal machine: one for
+    Unreal-MCP plus other repos' runners (the Unreal-AI-* extensions) and local runs. They share one UE install per engine (AutomationTool refuses a
     second instance: "A conflicting instance of AutomationTool is already running") and, on the
     UNREAL_HOST_PROJECT fallback, one host-project Plugins\UnrealMCP junction. A workflow
     `concurrency:` group cannot serialize them: the run-level group is keyed per PR, ref or chain

@@ -72,7 +72,8 @@ namespace UnrealMcpRqlSessionLocal
 		return Entry.bList ? FString(TEXT("list of ")) + Name : Name;
 	}
 
-	FString Cell(const FString& Text)
+	/** A Markdown table cell. Not `Cell`: macOS MacTypes.h (pulled in by UE 5.7 on Mac) declares a global `Cell`. */
+	FString TableCell(const FString& Text)
 	{
 		return Text.Replace(TEXT("|"), TEXT("\\|")).Replace(TEXT("\n"), TEXT(" "));
 	}
@@ -753,11 +754,11 @@ FString FUnrealMcpRqlSession::SkillMarkdown() const
 	TArray<FEntry> SortedSources = SourceEntries;
 	SortedSources.Sort([](const FEntry& A, const FEntry& B) { return A.Name < B.Name; });
 	for (const FEntry& Entry : SortedSources)
-		Out += FString::Printf(TEXT("| `%s` | %s |\n"), *Entry.Name, *Cell(Entry.Description));
+		Out += FString::Printf(TEXT("| `%s` | %s |\n"), *Entry.Name, *TableCell(Entry.Description));
 	TArray<FEntry> SortedFunctions = FunctionEntries;
 	SortedFunctions.Sort([](const FEntry& A, const FEntry& B) { return A.Name < B.Name; });
 	for (const FEntry& Entry : SortedFunctions)
-		Out += FString::Printf(TEXT("| `%s(...)` | %s |\n"), *Entry.Name, *Cell(Entry.Description));
+		Out += FString::Printf(TEXT("| `%s(...)` | %s |\n"), *Entry.Name, *TableCell(Entry.Description));
 	for (const TPair<FString, FString>& Guide : Guides)
 		Out += FString::Printf(TEXT("\n## %s\n\n%s\n"), *Guide.Key, *Guide.Value.TrimStartAndEnd());
 	Out += TEXT("\n## Installed RQL modules\n\n- `Core`\n");
