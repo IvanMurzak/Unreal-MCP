@@ -45,6 +45,20 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
     public sealed class IpcDisconnectedException : Exception
     {
         public const string DefaultMessage = "Unreal editor bridge disconnected.";
+        public const string NotSentMessage = "Unreal editor bridge disconnected: the editor is not connected (or not ready) yet, so the call was not sent.";
+
         public IpcDisconnectedException(string? message = null) : base(message ?? DefaultMessage) { }
+
+        IpcDisconnectedException(string message, bool notSent) : base(message) => NotSent = notSent;
+
+        /// <summary>
+        /// The call was refused before any of it was written to the editor link, so it provably never started
+        /// and is safe to re-send. False for a write that failed or a link that dropped mid-call: the editor may
+        /// already be running it.
+        /// </summary>
+        public bool NotSent { get; }
+
+        /// <summary>A refusal before anything was sent (see <see cref="NotSent"/>).</summary>
+        public static IpcDisconnectedException BeforeSend() => new(NotSentMessage, notSent: true);
     }
 }

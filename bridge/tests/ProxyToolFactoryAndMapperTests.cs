@@ -67,15 +67,46 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         }
 
         [Fact]
-        public async Task Create_DisconnectedChannel_FailsFastWithStructuredError()
+        public async Task Create_DisconnectedChannel_FailsFastAsNotExecuted()
         {
+            // Refused before anything was sent: provably not started, so the server may re-send it (503 contract).
             var channel = new FakeToolCallChannel { Connected = false };
             var proxy = ProxyToolFactory.Create(new ToolDescriptor { Name = "ping" }, channel);
 
             var result = await proxy.Run("req-1", null);
 
             Assert.Equal(ResponseStatus.Error, result.Status);
+            Assert.Equal("req-1", result.RequestID);
             Assert.Contains("disconnected", result.GetMessage());
+            Assert.Equal(ResponseErrorKind.Unavailable, result.ErrorKind);
+            Assert.Equal(ResponseCallTool.NotExecutedStatusCode, result.HttpStatusCode);
+        }
+
+        [Fact]
+        public async Task Create_LinkDropsMidCall_IsAPlainError_NotNotExecuted()
+        {
+            // The call may already be running in the editor: it must never be marked safe to re-send.
+            var channel = new FakeToolCallChannel { DropsMidCall = true };
+            var proxy = ProxyToolFactory.Create(new ToolDescriptor { Name = "ping" }, channel);
+
+            var result = await proxy.Run("req-2", null);
+
+            Assert.Equal(ResponseStatus.Error, result.Status);
+            Assert.Contains("disconnected", result.GetMessage());
+            Assert.NotEqual(ResponseCallTool.NotExecutedStatusCode, result.HttpStatusCode);
+            Assert.NotEqual(ResponseErrorKind.Unavailable, result.ErrorKind);
+        }
+
+        [Fact]
+        public async Task IpcClient_BeforeHandshake_RefusesTheCallAsNotSent()
+        {
+            // A client that never connected (the port is never dialed) fails the gate before writing anything.
+            var ipc = new IpcClient("127.0.0.1", 39997, token: "ipc-token", sidecarVersion: "0.1.0");
+
+            var ex = await Assert.ThrowsAsync<IpcDisconnectedException>(
+                () => ipc.CallToolAsync("ping", null, 1000, CancellationToken.None));
+
+            Assert.True(ex.NotSent);
         }
 
         [Fact]
