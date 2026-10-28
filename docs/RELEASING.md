@@ -435,12 +435,25 @@ again unless recovering a post-tag failure (see "Re-running a release" below).
 ## Self-hosted Unreal runner
 
 The plugin leg (compile + Automation specs) needs local Unreal Engine installs,
-which are not available on GitHub-hosted runners. It runs on a **self-hosted
-Windows runner** (runner-manager selector `rm-autoscale-win-x64`). Every self-hosted
-job also asks for the engine-versioned label of the engine it builds with —
-`unreal-<major>-<minor>`, e.g. `unreal-5-8` for UE 5.8 — so a job only lands on a
-machine that has that engine installed. A runner advertises one such label per
-installed engine. The release matrix validates UE 5.5/5.6/5.7/5.8.
+which are not available on GitHub-hosted runners. Every self-hosted job asks for
+the engine-versioned label of the engine it builds with — `unreal-<major>-<minor>`,
+e.g. `unreal-5-8` for UE 5.8 — so a job only lands on a machine that has that engine
+installed. A runner advertises one such label per installed engine. The release
+matrix validates UE 5.5/5.6/5.7/5.8.
+
+**Which OS.** The PR `plugin` job (`test_pull_request.yml`) asks only for `self-hosted`
++ the engine label, so a Windows, macOS or Linux runner can take a leg, whichever is
+free. The release workflows are deterministic instead: `release.yml`'s `plugin` runs
+every engine on Windows plus UE 5.7/5.8 on macOS, and `release_extensions.yml`'s `test`
+runs 5.7/5.8 on both, each leg pinned by its OS label (`windows`, `macos`).
+`.github/scripts/ue-env.ps1` resolves
+that runner's engine (`UE_ROOT_<major>_<minor>` in the runner's environment, else the
+Epic Launcher default: `C:\Program Files\Epic Games\UE_x.y` on Windows,
+`/Users/Shared/Epic Games/UE_x.y` on macOS; Linux has no default) and builds for the
+host platform (`Win64`, `Mac`, `Linux`). A runner needs PowerShell 7 (`pwsh`) on
+PATH. `connection-smoke` and `build-plugin-zip` (the Win64 Fab package) stay on the
+**Windows runner** (`windows` label). Because a PR 5.7/5.8 leg may land on either OS, an
+MSVC-only or clang-only compile error can slip through a PR; the release matrix catches it.
 
 > **Status (2026-06-11): the runner is LIVE.** Self-hosted Windows runners
 > (labels `self-hosted`, `Windows`, `X64`, `rm-autoscale-win-x64`, `unreal-5-x`) are registered against
@@ -450,11 +463,10 @@ installed engine. The release matrix validates UE 5.5/5.6/5.7/5.8.
 > workflows prefer that runner-local host and keep `UNREAL_HOST_PROJECT` only as
 > a fallback. That keeps parallel Automation jobs from sharing one mutable
 > `Plugins\UnrealMCP` junction while still exercising the packaged plugin. The
-> `plugin BuildPlugin + Automation (UE <ver>)` leg runs the same
-> `matrix.ue: ['5.5', '5.6', '5.7', '5.8']` in `test_pull_request.yml` (same-repo
-> PRs) and `release.yml` (real releases and dry-runs), so an API missing on an older
-> engine fails the PR instead of the release. Both are capped at two parallel
-> Unreal engines to avoid MSVC PCH virtual memory exhaustion on the local machine. The host game module is rebuilt per
+> `plugin BuildPlugin + Automation` leg covers UE 5.5–5.8 in `test_pull_request.yml`
+> (same-repo PRs) and in `release.yml` (real releases and dry-runs; there per OS, see
+> *Which OS*), so an API missing on an older engine fails the PR instead of the
+> release. The PR matrix is capped at two parallel Unreal engines to avoid MSVC PCH virtual memory exhaustion on the local machine. The host game module is rebuilt per
 > engine on each runner-local host. The
 > PR smoke job waits for the plugin job, because both use UE 5.8 `RunUAT` on the
 > same machine and Unreal's AutomationTool permits only one same-engine instance
@@ -484,7 +496,8 @@ So every self-hosted UE job (`plugin` and `connection-smoke` in
 machine-wide lock with `.github/scripts/ue-machine-lock.ps1`:
 
 - **Acquire** runs just before the job's first UE step. It holds an exclusive OS file
-  handle on `C:\ProgramData\UnrealMCP-ci\ue.lock` through a small detached holder
+  handle on `C:\ProgramData\UnrealMCP-ci\ue.lock` (macOS/Linux:
+  `/var/tmp/UnrealMCP-ci/ue.lock`, an exclusive `flock()`) through a small detached holder
   process, because the lock must outlive each step's own process. While it waits, it
   logs `waiting for the machine-wide UE lock ... held by: <repo> run <id> ...` once a
   minute. The wait is bounded (60 min in PR jobs, 180 min in release jobs), and a
@@ -501,9 +514,10 @@ machine-wide lock with `.github/scripts/ue-machine-lock.ps1`:
 - The first job to create `C:\ProgramData\UnrealMCP-ci\` grants Modify to
   Authenticated Users, LOCAL SERVICE and NETWORK SERVICE (SYSTEM: Full), so runners
   under different accounts can all open the lock. An existing folder is left as-is.
+  On macOS/Linux the folder is made `1777` and each holder opens the file to everyone.
 
 The lock spans every engine version, so it also serializes the release matrix
-legs, which `max-parallel: 2` would otherwise run two at a time. It is the
+legs on one machine, which `max-parallel` would otherwise run in parallel. It is the
 authoritative serialization, and it does not change runner labels.
 
 Waiters retry every 5 s, so the lock is **not first-come-first-served**: under
@@ -540,12 +554,18 @@ Defense in depth at the repository-settings level (operator):
 
 ### Registration steps (operator)
 
+A macOS or Linux runner only needs the engines installed (see *Which OS* above),
+`pwsh`, and the labels `self-hosted` + one `unreal-<major>-<minor>` per engine; with
+runner-manager: `runner-manager repo add IvanMurzak/Unreal-MCP --host-label <host>
+--max-capacity 1 --label unreal-5-8 --label unreal-5-7`, then `repo add-label … --label
+self-hosted`. The Windows runner, which also serves the Windows-only jobs:
+
 1. On a Windows machine with UE 5.5, 5.6, 5.7, and 5.8 installed at the standard
    Epic paths (`C:\Program Files\Epic Games\UE_5.5` through `UE_5.8`), register a
    self-hosted runner against `IvanMurzak/Unreal-MCP`:
    *Settings → Actions → Runners → New self-hosted runner* (Windows x64). Follow
    the `./config.cmd` steps GitHub shows.
-2. Give the runner the labels `self-hosted`, `windows`, `rm-autoscale-win-x64`, and one
+2. Give the runner the labels `self-hosted`, `windows`, and one
    **`unreal-<major>-<minor>`** label per installed engine (`unreal-5-5` … `unreal-5-8`).
 3. Prepare a host `.uproject` under that runner root at
    `host\UnrealTestProject\UnrealTestProject.uproject`. For multiple runners,

@@ -265,7 +265,7 @@ jobs:
   # real run otherwise, so a skipped plugin leg can never yield a green run that
   # published nothing. A dry run only warns. See docs/RELEASING.md.
   plugin:
-    name: plugin BuildPlugin + Automation (UE ${{ matrix.ue }})
+    name: plugin BuildPlugin + Automation (UE ${{ matrix.ue }}, ${{ matrix.os }})
     needs: [check-version]
     if: vars.UNREAL_RUNNER_READY == 'true'
     # Matrix covers the supported UE 5.5/5.6/5.7/5.8 set; the single self-hosted
@@ -277,19 +277,28 @@ jobs:
     # Engine-versioned runner label (unreal-5-8 for UE 5.8): the job only lands on a machine
     # that has this engine installed. Expressions have no replace(), hence the lookup; an
     # unmapped version yields e.g. `unreal-5.10`, which no runner carries (add it to the map).
+    # Deterministic OS coverage (unlike the PR legs, which take whichever OS is free): every engine
+    # on Windows (Win64, MSVC) and the engines the macOS runner has on macOS (Mac, clang), each leg
+    # pinned by its OS label. .github/scripts/ue-env.ps1 resolves that runner's engine install.
+    # max-parallel 4: the machine-wide UE lock serializes the UE work per machine anyway, so this
+    # only lets the two machines work at the same time.
     runs-on:
       - self-hosted
-      - windows
-      - rm-autoscale-win-x64
+      - ${{ matrix.os }}
       - ${{ fromJSON('{"5.5":"unreal-5-5","5.6":"unreal-5-6","5.7":"unreal-5-7","5.8":"unreal-5-8","5.9":"unreal-5-9"}')[matrix.ue] || format('unreal-{0}', matrix.ue) }}
     strategy:
       fail-fast: false
-      max-parallel: 2
+      max-parallel: 4
       matrix:
-        ue: ['5.5', '5.6', '5.7', '5.8']
+        include:
+          # Interleaved: GitHub starts matrix legs in this order, so both machines start at once.
+          - { os: windows, ue: '5.5' }
+          - { os: macos, ue: '5.7' }
+          - { os: windows, ue: '5.6' }
+          - { os: macos, ue: '5.8' }
+          - { os: windows, ue: '5.7' }
+          - { os: windows, ue: '5.8' }
     env:
-      # Engine path is driven by the matrix (standard Epic install layout).
-      UE_ROOT: C:\Program Files\Epic Games\UE_${{ matrix.ue }}
       HOST_UPROJECT: ${{ vars.UNREAL_HOST_PROJECT }}
     steps:
       - name: Checkout repository
@@ -305,7 +314,12 @@ jobs:
       - name: Clean staged bridge binaries (gitignored)
         shell: pwsh
         run: |
-          & "$env:GITHUB_WORKSPACE\.github\scripts\clean-staged-bridge.ps1"
+          & "$env:GITHUB_WORKSPACE/.github/scripts/clean-staged-bridge.ps1"
+      # This runner's engine install (any OS) and the chain python (UE's bundled Python 3.11 behind a
+      # space-free link): exports UE_ROOT, UE_PLATFORM, UE_RUNUAT and CHAIN_PY. See the script header.
+      - name: Resolve UE install + chain python
+        shell: pwsh
+        run: ./.github/scripts/ue-env.ps1 -Version '${{ matrix.ue }}'
       # Machine-wide UE serialization (#293): one lock for every self-hosted UE job on this
       # machine, whatever the engine version, so matrix legs, PR runs and chain dispatches never
       # share UAT or the host junction. Held until the always() release step ending this job.
@@ -314,7 +328,7 @@ jobs:
         id: ue_lock
         shell: pwsh
         run: |
-          & "$env:GITHUB_WORKSPACE\.github\scripts\ue-machine-lock.ps1" -Action Acquire -WaitMinutes 180
+          & "$env:GITHUB_WORKSPACE/.github/scripts/ue-machine-lock.ps1" -Action Acquire -WaitMinutes 180
       - name: BuildPlugin (marketplace packaging validation — DISTRIBUTED, test-free)
         shell: pwsh
         run: |
@@ -323,12 +337,12 @@ jobs:
           # omits UnrealMcpEditorTests (Fab review flags shipped test modules), so this
           # BuildPlugin -Rocket proves the marketplace package builds green test-free. The
           # Automation pass below rebuilds WITH the test module into a separate junction target.
-          $runUAT = Join-Path $env:UE_ROOT 'Engine\Build\BatchFiles\RunUAT.bat'
-          if (-not (Test-Path $runUAT)) { throw "RunUAT.bat not found at $runUAT — set the UNREAL_ENGINE_PATH repo variable." }
-          $uplugin = Join-Path $env:GITHUB_WORKSPACE 'UnrealMCP\UnrealMCP.uplugin'
+          # Packages for THIS host's platform (UE_PLATFORM: Win64, Mac or Linux); the Fab Win64 zip
+          # itself is built by release.yml's Windows-only build-plugin-zip.
+          $uplugin = Join-Path $env:GITHUB_WORKSPACE 'UnrealMCP/UnrealMCP.uplugin'
           $package = Join-Path $env:RUNNER_TEMP 'UnrealMCP-Dist-Package'
           if (Test-Path $package) { Remove-Item $package -Recurse -Force }
-          & $runUAT BuildPlugin -Plugin="$uplugin" -Package="$package" -TargetPlatforms=Win64 -Rocket
+          & $env:UE_RUNUAT BuildPlugin -Plugin="$uplugin" -Package="$package" -TargetPlatforms="$env:UE_PLATFORM" -Rocket
           if ($LASTEXITCODE -ne 0) { throw "Distributed BuildPlugin failed with exit code $LASTEXITCODE" }
           $distUplugin = Join-Path $package 'UnrealMCP.uplugin'
           if (Test-Path $distUplugin) {
@@ -347,7 +361,7 @@ jobs:
           $suiteArgs = @('--engine', $env:UE_ROOT, '--mode', 'verification', '--ue-lock-held', '--result-file', '.artifacts/suite-result.json')
           # Extensions currently support UE 5.7+; retain core-only gates on older engines.
           if ([version]'${{ matrix.ue }}' -lt [version]'5.7') { $suiteArgs += '--extensions' }
-          & (Join-Path $env:UE_ROOT "Engine/Binaries/ThirdParty/Python3/Win64/python.exe") scripts/extension_suite.py @suiteArgs
+          & $env:CHAIN_PY scripts/extension_suite.py @suiteArgs
           $suiteExit = $LASTEXITCODE
           if (Test-Path '.artifacts/suite-result.json') {
             $result = Get-Content '.artifacts/suite-result.json' -Raw | ConvertFrom-Json
@@ -362,7 +376,7 @@ jobs:
         if: ${{ failure() && env.REPORT_DIR != '' }}
         uses: actions/upload-artifact@v7
         with:
-          name: automation-report
+          name: automation-report-${{ matrix.ue }}-${{ matrix.os }}
           path: ${{ env.REPORT_DIR }}
           if-no-files-found: ignore
           retention-days: 7
@@ -389,9 +403,11 @@ jobs:
           function Remove-Tree([string]$p) {
             if ([string]::IsNullOrWhiteSpace($p) -or -not (Test-Path -LiteralPath $p)) { return }
             Write-Host "Removing $p"
-            cmd /c rmdir /s /q "$p" 2>$null
+            if ($IsWindows) { cmd /c rmdir /s /q "$p" 2>$null }
             if (Test-Path -LiteralPath $p) { Remove-Item -LiteralPath $p -Recurse -Force -ErrorAction SilentlyContinue }
           }
+          # 0. The UE python link (never a recursive delete: it would follow it into the engine).
+          & "$env:GITHUB_WORKSPACE/.github/scripts/ue-env.ps1" -RemoveLink
           # 1. This job's per-run BuildPlugin / report outputs under RUNNER_TEMP.
           foreach ($name in @('UnrealMCP-Package','UnrealMCP-Dist-Package','UnrealMCP-Source-Package','AutomationReport')) {
             Remove-Tree (Join-Path $env:RUNNER_TEMP $name)
@@ -409,7 +425,7 @@ jobs:
         if: always()
         shell: pwsh
         run: |
-          & "$env:GITHUB_WORKSPACE\.github\scripts\ue-machine-lock.ps1" -Action Release
+          & "$env:GITHUB_WORKSPACE/.github/scripts/ue-machine-lock.ps1" -Action Release
 
   # ── ARTIFACT BUILD — SIGNED BRIDGE BUNDLE (runs on a real release OR a
   #    dry-run rehearsal). The self-contained bridge is built + code-signed per
@@ -681,7 +697,7 @@ jobs:
     if: vars.UNREAL_RUNNER_READY == 'true'
     # Engine-versioned runner label for the engine UE_ROOT defaults to (UE 5.8). If
     # UNREAL_ENGINE_PATH ever points at another engine, change this label to match.
-    runs-on: [self-hosted, windows, rm-autoscale-win-x64, unreal-5-8]
+    runs-on: [self-hosted, windows, unreal-5-8]
     env:
       UE_ROOT: ${{ vars.UNREAL_ENGINE_PATH || 'C:\Program Files\Epic Games\UE_5.8' }}
     steps:

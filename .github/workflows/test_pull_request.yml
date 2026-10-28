@@ -12,7 +12,8 @@
 #   (a) bridge  — dotnet build + xUnit on hosted ubuntu-latest + windows-latest
 #   (b) cli     — unreal-mcp-cli node 20/22 tests via the reusable test_cli.yml
 #   (c) plugin  — UE 5.5–5.8 BuildPlugin + Automation specs (UnrealMcp. filter) on a
-#                 SELF-HOSTED windows runner labelled `unreal-<major>-<minor>` (e.g. `unreal-5-8`)
+#                 SELF-HOSTED runner of any OS (Windows, macOS, Linux) labelled
+#                 `unreal-<major>-<minor>` (e.g. `unreal-5-8`)
 #   (d) connection-smoke — live relay round-trip (client -> gamedev-mcp-server ->
 #                 sidecar -> plugin -> editor -> tool), self-hosted, gated on a
 #                 SEPARATE dormant `vars.UNREAL_SMOKE_READY` (owner-enabled after a
@@ -220,16 +221,16 @@ jobs:
     if: ${{ vars.UNREAL_RUNNER_READY == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     # PR-gating covers the same UE 5.5–5.8 set as release.yml: an API missing on an
     # older engine (e.g. FUObjectItem::GetObject() before 5.6) must fail the PR, not
-    # the release. max-parallel: 2 as in release.yml: the machine lock serializes the UE
+    # the release. max-parallel: 2: the machine lock serializes the UE
     # work anyway, so queued legs stay off a runner and off the lock's bounded wait.
     # fail-fast:false so one engine's failure never cancels the other legs.
     # Engine-versioned runner label (unreal-5-8 for UE 5.8): the job only lands on a machine
     # that has this engine installed. Expressions have no replace(), hence the lookup; an
     # unmapped version yields e.g. `unreal-5.10`, which no runner carries (add it to the map).
+    # Any OS: a Windows, macOS or Linux runner carrying the engine label takes the leg, and
+    # .github/scripts/ue-env.ps1 resolves its own engine install.
     runs-on:
       - self-hosted
-      - windows
-      - rm-autoscale-win-x64
       - ${{ fromJSON('{"5.5":"unreal-5-5","5.6":"unreal-5-6","5.7":"unreal-5-7","5.8":"unreal-5-8","5.9":"unreal-5-9"}')[matrix.ue] || format('unreal-{0}', matrix.ue) }}
     # A hang guard, not a budget. Expiry IS a GitHub-side cancel and can wedge this
     # self-hosted runner exactly like a manual cancel, so it is sized to fire only on a real
@@ -243,8 +244,6 @@ jobs:
       matrix:
         ue: ['5.5', '5.6', '5.7', '5.8']
     env:
-      # Engine path is driven by the matrix (standard Epic install layout).
-      UE_ROOT: C:\Program Files\Epic Games\UE_${{ matrix.ue }}
       # Absolute path on the runner to a host .uproject with the UnrealMCP plugin
       # available (the runner's local Unreal-Test-Project analog). Required for
       # the Automation pass; BuildPlugin alone does not need it. A "Sync host to
@@ -266,40 +265,13 @@ jobs:
       - name: Clean staged bridge binaries (gitignored)
         shell: pwsh
         run: |
-          & "$env:GITHUB_WORKSPACE\.github\scripts\clean-staged-bridge.ps1"
+          & "$env:GITHUB_WORKSPACE/.github/scripts/clean-staged-bridge.ps1"
 
-      # Chain leg. This runner account has no Python on PATH; UE's bundled Python 3.11 is the
-      # only interpreter, and it lives under "C:\Program Files\..." — a path with spaces that
-      # ${{ env.CHAIN_PY }} (substituted UNQUOTED) would split. Junction its folder to a
-      # space-free path under RUNNER_TEMP, prove it runs, and export that as CHAIN_PY.
-      - name: chain python (UE bundled, space-free path)
+      # This runner's engine install (any OS) and the chain python (UE's bundled Python 3.11 behind a
+      # space-free link): exports UE_ROOT, UE_PLATFORM, UE_RUNUAT and CHAIN_PY. See the script header.
+      - name: Resolve UE install + chain python
         shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $src = Join-Path $env:UE_ROOT 'Engine\Binaries\ThirdParty\Python3\Win64'
-          if (-not (Test-Path -LiteralPath (Join-Path $src 'python.exe'))) { throw "chain: UE bundled Python not found under $src" }
-          if ($env:RUNNER_TEMP -match '\s') { throw "chain: RUNNER_TEMP '$env:RUNNER_TEMP' contains whitespace; CHAIN_PY must be space-free" }
-          $link = Join-Path $env:RUNNER_TEMP 'chain-py'
-          if (Test-Path -LiteralPath $link) {
-            # A LINK only: plain rmdir removes the junction, never the engine files behind it.
-            cmd /c rmdir "$link" 2>$null
-            if (Test-Path -LiteralPath $link) { throw "chain: could not remove stale $link" }
-          }
-          cmd /c mklink /J "$link" "$src" | Write-Host
-          if ($LASTEXITCODE -ne 0) { throw "chain: mklink /J $link -> $src failed (exit $LASTEXITCODE)" }
-          # The hardened chain_feed.py contract: CHAIN_PY is an ABSOLUTE, SPACE-FREE, forward-slashed
-          # interpreter path (never a bare name). Exported through GITHUB_ENV, so it is this job's env
-          # for every later step. The fragment's job-level `env: CHAIN_PY:` form is not usable here:
-          # the path lives under runner.temp, which a job-level `env:` cannot read.
-          $py = (Join-Path $link 'python.exe').Replace('\', '/')
-          if ($py -notmatch '^[A-Za-z]:/\S+\z' -or -not (Test-Path -LiteralPath $py -PathType Leaf)) { throw "chain: CHAIN_PY '$py' is not an absolute, space-free interpreter path" }
-          # Prove it RUNS with the same probe the print-fragment resolvers use (C-extension imports + 3.9+).
-          $global:LASTEXITCODE = $null
-          $exe = & $py -c 'import sys, select, zlib, hashlib; sys.version_info >= (3, 9) or sys.exit(1); print(sys.executable.replace(chr(92), chr(47)))'
-          if ($LASTEXITCODE -ne 0) { throw "chain: $py is not a runnable Python 3.9+ (exit $LASTEXITCODE)" }
-          Write-Host "chain: probe sys.executable=$((@($exe) -join ' ').Trim())"
-          "CHAIN_PY=$py" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          Write-Host "chain: CHAIN_PY=$py"
+        run: ./.github/scripts/ue-env.ps1 -Version '${{ matrix.ue }}'
 
       # The C++ plugin consumes nothing from the chain: under a lock, only assert that the lock's
       # unreal-mcp sha is this run's commit, then record.
@@ -314,7 +286,7 @@ jobs:
         id: ue_lock
         shell: pwsh
         run: |
-          & "$env:GITHUB_WORKSPACE\.github\scripts\ue-machine-lock.ps1" -Action Acquire -WaitMinutes 60
+          & "$env:GITHUB_WORKSPACE/.github/scripts/ue-machine-lock.ps1" -Action Acquire -WaitMinutes 60
 
       - name: BuildPlugin (marketplace packaging validation — DISTRIBUTED, test-free)
         shell: pwsh
@@ -325,12 +297,12 @@ jobs:
           # shipped test/automation modules), so this BuildPlugin -Rocket proves the
           # marketplace package builds green WITHOUT the test module. The Automation
           # pass below rebuilds WITH the test module into a separate junction target.
-          $runUAT = Join-Path $env:UE_ROOT 'Engine\Build\BatchFiles\RunUAT.bat'
-          if (-not (Test-Path $runUAT)) { throw "RunUAT.bat not found at $runUAT — set the UNREAL_ENGINE_PATH repo variable." }
-          $uplugin = Join-Path $env:GITHUB_WORKSPACE 'UnrealMCP\UnrealMCP.uplugin'
+          # Packages for THIS host's platform (UE_PLATFORM: Win64, Mac or Linux); the Fab Win64 zip
+          # itself is built by release.yml's Windows-only build-plugin-zip.
+          $uplugin = Join-Path $env:GITHUB_WORKSPACE 'UnrealMCP/UnrealMCP.uplugin'
           $package = Join-Path $env:RUNNER_TEMP 'UnrealMCP-Dist-Package'
           if (Test-Path $package) { Remove-Item $package -Recurse -Force }
-          & $runUAT BuildPlugin -Plugin="$uplugin" -Package="$package" -TargetPlatforms=Win64 -Rocket
+          & $env:UE_RUNUAT BuildPlugin -Plugin="$uplugin" -Package="$package" -TargetPlatforms="$env:UE_PLATFORM" -Rocket
           if ($LASTEXITCODE -ne 0) { throw "Distributed BuildPlugin failed with exit code $LASTEXITCODE" }
           # Guard: the packaged distributed plugin must NOT carry the test module.
           $distUplugin = Join-Path $package 'UnrealMCP.uplugin'
@@ -368,7 +340,7 @@ jobs:
         if: ${{ failure() && env.REPORT_DIR != '' && env.CHAIN_LOCK == '' }}
         uses: actions/upload-artifact@v7
         with:
-          name: automation-report
+          name: automation-report-${{ matrix.ue }}
           path: ${{ env.REPORT_DIR }}
           if-no-files-found: ignore
           retention-days: 7
@@ -412,13 +384,12 @@ jobs:
           function Remove-Tree([string]$p) {
             if ([string]::IsNullOrWhiteSpace($p) -or -not (Test-Path -LiteralPath $p)) { return }
             Write-Host "Removing $p"
-            cmd /c rmdir /s /q "$p" 2>$null
+            if ($IsWindows) { cmd /c rmdir /s /q "$p" 2>$null }
             if (Test-Path -LiteralPath $p) { Remove-Item -LiteralPath $p -Recurse -Force -ErrorAction SilentlyContinue }
           }
-          # 0. The chain python junction: remove the LINK first (plain rmdir, never a recursive
-          #    delete that could follow it into the engine install), then the leg record.
-          $chainPy = Join-Path $env:RUNNER_TEMP 'chain-py'
-          if (Test-Path -LiteralPath $chainPy) { cmd /c rmdir "$chainPy" 2>$null }
+          # 0. The chain python link: remove the LINK first (never a recursive delete that could
+          #    follow it into the engine install), then the leg record.
+          & "$env:GITHUB_WORKSPACE/.github/scripts/ue-env.ps1" -RemoveLink
           Remove-Item -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'chain-leg.json') -Force -ErrorAction SilentlyContinue
           # 1. This job's per-run BuildPlugin / report outputs under RUNNER_TEMP.
           foreach ($name in @('UnrealMCP-Package','UnrealMCP-Dist-Package','UnrealMCP-Source-Package','AutomationReport')) {
@@ -438,7 +409,7 @@ jobs:
         if: always()
         shell: pwsh
         run: |
-          & "$env:GITHUB_WORKSPACE\.github\scripts\ue-machine-lock.ps1" -Action Release
+          & "$env:GITHUB_WORKSPACE/.github/scripts/ue-machine-lock.ps1" -Action Release
 
   # (d) connection + tool smoke — the live RELAY path the Automation specs do NOT
   # cover: a real MCP client -> gamedev-mcp-server -> sidecar -> plugin -> editor
@@ -464,10 +435,11 @@ jobs:
     # Engine-versioned runner label (unreal-5-8 for UE 5.8): the job only lands on a machine
     # that has this engine installed. Expressions have no replace(), hence the lookup; an
     # unmapped version yields e.g. `unreal-5.10`, which no runner carries (add it to the map).
+    # Still Windows-only, unlike the plugin job: it drives the runner's persistent host project
+    # (vars.UNREAL_HOST_PROJECT, a Windows path) and the Win64 editor, bridge and host build.
     runs-on:
       - self-hosted
       - windows
-      - rm-autoscale-win-x64
       - ${{ fromJSON('{"5.5":"unreal-5-5","5.6":"unreal-5-6","5.7":"unreal-5-7","5.8":"unreal-5-8","5.9":"unreal-5-9"}')[matrix.ue] || format('unreal-{0}', matrix.ue) }}
     # A hang guard, not a budget — see the plugin job: expiry is a GitHub-side cancel.
     # 90 = the machine-wide UE lock's 60-min bounded wait + the original 30-min guard.
@@ -477,7 +449,6 @@ jobs:
       matrix:
         ue: ['5.8']
     env:
-      UE_ROOT: C:\Program Files\Epic Games\UE_${{ matrix.ue }}
       HOST_UPROJECT: ${{ vars.UNREAL_HOST_PROJECT }}
     steps:
       - name: Checkout repository
@@ -492,35 +463,10 @@ jobs:
         run: |
           & "$env:GITHUB_WORKSPACE\.github\scripts\clean-staged-bridge.ps1"
 
-      # Chain leg — same space-free UE Python junction as the plugin job.
-      - name: chain python (UE bundled, space-free path)
+      # Same engine resolution + chain python as the plugin job (this job stays on Windows).
+      - name: Resolve UE install + chain python
         shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $src = Join-Path $env:UE_ROOT 'Engine\Binaries\ThirdParty\Python3\Win64'
-          if (-not (Test-Path -LiteralPath (Join-Path $src 'python.exe'))) { throw "chain: UE bundled Python not found under $src" }
-          if ($env:RUNNER_TEMP -match '\s') { throw "chain: RUNNER_TEMP '$env:RUNNER_TEMP' contains whitespace; CHAIN_PY must be space-free" }
-          $link = Join-Path $env:RUNNER_TEMP 'chain-py'
-          if (Test-Path -LiteralPath $link) {
-            # A LINK only: plain rmdir removes the junction, never the engine files behind it.
-            cmd /c rmdir "$link" 2>$null
-            if (Test-Path -LiteralPath $link) { throw "chain: could not remove stale $link" }
-          }
-          cmd /c mklink /J "$link" "$src" | Write-Host
-          if ($LASTEXITCODE -ne 0) { throw "chain: mklink /J $link -> $src failed (exit $LASTEXITCODE)" }
-          # The hardened chain_feed.py contract: CHAIN_PY is an ABSOLUTE, SPACE-FREE, forward-slashed
-          # interpreter path (never a bare name). Exported through GITHUB_ENV, so it is this job's env
-          # for every later step. The fragment's job-level `env: CHAIN_PY:` form is not usable here:
-          # the path lives under runner.temp, which a job-level `env:` cannot read.
-          $py = (Join-Path $link 'python.exe').Replace('\', '/')
-          if ($py -notmatch '^[A-Za-z]:/\S+\z' -or -not (Test-Path -LiteralPath $py -PathType Leaf)) { throw "chain: CHAIN_PY '$py' is not an absolute, space-free interpreter path" }
-          # Prove it RUNS with the same probe the print-fragment resolvers use (C-extension imports + 3.9+).
-          $global:LASTEXITCODE = $null
-          $exe = & $py -c 'import sys, select, zlib, hashlib; sys.version_info >= (3, 9) or sys.exit(1); print(sys.executable.replace(chr(92), chr(47)))'
-          if ($LASTEXITCODE -ne 0) { throw "chain: $py is not a runnable Python 3.9+ (exit $LASTEXITCODE)" }
-          Write-Host "chain: probe sys.executable=$((@($exe) -join ' ').Trim())"
-          "CHAIN_PY=$py" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          Write-Host "chain: CHAIN_PY=$py"
+        run: ./.github/scripts/ue-env.ps1 -Version '${{ matrix.ue }}'
 
       # `clean: false` keeps untracked files between runs on this persistent workspace, so a
       # chain run whose cleanup never ran (a killed job) would leave its generated nuget.config /
@@ -777,8 +723,7 @@ jobs:
           # generated override files (only when they carry the chain's GENERATED marker — this
           # clean:false workspace would otherwise hand them to the next ordinary run), the feed,
           # the lower-layer clones and the leg record.
-          $chainPy = Join-Path $env:RUNNER_TEMP 'chain-py'
-          if (Test-Path -LiteralPath $chainPy) { cmd /c rmdir "$chainPy" 2>$null }
+          & "$env:GITHUB_WORKSPACE/.github/scripts/ue-env.ps1" -RemoveLink
           foreach ($name in 'nuget.config', 'Directory.Build.targets') {
             $p = Join-Path $env:GITHUB_WORKSPACE $name
             if ((Test-Path -LiteralPath $p) -and ((Get-Content -LiteralPath $p -Raw) -match 'GENERATED by chain\.py')) {
