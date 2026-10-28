@@ -27,6 +27,7 @@
 #include "K2Node_Self.h"
 #include "K2Node_VariableGet.h"
 #include "K2Node_VariableSet.h"
+#include "AssetRegistry/AssetRegistryModule.h"
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "Kismet2/CompilerResultsLog.h"
 #include "Kismet2/KismetEditorUtilities.h"
@@ -415,7 +416,7 @@ namespace UnrealMcpRqlBlueprintsLocal
 		// UE 5 math works in doubles: "Add_FloatFloat" (the UE 4 name, and the editor's "float + float" title) is Add_DoubleDouble.
 		TArray<FString, TInlineAllocator<3>> Candidates{ Name, FString(TEXT("K2_")) + Name };
 		const FString Double = Name.Replace(TEXT("Float"), TEXT("Double"), ESearchCase::CaseSensitive);
-		if (Double != Name)
+		if (Double != Name && Class->HasAnyClassFlags(CLASS_Native)) // engine libraries only, never a Blueprint's own functions
 			Candidates.Add(Double);
 		for (const FString& Candidate : Candidates)
 		{
@@ -490,10 +491,33 @@ namespace UnrealMcpRqlBlueprintsLocal
 		return Property->GetFName();
 	}
 
-	/** A variable of the Blueprint, or of another class ("BP_Player.Score", "BP_Player_C.Score", "/Game/BP_Player.Score"). */
+	/**
+	 * The generated class of the one Blueprint asset named @p Name ("BP_Player"), loading it: a short name finds only
+	 * loaded classes otherwise. Several Blueprints with the name are an error naming their paths.
+	 */
+	UClass* GraphBlueprintClassByName(const FString& Name)
+	{
+		if (Name.IsEmpty() || Name.Contains(TEXT("/")))
+			return nullptr;
+		IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
+		TArray<FAssetData> Found;
+		Registry.GetAssetsByClass(UBlueprint::StaticClass()->GetClassPathName(), Found, /*bSearchSubClasses*/ true);
+		TArray<FAssetData> Named = Found.FilterByPredicate([&Name](const FAssetData& Data) { return Data.AssetName.ToString().Equals(Name, ESearchCase::IgnoreCase); });
+		if (Named.Num() > 1)
+		{
+			TArray<FString> Paths;
+			for (const FAssetData& Data : Named)
+				Paths.Add(Data.PackageName.ToString());
+			Throw(FString::Printf(TEXT("several Blueprints are named '%s' (%s): name one by path"), *Name, *FString::Join(Paths, TEXT(", "))));
+		}
+		const UBlueprint* Blueprint = Named.Num() == 1 ? Cast<UBlueprint>(Named[0].GetAsset()) : nullptr;
+		return Blueprint ? Blueprint->GeneratedClass.Get() : nullptr;
+	}
+
+	/** A variable of the Blueprint (Property null), or of another class ("BP_Player.Score", "BP_Player_C.Score", "/Game/BP_Player.Score"). */
 	struct FGraphVariable
 	{
-		UClass* Owner = nullptr; // null: the Blueprint's own variable
+		FProperty* Property = nullptr;
 		FName Name;
 	};
 
@@ -508,28 +532,31 @@ namespace UnrealMcpRqlBlueprintsLocal
 		if (!Class && !ClassPart.EndsWith(TEXT("_C")))
 			Class = FUnrealMcpObjectRef::ResolveClass(ClassPart + TEXT("_C"));
 		if (!Class)
+			Class = GraphBlueprintClassByName(ClassPart.EndsWith(TEXT("_C")) ? ClassPart.LeftChop(2) : ClassPart);
+		if (!Class)
 			Throw(FString::Printf(TEXT("no class '%s' (a Blueprint by name or path, e.g. \"BP_Player.Score\")"), *ClassPart));
-		if (UBlueprint* Other = Cast<UBlueprint>(Class->ClassGeneratedBy))
-		{
-			if (Other == Blueprint)
-				return { nullptr, RequireVariable(Blueprint, VariablePart, bWrite) };
-			// The skeleton class has the variables added since the last compile too.
-			if (Other->SkeletonGeneratedClass)
-				Class = Other->SkeletonGeneratedClass;
-		}
+		UClass* Own = Blueprint->SkeletonGeneratedClass ? Blueprint->SkeletonGeneratedClass : Blueprint->GeneratedClass;
+		if (UBlueprint* Other = Cast<UBlueprint>(Class->ClassGeneratedBy); Other && Other->SkeletonGeneratedClass)
+			Class = Other->SkeletonGeneratedClass; // the variables added since the last compile too
+		// The Blueprint's own or inherited variable ("MyBP.Health", "Actor.bHidden"): a self node, as the editor makes.
+		if (Class == Own || (Own && Own->IsChildOf(Class)))
+			return { nullptr, RequireVariable(Blueprint, VariablePart, bWrite) };
 		FProperty* Property = FindBlueprintVariable(Class, VariablePart);
 		if (!Property)
 			Throw(FString::Printf(TEXT("%s has no Blueprint variable '%s'"), *Class->GetName(), *VariablePart));
+		// The editor hides another class's Private and Protected variables from this graph.
+		if (Property->HasMetaData(FBlueprintMetadata::MD_Private) || Property->HasMetaData(FBlueprintMetadata::MD_Protected))
+			Throw(FString::Printf(TEXT("%s.%s is private to its Blueprint (untick Private on the variable to read it from others)"),
+				*Class->GetName(), *Property->GetAuthoredName()));
 		RequireWritable(Property, bWrite);
-		// SetExternalMember maps a skeleton class to its generated class.
-		return { Property->GetOwnerClass(), Property->GetFName() };
+		return { Property, Property->GetFName() };
 	}
 
 	/** The node reads the Blueprint's own variable, or another class's through a Target pin that takes the object. */
 	void SetVariableReference(FMemberReference& Reference, const FGraphVariable& Variable)
 	{
-		if (Variable.Owner)
-			Reference.SetExternalMember(Variable.Name, Variable.Owner);
+		if (Variable.Property)
+			Reference.SetFromField<FProperty>(Variable.Property, /*bIsConsideredSelfContext*/ false); // with its GUID: survives renames
 		else
 			Reference.SetSelfMember(Variable.Name);
 	}
@@ -814,6 +841,8 @@ namespace UnrealMcpRqlBlueprintsLocal
 				const FKey Key{ FName(*KeyName) };
 				if (!Key.IsValid())
 					Throw(FString::Printf(TEXT("'%s' is not a key name (W, A, S, D, SpaceBar, LeftMouseButton, Gamepad_FaceButton_Bottom, ...)"), *KeyName));
+				if (Key.IsAnalog() || Key.IsDeprecated() || !Key.IsBindableInBlueprints())
+					Throw(FString::Printf(TEXT("'%s' is not a key with Pressed / Released (an axis such as MouseX is read with GetInputAxisKeyValue)"), *KeyName));
 				return Types->WrapObject(CreateNode<UK2Node_InputKey>(Target, Place(Target, Args[1], Args[2]),
 					[Key](UK2Node_InputKey* Node) { Node->InputKey = Key; }));
 			}, "add a key event (\"W\", \"SpaceBar\"): Pressed / Released exec pins, fires on the pawn the player controls (or an actor with input enabled); returns the node"));
