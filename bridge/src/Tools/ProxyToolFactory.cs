@@ -67,9 +67,9 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
                     catch (IpcDisconnectedException ex)
                     {
                         // Fail fast — never hang to timeoutMs (§2.2 step 4). A call refused before it was sent
-                        // (editor not connected / handshake not done) never started: answer NotExecuted (503) so
-                        // the MCP server re-sends it once the editor is back. Anything that may have reached the
-                        // editor stays a plain error, never re-sent.
+                        // (editor not connected / handshake not done) never started: answer NotExecuted (503), the
+                        // contract for "safe to re-send" (docs/ARCHITECTURE.md). Anything that may have reached
+                        // the editor stays a plain error, never re-sent.
                         var refusal = ex.NotSent ? ResponseCallTool.NotExecuted(ex.Message) : ResponseCallTool.Error(ex.Message);
                         return refusal.SetRequestID(requestId);
                     }
