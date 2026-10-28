@@ -10,6 +10,7 @@
 #include "IUnrealMcpRqlModule.h"
 #include "UnrealMcpRqlTools.h"
 
+#include "Engine/World.h"
 #include "EngineUtils.h"
 #include "Landscape.h"
 #include "LandscapeDataAccess.h"

@@ -5,6 +5,8 @@
 
 #include "IUnrealMcpRqlModule.h"
 
+#include "Engine/Level.h"
+#include "Engine/World.h"
 #include "Landscape.h"
 #include "LandscapeDataAccess.h"
 #include "LandscapeEdit.h"
