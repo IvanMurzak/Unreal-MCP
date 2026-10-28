@@ -382,6 +382,9 @@ const rql::TypeDescriptor* FUnrealMcpRqlTypes::ForClass(UClass* Class)
 		return *Found;
 	const FString* Renamed = ApiClasses.Find(Class);
 	rql::TypeDescriptor& Descriptor = Shell(Class, Renamed && !Renamed->IsEmpty() ? *Renamed : Class->GetName(), rql::TypeKind::Object);
+	// A Blueprint's class is BP_Door_C; `is BP_Door` (the asset name agents see) matches it and its subclasses too.
+	if (Cast<UBlueprintGeneratedClass>(Class) && Class->GetName().EndsWith(TEXT("_C"), ESearchCase::CaseSensitive))
+		Descriptor.also_is.push_back(UnrealMcpRqlToStd(Class->GetName().LeftChop(2)));
 	Classes.Add(Class, &Descriptor);
 	ClassByDescriptor.Add(&Descriptor, Class);
 	if (UClass* Super = Class->GetSuperClass())

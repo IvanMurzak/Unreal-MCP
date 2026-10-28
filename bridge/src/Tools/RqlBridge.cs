@@ -124,6 +124,9 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
             }
             if (json["total"] is JsonValue total && total.TryGetValue<long>(out var t))
                 result.Total = t;
+            // A set receipt leaves out assignments that kept the old value and counts them here (present only when > 0).
+            if (json["unchanged"] is JsonValue unchanged && unchanged.TryGetValue<long>(out var u) && u > 0)
+                result.Unchanged = u;
             result.Truncated = Bool(json, "truncated");
             result.DryRun = Bool(json, "dryRun");
             if (json["diagnostics"] is JsonArray diagnostics)

@@ -14,7 +14,8 @@ void check_policy(Exec& x, const std::string& op) {
     if (!x.engine.mutations().enabled)
         throw RqlException("permission-denied", "'" + op + "' is not allowed: this host does not permit mutations");
     if (!x.options.allow_mutation)
-        throw RqlException("permission-denied", "'" + op + "' requires a mutation request (use the mutate tool / options.allowMutation)");
+        throw RqlException("permission-denied", "'" + op + "' requires a mutation request: run it with " +
+                                                    (x.engine.mutate_hint.empty() ? std::string("the mutation tool") : x.engine.mutate_hint));
 }
 
 /// A target with the scope its expressions see: its path, depth and position in the stage's input (spec §8).
@@ -80,9 +81,7 @@ void validate_batch(Exec& x, const std::string& op, const std::vector<MutationRe
                                       "); nothing was changed";
     std::string hint = m.limit_hint ? m.limit_hint(op, limit) : std::string();
     if (hint.empty()) {
-        std::string argument = !m.limit_argument.empty() ? m.limit_argument
-                               : x.engine.defaults().budgets_adjustable ? std::string("budgets.maxMutationTargets")
-                                                                         : std::string();
+        std::string argument = x.limit_argument();
         hint = mutation_limit_hint(op, limit, ended ? std::optional<int>(static_cast<int>(matched)) : std::nullopt, argument, static_cast<int>(ceiling));
     }
     throw RqlException("mutation-limit", message, hint);
@@ -189,7 +188,8 @@ struct Slot {
     }
 };
 
-Slot slot_of(Exec& x, const Value& container, const Segment& seg, const std::string& label) {
+/// top: the segment is read on the target itself, so its unknown-member hint may suggest filtering the stream.
+Slot slot_of(Exec& x, const Value& container, const Segment& seg, const std::string& label, bool top = false) {
     Slot s;
     if (container.is_map()) {
         if (!container.map().writable()) throw RqlException("readonly-member", "'" + label + "': map " + friendly_type_of(container) + " is read-only");
@@ -250,9 +250,10 @@ Slot slot_of(Exec& x, const Value& container, const Segment& seg, const std::str
         std::vector<std::string> names;
         if (tv)
             for (auto& mm : tv->members()) names.push_back(mm.name);
-        auto close = suggest_closest(name, names, 3);
+        std::vector<const TypeDescriptor*> except;
+        if (t) except.push_back(t);
         throw RqlException("unknown-member", "no member '" + name + "' on " + type_name,
-                           !close.empty() ? "did you mean " + join(close, " / ") + "?" : member_list_hint(names));
+                           member_hint(name, names, top ? types_declaring(x, name, except) : std::vector<std::string>()));
     }
     s.kind = Slot::Member;
     s.member = m;
@@ -304,7 +305,7 @@ Slot resolve(Exec& x, const Value& root, const std::vector<Segment>& segs, Value
     Value cur = root;
     std::vector<std::pair<Slot, Value>> chain;
     for (size_t i = 0; i < segs.size(); ++i) {
-        Slot slot = slot_of(x, cur, segs[i], label);
+        Slot slot = slot_of(x, cur, segs[i], label, i == 0);
         if (i + 1 == segs.size()) {
             // Every copy on the way (value type or copy-on-read member) is written back into its parent:
             // those parent slots must be writable and allowed too.
@@ -362,6 +363,7 @@ struct PlannedWrite {
     Value target;        // the stream item (host records)
     std::string ref;     // the receipt's $ref: the target's, or for an entry the owner of the change (spec §8)
     std::shared_ptr<const std::vector<Segment>> owned;  // rewritten entry segments (`segments` points into it)
+    Value planned;  // the coerced value the query asked for (new_value becomes the read-back after the write)
 };
 
 /// Where a set target writes (spec §8): for a map entry streamed from a map, `Value.p` (or `p`, which reads through to
@@ -596,7 +598,7 @@ std::optional<Value> coerce(Exec& x, const Value& v, const TypeDescriptor* targe
                             return std::nullopt;
                         }
                     }
-                    if (target->scalar == ScalarKind::Single) d = static_cast<float>(d);
+                    if (target->scalar == ScalarKind::Single) d = to_single(d);
                     return Value::number(d, target);
                 }
                 default: return v;
@@ -677,6 +679,45 @@ std::string value_text(const Value& v) {
 
 }  // namespace
 
+/// "only A, B have X: filter first, e.g. ... | where $ is A | stage" (spec §10 mixed streams).
+std::string filter_hint(const std::vector<std::string>& having, const std::string& what, const std::string& stage) {
+    return "only " + join(having, ", ") + (having.size() == 1 ? " has " : " have ") + what + ": filter first, e.g. \xE2\x80\xA6 | where $ is " +
+           having[0] + " | " + stage;
+}
+
+/// A set target member that some targets lack while others have it (a mixed stream): unknown-member naming the types that
+/// have it, so the agent filters to them (spec §10). All other cases are reported per target by the slot resolution.
+void check_mixed_targets(Exec& x, const std::vector<Target>& items, const std::vector<Assignment>& assign) {
+    std::vector<const TypeDescriptor*> types;
+    for (auto& t : items) {
+        const Value& v = t.item.value;
+        if ((v.is_object() || v.is_struct()) && std::find(types.begin(), types.end(), v.type()) == types.end()) types.push_back(v.type());
+    }
+    if (types.size() < 2) return;
+    for (auto& a : assign) {
+        if (a.target->segments.empty() || a.target->segments[0].kind != SegmentKind::Member) continue;
+        const std::string& name = a.target->segments[0].name;
+        std::vector<const TypeDescriptor*> lacking;
+        std::vector<std::string> having, lacking_names;
+        for (auto* t : types) {
+            if (x.view(t).find(name)) {
+                if (having.size() < 3 && std::find(having.begin(), having.end(), t->name) == having.end()) having.push_back(t->name);
+            } else {
+                lacking.push_back(t);
+                if (lacking_names.size() < 4) lacking_names.push_back(t->name);
+            }
+        }
+        if (lacking.empty() || having.empty()) continue;
+        size_t n = 0;
+        for (auto& t : items)
+            if (std::find(lacking.begin(), lacking.end(), t.item.value.type()) != lacking.end() && (t.item.value.is_object() || t.item.value.is_struct())) ++n;
+        throw RqlException("unknown-member",
+                           "no member '" + name + "' on " + join(lacking_names, ", ") + " (" + std::to_string(n) + " of " + std::to_string(items.size()) +
+                               " targets); nothing was changed",
+                           filter_hint(having, "'" + name + "'", "set \xE2\x80\xA6") + ", or \xE2\x80\xA6 | where has(" + name + ") | set \xE2\x80\xA6");
+    }
+}
+
 QueryResult run_set(Exec& x, Compiler& c, Encoder& enc, Stream& stream, const Stage& s) {
     check_policy(x, "set");
     struct Assign {
@@ -687,6 +728,7 @@ QueryResult run_set(Exec& x, Compiler& c, Encoder& enc, Stream& stream, const St
     std::vector<Assign> assigns;
     for (auto& a : s.assign) assigns.push_back({a.target.get(), c.compile(*a.value), label_of(*a.target)});
     std::vector<Target> items = targets(x, stream, "set");
+    check_mixed_targets(x, items, s.assign);
     std::vector<PlannedWrite> writes;
     for (auto& t : items) {
         const Value& item = t.item.value;
@@ -728,7 +770,7 @@ QueryResult run_set(Exec& x, Compiler& c, Encoder& enc, Stream& stream, const St
                 rejected = slot.validate(container, *coerced);
             if (!rejected.empty())
                 throw RqlException("invalid-value", "invalid value " + value_text(nv) + " for '" + label + "' on " + item_ref + ": " + rejected);
-            writes.push_back({root, &segs, label, snapshot(safe_get(slot, container, label)), *coerced, owner, item, origin ? x.ref_of(owner) : item_ref, owned});
+            writes.push_back({root, &segs, label, snapshot(safe_get(slot, container, label)), *coerced, owner, item, origin ? x.ref_of(owner) : item_ref, owned, *coerced});
         }
     }
 
@@ -769,10 +811,20 @@ QueryResult run_set(Exec& x, Compiler& c, Encoder& enc, Stream& stream, const St
     }
     committed(x, records);
 
+    // No-op assignments (the value read back equals the old one) are counted, not listed (spec §8 receipt).
     std::vector<std::vector<Value>> rows;
-    for (auto& w : writes) rows.push_back({Value::string(w.ref), Value::string(w.label), w.old_value, w.new_value});
+    int64_t unchanged = 0;
+    for (auto& w : writes) {
+        // A write the host refused or clamped back to the old value stays listed.
+        if (rql_equal(x, w.old_value, w.planned) == std::optional<bool>(true) && rql_equal(x, w.old_value, w.new_value) == std::optional<bool>(true)) {
+            ++unchanged;
+            continue;
+        }
+        rows.push_back({Value::string(w.ref), Value::string(w.label), w.old_value, w.new_value});
+    }
     QueryResult r = enc.rows({"$ref", "member", "old", "new"}, rows);
     r.dry_run = x.options.dry_run;
+    r.unchanged = unchanged;
     return r;
 }
 
@@ -833,10 +885,25 @@ QueryResult run_call(Exec& x, Compiler& c, Encoder& enc, Stream& stream, const S
             for (auto* m : candidates) sigs.push_back(t->signature(*m));
         }
         std::string tn = type_name_of(item);
-        if (candidates.empty())
+        if (candidates.empty()) {
+            // In a mixed stream, name the targets' types that do have the method (filter to them first).
+            std::vector<std::string> having;
+            for (auto& o : items) {
+                const Value& ov = o.item.value;
+                if (!(ov.is_object() || ov.is_struct()) || having.size() >= 3) continue;
+                if (std::find(having.begin(), having.end(), ov.type()->name) != having.end()) continue;
+                const TypeView ovw = x.view(ov.type());
+                for (auto& m : ovw.methods())
+                    if (m.callable && iequals(m.name, s.method)) {
+                        having.push_back(ov.type()->name);
+                        break;
+                    }
+            }
+            std::string filter = having.empty() ? std::string() : filter_hint(having, s.method, "call " + s.method + "(\xE2\x80\xA6)") + "; ";
             throw RqlException(exists ? "permission-denied" : "unknown-function", "no callable method '" + s.method + "' on " + tn,
-                               (!sigs.empty() ? "callable: " + join(sigs, ", ") : tn + " has no callable methods") +
+                               filter + (!sigs.empty() ? "callable: " + join(sigs, ", ") : tn + " has no callable methods") +
                                    (exists ? std::string() : sources_with_callable(x, s.method)));
+        }
         enter_scope(x, target);
         std::vector<Value> vals;
         for (auto& a : args) vals.push_back(a(x));

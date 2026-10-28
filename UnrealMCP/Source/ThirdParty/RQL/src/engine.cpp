@@ -48,10 +48,14 @@ Engine& Engine::add_source(const std::string& name, std::function<Value()> gette
             if (s.name == name) {
                 s.getter = std::move(getter);
                 s.description = std::move(description);
+                std::lock_guard<std::mutex> lock(source_types_mutex_);
+                source_types_.erase(name);
                 return *this;
             }
         }
         sources_.push_back({name, std::move(getter), std::move(description)});
+        std::lock_guard<std::mutex> lock(source_types_mutex_);
+        source_types_.erase(name);
     } catch (const std::exception& ex) {
         last_error_ = ex.what();
     } catch (...) {

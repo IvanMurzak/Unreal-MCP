@@ -37,8 +37,9 @@ Stages:
   get <path>                         replace each item by a member (lists are flattened)
   recurse Children [max-depth=N] [include-self=false]   walk a hierarchy (input items included by default)
   distinct [expr] | sum expr | min expr | max expr | avg expr
-  group-by expr                      rows key|count; group-by a, b (or kind=$type) gives one column per key, then count
-Expressions: == != < <= > >= and or not + - * / %; contains, starts-with, ends-with, matches "regex" (all case-insensitive); x in [a, b]; x is null; x is not null; $ is PointLight (includes subclasses); has(member); functions abs round floor ceil sqrt pow min(a, b) max(a, b) len lower upper coalesce; conditional: cond ? a : b or if(cond, a, b) (only the taken branch runs; not true = else; in select wrap it: kind=($ is PointLight ? "point" : "other")); text: replace(s, from, to) (case-insensitive), replace-regex(s, pattern, repl) ($1 = group 1), substring(s, start[, length]), split(s, sep), trim(s), pad(v, width[, fill]) - also as methods: Label.replace("Old", "New"), Label.substring(0, 4), Index.pad(3). After select, sort / where use the column names (sort Owner.Label). Literals: numbers, "strings", true/false/null, lists [a, b], objects {X: 1, Y: 2}.
+  group-by expr                      rows key|count; group-by a, b (or kind=$type) gives one column per key, then count; aggregate each group's items: group-by $type | select key, count, avg = items.avg(Intensity) (items.sum / .min / .max / .count(pred) / .first().Label)
+Conditions (where, and / or / not, cond ? a : b, list predicates) must be booleans: where StaticMesh != null, where has(Intensity), where len(Tags) > 0 - a bare non-boolean member is a type-mismatch error (null counts as false).
+Expressions: == != < <= > >= and or not + - * / %; contains, starts-with, ends-with, matches "regex" (all case-insensitive); x in [a, b]; x is null; x is not null; $ is PointLight (includes subclasses); has(member); functions abs round floor ceil sqrt pow min(a, b) max(a, b) len lower upper coalesce; conditional: cond ? a : b or if(cond, a, b) (only the taken branch runs; not true = else; in select wrap it: kind=($ is PointLight ? "point" : "other")); text: replace(s, from, to) (case-insensitive), replace-regex(s, pattern, repl) ($1 = group 1), substring(s, start[, length]), split(s, sep), trim(s), pad(v, width[, fill]) - also as methods: Label.replace("Old", "New"), Label.substring(0, 4), Index.pad(3). After select, sort / where use the column names (sort Owner.Label). Literals: numbers, "strings", true/false/null, lists [a, b], objects {X: 1, Y: 2}. Lists compare by value (Tags == ["A", "B"]; distinct / group-by Tags merge equal lists).
 Paths: a.b.c, list[0], map["key"]; .member on a list maps over its elements. List methods: .any(pred) .all(pred) .count([pred]) .sum(e) .min(e) .max(e) .first([pred]); inside them bare names refer to the element, falling back to the outer item.
 Meta: $ (current item), $ref (stable id such as PointLight#1234), $type, $path, $index, $depth. Enums compare to strings: the entry name, the editor's display name or the number (Mobility == "Movable"); == on strings is case-sensitive.
 Unreal: every object has Id, Name, Path. Actor has Label, Location, Rotation, Scale (world transform), Components (list), Children (attached actors), Parent, Folder, Level, HiddenInEditor, Selected; a Volume also BrushExtent (writable: rebuilds its box brush) and BrushBounds. Other members are the reflected properties (UPROPERTY EditAnywhere / VisibleAnywhere / BlueprintVisible) under their C++ names (bHidden, Intensity, RelativeLocation, StaticMesh); find them via actors | get Components | where $ is PointLightComponent (every light: $ is LightComponentBase; LightComponent leaves out sky lights). Vectors, rotators and colors print as (x, y, z) (rotators (pitch, yaw, roll)); write "(1, 2, 3)", [1, 2, 3] or {X: 1, Y: 2, Z: 3}; colors also "#ff8800". Object references accept ref("..."), unreal.asset(path) or an asset path "/Game/Meshes/SM_Cube". Material parameters: Scalars["Roughness"], Vectors["BaseColor"], Textures["Albedo"]. Gameplay tags are text: Tag == "Ability.Fire", set Tags = ["Ability.Fire", "State.Stunned"] (registered tags only). DataTable rows: Rows["Sword"].Damage (RowNames, RowStructName). Blueprints: Components (the components it adds; their defaults: StaticMesh, ...), Graphs / EventGraph -> Nodes -> Pins (Name Direction Type DefaultValue LinkedTo). User-defined structs: Fields. Widget Blueprints: RootWidget / Widgets, panels have Children, widgets Parent and Slot. Level Sequences: Bindings -> Tracks -> Sections -> Channels (frames at the display rate). Destroyed objects read as null (where StaticMesh == null finds empty references). Navigate with paths or get; select only projects output columns.
@@ -54,6 +55,7 @@ Results come back as compact rows (header line, then col|col). Long results are 
   actors | where Parent == null | recurse Children | select $depth Label
   unreal.assets("MaterialInstanceConstant") | select Name Scalars Vectors
   console | where Verbosity == "Error" | sort Sequence desc | first 5 | select Message
+  actors | get Components | where $ is LightComponentBase | group-by $type | select key, count, avg = items.avg(Intensity)
   levels | select Map IsPersistent IsCurrent IsVisible
   editor | select IsPlaying IsPaused Selection
   editor | select NextUndo UndoHistory RedoHistory      what Ctrl+Z / Ctrl+Y would revert (RQL steps are "RQL: <query>")
@@ -118,7 +120,7 @@ Widgets and sequences:
 
 	inline const char* QuerySyntaxShort()
 	{
-		return R"RQL(Query part: the RQL of rql-query (full guide and the sources in its description); unreal.assets("Material"), unreal.asset(path), unreal.find("Label"), ref("PointLight#1234"). Stages: where, select, sort, first N, get <path>, recurse Children. Operators: == != < > and or not, contains, starts-with, $ is PointLight, cond ? a : b. Paths a.b.c, list[0], map["key"]. Vectors/colors as "(1, 2, 3)" or "#ff8800"; enums as strings.)RQL";
+		return R"RQL(Query part: the RQL of rql-query (full guide and the sources in its description); unreal.assets("Material"), unreal.asset(path), unreal.find("Label"), ref("PointLight#1234"). Stages: where, select, sort, first N, get <path>, recurse Children. Operators: == != < > and or not, contains, starts-with, $ is PointLight, cond ? a : b; conditions must be booleans (StaticMesh != null, has(x)). Paths a.b.c, list[0], map["key"]. Vectors/colors as "(1, 2, 3)" or "#ff8800"; enums as strings.)RQL";
 	}
 
 	inline const char* QueryIntro()
@@ -132,7 +134,8 @@ Widgets and sequences:
 		return "Change the live Unreal Editor with an RQL query whose last stage is set or call. All-or-nothing: every target and "
 			"value is checked before anything is written; a failure changes nothing. One undo step in the editor (Ctrl+Z). Changes "
 			"are not saved to disk: when the user wants them saved, run editor | call SaveAsset(\"/Game/Path\") (one asset), SaveLevel() or SaveAll(). dry_run=true returns the "
-			"receipt ($ref, member, old, new) without changing anything. Do exactly the change requested; a read-only member fails "
+			"receipt ($ref, member, old, new) without changing anything. The receipt lists the assignments that change a value; those that keep "
+			"the old value are only counted (N unchanged). Do exactly the change requested; a read-only member fails "
 			"with readonly-member instead of being approximated.";
 	}
 

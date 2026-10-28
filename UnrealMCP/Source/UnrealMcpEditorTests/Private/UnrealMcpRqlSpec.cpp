@@ -47,7 +47,7 @@
  * methods and the `editor` operations, executed in EditorContext so GEditor and the editor world are live.
  *
  * The C++ runtime has no RQL text parser (the sidecar parses), so each case carries the canonical QueryPlan of the query
- * in its comment, produced by Rql.Parser (com.IvanMurzak.Rql 0.2.0, PlanCodec.Serialize). Every case works on actors
+ * in its comment, produced by Rql.Parser (com.IvanMurzak.Rql, PlanCodec.Serialize). Every case works on actors
  * labelled "RqlSpecLamp*" and removes them afterwards.
  */
 BEGIN_DEFINE_SPEC(FUnrealMcpRqlSpec, "UnrealMcp.Tools.Rql",
@@ -1047,7 +1047,7 @@ void FUnrealMcpRqlSpec::Define()
 				if (Actor)
 					Actor->SetActorLabel(FString::Printf(TEXT("RqlSpecLampMany%s_%d"), Index < 300 ? TEXT("A") : TEXT("B"), Index));
 			}
-			auto Mutate = [this](const TCHAR* Plan, int32 MaxTargets, bool bDryRun)
+			auto Mutate = [this](const TCHAR* Plan, TOptional<int32> MaxTargets, bool bDryRun)
 			{
 				FUnrealMcpToolRegistry Registry;
 				UnrealMcpRqlTools::Register(Registry);
@@ -1055,8 +1055,8 @@ void FUnrealMcpRqlSpec::Define()
 				Args->SetStringField(TEXT("query"), TEXT("(the text the sidecar parsed)")); // required; the handler runs the plan
 				Args->SetStringField(TEXT("plan"), Plan);
 				Args->SetBoolField(TEXT("dry_run"), bDryRun);
-				if (MaxTargets > 0)
-					Args->SetNumberField(TEXT("max_targets"), MaxTargets);
+				if (MaxTargets.IsSet())
+					Args->SetNumberField(TEXT("max_targets"), MaxTargets.GetValue());
 				const FUnrealMcpToolResult Result = Registry.Execute(TEXT("rql-mutate"), FUnrealMcpToolCall(Args));
 				const TSharedPtr<FJsonObject> Json = Parse(Result.Message);
 				TestEqual(TEXT("tool status matches the result"), Result.bSuccess, IsOk(Json));
@@ -1065,7 +1065,7 @@ void FUnrealMcpRqlSpec::Define()
 			const TCHAR* HideA = /* actors | where Label starts-with "RqlSpecLampManyA" | set HiddenInEditor = true */ TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"starts-with","args":[{"path":["Label"]},{"lit":"RqlSpecLampManyA"}]}},{"op":"set","assign":[{"target":{"path":["HiddenInEditor"]},"value":{"lit":true}}]}]})RQL");
 			const TCHAR* HideAll = /* actors | where Label starts-with "RqlSpecLampMany" | set HiddenInEditor = true */ TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"starts-with","args":[{"path":["Label"]},{"lit":"RqlSpecLampMany"}]}},{"op":"set","assign":[{"target":{"path":["HiddenInEditor"]},"value":{"lit":true}}]}]})RQL");
 
-			const TSharedPtr<FJsonObject> OverDefault = Mutate(HideA, 0, /*bDryRun*/ false);
+			const TSharedPtr<FJsonObject> OverDefault = Mutate(HideA, {}, /*bDryRun*/ false);
 			TestTrue(*FString::Printf(TEXT("300 > the default 200 (%s)"), *Codes(OverDefault)),
 				Codes(OverDefault).Contains(TEXT("mutation-limit")) && Codes(OverDefault).Contains(TEXT("300 objects")) && Codes(OverDefault).Contains(TEXT("limit of 200")));
 			const FString Hints = UnrealMcpRqlSpecHelpers::Hints(OverDefault);
@@ -1080,16 +1080,27 @@ void FUnrealMcpRqlSpec::Define()
 			};
 			TestEqual(TEXT("refused: nothing hidden"), HiddenA(), 0);
 
-			const TSharedPtr<FJsonObject> AtDefault = Mutate(/* actors | where Label starts-with "RqlSpecLampManyA" | first 200 | set HiddenInEditor = true */ TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"starts-with","args":[{"path":["Label"]},{"lit":"RqlSpecLampManyA"}]}},{"op":"first","n":200},{"op":"set","assign":[{"target":{"path":["HiddenInEditor"]},"value":{"lit":true}}]}]})RQL"), 0, /*bDryRun*/ true);
+			const TSharedPtr<FJsonObject> AtDefault = Mutate(/* actors | where Label starts-with "RqlSpecLampManyA" | first 200 | set HiddenInEditor = true */ TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"starts-with","args":[{"path":["Label"]},{"lit":"RqlSpecLampManyA"}]}},{"op":"first","n":200},{"op":"set","assign":[{"target":{"path":["HiddenInEditor"]},"value":{"lit":true}}]}]})RQL"), {}, /*bDryRun*/ true);
 			TestTrue(*FString::Printf(TEXT("200 pass the default (%s)"), *Codes(AtDefault)), IsOk(AtDefault));
 
 			const TSharedPtr<FJsonObject> Raised = Mutate(HideA, 300, /*bDryRun*/ false);
 			TestTrue(*FString::Printf(TEXT("max_targets = 300 changes all (%s)"), *Codes(Raised)), IsOk(Raised));
 			TestEqual(TEXT("300 hidden"), HiddenA(), 300);
 
-			const TSharedPtr<FJsonObject> OverCeiling = Mutate(HideAll, 5000, /*bDryRun*/ true);
+			const TSharedPtr<FJsonObject> OverCeiling = Mutate(HideAll, 1000, /*bDryRun*/ true);
 			TestTrue(*FString::Printf(TEXT("1001 > the ceiling 1000 (%s)"), *Codes(OverCeiling)),
 				Codes(OverCeiling).Contains(TEXT("mutation-limit")) && Codes(OverCeiling).Contains(TEXT("1000")));
+
+			// RQL c5fed20: a max_targets outside 1 .. 1000 is refused before anything runs (no longer clamped or ignored), so
+			// the tool passes it only when given: 0 is a value, not "unset".
+			for (const int32 OutOfRange : { 0, 1001, -1 })
+			{
+				const TSharedPtr<FJsonObject> Refused = Mutate(HideA, OutOfRange, /*bDryRun*/ false);
+				TestTrue(*FString::Printf(TEXT("max_targets = %d refused (%s)"), OutOfRange, *Codes(Refused)),
+					Codes(Refused).Contains(TEXT("invalid-value")) && Codes(Refused).Contains(TEXT("max_targets must be from 1 to 1000"))
+					&& Codes(Refused).Contains(FString::Printf(TEXT("got %d"), OutOfRange)));
+			}
+			TestEqual(TEXT("still 300 hidden"), HiddenA(), 300);
 		});
 
 		It("selects with cond ? a : b", [this]()
@@ -1134,6 +1145,123 @@ void FUnrealMcpRqlSpec::Define()
 			const FString Hints = UnrealMcpRqlSpecHelpers::Hints(Unknown);
 			TestTrue(*FString::Printf(TEXT("hint names rql-schema (%s)"), *Hints), Hints.Contains(TEXT("rql-schema")));
 			TestFalse(*FString::Printf(TEXT("not the generic tool name (%s)"), *Hints), Hints.Contains(TEXT("rql_schema")));
+		});
+	});
+
+	// RQL c5fed20 (conditions, list equality, group items, float widening, no-op receipts, the mutation tool in hints).
+	// Plans from Rql.Parser 0.3.0-dev.c5fed20.
+	Describe("conditions, groups and receipts", [this]()
+	{
+		It("refuses a non-boolean condition with a hint and accepts the explicit test", [this]()
+		{
+			if (!TestTrue(TEXT("mesh actor"), SpawnMesh()))
+				return;
+			for (AActor* Actor : Lamps())
+			{
+				if (AStaticMeshActor* Mesh = Cast<AStaticMeshActor>(Actor))
+					Mesh->GetStaticMeshComponent()->SetStaticMesh(LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube")));
+			}
+			const TSharedPtr<FJsonObject> Truthy = Exec(/* actors | where Label == "RqlSpecLampMesh" | get Components | where StaticMesh */ TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"RqlSpecLampMesh"}]}},{"op":"get","expr":{"path":["Components"]}},{"op":"where","pred":{"path":["StaticMesh"]}}]})RQL"));
+			TestFalse(TEXT("a mesh is not a condition"), IsOk(Truthy));
+			const FString Hints = UnrealMcpRqlSpecHelpers::Hints(Truthy);
+			TestTrue(*FString::Printf(TEXT("type-mismatch naming the member (%s)"), *Codes(Truthy)),
+				Codes(Truthy).Contains(TEXT("type-mismatch")) && Codes(Truthy).Contains(TEXT("'StaticMesh' is a StaticMesh, not a boolean")));
+			TestTrue(*FString::Printf(TEXT("the hint shows the test (%s)"), *Hints), Hints.Contains(TEXT("StaticMesh != null")) && Hints.Contains(TEXT("has(StaticMesh)")));
+
+			const TSharedPtr<FJsonObject> Explicit = Exec(/* actors | where Label == "RqlSpecLampMesh" | get Components | where StaticMesh != null | count */ TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"RqlSpecLampMesh"}]}},{"op":"get","expr":{"path":["Components"]}},{"op":"where","pred":{"op":"!=","args":[{"path":["StaticMesh"]},{"lit":null}]}},{"op":"count"}]})RQL"));
+			TestEqual(*FString::Printf(TEXT("!= null finds the mesh component (%s)"), *Codes(Explicit)), UnrealMcpRqlSpecHelpers::Number(Explicit), 1.0);
+		});
+
+		It("groups equal tag lists together", [this]()
+		{
+			for (const TCHAR* Label : { TEXT("RqlSpecLampA"), TEXT("RqlSpecLampB"), TEXT("RqlSpecLampC") })
+			{
+				AActor* Actor = World() ? World()->SpawnActor<AActor>() : nullptr;
+				if (!TestNotNull(TEXT("actor"), Actor))
+					return;
+				Actor->SetActorLabel(Label);
+				Actor->Tags = FCString::Strcmp(Label, TEXT("RqlSpecLampC")) == 0 ? TArray<FName>{ TEXT("Gold") } : TArray<FName>{ TEXT("Enemy"), TEXT("Boss") };
+			}
+			const TSharedPtr<FJsonObject> Groups = Exec(/* actors | where Label starts-with "RqlSpecLamp" | group-by Tags | select key, count */ TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"starts-with","args":[{"path":["Label"]},{"lit":"RqlSpecLamp"}]}},{"op":"group-by","expr":{"path":["Tags"]}},{"op":"select","fields":[{"name":"key","expr":{"path":["key"]}},{"name":"count","expr":{"path":["count"]}}]}]})RQL"));
+			TestTrue(*FString::Printf(TEXT("ok (%s)"), *Codes(Groups)), IsOk(Groups));
+			TestEqual(TEXT("two groups: [Enemy, Boss] twice, [Gold] once"), RowCount(Groups), 2);
+			double Largest = 0.0;
+			for (int32 Row = 0; Row < RowCount(Groups); ++Row)
+			{
+				if (Cell(Groups, Row, 1).IsValid())
+					Largest = FMath::Max(Largest, Cell(Groups, Row, 1)->AsNumber());
+			}
+			TestEqual(TEXT("the equal lists merged"), Largest, 2.0);
+		});
+
+		It("aggregates group items and float properties without float noise", [this]()
+		{
+			SpawnLamp();
+			Exec(/* editor | call SpawnActor("PointLight", "RqlSpecLamp2", "(0, 0, 0)") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"SpawnActor","args":[{"lit":"PointLight"},{"lit":"RqlSpecLamp2"},{"lit":"(0, 0, 0)"}]}]})RQL"), true);
+			TArray<AActor*> Spawned = Lamps();
+			if (!TestEqual(TEXT("two lamps"), Spawned.Num(), 2))
+				return;
+			// Intensity is a float UPROPERTY: 4.2f widens to 4.2, not 4.19999980926514 (RQL spec 1.1).
+			Spawned[0]->FindComponentByClass<UPointLightComponent>()->Intensity = 4.2f;
+			Spawned[1]->FindComponentByClass<UPointLightComponent>()->Intensity = 1.0f;
+			const TSharedPtr<FJsonObject> Grouped = Exec(/* actors | where Label starts-with "RqlSpecLamp" | get Components | where $ is PointLightComponent | group-by $type | select key, count, avg = items.avg(Intensity), sum = items.sum(Intensity) */ TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"starts-with","args":[{"path":["Label"]},{"lit":"RqlSpecLamp"}]}},{"op":"get","expr":{"path":["Components"]}},{"op":"where","pred":{"op":"is","args":[{"path":[]},{"lit":"PointLightComponent"}]}},{"op":"group-by","expr":{"path":[{"meta":"type"}]}},{"op":"select","fields":[{"name":"key","expr":{"path":["key"]}},{"name":"count","expr":{"path":["count"]}},{"name":"avg","expr":{"call":"avg","on":{"path":["items"]},"args":[{"path":["Intensity"]}]}},{"name":"sum","expr":{"call":"sum","on":{"path":["items"]},"args":[{"path":["Intensity"]}]}}]}]})RQL"));
+			if (!TestTrue(*FString::Printf(TEXT("ok (%s)"), *Codes(Grouped)), IsOk(Grouped) && RowCount(Grouped) == 1))
+				return;
+			TestEqual(TEXT("the group key"), CellText(Grouped, 0, 0), FString(TEXT("PointLightComponent")));
+			TestEqual(TEXT("count"), Cell(Grouped, 0, 1)->AsNumber(), 2.0);
+			TestEqual(TEXT("items.avg is clean"), Cell(Grouped, 0, 2)->AsNumber(), 2.6);
+			TestEqual(TEXT("items.sum is clean"), Cell(Grouped, 0, 3)->AsNumber(), 5.2);
+
+			const TSharedPtr<FJsonObject> Average = Exec(/* actors | where Label starts-with "RqlSpecLamp" | get Components | where $ is PointLightComponent | avg Intensity */ TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"starts-with","args":[{"path":["Label"]},{"lit":"RqlSpecLamp"}]}},{"op":"get","expr":{"path":["Components"]}},{"op":"where","pred":{"op":"is","args":[{"path":[]},{"lit":"PointLightComponent"}]}},{"op":"avg","expr":{"path":["Intensity"]}}]})RQL"));
+			TestEqual(TEXT("the avg stage is clean"), UnrealMcpRqlSpecHelpers::Number(Average), 2.6);
+		});
+
+		It("lists only the assignments that change a value and counts the others as unchanged", [this]()
+		{
+			SpawnLamp();
+			Exec(/* editor | call SpawnActor("PointLight", "RqlSpecLamp2", "(0, 0, 0)") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"SpawnActor","args":[{"lit":"PointLight"},{"lit":"RqlSpecLamp2"},{"lit":"(0, 0, 0)"}]}]})RQL"), true);
+			TArray<AActor*> Spawned = Lamps();
+			if (!TestEqual(TEXT("two lamps"), Spawned.Num(), 2))
+				return;
+			Spawned[0]->FindComponentByClass<UPointLightComponent>()->Intensity = 100.0f;
+			Spawned[1]->FindComponentByClass<UPointLightComponent>()->Intensity = 200.0f;
+			auto Unchanged = [](const TSharedPtr<FJsonObject>& Receipt)
+			{
+				return Receipt.IsValid() && Receipt->HasField(TEXT("unchanged")) ? Receipt->GetNumberField(TEXT("unchanged")) : 0.0;
+			};
+			const TCHAR* SetTo100 = /* actors | where Label starts-with "RqlSpecLamp" | get Components | where $ is PointLightComponent | set Intensity = 100 */ TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"starts-with","args":[{"path":["Label"]},{"lit":"RqlSpecLamp"}]}},{"op":"get","expr":{"path":["Components"]}},{"op":"where","pred":{"op":"is","args":[{"path":[]},{"lit":"PointLightComponent"}]}},{"op":"set","assign":[{"target":{"path":["Intensity"]},"value":{"lit":100}}]}]})RQL");
+			for (const bool bDryRun : { true, false })
+			{
+				const TSharedPtr<FJsonObject> Receipt = Exec(SetTo100, true, bDryRun);
+				TestTrue(*FString::Printf(TEXT("ok (dry run %d; %s)"), bDryRun, *Codes(Receipt)), IsOk(Receipt));
+				TestEqual(*FString::Printf(TEXT("one changed row (dry run %d)"), bDryRun), RowCount(Receipt), 1);
+				TestEqual(*FString::Printf(TEXT("one unchanged (dry run %d)"), bDryRun), Unchanged(Receipt), 1.0);
+			}
+			const UPointLightComponent* Changed = Spawned[1]->FindComponentByClass<UPointLightComponent>();
+			TestTrue(TEXT("written"), Changed && Changed->Intensity == 100.0f);
+
+			const TSharedPtr<FJsonObject> Again = Exec(SetTo100, true);
+			TestTrue(*FString::Printf(TEXT("all no-ops: still ok, not an empty mutation (%s)"), *Codes(Again)), IsOk(Again));
+			TestEqual(TEXT("no rows"), RowCount(Again), 0);
+			TestEqual(TEXT("two unchanged"), Unchanged(Again), 2.0);
+		});
+
+		It("names rql-mutate when rql-query gets a set or call", [this]()
+		{
+			SpawnLamp();
+			FUnrealMcpToolRegistry Registry;
+			UnrealMcpRqlTools::Register(Registry);
+			TSharedPtr<FJsonObject> Args = MakeShared<FJsonObject>();
+			Args->SetStringField(TEXT("query"), TEXT("(the text the sidecar parsed)"));
+			Args->SetStringField(TEXT("plan"), /* actors | where Label == "RqlSpecLamp" | set HiddenInEditor = true */ TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"RqlSpecLamp"}]}},{"op":"set","assign":[{"target":{"path":["HiddenInEditor"]},"value":{"lit":true}}]}]})RQL"));
+			const FUnrealMcpToolResult Result = Registry.Execute(TEXT("rql-query"), FUnrealMcpToolCall(Args));
+			const TSharedPtr<FJsonObject> Json = Parse(Result.Message);
+			TestFalse(TEXT("refused"), Result.bSuccess);
+			TestTrue(*FString::Printf(TEXT("permission-denied naming rql-mutate (%s)"), *Codes(Json)),
+				Codes(Json).Contains(TEXT("permission-denied")) && Codes(Json).Contains(TEXT("run it with rql-mutate")));
+			TestFalse(*FString::Printf(TEXT("no options.allowMutation advice (%s)"), *Codes(Json)), (Codes(Json) + UnrealMcpRqlSpecHelpers::Hints(Json)).Contains(TEXT("allowMutation")));
+			TArray<AActor*> Spawned = Lamps();
+			TestTrue(TEXT("nothing hidden"), Spawned.Num() == 1 && !Spawned[0]->IsTemporarilyHiddenInEditor());
 		});
 	});
 
