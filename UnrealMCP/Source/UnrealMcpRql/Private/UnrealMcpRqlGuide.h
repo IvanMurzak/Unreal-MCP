@@ -80,6 +80,8 @@ Results come back as compact rows (header line, then col|col). Long results are 
 		return R"RQL(  set path = expr, ...   assign members (paths may go through structs: set Location.Z = Location.Z + 100)
                          values see each target: $ (the target), $index (its position in the stream entering set / call)
   call Method(args)      invoke a method the tools expose
+                         installed extensions add sources with operations (e.g. landscapes, Control Rig, Niagara, PCG,
+                         Enhanced Input): check rql-schema before writing C++ or Python for an editor feature
 )RQL";
 	}
 
