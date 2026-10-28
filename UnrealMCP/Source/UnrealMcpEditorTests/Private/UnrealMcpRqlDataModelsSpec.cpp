@@ -806,6 +806,40 @@ void FUnrealMcpRqlDataModelsSpec::Define()
 		});
 	});
 
+	Describe("Blueprint graph access", [this]()
+	{
+		It("reads and writes another Blueprint's variable, finds UE 4 float function names and adds key events", [this]()
+		{
+			MakeBlueprint();
+			UWidgetBlueprint* Hud = MakeWidgetBlueprint();
+			if (!TestNotNull(TEXT("widget blueprint"), Hud))
+				return;
+			const FString Name = FPackageName::GetShortName(Blueprint);
+			const FString Get = ResultRef(Must(TEXT("another Blueprint's variable"), /* unreal.asset("@WBP@").EventGraph | call AddVariableGet("@BPN@.Health") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["EventGraph"],"on":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@WBP@"}]}},"stages":[{"op":"call","method":"AddVariableGet","args":[{"lit":"@BPN@.Health"}]}]})RQL"), { { TEXT("BPN"), Name } }));
+			const TSharedPtr<FJsonObject> Pins = Run(/* ref("@N@") | get Pins | select Name Direction */ TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"@N@"}]},"stages":[{"op":"get","expr":{"path":["Pins"]}},{"op":"select","fields":[{"name":"Name","expr":{"path":["Name"]}},{"name":"Direction","expr":{"path":["Direction"]}}]}]})RQL"), false, { { TEXT("N"), Get } });
+			bool bTarget = false, bValue = false;
+			for (int32 Row = 0; Row < UnrealMcpRqlSpecHelpers::RowCount(Pins); ++Row)
+			{
+				const FString Pin = UnrealMcpRqlSpecHelpers::CellText(Pins, Row, 0);
+				bTarget |= Pin == TEXT("self") && UnrealMcpRqlSpecHelpers::CellText(Pins, Row, 1) == TEXT("Input");
+				bValue |= Pin == TEXT("Health") && UnrealMcpRqlSpecHelpers::CellText(Pins, Row, 1) == TEXT("Output");
+			}
+			TestTrue(TEXT("the get node takes the object on its Target pin"), bTarget);
+			TestTrue(TEXT("and gives the value"), bValue);
+			Must(TEXT("another Blueprint's variable set"), /* unreal.asset("@WBP@").EventGraph | call AddVariableSet("@BPN@.Health") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["EventGraph"],"on":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@WBP@"}]}},"stages":[{"op":"call","method":"AddVariableSet","args":[{"lit":"@BPN@.Health"}]}]})RQL"), { { TEXT("BPN"), Name } });
+			Refuses(TEXT("no such variable there"), /* unreal.asset("@WBP@").EventGraph | call AddVariableGet("@BPN@.Mana") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["EventGraph"],"on":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@WBP@"}]}},"stages":[{"op":"call","method":"AddVariableGet","args":[{"lit":"@BPN@.Mana"}]}]})RQL"), TEXT("has no Blueprint variable 'Mana'"), { { TEXT("BPN"), Name } });
+
+			const FString Add = ResultRef(Must(TEXT("a UE 4 float name"), /* unreal.asset("@BP@").EventGraph | call AddCallFunction("KismetMathLibrary.Add_FloatFloat") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["EventGraph"],"on":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@BP@"}]}},"stages":[{"op":"call","method":"AddCallFunction","args":[{"lit":"KismetMathLibrary.Add_FloatFloat"}]}]})RQL")));
+			TestTrue(TEXT("a call node"), Add.StartsWith(TEXT("K2Node_CallFunction#")));
+			const FString Key = ResultRef(Must(TEXT("a key event"), /* unreal.asset("@BP@").EventGraph | call AddInputKey("SpaceBar") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["EventGraph"],"on":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@BP@"}]}},"stages":[{"op":"call","method":"AddInputKey","args":[{"lit":"SpaceBar"}]}]})RQL")));
+			TestTrue(TEXT("an input key node"), Key.StartsWith(TEXT("K2Node_InputKey#")));
+			Refuses(TEXT("not a key"), /* unreal.asset("@BP@").EventGraph | call AddInputKey("NotAKey") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["EventGraph"],"on":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@BP@"}]}},"stages":[{"op":"call","method":"AddInputKey","args":[{"lit":"NotAKey"}]}]})RQL"), TEXT("not a key name"));
+			const TSharedPtr<FJsonObject> Compiled = Must(TEXT("compile"), /* unreal.asset("@BP@") | call Compile() */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@BP@"}]},"stages":[{"op":"call","method":"Compile","args":[]}]})RQL"));
+			const FString Result = UnrealMcpRqlSpecHelpers::CellText(Compiled, 0, 2);
+			TestTrue(*FString::Printf(TEXT("compiles with the key event (%s)"), *Result), Result.Contains(TEXT("\"Succeeded\":true")));
+		});
+	});
+
 	Describe("Blueprint components and variables", [this]()
 	{
 		It("edits component defaults: placed actors that keep the old value follow, overrides stay, undo restores", [this]()

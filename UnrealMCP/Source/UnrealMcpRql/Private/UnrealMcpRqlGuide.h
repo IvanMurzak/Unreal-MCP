@@ -107,7 +107,7 @@ Data, tags, settings (settings are saved to their ini at once, tag edits too; ne
   unreal.settings("Maps & Modes") | set GameDefaultMap = "/Game/Maps/Arena"
 Blueprints (component defaults reach placed actors that keep the old value; each graph Add* returns the node; connect by pin name; Compile returns errors with the node's $ref):
   unreal.asset("/Game/BP_Coin").Components | where Name == "Mesh" | set StaticMesh = "/Engine/BasicShapes/Sphere"
-  unreal.asset("/Game/BP_Door").EventGraph | call AddEvent("BeginPlay")      AddCallFunction("PrintString") / AddVariableGet("Health") / AddNode("Branch")
+  unreal.asset("/Game/BP_Door").EventGraph | call AddEvent("BeginPlay")      AddCallFunction("PrintString") / AddVariableGet("Health") / AddVariableGet("BP_Player.Score") (Target pin) / AddInputKey("SpaceBar") / AddNode("Branch")
   ref("K2Node_Event#12") | call Connect("then", ref("K2Node_CallFunction#34"), "execute")     ref("K2Node_CallFunction#34") | call SetPinDefault("InString", "Hi")
   unreal.asset("/Game/BP_Door") | call Compile()
 Widgets and sequences:

@@ -22,6 +22,7 @@
 #include "K2Node_Event.h"
 #include "K2Node_ExecutionSequence.h"
 #include "K2Node_IfThenElse.h"
+#include "K2Node_InputKey.h"
 #include "K2Node_MacroInstance.h"
 #include "K2Node_Self.h"
 #include "K2Node_VariableGet.h"
@@ -411,7 +412,9 @@ namespace UnrealMcpRqlBlueprintsLocal
 	{
 		if (!Class)
 			return nullptr;
-		for (const FString& Candidate : { Name, FString(TEXT("K2_")) + Name })
+		// UE 5 math works in doubles: "Add_FloatFloat" (the UE 4 name, and the editor's "float + float" title) is Add_DoubleDouble.
+		const FString Double = Name.Replace(TEXT("Float"), TEXT("Double"), ESearchCase::CaseSensitive);
+		for (const FString& Candidate : { Name, FString(TEXT("K2_")) + Name, Double })
 		{
 			UFunction* Function = Class->FindFunctionByName(FName(*Candidate, FNAME_Find));
 			if (Function && Function->HasAnyFunctionFlags(FUNC_BlueprintCallable | FUNC_BlueprintPure))
@@ -445,6 +448,46 @@ namespace UnrealMcpRqlBlueprintsLocal
 		}
 		Throw(FString::Printf(TEXT("no Blueprint-callable function '%s' on %s or the common libraries (name the class: \"KismetMathLibrary.Add_IntInt\")"),
 			*Text, *Blueprint->GetName()));
+	}
+
+	/** A variable of another class ("BP_Player.Score", "BP_Player_C.Score", "/Game/BP_Player.Score"): its class and name. */
+	struct FGraphVariable
+	{
+		UClass* Owner = nullptr; // null: the Blueprint's own variable
+		FName Name;
+	};
+
+	FName RequireVariable(UBlueprint* Blueprint, const FString& Name, bool bWrite);
+
+	FGraphVariable RequireGraphVariable(UBlueprint* Blueprint, const FString& Spec, bool bWrite)
+	{
+		FString ClassPart, VariablePart;
+		const FString Text = Spec.TrimStartAndEnd();
+		if (!Text.Split(TEXT("."), &ClassPart, &VariablePart, ESearchCase::CaseSensitive, ESearchDir::FromEnd) || ClassPart.IsEmpty()
+			|| VariablePart.IsEmpty())
+			return { nullptr, RequireVariable(Blueprint, Text, bWrite) };
+		UClass* Class = FUnrealMcpObjectRef::ResolveClass(ClassPart);
+		if (!Class && !ClassPart.EndsWith(TEXT("_C")))
+			Class = FUnrealMcpObjectRef::ResolveClass(ClassPart + TEXT("_C"));
+		if (!Class)
+			Throw(FString::Printf(TEXT("no class '%s' (a Blueprint by name or path, e.g. \"BP_Player.Score\")"), *ClassPart));
+		if (UBlueprint* Other = Cast<UBlueprint>(Class->ClassGeneratedBy))
+		{
+			if (Other == Blueprint)
+				return { nullptr, RequireVariable(Blueprint, VariablePart, bWrite) };
+			// The skeleton class has the variables added since the last compile too.
+			if (Other->SkeletonGeneratedClass)
+				Class = Other->SkeletonGeneratedClass;
+		}
+		FProperty* Property = FindFProperty<FProperty>(Class, FName(*VariablePart, FNAME_Find));
+		if (!Property || !Property->HasAnyPropertyFlags(CPF_BlueprintVisible))
+			Throw(FString::Printf(TEXT("%s has no Blueprint variable '%s'"), *Class->GetName(), *VariablePart));
+		if (bWrite && Property->HasAnyPropertyFlags(CPF_BlueprintReadOnly))
+			Throw(FString::Printf(TEXT("%s is read-only in Blueprints"), *VariablePart));
+		UClass* Owner = Property->GetOwnerClass();
+		if (const UBlueprint* OwnerBlueprint = Owner ? Cast<UBlueprint>(Owner->ClassGeneratedBy) : nullptr)
+			Owner = OwnerBlueprint->GeneratedClass ? OwnerBlueprint->GeneratedClass.Get() : Owner;
+		return { Owner, Property->GetFName() };
 	}
 
 	/** A variable get / set node needs a variable the Blueprint (or its parent class) exposes to Blueprints. */
@@ -681,18 +724,30 @@ namespace UnrealMcpRqlBlueprintsLocal
 			[Types, Graph](void* Self, const std::vector<rql::Value>& Args) -> rql::Value
 			{
 				UEdGraph* Target = Graph(Self);
-				const FName Variable = RequireVariable(RequireBlueprint(Target), TextArg(Args[0]), /*bWrite*/ false);
+				const FGraphVariable Variable = RequireGraphVariable(RequireBlueprint(Target), TextArg(Args[0]), /*bWrite*/ false);
 				return Types->WrapObject(CreateNode<UK2Node_VariableGet>(Target, Place(Target, Args[1], Args[2]),
-					[Variable](UK2Node_VariableGet* Node) { Node->VariableReference.SetSelfMember(Variable); }));
-			}, "add a Get node for a variable of the Blueprint; returns the node"));
+					[Variable](UK2Node_VariableGet* Node)
+					{
+						if (Variable.Owner)
+							Node->VariableReference.SetExternalMember(Variable.Name, Variable.Owner); // a Target pin takes the object
+						else
+							Node->VariableReference.SetSelfMember(Variable.Name);
+					}));
+			}, "add a Get node for a variable of the Blueprint, or of another class (\"BP_Player.Score\": connect the object to its Target pin); returns the node"));
 		FUnrealMcpRqlTypes::AddMethod(D, Method("AddVariableSet", WithPlace({ FUnrealMcpRqlTypes::Param("Variable", String) }), NodeType,
 			[Types, Graph](void* Self, const std::vector<rql::Value>& Args) -> rql::Value
 			{
 				UEdGraph* Target = Graph(Self);
-				const FName Variable = RequireVariable(RequireBlueprint(Target), TextArg(Args[0]), /*bWrite*/ true);
+				const FGraphVariable Variable = RequireGraphVariable(RequireBlueprint(Target), TextArg(Args[0]), /*bWrite*/ true);
 				return Types->WrapObject(CreateNode<UK2Node_VariableSet>(Target, Place(Target, Args[1], Args[2]),
-					[Variable](UK2Node_VariableSet* Node) { Node->VariableReference.SetSelfMember(Variable); }));
-			}, "add a Set node for a variable of the Blueprint; returns the node"));
+					[Variable](UK2Node_VariableSet* Node)
+					{
+						if (Variable.Owner)
+							Node->VariableReference.SetExternalMember(Variable.Name, Variable.Owner); // a Target pin takes the object
+						else
+							Node->VariableReference.SetSelfMember(Variable.Name);
+					}));
+			}, "add a Set node for a variable of the Blueprint, or of another class (\"BP_Player.Score\": connect the object to its Target pin); returns the node"));
 		FUnrealMcpRqlTypes::AddMethod(D, Method("AddEvent", WithPlace({ FUnrealMcpRqlTypes::Param("Event", String) }), NodeType,
 			[Types, Graph](void* Self, const std::vector<rql::Value>& Args) -> rql::Value
 			{
@@ -747,6 +802,17 @@ namespace UnrealMcpRqlBlueprintsLocal
 						Created->bOverrideFunction = true;
 					}));
 			}, "add (or enable) an overridable event of the parent class: \"BeginPlay\", \"Tick\", \"ActorBeginOverlap\"; returns the node"));
+		FUnrealMcpRqlTypes::AddMethod(D, Method("AddInputKey", WithPlace({ FUnrealMcpRqlTypes::Param("Key", String) }), NodeType,
+			[Types, Graph](void* Self, const std::vector<rql::Value>& Args) -> rql::Value
+			{
+				UEdGraph* Target = Graph(Self);
+				RequireEventGraph(Target);
+				const FKey Key(FName(*TextArg(Args[0]).TrimStartAndEnd()));
+				if (!Key.IsValid())
+					Throw(FString::Printf(TEXT("'%s' is not a key name (W, A, S, D, SpaceBar, LeftMouseButton, Gamepad_FaceButton_Bottom, ...)"), *TextArg(Args[0])));
+				return Types->WrapObject(CreateNode<UK2Node_InputKey>(Target, Place(Target, Args[1], Args[2]),
+					[Key](UK2Node_InputKey* Node) { Node->InputKey = Key; }));
+			}, "add a key event (\"W\", \"SpaceBar\"): Pressed / Released exec pins, fires on the pawn the player controls (or an actor with input enabled); returns the node"));
 		FUnrealMcpRqlTypes::AddMethod(D, Method("AddCustomEvent", WithPlace({ FUnrealMcpRqlTypes::Param("Name", String) }), NodeType,
 			[Types, Graph](void* Self, const std::vector<rql::Value>& Args) -> rql::Value
 			{

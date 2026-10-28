@@ -56,6 +56,7 @@ public class UnrealMcpRql : ModuleRules
 			"SettingsEditor",
 			"BlueprintGraph",
 			"KismetCompiler",
+			"InputCore",
 			"UMG",
 			"UMGEditor",
 			"LevelSequence",
