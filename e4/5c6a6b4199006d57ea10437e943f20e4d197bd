@@ -1,0 +1,23 @@
+extensions/UnrealAIEnhancedInput/Source/UnrealAIEnhancedInput/Private/Tests/UnrealAIEnhancedInputSpec.cpp
+  s_7bc72ecaebd05d::t_e933e55173cad6 23,291-311
+extensions/UnrealAIEnhancedInput/Source/UnrealAIEnhancedInput/Private/UnrealAIEnhancedInputRqlApi.cpp
+  s_7bc72ecaebd05d::t_8da2ff6ae9979e 13,19,100-107,110,112,118-129,232-234,236-237,239-241,251-253,261-288
+tests/automation-inventory.json
+  s_7bc72ecaebd05d::t_635ed7018df11f 3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e45c6a6b4199006d57ea10437e943f20e4d197bd",
+  "prompts": {},
+  "sessions": {
+    "s_7bc72ecaebd05d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "40274cb2-edf8-49ba-9a73-33b83cb5be53",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
