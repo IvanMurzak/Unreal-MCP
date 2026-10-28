@@ -41,6 +41,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Enhanced Input", meta = (BlueprintInternalUseOnly = "true"))
 	int32 RemoveMapping(UInputMappingContext* Context, UInputAction* Action, const FString& Key);
 
+	/** An InputModifier class as the operations and KeyMappings name it: "Negate" for InputModifierNegate. */
+	static FString ModifierDisplayName(const UClass* Class);
+
 	/** add an Enhanced Input action event for Action to an actor Blueprint's event graph (the Blueprint, its path, or unreal.asset(path).EventGraph), as the Blueprint editor's "EnhancedInputAction IA_Jump" node: exec pins Triggered, Started, Ongoing, Canceled, Completed and the ActionValue; wire it with ref(node) | call Connect("Triggered", ref(other), "execute"); fires on the pawn the player controls once its mapping context is added (AddMappingContextOnBeginPlay); returns the node */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Enhanced Input", meta = (BlueprintInternalUseOnly = "true"))
 	UEdGraphNode* AddActionEvent(UObject* Graph, UInputAction* Action);

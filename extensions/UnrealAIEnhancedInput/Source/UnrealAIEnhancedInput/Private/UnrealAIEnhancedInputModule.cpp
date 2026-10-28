@@ -39,7 +39,7 @@ class FUnrealAIEnhancedInputRqlModule : public IUnrealMcpRqlModule
 				for (const UInputModifier* Modifier : Mapping.Modifiers)
 				{
 					if (Modifier)
-						Modifiers.Add(MakeShared<FJsonValueString>(Modifier->GetClass()->GetName().Replace(TEXT("InputModifier"), TEXT(""))));
+						Modifiers.Add(MakeShared<FJsonValueString>(UUnrealAIEnhancedInputRqlApi::ModifierDisplayName(Modifier->GetClass())));
 				}
 				if (Modifiers.Num() > 0)
 					Entry->SetArrayField(TEXT("Modifiers"), Modifiers);

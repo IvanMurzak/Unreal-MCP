@@ -44,7 +44,7 @@ delivered it. Identifiers below (tool ids, command names, env vars, paths) were 
 | Tool list family (1) | implemented: `unreal-tool-list` (every callable tool, hidden ones marked; Unity's `unity-tool-list`) | — |
 | Python family (1) | implemented: `python-execute` (PythonScriptPlugin + vendored Code-Exec `code_exec`) | — |
 
-**Total shipped: 27 STANDARD core tools across 7 families (rql 3, blueprint 11, console 1, tool list 1 (`unreal-tool-list`), python 1, source 6,
+**Total shipped: 27 STANDARD core tools across 7 families (rql 3, blueprint 11, console 1, tool list 1, python 1, source 6,
 screenshot 4), plus 3 SYSTEM tools (§2.4)** (counts verified from the registration source). The §10 sections
 below describe the superseded families as they were designed; their operations are RQL queries now
 ([`docs/rql.md`](rql.md) maps each removed tool to its query).

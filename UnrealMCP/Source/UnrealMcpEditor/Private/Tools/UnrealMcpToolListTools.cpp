@@ -69,11 +69,12 @@ namespace UnrealMcpToolListTools
 							continue;
 					}
 					Hidden += Tool->bVisible ? 0 : 1;
+					const FString InputsText = bInputs ? Inputs(*Tool) : FString();
 					FString Line = FString::Printf(TEXT("%s | %s | %s"), *Tool->Name, *Tool->Title, Tool->bVisible ? TEXT("visible") : TEXT("hidden"));
 					if (Tool->ExtensionId != TEXT("core"))
 						Line += TEXT(" | ") + Tool->ExtensionId;
 					if (bInputs)
-						Line += TEXT("\n  inputs: ") + Inputs(*Tool);
+						Line += TEXT("\n  inputs: ") + InputsText;
 					if (bDescription)
 						Line += TEXT("\n  ") + Tool->Description.Replace(TEXT("\n"), TEXT("\n  "));
 					Lines.Add(Line);
@@ -86,14 +87,14 @@ namespace UnrealMcpToolListTools
 					if (bDescription)
 						Row->SetStringField(TEXT("description"), Tool->Description);
 					if (bInputs)
-						Row->SetStringField(TEXT("inputs"), Inputs(*Tool));
+						Row->SetStringField(TEXT("inputs"), InputsText);
 					Rows.Add(MakeShared<FJsonValueObject>(Row));
 				}
 
 				FString Text = FString::Printf(TEXT("%d tool(s)%s, %d hidden"), Lines.Num(), Filter.IsEmpty() ? TEXT("") : *FString::Printf(TEXT(" matching '%s'"), *Filter), Hidden);
 				if (Hidden > 0)
 					Text += TEXT(" (hidden tools are left out of tools/list but still run when called by name)");
-				Text += TEXT("\nname | title | visible/hidden\n") + FString::Join(Lines, TEXT("\n"));
+				Text += TEXT("\nname | title | visible/hidden [| extension]\n") + FString::Join(Lines, TEXT("\n"));
 				TSharedPtr<FJsonObject> Structured = MakeShared<FJsonObject>();
 				Structured->SetArrayField(TEXT("tools"), Rows);
 				Structured->SetNumberField(TEXT("hidden"), Hidden);

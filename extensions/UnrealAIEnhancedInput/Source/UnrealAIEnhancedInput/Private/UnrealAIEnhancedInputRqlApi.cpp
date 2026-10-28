@@ -42,7 +42,7 @@ namespace UnrealAIEnhancedInputRqlLocal
 		const FString Short = Name.Equals(TEXT("Swizzle"), ESearchCase::IgnoreCase) ? FString(TEXT("SwizzleAxis")) : Name;
 		for (const FString& Candidate : { Short, TEXT("InputModifier") + Short })
 		{
-			UClass* Class = FindFirstObject<UClass>(*Candidate, EFindFirstObjectOptions::NativeFirst, ELogVerbosity::NoLogging);
+			UClass* Class = UnrealMcpRql::ResolveClass(Candidate);
 			if (Class && Class->IsChildOf(UInputModifier::StaticClass()) && !Class->HasAnyClassFlags(CLASS_Abstract | CLASS_Deprecated))
 				return Class;
 		}
@@ -56,7 +56,7 @@ namespace UnrealAIEnhancedInputRqlLocal
 		for (TObjectIterator<UClass> It; It; ++It)
 		{
 			if (It->IsChildOf(UInputModifier::StaticClass()) && !It->HasAnyClassFlags(CLASS_Abstract | CLASS_Deprecated) && It->IsNative())
-				Names.Add(It->GetName().Replace(TEXT("InputModifier"), TEXT("")));
+				Names.Add(UUnrealAIEnhancedInputRqlApi::ModifierDisplayName(*It));
 		}
 		Names.Sort();
 		return FString::Join(Names, TEXT(", "));
@@ -198,6 +198,13 @@ namespace UnrealAIEnhancedInputRqlLocal
 }
 
 using namespace UnrealAIEnhancedInputRqlLocal;
+
+FString UUnrealAIEnhancedInputRqlApi::ModifierDisplayName(const UClass* Class)
+{
+	FString Name = Class ? Class->GetName() : FString();
+	Name.RemoveFromStart(TEXT("InputModifier"));
+	return Name;
+}
 
 UInputAction* UUnrealAIEnhancedInputRqlApi::CreateAction(const FString& Path, EInputActionValueType ValueType)
 {
