@@ -133,18 +133,21 @@ void FUnrealAILandscapeSpec::Define()
 				Landscape = It->GetActorLabel() == Label ? *It : Landscape;
 			if (!TestNotNull(TEXT("the landscape is in the editor world"), Landscape))
 				return;
-			TestTrue(TEXT("it has components"), Landscape->LandscapeComponents.Num() > 0);
 			TestTrue(TEXT("the material is assigned"), Landscape->LandscapeMaterial.Get() == Material);
-			FVector Origin, Extent;
-			Landscape->GetActorBounds(false, Origin, Extent);
-			TestTrue(*FString::Printf(TEXT("20 m wide (%.0f x %.0f cm), centred (%.0f, %.0f)"), Extent.X * 2, Extent.Y * 2, Origin.X, Origin.Y),
-				FMath::IsNearlyEqual(Extent.X * 2, 2000.0, 60.0) && FMath::IsNearlyEqual(Extent.Y * 2, 2000.0, 60.0) && FMath::Abs(Origin.X) < 60.0 && FMath::Abs(Origin.Y) < 60.0);
+			// On a World Partition map the components live in streaming proxies: measure the whole landscape through its info.
+			ULandscapeInfo* Info = Landscape->GetLandscapeInfo();
+			FIntRect Whole;
+			if (!TestTrue(TEXT("it has components (landscape extent)"), Info && Info->GetLandscapeExtent(Whole)))
+				return;
+			const FTransform ToWorld = Landscape->LandscapeActorToWorld();
+			const FVector Min = ToWorld.TransformPosition(FVector(Whole.Min.X, Whole.Min.Y, 0.0));
+			const FVector Max = ToWorld.TransformPosition(FVector(Whole.Max.X, Whole.Max.Y, 0.0));
+			TestTrue(*FString::Printf(TEXT("20 m wide, centred (%.0f .. %.0f, %.0f .. %.0f cm)"), Min.X, Max.X, Min.Y, Max.Y),
+				FMath::IsNearlyEqual(Max.X - Min.X, 2000.0, 1.0) && FMath::IsNearlyEqual(Max.Y - Min.Y, 2000.0, 1.0)
+				&& FMath::Abs(Min.X + Max.X) < 1.0 && FMath::Abs(Min.Y + Max.Y) < 1.0);
 
 			// landscape | call Sculpt(unreal.find("@LABEL@"), [0, 0, 0], 500, 300)
 			TestTrue(TEXT("hill raised"), Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["landscape"]},"stages":[{"op":"call","method":"Sculpt","args":[{"call":"find","on":{"path":["unreal"]},"args":[{"lit":"@LABEL@"}]},{"list":[{"lit":0},{"lit":0},{"lit":0}]},{"lit":500},{"lit":300}]}]})RQL"), true));
-			ULandscapeInfo* Info = Landscape->GetLandscapeInfo();
-			FIntRect Whole;
-			if (TestTrue(TEXT("landscape extent"), Info && Info->GetLandscapeExtent(Whole)))
 			{
 				FHeightmapAccessor<false> Heights(Info);
 				if (const ULandscapeEditLayerBase* EditLayer = Landscape->GetEditLayerConst(0))
@@ -195,7 +198,10 @@ void FUnrealAILandscapeSpec::Define()
 			// landscape | call Sculpt(unreal.find("@LABEL@"), [0, 0, 0], 0, 300)
 			TestFalse(TEXT("a zero radius is refused"), Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["landscape"]},"stages":[{"op":"call","method":"Sculpt","args":[{"call":"find","on":{"path":["unreal"]},"args":[{"lit":"@LABEL@"}]},{"list":[{"lit":0},{"lit":0},{"lit":0}]},{"lit":0},{"lit":300}]}]})RQL"), true));
 
-			Landscape->Destroy();
+			TArray<ALandscapeProxy*> Proxies;
+			Info->ForEachLandscapeProxy([&Proxies](ALandscapeProxy* Proxy) { Proxies.Add(Proxy); return true; });
+			for (ALandscapeProxy* Proxy : Proxies)
+				Proxy->Destroy();
 		});
 	});
 
