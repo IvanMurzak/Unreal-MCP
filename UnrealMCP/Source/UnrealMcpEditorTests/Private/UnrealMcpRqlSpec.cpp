@@ -155,6 +155,21 @@ BEGIN_DEFINE_SPEC(FUnrealMcpRqlSpec, "UnrealMcp.Tools.Rql",
 		return Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"SpawnActor","args":[{"lit":"PointLight"},{"lit":"RqlSpecLamp"},{"lit":"(1, 2, 3)"}]}]})RQL"), true);
 	}
 
+	/** Two point lights (RqlSpecLamp, RqlSpecLamp2); their light components. */
+	TArray<UPointLightComponent*> SpawnTwoLamps()
+	{
+		SpawnLamp();
+		/* editor | call SpawnActor("PointLight", "RqlSpecLamp2", "(0, 0, 0)") */
+		Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"SpawnActor","args":[{"lit":"PointLight"},{"lit":"RqlSpecLamp2"},{"lit":"(0, 0, 0)"}]}]})RQL"), true);
+		TArray<UPointLightComponent*> Out;
+		for (AActor* Lamp : Lamps())
+		{
+			if (UPointLightComponent* Light = Lamp->FindComponentByClass<UPointLightComponent>())
+				Out.Add(Light);
+		}
+		return Out;
+	}
+
 	/** A StaticMeshActor labelled "RqlSpecLampMesh" (removed by Cleanup); whether it spawned. */
 	static bool SpawnMesh()
 	{
@@ -1196,14 +1211,12 @@ void FUnrealMcpRqlSpec::Define()
 
 		It("aggregates group items and float properties without float noise", [this]()
 		{
-			SpawnLamp();
-			Exec(/* editor | call SpawnActor("PointLight", "RqlSpecLamp2", "(0, 0, 0)") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"SpawnActor","args":[{"lit":"PointLight"},{"lit":"RqlSpecLamp2"},{"lit":"(0, 0, 0)"}]}]})RQL"), true);
-			TArray<AActor*> Spawned = Lamps();
-			if (!TestEqual(TEXT("two lamps"), Spawned.Num(), 2))
+			const TArray<UPointLightComponent*> Lights = SpawnTwoLamps();
+			if (!TestEqual(TEXT("two lamps"), Lights.Num(), 2))
 				return;
 			// Intensity is a float UPROPERTY: 4.2f widens to 4.2, not 4.19999980926514 (RQL spec 1.1).
-			Spawned[0]->FindComponentByClass<UPointLightComponent>()->Intensity = 4.2f;
-			Spawned[1]->FindComponentByClass<UPointLightComponent>()->Intensity = 1.0f;
+			Lights[0]->Intensity = 4.2f;
+			Lights[1]->Intensity = 1.0f;
 			const TSharedPtr<FJsonObject> Grouped = Exec(/* actors | where Label starts-with "RqlSpecLamp" | get Components | where $ is PointLightComponent | group-by $type | select key, count, avg = items.avg(Intensity), sum = items.sum(Intensity) */ TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"starts-with","args":[{"path":["Label"]},{"lit":"RqlSpecLamp"}]}},{"op":"get","expr":{"path":["Components"]}},{"op":"where","pred":{"op":"is","args":[{"path":[]},{"lit":"PointLightComponent"}]}},{"op":"group-by","expr":{"path":[{"meta":"type"}]}},{"op":"select","fields":[{"name":"key","expr":{"path":["key"]}},{"name":"count","expr":{"path":["count"]}},{"name":"avg","expr":{"call":"avg","on":{"path":["items"]},"args":[{"path":["Intensity"]}]}},{"name":"sum","expr":{"call":"sum","on":{"path":["items"]},"args":[{"path":["Intensity"]}]}}]}]})RQL"));
 			if (!TestTrue(*FString::Printf(TEXT("ok (%s)"), *Codes(Grouped)), IsOk(Grouped) && RowCount(Grouped) == 1))
 				return;
@@ -1218,13 +1231,11 @@ void FUnrealMcpRqlSpec::Define()
 
 		It("lists only the assignments that change a value and counts the others as unchanged", [this]()
 		{
-			SpawnLamp();
-			Exec(/* editor | call SpawnActor("PointLight", "RqlSpecLamp2", "(0, 0, 0)") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"SpawnActor","args":[{"lit":"PointLight"},{"lit":"RqlSpecLamp2"},{"lit":"(0, 0, 0)"}]}]})RQL"), true);
-			TArray<AActor*> Spawned = Lamps();
-			if (!TestEqual(TEXT("two lamps"), Spawned.Num(), 2))
+			const TArray<UPointLightComponent*> Lights = SpawnTwoLamps();
+			if (!TestEqual(TEXT("two lamps"), Lights.Num(), 2))
 				return;
-			Spawned[0]->FindComponentByClass<UPointLightComponent>()->Intensity = 100.0f;
-			Spawned[1]->FindComponentByClass<UPointLightComponent>()->Intensity = 200.0f;
+			Lights[0]->Intensity = 100.0f;
+			Lights[1]->Intensity = 200.0f;
 			auto Unchanged = [](const TSharedPtr<FJsonObject>& Receipt)
 			{
 				return Receipt.IsValid() && Receipt->HasField(TEXT("unchanged")) ? Receipt->GetNumberField(TEXT("unchanged")) : 0.0;
@@ -1237,8 +1248,7 @@ void FUnrealMcpRqlSpec::Define()
 				TestEqual(*FString::Printf(TEXT("one changed row (dry run %d)"), bDryRun), RowCount(Receipt), 1);
 				TestEqual(*FString::Printf(TEXT("one unchanged (dry run %d)"), bDryRun), Unchanged(Receipt), 1.0);
 			}
-			const UPointLightComponent* Changed = Spawned[1]->FindComponentByClass<UPointLightComponent>();
-			TestTrue(TEXT("written"), Changed && Changed->Intensity == 100.0f);
+			TestEqual(TEXT("written"), Lights[1]->Intensity, 100.0f);
 
 			const TSharedPtr<FJsonObject> Again = Exec(SetTo100, true);
 			TestTrue(*FString::Printf(TEXT("all no-ops: still ok, not an empty mutation (%s)"), *Codes(Again)), IsOk(Again));

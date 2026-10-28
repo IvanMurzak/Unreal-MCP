@@ -13,8 +13,6 @@
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 
-#include <limits>
-
 namespace UnrealMcpRqlToolsLocal
 {
 	/** SetEnabledExtensions; unset = every module. */
@@ -43,10 +41,9 @@ namespace UnrealMcpRqlToolsLocal
 		const bool bDryRun = bAllowMutation && Call.GetBool(TEXT("dry_run"), false);
 		// An absent (or null) max_targets keeps the default; any number given reaches the engine, which refuses one outside
 		// 1 .. HardMaxTargets (invalid-value, nothing run) instead of clamping it.
-		constexpr double Unset = std::numeric_limits<double>::quiet_NaN();
 		TOptional<int32> MaxTargets;
-		const double Requested = bAllowMutation ? Call.GetNumber(TEXT("max_targets"), Unset) : Unset;
-		if (!FMath::IsNaN(Requested))
+		double Requested = 0.0;
+		if (bAllowMutation && Call.Arguments->TryGetNumberField(TEXT("max_targets"), Requested))
 			MaxTargets = static_cast<int32>(FMath::Clamp<double>(Requested, MIN_int32, MAX_int32));
 		FUnrealMcpRqlSession Session;
 		Session.SetUndoTitle(Call.GetString(TEXT("query")));
