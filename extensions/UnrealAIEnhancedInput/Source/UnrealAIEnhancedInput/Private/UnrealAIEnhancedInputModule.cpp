@@ -12,6 +12,7 @@
 #include "EnhancedActionKeyMapping.h"
 #include "InputAction.h"
 #include "InputMappingContext.h"
+#include "InputModifiers.h"
 
 /**
  * The extension's RQL module (Unreal-MCP docs/rql.md "Extensions"): Enhanced Input is queried and changed with
@@ -23,7 +24,7 @@
  */
 class FUnrealAIEnhancedInputRqlModule : public IUnrealMcpRqlModule
 {
-	/** A context's live key mappings (GetMappings: the 5.7+ DefaultKeyMappings, the Mappings array before) as [{Action, Key}]. */
+	/** A context's live key mappings (GetMappings: the 5.7+ DefaultKeyMappings, the Mappings array before) as [{Action, Key, Modifiers?}]. */
 	static TSharedPtr<FJsonValue> KeyMappingsJson(UObject* Object)
 	{
 		TArray<TSharedPtr<FJsonValue>> Mappings;
@@ -34,6 +35,14 @@ class FUnrealAIEnhancedInputRqlModule : public IUnrealMcpRqlModule
 				TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
 				Entry->SetStringField(TEXT("Action"), Mapping.Action ? Mapping.Action->GetName() : FString());
 				Entry->SetStringField(TEXT("Key"), Mapping.Key.GetFName().ToString());
+				TArray<TSharedPtr<FJsonValue>> Modifiers;
+				for (const UInputModifier* Modifier : Mapping.Modifiers)
+				{
+					if (Modifier)
+						Modifiers.Add(MakeShared<FJsonValueString>(Modifier->GetClass()->GetName().Replace(TEXT("InputModifier"), TEXT(""))));
+				}
+				if (Modifiers.Num() > 0)
+					Entry->SetArrayField(TEXT("Modifiers"), Modifiers);
 				Mappings.Add(MakeShared<FJsonValueObject>(Entry));
 			}
 		}
@@ -52,14 +61,14 @@ public:
 		Context.AddAssetSource(TEXT("inputContexts"), TEXT("Input Mapping Context assets (InputMappingContext) of the project, at most 200"),
 			UInputMappingContext::StaticClass());
 		Context.AddApiSource(TEXT("enhancedInput"),
-			TEXT("Enhanced Input operations: call CreateAction(path, valueType) / CreateContext(path) / AddMapping(context, action, key) / RemoveMapping(context, action, key) / AddActionEvent(blueprint, action) / AddMappingContextOnBeginPlay(blueprint, context, priority)"),
+			TEXT("Enhanced Input operations: call CreateAction(path, valueType) / CreateContext(path) / AddMapping(context, action, key, modifiers) / RemoveMapping(context, action, key) / AddActionEvent(blueprint, action) / AddMappingContextOnBeginPlay(blueprint, context, priority)"),
 			UUnrealAIEnhancedInputRqlApi::StaticClass(), TEXT("EnhancedInputOperations"));
-		Context.AddJsonMember(UInputMappingContext::StaticClass(), TEXT("KeyMappings"), TEXT("the context's key mappings: Action, Key"), &KeyMappingsJson);
+		Context.AddJsonMember(UInputMappingContext::StaticClass(), TEXT("KeyMappings"), TEXT("the context's key mappings: Action, Key, Modifiers (when the key has any)"), &KeyMappingsJson);
 #if !UE_VERSION_OLDER_THAN(5, 7, 0)
 		// Since UE 5.7 the reflected `Mappings` array is deprecated and stays empty (the mappings moved to DefaultKeyMappings):
 		// an agent reading it saw [] beside a working mapping. It reads the live mappings too. (Before 5.7 it IS the live,
 		// editable array: left as reflected.)
-		Context.AddJsonMember(UInputMappingContext::StaticClass(), TEXT("Mappings"), TEXT("the context's key mappings: Action, Key (same as KeyMappings)"),
+		Context.AddJsonMember(UInputMappingContext::StaticClass(), TEXT("Mappings"), TEXT("the context's key mappings: Action, Key, Modifiers (same as KeyMappings)"),
 			&KeyMappingsJson);
 #endif
 		Context.AddGuide(TEXT("Enhanced Input"), TEXT(R"MD(Input Actions and Mapping Contexts are assets: `inputActions`, `inputContexts` (or `unreal.asset("/Game/Input/IA_Jump")`).
@@ -73,11 +82,14 @@ enhancedInput | call CreateAction("/Game/Input/IA_Jump", "Boolean")            B
 enhancedInput | call CreateContext("/Game/Input/IMC_Default")
 enhancedInput | call AddMapping("/Game/Input/IMC_Default", "/Game/Input/IA_Jump", "SpaceBar")
 enhancedInput | call RemoveMapping("/Game/Input/IMC_Default", "/Game/Input/IA_Jump", "SpaceBar")
+[["W", "Swizzle"], ["S", "Swizzle, Negate"], ["A", "Negate"], ["D", ""], ["Gamepad_Left2D", ""]] | call enhancedInput.AddMapping("/Game/Input/IMC_Default", "/Game/Input/IA_Move", $[0], $[1])
 unreal.asset("/Game/Input/IA_Move") | set ValueType = "Axis2D"
 ```
 
-Key names are Unreal FKey names (SpaceBar, W, LeftMouseButton, Gamepad_LeftX, Gamepad_FaceButton_Bottom). Created assets
-are unsaved: `editor | call SaveAll()`.
+Key names are Unreal FKey names (SpaceBar, W, LeftMouseButton, Gamepad_LeftX, Gamepad_FaceButton_Bottom). A key mapped to
+an Axis2D action feeds its X: the 4th AddMapping argument lists modifiers (Negate, Swizzle = X and Y swapped, DeadZone,
+Scalar, ...) so WASD drive a 2D Move (W Swizzle, S Swizzle + Negate, A Negate, D none; ActionValue X = right, Y = forward).
+Created assets are unsaved: `editor | call SaveAll()`.
 
 Blueprint input (a Pawn / Character / PlayerController Blueprint): the context must be added at BeginPlay, then each action
 gets one event node whose exec pins (Triggered, Started, Ongoing, Canceled, Completed) and ActionValue are wired with the

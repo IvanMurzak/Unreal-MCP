@@ -33,9 +33,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Enhanced Input", meta = (BlueprintInternalUseOnly = "true"))
 	UInputMappingContext* CreateContext(const FString& Path);
 
-	/** map a key ("SpaceBar", "W", "Gamepad_FaceButton_Bottom") to an action in a mapping context */
+	/** map a key ("SpaceBar", "W", "Gamepad_FaceButton_Bottom") to an action in a mapping context; Modifiers (optional, comma-separated, applied in order) shape that key's value: "Negate", "Swizzle" (X and Y swapped), "DeadZone", "Scalar", "Smooth", or another InputModifier class name. WASD into a 2D Move action: W "Swizzle", S "Swizzle, Negate", A "Negate", D none (Gamepad_Left2D needs none) */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Enhanced Input", meta = (BlueprintInternalUseOnly = "true"))
-	bool AddMapping(UInputMappingContext* Context, UInputAction* Action, const FString& Key);
+	bool AddMapping(UInputMappingContext* Context, UInputAction* Action, const FString& Key, const FString& Modifiers = TEXT(""));
 
 	/** remove every mapping of a key to an action from a mapping context; returns how many were removed */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Enhanced Input", meta = (BlueprintInternalUseOnly = "true"))
