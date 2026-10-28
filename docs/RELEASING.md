@@ -466,9 +466,11 @@ MSVC-only or clang-only compile error can slip through a PR; the release matrix 
 > `plugin BuildPlugin + Automation` leg covers UE 5.5–5.8 in `test_pull_request.yml`
 > (same-repo PRs) and in `release.yml` (real releases and dry-runs; there per OS, see
 > *Which OS*), so an API missing on an older engine fails the PR instead of the
-> release. The PR matrix has no `max-parallel`: all legs queue at once and whichever machine is
-> free first takes one (speed over a fixed OS); the machine-wide UE lock keeps one UE build per
-> machine, which also avoids MSVC PCH virtual memory exhaustion. The host game module is rebuilt per
+> release. The PR matrix has no `max-parallel`: all legs queue at once and whichever machine
+> frees up first takes the next one. Each machine therefore registers exactly **one**
+> Unreal-MCP runner (runner-manager `--max-capacity 1`): the [machine-wide UE lock](#machine-wide-ue-lock)
+> runs one UE build per machine anyway, and a second runner would only grab a leg and wait on
+> the lock while the other machine sits idle. The host game module is rebuilt per
 > engine on each runner-local host. The
 > PR smoke job waits for the plugin job, because both use UE 5.8 `RunUAT` on the
 > same machine and Unreal's AutomationTool permits only one same-engine instance
