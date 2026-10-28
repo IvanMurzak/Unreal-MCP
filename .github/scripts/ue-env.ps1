@@ -76,11 +76,12 @@ if ("$($installed.MajorVersion).$($installed.MinorVersion)" -ne $Version) {
     throw "ue-env: $root is UE $($installed.MajorVersion).$($installed.MinorVersion), not the requested $Version"
 }
 
-$runUAT = Join-Path $root "Engine/Build/BatchFiles/RunUAT.$(if ($IsWindows) { 'bat' } else { 'sh' })"
+# GetFullPath: one separator style on Windows (cmd's mklink and the .bat get backslashes only).
+$runUAT = [IO.Path]::GetFullPath((Join-Path $root "Engine/Build/BatchFiles/RunUAT.$(if ($IsWindows) { 'bat' } else { 'sh' })"))
 if (-not (Test-Path -LiteralPath $runUAT -PathType Leaf)) { throw "ue-env: $runUAT not found" }
 
 # Chain python: link the bundled Python folder (not just the binary, so it finds its stdlib).
-$src = Join-Path $root "Engine/Binaries/ThirdParty/Python3/$platform"
+$src = [IO.Path]::GetFullPath((Join-Path $root "Engine/Binaries/ThirdParty/Python3/$platform"))
 if (-not (Test-Path -LiteralPath (Join-Path $src $pyExe) -PathType Leaf)) { throw "ue-env: UE bundled Python not found under $src" }
 if ($env:RUNNER_TEMP -match '\s') { throw "ue-env: RUNNER_TEMP '$env:RUNNER_TEMP' contains whitespace; CHAIN_PY must be space-free" }
 Remove-Link

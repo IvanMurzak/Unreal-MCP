@@ -202,7 +202,7 @@ namespace UnrealMcpRqlStructsLocal
 	{
 		if (!FMath::IsFinite(Value))
 			return Value;
-		if (bDegrees)
+		if (bDegrees && FMath::Abs(Value) < 1e15)
 			Value = FMath::RoundToDouble(Value * 1e6) / 1e6;
 		if (FMath::Abs(Value) < 1e-9)
 			return 0.0;

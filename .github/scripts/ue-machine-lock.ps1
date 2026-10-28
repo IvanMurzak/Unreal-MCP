@@ -223,7 +223,11 @@ function Invoke-Hold {
             # Let the next holder open the file whatever its account (the folder is 1777).
             & chmod 0666 $LockPath 2>$null
             # Best effort: in the sticky folder another account's stale sidecar cannot be replaced.
-            try { Write-FileAtomic $ownerSidecar $utf8.GetString($bytes) } catch { Write-HolderLog "could not record the owner in $ownerSidecar ($($_.Exception.Message))" }
+            try { Write-FileAtomic $ownerSidecar $utf8.GetString($bytes) }
+            catch {
+                Remove-Item -LiteralPath "$ownerSidecar.$PID.tmp" -Force -ErrorAction SilentlyContinue
+                Write-HolderLog "could not record the owner in $ownerSidecar ($($_.Exception.Message))"
+            }
         }
         $msg = 'acquired the machine-wide UE lock {0} after waiting {1:N1} min' -f $LockPath, ($heldSince - $started).TotalMinutes
         Write-HolderLog $msg

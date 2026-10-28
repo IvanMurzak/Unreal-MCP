@@ -14,8 +14,8 @@ def resolve(output: Path) -> tuple[Path, Path]:
     core = json.loads((ROOT / "UnrealMCP/UnrealMCP.uplugin").read_text())["VersionName"]
     folder = output / "dependencies" / f"core-{core}"
     folder.mkdir(parents=True, exist_ok=True)
-    # The bridge ships for the same RIDs as the server (win-x64, osx-arm64, osx-x64, linux-x64).
-    rid = smoke.server_rid()
+    # The bridge ships for win-x64, osx-arm64, osx-x64 and linux-x64; Windows on ARM runs win-x64.
+    rid = {"win-arm64": "win-x64"}.get(smoke.server_rid(), smoke.server_rid())
     bridge = folder / ("unreal-mcp-bridge.exe" if os.name == "nt" else "unreal-mcp-bridge")
     if not bridge.exists():
         subprocess.run(["gh", "release", "download", f"v{core}", "--repo", "IvanMurzak/Unreal-MCP",

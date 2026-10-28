@@ -47,6 +47,13 @@ def machine_lock(already_held: bool = False, *, path: Path | None = None, timeou
         deadline = time.monotonic() + timeout_seconds
         announced = False
         with lock_path.open("a+b") as handle:
+            # Open to every account, as the CI holder does (folder 1777, file 0666): a CI runner under
+            # another account must still be able to open a lock this local run created first.
+            for target, mode in ((lock_path.parent, 0o1777), (lock_path, 0o666)):
+                try:
+                    target.chmod(mode)
+                except OSError:
+                    pass
             while True:
                 try:
                     fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -214,17 +221,17 @@ def check_report(report: Path, selected: list[str], core_tests: bool = True) -> 
 
 
 def kill_owned(process: subprocess.Popen) -> None:
-    if process.poll() is None:
-        if NEW_SESSION:
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-        else:
-            stopped = subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"], check=False, capture_output=True)
-            if stopped.returncode and process.poll() is None:
-                print(f"Owned process {process.pid} tree stop failed: {stopped.stdout!r} {stopped.stderr!r}", flush=True)
-                process.kill()
+    if NEW_SESSION:
+        # Even after the leader exited: its group (e.g. ShaderCompileWorker) may still be alive.
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    elif process.poll() is None:
+        stopped = subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"], check=False, capture_output=True)
+        if stopped.returncode and process.poll() is None:
+            print(f"Owned process {process.pid} tree stop failed: {stopped.stdout!r} {stopped.stderr!r}", flush=True)
+            process.kill()
     process.wait(timeout=30)
 
 
