@@ -20,6 +20,7 @@
 #include "GameFramework/Actor.h"
 #include "GameFramework/Character.h"
 #include "K2Node_CallFunction.h"
+#include "K2Node_CallParentFunction.h"
 #include "K2Node_EnhancedInputAction.h"
 #include "K2Node_Event.h"
 #include "Kismet2/BlueprintEditorUtils.h"
@@ -285,6 +286,27 @@ void FUnrealAIEnhancedInputSpec::Define()
 
 			const TSharedPtr<FJsonObject> Again = Run(AddContext, true);
 			TestTrue(*FString::Printf(TEXT("the same context again is refused (%s)"), *Codes(Again)), !IsOk(Again) && Codes(Again).Contains(TEXT("already adds")));
+		});
+
+		It("keeps a parent Blueprint's BeginPlay: a new BeginPlay in the child calls Parent: BeginPlay first", [this]()
+		{
+			UBlueprint* Parent = MakeBlueprint(ACharacter::StaticClass());
+			if (!TestNotNull(TEXT("parent blueprint"), Parent))
+				return;
+			// unreal.asset("@BP@").EventGraph | call AddEvent("BeginPlay")
+			TestTrue(TEXT("the parent implements BeginPlay"), IsOk(Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["EventGraph"],"on":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@BP@"}]}},"stages":[{"op":"call","method":"AddEvent","args":[{"lit":"BeginPlay"}]}]})RQL"), true)));
+			TestEqual(TEXT("the parent compiles"), CompileErrors(Parent), 0);
+			UBlueprint* Child = MakeBlueprint(Parent->GeneratedClass);
+			if (!TestNotNull(TEXT("child blueprint"), Child))
+				return;
+			// enhancedInput | call AddMappingContextOnBeginPlay("@BP@", "@IMC@")
+			const TSharedPtr<FJsonObject> Added = Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["enhancedInput"]},"stages":[{"op":"call","method":"AddMappingContextOnBeginPlay","args":[{"lit":"@BP@"},{"lit":"@IMC@"}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("added (%s)"), *Codes(Added)), IsOk(Added));
+			UK2Node_Event* BeginPlay = FBlueprintEditorUtils::FindOverrideForFunction(Child, AActor::StaticClass(), TEXT("ReceiveBeginPlay"));
+			const UEdGraphPin* Then = BeginPlay ? BeginPlay->FindPin(UEdGraphSchema_K2::PN_Then) : nullptr;
+			TestTrue(TEXT("BeginPlay calls the parent's first"), Then && Then->LinkedTo.Num() == 1
+				&& Then->LinkedTo[0]->GetOwningNode()->IsA<UK2Node_CallParentFunction>());
+			TestEqual(TEXT("the child compiles"), CompileErrors(Child), 0);
 		});
 
 		It("refuses a Blueprint that is not an actor", [this]()

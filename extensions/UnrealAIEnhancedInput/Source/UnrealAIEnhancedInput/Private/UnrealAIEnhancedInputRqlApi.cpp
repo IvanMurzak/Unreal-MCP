@@ -10,11 +10,13 @@
 #include "EnhancedActionKeyMapping.h"
 #include "EnhancedInputSubsystems.h"
 #include "Engine/Blueprint.h"
+#include "Engine/BlueprintGeneratedClass.h"
 #include "GameFramework/Actor.h"
 #include "InputAction.h"
 #include "InputCoreTypes.h"
 #include "InputMappingContext.h"
 #include "K2Node_CallFunction.h"
+#include "K2Node_CallParentFunction.h"
 #include "K2Node_EnhancedInputAction.h"
 #include "K2Node_Event.h"
 #include "K2Node_GetSubsystem.h"
@@ -95,28 +97,40 @@ namespace UnrealAIEnhancedInputRqlLocal
 		return false;
 	}
 
-	/** The Blueprint's BeginPlay event: the existing one (an editor placeholder is enabled), or a new one in @p Graph. */
-	UK2Node_Event* BeginPlayEvent(UBlueprint* Blueprint, UEdGraph* Graph)
+	/** The Blueprint's existing BeginPlay event (an editor placeholder included), or null. */
+	UK2Node_Event* FindBeginPlay(UBlueprint* Blueprint)
+	{
+		return FBlueprintEditorUtils::FindOverrideForFunction(Blueprint, AActor::StaticClass(), TEXT("ReceiveBeginPlay"));
+	}
+
+	/**
+	 * A BeginPlay that starts overriding now (new, or the editor's placeholder) would silently drop a parent Blueprint's
+	 * BeginPlay: when the parent implements it, Parent: BeginPlay runs first. Returns the exec pin what runs next connects to.
+	 */
+	UEdGraphPin* CallParentBeginPlay(UBlueprint* Blueprint, UK2Node_Event* Begin, UEdGraphPin* Then)
+	{
+		UFunction* Inherited = Blueprint->ParentClass ? Blueprint->ParentClass->FindFunctionByName(TEXT("ReceiveBeginPlay")) : nullptr;
+		if (!Then || !Inherited || !Cast<UBlueprintGeneratedClass>(Inherited->GetOuterUClass()))
+			return Then;
+		UK2Node_CallFunction* Parent = CastChecked<UK2Node_CallFunction>(CreateGraphNode(Begin->GetGraph(), UK2Node_CallParentFunction::StaticClass(),
+			Begin->NodePosX + 250, Begin->NodePosY, [Inherited](UEdGraphNode* Node) { CastChecked<UK2Node_CallFunction>(Node)->SetFromFunction(Inherited); }));
+		UEdGraphPin* ParentExec = Parent->FindPin(UEdGraphSchema_K2::PN_Execute);
+		return ParentExec && GetDefault<UEdGraphSchema_K2>()->TryCreateConnection(Then, ParentExec) ? Parent->FindPin(UEdGraphSchema_K2::PN_Then) : Then;
+	}
+
+	/** A new BeginPlay event in @p Graph; when a parent Blueprint implements BeginPlay, followed by its Parent: BeginPlay call. Returns the exec pin what runs next connects to. */
+	UEdGraphPin* AddBeginPlay(UBlueprint* Blueprint, UEdGraph* Graph, UK2Node_Event*& OutEvent)
 	{
 		const FName Name(TEXT("ReceiveBeginPlay")); // protected: GET_FUNCTION_NAME_CHECKED cannot name it
-		if (UK2Node_Event* Existing = FBlueprintEditorUtils::FindOverrideForFunction(Blueprint, AActor::StaticClass(), Name))
-		{
-			if (!Existing->IsNodeEnabled() || Existing->IsAutomaticallyPlacedGhostNode())
-			{
-				Existing->Modify();
-				Existing->SetEnabledState(ENodeEnabledState::Enabled, /*bUserAction*/ false);
-				Existing->NodeComment.Empty(); // the placeholder's "This node is disabled ..." comment
-				Existing->bCommentBubbleVisible = false;
-			}
-			return Existing;
-		}
+		Graph->Modify();
 		const FVector2D At = Graph->GetGoodPlaceForNewNode();
-		return CastChecked<UK2Node_Event>(CreateGraphNode(Graph, UK2Node_Event::StaticClass(), At.X, At.Y, [Name](UEdGraphNode* Node)
+		OutEvent = CastChecked<UK2Node_Event>(CreateGraphNode(Graph, UK2Node_Event::StaticClass(), At.X, At.Y, [Name](UEdGraphNode* Node)
 		{
 			UK2Node_Event* Event = CastChecked<UK2Node_Event>(Node);
 			Event->EventReference.SetExternalMember(Name, AActor::StaticClass());
 			Event->bOverrideFunction = true;
 		}));
+		return CallParentBeginPlay(Blueprint, OutEvent, OutEvent->FindPin(UEdGraphSchema_K2::PN_Then));
 	}
 
 	/** The Add Mapping Context call node of @p Blueprint that adds @p Context, if any. */
@@ -219,23 +233,28 @@ UEdGraphNode* UUnrealAIEnhancedInputRqlApi::AddMappingContextOnBeginPlay(UObject
 	UClass* SubsystemNode = FindObject<UClass>(nullptr, TEXT("/Script/BlueprintGraph.K2Node_GetSubsystemFromPC"));
 	if (!AddFunction || !PlayerController || !SubsystemNode)
 		return UnrealMcpRql::Failed<UEdGraphNode*>(TEXT("this engine version lacks a node Add Mapping Context needs"));
+	UK2Node_Event* Begin = FindBeginPlay(Owner);
+	if (Begin && !Begin->IsNodeEnabled() && !Begin->IsAutomaticallyPlacedGhostNode())
+		return UnrealMcpRql::Failed<UEdGraphNode*>(FString::Printf(TEXT("%s's BeginPlay is disabled: enable it first"), *Owner->GetName()));
 
-	UK2Node_Event* Begin = BeginPlayEvent(Owner, EventGraph);
-	UEdGraph* Graph = Begin->GetGraph();
+	// The new nodes, wired among themselves (a failure here leaves only them, unconnected to the Blueprint's logic).
+	UEdGraph* Graph = Begin ? Begin->GetGraph() : EventGraph;
 	Graph->Modify();
-	const double X = Begin->NodePosX;
-	const double Y = Begin->NodePosY;
+	const FVector2D Origin = Begin ? FVector2D(Begin->NodePosX, Begin->NodePosY) : FVector2D(Graph->GetGoodPlaceForNewNode());
+	const double X = Origin.X;
+	const double Y = Origin.Y;
 	UK2Node_CallFunction* GetController = CreateCallNode(Graph, PlayerController, X + 40, Y + 160);
 	UEdGraphNode* GetSubsystem = CreateGraphNode(Graph, SubsystemNode, X + 300, Y + 160, [](UEdGraphNode* Node)
 	{
 		CastChecked<UK2Node_GetSubsystem>(Node)->Initialize(UEnhancedInputLocalPlayerSubsystem::StaticClass());
 	});
 	UK2Node_CallFunction* Add = CreateCallNode(Graph, AddFunction, X + 620, Y);
-
 	const UEdGraphSchema_K2* Schema = GetDefault<UEdGraphSchema_K2>();
 	UEdGraphPin* ContextPin = RequirePin(Add, TEXT("MappingContext"));
 	UEdGraphPin* PriorityPin = RequirePin(Add, TEXT("Priority"));
-	if (!ContextPin || !PriorityPin)
+	UEdGraphPin* AddExec = RequirePin(Add, UEdGraphSchema_K2::PN_Execute);
+	UEdGraphPin* AddThen = RequirePin(Add, UEdGraphSchema_K2::PN_Then);
+	if (!ContextPin || !PriorityPin || !AddExec || !AddThen)
 		return nullptr;
 	Schema->TrySetDefaultObject(*ContextPin, Context);
 	Schema->TrySetDefaultValue(*PriorityPin, FString::FromInt(Priority));
@@ -243,15 +262,34 @@ UEdGraphNode* UUnrealAIEnhancedInputRqlApi::AddMappingContextOnBeginPlay(UObject
 		|| !Link(RequirePin(GetSubsystem, UEdGraphSchema_K2::PN_ReturnValue), RequirePin(Add, UEdGraphSchema_K2::PN_Self)))
 		return nullptr;
 
-	// Run first: what BeginPlay ran before now follows Add Mapping Context.
-	UEdGraphPin* Then = RequirePin(Begin, UEdGraphSchema_K2::PN_Then);
-	UEdGraphPin* AddExec = RequirePin(Add, UEdGraphSchema_K2::PN_Execute);
-	UEdGraphPin* AddThen = RequirePin(Add, UEdGraphSchema_K2::PN_Then);
-	if (!Then || !AddExec || !AddThen)
-		return nullptr;
-	const TArray<UEdGraphPin*> Before = Then->LinkedTo;
-	Begin->Modify();
-	Schema->BreakPinLinks(*Then, /*bSendsNodeNotifcation*/ true);
+	// Then BeginPlay, checked before it changes: what it ran before now follows Add Mapping Context.
+	UEdGraphPin* Then = nullptr;
+	TArray<UEdGraphPin*> Before;
+	if (Begin)
+	{
+		Then = RequirePin(Begin, UEdGraphSchema_K2::PN_Then);
+		if (!Then)
+			return nullptr;
+		Before = Then->LinkedTo;
+		for (UEdGraphPin* Next : Before)
+		{
+			if (Schema->CanCreateConnection(AddThen, Next).Response == CONNECT_RESPONSE_DISALLOW)
+				return UnrealMcpRql::Failed<UEdGraphNode*>(FString::Printf(TEXT("cannot move %s after Add Mapping Context"), *Next->GetOwningNode()->GetNodeTitle(ENodeTitleType::ListView).ToString()));
+		}
+		Begin->Modify();
+		Schema->BreakPinLinks(*Then, /*bSendsNodeNotifcation*/ true);
+		if (!Begin->IsNodeEnabled() || Begin->IsAutomaticallyPlacedGhostNode())
+		{
+			Begin->SetEnabledState(ENodeEnabledState::Enabled, /*bUserAction*/ false);
+			Begin->NodeComment.Empty(); // the placeholder's "This node is disabled ..." comment
+			Begin->bCommentBubbleVisible = false;
+			Then = CallParentBeginPlay(Owner, Begin, Then); // the placeholder starts overriding now
+		}
+	}
+	else
+	{
+		Then = AddBeginPlay(Owner, Graph, Begin);
+	}
 	if (!Link(Then, AddExec))
 		return nullptr;
 	for (UEdGraphPin* Next : Before)
