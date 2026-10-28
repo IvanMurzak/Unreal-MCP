@@ -78,10 +78,8 @@ if ("$($installed.MajorVersion).$($installed.MinorVersion)" -ne $Version) {
     throw "ue-env: $root is UE $($installed.MajorVersion).$($installed.MinorVersion), not the requested $Version"
 }
 
-# macOS: each engine accepts only an Xcode range (Engine/Config/Apple/Apple_SDK.json; UE 5.7 stops at
-# 26.9). When the machine's selected Xcode is outside it, pick the newest installed /Applications/Xcode*.app
-# inside it and hand it to this job only, through DEVELOPER_DIR (UBT finds Xcode with `xcode-select -p`,
-# which honours it). The machine-wide `xcode-select` choice is never changed.
+# macOS: an out-of-range selected Xcode is swapped for a fitting side-by-side one, for this job only
+# (UBT finds Xcode with `xcode-select -p`, which honours DEVELOPER_DIR). See docs/RELEASING.md "Which OS".
 $developerDir = $null
 if ($IsMacOS) {
     $sdk = Get-Content -LiteralPath (Join-Path $root 'Engine/Config/Apple/Apple_SDK.json') -Raw | ConvertFrom-Json
