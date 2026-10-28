@@ -153,6 +153,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             var noOps = "{\"rql\":\"0.1\",\"ok\":true,\"kind\":\"rows\",\"columns\":[\"$ref\",\"member\",\"old\",\"new\"],\"rows\":[],\"unchanged\":2}";
             Assert.Contains("(2 unchanged assignment(s) not listed)", Rendered(RqlBridge.Render(RqlBridge.MutateRole, Text(noOps))));
             Assert.Null(RqlBridge.ParseResult(JsonNode.Parse("{\"ok\":true,\"kind\":\"rows\",\"columns\":[],\"rows\":[]}")!.AsObject()).Unchanged);
+            Assert.Null(RqlBridge.ParseResult(JsonNode.Parse("{\"ok\":true,\"kind\":\"rows\",\"columns\":[],\"rows\":[],\"unchanged\":0}")!.AsObject()).Unchanged);
         }
 
         [Fact]

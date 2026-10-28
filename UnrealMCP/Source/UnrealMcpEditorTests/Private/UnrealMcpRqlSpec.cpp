@@ -1222,11 +1222,12 @@ void FUnrealMcpRqlSpec::Define()
 				return;
 			TestEqual(TEXT("the group key"), CellText(Grouped, 0, 0), FString(TEXT("PointLightComponent")));
 			TestEqual(TEXT("count"), Cell(Grouped, 0, 1)->AsNumber(), 2.0);
-			TestEqual(TEXT("items.avg is clean"), Cell(Grouped, 0, 2)->AsNumber(), 2.6);
-			TestEqual(TEXT("items.sum is clean"), Cell(Grouped, 0, 3)->AsNumber(), 5.2);
+			// Exact: without the widening the average is 2.5999999046 (inside TestEqual's default tolerance of 1e-4).
+			TestEqual(TEXT("items.avg is clean"), Cell(Grouped, 0, 2)->AsNumber(), 2.6, 0.0);
+			TestEqual(TEXT("items.sum is clean"), Cell(Grouped, 0, 3)->AsNumber(), 5.2, 0.0);
 
 			const TSharedPtr<FJsonObject> Average = Exec(/* actors | where Label starts-with "RqlSpecLamp" | get Components | where $ is PointLightComponent | avg Intensity */ TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"starts-with","args":[{"path":["Label"]},{"lit":"RqlSpecLamp"}]}},{"op":"get","expr":{"path":["Components"]}},{"op":"where","pred":{"op":"is","args":[{"path":[]},{"lit":"PointLightComponent"}]}},{"op":"avg","expr":{"path":["Intensity"]}}]})RQL"));
-			TestEqual(TEXT("the avg stage is clean"), UnrealMcpRqlSpecHelpers::Number(Average), 2.6);
+			TestEqual(TEXT("the avg stage is clean"), UnrealMcpRqlSpecHelpers::Number(Average), 2.6, 0.0);
 		});
 
 		It("lists only the assignments that change a value and counts the others as unchanged", [this]()
@@ -1236,9 +1237,11 @@ void FUnrealMcpRqlSpec::Define()
 				return;
 			Lights[0]->Intensity = 100.0f;
 			Lights[1]->Intensity = 200.0f;
-			auto Unchanged = [](const TSharedPtr<FJsonObject>& Receipt)
+			auto Unchanged = [this](const TSharedPtr<FJsonObject>& Receipt)
 			{
-				return Receipt.IsValid() && Receipt->HasField(TEXT("unchanged")) ? Receipt->GetNumberField(TEXT("unchanged")) : 0.0;
+				const bool bHas = Receipt.IsValid() && Receipt->HasField(TEXT("unchanged"));
+				TestTrue(TEXT("the receipt has 'unchanged'"), bHas);
+				return bHas ? Receipt->GetNumberField(TEXT("unchanged")) : 0.0;
 			};
 			const TCHAR* SetTo100 = /* actors | where Label starts-with "RqlSpecLamp" | get Components | where $ is PointLightComponent | set Intensity = 100 */ TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"starts-with","args":[{"path":["Label"]},{"lit":"RqlSpecLamp"}]}},{"op":"get","expr":{"path":["Components"]}},{"op":"where","pred":{"op":"is","args":[{"path":[]},{"lit":"PointLightComponent"}]}},{"op":"set","assign":[{"target":{"path":["Intensity"]},"value":{"lit":100}}]}]})RQL");
 			for (const bool bDryRun : { true, false })

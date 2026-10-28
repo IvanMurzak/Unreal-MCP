@@ -382,9 +382,15 @@ const rql::TypeDescriptor* FUnrealMcpRqlTypes::ForClass(UClass* Class)
 		return *Found;
 	const FString* Renamed = ApiClasses.Find(Class);
 	rql::TypeDescriptor& Descriptor = Shell(Class, Renamed && !Renamed->IsEmpty() ? *Renamed : Class->GetName(), rql::TypeKind::Object);
-	// A Blueprint's class is BP_Door_C; `is BP_Door` (the asset name agents see) matches it and its subclasses too.
+	// A Blueprint's class is BP_Door_C; `is BP_Door` (the asset name agents see) matches it and its subclasses too, unless
+	// a native class has that name (a Blueprint "PointLight" must not make `is PointLight` match it).
 	if (Cast<UBlueprintGeneratedClass>(Class) && Class->GetName().EndsWith(TEXT("_C"), ESearchCase::CaseSensitive))
-		Descriptor.also_is.push_back(UnrealMcpRqlToStd(Class->GetName().LeftChop(2)));
+	{
+		const FString Alias = Class->GetName().LeftChop(2);
+		const UClass* Named = FindFirstObject<UClass>(*Alias, EFindFirstObjectOptions::NativeFirst, ELogVerbosity::NoLogging);
+		if (!Named || !Named->HasAnyClassFlags(CLASS_Native))
+			Descriptor.also_is.push_back(UnrealMcpRqlToStd(Alias));
+	}
 	Classes.Add(Class, &Descriptor);
 	ClassByDescriptor.Add(&Descriptor, Class);
 	if (UClass* Super = Class->GetSuperClass())

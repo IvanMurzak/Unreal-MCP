@@ -129,12 +129,13 @@ agent ──query text──▶ unreal-mcp-bridge (sidecar, .NET)          Unrea
   `unknown-member` error: filter first (`where $ is LightComponentBase`).
 - **Receipts** of a `set` list only the assignments that change a value: one whose planned and read-back values equal
   the old value is left out and counted in the result's `unchanged` (the sidecar prints "(N unchanged assignment(s) not
-  listed)"); the write still runs and the commit hooks see it.
+  listed)"); outside a dry run the write still runs and the commit hooks see every record, and a write the editor
+  refused or clamped back to the old value stays listed.
 - **Conditions** (`where`, `and` / `or` / `not`, `?:`, list predicates) must be booleans: `where StaticMesh` is a
   `type-mismatch` whose hint suggests `StaticMesh != null` or `has(StaticMesh)`; null still counts as false.
   Lists compare by value (`group-by Tags` merges equal tag lists), and group-by rows have `items` for per-group
-  aggregates (`group-by $type | select key, avg = items.avg(Intensity)`). Float properties read as the shortest decimal
-  (`Intensity` 0.1f is 0.1, so sums and averages print clean).
+  aggregates (`group-by $type | select key, avg = items.avg(Intensity)`). A float property used as a number reads as its
+  shortest decimal (`Intensity` 4.2f is 4.2, so arithmetic, sums and averages print clean); comparisons keep float precision.
 - **Blueprint classes** are named `BP_Door_C` (`$type`); `is BP_Door` matches them too (the asset name, a
   `TypeDescriptor::also_is` alias, inherited by child Blueprints).
 - **Enums** read as entry names and accept the entry name, the editor's display name (`UMETA(DisplayName)`, RQL enum
