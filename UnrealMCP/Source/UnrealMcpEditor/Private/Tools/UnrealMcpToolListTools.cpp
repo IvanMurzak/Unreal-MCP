@@ -96,7 +96,6 @@ namespace UnrealMcpToolListTools
 					Text += TEXT(" (hidden tools are left out of tools/list but still run when called by name)");
 				if (Lines.Num() == 0 && Pattern.IsSet())
 					Text += TEXT(" (no tool matches: check the regex, or call without 'filter')"); // an invalid regex matches nothing silently
-				// Extensions (landscape, Control Rig, Niagara, ...) add RQL sources and operations, not tools: point there.
 				Text += TEXT("\nEditor features and installed extensions are RQL sources, not tools: rql-schema lists them (e.g. landscape, controlRig).");
 				Text += TEXT("\nname | title | visible/hidden [| extension]\n") + FString::Join(Lines, TEXT("\n"));
 				TSharedPtr<FJsonObject> Structured = MakeShared<FJsonObject>();

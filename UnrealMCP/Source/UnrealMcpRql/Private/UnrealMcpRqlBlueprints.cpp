@@ -37,7 +37,7 @@
 #include "Logging/TokenizedMessage.h"
 #include "Misc/UObjectToken.h"
 #include "Misc/ITransaction.h"
-#include "UObject/UObjectIterator.h"
+#include "UObject/UObjectHash.h"
 #include "UObject/UnrealType.h"
 #include "WidgetBlueprint.h"
 #include "Blueprint/WidgetTree.h"
@@ -451,30 +451,40 @@ namespace UnrealMcpRqlBlueprintsLocal
 			"work: EventGraph | call AddInputKey(\"SpaceBar\")");
 	}
 
-	/** The loaded Blueprint function libraries (engine, plugin and project ones), leaving out compiler artefacts. */
-	TArray<UClass*> FunctionLibraries()
+	/** "KismetInputLibrary.Key_IsGamepadKey" */
+	FString QualifiedName(const UFunction* Function)
 	{
-		TArray<UClass*> Out;
-		for (TObjectIterator<UClass> It; It; ++It)
+		return Function->GetOwnerClass()->GetName() + TEXT(".") + Function->GetName();
+	}
+
+	/**
+	 * The Blueprint-callable @p Name of every loaded function library (engine, plugin and project ones) that declares it
+	 * itself (a library inherited from another one is not a second home), sorted by "Library.Function".
+	 */
+	TArray<UFunction*> LibraryFunctions(const FString& Name)
+	{
+		TArray<UClass*> Libraries;
+		GetDerivedClasses(UBlueprintFunctionLibrary::StaticClass(), Libraries, /*bRecursive*/ true);
+		TArray<UFunction*> Out;
+		for (UClass* Library : Libraries)
 		{
-			if (It->IsChildOf(UBlueprintFunctionLibrary::StaticClass()) && !It->HasAnyClassFlags(CLASS_Abstract | CLASS_Deprecated | CLASS_NewerVersionExists)
-				&& !It->GetName().StartsWith(TEXT("SKEL_")) && !It->GetName().StartsWith(TEXT("REINST_")))
-				Out.Add(*It);
+			if (Library->HasAnyClassFlags(CLASS_Abstract | CLASS_Deprecated | CLASS_NewerVersionExists)
+				|| Library->GetName().StartsWith(TEXT("SKEL_")) || Library->GetName().StartsWith(TEXT("REINST_")))
+				continue;
+			UFunction* Function = FindCallable(Library, Name);
+			if (Function && Function->GetOwnerClass() == Library && !Function->HasMetaData(TEXT("BlueprintInternalUseOnly")))
+				Out.Add(Function);
 		}
+		Out.Sort([](const UFunction& A, const UFunction& B) { return QualifiedName(&A) < QualifiedName(&B); });
 		return Out;
 	}
 
-	/** "Class.Function" for every function library that has a Blueprint-callable @p Name, sorted. */
-	TArray<FString> LibrariesWith(const FString& Name)
+	FString QualifiedNames(const TArray<UFunction*>& Functions)
 	{
-		TArray<FString> Out;
-		for (UClass* Library : FunctionLibraries())
-		{
-			if (UFunction* Function = FindCallable(Library, Name))
-				Out.Add(Library->GetName() + TEXT(".") + Function->GetName());
-		}
-		Out.Sort();
-		return Out;
+		TArray<FString> Names;
+		for (const UFunction* Function : Functions)
+			Names.Add(QualifiedName(Function));
+		return FString::Join(Names, TEXT(", "));
 	}
 
 	/** Up to five Blueprint-callable functions of @p Class whose name contains @p Name (case-insensitive), for a "did you mean". */
@@ -505,10 +515,9 @@ namespace UnrealMcpRqlBlueprintsLocal
 				Throw(FString::Printf(TEXT("no class '%s'"), *ClassPart));
 			if (UFunction* Function = FindCallable(Class, FunctionPart))
 				return Function;
-			const TArray<FString> Elsewhere = LibrariesWith(FunctionPart);
+			const TArray<UFunction*> Elsewhere = LibraryFunctions(FunctionPart);
 			Throw(FString::Printf(TEXT("%s has no Blueprint-callable function '%s'%s%s"), *Class->GetName(), *FunctionPart,
-				Elsewhere.Num() ? *FString::Printf(TEXT("; it is on %s"), *FString::Join(Elsewhere, TEXT(", "))) : TEXT(""),
-				*SimilarFunctions(Class, FunctionPart)));
+				Elsewhere.Num() ? *(TEXT("; it is on ") + QualifiedNames(Elsewhere)) : TEXT(""), *SimilarFunctions(Class, FunctionPart)));
 		}
 		UClass* Own = Blueprint->SkeletonGeneratedClass ? Blueprint->SkeletonGeneratedClass : Blueprint->GeneratedClass;
 		if (UFunction* Function = FindCallable(Own, Text))
@@ -519,16 +528,13 @@ namespace UnrealMcpRqlBlueprintsLocal
 				return Function;
 		}
 		// Any other function library (NiagaraFunctionLibrary.SpawnSystemAtLocation, a plugin's or the project's): one match is it.
-		const TArray<FString> Elsewhere = LibrariesWith(Text);
+		const TArray<UFunction*> Elsewhere = LibraryFunctions(Text);
 		if (Elsewhere.Num() == 1)
-		{
-			FString LibraryName, FunctionName;
-			Elsewhere[0].Split(TEXT("."), &LibraryName, &FunctionName);
-			return FindCallable(FUnrealMcpObjectRef::ResolveClass(LibraryName), FunctionName);
-		}
+			return Elsewhere[0];
 		if (Elsewhere.Num() > 1)
-			Throw(FString::Printf(TEXT("'%s' is on several function libraries: name one (%s)"), *Text, *FString::Join(Elsewhere, TEXT(", "))));
-		Throw(FString::Printf(TEXT("no Blueprint-callable function '%s' on %s or any function library (a member function needs its class: \"Pawn.AddMovementInput\")%s%s"),
+			Throw(FString::Printf(TEXT("'%s' is on several function libraries: name one (%s)"), *Text, *QualifiedNames(Elsewhere)));
+		Throw(FString::Printf(TEXT("no Blueprint-callable function '%s' on %s or any function library (name the class: \"KismetMathLibrary.Add_IntInt\"; "
+			"a member function needs its class too: \"Pawn.AddMovementInput\")%s%s"),
 			*Text, *Blueprint->GetName(), *SimilarFunctions(Own, Text), *EnhancedInputHint(Text)));
 	}
 
