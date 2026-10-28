@@ -231,10 +231,11 @@ properties (and `Slot`, the widget's layout in its panel: `set Slot.LayoutData.O
 
 - `UBaseWidgetBlueprint`: `RootWidget`, `Widgets` (every widget of the tree), `call AddWidget(class, name?, parent?)` (into
   a panel, or as the root of an empty tree), and the Blueprint members (`Compile`, `Status`, `Graphs` …).
-- `UWidget`: `Parent`, `WidgetBlueprint`, `call AddChild(class, name?)` (panels), `call Destroy()` (with its children);
+- `UWidget`: `Parent`, `WidgetBlueprint`, `IsVariable` (writable: the Designer's Is Variable box; text blocks, images
+  and panels start unticked, and a graph reads a widget with `AddVariableGet(name)` only once it is ticked), `call AddChild(class, name?)` (panels), `call Destroy()` (with its children);
   `UPanelWidget`: `Children` (so `RootWidget | recurse Children` walks the tree).
 
-New widgets are registered as Blueprint variables and removed ones leave the tree, as the Designer does; structure
+New widgets are registered with the Blueprint (a variable only while `IsVariable` is true) and removed ones leave the tree, as the Designer does; structure
 changes mark the Blueprint structurally modified and property edits mark it modified (compile to apply them). The
 widgets of a Widget Blueprint are templates of its generated class but its design data: writable here, unlike other
 class defaults.

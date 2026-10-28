@@ -217,7 +217,8 @@ namespace UnrealMcpPythonTools
 			                  "set_actor_location are neither undoable nor marked unsaved. Engine warnings and errors raised while it "
 			                  "runs are returned as logs too. Output is capped (~20k characters each for the value and the logs). 'include': helper files/folders (relative to "
 			                  "<Project>/.ai-game-dev/snippets): folders are importable, files run before the code. Blueprint "
-			                  "graph wiring is not available from Python: use the blueprint-* tools for that."))
+			                  "graph wiring is not available from Python: add nodes and connect pins with rql-mutate "
+			                  "(unreal.asset(path).EventGraph | call AddEvent / AddCallFunction, node | call Connect)."))
 			.ParamString(TEXT("code"), TEXT("Python code. Example: \"actors = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)"
 			                                "\\nlen(actors.get_all_level_actors())\""), EUnrealMcpParamRequirement::Required)
 			.Param(TEXT("include"), TEXT("array"), TEXT(""), EUnrealMcpParamRequirement::Optional,

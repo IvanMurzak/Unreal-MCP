@@ -207,6 +207,23 @@ namespace UnrealMcpRqlWidgetsLocal
 			"the panel holding this widget (null for the root)", false, true));
 		FUnrealMcpRqlTypes::SetMember(D, Member("WidgetBlueprint", T.ForClass(UBaseWidgetBlueprint::StaticClass()),
 			[Types](void* Self) { return Types->WrapObject(BlueprintOf(static_cast<UWidget*>(Self))); }, {}, "", false, true));
+		FUnrealMcpRqlTypes::SetMember(D, Member("IsVariable", rql::builtin::bool_type(),
+			[](void* Self) { return rql::Value::boolean(static_cast<UWidget*>(Self)->bIsVariable); },
+			[](void* Self, const rql::Value& Value)
+			{
+				UWidget* Widget = static_cast<UWidget*>(Self);
+				UBaseWidgetBlueprint* Blueprint = BlueprintOf(Widget);
+				if (!Blueprint)
+					Throw(TEXT("only widgets of a Widget Blueprint's tree can be made variables (not of a running widget)"));
+				const bool bVariable = BoolArg(Value);
+				if (Widget->bIsVariable == bVariable)
+					return;
+				// The Designer's "Is Variable" checkbox: the widget becomes (or stops being) a member the graphs can read.
+				Blueprint->Modify();
+				Widget->Modify();
+				Widget->bIsVariable = bVariable;
+				FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+			}, "the Designer's Is Variable: true makes the widget a Blueprint variable the graphs can read (AddVariableGet(name)); text blocks, images and panels start as false"));
 		FUnrealMcpRqlTypes::AddMethod(D, Method("Destroy", {}, nullptr, [](void* Self, const std::vector<rql::Value>&) -> rql::Value
 		{
 			UWidget* Widget = static_cast<UWidget*>(Self);

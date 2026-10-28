@@ -53,6 +53,32 @@ namespace UnrealMcpSourceTools
 		return Root;
 	}
 
+	FString DescribeUbtResult(const FString& Target, int32 ErrorCount, int32 WarningCount, int32 ReturnCode, double Seconds, const FString& Output)
+	{
+		FString Text = FString::Printf(TEXT("Compile (%s, UBT): %d error(s), %d warning(s); return code %d in %.0fs."),
+			*Target, ErrorCount, WarningCount, ReturnCode, Seconds);
+		if (ReturnCode == 0)
+			return Text;
+		// The agent reads this line, not the structured fields: say why UBT stopped and what it means.
+		TArray<FString> Lines;
+		Output.ParseIntoArrayLines(Lines);
+		for (int32 Index = Lines.Num() - 1; Index >= 0; --Index)
+		{
+			const FString Line = Lines[Index].TrimStartAndEnd();
+			if (Line.Contains(TEXT("error"), ESearchCase::IgnoreCase) || Line.Contains(TEXT("Unable to"), ESearchCase::IgnoreCase)
+				|| Line.Contains(TEXT("failed"), ESearchCase::IgnoreCase))
+			{
+				Text += FString::Printf(TEXT(" UBT: %s"), *Line.Left(300));
+				break;
+			}
+		}
+		if (ErrorCount == 0)
+			Text += TEXT(" The code compiled but this running editor keeps its module loaded, so new or changed C++ "
+				"(new classes too) is NOT live yet: it needs Live Coding (an interactive editor) or an editor restart. "
+				"A Blueprint is live after blueprint-compile.");
+		return Text;
+	}
+
 	FString ModuleApiMacro(const FString& ModuleName)
 	{
 		return ModuleName.ToUpper() + TEXT("_API");
@@ -490,7 +516,7 @@ namespace UnrealMcpSourceTools
 				Structured->SetStringField(TEXT("cpp"), CppPath.RelPath);
 				Structured->SetBoolField(TEXT("isUClass"), Tpl.bUClass);
 				return FUnrealMcpToolResult::Success(
-					FString::Printf(TEXT("Created %s%s (%s.h + %s.cpp) in module '%s'. Run source-compile to build it."),
+					FString::Printf(TEXT("Created %s%s (%s.h + %s.cpp) in module '%s'. Run source-compile to build it; a running editor loads a new C++ class only after a restart (Live Coding does not pick up new source files), while a Blueprint class is usable at once."),
 						*Tpl.Prefix, *ClassName, *ClassName, *ClassName, *Module),
 					Structured);
 			});
@@ -936,10 +962,8 @@ namespace UnrealMcpSourceTools
 				// failure, or a UBT configuration error) without flooding the response.
 				Structured->SetStringField(TEXT("outputTail"), Combined.Right(4000));
 
-				return FUnrealMcpToolResult::Success(
-					FString::Printf(TEXT("Compile (%s, UBT): %d error(s), %d warning(s); return code %d in %.0fs."),
-						*TargetName, ErrorCount, WarningCount, ReturnCode, Elapsed),
-					Structured);
+				const FString Text = DescribeUbtResult(TargetName, ErrorCount, WarningCount, ReturnCode, Elapsed, Combined);
+				return FUnrealMcpToolResult::Success(Text, Structured);
 			});
 	}
 }

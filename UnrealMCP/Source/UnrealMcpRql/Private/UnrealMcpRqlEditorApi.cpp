@@ -181,7 +181,10 @@ namespace UnrealMcpRqlEditorApiLocal
 			return false;
 		if (!FPackageName::DoesPackageExist(Package, &OutFile))
 		{
-			OutError = FString::Printf(TEXT("no level at '%s'"), *Package);
+			const UPackage* Loaded = FindPackage(nullptr, *Package);
+			OutError = Loaded && UWorld::FindWorldInPackage(const_cast<UPackage*>(Loaded))
+				? FString::Printf(TEXT("the level '%s' is not saved yet: editor | call SaveAsset(\"%s\") first"), *Package, *Package)
+				: FString::Printf(TEXT("no level at '%s'"), *Package);
 			return false;
 		}
 		if (!OutFile.EndsWith(FPackageName::GetMapPackageExtension(), ESearchCase::IgnoreCase))
@@ -439,7 +442,12 @@ UObject* UUnrealMcpRqlEditorApi::CopyAsset(const FString& Source, const FString&
 	if (!ValidateNewAssetPath(Destination, Folder, Name))
 		return nullptr;
 	UObject* Copy = UEditorAssetLibrary::DuplicateAsset(Source, Destination);
-	return Copy ? Copy : Failed<UObject*>(FString::Printf(TEXT("could not copy '%s'"), *Source));
+	if (!Copy)
+		return Failed<UObject*>(FString::Printf(TEXT("could not copy '%s'"), *Source));
+	// A level opens from its file only (OpenLevel, AddSublevel): a copied level is saved at once, as a new map is.
+	if (Copy->IsA<UWorld>() && !UEditorAssetLibrary::SaveLoadedAsset(Copy, /*bOnlyIfIsDirty*/ false))
+		return Failed<UObject*>(FString::Printf(TEXT("copied the level to '%s' but could not save it"), *Destination));
+	return Copy;
 }
 
 void UUnrealMcpRqlEditorApi::MoveAsset(const FString& Source, const FString& Destination)

@@ -61,6 +61,13 @@ namespace UnrealMcpSourceTools
 	 */
 	UNREALMCPEDITOR_API void ParseDiagnostics(const FString& BuildOutput, TArray<FSourceDiagnostic>& OutDiagnostics);
 
+	/**
+	 * The one-line source-compile (UBT path) summary the agent reads: counts, return code and, when UBT failed, the
+	 * line saying why and, for a compiler-clean build, that the running editor does not load the new code.
+	 */
+	UNREALMCPEDITOR_API FString DescribeUbtResult(const FString& Target, int32 ErrorCount, int32 WarningCount, int32 ReturnCode,
+		double Seconds, const FString& Output);
+
 	/** Register the source family into @p Registry (docs/ARCHITECTURE.md §3.3). */
 	UNREALMCPEDITOR_API void Register(FUnrealMcpToolRegistry& Registry);
 }

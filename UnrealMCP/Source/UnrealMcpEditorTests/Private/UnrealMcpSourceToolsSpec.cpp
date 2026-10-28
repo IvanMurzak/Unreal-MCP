@@ -200,6 +200,26 @@ void FUnrealMcpSourceToolsSpec::Define()
 		});
 	});
 
+	Describe("compile summary", [this]()
+	{
+		It("says why UBT stopped and that a compiler-clean build is not live in the running editor", [this]()
+		{
+			const FString Locked = UnrealMcpSourceTools::DescribeUbtResult(TEXT("GameEditor"), 0, 0, 6, 52.0,
+				TEXT("Building GameEditor...\n[3/4] Link UnrealEditor-Game.dll\nLINK : fatal error LNK1104: cannot open file 'UnrealEditor-Game.dll'\nTotal time 52s\n"));
+			TestTrue(*FString::Printf(TEXT("counts and code (%s)"), *Locked), Locked.StartsWith(TEXT("Compile (GameEditor, UBT): 0 error(s), 0 warning(s); return code 6")));
+			TestTrue(TEXT("the reason line"), Locked.Contains(TEXT("UBT: LINK : fatal error LNK1104")));
+			TestTrue(TEXT("not live until Live Coding or a restart"), Locked.Contains(TEXT("NOT live yet")) && Locked.Contains(TEXT("restart")));
+
+			const FString Broken = UnrealMcpSourceTools::DescribeUbtResult(TEXT("GameEditor"), 2, 0, 6, 10.0,
+				TEXT("Foo.cpp(3): error C2143: syntax error\nResult: Failed (OtherCompilationError)\n"));
+			TestTrue(TEXT("a broken build names its last failure"), Broken.Contains(TEXT("UBT: Result: Failed")));
+			TestFalse(TEXT("a broken build says nothing about loading"), Broken.Contains(TEXT("NOT live")));
+
+			const FString Clean = UnrealMcpSourceTools::DescribeUbtResult(TEXT("GameEditor"), 0, 1, 0, 30.0, TEXT("Result: Succeeded\n"));
+			TestEqual(TEXT("a successful build stays one short line"), Clean, FString(TEXT("Compile (GameEditor, UBT): 0 error(s), 1 warning(s); return code 0 in 30s.")));
+		});
+	});
+
 	Describe("file ops", [this]()
 	{
 		BeforeEach([this]()
@@ -227,6 +247,8 @@ void FUnrealMcpSourceToolsSpec::Define()
 			Create->SetStringField(TEXT("parentClass"), TEXT("Actor"));
 			const FUnrealMcpToolResult CreateResult = RunSourceTool(Registry, TEXT("source-create-class"), Create);
 			TestTrue(TEXT("create succeeded"), CreateResult.bSuccess);
+			TestTrue(*FString::Printf(TEXT("says a new class needs a restart, a Blueprint does not (%s)"), *CreateResult.Message),
+				CreateResult.Message.Contains(TEXT("only after a restart")) && CreateResult.Message.Contains(TEXT("Blueprint")));
 			const FString HeaderRel = TempModule / TEXT("SpecPawnThing.h");
 			TestTrue(TEXT("header on disk"), FPaths::FileExists(UnrealMcpSourceTools::GetProjectSourceRoot() / HeaderRel));
 
