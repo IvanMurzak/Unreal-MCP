@@ -157,6 +157,20 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         }
 
         [Fact]
+        public void Render_BulkCreateReceiptsAreCompact()
+        {
+            // RQL 2877579: range(0, 60) | call editor.SpawnActor(...) prints the method once, drops the $ref column that repeats
+            // each created actor's reference, and lists 50 rows plus a count.
+            var rows = string.Join(",", Enumerable.Range(0, 60).Select(i =>
+                $"[\"StaticMeshActor#{i}\",\"SpawnActor(string ClassName)\",{{\"$ref\":\"StaticMeshActor#{i}\",\"$type\":\"StaticMeshActor\",\"Name\":\"Cube_{i}\"}}]"));
+            var json = "{\"rql\":\"0.1\",\"ok\":true,\"kind\":\"rows\",\"columns\":[\"$ref\",\"method\",\"result\"],\"rows\":[" + rows + "]}";
+            var text = Rendered(RqlBridge.Render(RqlBridge.MutateRole, Text(json)));
+            Assert.StartsWith("60 results\nmethod: SpawnActor(string ClassName)\nresult\n", text);
+            Assert.Contains("… 10 more row(s) not shown", text);
+            Assert.DoesNotContain("|", text);
+        }
+
+        [Fact]
         public void Render_Scalars()
         {
             var json = "{\"rql\":\"0.1\",\"ok\":true,\"kind\":\"scalar\",\"value\":3}";

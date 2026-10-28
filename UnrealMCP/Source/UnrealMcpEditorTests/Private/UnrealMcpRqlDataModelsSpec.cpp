@@ -1014,6 +1014,25 @@ void FUnrealMcpRqlDataModelsSpec::Define()
 		});
 	});
 
+	Describe("widget slots", [this]()
+	{
+		It("counts a same-value write of nested slot structs (Anchors) as unchanged", [this]()
+		{
+			UWidgetBlueprint* Made = MakeWidgetBlueprint();
+			if (!TestNotNull(TEXT("widget blueprint"), Made))
+				return;
+			const FString Root = ResultRef(Must(TEXT("root"), /* unreal.asset("@WBP@") | call AddWidget("CanvasPanel", "Root") */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@WBP@"}]},"stages":[{"op":"call","method":"AddWidget","args":[{"lit":"CanvasPanel"},{"lit":"Root"}]}]})RQL")));
+			const FString Button = ResultRef(Must(TEXT("a button"), /* unreal.asset("@WBP@") | call AddWidget("Button", "Play", ref("@R@")) */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@WBP@"}]},"stages":[{"op":"call","method":"AddWidget","args":[{"lit":"Button"},{"lit":"Play"},{"call":"ref","args":[{"lit":"@R@"}]}]}]})RQL"), { { TEXT("R"), Root } }));
+			// ref("@B@") | set Slot.LayoutData.Anchors = "(Minimum=(X=0.5,Y=0),Maximum=(X=0.5,Y=0))"
+			const TCHAR* Anchor = TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"@B@"}]},"stages":[{"op":"set","assign":[{"target":{"path":["Slot","LayoutData","Anchors"]},"value":{"lit":"(Minimum=(X=0.5,Y=0),Maximum=(X=0.5,Y=0))"}}]}]})RQL");
+			const TSharedPtr<FJsonObject> First = Must(TEXT("anchored"), Anchor, { { TEXT("B"), Button } });
+			TestEqual(TEXT("the first write changes it"), UnrealMcpRqlSpecHelpers::RowCount(First), 1);
+			const TSharedPtr<FJsonObject> Again = Must(TEXT("the same anchors again"), Anchor, { { TEXT("B"), Button } });
+			TestEqual(TEXT("no changed row"), UnrealMcpRqlSpecHelpers::RowCount(Again), 0);
+			TestTrue(TEXT("counted as unchanged"), Again.IsValid() && Again->HasField(TEXT("unchanged")) && Again->GetNumberField(TEXT("unchanged")) == 1.0);
+		});
+	});
+
 	Describe("widget variables", [this]()
 	{
 		It("makes a widget a variable (the Designer's Is Variable) so a graph can read it, undoably", [this]()

@@ -6,9 +6,19 @@
 // Agent-facing texts of the rql-* tools and the unreal-rql skill (UTF-8, ASCII only so every compiler reads them alike).
 // The language section is RQL's evaluated agent prompt adapted to Unreal, as Unity-MCP's RqlGuide does for Unity: the guide
 // travels in the tool descriptions, which agents load before first use; the blurbs are the always-visible catalog lines.
+// RQL's shared language rules (LanguageRules) follow the language section, so the rules every host states alike are not
+// copied here.
+
+#include "UnrealMcpRqlInclude.h"
 
 namespace UnrealMcpRqlGuide
 {
+	/** RQL's own language rules text (conditions, ?:, list equality, group items, receipts, call, bulk create, vectors, map keys). */
+	inline const char* LanguageRules()
+	{
+		return rql::language_rules();
+	}
+
 	inline const char* QueryBlurb()
 	{
 		return "Query the live Unreal Editor world (actors, components, assets, levels) with RQL in ONE call: filter, project, "
@@ -38,11 +48,10 @@ Stages:
   recurse Children [max-depth=N] [include-self=false]   walk a hierarchy (input items included by default)
   distinct [expr] | sum expr | min expr | max expr | avg expr
   group-by expr                      rows key|count; group-by a, b (or kind=$type) gives one column per key, then count; aggregate each group's items: group-by $type | select key, count, avg = items.avg(Intensity) (items.sum / .min / .max / .count(pred) / .first().Label)
-Conditions (where, and / or / not, cond ? a : b, list predicates) must be booleans: where StaticMesh != null, where has(Intensity), where len(Tags) > 0 - a bare non-boolean member is a type-mismatch error (null counts as false).
-Expressions: == != < <= > >= and or not + - * / %; contains, starts-with, ends-with, matches "regex" (all case-insensitive); x in [a, b]; x is null; x is not null; $ is PointLight (includes subclasses; a Blueprint's $type is BP_Door_C, $ is BP_Door matches it and its child Blueprints); has(member); functions abs round floor ceil sqrt pow min(a, b) max(a, b) len lower upper coalesce; conditional: cond ? a : b or if(cond, a, b) (only the taken branch runs; not true = else; in select wrap it: kind=($ is PointLight ? "point" : "other")); text: replace(s, from, to) (case-insensitive), replace-regex(s, pattern, repl) ($1 = group 1), substring(s, start[, length]), split(s, sep), trim(s), pad(v, width[, fill]) - also as methods: Label.replace("Old", "New"), Label.substring(0, 4), Index.pad(3). After select, sort / where use the column names (sort Owner.Label). Literals: numbers, "strings", true/false/null, lists [a, b], objects {X: 1, Y: 2}. Lists compare by value (Tags == ["A", "B"]; distinct / group-by Tags merge equal lists).
+Expressions: == != < <= > >= and or not + - * / %; contains, starts-with, ends-with, matches "regex" (all case-insensitive); x in [a, b]; x is null; x is not null; $ is PointLight (includes subclasses; a Blueprint's $type is BP_Door_C, $ is BP_Door matches it and its child Blueprints); has(member); functions abs round floor ceil sqrt pow min(a, b) max(a, b) len lower upper coalesce; conditional: cond ? a : b or if(cond, a, b); text: replace(s, from, to) (case-insensitive), replace-regex(s, pattern, repl) ($1 = group 1), substring(s, start[, length]), split(s, sep), trim(s), pad(v, width[, fill]) - also as methods: Label.replace("Old", "New"), Label.substring(0, 4), Index.pad(3). After select, sort / where use the column names (sort Owner.Label). Literals: numbers, "strings", true/false/null, lists [a, b], objects {X: 1, Y: 2}.
 Paths: a.b.c, list[0], map["key"]; .member on a list maps over its elements. List methods: .any(pred) .all(pred) .count([pred]) .sum(e) .min(e) .max(e) .first([pred]); inside them bare names refer to the element, falling back to the outer item.
 Meta: $ (current item), $ref (stable id such as PointLight#1234), $type, $path, $index, $depth. Enums compare to strings: the entry name, the editor's display name or the number (Mobility == "Movable"); == on strings is case-sensitive.
-Unreal: every object has Id, Name, Path. Actor has Label, Location, Rotation, Scale (world transform), Components (list), Children (attached actors), Parent, Folder, Level, HiddenInEditor, Selected; a Volume also BrushExtent (writable: rebuilds its box brush) and BrushBounds. Other members are the reflected properties (UPROPERTY EditAnywhere / VisibleAnywhere / BlueprintVisible) under their C++ names (bHidden, Intensity, RelativeLocation, StaticMesh); find them via actors | get Components | where $ is PointLightComponent (every light: $ is LightComponentBase; LightComponent leaves out sky lights). Vectors, rotators and colors print as (x, y, z) (rotators (pitch, yaw, roll)); write "(1, 2, 3)", [1, 2, 3] or {X: 1, Y: 2, Z: 3}; colors also "#ff8800". Object references accept ref("..."), unreal.asset(path) or an asset path "/Game/Meshes/SM_Cube". Material parameters: Scalars["Roughness"], Vectors["BaseColor"], Textures["Albedo"]. Gameplay tags are text: Tag == "Ability.Fire", set Tags = ["Ability.Fire", "State.Stunned"] (registered tags only). DataTable rows: Rows["Sword"].Damage (RowNames, RowStructName). Blueprints: Components (the components it adds; their defaults: StaticMesh, ...), Graphs / EventGraph -> Nodes -> Pins (Name Direction Type DefaultValue LinkedTo). User-defined structs: Fields. Widget Blueprints: RootWidget / Widgets, panels have Children, widgets Parent, Slot and IsVariable (set true to read the widget in graphs). Level Sequences: Bindings -> Tracks -> Sections -> Channels (frames at the display rate). Destroyed objects read as null (where StaticMesh == null finds empty references). Navigate with paths or get; select only projects output columns.
+Unreal: every object has Id, Name, Path. Actor has Label, Location, Rotation, Scale (world transform), Components (list), Children (attached actors), Parent, Folder, Level, HiddenInEditor (editor viewport only), bHidden (Actor Hidden In Game: invisible when playing), Selected; a Volume also BrushExtent (writable: rebuilds its box brush) and BrushBounds. Other members are the reflected properties (UPROPERTY EditAnywhere / VisibleAnywhere / BlueprintVisible) under their C++ names (bHidden, Intensity, RelativeLocation, StaticMesh); find them via actors | get Components | where $ is PointLightComponent (every light: $ is LightComponentBase; LightComponent leaves out sky lights). Vectors, rotators and colors print as (x, y, z) (rotators (pitch, yaw, roll)); write "(1, 2, 3)", [1, 2, 3] or {X: 1, Y: 2, Z: 3}; colors also "#ff8800". Vector, Vector2D, Vector4, LinearColor and Rotator compute component-wise: Scale * 1.5, Location + [0, 0, 100], Location - Other.Location (a rotator per axis, Rotation + [0, 90, 0] adds 90 to Yaw: an editor nudge, not a composed rotation); Quat and Transform do not. Object references accept ref("..."), unreal.asset(path) or an asset path "/Game/Meshes/SM_Cube". Material parameters: Scalars["Roughness"], Vectors["BaseColor"], Textures["Albedo"]. Gameplay tags are text: Tag == "Ability.Fire", set Tags = ["Ability.Fire", "State.Stunned"] (registered tags only). DataTable rows: Rows["Sword"].Damage (RowNames, RowStructName). Blueprints: Components (the components it adds; their defaults: StaticMesh, ...), Graphs / EventGraph -> Nodes -> Pins (Name Direction Type DefaultValue LinkedTo). User-defined structs: Fields. Widget Blueprints: RootWidget / Widgets, panels have Children, widgets Parent, Slot and IsVariable (set true to read the widget in graphs). Level Sequences: Bindings -> Tracks -> Sections -> Channels (frames at the display rate). Destroyed objects read as null (where StaticMesh == null finds empty references). Navigate with paths or get; select only projects output columns.
 Results come back as compact rows (header line, then col|col). Long results are truncated - refine with where/first or use count. Unknown members produce warnings with suggestions; rql-schema(type) lists a type's members.)RQL";
 	}
 
@@ -79,14 +88,19 @@ Results come back as compact rows (header line, then col|col). Long results are 
 		return R"RQL(Examples:
   actors | where Label == "Player" | set Location = "(0, 0, 100)"
   actors | get Components | where $ is PointLightComponent | set Intensity = Intensity * 2, LightColor = "#ffcc88"
-  actors | where Label starts-with "Enemy" | set HiddenInEditor = true
+  actors | where Label starts-with "Coin" | set Scale = Scale * 1.5, Location = Location + [0, 0, 50]       vectors compute component-wise
+  actors | where Label starts-with "Enemy" | set bHidden = true          invisible in game (Actor Hidden In Game); HiddenInEditor only hides it in the editor viewport
   actors | where Label starts-with "Pillar_" | set Label = Label.replace("Pillar_", "Column_")      bulk rename
   actors | where Label starts-with "Crate" | sort Label | set Location.X = $index * 200              spread along X
   actors | get Components | where $ is LightComponentBase | set Intensity = (Intensity > 5000 ? 5000 : Intensity)    clamp
   ref("Button#34") | set Slot.LayoutData.Anchors = "(Minimum=(X=0.5,Y=0),Maximum=(X=0.5,Y=0))"   structs also take UE's text form (the editor's Copy)
   unreal.asset("/Game/Materials/MI_Red") | set Scalars["Roughness"] = 0.2, Vectors["BaseColor"] = "(1, 0, 0, 1)"
 Create / add / remove (call; the receipt's result column holds the new object's $ref for follow-up queries):
-  editor | call SpawnActor("PointLight", "Lamp", "(0, 0, 300)")          class, label, location, rotation, parent
+  editor | call SpawnActor("PointLight", "Lamp", "(0, 0, 300)")          class, label, location, rotation, parent, scale
+  editor | call SpawnActorFromAsset("/Game/Props/SM_Rock", "Rock", [0, 0, 0], [0, 0, 0], null, [2, 2, 2])     place an asset (mesh, Blueprint, sound) as drag and drop does
+  range(0, 300) | call editor.SpawnActor("/Engine/BasicShapes/Cube", "Cube_" + $, [($ % 20) * 150, floor($ / 20) * 150, 50])   with max_targets=300: a 20 x 15 grid, one undo step
+  [["Lamp_A", 0], ["Lamp_B", 400]] | call editor.SpawnActor("PointLight", $[0], [$[1], 0, 300])      one spawn per list entry
+  range(0, 10) | call editor.SpawnActor({ClassName: "PointLight", Label: "Lamp_" + $, Location: [$ * 300, 0, 300]})   arguments by name (ClassName Label Location Rotation Parent Scale)
   actors | where Label == "Crate" | call AddComponent("StaticMeshComponent", "Mesh")
   actors | where Label == "Old" | call Destroy()                         components: get Components | where $ is X | call Destroy()
   actors | where Label == "Lamp" | set Parent = ref("StaticMeshActor#1234")   attach, keeping the world transform; null detaches
@@ -145,7 +159,10 @@ Widgets and sequences:
 			"(up to 1000) for a bigger edit, it stays one all-or-nothing undo step; beyond 1000 split it with first N / skip N. A misspelt "
 			"member in where / get that leaves set / call nothing to change is an error (nothing changed); a real member no remaining "
 			"item has is a no-match (0 changes, warning). Filter before setting a member only some classes have: where $ is "
-			"LightComponentBase (or has(Intensity)) | set Intensity = ...";
+			"LightComponentBase (or has(Intensity)) | set Intensity = ... When you use a different member than the user named (a "
+			"misspelling, or the did-you-mean of a warning), tell the user which member you changed. Bulk create: range(0, N) | call "
+			"editor.SpawnActor(... $ ...) spawns N actors in one call (each counts against max_targets; every spawn is checked "
+			"before the first); the receipt has one row per actor with its $ref.";
 	}
 
 	inline const char* SchemaDescription()

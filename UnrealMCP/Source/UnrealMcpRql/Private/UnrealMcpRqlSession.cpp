@@ -314,8 +314,19 @@ void FUnrealMcpRqlSession::ConfigureMutations()
 		{
 			if (!Record.method || !Record.item.is_object() || !Record.item.ptr())
 				continue;
+			// An operations object (`editor`, an extension's) is called once per stream item by design (range(0, 300) | call
+			// editor.SpawnActor(...) creates 300 actors): the same operation twice with the same arguments is the duplicate
+			// (DeleteAsset("/Game/X") twice), except a spawn, where identical arguments still mean another actor.
+			FString Key = UnrealMcpRqlFromStd(Record.method->name).ToLower();
+			if (const UObject* Receiver = TypeProvider->AsObject(Record.item); Receiver && TypeProvider->IsApiClass(Receiver->GetClass()))
+			{
+				if (Key.StartsWith(TEXT("spawn")))
+					continue;
+				for (const rql::Value& Argument : Record.args)
+					Key += TEXT("|") + UnrealMcpRqlFromStd(rql::to_text(Argument));
+			}
 			bool bTwice = false;
-			Called.Add({ Record.item.ptr(), UnrealMcpRqlFromStd(Record.method->name).ToLower() }, &bTwice);
+			Called.Add({ Record.item.ptr(), Key }, &bTwice);
 			if (bTwice)
 			{
 				const UObject* Object = TypeProvider->AsObject(Record.item);
@@ -332,6 +343,13 @@ void FUnrealMcpRqlSession::ConfigureMutations()
 				return UnrealMcpRqlToStd(Reason);
 		}
 		return std::string();
+	};
+	// Only the engine creates UObjects: a literal ({} or {Name: ...}) for an object parameter or member is refused
+	// (coercion-failed) and nothing is constructed, on dry runs and while RQL tries overloads too. Liveness is the
+	// engine-wide is_alive hook here, not a per-type adapter, so RQL's own engine-object default does not cover them.
+	Policy.can_construct_from_literal = [TypeProvider](const rql::TypeDescriptor& Type) -> std::optional<bool>
+	{
+		return TypeProvider->IsObjectType(&Type) ? std::optional<bool>(false) : std::nullopt;
 	};
 	// UE's own text form for structs without an RQL adapter (the editor's Copy): Anchors = "(Minimum=(X=0.5,Y=0),...)".
 	Policy.coerce_text = [TypeProvider](const rql::TypeDescriptor& Type, const std::string& Text, std::string& Reason)
@@ -726,6 +744,7 @@ FString FUnrealMcpRqlSession::SkillMarkdown() const
 	Out += TEXT("```\n\n## Language\n\n```\n");
 	Out += UnrealMcpRqlFromStd(UnrealMcpRqlGuide::Language());
 	Out += TEXT("\n");
+	Out += UnrealMcpRqlFromStd(UnrealMcpRqlGuide::LanguageRules());
 	Out += UnrealMcpRqlFromStd(UnrealMcpRqlGuide::QueryExamples());
 	Out += TEXT("\n```\n\n## Changing things (rql-mutate)\n\n```\n");
 	Out += UnrealMcpRqlFromStd(UnrealMcpRqlGuide::MutateStages());

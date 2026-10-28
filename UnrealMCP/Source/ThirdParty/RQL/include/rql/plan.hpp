@@ -80,6 +80,7 @@ struct Stage {
     bool include_self = true;           // recurse: emit input items (depth 0); default true
     std::vector<Assignment> assign;     // set
     std::string method;                 // call
+    ExprPtr on;                         // call: receiver of a source-qualified call (spec §8), else null
     std::vector<ExprPtr> args;          // call / generic positional args
     std::vector<std::pair<std::string, ExprPtr>> named;  // generic named args
 

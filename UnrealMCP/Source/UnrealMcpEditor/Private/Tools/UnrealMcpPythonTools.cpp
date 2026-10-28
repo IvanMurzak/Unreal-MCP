@@ -5,6 +5,7 @@
 #include "UnrealMcpSchema.h"
 #include "UnrealMcpToolArgs.h"
 #include "UnrealMcpToolRegistry.h"
+#include "Config/UnrealMcpConfig.h"
 #include "Tools/UnrealMcpLogCollector.h"
 
 #include "Dom/JsonObject.h"
@@ -89,6 +90,20 @@ namespace UnrealMcpPythonTools
 	// The runtime's own logs get a smaller budget: room for its one "left out" entry (about 120 characters with the 12 of
 	// overhead, rounded up), so the plugin cap below never cuts the runtime's output a second time.
 	static constexpr int32 PythonRuntimeLogChars = PythonMaxLogChars - 256;
+
+	/**
+	 * The snippet's time budget (Code-Exec timeoutMs): what is left of the call's timeout (UNREAL_MCP_TOOL_TIMEOUT; the call
+	 * may have waited for the game thread or for Python to start) less a margin for the reply, so code_exec's watchdog stops
+	 * an endless loop and frees the game thread before the dispatcher gives up on the call. Never 0, which means no bound.
+	 */
+	static int32 PythonTimeBudgetMs(const FUnrealMcpToolCall& Call)
+	{
+		const int32 Timeout = Call.TimeoutMs > 0 ? Call.TimeoutMs : FUnrealMcpConfig::DefaultToolTimeoutMs; // none: a direct call (tests)
+		const double Waited = Call.ReceivedSeconds > 0.0 ? (FPlatformTime::Seconds() - Call.ReceivedSeconds) * 1000.0 : 0.0;
+		const int32 Left = FMath::Max(Timeout - FMath::RoundToInt(Waited), 1);
+		const int32 Margin = FMath::Clamp(Timeout / 10, 2000, 15000);
+		return FMath::Max(Left - Margin, FMath::Max(Left / 2, 1));
+	}
 
 	/** Said when a snippet that calls setters recorded nothing for undo (UE records only objects that were Modify()'d). */
 	static const TCHAR* PythonNoUndoNote = TEXT("this run recorded no undo step: direct setters (set_actor_location, set_actor_scale3d ...) "
@@ -215,7 +230,8 @@ namespace UnrealMcpPythonTools
 			                  "call starts from a fresh namespace. Its recorded edits are one undo step (so the snippet itself cannot run TRANSACTION UNDO); only "
 			                  "objects that are Modify()'d record (set_editor_property, editor subsystems, obj.modify() first): direct setters such as "
 			                  "set_actor_location are neither undoable nor marked unsaved. Engine warnings and errors raised while it "
-			                  "runs are returned as logs too. Output is capped (~20k characters each for the value and the logs). 'include': helper files/folders (relative to "
+			                  "runs are returned as logs too. A run that outlives the tool timeout is stopped with a Timeout error "
+			                  "(a blocking unreal call finishes first); sys.setrecursionlimit is capped at 3000. Output is capped (~20k characters each for the value and the logs). 'include': helper files/folders (relative to "
 			                  "<Project>/.ai-game-dev/snippets): folders are importable, files run before the code. Blueprint "
 			                  "graph wiring is not available from Python: add nodes and connect pins with rql-mutate "
 			                  "(unreal.asset(path).EventGraph | call AddEvent / AddCallFunction, node | call Connect)."))
@@ -265,6 +281,7 @@ namespace UnrealMcpPythonTools
 				Request->SetNumberField(TEXT("maxLogChars"), PythonRuntimeLogChars);
 				Request->SetNumberField(TEXT("maxLogLineChars"), PythonMaxLogLineChars);
 				Request->SetNumberField(TEXT("maxErrorChars"), PythonMaxValueChars);
+				Request->SetNumberField(TEXT("timeoutMs"), PythonTimeBudgetMs(Call));
 				TArray<TSharedPtr<FJsonValue>> Imports;
 				Imports.Add(MakeShared<FJsonValueString>(TEXT("unreal")));
 				Request->SetArrayField(TEXT("imports"), Imports);

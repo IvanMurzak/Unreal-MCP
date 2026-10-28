@@ -256,6 +256,7 @@ bool UUnrealMcpRuntimeSubsystem::Connect(const FString& Host, const FString& Tok
 			Config.CloudToken = Token;
 	}
 	Config.bKeepConnected = true; // §12.4: the runtime config push carries keepConnected:true
+	Config.bRuntimeConnection = true; // the server must not let this connection replace the editor's
 
 	const TSharedPtr<FJsonObject> EffectiveConfig = Config.BuildEffectiveConnectionConfig();
 	Impl->BridgeServer->SetEffectiveConfig(EffectiveConfig); // also pushes the §1.3 `config` if a sidecar is already up

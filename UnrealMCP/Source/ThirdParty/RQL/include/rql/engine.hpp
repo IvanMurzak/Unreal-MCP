@@ -80,6 +80,13 @@ struct MutationPolicy {
     /// (e.g. Unreal's ExportText form "(Minimum=(X=0.5,Y=0),Maximum=(X=0.5,Y=0))"). Return the value; nullopt when the
     /// type is not handled (the built-in rules then report the failure); set `reason` (or throw) to refuse.
     std::function<std::optional<Value>(const TypeDescriptor& type, const std::string& text, std::string& reason)> coerce_text;
+    /// Whether an object literal may build a value of a type (spec §4.5): true / false decides, nullopt keeps the default.
+    /// The default builds the types registered constructible() that are not engine objects, i.e. have no stable_id or
+    /// is_alive adapter (spec §13). Return false for types only the engine may create (Unreal's UObject subclasses): a
+    /// literal written to such a type is then coercion-failed and nothing is constructed, on dry runs and during
+    /// overload resolution alike. Hosts that mark liveness only through Engine::is_alive (no adapter) get no default
+    /// protection and set this hook.
+    std::function<std::optional<bool>(const TypeDescriptor& type)> can_construct_from_literal;
     /// After planning, before any write (not on dry-run): e.g. record undo for the owners. Throwing (any
     /// exception) vetoes the whole mutation → permission-denied, nothing changed.
     MutationHook before_write;
@@ -238,7 +245,7 @@ private:
     int64_t next_handle_ = 0;
     std::string last_error_;
     std::vector<std::unique_ptr<TypeAdapter>> adapters_;
-    std::array<bool, 6> caps_{};  // some adapter implements the capability (detail::Capability order)
+    std::array<bool, 7> caps_{};  // some adapter implements the capability (detail::Capability order)
     // Every type each source has produced (by source name): a source that is null right now keeps the types it had for the
     // known member names and hints (spec §8). Guarded by source_types_mutex_.
     std::map<std::string, std::vector<const TypeDescriptor*>> source_types_;

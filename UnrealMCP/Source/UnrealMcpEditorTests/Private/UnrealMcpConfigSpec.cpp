@@ -561,6 +561,17 @@ void FUnrealMcpConfigSpec::Define()
 		});
 	});
 
+	Describe("client role", [this]()
+	{
+		It("declares an editor connection, and a runtime one for a game's runtime-mode connection", [this]()
+		{
+			FUnrealMcpConfig Config;
+			TestEqual(TEXT("editor by default"), Config.BuildEffectiveConnectionConfig()->GetStringField(TEXT("clientRole")), FString(TEXT("editor")));
+			Config.bRuntimeConnection = true;
+			TestEqual(TEXT("runtime"), Config.BuildEffectiveConnectionConfig()->GetStringField(TEXT("clientRole")), FString(TEXT("runtime")));
+		});
+	});
+
 	Describe("tool timeout (UNREAL_MCP_TOOL_TIMEOUT)", [this]()
 	{
 		It("defaults to 300000 ms and reaches the sidecar in the effective config", [this]()

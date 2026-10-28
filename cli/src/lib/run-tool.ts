@@ -80,13 +80,25 @@ async function invokeTool(routePrefix: string, opts: RunToolOptions): Promise<Ru
         reason: 'http-error',
         httpStatus: response.status,
         data,
-        message: response.statusText || `HTTP ${response.status}`,
+        message: serverErrorText(data) ?? (response.statusText || `HTTP ${response.status}`),
       });
     }
     return { kind: 'success', success: true, endpoint, httpStatus: response.status, data };
   } catch (err) {
     return classifyFetchError(err, endpoint, timeoutMs, timedOut);
   }
+}
+
+/**
+ * The server's own error text (`{"error": "[tool_timeout] ..."}`): the bracketed code says what happened
+ * (`[plugin_reloading]`, `[invalid_params]`, ...), which the bare HTTP status text does not.
+ */
+function serverErrorText(data: unknown): string | undefined {
+  if (data && typeof data === 'object' && !Array.isArray(data)) {
+    const error = (data as Record<string, unknown>).error;
+    if (typeof error === 'string' && error.trim().length > 0) return error;
+  }
+  return undefined;
 }
 
 function validateOptions(opts: RunToolOptions): RunToolFailure | null {

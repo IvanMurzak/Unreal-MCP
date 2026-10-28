@@ -22,8 +22,8 @@ agent ──query text──▶ unreal-mcp-bridge (sidecar, .NET)          Unrea
                       AgentFormat: QueryResult → compact rows ◀──IPC tool-response: QueryResult JSON── over live UObjects
 ```
 
-- **Sidecar** (`bridge/src/Tools/RqlBridge.cs`, NuGet `com.IvanMurzak.Rql` 0.3.0-dev.c5fed20 — a temporary pre-release
-  packed from RQL main c5fed20 and committed under `bridge/prerelease-packages/` until the cascade release): for `rql-query` / `rql-mutate` it
+- **Sidecar** (`bridge/src/Tools/RqlBridge.cs`, NuGet `com.IvanMurzak.Rql` 0.3.0-dev.2877579 — a temporary pre-release
+  packed from RQL main 2877579 and committed under `bridge/prerelease-packages/` until the cascade release): for `rql-query` / `rql-mutate` it
   parses `query` with `RqlParser` and adds `PlanCodec.Serialize(plan)` as the `plan` argument (a syntax error is
   answered without a round trip). The plugin answers with the QueryResult JSON; the sidecar renders it with
   `AgentFormat.Render(…, Table)` — byte-for-byte the agent output of Unity-MCP's rql tools. `rql-schema` answers with
@@ -152,7 +152,7 @@ agent ──query text──▶ unreal-mcp-bridge (sidecar, .NET)          Unrea
 | `actors` | every actor of the editor world's loaded levels |
 | `levels`, `world` | the loaded levels, the editor world |
 | `selection` | the selected actors (`editor | set Selection = [...]` writes it) |
-| `editor` | editor state (`IsPlaying`, `IsPaused` — writable, `Selection`, `World`, `CurrentLevel`; the transaction buffer: `NextUndo`, `NextRedo`, `UndoHistory`, `RedoHistory` — titles, next first — `UndoCount`, `RedoCount`) and operations: `SpawnActor` (a class, Blueprint name or path, or an asset to place: a StaticMesh path gives a StaticMeshActor; a volume class gets the editor's 200 cm box brush, sized with `Scale`), `OpenLevel`, `NewLevel`, `SaveLevel`, `SaveAll`, `AddSublevel` (a saved map as a streaming sublevel; not undoable, the current level stays; refused in World Partition worlds), `UnloadSublevel` (a level by its map name), `CreateAsset`, `CopyAsset`, `MoveAsset`, `DeleteAsset`, `CreateFolder`, `RefreshAssets`, `CreateMaterialInstance`, `ImportAsset` (returns every asset the import created: the mesh, then its materials, textures, skeleton), `SaveAsset`, `ClearConsole` |
+| `editor` | editor state (`IsPlaying`, `IsPaused` — writable, `Selection`, `World`, `CurrentLevel`; the transaction buffer: `NextUndo`, `NextRedo`, `UndoHistory`, `RedoHistory` — titles, next first — `UndoCount`, `RedoCount`) and operations: `SpawnActor` (a class, Blueprint name or path, or an asset to place: a StaticMesh path gives a StaticMeshActor; a volume class gets the editor's 200 cm box brush, sized with `Scale`; label, location, rotation, parent and scale are optional), `SpawnActorFromAsset` (an asset path only, placed as drag and drop does), `OpenLevel`, `NewLevel`, `SaveLevel`, `SaveAll`, `AddSublevel` (a saved map as a streaming sublevel; not undoable, the current level stays; refused in World Partition worlds), `UnloadSublevel` (a level by its map name), `CreateAsset`, `CopyAsset`, `MoveAsset`, `DeleteAsset`, `CreateFolder`, `RefreshAssets`, `CreateMaterialInstance`, `ImportAsset` (returns every asset the import created: the mesh, then its materials, textures, skeleton), `SaveAsset`, `ClearConsole` |
 | `console` | editor log entries (`Sequence`, `Time`, `Verbosity`, `Category`, `Message`) |
 | `unreal.find(label)` | an actor by label, name or path |
 | `unreal.asset(path)`, `unreal.assets(class, path?)` | one asset; assets of a class (at most 200, loaded as read; without a path: `/Game`, or in rql-query every content root (engine, plugins) when the project has none of the class) |
@@ -163,6 +163,24 @@ agent ──query text──▶ unreal-mcp-bridge (sidecar, .NET)          Unrea
 | `blueprints` | the project's Blueprints (see [Blueprint graphs](#blueprint-graphs)) |
 | `widgetBlueprints` | the project's Widget Blueprints (see [Widget Blueprints](#widget-blueprints)) |
 | `levelSequences` | the project's Level Sequences (see [Level Sequences](#level-sequences)) |
+
+**Bulk create.** A source-qualified call runs one `editor` operation per stream item:
+`range(0, 300) | call editor.SpawnActor("/Engine/BasicShapes/Cube", "Cube_" + $, [($ % 20) * 150, floor($ / 20) * 150, 50])`
+(with `max_targets: 300`), `[["Lamp_A", 0], ["Lamp_B", 400]] | call editor.SpawnActor("PointLight", $[0], [$[1], 0, 300])`, or by parameter name: `range(0, 10) | call editor.SpawnActor({ClassName: "PointLight", Label: "Lamp_" + $, Location: [$ * 300, 0, 300]})`.
+Every spawn counts against the target limit, every class / asset name is resolved before the first spawn (a call
+validator on `SpawnActor` / `SpawnActorFromAsset`, dry runs too), all spawns are one undo step (the mutation's one
+editor transaction), and the receipt has one row per actor carrying its `$ref`.
+
+**Vector arithmetic.** `FVector`, `FVector2D`, `FVector4`, `FLinearColor` and `FRotator` opt in to RQL's component-wise
+arithmetic (their adapters' `components` / `from_components`): `set Scale = Scale * 1.5`, `Location + [0, 0, 100]`,
+`Location - Other.Location`. A rotator's is per axis (`Rotation + [0, 90, 0]` adds 90 to Yaw), as the Details panel edits
+it, not a composed rotation; that is what editor nudges want. `FQuat`, `FTransform`, `FColor` and the integer points
+stay out (`type-mismatch`).
+
+**No UObjects from literals.** The session's `can_construct_from_literal` hook refuses every UObject type, so `{}` or
+`{Name: ...}` written to an object parameter or member is `coercion-failed` ("an engine object") and nothing is
+constructed, on dry runs and while RQL tries overloads. (Unreal marks liveness through the engine-wide `is_alive` hook,
+not a per-type adapter, so RQL's own engine-object default would not cover it.)
 
 The `editor` operations also include `CreateDataTable(path, rowStruct)` and, for gameplay tags,
 `AddGameplayTag(name, comment?, source?)`, `RemoveGameplayTag(name)`, `RenameGameplayTag(name, newName)` (written to
@@ -309,6 +327,9 @@ to parse `query` into `plan` (query / mutate) and to render the answer, and rql-
 guide, the live sources and functions, the guides of installed RQL modules) as `"skills": [{name, description,
 markdown}]`. `unreal-skill-generate` writes every shipped skill as `<name>/SKILL.md`; skills never reach `tools/list`.
 The skill's name, description and body live in the plugin (`UnrealMcpRqlGuide.h`, the session's skill markdown).
+The rql-query and rql-mutate descriptions and the skill append RQL's shared language rules (`rql::language_rules()`,
+`rql/guide.hpp`), so rules every host states alike (conditions, `?:`, list equality, group items, receipts, `call`,
+bulk create, vectors, missing map keys) come from RQL and are not copied into the Unreal guide.
 
 ## Extensions
 

@@ -79,6 +79,15 @@ struct UNREALMCPRUNTIME_API FUnrealMcpToolCall
 	// the response is sent and the map entry is removed — IsCancelled() can never deref freed memory.
 	TSharedPtr<const FThreadSafeBool, ESPMode::ThreadSafe> CancelRequested;
 
+	/**
+	 * This call's timeout in milliseconds (the sidecar's timeoutMs: UNREAL_MCP_TOOL_TIMEOUT); 0 when unknown (tests). A
+	 * handler that can run long (python-execute) stops its own work before it, so its answer arrives instead of the
+	 * dispatcher's "timed out".
+	 */
+	int32 TimeoutMs = 0;
+	/** When the call arrived (FPlatformTime::Seconds()), so a handler bounds its work by the time left; 0 when unknown. */
+	double ReceivedSeconds = 0.0;
+
 	FUnrealMcpToolCall() : Arguments(MakeShared<FJsonObject>()) {}
 	explicit FUnrealMcpToolCall(const TSharedPtr<FJsonObject>& InArgs)
 		: Arguments(InArgs.IsValid() ? InArgs : MakeShared<FJsonObject>()) {}

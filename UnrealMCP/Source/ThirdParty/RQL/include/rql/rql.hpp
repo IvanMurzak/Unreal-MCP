@@ -4,6 +4,7 @@
 #include "rql/adapters.hpp"
 #include "rql/codec.hpp"
 #include "rql/engine.hpp"
+#include "rql/guide.hpp"
 #include "rql/json.hpp"
 #include "rql/plan.hpp"
 #include "rql/reflection.hpp"

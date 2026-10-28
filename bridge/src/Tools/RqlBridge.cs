@@ -75,7 +75,13 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
             if (role == SchemaRole)
                 rendered = RenderSchema(json);
             else if (json.ContainsKey("ok"))
-                rendered = AgentFormat.Render(ParseResult(json), OutputFormat.Table);
+            {
+                var result = ParseResult(json);
+                // rql-mutate answers with a set / call receipt: the table format compacts it (one method: line, no $ref
+                // column for created objects, the first 50 rows and a count). The flag is not part of the JSON.
+                result.Receipt = role == MutateRole && result.Ok;
+                rendered = AgentFormat.Render(result, OutputFormat.Table);
+            }
             else
                 return response;
 

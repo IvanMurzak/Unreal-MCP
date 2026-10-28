@@ -298,6 +298,13 @@ struct TypeAdapter {
     /// search, so it must decide liveness WITHOUT dereferencing a possibly destroyed object (e.g. via a
     /// weak handle / object registry, as Unreal's IsValid on a UObject* tracked by the GC).
     std::function<std::optional<bool>(const Value& value)> is_alive;
+    /// Component-wise arithmetic (spec §4.2, §13 "Arithmetic"): the numeric components of a value (always the same count
+    /// for the type, in a fixed order; widen single-precision components with widen_single), nullopt when the type does
+    /// not take part. Opt in only for types whose arithmetic is component-wise (vectors, rotators, colors), never
+    /// quaternions or matrices. Requires from_components.
+    std::function<std::optional<std::vector<double>>(const Value& value)> components;
+    /// A value of `type` built from components in the order `components` returns them; nullopt when it cannot be built.
+    std::function<std::optional<Value>(const TypeDescriptor& type, const std::vector<double>& components)> from_components;
 };
 
 /// Engine-wide member type exclusion (spec §13): a member is dropped when its type, element type or key

@@ -805,6 +805,30 @@ namespace UnrealMcpRqlCoreLocal
 		return Titles;
 	}
 
+	/**
+	 * Spawn checks before the first spawn (RQL call validation, dry runs too): range(0, 300) | call editor.SpawnActor("Typo", ...)
+	 * fails as a whole instead of after 0 spawns or, worse, failing half-way. One resolution per distinct name and call.
+	 */
+	void EditorCallChecks(FUnrealMcpRqlTypes&, rql::TypeDescriptor& D)
+	{
+		for (rql::MethodDescriptor& Method : D.methods)
+		{
+			const bool bAssetOnly = Method.name == "SpawnActorFromAsset";
+			if (!bAssetOnly && Method.name != "SpawnActor")
+				continue;
+			TSharedRef<TMap<FString, FString>> Checked = MakeShared<TMap<FString, FString>>();
+			Method.validate = [bAssetOnly, Checked](void*, const std::vector<rql::Value>& Args) -> std::string
+			{
+				if (Args.empty() || !Args[0].is_string())
+					return std::string();
+				const FString Name = UnrealMcpRqlFromStd(Args[0].as_string());
+				if (const FString* Known = Checked->Find(Name))
+					return UnrealMcpRqlToStd(*Known);
+				return UnrealMcpRqlToStd(Checked->Add(Name, UnrealMcpRqlSpawnRefusal(Name, bAssetOnly)));
+			};
+		}
+	}
+
 	void EditorMembers(FUnrealMcpRqlTypes& T, rql::TypeDescriptor& D)
 	{
 		FUnrealMcpRqlTypes* Types = &T;
@@ -1123,6 +1147,7 @@ void UnrealMcpRqlConfigureCore(FUnrealMcpRqlSession& Session)
 	T.AddClassHook(UWorld::StaticClass(), &WorldMembers);
 	T.AddClassHook(UMaterialInterface::StaticClass(), &MaterialMembers);
 	T.AddClassHook(UUnrealMcpRqlEditorApi::StaticClass(), &EditorMembers);
+	T.AddClassHook(UUnrealMcpRqlEditorApi::StaticClass(), &EditorCallChecks);
 
 	rql::TypeRegistry& Registry = T.Registry();
 	Registry.structure<FLogEntry>("LogEntry")
@@ -1206,7 +1231,7 @@ void UnrealMcpRqlConfigureCore(FUnrealMcpRqlSession& Session)
 		return Types->WrapObjects(SelectedActors());
 	});
 	Session.AddSource(TEXT("editor"), T.ForClass(UUnrealMcpRqlEditorApi::StaticClass()), /*bList*/ false,
-		TEXT("editor state (IsPlaying, IsPaused, Selection, World, CurrentLevel, NextUndo / UndoHistory / RedoHistory) and operations: call SpawnActor / OpenLevel / NewLevel / "
+		TEXT("editor state (IsPlaying, IsPaused, Selection, World, CurrentLevel, NextUndo / UndoHistory / RedoHistory) and operations: call SpawnActor / SpawnActorFromAsset / OpenLevel / NewLevel / "
 			"SaveLevel / SaveAll / AddSublevel / UnloadSublevel / CreateAsset / CopyAsset / MoveAsset / DeleteAsset / CreateFolder / RefreshAssets / "
 			"CreateMaterialInstance / ImportAsset / SaveAsset / ClearConsole / CreateDataTable / AddGameplayTag / RemoveGameplayTag / "
 			"RenameGameplayTag"), [Types]()

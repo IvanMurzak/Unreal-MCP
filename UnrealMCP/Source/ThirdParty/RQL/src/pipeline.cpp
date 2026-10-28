@@ -268,56 +268,89 @@ private:
     std::shared_ptr<const EntryOrigin> origin_;
 };
 
+/// A source expression (spec §2) bound to how its value is computed: a registered source with navigation, ref(...), a host
+/// function or a list literal (the last two evaluated in root scope).
+struct SourceBinding {
+    enum class Kind { Registered, Ref, Value } kind = Kind::Registered;
+    const SourceRegistration* reg = nullptr;
+    Eval nav;          // Registered: navigation after the source
+    Eval ev;           // Ref / Value: the expression
+    std::string text;  // $path text and messages
+};
+
+Value source_value(Exec& x, const SourceBinding& b) {
+    if (b.kind == SourceBinding::Kind::Registered) {
+        Value root = b.reg->getter();
+        x.note_source_type(b.reg->name, root);
+        if (!b.nav) return root;
+        x.current = root;
+        x.current_path = nullptr;
+        return b.nav(x);
+    }
+    x.current = Value::null();
+    x.current_path = nullptr;
+    Value v = b.ev(x);
+    return b.kind == SourceBinding::Kind::Ref ? v : x.live(std::move(v));
+}
+
 class SourceStream final : public Stream {
 public:
-    SourceStream(Exec& x, const SourceRegistration* reg, Eval nav, std::string text, bool is_ref, Eval ref_eval)
-        : x_(x), reg_(reg), nav_(std::move(nav)), text_(std::move(text)), is_ref_(is_ref), ref_(std::move(ref_eval)) {}
+    SourceStream(Exec& x, SourceBinding b) : x_(x), b_(std::move(b)) {}
 
     bool next(Item& out) override {
         if (!started_) {
             started_ = true;
-            if (is_ref_) {
-                x_.current = Value::null();
-                Value v = ref_(x_);
-                if (v.is_error()) return false;  // diagnostic already recorded
-                inner_ = std::make_unique<ExpandStream>(x_, v, nullptr, true);
-            } else if (!reg_) {
-                // A host function as the source.
-                x_.current = Value::null();
-                x_.current_path = nullptr;
-                Value v = x_.live(ref_(x_));
-                if (v.is_error())
-                    throw RqlException(v.error_code(), "source " + text_ + "(...) failed: " +
-                                                           (v.error_detail().empty() ? v.error_code() : v.error_detail()));
-                inner_ = std::make_unique<ExpandStream>(x_, v, x_.track_paths ? path_text(nullptr, text_ + "(\xE2\x80\xA6)") : nullptr, true);
-            } else {
-                Value root = reg_->getter();
-                x_.note_source_type(reg_->name, root);
-                Value value = root;
-                if (nav_) {
-                    x_.current = root;
-                    x_.current_path = nullptr;
-                    value = nav_(x_);
-                }
-                if (value.is_error())
-                    throw RqlException(value.error_code(), "source '" + text_ + "' failed: " +
-                                                               (value.error_detail().empty() ? value.error_code() : value.error_detail()));
-                if (value.is_missing()) return false;
-                inner_ = std::make_unique<ExpandStream>(x_, value, x_.track_paths ? path_text(nullptr, text_) : nullptr, true);
+            Value v = source_value(x_, b_);
+            const bool ref = b_.kind == SourceBinding::Kind::Ref;
+            if (v.is_error()) {
+                if (ref) return false;  // diagnostic already recorded
+                throw RqlException(v.error_code(), "source '" + b_.text + "' failed: " + (v.error_detail().empty() ? v.error_code() : v.error_detail()));
             }
+            if (v.is_missing()) return false;
+            inner_ = std::make_unique<ExpandStream>(x_, v, x_.track_paths && !ref ? path_text(nullptr, b_.text) : nullptr, true);
         }
         return inner_ && inner_->next(out);
     }
 
 private:
     Exec& x_;
-    const SourceRegistration* reg_;
-    Eval nav_;
-    std::string text_;
-    bool is_ref_;
-    Eval ref_;
+    SourceBinding b_;
     bool started_ = false;
     StreamPtr inner_;
+};
+
+/// range(start, end[, step]) as a source: lazy, every number counts against maxVisited (spec §2).
+class RangeStream final : public Stream {
+public:
+    RangeStream(Exec& x, std::vector<Eval> args) : x_(x), args_(std::move(args)) {}
+
+    bool next(Item& out) override {
+        if (!started_) {
+            started_ = true;
+            x_.current = Value::null();
+            x_.current_path = nullptr;
+            Value error;
+            const Value a = args_[0](x_);
+            const Value b = args_[1](x_);
+            const Value c = args_.size() > 2 ? args_[2](x_) : Value::number(1);
+            if (!range_of(a, b, c, start_, step_, count_, error))
+                throw RqlException(error.error_code(), "source range(\xE2\x80\xA6) failed: " + (error.error_detail().empty() ? error.error_code() : error.error_detail()));
+            if (x_.track_paths) base_ = path_text(nullptr, "range(\xE2\x80\xA6)");
+        }
+        if (k_ >= count_) return false;
+        x_.visit();
+        out = Item{Value::number(range_at(start_, step_, k_)), base_ ? path_at(base_, k_) : nullptr, -1};
+        ++k_;
+        return true;
+    }
+
+private:
+    Exec& x_;
+    std::vector<Eval> args_;
+    bool started_ = false;
+    double start_ = 0, step_ = 1;
+    int64_t count_ = 0, k_ = 0;
+    PathPtr base_;
 };
 
 class WhereStream final : public Stream {
@@ -788,12 +821,22 @@ private:
 
 // ------------------------------------------------------------------ building
 
-StreamPtr compile_source(Exec& x, Compiler& c, const Expr& src) {
-    auto source_names = [&]() {
-        std::vector<std::string> n;
-        for (auto& s : x.engine.sources()) n.push_back(s.name);
-        return n;
-    };
+namespace {
+
+/// The core source function range(start, end[, step]) (spec §2), unless the host registered a function of that name.
+bool is_range(Exec& x, const Expr& e) {
+    std::string fn;
+    return e.kind == ExprKind::Call && !e.on && iequals(e.name, "range") && !extension_function(x, e, fn);
+}
+
+std::vector<std::string> source_names(Exec& x) {
+    std::vector<std::string> n;
+    for (auto& s : x.engine.sources()) n.push_back(s.name);
+    return n;
+}
+
+SourceBinding bind_source(Exec& x, Compiler& c, const Expr& src) {
+    SourceBinding b;
     if (src.kind == ExprKind::Path && !src.on && !src.segments.empty() && src.segments[0].kind == SegmentKind::Member) {
         size_t prefix = 0;
         while (prefix < src.segments.size() && src.segments[prefix].kind == SegmentKind::Member) ++prefix;
@@ -805,33 +848,112 @@ StreamPtr compile_source(Exec& x, Compiler& c, const Expr& src) {
             std::vector<Segment> rest(src.segments.begin() + static_cast<std::ptrdiff_t>(len), src.segments.end());
             std::string rest_text;
             for (auto& s : rest) rest_text += s.kind == SegmentKind::Member ? "." + s.name : s.to_string();
-            Eval nav;
-            if (!rest.empty()) nav = c.compile(*plan::path(rest));
-            return std::make_unique<SourceStream>(x, reg, nav, reg->name + rest_text, false, Eval());
+            b.reg = reg;
+            if (!rest.empty()) b.nav = c.compile(*plan::path(rest));
+            b.text = reg->name + rest_text;
+            return b;
         }
         const std::string& head = src.segments[0].name;
-        auto names = source_names();
+        auto names = source_names(x);
         auto close = suggest_closest(head, names, 3);
         throw RqlException("unknown-source", "unknown source '" + head + "'",
                            (close.empty() ? std::string() : "did you mean " + join(close, " / ") + "? ") + "sources: " + join(names, " "));
     }
     if (src.kind == ExprKind::Call && !src.on && iequals(src.name, "ref")) {
-        Eval ev = c.compile(src);
-        return std::make_unique<SourceStream>(x, nullptr, Eval(), "", true, ev);
+        b.kind = SourceBinding::Kind::Ref;
+        b.ev = c.compile(src);
+        b.text = "ref(\xE2\x80\xA6)";
+        return b;
     }
     // A host extension function may produce the input too (spec §2).
     std::string fn_name;
     if (extension_function(x, src, fn_name)) {
-        Eval ev = c.compile(src);
-        return std::make_unique<SourceStream>(x, nullptr, Eval(), fn_name, false, ev);
+        b.kind = SourceBinding::Kind::Value;
+        b.ev = c.compile(src);
+        b.text = fn_name + "(\xE2\x80\xA6)";
+        return b;
+    }
+    // A list literal streams its elements, evaluated with no current item (spec §2).
+    if (src.kind == ExprKind::List) {
+        // An error element fails the query; an element that reads nothing (a bare path) is dropped like null.
+        b.kind = SourceBinding::Kind::Value;
+        Eval list = c.compile(src);
+        b.ev = [list](Exec& ex) -> Value {
+            Value v = list(ex);
+            if (!v.is_list()) return v;
+            std::vector<Value> kept;
+            for (size_t i = 0; i < v.list().size(); ++i) {
+                Value e = v.list().at(i);
+                if (e.is_error()) return e;
+                if (!e.is_absent()) kept.push_back(std::move(e));
+            }
+            return Value::list_of(std::move(kept));
+        };
+        b.text = "[\xE2\x80\xA6]";
+        return b;
     }
     std::vector<std::string> fns;
     for (auto& kv : x.engine.functions()) fns.push_back(kv.first);
     const auto& sources = x.engine.sources();
     throw RqlException("unknown-source",
                        "query must start with a source name" + (sources.empty() ? std::string() : " (e.g. " + sources.front().name + ")") +
-                           ", ref(\"Type#id\") or a host function",
-                       "sources: " + join(source_names(), " ") + (fns.empty() ? std::string() : "; functions: " + join(fns, " ")));
+                           ", ref(\"Type#id\"), range(\xE2\x80\xA6), a list or a host function",
+                       "sources: " + join(source_names(x), " ") + (fns.empty() ? std::string() : "; functions: " + join(fns, " ")));
+}
+
+}  // namespace
+
+StreamPtr compile_source(Exec& x, Compiler& c, const Expr& src) {
+    if (is_range(x, src)) {
+        if (src.args.size() < 2 || src.args.size() > 3)
+            throw RqlException("arity", "'range' takes 2-3 argument(s), got " + std::to_string(src.args.size()), "example: range(0, 10) or range(10, 0, -2)");
+        std::vector<Eval> args;
+        for (auto& a : src.args) args.push_back(c.compile(*a));
+        return std::make_unique<RangeStream>(x, std::move(args));
+    }
+    return std::make_unique<SourceStream>(x, bind_source(x, c, src));
+}
+
+/// The receiver of a source-qualified call (spec §8): the source expression evaluated once, which must be one object.
+Value call_receiver(Exec& x, Compiler& c, const Stage& s) {
+    const Expr& on = *s.on;
+    const std::string ell = "\xE2\x80\xA6";
+    if (is_range(x, on))
+        throw RqlException("invalid-plan", "call range(" + ell + ")." + s.method + ": range() gives numbers, not an object to call " + s.method + " on",
+                           "stream the numbers into a source's method instead: range(" + ell + ") | call <source>." + s.method + "(" + ell + " $ " + ell + ")");
+    SourceBinding b;
+    try {
+        b = bind_source(x, c, on);
+    } catch (const RqlException& ex) {
+        if (ex.code() != "unknown-source") throw;
+        const std::string text = path_text(on);
+        if (text.empty() || on.segments[0].kind != SegmentKind::Member)
+            throw RqlException("unknown-source", "call " + ell + "." + s.method + ": the call target must be a source, ref(" + ell + ") or a host function",
+                               "a qualified call runs a method of one source object (sources: " + join(source_names(x), " ") + ")");
+        throw RqlException("unknown-source", "call " + text + "." + s.method + ": '" + on.segments[0].name + "' is not a source",
+                           "a qualified call runs a method of a source (sources: " + join(source_names(x), " ") +
+                               "); to call a method of each item's member, get it first: " + ell + " | get " + text + " | call " + s.method + "(" + ell + ")");
+    }
+    const std::string& label = b.text;
+    const std::string per_item = ell + " | call " + label + "." + s.method + "(" + ell + ") runs the method of one object once per stream item";
+    Value v = source_value(x, b);
+    if (v.is_error())
+        throw RqlException(v.error_code(), "call target " + label + " failed: " + (v.error_detail().empty() ? v.error_code() : v.error_detail()) +
+                                                "; nothing was called");
+    v = x.live(std::move(v));
+    if (v.is_null() || v.is_absent())
+        throw RqlException("invalid-plan", "call target " + label + " is null: there is no object to call " + s.method + " on; nothing was called");
+    if (v.is_list() || v.is_map()) {
+        const size_t n = v.is_list() ? v.list().size() : v.map().size();
+        throw RqlException("invalid-plan",
+                           "call target " + label + " is a " + (v.is_list() ? "list" : "map") + " of " + std::to_string(n) + " item(s), not one object; nothing was called",
+                           "to call " + s.method + " on each of them: " + label + " | call " + s.method + "(" + ell + "); " + per_item);
+    }
+    // A writes-through struct (a handle to shared state, spec §13) is a receiver like an object.
+    const bool handle = v.is_struct() && x.view(v.type()).writes_through();
+    if (!v.is_object() && !handle)
+        throw RqlException("invalid-plan", "call target " + label + " is a " + type_name_of(v) + " value, not an object with identity; nothing was called", per_item);
+    return v;
 }
 
 StreamPtr apply_stage(Exec& x, Compiler& c, StreamPtr in, const Stage& st) {
@@ -1020,6 +1142,20 @@ std::vector<const TypeDescriptor*> reachable_types(Exec& x, std::vector<std::pai
     return types;
 }
 
+/// A member missing on group-by rows: aggregate the group's items (spec §5). The example names the rows' own key columns
+/// (key, or the named keys such as mat), and a missing key column is not offered as a member to aggregate.
+std::string group_row_hint(const std::string& name, const std::vector<std::string>& columns) {
+    const std::string ell = "\xE2\x80\xA6";
+    std::vector<std::string> keys;
+    for (auto& c : columns)
+        if (!iequals(c, "count")) keys.push_back(c);
+    const std::string key_text = keys.empty() ? std::string("key") : join(keys, ", ");
+    const bool member = !iequals(name, "key");
+    return "group-by rows have their key column(s) (" + key_text + "), count and the group's items: aggregate per group with items, e.g. select " +
+           key_text + ", count, avg = items.avg(" + (member ? name : ell) + ") (also items.sum(" + ell + "), items.min(" + ell + "), items.max(" + ell +
+           "), items.count(" + ell + "), items.first()" + (member ? "." + name : std::string()) + ")";
+}
+
 /// reachable_types without roots, computed once per query.
 const std::vector<const TypeDescriptor*>& known_types(Exec& x) {
     if (!x.reachable_cache) x.reachable_cache = reachable_types(x, nullptr);
@@ -1106,6 +1242,13 @@ std::vector<Diagnostic> add_warnings(Exec& x, QueryResult& r, bool only_general)
                 const TypeView view = x.view(t);
                 for (auto& m : view.members()) known.push_back(m.name);
             }
+            // Adapters' target types count as known too (their virtual members included), reachable or not (spec §8):
+            // hosts add only names of their own through is_known_member.
+            for (const TypeAdapter* a : x.engine.adapters())
+                if (a->target) {
+                    const TypeView view = x.view(a->target);
+                    for (auto& m : view.members()) known.push_back(m.name);
+                }
             for (auto& st : x.plan.stages)
                 if (st.kind == StageKind::Select || st.kind == StageKind::GroupBy)
                     for (auto& f : st.fields) {
@@ -1146,8 +1289,7 @@ std::vector<Diagnostic> add_warnings(Exec& x, QueryResult& r, bool only_general)
             r.diagnostics.push_back(Diagnostic::warning(
                 "unknown-member", "no column '" + site.name + "' in the projected rows (columns: " + join(site.row_columns, ", ") + ")",
                 site.group_rows
-                    ? "group-by rows have their key column(s), count and the group's items: aggregate per group with items, e.g. select key, "
-                      "count, avg = items.avg(" + site.name + ") (also items.sum(\xE2\x80\xA6), items.min(\xE2\x80\xA6), items.max(\xE2\x80\xA6), items.count(\xE2\x80\xA6), items.first()." + site.name + ")"
+                    ? group_row_hint(site.name, site.row_columns)
                     : std::string("select produces rows with only the listed columns; to navigate into objects select the full path (select "
                                   "Path.Member) or put `get Path` before the select")));
             continue;
@@ -1160,9 +1302,10 @@ std::vector<Diagnostic> add_warnings(Exec& x, QueryResult& r, bool only_general)
             for (auto& m : view.members())
                 if (std::find(candidates.begin(), candidates.end(), m.name) == candidates.end()) candidates.push_back(m.name);
         }
-        auto close = suggest_closest(site.name, candidates, 3);
+        auto nested = nested_members(x, site.miss_types);
+        auto close = suggest_members(site.name, candidates, nested, 3);
         auto declaring = types_declaring(x, site.name, site.miss_types);
-        std::string hint = member_hint(site.name, candidates, declaring);
+        std::string hint = member_hint(site.name, candidates, declaring, nested);
         if (close.empty() && declaring.empty() && !site.name.empty() && site.name[0] >= 'A' && site.name[0] <= 'Z')
             hint += (hint.empty() ? "" : "; ") + std::string("if '") + site.name + "' is a value, quote it: \"" + site.name + "\"";
         r.diagnostics.push_back(Diagnostic::warning("unknown-member", "no member '" + site.name + "' on " + join(type_names, ", "), hint));
@@ -1230,7 +1373,10 @@ QueryResult run_core(Exec& x) {
             return r;
         }
         case StageKind::Set: return run_set(x, c, enc, *stream, *terminal);
-        case StageKind::Call: return run_call(x, c, enc, *stream, *terminal);
+        case StageKind::Call: {
+            if (!terminal->on) return run_call(x, c, enc, *stream, *terminal);
+            return run_call(x, c, enc, *stream, *terminal, [&] { return call_receiver(x, c, *terminal); });
+        }
         default: throw RqlException("unsupported", "stage '" + terminal->op + "' is not supported");
     }
 }
