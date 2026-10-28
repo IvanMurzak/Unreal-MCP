@@ -208,7 +208,9 @@ writable).
   result, not an error; `Node` is the node's `$ref`) and `call AddFunction(name)` adds a function graph.
 - `UEdGraph`: `Nodes`, `Kind` (`EventGraph`, `Function`, `Macro`, `Delegate`), `Blueprint`; node calls (each returns the
   node; `X` / `Y` place it, default: the editor's next free spot): `AddCallFunction("PrintString" |
-  "KismetMathLibrary.Add_IntInt" | a function of the Blueprint)`, `AddVariableGet(name)`, `AddVariableSet(name)`,
+  "KismetMathLibrary.Add_IntInt" | a function of the Blueprint; UE 4 float names such as `Add_FloatFloat` find the double
+  functions)`, `AddVariableGet(name)`, `AddVariableSet(name)` (another class's variable as `"BP_Player.Score"`: the node
+  takes the object on its Target pin), `AddInputKey("SpaceBar")` (a key event: `Pressed` / `Released`),
   `AddEvent("BeginPlay")` (overridable events of the parent class; enables the editor's placeholder node when there is
   one), `AddCustomEvent(name)`, `AddCast(class)`, `AddNode("Branch" | "Sequence" | "Self" | a standard macro such as
   "ForLoop", "ForEachLoop", "DoOnce", "Gate")`.
