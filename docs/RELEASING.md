@@ -472,23 +472,26 @@ MSVC-only or clang-only compile error can slip through a PR; the release matrix 
 > runs one UE build per machine anyway, and a second runner would only grab a leg and wait on
 > the lock while the other machine sits idle. The host game module is rebuilt per
 > engine on each runner-local host. The
-> PR smoke job waits for the plugin job, because both use UE 5.8 `RunUAT` on the
-> same machine and Unreal's AutomationTool permits only one same-engine instance
-> at a time. Every self-hosted UE job now also holds the
-> [machine-wide UE lock](#machine-wide-ue-lock), so only ONE UE job runs on the
-> machine at a time and extra runners no longer shorten the UE queue. The
-> registration steps below are retained for re-provisioning the runner.
+> PR smoke job waits for the plugin job so a broken plugin build fails once, in the
+> plugin leg. Every self-hosted UE job also holds the
+> [machine-wide UE lock](#machine-wide-ue-lock), so only ONE UE job runs on a
+> machine at a time. **One runner per machine is a single point of failure:** if it
+> wedges (cancelling a running job can do that: never cancel one by hand), every job
+> only that machine can run (Windows: UE 5.5/5.6, smoke, `build-plugin-zip`) waits
+> until the runner is fixed by hand. The registration steps below are retained for
+> re-provisioning the runner.
 
 The host-project `Build.bat` calls pass a per-job `-log=$RUNNER_TEMP\...` path.
-Do not remove that when tuning the workflow: parallel runners share the same
-Windows service account, and UBT's default
+Do not remove that when tuning the workflow: runners (and other repos' jobs) share
+the same Windows service account, and UBT's default
 `%LOCALAPPDATA%\UnrealBuildTool\Log.txt` can fail during log rotation when
 multiple engines build host targets at once.
 
 ### Machine-wide UE lock
 
-An autoscaler on the self-hosted Unreal machine registers several ephemeral
-`runner-manager-*` runners on that ONE machine. They share one UE install per engine
+runner-manager registers ephemeral `runner-manager-*` runners on each Unreal
+machine: one for Unreal-MCP, plus runners of other repos (the Unreal-AI-* extensions)
+and local runs that use the same engines. They share one UE install per engine
 (AutomationTool refuses a second instance: `A conflicting instance of AutomationTool
 is already running`) and, whenever a runner falls back to `UNREAL_HOST_PROJECT`, one
 host `Plugins\UnrealMCP` junction. A workflow `concurrency:` group cannot serialize
@@ -524,9 +527,9 @@ The lock spans every engine version, so it also serializes the release matrix
 legs on one machine, which `max-parallel` would otherwise run in parallel. It is the
 authoritative serialization, and it does not change runner labels.
 
-Waiters retry every 5 s, so the lock is **not first-come-first-served**: under
-heavy PR or chain traffic a job can lose repeatedly and fail when its bounded wait
-expires. Avoid dispatching a release while many Unreal PR runs are queued.
+Waiters retry every 5 s, so the lock is **not first-come-first-served**. With one
+Unreal-MCP runner per machine, Unreal-MCP jobs queue on GitHub rather than on the
+lock; a wait now comes only from another repo's UE job or a local run on that machine.
 
 ### Never red-by-absence
 
@@ -572,9 +575,10 @@ self-hosted`. The Windows runner, which also serves the Windows-only jobs:
 2. Give the runner the labels `self-hosted`, `windows`, and one
    **`unreal-<major>-<minor>`** label per installed engine (`unreal-5-5` … `unreal-5-8`).
 3. Prepare a host `.uproject` under that runner root at
-   `host\UnrealTestProject\UnrealTestProject.uproject`. For multiple runners,
-   copy the host project into each runner root so parallel jobs do not share the
-   same `Plugins\UnrealMCP` junction.
+   `host\UnrealTestProject\UnrealTestProject.uproject` (one per runner root, so two
+   runners never share one `Plugins\UnrealMCP` junction).
+   Keep the Unreal-MCP policy at `runner-manager repo set-capacity IvanMurzak/Unreal-MCP
+   --max-capacity 1` (see *Which OS*).
 4. Set the repository variables (below).
 5. Open a throwaway PR (or re-run an existing one) and confirm the `plugin` leg
    now runs and is green.
