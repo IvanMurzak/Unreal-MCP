@@ -32,14 +32,21 @@ The extension adds its feature to the editor's RQL data layer (`rql-query` / `rq
 | Kind | Names |
 | --- | --- |
 | Sources | `inputActions`, `inputContexts`, `enhancedInput` |
-| Operations (`call`) | `CreateAction`, `CreateContext`, `AddMapping`, `RemoveMapping` |
+| Operations (`call`) | `CreateAction`, `CreateContext`, `AddMapping`, `RemoveMapping`, `AddActionEvent`, `AddMappingContextOnBeginPlay` |
 | Members | `InputMappingContext.KeyMappings` |
 
 ```
 inputContexts | select Name KeyMappings
 enhancedInput | call CreateAction("/Game/Input/IA_Jump", "Boolean")
 enhancedInput | call AddMapping("/Game/Input/IMC_Default", "/Game/Input/IA_Jump", "SpaceBar")
+enhancedInput | call AddMappingContextOnBeginPlay("/Game/BP_Hero", "/Game/Input/IMC_Default")
+enhancedInput | call AddActionEvent("/Game/BP_Hero", "/Game/Input/IA_Jump")      wire its Triggered pin with ref(node) | call Connect(...)
 ```
+
+`AddActionEvent` places the Blueprint editor's Enhanced Input action event (Triggered, Started, Ongoing, Canceled,
+Completed, ActionValue) in an actor Blueprint's event graph; `AddMappingContextOnBeginPlay` adds Event BeginPlay -> Get
+Player Controller -> Enhanced Input Local Player Subsystem -> Add Mapping Context ahead of what BeginPlay already runs.
+The event node comes from the EnhancedInput plugin's `InputBlueprintNodes` module, a dependency of this extension only.
 
 ## Releases and development
 

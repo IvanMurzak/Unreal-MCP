@@ -3,6 +3,7 @@
 
 #include "UnrealMcpRqlSession.h"
 #include "UnrealMcpRqlSources.h"
+#include "UnrealMcpRqlTools.h"
 #include "UnrealMcpRqlUtil.h"
 #include "Tools/UnrealMcpObjectRef.h"
 
@@ -427,6 +428,27 @@ namespace UnrealMcpRqlBlueprintsLocal
 		return nullptr;
 	}
 
+	/**
+	 * Where Enhanced Input graph nodes come from, when @p Name looks like them (an "EnhancedInputAction" node, an IA_ action
+	 * event, AddMappingContext): the Enhanced Input extension's operations, or how to install / enable it. Empty otherwise.
+	 */
+	FString EnhancedInputHint(const FString& Name)
+	{
+		const FString Compact = CompactName(Name);
+		const bool bEnhancedInput = Compact.Contains(TEXT("EnhancedInput")) || Compact.Contains(TEXT("InputAction"))
+			|| Compact.Contains(TEXT("MappingContext")) || Compact.StartsWith(TEXT("IA_")) || Compact.StartsWith(TEXT("IMC_"));
+		if (!bEnhancedInput)
+			return FString();
+		const IUnrealMcpRqlModule* Extension = UnrealMcpRqlTools::FindModule(TEXT("com.ivanmurzak.unreal-ai-enhanced-input"));
+		if (Extension && UnrealMcpRqlTools::IsModuleEnabled(*Extension))
+			return TEXT(". Enhanced Input nodes come from the Enhanced Input extension: enhancedInput | call AddActionEvent(blueprint, action) "
+				"(the action event: Triggered / Started / Completed pins) and AddMappingContextOnBeginPlay(blueprint, context)");
+		return TEXT(". Enhanced Input nodes (action events, Add Mapping Context) come with the Enhanced Input extension, which is not "
+			"installed or not enabled: install it (unreal-mcp-cli install-extension com.ivanmurzak.unreal-ai-enhanced-input) or enable it in "
+			"the Extensions window, then use enhancedInput | call AddActionEvent / AddMappingContextOnBeginPlay. Without it, key events "
+			"work: EventGraph | call AddInputKey(\"SpaceBar\")");
+	}
+
 	/** "PrintString", "KismetSystemLibrary.PrintString", "/Script/Engine.KismetSystemLibrary:PrintString" or a function of the Blueprint. */
 	UFunction* ResolveFunction(UBlueprint* Blueprint, const FString& Spec)
 	{
@@ -450,8 +472,8 @@ namespace UnrealMcpRqlBlueprintsLocal
 			if (UFunction* Function = FindCallable(FUnrealMcpObjectRef::ResolveClass(Library), Text))
 				return Function;
 		}
-		Throw(FString::Printf(TEXT("no Blueprint-callable function '%s' on %s or the common libraries (name the class: \"KismetMathLibrary.Add_IntInt\")"),
-			*Text, *Blueprint->GetName()));
+		Throw(FString::Printf(TEXT("no Blueprint-callable function '%s' on %s or the common libraries (name the class: \"KismetMathLibrary.Add_IntInt\")%s"),
+			*Text, *Blueprint->GetName(), *EnhancedInputHint(Text)));
 	}
 
 	/** A variable of @p Class the graphs can see: by name, else by its authored name in any case. */
@@ -796,8 +818,8 @@ namespace UnrealMcpRqlBlueprintsLocal
 					}
 				}
 				if (!Event)
-					Throw(FString::Printf(TEXT("'%s' is not an overridable event of %s (e.g. BeginPlay, Tick, ActorBeginOverlap); for your own event use AddCustomEvent"),
-						*Name, Blueprint->ParentClass ? *Blueprint->ParentClass->GetName() : TEXT("the parent class")));
+					Throw(FString::Printf(TEXT("'%s' is not an overridable event of %s (e.g. BeginPlay, Tick, ActorBeginOverlap); for your own event use AddCustomEvent%s"),
+						*Name, Blueprint->ParentClass ? *Blueprint->ParentClass->GetName() : TEXT("the parent class"), *EnhancedInputHint(Name)));
 				// An actor Blueprint starts with disabled placeholder nodes for the common events: enabling one is adding it.
 				UK2Node_Event* Node = FBlueprintEditorUtils::FindOverrideForFunction(Blueprint, Event->GetOwnerClass(), Event->GetFName());
 				if (Node && Node->IsNodeEnabled() && !Node->IsAutomaticallyPlacedGhostNode())
@@ -885,8 +907,8 @@ namespace UnrealMcpRqlBlueprintsLocal
 					return Types->WrapObject(CreateNode<UK2Node_Self>(Target, At, [](UK2Node_Self*) {}));
 				if (UEdGraph* Macro = FindMacro(Kind))
 					return Types->WrapObject(CreateNode<UK2Node_MacroInstance>(Target, At, [Macro](UK2Node_MacroInstance* Node) { Node->SetMacroGraph(Macro); }));
-				Throw(FString::Printf(TEXT("unknown node kind '%s' (Branch, Sequence, Self, or a standard macro: %s); calls: AddCallFunction"),
-					*TextArg(Args[0]), *MacroNames()));
+				Throw(FString::Printf(TEXT("unknown node kind '%s' (Branch, Sequence, Self, or a standard macro: %s); calls: AddCallFunction%s"),
+					*TextArg(Args[0]), *MacroNames(), *EnhancedInputHint(TextArg(Args[0]))));
 			}, "add a flow node: Branch, Sequence, Self, or a standard macro (ForLoop, ForEachLoop, WhileLoop, DoOnce, Gate, FlipFlop, IsValid, ...); returns the node"));
 	}
 

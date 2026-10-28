@@ -31,6 +31,13 @@ public class UnrealAIEnhancedInput : ModuleRules
 			"EnhancedInput",
 			// FKey: the Key argument of AddMapping / RemoveMapping.
 			"InputCore",
+			// Blueprint graph authoring (AddActionEvent / AddMappingContextOnBeginPlay): K2 nodes and the schema
+			// (BlueprintGraph), FBlueprintEditorUtils (UnrealEd), and the "EnhancedInputAction" event node, which lives in the
+			// EnhancedInput plugin's UncookedOnly InputBlueprintNodes module (this extension is editor-only). Kept here, not in
+			// Unreal-MCP's core: extra engine dependencies belong to the extension that needs them.
+			"BlueprintGraph",
+			"UnrealEd",
+			"InputBlueprintNodes",
 		});
 	}
 }

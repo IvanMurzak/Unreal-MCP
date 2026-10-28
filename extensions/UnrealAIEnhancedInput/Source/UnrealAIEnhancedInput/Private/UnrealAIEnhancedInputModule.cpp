@@ -52,7 +52,7 @@ public:
 		Context.AddAssetSource(TEXT("inputContexts"), TEXT("Input Mapping Context assets (InputMappingContext) of the project, at most 200"),
 			UInputMappingContext::StaticClass());
 		Context.AddApiSource(TEXT("enhancedInput"),
-			TEXT("Enhanced Input operations: call CreateAction(path, valueType) / CreateContext(path) / AddMapping(context, action, key) / RemoveMapping(context, action, key)"),
+			TEXT("Enhanced Input operations: call CreateAction(path, valueType) / CreateContext(path) / AddMapping(context, action, key) / RemoveMapping(context, action, key) / AddActionEvent(blueprint, action) / AddMappingContextOnBeginPlay(blueprint, context, priority)"),
 			UUnrealAIEnhancedInputRqlApi::StaticClass(), TEXT("EnhancedInputOperations"));
 		Context.AddJsonMember(UInputMappingContext::StaticClass(), TEXT("KeyMappings"), TEXT("the context's key mappings: Action, Key"), &KeyMappingsJson);
 #if !UE_VERSION_OLDER_THAN(5, 7, 0)
@@ -77,7 +77,22 @@ unreal.asset("/Game/Input/IA_Move") | set ValueType = "Axis2D"
 ```
 
 Key names are Unreal FKey names (SpaceBar, W, LeftMouseButton, Gamepad_LeftX, Gamepad_FaceButton_Bottom). Created assets
-are unsaved: `editor | call SaveAll()`.)MD"));
+are unsaved: `editor | call SaveAll()`.
+
+Blueprint input (a Pawn / Character / PlayerController Blueprint): the context must be added at BeginPlay, then each action
+gets one event node whose exec pins (Triggered, Started, Ongoing, Canceled, Completed) and ActionValue are wired with the
+core graph calls. The jump example:
+
+```
+enhancedInput | call AddMappingContextOnBeginPlay("/Game/BP_Hero", "/Game/Input/IMC_Default")      once per Blueprint (Priority optional)
+enhancedInput | call AddActionEvent("/Game/BP_Hero", "/Game/Input/IA_Jump")                       returns K2Node_EnhancedInputAction#N
+unreal.asset("/Game/BP_Hero").EventGraph | call AddCallFunction("Jump")                             returns K2Node_CallFunction#M
+ref("K2Node_EnhancedInputAction#N") | call Connect("Triggered", ref("K2Node_CallFunction#M"), "execute")
+unreal.asset("/Game/BP_Hero") | call Compile()
+```
+
+The pawn must be the one the player controls (the GameMode's Default Pawn Class, or Auto Possess Player = Player 0 on a
+placed one). The legacy key events (`EventGraph | call AddInputKey("SpaceBar")`) need none of this.)MD"));
 	}
 };
 

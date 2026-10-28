@@ -9,6 +9,7 @@
 
 #include "UnrealAIEnhancedInputRqlApi.generated.h"
 
+class UEdGraphNode;
 class UInputAction;
 class UInputMappingContext;
 
@@ -39,4 +40,12 @@ public:
 	/** remove every mapping of a key to an action from a mapping context; returns how many were removed */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Enhanced Input", meta = (BlueprintInternalUseOnly = "true"))
 	int32 RemoveMapping(UInputMappingContext* Context, UInputAction* Action, const FString& Key);
+
+	/** add an Enhanced Input action event for Action to an actor Blueprint's event graph (the Blueprint, its path, or unreal.asset(path).EventGraph), as the Blueprint editor's "EnhancedInputAction IA_Jump" node: exec pins Triggered, Started, Ongoing, Canceled, Completed and the ActionValue; wire it with ref(node) | call Connect("Triggered", ref(other), "execute"); fires on the pawn the player controls once its mapping context is added (AddMappingContextOnBeginPlay); returns the node */
+	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Enhanced Input", meta = (BlueprintInternalUseOnly = "true"))
+	UEdGraphNode* AddActionEvent(UObject* Graph, UInputAction* Action);
+
+	/** make an actor Blueprint (or its path, or its event graph) add a mapping context when play starts: Event BeginPlay -> Get Player Controller (0) -> Enhanced Input Local Player Subsystem -> Add Mapping Context (Context, Priority), placed before what BeginPlay already runs; without it no action event fires; returns the Add Mapping Context node */
+	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Enhanced Input", meta = (BlueprintInternalUseOnly = "true"))
+	UEdGraphNode* AddMappingContextOnBeginPlay(UObject* Blueprint, UInputMappingContext* Context, int32 Priority = 0);
 };
