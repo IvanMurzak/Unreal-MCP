@@ -65,10 +65,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        os: [windows, macos]
         ue: ['5.7', '5.8']
-    # Any OS carrying the engine label (see test_pull_request.yml's plugin job).
+    # Deterministic: every engine on both Windows and macOS, pinned by the OS label (see
+    # release.yml's plugin job).
     runs-on:
       - self-hosted
+      - ${{ matrix.os }}
       - ${{ fromJSON('{"5.7":"unreal-5-7","5.8":"unreal-5-8"}')[matrix.ue] }}
     timeout-minutes: 180
     env:
@@ -98,7 +101,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Full extension suite failed' }
       - uses: actions/upload-artifact@v7
         with:
-          name: extension-suite-${{ matrix.ue }}
+          name: extension-suite-${{ matrix.ue }}-${{ matrix.os }}
           path: .artifacts/suite-result.json
           if-no-files-found: error
       - name: Release machine-wide UE lock

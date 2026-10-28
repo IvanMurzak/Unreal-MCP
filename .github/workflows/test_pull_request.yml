@@ -440,7 +440,6 @@ jobs:
     runs-on:
       - self-hosted
       - windows
-      - rm-autoscale-win-x64
       - ${{ fromJSON('{"5.5":"unreal-5-5","5.6":"unreal-5-6","5.7":"unreal-5-7","5.8":"unreal-5-8","5.9":"unreal-5-9"}')[matrix.ue] || format('unreal-{0}', matrix.ue) }}
     # A hang guard, not a budget — see the plugin job: expiry is a GitHub-side cancel.
     # 90 = the machine-wide UE lock's 60-min bounded wait + the original 30-min guard.

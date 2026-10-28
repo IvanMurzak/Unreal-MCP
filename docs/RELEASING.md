@@ -441,17 +441,19 @@ e.g. `unreal-5-8` for UE 5.8 — so a job only lands on a machine that has that 
 installed. A runner advertises one such label per installed engine. The release
 matrix validates UE 5.5/5.6/5.7/5.8.
 
-**Which OS.** The `plugin` jobs (`test_pull_request.yml`, `release.yml`) and
-`release_extensions.yml`'s `test` ask only for `self-hosted` + the engine label, so a
-Windows, macOS or Linux runner can take them. `.github/scripts/ue-env.ps1` resolves
+**Which OS.** The PR `plugin` job (`test_pull_request.yml`) asks only for `self-hosted`
++ the engine label, so a Windows, macOS or Linux runner can take a leg, whichever is
+free. The release workflows are deterministic instead: `release.yml`'s `plugin` runs
+every engine on Windows plus UE 5.7/5.8 on macOS, and `release_extensions.yml`'s `test`
+runs 5.7/5.8 on both, each leg pinned by its OS label (`windows`, `macos`).
+`.github/scripts/ue-env.ps1` resolves
 that runner's engine (`UE_ROOT_<major>_<minor>` in the runner's environment, else the
 Epic Launcher default: `C:\Program Files\Epic Games\UE_x.y` on Windows,
 `/Users/Shared/Epic Games/UE_x.y` on macOS; Linux has no default) and builds for the
 host platform (`Win64`, `Mac`, `Linux`). A runner needs PowerShell 7 (`pwsh`) on
 PATH. `connection-smoke` and `build-plugin-zip` (the Win64 Fab package) stay on the
-**Windows runner** (runner-manager selector `rm-autoscale-win-x64`). Because a 5.7/5.8
-leg may land on either OS, an MSVC-only or clang-only compile error shows up only on
-the OS that happened to take the leg.
+**Windows runner** (`windows` label). Because a PR 5.7/5.8 leg may land on either OS, an
+MSVC-only or clang-only compile error can slip through a PR; the release matrix catches it.
 
 > **Status (2026-06-11): the runner is LIVE.** Self-hosted Windows runners
 > (labels `self-hosted`, `Windows`, `X64`, `rm-autoscale-win-x64`, `unreal-5-x`) are registered against
@@ -564,7 +566,7 @@ self-hosted`. The Windows runner, which also serves the Windows-only jobs:
    self-hosted runner against `IvanMurzak/Unreal-MCP`:
    *Settings → Actions → Runners → New self-hosted runner* (Windows x64). Follow
    the `./config.cmd` steps GitHub shows.
-2. Give the runner the labels `self-hosted`, `windows`, `rm-autoscale-win-x64`, and one
+2. Give the runner the labels `self-hosted`, `windows`, and one
    **`unreal-<major>-<minor>`** label per installed engine (`unreal-5-5` … `unreal-5-8`).
 3. Prepare a host `.uproject` under that runner root at
    `host\UnrealTestProject\UnrealTestProject.uproject`. For multiple runners,

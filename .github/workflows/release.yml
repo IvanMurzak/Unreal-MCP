@@ -265,7 +265,7 @@ jobs:
   # real run otherwise, so a skipped plugin leg can never yield a green run that
   # published nothing. A dry run only warns. See docs/RELEASING.md.
   plugin:
-    name: plugin BuildPlugin + Automation (UE ${{ matrix.ue }})
+    name: plugin BuildPlugin + Automation (UE ${{ matrix.ue }}, ${{ matrix.os }})
     needs: [check-version]
     if: vars.UNREAL_RUNNER_READY == 'true'
     # Matrix covers the supported UE 5.5/5.6/5.7/5.8 set; the single self-hosted
@@ -277,16 +277,26 @@ jobs:
     # Engine-versioned runner label (unreal-5-8 for UE 5.8): the job only lands on a machine
     # that has this engine installed. Expressions have no replace(), hence the lookup; an
     # unmapped version yields e.g. `unreal-5.10`, which no runner carries (add it to the map).
-    # Any OS: a Windows, macOS or Linux runner carrying the engine label takes the leg, and
-    # .github/scripts/ue-env.ps1 resolves its own engine install.
+    # Deterministic OS coverage (unlike the PR legs, which take whichever OS is free): every engine
+    # on Windows (Win64, MSVC) and the engines the macOS runner has on macOS (Mac, clang), each leg
+    # pinned by its OS label. .github/scripts/ue-env.ps1 resolves that runner's engine install.
+    # max-parallel 4: the machine-wide UE lock serializes the UE work per machine anyway, so this
+    # only lets the two machines work at the same time.
     runs-on:
       - self-hosted
+      - ${{ matrix.os }}
       - ${{ fromJSON('{"5.5":"unreal-5-5","5.6":"unreal-5-6","5.7":"unreal-5-7","5.8":"unreal-5-8","5.9":"unreal-5-9"}')[matrix.ue] || format('unreal-{0}', matrix.ue) }}
     strategy:
       fail-fast: false
-      max-parallel: 2
+      max-parallel: 4
       matrix:
-        ue: ['5.5', '5.6', '5.7', '5.8']
+        include:
+          - { os: windows, ue: '5.5' }
+          - { os: windows, ue: '5.6' }
+          - { os: windows, ue: '5.7' }
+          - { os: windows, ue: '5.8' }
+          - { os: macos, ue: '5.7' }
+          - { os: macos, ue: '5.8' }
     env:
       HOST_UPROJECT: ${{ vars.UNREAL_HOST_PROJECT }}
     steps:
@@ -686,7 +696,7 @@ jobs:
     if: vars.UNREAL_RUNNER_READY == 'true'
     # Engine-versioned runner label for the engine UE_ROOT defaults to (UE 5.8). If
     # UNREAL_ENGINE_PATH ever points at another engine, change this label to match.
-    runs-on: [self-hosted, windows, rm-autoscale-win-x64, unreal-5-8]
+    runs-on: [self-hosted, windows, unreal-5-8]
     env:
       UE_ROOT: ${{ vars.UNREAL_ENGINE_PATH || 'C:\Program Files\Epic Games\UE_5.8' }}
     steps:

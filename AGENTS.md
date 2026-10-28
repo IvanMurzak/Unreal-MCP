@@ -112,8 +112,9 @@ handshake is independent of it. NuGet pins: see `bridge/AGENTS.md`.
 `test-cli` on Node 20 and 22 (`test_cli.yml`), and two UE jobs — `plugin BuildPlugin + Automation` and
 `connection + tool smoke` (matrix `ue`: plugin `['5.5', '5.6', '5.7', '5.8']` like `release.yml`, smoke
 `['5.8']`; `UE_ROOT` resolved per runner by `.github/scripts/ue-env.ps1`). UE jobs run on self-hosted
-runners that carry the engine's label (e.g. `unreal-5-8`): `plugin` on any OS (Windows, macOS, Linux),
-`connection-smoke` and release `build-plugin-zip` on Windows only. They are serialized by the machine-wide lock
+runners that carry the engine's label (e.g. `unreal-5-8`): PR `plugin` on any OS (Windows, macOS, Linux),
+release `plugin` / extension `test` on a fixed Windows + macOS matrix, `connection-smoke` and release
+`build-plugin-zip` on Windows only. They are serialized by the machine-wide lock
 `.github/scripts/ue-machine-lock.ps1` ([RELEASING](docs/RELEASING.md#machine-wide-ue-lock)), and are
 gated on `vars.UNREAL_RUNNER_READY` / `vars.UNREAL_SMOKE_READY == 'true'` and same-repo PRs — otherwise
 SKIPPED, never red. `release.yml` is `workflow_dispatch`-only (`dry_run` input; validates UE 5.5–5.8) and
