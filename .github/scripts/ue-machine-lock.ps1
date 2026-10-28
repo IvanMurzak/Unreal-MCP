@@ -76,6 +76,12 @@ if ([string]::IsNullOrWhiteSpace($LockPath)) {
     $LockPath = if ($IsWindows) { 'C:\ProgramData\UnrealMCP-ci\ue.lock' } else { '/var/tmp/UnrealMCP-ci/ue.lock' }
 }
 $LockPath = $LockPath.TrimEnd('\')
+# Windows: share Read only, so another holder asking for ReadWrite gets a sharing violation while
+# Read-LockOwner can still read who holds the lock. Elsewhere: share None, the only mode .NET backs
+# with an exclusive flock(). The error codes that mean "held": Windows 32 = ERROR_SHARING_VIOLATION,
+# 33 = ERROR_LOCK_VIOLATION; POSIX EWOULDBLOCK from flock(), 35 on macOS, 11 on Linux.
+$lockShare = if ($IsWindows) { [IO.FileShare]::Read } else { [IO.FileShare]::None }
+$heldCodes = if ($IsWindows) { @(32, 33) } elseif ($IsMacOS) { @(35) } else { @(11) }
 # The POSIX lock file cannot be read while it is held (a reader's shared flock() is refused), so
 # the owner is also written beside it.
 $ownerSidecar = "$LockPath.owner"
@@ -179,20 +185,13 @@ function Invoke-Hold {
         if (Test-Path -LiteralPath $releaseFile) { Write-HolderLog 'release requested before the lock was acquired; giving up'; return 5 }
         if (-not (Test-WatchAlive)) { Write-HolderLog "watched process $WatchPid exited before the lock was acquired; giving up"; return 4 }
         try {
-            # Windows: share Read only, so another holder asking for ReadWrite gets a sharing violation
-            # while Read-LockOwner can still read who holds the lock. Elsewhere: share None, the only
-            # mode .NET backs with an exclusive flock().
-            $share = if ($IsWindows) { [IO.FileShare]::Read } else { [IO.FileShare]::None }
-            $stream = [IO.FileStream]::new($LockPath, [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, $share)
+            $stream = [IO.FileStream]::new($LockPath, [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, $lockShare)
         }
         catch {
             $inner = Get-InnermostException $_.Exception
             $code = $inner.HResult -band 0xFFFF
-            # The lock is held: Windows 32 = ERROR_SHARING_VIOLATION, 33 = ERROR_LOCK_VIOLATION; POSIX
-            # EWOULDBLOCK from flock(), 35 on macOS, 11 on Linux. Anything else (access denied, bad
-            # path) will never clear by waiting, so fail at once.
-            $held = if ($IsWindows) { @(32, 33) } elseif ($IsMacOS) { @(35) } else { @(11) }
-            if (-not ($inner -is [IO.IOException]) -or $code -notin $held) {
+            # Anything but "held" (access denied, bad path) will never clear by waiting: fail at once.
+            if (-not ($inner -is [IO.IOException]) -or $code -notin $heldCodes) {
                 $msg = "cannot open $LockPath ($($inner.GetType().FullName)): $($inner.Message)"
                 Write-HolderLog $msg
                 Write-FileAtomic $failedFile $msg

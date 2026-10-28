@@ -194,18 +194,20 @@ namespace UnrealMcpRqlStructsLocal
 	}
 
 	/**
-	 * A double without the noise transform math leaves (-9.999999999999998, 7.8e-47): 9 significant digits, and 0 below
-	 * 1e-9. Not more: the arm64 (Mac) quaternion round trip of -46 degrees is -45.9999999942, noise in the 10th digit.
-	 * For display only; NaN and infinities pass through.
+	 * A double without the noise transform math leaves (-9.999999999999998, 7.8e-47): 12 significant digits, and 0 below
+	 * 1e-9. An angle is first snapped to 1e-6 degrees: the arm64 (Mac) quaternion round trip of -46 degrees is
+	 * -45.9999999942, noise that 12 digits keep. For display only; NaN and infinities pass through.
 	 */
-	double Tidy(double Value)
+	double Tidy(double Value, bool bDegrees)
 	{
 		if (!FMath::IsFinite(Value))
 			return Value;
+		if (bDegrees)
+			Value = FMath::RoundToDouble(Value * 1e6) / 1e6;
 		if (FMath::Abs(Value) < 1e-9)
 			return 0.0;
 		char Text[32];
-		std::snprintf(Text, sizeof(Text), "%.9g", Value);
+		std::snprintf(Text, sizeof(Text), "%.12g", Value);
 		double Parsed = Value;
 		return rql::parse_double(Text, Parsed) ? Parsed : Value;
 	}
@@ -219,7 +221,8 @@ namespace UnrealMcpRqlStructsLocal
 		{
 			if (Index > 0)
 				Out += ", ";
-			Out += rql::to_text(rql::Value::number(Spec.bSingle || Spec.Struct == TBaseStructure<FQuat>::Get() ? Parts[Index] : Tidy(Parts[Index]),
+			Out += rql::to_text(rql::Value::number(Spec.bSingle || Spec.Struct == TBaseStructure<FQuat>::Get() ? Parts[Index]
+				: Tidy(Parts[Index], Spec.Struct == TBaseStructure<FRotator>::Get()),
 				Spec.bSingle ? rql::builtin::single_type() : rql::builtin::double_type()));
 		}
 		return Out + ")";

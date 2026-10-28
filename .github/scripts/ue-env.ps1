@@ -60,11 +60,14 @@ function Add-JobEnv([string] $Name, [string] $Value) {
     Write-Host "ue-env: $Name=$Value"
 }
 
-$override = [Environment]::GetEnvironmentVariable('UE_ROOT_' + $Version.Replace('.', '_'))
-if ($override) { $root = $override }
-elseif ($IsWindows) { $root = "C:\Program Files\Epic Games\UE_$Version" }
-elseif ($IsMacOS) { $root = "/Users/Shared/Epic Games/UE_$Version" }
-else { throw "ue-env: no default UE $Version location on this OS; set UE_ROOT_$($Version.Replace('.', '_')) in the runner's environment" }
+if ($IsWindows) { $platform = 'Win64'; $defaultRoot = "C:\Program Files\Epic Games\UE_$Version"; $pyExe = 'python.exe' }
+elseif ($IsMacOS) { $platform = 'Mac'; $defaultRoot = "/Users/Shared/Epic Games/UE_$Version"; $pyExe = 'bin/python3' }
+else { $platform = 'Linux'; $defaultRoot = $null; $pyExe = 'bin/python3' }
+
+$overrideName = 'UE_ROOT_' + $Version.Replace('.', '_')
+$root = [Environment]::GetEnvironmentVariable($overrideName)
+if (-not $root) { $root = $defaultRoot }
+if (-not $root) { throw "ue-env: no default UE $Version location on this OS; set $overrideName in the runner's environment" }
 
 $build = Join-Path $root 'Engine/Build/Build.version'
 if (-not (Test-Path -LiteralPath $build -PathType Leaf)) { throw "ue-env: UE $Version not found at $root (no Engine/Build/Build.version)" }
@@ -73,14 +76,11 @@ if ("$($installed.MajorVersion).$($installed.MinorVersion)" -ne $Version) {
     throw "ue-env: $root is UE $($installed.MajorVersion).$($installed.MinorVersion), not the requested $Version"
 }
 
-if ($IsWindows) { $platform = 'Win64'; $runUAT = 'Engine/Build/BatchFiles/RunUAT.bat'; $pyDir = 'Win64'; $pyExe = 'python.exe' }
-elseif ($IsMacOS) { $platform = 'Mac'; $runUAT = 'Engine/Build/BatchFiles/RunUAT.sh'; $pyDir = 'Mac'; $pyExe = 'bin/python3' }
-else { $platform = 'Linux'; $runUAT = 'Engine/Build/BatchFiles/RunUAT.sh'; $pyDir = 'Linux'; $pyExe = 'bin/python3' }
-$runUAT = Join-Path $root $runUAT
+$runUAT = Join-Path $root "Engine/Build/BatchFiles/RunUAT.$(if ($IsWindows) { 'bat' } else { 'sh' })"
 if (-not (Test-Path -LiteralPath $runUAT -PathType Leaf)) { throw "ue-env: $runUAT not found" }
 
 # Chain python: link the bundled Python folder (not just the binary, so it finds its stdlib).
-$src = Join-Path $root "Engine/Binaries/ThirdParty/Python3/$pyDir"
+$src = Join-Path $root "Engine/Binaries/ThirdParty/Python3/$platform"
 if (-not (Test-Path -LiteralPath (Join-Path $src $pyExe) -PathType Leaf)) { throw "ue-env: UE bundled Python not found under $src" }
 if ($env:RUNNER_TEMP -match '\s') { throw "ue-env: RUNNER_TEMP '$env:RUNNER_TEMP' contains whitespace; CHAIN_PY must be space-free" }
 Remove-Link

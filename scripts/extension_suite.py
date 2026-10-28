@@ -29,6 +29,8 @@ elif sys.platform == "darwin":
     UE_PLATFORM, UE_BUILD, UE_EDITOR = "Mac", "Engine/Build/BatchFiles/Mac/Build.sh", "Engine/Binaries/Mac/UnrealEditor-Cmd"
 else:
     UE_PLATFORM, UE_BUILD, UE_EDITOR = "Linux", "Engine/Build/BatchFiles/Linux/Build.sh", "Engine/Binaries/Linux/UnrealEditor-Cmd"
+# POSIX: owned processes lead their own process group, so kill_owned can stop the whole tree.
+NEW_SESSION = os.name != "nt"
 
 
 @contextmanager
@@ -56,10 +58,7 @@ def machine_lock(already_held: bool = False, *, path: Path | None = None, timeou
                         print("Waiting for the machine-wide UE lock (another local/CI build owns it)", flush=True)
                         announced = True
                     time.sleep(1)
-            try:
-                yield
-            finally:
-                fcntl.flock(handle, fcntl.LOCK_UN)
+            yield  # closing the file releases the flock()
         return
     import ctypes
     from ctypes import wintypes
@@ -215,17 +214,17 @@ def check_report(report: Path, selected: list[str], core_tests: bool = True) -> 
 
 
 def kill_owned(process: subprocess.Popen) -> None:
-    if process.poll() is None and os.name != "nt":
-        # Started with start_new_session=True: its pid is the group id of its whole tree.
-        try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-    elif process.poll() is None:
-        stopped = subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"], check=False, capture_output=True)
-        if stopped.returncode and process.poll() is None:
-            print(f"Owned process {process.pid} tree stop failed: {stopped.stdout!r} {stopped.stderr!r}", flush=True)
-            process.kill()
+    if process.poll() is None:
+        if NEW_SESSION:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        else:
+            stopped = subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"], check=False, capture_output=True)
+            if stopped.returncode and process.poll() is None:
+                print(f"Owned process {process.pid} tree stop failed: {stopped.stdout!r} {stopped.stderr!r}", flush=True)
+                process.kill()
     process.wait(timeout=30)
 
 
@@ -253,7 +252,7 @@ def automation(engine: Path, project: Path, selected: list[str], timeout: int,
         server_log = (report / "server.log").open("w")
         server_proc = subprocess.Popen([str(server), "--port", str(port), "--client-transport", "streamableHttp"],
                                        stdout=server_log, stderr=subprocess.STDOUT, cwd=server.parent,
-                                       start_new_session=os.name != "nt")
+                                       start_new_session=NEW_SESSION)
         print(f"Started owned server PID {server_proc.pid}", flush=True)
         if not smoke.wait_port(port, 40):
             kill_owned(server_proc)
@@ -268,7 +267,7 @@ def automation(engine: Path, project: Path, selected: list[str], timeout: int,
     editor = None
     try:
         editor = subprocess.Popen(command, env=env, cwd=project.parent, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT,
-                                  start_new_session=os.name != "nt")
+                                  start_new_session=NEW_SESSION)
         print(f"Started ONE owned editor PID {editor.pid}; report {report}", flush=True)
         deadline = time.monotonic() + timeout
         while not (report / "index.json").exists():
