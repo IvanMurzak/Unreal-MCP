@@ -33,9 +33,11 @@
 #include "Kismet2/CompilerResultsLog.h"
 #include "Kismet2/KismetEditorUtilities.h"
 #include "Kismet2/Kismet2NameValidators.h"
+#include "Kismet/BlueprintFunctionLibrary.h"
 #include "Logging/TokenizedMessage.h"
 #include "Misc/UObjectToken.h"
 #include "Misc/ITransaction.h"
+#include "UObject/UObjectIterator.h"
 #include "UObject/UnrealType.h"
 #include "WidgetBlueprint.h"
 #include "Blueprint/WidgetTree.h"
@@ -449,6 +451,47 @@ namespace UnrealMcpRqlBlueprintsLocal
 			"work: EventGraph | call AddInputKey(\"SpaceBar\")");
 	}
 
+	/** The loaded Blueprint function libraries (engine, plugin and project ones), leaving out compiler artefacts. */
+	TArray<UClass*> FunctionLibraries()
+	{
+		TArray<UClass*> Out;
+		for (TObjectIterator<UClass> It; It; ++It)
+		{
+			if (It->IsChildOf(UBlueprintFunctionLibrary::StaticClass()) && !It->HasAnyClassFlags(CLASS_Abstract | CLASS_Deprecated | CLASS_NewerVersionExists)
+				&& !It->GetName().StartsWith(TEXT("SKEL_")) && !It->GetName().StartsWith(TEXT("REINST_")))
+				Out.Add(*It);
+		}
+		return Out;
+	}
+
+	/** "Class.Function" for every function library that has a Blueprint-callable @p Name, sorted. */
+	TArray<FString> LibrariesWith(const FString& Name)
+	{
+		TArray<FString> Out;
+		for (UClass* Library : FunctionLibraries())
+		{
+			if (UFunction* Function = FindCallable(Library, Name))
+				Out.Add(Library->GetName() + TEXT(".") + Function->GetName());
+		}
+		Out.Sort();
+		return Out;
+	}
+
+	/** Up to five Blueprint-callable functions of @p Class whose name contains @p Name (case-insensitive), for a "did you mean". */
+	FString SimilarFunctions(UClass* Class, const FString& Name)
+	{
+		// Compared without underscores or case, with UE 4's float as UE 5's double: "Less_float" finds Less_DoubleDouble.
+		auto Normal = [](const FString& Text) { return Text.Replace(TEXT("_"), TEXT("")).ToLower().Replace(TEXT("float"), TEXT("double")); };
+		TArray<FString> Out;
+		const FString Key = Normal(Name);
+		for (TFieldIterator<UFunction> It(Class); It && Out.Num() < 5; ++It)
+		{
+			if (It->HasAnyFunctionFlags(FUNC_BlueprintCallable | FUNC_BlueprintPure) && Normal(It->GetName()).Contains(Key))
+				Out.Add(It->GetName());
+		}
+		return Out.Num() ? FString::Printf(TEXT("; similar: %s"), *FString::Join(Out, TEXT(", "))) : FString();
+	}
+
 	/** "PrintString", "KismetSystemLibrary.PrintString", "/Script/Engine.KismetSystemLibrary:PrintString" or a function of the Blueprint. */
 	UFunction* ResolveFunction(UBlueprint* Blueprint, const FString& Spec)
 	{
@@ -462,7 +505,10 @@ namespace UnrealMcpRqlBlueprintsLocal
 				Throw(FString::Printf(TEXT("no class '%s'"), *ClassPart));
 			if (UFunction* Function = FindCallable(Class, FunctionPart))
 				return Function;
-			Throw(FString::Printf(TEXT("%s has no Blueprint-callable function '%s'"), *Class->GetName(), *FunctionPart));
+			const TArray<FString> Elsewhere = LibrariesWith(FunctionPart);
+			Throw(FString::Printf(TEXT("%s has no Blueprint-callable function '%s'%s%s"), *Class->GetName(), *FunctionPart,
+				Elsewhere.Num() ? *FString::Printf(TEXT("; it is on %s"), *FString::Join(Elsewhere, TEXT(", "))) : TEXT(""),
+				*SimilarFunctions(Class, FunctionPart)));
 		}
 		UClass* Own = Blueprint->SkeletonGeneratedClass ? Blueprint->SkeletonGeneratedClass : Blueprint->GeneratedClass;
 		if (UFunction* Function = FindCallable(Own, Text))
@@ -472,8 +518,18 @@ namespace UnrealMcpRqlBlueprintsLocal
 			if (UFunction* Function = FindCallable(FUnrealMcpObjectRef::ResolveClass(Library), Text))
 				return Function;
 		}
-		Throw(FString::Printf(TEXT("no Blueprint-callable function '%s' on %s or the common libraries (name the class: \"KismetMathLibrary.Add_IntInt\")%s"),
-			*Text, *Blueprint->GetName(), *EnhancedInputHint(Text)));
+		// Any other function library (NiagaraFunctionLibrary.SpawnSystemAtLocation, a plugin's or the project's): one match is it.
+		const TArray<FString> Elsewhere = LibrariesWith(Text);
+		if (Elsewhere.Num() == 1)
+		{
+			FString LibraryName, FunctionName;
+			Elsewhere[0].Split(TEXT("."), &LibraryName, &FunctionName);
+			return FindCallable(FUnrealMcpObjectRef::ResolveClass(LibraryName), FunctionName);
+		}
+		if (Elsewhere.Num() > 1)
+			Throw(FString::Printf(TEXT("'%s' is on several function libraries: name one (%s)"), *Text, *FString::Join(Elsewhere, TEXT(", "))));
+		Throw(FString::Printf(TEXT("no Blueprint-callable function '%s' on %s or any function library (a member function needs its class: \"Pawn.AddMovementInput\")%s%s"),
+			*Text, *Blueprint->GetName(), *SimilarFunctions(Own, Text), *EnhancedInputHint(Text)));
 	}
 
 	/** A variable of @p Class the graphs can see: by name, else by its authored name in any case. */
