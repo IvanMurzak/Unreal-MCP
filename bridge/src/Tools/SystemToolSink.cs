@@ -63,18 +63,18 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
         public bool RemoveTool(string name)
             => !string.IsNullOrEmpty(name) && _tools.Remove(name);
 
-        public bool SetToolEnabled(string name, bool enabled)
+        public bool SetToolVisible(string name, bool visible)
         {
             if (string.IsNullOrEmpty(name) || !_tools.TryGetValue(name, out var tool))
                 return false;
 
-            // IRunTool : IEnabled — the flag is settable on the concrete proxy. A system tool's Enabled flag is
-            // reported by RunListSystemTool but is NOT a gate in McpSystemToolManager.RunSystemTool, so the
-            // AUTHORITATIVE gate stays where it already is: the plugin excludes a disabled tool from the served
-            // manifest entirely (§2.2), which removes the proxy here rather than merely flagging it.
+            // IRunTool : IVisible — the flag is settable on the concrete proxy. Like every tool's Visible flag it is
+            // listing-only: RunListSystemTool reports it, McpSystemToolManager.RunSystemTool still runs the tool. A tool
+            // the plugin does not serve at all (the §8 enabledTools filter) is excluded from the manifest (§2.2), which
+            // removes the proxy here.
             if (tool is ProxyTool proxy)
             {
-                proxy.Enabled = enabled;
+                proxy.Visible = visible;
                 return true;
             }
             return false;

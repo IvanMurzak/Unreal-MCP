@@ -74,7 +74,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
                 // the system-tool manager instead of the MCP tool manager. A descriptor with no `toolType` (an
                 // older plugin) reads as Standard, preserving the pre-§2.4 behaviour exactly.
                 toolType: descriptor.IsSystem ? McpToolType.System : McpToolType.Standard)
-            { Enabled = descriptor.Enabled };
+            { Visible = descriptor.Visible };
         }
 
         /// <summary>

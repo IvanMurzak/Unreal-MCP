@@ -19,8 +19,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
     /// <summary>The "manifest diff" xUnit target (docs/ARCHITECTURE.md §9.3, §2.2).</summary>
     public class ManifestDifferTests
     {
-        private static ToolDescriptor Tool(string name, string hash, bool enabled = true) =>
-            new() { Name = name, SchemaHash = hash, Enabled = enabled };
+        private static ToolDescriptor Tool(string name, string hash, bool visible = true) =>
+            new() { Name = name, SchemaHash = hash, Visible = visible };
 
         private static Dictionary<string, ToolDescriptor> Prev(params ToolDescriptor[] tools) =>
             tools.ToDictionary(t => t.Name);
@@ -51,11 +51,11 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         }
 
         [Fact]
-        public void EnabledChanged_WhenOnlyEnabledFlagDiffers()
+        public void EnabledChanged_WhenOnlyVisibleFlagDiffers()
         {
             var diff = ManifestDiffer.Compute(
-                Prev(Tool("ping", "h1", enabled: true)),
-                new[] { Tool("ping", "h1", enabled: false) });
+                Prev(Tool("ping", "h1", visible: true)),
+                new[] { Tool("ping", "h1", visible: false) });
             Assert.Empty(diff.Changed);
             Assert.Single(diff.EnabledChanged);
             Assert.Equal(("ping", false), diff.EnabledChanged[0]);
@@ -85,7 +85,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             {
                 Tool("keep", "h1"),               // no-op
                 Tool("mutate", "h3-new"),         // changed
-                Tool("toggle", "h4", false),      // enabled-only
+                Tool("toggle", "h4", false),      // visible-only
                 Tool("brand-new", "h5"),          // added
                                                   // "drop" removed
             };

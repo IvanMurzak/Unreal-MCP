@@ -89,6 +89,8 @@ struct UNREALMCPRUNTIME_API FUnrealMcpRegisteredPrompt
 	EUnrealMcpPromptRole Role = EUnrealMcpPromptRole::User;
 	TArray<FUnrealMcpParamSpec> Params;
 	bool bEnabled = true;
+	/** Listed flag of the shared registry template; prompts have no hidden list, so it stays true. */
+	bool bVisible = true;
 	FString ExtensionId = TEXT("core");
 	FString SchemaHash;
 	FUnrealMcpPromptHandler Handler;
@@ -190,7 +192,7 @@ public:
 	/** Set the §8 env whitelist. Mirrors the tool registry's SetEnabledToolsFilter exactly. Game-thread only. */
 	void SetEnabledPromptsFilter(const TArray<FString>& EnabledPrompts) { SetWhitelistFilter(EnabledPrompts); }
 
-	/** Apply the persisted §7 per-prompt enable-map (blocklist). Mirrors the tool registry's ApplyDisabledTools. Game-thread only. */
+	/** Apply the persisted §7 per-prompt enable-map (blocklist): a listed prompt is disabled. Game-thread only. */
 	void ApplyDisabledPrompts(const TArray<FString>& DisabledNames) { ApplyBlocklist(DisabledNames); }
 
 	/**

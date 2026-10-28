@@ -30,8 +30,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
     /// </summary>
     public class SystemToolSurfaceTests
     {
-        private static ToolDescriptor Tool(string name, string hash, string? toolType = null, bool enabled = true) =>
-            new() { Name = name, SchemaHash = hash, ToolType = toolType, Enabled = enabled };
+        private static ToolDescriptor Tool(string name, string hash, string? toolType = null, bool visible = true) =>
+            new() { Name = name, SchemaHash = hash, ToolType = toolType, Visible = visible };
 
         private static ToolManifestMessage Manifest(int revision, params ToolDescriptor[] tools) =>
             new() { Revision = revision, Tools = tools.ToList() };
@@ -95,8 +95,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             Assert.True(sink.HasTool("ping"));
             Assert.Same(proxy, runners["ping"]);
 
-            Assert.True(sink.SetToolEnabled("ping", false));
-            Assert.False(proxy.Enabled);
+            Assert.True(sink.SetToolVisible("ping", false));
+            Assert.False(proxy.Visible);
 
             Assert.True(sink.RemoveTool("ping"));
             Assert.False(sink.HasTool("ping"));
@@ -153,14 +153,14 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         }
 
         [Fact]
-        public void Routing_TogglesEnabledOnTheRecordedSurface()
+        public void Routing_TogglesVisibleOnTheRecordedSurface()
         {
             var (sink, standard, system) = Routing();
             sink.AddTool("ping", ProxyToolFactory.Create(Tool("ping", "h", "system"), new FakeToolCallChannel()));
 
-            Assert.True(sink.SetToolEnabled("ping", false));
-            Assert.False(system.Enabled["ping"]);
-            Assert.False(standard.Enabled.ContainsKey("ping"));
+            Assert.True(sink.SetToolVisible("ping", false));
+            Assert.False(system.Visible["ping"]);
+            Assert.False(standard.Visible.ContainsKey("ping"));
         }
 
         [Fact]

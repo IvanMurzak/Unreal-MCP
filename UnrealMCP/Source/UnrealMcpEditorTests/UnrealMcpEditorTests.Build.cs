@@ -37,6 +37,8 @@ public class UnrealMcpEditorTests : ModuleRules
 			"LevelSequence",
 			"MovieScene",
 			"MovieSceneTracks", // property / visibility track classes in the Level Sequence specs
+			"Slate",          // the Tools-window spec constructs SUnrealMcpToolsWindow and reads its widgets
+			"SlateCore",
 		});
 
 		// Reach BOTH modules' PRIVATE headers so the Automation specs can drive their internals directly.

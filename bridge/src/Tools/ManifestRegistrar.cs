@@ -26,7 +26,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
         bool HasTool(string name);
         bool AddTool(string name, ProxyTool tool);
         bool RemoveTool(string name);
-        bool SetToolEnabled(string name, bool enabled);
+        /// <summary>Show/hide a registered tool in <c>tools/list</c>; a hidden tool stays callable by name.</summary>
+        bool SetToolVisible(string name, bool visible);
     }
 
     /// <summary>Adapts the reused <see cref="IToolManager"/> to <see cref="IProxyToolSink"/>.</summary>
@@ -38,13 +39,13 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
         public bool HasTool(string name) => _toolManager.HasTool(name);
         public bool AddTool(string name, ProxyTool tool) => _toolManager.AddTool(name, tool);
         public bool RemoveTool(string name) => _toolManager.RemoveTool(name);
-        public bool SetToolEnabled(string name, bool enabled) => _toolManager.SetToolEnabled(name, enabled);
+        public bool SetToolVisible(string name, bool visible) => _toolManager.SetToolVisible(name, visible);
     }
 
     /// <summary>
     /// Applies tool manifests (docs/ARCHITECTURE.md §2.2) to an <see cref="IProxyToolSink"/>: diff against
     /// the previously applied set, then remove / add (as <see cref="ProxyTool"/>s) / re-add changed /
-    /// toggle enabled. Honours the out-of-order revision guard (§2.2 step 3) — but
+    /// toggle visible. Honours the out-of-order revision guard (§2.2 step 3) — but
     /// <see cref="ManifestRegistrarBase{TDescriptor}.ResetForReconnect"/> (called on every
     /// <c>handshake-ack</c>, §1.5) resets the last-applied revision to −1 so a post-reconnect re-push with
     /// an unchanged revision is always applied. NOT thread-safe by itself: ProxyTool's docs require the host
@@ -97,6 +98,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
         protected override void SinkAdd(ToolDescriptor descriptor) =>
             _sink.AddTool(descriptor.Name, ProxyToolFactory.Create(descriptor, _channel, _toolTimeoutMs));
 
-        protected override void SinkSetEnabled(string key, bool enabled) => _sink.SetToolEnabled(key, enabled);
+        // The shared base calls a tool's flag "enabled" (the wire key it shares with prompts/resources); for a tool it is
+        // the visibility in tools/list.
+        protected override void SinkSetEnabled(string key, bool enabled) => _sink.SetToolVisible(key, enabled);
     }
 }

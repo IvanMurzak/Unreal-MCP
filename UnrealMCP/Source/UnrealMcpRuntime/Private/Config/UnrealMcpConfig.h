@@ -115,20 +115,20 @@ public:
 	// connection's role to the server ("clientRole" -> client_role), which keeps one editor and one runtime side by side.
 	bool bRuntimeConnection = false;
 	TArray<FString> EnabledTools; // "enabledTools" (UNREAL_MCP_TOOLS override; empty = no override)
-	// "disabledTools" — the per-tool enable-map persisted by the §7 MCP Tools window. Names listed here are
-	// hidden from the served manifest (excluded by the registry on boot + on every UI toggle). A blocklist,
-	// NOT a whitelist: default-empty means every tool is enabled, and a tool added by a later plugin update is
-	// enabled unless the user explicitly turns it off. Orthogonal to EnabledTools (the env power-user filter):
-	// a tool is served iff (EnabledTools empty OR it is in EnabledTools) AND it is NOT in DisabledTools. This
-	// field has no env override — it is pure UI persistence, so Save() always round-trips the live value.
-	TArray<FString> DisabledTools; // "disabledTools"
+	// "hiddenTools" — the per-tool Visible toggles persisted by the §7 MCP Tools window. A tool listed here is left
+	// out of tools/list; it still runs when an MCP client calls it by name (the toggle is not an access control).
+	// Default-empty means every tool is visible, and a tool added by a later plugin update is visible unless the user
+	// hides it. Orthogonal to EnabledTools (the env power-user filter, which decides whether a tool is served at all).
+	// Load() also reads the pre-rename key "disabledTools" (merged in); Save() writes "hiddenTools" only. No env
+	// override — it is pure UI persistence, so Save() always round-trips the live value.
+	TArray<FString> HiddenTools; // "hiddenTools" (legacy read: "disabledTools")
 	// "selectedAgentId" — the AI-agent-configurator dropdown selection persisted by the §7 Agent Configurators
 	// panel (e.g. "claude-code"/"cursor"). Pure presentation state, NO env override — Save() always round-trips
 	// the live value. Defaults to the first reference agent so a fresh project opens on a valid selection.
 	FString SelectedAgentId = TEXT("claude-code"); // "selectedAgentId"
 	// "skillAutoGenerateAgents" — the set of agent ids the user enabled per-agent "auto-generate skills" for (the
 	// §7 Agent Configurators skills toggle, issue #53 Phase C). The C++ analog of Unity's per-agent SkillAutoGenerate
-	// map; modelled as a string LIST (like enabledTools/disabledTools) since the JSON layer has no native map helper.
+	// map; modelled as a string LIST (like enabledTools/hiddenTools) since the JSON layer has no native map helper.
 	// Pure UI persistence, NO env override — Save() always round-trips the live value. Empty = no agent auto-generates.
 	TArray<FString> SkillAutoGenerateAgents; // "skillAutoGenerateAgents"
 	// "skillsPath" — the user-overridable skills folder for the Custom ("Other") agent (issue #53 Phase C, mirrors

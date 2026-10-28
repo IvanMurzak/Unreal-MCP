@@ -18,7 +18,7 @@ class FSpawnTabArgs;
  * "AI Game Developer Settings" tab + its "Project → Plugins → AI Game Developer" ISettingsModule section
  * were removed.
  *
- *   - UnrealMcpToolsWindow     — per-tool enable/disable (drives the §8 enable-map + manifest exclusion).
+ *   - UnrealMcpToolsWindow     — per-tool Visible toggles (drives the §8 hiddenTools list + the manifest's flag).
  *   - UnrealMcpPromptsWindow   — MCP prompts (honest empty state until a prompts feed lands).
  *   - UnrealMcpResourcesWindow — MCP resources (honest empty state).
  *   - UnrealMcpSerializationCheckWindow — serialize a picked UObject/Actor to JSON (Unity-MCP parity); opened

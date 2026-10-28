@@ -37,7 +37,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
 
         /// <summary>
         /// Whether this prompt is exposed to MCP clients. Settable so the manifest registrar can toggle a
-        /// runtime prompt on/off (mirrors <see cref="ProxyTool.Enabled"/>; <see cref="IRunPrompt"/> itself
+        /// runtime prompt on/off (unlike <see cref="ProxyTool.Visible"/>, which only hides a tool from the list;
+        /// <see cref="IRunPrompt"/> itself
         /// carries no enabled flag, so the toggle rides on the proxy + <c>IPromptManager.SetPromptEnabled</c>).
         /// </summary>
         public bool Enabled { get; set; } = true;

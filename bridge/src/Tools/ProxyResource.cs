@@ -31,7 +31,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
 
         /// <summary>
         /// Whether this resource is exposed to MCP clients. Settable so the manifest registrar can toggle a
-        /// runtime resource on/off (mirrors <see cref="ProxyTool.Enabled"/> / <see cref="ProxyPrompt.Enabled"/>).
+        /// runtime resource on/off (mirrors <see cref="ProxyPrompt.Enabled"/>; a tool's <see cref="ProxyTool.Visible"/>
+        /// only hides it from the list).
         /// </summary>
         public bool Enabled { get; set; } = true;
 

@@ -112,6 +112,8 @@ struct UNREALMCPRUNTIME_API FUnrealMcpRegisteredResource
 	FString Description;
 	FString MimeType;
 	bool bEnabled = true;
+	/** Listed flag of the shared registry template; resources have no hidden list, so it stays true. */
+	bool bVisible = true;
 	FString ExtensionId = TEXT("core");
 	FString SchemaHash;
 	FUnrealMcpResourceHandler Handler;
@@ -202,7 +204,7 @@ public:
 	/** Set the §8 env whitelist. Mirrors the tool registry's SetEnabledToolsFilter exactly. Game-thread only. */
 	void SetEnabledResourcesFilter(const TArray<FString>& EnabledResources) { SetWhitelistFilter(EnabledResources); }
 
-	/** Apply the persisted §7 per-resource enable-map (blocklist). Mirrors the tool registry's ApplyDisabledTools. Game-thread only. */
+	/** Apply the persisted §7 per-resource enable-map (blocklist): a listed resource is disabled. Game-thread only. */
 	void ApplyDisabledResources(const TArray<FString>& DisabledUris) { ApplyBlocklist(DisabledUris); }
 
 	/**

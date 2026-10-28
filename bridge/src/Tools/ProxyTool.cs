@@ -65,11 +65,11 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
         public McpToolType ToolType { get; }
 
         /// <summary>
-        /// Whether this tool is exposed to MCP clients. Settable so the manifest registrar can toggle a
-        /// runtime tool on/off. For post-registration toggling prefer
-        /// <c>IToolManager.SetToolEnabled(name, enabled)</c> (it also fires the list-changed notification).
+        /// Whether this tool is listed in <c>tools/list</c>. Only the listing: <c>tools/call</c> still runs a hidden
+        /// tool by name. Settable so the manifest registrar can show/hide a runtime tool. For post-registration
+        /// toggling prefer <c>IToolManager.SetToolVisible(name, visible)</c> (it also fires the list-changed notification).
         /// </summary>
-        public bool Enabled { get; set; } = true;
+        public bool Visible { get; set; } = true;
 
         public int TokenCount
         {
@@ -85,7 +85,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
                 catch
                 {
                     // Mirror RunTool.CalculateTokenCount's resilience: a tool whose externally supplied
-                    // schema fails to serialize must not poison IToolManager.EnabledToolsTokenCount.
+                    // schema fails to serialize must not poison IToolManager.VisibleToolsTokenCount.
                     _cachedTokenCount = 0;
                 }
                 return _cachedTokenCount.Value;

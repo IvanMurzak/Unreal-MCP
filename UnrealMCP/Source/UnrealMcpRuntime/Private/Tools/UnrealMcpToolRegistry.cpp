@@ -146,7 +146,9 @@ TSharedPtr<FJsonObject> FUnrealMcpRegisteredTool::ToDescriptorJson() const
 	Desc->SetBoolField(TEXT("destructiveHint"), bDestructiveHint);
 	Desc->SetBoolField(TEXT("idempotentHint"), bIdempotentHint);
 	Desc->SetBoolField(TEXT("openWorldHint"), bOpenWorldHint);
-	Desc->SetBoolField(TEXT("enabled"), bEnabled);
+	// The Visible flag travels under the protocol's "enabled" key (shared with prompts/resources; stripped from the
+	// schema hash). Only served tools reach the manifest, so the key carries whether the tool is listed in tools/list.
+	Desc->SetBoolField(TEXT("enabled"), bVisible);
 	// §2.4 served surface. Always emitted (never omitted for the Standard default) so the sidecar never has
 	// to infer it and an older descriptor can be told apart from a deliberately-standard one.
 	Desc->SetStringField(TEXT("toolType"), UnrealMcpToolTypeToString(ToolType));
@@ -268,9 +270,10 @@ FUnrealMcpToolBuilder FUnrealMcpToolRegistry::Tool(const FString& Name)
 
 FUnrealMcpToolResult FUnrealMcpToolRegistry::Execute(const FString& Name, const FUnrealMcpToolCall& Call) const
 {
-	// FindForDispatch enforces the §7 blocklist / §8 whitelist at the execution boundary (a disabled tool is
-	// dropped from BuildManifestJson, but a sidecar on a stale manifest — toggle → push race — could still
-	// dispatch it by name) and yields the SAME "Unknown tool '%s'." / "Tool '%s' is disabled." messages.
+	// FindForDispatch enforces the §8 whitelist at the execution boundary (a tool the whitelist does not serve is
+	// dropped from BuildManifestJson, but a sidecar on a stale manifest could still dispatch it by name) and yields
+	// "Unknown tool '%s'." / "Tool '%s' is disabled.". A tool hidden by the §7 Visible toggle is still served: it
+	// is only left out of tools/list, and a call by name runs it.
 	FString Error;
 	const FUnrealMcpRegisteredTool* Found = FindForDispatch(Name, Error);
 	if (Found == nullptr)

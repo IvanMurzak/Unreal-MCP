@@ -47,7 +47,8 @@ struct UNREALMCPRUNTIME_API FUnrealMcpExtensionRegistrationResult
  * keeping the extension-manager call sites + the public API byte-for-byte stable.
  *
  * A `TTraits` policy supplies the kind-specific statics (key accessor, validation, manifest strings,
- * noun). `TEntry` must expose: `bool bEnabled`, `FString ExtensionId`, `FString SchemaHash`, and
+ * noun). `TEntry` must expose: `bool bEnabled` (served: in the manifest, dispatchable), `bool bVisible` (listed;
+ * only tools use it — see ApplyHiddenList), `FString ExtensionId`, `FString SchemaHash`, and
  * `TSharedPtr<FJsonObject> ToDescriptorJson() const`.
  *
  * Threading contract (unchanged from the originals): NOT thread-safe. All mutation happens at startup
@@ -80,7 +81,7 @@ public:
 		return Keys;
 	}
 
-	/** Count of entries whose bEnabled flag is set (backs the boot-time enable-map log line). */
+	/** Count of entries whose bEnabled flag is set (served; hidden entries count too). */
 	int32 NumEnabled() const
 	{
 		int32 Count = 0;
@@ -166,10 +167,10 @@ public:
 		InEntry.SchemaHash = ComputeSchemaHash(InEntry);
 		const FString Key = TTraits::KeyOf(InEntry);
 		// §7/§8 retention: a (re-)registered entry inherits the retained whitelist/blocklist immediately, so an
-		// extension hot-reload (remove + re-register FRESH, bEnabled defaulting true) cannot resurrect an entry
-		// the user disabled, and a non-empty §8 whitelist still hides a non-whitelisted entry a rebuild re-adds.
-		// The schema hash above excludes the enabled flag (§2.2), so flipping bEnabled here does not perturb it.
-		InEntry.bEnabled = ShouldBeEnabled(Key);
+		// extension hot-reload (remove + re-register FRESH, flags defaulting true) cannot resurrect an entry the
+		// user disabled / hid, and a non-empty §8 whitelist still excludes a non-whitelisted entry a rebuild re-adds.
+		// The schema hash above excludes the enabled flag (§2.2), so flipping the flags here does not perturb it.
+		ApplyFilter(Key, InEntry);
 		Entries.Add(Key, MoveTemp(InEntry));
 		++Revision;
 		UE_LOG(LogUnrealMcp, Verbose, TEXT("[Unreal-MCP] registered %s '%s' (revision %d)."), TTraits::KindNoun(), *Key, Revision);
@@ -233,8 +234,8 @@ public:
 		const TArray<FString> Keys = GetKeysSorted();
 		for (const FString& Key : Keys)
 		{
-			// §7 enable-map: a disabled entry is EXCLUDED from the served manifest entirely (not merely flagged),
-			// so the sidecar mirrors no Proxy* for it and it never appears in the corresponding list (§2.2).
+			// A disabled (unserved) entry is EXCLUDED from the manifest entirely, so the sidecar mirrors no Proxy* for it
+			// (§2.2). A hidden entry is served: it stays in, flagged hidden by its descriptor, and remains callable.
 			const TEntry& Entry = Entries[Key];
 			if (!Entry.bEnabled)
 				continue;
@@ -266,6 +267,36 @@ public:
 	}
 
 	/**
+	 * Set one entry's Visible flag directly — a GRANULAR helper like SetEnabled, NOT the production §7 toggle (that is
+	 * ApplyHiddenList). Does NOT update the retained hidden list, so the next filter recompute (ApplyHiddenList,
+	 * SetWhitelistFilter, ApplyBlocklist) overrides it. Bumps the revision on a real change. Unknown key / no-op change:
+	 * returns false. Game-thread only.
+	 */
+	bool SetVisible(const FString& Key, bool bVisible)
+	{
+		TEntry* Found = Entries.Find(Key);
+		if (Found == nullptr || Found->bVisible == bVisible)
+			return false;
+		Found->bVisible = bVisible;
+		++Revision;
+		UE_LOG(LogUnrealMcp, Verbose, TEXT("[Unreal-MCP] %s '%s' %s (revision %d)."),
+			TTraits::KindNoun(), *Key, bVisible ? TEXT("visible") : TEXT("hidden"), Revision);
+		return true;
+	}
+
+	/** Count of entries that are served AND listed. */
+	int32 NumVisible() const
+	{
+		int32 Count = 0;
+		for (const TPair<FString, TEntry>& Pair : Entries)
+		{
+			if (Pair.Value.bEnabled && Pair.Value.bVisible)
+				++Count;
+		}
+		return Count;
+	}
+
+	/**
 	 * True iff @p Key passes the §8 whitelist gate (the whitelist is empty, or the key is listed) — the
 	 * STATIC env-driven dimension of the served predicate, independent of the §7 blocklist.
 	 */
@@ -285,7 +316,7 @@ public:
 	}
 
 	/**
-	 * Apply the persisted §7 per-entry enable-map (blocklist): every entry whose key is in @p BlockedKeys is
+	 * Apply the persisted §7 per-entry disable-map (blocklist): every entry whose key is in @p BlockedKeys is
 	 * disabled, the rest follow the §8 whitelist gate. RETAINED, so an extension hot-reload that re-registers
 	 * entries FRESH re-applies the blocklist rather than resurrecting a disabled one. Recomputes against BOTH
 	 * the retained whitelist and this blocklist, so re-applying the blocklist never clobbers the whitelist.
@@ -294,6 +325,18 @@ public:
 	void ApplyBlocklist(const TArray<FString>& BlockedKeys)
 	{
 		Enablement.SetBlocklist(BlockedKeys);
+		RecomputeEnablement();
+	}
+
+	/**
+	 * Apply the persisted §7 hidden list (the tools' Visible toggles): every entry whose key is in @p HiddenKeys is
+	 * left out of the listing (`bVisible = false`) but stays served — still in BuildManifestJson, flagged hidden, and
+	 * still dispatchable by key. Independent of the whitelist/blocklist. RETAINED like them, so an extension hot-reload
+	 * does not show a hidden entry again. Idempotent; bumps the revision once if any flag changed. Game-thread only.
+	 */
+	void ApplyHiddenList(const TArray<FString>& HiddenKeys)
+	{
+		Enablement.SetHidden(HiddenKeys);
 		RecomputeEnablement();
 	}
 
@@ -330,18 +373,25 @@ protected:
 	 */
 	bool ShouldBeEnabled(const FString& Key) const { return Enablement.ShouldBeEnabled(Key); }
 
-	/** Re-evaluate every registered entry's bEnabled against ShouldBeEnabled; bumps the revision once if any changed. */
+	/** Apply the retained filter to one entry (served: ShouldBeEnabled; listed: not hidden); true when a flag changed. */
+	bool ApplyFilter(const FString& Key, TEntry& Entry) const
+	{
+		const bool bServed = ShouldBeEnabled(Key);
+		const bool bVisible = Enablement.IsVisible(Key);
+		const bool bChanged = Entry.bEnabled != bServed || Entry.bVisible != bVisible;
+		Entry.bEnabled = bServed;
+		Entry.bVisible = bVisible;
+		return bChanged;
+	}
+
+	/** Re-apply the retained filter to every registered entry; bumps the revision once if any flag changed. */
 	void RecomputeEnablement()
 	{
 		bool bAnyChanged = false;
 		for (TPair<FString, TEntry>& Pair : Entries)
 		{
-			const bool bShouldEnable = ShouldBeEnabled(Pair.Key);
-			if (Pair.Value.bEnabled != bShouldEnable)
-			{
-				Pair.Value.bEnabled = bShouldEnable;
+			if (ApplyFilter(Pair.Key, Pair.Value))
 				bAnyChanged = true;
-			}
 		}
 		if (bAnyChanged)
 			++Revision;
@@ -353,7 +403,8 @@ private:
 
 	// --- Retained §7/§8 enablement filter. Re-applied on every (re-)registration (Commit) so an extension
 	//     hot-reload cannot resurrect a disabled entry, and a blocklist re-apply never clobbers the whitelist.
-	//     Whitelist = §8 env whitelist (empty = no filter); Blocklist = §7 persisted disable-map. ---
+	//     Whitelist = §8 env whitelist (empty = no filter); Blocklist = §7 persisted disable-map; Hidden = §7
+	//     persisted hidden list (listing only). ---
 	FUnrealMcpEnablementFilter Enablement;
 
 	// --- Extension-scope state (active only inside RegisterExtension; scopes never nest) ----------

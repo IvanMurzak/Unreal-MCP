@@ -11,7 +11,9 @@
  *
  *   - Whitelist (§8, the env `UNREAL_MCP_TOOLS` / `Config.EnabledTools` dimension): when EMPTY there is no filter
  *     (the common case — every entry passes the whitelist gate); when non-empty only listed keys pass.
- *   - Blocklist (§7, the persisted per-entry disable-map the MCP window writes): a listed key is always disabled.
+ *   - Blocklist (§7, a persisted per-entry disable-map): a listed key is always disabled.
+ *   - Hidden (§7, the tools' persisted Visible toggles, `hiddenTools`): a listed key stays served but is left out of
+ *     the listing (tools/list); a call by name still runs it. Orthogonal to the other two.
  *
  * The combined effective-served rule is `(whitelist empty OR member) AND NOT blocklisted`. All three registries
  * carried verbatim copies of these two TSet<FString> members plus the `PassesWhitelist` / `ShouldBeEnabled`
@@ -26,13 +28,22 @@ struct UNREALMCPRUNTIME_API FUnrealMcpEnablementFilter
 {
 	/** §8 env whitelist; EMPTY means "no filter" (every key passes the whitelist gate). */
 	TSet<FString> Whitelist;
-	/** §7 persisted blocklist (the window's `disabled*` map); a member key is always disabled. */
+	/** §7 persisted blocklist; a member key is always disabled. */
 	TSet<FString> Blocklist;
 
 	/** The STATIC §8 whitelist dimension alone: passes iff the whitelist is empty OR contains @p Key. */
 	bool PassesWhitelist(const FString& Key) const
 	{
 		return Whitelist.IsEmpty() || Whitelist.Contains(Key);
+	}
+
+	/** §7 persisted hidden list; a member key is served but not listed. */
+	TSet<FString> Hidden;
+
+	/** True iff @p Key is listed (not in the hidden list). */
+	bool IsVisible(const FString& Key) const
+	{
+		return !Hidden.Contains(Key);
 	}
 
 	/** The combined effective-served predicate: served iff (whitelist empty OR member) AND NOT blocklisted. */
@@ -45,6 +56,12 @@ struct UNREALMCPRUNTIME_API FUnrealMcpEnablementFilter
 	void SetWhitelist(const TArray<FString>& InWhitelist)
 	{
 		Whitelist = TSet<FString>(InWhitelist);
+	}
+
+	/** Replace the §7 hidden list (RETAINED). The caller recomputes enablement afterward. */
+	void SetHidden(const TArray<FString>& InHidden)
+	{
+		Hidden = TSet<FString>(InHidden);
 	}
 
 	/** Replace the §7 blocklist from a list (RETAINED). The caller recomputes enablement afterward. */
