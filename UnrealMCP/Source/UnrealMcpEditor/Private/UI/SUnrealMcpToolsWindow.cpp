@@ -104,7 +104,6 @@ TSharedRef<SWidget> SUnrealMcpToolsWindow::BuildToolRow(const FUnrealMcpToolList
 			[
 				SNew(SCheckBox)
 				.IsEnabled(bWhitelisted)
-				.ToolTipText(LOCTEXT("ToolVisibleTip", "Visible: list this tool in tools/list. A hidden tool still runs when an AI agent calls it by name."))
 				.IsChecked_Lambda([this, ToolName, bWhitelisted]()
 				{
 					if (!bWhitelisted)

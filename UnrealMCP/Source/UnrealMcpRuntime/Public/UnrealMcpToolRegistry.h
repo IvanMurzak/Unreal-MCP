@@ -317,8 +317,6 @@ struct UNREALMCPRUNTIME_API FUnrealMcpToolRegistryTraits
 	static const TCHAR* KeyNoun() { return TEXT("name"); }
 	static const TCHAR* ManifestType() { return TEXT("tool-manifest"); }
 	static const TCHAR* ManifestArrayKey() { return TEXT("tools"); }
-	/** The §7 blocklist (`hiddenTools`) only hides a tool from tools/list; it still runs when called by name. */
-	static constexpr bool bBlocklistHides = true;
 	/** True iff @p Name is a valid kebab-case tool id (non-empty; lowercase letters/digits with single internal hyphens). */
 	static bool IsValidKey(const FString& Name);
 	/** Validate a tool descriptor for the §5 isolation contract. Returns false + a reason on the first problem. */
@@ -391,7 +389,7 @@ public:
 	 * hot-reload that re-registers tools FRESH re-applies it rather than showing a hidden one again; re-applying never
 	 * clobbers the whitelist. Idempotent. Game-thread only.
 	 */
-	void ApplyHiddenTools(const TArray<FString>& HiddenNames) { ApplyBlocklist(HiddenNames); }
+	void ApplyHiddenTools(const TArray<FString>& HiddenNames) { ApplyHiddenList(HiddenNames); }
 
 	UE_DEPRECATED(5.5, "Renamed to ApplyHiddenTools: a listed tool is only hidden from tools/list; tools/call still runs it.")
 	void ApplyDisabledTools(const TArray<FString>& HiddenNames) { ApplyHiddenTools(HiddenNames); }

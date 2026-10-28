@@ -11,11 +11,11 @@
  *
  *   - Whitelist (§8, the env `UNREAL_MCP_TOOLS` / `Config.EnabledTools` dimension): when EMPTY there is no filter
  *     (the common case — every entry passes the whitelist gate); when non-empty only listed keys pass.
- *   - Blocklist (§7, the persisted per-entry map the MCP window writes): for prompts / resources a listed key is
- *     disabled; for TOOLS it is the per-tool Visible toggle (`hiddenTools`) — a listed tool is only hidden from
- *     tools/list and still runs when called by name (the tool registry's traits set `bBlocklistHides`).
+ *   - Blocklist (§7, a persisted per-entry disable-map): a listed key is always disabled.
+ *   - Hidden (§7, the tools' persisted Visible toggles, `hiddenTools`): a listed key stays served but is left out of
+ *     the listing (tools/list); a call by name still runs it. Orthogonal to the other two.
  *
- * The combined effective-served rule is `(whitelist empty OR member) AND NOT blocklisted` (tools: whitelist only). All three registries
+ * The combined effective-served rule is `(whitelist empty OR member) AND NOT blocklisted`. All three registries
  * carried verbatim copies of these two TSet<FString> members plus the `PassesWhitelist` / `ShouldBeEnabled`
  * predicates; this one small value type replaces the triplication. It is RETAINED on the registry so a later
  * re-registration (extension hot-reload) and every blocklist re-apply re-evaluate against both sets — a blocklist
@@ -28,7 +28,7 @@ struct UNREALMCPRUNTIME_API FUnrealMcpEnablementFilter
 {
 	/** §8 env whitelist; EMPTY means "no filter" (every key passes the whitelist gate). */
 	TSet<FString> Whitelist;
-	/** §7 persisted blocklist (prompts / resources: disabled; tools: the `hiddenTools` map, hidden from the list only). */
+	/** §7 persisted blocklist; a member key is always disabled. */
 	TSet<FString> Blocklist;
 
 	/** The STATIC §8 whitelist dimension alone: passes iff the whitelist is empty OR contains @p Key. */
@@ -37,10 +37,13 @@ struct UNREALMCPRUNTIME_API FUnrealMcpEnablementFilter
 		return Whitelist.IsEmpty() || Whitelist.Contains(Key);
 	}
 
-	/** True iff @p Key is in the §7 blocklist. */
-	bool IsBlocked(const FString& Key) const
+	/** §7 persisted hidden list; a member key is served but not listed. */
+	TSet<FString> Hidden;
+
+	/** True iff @p Key is listed (not in the hidden list). */
+	bool IsVisible(const FString& Key) const
 	{
-		return Blocklist.Contains(Key);
+		return !Hidden.Contains(Key);
 	}
 
 	/** The combined effective-served predicate: served iff (whitelist empty OR member) AND NOT blocklisted. */
@@ -53,6 +56,12 @@ struct UNREALMCPRUNTIME_API FUnrealMcpEnablementFilter
 	void SetWhitelist(const TArray<FString>& InWhitelist)
 	{
 		Whitelist = TSet<FString>(InWhitelist);
+	}
+
+	/** Replace the §7 hidden list (RETAINED). The caller recomputes enablement afterward. */
+	void SetHidden(const TArray<FString>& InHidden)
+	{
+		Hidden = TSet<FString>(InHidden);
 	}
 
 	/** Replace the §7 blocklist from a list (RETAINED). The caller recomputes enablement afterward. */

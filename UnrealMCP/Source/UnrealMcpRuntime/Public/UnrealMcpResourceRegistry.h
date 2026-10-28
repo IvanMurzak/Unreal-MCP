@@ -112,6 +112,8 @@ struct UNREALMCPRUNTIME_API FUnrealMcpRegisteredResource
 	FString Description;
 	FString MimeType;
 	bool bEnabled = true;
+	/** Listed flag of the shared registry template; resources have no hidden list, so it stays true. */
+	bool bVisible = true;
 	FString ExtensionId = TEXT("core");
 	FString SchemaHash;
 	FUnrealMcpResourceHandler Handler;
@@ -154,8 +156,6 @@ struct UNREALMCPRUNTIME_API FUnrealMcpResourceRegistryTraits
 	static const TCHAR* KeyNoun() { return TEXT("uri"); }
 	static const TCHAR* ManifestType() { return TEXT("resource-manifest"); }
 	static const TCHAR* ManifestArrayKey() { return TEXT("resources"); }
-	/** The §7 blocklist disables a resource (see TUnrealMcpRegistry). */
-	static constexpr bool bBlocklistHides = false;
 	/** True iff @p Uri is a valid resource URI (non-empty, no control/whitespace chars). */
 	static bool IsValidKey(const FString& Uri);
 	/** Validate a resource descriptor for the §5 isolation contract. Returns false + a reason on the first problem. */

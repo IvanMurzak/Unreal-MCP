@@ -89,6 +89,8 @@ struct UNREALMCPRUNTIME_API FUnrealMcpRegisteredPrompt
 	EUnrealMcpPromptRole Role = EUnrealMcpPromptRole::User;
 	TArray<FUnrealMcpParamSpec> Params;
 	bool bEnabled = true;
+	/** Listed flag of the shared registry template; prompts have no hidden list, so it stays true. */
+	bool bVisible = true;
 	FString ExtensionId = TEXT("core");
 	FString SchemaHash;
 	FUnrealMcpPromptHandler Handler;
@@ -141,8 +143,6 @@ struct UNREALMCPRUNTIME_API FUnrealMcpPromptRegistryTraits
 	static const TCHAR* KeyNoun() { return TEXT("name"); }
 	static const TCHAR* ManifestType() { return TEXT("prompt-manifest"); }
 	static const TCHAR* ManifestArrayKey() { return TEXT("prompts"); }
-	/** The §7 blocklist disables a prompt (see TUnrealMcpRegistry). */
-	static constexpr bool bBlocklistHides = false;
 	/** True iff @p Name is a valid kebab-case prompt id (same rule as the tool registry). */
 	static bool IsValidKey(const FString& Name);
 	/** Validate a prompt descriptor for the §5 isolation contract. Returns false + a reason on the first problem. */
