@@ -23,6 +23,7 @@
 #include "Engine/World.h"
 #include "LevelUtils.h"
 #include "Components/ActorComponent.h"
+#include "Components/BrushComponent.h"
 #include "Components/SceneComponent.h"
 #include "DataTableEditorUtils.h"
 #include "ActorFactories/ActorFactory.h"
@@ -213,8 +214,21 @@ AActor* UnrealMcpRql::SpawnActor(UClass* Class, const FVector& Location, const F
 	// A volume is its brush: spawned bare it has no shape, so a NavMeshBoundsVolume / TriggerVolume / PostProcessVolume
 	// would bound nothing. Give it the editor's default box (200 cm, as the Place Actors panel does); Scale sizes it.
 	if (AVolume* Volume = Cast<AVolume>(Actor); Volume && !Volume->Brush)
-		UActorFactory::CreateBrushForVolumeActor(Volume, NewObject<UCubeBuilder>());
+		UnrealMcpRqlBuildVolumeBox(Volume, FVector(100.0));
 	return FinishSpawnedActor(Actor, Location, Rotation, Label, Parent);
+}
+
+void UnrealMcpRqlBuildVolumeBox(AVolume* Volume, const FVector& HalfExtent)
+{
+	// The editor's box brush (what the Brush Settings' Cube builder makes), centred on the actor.
+	UCubeBuilder* Builder = NewObject<UCubeBuilder>();
+	FGCObjectScopeGuard BuilderGuard(Builder);
+	Builder->X = static_cast<float>(2.0 * HalfExtent.X);
+	Builder->Y = static_cast<float>(2.0 * HalfExtent.Y);
+	Builder->Z = static_cast<float>(2.0 * HalfExtent.Z);
+	if (UBrushComponent* Component = Volume->GetBrushComponent())
+		Component->Modify(); // the brush it points at is replaced: undo restores the old one
+	UActorFactory::CreateBrushForVolumeActor(Volume, Builder);
 }
 
 FString UnrealMcpRqlAttachFailure(const AActor* Actor, const AActor* Parent)
@@ -560,12 +574,16 @@ TArray<UObject*> UUnrealMcpRqlEditorApi::ImportAsset(const FString& File, const 
 {
 	if (!FPaths::FileExists(File))
 		return Failed<TArray<UObject*>>(FString::Printf(TEXT("no file '%s'"), *File));
-	if (!IsWritableRoot(Destination) || !Destination.StartsWith(TEXT("/")))
+	// The registry's package paths have no trailing slash: "/Game/Props/" would find no created assets.
+	FString Folder = Destination;
+	while (Folder.Len() > 1 && Folder.EndsWith(TEXT("/")))
+		Folder.LeftChopInline(1);
+	if (!IsWritableRoot(Folder) || !Folder.StartsWith(TEXT("/")))
 		return Failed<TArray<UObject*>>(FString::Printf(TEXT("'%s' is not a writable content folder (e.g. /Game/Imported)"), *Destination));
 	UAssetImportTask* Task = NewObject<UAssetImportTask>();
 	FGCObjectScopeGuard TaskGuard(Task);
 	Task->Filename = File;
-	Task->DestinationPath = Destination;
+	Task->DestinationPath = Folder;
 	if (!Name.IsEmpty())
 		Task->DestinationName = Name;
 	Task->bAutomated = true;
@@ -584,17 +602,37 @@ TArray<UObject*> UUnrealMcpRqlEditorApi::ImportAsset(const FString& File, const 
 		if (bInterchange)
 			Interchange->Set(true, ECVF_SetByCode);
 	};
+	// The task lists only the primary asset (the mesh of an FBX): the materials, textures and skeleton the importer creates
+	// next to it are the assets the destination folder gains, found by diffing the registry.
+	IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
+	const auto AssetsUnder = [&Registry, &Folder]()
+	{
+		TArray<FAssetData> Found;
+		Registry.GetAssetsByPath(FName(*Folder), Found, /*bRecursive*/ true, /*bIncludeOnlyOnDiskAssets*/ false);
+		TSet<FSoftObjectPath> Paths;
+		for (const FAssetData& Data : Found)
+			Paths.Add(Data.GetSoftObjectPath());
+		return Paths;
+	};
+	const TSet<FSoftObjectPath> Before = AssetsUnder();
 	AssetTools().ImportAssetTasks({ Task });
 	TArray<UObject*> Imported;
 	for (UObject* Object : Task->GetObjects())
 	{
 		if (Object)
-			Imported.Add(Object);
+			Imported.AddUnique(Object);
+	}
+	TArray<FSoftObjectPath> Created = AssetsUnder().Difference(Before).Array();
+	Created.Sort([](const FSoftObjectPath& A, const FSoftObjectPath& B) { return A.LexicalLess(B); });
+	for (const FSoftObjectPath& Path : Created)
+	{
+		if (UObject* Object = Path.TryLoad())
+			Imported.AddUnique(Object);
 	}
 	if (Imported.Num() == 0)
 	{
 		// An existing asset of the same name is skipped without bReplaceExisting: name that, not an empty import.
-		const FString Existing = Destination / (Name.IsEmpty() ? ObjectTools::SanitizeObjectName(FPaths::GetBaseFilename(File)) : Name);
+		const FString Existing = Folder / (Name.IsEmpty() ? ObjectTools::SanitizeObjectName(FPaths::GetBaseFilename(File)) : Name);
 		if (!bReplaceExisting && UEditorAssetLibrary::DoesAssetExist(Existing))
 			UnrealMcpRql::Fail(FString::Printf(TEXT("'%s' already exists; pass bReplaceExisting = true to reimport over it, or a Name for a new asset"), *Existing));
 		else

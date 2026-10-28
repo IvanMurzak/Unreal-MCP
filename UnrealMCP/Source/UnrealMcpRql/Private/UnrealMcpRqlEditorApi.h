@@ -9,6 +9,7 @@
 #include "UnrealMcpRqlEditorApi.generated.h"
 
 class AActor;
+class AVolume;
 class ULevel;
 class UDataTable;
 class UMaterialInstanceConstant;
@@ -86,7 +87,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Unreal MCP|RQL", meta = (BlueprintInternalUseOnly = "true"))
 	UMaterialInstanceConstant* CreateMaterialInstance(const FString& Path, UMaterialInterface* Parent);
 
-	/** import a file (FBX, PNG, …) from disk into a content folder; Name renames the asset; returns the imported assets */
+	/** import a file (FBX, PNG, …) from disk into a content folder; Name renames the asset; returns the imported asset first, then every other asset the import created in the folder (materials, textures, skeleton …) */
 	UFUNCTION(BlueprintCallable, Category = "Unreal MCP|RQL", meta = (BlueprintInternalUseOnly = "true"))
 	TArray<UObject*> ImportAsset(const FString& File, const FString& Destination, const FString& Name = TEXT(""),
 		bool bReplaceExisting = false);
@@ -118,3 +119,6 @@ public:
 
 /** Why AttachToActor left @p Actor unattached from @p Parent, as an agent-facing ": reason" suffix ("" when unknown). */
 FString UnrealMcpRqlAttachFailure(const AActor* Actor, const AActor* Parent);
+
+/** Give @p Volume a box brush of @p HalfExtent (cm, local space), replacing its brush; undoable inside a transaction. */
+void UnrealMcpRqlBuildVolumeBox(AVolume* Volume, const FVector& HalfExtent);
