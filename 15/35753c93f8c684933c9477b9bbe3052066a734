@@ -1,0 +1,89 @@
+bridge/Directory.Build.props
+  s_7bc72ecaebd05d::t_316640fc0e5dbd 5
+bridge/src/com.IvanMurzak.Unreal.MCP.Bridge.csproj
+  s_7bc72ecaebd05d::t_26143226d2b105 131-134
+  s_7bc72ecaebd05d::t_0f7c5731285e8c 55,169
+bridge/tests/SidecarHostIntegrationTests.cs
+  s_7bc72ecaebd05d::t_7a5c6afb033afb 62,89-121
+  s_7bc72ecaebd05d::t_476208c562c05b 12,88
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpToolsWindowSpec.cpp
+  s_7bc72ecaebd05d::t_f6e3efa1b57560 10,13,16-18,22-30,35,49,61-62,64,72-73,79-129,134,136,139-143,146-151,153-163,166,171-183,187-188,194,196,200-212,215,217-218,221,226-230,232-234,240,248-249,251-252,254-257,259-260,263-267,270,272,274,277,282,284-286,292,295-296,300,302-303,310-312,319-321,323,327-333,336,341,343-348,351,356,358-360,364,371,373,379,391,394,403-447,451,453,457,459-460,462-463,467
+README.md
+  s_7bc72ecaebd05d::t_7bfa6e6cf0bf96 57,72,297,299,301,303-304,306,308,482
+UnrealMCP/AGENTS.md
+  s_7bc72ecaebd05d::t_54a25f8bac6115 20
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/SUnrealMcpToolsWindow.cpp
+  s_7bc72ecaebd05d::t_750259ee2d753c 22-23,46-47,53-59,71,76-79,82-83,100-102,107,112-113,118,137-138
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/SUnrealMcpToolsWindow.h
+  s_7bc72ecaebd05d::t_9d1ee9346f3d1b 20,27-34,36,40
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/UnrealMcpAuxWindows.cpp
+  s_7bc72ecaebd05d::t_1d7d6702f0df8a 71
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/UnrealMcpAuxWindows.h
+  s_7bc72ecaebd05d::t_b36b59955b4676 21
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/UnrealMcpEditorViewModel.cpp
+  s_7bc72ecaebd05d::t_fe6bb0090acd29 472,474,476,479,481-482,485-486,488,490-492,496-497,500,510
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/UnrealMcpEditorViewModel.h
+  s_7bc72ecaebd05d::t_917e2a691090ae 113-116,118,316,318-321,323-326,328
+UnrealMCP/Source/UnrealMcpEditor/Private/UnrealMcpEditorCoordinator.cpp
+  s_7bc72ecaebd05d::t_f9b0f102c1a484 108,187-191,193-194,196-197,322-323,327,330,771
+UnrealMCP/Source/UnrealMcpEditorTests/UnrealMcpEditorTests.Build.cs
+  s_7bc72ecaebd05d::t_dbef5215649952 40-41
+UnrealMCP/Source/UnrealMcpRuntime/Private/Config/UnrealMcpConfig.cpp
+  s_7bc72ecaebd05d::t_42c66a81701685 61-63,69,191-197,398-401
+UnrealMCP/Source/UnrealMcpRuntime/Private/Config/UnrealMcpConfig.h
+  s_7bc72ecaebd05d::t_62e5c288b91d32 118-124,131
+UnrealMCP/Source/UnrealMcpRuntime/Private/Tools/UnrealMcpToolRegistry.cpp
+  s_7bc72ecaebd05d::t_20eceea6d4767f 149-151,273-276
+UnrealMCP/Source/UnrealMcpRuntime/Public/UnrealMcpEnablementFilter.h
+  s_7bc72ecaebd05d::t_775ae141ee5839 14-16,18,31,40-45
+UnrealMCP/Source/UnrealMcpRuntime/Public/UnrealMcpPromptRegistry.h
+  s_7bc72ecaebd05d::t_43bfeeacb092f5 144-145,195
+UnrealMCP/Source/UnrealMcpRuntime/Public/UnrealMcpRegistry.h
+  s_7bc72ecaebd05d::t_df91d4bd79c020 51-54,172-175,271-314,335-336,380-405,411
+UnrealMCP/Source/UnrealMcpRuntime/Public/UnrealMcpResourceRegistry.h
+  s_7bc72ecaebd05d::t_0053f4d9dbc912 157-158,207
+UnrealMCP/Source/UnrealMcpRuntime/Public/UnrealMcpToolRegistry.h
+  s_7bc72ecaebd05d::t_a217aa823b4930 238,240-244,320-321,364-365,370-372,374-379,383-384,389-392,394-397,401-402
+bridge/src/AgentConfig/SkillFileGenerator.cs
+  s_7bc72ecaebd05d::t_e7976be1ee602e 102
+bridge/src/Ipc/IpcMessages.cs
+  s_7bc72ecaebd05d::t_82cb1774d48030 101-111
+bridge/src/Tools/ManifestRegistrar.cs
+  s_7bc72ecaebd05d::t_705a8a61ef6fa2 29-30,42,48,101-103
+bridge/src/Tools/ProxyTool.cs
+  s_7bc72ecaebd05d::t_be05f76c57f1be 68-70,72,88
+bridge/src/Tools/ProxyToolFactory.cs
+  s_7bc72ecaebd05d::t_e07cef55f6d4fe 77
+bridge/src/Tools/SurfaceRoutingToolSink.cs
+  s_7bc72ecaebd05d::t_1fe52472992a95 30,95,100-101,103
+bridge/src/Tools/SystemToolSink.cs
+  s_7bc72ecaebd05d::t_d47c7b26c34421 66,71-74,77
+bridge/tests/Fakes.cs
+  s_7bc72ecaebd05d::t_2d18c10558e286 144,153,159,163,167
+bridge/tests/ManifestDifferTests.cs
+  s_7bc72ecaebd05d::t_ba3047d41c675a 22-23,54,57-58,88
+bridge/tests/ManifestRegistrarTests.cs
+  s_7bc72ecaebd05d::t_e59765545ca7d0 22-23,66,69-70,72
+bridge/tests/ProxyToolFactoryAndMapperTests.cs
+  s_7bc72ecaebd05d::t_7c41178ce3dcda 82,85-86
+bridge/tests/SystemToolSurfaceTests.cs
+  s_7bc72ecaebd05d::t_1a4a5745379bd1 33-34,98-99,156,161-163
+docs/ARCHITECTURE.md
+  s_7bc72ecaebd05d::t_5960adb969e787 62-72,324,353,367,654-656,887
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "1535753c93f8c684933c9477b9bbe3052066a734",
+  "prompts": {},
+  "sessions": {
+    "s_7bc72ecaebd05d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "40274cb2-edf8-49ba-9a73-33b83cb5be53",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
