@@ -221,7 +221,7 @@ jobs:
     if: ${{ vars.UNREAL_RUNNER_READY == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     # PR-gating covers the same UE 5.5–5.8 set as release.yml: an API missing on an
     # older engine (e.g. FUObjectItem::GetObject() before 5.6) must fail the PR, not
-    # the release. max-parallel: 2 as in release.yml: the machine lock serializes the UE
+    # the release. max-parallel: 2: the machine lock serializes the UE
     # work anyway, so queued legs stay off a runner and off the lock's bounded wait.
     # fail-fast:false so one engine's failure never cancels the other legs.
     # Engine-versioned runner label (unreal-5-8 for UE 5.8): the job only lands on a machine
@@ -340,7 +340,7 @@ jobs:
         if: ${{ failure() && env.REPORT_DIR != '' && env.CHAIN_LOCK == '' }}
         uses: actions/upload-artifact@v7
         with:
-          name: automation-report
+          name: automation-report-${{ matrix.ue }}
           path: ${{ env.REPORT_DIR }}
           if-no-files-found: ignore
           retention-days: 7

@@ -291,12 +291,13 @@ jobs:
       max-parallel: 4
       matrix:
         include:
+          # Interleaved: GitHub starts matrix legs in this order, so both machines start at once.
           - { os: windows, ue: '5.5' }
+          - { os: macos, ue: '5.7' }
           - { os: windows, ue: '5.6' }
+          - { os: macos, ue: '5.8' }
           - { os: windows, ue: '5.7' }
           - { os: windows, ue: '5.8' }
-          - { os: macos, ue: '5.7' }
-          - { os: macos, ue: '5.8' }
     env:
       HOST_UPROJECT: ${{ vars.UNREAL_HOST_PROJECT }}
     steps:
@@ -375,7 +376,7 @@ jobs:
         if: ${{ failure() && env.REPORT_DIR != '' }}
         uses: actions/upload-artifact@v7
         with:
-          name: automation-report
+          name: automation-report-${{ matrix.ue }}-${{ matrix.os }}
           path: ${{ env.REPORT_DIR }}
           if-no-files-found: ignore
           retention-days: 7
