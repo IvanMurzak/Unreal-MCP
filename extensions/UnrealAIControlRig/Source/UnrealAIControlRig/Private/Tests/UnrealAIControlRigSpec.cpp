@@ -153,9 +153,13 @@ void FUnrealAIControlRigSpec::Define()
 			}
 
 			// controlRig | call AddBone(unreal.asset("@RIG@"), "Finger", "Wrist", [5, 0, 0])
-			Says(TEXT("an unknown parent bone"), TEXT(R"RQL({"rql":"0.1","source":{"path":["controlRig"]},"stages":[{"op":"call","method":"AddBone","args":[{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@RIG@"}]},{"lit":"Finger"},{"lit":"Wrist"},{"list":[{"lit":5},{"lit":0},{"lit":0}]}]}]})RQL"), TEXT("no bone named 'Wrist'"));
+			Says(TEXT("an unknown parent bone"), TEXT(R"RQL({"rql":"0.1","source":{"path":["controlRig"]},"stages":[{"op":"call","method":"AddBone","args":[{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@RIG@"}]},{"lit":"Finger"},{"lit":"Wrist"},{"list":[{"lit":5},{"lit":0},{"lit":0}]}]}]})RQL"), TEXT("no parent named 'Wrist'"));
 			// controlRig | call AddTwoBoneIK(unreal.asset("@RIG@"), "Shoulder", "Elbow", "Hand", "Nope")
 			Says(TEXT("an unknown target"), TEXT(R"RQL({"rql":"0.1","source":{"path":["controlRig"]},"stages":[{"op":"call","method":"AddTwoBoneIK","args":[{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@RIG@"}]},{"lit":"Shoulder"},{"lit":"Elbow"},{"lit":"Hand"},{"lit":"Nope"}]}]})RQL"), TEXT("named 'Nope'"));
+			// controlRig | call AddTwoBoneIK(unreal.asset("@RIG@"), "Elbow", "Shoulder", "Hand", "IK_Target")
+			Says(TEXT("bones out of chain order"), TEXT(R"RQL({"rql":"0.1","source":{"path":["controlRig"]},"stages":[{"op":"call","method":"AddTwoBoneIK","args":[{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@RIG@"}]},{"lit":"Elbow"},{"lit":"Shoulder"},{"lit":"Hand"},{"lit":"IK_Target"}]}]})RQL"), TEXT("is not a bone chain"));
+			// controlRig | call AddBone(unreal.asset("@RIG@"), "Hand", "Elbow", [1, 0, 0])
+			Says(TEXT("a taken bone name"), TEXT(R"RQL({"rql":"0.1","source":{"path":["controlRig"]},"stages":[{"op":"call","method":"AddBone","args":[{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@RIG@"}]},{"lit":"Hand"},{"lit":"Elbow"},{"list":[{"lit":1},{"lit":0},{"lit":0}]}]}]})RQL"), TEXT("already has an element named 'Hand'"));
 			// controlRig | call CreateRig("@RIG@")
 			Says(TEXT("a taken path"), TEXT(R"RQL({"rql":"0.1","source":{"path":["controlRig"]},"stages":[{"op":"call","method":"CreateRig","args":[{"lit":"@RIG@"}]}]})RQL"), TEXT("already exists"));
 			if (Hierarchy)

@@ -30,7 +30,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Control Rig", meta = (BlueprintInternalUseOnly = "true"))
 	FString AddBone(UControlRigBlueprint* Rig, const FString& Name, const FString& Parent, FVector Location);
 
-	/** add an animator control named Name to a rig at Location (rig space, cm), under the element Parent ("" for none), as a transform control the animator moves; returns the control's name */
+	/** add an animator control named Name to a rig at Location (cm; rig space, or relative to Parent when one is given: a control, null or bone, "" for none), as a transform control the animator moves; returns the control's name */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Control Rig", meta = (BlueprintInternalUseOnly = "true"))
 	FString AddControl(UControlRigBlueprint* Rig, const FString& Name, FVector Location, const FString& Parent = TEXT(""));
 
