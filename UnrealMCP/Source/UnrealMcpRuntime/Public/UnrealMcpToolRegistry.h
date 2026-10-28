@@ -367,14 +367,16 @@ public:
 	/**
 	 * Set one tool's Visible flag directly — a GRANULAR helper, NOT the production §7 toggle (that path is
 	 * view-model → OnToolVisibilityChanged → ApplyHiddenTools, a whole-list re-apply). Used by tests + any future
-	 * single-tool caller. Does NOT update the retained whitelist/blocklist. Game-thread only.
+	 * single-tool caller. Does NOT update the retained hidden list, so the next filter recompute overrides it.
+	 * Game-thread only.
 	 */
 	bool SetToolVisible(const FString& Name, bool bVisible) { return SetVisible(Name, bVisible); }
 	/** Count of tools that are served and listed in tools/list. */
 	int32 NumVisibleTools() const { return NumVisible(); }
 
-	UE_DEPRECATED(5.5, "Renamed to SetToolVisible: the per-tool flag only controls whether a tool is listed in tools/list; tools/call still runs it.")
-	bool SetToolEnabled(const FString& Name, bool bEnabled) { return SetToolVisible(Name, bEnabled); }
+	/** The old granular helper, behaviour kept: false takes the tool out of the manifest and Execute refuses it. */
+	UE_DEPRECATED(5.5, "Use SetToolVisible to hide a tool from tools/list (it stays callable), or SetEnabledToolsFilter to stop serving it.")
+	bool SetToolEnabled(const FString& Name, bool bEnabled) { return SetEnabled(Name, bEnabled); }
 
 	/**
 	 * Set the §8 env whitelist (UNREAL_MCP_TOOLS / Config.EnabledTools). RETAINED, re-evaluated on every

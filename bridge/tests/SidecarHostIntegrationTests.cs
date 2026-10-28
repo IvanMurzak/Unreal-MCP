@@ -8,6 +8,7 @@
 └───────────────────────────────────────────────────────────────────┘
 */
 
+using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -107,10 +108,12 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             Assert.True(tm.HasTool("ping"));
             Assert.False(tm.IsToolVisible("ping"));
             Assert.Equal(0, tm.VisibleToolsCount);
+            var listed = await tm.RunListTool(new RequestListTool());
+            Assert.False(Assert.Single(listed.Value!, t => t.Name == "ping").Visible);
 
-            // Hidden only from tools/list: a call by name still reaches the plugin.
-            var result = await tm.GetAllTools().First(t => t.Name == "ping").Run("req-1", null);
-            Assert.Equal(ResponseStatus.Success, result.Status);
+            // Hidden only from tools/list: a call by name (the tools/call path) still reaches the plugin.
+            var result = await tm.RunCallTool(new RequestCallTool("req-1", "ping", new Dictionary<string, JsonElement>()));
+            Assert.Equal(ResponseStatus.Success, result.Value!.Status);
             Assert.Equal("ping", channel.LastTool);
 
             // A visibility-only change (same schema hash) shows it again without re-registering.

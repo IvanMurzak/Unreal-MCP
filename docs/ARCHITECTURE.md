@@ -377,7 +377,7 @@ changes cascade, so notify lead + release as a minor NuGet bump, e.g. 6.8.0):
   JsonNode? inputSchema, JsonNode? outputSchema, bool? readOnlyHint, bool? destructiveHint,
   bool? idempotentHint, bool? openWorldHint,
   Func<string, IReadOnlyDictionary<string, JsonElement>?, CancellationToken, Task<ResponseCallTool>> handler)`;
-  `Enabled` is a settable bool (default true); `TokenCount` replicates the chars/4 formula
+  `Visible` (formerly `Enabled`; listing only) is a settable bool (default true); `TokenCount` replicates the chars/4 formula
   (extract `RunTool.CalculateTokenCount` core into a shared internal static helper).
 - `McpPlugin/src/Mcp/Tool/IDynamicToolFactory.cs` + `ProxyToolFactory` — DI-friendly
   `CreateProxyTool(...)` returning `IRunTool` (matches the probe's proposal).

@@ -81,7 +81,7 @@ public:
 		return Keys;
 	}
 
-	/** Count of entries whose bEnabled flag is set (backs the boot-time enable-map log line). */
+	/** Count of entries whose bEnabled flag is set (served; hidden entries count too). */
 	int32 NumEnabled() const
 	{
 		int32 Count = 0;
@@ -234,8 +234,8 @@ public:
 		const TArray<FString> Keys = GetKeysSorted();
 		for (const FString& Key : Keys)
 		{
-			// §7 enable-map: a disabled entry is EXCLUDED from the served manifest entirely (not merely flagged),
-			// so the sidecar mirrors no Proxy* for it and it never appears in the corresponding list (§2.2).
+			// A disabled (unserved) entry is EXCLUDED from the manifest entirely, so the sidecar mirrors no Proxy* for it
+			// (§2.2). A hidden entry is served: it stays in, flagged hidden by its descriptor, and remains callable.
 			const TEntry& Entry = Entries[Key];
 			if (!Entry.bEnabled)
 				continue;
@@ -268,8 +268,9 @@ public:
 
 	/**
 	 * Set one entry's Visible flag directly — a GRANULAR helper like SetEnabled, NOT the production §7 toggle (that is
-	 * ApplyHiddenList). Does NOT update the retained hidden list. Bumps the revision on a real change. Unknown key /
-	 * no-op change: returns false. Game-thread only.
+	 * ApplyHiddenList). Does NOT update the retained hidden list, so the next filter recompute (ApplyHiddenList,
+	 * SetWhitelistFilter, ApplyBlocklist) overrides it. Bumps the revision on a real change. Unknown key / no-op change:
+	 * returns false. Game-thread only.
 	 */
 	bool SetVisible(const FString& Key, bool bVisible)
 	{

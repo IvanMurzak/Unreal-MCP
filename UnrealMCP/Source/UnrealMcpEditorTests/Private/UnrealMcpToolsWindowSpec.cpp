@@ -26,7 +26,8 @@
  * written), (2) a hidden tool is flagged hidden in the registry's manifest (what the sidecar mirrors into tools/list)
  * yet still executes, (3) the view-model toggle drives persistence + the manifest re-apply end to end, plus the boot
  * path that re-applies the persisted list to a fresh registry, and (4) the §8 `enabledTools` whitelist still decides
- * whether a tool is served at all. All without Slate, a live bridge, or a real editor world. (The windowed open/dock
+ * whether a tool is served at all, and (5) the Tools window widget labels the toggle Visible. All without a live
+ * bridge or a real editor world (the widget is constructed, not opened in a tab). (The windowed open/dock
  * + dedup/focus is operator-verified — not reachable headless.)
  */
 BEGIN_DEFINE_SPEC(FUnrealMcpToolsWindowSpec, "UnrealMcp.ToolsWindow",
