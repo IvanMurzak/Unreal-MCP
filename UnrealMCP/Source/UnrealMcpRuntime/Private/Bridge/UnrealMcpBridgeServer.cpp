@@ -529,6 +529,7 @@ void FUnrealMcpBridgeServer::HandleToolCall(const TSharedPtr<FJsonObject>& Messa
 
 	FUnrealMcpToolCall Call(Arguments);
 	Call.CancelRequested = CancelFlag;
+	Call.TimeoutMs = TimeoutMs;
 
 	const FString CapturedTool = ToolName;
 	const FString CapturedRequestId = RequestId;

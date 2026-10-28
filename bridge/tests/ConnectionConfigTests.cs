@@ -9,6 +9,7 @@
 */
 
 using System.Text.Json.Nodes;
+using com.IvanMurzak.McpPlugin.Common;
 using com.IvanMurzak.Unreal.MCP.Bridge.Host;
 using com.IvanMurzak.Unreal.MCP.Bridge.Ipc;
 using Xunit;
@@ -40,6 +41,30 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             if (token != null) obj["token"] = token;
             if (keepConnected.HasValue) obj["keepConnected"] = keepConnected.Value;
             return obj;
+        }
+
+        [Fact]
+        public void ClientRole_EditorByDefault_RuntimeWhenThePluginSaysSo()
+        {
+            using var host = BuildHost();
+            Assert.Equal(ClientRole.Editor, host.Config.ClientRole);
+
+            var runtime = Config("Custom", host: "http://localhost:5200", cloudUrl: null, token: null);
+            runtime["clientRole"] = "runtime";
+            host.ApplyConnectionConfig(runtime);
+            Assert.Equal(ClientRole.Runtime, host.Config.ClientRole);
+
+            // A push without the field keeps the role; an explicit editor (or an unknown value) is handled too.
+            host.ApplyConnectionConfig(Config("Custom", host: "http://localhost:5200", cloudUrl: null, token: null));
+            Assert.Equal(ClientRole.Runtime, host.Config.ClientRole);
+            var unknown = Config("Custom", host: null, cloudUrl: null, token: null);
+            unknown["clientRole"] = "spectator";
+            host.ApplyConnectionConfig(unknown);
+            Assert.Equal(ClientRole.Runtime, host.Config.ClientRole);
+            var editor = Config("Custom", host: null, cloudUrl: null, token: null);
+            editor["clientRole"] = "editor";
+            host.ApplyConnectionConfig(editor);
+            Assert.Equal(ClientRole.Editor, host.Config.ClientRole);
         }
 
         [Fact]

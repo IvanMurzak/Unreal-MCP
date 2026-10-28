@@ -20,6 +20,7 @@
 
 #include <cstdio>
 #include <exception>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -33,6 +34,7 @@ namespace UnrealMcpRqlStructsLocal
 		int32 Count = 0;
 		bool bColor = false;   // "#rrggbb[aa]" accepted, alpha optional (defaults to opaque)
 		bool bSingle = false;  // float components: printed in single precision
+		bool bArithmetic = false; // component-wise RQL arithmetic (Scale * 1.5, Location + [0, 0, 100]); never quaternions
 		const char* Shape = "";
 		TFunction<void(const void*, double*)> Get;
 		TFunction<void(void*, const double*)> Set;
@@ -44,13 +46,14 @@ namespace UnrealMcpRqlStructsLocal
 		if (Specs.Num() > 0)
 			return Specs;
 		auto Add = [](UScriptStruct* Struct, int32 Count, bool bColor, bool bSingle, const char* Shape,
-			TFunction<void(const void*, double*)> Get, TFunction<void(void*, const double*)> Set)
+			TFunction<void(const void*, double*)> Get, TFunction<void(void*, const double*)> Set, bool bArithmetic = false)
 		{
 			FMathStruct Spec;
 			Spec.Struct = Struct;
 			Spec.Count = Count;
 			Spec.bColor = bColor;
 			Spec.bSingle = bSingle;
+			Spec.bArithmetic = bArithmetic;
 			Spec.Shape = Shape;
 			Spec.Get = MoveTemp(Get);
 			Spec.Set = MoveTemp(Set);
@@ -58,22 +61,22 @@ namespace UnrealMcpRqlStructsLocal
 		};
 		Add(TBaseStructure<FVector>::Get(), 3, false, false, "(x, y, z)",
 			[](const void* P, double* O) { const FVector& V = *static_cast<const FVector*>(P); O[0] = V.X; O[1] = V.Y; O[2] = V.Z; },
-			[](void* P, const double* I) { *static_cast<FVector*>(P) = FVector(I[0], I[1], I[2]); });
+			[](void* P, const double* I) { *static_cast<FVector*>(P) = FVector(I[0], I[1], I[2]); }, /*bArithmetic*/ true);
 		Add(TBaseStructure<FVector2D>::Get(), 2, false, false, "(x, y)",
 			[](const void* P, double* O) { const FVector2D& V = *static_cast<const FVector2D*>(P); O[0] = V.X; O[1] = V.Y; },
-			[](void* P, const double* I) { *static_cast<FVector2D*>(P) = FVector2D(I[0], I[1]); });
+			[](void* P, const double* I) { *static_cast<FVector2D*>(P) = FVector2D(I[0], I[1]); }, /*bArithmetic*/ true);
 		Add(TBaseStructure<FVector4>::Get(), 4, false, false, "(x, y, z, w)",
 			[](const void* P, double* O) { const FVector4& V = *static_cast<const FVector4*>(P); O[0] = V.X; O[1] = V.Y; O[2] = V.Z; O[3] = V.W; },
-			[](void* P, const double* I) { *static_cast<FVector4*>(P) = FVector4(I[0], I[1], I[2], I[3]); });
+			[](void* P, const double* I) { *static_cast<FVector4*>(P) = FVector4(I[0], I[1], I[2], I[3]); }, /*bArithmetic*/ true);
 		Add(TBaseStructure<FRotator>::Get(), 3, false, false, "(pitch, yaw, roll) in degrees",
 			[](const void* P, double* O) { const FRotator& R = *static_cast<const FRotator*>(P); O[0] = R.Pitch; O[1] = R.Yaw; O[2] = R.Roll; },
-			[](void* P, const double* I) { *static_cast<FRotator*>(P) = FRotator(I[0], I[1], I[2]); });
+			[](void* P, const double* I) { *static_cast<FRotator*>(P) = FRotator(I[0], I[1], I[2]); }, /*bArithmetic*/ true);
 		Add(TBaseStructure<FQuat>::Get(), 4, false, false, "(x, y, z, w)",
 			[](const void* P, double* O) { const FQuat& Q = *static_cast<const FQuat*>(P); O[0] = Q.X; O[1] = Q.Y; O[2] = Q.Z; O[3] = Q.W; },
 			[](void* P, const double* I) { *static_cast<FQuat*>(P) = FQuat(I[0], I[1], I[2], I[3]); });
 		Add(TBaseStructure<FLinearColor>::Get(), 4, true, true, "(r, g, b, a) linear 0..1 or \"#rrggbb\"",
 			[](const void* P, double* O) { const FLinearColor& C = *static_cast<const FLinearColor*>(P); O[0] = C.R; O[1] = C.G; O[2] = C.B; O[3] = C.A; },
-			[](void* P, const double* I) { *static_cast<FLinearColor*>(P) = FLinearColor(static_cast<float>(I[0]), static_cast<float>(I[1]), static_cast<float>(I[2]), static_cast<float>(I[3])); });
+			[](void* P, const double* I) { *static_cast<FLinearColor*>(P) = FLinearColor(static_cast<float>(I[0]), static_cast<float>(I[1]), static_cast<float>(I[2]), static_cast<float>(I[3])); }, /*bArithmetic*/ true);
 		Add(TBaseStructure<FColor>::Get(), 4, true, false, "(r, g, b, a) 0..255 or \"#rrggbb\"",
 			[](const void* P, double* O) { const FColor& C = *static_cast<const FColor*>(P); O[0] = C.R; O[1] = C.G; O[2] = C.B; O[3] = C.A; },
 			[](void* P, const double* I)
@@ -416,6 +419,35 @@ void UnrealMcpRqlAddStructAdapters(FUnrealMcpRqlSession& Session)
 			}
 			return true;
 		};
+		// Component-wise arithmetic (RQL spec 4.2): set Scale = Scale * 1.5, Location + [0, 0, 100]. A rotator's is per
+		// axis (Pitch, Yaw, Roll), as in the Details panel, not a composed rotation.
+		if (Spec.bArithmetic)
+		{
+			Adapter.components = [SpecPtr](const rql::Value& Value) -> std::optional<std::vector<double>>
+			{
+				if (!Value.is_struct() || !Value.ptr())
+					return std::nullopt;
+				double Parts[4] = { 0, 0, 0, 0 };
+				SpecPtr->Get(Value.ptr(), Parts);
+				std::vector<double> Out(Parts, Parts + SpecPtr->Count);
+				if (SpecPtr->bSingle)
+				{
+					for (double& Part : Out)
+						Part = rql::widen_single(static_cast<float>(Part));
+				}
+				return Out;
+			};
+			Adapter.from_components = [SpecPtr, Types](const rql::TypeDescriptor&, const std::vector<double>& Parts) -> std::optional<rql::Value>
+			{
+				if (Parts.size() != static_cast<size_t>(SpecPtr->Count))
+					return std::nullopt;
+				rql::Value Built = Types->WrapStruct(SpecPtr->Struct, nullptr);
+				if (!Built.ptr())
+					return std::nullopt;
+				SpecPtr->Set(Built.ptr(), Parts.data());
+				return Built;
+			};
+		}
 		Session.AddAdapter(std::move(Adapter));
 	}
 }

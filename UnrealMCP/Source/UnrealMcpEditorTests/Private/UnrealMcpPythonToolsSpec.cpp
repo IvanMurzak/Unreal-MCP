@@ -25,7 +25,7 @@
 BEGIN_DEFINE_SPEC(FUnrealMcpPythonToolsSpec, "UnrealMcp.Tools.Python",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 
-	FUnrealMcpToolResult Run(const FString& Code, const TArray<FString>& Include = TArray<FString>())
+	FUnrealMcpToolResult Run(const FString& Code, const TArray<FString>& Include = TArray<FString>(), int32 CallTimeoutMs = 0)
 	{
 		FUnrealMcpToolRegistry Registry;
 		UnrealMcpPythonTools::Register(Registry);
@@ -38,7 +38,9 @@ BEGIN_DEFINE_SPEC(FUnrealMcpPythonToolsSpec, "UnrealMcp.Tools.Python",
 				Values.Add(MakeShared<FJsonValueString>(Path));
 			A->SetArrayField(TEXT("include"), Values);
 		}
-		return Registry.Execute(TEXT("python-execute"), FUnrealMcpToolCall(A));
+		FUnrealMcpToolCall Call(A);
+		Call.TimeoutMs = CallTimeoutMs;
+		return Registry.Execute(TEXT("python-execute"), Call);
 	}
 
 END_DEFINE_SPEC(FUnrealMcpPythonToolsSpec)
@@ -111,6 +113,31 @@ void FUnrealMcpPythonToolsSpec::Define()
 			TestTrue(*FString::Printf(TEXT("Runtime for %s"), Code), !R.bSuccess && R.Message.StartsWith(TEXT("Runtime: ")));
 		}
 		TestTrue(TEXT("the interpreter still works"), Run(TEXT("6 * 7")).Message.StartsWith(TEXT("42")));
+	});
+
+	It("stops an endless loop before the call's timeout and leaves the editor usable", [this]()
+	{
+		// A 3 s call timeout leaves the snippet a 1 s budget (the margin covers the queue and the reply).
+		const double Start = FPlatformTime::Seconds();
+		const FUnrealMcpToolResult R = Run(TEXT("while True:\n    pass"), {}, 3000);
+		const double Elapsed = FPlatformTime::Seconds() - Start;
+		TestFalse(TEXT("an error"), R.bSuccess);
+		TestTrue(*FString::Printf(TEXT("a Timeout naming the budget (%s)"), *R.Message), R.Message.StartsWith(TEXT("Timeout:"))
+			&& R.Message.Contains(TEXT("time budget of 1000 ms")));
+		TestTrue(*FString::Printf(TEXT("stopped within the call's timeout (%.1f s)"), Elapsed), Elapsed < 3.0);
+		const FUnrealMcpToolResult After = Run(TEXT("6 * 7"));
+		TestTrue(TEXT("the next run works"), After.bSuccess && After.Message.StartsWith(TEXT("42")));
+	});
+
+	It("caps sys.setrecursionlimit while a snippet runs (Python 3.11 would overflow the C stack) and restores it after", [this]()
+	{
+		const FUnrealMcpToolResult Before = Run(TEXT("import sys\nsys.getrecursionlimit()"));
+		const FUnrealMcpToolResult R = Run(TEXT("import sys\nsys.setrecursionlimit(1000000)\nsys.getrecursionlimit()"));
+		TestTrue(*FString::Printf(TEXT("success (%s)"), *R.Message), R.bSuccess);
+		TestTrue(*FString::Printf(TEXT("capped at 3000 (%s)"), *R.Message), R.Message.StartsWith(TEXT("3000")));
+		TestTrue(TEXT("says so in a warning"), R.Message.Contains(TEXT("was capped at 3000")));
+		const FUnrealMcpToolResult After = Run(TEXT("import sys\nsys.getrecursionlimit()"));
+		TestEqual(TEXT("the host's limit is back"), After.Message, Before.Message);
 	});
 
 	It("imports helpers from an include folder", [this]()

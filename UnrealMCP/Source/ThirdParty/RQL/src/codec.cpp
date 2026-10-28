@@ -248,6 +248,7 @@ Json stage_json(const Stage& s) {
         }
         case StageKind::Call:
             o.set("method", s.method);
+            if (s.on) o.set("on", encode_expr(*s.on));
             o.set("args", expr_array(s.args));
             break;
         case StageKind::Generic: {
@@ -542,10 +543,11 @@ Stage read_stage(const Json& s) {
             break;
         }
         case StageKind::Call: {
-            allow_only(s, ctx, {"op", "method", "args"});
+            allow_only(s, ctx, {"op", "method", "on", "args"});
             const Json& m = required(s, "method", ctx);
             if (!m.is_string() || m.as_string().empty()) invalid("call.method must be a non-empty string");
             st.method = m.as_string();
+            if (const Json* on = s.find("on")) st.on = decode_expr(*on);
             st.args = read_expr_array(required(s, "args", ctx), "args");
             break;
         }

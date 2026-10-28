@@ -912,13 +912,19 @@ void FUnrealMcpRqlTypes::AddFunctionMethod(rql::TypeDescriptor& Descriptor, UFun
 			|| Function->HasMetaData(*DefaultKey));
 		if (Function->HasMetaData(*DefaultKey))
 		{
-			// UHT records C++ default arguments as text; values it cannot import (e.g. FVector::ZeroVector) read as the
-			// type's zero value, which is what those defaults are.
+			// UHT records C++ default arguments as text; an empty text (FVector::ZeroVector) is the type's zero value.
+			// Math structs come as "1.000000,1.000000,1.000000" (FVector(1.0)), which their text import does not read.
 			FTempValue Default(Property);
 			FOutputDeviceNull Ignore;
 			const FString DefaultText = Function->GetMetaData(*DefaultKey);
-			if (!DefaultText.IsEmpty())
-				Property->ImportText_Direct(*DefaultText, Default.Ptr, nullptr, PPF_None, &Ignore);
+			if (!DefaultText.IsEmpty() && !Property->ImportText_Direct(*DefaultText, Default.Ptr, nullptr, PPF_None, &Ignore))
+			{
+				if (const FStructProperty* StructProperty = CastField<FStructProperty>(Property))
+				{
+					FString Ignored;
+					UnrealMcpRqlParseMathStruct(StructProperty->Struct, rql::Value::string(UnrealMcpRqlToStd(DefaultText)), Default.Ptr, Ignored);
+				}
+			}
 			Parameter.has_default = true;
 			Parameter.default_value = Detached(Read(Property, Default.Ptr));
 		}

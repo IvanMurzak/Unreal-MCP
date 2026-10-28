@@ -251,41 +251,132 @@ FString UnrealMcpRqlAttachFailure(const AActor* Actor, const AActor* Parent)
 	return FString();
 }
 
-AActor* UUnrealMcpRqlEditorApi::SpawnActor(const FString& ClassName, const FString& Label, FVector Location, FRotator Rotation, AActor* Parent)
+namespace UnrealMcpRqlEditorApiLocal
 {
-	if (UClass* Class = FUnrealMcpObjectRef::ResolveClass(ClassName))
+	/** What a spawn places: an actor class (a Blueprint's generated class too), or an asset with the actor factory that places it. */
+	struct FSpawnTarget
 	{
-		if (Class->IsChildOf(AActor::StaticClass()))
-			return UnrealMcpRql::SpawnActor(Class, Location, Rotation, Label, Parent);
+		UClass* Class = nullptr;
+		UObject* Asset = nullptr;
+		UActorFactory* Factory = nullptr;
+	};
+
+	/** Resolve @p Name for SpawnActor (bAssetOnly: SpawnActorFromAsset); false + the reason when nothing spawnable matches. */
+	bool ResolveSpawnTarget(const FString& Name, bool bAssetOnly, FSpawnTarget& Out, FString& OutError)
+	{
+		auto UseClass = [&Out, &OutError](UClass* Class)
+		{
+			if (Class->HasAnyClassFlags(CLASS_Abstract | CLASS_Deprecated | CLASS_NewerVersionExists))
+			{
+				OutError = FString::Printf(TEXT("'%s' is abstract or deprecated and cannot be spawned"), *Class->GetName());
+				return false;
+			}
+			Out.Class = Class;
+			return true;
+		};
+		const bool bPath = Name.StartsWith(TEXT("/"));
+		if (bAssetOnly && !bPath)
+		{
+			OutError = FString::Printf(TEXT("'%s' is not an asset path (SpawnActorFromAsset takes e.g. \"/Engine/BasicShapes/Cube\"; "
+				"SpawnActor takes class names)"), *Name);
+			return false;
+		}
+		if (!bAssetOnly)
+		{
+			if (UClass* Class = FUnrealMcpObjectRef::ResolveClass(Name))
+			{
+				if (Class->IsChildOf(AActor::StaticClass()))
+					return UseClass(Class);
+			}
+			else
+			{
+				TArray<FString> Ambiguous;
+				if (UClass* Blueprint = BlueprintClassByName(Name, Ambiguous))
+					return UseClass(Blueprint);
+				if (Ambiguous.Num() > 0)
+				{
+					OutError = FString::Printf(TEXT("several Blueprints are named '%s': use a path (%s)"), *Name, *FString::Join(Ambiguous, TEXT(", ")));
+					return false;
+				}
+			}
+		}
+		// An asset the editor can place (a mesh dragged into the viewport becomes a StaticMeshActor showing it).
+		if (bPath)
+		{
+			UObject* Asset = UnrealMcpRql::LoadObject(UObject::StaticClass(), Name);
+			if (const UBlueprint* Blueprint = Cast<UBlueprint>(Asset); Blueprint && Blueprint->GeneratedClass
+				&& Blueprint->GeneratedClass->IsChildOf(AActor::StaticClass()))
+				return UseClass(Blueprint->GeneratedClass);
+			if (Asset && !Asset->IsA<UClass>() && !Asset->IsA<UBlueprint>())
+			{
+				Out.Asset = Asset;
+				Out.Factory = FActorFactoryAssetProxy::GetFactoryForAssetObject(Asset);
+				if (Out.Factory)
+					return true;
+				OutError = FString::Printf(TEXT("'%s' is a %s, which cannot be placed in a level"), *Name, *Asset->GetClass()->GetName());
+				return false;
+			}
+			if (bAssetOnly && !Asset)
+			{
+				OutError = FString::Printf(TEXT("no asset at '%s'"), *Name);
+				return false;
+			}
+		}
+		OutError = FString::Printf(TEXT("'%s' is not an actor class (try a class name such as \"PointLight\", a Blueprint "
+			"name or path, or an asset to place such as a StaticMesh path)"), *Name);
+		return false;
 	}
-	else
+
+	AActor* SpawnFromTarget(const FString& Name, bool bAssetOnly, const FString& Label, const FVector& Location, const FRotator& Rotation,
+		AActor* Parent, const FVector& Scale)
 	{
-		TArray<FString> Ambiguous;
-		if (UClass* Blueprint = BlueprintClassByName(ClassName, Ambiguous))
-			return UnrealMcpRql::SpawnActor(Blueprint, Location, Rotation, Label, Parent);
-		if (Ambiguous.Num() > 0)
-			return Failed<AActor*>(FString::Printf(TEXT("several Blueprints are named '%s': use a path (%s)"), *ClassName,
-				*FString::Join(Ambiguous, TEXT(", "))));
-	}
-	// An asset the editor can place (a mesh dragged into the viewport becomes a StaticMeshActor showing it).
-	if (ClassName.StartsWith(TEXT("/")))
-	{
-		if (UObject* Asset = UnrealMcpRql::LoadObject(UObject::StaticClass(), ClassName); Asset && !Asset->IsA<UClass>() && !Asset->IsA<UBlueprint>())
+		FSpawnTarget Target;
+		FString Error;
+		if (!ResolveSpawnTarget(Name, bAssetOnly, Target, Error))
+			return Failed<AActor*>(Error);
+		AActor* Actor = nullptr;
+		if (Target.Class)
+		{
+			Actor = UnrealMcpRql::SpawnActor(Target.Class, Location, Rotation, Label, Parent);
+		}
+		else
 		{
 			UWorld* World = FUnrealMcpObjectRef::GetEditorWorld();
-			UActorFactory* Factory = FActorFactoryAssetProxy::GetFactoryForAssetObject(Asset);
-			if (!World || !Factory)
-				return Failed<AActor*>(FString::Printf(TEXT("'%s' is a %s, which cannot be placed in a level"), *ClassName, *Asset->GetClass()->GetName()));
+			if (!World)
+				return Failed<AActor*>(TEXT("no editor world"));
 			FActorSpawnParameters Params;
 			Params.ObjectFlags |= RF_Transactional;
-			AActor* Actor = Factory->CreateActor(Asset, World->GetCurrentLevel(), FTransform(Rotation, Location), Params);
+			Actor = Target.Factory->CreateActor(Target.Asset, World->GetCurrentLevel(), FTransform(Rotation, Location), Params);
 			if (!Actor)
-				return Failed<AActor*>(FString::Printf(TEXT("could not place '%s'"), *ClassName));
-			return FinishSpawnedActor(Actor, Location, Rotation, Label, Parent);
+				return Failed<AActor*>(FString::Printf(TEXT("could not place '%s'"), *Name));
+			Actor = FinishSpawnedActor(Actor, Location, Rotation, Label, Parent);
 		}
+		if (Actor && !Scale.Equals(FVector::OneVector))
+		{
+			Actor->SetActorScale3D(Scale);
+			Actor->PostEditMove(/*bFinished*/ true); // construction scripts ran at scale 1
+		}
+		return Actor;
 	}
-	return Failed<AActor*>(FString::Printf(TEXT("'%s' is not an actor class (try a class name such as \"PointLight\", a Blueprint "
-		"name or path, or an asset to place such as a StaticMesh path)"), *ClassName));
+}
+
+FString UnrealMcpRqlSpawnRefusal(const FString& Name, bool bAssetOnly)
+{
+	FSpawnTarget Target;
+	FString Error;
+	return ResolveSpawnTarget(Name, bAssetOnly, Target, Error) ? FString() : Error;
+}
+
+AActor* UUnrealMcpRqlEditorApi::SpawnActor(const FString& ClassName, const FString& Label, FVector Location, FRotator Rotation, AActor* Parent,
+	FVector Scale)
+{
+	return SpawnFromTarget(ClassName, /*bAssetOnly*/ false, Label, Location, Rotation, Parent, Scale);
+}
+
+AActor* UUnrealMcpRqlEditorApi::SpawnActorFromAsset(const FString& AssetPath, const FString& Label, FVector Location, FRotator Rotation,
+	AActor* Parent, FVector Scale)
+{
+	return SpawnFromTarget(AssetPath, /*bAssetOnly*/ true, Label, Location, Rotation, Parent, Scale);
 }
 
 UWorld* UUnrealMcpRqlEditorApi::OpenLevel(const FString& Path)

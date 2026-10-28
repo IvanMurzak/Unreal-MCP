@@ -39,6 +39,7 @@
 #include "Misc/Paths.h"
 #include "UnrealMcpRqlSpecHelpers.h"
 #include "UObject/UObjectGlobals.h"
+#include "UObject/UObjectIterator.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 
@@ -1275,6 +1276,129 @@ void FUnrealMcpRqlSpec::Define()
 			TestFalse(*FString::Printf(TEXT("no options.allowMutation advice (%s)"), *Codes(Json)), (Codes(Json) + UnrealMcpRqlSpecHelpers::Hints(Json)).Contains(TEXT("allowMutation")));
 			TArray<AActor*> Spawned = Lamps();
 			TestTrue(TEXT("nothing hidden"), Spawned.Num() == 1 && !Spawned[0]->IsTemporarilyHiddenInEditor());
+		});
+	});
+
+	Describe("bulk create and vector arithmetic", [this]()
+	{
+		It("spawns one actor per range item in one call: one receipt row with its $ref each, one undo step", [this]()
+		{
+			// range(0, 50) | call editor.SpawnActor("/Engine/BasicShapes/Cube", "RqlSpecLampGrid_" + $, [($ % 10) * 150, floor($ / 10) * 150, 0])
+			const TSharedPtr<FJsonObject> Grid = Exec(TEXT(R"RQL({"rql":"0.1","source":{"call":"range","args":[{"lit":0},{"lit":50}]},"stages":[{"op":"call","method":"SpawnActor","on":{"path":["editor"]},"args":[{"lit":"/Engine/BasicShapes/Cube"},{"op":"+","args":[{"lit":"RqlSpecLampGrid_"},{"path":[]}]},{"list":[{"op":"*","args":[{"op":"%","args":[{"path":[]},{"lit":10}]},{"lit":150}]},{"op":"*","args":[{"call":"floor","args":[{"op":"/","args":[{"path":[]},{"lit":10}]}]},{"lit":150}]},{"lit":0}]}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("ok (%s)"), *Codes(Grid)), IsOk(Grid));
+			TestEqual(TEXT("one receipt row per spawn"), RowCount(Grid), 50);
+			TestTrue(*FString::Printf(TEXT("rows carry the actor's $ref (%s)"), *CellText(Grid, 49, 2)), CellText(Grid, 49, 2).StartsWith(TEXT("StaticMeshActor#")));
+			TArray<AActor*> Spawned = Lamps();
+			TestEqual(TEXT("fifty actors"), Spawned.Num(), 50);
+			const AActor* Last = nullptr;
+			for (const AActor* Actor : Spawned)
+			{
+				if (Actor->GetActorLabel() == TEXT("RqlSpecLampGrid_49"))
+					Last = Actor;
+			}
+			TestTrue(TEXT("on the grid"), Last && Last->GetActorLocation().Equals(FVector(1350, 600, 0)));
+			if (!GEditor)
+				return;
+			TestTrue(TEXT("undo"), GEditor->UndoTransaction());
+			TestEqual(TEXT("one undo removes all fifty"), Lamps().Num(), 0);
+		});
+
+		It("checks every spawn before the first one: one bad class name spawns nothing", [this]()
+		{
+			// range(0, 3) | call editor.SpawnActor($ == 2 ? "RqlSpecNoSuchClass" : "PointLight", "RqlSpecLampBad_" + $)
+			const TSharedPtr<FJsonObject> Bad = Exec(TEXT(R"RQL({"rql":"0.1","source":{"call":"range","args":[{"lit":0},{"lit":3}]},"stages":[{"op":"call","method":"SpawnActor","on":{"path":["editor"]},"args":[{"call":"if","args":[{"op":"==","args":[{"path":[]},{"lit":2}]},{"lit":"RqlSpecNoSuchClass"},{"lit":"PointLight"}]},{"op":"+","args":[{"lit":"RqlSpecLampBad_"},{"path":[]}]}]}]})RQL"), true);
+			TestFalse(TEXT("refused"), IsOk(Bad));
+			TestTrue(*FString::Printf(TEXT("names the class (%s)"), *Codes(Bad)), Codes(Bad).Contains(TEXT("RqlSpecNoSuchClass")));
+			TestEqual(TEXT("nothing spawned"), Lamps().Num(), 0);
+		});
+
+		It("binds a lone object literal by parameter name: range(0, 3) | call editor.SpawnActor({ClassName, Label, Location, Scale})", [this]()
+		{
+			// range(0, 3) | call editor.SpawnActor({ClassName: "PointLight", Label: "RqlSpecLampNamed_" + $, Location: [$ * 100, 0, 0], Scale: [2, 2, 2]})
+			const TSharedPtr<FJsonObject> Named = Exec(TEXT(R"RQL({"rql":"0.1","source":{"call":"range","args":[{"lit":0},{"lit":3}]},"stages":[{"op":"call","method":"SpawnActor","on":{"path":["editor"]},"args":[{"object":[{"key":"ClassName","value":{"lit":"PointLight"}},{"key":"Label","value":{"op":"+","args":[{"lit":"RqlSpecLampNamed_"},{"path":[]}]}},{"key":"Location","value":{"list":[{"op":"*","args":[{"path":[]},{"lit":100}]},{"lit":0},{"lit":0}]}},{"key":"Scale","value":{"list":[{"lit":2},{"lit":2},{"lit":2}]}}]}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("ok (%s)"), *Codes(Named)), IsOk(Named));
+			const TArray<AActor*> Spawned = Lamps();
+			TestEqual(TEXT("three lamps"), Spawned.Num(), 3);
+			for (const AActor* Actor : Spawned)
+			{
+				TestEqual(TEXT("scale from the literal"), Actor->GetActorScale3D(), FVector(2.0));
+				if (Actor->GetActorLabel() == TEXT("RqlSpecLampNamed_2"))
+					TestEqual(TEXT("location from the literal"), Actor->GetActorLocation(), FVector(200, 0, 0));
+			}
+		});
+
+		It("never builds a UObject from an object literal: a dry run with {} for an actor parameter creates nothing", [this]()
+		{
+			int32 ActorsBefore = 0;
+			for (TObjectIterator<AActor> It; It; ++It)
+				++ActorsBefore;
+			// editor | call SpawnActor("PointLight", "RqlSpecLampLiteral", [0, 0, 0], [0, 0, 0], {})
+			const TCHAR* Plan = TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"SpawnActor","args":[{"lit":"PointLight"},{"lit":"RqlSpecLampLiteral"},{"list":[{"lit":0},{"lit":0},{"lit":0}]},{"list":[{"lit":0},{"lit":0},{"lit":0}]},{"object":[]}]}]})RQL");
+			for (const bool bDryRun : { true, false })
+			{
+				const TSharedPtr<FJsonObject> Literal = Exec(Plan, true, bDryRun);
+				TestTrue(*FString::Printf(TEXT("refused as an engine object (dry run %d; %s)"), bDryRun, *Codes(Literal)),
+					!IsOk(Literal) && Codes(Literal).Contains(TEXT("engine object")));
+			}
+			int32 ActorsAfter = 0;
+			for (TObjectIterator<AActor> It; It; ++It)
+				++ActorsAfter;
+			TestEqual(TEXT("no actor object was constructed"), ActorsAfter, ActorsBefore);
+			TestEqual(TEXT("nothing spawned"), Lamps().Num(), 0);
+		});
+
+		It("spawns with a scale, and places assets through SpawnActorFromAsset", [this]()
+		{
+			// editor | call SpawnActor("PointLight", "RqlSpecLampScaled", [0, 0, 0], [0, 0, 0], null, [2, 2, 2])
+			const TSharedPtr<FJsonObject> Scaled = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"SpawnActor","args":[{"lit":"PointLight"},{"lit":"RqlSpecLampScaled"},{"list":[{"lit":0},{"lit":0},{"lit":0}]},{"list":[{"lit":0},{"lit":0},{"lit":0}]},{"lit":null},{"list":[{"lit":2},{"lit":2},{"lit":2}]}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("scaled spawn ok (%s)"), *Codes(Scaled)), IsOk(Scaled));
+			// editor | call SpawnActorFromAsset("/Engine/BasicShapes/Sphere", "RqlSpecLampSphere", [100, 0, 0])
+			const TSharedPtr<FJsonObject> Sphere = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"SpawnActorFromAsset","args":[{"lit":"/Engine/BasicShapes/Sphere"},{"lit":"RqlSpecLampSphere"},{"list":[{"lit":100},{"lit":0},{"lit":0}]}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("asset placed (%s)"), *Codes(Sphere)), IsOk(Sphere));
+			for (const AActor* Actor : Lamps())
+			{
+				if (Actor->GetActorLabel() == TEXT("RqlSpecLampScaled"))
+					TestEqual(TEXT("scale 2"), Actor->GetActorScale3D(), FVector(2.0));
+				if (Actor->GetActorLabel() == TEXT("RqlSpecLampSphere"))
+				{
+					TestEqual(TEXT("default scale 1"), Actor->GetActorScale3D(), FVector(1.0));
+					TestTrue(TEXT("a mesh actor"), Actor->IsA<AStaticMeshActor>());
+				}
+			}
+			TestEqual(TEXT("both spawned"), Lamps().Num(), 2);
+			// editor | call SpawnActorFromAsset("PointLight", "RqlSpecLampNotAsset")
+			const TSharedPtr<FJsonObject> NotAsset = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"SpawnActorFromAsset","args":[{"lit":"PointLight"},{"lit":"RqlSpecLampNotAsset"}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("a class name is no asset path (%s)"), *Codes(NotAsset)), !IsOk(NotAsset) && Codes(NotAsset).Contains(TEXT("not an asset path")));
+		});
+
+		It("computes vectors and rotators component-wise: Scale * 1.5, Location + [0, 0, 100]; Scale + 1 is refused", [this]()
+		{
+			SpawnLamp();
+			// actors | where Label == "RqlSpecLamp" | set Scale = Scale * 1.5, Location = Location + [0, 0, 100], Rotation = Rotation + [0, 90, 0]
+			const TSharedPtr<FJsonObject> Set = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"RqlSpecLamp"}]}},{"op":"set","assign":[{"target":{"path":["Scale"]},"value":{"op":"*","args":[{"path":["Scale"]},{"lit":1.5}]}},{"target":{"path":["Location"]},"value":{"op":"+","args":[{"path":["Location"]},{"list":[{"lit":0},{"lit":0},{"lit":100}]}]}},{"target":{"path":["Rotation"]},"value":{"op":"+","args":[{"path":["Rotation"]},{"list":[{"lit":0},{"lit":90},{"lit":0}]}]}}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("ok (%s)"), *Codes(Set)), IsOk(Set));
+			const TArray<AActor*> Found = Lamps();
+			if (!TestEqual(TEXT("one lamp"), Found.Num(), 1))
+				return;
+			TestEqual(TEXT("scaled by 1.5"), Found[0]->GetActorScale3D(), FVector(1.5));
+			TestEqual(TEXT("raised by 100"), Found[0]->GetActorLocation(), FVector(1, 2, 103));
+			TestTrue(TEXT("yaw + 90"), FMath::IsNearlyEqual(Found[0]->GetActorRotation().Yaw, 90.0, 1e-3));
+			// actors | where Label == "RqlSpecLamp" | set Scale = Scale + 1
+			const TSharedPtr<FJsonObject> Plus = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"RqlSpecLamp"}]}},{"op":"set","assign":[{"target":{"path":["Scale"]},"value":{"op":"+","args":[{"path":["Scale"]},{"lit":1}]}}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("vector + number is refused (%s)"), *Codes(Plus)), !IsOk(Plus) && Codes(Plus).Contains(TEXT("cannot apply '+' to Vector")));
+			TestEqual(TEXT("unchanged"), Found[0]->GetActorScale3D(), FVector(1.5));
+		});
+
+		It("puts RQL's shared language rules in the rql-query and rql-mutate descriptions", [this]()
+		{
+			FUnrealMcpToolRegistry Registry;
+			UnrealMcpRqlTools::Register(Registry);
+			for (const TCHAR* Tool : { TEXT("rql-query"), TEXT("rql-mutate") })
+			{
+				const FUnrealMcpRegisteredTool* Found = Registry.Find(Tool);
+				TestTrue(*FString::Printf(TEXT("%s has the shared rules"), Tool), Found && Found->Description.Contains(TEXT("Language rules:"))
+					&& Found->Description.Contains(TEXT("Bulk create: range(start, end[, step])")));
+			}
 		});
 	});
 

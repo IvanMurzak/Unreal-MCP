@@ -2,6 +2,7 @@
 // Mirrors dotnet/Rql.Execution/Compiler.cs.
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <functional>
 #include <limits>
 
@@ -76,30 +77,14 @@ std::string member_list_hint(const std::vector<std::string>& names) {
     return s;
 }
 
+/// Containment signals a typo or a partial name: the candidate contains the name (at least 3 characters), or the name
+/// contains a candidate at least half its length (so "NoSuchType" does not suggest "Type").
+static bool signals_typo(const std::string& name, const std::string& c) {
+    return (name.size() >= 3 && icontains(c, name)) || (c.size() * 2 >= name.size() && icontains(name, c));
+}
+
 std::vector<std::string> suggest_closest(const std::string& name, const std::vector<std::string>& candidates, size_t max) {
-    struct C { std::string c; size_t d; bool sub; };
-    std::vector<C> cs;
-    std::string lower = ascii_lower(name);
-    size_t limit = std::max<size_t>(1, name.size() / 3);
-    for (auto& c : candidates) {
-        size_t d = osa_distance(lower, ascii_lower(c));
-        // Containment signals a typo or a partial name: the candidate contains the name (at least 3 characters),
-        // or the name contains a candidate at least half its length (so "NoSuchType" does not suggest "Type").
-        bool sub = (name.size() >= 3 && icontains(c, name)) || (c.size() * 2 >= name.size() && icontains(name, c));
-        if (sub || d <= limit) cs.push_back({c, d, sub});
-    }
-    std::stable_sort(cs.begin(), cs.end(), [](const C& a, const C& b) {
-        if (a.sub != b.sub) return a.sub;
-        if (a.d != b.d) return a.d < b.d;
-        return a.c < b.c;
-    });
-    std::vector<std::string> out;
-    for (auto& c : cs) {
-        if (std::find(out.begin(), out.end(), c.c) != out.end()) continue;
-        out.push_back(c.c);
-        if (out.size() >= max) break;
-    }
-    return out;
+    return suggest_members(name, candidates, {}, max);
 }
 
 bool try_number(const Value& v, double& d, bool& single) {
@@ -145,12 +130,75 @@ std::string path_text(const Expr& e) {
     return s;
 }
 
-std::string member_hint(const std::string& name, const std::vector<std::string>& members, const std::vector<std::string>& declaring) {
+namespace {
+constexpr int kMaxNested = 200;
+
+void walk_nested(Exec& x, const TypeDescriptor* type, const std::string& prefix, int level, int& budget, std::vector<std::string>& out) {
+    const TypeView outer_view = x.view(type);
+    for (auto& m : outer_view.members()) {
+        const TypeDescriptor* inner = m.type;
+        if (!inner || inner->kind != TypeKind::Struct) continue;
+        const std::string path = prefix + m.name + ".";
+        const TypeView inner_view = x.view(inner);
+        for (auto& im : inner_view.members()) {
+            if (budget-- <= 0) return;
+            out.push_back(path + im.name);
+        }
+        if (level < 2) walk_nested(x, inner, path, level + 1, budget, out);
+    }
+}
+}  // namespace
+
+std::vector<std::string> nested_members(Exec& x, const std::vector<const TypeDescriptor*>& types) {
+    std::vector<std::string> out;
+    for (const TypeDescriptor* t : types) {
+        if (!t) continue;
+        int budget = kMaxNested;
+        walk_nested(x, t, "", 1, budget, out);
+    }
+    // Several miss types may share a member type: keep each path once, in first-seen order.
+    std::vector<std::string> unique;
+    std::unordered_set<std::string> seen;
+    for (auto& p : out)
+        if (seen.insert(p).second) unique.push_back(std::move(p));
+    return unique;
+}
+
+std::vector<std::string> suggest_members(const std::string& name, const std::vector<std::string>& members,
+                                         const std::vector<std::string>& nested, size_t max) {
+    struct C { std::string c; size_t d; bool sub; size_t depth; };
+    std::vector<C> cs;
+    const std::string lower = ascii_lower(name);
+    const size_t limit = std::max<size_t>(1, name.size() / 3);
+    auto consider = [&](const std::string& c, const std::string& leaf, size_t depth) {
+        size_t d = osa_distance(lower, ascii_lower(leaf));
+        const bool sub = signals_typo(name, leaf);
+        if (sub || d <= limit) cs.push_back({c, d, sub, depth});
+    };
+    for (auto& c : members) consider(c, c, 0);
+    for (auto& c : nested) consider(c, c.substr(c.rfind('.') + 1), static_cast<size_t>(std::count(c.begin(), c.end(), '.')));
+    std::stable_sort(cs.begin(), cs.end(), [](const C& a, const C& b) {
+        if (a.sub != b.sub) return a.sub;
+        if (a.d != b.d) return a.d < b.d;
+        if (a.depth != b.depth) return a.depth < b.depth;
+        return a.c < b.c;
+    });
+    std::vector<std::string> out;
+    for (auto& c : cs) {
+        if (std::find(out.begin(), out.end(), c.c) != out.end()) continue;
+        out.push_back(c.c);
+        if (out.size() >= max) break;
+    }
+    return out;
+}
+
+std::string member_hint(const std::string& name, const std::vector<std::string>& members, const std::vector<std::string>& declaring,
+                        const std::vector<std::string>& nested) {
     std::vector<std::string> parts;
     if (!declaring.empty())
         parts.push_back("'" + name + "' is a member of " + join(declaring, ", ") + ": filter to those first, e.g. where $ is " + declaring[0] +
                         " (or where has(" + name + "))");
-    auto close = suggest_closest(name, members, 3);
+    auto close = suggest_members(name, members, nested, 3);
     if (!close.empty()) {
         parts.push_back("did you mean " + join(close, " / ") + "?");
     } else if (declaring.empty() && !members.empty()) {
@@ -267,7 +315,34 @@ std::optional<bool> rql_equal(Exec& x, const Value& a, const Value& b) {
     if (b.is_enum()) return enum_equal(b, a);
     if (a.is_string()) return b.is_string() ? std::optional<bool>(a.as_string() == b.as_string()) : std::nullopt;
     if (a.is_bool()) return b.is_bool() ? std::optional<bool>(a.as_bool() == b.as_bool()) : std::nullopt;
-    // value types (structs) and mixed scalar kinds are not comparable in v0
+    // Two structs of one type compare member by member, recursively (spec §4.1): the members their encoding shows, without
+    // members of the struct's own type (derived values); false as soon as one differs, unknown when none differs but one is.
+    if (a.is_struct() && b.is_struct() && a.type() && a.type() == b.type()) {
+        const auto view = x.view(a.type());
+        // Struct nesting is capped at 8 so derived members of other struct types cannot branch without end.
+        if (x.compare_depth >= kMaxCompareDepth || x.struct_eq_depth >= 8) return std::nullopt;
+        DepthGuard guard(x.compare_depth);
+        DepthGuard struct_guard(x.struct_eq_depth);
+        bool unknown = false;
+        size_t compared = 0;
+        for (auto& m : view.implicit_members()) {
+            if (m.type == a.type()) continue;
+            ++compared;
+            Value ma, mb;
+            try {
+                ma = x.live(m.getter(a.ptr()));
+                mb = x.live(m.getter(b.ptr()));
+            } catch (const std::exception&) {
+                return std::nullopt;
+            }
+            auto r = rql_equal(x, ma, mb);
+            if (r == std::optional<bool>(false)) return false;
+            if (!r) unknown = true;
+        }
+        if (compared == 0) return std::nullopt;  // nothing visible to compare
+        return unknown ? std::nullopt : std::optional<bool>(true);
+    }
+    // structs of different types and mixed scalar kinds are not comparable
     if (a.is_struct() || b.is_struct() || b.is_number() || b.is_bool() || b.is_string()) return std::nullopt;
     if (a.is_list() && b.is_list()) {
         // Lists compare by value (spec §4.1): the same length and pairwise equal elements; false as soon as a pair differs,
@@ -324,6 +399,22 @@ std::optional<int> rql_compare(Exec& x, const Value& a, const Value& b) {
     return std::nullopt;
 }
 
+/// A struct member number as numeric tuples display it (spec §5, §13): single precision to 6 significant digits, others
+/// to 12, tiny magnitudes (below 1e-6 / 1e-9) and -0 as 0. Only compared within one process, so text is a fine key.
+static std::string rounded_key(const Value& v) {
+    const double d = v.as_number();
+    if (std::isnan(d)) return "NaN";
+    if (std::isinf(d)) return d > 0 ? "Infinity" : "-Infinity";
+    const bool single = v.is_single();
+    if (std::fabs(d) < (single ? 1e-6 : 1e-9)) return "0";
+    char buf[48];
+    std::snprintf(buf, sizeof buf, "%.*e", single ? 5 : 11, single ? static_cast<double>(to_single(d)) : d);
+    return buf;
+}
+
+/// Struct levels a distinct / group-by key looks into: the struct and two nested levels (spec §5 "Struct keys").
+constexpr int kMaxStructKeyDepth = 3;
+
 bool distinct_equal(Exec& x, const Value& a, const Value& b) {
     if (a.is_null() || b.is_null()) return a.is_null() && b.is_null();
     if (a.is_missing() || b.is_missing()) return a.is_missing() && b.is_missing();  // singletons in .NET
@@ -335,16 +426,34 @@ bool distinct_equal(Exec& x, const Value& a, const Value& b) {
     if (a.is_bool() && b.is_bool()) return a.as_bool() == b.as_bool();
     if (a.is_struct() && b.is_struct()) {
         if (a.type() != b.type()) return false;
+        // The struct and two nested levels count (spec §5 "Struct keys"); deeper levels are not compared.
+        if (x.struct_key_depth >= kMaxStructKeyDepth) return true;
+        DepthGuard guard(x.struct_key_depth);
         const auto view = x.view(a.type());
         for (auto& m : view.implicit_members()) {  // never hidden / explicit-only members (spec §13)
+            if (m.type == a.type()) continue;      // a member of the struct's own type is a derived value (normalized)
             Value ma, mb;
+            bool threw_a = false, threw_b = false;
             try {
-                ma = m.getter(a.ptr());
-                mb = m.getter(b.ptr());
+                ma = x.live(m.getter(a.ptr()));
             } catch (const std::exception&) {
+                threw_a = true;
+            }
+            try {
+                mb = x.live(m.getter(b.ptr()));
+            } catch (const std::exception&) {
+                threw_b = true;
+            }
+            if (threw_a || threw_b) {  // as .NET: members whose getter throws on both sides are equal
+                if (threw_a && threw_b) continue;
                 return false;
             }
-            if (!distinct_equal(x, ma, mb)) return false;
+            // Numbers as numeric tuples print them (spec §5 "Struct keys"): values that print alike group together.
+            if (ma.is_number() && mb.is_number()) {
+                if (rounded_key(ma) != rounded_key(mb)) return false;
+            } else if (!distinct_equal(x, ma, mb)) {
+                return false;
+            }
         }
         return true;
     }
@@ -383,11 +492,16 @@ size_t distinct_hash(Exec& x, const Value& v) {
         case Value::Kind::Enum: return std::hash<int64_t>()(v.enum_value()) ^ std::hash<const void*>()(v.type());
         case Value::Kind::Struct: {
             size_t h = std::hash<const void*>()(v.type());
+            if (x.struct_key_depth >= kMaxStructKeyDepth) return h;
+            DepthGuard guard(x.struct_key_depth);
             const auto view = x.view(v.type());
             for (auto& m : view.implicit_members()) {
+                if (m.type == v.type()) continue;
                 try {
-                    h = h * 31 + distinct_hash(x, m.getter(v.ptr()));
+                    Value mv = x.live(m.getter(v.ptr()));
+                    h = h * 31 + (mv.is_number() ? std::hash<std::string>()(rounded_key(mv)) : distinct_hash(x, mv));
                 } catch (const std::exception&) {
+                    h = h * 31 + 1;
                 }
             }
             return h;
@@ -499,7 +613,8 @@ Value map_lookup_raw(Exec& x, const Value& map, const Value& key, MemberSite* si
             return out;
         }
     }
-    return Value::missing();
+    // An absent key reads as null (spec §3); inside has() it is missing, so has(M["k"]) tests the key.
+    return x.key_probe > 0 ? Value::missing() : Value::null();
 }
 
 Value index_at(const Value& v, int64_t idx) {
@@ -681,13 +796,23 @@ Eval Compiler::compile_path(const Expr& p) {
                     // Lexical scope chain: inside collection-method arguments a bare name missing on the
                     // element resolves against the enclosing item(s), innermost first (spec §3).
                     cur = [site](Exec& x) {
-                        Value r = member_of(x, x.live(x.current), *site);
-                        if (!r.is_missing() || x.outer.empty()) return r;
-                        for (size_t k = x.outer.size(); k-- > 0;) {
-                            Value o = member_of(x, x.live(x.outer[k]), *site);
-                            if (!o.is_missing()) return o;
+                        if (x.outer.empty()) return member_of(x, x.live(x.current), *site);
+                        // An absent map key counts as missing here, so the name can still resolve on an enclosing item
+                        // (spec §3); when no item has it, the element's own answer stands (null for an absent key).
+                        {
+                            struct Probe {
+                                int& depth;
+                                explicit Probe(int& d) : depth(d) { ++depth; }
+                                ~Probe() { --depth; }
+                            } probe(x.key_probe);
+                            Value r = member_of(x, x.live(x.current), *site);
+                            if (!r.is_missing()) return r;
+                            for (size_t k = x.outer.size(); k-- > 0;) {
+                                Value o = member_of(x, x.live(x.outer[k]), *site);
+                                if (!o.is_missing()) return o;
+                            }
                         }
-                        return r;
+                        return x.key_probe > 0 ? Value::missing() : member_of(x, x.live(x.current), *site);
                     };
                 } else {
                     cur = [prev, site](Exec& x) { return member_of(x, prev(x), *site); };
@@ -900,14 +1025,116 @@ std::optional<bool> is_type(const Value& a, const Value& b) {
     return iequals(type_name_of(a), b.as_string());
 }
 
-Value arith(const std::string& op, const Value& a, const Value& b) {
+/// The arithmetic components of a struct whose type adapter declares them (spec §4.2, §13), with that adapter.
+bool components_of(Exec& x, const Value& v, std::vector<double>& parts, const TypeAdapter*& adapter) {
+    if (!v.is_struct()) return false;
+    for (const TypeAdapter* ad : x.adapters_for(v, Capability::Components)) {
+        if (auto c = ad->components(v)) {
+            parts = std::move(*c);
+            adapter = ad;
+            return true;
+        }
+    }
+    return false;
+}
+
+Value arith_mismatch(Exec& x, const std::string& op, const Value& a, const Value& b, std::string why = {}) {
+    std::string message = "cannot apply '" + op + "' to " + describe_value(a) + " and " + describe_value(b);
+    if (why.empty()) {
+        // A struct without declared components: say why (spec §4.2), so `Scale * 1.5` is not a mystery.
+        std::vector<double> parts;
+        const TypeAdapter* ad = nullptr;
+        if (a.is_struct() && !components_of(x, a, parts, ad)) why = describe_value(a) + " has no component-wise arithmetic";
+        else if (op != "neg" && b.is_struct() && !components_of(x, b, parts, ad)) why = describe_value(b) + " has no component-wise arithmetic";
+    }
+    return Value::error("type-mismatch", why.empty() ? message : message + " (" + why + ")");
+}
+
+/// A list of exactly `width` numbers read as components (spec §4.2).
+bool list_parts(const Value& v, size_t width, std::vector<double>& out) {
+    if (!v.is_list()) return false;
+    auto& l = v.list();
+    if (l.size() != width) return false;
+    out.clear();
+    for (size_t i = 0; i < width; ++i) {
+        Value e = l.at(i);
+        if (!e.is_number()) return false;
+        out.push_back(e.as_number());
+    }
+    return true;
+}
+
+/// Component-wise arithmetic on structs whose adapter declares components (spec §4.2): v * n, n * v, v / n, v ± w, v * w,
+/// v / w (w of the same type, or a list of as many numbers), -v. nullopt when neither operand has components.
+std::optional<Value> struct_arith(Exec& x, std::string op, const Value& a, const Value& b) {
+    std::vector<double> pa, pb;
+    const TypeAdapter* ada = nullptr;
+    const TypeAdapter* adb = nullptr;
+    const bool ha = components_of(x, a, pa, ada);
+    const bool hb = op != "neg" && components_of(x, b, pb, adb);
+    if (!ha && !hb) return std::nullopt;
+    if (op == "%") return arith_mismatch(x, op, a, b, "'%' is not component-wise");
+    const bool vector_left = ha;
+    const TypeAdapter* adapter = vector_left ? ada : adb;
+    const Value& vector = vector_left ? a : b;
+    std::vector<double> parts = vector_left ? std::move(pa) : std::move(pb);
+    std::vector<double> other;
+    if (op == "neg") {
+        other = parts;
+        parts.assign(other.size(), 0.0);  // -v = 0 - v
+        op = "-";
+    } else if (ha && hb) {
+        if (a.type() != b.type() || parts.size() != pb.size()) return arith_mismatch(x, op, a, b, "different types");
+        other = std::move(pb);
+    } else {
+        const Value& operand = vector_left ? b : a;
+        if (operand.is_number()) {
+            // v * n, n * v and v / n scale; a number added to a vector, or divided by one, is not defined.
+            if (!(op == "*" || (op == "/" && vector_left)))
+                return arith_mismatch(x, op, a, b,
+                                      op == "/" ? "a number cannot be divided by a vector"
+                                                : "add a value of the same type or a list of " + std::to_string(parts.size()) +
+                                                      " numbers; multiply or divide by a number");
+            other.assign(parts.size(), operand.as_number());
+        } else if (!list_parts(operand, parts.size(), other)) {
+            return arith_mismatch(x, op, a, b,
+                                  operand.is_list() ? "the list must hold exactly " + std::to_string(parts.size()) + " numbers, one per component"
+                                                    : std::string());
+        }
+        if (!vector_left) std::swap(parts, other);
+    }
+    std::vector<double> result(parts.size());
+    for (size_t i = 0; i < parts.size(); ++i) {
+        const double l = parts[i], r = other[i];
+        if (op == "+") result[i] = l + r;
+        else if (op == "-") result[i] = l - r;
+        else if (op == "*") result[i] = l * r;
+        else {
+            if (r == 0) return Value::error("div-by-zero");
+            result[i] = l / r;
+        }
+    }
+    std::optional<Value> built;
+    try {
+        if (adapter->from_components) built = adapter->from_components(*vector.type(), result);
+    } catch (const std::exception&) {
+        built.reset();
+    }
+    if (!built) return arith_mismatch(x, op, a, b, "cannot build " + describe_value(vector) + " from components");
+    return built;
+}
+
+Value arith(Exec& x, const std::string& op, const Value& a, const Value& b) {
     if (a.is_missing() || b.is_missing()) return Value::missing();
     if (a.is_error()) return a;
     if (b.is_error()) return b;
     if (op == "+" && (a.is_string() || b.is_string())) return Value::string(to_text(a) + to_text(b));
     double l, r;
-    if (!try_number(a, l) || !try_number(b, r))
-        return Value::error("type-mismatch", "cannot apply '" + op + "' to " + describe_value(a) + " and " + describe_value(b));
+    if (!try_number(a, l) || !try_number(b, r)) {
+        if (x.has_capability(Capability::Components))
+            if (auto v = struct_arith(x, op, a, b)) return *v;
+        return arith_mismatch(x, op, a, b);
+    }
     if (op == "neg") return Value::number(-l);
     if (op == "+") return Value::number(l + r);
     if (op == "-") return Value::number(l - r);
@@ -1010,11 +1237,11 @@ Eval Compiler::compile_op_args(const std::string& op, const ExprPtr& ae, const E
             return tri(r);
         };
     }
-    if (op == "neg") return [a](Exec& x) { return arith("neg", a(x), Value::number(0)); };
+    if (op == "neg") return [a](Exec& x) { return arith(x, "neg", a(x), Value::number(0)); };
     if (op == "+" || op == "-" || op == "*" || op == "/" || op == "%")
         return [a, b, op](Exec& x) {
             Value l = a(x);
-            return arith(op, l, b(x));
+            return arith(x, op, l, b(x));
         };
     if (op == "index")
         return [a, b](Exec& x) {
@@ -1041,7 +1268,7 @@ namespace {
 
 const char* kCoreFunctions[] = {"has", "is-null", "len", "lower", "upper", "abs", "round", "floor", "ceil", "sqrt", "pow", "min", "max",
                                 "coalesce", "if", "ref",
-                                "append", "insert", "remove-at", "without",
+                                "append", "insert", "remove-at", "without", "range",
                                 "replace", "replace-regex", "substring", "split", "trim", "pad",
                                 "contains", "starts-with", "ends-with", "matches"};
 const char* kCoreMethods[] = {"any", "all", "count", "sum", "min", "max", "avg", "first", "keys", "values",
@@ -1341,6 +1568,46 @@ Value aggregate(Exec& x, const Value& v, const Eval* sel, const std::string& kin
 
 }  // namespace
 
+double range_at(double start, double step, int64_t k) {
+    // Two separately rounded operations, never a fused multiply-add (arm64 compilers contract a + b * c), so every runtime
+    // produces the same numbers and the same count.
+    volatile double offset = static_cast<double>(k) * step;
+    return start + offset;
+}
+
+bool range_of(const Value& a, const Value& b, const Value& c, double& start, double& step, int64_t& count, Value& error) {
+    double nums[3] = {0, 0, 1};
+    const Value* vals[3] = {&a, &b, &c};
+    for (int i = 0; i < 3; ++i) {
+        const Value& v = *vals[i];
+        if (v.is_error()) {
+            error = v;
+            return false;
+        }
+        if (!try_number(v, nums[i])) {
+            error = Value::error("type-mismatch", "range() expects numbers, got " + describe_value(v));
+            return false;
+        }
+        if (!std::isfinite(nums[i])) {
+            error = Value::error("type-mismatch", "range() expects finite numbers, got " + format_number_text(nums[i]));
+            return false;
+        }
+    }
+    start = nums[0];
+    step = nums[2];
+    if (step == 0) {
+        error = Value::error("type-mismatch", "range() step must not be 0");
+        return false;
+    }
+    const double n = std::ceil((nums[1] - start) / step);
+    count = n <= 0 ? 0 : n >= 9.2e18 ? INT64_MAX : static_cast<int64_t>(n);
+    // end is excluded: rounding in (end - start) / step can count one number too many (range(0, 2.1, 0.3)).
+    while (count > 0 && count < INT64_MAX &&
+           (step > 0 ? range_at(start, step, count - 1) >= nums[1] : range_at(start, step, count - 1) <= nums[1]))
+        --count;
+    return true;
+}
+
 void Compiler::arity(const Expr& c, size_t min, size_t max) {
     if (c.args.size() < min || c.args.size() > max) {
         std::string expect = min == max ? std::to_string(min) : std::to_string(min) + "-" + std::to_string(max);
@@ -1410,7 +1677,14 @@ Eval Compiler::compile_function(const Expr& c) {
             ~Guard() { --depth; }
         } guard(guarded_);
         Eval a = compile(*c.args[0]);
-        return [a](Exec& x) { return Value::boolean(!a(x).is_missing()); };
+        return [a](Exec& x) {
+            struct Probe {
+                int& depth;
+                explicit Probe(int& d) : depth(d) { ++depth; }
+                ~Probe() { --depth; }
+            } probe(x.key_probe);
+            return Value::boolean(!a(x).is_missing());
+        };
     }
     if (name == "is-null") {
         arity(c, 1, 1);
@@ -1473,6 +1747,27 @@ Eval Compiler::compile_function(const Expr& c) {
         };
     }
     // List editing (spec §4.3): pure functions returning a new list; assign the result with `set`.
+    if (name == "range") {
+        arity(c, 2, 3);
+        std::vector<Eval> args;
+        for (auto& e : c.args) args.push_back(compile(*e));
+        return [args](Exec& x) -> Value {
+            double start = 0, step = 1;
+            int64_t count = 0;
+            Value error;
+            // Left to right, like every other function (C++ argument evaluation order is unspecified).
+            const Value from = args[0](x);
+            const Value to = args[1](x);
+            const Value by = args.size() > 2 ? args[2](x) : Value::number(1);
+            if (!range_of(from, to, by, start, step, count, error)) return error;
+            std::vector<Value> list;
+            for (int64_t k = 0; k < count; ++k) {
+                x.visit();  // a range is bounded by maxVisited like any stream (spec §2)
+                list.push_back(Value::number(range_at(start, step, k)));
+            }
+            return Value::list_of(std::move(list));
+        };
+    }
     if (name == "append" || name == "insert" || name == "remove-at" || name == "without") {
         enum class ListFn { Append, Insert, RemoveAt, Without };
         const ListFn fn = name == "append" ? ListFn::Append : name == "insert" ? ListFn::Insert : name == "remove-at" ? ListFn::RemoveAt : ListFn::Without;

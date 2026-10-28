@@ -40,8 +40,8 @@ PathPtr path_key(const PathPtr& parent, const Value& key);
 
 // ---------------------------------------------------------------- adapted types (spec §13)
 
-enum class Capability : uint8_t { Encode, Coerce, Equals, Compare, StableId, IsAlive };
-constexpr size_t kCapabilities = 6;
+enum class Capability : uint8_t { Encode, Coerce, Equals, Compare, StableId, IsAlive, Components };
+constexpr size_t kCapabilities = 7;
 
 /// What adapters change for one type in one engine. Only built when some adapter applies; members are
 /// copied only when an adapter configures them.
@@ -170,6 +170,12 @@ public:
     PathPtr current_path;
     int current_depth = -1;
     int64_t index = 0;
+    /// Inside has(): an absent map key reads as missing instead of null (spec §3, §4.3).
+    int key_probe = 0;
+    /// Struct nesting while building a distinct / group-by key (spec §5).
+    int struct_key_depth = 0;
+    /// Struct nesting while comparing with == (spec §4.1).
+    int struct_eq_depth = 0;
     std::vector<Value> outer;  // enclosing items while evaluating collection-method arguments
 
     int64_t visited = 0;
@@ -259,7 +265,16 @@ using Eval = std::function<Value(Exec&)>;
 std::string path_text(const Expr& e);
 /// The hint of an unknown member (spec §10): the known types that have it, then the closest names, else the members
 /// ranked by similarity to the name.
-std::string member_hint(const std::string& name, const std::vector<std::string>& members, const std::vector<std::string>& declaring);
+/// `nested`: dotted paths of the members of struct-typed members (nested_members), ranked by their last segment.
+std::string member_hint(const std::string& name, const std::vector<std::string>& members, const std::vector<std::string>& declaring,
+                        const std::vector<std::string>& nested = {});
+/// Members of the types' struct-typed members, one and two levels down, as dotted paths ("BodyInstance.CollisionProfileName"),
+/// from static type information only (spec §10 "Nested members"); at most 200 per type.
+std::vector<std::string> nested_members(Exec& x, const std::vector<const TypeDescriptor*>& types);
+/// suggest_closest over members plus nested paths (spec §10): nested paths rank by their last segment; among equal ranks
+/// direct members first, then shallower paths, then ordinal.
+std::vector<std::string> suggest_members(const std::string& name, const std::vector<std::string>& members,
+                                         const std::vector<std::string>& nested, size_t max);
 /// Names of the known object types (reachable from the sources) that have a member of this name, at most max, base types
 /// before their subclasses; types in `except` are skipped (pipeline.cpp).
 std::vector<std::string> types_declaring(Exec& x, const std::string& member, const std::vector<const TypeDescriptor*>& except, size_t max = 3);
@@ -329,6 +344,10 @@ public:
 private:
     Exec& x_;
     Json inline_object(const Value& obj, int depth);
+    /// The lists and maps being encoded: one nested in itself, or nested deeper than 32 levels, encodes as "…"
+    /// instead of recursing forever (spec §6).
+    std::vector<const void*> open_;
+    bool enter(const void* collection);
 };
 
 // ---------------------------------------------------------------- streams (pipeline.cpp)
@@ -349,9 +368,21 @@ void set_scope(Exec& x, const Item& it, int64_t index);
 /// Whether `s` is the member `name` (ASCII case-insensitive).
 inline bool is_member(const Segment& s, const char* name) { return s.kind == SegmentKind::Member && iequals(s.name, name); }
 QueryResult run_set(Exec& x, Compiler& c, Encoder& enc, Stream& stream, const Stage& s);
-QueryResult run_call(Exec& x, Compiler& c, Encoder& enc, Stream& stream, const Stage& s);
+/// The numbers of range(start, end[, step]) (spec §2, §4.3): start + k * step for k = 0 … count - 1; false with `error`
+/// (an error argument, or a type-mismatch for a non-number, non-finite number or zero step).
+bool range_of(const Value& a, const Value& b, const Value& c, double& start, double& step, int64_t& count, Value& error);
+/// The k-th number of a range: start + k * step, rounded like .NET and JavaScript (no fused multiply-add).
+double range_at(double start, double step, int64_t k);
+
+/// `receiver`: a source-qualified call's object (spec §8), whose method runs once per stream item; null: on each item.
+/// Resolved after the policy check, so a read request never evaluates the target.
+QueryResult run_call(Exec& x, Compiler& c, Encoder& enc, Stream& stream, const Stage& s, const std::function<Value()>& resolve_receiver = {});
 /// Coerce a value to a member/parameter type (spec §8); nullopt + why on failure.
 std::optional<Value> coerce(Exec& x, const Value& v, const TypeDescriptor* target, bool nullable, std::string& why);
+/// Whether `v` converts to `target`, checked without side effects (overload resolution, spec §8): nothing is constructed,
+/// assigned or validated (member validators need the instance); adapters and the host's text coercion answer as usual.
+/// On failure `depth` is how deep inside the value it failed (0: the value itself, 1: a member or element of it, …).
+bool can_coerce(Exec& x, const Value& v, const TypeDescriptor* target, bool nullable, std::string& why, int& depth);
 
 // ---------------------------------------------------------------- describe (encoder.cpp)
 QueryResult run_describe(Exec& x, Stream& stream);

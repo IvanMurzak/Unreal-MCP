@@ -1,9 +1,10 @@
 <Project>
   <!--
-    TEMPORARY pre-release RQL feed (see the "TEMPORARY PRE-RELEASE PIN" entry in src/com.IvanMurzak.Unreal.MCP.Bridge.csproj):
-    bridge/prerelease-packages/ holds com.IvanMurzak.Rql 0.3.0-dev.c5fed20, packed from RQL main c5fed20. Every project
+    TEMPORARY pre-release feed (see the "TEMPORARY PRE-RELEASE PIN" entries in src/com.IvanMurzak.Unreal.MCP.Bridge.csproj):
+    bridge/prerelease-packages/ holds com.IvanMurzak.Rql 0.3.0-dev.2877579, packed from RQL main 2877579, and
+    com.IvanMurzak.McpPlugin(.Common, .Server) 8.14.0-dev.36320da from MCP-Plugin-dotnet main 36320da. Every project
     under bridge/ (the sidecar and its tests) restores from it in addition to the configured sources.
-    Delete this file and prerelease-packages/ when the pin moves back to a published nuget.org version.
+    Delete this file and prerelease-packages/ when the pins move back to published nuget.org versions.
   -->
   <!-- Keep any Directory.Build.props above this folder in effect (MSBuild imports only the nearest one). -->
   <PropertyGroup>

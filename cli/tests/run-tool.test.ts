@@ -41,6 +41,26 @@ describe('runTool', () => {
     }
   });
 
+  it('uses the server error text, with its code, as the failure message', async () => {
+    const fetchImpl = (async () =>
+      fakeResponse({
+        ok: false,
+        status: 503,
+        statusText: 'Service Unavailable',
+        body: '{"error":"[plugin_reloading] The plugin is reloading; the call was not run."}',
+      })) as unknown as typeof fetch;
+    const r = await runTool({ toolName: 'rql-query', url: 'http://h', fetchImpl });
+    expect(r.kind).toBe('failure');
+    if (r.kind === 'failure') {
+      expect(r.httpStatus).toBe(503);
+      expect(r.message).toBe('[plugin_reloading] The plugin is reloading; the call was not run.');
+    }
+    const plain = (async () =>
+      fakeResponse({ ok: false, status: 502, statusText: 'Bad Gateway', body: 'upstream down' })) as unknown as typeof fetch;
+    const p = await runTool({ toolName: 'rql-query', url: 'http://h', fetchImpl: plain });
+    if (p.kind === 'failure') expect(p.message).toBe('Bad Gateway');
+  });
+
   it('rejects a missing toolName / missing url+projectDir without throwing', async () => {
     const r1 = await runTool({ toolName: '', url: 'http://h' });
     expect(r1.kind).toBe('failure');

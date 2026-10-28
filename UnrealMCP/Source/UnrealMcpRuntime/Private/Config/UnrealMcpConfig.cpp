@@ -520,6 +520,7 @@ TSharedPtr<FJsonObject> FUnrealMcpConfig::BuildEffectiveConnectionConfig() const
 	Obj->SetBoolField(TEXT("keepConnected"), bKeepConnected);
 	// The sidecar stamps this on every tool-call; the dispatcher honours it per call (§4).
 	Obj->SetNumberField(TEXT("toolTimeoutMs"), ToolTimeoutMs);
+	Obj->SetStringField(TEXT("clientRole"), bRuntimeConnection ? TEXT("runtime") : TEXT("editor"));
 	return Obj;
 }
 

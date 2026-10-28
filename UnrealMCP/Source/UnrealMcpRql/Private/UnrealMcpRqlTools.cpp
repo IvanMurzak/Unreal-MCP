@@ -58,8 +58,8 @@ namespace UnrealMcpRqlToolsLocal
 
 		Registry.Tool(TEXT("rql-query"))
 			.Title(TEXT("RQL / Query"))
-			.Description(Text(UnrealMcpRqlGuide::QueryIntro()) + TEXT("\n\n") + Text(UnrealMcpRqlGuide::Language()) + TEXT("\n\n")
-				+ Text(UnrealMcpRqlGuide::QueryExamples()))
+			.Description(Text(UnrealMcpRqlGuide::QueryIntro()) + TEXT("\n\n") + Text(UnrealMcpRqlGuide::Language()) + TEXT("\n")
+				+ Text(UnrealMcpRqlGuide::LanguageRules()) + TEXT("\n") + Text(UnrealMcpRqlGuide::QueryExamples()))
 			.SkillDescription(Text(UnrealMcpRqlGuide::QueryBlurb()))
 			// The unreal-rql skill (sources and guides of the installed modules): the sidecar writes it beside the tool pages.
 			.Skill(Text(UnrealMcpRqlGuide::SkillName()), Text(UnrealMcpRqlGuide::SkillDescription()), Skill)
@@ -74,7 +74,7 @@ namespace UnrealMcpRqlToolsLocal
 			.Title(TEXT("RQL / Mutate"))
 			.Description(Text(UnrealMcpRqlGuide::MutateIntro()) + TEXT("\n") + Text(UnrealMcpRqlGuide::MutateStages())
 				+ Text(UnrealMcpRqlGuide::MutateExamples()) + Text(UnrealMcpRqlGuide::MutateOutro()) + TEXT("\n\n")
-				+ Text(UnrealMcpRqlGuide::QuerySyntaxShort()))
+				+ Text(UnrealMcpRqlGuide::QuerySyntaxShort()) + TEXT("\n\n") + Text(UnrealMcpRqlGuide::LanguageRules()))
 			.SkillDescription(Text(UnrealMcpRqlGuide::MutateBlurb()))
 			.Rql(TEXT("mutate"))
 			.ParamString(TEXT("query"), TEXT("RQL query ending with a set or call stage, e.g. actors | where Label == \"Player\" | set HiddenInEditor = true"),

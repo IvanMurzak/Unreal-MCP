@@ -111,6 +111,9 @@ public:
 	bool bStartServer = false; // "startServer"
 	// "toolTimeoutMs" — per-tool-call timeout pushed to the sidecar (UNREAL_MCP_TOOL_TIMEOUT override). Only positive values are accepted.
 	int32 ToolTimeoutMs = DefaultToolTimeoutMs;
+	// Not persisted: true for a game's runtime-mode connection (UUnrealMcpRuntimeSubsystem). The sidecar declares the
+	// connection's role to the server ("clientRole" -> client_role), which keeps one editor and one runtime side by side.
+	bool bRuntimeConnection = false;
 	TArray<FString> EnabledTools; // "enabledTools" (UNREAL_MCP_TOOLS override; empty = no override)
 	// "disabledTools" — the per-tool enable-map persisted by the §7 MCP Tools window. Names listed here are
 	// hidden from the served manifest (excluded by the registry on boot + on every UI toggle). A blocklist,

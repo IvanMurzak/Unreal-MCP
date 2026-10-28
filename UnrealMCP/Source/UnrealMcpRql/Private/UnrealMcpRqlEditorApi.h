@@ -30,10 +30,15 @@ class UUnrealMcpRqlEditorApi : public UObject
 	GENERATED_BODY()
 
 public:
-	/** spawn an actor in the current level from a class name ("PointLight"), class path, Blueprint name or path, or an asset to place (a StaticMesh path gives a StaticMeshActor showing it); Label, Location, Rotation (final; omitted keeps the class default, a SpotLight points down) and Parent are optional; returns the actor */
+	/** spawn an actor in the current level from a class name ("PointLight"), class path, Blueprint name or path, or an asset to place (a StaticMesh path gives a StaticMeshActor showing it); Label, Location, Rotation (final; omitted keeps the class default, a SpotLight points down), Parent and Scale are optional; returns the actor. Many at once: range(0, 100) | call editor.SpawnActor("/Engine/BasicShapes/Cube", "Cube_" + $, [($ % 10) * 150, floor($ / 10) * 150, 0]) */
 	UFUNCTION(BlueprintCallable, Category = "Unreal MCP|RQL", meta = (BlueprintInternalUseOnly = "true"))
 	AActor* SpawnActor(const FString& ClassName, const FString& Label = TEXT(""), FVector Location = FVector::ZeroVector,
-		FRotator Rotation = FRotator::ZeroRotator, AActor* Parent = nullptr);
+		FRotator Rotation = FRotator::ZeroRotator, AActor* Parent = nullptr, FVector Scale = FVector(1.0));
+
+	/** place an asset in the current level as the editor's drag and drop does (a StaticMesh gives a StaticMeshActor showing it, a Blueprint its actor, a sound an AmbientSound); Label, Location, Rotation, Parent and Scale are optional; returns the actor */
+	UFUNCTION(BlueprintCallable, Category = "Unreal MCP|RQL", meta = (BlueprintInternalUseOnly = "true"))
+	AActor* SpawnActorFromAsset(const FString& AssetPath, const FString& Label = TEXT(""), FVector Location = FVector::ZeroVector,
+		FRotator Rotation = FRotator::ZeroRotator, AActor* Parent = nullptr, FVector Scale = FVector(1.0));
 
 	/** open a level by asset path ("/Game/Maps/Arena"), replacing the editor world (unsaved edits of the current level are lost); returns the world */
 	UFUNCTION(BlueprintCallable, Category = "Unreal MCP|RQL", meta = (BlueprintInternalUseOnly = "true"))
@@ -116,6 +121,12 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Unreal MCP|RQL", meta = (BlueprintInternalUseOnly = "true"))
 	UDataTable* CreateDataTable(const FString& Path, const FString& RowStruct);
 };
+
+/**
+ * Why SpawnActor (bAssetOnly: SpawnActorFromAsset) cannot place @p Name: "" when it resolves to a spawnable actor class or
+ * a placeable asset. The `call` validator runs it for every planned spawn before the first one.
+ */
+FString UnrealMcpRqlSpawnRefusal(const FString& Name, bool bAssetOnly);
 
 /** Why AttachToActor left @p Actor unattached from @p Parent, as an agent-facing ": reason" suffix ("" when unknown). */
 FString UnrealMcpRqlAttachFailure(const AActor* Actor, const AActor* Parent);

@@ -73,6 +73,9 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         private readonly ConnectionConfig _config = new()
         {
             KeepConnected = true,
+            // Declared on the hub URL (client_role): the server keeps one editor and one runtime connection side by
+            // side, so a game's runtime-mode sidecar never replaces the editor's. The plugin's config says which.
+            ClientRole = ClientRole.Editor,
             // The sidecar does not author SKILL.md files — that is the plugin/agent's job. Disabling also
             // avoids the skills-path resolver throwing when no project root is set (MCP-Plugin issue #107).
             GenerateSkillFiles = false,
@@ -889,6 +892,11 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
 
             if (config["keepConnected"] is JsonValue keepNode && keepNode.TryGetValue<bool>(out var keepConnected))
                 _config.KeepConnected = keepConnected;
+            // "runtime" from a game's runtime-mode connection (PIE / Standalone / packaged), "editor" otherwise; absent (an
+            // older plugin, a partial push) leaves the current role.
+            var clientRole = ClientRoles.Parse(ReadString(config, "clientRole"));
+            if (clientRole.HasValue)
+                _config.ClientRole = clientRole.Value;
             // Absent or non-positive leaves the current value (partial pushes, older plugins).
             if (config["toolTimeoutMs"] is JsonValue timeoutNode && timeoutNode.TryGetValue<int>(out var toolTimeoutMs) && toolTimeoutMs > 0)
                 _toolTimeoutMs = toolTimeoutMs;

@@ -592,7 +592,9 @@ Godot's `GodotMainThread`:
   also answers a re-sent tool call (same request id, running or finished within 5 min) with the first
   run's result. A parallel timer fires the promise with a structured timeout error;
   the flag set on `FUnrealMcpToolCall::CancelRequested` (a `FThreadSafeBool`) lets long tool bodies
-  exit early at their own checkpoints. A game-thread task cannot be force-killed — an abandoned
+  exit early at their own checkpoints, and `FUnrealMcpToolCall::TimeoutMs` (the call's timeout) lets them bound their
+  own work: `python-execute` gives Code-Exec a time budget of the timeout less a margin (10 %, 2–15 s), whose watchdog
+  stops a runaway snippet (`while True: pass`) with a `Timeout` error and frees the game thread before the deadline. A game-thread task cannot be force-killed — an abandoned
   body finishes silently, logs at `Verbose`, and its late result is dropped (requestId already
   completed; double-set of the promise is guarded).
 - **Cancellation:** `tool-cancel` sets the same flag — one cooperative mechanism for both paths.
@@ -1327,7 +1329,9 @@ public:
 `Initialize` builds registry+runtime families+dispatcher+bridge, generates token, `BridgeServer->Start`
 (listener armed) — does NOT spawn sidecar or connect. `Connect()` spawns the sidecar
 (`SidecarManager->StartForPort`) and pushes a `config` IPC msg `keepConnected:true` + resolved
-host/token/mode (reuse `BuildEffectiveConnectionConfig`). Defer sidecar spawn to Connect (a game that
+host/token/mode (reuse `BuildEffectiveConnectionConfig`) and `clientRole:"runtime"` (the editor's config says
+`"editor"`; the sidecar sets McpPlugin's `ConnectionConfig.ClientRole`, sent as `client_role`, so the server keeps the
+editor and a running game side by side instead of one replacing the other). Defer sidecar spawn to Connect (a game that
 never calls Connect spawns zero child procs). Also: a Blueprint `Connect MCP` node; console commands
 `UnrealMcp.Connect <host> [token]` / `UnrealMcp.Disconnect` (QA without recompile). REJECT any
 config-asset that auto-connects.

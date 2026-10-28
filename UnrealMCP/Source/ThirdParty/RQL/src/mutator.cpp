@@ -1,12 +1,16 @@
 // Permissioned, all-or-nothing `set` / `call` (spec §8). Mirrors dotnet/Rql.Execution/Mutator.cs.
 #include <algorithm>
+#include <cctype>
 #include <cmath>
+#include <limits>
 #include <stdexcept>
 
 #include "exec.hpp"
 
 namespace rql {
 namespace detail {
+
+std::string per_item_call_hint(Exec& x, const std::string& method);
 
 namespace {
 
@@ -66,7 +70,7 @@ void validate_batch(Exec& x, const std::string& op, const std::vector<MutationRe
 /// mutation-limit (spec §8, §10) once `matched` targets passed the limit: counts the rest of the stage's input up to the
 /// host ceiling (counting only) so the message states how many items matched, and builds the hint for the host's limit
 /// argument.
-[[noreturn]] void limit_exceeded(Exec& x, Stream& rest, int64_t matched, const std::string& op) {
+[[noreturn]] void limit_exceeded(Exec& x, Stream& rest, int64_t matched, const std::string& op, const std::string& matched_text = "objects matched") {
     const MutationPolicy& m = x.engine.mutations();
     const int limit = static_cast<int>(x.max_mutation_targets);
     const int64_t ceiling = std::max<int64_t>(m.hard_max_targets, limit);
@@ -76,8 +80,9 @@ void validate_batch(Exec& x, const std::string& op, const std::vector<MutationRe
         if (!it.value.is_null() && !x.is_dead(it.value)) ++matched;
     const bool ended = matched <= ceiling;
     const std::string op_q = "'" + op + "'";
-    std::string message = ended ? std::to_string(matched) + " objects matched " + op_q + ", more than the limit of " + std::to_string(limit) + "; nothing was changed"
-                                : "more than " + std::to_string(ceiling) + " objects matched " + op_q + " (the limit is " + std::to_string(limit) +
+    std::string message = ended ? std::to_string(matched) + " " + matched_text + " " + op_q + ", more than the limit of " + std::to_string(limit) +
+                                      "; nothing was changed"
+                                : "more than " + std::to_string(ceiling) + " " + matched_text + " " + op_q + " (the limit is " + std::to_string(limit) +
                                       "); nothing was changed";
     std::string hint = m.limit_hint ? m.limit_hint(op, limit) : std::string();
     if (hint.empty()) {
@@ -87,7 +92,9 @@ void validate_batch(Exec& x, const std::string& op, const std::vector<MutationRe
     throw RqlException("mutation-limit", message, hint);
 }
 
-std::vector<Target> targets(Exec& x, Stream& stream, const std::string& op) {
+/// `method`: for `call`, the method (hints); `per_item`: a source-qualified call, whose items are only the scope of its
+/// arguments, so any value may be one (spec §8).
+std::vector<Target> targets(Exec& x, Stream& stream, const std::string& op, const std::string& method = std::string(), bool per_item = false) {
     std::vector<Target> list;
     Item it;
     int64_t index = -1;
@@ -95,6 +102,11 @@ std::vector<Target> targets(Exec& x, Stream& stream, const std::string& op) {
         ++index;  // skipped null/destroyed items keep their positions: $index is the position in the stage's input
         // Null and destroyed items are skipped (spec §13: a destroyed object reads as null).
         if (it.value.is_null() || x.is_dead(it.value)) continue;
+        if (per_item) {
+            list.push_back({it, index});
+            if (static_cast<int64_t>(list.size()) > x.max_mutation_targets) limit_exceeded(x, stream, static_cast<int64_t>(list.size()), op, "items reached");
+            continue;
+        }
         if (it.value.is_row())
             throw RqlException("invalid-plan", "'" + op + "' needs objects, not projected rows; remove 'select' before '" + op + "'");
         if (it.value.is_entry()) {
@@ -116,7 +128,8 @@ std::vector<Target> targets(Exec& x, Stream& stream, const std::string& op) {
         if ((v.is_struct() && !handle) || v.is_number() || v.is_string() || v.is_bool() || v.is_enum())
             throw RqlException("invalid-plan",
                                "'" + op + "' needs objects with identity; '" + type_name_of(v) + "' items are value copies, so the change would be lost",
-                               "set the member from its owner instead, e.g. objects | where ... | set Transform.Position.x = 0");
+                               !method.empty() ? per_item_call_hint(x, method)
+                                               : "set the member from its owner instead, e.g. objects | where ... | set Transform.Position.x = 0");
         list.push_back({it, index});
         if (static_cast<int64_t>(list.size()) > x.max_mutation_targets) limit_exceeded(x, stream, static_cast<int64_t>(list.size()), op);
     }
@@ -253,7 +266,7 @@ Slot slot_of(Exec& x, const Value& container, const Segment& seg, const std::str
         std::vector<const TypeDescriptor*> except;
         if (t) except.push_back(t);
         throw RqlException("unknown-member", "no member '" + name + "' on " + type_name,
-                           member_hint(name, names, top ? types_declaring(x, name, except) : std::vector<std::string>()));
+                           member_hint(name, names, top ? types_declaring(x, name, except) : std::vector<std::string>(), nested_members(x, except)));
     }
     s.kind = Slot::Member;
     s.member = m;
@@ -443,9 +456,22 @@ Value read_back(Exec& x, const PlannedWrite& w) {
     return w.new_value;
 }
 
+std::optional<Value> coerce_impl(Exec& x, const Value& v, const TypeDescriptor* target, bool nullable, std::string& why, bool probe, int& depth);
+
+/// Whether an object literal may build `type` (spec §4.5): the host's answer, else every type that is not an engine object
+/// (no stable_id or is_alive adapter).
+bool may_construct(Exec& x, const TypeDescriptor* type) {
+    if (const auto& decide = x.engine.mutations().can_construct_from_literal) {
+        if (std::optional<bool> answer = decide(*type)) return *answer;
+    }
+    return x.adapters_for(type, Capability::StableId).empty() && x.adapters_for(type, Capability::IsAlive).empty();
+}
+
 /// Build `target` (object or struct) from an object literal (spec §4.5): concrete type (`"$type"`),
-/// construction, assignment of the named members (coerced recursively and validated).
-std::optional<Value> construct(Exec& x, const Value& literal, const TypeDescriptor* target, std::string& why) {
+/// construction, assignment of the named members (coerced recursively and validated). A `probe` checks the same rules
+/// without constructing, assigning or validating anything (its success value is a placeholder).
+std::optional<Value> construct(Exec& x, const Value& literal, const TypeDescriptor* target, std::string& why, bool probe, int& depth) {
+    depth = 0;
     const TypeDescriptor* concrete = target;
     Value type_name;
     if (literal.map().find(Value::string("$type"), type_name) == MapLookup::Found) {
@@ -464,18 +490,28 @@ std::optional<Value> construct(Exec& x, const Value& literal, const TypeDescript
         }
         concrete = hits[0];
     }
+    // Engine objects are never built from literals (spec §4.5): only existing ones can be passed.
+    if (!may_construct(x, concrete)) {
+        why = concrete->name + " is an engine object and cannot be built from an object literal; pass an existing one (e.g. ref(\"\xE2\x80\xA6\"))";
+        return std::nullopt;
+    }
     if (!concrete->create) {
         why = "cannot construct " + concrete->friendly_name() + " (register it constructible(), or add an adapter that coerces object literals)";
         return std::nullopt;
     }
-    std::shared_ptr<void> data = concrete->create();
-    Value instance = concrete->kind == TypeKind::Struct ? Value::structure(concrete, data) : Value::object(concrete, data.get(), data);
+    std::shared_ptr<void> data;
+    Value instance;
+    if (!probe) {
+        data = concrete->create();
+        instance = concrete->kind == TypeKind::Struct ? Value::structure(concrete, data) : Value::object(concrete, data.get(), data);
+    }
     const TypeView view = x.view(concrete);
     bool ok = true;
     literal.map().for_each([&](const Value& k, const Value& v) {
         if (k.is_string() && k.as_string() == "$type") return true;
         const std::string name = to_text(k);
         const MemberDescriptor* m = view.find(name);
+        depth = 1;
         if (!m) {
             why = "no member '" + name + "' on " + concrete->name;
         } else if (!view.member_writable(*m)) {
@@ -485,9 +521,13 @@ std::optional<Value> construct(Exec& x, const Value& literal, const TypeDescript
                                "member '" + m->name + "' of " + concrete->name + " may not be written (denied by host policy)");
         } else {
             std::string w;
-            auto mv = coerce(x, v, m->type, m->nullable, w);
+            int d = 0;
+            auto mv = coerce_impl(x, v, m->type, m->nullable, w, probe, d);
             if (!mv) {
                 why = "'" + m->name + "': " + w;
+                depth = d + 1;
+            } else if (probe) {
+                return true;
             } else {
                 std::string rejected = m->validate ? m->validate(instance.ptr(), *mv) : std::string();
                 if (!rejected.empty()) {
@@ -508,14 +548,15 @@ std::optional<Value> construct(Exec& x, const Value& literal, const TypeDescript
         return false;
     });
     if (!ok) return std::nullopt;
+    depth = 0;
+    if (probe) return Value::null();
     // Engine-built objects are retained by the engine (raw links may reach them); host-factory ones are host-owned.
     if (instance.is_object() && !concrete->host_owned) x.constructed.push_back(data);
     return instance;
 }
 
-}  // namespace
-
-std::optional<Value> coerce(Exec& x, const Value& v, const TypeDescriptor* target, bool nullable, std::string& why) {
+std::optional<Value> coerce_impl(Exec& x, const Value& v, const TypeDescriptor* target, bool nullable, std::string& why, bool probe, int& depth) {
+    depth = 0;
     if (v.is_absent()) {
         why = "value is " + describe_value(v);
         return std::nullopt;
@@ -563,7 +604,7 @@ std::optional<Value> coerce(Exec& x, const Value& v, const TypeDescriptor* targe
     }
     if (v.is_map() && v.map().object_literal()) {
         // Object literals (spec §4.5): maps are built entry by entry below; objects / structs are constructed.
-        if (target->kind == TypeKind::Object || target->kind == TypeKind::Struct) return construct(x, v, target, why);
+        if (target->kind == TypeKind::Object || target->kind == TypeKind::Struct) return construct(x, v, target, why, probe, depth);
         if (target->kind != TypeKind::Map) {
             why = "an object literal cannot become " + target->friendly_name();
             return std::nullopt;
@@ -631,13 +672,16 @@ std::optional<Value> coerce(Exec& x, const Value& v, const TypeDescriptor* targe
             size_t n = l.size();
             for (size_t i = 0; i < n; ++i) {
                 std::string w;
-                auto c = coerce(x, l.at(i), target->element, target->element_nullable, w);
+                int d = 0;
+                auto c = coerce_impl(x, l.at(i), target->element, target->element_nullable, w, probe, d);
                 if (!c) {
                     why = "element: " + w;
+                    depth = d + 1;
                     return std::nullopt;
                 }
-                items.push_back(*c);
+                if (!probe) items.push_back(*c);
             }
+            if (probe) return Value::null();
             return Value::list_of(std::move(items));
         }
         case TypeKind::Map: {
@@ -649,21 +693,35 @@ std::optional<Value> coerce(Exec& x, const Value& v, const TypeDescriptor* targe
             bool ok = true;
             v.map().for_each([&](const Value& k, const Value& val) {
                 std::string w;
-                auto c = coerce(x, val, target->element, target->element_nullable, w);
+                int d = 0;
+                auto c = coerce_impl(x, val, target->element, target->element_nullable, w, probe, d);
                 if (!c) {
                     why = "value: " + w;
+                    depth = d + 1;
                     ok = false;
                     return false;
                 }
-                entries.emplace_back(k, *c);
+                if (!probe) entries.emplace_back(k, *c);
                 return true;
             });
             if (!ok) return std::nullopt;
+            if (probe) return Value::null();
             return Value::map(std::make_shared<OwnedMap>(target, std::move(entries)));
         }
     }
     why = "expected " + target->friendly_name();
     return std::nullopt;
+}
+
+}  // namespace
+
+std::optional<Value> coerce(Exec& x, const Value& v, const TypeDescriptor* target, bool nullable, std::string& why) {
+    int depth = 0;
+    return coerce_impl(x, v, target, nullable, why, false, depth);
+}
+
+bool can_coerce(Exec& x, const Value& v, const TypeDescriptor* target, bool nullable, std::string& why, int& depth) {
+    return coerce_impl(x, v, target, nullable, why, true, depth).has_value();
 }
 
 namespace {
@@ -828,8 +886,16 @@ QueryResult run_set(Exec& x, Compiler& c, Encoder& enc, Stream& stream, const St
     return r;
 }
 
-/// Sources whose value is a single object with a callable method of this name, as hint text, or "" (spec §10).
-std::string sources_with_callable(Exec& x, const std::string& method) {
+namespace {
+
+/// The source-qualified call text of a hint: … | call src.M(… $ …).
+std::string per_item_form(const std::string& source, const std::string& method) {
+    const std::string ell = "\xE2\x80\xA6";
+    return ell + " | call " + source + "." + method + "(" + ell + " $ " + ell + ")";
+}
+
+/// The sources whose value is a single object with a callable method of this name.
+std::vector<std::string> source_names_with_callable(Exec& x, const std::string& method) {
     std::vector<std::string> names;
     for (auto& s : x.engine.sources()) {
         Value v;
@@ -846,25 +912,248 @@ std::string sources_with_callable(Exec& x, const std::string& method) {
                 break;
             }
     }
-    if (names.empty()) return {};
-    if (names.size() == 1)
-        return "; the source '" + names[0] + "' has " + method + ": " + names[0] + " | call " + method + "(\xE2\x80\xA6)";
-    return "; sources with " + method + ": " + join(names, ", ") + " (e.g. " + names[0] + " | call " + method + "(\xE2\x80\xA6))";
+    return names;
 }
 
-QueryResult run_call(Exec& x, Compiler& c, Encoder& enc, Stream& stream, const Stage& s) {
+}  // namespace
+
+/// Sources whose value is a single object with a callable method of this name, as hint text, or "" (spec §10).
+std::string sources_with_callable(Exec& x, const std::string& method) {
+    const std::vector<std::string> names = source_names_with_callable(x, method);
+    if (names.empty()) return {};
+    const std::string ell = "\xE2\x80\xA6";
+    const std::string per_item = per_item_form(names[0], method) + " once per item";
+    if (names.size() == 1)
+        return "; the source '" + names[0] + "' has " + method + ": " + names[0] + " | call " + method + "(" + ell + ") calls it once, " + per_item;
+    return "; sources with " + method + ": " + join(names, ", ") + " (e.g. " + names[0] + " | call " + method + "(" + ell + ") once, " + per_item + ")";
+}
+
+/// The hint of an unqualified `call` on items that are not objects (numbers from range(), strings, structs): qualify the
+/// method with the source that has it, so it runs once per item (spec §8, §10).
+std::string per_item_call_hint(Exec& x, const std::string& method) {
+    const std::string ell = "\xE2\x80\xA6";
+    const std::vector<std::string> having = source_names_with_callable(x, method);
+    if (!having.empty()) return "to run a source's method once per item, qualify it with the source: " + per_item_form(having[0], method) + " ($ is the item)";
+    std::vector<std::string> names;
+    for (auto& src : x.engine.sources()) names.push_back(src.name);
+    return "call runs a method of each item, and these items have none; to run a source's method once per item qualify it: " + ell + " | call <source>." +
+           method + "(" + ell + " $ " + ell + ") ($ is the item; sources: " + join(names, " ") + ")";
+}
+
+namespace {
+
+/// Why one candidate does not fit, ranked by how close it came (spec §8 "Overloads").
+struct Miss {
+    const MethodDescriptor* method;
+    bool arity_fits;
+    long long matched;
+    int depth;
+    std::string why;
+};
+
+int compare_miss(const Miss& a, const Miss& b) {
+    if (a.arity_fits != b.arity_fits) return a.arity_fits ? 1 : -1;
+    if (a.matched != b.matched) return a.matched < b.matched ? -1 : 1;
+    return a.depth == b.depth ? 0 : a.depth < b.depth ? -1 : 1;
+}
+
+bool ascii_iequals(const std::string& a, const std::string& b) {
+    if (a.size() != b.size()) return false;
+    for (size_t i = 0; i < a.size(); ++i)
+        if (std::tolower(static_cast<unsigned char>(a[i])) != std::tolower(static_cast<unsigned char>(b[i]))) return false;
+    return true;
+}
+
+/// The parameter index of each literal key (exact name, else the only case-insensitive match); false with a miss when a key
+/// names no parameter or a parameter without a default is not named.
+bool bind_names(const MethodDescriptor& m, const Value& literal, std::vector<size_t>& slots, std::vector<Miss>& misses) {
+    const auto& ps = m.params;
+    std::vector<bool> named(ps.size(), false);
+    long long known = 0;
+    std::string unknown, twice;
+    literal.map().for_each([&](const Value& k, const Value&) {
+        const std::string key = to_text(k);
+        size_t i = ps.size();
+        for (size_t j = 0; j < ps.size() && i == ps.size(); ++j)
+            if (ps[j].name == key) i = j;
+        if (i == ps.size()) {
+            size_t hits = 0, hit = 0;
+            for (size_t j = 0; j < ps.size(); ++j)
+                if (ascii_iequals(ps[j].name, key)) ++hits, hit = j;
+            if (hits == 1) i = hit;
+        }
+        if (i == ps.size()) {
+            if (unknown.empty()) unknown = key;
+            return true;
+        }
+        if (named[i]) {
+            twice = ps[i].name;
+            return false;
+        }
+        named[i] = true;
+        slots.push_back(i);
+        ++known;
+        return true;
+    });
+    std::vector<std::string> names;
+    for (auto& p : ps) names.push_back(p.name);
+    if (!twice.empty()) {
+        misses.push_back({&m, true, known, 0, "parameter '" + twice + "' is named twice"});
+        return false;
+    }
+    if (!unknown.empty()) {
+        std::vector<std::string> close = suggest_closest(unknown, names, 1);
+        misses.push_back({&m, true, known, 0,
+                          "no parameter '" + unknown + "'" + (close.empty() ? std::string() : " (did you mean '" + close[0] + "'?)") +
+                              (ps.empty() ? std::string("; it takes no parameters") : "; parameters: " + join(names, ", "))});
+        return false;
+    }
+    for (size_t j = 0; j < ps.size(); ++j) {
+        if (named[j] || ps[j].has_default) continue;
+        misses.push_back({&m, true, known, 0, "missing parameter '" + ps[j].name + "'; parameters: " + join(names, ", ")});
+        return false;
+    }
+    return true;
+}
+
+/// The fewest arguments a call can pass: up to the last parameter without a default.
+size_t min_arity(const std::vector<ParamDescriptor>& ps) {
+    size_t min = 0;
+    for (size_t i = 0; i < ps.size(); ++i)
+        if (!ps[i].has_default) min = i + 1;
+    return min;
+}
+
+/// Overload resolution and argument binding for `call` (spec §8 "Overloads"): in order, each candidate is checked with the
+/// side-effect-free can_coerce and the first that passes is coerced for real (the next is tried only when that fails); a
+/// single object literal that no overload took binds by parameter name. A failure (null result) sets `why`: a host policy
+/// denial met on the way (`denied` true), else the best-matching candidate's reason.
+const MethodDescriptor* resolve_overload(Exec& x, const TypeDescriptor& type, const std::vector<const MethodDescriptor*>& candidates,
+                                         const std::vector<Value>& given, std::vector<Value>& coerced, std::string& why, bool& denied) {
+    std::vector<Miss> misses;
+    std::string denial;
+    // Checks every bound value without side effects, then coerces them for real; a policy denial is remembered, not raised,
+    // so an overload that would not be chosen cannot veto the call.
+    auto bind = [&](const MethodDescriptor& m, const std::vector<Value>& vals, const std::vector<size_t>& slots, const std::string& kind) {
+        long long matched = 0;
+        int depth = 0;
+        std::string first;
+        for (size_t k = 0; k < slots.size(); ++k) {
+            const ParamDescriptor& p = m.params[slots[k]];
+            std::string w;
+            int d = 0;
+            bool ok = false;
+            try {
+                ok = can_coerce(x, vals[k], p.type, p.nullable, w, d);
+            } catch (const RqlException& ex) {
+                if (ex.code() != "permission-denied") throw;
+                w = ex.what();
+                d = 0;
+                if (denial.empty()) denial = kind + " '" + p.name + "': " + w;
+            }
+            if (ok) {
+                ++matched;
+                continue;
+            }
+            if (first.empty()) {
+                first = kind + " '" + p.name + "': " + w;
+                depth = d;
+            }
+        }
+        if (!first.empty()) {
+            misses.push_back({&m, true, matched, depth, first});
+            return false;
+        }
+        std::vector<Value> cv;
+        for (auto& p : m.params) cv.push_back(p.default_value);
+        for (size_t k = 0; k < slots.size(); ++k) {
+            const ParamDescriptor& p = m.params[slots[k]];
+            std::string w;
+            auto r = coerce(x, vals[k], p.type, p.nullable, w);
+            if (!r) {
+                // Only the real coercion sees what the probe cannot (member validators, setters that throw); a candidate that
+                // passed the probe is the closest match, so its reason is the one reported.
+                misses.push_back({&m, true, std::numeric_limits<long long>::max(), 0, kind + " '" + p.name + "': " + w});
+                return false;
+            }
+            cv[slots[k]] = *r;
+        }
+        coerced = std::move(cv);
+        return true;
+    };
+    // 1. Positional.
+    for (auto* m : candidates) {
+        const auto& ps = m->params;
+        if (ps.size() < given.size() || min_arity(ps) > given.size()) {
+            misses.push_back({m, false, 0, 0, ""});
+            continue;
+        }
+        std::vector<size_t> slots;
+        for (size_t i = 0; i < given.size(); ++i) slots.push_back(i);
+        if (bind(*m, given, slots, "argument")) return m;
+    }
+    // 2. By name: a single object literal that no overload took positionally names the parameters.
+    if (given.size() == 1 && given[0].is_map() && given[0].map().object_literal()) {
+        std::vector<Value> vals;
+        given[0].map().for_each([&](const Value&, const Value& v) {
+            vals.push_back(v);
+            return true;
+        });
+        for (auto* m : candidates) {
+            std::vector<size_t> slots;
+            if (bind_names(*m, given[0], slots, misses) && bind(*m, vals, slots, "parameter")) return m;
+        }
+    }
+    denied = !denial.empty();
+    if (denied) {
+        why = denial;
+        return nullptr;
+    }
+    // The best candidate's reason; candidates that came equally close are listed with their signatures.
+    std::vector<const Miss*> fit;
+    for (auto& m : misses)
+        if (m.arity_fits) fit.push_back(&m);
+    if (fit.empty()) {
+        // Each overload accepts from its last parameter without a default up to all of them.
+        std::vector<std::pair<size_t, size_t>> ranges;
+        for (auto& m : misses) ranges.emplace_back(min_arity(m.method->params), m.method->params.size());
+        std::sort(ranges.begin(), ranges.end());
+        ranges.erase(std::unique(ranges.begin(), ranges.end()), ranges.end());
+        std::vector<std::string> parts;
+        for (auto& r : ranges) parts.push_back(r.first == r.second ? std::to_string(r.first) : std::to_string(r.first) + " to " + std::to_string(r.second));
+        why = "expects " + join(parts, " or ") + " argument(s), got " + std::to_string(given.size());
+        return nullptr;
+    }
+    const Miss* best = fit[0];
+    for (auto* m : fit)
+        if (compare_miss(*m, *best) > 0) best = m;
+    std::vector<const Miss*> tied;
+    for (auto* m : fit)
+        if (compare_miss(*m, *best) == 0 && std::none_of(tied.begin(), tied.end(), [&](const Miss* o) { return o->method == m->method; }))
+            tied.push_back(m);
+    if (tied.size() == 1) {
+        why = best->why;
+        return nullptr;
+    }
+    std::vector<std::string> parts;
+    for (auto* m : tied) parts.push_back(type.signature(*m->method) + ": " + m->why);
+    why = "no overload fits: " + join(parts, "; ");
+    return nullptr;
+}
+
+}  // namespace
+
+QueryResult run_call(Exec& x, Compiler& c, Encoder& enc, Stream& stream, const Stage& s, const std::function<Value()>& resolve_receiver) {
     check_policy(x, "call");
+    // After the policy check: a read request never evaluates the target.
+    std::optional<Value> resolved;
+    if (resolve_receiver) resolved = resolve_receiver();
+    const Value* receiver = resolved ? &*resolved : nullptr;
     std::vector<Eval> args;
     for (auto& a : s.args) args.push_back(c.compile(*a));
-    std::vector<Target> items = targets(x, stream, "call");
-    struct Planned {
-        Value item;
-        const MethodDescriptor* method;
-        std::vector<Value> args;
-    };
-    std::vector<Planned> planned;
-    for (auto& target : items) {
-        const Value& item = target.item.value;
+    // The callable overloads of the method on a target, by arity; none: unknown-function (or permission-denied for a method
+    // the host does not expose), naming the targets' types and the sources that have it (spec §10).
+    auto candidates_of = [&](const Value& item, const std::vector<Target>* stream_items) {
         const TypeDescriptor* t = (item.is_object() || item.is_struct()) ? item.type() : nullptr;
         std::vector<const MethodDescriptor*> candidates;
         bool exists = false;
@@ -884,11 +1173,12 @@ QueryResult run_call(Exec& x, Compiler& c, Encoder& enc, Stream& stream, const S
                              [](const MethodDescriptor* a, const MethodDescriptor* b) { return a->params.size() < b->params.size(); });
             for (auto* m : candidates) sigs.push_back(t->signature(*m));
         }
+        if (!candidates.empty()) return candidates;
         std::string tn = type_name_of(item);
-        if (candidates.empty()) {
-            // In a mixed stream, name the targets' types that do have the method (filter to them first).
-            std::vector<std::string> having;
-            for (auto& o : items) {
+        // In a mixed stream, name the targets' types that do have the method (filter to them first).
+        std::vector<std::string> having;
+        if (stream_items)
+            for (auto& o : *stream_items) {
                 const Value& ov = o.item.value;
                 if (!(ov.is_object() || ov.is_struct()) || having.size() >= 3) continue;
                 if (std::find(having.begin(), having.end(), ov.type()->name) != having.end()) continue;
@@ -899,53 +1189,43 @@ QueryResult run_call(Exec& x, Compiler& c, Encoder& enc, Stream& stream, const S
                         break;
                     }
             }
-            std::string filter = having.empty() ? std::string() : filter_hint(having, s.method, "call " + s.method + "(\xE2\x80\xA6)") + "; ";
-            throw RqlException(exists ? "permission-denied" : "unknown-function", "no callable method '" + s.method + "' on " + tn,
-                               filter + (!sigs.empty() ? "callable: " + join(sigs, ", ") : tn + " has no callable methods") +
-                                   (exists ? std::string() : sources_with_callable(x, s.method)));
-        }
+        std::string filter = having.empty() ? std::string() : filter_hint(having, s.method, "call " + s.method + "(\xE2\x80\xA6)") + "; ";
+        throw RqlException(exists ? "permission-denied" : "unknown-function",
+                           "no callable method '" + s.method + "' on " + (stream_items ? tn : x.ref_of(item)),
+                           filter + (!sigs.empty() ? "callable: " + join(sigs, ", ") : tn + " has no callable methods") +
+                               (exists ? std::string() : sources_with_callable(x, s.method)));
+    };
+    // A source-qualified call checks its receiver's method before reading the stream: a typo fails even with no items.
+    std::vector<const MethodDescriptor*> fixed;
+    if (receiver) fixed = candidates_of(*receiver, nullptr);
+    std::vector<Target> items = targets(x, stream, "call", s.method, receiver != nullptr);
+    struct Planned {
+        Value item;
+        const MethodDescriptor* method;
+        std::vector<Value> args;
+        int64_t index;
+    };
+    std::vector<Planned> planned;
+    // Where a failure is: the target, or for a source-qualified call the receiver and the item's position.
+    auto at = [&](const Value& item, int64_t index) { return x.ref_of(item) + (receiver ? " for item " + std::to_string(index) : std::string()); };
+    std::vector<const MethodDescriptor*> own;
+    for (auto& target : items) {
+        const Value& item = receiver ? *receiver : target.item.value;
+        const TypeDescriptor* t = item.type();
+        if (!receiver) own = candidates_of(item, &items);
+        const std::vector<const MethodDescriptor*>& candidates = receiver ? fixed : own;
         enter_scope(x, target);
         std::vector<Value> vals;
         for (auto& a : args) vals.push_back(a(x));
-        const MethodDescriptor* chosen = nullptr;
         std::vector<Value> coerced;
         std::string why;
-        for (auto* m : candidates) {
-            const auto& ps = m->params;
-            bool fits = ps.size() >= vals.size();
-            for (size_t i = vals.size(); fits && i < ps.size(); ++i)
-                if (!ps[i].has_default) fits = false;
-            if (!fits) {
-                why = "expects " + std::to_string(ps.size()) + " argument(s)";
-                continue;
-            }
-            std::vector<Value> cv;
-            bool ok = true;
-            for (size_t i = 0; i < ps.size(); ++i) {
-                if (i >= vals.size()) {
-                    cv.push_back(ps[i].default_value);
-                    continue;
-                }
-                std::string w;
-                auto r = coerce(x, vals[i], ps[i].type, ps[i].nullable, w);
-                if (!r) {
-                    ok = false;
-                    why = "argument '" + ps[i].name + "': " + w;
-                    break;
-                }
-                cv.push_back(*r);
-            }
-            if (ok) {
-                chosen = m;
-                coerced = std::move(cv);
-                break;
-            }
-        }
+        bool denied = false;
+        const MethodDescriptor* chosen = resolve_overload(x, *t, candidates, vals, coerced, why, denied);
+        if (!chosen && denied) throw RqlException("permission-denied", "cannot call " + s.method + " on " + at(item, target.index) + ": " + why);
         if (!chosen) {
             std::vector<std::string> cs;
             for (auto* m : candidates) cs.push_back(t->signature(*m));
-            throw RqlException("coercion-failed", "cannot call " + s.method + " on " + x.ref_of(item) + ": " + why,
-                               "signature: " + join(cs, ", "));
+            throw RqlException("coercion-failed", "cannot call " + s.method + " on " + at(item, target.index) + ": " + why, "signature: " + join(cs, ", "));
         }
         // The method's own check, for every target before the first call (and on dry runs): all-or-nothing (spec §8).
         if (chosen->validate) {
@@ -953,10 +1233,9 @@ QueryResult run_call(Exec& x, Compiler& c, Encoder& enc, Stream& stream, const S
             if (auto failure = capture_failure([&] { rejected = chosen->validate(item.ptr(), coerced); }))
                 rejected = "its check threw: " + *failure;
             if (!rejected.empty())
-                throw RqlException("invalid-value", "cannot call " + t->signature(*chosen) + " on " + x.ref_of(item) + ": " + rejected +
-                                                        "; nothing was called");
+                throw RqlException("invalid-value", "cannot call " + t->signature(*chosen) + " on " + at(item, target.index) + ": " + rejected + "; nothing was called");
         }
-        planned.push_back({item, chosen, std::move(coerced)});
+        planned.push_back({item, chosen, std::move(coerced), target.index});
     }
 
     auto call_records = [&] {
@@ -977,12 +1256,14 @@ QueryResult run_call(Exec& x, Compiler& c, Encoder& enc, Stream& stream, const S
             if (auto failure = capture_failure([&] { result = p.method->invoke(p.item.ptr(), p.args); })) {
                 // Completed calls are not rolled back, so the host still learns about them.
                 if (!records.empty()) committed(x, std::vector<MutationRecord>(records.begin(), records.begin() + static_cast<std::ptrdiff_t>(done)));
-                throw RqlException("call-threw", p.method->name + " on " + x.ref_of(p.item) + " threw: " + *failure + "; " +
-                                                       std::to_string(done) + " earlier call(s) completed and are NOT rolled back");
+                throw RqlException("call-threw", p.method->name + " on " + at(p.item, p.index) + " threw: " + *failure + "; " + std::to_string(done) +
+                                                       " earlier call(s) completed and are NOT rolled back");
             }
         }
         ++done;
-        rows.push_back({Value::string(x.ref_of(p.item)), Value::string(p.item.type()->signature(*p.method)), result});
+        // A source-qualified call reports what each invocation returned (the created object, spec §8).
+        const bool created = receiver && !x.options.dry_run && result.is_object() && !x.is_dead(result);
+        rows.push_back({Value::string(x.ref_of(created ? result : p.item)), Value::string(p.item.type()->signature(*p.method)), result});
     }
     committed(x, records);
     QueryResult r = enc.rows({"$ref", "method", "result"}, rows);
