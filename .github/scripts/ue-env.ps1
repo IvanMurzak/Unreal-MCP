@@ -83,16 +83,20 @@ if ("$($installed.MajorVersion).$($installed.MinorVersion)" -ne $Version) {
 $developerDir = $null
 if ($IsMacOS) {
     $sdk = Get-Content -LiteralPath (Join-Path $root 'Engine/Config/Apple/Apple_SDK.json') -Raw | ConvertFrom-Json
-    $minXcode = [version]$sdk.MinVersion
-    $maxXcode = [version]$sdk.MaxVersion
+    # Three-part on both sides: [version]"15.2" (Build -1) would sort below "15.2.0".
+    function ConvertTo-Xcode3([version] $V) { [version]::new($V.Major, $V.Minor, [Math]::Max($V.Build, 0)) }
+    $minXcode = ConvertTo-Xcode3 $sdk.MinVersion
+    $maxXcode = ConvertTo-Xcode3 $sdk.MaxVersion
     function Get-XcodeVersion([string] $App) {
         $v = & /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' (Join-Path $App 'Contents/Info.plist') 2>$null
-        if ($LASTEXITCODE -eq 0 -and "$v" -match '^\d+(\.\d+){1,3}$') { return [version]"$v" }
+        if ($LASTEXITCODE -eq 0 -and "$v" -match '^\d+(\.\d+){1,3}$') { return ConvertTo-Xcode3 "$v" }
         return $null
     }
     function Test-InRange($V) { $null -ne $V -and $V -ge $minXcode -and $V -le $maxXcode }
-    $selectedApp = Split-Path -Parent (Split-Path -Parent ((& xcode-select -p) | Select-Object -First 1))
-    $selectedVersion = Get-XcodeVersion $selectedApp
+    # No developer directory selected (xcode-select exits non-zero, prints nothing): treat as out of range.
+    $selectedDev = (& xcode-select -p 2>$null) | Select-Object -First 1
+    $selectedApp = if ($selectedDev) { Split-Path -Parent (Split-Path -Parent $selectedDev) } else { '(none)' }
+    $selectedVersion = if ($selectedDev) { Get-XcodeVersion $selectedApp } else { $null }
     if (-not (Test-InRange $selectedVersion)) {
         $pick = Get-ChildItem -Path '/Applications' -Filter 'Xcode*.app' -Directory -ErrorAction SilentlyContinue |
             ForEach-Object { [pscustomobject]@{ App = $_.FullName; Version = Get-XcodeVersion $_.FullName } } |
