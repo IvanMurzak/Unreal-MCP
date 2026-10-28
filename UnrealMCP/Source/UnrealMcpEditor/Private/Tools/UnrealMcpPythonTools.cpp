@@ -230,8 +230,11 @@ namespace UnrealMcpPythonTools
 			                  "call starts from a fresh namespace. Its recorded edits are one undo step (so the snippet itself cannot run TRANSACTION UNDO); only "
 			                  "objects that are Modify()'d record (set_editor_property, editor subsystems, obj.modify() first): direct setters such as "
 			                  "set_actor_location are neither undoable nor marked unsaved. Engine warnings and errors raised while it "
-			                  "runs are returned as logs too. A run that outlives the tool timeout is stopped with a Timeout error "
-			                  "(a blocking unreal call finishes first); sys.setrecursionlimit is capped at 3000. Output is capped (~20k characters each for the value and the logs). 'include': helper files/folders (relative to "
+			                  "runs are returned as logs too. An endless Python loop or runaway recursion cannot freeze the editor: the run is "
+			                  "stopped with a Timeout error when it outlives the tool timeout and the editor keeps working (only one "
+			                  "long blocking unreal call is waited for until it returns); sys.setrecursionlimit is capped at 3000. Do not call this "
+			                  "editor's MCP server over HTTP from a snippet: that tool call needs the game thread the snippet holds and only "
+			                  "times out. Output is capped (~20k characters each for the value and the logs). 'include': helper files/folders (relative to "
 			                  "<Project>/.ai-game-dev/snippets): folders are importable, files run before the code. Blueprint "
 			                  "graph wiring is not available from Python: add nodes and connect pins with rql-mutate "
 			                  "(unreal.asset(path).EventGraph | call AddEvent / AddCallFunction, node | call Connect)."))

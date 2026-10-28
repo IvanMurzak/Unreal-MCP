@@ -38,6 +38,16 @@ namespace UnrealMcpEditorTools
 }
 
 /**
+ * The tool family: `unreal-tool-list` lists every callable tool of the editor (Unity-MCP's unity-tool-list), INCLUDING the
+ * ones hidden from tools/list by the Visible toggle (marked hidden; a hidden tool still runs when called by name), so an
+ * MCP client that only sees tools/list can find them. Listing only. Registered in the boot path; specs exercise it.
+ */
+namespace UnrealMcpToolListTools
+{
+	UNREALMCPEDITOR_API void Register(FUnrealMcpToolRegistry& Registry);
+}
+
+/**
  * The Python tool family: `python-execute` runs agent Python inside the editor through PythonScriptPlugin and the
  * Code-Exec runtime vendored in Content/Python/unreal_mcp/_vendor (IvanMurzak/Code-Exec): last expression = result,
  * print / unreal.log = logs, errors in snippet.py coordinates, request and response travel as base64. Registered in the

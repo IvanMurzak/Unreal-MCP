@@ -68,7 +68,7 @@ Unlike Unity and Godot (C# engines that host the .NET `McpPlugin` in-process), U
 - [Install](#install)
 - [Updating the plugin](#updating-the-plugin)
 - [First run](#first-run)
-- [Tools](#tools) — all 6 families, 26 tools (+ 3 system tools)
+- [Tools](#tools) — all 7 families, 27 tools (+ 3 system tools)
 - [Per-tool visibility](#per-tool-visibility)
 - [`unreal-mcp-cli`](#unreal-mcp-cli)
 - [Customize Tools, Prompts & Resources](#customize-tools-prompts--resources)
@@ -176,9 +176,9 @@ Connection settings persist to `<Project>/Saved/Config/UnrealMcp/ai-game-develop
 
 # Tools
 
-Unreal-MCP ships **26 built-in ("core") tools** across **6 families** that your AI can call, plus **3 system tools** it cannot (see below). Tool ids are kebab-case (`rql-query`, `blueprint-compile`), matching the Unity/Godot naming convention. Extensions can add more (see [Customize Tools, Prompts & Resources](#customize-tools-prompts--resources)).
+Unreal-MCP ships **27 built-in ("core") tools** across **7 families** that your AI can call, plus **3 system tools** it cannot (see below). Tool ids are kebab-case (`rql-query`, `blueprint-compile`), matching the Unity/Godot naming convention. Extensions can add more (see [Customize Tools, Prompts & Resources](#customize-tools-prompts--resources)).
 
-> This list is generated from the STANDARD-surface registration sources (`UnrealMCP/Source/UnrealMcpEditor/Private/Tools/UnrealMcp*Tools.cpp`, excluding `UnrealMcpSkillTools.cpp` — its tool is a system tool, listed separately below — plus `UnrealMCP/Source/UnrealMcpRql/Private/UnrealMcpRqlTools.cpp`). Counts: rql 3, blueprint 11, console 1, python 1, source 6, screenshot 4 = **26**.
+> This list is generated from the STANDARD-surface registration sources (`UnrealMCP/Source/UnrealMcpEditor/Private/Tools/UnrealMcp*Tools.cpp`, excluding `UnrealMcpSkillTools.cpp` — its tool is a system tool, listed separately below — plus `UnrealMCP/Source/UnrealMcpRql/Private/UnrealMcpRqlTools.cpp`). Counts: rql 3, blueprint 11, console 1, tool list 1, python 1, source 6, screenshot 4 = **27**.
 
 <details>
   <summary><b>RQL — the data layer (3)</b></summary>
@@ -230,6 +230,15 @@ The `unreal-rql` skill (written by `unreal-skill-generate`) teaches the language
 
 Logs, PIE state and the selection are RQL: `console | where Verbosity == "Error"`, `editor | set IsPlaying = true`,
 `editor | set Selection = [...]`.
+
+</details>
+
+<details>
+  <summary><b>Tool list family (1)</b></summary>
+
+| Tool id | What it does |
+| --- | --- |
+| `unreal-tool-list` | List every tool, including the ones hidden from `tools/list` (marked hidden; they still run when called by name); regex `filter`, `includeDescription`, `includeInputs` |
 
 </details>
 
@@ -296,7 +305,7 @@ to (or spend tokens in) an AI session — the same split Unity and Godot use for
 
 # Per-tool visibility
 
-Every tool has a **Visible** checkbox in the **MCP Tools** window — the standalone **MCP Tools** tab (registered under the editor's **Tools** menu). The window shows each tool's title, family, and description, plus an "N / M tools visible" summary line. **Visible** only decides whether the tool is **listed in the MCP `tools/list`**, i.e. whether AI agents see it. It is not an access control: a hidden tool still runs when a client calls it by name (`tools/call`).
+Every tool has a **Visible** checkbox in the **MCP Tools** window — the standalone **MCP Tools** tab (registered under the editor's **Tools** menu). The window shows each tool's title, family, and description, plus an "N / M tools visible" summary line. **Visible** only decides whether the tool is **listed in the MCP `tools/list`**, i.e. whether AI agents see it. It is not an access control: a hidden tool still runs when a client calls it by name (`tools/call`), and `unreal-tool-list` lists hidden tools too (marked hidden) so an agent can find them.
 
 Two settings apply (see ARCHITECTURE §7/§8):
 
@@ -548,7 +557,7 @@ The complete, buildable example is [`samples/UnrealAIRuntimeSample/`](samples/Un
 
 A runtime connection ships exactly **one** built-in tool: **`ping`** (a liveness probe). `ping` is a [system tool](#tools), so it answers at `POST /api/system-tools/ping` and is not advertised to an AI agent — meaning a packaged game that registers nothing of its own presents an **empty** tool list, which is an honest description of it. Everything a runtime AI agent can do is **bring-your-own**: register your own tools via the extension bus above (`RegisterToolProvider`) and they appear normally.
 
-All of the engine-development families — the RQL data layer (`rql-query` / `rql-mutate` / `rql-schema` over actors, components, assets, levels, the console and editor state), every screenshot tool, plus Blueprint authoring, C++ source edit & compile, `console-run-command` and `python-execute` — are **editor-only** (the [26 editor tools](#tools)). They drive the editor and several are RCE-class (e.g. `rql-mutate`, `console-run-command`, `python-execute`), so they are not compiled into a shipped game by default. There is no editor in a packaged game, so the runtime built-in surface is intentionally just `ping` + whatever tools your game registers.
+All of the engine-development families — the RQL data layer (`rql-query` / `rql-mutate` / `rql-schema` over actors, components, assets, levels, the console and editor state), every screenshot tool, plus Blueprint authoring, C++ source edit & compile, `console-run-command` and `python-execute` — are **editor-only** (the [27 editor tools](#tools)). They drive the editor and several are RCE-class (e.g. `rql-mutate`, `console-run-command`, `python-execute`), so they are not compiled into a shipped game by default. There is no editor in a packaged game, so the runtime built-in surface is intentionally just `ping` + whatever tools your game registers.
 
 ## <a id="editor-only-exclude-from-packaged-games"></a>Editor-only — exclude Unreal-MCP from packaged games
 
