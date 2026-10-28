@@ -23,6 +23,8 @@
                    accounts have no Python on PATH, and the engine path can contain spaces, which
                    ${{ env.CHAIN_PY }} (substituted UNQUOTED) would split. It is the hardened
                    chain_feed.py contract: an ABSOLUTE, SPACE-FREE, forward-slashed interpreter path.
+      DEVELOPER_DIR  macOS only, and only when the machine's selected Xcode is outside the engine's
+                   supported range: a side-by-side /Applications/Xcode*.app that fits (see below).
 
     The link is a directory junction on Windows and a symlink elsewhere. The job's cleanup step
     removes it with `-RemoveLink`, never with a recursive delete: that would follow the link into
@@ -76,6 +78,35 @@ if ("$($installed.MajorVersion).$($installed.MinorVersion)" -ne $Version) {
     throw "ue-env: $root is UE $($installed.MajorVersion).$($installed.MinorVersion), not the requested $Version"
 }
 
+# macOS: each engine accepts only an Xcode range (Engine/Config/Apple/Apple_SDK.json; UE 5.7 stops at
+# 26.9). When the machine's selected Xcode is outside it, pick the newest installed /Applications/Xcode*.app
+# inside it and hand it to this job only, through DEVELOPER_DIR (UBT finds Xcode with `xcode-select -p`,
+# which honours it). The machine-wide `xcode-select` choice is never changed.
+$developerDir = $null
+if ($IsMacOS) {
+    $sdk = Get-Content -LiteralPath (Join-Path $root 'Engine/Config/Apple/Apple_SDK.json') -Raw | ConvertFrom-Json
+    $minXcode = [version]$sdk.MinVersion
+    $maxXcode = [version]$sdk.MaxVersion
+    function Get-XcodeVersion([string] $App) {
+        $v = & /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' (Join-Path $App 'Contents/Info.plist') 2>$null
+        if ($LASTEXITCODE -eq 0 -and "$v" -match '^\d+(\.\d+){1,3}$') { return [version]"$v" }
+        return $null
+    }
+    function Test-InRange($V) { $null -ne $V -and $V -ge $minXcode -and $V -le $maxXcode }
+    $selectedApp = Split-Path -Parent (Split-Path -Parent ((& xcode-select -p) | Select-Object -First 1))
+    $selectedVersion = Get-XcodeVersion $selectedApp
+    if (-not (Test-InRange $selectedVersion)) {
+        $pick = Get-ChildItem -Path '/Applications' -Filter 'Xcode*.app' -Directory -ErrorAction SilentlyContinue |
+            ForEach-Object { [pscustomobject]@{ App = $_.FullName; Version = Get-XcodeVersion $_.FullName } } |
+            Where-Object { Test-InRange $_.Version } | Sort-Object Version -Descending | Select-Object -First 1
+        if (-not $pick) {
+            throw "ue-env: UE $Version needs Xcode $minXcode..$maxXcode, the selected one is $selectedVersion ($selectedApp) and no /Applications/Xcode*.app fits; install one next to it (see docs/RELEASING.md)"
+        }
+        $developerDir = Join-Path $pick.App 'Contents/Developer'
+        Write-Host "ue-env: selected Xcode $selectedVersion is outside UE $Version's $minXcode..$maxXcode; this job uses Xcode $($pick.Version) ($($pick.App))"
+    }
+}
+
 # GetFullPath: one separator style on Windows (cmd's mklink and the .bat get backslashes only).
 $runUAT = [IO.Path]::GetFullPath((Join-Path $root "Engine/Build/BatchFiles/RunUAT.$(if ($IsWindows) { 'bat' } else { 'sh' })"))
 if (-not (Test-Path -LiteralPath $runUAT -PathType Leaf)) { throw "ue-env: $runUAT not found" }
@@ -103,3 +134,4 @@ Add-JobEnv 'UE_ROOT' $root
 Add-JobEnv 'UE_PLATFORM' $platform
 Add-JobEnv 'UE_RUNUAT' $runUAT
 Add-JobEnv 'CHAIN_PY' $py
+if ($developerDir) { Add-JobEnv 'DEVELOPER_DIR' $developerDir }

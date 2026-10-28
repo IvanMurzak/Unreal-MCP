@@ -451,7 +451,11 @@ that runner's engine (`UE_ROOT_<major>_<minor>` in the runner's environment, els
 Epic Launcher default: `C:\Program Files\Epic Games\UE_x.y` on Windows,
 `/Users/Shared/Epic Games/UE_x.y` on macOS; Linux has no default) and builds for the
 host platform (`Win64`, `Mac`, `Linux`). A runner needs PowerShell 7 (`pwsh`) on
-PATH. `connection-smoke` and `build-plugin-zip` (the Win64 Fab package) stay on the
+PATH. On macOS each engine accepts only an Xcode range (its
+`Engine/Config/Apple/Apple_SDK.json`; UE 5.7 stops at 26.9). Keep the newest Xcode selected
+and install older ones side by side (`xcodes install 26.6 --directory /Applications`);
+`ue-env.ps1` hands a job a fitting `/Applications/Xcode*.app` through `DEVELOPER_DIR` when the
+selected one is out of range, without touching `xcode-select`. `connection-smoke` and `build-plugin-zip` (the Win64 Fab package) stay on the
 **Windows runner** (`windows` label). Because a PR 5.7/5.8 leg may land on either OS, an
 MSVC-only or clang-only compile error can slip through a PR; the release matrix catches it.
 
