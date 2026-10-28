@@ -94,6 +94,7 @@ Json QueryResult::to_json(bool include_stats) const {
     if (total) o.set("total", static_cast<int64_t>(*total));
     if (truncated) o.set("truncated", true);
     if (dry_run) o.set("dryRun", true);
+    if (unchanged > 0) o.set("unchanged", unchanged);
     if (!diagnostics.empty()) {
         Json a = Json::array();
         for (auto& d : diagnostics) a.push(d.to_json());

@@ -135,6 +135,70 @@ size_t collection_size(const Value& v) {
     return 0;
 }
 
+std::string path_text(const Expr& e) {
+    if (e.kind != ExprKind::Path || e.on || e.segments.empty()) return {};
+    std::string s;
+    for (auto& seg : e.segments) {
+        if ((seg.kind == SegmentKind::Member || seg.kind == SegmentKind::Meta) && !s.empty()) s += '.';
+        s += seg.to_string();
+    }
+    return s;
+}
+
+std::string member_hint(const std::string& name, const std::vector<std::string>& members, const std::vector<std::string>& declaring) {
+    std::vector<std::string> parts;
+    if (!declaring.empty())
+        parts.push_back("'" + name + "' is a member of " + join(declaring, ", ") + ": filter to those first, e.g. where $ is " + declaring[0] +
+                        " (or where has(" + name + "))");
+    auto close = suggest_closest(name, members, 3);
+    if (!close.empty()) {
+        parts.push_back("did you mean " + join(close, " / ") + "?");
+    } else if (declaring.empty() && !members.empty()) {
+        parts.push_back(member_list_hint(by_similarity(name, members)));
+    }
+    return join(parts, "; ");
+}
+
+std::vector<std::string> by_similarity(const std::string& name, const std::vector<std::string>& names) {
+    const std::string lower = ascii_lower(name);
+    std::vector<std::pair<size_t, std::string>> ranked;
+    for (auto& n : names) ranked.emplace_back(osa_distance(lower, ascii_lower(n)), n);
+    std::sort(ranked.begin(), ranked.end());
+    ranked.erase(std::unique(ranked.begin(), ranked.end()), ranked.end());
+    std::vector<std::string> out;
+    for (auto& r : ranked) out.push_back(std::move(r.second));
+    return out;
+}
+
+namespace {
+
+/// type-mismatch for a non-boolean condition (spec §1.2), with a boolean test to write instead.
+RqlException not_a_condition(const Expr& e, const Value& v) {
+    const std::string text = path_text(e);
+    std::string what, example;
+    if (v.is_string()) {
+        what = "the string \"" + v.as_string() + "\"";
+        example = (text.empty() ? "Name" : text) + " != \"\"";
+    } else if (v.is_number()) {
+        what = "the number " + to_text(v);
+        example = (text.empty() ? "Count" : text) + " != 0";
+    } else if (v.is_enum()) {
+        what = "the " + v.type()->name + " value " + to_text(v);
+        example = (text.empty() ? "Kind" : text) + " == \"" + to_text(v) + "\"";
+    } else if (v.is_list() || v.is_map()) {
+        what = v.is_list() ? "a list" : "a map";
+        example = "len(" + (text.empty() ? std::string("Items") : text) + ") > 0";
+    } else {
+        what = "a " + type_name_of(v);
+        example = (text.empty() ? "Target" : text) + " != null";
+    }
+    const std::string exists = !text.empty() && !v.is_string() && !v.is_number() && !v.is_enum() ? ", or has(" + text + ") to test that the member exists" : "";
+    return RqlException("type-mismatch", "the condition " + (text.empty() ? std::string() : "'" + text + "' ") + "is " + what + ", not a boolean",
+                        "a condition must be a boolean, e.g. " + example + exists);
+}
+
+}  // namespace
+
 std::optional<bool> truth(const Value& v) {
     if (v.is_bool()) return v.as_bool();
     if (v.is_null()) return false;
@@ -166,6 +230,21 @@ bool same_identity(const Value& a, const Value& b) {
 
 }  // namespace
 
+namespace {
+
+/// Nesting of lists compared by value (spec §4.1).
+constexpr int kMaxCompareDepth = 32;
+
+struct DepthGuard {
+    int& depth;
+    explicit DepthGuard(int& d) : depth(d) { ++depth; }
+    ~DepthGuard() { --depth; }
+    DepthGuard(const DepthGuard&) = delete;
+    DepthGuard& operator=(const DepthGuard&) = delete;
+};
+
+}  // namespace
+
 std::optional<bool> rql_equal(Exec& x, const Value& a, const Value& b) {
     // Destroyed objects arrive here as null already: values are normalized where they enter expressions.
     if (a.is_absent() || b.is_absent()) return std::nullopt;
@@ -190,6 +269,22 @@ std::optional<bool> rql_equal(Exec& x, const Value& a, const Value& b) {
     if (a.is_bool()) return b.is_bool() ? std::optional<bool>(a.as_bool() == b.as_bool()) : std::nullopt;
     // value types (structs) and mixed scalar kinds are not comparable in v0
     if (a.is_struct() || b.is_struct() || b.is_number() || b.is_bool() || b.is_string()) return std::nullopt;
+    if (a.is_list() && b.is_list()) {
+        // Lists compare by value (spec §4.1): the same length and pairwise equal elements; false as soon as a pair differs,
+        // unknown when no pair differs but one is unknown. Self-containing or very deep lists are not compared.
+        if (same_identity(a, b)) return true;
+        if (x.compare_depth >= kMaxCompareDepth) return std::nullopt;
+        DepthGuard guard(x.compare_depth);
+        const size_t n = a.list().size();
+        if (n != b.list().size()) return false;
+        bool unknown = false;
+        for (size_t i = 0; i < n; ++i) {
+            auto r = rql_equal(x, x.live(a.list().at(i)), x.live(b.list().at(i)));
+            if (r == std::optional<bool>(false)) return false;
+            if (!r) unknown = true;
+        }
+        return unknown ? std::nullopt : std::optional<bool>(true);
+    }
     if (a.is_list() || b.is_list() || a.is_map() || b.is_map()) return std::nullopt;
     return same_identity(a, b);
 }
@@ -261,6 +356,16 @@ bool distinct_equal(Exec& x, const Value& a, const Value& b) {
             if (!distinct_equal(x, ra[i], rb[i])) return false;
         return true;
     }
+    if (a.is_list() && b.is_list()) {  // lists by their elements (spec §5): group-by Tags merges equal tag lists
+        if (same_identity(a, b)) return true;
+        if (x.compare_depth >= kMaxCompareDepth) return false;
+        DepthGuard guard(x.compare_depth);
+        const size_t n = a.list().size();
+        if (n != b.list().size()) return false;
+        for (size_t i = 0; i < n; ++i)
+            if (!distinct_equal(x, x.live(a.list().at(i)), x.live(b.list().at(i)))) return false;
+        return true;
+    }
     return same_identity(a, b);
 }
 
@@ -291,6 +396,14 @@ size_t distinct_hash(Exec& x, const Value& v) {
             const auto& values = v.row().values;
             size_t h = values.size();
             for (auto& el : values) h = h * 31 + distinct_hash(x, el);
+            return h;
+        }
+        case Value::Kind::List: {
+            const size_t n = v.list().size();
+            size_t h = 17 + n;
+            if (x.compare_depth >= kMaxCompareDepth) return h;
+            DepthGuard guard(x.compare_depth);
+            for (size_t i = 0; i < n; ++i) h = h * 31 + distinct_hash(x, x.live(v.list().at(i)));
             return h;
         }
         default: {
@@ -463,10 +576,16 @@ Value member_of(Exec& x, const Value& v, MemberSite& site) {
                 ++site.hits;
                 return row.values[static_cast<size_t>(i)];
             }
+            // A group row's items (spec §5): a column of that name takes precedence.
+            if (row.items.is_list() && iequals(site.name, "items")) {
+                ++site.hits;
+                return row.items;
+            }
             // A single-column row stands for its value.
             if (row.values.size() == 1) return member_of(x, row.values[0], site);
             ++site.misses;
             if (site.row_columns.empty()) site.row_columns = *row.columns;
+            if (row.group) site.group_rows = true;
             return Value::missing();
         }
         case Value::Kind::Object:
@@ -802,9 +921,23 @@ Value arith(const std::string& op, const Value& a, const Value& b) {
 
 Eval Compiler::compile_op(const Expr& o) { return compile_op_args(o.name, o.args[0], o.args.size() > 1 ? o.args[1] : nullptr); }
 
+Eval Compiler::compile_condition(const Expr& e) {
+    Eval ev = compile(e);
+    const Expr* ep = &e;
+    return [ev, ep](Exec& x) {
+        Value v = ev(x);
+        if (v.is_bool()) return v;
+        if (v.is_row() && v.row().values.size() == 1) v = v.row().values[0];  // a one-column row stands for its value (spec §3)
+        if (v.is_null() || v.is_bool() || v.is_absent()) return v;
+        throw not_a_condition(*ep, v);
+    };
+}
+
 Eval Compiler::compile_op_args(const std::string& op, const ExprPtr& ae, const ExprPtr& be) {
-    Eval a = compile(*ae);
-    Eval b = be ? compile(*be) : Eval();
+    const bool logical = op == "and" || op == "or" || op == "not";
+    auto operand = [&](const Expr& e) { return logical ? compile_condition(e) : compile(e); };
+    Eval a = operand(*ae);
+    Eval b = be ? operand(*be) : Eval();
     if (op == "and")
         return [a, b](Exec& x) {
             auto l = truth(a(x));
@@ -1399,7 +1532,7 @@ Eval Compiler::compile_function(const Expr& c) {
     if (name == "if") {
         // Lazy: only the taken branch runs; a condition that is not true (false or unknown) takes the else branch.
         arity(c, 3, 3);
-        Eval cond = compile(*c.args[0]), then = compile(*c.args[1]), otherwise = compile(*c.args[2]);
+        Eval cond = compile_condition(*c.args[0]), then = compile(*c.args[1]), otherwise = compile(*c.args[2]);
         return [cond, then, otherwise](Exec& x) { return truth(cond(x)) == std::optional<bool>(true) ? then(x) : otherwise(x); };
     }
     if (name == "ref") {
@@ -1448,7 +1581,7 @@ Eval Compiler::compile_method(const Expr& c) {
     std::string name = ascii_lower(c.name);
     if (name == "any" || name == "all" || name == "count" || name == "first") {
         arity(c, name == "all" ? 1 : 0, 1);
-        auto pred = c.args.empty() ? nullptr : std::make_shared<Eval>(compile(*c.args[0]));
+        auto pred = c.args.empty() ? nullptr : std::make_shared<Eval>(compile_condition(*c.args[0]));
         return [on, pred, name](Exec& x) { return quantify(x, on(x), pred.get(), name); };
     }
     if (name == "sum" || name == "min" || name == "max" || name == "avg") {

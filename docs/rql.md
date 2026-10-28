@@ -22,8 +22,8 @@ agent ──query text──▶ unreal-mcp-bridge (sidecar, .NET)          Unrea
                       AgentFormat: QueryResult → compact rows ◀──IPC tool-response: QueryResult JSON── over live UObjects
 ```
 
-- **Sidecar** (`bridge/src/Tools/RqlBridge.cs`, NuGet `com.IvanMurzak.Rql` 0.3.0-dev.7dd3b29 — a temporary pre-release
-  packed from RQL main 7dd3b29 and committed under `bridge/prerelease-packages/` until the cascade release): for `rql-query` / `rql-mutate` it
+- **Sidecar** (`bridge/src/Tools/RqlBridge.cs`, NuGet `com.IvanMurzak.Rql` 0.3.0-dev.c5fed20 — a temporary pre-release
+  packed from RQL main c5fed20 and committed under `bridge/prerelease-packages/` until the cascade release): for `rql-query` / `rql-mutate` it
   parses `query` with `RqlParser` and adds `PlanCodec.Serialize(plan)` as the `plan` argument (a syntax error is
   answered without a round trip). The plugin answers with the QueryResult JSON; the sidecar renders it with
   `AgentFormat.Render(…, Table)` — byte-for-byte the agent output of Unity-MCP's rql tools. `rql-schema` answers with
@@ -111,11 +111,13 @@ agent ──query text──▶ unreal-mcp-bridge (sidecar, .NET)          Unrea
   objects are read-only (except settings objects and API objects), a settings write must hit a config property, and one
   object reached twice by the same `call` (`actors | get Parent | call Destroy()` over siblings) is refused (`| distinct`
   first) — a call cannot be rolled back, so running it twice would break all-or-nothing. Hints never advise
-  `budgets.*` (the tools take no budgets), a `ref("Name")` hint names `unreal.find("…")`, and a hint that sends the
-  caller to the type list names `rql-schema` (`Engine::schema_hint`).
+  `budgets.*` (the tools take no budgets), a `ref("Name")` hint names `unreal.find("…")`, a hint that sends the
+  caller to the type list names `rql-schema` (`Engine::schema_hint`), and a `set` / `call` sent to `rql-query` is
+  `permission-denied` with a hint naming `rql-mutate` (`Engine::mutate_hint`).
 - **Target limit**: `rql-mutate` changes at most 200 targets per call by default (a mutation is one undo step whatever its
   size, RQL spec §8); its `max_targets` argument raises the limit for one call up to the ceiling of 1000
-  (`MutationPolicy::limit_argument`, mapped to `Budgets::max_mutation_targets`). Over the limit nothing changes and
+  (`MutationPolicy::limit_argument`, mapped to `Budgets::max_mutation_targets`; passed only when the caller gives it, and
+  a value outside 1 … 1000, 0 included, is refused with `invalid-value` before anything runs). Over the limit nothing changes and
   `mutation-limit` names the match count (or "more than 1000") and, while the limit is below 1000, `max_targets`;
   at the ceiling it suggests `first N` / `skip N` batches.
 - **Typos in mutations**: when no item reaches `set` / `call` because a member read (`where` / `get`) missed on every
@@ -125,6 +127,17 @@ agent ──query text──▶ unreal-mcp-bridge (sidecar, .NET)          Unrea
   `get Components | where Intensity > 0 | set Intensity = …` over actors without lights stays a no-match (ok, 0
   changes) while `get RootComponnt | set …` fails. A `set` that reaches targets lacking the member is still an
   `unknown-member` error: filter first (`where $ is LightComponentBase`).
+- **Receipts** of a `set` list only the assignments that change a value: one whose planned and read-back values equal
+  the old value is left out and counted in the result's `unchanged` (the sidecar prints "(N unchanged assignment(s) not
+  listed)"); outside a dry run the write still runs and the commit hooks see every record, and a write the editor
+  refused or clamped back to the old value stays listed.
+- **Conditions** (`where`, `and` / `or` / `not`, `?:`, list predicates) must be booleans: `where StaticMesh` is a
+  `type-mismatch` whose hint suggests `StaticMesh != null` or `has(StaticMesh)`; null still counts as false.
+  Lists compare by value (`group-by Tags` merges equal tag lists), and group-by rows have `items` for per-group
+  aggregates (`group-by $type | select key, avg = items.avg(Intensity)`). A float property used as a number reads as its
+  shortest decimal (`Intensity` 4.2f is 4.2, so arithmetic, sums and averages print clean); comparisons keep float precision.
+- **Blueprint classes** are named `BP_Door_C` (`$type`); `is BP_Door` matches them too (the asset name, a
+  `TypeDescriptor::also_is` alias, inherited by child Blueprints).
 - **Enums** read as entry names and accept the entry name, the editor's display name (`UMETA(DisplayName)`, RQL enum
   aliases; one that spells another entry's name is skipped), `Type::Name` or the number.
 - **Function sources**: RQL text lets a host function start a query (`unreal.assets("Material") | …`, also with a member

@@ -39,11 +39,16 @@ namespace UnrealMcpRqlToolsLocal
 			return MissingPlan();
 		bool bOk = false;
 		const bool bDryRun = bAllowMutation && Call.GetBool(TEXT("dry_run"), false);
-		// max_targets below 1 (or absent) keeps the default; above the ceiling the engine caps it.
-		const int64 MaxTargets = bAllowMutation ? Call.GetInt(TEXT("max_targets"), 0) : 0;
+		// An absent (or null, or non-numeric) max_targets keeps the default; any number given (a numeric string too, not a
+		// boolean) reaches the engine, which refuses one outside 1 .. HardMaxTargets (invalid-value, nothing run).
+		TOptional<int32> MaxTargets;
+		const TSharedPtr<FJsonValue> Limit = bAllowMutation ? Call.Arguments->TryGetField(TEXT("max_targets")) : nullptr;
+		double Requested = 0.0;
+		if (Limit.IsValid() && Limit->Type != EJson::Boolean && Limit->TryGetNumber(Requested))
+			MaxTargets = static_cast<int32>(FMath::Clamp<double>(Requested, MIN_int32, MAX_int32));
 		FUnrealMcpRqlSession Session;
 		Session.SetUndoTitle(Call.GetString(TEXT("query")));
-		const FString Json = Session.Execute(Plan, bAllowMutation, bDryRun, bOk, static_cast<int32>(FMath::Clamp<int64>(MaxTargets, 0, MAX_int32)));
+		const FString Json = Session.Execute(Plan, bAllowMutation, bDryRun, bOk, MaxTargets);
 		return bOk ? FUnrealMcpToolResult::Success(Json) : FUnrealMcpToolResult::Error(Json);
 	}
 

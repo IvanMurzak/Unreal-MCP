@@ -88,6 +88,8 @@ struct QueryResult {
     std::optional<int64_t> total;
     bool truncated = false;
     bool dry_run = false;
+    /// A set receipt: how many assignments left the value as it was (old == new), omitted from the rows.
+    int64_t unchanged = 0;
     std::vector<Diagnostic> diagnostics;
     Stats stats;
 

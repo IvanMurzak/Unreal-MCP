@@ -141,6 +141,22 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         }
 
         [Fact]
+        public void Render_ReceiptsCountTheUnchangedAssignments()
+        {
+            // RQL c5fed20: a set receipt leaves out assignments that kept the old value and counts them in "unchanged".
+            var json = "{\"rql\":\"0.1\",\"ok\":true,\"kind\":\"rows\",\"columns\":[\"$ref\",\"member\",\"old\",\"new\"]," +
+                       "\"rows\":[[\"PointLight#5\",\"Intensity\",5000,10000]],\"unchanged\":3}";
+            Assert.Equal(3, RqlBridge.ParseResult(JsonNode.Parse(json)!.AsObject()).Unchanged);
+            Assert.StartsWith("1 result (3 unchanged assignment(s) not listed)\n$ref|member|old|new\nPointLight#5|Intensity|5000|10000",
+                Rendered(RqlBridge.Render(RqlBridge.MutateRole, Text(json))));
+
+            var noOps = "{\"rql\":\"0.1\",\"ok\":true,\"kind\":\"rows\",\"columns\":[\"$ref\",\"member\",\"old\",\"new\"],\"rows\":[],\"unchanged\":2}";
+            Assert.Contains("(2 unchanged assignment(s) not listed)", Rendered(RqlBridge.Render(RqlBridge.MutateRole, Text(noOps))));
+            Assert.Null(RqlBridge.ParseResult(JsonNode.Parse("{\"ok\":true,\"kind\":\"rows\",\"columns\":[],\"rows\":[]}")!.AsObject()).Unchanged);
+            Assert.Null(RqlBridge.ParseResult(JsonNode.Parse("{\"ok\":true,\"kind\":\"rows\",\"columns\":[],\"rows\":[],\"unchanged\":0}")!.AsObject()).Unchanged);
+        }
+
+        [Fact]
         public void Render_Scalars()
         {
             var json = "{\"rql\":\"0.1\",\"ok\":true,\"kind\":\"scalar\",\"value\":3}";

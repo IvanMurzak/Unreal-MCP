@@ -218,6 +218,7 @@ FUnrealMcpRqlSession::FUnrealMcpRqlSession()
 	RqlEngine.defaults().budgets_adjustable = false;
 	RqlEngine.find_hint = "unreal.find(\"\xE2\x80\xA6\")";
 	RqlEngine.schema_hint = "rql-schema";
+	RqlEngine.mutate_hint = "rql-mutate"; // a set / call sent to rql-query: the permission-denied hint names the mutation tool
 	FUnrealMcpRqlTypes* TypeProvider = TypesPtr.Get();
 	// Liveness from the weak pointer every object value carries: a destroyed (garbage) actor reads as null.
 	RqlEngine.is_alive = [TypeProvider](const rql::Value& Object) { return TypeProvider->IsAlive(Object); };
@@ -450,7 +451,7 @@ void FUnrealMcpRqlSession::AddAdapter(rql::TypeAdapter Adapter)
 	EnginePtr->add_adapter(std::move(Adapter));
 }
 
-FString FUnrealMcpRqlSession::Execute(const FString& PlanJson, bool bAllowMutation, bool bDryRun, bool& bOutOk, int32 MaxTargets)
+FString FUnrealMcpRqlSession::Execute(const FString& PlanJson, bool bAllowMutation, bool bDryRun, bool& bOutOk, TOptional<int32> MaxTargets)
 {
 	Types().SetMutationRequest(bAllowMutation);
 	const std::string Text = UnrealMcpRqlToStd(PlanJson);
@@ -467,8 +468,8 @@ FString FUnrealMcpRqlSession::Execute(const FString& PlanJson, bool bAllowMutati
 		Options.allow_mutation = bAllowMutation;
 		Options.dry_run = bDryRun;
 		rql::Budgets Budgets;
-		if (MaxTargets > 0)
-			Budgets.max_mutation_targets = MaxTargets; // the engine caps it at hard_max_targets
+		if (MaxTargets.IsSet())
+			Budgets.max_mutation_targets = MaxTargets.GetValue(); // outside 1 .. hard_max_targets the engine refuses the request
 		Result = EnginePtr->execute(Plan, Budgets, Options);
 	}
 	CloseTransaction();

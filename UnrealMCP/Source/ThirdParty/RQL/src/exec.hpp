@@ -122,6 +122,7 @@ struct MemberSite {
     int64_t misses = 0;
     std::vector<const TypeDescriptor*> miss_types;
     std::vector<std::string> row_columns;  // columns of a multi-column row that lacked the member
+    bool group_rows = false;               // those rows were group-by rows (hint: aggregate their items)
     bool bare = false;                     // first segment of a relative path (no `on`)
     bool guarded = false;                  // read inside has(): never the cause of an empty mutation (spec §8)
     const TypeDescriptor* cached_type = nullptr;
@@ -149,6 +150,19 @@ public:
     QueryOptions options;
     const QueryPlan& plan;
     int max_visited, max_rows, max_list_items, max_depth, timeout_ms, max_output_bytes, max_mutation_targets;
+    /// The request's own target limit, when it set one.
+    std::optional<int> requested_max_targets;
+    /// The name under which callers raise the target limit (spec §10), or empty when they cannot.
+    std::string limit_argument() const;
+    /// A request target limit outside 1 ... the host ceiling is refused, never clamped (spec §8).
+    void check_target_limit() const;
+    /// Records the type of a source's value; with it, the types sources produced before (spec §8 known names).
+    void note_source_type(const std::string& source, const Value& v);
+    std::vector<std::pair<std::string, const TypeDescriptor*>> source_type_history();
+    /// The types statically reachable from the sources, computed once per query (unknown-member checks and hints).
+    std::optional<std::vector<const TypeDescriptor*>> reachable_cache;
+    /// Nesting of lists being compared by value (rql_equal / distinct_equal / distinct_hash).
+    int compare_depth = 0;
     bool track_paths = false;
 
     // evaluation scope
@@ -241,6 +255,14 @@ using Eval = std::function<Value(Exec&)>;
 
 // ---------------------------------------------------------------- value semantics (compiler.cpp)
 
+/// The text of a plain relative path (Renderer.sharedMaterial, Tags[0]), or empty for other expressions.
+std::string path_text(const Expr& e);
+/// The hint of an unknown member (spec §10): the known types that have it, then the closest names, else the members
+/// ranked by similarity to the name.
+std::string member_hint(const std::string& name, const std::vector<std::string>& members, const std::vector<std::string>& declaring);
+/// Names of the known object types (reachable from the sources) that have a member of this name, at most max, base types
+/// before their subclasses; types in `except` are skipped (pipeline.cpp).
+std::vector<std::string> types_declaring(Exec& x, const std::string& member, const std::vector<const TypeDescriptor*>& except, size_t max = 3);
 /// Kleene truth: bool → value, null → false, otherwise unknown (nullopt).
 std::optional<bool> truth(const Value& v);
 Value tri(std::optional<bool> b);
@@ -257,6 +279,8 @@ size_t distinct_hash(Exec& x, const Value& v);
 bool elements(const Value& v, std::vector<Value>& out);
 size_t collection_size(const Value& v);
 std::vector<std::string> suggest_closest(const std::string& name, const std::vector<std::string>& candidates, size_t max);
+/// Names ordered by their distance to `name` (then ordinal), duplicates dropped: the nearest come first in a capped list.
+std::vector<std::string> by_similarity(const std::string& name, const std::vector<std::string>& names);
 /// Optimal string alignment distance (Levenshtein plus adjacent transposition, each cost 1).
 size_t osa_distance(const std::string& a, const std::string& b);
 /// "members: a b c … (N more)" with at most 12 names (spec §10).
@@ -271,6 +295,8 @@ class Compiler {
 public:
     explicit Compiler(Exec& x) : x_(x) {}
     Eval compile(const Expr& e);
+    /// An expression in a predicate position (spec §1.2): a value that is not a boolean, null or absent fails the query.
+    Eval compile_condition(const Expr& e);
 
 private:
     Exec& x_;

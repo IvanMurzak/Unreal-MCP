@@ -82,7 +82,8 @@ public:
     static Value error(std::string code, std::string detail = {});
     static Value boolean(bool b) { Value v; v.kind_ = Kind::Bool; v.b_ = b; return v; }
     /// type: scalar descriptor of the native member type (Int32, Single, Double...); nullptr = double literal.
-    static Value number(double d, const TypeDescriptor* type = nullptr) { Value v; v.kind_ = Kind::Number; v.num_ = d; v.type_ = type; return v; }
+    /// A Single (float) number is widened to the double of its shortest round-trip decimal (spec §1.1), so 4.2f reads as 4.2.
+    static Value number(double d, const TypeDescriptor* type = nullptr);
     static Value string(std::string s) { Value v; v.kind_ = Kind::String; v.str_ = std::move(s); return v; }
     static Value enumeration(const TypeDescriptor* type, int64_t value) { Value v; v.kind_ = Kind::Enum; v.type_ = type; v.int_ = value; return v; }
     /// ptr must point to the object as its (most-derived registered) descriptor type.
@@ -95,6 +96,8 @@ public:
     /// An entry streamed from a map, remembering it (spec §8).
     static Value entry(Value key, Value value, std::shared_ptr<const EntryOrigin> origin);
     static Value row(std::shared_ptr<const std::vector<std::string>> columns, std::vector<Value> values);
+    /// A group-by row; `items` is the group's item list or missing (spec §5).
+    static Value group_row(std::shared_ptr<const std::vector<std::string>> columns, std::vector<Value> values, Value items);
 
     Kind kind() const { return kind_; }
     bool is_missing() const { return kind_ == Kind::Missing; }
@@ -155,6 +158,10 @@ struct EntryData {
 struct RowData {
     std::shared_ptr<const std::vector<std::string>> columns;
     std::vector<Value> values;
+    /// A group-by row (spec §5): besides its columns it has the member `items`.
+    bool group = false;
+    /// The group's items in stream order (an owned list), kept only when the plan reads `items`; not a column.
+    Value items;
     /// Column index: exact, then case-insensitive; -1 if absent.
     int index_of(const std::string& name) const;
 };
@@ -204,6 +211,10 @@ private:
 
 // ---------------------------------------------------------------- helpers
 
+/// A float as the double of its shortest round-trip decimal (4.2f -> 4.2, not 4.19999980926514); converts back to the same float.
+double widen_single(float f);
+/// double -> float as .NET converts (beyond the float range: +-infinity, never undefined behaviour).
+float to_single(double d);
 /// Text form used for string concatenation, map keys and ids (.NET-compatible number formatting).
 std::string to_text(const Value& v);
 /// Short human description for messages: null, missing, "str", type name...

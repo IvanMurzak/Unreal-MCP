@@ -902,6 +902,19 @@ void FUnrealMcpRqlDataModelsSpec::Define()
 			}
 			TestTrue(TEXT("the placed actor is still there"), bFound);
 		});
+
+		It("matches a placed Blueprint actor by the Blueprint's name, with or without _C", [this]()
+		{
+			MakeBlueprint();
+			const FString Name = FPackageName::GetShortName(Blueprint);
+			Must(TEXT("spawned"), /* editor | call SpawnActor("@BPNAME@", "RqlSeqLampBP") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"SpawnActor","args":[{"lit":"@BPNAME@"},{"lit":"RqlSeqLampBP"}]}]})RQL"), { { TEXT("BPNAME"), Name } });
+			for (const FString& TypeName : { Name, Name + TEXT("_C") })
+			{
+				const TSharedPtr<FJsonObject> Matched = Run(/* actors | where Label == "RqlSeqLampBP" and $ is @TYPE@ | select $type */ TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"and","args":[{"op":"==","args":[{"path":["Label"]},{"lit":"RqlSeqLampBP"}]},{"op":"is","args":[{"path":[]},{"lit":"@TYPE@"}]}]}},{"op":"select","fields":[{"name":"$type","expr":{"path":[{"meta":"type"}]}}]}]})RQL"), false, { { TEXT("TYPE"), TypeName } });
+				TestEqual(*FString::Printf(TEXT("is %s (%s)"), *TypeName, *UnrealMcpRqlSpecHelpers::Codes(Matched)), UnrealMcpRqlSpecHelpers::RowCount(Matched), 1);
+				TestEqual(TEXT("$type is the class name"), UnrealMcpRqlSpecHelpers::CellText(Matched, 0, 0), Name + TEXT("_C"));
+			}
+		});
 	});
 
 	Describe("Widget Blueprints", [this]()

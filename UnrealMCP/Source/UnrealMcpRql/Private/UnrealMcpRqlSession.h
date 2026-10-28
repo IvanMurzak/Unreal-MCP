@@ -44,10 +44,11 @@ public:
 	static constexpr int32 HardMaxTargets = 1000;
 
 	/**
-	 * Execute a canonical QueryPlan (JSON); returns the QueryResult JSON (spec form, no stats). @p MaxTargets > 0 sets this
-	 * request's target limit (capped at HardMaxTargets); 0 keeps DefaultMaxTargets.
+	 * Execute a canonical QueryPlan (JSON); returns the QueryResult JSON (spec form, no stats). @p MaxTargets, when set, is
+	 * this request's target limit: outside 1 .. HardMaxTargets the engine refuses the request (invalid-value). Unset keeps
+	 * DefaultMaxTargets.
 	 */
-	FString Execute(const FString& PlanJson, bool bAllowMutation, bool bDryRun, bool& bOutOk, int32 MaxTargets = 0);
+	FString Execute(const FString& PlanJson, bool bAllowMutation, bool bDryRun, bool& bOutOk, TOptional<int32> MaxTargets = {});
 
 	/**
 	 * The query text a mutation names its undo step after ("RQL: actors | ... | set ..."), so the Undo History and

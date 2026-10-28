@@ -1,5 +1,8 @@
 #include "rql/value.hpp"
 
+#include <cmath>
+#include <cstdlib>
+#include <limits>
 #include <stdexcept>
 
 #include "rql/json.hpp"
@@ -88,6 +91,14 @@ Value Value::entry(Value key, Value value, std::shared_ptr<const EntryOrigin> or
     return v;
 }
 
+Value Value::group_row(std::shared_ptr<const std::vector<std::string>> columns, std::vector<Value> values, Value items) {
+    Value v = row(std::move(columns), std::move(values));
+    auto* r = static_cast<RowData*>(v.holder_.get());
+    r->group = true;
+    r->items = std::move(items);
+    return v;
+}
+
 Value Value::row(std::shared_ptr<const std::vector<std::string>> columns, std::vector<Value> values) {
     Value v;
     v.kind_ = Kind::Row;
@@ -101,6 +112,42 @@ Value Value::row(std::shared_ptr<const std::vector<std::string>> columns, std::v
 }
 
 bool Value::is_single() const { return kind_ == Kind::Number && type_ && type_->scalar == ScalarKind::Single; }
+
+Value Value::number(double d, const TypeDescriptor* type) {
+    Value v;
+    v.kind_ = Kind::Number;
+    v.num_ = type && type->scalar == ScalarKind::Single ? widen_single(to_single(d)) : d;
+    v.type_ = type;
+    return v;
+}
+
+float to_single(double d) {
+    // A double beyond the float range is undefined behaviour to cast; .NET gives infinity.
+    if (d > static_cast<double>(std::numeric_limits<float>::max())) return std::numeric_limits<float>::infinity();
+    if (d < -static_cast<double>(std::numeric_limits<float>::max())) return -std::numeric_limits<float>::infinity();
+    return static_cast<float>(d);
+}
+
+double widen_single(float f) {
+    const double d = f;
+    // Integers below 2^24 are exact; larger floats are spaced wider than 1, so their shortest decimal may differ.
+    if (std::isnan(f) || std::isinf(f) || (std::fabs(d) < 16777216.0 && d == std::floor(d))) return d;
+    static const double kPow10[] = {1e0,  1e1,  1e2,  1e3,  1e4,  1e5,  1e6,  1e7,  1e8,  1e9,  1e10, 1e11,
+                                    1e12, 1e13, 1e14, 1e15, 1e16, 1e17, 1e18, 1e19, 1e20, 1e21, 1e22};
+    const int e = static_cast<int>(std::floor(std::log10(std::fabs(d))));
+    // Allocation-free fast path for the formatter's answer (the fallback below): 6 to 9 significant digits (rounding to 6
+    // already drops trailing zeros). An integer divided (or multiplied) by an exact power of ten is the correctly rounded
+    // double of that decimal.
+    for (int p = 6; p <= 9; ++p) {
+        const int k = p - 1 - e;
+        if (k > 22 || k < -22) break;
+        const double c = k >= 0 ? std::round(d * kPow10[k]) / kPow10[k] : std::round(d / kPow10[-k]) * kPow10[-k];
+        if (static_cast<float>(c) == f) return c;
+    }
+    double parsed = d;
+    parse_double(format_float(f), parsed);
+    return parsed;
+}
 
 const std::string& Value::error_code() const {
     static const std::string empty;
