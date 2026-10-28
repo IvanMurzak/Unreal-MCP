@@ -181,6 +181,10 @@ void FUnrealAILandscapeSpec::Define()
 				const int32 Y = (Whole.Min.Y + Whole.Max.Y) / 2;
 				Weights.GetDataFast(X, Y, X, Y, &Weight);
 				TestEqual(TEXT("full Grass weight in the middle"), static_cast<int32>(Weight), 255);
+				// landscape | call Paint(unreal.find("@LABEL@"), "Grass", [0, 0, 0], 0) again: the layer info is reused, not re-created
+				TestTrue(TEXT("painted again"), Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["landscape"]},"stages":[{"op":"call","method":"Paint","args":[{"call":"find","on":{"path":["unreal"]},"args":[{"lit":"@LABEL@"}]},{"lit":"Grass"},{"list":[{"lit":0},{"lit":0},{"lit":0}]},{"lit":0}]}]})RQL"), true));
+				const int32 Again = Info->GetLayerInfoIndex(FName(TEXT("Grass")));
+				TestTrue(TEXT("the same Grass layer info"), Again != INDEX_NONE && Info->Layers[Again].LayerInfoObj.Get() == Grass);
 			}
 
 			// landscape | call Create("@LABEL@x", [0, 0, 0], 3)

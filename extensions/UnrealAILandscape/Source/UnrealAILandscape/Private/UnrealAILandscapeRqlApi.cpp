@@ -12,10 +12,12 @@
 #include "LandscapeInfo.h"
 #include "LandscapeLayerInfoObject.h"
 #include "LandscapeProxy.h"
+#include "LandscapeSubsystem.h"
 #include "LandscapeUtils.h"
 #include "MaterialEditingLibrary.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialExpressionLandscapeLayerBlend.h"
+#include "Misc/Paths.h"
 
 namespace UnrealAILandscapeRqlApiLocal
 {
@@ -63,12 +65,23 @@ namespace UnrealAILandscapeRqlApiLocal
 		return Distance >= 1.0 ? 0.0 : 0.5 * (1.0 + FMath::Cos(PI * Distance));
 	}
 
-	/** The edit layer heights and weights are written to (the first one), or an invalid guid for a landscape without. */
-	FGuid EditLayerGuid(ALandscapeProxy* Landscape)
+	/**
+	 * The edit layer heights or weights (@p Target) are written to: the first one the standard tools can edit (not locked,
+	 * not procedural such as splines); an invalid guid after Fail when there is none.
+	 */
+	FGuid EditLayerGuid(ALandscapeProxy* Landscape, ELandscapeToolTargetType Target)
 	{
 		const ALandscape* Primary = Landscape ? Landscape->GetLandscapeActor() : nullptr;
-		const ULandscapeEditLayerBase* Layer = Primary ? Primary->GetEditLayerConst(0) : nullptr;
-		return Layer ? Layer->GetGuid() : FGuid();
+		if (Primary)
+		{
+			for (const ULandscapeEditLayerBase* Layer : Primary->GetEditLayersConst())
+			{
+				if (Layer && Layer->SupportsEditingTools() && !Layer->IsLocked() && Layer->SupportsTargetType(Target))
+					return Layer->GetGuid();
+			}
+		}
+		UnrealMcpRql::Fail(TEXT("the landscape has no unlocked edit layer to write to (unlock one in Landscape mode)"));
+		return FGuid();
 	}
 
 	void WriteData(FHeightmapAccessor<false>& Accessor, const FIntRect& R, const uint16* Data)
@@ -88,7 +101,10 @@ namespace UnrealAILandscapeRqlApiLocal
 	template <typename T, typename TAccessor>
 	int32 EditCircle(ALandscapeProxy* Landscape, TAccessor& Accessor, const FCircle& Circle, TFunctionRef<bool(T&, double)> Edit)
 	{
-		Accessor.SetEditLayer(EditLayerGuid(Landscape));
+		const FGuid EditLayer = EditLayerGuid(Landscape, std::is_same_v<T, uint16> ? ELandscapeToolTargetType::Heightmap : ELandscapeToolTargetType::Weightmap);
+		if (!EditLayer.IsValid())
+			return 0;
+		Accessor.SetEditLayer(EditLayer);
 		const FIntRect& R = Circle.Rect;
 		const int32 Width = R.Max.X - R.Min.X + 1;
 		TArray<T> Data;
@@ -154,16 +170,26 @@ namespace UnrealAILandscapeRqlApiLocal
 	/** The layer info of @p Layer on the landscape, created (asset beside the level) and added as a target layer when missing. */
 	ULandscapeLayerInfoObject* LayerInfoFor(ALandscapeProxy* Landscape, ULandscapeInfo* Info, const FName Layer)
 	{
-		const int32 Existing = Info->GetLayerInfoIndex(Layer);
-		if (Existing != INDEX_NONE && Info->Layers[Existing].LayerInfoObj)
-			return Info->Layers[Existing].LayerInfoObj;
 		ALandscape* Primary = Landscape->GetLandscapeActor();
 		if (!Primary)
 			return UnrealMcpRql::Failed<ULandscapeLayerInfoObject*>(TEXT("the landscape has no primary landscape actor to add a layer to"));
+		// The target layers are the source of truth (ULandscapeInfo::Layers is derived and can lag behind an undo).
+		if (const FLandscapeTargetLayerSettings* Settings = Primary->GetTargetLayers().Find(Layer))
+		{
+			if (ULandscapeLayerInfoObject* Existing = Settings->LayerInfoObj.Get())
+				return Existing;
+		}
 		// Beside a saved level ("<Map>_sharedassets/", as Landscape mode does), else under /Game/Landscape (an unsaved level).
+		// An asset of the name already there (an earlier Paint, even unsaved or undone) is reused, never re-created in place.
 		const FString LevelPackage = Primary->GetLevel() ? Primary->GetLevel()->GetOutermost()->GetName() : FString();
 		const FString Folder = LevelPackage.StartsWith(TEXT("/Game/")) ? UE::Landscape::GetSharedAssetsPath(LevelPackage) : FString(TEXT("/Game/Landscape/LayerInfos"));
-		ULandscapeLayerInfoObject* LayerInfo = UE::Landscape::CreateTargetLayerInfo(Layer, Folder);
+		const FString AssetName = Layer.ToString() + TEXT("_LayerInfo");
+		const FString Package = FPaths::Combine(Folder, AssetName);
+		ULandscapeLayerInfoObject* LayerInfo = Cast<ULandscapeLayerInfoObject>(UnrealMcpRql::LoadObject(ULandscapeLayerInfoObject::StaticClass(), Package));
+		if (LayerInfo && LayerInfo->GetLayerName() != Layer)
+			LayerInfo = nullptr; // a different layer's asset took the name: let the engine pick a unique one
+		if (!LayerInfo)
+			LayerInfo = UE::Landscape::CreateTargetLayerInfo(Layer, Folder);
 		if (!LayerInfo)
 			return UnrealMcpRql::Failed<ULandscapeLayerInfoObject*>(FString::Printf(TEXT("could not create the layer info of %s"), *Layer.ToString()));
 		Primary->Modify();
@@ -207,8 +233,15 @@ ALandscape* UUnrealAILandscapeRqlApi::Create(const FString& Label, FVector Locat
 	MaterialLayersPerLayer.Add(FGuid(), TArray<FLandscapeImportLayerInfo>());
 	Landscape->Import(FGuid::NewGuid(), 0, 0, Quads, Quads, /*InNumSubsections*/ 1, QuadsPerSection, HeightPerLayer, nullptr,
 		MaterialLayersPerLayer, ELandscapeImportAlphamapType::Additive, TArrayView<const FLandscapeLayer>());
-	if (ULandscapeInfo* Info = Landscape->GetLandscapeInfo())
+	ULandscapeInfo* Info = Landscape->GetLandscapeInfo();
+	if (Info)
+	{
 		Info->UpdateLayerInfoMap(Landscape);
+		// A World Partition map streams a landscape by grid cells, as Landscape mode's new landscape does (its default: 2 components).
+		ULandscapeSubsystem* Subsystem = Landscape->GetWorld() ? Landscape->GetWorld()->GetSubsystem<ULandscapeSubsystem>() : nullptr;
+		if (Subsystem && Subsystem->IsGridBased())
+			Subsystem->ChangeGridSize(Info, 2);
+	}
 	return Landscape;
 }
 
@@ -241,6 +274,8 @@ int32 UUnrealAILandscapeRqlApi::Paint(ALandscapeProxy* Landscape, const FString&
 		return 0;
 	if (!(Strength > 0.0 && Strength <= 1.0))
 		return UnrealMcpRql::Failed<int32>(TEXT("Strength must be within 0 (exclusive) .. 1"));
+	if (!(Radius >= 0.0))
+		return UnrealMcpRql::Failed<int32>(TEXT("Radius must be 0 (the whole landscape) or more (cm)"));
 	FCircle Area;
 	if (!Circle(Landscape, Center, Radius, Area))
 		return 0;
@@ -268,6 +303,9 @@ UMaterial* UUnrealAILandscapeRqlApi::CreateLayerMaterial(const FString& Path, co
 		return nullptr; // CreateAsset failed with the reason
 	UMaterialExpressionLandscapeLayerBlend* Blend = Cast<UMaterialExpressionLandscapeLayerBlend>(
 		UMaterialEditingLibrary::CreateMaterialExpression(Material, UMaterialExpressionLandscapeLayerBlend::StaticClass(), -400, 0));
+	if (!Blend)
+		return UnrealMcpRql::Failed<UMaterial*>(FString::Printf(TEXT("could not add a Landscape Layer Blend to %s"), *Path));
+	Blend->Modify();
 	for (const TPair<FName, FLinearColor>& Layer : Parsed)
 	{
 		FLayerBlendInput& Input = Blend->Layers.AddDefaulted_GetRef();
@@ -277,6 +315,7 @@ UMaterial* UUnrealAILandscapeRqlApi::CreateLayerMaterial(const FString& Path, co
 		Input.ConstLayerInput = FVector(Layer.Value.R, Layer.Value.G, Layer.Value.B);
 		Input.ConstHeightInput = 0.0f;
 	}
+	Blend->PostEditChange(); // the node's input pins follow the layer list
 	UMaterialEditingLibrary::ConnectMaterialProperty(Blend, FString(), MP_BaseColor);
 	UMaterialEditingLibrary::RecompileMaterial(Material);
 	return Material;

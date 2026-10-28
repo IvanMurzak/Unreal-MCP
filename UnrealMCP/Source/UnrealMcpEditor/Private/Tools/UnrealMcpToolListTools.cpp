@@ -94,6 +94,8 @@ namespace UnrealMcpToolListTools
 				FString Text = FString::Printf(TEXT("%d tool(s)%s, %d hidden"), Lines.Num(), Filter.IsEmpty() ? TEXT("") : *FString::Printf(TEXT(" matching '%s'"), *Filter), Hidden);
 				if (Hidden > 0)
 					Text += TEXT(" (hidden tools are left out of tools/list but still run when called by name)");
+				if (Lines.Num() == 0 && Pattern.IsSet())
+					Text += TEXT(" (no tool matches: check the regex, or call without 'filter')"); // an invalid regex matches nothing silently
 				Text += TEXT("\nname | title | visible/hidden [| extension]\n") + FString::Join(Lines, TEXT("\n"));
 				TSharedPtr<FJsonObject> Structured = MakeShared<FJsonObject>();
 				Structured->SetArrayField(TEXT("tools"), Rows);

@@ -399,7 +399,7 @@ A tool is served on exactly one of two surfaces, mirroring the shared
 
 | surface | reachable at | in `tools/list`? | for |
 | --- | --- | --- | --- |
-| **Standard** (default) | `/api/tools/<name>` + MCP `tools/call` | yes | the 25 authoring tools an AI agent drives |
+| **Standard** (default) | `/api/tools/<name>` + MCP `tools/call` | yes | the 27 authoring tools an AI agent drives |
 | **System** | `/api/system-tools/<name>` **only** | **no** | host plumbing a CLIENT drives: liveness, skill authoring |
 
 **The system tools are `ping`, `unreal-skill-create`, `unreal-skill-generate`** — the same three, with

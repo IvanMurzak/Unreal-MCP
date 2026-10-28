@@ -75,7 +75,7 @@ namespace UnrealAIEnhancedInputRqlLocal
 			UClass* Class = ModifierClass(Name);
 			if (!Class)
 			{
-				UnrealMcpRql::Fail(FString::Printf(TEXT("'%s' is not an input modifier (modifiers: %s)"), *Name, *ModifierNames()));
+				UnrealMcpRql::Fail(FString::Printf(TEXT("'%s' is not an input modifier (modifiers: %s, or a Blueprint modifier class path)"), *Name, *ModifierNames()));
 				return false;
 			}
 			Out.Add(Class);
@@ -229,7 +229,7 @@ bool UUnrealAIEnhancedInputRqlApi::AddMapping(UInputMappingContext* Context, UIn
 	FEnhancedActionKeyMapping& Mapping = Context->MapKey(Action, Parsed);
 	// Instanced into the context, as the editor's Modifiers array creates them.
 	for (UClass* Class : ModifierClasses)
-		Mapping.Modifiers.Add(NewObject<UInputModifier>(Context, Class, NAME_None, RF_Transactional));
+		Mapping.Modifiers.Add(NewObject<UInputModifier>(Context, Class, NAME_None, Context->GetMaskedFlags(RF_PropagateToSubObjects) | RF_Transactional));
 	Context->MarkPackageDirty();
 	return true;
 }
