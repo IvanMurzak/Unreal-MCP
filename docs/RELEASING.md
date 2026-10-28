@@ -466,7 +466,9 @@ MSVC-only or clang-only compile error can slip through a PR; the release matrix 
 > `plugin BuildPlugin + Automation` leg covers UE 5.5–5.8 in `test_pull_request.yml`
 > (same-repo PRs) and in `release.yml` (real releases and dry-runs; there per OS, see
 > *Which OS*), so an API missing on an older engine fails the PR instead of the
-> release. The PR matrix is capped at two parallel Unreal engines to avoid MSVC PCH virtual memory exhaustion on the local machine. The host game module is rebuilt per
+> release. The PR matrix has no `max-parallel`: all legs queue at once and whichever machine is
+> free first takes one (speed over a fixed OS); the machine-wide UE lock keeps one UE build per
+> machine, which also avoids MSVC PCH virtual memory exhaustion. The host game module is rebuilt per
 > engine on each runner-local host. The
 > PR smoke job waits for the plugin job, because both use UE 5.8 `RunUAT` on the
 > same machine and Unreal's AutomationTool permits only one same-engine instance

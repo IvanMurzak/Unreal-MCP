@@ -221,8 +221,9 @@ jobs:
     if: ${{ vars.UNREAL_RUNNER_READY == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     # PR-gating covers the same UE 5.5–5.8 set as release.yml: an API missing on an
     # older engine (e.g. FUObjectItem::GetObject() before 5.6) must fail the PR, not
-    # the release. max-parallel: 2: the machine lock serializes the UE
-    # work anyway, so queued legs stay off a runner and off the lock's bounded wait.
+    # the release. No max-parallel: every leg is dispatchable at once, so whichever machine
+    # (Windows or macOS) is free first takes it; the machine-wide UE lock still serializes
+    # the UE work on each machine (four ~10-min legs stay well inside its 60-min wait).
     # fail-fast:false so one engine's failure never cancels the other legs.
     # Engine-versioned runner label (unreal-5-8 for UE 5.8): the job only lands on a machine
     # that has this engine installed. Expressions have no replace(), hence the lookup; an
@@ -240,7 +241,6 @@ jobs:
     timeout-minutes: 120
     strategy:
       fail-fast: false
-      max-parallel: 2
       matrix:
         ue: ['5.5', '5.6', '5.7', '5.8']
     env:
