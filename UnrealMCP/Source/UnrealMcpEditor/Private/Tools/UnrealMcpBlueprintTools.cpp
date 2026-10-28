@@ -589,8 +589,9 @@ namespace UnrealMcpBlueprintTools
 		Registry.Tool(TEXT("blueprint-add-function"))
 			.Title(TEXT("Add Blueprint Function"))
 			.Description(TEXT("Add a new user function graph (entry/result nodes auto-wired by the K2 schema) via "
-			                  "FBlueprintEditorUtils::CreateNewGraph + AddFunctionGraph. Body authoring (free-form "
-			                  "node wiring) is backlog; this creates the callable stub."))
+			                  "FBlueprintEditorUtils::CreateNewGraph + AddFunctionGraph; this creates the callable stub. Fill its body with "
+			                  "rql-mutate graph calls: unreal.asset(path).Graphs | where Name == \"MyFunc\" | call AddCallFunction(...), "
+			                  "then Connect pins."))
 			.ParamString(TEXT("path"), TEXT("Blueprint asset object path."), EUnrealMcpParamRequirement::Required)
 			.ParamString(TEXT("name"), TEXT("New function name."), EUnrealMcpParamRequirement::Required)
 			.DestructiveHint(false).ReadOnlyHint(false)

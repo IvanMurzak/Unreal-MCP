@@ -53,6 +53,43 @@ namespace UnrealMcpSourceTools
 		return Root;
 	}
 
+	FString DescribeUbtResult(const FString& Target, int32 ErrorCount, int32 WarningCount, int32 ReturnCode, double Seconds, const FString& Output)
+	{
+		FString Text = FString::Printf(TEXT("Compile (%s, UBT): %d error(s), %d warning(s); return code %d in %.0fs."),
+			*Target, ErrorCount, WarningCount, ReturnCode, Seconds);
+		if (ReturnCode == 0)
+			return Text;
+		// The agent reads this line, not the structured fields: say why UBT stopped and what it means. The most telling
+		// line first (UBT's refusal, a fatal or link error), else the last error-looking line that is not a warning.
+		TArray<FString> Lines;
+		Output.ParseIntoArrayLines(Lines);
+		const TCHAR* const Telling[] = { TEXT("Unable to build"), TEXT("fatal error"), TEXT(": error LNK"), TEXT(": error"), TEXT("ERROR:"), TEXT("Result: Failed") };
+		FString Reason;
+		for (const TCHAR* Pattern : Telling)
+		{
+			for (const FString& Raw : Lines)
+			{
+				const FString Line = Raw.TrimStartAndEnd();
+				if (Line.Contains(Pattern) && !Line.Contains(TEXT("warning"), ESearchCase::IgnoreCase))
+				{
+					Reason = Line.Left(300);
+					break;
+				}
+			}
+			if (!Reason.IsEmpty())
+				break;
+		}
+		if (!Reason.IsEmpty())
+			Text += FString::Printf(TEXT(" UBT: %s"), *Reason);
+		// What a failed build in a running editor means for the code the agent waits for.
+		if (Reason.Contains(TEXT("Live Coding is active")))
+			Text += TEXT(" Nothing was built: compile through Live Coding (useLiveCoding true) or close the editor and build.");
+		else if (Reason.Contains(TEXT("LNK1104")) || Reason.Contains(TEXT("cannot open file")))
+			Text += TEXT(" Nothing new is loaded: this running editor holds its module DLL, so new or changed C++ is NOT live; "
+				"build with the editor closed and reopen it (a Blueprint is live after blueprint-compile).");
+		return Text;
+	}
+
 	FString ModuleApiMacro(const FString& ModuleName)
 	{
 		return ModuleName.ToUpper() + TEXT("_API");
@@ -490,7 +527,7 @@ namespace UnrealMcpSourceTools
 				Structured->SetStringField(TEXT("cpp"), CppPath.RelPath);
 				Structured->SetBoolField(TEXT("isUClass"), Tpl.bUClass);
 				return FUnrealMcpToolResult::Success(
-					FString::Printf(TEXT("Created %s%s (%s.h + %s.cpp) in module '%s'. Run source-compile to build it."),
+					FString::Printf(TEXT("Created %s%s (%s.h + %s.cpp) in module '%s'. Run source-compile to build it; a running editor cannot load a new C++ class (build with the editor closed, then reopen it), while a Blueprint class is usable at once."),
 						*Tpl.Prefix, *ClassName, *ClassName, *ClassName, *Module),
 					Structured);
 			});
@@ -936,10 +973,7 @@ namespace UnrealMcpSourceTools
 				// failure, or a UBT configuration error) without flooding the response.
 				Structured->SetStringField(TEXT("outputTail"), Combined.Right(4000));
 
-				return FUnrealMcpToolResult::Success(
-					FString::Printf(TEXT("Compile (%s, UBT): %d error(s), %d warning(s); return code %d in %.0fs."),
-						*TargetName, ErrorCount, WarningCount, ReturnCode, Elapsed),
-					Structured);
+				return FUnrealMcpToolResult::Success(DescribeUbtResult(TargetName, ErrorCount, WarningCount, ReturnCode, Elapsed, Combined), Structured);
 			});
 	}
 }

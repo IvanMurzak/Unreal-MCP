@@ -17,6 +17,7 @@
 #include "EditorAssetLibrary.h"
 #include "EditorLevelUtils.h"
 #include "Engine/Level.h"
+#include "Engine/MapBuildDataRegistry.h"
 #include "Engine/LevelStreaming.h"
 #include "Engine/LevelStreamingAlwaysLoaded.h"
 #include "Engine/LevelStreamingDynamic.h"
@@ -181,7 +182,10 @@ namespace UnrealMcpRqlEditorApiLocal
 			return false;
 		if (!FPackageName::DoesPackageExist(Package, &OutFile))
 		{
-			OutError = FString::Printf(TEXT("no level at '%s'"), *Package);
+			UPackage* Loaded = FindPackage(nullptr, *Package);
+			OutError = Loaded && UWorld::FindWorldInPackage(Loaded)
+				? FString::Printf(TEXT("the level '%s' is not saved yet: editor | call SaveAsset(\"%s\") first"), *Package, *Package)
+				: FString::Printf(TEXT("no level at '%s'"), *Package);
 			return false;
 		}
 		if (!OutFile.EndsWith(FPackageName::GetMapPackageExtension(), ESearchCase::IgnoreCase))
@@ -439,7 +443,22 @@ UObject* UUnrealMcpRqlEditorApi::CopyAsset(const FString& Source, const FString&
 	if (!ValidateNewAssetPath(Destination, Folder, Name))
 		return nullptr;
 	UObject* Copy = UEditorAssetLibrary::DuplicateAsset(Source, Destination);
-	return Copy ? Copy : Failed<UObject*>(FString::Printf(TEXT("could not copy '%s'"), *Source));
+	if (!Copy)
+		return Failed<UObject*>(FString::Printf(TEXT("could not copy '%s'"), *Source));
+	// A level opens from its file only (OpenLevel, AddSublevel): a copied level is saved at once, as a new map is. Saving
+	// the world package writes its external packages (one file per actor); its built data lives in a package of its own.
+	// (UEditorLoadingAndSavingUtils::SaveMap(World, Path) is not used: in testing, opening the copy saved that way tripped
+	// the editor's world-leak check, a fatal error.)
+	if (UWorld* World = Cast<UWorld>(Copy))
+	{
+		TArray<UPackage*> Packages{ World->GetPackage() };
+		if (World->PersistentLevel && World->PersistentLevel->MapBuildData)
+			Packages.AddUnique(World->PersistentLevel->MapBuildData->GetPackage());
+		if (!UEditorLoadingAndSavingUtils::SavePackages(Packages, /*bOnlyDirty*/ false))
+			return Failed<UObject*>(FString::Printf(TEXT("copied the level to '%s' but could not save it: the copy is in memory only "
+			"(editor | call SaveAsset(\"%s\") or DeleteAsset(\"%s\", true))"), *Destination, *Destination, *Destination));
+	}
+	return Copy;
 }
 
 void UUnrealMcpRqlEditorApi::MoveAsset(const FString& Source, const FString& Destination)
