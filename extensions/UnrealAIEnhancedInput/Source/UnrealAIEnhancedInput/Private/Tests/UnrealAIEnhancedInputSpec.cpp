@@ -184,25 +184,25 @@ void FUnrealAIEnhancedInputSpec::Define()
 		It("creates an action and a context, maps a key and refuses an unknown key", [this]()
 		{
 			const FString Id = FGuid::NewGuid().ToString(EGuidFormats::Digits);
-			const FString ActionPath = FString::Printf(TEXT("/Game/RqlSpec/IA_%s"), *Id);
-			const FString ContextPath = FString::Printf(TEXT("/Game/RqlSpec/IMC_%s"), *Id);
+			const FString NewActionPath = FString::Printf(TEXT("/Game/RqlSpec/IA_%s"), *Id);
+			const FString NewContextPath = FString::Printf(TEXT("/Game/RqlSpec/IMC_%s"), *Id);
 			// enhancedInput | call CreateAction("<action>", "Axis2D")
-			TestTrue(TEXT("action created"), UnrealMcpRqlTools::RunPlan(FString::Printf(TEXT(R"RQL({"rql":"0.1","source":{"path":["enhancedInput"]},"stages":[{"op":"call","method":"CreateAction","args":[{"lit":"%s"},{"lit":"Axis2D"}]}]})RQL"), *ActionPath), true));
+			TestTrue(TEXT("action created"), UnrealMcpRqlTools::RunPlan(FString::Printf(TEXT(R"RQL({"rql":"0.1","source":{"path":["enhancedInput"]},"stages":[{"op":"call","method":"CreateAction","args":[{"lit":"%s"},{"lit":"Axis2D"}]}]})RQL"), *NewActionPath), true));
 			// unreal.asset("<action>") | select ValueType
 			TSharedPtr<FJsonObject> Action;
-			const bool bActionOk = UnrealMcpRqlTools::RunPlan(FString::Printf(TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"%s"}]},"stages":[{"op":"select","fields":[{"name":"ValueType","expr":{"path":["ValueType"]}}]}]})RQL"), *ActionPath), false, &Action);
+			const bool bActionOk = UnrealMcpRqlTools::RunPlan(FString::Printf(TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"%s"}]},"stages":[{"op":"select","fields":[{"name":"ValueType","expr":{"path":["ValueType"]}}]}]})RQL"), *NewActionPath), false, &Action);
 			TestTrue(TEXT("action read"), bActionOk);
 			FString ValueType;
 			if (Action.IsValid() && Action->HasField(TEXT("rows")) && Action->GetArrayField(TEXT("rows")).Num() == 1)
 				ValueType = Action->GetArrayField(TEXT("rows"))[0]->AsArray()[0]->AsString();
 			TestEqual(TEXT("value type written"), ValueType, FString(TEXT("Axis2D")));
 			// enhancedInput | call CreateContext("<context>")
-			TestTrue(TEXT("context created"), UnrealMcpRqlTools::RunPlan(FString::Printf(TEXT(R"RQL({"rql":"0.1","source":{"path":["enhancedInput"]},"stages":[{"op":"call","method":"CreateContext","args":[{"lit":"%s"}]}]})RQL"), *ContextPath), true));
+			TestTrue(TEXT("context created"), UnrealMcpRqlTools::RunPlan(FString::Printf(TEXT(R"RQL({"rql":"0.1","source":{"path":["enhancedInput"]},"stages":[{"op":"call","method":"CreateContext","args":[{"lit":"%s"}]}]})RQL"), *NewContextPath), true));
 			// enhancedInput | call AddMapping("<context>", "<action>", "SpaceBar")
-			TestTrue(TEXT("key mapped"), UnrealMcpRqlTools::RunPlan(FString::Printf(TEXT(R"RQL({"rql":"0.1","source":{"path":["enhancedInput"]},"stages":[{"op":"call","method":"AddMapping","args":[{"lit":"%s"},{"lit":"%s"},{"lit":"SpaceBar"}]}]})RQL"), *ContextPath, *ActionPath), true));
+			TestTrue(TEXT("key mapped"), UnrealMcpRqlTools::RunPlan(FString::Printf(TEXT(R"RQL({"rql":"0.1","source":{"path":["enhancedInput"]},"stages":[{"op":"call","method":"AddMapping","args":[{"lit":"%s"},{"lit":"%s"},{"lit":"SpaceBar"}]}]})RQL"), *NewContextPath, *NewActionPath), true));
 			// unreal.asset("<context>") | select KeyMappings
 			TSharedPtr<FJsonObject> Mappings;
-			const bool bMappingsOk = UnrealMcpRqlTools::RunPlan(FString::Printf(TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"%s"}]},"stages":[{"op":"select","fields":[{"name":"KeyMappings","expr":{"path":["KeyMappings"]}}]}]})RQL"), *ContextPath), false, &Mappings);
+			const bool bMappingsOk = UnrealMcpRqlTools::RunPlan(FString::Printf(TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"%s"}]},"stages":[{"op":"select","fields":[{"name":"KeyMappings","expr":{"path":["KeyMappings"]}}]}]})RQL"), *NewContextPath), false, &Mappings);
 			TestTrue(TEXT("context read"), bMappingsOk);
 			FString Text;
 			if (Mappings.IsValid())
@@ -210,13 +210,13 @@ void FUnrealAIEnhancedInputSpec::Define()
 			TestTrue(TEXT("the mapping is listed"), Text.Contains(TEXT("SpaceBar")));
 			// unreal.asset("<context>") | select Mappings — the live mappings on every version (since 5.7 the reflected array is deprecated and empty)
 			TSharedPtr<FJsonObject> Reflected;
-			TestTrue(TEXT("Mappings read"), UnrealMcpRqlTools::RunPlan(FString::Printf(TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"%s"}]},"stages":[{"op":"select","fields":[{"name":"Mappings","expr":{"path":["Mappings"]}}]}]})RQL"), *ContextPath), false, &Reflected));
+			TestTrue(TEXT("Mappings read"), UnrealMcpRqlTools::RunPlan(FString::Printf(TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"%s"}]},"stages":[{"op":"select","fields":[{"name":"Mappings","expr":{"path":["Mappings"]}}]}]})RQL"), *NewContextPath), false, &Reflected));
 			FString ReflectedText;
 			if (Reflected.IsValid())
 				FJsonSerializer::Serialize(Reflected.ToSharedRef(), TJsonWriterFactory<>::Create(&ReflectedText));
 			TestTrue(*FString::Printf(TEXT("Mappings lists the mapping too (%s)"), *ReflectedText.Left(300)), ReflectedText.Contains(TEXT("SpaceBar")));
 			// enhancedInput | call AddMapping("<context>", "<action>", "NoSuchKey")
-			TestFalse(TEXT("unknown key refused"), UnrealMcpRqlTools::RunPlan(FString::Printf(TEXT(R"RQL({"rql":"0.1","source":{"path":["enhancedInput"]},"stages":[{"op":"call","method":"AddMapping","args":[{"lit":"%s"},{"lit":"%s"},{"lit":"NoSuchKeyRqlSpec"}]}]})RQL"), *ContextPath, *ActionPath), true));
+			TestFalse(TEXT("unknown key refused"), UnrealMcpRqlTools::RunPlan(FString::Printf(TEXT(R"RQL({"rql":"0.1","source":{"path":["enhancedInput"]},"stages":[{"op":"call","method":"AddMapping","args":[{"lit":"%s"},{"lit":"%s"},{"lit":"NoSuchKeyRqlSpec"}]}]})RQL"), *NewContextPath, *NewActionPath), true));
 		});
 
 		It("adds an action event to a Character Blueprint that wires to Jump and compiles; one event per action", [this]()
