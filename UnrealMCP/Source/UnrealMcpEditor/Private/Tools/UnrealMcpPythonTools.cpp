@@ -5,6 +5,7 @@
 #include "UnrealMcpSchema.h"
 #include "UnrealMcpToolArgs.h"
 #include "UnrealMcpToolRegistry.h"
+#include "Config/UnrealMcpConfig.h"
 #include "Tools/UnrealMcpLogCollector.h"
 
 #include "Dom/JsonObject.h"
@@ -97,8 +98,7 @@ namespace UnrealMcpPythonTools
 	 */
 	static int32 PythonTimeBudgetMs(int32 CallTimeoutMs)
 	{
-		static constexpr int32 DefaultCallTimeoutMs = 300000; // FUnrealMcpConfig::DefaultToolTimeoutMs (a tool call without one: tests)
-		const int32 Call = CallTimeoutMs > 0 ? CallTimeoutMs : DefaultCallTimeoutMs;
+		const int32 Call = CallTimeoutMs > 0 ? CallTimeoutMs : FUnrealMcpConfig::DefaultToolTimeoutMs; // none: a direct call (tests)
 		const int32 Margin = FMath::Clamp(Call / 10, 2000, 15000);
 		return FMath::Max(Call - Margin, 1000);
 	}
