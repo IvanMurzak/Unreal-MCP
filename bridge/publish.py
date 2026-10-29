@@ -74,13 +74,14 @@ def zip_dir(source: Path, zip_path: Path, prefix: str = "") -> None:
     with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         for path in sorted(source.rglob("*")):
             arcname = prefix + path.relative_to(source).as_posix()
-            mode = stat.S_IMODE(path.stat().st_mode)
+            # Never group/world-writable: a Windows host reports 0o666 / 0o777.
+            mode = stat.S_IMODE(path.stat().st_mode) & 0o755
             if path.is_dir():
                 info = zipfile.ZipInfo(arcname + "/")
-                info.external_attr = ((stat.S_IFDIR | (mode or 0o755)) << 16) | 0x10
+                info.external_attr = ((stat.S_IFDIR | 0o755) << 16) | 0x10
                 zf.writestr(info, b"")
                 continue
-            info = zipfile.ZipInfo.from_file(path, arcname)
+            info = zipfile.ZipInfo.from_file(path, arcname, strict_timestamps=False)
             # A Windows host reports no exec bit; force it on the non-Windows apphost.
             if path.name == APPHOST_NAME:
                 mode |= 0o755

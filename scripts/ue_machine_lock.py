@@ -180,6 +180,8 @@ def record_owner(lock_path: Path, text: str) -> None:
     except OSError:
         try:
             target.with_name(f"{target.name}.{os.getpid()}.tmp").unlink(missing_ok=True)
+            # Windows: a waiter reading the file blocks the replace (no delete sharing), not a plain overwrite.
+            target.write_text(text, encoding="utf-8")
         except OSError:
             pass
 
@@ -349,6 +351,13 @@ class State:
         self.write_log(message)
         _write_atomic(self.failed, message)
 
+    def holds_lock(self) -> bool:
+        """True while THIS job's holder (same pid and start time) holds the lock; a stale folder never counts."""
+        if not self.acquired.exists() or self.release.exists() or not self.pid.exists():
+            return False
+        fields = _read(self.pid).split("\n", 1)
+        return len(fields) == 2 and bool(fields[1]) and pid_alive(int(fields[0])) and process_identity(int(fields[0])) == fields[1]
+
     def show_log(self, printed: int) -> int:
         """Print the holder log lines not printed yet; return the new count."""
         lines = [line for line in _read(self.log).splitlines() if line]
@@ -466,6 +475,8 @@ def acquire(state: State, lock_path: Path, wait_minutes: float, max_hold_minutes
 
 def release(state: State) -> int:
     if not state.pid.exists():
+        if state.folder.is_dir():
+            _write_atomic(state.release, "release")  # a holder started just before its pid file was written
         print("ue-machine-lock: this job holds no lock (acquire never ran); nothing to release")
         return 0
     fields = _read(state.pid).split("\n", 1)

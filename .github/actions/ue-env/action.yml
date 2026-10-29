@@ -35,6 +35,6 @@ runs:
       env:
         UE_VERSION: ${{ inputs.version }}
       run: |
-        var="UE_ROOT_${UE_VERSION//./_}"; platform=$([ "$(uname)" = Darwin ] && echo Mac || echo Linux); root="${!var:-$([ "$platform" = Mac ] && echo "/Users/Shared/Epic Games/UE_$UE_VERSION")}"
+        var="UE_ROOT_${UE_VERSION//./_}"; platform=$([ "$(uname)" = Darwin ] && echo Mac || echo Linux); root="${!var:-$([ "$platform" = Mac ] && echo "/Users/Shared/Epic Games/UE_$UE_VERSION" || true)}"
         [ -n "$root" ] || { echo "::error::ue-env: no default UE $UE_VERSION location on this OS; set $var in the runner's environment"; exit 1; }
         exec "$root/Engine/Binaries/ThirdParty/Python3/$platform/bin/python3" "$GITHUB_WORKSPACE/.github/scripts/ue_env.py" --version "$UE_VERSION"

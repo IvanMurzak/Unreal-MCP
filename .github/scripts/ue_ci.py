@@ -166,25 +166,30 @@ def suite(args) -> None:
         raise StepError(f"Extension suite failed (exit {code})")
 
 
-def teardown(_args) -> None:
+def teardown(_args) -> int:
     """The ONE always() step that ends every UE job. Best effort: it never fails the job.
 
     In order: this job's own regenerable outputs (RUNNER_TEMP is not pruned on these shared runners; the
     host DerivedDataCache / Intermediate / Binaries speed cache and Docker are deliberately kept), the
     staged bridge (build-plugin-zip), the machine-wide lock, and last the chain python link this very
-    process runs through (removing a link never touches the engine behind it).
+    process runs through (removing a link never touches the engine behind it). Fails the job only when the
+    staged bridge survived (it would leak to the next job on this slot); every part still runs first.
     """
     job = os.environ.get("GITHUB_JOB", "")
     lock_state = ue_machine_lock.State(temp() / "ue-machine-lock")
-    steps = [lambda: cleanup(job, lock_state.acquired.exists() and not lock_state.release.exists())]
+    holds_lock = lock_state.holds_lock()
+    parts = [(lambda: cleanup(job, holds_lock), False)]
     if job == "build-plugin-zip":
-        steps.append(lambda: clean_staged_bridge(None))  # never leak the staged bridge to the next job on this slot
-    steps += [lambda: ue_machine_lock.release(lock_state), lambda: remove_link(link_path())]
-    for step in steps:
+        parts.append((lambda: clean_staged_bridge(None), True))
+    parts += [(lambda: ue_machine_lock.release(lock_state), False), (lambda: remove_link(link_path()), False)]
+    failed = False
+    for part, required in parts:
         try:
-            step()
+            part()
         except Exception as error:  # noqa: BLE001  (every part runs, whatever failed before it)
-            print(f"::warning::teardown: {error}", flush=True)
+            print(f"::{'error' if required else 'warning'}::teardown: {error}", flush=True)
+            failed |= required
+    return 1 if failed else 0
 
 
 def cleanup(job: str, holds_lock: bool) -> None:

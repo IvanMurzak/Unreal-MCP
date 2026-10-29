@@ -183,6 +183,20 @@ class CiStepTests(unittest.TestCase):
                 mock.patch.object(ci.ue_machine_lock, "release", mock.Mock(side_effect=RuntimeError("x"))):
             self.assertEqual(ci.main(["teardown"]), 0)
 
+    def test_teardown_fails_when_the_staged_bridge_survives(self):
+        with mock.patch.dict(os.environ, {"GITHUB_JOB": "build-plugin-zip"}), mock.patch.object(ci, "cleanup", lambda *a: None), \
+                mock.patch.object(ci, "clean_staged_bridge", mock.Mock(side_effect=ci.StepError("left"))), \
+                mock.patch.object(ci.ue_machine_lock, "release", mock.Mock()) as release:
+            self.assertEqual(ci.main(["teardown"]), 1)
+        release.assert_called_once()  # the lock is still released
+
+    def test_a_stale_lock_state_folder_does_not_count_as_holding_the_lock(self):
+        state = lock.State(self.runner_temp / "ue-machine-lock")
+        state.folder.mkdir()
+        state.acquired.write_text("acquired")
+        state.pid.write_text("999999\nnot-a-start-time")
+        self.assertFalse(state.holds_lock())
+
     def test_fixture_diff_without_a_raw_dump_fails(self):
         self.assertEqual(ci.main(["fixture-diff", "--ue", "5.8"]), 1)
 
