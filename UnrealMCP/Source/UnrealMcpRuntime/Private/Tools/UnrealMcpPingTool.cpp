@@ -36,7 +36,9 @@ namespace UnrealMcpPingTool
 
 				TSharedPtr<FJsonObject> Structured = MakeShared<FJsonObject>();
 				Structured->SetStringField(TEXT("result"), Result);
-				return FUnrealMcpToolResult::Success(Result, Structured);
+				FUnrealMcpToolResult Out = FUnrealMcpToolResult::Success(Result, Structured);
+				Out.bMessageCoversStructured = true; // the text is the whole result
+				return Out;
 			});
 	}
 }

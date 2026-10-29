@@ -233,7 +233,7 @@ void FUnrealMcpSourceToolsSpec::Define()
 			TestTrue(*FString::Printf(TEXT("both errors (%s)"), *Text), Text.Contains(TEXT("C2143")) && Text.Contains(TEXT("StreakMultiplier")));
 			TestTrue(TEXT("errors before the warning"), Text.Find(TEXT("C2065")) < Text.Find(TEXT("C4996")));
 			TestEqual(TEXT("one line per diagnostic"), Text.Len() - Text.Replace(TEXT("\n"), TEXT("")).Len(), 3);
-			TestTrue(TEXT("capped"), UnrealMcpSourceTools::DescribeDiagnostics(Diags, 1).Contains(TEXT("2 more diagnostic(s)")));
+			TestTrue(TEXT("capped"), UnrealMcpSourceTools::DescribeDiagnostics(Diags, 1).EndsWith(TEXT("... 2 more diagnostic(s)")));
 			TestEqual(TEXT("none: empty"), UnrealMcpSourceTools::DescribeDiagnostics({}), FString());
 		});
 	});

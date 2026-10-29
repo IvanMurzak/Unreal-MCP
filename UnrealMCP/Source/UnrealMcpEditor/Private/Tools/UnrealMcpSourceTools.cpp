@@ -108,7 +108,7 @@ namespace UnrealMcpSourceTools
 				: FString::Printf(TEXT("\n%s: %s: %s"), *Diag.File, *Diag.Severity, *Diag.Message);
 		}
 		if (Ordered.Num() > MaxRows)
-			Text += FString::Printf(TEXT("\n... %d more diagnostic(s) in the structured report"), Ordered.Num() - MaxRows);
+			Text += FString::Printf(TEXT("\n... %d more diagnostic(s)"), Ordered.Num() - MaxRows);
 		return Text;
 	}
 
@@ -1000,10 +1000,13 @@ namespace UnrealMcpSourceTools
 				// failure, or a UBT configuration error) without flooding the response.
 				Structured->SetStringField(TEXT("outputTail"), Combined.Right(4000));
 
-				// Every diagnostic is in the text: the structured report (and its raw output tail) stays for clients that read it.
+				// The diagnostics are in the text. Past the cap the structured report (with the raw output tail) is appended
+				// too, so a client that reads only the text still sees every row.
+				constexpr int32 MaxDiagnosticRows = 20;
 				FUnrealMcpToolResult Result = FUnrealMcpToolResult::Success(
-					DescribeUbtResult(TargetName, ErrorCount, WarningCount, ReturnCode, Elapsed, Combined) + DescribeDiagnostics(Diagnostics), Structured);
-				Result.bMessageCoversStructured = true;
+					DescribeUbtResult(TargetName, ErrorCount, WarningCount, ReturnCode, Elapsed, Combined)
+						+ DescribeDiagnostics(Diagnostics, MaxDiagnosticRows), Structured);
+				Result.bMessageCoversStructured = Diagnostics.Num() <= MaxDiagnosticRows;
 				return Result;
 			});
 	}
