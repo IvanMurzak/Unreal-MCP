@@ -384,6 +384,19 @@ void FUnrealMcpRqlSession::ConfigureMutations()
 		TypeProvider->Fill(&Type); // the literal's members are looked up next, also by probes that build nothing
 		return rql::LiteralKind::Instanced;
 	};
+	// A literal's $type names a UClass the provider builds descriptors for on demand (RQL only knows the registered ones):
+	// the class by name (InputTriggerHold, UInputTriggerHold, a path or a Blueprint), if it is or derives from the target.
+	// An abstract one is returned too, so the factory's error names its concrete classes.
+	Policy.resolve_subtype = [TypeProvider](const rql::TypeDescriptor& Target, const std::string& Name) -> const rql::TypeDescriptor*
+	{
+		UClass* Base = TypeProvider->ClassOf(&Target);
+		UClass* Class = Base ? FUnrealMcpObjectRef::ResolveClass(UnrealMcpRqlFromStd(Name)) : nullptr;
+		if (!Class || !Class->IsChildOf(Base))
+			return nullptr;
+		const rql::TypeDescriptor* Descriptor = TypeProvider->ForClass(Class);
+		TypeProvider->Fill(Descriptor);
+		return Descriptor;
+	};
 	// Builds an instanced subobject as the editor's instanced arrays do: NewObject in the owner, transactional. Runs while the
 	// mutation is planned (dry runs too): nothing references the object until the write (an unused one is collected), so
 	// the session holds it until the query ends (a call in the same query may collect garbage).
@@ -396,7 +409,7 @@ void FUnrealMcpRqlSession::ConfigureMutations()
 		if (!Owner)
 			throw std::runtime_error("it needs an owning object (write it to a member of one, or pass it to a call on one)");
 		if (Class->HasAnyClassFlags(CLASS_Abstract | CLASS_Deprecated | CLASS_NewerVersionExists))
-			throw std::runtime_error(UnrealMcpRqlToStd(FString::Printf(TEXT("%s is %s (concrete classes: %s); a $type literal cannot name an Unreal class yet"),
+			throw std::runtime_error(UnrealMcpRqlToStd(FString::Printf(TEXT("%s is %s: name a concrete class with $type (%s)"),
 				*Class->GetName(), Class->HasAnyClassFlags(CLASS_Abstract) ? TEXT("abstract") : TEXT("deprecated or outdated"),
 				*UnrealMcpRqlSessionLocal::ConcreteSubclassNames(Class))));
 		// NewObject asserts (a fatal error) on an outer its class does not allow (UCLASS(Within=...)), and an operations

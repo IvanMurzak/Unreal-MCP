@@ -535,13 +535,29 @@ std::optional<Value> construct(Exec& x, const Value& literal, const TypeDescript
             why = "\"$type\" must be a type name string";
             return std::nullopt;
         }
-        const std::vector<const TypeDescriptor*> hits = x.subtypes_named(target, type_name.as_string());
+        const std::string& name = type_name.as_string();
+        std::vector<const TypeDescriptor*> hits = x.subtypes_named(target, name);
+        // A name no registered type matches goes to the host's lazy lookup (spec §13 "Subtype lookup").
+        if (const auto& resolve = x.engine.mutations().resolve_subtype; hits.empty() && resolve) {
+            const TypeDescriptor* found = nullptr;
+            if (auto failure = capture_failure([&] { found = resolve(*target, name); })) {
+                why = "resolving \"$type\" '" + name + "' failed: " + *failure;
+                return std::nullopt;
+            }
+            if (found) {
+                if (found->kind != target->kind || !found->derives_from(target)) {
+                    why = "the host resolved '" + name + "' to " + found->name + ", which does not derive from " + target->friendly_name();
+                    return std::nullopt;
+                }
+                hits.push_back(found);
+            }
+        }
         if (hits.empty()) {
-            why = "no concrete type named '" + type_name.as_string() + "' derives from " + target->friendly_name();
+            why = "no concrete type named '" + name + "' derives from " + target->friendly_name();
             return std::nullopt;
         }
         if (hits.size() > 1) {
-            why = "'" + type_name.as_string() + "' is ambiguous";
+            why = "'" + name + "' is ambiguous";
             return std::nullopt;
         }
         concrete = hits[0];
