@@ -240,9 +240,9 @@ namespace UnrealMcpPythonTools
 			                  "at 3000. Threads the snippet starts with threading.Thread are stopped once the run ends (when their own Python code "
 			                  "runs; not threads blocked in a C call or a queue, nor _thread.start_new_thread) and an unfired threading.Timer is "
 			                  "cancelled: join the work you start. Known engine crashes that take the editor down (avoid them): importing a malformed "
-			                  "or truncated OBJ through Interchange (AssetTools.import_asset_tasks / AssetImportTask) - check the file first or use "
-			                  "rql-mutate editor | call ImportAsset(...) (legacy importers); constructing unreal.NiagaraPythonEmitter() directly - read "
-			                  "emitters with rql-query (NiagaraSystem.Emitters, Niagara extension). Do not call this "
+			                  "or truncated OBJ through Interchange (AssetTools.import_asset_tasks / AssetImportTask) - check the file before importing it; "
+			                  "constructing unreal.NiagaraPythonEmitter() directly - read emitters with rql-query (NiagaraSystem.Emitters, Niagara "
+			                  "extension). Do not call this "
 			                  "editor's MCP server over HTTP from a snippet: that tool call needs the game thread the snippet holds and only "
 			                  "times out. Output is capped (~20k characters each for the value and the logs). 'include': helper files/folders (relative to "
 			                  "<Project>/.ai-game-dev/snippets): folders are importable, files run before the code. Blueprint "
@@ -309,7 +309,8 @@ namespace UnrealMcpPythonTools
 				Request->SetNumberField(TEXT("maxErrorChars"), PythonMaxValueChars);
 				// code_exec takes whole milliseconds and caps them at the max below (a longer budget becomes the cap).
 				const int32 MaxTimeoutMs = PythonMaxTimeBudgetMs(Call);
-				const int32 TimeoutMs = (int32)FMath::Clamp(FMath::CeilToDouble(TimeoutSeconds * 1000.0), 1.0, (double)MAX_int32);
+				// Whole milliseconds; the epsilon keeps 0.07 s at 70 ms (0.07 * 1000 is 70.00000000000001).
+				const int32 TimeoutMs = (int32)FMath::Clamp(FMath::CeilToDouble(TimeoutSeconds * 1000.0 - 1e-6), 1.0, (double)MAX_int32);
 				Request->SetNumberField(TEXT("timeoutMs"), TimeoutMs);
 				TArray<TSharedPtr<FJsonValue>> Imports;
 				Imports.Add(MakeShared<FJsonValueString>(TEXT("unreal")));
@@ -355,6 +356,7 @@ namespace UnrealMcpPythonTools
 				if (Timeout.IsValid() && TimeoutMs > MaxTimeoutMs)
 					Logs.Add(PythonLogEntry(TEXT("info"), FString::Printf(TEXT("timeout %g s was capped at %.1f s (the tool timeout less a margin)"),
 						TimeoutSeconds, MaxTimeoutMs / 1000.0)));
+				Response->SetNumberField(TEXT("timeoutMs"), FMath::Min(TimeoutMs, MaxTimeoutMs)); // the budget the run had
 				if (bRecordedNothing && Response->GetBoolField(TEXT("success")) && PythonLooksMutating(Code))
 					Logs.Add(PythonLogEntry(TEXT("warning"), PythonNoUndoNote));
 				if (PythonCapLogs(Logs, FirstOwn))

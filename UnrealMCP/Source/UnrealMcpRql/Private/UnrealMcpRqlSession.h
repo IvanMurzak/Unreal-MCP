@@ -5,6 +5,7 @@
 
 #include "CoreMinimal.h"
 #include "UnrealMcpRqlTypes.h"
+#include "UObject/StrongObjectPtr.h"
 
 #include <functional>
 #include <memory>
@@ -94,6 +95,8 @@ private:
 	TArray<FMutationHook> CommittedHooks;
 	TArray<TFunction<bool(const UObject*)>> WritableTemplates;
 	int32 TransactionIndex = INDEX_NONE;
+	/** Subobjects create_for_literal built for the running query: kept alive until it ends. */
+	TArray<TStrongObjectPtr<UObject>> LiteralObjects;
 	FString UndoTitle = TEXT("RQL mutation");
 
 	/** A host function as the query source (unreal.assets("Material") | ...): evaluated into a source. True = failed. */

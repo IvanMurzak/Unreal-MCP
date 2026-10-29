@@ -52,7 +52,7 @@
   <!--
     Reused NuGet pins — normally owned by the upstream release pipelines and kept in lockstep
     with Godot-MCP (Godot-MCP.csproj), except where a ⚠ DEVIATION entry below records an owner-approved
-    early adoption. Current: McpPlugin 8.14.0-dev.e8985d5 (temporary pre-release) + ReflectorNet 5.5.0 + Rql 0.3.0-dev.2877579 (temporary pre-release).
+    early adoption. Current: McpPlugin 8.14.0-dev.42786f9 + ReflectorNet 5.5.1-dev.ec3702e + Rql 0.3.0-dev.2f4e263 (all temporary pre-releases).
     The MCP/reflection stack is NOT forked. Historical context: the 6.8.0 bump consumed the new
     shared engine-agnostic com.IvanMurzak.McpPlugin.AgentConfig module (the AI-agent configurators
     + the AgentConfiguratorDescription UI-DTO) so the sidecar hosts the AI-agent configuration

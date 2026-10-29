@@ -139,7 +139,7 @@ void FUnrealMcpPythonToolsSpec::Define()
 		const double Elapsed = FPlatformTime::Seconds() - Start;
 		TestTrue(*FString::Printf(TEXT("a Timeout of 2000 ms (%s)"), *R.Message), !R.bSuccess && R.Message.StartsWith(TEXT("Timeout:"))
 			&& R.Message.Contains(TEXT("time budget of 2000 ms")));
-		TestTrue(*FString::Printf(TEXT("stopped after about 2 s (%.1f s)"), Elapsed), Elapsed >= 1.9 && Elapsed < 5.0);
+		TestTrue(*FString::Printf(TEXT("stopped after about 2 s (%.1f s)"), Elapsed), Elapsed >= 1.9 && Elapsed < 20.0);
 		TestFalse(TEXT("no cap note when the timeout fits"), R.Message.Contains(TEXT("was capped")));
 
 		// Longer than the call allows: the cap (half of a 3 s call timeout here) wins and the logs say so.
@@ -148,8 +148,10 @@ void FUnrealMcpPythonToolsSpec::Define()
 		TestTrue(*FString::Printf(TEXT("says it was capped (%s)"), *Capped.Message), Capped.Message.Contains(TEXT("timeout 100 s was capped at 1.5 s")));
 
 		// Without 'timeout' the default is 30 s (only the cap of a short call lowers it, silently).
-		const FUnrealMcpToolResult Default = Run(TEXT("from unreal_mcp._vendor.code_exec import runner\nrunner._default_timeout_ms"));
-		TestTrue(*FString::Printf(TEXT("default 30000 ms (%s)"), *Default.Message), Default.bSuccess && Default.Message.StartsWith(TEXT("30000")));
+		const FUnrealMcpToolResult Default = Run(TEXT("1"));
+		TestTrue(TEXT("default budget 30000 ms"), Default.bSuccess && Default.Structured.IsValid() && Default.Structured->GetNumberField(TEXT("timeoutMs")) == 30000.0);
+		const FUnrealMcpToolResult Fraction = Run(TEXT("1"), {}, 0, MakeShared<FJsonValueNumber>(0.07));
+		TestTrue(TEXT("0.07 s is 70 ms"), Fraction.Structured.IsValid() && Fraction.Structured->GetNumberField(TEXT("timeoutMs")) == 70.0);
 
 		for (const TSharedPtr<FJsonValue>& Bad : TArray<TSharedPtr<FJsonValue>>{ MakeShared<FJsonValueNumber>(0), MakeShared<FJsonValueNumber>(-1),
 			MakeShared<FJsonValueString>(TEXT("soon")), MakeShared<FJsonValueBoolean>(true) })

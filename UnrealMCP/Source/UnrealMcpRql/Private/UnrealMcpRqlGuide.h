@@ -15,12 +15,12 @@ namespace UnrealMcpRqlGuide
 {
 	/**
 	 * RQL's own language rules text (conditions, ?:, list equality, group items, receipts, call, bulk create, vectors, map keys,
-	 * typed literals) with Unreal's creation call in its examples.
+	 * typed literals). Not rql::language_rules_for("editor.SpawnActor"): its examples call the creation method as
+	 * (name, {properties}), which SpawnActor(ClassName, Label, Location, ...) does not take; the guide has Unreal's own.
 	 */
 	inline const char* LanguageRules()
 	{
-		static const std::string Rules = rql::language_rules_for("editor.SpawnActor");
-		return Rules.c_str();
+		return rql::language_rules();
 	}
 
 	inline const char* QueryBlurb()
@@ -163,7 +163,8 @@ Widgets and sequences:
 
 	inline const char* MutateOutro()
 	{
-		return "Object literals build values: set Settings = {Speed: 2}. Actors, components and assets are never built from literals: reference them (unreal.find(\"Label\"), "
+		return "Object literals build values: set Settings = {Speed: 2}; a member of an EditInlineNew class gets a new subobject of its "
+			"declared class (no $type: it cannot name an Unreal class yet). Actors, components and assets are never built from literals: reference them (unreal.find(\"Label\"), "
 			"ref(\"Type#id\"), an asset path) and create them with editor | call SpawnActor / AddComponent / CreateAsset. "
 			"Destructive cleanup (Destroy, DeleteAsset, removing many items): first list what would go (rql-query, or dry_run=true) "
 			"and show it to the user; delete only in a second call after that. At most 200 targets per call by default: pass max_targets "

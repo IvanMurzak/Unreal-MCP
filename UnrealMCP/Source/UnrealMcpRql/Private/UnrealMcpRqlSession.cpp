@@ -41,8 +41,12 @@ namespace UnrealMcpRqlSessionLocal
 		GetDerivedClasses(Base, Derived, /*bRecursive*/ true);
 		TArray<FString> Names;
 		for (const UClass* Class : Derived)
-			if (!Class->HasAnyClassFlags(CLASS_Abstract | CLASS_Deprecated | CLASS_NewerVersionExists) && Class->IsNative())
-				Names.Add(Class->GetName());
+		{
+			const FString Name = Class->GetName();
+			if (Class->HasAnyClassFlags(CLASS_EditInlineNew) && !Class->HasAnyClassFlags(CLASS_Abstract | CLASS_Deprecated | CLASS_NewerVersionExists)
+				&& !Name.StartsWith(TEXT("SKEL_")) && !Name.StartsWith(TEXT("REINST_")))
+				Names.Add(Name);
+		}
 		Names.Sort();
 		static constexpr int32 MaxNames = 8;
 		const int32 More = Names.Num() - MaxNames;
@@ -381,8 +385,9 @@ void FUnrealMcpRqlSession::ConfigureMutations()
 		return rql::LiteralKind::Instanced;
 	};
 	// Builds an instanced subobject as the editor's instanced arrays do: NewObject in the owner, transactional. Runs while the
-	// mutation is planned (dry runs too): nothing references the object until the write, so an unused one is collected.
-	Policy.create_for_literal = [TypeProvider](const rql::TypeDescriptor& Type, const rql::Value& Outer) -> std::optional<rql::Value>
+	// mutation is planned (dry runs too): nothing references the object until the write (an unused one is collected), so
+	// the session holds it until the query ends (a call in the same query may collect garbage).
+	Policy.create_for_literal = [this, TypeProvider](const rql::TypeDescriptor& Type, const rql::Value& Outer) -> std::optional<rql::Value>
 	{
 		UClass* Class = TypeProvider->ClassOf(&Type);
 		if (!Class)
@@ -392,9 +397,17 @@ void FUnrealMcpRqlSession::ConfigureMutations()
 			throw std::runtime_error("it needs an owning object (write it to a member of one, or pass it to a call on one)");
 		if (Class->HasAnyClassFlags(CLASS_Abstract | CLASS_Deprecated | CLASS_NewerVersionExists))
 			throw std::runtime_error(UnrealMcpRqlToStd(FString::Printf(TEXT("%s is %s (concrete classes: %s); a $type literal cannot name an Unreal class yet"),
-				*Class->GetName(), Class->HasAnyClassFlags(CLASS_Abstract) ? TEXT("abstract") : TEXT("deprecated"),
+				*Class->GetName(), Class->HasAnyClassFlags(CLASS_Abstract) ? TEXT("abstract") : TEXT("deprecated or outdated"),
 				*UnrealMcpRqlSessionLocal::ConcreteSubclassNames(Class))));
+		// NewObject asserts (a fatal error) on an outer its class does not allow (UCLASS(Within=...)), and an operations
+		// object or a class default would make the subobject a read-only template.
+		if (Class->ClassWithin && !Owner->IsA(Class->ClassWithin))
+			throw std::runtime_error(UnrealMcpRqlToStd(FString::Printf(TEXT("%s can only be owned by a %s, not by %s"),
+				*Class->GetName(), *Class->ClassWithin->GetName(), *Owner->GetName())));
+		if (Owner->IsTemplate())
+			throw std::runtime_error(UnrealMcpRqlToStd(FString::Printf(TEXT("%s is a class default or operations object and cannot own it"), *Owner->GetName())));
 		UObject* Made = NewObject<UObject>(Owner, Class, NAME_None, Owner->GetMaskedFlags(RF_PropagateToSubObjects) | RF_Transactional);
+		LiteralObjects.Emplace(Made);
 		return TypeProvider->WrapObject(Made);
 	};
 	Policy.literal_refusal_hint = [](const rql::TypeDescriptor&)
@@ -542,6 +555,7 @@ FString FUnrealMcpRqlSession::Execute(const FString& PlanJson, bool bAllowMutati
 		Result = EnginePtr->execute(Plan, Budgets, Options);
 	}
 	CloseTransaction();
+	LiteralObjects.Reset(); // written by now (the undo buffer or their owner holds them), or garbage
 	bOutOk = Result.ok;
 	return UnrealMcpRqlFromStd(Result.to_json(/*include_stats*/ false).dump());
 }

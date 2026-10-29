@@ -336,7 +336,7 @@ to parse `query` into `plan` (query / mutate) and to render the answer, and rql-
 guide, the live sources and functions, the guides of installed RQL modules) as `"skills": [{name, description,
 markdown}]`. `unreal-skill-generate` writes every shipped skill as `<name>/SKILL.md`; skills never reach `tools/list`.
 The skill's name, description and body live in the plugin (`UnrealMcpRqlGuide.h`, the session's skill markdown).
-The rql-query and rql-mutate descriptions and the skill append RQL's shared language rules (`rql::language_rules_for("editor.SpawnActor")`,
+The rql-query and rql-mutate descriptions and the skill append RQL's shared language rules (`rql::language_rules()`,
 `rql/guide.hpp`), so rules every host states alike (conditions, `?:`, list equality, group items, receipts, `call`,
 bulk create, vectors and vector functions, missing map keys, typed literals) come from RQL and are not copied into the Unreal guide.
 
