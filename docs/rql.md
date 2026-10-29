@@ -22,8 +22,8 @@ agent ──query text──▶ unreal-mcp-bridge (sidecar, .NET)          Unrea
                       AgentFormat: QueryResult → compact rows ◀──IPC tool-response: QueryResult JSON── over live UObjects
 ```
 
-- **Sidecar** (`bridge/src/Tools/RqlBridge.cs`, NuGet `com.IvanMurzak.Rql` 0.3.0-dev.2877579 — a temporary pre-release
-  packed from RQL main 2877579 and committed under `bridge/prerelease-packages/` until the cascade release): for `rql-query` / `rql-mutate` it
+- **Sidecar** (`bridge/src/Tools/RqlBridge.cs`, NuGet `com.IvanMurzak.Rql` 0.3.0-dev.2f4e263 — a temporary pre-release
+  packed from RQL main 2f4e263 and committed under `bridge/prerelease-packages/` until the cascade release): for `rql-query` / `rql-mutate` it
   parses `query` with `RqlParser` and adds `PlanCodec.Serialize(plan)` as the `plan` argument (a syntax error is
   answered without a round trip). The plugin answers with the QueryResult JSON; the sidecar renders it with
   `AgentFormat.Render(…, Table)` — byte-for-byte the agent output of Unity-MCP's rql tools. `rql-schema` answers with
@@ -177,10 +177,19 @@ arithmetic (their adapters' `components` / `from_components`): `set Scale = Scal
 it, not a composed rotation; that is what editor nudges want. `FQuat`, `FTransform`, `FColor` and the integer points
 stay out (`type-mismatch`).
 
-**No UObjects from literals.** The session's `can_construct_from_literal` hook refuses every UObject type, so `{}` or
-`{Name: ...}` written to an object parameter or member is `coercion-failed` ("an engine object") and nothing is
-constructed, on dry runs and while RQL tries overloads. (Unreal marks liveness through the engine-wide `is_alive` hook,
-not a per-type adapter, so RQL's own engine-object default would not cover it.)
+**Literal kinds (RQL spec 4.5).** The session's `literal_kind_of` hook makes every UObject class an *engine* object and
+every `EditInlineNew` class *instanced*; structs stay values. (Unreal marks liveness through the engine-wide `is_alive`
+hook, not a per-type adapter, so RQL's own default would not cover them.)
+- Engine: `{}` or `{Name: ...}` written to an actor / component / asset parameter or member is `coercion-failed` ("an
+  engine object ...; reference an existing one: unreal.find(...), ref(...) or an asset path", `literal_refusal_hint`) and
+  nothing is constructed, on dry runs and while RQL tries overloads.
+- Instanced: a typed literal builds the subobject for its outer (the object owning the written member, the call's target,
+  or the object an enclosing literal builds): `create_for_literal` is `NewObject(Outer, Class)` with the outer's
+  propagated flags plus `RF_Transactional`, as the editor's instanced arrays create them, in the mutation's one undo
+  step. The factory runs while the mutation is planned (dry runs too); an object nothing references afterwards is
+  garbage collected. A literal for an abstract class (UInputTrigger, UInputModifier) fails naming concrete subclasses:
+  `$type` cannot name an Unreal class yet, because the C++ runtime looks it up only among types its own builders
+  registered (an RQL API for runtime-built descriptors is pending).
 
 The `editor` operations also include `CreateDataTable(path, rowStruct)` and, for gameplay tags,
 `AddGameplayTag(name, comment?, source?)`, `RemoveGameplayTag(name)`, `RenameGameplayTag(name, newName)` (written to
@@ -327,9 +336,9 @@ to parse `query` into `plan` (query / mutate) and to render the answer, and rql-
 guide, the live sources and functions, the guides of installed RQL modules) as `"skills": [{name, description,
 markdown}]`. `unreal-skill-generate` writes every shipped skill as `<name>/SKILL.md`; skills never reach `tools/list`.
 The skill's name, description and body live in the plugin (`UnrealMcpRqlGuide.h`, the session's skill markdown).
-The rql-query and rql-mutate descriptions and the skill append RQL's shared language rules (`rql::language_rules()`,
+The rql-query and rql-mutate descriptions and the skill append RQL's shared language rules (`rql::language_rules_for("editor.SpawnActor")`,
 `rql/guide.hpp`), so rules every host states alike (conditions, `?:`, list equality, group items, receipts, `call`,
-bulk create, vectors, missing map keys) come from RQL and are not copied into the Unreal guide.
+bulk create, vectors and vector functions, missing map keys, typed literals) come from RQL and are not copied into the Unreal guide.
 
 ## Extensions
 

@@ -25,12 +25,15 @@
 BEGIN_DEFINE_SPEC(FUnrealMcpPythonToolsSpec, "UnrealMcp.Tools.Python",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 
-	FUnrealMcpToolResult Run(const FString& Code, const TArray<FString>& Include = TArray<FString>(), int32 CallTimeoutMs = 0)
+	FUnrealMcpToolResult Run(const FString& Code, const TArray<FString>& Include = TArray<FString>(), int32 CallTimeoutMs = 0,
+		TSharedPtr<FJsonValue> Timeout = nullptr)
 	{
 		FUnrealMcpToolRegistry Registry;
 		UnrealMcpPythonTools::Register(Registry);
 		TSharedPtr<FJsonObject> A = MakeShared<FJsonObject>();
 		A->SetStringField(TEXT("code"), Code);
+		if (Timeout.IsValid())
+			A->SetField(TEXT("timeout"), Timeout);
 		if (Include.Num() > 0)
 		{
 			TArray<TSharedPtr<FJsonValue>> Values;
@@ -127,6 +130,48 @@ void FUnrealMcpPythonToolsSpec::Define()
 		TestTrue(*FString::Printf(TEXT("stopped within the call's timeout (%.1f s)"), Elapsed), Elapsed < 3.0);
 		const FUnrealMcpToolResult After = Run(TEXT("6 * 7"));
 		TestTrue(TEXT("the next run works"), After.bSuccess && After.Message.StartsWith(TEXT("42")));
+	});
+
+	It("takes a 'timeout' in seconds: an endless loop with timeout 2 stops after about 2 s, far below the call's timeout", [this]()
+	{
+		const double Start = FPlatformTime::Seconds();
+		const FUnrealMcpToolResult R = Run(TEXT("while True:\n    pass"), {}, 120000, MakeShared<FJsonValueNumber>(2));
+		const double Elapsed = FPlatformTime::Seconds() - Start;
+		TestTrue(*FString::Printf(TEXT("a Timeout of 2000 ms (%s)"), *R.Message), !R.bSuccess && R.Message.StartsWith(TEXT("Timeout:"))
+			&& R.Message.Contains(TEXT("time budget of 2000 ms")));
+		TestTrue(*FString::Printf(TEXT("stopped after about 2 s (%.1f s)"), Elapsed), Elapsed >= 1.9 && Elapsed < 5.0);
+		TestFalse(TEXT("no cap note when the timeout fits"), R.Message.Contains(TEXT("was capped")));
+
+		// Longer than the call allows: the cap (half of a 3 s call timeout here) wins and the logs say so.
+		const FUnrealMcpToolResult Capped = Run(TEXT("while True:\n    pass"), {}, 3000, MakeShared<FJsonValueNumber>(100));
+		TestTrue(*FString::Printf(TEXT("capped budget (%s)"), *Capped.Message), Capped.Message.Contains(TEXT("time budget of 1500 ms")));
+		TestTrue(*FString::Printf(TEXT("says it was capped (%s)"), *Capped.Message), Capped.Message.Contains(TEXT("timeout 100 s was capped at 1.5 s")));
+
+		// Without 'timeout' the default is 30 s (only the cap of a short call lowers it, silently).
+		const FUnrealMcpToolResult Default = Run(TEXT("from unreal_mcp._vendor.code_exec import runner\nrunner._default_timeout_ms"));
+		TestTrue(*FString::Printf(TEXT("default 30000 ms (%s)"), *Default.Message), Default.bSuccess && Default.Message.StartsWith(TEXT("30000")));
+
+		for (const TSharedPtr<FJsonValue>& Bad : TArray<TSharedPtr<FJsonValue>>{ MakeShared<FJsonValueNumber>(0), MakeShared<FJsonValueNumber>(-1),
+			MakeShared<FJsonValueString>(TEXT("soon")), MakeShared<FJsonValueBoolean>(true) })
+		{
+			const FUnrealMcpToolResult Refused = Run(TEXT("1"), {}, 0, Bad);
+			TestTrue(*FString::Printf(TEXT("invalid timeout refused (%s)"), *Refused.Message), !Refused.bSuccess
+				&& Refused.Message.StartsWith(TEXT("InvalidRequest: 'timeout' must be a number of seconds")));
+		}
+	});
+
+	It("stops a thread the snippet started once the run ends", [this]()
+	{
+		const FUnrealMcpToolResult Started = Run(TEXT("import threading\n"
+			"def spin():\n    while True:\n        pass\n"
+			"threading.Thread(target=spin, name='UnrealMcpSpecSpin', daemon=True).start()\n'started'"));
+		TestTrue(*FString::Printf(TEXT("ran (%s)"), *Started.Message), Started.bSuccess && Started.Message.StartsWith(TEXT("started")));
+		TestTrue(*FString::Printf(TEXT("warns about the running thread (%s)"), *Started.Message), Started.Message.Contains(TEXT("still running when it ended")));
+		const FUnrealMcpToolResult After = Run(TEXT("import threading, time\n"
+			"deadline = time.monotonic() + 3\n"
+			"while time.monotonic() < deadline and any(t.name == 'UnrealMcpSpecSpin' for t in threading.enumerate()):\n    time.sleep(0.05)\n"
+			"[t.name for t in threading.enumerate() if t.name == 'UnrealMcpSpecSpin']"));
+		TestTrue(*FString::Printf(TEXT("the thread is gone (%s)"), *After.Message), After.bSuccess && After.Message.StartsWith(TEXT("[]")));
 	});
 
 	It("caps sys.setrecursionlimit while a snippet runs (Python 3.11 would overflow the C stack) and restores it after", [this]()

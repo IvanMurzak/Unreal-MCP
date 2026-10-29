@@ -32,6 +32,11 @@ namespace rql {
 /// Outcome of a capability that may decline: not handled (defer), succeeded, or failed with a reason.
 enum class AdapterOutcome : uint8_t { NotHandled, Ok, Failed };
 
+/// How object literals build values of a type (spec §4.5, §13 "Literal construction"): never (Engine: scene objects), as a
+/// fresh value (Value: plain data, value-like assets), or as a subobject owned by the object it is written into
+/// (Instanced: Unreal's EditInlineNew objects, built with NewObject(Outer, Class)).
+enum class LiteralKind : uint8_t { Engine, Value, Instanced };
+
 namespace detail {
 class Encoder;
 }
@@ -305,6 +310,16 @@ struct TypeAdapter {
     std::function<std::optional<std::vector<double>>(const Value& value)> components;
     /// A value of `type` built from components in the order `components` returns them; nullopt when it cannot be built.
     std::function<std::optional<Value>(const TypeDescriptor& type, const std::vector<double>& components)> from_components;
+    /// The literal kind of `type` (the adapter's type or a subtype; spec §4.5): Engine (never built from an object literal),
+    /// Value (built fresh) or Instanced (built as a subobject of its outer); nullopt defers. Without an answer a type with a
+    /// stable_id or is_alive adapter is an engine object and every other type a value.
+    std::function<std::optional<LiteralKind>(const TypeDescriptor& type)> literal_kind;
+    /// Builds an empty value of the concrete `type` for an object literal of kind Value or Instanced (spec §13 "Literal
+    /// construction"); the literal's members are assigned afterwards. `outer` is the object that will own it (the owner of
+    /// the written member, the call's target, or the object an enclosing literal builds), null outside any object. Return
+    /// nullopt to defer (next adapter, then the type's create()). Values it builds are host-owned (never retained by the
+    /// engine). Runs while the mutation is planned, dry runs included: create objects nothing references until the write.
+    std::function<std::optional<Value>(const TypeDescriptor& type, const Value& outer)> create_for_literal;
 };
 
 /// Engine-wide member type exclusion (spec §13): a member is dropped when its type, element type or key

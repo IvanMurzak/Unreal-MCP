@@ -456,21 +456,77 @@ Value read_back(Exec& x, const PlannedWrite& w) {
     return w.new_value;
 }
 
-std::optional<Value> coerce_impl(Exec& x, const Value& v, const TypeDescriptor* target, bool nullable, std::string& why, bool probe, int& depth);
+std::optional<Value> coerce_impl(Exec& x, const Value& v, const TypeDescriptor* target, bool nullable, std::string& why, bool probe, int& depth,
+                                 const Value& outer);
 
-/// Whether an object literal may build `type` (spec §4.5): the host's answer, else every type that is not an engine object
-/// (no stable_id or is_alive adapter).
-bool may_construct(Exec& x, const TypeDescriptor* type) {
-    if (const auto& decide = x.engine.mutations().can_construct_from_literal) {
-        if (std::optional<bool> answer = decide(*type)) return *answer;
+/// The literal kind of `type` (spec §4.5, §13): the host's literal_kind_of, else the adapters (most specific first), else
+/// Engine for a type with a stable_id or is_alive adapter and Value for any other; then the host's
+/// can_construct_from_literal (false -> Engine, true -> an Engine type becomes Value).
+LiteralKind literal_kind(Exec& x, const TypeDescriptor* type) {
+    // The hooks answer per type and cannot change within one execution: ask them once.
+    auto cached = x.literal_kinds.find(type);
+    if (cached != x.literal_kinds.end()) return cached->second;
+    const MutationPolicy& m = x.engine.mutations();
+    std::optional<LiteralKind> kind;
+    if (m.literal_kind_of) kind = m.literal_kind_of(*type);
+    if (!kind)
+        for (const TypeAdapter* ad : x.adapters_for(type, Capability::LiteralKind))
+            if ((kind = ad->literal_kind(*type))) break;
+    LiteralKind k = kind ? *kind
+                         : (x.adapters_for(type, Capability::StableId).empty() && x.adapters_for(type, Capability::IsAlive).empty() ? LiteralKind::Value
+                                                                                                                                     : LiteralKind::Engine);
+    if (m.can_construct_from_literal) {
+        if (std::optional<bool> decided = m.can_construct_from_literal(*type))
+            k = !*decided ? LiteralKind::Engine : k == LiteralKind::Engine ? LiteralKind::Value : k;
     }
-    return x.adapters_for(type, Capability::StableId).empty() && x.adapters_for(type, Capability::IsAlive).empty();
+    x.literal_kinds.emplace(type, k);
+    return k;
+}
+
+/// Whether a factory (the host's or an adapter's) may build `type`: a probe then needs no create().
+bool has_factory(Exec& x, const TypeDescriptor* type) {
+    return static_cast<bool>(x.engine.mutations().create_for_literal) || !x.adapters_for(type, Capability::Factory).empty();
+}
+
+/// The value a factory builds for a literal of `type` (host first, then adapters); nullopt: none answered.
+std::optional<Value> create_for_literal(Exec& x, const TypeDescriptor* type, const Value& outer) {
+    // A null / missing answer defers to the next factory, like no answer.
+    auto answered = [](std::optional<Value>& m) {
+        if (m && (m->is_null() || m->is_missing())) m.reset();
+        return m.has_value();
+    };
+    std::optional<Value> made;
+    if (const auto& host = x.engine.mutations().create_for_literal) {
+        made = host(*type, outer);
+        if (answered(made)) return made;
+    }
+    for (const TypeAdapter* ad : x.adapters_for(type, Capability::Factory)) {
+        made = ad->create_for_literal(*type, outer);
+        if (answered(made)) return made;
+    }
+    return std::nullopt;
+}
+
+/// The advice ending the engine-object refusal (spec §4.5): the host's for the type, else "pass an existing one".
+std::string refusal_advice(Exec& x, const TypeDescriptor* type) {
+    if (const auto& hint = x.engine.mutations().literal_refusal_hint) {
+        std::string h = hint(*type);
+        if (!h.empty()) return h;
+    }
+    return "pass an existing one (e.g. ref(\"\xE2\x80\xA6\"))";
+}
+
+/// Stands for the object a probed literal would build (nothing is constructed), so its nested values have an outer.
+const Value& probe_outer() {
+    static const Value placeholder = Value::boolean(true);
+    return placeholder;
 }
 
 /// Build `target` (object or struct) from an object literal (spec §4.5): concrete type (`"$type"`),
 /// construction, assignment of the named members (coerced recursively and validated). A `probe` checks the same rules
 /// without constructing, assigning or validating anything (its success value is a placeholder).
-std::optional<Value> construct(Exec& x, const Value& literal, const TypeDescriptor* target, std::string& why, bool probe, int& depth) {
+std::optional<Value> construct(Exec& x, const Value& literal, const TypeDescriptor* target, std::string& why, bool probe, int& depth,
+                               const Value& outer) {
     depth = 0;
     const TypeDescriptor* concrete = target;
     Value type_name;
@@ -490,22 +546,46 @@ std::optional<Value> construct(Exec& x, const Value& literal, const TypeDescript
         }
         concrete = hits[0];
     }
-    // Engine objects are never built from literals (spec §4.5): only existing ones can be passed.
-    if (!may_construct(x, concrete)) {
-        why = concrete->name + " is an engine object and cannot be built from an object literal; pass an existing one (e.g. ref(\"\xE2\x80\xA6\"))";
+    // Engine objects are never built from literals (spec §4.5), constructible or not: only existing ones can be passed.
+    const LiteralKind kind = literal_kind(x, concrete);
+    if (kind == LiteralKind::Engine) {
+        why = concrete->name + " is an engine object and cannot be built from an object literal; " + refusal_advice(x, concrete);
         return std::nullopt;
     }
-    if (!concrete->create) {
+    // An instanced subobject is built for the object that owns it (spec §4.5).
+    if (kind == LiteralKind::Instanced && (outer.is_null() || outer.is_missing())) {
+        why = concrete->name + " is an instanced subobject: it is built only for the object that owns it (write it to a member of that object or pass it to a call)";
+        return std::nullopt;
+    }
+    // A factory builds first (never in a probe, where it counts as constructible), then the type's own create().
+    const bool factory = has_factory(x, concrete);
+    std::optional<Value> made;
+    if (!probe && factory) {
+        if (auto failure = capture_failure([&] { made = create_for_literal(x, concrete, outer); })) {
+            why = "building " + concrete->name + " failed: " + *failure;
+            return std::nullopt;
+        }
+        if (made && !is_instance_of(*made, concrete))
+            throw std::logic_error("the literal factory built " + type_name_of(*made) + ", not " + concrete->name);
+    }
+    if (!made && !concrete->create && !(probe && factory)) {
         why = "cannot construct " + concrete->friendly_name() + " (register it constructible(), or add an adapter that coerces object literals)";
         return std::nullopt;
     }
     std::shared_ptr<void> data;
     Value instance;
-    if (!probe) {
+    const bool host_built = made.has_value();
+    if (made) {
+        instance = *made;
+    } else if (!probe) {
         data = concrete->create();
         instance = concrete->kind == TypeKind::Struct ? Value::structure(concrete, data) : Value::object(concrete, data.get(), data);
     }
+    // Values nested in an object literal belong to the object it builds; a struct passes its own outer on.
+    const Value& inner = concrete->kind == TypeKind::Object ? (probe ? probe_outer() : instance) : outer;
     const TypeView view = x.view(concrete);
+    // Members are looked up on `concrete`: a factory that built a subtype hands them the concrete base's pointer.
+    void* self = probe ? nullptr : instance.type() == concrete || !instance.type() ? instance.ptr() : instance.type()->upcast(instance.ptr(), concrete);
     bool ok = true;
     literal.map().for_each([&](const Value& k, const Value& v) {
         if (k.is_string() && k.as_string() == "$type") return true;
@@ -522,19 +602,19 @@ std::optional<Value> construct(Exec& x, const Value& literal, const TypeDescript
         } else {
             std::string w;
             int d = 0;
-            auto mv = coerce_impl(x, v, m->type, m->nullable, w, probe, d);
+            auto mv = coerce_impl(x, v, m->type, m->nullable, w, probe, d, inner);
             if (!mv) {
                 why = "'" + m->name + "': " + w;
                 depth = d + 1;
             } else if (probe) {
                 return true;
             } else {
-                std::string rejected = m->validate ? m->validate(instance.ptr(), *mv) : std::string();
+                std::string rejected = m->validate ? m->validate(self, *mv) : std::string();
                 if (!rejected.empty()) {
                     why = "'" + m->name + "': " + rejected;
                 } else {
                     try {
-                        m->setter(instance.ptr(), *mv);
+                        m->setter(self, *mv);
                         return true;
                     } catch (const std::exception& ex) {
                         why = "'" + m->name + "': " + ex.what();
@@ -551,11 +631,12 @@ std::optional<Value> construct(Exec& x, const Value& literal, const TypeDescript
     depth = 0;
     if (probe) return Value::null();
     // Engine-built objects are retained by the engine (raw links may reach them); host-factory ones are host-owned.
-    if (instance.is_object() && !concrete->host_owned) x.constructed.push_back(data);
+    if (instance.is_object() && !concrete->host_owned && !host_built) x.constructed.push_back(data);
     return instance;
 }
 
-std::optional<Value> coerce_impl(Exec& x, const Value& v, const TypeDescriptor* target, bool nullable, std::string& why, bool probe, int& depth) {
+std::optional<Value> coerce_impl(Exec& x, const Value& v, const TypeDescriptor* target, bool nullable, std::string& why, bool probe, int& depth,
+                                 const Value& outer) {
     depth = 0;
     if (v.is_absent()) {
         why = "value is " + describe_value(v);
@@ -604,7 +685,7 @@ std::optional<Value> coerce_impl(Exec& x, const Value& v, const TypeDescriptor* 
     }
     if (v.is_map() && v.map().object_literal()) {
         // Object literals (spec §4.5): maps are built entry by entry below; objects / structs are constructed.
-        if (target->kind == TypeKind::Object || target->kind == TypeKind::Struct) return construct(x, v, target, why, probe, depth);
+        if (target->kind == TypeKind::Object || target->kind == TypeKind::Struct) return construct(x, v, target, why, probe, depth, outer);
         if (target->kind != TypeKind::Map) {
             why = "an object literal cannot become " + target->friendly_name();
             return std::nullopt;
@@ -673,7 +754,7 @@ std::optional<Value> coerce_impl(Exec& x, const Value& v, const TypeDescriptor* 
             for (size_t i = 0; i < n; ++i) {
                 std::string w;
                 int d = 0;
-                auto c = coerce_impl(x, l.at(i), target->element, target->element_nullable, w, probe, d);
+                auto c = coerce_impl(x, l.at(i), target->element, target->element_nullable, w, probe, d, outer);
                 if (!c) {
                     why = "element: " + w;
                     depth = d + 1;
@@ -694,7 +775,7 @@ std::optional<Value> coerce_impl(Exec& x, const Value& v, const TypeDescriptor* 
             v.map().for_each([&](const Value& k, const Value& val) {
                 std::string w;
                 int d = 0;
-                auto c = coerce_impl(x, val, target->element, target->element_nullable, w, probe, d);
+                auto c = coerce_impl(x, val, target->element, target->element_nullable, w, probe, d, outer);
                 if (!c) {
                     why = "value: " + w;
                     depth = d + 1;
@@ -715,13 +796,13 @@ std::optional<Value> coerce_impl(Exec& x, const Value& v, const TypeDescriptor* 
 
 }  // namespace
 
-std::optional<Value> coerce(Exec& x, const Value& v, const TypeDescriptor* target, bool nullable, std::string& why) {
+std::optional<Value> coerce(Exec& x, const Value& v, const TypeDescriptor* target, bool nullable, std::string& why, const Value& outer) {
     int depth = 0;
-    return coerce_impl(x, v, target, nullable, why, false, depth);
+    return coerce_impl(x, v, target, nullable, why, false, depth, outer);
 }
 
-bool can_coerce(Exec& x, const Value& v, const TypeDescriptor* target, bool nullable, std::string& why, int& depth) {
-    return coerce_impl(x, v, target, nullable, why, true, depth).has_value();
+bool can_coerce(Exec& x, const Value& v, const TypeDescriptor* target, bool nullable, std::string& why, int& depth, const Value& outer) {
+    return coerce_impl(x, v, target, nullable, why, true, depth, outer).has_value();
 }
 
 namespace {
@@ -814,7 +895,8 @@ QueryResult run_set(Exec& x, Compiler& c, Encoder& enc, Stream& stream, const St
             if (holder_owns && owner.is_map()) owner = origin->holder;
             check_writable(x, slot, label, root, "");
             std::string why;
-            auto coerced = coerce(x, nv, slot.type, slot.nullable, why);
+            // The outer of an instanced literal is the owning object, never a map, list or struct (spec §4.5).
+            auto coerced = coerce(x, nv, slot.type, slot.nullable, why, owner.is_object() ? owner : Value::null());
             if (!coerced)
                 throw RqlException("coercion-failed", "cannot assign " + describe_value(nv) + " to '" + label + "' (" +
                                                           (slot.type ? slot.type->friendly_name() : std::string("object")) + "): " + why);
@@ -880,7 +962,7 @@ QueryResult run_set(Exec& x, Compiler& c, Encoder& enc, Stream& stream, const St
         }
         rows.push_back({Value::string(w.ref), Value::string(w.label), w.old_value, w.new_value});
     }
-    QueryResult r = enc.rows({"$ref", "member", "old", "new"}, rows);
+    QueryResult r = enc.rows({"$ref", "member", "old", "new"}, rows, "changes");
     r.dry_run = x.options.dry_run;
     r.unchanged = unchanged;
     return r;
@@ -949,11 +1031,14 @@ struct Miss {
     long long matched;
     int depth;
     std::string why;
+    /// Bound by name except one key that is a parameter's name misspelt (spec §8): closer than any failure depth.
+    bool misspelt = false;
 };
 
 int compare_miss(const Miss& a, const Miss& b) {
     if (a.arity_fits != b.arity_fits) return a.arity_fits ? 1 : -1;
     if (a.matched != b.matched) return a.matched < b.matched ? -1 : 1;
+    if (a.misspelt != b.misspelt) return a.misspelt ? 1 : -1;
     return a.depth == b.depth ? 0 : a.depth < b.depth ? -1 : 1;
 }
 
@@ -1002,10 +1087,16 @@ bool bind_names(const MethodDescriptor& m, const Value& literal, std::vector<siz
         return false;
     }
     if (!unknown.empty()) {
-        std::vector<std::string> close = suggest_closest(unknown, names, 1);
+        // A key close to a parameter not named yet is that parameter misspelt, so "no parameter 'klass' (did you mean
+        // 'className'?)" beats an overload that cannot take the literal at all (spec §8).
+        std::vector<std::string> unnamed;
+        for (size_t j = 0; j < ps.size(); ++j)
+            if (!named[j]) unnamed.push_back(ps[j].name);
+        const std::string close = closest_parameter(unknown, unnamed);
         misses.push_back({&m, true, known, 0,
-                          "no parameter '" + unknown + "'" + (close.empty() ? std::string() : " (did you mean '" + close[0] + "'?)") +
-                              (ps.empty() ? std::string("; it takes no parameters") : "; parameters: " + join(names, ", "))});
+                          "no parameter '" + unknown + "'" + (close.empty() ? std::string() : " (did you mean '" + close + "'?)") +
+                              (ps.empty() ? std::string("; it takes no parameters") : "; parameters: " + join(names, ", ")),
+                          !close.empty()});
         return false;
     }
     for (size_t j = 0; j < ps.size(); ++j) {
@@ -1029,7 +1120,8 @@ size_t min_arity(const std::vector<ParamDescriptor>& ps) {
 /// single object literal that no overload took binds by parameter name. A failure (null result) sets `why`: a host policy
 /// denial met on the way (`denied` true), else the best-matching candidate's reason.
 const MethodDescriptor* resolve_overload(Exec& x, const TypeDescriptor& type, const std::vector<const MethodDescriptor*>& candidates,
-                                         const std::vector<Value>& given, std::vector<Value>& coerced, std::string& why, bool& denied) {
+                                         const std::vector<Value>& given, std::vector<Value>& coerced, std::string& why, bool& denied,
+                                         const Value& outer) {
     std::vector<Miss> misses;
     std::string denial;
     // Checks every bound value without side effects, then coerces them for real; a policy denial is remembered, not raised,
@@ -1044,7 +1136,7 @@ const MethodDescriptor* resolve_overload(Exec& x, const TypeDescriptor& type, co
             int d = 0;
             bool ok = false;
             try {
-                ok = can_coerce(x, vals[k], p.type, p.nullable, w, d);
+                ok = can_coerce(x, vals[k], p.type, p.nullable, w, d, outer);
             } catch (const RqlException& ex) {
                 if (ex.code() != "permission-denied") throw;
                 w = ex.what();
@@ -1061,7 +1153,8 @@ const MethodDescriptor* resolve_overload(Exec& x, const TypeDescriptor& type, co
             }
         }
         if (!first.empty()) {
-            misses.push_back({&m, true, matched, depth, first});
+            // By name, every bound key names a parameter (spec §8): an exact name whose value fails ranks above a misspelt one.
+            misses.push_back({&m, true, kind == "parameter" ? static_cast<long long>(slots.size()) : matched, depth, first});
             return false;
         }
         std::vector<Value> cv;
@@ -1069,7 +1162,7 @@ const MethodDescriptor* resolve_overload(Exec& x, const TypeDescriptor& type, co
         for (size_t k = 0; k < slots.size(); ++k) {
             const ParamDescriptor& p = m.params[slots[k]];
             std::string w;
-            auto r = coerce(x, vals[k], p.type, p.nullable, w);
+            auto r = coerce(x, vals[k], p.type, p.nullable, w, outer);
             if (!r) {
                 // Only the real coercion sees what the probe cannot (member validators, setters that throw); a candidate that
                 // passed the probe is the closest match, so its reason is the one reported.
@@ -1220,7 +1313,7 @@ QueryResult run_call(Exec& x, Compiler& c, Encoder& enc, Stream& stream, const S
         std::vector<Value> coerced;
         std::string why;
         bool denied = false;
-        const MethodDescriptor* chosen = resolve_overload(x, *t, candidates, vals, coerced, why, denied);
+        const MethodDescriptor* chosen = resolve_overload(x, *t, candidates, vals, coerced, why, denied, item);
         if (!chosen && denied) throw RqlException("permission-denied", "cannot call " + s.method + " on " + at(item, target.index) + ": " + why);
         if (!chosen) {
             std::vector<std::string> cs;
@@ -1266,7 +1359,7 @@ QueryResult run_call(Exec& x, Compiler& c, Encoder& enc, Stream& stream, const S
         rows.push_back({Value::string(x.ref_of(created ? result : p.item)), Value::string(p.item.type()->signature(*p.method)), result});
     }
     committed(x, records);
-    QueryResult r = enc.rows({"$ref", "method", "result"}, rows);
+    QueryResult r = enc.rows({"$ref", "method", "result"}, rows, "calls");
     r.dry_run = x.options.dry_run;
     return r;
 }

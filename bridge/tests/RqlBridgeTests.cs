@@ -105,6 +105,22 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             var error = RqlBridge.AddPlan(new JsonObject());
             Assert.NotNull(error);
             Assert.Contains("'query' is required", error!.Content!.Single().Text);
+            Assert.Contains("'query' is required", RqlBridge.AddPlan(new JsonObject { ["query"] = "  " })!.Content!.Single().Text);
+            Assert.Contains("'query' is required", RqlBridge.AddPlan(new JsonObject { ["query"] = null })!.Content!.Single().Text);
+        }
+
+        [Theory]
+        [InlineData("42", "number")]
+        [InlineData("true", "boolean")]
+        [InlineData("[\"actors\"]", "array")]
+        [InlineData("{\"q\":\"actors\"}", "object")]
+        public void AddPlan_NamesTheTypeOfANonStringQuery(string json, string kind)
+        {
+            var args = new JsonObject { ["query"] = JsonNode.Parse(json) };
+            var text = RqlBridge.AddPlan(args)!.Content!.Single().Text;
+            Assert.Contains($"'query' must be a string (got {kind})", text);
+            Assert.DoesNotContain("is required", text);
+            Assert.False(args.ContainsKey("plan"));
         }
 
         // ------------------------------------------------------------ results
@@ -167,6 +183,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             var text = Rendered(RqlBridge.Render(RqlBridge.MutateRole, Text(json)));
             Assert.StartsWith("60 results\nmethod: SpawnActor(string ClassName)\nresult\n", text);
             Assert.Contains("… 10 more row(s) not shown", text);
+            Assert.DoesNotContain("json format", text); // the rql tools offer no json format
             Assert.DoesNotContain("|", text);
         }
 

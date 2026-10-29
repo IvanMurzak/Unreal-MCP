@@ -33,14 +33,17 @@ const char* kFunctionNames[] = {"has", "is-null", "len", "lower", "upper", "abs"
                                 "coalesce", "if", "ref",
                                 "append", "insert", "remove-at", "without", "range",
                                 "replace", "replace-regex", "substring", "split", "trim", "pad",
-                                "contains", "starts-with", "ends-with", "matches"};
+                                "contains", "starts-with", "ends-with", "matches",
+                                "length", "magnitude", "normalize", "distance", "dot", "lerp"};
 const char* kMethodNames[] = {"any", "all", "count", "sum", "min", "max", "avg", "first", "keys", "values",
                               "contains", "starts-with", "ends-with", "matches", "lower", "upper", "len",
-                              "replace", "replace-regex", "substring", "split", "trim", "pad"};
+                              "replace", "replace-regex", "substring", "split", "trim", "pad",
+                              "length", "magnitude", "normalize", "distance", "dot", "lerp"};
 
 }  // namespace
 
-Engine& Engine::add_source(const std::string& name, std::function<Value()> getter, std::string description) noexcept {
+Engine& Engine::add_source(const std::string& name, std::function<Value()> getter, std::string description,
+                           const TypeDescriptor* declared_type) noexcept {
     try {
         validate_name(name, false);
         last_error_.clear();
@@ -48,12 +51,13 @@ Engine& Engine::add_source(const std::string& name, std::function<Value()> gette
             if (s.name == name) {
                 s.getter = std::move(getter);
                 s.description = std::move(description);
+                s.declared_type = declared_type;
                 std::lock_guard<std::mutex> lock(source_types_mutex_);
                 source_types_.erase(name);
                 return *this;
             }
         }
-        sources_.push_back({name, std::move(getter), std::move(description)});
+        sources_.push_back({name, std::move(getter), std::move(description), declared_type});
         std::lock_guard<std::mutex> lock(source_types_mutex_);
         source_types_.erase(name);
     } catch (const std::exception& ex) {
@@ -117,7 +121,10 @@ Engine& Engine::add_adapter(TypeAdapter adapter) noexcept {
         if (adapter.name.empty()) adapter.name = adapter.target ? adapter.target->name + "Adapter" : adapter.interface_name + "Adapter";
         last_error_.clear();
         const bool caps[] = {bool(adapter.encode),  bool(adapter.coerce),    bool(adapter.equals),   bool(adapter.compare),
-                             bool(adapter.stable_id), bool(adapter.is_alive), bool(adapter.components)};
+                             bool(adapter.stable_id), bool(adapter.is_alive), bool(adapter.components),
+                             bool(adapter.literal_kind), bool(adapter.create_for_literal)};
+        static_assert(sizeof(caps) / sizeof(caps[0]) == std::tuple_size<decltype(caps_)>::value, "one flag per adapter capability");
+        static_assert(std::tuple_size<decltype(caps_)>::value == detail::kCapabilities, "caps_ covers every capability");
         for (size_t i = 0; i < caps_.size(); ++i) caps_[i] = caps_[i] || caps[i];
         adapters_.push_back(std::make_unique<TypeAdapter>(std::move(adapter)));
         // Registering adapters while queries run is not supported, so cached adaptations can just go.

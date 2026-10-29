@@ -1,8 +1,9 @@
 <Project>
   <!--
     TEMPORARY pre-release feed (see the "TEMPORARY PRE-RELEASE PIN" entries in src/com.IvanMurzak.Unreal.MCP.Bridge.csproj):
-    bridge/prerelease-packages/ holds com.IvanMurzak.Rql 0.3.0-dev.2877579, packed from RQL main 2877579, and
-    com.IvanMurzak.McpPlugin(.Common, .Server) 8.14.0-dev.e8985d5 from MCP-Plugin-dotnet main e8985d5. Every project
+    bridge/prerelease-packages/ holds com.IvanMurzak.Rql 0.3.0-dev.2f4e263, packed from RQL main 2f4e263,
+    com.IvanMurzak.McpPlugin(.Common, .Server) 8.14.0-dev.42786f9 from MCP-Plugin-dotnet main 42786f9, and
+    com.IvanMurzak.ReflectorNet 5.5.1-dev.ec3702e from ReflectorNet main ec3702e. Every project
     under bridge/ (the sidecar and its tests) restores from it in addition to the configured sources.
     Delete this file and prerelease-packages/ when the pins move back to published nuget.org versions.
   -->

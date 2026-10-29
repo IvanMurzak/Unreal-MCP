@@ -40,8 +40,8 @@ PathPtr path_key(const PathPtr& parent, const Value& key);
 
 // ---------------------------------------------------------------- adapted types (spec §13)
 
-enum class Capability : uint8_t { Encode, Coerce, Equals, Compare, StableId, IsAlive, Components };
-constexpr size_t kCapabilities = 7;
+enum class Capability : uint8_t { Encode, Coerce, Equals, Compare, StableId, IsAlive, Components, LiteralKind, Factory };
+constexpr size_t kCapabilities = 9;
 
 /// What adapters change for one type in one engine. Only built when some adapter applies; members are
 /// copied only when an adapter configures them.
@@ -158,7 +158,17 @@ public:
     void check_target_limit() const;
     /// Records the type of a source's value; with it, the types sources produced before (spec §8 known names).
     void note_source_type(const std::string& source, const Value& v);
+    /// The types each registered source has produced so far or declares, by source, without evaluating any (spec §8).
     std::vector<std::pair<std::string, const TypeDescriptor*>> source_type_history();
+    /// The registered source the query starts from (or calls), if any: known names may read it once (spec §8).
+    const SourceRegistration* plan_source = nullptr;
+    /// Whether this query has read (or tried to read) plan_source: known names then never read it again.
+    bool plan_source_read = false;
+    /// Literal kinds already resolved in this execution (the host hooks answer per type).
+    std::unordered_map<const TypeDescriptor*, LiteralKind> literal_kinds;
+    /// Reads plan_source once for its type when it has neither produced a value yet nor declares a type (a lazy stream such
+    /// as `first 0` never pulled it); known names never evaluate any other source (spec §8).
+    void ensure_plan_source_type();
     /// The types statically reachable from the sources, computed once per query (unknown-member checks and hints).
     std::optional<std::vector<const TypeDescriptor*>> reachable_cache;
     /// Nesting of lists being compared by value (rql_equal / distinct_equal / distinct_hash).
@@ -263,6 +273,8 @@ using Eval = std::function<Value(Exec&)>;
 
 /// The text of a plain relative path (Renderer.sharedMaterial, Tags[0]), or empty for other expressions.
 std::string path_text(const Expr& e);
+/// "did you mean $type (the meta member)?" for a bare name that is a meta member's name (any case), or empty (spec §5, §10).
+std::string meta_hint(const std::string& name);
 /// The hint of an unknown member (spec §10): the known types that have it, then the closest names, else the members
 /// ranked by similarity to the name.
 /// `nested`: dotted paths of the members of struct-typed members (nested_members), ranked by their last segment.
@@ -294,6 +306,9 @@ size_t distinct_hash(Exec& x, const Value& v);
 bool elements(const Value& v, std::vector<Value>& out);
 size_t collection_size(const Value& v);
 std::vector<std::string> suggest_closest(const std::string& name, const std::vector<std::string>& candidates, size_t max);
+/// The parameter a misspelt argument name stands for (spec §8): the closest name by the suggestion rules, else the name one
+/// of whose camelCase / snake_case words is close ("klass" → "className"); empty when none qualifies.
+std::string closest_parameter(const std::string& key, const std::vector<std::string>& names);
 /// Names ordered by their distance to `name` (then ordinal), duplicates dropped: the nearest come first in a capped list.
 std::vector<std::string> by_similarity(const std::string& name, const std::vector<std::string>& names);
 /// Optimal string alignment distance (Levenshtein plus adjacent transposition, each cost 1).
@@ -327,6 +342,7 @@ private:
     Eval compile_extension(const std::string& name, const FunctionHandler& fn, const std::vector<ExprPtr>& args);
     /// String functions as functions (receiver 0) or methods on the string (receiver 1: args[0] is the receiver).
     Eval compile_string_function(const Expr& c, const std::string& name, const std::vector<const Expr*>& args, size_t receiver);
+    Eval compile_vector_function(const Expr& call, const std::string& name, const std::vector<const Expr*>& args, size_t receiver);
     void arity(const Expr& c, size_t min, size_t max);
 };
 
@@ -337,7 +353,9 @@ public:
     explicit Encoder(Exec& x) : x_(x) {}
     Json encode(const Value& v, int depth = 0);
     Json summary(const Value& obj);
-    QueryResult rows(const std::vector<std::string>& columns, const std::vector<std::vector<Value>>& rows);
+    /// `receipt`: a set / call receipt (spec §8): when the byte budget shortens it, the hint says that every change was made
+    /// (or, on a dry run, checked) instead of suggesting paging, which would repeat the mutation.
+    QueryResult rows(const std::vector<std::string>& columns, const std::vector<std::vector<Value>>& rows, const char* receipt = nullptr);
     QueryResult items(const std::vector<Value>& items);
     static Json number(double d, bool single);
 
@@ -378,11 +396,12 @@ double range_at(double start, double step, int64_t k);
 /// Resolved after the policy check, so a read request never evaluates the target.
 QueryResult run_call(Exec& x, Compiler& c, Encoder& enc, Stream& stream, const Stage& s, const std::function<Value()>& resolve_receiver = {});
 /// Coerce a value to a member/parameter type (spec §8); nullopt + why on failure.
-std::optional<Value> coerce(Exec& x, const Value& v, const TypeDescriptor* target, bool nullable, std::string& why);
+/// `outer`: the object that will own the value (spec §4.5): instanced literals are built for it.
+std::optional<Value> coerce(Exec& x, const Value& v, const TypeDescriptor* target, bool nullable, std::string& why, const Value& outer = Value::null());
 /// Whether `v` converts to `target`, checked without side effects (overload resolution, spec §8): nothing is constructed,
 /// assigned or validated (member validators need the instance); adapters and the host's text coercion answer as usual.
 /// On failure `depth` is how deep inside the value it failed (0: the value itself, 1: a member or element of it, …).
-bool can_coerce(Exec& x, const Value& v, const TypeDescriptor* target, bool nullable, std::string& why, int& depth);
+bool can_coerce(Exec& x, const Value& v, const TypeDescriptor* target, bool nullable, std::string& why, int& depth, const Value& outer = Value::null());
 
 // ---------------------------------------------------------------- describe (encoder.cpp)
 QueryResult run_describe(Exec& x, Stream& stream);

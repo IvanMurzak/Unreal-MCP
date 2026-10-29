@@ -600,7 +600,7 @@ Godot's `GodotMainThread`:
   run's result. A parallel timer fires the promise with a structured timeout error;
   the flag set on `FUnrealMcpToolCall::CancelRequested` (a `FThreadSafeBool`) lets long tool bodies
   exit early at their own checkpoints, and `FUnrealMcpToolCall::TimeoutMs` (the call's timeout) lets them bound their
-  own work: `python-execute` gives Code-Exec a time budget of what is left of it (`FUnrealMcpToolCall::ReceivedSeconds`) less a margin (10 %, 2–15 s; at least half the time left), whose watchdog
+  own work: `python-execute` gives Code-Exec the call's `timeout` argument (seconds, default 30) as its time budget, capped (`set_max_timeout_ms`) at what is left of the call's timeout (`FUnrealMcpToolCall::ReceivedSeconds`) less a margin (10 %, 2–15 s; at least half the time left), whose watchdog
   stops a runaway snippet (`while True: pass`) with a `Timeout` error and frees the game thread before the deadline. A game-thread task cannot be force-killed — an abandoned
   body finishes silently, logs at `Verbose`, and its late result is dropped (requestId already
   completed; double-set of the promise is guarded).

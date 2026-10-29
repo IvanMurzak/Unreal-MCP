@@ -31,6 +31,9 @@ struct SourceRegistration {
     std::string name;
     std::function<Value()> getter;
     std::string description;
+    /// The type the host declares for the source's value (spec §8 known names), or nullptr. Known member names never
+    /// evaluate a source; a source no query has read yet contributes only this type.
+    const TypeDescriptor* declared_type = nullptr;
 };
 
 /// Per-item evaluator handed to extension stages: evaluates an argument expression with $ = item.
@@ -87,6 +90,21 @@ struct MutationPolicy {
     /// overload resolution alike. Hosts that mark liveness only through Engine::is_alive (no adapter) get no default
     /// protection and set this hook.
     std::function<std::optional<bool>(const TypeDescriptor& type)> can_construct_from_literal;
+    /// The literal kind of a type (spec §4.5, §13 "Literal construction"), asked before the adapters: Engine (never built
+    /// from an object literal), Value (built fresh: plain data, value-like assets) or Instanced (built as a subobject of the
+    /// object it is written into, its outer: Unreal's EditInlineNew objects); nullopt keeps the adapters' answer or the
+    /// default (stable_id / is_alive adapter -> Engine, else Value). can_construct_from_literal still applies afterwards
+    /// (false -> Engine, true -> an Engine type becomes Value).
+    std::function<std::optional<LiteralKind>(const TypeDescriptor& type)> literal_kind_of;
+    /// Builds an empty value of a concrete type for an object literal of kind Value or Instanced, given its outer (the owner
+    /// of the written member, the call's target, or the object an enclosing literal builds; null outside any object), e.g.
+    /// Unreal's NewObject(Outer, Class). nullopt defers to the adapters' factories, then the type's create(). Values it
+    /// builds are host-owned. Runs while the mutation is planned, dry runs included: create objects nothing references
+    /// until the write.
+    std::function<std::optional<Value>(const TypeDescriptor& type, const Value& outer)> create_for_literal;
+    /// The advice that ends the engine-object refusal for a type (spec §4.5), replacing "pass an existing one (e.g.
+    /// ref("…"))", e.g. "use unreal.find(…) or an asset path"; empty keeps the default.
+    std::function<std::string(const TypeDescriptor& type)> literal_refusal_hint;
     /// After planning, before any write (not on dry-run): e.g. record undo for the owners. Throwing (any
     /// exception) vetoes the whole mutation → permission-denied, nothing changed.
     MutationHook before_write;
@@ -152,12 +170,15 @@ public:
     // Every Engine member function is noexcept: exceptions used internally never cross this API.
     // Registration with an invalid name is ignored and reported through last_error().
 
-    Engine& add_source(const std::string& name, std::function<Value()> getter, std::string description = {}) noexcept;
-    /// Convenience: a registered object exposed as a source.
+    /// `declared_type`: the type of the source's value (a list type for a source of many objects), so its members are
+    /// known names before any query has read the source (spec §8): known names never evaluate a source.
+    Engine& add_source(const std::string& name, std::function<Value()> getter, std::string description = {},
+                       const TypeDescriptor* declared_type = nullptr) noexcept;
+    /// Convenience: a registered object exposed as a source (its type is declared).
     template <class T>
     Engine& add_object_source(const std::string& name, T* object, std::string description = {}) noexcept {
         TypeRegistry* r = types_;
-        return add_source(name, [r, object]() { return r->wrap(object); }, std::move(description));
+        return add_source(name, [r, object]() { return r->wrap(object); }, std::move(description), r->template descriptor<T>());
     }
     /// Namespaced extension function "ns.fn".
     Engine& add_function(const std::string& name, FunctionHandler fn) noexcept;
@@ -245,7 +266,7 @@ private:
     int64_t next_handle_ = 0;
     std::string last_error_;
     std::vector<std::unique_ptr<TypeAdapter>> adapters_;
-    std::array<bool, 7> caps_{};  // some adapter implements the capability (detail::Capability order)
+    std::array<bool, 9> caps_{};  // some adapter implements the capability (detail::Capability order)
     // Every type each source has produced (by source name): a source that is null right now keeps the types it had for the
     // known member names and hints (spec §8). Guarded by source_types_mutex_.
     std::map<std::string, std::vector<const TypeDescriptor*>> source_types_;
