@@ -17,6 +17,7 @@
 #include "Dom/JsonObject.h"
 #include "GameFramework/Actor.h"
 #include "Tools/UnrealMcpObjectRef.h"
+#include "Misc/Paths.h"
 #include "UObject/Package.h"
 #include "UObject/UObjectHash.h"
 
@@ -385,12 +386,28 @@ void FUnrealMcpRqlSession::ConfigureMutations()
 		return rql::LiteralKind::Instanced;
 	};
 	// A literal's $type names a UClass the provider builds descriptors for on demand (RQL only knows the registered ones):
-	// the class by name (InputTriggerHold, UInputTriggerHold, a path or a Blueprint), if it is or derives from the target.
-	// An abstract one is returned too, so the factory's error names its concrete classes.
+	// by name (InputTriggerHold, UInputTriggerHold, a Blueprint's BP_Hold or BP_Hold_C) or by the path of a loaded class,
+	// if it is or derives from the target. The hook also runs for overload probes and dry runs, so a path never loads a
+	// package. An abstract class is returned too, so the factory's error names its concrete classes.
 	Policy.resolve_subtype = [TypeProvider](const rql::TypeDescriptor& Target, const std::string& Name) -> const rql::TypeDescriptor*
 	{
 		UClass* Base = TypeProvider->ClassOf(&Target);
-		UClass* Class = Base ? FUnrealMcpObjectRef::ResolveClass(UnrealMcpRqlFromStd(Name)) : nullptr;
+		if (!Base)
+			return nullptr;
+		const FString Text = UnrealMcpRqlFromStd(Name).TrimStartAndEnd();
+		UClass* Class = nullptr;
+		if (Text.Contains(TEXT("/")))
+		{
+			Class = FindObject<UClass>(nullptr, *Text);
+			if (!Class && !Text.Contains(TEXT(".")))
+				Class = FindObject<UClass>(nullptr, *FString::Printf(TEXT("%s.%s_C"), *Text, *FPaths::GetBaseFilename(Text)));
+		}
+		else
+		{
+			Class = FUnrealMcpObjectRef::ResolveClass(Text);
+			if (!Class)
+				Class = FUnrealMcpObjectRef::ResolveClass(Text + TEXT("_C"));
+		}
 		if (!Class || !Class->IsChildOf(Base))
 			return nullptr;
 		const rql::TypeDescriptor* Descriptor = TypeProvider->ForClass(Class);

@@ -188,7 +188,8 @@ hook, not a per-type adapter, so RQL's own default would not cover them.)
   propagated flags plus `RF_Transactional`, as the editor's instanced arrays create them, in the mutation's one undo
   step. The factory runs while the mutation is planned (dry runs too); an object nothing references afterwards is
   garbage collected; the session holds it until the query ends. `$type` names the concrete class: the session's
-  `resolve_subtype` hook resolves it like any class name (`InputTriggerHold`, `UInputTriggerHold`, a path, a Blueprint)
+  `resolve_subtype` hook resolves it by name (`InputTriggerHold`, `UInputTriggerHold`, a Blueprint's `BP_X` / `BP_X_C`) or
+  by the path of a loaded class (it never loads a package: it also runs for overload probes and dry runs)
   when it is or derives from the member's class, and describes it on demand. So
   `unreal.asset("/Game/Input/IA_Jump") | set Triggers = [{$type: "InputTriggerHold", HoldTimeThreshold: 0.5}]` and
   `set Modifiers = append(Modifiers, {$type: "InputModifierNegate"})` work, in one undo step. A literal for an abstract
