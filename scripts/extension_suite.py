@@ -96,6 +96,29 @@ def machine_lock(already_held: bool = False, *, path: Path | None = None, timeou
         kernel.CloseHandle(handle)
 
 
+def sync_template(template: Path, dest: Path) -> None:
+    """Write only changed template files: an identical Target.cs/Build.cs keeps UBT's caches valid."""
+    for file in template.rglob("*"):
+        if file.is_file():
+            target = dest / file.relative_to(template)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            data = file.read_bytes()
+            if not target.exists() or target.read_bytes() != data:
+                target.write_bytes(data)
+
+
+def smoke_host() -> Path:
+    """Sync tests/smoke-host and this checkout's UnrealMCP plugin source into the smoke host; return the .uproject.
+
+    The host lives beside the suite's build caches and keeps its own Binaries / Intermediate (and the
+    plugin's), so the host editor build that follows recompiles only what changed.
+    """
+    dest = default_output() / "smoke-host" / "UnrealTestProject"
+    sync_template(ROOT / "tests/smoke-host", dest)
+    copy_plugin(ROOT / "UnrealMCP", dest / "Plugins" / "UnrealMCP")
+    return dest / "UnrealTestProject.uproject"
+
+
 def default_output() -> Path:
     if os.name == "nt":
         return Path(os.environ.get("SystemDrive", "C:") + "/wt/unreal-tests") / hashlib.sha256(str(ROOT).encode()).hexdigest()[:8]
@@ -157,15 +180,7 @@ def prepare(engine: Path, profile: str, selected: list[str], output: Path, *, st
     copy_plugin(ROOT / "UnrealMCP", plugins / "UnrealMCP", core_tests=core_tests)
     for name in selected:
         copy_plugin(extensions()[name], plugins / name, strict)
-    template = ROOT / "tests/host-project"
-    # Do not touch identical Target.cs/Build.cs files: their timestamps invalidate UBT caches.
-    for file in template.rglob("*"):
-        if file.is_file():
-            target = base / file.relative_to(template)
-            target.parent.mkdir(parents=True, exist_ok=True)
-            data = file.read_bytes()
-            if not target.exists() or target.read_bytes() != data:
-                target.write_bytes(data)
+    sync_template(ROOT / "tests/host-project", base)
     project = base / "UnrealMcpTests.uproject"
     write_json(project, {"FileVersion": 3, "EngineAssociation": f"{version['MajorVersion']}.{version['MinorVersion']}",
                         "Modules": [{"Name": "UnrealMcpTests", "Type": "Runtime", "LoadingPhase": "Default"}],
