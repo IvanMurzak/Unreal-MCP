@@ -456,7 +456,8 @@ jobs:
       # The bridge targets net9.0, and the chain feed builds the lower layers with this SDK. On the
       # runner-manager runners DOTNET_INSTALL_DIR is a persistent per-slot cache, so after the first
       # job this is a version check, not a download. setup-dotnet also exports DOTNET_ROOT, which the
-      # bridge's apphost (started later by the editor) uses to find this runtime.
+      # bridge's apphost (started later by the editor) uses to find this runtime; the smoke step
+      # re-applies it (see there).
       - name: Setup .NET 9
         uses: actions/setup-dotnet@v5
         with:
@@ -545,8 +546,15 @@ jobs:
 
       - name: Run connection + tool smoke (custom local server)
         shell: pwsh
+        env:
+          # setup-dotnet's DOTNET_ROOT, read before the shell starts: Homebrew's pwsh launcher
+          # (/opt/homebrew/bin/pwsh) overwrites DOTNET_ROOT with Homebrew's own .NET, and the net9.0
+          # bridge the editor spawns inherits that and exits ("You must install or update .NET").
+          JOB_DOTNET_ROOT: ${{ env.DOTNET_ROOT }}
         run: |
           $ErrorActionPreference = 'Stop'
+          if (-not $env:JOB_DOTNET_ROOT) { throw 'setup-dotnet exported no DOTNET_ROOT' }
+          $env:DOTNET_ROOT = $env:JOB_DOTNET_ROOT
           # --mode custom downloads the public gamedev-mcp-server release, runs it,
           # launches the editor in Custom mode, and asserts the tool battery. The
           # bridge override (UNREAL_MCP_BRIDGE_PATH, set above) is inherited by the
