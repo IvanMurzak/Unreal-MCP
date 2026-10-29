@@ -1,0 +1,10 @@
+{
+  "description": "GrantAbility among the operations",
+  "tool": "rql-schema",
+  "input": {
+    "type": "GASOperations"
+  },
+  "assert": {
+    "pattern": "GrantAbility"
+  }
+}

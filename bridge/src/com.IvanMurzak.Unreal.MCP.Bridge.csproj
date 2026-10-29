@@ -20,7 +20,7 @@
   <!--
     Self-contained, single-file publish per RID (docs/ARCHITECTURE.md §6 BUNDLE model, issue #45).
     The end user installs NO .NET SDK/runtime — the published binary carries the runtime inside it.
-    Self-containment is driven by the publish flags in bridge/publish.sh / bridge/publish.ps1
+    Self-containment is driven by the publish flags in bridge/publish.py
     (-r <rid> with self-contained + PublishSingleFile). The properties below are a defensive default
     so a flagless `dotnet publish -r <rid>` still produces a self-contained single file.
 

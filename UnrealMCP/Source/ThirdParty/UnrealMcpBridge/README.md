@@ -22,5 +22,5 @@ source zip while the ~73–80 MB self-contained payloads are staged only transie
 - by Epic's Fab recompile (from the surviving source you submit).
 
 For a local packaged-game verification, publish the sidecar for your RID and place it here:
-`bash bridge/publish.sh Release win-x64 --no-zip` then copy `bridge/publish/win-x64/*` into
+`python bridge/publish.py --platforms win-x64 --no-zip` then copy `bridge/publish/win-x64/*` into
 `UnrealMCP/Source/ThirdParty/UnrealMcpBridge/win-x64/` (see docs/RELEASING.md).

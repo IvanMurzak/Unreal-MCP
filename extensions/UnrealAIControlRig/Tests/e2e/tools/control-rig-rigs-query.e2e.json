@@ -1,0 +1,10 @@
+{
+  "description": "the count of Control Rig blueprints",
+  "tool": "rql-query",
+  "input": {
+    "query": "controlRigs | count"
+  },
+  "assert": {
+    "pattern": "\"text\"\\s*:\\s*\"\\d+\"|value\\\\?\"\\s*:\\s*\\d"
+  }
+}

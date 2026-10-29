@@ -1,0 +1,10 @@
+{
+  "description": "the count of Niagara systems",
+  "tool": "rql-query",
+  "input": {
+    "query": "niagaraSystems | count"
+  },
+  "assert": {
+    "pattern": "\"text\"\\s*:\\s*\"\\d+\"|value\\\\?\"\\s*:\\s*\\d"
+  }
+}

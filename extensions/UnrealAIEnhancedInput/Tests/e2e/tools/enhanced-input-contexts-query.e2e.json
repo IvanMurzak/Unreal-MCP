@@ -1,0 +1,10 @@
+{
+  "description": "the Mapping Context rows",
+  "tool": "rql-query",
+  "input": {
+    "query": "inputContexts | select Name KeyMappings"
+  },
+  "assert": {
+    "pattern": "result"
+  }
+}

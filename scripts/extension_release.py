@@ -55,7 +55,7 @@ def validate(plugin: str) -> dict:
     sources = "\n".join(p.read_text(encoding="utf-8-sig") for p in (folder / "Source").rglob("*.cpp"))
     if f'PluginVersion(TEXT("{plugin}"))' not in sources:
         raise ValueError(f'{plugin} must report its .uplugin version: UnrealMcpRql::PluginVersion(TEXT("{plugin}"))')
-    if not list((folder / "Tests/e2e/tools").glob("*.e2e.ps1")):
+    if not list((folder / "Tests/e2e/tools").glob("*.e2e.json")):
         raise ValueError(f"No E2E checks for {plugin}")
     return metadata
 

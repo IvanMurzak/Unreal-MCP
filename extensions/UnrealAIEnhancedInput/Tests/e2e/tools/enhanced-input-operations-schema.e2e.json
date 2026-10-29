@@ -1,0 +1,10 @@
+{
+  "description": "AddMapping among the operations",
+  "tool": "rql-schema",
+  "input": {
+    "type": "EnhancedInputOperations"
+  },
+  "assert": {
+    "pattern": "AddMapping"
+  }
+}

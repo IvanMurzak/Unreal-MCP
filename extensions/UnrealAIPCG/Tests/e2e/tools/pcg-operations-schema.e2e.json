@@ -1,0 +1,10 @@
+{
+  "description": "Generate among the operations",
+  "tool": "rql-schema",
+  "input": {
+    "type": "PCGOperations"
+  },
+  "assert": {
+    "pattern": "Generate"
+  }
+}

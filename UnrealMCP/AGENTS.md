@@ -23,5 +23,5 @@ so this file stays out of the package; keep agent notes out of `Source/`.
 **Build / test** (UE 5.7+, a host project with `Plugins/UnrealMCP` junctioned here; quote engine paths)
 1. UBT (`<UE>/Engine/Binaries/DotNET/UnrealBuildTool/`): `UnrealBuildTool.exe <Host>Editor Win64 Development -project=<host>.uproject -WaitMutex` (first build 10+ min).
 2. Boot smoke (`<UE>/Engine/Binaries/Win64/`): `UnrealEditor-Cmd.exe <host>.uproject -nullrhi -nosplash -unattended -ExecCmds="QUIT_EDITOR" -log` → expect `[Unreal-MCP] plugin loaded`.
-3. Specs: add the test module with `commands/test-module-uplugin.ps1`, build, run `-ExecCmds="Automation RunTests UnrealMcp; Quit" -ReportExportPath=<dir>`, then revert the descriptor.
+3. Specs: add the test module with `commands/test_module_uplugin.py`, build, run `-ExecCmds="Automation RunTests UnrealMcp; Quit" -ReportExportPath=<dir>`, then revert the descriptor.
 4. Judge by `<dir>/index.json` (UTF-8 **BOM**), not the exit code: pass = `failed == 0` and `succeeded >= 1`. Missing `index.json` = crash (check Saved log for `Fatal error` / `[Callstack]`). Screenshot capture can't render under `-nullrhi`.

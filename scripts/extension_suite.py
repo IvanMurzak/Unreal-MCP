@@ -6,7 +6,6 @@ Python stdlib only; the host OS's UE toolchain (Windows, macOS or Linux). See do
 from __future__ import annotations
 
 import argparse
-from contextlib import contextmanager
 import hashlib
 import json
 import os
@@ -19,6 +18,7 @@ import sys
 import time
 
 from extension_release import components as extensions
+from ue_machine_lock import machine_lock
 
 ROOT = Path(__file__).resolve().parents[1]
 EXCLUDED = {"Binaries", "Intermediate", "Saved", "DerivedDataCache", ".git", ".vs", "node_modules"}
@@ -31,69 +31,6 @@ else:
     UE_PLATFORM, UE_BUILD, UE_EDITOR = "Linux", "Engine/Build/BatchFiles/Linux/Build.sh", "Engine/Binaries/Linux/UnrealEditor-Cmd"
 # POSIX: owned processes lead their own process group, so kill_owned can stop the whole tree.
 NEW_SESSION = os.name != "nt"
-
-
-@contextmanager
-def machine_lock(already_held: bool = False, *, path: Path | None = None, timeout_seconds: float = 3600):
-    """Use the SAME exclusive file handle as CI, including from interactive local runs."""
-    if already_held:
-        yield
-        return
-    if os.name != "nt":
-        # .github/scripts/ue-machine-lock.ps1 holds an exclusive flock() on this same file.
-        import fcntl
-        lock_path = path or Path("/var/tmp/UnrealMCP-ci/ue.lock")
-        lock_path.parent.mkdir(parents=True, exist_ok=True)
-        deadline = time.monotonic() + timeout_seconds
-        announced = False
-        with lock_path.open("a+b") as handle:
-            # Open to every account, as the CI holder does (folder 1777, file 0666): a CI runner under
-            # another account must still be able to open a lock this local run created first.
-            for target, mode in ((lock_path.parent, 0o1777), (lock_path, 0o666)):
-                try:
-                    target.chmod(mode)
-                except OSError:
-                    pass
-            while True:
-                try:
-                    fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                    break
-                except BlockingIOError:
-                    if time.monotonic() > deadline:
-                        raise OSError(f"Cannot acquire UE machine lock {lock_path}") from None
-                    if not announced:
-                        print("Waiting for the machine-wide UE lock (another local/CI build owns it)", flush=True)
-                        announced = True
-                    time.sleep(1)
-            yield  # closing the file releases the flock()
-        return
-    import ctypes
-    from ctypes import wintypes
-    lock_path = path or Path(os.environ.get("ProgramData", "C:/ProgramData")) / "UnrealMCP-ci/ue.lock"
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
-    create = kernel.CreateFileW
-    create.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, ctypes.c_void_p,
-                       wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
-    create.restype = wintypes.HANDLE
-    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
-    deadline = time.monotonic() + timeout_seconds
-    announced = False
-    while True:
-        handle = create(str(lock_path), 0xC0000000, 0, None, 4, 0x80, None)
-        if handle != wintypes.HANDLE(-1).value:
-            break
-        error = ctypes.get_last_error()
-        if error not in (32, 33) or time.monotonic() > deadline:
-            raise OSError(error, f"Cannot acquire UE machine lock {lock_path}")
-        if not announced:
-            print("Waiting for the machine-wide UE lock (another local/CI build owns it)", flush=True)
-            announced = True
-        time.sleep(1)
-    try:
-        yield
-    finally:
-        kernel.CloseHandle(handle)
 
 
 def sync_template(template: Path, dest: Path) -> None:
@@ -319,9 +256,10 @@ def automation(engine: Path, project: Path, selected: list[str], timeout: int,
                 except (OSError, ValueError):
                     pass
                 time.sleep(1)
-            subprocess.run(["pwsh", "-NoProfile", "-File", str(ROOT / "scripts/run-extension-e2e.ps1"),
-                            "-ProjectDir", str(project.parent), "-Url", url, "-Plugins", ",".join(selected)],
-                           env=env, check=True, timeout=max(1, deadline - time.monotonic()))
+            from run_extension_e2e import run as run_e2e
+            failures = run_e2e(project.parent, url, selected, env=env, timeout=max(1, deadline - time.monotonic()))
+            if failures:
+                raise ValueError("Extension E2E failed:\n" + "\n".join(failures))
             result["e2e"] = "passed"
         result.update(editorLaunches=1, editorPid=editor.pid, report=str(report))
         return result

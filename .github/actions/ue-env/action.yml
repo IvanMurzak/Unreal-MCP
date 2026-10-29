@@ -1,0 +1,40 @@
+# ┌──────────────────────────────────────────────────────────────────┐
+# │  Author: Ivan Murzak (https://github.com/IvanMurzak)             │
+# │  Repository: GitHub (https://github.com/IvanMurzak/Unreal-MCP)   │
+# │  Copyright (c) 2026 Ivan Murzak                                  │
+# │  Licensed under the Apache License, Version 2.0.                 │
+# │  See the LICENSE file in the project root for more information.  │
+# └──────────────────────────────────────────────────────────────────┘
+
+# Bootstrap for the self-hosted UE jobs: finds the engine's bundled Python (the runner accounts have no
+# Python on PATH) and runs .github/scripts/ue_env.py with it, which exports UE_ROOT, UE_PLATFORM,
+# UE_RUNUAT, UE_BUILD, UE_EDITOR_CMD, CHAIN_PY and, per OS, SSL_CERT_FILE / DEVELOPER_DIR (see its
+# docstring). Every later step runs `${{ env.CHAIN_PY }} <script>`, which works in any shell.
+#
+# Only these two lines are shell-specific, and they use what every OS ships: bash, and Windows
+# PowerShell 5.1 on Windows (no PowerShell 7 needed). Both pick the engine root the same way as ue_env.py:
+# UE_ROOT_<major>_<minor> from the runner's environment, else the Epic Games Launcher default.
+name: ue-env
+description: Resolve this runner's Unreal Engine install and its bundled Python for one engine version
+inputs:
+  version:
+    description: the engine version, <major>.<minor>
+    required: true
+runs:
+  using: composite
+  steps:
+    - if: runner.os == 'Windows'
+      shell: powershell
+      env:
+        UE_VERSION: ${{ inputs.version }}
+      run: |
+        $root = [Environment]::GetEnvironmentVariable('UE_ROOT_' + $env:UE_VERSION.Replace('.', '_')); if (-not $root) { $root = "C:\Program Files\Epic Games\UE_$env:UE_VERSION" }
+        & "$root\Engine\Binaries\ThirdParty\Python3\Win64\python.exe" "$env:GITHUB_WORKSPACE\.github\scripts\ue_env.py" --version $env:UE_VERSION; exit $LASTEXITCODE
+    - if: runner.os != 'Windows'
+      shell: bash
+      env:
+        UE_VERSION: ${{ inputs.version }}
+      run: |
+        var="UE_ROOT_${UE_VERSION//./_}"; platform=$([ "$(uname)" = Darwin ] && echo Mac || echo Linux); root="${!var:-$([ "$platform" = Mac ] && echo "/Users/Shared/Epic Games/UE_$UE_VERSION")}"
+        [ -n "$root" ] || { echo "::error::ue-env: no default UE $UE_VERSION location on this OS; set $var in the runner's environment"; exit 1; }
+        exec "$root/Engine/Binaries/ThirdParty/Python3/$platform/bin/python3" "$GITHUB_WORKSPACE/.github/scripts/ue_env.py" --version "$UE_VERSION"

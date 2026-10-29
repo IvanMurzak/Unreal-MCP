@@ -40,10 +40,6 @@ indent_size = 2
 [*.md]
 trim_trailing_whitespace = false
 
-# PowerShell
-[*.ps1]
-indent_size = 4
-
 # Windows batch files require CRLF
 [*.{bat,cmd}]
 end_of_line = crlf

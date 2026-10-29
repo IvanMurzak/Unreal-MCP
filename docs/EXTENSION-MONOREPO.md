@@ -10,10 +10,10 @@ Third-party plugins and the external Unreal-AI-Template repository remain suppor
 On Windows, macOS or Linux, with the UE toolchain, Node 22 and Python 3.10+ (examples are Windows;
 on macOS the engine is e.g. `'/Users/Shared/Epic Games/UE_5.8'`):
 
-```powershell
+```shell
 npm ci --prefix cli
 npm run build --prefix cli
-py -3 -m unittest discover -s scripts -p 'test_extension*.py'
+py -3 -m unittest discover -s scripts -p 'test_*.py'
 py -3 scripts/extension_suite.py --engine 'C:/Program Files/Epic Games/UE_5.8' --mode full
 ```
 
@@ -22,6 +22,26 @@ modules use non-unity compilation with no PCH in these isolated copies. It then 
 host and starts **one** UnrealEditor-Cmd process for all core/extension Automation tests. All
 preserved extension E2E checks run against that same process, local sidecar and local server.
 The CLI itself runs from this checkout's compiled `cli/dist/index.js`.
+
+Each E2E check is a declarative `extensions/<plugin>/Tests/e2e/tools/<name>.e2e.json`, run by
+`scripts/run_extension_e2e.py` (`--project-dir`, `--url`, `--plugins`; the suite calls it in-process):
+
+```json
+{
+  "description": "the count of PCG graphs",
+  "tool": "rql-query",
+  "input": { "query": "pcgGraphs | count" },
+  "assert": { "pattern": "\"text\"\\s*:\\s*\"\\d+\"|value\\\\?\"\\s*:\\s*\\d" }
+}
+```
+
+`tool` (required) is invoked with `run-tool`, or `run-system-tool` when `"system": true`; `input` (optional
+object) becomes `--input`. `assert.pattern` is a regex searched case-insensitively in the compact JSON of
+the result (`json.dumps(result, separators=(",", ":"), ensure_ascii=False)`; non-JSON CLI output is a JSON
+string); `description` (required) names what it expects and is printed on failure. A check passes when the CLI exits
+0 with a JSON object whose `isError` is not true and the pattern matches. `"expectError": true` inverts
+that: the tool must fail and `assert` is then required to pin the specific error. A transport failure
+(`(network)`, `(timeout)`, `ECONNREFUSED`, `ENOTFOUND`) always fails; a plugin without checks fails.
 
 E2E reuses the already-published bridge version matching the core `.uplugin` and the pinned shared
 server; it does not publish/rebuild those packages. `--server` and `--bridge` accept explicit local
@@ -62,7 +82,7 @@ Only the selected extension's source ZIP is packaged/published. No unchanged ext
 core artifact or npm package is republished. Test compilation is separate from distribution builds.
 ZIPs include one plugin root and its source/content/config/resources/license, no build caches.
 
-```powershell
+```shell
 # A release-preparation PR, never a feature task:
 py -3 scripts/extension_release.py bump --plugin UnrealAINiagara --version 0.2.0
 py -3 scripts/extension_release.py package --plugin UnrealAINiagara

@@ -1,0 +1,10 @@
+{
+  "description": "the count of water bodies",
+  "tool": "rql-query",
+  "input": {
+    "query": "waterBodies | count"
+  },
+  "assert": {
+    "pattern": "\"text\"\\s*:\\s*\"\\d+\"|value\\\\?\"\\s*:\\s*\\d"
+  }
+}
