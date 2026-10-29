@@ -186,6 +186,47 @@ describe('openProject', () => {
     expect(spawnedWith!.env['UNREAL_MCP_HOST']).toBe('http://localhost:5220');
   });
 
+  /** openProject on a fresh project with `spawnImpl`, its progress collected. */
+  async function openWith(spawnImpl: NonNullable<Parameters<typeof openProject>[0]['spawnImpl']>, progress: ProgressEvent[]) {
+    const dir = tmp();
+    writeUProject(dir, 'MyGame', '5.7');
+    return openProject({
+      projectDir: dir,
+      autoDismissStartupDialogs: false,
+      build: false,
+      noCache: true, // a rejecting spawnImpl drops the cached engine: keep the real cache file out of it
+      enginesImpl: () => [fakeEngine('5.7')],
+      spawnImpl,
+      onProgress: (e) => progress.push(e),
+    });
+  }
+
+  it('a spawnImpl may return a pid promise: a late pid is waited for and logged once known', async () => {
+    const progress: ProgressEvent[] = [];
+    const r = await openWith(() => new Promise<number>((resolve) => setTimeout(() => resolve(4343), 50)), progress);
+    expect(r.kind === 'success' && r.editorPid).toBe(4343);
+    expect(progress.filter((e) => e.phase === 'launched')).toEqual([
+      { phase: 'launched', message: 'Launched (PID: 4343)', pid: 4343 },
+    ]);
+  });
+
+  it('an unknown pid is never logged as "unknown"', async () => {
+    const progress: ProgressEvent[] = [];
+    const r = await openWith(async () => undefined, progress);
+    expect(r.kind).toBe('success');
+    expect(r.kind === 'success' && r.editorPid).toBeUndefined();
+    expect(progress).toContainEqual({ phase: 'launched', message: 'Launched', pid: undefined });
+  });
+
+  it('a spawnImpl that rejects fails the open (the editor did not start)', async () => {
+    const progress: ProgressEvent[] = [];
+    const r = await openWith(async () => {
+      throw new Error('Windows did not start the application (code 9).');
+    }, progress);
+    expect(r.kind === 'failure' && r.errorMessage).toBe('Windows did not start the application (code 9).');
+    expect(progress.map((e) => e.phase)).not.toContain('launched');
+  });
+
   it('dismisses known Unreal startup dialogs after launch on Windows', async () => {
     const dir = tmp();
     writeBlueprintProject(dir, 'MyGame', '5.7');

@@ -288,6 +288,47 @@ describe('openProject — forwards the discovery surfaces (hermetic, no home cac
       fs.rmSync(engineRoot, { recursive: true, force: true });
     }
   });
+
+  it('a spawnImpl that rejects drops the resolved engine from the INJECTED cache (the next open re-resolves)', async () => {
+    const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'umcp-openproj-'));
+    const engineRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'umcp-engine-'));
+    try {
+      fs.writeFileSync(
+        path.join(projectDir, 'MyGame.uproject'),
+        JSON.stringify({ FileVersion: 3, EngineAssociation: '5.7' }),
+        'utf-8',
+      );
+      const bin = editorBinaryPath(engineRoot, process.platform);
+      fs.mkdirSync(path.dirname(bin), { recursive: true });
+      fs.writeFileSync(bin, '', 'utf-8');
+      const store = new Map<string, string>();
+
+      const r = await openProject({
+        projectDir,
+        autoDismissStartupDialogs: false,
+        build: false,
+        enginesImpl: () => [
+          { appName: 'UE_5.7', appVersion: '5.7', installLocation: engineRoot, engineAssociation: '5.7' },
+        ],
+        cacheIo: {
+          cacheFilePath: '<in-memory>',
+          readImpl: (p) => store.get(p) ?? null,
+          writeImpl: (p, c) => void store.set(p, c),
+        },
+        discoveryFs: { existsImpl: () => false, readdirImpl: () => [], readFileImpl: () => null },
+        registryQueryImpl: () => null,
+        spawnImpl: async () => {
+          throw new Error('Windows did not start the application (code 9).');
+        },
+      });
+
+      expect(r.kind).toBe('failure');
+      expect(JSON.parse(store.get('<in-memory>') ?? '{}')['5.7']).toBeUndefined();
+    } finally {
+      fs.rmSync(projectDir, { recursive: true, force: true });
+      fs.rmSync(engineRoot, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('engineRootFromEditorPath', () => {
