@@ -1,7 +1,6 @@
-"""Read Unreal Engine's JSON files, which are often JSONC: `//` and `/* */` comments, trailing commas.
+"""Read Unreal Engine's JSON files as JSONC: `//` and `/* */` comments and trailing commas allowed.
 
-UE's own JSON reader accepts them, and engine files use them (UE 5.5's Engine/Config/Apple/Apple_SDK.json
-has `//` comments and trailing commas), so strict `json.loads` fails on them. Python stdlib only.
+UE 5.5's Engine/Config/Apple/Apple_SDK.json has both, so a strict `json.loads` fails on it. Python stdlib only.
 """
 from __future__ import annotations
 

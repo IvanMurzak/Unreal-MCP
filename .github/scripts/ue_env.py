@@ -37,7 +37,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 from extension_suite import UE_BUILD, UE_EDITOR, UE_PLATFORM  # noqa: E402  (the one host-platform table)
-import ue_json  # noqa: E402  (engine JSON files may carry comments and trailing commas)
+import ue_json  # noqa: E402  (engine JSON is JSONC)
 
 IS_WINDOWS = os.name == "nt"
 IS_MAC = sys.platform == "darwin"
