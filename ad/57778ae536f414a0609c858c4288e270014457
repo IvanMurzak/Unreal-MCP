@@ -1,0 +1,42 @@
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpToolRegistrySpec.cpp
+  s_7bc72ecaebd05d::t_174dc85603ef47 48-60
+UnrealMCP/Source/UnrealMcpEditor/Private/Tools/UnrealMcpSourceTools.cpp
+  s_7bc72ecaebd05d::t_8ff4c46a79cf34 459-463,465-466
+  s_7bc72ecaebd05d::t_9588437305fa55 93-114,1003-1007
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpSourceToolsSpec.cpp
+  s_7bc72ecaebd05d::t_f1e645b34fa8c6 287-289
+  s_7bc72ecaebd05d::t_87fc7ce7ec4e5d 298-299
+  s_7bc72ecaebd05d::t_491613fed7cde3 225-238
+UnrealMCP/Source/UnrealMcpRuntime/Private/Bridge/UnrealMcpBridgeServer.cpp
+  s_7bc72ecaebd05d::t_47500fb4c51c0e 561-564,568
+UnrealMCP/Source/UnrealMcpRuntime/Public/UnrealMcpToolRegistry.h
+  s_7bc72ecaebd05d::t_dc49cab0c434c6 129-139
+UnrealMCP/Source/UnrealMcpEditor/Private/Tools/UnrealMcpEditorTools.cpp
+  s_7bc72ecaebd05d::t_42dea7d3f913ce 108-110
+UnrealMCP/Source/UnrealMcpRuntime/Private/Tools/UnrealMcpToolRegistry.cpp
+  s_7bc72ecaebd05d::t_f5be92f58a3a48 84-91
+UnrealMCP/Source/UnrealMcpEditor/Private/Tools/UnrealMcpPythonTools.cpp
+  s_7bc72ecaebd05d::t_5aadb6e564e570 386-388
+UnrealMCP/Source/UnrealMcpEditor/Private/Tools/UnrealMcpSourceTools.h
+  s_7bc72ecaebd05d::t_d7922a50458229 71-77
+UnrealMCP/Source/UnrealMcpEditor/Private/Tools/UnrealMcpToolListTools.cpp
+  s_7bc72ecaebd05d::t_e661748393a626 104-106
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpBlueprintToolsSpec.cpp
+  s_7bc72ecaebd05d::t_c7c1088a981335 271-274
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "ad57778ae536f414a0609c858c4288e270014457",
+  "prompts": {},
+  "sessions": {
+    "s_7bc72ecaebd05d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "40274cb2-edf8-49ba-9a73-33b83cb5be53",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
