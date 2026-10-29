@@ -10,6 +10,7 @@
 #include "IUnrealMcpRqlModule.h"
 #include "UnrealMcpRqlTools.h"
 
+#include "Engine/CollisionProfile.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "Landscape.h"
@@ -50,6 +51,16 @@ void FUnrealAILandscapeSpec::Define()
 				TestEqual(TEXT("module name"), Module->GetRqlModuleName(), FString(TEXT("Landscape")));
 				TestFalse(TEXT("version reported"), Module->GetExtensionVersion().IsEmpty());
 			}
+		});
+
+		It("ships the Water collision profile the Water plugin it enables requires (else every load errors and a cook fails)", [this]()
+		{
+			// Config/Engine.ini of this plugin: without it the WaterEditor module logs a LoadErrors error and
+			// BuildCookRun fails with "Cook failed" (Error_UnknownCookFailure) in every project that installs the extension.
+			FCollisionResponseTemplate Water;
+			TestTrue(TEXT("WaterBodyCollision profile exists"), UCollisionProfile::Get()->GetProfileTemplate(TEXT("WaterBodyCollision"), Water));
+			TestEqual(TEXT("query-only"), Water.CollisionEnabled.GetValue(), ECollisionEnabled::QueryOnly);
+			TestEqual(TEXT("overlaps pawns"), Water.ResponseToChannels.GetResponse(ECC_Pawn), ECR_Overlap);
 		});
 
 		It("adds its sources and guide to the unreal-rql skill", [this]()

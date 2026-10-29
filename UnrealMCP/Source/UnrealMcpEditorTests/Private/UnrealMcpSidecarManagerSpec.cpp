@@ -75,6 +75,15 @@ void FUnrealMcpSidecarManagerSpec::Define()
 		});
 	});
 
+	Describe("ShouldAutoStart", [this]()
+	{
+		It("starts the sidecar in the editor, never in a commandlet (a packaging cook)", [this]()
+		{
+			TestTrue(TEXT("editor"), FUnrealMcpSidecarManager::ShouldAutoStart(/*bIsCommandlet*/ false));
+			TestFalse(TEXT("commandlet"), FUnrealMcpSidecarManager::ShouldAutoStart(/*bIsCommandlet*/ true));
+		});
+	});
+
 	Describe("BridgeBinaryBasename", [this]()
 	{
 		It("is platform-correct (.exe on Windows only)", [this]()

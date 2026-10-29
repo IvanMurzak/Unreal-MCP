@@ -107,6 +107,12 @@ public:
 	static FString GenerateToken();
 
 	/**
+	 * Whether the editor starts the sidecar when the plugin loads: not in a commandlet (a cook while packaging, -run=...),
+	 * a one-shot process no agent talks to, where it would only dial the server and be restarted until the process ends.
+	 */
+	static bool ShouldAutoStart(bool bIsCommandlet) { return !bIsCommandlet; }
+
+	/**
 	 * macOS/Linux pre-spawn prep on @p Path (§6.6): ensure the executable bit (+x) and, on macOS, strip
 	 * the com.apple.quarantine xattr so Gatekeeper's first-exec check is bypassed offline. No-op on
 	 * Windows. Static + path-taking so a spec can exercise it on a fixture binary; tolerant of a
