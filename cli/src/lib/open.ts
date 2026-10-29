@@ -9,7 +9,7 @@ import { platform } from 'os';
 import { discoverEngine, invalidateCachedEngine } from './engine.js';
 import { readUProject } from '../utils/project.js';
 import { asError } from '../utils/error.js';
-import { emitProgress } from './progress.js';
+import { emitProgress, pidSuffix } from './progress.js';
 import {
   tryDismissUnrealStartupDialog,
   type DismissOutcome,
@@ -200,7 +200,7 @@ export async function openProject(opts: OpenProjectOptions): Promise<OpenProject
 
     emitProgress(opts.onProgress, {
       phase: 'launched',
-      message: `Launched${pid !== undefined ? ` (PID: ${pid})` : ''}`,
+      message: `Launched${pidSuffix(pid)}`,
       pid,
     });
 

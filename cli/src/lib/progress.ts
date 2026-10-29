@@ -9,3 +9,8 @@ export function emitProgress(cb: ProgressCallback | undefined, event: ProgressEv
     /* a consumer's onProgress must never break the library call */
   }
 }
+
+/** ` (PID: n)` when the pid is known, else nothing: a log line never says "PID: unknown". */
+export function pidSuffix(pid: number | undefined): string {
+  return pid !== undefined ? ` (PID: ${pid})` : '';
+}

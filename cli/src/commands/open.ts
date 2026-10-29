@@ -3,6 +3,7 @@ import { DEFAULT_SESSION_IDLE_SECONDS } from '@baizor/gamedev-cli-core';
 import { openProject } from '../lib/open.js';
 import { openEditorSession, prepareGuiOpen } from '../lib/session.js';
 import type { AuthOption, McpTransport } from '../lib/types.js';
+import { pidSuffix } from '../lib/progress.js';
 import * as ui from '../utils/ui.js';
 import { parseIntFlag } from '../utils/flags.js';
 
@@ -88,7 +89,7 @@ export const openCommand = new Command('open')
       process.exitCode = 1;
       return;
     }
-    spinner.success(`Launched Unreal Editor${result.editorPid !== undefined ? ` (PID: ${result.editorPid})` : ''}`);
+    spinner.success(`Launched Unreal Editor${pidSuffix(result.editorPid)}`);
     ui.printWarnings(result.warnings);
     ui.label('editor', result.editorPath);
     ui.label('engine', result.engineRoot);
