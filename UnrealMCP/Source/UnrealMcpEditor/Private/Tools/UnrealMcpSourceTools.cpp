@@ -90,6 +90,28 @@ namespace UnrealMcpSourceTools
 		return Text;
 	}
 
+	FString DescribeDiagnostics(const TArray<FSourceDiagnostic>& Diagnostics, int32 MaxRows)
+	{
+		TArray<const FSourceDiagnostic*> Ordered;
+		for (const FSourceDiagnostic& Diag : Diagnostics)
+			if (Diag.Severity == TEXT("error"))
+				Ordered.Add(&Diag);
+		for (const FSourceDiagnostic& Diag : Diagnostics)
+			if (Diag.Severity != TEXT("error"))
+				Ordered.Add(&Diag);
+		FString Text;
+		for (int32 Index = 0; Index < Ordered.Num() && Index < MaxRows; ++Index)
+		{
+			const FSourceDiagnostic& Diag = *Ordered[Index];
+			Text += Diag.Line > 0
+				? FString::Printf(TEXT("\n%s(%d): %s: %s"), *Diag.File, Diag.Line, *Diag.Severity, *Diag.Message)
+				: FString::Printf(TEXT("\n%s: %s: %s"), *Diag.File, *Diag.Severity, *Diag.Message);
+		}
+		if (Ordered.Num() > MaxRows)
+			Text += FString::Printf(TEXT("\n... %d more diagnostic(s) in the structured report"), Ordered.Num() - MaxRows);
+		return Text;
+	}
+
 	FString ModuleApiMacro(const FString& ModuleName)
 	{
 		return ModuleName.ToUpper() + TEXT("_API");
@@ -434,9 +456,14 @@ namespace UnrealMcpSourceTools
 				Structured->SetNumberField(TEXT("endLine"), bWindowed ? EndLine : TotalLines);
 				Structured->SetNumberField(TEXT("returnedBytes"), Utf8Len(Content));
 				Structured->SetBoolField(TEXT("truncated"), bTruncated);
-				return FUnrealMcpToolResult::Success(
-					FString::Printf(TEXT("Read '%s' (%d line(s)%s)."), *Jailed.RelPath, TotalLines, bTruncated ? TEXT(", truncated") : TEXT("")),
+				// The file text itself goes in the text block (raw, not JSON-escaped): it is what the agent asked for.
+				const FString Range = bWindowed ? FString::Printf(TEXT(", lines %d-%d"), StartLine, EndLine) : FString();
+				FUnrealMcpToolResult Result = FUnrealMcpToolResult::Success(
+					FString::Printf(TEXT("Read '%s' (%d line(s)%s%s):\n%s"), *Jailed.RelPath, TotalLines, *Range,
+						bTruncated ? TEXT(", truncated") : TEXT(""), *Content),
 					Structured);
+				Result.bMessageCoversStructured = true;
+				return Result;
 			});
 
 		// source-create-class ----------------------------------------------------------------------
@@ -973,7 +1000,11 @@ namespace UnrealMcpSourceTools
 				// failure, or a UBT configuration error) without flooding the response.
 				Structured->SetStringField(TEXT("outputTail"), Combined.Right(4000));
 
-				return FUnrealMcpToolResult::Success(DescribeUbtResult(TargetName, ErrorCount, WarningCount, ReturnCode, Elapsed, Combined), Structured);
+				// Every diagnostic is in the text: the structured report (and its raw output tail) stays for clients that read it.
+				FUnrealMcpToolResult Result = FUnrealMcpToolResult::Success(
+					DescribeUbtResult(TargetName, ErrorCount, WarningCount, ReturnCode, Elapsed, Combined) + DescribeDiagnostics(Diagnostics), Structured);
+				Result.bMessageCoversStructured = true;
+				return Result;
 			});
 	}
 }

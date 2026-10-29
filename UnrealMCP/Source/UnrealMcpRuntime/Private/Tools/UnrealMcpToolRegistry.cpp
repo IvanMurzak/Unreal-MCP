@@ -81,6 +81,14 @@ FUnrealMcpToolResult FUnrealMcpToolResult::SuccessWithImage(const FString& InMes
 	return SuccessWithImage(Message, InBase64Data, InMimeType);
 }
 
+FString FUnrealMcpToolResult::WireText() const
+{
+	if (bMessageCoversStructured || !Structured.IsValid() || Structured->Values.Num() == 0)
+		return Message;
+	const FString Json = UnrealMcpSerializeCondensed(Structured);
+	return Message.IsEmpty() ? Json : Message + TEXT("\n") + Json;
+}
+
 // --- Schema building ------------------------------------------------------------------------------
 // The §3.2 scalar + vector schema builders now live in the shared FUnrealMcpSchema TU (UnrealMcpSchema.h),
 // externally linked so the prompt registry + the editor tool families reuse the SAME definition.

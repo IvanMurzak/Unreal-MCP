@@ -105,7 +105,9 @@ namespace UnrealMcpEditorTools
 					Text += TEXT("\nLog:\n") + FString::Join(LogLines, TEXT("\n"));
 				if (MoreLogLines > 0)
 					Text += FString::Printf(TEXT("\n(%d more log line(s): rql-query on the console source)"), MoreLogLines);
-				return FUnrealMcpToolResult::Success(Text, S);
+				FUnrealMcpToolResult Result = FUnrealMcpToolResult::Success(Text, S);
+				Result.bMessageCoversStructured = true; // the output and the log lines are in the text
+				return Result;
 			});
 	}
 }

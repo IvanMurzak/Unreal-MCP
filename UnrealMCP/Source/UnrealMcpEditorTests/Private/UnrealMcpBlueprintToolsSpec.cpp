@@ -268,6 +268,10 @@ void FUnrealMcpBlueprintToolsSpec::Define()
 				TestTrue(TEXT("at least one variable"), Vars && Vars->Num() >= 1);
 				TestTrue(TEXT("at least one component"), Comps && Comps->Num() >= 1);
 			}
+			// The client's text block carries the summary data, not only the counts (clients that read only `content`).
+			const FString GetText = GetResult.WireText();
+			TestTrue(*FString::Printf(TEXT("text names the variable and the component (%s)"), *GetText.Left(300)),
+				GetText.Contains(TEXT("Health")) && GetText.Contains(TEXT("Mesh")) && GetText.Contains(TEXT("DoThing")));
 
 			// remove-component closes the SCS edit pair
 			TSharedPtr<FJsonObject> RemoveComp = Args();

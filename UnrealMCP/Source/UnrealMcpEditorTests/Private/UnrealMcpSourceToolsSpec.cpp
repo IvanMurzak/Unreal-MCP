@@ -222,6 +222,20 @@ void FUnrealMcpSourceToolsSpec::Define()
 			const FString Clean = UnrealMcpSourceTools::DescribeUbtResult(TEXT("GameEditor"), 0, 1, 0, 30.0, TEXT("Result: Succeeded\n"));
 			TestEqual(TEXT("a successful build stays one short line"), Clean, FString(TEXT("Compile (GameEditor, UBT): 0 error(s), 1 warning(s); return code 0 in 30s.")));
 		});
+
+		It("lists every compiler diagnostic, errors first", [this]()
+		{
+			TArray<UnrealMcpSourceTools::FSourceDiagnostic> Diags;
+			UnrealMcpSourceTools::ParseDiagnostics(TEXT("C:\\P\\Foo.cpp(5): warning C4996: 'Old': deprecated\n")
+				TEXT("C:\\P\\Foo.cpp(7): error C2143: syntax error: missing ';' before 'const'\n")
+				TEXT("C:\\P\\Foo.cpp(9): error C2065: 'StreakMultiplier': undeclared identifier\n"), Diags);
+			const FString Text = UnrealMcpSourceTools::DescribeDiagnostics(Diags);
+			TestTrue(*FString::Printf(TEXT("both errors (%s)"), *Text), Text.Contains(TEXT("C2143")) && Text.Contains(TEXT("StreakMultiplier")));
+			TestTrue(TEXT("errors before the warning"), Text.Find(TEXT("C2065")) < Text.Find(TEXT("C4996")));
+			TestEqual(TEXT("one line per diagnostic"), Text.Len() - Text.Replace(TEXT("\n"), TEXT("")).Len(), 3);
+			TestTrue(TEXT("capped"), UnrealMcpSourceTools::DescribeDiagnostics(Diags, 1).Contains(TEXT("2 more diagnostic(s)")));
+			TestEqual(TEXT("none: empty"), UnrealMcpSourceTools::DescribeDiagnostics({}), FString());
+		});
 	});
 
 	Describe("file ops", [this]()
@@ -270,6 +284,9 @@ void FUnrealMcpSourceToolsSpec::Define()
 			// module-independent parts: the prefixed symbol, the parent, and the UCLASS marker.
 			TestTrue(TEXT("declares ASpecPawnThing : public AActor"), Content.Contains(TEXT("ASpecPawnThing : public AActor")));
 			TestTrue(TEXT("is a UCLASS"), Content.Contains(TEXT("UCLASS()")));
+			// The file text is in the text block too: clients that read only `content` must see the code they asked for.
+			TestTrue(*FString::Printf(TEXT("the text block carries the file (%s)"), *ReadResult.WireText().Left(200)),
+				ReadResult.WireText().Contains(TEXT("ASpecPawnThing : public AActor")));
 
 			// list the temp module and confirm both files are present with sizes.
 			TSharedPtr<FJsonObject> List = SourceArgs();
@@ -278,6 +295,8 @@ void FUnrealMcpSourceToolsSpec::Define()
 			TestTrue(TEXT("list succeeded"), ListResult.bSuccess);
 			int32 ListCount = 0;
 			if (ListResult.Structured.IsValid()) { ListResult.Structured->TryGetNumberField(TEXT("count"), ListCount); }
+			TestTrue(*FString::Printf(TEXT("the list text names the header (%s)"), *ListResult.WireText().Left(300)),
+				ListResult.WireText().Contains(TEXT("SpecPawnThing.h")));
 			TestEqual(TEXT("two files listed"), ListCount, 2);
 
 			// update the cpp with full-content replacement.
