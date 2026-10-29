@@ -938,6 +938,8 @@ void FUnrealMcpRqlDataModelsSpec::Define()
 			TestEqual(TEXT("an actor overriding another member follows too"), Profile(Overrider), FString(TEXT("NoCollision")));
 			const UStaticMeshComponent* OverriderMesh = Overrider->FindComponentByClass<UStaticMeshComponent>();
 			TestEqual(TEXT("and keeps its own member"), OverriderMesh ? OverriderMesh->BodyInstance.MassScale : 0.f, 3.f);
+			const UStaticMeshComponent* FollowerMesh = Follower->FindComponentByClass<UStaticMeshComponent>();
+			TestTrue(TEXT("the profile's collision settings came along"), FollowerMesh && FollowerMesh->GetCollisionEnabled() == ECollisionEnabled::NoCollision);
 
 			Must(TEXT("template profile back"), /* unreal.asset("@BP@").Components | where Name == "RqlMesh" | set BodyInstance.CollisionProfileName = "OverlapAllDynamic" */ TEXT(R"RQL({"rql":"0.1","source":{"path":["Components"],"on":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@BP@"}]}},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Name"]},{"lit":"RqlMesh"}]}},{"op":"set","assign":[{"target":{"path":["BodyInstance","CollisionProfileName"]},"value":{"lit":"OverlapAllDynamic"}}]}]})RQL"));
 			TestEqual(TEXT("the placed actor follows the edit back"), Profile(Follower), FString(TEXT("OverlapAllDynamic")));

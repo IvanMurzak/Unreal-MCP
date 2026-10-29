@@ -1286,11 +1286,15 @@ UObject* FUnrealMcpRqlTypes::LiveObject(UObject* Object) const
  * Pass a template's change on to one object made from it, member by member as the Details panel does for a member edit
  * (set BodyInstance.CollisionProfileName = ...): every leaf that changed on the template (@p Old -> @p New) follows where
  * the instance still holds the old value, and the instance's own value of any other member stays. A struct is walked
- * into its members; anything else (numbers, names, objects, containers) is one leaf. Returns whether a leaf follows;
- * writes only when @p bApply.
+ * into its members, unless its value is more than its reflected members (a native identity or serializer, as
+ * FCollisionResponse, or no members at all, as FInstancedStruct): that struct, like anything else (numbers, names,
+ * objects, containers), is one leaf. Returns whether a leaf follows; writes only when @p bApply.
  */
 static bool UnrealMcpRqlFollowTemplate(const FProperty* Property, void* Instance, const void* Old, const void* New, bool bApply)
 {
+	const FStructProperty* Struct = CastField<FStructProperty>(Property);
+	const bool bWalk = Struct && Struct->Struct->PropertyLink
+		&& !(Struct->Struct->StructFlags & (STRUCT_IdenticalNative | STRUCT_SerializeNative));
 	bool bAny = false;
 	for (int32 Index = 0; Index < Property->ArrayDim; ++Index)
 	{
@@ -1298,7 +1302,7 @@ static bool UnrealMcpRqlFollowTemplate(const FProperty* Property, void* Instance
 		void* InstanceValue = static_cast<uint8*>(Instance) + Offset;
 		const void* OldValue = static_cast<const uint8*>(Old) + Offset;
 		const void* NewValue = static_cast<const uint8*>(New) + Offset;
-		if (const FStructProperty* Struct = CastField<FStructProperty>(Property))
+		if (bWalk)
 		{
 			for (TFieldIterator<FProperty> It(Struct->Struct); It; ++It)
 				bAny |= UnrealMcpRqlFollowTemplate(*It, It->ContainerPtrToValuePtr<void>(InstanceValue), It->ContainerPtrToValuePtr<void>(OldValue),
