@@ -10,11 +10,11 @@
 
 .DESCRIPTION
     runner-manager registers ephemeral `runner-manager-*` runners on each Unreal machine: one for
-    Unreal-MCP plus other repos' runners (the Unreal-AI-* extensions) and local runs. They share one UE install per engine (AutomationTool refuses a
-    second instance: "A conflicting instance of AutomationTool is already running") and, on the
-    UNREAL_HOST_PROJECT fallback, one host-project Plugins\UnrealMCP junction. A workflow
-    `concurrency:` group cannot serialize them: the run-level group is keyed per PR, ref or chain
-    lock, and a job-level group keeps only ONE pending job and cancels the older one.
+    Unreal-MCP plus other repos' runners (the Unreal-AI-* extensions) and local runs. They share one
+    UE install per engine (AutomationTool refuses a second instance: "A conflicting instance of
+    AutomationTool is already running") and the fixed smoke port 18080. A workflow `concurrency:`
+    group cannot serialize them: the run-level group is keyed per PR, ref or chain lock, and a
+    job-level group keeps only ONE pending job and cancels the older one.
     See docs/RELEASING.md "Machine-wide UE lock".
 
     The lock is an exclusive OS file handle on a fixed machine path: a share-Read handle on Windows,

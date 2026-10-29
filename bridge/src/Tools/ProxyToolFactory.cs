@@ -66,8 +66,12 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
                     }
                     catch (IpcDisconnectedException ex)
                     {
-                        // Fail fast — never hang to timeoutMs (§2.2 step 4).
-                        return ResponseCallTool.Error(ex.Message).SetRequestID(requestId);
+                        // Fail fast — never hang to timeoutMs (§2.2 step 4). A call refused before it was sent
+                        // (editor not connected / handshake not done) never started: answer NotExecuted (503), the
+                        // contract for "safe to re-send" (docs/ARCHITECTURE.md). Anything that may have reached
+                        // the editor stays a plain error, never re-sent.
+                        var refusal = ex.NotSent ? ResponseCallTool.NotExecuted(ex.Message) : ResponseCallTool.Error(ex.Message);
+                        return refusal.SetRequestID(requestId);
                     }
                 },
                 // §2.4: carry the plugin-declared surface onto the proxy so SurfaceRoutingToolSink can put it on

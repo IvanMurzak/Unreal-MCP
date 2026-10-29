@@ -19,10 +19,14 @@
                    Linux has no launcher default, so a Linux runner must set UE_ROOT_<major>_<minor>.
       UE_PLATFORM  the UBT/UAT target platform of this host: Win64, Mac or Linux.
       UE_RUNUAT    RunUAT.bat (Windows) or RunUAT.sh.
+      UE_BUILD     the host's UBT Build script (Build.bat, Mac/Build.sh, Linux/Build.sh).
+      UE_EDITOR_CMD  the host's UnrealEditor-Cmd (.exe on Windows).
       CHAIN_PY     UE's bundled Python 3.11, through a space-free link under RUNNER_TEMP. The runner
                    accounts have no Python on PATH, and the engine path can contain spaces, which
                    ${{ env.CHAIN_PY }} (substituted UNQUOTED) would split. It is the hardened
                    chain_feed.py contract: an ABSOLUTE, SPACE-FREE, forward-slashed interpreter path.
+      SSL_CERT_FILE  macOS/Linux only, unless already set: the OS CA bundle. UE's bundled Python
+                   ships no CA certificates there, so its HTTPS downloads would fail to verify.
       DEVELOPER_DIR  macOS only, and only when the machine's selected Xcode is outside the engine's
                    supported range: a side-by-side /Applications/Xcode*.app that fits (see below).
 
@@ -62,9 +66,9 @@ function Add-JobEnv([string] $Name, [string] $Value) {
     Write-Host "ue-env: $Name=$Value"
 }
 
-if ($IsWindows) { $platform = 'Win64'; $defaultRoot = "C:\Program Files\Epic Games\UE_$Version"; $pyExe = 'python.exe' }
-elseif ($IsMacOS) { $platform = 'Mac'; $defaultRoot = "/Users/Shared/Epic Games/UE_$Version"; $pyExe = 'bin/python3' }
-else { $platform = 'Linux'; $defaultRoot = $null; $pyExe = 'bin/python3' }
+if ($IsWindows) { $platform = 'Win64'; $defaultRoot = "C:\Program Files\Epic Games\UE_$Version"; $pyExe = 'python.exe'; $buildScript = 'Build.bat'; $editorExe = 'UnrealEditor-Cmd.exe' }
+elseif ($IsMacOS) { $platform = 'Mac'; $defaultRoot = "/Users/Shared/Epic Games/UE_$Version"; $pyExe = 'bin/python3'; $buildScript = 'Mac/Build.sh'; $editorExe = 'UnrealEditor-Cmd' }
+else { $platform = 'Linux'; $defaultRoot = $null; $pyExe = 'bin/python3'; $buildScript = 'Linux/Build.sh'; $editorExe = 'UnrealEditor-Cmd' }
 
 $overrideName = 'UE_ROOT_' + $Version.Replace('.', '_')
 $root = [Environment]::GetEnvironmentVariable($overrideName)
@@ -112,6 +116,13 @@ if ($IsMacOS) {
 # GetFullPath: one separator style on Windows (cmd's mklink and the .bat get backslashes only).
 $runUAT = [IO.Path]::GetFullPath((Join-Path $root "Engine/Build/BatchFiles/RunUAT.$(if ($IsWindows) { 'bat' } else { 'sh' })"))
 if (-not (Test-Path -LiteralPath $runUAT -PathType Leaf)) { throw "ue-env: $runUAT not found" }
+$ueBuild = [IO.Path]::GetFullPath((Join-Path $root "Engine/Build/BatchFiles/$buildScript"))
+$editorCmd = [IO.Path]::GetFullPath((Join-Path $root "Engine/Binaries/$platform/$editorExe"))
+foreach ($f in $ueBuild, $editorCmd) { if (-not (Test-Path -LiteralPath $f -PathType Leaf)) { throw "ue-env: $f not found" } }
+$caBundle = $null
+if (-not $IsWindows -and -not $env:SSL_CERT_FILE) {
+    $caBundle = @('/etc/ssl/cert.pem', '/etc/ssl/certs/ca-certificates.crt') | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+}
 
 # Chain python: link the bundled Python folder (not just the binary, so it finds its stdlib).
 $src = [IO.Path]::GetFullPath((Join-Path $root "Engine/Binaries/ThirdParty/Python3/$platform"))
@@ -135,5 +146,8 @@ Write-Host "ue-env: probe sys.executable=$((@($exe) -join ' ').Trim())"
 Add-JobEnv 'UE_ROOT' $root
 Add-JobEnv 'UE_PLATFORM' $platform
 Add-JobEnv 'UE_RUNUAT' $runUAT
+Add-JobEnv 'UE_BUILD' $ueBuild
+Add-JobEnv 'UE_EDITOR_CMD' $editorCmd
 Add-JobEnv 'CHAIN_PY' $py
 if ($developerDir) { Add-JobEnv 'DEVELOPER_DIR' $developerDir }
+if ($caBundle) { Add-JobEnv 'SSL_CERT_FILE' $caBundle }

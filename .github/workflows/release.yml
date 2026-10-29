@@ -298,8 +298,6 @@ jobs:
           - { os: macos, ue: '5.8' }
           - { os: windows, ue: '5.7' }
           - { os: windows, ue: '5.8' }
-    env:
-      HOST_UPROJECT: ${{ vars.UNREAL_HOST_PROJECT }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
@@ -322,7 +320,7 @@ jobs:
         run: ./.github/scripts/ue-env.ps1 -Version '${{ matrix.ue }}'
       # Machine-wide UE serialization (#293): one lock for every self-hosted UE job on this
       # machine, whatever the engine version, so matrix legs, PR runs and chain dispatches never
-      # share UAT or the host junction. Held until the always() release step ending this job.
+      # share UAT. Held until the always() release step ending this job.
       # This job has no timeout-minutes (360 default), which covers the longer wait.
       - name: Acquire machine-wide UE lock
         id: ue_lock
@@ -336,7 +334,7 @@ jobs:
           # C2 (#139): validates the DISTRIBUTED package — the committed UnrealMCP.uplugin
           # omits UnrealMcpEditorTests (Fab review flags shipped test modules), so this
           # BuildPlugin -Rocket proves the marketplace package builds green test-free. The
-          # Automation pass below rebuilds WITH the test module into a separate junction target.
+          # Automation pass below rebuilds WITH the test module in its own isolated build copy.
           # Packages for THIS host's platform (UE_PLATFORM: Win64, Mac or Linux); the Fab Win64 zip
           # itself is built by release.yml's Windows-only build-plugin-zip.
           $uplugin = Join-Path $env:GITHUB_WORKSPACE 'UnrealMCP/UnrealMCP.uplugin'
@@ -383,14 +381,13 @@ jobs:
 
       - name: Cleanup this job's build outputs (self-hosted disk hygiene)
         # Self-hosted disk hygiene. This runner is SHARED with other repos' jobs and
-        # its RUNNER_TEMP + the persistent runner-local host project are NOT auto-pruned
-        # after a job, so per-run BuildPlugin packages and host logs accumulate across
+        # its RUNNER_TEMP is NOT auto-pruned after a job, so per-run BuildPlugin
+        # packages and logs accumulate across
         # runs (a contributor to disk-full spikes during heavy concurrent CI). Remove
         # ONLY THIS job's own regenerable outputs. Deliberately NOT touched:
         #   • host DerivedDataCache / Intermediate / Binaries — a persistent
         #     shared-for-speed cache; deleting it forces a full shader/host recompile
         #     every run (§ guardrail: never prune a cache other runs rely on for speed).
-        #   • the host Plugins\UnrealMCP junction — owned by the self-heal step above.
         #   • Docker — these UE jobs use no containers, and the daemon is shared with
         #     the context-engine / ai-pipeline runners' ACTIVE jobs.
         # Best-effort: a cleanup failure must NEVER red an otherwise-green run.
@@ -415,9 +412,6 @@ jobs:
           # 2. This job's UBT logs under RUNNER_TEMP.
           Get-ChildItem -Path $env:RUNNER_TEMP -Filter 'UBT-*.log' -File -ErrorAction SilentlyContinue |
             Remove-Item -Force -ErrorAction SilentlyContinue
-          # 3. Host project transient logs/crashes ONLY (unbounded growers; NOT the
-          #    DDC / Intermediate / Binaries speed caches). Only while this job held the
-          #    machine-wide UE lock: otherwise the host may be another job's live editor.
           Write-Host "Per-run cleanup done (DDC / Intermediate / Binaries and Docker intentionally preserved)."
 
       # Last step, so the whole UE portion stays inside the machine-wide UE lock (#293).

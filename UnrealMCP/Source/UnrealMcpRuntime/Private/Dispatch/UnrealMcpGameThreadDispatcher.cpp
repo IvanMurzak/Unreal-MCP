@@ -3,6 +3,7 @@
 
 #include "UnrealMcpGameThreadDispatcher.h"
 #include "UnrealMcpLog.h"
+#include "Async/Async.h"
 #include "HAL/Event.h"
 #include "HAL/PlatformProcess.h"
 #include "HAL/PlatformTime.h"
@@ -15,6 +16,19 @@
 
 namespace
 {
+	/**
+	 * FCoreDelegates are not thread-safe, and the process-lifetime helpers below are created lazily by the first
+	 * Dispatch(), which may come from a worker thread (UE 5.8's access detector ensures on that data race). Add their
+	 * subscriptions on the game thread: inline when already there, else posted (a trivial delegate add, not a tool body).
+	 */
+	void SubscribeOnGameThread(TUniqueFunction<void()> Subscribe)
+	{
+		if (IsInGameThread())
+			Subscribe();
+		else
+			AsyncTask(ENamedThreads::GameThread, MoveTemp(Subscribe));
+	}
+
 	/**
 	 * Shared completion state for one dispatched call. The promise is completed by whichever path wins
 	 * the atomic guard first — the game-thread body or the timeout watchdog — so it is never set twice.
@@ -118,10 +132,13 @@ namespace
 				Thread = FRunnableThread::Create(this, TEXT("UnrealMcpDispatchWatchdog"), 64 * 1024, TPri_BelowNormal);
 			if (Thread == nullptr)
 				UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] no watchdog thread; tool-call timeouts are not enforced."));
-			FCoreDelegates::OnEnginePreExit.AddLambda([this]()
+			SubscribeOnGameThread([this]()
 			{
-				bStop = true;
-				Wake->Trigger();
+				FCoreDelegates::OnEnginePreExit.AddLambda([this]()
+				{
+					bStop = true;
+					Wake->Trigger();
+				});
 			});
 		}
 
@@ -207,8 +224,12 @@ namespace
 
 		FUnrealMcpEndOfFrameQueue()
 		{
-			EndFrame = FCoreDelegates::OnEndFrame.AddRaw(this, &FUnrealMcpEndOfFrameQueue::Drain);
-			FCoreDelegates::OnEnginePreExit.AddLambda([this]() { FCoreDelegates::OnEndFrame.Remove(EndFrame); });
+			// Jobs added before the subscription lands simply wait for the first drained frame.
+			SubscribeOnGameThread([this]()
+			{
+				EndFrame = FCoreDelegates::OnEndFrame.AddRaw(this, &FUnrealMcpEndOfFrameQueue::Drain);
+				FCoreDelegates::OnEnginePreExit.AddLambda([this]() { FCoreDelegates::OnEndFrame.Remove(EndFrame); });
+			});
 		}
 
 		void Drain()
