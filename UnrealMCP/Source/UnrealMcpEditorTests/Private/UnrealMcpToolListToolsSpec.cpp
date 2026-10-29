@@ -48,6 +48,7 @@ void FUnrealMcpToolListToolsSpec::Define()
 		TestTrue(TEXT("lists itself"), Text.Contains(TEXT("unreal-tool-list | List Tools | visible")));
 		TestTrue(TEXT("says hidden tools still run by name"), Text.Contains(TEXT("still run when called by name")));
 		TestFalse(TEXT("leaves the system tool out"), Text.Contains(TEXT("ping |")));
+		TestTrue(TEXT("points at rql-schema for extension features"), Text.Contains(TEXT("rql-schema lists them")));
 		TestTrue(TEXT("counts one hidden"), Text.StartsWith(TEXT("3 tool(s), 1 hidden")));
 		const FUnrealMcpRegisteredTool* Python = Registry.Find(TEXT("python-execute"));
 		TestTrue(TEXT("still hidden afterwards"), Python && !Python->bVisible);

@@ -1,7 +1,7 @@
 {
   "extensionId": "com.ivanmurzak.unreal-ai-control-rig",
   "name": "ControlRig Tools",
-  "description": "RQL module for Unreal's Control Rig: query Control Rig blueprints (element hierarchy, controls, bones) and Control Rig components.",
+  "description": "RQL module for Unreal's Control Rig: create rigs with bones, controls and a two-bone IK solver; query Control Rig blueprints (element hierarchy, controls, bones) and Control Rig components.",
   "pluginName": "UnrealAIControlRig",
   "repo": "IvanMurzak/Unreal-MCP",
   "version": "0.1.3",

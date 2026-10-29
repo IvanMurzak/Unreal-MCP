@@ -1,6 +1,6 @@
 # ControlRig RQL module
 
-RQL module for Unreal's Control Rig: query Control Rig blueprints (element hierarchy, controls, bones) and Control Rig components.
+RQL module for Unreal's Control Rig: create rigs with bones, controls and a two-bone IK solver; query Control Rig blueprints (element hierarchy, controls, bones) and Control Rig components.
 
 An optional editor plugin in the [Unreal MCP monorepository](../../README.md), with its own module, version and release archive.
 
@@ -31,14 +31,22 @@ The extension adds its feature to the editor's RQL data layer (`rql-query` / `rq
 
 | Kind | Names |
 | --- | --- |
-| Sources | `controlRigs` |
+| Sources | `controlRigs`, `controlRig` |
+| Operations (`call`) | `CreateRig`, `AddBone`, `AddControl`, `AddTwoBoneIK` |
 | Members | `ControlRigBlueprint.Elements`, `ControlRigBlueprint.Hierarchy`, `ControlRigBlueprint.Controls`, `ControlRigBlueprint.Bones`, `ControlRigComponent.BoundRig` (the running rig) |
 
 ```
 controlRigs | select Name Elements
 controlRigs | where Name == "CR_Mannequin" | select Controls Bones
 actors | get Components | where $ is ControlRigComponent | select Owner.Label BoundRig
+controlRig | call CreateRig("/Game/Rigs/CR_Arm")
+controlRig | call AddBone(unreal.asset("/Game/Rigs/CR_Arm"), "Shoulder", "", [0, 0, 150])
+controlRig | call AddControl(unreal.asset("/Game/Rigs/CR_Arm"), "IK_Target", [60, 0, 150])
+controlRig | call AddTwoBoneIK(unreal.asset("/Game/Rigs/CR_Arm"), "Shoulder", "Elbow", "Hand", "IK_Target")
 ```
+
+`AddBone` places a bone relative to its parent (cm); `AddControl` adds a transform control for the animator; `AddTwoBoneIK`
+adds a Basic IK node on Forwards Solve whose effector follows the target control.
 
 ## Releases and development
 
