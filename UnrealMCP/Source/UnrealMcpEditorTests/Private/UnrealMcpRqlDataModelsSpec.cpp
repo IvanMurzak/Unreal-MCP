@@ -903,6 +903,47 @@ void FUnrealMcpRqlDataModelsSpec::Define()
 			TestTrue(TEXT("and the placed actor"), Restored && Restored->GetStaticMesh() == nullptr);
 		});
 
+		It("passes a struct member edit on member by member: placed actors follow it, back and forth, and keep their own other members", [this]()
+		{
+			UBlueprint* Made = MakeBlueprint();
+			USCS_Node* Node = Made->SimpleConstructionScript->CreateNode(UStaticMeshComponent::StaticClass(), TEXT("RqlMesh"));
+			Made->SimpleConstructionScript->AddNode(Node);
+			Cast<UStaticMeshComponent>(Node->ComponentTemplate)->SetCollisionProfileName(TEXT("OverlapAllDynamic"));
+			FKismetEditorUtilities::CompileBlueprint(Made);
+			Must(TEXT("spawned"), /* editor | call SpawnActor("@BPNAME@", "RqlSeqLampBP") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"SpawnActor","args":[{"lit":"@BPNAME@"},{"lit":"RqlSeqLampBP"}]}]})RQL"), { { TEXT("BPNAME"), FPackageName::GetShortName(Blueprint) } });
+			UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+			AActor* Follower = nullptr;
+			for (TActorIterator<AActor> It(World); It; ++It)
+			{
+				if (It->GetActorLabel() == TEXT("RqlSeqLampBP"))
+					Follower = *It;
+			}
+			if (!TestNotNull(TEXT("placed"), Follower))
+				return;
+			FActorSpawnParameters Params;
+			Params.ObjectFlags |= RF_Transactional;
+			AActor* Overrider = World->SpawnActor<AActor>(Made->GeneratedClass, FTransform::Identity, Params);
+			Overrider->SetActorLabel(TEXT("RqlSeqLampBPOverride"));
+			// The overrider's own value of ANOTHER BodyInstance member: it must not block the profile edit, nor be lost by it.
+			Overrider->FindComponentByClass<UStaticMeshComponent>()->BodyInstance.MassScale = 3.f;
+			auto Profile = [](const AActor* Actor)
+			{
+				const UStaticMeshComponent* Mesh = IsValid(Actor) ? Actor->FindComponentByClass<UStaticMeshComponent>() : nullptr;
+				return Mesh ? Mesh->GetCollisionProfileName().ToString() : FString(TEXT("<none>"));
+			};
+			TestEqual(TEXT("starts on the template's profile"), Profile(Follower), FString(TEXT("OverlapAllDynamic")));
+
+			Must(TEXT("template profile off"), /* unreal.asset("@BP@").Components | where Name == "RqlMesh" | set BodyInstance.CollisionProfileName = "NoCollision" */ TEXT(R"RQL({"rql":"0.1","source":{"path":["Components"],"on":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@BP@"}]}},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Name"]},{"lit":"RqlMesh"}]}},{"op":"set","assign":[{"target":{"path":["BodyInstance","CollisionProfileName"]},"value":{"lit":"NoCollision"}}]}]})RQL"));
+			TestEqual(TEXT("the placed actor follows"), Profile(Follower), FString(TEXT("NoCollision")));
+			TestEqual(TEXT("an actor overriding another member follows too"), Profile(Overrider), FString(TEXT("NoCollision")));
+			const UStaticMeshComponent* OverriderMesh = Overrider->FindComponentByClass<UStaticMeshComponent>();
+			TestEqual(TEXT("and keeps its own member"), OverriderMesh ? OverriderMesh->BodyInstance.MassScale : 0.f, 3.f);
+
+			Must(TEXT("template profile back"), /* unreal.asset("@BP@").Components | where Name == "RqlMesh" | set BodyInstance.CollisionProfileName = "OverlapAllDynamic" */ TEXT(R"RQL({"rql":"0.1","source":{"path":["Components"],"on":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@BP@"}]}},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Name"]},{"lit":"RqlMesh"}]}},{"op":"set","assign":[{"target":{"path":["BodyInstance","CollisionProfileName"]},"value":{"lit":"OverlapAllDynamic"}}]}]})RQL"));
+			TestEqual(TEXT("the placed actor follows the edit back"), Profile(Follower), FString(TEXT("OverlapAllDynamic")));
+			TestEqual(TEXT("so does the overrider"), Profile(Overrider), FString(TEXT("OverlapAllDynamic")));
+		});
+
 		It("writes several members of a placed actor's construction-script component in one set (each write rebuilds it)", [this]()
 		{
 			UBlueprint* Made = MakeBlueprint();

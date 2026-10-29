@@ -1282,6 +1282,38 @@ UObject* FUnrealMcpRqlTypes::LiveObject(UObject* Object) const
 	return Object;
 }
 
+/**
+ * Pass a template's change on to one object made from it, member by member as the Details panel does for a member edit
+ * (set BodyInstance.CollisionProfileName = ...): every leaf that changed on the template (@p Old -> @p New) follows where
+ * the instance still holds the old value, and the instance's own value of any other member stays. A struct is walked
+ * into its members; anything else (numbers, names, objects, containers) is one leaf. Returns whether a leaf follows;
+ * writes only when @p bApply.
+ */
+static bool UnrealMcpRqlFollowTemplate(const FProperty* Property, void* Instance, const void* Old, const void* New, bool bApply)
+{
+	bool bAny = false;
+	for (int32 Index = 0; Index < Property->ArrayDim; ++Index)
+	{
+		const int32 Offset = Index * Property->GetElementSize();
+		void* InstanceValue = static_cast<uint8*>(Instance) + Offset;
+		const void* OldValue = static_cast<const uint8*>(Old) + Offset;
+		const void* NewValue = static_cast<const uint8*>(New) + Offset;
+		if (const FStructProperty* Struct = CastField<FStructProperty>(Property))
+		{
+			for (TFieldIterator<FProperty> It(Struct->Struct); It; ++It)
+				bAny |= UnrealMcpRqlFollowTemplate(*It, It->ContainerPtrToValuePtr<void>(InstanceValue), It->ContainerPtrToValuePtr<void>(OldValue),
+					It->ContainerPtrToValuePtr<void>(NewValue), bApply);
+			continue;
+		}
+		if (Property->Identical(OldValue, NewValue) || !Property->Identical(InstanceValue, OldValue))
+			continue; // unchanged on the template, or the instance overrides it
+		bAny = true;
+		if (bApply)
+			Property->CopySingleValue(InstanceValue, NewValue);
+	}
+	return bAny;
+}
+
 void FUnrealMcpRqlTypes::WriteObjectProperty(UObject* Object, FProperty* Property, const rql::Value& Value)
 {
 	// A previous write of this mutation may have rebuilt the component (set A = 1, B = 2 on a Blueprint actor's component):
@@ -1342,8 +1374,9 @@ void FUnrealMcpRqlTypes::WriteObjectProperty(UObject* Object, FProperty* Propert
 			|| Instance->GetClass() != Object->GetClass() || (Instance->GetWorld() && Instance->GetWorld()->IsGameWorld()))
 			continue;
 		void* Current = Property->ContainerPtrToValuePtr<void>(Instance);
-		if (!Property->Identical(Current, Old->Ptr))
-			continue; // the instance overrides this value: keep it
+		// Member by member: a struct (BodyInstance) the instance overrides in one member still follows a change of another.
+		if (!UnrealMcpRqlFollowTemplate(Property, Current, Old->Ptr, New, /*bApply*/ false))
+			continue; // nothing changed that the instance does not override: keep it
 		// As FComponentEditorUtils::ApplyDefaultValueChange: a component the construction script made is rebuilt on undo
 		// through its owner, so the owner is recorded instead of the component.
 		UActorComponent* Component = Cast<UActorComponent>(Instance);
@@ -1353,7 +1386,7 @@ void FUnrealMcpRqlTypes::WriteObjectProperty(UObject* Object, FProperty* Propert
 		if (!Component || !Component->IsCreatedByConstructionScript())
 			Instance->Modify();
 		Instance->PreEditChange(Property);
-		Property->CopyCompleteValue(Current, New);
+		UnrealMcpRqlFollowTemplate(Property, Current, Old->Ptr, New, /*bApply*/ true);
 		FPropertyChangedEvent InstanceEvent(Property, EPropertyChangeType::ValueSet);
 		Instance->PostEditChangeProperty(InstanceEvent);
 		Instance->MarkPackageDirty();
