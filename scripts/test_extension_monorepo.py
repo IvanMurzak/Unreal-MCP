@@ -89,6 +89,22 @@ class MonorepoTests(unittest.TestCase):
     def test_default_output_is_absolute(self):
         self.assertTrue(suite.default_output().is_absolute())
 
+    def test_smoke_host_syncs_the_template_and_leaves_unchanged_files_alone(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            out = Path(temporary)
+            with patch.object(suite, 'default_output', return_value=out):
+                project = suite.smoke_host()
+                self.assertEqual(project, out / 'smoke-host/UnrealTestProject/UnrealTestProject.uproject')
+                template = suite.ROOT / 'tests/smoke-host'
+                expected = {f.relative_to(template) for f in template.rglob('*') if f.is_file()}
+                self.assertEqual({f.relative_to(project.parent) for f in project.parent.rglob('*') if f.is_file()}, expected)
+                target = project.parent / 'Source/UnrealTestProjectEditor.Target.cs'
+                stamp = target.stat().st_mtime_ns
+                (project.parent / 'Config/DefaultGame.ini').write_text('drift')
+                suite.smoke_host()
+                self.assertEqual(target.stat().st_mtime_ns, stamp, 'an unchanged Target.cs must not be rewritten')
+                self.assertEqual((project.parent / 'Config/DefaultGame.ini').read_bytes(), (template / 'Config/DefaultGame.ini').read_bytes())
+
     def test_local_ue_lock_excludes_a_second_holder_and_releases(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / 'ue.lock'

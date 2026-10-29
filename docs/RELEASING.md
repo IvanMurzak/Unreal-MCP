@@ -591,18 +591,19 @@ Set via `gh variable set --repo IvanMurzak/Unreal-MCP <NAME> --body <VALUE>`
 | --- | --- | --- |
 | `UNREAL_RUNNER_READY` | to enable the plugin legs | **Currently `true`** — a self-hosted Unreal runner is registered (2026-06-11), so the plugin legs run. Unset/anything-else → plugin legs skip. |
 | `UNREAL_ENGINE_PATH` | optional | Packaged-plugin UE install root on the runner. Defaults to the latest supported engine, `C:\Program Files\Epic Games\UE_5.8`. |
-| `UNREAL_HOST_PROJECT` | no longer used | The smoke host project now comes from `tests/smoke-host` (see *The smoke host project*). |
 | `UNREAL_SMOKE_READY` | to enable the `connection-smoke` leg | Gates the live relay round-trip leg (client → `gamedev-mcp-server` → sidecar → plugin → editor → tool, via `scripts/connection_smoke.py --mode custom`). **Separate from `UNREAL_RUNNER_READY`** so the smoke leg stays SKIPPED — never red-by-absence — until validated once on the runner. The leg builds the bridge (→ `UNREAL_MCP_BRIDGE_PATH`), `BuildPlugin`s into the smoke host project, downloads the public `gamedev-mcp-server` release, and asserts a tool battery. Set to `true` to enable. |
 
-Variables (not secrets) are correct here: none of these values are sensitive.
+Variables (not secrets) are correct here: none of these values are sensitive. An old
+`UNREAL_HOST_PROJECT` variable is no longer read (see *The smoke host project*) and can be deleted.
 
 ### The smoke host project
 
 `connection-smoke` needs a real host `.uproject`. It is the repo's `tests/smoke-host`
-(a copy of the workspace's `engines/unreal/test-project`, `UnrealTestProject`): the job
-syncs it into a folder that survives jobs on the runner slot (Windows
-`C:\wt\unreal-smoke\<hash>\`, elsewhere `<_work>/<repo>/smoke-host/`), so its Binaries,
-Intermediate and DerivedDataCache stay warm, and `BuildPlugin`s this PR's plugin straight into
+(a copy of the workspace's `engines/unreal/test-project`, `UnrealTestProject`):
+`scripts/smoke_host.py` syncs it (changed files only) into `smoke-host/` beside
+`extension_suite.py`'s build caches (Windows `C:\wt\unreal-tests\<hash>\`, elsewhere
+`.artifacts/tests/` in the checkout), which survive jobs on the runner slot, so its Binaries,
+Intermediate and DerivedDataCache stay warm. The job then `BuildPlugin`s this PR's plugin straight into
 its `Plugins/UnrealMCP` (a real folder, not a link: UBT's build accelerator does not follow a
 symlinked plugin on macOS). Nothing is provisioned on the machine; .NET 9 comes from
 `actions/setup-dotnet` (runner-manager keeps `DOTNET_INSTALL_DIR` per slot, so it is cached).

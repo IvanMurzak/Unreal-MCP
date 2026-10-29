@@ -289,7 +289,7 @@ jobs:
           # UnrealMCP.uplugin omits the UnrealMcpEditorTests module (Fab review flags
           # shipped test/automation modules), so this BuildPlugin -Rocket proves the
           # marketplace package builds green WITHOUT the test module. The Automation
-          # pass below rebuilds WITH the test module into a separate junction target.
+          # pass below rebuilds WITH the test module in its own isolated build copy.
           # Packages for THIS host's platform (UE_PLATFORM: Win64, Mac or Linux); the Fab Win64 zip
           # itself is built by release.yml's Windows-only build-plugin-zip.
           $uplugin = Join-Path $env:GITHUB_WORKSPACE 'UnrealMCP/UnrealMCP.uplugin'
@@ -357,14 +357,13 @@ jobs:
 
       - name: Cleanup this job's build outputs (self-hosted disk hygiene)
         # Self-hosted disk hygiene. This runner is SHARED with other repos' jobs and
-        # its RUNNER_TEMP + the persistent runner-local host project are NOT auto-pruned
-        # after a job, so per-run BuildPlugin packages and host logs accumulate across
+        # its RUNNER_TEMP is NOT auto-pruned after a job, so per-run BuildPlugin
+        # packages and logs accumulate across
         # runs (a contributor to disk-full spikes during heavy concurrent CI). Remove
         # ONLY THIS job's own regenerable outputs. Deliberately NOT touched:
         #   • host DerivedDataCache / Intermediate / Binaries — a persistent
         #     shared-for-speed cache; deleting it forces a full shader/host recompile
         #     every run (§ guardrail: never prune a cache other runs rely on for speed).
-        #   • the host Plugins\UnrealMCP junction — owned by the self-heal step above.
         #   • Docker — these UE jobs use no containers, and the daemon is shared with
         #     the context-engine / ai-pipeline runners' ACTIVE jobs.
         # Best-effort: a cleanup failure must NEVER red an otherwise-green run.
@@ -391,12 +390,9 @@ jobs:
           # 2. This job's UBT logs under RUNNER_TEMP.
           Get-ChildItem -Path $env:RUNNER_TEMP -Filter 'UBT-*.log' -File -ErrorAction SilentlyContinue |
             Remove-Item -Force -ErrorAction SilentlyContinue
-          # 3. Host project transient logs/crashes ONLY (unbounded growers; NOT the
-          #    DDC / Intermediate / Binaries speed caches). Only while this job held the
-          #    machine-wide UE lock: otherwise the host may be another job's live editor.
           Write-Host "Per-run cleanup done (DDC / Intermediate / Binaries and Docker intentionally preserved)."
 
-      # Last step, so everything from BuildPlugin through the host-log cleanup stays inside the
+      # Last step, so everything from BuildPlugin through the cleanup stays inside the
       # machine-wide UE lock. A no-op when Acquire never ran; never fails the job.
       - name: Release machine-wide UE lock
         if: always()
@@ -482,8 +478,11 @@ jobs:
               Write-Host "chain: removed stale generated $p"
             }
           }
-          $feed = Join-Path $env:GITHUB_WORKSPACE '.artifacts'
-          if (Test-Path -LiteralPath $feed) { Remove-Item -LiteralPath $feed -Recurse -Force; Write-Host "chain: removed stale $feed" }
+          # Only the chain's own feeds: .artifacts/tests holds the suite's build caches and the smoke host.
+          foreach ($name in 'nuget', 'npm', 'server', 'unity-dll', 'nuget-cache') {
+            $feed = Join-Path $env:GITHUB_WORKSPACE ".artifacts/$name"
+            if (Test-Path -LiteralPath $feed) { Remove-Item -LiteralPath $feed -Recurse -Force; Write-Host "chain: removed stale $feed" }
+          }
 
       # Under a lock: clone ReflectorNet / MCP-Plugin-dotnet / GameDev-MCP-Server at the lock
       # shas, build them with the .NET 9 SDK set up above, force the
@@ -506,27 +505,15 @@ jobs:
           if (-not (Test-Path $bridge)) { throw "bridge binary not found at $bridge" }
           echo "UNREAL_MCP_BRIDGE_PATH=$bridge" >> $env:GITHUB_ENV
 
-      # The host project is tests/smoke-host, synced into a folder that survives jobs on this runner
-      # slot, so its Binaries / Intermediate / DerivedDataCache stay warm. Windows keeps it under the
-      # short C:\wt (MAX_PATH, as extension_suite.py); elsewhere it sits next to the checkout in _work.
-      # Only changed template files are written: an unchanged Target.cs keeps UBT's caches valid.
+      # The host project is tests/smoke-host, synced (changed files only) by scripts/smoke_host.py into
+      # a folder beside the suite's build caches that survives jobs on this runner slot, so its
+      # Binaries / Intermediate / DerivedDataCache stay warm.
       - name: Prepare smoke host project (tests/smoke-host)
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $key = ([BitConverter]::ToString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($env:GITHUB_WORKSPACE))) -replace '-', '').Substring(0, 8).ToLowerInvariant()
-          $root = if ($IsWindows) { Join-Path "$env:SystemDrive\wt\unreal-smoke" $key } else { Join-Path (Split-Path -Parent $env:GITHUB_WORKSPACE) 'smoke-host' }
-          $hostDir = Join-Path $root 'UnrealTestProject'
-          $template = Join-Path $env:GITHUB_WORKSPACE 'tests/smoke-host'
-          Get-ChildItem -LiteralPath $template -Recurse -File -Force | ForEach-Object {
-            $target = Join-Path $hostDir ([IO.Path]::GetRelativePath($template, $_.FullName))
-            $same = (Test-Path -LiteralPath $target) -and ((Get-FileHash -LiteralPath $target).Hash -eq (Get-FileHash -LiteralPath $_.FullName).Hash)
-            if (-not $same) {
-              New-Item -ItemType Directory -Force -Path (Split-Path -Parent $target) | Out-Null
-              Copy-Item -LiteralPath $_.FullName -Destination $target -Force
-            }
-          }
-          $uproject = Join-Path $hostDir 'UnrealTestProject.uproject'
+          $uproject = (& $env:CHAIN_PY scripts/smoke_host.py | Select-Object -Last 1)
+          if ($LASTEXITCODE -ne 0) { throw "smoke_host.py failed ($LASTEXITCODE)" }
           "HOST_UPROJECT=$uproject" >> $env:GITHUB_ENV
           Write-Host "Smoke host project: $uproject"
 
@@ -564,8 +551,6 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $editorCmd = $env:UE_EDITOR_CMD
-          $py = $env:CHAIN_PY
           # --mode custom downloads the public gamedev-mcp-server release, runs it,
           # launches the editor in Custom mode, and asserts the tool battery. The
           # bridge override (UNREAL_MCP_BRIDGE_PATH, set above) is inherited by the
@@ -584,7 +569,7 @@ jobs:
           # MCP-level dump of tools/list + the battery it runs (tests/chain-fixtures/battery.json, kept
           # equal to the script's SMOKE_BATTERY) to RUNNER_TEMP — never under the host project.
           $record = Join-Path $env:RUNNER_TEMP 'chain-record/raw.json'
-          & $py scripts/connection_smoke.py --mode custom --project "$env:HOST_UPROJECT" --ue "$editorCmd" --server-port 18080 --timeout 240 --record-out "$record" --battery tests/chain-fixtures/battery.json
+          & $env:CHAIN_PY scripts/connection_smoke.py --mode custom --project "$env:HOST_UPROJECT" --ue "$env:UE_EDITOR_CMD" --server-port 18080 --timeout 240 --record-out "$record" --battery tests/chain-fixtures/battery.json
           if ($LASTEXITCODE -ne 0) { throw "connection + tool smoke FAILED (exit $LASTEXITCODE)" }
 
       # T2 chain fixture (docs/chain-fixtures.md §F5): canonicalise the smoke's raw dump and diff it against
@@ -702,7 +687,7 @@ jobs:
               Remove-Item -LiteralPath $p -Force -ErrorAction SilentlyContinue
             }
           }
-          Remove-Tree (Join-Path $env:GITHUB_WORKSPACE '.artifacts')
+          foreach ($name in 'nuget', 'npm', 'server', 'unity-dll', 'nuget-cache') { Remove-Tree (Join-Path $env:GITHUB_WORKSPACE ".artifacts/$name") }
           Remove-Tree (Join-Path $env:RUNNER_TEMP 'chain')
           # T2 chain record: the smoke's raw dump and the canonical/diff review files.
           Remove-Tree (Join-Path $env:RUNNER_TEMP 'chain-record')
