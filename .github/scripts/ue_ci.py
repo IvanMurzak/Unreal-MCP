@@ -23,6 +23,7 @@ sys.path[:0] = [str(Path(__file__).resolve().parent), str(ROOT / "scripts"), str
 
 from chain_feed import NUGET_CONFIG_NAME, TARGETS_NAME, _is_ours  # noqa: E402  (vendored, same folder)
 from publish import ALL_RUNTIMES as RIDS, zip_dir  # noqa: E402  (bridge/publish.py)
+import ue_json  # noqa: E402  (scripts/)
 import ue_machine_lock  # noqa: E402  (scripts/)
 from ue_env import IS_WINDOWS, add_job_env, link_path, remove_link  # noqa: E402  (same folder)
 
@@ -72,7 +73,7 @@ def count_files(folder: Path) -> int:
 
 
 def module_names(uplugin: Path) -> list:
-    return [m.get("Name") for m in json.loads(uplugin.read_text(encoding="utf-8-sig")).get("Modules") or []]
+    return [m.get("Name") for m in ue_json.read(uplugin).get("Modules") or []]
 
 
 def build_plugin(package: Path) -> None:
@@ -334,7 +335,7 @@ def stage_bridge(_args) -> None:
 
 def source_zip(args) -> None:
     """The SOURCE install asset unreal-mcp-plugin-source-<version>.zip (CLI/Fab path, test-free, no EngineVersion pin)."""
-    descriptor = json.loads((PLUGIN / "UnrealMCP.uplugin").read_text(encoding="utf-8-sig"))
+    descriptor = ue_json.read(PLUGIN / "UnrealMCP.uplugin")
     if str(descriptor.get("EngineVersion") or "").strip():
         raise StepError(f"The distributed source descriptor must not pin EngineVersion (found '{descriptor['EngineVersion']}').")
     if "UnrealMcpEditorTests" in module_names(PLUGIN / "UnrealMCP.uplugin"):

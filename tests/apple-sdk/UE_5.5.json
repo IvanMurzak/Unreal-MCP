@@ -1,0 +1,14 @@
+{
+	// Xcode versions
+	"MainVersion": "15.2",
+	"MinVersion": "15.2.0",
+	"MaxVersion": "16.9.0",
+	// !!!
+	// NOTE: If you update the MaxVersion, double check the AppleVersionToLLVMVersion array below!!!
+	// !!!
+	// Version mapping can be found at https://en.wikipedia.org/wiki/Xcode#Toolchain_versions
+	"AppleVersionToLLVMVersions": [
+		"15.0.0-16.0.0", // Xcode 15.0 -> LLVM 16.0
+		"16.0.0-17.0.6", // Xcode 16.0 -> LLVM 17.0.6
+	],
+}

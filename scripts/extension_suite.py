@@ -19,6 +19,7 @@ import time
 
 from extension_release import components as extensions
 from ue_machine_lock import machine_lock
+import ue_json
 
 ROOT = Path(__file__).resolve().parents[1]
 EXCLUDED = {"Binaries", "Intermediate", "Saved", "DerivedDataCache", ".git", ".vs", "node_modules"}
@@ -79,7 +80,7 @@ def copy_plugin(source: Path, dest: Path, strict: bool = False, *, core_tests: b
         expected.add(rel)
         data = file.read_bytes()
         if core_tests and file.name == "UnrealMCP.uplugin":
-            descriptor = json.loads(data.decode("utf-8-sig"))
+            descriptor = ue_json.loads(data.decode("utf-8-sig"))
             descriptor["Modules"].append({"Name": "UnrealMcpEditorTests", "Type": "Editor", "LoadingPhase": "Default"})
             data = (json.dumps(descriptor, indent=2) + "\n").encode("utf-8")
         if strict and file.suffix == ".cs" and file.name.endswith(".Build.cs"):
@@ -100,7 +101,7 @@ def copy_plugin(source: Path, dest: Path, strict: bool = False, *, core_tests: b
 
 def prepare(engine: Path, profile: str, selected: list[str], output: Path, *, strict: bool = False,
             core_tests: bool = False) -> Path:
-    version = json.loads((engine / "Engine/Build/Build.version").read_text(encoding="utf-8-sig"))
+    version = ue_json.read(engine / "Engine/Build/Build.version")
     engine_key = f"UE-{version['MajorVersion']}.{version['MinorVersion']}-" + hashlib.sha256(str(engine).encode()).hexdigest()[:8]
     base = output / engine_key / profile
     base.mkdir(parents=True, exist_ok=True)

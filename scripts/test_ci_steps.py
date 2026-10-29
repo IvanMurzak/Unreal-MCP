@@ -1,4 +1,4 @@
-"""Tests for the CI step scripts: .github/scripts/ue_ci.py, .github/scripts/ue_env.py, scripts/ue_machine_lock.py."""
+"""Tests for the CI step scripts: .github/scripts/ue_ci.py, .github/scripts/ue_env.py, scripts/ue_machine_lock.py, scripts/ue_json.py."""
 from __future__ import annotations
 
 import importlib.util
@@ -15,6 +15,7 @@ from unittest import mock
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
+APPLE_SDK = ROOT / "tests/apple-sdk"
 
 
 def load(name: str, path: Path):
@@ -26,6 +27,7 @@ def load(name: str, path: Path):
 
 ci = load("ue_ci", ROOT / ".github/scripts/ue_ci.py")
 ue_env = load("ue_env", ROOT / ".github/scripts/ue_env.py")
+import ue_json  # noqa: E402
 import ue_machine_lock as lock  # noqa: E402  (scripts/ is on sys.path under `unittest discover -s scripts`)
 
 
@@ -220,6 +222,29 @@ class UeEnvTests(unittest.TestCase):
             with self.assertRaises(SystemExit):  # not an engine's Python
                 ue_env.engine_root("5.7")
 
+    @staticmethod
+    def engine_with_apple_sdk(folder: str, version: str) -> Path:
+        """An engine root holding an excerpt of that UE version's real Engine/Config/Apple/Apple_SDK.json."""
+        sdk = Path(folder) / "Engine/Config/Apple/Apple_SDK.json"
+        sdk.parent.mkdir(parents=True)
+        sdk.write_bytes((APPLE_SDK / f"UE_{version}.json").read_bytes())
+        return Path(folder)
+
+    def test_xcode_range_reads_every_engines_apple_sdk_json(self):
+        # UE 5.5's file is JSONC (comments, trailing commas); 5.6+ hide comments in "//N" keys.
+        expected = {"5.5": "16.9.0", "5.6": "16.9.0", "5.7": "26.9.0", "5.8": "27.9.0"}
+        for version, high in expected.items():
+            with self.subTest(version=version), tempfile.TemporaryDirectory() as folder:
+                root = self.engine_with_apple_sdk(folder, version)
+                self.assertEqual(ue_env.xcode_range(root), ((15, 2, 0), ue_env.xcode3(high)))
+
+    def test_developer_dir_keeps_a_selected_xcode_in_ue55_range(self):
+        selected = subprocess.CompletedProcess([], 0, stdout="/Applications/Xcode.app/Contents/Developer\n")
+        with tempfile.TemporaryDirectory() as folder, \
+                mock.patch.object(ue_env.subprocess, "run", return_value=selected), \
+                mock.patch.object(ue_env, "xcode_version", return_value=(16, 2, 0)):
+            self.assertIsNone(ue_env.developer_dir(self.engine_with_apple_sdk(folder, "5.5"), "5.5"))
+
     @unittest.skipIf(os.name == "nt", "a junction needs a Windows host")
     def test_link_python_and_remove_link_never_touch_the_target(self):
         with tempfile.TemporaryDirectory() as folder, mock.patch.dict(os.environ, {"RUNNER_TEMP": folder}):
@@ -229,6 +254,34 @@ class UeEnvTests(unittest.TestCase):
             ue_env.remove_link(ue_env.link_path())
             self.assertFalse(os.path.lexists(ue_env.link_path()))
             self.assertTrue(Path(sys.executable).exists())
+
+
+class UeJsonTests(unittest.TestCase):
+    def test_strict_json_is_unchanged(self):
+        text = json.dumps({"a": [1, 2.5, None, True], "b": {"c": "d"}})
+        self.assertEqual(ue_json.loads(text), json.loads(text))
+
+    def test_comments_and_trailing_commas_are_removed(self):
+        text = '{\n  // line\n  "a": [1, 2, /* block,\n  comment */ 3,],\n  "b": {"c": 1,}, // after\n}'
+        self.assertEqual(ue_json.loads(text), {"a": [1, 2, 3], "b": {"c": 1}})
+
+    def test_comment_between_a_trailing_comma_and_the_bracket(self):
+        self.assertEqual(ue_json.loads('["x", // why\n]'), ["x"])
+
+    def test_comment_markers_and_commas_inside_strings_are_kept(self):
+        text = r'{"//1": "see https://example.com/a//b", "s": "/* not a comment */", "q": "a \"// q\",]", "e": "x\\"}'
+        self.assertEqual(ue_json.loads(text), {"//1": "see https://example.com/a//b", "s": "/* not a comment */",
+                                               "q": 'a "// q",]', "e": "x\\"})
+
+    def test_a_block_comment_does_not_join_tokens(self):
+        with self.assertRaises(json.JSONDecodeError):
+            ue_json.loads("[1/**/2]")
+
+    def test_uplugin_module_names_accept_a_bom_and_trailing_commas(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "UnrealMCP.uplugin"
+            path.write_bytes(b'\xef\xbb\xbf{"Modules": [{"Name": "A"},],}')
+            self.assertEqual(ci.module_names(path), ["A"])
 
 
 class MachineLockCliTests(unittest.TestCase):
