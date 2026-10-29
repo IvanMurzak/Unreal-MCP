@@ -165,7 +165,14 @@ public:
 void FUnrealMcpRqlAdaptersSpec::Define()
 {
 	BeforeEach([this]() { CleanupWorld(); MakeFixture(); });
-	AfterEach([this]() { CleanupWorld(); DropFixture(); });
+	AfterEach([this]()
+	{
+		CleanupWorld();
+		DropFixture();
+		// The undo buffer would keep the dropped fixture (and anything a spec mutated undoably) alive for later specs.
+		if (GEditor)
+			GEditor->ResetTransaction(FText::FromString(TEXT("RQL adapter specs")));
+	});
 
 	Describe("math structs", [this]()
 	{
