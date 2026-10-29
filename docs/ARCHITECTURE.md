@@ -831,8 +831,8 @@ all are handled in-repo (issues #139/#187), and submission itself remains an ope
    BuildPlugin asset are both cut from the same staged `Source/ThirdParty/UnrealMcpBridge/<rid>/` payloads.
 2. **No shipped test/automation module.** Fab review flags shipped test modules, so the DISTRIBUTED
    `UnrealMCP.uplugin` omits `UnrealMcpEditorTests`. PR/dev CI still runs the `UnrealMcp.` Automation
-   specs by transiently re-adding the module via `commands/test_module_uplugin.py` (idempotent
-   add/remove around the Automation BuildPlugin), then reverting — the committed/distributed descriptor
+   specs by adding the module only to `scripts/extension_suite.py`'s isolated build copy (by hand:
+   `commands/test_module_uplugin.py`, idempotent add/remove) — the committed/distributed descriptor
    never carries the test module. `BuildPlugin -Rocket` on the distributed descriptor stays green.
 3. **FilterPlugin hygiene.** `Config/FilterPlugin.ini` ships the `Source/ThirdParty/UnrealMcpBridge/...`
    tree; no source uses hardcoded/absolute paths (resolution is plugin-base-dir relative, §6.1); all

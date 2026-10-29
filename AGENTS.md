@@ -53,7 +53,7 @@ Consumers exclude the plugin from packaged games with a `TargetDenyList: ["Game"
 | `commands/` | Repo Python tooling (stdlib, Python 3.9+; tests in `scripts/test_commands.py`): `bump_version.py`, `release_github.py`, `test_module_uplugin.py` |
 | `scripts/` | Python run by CI and locally: smokes (`connection_smoke.py`, `server_smoke.py`, `window_smoke.py`), the extension suite and its E2E runner, the machine-wide UE lock (`ue_machine_lock.py`); `test_*.py` unit tests |
 | `tests/chain-fixtures/` | Byte-compared T2 chain fixtures (LF-pinned in `.gitattributes`) |
-| `.github/` | Workflows, the `actions/ue-env` bootstrap and CI step scripts (`.github/scripts/ue_ci.py`, `ue_env.py`; `chain_*.py` are vendored). No PowerShell: every step is Python |
+| `.github/` | Workflows, the `actions/ue-env` bootstrap and CI step scripts (`.github/scripts/ue_ci.py`, `ue_env.py`; `chain_*.py` are vendored). Every self-hosted UE step is Python, never `pwsh` (only the vendored chain resolver on hosted `windows-latest` uses it) |
 | `docs/` | Design, release and operator docs; images in `docs/img/` |
 | `build/` | macOS signing entitlements |
 

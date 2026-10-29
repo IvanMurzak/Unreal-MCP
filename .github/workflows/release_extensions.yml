@@ -86,9 +86,7 @@ jobs:
       - name: Build CLI for live E2E
         working-directory: cli
         run: npm ci && npm run build
-      # This runner's engine install (any OS) and the chain python (UE's bundled Python behind a
-      # space-free link): exports UE_ROOT, UE_PLATFORM, UE_RUNUAT, UE_BUILD, UE_EDITOR_CMD and CHAIN_PY,
-      # which runs every later step. See .github/scripts/ue_env.py.
+      # This runner's engine and its bundled Python as CHAIN_PY, which runs every later step (ue_env.py).
       - name: Resolve UE install + chain python
         uses: ./.github/actions/ue-env
         with:
@@ -102,13 +100,10 @@ jobs:
           name: extension-suite-${{ matrix.ue }}-${{ matrix.os }}
           path: .artifacts/suite-result.json
           if-no-files-found: error
-      - name: Release machine-wide UE lock
+      # Always the last step: cleanup, the lock release and the chain python link (`teardown` in ue_ci.py).
+      - name: Teardown (cleanup, release the machine-wide UE lock)
         if: always() && env.CHAIN_PY != ''
-        run: ${{ env.CHAIN_PY }} scripts/ue_machine_lock.py release
-      # The very last step: every step above runs through this link. Removes the LINK only, never the engine.
-      - name: Remove the chain python link
-        if: always() && env.CHAIN_PY != ''
-        run: ${{ env.CHAIN_PY }} .github/scripts/ue_env.py --remove-link
+        run: ${{ env.CHAIN_PY }} .github/scripts/ue_ci.py teardown
 
   publish:
     needs: [validate, test]

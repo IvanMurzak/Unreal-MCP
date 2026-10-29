@@ -36,8 +36,10 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from typing import Iterator, Optional
 
@@ -297,32 +299,31 @@ def _windows_processes() -> dict:
     return table
 
 
+def _posix_processes() -> dict:
+    """pid -> (parent pid, executable name), from one `ps` listing."""
+    table = {}
+    listing = subprocess.run(["ps", "-A", "-o", "pid=", "-o", "ppid=", "-o", "comm="], capture_output=True, text=True).stdout
+    for line in listing.splitlines():
+        parts = line.split(None, 2)
+        if len(parts) == 3 and parts[0].isdigit() and parts[1].isdigit():
+            table[int(parts[0])] = (int(parts[1]), os.path.basename(parts[2]))
+    return table
+
+
 def find_runner_worker() -> int:
     """Walk up from this process to the job's Runner.Worker, whose exit ends the job; 0 if not found."""
     try:
-        pid = os.getpid()
-        table = _windows_processes() if IS_WINDOWS else None
-        for _ in range(12):
-            if pid <= 1:
-                break
-            if IS_WINDOWS:
-                if pid not in table:
-                    break
-                parent, name = table[pid]
-                if name.lower() == "runner.worker.exe":
-                    return pid
-                pid = parent
-                continue
-            line = subprocess.run(["ps", "-o", "ppid=", "-o", "comm=", "-p", str(pid)],
-                                  capture_output=True, text=True).stdout.strip()
-            parts = line.split(None, 1)
-            if len(parts) != 2 or not parts[0].isdigit():
-                break
-            if os.path.basename(parts[1]) == "Runner.Worker":
-                return pid
-            pid = int(parts[0])
+        table = _windows_processes() if IS_WINDOWS else _posix_processes()
     except OSError:
-        pass
+        return 0
+    pid = os.getpid()
+    for _ in range(12):
+        if pid <= 1 or pid not in table:
+            break
+        parent, name = table[pid]
+        if name.lower() in ("runner.worker", "runner.worker.exe"):
+            return pid
+        pid = parent
     return 0
 
 
@@ -386,7 +387,7 @@ def hold(state: State, lock_path: Path, wait_minutes: float, max_hold_minutes: f
             state.write_log(f"waiting for the machine-wide UE lock {lock_path} (waited {(now - started) / 60:.1f} of "
                             f"{wait_minutes:g} min); held by: {read_owner(lock_path)}")
             next_report = now + 60
-        time.sleep(5)
+        time.sleep(1)
 
     held_since = time.monotonic()
     why = "holder stopped"
@@ -405,7 +406,7 @@ def hold(state: State, lock_path: Path, wait_minutes: float, max_hold_minutes: f
             if time.monotonic() - held_since >= max_hold_minutes * 60:
                 why = f"max hold of {max_hold_minutes:g} min reached"
                 break
-            time.sleep(2)
+            time.sleep(0.5)
     finally:
         record_owner(lock_path, "")
         unlock(handle)
@@ -415,7 +416,6 @@ def hold(state: State, lock_path: Path, wait_minutes: float, max_hold_minutes: f
 
 def acquire(state: State, lock_path: Path, wait_minutes: float, max_hold_minutes: float, watch_pid: int) -> int:
     if state.folder.exists():
-        import shutil
         shutil.rmtree(state.folder)
     state.folder.mkdir(parents=True)
     watch = watch_pid if watch_pid > 0 else find_runner_worker()
@@ -461,7 +461,7 @@ def acquire(state: State, lock_path: Path, wait_minutes: float, max_hold_minutes
             holder.kill()
             print(f"::error::ue-machine-lock: the holder neither acquired nor gave up within {wait_minutes + 5:g} min", flush=True)
             return 1
-        time.sleep(3)
+        time.sleep(0.5)
 
 
 def release(state: State) -> int:
@@ -474,12 +474,12 @@ def release(state: State) -> int:
     _write_atomic(state.release, "release")
     # Only this job's own holder is waited on or killed: a live process with the same pid but another
     # start time is an unrelated process that reused the pid of an exited holder.
-    is_holder = pid_alive(holder_pid) and bool(identity) and process_identity(holder_pid) == identity
-    if is_holder:
+    # Identity is checked once: no pid is reused within the 60 s wait.
+    if pid_alive(holder_pid) and bool(identity) and process_identity(holder_pid) == identity:
         deadline = time.monotonic() + 60
-        while pid_alive(holder_pid) and process_identity(holder_pid) == identity and time.monotonic() < deadline:
-            time.sleep(0.5)
-        if pid_alive(holder_pid) and process_identity(holder_pid) == identity:
+        while pid_alive(holder_pid) and time.monotonic() < deadline:
+            time.sleep(0.2)
+        if pid_alive(holder_pid):
             print(f"ue-machine-lock: holder pid {holder_pid} did not exit within 60 s; killing it (the OS releases its lock)")
             kill_pid(holder_pid)
     elif state.acquired.exists() and not state.failed.exists():
@@ -504,7 +504,7 @@ def main(argv: Optional[list] = None) -> int:
                         help="the process whose exit releases the lock; 0 makes acquire resolve the job's Runner.Worker")
     args = parser.parse_args(argv)
     lock_path = args.lock_path or default_lock_path()
-    state = State(args.state_dir or Path(os.environ.get("RUNNER_TEMP") or __import__("tempfile").gettempdir()) / "ue-machine-lock")
+    state = State(args.state_dir or Path(os.environ.get("RUNNER_TEMP") or tempfile.gettempdir()) / "ue-machine-lock")
     if args.action == "hold":
         try:
             return hold(state, lock_path, args.wait_minutes, args.max_hold_minutes, args.watch_pid)

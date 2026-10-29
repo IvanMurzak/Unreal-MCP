@@ -234,9 +234,9 @@ an entirely manual operator step (no CI job submits — see the checklist at the
   `RuntimeDependencies`, and resolved from both paths (`ComposeBundledBridgeCandidates`). So an
   Epic-compiled build resolves the sidecar even though `Binaries/` was stripped.
 - **C2 — no shipped test module.** The DISTRIBUTED `UnrealMCP.uplugin` omits
-  `UnrealMcpEditorTests` (Fab flags shipped test modules). PR/dev CI re-adds it
-  transiently via `commands/test_module_uplugin.py` around the Automation BuildPlugin,
-  then reverts — so `BuildPlugin -Rocket` on the distributed descriptor is test-free +
+  `UnrealMcpEditorTests` (Fab flags shipped test modules). PR/dev CI adds it only
+  to the suite's isolated build copy (`scripts/extension_suite.py`; by hand:
+  `commands/test_module_uplugin.py`), never to the checkout — so `BuildPlugin -Rocket` on the distributed descriptor is test-free +
   green, while the `UnrealMcp.` specs still run on every PR. **Never commit the
   descriptor with the test module added.**
 - **C3 — FilterPlugin hygiene.** `Config/FilterPlugin.ini` ships the

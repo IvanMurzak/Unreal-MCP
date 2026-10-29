@@ -306,9 +306,7 @@ jobs:
           # GITHUB_TOKEN in the worktree's .git config after checkout.
           persist-credentials: false
           clean: false
-      # This runner's engine install (any OS) and the chain python (UE's bundled Python behind a
-      # space-free link): exports UE_ROOT, UE_PLATFORM, UE_RUNUAT, UE_BUILD, UE_EDITOR_CMD and CHAIN_PY,
-      # which runs every later step. See .github/scripts/ue_env.py.
+      # This runner's engine and its bundled Python as CHAIN_PY, which runs every later step (ue_env.py).
       - name: Resolve UE install + chain python
         uses: ./.github/actions/ue-env
         with:
@@ -342,29 +340,10 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-      - name: Cleanup this job's build outputs (self-hosted disk hygiene)
-        # Self-hosted disk hygiene. This runner is SHARED with other repos' jobs and
-        # its RUNNER_TEMP is NOT auto-pruned after a job, so per-run BuildPlugin
-        # packages and logs accumulate across
-        # runs (a contributor to disk-full spikes during heavy concurrent CI). Remove
-        # ONLY THIS job's own regenerable outputs. Deliberately NOT touched:
-        #   • host DerivedDataCache / Intermediate / Binaries — a persistent
-        #     shared-for-speed cache; deleting it forces a full shader/host recompile
-        #     every run (§ guardrail: never prune a cache other runs rely on for speed).
-        #   • Docker — these UE jobs use no containers, and the daemon is shared with
-        #     the context-engine / ai-pipeline runners' ACTIVE jobs.
-        # Best-effort: a cleanup failure must NEVER red an otherwise-green run.
+      # Always the last step: cleanup, the lock release and the chain python link (`teardown` in ue_ci.py).
+      - name: Teardown (cleanup, release the machine-wide UE lock)
         if: always() && env.CHAIN_PY != ''
-        run: ${{ env.CHAIN_PY }} .github/scripts/ue_ci.py cleanup --job plugin
-
-      # Last step, so the whole UE portion stays inside the machine-wide UE lock (#293).
-      - name: Release machine-wide UE lock
-        if: always() && env.CHAIN_PY != ''
-        run: ${{ env.CHAIN_PY }} scripts/ue_machine_lock.py release
-      # The very last step: every step above runs through this link. Removes the LINK only, never the engine.
-      - name: Remove the chain python link
-        if: always() && env.CHAIN_PY != ''
-        run: ${{ env.CHAIN_PY }} .github/scripts/ue_env.py --remove-link
+        run: ${{ env.CHAIN_PY }} .github/scripts/ue_ci.py teardown
 
   # ── ARTIFACT BUILD — SIGNED BRIDGE BUNDLE (runs on a real release OR a
   #    dry-run rehearsal). The self-contained bridge is built + code-signed per
@@ -501,20 +480,7 @@ jobs:
       # zip job) AND the per-RID release zips (kept as debugging /
       # UNREAL_MCP_BRIDGE_PATH artifacts on the GitHub Release).
       - name: Zip signed bridge dirs (release artifacts)
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd bridge/publish
-          for rid in osx-arm64 osx-x64 linux-x64; do
-            if [ -d "$rid" ]; then
-              echo "Zipping ${rid}..."
-              (cd "$rid" && zip -r "../unreal-mcp-bridge-${rid}.zip" .)
-            else
-              echo "::error::Expected publish dir ${rid} not found"
-              exit 1
-            fi
-          done
-          ls -la *.zip
+        run: python3 bridge/publish.py --zip-only --platforms osx-arm64 osx-x64 linux-x64
       - name: Upload signed bridge staging dirs (osx + linux)
         uses: actions/upload-artifact@v7
         with:
@@ -580,7 +546,7 @@ jobs:
           cache-dependencies: false
 
       - name: Zip signed bridge dir (release artifact)
-        run: python .github/scripts/ue_ci.py zip-bridge --rid win-x64
+        run: python bridge/publish.py --zip-only --platforms win-x64
       - name: Upload signed bridge staging dir (win)
         uses: actions/upload-artifact@v7
         with:
@@ -629,9 +595,7 @@ jobs:
           # GITHUB_TOKEN in the worktree's .git config after checkout.
           persist-credentials: false
           clean: false
-      # This runner's engine install (any OS) and the chain python (UE's bundled Python behind a
-      # space-free link): exports UE_ROOT, UE_PLATFORM, UE_RUNUAT, UE_BUILD, UE_EDITOR_CMD and CHAIN_PY,
-      # which runs every later step. See .github/scripts/ue_env.py.
+      # This runner's engine and its bundled Python as CHAIN_PY, which runs every later step (ue_env.py).
       - name: Resolve UE install + chain python
         uses: ./.github/actions/ue-env
         with:
@@ -698,31 +662,10 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-      - name: Cleanup this job's build outputs (self-hosted disk hygiene)
-        # Self-hosted disk hygiene. The release packaging outputs are the LARGEST
-        # per-run artifacts on this shared runner (compiled BuildPlugin package +
-        # staged source package). RUNNER_TEMP is not auto-pruned after a job, so
-        # remove ONLY THIS job's own regenerable outputs here (the uploaded artifacts
-        # are already safely stored). This job builds no host project and touches no
-        # Docker, so neither the host DDC/Intermediate/Binaries speed cache nor the
-        # shared Docker daemon is relevant. Best-effort: never red a green run.
+      # Always the last step: cleanup, the lock release and the chain python link (`teardown` in ue_ci.py).
+      - name: Teardown (cleanup, release the machine-wide UE lock)
         if: always() && env.CHAIN_PY != ''
-        run: ${{ env.CHAIN_PY }} .github/scripts/ue_ci.py cleanup --job build-plugin-zip
-
-      # The staged bridge is gitignored and `clean: false` would hand it to the next job on this
-      # slot, where a PR plugin job would package it as a "bundled" bridge. Never let it leak.
-      - name: Clean staged bridge binaries (never leak to the next job on this slot)
-        if: always() && env.CHAIN_PY != ''
-        run: ${{ env.CHAIN_PY }} .github/scripts/ue_ci.py clean-staged-bridge
-
-      # Last step, so the BuildPlugin stays inside the machine-wide UE lock (#293).
-      - name: Release machine-wide UE lock
-        if: always() && env.CHAIN_PY != ''
-        run: ${{ env.CHAIN_PY }} scripts/ue_machine_lock.py release
-      # The very last step: every step above runs through this link. Removes the LINK only, never the engine.
-      - name: Remove the chain python link
-        if: always() && env.CHAIN_PY != ''
-        run: ${{ env.CHAIN_PY }} .github/scripts/ue_env.py --remove-link
+        run: ${{ env.CHAIN_PY }} .github/scripts/ue_ci.py teardown
 
   # ── SIGN (no external side effect — runs on dry runs too, so a missing
   #    MINISIGN_SECRET_KEY is caught by the rehearsal and BEFORE any publish). ─

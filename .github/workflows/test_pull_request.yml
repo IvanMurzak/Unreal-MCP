@@ -252,9 +252,7 @@ jobs:
           persist-credentials: false
           clean: false
 
-      # This runner's engine install (any OS) and the chain python (UE's bundled Python behind a
-      # space-free link): exports UE_ROOT, UE_PLATFORM, UE_RUNUAT, UE_BUILD, UE_EDITOR_CMD and CHAIN_PY,
-      # which runs every later step. See .github/scripts/ue_env.py.
+      # This runner's engine and its bundled Python as CHAIN_PY, which runs every later step (ue_env.py).
       - name: Resolve UE install + chain python
         uses: ./.github/actions/ue-env
         with:
@@ -276,7 +274,7 @@ jobs:
       # the always() release step that ends this job.
       - name: Acquire machine-wide UE lock
         id: ue_lock
-        run: ${{ env.CHAIN_PY }} scripts/ue_machine_lock.py acquire --wait-minutes 60
+        run: ${{ env.CHAIN_PY }} scripts/ue_machine_lock.py acquire
 
       - name: BuildPlugin (marketplace packaging validation — DISTRIBUTED, test-free)
         run: ${{ env.CHAIN_PY }} .github/scripts/ue_ci.py build-plugin-dist
@@ -314,30 +312,10 @@ jobs:
           # A few-KB JSON leg record; whoever dispatched the chain run collects it right after the run.
           retention-days: 1
 
-      - name: Cleanup this job's build outputs (self-hosted disk hygiene)
-        # Self-hosted disk hygiene. This runner is SHARED with other repos' jobs and
-        # its RUNNER_TEMP is NOT auto-pruned after a job, so per-run BuildPlugin
-        # packages and logs accumulate across
-        # runs (a contributor to disk-full spikes during heavy concurrent CI). Remove
-        # ONLY THIS job's own regenerable outputs. Deliberately NOT touched:
-        #   • host DerivedDataCache / Intermediate / Binaries — a persistent
-        #     shared-for-speed cache; deleting it forces a full shader/host recompile
-        #     every run (§ guardrail: never prune a cache other runs rely on for speed).
-        #   • Docker — these UE jobs use no containers, and the daemon is shared with
-        #     the context-engine / ai-pipeline runners' ACTIVE jobs.
-        # Best-effort: a cleanup failure must NEVER red an otherwise-green run.
+      # Always the last step: cleanup, the lock release and the chain python link (`teardown` in ue_ci.py).
+      - name: Teardown (cleanup, release the machine-wide UE lock)
         if: always() && env.CHAIN_PY != ''
-        run: ${{ env.CHAIN_PY }} .github/scripts/ue_ci.py cleanup --job plugin
-
-      # Last step, so everything from BuildPlugin through the cleanup stays inside the
-      # machine-wide UE lock. A no-op when Acquire never ran; never fails the job.
-      - name: Release machine-wide UE lock
-        if: always() && env.CHAIN_PY != ''
-        run: ${{ env.CHAIN_PY }} scripts/ue_machine_lock.py release
-      # The very last step: every step above runs through this link. Removes the LINK only, never the engine.
-      - name: Remove the chain python link
-        if: always() && env.CHAIN_PY != ''
-        run: ${{ env.CHAIN_PY }} .github/scripts/ue_env.py --remove-link
+        run: ${{ env.CHAIN_PY }} .github/scripts/ue_ci.py teardown
 
   # (d) connection + tool smoke — the live RELAY path the Automation specs do NOT
   # cover: a real MCP client -> gamedev-mcp-server -> sidecar -> plugin -> editor
@@ -432,7 +410,7 @@ jobs:
       # all machine-shared, so everything up to the release step stays inside the lock.
       - name: Acquire machine-wide UE lock
         id: ue_lock
-        run: ${{ env.CHAIN_PY }} scripts/ue_machine_lock.py acquire --wait-minutes 60
+        run: ${{ env.CHAIN_PY }} scripts/ue_machine_lock.py acquire
 
       # The host project already holds THIS PR's plugin source (smoke-host above copies only changed
       # files and keeps the plugin's Intermediate / Binaries), so this is an incremental editor build,
@@ -496,22 +474,8 @@ jobs:
           # A few-KB JSON leg record; whoever dispatched the chain run collects it right after the run.
           retention-days: 1
 
-      - name: Cleanup this job's build outputs (self-hosted disk hygiene)
-        # See the plugin job's cleanup note. Removes ONLY this job's own regenerable
-        # RUNNER_TEMP outputs + host transient logs; preserves the host
-        # DDC / Intermediate / Binaries speed cache (its Plugins/UnrealMCP included),
-        # and Docker (unused here; daemon shared with other runners). The host logs are
-        # removed only while this job held the machine-wide UE lock.
+      # Always the last step: cleanup, the lock release and the chain python link (`teardown` in ue_ci.py).
+      - name: Teardown (cleanup, release the machine-wide UE lock)
         if: always() && env.CHAIN_PY != ''
-        env:
-          UE_LOCK_OUTCOME: ${{ steps.ue_lock.outcome }}
-        run: ${{ env.CHAIN_PY }} .github/scripts/ue_ci.py cleanup --job connection-smoke --ue ${{ matrix.ue }}
+        run: ${{ env.CHAIN_PY }} .github/scripts/ue_ci.py teardown
 
-      # Last step, so the smoke's host build, editor and port stay inside the machine-wide UE lock.
-      - name: Release machine-wide UE lock
-        if: always() && env.CHAIN_PY != ''
-        run: ${{ env.CHAIN_PY }} scripts/ue_machine_lock.py release
-      # The very last step: every step above runs through this link. Removes the LINK only, never the engine.
-      - name: Remove the chain python link
-        if: always() && env.CHAIN_PY != ''
-        run: ${{ env.CHAIN_PY }} .github/scripts/ue_env.py --remove-link

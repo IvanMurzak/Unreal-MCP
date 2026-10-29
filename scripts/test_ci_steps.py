@@ -146,11 +146,12 @@ class CiStepTests(unittest.TestCase):
         """)
         with self.patch_repo(plugin), mock.patch.dict(os.environ, {"UE_RUNUAT": uat}):
             self.assertEqual(ci.main(["plugin-zip", "--version", "1.2.3"]), 0)
-        names = zipfile.ZipFile(plugin.parent / "dist/unreal-mcp-plugin-1.2.3.zip").namelist()
-        self.assertIn("UnrealMCP.uplugin", names)
-        self.assertIn("Binaries/ThirdParty/UnrealMcpBridge/win-x64/unreal-mcp-bridge", names)
+        archive = zipfile.ZipFile(plugin.parent / "dist/unreal-mcp-plugin-1.2.3.zip")
+        self.assertIn("UnrealMCP.uplugin", archive.namelist())
+        apphost = archive.getinfo("Binaries/ThirdParty/UnrealMcpBridge/osx-arm64/unreal-mcp-bridge")
+        self.assertTrue((apphost.external_attr >> 16) & 0o111, "the non-Windows apphost must stay executable")
 
-    def test_cleanup_keeps_the_chain_python_link_and_unrelated_files(self):
+    def test_teardown_cleans_releases_and_removes_the_link_last(self):
         repo = self.temp / "repo"
         (repo / ".artifacts/nuget").mkdir(parents=True)
         (repo / ".artifacts/tests").mkdir(parents=True)
@@ -162,17 +163,25 @@ class CiStepTests(unittest.TestCase):
             os.symlink(link_target, self.runner_temp / "chain-py")
         (self.runner_temp / "UnrealMCP-Package").mkdir()
         (self.runner_temp / "UBT-x.log").write_text("log")
-        with mock.patch.object(ci, "ROOT", repo):
-            self.assertEqual(ci.main(["cleanup", "--job", "connection-smoke", "--ue", "5.8"]), 0)
+        order = []
+        with mock.patch.object(ci, "ROOT", repo), mock.patch.dict(os.environ, {"GITHUB_JOB": "connection-smoke"}), \
+                mock.patch.object(ci.ue_machine_lock, "release", lambda state: order.append("release")), \
+                mock.patch.object(ci, "remove_link", lambda link: (order.append("link"), os.path.lexists(link) and os.unlink(link))):
+            self.assertEqual(ci.main(["teardown"]), 0)
+        self.assertEqual(order, ["release", "link"])
         self.assertFalse((repo / "nuget.config").exists())
         self.assertTrue((repo / "Directory.Build.targets").exists())
         self.assertFalse((repo / ".artifacts/nuget").exists())
         self.assertTrue((repo / ".artifacts/tests").exists())
         self.assertFalse((self.runner_temp / "UnrealMCP-Package").exists())
         self.assertFalse((self.runner_temp / "UBT-x.log").exists())
-        if os.name != "nt":
-            self.assertTrue(os.path.islink(self.runner_temp / "chain-py"))
+        self.assertFalse(os.path.lexists(self.runner_temp / "chain-py"))
         self.assertTrue(link_target.is_dir())
+
+    def test_teardown_never_fails_the_job(self):
+        with mock.patch.object(ci, "cleanup", mock.Mock(side_effect=OSError("disk"))), \
+                mock.patch.object(ci.ue_machine_lock, "release", mock.Mock(side_effect=RuntimeError("x"))):
+            self.assertEqual(ci.main(["teardown"]), 0)
 
     def test_fixture_diff_without_a_raw_dump_fails(self):
         self.assertEqual(ci.main(["fixture-diff", "--ue", "5.8"]), 1)
@@ -184,15 +193,18 @@ class UeEnvTests(unittest.TestCase):
         self.assertLess(ue_env.xcode3("16.4"), ue_env.xcode3("16.9.0"))
         self.assertIsNone(ue_env.xcode3("abc"))
 
-    def test_engine_root_override_and_version_check(self):
+    def test_engine_root_is_the_install_of_the_running_python(self):
         with tempfile.TemporaryDirectory() as folder:
-            build = Path(folder) / "Engine/Build/Build.version"
-            build.parent.mkdir(parents=True)
-            build.write_text(json.dumps({"MajorVersion": 5, "MinorVersion": 7}))
-            with mock.patch.dict(os.environ, {"UE_ROOT_5_7": folder, "UE_ROOT_5_8": folder}):
-                self.assertEqual(ue_env.engine_root("5.7"), Path(folder))
+            root = Path(folder) / "UE 5.7"
+            (root / "Engine/Build").mkdir(parents=True)
+            (root / "Engine/Build/Build.version").write_text(json.dumps({"MajorVersion": 5, "MinorVersion": 7}))
+            python = root / "Engine/Binaries/ThirdParty/Python3/Mac/bin/python3"
+            with mock.patch.object(sys, "executable", str(python)):
+                self.assertEqual(ue_env.engine_root("5.7"), root)
                 with self.assertRaises(SystemExit):
                     ue_env.engine_root("5.8")
+            with self.assertRaises(SystemExit):  # not an engine's Python
+                ue_env.engine_root("5.7")
 
     @unittest.skipIf(os.name == "nt", "a junction needs a Windows host")
     def test_link_python_and_remove_link_never_touch_the_target(self):

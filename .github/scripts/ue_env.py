@@ -3,13 +3,12 @@
 
 The self-hosted UE jobs run on any runner carrying the engine's `unreal-<major>-<minor>` label, whatever
 its OS (Windows, macOS or Linux). The `.github/actions/ue-env` action runs this script with the engine's
-own bundled Python; it turns the matrix version into the runner-local paths every later step uses, and
-appends them to GITHUB_ENV:
+own bundled Python, found in the engine the action picked (`UE_ROOT_<major>_<minor>` in the runner's own
+environment, else the Epic Games Launcher default; Linux has no default). It turns that engine into the
+runner-local paths every later step uses, and appends them to GITHUB_ENV:
 
-  UE_ROOT        the engine root. `UE_ROOT_<major>_<minor>` (e.g. UE_ROOT_5_8) in the runner's own
-                 environment wins; otherwise the Epic Games Launcher default for this OS (Windows
-                 `C:/Program Files/Epic Games/UE_x.y`, macOS `/Users/Shared/Epic Games/UE_x.y`). Linux
-                 has no launcher default, so a Linux runner must set UE_ROOT_<major>_<minor>.
+  UE_ROOT        the engine root: the install whose bundled Python runs this script, checked against the
+                 requested version.
   UE_PLATFORM    the UBT/UAT target platform of this host: Win64, Mac or Linux.
   UE_RUNUAT      RunUAT.bat (Windows) or RunUAT.sh.
   UE_BUILD       the host's UBT Build script (Build.bat, Mac/Build.sh, Linux/Build.sh).
@@ -37,6 +36,9 @@ import re
 import subprocess
 import sys
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
+from extension_suite import UE_BUILD, UE_EDITOR, UE_PLATFORM  # noqa: E402  (the one host-platform table)
+
 IS_WINDOWS = os.name == "nt"
 IS_MAC = sys.platform == "darwin"
 
@@ -56,30 +58,20 @@ def remove_link(link: Path) -> None:
 
 
 def add_job_env(name: str, value: str) -> None:
+    if any(c in value for c in "\r\n\0"):
+        raise SystemExit(f"refusing to export {name}: its value contains a line break or NUL")
     with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as handle:
         handle.write(f"{name}={value}\n")
     print(f"ue-env: {name}={value}", flush=True)
 
 
-def host() -> tuple:
-    """(UBT platform, default engine root format, Build script, editor binary) for this OS."""
-    if IS_WINDOWS:
-        return "Win64", "C:/Program Files/Epic Games/UE_{}", "Build.bat", "UnrealEditor-Cmd.exe"
-    if IS_MAC:
-        return "Mac", "/Users/Shared/Epic Games/UE_{}", "Mac/Build.sh", "UnrealEditor-Cmd"
-    return "Linux", None, "Linux/Build.sh", "UnrealEditor-Cmd"
-
-
 def engine_root(version: str) -> Path:
-    override = "UE_ROOT_" + version.replace(".", "_")
-    root = os.environ.get(override) or (host()[1] or "").format(version)
-    if not root:
-        raise SystemExit(f"ue-env: no default UE {version} location on this OS; set {override} in the runner's environment")
-    root = Path(root)
-    build = root / "Engine/Build/Build.version"
-    if not build.is_file():
-        raise SystemExit(f"ue-env: UE {version} not found at {root} (no Engine/Build/Build.version)")
-    installed = json.loads(build.read_text(encoding="utf-8-sig"))
+    """The install whose bundled Python runs this script (<root>/Engine/Binaries/ThirdParty/Python3/<platform>/...)."""
+    executable = Path(sys.executable).absolute()
+    root = next((p.parents[1] for p in executable.parents if p.name == "Binaries" and p.parent.name == "Engine"), None)
+    if root is None or not (root / "Engine/Build/Build.version").is_file():
+        raise SystemExit(f"ue-env: run me with the engine's bundled Python (the .github/actions/ue-env action); got {executable}")
+    installed = json.loads((root / "Engine/Build/Build.version").read_text(encoding="utf-8-sig"))
     found = f"{installed['MajorVersion']}.{installed['MinorVersion']}"
     if found != version:
         raise SystemExit(f"ue-env: {root} is UE {found}, not the requested {version}")
@@ -160,12 +152,10 @@ def link_python() -> str:
 
 
 def resolve(version: str) -> None:
-    platform, _, build_script, editor = host()
     root = engine_root(version)
     developer = developer_dir(root, version) if IS_MAC else None
     run_uat = root / f"Engine/Build/BatchFiles/RunUAT.{'bat' if IS_WINDOWS else 'sh'}"
-    ue_build = root / "Engine/Build/BatchFiles" / build_script
-    editor_cmd = root / "Engine/Binaries" / platform / editor
+    ue_build, editor_cmd = root / UE_BUILD, root / UE_EDITOR
     for required in (run_uat, ue_build, editor_cmd):
         if not required.is_file():
             raise SystemExit(f"ue-env: {required} not found")
@@ -175,7 +165,7 @@ def resolve(version: str) -> None:
     python = link_python()
 
     add_job_env("UE_ROOT", str(root))
-    add_job_env("UE_PLATFORM", platform)
+    add_job_env("UE_PLATFORM", UE_PLATFORM)
     add_job_env("UE_RUNUAT", str(run_uat))
     add_job_env("UE_BUILD", str(ue_build))
     add_job_env("UE_EDITOR_CMD", str(editor_cmd))

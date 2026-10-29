@@ -19,8 +19,9 @@ Usage
     python bridge/publish.py --platforms win-x64               # Release, only win-x64, zipped
     python bridge/publish.py --platforms osx-x64 osx-arm64 --no-zip   # publish dirs only (sign first)
     python bridge/publish.py --configuration Debug --platforms linux-x64
+    python bridge/publish.py --zip-only --platforms win-x64    # zip already-published (signed) dirs
 
---no-zip skips zipping (CI signs the raw apphost before re-zip).
+--no-zip skips zipping: CI signs the raw apphost, then zips it with --zip-only.
 
 Exit code 0 = every selected RID published (and zipped); 1 = an unknown RID or any publish failed
 (the remaining RIDs are still attempted).
@@ -62,14 +63,17 @@ def publish(runtime: str, configuration: str, output: Path) -> bool:
         return False
 
 
-def zip_dir(source: Path, zip_path: Path, runtime: str) -> None:
-    """Zip the contents of `source` (entries relative to it), preserving Unix permissions."""
+def zip_dir(source: Path, zip_path: Path, prefix: str = "") -> None:
+    """Zip the contents of `source` under `prefix`, preserving Unix permissions.
+
+    Every non-Windows apphost (`unreal-mcp-bridge`, no .exe) is marked executable, even when zipped on Windows.
+    """
+    zip_path.parent.mkdir(parents=True, exist_ok=True)
     if zip_path.exists():
         zip_path.unlink()
-    is_windows_rid = runtime.startswith("win-")
     with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         for path in sorted(source.rglob("*")):
-            arcname = path.relative_to(source).as_posix()
+            arcname = prefix + path.relative_to(source).as_posix()
             mode = stat.S_IMODE(path.stat().st_mode)
             if path.is_dir():
                 info = zipfile.ZipInfo(arcname + "/")
@@ -78,7 +82,7 @@ def zip_dir(source: Path, zip_path: Path, runtime: str) -> None:
                 continue
             info = zipfile.ZipInfo.from_file(path, arcname)
             # A Windows host reports no exec bit; force it on the non-Windows apphost.
-            if not is_windows_rid and path.name == APPHOST_NAME:
+            if path.name == APPHOST_NAME:
                 mode |= 0o755
             info.external_attr = (stat.S_IFREG | (mode or 0o644)) << 16
             info.create_system = 3  # Unix, so unzip/ditto honour external_attr
@@ -96,7 +100,9 @@ def main() -> int:
         "--platforms", "-p", nargs="+", default=[], metavar="RID",
         help=f"RIDs to publish (default: all of {' '.join(ALL_RUNTIMES)})",
     )
-    parser.add_argument("--no-zip", action="store_true", help="Publish dirs only (e.g. before signing)")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--no-zip", action="store_true", help="Publish dirs only (e.g. before signing)")
+    mode.add_argument("--zip-only", action="store_true", help="Only zip existing publish dirs (e.g. after signing)")
     args = parser.parse_args()
 
     unknown = [r for r in args.platforms if r not in ALL_RUNTIMES]
@@ -108,15 +114,21 @@ def main() -> int:
     PUBLISH_ROOT.mkdir(parents=True, exist_ok=True)
     failed = []
     for runtime in runtimes:
-        print(f"Publishing {runtime} ({args.configuration})...", flush=True)
+        if not args.zip_only:
+            print(f"Publishing {runtime} ({args.configuration})...", flush=True)
         output = PUBLISH_ROOT / runtime
-        if not publish(runtime, args.configuration, output):
+        if args.zip_only:
+            if not output.is_dir():
+                print(f"Expected publish dir {output} not found", file=sys.stderr)
+                failed.append(runtime)
+                continue
+        elif not publish(runtime, args.configuration, output):
             print(f"Failed to publish {runtime}", file=sys.stderr)
             failed.append(runtime)
             continue
         if not args.no_zip:
             zip_path = PUBLISH_ROOT / f"unreal-mcp-bridge-{runtime}.zip"
-            zip_dir(output, zip_path, runtime)
+            zip_dir(output, zip_path)
             print(f"Created {zip_path}", flush=True)
 
     if failed:
