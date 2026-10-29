@@ -97,7 +97,10 @@ class MonorepoTests(unittest.TestCase):
                 self.assertEqual(project, out / 'smoke-host/UnrealTestProject/UnrealTestProject.uproject')
                 template = suite.ROOT / 'tests/smoke-host'
                 expected = {f.relative_to(template) for f in template.rglob('*') if f.is_file()}
-                self.assertEqual({f.relative_to(project.parent) for f in project.parent.rglob('*') if f.is_file()}, expected)
+                host_files = {f.relative_to(project.parent) for f in project.parent.rglob('*') if f.is_file()}
+                self.assertEqual({f for f in host_files if f.parts[0] != 'Plugins'}, expected)
+                self.assertIn(Path('Plugins/UnrealMCP/UnrealMCP.uplugin'), host_files)
+                self.assertFalse(any(p in suite.EXCLUDED for f in host_files for p in f.parts), 'no build outputs are copied')
                 target = project.parent / 'Source/UnrealTestProjectEditor.Target.cs'
                 stamp = target.stat().st_mtime_ns
                 (project.parent / 'Config/DefaultGame.ini').write_text('drift')

@@ -599,13 +599,13 @@ Variables (not secrets) are correct here: none of these values are sensitive. An
 ### The smoke host project
 
 `connection-smoke` needs a real host `.uproject`. It is the repo's `tests/smoke-host`
-(a copy of the workspace's `engines/unreal/test-project`, `UnrealTestProject`):
-`scripts/smoke_host.py` syncs it (changed files only) into `smoke-host/` beside
+(a copy of the workspace's `engines/unreal/test-project`, `UnrealTestProject`) plus this PR's
+`UnrealMCP` plugin source: `scripts/smoke_host.py` syncs both (changed files only) into `smoke-host/` beside
 `extension_suite.py`'s build caches (Windows `C:\wt\unreal-tests\<hash>\`, elsewhere
 `.artifacts/tests/` in the checkout), which survive jobs on the runner slot, so its Binaries,
-Intermediate and DerivedDataCache stay warm. The job then `BuildPlugin`s this PR's plugin straight into
-its `Plugins/UnrealMCP` (a real folder, not a link: UBT's build accelerator does not follow a
-symlinked plugin on macOS). Nothing is provisioned on the machine; .NET 9 comes from
+Intermediate and DerivedDataCache stay warm, and the host editor build recompiles only what changed
+(no from-scratch `BuildPlugin` here: the plugin job validates the packaged plugin). The plugin is a real
+folder, not a link: UBT's build accelerator does not follow a symlinked plugin on macOS. Nothing is provisioned on the machine; .NET 9 comes from
 `actions/setup-dotnet` (runner-manager keeps `DOTNET_INSTALL_DIR` per slot, so it is cached).
 
 ## Secrets (least-privilege)

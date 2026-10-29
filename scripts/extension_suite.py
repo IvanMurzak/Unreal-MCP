@@ -108,9 +108,14 @@ def sync_template(template: Path, dest: Path) -> None:
 
 
 def smoke_host() -> Path:
-    """Sync tests/smoke-host into its persistent folder beside the suite's build caches; return the .uproject."""
+    """Sync tests/smoke-host and this checkout's UnrealMCP plugin source into the smoke host; return the .uproject.
+
+    The host lives beside the suite's build caches and keeps its own Binaries / Intermediate (and the
+    plugin's), so the host editor build that follows recompiles only what changed.
+    """
     dest = default_output() / "smoke-host" / "UnrealTestProject"
     sync_template(ROOT / "tests/smoke-host", dest)
+    copy_plugin(ROOT / "UnrealMCP", dest / "Plugins" / "UnrealMCP")
     return dest / "UnrealTestProject.uproject"
 
 

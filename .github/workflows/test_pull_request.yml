@@ -442,7 +442,7 @@ jobs:
           persist-credentials: false
           clean: false
 
-      # Same stale-bridge guard as the plugin job: this job BuildPlugins into the host project.
+      # Same stale-bridge guard as the plugin job: smoke_host.py copies the plugin source into the host.
       - name: Clean staged bridge binaries (gitignored)
         shell: pwsh
         run: |
@@ -505,9 +505,9 @@ jobs:
           if (-not (Test-Path $bridge)) { throw "bridge binary not found at $bridge" }
           echo "UNREAL_MCP_BRIDGE_PATH=$bridge" >> $env:GITHUB_ENV
 
-      # The host project is tests/smoke-host, synced (changed files only) by scripts/smoke_host.py into
-      # a folder beside the suite's build caches that survives jobs on this runner slot, so its
-      # Binaries / Intermediate / DerivedDataCache stay warm.
+      # The host project is tests/smoke-host plus this PR's UnrealMCP plugin source, synced (changed files
+      # only) by scripts/smoke_host.py into a folder beside the suite's build caches that survives jobs
+      # on this runner slot, so its Binaries / Intermediate / DerivedDataCache stay warm.
       - name: Prepare smoke host project (tests/smoke-host)
         shell: pwsh
         run: |
@@ -519,7 +519,7 @@ jobs:
 
       # Machine-wide UE serialization (#293) — see the plugin job. Taken after the chain feed and
       # bridge build (no UE there) so this job does not hold the machine while it clones and
-      # packs; from here the BuildPlugin, the host project and the fixed smoke port 18080 are
+      # packs; from here the host build, the host project and the fixed smoke port 18080 are
       # all machine-shared, so everything up to the release step stays inside the lock.
       - name: Acquire machine-wide UE lock
         id: ue_lock
@@ -527,21 +527,16 @@ jobs:
         run: |
           & "$env:GITHUB_WORKSPACE/.github/scripts/ue-machine-lock.ps1" -Action Acquire -WaitMinutes 60
 
-      - name: BuildPlugin into the host project
+      # The host project already holds THIS PR's plugin source (smoke_host.py above copies only changed
+      # files and keeps the plugin's Intermediate / Binaries), so this is an incremental editor build,
+      # not a from-scratch BuildPlugin: the plugin job already validates the packaged plugin. Builds the
+      # host's own game module for THIS matrix engine too, so the -unattended editor launch never meets an
+      # out-of-date module. -NoLiveCoding for the same self-hosted service-account reason as the
+      # Automation leg. (The PR plugin bundles no §6 sidecar: UNREAL_MCP_BRIDGE_PATH is set above.)
+      - name: Build the host editor with this PR's plugin
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $uplugin = Join-Path $env:GITHUB_WORKSPACE 'UnrealMCP/UnrealMCP.uplugin'
-          # Package THIS PR's plugin straight into the host's Plugins/UnrealMCP (BuildPlugin empties the
-          # folder first), so the smoke editor loads it. A real folder, not a link: UBT's build
-          # accelerator does not follow a symlinked plugin on macOS. (PR BuildPlugin does not bundle the
-          # §6 sidecar — that is why UNREAL_MCP_BRIDGE_PATH is set above.)
-          $hostPlugin = Join-Path (Split-Path -Parent $env:HOST_UPROJECT) 'Plugins/UnrealMCP'
-          & $env:UE_RUNUAT BuildPlugin -Plugin="$uplugin" -Package="$hostPlugin" -TargetPlatforms="$env:UE_PLATFORM" -Rocket
-          if ($LASTEXITCODE -ne 0) { throw "BuildPlugin failed ($LASTEXITCODE)" }
-          # Build the host's own game module for THIS matrix engine so the smoke's editor launch does
-          # not fail on out-of-date modules (-unattended will not interactively rebuild). -NoLiveCoding
-          # for the same self-hosted service-account reason as the Automation leg.
           $hostTarget = [System.IO.Path]::GetFileNameWithoutExtension($env:HOST_UPROJECT) + 'Editor'
           $hostBuildLog = Join-Path $env:RUNNER_TEMP "UBT-$hostTarget-$($env:GITHUB_JOB)-$($env:RUNNER_NAME).log"
           & $env:UE_BUILD $hostTarget $env:UE_PLATFORM Development -project="$env:HOST_UPROJECT" -WaitMutex -NoLiveCoding -log="$hostBuildLog"
@@ -660,7 +655,7 @@ jobs:
       - name: Cleanup this job's build outputs (self-hosted disk hygiene)
         # See the plugin job's cleanup note. Removes ONLY this job's own regenerable
         # RUNNER_TEMP outputs + host transient logs; preserves the host
-        # DDC / Intermediate / Binaries speed cache, its packaged Plugins/UnrealMCP,
+        # DDC / Intermediate / Binaries speed cache (its Plugins/UnrealMCP included),
         # and Docker (unused here; daemon shared with other runners). The host logs are
         # removed only while this job held the machine-wide UE lock.
         if: always()
@@ -704,7 +699,7 @@ jobs:
           }
           Write-Host "Per-run cleanup done (DDC / Intermediate / Binaries and Docker intentionally preserved)."
 
-      # Last step, so the smoke's BuildPlugin, editor and port stay inside the machine-wide UE lock.
+      # Last step, so the smoke's host build, editor and port stay inside the machine-wide UE lock.
       - name: Release machine-wide UE lock
         if: always()
         shell: pwsh
