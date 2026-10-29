@@ -29,7 +29,6 @@ with `--remove-link`, never with a recursive delete: that would follow the link 
 from __future__ import annotations
 
 import argparse
-import json
 import os
 from pathlib import Path
 import re
@@ -38,6 +37,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 from extension_suite import UE_BUILD, UE_EDITOR, UE_PLATFORM  # noqa: E402  (the one host-platform table)
+import ue_json  # noqa: E402  (engine JSON files may carry comments and trailing commas)
 
 IS_WINDOWS = os.name == "nt"
 IS_MAC = sys.platform == "darwin"
@@ -71,7 +71,7 @@ def engine_root(version: str) -> Path:
     root = next((p.parents[1] for p in executable.parents if p.name == "Binaries" and p.parent.name == "Engine"), None)
     if root is None or not (root / "Engine/Build/Build.version").is_file():
         raise SystemExit(f"ue-env: run me with the engine's bundled Python (the .github/actions/ue-env action); got {executable}")
-    installed = json.loads((root / "Engine/Build/Build.version").read_text(encoding="utf-8-sig"))
+    installed = ue_json.read(root / "Engine/Build/Build.version")
     found = f"{installed['MajorVersion']}.{installed['MinorVersion']}"
     if found != version:
         raise SystemExit(f"ue-env: {root} is UE {found}, not the requested {version}")
@@ -92,13 +92,18 @@ def xcode_version(app: Path):
     return xcode3(result.stdout.strip()) if result.returncode == 0 else None
 
 
+def xcode_range(root: Path) -> tuple:
+    """The engine's supported Xcode range from Apple_SDK.json (JSONC in UE 5.5: comments, trailing commas)."""
+    sdk = ue_json.read(root / "Engine/Config/Apple/Apple_SDK.json")
+    return xcode3(sdk["MinVersion"]), xcode3(sdk["MaxVersion"])
+
+
 def developer_dir(root: Path, version: str):
     """macOS: a fitting side-by-side Xcode when the selected one is outside the engine's range, else None.
 
     UBT finds Xcode with `xcode-select -p`, which honours DEVELOPER_DIR. See docs/RELEASING.md "Which OS".
     """
-    sdk = json.loads((root / "Engine/Config/Apple/Apple_SDK.json").read_text(encoding="utf-8-sig"))
-    low, high = xcode3(sdk["MinVersion"]), xcode3(sdk["MaxVersion"])
+    low, high = xcode_range(root)
 
     def fits(v) -> bool:
         return v is not None and low <= v <= high
