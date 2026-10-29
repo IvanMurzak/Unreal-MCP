@@ -194,6 +194,7 @@ describe('openProject', () => {
       projectDir: dir,
       autoDismissStartupDialogs: false,
       build: false,
+      noCache: true, // a rejecting spawnImpl drops the cached engine: keep the real cache file out of it
       enginesImpl: () => [fakeEngine('5.7')],
       spawnImpl,
       onProgress: (e) => progress.push(e),

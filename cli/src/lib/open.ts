@@ -183,15 +183,19 @@ export async function openProject(opts: OpenProjectOptions): Promise<OpenProject
     // Invalidate-on-spawn-failure: when the editor fails to launch from a path
     // we resolved (most importantly a CACHED path pointing at a moved/removed
     // engine), drop that cache slot so the next `open` re-runs the full chain.
-    // Only relevant for the real detached spawn — an injected `spawnImpl`
-    // owns its own error semantics (a rejection fails the open).
+    // The same for an injected `spawnImpl` that throws or rejects (which also fails the open).
     const onSpawnError = (): void => {
-      if (!opts.noCache) invalidateCachedEngine(uproject.engineAssociation);
+      if (!opts.noCache) invalidateCachedEngine(uproject.engineAssociation, opts.cacheIo);
     };
     let pid: number | undefined;
     if (opts.spawnImpl) {
       // The embedder's pid may come later (a promise): it is waited for, and logged once known.
-      pid = await spawnedEditorPid(opts.spawnImpl(resolution.editorPath, args, childEnv));
+      try {
+        pid = await spawnedEditorPid(opts.spawnImpl(resolution.editorPath, args, childEnv));
+      } catch (err: unknown) {
+        onSpawnError();
+        throw err;
+      }
     } else {
       const child = spawnDetached(resolution.editorPath, args, childEnv, onSpawnError);
       // Node sets `pid` at once; a spawn whose pid is reported later (a `spawn` event) is waited for briefly.
@@ -375,7 +379,7 @@ function sleep(ms: number): Promise<void> {
 /** The editor pid an `openProject` `spawnImpl` reported: the started process's `pid`, or its promise's value. */
 async function spawnedEditorPid(started: ReturnType<EditorSpawnImpl>): Promise<number | undefined> {
   const value = await started;
-  return typeof value === 'object' ? value.pid : value;
+  return value !== null && typeof value === 'object' ? value.pid : (value ?? undefined);
 }
 
 /**
