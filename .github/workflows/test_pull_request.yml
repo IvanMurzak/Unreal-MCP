@@ -428,6 +428,7 @@ jobs:
     runs-on:
       - self-hosted
       - ${{ fromJSON('{"5.5":"unreal-5-5","5.6":"unreal-5-6","5.7":"unreal-5-7","5.8":"unreal-5-8","5.9":"unreal-5-9"}')[matrix.ue] || format('unreal-{0}', matrix.ue) }}
+      - macOS
     # A hang guard, not a budget — see the plugin job: expiry is a GitHub-side cancel.
     # 90 = the machine-wide UE lock's 60-min bounded wait + the original 30-min guard.
     timeout-minutes: 90
@@ -504,6 +505,22 @@ jobs:
           $bridge = Join-Path $env:GITHUB_WORKSPACE "bridge/src/bin/Debug/net9.0/unreal-mcp-bridge$(if ($IsWindows) { '.exe' })"
           if (-not (Test-Path $bridge)) { throw "bridge binary not found at $bridge" }
           echo "UNREAL_MCP_BRIDGE_PATH=$bridge" >> $env:GITHUB_ENV
+
+      # DIAGNOSTIC (throwaway): wrap the bridge to capture env, limits, stderr and exit code.
+      - name: DIAG wrap bridge
+        if: ${{ runner.os != 'Windows' }}
+        shell: bash
+        run: |
+          w="$RUNNER_TEMP/bridge-wrap.sh"
+          {
+            echo '#!/bin/bash'
+            echo 'log="$SMOKE_LOGS/bridge-wrap.log"'
+            echo '{ echo "== $(date -u +%T) pid=$$ ppid=$PPID argv: $*"; env | sort; ulimit -a; ls -la /dev/fd; } >> "$log" 2>&1'
+            echo "\"$UNREAL_MCP_BRIDGE_PATH\" \"\$@\" >> \"\$log\" 2>&1"
+            echo 'rc=$?; echo "== exit=$rc" >> "$log"; exit $rc'
+          } > "$w"
+          chmod +x "$w"; cat "$w"
+          echo "UNREAL_MCP_BRIDGE_PATH=$w" >> "$GITHUB_ENV"
 
       # The host project is tests/smoke-host plus this PR's UnrealMCP plugin source, synced (changed files
       # only) by scripts/smoke_host.py into a folder beside the suite's build caches that survives jobs
@@ -621,6 +638,11 @@ jobs:
 
       # The editor, sidecar (UnrealMcpBridge.log) and server logs: the smoke prints only the editor log's
       # tail, and the cleanup step below deletes Saved/Logs.
+      - name: DIAG print bridge wrapper log
+        if: ${{ always() && runner.os != 'Windows' }}
+        shell: bash
+        run: cat "$SMOKE_LOGS/bridge-wrap.log" || true
+
       - name: Upload smoke logs on failure
         if: failure() && env.SMOKE_LOGS != ''
         uses: actions/upload-artifact@v7
