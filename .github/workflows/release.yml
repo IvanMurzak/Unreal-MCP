@@ -298,8 +298,6 @@ jobs:
           - { os: macos, ue: '5.8' }
           - { os: windows, ue: '5.7' }
           - { os: windows, ue: '5.8' }
-    env:
-      HOST_UPROJECT: ${{ vars.UNREAL_HOST_PROJECT }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5

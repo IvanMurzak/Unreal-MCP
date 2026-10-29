@@ -243,13 +243,6 @@ jobs:
       fail-fast: false
       matrix:
         ue: ['5.5', '5.6', '5.7', '5.8']
-    env:
-      # Absolute path on the runner to a host .uproject with the UnrealMCP plugin
-      # available (the runner's local Unreal-Test-Project analog). Required for
-      # the Automation pass; BuildPlugin alone does not need it. A "Sync host to
-      # UE_ROOT" step below rebuilds the host's own game module for the matrix
-      # engine, so one host project serves every engine.
-      HOST_UPROJECT: ${{ vars.UNREAL_HOST_PROJECT }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
@@ -423,8 +416,7 @@ jobs:
   # runner var), so it stays SKIPPED — never red-by-absence — until the owner has
   # validated it once on the runner and flips the variable. Prerequisites the
   # owner confirms before enabling (see docs/RELEASING.md):
-  #   • the host project (`vars.UNREAL_HOST_PROJECT`) has the UnrealMCP plugin
-  #     COMPILED (the plugin leg / runner setup builds it); and
+  #   • the host project is tests/smoke-host (the job syncs, packages and builds it); and
   #   • a bridge sidecar is resolvable — this job builds it and exports
   #     UNREAL_MCP_BRIDGE_PATH (PR builds do not bundle the §6 sidecar; only the
   #     release job does).
@@ -435,11 +427,10 @@ jobs:
     # Engine-versioned runner label (unreal-5-8 for UE 5.8): the job only lands on a machine
     # that has this engine installed. Expressions have no replace(), hence the lookup; an
     # unmapped version yields e.g. `unreal-5.10`, which no runner carries (add it to the map).
-    # Still Windows-only, unlike the plugin job: it drives the runner's persistent host project
-    # (vars.UNREAL_HOST_PROJECT, a Windows path) and the Win64 editor, bridge and host build.
+    # Any OS, like the plugin job: the host project comes from tests/smoke-host (synced into a
+    # persistent per-runner folder below), .NET from setup-dotnet, and UE paths from ue-env.ps1.
     runs-on:
       - self-hosted
-      - windows
       - ${{ fromJSON('{"5.5":"unreal-5-5","5.6":"unreal-5-6","5.7":"unreal-5-7","5.8":"unreal-5-8","5.9":"unreal-5-9"}')[matrix.ue] || format('unreal-{0}', matrix.ue) }}
     # A hang guard, not a budget — see the plugin job: expiry is a GitHub-side cancel.
     # 90 = the machine-wide UE lock's 60-min bounded wait + the original 30-min guard.
@@ -448,8 +439,6 @@ jobs:
       fail-fast: false
       matrix:
         ue: ['5.8']
-    env:
-      HOST_UPROJECT: ${{ vars.UNREAL_HOST_PROJECT }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
@@ -457,16 +446,25 @@ jobs:
           persist-credentials: false
           clean: false
 
-      # Same stale-bridge guard as the plugin job: this job BuildPlugins into the host junction.
+      # Same stale-bridge guard as the plugin job: this job BuildPlugins into the host project.
       - name: Clean staged bridge binaries (gitignored)
         shell: pwsh
         run: |
-          & "$env:GITHUB_WORKSPACE\.github\scripts\clean-staged-bridge.ps1"
+          & "$env:GITHUB_WORKSPACE/.github/scripts/clean-staged-bridge.ps1"
 
-      # Same engine resolution + chain python as the plugin job (this job stays on Windows).
+      # Same engine resolution + chain python as the plugin job.
       - name: Resolve UE install + chain python
         shell: pwsh
         run: ./.github/scripts/ue-env.ps1 -Version '${{ matrix.ue }}'
+
+      # The bridge targets net9.0, and the chain feed builds the lower layers with this SDK. On the
+      # runner-manager runners DOTNET_INSTALL_DIR is a persistent per-slot cache, so after the first
+      # job this is a version check, not a download. setup-dotnet also exports DOTNET_ROOT, which the
+      # bridge's apphost (started later by the editor) uses to find this runtime.
+      - name: Setup .NET 9
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "9.0.x"
 
       # `clean: false` keeps untracked files between runs on this persistent workspace, so a
       # chain run whose cleanup never ran (a killed job) would leave its generated nuget.config /
@@ -488,113 +486,86 @@ jobs:
           if (Test-Path -LiteralPath $feed) { Remove-Item -LiteralPath $feed -Recurse -Force; Write-Host "chain: removed stale $feed" }
 
       # Under a lock: clone ReflectorNet / MCP-Plugin-dotnet / GameDev-MCP-Server at the lock
-      # shas, build them with the SYSTEM .NET SDK (no setup-dotnet here, see below), force the
-      # bridge csproj's pins to the lock's ws versions, publish the win-x64 server with its
+      # shas, build them with the .NET 9 SDK set up above, force the
+      # bridge csproj's pins to the lock's ws versions, publish the host-RID server with its
       # chain-identity.json marker and export UNREAL_MCP_SERVER_PATH — BEFORE the bridge build.
       - name: chain feed
         id: chain
         shell: pwsh
         run: ${{ env.CHAIN_PY }} .github/scripts/chain_feed.py apply --node unreal-mcp --job connection-smoke --edges nuget --edges server-binary
 
-      # No `actions/setup-dotnet` or `actions/setup-python`: this self-hosted
-      # runner runs as NT AUTHORITY\NETWORK SERVICE, which cannot write to
-      # C:\Program Files\dotnet (setup-dotnet throws) and whose tool-cache Python
-      # install (setup-python) also fails. Instead we use what the runner already
-      # has read-only under Program Files: the system .NET 9 SDK + runtime for the
-      # bridge build (below), and UE's bundled Python 3.11
-      # (Engine\Binaries\ThirdParty\Python3\Win64\python.exe — has ssl) to run the
-      # stdlib-only smoke script.
+      # No `actions/setup-python`: the stdlib-only smoke script runs under UE's bundled Python 3.11
+      # (CHAIN_PY from ue-env.ps1, which also points it at the OS CA bundle off Windows).
       - name: Build bridge sidecar (for UNREAL_MCP_BRIDGE_PATH override)
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           dotnet build bridge/Unreal-MCP-Bridge.sln --configuration Debug
           if ($LASTEXITCODE -ne 0) { throw "bridge build failed ($LASTEXITCODE)" }
-          $bridge = Join-Path $env:GITHUB_WORKSPACE 'bridge\src\bin\Debug\net9.0\unreal-mcp-bridge.exe'
+          $bridge = Join-Path $env:GITHUB_WORKSPACE "bridge/src/bin/Debug/net9.0/unreal-mcp-bridge$(if ($IsWindows) { '.exe' })"
           if (-not (Test-Path $bridge)) { throw "bridge binary not found at $bridge" }
           echo "UNREAL_MCP_BRIDGE_PATH=$bridge" >> $env:GITHUB_ENV
 
-      - name: Resolve runner-local host project
+      # The host project is tests/smoke-host, synced into a folder that survives jobs on this runner
+      # slot, so its Binaries / Intermediate / DerivedDataCache stay warm. Windows keeps it under the
+      # short C:\wt (MAX_PATH, as extension_suite.py); elsewhere it sits next to the checkout in _work.
+      # Only changed template files are written: an unchanged Target.cs keeps UBT's caches valid.
+      - name: Prepare smoke host project (tests/smoke-host)
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $runnerRoot = Split-Path -Parent (Split-Path -Parent $env:RUNNER_TEMP)
-          $runnerLocalHost = Join-Path $runnerRoot 'host\UnrealTestProject\UnrealTestProject.uproject'
-          if (Test-Path $runnerLocalHost) {
-            "HOST_UPROJECT=$runnerLocalHost" >> $env:GITHUB_ENV
-            Write-Host "Using runner-local host project: $runnerLocalHost"
-          } elseif (-not [string]::IsNullOrWhiteSpace($env:HOST_UPROJECT) -and (Test-Path $env:HOST_UPROJECT)) {
-            Write-Host "Using UNREAL_HOST_PROJECT fallback: $env:HOST_UPROJECT"
-          } else {
-            throw "No host .uproject found. Expected runner-local '$runnerLocalHost' or a valid UNREAL_HOST_PROJECT repo variable."
+          $key = ([BitConverter]::ToString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($env:GITHUB_WORKSPACE))) -replace '-', '').Substring(0, 8).ToLowerInvariant()
+          $root = if ($IsWindows) { Join-Path "$env:SystemDrive\wt\unreal-smoke" $key } else { Join-Path (Split-Path -Parent $env:GITHUB_WORKSPACE) 'smoke-host' }
+          $hostDir = Join-Path $root 'UnrealTestProject'
+          $template = Join-Path $env:GITHUB_WORKSPACE 'tests/smoke-host'
+          Get-ChildItem -LiteralPath $template -Recurse -File -Force | ForEach-Object {
+            $target = Join-Path $hostDir ([IO.Path]::GetRelativePath($template, $_.FullName))
+            $same = (Test-Path -LiteralPath $target) -and ((Get-FileHash -LiteralPath $target).Hash -eq (Get-FileHash -LiteralPath $_.FullName).Hash)
+            if (-not $same) {
+              New-Item -ItemType Directory -Force -Path (Split-Path -Parent $target) | Out-Null
+              Copy-Item -LiteralPath $_.FullName -Destination $target -Force
+            }
           }
+          $uproject = Join-Path $hostDir 'UnrealTestProject.uproject'
+          "HOST_UPROJECT=$uproject" >> $env:GITHUB_ENV
+          Write-Host "Smoke host project: $uproject"
 
       # Machine-wide UE serialization (#293) — see the plugin job. Taken after the chain feed and
       # bridge build (no UE there) so this job does not hold the machine while it clones and
-      # packs; from here the BuildPlugin, the host junction and the fixed smoke port 18080 are
+      # packs; from here the BuildPlugin, the host project and the fixed smoke port 18080 are
       # all machine-shared, so everything up to the release step stays inside the lock.
       - name: Acquire machine-wide UE lock
         id: ue_lock
         shell: pwsh
         run: |
-          & "$env:GITHUB_WORKSPACE\.github\scripts\ue-machine-lock.ps1" -Action Acquire -WaitMinutes 60
+          & "$env:GITHUB_WORKSPACE/.github/scripts/ue-machine-lock.ps1" -Action Acquire -WaitMinutes 60
 
-      - name: BuildPlugin into the host junction target
+      - name: BuildPlugin into the host project
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          if ([string]::IsNullOrWhiteSpace($env:HOST_UPROJECT)) {
-            throw "UNREAL_HOST_PROJECT repo variable is not set (see docs/RELEASING.md)."
-          }
-          $runUAT = Join-Path $env:UE_ROOT 'Engine\Build\BatchFiles\RunUAT.bat'
-          $uplugin = Join-Path $env:GITHUB_WORKSPACE 'UnrealMCP\UnrealMCP.uplugin'
-          # This job runs in its OWN context — RUNNER_TEMP is cleaned per job, so the
-          # plugin leg's package is gone. The host project's Plugins\UnrealMCP junctions
-          # to $RUNNER_TEMP\UnrealMCP-Package (docs/RELEASING.md); BuildPlugin there so
-          # the host editor loads THIS PR's plugin for the smoke. (PR BuildPlugin does
-          # not bundle the §6 sidecar — that is why UNREAL_MCP_BRIDGE_PATH is set above.)
-          $package = Join-Path $env:RUNNER_TEMP 'UnrealMCP-Package'
-          if (Test-Path $package) { Remove-Item $package -Recurse -Force }
-          & $runUAT BuildPlugin -Plugin="$uplugin" -Package="$package" -TargetPlatforms=Win64 -Rocket
+          $uplugin = Join-Path $env:GITHUB_WORKSPACE 'UnrealMCP/UnrealMCP.uplugin'
+          # Package THIS PR's plugin straight into the host's Plugins/UnrealMCP (BuildPlugin empties the
+          # folder first), so the smoke editor loads it. A real folder, not a link: UBT's build
+          # accelerator does not follow a symlinked plugin on macOS. (PR BuildPlugin does not bundle the
+          # §6 sidecar — that is why UNREAL_MCP_BRIDGE_PATH is set above.)
+          $hostPlugin = Join-Path (Split-Path -Parent $env:HOST_UPROJECT) 'Plugins/UnrealMCP'
+          & $env:UE_RUNUAT BuildPlugin -Plugin="$uplugin" -Package="$hostPlugin" -TargetPlatforms="$env:UE_PLATFORM" -Rocket
           if ($LASTEXITCODE -ne 0) { throw "BuildPlugin failed ($LASTEXITCODE)" }
-          # SELF-HEAL the host's Plugins\UnrealMCP junction (docs/RELEASING.md invariant) —
-          # same rationale as the plugin leg: force-recreate it to point at THIS run's
-          # $package so off-workflow tooling that repointed it at the submodule source
-          # can never wedge the smoke. Idempotent: drop any existing reparse point/dir
-          # first, then mklink /J. $package was just populated above.
-          $hostPluginsDir = Join-Path (Split-Path -Parent $env:HOST_UPROJECT) 'Plugins'
-          $hostJunction = Join-Path $hostPluginsDir 'UnrealMCP'
-          New-Item -ItemType Directory -Force -Path $hostPluginsDir | Out-Null
-          if (Test-Path -LiteralPath $hostJunction) {
-            cmd /c rmdir "$hostJunction" 2>$null
-            if (Test-Path -LiteralPath $hostJunction) { Remove-Item -LiteralPath $hostJunction -Recurse -Force }
-          }
-          cmd /c mklink /J "$hostJunction" "$package" | Write-Host
-          if ($LASTEXITCODE -ne 0) { throw "Failed to (re)create host junction $hostJunction -> $package (exit $LASTEXITCODE)" }
-          $resolved = (Get-Item -LiteralPath $hostJunction).Target
-          Write-Host "Host junction: $hostJunction -> $resolved (expected $package)"
-          # Rebuild the host's own game module for THIS matrix engine so the smoke's
-          # editor launch does not fail on out-of-date modules (the committed host
-          # Binaries may be built for a different UE version; -unattended will not
-          # interactively rebuild). The plugin is current via the junction above.
-          # Force -NoLiveCoding for the same self-hosted service-account reason as
-          # the Automation leg above.
-          $hostBuild = Join-Path $env:UE_ROOT 'Engine\Build\BatchFiles\Build.bat'
+          # Build the host's own game module for THIS matrix engine so the smoke's editor launch does
+          # not fail on out-of-date modules (-unattended will not interactively rebuild). -NoLiveCoding
+          # for the same self-hosted service-account reason as the Automation leg.
           $hostTarget = [System.IO.Path]::GetFileNameWithoutExtension($env:HOST_UPROJECT) + 'Editor'
           $hostBuildLog = Join-Path $env:RUNNER_TEMP "UBT-$hostTarget-$($env:GITHUB_JOB)-$($env:RUNNER_NAME).log"
-          & $hostBuild $hostTarget Win64 Development -project="$env:HOST_UPROJECT" -WaitMutex -NoLiveCoding -log="$hostBuildLog"
+          & $env:UE_BUILD $hostTarget $env:UE_PLATFORM Development -project="$env:HOST_UPROJECT" -WaitMutex -NoLiveCoding -log="$hostBuildLog"
           if ($LASTEXITCODE -ne 0) { throw "Host editor target ($hostTarget) build failed for UE_ROOT=$env:UE_ROOT (exit $LASTEXITCODE)" }
 
       - name: Run connection + tool smoke (custom local server)
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          if ([string]::IsNullOrWhiteSpace($env:HOST_UPROJECT)) {
-            throw "UNREAL_HOST_PROJECT repo variable is not set — the smoke needs a host .uproject with the UnrealMCP plugin compiled (see docs/RELEASING.md)."
-          }
-          $editorCmd = Join-Path $env:UE_ROOT 'Engine\Binaries\Win64\UnrealEditor-Cmd.exe'
-          $py = Join-Path $env:UE_ROOT 'Engine\Binaries\ThirdParty\Python3\Win64\python.exe'
-          if (-not (Test-Path $py)) { throw "UE bundled Python not found at $py" }
+          $editorCmd = $env:UE_EDITOR_CMD
+          $py = $env:CHAIN_PY
           # --mode custom downloads the public gamedev-mcp-server release, runs it,
           # launches the editor in Custom mode, and asserts the tool battery. The
           # bridge override (UNREAL_MCP_BRIDGE_PATH, set above) is inherited by the
@@ -612,7 +583,7 @@ jobs:
           # T2 chain record (MCP-Plugin-dotnet docs/chain-fixtures.md): the smoke also writes the RAW
           # MCP-level dump of tools/list + the battery it runs (tests/chain-fixtures/battery.json, kept
           # equal to the script's SMOKE_BATTERY) to RUNNER_TEMP — never under the host project.
-          $record = Join-Path $env:RUNNER_TEMP 'chain-record\raw.json'
+          $record = Join-Path $env:RUNNER_TEMP 'chain-record/raw.json'
           & $py scripts/connection_smoke.py --mode custom --project "$env:HOST_UPROJECT" --ue "$editorCmd" --server-port 18080 --timeout 240 --record-out "$record" --battery tests/chain-fixtures/battery.json
           if ($LASTEXITCODE -ne 0) { throw "connection + tool smoke FAILED (exit $LASTEXITCODE)" }
 
@@ -624,8 +595,8 @@ jobs:
         shell: pwsh
         env:
           PYTHONUTF8: '1'
-          CHAIN_RECORD_RAW: ${{ runner.temp }}\chain-record\raw.json
-          CHAIN_FIXTURE_OUT: ${{ runner.temp }}\chain-fixture-unreal-${{ matrix.ue }}
+          CHAIN_RECORD_RAW: ${{ runner.temp }}/chain-record/raw.json
+          CHAIN_FIXTURE_OUT: ${{ runner.temp }}/chain-fixture-unreal-${{ matrix.ue }}
           CHAIN_FIXTURE_COMMITTED: tests/chain-fixtures/${{ matrix.ue }}/tools.jsonl
         run: |
           $ErrorActionPreference = 'Stop'
@@ -634,7 +605,7 @@ jobs:
           # description in the diff was mojibaked on its way into diff.txt and the log. Decode as UTF-8.
           [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
           $OutputEncoding = [System.Text.UTF8Encoding]::new($false)
-          $py = Join-Path $env:UE_ROOT 'Engine\Binaries\ThirdParty\Python3\Win64\python.exe'
+          $py = $env:CHAIN_PY
           New-Item -ItemType Directory -Force -Path $env:CHAIN_FIXTURE_OUT | Out-Null
           if (-not (Test-Path -LiteralPath $env:CHAIN_RECORD_RAW)) {
             Write-Host "::error title=chain fixture::raw-dump-missing: $env:CHAIN_RECORD_RAW was not written by the smoke"
@@ -672,7 +643,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: chain-fixture-unreal-${{ matrix.ue }}
-          path: ${{ runner.temp }}\chain-fixture-unreal-${{ matrix.ue }}
+          path: ${{ runner.temp }}/chain-fixture-unreal-${{ matrix.ue }}
           if-no-files-found: ignore
           # Review aid only (fresh.jsonl to commit, diff.txt; the raw dump only when canonicalize failed):
           # the replay side reads the COMMITTED fixture, never this artifact.
@@ -703,8 +674,8 @@ jobs:
 
       - name: Cleanup this job's build outputs (self-hosted disk hygiene)
         # See the plugin job's cleanup note. Removes ONLY this job's own regenerable
-        # RUNNER_TEMP package + host transient logs; preserves the host
-        # DDC / Intermediate / Binaries speed cache, the junction (self-heal above),
+        # RUNNER_TEMP outputs + host transient logs; preserves the host
+        # DDC / Intermediate / Binaries speed cache, its packaged Plugins/UnrealMCP,
         # and Docker (unused here; daemon shared with other runners). The host logs are
         # removed only while this job held the machine-wide UE lock.
         if: always()
@@ -716,7 +687,7 @@ jobs:
           function Remove-Tree([string]$p) {
             if ([string]::IsNullOrWhiteSpace($p) -or -not (Test-Path -LiteralPath $p)) { return }
             Write-Host "Removing $p"
-            cmd /c rmdir /s /q "$p" 2>$null
+            if ($IsWindows) { cmd /c rmdir /s /q "$p" 2>$null }
             if (Test-Path -LiteralPath $p) { Remove-Item -LiteralPath $p -Recurse -Force -ErrorAction SilentlyContinue }
           }
           # Chain leg: the python junction LINK first (plain rmdir, never recursive), then the
@@ -744,7 +715,7 @@ jobs:
             Remove-Item -Force -ErrorAction SilentlyContinue
           if ($env:UE_LOCK_OUTCOME -eq 'success' -and -not [string]::IsNullOrWhiteSpace($env:HOST_UPROJECT) -and (Test-Path -LiteralPath $env:HOST_UPROJECT)) {
             $hostRoot = Split-Path -Parent $env:HOST_UPROJECT
-            foreach ($sub in @('Saved\Logs','Saved\Crashes')) { Remove-Tree (Join-Path $hostRoot $sub) }
+            foreach ($sub in @('Saved/Logs','Saved/Crashes')) { Remove-Tree (Join-Path $hostRoot $sub) }
           }
           Write-Host "Per-run cleanup done (DDC / Intermediate / Binaries and Docker intentionally preserved)."
 
@@ -753,4 +724,4 @@ jobs:
         if: always()
         shell: pwsh
         run: |
-          & "$env:GITHUB_WORKSPACE\.github\scripts\ue-machine-lock.ps1" -Action Release
+          & "$env:GITHUB_WORKSPACE/.github/scripts/ue-machine-lock.ps1" -Action Release

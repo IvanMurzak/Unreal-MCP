@@ -1,0 +1,13 @@
+{
+	"FileVersion": 3,
+	"EngineAssociation": "5.7",
+	"Category": "",
+	"Description": "Minimal UE 5.7 C++ testbed for live-testing the Unreal-MCP plugin against a real Unreal Editor.",
+	"Modules": [
+		{
+			"Name": "UnrealTestProject",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		}
+	]
+}
