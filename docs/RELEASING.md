@@ -16,8 +16,8 @@ implement-task profile `test.md` (infra repo).
 
 For the short operator "what do I run?" flow, see
 [`docs/GITHUB-RELEASE-RUNBOOK.md`](GITHUB-RELEASE-RUNBOOK.md). The wrapper
-script documented there (`commands/release-github.ps1`) does **not** bypass this
-file's contract — it only wraps `commands/bump-version.ps1` and `release.yml`.
+script documented there (`commands/release_github.py`) does **not** bypass this
+file's contract — it only wraps `commands/bump_version.py` and `release.yml`.
 
 ## Release checklist — operator-gated leaves
 
@@ -27,7 +27,7 @@ CI-backed, but only a manual `workflow_dispatch` of `release.yml` on `main` publ
 version bump publishes nothing. Fab submission remains fully manual:
 
 - [ ] **GitHub Release + `v<version>` tag.** Land a deliberate `VersionName` bump on `main` (run
-      `commands/bump-version.ps1`, commit, merge), then dispatch `release.yml` on `main` with
+      `commands/bump_version.py`, commit, merge), then dispatch `release.yml` on `main` with
       `dry_run=false`. `check-version` FAILS the run if `v<version>` already exists.
 - [ ] **`unreal-mcp-cli` publish.** The initial npm bootstrap was manual; subsequent publishes are
       CI-owned through `release.yml`'s OIDC `publish-npm` job. Do **not** hand-publish from a feature
@@ -197,7 +197,7 @@ sidecar:
 
 ```bash
 # 1. Publish the self-contained sidecar for the target RID (e.g. win-x64):
-bash bridge/publish.sh Release win-x64 --no-zip
+python bridge/publish.py --platforms win-x64 --no-zip
 # 2. Place it in the Fab-surviving source folder (#139/#187) — RuntimeDependencies
 #    stages it from here into Binaries/ThirdParty/... at compile time, and the
 #    resolver also reads it directly from here:
@@ -234,9 +234,9 @@ an entirely manual operator step (no CI job submits — see the checklist at the
   `RuntimeDependencies`, and resolved from both paths (`ComposeBundledBridgeCandidates`). So an
   Epic-compiled build resolves the sidecar even though `Binaries/` was stripped.
 - **C2 — no shipped test module.** The DISTRIBUTED `UnrealMCP.uplugin` omits
-  `UnrealMcpEditorTests` (Fab flags shipped test modules). PR/dev CI re-adds it
-  transiently via `commands/test-module-uplugin.ps1` around the Automation BuildPlugin,
-  then reverts — so `BuildPlugin -Rocket` on the distributed descriptor is test-free +
+  `UnrealMcpEditorTests` (Fab flags shipped test modules). PR/dev CI adds it only
+  to the suite's isolated build copy (`scripts/extension_suite.py`; by hand:
+  `commands/test_module_uplugin.py`), never to the checkout — so `BuildPlugin -Rocket` on the distributed descriptor is test-free +
   green, while the `UnrealMcp.` specs still run on every PR. **Never commit the
   descriptor with the test module added.**
 - **C3 — FilterPlugin hygiene.** `Config/FilterPlugin.ini` ships the
@@ -270,13 +270,13 @@ signing the moment they are mirrored (see [Signing secrets](#signing-secrets-cod
 
 `UnrealMCP/UnrealMCP.uplugin` `VersionName` is the **single source of truth** for
 the release version. `release.yml`'s `check-version` job reads it.
-`commands/bump-version.ps1` rewrites the version across all version-bearing
+`commands/bump_version.py` rewrites the version across all version-bearing
 files in one shot (the `.uplugin`, the bridge csproj `<Version>`,
 `cli/package.json` + lockfile, and the `cli/src/version.ts` `PACKAGE_VERSION` constant —
 enforced equal to `cli/package.json` by `cli/tests/version.test.ts`):
 
-```powershell
-.\commands\bump-version.ps1 -NewVersion "0.2.0"     # add -WhatIf to preview
+```bash
+python commands/bump_version.py --new-version 0.2.0     # add --what-if to preview
 ```
 
 **Never hand-edit one of them alone.** The NuGet pins
@@ -290,7 +290,7 @@ The local MCP server is the shared
 `gamedev-mcp-server`, assets `gamedev-mcp-server-<rid>.zip`) — it is **not built or
 released by this repo's pipelines**. The CLI downloads the release pinned by the
 `SERVER_VERSION` constant in `cli/src/lib/server-version.ts`, which is independent
-of the plugin version and deliberately untouched by `bump-version.ps1`.
+of the plugin version and deliberately untouched by `bump_version.py`.
 
 **Release-order rule:** a CLI release that bumps `SERVER_VERSION` requires the
 corresponding `v<SERVER_VERSION>` GameDev-MCP-Server release (with all 7 RID zips)
@@ -428,7 +428,7 @@ again unless recovering a post-tag failure (see "Re-running a release" below).
 > `npm version <v> --allow-same-version` then `npm publish`, which on the
 > already-published `0.1.0` fails with `E403 cannot publish over previously
 > published version` (a red `publish-npm` leg). So the **first CI-driven release
-> must target a new version** (`0.1.1` / `0.2.0`, via `bump-version.ps1`), not
+> must target a new version** (`0.1.1` / `0.2.0`, via `bump_version.py`), not
 > `v0.1.0`. (npm will carry a `0.1.0` with no corresponding `v0.1.0` tag/Release
 > — expected, not a bug.)
 
@@ -446,15 +446,18 @@ matrix validates UE 5.5/5.6/5.7/5.8.
 free. The release workflows are deterministic instead: `release.yml`'s `plugin` runs
 every engine on Windows plus UE 5.7/5.8 on macOS, and `release_extensions.yml`'s `test`
 runs 5.7/5.8 on both, each leg pinned by its OS label (`windows`, `macos`).
-`.github/scripts/ue-env.ps1` resolves
+The `.github/actions/ue-env` action (`.github/scripts/ue_env.py`) resolves
 that runner's engine (`UE_ROOT_<major>_<minor>` in the runner's environment, else the
 Epic Launcher default: `C:\Program Files\Epic Games\UE_x.y` on Windows,
 `/Users/Shared/Epic Games/UE_x.y` on macOS; Linux has no default) and builds for the
-host platform (`Win64`, `Mac`, `Linux`). A runner needs PowerShell 7 (`pwsh`) on
-PATH. On macOS each engine accepts only an Xcode range (its
+host platform (`Win64`, `Mac`, `Linux`). Every step runs as a Python script under the engine's
+bundled Python (`CHAIN_PY`), so a runner needs nothing beyond the engines: no Python and no
+PowerShell 7. The action's two bootstrap lines use what every OS ships (bash, Windows PowerShell 5.1),
+and the steps use the runner's default shell. Do not put a step on `pwsh`: Homebrew's `pwsh` launcher
+on macOS overwrites `DOTNET_ROOT`, and the smoke's .NET 9 bridge then cannot start. On macOS each engine accepts only an Xcode range (its
 `Engine/Config/Apple/Apple_SDK.json`; UE 5.7 stops at 26.9). Keep the newest Xcode selected
 and install older ones side by side (`xcodes install 26.6 --directory /Applications`);
-`ue-env.ps1` hands a job a fitting `/Applications/Xcode*.app` through `DEVELOPER_DIR` when the
+`ue_env.py` hands a job a fitting `/Applications/Xcode*.app` through `DEVELOPER_DIR` when the
 selected one is out of range, without touching `xcode-select`. Finish a side-by-side Xcode's
 first launch once (`sudo DEVELOPER_DIR=<app>/Contents/Developer xcodebuild -license accept` and
 `-runFirstLaunch`): the job's later `/usr/bin` tools (git included) run through it.
@@ -502,10 +505,11 @@ keeps only ONE pending job and cancels the older one.
 
 So every self-hosted UE job (`plugin` and `connection-smoke` in
 `test_pull_request.yml`; `plugin` and `build-plugin-zip` in `release.yml`) takes a
-machine-wide lock with `.github/scripts/ue-machine-lock.ps1`:
+machine-wide lock with `scripts/ue_machine_lock.py`
+(`scripts/extension_suite.py` takes the same lock in-process for local runs):
 
-- **Acquire** runs just before the job's first UE step. It holds an exclusive OS file
-  handle on `C:\ProgramData\UnrealMCP-ci\ue.lock` (macOS/Linux:
+- **Acquire** runs just before the job's first UE step. It holds an exclusive OS lock on
+  `C:\ProgramData\UnrealMCP-ci\ue.lock` (a share-none handle; macOS/Linux:
   `/var/tmp/UnrealMCP-ci/ue.lock`, an exclusive `flock()`) through a small detached holder
   process, because the lock must outlive each step's own process. While it waits, it
   logs `waiting for the machine-wide UE lock ... held by: <repo> run <id> ...` once a
@@ -564,7 +568,7 @@ Defense in depth at the repository-settings level (operator):
 ### Registration steps (operator)
 
 A macOS or Linux runner only needs the engines installed (see *Which OS* above),
-`pwsh`, and the labels `self-hosted` + one `unreal-<major>-<minor>` per engine; with
+and the labels `self-hosted` + one `unreal-<major>-<minor>` per engine; with
 runner-manager: `runner-manager repo add IvanMurzak/Unreal-MCP --host-label <host>
 --max-capacity 1 --label unreal-5-8 --label unreal-5-7`, then `repo add-label … --label
 self-hosted`. The Windows runner, which also serves the Windows-only jobs:
@@ -590,17 +594,18 @@ Set via `gh variable set --repo IvanMurzak/Unreal-MCP <NAME> --body <VALUE>`
 | Variable | Required | Purpose |
 | --- | --- | --- |
 | `UNREAL_RUNNER_READY` | to enable the plugin legs | **Currently `true`** — a self-hosted Unreal runner is registered (2026-06-11), so the plugin legs run. Unset/anything-else → plugin legs skip. |
-| `UNREAL_ENGINE_PATH` | optional | Packaged-plugin UE install root on the runner. Defaults to the latest supported engine, `C:\Program Files\Epic Games\UE_5.8`. |
 | `UNREAL_SMOKE_READY` | to enable the `connection-smoke` leg | Gates the live relay round-trip leg (client → `gamedev-mcp-server` → sidecar → plugin → editor → tool, via `scripts/connection_smoke.py --mode custom`). **Separate from `UNREAL_RUNNER_READY`** so the smoke leg stays SKIPPED — never red-by-absence — until validated once on the runner. The leg builds the bridge (→ `UNREAL_MCP_BRIDGE_PATH`), `BuildPlugin`s into the smoke host project, downloads the public `gamedev-mcp-server` release, and asserts a tool battery. Set to `true` to enable. |
 
-Variables (not secrets) are correct here: none of these values are sensitive. An old
-`UNREAL_HOST_PROJECT` variable is no longer read (see *The smoke host project*) and can be deleted.
+Variables (not secrets) are correct here: none of these values are sensitive. The old
+`UNREAL_HOST_PROJECT` and `UNREAL_ENGINE_PATH` variables are no longer read: the smoke host comes from
+the repo (see *The smoke host project*), and `build-plugin-zip` finds UE 5.8 like every other job
+(`UE_ROOT_5_8` in the runner's environment overrides the default path).
 
 ### The smoke host project
 
 `connection-smoke` needs a real host `.uproject`. It is the repo's `tests/smoke-host`
 (a copy of the workspace's `engines/unreal/test-project`, `UnrealTestProject`) plus this PR's
-`UnrealMCP` plugin source: `scripts/smoke_host.py` syncs both (changed files only) into `smoke-host/` beside
+`UnrealMCP` plugin source: `ue_ci.py smoke-host` syncs both (changed files only) into `smoke-host/` beside
 `extension_suite.py`'s build caches (Windows `C:\wt\unreal-tests\<hash>\`, elsewhere
 `.artifacts/tests/` in the checkout), which survive jobs on the runner slot, so its Binaries,
 Intermediate and DerivedDataCache stay warm, and the host editor build recompiles only what changed
@@ -705,7 +710,7 @@ gh workflow run release.yml --repo IvanMurzak/Unreal-MCP --ref main -f dry_run=f
 ## Operator gate summary
 
 - A merge to `main` publishes **nothing** (`release.yml` is dispatch-only).
-- A real release is a **deliberate version bump** (run `bump-version.ps1`, commit,
+- A real release is a **deliberate version bump** (run `bump_version.py`, commit,
   merge) followed by a `workflow_dispatch` of `release.yml` on `main` with
   `dry_run=false`.
 - The dry-run (`dry_run=true`) is the safe rehearsal and the only way the release

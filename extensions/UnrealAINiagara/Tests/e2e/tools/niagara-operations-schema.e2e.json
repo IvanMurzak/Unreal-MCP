@@ -1,0 +1,10 @@
+{
+  "description": "SpawnSystem among the operations",
+  "tool": "rql-schema",
+  "input": {
+    "type": "NiagaraOperations"
+  },
+  "assert": {
+    "pattern": "SpawnSystem"
+  }
+}

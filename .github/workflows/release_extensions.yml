@@ -86,30 +86,24 @@ jobs:
       - name: Build CLI for live E2E
         working-directory: cli
         run: npm ci && npm run build
-      # This runner's engine install (any OS) and the chain python (UE's bundled Python 3.11 behind a
-      # space-free link): exports UE_ROOT, UE_PLATFORM, UE_RUNUAT and CHAIN_PY. See the script header.
+      # This runner's engine and its bundled Python as CHAIN_PY, which runs every later step (ue_env.py).
       - name: Resolve UE install + chain python
-        shell: pwsh
-        run: ./.github/scripts/ue-env.ps1 -Version '${{ matrix.ue }}'
+        uses: ./.github/actions/ue-env
+        with:
+          version: ${{ matrix.ue }}
       - name: Acquire machine-wide UE lock
-        shell: pwsh
-        run: ./.github/scripts/ue-machine-lock.ps1 -Action Acquire
+        run: ${{ env.CHAIN_PY }} scripts/ue_machine_lock.py acquire
       - name: Isolated builds and all Automation/E2E checks in one editor
-        shell: pwsh
-        run: |
-          & $env:CHAIN_PY scripts/extension_suite.py --engine $env:UE_ROOT --mode full --ue-lock-held --result-file .artifacts/suite-result.json
-          if ($LASTEXITCODE -ne 0) { throw 'Full extension suite failed' }
+        run: ${{ env.CHAIN_PY }} .github/scripts/ue_ci.py suite --mode full
       - uses: actions/upload-artifact@v7
         with:
           name: extension-suite-${{ matrix.ue }}-${{ matrix.os }}
           path: .artifacts/suite-result.json
           if-no-files-found: error
-      - name: Release machine-wide UE lock
-        if: always()
-        shell: pwsh
-        run: |
-          ./.github/scripts/ue-machine-lock.ps1 -Action Release
-          ./.github/scripts/ue-env.ps1 -RemoveLink
+      # Always the last step: cleanup, the lock release and the chain python link (`teardown` in ue_ci.py).
+      - name: Teardown (cleanup, release the machine-wide UE lock)
+        if: always() && env.CHAIN_PY != ''
+        run: ${{ env.CHAIN_PY }} .github/scripts/ue_ci.py teardown
 
   publish:
     needs: [validate, test]

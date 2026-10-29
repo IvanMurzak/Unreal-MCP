@@ -1,0 +1,10 @@
+{
+  "description": "the PaintLayers member",
+  "tool": "rql-schema",
+  "input": {
+    "type": "LandscapeProxy"
+  },
+  "assert": {
+    "pattern": "PaintLayers"
+  }
+}

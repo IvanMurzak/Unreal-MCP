@@ -1,0 +1,10 @@
+{
+  "description": "the count of landscapes",
+  "tool": "rql-query",
+  "input": {
+    "query": "landscapes | count"
+  },
+  "assert": {
+    "pattern": "\"text\"\\s*:\\s*\"\\d+\"|value\\\\?\"\\s*:\\s*\\d"
+  }
+}

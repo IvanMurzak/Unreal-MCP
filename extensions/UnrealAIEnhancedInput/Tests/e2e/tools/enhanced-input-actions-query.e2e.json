@@ -1,0 +1,10 @@
+{
+  "description": "the count of Input Actions",
+  "tool": "rql-query",
+  "input": {
+    "query": "inputActions | count"
+  },
+  "assert": {
+    "pattern": "\"text\"\\s*:\\s*\"\\d+\"|value\\\\?\"\\s*:\\s*\\d"
+  }
+}

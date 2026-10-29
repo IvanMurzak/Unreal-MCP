@@ -1,0 +1,10 @@
+{
+  "description": "the count of Gameplay Ability classes",
+  "tool": "rql-query",
+  "input": {
+    "query": "gasAbilities | count"
+  },
+  "assert": {
+    "pattern": "\"text\"\\s*:\\s*\"\\d+\"|value\\\\?\"\\s*:\\s*\\d"
+  }
+}

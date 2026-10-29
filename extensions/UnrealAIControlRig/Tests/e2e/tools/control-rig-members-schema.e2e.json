@@ -1,0 +1,10 @@
+{
+  "description": "the Controls member",
+  "tool": "rql-schema",
+  "input": {
+    "type": "ControlRigBlueprint"
+  },
+  "assert": {
+    "pattern": "Controls"
+  }
+}

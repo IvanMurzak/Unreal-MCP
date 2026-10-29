@@ -4,9 +4,9 @@ This is the short operator guide for cutting a new Unreal-MCP GitHub release **w
 
 The key rule is simple:
 
-- **`commands/bump-version.ps1` owns version edits**
+- **`commands/bump_version.py` owns version edits**
 - **`release.yml` owns GitHub Release creation, tag creation, asset upload, and npm publish**
-- **`commands/release-github.ps1` is only a safe wrapper around those two pieces**
+- **`commands/release_github.py` is only a safe wrapper around those two pieces**
 
 For the deep release architecture and artifact graph, read [`docs/RELEASING.md`](RELEASING.md). This file is the quick "what do I run?" layer.
 
@@ -16,8 +16,8 @@ For the deep release architecture and artifact graph, read [`docs/RELEASING.md`]
 
 Run the release workflow in **dry-run** mode before doing a real release:
 
-```powershell
-.\commands\release-github.ps1 -Mode dry-run -Wait
+```bash
+python commands/release_github.py --mode dry-run --wait
 ```
 
 That dispatches:
@@ -38,11 +38,11 @@ What it does:
 
 From a clean checkout of the Unreal-MCP repo:
 
-```powershell
-.\commands\release-github.ps1 -Mode prepare -NewVersion 0.6.5
+```bash
+python commands/release_github.py --mode prepare --new-version 0.6.5
 ```
 
-That runs `commands/bump-version.ps1` and updates the version-bearing files together.
+That runs `commands/bump_version.py` and updates the version-bearing files together.
 
 Then:
 
@@ -56,8 +56,8 @@ The merge publishes nothing (`release.yml` is dispatch-only).
 
 Once the untagged version is on `main`, dispatch the real release workflow:
 
-```powershell
-.\commands\release-github.ps1 -Mode publish -Wait
+```bash
+python commands/release_github.py --mode publish --wait
 ```
 
 That dispatches:
@@ -84,26 +84,26 @@ Those actions remain CI-owned or operator-reviewed on purpose.
 
 ### Prepare a version bump
 
-```powershell
-.\commands\release-github.ps1 -Mode prepare -NewVersion 0.6.5
+```bash
+python commands/release_github.py --mode prepare --new-version 0.6.5
 ```
 
 ### Dispatch a rehearsal
 
-```powershell
-.\commands\release-github.ps1 -Mode dry-run -Wait
+```bash
+python commands/release_github.py --mode dry-run --wait
 ```
 
 ### Dispatch a real publish
 
-```powershell
-.\commands\release-github.ps1 -Mode publish -Wait
+```bash
+python commands/release_github.py --mode publish --wait
 ```
 
 ### Watch the latest release workflow
 
-```powershell
-.\commands\release-github.ps1 -Mode watch
+```bash
+python commands/release_github.py --mode watch
 ```
 
 ## Safety notes
@@ -115,7 +115,7 @@ Those actions remain CI-owned or operator-reviewed on purpose.
    - prepare version bump
    - PR
    - merge to `main`
-   - dispatch `release.yml` (`-Mode publish`)
+   - dispatch `release.yml` (`--mode publish`)
 
 ## Recovery
 
@@ -127,6 +127,6 @@ If a release run fails:
 
 If you only need to inspect the latest run:
 
-```powershell
-.\commands\release-github.ps1 -Mode watch
+```bash
+python commands/release_github.py --mode watch
 ```

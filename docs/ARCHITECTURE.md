@@ -29,7 +29,7 @@ delivered it. Identifiers below (tool ids, command names, env vars, paths) were 
 | §7 Slate UI | implemented | #24 (AI Game Developer main window) + #29 (MCP Tools/Prompts/Resources aux windows) + #107 (collapsed the separate Settings window into the single main window, Unity-MCP parity) |
 | §8 Config & env | implemented | #8 (`UNREAL_MCP_*`, `.env`, on-disk config) |
 | §9.1 cli (`unreal-mcp-cli`, 18 commands) | implemented | #3 |
-| §9.2 Versioning | implemented | `commands/bump-version.ps1` single-sources `VersionName` across plugin/bridge/server/cli (the "≥ 6.8.0 w/ ProxyTool" pin is forward-looking — see §2.3 drift below) |
+| §9.2 Versioning | implemented | `commands/bump_version.py` single-sources `VersionName` across plugin/bridge/server/cli (the "≥ 6.8.0 w/ ProxyTool" pin is forward-looking — see §2.3 drift below) |
 | §9.3 Test strategy | implemented | bridge xUnit + cli vitest + plugin Automation specs (#13–#25), CI wiring #28 |
 | §9.4 CI (`test_pull_request` / `release` / `test_cli`) | implemented | #28 |
 | §10 system tools (3: `ping`, `unreal-skill-create`, `unreal-skill-generate` — see §2.4) | implemented | #4 + owner ruling 2026-07-25 |
@@ -758,7 +758,7 @@ The bundled binary is built from the SAME source tree at the SAME `VersionName` 
 same release job. The plugin/bridge handshake (`sidecarVersion` vs `pluginVersion`, §1.3) therefore
 always matches by construction; a skew can only occur if the user hand-replaces the bundled binary
 (still caught by the handshake check, which kills + hard-fails to the UI — there is no re-download
-recovery to attempt). `commands/bump-version.ps1` already moves the `.uplugin` `VersionName` and the
+recovery to attempt). `commands/bump_version.py` already moves the `.uplugin` `VersionName` and the
 bridge csproj `<Version>` together, so the plugin zip and the bundled bridge share one version.
 
 ### 6.5 Offline / air-gapped guarantee
@@ -831,8 +831,8 @@ all are handled in-repo (issues #139/#187), and submission itself remains an ope
    BuildPlugin asset are both cut from the same staged `Source/ThirdParty/UnrealMcpBridge/<rid>/` payloads.
 2. **No shipped test/automation module.** Fab review flags shipped test modules, so the DISTRIBUTED
    `UnrealMCP.uplugin` omits `UnrealMcpEditorTests`. PR/dev CI still runs the `UnrealMcp.` Automation
-   specs by transiently re-adding the module via `commands/test-module-uplugin.ps1` (idempotent
-   add/remove around the Automation BuildPlugin), then reverting — the committed/distributed descriptor
+   specs by adding the module only to `scripts/extension_suite.py`'s isolated build copy (by hand:
+   `commands/test_module_uplugin.py`, idempotent add/remove) — the committed/distributed descriptor
    never carries the test module. `BuildPlugin -Rocket` on the distributed descriptor stays green.
 3. **FilterPlugin hygiene.** `Config/FilterPlugin.ini` ships the `Source/ThirdParty/UnrealMcpBridge/...`
    tree; no source uses hardcoded/absolute paths (resolution is plugin-base-dir relative, §6.1); all
@@ -862,7 +862,7 @@ the C++ plugin never downloads the server (only the bridge — see the TODO in
   it** into the install dir — the sidecar files must land next to the exe.
 - **Version pin — independent of the plugin version:** the consumed server version is the
   `SERVER_VERSION` constant in `cli/src/lib/server-version.ts` (single source; plugin 0.x and
-  shared server 8.x deliberately diverge — `commands/bump-version.ps1` never touches it). A
+  shared server 8.x deliberately diverge — `commands/bump_version.py` never touches it). A
   `version` marker file beside the binary records the installed version; missing/mismatched →
   re-download. Bumping the pin requires the corresponding GameDev-MCP-Server release to already
   exist (docs/RELEASING.md).
@@ -1049,7 +1049,7 @@ Unreal-MCP/
 ├── samples/UnrealAITemplate/           # §5 extension template plugin
 ├── docs/  (ARCHITECTURE.md ← this doc, RELEASING.md, EXTENSIONS.md, claude/)
 ├── .github/workflows/  (test_pull_request.yml, test_cli.yml, release.yml)
-├── commands/bump-version.ps1
+├── commands/bump_version.py
 ├── AGENTS.md  README.md  LICENSE  .gitignore  .editorconfig
 ```
 
@@ -1064,11 +1064,11 @@ Their release/catalog and one-editor test design is specified in [EXTENSION-MONO
 The shared semver below applies only to core/bridge/CLI, not extensions.
 
 Single semver `MAJOR.MINOR.PATCH` shared by plugin (`.uplugin` `VersionName`), bridge and cli —
-`commands/bump-version.ps1` rewrites all of them (Unity/Godot convention). The plugin↔sidecar
+`commands/bump_version.py` rewrites all of them (Unity/Godot convention). The plugin↔sidecar
 download URL embeds the version (§6) and the handshake double-checks it, so the pair can never
 skew. The **consumed shared-server version is independent**: `cli/src/lib/server-version.ts`
 `SERVER_VERSION` pins the GameDev-MCP-Server release (§6) and is bumped deliberately, never by
-`bump-version.ps1`. `ipcVersion` (integer, starts at 1) only bumps on breaking IPC changes. NuGet
+`bump_version.py`. `ipcVersion` (integer, starts at 1) only bumps on breaking IPC changes. NuGet
 pins (`com.IvanMurzak.McpPlugin` ≥ 6.8.0 w/ ProxyTool, `com.IvanMurzak.ReflectorNet`) are owned by
 upstream release pipelines — never bumped ad-hoc (Godot lockstep rule).
 

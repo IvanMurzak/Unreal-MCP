@@ -1,0 +1,10 @@
+{
+  "description": "the count of PCG graphs",
+  "tool": "rql-query",
+  "input": {
+    "query": "pcgGraphs | count"
+  },
+  "assert": {
+    "pattern": "\"text\"\\s*:\\s*\"\\d+\"|value\\\\?\"\\s*:\\s*\\d"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "description": "the count of PCG components",
+  "tool": "rql-query",
+  "input": {
+    "query": "actors | get Components | where $ is PCGComponent | count"
+  },
+  "assert": {
+    "pattern": "\"text\"\\s*:\\s*\"\\d+\"|value\\\\?\"\\s*:\\s*\\d"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "description": "the count of water zones",
+  "tool": "rql-query",
+  "input": {
+    "query": "waterZones | count"
+  },
+  "assert": {
+    "pattern": "\"text\"\\s*:\\s*\"\\d+\"|value\\\\?\"\\s*:\\s*\\d"
+  }
+}

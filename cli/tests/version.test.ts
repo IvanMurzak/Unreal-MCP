@@ -17,7 +17,7 @@ afterEach(() => {
 });
 
 describe('version constants', () => {
-  it('match package.json (commands/bump-version.ps1 must rewrite both)', () => {
+  it('match package.json (commands/bump_version.py must rewrite both)', () => {
     expect(PACKAGE_NAME).toBe(pkg.name);
     expect(PACKAGE_VERSION).toBe(pkg.version);
   });
