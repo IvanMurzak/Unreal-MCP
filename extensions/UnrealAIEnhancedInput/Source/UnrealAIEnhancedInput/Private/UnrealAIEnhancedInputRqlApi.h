@@ -33,13 +33,16 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Enhanced Input", meta = (BlueprintInternalUseOnly = "true"))
 	UInputMappingContext* CreateContext(const FString& Path);
 
-	/** map a key ("SpaceBar", "W", "Gamepad_FaceButton_Bottom") to an action in a mapping context */
+	/** map a key ("SpaceBar", "W", "Gamepad_FaceButton_Bottom") to an action in a mapping context; Modifiers (optional, comma-separated, applied in order) shape that key's value: "Negate", "Swizzle" (X and Y swapped), "DeadZone", "Scalar", "Smooth", or another InputModifier class name. WASD into a 2D Move action: W "Swizzle", S "Swizzle, Negate", A "Negate", D none (Gamepad_Left2D needs none) */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Enhanced Input", meta = (BlueprintInternalUseOnly = "true"))
-	bool AddMapping(UInputMappingContext* Context, UInputAction* Action, const FString& Key);
+	bool AddMapping(UInputMappingContext* Context, UInputAction* Action, const FString& Key, const FString& Modifiers = TEXT(""));
 
 	/** remove every mapping of a key to an action from a mapping context; returns how many were removed */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Enhanced Input", meta = (BlueprintInternalUseOnly = "true"))
 	int32 RemoveMapping(UInputMappingContext* Context, UInputAction* Action, const FString& Key);
+
+	/** An InputModifier class as the operations and KeyMappings name it: "Negate" for InputModifierNegate. */
+	static FString ModifierDisplayName(const UClass* Class);
 
 	/** add an Enhanced Input action event for Action to an actor Blueprint's event graph (the Blueprint, its path, or unreal.asset(path).EventGraph), as the Blueprint editor's "EnhancedInputAction IA_Jump" node: exec pins Triggered, Started, Ongoing, Canceled, Completed and the ActionValue; wire it with ref(node) | call Connect("Triggered", ref(other), "execute"); fires on the pawn the player controls once its mapping context is added (AddMappingContextOnBeginPlay); returns the node */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Enhanced Input", meta = (BlueprintInternalUseOnly = "true"))

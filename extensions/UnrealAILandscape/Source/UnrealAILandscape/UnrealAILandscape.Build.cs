@@ -31,6 +31,11 @@ public class UnrealAILandscape : ModuleRules
 			// A built-in engine module (no .uplugin entry): ALandscapeProxy / ULandscapeInfo for the landscapes source
 			// and the Sections / PaintLayers members.
 			"Landscape",
+			// The `landscape` operations: UMaterialEditingLibrary (CreateLayerMaterial's Landscape Layer Blend graph).
+			"MaterialEditor",
+			// LandscapeEdit.h (the height / weight accessors) includes InstancedFoliageActor.h.
+			"Foliage",
+			"UnrealEd",
 		});
 	}
 }

@@ -19,6 +19,10 @@
 #include "Engine/BlueprintGeneratedClass.h"
 #include "GameFramework/Actor.h"
 #include "GameFramework/Character.h"
+#include "EnhancedActionKeyMapping.h"
+#include "InputCoreTypes.h"
+#include "InputMappingContext.h"
+#include "InputModifiers.h"
 #include "K2Node_CallFunction.h"
 #include "K2Node_CallParentFunction.h"
 #include "K2Node_EnhancedInputAction.h"
@@ -217,6 +221,47 @@ void FUnrealAIEnhancedInputSpec::Define()
 			TestTrue(*FString::Printf(TEXT("Mappings lists the mapping too (%s)"), *ReflectedText.Left(300)), ReflectedText.Contains(TEXT("SpaceBar")));
 			// enhancedInput | call AddMapping("<context>", "<action>", "NoSuchKey")
 			TestFalse(TEXT("unknown key refused"), UnrealMcpRqlTools::RunPlan(FString::Printf(TEXT(R"RQL({"rql":"0.1","source":{"path":["enhancedInput"]},"stages":[{"op":"call","method":"AddMapping","args":[{"lit":"%s"},{"lit":"%s"},{"lit":"NoSuchKeyRqlSpec"}]}]})RQL"), *NewContextPath, *NewActionPath), true));
+		});
+
+		It("maps WASD into a 2D action with modifiers, lists them in KeyMappings and refuses an unknown modifier", [this]()
+		{
+			const FString Id = FGuid::NewGuid().ToString(EGuidFormats::Digits);
+			ActionPath = FString::Printf(TEXT("/Game/RqlSpec/IA_Move_%s"), *Id);
+			ContextPath = FString::Printf(TEXT("/Game/RqlSpec/IMC_Move_%s"), *Id);
+			// enhancedInput | call CreateAction("@IA@", "Axis2D")
+			TestTrue(TEXT("action created"), IsOk(Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["enhancedInput"]},"stages":[{"op":"call","method":"CreateAction","args":[{"lit":"@IA@"},{"lit":"Axis2D"}]}]})RQL"), true)));
+			// enhancedInput | call CreateContext("@IMC@")
+			TestTrue(TEXT("context created"), IsOk(Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["enhancedInput"]},"stages":[{"op":"call","method":"CreateContext","args":[{"lit":"@IMC@"}]}]})RQL"), true)));
+			// [["W", "Swizzle"], ["S", "Swizzle, Negate"], ["A", "InputModifierNegate"], ["D", ""]] | call enhancedInput.AddMapping("@IMC@", "@IA@", $[0], $[1])
+			const TSharedPtr<FJsonObject> Mapped = Run(TEXT(R"RQL({"rql":"0.1","source":{"list":[{"list":[{"lit":"W"},{"lit":"Swizzle"}]},{"list":[{"lit":"S"},{"lit":"Swizzle, Negate"}]},{"list":[{"lit":"A"},{"lit":"InputModifierNegate"}]},{"list":[{"lit":"D"},{"lit":""}]}]},"stages":[{"op":"call","method":"AddMapping","on":{"path":["enhancedInput"]},"args":[{"lit":"@IMC@"},{"lit":"@IA@"},{"path":[{"index":0}]},{"path":[{"index":1}]}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("WASD mapped (%s)"), *Codes(Mapped)), IsOk(Mapped));
+			TMap<FString, TArray<FString>> Modifiers;
+			if (const UInputMappingContext* Context = LoadObject<UInputMappingContext>(nullptr, *ContextPath))
+			{
+				for (const FEnhancedActionKeyMapping& Mapping : Context->GetMappings())
+				{
+					TArray<FString>& Names = Modifiers.FindOrAdd(Mapping.Key.GetFName().ToString());
+					for (const UInputModifier* Modifier : Mapping.Modifiers)
+						Names.Add(Modifier ? Modifier->GetClass()->GetName() : TEXT("null"));
+				}
+			}
+			TestEqual(TEXT("four keys"), Modifiers.Num(), 4);
+			TestEqual(TEXT("W swizzles"), Modifiers.FindRef(TEXT("W")), TArray<FString>{ TEXT("InputModifierSwizzleAxis") });
+			TestEqual(TEXT("S swizzles then negates"), Modifiers.FindRef(TEXT("S")), TArray<FString>({ TEXT("InputModifierSwizzleAxis"), TEXT("InputModifierNegate") }));
+			TestEqual(TEXT("A negates (full class name)"), Modifiers.FindRef(TEXT("A")), TArray<FString>{ TEXT("InputModifierNegate") });
+			TestEqual(TEXT("D has none"), Modifiers.FindRef(TEXT("D")).Num(), 0);
+			// unreal.asset("@IMC@") | select KeyMappings
+			const FString Listed = Codes(Run(TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@IMC@"}]},"stages":[{"op":"select","fields":[{"name":"KeyMappings","expr":{"path":["KeyMappings"]}}]}]})RQL"), false));
+			TestTrue(*FString::Printf(TEXT("KeyMappings lists the modifiers (%s)"), *Listed), Listed.Contains(TEXT("SwizzleAxis")) && Listed.Contains(TEXT("Negate")));
+			// enhancedInput | call AddMapping("@IMC@", "@IA@", "Up", "Negate, NoSuchModifier")
+			const TSharedPtr<FJsonObject> Refused = Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["enhancedInput"]},"stages":[{"op":"call","method":"AddMapping","args":[{"lit":"@IMC@"},{"lit":"@IA@"},{"lit":"Up"},{"lit":"Negate, NoSuchModifier"}]}]})RQL"), true);
+			TestFalse(TEXT("unknown modifier refused"), IsOk(Refused));
+			TestTrue(*FString::Printf(TEXT("the error lists the modifiers (%s)"), *Codes(Refused)), Codes(Refused).Contains(TEXT("SwizzleAxis")));
+			const UInputMappingContext* After = LoadObject<UInputMappingContext>(nullptr, *ContextPath);
+			TestFalse(TEXT("nothing mapped for the refused key"), After && After->GetMappings().ContainsByPredicate([](const FEnhancedActionKeyMapping& Mapping)
+			{
+				return Mapping.Key == EKeys::Up;
+			}));
 		});
 
 		It("adds an action event to a Character Blueprint that wires to Jump and compiles; one event per action", [this]()

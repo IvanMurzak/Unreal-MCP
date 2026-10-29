@@ -148,6 +148,9 @@ BEGIN_DEFINE_SPEC(FUnrealMcpRqlSpec, "UnrealMcp.Tools.Rql",
 			GEditor->SelectNone(false, true);
 		for (AActor* Actor : Lamps())
 			Actor->GetWorld()->EditorDestroyActor(Actor, true);
+		// The undo buffer would keep dropped spec assets and destroyed lamps alive for later specs.
+		if (GEditor)
+			GEditor->ResetTransaction(FText::FromString(TEXT("RQL specs")));
 	}
 
 	/** editor | call SpawnActor("PointLight", "RqlSpecLamp", "(1, 2, 3)") */

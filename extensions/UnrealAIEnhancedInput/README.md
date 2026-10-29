@@ -1,6 +1,6 @@
 # EnhancedInput RQL module
 
-RQL module for Unreal's Enhanced Input system: query Input Actions and Mapping Contexts with their key mappings, create actions and contexts, map keys.
+RQL module for Unreal's Enhanced Input system: query Input Actions and Mapping Contexts with their key mappings, create actions and contexts, map keys (with modifiers such as Negate and Swizzle).
 
 An optional editor plugin in the [Unreal MCP monorepository](../../README.md), with its own module, version and release archive.
 
@@ -39,6 +39,7 @@ The extension adds its feature to the editor's RQL data layer (`rql-query` / `rq
 inputContexts | select Name KeyMappings
 enhancedInput | call CreateAction("/Game/Input/IA_Jump", "Boolean")
 enhancedInput | call AddMapping("/Game/Input/IMC_Default", "/Game/Input/IA_Jump", "SpaceBar")
+[["W", "Swizzle"], ["S", "Swizzle, Negate"], ["A", "Negate"], ["D", ""]] | call enhancedInput.AddMapping("/Game/Input/IMC_Default", "/Game/Input/IA_Move", $[0], $[1])
 enhancedInput | call AddMappingContextOnBeginPlay("/Game/BP_Hero", "/Game/Input/IMC_Default")
 enhancedInput | call AddActionEvent("/Game/BP_Hero", "/Game/Input/IA_Jump")      wire its Triggered pin with ref(node) | call Connect(...)
 ```
