@@ -515,6 +515,7 @@ jobs:
           $uproject = (& $env:CHAIN_PY scripts/smoke_host.py | Select-Object -Last 1)
           if ($LASTEXITCODE -ne 0) { throw "smoke_host.py failed ($LASTEXITCODE)" }
           "HOST_UPROJECT=$uproject" >> $env:GITHUB_ENV
+          "SMOKE_LOGS=$(Join-Path (Split-Path -Parent $uproject) 'Saved/Logs')" >> $env:GITHUB_ENV
           Write-Host "Smoke host project: $uproject"
 
       # Machine-wide UE serialization (#293) — see the plugin job. Taken after the chain feed and
@@ -617,6 +618,17 @@ jobs:
             3 { Write-Host "::error title=chain fixture::contract-change: the editor tool contract differs from $env:CHAIN_FIXTURE_COMMITTED (unified diff above and in diff.txt)"; exit 3 }
             default { Write-Host "::error title=chain fixture::diff exited $rc"; exit $rc }
           }
+
+      # The editor, sidecar (UnrealMcpBridge.log) and server logs: the smoke prints only the editor log's
+      # tail, and the cleanup step below deletes Saved/Logs.
+      - name: Upload smoke logs on failure
+        if: failure() && env.SMOKE_LOGS != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: smoke-logs-unreal-${{ matrix.ue }}
+          path: ${{ env.SMOKE_LOGS }}
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: chain fixture artifact
         if: always()
