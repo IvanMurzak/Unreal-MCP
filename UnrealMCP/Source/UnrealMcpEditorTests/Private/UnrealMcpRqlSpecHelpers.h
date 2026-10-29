@@ -128,19 +128,23 @@ namespace UnrealMcpRqlSpecHelpers
 		return Value;
 	}
 
-	/** Throw away an object a spec created in its own package (unsaved): unpublished, garbage, its package clean. */
+	/**
+	 * Throw away an object a spec created in its own package (unsaved): unpublished and its package clean, so the next
+	 * garbage collection reclaims both once nothing references them. Not MarkAsGarbage: forcing a Blueprint and its
+	 * package to garbage while the editor world still holds a destroyed (not yet purged) instance of its class made the
+	 * next collection crash on a worker (EXCEPTION_ACCESS_VIOLATION reading 0xC in the reachability pass) about once in
+	 * 70 runs of a placed-actor spec.
+	 */
 	inline void DropObject(UObject* Object)
 	{
 		if (!IsValid(Object))
 			return;
 		UPackage* Package = Object->GetOutermost();
 		Object->ClearFlags(RF_Public | RF_Standalone);
-		Object->MarkAsGarbage();
 		if (Package)
 		{
 			Package->SetDirtyFlag(false);
 			Package->ClearFlags(RF_Standalone);
-			Package->MarkAsGarbage();
 		}
 	}
 
