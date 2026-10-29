@@ -513,7 +513,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
             // pre-handshake auth gate, with no response ever returning. Fail fast pre-ack instead (§1.4).
             var stream = _stream;
             if (stream == null || !_ackAccepted || _tcp is not { Connected: true })
-                throw new IpcDisconnectedException();
+                throw IpcDisconnectedException.BeforeSend();
 
             var requestId = Guid.NewGuid().ToString("N");
             var task = registry.Register(requestId);

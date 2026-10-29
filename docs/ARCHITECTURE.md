@@ -306,8 +306,12 @@ Stopped → LaunchingSidecar → WaitingHandshake → Ready ⇄ Degraded → Sto
   even when its `revision` is unchanged (the §2.2 rule-3 guard only filters races *within* one
   connection). On IPC disconnect the sidecar **immediately fails ALL pending proxy calls** with
   the structured "Unreal editor bridge disconnected" error — it never lets them hang to
-  `timeoutMs`. Both sides silently drop `tool-response`s for unknown or already-completed
-  `requestId`s (covers late responses straddling a reconnect).
+  `timeoutMs`. A call refused before it is sent (no link, or no `handshake-ack` yet) never started, so it is
+  answered `ResponseCallTool.NotExecuted` (HTTP 503): the MCP server may re-send it within its reconnect wait,
+  and otherwise reports it as safe to retry (`[plugin_reloading]`). (While this sidecar stays connected, a
+  same-id re-send is answered from McpPlugin's duplicate-request cache, so it reaches the editor only after a
+  sidecar restart.)
+  Both sides silently drop `tool-response`s for unknown or already-completed `requestId`s (covers late responses straddling a reconnect).
 
 ---
 

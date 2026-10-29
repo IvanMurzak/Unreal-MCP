@@ -116,6 +116,9 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         public int Calls { get; private set; }
         public int LastTimeoutMs { get; private set; }
 
+        /// <summary>When set, the call fails as a link drop AFTER it was sent (the editor may have started it).</summary>
+        public bool DropsMidCall { get; set; }
+
         public FakeToolCallChannel(Func<string, JsonObject?, ToolResponseMessage>? responder = null)
             => _responder = responder;
 
@@ -126,6 +129,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             LastArguments = arguments;
             LastTimeoutMs = timeoutMs;
             if (!Connected)
+                throw IpcDisconnectedException.BeforeSend();
+            if (DropsMidCall)
                 throw new IpcDisconnectedException();
 
             var response = _responder?.Invoke(tool, arguments) ?? new ToolResponseMessage
