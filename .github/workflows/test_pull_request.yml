@@ -412,7 +412,7 @@ jobs:
   # runner var), so it stays SKIPPED — never red-by-absence — until the owner has
   # validated it once on the runner and flips the variable. Prerequisites the
   # owner confirms before enabling (see docs/RELEASING.md):
-  #   • the host project is tests/smoke-host (the job syncs, packages and builds it); and
+  #   • the host project is tests/smoke-host (the job syncs it with the plugin source and builds it); and
   #   • a bridge sidecar is resolvable — this job builds it and exports
   #     UNREAL_MCP_BRIDGE_PATH (PR builds do not bundle the §6 sidecar; only the
   #     release job does).
