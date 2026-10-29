@@ -174,6 +174,143 @@ void FUnrealMcpRqlAdaptersSpec::Define()
 			GEditor->ResetTransaction(FText::FromString(TEXT("RQL adapter specs")));
 	});
 
+	Describe("literal kinds (RQL 2f4e263, aacfbba)", [this]()
+	{
+		It("builds instanced (EditInlineNew) subobjects from literals, owned by the written object, as one undo step", [this]()
+		{
+			// ref("UnrealMcpRqlSpecFixture#@F@") | set Scaled = [{Scale: 2.5}, {Weight: 3}]
+			const FString Set = TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"UnrealMcpRqlSpecFixture#@F@"}]},"stages":[{"op":"set","assign":[{"target":{"path":["Scaled"]},"value":{"list":[{"object":[{"key":"Scale","value":{"lit":2.5}}]},{"object":[{"key":"Weight","value":{"lit":3}}]}]}}]}]})RQL");
+			const TSharedPtr<FJsonObject> DryRun = UnrealMcpRqlSpecHelpers::Exec(*this, UnrealMcpRqlSpecHelpers::Fill(Set, { { TEXT("F"), FixtureId } }), true, true);
+			TestTrue(*FString::Printf(TEXT("dry run ok (%s)"), *UnrealMcpRqlSpecHelpers::Codes(DryRun)), UnrealMcpRqlSpecHelpers::IsOk(DryRun));
+			TestEqual(TEXT("a dry run writes nothing"), Fixture->Scaled.Num(), 0);
+
+			Must(Set);
+			if (!TestEqual(TEXT("two subobjects"), Fixture->Scaled.Num(), 2))
+				return;
+			const UUnrealMcpRqlSpecInlineScaled* First = Fixture->Scaled[0];
+			const UUnrealMcpRqlSpecInlineScaled* Second = Fixture->Scaled[1];
+			if (!TestTrue(TEXT("both built"), First != nullptr && Second != nullptr))
+				return;
+			TestEqual(TEXT("Scale from the literal"), First->Scale, 2.5f);
+			TestEqual(TEXT("Weight from the literal"), Second->Weight, 3.0f);
+			TestTrue(TEXT("two objects"), First != Second);
+			TestTrue(TEXT("owned by the fixture (its outer)"), First->GetOuter() == Fixture && Second->GetOuter() == Fixture);
+			TestTrue(TEXT("transactional, as the editor's instanced arrays make them"), First->HasAnyFlags(RF_Transactional));
+			TestFalse(TEXT("not a class default"), First->HasAnyFlags(RF_ClassDefaultObject | RF_ArchetypeObject));
+
+			// ref("UnrealMcpRqlSpecFixture#@F@") | set Scaled = append(Scaled, {Scale: 7})
+			Must(TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"UnrealMcpRqlSpecFixture#@F@"}]},"stages":[{"op":"set","assign":[{"target":{"path":["Scaled"]},"value":{"call":"append","args":[{"path":["Scaled"]},{"object":[{"key":"Scale","value":{"lit":7}}]}]}}]}]})RQL"));
+			TestEqual(TEXT("append adds a third"), Fixture->Scaled.Num(), 3);
+			TestTrue(TEXT("append keeps the existing objects"), Fixture->Scaled.Num() == 3 && Fixture->Scaled[0] == First && Fixture->Scaled[1] == Second
+				&& Fixture->Scaled[2] && Fixture->Scaled[2]->Scale == 7.0f);
+
+			// ref("UnrealMcpRqlSpecFixture#@F@") | select n = Scaled.count(), s = Scaled[0].Scale, w = Scaled[1].Weight
+			const TSharedPtr<FJsonObject> Read = Run(TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"UnrealMcpRqlSpecFixture#@F@"}]},"stages":[{"op":"select","fields":[{"name":"n","expr":{"call":"count","on":{"path":["Scaled"]},"args":[]}},{"name":"s","expr":{"path":["Scaled",{"index":0},"Scale"]}},{"name":"w","expr":{"path":["Scaled",{"index":1},"Weight"]}}]}]})RQL"));
+			TestEqual(TEXT("reads the count"), UnrealMcpRqlSpecHelpers::CellText(Read, 0, 0), FString(TEXT("3")));
+			TestEqual(TEXT("reads Scale"), UnrealMcpRqlSpecHelpers::CellText(Read, 0, 1), FString(TEXT("2.5")));
+			TestEqual(TEXT("reads Weight"), UnrealMcpRqlSpecHelpers::CellText(Read, 0, 2), FString(TEXT("3")));
+
+			if (!GEditor)
+				return;
+			TestTrue(TEXT("undo the append"), GEditor->UndoTransaction());
+			TestEqual(TEXT("undo drops the appended one"), Fixture->Scaled.Num(), 2);
+			TestTrue(TEXT("undo the first set"), GEditor->UndoTransaction());
+			TestEqual(TEXT("undo empties the array again"), Fixture->Scaled.Num(), 0);
+		});
+
+		It("builds subclasses of an abstract instanced class from $type literals (resolve_subtype)", [this]()
+		{
+			// ref("UnrealMcpRqlSpecFixture#@F@") | set Inline = [{$type: "UnrealMcpRqlSpecInlineScaled", Scale: 2.5}, {$type: "UnrealMcpRqlSpecInlineOffset", Weight: 3, Offset: [0, 0, 10]}]
+			const FString Set = TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"UnrealMcpRqlSpecFixture#@F@"}]},"stages":[{"op":"set","assign":[{"target":{"path":["Inline"]},"value":{"list":[{"object":[{"key":"$type","value":{"lit":"UnrealMcpRqlSpecInlineScaled"}},{"key":"Scale","value":{"lit":2.5}}]},{"object":[{"key":"$type","value":{"lit":"UnrealMcpRqlSpecInlineOffset"}},{"key":"Weight","value":{"lit":3}},{"key":"Offset","value":{"list":[{"lit":0},{"lit":0},{"lit":10}]}}]}]}}]}]})RQL");
+			const TSharedPtr<FJsonObject> DryRun = UnrealMcpRqlSpecHelpers::Exec(*this, UnrealMcpRqlSpecHelpers::Fill(Set, { { TEXT("F"), FixtureId } }), true, true);
+			TestTrue(*FString::Printf(TEXT("dry run ok (%s)"), *UnrealMcpRqlSpecHelpers::Codes(DryRun)), UnrealMcpRqlSpecHelpers::IsOk(DryRun));
+			TestEqual(TEXT("a dry run writes nothing"), Fixture->Inline.Num(), 0);
+
+			Must(Set);
+			if (!TestEqual(TEXT("two subobjects"), Fixture->Inline.Num(), 2))
+				return;
+			const UUnrealMcpRqlSpecInlineScaled* Scaled = Cast<UUnrealMcpRqlSpecInlineScaled>(Fixture->Inline[0]);
+			const UUnrealMcpRqlSpecInlineOffset* Offset = Cast<UUnrealMcpRqlSpecInlineOffset>(Fixture->Inline[1]);
+			TestTrue(TEXT("the $type classes"), Scaled != nullptr && Offset != nullptr);
+			if (!Scaled || !Offset)
+				return;
+			TestEqual(TEXT("Scale from the literal"), Scaled->Scale, 2.5f);
+			TestEqual(TEXT("Weight from the literal"), Offset->Weight, 3.0f);
+			TestEqual(TEXT("Offset from the literal"), Offset->Offset, FVector(0, 0, 10));
+			TestTrue(TEXT("owned by the fixture (its outer)"), Scaled->GetOuter() == Fixture && Offset->GetOuter() == Fixture);
+			TestTrue(TEXT("transactional, as the editor's instanced arrays make them"), Scaled->HasAnyFlags(RF_Transactional));
+			TestFalse(TEXT("not the class default"), Scaled->HasAnyFlags(RF_ClassDefaultObject | RF_ArchetypeObject));
+
+			// ref("UnrealMcpRqlSpecFixture#@F@") | set Inline = append(Inline, {$type: "UnrealMcpRqlSpecInlineScaled"})
+			Must(TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"UnrealMcpRqlSpecFixture#@F@"}]},"stages":[{"op":"set","assign":[{"target":{"path":["Inline"]},"value":{"call":"append","args":[{"path":["Inline"]},{"object":[{"key":"$type","value":{"lit":"UnrealMcpRqlSpecInlineScaled"}}]}]}}]}]})RQL"));
+			TestEqual(TEXT("append adds a third"), Fixture->Inline.Num(), 3);
+			TestTrue(TEXT("append keeps the existing objects"), Fixture->Inline.Num() == 3 && Fixture->Inline[0] == Scaled && Fixture->Inline[1] == Offset);
+
+			// ref("UnrealMcpRqlSpecFixture#@F@") | set InlineOne = {$type: "UnrealMcpRqlSpecInlineScaled", Scale: 4}
+			Must(TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"UnrealMcpRqlSpecFixture#@F@"}]},"stages":[{"op":"set","assign":[{"target":{"path":["InlineOne"]},"value":{"object":[{"key":"$type","value":{"lit":"UnrealMcpRqlSpecInlineScaled"}},{"key":"Scale","value":{"lit":4}}]}}]}]})RQL"));
+			const UUnrealMcpRqlSpecInlineScaled* One = Cast<UUnrealMcpRqlSpecInlineScaled>(Fixture->InlineOne);
+			TestTrue(TEXT("a single instanced member"), One && One->Scale == 4.0f && One->GetOuter() == Fixture);
+
+			// ref("UnrealMcpRqlSpecFixture#@F@") | select n = Inline.count(), s = Inline[0].Scale, w = Inline[1].Weight
+			const TSharedPtr<FJsonObject> Read = Run(TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"UnrealMcpRqlSpecFixture#@F@"}]},"stages":[{"op":"select","fields":[{"name":"n","expr":{"call":"count","on":{"path":["Inline"]},"args":[]}},{"name":"s","expr":{"path":["Inline",{"index":0},"Scale"]}},{"name":"w","expr":{"path":["Inline",{"index":1},"Weight"]}}]}]})RQL"));
+			TestEqual(TEXT("reads the count"), UnrealMcpRqlSpecHelpers::CellText(Read, 0, 0), FString(TEXT("3")));
+			TestEqual(TEXT("reads Scale"), UnrealMcpRqlSpecHelpers::CellText(Read, 0, 1), FString(TEXT("2.5")));
+			TestEqual(TEXT("reads Weight"), UnrealMcpRqlSpecHelpers::CellText(Read, 0, 2), FString(TEXT("3")));
+
+			if (!GEditor)
+				return;
+			TestTrue(TEXT("undo InlineOne"), GEditor->UndoTransaction());
+			TestTrue(TEXT("undo the append"), GEditor->UndoTransaction());
+			TestTrue(TEXT("undo the first set"), GEditor->UndoTransaction());
+			TestEqual(TEXT("undo empties the array again"), Fixture->Inline.Num(), 0);
+			TestTrue(TEXT("undo clears InlineOne"), Fixture->InlineOne == nullptr);
+		});
+
+		It("asks for a concrete $type for an abstract instanced class, and names an unknown one", [this]()
+		{
+			// ref("UnrealMcpRqlSpecFixture#@F@") | set InlineOne = {Weight: 2}
+			Refuses(TEXT("abstract without $type"), TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"UnrealMcpRqlSpecFixture#@F@"}]},"stages":[{"op":"set","assign":[{"target":{"path":["InlineOne"]},"value":{"object":[{"key":"Weight","value":{"lit":2}}]}}]}]})RQL"),
+				TEXT("UnrealMcpRqlSpecInline is abstract: name a concrete class with $type (e.g. UnrealMcpRqlSpecInlineOffset, UnrealMcpRqlSpecInlineScaled)"));
+			// ref("UnrealMcpRqlSpecFixture#@F@") | set InlineOne = {$type: "UnrealMcpRqlSpecNoSuchInline"}
+			Refuses(TEXT("unknown $type"), TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"UnrealMcpRqlSpecFixture#@F@"}]},"stages":[{"op":"set","assign":[{"target":{"path":["InlineOne"]},"value":{"object":[{"key":"$type","value":{"lit":"UnrealMcpRqlSpecNoSuchInline"}}]}}]}]})RQL"),
+				TEXT("no concrete type named 'UnrealMcpRqlSpecNoSuchInline'"));
+			TestTrue(TEXT("nothing written"), Fixture->InlineOne == nullptr);
+		});
+
+		It("refuses a literal for an engine object with the Unreal way to reference one", [this]()
+		{
+			// ref("UnrealMcpRqlSpecFixture#@F@") | set Reference = {}
+			const FString Plan = TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"UnrealMcpRqlSpecFixture#@F@"}]},"stages":[{"op":"set","assign":[{"target":{"path":["Reference"]},"value":{"object":[]}}]}]})RQL");
+			Refuses(TEXT("engine object"), Plan, TEXT("is an engine object and cannot be built from an object literal"));
+			Refuses(TEXT("engine object hint"), Plan, TEXT("unreal.find(\"Label\")"));
+		});
+	});
+
+	Describe("vector functions and list arithmetic (RQL 2f4e263)", [this]()
+	{
+		It("writes normalize(v) * k and [x, 0, z] * k, and reads distance / length", [this]()
+		{
+			// ref("UnrealMcpRqlSpecFixture#@F@") | set Vector = normalize([3, 0, 4]) * 10, Points = [[1, 0, 2] * 3]
+			Must(TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"UnrealMcpRqlSpecFixture#@F@"}]},"stages":[{"op":"set","assign":[{"target":{"path":["Vector"]},"value":{"op":"*","args":[{"call":"normalize","args":[{"list":[{"lit":3},{"lit":0},{"lit":4}]}]},{"lit":10}]}},{"target":{"path":["Points"]},"value":{"list":[{"op":"*","args":[{"list":[{"lit":1},{"lit":0},{"lit":2}]},{"lit":3}]}]}}]}]})RQL"));
+			TestTrue(*FString::Printf(TEXT("normalize * 10 (%s)"), *Fixture->Vector.ToString()), Fixture->Vector.Equals(FVector(6, 0, 8), 1e-6));
+			TestTrue(TEXT("a list times a number"), Fixture->Points.Num() == 1 && Fixture->Points[0].Equals(FVector(3, 0, 6), 1e-9));
+			// ref("UnrealMcpRqlSpecFixture#@F@") | select d = distance(Vector, [0, 0, 0]), l = Vector.length(), p = Points[0]
+			const TSharedPtr<FJsonObject> Read = Run(TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"UnrealMcpRqlSpecFixture#@F@"}]},"stages":[{"op":"select","fields":[{"name":"d","expr":{"call":"distance","args":[{"path":["Vector"]},{"list":[{"lit":0},{"lit":0},{"lit":0}]}]}},{"name":"l","expr":{"call":"length","on":{"path":["Vector"]},"args":[]}},{"name":"p","expr":{"path":["Points",{"index":0}]}}]}]})RQL"));
+			TestTrue(*FString::Printf(TEXT("ok (%s)"), *UnrealMcpRqlSpecHelpers::Codes(Read)), UnrealMcpRqlSpecHelpers::IsOk(Read));
+			TestEqual(TEXT("distance"), UnrealMcpRqlSpecHelpers::CellText(Read, 0, 0), FString(TEXT("10")));
+			TestEqual(TEXT("length"), UnrealMcpRqlSpecHelpers::CellText(Read, 0, 1), FString(TEXT("10")));
+		});
+
+		It("warns when a sort key fails", [this]()
+		{
+			// levels | sort (len(Map) / 0) | select Map
+			const TSharedPtr<FJsonObject> Sorted = Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["levels"]},"stages":[{"op":"sort","keys":[{"expr":{"op":"/","args":[{"call":"len","args":[{"path":["Map"]}]},{"lit":0}]}}]},{"op":"select","fields":[{"name":"Map","expr":{"path":["Map"]}}]}]})RQL"));
+			TestTrue(TEXT("still ok"), UnrealMcpRqlSpecHelpers::IsOk(Sorted));
+			TestTrue(*FString::Printf(TEXT("warns about the key (%s)"), *UnrealMcpRqlSpecHelpers::Codes(Sorted)),
+				UnrealMcpRqlSpecHelpers::Codes(Sorted).Contains(TEXT("sort key 1 failed for ")));
+		});
+	});
+
 	Describe("math structs", [this]()
 	{
 		It("reads and writes Vector as text, lists and object literals, and rejects malformed text", [this]()

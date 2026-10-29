@@ -84,12 +84,14 @@ enhancedInput | call AddMapping("/Game/Input/IMC_Default", "/Game/Input/IA_Jump"
 enhancedInput | call RemoveMapping("/Game/Input/IMC_Default", "/Game/Input/IA_Jump", "SpaceBar")
 [["W", "Swizzle"], ["S", "Swizzle, Negate"], ["A", "Negate"], ["D", ""], ["Gamepad_Left2D", ""]] | call enhancedInput.AddMapping("/Game/Input/IMC_Default", "/Game/Input/IA_Move", $[0], $[1])
 unreal.asset("/Game/Input/IA_Move") | set ValueType = "Axis2D"
+unreal.asset("/Game/Input/IA_Jump") | set Triggers = [{$type: "InputTriggerHold", HoldTimeThreshold: 0.5}], Modifiers = append(Modifiers, {$type: "InputModifierNegate"})
 ```
 
 Key names are Unreal FKey names (SpaceBar, W, LeftMouseButton, Gamepad_LeftX, Gamepad_FaceButton_Bottom). A key mapped to
 an Axis2D action feeds its X: the 4th AddMapping argument lists modifiers (Negate, Swizzle = X and Y swapped, DeadZone,
 Scalar, ...) so WASD drive a 2D Move (W Swizzle, S Swizzle + Negate, A Negate, D none; ActionValue X = right, Y = forward).
-Created assets are unsaved: `editor | call SaveAll()`.
+An action's Triggers and Modifiers are instanced subobjects: write them as typed literals (`$type` = the class, e.g. InputTriggerPressed,
+InputTriggerHold, InputTriggerTap, InputModifierNegate, InputModifierDeadZone), built inside the action. Created assets are unsaved: `editor | call SaveAll()`.
 
 Blueprint input (a Pawn / Character / PlayerController Blueprint): the context must be added at BeginPlay, then each action
 gets one event node whose exec pins (Triggered, Started, Ongoing, Canceled, Completed) and ActionValue are wired with the

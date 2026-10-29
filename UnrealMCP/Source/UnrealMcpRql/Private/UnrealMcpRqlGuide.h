@@ -13,10 +13,22 @@
 
 namespace UnrealMcpRqlGuide
 {
-	/** RQL's own language rules text (conditions, ?:, list equality, group items, receipts, call, bulk create, vectors, map keys). */
+	/**
+	 * RQL's own language rules text (conditions, ?:, list equality, group items, receipts, call, bulk create, vectors, map keys,
+	 * typed literals) with SpawnActor(ClassName, Label, Location, ...) calls as its creation examples.
+	 */
 	inline const char* LanguageRules()
 	{
-		return rql::language_rules();
+		static const std::string Rules = []()
+		{
+			rql::RuleExamples Examples;
+			Examples.create_call = "editor.SpawnActor";
+			Examples.grid = "editor.SpawnActor(\"/Engine/BasicShapes/Cube\", \"Tile_\" + $, [($ % 15) * 200, floor($ / 15) * 200, 0])";
+			Examples.per_entry = "[[\"Lamp_A\", [0, 0, 300]], [\"Lamp_B\", [400, 0, 300]]] | call editor.SpawnActor(\"PointLight\", $[0], $[1])";
+			Examples.named = "editor.SpawnActor({ClassName: \"/Engine/BasicShapes/Cube\", Label: \"Tile_\" + $, Location: [$ * 200, 0, 0]})";
+			return rql::language_rules_with(Examples);
+		}();
+		return Rules.c_str();
 	}
 
 	inline const char* QueryBlurb()
@@ -62,6 +74,7 @@ Results come back as compact rows (header line, then col|col). Long results are 
   actors | get Components | where $ is PointLightComponent and Intensity > 2 | select Owner.Label Intensity LightColor
   actors | get Components | where $ is LightComponentBase and CastShadows | sort Intensity desc | select Owner.Label $type Intensity      every light kind (sky lights too)
   actors | where Parent == null | recurse Children | select $depth Label
+  actors | where $ is PointLight and distance(Location, unreal.find("Player").Location) < 1000 | select Label      within 10 m (cm)
   unreal.assets("MaterialInstanceConstant") | select Name Scalars Vectors
   console | where Verbosity == "Error" | sort Sequence desc | first 5 | select Message
   actors | get Components | where $ is LightComponentBase | group-by $type | select key, count, avg = items.avg(Intensity)
@@ -94,6 +107,9 @@ Results come back as compact rows (header line, then col|col). Long results are 
   actors | where Label starts-with "Enemy" | set bHidden = true          invisible in game (Actor Hidden In Game); HiddenInEditor only hides it in the editor viewport
   actors | where Label starts-with "Pillar_" | set Label = Label.replace("Pillar_", "Column_")      bulk rename
   actors | where Label starts-with "Crate" | sort Label | set Location.X = $index * 200              spread along X
+  actors | where Label starts-with "Guard" | set Location = Location + normalize([1, 1, 0]) * 300     3 m diagonally (vector functions: length, normalize, distance, dot, lerp; [X, 0, Z] * k)
+  unreal.asset("/Game/Input/IA_Jump") | set Triggers = [{$type: "InputTriggerHold", HoldTimeThreshold: 0.5}], Modifiers = append(Modifiers, {$type: "InputModifierNegate"})
+                         instanced subobjects (EditInlineNew: input triggers / modifiers ...) are built from a typed literal for the object that owns them
   actors | get Components | where $ is LightComponentBase | set Intensity = (Intensity > 5000 ? 5000 : Intensity)    clamp
   ref("Button#34") | set Slot.LayoutData.Anchors = "(Minimum=(X=0.5,Y=0),Maximum=(X=0.5,Y=0))"   structs also take UE's text form (the editor's Copy)
   unreal.asset("/Game/Materials/MI_Red") | set Scalars["Roughness"] = 0.2, Vectors["BaseColor"] = "(1, 0, 0, 1)"
@@ -157,12 +173,17 @@ Widgets and sequences:
 
 	inline const char* MutateOutro()
 	{
-		return "Object literals build values: set Settings = {Speed: 2}. At most 200 targets per call by default: pass max_targets "
+		return "Object literals build values: set Settings = {Speed: 2}, and instanced subobjects (EditInlineNew classes such as "
+			"input triggers and modifiers) from a typed literal: {$type: \"InputTriggerHold\", HoldTimeThreshold: 0.5}, owned by the "
+			"object written to. Actors, components and assets are never built from literals: reference them (unreal.find(\"Label\"), "
+			"ref(\"Type#id\"), an asset path) and create them with editor | call SpawnActor / AddComponent / CreateAsset. "
+			"Destructive cleanup (Destroy, DeleteAsset, removing many items): first list what would go (rql-query, or dry_run=true) "
+			"and show it to the user; delete only in a second call after that. At most 200 targets per call by default: pass max_targets "
 			"(up to 1000) for a bigger edit, it stays one all-or-nothing undo step; beyond 1000 split it with first N / skip N. A misspelt "
 			"member in where / get that leaves set / call nothing to change is an error (nothing changed); a real member no remaining "
 			"item has is a no-match (0 changes, warning). Filter before setting a member only some classes have: where $ is "
 			"LightComponentBase (or has(Intensity)) | set Intensity = ... When you use a different member than the user named (a "
-			"misspelling, or the did-you-mean of a warning), tell the user which member you changed. Bulk create: range(0, N) | call "
+			"misspelling, or the did-you-mean of a warning), or a different actor / asset than the name the user gave, tell the user which one you changed. Bulk create: range(0, N) | call "
 			"editor.SpawnActor(... $ ...) spawns N actors in one call (each counts against max_targets; every spawn is checked "
 			"before the first); the receipt has one row per actor with its $ref.";
 	}

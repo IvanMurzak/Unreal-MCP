@@ -1,6 +1,7 @@
 #include "rql/reflection.hpp"
 
 #include <cmath>
+#include <stdexcept>
 
 namespace rql {
 
@@ -390,6 +391,14 @@ const TypeDescriptor* TypeRegistry::map_type(const TypeDescriptor* key, const Ty
 }
 
 std::vector<const TypeDescriptor*> TypeRegistry::registered() const { return order_; }
+
+void TypeRegistry::register_descriptor(TypeDescriptor* d) {
+    if (!d || find_native(d->native_key) != d) throw std::invalid_argument("register_descriptor: not a descriptor of this registry (use descriptor_for)");
+    if (d->kind != TypeKind::Object && d->kind != TypeKind::Struct && d->kind != TypeKind::Enum)
+        throw std::invalid_argument("register_descriptor: " + d->name + " is not an object, struct or enum type");
+    if (d->name.empty() || d->name == "?") throw std::invalid_argument("register_descriptor: the descriptor has no name");
+    mark_registered(d);
+}
 
 Value TypeRegistry::finish_wrap(const TypeDescriptor* d, void* p, std::shared_ptr<void> keep) {
     if (d->kind == TypeKind::Struct && d->copy) return Value::structure(d, d->copy(p));

@@ -91,12 +91,16 @@ namespace UnrealMcpPythonTools
 	// overhead, rounded up), so the plugin cap below never cuts the runtime's output a second time.
 	static constexpr int32 PythonRuntimeLogChars = PythonMaxLogChars - 256;
 
+	/** The snippet's time budget when the call sets no 'timeout' (seconds); the glue makes it code_exec's default too. */
+	static constexpr int32 PythonDefaultTimeoutSeconds = 30;
+
 	/**
-	 * The snippet's time budget (Code-Exec timeoutMs): what is left of the call's timeout (UNREAL_MCP_TOOL_TIMEOUT; the call
-	 * may have waited for the game thread or for Python to start) less a margin for the reply, so code_exec's watchdog stops
-	 * an endless loop and frees the game thread before the dispatcher gives up on the call. Never 0, which means no bound.
+	 * The highest time budget a snippet may get (code_exec's set_max_timeout_ms): what is left of the call's timeout
+	 * (UNREAL_MCP_TOOL_TIMEOUT; the call may have waited for the game thread or for Python to start) less a margin for the
+	 * reply, so code_exec's watchdog stops an endless loop and frees the game thread before the dispatcher gives up on the
+	 * call. Never 0, which means no cap.
 	 */
-	static int32 PythonTimeBudgetMs(const FUnrealMcpToolCall& Call)
+	static int32 PythonMaxTimeBudgetMs(const FUnrealMcpToolCall& Call)
 	{
 		const int32 Timeout = Call.TimeoutMs > 0 ? Call.TimeoutMs : FUnrealMcpConfig::DefaultToolTimeoutMs; // none: a direct call (tests)
 		const double Waited = Call.ReceivedSeconds > 0.0 ? (FPlatformTime::Seconds() - Call.ReceivedSeconds) * 1000.0 : 0.0;
@@ -231,8 +235,14 @@ namespace UnrealMcpPythonTools
 			                  "objects that are Modify()'d record (set_editor_property, editor subsystems, obj.modify() first): direct setters such as "
 			                  "set_actor_location are neither undoable nor marked unsaved. Engine warnings and errors raised while it "
 			                  "runs are returned as logs too. An endless pure-Python loop or runaway recursion does not freeze the editor: it is "
-			                  "stopped with a Timeout error before the tool timeout and the editor keeps working (one long call into C, such as an "
-			                  "unreal call or time.sleep, finishes first); sys.setrecursionlimit is capped at 3000. Do not call this "
+			                  "stopped with a Timeout error after 'timeout' seconds (default 30, capped below the tool timeout) and the editor keeps "
+			                  "working (one long call into C, such as an unreal call or time.sleep, finishes first); sys.setrecursionlimit is capped "
+			                  "at 3000. Threads the snippet starts with threading.Thread are stopped once the run ends (when their own Python code "
+			                  "runs; not threads blocked in a C call or a queue, nor _thread.start_new_thread) and an unfired threading.Timer is "
+			                  "cancelled: join the work you start. Known engine crashes that take the editor down (avoid them): importing a malformed "
+			                  "or truncated OBJ through Interchange (AssetTools.import_asset_tasks / AssetImportTask) - check the file before importing it; "
+			                  "constructing unreal.NiagaraPythonEmitter() directly - read emitters with rql-query (NiagaraSystem.Emitters, Niagara "
+			                  "extension). Do not call this "
 			                  "editor's MCP server over HTTP from a snippet: that tool call needs the game thread the snippet holds and only "
 			                  "times out. Output is capped (~20k characters each for the value and the logs). 'include': helper files/folders (relative to "
 			                  "<Project>/.ai-game-dev/snippets): folders are importable, files run before the code. Blueprint "
@@ -242,6 +252,9 @@ namespace UnrealMcpPythonTools
 			                                "\\nlen(actors.get_all_level_actors())\""), EUnrealMcpParamRequirement::Required)
 			.Param(TEXT("include"), TEXT("array"), TEXT(""), EUnrealMcpParamRequirement::Optional,
 				FUnrealMcpSchema::StringArray(TEXT("Helper .py files or folders, relative to <Project>/.ai-game-dev/snippets or absolute.")))
+			.ParamNumber(TEXT("timeout"), TEXT("Time budget in seconds, default 30: a snippet still running then is stopped with a Timeout "
+			                                   "error. Capped a few seconds below the tool timeout. Use a small value (e.g. 5) to try code "
+			                                   "that might not end."))
 			.DestructiveHint(true)
 			.OpenWorldHint(true)
 			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
@@ -254,6 +267,16 @@ namespace UnrealMcpPythonTools
 				const TArray<FString> Include = FUnrealMcpToolArgs::GetStringArray(Call, TEXT("include"), IncludeError);
 				if (!IncludeError.IsEmpty())
 					return FUnrealMcpToolResult::Error(FString::Printf(TEXT("InvalidRequest: %s"), *IncludeError));
+				double TimeoutSeconds = PythonDefaultTimeoutSeconds;
+				const TSharedPtr<FJsonValue> Timeout = Call.Arguments->TryGetField(TEXT("timeout"));
+				if (Timeout.IsValid())
+				{
+					// A JSON number only: UE's TryGetNumber would also read true as 1 and parse strings.
+					TimeoutSeconds = Timeout->Type == EJson::Number ? Timeout->AsNumber() : 0.0;
+					if (!(TimeoutSeconds > 0.0))
+						return FUnrealMcpToolResult::Error(FString::Printf(
+							TEXT("InvalidRequest: 'timeout' must be a number of seconds greater than 0 (default %d)."), PythonDefaultTimeoutSeconds));
+				}
 
 				IPythonScriptPlugin* Python = IPythonScriptPlugin::Get();
 #if UE_VERSION_OLDER_THAN(5, 6, 0)
@@ -284,7 +307,11 @@ namespace UnrealMcpPythonTools
 				Request->SetNumberField(TEXT("maxLogChars"), PythonRuntimeLogChars);
 				Request->SetNumberField(TEXT("maxLogLineChars"), PythonMaxLogLineChars);
 				Request->SetNumberField(TEXT("maxErrorChars"), PythonMaxValueChars);
-				Request->SetNumberField(TEXT("timeoutMs"), PythonTimeBudgetMs(Call));
+				// code_exec takes whole milliseconds and caps them at the max below (a longer budget becomes the cap).
+				const int32 MaxTimeoutMs = PythonMaxTimeBudgetMs(Call);
+				// Whole milliseconds; the epsilon keeps 0.07 s at 70 ms (0.07 * 1000 is 70.00000000000001).
+				const int32 TimeoutMs = (int32)FMath::Clamp(FMath::CeilToDouble(TimeoutSeconds * 1000.0 - 1e-6), 1.0, (double)MAX_int32);
+				Request->SetNumberField(TEXT("timeoutMs"), TimeoutMs);
 				TArray<TSharedPtr<FJsonValue>> Imports;
 				Imports.Add(MakeShared<FJsonValueString>(TEXT("unreal")));
 				Request->SetArrayField(TEXT("imports"), Imports);
@@ -298,8 +325,8 @@ namespace UnrealMcpPythonTools
 				FPythonCommandEx Command;
 				Command.ExecutionMode = EPythonCommandExecutionMode::EvaluateStatement;
 				Command.Flags = EPythonCommandFlags::Unattended;
-				Command.Command = FString::Printf(TEXT("__import__('unreal_mcp.python_execute', fromlist=['run']).run('%s')"),
-					*FBase64::Encode(reinterpret_cast<const uint8*>(Utf8.Get()), Utf8.Length()));
+				Command.Command = FString::Printf(TEXT("__import__('unreal_mcp.python_execute', fromlist=['run']).run('%s', %d)"),
+					*FBase64::Encode(reinterpret_cast<const uint8*>(Utf8.Get()), Utf8.Length()), MaxTimeoutMs);
 				// One undo step, as rql-mutate (the transaction buffer drops it when a read-only snippet recorded nothing).
 				const int64 LogSequence = FUnrealMcpLogCollector::Get().GetLastSequence();
 				const int32 Transaction = GEditor ? GEditor->BeginTransaction(TEXT("UnrealMcp"), FText::FromString(PythonUndoTitle(Code)), nullptr) : INDEX_NONE;
@@ -326,6 +353,10 @@ namespace UnrealMcpPythonTools
 				for (const FPythonLogOutputEntry& Entry : Command.LogOutput)
 					Logs.Add(PythonLogEntry(PythonLogLevel(Entry.Type), Entry.Output.TrimEnd()));
 				PythonAddEngineLogs(LogSequence, Logs);
+				if (Timeout.IsValid() && TimeoutMs > MaxTimeoutMs)
+					Logs.Add(PythonLogEntry(TEXT("info"), FString::Printf(TEXT("timeout %g s was capped at %.1f s (the tool timeout less a margin)"),
+						TimeoutSeconds, MaxTimeoutMs / 1000.0)));
+				Response->SetNumberField(TEXT("timeoutMs"), FMath::Min(TimeoutMs, MaxTimeoutMs)); // the budget the run had
 				if (bRecordedNothing && Response->GetBoolField(TEXT("success")) && PythonLooksMutating(Code))
 					Logs.Add(PythonLogEntry(TEXT("warning"), PythonNoUndoNote));
 				if (PythonCapLogs(Logs, FirstOwn))

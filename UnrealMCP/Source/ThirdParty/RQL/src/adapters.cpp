@@ -325,6 +325,8 @@ std::unique_ptr<AdaptedType> build_adapted(TypeRegistry& registry, const TypeDes
         if (ad->stable_id) a->by_cap[static_cast<size_t>(Capability::StableId)].push_back(ad);
         if (ad->is_alive) a->by_cap[static_cast<size_t>(Capability::IsAlive)].push_back(ad);
         if (ad->components) a->by_cap[static_cast<size_t>(Capability::Components)].push_back(ad);
+        if (ad->literal_kind) a->by_cap[static_cast<size_t>(Capability::LiteralKind)].push_back(ad);
+        if (ad->create_for_literal) a->by_cap[static_cast<size_t>(Capability::Factory)].push_back(ad);
         if (a->description.empty() && !ad->description.empty()) a->description = ad->description;
         if (!a->literal_schema && ad->literal_schema) a->literal_schema = ad->literal_schema;
     }

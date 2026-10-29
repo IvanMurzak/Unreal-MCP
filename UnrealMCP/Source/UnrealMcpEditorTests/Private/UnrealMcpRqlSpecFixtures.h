@@ -60,6 +60,34 @@ struct FUnrealMcpRqlSpecRow : public FTableRowBase
 	EUnrealMcpRqlSpecMode Mode = EUnrealMcpRqlSpecMode::Idle;
 };
 
+/** An abstract instanced (EditInlineNew) class, as UInputTrigger / UInputModifier: RQL literals build its subclasses. */
+UCLASS(Abstract, EditInlineNew, CollapseCategories)
+class UUnrealMcpRqlSpecInline : public UObject
+{
+	GENERATED_BODY()
+
+public:
+	UPROPERTY(EditAnywhere, Category = "Spec") float Weight = 1.0f;
+};
+
+UCLASS()
+class UUnrealMcpRqlSpecInlineScaled : public UUnrealMcpRqlSpecInline
+{
+	GENERATED_BODY()
+
+public:
+	UPROPERTY(EditAnywhere, Category = "Spec") float Scale = 1.0f;
+};
+
+UCLASS()
+class UUnrealMcpRqlSpecInlineOffset : public UUnrealMcpRqlSpecInline
+{
+	GENERATED_BODY()
+
+public:
+	UPROPERTY(EditAnywhere, Category = "Spec") FVector Offset = FVector::ZeroVector;
+};
+
 UCLASS()
 class UUnrealMcpRqlSpecFixture : public UObject
 {
@@ -88,6 +116,11 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Spec") TObjectPtr<UObject> Reference;
 	UPROPERTY(EditAnywhere, Category = "Spec") TSubclassOf<AActor> ActorClass;
 	UPROPERTY(EditAnywhere, Category = "Spec") TSoftObjectPtr<UObject> Soft;
+	// Instanced subobjects (the literal kind instanced): of an abstract class, as UInputAction::Triggers (an array and a
+	// single one), and of a concrete class.
+	UPROPERTY(EditAnywhere, Instanced, Category = "Spec") TArray<TObjectPtr<UUnrealMcpRqlSpecInline>> Inline;
+	UPROPERTY(EditAnywhere, Instanced, Category = "Spec") TObjectPtr<UUnrealMcpRqlSpecInline> InlineOne;
+	UPROPERTY(EditAnywhere, Instanced, Category = "Spec") TArray<TObjectPtr<UUnrealMcpRqlSpecInlineScaled>> Scaled;
 	UPROPERTY(EditAnywhere, Category = "Spec") FSoftObjectPath SoftPath;
 	UPROPERTY(EditAnywhere, Category = "Spec") FSoftClassPath SoftClass;
 

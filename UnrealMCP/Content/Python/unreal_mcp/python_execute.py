@@ -43,7 +43,12 @@ def _convert(value):
 
 
 code_exec.set_value_converter(_convert)
+# python-execute's default 'timeout' (30 s; the tool always sends its budget, this covers a request without one).
+code_exec.set_default_timeout_ms(30000)
 
 
-def run(payload_b64):
+def run(payload_b64, max_timeout_ms=0):
+    """Runs one request. ``max_timeout_ms``: the highest budget this call may take (what is left of the tool timeout less
+    a margin; code_exec turns a longer ``timeoutMs`` into it), 0 = no cap."""
+    code_exec.set_max_timeout_ms(max_timeout_ms)
     return base64.b64encode(code_exec.run_b64(payload_b64).encode("utf-8")).decode("ascii")

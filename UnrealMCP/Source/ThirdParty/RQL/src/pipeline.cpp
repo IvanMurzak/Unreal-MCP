@@ -75,9 +75,28 @@ void Exec::note_source_type(const std::string& source, const Value& v) {
 std::vector<std::pair<std::string, const TypeDescriptor*>> Exec::source_type_history() {
     std::vector<std::pair<std::string, const TypeDescriptor*>> out;
     std::lock_guard<std::mutex> lock(engine.source_types_mutex_);
-    for (auto& kv : engine.source_types_)
-        for (auto* t : kv.second) out.emplace_back(kv.first, t);
+    for (auto& s : engine.sources()) {
+        if (s.declared_type) out.emplace_back(s.name, s.declared_type);
+        auto seen = engine.source_types_.find(s.name);
+        if (seen == engine.source_types_.end()) continue;
+        for (auto* t : seen->second)
+            if (t != s.declared_type) out.emplace_back(s.name, t);
+    }
     return out;
+}
+
+void Exec::ensure_plan_source_type() {
+    if (!plan_source || plan_source_read || plan_source->declared_type) return;
+    plan_source_read = true;
+    {
+        std::lock_guard<std::mutex> lock(engine.source_types_mutex_);
+        if (engine.source_types_.count(plan_source->name)) return;
+    }
+    try {
+        note_source_type(plan_source->name, plan_source->getter());
+    } catch (...) {
+        // no type yet
+    }
 }
 
 void Exec::check_target_limit() const {
@@ -184,15 +203,19 @@ bool plan_uses_meta(const QueryPlan& p, const std::string& meta) {
     return plan_uses_segment(p, [&](const Segment& s) { return s.kind == SegmentKind::Meta && s.name == meta; });
 }
 
+/// The text of path segments as $path writes them: .Member, [i], ["key"].
+std::string segments_text(const std::vector<Segment>& segments) {
+    std::string s;
+    for (auto& seg : segments) s += seg.kind == SegmentKind::Member ? "." + seg.name : seg.to_string();
+    return s;
+}
+
 /// Path text appended by get/recurse-via when the expression is a plain member/index path.
 std::optional<std::string> path_suffix(const Expr& e) {
     if (e.kind != ExprKind::Path || e.on) return std::nullopt;
-    std::string s;
-    for (auto& seg : e.segments) {
+    for (auto& seg : e.segments)
         if (seg.kind == SegmentKind::Meta) return std::nullopt;
-        s += seg.kind == SegmentKind::Member ? "." + seg.name : seg.to_string();
-    }
-    return s;
+    return segments_text(e.segments);
 }
 
 // ------------------------------------------------------------------ streams
@@ -280,6 +303,7 @@ struct SourceBinding {
 
 Value source_value(Exec& x, const SourceBinding& b) {
     if (b.kind == SourceBinding::Kind::Registered) {
+        if (b.reg == x.plan_source) x.plan_source_read = true;
         Value root = b.reg->getter();
         x.note_source_type(b.reg->name, root);
         if (!b.nav) return root;
@@ -423,22 +447,56 @@ int compare_one(Exec& x, const Value& a, const Value& b, bool desc) {
     return desc ? -c : c;
 }
 
+/// Sort keys that evaluated to an error (spec §5): they sort last like null, and each failing key gets one warning with the
+/// first error's code, so a key that fails on every item is not mistaken for a sort that kept the order.
+class SortKeyErrors {
+public:
+    explicit SortKeyErrors(size_t keys) : failed_(keys, 0), first_(keys) {}
+    void note(const std::vector<Value>& kv) {
+        ++items_;
+        for (size_t k = 0; k < kv.size(); ++k) {
+            if (!kv[k].is_error()) continue;
+            if (failed_[k]++ == 0) first_[k] = kv[k];
+        }
+    }
+    void report(Exec& x, const std::vector<const Expr*>& exprs) const {
+        for (size_t k = 0; k < exprs.size(); ++k) {
+            if (failed_[k] == 0) continue;
+            const Value& first = first_[k];
+            const std::string text = path_text(*exprs[k]);
+            const std::string label = !text.empty() ? "sort key '" + text + "'" : "sort key " + std::to_string(k + 1);
+            const std::string& detail = first.error_detail();
+            x.diagnostics.push_back(Diagnostic::warning(first.error_code(), label + " failed for " + std::to_string(failed_[k]) + " of " +
+                                                                                std::to_string(items_) + " item(s) (" + first.error_code() +
+                                                                                (detail.empty() ? std::string() : ": " + detail) + "); they sort last"));
+        }
+    }
+
+private:
+    std::vector<int64_t> failed_;
+    std::vector<Value> first_;
+    int64_t items_ = 0;
+};
+
 class SortStream final : public Stream {
 public:
-    SortStream(Exec& x, StreamPtr in, std::vector<Eval> keys, std::vector<bool> desc)
-        : x_(x), in_(std::move(in)), keys_(std::move(keys)), desc_(std::move(desc)) {}
+    SortStream(Exec& x, StreamPtr in, std::vector<Eval> keys, std::vector<bool> desc, std::vector<const Expr*> exprs)
+        : x_(x), in_(std::move(in)), keys_(std::move(keys)), desc_(std::move(desc)), exprs_(std::move(exprs)) {}
     bool next(Item& out) override {
         if (!sorted_) {
             sorted_ = true;
             Item it;
             int64_t i = 0;
+            SortKeyErrors errors(keys_.size());
             while (in_->next(it)) {
                 set_scope(x_, it, i++);
                 std::vector<Value> kv;
                 kv.reserve(keys_.size());
                 for (auto& k : keys_) kv.push_back(k(x_));
+                errors.note(kv);
                 rows_.push_back({std::move(it), std::move(kv)});
             }
+            errors.report(x_, exprs_);
             x_.check_time();
             std::stable_sort(rows_.begin(), rows_.end(), [this](const Row& a, const Row& b) {
                 for (size_t k = 0; k < desc_.size(); ++k) {
@@ -462,6 +520,7 @@ private:
     StreamPtr in_;
     std::vector<Eval> keys_;
     std::vector<bool> desc_;
+    std::vector<const Expr*> exprs_;
     bool sorted_ = false;
     std::vector<Row> rows_;
     size_t pos_ = 0;
@@ -562,9 +621,41 @@ struct ValueEq {
     bool operator()(const Value& a, const Value& b) const { return distinct_equal(*x, a, b); }
 };
 
+/// Counts how often a group-by / distinct key that is a member path is missing (spec §5 sparse key members): a member that
+/// most items lack (a polymorphic `group-by type`) is reported instead of silently forming the null group.
+class KeyTally {
+public:
+    /// A tally for a plain member path (no meta member); nullopt for any other key.
+    static std::optional<KeyTally> of(const Expr* e) {
+        if (!e || !path_suffix(*e)) return std::nullopt;
+        KeyTally t;
+        t.text_ = path_text(*e);
+        if (t.text_.empty()) return std::nullopt;
+        return t;
+    }
+    void count(const Value& v) {
+        if (v.is_missing()) ++missing_;
+        else ++present_;
+    }
+    void report(Exec& x, const std::string& fate) const {
+        if (present_ == 0 || missing_ <= present_) return;
+        const std::string meta = meta_hint(text_);
+        x.diagnostics.push_back(Diagnostic::warning(
+            "unknown-member",
+            "member '" + text_ + "' exists on " + std::to_string(present_) + " of " + std::to_string(present_ + missing_) + " item(s); the other " +
+                std::to_string(missing_) + " " + fate,
+            !meta.empty() ? meta : "filter to the items that have it first: where has(" + text_ + ")"));
+    }
+
+private:
+    std::string text_;
+    int64_t present_ = 0, missing_ = 0;
+};
+
 class DistinctStream final : public Stream {
 public:
-    DistinctStream(Exec& x, StreamPtr in, Eval key) : x_(x), in_(std::move(in)), key_(std::move(key)) {}
+    DistinctStream(Exec& x, StreamPtr in, Eval key, std::optional<KeyTally> tally)
+        : x_(x), in_(std::move(in)), key_(std::move(key)), tally_(std::move(tally)) {}
     bool next(Item& out) override {
         Item it;
         while (in_->next(it)) {
@@ -572,12 +663,17 @@ public:
             if (key_) {
                 set_scope(x_, it, i_);
                 k = key_(x_);
+                if (tally_) tally_->count(k);
             }
             ++i_;
             if (seen_.insert(k).second) {
                 out = std::move(it);
                 return true;
             }
+        }
+        if (tally_ && !reported_) {
+            reported_ = true;
+            tally_->report(x_, "are kept as one");
         }
         return false;
     }
@@ -586,6 +682,8 @@ private:
     Exec& x_;
     StreamPtr in_;
     Eval key_;
+    std::optional<KeyTally> tally_;
+    bool reported_ = false;
     int64_t i_ = 0;
     std::unordered_set<Value, ValueHash, ValueEq> seen_{16, ValueHash{&x_}, ValueEq{&x_}};
 };
@@ -594,8 +692,10 @@ class GroupByStream final : public Stream {
 public:
     /// One row per distinct key tuple (first appearance order): the key columns, then count (spec §5).
     /// keep_items: a later stage reads the rows' `items` (per-group aggregates, spec §5).
-    GroupByStream(Exec& x, StreamPtr in, std::vector<Eval> keys, std::vector<std::string> key_columns, bool keep_items)
-        : x_(x), in_(std::move(in)), keys_(std::move(keys)), key_columns_(std::move(key_columns)), keep_items_(keep_items) {}
+    GroupByStream(Exec& x, StreamPtr in, std::vector<Eval> keys, std::vector<std::string> key_columns, bool keep_items,
+                  std::vector<std::optional<KeyTally>> tallies)
+        : x_(x), in_(std::move(in)), keys_(std::move(keys)), key_columns_(std::move(key_columns)), keep_items_(keep_items),
+          tallies_(std::move(tallies)) {}
     bool next(Item& out) override {
         if (!done_) {
             done_ = true;
@@ -610,8 +710,9 @@ public:
             while (in_->next(it)) {
                 set_scope(x_, it, i++);
                 std::vector<Value> tuple;
-                for (auto& key : keys_) {
-                    Value k = key(x_);
+                for (size_t ki = 0; ki < keys_.size(); ++ki) {
+                    Value k = keys_[ki](x_);
+                    if (tallies_[ki]) tallies_[ki]->count(k);
                     if (k.is_missing() || k.is_unknown()) k = Value::null();
                     tuple.push_back(std::move(k));
                 }
@@ -629,6 +730,8 @@ public:
                 }
                 if (keep_items) items[g].push_back(it.value);
             }
+            for (auto& t : tallies_)
+                if (t) t->report(x_, "group as null");
             std::vector<std::string> names = key_columns_;
             names.push_back("count");
             auto cols = std::make_shared<const std::vector<std::string>>(std::move(names));
@@ -649,6 +752,7 @@ private:
     std::vector<Eval> keys_;
     std::vector<std::string> key_columns_;
     bool keep_items_;
+    std::vector<std::optional<KeyTally>> tallies_;
     bool done_ = false;
     std::vector<Value> rows_;
     size_t pos_ = 0;
@@ -846,9 +950,9 @@ SourceBinding bind_source(Exec& x, Compiler& c, const Expr& src) {
             const SourceRegistration* reg = x.engine.find_source(join(parts, "."));
             if (!reg) continue;
             std::vector<Segment> rest(src.segments.begin() + static_cast<std::ptrdiff_t>(len), src.segments.end());
-            std::string rest_text;
-            for (auto& s : rest) rest_text += s.kind == SegmentKind::Member ? "." + s.name : s.to_string();
+            const std::string rest_text = segments_text(rest);
             b.reg = reg;
+            if (!x.plan_source) x.plan_source = reg;
             if (!rest.empty()) b.nav = c.compile(*plan::path(rest));
             b.text = reg->name + rest_text;
             return b;
@@ -858,6 +962,24 @@ SourceBinding bind_source(Exec& x, Compiler& c, const Expr& src) {
         auto close = suggest_closest(head, names, 3);
         throw RqlException("unknown-source", "unknown source '" + head + "'",
                            (close.empty() ? std::string() : "did you mean " + join(close, " / ") + "? ") + "sources: " + join(names, " "));
+    }
+    // A function call or ref(…) followed by navigation (spec §2): unreal.asset("/Game/BP").EventGraph, ref("Node#1").Children[0].
+    if (src.kind == ExprKind::Path && src.on && src.on->kind == ExprKind::Call && !src.segments.empty()) {
+        auto base = std::make_shared<SourceBinding>(bind_source(x, c, *src.on));
+        Eval nav = c.compile(*plan::path(src.segments));
+        const std::string rest_text = segments_text(src.segments);
+        b.kind = SourceBinding::Kind::Value;
+        b.ev = [base, nav](Exec& ex) -> Value {
+            Value v = source_value(ex, *base);
+            // ref() already reported its own error: the stream is empty; an error of the navigation itself fails the query.
+            if (v.is_error() && base->kind == SourceBinding::Kind::Ref) return Value::missing();
+            if (v.is_null() || v.is_absent()) return v;
+            ex.current = v;
+            ex.current_path = nullptr;
+            return nav(ex);  // member reads already read destroyed objects as null, as for a registered source's navigation
+        };
+        b.text = base->text + rest_text;
+        return b;
     }
     if (src.kind == ExprKind::Call && !src.on && iequals(src.name, "ref")) {
         b.kind = SourceBinding::Kind::Ref;
@@ -971,11 +1093,13 @@ StreamPtr apply_stage(Exec& x, Compiler& c, StreamPtr in, const Stage& st) {
         case StageKind::Sort: {
             std::vector<Eval> keys;
             std::vector<bool> desc;
+            std::vector<const Expr*> exprs;
             for (auto& k : st.keys) {
                 keys.push_back(c.compile(*k.expr));
                 desc.push_back(k.desc);
+                exprs.push_back(k.expr.get());
             }
-            return std::make_unique<SortStream>(x, std::move(in), std::move(keys), std::move(desc));
+            return std::make_unique<SortStream>(x, std::move(in), std::move(keys), std::move(desc), std::move(exprs));
         }
         case StageKind::First: return std::make_unique<FirstStream>(std::move(in), st.n);
         case StageKind::Skip: return std::make_unique<SkipStream>(std::move(in), st.n);
@@ -985,21 +1109,25 @@ StreamPtr apply_stage(Exec& x, Compiler& c, StreamPtr in, const Stage& st) {
                          std::none_of(e.segments.begin(), e.segments.end(), [](const Segment& s) { return s.kind == SegmentKind::Meta; });
             return std::make_unique<GetStream>(x, std::move(in), c.compile(e), path_suffix(e), plain ? &e.segments : nullptr);
         }
-        case StageKind::Distinct: return std::make_unique<DistinctStream>(x, std::move(in), st.expr ? c.compile(*st.expr) : Eval());
+        case StageKind::Distinct:
+            return std::make_unique<DistinctStream>(x, std::move(in), st.expr ? c.compile(*st.expr) : Eval(), KeyTally::of(st.expr.get()));
         case StageKind::GroupBy: {
             std::vector<Eval> keys;
             std::vector<std::string> names;
+            std::vector<std::optional<KeyTally>> tallies;
             if (st.expr) {
                 keys.push_back(c.compile(*st.expr));
                 names.push_back("key");
+                tallies.push_back(KeyTally::of(st.expr.get()));
             }
             for (auto& f : st.fields) {
                 keys.push_back(c.compile(*f.expr));
                 names.push_back(f.name);
+                tallies.push_back(KeyTally::of(f.expr.get()));
             }
             const bool keep_items = plan_uses_segment(
                 x.plan, [](const Segment& s) { return s.kind == SegmentKind::Member && iequals(s.name, "items"); }, &st);
-            return std::make_unique<GroupByStream>(x, std::move(in), std::move(keys), std::move(names), keep_items);
+            return std::make_unique<GroupByStream>(x, std::move(in), std::move(keys), std::move(names), keep_items, std::move(tallies));
         }
         case StageKind::Recurse: {
             std::vector<RecurseStream::Via> via;
@@ -1101,23 +1229,10 @@ QueryResult collect(Exec& x, Stream& stream, Encoder& enc) {
 
 /// Types statically reachable from the sources' root types through member, element and key types,
 /// plus registered subtypes of reachable object types.
+/// Never evaluates a source the query does not name (spec §8): the roots are the types sources produced so far (a source
+/// that is null right now keeps them) and the types they declare; the query's own source is read once when it has none.
 std::vector<const TypeDescriptor*> reachable_types(Exec& x, std::vector<std::pair<std::string, const TypeDescriptor*>>* roots_out) {
-    std::vector<std::pair<std::string, const TypeDescriptor*>> roots;
-    for (auto& s : x.engine.sources()) {
-        Value v;
-        try {
-            v = s.getter();
-        } catch (const std::exception&) {
-            continue;
-        }
-        if (v.type()) roots.emplace_back(s.name, v.type());
-        x.note_source_type(s.name, v);
-    }
-    // A source that is null right now keeps the types it produced before (spec §8 known names).
-    for (auto& h : x.source_type_history()) {
-        bool registered = std::any_of(x.engine.sources().begin(), x.engine.sources().end(), [&](const auto& s) { return s.name == h.first; });
-        if (registered && std::find(roots.begin(), roots.end(), h) == roots.end()) roots.push_back(h);
-    }
+    auto roots = x.source_type_history();
     std::vector<const TypeDescriptor*> types;
     std::vector<const TypeDescriptor*> queue;
     for (auto& r : roots) queue.push_back(r.second);
@@ -1158,7 +1273,10 @@ std::string group_row_hint(const std::string& name, const std::vector<std::strin
 
 /// reachable_types without roots, computed once per query.
 const std::vector<const TypeDescriptor*>& known_types(Exec& x) {
-    if (!x.reachable_cache) x.reachable_cache = reachable_types(x, nullptr);
+    if (!x.reachable_cache) {
+        x.ensure_plan_source_type();  // the query's own source counts even when its stream never pulled it
+        x.reachable_cache = reachable_types(x, nullptr);
+    }
     return *x.reachable_cache;
 }
 
@@ -1306,6 +1424,8 @@ std::vector<Diagnostic> add_warnings(Exec& x, QueryResult& r, bool only_general)
         auto close = suggest_members(site.name, candidates, nested, 3);
         auto declaring = types_declaring(x, site.name, site.miss_types);
         std::string hint = member_hint(site.name, candidates, declaring, nested);
+        const std::string meta = meta_hint(site.name);
+        if (!meta.empty()) hint = meta + (hint.empty() ? std::string() : "; " + hint);
         if (close.empty() && declaring.empty() && !site.name.empty() && site.name[0] >= 'A' && site.name[0] <= 'Z')
             hint += (hint.empty() ? "" : "; ") + std::string("if '") + site.name + "' is a value, quote it: \"" + site.name + "\"";
         r.diagnostics.push_back(Diagnostic::warning("unknown-member", "no member '" + site.name + "' on " + join(type_names, ", "), hint));

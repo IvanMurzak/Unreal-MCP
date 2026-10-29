@@ -22,7 +22,9 @@
 #include "EnhancedActionKeyMapping.h"
 #include "InputCoreTypes.h"
 #include "InputMappingContext.h"
+#include "InputAction.h"
 #include "InputModifiers.h"
+#include "InputTriggers.h"
 #include "K2Node_CallFunction.h"
 #include "K2Node_CallParentFunction.h"
 #include "K2Node_EnhancedInputAction.h"
@@ -262,6 +264,38 @@ void FUnrealAIEnhancedInputSpec::Define()
 			{
 				return Mapping.Key == EKeys::Up;
 			}));
+		});
+
+		It("builds an action's Triggers and Modifiers from typed literals (instanced into the action)", [this]()
+		{
+			const FString Id = FGuid::NewGuid().ToString(EGuidFormats::Digits);
+			ActionPath = FString::Printf(TEXT("/Game/RqlSpec/IA_Hold_%s"), *Id);
+			// enhancedInput | call CreateAction("@IA@", "Boolean")
+			TestTrue(TEXT("action created"), IsOk(Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["enhancedInput"]},"stages":[{"op":"call","method":"CreateAction","args":[{"lit":"@IA@"},{"lit":"Boolean"}]}]})RQL"), true)));
+			// unreal.asset("@IA@") | set Triggers = [{$type: "InputTriggerHold", HoldTimeThreshold: 0.5}]
+			const TSharedPtr<FJsonObject> Triggers = Run(TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@IA@"}]},"stages":[{"op":"set","assign":[{"target":{"path":["Triggers"]},"value":{"list":[{"object":[{"key":"$type","value":{"lit":"InputTriggerHold"}},{"key":"HoldTimeThreshold","value":{"lit":0.5}}]}]}}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("Triggers set (%s)"), *Codes(Triggers)), IsOk(Triggers));
+			// unreal.asset("@IA@") | set Modifiers = append(Modifiers, {$type: "InputModifierNegate"})
+			const TCHAR* AppendNegate = TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@IA@"}]},"stages":[{"op":"set","assign":[{"target":{"path":["Modifiers"]},"value":{"call":"append","args":[{"path":["Modifiers"]},{"object":[{"key":"$type","value":{"lit":"InputModifierNegate"}}]}]}}]}]})RQL");
+			for (int32 Pass = 0; Pass < 2; ++Pass)
+			{
+				const TSharedPtr<FJsonObject> Modifiers = Run(AppendNegate, true);
+				TestTrue(*FString::Printf(TEXT("Modifiers appended (%s)"), *Codes(Modifiers)), IsOk(Modifiers));
+			}
+			const UInputAction* Action = LoadObject<UInputAction>(nullptr, *ActionPath);
+			if (!TestNotNull(TEXT("the action"), Action))
+				return;
+			const UInputTriggerHold* Hold = Action->Triggers.Num() == 1 ? Cast<UInputTriggerHold>(Action->Triggers[0]) : nullptr;
+			TestTrue(TEXT("one Hold trigger"), Hold != nullptr);
+			TestTrue(TEXT("HoldTimeThreshold 0.5, owned by the action"), Hold && Hold->HoldTimeThreshold == 0.5f && Hold->GetOuter() == Action);
+			TestEqual(TEXT("two modifiers (append kept the first)"), Action->Modifiers.Num(), 2);
+			for (const UInputModifier* Modifier : Action->Modifiers)
+				TestTrue(TEXT("Negate, owned by the action"), Cast<UInputModifierNegate>(Modifier) != nullptr && Modifier->GetOuter() == Action);
+			// unreal.asset("@IA@") | set Triggers = [{HoldTimeThreshold: 0.5}]
+			const TSharedPtr<FJsonObject> Abstract = Run(TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@IA@"}]},"stages":[{"op":"set","assign":[{"target":{"path":["Triggers"]},"value":{"list":[{"object":[{"key":"HoldTimeThreshold","value":{"lit":0.5}}]}]}}]}]})RQL"), true);
+			TestFalse(TEXT("an abstract trigger is refused"), IsOk(Abstract));
+			TestTrue(*FString::Printf(TEXT("asks for a concrete $type (%s)"), *Codes(Abstract)), Codes(Abstract).Contains(TEXT("InputTrigger is abstract: name a concrete class with $type")));
+			TestEqual(TEXT("the refused write changed nothing"), Action->Triggers.Num(), 1);
 		});
 
 		It("adds an action event to a Character Blueprint that wires to Jump and compiles; one event per action", [this]()

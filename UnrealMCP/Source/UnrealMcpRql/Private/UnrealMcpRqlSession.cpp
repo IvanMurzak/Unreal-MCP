@@ -17,7 +17,9 @@
 #include "Dom/JsonObject.h"
 #include "GameFramework/Actor.h"
 #include "Tools/UnrealMcpObjectRef.h"
+#include "Misc/Paths.h"
 #include "UObject/Package.h"
+#include "UObject/UObjectHash.h"
 
 #include <stdexcept>
 #include <string_view>
@@ -31,6 +33,30 @@ namespace UnrealMcpRqlSessionLocal
 			return false;
 		const UPackage* Package = Object->GetOutermost();
 		return Package && Package != GetTransientPackage() && !Package->HasAnyPackageFlags(PKG_CompiledIn);
+	}
+
+	/** A few concrete subclasses of an abstract instanced class, for the error that asks for a $type. */
+	FString ConcreteSubclassNames(const UClass* Base)
+	{
+		TArray<UClass*> Derived;
+		GetDerivedClasses(Base, Derived, /*bRecursive*/ true);
+		TArray<FString> Names;
+		for (const UClass* Class : Derived)
+		{
+			const FString Name = Class->GetName();
+			if (Class->HasAnyClassFlags(CLASS_EditInlineNew) && !Class->HasAnyClassFlags(CLASS_Abstract | CLASS_Deprecated | CLASS_NewerVersionExists)
+				&& !Name.StartsWith(TEXT("SKEL_")) && !Name.StartsWith(TEXT("REINST_")))
+				Names.Add(Name);
+		}
+		Names.Sort();
+		static constexpr int32 MaxNames = 8;
+		const int32 More = Names.Num() - MaxNames;
+		if (More > 0)
+			Names.SetNum(MaxNames);
+		if (Names.IsEmpty())
+			return TEXT("none is loaded");
+		const FString Rest = More > 0 ? FString::Printf(TEXT(" and %d more"), More) : FString();
+		return FString::Printf(TEXT("e.g. %s%s"), *FString::Join(Names, TEXT(", ")), *Rest);
 	}
 
 	/** JSON from an extension (AddJsonMember) as an owned RQL value. */
@@ -345,12 +371,79 @@ void FUnrealMcpRqlSession::ConfigureMutations()
 		}
 		return std::string();
 	};
-	// Only the engine creates UObjects: a literal ({} or {Name: ...}) for an object parameter or member is refused
-	// (coercion-failed) and nothing is constructed, on dry runs and while RQL tries overloads too. Liveness is the
-	// engine-wide is_alive hook here, not a per-type adapter, so RQL's own engine-object default does not cover them.
-	Policy.can_construct_from_literal = [TypeProvider](const rql::TypeDescriptor& Type) -> std::optional<bool>
+	// Literal kinds (RQL spec 4.5): actors, components, assets and every other UObject are engine objects, never built from
+	// a literal ({} for an actor parameter is refused and nothing is constructed); EditInlineNew classes (input triggers and
+	// modifiers, ...) are instanced: a typed literal builds one for the object that owns the written member or is the call's
+	// target. Liveness is the engine-wide is_alive hook here, not a per-type adapter, so RQL's own default does not apply.
+	Policy.literal_kind_of = [TypeProvider](const rql::TypeDescriptor& Type) -> std::optional<rql::LiteralKind>
 	{
-		return TypeProvider->IsObjectType(&Type) ? std::optional<bool>(false) : std::nullopt;
+		const UClass* Class = TypeProvider->ClassOf(&Type);
+		if (!Class)
+			return std::nullopt;
+		if (!Class->HasAnyClassFlags(CLASS_EditInlineNew))
+			return rql::LiteralKind::Engine;
+		TypeProvider->Fill(&Type); // the literal's members are looked up next, also by probes that build nothing
+		return rql::LiteralKind::Instanced;
+	};
+	// A literal's $type names a UClass the provider builds descriptors for on demand (RQL only knows the registered ones):
+	// by name (InputTriggerHold, UInputTriggerHold, a Blueprint's BP_Hold or BP_Hold_C) or by the path of a loaded class,
+	// if it is or derives from the target. The hook also runs for overload probes and dry runs, so a path never loads a
+	// package. An abstract class is returned too, so the factory's error names its concrete classes.
+	Policy.resolve_subtype = [TypeProvider](const rql::TypeDescriptor& Target, const std::string& Name) -> const rql::TypeDescriptor*
+	{
+		UClass* Base = TypeProvider->ClassOf(&Target);
+		if (!Base)
+			return nullptr;
+		const FString Text = UnrealMcpRqlFromStd(Name).TrimStartAndEnd();
+		UClass* Class = nullptr;
+		if (Text.Contains(TEXT("/")))
+		{
+			Class = FindObject<UClass>(nullptr, *Text);
+			if (!Class && !Text.Contains(TEXT(".")))
+				Class = FindObject<UClass>(nullptr, *FString::Printf(TEXT("%s.%s_C"), *Text, *FPaths::GetBaseFilename(Text)));
+		}
+		else
+		{
+			Class = FUnrealMcpObjectRef::ResolveClass(Text);
+			if (!Class)
+				Class = FUnrealMcpObjectRef::ResolveClass(Text + TEXT("_C"));
+		}
+		if (!Class || !Class->IsChildOf(Base))
+			return nullptr;
+		const rql::TypeDescriptor* Descriptor = TypeProvider->ForClass(Class);
+		TypeProvider->Fill(Descriptor);
+		return Descriptor;
+	};
+	// Builds an instanced subobject as the editor's instanced arrays do: NewObject in the owner, transactional. Runs while the
+	// mutation is planned (dry runs too): nothing references the object until the write (an unused one is collected), so
+	// the session holds it until the query ends (a call in the same query may collect garbage).
+	Policy.create_for_literal = [this, TypeProvider](const rql::TypeDescriptor& Type, const rql::Value& Outer) -> std::optional<rql::Value>
+	{
+		UClass* Class = TypeProvider->ClassOf(&Type);
+		if (!Class)
+			return std::nullopt;
+		UObject* Owner = TypeProvider->AsObject(Outer);
+		if (!Owner)
+			throw std::runtime_error("it needs an owning object (write it to a member of one, or pass it to a call on one)");
+		if (Class->HasAnyClassFlags(CLASS_Abstract | CLASS_Deprecated | CLASS_NewerVersionExists))
+			throw std::runtime_error(UnrealMcpRqlToStd(FString::Printf(TEXT("%s is %s: name a concrete class with $type (%s)"),
+				*Class->GetName(), Class->HasAnyClassFlags(CLASS_Abstract) ? TEXT("abstract") : TEXT("deprecated or outdated"),
+				*UnrealMcpRqlSessionLocal::ConcreteSubclassNames(Class))));
+		// NewObject asserts (a fatal error) on an outer its class does not allow (UCLASS(Within=...)), and an operations
+		// object or a class default would make the subobject a read-only template.
+		if (Class->ClassWithin && !Owner->IsA(Class->ClassWithin))
+			throw std::runtime_error(UnrealMcpRqlToStd(FString::Printf(TEXT("%s can only be owned by a %s, not by %s"),
+				*Class->GetName(), *Class->ClassWithin->GetName(), *Owner->GetName())));
+		if (Owner->IsTemplate())
+			throw std::runtime_error(UnrealMcpRqlToStd(FString::Printf(TEXT("%s is a class default or operations object and cannot own it"), *Owner->GetName())));
+		UObject* Made = NewObject<UObject>(Owner, Class, NAME_None, Owner->GetMaskedFlags(RF_PropagateToSubObjects) | RF_Transactional);
+		LiteralObjects.Emplace(Made);
+		return TypeProvider->WrapObject(Made);
+	};
+	Policy.literal_refusal_hint = [](const rql::TypeDescriptor&)
+	{
+		return std::string("reference an existing one: unreal.find(\"Label\"), ref(\"Type#id\") or an asset path such as "
+			"\"/Game/Meshes/SM_Rock\" (create actors, components and assets with editor | call SpawnActor / AddComponent / CreateAsset)");
 	};
 	// UE's own text form for structs without an RQL adapter (the editor's Copy): Anchors = "(Minimum=(X=0.5,Y=0),...)".
 	Policy.coerce_text = [TypeProvider](const rql::TypeDescriptor& Type, const std::string& Text, std::string& Reason)
@@ -492,6 +585,7 @@ FString FUnrealMcpRqlSession::Execute(const FString& PlanJson, bool bAllowMutati
 		Result = EnginePtr->execute(Plan, Budgets, Options);
 	}
 	CloseTransaction();
+	LiteralObjects.Reset(); // written by now (the undo buffer or their owner holds them), or garbage
 	bOutOk = Result.ok;
 	return UnrealMcpRqlFromStd(Result.to_json(/*include_stats*/ false).dump());
 }
