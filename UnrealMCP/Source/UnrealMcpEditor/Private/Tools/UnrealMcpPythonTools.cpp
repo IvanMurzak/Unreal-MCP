@@ -268,12 +268,14 @@ namespace UnrealMcpPythonTools
 				if (!IncludeError.IsEmpty())
 					return FUnrealMcpToolResult::Error(FString::Printf(TEXT("InvalidRequest: %s"), *IncludeError));
 				double TimeoutSeconds = PythonDefaultTimeoutSeconds;
-				if (const TSharedPtr<FJsonValue> Timeout = Call.Arguments->TryGetField(TEXT("timeout")))
+				const TSharedPtr<FJsonValue> Timeout = Call.Arguments->TryGetField(TEXT("timeout"));
+				if (Timeout.IsValid())
 				{
 					// A JSON number only: UE's TryGetNumber would also read true as 1 and parse strings.
 					TimeoutSeconds = Timeout->Type == EJson::Number ? Timeout->AsNumber() : 0.0;
 					if (!(TimeoutSeconds > 0.0))
-						return FUnrealMcpToolResult::Error(TEXT("InvalidRequest: 'timeout' must be a number of seconds greater than 0 (default 30)."));
+						return FUnrealMcpToolResult::Error(FString::Printf(
+							TEXT("InvalidRequest: 'timeout' must be a number of seconds greater than 0 (default %d)."), PythonDefaultTimeoutSeconds));
 				}
 
 				IPythonScriptPlugin* Python = IPythonScriptPlugin::Get();
@@ -350,7 +352,7 @@ namespace UnrealMcpPythonTools
 				for (const FPythonLogOutputEntry& Entry : Command.LogOutput)
 					Logs.Add(PythonLogEntry(PythonLogLevel(Entry.Type), Entry.Output.TrimEnd()));
 				PythonAddEngineLogs(LogSequence, Logs);
-				if (Call.Has(TEXT("timeout")) && TimeoutMs > MaxTimeoutMs)
+				if (Timeout.IsValid() && TimeoutMs > MaxTimeoutMs)
 					Logs.Add(PythonLogEntry(TEXT("info"), FString::Printf(TEXT("timeout %g s was capped at %.1f s (the tool timeout less a margin)"),
 						TimeoutSeconds, MaxTimeoutMs / 1000.0)));
 				if (bRecordedNothing && Response->GetBoolField(TEXT("success")) && PythonLooksMutating(Code))

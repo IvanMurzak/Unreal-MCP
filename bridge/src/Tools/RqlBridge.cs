@@ -84,7 +84,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
                 // column for created objects, the first 50 rows and a count). The flag is not part of the JSON. The rql tools
                 // have no json format, so the count carries no "(the json format lists every row)" pointer.
                 result.Receipt = role == MutateRole && result.Ok;
-                rendered = AgentFormat.Render(result, OutputFormat.Table, AgentFormat.DefaultReceiptRows, "");
+                rendered = AgentFormat.Render(result, OutputFormat.Table, AgentFormat.DefaultReceiptRows, moreRowsNote: "");
             }
             else
                 return response;
@@ -94,14 +94,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
             return response;
         }
 
-        private static string JsonKindName(JsonNode node) => node.GetValueKind() switch
-        {
-            JsonValueKind.Number => "number",
-            JsonValueKind.True or JsonValueKind.False => "boolean",
-            JsonValueKind.Array => "array",
-            JsonValueKind.Object => "object",
-            var kind => kind.ToString().ToLowerInvariant()
-        };
+        private static string JsonKindName(JsonNode node) =>
+            node.GetValueKind() is JsonValueKind.True or JsonValueKind.False ? "boolean" : node.GetValueKind().ToString().ToLowerInvariant();
 
         private static ResponseCallTool Failure(Diagnostic diagnostic) =>
             ResponseCallTool.Error(AgentFormat.Render(QueryResult.Fail(new[] { diagnostic }), OutputFormat.Table));

@@ -48,8 +48,10 @@ namespace UnrealMcpRqlSessionLocal
 		const int32 More = Names.Num() - MaxNames;
 		if (More > 0)
 			Names.SetNum(MaxNames);
-		return Names.IsEmpty() ? FString(TEXT("none is loaded"))
-			: FString::Printf(TEXT("e.g. %s%s"), *FString::Join(Names, TEXT(", ")), More > 0 ? *FString::Printf(TEXT(" and %d more"), More) : TEXT(""));
+		if (Names.IsEmpty())
+			return TEXT("none is loaded");
+		const FString Rest = More > 0 ? FString::Printf(TEXT(" and %d more"), More) : FString();
+		return FString::Printf(TEXT("e.g. %s%s"), *FString::Join(Names, TEXT(", ")), *Rest);
 	}
 
 	/** JSON from an extension (AddJsonMember) as an owned RQL value. */
