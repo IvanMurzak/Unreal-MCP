@@ -250,8 +250,8 @@ void FUnrealMcpRqlDataModelsSpec::Define()
 	});
 	AfterEach([this]()
 	{
-		// Actors first: placed instances of a spec Blueprint must not outlive their class (a garbage class with live
-		// instances breaks the next garbage collection).
+		// Actors first, so no placed instance of a spec Blueprint is still in the world when its class is dropped
+		// (see DropObject).
 		DestroySpecActors();
 		for (UObject* Object : Created)
 			UnrealMcpRqlSpecHelpers::DropObject(Object);
