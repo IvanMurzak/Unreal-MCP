@@ -171,6 +171,7 @@ export type {
   ConfigureResult,
   ConfigureSuccess,
   ConfigureFailure,
+  EditorSpawnImpl,
   OpenProjectOptions,
   OpenProjectResult,
   OpenProjectSuccess,

@@ -88,7 +88,7 @@ export const openCommand = new Command('open')
       process.exitCode = 1;
       return;
     }
-    spinner.success(`Launched Unreal Editor (PID: ${result.editorPid ?? 'unknown'})`);
+    spinner.success(`Launched Unreal Editor${result.editorPid !== undefined ? ` (PID: ${result.editorPid})` : ''}`);
     ui.printWarnings(result.warnings);
     ui.label('editor', result.editorPath);
     ui.label('engine', result.engineRoot);
@@ -144,7 +144,7 @@ async function openSession(pathArg: string | undefined, opts: Record<string, unk
     return;
   }
   spinner.success(result.source === 'started'
-    ? `Started the Unreal Editor (${mode}, PID: ${result.pid ?? 'unknown'})`
+    ? `Started the Unreal Editor (${mode}${result.pid !== undefined ? `, PID: ${result.pid}` : ''})`
     : `The Unreal Editor is already running (${result.source})`);
   ui.label('server', result.url);
 }

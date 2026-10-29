@@ -186,6 +186,64 @@ describe('openProject', () => {
     expect(spawnedWith!.env['UNREAL_MCP_HOST']).toBe('http://localhost:5220');
   });
 
+  it('a spawnImpl may return a pid promise: a late pid is waited for and logged once known', async () => {
+    const dir = tmp();
+    writeUProject(dir, 'MyGame', '5.7');
+    const progress: ProgressEvent[] = [];
+    const r = await openProject({
+      projectDir: dir,
+      autoDismissStartupDialogs: false,
+      build: false,
+      enginesImpl: () => [fakeEngine('5.7')],
+      spawnImpl: () => new Promise<number>((resolve) => setTimeout(() => resolve(4343), 50)),
+      onProgress: (e) => progress.push(e),
+    });
+    expect(r.kind).toBe('success');
+    if (r.kind !== 'success') return;
+    expect(r.editorPid).toBe(4343);
+    expect(progress.filter((e) => e.phase === 'launched')).toEqual([
+      { phase: 'launched', message: 'Launched (PID: 4343)', pid: 4343 },
+    ]);
+  });
+
+  it('an unknown pid is never logged as "unknown"', async () => {
+    const dir = tmp();
+    writeUProject(dir, 'MyGame', '5.7');
+    const progress: ProgressEvent[] = [];
+    const r = await openProject({
+      projectDir: dir,
+      autoDismissStartupDialogs: false,
+      build: false,
+      enginesImpl: () => [fakeEngine('5.7')],
+      spawnImpl: async () => undefined,
+      onProgress: (e) => progress.push(e),
+    });
+    expect(r.kind).toBe('success');
+    if (r.kind !== 'success') return;
+    expect(r.editorPid).toBeUndefined();
+    expect(progress).toContainEqual({ phase: 'launched', message: 'Launched', pid: undefined });
+  });
+
+  it('a spawnImpl that rejects fails the open (the editor did not start)', async () => {
+    const dir = tmp();
+    writeUProject(dir, 'MyGame', '5.7');
+    const progress: ProgressEvent[] = [];
+    const r = await openProject({
+      projectDir: dir,
+      autoDismissStartupDialogs: false,
+      build: false,
+      enginesImpl: () => [fakeEngine('5.7')],
+      spawnImpl: async () => {
+        throw new Error('Windows did not start the application (code 9).');
+      },
+      onProgress: (e) => progress.push(e),
+    });
+    expect(r.kind).toBe('failure');
+    if (r.kind !== 'failure') return;
+    expect(r.errorMessage).toBe('Windows did not start the application (code 9).');
+    expect(progress.map((e) => e.phase)).not.toContain('launched');
+  });
+
   it('dismisses known Unreal startup dialogs after launch on Windows', async () => {
     const dir = tmp();
     writeBlueprintProject(dir, 'MyGame', '5.7');

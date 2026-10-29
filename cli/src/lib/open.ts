@@ -4,7 +4,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { spawn } from 'child_process';
+import { spawn, type ChildProcess } from 'child_process';
 import { platform } from 'os';
 import { discoverEngine, invalidateCachedEngine } from './engine.js';
 import { readUProject } from '../utils/project.js';
@@ -27,6 +27,7 @@ import {
 } from '../utils/unreal-build.js';
 import type {
   AuthOption,
+  EditorSpawnImpl,
   McpTransport,
   OpenProjectOptions,
   OpenProjectResult,
@@ -183,18 +184,24 @@ export async function openProject(opts: OpenProjectOptions): Promise<OpenProject
     // we resolved (most importantly a CACHED path pointing at a moved/removed
     // engine), drop that cache slot so the next `open` re-runs the full chain.
     // Only relevant for the real detached spawn — an injected `spawnImpl`
-    // (tests) owns its own error semantics.
+    // owns its own error semantics (a rejection fails the open).
     const onSpawnError = (): void => {
       if (!opts.noCache) invalidateCachedEngine(uproject.engineAssociation);
     };
-    const child = opts.spawnImpl
-      ? opts.spawnImpl(resolution.editorPath, args, childEnv)
-      : spawnDetached(resolution.editorPath, args, childEnv, onSpawnError);
+    let pid: number | undefined;
+    if (opts.spawnImpl) {
+      // The embedder's pid may come later (a promise): it is waited for, and logged once known.
+      pid = await spawnedEditorPid(opts.spawnImpl(resolution.editorPath, args, childEnv));
+    } else {
+      const child = spawnDetached(resolution.editorPath, args, childEnv, onSpawnError);
+      // Node sets `pid` at once; a spawn whose pid is reported later (a `spawn` event) is waited for briefly.
+      pid = child.pid ?? (await waitForSpawn(child));
+    }
 
     emitProgress(opts.onProgress, {
       phase: 'launched',
-      message: `Launched (PID: ${child.pid ?? 'unknown'})`,
-      pid: child.pid,
+      message: `Launched${pid !== undefined ? ` (PID: ${pid})` : ''}`,
+      pid,
     });
 
     if (isDesktopBuildPlatform(os) && opts.autoDismissStartupDialogs !== false) {
@@ -216,7 +223,7 @@ export async function openProject(opts: OpenProjectOptions): Promise<OpenProject
       editorPath: resolution.editorPath,
       engineRoot: resolution.engineRoot,
       projectDir,
-      editorPid: child.pid,
+      editorPid: pid,
       envVars: env ?? {},
       warnings,
     };
@@ -365,12 +372,36 @@ function sleep(ms: number): Promise<void> {
   });
 }
 
+/** The editor pid an `openProject` `spawnImpl` reported: the started process's `pid`, or its promise's value. */
+async function spawnedEditorPid(started: ReturnType<EditorSpawnImpl>): Promise<number | undefined> {
+  const value = await started;
+  return typeof value === 'object' ? value.pid : value;
+}
+
+/**
+ * Resolve to the child's pid once it emits `spawn`, or to `undefined` when it emits `error` first or
+ * `timeoutMs` elapses. Never throws, never keeps the process alive (the child is detached and unref'd).
+ */
+function waitForSpawn(child: ChildProcess, timeoutMs = 2000): Promise<number | undefined> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (pid: number | undefined): void => {
+      if (settled) return;
+      settled = true;
+      resolve(pid);
+    };
+    child.once('spawn', () => finish(child.pid ?? undefined));
+    child.once('error', () => finish(undefined));
+    setTimeout(() => finish(child.pid ?? undefined), timeoutMs).unref();
+  });
+}
+
 function spawnDetached(
   editorPath: string,
   args: string[],
   env: NodeJS.ProcessEnv,
   onError?: () => void,
-): { pid?: number } {
+): ChildProcess {
   const child = spawn(editorPath, args, { detached: true, stdio: 'ignore', env });
   // A detached spawn can fail asynchronously (EACCES, ENOENT) AFTER we have
   // already returned success; without an 'error' listener that emits an
@@ -385,5 +416,5 @@ function spawnDetached(
     }
   });
   child.unref();
-  return { pid: child.pid };
+  return child;
 }

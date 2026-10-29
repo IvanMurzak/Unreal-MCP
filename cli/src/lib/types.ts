@@ -163,14 +163,29 @@ export interface OpenProjectOptions {
   registryQueryImpl?: import('../utils/engine-discovery.js').RegistryQueryImpl;
   /** Test/embed injection — binary existence check (defaults to `fs.existsSync`). */
   existsImpl?: (p: string) => boolean;
-  /** Test injection — spawn (defaults to detached `child_process.spawn`). */
-  spawnImpl?: (editorPath: string, args: string[], env: NodeJS.ProcessEnv) => { pid?: number };
+  /**
+   * Starts the editor in place of the default detached `child_process.spawn` (tests, or an embedder that launches
+   * processes its own way). See {@link EditorSpawnImpl}.
+   */
+  spawnImpl?: EditorSpawnImpl;
   /** Test injection — build runner used by the pre-launch build. */
   buildImpl?: (step: UbtBuildStep) => Promise<void>;
   /** Test injection — startup-dialog probe used by the post-launch dismiss loop. */
   dismissStartupDialogImpl?: (platform: DismissPlatform) => Promise<DismissOutcome>;
   onProgress?: ProgressCallback;
 }
+
+/**
+ * Starts the editor for `openProject`: `editorPath` with `args`, detached, in `env` (the full environment:
+ * `process.env` plus the MCP variables). Returns the started process (its `pid` is read once) or a promise of the
+ * editor's pid, which `openProject` waits for before it reports `launched` and returns `editorPid`
+ * (`undefined`: started, pid unknown). A rejection, or a throw, fails the open: the editor did not start.
+ */
+export type EditorSpawnImpl = (
+  editorPath: string,
+  args: string[],
+  env: NodeJS.ProcessEnv,
+) => { pid?: number } | Promise<number | undefined>;
 
 export interface OpenProjectSuccess {
   kind: 'success';
