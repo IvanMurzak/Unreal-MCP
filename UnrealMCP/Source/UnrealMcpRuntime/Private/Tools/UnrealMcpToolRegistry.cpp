@@ -71,14 +71,7 @@ FUnrealMcpToolResult FUnrealMcpToolResult::SuccessWithImage(const FString& InMes
 	const TSharedPtr<FJsonObject>& InStructured, const FString& InMimeType)
 {
 	// Deprecated structured form: fold the payload into the text block, never into StructuredContent (see header).
-	FString Message = InMessage;
-	if (InStructured.IsValid() && InStructured->Values.Num() > 0)
-	{
-		if (!Message.IsEmpty())
-			Message += TEXT("\n");
-		Message += UnrealMcpSerializeCondensed(InStructured);
-	}
-	return SuccessWithImage(Message, InBase64Data, InMimeType);
+	return SuccessWithImage(FUnrealMcpToolResult{ true, InMessage, InStructured }.WireText(), InBase64Data, InMimeType);
 }
 
 FString FUnrealMcpToolResult::WireText() const
