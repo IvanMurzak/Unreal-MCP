@@ -1,0 +1,43 @@
+UnrealMCP/Source/UnrealMcpEditor/Private/Session/UnrealMcpEditorSession.h
+  s_5f9a753ce320b5::t_89d7321c2fe881 18,20,22,38,72,104
+UnrealMCP/Source/UnrealMcpEditor/Private/UnrealMcpEditorCoordinator.cpp
+  s_5f9a753ce320b5::t_b9473f3f1e5896 309,620-621,626,652,695-696
+UnrealMCP/Source/UnrealMcpEditor/Private/UnrealMcpEditorCoordinator.h
+  s_5f9a753ce320b5::t_a33da3723acb8a 117,119-121,125-126
+UnrealMCP/Source/UnrealMcpRuntime/Private/Bridge/UnrealMcpBridgeServer.cpp
+  s_5f9a753ce320b5::t_870fe5364e33cd 539,541-544,546-550
+UnrealMCP/Source/UnrealMcpRuntime/Private/Bridge/UnrealMcpBridgeServer.h
+  s_5f9a753ce320b5::t_523d51ea169a48 62-63,288
+cli/src/commands/exec.ts
+  s_5f9a753ce320b5::t_a228a0559f594e 5,7,51,90
+cli/src/commands/open.ts
+  s_5f9a753ce320b5::t_8dcb5087d1b1ea 7,142-143
+cli/src/lib.ts
+  s_5f9a753ce320b5::t_de881cd0eb211f 23-24,32-33
+cli/src/lib/close.ts
+  s_5f9a753ce320b5::t_35446ee9e5c6b8 144,146-147
+cli/src/lib/exec.ts
+  s_5f9a753ce320b5::t_4615303f675d9b 6,67,69-79,84,145,149
+cli/src/lib/session.ts
+  s_5f9a753ce320b5::t_1a5de0d27e47ee 31,37,43,45,82-89,96-97,139-147,155-156,176,180,185,187,191,229,237-253,256,259-260,288,298,303
+cli/src/utils/flags.ts
+  s_5f9a753ce320b5::t_c78f0d99f23f11 1-11
+cli/tests/exec.test.ts
+  s_5f9a753ce320b5::t_23335b19bb94f8 5,318
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "8348be440793ec9b46bbd4877b38cf6382fa6f28",
+  "prompts": {},
+  "sessions": {
+    "s_5f9a753ce320b5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7ee65e8c-aca3-452e-9397-46e1aceea5e9",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

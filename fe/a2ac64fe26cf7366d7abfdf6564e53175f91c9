@@ -1,0 +1,31 @@
+cli/README.md
+  s_566a39e1443632::t_01dc9c3a509a29 54
+cli/tests/setup-mcp.test.ts
+  s_566a39e1443632::t_d19f25ccfb0670 23,46-48,160,162
+cli/src/utils/agents.ts
+  s_f670c6905b87a7::t_b8eab2588ce603 22-23,197
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "fea2ac64fe26cf7366d7abfdf6564e53175f91c9",
+  "prompts": {},
+  "sessions": {
+    "s_566a39e1443632": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "aae1b0e5-676d-4eba-a0de-682397697f07",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_f670c6905b87a7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-ad076a2dc64d8e5cb",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

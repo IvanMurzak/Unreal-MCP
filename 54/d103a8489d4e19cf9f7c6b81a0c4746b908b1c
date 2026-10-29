@@ -1,0 +1,32 @@
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpSourceToolsSpec.cpp
+  s_908974782fafa1::t_9d67a5714d437b 168-193
+  s_908974782fafa1::t_7a1a0cae263b88 352-355
+  s_908974782fafa1::t_a56b98ccff1903 302-330
+  s_908974782fafa1::t_0bddfad1f0f969 388-410
+UnrealMCP/Source/UnrealMcpEditor/Private/Tools/UnrealMcpSourceTools.cpp
+  s_908974782fafa1::t_268aa9b70db91a 125-137
+  s_908974782fafa1::t_6b354c95b21bb1 91-93
+  s_908974782fafa1::t_2f3f1e3e1f1b7f 355,367-372
+  s_908974782fafa1::t_7565b2ec038ae7 779-786
+  s_908974782fafa1::t_f14200afe234c3 529-532,551-555
+  s_908974782fafa1::t_eafbbf97e4f81b 803-820
+  s_908974782fafa1::t_96f4ec163e9467 315-325
+  s_908974782fafa1::t_15d456390d661a 341-344
+  s_908974782fafa1::t_8075321fd03b9c 152-156
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "54d103a8489d4e19cf9f7c6b81a0c4746b908b1c",
+  "prompts": {},
+  "sessions": {
+    "s_908974782fafa1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f1748397-e586-40bb-91a9-b89c0caebdf5",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

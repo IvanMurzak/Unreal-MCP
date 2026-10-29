@@ -1,0 +1,21 @@
+bridge/src/com.IvanMurzak.Unreal.MCP.Bridge.csproj
+  s_cb41aadbde3305::t_7a69a201c010cf 54,67-68,72
+cli/src/lib/server-version.ts
+  s_cb41aadbde3305::t_fe81d6de17741b 12
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "00d1397727b13416c26118119c3a4226b6e4e65d",
+  "prompts": {},
+  "sessions": {
+    "s_cb41aadbde3305": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e52f295f-a887-4d28-a18e-567076052857",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

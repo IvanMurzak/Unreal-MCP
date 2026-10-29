@@ -1,0 +1,48 @@
+UnrealMCP/Source/UnrealMcpEditor/Private/UnrealMcpRuntime.cpp
+  s_908974782fafa1::t_75e3402d381e89 32
+UnrealMCP/Source/UnrealMcpEditor/Private/Tools/UnrealMcpActorTools.cpp
+  s_908974782fafa1::t_e13b47bc30c9fb 1-159,163-173,180-221,226-227,229-248,253,256,262-655
+  s_908974782fafa1::t_4594aa9a922980 249-252,254-255,257-261
+  s_908974782fafa1::t_bb2fa9a5cd5f16 222-225,228
+  s_908974782fafa1::t_027069d5069180 160-162,174-179
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpActorToolsSpec.cpp
+  s_908974782fafa1::t_d544be5b45f9ee 105
+  s_908974782fafa1::t_8200e6803b6695 1-104,106-321
+UnrealMCP/Source/UnrealMcpEditor/Public/UnrealMcpToolRegistry.h
+  s_908974782fafa1::t_9e09cafad6216d 135-141
+  s_908974782fafa1::t_e5f9d467d3cd41 34
+UnrealMCP/Source/UnrealMcpEditor/Private/Tools/UnrealMcpToolRegistry.cpp
+  s_908974782fafa1::t_b1ab0318100fb8 271
+  s_908974782fafa1::t_8d21d24ef90884 116-118
+  s_908974782fafa1::t_9e0638469aadd3 189-193
+  s_908974782fafa1::t_e125a1e27ccc15 293,295-296
+UnrealMCP/Source/UnrealMcpEditor/Private/Tools/UnrealMcpObjectRef.h
+  s_908974782fafa1::t_f1389d3449edbf 1-57
+UnrealMCP/Source/UnrealMcpEditor/Private/Tools/UnrealMcpPropertyJson.h
+  s_908974782fafa1::t_5e25dbb3572957 1-15,17-46
+  s_908974782fafa1::t_d258a32b23c9d9 16
+UnrealMCP/Source/UnrealMcpEditorTests/UnrealMcpEditorTests.Build.cs
+  s_908974782fafa1::t_9e01e2c3f698a9 18
+UnrealMCP/Source/UnrealMcpEditor/Public/UnrealMcpCoreTools.h
+  s_908974782fafa1::t_e45ae8dda566d2 19-31
+UnrealMCP/Source/UnrealMcpEditor/Private/Tools/UnrealMcpPropertyJson.cpp
+  s_908974782fafa1::t_6d221d3a1aa4aa 1-234
+UnrealMCP/Source/UnrealMcpEditor/Private/Tools/UnrealMcpObjectRef.cpp
+  s_908974782fafa1::t_106b8488d21901 1-143
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "6162666d5b7ad1540a11e0cde8f59b3741ec11a2",
+  "prompts": {},
+  "sessions": {
+    "s_908974782fafa1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f1748397-e586-40bb-91a9-b89c0caebdf5",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

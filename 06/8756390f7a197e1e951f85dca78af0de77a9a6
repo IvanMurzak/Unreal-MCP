@@ -1,0 +1,224 @@
+README.md
+  s_eb8bcde0be96a2::t_0703eb2efeca27 62-65
+extensions/UnrealAIControlRig/Tests/e2e/tools/control-rig-list-controls.e2e.ps1
+  s_eb8bcde0be96a2::t_0be9753da31002 1-17
+extensions/UnrealAIPCG/Tests/e2e/tools/pcg-get-component.e2e.ps1
+  s_eb8bcde0be96a2::t_0be9753da31002 1-17
+extensions/UnrealAINiagara/Tests/e2e/tools/niagara-spawn-component.e2e.ps1
+  s_eb8bcde0be96a2::t_0be9753da31002 1-18
+scripts/run-extension-e2e.ps1
+  s_eb8bcde0be96a2::t_f55a3eba5999cf 1-37
+extensions/UnrealAIGAS/extension.json
+  s_eb8bcde0be96a2::t_9ebb5be3c5d750 6,9-11,13-32,34
+  s_eb8bcde0be96a2::t_0be9753da31002 1-5,7-8,12,33,35
+extensions/UnrealAILandscape/extension.json
+  s_eb8bcde0be96a2::t_0be9753da31002 1-5,7-8,12,33,35
+  s_eb8bcde0be96a2::t_9ebb5be3c5d750 6,9-11,13-32,34
+extensions/UnrealAIGAS/Tests/e2e/tools/gas-grant-ability.e2e.ps1
+  s_eb8bcde0be96a2::t_0be9753da31002 1-19
+extensions/UnrealAIControlRig/Tests/e2e/tools/control-rig-get.e2e.ps1
+  s_eb8bcde0be96a2::t_0be9753da31002 1-19
+extensions/UnrealAINiagara/LICENSE
+  s_eb8bcde0be96a2::t_0be9753da31002 1-201
+extensions/UnrealAIEnhancedInput/Tests/e2e/tools/enhanced-input-list.e2e.ps1
+  s_eb8bcde0be96a2::t_0be9753da31002 1-17
+extensions/UnrealAIGAS/Source/UnrealAIGAS/UnrealAIGAS.Build.cs
+  s_eb8bcde0be96a2::t_0be9753da31002 1-56
+extensions/UnrealAIGAS/UnrealAIGAS.uplugin
+  s_eb8bcde0be96a2::t_9ebb5be3c5d750 10,12
+  s_eb8bcde0be96a2::t_0be9753da31002 1-9,11,13-34
+extensions/UnrealAINiagara/Tests/e2e/tools/niagara-list-systems.e2e.ps1
+  s_eb8bcde0be96a2::t_0be9753da31002 1-17
+extensions/README.md
+  s_eb8bcde0be96a2::t_9ebb5be3c5d750 1-18
+extensions/UnrealAIEnhancedInput/Tests/e2e/tools/enhanced-input-context-create.e2e.ps1
+  s_eb8bcde0be96a2::t_0be9753da31002 1-17
+extensions/UnrealAIControlRig/extension.json
+  s_eb8bcde0be96a2::t_9ebb5be3c5d750 6,9-11,13-32,34
+  s_eb8bcde0be96a2::t_0be9753da31002 1-5,7-8,12,33,35
+extensions/UnrealAIGAS/Tests/e2e/tools/gas-list-effects.e2e.ps1
+  s_eb8bcde0be96a2::t_0be9753da31002 1-17
+extensions/UnrealAIEnhancedInput/extension.json
+  s_eb8bcde0be96a2::t_9ebb5be3c5d750 6,9-11,13-32,34
+  s_eb8bcde0be96a2::t_0be9753da31002 1-5,7-8,12,33,35
+extensions/UnrealAILandscape/Tests/e2e/tools/landscape-get-actor.e2e.ps1
+  s_eb8bcde0be96a2::t_0be9753da31002 1-17
+cli/src/lib/types.ts
+  s_eb8bcde0be96a2::t_f431465067cd9c 801,826-827
+extensions/UnrealAIEnhancedInput/Source/UnrealAIEnhancedInput/Private/UnrealAIEnhancedInputModule.cpp
+  s_eb8bcde0be96a2::t_0be9753da31002 1-507
+tests/host-project/Source/UnrealMcpTests/UnrealMcpTests.cpp
+  s_eb8bcde0be96a2::t_f55a3eba5999cf 1-2
+extensions/UnrealAILandscape/Tests/e2e/tools/landscape-list-water-zones.e2e.ps1
+  s_eb8bcde0be96a2::t_0be9753da31002 1-17
+cli/src/lib/install-extension.ts
+  s_eb8bcde0be96a2::t_51f252d8528418 39-40,108,110-119,151,179,194-197,200,203-204,387-389,399-405
+extensions/UnrealAIPCG/extension.json
+  s_eb8bcde0be96a2::t_0be9753da31002 1-5,7-8,12,33,35
+  s_eb8bcde0be96a2::t_9ebb5be3c5d750 6,9-11,13-32,34
+docs/EXTENSION-MONOREPO.md
+  s_eb8bcde0be96a2::t_cb3496370ee98e 1-115
+docs/RELEASING.md
+  s_eb8bcde0be96a2::t_0703eb2efeca27 3-6
+extensions-index.json
+  s_eb8bcde0be96a2::t_679e9c5b18cada 1-245
+extensions/UnrealAINiagara/Source/UnrealAINiagara/Private/UnrealAINiagaraModule.cpp
+  s_eb8bcde0be96a2::t_0be9753da31002 1-236
+cli/README.md
+  s_eb8bcde0be96a2::t_0703eb2efeca27 54-57
+extensions/UnrealAIEnhancedInput/LICENSE
+  s_eb8bcde0be96a2::t_0be9753da31002 1-201
+extensions/UnrealAIEnhancedInput/UnrealAIEnhancedInput.uplugin
+  s_eb8bcde0be96a2::t_9ebb5be3c5d750 10,12
+  s_eb8bcde0be96a2::t_0be9753da31002 1-9,11,13-34
+extensions/UnrealAINiagara/Source/UnrealAINiagara/UnrealAINiagara.Build.cs
+  s_eb8bcde0be96a2::t_0be9753da31002 1-51
+extensions/UnrealAIControlRig/Tests/e2e/tools/control-rig-get-component.e2e.ps1
+  s_eb8bcde0be96a2::t_0be9753da31002 1-18
+extensions/UnrealAILandscape/Tests/e2e/tools/landscape-list-actors.e2e.ps1
+  s_eb8bcde0be96a2::t_0be9753da31002 1-17
+extensions/UnrealAIEnhancedInput/Tests/e2e/tools/enhanced-input-get.e2e.ps1
+  s_eb8bcde0be96a2::t_0be9753da31002 1-18
+extensions/UnrealAIEnhancedInput/Source/UnrealAIEnhancedInput/Private/Tests/UnrealAIEnhancedInputSpec.cpp
+  s_eb8bcde0be96a2::t_0be9753da31002 1-181
+extensions/UnrealAIEnhancedInput/Tests/e2e/tools/enhanced-input-add-mapping.e2e.ps1
+  s_eb8bcde0be96a2::t_0be9753da31002 1-18
+extensions/UnrealAILandscape/Source/UnrealAILandscape/Private/Tests/UnrealAILandscapeSpec.cpp
+  s_eb8bcde0be96a2::t_0be9753da31002 1-186
+extensions/UnrealAIPCG/Tests/e2e/tools/pcg-add-component.e2e.ps1
+  s_eb8bcde0be96a2::t_0be9753da31002 1-18
+scripts/extension_release.py
+  s_eb8bcde0be96a2::t_51f252d8528418 1-206
+AGENTS.md
+  s_eb8bcde0be96a2::t_0703eb2efeca27 49,85-86,115-116
+scripts/suite_dependencies.py
+  s_eb8bcde0be96a2::t_25a1ec0cb23068 1-29
+extensions/UnrealAIGAS/Source/UnrealAIGAS/Private/UnrealAIGASModule.cpp
+  s_eb8bcde0be96a2::t_0be9753da31002 1-474
+.github/workflows/test_pull_request.yml
+  s_eb8bcde0be96a2::t_9a0cf1b691afb4 242,345,349-355
+extensions/UnrealAIControlRig/LICENSE
+  s_eb8bcde0be96a2::t_0be9753da31002 1-201
+extensions/UnrealAIControlRig/Tests/e2e/tools/control-rig-list.e2e.ps1
+  s_eb8bcde0be96a2::t_0be9753da31002 1-17
+extensions/UnrealAIPCG/UnrealAIPCG.uplugin
+  s_eb8bcde0be96a2::t_9ebb5be3c5d750 10,12
+  s_eb8bcde0be96a2::t_0be9753da31002 1-9,11,13-34
+.github/workflows/release_extensions.yml
+  s_eb8bcde0be96a2::t_fc758d213d2f48 1-130
+tests/AGENTS.md
+  s_eb8bcde0be96a2::t_cb3496370ee98e 1-7
+extensions/UnrealAIGAS/Source/UnrealAIGAS/Private/Tests/UnrealAIGASSpec.cpp
+  s_eb8bcde0be96a2::t_0be9753da31002 1-184
+extensions/UnrealAIGAS/Tests/e2e/tools/gas-list-attribute-sets.e2e.ps1
+  s_eb8bcde0be96a2::t_0be9753da31002 1-18
+extensions/UnrealAINiagara/extension.json
+  s_eb8bcde0be96a2::t_0be9753da31002 1-5,7-8,12,25-27
+  s_eb8bcde0be96a2::t_9ebb5be3c5d750 6,9-11,13-24
+extensions/UnrealAINiagara/Tests/e2e/tools/niagara-get-system.e2e.ps1
+  s_eb8bcde0be96a2::t_0be9753da31002 1-18
+extensions/UnrealAINiagara/UnrealAINiagara.uplugin
+  s_eb8bcde0be96a2::t_9ebb5be3c5d750 10,12
+  s_eb8bcde0be96a2::t_0be9753da31002 1-9,11,13-34
+extensions/UnrealAIPCG/Tests/e2e/tools/pcg-list-graphs.e2e.ps1
+  s_eb8bcde0be96a2::t_0be9753da31002 1-17
+.gitignore
+  s_eb8bcde0be96a2::t_fadcbc88ddb65d 91-93
+extensions/UnrealAIPCG/Source/UnrealAIPCG/Private/UnrealAIPCGModule.cpp
+  s_eb8bcde0be96a2::t_0be9753da31002 1-398
+extensions/UnrealAIControlRig/Source/UnrealAIControlRig/Private/UnrealAIControlRigModule.cpp
+  s_eb8bcde0be96a2::t_0be9753da31002 1-441
+tests/host-project/Source/UnrealMcpTests/UnrealMcpTests.Build.cs
+  s_eb8bcde0be96a2::t_f55a3eba5999cf 1-9
+extensions/UnrealAIControlRig/Source/UnrealAIControlRig/UnrealAIControlRig.Build.cs
+  s_eb8bcde0be96a2::t_0be9753da31002 1-53
+extensions/UnrealAIEnhancedInput/Tests/e2e/tools/enhanced-input-action-create.e2e.ps1
+  s_eb8bcde0be96a2::t_0be9753da31002 1-17
+extensions/UnrealAILandscape/Source/UnrealAILandscape/Private/UnrealAILandscapeModule.cpp
+  s_eb8bcde0be96a2::t_0be9753da31002 1-417
+cli/src/utils/extension-source.ts
+  s_eb8bcde0be96a2::t_f431465067cd9c 27,64,66,106-107,131,133
+extensions/UnrealAINiagara/Source/UnrealAINiagara/Private/Tests/UnrealAINiagaraSpec.cpp
+  s_eb8bcde0be96a2::t_0be9753da31002 1-142
+scripts/extension_suite.py
+  s_eb8bcde0be96a2::t_51f252d8528418 232-233
+  s_eb8bcde0be96a2::t_c8aaea27f718f5 119-120,223-225
+  s_eb8bcde0be96a2::t_cb9a053db283a8 212-213,226,238-239
+  s_eb8bcde0be96a2::t_f55a3eba5999cf 6-37,39-118,121-209,211,214-222,227-231,234-237,240-245
+  s_eb8bcde0be96a2::t_33d590620b7bcc 1-5,38,210
+extensions/UnrealAIControlRig/UnrealAIControlRig.uplugin
+  s_eb8bcde0be96a2::t_9ebb5be3c5d750 10,12
+  s_eb8bcde0be96a2::t_0be9753da31002 1-9,11,13-34
+cli/tests/extensions-index.test.ts
+  s_eb8bcde0be96a2::t_4f52ab5df70423 1-129
+extensions/UnrealAIPCG/LICENSE
+  s_eb8bcde0be96a2::t_0be9753da31002 1-201
+extensions/UnrealAIGAS/LICENSE
+  s_eb8bcde0be96a2::t_0be9753da31002 1-201
+extensions/UnrealAIControlRig/Source/UnrealAIControlRig/Private/Tests/UnrealAIControlRigSpec.cpp
+  s_eb8bcde0be96a2::t_0be9753da31002 1-177
+extensions/UnrealAILandscape/Source/UnrealAILandscape/UnrealAILandscape.Build.cs
+  s_eb8bcde0be96a2::t_0be9753da31002 1-52
+extensions/UnrealAIPCG/Source/UnrealAIPCG/Private/Tests/UnrealAIPCGSpec.cpp
+  s_eb8bcde0be96a2::t_0be9753da31002 1-178
+extensions/UnrealAIPCG/Source/UnrealAIPCG/UnrealAIPCG.Build.cs
+  s_eb8bcde0be96a2::t_0be9753da31002 1-53
+cli/src/utils/extensions-index.ts
+  s_eb8bcde0be96a2::t_f419a520d32b78 1-36,38-61,63-103
+  s_eb8bcde0be96a2::t_c2e29dc938d125 37,62
+.github/workflows/release.yml
+  s_eb8bcde0be96a2::t_cb9a053db283a8 335,339-345
+scripts/test_extension_monorepo.py
+  s_eb8bcde0be96a2::t_51f252d8528418 1-104
+extensions/UnrealAIControlRig/Tests/e2e/tools/control-rig-list-bones.e2e.ps1
+  s_eb8bcde0be96a2::t_0be9753da31002 1-17
+.github/workflows/test_cli.yml
+  s_eb8bcde0be96a2::t_9a0cf1b691afb4 120-123
+tests/host-project/Source/UnrealMcpTestsEditor.Target.cs
+  s_eb8bcde0be96a2::t_f55a3eba5999cf 1-12
+extensions/AGENTS.md
+  s_eb8bcde0be96a2::t_cb3496370ee98e 1-9
+extensions/UnrealAIEnhancedInput/Source/UnrealAIEnhancedInput/UnrealAIEnhancedInput.Build.cs
+  s_eb8bcde0be96a2::t_0be9753da31002 1-59
+extensions/UnrealAIGAS/Tests/e2e/tools/gas-inspect-ability.e2e.ps1
+  s_eb8bcde0be96a2::t_0be9753da31002 1-19
+extensions/UnrealAILandscape/LICENSE
+  s_eb8bcde0be96a2::t_0be9753da31002 1-201
+extensions/UnrealAIPCG/Tests/e2e/tools/pcg-generate.e2e.ps1
+  s_eb8bcde0be96a2::t_0be9753da31002 1-18
+extensions/UnrealAILandscape/Tests/e2e/tools/landscape-get-water-body.e2e.ps1
+  s_eb8bcde0be96a2::t_0be9753da31002 1-18
+extensions/migration-sources.json
+  s_eb8bcde0be96a2::t_0be9753da31002 1-26
+extensions/UnrealAILandscape/UnrealAILandscape.uplugin
+  s_eb8bcde0be96a2::t_9ebb5be3c5d750 10,12
+  s_eb8bcde0be96a2::t_0be9753da31002 1-9,11,13-34
+extensions/UnrealAIPCG/Tests/e2e/tools/pcg-get-graph.e2e.ps1
+  s_eb8bcde0be96a2::t_0be9753da31002 1-18
+tests/automation-inventory.json
+  s_eb8bcde0be96a2::t_fadcbc88ddb65d 1-40
+extensions/UnrealAILandscape/Tests/e2e/tools/landscape-list-water-bodies.e2e.ps1
+  s_eb8bcde0be96a2::t_0be9753da31002 1-17
+extensions/UnrealAIGAS/Tests/e2e/tools/gas-list-abilities.e2e.ps1
+  s_eb8bcde0be96a2::t_0be9753da31002 1-17
+docs/ARCHITECTURE.md
+  s_eb8bcde0be96a2::t_0703eb2efeca27 1005-1008
+docs/EXTENSIONS.md
+  s_eb8bcde0be96a2::t_0703eb2efeca27 3-6
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "068756390f7a197e1e951f85dca78af0de77a9a6",
+  "prompts": {},
+  "sessions": {
+    "s_eb8bcde0be96a2": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14267-6fec-7a30-97a7-931925a48014",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

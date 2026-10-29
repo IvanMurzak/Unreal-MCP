@@ -1,0 +1,21 @@
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/SUnrealMcpAgentConfigurators.cpp
+  s_22693b636f3172::t_5cd09d367e38da 430-432
+UnrealMCP/Source/UnrealMcpEditor/Private/Agents/Impl/ClaudeCodeConfigurator.h
+  s_22693b636f3172::t_50278592e1bfab 68-72,76-77
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "60ef81c55758243277e620a4042f8117567d598f",
+  "prompts": {},
+  "sessions": {
+    "s_22693b636f3172": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c07809a2-615b-47aa-afa6-1d2832f8909c",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

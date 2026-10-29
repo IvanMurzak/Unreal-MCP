@@ -1,0 +1,38 @@
+extensions/UnrealAILandscape/Source/UnrealAILandscape/Private/UnrealAILandscapeRqlApi.cpp
+  s_7bc72ecaebd05d::t_e59e665e2b343b 176-181,183,186-192
+  s_7bc72ecaebd05d::t_039e7ee2c27f2b 277-278
+  s_7bc72ecaebd05d::t_acf31e3ba6032b 68-72,75-84
+  s_7bc72ecaebd05d::t_946fa2c3c9b857 306-308
+  s_7bc72ecaebd05d::t_08985a4097bb59 318
+  s_7bc72ecaebd05d::t_9b477bfce17cb4 236-238,240-244
+  s_7bc72ecaebd05d::t_f9bd853442e6ab 104-107
+  s_7bc72ecaebd05d::t_59feb5563121f2 15,20
+UnrealMCP/Source/UnrealMcpEditor/Private/Tools/UnrealMcpToolListTools.cpp
+  s_7bc72ecaebd05d::t_97446e8811fa15 97-98
+extensions/UnrealAILandscape/Source/UnrealAILandscape/Private/Tests/UnrealAILandscapeSpec.cpp
+  s_7bc72ecaebd05d::t_6457862eb218b7 184-187
+UnrealMCP/Source/UnrealMcpEditor/Private/Tools/UnrealMcpPythonTools.cpp
+  s_7bc72ecaebd05d::t_85150ac3ff5909 233-235
+README.md
+  s_7bc72ecaebd05d::t_590b18b0077647 43,51,560
+docs/ARCHITECTURE.md
+  s_7bc72ecaebd05d::t_f11bda8f77bb97 402
+extensions/UnrealAIEnhancedInput/Source/UnrealAIEnhancedInput/Private/UnrealAIEnhancedInputRqlApi.cpp
+  s_7bc72ecaebd05d::t_9b61709952863a 78,232
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "8c400f87f8228a64bb751e11d8fb4586fbe1dee5",
+  "prompts": {},
+  "sessions": {
+    "s_7bc72ecaebd05d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "40274cb2-edf8-49ba-9a73-33b83cb5be53",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

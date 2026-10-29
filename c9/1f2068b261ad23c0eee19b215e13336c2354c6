@@ -1,0 +1,74 @@
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpLevelToolsSpec.cpp
+  s_3e0a2681fef788::t_50b791b99be04c 14-16,21
+  s_3e0a2681fef788::t_27811019eb2afe 48,55,63-65,76
+UnrealMCP/Source/UnrealMcpEditor/Private/UnrealMcpEditorCoordinator.cpp
+  s_3e0a2681fef788::t_f757439a1fa287 58-61,63-67,70-72
+UnrealMCP/Source/UnrealMcpRuntime/Private/UnrealMcpRuntimeSubsystem.cpp
+  s_3e0a2681fef788::t_8ae6cf301a8c3a 57-58,62-65
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpRuntimeSubsystemSpec.cpp
+  s_3e0a2681fef788::t_f42b04347813d0 16
+  s_3e0a2681fef788::t_5b6e2b0fc33296 144-206
+  s_3e0a2681fef788::t_9b103257bb52ba 17
+UnrealMCP/Source/UnrealMcpEditor/Private/Tools/UnrealMcpScreenshotTools.cpp
+  s_3e0a2681fef788::t_4068512eedadd0 38
+  s_3e0a2681fef788::t_cca5552e21341c 29-30,32,36-37
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpRuntimeLevelToolsSpec.cpp
+  s_3e0a2681fef788::t_c0ac445a314348 1-106
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpConsoleReflectionToolsSpec.cpp
+  s_3e0a2681fef788::t_358742afa260f3 1-292
+UnrealMCP/Source/UnrealMcpRuntime/Private/Tools/UnrealMcpActorTools.cpp
+  s_3e0a2681fef788::t_e830772bdd75f5 4-5,19-34,38-40,42,54-58,60,68-72,74-75,80-93,98-99
+  s_3e0a2681fef788::t_964f0208b88710 77-78
+  s_3e0a2681fef788::t_63ead51a907252 233
+  s_3e0a2681fef788::t_706f02fda07555 35-37,41,43-53
+  s_3e0a2681fef788::t_9ea66814c4fd4f 61-67,73
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpEditorToolsSpec.cpp
+  s_3e0a2681fef788::t_4b2ebf5b3102f9 53,61
+  s_3e0a2681fef788::t_3182054f0859c5 17-20,27
+UnrealMCP/Source/UnrealMcpEditor/Public/UnrealMcpCoreTools.h
+  s_3e0a2681fef788::t_b6c4deb670706e 41-46
+  s_3e0a2681fef788::t_b46e523df15400 55-58
+  s_3e0a2681fef788::t_a033a5c795c72f 13-16
+  s_3e0a2681fef788::t_5dca88167052bd 69-77
+UnrealMCP/Source/UnrealMcpRuntime/Private/Tools/UnrealMcpConsoleReflectionTools.cpp
+  s_3e0a2681fef788::t_e86eac1cdc1958 1-16,20-457
+  s_3e0a2681fef788::t_07fc597effda58 17-19
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpScreenshotToolsSpec.cpp
+  s_3e0a2681fef788::t_ac6dba4dc14655 47,53,60,68
+  s_3e0a2681fef788::t_de8b8b7fb10fc2 18-21,24
+UnrealMCP/Source/UnrealMcpEditor/Private/Tools/UnrealMcpEditorTools.cpp
+  s_3e0a2681fef788::t_173117a85c20d2 21-24,29-33
+UnrealMCP/Source/UnrealMcpRuntime/Private/Tools/UnrealMcpRuntimeLevelTools.cpp
+  s_3e0a2681fef788::t_31260d11037e8a 1-182
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpRuntimeScreenshotToolsSpec.cpp
+  s_3e0a2681fef788::t_02b5acde3afea3 1-126
+UnrealMCP/Source/UnrealMcpRuntime/Public/UnrealMcpRuntimeCoreTools.h
+  s_3e0a2681fef788::t_a2fd139eff55c7 13-20,24,30-93
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpActorToolsSpec.cpp
+  s_3e0a2681fef788::t_ff4e3ce3496053 8
+UnrealMCP/Source/UnrealMcpRuntime/Private/Tools/UnrealMcpRuntimeScreenshotTools.cpp
+  s_3e0a2681fef788::t_a597dffbde7553 228-231
+  s_3e0a2681fef788::t_9b36949aa20c84 1-13,15-227,232-240,245,247-382
+  s_3e0a2681fef788::t_04bebd4d4f3631 241-244,246
+  s_3e0a2681fef788::t_e87db827797420 14
+UnrealMCP/Source/UnrealMcpEditor/Private/Tools/UnrealMcpLevelTools.cpp
+  s_3e0a2681fef788::t_38532a6c8d00f2 22-26
+  s_3e0a2681fef788::t_7fe835fddc497d 377-380
+  s_3e0a2681fef788::t_e74cefb4b4a0a3 42
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.8",
+  "base_commit_sha": "c91f2068b261ad23c0eee19b215e13336c2354c6",
+  "prompts": {},
+  "sessions": {
+    "s_3e0a2681fef788": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a9715f3a-114a-4de7-815b-97526309448b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

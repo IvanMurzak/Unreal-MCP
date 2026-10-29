@@ -1,0 +1,25 @@
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpRqlSpec.cpp
+  s_7bc72ecaebd05d::t_ee61d8ff6e466c 501,689-691
+UnrealMCP/Source/UnrealMcpRql/Private/UnrealMcpRqlCore.cpp
+  s_7bc72ecaebd05d::t_7dbed79f9f7935 614,625-628,630-634,637-655,770,777-778,781,796
+UnrealMCP/Source/UnrealMcpRql/Private/UnrealMcpRqlEditorApi.cpp
+  s_7bc72ecaebd05d::t_97ffb66f95eb2d 577-581,586,608,611,635
+UnrealMCP/Source/UnrealMcpRql/Private/UnrealMcpRqlEditorApi.h
+  s_7bc72ecaebd05d::t_3cf280d681131d 90
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "472cef5a551f391196d9f748086a1565077a0db0",
+  "prompts": {},
+  "sessions": {
+    "s_7bc72ecaebd05d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "40274cb2-edf8-49ba-9a73-33b83cb5be53",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

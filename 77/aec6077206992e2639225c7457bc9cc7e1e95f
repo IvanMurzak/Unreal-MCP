@@ -1,0 +1,19 @@
+UnrealMCP/Source/UnrealMcpRuntime/Private/Sidecar/UnrealMcpSidecarManager.cpp
+  s_4c9819f3be8763::t_8eec0cae955563 15
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "77aec6077206992e2639225c7457bc9cc7e1e95f",
+  "prompts": {},
+  "sessions": {
+    "s_4c9819f3be8763": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a2a531ffe30c4b824",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

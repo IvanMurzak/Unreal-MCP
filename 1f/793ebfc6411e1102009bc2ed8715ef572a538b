@@ -1,0 +1,27 @@
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpPythonToolsSpec.cpp
+  s_7bc72ecaebd05d::t_7564fd58cf7800 98-114
+UnrealMCP/Content/Python/unreal_mcp/_vendor/code_exec/VENDORED.md
+  s_7bc72ecaebd05d::t_36033a59c8e4cc 4-5
+UnrealMCP/Source/UnrealMcpEditor/Private/Tools/UnrealMcpPythonTools.cpp
+  s_7bc72ecaebd05d::t_3760d9365e6585 76-80,84-87,213-217,252,258
+UnrealMCP/Content/Python/unreal_mcp/_vendor/code_exec/__init__.py
+  s_7bc72ecaebd05d::t_5f8000ad777f4e 14
+UnrealMCP/Content/Python/unreal_mcp/_vendor/code_exec/runner.py
+  s_7bc72ecaebd05d::t_229ec3fee9ed31 1,6,9,13,19-35,45-50,52-71,73-74,77,79-80,84,86,108,110,115,117,126,135,137-140,144,149-152,157-158,161-165,170-176,183,191,210-216,218,220,222-223,226-230,233-236,239-241,243,247-248,269-326,345-372,374-376,382-447,453,455,457,463-471,475-477
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "1f793ebfc6411e1102009bc2ed8715ef572a538b",
+  "prompts": {},
+  "sessions": {
+    "s_7bc72ecaebd05d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "40274cb2-edf8-49ba-9a73-33b83cb5be53",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

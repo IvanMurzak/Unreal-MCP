@@ -1,0 +1,21 @@
+UnrealMCP/Source/UnrealMcpRql/Private/UnrealMcpRqlTypes.cpp
+  s_be319aa0129387::t_f38cf3a3746d40 838-841
+.github/workflows/test_pull_request.yml
+  s_be319aa0129387::t_4f984b4ee12352 208
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "1514c53aed49dc9d1add29d889a32ee16298b634",
+  "prompts": {},
+  "sessions": {
+    "s_be319aa0129387": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4973661e-fb8b-4b77-ad37-428f038b740d",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

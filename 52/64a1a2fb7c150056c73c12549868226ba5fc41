@@ -1,0 +1,21 @@
+docs/RELEASING.md
+  s_cf39f5fb556145::t_8e284afa0f6994 36-37
+  s_cf39f5fb556145::t_8472d67d11cfa6 106-112,117-121,123,125-126,130-137,140-167
+  s_cf39f5fb556145::t_14f6f88112ce03 69-74,77,80
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.8",
+  "base_commit_sha": "5264a1a2fb7c150056c73c12549868226ba5fc41",
+  "prompts": {},
+  "sessions": {
+    "s_cf39f5fb556145": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cae79e43-d299-489d-8250-d2c7017cba2e",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

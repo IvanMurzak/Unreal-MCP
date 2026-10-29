@@ -1,0 +1,21 @@
+cli/extensions.catalog.json
+  s_80048c3742a8ad::t_750412a1dfe1f7 25,33
+cli/src/utils/extensions-catalog.ts
+  s_80048c3742a8ad::t_7b78522a26433f 127,154
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "be28e1e278f427f092bc5d1d8315c017b53d10b8",
+  "prompts": {},
+  "sessions": {
+    "s_80048c3742a8ad": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a3700b0930866c52e",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

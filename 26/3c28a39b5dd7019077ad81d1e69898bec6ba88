@@ -1,0 +1,72 @@
+UnrealMCP/Source/ThirdParty/RQL/src/mutator.cpp
+  s_7bc72ecaebd05d::t_cfe1a35aae1921 20-65,67,69,74-83,94-95,100,102-103,109-116,205-206,329,335-337,340-355,517-534,657,659-665,667-672,675,678,681-683,687,698-699,703-711,741,751,758-759,783,838-846
+bridge/src/com.IvanMurzak.Unreal.MCP.Bridge.csproj
+  s_7bc72ecaebd05d::t_b5378543953bfa 55,120-122,169
+  s_7bc72ecaebd05d::t_44df2c96aff9dc 123-125
+bridge/Directory.Build.props
+  s_7bc72ecaebd05d::t_44df2c96aff9dc 1-11
+UnrealMCP/Source/ThirdParty/RQL/src/exec.hpp
+  s_7bc72ecaebd05d::t_cfe1a35aae1921 18-27,285-286,319-322
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpRqlSpec.cpp
+  s_7bc72ecaebd05d::t_f25e351a78cd89 683-713,722-782
+  s_7bc72ecaebd05d::t_f642591d5fa1cd 714-721
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpRqlAdaptersSpec.cpp
+  s_7bc72ecaebd05d::t_befd845d3ea99d 369-400
+UnrealMCP/Source/ThirdParty/RQL/include/rql/engine.hpp
+  s_7bc72ecaebd05d::t_cfe1a35aae1921 51,54-55,65-74,95-97,122-124
+UnrealMCP/Source/ThirdParty/RQL/README.md
+  s_7bc72ecaebd05d::t_55d96db9167837 6-7
+UnrealMCP/Source/UnrealMcpRql/Private/UnrealMcpRqlSession.cpp
+  s_7bc72ecaebd05d::t_01c671c29086cf 216-218
+  s_7bc72ecaebd05d::t_f65b75bcfe8f7e 299-311,314-315
+  s_7bc72ecaebd05d::t_ff6aedc624d3d2 312-313
+  s_7bc72ecaebd05d::t_c81ba5763115c0 408,410
+  s_7bc72ecaebd05d::t_611cd6ff8e9569 284-285,295-296,316-330
+UnrealMCP/Source/UnrealMcpRql/Private/UnrealMcpRqlTypes.cpp
+  s_7bc72ecaebd05d::t_53dacb56abf4c2 1243-1264
+UnrealMCP/Source/UnrealMcpRql/Private/UnrealMcpRqlGuide.h
+  s_7bc72ecaebd05d::t_e5f1410f1b7f2f 39-41,67,78-79,97
+  s_7bc72ecaebd05d::t_9af8d0230fcd40 80
+UnrealMCP/Source/ThirdParty/RQL/src/value.cpp
+  s_7bc72ecaebd05d::t_cfe1a35aae1921 85-90
+UnrealMCP/Source/ThirdParty/RQL/src/pipeline.cpp
+  s_7bc72ecaebd05d::t_cfe1a35aae1921 63-64,74-75,93-94,149-151,196-197,214,418-420,435-436,441-458,463,507-509,513-514,516,521-528,532-533,536-543,553-554,793-798,800-812,874-880,1014
+UnrealMCP/ThirdPartyNotices.txt
+  s_7bc72ecaebd05d::t_55d96db9167837 101-103
+UnrealMCP/Source/UnrealMcpRql/Private/UnrealMcpRqlSession.h
+  s_7bc72ecaebd05d::t_e27c1bea984e3b 60-65
+  s_7bc72ecaebd05d::t_3e69373a667184 79
+docs/rql.md
+  s_7bc72ecaebd05d::t_55d96db9167837 25-26,77-80,101-106,141-142
+UnrealMCP/Source/ThirdParty/RQL/include/rql/value.hpp
+  s_7bc72ecaebd05d::t_cfe1a35aae1921 70,95-96,152
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpRqlDataModelsSpec.cpp
+  s_7bc72ecaebd05d::t_bc1f28f1759f35 349-385
+UnrealMCP/Source/ThirdParty/RQL/include/rql/plan.hpp
+  s_7bc72ecaebd05d::t_cfe1a35aae1921 73-74,99-100
+UnrealMCP/Source/UnrealMcpRql/Private/UnrealMcpRqlSettings.cpp
+  s_7bc72ecaebd05d::t_abdc5f6822535e 236,248-249,251
+UnrealMCP/Source/ThirdParty/RQL/src/codec.cpp
+  s_7bc72ecaebd05d::t_cfe1a35aae1921 36-52,189-199,205,229-232,417-430,464,466,499-512
+UnrealMCP/Source/ThirdParty/RQL/src/compiler.cpp
+  s_7bc72ecaebd05d::t_cfe1a35aae1921 737-743,849,911,914-1095,1409,1422-1426,1474-1478,1484-1506
+UnrealMCP/Source/UnrealMcpRql/Private/UnrealMcpRqlTypes.h
+  s_7bc72ecaebd05d::t_a8edba08579d82 11
+  s_7bc72ecaebd05d::t_1d1c6ac2930e9e 106-112
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "263c28a39b5dd7019077ad81d1e69898bec6ba88",
+  "prompts": {},
+  "sessions": {
+    "s_7bc72ecaebd05d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "40274cb2-edf8-49ba-9a73-33b83cb5be53",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

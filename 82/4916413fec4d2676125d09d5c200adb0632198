@@ -1,0 +1,25 @@
+UnrealMCP/Source/UnrealMcpEditor/Private/Tools/UnrealMcpScreenshotTools.cpp
+  s_c318ff925a6f98::t_5004a64d2f629f 70-80,209,319
+UnrealMCP/Source/UnrealMcpEditor/Public/UnrealMcpCoreTools.h
+  s_c318ff925a6f98::t_f3ad210eca1f4e 7,104-111
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpScreenshotToolsSpec.cpp
+  s_c318ff925a6f98::t_2215c87e94f37a 196-216
+bridge/tests/ProxyToolFactoryAndMapperTests.cs
+  s_c318ff925a6f98::t_f94a3542556582 111-135
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "824916413fec4d2676125d09d5c200adb0632198",
+  "prompts": {},
+  "sessions": {
+    "s_c318ff925a6f98": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f18f0a3d-5bea-4017-a8c1-2c4000dad348",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

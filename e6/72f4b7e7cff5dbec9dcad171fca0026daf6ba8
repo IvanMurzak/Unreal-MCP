@@ -1,0 +1,44 @@
+UnrealMCP/Source/ThirdParty/RQL/src/compiler.cpp
+  s_7bc72ecaebd05d::t_4085b9913e71cd 6,54-78,85-88,234-235,256-263,290-295,310-311,313-315,318-334,336-341,597-611,719-736,740-744,748-751,841-846,853,905-906,932-944,1032-1041,1043-1047,1049-1057,1062,1065,1069,1073-1075,1077-1080,1107,1110,1112-1113,1116-1135
+UnrealMCP/Source/ThirdParty/RQL/src/engine.cpp
+  s_7bc72ecaebd05d::t_4085b9913e71cd 31-32
+UnrealMCP/Source/ThirdParty/RQL/src/adapters.cpp
+  s_7bc72ecaebd05d::t_4085b9913e71cd 78-79,89-90,93
+UnrealMCP/Source/UnrealMcpRql/Private/UnrealMcpRqlGuide.h
+  s_7bc72ecaebd05d::t_86a551e076d185 40
+UnrealMCP/Source/UnrealMcpRql/Private/UnrealMcpRqlSession.cpp
+  s_7bc72ecaebd05d::t_86a551e076d185 473
+UnrealMCP/Source/ThirdParty/RQL/include/rql/adapters.hpp
+  s_7bc72ecaebd05d::t_4085b9913e71cd 192-193,195-197,200-202,205
+UnrealMCP/Source/ThirdParty/RQL/include/rql/engine.hpp
+  s_7bc72ecaebd05d::t_4085b9913e71cd 49,66-67
+UnrealMCP/Source/ThirdParty/RQL/src/mutator.cpp
+  s_7bc72ecaebd05d::t_4085b9913e71cd 172,312,315-339,542-554,586-593,595,623-627,717-725,741
+UnrealMCP/Source/ThirdParty/RQL/src/pipeline.cpp
+  s_7bc72ecaebd05d::t_4085b9913e71cd 80-83,224-232,715-724,949-954,991,999-1003,1062-1069
+UnrealMCP/Source/ThirdParty/RQL/src/exec.hpp
+  s_7bc72ecaebd05d::t_4085b9913e71cd 12,157-162,210-211,216,249-255,274
+UnrealMCP/Source/ThirdParty/RQL/include/rql/reflection.hpp
+  s_7bc72ecaebd05d::t_4085b9913e71cd 90-92,100-102,647-650,781-786
+docs/rql.md
+  s_7bc72ecaebd05d::t_c2fa218a3c9956 86
+  s_7bc72ecaebd05d::t_5024b2530b2232 25
+bridge/src/com.IvanMurzak.Unreal.MCP.Bridge.csproj
+  s_7bc72ecaebd05d::t_9ecbaa1e58acb6 55,117-119,163
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e672f4b7e7cff5dbec9dcad171fca0026daf6ba8",
+  "prompts": {},
+  "sessions": {
+    "s_7bc72ecaebd05d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "40274cb2-edf8-49ba-9a73-33b83cb5be53",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

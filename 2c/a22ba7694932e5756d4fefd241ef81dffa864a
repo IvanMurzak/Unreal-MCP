@@ -1,0 +1,47 @@
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/UnrealMcpEditorViewModel.h
+  s_8866be828ff748::t_1deef81f29f338 25-36,126,132,218,222,225,234,371,377
+  s_f2c38c5bb8e069::t_7596c62bc964a4 127-131,133-134,219-221,223-224,226-233,235-236,372-376,378-379
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpEditorViewModelSpec.cpp
+  s_8866be828ff748::t_10e2ecf06681bb 43-46,69
+  s_65327eaf39283c::t_7401feec329357 138-239
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/SUnrealMcpMainWindow.cpp
+  s_f2c38c5bb8e069::t_f7d08cbe7686a4 294-296,301,307-308,406-447,449-457,460,462
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/UnrealMcpEditorViewModel.cpp
+  s_f2c38c5bb8e069::t_05cd998cec93f9 605-626,634-636,649-651,664-666,672-681
+UnrealMCP/Source/UnrealMcpEditor/Private/UnrealMcpEditorCoordinator.cpp
+  s_f2c38c5bb8e069::t_02947bfac68883 227-234,489
+UnrealMCP/Source/UnrealMcpEditor/Private/DevControl/UnrealMcpDevControlServer.cpp
+  s_65327eaf39283c::t_bc1f1716a71d52 319-321,325
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "2ca22ba7694932e5756d4fefd241ef81dffa864a",
+  "prompts": {},
+  "sessions": {
+    "s_65327eaf39283c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a719f633200f2d154",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_8866be828ff748": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6aaa18f3-02a2-482c-8ba3-352853a8d5fa",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_f2c38c5bb8e069": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5ebc9ea1-9953-406e-902f-35e72655e0fc",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

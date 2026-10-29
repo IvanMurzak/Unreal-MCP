@@ -1,0 +1,26 @@
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpPromptRegistrySpec.cpp
+  s_3e0a2681fef788::t_677058437195ee 1-218
+bridge/tests/PromptManifestRegistrarTests.cs
+  s_3e0a2681fef788::t_28e73889405136 1-118
+bridge/tests/ProxyPromptTests.cs
+  s_3e0a2681fef788::t_fd7542a352eca2 99,109
+  s_3e0a2681fef788::t_751304b723e191 1-98,100-108,110-144
+bridge/tests/Fakes.cs
+  s_3e0a2681fef788::t_0b9e37f8a44c88 170-198
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.8",
+  "base_commit_sha": "cdc0339946bc185edc50f5c182e5d13d9ea883bc",
+  "prompts": {},
+  "sessions": {
+    "s_3e0a2681fef788": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a9715f3a-114a-4de7-815b-97526309448b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
