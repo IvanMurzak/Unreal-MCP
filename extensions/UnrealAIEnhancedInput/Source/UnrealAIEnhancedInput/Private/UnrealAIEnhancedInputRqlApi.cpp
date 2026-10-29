@@ -15,6 +15,7 @@
 #include "InputAction.h"
 #include "InputCoreTypes.h"
 #include "InputMappingContext.h"
+#include "InputModifiers.h"
 #include "K2Node_CallFunction.h"
 #include "K2Node_CallParentFunction.h"
 #include "K2Node_EnhancedInputAction.h"
@@ -22,6 +23,7 @@
 #include "K2Node_GetSubsystem.h"
 #include "Kismet/GameplayStatics.h"
 #include "Kismet2/BlueprintEditorUtils.h"
+#include "UObject/UObjectIterator.h"
 
 namespace UnrealAIEnhancedInputRqlLocal
 {
@@ -32,6 +34,53 @@ namespace UnrealAIEnhancedInputRqlLocal
 			return true;
 		UnrealMcpRql::Fail(FString::Printf(TEXT("'%s' is not a key name (e.g. SpaceBar, W, LeftMouseButton, Gamepad_FaceButton_Bottom)"), *Key));
 		return false;
+	}
+
+	/** The concrete InputModifier class a name means ("Negate", "InputModifierNegate", "Swizzle"); null when none. */
+	UClass* ModifierClass(const FString& Name)
+	{
+		const FString Short = Name.Equals(TEXT("Swizzle"), ESearchCase::IgnoreCase) ? FString(TEXT("SwizzleAxis")) : Name;
+		for (const FString& Candidate : { Short, TEXT("InputModifier") + Short })
+		{
+			UClass* Class = UnrealMcpRql::ResolveClass(Candidate);
+			if (Class && Class->IsChildOf(UInputModifier::StaticClass()) && !Class->HasAnyClassFlags(CLASS_Abstract | CLASS_Deprecated))
+				return Class;
+		}
+		return nullptr;
+	}
+
+	/** Every concrete InputModifier class name without its prefix, for the error that lists them. */
+	FString ModifierNames()
+	{
+		TArray<FString> Names;
+		for (TObjectIterator<UClass> It; It; ++It)
+		{
+			if (It->IsChildOf(UInputModifier::StaticClass()) && !It->HasAnyClassFlags(CLASS_Abstract | CLASS_Deprecated) && It->IsNative())
+				Names.Add(UUnrealAIEnhancedInputRqlApi::ModifierDisplayName(*It));
+		}
+		Names.Sort();
+		return FString::Join(Names, TEXT(", "));
+	}
+
+	/** The modifier classes of a comma-separated list, in order; false after Fail (an unknown name). */
+	bool ParseModifiers(const FString& Text, TArray<UClass*>& Out)
+	{
+		TArray<FString> Names;
+		Text.ParseIntoArray(Names, TEXT(","), /*InCullEmpty*/ true);
+		for (FString& Name : Names)
+		{
+			Name.TrimStartAndEndInline();
+			if (Name.IsEmpty())
+				continue;
+			UClass* Class = ModifierClass(Name);
+			if (!Class)
+			{
+				UnrealMcpRql::Fail(FString::Printf(TEXT("'%s' is not an input modifier (modifiers: %s, or a Blueprint modifier class path)"), *Name, *ModifierNames()));
+				return false;
+			}
+			Out.Add(Class);
+		}
+		return true;
 	}
 }
 
@@ -150,6 +199,13 @@ namespace UnrealAIEnhancedInputRqlLocal
 
 using namespace UnrealAIEnhancedInputRqlLocal;
 
+FString UUnrealAIEnhancedInputRqlApi::ModifierDisplayName(const UClass* Class)
+{
+	FString Name = Class ? Class->GetName() : FString();
+	Name.RemoveFromStart(TEXT("InputModifier"));
+	return Name;
+}
+
 UInputAction* UUnrealAIEnhancedInputRqlApi::CreateAction(const FString& Path, EInputActionValueType ValueType)
 {
 	UInputAction* Action = Cast<UInputAction>(UnrealMcpRql::CreateAsset(UInputAction::StaticClass(), Path));
@@ -163,13 +219,17 @@ UInputMappingContext* UUnrealAIEnhancedInputRqlApi::CreateContext(const FString&
 	return Cast<UInputMappingContext>(UnrealMcpRql::CreateAsset(UInputMappingContext::StaticClass(), Path));
 }
 
-bool UUnrealAIEnhancedInputRqlApi::AddMapping(UInputMappingContext* Context, UInputAction* Action, const FString& Key)
+bool UUnrealAIEnhancedInputRqlApi::AddMapping(UInputMappingContext* Context, UInputAction* Action, const FString& Key, const FString& Modifiers)
 {
 	FKey Parsed;
-	if (!ValidKey(Key, Parsed))
+	TArray<UClass*> ModifierClasses;
+	if (!ValidKey(Key, Parsed) || !ParseModifiers(Modifiers, ModifierClasses))
 		return false;
 	Context->Modify();
-	Context->MapKey(Action, Parsed);
+	FEnhancedActionKeyMapping& Mapping = Context->MapKey(Action, Parsed);
+	// Instanced into the context, as the editor's Modifiers array creates them.
+	for (UClass* Class : ModifierClasses)
+		Mapping.Modifiers.Add(NewObject<UInputModifier>(Context, Class, NAME_None, Context->GetMaskedFlags(RF_PropagateToSubObjects) | RF_Transactional));
 	Context->MarkPackageDirty();
 	return true;
 }

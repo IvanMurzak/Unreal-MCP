@@ -3,7 +3,7 @@
   "Version": 2,
   "VersionName": "0.1.1",
   "FriendlyName": "Unreal AI Landscape",
-  "Description": "RQL module for Unreal's Landscape and Water systems: query landscapes (sections, paint layers), water bodies and water zones. An AI Game Developer (Unreal-MCP) extension: an IUnrealMcpRqlModule that agents use through rql-query / rql-mutate / rql-schema.",
+  "Description": "RQL module for Unreal's Landscape and Water systems: create, sculpt and paint landscapes; query landscapes (sections, paint layers), water bodies and water zones. An AI Game Developer (Unreal-MCP) extension: an IUnrealMcpRqlModule that agents use through rql-query / rql-mutate / rql-schema.",
   "Category": "AI",
   "CreatedBy": "IvanMurzak/Unreal-AI-Landscape",
   "CreatedByURL": "https://github.com/IvanMurzak/Unreal-AI-Landscape",

@@ -1,6 +1,6 @@
 # Landscape RQL module
 
-RQL module for Unreal's Landscape and Water systems: query landscapes (sections, paint layers), water bodies and water zones.
+RQL module for Unreal's Landscape and Water systems: create, sculpt and paint landscapes; query landscapes (sections, paint layers), water bodies and water zones.
 
 An optional editor plugin in the [Unreal MCP monorepository](../../README.md), with its own module, version and release archive.
 
@@ -31,14 +31,23 @@ The extension adds its feature to the editor's RQL data layer (`rql-query` / `rq
 
 | Kind | Names |
 | --- | --- |
-| Sources | `landscapes`, `waterBodies`, `waterZones` |
+| Sources | `landscapes`, `waterBodies`, `waterZones`, `landscape` |
+| Operations (`call`) | `Create`, `Sculpt`, `Paint`, `CreateLayerMaterial` |
 | Members | `LandscapeProxy.IsPrimary`, `LandscapeProxy.ComponentCount`, `LandscapeProxy.Sections`, `LandscapeProxy.PaintLayers`, `WaterBody.WaterType`, `WaterBody.WaterMaterial`, `WaterBody.WaterZone`, `WaterBody.Water` |
 
 ```
 landscapes | select Label Sections PaintLayers LandscapeMaterial
 waterBodies | select Label Water
 waterZones | select Label ZoneExtent
+landscape | call CreateLayerMaterial("/Game/Landscape/M_Terrain", "Grass #3a7d2c, Rock #7a7a7a")
+landscape | call Create("Terrain", [0, 0, 0], 100, "/Game/Landscape/M_Terrain")
+landscape | call Sculpt(unreal.find("Terrain"), [2000, 1500, 0], 1200, 600)
+landscape | call Paint(unreal.find("Terrain"), "Grass", [0, 0, 0], 0)
 ```
+
+`Create` makes a flat landscape of whole 63-quad components scaled to the requested size; `Sculpt` raises or lowers a
+smooth circular area (cm); `Paint` adds a paint layer by name (creating its layer info asset) and paints it with a soft
+edge; `CreateLayerMaterial` makes a material whose Landscape Layer Blend has one coloured layer per name.
 
 ## Releases and development
 

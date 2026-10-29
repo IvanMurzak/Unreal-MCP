@@ -6,6 +6,7 @@
 #include "Dom/JsonValue.h"
 
 #include "IUnrealMcpRqlModule.h"
+#include "UnrealAILandscapeRqlApi.h"
 
 #include "Engine/World.h"
 #include "EngineUtils.h"               // TActorIterator
@@ -74,6 +75,10 @@ public:
 			AWaterBody::StaticClass(), []() { return EditorActors<AWaterBody>(); });
 		Context.AddObjectListSource(TEXT("waterZones"), TEXT("the Water zone actors of the editor world"),
 			AWaterZone::StaticClass(), []() { return EditorActors<AWaterZone>(); });
+
+		Context.AddApiSource(TEXT("landscape"),
+			TEXT("Landscape operations: call Create(label, location, sizeMeters, material) / Sculpt(landscape, center, radius, height) / Paint(landscape, layer, center, radius, strength) / CreateLayerMaterial(path, layers)"),
+			UUnrealAILandscapeRqlApi::StaticClass(), TEXT("LandscapeOperations"));
 
 		// The fields queries filter on are scalar members; `Sections` keeps the layout together for select output.
 		Context.AddJsonMember(ALandscapeProxy::StaticClass(), TEXT("IsPrimary"), TEXT("true for the landscape actor, false for a streaming proxy"),
@@ -159,7 +164,19 @@ waterZones | select Label Location ZoneExtent
 landscapes | where IsPrimary | set LandscapeMaterial = "/Game/Materials/M_Terrain"
 ```
 
-Sculpting and painting are not RQL operations; edit landscape heights and layers in Landscape mode.)MD"));
+Create, sculpt and paint with the `landscape` operations (each call is one undo step):
+
+```
+landscape | call CreateLayerMaterial("/Game/Landscape/M_Terrain", "Grass #3a7d2c, Rock #7a7a7a")    a material blending two paint layers
+landscape | call Create("Terrain", [0, 0, 0], 100, "/Game/Landscape/M_Terrain")                      100 x 100 m, flat, centred on the location
+[[2000, 1500, 1200, 600], [-1800, -900, 1500, 900]] | call landscape.Sculpt(unreal.find("Terrain"), [$[0], $[1], 0], $[2], $[3])    hills: center X Y, radius, height (cm)
+landscape | call Paint(unreal.find("Terrain"), "Grass", [0, 0, 0], 0)                                 a whole-landscape base layer (radius 0)
+[[2000, 1500], [-1800, -900]] | call landscape.Paint(unreal.find("Terrain"), "Rock", [$[0], $[1], 0], 1000)   rock on the hilltops
+landscapes | select Label PaintLayers Sections
+```
+
+Heights are in cm (negative Height digs a hollow); a paint layer shows when the material blends a layer of that name.
+Created materials and layer infos are unsaved: `editor | call SaveAll()`.)MD"));
 	}
 };
 
