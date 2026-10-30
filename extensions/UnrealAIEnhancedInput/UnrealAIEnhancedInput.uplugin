@@ -1,7 +1,7 @@
 {
   "FileVersion": 3,
-  "Version": 2,
-  "VersionName": "0.1.1",
+  "Version": 3,
+  "VersionName": "0.2.0",
   "FriendlyName": "Unreal AI EnhancedInput",
   "Description": "RQL module for Unreal's Enhanced Input system: query Input Actions and Mapping Contexts with their key mappings, create actions and contexts, map keys. An AI Game Developer (Unreal-MCP) extension: an IUnrealMcpRqlModule that agents use through rql-query / rql-mutate / rql-schema.",
   "Category": "AI",

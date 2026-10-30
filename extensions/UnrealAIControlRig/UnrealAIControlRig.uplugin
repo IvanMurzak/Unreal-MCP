@@ -1,7 +1,7 @@
 {
   "FileVersion": 3,
-  "Version": 2,
-  "VersionName": "0.1.3",
+  "Version": 3,
+  "VersionName": "0.2.0",
   "FriendlyName": "Unreal AI ControlRig",
   "Description": "RQL module for Unreal's Control Rig: create rigs with bones, controls and a two-bone IK solver; query Control Rig blueprints (element hierarchy, controls, bones) and Control Rig components. An AI Game Developer (Unreal-MCP) extension: an IUnrealMcpRqlModule that agents use through rql-query / rql-mutate / rql-schema.",
   "Category": "AI",

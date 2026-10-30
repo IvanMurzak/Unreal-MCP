@@ -4,8 +4,8 @@
   "description": "RQL module for Unreal's Control Rig: create rigs with bones, controls and a two-bone IK solver; query Control Rig blueprints (element hierarchy, controls, bones) and Control Rig components.",
   "pluginName": "UnrealAIControlRig",
   "repo": "IvanMurzak/Unreal-MCP",
-  "version": "0.1.3",
-  "minCoreVersion": "1.0.0",
+  "version": "0.2.0",
+  "minCoreVersion": "0.26.0",
   "enginePlugins": [
     "ControlRig"
   ],

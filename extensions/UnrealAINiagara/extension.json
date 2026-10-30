@@ -4,8 +4,8 @@
   "description": "RQL module for Unreal's Niagara VFX system: query Niagara systems and their emitters, place systems in the level.",
   "pluginName": "UnrealAINiagara",
   "repo": "IvanMurzak/Unreal-MCP",
-  "version": "0.1.1",
-  "minCoreVersion": "1.0.0",
+  "version": "0.2.0",
+  "minCoreVersion": "0.26.0",
   "enginePlugins": [
     "Niagara"
   ],

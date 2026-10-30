@@ -4,8 +4,8 @@
   "description": "RQL module for Unreal's Procedural Content Generation (PCG) framework: query graphs and PCG components, add components and run generation.",
   "pluginName": "UnrealAIPCG",
   "repo": "IvanMurzak/Unreal-MCP",
-  "version": "0.1.1",
-  "minCoreVersion": "1.0.0",
+  "version": "0.2.0",
+  "minCoreVersion": "0.26.0",
   "enginePlugins": [
     "PCG"
   ],
