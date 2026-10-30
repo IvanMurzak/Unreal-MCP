@@ -14,8 +14,8 @@
 namespace UnrealMcpRqlGuide
 {
 	/**
-	 * RQL's own language rules text (conditions, ?:, list equality, group items, receipts, call, bulk create, vectors, map keys,
-	 * typed literals) with SpawnActor(ClassName, Label, Location, ...) calls as its creation examples.
+	 * RQL's own language rules text (conditions, ?:, list equality, group items, receipts, call, bulk create, vectors, trigonometry
+	 * and $count, map keys, typed literals) with SpawnActor(ClassName, Label, Location, ...) calls as its creation examples.
 	 */
 	inline const char* LanguageRules()
 	{

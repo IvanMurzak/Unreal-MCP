@@ -184,7 +184,7 @@ void FUnrealMcpPythonToolsSpec::Define()
 			TEXT("import time\ntime.sleep(60)"),
 			TEXT("import threading\nthreading.Event().wait()"),
 			TEXT("import queue\nqueue.Queue().get()"),
-			TEXT("from concurrent.futures import ThreadPoolExecutor\nThreadPoolExecutor(2).submit(lambda: [0 for _ in iter(int, 1)]).result()"),
+			TEXT("from concurrent.futures import ThreadPoolExecutor\ndef spin():\n    while True:\n        pass\nThreadPoolExecutor(2).submit(spin).result()"),
 		};
 		for (const TCHAR* Code : Cases)
 		{
@@ -196,6 +196,13 @@ void FUnrealMcpPythonToolsSpec::Define()
 			TestTrue(*FString::Printf(TEXT("stopped after about 1 s for %s (%.1f s)"), Code, Elapsed), Elapsed >= 0.9 && Elapsed < 5.0);
 			TestTrue(TEXT("the next run works"), Run(TEXT("6 * 7")).Message.StartsWith(TEXT("42")));
 		}
+		// The spinning thread and the pool worker were stopped at the deadline: no snippet thread outlives its run.
+		const FUnrealMcpToolResult Threads = Run(TEXT("import threading, time\n"
+			"names = lambda: [t.name for t in threading.enumerate() if t.name.startswith(('Thread-', 'ThreadPoolExecutor'))]\n"
+			"deadline = time.monotonic() + 2\n"
+			"while time.monotonic() < deadline and names():\n    time.sleep(0.05)\n"
+			"names()"));
+		TestTrue(*FString::Printf(TEXT("the snippets' threads are gone (%s)"), *Threads.Message), Threads.bSuccess && Threads.Message.StartsWith(TEXT("[]")));
 
 		// A snippet blocked in a C lock that swallows its stop and would finish past the budget is a Timeout, not a late success.
 		const FUnrealMcpToolResult Overrun = Run(TEXT("import _thread\nlock = _thread.allocate_lock()\nlock.acquire()\n"

@@ -1321,6 +1321,7 @@ void FUnrealMcpRqlSpec::Define()
 			const TSharedPtr<FJsonObject> Ring = Exec(TEXT(R"RQL({"rql":"0.1","source":{"call":"range","args":[{"lit":0},{"lit":4}]},"stages":[{"op":"call","method":"SpawnActor","on":{"path":["editor"]},"args":[{"lit":"PointLight"},{"op":"+","args":[{"lit":"RqlSpecLampRing_"},{"path":[]}]},{"list":[{"op":"*","args":[{"lit":500},{"call":"cos","args":[{"op":"/","args":[{"op":"*","args":[{"op":"*","args":[{"lit":2},{"call":"pi","args":[]}]},{"path":[{"meta":"index"}]}]},{"path":[{"meta":"count"}]}]}]}]},{"op":"*","args":[{"lit":500},{"call":"sin","args":[{"op":"/","args":[{"op":"*","args":[{"op":"*","args":[{"lit":2},{"call":"pi","args":[]}]},{"path":[{"meta":"index"}]}]},{"path":[{"meta":"count"}]}]}]}]},{"lit":300}]}]}]})RQL"), true);
 			TestTrue(*FString::Printf(TEXT("spawned (%s)"), *Codes(Ring)), IsOk(Ring) && RowCount(Ring) == 4);
 			auto RingIndex = [](const AActor* Actor) { return FCString::Atoi(*Actor->GetActorLabel().RightChop(FCString::Strlen(TEXT("RqlSpecLampRing_")))); };
+			TestEqual(TEXT("four lamps"), Lamps().Num(), 4);
 			const FVector Expected[] = { FVector(500, 0, 300), FVector(0, 500, 300), FVector(-500, 0, 300), FVector(0, -500, 300) };
 			for (const AActor* Actor : Lamps())
 			{
