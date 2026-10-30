@@ -1306,6 +1306,40 @@ void FUnrealMcpRqlSpec::Define()
 			TestEqual(TEXT("one undo removes all fifty"), Lamps().Num(), 0);
 		});
 
+		It("lays spawns out on a circle with trigonometry and $count, and $count / $index number the targets of a set", [this]()
+		{
+			// world | select s = sin(pi()), d = deg(atan2(1, 1)), c = cos(rad(180))
+			const TSharedPtr<FJsonObject> Trig = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["world"]},"stages":[{"op":"select","fields":[{"name":"s","expr":{"call":"sin","args":[{"call":"pi","args":[]}]}},{"name":"d","expr":{"call":"deg","args":[{"call":"atan2","args":[{"lit":1},{"lit":1}]}]}},{"name":"c","expr":{"call":"cos","args":[{"call":"rad","args":[{"lit":180}]}]}}]}]})RQL"));
+			TestTrue(*FString::Printf(TEXT("ok (%s)"), *Codes(Trig)), IsOk(Trig));
+			const TSharedPtr<FJsonValue> S = Cell(Trig, 0, 0), D = Cell(Trig, 0, 1), C = Cell(Trig, 0, 2);
+			TestTrue(TEXT("sin(pi()) is exactly 0 (rounded)"), S.IsValid() && S->Type == EJson::Number && S->AsNumber() == 0.0);
+			TestTrue(TEXT("deg(atan2(1, 1)) is 45"), D.IsValid() && D->Type == EJson::Number && D->AsNumber() == 45.0);
+			TestTrue(TEXT("cos(rad(180)) is -1"), C.IsValid() && C->Type == EJson::Number && C->AsNumber() == -1.0);
+
+			// range(0, 4) | call editor.SpawnActor("PointLight", "RqlSpecLampRing_" + $,
+			//     [500 * cos(2 * pi() * $index / $count), 500 * sin(2 * pi() * $index / $count), 300])
+			const TSharedPtr<FJsonObject> Ring = Exec(TEXT(R"RQL({"rql":"0.1","source":{"call":"range","args":[{"lit":0},{"lit":4}]},"stages":[{"op":"call","method":"SpawnActor","on":{"path":["editor"]},"args":[{"lit":"PointLight"},{"op":"+","args":[{"lit":"RqlSpecLampRing_"},{"path":[]}]},{"list":[{"op":"*","args":[{"lit":500},{"call":"cos","args":[{"op":"/","args":[{"op":"*","args":[{"op":"*","args":[{"lit":2},{"call":"pi","args":[]}]},{"path":[{"meta":"index"}]}]},{"path":[{"meta":"count"}]}]}]}]},{"op":"*","args":[{"lit":500},{"call":"sin","args":[{"op":"/","args":[{"op":"*","args":[{"op":"*","args":[{"lit":2},{"call":"pi","args":[]}]},{"path":[{"meta":"index"}]}]},{"path":[{"meta":"count"}]}]}]}]},{"lit":300}]}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("spawned (%s)"), *Codes(Ring)), IsOk(Ring) && RowCount(Ring) == 4);
+			auto RingIndex = [](const AActor* Actor) { return FCString::Atoi(*Actor->GetActorLabel().RightChop(FCString::Strlen(TEXT("RqlSpecLampRing_")))); };
+			TestEqual(TEXT("four lamps"), Lamps().Num(), 4);
+			const FVector Expected[] = { FVector(500, 0, 300), FVector(0, 500, 300), FVector(-500, 0, 300), FVector(0, -500, 300) };
+			for (const AActor* Actor : Lamps())
+			{
+				const int32 Index = RingIndex(Actor);
+				TestTrue(*FString::Printf(TEXT("%s on the circle (%s)"), *Actor->GetActorLabel(), *Actor->GetActorLocation().ToString()),
+					Index >= 0 && Index < 4 && Actor->GetActorLocation().Equals(Expected[Index], 0.01));
+			}
+
+			// actors | where Label starts-with "RqlSpecLampRing_" | sort Label | set Location.Z = $count * 100 + $index
+			const TSharedPtr<FJsonObject> Numbered = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"starts-with","args":[{"path":["Label"]},{"lit":"RqlSpecLampRing_"}]}},{"op":"sort","keys":[{"expr":{"path":["Label"]}}]},{"op":"set","assign":[{"target":{"path":["Location","Z"]},"value":{"op":"+","args":[{"op":"*","args":[{"path":[{"meta":"count"}]},{"lit":100}]},{"path":[{"meta":"index"}]}]}}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("set (%s)"), *Codes(Numbered)), IsOk(Numbered));
+			for (const AActor* Actor : Lamps())
+			{
+				const int32 Index = RingIndex(Actor);
+				TestEqual(*FString::Printf(TEXT("%s Z = 4 * 100 + index"), *Actor->GetActorLabel()), Actor->GetActorLocation().Z, 400.0 + Index);
+			}
+		});
+
 		It("checks every spawn before the first one: one bad class name spawns nothing", [this]()
 		{
 			// range(0, 3) | call editor.SpawnActor($ == 2 ? "RqlSpecNoSuchClass" : "PointLight", "RqlSpecLampBad_" + $)
@@ -1406,7 +1440,10 @@ void FUnrealMcpRqlSpec::Define()
 			{
 				const FUnrealMcpRegisteredTool* Found = Registry.Find(Tool);
 				TestTrue(*FString::Printf(TEXT("%s has the shared rules"), Tool), Found && Found->Description.Contains(TEXT("Language rules:"))
-					&& Found->Description.Contains(TEXT("Bulk create: range(start, end[, step])")));
+					&& Found->Description.Contains(TEXT("Bulk create: range(start, end[, step])"))
+					&& Found->Description.Contains(TEXT("range(0, 150) | call editor.SpawnActor(\"/Engine/BasicShapes/Cube\""))
+					&& !Found->Description.Contains(TEXT("range(0, 300) | call editor.SpawnActor(\"/Engine/BasicShapes/Cube\", \"Tile_\""))
+					&& Found->Description.Contains(TEXT("Trigonometry is in radians")));
 			}
 		});
 	});

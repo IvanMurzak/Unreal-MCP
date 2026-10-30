@@ -176,6 +176,42 @@ void FUnrealMcpPythonToolsSpec::Define()
 		TestTrue(*FString::Printf(TEXT("the thread is gone (%s)"), *After.Message), After.bSuccess && After.Message.StartsWith(TEXT("[]")));
 	});
 
+	It("stops a snippet blocked in join, a wait or time.sleep at its budget (Code-Exec affe6ef) and leaves the editor usable", [this]()
+	{
+		// Before Code-Exec affe6ef each of these held the game thread for good (join / wait) or for the whole sleep.
+		const TCHAR* Cases[] = {
+			TEXT("import threading\ndef spin():\n    while True:\n        pass\nt = threading.Thread(target=spin, daemon=True)\nt.start()\nt.join()"),
+			TEXT("import time\ntime.sleep(60)"),
+			TEXT("import threading\nthreading.Event().wait()"),
+			TEXT("import queue\nqueue.Queue().get()"),
+			TEXT("from concurrent.futures import ThreadPoolExecutor\ndef spin():\n    while True:\n        pass\nThreadPoolExecutor(2).submit(spin).result()"),
+		};
+		for (const TCHAR* Code : Cases)
+		{
+			const double Start = FPlatformTime::Seconds();
+			const FUnrealMcpToolResult R = Run(Code, {}, 120000, MakeShared<FJsonValueNumber>(1));
+			const double Elapsed = FPlatformTime::Seconds() - Start;
+			TestTrue(*FString::Printf(TEXT("a Timeout of 1000 ms for %s (%s)"), Code, *R.Message), !R.bSuccess
+				&& R.Message.StartsWith(TEXT("Timeout:")) && R.Message.Contains(TEXT("time budget of 1000 ms")));
+			TestTrue(*FString::Printf(TEXT("stopped after about 1 s for %s (%.1f s)"), Code, Elapsed), Elapsed >= 0.9 && Elapsed < 5.0);
+			TestTrue(TEXT("the next run works"), Run(TEXT("6 * 7")).Message.StartsWith(TEXT("42")));
+		}
+		// The spinning thread and the pool worker were stopped at the deadline: no snippet thread outlives its run.
+		const FUnrealMcpToolResult Threads = Run(TEXT("import threading, time\n"
+			"names = lambda: [t.name for t in threading.enumerate() if t.name.startswith(('Thread-', 'ThreadPoolExecutor'))]\n"
+			"deadline = time.monotonic() + 2\n"
+			"while time.monotonic() < deadline and names():\n    time.sleep(0.05)\n"
+			"names()"));
+		TestTrue(*FString::Printf(TEXT("the snippets' threads are gone (%s)"), *Threads.Message), Threads.bSuccess && Threads.Message.StartsWith(TEXT("[]")));
+
+		// A snippet blocked in a C lock that swallows its stop and would finish past the budget is a Timeout, not a late success.
+		const FUnrealMcpToolResult Overrun = Run(TEXT("import _thread\nlock = _thread.allocate_lock()\nlock.acquire()\n"
+			"try:\n    lock.acquire(timeout=2)\nexcept BaseException:\n    pass\n'late'"),
+			{}, 120000, MakeShared<FJsonValueNumber>(1));
+		TestTrue(*FString::Printf(TEXT("an overrun is a Timeout (%s)"), *Overrun.Message), !Overrun.bSuccess
+			&& Overrun.Message.StartsWith(TEXT("Timeout:")) && Overrun.Message.Contains(TEXT("time budget of 1000 ms")));
+	});
+
 	It("caps sys.setrecursionlimit while a snippet runs (Python 3.11 would overflow the C stack) and restores it after", [this]()
 	{
 		const FUnrealMcpToolResult Before = Run(TEXT("import sys\nsys.getrecursionlimit()"));

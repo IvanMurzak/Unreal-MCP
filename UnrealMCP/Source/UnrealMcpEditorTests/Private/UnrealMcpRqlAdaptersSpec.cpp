@@ -174,7 +174,7 @@ void FUnrealMcpRqlAdaptersSpec::Define()
 			GEditor->ResetTransaction(FText::FromString(TEXT("RQL adapter specs")));
 	});
 
-	Describe("literal kinds (RQL 2f4e263, aacfbba)", [this]()
+	Describe("literal kinds (RQL 2f4e263, aacfbba, 3602d6a)", [this]()
 	{
 		It("builds instanced (EditInlineNew) subobjects from literals, owned by the written object, as one undo step", [this]()
 		{
@@ -266,7 +266,7 @@ void FUnrealMcpRqlAdaptersSpec::Define()
 			TestTrue(TEXT("undo clears InlineOne"), Fixture->InlineOne == nullptr);
 		});
 
-		It("asks for a concrete $type for an abstract instanced class, and names an unknown one", [this]()
+		It("asks for a concrete $type for an abstract instanced class, names an unknown one and suggests a misspelt one", [this]()
 		{
 			// ref("UnrealMcpRqlSpecFixture#@F@") | set InlineOne = {Weight: 2}
 			Refuses(TEXT("abstract without $type"), TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"UnrealMcpRqlSpecFixture#@F@"}]},"stages":[{"op":"set","assign":[{"target":{"path":["InlineOne"]},"value":{"object":[{"key":"Weight","value":{"lit":2}}]}}]}]})RQL"),
@@ -274,6 +274,10 @@ void FUnrealMcpRqlAdaptersSpec::Define()
 			// ref("UnrealMcpRqlSpecFixture#@F@") | set InlineOne = {$type: "UnrealMcpRqlSpecNoSuchInline"}
 			Refuses(TEXT("unknown $type"), TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"UnrealMcpRqlSpecFixture#@F@"}]},"stages":[{"op":"set","assign":[{"target":{"path":["InlineOne"]},"value":{"object":[{"key":"$type","value":{"lit":"UnrealMcpRqlSpecNoSuchInline"}}]}}]}]})RQL"),
 				TEXT("no concrete type named 'UnrealMcpRqlSpecNoSuchInline'"));
+			// ref("UnrealMcpRqlSpecFixture#@F@") | set InlineOne = {$type: "UnrealMcpRqlSpecInlineScaeld"}: the session registers the
+			// loaded subclasses, so RQL 3602d6a's suggestion finds the class
+			Refuses(TEXT("misspelt $type"), TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"UnrealMcpRqlSpecFixture#@F@"}]},"stages":[{"op":"set","assign":[{"target":{"path":["InlineOne"]},"value":{"object":[{"key":"$type","value":{"lit":"UnrealMcpRqlSpecInlineScaeld"}}]}}]}]})RQL"),
+				TEXT("(did you mean 'UnrealMcpRqlSpecInlineScaled'"));
 			TestTrue(TEXT("nothing written"), Fixture->InlineOne == nullptr);
 		});
 

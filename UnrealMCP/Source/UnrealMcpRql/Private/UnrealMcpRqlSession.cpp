@@ -389,7 +389,7 @@ void FUnrealMcpRqlSession::ConfigureMutations()
 	// by name (InputTriggerHold, UInputTriggerHold, a Blueprint's BP_Hold or BP_Hold_C) or by the path of a loaded class,
 	// if it is or derives from the target. The hook also runs for overload probes and dry runs, so a path never loads a
 	// package. An abstract class is returned too, so the factory's error names its concrete classes.
-	Policy.resolve_subtype = [TypeProvider](const rql::TypeDescriptor& Target, const std::string& Name) -> const rql::TypeDescriptor*
+	Policy.resolve_subtype = [TypeProvider, OfferedBases = MakeShared<TSet<UClass*>>()](const rql::TypeDescriptor& Target, const std::string& Name) -> const rql::TypeDescriptor*
 	{
 		UClass* Base = TypeProvider->ClassOf(&Target);
 		if (!Base)
@@ -409,7 +409,44 @@ void FUnrealMcpRqlSession::ConfigureMutations()
 				Class = FUnrealMcpObjectRef::ResolveClass(Text + TEXT("_C"));
 		}
 		if (!Class || !Class->IsChildOf(Base))
+		{
+			// No such class: register the loaded concrete subclasses of the target, so RQL's "did you mean" (it suggests
+			// registered descriptors only, the hook cannot list names) offers InputTriggerHold for "InputTrigerHold". Capped:
+			// a broad target (Object, Actor) has thousands of subclasses and gets no suggestion rather than a slow error.
+			// Once per target and session (probes and dry runs call the hook again). A name two loaded classes share is left
+			// out: registered, it would make later $type lookups of that name ambiguous instead of resolved here.
+			constexpr int32 MaxSuggestedSubclasses = 200;
+			bool bAlreadyOffered = false;
+			OfferedBases->Add(Base, &bAlreadyOffered);
+			if (bAlreadyOffered)
+				return nullptr;
+			TArray<UClass*> Derived;
+			GetDerivedClasses(Base, Derived, /*bRecursive*/ true);
+			const bool bInstanced = Base->HasAnyClassFlags(CLASS_EditInlineNew);
+			TMap<FName, int32> NameCounts;
+			Derived.RemoveAll([bInstanced, &NameCounts](const UClass* Sub)
+			{
+				const FString SubName = Sub->GetName();
+				const bool bDrop = Sub->HasAnyClassFlags(CLASS_Abstract | CLASS_Deprecated | CLASS_NewerVersionExists | CLASS_Hidden)
+					|| (bInstanced && !Sub->HasAnyClassFlags(CLASS_EditInlineNew))
+					|| SubName.StartsWith(TEXT("SKEL_")) || SubName.StartsWith(TEXT("REINST_"));
+				if (!bDrop)
+					++NameCounts.FindOrAdd(Sub->GetFName());
+				return bDrop;
+			});
+			if (Derived.Num() <= MaxSuggestedSubclasses)
+			{
+				for (UClass* Sub : Derived)
+				{
+					if (NameCounts.FindRef(Sub->GetFName()) != 1)
+						continue;
+					const rql::TypeDescriptor* Descriptor = TypeProvider->ForClass(Sub);
+					TypeProvider->Fill(Descriptor);
+					TypeProvider->Registry().register_descriptor(const_cast<rql::TypeDescriptor*>(Descriptor)); // idempotent
+				}
+			}
 			return nullptr;
+		}
 		const rql::TypeDescriptor* Descriptor = TypeProvider->ForClass(Class);
 		TypeProvider->Fill(Descriptor);
 		return Descriptor;

@@ -14,8 +14,8 @@
 namespace UnrealMcpRqlGuide
 {
 	/**
-	 * RQL's own language rules text (conditions, ?:, list equality, group items, receipts, call, bulk create, vectors, map keys,
-	 * typed literals) with SpawnActor(ClassName, Label, Location, ...) calls as its creation examples.
+	 * RQL's own language rules text (conditions, ?:, list equality, group items, receipts, call, bulk create, vectors, trigonometry
+	 * and $count, map keys, typed literals) with SpawnActor(ClassName, Label, Location, ...) calls as its creation examples.
 	 */
 	inline const char* LanguageRules()
 	{
@@ -23,7 +23,7 @@ namespace UnrealMcpRqlGuide
 		{
 			rql::RuleExamples Examples;
 			Examples.create_call = "editor.SpawnActor";
-			Examples.grid = "editor.SpawnActor(\"/Engine/BasicShapes/Cube\", \"Tile_\" + $, [($ % 15) * 200, floor($ / 15) * 200, 0])";
+			Examples.grid = "range(0, 150) | call editor.SpawnActor(\"/Engine/BasicShapes/Cube\", \"Tile_\" + $, [($ % 15) * 200, floor($ / 15) * 200, 0])";
 			Examples.per_entry = "[[\"Lamp_A\", [0, 0, 300]], [\"Lamp_B\", [400, 0, 300]]] | call editor.SpawnActor(\"PointLight\", $[0], $[1])";
 			Examples.named = "editor.SpawnActor({ClassName: \"/Engine/BasicShapes/Cube\", Label: \"Tile_\" + $, Location: [$ * 200, 0, 0]})";
 			return rql::language_rules_with(Examples);
@@ -91,7 +91,7 @@ Results come back as compact rows (header line, then col|col). Long results are 
 	inline const char* MutateStages()
 	{
 		return R"RQL(  set path = expr, ...   assign members (paths may go through structs: set Location.Z = Location.Z + 100)
-                         values see each target: $ (the target), $index (its position in the stream entering set / call)
+                         values see each target: $ (the target), $index (its position in the stream entering set / call), $count (how many enter)
   call Method(args)      invoke a method the tools expose
                          installed extensions add sources with operations (e.g. landscapes, Control Rig, Niagara, PCG,
                          Enhanced Input): check rql-schema before writing C++ or Python for an editor feature
@@ -108,6 +108,7 @@ Results come back as compact rows (header line, then col|col). Long results are 
   actors | where Label starts-with "Pillar_" | set Label = Label.replace("Pillar_", "Column_")      bulk rename
   actors | where Label starts-with "Crate" | sort Label | set Location.X = $index * 200              spread along X
   actors | where Label starts-with "Guard" | set Location = Location + normalize([1, 1, 0]) * 300     3 m diagonally (vector functions: length, normalize, distance, dot, lerp; [X, 0, Z] * k)
+  actors | where Label starts-with "Lamp" | set Location = [500 * cos(2 * pi() * $index / $count), 500 * sin(2 * pi() * $index / $count), 300]     a 5 m circle (radians)
   unreal.asset("/Game/Input/IA_Jump") | set Triggers = [{$type: "InputTriggerHold", HoldTimeThreshold: 0.5}], Modifiers = append(Modifiers, {$type: "InputModifierNegate"})
                          instanced subobjects (EditInlineNew: input triggers / modifiers ...) are built from a typed literal for the object that owns them
   actors | get Components | where $ is LightComponentBase | set Intensity = (Intensity > 5000 ? 5000 : Intensity)    clamp

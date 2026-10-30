@@ -19,6 +19,7 @@ inline const char* language_rules() noexcept {
         "- call Method(args) runs the method of each item (the items must be objects). call source.Method(args) runs the method of that one source object once per stream item, with $, $index, $path and $depth in the arguments being the item's; every call counts against the target limit, and every argument is checked before the first call (a dry run checks without calling).\n"
         "- Bulk create: range(start, end[, step]) streams numbers (end excluded), and a list literal streams its elements, so one call creates many objects: range(0, 300) | call editor.CreateObject(\"Cube\", {position: [($ % 15) * 2, 0, floor($ / 15) * 2]}) builds a 15-wide grid, [[\"A\", 1], [\"B\", 2]] | call editor.CreateObject($[0], $[1]) one object per entry (editor.CreateObject stands for the host's source and creation method). The receipt has one row per call with the $ref of the created object.\n"
         "- Vectors and colors the host marks as component-wise compute component by component: set Scale = Scale * 1.5, Position + [0, 1, 0], Position - Offset, -Velocity, v / 2. Adding a number to a vector is a type-mismatch (add [x, y, z] instead); quaternions and other types without that mark stay type-mismatch. Lists of numbers are vectors too: [x, 0, z] * k, [1, 2] + [3, 4]. Vector functions work on both: length(v) (or v.length(), magnitude), normalize(v), distance(a, b), dot(a, b), lerp(a, b, t); len(x) stays the size of a string or list.\n"
+        "- Trigonometry is in radians: sin, cos, tan, asin, acos, atan, atan2(y, x), pi(), deg(x), rad(x); trigonometric results are rounded (sin(pi()) is 0). In a set value or call argument $count is the number of items entering the stage ($index runs 0 to $count - 1), so set position = [5 * cos(2 * pi() * $index / $count), 0, 5 * sin(2 * pi() * $index / $count)] lays the items out on a circle of radius 5.\n"
         "- A missing map entry reads as null: props[\"k\"] == null and props[\"k\"] is null are true without the entry, and has(props[\"k\"]) tests whether it exists. A misspelt member is not null: it stays unknown and is reported.\n"
         "- Arguments by name: call Method({name: value, ...}) with one object literal that no overload takes as a whole binds each key to the parameter of that name; parameters left out keep their defaults, and an unknown name fails listing the parameters: range(0, 10) | call editor.CreateObject({name: \"Tile\" + $, position: [$ * 2, 0, 0]}). Engine objects (scene objects, nodes, actors) are never built from an object literal: pass an existing one, e.g. ref(\"Type#id\"). Value-like assets and owned subobjects that the host marks are built from a typed literal: set mesh = {$type: \"TypeName\", size: 2}.\n"
         ;
@@ -30,7 +31,8 @@ inline const char* language_rules() noexcept {
 struct RuleExamples {
     /// The creation call, e.g. "editor.CreateGameObject" (empty: editor.CreateObject).
     std::string create_call;
-    /// Replaces the bulk-create call after `range(0, 300) | call ` (it builds a 15-wide grid from $).
+    /// Replaces the bulk-create example in full, range included (the default is `range(0, 300) | call …`, a 15-wide grid from
+    /// $), so a host can keep it within its target limit, e.g. `range(0, 150) | call …`.
     std::string grid;
     /// Replaces the list-literal example in full (`[…] | call ….($[0], $[1])`, one call per entry).
     std::string per_entry;
@@ -43,7 +45,7 @@ struct RuleExamples {
 inline std::string language_rules_with(const RuleExamples& examples) {
     static constexpr const char* placeholder = "editor.CreateObject";
     static constexpr const char* note = " (editor.CreateObject stands for the host's source and creation method)";
-    static constexpr const char* grid_example = "editor.CreateObject(\"Cube\", {position: [($ % 15) * 2, 0, floor($ / 15) * 2]})";
+    static constexpr const char* grid_example = "range(0, 300) | call editor.CreateObject(\"Cube\", {position: [($ % 15) * 2, 0, floor($ / 15) * 2]})";
     static constexpr const char* per_entry_example = "[[\"A\", 1], [\"B\", 2]] | call editor.CreateObject($[0], $[1])";
     static constexpr const char* named_example = "editor.CreateObject({name: \"Tile\" + $, position: [$ * 2, 0, 0]})";
     auto trim = [](const std::string& s) {

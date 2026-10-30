@@ -98,9 +98,9 @@ Reflection / serialization library used by the McpPlugin host.
 --------------------------------------------------------------------------
 8. RQL (Reflection Query Language): com.IvanMurzak.Rql and the C++ runtime
 --------------------------------------------------------------------------
-Version   : 0.3.0-dev.aacfbba (pre-release NuGet, in the sidecar); C++ runtime
+Version   : 0.3.0-dev.3602d6a (pre-release NuGet, in the sidecar); C++ runtime
             vendored from the same commit
-            aacfbba756dbbd977cec50212a206de3b8878494
+            3602d6a5163996f065be3d47e23f6af83e728e5b
 Publisher : Ivan Murzak
 License   : PolyForm Shield License 1.0.0 (NOT Apache-2.0)
 Source    : https://github.com/IvanMurzak/RQL
@@ -117,7 +117,7 @@ licensor's products.
 --------------------------------------------------------------------------
 9. Code-Exec: the code_exec Python runtime
 --------------------------------------------------------------------------
-Version   : unreleased main after 0.3.1, vendored from commit 2b784e4
+Version   : unreleased main after 0.3.1, vendored from commit affe6ef
 Publisher : Ivan Murzak
 License   : PolyForm Shield License 1.0.0 (NOT Apache-2.0)
 Source    : https://github.com/IvanMurzak/Code-Exec
