@@ -1,7 +1,7 @@
 <Project>
   <!--
     TEMPORARY pre-release feed (see the "TEMPORARY PRE-RELEASE PIN" entries in src/com.IvanMurzak.Unreal.MCP.Bridge.csproj):
-    bridge/prerelease-packages/ holds com.IvanMurzak.Rql 0.3.0-dev.aacfbba, packed from RQL main aacfbba,
+    bridge/prerelease-packages/ holds com.IvanMurzak.Rql 0.3.0-dev.544a247, packed from RQL main 544a247,
     com.IvanMurzak.McpPlugin(.Common, .Server) 8.14.0-dev.42786f9 from MCP-Plugin-dotnet main 42786f9, and
     com.IvanMurzak.ReflectorNet 5.5.1-dev.ec3702e from ReflectorNet main ec3702e. Every project
     under bridge/ (the sidecar and its tests) restores from it in addition to the configured sources.

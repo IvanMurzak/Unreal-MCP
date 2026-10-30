@@ -22,8 +22,8 @@ agent ──query text──▶ unreal-mcp-bridge (sidecar, .NET)          Unrea
                       AgentFormat: QueryResult → compact rows ◀──IPC tool-response: QueryResult JSON── over live UObjects
 ```
 
-- **Sidecar** (`bridge/src/Tools/RqlBridge.cs`, NuGet `com.IvanMurzak.Rql` 0.3.0-dev.aacfbba — a temporary pre-release
-  packed from RQL main aacfbba and committed under `bridge/prerelease-packages/` until the cascade release): for `rql-query` / `rql-mutate` it
+- **Sidecar** (`bridge/src/Tools/RqlBridge.cs`, NuGet `com.IvanMurzak.Rql` 0.3.0-dev.544a247 — a temporary pre-release
+  packed from RQL main 544a247 and committed under `bridge/prerelease-packages/` until the cascade release): for `rql-query` / `rql-mutate` it
   parses `query` with `RqlParser` and adds `PlanCodec.Serialize(plan)` as the `plan` argument (a syntax error is
   answered without a round trip). The plugin answers with the QueryResult JSON; the sidecar renders it with
   `AgentFormat.Render(…, Table)` — byte-for-byte the agent output of Unity-MCP's rql tools. `rql-schema` answers with
@@ -169,7 +169,10 @@ agent ──query text──▶ unreal-mcp-bridge (sidecar, .NET)          Unrea
 (with `max_targets: 300`), `[["Lamp_A", 0], ["Lamp_B", 400]] | call editor.SpawnActor("PointLight", $[0], [$[1], 0, 300])`, or by parameter name: `range(0, 10) | call editor.SpawnActor({ClassName: "PointLight", Label: "Lamp_" + $, Location: [$ * 300, 0, 300]})`.
 Every spawn counts against the target limit, every class / asset name is resolved before the first spawn (a call
 validator on `SpawnActor` / `SpawnActorFromAsset`, dry runs too), all spawns are one undo step (the mutation's one
-editor transaction), and the receipt has one row per actor carrying its `$ref`.
+editor transaction), and the receipt has one row per actor carrying its `$ref`. In a call argument or `set` value `$count` is
+the number of items entering the stage, so with trigonometry (radians, `pi()`, `deg` / `rad`) `range(0, 8) | call
+editor.SpawnActor("PointLight", "Lamp_" + $, [500 * cos(2 * pi() * $index / $count), 500 * sin(2 * pi() * $index / $count), 300])`
+places eight lamps on a 5 m circle.
 
 **Vector arithmetic.** `FVector`, `FVector2D`, `FVector4`, `FLinearColor` and `FRotator` opt in to RQL's component-wise
 arithmetic (their adapters' `components` / `from_components`): `set Scale = Scale * 1.5`, `Location + [0, 0, 100]`,
@@ -340,9 +343,10 @@ to parse `query` into `plan` (query / mutate) and to render the answer, and rql-
 guide, the live sources and functions, the guides of installed RQL modules) as `"skills": [{name, description,
 markdown}]`. `unreal-skill-generate` writes every shipped skill as `<name>/SKILL.md`; skills never reach `tools/list`.
 The skill's name, description and body live in the plugin (`UnrealMcpRqlGuide.h`, the session's skill markdown).
-The rql-query and rql-mutate descriptions and the skill append RQL's shared language rules (`rql::language_rules_with(...)` with `editor.SpawnActor` examples,
+The rql-query and rql-mutate descriptions and the skill append RQL's shared language rules (`rql::language_rules_with(...)` with `editor.SpawnActor` examples;
+the grid example is the whole `range(0, 150) | call editor.SpawnActor(...)` pipeline, within the default 200-target limit;
 `rql/guide.hpp`), so rules every host states alike (conditions, `?:`, list equality, group items, receipts, `call`,
-bulk create, vectors and vector functions, missing map keys, typed literals) come from RQL and are not copied into the Unreal guide.
+bulk create, vectors and vector functions, trigonometry and `$count`, missing map keys, typed literals) come from RQL and are not copied into the Unreal guide.
 
 ## Extensions
 

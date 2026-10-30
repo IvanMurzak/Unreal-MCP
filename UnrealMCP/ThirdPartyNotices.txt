@@ -98,9 +98,9 @@ Reflection / serialization library used by the McpPlugin host.
 --------------------------------------------------------------------------
 8. RQL (Reflection Query Language): com.IvanMurzak.Rql and the C++ runtime
 --------------------------------------------------------------------------
-Version   : 0.3.0-dev.aacfbba (pre-release NuGet, in the sidecar); C++ runtime
+Version   : 0.3.0-dev.544a247 (pre-release NuGet, in the sidecar); C++ runtime
             vendored from the same commit
-            aacfbba756dbbd977cec50212a206de3b8878494
+            544a247a916ca84900793d3ca20c9adf194b782d
 Publisher : Ivan Murzak
 License   : PolyForm Shield License 1.0.0 (NOT Apache-2.0)
 Source    : https://github.com/IvanMurzak/RQL

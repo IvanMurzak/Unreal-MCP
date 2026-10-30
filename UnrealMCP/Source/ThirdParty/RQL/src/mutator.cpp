@@ -133,6 +133,7 @@ std::vector<Target> targets(Exec& x, Stream& stream, const std::string& op, cons
         list.push_back({it, index});
         if (static_cast<int64_t>(list.size()) > x.max_mutation_targets) limit_exceeded(x, stream, static_cast<int64_t>(list.size()), op);
     }
+    x.count = index + 1;  // $count: the stage's input, skipped items included, so $index runs 0 ... $count - 1
     return list;
 }
 
@@ -881,7 +882,9 @@ QueryResult run_set(Exec& x, Compiler& c, Encoder& enc, Stream& stream, const St
         std::string label;
     };
     std::vector<Assign> assigns;
+    c.mutation_values = true;  // $count is defined in set values (spec §3)
     for (auto& a : s.assign) assigns.push_back({a.target.get(), c.compile(*a.value), label_of(*a.target)});
+    c.mutation_values = false;
     std::vector<Target> items = targets(x, stream, "set");
     check_mixed_targets(x, items, s.assign);
     std::vector<PlannedWrite> writes;
@@ -1259,7 +1262,9 @@ QueryResult run_call(Exec& x, Compiler& c, Encoder& enc, Stream& stream, const S
     if (resolve_receiver) resolved = resolve_receiver();
     const Value* receiver = resolved ? &*resolved : nullptr;
     std::vector<Eval> args;
+    c.mutation_values = true;  // $count is defined in call arguments (spec §3)
     for (auto& a : s.args) args.push_back(c.compile(*a));
+    c.mutation_values = false;
     // The callable overloads of the method on a target, by arity; none: unknown-function (or permission-denied for a method
     // the host does not expose), naming the targets' types and the sources that have it (spec §10).
     auto candidates_of = [&](const Value& item, const std::vector<Target>* stream_items) {

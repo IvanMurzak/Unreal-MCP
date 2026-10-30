@@ -52,7 +52,7 @@
   <!--
     Reused NuGet pins — normally owned by the upstream release pipelines and kept in lockstep
     with Godot-MCP (Godot-MCP.csproj), except where a ⚠ DEVIATION entry below records an owner-approved
-    early adoption. Current: McpPlugin 8.14.0-dev.42786f9 + ReflectorNet 5.5.1-dev.ec3702e + Rql 0.3.0-dev.aacfbba (all temporary pre-releases).
+    early adoption. Current: McpPlugin 8.14.0-dev.42786f9 + ReflectorNet 5.5.1-dev.ec3702e + Rql 0.3.0-dev.544a247 (all temporary pre-releases).
     The MCP/reflection stack is NOT forked. Historical context: the 6.8.0 bump consumed the new
     shared engine-agnostic com.IvanMurzak.McpPlugin.AgentConfig module (the AI-agent configurators
     + the AgentConfiguratorDescription UI-DTO) so the sidecar hosts the AI-agent configuration
@@ -132,9 +132,10 @@
     #278, main e8985d5; the three packages copied unchanged from GameDev-MCP-Server main 7befeeb prerelease-packages/). It
     renames the per-tool flag Enabled -> Visible (IRunTool.Visible, IToolManager.SetToolVisible / VisibleToolsCount; the old
     names stay [Obsolete] aliases): the flag only decides whether a tool is listed in tools/list, tools/call still runs it.
-    ⚠ TEMPORARY PRE-RELEASE PIN (same owner rule, same feed): com.IvanMurzak.Rql 0.3.0-dev.2877579 -> 0.3.0-dev.2f4e263 -> 0.3.0-dev.aacfbba (RQL
+    ⚠ TEMPORARY PRE-RELEASE PIN (same owner rule, same feed): com.IvanMurzak.Rql 0.3.0-dev.2877579 -> 0.3.0-dev.2f4e263 -> 0.3.0-dev.aacfbba -> 0.3.0-dev.544a247 (RQL
     main 2f4e263: literal kinds, vector functions and list arithmetic, key warnings, misspelt-parameter hints; main aacfbba: the
-    resolve_subtype hook for $type and host rule examples), packed
+    resolve_subtype hook for $type and host rule examples; main 544a247: trigonometry, $count, the grid rule example
+    owning its range), packed
     the same way and matching the re-vendored C++ runtime. McpPlugin 8.14.0-dev.e8985d5 -> 8.14.0-dev.42786f9
     (MCP-Plugin-dotnet #280: role-scoped tools, NotExecuted re-send, nullable parameters optional) together with
     ReflectorNet 5.5.0 -> 5.5.1-dev.ec3702e (ReflectorNet #115), which that McpPlugin build depends on: the four packages
@@ -183,7 +184,7 @@
     Referenced in both build modes (the local-LIB toggle only swaps McpPlugin / ReflectorNet).
   -->
   <ItemGroup>
-    <PackageReference Include="com.IvanMurzak.Rql" Version="0.3.0-dev.aacfbba" />
+    <PackageReference Include="com.IvanMurzak.Rql" Version="0.3.0-dev.544a247" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(UseLocalMcpPlugin)' == 'true'">
