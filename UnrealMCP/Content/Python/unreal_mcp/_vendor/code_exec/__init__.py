@@ -13,4 +13,4 @@ from .runner import (run, run_json, run_b64, set_value_converter, set_default_ti
 
 __all__ = ["run", "run_json", "run_b64", "set_value_converter", "set_default_timeout_ms", "set_max_timeout_ms",
            "set_max_recursion_limit", "SnippetTimeout", "SnippetThreadStopped", "SNIPPET_FILE"]
-__version__ = "0.3.0"
+__version__ = "0.4.0"

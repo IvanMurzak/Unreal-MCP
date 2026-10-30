@@ -22,8 +22,7 @@ agent ──query text──▶ unreal-mcp-bridge (sidecar, .NET)          Unrea
                       AgentFormat: QueryResult → compact rows ◀──IPC tool-response: QueryResult JSON── over live UObjects
 ```
 
-- **Sidecar** (`bridge/src/Tools/RqlBridge.cs`, NuGet `com.IvanMurzak.Rql` 0.3.0-dev.3602d6a — a temporary pre-release
-  packed from RQL main 3602d6a and committed under `bridge/prerelease-packages/` until the cascade release): for `rql-query` / `rql-mutate` it
+- **Sidecar** (`bridge/src/Tools/RqlBridge.cs`, NuGet `com.IvanMurzak.Rql` 0.3.0): for `rql-query` / `rql-mutate` it
   parses `query` with `RqlParser` and adds `PlanCodec.Serialize(plan)` as the `plan` argument (a syntax error is
   answered without a round trip). The plugin answers with the QueryResult JSON; the sidecar renders it with
   `AgentFormat.Render(…, Table)` — byte-for-byte the agent output of Unity-MCP's rql tools. `rql-schema` answers with

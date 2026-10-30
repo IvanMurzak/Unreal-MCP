@@ -7,7 +7,7 @@ An optional editor plugin in the [Unreal MCP monorepository](../../README.md), w
 ## Requirements
 
 - Unreal Engine 5.7 or later (the shared extension suite verifies UE 5.7 and 5.8).
-- Unreal MCP 1.0.0 or later (the RQL data layer), installed in the same project.
+- Unreal MCP 0.26.0 or later (the RQL extension modules), installed in the same project.
 - Engine plugins: `Water`. The installer enables these dependencies. The plugin also adds the `WaterBodyCollision` collision profile Water requires (its `Config/Engine.ini`), so a project with the extension packages without the "Collision Profile settings do not include an entry for the Water Body Collision profile" cook error.
 - A C++ toolchain for your Unreal Engine installation. Extension releases contain source files and must be compiled for your project and engine.
 

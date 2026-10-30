@@ -4,8 +4,8 @@
   "description": "RQL module for Unreal's Gameplay Ability System: query ability, effect and attribute-set classes and granted abilities, grant abilities to actors.",
   "pluginName": "UnrealAIGAS",
   "repo": "IvanMurzak/Unreal-MCP",
-  "version": "0.1.1",
-  "minCoreVersion": "1.0.0",
+  "version": "0.2.0",
+  "minCoreVersion": "0.26.0",
   "enginePlugins": [
     "GameplayAbilities"
   ],

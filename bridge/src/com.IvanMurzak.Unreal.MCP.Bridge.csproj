@@ -52,7 +52,7 @@
   <!--
     Reused NuGet pins — normally owned by the upstream release pipelines and kept in lockstep
     with Godot-MCP (Godot-MCP.csproj), except where a ⚠ DEVIATION entry below records an owner-approved
-    early adoption. Current: McpPlugin 8.14.0-dev.42786f9 + ReflectorNet 5.5.1-dev.ec3702e + Rql 0.3.0-dev.3602d6a (all temporary pre-releases).
+    early adoption. Current: McpPlugin 8.14.0-dev.42786f9 + ReflectorNet 5.5.1-dev.ec3702e (temporary pre-releases) + Rql 0.3.0.
     The MCP/reflection stack is NOT forked. Historical context: the 6.8.0 bump consumed the new
     shared engine-agnostic com.IvanMurzak.McpPlugin.AgentConfig module (the AI-agent configurators
     + the AgentConfiguratorDescription UI-DTO) so the sidecar hosts the AI-agent configuration
@@ -141,6 +141,9 @@
     ReflectorNet 5.5.0 -> 5.5.1-dev.ec3702e (ReflectorNet #115), which that McpPlugin build depends on: the four packages
     are copied unchanged from GameDev-MCP-Server main prerelease-packages/. At the cascade release: set the published
     ReflectorNet version here and drop its package from bridge/prerelease-packages/ too.
+    Cascade release: com.IvanMurzak.Rql 0.3.0-dev.3602d6a -> 0.3.0, the published release (RQL c254c32, whose cpp/ is
+    identical to 3602d6a; the C++ runtime in ThirdParty/RQL is re-vendored from it). Its package left
+    bridge/prerelease-packages/; the feed stays for the McpPlugin / ReflectorNet pre-releases until the train moves them.
   -->
   <!--
     Local-LIB dev toggle (auth-fixes f1b — parity with the GameDev-MCP-Server + Unity/Godot
@@ -184,7 +187,7 @@
     Referenced in both build modes (the local-LIB toggle only swaps McpPlugin / ReflectorNet).
   -->
   <ItemGroup>
-    <PackageReference Include="com.IvanMurzak.Rql" Version="0.3.0-dev.3602d6a" />
+    <PackageReference Include="com.IvanMurzak.Rql" Version="0.3.0" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(UseLocalMcpPlugin)' == 'true'">

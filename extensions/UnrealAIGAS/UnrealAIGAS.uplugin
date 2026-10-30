@@ -1,7 +1,7 @@
 {
   "FileVersion": 3,
-  "Version": 2,
-  "VersionName": "0.1.1",
+  "Version": 3,
+  "VersionName": "0.2.0",
   "FriendlyName": "Unreal AI GAS",
   "Description": "RQL module for Unreal's Gameplay Ability System: query ability, effect and attribute-set classes and granted abilities, grant abilities to actors. An AI Game Developer (Unreal-MCP) extension: an IUnrealMcpRqlModule that agents use through rql-query / rql-mutate / rql-schema.",
   "Category": "AI",
