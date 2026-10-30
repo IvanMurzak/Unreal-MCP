@@ -218,8 +218,17 @@ void FUnrealMcpEditorCoordinator::Startup()
 		return;
 	}
 
-	SidecarManager = MakeUnique<FUnrealMcpSidecarManager>();
-	SidecarManager->StartForPort(BoundPort, Token);
+	// A commandlet (a cook while packaging, -run=...) is a one-shot process no agent talks to: a sidecar there would
+	// only dial the server and be restarted until the process ends ("sidecar exited; restarting" warnings in the cook).
+	if (FUnrealMcpSidecarManager::ShouldAutoStart(IsRunningCommandlet()))
+	{
+		SidecarManager = MakeUnique<FUnrealMcpSidecarManager>();
+		SidecarManager->StartForPort(BoundPort, Token);
+	}
+	else
+	{
+		UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] commandlet: the sidecar is not started."));
+	}
 
 	// §7 in-UI local-server (issue #95): create the local gamedev-mcp-server manager. It does NOT auto-start —
 	// the user launches it from the MCP-server card's Start button (Custom+http only).
