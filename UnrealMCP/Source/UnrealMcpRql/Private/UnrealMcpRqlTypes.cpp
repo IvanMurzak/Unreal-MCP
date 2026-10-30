@@ -370,7 +370,8 @@ rql::TypeDescriptor& FUnrealMcpRqlTypes::Shell(const void* Key, const FString& N
 	Descriptor->name = UnrealMcpRqlToStd(Name);
 	Descriptor->friendly = Descriptor->name;
 	Descriptor->kind = Kind;
-	Descriptor->registered = true;
+	// Left unregistered: RQL's registered() list (the $type suggestions, rql-schema's callables) holds only what
+	// register_descriptor adds; marking the flag here would make that call a no-op.
 	return *Descriptor;
 }
 

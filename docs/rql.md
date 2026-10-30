@@ -198,7 +198,7 @@ hook, not a per-type adapter, so RQL's own default would not cover them.)
   `set Modifiers = append(Modifiers, {$type: "InputModifierNegate"})` work, in one undo step. A literal for an abstract
   class without `$type` fails naming concrete subclasses. A `$type` that names no class makes the hook register the
   loaded concrete subclasses of the member's class (at most 200; a broader class gets none), so RQL's
-  `coercion-failed` message suggests the closest: `{$type: "InputTrigerHold"}` ... `(did you mean 'InputTriggerHold'?)`.
+  `coercion-failed` message suggests the closest: `{$type: "InputTrigerHold"}` gets `(did you mean 'InputTriggerHold' ...)`. A class name two loaded classes share is not offered.
 
 The `editor` operations also include `CreateDataTable(path, rowStruct)` and, for gameplay tags,
 `AddGameplayTag(name, comment?, source?)`, `RemoveGameplayTag(name)`, `RenameGameplayTag(name, newName)` (written to

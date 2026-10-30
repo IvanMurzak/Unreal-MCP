@@ -277,7 +277,7 @@ void FUnrealMcpRqlAdaptersSpec::Define()
 			// ref("UnrealMcpRqlSpecFixture#@F@") | set InlineOne = {$type: "UnrealMcpRqlSpecInlineScaeld"}: the session registers the
 			// loaded subclasses, so RQL 3602d6a's suggestion finds the class
 			Refuses(TEXT("misspelt $type"), TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"UnrealMcpRqlSpecFixture#@F@"}]},"stages":[{"op":"set","assign":[{"target":{"path":["InlineOne"]},"value":{"object":[{"key":"$type","value":{"lit":"UnrealMcpRqlSpecInlineScaeld"}}]}}]}]})RQL"),
-				TEXT("(did you mean 'UnrealMcpRqlSpecInlineScaled'?)"));
+				TEXT("(did you mean 'UnrealMcpRqlSpecInlineScaled'"));
 			TestTrue(TEXT("nothing written"), Fixture->InlineOne == nullptr);
 		});
 
