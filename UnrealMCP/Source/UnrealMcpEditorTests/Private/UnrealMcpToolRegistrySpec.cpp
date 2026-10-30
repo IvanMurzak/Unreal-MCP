@@ -45,6 +45,19 @@ void FUnrealMcpToolRegistrySpec::Define()
 			TestEqual(TEXT("result is pong"), StructResult, FString(TEXT("pong")));
 		});
 
+		It("folds structured content into the wire text unless the message covers it", [this]()
+		{
+			TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+			Data->SetStringField(TEXT("content"), TEXT("int32 X;"));
+			FUnrealMcpToolResult Result = FUnrealMcpToolResult::Success(TEXT("Read 'A.h' (1 line(s))."), Data);
+			TestEqual(TEXT("summary + condensed JSON"), Result.WireText(), FString(TEXT("Read 'A.h' (1 line(s)).\n{\"content\":\"int32 X;\"}")));
+			TestEqual(TEXT("the message itself is unchanged"), Result.Message, FString(TEXT("Read 'A.h' (1 line(s)).")));
+			Result.bMessageCoversStructured = true;
+			TestEqual(TEXT("covered: message only"), Result.WireText(), Result.Message);
+			TestEqual(TEXT("no structured: message only"), FUnrealMcpToolResult::Success(TEXT("ok")).WireText(), FString(TEXT("ok")));
+			TestEqual(TEXT("empty message: JSON only"), FUnrealMcpToolResult::Success(FString(), Data).WireText(), FString(TEXT("{\"content\":\"int32 X;\"}")));
+		});
+
 		It("echoes the message arg", [this]()
 		{
 			FUnrealMcpToolRegistry Registry;

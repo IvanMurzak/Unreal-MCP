@@ -68,6 +68,13 @@ namespace UnrealMcpSourceTools
 	UNREALMCPEDITOR_API FString DescribeUbtResult(const FString& Target, int32 ErrorCount, int32 WarningCount, int32 ReturnCode,
 		double Seconds, const FString& Output);
 
+	/**
+	 * The compiler diagnostics as text lines for the summary (one "<file>(<line>): error: <message>" line each), errors first, at most
+	 * @p MaxRows (then "... N more"); empty when there are none. The agent reads the text block, so every error must be
+	 * in it, not only in the structured report.
+	 */
+	UNREALMCPEDITOR_API FString DescribeDiagnostics(const TArray<FSourceDiagnostic>& Diagnostics, int32 MaxRows = 20);
+
 	/** Register the source family into @p Registry (docs/ARCHITECTURE.md §3.3). */
 	UNREALMCPEDITOR_API void Register(FUnrealMcpToolRegistry& Registry);
 }

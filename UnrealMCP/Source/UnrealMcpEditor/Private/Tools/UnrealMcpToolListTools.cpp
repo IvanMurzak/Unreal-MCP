@@ -101,7 +101,9 @@ namespace UnrealMcpToolListTools
 				TSharedPtr<FJsonObject> Structured = MakeShared<FJsonObject>();
 				Structured->SetArrayField(TEXT("tools"), Rows);
 				Structured->SetNumberField(TEXT("hidden"), Hidden);
-				return FUnrealMcpToolResult::Success(Text, Structured);
+				FUnrealMcpToolResult Result = FUnrealMcpToolResult::Success(Text, Structured);
+				Result.bMessageCoversStructured = true; // every row is a line of the text
+				return Result;
 			});
 	}
 }

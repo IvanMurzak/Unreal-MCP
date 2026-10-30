@@ -383,7 +383,9 @@ namespace UnrealMcpPythonTools
 					return FUnrealMcpToolResult::Error(FString::Printf(TEXT("%s: %s%s"),
 						*Response->GetStringField(TEXT("errorKind")), *Response->GetStringField(TEXT("error")), *Details));
 
-				return FUnrealMcpToolResult::Success((bHasValue ? Value : TEXT("null")) + Details, Response);
+				FUnrealMcpToolResult Result = FUnrealMcpToolResult::Success((bHasValue ? Value : TEXT("null")) + Details, Response);
+				Result.bMessageCoversStructured = true; // the value, logs and diagnostics are rendered in the text
+				return Result;
 			});
 	}
 }

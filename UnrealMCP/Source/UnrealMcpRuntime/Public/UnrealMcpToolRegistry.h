@@ -126,6 +126,17 @@ struct UNREALMCPRUNTIME_API FUnrealMcpToolResult
 	// Not terminal: the dispatcher runs the handler again on a later game-thread tick, until the call's
 	// timeout. For a dependency that comes up after the editor (e.g. Python's first tick). See RetryLater.
 	bool bRetryLater = false;
+	// Message already renders everything Structured holds (python-execute's value and logs, a file's text): the wire
+	// text block is Message alone. Otherwise the text block also carries Structured as condensed JSON (WireText).
+	bool bMessageCoversStructured = false;
+
+	/**
+	 * The text block sent to the MCP client. Many clients hand the model only the `content` text, never
+	 * `structuredContent` (MCP: a tool returning structured content should also return it serialized in a text
+	 * block), so a summary line alone ("Read 'X' (21 line(s)).") would hide the data: Structured is appended as
+	 * condensed JSON on its own line unless bMessageCoversStructured.
+	 */
+	FString WireText() const;
 
 	static FUnrealMcpToolResult Success(const FString& InMessage, const TSharedPtr<FJsonObject>& InStructured = nullptr)
 	{

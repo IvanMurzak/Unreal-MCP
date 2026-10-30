@@ -558,11 +558,14 @@ void FUnrealMcpBridgeServer::HandleToolCall(const TSharedPtr<FJsonObject>& Messa
 			Response->SetStringField(TEXT("status"), Result.bSuccess ? TEXT("success") : TEXT("error"));
 
 			TArray<TSharedPtr<FJsonValue>> Content;
-			if (!Result.Message.IsEmpty())
+			// The text block carries the structured payload too (WireText): clients that show the model only `content`
+			// would otherwise get a summary line without the data.
+			const FString Text = Result.WireText();
+			if (!Text.IsEmpty())
 			{
 				TSharedPtr<FJsonObject> TextBlock = MakeShared<FJsonObject>();
 				TextBlock->SetStringField(TEXT("type"), TEXT("text"));
-				TextBlock->SetStringField(TEXT("text"), Result.Message);
+				TextBlock->SetStringField(TEXT("text"), Text);
 				TextBlock->SetStringField(TEXT("mimeType"), TEXT("text/plain"));
 				Content.Add(MakeShared<FJsonValueObject>(TextBlock));
 			}
