@@ -290,6 +290,10 @@ private:
     mutable std::unordered_map<const TypeDescriptor*, std::unordered_map<std::string, std::vector<const TypeDescriptor*>>> subtypes_;
     mutable size_t subtypes_registered_ = 0;
     std::vector<const TypeDescriptor*> subtypes_named(const TypeDescriptor* target, const std::string& name) const;
+    /// The names subtypes_named accepts for `target`: what a misspelt "$type" is compared with (spec §4.5, §10).
+    std::vector<std::string> subtype_names(const TypeDescriptor* target) const;
+    /// The per-target index of subtypes_named; the caller holds subtypes_mutex_.
+    const std::unordered_map<std::string, std::vector<const TypeDescriptor*>>& subtype_index_locked(const TypeDescriptor* target) const;
     /// Some adapter, or a type exclusion that actually removes a member of a registered type: only then
     /// may types differ from their descriptors (adapter-free engines read descriptors directly).
     bool adapts() const;

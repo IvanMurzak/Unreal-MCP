@@ -139,6 +139,14 @@ std::vector<std::string> suggest_closest(const std::string& name, const std::vec
     return suggest_members(name, candidates, {}, max);
 }
 
+std::string type_name_hint(const std::string& name, const std::vector<std::string>& known) {
+    std::vector<std::string> close = suggest_closest(name, known, 3);
+    if (close.empty()) return {};
+    std::string hint = " (did you mean ";
+    for (size_t i = 0; i < close.size(); ++i) hint += (i ? " / '" : "'") + close[i] + "'";
+    return hint + "?)";
+}
+
 bool try_number(const Value& v, double& d, bool& single) {
     if (!v.is_number()) { d = 0; single = false; return false; }
     d = v.as_number();

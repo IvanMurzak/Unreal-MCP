@@ -554,7 +554,7 @@ std::optional<Value> construct(Exec& x, const Value& literal, const TypeDescript
             }
         }
         if (hits.empty()) {
-            why = "no concrete type named '" + name + "' derives from " + target->friendly_name();
+            why = "no concrete type named '" + name + "' derives from " + target->friendly_name() + type_name_hint(name, x.subtype_names(target));
             return std::nullopt;
         }
         if (hits.size() > 1) {

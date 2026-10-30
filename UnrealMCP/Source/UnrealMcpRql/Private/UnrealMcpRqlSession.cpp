@@ -409,7 +409,29 @@ void FUnrealMcpRqlSession::ConfigureMutations()
 				Class = FUnrealMcpObjectRef::ResolveClass(Text + TEXT("_C"));
 		}
 		if (!Class || !Class->IsChildOf(Base))
+		{
+			// No such class: register the loaded concrete subclasses of the target, so RQL's "did you mean" (it suggests
+			// registered descriptors only, the hook cannot list names) offers InputTriggerHold for "InputTrigerHold". Capped:
+			// a broad target (Object, Actor) has thousands of subclasses and gets no suggestion rather than a slow error.
+			constexpr int32 MaxSuggestedSubclasses = 200;
+			TArray<UClass*> Derived;
+			GetDerivedClasses(Base, Derived, /*bRecursive*/ true);
+			Derived.RemoveAll([](const UClass* Sub)
+			{
+				return Sub->HasAnyClassFlags(CLASS_Abstract | CLASS_Deprecated | CLASS_NewerVersionExists | CLASS_Hidden)
+					|| Sub->GetName().StartsWith(TEXT("SKEL_")) || Sub->GetName().StartsWith(TEXT("REINST_"));
+			});
+			if (Derived.Num() <= MaxSuggestedSubclasses)
+			{
+				for (UClass* Sub : Derived)
+				{
+					const rql::TypeDescriptor* Descriptor = TypeProvider->ForClass(Sub);
+					TypeProvider->Fill(Descriptor);
+					TypeProvider->Registry().register_descriptor(const_cast<rql::TypeDescriptor*>(Descriptor)); // idempotent
+				}
+			}
 			return nullptr;
+		}
 		const rql::TypeDescriptor* Descriptor = TypeProvider->ForClass(Class);
 		TypeProvider->Fill(Descriptor);
 		return Descriptor;

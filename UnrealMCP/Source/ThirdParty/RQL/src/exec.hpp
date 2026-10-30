@@ -242,6 +242,8 @@ public:
     std::vector<std::shared_ptr<void>> constructed;
     /// Registered types named `name` deriving from `target` (cached per target).
     std::vector<const TypeDescriptor*> subtypes_named(const TypeDescriptor* target, const std::string& name);
+    /// The names subtypes_named accepts for `target` (registered types, including descriptors a host registered while resolving).
+    std::vector<std::string> subtype_names(const TypeDescriptor* target);
     /// Stable reference string (adapter stable ids, id member, session handles).
     std::string ref_of(const Value& v);
     /// Resolve a reference; fallback-search nodes count as visits; results cached per query.
@@ -308,6 +310,8 @@ size_t distinct_hash(Exec& x, const Value& v);
 bool elements(const Value& v, std::vector<Value>& out);
 size_t collection_size(const Value& v);
 std::vector<std::string> suggest_closest(const std::string& name, const std::vector<std::string>& candidates, size_t max);
+/// " (did you mean 'BoxMesh'?)" after an unknown type name, with up to three of the closest known names; empty when none qualifies.
+std::string type_name_hint(const std::string& name, const std::vector<std::string>& known);
 /// The parameter a misspelt argument name stands for (spec §8): the closest name by the suggestion rules, else the name one
 /// of whose camelCase / snake_case words is close ("klass" → "className"); empty when none qualifies.
 std::string closest_parameter(const std::string& key, const std::vector<std::string>& names);

@@ -22,8 +22,8 @@ agent ──query text──▶ unreal-mcp-bridge (sidecar, .NET)          Unrea
                       AgentFormat: QueryResult → compact rows ◀──IPC tool-response: QueryResult JSON── over live UObjects
 ```
 
-- **Sidecar** (`bridge/src/Tools/RqlBridge.cs`, NuGet `com.IvanMurzak.Rql` 0.3.0-dev.544a247 — a temporary pre-release
-  packed from RQL main 544a247 and committed under `bridge/prerelease-packages/` until the cascade release): for `rql-query` / `rql-mutate` it
+- **Sidecar** (`bridge/src/Tools/RqlBridge.cs`, NuGet `com.IvanMurzak.Rql` 0.3.0-dev.3602d6a — a temporary pre-release
+  packed from RQL main 3602d6a and committed under `bridge/prerelease-packages/` until the cascade release): for `rql-query` / `rql-mutate` it
   parses `query` with `RqlParser` and adds `PlanCodec.Serialize(plan)` as the `plan` argument (a syntax error is
   answered without a round trip). The plugin answers with the QueryResult JSON; the sidecar renders it with
   `AgentFormat.Render(…, Table)` — byte-for-byte the agent output of Unity-MCP's rql tools. `rql-schema` answers with
@@ -196,7 +196,9 @@ hook, not a per-type adapter, so RQL's own default would not cover them.)
   when it is or derives from the member's class, and describes it on demand. So
   `unreal.asset("/Game/Input/IA_Jump") | set Triggers = [{$type: "InputTriggerHold", HoldTimeThreshold: 0.5}]` and
   `set Modifiers = append(Modifiers, {$type: "InputModifierNegate"})` work, in one undo step. A literal for an abstract
-  class without `$type` fails naming concrete subclasses.
+  class without `$type` fails naming concrete subclasses. A `$type` that names no class makes the hook register the
+  loaded concrete subclasses of the member's class (at most 200; a broader class gets none), so RQL's
+  `coercion-failed` message suggests the closest: `{$type: "InputTrigerHold"}` ... `(did you mean 'InputTriggerHold'?)`.
 
 The `editor` operations also include `CreateDataTable(path, rowStruct)` and, for gameplay tags,
 `AddGameplayTag(name, comment?, source?)`, `RemoveGameplayTag(name)`, `RenameGameplayTag(name, newName)` (written to
@@ -343,9 +345,9 @@ to parse `query` into `plan` (query / mutate) and to render the answer, and rql-
 guide, the live sources and functions, the guides of installed RQL modules) as `"skills": [{name, description,
 markdown}]`. `unreal-skill-generate` writes every shipped skill as `<name>/SKILL.md`; skills never reach `tools/list`.
 The skill's name, description and body live in the plugin (`UnrealMcpRqlGuide.h`, the session's skill markdown).
-The rql-query and rql-mutate descriptions and the skill append RQL's shared language rules (`rql::language_rules_with(...)` with `editor.SpawnActor` examples;
-the grid example is the whole `range(0, 150) | call editor.SpawnActor(...)` pipeline, within the default 200-target limit;
-`rql/guide.hpp`), so rules every host states alike (conditions, `?:`, list equality, group items, receipts, `call`,
+The rql-query and rql-mutate descriptions and the skill append RQL's shared language rules (`rql::language_rules_with(...)` from `rql/guide.hpp`,
+with `editor.SpawnActor` examples; the grid example is the whole `range(0, 150) | call editor.SpawnActor(...)` pipeline,
+within the default 200-target limit), so rules every host states alike (conditions, `?:`, list equality, group items, receipts, `call`,
 bulk create, vectors and vector functions, trigonometry and `$count`, missing map keys, typed literals) come from RQL and are not copied into the Unreal guide.
 
 ## Extensions
