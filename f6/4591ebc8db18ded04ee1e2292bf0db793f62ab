@@ -1,0 +1,29 @@
+cli/tests/open-default-spawn.test.ts
+  s_7be60963fe3603::t_52ee6f9c615a08 1-85
+cli/src/commands/open.ts
+  s_7be60963fe3603::t_0ea8959d75fd77 91,147
+cli/src/lib.ts
+  s_7be60963fe3603::t_b996039a1d9050 174
+cli/src/lib/open.ts
+  s_7be60963fe3603::t_dc5df00a9fdb70 7,30,187,191-199,203-204,226,375-398,404,419
+cli/src/lib/types.ts
+  s_7be60963fe3603::t_039270e3b018d0 166-170,178-189
+cli/tests/open.test.ts
+  s_7be60963fe3603::t_bb2c77805c385e 189-246
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "f64591ebc8db18ded04ee1e2292bf0db793f62ab",
+  "prompts": {},
+  "sessions": {
+    "s_7be60963fe3603": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9c306a43-6f1a-4fe9-9b57-09acf4bc1a65",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
