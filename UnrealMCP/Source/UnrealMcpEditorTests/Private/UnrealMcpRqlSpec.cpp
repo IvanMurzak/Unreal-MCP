@@ -1320,10 +1320,11 @@ void FUnrealMcpRqlSpec::Define()
 			//     [500 * cos(2 * pi() * $index / $count), 500 * sin(2 * pi() * $index / $count), 300])
 			const TSharedPtr<FJsonObject> Ring = Exec(TEXT(R"RQL({"rql":"0.1","source":{"call":"range","args":[{"lit":0},{"lit":4}]},"stages":[{"op":"call","method":"SpawnActor","on":{"path":["editor"]},"args":[{"lit":"PointLight"},{"op":"+","args":[{"lit":"RqlSpecLampRing_"},{"path":[]}]},{"list":[{"op":"*","args":[{"lit":500},{"call":"cos","args":[{"op":"/","args":[{"op":"*","args":[{"op":"*","args":[{"lit":2},{"call":"pi","args":[]}]},{"path":[{"meta":"index"}]}]},{"path":[{"meta":"count"}]}]}]}]},{"op":"*","args":[{"lit":500},{"call":"sin","args":[{"op":"/","args":[{"op":"*","args":[{"op":"*","args":[{"lit":2},{"call":"pi","args":[]}]},{"path":[{"meta":"index"}]}]},{"path":[{"meta":"count"}]}]}]}]},{"lit":300}]}]}]})RQL"), true);
 			TestTrue(*FString::Printf(TEXT("spawned (%s)"), *Codes(Ring)), IsOk(Ring) && RowCount(Ring) == 4);
+			auto RingIndex = [](const AActor* Actor) { return FCString::Atoi(*Actor->GetActorLabel().RightChop(FCString::Strlen(TEXT("RqlSpecLampRing_")))); };
 			const FVector Expected[] = { FVector(500, 0, 300), FVector(0, 500, 300), FVector(-500, 0, 300), FVector(0, -500, 300) };
 			for (const AActor* Actor : Lamps())
 			{
-				const int32 Index = FCString::Atoi(*Actor->GetActorLabel().RightChop(16)); // "RqlSpecLampRing_" is 16 characters
+				const int32 Index = RingIndex(Actor);
 				TestTrue(*FString::Printf(TEXT("%s on the circle (%s)"), *Actor->GetActorLabel(), *Actor->GetActorLocation().ToString()),
 					Index >= 0 && Index < 4 && Actor->GetActorLocation().Equals(Expected[Index], 0.01));
 			}
@@ -1333,7 +1334,7 @@ void FUnrealMcpRqlSpec::Define()
 			TestTrue(*FString::Printf(TEXT("set (%s)"), *Codes(Numbered)), IsOk(Numbered));
 			for (const AActor* Actor : Lamps())
 			{
-				const int32 Index = FCString::Atoi(*Actor->GetActorLabel().RightChop(16));
+				const int32 Index = RingIndex(Actor);
 				TestEqual(*FString::Printf(TEXT("%s Z = 4 * 100 + index"), *Actor->GetActorLabel()), Actor->GetActorLocation().Z, 400.0 + Index);
 			}
 		});
