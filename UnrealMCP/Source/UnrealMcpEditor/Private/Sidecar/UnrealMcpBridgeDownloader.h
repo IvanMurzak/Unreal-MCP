@@ -58,19 +58,19 @@ public:
 	static UNREALMCPEDITOR_API FString ManifestPath(const FString& PluginBaseDir);
 
 	/**
-	 * The integrity gate: true only when @p ManifestText has an entry for this RID's asset AND it equals the SHA-256
-	 * of @p ZipBytes. Otherwise false with a user-facing @p OutError. Pure (no IO).
+	 * The integrity gate: true only when @p ManifestText has an entry for this RID's asset AND it equals @p ZipDigest
+	 * (the downloaded zip's SHA-256 hex). Otherwise false with a user-facing @p OutError. Pure (no IO).
 	 */
-	static UNREALMCPEDITOR_API bool VerifyBridgeZip(const FString& ManifestText, const FString& Rid, const TArray<uint8>& ZipBytes, FString& OutError);
+	static UNREALMCPEDITOR_API bool VerifyBridgeZip(const FString& ManifestText, const FString& Rid, const FString& ZipDigest, FString& OutError);
 
 	/**
 	 * Extract a verified bridge zip into @p TargetDir atomically: unpack into a sibling staging dir, write the
-	 * FUnrealMcpSidecarManager::DownloadedBridgeMarkerName marker, set the exec bit (macOS/Linux), then rename the
+	 * FUnrealMcpSidecarManager::DownloadedBridgeMarkerName marker (holding @p ZipDigest), set the exec bit (macOS/Linux), then rename the
 	 * staging dir to @p TargetDir. Only flat entries (single path segment) are written — anything else is skipped
 	 * (zip-slip hardening). A concurrent editor that finished first wins: its complete dir is kept. Returns false
 	 * with @p OutError when the zip is unreadable or the bridge binary is missing.
 	 */
-	static UNREALMCPEDITOR_API bool ExtractBridgeZip(const TArray<uint8>& ZipBytes, const FString& TargetDir, FString& OutError);
+	static UNREALMCPEDITOR_API bool ExtractBridgeZip(const TArray<uint8>& ZipBytes, const FString& ZipDigest, const FString& TargetDir, FString& OutError);
 
 	/**
 	 * Start the download of @p Version for @p Rid (game thread). No-op while a download is already running. Fails

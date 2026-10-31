@@ -20,10 +20,9 @@ source zip while the ~73–80 MB self-contained payloads are staged only transie
 
 - by `release.yml` (signed, per RID) before `BuildPlugin` for a GitHub/npm release.
 
-`release.yml` also writes `SHA256SUMS` here (gitignored): the SHA-256 of each per-RID release zip
-`unreal-mcp-bridge-<rid>.zip`. The Fab asset ships this folder with no payload (Fab accepts no executable)
-but with `SHA256SUMS`; the editor then downloads the bridge for its own version from the GitHub Release
-and verifies it against this file before running it (docs/ARCHITECTURE.md §6.8).
+`release.yml` also writes `SHA256SUMS` here (gitignored): the digests of the per-RID release zips. The Fab
+asset ships this folder with no payload but with `SHA256SUMS`, which the editor's bridge download verifies
+against (docs/ARCHITECTURE.md §6.8).
 
 For a local packaged-game verification, publish the sidecar for your RID and place it here:
 `python bridge/publish.py --platforms win-x64 --no-zip` then copy `bridge/publish/win-x64/*` into

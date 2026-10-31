@@ -457,8 +457,7 @@ TSharedRef<SWidget> SUnrealMcpMainWindow::BuildUnrealStatusRow()
 			.AutoWrapText(true)
 			.ColorAndOpacity_Lambda([this]()
 			{
-				const bool bDownloading = IsViewModelValid()
-					&& ViewModel->GetEffectiveConnectionState() == EUnrealMcpConnectionState::Connecting;
+				const bool bDownloading = IsViewModelValid() && ViewModel->IsBridgeDownloading();
 				return FSlateColor(bDownloading
 					? FUnrealMcpEditorViewModel::GetStatusColor(EUnrealMcpConnectionState::Connecting)
 					: FUnrealMcpStyle::StatusOffline());

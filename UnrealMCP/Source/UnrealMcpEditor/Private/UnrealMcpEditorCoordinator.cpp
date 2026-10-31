@@ -735,7 +735,7 @@ bool FUnrealMcpEditorCoordinator::StartSidecarOrDownload()
 	TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("UnrealMCP"));
 	if (!Plugin.IsValid())
 		return false;
-	BridgeDownloader->Start(Plugin->GetDescriptor().VersionName, Rid, Plugin->GetBaseDir(), FUnrealMcpSidecarManager::BridgeCacheRoot(),
+	BridgeDownloader->Start(FUnrealMcpSidecarManager::PluginVersionName(), Rid, Plugin->GetBaseDir(), FUnrealMcpSidecarManager::BridgeCacheRoot(),
 		[this](bool bOk, const FString&)
 		{
 			// Game thread; never invoked after Shutdown's Cancel(), so `this` and the sidecar manager are alive.

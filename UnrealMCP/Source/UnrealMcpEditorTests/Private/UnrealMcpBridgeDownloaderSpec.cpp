@@ -12,6 +12,7 @@
 #include "HAL/PlatformFileManager.h"
 #include "FileUtilities/ZipArchiveWriter.h"
 #include "Extensions/UnrealMcpExtensionInstaller.h"
+#include "Server/UnrealMcpServerChecksum.h"
 #include "Sidecar/UnrealMcpBridgeDownloader.h"
 #include "Sidecar/UnrealMcpSidecarManager.h"
 
@@ -32,6 +33,16 @@ BEGIN_DEFINE_SPEC(FUnrealMcpBridgeDownloaderSpec, "UnrealMcp.BridgeDownloader",
 	static TArray<uint8> BridgeDlSpecBytes(const ANSICHAR* Text)
 	{
 		return TArray<uint8>(reinterpret_cast<const uint8*>(Text), FCStringAnsi::Strlen(Text));
+	}
+
+	static FString BridgeDlSpecDigest(const ANSICHAR* Text)
+	{
+		return FUnrealMcpServerChecksum::ComputeSha256Hex(BridgeDlSpecBytes(Text));
+	}
+
+	static bool BridgeDlSpecExtract(const TArray<uint8>& Zip, const FString& Target, FString& Error)
+	{
+		return FUnrealMcpBridgeDownloader::ExtractBridgeZip(Zip, FUnrealMcpServerChecksum::ComputeSha256Hex(Zip), Target, Error);
 	}
 
 	static FString BridgeDlSpecRoot()
@@ -124,29 +135,29 @@ void FUnrealMcpBridgeDownloaderSpec::Define()
 		It("accepts a zip whose SHA-256 matches the shipped manifest entry for its RID", [this, Manifest]()
 		{
 			FString Error;
-			TestTrue(TEXT("verified"), FUnrealMcpBridgeDownloader::VerifyBridgeZip(Manifest, TEXT("win-x64"), BridgeDlSpecBytes("abc"), Error));
+			TestTrue(TEXT("verified"), FUnrealMcpBridgeDownloader::VerifyBridgeZip(Manifest, TEXT("win-x64"), BridgeDlSpecDigest("abc"), Error));
 			TestTrue(TEXT("no error"), Error.IsEmpty());
 		});
 
 		It("rejects a tampered zip", [this, Manifest]()
 		{
 			FString Error;
-			TestFalse(TEXT("tampered"), FUnrealMcpBridgeDownloader::VerifyBridgeZip(Manifest, TEXT("win-x64"), BridgeDlSpecBytes("abd"), Error));
+			TestFalse(TEXT("tampered"), FUnrealMcpBridgeDownloader::VerifyBridgeZip(Manifest, TEXT("win-x64"), BridgeDlSpecDigest("abd"), Error));
 			TestTrue(TEXT("actionable error"), Error.Contains(TEXT("rejected")) && Error.Contains(TEXT("not installed")));
 		});
 
 		It("rejects a RID the manifest has no entry for, and never cross-matches another RID's digest", [this, Manifest]()
 		{
 			FString Error;
-			TestFalse(TEXT("missing entry"), FUnrealMcpBridgeDownloader::VerifyBridgeZip(Manifest, TEXT("osx-arm64"), BridgeDlSpecBytes("abc"), Error));
-			TestFalse(TEXT("linux digest is not win's"), FUnrealMcpBridgeDownloader::VerifyBridgeZip(Manifest, TEXT("linux-x64"), BridgeDlSpecBytes("abc"), Error));
+			TestFalse(TEXT("missing entry"), FUnrealMcpBridgeDownloader::VerifyBridgeZip(Manifest, TEXT("osx-arm64"), BridgeDlSpecDigest("abc"), Error));
+			TestFalse(TEXT("linux digest is not win's"), FUnrealMcpBridgeDownloader::VerifyBridgeZip(Manifest, TEXT("linux-x64"), BridgeDlSpecDigest("abc"), Error));
 		});
 
 		It("rejects everything against an empty or garbage manifest", [this]()
 		{
 			FString Error;
-			TestFalse(TEXT("empty"), FUnrealMcpBridgeDownloader::VerifyBridgeZip(TEXT(""), TEXT("win-x64"), BridgeDlSpecBytes("abc"), Error));
-			TestFalse(TEXT("garbage"), FUnrealMcpBridgeDownloader::VerifyBridgeZip(TEXT("not a manifest"), TEXT("win-x64"), BridgeDlSpecBytes("abc"), Error));
+			TestFalse(TEXT("empty"), FUnrealMcpBridgeDownloader::VerifyBridgeZip(TEXT(""), TEXT("win-x64"), BridgeDlSpecDigest("abc"), Error));
+			TestFalse(TEXT("garbage"), FUnrealMcpBridgeDownloader::VerifyBridgeZip(TEXT("not a manifest"), TEXT("win-x64"), BridgeDlSpecDigest("abc"), Error));
 		});
 	});
 
@@ -163,7 +174,7 @@ void FUnrealMcpBridgeDownloaderSpec::Define()
 				{ TEXT("nested/inner.txt"), TEXT("x") } });
 			const FString Target = BridgeDlSpecRoot() / TEXT("cache/0.0.1/win-x64");
 			FString Error;
-			TestTrue(TEXT("extracted"), FUnrealMcpBridgeDownloader::ExtractBridgeZip(Zip, Target, Error));
+			TestTrue(TEXT("extracted"), BridgeDlSpecExtract(Zip, Target, Error));
 			TestTrue(TEXT("binary"), FPaths::FileExists(Target / Basename));
 			TestTrue(TEXT("marker"), FPaths::FileExists(Target / FUnrealMcpSidecarManager::DownloadedBridgeMarkerName));
 			TestFalse(TEXT("no zip-slip"), FPaths::FileExists(BridgeDlSpecRoot() / TEXT("cache/0.0.1/escaped.txt")));
@@ -178,8 +189,8 @@ void FUnrealMcpBridgeDownloaderSpec::Define()
 			const FString Basename = FUnrealMcpSidecarManager::BridgeBinaryBasename();
 			const FString Target = BridgeDlSpecRoot() / TEXT("cache/0.0.1/win-x64");
 			FString Error;
-			TestTrue(TEXT("first"), FUnrealMcpBridgeDownloader::ExtractBridgeZip(BridgeDlSpecZip({ { Basename, TEXT("first") } }), Target, Error));
-			TestTrue(TEXT("second"), FUnrealMcpBridgeDownloader::ExtractBridgeZip(BridgeDlSpecZip({ { Basename, TEXT("second") } }), Target, Error));
+			TestTrue(TEXT("first"), BridgeDlSpecExtract(BridgeDlSpecZip({ { Basename, TEXT("first") } }), Target, Error));
+			TestTrue(TEXT("second"), BridgeDlSpecExtract(BridgeDlSpecZip({ { Basename, TEXT("second") } }), Target, Error));
 			FString Content;
 			FFileHelper::LoadFileToString(Content, *(Target / Basename));
 			TestEqual(TEXT("the first complete dir wins"), Content, FString(TEXT("first")));
@@ -189,9 +200,9 @@ void FUnrealMcpBridgeDownloaderSpec::Define()
 		{
 			const FString Target = BridgeDlSpecRoot() / TEXT("cache/0.0.1/win-x64");
 			FString Error;
-			TestFalse(TEXT("no binary"), FUnrealMcpBridgeDownloader::ExtractBridgeZip(BridgeDlSpecZip({ { TEXT("readme.txt"), TEXT("x") } }), Target, Error));
+			TestFalse(TEXT("no binary"), BridgeDlSpecExtract(BridgeDlSpecZip({ { TEXT("readme.txt"), TEXT("x") } }), Target, Error));
 			TestFalse(TEXT("error set"), Error.IsEmpty());
-			TestFalse(TEXT("not a zip"), FUnrealMcpBridgeDownloader::ExtractBridgeZip(BridgeDlSpecBytes("abc"), Target, Error));
+			TestFalse(TEXT("not a zip"), BridgeDlSpecExtract(BridgeDlSpecBytes("abc"), Target, Error));
 			TestFalse(TEXT("nothing published"), FPaths::DirectoryExists(Target));
 		});
 	});

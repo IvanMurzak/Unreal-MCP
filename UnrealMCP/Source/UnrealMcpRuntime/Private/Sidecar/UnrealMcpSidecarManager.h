@@ -91,6 +91,9 @@ public:
 	 */
 	static const TCHAR* DownloadedBridgeMarkerName;
 
+	/** Whether @p Dir is a complete cache dir: the marker and the bridge binary both exist. */
+	static bool IsCompleteDownloadedBridgeDir(const FString& Dir);
+
 	/**
 	 * The verified cached binary for this plugin version + host RID, or empty when the cache holds none (binary
 	 * or marker missing).

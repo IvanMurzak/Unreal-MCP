@@ -687,20 +687,22 @@ EUnrealMcpConnectionState FUnrealMcpEditorViewModel::GetEffectiveConnectionState
 	if (IsBridgeBinaryResolvable())
 		return ConnectionState;
 	// §6.8: a bridge download in flight will start the sidecar — a transient Connecting, not an install problem.
-	const bool bDownloading = IsBridgeDownloadingSink && IsBridgeDownloadingSink();
-	return bDownloading ? EUnrealMcpConnectionState::Connecting : EUnrealMcpConnectionState::NoBinary;
+	return IsBridgeDownloading() ? EUnrealMcpConnectionState::Connecting : EUnrealMcpConnectionState::NoBinary;
+}
+
+bool FUnrealMcpEditorViewModel::IsBridgeDownloading() const
+{
+	return IsBridgeDownloadingSink && IsBridgeDownloadingSink();
 }
 
 FText FUnrealMcpEditorViewModel::GetBridgeStatusHint() const
 {
+	// The download's progress line (Connecting while it runs) or failure reason (NoBinary) wins over the generic hint.
 	const EUnrealMcpConnectionState State = GetEffectiveConnectionState();
 	const FString DownloadMessage = BridgeDownloadMessageSink ? BridgeDownloadMessageSink() : FString();
-	const bool bDownloading = IsBridgeDownloadingSink && IsBridgeDownloadingSink();
-	if (bDownloading && State == EUnrealMcpConnectionState::Connecting)
-		return FText::FromString(DownloadMessage);
-	if (State == EUnrealMcpConnectionState::NoBinary && !DownloadMessage.IsEmpty())
-		return FText::FromString(DownloadMessage);
-	return GetConnectionHint(State);
+	const bool bDownloadLine = State == EUnrealMcpConnectionState::NoBinary
+		|| (State == EUnrealMcpConnectionState::Connecting && IsBridgeDownloading());
+	return bDownloadLine && !DownloadMessage.IsEmpty() ? FText::FromString(DownloadMessage) : GetConnectionHint(State);
 }
 
 FText FUnrealMcpEditorViewModel::GetButtonText(EUnrealMcpConnectionState State)

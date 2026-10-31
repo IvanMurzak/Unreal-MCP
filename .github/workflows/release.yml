@@ -734,9 +734,9 @@ jobs:
             echo "::error::MINISIGN_SECRET_KEY is not set. The plugin-source signing key must be provisioned before a release (docs/RELEASING.md 'Plugin-source signing key'). Refusing to publish an unsigned source zip the CLI would reject (fail-closed)."
             exit 1
           fi
-          for zip in "./assets/unreal-mcp-plugin-source-${VERSION}.zip" "./assets/unreal-mcp-plugin-fab-${VERSION}.zip"; do
-            if [ ! -f "$zip" ]; then
-              echo "::error::Plugin zip not found at $zip"
+          for kind in source fab; do
+            if [ ! -f "./assets/unreal-mcp-plugin-${kind}-${VERSION}.zip" ]; then
+              echo "::error::Plugin zip not found at ./assets/unreal-mcp-plugin-${kind}-${VERSION}.zip"
               exit 1
             fi
           done
@@ -747,14 +747,13 @@ jobs:
           # The key is passwordless (minted with `minisign -G -W`), so signing does
           # not prompt; `< /dev/null` guards against any interactive read on a CI
           # runner with no tty. `-x` names the detached signature output.
-          minisign -S -s "$keyfile" -m "./assets/unreal-mcp-plugin-source-${VERSION}.zip" \
-            -x "./assets/unreal-mcp-plugin-source-${VERSION}.zip.minisig" \
-            -t "unreal-mcp plugin source ${VERSION} signed by AI Game Dev release CI" < /dev/null
-          minisign -S -s "$keyfile" -m "./assets/unreal-mcp-plugin-fab-${VERSION}.zip" \
-            -x "./assets/unreal-mcp-plugin-fab-${VERSION}.zip.minisig" \
-            -t "unreal-mcp plugin fab ${VERSION} signed by AI Game Dev release CI" < /dev/null
+          for kind in source fab; do
+            zip="./assets/unreal-mcp-plugin-${kind}-${VERSION}.zip"
+            minisign -S -s "$keyfile" -m "$zip" -x "${zip}.minisig" \
+              -t "unreal-mcp plugin ${kind} ${VERSION} signed by AI Game Dev release CI" < /dev/null
+            echo "Signed $zip -> ${zip}.minisig"
+          done
           rm -f "$keyfile"
-          echo "Signed the source + Fab plugin zips."
           ls -la ./assets
       - name: Upload plugin-source signature
         uses: actions/upload-artifact@v7

@@ -26,12 +26,6 @@ namespace
 {
 	// Generous ceiling for a ~32 MB zip on a slow link; the editor stays responsive throughout (non-blocking).
 	constexpr float BridgeDownloadTimeoutSeconds = 600.0f;
-
-	bool BridgeDownloadIsCompleteDir(const FString& Dir)
-	{
-		return FPaths::FileExists(Dir / FUnrealMcpSidecarManager::DownloadedBridgeMarkerName)
-			&& FPaths::FileExists(Dir / FUnrealMcpSidecarManager::BridgeBinaryBasename());
-	}
 }
 
 FUnrealMcpBridgeDownloader::~FUnrealMcpBridgeDownloader()
@@ -65,11 +59,10 @@ FString FUnrealMcpBridgeDownloader::ManifestPath(const FString& PluginBaseDir)
 		PluginBaseDir / TEXT("Source") / TEXT("ThirdParty") / TEXT("UnrealMcpBridge") / ManifestFileName);
 }
 
-bool FUnrealMcpBridgeDownloader::VerifyBridgeZip(const FString& InManifestText, const FString& InRid, const TArray<uint8>& ZipBytes, FString& OutError)
+bool FUnrealMcpBridgeDownloader::VerifyBridgeZip(const FString& InManifestText, const FString& InRid, const FString& ZipDigest, FString& OutError)
 {
 	const FString Asset = BridgeAssetName(InRid);
-	const FUnrealMcpServerChecksum::EChecksumVerdict Verdict = FUnrealMcpServerChecksum::VerifyZipChecksum(
-		InManifestText, Asset, FUnrealMcpServerChecksum::ComputeSha256Hex(ZipBytes));
+	const FUnrealMcpServerChecksum::EChecksumVerdict Verdict = FUnrealMcpServerChecksum::VerifyZipChecksum(InManifestText, Asset, ZipDigest);
 	if (Verdict == FUnrealMcpServerChecksum::EChecksumVerdict::Verified)
 		return true;
 	OutError = FString::Printf(
@@ -78,7 +71,7 @@ bool FUnrealMcpBridgeDownloader::VerifyBridgeZip(const FString& InManifestText, 
 	return false;
 }
 
-bool FUnrealMcpBridgeDownloader::ExtractBridgeZip(const TArray<uint8>& ZipBytes, const FString& InTargetDir, FString& OutError)
+bool FUnrealMcpBridgeDownloader::ExtractBridgeZip(const TArray<uint8>& ZipBytes, const FString& ZipDigest, const FString& InTargetDir, FString& OutError)
 {
 	IFileManager& FM = IFileManager::Get();
 	IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
@@ -112,9 +105,8 @@ bool FUnrealMcpBridgeDownloader::ExtractBridgeZip(const TArray<uint8>& ZipBytes,
 		for (const FString& Name : Reader.GetFileNames())
 		{
 			// The release zips are flat (the apphost alone). Write only single safe segments; skip the rest.
-			if (Name.IsEmpty() || Name.EndsWith(TEXT("/")) || Name.Contains(TEXT("/")) || Name.Contains(TEXT("\\"))
-				|| Name.Contains(TEXT("..")) || Name.Contains(TEXT(":")) || !FPaths::IsRelative(Name)
-				|| Name == FUnrealMcpSidecarManager::DownloadedBridgeMarkerName)
+			if (Name.IsEmpty() || Name.Contains(TEXT("/")) || Name.Contains(TEXT("\\")) || Name.Contains(TEXT(":"))
+				|| Name.Contains(TEXT("..")) || Name == FUnrealMcpSidecarManager::DownloadedBridgeMarkerName)
 			{
 				UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] skipped bridge zip entry '%s'."), *Name);
 				continue;
@@ -135,8 +127,7 @@ bool FUnrealMcpBridgeDownloader::ExtractBridgeZip(const TArray<uint8>& ZipBytes,
 		return false;
 	}
 	FUnrealMcpProcessUtil::MakeExecutable(StagedBinary);
-	if (!FFileHelper::SaveStringToFile(FUnrealMcpServerChecksum::ComputeSha256Hex(ZipBytes),
-		*(Staging / FUnrealMcpSidecarManager::DownloadedBridgeMarkerName)))
+	if (!FFileHelper::SaveStringToFile(ZipDigest, *(Staging / FUnrealMcpSidecarManager::DownloadedBridgeMarkerName)))
 	{
 		OutError = TEXT("MCP bridge download: could not write the verification marker.");
 		return false;
@@ -146,7 +137,7 @@ bool FUnrealMcpBridgeDownloader::ExtractBridgeZip(const TArray<uint8>& ZipBytes,
 	// incomplete dir (never produced by this code, but possibly by a user) is replaced.
 	if (PlatformFile.MoveFile(*InTargetDir, *Staging))
 		return true;
-	if (BridgeDownloadIsCompleteDir(InTargetDir))
+	if (FUnrealMcpSidecarManager::IsCompleteDownloadedBridgeDir(InTargetDir))
 		return true;
 	FM.DeleteDirectory(*InTargetDir, /*RequireExists*/ false, /*Tree*/ true);
 	if (PlatformFile.MoveFile(*InTargetDir, *Staging))
@@ -216,14 +207,17 @@ void FUnrealMcpBridgeDownloader::OnHttpComplete(FHttpRequestPtr, FHttpResponsePt
 		return;
 	}
 
-	// Hash + extract off the game thread (a ~32 MB zip, ~75 MB unpacked), then finish back on it.
+	// Hash + extract off the game thread (a ~32 MB zip, ~75 MB unpacked), then finish back on it. The response is
+	// captured, not its body, so the bytes are never copied.
 	TWeakPtr<FUnrealMcpBridgeDownloader, ESPMode::ThreadSafe> WeakSelf = AsShared();
 	Worker = Async(EAsyncExecution::Thread,
-		[WeakSelf, Bytes = Response->GetContent(), Text = ManifestText, InRid = Rid, Dir = TargetDir]()
+		[WeakSelf, Response, Text = ManifestText, InRid = Rid, Dir = TargetDir]()
 		{
+			const TArray<uint8>& Bytes = Response->GetContent();
+			const FString Digest = FUnrealMcpServerChecksum::ComputeSha256Hex(Bytes);
 			FString Error;
-			const bool bOk = FUnrealMcpBridgeDownloader::VerifyBridgeZip(Text, InRid, Bytes, Error)
-				&& FUnrealMcpBridgeDownloader::ExtractBridgeZip(Bytes, Dir, Error);
+			const bool bOk = FUnrealMcpBridgeDownloader::VerifyBridgeZip(Text, InRid, Digest, Error)
+				&& FUnrealMcpBridgeDownloader::ExtractBridgeZip(Bytes, Digest, Dir, Error);
 			const FString Result = bOk ? Dir / FUnrealMcpSidecarManager::BridgeBinaryBasename() : Error;
 			AsyncTask(ENamedThreads::GameThread, [WeakSelf, bOk, Result]()
 			{
@@ -249,7 +243,6 @@ void FUnrealMcpBridgeDownloader::Finish(bool bOk, const FString& BinaryPathOrErr
 		UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] %s"), *BinaryPathOrError);
 	}
 	FOnComplete Callback = MoveTemp(OnCompleteCallback);
-	OnCompleteCallback = nullptr;
 	if (Callback)
 		Callback(bOk, BinaryPathOrError);
 }

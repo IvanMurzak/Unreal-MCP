@@ -159,13 +159,15 @@ FString FUnrealMcpSidecarManager::PluginVersionName()
 	return Plugin.IsValid() ? Plugin->GetDescriptor().VersionName : FString();
 }
 
+bool FUnrealMcpSidecarManager::IsCompleteDownloadedBridgeDir(const FString& Dir)
+{
+	return !Dir.IsEmpty() && FPaths::FileExists(Dir / DownloadedBridgeMarkerName) && FPaths::FileExists(Dir / BridgeBinaryBasename());
+}
+
 FString FUnrealMcpSidecarManager::ResolveDownloadedBridgePath()
 {
 	const FString Dir = ComposeDownloadedBridgeDir(BridgeCacheRoot(), PluginVersionName(), ResolveDownloadRid());
-	if (Dir.IsEmpty() || !FPaths::FileExists(Dir / DownloadedBridgeMarkerName))
-		return FString();
-	const FString Binary = Dir / BridgeBinaryBasename();
-	return FPaths::FileExists(Binary) ? Binary : FString();
+	return IsCompleteDownloadedBridgeDir(Dir) ? Dir / BridgeBinaryBasename() : FString();
 }
 
 FString FUnrealMcpSidecarManager::ResolveBridgeBinaryPath()

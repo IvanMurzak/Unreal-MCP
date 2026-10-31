@@ -40,7 +40,7 @@ SOURCE_ASSET_INPUTS = ("UnrealMCP.uplugin", "Config", "Resources", "Content", "S
 # shebang, and the usual executable / native-library extensions.
 EXECUTABLE_MAGIC = (b"MZ", b"\x7fELF", b"\xfe\xed\xfa\xce", b"\xfe\xed\xfa\xcf", b"\xce\xfa\xed\xfe", b"\xcf\xfa\xed\xfe",
                     b"\xca\xfe\xba\xbe", b"#!")
-EXECUTABLE_SUFFIXES = {".exe", ".dll", ".so", ".dylib", ".bat", ".cmd", ".ps1", ".sh", ".com", ".msi", ".app", ".lib", ".a", ".pdb"}
+EXECUTABLE_SUFFIXES = {".exe", ".dll", ".so", ".dylib", ".bat", ".cmd", ".ps1", ".sh", ".com", ".msi", ".lib", ".a", ".pdb"}
 # Only the chain's own feeds: .artifacts/tests holds the suite's build caches and the smoke host.
 CHAIN_FEEDS = ("nuget", "npm", "server", "unity-dll", "nuget-cache")
 # This job's per-run BuildPlugin / report outputs under RUNNER_TEMP.

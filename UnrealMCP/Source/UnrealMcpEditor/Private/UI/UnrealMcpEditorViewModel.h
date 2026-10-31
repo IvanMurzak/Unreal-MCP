@@ -254,6 +254,9 @@ public:
 	 */
 	UNREALMCPEDITOR_API FText GetBridgeStatusHint() const;
 
+	/** Whether the §6.8 bridge download is in flight (IsBridgeDownloadingSink; unset → false). */
+	UNREALMCPEDITOR_API bool IsBridgeDownloading() const;
+
 	/** §7 Connect: keepConnected=true, optimistic Connecting state, push the config (sidecar (re)dials). */
 	UNREALMCPEDITOR_API void Connect();
 	/**
