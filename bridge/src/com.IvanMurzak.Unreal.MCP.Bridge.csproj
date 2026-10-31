@@ -52,7 +52,7 @@
   <!--
     Reused NuGet pins — normally owned by the upstream release pipelines and kept in lockstep
     with Godot-MCP (Godot-MCP.csproj), except where a ⚠ DEVIATION entry below records an owner-approved
-    early adoption. Current: McpPlugin 8.14.0 + ReflectorNet 5.5.1 + Rql 0.3.0.
+    early adoption. Current: McpPlugin 8.15.0 + ReflectorNet 5.5.1 + Rql 0.3.0.
     The MCP/reflection stack is NOT forked. Historical context: the 6.8.0 bump consumed the new
     shared engine-agnostic com.IvanMurzak.McpPlugin.AgentConfig module (the AI-agent configurators
     + the AgentConfiguratorDescription UI-DTO) so the sidecar hosts the AI-agent configuration
@@ -146,6 +146,8 @@
     ThirdParty/RQL re-vendored). Its package left prerelease-packages/; the feed stays for McpPlugin / ReflectorNet.
     Cascade release (train t-2026-10-30-03): McpPlugin 8.14.0-dev.42786f9 -> 8.14.0 and ReflectorNet 5.5.1-dev.ec3702e
     -> 5.5.1, both published; bridge/prerelease-packages/ and bridge/Directory.Build.props are gone.
+    McpPlugin 8.14.0 -> 8.15.0 (published): a tool that throws on the request's content answers the server's
+    direct endpoint with HTTP 422 instead of 500; plugin faults stay 500.
   -->
   <!--
     Local-LIB dev toggle (auth-fixes f1b — parity with the GameDev-MCP-Server + Unity/Godot
@@ -180,7 +182,7 @@
 
   <ItemGroup Condition="'$(UseLocalMcpPlugin)' != 'true'">
     <PackageReference Include="com.IvanMurzak.ReflectorNet" Version="5.5.1" />
-    <PackageReference Include="com.IvanMurzak.McpPlugin" Version="8.14.0" />
+    <PackageReference Include="com.IvanMurzak.McpPlugin" Version="8.15.0" />
   </ItemGroup>
 
   <!--
