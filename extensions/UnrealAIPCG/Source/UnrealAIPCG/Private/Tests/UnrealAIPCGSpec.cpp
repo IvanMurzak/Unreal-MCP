@@ -86,9 +86,17 @@ void FUnrealAIPCGSpec::Define()
 		{
 			// The product path of the extension's e2e count (`actors | get Components | where $ is PCGComponent | count`): with
 			// a PCGComponent in the level the filter matches it -- an empty level answers 0 with RQL's no-match warning.
+			if (!TestNotNull(TEXT("GEngine"), GEngine))
+				return;
 			UWorld* World = nullptr;
 			for (const FWorldContext& Context : GEngine->GetWorldContexts())
-				World = Context.WorldType == EWorldType::Editor ? Context.World() : World;
+			{
+				if (Context.WorldType == EWorldType::Editor)
+				{
+					World = Context.World();
+					break;
+				}
+			}
 			if (!TestNotNull(TEXT("the editor world"), World))
 				return;
 			AActor* Host = World->SpawnActor<AActor>();

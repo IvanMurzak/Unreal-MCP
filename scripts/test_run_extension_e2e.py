@@ -75,6 +75,8 @@ class CheckFileTests(unittest.TestCase):
                                  "another type's warning")
                 self.assertFalse(matches(check, text_result(warning.replace(type_name, type_name + 'X') + '\n0')),
                                  'a longer type name')
+                self.assertFalse(matches(check, text_result(warning + '\nwarning getter-threw: x\n0')),
+                                 'the warning covers one line only')
 
     def test_schema_rejects_malformed_checks(self):
         bad = [

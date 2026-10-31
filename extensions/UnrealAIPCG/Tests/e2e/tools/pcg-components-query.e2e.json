@@ -5,6 +5,6 @@
     "query": "actors | get Components | where $ is PCGComponent | count"
   },
   "assert": {
-    "pattern": "\"text\"\\s*:\\s*\"(warning no-match: none of the \\d+ tested item\\(s\\) is a PCGComponent\\b[^\"]*\\\\n)?\\d+\"|value\\\\?\"\\s*:\\s*\\d"
+    "pattern": "\"text\"\\s*:\\s*\"(warning no-match: none of the \\d+ tested item\\(s\\) is a PCGComponent\\b(?:[^\"\\\\]|\\\\[^n])*\\\\n)?\\d+\"|value\\\\?\"\\s*:\\s*\\d"
   }
 }
