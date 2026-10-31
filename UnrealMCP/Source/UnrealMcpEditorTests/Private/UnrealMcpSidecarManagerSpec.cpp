@@ -41,6 +41,15 @@ BEGIN_DEFINE_SPEC(FUnrealMcpSidecarManagerSpec, "UnrealMcp.Sidecar",
 		const FString Dir = FPaths::Combine(FPaths::ProjectIntermediateDir(), TEXT("UnrealMcpSidecarSpec"));
 		IFileManager::Get().DeleteDirectory(*Dir, /*RequireExists*/ false, /*Tree*/ true);
 		FPlatformMisc::SetEnvironmentVar(TEXT("UNREAL_MCP_BRIDGE_PATH"), TEXT(""));
+		FPlatformMisc::SetEnvironmentVar(TEXT("UNREAL_MCP_BRIDGE_CACHE_DIR"), TEXT(""));
+	}
+
+	// Point the §6.8 download cache at an empty spec dir so a real per-user cache on this machine cannot leak in.
+	static FString SidecarSpecUseEmptyCache()
+	{
+		const FString Root = FPaths::ConvertRelativePathToFull(FPaths::Combine(FPaths::ProjectIntermediateDir(), TEXT("UnrealMcpSidecarSpec"), TEXT("cache")));
+		FPlatformMisc::SetEnvironmentVar(TEXT("UNREAL_MCP_BRIDGE_CACHE_DIR"), *Root);
+		return Root;
 	}
 
 END_DEFINE_SPEC(FUnrealMcpSidecarManagerSpec)
@@ -174,8 +183,63 @@ void FUnrealMcpSidecarManagerSpec::Define()
 			// A dev checkout never has a staged bundled binary, so with a bogus override the resolver
 			// must return empty rather than a phantom path — this is the graceful-degrade precondition.
 			FPlatformMisc::SetEnvironmentVar(TEXT("UNREAL_MCP_BRIDGE_PATH"), TEXT("Z:/does/not/exist/unreal-mcp-bridge.bin"));
+			SidecarSpecUseEmptyCache();
 			const FString Resolved = FUnrealMcpSidecarManager::ResolveBridgeBinaryPath();
 			TestTrue(TEXT("bogus override + no bundle -> empty"), Resolved.IsEmpty());
+			SidecarSpecCleanup();
+		});
+	});
+
+	Describe("PickBridgeBinaryPath (6.3 precedence)", [this]()
+	{
+		const FString Override = TEXT("C:/o/bridge.exe");
+		const TArray<FString> Bundled = { TEXT("C:/p/Binaries/bridge.exe"), TEXT("C:/p/Source/bridge.exe") };
+		const FString Downloaded = TEXT("C:/cache/0.26.1/win-x64/bridge.exe");
+		auto Pick = [Override, Bundled, Downloaded](TSet<FString> Present)
+		{
+			return FUnrealMcpSidecarManager::PickBridgeBinaryPath(Override, Bundled, Downloaded,
+				[&Present](const FString& Path) { return Present.Contains(Path); });
+		};
+
+		It("prefers the override, then the staged bundle, then the surviving bundle, then the download cache", [this, Pick, Override, Bundled, Downloaded]()
+		{
+			TestEqual(TEXT("override wins"), Pick({ Override, Bundled[0], Bundled[1], Downloaded }), Override);
+			TestEqual(TEXT("bundled beats the download (existing installs unchanged)"), Pick({ Bundled[0], Bundled[1], Downloaded }), Bundled[0]);
+			TestEqual(TEXT("surviving bundle beats the download"), Pick({ Bundled[1], Downloaded }), Bundled[1]);
+			TestEqual(TEXT("download cache last"), Pick({ Downloaded }), Downloaded);
+			TestTrue(TEXT("nothing present -> empty"), Pick({}).IsEmpty());
+		});
+
+		It("never matches empty entries", [this]()
+		{
+			TestTrue(TEXT("empty inputs"), FUnrealMcpSidecarManager::PickBridgeBinaryPath(FString(), { FString() }, FString(),
+				[](const FString&) { return true; }).IsEmpty());
+		});
+	});
+
+	Describe("Download cache (6.8)", [this]()
+	{
+		It("composes <root>/<version>/<rid> and nothing for a missing input", [this]()
+		{
+			TestEqual(TEXT("dir"), FUnrealMcpSidecarManager::ComposeDownloadedBridgeDir(TEXT("C:/cache"), TEXT("0.26.1"), TEXT("win-x64")),
+				FPaths::ConvertRelativePathToFull(TEXT("C:/cache/0.26.1/win-x64")));
+			TestTrue(TEXT("no version"), FUnrealMcpSidecarManager::ComposeDownloadedBridgeDir(TEXT("C:/cache"), TEXT(""), TEXT("win-x64")).IsEmpty());
+		});
+
+		It("resolves a cached binary only once its verification marker exists, and the resolver falls back to it", [this]()
+		{
+			const FString Root = SidecarSpecUseEmptyCache();
+			FPlatformMisc::SetEnvironmentVar(TEXT("UNREAL_MCP_BRIDGE_PATH"), TEXT(""));
+			TestEqual(TEXT("cache root honours UNREAL_MCP_BRIDGE_CACHE_DIR"), FUnrealMcpSidecarManager::BridgeCacheRoot(), Root);
+			const FString Dir = FUnrealMcpSidecarManager::ComposeDownloadedBridgeDir(Root,
+				FUnrealMcpSidecarManager::PluginVersionName(), FUnrealMcpSidecarManager::ResolveDownloadRid());
+			const FString Binary = Dir / FUnrealMcpSidecarManager::BridgeBinaryBasename();
+			FFileHelper::SaveStringToFile(TEXT("apphost"), *Binary);
+			TestTrue(TEXT("no marker -> not resolved"), FUnrealMcpSidecarManager::ResolveDownloadedBridgePath().IsEmpty());
+			FFileHelper::SaveStringToFile(TEXT("sha"), *(Dir / FUnrealMcpSidecarManager::DownloadedBridgeMarkerName));
+			TestEqual(TEXT("marker -> resolved"), FUnrealMcpSidecarManager::ResolveDownloadedBridgePath(), Binary);
+			// A dev checkout has no bundle, so the full resolver lands on the cache (a bundled install never gets here).
+			TestEqual(TEXT("resolver falls back to the cache"), FUnrealMcpSidecarManager::ResolveBridgeBinaryPath(), Binary);
 			SidecarSpecCleanup();
 		});
 	});

@@ -190,7 +190,7 @@ void FUnrealMcpEditorViewModel::Disconnect()
 const TCHAR* FUnrealMcpEditorViewModel::BridgeUnavailableMessage()
 {
 	// Actionable, NOT the cryptic "No sidecar connected." — tell the user how to get a working bridge (issue #99).
-	return TEXT("MCP bridge not installed for this platform — reinstall the plugin, or run `unreal-mcp-cli bootstrap-local`.");
+	return TEXT("MCP bridge not available for this platform — click \"Restart bridge\" to download it again, reinstall the plugin, or run `unreal-mcp-cli bootstrap-local`.");
 }
 
 void FUnrealMcpEditorViewModel::Authorize(double NowSeconds)
@@ -684,7 +684,23 @@ EUnrealMcpConnectionState FUnrealMcpEditorViewModel::GetEffectiveConnectionState
 	// the bridge binary cannot be resolved, the sidecar can never come up, so surface NoBinary PROACTIVELY — the
 	// user sees the install/config problem before clicking Connect/Authorize, distinct from a transient
 	// Disconnected/Connecting. When it IS resolvable, the raw state stands (issue #63).
-	return IsBridgeBinaryResolvable() ? ConnectionState : EUnrealMcpConnectionState::NoBinary;
+	if (IsBridgeBinaryResolvable())
+		return ConnectionState;
+	// §6.8: a bridge download in flight will start the sidecar — a transient Connecting, not an install problem.
+	const bool bDownloading = IsBridgeDownloadingSink && IsBridgeDownloadingSink();
+	return bDownloading ? EUnrealMcpConnectionState::Connecting : EUnrealMcpConnectionState::NoBinary;
+}
+
+FText FUnrealMcpEditorViewModel::GetBridgeStatusHint() const
+{
+	const EUnrealMcpConnectionState State = GetEffectiveConnectionState();
+	const FString DownloadMessage = BridgeDownloadMessageSink ? BridgeDownloadMessageSink() : FString();
+	const bool bDownloading = IsBridgeDownloadingSink && IsBridgeDownloadingSink();
+	if (bDownloading && State == EUnrealMcpConnectionState::Connecting)
+		return FText::FromString(DownloadMessage);
+	if (State == EUnrealMcpConnectionState::NoBinary && !DownloadMessage.IsEmpty())
+		return FText::FromString(DownloadMessage);
+	return GetConnectionHint(State);
 }
 
 FText FUnrealMcpEditorViewModel::GetButtonText(EUnrealMcpConnectionState State)

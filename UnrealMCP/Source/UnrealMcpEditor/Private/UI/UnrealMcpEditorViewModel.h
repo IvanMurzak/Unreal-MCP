@@ -139,6 +139,10 @@ public:
 	 * GetEffectiveConnectionState to overlay the proactive NoBinary hint. Game-thread only.
 	 */
 	TFunction<bool()> IsBridgeBinaryResolvableSink;
+	/** §6.8: whether the bridge download is in flight (no binary yet, but one is coming). Unset → false. */
+	TFunction<bool()> IsBridgeDownloadingSink;
+	/** §6.8: the bridge download's progress line or failure reason; empty when there is none. Unset → empty. */
+	TFunction<FString()> BridgeDownloadMessageSink;
 
 	// --- Local MCP-server gating + control (pure view-model surface over the sinks above). ---
 
@@ -235,12 +239,20 @@ public:
 	 * NoBinary on the raw live state when the bridge binary cannot be resolved AND we are not on a live link. A
 	 * Connected/Degraded raw state proves a sidecar exists (the `status` feed originates there), so it is returned
 	 * unchanged — NoBinary never masks a real link. Otherwise — a plain Disconnected, or a Connecting that can
-	 * never complete because no binary can spawn — an unresolvable binary yields NoBinary, so the user sees the
+	 * never complete because no binary can spawn — an unresolvable binary yields NoBinary (or Connecting while the
+	 * §6.8 bridge download is in flight), so the user sees the
 	 * install/config problem BEFORE clicking Connect/Authorize, distinct from the transient Disconnected/Connecting
 	 * (the §63 "distinguish no-binary from not-yet-handshaken" ask). The raw GetConnectionState() is deliberately
 	 * unchanged — it stays the live SignalR state the connect/disconnect logic and the status feed drive.
 	 */
 	UNREALMCPEDITOR_API EUnrealMcpConnectionState GetEffectiveConnectionState() const;
+
+	/**
+	 * The line shown beneath the Connection-section status (issues #63, §6.8): while the bridge downloads, its
+	 * progress line; in NoBinary, the download's failure reason (e.g. offline) or else GetConnectionHint's
+	 * actionable guidance; empty otherwise (no line is rendered).
+	 */
+	UNREALMCPEDITOR_API FText GetBridgeStatusHint() const;
 
 	/** §7 Connect: keepConnected=true, optimistic Connecting state, push the config (sidecar (re)dials). */
 	UNREALMCPEDITOR_API void Connect();

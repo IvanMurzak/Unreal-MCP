@@ -11,6 +11,7 @@ class FUnrealMcpResourceRegistry;
 class FUnrealMcpGameThreadDispatcher;
 class FUnrealMcpBridgeServer;
 class FUnrealMcpSidecarManager;
+class FUnrealMcpBridgeDownloader;
 class FUnrealMcpServerManager;
 class FUnrealMcpExtensionManager;
 class FUnrealMcpEditorViewModel;
@@ -72,6 +73,18 @@ private:
 	TUniquePtr<FUnrealMcpGameThreadDispatcher> Dispatcher;
 	TUniquePtr<FUnrealMcpBridgeServer> BridgeServer;
 	TUniquePtr<FUnrealMcpSidecarManager> SidecarManager;
+	// §6.8: downloads + verifies the bridge for this plugin version when none resolves (a Fab install ships no
+	// binaries). Shared: its async completion holds it weakly. Cancelled first thing in Shutdown.
+	TSharedPtr<FUnrealMcpBridgeDownloader, ESPMode::ThreadSafe> BridgeDownloader;
+	// The bridge server's IPC port + one-shot token the sidecar is (re)started with (a download completes later).
+	int32 SidecarIpcPort = -1;
+	FString SidecarToken;
+	// Whether a bridge binary resolves (issue #63 NoBinary overlay). Snapshotted at startup, flipped true when a
+	// download completes, so the per-frame UI read never walks the filesystem. Game-thread only.
+	bool bBridgeBinaryResolvable = false;
+	// Start the sidecar; when no binary resolves, start the §6.8 download (which starts the sidecar on success).
+	// Returns true when the sidecar was spawned or a download is in flight.
+	bool StartSidecarOrDownload();
 	// §7 in-UI local-server (issue #95): owns the LOCAL gamedev-mcp-server process (Custom+http only), the
 	// plugin-side analog of Unity's McpServerManager. Distinct from SidecarManager (the always-on bridge).
 	// Force-stopped in Shutdown so no gamedev-mcp-server orphans on editor close.

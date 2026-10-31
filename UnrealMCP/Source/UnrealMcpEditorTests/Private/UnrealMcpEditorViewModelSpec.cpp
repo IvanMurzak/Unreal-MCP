@@ -257,6 +257,34 @@ void FUnrealMcpEditorViewModelSpec::Define()
 			TestEqual("NoBinary button label is Connect",
 				FUnrealMcpEditorViewModel::GetButtonText(EUnrealMcpConnectionState::NoBinary).ToString(), FString(TEXT("Connect")));
 		});
+
+		It("shows a bridge download in flight as Connecting with its progress line, and a failed one as NoBinary with its reason (6.8)", [this]()
+		{
+			TSharedRef<FRecording> Rec = MakeShared<FRecording>();
+			Rec->bBridgeBinaryResolvable = false;
+			TSharedRef<FUnrealMcpEditorViewModel> VM = MakeViewModel(Rec);
+			bool bDownloading = true;
+			FString Message = TEXT("Downloading the MCP bridge (unreal-mcp-bridge 0.26.1, win-x64) from GitHub…");
+			VM->IsBridgeDownloadingSink = [&bDownloading]() { return bDownloading; };
+			VM->BridgeDownloadMessageSink = [&Message]() { return Message; };
+
+			TestEqual("downloading -> Connecting, not NoBinary",
+				static_cast<int32>(VM->GetEffectiveConnectionState()), static_cast<int32>(EUnrealMcpConnectionState::Connecting));
+			TestEqual("progress line", VM->GetBridgeStatusHint().ToString(), Message);
+
+			bDownloading = false;
+			Message = TEXT("MCP bridge download failed: could not reach github.com (offline, or blocked by a firewall/proxy?).");
+			TestEqual("failed -> NoBinary",
+				static_cast<int32>(VM->GetEffectiveConnectionState()), static_cast<int32>(EUnrealMcpConnectionState::NoBinary));
+			TestEqual("the failure reason replaces the generic hint", VM->GetBridgeStatusHint().ToString(), Message);
+
+			Message.Reset();
+			TestEqual("no download message -> the generic NoBinary guidance", VM->GetBridgeStatusHint().ToString(),
+				FUnrealMcpEditorViewModel::GetConnectionHint(EUnrealMcpConnectionState::NoBinary).ToString());
+
+			Rec->bBridgeBinaryResolvable = true;
+			TestTrue("resolvable + idle -> no line", VM->GetBridgeStatusHint().IsEmpty());
+		});
 	});
 
 	Describe("Connect / Disconnect (the M9b reconnect-halt rule)", [this]()

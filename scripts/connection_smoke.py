@@ -63,6 +63,10 @@ SERVER_BASENAME = "gamedev-mcp-server.exe" if os.name == "nt" else "gamedev-mcp-
 MARK_PLUGIN_LOADED = "[Unreal-MCP] plugin loaded"
 MARK_SIDECAR_SPAWN = "spawned sidecar"
 MARK_NO_BINARY = "no sidecar binary resolved"
+# A plugin that ships no bridge (the Fab asset) downloads it (docs/ARCHITECTURE.md §6.8): no binary is then not fatal
+# while the download runs, and a failed download ends the wait at once.
+MARK_BRIDGE_DOWNLOAD = "no bridge binary resolved; downloading"
+RE_BRIDGE_DOWNLOAD_FAILED = re.compile(r"\[Unreal-MCP\] (MCP bridge download (failed|rejected|could not)|Cannot download the MCP bridge)")
 RE_FATAL = re.compile(r"Fatal error|Unhandled Exception|\[Callstack\]")
 
 
@@ -491,7 +495,9 @@ def scan_log(path: Path) -> dict:
     except OSError:
         return {}
     return {"plugin_loaded": MARK_PLUGIN_LOADED in text, "sidecar_spawned": MARK_SIDECAR_SPAWN in text,
-            "no_binary": MARK_NO_BINARY in text, "fatal": bool(RE_FATAL.search(text))}
+            "no_binary": MARK_NO_BINARY in text and MARK_BRIDGE_DOWNLOAD not in text,
+            "bridge_download_failed": MARK_BRIDGE_DOWNLOAD in text and bool(RE_BRIDGE_DOWNLOAD_FAILED.search(text)),
+            "fatal": bool(RE_FATAL.search(text))}
 
 
 def main() -> int:
@@ -594,6 +600,8 @@ def main() -> int:
             marks = scan_log(logpath)
             if marks.get("no_binary"):
                 connect_result = "NO_SIDECAR_BINARY"; break
+            if marks.get("bridge_download_failed"):
+                connect_result = "BRIDGE_DOWNLOAD_FAILED"; break
             if marks.get("fatal"):
                 connect_result = "EDITOR_CRASH"; break
             elapsed = int(time.monotonic() - start)

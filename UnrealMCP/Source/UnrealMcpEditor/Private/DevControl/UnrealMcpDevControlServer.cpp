@@ -328,6 +328,8 @@ int32 FUnrealMcpDevControlServer::RouteRequest(
 			FUnrealMcpEditorViewModel::GetButtonText(ViewModelPtr->GetConnectionState()).ToString());
 		OutResult->SetStringField(TEXT("statusLabel"),
 			FUnrealMcpEditorViewModel::GetStatusLabel(ViewModelPtr->GetEffectiveConnectionState()).ToString());
+		// The line beneath it (NoBinary guidance, §6.8 bridge-download progress / failure), empty when hidden.
+		OutResult->SetStringField(TEXT("bridgeHint"), ViewModelPtr->GetBridgeStatusHint().ToString());
 		// The Serialization Check window's tab id — lets the smoke test assert membership and (with a
 		// `check` click) drive the same footer "Check" button the dock renders.
 		OutResult->SetStringField(TEXT("serializationCheckTabId"), FUnrealMcpAuxWindows::SerializationCheckTabId.ToString());

@@ -672,7 +672,9 @@ public:
 
 **Decision: BUNDLE the sidecar inside the plugin.** Prebuilt, **self-contained, single-file**
 `unreal-mcp-bridge` binaries for all four RIDs ship inside the plugin and are resolved from disk at
-spawn time — there is **no download-on-first-run**. Rationale: the owner requirement is zero .NET
+spawn time — there is **no download-on-first-run** for a CLI or BuildPlugin install. The one exception is the
+**Fab asset**, which Epic requires to carry no executable: there the editor downloads and verifies the bridge
+for its own version (§6.8). Rationale: the owner requirement is zero .NET
 install + zero manual steps for the end user; a bundle guarantees the binary is present and
 version-correct the instant the compiled plugin loads, works fully offline/air-gapped, and welds
 the sidecar to the exact plugin version it was tested against (no skew window). The earlier
@@ -748,9 +750,12 @@ empty (caller logs the actionable "plugin packaged without the <rid> bridge" err
    `Source/ThirdParty/UnrealMcpBridge/<rid>/` source (#139/#187). The first that exists wins. This is the production path for every end user; the
    Fab-surviving fallback is what an Epic-compiled marketplace build resolves from after Fab strips
    `Binaries/`.
-3. **Neither resolves:** return empty; `StartForPort` logs an actionable error (e.g. "no sidecar
-   binary resolved for rid <rid>; reinstall the plugin for your platform, or set
-   UNREAL_MCP_BRIDGE_PATH"). No download fallback exists.
+3. **Download cache (§6.8):** `<BridgeCacheRoot>/<VersionName>/<rid>/unreal-mcp-bridge[.exe]`, only when its
+   `.verified` marker exists. Last, so a bundled install behaves exactly as before.
+4. **None resolves:** return empty; `StartForPort` logs an actionable error, and the editor coordinator
+   starts the §6.8 download (a packaged game never downloads).
+
+`PickBridgeBinaryPath` is the pure, unit-tested form of this order.
 
 ### 6.4 Version-lockstep guarantee
 
@@ -763,7 +768,8 @@ bridge csproj `<Version>` together, so the plugin zip and the bundled bridge sha
 
 ### 6.5 Offline / air-gapped guarantee
 
-No network access is required at any point of sidecar bring-up: the binary is on disk inside the
+For a bundled install (CLI, BuildPlugin) no network access is required at any point of sidecar bring-up (a
+Fab install needs it once, for the §6.8 download; offline users install with the CLI instead): the binary is on disk inside the
 plugin, the token is generated locally (CSPRNG, §1.4), and the IPC is loopback TCP. Network is only
 touched when the sidecar dials the MCP server (Cloud or Custom) — i.e. only when the user has
 actively chosen to connect. A fully offline editor still loads the plugin and spawns the sidecar.
@@ -843,6 +849,43 @@ all are handled in-repo (issues #139/#187), and submission itself remains an ope
    (`UnrealMcpRuntime`, `UnrealMcpEditor`) carry `"PlatformAllowList": ["Win64","Mac","Linux"]`, matching
    the desktop-only target platforms (console/mobile cannot spawn the .NET sidecar, §12.5). Fab review
    expects modules to enumerate their supported platforms rather than defaulting to all.
+
+### 6.8 Fab install: download-on-first-run of the bridge
+
+Epic's Fab review rejects any executable in a listing ("only source files are accepted"), so release.yml also
+publishes `unreal-mcp-plugin-fab-<version>.zip`: the source asset with every bridge payload removed (the per-RID
+`.gitkeep` placeholders stay; `ue_ci.py fab-zip` fails the release if any executable is left, by extension,
+PE/ELF/Mach-O magic bytes or shebang). An editor that resolves no bridge (§6.3) downloads it:
+
+- **What:** `unreal-mcp-bridge-<rid>.zip` for the plugin's OWN `VersionName` from
+  `https://github.com/IvanMurzak/Unreal-MCP/releases/download/v<VersionName>/` — the per-RID zips every release
+  attaches. `UNREAL_MCP_BRIDGE_RELEASE_BASE_URL` overrides the base (tests, forks); every URL must pass the
+  github.com-only `FUnrealMcpExtensionInstaller::IsTrustedDownloadUrl`.
+- **Integrity — the trust anchor is the plugin itself.** `ue_ci.py stage-bridge` writes the SHA-256 of the four
+  release zips (the exact bytes publish-release attaches) into
+  `Source/ThirdParty/UnrealMcpBridge/SHA256SUMS`, which ships in the source, Fab and packaged assets. The editor
+  verifies the download against THAT file, never against anything fetched from the release, so a replaced release
+  asset is rejected. The anchor is as strong as the plugin package the user already trusts to run code: the CLI
+  minisign-verifies the source zip (D12), Fab distributes the reviewed package, and the `-fab-` zip carries its own
+  `.minisig`. Why not a minisign signature per bridge zip verified in C++: it needs Ed25519 + BLAKE2b in the
+  plugin — either a link against the engine's OpenSSL third-party module (its version differs per engine and
+  platform, UE 5.5-5.8 x Win/Mac/Linux) or vendored crypto source (Fab-review and per-engine compile risk) — and buys
+  nothing over a digest list inside an already-verified package. A plugin without
+  `SHA256SUMS` (a dev checkout) never downloads — fail-closed; developers use `UNREAL_MCP_BRIDGE_PATH`.
+- **Where:** a per-user cache, because a Fab install lives in the read-only engine `Plugins/Marketplace` folder:
+  `FUnrealMcpSidecarManager::BridgeCacheRoot()` = `UNREAL_MCP_BRIDGE_CACHE_DIR`, else
+  `<UserSettingsDir>/UnrealMCP/bridge` (`%LOCALAPPDATA%`, `~/Library/Application Support`, `~/.config`), keyed
+  `<VersionName>/<rid>/`. Shared by every project and editor of that version.
+- **How (`FUnrealMcpBridgeDownloader`, editor module):** non-blocking — the HTTP request completes on the game
+  thread's HTTP tick, the SHA-256 + extraction run on a worker thread. The zip is unpacked into a sibling staging dir
+  (flat entries only — zip-slip hardened), the exec bit is set, a `.verified` marker (the zip digest) is written, and
+  the dir is renamed into place atomically; a concurrent editor that finished first keeps its dir. The coordinator
+  then starts the sidecar (§6.6 prep runs as for a bundled binary).
+- **UI:** while downloading, the Connection section reads "Unreal: Connecting…" with the amber progress line; a
+  failure (offline, HTTP error, checksum mismatch, no manifest) shows NoBinary with the reason as its hint line and a
+  `LogUnrealMcp` warning. "Restart bridge" (and Authorize) retries.
+- **Packaged games** never download (the runtime module has no HTTP). A game packaged from a Fab install stages no
+  sidecar; runtime mode there needs a CLI install (or the payload placed per docs/RELEASING.md).
 
 ### Local server acquisition (the shared GameDev-MCP-Server)
 

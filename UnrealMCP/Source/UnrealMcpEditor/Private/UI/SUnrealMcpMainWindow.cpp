@@ -450,21 +450,27 @@ TSharedRef<SWidget> SUnrealMcpMainWindow::BuildUnrealStatusRow()
 		// failure shows (BridgeUnavailableMessage, issue #99), surfaced in the always-visible Connection section
 		// BEFORE the user clicks Connect/Authorize. Red (StatusOffline, matching the other alert/validation lines)
 		// and collapsed in every state but NoBinary, so a healthy/transient connection shows no extra row.
+		// §6.8: the same row carries the bridge download's progress line (amber, while Connecting) or its failure reason.
 		+ SVerticalBox::Slot().AutoHeight().Padding(0, 4, 0, 0)
 		[
 			SNew(STextBlock)
 			.AutoWrapText(true)
-			.ColorAndOpacity(FSlateColor(FUnrealMcpStyle::StatusOffline()))
+			.ColorAndOpacity_Lambda([this]()
+			{
+				const bool bDownloading = IsViewModelValid()
+					&& ViewModel->GetEffectiveConnectionState() == EUnrealMcpConnectionState::Connecting;
+				return FSlateColor(bDownloading
+					? FUnrealMcpEditorViewModel::GetStatusColor(EUnrealMcpConnectionState::Connecting)
+					: FUnrealMcpStyle::StatusOffline());
+			})
 			.Visibility_Lambda([this]()
 			{
-				return (IsViewModelValid() && ViewModel->GetEffectiveConnectionState() == EUnrealMcpConnectionState::NoBinary)
+				return (IsViewModelValid() && !ViewModel->GetBridgeStatusHint().IsEmpty())
 					? EVisibility::Visible : EVisibility::Collapsed;
 			})
 			.Text_Lambda([this]()
 			{
-				return IsViewModelValid()
-					? FUnrealMcpEditorViewModel::GetConnectionHint(ViewModel->GetEffectiveConnectionState())
-					: FText::GetEmpty();
+				return IsViewModelValid() ? ViewModel->GetBridgeStatusHint() : FText::GetEmpty();
 			})
 		];
 }

@@ -1,6 +1,7 @@
 """Tests for the CI step scripts: .github/scripts/ue_ci.py, .github/scripts/ue_env.py, scripts/ue_machine_lock.py, scripts/ue_json.py."""
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import os
@@ -115,19 +116,64 @@ class CiStepTests(unittest.TestCase):
         root = plugin.parent
         return mock.patch.multiple(ci, ROOT=root, PLUGIN=plugin, STAGED_BRIDGE=plugin / "Source/ThirdParty/UnrealMcpBridge")
 
+    def stage_fake_bridge(self, plugin: Path) -> None:
+        """./bridge-staging/<rid>/ (signed dirs) + ./bridge-zips/ (release zips), as the release job downloads them."""
+        for rid in ci.RIDS:
+            (plugin.parent / "bridge-staging" / rid).mkdir(parents=True)
+            (plugin.parent / "bridge-staging" / rid / "unreal-mcp-bridge").write_bytes(b"\x7fELF" + rid.encode())
+            (plugin / "Source/ThirdParty/UnrealMcpBridge" / rid).mkdir(parents=True, exist_ok=True)
+            (plugin / "Source/ThirdParty/UnrealMcpBridge" / rid / ".gitkeep").write_text("")
+        (plugin.parent / "bridge-zips").mkdir()
+        for rid in ci.RIDS:
+            (plugin.parent / "bridge-zips" / f"unreal-mcp-bridge-{rid}.zip").write_bytes(rid.encode())
+
     def test_stage_bridge_then_source_zip(self):
         plugin = self.fake_plugin()
         with self.patch_repo(plugin):
-            self.assertEqual(ci.main(["stage-bridge"]), 1)  # no ./bridge-staging yet
-            for rid in ci.RIDS:
-                (plugin.parent / "bridge-staging" / rid).mkdir(parents=True)
-                (plugin.parent / "bridge-staging" / rid / "unreal-mcp-bridge").write_text(rid)
+            self.assertEqual(ci.main(["stage-bridge"]), 1)  # no ./bridge-zips + ./bridge-staging yet
+            self.stage_fake_bridge(plugin)
             self.assertEqual(ci.main(["stage-bridge"]), 0)
             self.assertEqual(ci.main(["source-zip", "--version", "1.2.3"]), 0)
-        names = zipfile.ZipFile(plugin.parent / "dist/unreal-mcp-plugin-source-1.2.3.zip").namelist()
+        archive = zipfile.ZipFile(plugin.parent / "dist/unreal-mcp-plugin-source-1.2.3.zip")
+        names = archive.namelist()
         self.assertIn("UnrealMCP/UnrealMCP.uplugin", names)
         self.assertIn("UnrealMCP/Source/ThirdParty/UnrealMcpBridge/osx-arm64/unreal-mcp-bridge", names)
         self.assertFalse([n for n in names if "UnrealMcpEditorTests" in n])
+        # The shipped trust anchor of the §6.8 bridge download: the SHA-256 of every per-RID release zip.
+        sums = archive.read("UnrealMCP/Source/ThirdParty/UnrealMcpBridge/SHA256SUMS").decode()
+        win = hashlib.sha256(b"win-x64").hexdigest()
+        self.assertIn(f"{win}  unreal-mcp-bridge-win-x64.zip\n", sums)
+        self.assertEqual(len(sums.splitlines()), len(ci.RIDS))
+
+    def test_fab_zip_ships_the_manifest_and_no_executable(self):
+        plugin = self.fake_plugin()
+        with self.patch_repo(plugin):
+            self.assertEqual(ci.main(["fab-zip", "--version", "1.2.3"]), 1)  # no SHA256SUMS: refuses
+            self.stage_fake_bridge(plugin)
+            self.assertEqual(ci.main(["stage-bridge"]), 0)
+            self.assertEqual(ci.main(["fab-zip", "--version", "1.2.3"]), 0)
+        names = zipfile.ZipFile(plugin.parent / "dist/unreal-mcp-plugin-fab-1.2.3.zip").namelist()
+        self.assertIn("UnrealMCP/Source/ThirdParty/UnrealMcpBridge/SHA256SUMS", names)
+        self.assertIn("UnrealMCP/Source/ThirdParty/UnrealMcpBridge/win-x64/.gitkeep", names)
+        self.assertFalse([n for n in names if n.endswith("/unreal-mcp-bridge") or n.endswith(".exe")])
+        self.assertFalse([n for n in names if "UnrealMcpEditorTests" in n])
+
+    def test_fab_zip_refuses_any_other_executable(self):
+        plugin = self.fake_plugin()
+        with self.patch_repo(plugin):
+            self.stage_fake_bridge(plugin)
+            self.assertEqual(ci.main(["stage-bridge"]), 0)
+            (plugin / "Content/tool.dll").write_text("x")
+            self.assertEqual(ci.main(["fab-zip", "--version", "1.2.3"]), 1)
+
+    def test_find_executables_by_magic_bytes_shebang_and_extension(self):
+        folder = self.temp / "scan"
+        files = {"pe": b"MZ\x90\x00", "elf": b"\x7fELF\x02", "macho": b"\xcf\xfa\xed\xfe", "fat": b"\xca\xfe\xba\xbe",
+                 "run": b"#!/bin/sh\n", "lib.so": b"x", "a/b/c.dylib": b"x", "readme.md": b"# MZ", "code.cpp": b"int x;"}
+        for rel, data in files.items():
+            (folder / rel).parent.mkdir(parents=True, exist_ok=True)
+            (folder / rel).write_bytes(data)
+        self.assertEqual(ci.find_executables(folder), ["a/b/c.dylib", "elf", "fat", "lib.so", "macho", "pe", "run"])
 
     def test_source_zip_refuses_an_engine_version_pin(self):
         plugin = self.fake_plugin()

@@ -11,6 +11,7 @@ UE_EDITOR_CMD. Commands that export values for later steps append them to GITHUB
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -29,6 +30,17 @@ from ue_env import IS_WINDOWS, add_job_env, link_path, remove_link  # noqa: E402
 
 PLUGIN = ROOT / "UnrealMCP"
 STAGED_BRIDGE = PLUGIN / "Source/ThirdParty/UnrealMcpBridge"
+# The SHA-256 manifest of the per-RID release zips, shipped INSIDE the plugin: the editor verifies a downloaded bridge
+# against it (docs/ARCHITECTURE.md §6.8, FUnrealMcpBridgeDownloader). Gitignored, written by stage-bridge.
+BRIDGE_SUMS = "SHA256SUMS"
+# The files of the source plugin assets, relative to UnrealMCP/.
+SOURCE_ASSET_INPUTS = ("UnrealMCP.uplugin", "Config", "Resources", "Content", "Source/UnrealMcpRuntime", "Source/UnrealMcpRql",
+                       "Source/UnrealMcpEditor", "Source/ThirdParty", "ThirdPartyNotices.txt")
+# What Epic's Fab review calls an executable: native binaries by magic bytes (PE, ELF, Mach-O thin + fat), scripts by
+# shebang, and the usual executable / native-library extensions.
+EXECUTABLE_MAGIC = (b"MZ", b"\x7fELF", b"\xfe\xed\xfa\xce", b"\xfe\xed\xfa\xcf", b"\xce\xfa\xed\xfe", b"\xcf\xfa\xed\xfe",
+                    b"\xca\xfe\xba\xbe", b"#!")
+EXECUTABLE_SUFFIXES = {".exe", ".dll", ".so", ".dylib", ".bat", ".cmd", ".ps1", ".sh", ".com", ".msi", ".app", ".lib", ".a", ".pdb"}
 # Only the chain's own feeds: .artifacts/tests holds the suite's build caches and the smoke host.
 CHAIN_FEEDS = ("nuget", "npm", "server", "unity-dll", "nuget-cache")
 # This job's per-run BuildPlugin / report outputs under RUNNER_TEMP.
@@ -319,7 +331,17 @@ def stage_bridge(_args) -> None:
     UnrealMCP/Source/ThirdParty/UnrealMcpBridge/<rid>/ (#139/#187), which survives a Fab strip (Binaries/
     is stripped) and is declared in Config/FilterPlugin.ini; BuildPlugin then stages it into the
     package's Binaries/ThirdParty/UnrealMcpBridge/<rid>/. The payloads are gitignored.
+
+    Also writes SHA256SUMS over the per-RID release zips (./bridge-zips/, the exact bytes publish-release attaches):
+    the plugin's trust anchor for downloading the bridge when it ships without one (the Fab asset, §6.8).
     """
+    zips = ROOT / "bridge-zips"
+    lines = []
+    for rid in RIDS:
+        name = f"unreal-mcp-bridge-{rid}.zip"
+        if not (zips / name).is_file():
+            raise StepError(f"Bridge release zip missing for RID '{rid}' at {zips / name}")
+        lines.append(f"{hashlib.sha256((zips / name).read_bytes()).hexdigest()}  {name}\n")
     for rid in RIDS:
         source = ROOT / "bridge-staging" / rid
         if not source.is_dir():
@@ -331,20 +353,23 @@ def stage_bridge(_args) -> None:
         print(f"Staged {count} file(s) for {rid} -> {dest}")
         if count < 1:
             raise StepError(f"No files staged for RID '{rid}'.")
+    (STAGED_BRIDGE / BRIDGE_SUMS).write_text("".join(lines), encoding="utf-8", newline="\n")
+    print(f"Wrote {STAGED_BRIDGE / BRIDGE_SUMS}:\n{''.join(lines)}", end="")
 
 
-def source_zip(args) -> None:
-    """The SOURCE install asset unreal-mcp-plugin-source-<version>.zip (CLI/Fab path, test-free, no EngineVersion pin)."""
+def stage_source_asset(folder: str) -> Path:
+    """Copy the distributed plugin source (test-free, no EngineVersion pin, with the bridge SHA256SUMS) to RUNNER_TEMP."""
     descriptor = ue_json.read(PLUGIN / "UnrealMCP.uplugin")
     if str(descriptor.get("EngineVersion") or "").strip():
         raise StepError(f"The distributed source descriptor must not pin EngineVersion (found '{descriptor['EngineVersion']}').")
     if "UnrealMcpEditorTests" in module_names(PLUGIN / "UnrealMCP.uplugin"):
         raise StepError("The distributed source descriptor must not ship UnrealMcpEditorTests.")
-    stage_root = temp() / "UnrealMCP-Source-Package"
+    if not (STAGED_BRIDGE / BRIDGE_SUMS).is_file():
+        raise StepError(f"{STAGED_BRIDGE / BRIDGE_SUMS} is missing (stage-bridge writes it); a plugin without it cannot download its bridge.")
+    stage_root = temp() / folder
     remove_tree(stage_root)
     stage = stage_root / "UnrealMCP"
-    for rel in ("UnrealMCP.uplugin", "Config", "Resources", "Content", "Source/UnrealMcpRuntime", "Source/UnrealMcpRql",
-                "Source/UnrealMcpEditor", "Source/ThirdParty", "ThirdPartyNotices.txt"):
+    for rel in SOURCE_ASSET_INPUTS:
         source = PLUGIN / rel
         if not source.exists():
             raise StepError(f"Source-asset input missing: {source}")
@@ -353,12 +378,49 @@ def source_zip(args) -> None:
         shutil.copytree(source, target) if source.is_dir() else shutil.copy2(source, target)
     if (stage / "Source/UnrealMcpEditorTests").exists():
         raise StepError("The source asset staging unexpectedly included UnrealMcpEditorTests.")
+    return stage
+
+
+def source_zip(args) -> None:
+    """The SOURCE install asset unreal-mcp-plugin-source-<version>.zip (the CLI install path; bundles the bridge)."""
+    stage = stage_source_asset("UnrealMCP-Source-Package")
     for rid in RIDS:
         count = count_files(stage / "Source/ThirdParty/UnrealMcpBridge" / rid)
         print(f"Source asset bridge for {rid}: {count} file(s).")
         if count < 1:
             raise StepError(f"Source asset is missing the staged bridge payload for RID '{rid}'.")
     zip_dir(stage, ROOT / f"dist/unreal-mcp-plugin-source-{args.version}.zip", prefix="UnrealMCP/")
+
+
+def find_executables(folder: Path) -> list:
+    """Every file under `folder` an executable check flags: by extension, or by its first bytes (magic / shebang)."""
+    found = []
+    for path in sorted(p for p in folder.rglob("*") if p.is_file()):
+        with path.open("rb") as handle:
+            head = handle.read(4)
+        if path.suffix.lower() in EXECUTABLE_SUFFIXES or any(head.startswith(magic) for magic in EXECUTABLE_MAGIC):
+            found.append(path.relative_to(folder).as_posix())
+    return found
+
+
+def fab_zip(args) -> None:
+    """The Fab asset unreal-mcp-plugin-fab-<version>.zip: the source asset WITHOUT any executable.
+
+    Epic's Fab review accepts source files only, so the per-RID bridge payloads are dropped (their .gitkeep
+    placeholders stay); the editor downloads the bridge for its own version and verifies it against the shipped
+    SHA256SUMS (docs/ARCHITECTURE.md §6.8). Fails if anything executable is left.
+    """
+    stage = stage_source_asset("UnrealMCP-Fab-Package")
+    for rid in RIDS:
+        payload = stage / "Source/ThirdParty/UnrealMcpBridge" / rid
+        remove_tree(payload)
+        payload.mkdir(parents=True)
+        (payload / ".gitkeep").write_bytes(b"")  # the tracked placeholder stage-bridge replaced with the payload
+    found = find_executables(stage)
+    if found:
+        raise StepError("The Fab asset must contain no executable, found:\n" + "\n".join(found))
+    print(f"Fab asset: {count_files(stage)} file(s), no executable.")
+    zip_dir(stage, ROOT / f"dist/unreal-mcp-plugin-fab-{args.version}.zip", prefix="UnrealMCP/")
 
 
 def plugin_zip(args) -> None:
@@ -397,6 +459,7 @@ COMMANDS = {
     "fixture-diff": fixture_diff,
     "stage-bridge": stage_bridge,
     "source-zip": source_zip,
+    "fab-zip": fab_zip,
     "plugin-zip": plugin_zip,
 }
 
@@ -409,7 +472,7 @@ def main(argv: list | None = None) -> int:
     parser.add_argument("command", choices=sorted(COMMANDS))
     parser.add_argument("--ue", help="the matrix engine version (suite, fixture-diff)")
     parser.add_argument("--mode", default="verification", help="extension_suite.py mode (suite)")
-    parser.add_argument("--version", help="release version (source-zip, plugin-zip)")
+    parser.add_argument("--version", help="release version (source-zip, fab-zip, plugin-zip)")
     args = parser.parse_args(argv)
     try:
         return COMMANDS[args.command](args) or 0
