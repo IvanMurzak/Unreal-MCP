@@ -10,6 +10,7 @@
 #include "HAL/FileManager.h"
 #include "HAL/PlatformProcess.h"
 #include "Sidecar/UnrealMcpSidecarManager.h"
+#include "Interfaces/IPluginManager.h"
 
 #if PLATFORM_MAC || PLATFORM_LINUX
 #include <sys/stat.h>
@@ -226,20 +227,43 @@ void FUnrealMcpSidecarManagerSpec::Define()
 			TestTrue(TEXT("no version"), FUnrealMcpSidecarManager::ComposeDownloadedBridgeDir(TEXT("C:/cache"), TEXT(""), TEXT("win-x64")).IsEmpty());
 		});
 
-		It("resolves a cached binary only once its verification marker exists, and the resolver falls back to it", [this]()
+		It("trusts a cache dir only when its marker records the digest the plugin ships", [this]()
 		{
 			const FString Root = SidecarSpecUseEmptyCache();
-			FPlatformMisc::SetEnvironmentVar(TEXT("UNREAL_MCP_BRIDGE_PATH"), TEXT(""));
 			TestEqual(TEXT("cache root honours UNREAL_MCP_BRIDGE_CACHE_DIR"), FUnrealMcpSidecarManager::BridgeCacheRoot(), Root);
+			const FString Dir = FUnrealMcpSidecarManager::ComposeDownloadedBridgeDir(Root, TEXT("0.0.1"), TEXT("win-x64"));
+			const FString Digest = TEXT("0a936975cbf07c285c5e10e8ab444547b55c6f3f404b51daa6890c2b96e034c1");
+			FFileHelper::SaveStringToFile(TEXT("apphost"), *(Dir / FUnrealMcpSidecarManager::BridgeBinaryBasename()));
+			TestFalse(TEXT("no marker"), FUnrealMcpSidecarManager::IsCompleteDownloadedBridgeDir(Dir, Digest));
+			FFileHelper::SaveStringToFile(Digest.ToUpper(), *(Dir / FUnrealMcpSidecarManager::DownloadedBridgeMarkerName));
+			TestTrue(TEXT("marker == shipped digest (case-insensitive)"), FUnrealMcpSidecarManager::IsCompleteDownloadedBridgeDir(Dir, Digest));
+			TestFalse(TEXT("another build's digest"), FUnrealMcpSidecarManager::IsCompleteDownloadedBridgeDir(Dir, FString::ChrN(64, TEXT('1'))));
+			TestFalse(TEXT("no shipped digest (no manifest) never matches"), FUnrealMcpSidecarManager::IsCompleteDownloadedBridgeDir(Dir, FString()));
+			SidecarSpecCleanup();
+		});
+
+		It("reads the shipped digest per RID from the SHA256SUMS text, exact name only", [this]()
+		{
+			const FString Manifest = FString(TEXT("1111111111111111111111111111111111111111111111111111111111111111  unreal-mcp-bridge-linux-x64.zip\r\n"))
+				+ TEXT("0A936975CBF07C285C5E10E8AB444547B55C6F3F404B51DAA6890C2B96E034C1 *unreal-mcp-bridge-win-x64.zip\n");
+			TestEqual(TEXT("win (binary-mode marker, upper-case)"), FUnrealMcpSidecarManager::ShippedBridgeZipDigest(Manifest, TEXT("win-x64")),
+				FString(TEXT("0a936975cbf07c285c5e10e8ab444547b55c6f3f404b51daa6890c2b96e034c1")));
+			TestEqual(TEXT("linux"), FUnrealMcpSidecarManager::ShippedBridgeZipDigest(Manifest, TEXT("linux-x64")), FString::ChrN(64, TEXT('1')));
+			TestTrue(TEXT("absent rid"), FUnrealMcpSidecarManager::ShippedBridgeZipDigest(Manifest, TEXT("osx-arm64")).IsEmpty());
+			TestTrue(TEXT("no prefix match"), FUnrealMcpSidecarManager::ShippedBridgeZipDigest(Manifest, TEXT("win")).IsEmpty());
+		});
+
+		It("never resolves the cache for a plugin that ships no SHA256SUMS (a dev checkout)", [this]()
+		{
+			TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("UnrealMCP"));
+			if (!Plugin.IsValid() || FPaths::FileExists(FUnrealMcpSidecarManager::BridgeManifestPath(Plugin->GetBaseDir())))
+				return; // a release-installed plugin ships the manifest; this case is about dev checkouts
+			const FString Root = SidecarSpecUseEmptyCache();
 			const FString Dir = FUnrealMcpSidecarManager::ComposeDownloadedBridgeDir(Root,
 				FUnrealMcpSidecarManager::PluginVersionName(), FUnrealMcpSidecarManager::ResolveDownloadRid());
-			const FString Binary = Dir / FUnrealMcpSidecarManager::BridgeBinaryBasename();
-			FFileHelper::SaveStringToFile(TEXT("apphost"), *Binary);
-			TestTrue(TEXT("no marker -> not resolved"), FUnrealMcpSidecarManager::ResolveDownloadedBridgePath().IsEmpty());
-			FFileHelper::SaveStringToFile(TEXT("sha"), *(Dir / FUnrealMcpSidecarManager::DownloadedBridgeMarkerName));
-			TestEqual(TEXT("marker -> resolved"), FUnrealMcpSidecarManager::ResolveDownloadedBridgePath(), Binary);
-			// A dev checkout has no bundle, so the full resolver lands on the cache (a bundled install never gets here).
-			TestEqual(TEXT("resolver falls back to the cache"), FUnrealMcpSidecarManager::ResolveBridgeBinaryPath(), Binary);
+			FFileHelper::SaveStringToFile(TEXT("apphost"), *(Dir / FUnrealMcpSidecarManager::BridgeBinaryBasename()));
+			FFileHelper::SaveStringToFile(TEXT("anything"), *(Dir / FUnrealMcpSidecarManager::DownloadedBridgeMarkerName));
+			TestTrue(TEXT("not resolved"), FUnrealMcpSidecarManager::ResolveDownloadedBridgePath().IsEmpty());
 			SidecarSpecCleanup();
 		});
 	});

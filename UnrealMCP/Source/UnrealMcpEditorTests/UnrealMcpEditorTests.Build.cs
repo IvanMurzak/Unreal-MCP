@@ -40,6 +40,7 @@ public class UnrealMcpEditorTests : ModuleRules
 			"Slate",          // the Tools-window spec constructs SUnrealMcpToolsWindow and reads its widgets
 			"SlateCore",
 			"FileUtilities",  // FZipArchiveWriter builds the fixture zips of the bridge-download spec
+			"Projects",       // IPluginManager: the sidecar spec checks whether the plugin ships SHA256SUMS
 		});
 
 		// Reach BOTH modules' PRIVATE headers so the Automation specs can drive their internals directly.

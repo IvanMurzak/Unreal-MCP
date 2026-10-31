@@ -190,7 +190,7 @@ void FUnrealMcpEditorViewModel::Disconnect()
 const TCHAR* FUnrealMcpEditorViewModel::BridgeUnavailableMessage()
 {
 	// Actionable, NOT the cryptic "No sidecar connected." — tell the user how to get a working bridge (issue #99).
-	return TEXT("MCP bridge not available for this platform — click \"Restart bridge\" to download it again, reinstall the plugin, or run `unreal-mcp-cli bootstrap-local`.");
+	return TEXT("MCP bridge not available for this platform — reinstall the plugin, or run `unreal-mcp-cli bootstrap-local` (a Fab install downloads it on first launch; \"Restart bridge\" retries).");
 }
 
 void FUnrealMcpEditorViewModel::Authorize(double NowSeconds)
@@ -254,12 +254,20 @@ void FUnrealMcpEditorViewModel::TickAuthTimeout(double NowSeconds)
 	// resurrect a stale auth-start. No-op in every other state (Pending/Authorized/Failed/Idle are driven elsewhere).
 	if (DeviceAuthState != EUnrealMcpDeviceAuthState::Connecting)
 		return;
+	// §6.8: while the bridge still downloads, the handshake bound has not started yet — it counts from completion.
+	if (IsBridgeDownloading())
+	{
+		ConnectingStartedSeconds = NowSeconds;
+		return;
+	}
 	if (NowSeconds - ConnectingStartedSeconds < SidecarConnectTimeoutSeconds)
 		return;
 
 	bAuthStartQueued = false;
 	DeviceAuthState = EUnrealMcpDeviceAuthState::Failed;
-	DeviceAuthError = BridgeUnavailableMessage();
+	// A failed download carries its own reason (offline, checksum, …); otherwise the generic guidance.
+	const FString DownloadMessage = BridgeDownloadMessageSink ? BridgeDownloadMessageSink() : FString();
+	DeviceAuthError = DownloadMessage.IsEmpty() ? FString(BridgeUnavailableMessage()) : DownloadMessage;
 }
 
 void FUnrealMcpEditorViewModel::CancelAuth()

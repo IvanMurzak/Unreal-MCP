@@ -91,12 +91,21 @@ public:
 	 */
 	static const TCHAR* DownloadedBridgeMarkerName;
 
-	/** Whether @p Dir is a complete cache dir: the marker and the bridge binary both exist. */
-	static bool IsCompleteDownloadedBridgeDir(const FString& Dir);
+	/**
+	 * Whether @p Dir is a complete cache dir for @p ExpectedDigest: the bridge binary exists and the marker records
+	 * exactly that zip digest (the one this plugin ships). An empty digest never matches.
+	 */
+	static bool IsCompleteDownloadedBridgeDir(const FString& Dir, const FString& ExpectedDigest);
+
+	/** <PluginBaseDir>/Source/ThirdParty/UnrealMcpBridge/SHA256SUMS — the release-written digests (§6.8). Pure. */
+	static FString BridgeManifestPath(const FString& PluginBaseDir);
+
+	/** The digest @p ManifestText lists for `unreal-mcp-bridge-<rid>.zip` (lowercase), or empty. Pure. */
+	static FString ShippedBridgeZipDigest(const FString& ManifestText, const FString& Rid);
 
 	/**
-	 * The verified cached binary for this plugin version + host RID, or empty when the cache holds none (binary
-	 * or marker missing).
+	 * The verified cached binary for this plugin version + host RID, or empty when the cache holds none, the plugin
+	 * ships no SHA256SUMS, or the marker records another digest.
 	 */
 	static FString ResolveDownloadedBridgePath();
 

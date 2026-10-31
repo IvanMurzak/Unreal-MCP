@@ -570,7 +570,7 @@ jobs:
   # cli/src/lib/server-version.ts SERVER_VERSION.
 
   # Release plugin zips: the dedicated SOURCE install asset
-  # `unreal-mcp-plugin-source-<version>.zip` (CLI/Fab install path, no
+  # `unreal-mcp-plugin-source-<version>.zip` (CLI install path, no
   # EngineVersion pin, test-free descriptor) AND the PACKAGED BuildPlugin asset
   # `unreal-mcp-plugin-<version>.zip` with the signed bridge bundled in under
   # Binaries/ThirdParty/. The single packaged artifact is built with the latest
@@ -806,8 +806,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
-      # Attach both plugin artifacts:
-      #   * unreal-mcp-plugin-source-<version>.zip  -> CLI/Fab source install asset
+      # Attach the three plugin artifacts:
+      #   * unreal-mcp-plugin-source-<version>.zip  -> CLI source install asset
       #   * unreal-mcp-plugin-<version>.zip         -> packaged BuildPlugin artifact
       #   * unreal-mcp-plugin-fab-<version>.zip     -> Fab submission (source, no executable; §6.8)
       # The per-RID signed bridge zips are also attached for debugging /
@@ -857,13 +857,15 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          # Fail-closed: the CLI rejects an unsigned source zip (D12); the signature
-          # is produced by sign-plugin-source.
-          if [ ! -f "./assets/unreal-mcp-plugin-source-${VERSION}.zip.minisig" ]; then
-            echo "::error::Plugin-source signature ./assets/unreal-mcp-plugin-source-${VERSION}.zip.minisig is missing — refusing to create the Release."
-            exit 1
-          fi
-          # Attach every zip AND the plugin-source `.minisig` signature (D12).
+          # Fail-closed: the CLI rejects an unsigned source zip (D12); the signatures
+          # are produced by sign-plugin-source.
+          for kind in source fab; do
+            if [ ! -f "./assets/unreal-mcp-plugin-${kind}-${VERSION}.zip.minisig" ]; then
+              echo "::error::Plugin signature ./assets/unreal-mcp-plugin-${kind}-${VERSION}.zip.minisig is missing — refusing to create the Release."
+              exit 1
+            fi
+          done
+          # Attach every zip AND the plugin `.minisig` signatures (D12).
           files=(./assets/*.zip ./assets/*.minisig)
           if [ "${#files[@]}" -eq 0 ]; then
             echo "::error::No release zip assets found in ./assets"
@@ -1226,3 +1228,21 @@ jobs:
             fi
           done
           exit "$missing"
+      # A Fab install downloads the attached bridge zips and accepts them only if they match the SHA256SUMS shipped
+      # inside the plugin (docs/ARCHITECTURE.md §6.8): prove the published bytes and the shipped digests agree.
+      - name: Verify the bridge zips match the plugin's SHA256SUMS
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.check-version.outputs.tag }}
+          VERSION: ${{ needs.check-version.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/bridge-verify"
+          mkdir -p "$dir"
+          cd "$dir"
+          gh release download "${TAG}" --repo "${GITHUB_REPOSITORY}" \
+            --pattern "unreal-mcp-plugin-fab-${VERSION}.zip" --pattern 'unreal-mcp-bridge-*.zip'
+          unzip -p "unreal-mcp-plugin-fab-${VERSION}.zip" UnrealMCP/Source/ThirdParty/UnrealMcpBridge/SHA256SUMS > SHA256SUMS
+          cat SHA256SUMS
+          sha256sum -c SHA256SUMS

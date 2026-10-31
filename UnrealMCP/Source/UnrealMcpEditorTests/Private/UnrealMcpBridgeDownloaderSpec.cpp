@@ -184,16 +184,22 @@ void FUnrealMcpBridgeDownloaderSpec::Define()
 			TestEqual(TEXT("only the published rid dir remains (no staging leftovers)"), Leftovers.Num(), 1);
 		});
 
-		It("keeps a concurrent editor's complete dir when it finished first", [this]()
+		It("keeps a concurrent editor's dir for the same digest, and replaces a dir from another build", [this]()
 		{
 			const FString Basename = FUnrealMcpSidecarManager::BridgeBinaryBasename();
 			const FString Target = BridgeDlSpecRoot() / TEXT("cache/0.0.1/win-x64");
+			const TArray<uint8> Zip = BridgeDlSpecZip({ { Basename, TEXT("first") } });
 			FString Error;
-			TestTrue(TEXT("first"), BridgeDlSpecExtract(BridgeDlSpecZip({ { Basename, TEXT("first") } }), Target, Error));
-			TestTrue(TEXT("second"), BridgeDlSpecExtract(BridgeDlSpecZip({ { Basename, TEXT("second") } }), Target, Error));
+			TestTrue(TEXT("first"), BridgeDlSpecExtract(Zip, Target, Error));
+			FFileHelper::SaveStringToFile(TEXT("winner"), *(Target / Basename)); // tells the published dir apart
+			TestTrue(TEXT("same zip again"), BridgeDlSpecExtract(Zip, Target, Error));
 			FString Content;
 			FFileHelper::LoadFileToString(Content, *(Target / Basename));
-			TestEqual(TEXT("the first complete dir wins"), Content, FString(TEXT("first")));
+			TestEqual(TEXT("the dir that finished first is kept"), Content, FString(TEXT("winner")));
+
+			TestTrue(TEXT("another build"), BridgeDlSpecExtract(BridgeDlSpecZip({ { Basename, TEXT("second") } }), Target, Error));
+			FFileHelper::LoadFileToString(Content, *(Target / Basename));
+			TestEqual(TEXT("a dir for another digest is replaced"), Content, FString(TEXT("second")));
 		});
 
 		It("fails, publishing nothing, when the zip lacks the bridge binary or is not a zip", [this]()

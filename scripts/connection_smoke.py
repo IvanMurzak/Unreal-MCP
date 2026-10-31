@@ -66,7 +66,8 @@ MARK_NO_BINARY = "no sidecar binary resolved"
 # A plugin that ships no bridge (the Fab asset) downloads it (docs/ARCHITECTURE.md §6.8): no binary is then not fatal
 # while the download runs, and a failed download ends the wait at once.
 MARK_BRIDGE_DOWNLOAD = "no bridge binary resolved; downloading"
-RE_BRIDGE_DOWNLOAD_FAILED = re.compile(r"\[Unreal-MCP\] (MCP bridge download (failed|rejected|could not)|Cannot download the MCP bridge)")
+# Every downloader failure line starts "MCP bridge download" (never "downloaded", the success line) or "Cannot download".
+RE_BRIDGE_DOWNLOAD_FAILED = re.compile(r"\[Unreal-MCP\] (MCP bridge download(?!ed)|Cannot download the MCP bridge)")
 RE_FATAL = re.compile(r"Fatal error|Unhandled Exception|\[Callstack\]")
 
 
@@ -590,6 +591,7 @@ def main() -> int:
     connected_at = None
     marks: dict = {}
     start = time.monotonic()
+    no_binary_seen = False
     try:
         while time.monotonic() - start < args.timeout:
             time.sleep(args.poll)
@@ -598,8 +600,10 @@ def main() -> int:
             if server_proc and server_proc.poll() is not None:
                 connect_result = "SERVER_EXITED"; break
             marks = scan_log(logpath)
-            if marks.get("no_binary"):
+            # One poll of grace: the "downloading" line follows the no-binary line within the same frame.
+            if marks.get("no_binary") and no_binary_seen:
                 connect_result = "NO_SIDECAR_BINARY"; break
+            no_binary_seen = bool(marks.get("no_binary"))
             if marks.get("bridge_download_failed"):
                 connect_result = "BRIDGE_DOWNLOAD_FAILED"; break
             if marks.get("fatal"):

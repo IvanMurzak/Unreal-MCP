@@ -39,8 +39,9 @@ SOURCE_ASSET_INPUTS = ("UnrealMCP.uplugin", "Config", "Resources", "Content", "S
 # What Epic's Fab review calls an executable: native binaries by magic bytes (PE, ELF, Mach-O thin + fat), scripts by
 # shebang, and the usual executable / native-library extensions.
 EXECUTABLE_MAGIC = (b"MZ", b"\x7fELF", b"\xfe\xed\xfa\xce", b"\xfe\xed\xfa\xcf", b"\xce\xfa\xed\xfe", b"\xcf\xfa\xed\xfe",
-                    b"\xca\xfe\xba\xbe", b"#!")
-EXECUTABLE_SUFFIXES = {".exe", ".dll", ".so", ".dylib", ".bat", ".cmd", ".ps1", ".sh", ".com", ".msi", ".lib", ".a", ".pdb"}
+                    b"\xca\xfe\xba\xbe", b"#!", b"PK\x03\x04")  # PK: a nested archive could hide any of the above
+EXECUTABLE_SUFFIXES = {".exe", ".dll", ".so", ".dylib", ".bat", ".cmd", ".ps1", ".psm1", ".sh", ".command", ".vbs", ".jar", ".com",
+                       ".msi", ".lib", ".a", ".pdb"}
 # Only the chain's own feeds: .artifacts/tests holds the suite's build caches and the smoke host.
 CHAIN_FEEDS = ("nuget", "npm", "server", "unity-dll", "nuget-cache")
 # This job's per-run BuildPlugin / report outputs under RUNNER_TEMP.
@@ -120,6 +121,7 @@ def clean_staged_bridge(_args) -> None:
     if tracked:
         raise StepError(f"Refusing to delete {binaries}: it contains tracked files:\n{tracked}")
     remove_tree(ROOT / binaries)
+    remove_tree(ROOT / "bridge-zips")  # build-plugin-zip's downloaded release zips (hashed into SHA256SUMS)
     status = subprocess.run(git + ["status", "--porcelain=v1", "--ignored", "--", source, binaries],
                             cwd=ROOT, capture_output=True, text=True, check=True).stdout
     left = [line for line in status.splitlines() if line.startswith("!! ")]

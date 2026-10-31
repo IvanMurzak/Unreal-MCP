@@ -25,7 +25,7 @@ delivered it. Identifiers below (tool ids, command names, env vars, paths) were 
 | §3 Schema generation | implemented | exercised by every tool family (#13–#25) |
 | §4 GameThread dispatcher | implemented | #4 (used by every tool family) |
 | §5 Extensions mechanism | implemented | #7 (`IUnrealMcpToolProvider`, `samples/UnrealAITemplate`) |
-| §6 Sidecar lifecycle | implemented | #4 (spawn / crash auto-restart / orphan-prevention / stdin-token) + #46 (BUNDLE-model resolution: env override → bundled `Binaries/ThirdParty/UnrealMcpBridge/<rid>/`, zero-click auto-spawn; the superseded download-on-first-run flow is dropped — see drift below) |
+| §6 Sidecar lifecycle | implemented | #4 (spawn / crash auto-restart / orphan-prevention / stdin-token) + #46 (BUNDLE-model resolution: env override → bundled `Binaries/ThirdParty/UnrealMcpBridge/<rid>/`, zero-click auto-spawn; the superseded download-on-first-run flow is dropped — see drift below) + the Fab asset's verified bridge download (§6.8) |
 | §7 Slate UI | implemented | #24 (AI Game Developer main window) + #29 (MCP Tools/Prompts/Resources aux windows) + #107 (collapsed the separate Settings window into the single main window, Unity-MCP parity) |
 | §8 Config & env | implemented | #8 (`UNREAL_MCP_*`, `.env`, on-disk config) |
 | §9.1 cli (`unreal-mcp-cli`, 18 commands) | implemented | #3 |
@@ -92,7 +92,7 @@ Prompts/Resources ship empty-but-wired (§10), as designed.
   A packaged plugin therefore auto-spawns at StartupModule with zero user action; a dev source
   checkout (no staged binary) still uses the env override and emits the rid-aware actionable warning.
   The earlier **download-on-first-run + version-skew re-download** design is **superseded and removed**
-  (no `.lock`, no atomic-rename, no re-download recovery) — version lockstep is by construction
+  for bundled installs (no `.lock`, no re-download recovery; the executable-free Fab asset downloads once, §6.8) — version lockstep is by construction
   (bundle built in the same release job at the same version). The bundled binaries are staged by the
   release job (`RuntimeDependencies`, `UnrealMcpEditor.Build.cs`) and are **never committed to git**;
   CI signing/notarization of those binaries is owned by the T3/T4 release tasks.
@@ -833,7 +833,7 @@ all are handled in-repo (issues #139/#187), and submission itself remains an ope
    into `Binaries/ThirdParty/UnrealMcpBridge/<rid>/` by `RuntimeDependencies`, and is ALSO resolved
    directly from `Source/ThirdParty/UnrealMcpBridge/<rid>/` (§6.1 candidate list) so an Epic-compiled build
    resolves it even when `Binaries/` did not re-stage. This does not regress the GitHub-release/npm bundle
-   nor `release.yml`'s signed-binary staging — the dedicated CLI/Fab source asset and the packaged
+   nor `release.yml`'s signed-binary staging — the dedicated CLI source asset, the executable-free Fab asset (§6.8) and the packaged
    BuildPlugin asset are both cut from the same staged `Source/ThirdParty/UnrealMcpBridge/<rid>/` payloads.
 2. **No shipped test/automation module.** Fab review flags shipped test modules, so the DISTRIBUTED
    `UnrealMCP.uplugin` omits `UnrealMcpEditorTests`. PR/dev CI still runs the `UnrealMcp.` Automation
@@ -866,12 +866,16 @@ PE/ELF/Mach-O magic bytes or shebang). An editor that resolves no bridge (§6.3)
   `Source/ThirdParty/UnrealMcpBridge/SHA256SUMS`, which ships in the source, Fab and packaged assets. The editor
   verifies the download against THAT file, never against anything fetched from the release, so a replaced release
   asset is rejected. The anchor is as strong as the plugin package the user already trusts to run code: the CLI
-  minisign-verifies the source zip (D12), Fab distributes the reviewed package, and the `-fab-` zip carries its own
-  `.minisig`. Why not a minisign signature per bridge zip verified in C++: it needs Ed25519 + BLAKE2b in the
+  minisign-verifies the source zip (D12) and Fab distributes the reviewed package (the `-fab-` zip's own `.minisig`
+  lets the operator verify it before submitting). Why not a minisign signature per bridge zip verified in C++: it needs Ed25519 + BLAKE2b in the
   plugin — either a link against the engine's OpenSSL third-party module (its version differs per engine and
   platform, UE 5.5-5.8 x Win/Mac/Linux) or vendored crypto source (Fab-review and per-engine compile risk) — and buys
   nothing over a digest list inside an already-verified package. A plugin without
-  `SHA256SUMS` (a dev checkout) never downloads — fail-closed; developers use `UNREAL_MCP_BRIDGE_PATH`.
+  `SHA256SUMS` (a dev checkout) never downloads and never runs a cached bridge — fail-closed; developers use
+  `UNREAL_MCP_BRIDGE_PATH`. The resolver trusts a cache dir only when its `.verified` marker records the digest the
+  plugin ships for that RID, so a dir from another build of the same version is ignored and replaced.
+  `verify-release` re-checks the published bridge zips against the `-fab-` zip's `SHA256SUMS`. The github.com host
+  check is hygiene (GitHub redirects to its asset CDN); the integrity guarantee is the digest.
 - **Where:** a per-user cache, because a Fab install lives in the read-only engine `Plugins/Marketplace` folder:
   `FUnrealMcpSidecarManager::BridgeCacheRoot()` = `UNREAL_MCP_BRIDGE_CACHE_DIR`, else
   `<UserSettingsDir>/UnrealMCP/bridge` (`%LOCALAPPDATA%`, `~/Library/Application Support`, `~/.config`), keyed
@@ -1138,7 +1142,7 @@ happens in each tool-family task against `Unreal-Test-Project` (Godot tool-wave 
   validates marketplace packaging) and then runs the Automation filter against the testbed project.
 - `release.yml` (Godot `release.yml` skeleton: version-from-source job → gate compute → test fan-out
   → artifact build → gated publish): artifacts = dedicated source plugin zip
-  (`unreal-mcp-plugin-source-<version>.zip`, CLI/Fab install asset), packaged plugin zip
+  (`unreal-mcp-plugin-source-<version>.zip`, CLI install asset), the Fab asset (`unreal-mcp-plugin-fab-<version>.zip`, §6.8), packaged plugin zip
   (`unreal-mcp-plugin-<version>.zip`, BuildPlugin output with the staged bundle),
   `unreal-mcp-bridge-<rid>.zip` ×4, npm publish, GitHub Release (server zips are
   released from the shared GameDev-MCP-Server repo, not here — §6).

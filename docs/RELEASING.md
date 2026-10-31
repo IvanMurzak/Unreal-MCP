@@ -39,10 +39,9 @@ version bump publishes nothing. Fab submission remains fully manual:
       (`unreal-mcp-plugin-source-<version>.zip`, the CLI install asset) and the packaged
       BuildPlugin zip (`unreal-mcp-plugin-<version>.zip`), but no job submits to Fab. Fab carries
       its own metadata/screenshot requirements and an Epic review; do it by hand when the listing
-      is ready. The plugin is
-      Fab source-submission READY (#139/#187): the sidecar survives Fab's `Binaries/` strip via
-      `Source/ThirdParty/UnrealMcpBridge/<rid>/`, the distributed `.uplugin` ships no test module, and `FilterPlugin.ini`
-      is complete — see [Fab source-submission readiness](#fab-epic-marketplace-source-submission-readiness-139187) below.
+      is ready. The `-fab-` zip ships no executable (Epic rejected the bundled sidecar; the editor
+      downloads and verifies it instead, `docs/ARCHITECTURE.md` §6.8), the distributed `.uplugin` ships no
+      test module, and `FilterPlugin.ini` is complete — see [Fab source-submission readiness](#fab-epic-marketplace-source-submission-readiness-139187) below.
 
 A merge to `main` publishes nothing: `release.yml` has no `push` trigger. The safe rehearsal is a
 `dry_run=true` dispatch (below), which exercises every test + artifact job and skips every
@@ -54,7 +53,7 @@ npm/tag/Release/Discord job.
 | --- | --- | --- |
 | `test_pull_request.yml` | `pull_request` to `main` (+ manual) | Fans out the PR test legs: bridge build+xUnit (ubuntu + windows), cli node 20/22, and — when a runner is registered — the UE 5.8 plugin BuildPlugin + Automation leg. |
 | `test_cli.yml` | `workflow_call` (reusable) | Builds + tests `unreal-mcp-cli` on Node 20 & 22. Called by both `test_pull_request.yml` and `release.yml`. |
-| `release.yml` | manual `workflow_dispatch` **only** | Dispatch-only release: builds + **code-signs** the self-contained bridge per RID, validates the plugin Automation leg across UE 5.5/5.6/5.7/5.8, publishes a dedicated **source** plugin asset for CLI/Fab installs, **bundles the signed sidecar into the packaged plugin** (BuildPlugin), and (on a real run) publishes `unreal-mcp-cli` to npm, cuts the GitHub Release + tag, verifies both, and announces in Discord. `dry_run=true` rehearses everything without publishing. |
+| `release.yml` | manual `workflow_dispatch` **only** | Dispatch-only release: builds + **code-signs** the self-contained bridge per RID, validates the plugin Automation leg across UE 5.5/5.6/5.7/5.8, publishes a dedicated **source** plugin asset for CLI installs and an executable-free **Fab** asset, **bundles the signed sidecar into the packaged plugin** (BuildPlugin), and (on a real run) publishes `unreal-mcp-cli` to npm, cuts the GitHub Release + tag, verifies both, and announces in Discord. `dry_run=true` rehearses everything without publishing. |
 
 ### The signed self-bootstrapping sidecar bundle (release.yml artifact graph)
 
@@ -112,7 +111,7 @@ gate — the CLI verifies a **detached minisign (Ed25519) signature** over a PIN
 publisher key (zero-config-engine-connect D12; the workspace Ed25519 key-mint
 precedent).
 
-- **Release side** — `publish-release` signs the source zip with `minisign` and
+- **Release side** — `sign-plugin-source` signs the source (and Fab) zip with `minisign` and
   publishes `…-source-<version>.zip.minisig` beside it. The step is **fail-closed**:
   it errors when the `MINISIGN_SECRET_KEY` secret is absent, so a release never
   ships an unsigned source zip the CLI would reject. (This is stricter than the
@@ -234,8 +233,9 @@ Fab accepts a **source** plugin and recompiles it per engine version, **strippin
 keep the plugin submittable (`docs/ARCHITECTURE.md` §6.7); submission itself is still
 an entirely manual operator step (no CI job submits — see the checklist at the top):
 
-- **C1 — surviving sidecar under the canonical ThirdParty layout.** The prebuilt sidecar lives in the
-  Fab-surviving, engine-canonical `Source/ThirdParty/UnrealMcpBridge/<rid>/` folder (declared in
+- **C1 — no executable in the Fab asset.** Epic's review rejected the bundled sidecar, so the `-fab-` zip
+  carries none (the editor downloads it, `docs/ARCHITECTURE.md` §6.8). For the CLI and packaged assets the
+  prebuilt sidecar lives in the engine-canonical `Source/ThirdParty/UnrealMcpBridge/<rid>/` folder (declared in
   `Config/FilterPlugin.ini`), staged into `Binaries/ThirdParty/UnrealMcpBridge/<rid>/` by
   `RuntimeDependencies`, and resolved from both paths (`ComposeBundledBridgeCandidates`). So an
   Epic-compiled build resolves the sidecar even though `Binaries/` was stripped.

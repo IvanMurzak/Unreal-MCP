@@ -7,6 +7,7 @@
 #include "HAL/PlatformProcess.h"
 #include "HAL/PlatformTime.h"       // FPlatformTime::Seconds (WaitForExit) — was transitively via the removed Async/Async.h
 #include "Misc/Paths.h"
+#include "Misc/FileHelper.h"
 #include "Interfaces/IPluginManager.h"
 
 #include <random>
@@ -159,15 +160,52 @@ FString FUnrealMcpSidecarManager::PluginVersionName()
 	return Plugin.IsValid() ? Plugin->GetDescriptor().VersionName : FString();
 }
 
-bool FUnrealMcpSidecarManager::IsCompleteDownloadedBridgeDir(const FString& Dir)
+FString FUnrealMcpSidecarManager::BridgeManifestPath(const FString& PluginBaseDir)
 {
-	return !Dir.IsEmpty() && FPaths::FileExists(Dir / DownloadedBridgeMarkerName) && FPaths::FileExists(Dir / BridgeBinaryBasename());
+	if (PluginBaseDir.IsEmpty())
+		return FString();
+	return FPaths::ConvertRelativePathToFull(PluginBaseDir / TEXT("Source") / TEXT("ThirdParty") / TEXT("UnrealMcpBridge") / TEXT("SHA256SUMS"));
+}
+
+FString FUnrealMcpSidecarManager::ShippedBridgeZipDigest(const FString& ManifestText, const FString& Rid)
+{
+	// coreutils `sha256sum` lines: "<64 hex>  <name>" (binary mode: "<hex> *<name>"). Exact name match only.
+	const FString Asset = FString::Printf(TEXT("unreal-mcp-bridge-%s.zip"), *Rid);
+	TArray<FString> Lines;
+	ManifestText.ParseIntoArrayLines(Lines);
+	for (const FString& Line : Lines)
+	{
+		FString Digest, Name;
+		if (!Line.TrimStartAndEnd().Split(TEXT(" "), &Digest, &Name))
+			continue;
+		Name = Name.TrimStartAndEnd();
+		Name.RemoveFromStart(TEXT("*"));
+		if (Name == Asset && Digest.Len() == 64)
+			return Digest.ToLower();
+	}
+	return FString();
+}
+
+bool FUnrealMcpSidecarManager::IsCompleteDownloadedBridgeDir(const FString& Dir, const FString& ExpectedDigest)
+{
+	FString Marker;
+	return !Dir.IsEmpty() && !ExpectedDigest.IsEmpty()
+		&& FFileHelper::LoadFileToString(Marker, *(Dir / DownloadedBridgeMarkerName))
+		&& Marker.TrimStartAndEnd().Equals(ExpectedDigest, ESearchCase::IgnoreCase)
+		&& FPaths::FileExists(Dir / BridgeBinaryBasename());
 }
 
 FString FUnrealMcpSidecarManager::ResolveDownloadedBridgePath()
 {
-	const FString Dir = ComposeDownloadedBridgeDir(BridgeCacheRoot(), PluginVersionName(), ResolveDownloadRid());
-	return IsCompleteDownloadedBridgeDir(Dir) ? Dir / BridgeBinaryBasename() : FString();
+	// Only a cache dir whose marker records the digest THIS plugin ships is trusted: a plugin without SHA256SUMS
+	// (a dev checkout) never runs a cached bridge, and a dir from another build of the same version is ignored.
+	TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("UnrealMCP"));
+	FString ManifestText;
+	if (!Plugin.IsValid() || !FFileHelper::LoadFileToString(ManifestText, *BridgeManifestPath(Plugin->GetBaseDir())))
+		return FString();
+	const FString Rid = ResolveDownloadRid();
+	const FString Dir = ComposeDownloadedBridgeDir(BridgeCacheRoot(), Plugin->GetDescriptor().VersionName, Rid);
+	return IsCompleteDownloadedBridgeDir(Dir, ShippedBridgeZipDigest(ManifestText, Rid)) ? Dir / BridgeBinaryBasename() : FString();
 }
 
 FString FUnrealMcpSidecarManager::ResolveBridgeBinaryPath()

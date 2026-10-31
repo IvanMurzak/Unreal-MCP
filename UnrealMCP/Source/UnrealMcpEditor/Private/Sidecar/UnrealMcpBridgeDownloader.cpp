@@ -55,8 +55,7 @@ FString FUnrealMcpBridgeDownloader::BridgeDownloadUrl(const FString& Base, const
 
 FString FUnrealMcpBridgeDownloader::ManifestPath(const FString& PluginBaseDir)
 {
-	return FPaths::ConvertRelativePathToFull(
-		PluginBaseDir / TEXT("Source") / TEXT("ThirdParty") / TEXT("UnrealMcpBridge") / ManifestFileName);
+	return FUnrealMcpSidecarManager::BridgeManifestPath(PluginBaseDir);
 }
 
 bool FUnrealMcpBridgeDownloader::VerifyBridgeZip(const FString& InManifestText, const FString& InRid, const FString& ZipDigest, FString& OutError)
@@ -133,15 +132,18 @@ bool FUnrealMcpBridgeDownloader::ExtractBridgeZip(const TArray<uint8>& ZipBytes,
 		return false;
 	}
 
-	// Publish atomically. Another editor may have finished the same version first: keep its complete dir. A stale,
-	// incomplete dir (never produced by this code, but possibly by a user) is replaced.
-	if (PlatformFile.MoveFile(*InTargetDir, *Staging))
-		return true;
-	if (FUnrealMcpSidecarManager::IsCompleteDownloadedBridgeDir(InTargetDir))
-		return true;
-	FM.DeleteDirectory(*InTargetDir, /*RequireExists*/ false, /*Tree*/ true);
-	if (PlatformFile.MoveFile(*InTargetDir, *Staging))
-		return true;
+	// Publish atomically. Another editor may have finished the same download first: keep its dir when it records the
+	// same digest. Any other dir there (incomplete, or from another build of this version) is replaced. Retried briefly:
+	// right after a ~75 MB write, an antivirus scan can hold the new binary open (worker thread, so the sleep is fine).
+	for (int32 Attempt = 0; Attempt < 5; ++Attempt)
+	{
+		if (PlatformFile.MoveFile(*InTargetDir, *Staging))
+			return true;
+		if (FUnrealMcpSidecarManager::IsCompleteDownloadedBridgeDir(InTargetDir, ZipDigest))
+			return true;
+		FM.DeleteDirectory(*InTargetDir, /*RequireExists*/ false, /*Tree*/ true);
+		FPlatformProcess::Sleep(0.5f);
+	}
 	OutError = FString::Printf(TEXT("MCP bridge download could not be moved into '%s'."), *InTargetDir);
 	return false;
 }
@@ -185,14 +187,18 @@ void FUnrealMcpBridgeDownloader::Start(const FString& Version, const FString& In
 	Request->SetTimeout(BridgeDownloadTimeoutSeconds);
 	Request->OnProcessRequestComplete().BindThreadSafeSP(AsShared(), &FUnrealMcpBridgeDownloader::OnHttpComplete);
 	if (!Request->ProcessRequest())
+	{
+		Request->OnProcessRequestComplete().Unbind();
+		Request.Reset();
 		Finish(false, FString::Printf(TEXT("MCP bridge download could not start (%s)."), *Url));
+	}
 }
 
-void FUnrealMcpBridgeDownloader::OnHttpComplete(FHttpRequestPtr, FHttpResponsePtr Response, bool bConnectedOk)
+void FUnrealMcpBridgeDownloader::OnHttpComplete(FHttpRequestPtr CompletedRequest, FHttpResponsePtr Response, bool bConnectedOk)
 {
+	if (bCancelled || CompletedRequest != Request)
+		return; // cancelled, or a stale request superseded by a retry
 	Request.Reset();
-	if (bCancelled)
-		return;
 	if (!bConnectedOk || !Response.IsValid())
 	{
 		Finish(false, FString::Printf(

@@ -302,6 +302,41 @@ class UeEnvTests(unittest.TestCase):
             self.assertTrue(Path(sys.executable).exists())
 
 
+class ConnectionSmokeLogTests(unittest.TestCase):
+    """The editor-log markers connection_smoke.py reads, incl. the §6.8 bridge download."""
+
+    def scan(self, *lines: str) -> dict:
+        smoke = load("connection_smoke", ROOT / "scripts/connection_smoke.py")
+        with tempfile.TemporaryDirectory() as folder:
+            log = Path(folder) / "editor.log"
+            log.write_text("\n".join(lines), encoding="utf-8")
+            return smoke.scan_log(log)
+
+    NO_BINARY = "LogUnrealMcp: Warning: [Unreal-MCP] no sidecar binary resolved for rid 'win-x64'"
+    DOWNLOADING = "LogUnrealMcp: [Unreal-MCP] no bridge binary resolved; downloading https://github.com/x.zip"
+
+    def test_no_binary_without_a_download_is_fatal(self):
+        self.assertTrue(self.scan(self.NO_BINARY)["no_binary"])
+
+    def test_a_download_in_flight_is_not_fatal(self):
+        marks = self.scan(self.NO_BINARY, self.DOWNLOADING)
+        self.assertFalse(marks["no_binary"])
+        self.assertFalse(marks["bridge_download_failed"])
+
+    def test_the_success_line_is_not_a_failure(self):
+        ok = "LogUnrealMcp: [Unreal-MCP] MCP bridge downloaded and verified: C:/cache/unreal-mcp-bridge.exe"
+        self.assertFalse(self.scan(self.NO_BINARY, self.DOWNLOADING, ok)["bridge_download_failed"])
+
+    def test_every_downloader_failure_line_ends_the_wait(self):
+        for failure in ("MCP bridge download failed: could not reach github.com",
+                        "MCP bridge download rejected: the downloaded zip SHA256 did not match",
+                        "MCP bridge download is not a readable zip.",
+                        "MCP bridge download: failed to extract 'x'.",
+                        "Cannot download the MCP bridge: this UnrealMCP build has no bridge checksum manifest"):
+            marks = self.scan(self.NO_BINARY, self.DOWNLOADING, f"LogUnrealMcp: Warning: [Unreal-MCP] {failure}")
+            self.assertTrue(marks["bridge_download_failed"], failure)
+
+
 class UeJsonTests(unittest.TestCase):
     def test_strict_json_is_unchanged(self):
         text = json.dumps({"a": [1, 2.5, None, True], "b": {"c": "d"}})
