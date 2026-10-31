@@ -257,6 +257,34 @@ void FUnrealMcpEditorViewModelSpec::Define()
 			TestEqual("NoBinary button label is Connect",
 				FUnrealMcpEditorViewModel::GetButtonText(EUnrealMcpConnectionState::NoBinary).ToString(), FString(TEXT("Connect")));
 		});
+
+		It("shows a bridge download in flight as Connecting with its progress line, and a failed one as NoBinary with its reason (6.8)", [this]()
+		{
+			TSharedRef<FRecording> Rec = MakeShared<FRecording>();
+			Rec->bBridgeBinaryResolvable = false;
+			TSharedRef<FUnrealMcpEditorViewModel> VM = MakeViewModel(Rec);
+			bool bDownloading = true;
+			FString Message = TEXT("Downloading the MCP bridge (unreal-mcp-bridge 0.26.1, win-x64) from GitHub…");
+			VM->IsBridgeDownloadingSink = [&bDownloading]() { return bDownloading; };
+			VM->BridgeDownloadMessageSink = [&Message]() { return Message; };
+
+			TestEqual("downloading -> Connecting, not NoBinary",
+				static_cast<int32>(VM->GetEffectiveConnectionState()), static_cast<int32>(EUnrealMcpConnectionState::Connecting));
+			TestEqual("progress line", VM->GetBridgeStatusHint().ToString(), Message);
+
+			bDownloading = false;
+			Message = TEXT("MCP bridge download failed: could not reach github.com (offline, or blocked by a firewall/proxy?).");
+			TestEqual("failed -> NoBinary",
+				static_cast<int32>(VM->GetEffectiveConnectionState()), static_cast<int32>(EUnrealMcpConnectionState::NoBinary));
+			TestEqual("the failure reason replaces the generic hint", VM->GetBridgeStatusHint().ToString(), Message);
+
+			Message.Reset();
+			TestEqual("no download message -> the generic NoBinary guidance", VM->GetBridgeStatusHint().ToString(),
+				FUnrealMcpEditorViewModel::GetConnectionHint(EUnrealMcpConnectionState::NoBinary).ToString());
+
+			Rec->bBridgeBinaryResolvable = true;
+			TestTrue("resolvable + idle -> no line", VM->GetBridgeStatusHint().IsEmpty());
+		});
 	});
 
 	Describe("Connect / Disconnect (the M9b reconnect-halt rule)", [this]()
@@ -491,6 +519,40 @@ void FUnrealMcpEditorViewModelSpec::Define()
 			TestTrue("actionable failure mentions installing the bridge",
 				VM->GetDeviceAuthError().Contains(TEXT("bootstrap-local")) || VM->GetDeviceAuthError().Contains(TEXT("reinstall")));
 			TestFalse("failure is NOT the cryptic No-sidecar-connected message", VM->GetDeviceAuthError() == TEXT("No sidecar connected."));
+		});
+
+		It("does not time out the auth wait while the bridge is still downloading, and reports a failed download's reason (6.8)", [this]()
+		{
+			TSharedRef<FRecording> Rec = MakeShared<FRecording>();
+			TSharedRef<FUnrealMcpEditorViewModel> VM = MakeViewModel(Rec);
+			Rec->bSidecarConnected = false;
+			Rec->bSidecarCanStart = true; // the coordinator reports true while the download is in flight
+			bool bDownloading = true;
+			FString Message = TEXT("Downloading the MCP bridge");
+			VM->IsBridgeDownloadingSink = [&bDownloading]() { return bDownloading; };
+			VM->BridgeDownloadMessageSink = [&Message]() { return Message; };
+
+			VM->Authorize(/*NowSeconds*/ 100.0);
+			VM->TickAuthTimeout(/*NowSeconds*/ 100.0 + 120.0); // a slow 32 MB download: far past the 20 s bound
+			TestEqual("still connecting while downloading", static_cast<int32>(VM->GetDeviceAuthState()), static_cast<int32>(EUnrealMcpDeviceAuthState::Connecting));
+
+			// The download completes; the bound counts from there.
+			bDownloading = false;
+			Message.Reset();
+			VM->TickAuthTimeout(/*NowSeconds*/ 100.0 + 125.0);
+			TestEqual("the bound restarts at completion", static_cast<int32>(VM->GetDeviceAuthState()), static_cast<int32>(EUnrealMcpDeviceAuthState::Connecting));
+			VM->TickAuthTimeout(/*NowSeconds*/ 100.0 + 180.0);
+			TestEqual("then times out as before", static_cast<int32>(VM->GetDeviceAuthState()), static_cast<int32>(EUnrealMcpDeviceAuthState::Failed));
+
+			// A failed download's reason is the auth error.
+			TSharedRef<FUnrealMcpEditorViewModel> VmFailed = MakeViewModel(Rec);
+			bool bFailedDownloading = true;
+			VmFailed->IsBridgeDownloadingSink = [&bFailedDownloading]() { return bFailedDownloading; };
+			VmFailed->BridgeDownloadMessageSink = []() { return FString(TEXT("MCP bridge download failed: could not reach github.com")); };
+			VmFailed->Authorize(/*NowSeconds*/ 0.0);
+			bFailedDownloading = false;
+			VmFailed->TickAuthTimeout(/*NowSeconds*/ 60.0);
+			TestEqual("failed download reason", VmFailed->GetDeviceAuthError(), FString(TEXT("MCP bridge download failed: could not reach github.com")));
 		});
 
 		It("Authorize fails fast actionably when the bridge binary cannot start at all (issue #99)", [this]()

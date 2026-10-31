@@ -18,8 +18,11 @@ is declared in `Config/FilterPlugin.ini`, and is staged into
 folder except this README and the `.gitkeep` placeholders, so the folder structure ships in the
 source zip while the ~73–80 MB self-contained payloads are staged only transiently:
 
-- by `release.yml` (signed, per RID) before `BuildPlugin` for a GitHub/npm release, and
-- by Epic's Fab recompile (from the surviving source you submit).
+- by `release.yml` (signed, per RID) before `BuildPlugin` for a GitHub/npm release.
+
+`release.yml` also writes `SHA256SUMS` here (gitignored): the digests of the per-RID release zips. The Fab
+asset ships this folder with no payload but with `SHA256SUMS`, which the editor's bridge download verifies
+against (docs/ARCHITECTURE.md §6.8).
 
 For a local packaged-game verification, publish the sidecar for your RID and place it here:
 `python bridge/publish.py --platforms win-x64 --no-zip` then copy `bridge/publish/win-x64/*` into

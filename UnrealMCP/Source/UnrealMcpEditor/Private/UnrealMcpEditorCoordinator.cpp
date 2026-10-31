@@ -16,6 +16,7 @@
 #include "Dispatch/UnrealMcpGameThreadDispatcher.h"
 #include "Bridge/UnrealMcpBridgeServer.h"
 #include "Sidecar/UnrealMcpSidecarManager.h"
+#include "Sidecar/UnrealMcpBridgeDownloader.h"
 #include "Server/UnrealMcpServerManager.h"
 #include "Extensions/UnrealMcpExtensionManager.h"
 #include "Extensions/UnrealMcpExtensionInstaller.h" // §7 install channel #3 (catalog fetch + installer)
@@ -220,10 +221,13 @@ void FUnrealMcpEditorCoordinator::Startup()
 
 	// A commandlet (a cook while packaging, -run=...) is a one-shot process no agent talks to: a sidecar there would
 	// only dial the server and be restarted until the process ends ("sidecar exited; restarting" warnings in the cook).
+	SidecarIpcPort = BoundPort;
+	SidecarToken = Token;
 	if (FUnrealMcpSidecarManager::ShouldAutoStart(IsRunningCommandlet()))
 	{
 		SidecarManager = MakeUnique<FUnrealMcpSidecarManager>();
-		SidecarManager->StartForPort(BoundPort, Token);
+		BridgeDownloader = MakeShared<FUnrealMcpBridgeDownloader, ESPMode::ThreadSafe>();
+		StartSidecarOrDownload();
 	}
 	else
 	{
@@ -266,14 +270,12 @@ void FUnrealMcpEditorCoordinator::Startup()
 	// imminent / already happening). Not running → StartForPort spawns it and returns false ONLY when the binary
 	// genuinely cannot be resolved (packaged-without-<rid> / unset UNREAL_MCP_BRIDGE_PATH) — the view-model then
 	// fails fast with an actionable message instead of awaiting a handshake that will never come.
-	FUnrealMcpSidecarManager* SidecarPtrForAuth = SidecarManager.Get();
-	ViewModel->OnEnsureSidecarStarted = [SidecarPtrForAuth, BoundPort, Token]() -> bool
+	// §6.8: a missing binary starts (or joins) the bridge download, which starts the sidecar once verified.
+	ViewModel->OnEnsureSidecarStarted = [this]() -> bool
 	{
-		if (!SidecarPtrForAuth)
+		if (!SidecarManager.IsValid())
 			return false;
-		if (SidecarPtrForAuth->IsRunning())
-			return true;
-		return SidecarPtrForAuth->StartForPort(BoundPort, Token);
+		return SidecarManager->IsRunning() || StartSidecarOrDownload();
 	};
 	ViewModel->OnOpenBrowser = [](const FString& Url)
 	{
@@ -286,8 +288,17 @@ void FUnrealMcpEditorCoordinator::Startup()
 	// the per-frame TAttribute that reads GetEffectiveConnectionState never walks the filesystem. A mid-session
 	// recovery (run `unreal-mcp-cli bootstrap-local`, then "Restart bridge") still clears the hint the instant the
 	// sidecar connects, because GetEffectiveConnectionState short-circuits NoBinary off a live Connected link.
-	const bool bBridgeBinaryResolvable = !FUnrealMcpSidecarManager::ResolveBridgeBinaryPath().IsEmpty();
-	ViewModel->IsBridgeBinaryResolvableSink = [bBridgeBinaryResolvable]() -> bool { return bBridgeBinaryResolvable; };
+	// §6.8: the flag flips true when a download completes; the download sinks drive the "Downloading…" / failure line.
+	bBridgeBinaryResolvable = !FUnrealMcpSidecarManager::ResolveBridgeBinaryPath().IsEmpty();
+	ViewModel->IsBridgeBinaryResolvableSink = [this]() -> bool { return bBridgeBinaryResolvable; };
+	ViewModel->IsBridgeDownloadingSink = [this]() -> bool
+	{
+		return BridgeDownloader.IsValid() && BridgeDownloader->GetState() == FUnrealMcpBridgeDownloader::EState::Downloading;
+	};
+	ViewModel->BridgeDownloadMessageSink = [this]() -> FString
+	{
+		return BridgeDownloader.IsValid() ? BridgeDownloader->GetMessage() : FString();
+	};
 
 	// §7 in-UI local-server (issue #95): wire the MCP-server card's Start/Stop to the local server manager. The
 	// view-model already gates these to Custom+http (ToggleLocalServer no-ops otherwise) — the sinks just execute.
@@ -469,12 +480,12 @@ void FUnrealMcpEditorCoordinator::Startup()
 	MainWindowTab->Register(
 		ViewModel.ToSharedRef(),
 		PluginVersion,
-		FSimpleDelegate::CreateLambda([SidecarPtr, BoundPort, Token]()
+		FSimpleDelegate::CreateLambda([this]()
 		{
-			if (SidecarPtr)
+			if (SidecarManager.IsValid())
 			{
-				SidecarPtr->Stop();
-				SidecarPtr->StartForPort(BoundPort, Token);
+				SidecarManager->Stop();
+				StartSidecarOrDownload(); // §6.8: also the retry after a failed (e.g. offline) bridge download
 			}
 		}),
 		[SidecarPtr]() -> FString
@@ -711,6 +722,32 @@ void FUnrealMcpEditorCoordinator::ApplyServerLaunchArgsResult(const TSharedPtr<F
 		ServerManager->Start(Pending.Port, Args);
 }
 
+bool FUnrealMcpEditorCoordinator::StartSidecarOrDownload()
+{
+	if (!SidecarManager.IsValid())
+		return false;
+	if (SidecarManager->StartForPort(SidecarIpcPort, SidecarToken))
+		return true;
+	// A spawn failure with a resolvable binary, or a platform with no RID (§12.5), is not a download case.
+	const FString Rid = FUnrealMcpSidecarManager::ResolveDownloadRid();
+	if (!BridgeDownloader.IsValid() || Rid.IsEmpty() || !FUnrealMcpSidecarManager::ResolveBridgeBinaryPath().IsEmpty())
+		return false;
+	TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("UnrealMCP"));
+	if (!Plugin.IsValid())
+		return false;
+	BridgeDownloader->Start(FUnrealMcpSidecarManager::PluginVersionName(), Rid, Plugin->GetBaseDir(), FUnrealMcpSidecarManager::BridgeCacheRoot(),
+		[this](bool bOk, const FString&)
+		{
+			// Game thread; never invoked after Shutdown's Cancel(), so `this` and the sidecar manager are alive.
+			if (!bOk || !SidecarManager.IsValid())
+				return;
+			bBridgeBinaryResolvable = true;
+			if (!SidecarManager->IsRunning())
+				SidecarManager->StartForPort(SidecarIpcPort, SidecarToken);
+		});
+	return BridgeDownloader->GetState() == FUnrealMcpBridgeDownloader::EState::Downloading;
+}
+
 void FUnrealMcpEditorCoordinator::Shutdown()
 {
 	if (!bStarted)
@@ -722,6 +759,13 @@ void FUnrealMcpEditorCoordinator::Shutdown()
 	// an empty list instead of dereferencing the soon-to-be-freed extension manager. Mirrors the aux-windows guard.
 	if (ExtProvidersAlive.IsValid())
 		*ExtProvidersAlive = false;
+
+	// §6.8: cancel an in-flight bridge download first; its completion would start the sidecar torn down below.
+	if (BridgeDownloader.IsValid())
+	{
+		BridgeDownloader->Cancel();
+		BridgeDownloader.Reset();
+	}
 
 	if (PreExitHandle.IsValid())
 	{
@@ -783,7 +827,9 @@ void FUnrealMcpEditorCoordinator::Shutdown()
 		ViewModel->OnStartLocalServer = nullptr;
 		ViewModel->OnStopLocalServer = nullptr;
 		ViewModel->IsLocalServerRunningSink = nullptr;
-		ViewModel->IsBridgeBinaryResolvableSink = nullptr; // issue #63: captures only a bool, nulled for teardown symmetry
+		ViewModel->IsBridgeBinaryResolvableSink = nullptr; // these three capture `this`
+		ViewModel->IsBridgeDownloadingSink = nullptr;
+		ViewModel->BridgeDownloadMessageSink = nullptr;
 	}
 	ViewModel.Reset();
 

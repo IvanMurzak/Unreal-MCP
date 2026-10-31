@@ -63,6 +63,11 @@ SERVER_BASENAME = "gamedev-mcp-server.exe" if os.name == "nt" else "gamedev-mcp-
 MARK_PLUGIN_LOADED = "[Unreal-MCP] plugin loaded"
 MARK_SIDECAR_SPAWN = "spawned sidecar"
 MARK_NO_BINARY = "no sidecar binary resolved"
+# A plugin that ships no bridge (the Fab asset) downloads it (docs/ARCHITECTURE.md §6.8): no binary is then not fatal
+# while the download runs, and a failed download ends the wait at once.
+MARK_BRIDGE_DOWNLOAD = "no bridge binary resolved; downloading"
+# Every downloader failure line starts "MCP bridge download" (never "downloaded", the success line) or "Cannot download".
+RE_BRIDGE_DOWNLOAD_FAILED = re.compile(r"\[Unreal-MCP\] (MCP bridge download(?!ed)|Cannot download the MCP bridge)")
 RE_FATAL = re.compile(r"Fatal error|Unhandled Exception|\[Callstack\]")
 
 
@@ -491,7 +496,9 @@ def scan_log(path: Path) -> dict:
     except OSError:
         return {}
     return {"plugin_loaded": MARK_PLUGIN_LOADED in text, "sidecar_spawned": MARK_SIDECAR_SPAWN in text,
-            "no_binary": MARK_NO_BINARY in text, "fatal": bool(RE_FATAL.search(text))}
+            "no_binary": MARK_NO_BINARY in text and MARK_BRIDGE_DOWNLOAD not in text,
+            "bridge_download_failed": MARK_BRIDGE_DOWNLOAD in text and bool(RE_BRIDGE_DOWNLOAD_FAILED.search(text)),
+            "fatal": bool(RE_FATAL.search(text))}
 
 
 def main() -> int:
@@ -584,6 +591,7 @@ def main() -> int:
     connected_at = None
     marks: dict = {}
     start = time.monotonic()
+    no_binary_seen = False
     try:
         while time.monotonic() - start < args.timeout:
             time.sleep(args.poll)
@@ -592,8 +600,12 @@ def main() -> int:
             if server_proc and server_proc.poll() is not None:
                 connect_result = "SERVER_EXITED"; break
             marks = scan_log(logpath)
-            if marks.get("no_binary"):
+            # One poll of grace: the "downloading" line follows the no-binary line within the same frame.
+            if marks.get("no_binary") and no_binary_seen:
                 connect_result = "NO_SIDECAR_BINARY"; break
+            no_binary_seen = bool(marks.get("no_binary"))
+            if marks.get("bridge_download_failed"):
+                connect_result = "BRIDGE_DOWNLOAD_FAILED"; break
             if marks.get("fatal"):
                 connect_result = "EDITOR_CRASH"; break
             elapsed = int(time.monotonic() - start)

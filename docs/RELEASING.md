@@ -34,14 +34,14 @@ version bump publishes nothing. Fab submission remains fully manual:
       branch or a normal docs/code PR. The historical one-time bootstrap runbook remains below for
       reference.
 - [ ] **Fab (Epic marketplace) submission.** Entirely manual and **out of scope of every CI
-      workflow** — the release pipeline produces both a dedicated source-plugin zip
-      (`unreal-mcp-plugin-source-<version>.zip`, the CLI/Fab install asset) and the packaged
+      workflow** — the release pipeline produces the executable-free Fab asset
+      (`unreal-mcp-plugin-fab-<version>.zip`, **the zip to submit**), the dedicated source-plugin zip
+      (`unreal-mcp-plugin-source-<version>.zip`, the CLI install asset) and the packaged
       BuildPlugin zip (`unreal-mcp-plugin-<version>.zip`), but no job submits to Fab. Fab carries
       its own metadata/screenshot requirements and an Epic review; do it by hand when the listing
-      is ready. The plugin is
-      Fab source-submission READY (#139/#187): the sidecar survives Fab's `Binaries/` strip via
-      `Source/ThirdParty/UnrealMcpBridge/<rid>/`, the distributed `.uplugin` ships no test module, and `FilterPlugin.ini`
-      is complete — see [Fab source-submission readiness](#fab-epic-marketplace-source-submission-readiness-139187) below.
+      is ready. The `-fab-` zip ships no executable (Epic rejected the bundled sidecar; the editor
+      downloads and verifies it instead, `docs/ARCHITECTURE.md` §6.8), the distributed `.uplugin` ships no
+      test module, and `FilterPlugin.ini` is complete — see [Fab source-submission readiness](#fab-epic-marketplace-source-submission-readiness-139187) below.
 
 A merge to `main` publishes nothing: `release.yml` has no `push` trigger. The safe rehearsal is a
 `dry_run=true` dispatch (below), which exercises every test + artifact job and skips every
@@ -53,7 +53,7 @@ npm/tag/Release/Discord job.
 | --- | --- | --- |
 | `test_pull_request.yml` | `pull_request` to `main` (+ manual) | Fans out the PR test legs: bridge build+xUnit (ubuntu + windows), cli node 20/22, and — when a runner is registered — the UE 5.8 plugin BuildPlugin + Automation leg. |
 | `test_cli.yml` | `workflow_call` (reusable) | Builds + tests `unreal-mcp-cli` on Node 20 & 22. Called by both `test_pull_request.yml` and `release.yml`. |
-| `release.yml` | manual `workflow_dispatch` **only** | Dispatch-only release: builds + **code-signs** the self-contained bridge per RID, validates the plugin Automation leg across UE 5.5/5.6/5.7/5.8, publishes a dedicated **source** plugin asset for CLI/Fab installs, **bundles the signed sidecar into the packaged plugin** (BuildPlugin), and (on a real run) publishes `unreal-mcp-cli` to npm, cuts the GitHub Release + tag, verifies both, and announces in Discord. `dry_run=true` rehearses everything without publishing. |
+| `release.yml` | manual `workflow_dispatch` **only** | Dispatch-only release: builds + **code-signs** the self-contained bridge per RID, validates the plugin Automation leg across UE 5.5/5.6/5.7/5.8, publishes a dedicated **source** plugin asset for CLI installs and an executable-free **Fab** asset, **bundles the signed sidecar into the packaged plugin** (BuildPlugin), and (on a real run) publishes `unreal-mcp-cli` to npm, cuts the GitHub Release + tag, verifies both, and announces in Discord. `dry_run=true` rehearses everything without publishing. |
 
 ### The signed self-bootstrapping sidecar bundle (release.yml artifact graph)
 
@@ -80,9 +80,14 @@ artifact jobs in `release.yml`:
   resolver reads — declared on the runtime module in R2 so the bridge bundles into
   packaged GAMES, not just editor packages; see
   [Packaged-game sidecar bundling](#packaged-game-sidecar-bundling-r2) below), then emits
-  **two plugin zips**: the dedicated source install asset
-  `unreal-mcp-plugin-source-<version>.zip` (CLI/Fab source form, no `EngineVersion` pin, no test module)
-  and the packaged BuildPlugin asset `unreal-mcp-plugin-<version>.zip`.
+  **three plugin zips**: the dedicated source install asset
+  `unreal-mcp-plugin-source-<version>.zip` (CLI source form, no `EngineVersion` pin, no test module),
+  the Fab asset `unreal-mcp-plugin-fab-<version>.zip` (the same source with **no executable**: the bridge
+  payloads are removed and `ue_ci.py fab-zip` fails on any file it flags by extension, PE/ELF/Mach-O magic
+  bytes or shebang; the editor downloads the bridge instead, `docs/ARCHITECTURE.md` §6.8) and the packaged
+  BuildPlugin asset `unreal-mcp-plugin-<version>.zip`. It also downloads the four per-RID release zips and
+  `stage-bridge` writes their SHA-256 into `Source/ThirdParty/UnrealMcpBridge/SHA256SUMS`, which ships in all
+  three: the trust anchor the editor verifies a downloaded bridge against (§6.8).
   A post-BuildPlugin guard copies the binaries from `Source/ThirdParty/UnrealMcpBridge/<rid>/` into the
   package's `Binaries/ThirdParty/...` output if `RuntimeDependencies` did not stage
   them, and asserts the surviving `Source/ThirdParty/UnrealMcpBridge/<rid>/` payload shipped (the form Epic's
@@ -90,9 +95,9 @@ artifact jobs in `release.yml`:
   so its UE 5.8 `BuildPlugin` run does not overlap the UE 5.8 validation leg on
   the same machine's AutomationTool lock. Like every self-hosted UE job, it also
   holds the [machine-wide UE lock](#machine-wide-ue-lock) around its UE steps.
-- **`publish-release`** additionally **signs** `unreal-mcp-plugin-source-<version>.zip`
-  with `minisign` and attaches `unreal-mcp-plugin-source-<version>.zip.minisig` as a
-  sibling release asset (see [Plugin-source signing key](#plugin-source-signing-key-d12--cli-verifies-before-install)).
+- **`sign-plugin-source`** **signs** `unreal-mcp-plugin-source-<version>.zip` and
+  `unreal-mcp-plugin-fab-<version>.zip` with `minisign`; `publish-release` attaches both `.minisig` files as
+  sibling release assets (see [Plugin-source signing key](#plugin-source-signing-key-d12--cli-verifies-before-install)).
 
 ### Plugin-source signing key (D12 — CLI verifies before install)
 
@@ -106,7 +111,7 @@ gate — the CLI verifies a **detached minisign (Ed25519) signature** over a PIN
 publisher key (zero-config-engine-connect D12; the workspace Ed25519 key-mint
 precedent).
 
-- **Release side** — `publish-release` signs the source zip with `minisign` and
+- **Release side** — `sign-plugin-source` signs the source (and Fab) zip with `minisign` and
   publishes `…-source-<version>.zip.minisig` beside it. The step is **fail-closed**:
   it errors when the `MINISIGN_SECRET_KEY` secret is absent, so a release never
   ships an unsigned source zip the CLI would reject. (This is stricter than the
@@ -228,8 +233,9 @@ Fab accepts a **source** plugin and recompiles it per engine version, **strippin
 keep the plugin submittable (`docs/ARCHITECTURE.md` §6.7); submission itself is still
 an entirely manual operator step (no CI job submits — see the checklist at the top):
 
-- **C1 — surviving sidecar under the canonical ThirdParty layout.** The prebuilt sidecar lives in the
-  Fab-surviving, engine-canonical `Source/ThirdParty/UnrealMcpBridge/<rid>/` folder (declared in
+- **C1 — no executable in the Fab asset.** Epic's review rejected the bundled sidecar, so the `-fab-` zip
+  carries none (the editor downloads it, `docs/ARCHITECTURE.md` §6.8). For the CLI and packaged assets the
+  prebuilt sidecar lives in the engine-canonical `Source/ThirdParty/UnrealMcpBridge/<rid>/` folder (declared in
   `Config/FilterPlugin.ini`), staged into `Binaries/ThirdParty/UnrealMcpBridge/<rid>/` by
   `RuntimeDependencies`, and resolved from both paths (`ComposeBundledBridgeCandidates`). So an
   Epic-compiled build resolves the sidecar even though `Binaries/` was stripped.
@@ -247,11 +253,15 @@ an entirely manual operator step (no CI job submits — see the checklist at the
   `"PlatformAllowList": ["Win64","Mac","Linux"]` (desktop-only — console/mobile cannot spawn the .NET
   sidecar), which Fab review expects.
 
-**Manual Fab submission (operator):** prefer the release-produced
-`unreal-mcp-plugin-source-<version>.zip` asset — it is the distributed, test-free source form with
-the signed `Source/ThirdParty/UnrealMcpBridge/<rid>/` payloads already staged. If you must rebuild it
-locally, verify the source zip carries `Source/ThirdParty/UnrealMcpBridge/<rid>/` + a test-free `.uplugin`,
-then upload that source zip to Fab. **Do not bump `VersionName` for a Fab submission** unless
+**Manual Fab submission (operator):** submit the release-produced
+`unreal-mcp-plugin-fab-<version>.zip` — never the `-source-` zip. Epic's Fab technical review rejects any
+executable ("only source files are accepted"), and the `-source-` zip bundles the four bridge binaries for the
+CLI path. The `-fab-` zip is the same test-free source with no executable, plus
+`Source/ThirdParty/UnrealMcpBridge/SHA256SUMS`; on first launch the editor downloads `unreal-mcp-bridge-<rid>.zip`
+for its own version from the GitHub Release and verifies it against that file (`docs/ARCHITECTURE.md` §6.8), so
+the release must stay published with its bridge zips. Verify the zip before uploading:
+`minisign -Vm unreal-mcp-plugin-fab-<version>.zip -P <MINISIGN_PUBLIC_KEY>` and a listing with no
+`.exe`/`.dll`/`.so`/`.dylib` or extensionless apphost. **Do not bump `VersionName` for a Fab submission** unless
 it is also a coordinated release (the version is release-pipeline-owned).
 
 **Self-hosted runner Live Coding gotcha (UE 5.8+):** the unattended host-project rebuilds inside
@@ -320,7 +330,7 @@ dispatches it on `main`. `check-version` runs the guards, in its first job:
 Order: tests (`bridge`, `test-cli`, `plugin`) + builds (`build-bridge-*`,
 `build-plugin-zip`) → `sign-plugin-source` → `publish-npm` (skips if the version is
 already on npm) → `publish-release` (tag + GitHub Release) → `verify-release` (npm
-version live, tag present, all 7 assets attached) → `publish_discord`. Every job from
+version live, tag present, all 9 assets attached) → `publish_discord`. Every job from
 `publish-npm` on carries a job-level `dry_run != 'true'` guard, so a dry run shows
 them skipped. Because the tag is created only after npm, a run that fails before
 `publish-release` can simply be re-dispatched.

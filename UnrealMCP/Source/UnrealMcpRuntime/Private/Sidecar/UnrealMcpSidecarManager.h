@@ -14,10 +14,10 @@
  * §6 layer 1). Binary resolution follows the §6 BUNDLE model: (1) the UNREAL_MCP_BRIDGE_PATH dev/CI
  * override wins when set, then (2) the prebuilt self-contained binary bundled inside the plugin — checked
  * at the STAGED path Binaries/ThirdParty/UnrealMcpBridge/<rid>/ first, then the FAB-SURVIVING source
- * Source/ThirdParty/UnrealMcpBridge/<rid>/ (#139/#187: Fab strips Binaries/ from a source submission, so
- * the surviving folder is what Epic's recompile stages from). A fresh GUI install resolves the bundled path and auto-spawns at
- * StartupModule with zero user action; a dev source checkout (no staged binary) falls back to the
- * override, exactly as before.
+ * Source/ThirdParty/UnrealMcpBridge/<rid>/ (#139/#187), then (3) the verified per-user download cache
+ * (§6.8 — a Fab install ships no binaries, so the editor downloads the bridge for its own version). A
+ * CLI/BuildPlugin install resolves the bundled path and auto-spawns at StartupModule with zero user action;
+ * a dev source checkout (no staged binary) falls back to the override, exactly as before.
  */
 class UNREALMCPRUNTIME_API FUnrealMcpSidecarManager
 {
@@ -59,11 +59,61 @@ public:
 	int32 GetRestartCount() const { return Watchdog.GetRestartCount(); }
 
 	/**
-	 * Resolve the bridge binary path (§6 BUNDLE model): UNREAL_MCP_BRIDGE_PATH dev/CI override first,
-	 * then the bundled path inside the plugin. Empty when neither resolves (caller logs the actionable
-	 * packaged-without-<rid> error). The returned bundled path is absolute (ConvertRelativePathToFull).
+	 * Resolve the bridge binary path (§6.3): UNREAL_MCP_BRIDGE_PATH dev/CI override first, then the bundled
+	 * path inside the plugin, then the verified per-user download cache (§6.8 — what a Fab install, which ships
+	 * no binaries, runs). Empty when none resolves (the editor then downloads, or the caller logs the
+	 * actionable error). The returned bundled path is absolute (ConvertRelativePathToFull).
 	 */
 	static FString ResolveBridgeBinaryPath();
+
+	/**
+	 * The §6.3 precedence over already-composed candidates, pure + injectable for specs: @p Override when it
+	 * exists, else the first existing @p BundledCandidates entry, else @p DownloadedPath when it exists. Empty
+	 * entries never match.
+	 */
+	static FString PickBridgeBinaryPath(const FString& Override, const TArray<FString>& BundledCandidates,
+		const FString& DownloadedPath, TFunctionRef<bool(const FString&)> FileExists);
+
+	/**
+	 * Root of the per-user bridge download cache (§6.8): UNREAL_MCP_BRIDGE_CACHE_DIR when set, else
+	 * <UserSettingsDir>/UnrealMCP/bridge (%LOCALAPPDATA% on Windows, ~/Library/Application Support on macOS,
+	 * ~/.config on Linux). Per-user rather than plugin-local because a Fab install lives in the read-only engine
+	 * Plugins folder. Absolute.
+	 */
+	static FString BridgeCacheRoot();
+
+	/** <CacheRoot>/<Version>/<Rid> — the cache dir for one plugin version + RID. Empty when any input is empty. Pure. */
+	static FString ComposeDownloadedBridgeDir(const FString& CacheRoot, const FString& Version, const FString& Rid);
+
+	/**
+	 * The file written into a cache dir after its zip passed verification and was fully extracted (§6.8). A dir
+	 * without it is never resolved.
+	 */
+	static const TCHAR* DownloadedBridgeMarkerName;
+
+	/**
+	 * Whether @p Dir is a complete cache dir for @p ExpectedDigest: the bridge binary exists and the marker records
+	 * exactly that zip digest (the one this plugin ships). An empty digest never matches.
+	 */
+	static bool IsCompleteDownloadedBridgeDir(const FString& Dir, const FString& ExpectedDigest);
+
+	/** <PluginBaseDir>/Source/ThirdParty/UnrealMcpBridge/SHA256SUMS — the release-written digests (§6.8). Pure. */
+	static FString BridgeManifestPath(const FString& PluginBaseDir);
+
+	/** The digest @p ManifestText lists for `unreal-mcp-bridge-<rid>.zip` (lowercase), or empty. Pure. */
+	static FString ShippedBridgeZipDigest(const FString& ManifestText, const FString& Rid);
+
+	/**
+	 * The verified cached binary for this plugin version + host RID, or empty when the cache holds none, the plugin
+	 * ships no SHA256SUMS, or the marker records another digest.
+	 */
+	static FString ResolveDownloadedBridgePath();
+
+	/** The host's native RID for a download (§6.2; on macOS the physical CPU, no bundle probe). */
+	static FString ResolveDownloadRid() { return ResolveRid(/*bArm64DirExists*/ true); }
+
+	/** The UnrealMCP plugin's VersionName, or empty when the plugin is not found. */
+	static FString PluginVersionName();
 
 	/**
 	 * The .NET RID directory name for the current host platform (§6.2): "win-x64" / "linux-x64", or

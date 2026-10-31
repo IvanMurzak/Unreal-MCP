@@ -7,6 +7,7 @@
 #include "HAL/PlatformProcess.h"
 #include "HAL/PlatformTime.h"       // FPlatformTime::Seconds (WaitForExit) — was transitively via the removed Async/Async.h
 #include "Misc/Paths.h"
+#include "Misc/FileHelper.h"
 #include "Interfaces/IPluginManager.h"
 
 #include <random>
@@ -118,34 +119,110 @@ FString FUnrealMcpSidecarManager::ResolveEffectiveRid()
 	return ResolveRid(BundledArm64SliceExists());
 }
 
-FString FUnrealMcpSidecarManager::ResolveBridgeBinaryPath()
+FString FUnrealMcpSidecarManager::PickBridgeBinaryPath(const FString& Override, const TArray<FString>& BundledCandidates,
+	const FString& DownloadedPath, TFunctionRef<bool(const FString&)> FileExists)
 {
-	// §6.3 step 1 — dev/CI override: UNREAL_MCP_BRIDGE_PATH wins when set and present (bridge inner
-	// dev loop + live e2e). The bundled binary is NEVER preferred over an explicit override.
-	const FString Override = FPlatformMisc::GetEnvironmentVariable(TEXT("UNREAL_MCP_BRIDGE_PATH"));
-	if (!Override.IsEmpty() && FPaths::FileExists(Override))
+	// §6.3 step 1 — dev/CI override: UNREAL_MCP_BRIDGE_PATH wins when set and present (bridge inner dev loop + live
+	// e2e). Step 2 — the bundled binary (CLI / BuildPlugin installs). Step 3 — the verified download cache (§6.8).
+	if (!Override.IsEmpty() && FileExists(Override))
 		return Override;
-
-	// §6.3 step 2 — bundled path inside the plugin (the production path for every end user). The
-	// self-contained binary ships under Binaries/ThirdParty/UnrealMcpBridge/<rid>/ (§6.1, the STAGED path,
-	// used by packaged games + non-Fab GitHub releases) OR — for a Fab SOURCE submission (#139/#187) — under
-	// the Fab-surviving Source/ThirdParty/UnrealMcpBridge/<rid>/ folder that Epic's recompile stages from.
-	// Walk both, in that order; a dev
-	// source checkout has neither, so this returns empty and the override above is the dev path (unchanged
-	// behavior on a fresh source tree).
-	TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("UnrealMCP"));
-	if (!Plugin.IsValid())
-		return FString(); // §6.3 step 3 — neither resolves; caller logs the actionable error.
-
-	// Share the single §6.1 layout composition with the unit-tested pure helpers (no inline drift); pass the
-	// arm64-probe result so a host with only the osx-x64 slice degrades to that rid.
-	const TArray<FString> Candidates = ComposeBundledBridgeCandidates(Plugin->GetBaseDir(), BundledArm64SliceExists());
-	for (const FString& Candidate : Candidates)
+	for (const FString& Candidate : BundledCandidates)
 	{
-		if (FPaths::FileExists(Candidate))
+		if (!Candidate.IsEmpty() && FileExists(Candidate))
 			return Candidate;
 	}
+	if (!DownloadedPath.IsEmpty() && FileExists(DownloadedPath))
+		return DownloadedPath;
 	return FString();
+}
+
+const TCHAR* FUnrealMcpSidecarManager::DownloadedBridgeMarkerName = TEXT(".verified");
+
+FString FUnrealMcpSidecarManager::BridgeCacheRoot()
+{
+	const FString Override = FPlatformMisc::GetEnvironmentVariable(TEXT("UNREAL_MCP_BRIDGE_CACHE_DIR"));
+	const FString Root = Override.IsEmpty()
+		? FString(FPlatformProcess::UserSettingsDir()) / TEXT("UnrealMCP") / TEXT("bridge")
+		: Override;
+	return FPaths::ConvertRelativePathToFull(Root);
+}
+
+FString FUnrealMcpSidecarManager::ComposeDownloadedBridgeDir(const FString& CacheRoot, const FString& Version, const FString& Rid)
+{
+	if (CacheRoot.IsEmpty() || Version.IsEmpty() || Rid.IsEmpty())
+		return FString();
+	return FPaths::ConvertRelativePathToFull(CacheRoot / Version / Rid);
+}
+
+FString FUnrealMcpSidecarManager::PluginVersionName()
+{
+	TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("UnrealMCP"));
+	return Plugin.IsValid() ? Plugin->GetDescriptor().VersionName : FString();
+}
+
+FString FUnrealMcpSidecarManager::BridgeManifestPath(const FString& PluginBaseDir)
+{
+	if (PluginBaseDir.IsEmpty())
+		return FString();
+	return FPaths::ConvertRelativePathToFull(PluginBaseDir / TEXT("Source") / TEXT("ThirdParty") / TEXT("UnrealMcpBridge") / TEXT("SHA256SUMS"));
+}
+
+FString FUnrealMcpSidecarManager::ShippedBridgeZipDigest(const FString& ManifestText, const FString& Rid)
+{
+	// coreutils `sha256sum` lines: "<64 hex>  <name>" (binary mode: "<hex> *<name>"). Exact name match only.
+	const FString Asset = FString::Printf(TEXT("unreal-mcp-bridge-%s.zip"), *Rid);
+	TArray<FString> Lines;
+	ManifestText.ParseIntoArrayLines(Lines);
+	for (const FString& Line : Lines)
+	{
+		FString Digest, Name;
+		if (!Line.TrimStartAndEnd().Split(TEXT(" "), &Digest, &Name))
+			continue;
+		Name = Name.TrimStartAndEnd();
+		Name.RemoveFromStart(TEXT("*"));
+		if (Name == Asset && Digest.Len() == 64)
+			return Digest.ToLower();
+	}
+	return FString();
+}
+
+bool FUnrealMcpSidecarManager::IsCompleteDownloadedBridgeDir(const FString& Dir, const FString& ExpectedDigest)
+{
+	FString Marker;
+	return !Dir.IsEmpty() && !ExpectedDigest.IsEmpty()
+		&& FFileHelper::LoadFileToString(Marker, *(Dir / DownloadedBridgeMarkerName))
+		&& Marker.TrimStartAndEnd().Equals(ExpectedDigest, ESearchCase::IgnoreCase)
+		&& FPaths::FileExists(Dir / BridgeBinaryBasename());
+}
+
+FString FUnrealMcpSidecarManager::ResolveDownloadedBridgePath()
+{
+	// Only a cache dir whose marker records the digest THIS plugin ships is trusted: a plugin without SHA256SUMS
+	// (a dev checkout) never runs a cached bridge, and a dir from another build of the same version is ignored.
+	TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("UnrealMCP"));
+	FString ManifestText;
+	if (!Plugin.IsValid() || !FFileHelper::LoadFileToString(ManifestText, *BridgeManifestPath(Plugin->GetBaseDir())))
+		return FString();
+	const FString Rid = ResolveDownloadRid();
+	const FString Dir = ComposeDownloadedBridgeDir(BridgeCacheRoot(), Plugin->GetDescriptor().VersionName, Rid);
+	return IsCompleteDownloadedBridgeDir(Dir, ShippedBridgeZipDigest(ManifestText, Rid)) ? Dir / BridgeBinaryBasename() : FString();
+}
+
+FString FUnrealMcpSidecarManager::ResolveBridgeBinaryPath()
+{
+	// §6.3: the override, then the bundled binary — the STAGED Binaries/ThirdParty/UnrealMcpBridge/<rid>/ path
+	// (§6.1, packaged games + BuildPlugin installs) and the Fab-surviving Source/ThirdParty/UnrealMcpBridge/<rid>/
+	// folder (the CLI's source install) — then the verified download cache (§6.8, Fab installs). A dev source
+	// checkout has none of them, so the override is the dev path (unchanged behavior on a fresh source tree).
+	const FString Override = FPlatformMisc::GetEnvironmentVariable(TEXT("UNREAL_MCP_BRIDGE_PATH"));
+	TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("UnrealMCP"));
+	// Share the single §6.1 layout composition with the unit-tested pure helpers (no inline drift); pass the
+	// arm64-probe result so a host with only the osx-x64 slice degrades to that rid.
+	const TArray<FString> Candidates = Plugin.IsValid()
+		? ComposeBundledBridgeCandidates(Plugin->GetBaseDir(), BundledArm64SliceExists())
+		: TArray<FString>();
+	return PickBridgeBinaryPath(Override, Candidates, ResolveDownloadedBridgePath(),
+		[](const FString& Path) { return FPaths::FileExists(Path); });
 }
 
 bool FUnrealMcpSidecarManager::PrepareBundledBinaryForSpawn(const FString& Path)
@@ -222,8 +299,8 @@ bool FUnrealMcpSidecarManager::StartForPort(int32 InIpcPort, const FString& InTo
 		// matching ResolveBridgeBinaryPath) so the reinstall hint names the slice that was actually looked for
 		// — not osx-arm64 on a host that degraded to osx-x64.
 		UE_LOG(LogUnrealMcp, Warning,
-			TEXT("[Unreal-MCP] no sidecar binary resolved for rid '%s' (bundled path absent and UNREAL_MCP_BRIDGE_PATH unset or pointing at a missing file). ")
-			TEXT("The bridge is listening on %d. End users: reinstall the plugin for your platform; developers: set UNREAL_MCP_BRIDGE_PATH or run `unreal-mcp-cli bootstrap-local`."),
+			TEXT("[Unreal-MCP] no sidecar binary resolved for rid '%s' (no bundled or downloaded bridge, and UNREAL_MCP_BRIDGE_PATH unset or pointing at a missing file). ")
+			TEXT("The bridge is listening on %d. The editor downloads the bridge for this plugin version (§6.8); developers: set UNREAL_MCP_BRIDGE_PATH or run `unreal-mcp-cli bootstrap-local`."),
 			*EffectiveRid, IpcPort);
 		return false;
 	}
