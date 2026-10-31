@@ -146,8 +146,9 @@
     ThirdParty/RQL re-vendored). Its package left prerelease-packages/; the feed stays for McpPlugin / ReflectorNet.
     Cascade release (train t-2026-10-30-03): McpPlugin 8.14.0-dev.42786f9 -> 8.14.0 and ReflectorNet 5.5.1-dev.ec3702e
     -> 5.5.1, both published; bridge/prerelease-packages/ and bridge/Directory.Build.props are gone.
-    McpPlugin 8.14.0 -> 8.15.0 (published): a tool that throws on the request's content answers the server's
-    direct endpoint with HTTP 422 instead of 500; plugin faults stay 500.
+    McpPlugin 8.14.0 -> 8.15.0 (published): an [AiTool] (RunTool) tool that throws on the request's content answers
+    the server's direct endpoint with HTTP 422 instead of 500; framework faults stay 500. The bridge's ProxyTool /
+    SkillGenerateTool build their own responses, so nothing changes at runtime here.
   -->
   <!--
     Local-LIB dev toggle (auth-fixes f1b — parity with the GameDev-MCP-Server + Unity/Godot
