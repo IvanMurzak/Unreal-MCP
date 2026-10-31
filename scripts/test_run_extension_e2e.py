@@ -59,6 +59,23 @@ class CheckFileTests(unittest.TestCase):
                     self.assertTrue(matches(check, {'structuredContent': {'result': {'kind': 'rows', 'rows': []}}}))
                     self.assertFalse(matches(check, NO_COUNT))
 
+    def test_a_type_filter_count_accepts_rqls_no_match_warning_for_its_type_only(self):
+        # RQL 0.3.0: an empty level answers `where $ is <Type> | count` with its no-match warning, the count on the last
+        # line. The extension spec proves a placed component matches; the e2e only needs the answer's shape.
+        filtered = {key: check for key, check in all_checks().items() if '| where $ is ' in check['input'].get('query', '')}
+        self.assertEqual(sorted(plugin for plugin, _ in filtered), ['UnrealAIControlRig', 'UnrealAIPCG'])
+        for (plugin, name), check in filtered.items():
+            type_name = check['input']['query'].split('| where $ is ')[1].split()[0]
+            warning = (f"warning no-match: none of the 730 tested item(s) is a {type_name} (saw BrushComponent) \u2014 "
+                       f"hint: no reachable type is named '{type_name}'; list the types with rql-schema")
+            with self.subTest(check=f'{plugin}/{name}'):
+                self.assertTrue(matches(check, text_result(warning + '\n0')))
+                self.assertFalse(matches(check, text_result(warning)), 'a warning with no count')
+                self.assertFalse(matches(check, text_result(warning.replace(type_name, 'FooComponent') + '\n0')),
+                                 "another type's warning")
+                self.assertFalse(matches(check, text_result(warning.replace(type_name, type_name + 'X') + '\n0')),
+                                 'a longer type name')
+
     def test_schema_rejects_malformed_checks(self):
         bad = [
             {'tool': 'rql-query'},

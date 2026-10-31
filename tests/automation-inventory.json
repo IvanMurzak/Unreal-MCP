@@ -1,10 +1,10 @@
 {
-  "UnrealAIControlRig": 6,
+  "UnrealAIControlRig": 9,
   "UnrealAIEnhancedInput": 12,
   "UnrealAIGAS": 8,
   "UnrealAILandscape": 7,
   "UnrealAINiagara": 6,
-  "UnrealAIPCG": 8,
+  "UnrealAIPCG": 9,
   "UnrealMcp.AgentConfigModels": 19,
   "UnrealMcp.Config": 25,
   "UnrealMcp.DevControl": 39,

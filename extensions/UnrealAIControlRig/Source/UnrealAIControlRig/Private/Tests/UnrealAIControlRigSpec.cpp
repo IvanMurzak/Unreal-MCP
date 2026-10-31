@@ -11,6 +11,10 @@
 
 #include "IUnrealMcpRqlModule.h"
 #include "UnrealMcpRqlTools.h"
+#include "Engine/Engine.h"
+#include "Engine/World.h"
+#include "GameFramework/Actor.h"
+#include "ControlRigComponent.h"
 
 #include "ControlRigBlueprintLegacy.h"
 #include "Rigs/RigHierarchy.h"
@@ -186,6 +190,39 @@ void FUnrealAIControlRigSpec::Define()
 			const FString Schema = UnrealMcpRqlTools::Schema(TEXT("ControlRigComponent"), bOk);
 			TestTrue(TEXT("schema ok"), bOk);
 			TestTrue(TEXT("lists name:BoundRig"), Schema.Contains(TEXT("\"name\":\"BoundRig\"")));
+		});
+
+		It("matches a placed ControlRigComponent with `where $ is ControlRigComponent`", [this]()
+		{
+			// The product path of the extension's e2e count (`actors | get Components | where $ is ControlRigComponent | count`): with
+			// a ControlRigComponent in the level the filter matches it -- an empty level answers 0 with RQL's no-match warning.
+			UWorld* World = nullptr;
+			for (const FWorldContext& Context : GEngine->GetWorldContexts())
+				World = Context.WorldType == EWorldType::Editor ? Context.World() : World;
+			if (!TestNotNull(TEXT("the editor world"), World))
+				return;
+			AActor* Host = World->SpawnActor<AActor>();
+			if (!TestNotNull(TEXT("a host actor"), Host))
+				return;
+			const FString Label = TEXT("RqlSpecControlRigComponentHost_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+			Host->SetActorLabel(Label);
+			UControlRigComponent* Component = NewObject<UControlRigComponent>(Host, TEXT("RqlSpecControlRigComponent"));
+			if (USceneComponent* Scene = Cast<USceneComponent>(Component))
+				Host->SetRootComponent(Scene);
+			Host->AddInstanceComponent(Component);
+			Component->RegisterComponent();
+
+			// actors | where Label == "@LABEL@" | get Components | where $ is ControlRigComponent | count
+			TSharedPtr<FJsonObject> Result;
+			const bool bResultOk = UnrealMcpRqlTools::RunPlan(FString(TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"@LABEL@"}]}},{"op":"get","expr":{"path":["Components"]}},{"op":"where","pred":{"op":"is","args":[{"path":[]},{"lit":"ControlRigComponent"}]}},{"op":"count"}]})RQL")).Replace(TEXT("@LABEL@"), *Label), false, &Result);
+			FString Text;
+			if (Result.IsValid())
+				FJsonSerializer::Serialize(Result.ToSharedRef(), TJsonWriterFactory<>::Create(&Text));
+			TestTrue(*FString::Printf(TEXT("succeeds (%s)"), *Text.Left(400)), bResultOk);
+			TestEqual(*FString::Printf(TEXT("counts the placed component (%s)"), *Text.Left(400)),
+				Result.IsValid() ? static_cast<int32>(Result->GetNumberField(TEXT("value"))) : -1, 1);
+			TestFalse(*FString::Printf(TEXT("no no-match warning (%s)"), *Text.Left(400)), Text.Contains(TEXT("no-match")));
+			World->DestroyActor(Host);
 		});
 	});
 }
