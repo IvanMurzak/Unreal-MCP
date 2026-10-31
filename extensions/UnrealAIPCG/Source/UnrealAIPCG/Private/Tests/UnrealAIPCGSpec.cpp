@@ -9,6 +9,13 @@
 
 #include "IUnrealMcpRqlModule.h"
 #include "UnrealMcpRqlTools.h"
+#include "Engine/Engine.h"
+#include "Engine/World.h"
+#include "Components/BoxComponent.h"
+#include "GameFramework/Actor.h"
+#include "Misc/Guid.h"
+#include "Serialization/JsonSerializer.h"
+#include "PCGComponent.h"
 
 // ============================================================================================
 //  UE Automation spec for the extension's RQL module (Unreal-MCP docs/rql.md "Extensions").
@@ -73,6 +80,51 @@ void FUnrealAIPCGSpec::Define()
 			TestTrue(TEXT("schema ok"), bOk);
 			TestTrue(TEXT("lists name:BoundGraph"), Schema.Contains(TEXT("\"name\":\"BoundGraph\"")));
 			TestTrue(TEXT("lists name:IsGenerating"), Schema.Contains(TEXT("\"name\":\"IsGenerating\"")));
+		});
+
+		It("matches a placed PCGComponent with `where $ is PCGComponent`", [this]()
+		{
+			// The product path of the extension's e2e count (`actors | get Components | where $ is PCGComponent | count`): with
+			// a PCGComponent in the level the filter matches it -- an empty level answers 0 with RQL's no-match warning.
+			if (!TestNotNull(TEXT("GEngine"), GEngine))
+				return;
+			UWorld* World = nullptr;
+			for (const FWorldContext& Context : GEngine->GetWorldContexts())
+			{
+				if (Context.WorldType == EWorldType::Editor)
+				{
+					World = Context.World();
+					break;
+				}
+			}
+			if (!TestNotNull(TEXT("the editor world"), World))
+				return;
+			AActor* Host = World->SpawnActor<AActor>();
+			if (!TestNotNull(TEXT("a host actor"), Host))
+				return;
+			const FString Label = TEXT("RqlSpecPCGComponentHost_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+			Host->SetActorLabel(Label);
+			// PCG registers a component only on an actor with bounds (else LogPCG errors "invalid bounds"): a box root.
+			UBoxComponent* Bounds = NewObject<UBoxComponent>(Host, TEXT("RqlSpecPCGBounds"));
+			Bounds->SetBoxExtent(FVector(100.0));
+			Host->SetRootComponent(Bounds);
+			Host->AddInstanceComponent(Bounds);
+			Bounds->RegisterComponent();
+			UPCGComponent* Component = NewObject<UPCGComponent>(Host, TEXT("RqlSpecPCGComponent"));
+			Host->AddInstanceComponent(Component);
+			Component->RegisterComponent();
+
+			// actors | where Label == "@LABEL@" | get Components | where $ is PCGComponent | count
+			TSharedPtr<FJsonObject> Result;
+			const bool bResultOk = UnrealMcpRqlTools::RunPlan(FString(TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"@LABEL@"}]}},{"op":"get","expr":{"path":["Components"]}},{"op":"where","pred":{"op":"is","args":[{"path":[]},{"lit":"PCGComponent"}]}},{"op":"count"}]})RQL")).Replace(TEXT("@LABEL@"), *Label), false, &Result);
+			FString Text;
+			if (Result.IsValid())
+				FJsonSerializer::Serialize(Result.ToSharedRef(), TJsonWriterFactory<>::Create(&Text));
+			TestTrue(*FString::Printf(TEXT("succeeds (%s)"), *Text.Left(400)), bResultOk);
+			TestEqual(*FString::Printf(TEXT("counts the placed component (%s)"), *Text.Left(400)),
+				Result.IsValid() ? static_cast<int32>(Result->GetNumberField(TEXT("value"))) : -1, 1);
+			TestFalse(*FString::Printf(TEXT("no no-match warning (%s)"), *Text.Left(400)), Text.Contains(TEXT("no-match")));
+			World->DestroyActor(Host);
 		});
 	});
 
