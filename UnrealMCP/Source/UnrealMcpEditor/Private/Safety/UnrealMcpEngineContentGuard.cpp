@@ -58,7 +58,7 @@ bool FUnrealMcpEngineContentGuard::IsInstalledEngineFile(const FString& Filename
 {
 	if (!FApp::IsEngineInstalled() || Filename.IsEmpty())
 		return false;
-	const FString EngineDir = FPaths::ConvertRelativePathToFull(FPaths::EngineDir());
+	static const FString EngineDir = FPaths::ConvertRelativePathToFull(FPaths::EngineDir());
 	return FPaths::IsUnderDirectory(FPaths::ConvertRelativePathToFull(Filename), EngineDir);
 }
 

@@ -8,6 +8,7 @@
 #include "UnrealMcpValidation.h"
 
 #include "Dom/JsonValue.h"
+#include "Templates/UnrealTemplate.h"
 
 // Game-thread state of the tool call being executed (Execute runs handlers on the game thread only).
 static int32 GUnrealMcpToolExecutionDepth = 0;
@@ -300,16 +301,10 @@ FUnrealMcpToolResult FUnrealMcpToolRegistry::Execute(const FString& Name, const 
 			*FString::Join(Declared, TEXT(", ")), Sent.Num() ? *FString::Join(Sent, TEXT(", ")) : TEXT("none")));
 	}
 
-	struct FToolExecutionScope
-	{
-		FToolExecutionScope() { ++GUnrealMcpToolExecutionDepth; }
-		~FToolExecutionScope() { --GUnrealMcpToolExecutionDepth; }
-	};
 	TArray<FString> OuterRefusals = MoveTemp(GUnrealMcpCallRefusals); // a nested call keeps its own refusals
-	GUnrealMcpCallRefusals.Reset();
 	FUnrealMcpToolResult Result;
 	{
-		FToolExecutionScope Scope;
+		TGuardValue<int32> DepthGuard(GUnrealMcpToolExecutionDepth, GUnrealMcpToolExecutionDepth + 1);
 		Result = Found->Handler(Call);
 	}
 	TArray<FString> Refusals = MoveTemp(GUnrealMcpCallRefusals);
