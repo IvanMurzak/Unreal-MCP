@@ -35,7 +35,7 @@ version bump publishes nothing. Fab submission remains fully manual:
       reference.
 - [ ] **Fab (Epic marketplace) submission.** Entirely manual and **out of scope of every CI
       workflow** — the release pipeline produces the executable-free Fab asset
-      (`unreal-mcp-plugin-fab-<version>.zip`, **the zip to submit**), the dedicated source-plugin zip
+      (`unreal-mcp-plugin-fab-<version>.zip`, **the input of the per-engine zips to submit**, C5 below), the dedicated source-plugin zip
       (`unreal-mcp-plugin-source-<version>.zip`, the CLI install asset) and the packaged
       BuildPlugin zip (`unreal-mcp-plugin-<version>.zip`), but no job submits to Fab. Fab carries
       its own metadata/screenshot requirements and an Epic review; do it by hand when the listing
@@ -265,9 +265,8 @@ executable ("only source files are accepted"), and the `-source-` zip bundles th
 CLI path. The `-fab-` zip is the same test-free source with no executable, plus
 `Source/ThirdParty/UnrealMcpBridge/SHA256SUMS`; on first launch the editor downloads `unreal-mcp-bridge-<rid>.zip`
 for its own version from the GitHub Release and verifies it against that file (`docs/ARCHITECTURE.md` §6.8), so
-the release must stay published with its bridge zips. Verify the zip before uploading:
-`minisign -Vm unreal-mcp-plugin-fab-<version>.zip -P <MINISIGN_PUBLIC_KEY>` and a listing with no
-`.exe`/`.dll`/`.so`/`.dylib` or extensionless apphost. **Do not bump `VersionName` for a Fab submission** unless
+the release must stay published with its bridge zips. Verify the downloaded `-fab-` zip before building from it:
+`minisign -Vm unreal-mcp-plugin-fab-<version>.zip -P <MINISIGN_PUBLIC_KEY>`. `fab-engine-zips` then refuses any executable. **Do not bump `VersionName` for a Fab submission** unless
 it is also a coordinated release (the version is release-pipeline-owned).
 
 **Self-hosted runner Live Coding gotcha (UE 5.8+):** the unattended host-project rebuilds inside

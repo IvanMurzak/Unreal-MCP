@@ -19,8 +19,8 @@ plugin version from the GitHub Release and verifies it against the shipped
 self-contained, each binary carries the Microsoft .NET 9 runtime and the
 managed dependencies listed below inside it.
 
-The third-party components redistributed via that sidecar, and
-their licenses, are enumerated below. Each component remains the property
+The third-party components redistributed via that sidecar or as source
+in this plugin, and their licenses, are enumerated below. Each component remains the property
 of its respective copyright holder(s) and is governed by its own license.
 
 --------------------------------------------------------------------------
