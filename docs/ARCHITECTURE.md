@@ -1237,6 +1237,18 @@ e2e work without the windows populated — see §A.5).
 
 ---
 
+### Installed engine content is read-only for agents
+
+`FUnrealMcpEngineContentGuard` (`UnrealMcpEditor/Private/Safety/`) binds
+`FCoreUObjectDelegates::IsPackageOKToSaveDelegate` on `OnPostEngineInit` (the editor binds its own check in
+`UEditorEngine::Init` and is chained after ours) and adds to `FEditorDelegates::OnAssetsCanDelete`. While a
+tool call runs (`FUnrealMcpToolRegistry::IsExecutingTool`, set by `Execute`), saving or deleting a package
+whose file lies inside an INSTALLED engine (`FApp::IsEngineInstalled()`, under `FPaths::EngineDir()`) is
+refused, e.g. `SaveLevel()` on the default `/Engine/Maps/Entry` startup map. The guard records the refusal
+with `FUnrealMcpToolRegistry::AddCallRefusal`; `Execute` then returns the call as an error that leads with
+the reason, so the agent never reads a refused write as done. The user's own editor actions and a
+source-built engine are unaffected. Spec: `UnrealMcp.Safety.EngineContentGuard`.
+
 ## 11. Top-5 risks & mitigations
 
 1. **Blueprint structure-edit APIs are brittle across UE versions** (SCS editing, K2 schema

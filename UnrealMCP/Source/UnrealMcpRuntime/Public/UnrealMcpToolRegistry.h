@@ -413,4 +413,14 @@ public:
 	 * the Visible toggle runs like any other. The handler owns argument interpretation.
 	 */
 	FUnrealMcpToolResult Execute(const FString& Name, const FUnrealMcpToolCall& Call) const;
+
+	/** True while a tool handler runs (an agent's call), so editor-wide guards can tell agent actions from the user's. Game-thread only. */
+	static bool IsExecutingTool();
+
+	/**
+	 * Record that a guard refused part of the running call (e.g. saving an engine package). Execute turns the call's
+	 * result into an error that carries @p Reason, so the agent never reads a refused write as done. Ignored when no
+	 * tool is running. Game-thread only.
+	 */
+	static void AddCallRefusal(const FString& Reason);
 };

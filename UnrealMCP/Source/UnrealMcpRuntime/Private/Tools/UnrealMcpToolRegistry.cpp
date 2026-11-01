@@ -9,6 +9,10 @@
 
 #include "Dom/JsonValue.h"
 
+// Game-thread state of the tool call being executed (Execute runs handlers on the game thread only).
+static int32 GUnrealMcpToolExecutionDepth = 0;
+static TArray<FString> GUnrealMcpCallRefusals;
+
 // --- FUnrealMcpToolCall accessors -----------------------------------------------------------------
 
 FString FUnrealMcpToolCall::GetString(const FString& Key, const FString& Default) const
@@ -296,5 +300,35 @@ FUnrealMcpToolResult FUnrealMcpToolRegistry::Execute(const FString& Name, const 
 			*FString::Join(Declared, TEXT(", ")), Sent.Num() ? *FString::Join(Sent, TEXT(", ")) : TEXT("none")));
 	}
 
-	return Found->Handler(Call);
+	struct FToolExecutionScope
+	{
+		FToolExecutionScope() { ++GUnrealMcpToolExecutionDepth; }
+		~FToolExecutionScope() { --GUnrealMcpToolExecutionDepth; }
+	};
+	TArray<FString> OuterRefusals = MoveTemp(GUnrealMcpCallRefusals); // a nested call keeps its own refusals
+	GUnrealMcpCallRefusals.Reset();
+	FUnrealMcpToolResult Result;
+	{
+		FToolExecutionScope Scope;
+		Result = Found->Handler(Call);
+	}
+	TArray<FString> Refusals = MoveTemp(GUnrealMcpCallRefusals);
+	GUnrealMcpCallRefusals = MoveTemp(OuterRefusals);
+	if (Refusals.Num() > 0 && !Result.bRetryLater)
+	{
+		Result.bSuccess = false;
+		Result.Message = FString::Join(Refusals, TEXT("\n")) + (Result.Message.IsEmpty() ? FString() : TEXT("\n") + Result.Message);
+	}
+	return Result;
+}
+
+bool FUnrealMcpToolRegistry::IsExecutingTool()
+{
+	return GUnrealMcpToolExecutionDepth > 0;
+}
+
+void FUnrealMcpToolRegistry::AddCallRefusal(const FString& Reason)
+{
+	if (GUnrealMcpToolExecutionDepth > 0)
+		GUnrealMcpCallRefusals.AddUnique(Reason);
 }
