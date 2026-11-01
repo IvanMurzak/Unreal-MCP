@@ -809,7 +809,7 @@ jobs:
       # Attach the three plugin artifacts:
       #   * unreal-mcp-plugin-source-<version>.zip  -> CLI source install asset
       #   * unreal-mcp-plugin-<version>.zip         -> packaged BuildPlugin artifact
-      #   * unreal-mcp-plugin-fab-<version>.zip     -> Fab submission (source, no executable; §6.8)
+      #   * unreal-mcp-plugin-fab-<version>.zip     -> input of the per-engine Fab zips (source, no executable; §6.8)
       # The per-RID signed bridge zips are also attached for debugging /
       # UNREAL_MCP_BRIDGE_PATH users.
       - name: Download bridge release zips (osx + linux)

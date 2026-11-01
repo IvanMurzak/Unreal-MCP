@@ -6,6 +6,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -157,6 +158,32 @@ class CiStepTests(unittest.TestCase):
         self.assertIn("UnrealMCP/Source/ThirdParty/UnrealMcpBridge/win-x64/.gitkeep", names)
         self.assertFalse([n for n in names if n.endswith("/unreal-mcp-bridge") or n.endswith(".exe")])
         self.assertFalse([n for n in names if "UnrealMcpEditorTests" in n])
+
+    def test_fab_engine_zips_pin_one_engine_each_and_refresh_the_notices(self):
+        plugin = self.fake_plugin()
+        (plugin / "ThirdPartyNotices.txt").write_text("old")
+        with self.patch_repo(plugin):
+            self.assertEqual(ci.main(["fab-engine-zips", "--version", "1.2.3"]), 1)  # no released Fab asset: refuses
+            self.stage_fake_bridge(plugin)
+            self.assertEqual(ci.main(["stage-bridge"]), 0)
+            self.assertEqual(ci.main(["fab-zip", "--version", "1.2.3"]), 0)
+            (plugin / "ThirdPartyNotices.txt").write_text("corrected")
+            (plugin / "UnrealMCP.uplugin").write_text(json.dumps({"Description": "corrected"}))
+            self.assertEqual(ci.main(["fab-engine-zips", "--version", "1.2.3"]), 0)
+        dist = plugin.parent / "dist"
+        for engine in ci.FAB_ENGINES:
+            with zipfile.ZipFile(dist / f"unreal-mcp-plugin-fab-1.2.3-ue{engine}.zip") as archive:
+                pinned = json.loads(archive.read("UnrealMCP/UnrealMCP.uplugin"))
+                self.assertEqual(archive.read("UnrealMCP/ThirdPartyNotices.txt"), b"corrected")
+            self.assertEqual(pinned["EngineVersion"], f"{engine}.0")
+            self.assertEqual(pinned["Description"], "corrected")
+            self.assertEqual([m["Name"] for m in pinned["Modules"]], ["UnrealMcpRuntime"])  # the rest stays as released
+        with zipfile.ZipFile(dist / "unreal-mcp-plugin-fab-1.2.3.zip") as released:
+            self.assertNotIn("EngineVersion", json.loads(released.read("UnrealMCP/UnrealMCP.uplugin")))
+
+    def test_fab_engines_match_the_release_matrix(self):
+        workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        self.assertEqual(sorted(set(re.findall(r"ue: '([0-9.]+)' }", workflow))), sorted(ci.FAB_ENGINES))
 
     def test_fab_zip_refuses_any_other_executable(self):
         plugin = self.fake_plugin()

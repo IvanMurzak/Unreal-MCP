@@ -867,7 +867,7 @@ PE/ELF/Mach-O magic bytes or shebang). An editor that resolves no bridge (§6.3)
   verifies the download against THAT file, never against anything fetched from the release, so a replaced release
   asset is rejected. The anchor is as strong as the plugin package the user already trusts to run code: the CLI
   minisign-verifies the source zip (D12) and Fab distributes the reviewed package (the `-fab-` zip's own `.minisig`
-  lets the operator verify it before submitting). Why not a minisign signature per bridge zip verified in C++: it needs Ed25519 + BLAKE2b in the
+  lets the operator verify it before building the per-engine zips to submit). Why not a minisign signature per bridge zip verified in C++: it needs Ed25519 + BLAKE2b in the
   plugin — either a link against the engine's OpenSSL third-party module (its version differs per engine and
   platform, UE 5.5-5.8 x Win/Mac/Linux) or vendored crypto source (Fab-review and per-engine compile risk) — and buys
   nothing over a digest list inside an already-verified package. A plugin without
