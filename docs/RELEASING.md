@@ -253,7 +253,7 @@ an entirely manual operator step (no CI job submits — see the checklist at the
   while every other asset must stay unpinned (UE treats it as an exact match). Download the release's `-fab-` zip
   into `dist/`, run `python .github/scripts/ue_ci.py fab-engine-zips --version <version>` at the release's commit
   or later, and submit the `unreal-mcp-plugin-fab-<version>-ue<engine>.zip` it writes as that engine's project
-  version. They also take the checkout's `ThirdPartyNotices.txt`. Keep the listing's third-party box ticked and
+  version. They also take the checkout's `ThirdPartyNotices.txt` and descriptor `Description`. Outside CI, set `RUNNER_TEMP` to a scratch folder. Keep the listing's third-party box ticked and
   file Epic's Third Party Software form whenever `Source/ThirdParty` or the sidecar's components change.
 - **C4 — module `PlatformAllowList` (#187).** Both modules in `UnrealMCP.uplugin` declare
   `"PlatformAllowList": ["Win64","Mac","Linux"]` (desktop-only — console/mobile cannot spawn the .NET

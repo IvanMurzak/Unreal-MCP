@@ -15,7 +15,6 @@ import hashlib
 import json
 import os
 from pathlib import Path
-import re
 import shutil
 import subprocess
 import sys
@@ -37,7 +36,6 @@ STAGED_BRIDGE = PLUGIN / "Source/ThirdParty/UnrealMcpBridge"
 BRIDGE_SUMS = "SHA256SUMS"
 # The engines the release validates (release.yml) and the Fab listing offers: one Fab project file per engine.
 FAB_ENGINES = ("5.5", "5.6", "5.7", "5.8")
-FAB_PIN_NOTE = re.compile(r" \(no EngineVersion pin:.*?\)(?=\.?$)")
 # The files of the source plugin assets, relative to UnrealMCP/.
 SOURCE_ASSET_INPUTS = ("UnrealMCP.uplugin", "Config", "Resources", "Content", "Source/UnrealMcpRuntime", "Source/UnrealMcpRql",
                        "Source/UnrealMcpEditor", "Source/ThirdParty", "ThirdPartyNotices.txt")
@@ -410,6 +408,12 @@ def find_executables(folder: Path) -> list:
     return found
 
 
+def require_no_executable(stage: Path) -> None:
+    found = find_executables(stage)
+    if found:
+        raise StepError("The Fab asset must contain no executable, found:\n" + "\n".join(found))
+
+
 def fab_zip(args) -> None:
     """The Fab asset unreal-mcp-plugin-fab-<version>.zip: the source asset WITHOUT any executable.
 
@@ -423,9 +427,7 @@ def fab_zip(args) -> None:
         remove_tree(payload)
         payload.mkdir(parents=True)
         (payload / ".gitkeep").write_bytes(b"")  # the tracked placeholder stage-bridge replaced with the payload
-    found = find_executables(stage)
-    if found:
-        raise StepError("The Fab asset must contain no executable, found:\n" + "\n".join(found))
+    require_no_executable(stage)
     print(f"Fab asset: {count_files(stage)} file(s), no executable.")
     zip_dir(stage, ROOT / f"dist/unreal-mcp-plugin-fab-{args.version}.zip", prefix="UnrealMCP/")
 
@@ -435,7 +437,7 @@ def fab_engine_zips(args) -> None:
 
     Epic's Fab review requires EngineVersion in the .uplugin of what it compiles, while every other asset must stay
     unpinned (UE treats the key as an exact match). So only these operator-built zips carry it, and only they take
-    the checkout's ThirdPartyNotices.txt, which lets a released version get corrected notices without a new release.
+    the checkout's ThirdPartyNotices.txt and Description, so a released version gets corrected text without a release.
     """
     source = ROOT / f"dist/unreal-mcp-plugin-fab-{args.version}.zip"
     if not source.is_file():
@@ -447,16 +449,11 @@ def fab_engine_zips(args) -> None:
     stage = stage_root / "UnrealMCP"
     descriptor_path = stage / "UnrealMCP.uplugin"
     descriptor = ue_json.read(descriptor_path)
+    description = ue_json.read(PLUGIN / "UnrealMCP.uplugin")["Description"]
     shutil.copy2(PLUGIN / "ThirdPartyNotices.txt", stage / "ThirdPartyNotices.txt")
-    found = find_executables(stage)
-    if found:
-        raise StepError("The Fab asset must contain no executable, found:\n" + "\n".join(found))
+    require_no_executable(stage)
     for engine in FAB_ENGINES:
-        pinned = dict(descriptor)
-        pinned["EngineVersion"] = f"{engine}.0"
-        pinned["Description"] = FAB_PIN_NOTE.sub("", descriptor["Description"]).replace("Unreal Engine 5.5+", f"Unreal Engine {engine}")
-        if "EngineVersion" in pinned["Description"]:
-            raise StepError("The pinned descriptor's description still talks about the missing EngineVersion pin.")
+        pinned = {**descriptor, "Description": description, "EngineVersion": f"{engine}.0"}
         descriptor_path.write_text(json.dumps(pinned, indent=2) + "\n", encoding="utf-8")
         zip_dir(stage, ROOT / f"dist/unreal-mcp-plugin-fab-{args.version}-ue{engine}.zip", prefix="UnrealMCP/")
     print(f"Fab project files for UE {', '.join(FAB_ENGINES)}: {count_files(stage)} file(s) each, no executable.")
