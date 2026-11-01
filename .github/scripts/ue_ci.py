@@ -15,9 +15,11 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
+import zipfile
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path[:0] = [str(Path(__file__).resolve().parent), str(ROOT / "scripts"), str(ROOT / "bridge")]
@@ -33,6 +35,9 @@ STAGED_BRIDGE = PLUGIN / "Source/ThirdParty/UnrealMcpBridge"
 # The SHA-256 manifest of the per-RID release zips, shipped INSIDE the plugin: the editor verifies a downloaded bridge
 # against it (docs/ARCHITECTURE.md §6.8, FUnrealMcpBridgeDownloader). Gitignored, written by stage-bridge.
 BRIDGE_SUMS = "SHA256SUMS"
+# The engines the release validates (release.yml) and the Fab listing offers: one Fab project file per engine.
+FAB_ENGINES = ("5.5", "5.6", "5.7", "5.8")
+FAB_PIN_NOTE = re.compile(r" \(no EngineVersion pin:.*?\)(?=\.?$)")
 # The files of the source plugin assets, relative to UnrealMCP/.
 SOURCE_ASSET_INPUTS = ("UnrealMCP.uplugin", "Config", "Resources", "Content", "Source/UnrealMcpRuntime", "Source/UnrealMcpRql",
                        "Source/UnrealMcpEditor", "Source/ThirdParty", "ThirdPartyNotices.txt")
@@ -45,7 +50,7 @@ EXECUTABLE_SUFFIXES = {".exe", ".dll", ".so", ".dylib", ".bat", ".cmd", ".ps1", 
 # Only the chain's own feeds: .artifacts/tests holds the suite's build caches and the smoke host.
 CHAIN_FEEDS = ("nuget", "npm", "server", "unity-dll", "nuget-cache")
 # This job's per-run BuildPlugin / report outputs under RUNNER_TEMP.
-TEMP_OUTPUTS = ("UnrealMCP-Package", "UnrealMCP-Dist-Package", "UnrealMCP-Source-Package", "AutomationReport")
+TEMP_OUTPUTS = ("UnrealMCP-Package", "UnrealMCP-Dist-Package", "UnrealMCP-Source-Package", "UnrealMCP-Fab-Engines", "AutomationReport")
 
 
 class StepError(Exception):
@@ -425,6 +430,38 @@ def fab_zip(args) -> None:
     zip_dir(stage, ROOT / f"dist/unreal-mcp-plugin-fab-{args.version}.zip", prefix="UnrealMCP/")
 
 
+def fab_engine_zips(args) -> None:
+    """One Fab project file per engine: unreal-mcp-plugin-fab-<version>-ue<engine>.zip, from the released Fab asset.
+
+    Epic's Fab review requires EngineVersion in the .uplugin of what it compiles, while every other asset must stay
+    unpinned (UE treats the key as an exact match). So only these operator-built zips carry it, and only they take
+    the checkout's ThirdPartyNotices.txt, which lets a released version get corrected notices without a new release.
+    """
+    source = ROOT / f"dist/unreal-mcp-plugin-fab-{args.version}.zip"
+    if not source.is_file():
+        raise StepError(f"{source} is missing: download the release's Fab asset there first.")
+    stage_root = temp() / "UnrealMCP-Fab-Engines"
+    remove_tree(stage_root)
+    with zipfile.ZipFile(source) as archive:
+        archive.extractall(stage_root)
+    stage = stage_root / "UnrealMCP"
+    descriptor_path = stage / "UnrealMCP.uplugin"
+    descriptor = ue_json.read(descriptor_path)
+    shutil.copy2(PLUGIN / "ThirdPartyNotices.txt", stage / "ThirdPartyNotices.txt")
+    found = find_executables(stage)
+    if found:
+        raise StepError("The Fab asset must contain no executable, found:\n" + "\n".join(found))
+    for engine in FAB_ENGINES:
+        pinned = dict(descriptor)
+        pinned["EngineVersion"] = f"{engine}.0"
+        pinned["Description"] = FAB_PIN_NOTE.sub("", descriptor["Description"]).replace("Unreal Engine 5.5+", f"Unreal Engine {engine}")
+        if "EngineVersion" in pinned["Description"]:
+            raise StepError("The pinned descriptor's description still talks about the missing EngineVersion pin.")
+        descriptor_path.write_text(json.dumps(pinned, indent=2) + "\n", encoding="utf-8")
+        zip_dir(stage, ROOT / f"dist/unreal-mcp-plugin-fab-{args.version}-ue{engine}.zip", prefix="UnrealMCP/")
+    print(f"Fab project files for UE {', '.join(FAB_ENGINES)}: {count_files(stage)} file(s) each, no executable.")
+
+
 def plugin_zip(args) -> None:
     """BuildPlugin -Rocket with the staged signed bridge, verify both bridge copies, zip the PACKAGED plugin."""
     package = temp() / "UnrealMCP-Package"
@@ -462,6 +499,7 @@ COMMANDS = {
     "stage-bridge": stage_bridge,
     "source-zip": source_zip,
     "fab-zip": fab_zip,
+    "fab-engine-zips": fab_engine_zips,
     "plugin-zip": plugin_zip,
 }
 
@@ -474,7 +512,7 @@ def main(argv: list | None = None) -> int:
     parser.add_argument("command", choices=sorted(COMMANDS))
     parser.add_argument("--ue", help="the matrix engine version (suite, fixture-diff)")
     parser.add_argument("--mode", default="verification", help="extension_suite.py mode (suite)")
-    parser.add_argument("--version", help="release version (source-zip, fab-zip, plugin-zip)")
+    parser.add_argument("--version", help="release version (source-zip, fab-zip, fab-engine-zips, plugin-zip)")
     args = parser.parse_args(argv)
     try:
         return COMMANDS[args.command](args) or 0

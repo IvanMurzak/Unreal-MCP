@@ -249,12 +249,18 @@ an entirely manual operator step (no CI job submits — see the checklist at the
   `Source/ThirdParty/UnrealMcpBridge/...` tree; no source uses hardcoded/absolute paths; all packaged
   paths are ≤140 chars from the plugin root; the zip excludes `Binaries/Intermediate/Saved/.vs` (Fab strips
   them — the surviving `Source/ThirdParty/UnrealMcpBridge/<rid>/` copy is what the recompile uses).
+- **C5 — one project file per engine, `EngineVersion` set.** Epic's review requires the key in what it compiles,
+  while every other asset must stay unpinned (UE treats it as an exact match). Download the release's `-fab-` zip
+  into `dist/`, run `python .github/scripts/ue_ci.py fab-engine-zips --version <version>` at the release's commit
+  or later, and submit the `unreal-mcp-plugin-fab-<version>-ue<engine>.zip` it writes as that engine's project
+  version. They also take the checkout's `ThirdPartyNotices.txt`. Keep the listing's third-party box ticked and
+  file Epic's Third Party Software form whenever `Source/ThirdParty` or the sidecar's components change.
 - **C4 — module `PlatformAllowList` (#187).** Both modules in `UnrealMCP.uplugin` declare
   `"PlatformAllowList": ["Win64","Mac","Linux"]` (desktop-only — console/mobile cannot spawn the .NET
   sidecar), which Fab review expects.
 
-**Manual Fab submission (operator):** submit the release-produced
-`unreal-mcp-plugin-fab-<version>.zip` — never the `-source-` zip. Epic's Fab technical review rejects any
+**Manual Fab submission (operator):** submit the per-engine zips built from the release-produced
+`unreal-mcp-plugin-fab-<version>.zip` (C5) — never the `-source-` zip. Epic's Fab technical review rejects any
 executable ("only source files are accepted"), and the `-source-` zip bundles the four bridge binaries for the
 CLI path. The `-fab-` zip is the same test-free source with no executable, plus
 `Source/ThirdParty/UnrealMcpBridge/SHA256SUMS`; on first launch the editor downloads `unreal-mcp-bridge-<rid>.zip`
