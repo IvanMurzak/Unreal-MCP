@@ -5,6 +5,7 @@
 #include "UnrealMcpLog.h"
 #include "UnrealMcpEditorCoordinator.h"
 #include "UI/FUnrealMcpStyle.h"
+#include "Safety/UnrealMcpEngineContentGuard.h"
 
 /**
  * Editor module for the Unreal-MCP plugin (docs/ARCHITECTURE.md §0, §12.3 Model A). Owns the
@@ -24,6 +25,9 @@ public:
 		// The "AI Game Developer" Slate style set (§7) — must be registered before any §7 window is built.
 		FUnrealMcpStyle::Initialize();
 
+		// Agent tool calls must never change the installed engine (e.g. saving /Engine/Maps/Entry).
+		EngineContentGuard.Install();
+
 		Coordinator = MakeUnique<FUnrealMcpEditorCoordinator>();
 		Coordinator->Startup();
 	}
@@ -35,12 +39,14 @@ public:
 			Coordinator->Shutdown();
 			Coordinator.Reset();
 		}
+		EngineContentGuard.Uninstall();
 		FUnrealMcpStyle::Shutdown();
 		UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] plugin shutting down"));
 	}
 
 private:
 	TUniquePtr<FUnrealMcpEditorCoordinator> Coordinator;
+	FUnrealMcpEngineContentGuard EngineContentGuard;
 };
 
 IMPLEMENT_MODULE(FUnrealMcpEditorModule, UnrealMcpEditor)

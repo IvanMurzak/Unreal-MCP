@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { spawn } from 'child_process';
 import type { UbtBuildStep } from '../lib/types.js';
+import { createUnrealBuildDiagnostics } from './build-diagnostics.js';
 
 export type DesktopBuildPlatform = 'win32' | 'darwin' | 'linux';
 
@@ -83,18 +84,31 @@ export function projectHasNativeCode(projectDir: string): boolean {
 export function runUnrealBuildStep(step: UbtBuildStep): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     const child = spawn(step.ubtPath, step.args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const diagnostics = createUnrealBuildDiagnostics();
     let combined = '';
-    const append = (chunk: Buffer | string): void => {
-      combined += chunk.toString();
-      if (combined.length > 8192) combined = combined.slice(-8192);
+    const flushers: Array<() => void> = [];
+    const reader = (): ((chunk: Buffer | string) => void) => {
+      let pending = '';
+      flushers.push(() => { if (pending) diagnostics.line(pending); pending = ''; });
+      return (chunk) => {
+        const text = chunk.toString();
+        combined = (combined + text).slice(-8192);
+        const lines = (pending + text).split(/[\r\n]/);
+        // Keep the START of an over-long line: a diagnostic's `file:line: error:` prefix comes first.
+        pending = (lines.pop() ?? '').slice(0, 8192);
+        for (const line of lines) diagnostics.line(line);
+      };
     };
-    child.stdout?.on('data', append);
-    child.stderr?.on('data', append);
+    // Decode as UTF-8 across chunk boundaries (a split multibyte character would otherwise corrupt a path).
+    child.stdout?.setEncoding('utf8');
+    child.stderr?.setEncoding('utf8');
+    child.stdout?.on('data', reader());
+    child.stderr?.on('data', reader());
     child.on('error', reject);
     child.on('close', (code) => {
       if (code === 0) return resolve();
-      const tail = combined.trim().slice(-4096);
-      reject(new Error(`Unreal build exited with code ${code}${tail ? `:\n${tail}` : ''}`));
+      for (const flush of flushers) flush();
+      reject(new Error(diagnostics.message(code, combined)));
     });
   });
 }

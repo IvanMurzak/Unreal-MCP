@@ -15,6 +15,8 @@ export { configure } from './lib/configure.js';
 export { configureAgent } from './lib/configure-agent.js';
 export { enrollPlugin } from './lib/enroll.js';
 export { openProject, buildOpenEnv } from './lib/open.js';
+export { createUnrealBuildDiagnostics } from './utils/build-diagnostics.js';
+export type { UnrealBuildDiagnostics } from './utils/build-diagnostics.js';
 export { close, selectEditorProcesses } from './lib/close.js';
 export { execPython, readPythonResponse, PYTHON_EXECUTE_TOOL, DEFAULT_EXEC_TIMEOUT_MS } from './lib/exec.js';
 export type { ExecPythonOptions, ExecPythonResult, ExecPythonSuccess, ExecPythonFailure, PythonLogLine } from './lib/exec.js';

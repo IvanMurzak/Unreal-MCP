@@ -4,6 +4,7 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "CoreMinimal.h"
+#include "Misc/App.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Guid.h"
@@ -167,6 +168,7 @@ void FUnrealMcpEditorSessionSpec::Define()
 			TestFalse(TEXT("memory"), FUnrealMcpEditorSession::HasSavablePath(TEXT("/Memory/Foo")));
 			TestFalse(TEXT("transient"), FUnrealMcpEditorSession::HasSavablePath(TEXT("/Engine/Transient")));
 			TestFalse(TEXT("not a package name"), FUnrealMcpEditorSession::HasSavablePath(TEXT("C:/x.uasset")));
+			TestEqual(TEXT("installed engine content is never quit-saved"), FUnrealMcpEditorSession::HasSavablePath(TEXT("/Engine/Maps/Entry")), !FApp::IsEngineInstalled());
 		});
 	});
 

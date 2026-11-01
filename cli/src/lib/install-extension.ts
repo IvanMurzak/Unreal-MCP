@@ -557,7 +557,7 @@ async function runUbtBuild(
     return true;
   } catch (err: unknown) {
     warnings.push(
-      `Build failed: ${asError(err).message}. The editor will recompile the extension on next open.`,
+      `Build failed: ${asError(err).message}\nThe editor will recompile the extension on next open.`,
     );
     return false;
   }
