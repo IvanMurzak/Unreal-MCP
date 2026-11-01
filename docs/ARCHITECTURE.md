@@ -1247,7 +1247,11 @@ whose file lies inside an INSTALLED engine (`FApp::IsEngineInstalled()`, under `
 refused, e.g. `SaveLevel()` on the default `/Engine/Maps/Entry` startup map. The guard records the refusal
 with `FUnrealMcpToolRegistry::AddCallRefusal`; `Execute` then returns the call as an error that leads with
 the reason, so the agent never reads a refused write as done. The user's own editor actions and a
-source-built engine are unaffected. Spec: `UnrealMcp.Safety.EngineContentGuard`.
+source-built engine are unaffected. The CLI session's quit-save (`FUnrealMcpEditorSession::SaveDirtyPackagesWithPath`,
+which runs on a ticker after the call returned) skips installed engine packages itself, so content an agent left
+dirty after a refused save is not written on quit. Not covered: a Python `rename_asset` of an unreferenced engine
+asset (`AssetRenameManager` deletes the old file without `OnAssetsCanDelete`) and raw file writes from Python.
+Specs: `UnrealMcp.Safety.EngineContentGuard`, `UnrealMcp.EditorSession`.
 
 ## 11. Top-5 risks & mitigations
 

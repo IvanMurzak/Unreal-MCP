@@ -2,6 +2,7 @@
 // See the LICENSE file in the repository root for more information.
 
 #include "Session/UnrealMcpEditorSession.h"
+#include "Safety/UnrealMcpEngineContentGuard.h"
 #include "UnrealMcpLog.h"
 #include "UnrealMcpToolRegistry.h"
 
@@ -220,10 +221,18 @@ bool FUnrealMcpEditorSession::RemoveLeaseIfOwned(const FString& Path, const FStr
 
 bool FUnrealMcpEditorSession::HasSavablePath(const FString& PackageName)
 {
-	return FPackageName::IsValidLongPackageName(PackageName)
-		&& !FPackageName::IsTempPackage(PackageName)
-		&& !FPackageName::IsMemoryPackage(PackageName)
-		&& !PackageName.StartsWith(TEXT("/Engine/Transient"));
+	if (!FPackageName::IsValidLongPackageName(PackageName) || FPackageName::IsTempPackage(PackageName)
+		|| FPackageName::IsMemoryPackage(PackageName) || PackageName.StartsWith(TEXT("/Engine/Transient")))
+		return false;
+	// An agent may have left installed engine content dirty (e.g. the default /Engine/Maps/Entry startup map after its
+	// save was refused): the quit-save runs outside any tool call, so it must skip that content itself.
+	FString Filename;
+	if (FPackageName::TryConvertLongPackageNameToFilename(PackageName, Filename) && FUnrealMcpEngineContentGuard::IsInstalledEngineFile(Filename))
+	{
+		UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] not saving '%s' before quitting: it belongs to the installed Unreal Engine."), *PackageName);
+		return false;
+	}
+	return true;
 }
 
 void FUnrealMcpEditorSession::SaveDirtyPackagesWithPath()

@@ -5,19 +5,23 @@ const SOURCE_DIAGNOSTIC = [
 ];
 const BUILD_DIAGNOSTIC = [
   /:\s+(?:fatal\s+)?error\s+(?:LNK|C)\d+:/i, // MSVC linker or a diagnostic without a location
-  /^\s*ld: |^Undefined symbols for architecture|linker command failed/,
+  /^\s*ld: (?!warning)|^Undefined symbols for architecture|linker command failed/,
   /^\s*ERROR:\s|BuildException:|is not a valid platform to build|Unable to find valid SDK/,
 ];
 /** What clang prints under a diagnostic: the source excerpt (`11 |  code`, `   |  ^~~`) and its notes. */
 const EXCERPT = /^\s*\d*\s+\||:\d+(?::\d+)?:\s+note:/;
 const MAX_DIAGNOSTIC_LINES = 40;
 const MAX_DIAGNOSTIC_CHARS = 6000;
+const MAX_LINE_CHARS = 1000;
 
 export interface UnrealBuildDiagnostics {
   /** Feed one output line (without its line break). */
   line(raw: string): void;
-  /** The failure message: the errors first; the raw output tail only when no diagnostic was recognised. */
-  message(code: number | null, tail: string): string;
+  /**
+   * The failure message: the errors first, then the build log path and @p retry (what to do after fixing them).
+   * The raw output tail is added when no source error was recognised, so a guessed toolchain line never hides the cause.
+   */
+  message(code: number | null, tail: string, retry?: string): string;
 }
 
 /**
@@ -29,7 +33,8 @@ export function createUnrealBuildDiagnostics(): UnrealBuildDiagnostics {
   const seen = new Set<string>();
   let chars = 0, excerpt = 0, errors = 0, sourceErrors = 0, omitted = 0;
   let logFile: string | undefined, result: string | undefined;
-  const keep = (line: string): boolean => {
+  const keep = (whole: string): boolean => {
+    const line = whole.length > MAX_LINE_CHARS ? `${whole.slice(0, MAX_LINE_CHARS)}…` : whole;
     if (lines.length >= MAX_DIAGNOSTIC_LINES || chars + line.length > MAX_DIAGNOSTIC_CHARS) return false;
     lines.push(line);
     chars += line.length + 1;
@@ -57,13 +62,14 @@ export function createUnrealBuildDiagnostics(): UnrealBuildDiagnostics {
         keep(line);
       } else excerpt = 0;
     },
-    message(code, tail) {
-      const head = `Unreal C++ build failed (exit code ${code}${result ? `, ${result}` : ''}). The editor was not started.`;
+    message(code, tail, retry = 'then build again') {
+      const head = `Unreal C++ build failed (exit code ${code}${result ? `, ${result}` : ''}).`;
       const log = logFile ? `\nFull build log: ${logFile}` : '';
-      if (errors === 0) return `${head}${log}\nLast build output:\n${tail.trim().slice(-4096)}`;
+      const output = `\nLast build output:\n${tail.trim().slice(errors === 0 ? -4096 : -2048)}`;
+      if (errors === 0) return `${head}${log}${output}`;
       const more = omitted ? `\n… ${omitted} more error${omitted === 1 ? '' : 's'} in the build log.` : '';
       const next = sourceErrors ? "Fix the errors in the project's source files" : 'Fix the build problem above';
-      return `${head}\n${errors} error${errors === 1 ? '' : 's'}:\n${lines.join('\n')}${more}\n${next}, then open the editor again.${log}`;
+      return `${head}\n${errors} error${errors === 1 ? '' : 's'}:\n${lines.join('\n')}${more}\n${next}, ${retry}.${log}${sourceErrors ? '' : output}`;
     },
   };
 }

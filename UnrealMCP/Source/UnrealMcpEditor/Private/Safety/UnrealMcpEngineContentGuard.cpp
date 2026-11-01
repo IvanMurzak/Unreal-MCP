@@ -4,6 +4,7 @@
 #include "Safety/UnrealMcpEngineContentGuard.h"
 
 #include "Editor.h"
+#include "Engine/Engine.h"
 #include "Misc/App.h"
 #include "Misc/CoreDelegates.h"
 #include "Misc/PackageName.h"
@@ -32,13 +33,18 @@ namespace UnrealMcpEngineContentGuardImpl
 void FUnrealMcpEngineContentGuard::Install()
 {
 	CanDeleteHandle = FEditorDelegates::OnAssetsCanDelete.AddRaw(this, &FUnrealMcpEngineContentGuard::CanDeleteAssets);
-	PostEngineInitHandle = FCoreDelegates::OnPostEngineInit.AddLambda([this]()
-	{
-		// Keep the editor's own check (read-only and source-control rules) running after ours.
-		PreviousSaveCheck = FCoreUObjectDelegates::IsPackageOKToSaveDelegate;
-		FCoreUObjectDelegates::IsPackageOKToSaveDelegate.BindRaw(this, &FUnrealMcpEngineContentGuard::IsPackageOkToSave);
-		bSaveCheckBound = true;
-	});
+	if (GEngine != nullptr && GEngine->IsInitialized())
+		BindSaveCheck(); // loaded after engine init (enabled at runtime): OnPostEngineInit has already fired
+	else
+		PostEngineInitHandle = FCoreDelegates::OnPostEngineInit.AddRaw(this, &FUnrealMcpEngineContentGuard::BindSaveCheck);
+}
+
+void FUnrealMcpEngineContentGuard::BindSaveCheck()
+{
+	// Keep the editor's own check (read-only and source-control rules) running after ours.
+	PreviousSaveCheck = FCoreUObjectDelegates::IsPackageOKToSaveDelegate;
+	FCoreUObjectDelegates::IsPackageOKToSaveDelegate.BindRaw(this, &FUnrealMcpEngineContentGuard::IsPackageOkToSave);
+	bSaveCheckBound = true;
 }
 
 void FUnrealMcpEngineContentGuard::Uninstall()

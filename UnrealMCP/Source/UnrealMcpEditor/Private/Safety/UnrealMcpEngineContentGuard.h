@@ -19,7 +19,7 @@ struct FCanDeleteAssetResult;
 class UNREALMCPEDITOR_API FUnrealMcpEngineContentGuard
 {
 public:
-	/** Bind after engine init: UEditorEngine::Init binds IsPackageOKToSaveDelegate itself and would replace an earlier binding. */
+	/** Binds the save check after engine init (UEditorEngine::Init binds IsPackageOKToSaveDelegate itself and would replace an earlier binding). */
 	void Install();
 	void Uninstall();
 
@@ -27,6 +27,7 @@ public:
 	static bool IsInstalledEngineFile(const FString& Filename);
 
 private:
+	void BindSaveCheck();
 	bool IsPackageOkToSave(UPackage* Package, const FString& Filename, FOutputDevice* Error);
 	void CanDeleteAssets(const TArray<UObject*>& Objects, FCanDeleteAssetResult& CanDelete);
 

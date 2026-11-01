@@ -94,10 +94,14 @@ export function runUnrealBuildStep(step: UbtBuildStep): Promise<void> {
         const text = chunk.toString();
         combined = (combined + text).slice(-8192);
         const lines = (pending + text).split(/[\r\n]/);
-        pending = (lines.pop() ?? '').slice(-8192);
+        // Keep the START of an over-long line: a diagnostic's `file:line: error:` prefix comes first.
+        pending = (lines.pop() ?? '').slice(0, 8192);
         for (const line of lines) diagnostics.line(line);
       };
     };
+    // Decode as UTF-8 across chunk boundaries (a split multibyte character would otherwise corrupt a path).
+    child.stdout?.setEncoding('utf8');
+    child.stderr?.setEncoding('utf8');
     child.stdout?.on('data', reader());
     child.stderr?.on('data', reader());
     child.on('error', reject);
