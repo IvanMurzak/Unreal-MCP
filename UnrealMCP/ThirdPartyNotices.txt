@@ -13,9 +13,10 @@ self-contained, single-file .NET 9 application built per platform RID
 GitHub Release assets bundle it under
 `Source/ThirdParty/UnrealMcpBridge/<rid>/` and stage it into
 `Binaries/ThirdParty/UnrealMcpBridge/<rid>/` at compile time. The Fab
-asset carries no executable: the editor downloads the sidecar for its own
-plugin version from the GitHub Release and verifies it against the shipped
-`Source/ThirdParty/UnrealMcpBridge/SHA256SUMS`. Because it is
+asset carries no executable and never downloads one: the user downloads
+the sidecar for the plugin version from the GitHub Release by hand, and can
+check it against the shipped `Source/ThirdParty/UnrealMcpBridge/SHA256SUMS`.
+Because it is
 self-contained, each binary carries the Microsoft .NET 9 runtime and the
 managed dependencies listed below inside it.
 
@@ -125,8 +126,8 @@ License   : PolyForm Shield License 1.0.0 (NOT Apache-2.0)
 Source    : https://github.com/IvanMurzak/Code-Exec
 License   : https://polyformproject.org/licenses/shield/1.0.0
 
-The python-execute tool's runtime, shipped as unmodified source under
-Content/Python/unreal_mcp/_vendor/code_exec/ (see VENDORED.md there) and run inside the
+The python-execute tool's runtime, shipped as source (unmodified but for a copyright comment) under
+Content/Python/Lib/site-packages/code_exec/ (see VENDORED.md there) and run inside the
 editor's Python (PythonScriptPlugin).
 Required Notice: Copyright (c) 2026 Ivan Murzak (https://github.com/IvanMurzak)
 

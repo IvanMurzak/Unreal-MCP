@@ -107,9 +107,12 @@ class CiStepTests(unittest.TestCase):
         plugin = self.temp / "repo/UnrealMCP"
         for rel in ("Config/x.ini", "Resources/Icon128.png", "Content/a.txt", "Source/UnrealMcpRuntime/a.cpp",
                     "Source/UnrealMcpRql/a.cpp", "Source/UnrealMcpEditor/a.cpp", "Source/UnrealMcpEditorTests/a.cpp",
+                    "Source/UnrealMcpEditor/Private/Server/UnrealMcpServerDownload.cpp",
+                    "Source/UnrealMcpEditor/Private/Sidecar/UnrealMcpBridgeDownloader.cpp",
+                    "Source/UnrealMcpEditor/Private/Sidecar/UnrealMcpBridgeDownloader.h",
                     "ThirdPartyNotices.txt"):
             (plugin / rel).parent.mkdir(parents=True, exist_ok=True)
-            (plugin / rel).write_text("x")
+            (plugin / rel).write_text("// Copyright x")
         (plugin / "UnrealMCP.uplugin").write_text(json.dumps({"Modules": [{"Name": "UnrealMcpRuntime"}]}))
         return plugin
 
@@ -158,6 +161,34 @@ class CiStepTests(unittest.TestCase):
         self.assertIn("UnrealMCP/Source/ThirdParty/UnrealMcpBridge/win-x64/.gitkeep", names)
         self.assertFalse([n for n in names if n.endswith("/unreal-mcp-bridge") or n.endswith(".exe")])
         self.assertFalse([n for n in names if "UnrealMcpEditorTests" in n])
+
+    def test_fab_zip_is_the_manual_bridge_build(self):
+        plugin = self.fake_plugin()
+        rql = plugin / "Source/ThirdParty/RQL/src/value.cpp"
+        rql.parent.mkdir(parents=True)
+        rql.write_text("#include <a>\n", encoding="utf-8")
+        runner = plugin / "Content/Python/Lib/site-packages/code_exec/runner.py"
+        runner.parent.mkdir(parents=True)
+        runner.write_text('"""doc"""\n', encoding="utf-8")
+        with self.patch_repo(plugin):
+            self.stage_fake_bridge(plugin)
+            self.assertEqual(ci.main(["stage-bridge"]), 0)
+            self.assertEqual(ci.main(["fab-zip", "--version", "1.2.3"]), 0)
+        archive = zipfile.ZipFile(plugin.parent / "dist/unreal-mcp-plugin-fab-1.2.3.zip")
+        names = archive.namelist()
+        self.assertIn("UnrealMCP/Config/FabDistribution.ini", names)
+        self.assertFalse([n for n in names if "BridgeDownloader" in n])
+        self.assertTrue(archive.read("UnrealMCP/Source/ThirdParty/RQL/src/value.cpp").startswith(b"// Copyright (c) 2026 Ivan Murzak."))
+        self.assertTrue(archive.read("UnrealMCP/Content/Python/Lib/site-packages/code_exec/runner.py").startswith(b"# Copyright (c) 2026 Ivan Murzak."))
+        self.assertEqual(rql.read_text(encoding="utf-8"), "#include <a>\n")  # the repo keeps its verbatim copy
+
+    def test_fab_zip_refuses_first_party_code_without_copyright(self):
+        plugin = self.fake_plugin()
+        (plugin / "Source/UnrealMcpRuntime/Bare.cpp").write_text("int x;\n", encoding="utf-8")
+        with self.patch_repo(plugin):
+            self.stage_fake_bridge(plugin)
+            self.assertEqual(ci.main(["stage-bridge"]), 0)
+            self.assertEqual(ci.main(["fab-zip", "--version", "1.2.3"]), 1)
 
     def test_fab_engine_zips_pin_one_engine_each_and_refresh_the_notices(self):
         plugin = self.fake_plugin()

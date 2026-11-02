@@ -8,6 +8,10 @@
 #include "UI/UnrealMcpExternalLinks.h"
 #include "UI/FUnrealMcpStyle.h"
 #include "UnrealMcpLog.h"
+#if UNREAL_MCP_FAB_DISTRIBUTION
+#include "HAL/FileManager.h"
+#include "Sidecar/UnrealMcpSidecarManager.h"
+#endif
 
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/Images/SImage.h"
@@ -1068,9 +1072,29 @@ TSharedRef<SWidget> SUnrealMcpMainWindow::BuildFooterSection()
 				UnrealMcpStyleWidgets::StyledTextButton("UnrealMcp.Button.Secondary", LOCTEXT("Check", "Check"),
 					FOnClicked::CreateLambda([]() { FUnrealMcpAuxWindows::TryInvokeSerializationCheckTab(); return FReply::Handled(); }))
 			]
+#if UNREAL_MCP_FAB_DISTRIBUTION
+			// §6.8: the Fab build installs the bridge by hand. These open the release page and the install folder.
+			+ SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 8, 0)
+			[
+				UnrealMcpStyleWidgets::StyledTextButton("UnrealMcp.Button.Secondary", LOCTEXT("GetBridge", "Get bridge"),
+					UnrealMcpStyleWidgets::OpenUrlClicked(FUnrealMcpSidecarManager::ManualBridgeReleaseUrl()))
+			]
+			+ SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 8, 0)
+			[
+				UnrealMcpStyleWidgets::StyledTextButton("UnrealMcp.Button.Secondary", LOCTEXT("OpenBridgeFolder", "Open bridge folder"),
+					FOnClicked::CreateLambda([]()
+					{
+						const FString Dir = FUnrealMcpSidecarManager::ManualBridgeDir();
+						IFileManager::Get().MakeDirectory(*Dir, /*Tree*/ true);
+						FPlatformProcess::ExploreFolder(*Dir);
+						return FReply::Handled();
+					}))
+			]
+#endif
 			+ SHorizontalBox::Slot().AutoWidth()
 			[
-				UnrealMcpStyleWidgets::StyledTextButton("UnrealMcp.Button.Secondary", LOCTEXT("RestartBridge", "Restart bridge"),
+				UnrealMcpStyleWidgets::StyledTextButton("UnrealMcp.Button.Secondary",
+					UNREAL_MCP_FAB_DISTRIBUTION ? LOCTEXT("StartBridge", "Start bridge") : LOCTEXT("RestartBridge", "Restart bridge"),
 					FOnClicked::CreateLambda([this]() { OnRestartBridge.ExecuteIfBound(); return FReply::Handled(); }))
 			]
 		]
@@ -1110,7 +1134,13 @@ FReply SUnrealMcpMainWindow::OnConnectClicked()
 		return FReply::Handled();
 
 	// Tri-state: Disconnected → Connect; anything else (Connecting/Connected/Degraded) → Disconnect/Stop.
+#if UNREAL_MCP_FAB_DISTRIBUTION
+	// §6.8: the effective state, so a bridge that died or was never started offers Connect, which starts it.
+	const EUnrealMcpConnectionState State = ViewModel->GetEffectiveConnectionState();
+	if (State == EUnrealMcpConnectionState::Disconnected || State == EUnrealMcpConnectionState::NoBinary)
+#else
 	if (ViewModel->GetConnectionState() == EUnrealMcpConnectionState::Disconnected)
+#endif
 		ViewModel->Connect();
 	else
 		ViewModel->Disconnect();

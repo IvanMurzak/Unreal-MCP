@@ -19,7 +19,7 @@ What it checks (everything the core, extension and CLI releases ship):
     equal the sidecar's `com.IvanMurzak.Rql` pin (the C++ runtime executes the plans the sidecar's RQL
     parses), and its recorded commit must be the `<repository commit>` of that package's nuspec. The
     copied sources carry no version of their own, so the README is what is checked;
-  * the vendored Code-Exec Python runtime (`_vendor/code_exec/VENDORED.md`): a published
+  * the vendored Code-Exec Python runtime (`Lib/site-packages/code_exec/VENDORED.md`): a published
     `com.IvanMurzak.CodeExec` release;
   * every extension's `minCoreVersion` (`extensions/*/extension.json`) and the npm dependencies of
     `unreal-mcp-cli` (`cli/package.json`): pre-release or non-registry specs fail.
@@ -399,7 +399,7 @@ def require(path: Path, problems: list[Problem]) -> bool:
 
 RQL_PACKAGE = "com.IvanMurzak.Rql"
 RQL_VENDORED = Path("UnrealMCP/Source/ThirdParty/RQL/README.md")
-CODE_EXEC_VENDORED = Path("UnrealMCP/Content/Python/unreal_mcp/_vendor/code_exec/VENDORED.md")
+CODE_EXEC_VENDORED = Path("UnrealMCP/Content/Python/Lib/site-packages/code_exec/VENDORED.md")
 RQL_COMMIT_RE = re.compile(r"commit\s+`([0-9a-fA-F]{7,40})`")
 RQL_MARKER_RE = re.compile(r"`com\.IvanMurzak\.Rql`\s*`?\s*([0-9][0-9A-Za-z.+-]*[0-9A-Za-z])")
 VENDORED_RELEASE_RE = re.compile(r"release\s+\*\*([^*\s]+)\*\*")

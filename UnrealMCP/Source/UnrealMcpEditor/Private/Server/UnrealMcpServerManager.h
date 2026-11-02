@@ -138,6 +138,7 @@ private:
 	/** macOS/Linux pre-spawn: chmod +x the resolved binary so a freshly-downloaded server is runnable. No-op on Windows. */
 	static void PrepareBinaryForSpawn(const FString& Path);
 
+#if !UNREAL_MCP_FAB_DISTRIBUTION
 	/** Download + unpack the pinned server zip into the §6 install dir (override/cache miss path). Blocking; game-thread. */
 	bool DownloadBinaryIfNeeded(FString& OutBinaryPath);
 
@@ -158,6 +159,7 @@ private:
 	 * tick-until-done pattern on the game thread). Writes the manifest body to @p OutText and returns true,
 	 * or returns false when every attempt failed (the fail-closed signal). Game-thread; blocking. */
 	static bool FetchSha256SumsText(const FString& SumsUrl, FString& OutText);
+#endif
 
 	/** Spawn the resolved binary with the current launch args; records ProcHandle + ProcId under ProcessMutex. */
 	bool SpawnProcess(const FString& BinaryPath);

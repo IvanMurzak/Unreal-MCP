@@ -249,6 +249,11 @@ an entirely manual operator step (no CI job submits — see the checklist at the
   `Source/ThirdParty/UnrealMcpBridge/...` tree; no source uses hardcoded/absolute paths; all packaged
   paths are ≤140 chars from the plugin root; the zip excludes `Binaries/Intermediate/Saved/.vs` (Fab strips
   them — the surviving `Source/ThirdParty/UnrealMcpBridge/<rid>/` copy is what the recompile uses).
+- **C1b — no download, no auto-start.** The `-fab-` zip carries `Config/FabDistribution.ini`, which compiles
+  `UNREAL_MCP_FAB_DISTRIBUTION=1`; the downloader sources do not ship. The listing's Technical Information must
+  describe the manual bridge download (ARCHITECTURE §6.8).
+- **C1c — copyright comment in every code file.** `fab-zip` stamps the vendored RQL and Code-Exec sources (the repo
+  keeps them verbatim) and fails on any other code file without one.
 - **C5 — one project file per engine, `EngineVersion` set.** Epic's review requires the key in what it compiles,
   while every other asset must stay unpinned (UE treats it as an exact match). Download the release's `-fab-` zip
   into `dist/`, run `python .github/scripts/ue_ci.py fab-engine-zips --version <version>` at the release's commit

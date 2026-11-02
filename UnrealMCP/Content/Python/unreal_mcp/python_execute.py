@@ -11,7 +11,7 @@ import json
 
 import unreal
 
-from unreal_mcp._vendor import code_exec
+import code_exec
 
 
 def _plain(value):

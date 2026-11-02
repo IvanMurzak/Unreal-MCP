@@ -195,8 +195,29 @@ bool FUnrealMcpSidecarManager::IsCompleteDownloadedBridgeDir(const FString& Dir,
 		&& FPaths::FileExists(Dir / BridgeBinaryBasename());
 }
 
+FString FUnrealMcpSidecarManager::ManualBridgeDir()
+{
+	return ComposeDownloadedBridgeDir(BridgeCacheRoot(), PluginVersionName(), ResolveDownloadRid());
+}
+
+FString FUnrealMcpSidecarManager::ManualBridgeReleaseUrl()
+{
+	return FString::Printf(TEXT("https://github.com/IvanMurzak/Unreal-MCP/releases/tag/v%s"), *PluginVersionName());
+}
+
+FString FUnrealMcpSidecarManager::ManualBridgeInstructions()
+{
+	return FString::Printf(TEXT("The MCP bridge program is not installed. Click \"Get bridge\", download unreal-mcp-bridge-%s.zip from the release page, ")
+		TEXT("extract it into the folder \"Open bridge folder\" shows, then click \"Connect\"."), *ResolveDownloadRid());
+}
+
 FString FUnrealMcpSidecarManager::ResolveDownloadedBridgePath()
 {
+#if UNREAL_MCP_FAB_DISTRIBUTION
+	// §6.8: the user put this file here by hand, so there is no download marker to check.
+	const FString Manual = ManualBridgeDir() / BridgeBinaryBasename();
+	return FPaths::FileExists(Manual) ? Manual : FString();
+#else
 	// Only a cache dir whose marker records the digest THIS plugin ships is trusted: a plugin without SHA256SUMS
 	// (a dev checkout) never runs a cached bridge, and a dir from another build of the same version is ignored.
 	TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("UnrealMCP"));
@@ -206,6 +227,7 @@ FString FUnrealMcpSidecarManager::ResolveDownloadedBridgePath()
 	const FString Rid = ResolveDownloadRid();
 	const FString Dir = ComposeDownloadedBridgeDir(BridgeCacheRoot(), Plugin->GetDescriptor().VersionName, Rid);
 	return IsCompleteDownloadedBridgeDir(Dir, ShippedBridgeZipDigest(ManifestText, Rid)) ? Dir / BridgeBinaryBasename() : FString();
+#endif
 }
 
 FString FUnrealMcpSidecarManager::ResolveBridgeBinaryPath()
@@ -298,10 +320,14 @@ bool FUnrealMcpSidecarManager::StartForPort(int32 InIpcPort, const FString& InTo
 		// binary is the production path, the env var is the dev path). Report the EFFECTIVE rid (arm64-probed,
 		// matching ResolveBridgeBinaryPath) so the reinstall hint names the slice that was actually looked for
 		// — not osx-arm64 on a host that degraded to osx-x64.
+#if UNREAL_MCP_FAB_DISTRIBUTION
+		UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] %s"), *ManualBridgeInstructions());
+#else
 		UE_LOG(LogUnrealMcp, Warning,
 			TEXT("[Unreal-MCP] no sidecar binary resolved for rid '%s' (no bundled or downloaded bridge, and UNREAL_MCP_BRIDGE_PATH unset or pointing at a missing file). ")
 			TEXT("The bridge is listening on %d. The editor downloads the bridge for this plugin version (§6.8); developers: set UNREAL_MCP_BRIDGE_PATH or run `unreal-mcp-cli bootstrap-local`."),
 			*EffectiveRid, IpcPort);
+#endif
 		return false;
 	}
 

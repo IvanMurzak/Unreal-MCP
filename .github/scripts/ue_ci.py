@@ -11,6 +11,7 @@ UE_EDITOR_CMD. Commands that export values for later steps append them to GITHUB
 from __future__ import annotations
 
 import argparse
+import codecs
 import hashlib
 import json
 import os
@@ -31,11 +32,24 @@ from ue_env import IS_WINDOWS, add_job_env, link_path, remove_link  # noqa: E402
 
 PLUGIN = ROOT / "UnrealMCP"
 STAGED_BRIDGE = PLUGIN / "Source/ThirdParty/UnrealMcpBridge"
-# The SHA-256 manifest of the per-RID release zips, shipped INSIDE the plugin: the editor verifies a downloaded bridge
-# against it (docs/ARCHITECTURE.md §6.8, FUnrealMcpBridgeDownloader). Gitignored, written by stage-bridge.
+# The SHA-256 manifest of the per-RID release zips, shipped INSIDE the plugin: FUnrealMcpBridgeDownloader, or the user of
+# a Fab install, checks a downloaded bridge against it (docs/ARCHITECTURE.md §6.8). Gitignored, written by stage-bridge.
 BRIDGE_SUMS = "SHA256SUMS"
 # The engines the release validates (release.yml) and the Fab listing offers: one Fab project file per engine.
 FAB_ENGINES = ("5.5", "5.6", "5.7", "5.8")
+# Fab asset only: its presence compiles UNREAL_MCP_FAB_DISTRIBUTION=1 (UnrealMcpRuntime.Build.cs): no download, no auto-start.
+FAB_MARKER = "Config/FabDistribution.ini"
+# The download code is not compiled in the Fab build, and Epic's review reads the source, so these files do not ship.
+FAB_REMOVED_SOURCES = (
+    "Source/UnrealMcpEditor/Private/Server/UnrealMcpServerDownload.cpp",
+    "Source/UnrealMcpEditor/Private/Sidecar/UnrealMcpBridgeDownloader.cpp",
+    "Source/UnrealMcpEditor/Private/Sidecar/UnrealMcpBridgeDownloader.h",
+)
+# Fab review wants a copyright comment at the top of every code file. The repo keeps vendored copies verbatim, so the
+# Fab asset stamps them; both come from the same publisher, under the license in their folders.
+FAB_CODE_SUFFIXES = {".c", ".cpp", ".cs", ".h", ".hpp", ".inl", ".py"}
+FAB_VENDORED_CODE = ("Source/ThirdParty/RQL", "Content/Python/Lib/site-packages/code_exec")
+FAB_VENDORED_COPYRIGHT = "Copyright (c) 2026 Ivan Murzak. Licensed under the PolyForm Shield License 1.0.0."
 # The files of the source plugin assets, relative to UnrealMCP/.
 SOURCE_ASSET_INPUTS = ("UnrealMCP.uplugin", "Config", "Resources", "Content", "Source/UnrealMcpRuntime", "Source/UnrealMcpRql",
                        "Source/UnrealMcpEditor", "Source/ThirdParty", "ThirdPartyNotices.txt")
@@ -370,7 +384,7 @@ def stage_source_asset(folder: str) -> Path:
     if "UnrealMcpEditorTests" in module_names(PLUGIN / "UnrealMCP.uplugin"):
         raise StepError("The distributed source descriptor must not ship UnrealMcpEditorTests.")
     if not (STAGED_BRIDGE / BRIDGE_SUMS).is_file():
-        raise StepError(f"{STAGED_BRIDGE / BRIDGE_SUMS} is missing (stage-bridge writes it); a plugin without it cannot download its bridge.")
+        raise StepError(f"{STAGED_BRIDGE / BRIDGE_SUMS} is missing (stage-bridge writes it); a plugin without it cannot verify its bridge.")
     stage_root = temp() / folder
     remove_tree(stage_root)
     stage = stage_root / "UnrealMCP"
@@ -414,12 +428,48 @@ def require_no_executable(stage: Path) -> None:
         raise StepError("The Fab asset must contain no executable, found:\n" + "\n".join(found))
 
 
+def code_files(stage: Path) -> list:
+    return sorted(p for p in stage.rglob("*") if p.is_file() and p.suffix.lower() in FAB_CODE_SUFFIXES)
+
+
+def has_copyright(path: Path) -> bool:
+    with path.open("rb") as handle:
+        return b"copyright" in b"\n".join(handle.read(4096).splitlines()[:5]).lower()
+
+
+def stamp_vendored_copyright(stage: Path) -> None:
+    """Prepend the copyright comment to the vendored code files of the staged Fab asset that lack one."""
+    for folder in FAB_VENDORED_CODE:
+        for path in code_files(stage / folder):
+            if has_copyright(path):
+                continue
+            comment = "#" if path.suffix.lower() == ".py" else "//"
+            data = path.read_bytes()
+            bom = codecs.BOM_UTF8 if data.startswith(codecs.BOM_UTF8) else b""
+            path.write_bytes(bom + f"{comment} {FAB_VENDORED_COPYRIGHT}\n".encode("utf-8") + data[len(bom):])
+
+
+def require_fab_build(stage: Path) -> None:
+    """An asset built before the manual bridge install is the code Epic rejected: refuse to make project files from it."""
+    leftover = [rel for rel in FAB_REMOVED_SOURCES if (stage / rel).exists()]
+    if leftover or not (stage / FAB_MARKER).is_file():
+        raise StepError(f"Not a manual-bridge Fab asset (marker {FAB_MARKER}, download sources left: {leftover}).")
+    require_copyright(stage)
+    require_no_executable(stage)
+
+
+def require_copyright(stage: Path) -> None:
+    missing = [p.relative_to(stage).as_posix() for p in code_files(stage) if not has_copyright(p)]
+    if missing:
+        raise StepError("The Fab asset needs a copyright comment at the top of every code file, missing in:\n" + "\n".join(missing))
+
+
 def fab_zip(args) -> None:
-    """The Fab asset unreal-mcp-plugin-fab-<version>.zip: the source asset WITHOUT any executable.
+    """The Fab asset unreal-mcp-plugin-fab-<version>.zip: the source asset WITHOUT any executable or way to fetch one.
 
     Epic's Fab review accepts source files only, so the per-RID bridge payloads are dropped (their .gitkeep
-    placeholders stay); the editor downloads the bridge for its own version and verifies it against the shipped
-    SHA256SUMS (docs/ARCHITECTURE.md §6.8). Fails if anything executable is left.
+    placeholders stay), and it forbids downloading or starting an executable on the plugin's own: the marker switches
+    the build to the manual install of docs/ARCHITECTURE.md §6.8. Fails if anything executable is left.
     """
     stage = stage_source_asset("UnrealMCP-Fab-Package")
     for rid in RIDS:
@@ -427,7 +477,11 @@ def fab_zip(args) -> None:
         remove_tree(payload)
         payload.mkdir(parents=True)
         (payload / ".gitkeep").write_bytes(b"")  # the tracked placeholder stage-bridge replaced with the payload
-    require_no_executable(stage)
+    for rel in FAB_REMOVED_SOURCES:
+        (stage / rel).unlink()
+    (stage / FAB_MARKER).write_text("; Compiles the Fab build: no bridge download, no auto-start (UnrealMcpRuntime.Build.cs).\n", encoding="utf-8")
+    stamp_vendored_copyright(stage)
+    require_fab_build(stage)
     print(f"Fab asset: {count_files(stage)} file(s), no executable.")
     zip_dir(stage, ROOT / f"dist/unreal-mcp-plugin-fab-{args.version}.zip", prefix="UnrealMCP/")
 
@@ -441,7 +495,7 @@ def fab_engine_zips(args) -> None:
     """
     source = ROOT / f"dist/unreal-mcp-plugin-fab-{args.version}.zip"
     if not source.is_file():
-        raise StepError(f"{source} is missing: download the release's Fab asset there first.")
+        raise StepError(f"{source} is missing: build or download the Fab asset there first.")
     stage_root = temp() / "UnrealMCP-Fab-Engines"
     remove_tree(stage_root)
     with zipfile.ZipFile(source) as archive:
@@ -451,7 +505,7 @@ def fab_engine_zips(args) -> None:
     descriptor = ue_json.read(descriptor_path)
     description = ue_json.read(PLUGIN / "UnrealMCP.uplugin")["Description"]
     shutil.copy2(PLUGIN / "ThirdPartyNotices.txt", stage / "ThirdPartyNotices.txt")
-    require_no_executable(stage)
+    require_fab_build(stage)
     for engine in FAB_ENGINES:
         pinned = {**descriptor, "Description": description, "EngineVersion": f"{engine}.0"}
         descriptor_path.write_text(json.dumps(pinned, indent=2) + "\n", encoding="utf-8")

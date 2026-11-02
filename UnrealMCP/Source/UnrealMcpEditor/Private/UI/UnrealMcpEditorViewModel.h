@@ -141,6 +141,9 @@ public:
 	TFunction<bool()> IsBridgeBinaryResolvableSink;
 	/** §6.8: whether the bridge download is in flight (no binary yet, but one is coming). Unset → false. */
 	TFunction<bool()> IsBridgeDownloadingSink;
+
+	/** Fab build (§6.8): whether the bridge process runs. Nothing restarts it, so a dead bridge means Disconnected. */
+	TFunction<bool()> IsBridgeRunningSink;
 	/** §6.8: the bridge download's progress line or failure reason; empty when there is none. Unset → empty. */
 	TFunction<FString()> BridgeDownloadMessageSink;
 

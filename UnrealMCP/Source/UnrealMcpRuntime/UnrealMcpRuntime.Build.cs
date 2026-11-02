@@ -73,6 +73,11 @@ public class UnrealMcpRuntime : ModuleRules
 		bool bUnrealMcpAllowShipping = false;
 		PublicDefinitions.Add("UNREAL_MCP_ALLOW_SHIPPING=" + (bUnrealMcpAllowShipping ? "1" : "0"));
 
+		// Fab review: the marketplace build neither downloads nor starts an executable on its own (ARCHITECTURE §6.8).
+		// `ue_ci.py fab-zip` writes this marker into the Fab asset only, so every other distribution is unchanged.
+		bool bFabDistribution = File.Exists(Path.Combine(PluginDirectory, "Config", "FabDistribution.ini"));
+		PublicDefinitions.Add("UNREAL_MCP_FAB_DISTRIBUTION=" + (bFabDistribution ? "1" : "0"));
+
 		// R2 (docs/ARCHITECTURE.md §12.5) + Fab readiness (#139): bundle the prebuilt self-contained sidecar
 		// payloads into the packaged plugin under Binaries/ThirdParty/UnrealMcpBridge/<rid>/ — the exact path
 		// the C++ resolver (FUnrealMcpSidecarManager::ResolveBridgeBinaryPath / ComposeBundledBridgePath) reads

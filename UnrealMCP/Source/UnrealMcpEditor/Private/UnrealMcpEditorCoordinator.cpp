@@ -16,7 +16,9 @@
 #include "Dispatch/UnrealMcpGameThreadDispatcher.h"
 #include "Bridge/UnrealMcpBridgeServer.h"
 #include "Sidecar/UnrealMcpSidecarManager.h"
+#if !UNREAL_MCP_FAB_DISTRIBUTION
 #include "Sidecar/UnrealMcpBridgeDownloader.h"
+#endif
 #include "Server/UnrealMcpServerManager.h"
 #include "Extensions/UnrealMcpExtensionManager.h"
 #include "Extensions/UnrealMcpExtensionInstaller.h" // §7 install channel #3 (catalog fetch + installer)
@@ -226,8 +228,13 @@ void FUnrealMcpEditorCoordinator::Startup()
 	if (FUnrealMcpSidecarManager::ShouldAutoStart(IsRunningCommandlet()))
 	{
 		SidecarManager = MakeUnique<FUnrealMcpSidecarManager>();
+#if UNREAL_MCP_FAB_DISTRIBUTION
+		// §6.8: the Fab build starts the bridge only on a user action (Connect, Authorize, Start bridge).
+		UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] Fab build: the MCP bridge starts when you click Connect."));
+#else
 		BridgeDownloader = MakeShared<FUnrealMcpBridgeDownloader, ESPMode::ThreadSafe>();
 		StartSidecarOrDownload();
+#endif
 	}
 	else
 	{
@@ -291,6 +298,13 @@ void FUnrealMcpEditorCoordinator::Startup()
 	// §6.8: the flag flips true when a download completes; the download sinks drive the "Downloading…" / failure line.
 	bBridgeBinaryResolvable = !FUnrealMcpSidecarManager::ResolveBridgeBinaryPath().IsEmpty();
 	ViewModel->IsBridgeBinaryResolvableSink = [this]() -> bool { return bBridgeBinaryResolvable; };
+#if UNREAL_MCP_FAB_DISTRIBUTION
+	ViewModel->IsBridgeRunningSink = [this]() -> bool { return SidecarManager.IsValid() && SidecarManager->IsRunning(); };
+	ViewModel->BridgeDownloadMessageSink = [this, Instructions = FUnrealMcpSidecarManager::ManualBridgeInstructions()]() -> FString
+	{
+		return bBridgeBinaryResolvable ? FString() : Instructions;
+	};
+#else
 	ViewModel->IsBridgeDownloadingSink = [this]() -> bool
 	{
 		return BridgeDownloader.IsValid() && BridgeDownloader->GetState() == FUnrealMcpBridgeDownloader::EState::Downloading;
@@ -299,6 +313,7 @@ void FUnrealMcpEditorCoordinator::Startup()
 	{
 		return BridgeDownloader.IsValid() ? BridgeDownloader->GetMessage() : FString();
 	};
+#endif
 
 	// §7 in-UI local-server (issue #95): wire the MCP-server card's Start/Stop to the local server manager. The
 	// view-model already gates these to Custom+http (ToggleLocalServer no-ops otherwise) — the sinks just execute.
@@ -640,7 +655,7 @@ void FUnrealMcpEditorCoordinator::ApplyProjectConfigResult(const TSharedPtr<FJso
 		// request them; ApplyServerLaunchArgsResult calls ReattachIfRunning with the returned string.
 		// UNREAL_MCP_START_SERVER / `startServer` (e.g. `unreal-mcp-cli exec`): no survivor → start one.
 		RequestServerLaunchArgs(DerivedPort, Live,
-			Live.bStartServer ? EServerLaunch::ReattachOrStart : EServerLaunch::Reattach);
+			Live.bStartServer && !UNREAL_MCP_FAB_DISTRIBUTION ? EServerLaunch::ReattachOrStart : EServerLaunch::Reattach);
 	}
 	bLocalServerReattachAttempted = true;
 }
@@ -726,6 +741,14 @@ bool FUnrealMcpEditorCoordinator::StartSidecarOrDownload()
 {
 	if (!SidecarManager.IsValid())
 		return false;
+#if UNREAL_MCP_FAB_DISTRIBUTION
+	// §6.8: always a user action here; re-resolve, as the user may have just installed the bridge by hand.
+	if (SidecarManager->IsRunning())
+		return true;
+	SidecarManager->Stop(); // joins the finished watchdog and closes the dead handle of an earlier run
+	bBridgeBinaryResolvable = !FUnrealMcpSidecarManager::ResolveBridgeBinaryPath().IsEmpty();
+	return SidecarManager->StartForPort(SidecarIpcPort, SidecarToken);
+#else
 	if (SidecarManager->StartForPort(SidecarIpcPort, SidecarToken))
 		return true;
 	// A spawn failure with a resolvable binary, or a platform with no RID (§12.5), is not a download case.
@@ -746,6 +769,7 @@ bool FUnrealMcpEditorCoordinator::StartSidecarOrDownload()
 				SidecarManager->StartForPort(SidecarIpcPort, SidecarToken);
 		});
 	return BridgeDownloader->GetState() == FUnrealMcpBridgeDownloader::EState::Downloading;
+#endif
 }
 
 void FUnrealMcpEditorCoordinator::Shutdown()
@@ -760,12 +784,14 @@ void FUnrealMcpEditorCoordinator::Shutdown()
 	if (ExtProvidersAlive.IsValid())
 		*ExtProvidersAlive = false;
 
+#if !UNREAL_MCP_FAB_DISTRIBUTION
 	// §6.8: cancel an in-flight bridge download first; its completion would start the sidecar torn down below.
 	if (BridgeDownloader.IsValid())
 	{
 		BridgeDownloader->Cancel();
 		BridgeDownloader.Reset();
 	}
+#endif
 
 	if (PreExitHandle.IsValid())
 	{
@@ -828,6 +854,7 @@ void FUnrealMcpEditorCoordinator::Shutdown()
 		ViewModel->OnStopLocalServer = nullptr;
 		ViewModel->IsLocalServerRunningSink = nullptr;
 		ViewModel->IsBridgeBinaryResolvableSink = nullptr; // these three capture `this`
+		ViewModel->IsBridgeRunningSink = nullptr;
 		ViewModel->IsBridgeDownloadingSink = nullptr;
 		ViewModel->BridgeDownloadMessageSink = nullptr;
 	}
