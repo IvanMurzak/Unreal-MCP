@@ -673,8 +673,8 @@ public:
 **Decision: BUNDLE the sidecar inside the plugin.** Prebuilt, **self-contained, single-file**
 `unreal-mcp-bridge` binaries for all four RIDs ship inside the plugin and are resolved from disk at
 spawn time — there is **no download-on-first-run** for a CLI or BuildPlugin install. The one exception is the
-**Fab asset**, which Epic requires to carry no executable: there the editor downloads and verifies the bridge
-for its own version (§6.8; superseded for Fab, see there). Rationale: the owner requirement is zero .NET
+**Fab asset**, which Epic requires to carry no executable: there the user installs the bridge by hand
+(§6.8). Rationale: the owner requirement is zero .NET
 install + zero manual steps for the end user; a bundle guarantees the binary is present and
 version-correct the instant the compiled plugin loads, works fully offline/air-gapped, and welds
 the sidecar to the exact plugin version it was tested against (no skew window). The earlier

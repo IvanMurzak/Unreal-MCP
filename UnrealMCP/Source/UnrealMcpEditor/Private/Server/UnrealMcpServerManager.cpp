@@ -2,18 +2,16 @@
 // See the LICENSE file in the repository root for more information.
 
 #include "Server/UnrealMcpServerManager.h"
+#include "Server/UnrealMcpServerChecksum.h"
 #include "UnrealMcpLog.h"
 #include "UnrealMcpProcessUtil.h"   // shared ResolveDotNetRid + MakeExecutable
 
 #include "Async/Async.h"
 #include "HAL/PlatformProcess.h"
-#include "HAL/PlatformFileManager.h"
 #include "HAL/FileManager.h"
 #include "Misc/Paths.h"
 #include "Misc/FileHelper.h"
 #include "Misc/ScopeLock.h"
-#include "Misc/ScopeExit.h"
-#include "GenericPlatform/GenericPlatformFile.h"
 
 
 
@@ -195,14 +193,9 @@ FString FUnrealMcpServerManager::ResolveBinaryPath() const
 	const FString Rid = ResolveRid();
 	const FString InstallDir = ServerInstallDir(ProjectDir, Rid);
 	const FString BinPath = ServerBinaryPathFor(ProjectDir, Rid);
-#if UNREAL_MCP_FAB_DISTRIBUTION
-	// §6.8: the user installed this file by hand; only a plugin download writes the `version` marker.
-	if (!BinPath.IsEmpty() && FPaths::FileExists(BinPath))
+	// §6.8: in the Fab build the user installed the file by hand; only a plugin download writes the `version` marker.
+	if (!BinPath.IsEmpty() && FPaths::FileExists(BinPath) && (UNREAL_MCP_FAB_DISTRIBUTION || ReadVersionMarker(InstallDir) == ServerVersion))
 		return BinPath;
-#else
-	if (!BinPath.IsEmpty() && FPaths::FileExists(BinPath) && ReadVersionMarker(InstallDir) == ServerVersion)
-		return BinPath;
-#endif
 
 	// 3. Neither resolves — caller downloads (or surfaces the CLI hint).
 	return FString();
@@ -309,9 +302,9 @@ bool FUnrealMcpServerManager::Start(int32 Port, const FString& InLaunchArgs)
 		// §6.8: the Fab build never downloads an executable. The user installs the server by hand.
 		bStarting = false;
 		UE_LOG(LogUnrealMcp, Error,
-			TEXT("[Unreal-MCP] the local gamedev-mcp-server is not installed. Download gamedev-mcp-server-%s.zip from ")
+			TEXT("[Unreal-MCP] the local gamedev-mcp-server is not installed. Download %s from ")
 			TEXT("https://github.com/IvanMurzak/GameDev-MCP-Server/releases/tag/v%s and extract it into %s, or set %s."),
-			*ResolveRid(), ServerVersion, *ServerInstallDir(FPaths::ConvertRelativePathToFull(FPaths::ProjectDir()), ResolveRid()), ServerPathEnvVar);
+			*FUnrealMcpServerChecksum::ServerZipAssetName(ResolveRid()), ServerVersion, *ServerInstallDir(FPaths::ConvertRelativePathToFull(FPaths::ProjectDir()), ResolveRid()), ServerPathEnvVar);
 		return false;
 #else
 		FString Downloaded;

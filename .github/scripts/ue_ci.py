@@ -433,7 +433,8 @@ def code_files(stage: Path) -> list:
 
 
 def has_copyright(path: Path) -> bool:
-    return b"copyright" in b"\n".join(path.read_bytes().splitlines()[:5]).lower()
+    with path.open("rb") as handle:
+        return b"copyright" in b"\n".join(handle.read(4096).splitlines()[:5]).lower()
 
 
 def stamp_vendored_copyright(stage: Path) -> None:

@@ -1077,11 +1077,7 @@ TSharedRef<SWidget> SUnrealMcpMainWindow::BuildFooterSection()
 			+ SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 8, 0)
 			[
 				UnrealMcpStyleWidgets::StyledTextButton("UnrealMcp.Button.Secondary", LOCTEXT("GetBridge", "Get bridge"),
-					FOnClicked::CreateLambda([]()
-					{
-						FPlatformProcess::LaunchURL(*FUnrealMcpSidecarManager::ManualBridgeReleaseUrl(), nullptr, nullptr);
-						return FReply::Handled();
-					}))
+					UnrealMcpStyleWidgets::OpenUrlClicked(FUnrealMcpSidecarManager::ManualBridgeReleaseUrl()))
 			]
 			+ SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 8, 0)
 			[
@@ -1097,11 +1093,8 @@ TSharedRef<SWidget> SUnrealMcpMainWindow::BuildFooterSection()
 #endif
 			+ SHorizontalBox::Slot().AutoWidth()
 			[
-#if UNREAL_MCP_FAB_DISTRIBUTION
-				UnrealMcpStyleWidgets::StyledTextButton("UnrealMcp.Button.Secondary", LOCTEXT("StartBridge", "Start bridge"),
-#else
-				UnrealMcpStyleWidgets::StyledTextButton("UnrealMcp.Button.Secondary", LOCTEXT("RestartBridge", "Restart bridge"),
-#endif
+				UnrealMcpStyleWidgets::StyledTextButton("UnrealMcp.Button.Secondary",
+					UNREAL_MCP_FAB_DISTRIBUTION ? LOCTEXT("StartBridge", "Start bridge") : LOCTEXT("RestartBridge", "Restart bridge"),
 					FOnClicked::CreateLambda([this]() { OnRestartBridge.ExecuteIfBound(); return FReply::Handled(); }))
 			]
 		]

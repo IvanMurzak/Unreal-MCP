@@ -300,9 +300,9 @@ void FUnrealMcpEditorCoordinator::Startup()
 	ViewModel->IsBridgeBinaryResolvableSink = [this]() -> bool { return bBridgeBinaryResolvable; };
 #if UNREAL_MCP_FAB_DISTRIBUTION
 	ViewModel->IsBridgeRunningSink = [this]() -> bool { return SidecarManager.IsValid() && SidecarManager->IsRunning(); };
-	ViewModel->BridgeDownloadMessageSink = [this]() -> FString
+	ViewModel->BridgeDownloadMessageSink = [this, Instructions = FUnrealMcpSidecarManager::ManualBridgeInstructions()]() -> FString
 	{
-		return bBridgeBinaryResolvable ? FString() : FUnrealMcpSidecarManager::ManualBridgeInstructions();
+		return bBridgeBinaryResolvable ? FString() : Instructions;
 	};
 #else
 	ViewModel->IsBridgeDownloadingSink = [this]() -> bool
@@ -854,6 +854,7 @@ void FUnrealMcpEditorCoordinator::Shutdown()
 		ViewModel->OnStopLocalServer = nullptr;
 		ViewModel->IsLocalServerRunningSink = nullptr;
 		ViewModel->IsBridgeBinaryResolvableSink = nullptr; // these three capture `this`
+		ViewModel->IsBridgeRunningSink = nullptr;
 		ViewModel->IsBridgeDownloadingSink = nullptr;
 		ViewModel->BridgeDownloadMessageSink = nullptr;
 	}

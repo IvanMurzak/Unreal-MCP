@@ -75,9 +75,9 @@ private:
 	TUniquePtr<FUnrealMcpGameThreadDispatcher> Dispatcher;
 	TUniquePtr<FUnrealMcpBridgeServer> BridgeServer;
 	TUniquePtr<FUnrealMcpSidecarManager> SidecarManager;
-	// §6.8: downloads + verifies the bridge for this plugin version when none resolves (a Fab install ships no
-	// binaries). Shared: its async completion holds it weakly. Cancelled first thing in Shutdown.
 #if !UNREAL_MCP_FAB_DISTRIBUTION
+	// §6.8: downloads + verifies the bridge for this plugin version when none resolves (a plugin without bundled
+	// binaries). Shared: its async completion holds it weakly. Cancelled first thing in Shutdown.
 	TSharedPtr<FUnrealMcpBridgeDownloader, ESPMode::ThreadSafe> BridgeDownloader;
 #endif
 	// The bridge server's IPC port + one-shot token the sidecar is (re)started with (a download completes later).
