@@ -107,6 +107,7 @@ class CiStepTests(unittest.TestCase):
         plugin = self.temp / "repo/UnrealMCP"
         for rel in ("Config/x.ini", "Resources/Icon128.png", "Content/a.txt", "Source/UnrealMcpRuntime/a.cpp",
                     "Source/UnrealMcpRql/a.cpp", "Source/UnrealMcpEditor/a.cpp", "Source/UnrealMcpEditorTests/a.cpp",
+                    "Source/UnrealMcpEditor/Private/Server/UnrealMcpServerDownload.cpp",
                     "Source/UnrealMcpEditor/Private/Sidecar/UnrealMcpBridgeDownloader.cpp",
                     "Source/UnrealMcpEditor/Private/Sidecar/UnrealMcpBridgeDownloader.h",
                     "ThirdPartyNotices.txt"):
@@ -179,7 +180,7 @@ class CiStepTests(unittest.TestCase):
         self.assertFalse([n for n in names if "BridgeDownloader" in n])
         self.assertTrue(archive.read("UnrealMCP/Source/ThirdParty/RQL/src/value.cpp").startswith(b"// Copyright (c) 2026 Ivan Murzak."))
         self.assertTrue(archive.read("UnrealMCP/Content/Python/Lib/site-packages/code_exec/runner.py").startswith(b"# Copyright (c) 2026 Ivan Murzak."))
-        self.assertEqual(rql.read_bytes(), b"#include <a>\n")  # the repo keeps its verbatim copy
+        self.assertEqual(rql.read_text(encoding="utf-8"), "#include <a>\n")  # the repo keeps its verbatim copy
 
     def test_fab_zip_refuses_first_party_code_without_copyright(self):
         plugin = self.fake_plugin()

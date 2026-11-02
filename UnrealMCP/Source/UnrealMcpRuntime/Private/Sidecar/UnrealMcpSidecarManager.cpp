@@ -322,12 +322,12 @@ bool FUnrealMcpSidecarManager::StartForPort(int32 InIpcPort, const FString& InTo
 		// — not osx-arm64 on a host that degraded to osx-x64.
 #if UNREAL_MCP_FAB_DISTRIBUTION
 		UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] %s"), *ManualBridgeInstructions());
-		return false;
-#endif
+#else
 		UE_LOG(LogUnrealMcp, Warning,
 			TEXT("[Unreal-MCP] no sidecar binary resolved for rid '%s' (no bundled or downloaded bridge, and UNREAL_MCP_BRIDGE_PATH unset or pointing at a missing file). ")
 			TEXT("The bridge is listening on %d. The editor downloads the bridge for this plugin version (§6.8); developers: set UNREAL_MCP_BRIDGE_PATH or run `unreal-mcp-cli bootstrap-local`."),
 			*EffectiveRid, IpcPort);
+#endif
 		return false;
 	}
 

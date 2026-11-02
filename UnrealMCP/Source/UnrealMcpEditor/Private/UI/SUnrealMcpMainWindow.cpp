@@ -1141,7 +1141,13 @@ FReply SUnrealMcpMainWindow::OnConnectClicked()
 		return FReply::Handled();
 
 	// Tri-state: Disconnected → Connect; anything else (Connecting/Connected/Degraded) → Disconnect/Stop.
+#if UNREAL_MCP_FAB_DISTRIBUTION
+	// §6.8: the effective state, so a bridge that died or was never started offers Connect, which starts it.
+	const EUnrealMcpConnectionState State = ViewModel->GetEffectiveConnectionState();
+	if (State == EUnrealMcpConnectionState::Disconnected || State == EUnrealMcpConnectionState::NoBinary)
+#else
 	if (ViewModel->GetConnectionState() == EUnrealMcpConnectionState::Disconnected)
+#endif
 		ViewModel->Connect();
 	else
 		ViewModel->Disconnect();

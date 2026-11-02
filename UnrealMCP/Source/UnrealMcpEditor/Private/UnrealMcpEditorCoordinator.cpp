@@ -299,6 +299,7 @@ void FUnrealMcpEditorCoordinator::Startup()
 	bBridgeBinaryResolvable = !FUnrealMcpSidecarManager::ResolveBridgeBinaryPath().IsEmpty();
 	ViewModel->IsBridgeBinaryResolvableSink = [this]() -> bool { return bBridgeBinaryResolvable; };
 #if UNREAL_MCP_FAB_DISTRIBUTION
+	ViewModel->IsBridgeRunningSink = [this]() -> bool { return SidecarManager.IsValid() && SidecarManager->IsRunning(); };
 	ViewModel->BridgeDownloadMessageSink = [this]() -> FString
 	{
 		return bBridgeBinaryResolvable ? FString() : FUnrealMcpSidecarManager::ManualBridgeInstructions();
@@ -742,6 +743,9 @@ bool FUnrealMcpEditorCoordinator::StartSidecarOrDownload()
 		return false;
 #if UNREAL_MCP_FAB_DISTRIBUTION
 	// §6.8: always a user action here; re-resolve, as the user may have just installed the bridge by hand.
+	if (SidecarManager->IsRunning())
+		return true;
+	SidecarManager->Stop(); // joins the finished watchdog and closes the dead handle of an earlier run
 	bBridgeBinaryResolvable = !FUnrealMcpSidecarManager::ResolveBridgeBinaryPath().IsEmpty();
 	return SidecarManager->StartForPort(SidecarIpcPort, SidecarToken);
 #else

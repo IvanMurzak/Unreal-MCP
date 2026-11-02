@@ -856,8 +856,8 @@ all are handled in-repo (issues #139/#187), and submission itself remains an ope
 executables on its own". So `ue_ci.py fab-zip` writes `Config/FabDistribution.ini` into the Fab asset, and
 `UnrealMcpRuntime.Build.cs` turns its presence into `UNREAL_MCP_FAB_DISTRIBUTION=1`. In that build only:
 
-- **Nothing is downloaded.** `FUnrealMcpBridgeDownloader` is not compiled and its files do not ship; the local-server
-  download is compiled out too. Extensions stay a separate, user-clicked install.
+- **Nothing is downloaded.** `FUnrealMcpBridgeDownloader` and the local-server download
+  (`UnrealMcpServerDownload.cpp`) are not compiled and their files do not ship. Extensions stay a separate, user-clicked install.
 - **Nothing starts by itself.** The sidecar starts on a user click (Connect, Authorize, Start bridge), never at editor
   load, and a dead child is not restarted (`FUnrealMcpSupervisedProcess` stops at the first exit). The local server
   keeps its Start button; `startServer` is ignored.

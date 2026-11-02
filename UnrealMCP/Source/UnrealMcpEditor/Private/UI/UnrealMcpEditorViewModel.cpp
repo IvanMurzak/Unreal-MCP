@@ -224,8 +224,12 @@ void FUnrealMcpEditorViewModel::Authorize(double NowSeconds)
 		// The bridge binary genuinely cannot be resolved/spawned (packaged-without-<rid> / unset dev override).
 		// Awaiting a handshake that will never arrive would be a silent wedge — fail fast, actionably.
 		DeviceAuthState = EUnrealMcpDeviceAuthState::Failed;
+#if UNREAL_MCP_FAB_DISTRIBUTION
 		const FString InstallHint = BridgeDownloadMessageSink ? BridgeDownloadMessageSink() : FString();
 		DeviceAuthError = InstallHint.IsEmpty() ? FString(BridgeUnavailableMessage()) : InstallHint;
+#else
+		DeviceAuthError = BridgeUnavailableMessage();
+#endif
 		return;
 	}
 
@@ -689,6 +693,10 @@ bool FUnrealMcpEditorViewModel::IsBridgeBinaryResolvable() const
 
 EUnrealMcpConnectionState FUnrealMcpEditorViewModel::GetEffectiveConnectionState() const
 {
+#if UNREAL_MCP_FAB_DISTRIBUTION
+	if (IsBridgeRunningSink && !IsBridgeRunningSink())
+		return IsBridgeBinaryResolvable() ? EUnrealMcpConnectionState::Disconnected : EUnrealMcpConnectionState::NoBinary;
+#endif
 	// A live or armed-and-recently-live link proves a sidecar (hence a binary) exists — the `status` feed that
 	// produced Connected/Degraded originates in the sidecar — so never overlay NoBinary on it; return the raw
 	// state untouched.

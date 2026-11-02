@@ -11,6 +11,7 @@ UE_EDITOR_CMD. Commands that export values for later steps append them to GITHUB
 from __future__ import annotations
 
 import argparse
+import codecs
 import hashlib
 import json
 import os
@@ -31,15 +32,16 @@ from ue_env import IS_WINDOWS, add_job_env, link_path, remove_link  # noqa: E402
 
 PLUGIN = ROOT / "UnrealMCP"
 STAGED_BRIDGE = PLUGIN / "Source/ThirdParty/UnrealMcpBridge"
-# The SHA-256 manifest of the per-RID release zips, shipped INSIDE the plugin: the editor verifies a downloaded bridge
-# against it (docs/ARCHITECTURE.md §6.8, FUnrealMcpBridgeDownloader). Gitignored, written by stage-bridge.
+# The SHA-256 manifest of the per-RID release zips, shipped INSIDE the plugin: FUnrealMcpBridgeDownloader, or the user of
+# a Fab install, checks a downloaded bridge against it (docs/ARCHITECTURE.md §6.8). Gitignored, written by stage-bridge.
 BRIDGE_SUMS = "SHA256SUMS"
 # The engines the release validates (release.yml) and the Fab listing offers: one Fab project file per engine.
 FAB_ENGINES = ("5.5", "5.6", "5.7", "5.8")
 # Fab asset only: its presence compiles UNREAL_MCP_FAB_DISTRIBUTION=1 (UnrealMcpRuntime.Build.cs): no download, no auto-start.
 FAB_MARKER = "Config/FabDistribution.ini"
-# The bridge downloader is not compiled in the Fab build, and Epic's review reads the source, so the files do not ship.
+# The download code is not compiled in the Fab build, and Epic's review reads the source, so these files do not ship.
 FAB_REMOVED_SOURCES = (
+    "Source/UnrealMcpEditor/Private/Server/UnrealMcpServerDownload.cpp",
     "Source/UnrealMcpEditor/Private/Sidecar/UnrealMcpBridgeDownloader.cpp",
     "Source/UnrealMcpEditor/Private/Sidecar/UnrealMcpBridgeDownloader.h",
 )
@@ -382,7 +384,7 @@ def stage_source_asset(folder: str) -> Path:
     if "UnrealMcpEditorTests" in module_names(PLUGIN / "UnrealMCP.uplugin"):
         raise StepError("The distributed source descriptor must not ship UnrealMcpEditorTests.")
     if not (STAGED_BRIDGE / BRIDGE_SUMS).is_file():
-        raise StepError(f"{STAGED_BRIDGE / BRIDGE_SUMS} is missing (stage-bridge writes it); a plugin without it cannot download its bridge.")
+        raise StepError(f"{STAGED_BRIDGE / BRIDGE_SUMS} is missing (stage-bridge writes it); a plugin without it cannot verify its bridge.")
     stage_root = temp() / folder
     remove_tree(stage_root)
     stage = stage_root / "UnrealMCP"
@@ -441,7 +443,18 @@ def stamp_vendored_copyright(stage: Path) -> None:
             if has_copyright(path):
                 continue
             comment = "#" if path.suffix.lower() == ".py" else "//"
-            path.write_bytes(f"{comment} {FAB_VENDORED_COPYRIGHT}\n".encode("utf-8") + path.read_bytes())
+            data = path.read_bytes()
+            bom = codecs.BOM_UTF8 if data.startswith(codecs.BOM_UTF8) else b""
+            path.write_bytes(bom + f"{comment} {FAB_VENDORED_COPYRIGHT}\n".encode("utf-8") + data[len(bom):])
+
+
+def require_fab_build(stage: Path) -> None:
+    """An asset built before the manual bridge install is the code Epic rejected: refuse to make project files from it."""
+    leftover = [rel for rel in FAB_REMOVED_SOURCES if (stage / rel).exists()]
+    if leftover or not (stage / FAB_MARKER).is_file():
+        raise StepError(f"Not a manual-bridge Fab asset (marker {FAB_MARKER}, download sources left: {leftover}).")
+    require_copyright(stage)
+    require_no_executable(stage)
 
 
 def require_copyright(stage: Path) -> None:
@@ -467,8 +480,7 @@ def fab_zip(args) -> None:
         (stage / rel).unlink()
     (stage / FAB_MARKER).write_text("; Compiles the Fab build: no bridge download, no auto-start (UnrealMcpRuntime.Build.cs).\n", encoding="utf-8")
     stamp_vendored_copyright(stage)
-    require_copyright(stage)
-    require_no_executable(stage)
+    require_fab_build(stage)
     print(f"Fab asset: {count_files(stage)} file(s), no executable.")
     zip_dir(stage, ROOT / f"dist/unreal-mcp-plugin-fab-{args.version}.zip", prefix="UnrealMCP/")
 
@@ -492,7 +504,7 @@ def fab_engine_zips(args) -> None:
     descriptor = ue_json.read(descriptor_path)
     description = ue_json.read(PLUGIN / "UnrealMCP.uplugin")["Description"]
     shutil.copy2(PLUGIN / "ThirdPartyNotices.txt", stage / "ThirdPartyNotices.txt")
-    require_no_executable(stage)
+    require_fab_build(stage)
     for engine in FAB_ENGINES:
         pinned = {**descriptor, "Description": description, "EngineVersion": f"{engine}.0"}
         descriptor_path.write_text(json.dumps(pinned, indent=2) + "\n", encoding="utf-8")
