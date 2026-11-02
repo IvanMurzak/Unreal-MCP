@@ -25,7 +25,7 @@ delivered it. Identifiers below (tool ids, command names, env vars, paths) were 
 | §3 Schema generation | implemented | exercised by every tool family (#13–#25) |
 | §4 GameThread dispatcher | implemented | #4 (used by every tool family) |
 | §5 Extensions mechanism | implemented | #7 (`IUnrealMcpToolProvider`, `samples/UnrealAITemplate`) |
-| §6 Sidecar lifecycle | implemented | #4 (spawn / crash auto-restart / orphan-prevention / stdin-token) + #46 (BUNDLE-model resolution: env override → bundled `Binaries/ThirdParty/UnrealMcpBridge/<rid>/`, zero-click auto-spawn; the superseded download-on-first-run flow is dropped — see drift below) + the Fab asset's verified bridge download (§6.8) |
+| §6 Sidecar lifecycle | implemented | #4 (spawn / crash auto-restart / orphan-prevention / stdin-token) + #46 (BUNDLE-model resolution: env override → bundled `Binaries/ThirdParty/UnrealMcpBridge/<rid>/`, zero-click auto-spawn; the superseded download-on-first-run flow is dropped — see drift below) + the Fab asset's manual bridge install (§6.8) |
 | §7 Slate UI | implemented | #24 (AI Game Developer main window) + #29 (MCP Tools/Prompts/Resources aux windows) + #107 (collapsed the separate Settings window into the single main window, Unity-MCP parity) |
 | §8 Config & env | implemented | #8 (`UNREAL_MCP_*`, `.env`, on-disk config) |
 | §9.1 cli (`unreal-mcp-cli`, 18 commands) | implemented | #3 |
@@ -92,7 +92,7 @@ Prompts/Resources ship empty-but-wired (§10), as designed.
   A packaged plugin therefore auto-spawns at StartupModule with zero user action; a dev source
   checkout (no staged binary) still uses the env override and emits the rid-aware actionable warning.
   The earlier **download-on-first-run + version-skew re-download** design is **superseded and removed**
-  for bundled installs (no `.lock`, no re-download recovery; the executable-free Fab asset downloads once, §6.8) — version lockstep is by construction
+  for bundled installs (no `.lock`, no re-download recovery; the executable-free Fab asset is installed by hand, §6.8) — version lockstep is by construction
   (bundle built in the same release job at the same version). The bundled binaries are staged by the
   release job (`RuntimeDependencies`, `UnrealMcpEditor.Build.cs`) and are **never committed to git**;
   CI signing/notarization of those binaries is owned by the T3/T4 release tasks.
@@ -674,7 +674,7 @@ public:
 `unreal-mcp-bridge` binaries for all four RIDs ship inside the plugin and are resolved from disk at
 spawn time — there is **no download-on-first-run** for a CLI or BuildPlugin install. The one exception is the
 **Fab asset**, which Epic requires to carry no executable: there the editor downloads and verifies the bridge
-for its own version (§6.8). Rationale: the owner requirement is zero .NET
+for its own version (§6.8; superseded for Fab, see there). Rationale: the owner requirement is zero .NET
 install + zero manual steps for the end user; a bundle guarantees the binary is present and
 version-correct the instant the compiled plugin loads, works fully offline/air-gapped, and welds
 the sidecar to the exact plugin version it was tested against (no skew window). The earlier
@@ -850,9 +850,26 @@ all are handled in-repo (issues #139/#187), and submission itself remains an ope
    the desktop-only target platforms (console/mobile cannot spawn the .NET sidecar, §12.5). Fab review
    expects modules to enumerate their supported platforms rather than defaulting to all.
 
-### 6.8 Fab install: download-on-first-run of the bridge
+### 6.8 Fab install: manual bridge install (and the download it replaced)
 
-Epic's Fab review rejects any executable in a listing ("only source files are accepted"), so release.yml also
+**Current Fab behaviour.** Epic's review also rejected the download below: "the plugin must not download or launch
+executables on its own". So `ue_ci.py fab-zip` writes `Config/FabDistribution.ini` into the Fab asset, and
+`UnrealMcpRuntime.Build.cs` turns its presence into `UNREAL_MCP_FAB_DISTRIBUTION=1`. In that build only:
+
+- **Nothing is downloaded.** `FUnrealMcpBridgeDownloader` is not compiled and its files do not ship; the local-server
+  download is compiled out too. Extensions stay a separate, user-clicked install.
+- **Nothing starts by itself.** The sidecar starts on a user click (Connect, Authorize, Start bridge), never at editor
+  load, and a dead child is not restarted (`FUnrealMcpSupervisedProcess` stops at the first exit). The local server
+  keeps its Start button; `startServer` is ignored.
+- **The user installs the bridge.** The NoBinary hint explains the steps; "Get bridge" opens
+  `https://github.com/IvanMurzak/Unreal-MCP/releases/tag/v<VersionName>` and "Open bridge folder" opens
+  `<BridgeCacheRoot>/<VersionName>/<rid>/`, the place the resolver checks third (no `.verified` marker: the user put
+  it there; `SHA256SUMS` still ships for a manual check). `UNREAL_MCP_BRIDGE_PATH` works as everywhere. The local
+  server goes into `<Project>/Intermediate/UnrealMCP/server/<rid>/` or `UNREAL_MCP_SERVER_PATH`.
+
+Every other asset (CLI source, GitHub zip) has no marker and keeps the behaviour below, used when no bridge is bundled.
+
+**The verified download.** Epic's Fab review rejects any executable in a listing ("only source files are accepted"), so release.yml also
 publishes `unreal-mcp-plugin-fab-<version>.zip`: the source asset with every bridge payload removed (the per-RID
 `.gitkeep` placeholders stay; `ue_ci.py fab-zip` fails the release if any executable is left, by extension,
 PE/ELF/Mach-O magic bytes or shebang). An editor that resolves no bridge (§6.3) downloads it:

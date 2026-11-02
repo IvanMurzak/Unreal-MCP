@@ -8,6 +8,10 @@
 #include "UI/UnrealMcpExternalLinks.h"
 #include "UI/FUnrealMcpStyle.h"
 #include "UnrealMcpLog.h"
+#if UNREAL_MCP_FAB_DISTRIBUTION
+#include "HAL/FileManager.h"
+#include "Sidecar/UnrealMcpSidecarManager.h"
+#endif
 
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/Images/SImage.h"
@@ -1068,9 +1072,36 @@ TSharedRef<SWidget> SUnrealMcpMainWindow::BuildFooterSection()
 				UnrealMcpStyleWidgets::StyledTextButton("UnrealMcp.Button.Secondary", LOCTEXT("Check", "Check"),
 					FOnClicked::CreateLambda([]() { FUnrealMcpAuxWindows::TryInvokeSerializationCheckTab(); return FReply::Handled(); }))
 			]
+#if UNREAL_MCP_FAB_DISTRIBUTION
+			// §6.8: the Fab build installs the bridge by hand. These open the release page and the install folder.
+			+ SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 8, 0)
+			[
+				UnrealMcpStyleWidgets::StyledTextButton("UnrealMcp.Button.Secondary", LOCTEXT("GetBridge", "Get bridge"),
+					FOnClicked::CreateLambda([]()
+					{
+						FPlatformProcess::LaunchURL(*FUnrealMcpSidecarManager::ManualBridgeReleaseUrl(), nullptr, nullptr);
+						return FReply::Handled();
+					}))
+			]
+			+ SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 8, 0)
+			[
+				UnrealMcpStyleWidgets::StyledTextButton("UnrealMcp.Button.Secondary", LOCTEXT("OpenBridgeFolder", "Open bridge folder"),
+					FOnClicked::CreateLambda([]()
+					{
+						const FString Dir = FUnrealMcpSidecarManager::ManualBridgeDir();
+						IFileManager::Get().MakeDirectory(*Dir, /*Tree*/ true);
+						FPlatformProcess::ExploreFolder(*Dir);
+						return FReply::Handled();
+					}))
+			]
+#endif
 			+ SHorizontalBox::Slot().AutoWidth()
 			[
+#if UNREAL_MCP_FAB_DISTRIBUTION
+				UnrealMcpStyleWidgets::StyledTextButton("UnrealMcp.Button.Secondary", LOCTEXT("StartBridge", "Start bridge"),
+#else
 				UnrealMcpStyleWidgets::StyledTextButton("UnrealMcp.Button.Secondary", LOCTEXT("RestartBridge", "Restart bridge"),
+#endif
 					FOnClicked::CreateLambda([this]() { OnRestartBridge.ExecuteIfBound(); return FReply::Handled(); }))
 			]
 		]

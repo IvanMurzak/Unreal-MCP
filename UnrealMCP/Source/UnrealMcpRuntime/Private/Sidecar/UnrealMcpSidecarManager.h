@@ -109,6 +109,15 @@ public:
 	 */
 	static FString ResolveDownloadedBridgePath();
 
+	/** Fab build (§6.8): where the user extracts the bridge by hand: the per-user <BridgeCacheRoot>/<VersionName>/<rid>. */
+	static FString ManualBridgeDir();
+
+	/** Fab build (§6.8): the GitHub Release page holding the bridge of THIS plugin version. */
+	static FString ManualBridgeReleaseUrl();
+
+	/** Fab build (§6.8): the UI line that tells the user how to install the bridge. */
+	static FString ManualBridgeInstructions();
+
 	/** The host's native RID for a download (§6.2; on macOS the physical CPU, no bundle probe). */
 	static FString ResolveDownloadRid() { return ResolveRid(/*bArm64DirExists*/ true); }
 

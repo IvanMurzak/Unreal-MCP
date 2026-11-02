@@ -15,7 +15,8 @@ void FUnrealMcpEditorViewModel::InitializeConfig(const FUnrealMcpConfig& InConfi
 {
 	Config = InConfig;
 	// Reflect the persisted intent: keepConnected drives whether we present as armed-but-disconnected.
-	ConnectionState = Config.bKeepConnected ? EUnrealMcpConnectionState::Connecting : EUnrealMcpConnectionState::Disconnected;
+	// The Fab build starts no bridge at load (§6.8), so nothing is connecting until the user clicks Connect.
+	ConnectionState = Config.bKeepConnected && !UNREAL_MCP_FAB_DISTRIBUTION ? EUnrealMcpConnectionState::Connecting : EUnrealMcpConnectionState::Disconnected;
 	DeviceAuthState = HasCloudToken() ? EUnrealMcpDeviceAuthState::Authorized : EUnrealMcpDeviceAuthState::Idle;
 }
 
@@ -176,6 +177,11 @@ void FUnrealMcpEditorViewModel::Connect()
 	Config.bKeepConnected = true;
 	ConnectionState = EUnrealMcpConnectionState::Connecting;
 	PersistAndPush();
+#if UNREAL_MCP_FAB_DISTRIBUTION
+	// §6.8: this click is what starts the bridge in the Fab build.
+	if (OnEnsureSidecarStarted && !OnEnsureSidecarStarted())
+		ConnectionState = EUnrealMcpConnectionState::Disconnected;
+#endif
 }
 
 void FUnrealMcpEditorViewModel::Disconnect()
@@ -190,7 +196,7 @@ void FUnrealMcpEditorViewModel::Disconnect()
 const TCHAR* FUnrealMcpEditorViewModel::BridgeUnavailableMessage()
 {
 	// Actionable, NOT the cryptic "No sidecar connected." — tell the user how to get a working bridge (issue #99).
-	return TEXT("MCP bridge not available for this platform — reinstall the plugin, or run `unreal-mcp-cli bootstrap-local` (a Fab install downloads it on first launch; \"Restart bridge\" retries).");
+	return TEXT("MCP bridge not available for this platform — reinstall the plugin, or run `unreal-mcp-cli bootstrap-local` (a Fab install: follow the steps in the Connection section).");
 }
 
 void FUnrealMcpEditorViewModel::Authorize(double NowSeconds)
@@ -218,7 +224,8 @@ void FUnrealMcpEditorViewModel::Authorize(double NowSeconds)
 		// The bridge binary genuinely cannot be resolved/spawned (packaged-without-<rid> / unset dev override).
 		// Awaiting a handshake that will never arrive would be a silent wedge — fail fast, actionably.
 		DeviceAuthState = EUnrealMcpDeviceAuthState::Failed;
-		DeviceAuthError = BridgeUnavailableMessage();
+		const FString InstallHint = BridgeDownloadMessageSink ? BridgeDownloadMessageSink() : FString();
+		DeviceAuthError = InstallHint.IsEmpty() ? FString(BridgeUnavailableMessage()) : InstallHint;
 		return;
 	}
 

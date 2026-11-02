@@ -41,6 +41,7 @@ namespace
 	// The §1.5 backoff schedule + crash-rate constants now live in FUnrealMcpSupervisedProcess.
 	const TCHAR* ServerProcessNameNeedle = TEXT("gamedev-mcp-server");
 
+#if !UNREAL_MCP_FAB_DISTRIBUTION
 	// GitHub release-asset URL for a rid + version (v-prefixed tags), matching the CLI's serverDownloadUrl.
 	FString ServerDownloadUrl(const FString& Rid, const FString& Version)
 	{
@@ -48,6 +49,7 @@ namespace
 			TEXT("https://github.com/IvanMurzak/GameDev-MCP-Server/releases/download/v%s/gamedev-mcp-server-%s.zip"),
 			*Version, *Rid);
 	}
+#endif
 
 	// The UNREAL_MCP_SERVER_PATH dev/CI override when it is set and points at an existing file, else empty.
 	FString ExistingServerPathOverride()
@@ -208,13 +210,20 @@ FString FUnrealMcpServerManager::ResolveBinaryPath() const
 	const FString Rid = ResolveRid();
 	const FString InstallDir = ServerInstallDir(ProjectDir, Rid);
 	const FString BinPath = ServerBinaryPathFor(ProjectDir, Rid);
+#if UNREAL_MCP_FAB_DISTRIBUTION
+	// §6.8: the user installed this file by hand; only a plugin download writes the `version` marker.
+	if (!BinPath.IsEmpty() && FPaths::FileExists(BinPath))
+		return BinPath;
+#else
 	if (!BinPath.IsEmpty() && FPaths::FileExists(BinPath) && ReadVersionMarker(InstallDir) == ServerVersion)
 		return BinPath;
+#endif
 
 	// 3. Neither resolves — caller downloads (or surfaces the CLI hint).
 	return FString();
 }
 
+#if !UNREAL_MCP_FAB_DISTRIBUTION
 bool FUnrealMcpServerManager::DownloadBinaryIfNeeded(FString& OutBinaryPath)
 {
 	const FString ProjectDir = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir());
@@ -509,6 +518,7 @@ bool FUnrealMcpServerManager::VerifyDownloadedZip(const TArray<uint8>& ZipBytes,
 		*AssetZipName, FUnrealMcpServerChecksum::Sha256SumsAssetName);
 	return true;
 }
+#endif // !UNREAL_MCP_FAB_DISTRIBUTION
 
 bool FUnrealMcpServerManager::SpawnProcess(const FString& InBinaryPath)
 {
@@ -607,6 +617,15 @@ bool FUnrealMcpServerManager::Start(int32 Port, const FString& InLaunchArgs)
 	BinaryPath = ResolveBinaryPath();
 	if (BinaryPath.IsEmpty())
 	{
+#if UNREAL_MCP_FAB_DISTRIBUTION
+		// §6.8: the Fab build never downloads an executable. The user installs the server by hand.
+		bStarting = false;
+		UE_LOG(LogUnrealMcp, Error,
+			TEXT("[Unreal-MCP] the local gamedev-mcp-server is not installed. Download gamedev-mcp-server-%s.zip from ")
+			TEXT("https://github.com/IvanMurzak/GameDev-MCP-Server/releases/tag/v%s and extract it into %s, or set %s."),
+			*ResolveRid(), ServerVersion, *ServerInstallDir(FPaths::ConvertRelativePathToFull(FPaths::ProjectDir()), ResolveRid()), ServerPathEnvVar);
+		return false;
+#else
 		FString Downloaded;
 		if (!DownloadBinaryIfNeeded(Downloaded))
 		{
@@ -618,6 +637,7 @@ bool FUnrealMcpServerManager::Start(int32 Port, const FString& InLaunchArgs)
 			return false;
 		}
 		BinaryPath = Downloaded;
+#endif
 	}
 
 	PrepareBinaryForSpawn(BinaryPath);

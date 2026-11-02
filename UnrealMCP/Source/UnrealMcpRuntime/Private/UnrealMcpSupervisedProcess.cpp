@@ -45,6 +45,13 @@ void FUnrealMcpSupervisedProcess::Start(
 				continue;
 			}
 
+#if UNREAL_MCP_FAB_DISTRIBUTION
+			// §6.8: the Fab build never starts an executable on its own, so a dead child stays stopped until the user acts.
+			UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] %s exited; it is not restarted automatically in the Fab build."), *LabelStr);
+			if (OnGiveUp)
+				OnGiveUp();
+			return;
+#else
 			// Child died unexpectedly — crash-restart with backoff + a crash-rate guard.
 			const double Now = FPlatformTime::Seconds();
 			if (Now - WindowStartSeconds > SupervisedCrashWindowSeconds)
@@ -76,6 +83,7 @@ void FUnrealMcpSupervisedProcess::Start(
 
 			if (Respawn())
 				RestartCount.Increment();
+#endif
 		}
 	});
 }
