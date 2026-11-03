@@ -203,8 +203,8 @@ public:
 	 */
 	UNREALMCPEDITOR_API void SetCustomHost(const FString& InHost);
 	/**
-	 * Record the project's local-server port (the sidecar's `project-config-result`, the port the local server binds)
-	 * and repair a stored empty or port-less loopback Server URL to http://localhost:<port>, so the field shows the URL
+	 * Record the project's local-server port for a port-less host (the sidecar's `project-config-result` hostlessPort:
+	 * marker override, else derived) and repair a stored empty or port-less loopback Server URL to http://localhost:<port>, so the field shows the URL
 	 * the engine dials. The sidecar already dials that repaired URL, so this persists + pushes without demoting the
 	 * connection state. A non-positive port is ignored.
 	 */

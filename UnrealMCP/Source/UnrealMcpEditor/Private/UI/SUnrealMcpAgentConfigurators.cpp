@@ -196,7 +196,6 @@ void SUnrealMcpAgentConfigurators::RequestConfigure()
 	Request->SetStringField(TEXT("agentId"), SelectedAgentId);
 	Request->SetStringField(TEXT("transport"), EffectiveTransportString());
 	Request->SetObjectField(TEXT("settings"), BuildSettings());
-	LastRestartNotice.Reset();
 	SendTracked(Request, TEXT("agent-configure"), EPhase::Pending);
 }
 
@@ -208,7 +207,6 @@ void SUnrealMcpAgentConfigurators::RequestRemove()
 	Request->SetStringField(TEXT("agentId"), SelectedAgentId);
 	Request->SetStringField(TEXT("transport"), EffectiveTransportString());
 	Request->SetObjectField(TEXT("settings"), BuildSettings());
-	LastRestartNotice.Reset();
 	SendTracked(Request, TEXT("agent-remove"), EPhase::Pending);
 }
 
@@ -261,8 +259,7 @@ void SUnrealMcpAgentConfigurators::Refresh()
 {
 	// Always re-list (the set is cheap + lets the dropdown populate) and, when an agent is selected, its status.
 	// agents-list is the in-flight request we track; the selected-status request follows when the list returns.
-	// A changed connection setting makes the last restart notice stale (it named the previous transport's write).
-	LastRestartNotice.Reset();
+	LastRestartNotice.Reset(); // a changed connection setting makes it stale
 	RequestAgentsList();
 }
 
@@ -356,12 +353,11 @@ void SUnrealMcpAgentConfigurators::OnAgentConfigResult(const TSharedPtr<FJsonObj
 		}
 		// A configure/remove that returned ok==false (e.g. the Custom agent has no writable file) still surfaces
 		// its reason via LastError; the description (if any) re-renders the current state.
-		// McpPlugin 8.17.0: a stdio agent reads its MCP config only at startup, so a successful write/remove carries a
-		// restart notice. Keep it inline under the status row and raise it once as an editor notification.
-		if (bOk && (Op == TEXT("agent-configure") || Op == TEXT("agent-remove")) && !SelectedDescription.RestartNotice.IsEmpty())
+		// The restart notice of a successful Configure / Remove: inline under the status row, plus one notification.
+		if (Op == TEXT("agent-configure") || Op == TEXT("agent-remove"))
 		{
-			LastRestartNotice = SelectedDescription.RestartNotice;
-			if (FSlateApplication::IsInitialized())
+			LastRestartNotice = bOk ? SelectedDescription.RestartNotice : FString();
+			if (!LastRestartNotice.IsEmpty() && FSlateApplication::IsInitialized())
 			{
 				FNotificationInfo Info(FText::FromString(LastRestartNotice));
 				Info.ExpireDuration = 10.0f;
@@ -471,7 +467,6 @@ void SUnrealMcpAgentConfigurators::RebuildAgentPanel()
 	// only its rich-content snippet + EditableField drive it — still show the row, it self-disables sensibly.
 	AgentPanelContainer->AddSlot().AutoHeight().Padding(0, 6, 0, 0)[ MakeStatusRow() ];
 
-	// The restart notice of the last successful Configure / Remove (stdio agents read their config only at startup).
 	if (!LastRestartNotice.IsEmpty())
 	{
 		AgentPanelContainer->AddSlot().AutoHeight().Padding(0, 4, 0, 0)

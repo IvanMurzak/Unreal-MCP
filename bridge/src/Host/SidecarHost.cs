@@ -197,6 +197,10 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         // Volatile: written on the IPC reader thread, read from the project-config Task.Run worker.
         private string? _customHost;
 
+        // The port a port-less Custom host binds (ProjectConnection.HostlessPort), cached by ApplyProjectIdentity for
+        // RepairLocalHost; 0 until the handshake reports the project root. Volatile: written on the IPC reader thread.
+        private int _hostlessLocalPort;
+
         // The account server base (the config's cloudUrl, no /mcp suffix), kept in every mode so sign-out never
         // falls back to a Custom host. Volatile: written on the IPC reader thread, read by the sign-out task.
         private string? _cloudBaseUrl;
@@ -730,17 +734,14 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
                 return;
 
             Volatile.Write(ref _projectRootPath, projectPath);
-            // A Custom config pushed before the handshake kept a port-less loopback host as is (no project root
-            // yet); now that the root is known, dial the project's local-server port instead of port 80.
-            if (LocalBindHost is { } customHost)
-            {
-                var repaired = RepairLocalHost(customHost);
-                if (!string.Equals(repaired, _config.Host, StringComparison.Ordinal))
-                    SetHost(repaired);
-            }
             try
             {
                 var resolved = ProjectConnectionResolver.Resolve(projectPath!, _instanceId, localHost: LocalBindHost);
+                // A Custom config pushed before the handshake kept a port-less loopback host as is (the port was
+                // unknown); now dial the project's local-server port instead of port 80.
+                Volatile.Write(ref _hostlessLocalPort, resolved.HostlessPort);
+                if (LocalBindHost is { } customHost)
+                    SetHost(RepairLocalHost(customHost));
                 _config.InstanceMetadata = resolved.Metadata;
                 _config.ProjectRootPath = projectPath;
                 // Log the reported project root (the deterministic hash INPUT) alongside the resulting
@@ -912,31 +913,15 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         }
 
         /// <summary>
-        /// The Custom-mode dial host with a port-less loopback URL (the default <c>http://localhost</c>, or a saved
-        /// <c>http://localhost/mcp</c>) repaired to <c>http://localhost:&lt;port&gt;</c> via the shared
-        /// <see cref="McpAgentConfig.AgentConfiguratorSettings.NormalizeLocalHost"/>, where the port is the one the local server binds
-        /// for this project (<see cref="ProjectConnectionResolver.Resolve"/>: marker override, else the derived port).
-        /// Without it SignalR dials the scheme default (80) while the server and the written agent configs use the
-        /// project port. A host with an explicit port or a non-loopback host is returned as is, and so is every host
-        /// before the handshake reports the project root (<see cref="ApplyProjectIdentity"/> repairs it then).
+        /// The Custom-mode dial host with a port-less loopback URL (the default <c>http://localhost</c>, a saved
+        /// <c>http://localhost/mcp</c>) given the project's local-server port via the shared
+        /// <see cref="McpAgentConfig.AgentConfiguratorSettings.NormalizeLocalHost"/>, so SignalR does not dial port 80.
+        /// Any other host, and every host before the handshake resolves the port, is returned as is.
         /// </summary>
         private string RepairLocalHost(string host)
         {
-            var projectRoot = Volatile.Read(ref _projectRootPath);
-            if (string.IsNullOrWhiteSpace(projectRoot)
-                || ProjectConnectionResolver.TryGetExplicitLoopbackPort(host) != null
-                || !HostScope.IsLoopback(host))
-                return host;
-            try
-            {
-                var port = ProjectConnectionResolver.Resolve(projectRoot!, _instanceId, localHost: host).Port;
-                return McpAgentConfig.AgentConfiguratorSettings.NormalizeLocalHost(host, port);
-            }
-            catch (Exception ex)
-            {
-                _logger?.LogWarning("Could not resolve the local-server port for '{Host}': {Message}", host, ex.Message);
-                return host;
-            }
+            var port = Volatile.Read(ref _hostlessLocalPort);
+            return port > 0 ? McpAgentConfig.AgentConfiguratorSettings.NormalizeLocalHost(host, port) : host;
         }
 
         /// <summary>
@@ -1175,6 +1160,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
                 Pin = resolved.Pin,
                 Port = resolved.Port,
                 PortIsOverridden = resolved.PortIsOverridden,
+                HostlessPort = resolved.HostlessPort,
                 ServerTarget = resolved.ServerTarget,
             };
         }

@@ -136,6 +136,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             Assert.Equal(27618, result.Port);
             Assert.True(result.PortIsOverridden);   // a user choice, not the derivation
             Assert.NotEqual(23940, result.Port);    // the golden derived port really was displaced
+            Assert.Equal(23940, result.HostlessPort); // what a port-less Server URL is repaired to, typed port or not
         }
 
         /// <summary>

@@ -61,6 +61,10 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
         [JsonPropertyName("port")] public int Port { get; set; }
         /// <summary>Whether <see cref="Port"/> is a USER choice — the marker's <c>portOverride</c> or a port typed into the loopback host — rather than the deterministic derivation (informational; the winner is already applied to <see cref="Port"/>).</summary>
         [JsonPropertyName("portIsOverridden")] public bool PortIsOverridden { get; set; }
+        /// <summary>The port a Custom host with no explicit port resolves to (marker override, else derived) — the port the
+        /// editor writes into a port-less loopback Server URL. Unlike <see cref="Port"/> it ignores a typed host port, so
+        /// clearing a typed port returns to the project port. Absent (0) from an older sidecar.</summary>
+        [JsonPropertyName("hostlessPort")] public int HostlessPort { get; set; }
         /// <summary>The enrolled server target (hosted vs local) from the project marker, or null when unenrolled.</summary>
         [JsonPropertyName("serverTarget")] public string? ServerTarget { get; set; }
     }

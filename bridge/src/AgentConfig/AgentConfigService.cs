@@ -134,19 +134,20 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
             ApplyEditableValue(configurator, request.EditableValue);
 
             var transport = ParseTransport(request.Transport);
+            var mapped = MapSettings(request.Settings);
             // An agent that cannot use this transport (Claude Desktop over HTTP) must never get an entry it would
             // reject: answer with its description (the "Transport Not Supported" alert) and write nothing.
             if (!configurator.SupportsTransport(transport))
             {
-                result.Description = Describe(configurator, MapSettings(request.Settings), transport);
+                result.Description = Describe(configurator, mapped, transport);
                 return Fail(result, $"{configurator.AgentName} does not support the {TransportWord(transport)} transport. Select the Custom connection and the stdio transport.");
             }
 
             // The Custom agent has no file to write, so it never needs a freshly minted key — the cached one (if any)
             // is enough to render its snippet with the header present.
             var settings = configurator is CustomConfigurator
-                ? AttachCachedProjectKey(MapSettings(request.Settings), transport, result)
-                : await AttachProjectKeyAsync(MapSettings(request.Settings), transport, regenerate: false, result, cancellationToken).ConfigureAwait(false);
+                ? AttachCachedProjectKey(mapped, transport, result)
+                : await AttachProjectKeyAsync(mapped, transport, regenerate: false, result, cancellationToken).ConfigureAwait(false);
             try
             {
                 // Cloud + project key ⇒ the Bearer shape for every agent (contract §7). Otherwise the default is native

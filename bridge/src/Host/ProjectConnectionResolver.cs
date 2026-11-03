@@ -48,6 +48,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
     internal sealed record ProjectConnection(
         string Pin,
         int Port,
+        int HostlessPort,
         LocalServerPortSource PortSource,
         string? ServerTarget,
         string ProjectPathHash,
@@ -61,6 +62,9 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         /// "[user override]".
         /// </summary>
         public bool PortIsOverridden => PortSource != LocalServerPortSource.Derived;
+
+        // HostlessPort: the port a host carrying NO explicit port binds (levels 1+3: marker override, else derived).
+        // A port-less loopback Custom host is repaired to it (SidecarHost.RepairLocalHost, the editor's Server URL).
     }
 
     /// <summary>
@@ -151,6 +155,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             return new ProjectConnection(
                 Pin: identity.Pin,
                 Port: port,
+                HostlessPort: identity.Port,
                 PortSource: portSource,
                 ServerTarget: marker?.ServerTarget,
                 ProjectPathHash: metadata.ProjectPathHash,
