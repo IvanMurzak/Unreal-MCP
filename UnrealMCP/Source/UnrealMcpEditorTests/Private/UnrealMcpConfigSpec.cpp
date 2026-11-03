@@ -645,6 +645,7 @@ void FUnrealMcpConfigSpec::Define()
 				{ TEXT("http://localhost:/mcp"), TEXT("http://localhost:23940") },
 				{ TEXT("http://127.0.0.1?x=1"), TEXT("http://127.0.0.1:23940") },
 				{ TEXT("http://[::1]/mcp"), TEXT("http://[::1]:23940") },
+				{ TEXT("http://localhost:0/mcp"), TEXT("http://localhost:23940") },
 			};
 			for (const TPair<const TCHAR*, const TCHAR*>& Case : Cases)
 				TestEqual(Case.Key, FUnrealMcpConfig::NormalizeLocalHost(Case.Key, 23940), FString(Case.Value));
@@ -659,6 +660,9 @@ void FUnrealMcpConfigSpec::Define()
 				{ TEXT("http://user@localhost/mcp"), TEXT("http://user@localhost/mcp") },
 				{ TEXT("localhost/mcp"), TEXT("localhost/mcp") },
 				{ TEXT("ws://localhost"), TEXT("ws://localhost") },
+				{ TEXT("http://127.0.0.1.nip.io/mcp"), TEXT("http://127.0.0.1.nip.io/mcp") },
+				{ TEXT("http://127.foo"), TEXT("http://127.foo") },
+				{ TEXT("http://localhost:abc"), TEXT("http://localhost:abc") },
 			};
 			for (const TPair<const TCHAR*, const TCHAR*>& Case : Cases)
 				TestEqual(Case.Key, FUnrealMcpConfig::NormalizeLocalHost(Case.Key, 23940), FString(Case.Value));

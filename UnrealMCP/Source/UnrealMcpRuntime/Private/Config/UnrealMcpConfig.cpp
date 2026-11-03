@@ -39,7 +39,7 @@ const TCHAR* FUnrealMcpConfig::DefaultCloudBaseUrl = TEXT("https://ai-game.dev")
 // CustomHost and is parsed off the RAW string, never synthesised from the scheme (a port-less host is
 // NOT read as 80). Keep it port-less — see UnrealMcpConfigSpec's "no explicit port" guard, which is the
 // C++ half of that cross-language lockstep. Once the sidecar reports the project's port, the editor shows
-// and stores the repaired http://localhost:<port> (NormalizeLocalHost), and the sidecar dials that port.
+// the repaired http://localhost:<port> (NormalizeLocalHost, never persisted), and the sidecar dials that port.
 const TCHAR* FUnrealMcpConfig::DefaultCustomHost   = TEXT("http://localhost");
 const TCHAR* FUnrealMcpConfig::DefaultLogLevel     = TEXT("Info");
 const TCHAR* FUnrealMcpConfig::DefaultTransport    = TEXT("http");
@@ -531,13 +531,28 @@ FString FUnrealMcpConfig::NormalizeLocalHost(const FString& Host, int32 Port)
 		Authority.FindChar(TEXT(':'), HostEnd);
 		HostEnd = HostEnd == INDEX_NONE ? Authority.Len() : HostEnd;
 	}
-	if (Authority.Len() > HostEnd + 1)
-		return Trimmed; // an explicit port (anything after the colon) is the user's choice
+	// An explicit port is the user's choice. Like McpPlugin's TryGetExplicitPort, an empty port or port 0 is "no port".
+	const auto IsDigits = [](const FString& Text)
+	{
+		for (const TCHAR Char : Text)
+		{
+			if (!FChar::IsDigit(Char))
+				return false;
+		}
+		return !Text.IsEmpty();
+	};
+	const FString PortText = Authority.Mid(HostEnd + 1);
+	if (!PortText.IsEmpty() && !(IsDigits(PortText) && FCString::Atoi64(*PortText) == 0))
+		return Trimmed;
 
+	// Loopback: localhost, a dotted-quad 127.x.x.x (not a DNS name like 127.0.0.1.nip.io), or [::1].
 	const FString HostName = Authority.Left(HostEnd).ToLower();
-	const bool bLoopback = HostName == TEXT("localhost")
-		|| HostName.StartsWith(TEXT("127."))
-		|| HostName == TEXT("[::1]");
+	TArray<FString> Octets;
+	HostName.ParseIntoArray(Octets, TEXT("."), /*InCullEmpty*/ false);
+	bool bIpv4Loopback = Octets.Num() == 4 && Octets[0] == TEXT("127");
+	for (const FString& Octet : Octets)
+		bIpv4Loopback &= IsDigits(Octet) && Octet.Len() <= 3 && FCString::Atoi(*Octet) <= 255;
+	const bool bLoopback = HostName == TEXT("localhost") || bIpv4Loopback || HostName == TEXT("[::1]");
 	return bLoopback ? FString::Printf(TEXT("%s://%s:%d"), Scheme, *HostName, Port) : Trimmed;
 }
 

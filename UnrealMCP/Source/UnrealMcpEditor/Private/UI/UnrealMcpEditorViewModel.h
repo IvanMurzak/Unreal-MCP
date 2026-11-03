@@ -195,20 +195,20 @@ public:
 	EUnrealMcpConnectionMode GetConnectionMode() const { return Config.ConnectionMode; }
 	UNREALMCPEDITOR_API void SetConnectionMode(EUnrealMcpConnectionMode InMode);
 
-	const FString& GetCustomHost() const { return Config.CustomHost; }
 	/**
-	 * Set the Custom-mode server URL; persists + pushes only when it is a valid URL (§7 validated field). Once the
-	 * local-server port is known (SetLocalServerPort), an empty or port-less loopback URL is stored as
-	 * http://localhost:<port> (FUnrealMcpConfig::NormalizeLocalHost).
+	 * The Server URL as shown: the stored value, with an empty or port-less loopback URL shown as
+	 * http://localhost:<port> once the local-server port is known (FUnrealMcpConfig::NormalizeLocalHost) — the URL the
+	 * sidecar dials. The repair is never persisted, so the URL keeps following the project port (marker override,
+	 * moved or copied project).
+	 */
+	FString GetCustomHost() const { return FUnrealMcpConfig::NormalizeLocalHost(Config.CustomHost, LocalServerPort); }
+	/**
+	 * Set the Custom-mode server URL; persists + pushes only when it is a valid URL (§7 validated field). Committing
+	 * the shown repaired URL unchanged keeps the stored port-less value.
 	 */
 	UNREALMCPEDITOR_API void SetCustomHost(const FString& InHost);
-	/**
-	 * Record the project's local-server port for a port-less host (the sidecar's `project-config-result` hostlessPort:
-	 * marker override, else derived) and repair a stored empty or port-less loopback Server URL to http://localhost:<port>, so the field shows the URL
-	 * the engine dials. The sidecar already dials that repaired URL, so this persists + pushes without demoting the
-	 * connection state. A non-positive port is ignored.
-	 */
-	UNREALMCPEDITOR_API void SetLocalServerPort(int32 InPort);
+	/** Record the port a port-less host dials (the sidecar's `project-config-result` hostlessPort); <= 0 is ignored. */
+	void SetLocalServerPort(int32 InPort) { if (InPort > 0) LocalServerPort = InPort; }
 
 	EUnrealMcpAuthOption GetAuthOption() const { return Config.AuthOption; }
 	UNREALMCPEDITOR_API void SetAuthOption(EUnrealMcpAuthOption InOption);

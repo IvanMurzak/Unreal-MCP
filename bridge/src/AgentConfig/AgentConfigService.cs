@@ -416,7 +416,10 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
                 host: dto.Host,
                 token: useAccessToken ? dto.Token : null,
                 connectionMode: connectionMode,
-                authOption: authOption);
+                authOption: authOption,
+                // Design 02 D21: the written loopback port follows the v1 derivation this sidecar binds
+                // (ProjectConnectionResolver), not the v2 default — they differ for a Windows backslash project root.
+                localPortDerivation: LocalPortDerivation.V1);
         }
 
         /// <summary>

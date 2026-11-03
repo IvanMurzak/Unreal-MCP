@@ -1074,8 +1074,10 @@ the connection-config task).
 - **Port-less loopback Custom host.** The default `http://localhost` (or a saved `http://localhost/mcp`) names no
   port. The sidecar dials it on the project's local-server port (`SidecarHost.RepairLocalHost`, McpPlugin
   `AgentConfiguratorSettings.NormalizeLocalHost`: marker `portOverride`, else the v1 derived port), and once the
-  `project-config-result` arrives the editor stores and shows `http://localhost:<port>`
-  (`FUnrealMcpEditorViewModel::SetLocalServerPort`, also on edit). A URL with a port or a non-loopback URL is kept.
+  `project-config-result` arrives the editor shows `http://localhost:<port>` (`hostlessPort`,
+  `FUnrealMcpEditorViewModel::GetCustomHost`). The repair is display-only and never persisted, so the URL keeps
+  following the project port (marker override, moved project); agent configs write the same port (`LocalPortDerivation.V1`).
+  A URL with a port or a non-loopback URL is kept.
 - **Transport support and restart notice (McpPlugin 8.17.0).** An agent may not support a transport (Claude Desktop
   starts only stdio servers from `claude_desktop_config.json`). Its description then carries `transportSupported:
   false` and one "Transport Not Supported" alert; the panel hides Configure and the sidecar refuses the write (and
