@@ -1,0 +1,43 @@
+extensions/UnrealAIPCG/Source/UnrealAIPCG/Private/Tests/UnrealAIPCGSpec.cpp
+  s_7bc72ecaebd05d::t_0f3a4d2aef4eda 99-104
+  s_7bc72ecaebd05d::t_61360376d79101 96-98
+  s_7bc72ecaebd05d::t_44ffce973c49fa 105-107
+  s_7bc72ecaebd05d::t_af861b9160920c 12-18,84-95,108-120
+scripts/test_run_extension_e2e.py
+  s_7bc72ecaebd05d::t_c9df320becc227 72-76
+  s_7bc72ecaebd05d::t_f3261692fdbdd1 69-71
+  s_7bc72ecaebd05d::t_82b3febab27f01 77-78
+  s_2d84627e0cfdfe::t_7bc6ef9656e7de 62-68
+extensions/UnrealAIControlRig/Source/UnrealAIControlRig/Private/Tests/UnrealAIControlRigSpec.cpp
+  s_7bc72ecaebd05d::t_d08e43ec9df635 14-17,194-226
+extensions/UnrealAIControlRig/Tests/e2e/tools/control-rig-components-query.e2e.json
+  s_7bc72ecaebd05d::t_0a3c4f9cd94e0b 8
+extensions/UnrealAIPCG/Tests/e2e/tools/pcg-components-query.e2e.json
+  s_7bc72ecaebd05d::t_60b058c0ee6ccb 8
+tests/automation-inventory.json
+  s_7bc72ecaebd05d::t_96bbb931fe09fe 2,7
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "85aac2e353b1127174cefbeb9c29c8bb9950eb99",
+  "prompts": {},
+  "sessions": {
+    "s_2d84627e0cfdfe": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a6e215ef1a2debb5d",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_7bc72ecaebd05d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "40274cb2-edf8-49ba-9a73-33b83cb5be53",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

@@ -1,0 +1,38 @@
+scripts/test_release_dependency_guard.py
+  s_7bc72ecaebd05d::t_c59a503db1b821 1-133
+scripts/release_dependency_guard.py
+  s_7bc72ecaebd05d::t_87e2ed3e7bb844 400
+  s_7be60963fe3603::t_4ed1e9df496bba 1-399,401-471
+.github/workflows/release.yml
+  s_7bc72ecaebd05d::t_aebf342d5eb673 135-142
+.github/workflows/release_extensions.yml
+  s_7bc72ecaebd05d::t_66e180ff4dca0e 36-38,60
+.github/workflows/test_cli.yml
+  s_7bc72ecaebd05d::t_7cb05e97c4315c 120,122
+docs/RELEASING.md
+  s_7bc72ecaebd05d::t_92b6d3c5826f34 307-312
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "02b2aa82bf39521c1a3e01e47aefa954c3f315f2",
+  "prompts": {},
+  "sessions": {
+    "s_7bc72ecaebd05d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "40274cb2-edf8-49ba-9a73-33b83cb5be53",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_7be60963fe3603": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9c306a43-6f1a-4fe9-9b57-09acf4bc1a65",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

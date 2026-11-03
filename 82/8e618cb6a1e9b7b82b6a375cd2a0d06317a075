@@ -1,0 +1,35 @@
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/SUnrealMcpMainWindow.cpp
+  s_be319aa0129387::t_6e7a992cd2213f 520,522-524
+  s_be319aa0129387::t_1eb4018423d87d 529,532
+  s_be319aa0129387::t_f6ba12e5501af6 628
+  s_be319aa0129387::t_2ea12ef3acbac4 670-722
+  s_be319aa0129387::t_43c6cecd1f2351 268-269
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/SUnrealMcpMainWindow.h
+  s_be319aa0129387::t_63e42917430572 94-97
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/UnrealMcpEditorViewModel.h
+  s_be319aa0129387::t_6404bb46c9b6f0 290-293,295,297-302
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpEditorViewModelSpec.cpp
+  s_be319aa0129387::t_cfa3ee2a064549 612-682
+bridge/src/Host/SidecarHost.cs
+  s_be319aa0129387::t_bd4c7042b6ba9a 194-197,866-867,1520-1523,1530-1531,1533
+bridge/tests/SignInModeGuardTests.cs
+  s_be319aa0129387::t_9dbc8508047e2c 124-165
+docs/ARCHITECTURE.md
+  s_be319aa0129387::t_28bcb4424ce676 976-980
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "828e618cb6a1e9b7b82b6a375cd2a0d06317a075",
+  "prompts": {},
+  "sessions": {
+    "s_be319aa0129387": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4973661e-fb8b-4b77-ad37-428f038b740d",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

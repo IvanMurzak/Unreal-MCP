@@ -1,0 +1,21 @@
+bridge/src/Host/SidecarHost.cs
+  s_5e2881ed8bfd52::t_a272b9dc690a7e 179-180
+bridge/tests/CustomOAuthCredentialScopeTests.cs
+  s_5e2881ed8bfd52::t_b2edb015ce73b1 26-27
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "729cec35ae46968f8a374d19c9a76a4292ca5c85",
+  "prompts": {},
+  "sessions": {
+    "s_5e2881ed8bfd52": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a139fe-5e37-7630-a5ee-38fd3b09c0dd",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
