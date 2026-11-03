@@ -169,4 +169,8 @@ private:
 	FString ProjectKeyStatus;
 	FString ProjectKeyHint;
 	FString LastKeyActionStatus;
+
+	// The restart notice of the last successful Configure / Remove (McpPlugin 8.17.0, e.g. "Fully quit Claude Desktop
+	// …"), shown under the status row until the selection, the connection settings or the next action changes.
+	FString LastRestartNotice;
 };

@@ -135,6 +135,12 @@ struct FUnrealMcpAgentDescription
 	// renders as a clickable hyperlink. Supersedes the single Download/Tutorial pair (kept for back-compat).
 	TArray<FAiAgentRichContentItem> Links;
 	TArray<FAiAgentRichContentSection> Sections;
+	// McpPlugin 8.17.0: false when the agent cannot use the requested transport (Claude Desktop over HTTP). Sections
+	// then hold one "Transport Not Supported" Alert and the panel hides Configure. Absent (older sidecar) → true.
+	bool bTransportSupported = true;
+	// McpPlugin 8.17.0: the notice shown after a successful Configure / Remove (e.g. "Fully quit Claude Desktop …");
+	// empty when none applies (HTTP transport, the Custom agent) or from an older sidecar.
+	FString RestartNotice;
 
 	/** Parse the DTO status string ("NotConfigured"/"Configured"/"ReconfigureNeeded") into the enum. */
 	static UNREALMCPEDITOR_API EAiAgentConfiguratorStatus ParseStatus(const FString& Raw);

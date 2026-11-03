@@ -179,6 +179,48 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             Assert.False(result.PortIsOverridden);
         }
 
+        /// <summary>
+        /// A port-less loopback Custom host (the default <c>http://localhost</c> or a saved <c>http://localhost/mcp</c>)
+        /// must not dial port 80: once the handshake reports the project root, the sidecar dials the port the local
+        /// server binds (23940 for the golden root). A config pushed BEFORE the root is known keeps the host until
+        /// <c>ApplyProjectIdentity</c> repairs it; one pushed after is repaired on arrival. The bind port stays derived.
+        /// </summary>
+        [Fact]
+        public void ApplyConnectionConfig_PortlessLoopbackCustomHost_DialsTheProjectPort()
+        {
+            using var host = BuildHost();
+            host.ApplyConnectionConfig(new JsonObject { ["mode"] = "Custom", ["host"] = "http://localhost/mcp" });
+            Assert.Equal("http://localhost/mcp", host.Config.Host); // no project root yet
+
+            host.ApplyProjectIdentity("/home/user/my-game");
+            Assert.Equal("http://localhost:23940", host.Config.Host);
+
+            host.ApplyConnectionConfig(new JsonObject { ["mode"] = "Custom", ["host"] = "http://localhost" });
+            Assert.Equal("http://localhost:23940", host.Config.Host);
+
+            var result = host.BuildProjectConfigResult(Request("r-8", "/home/user/my-game"));
+            Assert.Equal(23940, result.Port);
+            Assert.False(result.PortIsOverridden); // the repair is not a typed port
+        }
+
+        [Theory]
+        [InlineData("Custom", "http://localhost:27618", "http://localhost:27618")]        // explicit port: as typed
+        [InlineData("Custom", "https://mcp.example.com/mcp", "https://mcp.example.com/mcp")] // not loopback: as typed
+        [InlineData("Cloud", "http://localhost", "https://ai-game.dev/mcp")]               // Cloud dials the cloud
+        public void ApplyConnectionConfig_LeavesOtherHostsAsTyped(string mode, string customHost, string expected)
+        {
+            using var host = BuildHost();
+            host.ApplyProjectIdentity("/home/user/my-game");
+            host.ApplyConnectionConfig(new JsonObject
+            {
+                ["mode"] = mode,
+                ["host"] = customHost,
+                ["cloudUrl"] = "https://ai-game.dev",
+            });
+
+            Assert.Equal(expected, host.Config.Host);
+        }
+
         [Fact]
         public void BuildProjectConfigResult_FallsBackToHandshakeRoot_WhenRequestOmitsPath()
         {

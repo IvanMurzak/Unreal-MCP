@@ -200,6 +200,27 @@ void FUnrealMcpAgentConfigModelsSpec::Define()
 			TestTrue("supportsOAuth true round-trips", DescTrue.bSupportsOAuth);
 		});
 
+		It("parses the McpPlugin 8.17.0 transportSupported flag and restart notice, defaulting for an older sidecar", [this]()
+		{
+			const FString JsonUnsupported = TEXT(R"JSON({ "agentId": "claude-desktop", "agentName": "Claude Desktop", "transportSupported": false, "restartNotice": null,
+				"sections": [ { "heading": "Transport Not Supported", "expandedFirst": true, "items": [ { "kind": "Alert", "text": "Claude Desktop supports only the stdio transport." } ] } ] })JSON");
+			const FUnrealMcpAgentDescription Unsupported = FUnrealMcpAgentDescription::FromJson(AgentConfigModelsParseObject(JsonUnsupported));
+			TestFalse("transportSupported false round-trips", Unsupported.bTransportSupported);
+			TestTrue("null restartNotice reads as empty", Unsupported.RestartNotice.IsEmpty());
+			TestEqual("one alert section", Unsupported.Sections.Num(), 1);
+			TestEqual("alert kind", Unsupported.Sections[0].Items[0].Kind, FAiAgentRichContentItem::EKind::Alert);
+
+			const FString JsonStdio = TEXT(R"JSON({ "agentId": "claude-desktop", "agentName": "Claude Desktop", "transportSupported": true, "restartNotice": "Fully quit Claude Desktop and start it again." })JSON");
+			const FUnrealMcpAgentDescription Stdio = FUnrealMcpAgentDescription::FromJson(AgentConfigModelsParseObject(JsonStdio));
+			TestTrue("transportSupported true", Stdio.bTransportSupported);
+			TestEqual("restartNotice round-trips", Stdio.RestartNotice, FString(TEXT("Fully quit Claude Desktop and start it again.")));
+
+			const FString JsonOld = TEXT(R"JSON({ "agentId": "claude-code", "agentName": "Claude Code" })JSON");
+			const FUnrealMcpAgentDescription Old = FUnrealMcpAgentDescription::FromJson(AgentConfigModelsParseObject(JsonOld));
+			TestTrue("absent transportSupported defaults to true", Old.bTransportSupported);
+			TestTrue("absent restartNotice is empty", Old.RestartNotice.IsEmpty());
+		});
+
 		It("returns an empty description for a null/invalid object", [this]()
 		{
 			const FUnrealMcpAgentDescription Desc = FUnrealMcpAgentDescription::FromJson(nullptr);

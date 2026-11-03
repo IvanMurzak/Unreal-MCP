@@ -994,6 +994,64 @@ void FUnrealMcpEditorViewModelSpec::Define()
 		});
 	});
 
+	Describe("Port-less loopback Server URL repair (SetLocalServerPort)", [this]()
+	{
+		It("stores, persists and pushes http://localhost:<port> once the local-server port is known", [this]()
+		{
+			TSharedRef<FRecording> Rec = MakeShared<FRecording>();
+			TSharedRef<FUnrealMcpEditorViewModel> VM = MakeViewModel(Rec);
+			VM->SetConnectionMode(EUnrealMcpConnectionMode::Custom);
+			VM->SetCustomHost(TEXT("http://localhost/mcp"));
+			TestEqual("kept as typed while the port is unknown", VM->GetCustomHost(), FString(TEXT("http://localhost/mcp")));
+
+			VM->Connect();
+			TSharedPtr<FJsonObject> Status = MakeShared<FJsonObject>();
+			Status->SetStringField(TEXT("connectionState"), TEXT("Connected"));
+			Status->SetBoolField(TEXT("keepConnected"), true);
+			VM->ApplyStatus(Status);
+
+			int32 Changes = 0;
+			VM->OnConnectionSettingsChanged.AddLambda([&Changes]() { ++Changes; });
+			const int32 PersistBefore = Rec->PersistCount;
+			const int32 PushBefore = Rec->PushCount;
+			VM->SetLocalServerPort(23940);
+
+			TestEqual("repaired host", VM->GetCustomHost(), FString(TEXT("http://localhost:23940")));
+			TestEqual("persisted", Rec->PersistCount, PersistBefore + 1);
+			TestEqual("pushed", Rec->PushCount, PushBefore + 1);
+			TestEqual("pushed the repaired host", Rec->LastPushed.CustomHost, FString(TEXT("http://localhost:23940")));
+			TestEqual("agent panel refreshed", Changes, 1);
+			// The sidecar already dials the repaired URL, so this is not a retarget: the green state stays.
+			TestEqual("still Connected", static_cast<int32>(VM->GetConnectionState()), static_cast<int32>(EUnrealMcpConnectionState::Connected));
+		});
+
+		It("leaves a URL with an explicit port or a remote host alone and does nothing for a repeat", [this]()
+		{
+			TSharedRef<FRecording> Rec = MakeShared<FRecording>();
+			TSharedRef<FUnrealMcpEditorViewModel> VM = MakeViewModel(Rec);
+			VM->SetConnectionMode(EUnrealMcpConnectionMode::Custom);
+			VM->SetCustomHost(TEXT("http://localhost:8080"));
+			const int32 PersistBefore = Rec->PersistCount;
+			VM->SetLocalServerPort(23940);
+			TestEqual("explicit port kept", VM->GetCustomHost(), FString(TEXT("http://localhost:8080")));
+			TestEqual("nothing persisted", Rec->PersistCount, PersistBefore);
+
+			VM->SetCustomHost(TEXT("https://mcp.example.com/mcp"));
+			TestEqual("remote host kept", VM->GetCustomHost(), FString(TEXT("https://mcp.example.com/mcp")));
+		});
+
+		It("repairs a port-less loopback URL typed after the port is known", [this]()
+		{
+			TSharedRef<FRecording> Rec = MakeShared<FRecording>();
+			TSharedRef<FUnrealMcpEditorViewModel> VM = MakeViewModel(Rec);
+			VM->SetConnectionMode(EUnrealMcpConnectionMode::Custom);
+			VM->SetLocalServerPort(23940);
+			VM->SetCustomHost(TEXT(" http://localhost/mcp "));
+			TestEqual("typed URL repaired", VM->GetCustomHost(), FString(TEXT("http://localhost:23940")));
+			TestEqual("pushed the repaired host", Rec->LastPushed.CustomHost, FString(TEXT("http://localhost:23940")));
+		});
+	});
+
 	Describe("Transport selector (§7 stdio/http — issue #59)", [this]()
 	{
 		It("Custom mode honours the stored transport and notifies on change", [this]()

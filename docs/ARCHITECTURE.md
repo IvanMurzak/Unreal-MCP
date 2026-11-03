@@ -1071,6 +1071,16 @@ the connection-config task).
   `explicitToken` (else the sidecar's `UNREAL_MCP_TOKEN`), or the dial fails with "Refusing to send your ai-game.dev account token to <host>; set
   UNREAL_MCP_TOKEN or use a localhost server" (McpPlugin's shared `CustomOAuthCredentialPolicy` / `HostScope`, bound to
   the dial host in `SidecarHost.SetHost`).
+- **Port-less loopback Custom host.** The default `http://localhost` (or a saved `http://localhost/mcp`) names no
+  port. The sidecar dials it on the project's local-server port (`SidecarHost.RepairLocalHost`, McpPlugin
+  `AgentConfiguratorSettings.NormalizeLocalHost`: marker `portOverride`, else the v1 derived port), and once the
+  `project-config-result` arrives the editor stores and shows `http://localhost:<port>`
+  (`FUnrealMcpEditorViewModel::SetLocalServerPort`, also on edit). A URL with a port or a non-loopback URL is kept.
+- **Transport support and restart notice (McpPlugin 8.17.0).** An agent may not support a transport (Claude Desktop
+  starts only stdio servers from `claude_desktop_config.json`). Its description then carries `transportSupported:
+  false` and one "Transport Not Supported" alert; the panel hides Configure and the sidecar refuses the write (and
+  Regenerate key skips it). A successful stdio Configure / Remove carries `restartNotice`, shown inline and as an
+  editor notification.
 - **Sign-in completion is mode-checked.** A device-code sign-in is always committed to the machine credential
   store against the server it started on. Its account token enters the connection token slot (sidecar
   `BearerToken`, plugin `CloudToken`) only if the connection is still in Cloud mode when it completes; after a

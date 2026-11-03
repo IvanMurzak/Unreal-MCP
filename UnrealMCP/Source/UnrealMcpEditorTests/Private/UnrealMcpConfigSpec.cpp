@@ -630,6 +630,46 @@ void FUnrealMcpConfigSpec::Define()
 			TestEqual(TEXT(".env value kept"), Parsed.FindRef(TEXT("UNREAL_MCP_TOOL_TIMEOUT")), FString(TEXT("60000")));
 		});
 	});
+
+	Describe("NormalizeLocalHost (mirror of McpPlugin 8.17.0 AgentConfiguratorSettings.NormalizeLocalHost)", [this]()
+	{
+		It("gives an empty or port-less loopback URL the local-server port and drops the path", [this]()
+		{
+			const TPair<const TCHAR*, const TCHAR*> Cases[] = {
+				{ TEXT(""), TEXT("http://localhost:23940") },
+				{ TEXT("   "), TEXT("http://localhost:23940") },
+				{ TEXT("http://localhost"), TEXT("http://localhost:23940") },
+				{ TEXT("http://localhost/mcp"), TEXT("http://localhost:23940") },
+				{ TEXT("  http://LOCALHOST/mcp/  "), TEXT("http://localhost:23940") },
+				{ TEXT("https://localhost/mcp"), TEXT("https://localhost:23940") },
+				{ TEXT("http://localhost:/mcp"), TEXT("http://localhost:23940") },
+				{ TEXT("http://127.0.0.1?x=1"), TEXT("http://127.0.0.1:23940") },
+				{ TEXT("http://[::1]/mcp"), TEXT("http://[::1]:23940") },
+			};
+			for (const TPair<const TCHAR*, const TCHAR*>& Case : Cases)
+				TestEqual(Case.Key, FUnrealMcpConfig::NormalizeLocalHost(Case.Key, 23940), FString(Case.Value));
+		});
+
+		It("keeps an explicit port, a remote host, user info and a non-http value as typed (trimmed)", [this]()
+		{
+			const TPair<const TCHAR*, const TCHAR*> Cases[] = {
+				{ TEXT("http://localhost:8080/mcp"), TEXT("http://localhost:8080/mcp") },
+				{ TEXT(" http://[::1]:27618 "), TEXT("http://[::1]:27618") },
+				{ TEXT("https://mcp.example.com/mcp"), TEXT("https://mcp.example.com/mcp") },
+				{ TEXT("http://user@localhost/mcp"), TEXT("http://user@localhost/mcp") },
+				{ TEXT("localhost/mcp"), TEXT("localhost/mcp") },
+				{ TEXT("ws://localhost"), TEXT("ws://localhost") },
+			};
+			for (const TPair<const TCHAR*, const TCHAR*>& Case : Cases)
+				TestEqual(Case.Key, FUnrealMcpConfig::NormalizeLocalHost(Case.Key, 23940), FString(Case.Value));
+		});
+
+		It("changes nothing but whitespace while the port is unknown", [this]()
+		{
+			TestEqual(TEXT("port 0"), FUnrealMcpConfig::NormalizeLocalHost(TEXT(" http://localhost/mcp "), 0), FString(TEXT("http://localhost/mcp")));
+			TestEqual(TEXT("empty, port 0"), FUnrealMcpConfig::NormalizeLocalHost(FString(), 0), FString());
+		});
+	});
 }
 
 #endif // WITH_DEV_AUTOMATION_TESTS

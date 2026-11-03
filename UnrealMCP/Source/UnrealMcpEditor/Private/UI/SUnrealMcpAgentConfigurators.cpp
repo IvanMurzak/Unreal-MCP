@@ -8,6 +8,8 @@
 
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
+#include "Framework/Application/SlateApplication.h"
+#include "Framework/Notifications/NotificationManager.h"
 #include "Misc/Guid.h"
 #include "Misc/Paths.h"
 #include "HAL/PlatformProcess.h"
@@ -18,6 +20,7 @@
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SComboBox.h"
 #include "Widgets/Input/SEditableTextBox.h"
+#include "Widgets/Notifications/SNotificationList.h"
 #include "Styling/CoreStyle.h"
 
 #define LOCTEXT_NAMESPACE "UnrealMcp"
@@ -193,6 +196,7 @@ void SUnrealMcpAgentConfigurators::RequestConfigure()
 	Request->SetStringField(TEXT("agentId"), SelectedAgentId);
 	Request->SetStringField(TEXT("transport"), EffectiveTransportString());
 	Request->SetObjectField(TEXT("settings"), BuildSettings());
+	LastRestartNotice.Reset();
 	SendTracked(Request, TEXT("agent-configure"), EPhase::Pending);
 }
 
@@ -204,6 +208,7 @@ void SUnrealMcpAgentConfigurators::RequestRemove()
 	Request->SetStringField(TEXT("agentId"), SelectedAgentId);
 	Request->SetStringField(TEXT("transport"), EffectiveTransportString());
 	Request->SetObjectField(TEXT("settings"), BuildSettings());
+	LastRestartNotice.Reset();
 	SendTracked(Request, TEXT("agent-remove"), EPhase::Pending);
 }
 
@@ -256,6 +261,8 @@ void SUnrealMcpAgentConfigurators::Refresh()
 {
 	// Always re-list (the set is cheap + lets the dropdown populate) and, when an agent is selected, its status.
 	// agents-list is the in-flight request we track; the selected-status request follows when the list returns.
+	// A changed connection setting makes the last restart notice stale (it named the previous transport's write).
+	LastRestartNotice.Reset();
 	RequestAgentsList();
 }
 
@@ -349,6 +356,19 @@ void SUnrealMcpAgentConfigurators::OnAgentConfigResult(const TSharedPtr<FJsonObj
 		}
 		// A configure/remove that returned ok==false (e.g. the Custom agent has no writable file) still surfaces
 		// its reason via LastError; the description (if any) re-renders the current state.
+		// McpPlugin 8.17.0: a stdio agent reads its MCP config only at startup, so a successful write/remove carries a
+		// restart notice. Keep it inline under the status row and raise it once as an editor notification.
+		if (bOk && (Op == TEXT("agent-configure") || Op == TEXT("agent-remove")) && !SelectedDescription.RestartNotice.IsEmpty())
+		{
+			LastRestartNotice = SelectedDescription.RestartNotice;
+			if (FSlateApplication::IsInitialized())
+			{
+				FNotificationInfo Info(FText::FromString(LastRestartNotice));
+				Info.ExpireDuration = 10.0f;
+				Info.bUseSuccessFailIcons = false;
+				FSlateNotificationManager::Get().AddNotification(Info);
+			}
+		}
 		Phase = EPhase::Idle;
 		RebuildAgentPanel();
 		return;
@@ -395,6 +415,7 @@ void SUnrealMcpAgentConfigurators::SetSelectedAgentId(const FString& InAgentId)
 	LastSkillsStatus.Reset();   // a prior agent's generation outcome is meaningless for the new selection
 	LastSkillsPath.Reset();
 	LastKeyActionStatus.Reset(); // the last Regenerate outcome is a one-shot notice, not a persistent state
+	LastRestartNotice.Reset();
 	if (IsViewModelValid())
 		ViewModel->SetSelectedAgentId(InAgentId);
 
@@ -449,6 +470,15 @@ void SUnrealMcpAgentConfigurators::RebuildAgentPanel()
 	// no detectable on-disk config (sidecar reports IsConfigured=false, configure returns a clear non-success), so
 	// only its rich-content snippet + EditableField drive it — still show the row, it self-disables sensibly.
 	AgentPanelContainer->AddSlot().AutoHeight().Padding(0, 6, 0, 0)[ MakeStatusRow() ];
+
+	// The restart notice of the last successful Configure / Remove (stdio agents read their config only at startup).
+	if (!LastRestartNotice.IsEmpty())
+	{
+		AgentPanelContainer->AddSlot().AutoHeight().Padding(0, 4, 0, 0)
+		[
+			UnrealMcpAgentWidgets::TemplateWarningLabel(FText::FromString(LastRestartNotice))
+		];
+	}
 
 	// Project-key row (Cloud only): whether the agent configs carry a project key + Regenerate key.
 	if (!ProjectKeyStatus.IsEmpty() && ProjectKeyStatus != TEXT("not-applicable"))
@@ -596,22 +626,35 @@ TSharedRef<SWidget> SUnrealMcpAgentConfigurators::MakeStatusRow()
 	// section, rendered below as an Alert-kind item.) Falls back to bIsConfigured if Status is absent (older sidecar).
 	const bool bReconfigure = SelectedDescription.Status == EAiAgentConfiguratorStatus::ReconfigureNeeded || bConfigured;
 	const FText AgentName = FText::FromString(SelectedDescription.AgentName);
+	// McpPlugin 8.17.0: the agent cannot use this transport (Claude Desktop over HTTP, which includes Cloud). Say so in
+	// the status line and offer no Configure: the sidecar refuses the write, and the section below explains the setup.
+	const bool bSupported = SelectedDescription.bTransportSupported;
+
+	FText StatusText = LOCTEXT("StatusNotConfigured", "Not configured");
+	FLinearColor StatusColor = UnrealMcpAgentWidgets::PendingColor();
+	if (!bSupported)
+	{
+		StatusText = FText::Format(LOCTEXT("StatusTransportNotSupportedFmt", "Not supported over {0}"), FText::FromString(TransportWord));
+		StatusColor = UnrealMcpAgentWidgets::AlertColor();
+	}
+	else if (bConfigured)
+	{
+		StatusText = FText::Format(LOCTEXT("StatusConfiguredFmt", "Configured ({0})"), FText::FromString(TransportWord));
+		StatusColor = UnrealMcpAgentWidgets::ConfiguredColor();
+	}
 
 	return SNew(SHorizontalBox)
 		+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
 		[
 			SNew(STextBlock)
-			.Text(bConfigured
-				? FText::Format(LOCTEXT("StatusConfiguredFmt", "Configured ({0})"), FText::FromString(TransportWord))
-				: LOCTEXT("StatusNotConfigured", "Not configured"))
-			.ColorAndOpacity(FSlateColor(bConfigured
-				? UnrealMcpAgentWidgets::ConfiguredColor()
-				: UnrealMcpAgentWidgets::PendingColor()))
+			.Text(StatusText)
+			.ColorAndOpacity(FSlateColor(StatusColor))
 		]
 		+ SHorizontalBox::Slot().AutoWidth().Padding(6, 0, 0, 0).VAlign(VAlign_Center)
 		[
 			SNew(SButton)
 			.IsEnabled(!bBusy)
+			.Visibility(bSupported ? EVisibility::Visible : EVisibility::Collapsed)
 			.Text(bReconfigure ? LOCTEXT("Reconfigure", "Reconfigure") : LOCTEXT("Configure", "Configure"))
 			.ToolTipText(FText::Format(LOCTEXT("ConfigureHint", "Write the Unreal MCP entry into {0}'s config file."), AgentName))
 			.OnClicked_Lambda([this]() { RequestConfigure(); return FReply::Handled(); })

@@ -95,8 +95,9 @@ void FUnrealMcpEditorViewModel::SetCustomHost(const FString& InHost)
 	// Trim before storing: validation already trims internally, so "  http://host  " would validate yet get
 	// persisted + pushed padded — the sidecar would then dial the untrimmed target. Store the trimmed form so
 	// the field, the §8 store, and the dial target stay consistent. Only push a host that validates — pushing a
-	// malformed URL to the sidecar would just make it dial nowhere (§7 validated field).
-	const FString Trimmed = InHost.TrimStartAndEnd();
+	// malformed URL to the sidecar would just make it dial nowhere (§7 validated field). Once the local-server port is
+	// known, an empty or port-less loopback URL is stored with that port (port 80 is never what the user means).
+	const FString Trimmed = FUnrealMcpConfig::NormalizeLocalHost(InHost, LocalServerPort);
 	const bool bChanged = Config.CustomHost != Trimmed;
 	Config.CustomHost = Trimmed;
 	FString Error;
@@ -119,6 +120,21 @@ void FUnrealMcpEditorViewModel::SetCustomHost(const FString& InHost)
 	// what the user typed; the panel reads the host through the connection-info provider, not the dialed target.
 	if (bChanged)
 		OnConnectionSettingsChanged.Broadcast();
+}
+
+void FUnrealMcpEditorViewModel::SetLocalServerPort(int32 InPort)
+{
+	if (InPort <= 0)
+		return;
+	LocalServerPort = InPort;
+	const FString Repaired = FUnrealMcpConfig::NormalizeLocalHost(Config.CustomHost, InPort);
+	if (Repaired == Config.CustomHost)
+		return;
+	// No ReflectTargetChangeOptimistically: the sidecar repairs a port-less loopback dial host with the same port, so
+	// the dial target is unchanged and no re-dial `status` would follow to clear an optimistic Connecting.
+	Config.CustomHost = Repaired;
+	PersistAndPush();
+	OnConnectionSettingsChanged.Broadcast();
 }
 
 FString FUnrealMcpEditorViewModel::GetLogLevel() const

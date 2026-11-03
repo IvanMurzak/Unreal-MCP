@@ -38,7 +38,8 @@ const TCHAR* FUnrealMcpConfig::DefaultCloudBaseUrl = TEXT("https://ai-game.dev")
 // v2 derivation, 20000–29999) supply a per-project port again. A typed port still wins: it arrives in
 // CustomHost and is parsed off the RAW string, never synthesised from the scheme (a port-less host is
 // NOT read as 80). Keep it port-less — see UnrealMcpConfigSpec's "no explicit port" guard, which is the
-// C++ half of that cross-language lockstep.
+// C++ half of that cross-language lockstep. Once the sidecar reports the project's port, the editor shows
+// and stores the repaired http://localhost:<port> (NormalizeLocalHost), and the sidecar dials that port.
 const TCHAR* FUnrealMcpConfig::DefaultCustomHost   = TEXT("http://localhost");
 const TCHAR* FUnrealMcpConfig::DefaultLogLevel     = TEXT("Info");
 const TCHAR* FUnrealMcpConfig::DefaultTransport    = TEXT("http");
@@ -490,6 +491,60 @@ FString FUnrealMcpConfig::ResolveCustomHost() const
 {
 	const FString Trimmed = TrimSlash(CustomHost.TrimStartAndEnd());
 	return Trimmed.IsEmpty() ? FString(DefaultCustomHost) : Trimmed;
+}
+
+FString FUnrealMcpConfig::NormalizeLocalHost(const FString& Host, int32 Port)
+{
+	const FString Trimmed = Host.TrimStartAndEnd();
+	if (Port <= 0)
+		return Trimmed;
+	if (Trimmed.IsEmpty())
+		return FString::Printf(TEXT("http://localhost:%d"), Port);
+
+	const TCHAR* Scheme = Trimmed.StartsWith(TEXT("http://"), ESearchCase::IgnoreCase) ? TEXT("http")
+		: Trimmed.StartsWith(TEXT("https://"), ESearchCase::IgnoreCase) ? TEXT("https")
+		: nullptr;
+	if (!Scheme)
+		return Trimmed; // not an absolute http(s) URL
+
+	// The authority ends at the first '/', '?' or '#'.
+	FString Authority = Trimmed.RightChop(FCString::Strlen(Scheme) + 3);
+	for (const TCHAR Terminator : { TEXT('/'), TEXT('?'), TEXT('#') })
+	{
+		int32 Index;
+		if (Authority.FindChar(Terminator, Index))
+			Authority.LeftInline(Index);
+	}
+	if (Authority.Contains(TEXT("@")))
+		return Trimmed; // user info is never treated as loopback (McpPlugin HostScope)
+
+	// Split host and port; an IPv6 literal keeps its brackets ("[::1]:27618").
+	FString HostName = Authority;
+	FString PortText;
+	int32 ColonIndex = INDEX_NONE;
+	if (Authority.StartsWith(TEXT("[")))
+	{
+		int32 CloseIndex;
+		if (!Authority.FindChar(TEXT(']'), CloseIndex))
+			return Trimmed;
+		HostName = Authority.Left(CloseIndex + 1);
+		if (Authority.Mid(CloseIndex + 1).StartsWith(TEXT(":")))
+			ColonIndex = CloseIndex + 1;
+	}
+	else if (Authority.FindChar(TEXT(':'), ColonIndex))
+	{
+		HostName = Authority.Left(ColonIndex);
+	}
+	if (ColonIndex != INDEX_NONE)
+		PortText = Authority.Mid(ColonIndex + 1);
+	if (!PortText.IsEmpty())
+		return Trimmed; // an explicit port is the user's choice
+
+	HostName.ToLowerInline();
+	const bool bLoopback = HostName == TEXT("localhost")
+		|| HostName.StartsWith(TEXT("127."))
+		|| HostName == TEXT("[::1]");
+	return bLoopback ? FString::Printf(TEXT("%s://%s:%d"), Scheme, *HostName, Port) : Trimmed;
 }
 
 int32 FUnrealMcpConfig::ResolveServerToolTimeoutMs() const

@@ -91,6 +91,10 @@ FUnrealMcpAgentDescription FUnrealMcpAgentDescription::FromJson(const TSharedPtr
 	Json->TryGetBoolField(TEXT("supportsOAuth"), Desc.bSupportsOAuth);
 	Json->TryGetStringField(TEXT("downloadUrl"), Desc.DownloadUrl);
 	Json->TryGetStringField(TEXT("tutorialUrl"), Desc.TutorialUrl);
+	// McpPlugin 8.17.0. Absent in an older sidecar → supported / no notice. A JSON null restartNotice is not a string,
+	// so TryGetStringField leaves it empty.
+	Json->TryGetBoolField(TEXT("transportSupported"), Desc.bTransportSupported);
+	Json->TryGetStringField(TEXT("restartNotice"), Desc.RestartNotice);
 
 	// 6.9.0: the tri-state status. Absent in an older sidecar → NotConfigured (back-compat).
 	FString StatusRaw;

@@ -730,6 +730,14 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
                 return;
 
             Volatile.Write(ref _projectRootPath, projectPath);
+            // A Custom config pushed before the handshake kept a port-less loopback host as is (no project root
+            // yet); now that the root is known, dial the project's local-server port instead of port 80.
+            if (LocalBindHost is { } customHost)
+            {
+                var repaired = RepairLocalHost(customHost);
+                if (!string.Equals(repaired, _config.Host, StringComparison.Ordinal))
+                    SetHost(repaired);
+            }
             try
             {
                 var resolved = ProjectConnectionResolver.Resolve(projectPath!, _instanceId, localHost: LocalBindHost);
@@ -885,10 +893,11 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
                 selected = isCloud ? host : cloudUrl;
             if (!string.IsNullOrWhiteSpace(selected))
                 // Cloud mode: suffix the SignalR host with the /mcp prefix the cloud serves the hub behind
-                // (idempotent — never /mcp/mcp). Custom mode: use the host verbatim (a local/self-hosted
-                // server exposes the hub at the root, like Unity/Godot Custom). Device-auth strips this back
-                // off in StartDeviceAuth (the AS /oauth/... is NOT behind /mcp).
-                SetHost(isCloud ? AppendCloudHubPath(selected!) : selected!);
+                // (idempotent — never /mcp/mcp). Custom mode: use the host as typed (a local/self-hosted server
+                // exposes the hub at the root, like Unity/Godot Custom), except that a loopback host with no port
+                // dials the project's local-server port (RepairLocalHost). Device-auth strips the Cloud suffix
+                // back off in StartDeviceAuth (the AS /oauth/... is NOT behind /mcp).
+                SetHost(isCloud ? AppendCloudHubPath(selected!) : RepairLocalHost(selected!));
 
             if (config["keepConnected"] is JsonValue keepNode && keepNode.TryGetValue<bool>(out var keepConnected))
                 _config.KeepConnected = keepConnected;
@@ -900,6 +909,34 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             // Absent or non-positive leaves the current value (partial pushes, older plugins).
             if (config["toolTimeoutMs"] is JsonValue timeoutNode && timeoutNode.TryGetValue<int>(out var toolTimeoutMs) && toolTimeoutMs > 0)
                 _toolTimeoutMs = toolTimeoutMs;
+        }
+
+        /// <summary>
+        /// The Custom-mode dial host with a port-less loopback URL (the default <c>http://localhost</c>, or a saved
+        /// <c>http://localhost/mcp</c>) repaired to <c>http://localhost:&lt;port&gt;</c> via the shared
+        /// <see cref="McpAgentConfig.AgentConfiguratorSettings.NormalizeLocalHost"/>, where the port is the one the local server binds
+        /// for this project (<see cref="ProjectConnectionResolver.Resolve"/>: marker override, else the derived port).
+        /// Without it SignalR dials the scheme default (80) while the server and the written agent configs use the
+        /// project port. A host with an explicit port or a non-loopback host is returned as is, and so is every host
+        /// before the handshake reports the project root (<see cref="ApplyProjectIdentity"/> repairs it then).
+        /// </summary>
+        private string RepairLocalHost(string host)
+        {
+            var projectRoot = Volatile.Read(ref _projectRootPath);
+            if (string.IsNullOrWhiteSpace(projectRoot)
+                || ProjectConnectionResolver.TryGetExplicitLoopbackPort(host) != null
+                || !HostScope.IsLoopback(host))
+                return host;
+            try
+            {
+                var port = ProjectConnectionResolver.Resolve(projectRoot!, _instanceId, localHost: host).Port;
+                return McpAgentConfig.AgentConfiguratorSettings.NormalizeLocalHost(host, port);
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning("Could not resolve the local-server port for '{Host}': {Message}", host, ex.Message);
+                return host;
+            }
         }
 
         /// <summary>

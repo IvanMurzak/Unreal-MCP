@@ -149,6 +149,12 @@
     McpPlugin 8.14.0 -> 8.15.0 (published): an [AiTool] (RunTool) tool that throws on the request's content answers
     the server's direct endpoint with HTTP 422 instead of 500; framework faults stay 500. The bridge's ProxyTool /
     SkillGenerateTool build their own responses, so nothing changes at runtime here.
+    ⚠ DEVIATION (owner-requested fix, outside the train; Godot-MCP / Unity-MCP adopt it in their own fixes):
+    McpPlugin 8.15.0 -> 8.17.0 (MCP-Plugin-dotnet #288). 8.17.0: AiAgentConfigurator.SupportsTransport (Claude
+    Desktop is stdio-only; Describe returns one "Transport Not Supported" alert and TransportSupported == false),
+    GetRestartNotice / AgentConfiguratorDescription.RestartNotice, and AgentConfiguratorSettings.NormalizeLocalHost
+    (the sidecar dials a port-less loopback Custom host on the project's local-server port). 8.16.0 only adds
+    ToolUnavailableException (HTTP 503) for [AiTool] tools, which the sidecar does not host. ReflectorNet stays 5.5.1.
   -->
   <!--
     Local-LIB dev toggle (auth-fixes f1b — parity with the GameDev-MCP-Server + Unity/Godot
@@ -183,7 +189,7 @@
 
   <ItemGroup Condition="'$(UseLocalMcpPlugin)' != 'true'">
     <PackageReference Include="com.IvanMurzak.ReflectorNet" Version="5.5.1" />
-    <PackageReference Include="com.IvanMurzak.McpPlugin" Version="8.15.0" />
+    <PackageReference Include="com.IvanMurzak.McpPlugin" Version="8.17.0" />
   </ItemGroup>
 
   <!--

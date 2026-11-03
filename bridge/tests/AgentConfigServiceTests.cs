@@ -335,6 +335,89 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         }
 
         [Fact]
+        public void Status_ClaudeDesktopOverHttp_IsTransportNotSupported_WithOneAlert()
+        {
+            var result = _service.HandleStatus(new AgentStatusRequestMessage
+            {
+                RequestId = "cd1", AgentId = "claude-desktop", Transport = "streamableHttp", Settings = Settings(),
+            });
+
+            Assert.True(result.Ok);
+            var description = result.Description!;
+            Assert.False(description.TransportSupported);
+            Assert.False(description.IsConfigured);
+            Assert.Equal("NotConfigured", description.Status);
+            Assert.Null(description.RestartNotice);
+            var section = Assert.Single(description.Sections);
+            Assert.True(section.ExpandedFirst);
+            var alert = Assert.Single(section.Items);
+            Assert.Equal("Alert", alert.Kind);
+            Assert.Contains("stdio", alert.Text);
+        }
+
+        [Fact]
+        public async Task Configure_ClaudeDesktopOverHttp_WritesNothing_AndReturnsTheAlert()
+        {
+            // Claude Desktop's config lives in the user profile, so this only reads its state: the guard must refuse
+            // before any write, leaving the file exactly as it was (absent stays absent).
+            var configPath = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+                ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "AppData", "Roaming", "Claude", "claude_desktop_config.json")
+                : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Library", "Application Support", "Claude", "claude_desktop_config.json");
+            var existedBefore = File.Exists(configPath);
+            var writtenBefore = existedBefore ? File.GetLastWriteTimeUtc(configPath) : default;
+
+            var result = await _service.HandleConfigureAsync(new AgentConfigureRequestMessage
+            {
+                RequestId = "cd2", AgentId = "claude-desktop", Transport = "streamableHttp", Settings = Settings(),
+            });
+
+            Assert.False(result.Ok);
+            Assert.Contains("stdio", result.Error);
+            Assert.False(result.Description!.TransportSupported);
+            Assert.Equal(existedBefore, File.Exists(configPath));
+            if (existedBefore)
+                Assert.Equal(writtenBefore, File.GetLastWriteTimeUtc(configPath));
+        }
+
+        [Fact]
+        public void List_FlagsOnlyClaudeDesktop_AsUnsupportedOverHttp()
+        {
+            var http = _service.HandleList(new AgentsListRequestMessage { RequestId = "l-http", Transport = "streamableHttp", Settings = Settings() });
+            var stdio = _service.HandleList(new AgentsListRequestMessage { RequestId = "l-stdio", Transport = "stdio", Settings = Settings() });
+
+            Assert.Equal(new[] { "claude-desktop" }, http.Agents!.Where(a => !a.TransportSupported).Select(a => a.AgentId));
+            Assert.All(stdio.Agents!, a => Assert.True(a.TransportSupported));
+        }
+
+        [Fact]
+        public void Status_RestartNotice_OnlyForStdio_AndNeverForTheCustomAgent()
+        {
+            string? Notice(string agentId, string transport) => _service.HandleStatus(new AgentStatusRequestMessage
+            {
+                RequestId = "rn-" + agentId + transport, AgentId = agentId, Transport = transport, Settings = Settings(),
+            }).Description!.RestartNotice;
+
+            Assert.StartsWith("Fully quit Claude Desktop", Notice("claude-desktop", "stdio"));
+            Assert.StartsWith("Restart Claude Code", Notice("claude-code", "stdio"));
+            Assert.Null(Notice("claude-code", "streamableHttp"));
+            Assert.Null(Notice("other-custom", "stdio"));
+        }
+
+        [Fact]
+        public async Task Configure_Stdio_ReturnsTheRestartNotice_WithTheRefreshedDescription()
+        {
+            // Claude Code's stdio entry goes to the project-local .mcp.json under the temp project root.
+            var configure = await _service.HandleConfigureAsync(new AgentConfigureRequestMessage
+            {
+                RequestId = "c-stdio", AgentId = "claude-code", Transport = "stdio", Settings = Settings(),
+            });
+
+            Assert.True(configure.Ok);
+            Assert.True(configure.Description!.TransportSupported);
+            Assert.False(string.IsNullOrEmpty(configure.Description.RestartNotice));
+        }
+
+        [Fact]
         public void Remove_WhenNothingConfigured_IsIdempotentSuccess()
         {
             var result = _service.HandleRemove(new AgentRemoveRequestMessage

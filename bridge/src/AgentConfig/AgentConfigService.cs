@@ -134,9 +134,16 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
             ApplyEditableValue(configurator, request.EditableValue);
 
             var transport = ParseTransport(request.Transport);
+            // An agent that cannot use this transport (Claude Desktop over HTTP) must never get an entry it would
+            // reject: answer with its description (the "Transport Not Supported" alert) and write nothing.
+            if (!configurator.SupportsTransport(transport))
+            {
+                result.Description = Describe(configurator, MapSettings(request.Settings), transport);
+                return Fail(result, $"{configurator.AgentName} does not support the {TransportWord(transport)} transport. Select the Custom connection and the stdio transport.");
+            }
+
             // The Custom agent has no file to write, so it never needs a freshly minted key — the cached one (if any)
             // is enough to render its snippet with the header present.
-            // The Custom agent has no file to write, so it never needs a freshly minted key.
             var settings = configurator is CustomConfigurator
                 ? AttachCachedProjectKey(MapSettings(request.Settings), transport, result)
                 : await AttachProjectKeyAsync(MapSettings(request.Settings), transport, regenerate: false, result, cancellationToken).ConfigureAwait(false);
@@ -186,8 +193,11 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
                 return Fail(result, "Project keys are used only in Cloud mode.");
 
             // Every agent holding an HTTP entry routed to this project (whatever key it carries, or none) — the
-            // configs that must not keep the old key.
-            var targets = AiAgentConfiguratorRegistry.All.Where(c => HasPinnedHttpEntry(c, baseSettings)).ToList();
+            // configs that must not keep the old key. An agent that cannot use HTTP (a stale Claude Desktop entry)
+            // is skipped: rewriting it would write the entry it rejects again.
+            var targets = AiAgentConfiguratorRegistry.All
+                .Where(c => c.SupportsTransport(McpTransport.streamableHttp) && HasPinnedHttpEntry(c, baseSettings))
+                .ToList();
 
             var settings = await AttachProjectKeyAsync(baseSettings, McpTransport.streamableHttp, regenerate: true, result, cancellationToken).ConfigureAwait(false);
             if (!settings.HasProjectKey)
@@ -367,6 +377,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
                             .ToList(),
                     })
                     .ToList(),
+                TransportSupported = description.TransportSupported,
+                RestartNotice = description.RestartNotice,
             };
         }
 
@@ -537,6 +549,10 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
             string.Equals(transport, "stdio", StringComparison.OrdinalIgnoreCase)
                 ? McpTransport.stdio
                 : McpTransport.streamableHttp;
+
+        /// <summary>The transport name the plugin UI shows ("stdio" / "http").</summary>
+        private static string TransportWord(McpTransport transport) =>
+            transport == McpTransport.stdio ? "stdio" : "http";
 
         /// <summary>Push the Custom agent's edited path into its configurator (no-op for built-in agents).</summary>
         private static void ApplyEditableValue(AiAgentConfigurator configurator, string? editableValue)
