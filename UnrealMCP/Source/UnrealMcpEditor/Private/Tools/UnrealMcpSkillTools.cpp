@@ -280,12 +280,10 @@ namespace UnrealMcpSkillTools
 		}
 		for (const FSkillParamSpec& Param : Spec.Params)
 			Out += SkillsParamBuilderCall(Param);
-		if (Spec.bReadOnlyHint)
-			Out += TEXT("\t\t\t.ReadOnlyHint(true)\n");
-		if (Spec.bDestructiveHint)
-			Out += TEXT("\t\t\t.DestructiveHint(true)\n");
-		if (Spec.bIdempotentHint)
-			Out += TEXT("\t\t\t.IdempotentHint(true)\n");
+		// Every hint explicit (MCP tool annotations): a generated tool declares its decision, never the builder default.
+		Out += FString::Printf(TEXT("\t\t\t.ReadOnlyHint(%s).DestructiveHint(%s).IdempotentHint(%s).OpenWorldHint(false)\n"),
+			Spec.bReadOnlyHint ? TEXT("true") : TEXT("false"), Spec.bDestructiveHint ? TEXT("true") : TEXT("false"),
+			Spec.bIdempotentHint ? TEXT("true") : TEXT("false"));
 		Out += TEXT("\t\t\t.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult\n\t\t\t{\n");
 		Out += TEXT("\t\t\t\t// Runs ON the game thread (the dispatcher guarantees it, docs/ARCHITECTURE.md §4).\n");
 		Out += TEXT("\t\t\t\t// Read arguments with Call.GetString/GetInt/GetNumber/GetBool/GetVector.\n");
@@ -364,6 +362,7 @@ namespace UnrealMcpSkillTools
 			// SYSTEM surface (§2.4), matching Unity's unity-skill-create: skill AUTHORING is host plumbing driven
 			// by the CLI / desktop app, not a capability an arbitrary AI agent should find in tools/list.
 			.ToolType(EUnrealMcpToolType::System)
+			.ReadOnlyHint(false).DestructiveHint(true).IdempotentHint(false).OpenWorldHint(false)
 			.Handle([RegistryPtr](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
 			{
 				FSkillSpec Spec;

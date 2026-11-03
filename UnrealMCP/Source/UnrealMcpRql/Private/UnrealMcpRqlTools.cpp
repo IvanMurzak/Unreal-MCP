@@ -66,8 +66,7 @@ namespace UnrealMcpRqlToolsLocal
 			.Rql(TEXT("query"))
 			.ParamString(TEXT("query"), TEXT("RQL query, e.g. actors | where $ is PointLight | select $ref Label Location"),
 				EUnrealMcpParamRequirement::Required)
-			.ReadOnlyHint(true)
-			.OpenWorldHint(false)
+			.ReadOnlyHint(true).DestructiveHint(false).IdempotentHint(true).OpenWorldHint(false)
 			.Handle([](const FUnrealMcpToolCall& Call) { return Run(Call, /*bAllowMutation*/ false); });
 
 		Registry.Tool(TEXT("rql-mutate"))
@@ -82,8 +81,7 @@ namespace UnrealMcpRqlToolsLocal
 			.ParamBool(TEXT("dry_run"), TEXT("true = preview the receipt without changing anything"))
 			.ParamInt(TEXT("max_targets"), FString::Printf(TEXT("Most objects set / call may change in this call (default %d, at most %d); raise it for a bigger bulk edit"),
 				FUnrealMcpRqlSession::DefaultMaxTargets, FUnrealMcpRqlSession::HardMaxTargets))
-			.DestructiveHint(true)
-			.OpenWorldHint(false)
+			.ReadOnlyHint(false).DestructiveHint(true).IdempotentHint(false).OpenWorldHint(false)
 			.Handle([](const FUnrealMcpToolCall& Call) { return Run(Call, /*bAllowMutation*/ true); });
 
 		Registry.Tool(TEXT("rql-schema"))
@@ -92,8 +90,7 @@ namespace UnrealMcpRqlToolsLocal
 			.SkillDescription(Text(UnrealMcpRqlGuide::SchemaBlurb()))
 			.Rql(TEXT("schema"))
 			.ParamString(TEXT("type"), TEXT("Optional type name, e.g. \"PointLight\", \"StaticMeshComponent\", \"Vector\""))
-			.ReadOnlyHint(true)
-			.OpenWorldHint(false)
+			.ReadOnlyHint(true).DestructiveHint(false).IdempotentHint(true).OpenWorldHint(false)
 			.Handle([](const FUnrealMcpToolCall& Call)
 			{
 				bool bOk = false;

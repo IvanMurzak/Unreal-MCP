@@ -229,14 +229,21 @@ FUnrealMcpToolBuilder& FUnrealMcpToolBuilder::Param(const FString& Name, const F
 	return *this;
 }
 FUnrealMcpToolBuilder& FUnrealMcpToolBuilder::ToolType(EUnrealMcpToolType InToolType) { Tool.ToolType = InToolType; return *this; }
-FUnrealMcpToolBuilder& FUnrealMcpToolBuilder::ReadOnlyHint(bool bValue) { Tool.bReadOnlyHint = bValue; return *this; }
-FUnrealMcpToolBuilder& FUnrealMcpToolBuilder::DestructiveHint(bool bValue) { Tool.bDestructiveHint = bValue; return *this; }
+FUnrealMcpToolBuilder& FUnrealMcpToolBuilder::ReadOnlyHint(bool bValue) { Tool.bReadOnlyHint = bValue; Tool.bReadOnlyHintDeclared = true; return *this; }
+FUnrealMcpToolBuilder& FUnrealMcpToolBuilder::DestructiveHint(bool bValue) { Tool.bDestructiveHint = bValue; Tool.bDestructiveHintDeclared = true; return *this; }
 FUnrealMcpToolBuilder& FUnrealMcpToolBuilder::IdempotentHint(bool bValue) { Tool.bIdempotentHint = bValue; return *this; }
 FUnrealMcpToolBuilder& FUnrealMcpToolBuilder::OpenWorldHint(bool bValue) { Tool.bOpenWorldHint = bValue; return *this; }
 FUnrealMcpToolBuilder& FUnrealMcpToolBuilder::ExtensionId(const FString& InExtensionId) { Tool.ExtensionId = InExtensionId; return *this; }
 
 void FUnrealMcpToolBuilder::Handle(FUnrealMcpToolHandler InHandler)
 {
+	// Not a rejection (extension tools keep working): MCP directories flag a tool without a title or an explicit
+	// read-only / destructive hint, so say which declaration is missing them.
+	if (Tool.Title.TrimStartAndEnd().IsEmpty() || !(Tool.bReadOnlyHintDeclared || Tool.bDestructiveHintDeclared))
+	{
+		UE_LOG(LogUnrealMcp, Display, TEXT("[Unreal-MCP] tool '%s' should declare .Title() and .ReadOnlyHint() / .DestructiveHint() (MCP tool annotations)."),
+			*Tool.Name);
+	}
 	Tool.Handler = MoveTemp(InHandler);
 	Registry.Commit(MoveTemp(Tool));
 }

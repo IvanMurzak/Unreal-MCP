@@ -82,18 +82,8 @@ void FUnrealMcpEditorCoordinator::Startup()
 	// world) and several are RCE-class — so they live in the editor module and are NOT compiled into a packaged
 	// game. The runtime bootstrap subsystem (UUnrealMcpRuntimeSubsystem) registers ONLY `ping` in a packaged
 	// game; a game adds its own runtime tools via an IUnrealMcpToolProvider extension (RegisterToolProvider).
-	UnrealMcpPingTool::Register(*Registry); // runtime-safe liveness probe (UnrealMcpRuntimeCoreTools.h)
-	// --- Editor-only families (UnrealMcpCoreTools.h) ---
-	// docs/rql.md: the RQL data layer — rql-query / rql-mutate / rql-schema replace the actor / object / asset / level /
-	// editor-state / selection / console-log / reflection tools (the UnrealMcpRql module).
-	UnrealMcpRqlTools::Register(*Registry);
-	UnrealMcpBlueprintTools::Register(*Registry); // §10 flagship Blueprint family (CORE)
-	UnrealMcpEditorTools::Register(*Registry); // §10 console family: console-run-command
-	UnrealMcpToolListTools::Register(*Registry); // unreal-tool-list: every callable tool, hidden ones included
-	UnrealMcpPythonTools::Register(*Registry); // python-execute (PythonScriptPlugin + vendored code_exec)
-	UnrealMcpScreenshotTools::Register(*Registry); // §10 screenshot / viewport-capture family (issue #17)
-	UnrealMcpSourceTools::Register(*Registry); // §10 C++ source / script family (issue #18)
-	UnrealMcpSkillTools::Register(*Registry); // §2.4 skill authoring — `unreal-skill-create` (SYSTEM surface)
+	// `ping`, RQL and every editor-only family, in boot order (UnrealMcpCoreTools.h).
+	UnrealMcpCoreTools::RegisterAll(*Registry);
 	// §2.4 generated skills: every C++ file `unreal-skill-create` emitted into
 	// UnrealMcpEditor/Private/Tools/Skills/ self-registered at static-init time. They commit through an
 	// EXTENSION SCOPE (see UnrealMcpGeneratedSkills::Register), which is what rejects a generated id that

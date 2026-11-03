@@ -11,6 +11,9 @@
 
 #include "UnrealMcpRqlInclude.h"
 
+/** Appended to every rql-* description: names RQL and links its documentation. */
+#define UNREAL_MCP_RQL_DOCS_LINE " RQL docs: https://ai-game.dev/docs/rql"
+
 namespace UnrealMcpRqlGuide
 {
 	/**
@@ -159,7 +162,7 @@ Widgets and sequences:
 	inline const char* QueryIntro()
 	{
 		return "Run a read-only RQL query against the live Unreal Editor world and return compact rows. One precise query beats many "
-			"exploratory calls. Changes need rql-mutate.";
+			"exploratory calls. Changes need rql-mutate." UNREAL_MCP_RQL_DOCS_LINE;
 	}
 
 	inline const char* MutateIntro()
@@ -169,7 +172,7 @@ Widgets and sequences:
 			"are not saved to disk: when the user wants them saved, run editor | call SaveAsset(\"/Game/Path\") (one asset), SaveLevel() or SaveAll(). dry_run=true returns the "
 			"receipt ($ref, member, old, new) without changing anything. The receipt lists the assignments that change a value; those that keep "
 			"the old value are only counted (N unchanged). Do exactly the change requested; a read-only member fails "
-			"with readonly-member instead of being approximated.";
+			"with readonly-member instead of being approximated." UNREAL_MCP_RQL_DOCS_LINE;
 	}
 
 	inline const char* MutateOutro()
@@ -193,7 +196,7 @@ Widgets and sequences:
 	{
 		return "Without a type: RQL sources, functions, and the actor and component classes in the editor world (with counts), "
 			"plus the Actor members. With a type name (e.g. \"PointLight\", \"StaticMeshComponent\", \"Vector\"): that type's "
-			"members (name type; ro = read-only) and methods. Use it before querying an unfamiliar class.";
+			"members (name type; ro = read-only) and methods. Use it before querying an unfamiliar class." UNREAL_MCP_RQL_DOCS_LINE;
 	}
 
 	/** The skill rql-query ships (FUnrealMcpToolBuilder::Skill): the one place its name and description live. */

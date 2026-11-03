@@ -68,6 +68,7 @@ namespace UnrealMcpEditorTools
 			.Description(TEXT("Execute an Unreal console command (incl. CVars, e.g. 'stat fps', 'r.ScreenPercentage 80') "
 			                  "via GEngine->Exec against the editor world, returning any captured output text."))
 			.ParamString(TEXT("command"), TEXT("The console command line to execute."), EUnrealMcpParamRequirement::Required)
+			.ReadOnlyHint(false).DestructiveHint(true).IdempotentHint(false).OpenWorldHint(true)
 			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
 			{
 				const FString Command = Call.GetString(TEXT("command"));

@@ -66,7 +66,7 @@ public:
 			                  "gameplay state on the live UWorld, callable in a running game over a runtime MCP "
 			                  "connection (docs/ARCHITECTURE.md §12.9)."))
 			.ParamNumber(TEXT("value"), TEXT("Optional new global time dilation (> 0). Omit to read the current value without changing it."))
-			.IdempotentHint(true) // setting to the same value twice yields the same state
+			.ReadOnlyHint(false).DestructiveHint(true).IdempotentHint(true).OpenWorldHint(false) // overwrites the global time dilation
 			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
 			{
 				// Runs ON the game thread (the dispatcher guarantees it, §4), so touching the live world is safe.

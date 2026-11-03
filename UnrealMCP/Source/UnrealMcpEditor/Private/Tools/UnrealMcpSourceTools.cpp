@@ -353,7 +353,7 @@ namespace UnrealMcpSourceTools
 			.ParamInt(TEXT("startLine"), TEXT("1-based first line to return (inclusive). Default 1."))
 			.ParamInt(TEXT("endLine"), TEXT("1-based last line to return (inclusive). Default: end of file."))
 			.ParamInt(TEXT("maxBytes"), TEXT("Maximum bytes of content to return (1..4194304). Default 262144."))
-			.ReadOnlyHint(true)
+			.ReadOnlyHint(true).DestructiveHint(false).IdempotentHint(true).OpenWorldHint(false)
 			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
 			{
 				const FString Path = Call.GetString(TEXT("path"));
@@ -479,6 +479,7 @@ namespace UnrealMcpSourceTools
 			.ParamString(TEXT("parentClass"), TEXT("Parent kind: UObject (default), Actor, ActorComponent, or None."))
 			.ParamString(TEXT("module"), TEXT("Target module folder under Source/. Defaults to the project's primary module."))
 			.ParamBool(TEXT("force"), TEXT("Overwrite existing header/cpp at the destination. Default false."))
+			.ReadOnlyHint(false).DestructiveHint(true).IdempotentHint(false).OpenWorldHint(false)
 			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
 			{
 				const FString ClassName = Call.GetString(TEXT("className"));
@@ -570,6 +571,7 @@ namespace UnrealMcpSourceTools
 			.ParamString(TEXT("content"), TEXT("Replacement text."), EUnrealMcpParamRequirement::Required)
 			.ParamInt(TEXT("startLine"), TEXT("1-based first line to replace (inclusive). Requires 'endLine'."))
 			.ParamInt(TEXT("endLine"), TEXT("1-based last line to replace (inclusive). Requires 'startLine'."))
+			.ReadOnlyHint(false).DestructiveHint(true).IdempotentHint(false).OpenWorldHint(false)
 			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
 			{
 				const FString Path = Call.GetString(TEXT("path"));
@@ -687,7 +689,7 @@ namespace UnrealMcpSourceTools
 			.Description(TEXT("Delete a source file. JAILED to <Project>/Source — refuses directories and any path "
 			                  "outside the jail. Destructive and not undoable from MCP."))
 			.ParamString(TEXT("path"), TEXT("Source file path relative to <Project>/Source (or absolute, inside it)."), EUnrealMcpParamRequirement::Required)
-			.DestructiveHint(true)
+			.ReadOnlyHint(false).DestructiveHint(true).IdempotentHint(true).OpenWorldHint(false)
 			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
 			{
 				const FString Path = Call.GetString(TEXT("path"));
@@ -730,7 +732,7 @@ namespace UnrealMcpSourceTools
 			.ParamBool(TEXT("recursive"), TEXT("Recurse sub-folders. Default true."))
 			.Param(TEXT("extensions"), TEXT("array"), TEXT("Extensions to include (without the dot). Default ['h','cpp','cs']."),
 				EUnrealMcpParamRequirement::Optional, nullptr)
-			.ReadOnlyHint(true)
+			.ReadOnlyHint(true).DestructiveHint(false).IdempotentHint(true).OpenWorldHint(false)
 			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
 			{
 				const FString Root = GetProjectSourceRoot();
@@ -836,6 +838,7 @@ namespace UnrealMcpSourceTools
 			.ParamString(TEXT("configuration"), TEXT("Build configuration. Default 'Development'."))
 			.ParamString(TEXT("platform"), TEXT("Build platform. Default the host platform (e.g. 'Win64')."))
 			.ParamBool(TEXT("useLiveCoding"), TEXT("Prefer Live Coding when available (interactive editor only). Default true."))
+			.ReadOnlyHint(false).DestructiveHint(false).IdempotentHint(true).OpenWorldHint(false)
 			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
 			{
 				const bool bUseLiveCoding = Call.GetBool(TEXT("useLiveCoding"), true);

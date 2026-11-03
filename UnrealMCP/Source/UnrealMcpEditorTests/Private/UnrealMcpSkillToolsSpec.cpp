@@ -164,18 +164,16 @@ void FUnrealMcpSkillToolsSpec::Define()
 			TestTrue(TEXT("optional bool"), Code.Contains(TEXT(".ParamBool(TEXT(\"flag\"), TEXT(\"A flag.\"))")));
 		});
 
-		It("emits only the hints that were requested", [this]()
+		It("emits every hint explicitly, with the requested values", [this]()
 		{
 			UnrealMcpSkillTools::FSkillSpec Spec = SkillsMakeBaseSpec();
-			TestFalse(TEXT("no hints by default"),
-				UnrealMcpSkillTools::BuildSkillSourceCode(Spec).Contains(TEXT(".ReadOnlyHint(")));
+			TestTrue(TEXT("all false by default"), UnrealMcpSkillTools::BuildSkillSourceCode(Spec).Contains(
+				TEXT(".ReadOnlyHint(false).DestructiveHint(false).IdempotentHint(false).OpenWorldHint(false)")));
 
 			Spec.bReadOnlyHint = true;
 			Spec.bIdempotentHint = true;
-			const FString Code = UnrealMcpSkillTools::BuildSkillSourceCode(Spec);
-			TestTrue(TEXT("read-only"), Code.Contains(TEXT(".ReadOnlyHint(true)")));
-			TestTrue(TEXT("idempotent"), Code.Contains(TEXT(".IdempotentHint(true)")));
-			TestFalse(TEXT("not destructive"), Code.Contains(TEXT(".DestructiveHint(")));
+			TestTrue(TEXT("requested values"), UnrealMcpSkillTools::BuildSkillSourceCode(Spec).Contains(
+				TEXT(".ReadOnlyHint(true).DestructiveHint(false).IdempotentHint(true).OpenWorldHint(false)")));
 		});
 
 		It("escapes an embedded quote in the description", [this]()

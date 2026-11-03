@@ -116,6 +116,24 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             var proxy = ProxyToolFactory.Create(new ToolDescriptor { Name = "ping", Visible = false }, channel);
             Assert.False(proxy.Visible);
         }
+
+        [Fact]
+        public void Create_CarriesTitleAndEveryAnnotationHint()
+        {
+            // The descriptor exactly as the C++ ToDescriptorJson() writes it (all four hints always present); McpPlugin
+            // forwards these proxy fields to the server as the MCP tool `annotations` (ToolAnnotationsTests).
+            const string json = """
+                {"name":"source-delete","title":"Delete Source File","description":"d","schemaHash":"h",
+                 "readOnlyHint":false,"destructiveHint":true,"idempotentHint":true,"openWorldHint":false}
+                """;
+            var proxy = ProxyToolFactory.Create(JsonSerializer.Deserialize<ToolDescriptor>(json)!, new FakeToolCallChannel());
+
+            Assert.Equal("Delete Source File", proxy.Title);
+            Assert.False(proxy.ReadOnlyHint);
+            Assert.True(proxy.DestructiveHint);
+            Assert.True(proxy.IdempotentHint);
+            Assert.False(proxy.OpenWorldHint);
+        }
     }
 
     public class ProxyResponseMapperTests

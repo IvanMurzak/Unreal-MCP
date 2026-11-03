@@ -246,6 +246,13 @@ struct UNREALMCPRUNTIME_API FUnrealMcpRegisteredTool
 	bool bDestructiveHint = false;
 	bool bIdempotentHint = false;
 	bool bOpenWorldHint = false;
+	/**
+	 * Whether the declaration set ReadOnlyHint() / DestructiveHint() at all. The wire always carries the booleans, so
+	 * these are what tell a decided `false` from an undecided default: Commit warns when a tool declares neither (MCP
+	 * directories such as the Claude Connectors Directory flag such tools), and the annotations spec requires both.
+	 */
+	bool bReadOnlyHintDeclared = false;
+	bool bDestructiveHintDeclared = false;
 	/** Served at all: false only when the §8 `enabledTools` whitelist excludes the tool (not in the manifest, refused by Execute). */
 	bool bEnabled = true;
 	/**

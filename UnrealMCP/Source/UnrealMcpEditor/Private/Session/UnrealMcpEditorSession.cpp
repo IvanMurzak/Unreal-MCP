@@ -171,12 +171,12 @@ void FUnrealMcpEditorSession::RegisterTools(FUnrealMcpToolRegistry& Registry)
 {
 	TWeakPtr<FUnrealMcpEditorSession> WeakSession = AsShared();
 	Registry.Tool(QuitToolName)
-		.Title(TEXT("Quit editor session"))
+		.Title(TEXT("Quit Editor Session"))
 		.Description(TEXT("Save dirty packages that have a path and quit an editor started by a CLI session "
 		                  "(`unreal-mcp-cli close --owned-only`). Refuses unless 'nonce' matches the session lease."))
 		.ParamString(TEXT("nonce"), TEXT("The nonce of the CLI session lease (.ai-game-dev/session.json)."), EUnrealMcpParamRequirement::Required)
 		.ToolType(EUnrealMcpToolType::System)
-		.DestructiveHint(true)
+		.ReadOnlyHint(false).DestructiveHint(true).IdempotentHint(false).OpenWorldHint(false)
 		.Handle([WeakSession](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
 		{
 			const TSharedPtr<FUnrealMcpEditorSession> Session = WeakSession.Pin();
