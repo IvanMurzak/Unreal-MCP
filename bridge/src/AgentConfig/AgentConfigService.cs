@@ -155,13 +155,10 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
             var mapped = MapSettings(request.Settings);
             // Only a config-file setup is written. Claude Desktop over HTTP gets nothing it would reject: in Cloud mode it is
             // added by hand as a Claude connector (Manual), locally it is unsupported. Answer with its description.
-            var setupKind = configurator.GetSetupKind(mapped, transport);
-            if (setupKind != AgentSetupKind.ConfigFile)
+            if (configurator.GetSetupKind(mapped, transport) != AgentSetupKind.ConfigFile)
             {
                 result.Description = Describe(configurator, mapped, transport);
-                return Fail(result, setupKind == AgentSetupKind.Manual
-                    ? $"{configurator.AgentName} is set up by hand over {TransportWord(transport)}: follow the steps shown; nothing is written."
-                    : $"{configurator.AgentName} does not support the {TransportWord(transport)} transport. Select the Custom connection and the stdio transport.");
+                return Fail(result, $"{configurator.AgentName} has no config file to write over {TransportWord(transport)}; see the steps shown.");
             }
 
             // The Custom agent has no file to write, so it never needs a freshly minted key — the cached one (if any)

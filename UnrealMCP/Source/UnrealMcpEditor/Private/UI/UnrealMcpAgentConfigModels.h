@@ -148,8 +148,7 @@ struct FUnrealMcpAgentDescription
 	// renders as a clickable hyperlink. Supersedes the single Download/Tutorial pair (kept for back-compat).
 	TArray<FAiAgentRichContentItem> Links;
 	TArray<FAiAgentRichContentSection> Sections;
-	// McpPlugin 8.18.0 setupKind. A sidecar without it (8.17.0) sends only transportSupported: false → Unsupported;
-	// neither field (older) → ConfigFile.
+	// McpPlugin 8.18.0 setupKind; absent (older sidecar) → ConfigFile.
 	EAiAgentSetupKind SetupKind = EAiAgentSetupKind::ConfigFile;
 	// McpPlugin 8.17.0: the notice shown after a successful Configure / Remove (e.g. "Fully quit Claude Desktop …");
 	// empty when none applies (HTTP transport, the Custom agent) or from an older sidecar.

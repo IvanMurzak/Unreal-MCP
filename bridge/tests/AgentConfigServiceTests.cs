@@ -460,7 +460,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
                 RequestId = "so1", AgentId = "stdio-only", Transport = "streamableHttp", Settings = Settings(),
             });
             Assert.False(http.Ok);
-            Assert.Contains("stdio", http.Error);
+            Assert.Contains("no config file", http.Error);
+            Assert.Equal("Alert", Assert.Single(Assert.Single(http.Description!.Sections).Items).Kind);
             Assert.False(http.Description!.TransportSupported);
             Assert.Equal("Unsupported", http.Description.SetupKind);
             Assert.False(File.Exists(configPath)); // the guard refused before any write

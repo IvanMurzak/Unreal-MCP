@@ -665,7 +665,7 @@ TSharedRef<SWidget> SUnrealMcpAgentConfigurators::MakeStatusRow()
 		[
 			SNew(SButton)
 			.IsEnabled(!bBusy)
-			.Visibility(bConfigFile && bConfigured ? EVisibility::Visible : EVisibility::Collapsed)
+			.Visibility(bConfigured ? EVisibility::Visible : EVisibility::Collapsed)
 			.Text(LOCTEXT("RemoveAgent", "Remove"))
 			.ToolTipText(FText::Format(LOCTEXT("RemoveAgentHint", "Remove the Unreal MCP entry from {0}'s config file."), AgentName))
 			.OnClicked_Lambda([this]() { RequestRemove(); return FReply::Handled(); })

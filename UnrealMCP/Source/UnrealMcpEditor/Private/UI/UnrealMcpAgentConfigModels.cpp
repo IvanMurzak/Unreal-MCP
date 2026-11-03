@@ -67,7 +67,7 @@ FAiAgentRichContentItem FAiAgentRichContentItem::FromJson(const TSharedPtr<FJson
 
 EAiAgentSetupKind FUnrealMcpAgentDescription::ParseSetupKind(const FString& Raw)
 {
-	// Unknown → ConfigFile, the pre-8.17 behaviour (the sidecar still refuses a write it cannot do).
+	// Unknown / absent → ConfigFile (the sidecar still refuses a write it cannot do).
 	if (Raw == TEXT("Manual"))      return EAiAgentSetupKind::Manual;
 	if (Raw == TEXT("Unsupported")) return EAiAgentSetupKind::Unsupported;
 	return EAiAgentSetupKind::ConfigFile;
@@ -99,14 +99,11 @@ FUnrealMcpAgentDescription FUnrealMcpAgentDescription::FromJson(const TSharedPtr
 	Json->TryGetBoolField(TEXT("supportsOAuth"), Desc.bSupportsOAuth);
 	Json->TryGetStringField(TEXT("downloadUrl"), Desc.DownloadUrl);
 	Json->TryGetStringField(TEXT("tutorialUrl"), Desc.TutorialUrl);
-	// McpPlugin 8.18.0 setupKind, else the 8.17.0 transportSupported flag. A JSON null restartNotice is not a string, so
+	// McpPlugin 8.18.0. Absent (older sidecar) → ConfigFile / no notice. A JSON null restartNotice is not a string, so
 	// TryGetStringField leaves it empty.
 	FString SetupKindRaw;
-	bool bTransportSupported = true;
-	if (Json->TryGetStringField(TEXT("setupKind"), SetupKindRaw))
-		Desc.SetupKind = ParseSetupKind(SetupKindRaw);
-	else if (Json->TryGetBoolField(TEXT("transportSupported"), bTransportSupported) && !bTransportSupported)
-		Desc.SetupKind = EAiAgentSetupKind::Unsupported;
+	Json->TryGetStringField(TEXT("setupKind"), SetupKindRaw);
+	Desc.SetupKind = ParseSetupKind(SetupKindRaw);
 	Json->TryGetStringField(TEXT("restartNotice"), Desc.RestartNotice);
 
 	// 6.9.0: the tri-state status. Absent in an older sidecar → NotConfigured (back-compat).

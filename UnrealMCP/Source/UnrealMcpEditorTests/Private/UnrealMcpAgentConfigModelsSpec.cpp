@@ -200,7 +200,7 @@ void FUnrealMcpAgentConfigModelsSpec::Define()
 			TestTrue("supportsOAuth true round-trips", DescTrue.bSupportsOAuth);
 		});
 
-		It("parses the McpPlugin 8.18.0 setupKind and restart notice, falling back to 8.17.0 transportSupported", [this]()
+		It("parses the McpPlugin 8.18.0 setupKind and restart notice, defaulting for an older sidecar", [this]()
 		{
 			const FString JsonManual = TEXT(R"JSON({ "agentId": "claude-desktop", "agentName": "Claude Desktop", "setupKind": "Manual", "transportSupported": false, "restartNotice": null,
 				"sections": [ { "heading": "Add as a Claude Connector", "expandedFirst": true, "items": [
@@ -216,11 +216,6 @@ void FUnrealMcpAgentConfigModelsSpec::Define()
 			const FString JsonUnsupported = TEXT(R"JSON({ "agentId": "claude-desktop", "agentName": "Claude Desktop", "setupKind": "Unsupported", "transportSupported": false })JSON");
 			TestEqual("setupKind Unsupported",
 				FUnrealMcpAgentDescription::FromJson(AgentConfigModelsParseObject(JsonUnsupported)).SetupKind, EAiAgentSetupKind::Unsupported);
-
-			// An 8.17.0 sidecar sends only transportSupported.
-			const FString Json817 = TEXT(R"JSON({ "agentId": "claude-desktop", "agentName": "Claude Desktop", "transportSupported": false })JSON");
-			TestEqual("8.17 transportSupported false → Unsupported",
-				FUnrealMcpAgentDescription::FromJson(AgentConfigModelsParseObject(Json817)).SetupKind, EAiAgentSetupKind::Unsupported);
 
 			const FString JsonStdio = TEXT(R"JSON({ "agentId": "claude-desktop", "agentName": "Claude Desktop", "setupKind": "ConfigFile", "transportSupported": true, "restartNotice": "Fully quit Claude Desktop and start it again." })JSON");
 			const FUnrealMcpAgentDescription Stdio = FUnrealMcpAgentDescription::FromJson(AgentConfigModelsParseObject(JsonStdio));
