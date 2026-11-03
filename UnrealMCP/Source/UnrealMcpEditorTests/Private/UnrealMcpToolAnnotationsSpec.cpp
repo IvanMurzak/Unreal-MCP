@@ -10,20 +10,18 @@
 #include "Dom/JsonValue.h"
 
 #include "UnrealMcpCoreTools.h"
-#include "UnrealMcpRqlTools.h"
-#include "UnrealMcpRuntimeCoreTools.h"
 #include "UnrealMcpToolRegistry.h"
 #include "Session/UnrealMcpEditorSession.h"
-#include "Tools/UnrealMcpSkillTools.h"
 
 /**
  * MCP tool annotations of every built-in tool (the Claude Connectors Directory rule: each tool declares a `title`
  * and an explicit `readOnlyHint` / `destructiveHint`, plus `idempotentHint` / `openWorldHint`).
  *
- * Builds the registry the way FUnrealMcpEditorCoordinator does and reads the §2.2 manifest descriptors, i.e. the
- * exact fields the sidecar maps onto the MCP tool annotations. Each tool's four hints are pinned in
- * AnnotationsExpected: a new tool fails here until its hints are decided and listed, so none ships on the
- * builder's defaults by accident. The bridge-side guard is bridge/tests/ToolAnnotationsTests.cs.
+ * Builds the registry the way FUnrealMcpEditorCoordinator does (UnrealMcpCoreTools::RegisterAll + editor-quit). The
+ * rule: every tool has a title and DECLARES ReadOnlyHint() and DestructiveHint() (the wire always carries booleans, so
+ * the builder's *Declared flags are what tell a decision from a default). The reviewed values are pinned in
+ * AnnotationsExpected and checked on the §2.2 manifest descriptors the sidecar maps onto the MCP annotations; a new
+ * tool fails here until its hints are decided and listed. The bridge-side guard is bridge/tests/ToolAnnotationsTests.cs.
  */
 BEGIN_DEFINE_SPEC(FUnrealMcpToolAnnotationsSpec, "UnrealMcp.Tools.Annotations",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -38,7 +36,7 @@ BEGIN_DEFINE_SPEC(FUnrealMcpToolAnnotationsSpec, "UnrealMcp.Tools.Annotations",
 	};
 
 	/** The reviewed hints of every built-in tool (readOnly, destructive, idempotent, openWorld). */
-	TMap<FString, FAnnotationsHints> AnnotationsExpected() const
+	static const TMap<FString, FAnnotationsHints>& AnnotationsExpected()
 	{
 		static const FAnnotationsHints Table[] = {
 			{ TEXT("blueprint-add-component"), false, false, false, false },
@@ -72,87 +70,89 @@ BEGIN_DEFINE_SPEC(FUnrealMcpToolAnnotationsSpec, "UnrealMcp.Tools.Annotations",
 			{ TEXT("unreal-skill-create"), false, true, false, false },
 			{ TEXT("unreal-tool-list"), true, false, true, false },
 		};
-		TMap<FString, FAnnotationsHints> Out;
-		for (const FAnnotationsHints& Row : Table)
-			Out.Add(Row.Name, Row);
-		return Out;
+		static const TMap<FString, FAnnotationsHints> Expected = []()
+		{
+			TMap<FString, FAnnotationsHints> Out;
+			for (const FAnnotationsHints& Row : Table)
+				Out.Add(Row.Name, Row);
+			return Out;
+		}();
+		return Expected;
 	}
 
-	/** The manifest descriptors of every core tool, registered as FUnrealMcpEditorCoordinator::Startup does. */
-	TArray<TSharedPtr<FJsonObject>> AnnotationsCoreDescriptors() const
+	/** The registry FUnrealMcpEditorCoordinator::Startup builds (core families + the session's editor-quit). */
+	TUniquePtr<FUnrealMcpToolRegistry> AnnotationsRegistry;
+	/** Its manifest descriptors: the fields the sidecar maps onto the MCP tool annotations. */
+	TArray<TSharedPtr<FJsonObject>> AnnotationsDescriptors;
+
+END_DEFINE_SPEC(FUnrealMcpToolAnnotationsSpec)
+
+void FUnrealMcpToolAnnotationsSpec::Define()
+{
+	BeforeEach([this]()
 	{
-		FUnrealMcpToolRegistry Registry;
-		UnrealMcpPingTool::Register(Registry);
-		UnrealMcpRqlTools::Register(Registry);
-		UnrealMcpBlueprintTools::Register(Registry);
-		UnrealMcpEditorTools::Register(Registry);
-		UnrealMcpToolListTools::Register(Registry);
-		UnrealMcpPythonTools::Register(Registry);
-		UnrealMcpScreenshotTools::Register(Registry);
-		UnrealMcpSourceTools::Register(Registry);
-		UnrealMcpSkillTools::Register(Registry);
+		if (AnnotationsRegistry.IsValid())
+			return;
+		AnnotationsRegistry = MakeUnique<FUnrealMcpToolRegistry>();
+		UnrealMcpCoreTools::RegisterAll(*AnnotationsRegistry);
 		const TSharedRef<FUnrealMcpEditorSession> Session = MakeShared<FUnrealMcpEditorSession>(
 			FUnrealMcpSessionEnv::Parse(TEXT(""), TEXT(""), TEXT("")), FPaths::ProjectDir());
-		Session->RegisterTools(Registry);
+		Session->RegisterTools(*AnnotationsRegistry);
 
-		TArray<TSharedPtr<FJsonObject>> Out;
-		const TSharedPtr<FJsonObject> Manifest = Registry.BuildManifestJson();
+		const TSharedPtr<FJsonObject> Manifest = AnnotationsRegistry->BuildManifestJson();
 		const TArray<TSharedPtr<FJsonValue>>* Tools = nullptr;
 		if (Manifest.IsValid() && Manifest->TryGetArrayField(TEXT("tools"), Tools) && Tools != nullptr)
 		{
 			for (const TSharedPtr<FJsonValue>& Value : *Tools)
 			{
 				if (Value.IsValid() && Value->AsObject().IsValid())
-					Out.Add(Value->AsObject());
+					AnnotationsDescriptors.Add(Value->AsObject());
 			}
 		}
-		return Out;
-	}
+	});
 
-END_DEFINE_SPEC(FUnrealMcpToolAnnotationsSpec)
-
-void FUnrealMcpToolAnnotationsSpec::Define()
-{
 	Describe("built-in tools", [this]()
 	{
-		It("each declares a non-empty title and all four hints as explicit booleans", [this]()
+		It("each declares a non-empty title and both a read-only and a destructive hint", [this]()
 		{
-			const TArray<TSharedPtr<FJsonObject>> Descriptors = AnnotationsCoreDescriptors();
-			TestTrue(TEXT("manifest lists the core tools"), Descriptors.Num() >= AnnotationsExpected().Num());
-
-			for (const TSharedPtr<FJsonObject>& Descriptor : Descriptors)
+			TestTrue(TEXT("manifest lists the core tools"), AnnotationsDescriptors.Num() >= AnnotationsExpected().Num());
+			for (const TSharedPtr<FJsonObject>& Descriptor : AnnotationsDescriptors)
 			{
 				const FString Name = Descriptor->GetStringField(TEXT("name"));
-				FString Title;
-				TestTrue(*FString::Printf(TEXT("%s has a title"), *Name),
-					Descriptor->TryGetStringField(TEXT("title"), Title) && !Title.TrimStartAndEnd().IsEmpty());
-
-				for (const TCHAR* Hint : { TEXT("readOnlyHint"), TEXT("destructiveHint"), TEXT("idempotentHint"), TEXT("openWorldHint") })
-				{
-					bool bValue = false;
-					TestTrue(*FString::Printf(TEXT("%s carries %s as a boolean"), *Name, Hint),
-						Descriptor->TryGetBoolField(Hint, bValue));
-				}
-				TestFalse(*FString::Printf(TEXT("%s is not both read-only and destructive"), *Name),
-					Descriptor->GetBoolField(TEXT("readOnlyHint")) && Descriptor->GetBoolField(TEXT("destructiveHint")));
+				const FUnrealMcpRegisteredTool* Tool = AnnotationsRegistry->Find(Name);
+				if (!TestNotNull(*FString::Printf(TEXT("%s is registered"), *Name), Tool))
+					continue;
+				TestFalse(*FString::Printf(TEXT("%s has a title"), *Name), Tool->Title.TrimStartAndEnd().IsEmpty());
+				TestTrue(*FString::Printf(TEXT("%s declares ReadOnlyHint()"), *Name), Tool->bReadOnlyHintDeclared);
+				TestTrue(*FString::Printf(TEXT("%s declares DestructiveHint()"), *Name), Tool->bDestructiveHintDeclared);
+				TestFalse(*FString::Printf(TEXT("%s is not both read-only and destructive"), *Name), Tool->bReadOnlyHint && Tool->bDestructiveHint);
 			}
 		});
 
-		It("match the reviewed hints, and every tool has a reviewed entry", [this]()
+		It("ship the reviewed hints, and every tool has a reviewed entry", [this]()
 		{
-			const TMap<FString, FAnnotationsHints> Expected = AnnotationsExpected();
+			const TMap<FString, FAnnotationsHints>& Expected = AnnotationsExpected();
 			TSet<FString> Seen;
-			for (const TSharedPtr<FJsonObject>& Descriptor : AnnotationsCoreDescriptors())
+			for (const TSharedPtr<FJsonObject>& Descriptor : AnnotationsDescriptors)
 			{
 				const FString Name = Descriptor->GetStringField(TEXT("name"));
 				Seen.Add(Name);
 				const FAnnotationsHints* Hints = Expected.Find(Name);
 				if (!TestNotNull(*FString::Printf(TEXT("%s has reviewed hints in AnnotationsExpected"), *Name), Hints))
 					continue;
-				TestTrue(*FString::Printf(TEXT("%s readOnlyHint == %s"), *Name, Hints->bReadOnly ? TEXT("true") : TEXT("false")), Descriptor->GetBoolField(TEXT("readOnlyHint")) == Hints->bReadOnly);
-				TestTrue(*FString::Printf(TEXT("%s destructiveHint == %s"), *Name, Hints->bDestructive ? TEXT("true") : TEXT("false")), Descriptor->GetBoolField(TEXT("destructiveHint")) == Hints->bDestructive);
-				TestTrue(*FString::Printf(TEXT("%s idempotentHint == %s"), *Name, Hints->bIdempotent ? TEXT("true") : TEXT("false")), Descriptor->GetBoolField(TEXT("idempotentHint")) == Hints->bIdempotent);
-				TestTrue(*FString::Printf(TEXT("%s openWorldHint == %s"), *Name, Hints->bOpenWorld ? TEXT("true") : TEXT("false")), Descriptor->GetBoolField(TEXT("openWorldHint")) == Hints->bOpenWorld);
+				struct FAnnotationsWireHint { const TCHAR* Field; bool bExpected; };
+				const FAnnotationsWireHint Wire[] = {
+					{ TEXT("readOnlyHint"), Hints->bReadOnly },
+					{ TEXT("destructiveHint"), Hints->bDestructive },
+					{ TEXT("idempotentHint"), Hints->bIdempotent },
+					{ TEXT("openWorldHint"), Hints->bOpenWorld },
+				};
+				for (const FAnnotationsWireHint& Hint : Wire)
+				{
+					bool bActual = !Hint.bExpected;
+					TestTrue(*FString::Printf(TEXT("%s %s == %s"), *Name, Hint.Field, Hint.bExpected ? TEXT("true") : TEXT("false")),
+						Descriptor->TryGetBoolField(Hint.Field, bActual) && bActual == Hint.bExpected);
+				}
 			}
 			for (const TPair<FString, FAnnotationsHints>& Pair : Expected)
 				TestTrue(*FString::Printf(TEXT("%s is registered"), *Pair.Key), Seen.Contains(Pair.Key));
@@ -160,7 +160,7 @@ void FUnrealMcpToolAnnotationsSpec::Define()
 
 		It("name RQL and link its docs in every rql-* description", [this]()
 		{
-			for (const TSharedPtr<FJsonObject>& Descriptor : AnnotationsCoreDescriptors())
+			for (const TSharedPtr<FJsonObject>& Descriptor : AnnotationsDescriptors)
 			{
 				const FString Name = Descriptor->GetStringField(TEXT("name"));
 				if (!Name.StartsWith(TEXT("rql-")))

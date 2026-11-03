@@ -105,3 +105,14 @@ namespace UnrealMcpSourceTools
 {
 	UNREALMCPEDITOR_API void Register(FUnrealMcpToolRegistry& Registry);
 }
+
+/**
+ * Every built-in tool family the editor serves: `ping`, the RQL family, the editor-only families above and
+ * `unreal-skill-create`, in boot order. The coordinator registers through it and the annotations spec builds the
+ * same registry from it, so a new family is covered by that spec the moment it is wired. Generated skills and the
+ * CLI session's `editor-quit` are registered separately by the coordinator.
+ */
+namespace UnrealMcpCoreTools
+{
+	UNREALMCPEDITOR_API void RegisterAll(FUnrealMcpToolRegistry& Registry);
+}

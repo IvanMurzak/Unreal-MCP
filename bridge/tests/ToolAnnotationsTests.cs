@@ -14,9 +14,7 @@ using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using com.IvanMurzak.Unreal.MCP.Bridge.Ipc;
 using Xunit;
-using ProxyToolFactory = com.IvanMurzak.Unreal.MCP.Bridge.Tools.ProxyToolFactory;
 
 namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
 {
@@ -24,8 +22,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
     /// MCP tool annotations (the Claude Connectors Directory rule): every tool in <c>tools/list</c> carries a non-empty
     /// <c>title</c> and explicit <c>readOnlyHint</c> / <c>destructiveHint</c> (plus <c>idempotentHint</c> /
     /// <c>openWorldHint</c>). The plugin declares them per tool (C++ guard: <c>UnrealMcp.Tools.Annotations</c>), the
-    /// manifest ships them, <see cref="ProxyToolFactory"/> copies them onto the proxy and McpPlugin's tool listing
-    /// forwards them to the server's <c>annotations</c>.
+    /// manifest ships them, <c>ProxyToolFactory</c> copies them onto the proxy (ProxyToolFactoryTests) and McpPlugin's
+    /// tool listing forwards them to the server's <c>annotations</c>.
     ///
     /// <para>The fixture tests read <c>tests/chain-fixtures/&lt;ue&gt;/tools.jsonl</c>: the live <c>tools/list</c> of the
     /// editor that the CI <c>connection-smoke</c> leg diffs against, so a tool without a title or a hint fails here
@@ -37,25 +35,6 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
 
         private const string RqlDocsUrl = "https://ai-game.dev/docs/rql";
 
-        [Fact]
-        public void ProxyToolFactory_CarriesTitleAndEveryHintFromTheManifest()
-        {
-            // The descriptor exactly as the C++ ToDescriptorJson() writes it (all four hints always present).
-            const string json = """
-                {"name":"source-delete","title":"Delete Source File","description":"d","schemaHash":"h",
-                 "readOnlyHint":false,"destructiveHint":true,"idempotentHint":true,"openWorldHint":false}
-                """;
-            var descriptor = JsonSerializer.Deserialize<ToolDescriptor>(json)!;
-
-            var proxy = ProxyToolFactory.Create(descriptor, new FakeToolCallChannel());
-
-            Assert.Equal("Delete Source File", proxy.Title);
-            Assert.False(proxy.ReadOnlyHint);
-            Assert.True(proxy.DestructiveHint);
-            Assert.True(proxy.IdempotentHint);
-            Assert.False(proxy.OpenWorldHint);
-        }
-
         public static IEnumerable<object[]> FixtureTools() =>
             FixtureFiles().SelectMany(file => File.ReadAllLines(file)
                 .Where(line => line.Length > 0)
@@ -64,11 +43,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
                 .Select(entry => new object[] { Path.GetFileName(Path.GetDirectoryName(file))!, entry["name"]!.GetValue<string>(), entry.ToJsonString() }));
 
         [Fact]
-        public void Fixtures_ArePresentAndListTools()
-        {
-            Assert.NotEmpty(FixtureFiles());
-            Assert.NotEmpty(FixtureTools());
-        }
+        public void Fixtures_ListTools() => Assert.NotEmpty(FixtureTools());
 
         [Theory]
         [MemberData(nameof(FixtureTools))]
