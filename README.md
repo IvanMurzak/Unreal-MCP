@@ -306,20 +306,22 @@ to (or spend tokens in) an AI session — the same split Unity and Godot use for
 
 ## Install Additional Skills and Tools
 
-Install extensions when you need more or [create your own tools](#customize-tools-prompts--resources). Each extension is an RQL module: it adds no MCP tools of its own, it extends the core `rql-query` / `rql-mutate` / `rql-schema` tools.
+Install an extension when your project uses one of the engine systems below, or [create your own](#customize-tools-prompts--resources). Each extension is an RQL module: it extends the core `rql-query` / `rql-mutate` / `rql-schema` tools and adds its guide to the `unreal-rql` skill, so no separate MCP tools appear in `tools/list`.
 
-```sh
+```bash
 unreal-mcp-cli install-extension com.ivanmurzak.unreal-ai-gas "<UEProject>"
 ```
 
-| Extension | Description |
-| --- | --- |
-| **[AI ControlRig](https://github.com/IvanMurzak/Unreal-MCP/blob/main/extensions/UnrealAIControlRig/README.md)** | Create rigs with bones, controls and a two-bone IK solver; query Control Rig blueprints and components |
-| **[AI EnhancedInput](https://github.com/IvanMurzak/Unreal-MCP/blob/main/extensions/UnrealAIEnhancedInput/README.md)** | Query Input Actions and Mapping Contexts, create actions and contexts, map keys |
-| **[AI GAS](https://github.com/IvanMurzak/Unreal-MCP/blob/main/extensions/UnrealAIGAS/README.md)** | Gameplay Ability System: query ability, effect and attribute-set classes, grant abilities to actors |
-| **[AI Landscape](https://github.com/IvanMurzak/Unreal-MCP/blob/main/extensions/UnrealAILandscape/README.md)** | Landscape and Water: create, sculpt and paint landscapes; query landscapes, water bodies and water zones |
-| **[AI Niagara](https://github.com/IvanMurzak/Unreal-MCP/blob/main/extensions/UnrealAINiagara/README.md)** | Niagara VFX: query systems and their emitters, place systems in the level |
-| **[AI PCG](https://github.com/IvanMurzak/Unreal-MCP/blob/main/extensions/UnrealAIPCG/README.md)** | Procedural Content Generation: query graphs and PCG components, add components and run generation |
+Extensions are beta and need Unreal Engine 5.7+, Unreal MCP 0.26.0+ in the same project, and a C++ toolchain: releases ship as source and compile for your project (on next editor open, or now with `--build`). The install options (`--version`, `--build`, offline `--source`) are in [Installing an extension into a project](docs/EXTENSIONS.md#installing-an-extension-into-a-project).
+
+| Extension | Install id | Description |
+| --- | --- | --- |
+| **[AI ControlRig](extensions/UnrealAIControlRig/README.md)** | `com.ivanmurzak.unreal-ai-control-rig` | Create rigs with bones, controls and a two-bone IK solver; query Control Rig blueprints and components |
+| **[AI EnhancedInput](extensions/UnrealAIEnhancedInput/README.md)** | `com.ivanmurzak.unreal-ai-enhanced-input` | Query Input Actions and Mapping Contexts, create actions and contexts, map keys |
+| **[AI GAS](extensions/UnrealAIGAS/README.md)** | `com.ivanmurzak.unreal-ai-gas` | Gameplay Ability System: query ability, effect and attribute-set classes, grant abilities to actors |
+| **[AI Landscape](extensions/UnrealAILandscape/README.md)** | `com.ivanmurzak.unreal-ai-landscape` | Landscape and Water: create, sculpt and paint landscapes; query landscapes, water bodies and water zones |
+| **[AI Niagara](extensions/UnrealAINiagara/README.md)** | `com.ivanmurzak.unreal-ai-niagara` | Niagara VFX: query systems and their emitters, place systems in the level |
+| **[AI PCG](extensions/UnrealAIPCG/README.md)** | `com.ivanmurzak.unreal-ai-pcg` | Procedural Content Generation: query graphs and PCG components, add components and run generation |
 
 ![AI Game Developer — Unreal MCP](https://github.com/IvanMurzak/Unreal-MCP/blob/main/docs/img/promo/hazzard-divider.svg?raw=true)
 
