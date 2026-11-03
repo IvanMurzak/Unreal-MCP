@@ -157,8 +157,7 @@ public:
             .Title(TEXT("Hello Extension"))
             .Description(TEXT("Returns a friendly greeting, optionally addressed to 'name'."))
             .ParamString(TEXT("name"), TEXT("Who to greet. Defaults to 'world'."))
-            .ReadOnlyHint(true)
-            .IdempotentHint(true)
+            .ReadOnlyHint(true).DestructiveHint(false).IdempotentHint(true).OpenWorldHint(false)
             .Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
             {
                 const FString Name = Call.Has(TEXT("name")) ? Call.GetString(TEXT("name")) : TEXT("world");
@@ -177,7 +176,9 @@ public:
 - `.Title(...)`, `.Description(...)` — human-/LLM-facing copy.
 - `.ParamString / .ParamInt / .ParamNumber / .ParamBool / .ParamVector(name, desc, requirement)` —
   declare an input parameter. Pass `EUnrealMcpParamRequirement::Required` to mark it required.
-- `.ReadOnlyHint / .DestructiveHint / .IdempotentHint / .OpenWorldHint(bool)` — MCP tool hints.
+- `.ReadOnlyHint / .DestructiveHint / .IdempotentHint / .OpenWorldHint(bool)` — MCP tool annotations. Set
+  all four and a `.Title(...)` on every tool: MCP directories (e.g. the Claude Connectors Directory) flag a tool
+  without a title or an explicit read-only / destructive hint. Anything that deletes or overwrites is destructive.
 - `.Handle(lambda)` — bind the handler and commit the tool. **The handler runs on the game thread**
   (the dispatcher guarantees this, §4), so you may call editor/`UObject` APIs directly. Do not block
   on bridge state or pump modal UI.

@@ -405,8 +405,7 @@ public:
             .Title(TEXT("Hello Extension"))
             .Description(TEXT("Returns a friendly greeting."))
             .ParamString(TEXT("name"), TEXT("Who to greet. Defaults to 'world'."))
-            .ReadOnlyHint(true)
-            .IdempotentHint(true)
+            .ReadOnlyHint(true).DestructiveHint(false).IdempotentHint(true).OpenWorldHint(false)
             .Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
             {
                 const FString Name = Call.Has(TEXT("name")) ? Call.GetString(TEXT("name")) : TEXT("world");

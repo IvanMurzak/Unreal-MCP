@@ -366,7 +366,7 @@ namespace UnrealMcpScreenshotTools
 				"capture the game view explicitly.")) + SizeCapNote())
 			.ParamInt(TEXT("width"), TEXT("Optional output width in pixels (clamped to [1, 2048]); when only 'height' is given the width is derived from the native aspect ratio, and the native viewport width is used when both are omitted."))
 			.ParamInt(TEXT("height"), TEXT("Optional output height in pixels (clamped to [1, 2048]); when only 'width' is given the height is derived from the native aspect ratio, and the native viewport height is used when both are omitted."))
-			.ReadOnlyHint(true)
+			.ReadOnlyHint(true).DestructiveHint(false).IdempotentHint(true).OpenWorldHint(false)
 			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
 			{
 				FString Error;
@@ -386,7 +386,7 @@ namespace UnrealMcpScreenshotTools
 			.Description(FString(TEXT("Capture the Play-In-Editor game view. Errors when no PIE session is active.")) + SizeCapNote())
 			.ParamInt(TEXT("width"), TEXT("Optional output width in pixels (clamped to [1, 2048]); when only 'height' is given the width is derived from the native aspect ratio, and the native game-view width is used when both are omitted."))
 			.ParamInt(TEXT("height"), TEXT("Optional output height in pixels (clamped to [1, 2048]); when only 'width' is given the height is derived from the native aspect ratio, and the native game-view height is used when both are omitted."))
-			.ReadOnlyHint(true)
+			.ReadOnlyHint(true).DestructiveHint(false).IdempotentHint(true).OpenWorldHint(false)
 			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
 			{
 				// Validate the PIE precondition FIRST (GPU-free, headless-spec-covered).
@@ -410,7 +410,7 @@ namespace UnrealMcpScreenshotTools
 			.ParamInt(TEXT("width"), TEXT("Optional output width in pixels (clamped to [1, 2048]); default 1024."))
 			.ParamInt(TEXT("height"), TEXT("Optional output height in pixels (clamped to [1, 2048]); default 1024."))
 			.ParamNumber(TEXT("fov"), TEXT("Optional horizontal field-of-view override in degrees (clamped to [5, 170]); defaults to the camera component's FOV (or 90)."))
-			.ReadOnlyHint(true)
+			.ReadOnlyHint(true).DestructiveHint(false).IdempotentHint(true).OpenWorldHint(false)
 			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
 			{
 				// Validate arguments + resolve the camera FIRST (GPU-free, headless-spec-covered).
@@ -455,7 +455,7 @@ namespace UnrealMcpScreenshotTools
 			.ParamInt(TEXT("height"), TEXT("Optional output height in pixels (clamped to [1, 2048]); default 1024."))
 			.ParamString(TEXT("background"), TEXT("Optional background color as hex ('#RRGGBB' or '#RRGGBBAA'); the alpha of '#RRGGBBAA' is accepted but ignored (the PNG is always opaque). Defaults to dark grey."))
 			.ParamNumber(TEXT("fov"), TEXT("Optional field-of-view override in degrees (clamped to [5, 170]); default 50."))
-			.ReadOnlyHint(true)
+			.ReadOnlyHint(true).DestructiveHint(false).IdempotentHint(true).OpenWorldHint(false)
 			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
 			{
 				// Validate arguments + resolve the actor FIRST (GPU-free, headless-spec-covered).

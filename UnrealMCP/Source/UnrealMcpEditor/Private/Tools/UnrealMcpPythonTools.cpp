@@ -256,8 +256,7 @@ namespace UnrealMcpPythonTools
 			.ParamNumber(TEXT("timeout"), TEXT("Time budget in seconds, default 30: a snippet still running then is stopped with a Timeout "
 			                                   "error. Capped a few seconds below the tool timeout. Use a small value (e.g. 5) to try code "
 			                                   "that might not end."))
-			.DestructiveHint(true)
-			.OpenWorldHint(true)
+			.ReadOnlyHint(false).DestructiveHint(true).IdempotentHint(false).OpenWorldHint(true)
 			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
 			{
 				const FString Code = Call.GetString(TEXT("code"));

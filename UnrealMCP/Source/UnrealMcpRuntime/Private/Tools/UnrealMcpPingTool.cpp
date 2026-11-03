@@ -27,8 +27,7 @@ namespace UnrealMcpPingTool
 			                  "MCP -> sidecar -> Unreal editor path."))
 			.ParamString(TEXT("message"), TEXT("Optional message to echo back; defaults to 'pong'."))
 			.ToolType(EUnrealMcpToolType::System)
-			.ReadOnlyHint(true)
-			.IdempotentHint(true)
+			.ReadOnlyHint(true).DestructiveHint(false).IdempotentHint(true).OpenWorldHint(false)
 			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
 			{
 				// Runs ON the game thread (the dispatcher guarantees it, §4).

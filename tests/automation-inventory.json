@@ -25,6 +25,7 @@
   "UnrealMcp.Server": 12,
   "UnrealMcp.ServerChecksum": 17,
   "UnrealMcp.Sidecar": 13,
+  "UnrealMcp.Tools.Annotations": 3,
   "UnrealMcp.Tools.Blueprint": 11,
   "UnrealMcp.Tools.Console": 5,
   "UnrealMcp.Tools.Python": 5,

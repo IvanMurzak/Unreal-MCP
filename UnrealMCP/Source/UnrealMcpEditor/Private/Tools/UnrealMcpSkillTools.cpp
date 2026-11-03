@@ -364,6 +364,7 @@ namespace UnrealMcpSkillTools
 			// SYSTEM surface (§2.4), matching Unity's unity-skill-create: skill AUTHORING is host plumbing driven
 			// by the CLI / desktop app, not a capability an arbitrary AI agent should find in tools/list.
 			.ToolType(EUnrealMcpToolType::System)
+			.ReadOnlyHint(false).DestructiveHint(true).IdempotentHint(false).OpenWorldHint(false)
 			.Handle([RegistryPtr](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
 			{
 				FSkillSpec Spec;

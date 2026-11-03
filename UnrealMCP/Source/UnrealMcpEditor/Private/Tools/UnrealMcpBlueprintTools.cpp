@@ -115,7 +115,7 @@ namespace UnrealMcpBlueprintTools
 			                  "save it with rql-mutate: editor | call SaveAsset(\"/Game/MCP/BP_Thing\")."))
 			.ParamString(TEXT("path"), TEXT("/Game package path for the new Blueprint asset (object-path form also accepted)."), EUnrealMcpParamRequirement::Required)
 			.ParamString(TEXT("parentClass"), TEXT("Parent UClass path or short name. Defaults to Actor."))
-			.DestructiveHint(false).ReadOnlyHint(false)
+			.ReadOnlyHint(false).DestructiveHint(false).IdempotentHint(false).OpenWorldHint(false)
 			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
 			{
 				const FString Path = Call.GetString(TEXT("path"));
@@ -190,7 +190,7 @@ namespace UnrealMcpBlueprintTools
 			                  "(name/type/array), SCS components (name/class/parent), functions and events with "
 			                  "node-counts, implemented interfaces, and the parent class chain."))
 			.ParamString(TEXT("path"), TEXT("Full object path of the Blueprint asset."), EUnrealMcpParamRequirement::Required)
-			.ReadOnlyHint(true).IdempotentHint(true)
+			.ReadOnlyHint(true).DestructiveHint(false).IdempotentHint(true).OpenWorldHint(false)
 			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
 			{
 				UBlueprint* Blueprint = ResolveBlueprint(Call.GetString(TEXT("path")));
@@ -312,7 +312,7 @@ namespace UnrealMcpBlueprintTools
 			.ParamString(TEXT("componentClass"), TEXT("UActorComponent subclass path or short name."), EUnrealMcpParamRequirement::Required)
 			.ParamString(TEXT("name"), TEXT("Variable name for the new component."), EUnrealMcpParamRequirement::Required)
 			.ParamString(TEXT("parentComponent"), TEXT("Optional existing scene-component node to attach under."))
-			.DestructiveHint(false).ReadOnlyHint(false)
+			.ReadOnlyHint(false).DestructiveHint(false).IdempotentHint(false).OpenWorldHint(false)
 			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
 			{
 				UBlueprint* Blueprint = ResolveBlueprint(Call.GetString(TEXT("path")));
@@ -382,7 +382,7 @@ namespace UnrealMcpBlueprintTools
 			.Description(TEXT("Remove a component node from a Blueprint's Simple Construction Script by variable name."))
 			.ParamString(TEXT("path"), TEXT("Blueprint asset object path."), EUnrealMcpParamRequirement::Required)
 			.ParamString(TEXT("name"), TEXT("Variable name of the SCS component node to remove."), EUnrealMcpParamRequirement::Required)
-			.DestructiveHint(true).ReadOnlyHint(false)
+			.ReadOnlyHint(false).DestructiveHint(true).IdempotentHint(true).OpenWorldHint(false)
 			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
 			{
 				UBlueprint* Blueprint = ResolveBlueprint(Call.GetString(TEXT("path")));
@@ -420,7 +420,7 @@ namespace UnrealMcpBlueprintTools
 			.ParamBool(TEXT("isArray"), TEXT("Wrap the type in an array. Defaults to false."))
 			.ParamString(TEXT("defaultValue"), TEXT("Optional default value (UE text format)."))
 			.ParamBool(TEXT("instanceEditable"), TEXT("Editable per placed actor (the editor's 'Instance Editable' eye). Defaults to false."))
-			.DestructiveHint(false).ReadOnlyHint(false)
+			.ReadOnlyHint(false).DestructiveHint(false).IdempotentHint(false).OpenWorldHint(false)
 			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
 			{
 				UBlueprint* Blueprint = ResolveBlueprint(Call.GetString(TEXT("path")));
@@ -472,7 +472,7 @@ namespace UnrealMcpBlueprintTools
 			.ParamString(TEXT("newType"), TEXT("Optional new type token (see blueprint-add-variable)."))
 			.ParamBool(TEXT("isArray"), TEXT("Array flag applied with 'newType'. Defaults to false."))
 			.ParamBool(TEXT("instanceEditable"), TEXT("Optional: true = editable per placed actor, false = class default only."))
-			.DestructiveHint(false).ReadOnlyHint(false)
+			.ReadOnlyHint(false).DestructiveHint(true).IdempotentHint(false).OpenWorldHint(false)
 			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
 			{
 				UBlueprint* Blueprint = ResolveBlueprint(Call.GetString(TEXT("path")));
@@ -541,7 +541,7 @@ namespace UnrealMcpBlueprintTools
 			.ParamString(TEXT("path"), TEXT("Blueprint asset object path."), EUnrealMcpParamRequirement::Required)
 			.ParamString(TEXT("property"), TEXT("CDO property name."), EUnrealMcpParamRequirement::Required)
 			.ParamString(TEXT("value"), TEXT("Value in UE text format."), EUnrealMcpParamRequirement::Required)
-			.DestructiveHint(false).ReadOnlyHint(false)
+			.ReadOnlyHint(false).DestructiveHint(true).IdempotentHint(true).OpenWorldHint(false)
 			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
 			{
 				UBlueprint* Blueprint = ResolveBlueprint(Call.GetString(TEXT("path")));
@@ -594,7 +594,7 @@ namespace UnrealMcpBlueprintTools
 			                  "then Connect pins."))
 			.ParamString(TEXT("path"), TEXT("Blueprint asset object path."), EUnrealMcpParamRequirement::Required)
 			.ParamString(TEXT("name"), TEXT("New function name."), EUnrealMcpParamRequirement::Required)
-			.DestructiveHint(false).ReadOnlyHint(false)
+			.ReadOnlyHint(false).DestructiveHint(false).IdempotentHint(false).OpenWorldHint(false)
 			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
 			{
 				UBlueprint* Blueprint = ResolveBlueprint(Call.GetString(TEXT("path")));
@@ -634,7 +634,7 @@ namespace UnrealMcpBlueprintTools
 			                  "name; it must be an overridable event on the parent class."))
 			.ParamString(TEXT("path"), TEXT("Blueprint asset object path."), EUnrealMcpParamRequirement::Required)
 			.ParamString(TEXT("name"), TEXT("Parent event function name (e.g. ReceiveBeginPlay)."), EUnrealMcpParamRequirement::Required)
-			.DestructiveHint(false).ReadOnlyHint(false)
+			.ReadOnlyHint(false).DestructiveHint(false).IdempotentHint(false).OpenWorldHint(false)
 			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
 			{
 				UBlueprint* Blueprint = ResolveBlueprint(Call.GetString(TEXT("path")));
@@ -692,7 +692,7 @@ namespace UnrealMcpBlueprintTools
 			                  "error/warning list. Each message entry carries 'severity', 'message', and best-effort "
 			                  "'node'/'graph' context — this is the feedback loop an AI uses to self-correct."))
 			.ParamString(TEXT("path"), TEXT("Blueprint asset object path."), EUnrealMcpParamRequirement::Required)
-			.ReadOnlyHint(false).IdempotentHint(true)
+			.ReadOnlyHint(false).DestructiveHint(false).IdempotentHint(true).OpenWorldHint(false)
 			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
 			{
 				UBlueprint* Blueprint = ResolveBlueprint(Call.GetString(TEXT("path")));
@@ -762,7 +762,7 @@ namespace UnrealMcpBlueprintTools
 			.ParamString(TEXT("path"), TEXT("Blueprint asset object path."), EUnrealMcpParamRequirement::Required)
 			.ParamVector(TEXT("location"), TEXT("World location. Defaults to origin."))
 			.ParamString(TEXT("name"), TEXT("Optional actor label."))
-			.DestructiveHint(false).ReadOnlyHint(false)
+			.ReadOnlyHint(false).DestructiveHint(false).IdempotentHint(false).OpenWorldHint(false)
 			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
 			{
 				UBlueprint* Blueprint = ResolveBlueprint(Call.GetString(TEXT("path")));

@@ -41,8 +41,7 @@ namespace UnrealMcpToolListTools
 			.ParamString(TEXT("filter"), TEXT("Case-insensitive regex matched against each tool's name, title and description."))
 			.ParamBool(TEXT("includeDescription"), TEXT("Add each tool's full description (default false)."))
 			.ParamBool(TEXT("includeInputs"), TEXT("Add each tool's parameters as name: type (default false)."))
-			.ReadOnlyHint(true)
-			.IdempotentHint(true)
+			.ReadOnlyHint(true).DestructiveHint(false).IdempotentHint(true).OpenWorldHint(false)
 			.Handle([RegistryPtr](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
 			{
 				using namespace UnrealMcpToolListToolsLocal;
