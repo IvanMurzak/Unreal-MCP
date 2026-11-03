@@ -621,21 +621,28 @@ TSharedRef<SWidget> SUnrealMcpAgentConfigurators::MakeStatusRow()
 	// section, rendered below as an Alert-kind item.) Falls back to bIsConfigured if Status is absent (older sidecar).
 	const bool bReconfigure = SelectedDescription.Status == EAiAgentConfiguratorStatus::ReconfigureNeeded || bConfigured;
 	const FText AgentName = FText::FromString(SelectedDescription.AgentName);
-	// McpPlugin 8.17.0: the agent cannot use this transport (Claude Desktop over HTTP, which includes Cloud). Say so in
-	// the status line and offer no Configure: the sidecar refuses the write, and the section below explains the setup.
-	const bool bSupported = SelectedDescription.bTransportSupported;
+	// McpPlugin 8.18.0: only a config-file setup offers Configure (the sidecar refuses any other write). A Manual setup
+	// (Claude Desktop as a Claude connector in Cloud mode) shows a neutral status and its steps below; an Unsupported one
+	// says so in red above its alert.
+	const EAiAgentSetupKind SetupKind = SelectedDescription.SetupKind;
+	const bool bConfigFile = SetupKind == EAiAgentSetupKind::ConfigFile;
 
 	FText StatusText = LOCTEXT("StatusNotConfigured", "Not configured");
-	FLinearColor StatusColor = UnrealMcpAgentWidgets::PendingColor();
-	if (!bSupported)
+	FSlateColor StatusColor = FSlateColor(UnrealMcpAgentWidgets::PendingColor());
+	if (SetupKind == EAiAgentSetupKind::Manual)
+	{
+		StatusText = LOCTEXT("StatusManualSetup", "Manual setup: follow the steps below");
+		StatusColor = FSlateColor::UseForeground();
+	}
+	else if (SetupKind == EAiAgentSetupKind::Unsupported)
 	{
 		StatusText = FText::Format(LOCTEXT("StatusTransportNotSupportedFmt", "Not supported over {0}"), FText::FromString(TransportWord));
-		StatusColor = UnrealMcpAgentWidgets::AlertColor();
+		StatusColor = FSlateColor(UnrealMcpAgentWidgets::AlertColor());
 	}
 	else if (bConfigured)
 	{
 		StatusText = FText::Format(LOCTEXT("StatusConfiguredFmt", "Configured ({0})"), FText::FromString(TransportWord));
-		StatusColor = UnrealMcpAgentWidgets::ConfiguredColor();
+		StatusColor = FSlateColor(UnrealMcpAgentWidgets::ConfiguredColor());
 	}
 
 	return SNew(SHorizontalBox)
@@ -643,13 +650,13 @@ TSharedRef<SWidget> SUnrealMcpAgentConfigurators::MakeStatusRow()
 		[
 			SNew(STextBlock)
 			.Text(StatusText)
-			.ColorAndOpacity(FSlateColor(StatusColor))
+			.ColorAndOpacity(StatusColor)
 		]
 		+ SHorizontalBox::Slot().AutoWidth().Padding(6, 0, 0, 0).VAlign(VAlign_Center)
 		[
 			SNew(SButton)
 			.IsEnabled(!bBusy)
-			.Visibility(bSupported ? EVisibility::Visible : EVisibility::Collapsed)
+			.Visibility(bConfigFile ? EVisibility::Visible : EVisibility::Collapsed)
 			.Text(bReconfigure ? LOCTEXT("Reconfigure", "Reconfigure") : LOCTEXT("Configure", "Configure"))
 			.ToolTipText(FText::Format(LOCTEXT("ConfigureHint", "Write the Unreal MCP entry into {0}'s config file."), AgentName))
 			.OnClicked_Lambda([this]() { RequestConfigure(); return FReply::Handled(); })
@@ -658,7 +665,7 @@ TSharedRef<SWidget> SUnrealMcpAgentConfigurators::MakeStatusRow()
 		[
 			SNew(SButton)
 			.IsEnabled(!bBusy)
-			.Visibility(bConfigured ? EVisibility::Visible : EVisibility::Collapsed)
+			.Visibility(bConfigFile && bConfigured ? EVisibility::Visible : EVisibility::Collapsed)
 			.Text(LOCTEXT("RemoveAgent", "Remove"))
 			.ToolTipText(FText::Format(LOCTEXT("RemoveAgentHint", "Remove the Unreal MCP entry from {0}'s config file."), AgentName))
 			.OnClicked_Lambda([this]() { RequestRemove(); return FReply::Handled(); })

@@ -153,12 +153,15 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
 
             var transport = ParseTransport(request.Transport);
             var mapped = MapSettings(request.Settings);
-            // An agent that cannot use this transport (Claude Desktop over HTTP) must never get an entry it would
-            // reject: answer with its description (the "Transport Not Supported" alert) and write nothing.
-            if (!configurator.SupportsTransport(transport))
+            // Only a config-file setup is written. Claude Desktop over HTTP gets nothing it would reject: in Cloud mode it is
+            // added by hand as a Claude connector (Manual), locally it is unsupported. Answer with its description.
+            var setupKind = configurator.GetSetupKind(mapped, transport);
+            if (setupKind != AgentSetupKind.ConfigFile)
             {
                 result.Description = Describe(configurator, mapped, transport);
-                return Fail(result, $"{configurator.AgentName} does not support the {TransportWord(transport)} transport. Select the Custom connection and the stdio transport.");
+                return Fail(result, setupKind == AgentSetupKind.Manual
+                    ? $"{configurator.AgentName} is set up by hand over {TransportWord(transport)}: follow the steps shown; nothing is written."
+                    : $"{configurator.AgentName} does not support the {TransportWord(transport)} transport. Select the Custom connection and the stdio transport.");
             }
 
             // The Custom agent has no file to write, so it never needs a freshly minted key — the cached one (if any)
@@ -212,10 +215,11 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
                 return Fail(result, "Project keys are used only in Cloud mode.");
 
             // Every agent holding an HTTP entry routed to this project (whatever key it carries, or none) — the
-            // configs that must not keep the old key. An agent that cannot use HTTP (a stale Claude Desktop entry)
-            // is skipped: rewriting it would write the entry it rejects again.
+            // configs that must not keep the old key. An agent whose HTTP setup is not a config file (a stale Claude
+            // Desktop entry; Claude Desktop is a connector in Cloud mode) is skipped: rewriting would write it again.
             var targets = AllConfigurators
-                .Where(c => c.SupportsTransport(McpTransport.streamableHttp) && HasPinnedHttpEntry(c, baseSettings))
+                .Where(c => c.GetSetupKind(baseSettings, McpTransport.streamableHttp) == AgentSetupKind.ConfigFile
+                    && HasPinnedHttpEntry(c, baseSettings))
                 .ToList();
 
             var settings = await AttachProjectKeyAsync(baseSettings, McpTransport.streamableHttp, regenerate: true, result, cancellationToken).ConfigureAwait(false);
@@ -397,6 +401,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
                     })
                     .ToList(),
                 TransportSupported = description.TransportSupported,
+                SetupKind = description.SetupKind.ToString(),
                 RestartNotice = description.RestartNotice,
             };
         }

@@ -109,6 +109,19 @@ enum class EAiAgentConfiguratorStatus : uint8
 };
 
 /**
+ * How the user sets an agent up for the requested transport (McpPlugin 8.18.0 <c>AgentSetupKind</c>): ConfigFile (the
+ * sidecar writes the agent's config file — Configure / Reconfigure / Remove), Manual (the sections are steps the user
+ * follows in the agent's own UI, e.g. Claude Desktop added as a Claude connector in Cloud mode — rendered normally, no
+ * Configure), Unsupported (one alert, no Configure).
+ */
+enum class EAiAgentSetupKind : uint8
+{
+	ConfigFile,
+	Manual,
+	Unsupported
+};
+
+/**
  * The plugin-side mirror of the sidecar's <c>AgentConfiguratorDescription</c> DTO (§7) — identity + status + the
  * ordered UI sections, parsed from the IPC <c>agent-config-result</c>. The icon is a NAME only (the sidecar never
  * sends bytes); the panel resolves the name to a Slate brush. The thin panel holds one of these per visible agent
@@ -135,12 +148,15 @@ struct FUnrealMcpAgentDescription
 	// renders as a clickable hyperlink. Supersedes the single Download/Tutorial pair (kept for back-compat).
 	TArray<FAiAgentRichContentItem> Links;
 	TArray<FAiAgentRichContentSection> Sections;
-	// McpPlugin 8.17.0: false when the agent cannot use the requested transport (Claude Desktop over HTTP). Sections
-	// then hold one "Transport Not Supported" Alert and the panel hides Configure. Absent (older sidecar) → true.
-	bool bTransportSupported = true;
+	// McpPlugin 8.18.0 setupKind. A sidecar without it (8.17.0) sends only transportSupported: false → Unsupported;
+	// neither field (older) → ConfigFile.
+	EAiAgentSetupKind SetupKind = EAiAgentSetupKind::ConfigFile;
 	// McpPlugin 8.17.0: the notice shown after a successful Configure / Remove (e.g. "Fully quit Claude Desktop …");
 	// empty when none applies (HTTP transport, the Custom agent) or from an older sidecar.
 	FString RestartNotice;
+
+	/** Parse the DTO setupKind string ("ConfigFile"/"Manual"/"Unsupported"); unknown → ConfigFile. */
+	static UNREALMCPEDITOR_API EAiAgentSetupKind ParseSetupKind(const FString& Raw);
 
 	/** Parse the DTO status string ("NotConfigured"/"Configured"/"ReconfigureNeeded") into the enum. */
 	static UNREALMCPEDITOR_API EAiAgentConfiguratorStatus ParseStatus(const FString& Raw);

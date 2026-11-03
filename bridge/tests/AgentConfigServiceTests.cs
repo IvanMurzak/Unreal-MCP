@@ -341,8 +341,9 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         }
 
         /// <summary>
-        /// A stdio-only agent (the Claude Desktop shape) whose config file lives in the test's temp project, so the
-        /// Configure guard is exercised end to end without touching any real user-profile config.
+        /// A stdio-only agent with the Claude Desktop setup shape (stdio = config file, Cloud HTTP = manual steps, local
+        /// HTTP = unsupported) whose config file lives in the test's temp project, so the Configure guard is exercised
+        /// end to end without touching any real user-profile config.
         /// </summary>
         private sealed class StdioOnlyConfigurator : AiAgentConfigurator
         {
@@ -354,6 +355,12 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             public override string DownloadUrl => "https://example.com";
             public override string? IconName => null;
             public override bool SupportsTransport(McpTransport transport) => transport == McpTransport.stdio;
+            public override AgentSetupKind GetSetupKind(AgentConfiguratorSettings settings, McpTransport transport)
+                => transport == McpTransport.stdio ? AgentSetupKind.ConfigFile
+                    : settings.ConnectionMode == ConnectionMode.Cloud ? AgentSetupKind.Manual
+                    : AgentSetupKind.Unsupported;
+            protected override IReadOnlyList<ConfigurationSection> BuildManualSetupSections(AgentConfiguratorSettings settings)
+                => new[] { new ConfigurationSection("Manual steps", true, new[] { ConfigurationItem.ReadOnlyField(settings.PinnedHttpUrl) }) };
 
             // AgentConfigBuilders is internal to McpPlugin, so the entries are built with the public JsonAiAgentConfig.
             protected override AiAgentConfig CreateStdioConfig(AgentConfiguratorSettings settings, ILogger? logger)
@@ -390,12 +397,56 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             Assert.False(description.TransportSupported);
             Assert.False(description.IsConfigured);
             Assert.Equal("NotConfigured", description.Status);
+            Assert.Equal("Unsupported", description.SetupKind);
             Assert.Null(description.RestartNotice);
             var section = Assert.Single(description.Sections);
             Assert.True(section.ExpandedFirst);
             var alert = Assert.Single(section.Items);
             Assert.Equal("Alert", alert.Kind);
             Assert.Contains("stdio", alert.Text);
+        }
+
+        [Fact]
+        public void ClaudeDesktop_InCloudOverHttp_IsTheClaudeConnectorSteps()
+        {
+            // Pure: a Manual description is built from the settings alone (Cloud, not signed in: no key, no network).
+            var result = _service.HandleStatus(new AgentStatusRequestMessage
+            {
+                RequestId = "cd-cloud", AgentId = "claude-desktop", Transport = "streamableHttp",
+                Settings = Settings(mode: "Cloud", host: "https://ai-game.dev/mcp"),
+            });
+
+            Assert.True(result.Ok);
+            var description = result.Description!;
+            Assert.Equal("Manual", description.SetupKind);
+            Assert.False(description.TransportSupported);
+            Assert.False(description.IsConfigured);
+            Assert.Null(description.RestartNotice);
+            var steps = description.Sections[0];
+            Assert.Equal("Add as a Claude Connector", steps.Heading);
+            Assert.True(steps.ExpandedFirst);
+            Assert.Contains(steps.Items, i => i.Kind == "Link" && i.Url == ClaudeDesktopConfigurator.ConnectorsSettingsUrl);
+            var url = Assert.Single(steps.Items, i => i.Kind == "ReadOnlyField").Text;
+            Assert.StartsWith("https://ai-game.dev/mcp/p/", url);
+            Assert.DoesNotContain(description.Sections.SelectMany(x => x.Items), i => i.Kind == "Alert");
+        }
+
+        [Fact]
+        public async Task Configure_ManualSetup_WritesNothing_AndReturnsTheSteps()
+        {
+            var configPath = Path.Combine(_projectRoot, "stdio-only.json");
+            var service = new AgentConfigService(new AiAgentConfigurator[] { new StdioOnlyConfigurator(configPath) });
+
+            var result = await service.HandleConfigureAsync(new AgentConfigureRequestMessage
+            {
+                RequestId = "so-cloud", AgentId = "stdio-only", Transport = "streamableHttp",
+                Settings = Settings(mode: "Cloud", host: "https://ai-game.dev/mcp"),
+            });
+
+            Assert.False(result.Ok);
+            Assert.Equal("Manual", result.Description!.SetupKind);
+            Assert.Equal("Manual steps", Assert.Single(result.Description.Sections).Heading);
+            Assert.False(File.Exists(configPath));
         }
 
         [Fact]
@@ -411,6 +462,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             Assert.False(http.Ok);
             Assert.Contains("stdio", http.Error);
             Assert.False(http.Description!.TransportSupported);
+            Assert.Equal("Unsupported", http.Description.SetupKind);
             Assert.False(File.Exists(configPath)); // the guard refused before any write
 
             var stdio = await service.HandleConfigureAsync(new AgentConfigureRequestMessage
@@ -419,6 +471,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             });
             Assert.True(stdio.Ok);
             Assert.True(stdio.Description!.TransportSupported);
+            Assert.Equal("ConfigFile", stdio.Description.SetupKind);
             Assert.StartsWith("Restart Stdio Only", stdio.Description.RestartNotice);
             Assert.True(File.Exists(configPath));
         }
