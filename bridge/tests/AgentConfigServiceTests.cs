@@ -13,10 +13,16 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.Text.Json.Nodes;
 using System.Threading.Tasks;
+using com.IvanMurzak.McpPlugin.AgentConfig;
+using com.IvanMurzak.McpPlugin.AgentConfig.Impl;
 using com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig;
 using com.IvanMurzak.Unreal.MCP.Bridge.Ipc;
+using Microsoft.Extensions.Logging;
 using Xunit;
+using McpConsts = com.IvanMurzak.McpPlugin.Common.Consts;
+using McpTransport = com.IvanMurzak.McpPlugin.Common.Consts.MCP.Server.TransportMethod;
 
 namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
 {
@@ -334,9 +340,46 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             Assert.NotNull(result.Error);
         }
 
-        [Fact]
-        public void Status_ClaudeDesktopOverHttp_IsTransportNotSupported_WithOneAlert()
+        /// <summary>
+        /// A stdio-only agent (the Claude Desktop shape) whose config file lives in the test's temp project, so the
+        /// Configure guard is exercised end to end without touching any real user-profile config.
+        /// </summary>
+        private sealed class StdioOnlyConfigurator : AiAgentConfigurator
         {
+            private readonly string _configPath;
+            public StdioOnlyConfigurator(string configPath) => _configPath = configPath;
+
+            public override string AgentName => "Stdio Only";
+            public override string AgentId => "stdio-only";
+            public override string DownloadUrl => "https://example.com";
+            public override string? IconName => null;
+            public override bool SupportsTransport(McpTransport transport) => transport == McpTransport.stdio;
+
+            // AgentConfigBuilders is internal to McpPlugin, so the entries are built with the public JsonAiAgentConfig.
+            protected override AiAgentConfig CreateStdioConfig(AgentConfiguratorSettings settings, ILogger? logger)
+                => new JsonAiAgentConfig(AgentName, _configPath, McpConsts.MCP.Server.DefaultBodyPath, logger)
+                    .SetProperty("type", JsonValue.Create("stdio")!, requiredForConfiguration: true)
+                    .SetProperty("command", JsonValue.Create(settings.ExecutableFullPath)!, requiredForConfiguration: true)
+                    .SetPropertyToRemove("url");
+            protected override AiAgentConfig CreateHttpConfig(AgentConfiguratorSettings settings, ILogger? logger)
+                => new JsonAiAgentConfig(AgentName, _configPath, McpConsts.MCP.Server.DefaultBodyPath, logger)
+                    .SetProperty("type", JsonValue.Create("http")!, requiredForConfiguration: true)
+                    .SetProperty("url", JsonValue.Create(settings.PinnedHttpUrl)!, requiredForConfiguration: true)
+                    .SetPropertyToRemove("command");
+            protected override IReadOnlyList<ConfigurationSection> BuildSections(
+                AgentConfiguratorSettings settings, McpTransport transport, ILogger? logger)
+                => DefaultConfigurationSections(settings, transport, logger);
+        }
+
+        [Fact]
+        public void ClaudeDesktop_IsStdioOnly_AndItsHttpDescription_IsTheAlertOnly()
+        {
+            // Pure: SupportsTransport is a constant, and Describe returns the alert before reading any config file.
+            var claudeDesktop = new ClaudeDesktopConfigurator();
+            Assert.True(claudeDesktop.SupportsTransport(McpTransport.stdio));
+            Assert.False(claudeDesktop.SupportsTransport(McpTransport.streamableHttp));
+            Assert.StartsWith("Fully quit Claude Desktop", claudeDesktop.GetRestartNotice(McpTransport.stdio));
+
             var result = _service.HandleStatus(new AgentStatusRequestMessage
             {
                 RequestId = "cd1", AgentId = "claude-desktop", Transport = "streamableHttp", Settings = Settings(),
@@ -356,37 +399,36 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         }
 
         [Fact]
-        public async Task Configure_ClaudeDesktopOverHttp_WritesNothing_AndReturnsTheAlert()
+        public async Task Configure_UnsupportedTransport_WritesNothing_AndReturnsTheAlert()
         {
-            // Claude Desktop's config lives in the user profile, so this only reads its state: the guard must refuse
-            // before any write, leaving the file exactly as it was (absent stays absent).
-            var configPath = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
-                ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "AppData", "Roaming", "Claude", "claude_desktop_config.json")
-                : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Library", "Application Support", "Claude", "claude_desktop_config.json");
-            var existedBefore = File.Exists(configPath);
-            var writtenBefore = existedBefore ? File.GetLastWriteTimeUtc(configPath) : default;
+            var configPath = Path.Combine(_projectRoot, "stdio-only.json");
+            var service = new AgentConfigService(new AiAgentConfigurator[] { new StdioOnlyConfigurator(configPath) });
 
-            var result = await _service.HandleConfigureAsync(new AgentConfigureRequestMessage
+            var http = await service.HandleConfigureAsync(new AgentConfigureRequestMessage
             {
-                RequestId = "cd2", AgentId = "claude-desktop", Transport = "streamableHttp", Settings = Settings(),
+                RequestId = "so1", AgentId = "stdio-only", Transport = "streamableHttp", Settings = Settings(),
             });
+            Assert.False(http.Ok);
+            Assert.Contains("stdio", http.Error);
+            Assert.False(http.Description!.TransportSupported);
+            Assert.False(File.Exists(configPath)); // the guard refused before any write
 
-            Assert.False(result.Ok);
-            Assert.Contains("stdio", result.Error);
-            Assert.False(result.Description!.TransportSupported);
-            Assert.Equal(existedBefore, File.Exists(configPath));
-            if (existedBefore)
-                Assert.Equal(writtenBefore, File.GetLastWriteTimeUtc(configPath));
+            var stdio = await service.HandleConfigureAsync(new AgentConfigureRequestMessage
+            {
+                RequestId = "so2", AgentId = "stdio-only", Transport = "stdio", Settings = Settings(),
+            });
+            Assert.True(stdio.Ok);
+            Assert.True(stdio.Description!.TransportSupported);
+            Assert.StartsWith("Restart Stdio Only", stdio.Description.RestartNotice);
+            Assert.True(File.Exists(configPath));
         }
 
         [Fact]
         public void List_FlagsOnlyClaudeDesktop_AsUnsupportedOverHttp()
         {
             var http = _service.HandleList(new AgentsListRequestMessage { RequestId = "l-http", Transport = "streamableHttp", Settings = Settings() });
-            var stdio = _service.HandleList(new AgentsListRequestMessage { RequestId = "l-stdio", Transport = "stdio", Settings = Settings() });
 
             Assert.Equal(new[] { "claude-desktop" }, http.Agents!.Where(a => !a.TransportSupported).Select(a => a.AgentId));
-            Assert.All(stdio.Agents!, a => Assert.True(a.TransportSupported));
         }
 
         [Fact]
@@ -397,7 +439,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
                 RequestId = "rn-" + agentId + transport, AgentId = agentId, Transport = transport, Settings = Settings(),
             }).Description!.RestartNotice;
 
-            Assert.StartsWith("Fully quit Claude Desktop", Notice("claude-desktop", "stdio"));
+            // claude-code keeps its config in the temp project root (.mcp.json); Claude Desktop is covered above.
             Assert.StartsWith("Restart Claude Code", Notice("claude-code", "stdio"));
             Assert.Null(Notice("claude-code", "streamableHttp"));
             Assert.Null(Notice("other-custom", "stdio"));
