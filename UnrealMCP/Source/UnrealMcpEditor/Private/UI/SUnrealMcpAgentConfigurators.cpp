@@ -665,7 +665,10 @@ TSharedRef<SWidget> SUnrealMcpAgentConfigurators::MakeStatusRow()
 		[
 			SNew(SButton)
 			.IsEnabled(!bBusy)
-			.Visibility(bConfigured ? EVisibility::Visible : EVisibility::Collapsed)
+			// Also for a stale entry (ReconfigureNeeded, e.g. an old HTTP entry in claude_desktop_config.json seen from the
+			// stdio view): the sidecar removes the entry of both transports.
+			.Visibility(bConfigured || SelectedDescription.Status == EAiAgentConfiguratorStatus::ReconfigureNeeded
+				? EVisibility::Visible : EVisibility::Collapsed)
 			.Text(LOCTEXT("RemoveAgent", "Remove"))
 			.ToolTipText(FText::Format(LOCTEXT("RemoveAgentHint", "Remove the Unreal MCP entry from {0}'s config file."), AgentName))
 			.OnClicked_Lambda([this]() { RequestRemove(); return FReply::Handled(); })
