@@ -66,7 +66,7 @@ BEGIN_DEFINE_SPEC(FUnrealMcpToolAnnotationsSpec, "UnrealMcp.Tools.Annotations",
 			{ TEXT("source-delete"), false, true, true, false },
 			{ TEXT("source-list"), true, false, true, false },
 			{ TEXT("source-read"), true, false, true, false },
-			{ TEXT("source-update"), false, true, true, false },
+			{ TEXT("source-update"), false, true, false, false },
 			{ TEXT("unreal-skill-create"), false, true, false, false },
 			{ TEXT("unreal-tool-list"), true, false, true, false },
 		};

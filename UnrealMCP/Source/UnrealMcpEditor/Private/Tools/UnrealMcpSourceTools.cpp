@@ -571,7 +571,7 @@ namespace UnrealMcpSourceTools
 			.ParamString(TEXT("content"), TEXT("Replacement text."), EUnrealMcpParamRequirement::Required)
 			.ParamInt(TEXT("startLine"), TEXT("1-based first line to replace (inclusive). Requires 'endLine'."))
 			.ParamInt(TEXT("endLine"), TEXT("1-based last line to replace (inclusive). Requires 'startLine'."))
-			.ReadOnlyHint(false).DestructiveHint(true).IdempotentHint(true).OpenWorldHint(false)
+			.ReadOnlyHint(false).DestructiveHint(true).IdempotentHint(false).OpenWorldHint(false)
 			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
 			{
 				const FString Path = Call.GetString(TEXT("path"));
