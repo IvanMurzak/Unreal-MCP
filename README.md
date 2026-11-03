@@ -69,6 +69,7 @@ Unlike Unity and Godot (C# engines that host the .NET `McpPlugin` in-process), U
 - [Updating the plugin](#updating-the-plugin)
 - [First run](#first-run)
 - [Tools](#tools) — all 7 families, 27 tools (+ 3 system tools)
+  - [Install Additional Skills and Tools](#install-additional-skills-and-tools)
 - [Per-tool visibility](#per-tool-visibility)
 - [`unreal-mcp-cli`](#unreal-mcp-cli)
 - [Customize Tools, Prompts & Resources](#customize-tools-prompts--resources)
@@ -302,6 +303,23 @@ to (or spend tokens in) an AI session — the same split Unity and Godot use for
 | `editor-quit` | Save dirty packages that have a path and quit an editor a CLI session started (`unreal-mcp-cli close --owned-only`). Refuses unless `nonce` matches the session lease, so it never closes an editor you opened |
 
 </details>
+
+## Install Additional Skills and Tools
+
+Install extensions when you need more or [create your own tools](#customize-tools-prompts--resources). Each extension is an RQL module: it adds no MCP tools of its own, it extends the core `rql-query` / `rql-mutate` / `rql-schema` tools.
+
+```sh
+unreal-mcp-cli install-extension com.ivanmurzak.unreal-ai-gas "<UEProject>"
+```
+
+| Extension | Description |
+| --- | --- |
+| **[AI ControlRig](https://github.com/IvanMurzak/Unreal-MCP/blob/main/extensions/UnrealAIControlRig/README.md)** | Create rigs with bones, controls and a two-bone IK solver; query Control Rig blueprints and components |
+| **[AI EnhancedInput](https://github.com/IvanMurzak/Unreal-MCP/blob/main/extensions/UnrealAIEnhancedInput/README.md)** | Query Input Actions and Mapping Contexts, create actions and contexts, map keys |
+| **[AI GAS](https://github.com/IvanMurzak/Unreal-MCP/blob/main/extensions/UnrealAIGAS/README.md)** | Gameplay Ability System: query ability, effect and attribute-set classes, grant abilities to actors |
+| **[AI Landscape](https://github.com/IvanMurzak/Unreal-MCP/blob/main/extensions/UnrealAILandscape/README.md)** | Landscape and Water: create, sculpt and paint landscapes; query landscapes, water bodies and water zones |
+| **[AI Niagara](https://github.com/IvanMurzak/Unreal-MCP/blob/main/extensions/UnrealAINiagara/README.md)** | Niagara VFX: query systems and their emitters, place systems in the level |
+| **[AI PCG](https://github.com/IvanMurzak/Unreal-MCP/blob/main/extensions/UnrealAIPCG/README.md)** | Procedural Content Generation: query graphs and PCG components, add components and run generation |
 
 ![AI Game Developer — Unreal MCP](https://github.com/IvanMurzak/Unreal-MCP/blob/main/docs/img/promo/hazzard-divider.svg?raw=true)
 
