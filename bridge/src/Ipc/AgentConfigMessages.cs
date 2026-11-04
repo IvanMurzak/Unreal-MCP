@@ -10,6 +10,7 @@
 
 using System.Collections.Generic;
 using System.Text.Json.Serialization;
+using com.IvanMurzak.McpPlugin.AgentConfig;
 
 namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
 {
@@ -226,6 +227,24 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
         /// </summary>
         [JsonPropertyName("links")] public List<AgentItemDto> Links { get; set; } = new();
         [JsonPropertyName("sections")] public List<AgentSectionDto> Sections { get; set; } = new();
+        /// <summary>
+        /// Whether the agent can use the described transport (McpPlugin 8.17.0 <c>SupportsTransport</c>; e.g. Claude
+        /// Desktop is stdio-only). When <c>false</c> <see cref="Sections"/> holds one Alert and the plugin hides
+        /// Configure for that transport; the sidecar also refuses to write it. Absent (an older sidecar) reads as true.
+        /// </summary>
+        [JsonPropertyName("transportSupported")] public bool TransportSupported { get; set; } = true;
+        /// <summary>
+        /// How the user sets the agent up for this transport (McpPlugin 8.18.0 <c>AgentSetupKind</c> name):
+        /// <c>ConfigFile</c> (Configure writes the agent's file), <c>Manual</c> (the sections are steps in the agent's own
+        /// UI, e.g. adding Claude Desktop as a Claude connector in Cloud mode; no Configure), <c>Unsupported</c> (one
+        /// alert). <see cref="TransportSupported"/> is <c>SetupKind == ConfigFile</c>, kept for older plugins.
+        /// </summary>
+        [JsonPropertyName("setupKind")] public string SetupKind { get; set; } = nameof(AgentSetupKind.ConfigFile);
+        /// <summary>
+        /// The notice the plugin shows after a successful Configure / Remove for this transport (e.g. "Fully quit Claude
+        /// Desktop …"), or null when none applies (HTTP transport, the Custom agent).
+        /// </summary>
+        [JsonPropertyName("restartNotice")] public string? RestartNotice { get; set; }
     }
 
     /// <summary>

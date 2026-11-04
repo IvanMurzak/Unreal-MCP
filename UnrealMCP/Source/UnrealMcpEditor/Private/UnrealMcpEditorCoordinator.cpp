@@ -631,6 +631,13 @@ void FUnrealMcpEditorCoordinator::ApplyProjectConfigResult(const TSharedPtr<FJso
 		DerivedLocalServerPin = Pin;
 	UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] resolved derived local-server port %d%s from the sidecar."),
 		DerivedPort, bPortIsOverridden ? TEXT(" [user override]") : TEXT(""));
+	// The Server URL field shows a port-less loopback URL ("http://localhost", "http://localhost/mcp") as
+	// http://localhost:<port>, the URL the sidecar dials. hostlessPort ignores a typed host port, so a port the user later
+	// clears returns to the project port; an older sidecar sends none (use the resolved port).
+	double HostlessPort = 0.0;
+	if (ViewModel.IsValid())
+		ViewModel->SetLocalServerPort(Message->TryGetNumberField(TEXT("hostlessPort"), HostlessPort) && HostlessPort > 0.0
+			? static_cast<int32>(HostlessPort) : DerivedPort);
 
 	// One-time survivor reattach on the derived port (Custom+http only; a re-handshake must not repeat it).
 	if (bLocalServerReattachAttempted || !ServerManager.IsValid())

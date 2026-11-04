@@ -65,6 +65,14 @@ FAiAgentRichContentItem FAiAgentRichContentItem::FromJson(const TSharedPtr<FJson
 	return Item;
 }
 
+EAiAgentSetupKind FUnrealMcpAgentDescription::ParseSetupKind(const FString& Raw)
+{
+	// Unknown / absent → ConfigFile (the sidecar still refuses a write it cannot do).
+	if (Raw == TEXT("Manual"))      return EAiAgentSetupKind::Manual;
+	if (Raw == TEXT("Unsupported")) return EAiAgentSetupKind::Unsupported;
+	return EAiAgentSetupKind::ConfigFile;
+}
+
 EAiAgentConfiguratorStatus FUnrealMcpAgentDescription::ParseStatus(const FString& Raw)
 {
 	// Match the shared library's ConfiguratorStatus names. Unknown / absent → NotConfigured (the safe default that
@@ -91,6 +99,12 @@ FUnrealMcpAgentDescription FUnrealMcpAgentDescription::FromJson(const TSharedPtr
 	Json->TryGetBoolField(TEXT("supportsOAuth"), Desc.bSupportsOAuth);
 	Json->TryGetStringField(TEXT("downloadUrl"), Desc.DownloadUrl);
 	Json->TryGetStringField(TEXT("tutorialUrl"), Desc.TutorialUrl);
+	// McpPlugin 8.18.0. Absent (older sidecar) → ConfigFile / no notice. A JSON null restartNotice is not a string, so
+	// TryGetStringField leaves it empty.
+	FString SetupKindRaw;
+	Json->TryGetStringField(TEXT("setupKind"), SetupKindRaw);
+	Desc.SetupKind = ParseSetupKind(SetupKindRaw);
+	Json->TryGetStringField(TEXT("restartNotice"), Desc.RestartNotice);
 
 	// 6.9.0: the tri-state status. Absent in an older sidecar → NotConfigured (back-compat).
 	FString StatusRaw;

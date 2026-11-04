@@ -197,6 +197,10 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         // Volatile: written on the IPC reader thread, read from the project-config Task.Run worker.
         private string? _customHost;
 
+        // The port a port-less Custom host binds (ProjectConnection.HostlessPort), cached by ApplyProjectIdentity for
+        // RepairLocalHost; 0 until the handshake reports the project root. Volatile: written on the IPC reader thread.
+        private int _hostlessLocalPort;
+
         // The account server base (the config's cloudUrl, no /mcp suffix), kept in every mode so sign-out never
         // falls back to a Custom host. Volatile: written on the IPC reader thread, read by the sign-out task.
         private string? _cloudBaseUrl;
@@ -733,6 +737,11 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             try
             {
                 var resolved = ProjectConnectionResolver.Resolve(projectPath!, _instanceId, localHost: LocalBindHost);
+                // A Custom config pushed before the handshake kept a port-less loopback host as is (the port was
+                // unknown); now dial the project's local-server port instead of port 80.
+                Volatile.Write(ref _hostlessLocalPort, resolved.HostlessPort);
+                if (LocalBindHost is { } customHost)
+                    SetHost(RepairLocalHost(customHost));
                 _config.InstanceMetadata = resolved.Metadata;
                 _config.ProjectRootPath = projectPath;
                 // Log the reported project root (the deterministic hash INPUT) alongside the resulting
@@ -885,10 +894,11 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
                 selected = isCloud ? host : cloudUrl;
             if (!string.IsNullOrWhiteSpace(selected))
                 // Cloud mode: suffix the SignalR host with the /mcp prefix the cloud serves the hub behind
-                // (idempotent — never /mcp/mcp). Custom mode: use the host verbatim (a local/self-hosted
-                // server exposes the hub at the root, like Unity/Godot Custom). Device-auth strips this back
-                // off in StartDeviceAuth (the AS /oauth/... is NOT behind /mcp).
-                SetHost(isCloud ? AppendCloudHubPath(selected!) : selected!);
+                // (idempotent — never /mcp/mcp). Custom mode: use the host as typed (a local/self-hosted server
+                // exposes the hub at the root, like Unity/Godot Custom), except that a loopback host with no port
+                // dials the project's local-server port (RepairLocalHost). Device-auth strips the Cloud suffix
+                // back off in StartDeviceAuth (the AS /oauth/... is NOT behind /mcp).
+                SetHost(isCloud ? AppendCloudHubPath(selected!) : RepairLocalHost(selected!));
 
             if (config["keepConnected"] is JsonValue keepNode && keepNode.TryGetValue<bool>(out var keepConnected))
                 _config.KeepConnected = keepConnected;
@@ -900,6 +910,18 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             // Absent or non-positive leaves the current value (partial pushes, older plugins).
             if (config["toolTimeoutMs"] is JsonValue timeoutNode && timeoutNode.TryGetValue<int>(out var toolTimeoutMs) && toolTimeoutMs > 0)
                 _toolTimeoutMs = toolTimeoutMs;
+        }
+
+        /// <summary>
+        /// The Custom-mode dial host with a port-less loopback URL (the default <c>http://localhost</c>, a saved
+        /// <c>http://localhost/mcp</c>) given the project's local-server port via the shared
+        /// <see cref="McpAgentConfig.AgentConfiguratorSettings.NormalizeLocalHost"/>, so SignalR does not dial port 80.
+        /// Any other host, and every host before the handshake resolves the port, is returned as is.
+        /// </summary>
+        private string RepairLocalHost(string host)
+        {
+            var port = Volatile.Read(ref _hostlessLocalPort);
+            return port > 0 ? McpAgentConfig.AgentConfiguratorSettings.NormalizeLocalHost(host, port) : host;
         }
 
         /// <summary>
@@ -1138,6 +1160,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
                 Pin = resolved.Pin,
                 Port = resolved.Port,
                 PortIsOverridden = resolved.PortIsOverridden,
+                HostlessPort = resolved.HostlessPort,
                 ServerTarget = resolved.ServerTarget,
             };
         }

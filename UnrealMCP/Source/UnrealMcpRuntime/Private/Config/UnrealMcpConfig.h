@@ -228,6 +228,16 @@ public:
 	/** The resolved Custom-mode host (CustomHost or DefaultCustomHost), trailing slash trimmed. */
 	UNREALMCPRUNTIME_API FString ResolveCustomHost() const;
 	/**
+	 * Repair a Custom-mode Server URL for display and dialing — the C++ mirror of McpPlugin 8.17.0
+	 * AgentConfiguratorSettings.NormalizeLocalHost, which the sidecar applies to the dial host. An empty value or an
+	 * http(s) LOOPBACK URL with no port (the default "http://localhost", a saved "http://localhost/mcp") becomes
+	 * "{scheme}://{host}:{Port}" with no path, so the field shows and the engine dials the project's local-server port
+	 * instead of port 80 (an empty port or port 0 counts as none; loopback = localhost, a dotted-quad 127.x.x.x, [::1]).
+	 * A URL with a port, a non-loopback URL, a URL with user info and a non-http(s) value are returned trimmed but
+	 * otherwise unchanged: they carry the user's intent. @p Port <= 0 changes nothing.
+	 */
+	static UNREALMCPRUNTIME_API FString NormalizeLocalHost(const FString& Host, int32 Port);
+	/**
 	 * How long the MCP server should wait for one tool call: ToolTimeoutMs plus ServerPluginTimeoutMarginMs (clamped),
 	 * so the editor's own timeout error reaches the caller before the server gives up. Passed as `tool-timeout`.
 	 */

@@ -64,6 +64,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
         private readonly ILogger? _logger;
         private readonly SkillFileGenerator _skillGenerator;
         private readonly Func<ProjectKeyProvider?>? _projectKeys;
+        // Test seam: the agent set to serve instead of the shared registry (null = AiAgentConfiguratorRegistry).
+        private readonly IReadOnlyList<AiAgentConfigurator>? _configurators;
 
         /// <param name="logger">Optional diagnostics sink (never receives a secret).</param>
         /// <param name="projectKeys">Returns the project-key provider for the signed-in machine account, or
@@ -75,6 +77,22 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
             _skillGenerator = new SkillFileGenerator(logger, skillMetadata);
             _projectKeys = projectKeys;
         }
+
+        /// <summary>Test seam: serve <paramref name="configurators"/> instead of the shared registry, so a test can use
+        /// configurators whose config files live in a temp folder rather than the user profile.</summary>
+        internal AgentConfigService(IReadOnlyList<AiAgentConfigurator> configurators, ILogger? logger = null)
+            : this(logger)
+        {
+            _configurators = configurators;
+        }
+
+        private IReadOnlyList<AiAgentConfigurator> AllConfigurators =>
+            _configurators ?? AiAgentConfiguratorRegistry.All;
+
+        private AiAgentConfigurator? FindConfigurator(string agentId) =>
+            _configurators == null
+                ? AiAgentConfiguratorRegistry.GetByAgentId(agentId)
+                : _configurators.FirstOrDefault(c => string.Equals(c.AgentId, agentId, StringComparison.Ordinal));
 
         // --- Request handlers (one per plugin → sidecar request type). Each returns the terminal result the
         //     caller frames as an `agent-config-result` and sends back over IPC. None throw on bad input — a
@@ -90,7 +108,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
             var transport = ParseTransport(request.Transport);
             var settings = AttachCachedProjectKey(MapSettings(request.Settings), transport, result);
 
-            result.Agents = AiAgentConfiguratorRegistry.All
+            result.Agents = AllConfigurators
                 .Select(c => Describe(c, settings, transport))
                 .ToList();
             result.Ok = true;
@@ -104,7 +122,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
             if (request.Settings == null)
                 return Fail(result, "No settings provided for agent-status.");
 
-            var configurator = AiAgentConfiguratorRegistry.GetByAgentId(request.AgentId);
+            var configurator = FindConfigurator(request.AgentId);
             if (configurator == null)
                 return Fail(result, $"Unknown agent id '{request.AgentId}'.");
 
@@ -125,7 +143,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
             if (request.Settings == null)
                 return Fail(result, "No settings provided for agent-configure.");
 
-            var configurator = AiAgentConfiguratorRegistry.GetByAgentId(request.AgentId);
+            var configurator = FindConfigurator(request.AgentId);
             if (configurator == null)
                 return Fail(result, $"Unknown agent id '{request.AgentId}'.");
 
@@ -134,12 +152,20 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
             ApplyEditableValue(configurator, request.EditableValue);
 
             var transport = ParseTransport(request.Transport);
+            var mapped = MapSettings(request.Settings);
+            // Only a config-file setup is written. Claude Desktop over HTTP gets nothing it would reject: in Cloud mode it is
+            // added by hand as a Claude connector (Manual), locally it is unsupported. Answer with its description.
+            if (configurator.GetSetupKind(mapped, transport) != AgentSetupKind.ConfigFile)
+            {
+                result.Description = Describe(configurator, mapped, transport);
+                return Fail(result, $"{configurator.AgentName} has no config file to write over {TransportWord(transport)}; see the steps shown.");
+            }
+
             // The Custom agent has no file to write, so it never needs a freshly minted key — the cached one (if any)
             // is enough to render its snippet with the header present.
-            // The Custom agent has no file to write, so it never needs a freshly minted key.
             var settings = configurator is CustomConfigurator
-                ? AttachCachedProjectKey(MapSettings(request.Settings), transport, result)
-                : await AttachProjectKeyAsync(MapSettings(request.Settings), transport, regenerate: false, result, cancellationToken).ConfigureAwait(false);
+                ? AttachCachedProjectKey(mapped, transport, result)
+                : await AttachProjectKeyAsync(mapped, transport, regenerate: false, result, cancellationToken).ConfigureAwait(false);
             try
             {
                 // Cloud + project key ⇒ the Bearer shape for every agent (contract §7). Otherwise the default is native
@@ -186,8 +212,12 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
                 return Fail(result, "Project keys are used only in Cloud mode.");
 
             // Every agent holding an HTTP entry routed to this project (whatever key it carries, or none) — the
-            // configs that must not keep the old key.
-            var targets = AiAgentConfiguratorRegistry.All.Where(c => HasPinnedHttpEntry(c, baseSettings)).ToList();
+            // configs that must not keep the old key. An agent whose HTTP setup is not a config file (a stale Claude
+            // Desktop entry; Claude Desktop is a connector in Cloud mode) is skipped: rewriting would write it again.
+            var targets = AllConfigurators
+                .Where(c => c.GetSetupKind(baseSettings, McpTransport.streamableHttp) == AgentSetupKind.ConfigFile
+                    && HasPinnedHttpEntry(c, baseSettings))
+                .ToList();
 
             var settings = await AttachProjectKeyAsync(baseSettings, McpTransport.streamableHttp, regenerate: true, result, cancellationToken).ConfigureAwait(false);
             if (!settings.HasProjectKey)
@@ -224,7 +254,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
             if (failed.Count > 0)
                 result.ProjectKeyHint = $"Could not update: {string.Join(", ", failed)}. Their config still holds the previous (revoked) key — select each and press Configure.";
 
-            var selected = AiAgentConfiguratorRegistry.GetByAgentId(request.AgentId);
+            var selected = FindConfigurator(request.AgentId);
             if (selected != null)
             {
                 var transport = ParseTransport(request.Transport);
@@ -240,7 +270,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
             if (request.Settings == null)
                 return Fail(result, "No settings provided for agent-remove.");
 
-            var configurator = AiAgentConfiguratorRegistry.GetByAgentId(request.AgentId);
+            var configurator = FindConfigurator(request.AgentId);
             if (configurator == null)
                 return Fail(result, $"Unknown agent id '{request.AgentId}'.");
 
@@ -281,7 +311,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
         {
             var result = NewResult(request.RequestId, IpcProtocol.Type.AgentSkillsPath);
 
-            var configurator = AiAgentConfiguratorRegistry.GetByAgentId(request.AgentId);
+            var configurator = FindConfigurator(request.AgentId);
             if (configurator == null)
                 return Fail(result, $"Unknown agent id '{request.AgentId}'.");
 
@@ -306,7 +336,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
         {
             var result = NewResult(request.RequestId, IpcProtocol.Type.AgentGenerateSkills);
 
-            var configurator = AiAgentConfiguratorRegistry.GetByAgentId(request.AgentId);
+            var configurator = FindConfigurator(request.AgentId);
             if (configurator == null)
                 return Fail(result, $"Unknown agent id '{request.AgentId}'.");
 
@@ -367,6 +397,9 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
                             .ToList(),
                     })
                     .ToList(),
+                TransportSupported = description.TransportSupported,
+                SetupKind = description.SetupKind.ToString(),
+                RestartNotice = description.RestartNotice,
             };
         }
 
@@ -403,7 +436,10 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
                 host: dto.Host,
                 token: useAccessToken ? dto.Token : null,
                 connectionMode: connectionMode,
-                authOption: authOption);
+                authOption: authOption,
+                // Design 02 D21: the written loopback port follows the v1 derivation this sidecar binds
+                // (ProjectConnectionResolver), not the v2 default — they differ for a Windows backslash project root.
+                localPortDerivation: LocalPortDerivation.V1);
         }
 
         /// <summary>
@@ -537,6 +573,10 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
             string.Equals(transport, "stdio", StringComparison.OrdinalIgnoreCase)
                 ? McpTransport.stdio
                 : McpTransport.streamableHttp;
+
+        /// <summary>The transport name the plugin UI shows ("stdio" / "http").</summary>
+        private static string TransportWord(McpTransport transport) =>
+            transport == McpTransport.stdio ? "stdio" : "http";
 
         /// <summary>Push the Custom agent's edited path into its configurator (no-op for built-in agents).</summary>
         private static void ApplyEditableValue(AiAgentConfigurator configurator, string? editableValue)

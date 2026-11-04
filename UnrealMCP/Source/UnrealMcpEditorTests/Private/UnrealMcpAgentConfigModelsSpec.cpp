@@ -200,6 +200,35 @@ void FUnrealMcpAgentConfigModelsSpec::Define()
 			TestTrue("supportsOAuth true round-trips", DescTrue.bSupportsOAuth);
 		});
 
+		It("parses the McpPlugin 8.18.0 setupKind and restart notice, defaulting for an older sidecar", [this]()
+		{
+			const FString JsonManual = TEXT(R"JSON({ "agentId": "claude-desktop", "agentName": "Claude Desktop", "setupKind": "Manual", "transportSupported": false, "restartNotice": null,
+				"sections": [ { "heading": "Add as a Claude Connector", "expandedFirst": true, "items": [
+					{ "kind": "Link", "text": "Open Claude Connectors", "url": "https://claude.ai/customize/connectors" },
+					{ "kind": "ReadOnlyField", "text": "https://ai-game.dev/mcp/p/34ea75f2" } ] } ] })JSON");
+			const FUnrealMcpAgentDescription Manual = FUnrealMcpAgentDescription::FromJson(AgentConfigModelsParseObject(JsonManual));
+			TestEqual("setupKind Manual", Manual.SetupKind, EAiAgentSetupKind::Manual);
+			TestTrue("null restartNotice reads as empty", Manual.RestartNotice.IsEmpty());
+			TestEqual("link kind", Manual.Sections[0].Items[0].Kind, FAiAgentRichContentItem::EKind::Link);
+			TestEqual("link url", Manual.Sections[0].Items[0].Url, FString(TEXT("https://claude.ai/customize/connectors")));
+			TestEqual("copyable url", Manual.Sections[0].Items[1].Kind, FAiAgentRichContentItem::EKind::ReadOnlyField);
+
+			const FString JsonUnsupported = TEXT(R"JSON({ "agentId": "claude-desktop", "agentName": "Claude Desktop", "setupKind": "Unsupported", "transportSupported": false })JSON");
+			TestEqual("setupKind Unsupported",
+				FUnrealMcpAgentDescription::FromJson(AgentConfigModelsParseObject(JsonUnsupported)).SetupKind, EAiAgentSetupKind::Unsupported);
+
+			const FString JsonStdio = TEXT(R"JSON({ "agentId": "claude-desktop", "agentName": "Claude Desktop", "setupKind": "ConfigFile", "transportSupported": true, "restartNotice": "Fully quit Claude Desktop and start it again." })JSON");
+			const FUnrealMcpAgentDescription Stdio = FUnrealMcpAgentDescription::FromJson(AgentConfigModelsParseObject(JsonStdio));
+			TestEqual("setupKind ConfigFile", Stdio.SetupKind, EAiAgentSetupKind::ConfigFile);
+			TestEqual("restartNotice round-trips", Stdio.RestartNotice, FString(TEXT("Fully quit Claude Desktop and start it again.")));
+
+			const FString JsonOld = TEXT(R"JSON({ "agentId": "claude-code", "agentName": "Claude Code" })JSON");
+			const FUnrealMcpAgentDescription Old = FUnrealMcpAgentDescription::FromJson(AgentConfigModelsParseObject(JsonOld));
+			TestEqual("absent fields → ConfigFile", Old.SetupKind, EAiAgentSetupKind::ConfigFile);
+			TestTrue("absent restartNotice is empty", Old.RestartNotice.IsEmpty());
+			TestEqual("unknown setupKind → ConfigFile", FUnrealMcpAgentDescription::ParseSetupKind(TEXT("Future")), EAiAgentSetupKind::ConfigFile);
+		});
+
 		It("returns an empty description for a null/invalid object", [this]()
 		{
 			const FUnrealMcpAgentDescription Desc = FUnrealMcpAgentDescription::FromJson(nullptr);

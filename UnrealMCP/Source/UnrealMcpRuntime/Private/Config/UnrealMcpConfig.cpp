@@ -38,7 +38,8 @@ const TCHAR* FUnrealMcpConfig::DefaultCloudBaseUrl = TEXT("https://ai-game.dev")
 // v2 derivation, 20000–29999) supply a per-project port again. A typed port still wins: it arrives in
 // CustomHost and is parsed off the RAW string, never synthesised from the scheme (a port-less host is
 // NOT read as 80). Keep it port-less — see UnrealMcpConfigSpec's "no explicit port" guard, which is the
-// C++ half of that cross-language lockstep.
+// C++ half of that cross-language lockstep. Once the sidecar reports the project's port, the editor shows
+// the repaired http://localhost:<port> (NormalizeLocalHost, never persisted), and the sidecar dials that port.
 const TCHAR* FUnrealMcpConfig::DefaultCustomHost   = TEXT("http://localhost");
 const TCHAR* FUnrealMcpConfig::DefaultLogLevel     = TEXT("Info");
 const TCHAR* FUnrealMcpConfig::DefaultTransport    = TEXT("http");
@@ -490,6 +491,69 @@ FString FUnrealMcpConfig::ResolveCustomHost() const
 {
 	const FString Trimmed = TrimSlash(CustomHost.TrimStartAndEnd());
 	return Trimmed.IsEmpty() ? FString(DefaultCustomHost) : Trimmed;
+}
+
+FString FUnrealMcpConfig::NormalizeLocalHost(const FString& Host, int32 Port)
+{
+	const FString Trimmed = Host.TrimStartAndEnd();
+	if (Port <= 0)
+		return Trimmed;
+	if (Trimmed.IsEmpty())
+		return FString::Printf(TEXT("http://localhost:%d"), Port);
+
+	const TCHAR* Scheme = Trimmed.StartsWith(TEXT("http://"), ESearchCase::IgnoreCase) ? TEXT("http")
+		: Trimmed.StartsWith(TEXT("https://"), ESearchCase::IgnoreCase) ? TEXT("https")
+		: nullptr;
+	if (!Scheme)
+		return Trimmed; // not an absolute http(s) URL
+
+	// The authority ends at the first '/', '?' or '#'.
+	FString Authority = Trimmed.RightChop(FCString::Strlen(Scheme) + 3);
+	for (const TCHAR Terminator : { TEXT('/'), TEXT('?'), TEXT('#') })
+	{
+		int32 Index;
+		if (Authority.FindChar(Terminator, Index))
+			Authority.LeftInline(Index);
+	}
+	if (Authority.Contains(TEXT("@")))
+		return Trimmed; // user info is never treated as loopback (McpPlugin HostScope)
+
+	// The host ends at the port colon; an IPv6 literal keeps its brackets ("[::1]:27618").
+	int32 HostEnd = Authority.Len();
+	if (Authority.StartsWith(TEXT("[")))
+	{
+		if (!Authority.FindChar(TEXT(']'), HostEnd))
+			return Trimmed;
+		++HostEnd;
+	}
+	else
+	{
+		Authority.FindChar(TEXT(':'), HostEnd);
+		HostEnd = HostEnd == INDEX_NONE ? Authority.Len() : HostEnd;
+	}
+	// An explicit port is the user's choice. Like McpPlugin's TryGetExplicitPort, an empty port or port 0 is "no port".
+	const auto IsDigits = [](const FString& Text)
+	{
+		for (const TCHAR Char : Text)
+		{
+			if (!FChar::IsDigit(Char))
+				return false;
+		}
+		return !Text.IsEmpty();
+	};
+	const FString PortText = Authority.Mid(HostEnd + 1);
+	if (!PortText.IsEmpty() && !(IsDigits(PortText) && FCString::Atoi64(*PortText) == 0))
+		return Trimmed;
+
+	// Loopback: localhost, a dotted-quad 127.x.x.x (not a DNS name like 127.0.0.1.nip.io), or [::1].
+	const FString HostName = Authority.Left(HostEnd).ToLower();
+	TArray<FString> Octets;
+	HostName.ParseIntoArray(Octets, TEXT("."), /*InCullEmpty*/ false);
+	bool bIpv4Loopback = Octets.Num() == 4 && Octets[0] == TEXT("127");
+	for (const FString& Octet : Octets)
+		bIpv4Loopback &= IsDigits(Octet) && Octet.Len() <= 3 && FCString::Atoi(*Octet) <= 255;
+	const bool bLoopback = HostName == TEXT("localhost") || bIpv4Loopback || HostName == TEXT("[::1]");
+	return bLoopback ? FString::Printf(TEXT("%s://%s:%d"), Scheme, *HostName, Port) : Trimmed;
 }
 
 int32 FUnrealMcpConfig::ResolveServerToolTimeoutMs() const

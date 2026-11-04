@@ -95,8 +95,12 @@ void FUnrealMcpEditorViewModel::SetCustomHost(const FString& InHost)
 	// Trim before storing: validation already trims internally, so "  http://host  " would validate yet get
 	// persisted + pushed padded — the sidecar would then dial the untrimmed target. Store the trimmed form so
 	// the field, the §8 store, and the dial target stay consistent. Only push a host that validates — pushing a
-	// malformed URL to the sidecar would just make it dial nowhere (§7 validated field).
-	const FString Trimmed = InHost.TrimStartAndEnd();
+	// malformed URL to the sidecar would just make it dial nowhere (§7 validated field). The field shows a port-less
+	// loopback URL repaired (GetCustomHost); committing that shown value unchanged keeps the stored port-less value, so
+	// the project port is never frozen into the config.
+	FString Trimmed = InHost.TrimStartAndEnd();
+	if (Trimmed == GetCustomHost())
+		Trimmed = Config.CustomHost;
 	const bool bChanged = Config.CustomHost != Trimmed;
 	Config.CustomHost = Trimmed;
 	FString Error;

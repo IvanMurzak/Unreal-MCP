@@ -994,6 +994,61 @@ void FUnrealMcpEditorViewModelSpec::Define()
 		});
 	});
 
+	Describe("Port-less loopback Server URL repair (SetLocalServerPort)", [this]()
+	{
+		It("shows http://localhost:<port> once the port is known, without persisting, pushing or retargeting", [this]()
+		{
+			TSharedRef<FRecording> Rec = MakeShared<FRecording>();
+			TSharedRef<FUnrealMcpEditorViewModel> VM = MakeViewModel(Rec);
+			VM->SetConnectionMode(EUnrealMcpConnectionMode::Custom);
+			VM->SetCustomHost(TEXT("http://localhost/mcp"));
+			TestEqual("shown as typed while the port is unknown", VM->GetCustomHost(), FString(TEXT("http://localhost/mcp")));
+
+			VM->Connect();
+			TSharedPtr<FJsonObject> Status = MakeShared<FJsonObject>();
+			Status->SetStringField(TEXT("connectionState"), TEXT("Connected"));
+			Status->SetBoolField(TEXT("keepConnected"), true);
+			VM->ApplyStatus(Status);
+
+			const int32 PersistBefore = Rec->PersistCount;
+			const int32 PushBefore = Rec->PushCount;
+			VM->SetLocalServerPort(23940);
+
+			TestEqual("shown repaired", VM->GetCustomHost(), FString(TEXT("http://localhost:23940")));
+			TestEqual("not persisted", Rec->PersistCount, PersistBefore);
+			TestEqual("not pushed", Rec->PushCount, PushBefore);
+			TestEqual("still Connected", static_cast<int32>(VM->GetConnectionState()), static_cast<int32>(EUnrealMcpConnectionState::Connected));
+		});
+
+		It("keeps the stored port-less value when the shown repaired URL is committed unchanged", [this]()
+		{
+			TSharedRef<FRecording> Rec = MakeShared<FRecording>();
+			TSharedRef<FUnrealMcpEditorViewModel> VM = MakeViewModel(Rec);
+			VM->SetConnectionMode(EUnrealMcpConnectionMode::Custom);
+			VM->SetCustomHost(TEXT("http://localhost/mcp"));
+			VM->SetLocalServerPort(23940);
+
+			VM->SetCustomHost(VM->GetCustomHost()); // the field commits on focus loss with the shown text
+			TestEqual("stored value stays port-less", Rec->LastPushed.CustomHost, FString(TEXT("http://localhost/mcp")));
+
+			VM->SetCustomHost(TEXT(" http://localhost "));
+			TestEqual("a port-less edit is shown repaired", VM->GetCustomHost(), FString(TEXT("http://localhost:23940")));
+			TestEqual("and stored as typed", Rec->LastPushed.CustomHost, FString(TEXT("http://localhost")));
+		});
+
+		It("leaves a URL with an explicit port or a remote host alone", [this]()
+		{
+			TSharedRef<FRecording> Rec = MakeShared<FRecording>();
+			TSharedRef<FUnrealMcpEditorViewModel> VM = MakeViewModel(Rec);
+			VM->SetConnectionMode(EUnrealMcpConnectionMode::Custom);
+			VM->SetLocalServerPort(23940);
+			VM->SetCustomHost(TEXT("http://localhost:8080"));
+			TestEqual("explicit port kept", VM->GetCustomHost(), FString(TEXT("http://localhost:8080")));
+			VM->SetCustomHost(TEXT("https://mcp.example.com/mcp"));
+			TestEqual("remote host kept", VM->GetCustomHost(), FString(TEXT("https://mcp.example.com/mcp")));
+		});
+	});
+
 	Describe("Transport selector (§7 stdio/http — issue #59)", [this]()
 	{
 		It("Custom mode honours the stored transport and notifies on change", [this]()

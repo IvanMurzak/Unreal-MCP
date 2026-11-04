@@ -195,9 +195,20 @@ public:
 	EUnrealMcpConnectionMode GetConnectionMode() const { return Config.ConnectionMode; }
 	UNREALMCPEDITOR_API void SetConnectionMode(EUnrealMcpConnectionMode InMode);
 
-	const FString& GetCustomHost() const { return Config.CustomHost; }
-	/** Set the Custom-mode server URL; persists + pushes only when it is a valid URL (§7 validated field). */
+	/**
+	 * The Server URL as shown: the stored value, with an empty or port-less loopback URL shown as
+	 * http://localhost:<port> once the local-server port is known (FUnrealMcpConfig::NormalizeLocalHost) — the URL the
+	 * sidecar dials. The repair is never persisted, so the URL keeps following the project port (marker override,
+	 * moved or copied project).
+	 */
+	FString GetCustomHost() const { return FUnrealMcpConfig::NormalizeLocalHost(Config.CustomHost, LocalServerPort); }
+	/**
+	 * Set the Custom-mode server URL; persists + pushes only when it is a valid URL (§7 validated field). Committing
+	 * the shown repaired URL unchanged keeps the stored port-less value.
+	 */
 	UNREALMCPEDITOR_API void SetCustomHost(const FString& InHost);
+	/** Record the port a port-less host dials (the sidecar's `project-config-result` hostlessPort); <= 0 is ignored. */
+	void SetLocalServerPort(int32 InPort) { if (InPort > 0) LocalServerPort = InPort; }
 
 	EUnrealMcpAuthOption GetAuthOption() const { return Config.AuthOption; }
 	UNREALMCPEDITOR_API void SetAuthOption(EUnrealMcpAuthOption InOption);
@@ -419,6 +430,8 @@ public:
 
 private:
 	FUnrealMcpConfig Config;
+	/** The project's local-server port from the sidecar; 0 until the first `project-config-result`. */
+	int32 LocalServerPort = 0;
 
 	EUnrealMcpConnectionState ConnectionState = EUnrealMcpConnectionState::Disconnected;
 	EUnrealMcpDeviceAuthState DeviceAuthState = EUnrealMcpDeviceAuthState::Idle;
