@@ -81,7 +81,7 @@ void SUnrealMcpMainWindow::Construct(const FArguments& InArgs)
 	SendAgentConfigRequest = InArgs._SendAgentConfigRequest;
 	ExtensionsWiring = InArgs._ExtensionsWiring;
 
-	// The AI-cube logo brush comes from the style set (registered at module startup; lazily-inited fallback).
+	// The AI Game Dev logo brush comes from the style set (registered at module startup; lazily-inited fallback).
 	LogoBrush = FUnrealMcpStyle::Get().GetBrush("UnrealMcp.Logo");
 
 	// Build the Log Level dropdown's item source once (kept as a member so OptionsSource stays valid).
@@ -230,7 +230,7 @@ TSharedRef<SWidget> SUnrealMcpMainWindow::BuildHeaderSection()
 			]
 			+ SVerticalBox::Slot().AutoHeight().Padding(0, 2)[ MakeConfigRow(LOCTEXT("VersionLbl", "Version"), VersionField) ]
 		]
-		// AI-cube logo (top-right).
+		// AI Game Dev logo (top-right).
 		+ SHorizontalBox::Slot().AutoWidth().HAlign(HAlign_Right).VAlign(VAlign_Top).Padding(15, 0, 0, 0)
 		[
 			SNew(SBox).WidthOverride(60.0f).HeightOverride(60.0f)
