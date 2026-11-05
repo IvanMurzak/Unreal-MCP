@@ -362,7 +362,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
                 fallbackToken,
                 authenticator,
                 // B14 guarantee: null collapses to the real machine store, so the store is ALWAYS wired in prod.
-                credentialStore: credentialStore ?? new McpAgentConfig.MachineCredentialStore(),
+                // UNREAL_MCP_CREDENTIALS_DIR (CredentialsDirectory) relocates it for dev/test editors; null = the OS profile.
+                credentialStore: credentialStore ?? new McpAgentConfig.MachineCredentialStore(CredentialsDirectory.Resolve()),
                 tokenRefresher: tokenRefresher,
                 exchangeClient: exchangeClient,
                 revocationClient: revocationClient,
@@ -681,6 +682,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
                     .Subscribe(signal => { _ = EmitStatusAsync(_config.KeepConnected ? "Connecting" : "Disconnected", cloudAuthState: "SignInRequired"); });
                 if (_credentialStore!.Exists)
                     _logger?.LogInformation("Machine credential present; the sidecar will connect signed-in with no UI (zero-button boot, D12).");
+                _logger?.LogInformation("Machine credential store: {Directory} ({Source}).", _credentialStore.BaseDirectory,
+                    CredentialsDirectory.Resolve() != null ? CredentialsDirectory.EnvName : "user profile");
             }
 
             _ipc.HandshakeAccepted += OnHandshakeAccepted;
@@ -871,7 +874,10 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             }
             // Custom-mode authorization ("none" / "oauth" / "token"); absent leaves the previous value (partial push).
             if (authOption != null)
+            {
                 _isCustomOAuth = string.Equals(authOption, "oauth", StringComparison.OrdinalIgnoreCase);
+                _logger?.LogInformation("Connection auth option {AuthOption} (Custom account token {Use}).", authOption, _isCustomOAuth ? "for a loopback host" : "not used");
+            }
             var explicitToken = ReadString(config, "explicitToken");
             if (explicitToken != null)
                 _customExplicitToken = string.IsNullOrEmpty(explicitToken) ? null : explicitToken;
