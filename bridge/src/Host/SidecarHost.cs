@@ -363,7 +363,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
                 authenticator,
                 // B14 guarantee: null collapses to the real machine store, so the store is ALWAYS wired in prod.
                 // UNREAL_MCP_CREDENTIALS_DIR (CredentialsDirectory) relocates it for dev/test editors; null = the OS profile.
-                credentialStore: credentialStore ?? new McpAgentConfig.MachineCredentialStore(CredentialsDirectory.Resolve()),
+                credentialStore: credentialStore ?? new McpAgentConfig.MachineCredentialStore(
+                    CredentialsDirectory.ResolveOrDefault(loggerProvider?.CreateLogger(nameof(CredentialsDirectory)))),
                 tokenRefresher: tokenRefresher,
                 exchangeClient: exchangeClient,
                 revocationClient: revocationClient,
@@ -682,8 +683,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
                     .Subscribe(signal => { _ = EmitStatusAsync(_config.KeepConnected ? "Connecting" : "Disconnected", cloudAuthState: "SignInRequired"); });
                 if (_credentialStore!.Exists)
                     _logger?.LogInformation("Machine credential present; the sidecar will connect signed-in with no UI (zero-button boot, D12).");
-                _logger?.LogInformation("Machine credential store: {Directory} ({Source}).", _credentialStore.BaseDirectory,
-                    CredentialsDirectory.Resolve() != null ? CredentialsDirectory.EnvName : "user profile");
+                _logger?.LogInformation("Machine credential store: {Directory}.", _credentialStore.BaseDirectory);
             }
 
             _ipc.HandshakeAccepted += OnHandshakeAccepted;

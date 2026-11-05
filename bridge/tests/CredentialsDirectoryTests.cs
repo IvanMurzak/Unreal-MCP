@@ -36,5 +36,11 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         {
             Assert.Throws<ArgumentException>(() => CredentialsDirectory.Resolve(_ => "relative/store"));
         }
+
+        [Fact]
+        public void At_startup_a_relative_folder_falls_back_to_the_default_instead_of_throwing()
+        {
+            Assert.Null(CredentialsDirectory.ResolveOrDefault(null, _ => "relative/store"));
+        }
     }
 }

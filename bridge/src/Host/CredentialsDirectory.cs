@@ -10,6 +10,7 @@
 
 using System;
 using System.IO;
+using Microsoft.Extensions.Logging;
 
 namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
 {
@@ -35,6 +36,24 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             if (!Path.IsPathFullyQualified(directory))
                 throw new ArgumentException($"{EnvName} must be an absolute path.");
             return Path.GetFullPath(directory);
+        }
+
+        /// <summary>
+        /// <see cref="Resolve"/> for the sidecar's start: an invalid value is logged and ignored (the platform
+        /// default is used) rather than thrown, since a throw before the IPC handshake would leave the editor
+        /// restarting a sidecar that dies at once, with nothing in the log saying why.
+        /// </summary>
+        public static string? ResolveOrDefault(ILogger? logger, Func<string, string?>? getEnv = null)
+        {
+            try
+            {
+                return Resolve(getEnv);
+            }
+            catch (ArgumentException e)
+            {
+                logger?.LogError("{Message} Using the default machine credential store.", e.Message);
+                return null;
+            }
         }
     }
 }
