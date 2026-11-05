@@ -78,7 +78,7 @@ private:
 
 	// Section builders (each returns a Slate widget; kept separate so §7's ordering reads top-to-bottom).
 	// The window now mirrors the Unity-MCP reference (issue #78): a header card with base config (Log Level /
-	// Timeout / Version) + the AI-cube logo, a unified Connection timeline (Custom/Cloud segmented in the header
+	// Timeout / Version) + the AI Game Dev logo, a unified Connection timeline (Custom/Cloud segmented in the header
 	// row, status dots + connecting line + underlined labels, teal Start / red Revoke / masked token + New,
 	// stdio/http + none/required segmented) whose three points are Unreal status → MCP server → AI-agents status
 	// readout (issue #97), then the AI Agent Configurators panel as its own section below, an Extensions section,
@@ -117,7 +117,7 @@ private:
 	TSharedRef<SWidget> BuildExtensionsSection();
 	TSharedRef<SWidget> BuildFooterSection();
 
-	// The AI-cube logo brush, loaded once at Construct from the plugin's Resources dir
+	// The AI Game Dev logo brush, loaded once at Construct from the plugin's Resources dir
 	// (Resources/ai-cube-logo.png) via the style set. Held as a member so the brush outlives the SImage.
 	const FSlateBrush* LogoBrush = nullptr;
 

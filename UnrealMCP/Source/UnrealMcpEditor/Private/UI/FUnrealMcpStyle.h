@@ -11,7 +11,7 @@
 /**
  * The "AI Game Developer" Slate style set (docs/ARCHITECTURE.md §7) — the C++/Slate analog of Unity-MCP's
  * shared USS (the .uss files under Editor/UI/uss/common). It centralizes the palette, card/frame/input brushes, status-dot
- * brushes, the segmented-control + toggle-switch button styles, and the icon brushes (AI-cube logo, Discord,
+ * brushes, the segmented-control + toggle-switch button styles, and the icon brushes (AI Game Dev logo, Discord,
  * GitHub, Star) so the main window stops hard-coding inline colours / default FAppStyle brushes and instead
  * reads one source of truth that matches the Unity reference 1:1.
  *
