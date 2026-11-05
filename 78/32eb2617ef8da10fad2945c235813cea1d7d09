@@ -1,0 +1,96 @@
+bridge/tests/SidecarHostServerLaunchArgsTests.cs
+  s_e76879ce38f93b::t_708264e5c1bfda 1-160
+bridge/src/Host/SidecarHost.cs
+  s_e76879ce38f93b::t_4bf277f6973663 22
+  s_32982b4cc9d36e::t_7ecf65d0ad5c0d 427,809-903
+bridge/src/Ipc/ServerLaunchArgsMessages.cs
+  s_e76879ce38f93b::t_bf2a9360d10942 1-63
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/SUnrealMcpAgentWidgets.h
+  s_364be739bc892c::t_f12c646f699071 159
+UnrealMCP/Source/UnrealMcpEditor/Private/UnrealMcpEditorCoordinator.cpp
+  s_dd5b0581f27552::t_04a3419fdc6a43 252-253,262-265,267-268,320-322,555-559,572-574,579-653
+UnrealMCP/Source/UnrealMcpEditor/Private/UnrealMcpEditorCoordinator.h
+  s_dd5b0581f27552::t_d1b4e23eb91cd7 53-60,103-106,111-121
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpAgentConfigModelsSpec.cpp
+  s_364be739bc892c::t_3eac347956dc2b 264-266,277,282-294,301,305
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpDevControlSpec.cpp
+  s_dd5b0581f27552::t_296cdc5a80d5eb 139,150,557-571,576,578-579
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpEditorViewModelSpec.cpp
+  s_364be739bc892c::t_fba96aed4ce50c 286,318,663,676-677
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpServerManagerSpec.cpp
+  s_364be739bc892c::t_9f60c486beaf5d 132-136,153
+UnrealMCP/Source/UnrealMcpRuntime/Private/UnrealMcpRuntimeSubsystem.cpp
+  s_dd5b0581f27552::t_8953aef6360241 244-245,247
+bridge/src/Ipc/IpcClient.cs
+  s_8c19f166a0a4cd::t_6b03aefb3e0f2b 125-133,394-400
+bridge/src/Ipc/IpcProtocol.cs
+  s_8c19f166a0a4cd::t_19bb6b6079b4b1 102-106,143-148
+cli/src/lib/server-version.ts
+  s_8c19f166a0a4cd::t_971c7d7d1811f4 12
+UnrealMCP/Source/UnrealMcpEditor/Private/DevControl/UnrealMcpDevControlServer.cpp
+  s_32982b4cc9d36e::t_fd8655677d2ee6 79,82,85-86,89-93
+UnrealMCP/Source/UnrealMcpEditor/Private/Server/UnrealMcpServerManager.cpp
+  s_32982b4cc9d36e::t_62ae0814102bfe 34,560,570-572,609,627
+UnrealMCP/Source/UnrealMcpEditor/Private/Server/UnrealMcpServerManager.h
+  s_32982b4cc9d36e::t_0b1f9268c05278 43-47,49-52,54,75
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/SUnrealMcpMainWindow.cpp
+  s_32982b4cc9d36e::t_7ae89a4883ef7b 50-53,802,810,817-828,831-837,842,848
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpConfigSpec.cpp
+  s_32982b4cc9d36e::t_ffd1025e507d68 185,199-241
+UnrealMCP/Source/UnrealMcpRuntime/Private/Bridge/UnrealMcpBridgeServer.cpp
+  s_32982b4cc9d36e::t_0c7c9abb1454d3 60-64,387,389-391,1120-1146
+UnrealMCP/Source/UnrealMcpRuntime/Private/Bridge/UnrealMcpBridgeServer.h
+  s_32982b4cc9d36e::t_7b96102a7108df 123-136
+bridge/src/com.IvanMurzak.Unreal.MCP.Bridge.csproj
+  s_32982b4cc9d36e::t_18e1bf8872bbe8 76-81,85
+cli/tests/configure-agent.test.ts
+  s_32982b4cc9d36e::t_10add6c52c57e3 9
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "7832eb2617ef8da10fad2945c235813cea1d7d09",
+  "prompts": {},
+  "sessions": {
+    "s_32982b4cc9d36e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-af8d662fb75bf3480",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_364be739bc892c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b8f91f54-742b-4579-9e3a-eeb38012be81",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_8c19f166a0a4cd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "df8298f2-beea-41ba-9052-0bf0c5fc46f2",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_dd5b0581f27552": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c3530c51-4b24-438d-a375-143bc893dff8",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_e76879ce38f93b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "90bb756d-c158-4063-aaec-3f5e702c2d20",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

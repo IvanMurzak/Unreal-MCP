@@ -1,0 +1,21 @@
+scripts/release_dependency_guard.py
+  s_7bc72ecaebd05d::t_3907abdf6311e9 18,62,85,90-100,116-117,262,266,306,337,379-380,382,384,398,413
+scripts/test_release_dependency_guard.py
+  s_7bc72ecaebd05d::t_7c4abd70405481 87,99-100
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "41951d5730eb62d582cb95f4add320edd0bc5f0c",
+  "prompts": {},
+  "sessions": {
+    "s_7bc72ecaebd05d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "40274cb2-edf8-49ba-9a73-33b83cb5be53",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

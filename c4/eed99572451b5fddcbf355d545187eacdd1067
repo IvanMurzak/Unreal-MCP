@@ -1,0 +1,26 @@
+README.md
+  s_908974782fafa1::t_a754a939496298 8-11,16-24,27,29-40,44-53,55-58,61-108,110,112-206,208-303,306-372
+docs/RELEASING.md
+  s_908974782fafa1::t_de5a33b75233ed 13-41
+CLAUDE.md
+  s_908974782fafa1::t_f1dd4e53b71717 5-15,21-29,32-33,36-87,90,93-101,104-105,111-113,115-120,124-147,149-170
+docs/ARCHITECTURE.md
+  s_908974782fafa1::t_f59ff7f881876a 13-80
+  s_908974782fafa1::t_db84fd9472c58d 645
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "c4eed99572451b5fddcbf355d545187eacdd1067",
+  "prompts": {},
+  "sessions": {
+    "s_908974782fafa1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f1748397-e586-40bb-91a9-b89c0caebdf5",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

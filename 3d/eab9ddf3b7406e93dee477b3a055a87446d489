@@ -1,0 +1,19 @@
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpEditorViewModelSpec.cpp
+  s_6f6bc0fcdfa565::t_96b902d6efe22d 122-124,237
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "3deab9ddf3b7406e93dee477b3a055a87446d489",
+  "prompts": {},
+  "sessions": {
+    "s_6f6bc0fcdfa565": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a4b8917dba70ec855",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

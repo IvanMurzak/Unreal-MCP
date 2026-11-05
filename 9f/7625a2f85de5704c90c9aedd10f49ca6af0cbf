@@ -1,0 +1,18 @@
+UnrealMCP/Source/UnrealMcpEditor/Private/Server/UnrealMcpServerManager.cpp
+  h_8325a340bf5897 34
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpServerManagerSpec.cpp
+  h_8325a340bf5897 153
+cli/src/lib/server-version.ts
+  h_8325a340bf5897 12
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "9f7625a2f85de5704c90c9aedd10f49ca6af0cbf",
+  "prompts": {},
+  "humans": {
+    "h_8325a340bf5897": {
+      "author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

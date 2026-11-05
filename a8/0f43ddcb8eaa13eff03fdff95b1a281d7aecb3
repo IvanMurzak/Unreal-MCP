@@ -1,0 +1,46 @@
+bridge/src/Host/SidecarHost.cs
+  s_908974782fafa1::t_12a63d92d4c35a 245-246,248
+  s_908974782fafa1::t_1f59c9b75eb8d9 294-299,303,309,314-330
+  s_908974782fafa1::t_cfddbd86298352 371
+  s_908974782fafa1::t_498aa8313f2501 170,172
+  s_908974782fafa1::t_3749cc82147904 65-70
+  s_908974782fafa1::t_a7845f512195d1 269-273
+UnrealMCP/Source/UnrealMcpEditor/Private/UnrealMcpRuntime.cpp
+  s_908974782fafa1::t_a26e281501f38c 107,109-111
+  s_908974782fafa1::t_dce18b54618143 191,196-205
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/UnrealMcpEditorViewModel.cpp
+  s_908974782fafa1::t_b5204e95c855fd 94-98
+  s_908974782fafa1::t_ad8b795794fd02 184-188,190-191,193-194
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/UnrealMcpMainWindowTab.cpp
+  s_908974782fafa1::t_32ea7e10d0087f 61-68,70
+bridge/src/Auth/DeviceCodeAuthenticator.cs
+  s_908974782fafa1::t_d102eb37bdf1fe 47,52-53,58-59
+  s_908974782fafa1::t_943bb5308efaa2 111-117,120-125
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/SUnrealMcpMainWindow.cpp
+  s_908974782fafa1::t_48ec20a38949f5 422-427
+bridge/tests/DeviceCodeAuthenticatorTests.cs
+  s_908974782fafa1::t_e5b66ea449c34d 149-176
+  s_908974782fafa1::t_7ad854ac5d1f88 4
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/UnrealMcpEditorViewModel.h
+  s_908974782fafa1::t_5d043d83555cd4 68-73
+  s_908974782fafa1::t_95ab29d63ac1b7 147,149-153
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpEditorViewModelSpec.cpp
+  s_908974782fafa1::t_550395b548f663 176-177,184-201
+  s_908974782fafa1::t_63508a9d834db2 36
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "a80f43ddcb8eaa13eff03fdff95b1a281d7aecb3",
+  "prompts": {},
+  "sessions": {
+    "s_908974782fafa1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f1748397-e586-40bb-91a9-b89c0caebdf5",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
