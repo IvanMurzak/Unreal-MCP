@@ -250,6 +250,32 @@ void FUnrealAILandscapeSpec::Define()
 
 	Describe("ground", [this]()
 	{
+		It("creates a 2 km landscape in 8 x 8 large components (32 x 32 small ones took minutes on a World Partition map)", [this]()
+		{
+			const FString Label = TEXT("RqlSpecIsland_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+			// landscape | call Create("@LABEL@", [-800000, 0, 0], 2000)
+			const double Start = FPlatformTime::Seconds();
+			TestTrue(TEXT("landscape created"), UnrealMcpRqlTools::RunPlan(FString(TEXT(R"RQL({"rql":"0.1","source":{"path":["landscape"]},"stages":[{"op":"call","method":"Create","args":[{"lit":"@LABEL@"},{"list":[{"lit":-800000},{"lit":0},{"lit":0}]},{"lit":2000}]}]})RQL")).Replace(TEXT("@LABEL@"), *Label), true));
+			AddInfo(FString::Printf(TEXT("Create 2000 m: %.1f s"), FPlatformTime::Seconds() - Start));
+			ALandscape* Landscape = nullptr;
+			for (TActorIterator<ALandscape> It(UnrealMcpRql::EditorWorld()); It; ++It)
+				Landscape = It->GetActorLabel() == Label ? *It : Landscape;
+			if (!TestNotNull(TEXT("the landscape is in the editor world"), Landscape))
+				return;
+			ON_SCOPE_EXIT { LandscapeSpecDestroy(Landscape); };
+			int32 Components = 0;
+			Landscape->GetLandscapeInfo()->ForAllLandscapeComponents([&Components](ULandscapeComponent*) { ++Components; });
+			TestEqual(TEXT("8 x 8 components"), Components, 64);
+			TestEqual(TEXT("254-quad components (2 x 2 sections of 127)"), Landscape->ComponentSizeQuads, 254);
+			FIntRect Whole;
+			if (TestTrue(TEXT("landscape extent"), Landscape->GetLandscapeInfo()->GetLandscapeExtent(Whole)))
+			{
+				const FTransform ToWorld = Landscape->LandscapeActorToWorld();
+				const double Width = ToWorld.TransformPosition(FVector(Whole.Max.X, 0, 0)).X - ToWorld.TransformPosition(FVector(Whole.Min.X, 0, 0)).X;
+				TestTrue(*FString::Printf(TEXT("2000 m wide (%.0f cm)"), Width), FMath::IsNearlyEqual(Width, 200000.0, 1.0));
+			}
+		});
+
 		It("returns from Create, Sculpt and Paint with the landscape merged: collision, traces and Surface see the new ground at once", [this]()
 		{
 			// Away from the other specs' actors, so the trace below meets only this landscape.

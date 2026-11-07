@@ -47,9 +47,11 @@ landscape | call Surface(unreal.find("Terrain"), [2000, 1500, 0])
 landscapes | where IsPrimary | select Label Bounds
 ```
 
-`Create` makes a flat landscape of whole 63-quad components scaled to the requested size; `Sculpt` raises or lowers a
-smooth circular area (cm); `Paint` adds a paint layer by name (creating its layer info asset) and paints it with a soft
-edge; `CreateLayerMaterial` makes a material whose Landscape Layer Blend has one coloured layer per name.
+`Create` makes a flat landscape of about one vertex per metre in at most 8 x 8 components (63-quad sections, 2 x 2
+per component above 504 m, 127-quad sections above 1008 m, so a 2 km landscape takes seconds), scaled to the requested
+size; `Sculpt` raises or lowers a smooth circular area (cm); `Paint` adds a paint layer by name (creating its layer info
+asset) and paints it with a soft edge; `CreateLayerMaterial` makes a material whose Landscape Layer Blend has one
+coloured layer per name.
 
 `Create`, `Sculpt` and `Paint` return with the landscape's edit layers merged: its heights, heightfield collision (line
 traces, `GetHeightAtLocation`, actors placed on the ground) and rendered surface match as soon as the call ends. Without

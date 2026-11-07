@@ -30,8 +30,29 @@ DEFINE_LOG_CATEGORY_STATIC(LogUnrealAILandscape, Log, All);
 
 namespace UnrealAILandscapeRqlApiLocal
 {
-	/** Quads of the one section each component of a created landscape has. */
-	constexpr int32 QuadsPerSection = 63;
+	/**
+	 * The component layout of a created landscape SizeMeters wide (about one vertex per metre): sections of 63 quads, one or
+	 * 2 x 2 per component, then 127-quad sections, so a side has at most 8 components. Many small components make a big
+	 * landscape slow: a World Partition map's streaming proxies (ULandscapeSubsystem::ChangeGridSize) took 130 s for
+	 * 2000 m in 32 x 32 components of 63 quads and 4 s in 8 x 8 of 254.
+	 */
+	struct FComponentLayout
+	{
+		int32 Subsections = 1;
+		int32 SubsectionQuads = 63;
+		int32 Quads() const { return Subsections * SubsectionQuads; }
+	};
+
+	FComponentLayout LayoutFor(double SizeMeters)
+	{
+		constexpr int32 MaxComponentsPerSide = 8;
+		for (const FComponentLayout Layout : { FComponentLayout{ 1, 63 }, FComponentLayout{ 2, 63 } })
+		{
+			if (SizeMeters <= Layout.Quads() * MaxComponentsPerSide)
+				return Layout;
+		}
+		return FComponentLayout{ 2, 127 };
+	}
 
 	/** A circle of landscape vertices to edit: the landscape info, the covered vertex rectangle, centre and radius in vertices (0: everything). */
 	struct FCircle
@@ -286,9 +307,9 @@ ALandscape* UUnrealAILandscapeRqlApi::Create(const FString& Label, FVector Locat
 {
 	if (!(SizeMeters >= 8.0 && SizeMeters <= 2000.0))
 		return UnrealMcpRql::Failed<ALandscape*>(FString::Printf(TEXT("SizeMeters %g is outside 8 .. 2000"), SizeMeters));
-	// Whole components of one 63-quad section (at most 32 per side, for 2000 m), then a horizontal scale that makes the
-	// side exactly SizeMeters.
-	const int32 Quads = FMath::CeilToInt(SizeMeters / QuadsPerSection) * QuadsPerSection;
+	// Whole components (at most 8 per side), then a horizontal scale that makes the side exactly SizeMeters.
+	const FComponentLayout Layout = LayoutFor(SizeMeters);
+	const int32 Quads = FMath::CeilToInt(SizeMeters / Layout.Quads()) * Layout.Quads();
 	const double Scale = SizeMeters * 100.0 / Quads;
 	const FVector Corner = Location - FVector(SizeMeters * 50.0, SizeMeters * 50.0, 0.0);
 
@@ -306,7 +327,7 @@ ALandscape* UUnrealAILandscapeRqlApi::Create(const FString& Label, FVector Locat
 	HeightPerLayer.Add(FGuid(), MoveTemp(Heights));
 	TMap<FGuid, TArray<FLandscapeImportLayerInfo>> MaterialLayersPerLayer;
 	MaterialLayersPerLayer.Add(FGuid(), TArray<FLandscapeImportLayerInfo>());
-	Landscape->Import(FGuid::NewGuid(), 0, 0, Quads, Quads, /*InNumSubsections*/ 1, QuadsPerSection, HeightPerLayer, nullptr,
+	Landscape->Import(FGuid::NewGuid(), 0, 0, Quads, Quads, Layout.Subsections, Layout.SubsectionQuads, HeightPerLayer, nullptr,
 		MaterialLayersPerLayer, ELandscapeImportAlphamapType::Additive, TArrayView<const FLandscapeLayer>());
 	ULandscapeInfo* Info = Landscape->GetLandscapeInfo();
 	if (Info)
