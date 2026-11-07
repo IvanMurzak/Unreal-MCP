@@ -1,0 +1,10 @@
+{
+  "description": "a 250 m mountain on the island",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "landscape | call Sculpt(unreal.find(\"E2EIsland\"), [0, 25000, 0], 30000, 25000)"
+  },
+  "assert": {
+    "pattern": "Sculpt\\(.*\\|\\d+"
+  }
+}

@@ -2,6 +2,7 @@
 // See the LICENSE file in the repository root for more information.
 
 #include "UnrealAILandscapeRqlApi.h"
+#include "UnrealAILandscapeEdit.h"
 
 #include "IUnrealMcpRqlModule.h"
 
@@ -169,6 +170,7 @@ namespace UnrealAILandscapeRqlApiLocal
 	 */
 	void MergeNow(ALandscapeProxy* Landscape, ELandscapeLayerUpdateMode FollowUp)
 	{
+		constexpr double MergeWaitSeconds = 30.0; // well inside a tool call's 60 s timeout
 		ALandscape* Primary = Landscape ? Landscape->GetLandscapeActor() : nullptr;
 		if (!Primary)
 		{
@@ -183,9 +185,17 @@ namespace UnrealAILandscapeRqlApiLocal
 		Primary->ForceUpdateLayersContent();
 		if (MergePending(Primary))
 		{
-			// Waiting on shaders or textures still compiling (the first edit of a session): finish them and merge again.
-			FAssetCompilingManager::Get().FinishAllCompilation();
-			Primary->ForceUpdateLayersContent();
+			// Waiting on shaders or textures still compiling (the first edit of a session): let them finish and merge again,
+			// for at most MergeWaitSeconds. FinishAllCompilation would also wait for every unrelated shader (the first water
+			// material compiles for minutes on a cold cache), far past the tool call's timeout.
+			const double Deadline = FPlatformTime::Seconds() + MergeWaitSeconds;
+			do
+			{
+				FAssetCompilingManager::Get().ProcessAsyncTasks(true);
+				FPlatformProcess::Sleep(0.02f);
+				Primary->ForceUpdateLayersContent();
+			}
+			while (MergePending(Primary) && FPlatformTime::Seconds() < Deadline);
 			if (MergePending(Primary))
 				UE_LOG(LogUnrealAILandscape, Warning, TEXT("%s: the landscape edit could not merge yet; it shows (and collides) after the next editor frames"), *Primary->GetActorNameOrLabel());
 		}

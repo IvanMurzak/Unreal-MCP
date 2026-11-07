@@ -1,0 +1,10 @@
+{
+  "description": "the island rising above the sea",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "landscape | call Sculpt(unreal.find(\"E2EIsland\"), [0, 0, 0], 75000, 5000)"
+  },
+  "assert": {
+    "pattern": "Sculpt\\(.*\\|\\d+"
+  }
+}

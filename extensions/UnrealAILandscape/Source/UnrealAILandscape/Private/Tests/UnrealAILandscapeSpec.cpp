@@ -30,6 +30,15 @@
 #include "Policies/CondensedJsonPrintPolicy.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
+#include "LandscapeSettings.h"
+#include "WaterBodyActor.h"
+#include "WaterBodyComponent.h"
+#include "WaterBodyLakeActor.h"
+#include "WaterBodyOceanActor.h"
+#include "WaterBodyRiverActor.h"
+#include "WaterSplineComponent.h"
+#include "WaterSplineMetadata.h"
+#include "WaterZoneActor.h"
 
 // ============================================================================================
 //  UE Automation spec for the extension's RQL module (Unreal-MCP docs/rql.md "Extensions").
@@ -72,6 +81,35 @@ BEGIN_DEFINE_SPEC(FUnrealAILandscapeSpec, "UnrealAILandscape",
 			Info->ForEachLandscapeProxy([&Proxies](ALandscapeProxy* Proxy) { Proxies.Add(Proxy); return true; });
 		for (ALandscapeProxy* Proxy : Proxies)
 			Proxy->Destroy();
+	}
+
+	/** The actor of class T labelled @p Label in the editor world (null when none). */
+	template <typename T>
+	static T* LandscapeSpecFind(const FString& Label)
+	{
+		for (TActorIterator<T> It(UnrealMcpRql::EditorWorld()); It; ++It)
+		{
+			if (It->GetActorLabel() == Label)
+				return *It;
+		}
+		return nullptr;
+	}
+
+	/** How many actors of class @p Class the editor world has (0 for a null class). */
+	static int32 LandscapeSpecCount(UClass* Class)
+	{
+		int32 Count = 0;
+		if (!Class)
+			return 0;
+		for (TActorIterator<AActor> It(UnrealMcpRql::EditorWorld(), Class); It; ++It)
+			++Count;
+		return Count;
+	}
+
+	/** Run a plan with @LABEL@ / @LAND@ replaced (rql-mutate when @p bMutate). */
+	static bool LandscapeSpecRun(const FString& Plan, const FString& Label, const FString& Land, bool bMutate, TSharedPtr<FJsonObject>* Out = nullptr)
+	{
+		return UnrealMcpRqlTools::RunPlan(Plan.Replace(TEXT("@LABEL@"), *Label).Replace(TEXT("@LAND@"), *Land), bMutate, Out);
 	}
 END_DEFINE_SPEC(FUnrealAILandscapeSpec)
 
@@ -376,6 +414,211 @@ void FUnrealAILandscapeSpec::Define()
 			TestTrue(TEXT("rebuilt"), Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["landscape"]},"stages":[{"op":"call","method":"Rebuild","args":[{"call":"find","on":{"path":["unreal"]},"args":[{"lit":"@LABEL@"}]}]}]})RQL"), true, &Rebuilt));
 			const TOptional<float> After = Landscape->GetHeightAtLocation(Top, EHeightfieldSource::Complex);
 			TestTrue(*FString::Printf(TEXT("the hill survives a rebuild (%.1f cm; %s)"), After.Get(-1.0f), *LandscapeSpecJson(Rebuilt).Left(200)), After.IsSet() && FMath::IsNearlyEqual(After.GetValue(), 300.0f, 25.0f));
+		});
+	});
+
+	Describe("water", [this]()
+	{
+		It("lists the water operations and the Water status members", [this]()
+		{
+			bool bOk = false;
+			const FString Schema = UnrealMcpRqlTools::Schema(TEXT("WaterOperations"), bOk);
+			TestTrue(TEXT("schema ok"), bOk);
+			for (const TCHAR* Method : { TEXT("EnableWater"), TEXT("SetZone"), TEXT("CreateOcean"), TEXT("CreateLake"), TEXT("CreateRiver"), TEXT("CreateRiverBetween"), TEXT("SetMaterial") })
+				TestTrue(*FString::Printf(TEXT("lists %s"), Method), Schema.Contains(FString(Method) + TEXT("(")));
+			const FString Body = UnrealMcpRqlTools::Schema(TEXT("WaterBody"), bOk);
+			TestTrue(TEXT("lists name:Path"), Body.Contains(TEXT("\"name\":\"Path\"")));
+			TestTrue(TEXT("Water describes Ready and Problem"), Body.Contains(TEXT("Ready")) && Body.Contains(TEXT("Problem")));
+			TestTrue(TEXT("the guide steers away from SpawnActor"), UnrealMcpRqlTools::SkillMarkdown().Contains(TEXT("never `editor | call SpawnActor(\"WaterBody...\")`")));
+		});
+
+		It("creates an ocean, a lake and a river with the Water defaults, never touching the landscape (no brush, no edit layer, no dialog)", [this]()
+		{
+			const FString Id = FGuid::NewGuid().ToString(EGuidFormats::Digits);
+			const FString Land = TEXT("RqlSpecWaterLand_") + Id;
+			const FString Label = TEXT("RqlSpecWater_") + Id;
+			// landscape | call Create("@LAND@", [1200000, 0, 0], 100)
+			TestTrue(TEXT("landscape created"), LandscapeSpecRun(TEXT(R"RQL({"rql":"0.1","source":{"path":["landscape"]},"stages":[{"op":"call","method":"Create","args":[{"lit":"@LAND@"},{"list":[{"lit":1200000},{"lit":0},{"lit":0}]},{"lit":100}]}]})RQL"), Label, Land, true));
+			ALandscape* Landscape = LandscapeSpecFind<ALandscape>(Land);
+			if (!TestNotNull(TEXT("the landscape"), Landscape))
+				return;
+			TArray<AActor*> Created;
+			const bool bHadZone = LandscapeSpecCount(AWaterZone::StaticClass()) > 0;
+			ON_SCOPE_EXIT
+			{
+				if (!bHadZone)
+				{
+					for (TActorIterator<AWaterZone> It(UnrealMcpRql::EditorWorld()); It; ++It)
+						Created.Add(*It);
+				}
+				for (AActor* Actor : Created)
+				{
+					if (IsValid(Actor))
+						Actor->Destroy();
+				}
+				LandscapeSpecDestroy(Landscape);
+			};
+			const int32 Managers = LandscapeSpecCount(UnrealMcpRql::ResolveClass(TEXT("WaterBrushManager")));
+
+			if (LandscapeSpecCount(AWaterBodyOcean::StaticClass()) == 0)
+			{
+				// water | call CreateOcean("@LABEL@O", 50)
+				TestTrue(TEXT("ocean created"), LandscapeSpecRun(TEXT(R"RQL({"rql":"0.1","source":{"path":["water"]},"stages":[{"op":"call","method":"CreateOcean","args":[{"lit":"@LABEL@O"},{"lit":50}]}]})RQL"), Label, Land, true));
+				AWaterBodyOcean* Ocean = LandscapeSpecFind<AWaterBodyOcean>(Label + TEXT("O"));
+				if (TestNotNull(TEXT("the ocean"), Ocean))
+				{
+					Created.Add(Ocean);
+					TestTrue(TEXT("the ocean surface is at Z 50"), FMath::IsNearlyEqual(Ocean->GetActorLocation().Z, 50.0, 1.0));
+					TestNotNull(TEXT("a water zone renders it"), Ocean->GetWaterBodyComponent()->GetWaterZone());
+				}
+				// water | call CreateOcean("@LABEL@O2")
+				TestFalse(TEXT("a second ocean is refused"), LandscapeSpecRun(TEXT(R"RQL({"rql":"0.1","source":{"path":["water"]},"stages":[{"op":"call","method":"CreateOcean","args":[{"lit":"@LABEL@O2"}]}]})RQL"), Label, Land, true));
+			}
+			// water | call CreateLake("@LABEL@L", [1201000, 1000, 200], 1500)
+			TestTrue(TEXT("lake created"), LandscapeSpecRun(TEXT(R"RQL({"rql":"0.1","source":{"path":["water"]},"stages":[{"op":"call","method":"CreateLake","args":[{"lit":"@LABEL@L"},{"list":[{"lit":1201000},{"lit":1000},{"lit":200}]},{"lit":1500}]}]})RQL"), Label, Land, true));
+			AWaterBodyLake* Lake = LandscapeSpecFind<AWaterBodyLake>(Label + TEXT("L"));
+			if (TestNotNull(TEXT("the lake"), Lake))
+			{
+				Created.Add(Lake);
+				TestEqual(TEXT("an 8-point shore"), Lake->GetWaterSpline()->GetNumberOfSplinePoints(), 8);
+				const FVector Shore = Lake->GetWaterSpline()->GetLocationAtSplinePoint(0, ESplineCoordinateSpace::World);
+				TestTrue(*FString::Printf(TEXT("the shore is 15 m out at the water surface Z 200 (%s)"), *Shore.ToString()), FMath::IsNearlyEqual(Shore.X, 1202500.0, 1.0) && FMath::IsNearlyEqual(Shore.Z, 200.0, 1.0));
+			}
+			// water | call CreateRiver("@LABEL@R", [[1198000, -3000, 300], [1200000, 0, 200], [1202000, 3000, 100]], 600)
+			TestTrue(TEXT("river created from points"), LandscapeSpecRun(TEXT(R"RQL({"rql":"0.1","source":{"path":["water"]},"stages":[{"op":"call","method":"CreateRiver","args":[{"lit":"@LABEL@R"},{"list":[{"list":[{"lit":1198000},{"lit":-3000},{"lit":300}]},{"list":[{"lit":1200000},{"lit":0},{"lit":200}]},{"list":[{"lit":1202000},{"lit":3000},{"lit":100}]}]},{"lit":600}]}]})RQL"), Label, Land, true));
+			AWaterBodyRiver* River = LandscapeSpecFind<AWaterBodyRiver>(Label + TEXT("R"));
+			if (TestNotNull(TEXT("the river"), River))
+			{
+				Created.Add(River);
+				TestEqual(TEXT("three spline points"), River->GetWaterSpline()->GetNumberOfSplinePoints(), 3);
+				const FVector Last = River->GetWaterSpline()->GetLocationAtSplinePoint(2, ESplineCoordinateSpace::World);
+				TestTrue(*FString::Printf(TEXT("the last point is where it was asked (%s)"), *Last.ToString()), Last.Equals(FVector(1202000, 3000, 100), 1.0));
+				const UWaterSplineMetadata* Metadata = River->GetWaterBodyComponent()->GetWaterSplineMetadata();
+				TestTrue(TEXT("6 m wide"), Metadata && Metadata->RiverWidth.Points.Num() == 3 && FMath::IsNearlyEqual(Metadata->RiverWidth.Points[1].OutVal, 600.0f, 0.5f));
+			}
+			for (AActor* Actor : Created)
+			{
+				const UWaterBodyComponent* Component = CastChecked<AWaterBody>(Actor)->GetWaterBodyComponent();
+				TestFalse(*FString::Printf(TEXT("%s does not affect the landscape"), *Actor->GetActorLabel()), Component->bAffectsLandscape);
+				TestNotNull(*FString::Printf(TEXT("%s has the Water default material"), *Actor->GetActorLabel()), Component->GetWaterMaterial());
+			}
+			TestEqual(TEXT("no water brush manager was spawned"), LandscapeSpecCount(UnrealMcpRql::ResolveClass(TEXT("WaterBrushManager"))), Managers);
+			TestEqual(TEXT("no Water edit layer was added"), Landscape->GetLayerIndex(FName(TEXT("Water"))), static_cast<int32>(INDEX_NONE));
+			TestTrue(TEXT("the landscape dialog setting is restored"), GetDefault<ULandscapeSettings>()->bShowDialogForAutomaticLayerCreation);
+
+			// water | call CreateRiver("@LABEL@X", [[0, 0, 0]])
+			TestFalse(TEXT("a one-point river is refused"), LandscapeSpecRun(TEXT(R"RQL({"rql":"0.1","source":{"path":["water"]},"stages":[{"op":"call","method":"CreateRiver","args":[{"lit":"@LABEL@X"},{"list":[{"list":[{"lit":0},{"lit":0},{"lit":0}]}]}]}]})RQL"), Label, Land, true));
+			// water | call SetMaterial(unreal.find("@LABEL@L"), "/Engine/BasicShapes/BasicShapeMaterial")
+			UMaterialInterface* Before = Lake ? Lake->GetWaterBodyComponent()->GetWaterMaterial() : nullptr;
+			TSharedPtr<FJsonObject> Refused;
+			TestFalse(TEXT("a non-water material is refused"), LandscapeSpecRun(TEXT(R"RQL({"rql":"0.1","source":{"path":["water"]},"stages":[{"op":"call","method":"SetMaterial","args":[{"call":"find","on":{"path":["unreal"]},"args":[{"lit":"@LABEL@L"}]},{"lit":"/Engine/BasicShapes/BasicShapeMaterial"}]}]})RQL"), Label, Land, true, &Refused));
+			TestTrue(*FString::Printf(TEXT("the refusal names a water material to use (%s)"), *LandscapeSpecJson(Refused).Left(300)), LandscapeSpecJson(Refused).Contains(TEXT("Water_Material")));
+			TestTrue(TEXT("the lake keeps its material"), !Lake || Lake->GetWaterBodyComponent()->GetWaterMaterial() == Before);
+		});
+
+		It("routes a river downhill between two points and carves its bed into the landscape", [this]()
+		{
+			const FString Id = FGuid::NewGuid().ToString(EGuidFormats::Digits);
+			const FString Land = TEXT("RqlSpecRiverLand_") + Id;
+			const FString Label = TEXT("RqlSpecRiver_") + Id;
+			// landscape | call Create("@LAND@", [-1200000, 0, 0], 300)
+			TestTrue(TEXT("landscape created"), LandscapeSpecRun(TEXT(R"RQL({"rql":"0.1","source":{"path":["landscape"]},"stages":[{"op":"call","method":"Create","args":[{"lit":"@LAND@"},{"list":[{"lit":-1200000},{"lit":0},{"lit":0}]},{"lit":300}]}]})RQL"), Label, Land, true));
+			ALandscape* Landscape = LandscapeSpecFind<ALandscape>(Land);
+			if (!TestNotNull(TEXT("the landscape"), Landscape))
+				return;
+			AWaterBodyRiver* River = nullptr;
+			const bool bHadZone = LandscapeSpecCount(AWaterZone::StaticClass()) > 0;
+			ON_SCOPE_EXIT
+			{
+				if (IsValid(River))
+					River->Destroy();
+				if (!bHadZone)
+				{
+					for (TActorIterator<AWaterZone> It(UnrealMcpRql::EditorWorld()); It; ++It)
+						It->Destroy();
+				}
+				LandscapeSpecDestroy(Landscape);
+			};
+			// landscape | call Sculpt(unreal.find("@LAND@"), [-1200000, 15000, 0], 12000, 2000): a 20 m hill at the north edge
+			TestTrue(TEXT("hill raised"), LandscapeSpecRun(TEXT(R"RQL({"rql":"0.1","source":{"path":["landscape"]},"stages":[{"op":"call","method":"Sculpt","args":[{"call":"find","on":{"path":["unreal"]},"args":[{"lit":"@LAND@"}]},{"list":[{"lit":-1200000},{"lit":15000},{"lit":0}]},{"lit":12000},{"lit":2000}]}]})RQL"), Label, Land, true));
+			// water | call CreateRiverBetween("@LABEL@", unreal.find("@LAND@"), [-1200000, 12000, 0], [-1200000, -13000, 0], 800, 300)
+			const double Start = FPlatformTime::Seconds();
+			TestTrue(TEXT("river created"), LandscapeSpecRun(TEXT(R"RQL({"rql":"0.1","source":{"path":["water"]},"stages":[{"op":"call","method":"CreateRiverBetween","args":[{"lit":"@LABEL@"},{"call":"find","on":{"path":["unreal"]},"args":[{"lit":"@LAND@"}]},{"list":[{"lit":-1200000},{"lit":12000},{"lit":0}]},{"list":[{"lit":-1200000},{"lit":-13000},{"lit":0}]},{"lit":800},{"lit":300}]}]})RQL"), Label, Land, true));
+			AddInfo(FString::Printf(TEXT("CreateRiverBetween on a 300 m landscape: %.2f s"), FPlatformTime::Seconds() - Start));
+			River = LandscapeSpecFind<AWaterBodyRiver>(Label);
+			if (!TestNotNull(TEXT("the river"), River))
+				return;
+			const UWaterSplineComponent* Spline = River->GetWaterSpline();
+			const int32 Count = Spline->GetNumberOfSplinePoints();
+			TestTrue(*FString::Printf(TEXT("a routed spline (%d points)"), Count), Count >= 3 && Count <= 150);
+			bool bDownhill = true;
+			for (int32 Index = 1; Index < Count; ++Index)
+				bDownhill &= Spline->GetLocationAtSplinePoint(Index, ESplineCoordinateSpace::World).Z <= Spline->GetLocationAtSplinePoint(Index - 1, ESplineCoordinateSpace::World).Z + 0.5;
+			TestTrue(TEXT("the water surface never climbs"), bDownhill);
+			const FVector First = Spline->GetLocationAtSplinePoint(0, ESplineCoordinateSpace::World);
+			const FVector Last = Spline->GetLocationAtSplinePoint(Count - 1, ESplineCoordinateSpace::World);
+			TestTrue(*FString::Printf(TEXT("from the hillside (%s) down to the mouth (%s)"), *First.ToString(), *Last.ToString()),
+				FVector2D::Distance(FVector2D(First), FVector2D(-1200000, 12000)) < 300.0 && FVector2D::Distance(FVector2D(Last), FVector2D(-1200000, -13000)) < 300.0
+				&& First.Z > Last.Z + 500.0);
+			// The bed: the edit layer heights (merged or not, so -nullrhi checks it too) are lower under the river than the flat 0.
+			ULandscapeInfo* Info = Landscape->GetLandscapeInfo();
+			FHeightmapAccessor<false> Heights(Info);
+			if (const ULandscapeEditLayerBase* EditLayer = Landscape->GetEditLayerConst(0))
+				Heights.SetEditLayer(EditLayer->GetGuid());
+			const FVector Middle = Landscape->LandscapeActorToWorld().InverseTransformPosition(FVector(-1200000, -10000, 0));
+			uint16 Value = 0;
+			Heights.GetDataFast(FMath::RoundToInt(Middle.X), FMath::RoundToInt(Middle.Y), FMath::RoundToInt(Middle.X), FMath::RoundToInt(Middle.Y), &Value);
+			const double Cm = (static_cast<double>(Value) - LandscapeDataAccess::MidValue) * Landscape->GetActorScale3D().Z * LANDSCAPE_ZSCALE;
+			TestTrue(*FString::Printf(TEXT("the bed is carved about 3 m deep (%.1f cm)"), Cm), Cm < -200.0 && Cm > -400.0);
+			// water | call CreateRiverBetween("@LABEL@x", unreal.find("@LAND@"), [0, 0, 0], [10, 0, 0])
+			TestFalse(TEXT("points off the landscape are refused"), LandscapeSpecRun(TEXT(R"RQL({"rql":"0.1","source":{"path":["water"]},"stages":[{"op":"call","method":"CreateRiverBetween","args":[{"lit":"@LABEL@x"},{"call":"find","on":{"path":["unreal"]},"args":[{"lit":"@LAND@"}]},{"list":[{"lit":0},{"lit":0},{"lit":0}]},{"list":[{"lit":10},{"lit":0},{"lit":0}]}]}]})RQL"), Label, Land, true));
+		});
+
+		It("keeps a water body placed with SpawnActor from opening the modal edit layer dialog, reports it and repairs it with SetMaterial", [this]()
+		{
+			const FString Id = FGuid::NewGuid().ToString(EGuidFormats::Digits);
+			const FString Land = TEXT("RqlSpecGuardLand_") + Id;
+			const FString Label = TEXT("RqlSpecGuardLake_") + Id;
+			// landscape | call Create("@LAND@", [0, 1200000, 0], 50)
+			TestTrue(TEXT("landscape created"), LandscapeSpecRun(TEXT(R"RQL({"rql":"0.1","source":{"path":["landscape"]},"stages":[{"op":"call","method":"Create","args":[{"lit":"@LAND@"},{"list":[{"lit":0},{"lit":1200000},{"lit":0}]},{"lit":50}]}]})RQL"), Label, Land, true));
+			ALandscape* Landscape = LandscapeSpecFind<ALandscape>(Land);
+			if (!TestNotNull(TEXT("the landscape"), Landscape))
+				return;
+			UClass* ManagerClass = UnrealMcpRql::ResolveClass(TEXT("WaterBrushManager"));
+			const bool bHadZone = LandscapeSpecCount(AWaterZone::StaticClass()) > 0;
+			TArray<AActor*> Before;
+			for (TActorIterator<AActor> It(UnrealMcpRql::EditorWorld()); It; ++It)
+				Before.Add(*It);
+			ON_SCOPE_EXIT
+			{
+				// The lake, and the brush manager / zone the Water editor added for it.
+				TArray<AActor*> Added;
+				for (TActorIterator<AActor> It(UnrealMcpRql::EditorWorld()); It; ++It)
+				{
+					if (!Before.Contains(*It) && (It->IsA<AWaterBody>() || (ManagerClass && It->IsA(ManagerClass)) || (!bHadZone && It->IsA<AWaterZone>())))
+						Added.Add(*It);
+				}
+				for (AActor* Actor : Added)
+					Actor->Destroy();
+				LandscapeSpecDestroy(Landscape);
+			};
+			TestEqual(TEXT("no Water edit layer yet"), Landscape->GetLayerIndex(FName(TEXT("Water"))), static_cast<int32>(INDEX_NONE));
+			// editor | call SpawnActor("WaterBodyLake", "@LABEL@", [0, 1200000, 100]): a landscape-affecting lake without the Water
+			// defaults. Without the guard the Water plugin blocks this call on the modal "Insert New Landscape Edit Layer" dialog.
+			TestTrue(TEXT("spawned and returned (no modal dialog)"), LandscapeSpecRun(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"SpawnActor","args":[{"lit":"WaterBodyLake"},{"lit":"@LABEL@"},{"list":[{"lit":0},{"lit":1200000},{"lit":100}]}]}]})RQL"), Label, Land, true));
+			TestNotEqual(TEXT("the Water edit layer was created up front"), Landscape->GetLayerIndex(FName(TEXT("Water"))), static_cast<int32>(INDEX_NONE));
+			AWaterBodyLake* Lake = LandscapeSpecFind<AWaterBodyLake>(Label);
+			if (!TestNotNull(TEXT("the lake"), Lake))
+				return;
+			// waterBodies | where Label == "@LABEL@" | select Water
+			TSharedPtr<FJsonObject> Status;
+			LandscapeSpecRun(TEXT(R"RQL({"rql":"0.1","source":{"path":["waterBodies"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"@LABEL@"}]}},{"op":"select","fields":[{"name":"Water","expr":{"path":["Water"]}}]}]})RQL"), Label, Land, false, &Status);
+			const FString StatusText = LandscapeSpecJson(Status);
+			TestTrue(*FString::Printf(TEXT("Water reports it is not ready and names SetMaterial (%s)"), *StatusText.Left(400)),
+				StatusText.Contains(TEXT("\"Ready\":false")) && StatusText.Contains(TEXT("water | call SetMaterial")));
+			// water | call SetMaterial(unreal.find("@LABEL@"))
+			TestTrue(TEXT("repaired"), LandscapeSpecRun(TEXT(R"RQL({"rql":"0.1","source":{"path":["water"]},"stages":[{"op":"call","method":"SetMaterial","args":[{"call":"find","on":{"path":["unreal"]},"args":[{"lit":"@LABEL@"}]}]}]})RQL"), Label, Land, true));
+			TestNotNull(TEXT("the lake has the Water default material"), Lake->GetWaterBodyComponent()->GetWaterMaterial());
 		});
 	});
 

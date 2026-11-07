@@ -7,6 +7,8 @@
 
 #include "IUnrealMcpRqlModule.h"
 #include "UnrealAILandscapeRqlApi.h"
+#include "UnrealAIWaterRqlApi.h"
+#include "UnrealAIWaterSafety.h"
 
 #include "Engine/World.h"
 #include "EngineUtils.h"               // TActorIterator
@@ -14,7 +16,9 @@
 #include "LandscapeHeightfieldCollisionComponent.h" // the collision heightfields (Bounds)
 #include "LandscapeInfo.h"             // ULandscapeInfo + FLandscapeInfoLayerSettings (paint layers)
 #include "LandscapeProxy.h"            // ALandscapeProxy (+ streaming proxies)
+#include "Components/StaticMeshComponent.h"
 #include "Materials/MaterialInterface.h"
+#include "Misc/App.h"
 #include "WaterBodyActor.h"            // AWaterBody
 #include "WaterBodyComponent.h"        // UWaterBodyComponent + EWaterBodyType
 #include "WaterBodyTypes.h"            // EWaterBodyType
@@ -37,6 +41,37 @@ namespace UnrealAILandscapeRqlLocal
 				Out.Add(*It);
 		}
 		return Out;
+	}
+
+	/**
+	 * Why a water body does not show yet, with what to call (empty when it is ready): the readback after the water
+	 * operations, and the repair hint for a body placed another way (editor | call SpawnActor gives no material).
+	 */
+	FString WaterProblem(const AWaterBody* Body)
+	{
+		const UWaterBodyComponent* Component = Body ? Body->GetWaterBodyComponent() : nullptr;
+		if (!Component)
+			return TEXT("it has no water body component");
+		const FString Find = FString::Printf(TEXT("unreal.find(\"%s\")"), *Body->GetActorLabel());
+		const UMaterialInterface* Material = Component->GetWaterMaterial();
+		if (!Material)
+			return FString::Printf(TEXT("no water material, so it is invisible (placed without the Water defaults, e.g. by editor | call SpawnActor): water | call SetMaterial(%s)"), *Find);
+		if (!UnrealAIWaterSafety::IsWaterMaterial(Material))
+			return FString::Printf(TEXT("its WaterMaterial %s is not a water material: water | call SetMaterial(%s)"), *Material->GetName(), *Find);
+		if (Component->GetWaterBodyType() != EWaterBodyType::Transition && !Component->GetWaterZone())
+			return TEXT("no water zone renders it: water | call SetZone()");
+		if (!FApp::CanEverRender())
+			return TEXT("this editor does not render (-nullrhi): the water mesh is built in a rendering editor");
+		bool bMesh = false;
+		TArray<UStaticMeshComponent*> Meshes;
+		Body->GetComponents(Meshes);
+		for (const UStaticMeshComponent* Mesh : Meshes)
+			bMesh |= Mesh->GetFName() == TEXT("WaterInfoMeshComponent") && Mesh->GetStaticMesh() != nullptr;
+		if (!bMesh && Component->ShouldGenerateWaterMeshTile())
+			return FString::Printf(TEXT("its water mesh is not built: water | call SetMaterial(%s) rebuilds it"), *Find);
+		if (Material->IsCompiling())
+			return TEXT("its material's shaders are still compiling: it shows when they finish (read Water again)");
+		return FString();
 	}
 
 	const TCHAR* WaterBodyTypeName(EWaterBodyType Type)
@@ -80,6 +115,9 @@ public:
 		Context.AddApiSource(TEXT("landscape"),
 			TEXT("Landscape operations: call Create(label, location, sizeMeters, material) / Sculpt(landscape, center, radius, height) / Paint(landscape, layer, center, radius, strength) / CreateLayerMaterial(path, layers) / Surface(landscape, point) / Rebuild(landscape)"),
 			UUnrealAILandscapeRqlApi::StaticClass(), TEXT("LandscapeOperations"));
+		Context.AddApiSource(TEXT("water"),
+			TEXT("Water operations: call CreateOcean(label, height, material) / CreateLake(label, center, radius, material) / CreateRiver(label, points, width, material) / CreateRiverBetween(label, landscape, source, mouth, width, depth, material) / SetMaterial(body, material) / SetZone(sizeMeters, center) / EnableWater()"),
+			UUnrealAIWaterRqlApi::StaticClass(), TEXT("WaterOperations"));
 
 		// The fields queries filter on are scalar members; `Sections` keeps the layout together for select output.
 		Context.AddJsonMember(ALandscapeProxy::StaticClass(), TEXT("IsPrimary"), TEXT("true for the landscape actor, false for a streaming proxy"),
@@ -161,7 +199,7 @@ public:
 				return MakeShared<FJsonValueString>(Component ? WaterBodyTypeName(Component->GetWaterBodyType()) : TEXT("Unknown"));
 			});
 		Context.AddJsonMember(AWaterBody::StaticClass(), TEXT("Water"),
-			TEXT("water body summary: Type, SplinePoints"),
+			TEXT("water body status: Type, SplinePoints, Material, AffectsLandscape, Ready (it renders) and Problem (why not, with what to call)"),
 			[](UObject* Object) -> TSharedPtr<FJsonValue>
 			{
 				TSharedPtr<FJsonObject> Out = MakeShared<FJsonObject>();
@@ -169,10 +207,35 @@ public:
 				if (UWaterBodyComponent* Component = Body ? Body->GetWaterBodyComponent() : nullptr)
 				{
 					const UWaterSplineComponent* Spline = Component->GetWaterSpline();
+					const UMaterialInterface* Material = Component->GetWaterMaterial();
+					const FString Problem = WaterProblem(Body);
 					Out->SetStringField(TEXT("Type"), WaterBodyTypeName(Component->GetWaterBodyType()));
 					Out->SetNumberField(TEXT("SplinePoints"), Spline ? Spline->GetNumberOfSplinePoints() : 0);
+					Out->SetStringField(TEXT("Material"), Material ? Material->GetName() : FString());
+					Out->SetBoolField(TEXT("AffectsLandscape"), Component->bAffectsLandscape);
+					Out->SetBoolField(TEXT("Ready"), Problem.IsEmpty());
+					Out->SetStringField(TEXT("Problem"), Problem);
 				}
 				return MakeShared<FJsonValueObject>(Out);
+			});
+		Context.AddJsonMember(AWaterBody::StaticClass(), TEXT("Path"),
+			TEXT("the water body's spline points in world space (cm), [X, Y, Z] each; Z is the water surface"),
+			[](UObject* Object) -> TSharedPtr<FJsonValue>
+			{
+				TArray<TSharedPtr<FJsonValue>> Points;
+				const AWaterBody* Body = Cast<AWaterBody>(Object);
+				if (const UWaterSplineComponent* Spline = Body ? Body->GetWaterSpline() : nullptr)
+				{
+					for (int32 Index = 0; Index < Spline->GetNumberOfSplinePoints(); ++Index)
+					{
+						const FVector Point = Spline->GetLocationAtSplinePoint(Index, ESplineCoordinateSpace::World);
+						TArray<TSharedPtr<FJsonValue>> Xyz;
+						for (const double Value : { Point.X, Point.Y, Point.Z })
+							Xyz.Add(MakeShared<FJsonValueNumber>(FMath::RoundToDouble(Value)));
+						Points.Add(MakeShared<FJsonValueArray>(Xyz));
+					}
+				}
+				return MakeShared<FJsonValueArray>(Points);
 			});
 		Context.AddObjectMember(AWaterBody::StaticClass(), TEXT("WaterMaterial"), TEXT("the water body's water material"),
 			UMaterialInterface::StaticClass(), [](UObject* Object) -> UObject*
@@ -229,8 +292,49 @@ ground; off the landscape `Inside` is false. Traces from above also hit your own
 `Surface` reads only the ground. Far views draw the landscape at a lower LOD, so a thin mesh laid on the ground (a road)
 can look buried from afar: sample `Surface` every metre along it and lift it 5-10 cm, or paint the road as a layer.
 `call Rebuild(unreal.find("Terrain"))` re-merges a landscape edited elsewhere (Landscape mode, Python) and rebuilds its
-collision and Nanite mesh.)MD"));
+collision and Nanite mesh.
+
+Water: create oceans, lakes and rivers with the `water` operations, never `editor | call SpawnActor("WaterBody...")`:
+a spawned body gets no Water defaults (no material: invisible), and one that affects the landscape makes the Water
+plugin open a modal "Insert New Landscape Edit Layer" dialog that blocks the editor until a human closes it. The
+operations place bodies like the Place Actors panel (material, waves), never edit the landscape through the Water brush,
+build the water mesh before returning and create the water zone when there is none.
+
+```
+water | call CreateOcean("Ocean", 0)                                                    sea level Z 0 around the island (fills the water zone)
+water | call CreateLake("Lake", [12000, -8000, 2400], 3000)                             Z of the center is the water surface
+water | call CreateRiverBetween("River", unreal.find("Terrain"), [-20000, 30000, 0], [60000, -90000, 0], 1500, 300)
+water | call CreateRiver("Creek", [[0, 0, 900], [4000, 1000, 700], [9000, 0, 400]], 800)  your own points, upstream first
+waterBodies | select Label Water Path                                                  Water.Ready / Water.Problem: renders or why not
+water | call SetMaterial(unreal.find("Lake"), "/Water/Materials/WaterSurface/Water_Material")
+water | call SetZone()                                                                  zone over every landscape (+25%), or SetZone(3000, [0, 0, 0])
+water | call EnableWater()                                                              Water in the project file, for packaged games
+```
+
+Land above the ocean's height hides it, so one ocean surrounds an island. `CreateRiverBetween` follows the lowest
+ground from source to mouth, keeps the water flowing downhill and (Depth > 0, cm) carves its bed into the landscape, so
+it shows even across a rise; keep the mouth a little inside the landscape. A water body's surface is its spline's Z: a
+lake or river below the ground around it is hidden. `Water.Problem` names what to call when a body does not render
+(e.g. one placed by `SpawnActor`: `water | call SetMaterial(unreal.find("Ocean"))` repairs it). The first water
+material compiles its shaders for a while after the call; `Water.Ready` turns true when they are done.)MD"));
 	}
 };
 
-IMPLEMENT_MODULE(TUnrealMcpRqlEditorModule<FUnrealAILandscapeRqlModule>, UnrealAILandscape)
+/** The RQL module plus the Water modal guard (UnrealAIWaterSafety) for the module's lifetime. */
+class FUnrealAILandscapeEditorModule : public TUnrealMcpRqlEditorModule<FUnrealAILandscapeRqlModule>
+{
+public:
+	virtual void StartupModule() override
+	{
+		TUnrealMcpRqlEditorModule::StartupModule();
+		UnrealAIWaterSafety::Start();
+	}
+
+	virtual void ShutdownModule() override
+	{
+		UnrealAIWaterSafety::Stop();
+		TUnrealMcpRqlEditorModule::ShutdownModule();
+	}
+};
+
+IMPLEMENT_MODULE(FUnrealAILandscapeEditorModule, UnrealAILandscape)

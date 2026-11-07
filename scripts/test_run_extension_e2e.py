@@ -358,12 +358,39 @@ CONTROL_RIG = {
 AUTHORING.update(CONTROL_RIG)
 
 
+def water_receipt(method, result):
+    return text_result(f'1 result\n$ref|method|result\nWaterOperations#9170|{method}|{result}')
+
+
+SCULPT = 'LandscapeOperations#9190|Sculpt(LandscapeProxy Landscape, Vector Center, double Radius, double Height)'
+WATER_STATUS = ('2 results\nLabel|Water\nE2EOcean|{{Type:Ocean,SplinePoints:4,Material:Water_Material_Ocean,AffectsLandscape:false,'
+                'Ready:true,Problem:""}}\nE2ERiver|{{Type:River,SplinePoints:36,Material:Water_Material_River,AffectsLandscape:{},'
+                'Ready:true,Problem:""}}')
+# The Landscape island + water sequence: per check, an answer the live UE 5.7 editor gives and one that must not pass.
+AUTHORING.update({
+    'water-1-island-landscape.e2e.json': (
+        text_result('1 result\n$ref|method|result\nLandscapeOperations#9190|Create(string Label, Vector Location, double SizeMeters, '
+                    'MaterialInterface Material)|Landscape#9191(E2EIsland)'), NO_COUNT),
+    'water-2-island-sea-floor.e2e.json': (text_result(f'1 result\n$ref|method|result\n{SCULPT}|3196021'), NO_COUNT),
+    'water-3-island-land.e2e.json': (text_result(f'1 result\n$ref|method|result\n{SCULPT}|1803641'), NO_COUNT),
+    'water-4-island-mountain.e2e.json': (text_result(f'1 result\n$ref|method|result\n{SCULPT}|290393'), NO_COUNT),
+    'water-5-ocean.e2e.json': (
+        water_receipt('CreateOcean(string Label, double Height, MaterialInterface Material)', 'WaterBodyOcean#9280(E2EOcean)'),
+        {'content': [{'type': 'text', 'text': 'error call-threw: CreateOcean threw: the level already has an ocean'}], 'isError': True}),
+    'water-6-river.e2e.json': (
+        water_receipt('CreateRiverBetween(string Label, LandscapeProxy Landscape, Vector Source, Vector Mouth, double Width, double Depth, '
+                      'MaterialInterface Material)', 'WaterBodyRiver#9304(E2ERiver)'), NO_COUNT),
+    'water-7-status.e2e.json': (text_result(WATER_STATUS.format('false')), text_result(WATER_STATUS.format('true'))),
+    'water-8-zone.e2e.json': (text_result('1 result\nZoneExtent\n(250000, 250000)'), text_result('1 result\nZoneExtent\n(51200, 51200)')),
+})
+
+
 class CheckFileTests(unittest.TestCase):
     def test_every_plugin_has_valid_checks_and_no_powershell_left(self):
         for plugin, folder in release.components().items():
             self.assertTrue(e2e.checks_for(plugin), plugin)
             self.assertEqual(list((folder / 'Tests/e2e/tools').glob('*.ps1')), [], plugin)
-        self.assertEqual(len(all_checks()), 112)
+        self.assertEqual(len(all_checks()), 120)
 
     def test_every_assert_matches_its_intended_shape_and_rejects_others(self):
         for (plugin, name), check in all_checks().items():
