@@ -1,0 +1,19 @@
+extensions/UnrealAIEnhancedInput/Source/UnrealAIEnhancedInput/Private/UnrealAIEnhancedInputModule.cpp
+  s_7882418ace25db::t_46813b9739dd40 198
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "0c2d7a2cdf79d74af37cb1357f17741735e23487",
+  "prompts": {},
+  "sessions": {
+    "s_7882418ace25db": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1b7f0-b6d2-7a63-bade-fcacdadce5e5",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
