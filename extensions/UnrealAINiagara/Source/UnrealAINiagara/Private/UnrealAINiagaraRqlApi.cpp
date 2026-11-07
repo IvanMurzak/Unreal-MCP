@@ -28,7 +28,6 @@
 #include "NiagaraScript.h"
 #include "NiagaraShared.h"
 #include "NiagaraSystem.h"
-#include "UObject/UObjectIterator.h"
 #include "ViewModels/NiagaraEmitterHandleViewModel.h"
 #include "ViewModels/NiagaraSystemViewModel.h"
 #include "ViewModels/Stack/NiagaraStackFunctionInput.h"

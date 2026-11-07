@@ -339,82 +339,6 @@ namespace UnrealAINiagaraStackLocal
 	 * Lifetime Mode): those keep @p Prefix, the path of their function call. The inputs of a dynamic input set on an input
 	 * belong to another function call and are named below it: "Lifetime.Minimum".
 	 */
-}
-
-FString UnrealAINiagara::FormatDataInterface(UNiagaraDataInterface& Data)
-{
-		TArray<FString> Parts;
-		for (TFieldIterator<FProperty> It(Data.GetClass()); It; ++It)
-		{
-			if (!It->HasAnyPropertyFlags(CPF_Edit) || It->HasAnyPropertyFlags(CPF_Deprecated))
-				continue;
-			FString Text;
-			It->ExportTextItem_InContainer(Text, &Data, nullptr, &Data, PPF_None);
-			Parts.Add(It->GetName() + TEXT("=") + Text);
-		}
-		return FString::Printf(TEXT("%s(%s)"), *Data.GetClass()->GetName(), *FString::Join(Parts, TEXT(", ")));
-	}
-
-bool UnrealAINiagara::WriteDataInterface(UNiagaraDataInterface& Data, const FString& InText, FString& OutError)
-{
-		using namespace UnrealAINiagaraStackLocal;
-		FString Text = InText.TrimStartAndEnd().TrimQuotes();
-		if (Text.StartsWith(TEXT("/")) && !Text.Contains(TEXT("=")))
-		{
-			// An asset path alone: the editable object property that takes it (a static mesh interface's DefaultMesh; an
-			// editor-only Preview* property only when nothing else does).
-			UObject* Asset = UnrealMcpRql::LoadObject(UObject::StaticClass(), Text);
-			if (!Asset)
-				return (OutError = FString::Printf(TEXT("no asset at '%s'"), *Text)), false;
-			FObjectPropertyBase* Best = nullptr;
-			for (TFieldIterator<FObjectPropertyBase> It(Data.GetClass()); It; ++It)
-			{
-				if (!It->HasAnyPropertyFlags(CPF_Edit) || It->HasAnyPropertyFlags(CPF_Deprecated) || !Asset->IsA(It->PropertyClass))
-					continue;
-				if (!Best || (Best->GetName().StartsWith(TEXT("Preview")) && !It->GetName().StartsWith(TEXT("Preview"))))
-					Best = *It;
-			}
-			if (Best)
-				Text = Best->GetName() + TEXT("=") + Asset->GetPathName();
-			if (Text.StartsWith(TEXT("/")))
-				return (OutError = FString::Printf(TEXT("no property of %s takes a %s (%s)"), *Data.GetClass()->GetName(), *Asset->GetClass()->GetName(), *FormatDataInterface(Data))), false;
-		}
-		if (Text.StartsWith(TEXT("(")) && Text.EndsWith(TEXT(")")))
-			Text = Text.Mid(1, Text.Len() - 2);
-		TArray<TPair<FProperty*, FString>> Writes;
-		for (const FString& Part : SplitTopLevel(Text))
-		{
-			FString Name, Value;
-			if (!Part.Split(TEXT("="), &Name, &Value))
-				return (OutError = FString::Printf(TEXT("a %s takes \"Property=Value, ...\" (its properties: %s)"), *Data.GetClass()->GetName(), *FormatDataInterface(Data))), false;
-			FProperty* Found = nullptr;
-			for (TFieldIterator<FProperty> It(Data.GetClass()); It && !Found; ++It)
-			{
-				if (It->HasAnyPropertyFlags(CPF_Edit) && Normalize(It->GetName()) == Normalize(Name))
-					Found = *It;
-			}
-			if (!Found)
-				return (OutError = FString::Printf(TEXT("%s has no property '%s' (%s)"), *Data.GetClass()->GetName(), *Name.TrimStartAndEnd(), *FormatDataInterface(Data))), false;
-			Writes.Add({ Found, Value.TrimStartAndEnd() });
-		}
-		if (Writes.Num() == 0)
-			return (OutError = FString::Printf(TEXT("no \"Property=Value\" given (%s)"), *FormatDataInterface(Data))), false;
-		Data.Modify();
-		for (const TPair<FProperty*, FString>& Write : Writes)
-		{
-			FString Value = Write.Value;
-			Value.TrimQuotesInline();
-			const TCHAR* End = Write.Key->ImportText_InContainer(*Value, &Data, &Data, PPF_None);
-			if (!End)
-				return (OutError = FString::Printf(TEXT("'%s' is not a value of %s"), *Value, *Write.Key->GetName())), false;
-			FPropertyChangedEvent Event(Write.Key, EPropertyChangeType::ValueSet);
-			Data.PostEditChangeProperty(Event);
-		}
-		return true;
-}
-
-namespace UnrealAINiagaraStackLocal
-{
 	void CollectInputs(UNiagaraStackEntry& Entry, const FString& Prefix, const UNiagaraNodeFunctionCall* PrefixNode, const FString& ParentPath,
 		bool bParentHidden, TArray<FInputRef>& Out)
 	{
@@ -536,6 +460,78 @@ namespace UnrealAINiagaraStackLocal
 		Input.SetLocalValue(Value);
 		return true;
 	}
+}
+
+FString UnrealAINiagara::FormatDataInterface(UNiagaraDataInterface& Data)
+{
+	TArray<FString> Parts;
+	for (TFieldIterator<FProperty> It(Data.GetClass()); It; ++It)
+	{
+		if (!It->HasAnyPropertyFlags(CPF_Edit) || It->HasAnyPropertyFlags(CPF_Deprecated))
+			continue;
+		FString Text;
+		It->ExportTextItem_InContainer(Text, &Data, nullptr, &Data, PPF_None);
+		Parts.Add(It->GetName() + TEXT("=") + Text);
+	}
+	return FString::Printf(TEXT("%s(%s)"), *Data.GetClass()->GetName(), *FString::Join(Parts, TEXT(", ")));
+}
+
+bool UnrealAINiagara::WriteDataInterface(UNiagaraDataInterface& Data, const FString& InText, FString& OutError)
+{
+	using namespace UnrealAINiagaraStackLocal;
+	FString Text = InText.TrimStartAndEnd().TrimQuotes();
+	if (Text.StartsWith(TEXT("/")) && !Text.Contains(TEXT("=")))
+	{
+		// An asset path alone: the editable object property that takes it (a static mesh interface's DefaultMesh; an
+		// editor-only Preview* property only when nothing else does).
+		UObject* Asset = UnrealMcpRql::LoadObject(UObject::StaticClass(), Text);
+		if (!Asset)
+			return (OutError = FString::Printf(TEXT("no asset at '%s'"), *Text)), false;
+		FObjectPropertyBase* Best = nullptr;
+		for (TFieldIterator<FObjectPropertyBase> It(Data.GetClass()); It; ++It)
+		{
+			if (!It->HasAnyPropertyFlags(CPF_Edit) || It->HasAnyPropertyFlags(CPF_Deprecated) || !Asset->IsA(It->PropertyClass))
+				continue;
+			if (!Best || (Best->GetName().StartsWith(TEXT("Preview")) && !It->GetName().StartsWith(TEXT("Preview"))))
+				Best = *It;
+		}
+		if (Best)
+			Text = Best->GetName() + TEXT("=") + Asset->GetPathName();
+		if (Text.StartsWith(TEXT("/")))
+			return (OutError = FString::Printf(TEXT("no property of %s takes a %s (%s)"), *Data.GetClass()->GetName(), *Asset->GetClass()->GetName(), *FormatDataInterface(Data))), false;
+	}
+	if (Text.StartsWith(TEXT("(")) && Text.EndsWith(TEXT(")")))
+		Text = Text.Mid(1, Text.Len() - 2);
+	TArray<TPair<FProperty*, FString>> Writes;
+	for (const FString& Part : SplitTopLevel(Text))
+	{
+		FString Name, Value;
+		if (!Part.Split(TEXT("="), &Name, &Value))
+			return (OutError = FString::Printf(TEXT("a %s takes \"Property=Value, ...\" (its properties: %s)"), *Data.GetClass()->GetName(), *FormatDataInterface(Data))), false;
+		FProperty* Found = nullptr;
+		for (TFieldIterator<FProperty> It(Data.GetClass()); It && !Found; ++It)
+		{
+			if (It->HasAnyPropertyFlags(CPF_Edit) && Normalize(It->GetName()) == Normalize(Name))
+				Found = *It;
+		}
+		if (!Found)
+			return (OutError = FString::Printf(TEXT("%s has no property '%s' (%s)"), *Data.GetClass()->GetName(), *Name.TrimStartAndEnd(), *FormatDataInterface(Data))), false;
+		Writes.Add({ Found, Value.TrimStartAndEnd() });
+	}
+	if (Writes.Num() == 0)
+		return (OutError = FString::Printf(TEXT("no \"Property=Value\" given (%s)"), *FormatDataInterface(Data))), false;
+	Data.Modify();
+	for (const TPair<FProperty*, FString>& Write : Writes)
+	{
+		FString Value = Write.Value;
+		Value.TrimQuotesInline();
+		const TCHAR* End = Write.Key->ImportText_InContainer(*Value, &Data, &Data, PPF_None);
+		if (!End)
+			return (OutError = FString::Printf(TEXT("'%s' is not a value of %s"), *Value, *Write.Key->GetName())), false;
+		FPropertyChangedEvent Event(Write.Key, EPropertyChangeType::ValueSet);
+		Data.PostEditChangeProperty(Event);
+	}
+	return true;
 }
 
 FString UnrealAINiagara::Normalize(const FString& Name)
