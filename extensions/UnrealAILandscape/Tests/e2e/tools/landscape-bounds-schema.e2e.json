@@ -1,0 +1,10 @@
+{
+  "description": "the Bounds member",
+  "tool": "rql-schema",
+  "input": {
+    "type": "LandscapeProxy"
+  },
+  "assert": {
+    "pattern": "Bounds"
+  }
+}

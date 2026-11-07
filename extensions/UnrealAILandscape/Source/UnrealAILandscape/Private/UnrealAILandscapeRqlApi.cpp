@@ -11,6 +11,8 @@
 #include "LandscapeDataAccess.h"
 #include "LandscapeEdit.h"
 #include "LandscapeEditLayer.h"
+#include "LandscapeEditTypes.h"
+#include "LandscapeHeightfieldCollisionComponent.h"
 #include "LandscapeInfo.h"
 #include "LandscapeLayerInfoObject.h"
 #include "LandscapeProxy.h"
@@ -19,6 +21,8 @@
 #include "MaterialEditingLibrary.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialExpressionLandscapeLayerBlend.h"
+#include "AssetCompilingManager.h"
+#include "Misc/App.h"
 #include "Misc/Paths.h"
 
 namespace UnrealAILandscapeRqlApiLocal
@@ -97,6 +101,47 @@ namespace UnrealAILandscapeRqlApiLocal
 	}
 
 	/**
+	 * Whether a component still waits for its heights or weights to be merged. (ALandscape::IsUpToDate also counts the
+	 * navigation / foliage refresh the engine defers while a transaction, such as an rql-mutate call, is open.)
+	 */
+	bool MergePending(const ALandscape* Primary)
+	{
+		bool bPending = false;
+		if (const ULandscapeInfo* Info = Primary->GetLandscapeInfo())
+		{
+			Info->ForAllLandscapeComponents([&bPending](ULandscapeComponent* Component)
+			{
+				bPending |= (Component->GetLayerUpdateFlagPerMode() & (ELandscapeLayerUpdateMode::Update_Heightmap_Types | ELandscapeLayerUpdateMode::Update_Weightmap_Types)) != 0;
+			});
+		}
+		return bPending;
+	}
+
+	/**
+	 * Merge the landscape's edit layers now, as the next editor frames would: the final heightmap, the heightfield collision
+	 * (line traces, GetHeightAtLocation, actors placed on the ground) and the rendered surface then all match when the
+	 * operation returns. Without it they stay at the old heights for some frames (the merge runs on the GPU, then reads
+	 * back), so a caller that sculpts and then traces or places actors in the same step reads the surface before the edit.
+	 * Not possible without rendering (-nullrhi, commandlets): the edit stays in its edit layer until a rendering editor opens it.
+	 */
+	void MergeNow(ALandscapeProxy* Landscape)
+	{
+		ALandscape* Primary = Landscape ? Landscape->GetLandscapeActor() : nullptr;
+		if (!Primary || !FApp::CanEverRender())
+			return;
+		// The accessors flag the components they touched for the full update but request only the in-stroke one; ask for the
+		// full one, as Landscape mode does when a stroke ends: collision recreated, navigation and foliage refreshed.
+		Primary->RequestLayersContentUpdate(ELandscapeLayerUpdateMode::Update_All);
+		Primary->ForceUpdateLayersContent();
+		if (MergePending(Primary))
+		{
+			// Waiting on shaders or textures still compiling (the first edit of a session): finish them and merge again.
+			FAssetCompilingManager::Get().FinishAllCompilation();
+			Primary->ForceUpdateLayersContent();
+		}
+	}
+
+	/**
 	 * Read the circle's vertices through @p Accessor (heights or one layer's weights, on the first edit layer), let @p Edit
 	 * change each one with its falloff weight (true when it changed), write them back and refresh; how many changed.
 	 */
@@ -119,10 +164,9 @@ namespace UnrealAILandscapeRqlApiLocal
 				Changed += Edit(Data[(Y - R.Min.Y) * Width + (X - R.Min.X)], Falloff(X, Y, Circle)) ? 1 : 0;
 		}
 		Landscape->Modify();
-		WriteData(Accessor, R, Data.GetData());
+		WriteData(Accessor, R, Data.GetData()); // requests the merge of just the components it touched
 		Accessor.Flush();
-		if (ALandscape* Primary = Landscape->GetLandscapeActor())
-			Primary->RequestLayersContentUpdateForceAll();
+		MergeNow(Landscape);
 		return Changed;
 	}
 
@@ -244,6 +288,7 @@ ALandscape* UUnrealAILandscapeRqlApi::Create(const FString& Label, FVector Locat
 		if (Subsystem && Subsystem->IsGridBased())
 			Subsystem->ChangeGridSize(Info, 2);
 	}
+	MergeNow(Landscape);
 	return Landscape;
 }
 
@@ -321,4 +366,56 @@ UMaterial* UUnrealAILandscapeRqlApi::CreateLayerMaterial(const FString& Path, co
 	UMaterialEditingLibrary::ConnectMaterialProperty(Blend, FString(), MP_BaseColor);
 	UMaterialEditingLibrary::RecompileMaterial(Material);
 	return Material;
+}
+
+FUnrealAILandscapeSurface UUnrealAILandscapeRqlApi::Surface(ALandscapeProxy* Landscape, FVector Point)
+{
+	FUnrealAILandscapeSurface Out;
+	if (!Landscape)
+		return UnrealMcpRql::Failed<FUnrealAILandscapeSurface>(TEXT("Landscape is null: pass unreal.find(\"<label>\")"));
+	// The heightfield collision: what line traces, physics and actors placed on the ground meet. The operations above leave
+	// it merged; at collision mip 0 (the default) it is the full-resolution surface the editor renders up close.
+	const auto HeightAt = [Landscape](double X, double Y) { return Landscape->GetHeightAtLocation(FVector(X, Y, 0.0), EHeightfieldSource::Complex); };
+	const TOptional<float> Height = HeightAt(Point.X, Point.Y);
+	if (!Height.IsSet())
+		return Out;
+	// Slope over one quad on each side (one side at the landscape's edge).
+	const double Step = FMath::Max(FMath::Abs(Landscape->LandscapeActorToWorld().GetScale3D().X), 1.0);
+	const auto Gradient = [&HeightAt, &Height, Step](double X, double Y, double DX, double DY)
+	{
+		const TOptional<float> Ahead = HeightAt(X + DX, Y + DY);
+		const TOptional<float> Behind = HeightAt(X - DX, Y - DY);
+		const double Span = (Ahead.IsSet() ? Step : 0.0) + (Behind.IsSet() ? Step : 0.0);
+		return Span > 0.0 ? (Ahead.Get(Height.GetValue()) - Behind.Get(Height.GetValue())) / Span : 0.0;
+	};
+	const double SlopeX = Gradient(Point.X, Point.Y, Step, 0.0);
+	const double SlopeY = Gradient(Point.X, Point.Y, 0.0, Step);
+	Out.Inside = true;
+	Out.Height = Height.GetValue();
+	Out.Location = FVector(Point.X, Point.Y, Out.Height);
+	Out.Normal = FVector(-SlopeX, -SlopeY, 1.0).GetSafeNormal();
+	Out.Slope = FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp(Out.Normal.Z, -1.0, 1.0)));
+	return Out;
+}
+
+int32 UUnrealAILandscapeRqlApi::Rebuild(ALandscapeProxy* Landscape)
+{
+	ALandscape* Primary = Landscape ? Landscape->GetLandscapeActor() : nullptr;
+	ULandscapeInfo* Info = Primary ? Primary->GetLandscapeInfo() : nullptr;
+	if (!Info)
+		return UnrealMcpRql::Failed<int32>(TEXT("the landscape has no primary landscape actor to rebuild"));
+	if (!FApp::CanEverRender())
+		return UnrealMcpRql::Failed<int32>(TEXT("this editor does not render (-nullrhi): a landscape merges its edit layers only in a rendering editor"));
+	Primary->ForceLayersFullUpdate(); // every edit layer merged again, collision recreated
+	if (Primary->IsNaniteEnabled())
+	{
+		if (ULandscapeSubsystem* Subsystem = Primary->GetWorld() ? Primary->GetWorld()->GetSubsystem<ULandscapeSubsystem>() : nullptr)
+		{
+			ALandscapeProxy* Proxies[] = { Primary };
+			Subsystem->BuildNanite(UE::Landscape::EBuildFlags::None, Proxies);
+		}
+	}
+	int32 Components = 0;
+	Info->ForEachLandscapeProxy([&Components](ALandscapeProxy* Proxy) { Components += Proxy->LandscapeComponents.Num(); return true; });
+	return Components;
 }
