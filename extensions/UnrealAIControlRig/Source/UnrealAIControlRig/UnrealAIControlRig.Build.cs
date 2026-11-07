@@ -35,6 +35,15 @@ public class UnrealAIControlRig : ModuleRules
 			"ControlRigEditor",
 			"RigVM",
 			"RigVMDeveloper",
+
+			// Anim Blueprint integration (AddToAnimBlueprint / SetRigInput / TrackNearestActor): the AnimGraph's Output Pose
+			// and schema (AnimGraph), K2 nodes for variables and the event graph (BlueprintGraph), FBlueprintEditorUtils and
+			// FKismetEditorUtilities (UnrealEd). IPluginManager (Projects) names the engine plugin of a rig unit that is not
+			// enabled (Full Body IK).
+			"AnimGraph",
+			"BlueprintGraph",
+			"UnrealEd",
+			"Projects",
 		});
 	}
 }

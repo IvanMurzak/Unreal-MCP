@@ -1,0 +1,11 @@
+{
+  "description": "an unknown rig unit fails naming similar ones",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "controlRig | call AddUnit(\"/Game/E2E/CR_HeadLookAt\", \"Aimm\")"
+  },
+  "expectError": true,
+  "assert": {
+    "pattern": "no rig unit named 'Aimm'"
+  }
+}

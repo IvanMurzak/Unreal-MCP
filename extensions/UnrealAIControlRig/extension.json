@@ -1,7 +1,7 @@
 {
   "extensionId": "com.ivanmurzak.unreal-ai-control-rig",
   "name": "ControlRig Tools",
-  "description": "RQL module for Unreal's Control Rig: create rigs with bones, controls and a two-bone IK solver; query Control Rig blueprints (element hierarchy, controls, bones) and Control Rig components.",
+  "description": "RQL module for Unreal's Control Rig: author procedural animation rigs without C++ (look-at / aim, two-bone and full-body IK, traces, springs: any rig unit with its settings, links and rig variables) and wire them into Anim Blueprints (a Control Rig node before Output Pose, its inputs bound to Anim Blueprint variables set every frame, e.g. from the nearest target); query rigs, their graphs, variables and hierarchy, and Control Rig components.",
   "pluginName": "UnrealAIControlRig",
   "repo": "IvanMurzak/Unreal-MCP",
   "version": "0.2.0",

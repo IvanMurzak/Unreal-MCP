@@ -1,0 +1,10 @@
+{
+  "description": "the target follows the nearest actor every frame",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "controlRig | call TrackNearestActor(\"/Game/E2E/ABP_HeadLookAt\", \"StaticMeshActor\", \"LookAtTarget\", \"LookAtWeight\", 600, 4)"
+  },
+  "assert": {
+    "pattern": "LookAtTarget \\(existing variable\\) follows the nearest StaticMeshActor within 600 cm"
+  }
+}
