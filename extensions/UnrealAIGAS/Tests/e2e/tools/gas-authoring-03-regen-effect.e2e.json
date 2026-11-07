@@ -1,0 +1,10 @@
+{
+  "description": "the infinite mana regeneration effect created, executing every second",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "gas | call CreateEffect(\"/Game/E2EGAS/GE_ManaRegen\", \"Infinite\", 1)"
+  },
+  "assert": {
+    "pattern": "GE_ManaRegen"
+  }
+}

@@ -321,7 +321,7 @@ Extensions are beta and need Unreal Engine 5.7+, Unreal MCP 0.26.0+ in the same 
 | --- | --- | --- |
 | **[AI ControlRig](extensions/UnrealAIControlRig/README.md)** | `com.ivanmurzak.unreal-ai-control-rig` | Create rigs with bones, controls and a two-bone IK solver; query Control Rig blueprints and components |
 | **[AI EnhancedInput](extensions/UnrealAIEnhancedInput/README.md)** | `com.ivanmurzak.unreal-ai-enhanced-input` | Query Input Actions and Mapping Contexts, create actions and contexts, map keys |
-| **[AI GAS](extensions/UnrealAIGAS/README.md)** | `com.ivanmurzak.unreal-ai-gas` | Gameplay Ability System: query ability, effect and attribute-set classes, grant abilities to actors |
+| **[AI GAS](extensions/UnrealAIGAS/README.md)** | `com.ivanmurzak.unreal-ai-gas` | Gameplay Ability System authoring without C++: effects (cost, cooldown, damage, regeneration), ability Blueprints, ability system components with a ready-made Health / Mana / Stamina attribute set, input bindings, Play In Editor checks |
 | **[AI Landscape](extensions/UnrealAILandscape/README.md)** | `com.ivanmurzak.unreal-ai-landscape` | Landscape and Water: create, sculpt and paint landscapes; query landscapes, water bodies and water zones |
 | **[AI Niagara](extensions/UnrealAINiagara/README.md)** | `com.ivanmurzak.unreal-ai-niagara` | Niagara VFX: query systems and their emitters, place systems in the level |
 | **[AI PCG](extensions/UnrealAIPCG/README.md)** | `com.ivanmurzak.unreal-ai-pcg` | Procedural Content Generation: author PCG graphs (nodes, connections, settings, parameters), place them on volumes, generate scatters (forests, rocks, props) and read the counts |

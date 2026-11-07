@@ -1,0 +1,10 @@
+{
+  "description": "the instant damage effect created",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "gas | call CreateEffect(\"/Game/E2EGAS/GE_Damage\")"
+  },
+  "assert": {
+    "pattern": "GE_Damage"
+  }
+}

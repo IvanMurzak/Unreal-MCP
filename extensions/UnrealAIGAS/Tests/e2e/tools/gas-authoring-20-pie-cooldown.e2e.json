@@ -1,0 +1,10 @@
+{
+  "description": "a second cast is refused while the cooldown runs",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "gas | call ActivateAbility(\"/Game/E2EGAS/GA_Fireball\", \"E2E_Hero\")"
+  },
+  "assert": {
+    "pattern": "not activated: on cooldown \\(E2E\\.GAS\\.Cooldown"
+  }
+}

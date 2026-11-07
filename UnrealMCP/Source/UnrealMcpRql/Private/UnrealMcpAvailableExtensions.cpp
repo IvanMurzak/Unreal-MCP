@@ -32,8 +32,9 @@ namespace
 					"pcgTemplates, pcg | call CreateGraph / AddNode / Connect / SetNodeSetting / SetParameter / SpawnVolume / Generate"),
 				{ TEXT("pcg") }, true },
 			{ TEXT("com.ivanmurzak.unreal-ai-gas"), TEXT("GAS Tools"), TEXT("UnrealAIGAS"),
-				TEXT("Gameplay Ability System: gasAbilities, gasEffects, gasAttributeSets, granted abilities, gas | call GrantAbility"),
-				{ TEXT("gas$"), TEXT("gasabilit"), TEXT("gaseffect"), TEXT("gasattribute"), TEXT("gameplayabilit"), TEXT("gameplayeffect"),
+				TEXT("Gameplay Ability System authoring without C++: a ready-made Health / Mana / Stamina attribute set, gas | call CreateEffect / "
+					"AddModifier / CreateAbility / SetCost / SetCooldown / AddAbilitySystem / BindAbilityInput / ActivateAbility; gasAbilities, gasEffects, gasComponents"),
+				{ TEXT("gas$"), TEXT("gasabilit"), TEXT("gaseffect"), TEXT("gasattribute"), TEXT("gascomponent"), TEXT("gameplayabilit"), TEXT("gameplayeffect"),
 					TEXT("attributeset"), TEXT("abilitysystem"), TEXT("grantability") }, true },
 			{ TEXT("com.ivanmurzak.unreal-ai-landscape"), TEXT("Landscape Tools"), TEXT("UnrealAILandscape"),
 				TEXT("Landscape and Water: landscapes, waterBodies, waterZones, landscape | call Create / Sculpt / Paint / CreateLayerMaterial / Surface (ground height and slope) / Rebuild"),

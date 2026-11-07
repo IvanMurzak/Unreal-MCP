@@ -1,0 +1,10 @@
+{
+  "description": "the fireball has a 30 s cooldown granting its tag (long enough to read it in Play In Editor)",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "gas | call SetCooldown(\"/Game/E2EGAS/GA_Fireball\", 30, \"E2E.GAS.Cooldown\")"
+  },
+  "assert": {
+    "pattern": "30s cooldown: .*GA_Fireball_Cooldown grants E2E\\.GAS\\.Cooldown"
+  }
+}

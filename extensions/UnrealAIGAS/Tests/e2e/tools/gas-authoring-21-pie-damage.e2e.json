@@ -1,0 +1,10 @@
+{
+  "description": "25 damage through SetByCaller lowers health",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "gas | call ApplyEffect(\"/Game/E2EGAS/GE_Damage\", \"E2E_Hero\", \"Damage=25\")"
+  },
+  "assert": {
+    "pattern": "Health 100 -> 75"
+  }
+}

@@ -1,13 +1,15 @@
 {
   "extensionId": "com.ivanmurzak.unreal-ai-gas",
   "name": "GAS Tools",
-  "description": "RQL module for Unreal's Gameplay Ability System: query ability, effect and attribute-set classes and granted abilities, grant abilities to actors.",
+  "description": "Gameplay Ability System authoring without project C++: create Gameplay Effects (cost, cooldown, damage via SetByCaller, periodic regeneration, stacking, tags), ability Blueprints with cost / cooldown / tags / projectiles, give Blueprint actors an ability system component with attributes (a ready-made Health / Mana / Stamina attribute set), starting abilities, effects and Enhanced Input bindings; activate abilities, apply effects and read attributes in Play In Editor; query abilities, effects and attribute sets.",
   "pluginName": "UnrealAIGAS",
   "repo": "IvanMurzak/Unreal-MCP",
   "version": "0.2.0",
   "minCoreVersion": "0.26.0",
   "enginePlugins": [
-    "GameplayAbilities"
+    "GameplayAbilities",
+    "EnhancedInput",
+    "GameplayTagsEditor"
   ],
   "tools": [],
   "_comment": "Install-catalog metadata (one unreal-mcp-cli ExtensionDescriptor). 'version' is the .uplugin VersionName; change both with `python scripts/extension_release.py bump --plugin <Plugin> --version <x.y.z>`. 'tools' is empty: the extension adds an RQL module (docs/rql.md), not MCP tools. 'minCoreVersion' is the lowest supported Unreal-MCP core; 'enginePlugins' are the engine plugins the installer enables."

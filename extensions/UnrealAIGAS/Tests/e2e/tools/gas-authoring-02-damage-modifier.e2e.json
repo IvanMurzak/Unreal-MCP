@@ -1,0 +1,10 @@
+{
+  "description": "the damage effect adds a SetByCaller amount to the Damage meta attribute",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "gas | call AddModifier(\"/Game/E2EGAS/GE_Damage\", \"Damage\", \"Add\", \"SetByCaller\")"
+  },
+  "assert": {
+    "pattern": "\\)\\|1\\b"
+  }
+}

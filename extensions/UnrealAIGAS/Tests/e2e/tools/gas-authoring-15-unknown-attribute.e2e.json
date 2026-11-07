@@ -1,0 +1,11 @@
+{
+  "description": "an unknown attribute fails naming the known ones",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "gas | call AddModifier(\"/Game/E2EGAS/GE_Damage\", \"Manna\")"
+  },
+  "expectError": true,
+  "assert": {
+    "pattern": "UnrealAIAttributeSet\\.Mana"
+  }
+}

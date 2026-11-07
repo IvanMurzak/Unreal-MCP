@@ -1,0 +1,10 @@
+{
+  "description": "the placed hero removed",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "actors | where Label == \"E2E_Hero\" | call Destroy()"
+  },
+  "assert": {
+    "pattern": "Destroy\\(\\)"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "description": "mana regeneration applied when the hero begins play",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "gas | call AddStartingEffect(\"/Game/E2EGAS/BP_Hero\", \"/Game/E2EGAS/GE_ManaRegen\")"
+  },
+  "assert": {
+    "pattern": "GE_ManaRegen_C"
+  }
+}

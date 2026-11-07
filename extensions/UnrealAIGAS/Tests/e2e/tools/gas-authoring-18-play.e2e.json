@@ -1,0 +1,10 @@
+{
+  "description": "Play In Editor started",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "editor | set IsPlaying = true"
+  },
+  "assert": {
+    "pattern": "IsPlaying\\|false\\|true"
+  }
+}

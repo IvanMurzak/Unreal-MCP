@@ -3,7 +3,7 @@
   "Version": 3,
   "VersionName": "0.2.0",
   "FriendlyName": "Unreal AI GAS",
-  "Description": "RQL module for Unreal's Gameplay Ability System: query ability, effect and attribute-set classes and granted abilities, grant abilities to actors. An AI Game Developer (Unreal-MCP) extension: an IUnrealMcpRqlModule that agents use through rql-query / rql-mutate / rql-schema.",
+  "Description": "Gameplay Ability System authoring without project C++: create Gameplay Effects (cost, cooldown, damage via SetByCaller, periodic regeneration, stacking, tags), ability Blueprints with cost / cooldown / tags / projectiles, give Blueprint actors an ability system component with attributes (a ready-made Health / Mana / Stamina attribute set), starting abilities, effects and Enhanced Input bindings; activate abilities, apply effects and read attributes in Play In Editor; query abilities, effects and attribute sets. A generic attribute set, ability, projectile and ability system component ship in its runtime module. An AI Game Developer (Unreal-MCP) extension: an IUnrealMcpRqlModule that agents use through rql-query / rql-mutate / rql-schema.",
   "Category": "AI",
   "CreatedBy": "IvanMurzak/Unreal-AI-GAS",
   "CreatedByURL": "https://github.com/IvanMurzak/Unreal-AI-GAS",
@@ -15,6 +15,11 @@
   "IsExperimentalVersion": false,
   "Installed": false,
   "Modules": [
+    {
+      "Name": "UnrealAIGASRuntime",
+      "Type": "Runtime",
+      "LoadingPhase": "Default"
+    },
     {
       "Name": "UnrealAIGAS",
       "Type": "Editor",
@@ -28,6 +33,14 @@
     },
     {
       "Name": "GameplayAbilities",
+      "Enabled": true
+    },
+    {
+      "Name": "EnhancedInput",
+      "Enabled": true
+    },
+    {
+      "Name": "GameplayTagsEditor",
       "Enabled": true
     }
   ]

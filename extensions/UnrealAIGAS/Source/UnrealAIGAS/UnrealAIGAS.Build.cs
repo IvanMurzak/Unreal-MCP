@@ -18,7 +18,7 @@ public class UnrealAIGAS : ModuleRules
 		{
 			"CoreUObject",
 			"Engine",
-			// FJsonValue: the GrantedAbilities member.
+			// FJsonValue: the GrantedAbilities / Attributes / OwnedTags / ActiveEffects members.
 			"Json",
 			// The RQL module seam: IUnrealMcpRqlModule.h (sources, operations, members, guides, the editor-module template)
 			// and UnrealMcpRqlTools.h (the specs run plans) live in the Unreal-MCP plugin's UnrealMcpRql module; the
@@ -26,9 +26,21 @@ public class UnrealAIGAS : ModuleRules
 			"UnrealMcpRql",
 
 			// The gating engine plugin's runtime module (its { "Name": "GameplayAbilities" } entry is in the .uplugin
-			// "Plugins" array): UGameplayAbility / UGameplayEffect / UAttributeSet for the class-default sources,
-			// UAbilitySystemComponent for GrantedAbilities and the GrantAbility operation.
+			// "Plugins" array): abilities, effects and their components, attribute sets, the AbilitySystemComponent.
 			"GameplayAbilities",
+			"GameplayTags",
+			"GameplayTasks",
+			// The extension's runtime classes (UnrealAIAttributeSet, UnrealAIAbilitySystemComponent, UnrealAIGameplayAbility, ...).
+			"UnrealAIGASRuntime",
+			// The operations: Blueprint assets and their components (UnrealEd, Kismet utilities), new tags in the tag ini
+			// (GameplayTagsEditor plugin), input actions / mapping contexts and keys (EnhancedInput, InputCore), the project
+			// file (Projects: EnableGameplayAbilities), new assets (AssetRegistry).
+			"UnrealEd",
+			"GameplayTagsEditor",
+			"EnhancedInput",
+			"InputCore",
+			"Projects",
+			"AssetRegistry",
 		});
 	}
 }

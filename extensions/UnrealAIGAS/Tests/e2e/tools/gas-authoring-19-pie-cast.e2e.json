@@ -1,0 +1,10 @@
+{
+  "description": "the fireball cast in the running game costs 20 mana",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "gas | call ActivateAbility(\"/Game/E2EGAS/GA_Fireball\", \"E2E_Hero\")"
+  },
+  "assert": {
+    "pattern": "activated: .*Mana 100 -> 80"
+  }
+}
