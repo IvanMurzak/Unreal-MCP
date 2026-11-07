@@ -1,0 +1,10 @@
+{
+  "description": "another seed: another variant",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "pcg | call Generate(\"E2E_PCGForest\", 11)"
+  },
+  "assert": {
+    "pattern": "Instances\\W{0,4}[1-9].*Seed\\W{0,4}11"
+  }
+}

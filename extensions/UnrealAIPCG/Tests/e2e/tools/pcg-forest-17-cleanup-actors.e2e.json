@@ -1,0 +1,10 @@
+{
+  "description": "the test volume and road removed from the level",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "actors | where Label in [\"E2E_PCGForest\", \"E2E_PCGRoad\"] | call Destroy()"
+  },
+  "assert": {
+    "pattern": "Destroy\\(\\).*(Actor|PCGVolume)#\\d+\\|null.*(Actor|PCGVolume)#\\d+\\|null"
+  }
+}

@@ -1,10 +1,10 @@
 {
-  "description": "Generate among the operations",
+  "description": "the authoring operations (SetNodeSetting, BindParameter) among the operations",
   "tool": "rql-schema",
   "input": {
     "type": "PCGOperations"
   },
   "assert": {
-    "pattern": "Generate"
+    "pattern": "SetNodeSetting.*BindParameter|BindParameter.*SetNodeSetting"
   }
 }
