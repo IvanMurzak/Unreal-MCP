@@ -1,0 +1,177 @@
+README.md
+  s_7882418ace25db::t_ce4878c47ee8e4 327
+UnrealMCP/Source/UnrealMcpRql/Private/UnrealMcpAvailableExtensions.cpp
+  s_7882418ace25db::t_aedbcf831e9e99 24-26,28-29,31-32
+UnrealMCP/Source/UnrealMcpRql/Private/UnrealMcpRqlSession.cpp
+  s_7882418ace25db::t_1111d8ae546e1a 389,391
+extensions/UnrealAIEnhancedInput/README.md
+  s_b4e88c47e182f2::t_b013879b639dd6 3,34-43,46-58,61
+extensions/UnrealAIEnhancedInput/Source/UnrealAIEnhancedInput/Private/Tests/UnrealAIEnhancedInputSpec.cpp
+  s_b4e88c47e182f2::t_d84efed819eec5 16,47-52,93-94,99,143-198,267-270,470-486,572,606-854
+extensions/UnrealAIEnhancedInput/Source/UnrealAIEnhancedInput/Private/UnrealAIEnhancedInputGraph.cpp
+  s_7882418ace25db::t_63de8286fc7af9 1-864
+extensions/UnrealAIEnhancedInput/Source/UnrealAIEnhancedInput/Private/UnrealAIEnhancedInputGraph.h
+  s_7882418ace25db::t_7e4cf27926969b 1-66
+extensions/UnrealAIEnhancedInput/Source/UnrealAIEnhancedInput/Private/UnrealAIEnhancedInputModule.cpp
+  s_b4e88c47e182f2::t_dee455727b1acf 9-10,13,16,21,23-25,31,38,68-76,78-80,82-85,88-89,92-151,154-158,161-163,165-168,171-179,183-196
+extensions/UnrealAIEnhancedInput/Source/UnrealAIEnhancedInput/Private/UnrealAIEnhancedInputRows.cpp
+  s_7882418ace25db::t_fb3f0ec68f2e77 1-136
+extensions/UnrealAIEnhancedInput/Source/UnrealAIEnhancedInput/Private/UnrealAIEnhancedInputRows.h
+  s_7882418ace25db::t_c550b015319e08 1-116
+extensions/UnrealAIEnhancedInput/Source/UnrealAIEnhancedInput/Private/UnrealAIEnhancedInputRqlApi.cpp
+  s_7882418ace25db::t_4d107d8c153885 6-8,13-17,29-31,49-50,54-55,57-63,65-67,69-72,75-76,78-80,83-84,86-87,90-94,96-102,105-106,108,111-112,114,117-118,120-122,125-126,128-131,134-135,137-143,146-147,149-153,159,161-164,166-170,179,182-184,188-190,206-211,213-214,220-326,330,333-340,344-357,359-363,366,369-381,383-387,389-395,398,400-402,404-413,415-416,485-489,492,494
+extensions/UnrealAIEnhancedInput/Source/UnrealAIEnhancedInput/Private/UnrealAIEnhancedInputRqlApi.h
+  s_7882418ace25db::t_82454a60310142 23,31-33,35,37,41-43,45,51-84,86,90-97,102-114
+extensions/UnrealAIEnhancedInput/Source/UnrealAIEnhancedInput/Private/UnrealAIEnhancedInputText.cpp
+  s_7882418ace25db::t_11e3e57bbe964f 1-559
+extensions/UnrealAIEnhancedInput/Source/UnrealAIEnhancedInput/Private/UnrealAIEnhancedInputText.h
+  s_7882418ace25db::t_21e6961a17b135 1-78
+extensions/UnrealAIEnhancedInput/Source/UnrealAIEnhancedInput/UnrealAIEnhancedInput.Build.cs
+  s_7882418ace25db::t_8eb22789dda96f 21,23-26
+extensions/UnrealAIEnhancedInput/Tests/e2e/tools/enhanced-input-operations-schema.e2e.json
+  s_7882418ace25db::t_a5129a4a157a4a 2,8
+extensions/UnrealAIEnhancedInput/Tests/e2e/tools/enhanced-input-scheme-01-actions.e2e.json
+  s_7882418ace25db::t_f4c7fcba38cd36 1-10
+extensions/UnrealAIEnhancedInput/Tests/e2e/tools/enhanced-input-scheme-02-contexts.e2e.json
+  s_7882418ace25db::t_aac8e76ea93774 1-10
+extensions/UnrealAIEnhancedInput/Tests/e2e/tools/enhanced-input-scheme-03-move.e2e.json
+  s_7882418ace25db::t_24530f7ac0861e 1-10
+extensions/UnrealAIEnhancedInput/Tests/e2e/tools/enhanced-input-scheme-04-on-foot.e2e.json
+  s_7882418ace25db::t_79d48eeac9e4db 1-10
+extensions/UnrealAIEnhancedInput/Tests/e2e/tools/enhanced-input-scheme-05-vehicle.e2e.json
+  s_7882418ace25db::t_b7f811c67900ab 1-10
+extensions/UnrealAIEnhancedInput/Tests/e2e/tools/enhanced-input-scheme-06-hold.e2e.json
+  s_7882418ace25db::t_7527375b140fa3 1-10
+extensions/UnrealAIEnhancedInput/Tests/e2e/tools/enhanced-input-scheme-07-mappable.e2e.json
+  s_7882418ace25db::t_aa82b2069d6898 1-10
+extensions/UnrealAIEnhancedInput/Tests/e2e/tools/enhanced-input-scheme-08-user-settings.e2e.json
+  s_7882418ace25db::t_e966713db29eaf 1-10
+extensions/UnrealAIEnhancedInput/Tests/e2e/tools/enhanced-input-scheme-09-hero.e2e.json
+  s_7882418ace25db::t_dcd77257a49342 1-11
+extensions/UnrealAIEnhancedInput/Tests/e2e/tools/enhanced-input-scheme-10-car.e2e.json
+  s_7882418ace25db::t_83e1b345e5e812 1-11
+extensions/UnrealAIEnhancedInput/Tests/e2e/tools/enhanced-input-scheme-11-possess.e2e.json
+  s_7882418ace25db::t_0727f8a56cc7fb 1-10
+extensions/UnrealAIEnhancedInput/Tests/e2e/tools/enhanced-input-scheme-12-sprint-start.e2e.json
+  s_7882418ace25db::t_c7b625b8e80791 1-10
+extensions/UnrealAIEnhancedInput/Tests/e2e/tools/enhanced-input-scheme-13-sprint-stop.e2e.json
+  s_7882418ace25db::t_919f70348dcc07 1-10
+extensions/UnrealAIEnhancedInput/Tests/e2e/tools/enhanced-input-scheme-14-bind.e2e.json
+  s_7882418ace25db::t_806ab71aa01db3 1-10
+extensions/UnrealAIEnhancedInput/Tests/e2e/tools/enhanced-input-scheme-15-toggle.e2e.json
+  s_7882418ace25db::t_92a4e1dabd9865 1-10
+extensions/UnrealAIEnhancedInput/Tests/e2e/tools/enhanced-input-scheme-16-car-bind.e2e.json
+  s_7882418ace25db::t_634427e1a09f0a 1-10
+extensions/UnrealAIEnhancedInput/Tests/e2e/tools/enhanced-input-scheme-17-compile-hero.e2e.json
+  s_7882418ace25db::t_8ad00d21648827 1-10
+extensions/UnrealAIEnhancedInput/Tests/e2e/tools/enhanced-input-scheme-18-compile-car.e2e.json
+  s_7882418ace25db::t_a45e929653ce0b 1-10
+extensions/UnrealAIEnhancedInput/Tests/e2e/tools/enhanced-input-scheme-19-readback-mappings.e2e.json
+  s_7882418ace25db::t_0805b41096e250 1-10
+extensions/UnrealAIEnhancedInput/Tests/e2e/tools/enhanced-input-scheme-20-readback-setup.e2e.json
+  s_7882418ace25db::t_38031f61ac1899 1-10
+extensions/UnrealAIEnhancedInput/Tests/e2e/tools/enhanced-input-scheme-21-readback-mappable.e2e.json
+  s_7882418ace25db::t_76d78a108c621f 1-10
+extensions/UnrealAIEnhancedInput/Tests/e2e/tools/enhanced-input-scheme-22-unknown-trigger.e2e.json
+  s_7882418ace25db::t_493526002c5f8b 1-11
+extensions/UnrealAIEnhancedInput/Tests/e2e/tools/enhanced-input-scheme-99-cleanup-settings.e2e.json
+  s_7882418ace25db::t_a6bf10b44c4363 1-10
+extensions/UnrealAIEnhancedInput/Tests/e2e/tools/enhanced-input-scheme-99-cleanup-zassets.e2e.json
+  s_7882418ace25db::t_f1280789353d22 1-10
+extensions/UnrealAIEnhancedInput/UnrealAIEnhancedInput.uplugin
+  s_7882418ace25db::t_97beb1f28e0d42 6
+extensions/UnrealAIEnhancedInput/extension.json
+  s_7882418ace25db::t_60f78c2c574ce6 4
+extensions/UnrealAIPCG/README.md
+  s_7882418ace25db::t_4336559812b86d 3,11,30,34-36,39-49,52-57
+extensions/UnrealAIPCG/Source/UnrealAIPCG/Private/Tests/UnrealAIPCGSpec.cpp
+  s_7882418ace25db::t_a194d4ef8db9b2 17-18,20-21,23-28,35-37,42-139,269-530
+extensions/UnrealAIPCG/Source/UnrealAIPCG/Private/UnrealAIPCGCatalog.cpp
+  s_7882418ace25db::t_99cfdb89152e4a 1-220
+extensions/UnrealAIPCG/Source/UnrealAIPCG/Private/UnrealAIPCGCatalog.h
+  s_7882418ace25db::t_02b0fc2929abbc 1-98
+extensions/UnrealAIPCG/Source/UnrealAIPCG/Private/UnrealAIPCGGraphEdit.cpp
+  s_7882418ace25db::t_38b504c9795eda 1-1147
+extensions/UnrealAIPCG/Source/UnrealAIPCG/Private/UnrealAIPCGGraphEdit.h
+  s_7882418ace25db::t_22b6eddbed9a31 1-103
+extensions/UnrealAIPCG/Source/UnrealAIPCG/Private/UnrealAIPCGModule.cpp
+  s_7882418ace25db::t_75c4e8d9b6e652 9-10,16,19-23,37-44,46-80,83-84,86-99,112-145,148-168,171-186
+extensions/UnrealAIPCG/Source/UnrealAIPCG/Private/UnrealAIPCGRqlApi.cpp
+  s_7882418ace25db::t_bc7b55dd773230 7-8,10-14,16-21,23,25-497,506,510,512-513,516-647
+extensions/UnrealAIPCG/Source/UnrealAIPCG/Private/UnrealAIPCGRqlApi.h
+  s_7882418ace25db::t_ab6d1f9187ee2d 15-61,63-68,76-111,116-128,130
+extensions/UnrealAIPCG/Source/UnrealAIPCG/UnrealAIPCG.Build.cs
+  s_7882418ace25db::t_94997470c57801 21,29,31-35
+extensions/UnrealAIPCG/Tests/e2e/tools/pcg-forest-01-road.e2e.json
+  s_7882418ace25db::t_aeef685d395476 1-10
+extensions/UnrealAIPCG/Tests/e2e/tools/pcg-forest-02-road-spline.e2e.json
+  s_7882418ace25db::t_2c798eb9289e5d 1-10
+extensions/UnrealAIPCG/Tests/e2e/tools/pcg-forest-03-road-tag.e2e.json
+  s_7882418ace25db::t_abd188f159c64a 1-10
+extensions/UnrealAIPCG/Tests/e2e/tools/pcg-forest-04-graph.e2e.json
+  s_7882418ace25db::t_d246f1de47a732 1-10
+extensions/UnrealAIPCG/Tests/e2e/tools/pcg-forest-05-nodes.e2e.json
+  s_7882418ace25db::t_33e0f2ae527db4 1-10
+extensions/UnrealAIPCG/Tests/e2e/tools/pcg-forest-06-connect.e2e.json
+  s_7882418ace25db::t_ff2f91df35daf7 1-10
+extensions/UnrealAIPCG/Tests/e2e/tools/pcg-forest-07-settings.e2e.json
+  s_7882418ace25db::t_4cf71447f9760c 1-10
+extensions/UnrealAIPCG/Tests/e2e/tools/pcg-forest-08-parameter.e2e.json
+  s_7882418ace25db::t_a01f6764c7f21c 1-10
+extensions/UnrealAIPCG/Tests/e2e/tools/pcg-forest-09-bind.e2e.json
+  s_7882418ace25db::t_01280015e1ec62 1-10
+extensions/UnrealAIPCG/Tests/e2e/tools/pcg-forest-10-volume.e2e.json
+  s_7882418ace25db::t_5f06caadcf42ac 1-10
+extensions/UnrealAIPCG/Tests/e2e/tools/pcg-forest-11-generate.e2e.json
+  s_7882418ace25db::t_30e1addb806fa0 1-10
+extensions/UnrealAIPCG/Tests/e2e/tools/pcg-forest-12-variant.e2e.json
+  s_7882418ace25db::t_74ad182fab5c86 1-10
+extensions/UnrealAIPCG/Tests/e2e/tools/pcg-forest-13-counts.e2e.json
+  s_7882418ace25db::t_abf8f7a7449b0e 1-10
+extensions/UnrealAIPCG/Tests/e2e/tools/pcg-forest-14-graph-query.e2e.json
+  s_7882418ace25db::t_981be596f6ea04 1-10
+extensions/UnrealAIPCG/Tests/e2e/tools/pcg-forest-15-unknown-setting.e2e.json
+  s_7882418ace25db::t_865cdefd179ea1 1-11
+extensions/UnrealAIPCG/Tests/e2e/tools/pcg-forest-16-cleanup-generated.e2e.json
+  s_7882418ace25db::t_13e88bc9014330 1-10
+extensions/UnrealAIPCG/Tests/e2e/tools/pcg-forest-17-cleanup-actors.e2e.json
+  s_7882418ace25db::t_1e891a485daccd 1-10
+extensions/UnrealAIPCG/Tests/e2e/tools/pcg-forest-18-cleanup-asset.e2e.json
+  s_7882418ace25db::t_8454600b066a84 1-10
+extensions/UnrealAIPCG/Tests/e2e/tools/pcg-operations-schema.e2e.json
+  s_7882418ace25db::t_3babb6290aba19 2,8
+extensions/UnrealAIPCG/UnrealAIPCG.uplugin
+  s_7882418ace25db::t_dd47f6966359fb 6
+extensions/UnrealAIPCG/extension.json
+  s_7882418ace25db::t_ab1cbee933205c 4
+scripts/test_run_extension_e2e.py
+  s_7882418ace25db::t_0a3a537518763e 50-64,91-218,227,239-240
+tests/automation-inventory.json
+  s_b4e88c47e182f2::t_addf556d26dc52 3,7
+tests/chain-fixtures/5.8/tools.jsonl
+  s_7882418ace25db::t_dc1c0d20da9330 29
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "6202b281997daae39e10142aa0fbe04be844aefa",
+  "prompts": {},
+  "sessions": {
+    "s_7882418ace25db": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1b7f0-b6d2-7a63-bade-fcacdadce5e5",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_b4e88c47e182f2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ef0d1b43-913a-487a-95df-8feba021ec1f",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

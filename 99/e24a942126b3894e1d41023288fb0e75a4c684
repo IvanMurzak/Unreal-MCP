@@ -1,0 +1,37 @@
+UnrealMCP/Source/UnrealMcpRql/Private/UnrealMcpRqlPlay.cpp
+  s_b4e88c47e182f2::t_3022dfd6734cca 187-189,196-201
+  s_b4e88c47e182f2::t_4037d31eea7576 341,348-356
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpSourceToolsSpec.cpp
+  s_b4e88c47e182f2::t_25ebee305b57b8 221
+  s_b4e88c47e182f2::t_e724796caf9853 217,220,222-223
+UnrealMCP/Source/UnrealMcpEditor/Private/Tools/UnrealMcpSourceTools.cpp
+  s_b4e88c47e182f2::t_01499ea4743a53 67-68,98-101,112-113,123-128,131,622,901-904,921-925,927-930,936,960-961,977-979,1071-1074,1084,1095,1100
+UnrealMCP/Source/UnrealMcpEditor/Private/Tools/UnrealMcpSourceTools.h
+  s_b4e88c47e182f2::t_6317cc309a34de 66-67,70
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpRqlPlaySpec.cpp
+  s_b4e88c47e182f2::t_ab170ef146c497 41,54,72-76
+UnrealMCP/Source/UnrealMcpRql/Private/UnrealMcpRqlSession.cpp
+  s_b4e88c47e182f2::t_2a0b80e17a8b41 531-533,598
+docs/ARCHITECTURE.md
+  s_b4e88c47e182f2::t_ee8b9305160da8 1238-1239
+extensions/UnrealAIEnhancedInput/Source/UnrealAIEnhancedInput/Private/Tests/UnrealAIEnhancedInputSpec.cpp
+  s_b4e88c47e182f2::t_9ce623d7c8c07e 68,435-439,468,507-513
+extensions/UnrealAIEnhancedInput/Source/UnrealAIEnhancedInput/Private/UnrealAIEnhancedInputRqlApi.cpp
+  s_b4e88c47e182f2::t_1297ac98e2ea8d 480-489,495-496,500-501,503-507,510
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "99e24a942126b3894e1d41023288fb0e75a4c684",
+  "prompts": {},
+  "sessions": {
+    "s_b4e88c47e182f2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ef0d1b43-913a-487a-95df-8feba021ec1f",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

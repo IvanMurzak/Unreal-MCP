@@ -1,0 +1,109 @@
+extensions/UnrealAIPCG/Source/UnrealAIPCG/Private/UnrealAIPCGModule.cpp
+  s_b4e88c47e182f2::t_d93ea4dd274df6 9-10,16,19-23,37-44,46-49,51,54-57,59-92,94-107,120-153,156-176,179-189
+  s_b4e88c47e182f2::t_61b3d943450c7f 190-192
+  s_6d3d6a83accc4f::t_b449ddb4e75c7e 193-194
+extensions/UnrealAIPCG/Source/UnrealAIPCG/Private/UnrealAIPCGCatalog.cpp
+  s_b4e88c47e182f2::t_a4b1e4f4897bdc 1-222
+extensions/UnrealAIPCG/Source/UnrealAIPCG/Private/UnrealAIPCGRqlApi.cpp
+  s_b4e88c47e182f2::t_84cd4bc9b0c9ac 7-8,10-14,16-21,23,25-478,487,491,493-494,497-612
+extensions/UnrealAIPCG/Source/UnrealAIPCG/Private/UnrealAIPCGGraphEdit.cpp
+  s_b4e88c47e182f2::t_a9837866676589 1-56,59,62,64-66,68-69,84-88,91-117,121-614,616-636,640-650,652-659,661,663-674,677-1066
+  s_b4e88c47e182f2::t_a4e3b9795aef2e 118-120
+  s_b4e88c47e182f2::t_c47bfef6c6876e 70-83,89-90
+  s_b4e88c47e182f2::t_0b804acbe3de7f 57-58,60-61,63,67,615,637-639,651,660,662,675-676,1067-1068
+extensions/UnrealAIPCG/Source/UnrealAIPCG/Private/UnrealAIPCGRqlApi.h
+  s_b4e88c47e182f2::t_b7d2931a559885 15-61,63-68,76-111,116-128,130
+extensions/UnrealAIPCG/Source/UnrealAIPCG/Private/UnrealAIPCGGraphEdit.h
+  s_b4e88c47e182f2::t_ff230453f056a2 22
+  s_b4e88c47e182f2::t_3adff3e7e4ad17 1-21,23-82
+extensions/UnrealAIPCG/Source/UnrealAIPCG/Private/Tests/UnrealAIPCGSpec.cpp
+  s_b4e88c47e182f2::t_9ed4b358c50f3a 17-18,20-21,23-30
+  s_b4e88c47e182f2::t_c0523de706c91f 84-90
+  s_b4e88c47e182f2::t_8ed8a68fae8f35 114-115
+  s_b4e88c47e182f2::t_915949e16e8f8c 47,60,63,83,94,99,102,110,116,125,130,132,134,137,272-329,400,403,408,434,437,453,466,469,491,493,496-497,499,502,507,531
+  s_b4e88c47e182f2::t_5dfbf9fea2777c 37-39,44-46,48-59,61-62,64-82,91-93,95-98,100-101,103-109,111-113,117-124,126-129,131,133,135-136,138-141,271,330-399,401-402,404-407,409-433,435-436,438-452,454-465,467-468,470-490,492,494-495,498,500-501,503-506,508-530
+extensions/UnrealAIPCG/Source/UnrealAIPCG/Private/UnrealAIPCGCatalog.h
+  s_b4e88c47e182f2::t_b97faa4b47a11e 1-98
+extensions/UnrealAIPCG/README.md
+  s_b4e88c47e182f2::t_6ef58d73eafec0 3,11,30,34-36,39-49,52-57
+extensions/UnrealAIPCG/Source/UnrealAIPCG/UnrealAIPCG.Build.cs
+  s_b4e88c47e182f2::t_7982f7be4a2223 21,29,31-35
+extensions/UnrealAIPCG/Tests/e2e/tools/pcg-forest-01-terrain.e2e.json
+  s_b4e88c47e182f2::t_cc8cf79436dd80 1-10
+extensions/UnrealAIPCG/Tests/e2e/tools/pcg-forest-02-hills.e2e.json
+  s_b4e88c47e182f2::t_3b871ce227eb17 1-10
+extensions/UnrealAIPCG/Tests/e2e/tools/pcg-forest-03-road.e2e.json
+  s_b4e88c47e182f2::t_0c9e48d25626d7 1-10
+extensions/UnrealAIPCG/Tests/e2e/tools/pcg-forest-04-road-spline.e2e.json
+  s_b4e88c47e182f2::t_8612522f52ddb8 1-10
+extensions/UnrealAIPCG/Tests/e2e/tools/pcg-forest-05-road-tag.e2e.json
+  s_b4e88c47e182f2::t_6650b4833e3345 1-10
+extensions/UnrealAIPCG/Tests/e2e/tools/pcg-forest-06-graph.e2e.json
+  s_b4e88c47e182f2::t_e4ebd2f639c54e 1-10
+extensions/UnrealAIPCG/Tests/e2e/tools/pcg-forest-07-nodes.e2e.json
+  s_b4e88c47e182f2::t_bb412bd190c65b 1-10
+extensions/UnrealAIPCG/Tests/e2e/tools/pcg-forest-08-connect.e2e.json
+  s_b4e88c47e182f2::t_b35350679db956 1-10
+extensions/UnrealAIPCG/Tests/e2e/tools/pcg-forest-09-settings.e2e.json
+  s_b4e88c47e182f2::t_c5a8c2d599ff3e 1-10
+extensions/UnrealAIPCG/Tests/e2e/tools/pcg-forest-10-parameter.e2e.json
+  s_b4e88c47e182f2::t_d71720f980c613 1-10
+extensions/UnrealAIPCG/Tests/e2e/tools/pcg-forest-11-bind.e2e.json
+  s_b4e88c47e182f2::t_941da3423e27e3 1-10
+extensions/UnrealAIPCG/Tests/e2e/tools/pcg-forest-12-volume.e2e.json
+  s_b4e88c47e182f2::t_de4f08c0ce1252 1-10
+extensions/UnrealAIPCG/Tests/e2e/tools/pcg-forest-13-generate.e2e.json
+  s_b4e88c47e182f2::t_9c751d6b12201e 1-10
+extensions/UnrealAIPCG/Tests/e2e/tools/pcg-forest-14-variant.e2e.json
+  s_b4e88c47e182f2::t_caae56ed4c166d 1-10
+extensions/UnrealAIPCG/Tests/e2e/tools/pcg-forest-15-counts.e2e.json
+  s_b4e88c47e182f2::t_73aae5cd7d078c 1-10
+extensions/UnrealAIPCG/Tests/e2e/tools/pcg-forest-16-graph-query.e2e.json
+  s_b4e88c47e182f2::t_54def481a8963d 1-10
+extensions/UnrealAIPCG/Tests/e2e/tools/pcg-forest-17-unknown-setting.e2e.json
+  s_b4e88c47e182f2::t_b6d7241672f483 1-11
+extensions/UnrealAIPCG/Tests/e2e/tools/pcg-forest-18-cleanup-generated.e2e.json
+  s_b4e88c47e182f2::t_449ae6d5ac50f8 1-10
+extensions/UnrealAIPCG/Tests/e2e/tools/pcg-forest-19-cleanup-actors.e2e.json
+  s_b4e88c47e182f2::t_f0a90629181c61 1-10
+extensions/UnrealAIPCG/Tests/e2e/tools/pcg-forest-20-cleanup-asset.e2e.json
+  s_b4e88c47e182f2::t_845beff185473f 1-10
+extensions/UnrealAIPCG/Tests/e2e/tools/pcg-operations-schema.e2e.json
+  s_b4e88c47e182f2::t_ce74b4f05d7330 2,8
+scripts/test_run_extension_e2e.py
+  s_b4e88c47e182f2::t_88c377bb84b1a0 50-64,91-143,152,164
+tests/automation-inventory.json
+  s_b4e88c47e182f2::t_427082aae765d0 7
+README.md
+  s_6d3d6a83accc4f::t_59d4666bb5ee06 324
+UnrealMCP/Source/UnrealMcpRql/Private/UnrealMcpAvailableExtensions.cpp
+  s_6d3d6a83accc4f::t_9c10cde2e785b5 29-30
+extensions/UnrealAIPCG/UnrealAIPCG.uplugin
+  s_6d3d6a83accc4f::t_209947d3166860 6
+extensions/UnrealAIPCG/extension.json
+  s_6d3d6a83accc4f::t_c2bfc8cead61e7 4
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "17f282d52daca84204d53c30d9c942994ccc30cc",
+  "prompts": {},
+  "sessions": {
+    "s_6d3d6a83accc4f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a99c0961bb384ef2b",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_b4e88c47e182f2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ef0d1b43-913a-487a-95df-8feba021ec1f",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
