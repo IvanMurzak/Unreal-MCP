@@ -11,6 +11,7 @@
 #include "Engine/World.h"
 #include "EngineUtils.h"               // TActorIterator
 #include "Landscape.h"                 // ALandscape (the primary landscape actor)
+#include "LandscapeHeightfieldCollisionComponent.h" // the collision heightfields (Bounds)
 #include "LandscapeInfo.h"             // ULandscapeInfo + FLandscapeInfoLayerSettings (paint layers)
 #include "LandscapeProxy.h"            // ALandscapeProxy (+ streaming proxies)
 #include "Materials/MaterialInterface.h"
@@ -77,7 +78,7 @@ public:
 			AWaterZone::StaticClass(), []() { return EditorActors<AWaterZone>(); });
 
 		Context.AddApiSource(TEXT("landscape"),
-			TEXT("Landscape operations: call Create(label, location, sizeMeters, material) / Sculpt(landscape, center, radius, height) / Paint(landscape, layer, center, radius, strength) / CreateLayerMaterial(path, layers)"),
+			TEXT("Landscape operations: call Create(label, location, sizeMeters, material) / Sculpt(landscape, center, radius, height) / Paint(landscape, layer, center, radius, strength) / CreateLayerMaterial(path, layers) / Surface(landscape, point) / Rebuild(landscape)"),
 			UUnrealAILandscapeRqlApi::StaticClass(), TEXT("LandscapeOperations"));
 
 		// The fields queries filter on are scalar members; `Sections` keeps the layout together for select output.
@@ -102,6 +103,42 @@ public:
 					Out->SetNumberField(TEXT("SubsectionSizeQuads"), Proxy->SubsectionSizeQuads);
 					Out->SetNumberField(TEXT("NumSubsections"), Proxy->NumSubsections);
 				}
+				return MakeShared<FJsonValueObject>(Out);
+			});
+		Context.AddJsonMember(ALandscapeProxy::StaticClass(), TEXT("Bounds"),
+			TEXT("the whole landscape's world box (cm): Min [X, Y, Z], Max [X, Y, Z] (Z: the lowest and highest ground), SizeMeters [X, Y]"),
+			[](UObject* Object) -> TSharedPtr<FJsonValue>
+			{
+				// The loaded collision heightfields' local boxes span the ground (ULandscapeInfo::GetCompleteBounds was empty for a
+				// landscape created in the session; on a World Partition map the primary actor has no components of its own). The
+				// engine pads a flat component's box by one unit up and down: undo it, so Z is the real lowest and highest ground.
+				FBox Box(ForceInit);
+				const ALandscapeProxy* Proxy = Cast<ALandscapeProxy>(Object);
+				if (const ULandscapeInfo* Info = Proxy ? Proxy->GetLandscapeInfo() : nullptr)
+				{
+					for (const TPair<FIntPoint, ULandscapeHeightfieldCollisionComponent*>& Pair : Info->XYtoCollisionComponentMap)
+					{
+						if (!Pair.Value)
+							continue;
+						FBox Local = Pair.Value->CachedLocalBox;
+						if (FMath::IsNearlyEqual(Local.GetExtent().Z, 1.0))
+							Local.Min.Z = Local.Max.Z = Local.GetCenter().Z;
+						Box += Local.TransformBy(Pair.Value->GetComponentTransform());
+					}
+				}
+				TSharedPtr<FJsonObject> Out = MakeShared<FJsonObject>();
+				if (!Box.IsValid)
+					return MakeShared<FJsonValueObject>(Out);
+				const auto Vector = [](std::initializer_list<double> Values)
+				{
+					TArray<TSharedPtr<FJsonValue>> Items;
+					for (double Value : Values)
+						Items.Add(MakeShared<FJsonValueNumber>(FMath::RoundToDouble(Value * 10.0) / 10.0));
+					return Items;
+				};
+				Out->SetArrayField(TEXT("Min"), Vector({ Box.Min.X, Box.Min.Y, Box.Min.Z }));
+				Out->SetArrayField(TEXT("Max"), Vector({ Box.Max.X, Box.Max.Y, Box.Max.Z }));
+				Out->SetArrayField(TEXT("SizeMeters"), Vector({ (Box.Max.X - Box.Min.X) / 100.0, (Box.Max.Y - Box.Min.Y) / 100.0 }));
 				return MakeShared<FJsonValueObject>(Out);
 			});
 		Context.AddJsonMember(ALandscapeProxy::StaticClass(), TEXT("PaintLayers"), TEXT("the names of the landscape's paint layers"),
@@ -176,7 +213,23 @@ landscapes | select Label PaintLayers Sections
 ```
 
 Heights are in cm (negative Height digs a hollow); a paint layer shows when the material blends a layer of that name.
-Created materials and layer infos are unsaved: `editor | call SaveAll()`.)MD"));
+Created materials and layer infos are unsaved: `editor | call SaveAll()`.
+
+Read the ground back with `Surface` (rql-mutate, read-only) and `Bounds` instead of line traces: Create, Sculpt and
+Paint return with the landscape merged, so its collision, `Surface` and the rendered surface agree at once.
+
+```
+landscapes | where IsPrimary | select Label Bounds                                                 world box: Min/Max [X, Y, Z] cm, SizeMeters
+landscape | call Surface(unreal.find("Terrain"), [2000, 1500, 0])                                   {Inside, Height, Slope, Location, Normal}
+range(0, 100) | call landscape.Surface(unreal.find("Terrain"), [($ % 10) * 1000 - 4500, floor($ / 10) * 1000 - 4500, 0])   a 10 x 10 grid
+```
+
+`Height` is the world Z (cm) that traces and collision hit, `Slope` degrees (0 flat), `Location` a spawn point on the
+ground; off the landscape `Inside` is false. Traces from above also hit your own actors (probes, roads, trees);
+`Surface` reads only the ground. Far views draw the landscape at a lower LOD, so a thin mesh laid on the ground (a road)
+can look buried from afar: sample `Surface` every metre along it and lift it 5-10 cm, or paint the road as a layer.
+`call Rebuild(unreal.find("Terrain"))` re-merges a landscape edited elsewhere (Landscape mode, Python) and rebuilds its
+collision and Nanite mesh.)MD"));
 	}
 };
 
