@@ -5,6 +5,6 @@
     "query": "actors | where Label == \"E2E_PCGRoad\" | set Tags = [\"Road\"], Scale = \"(200, 1, 1)\""
   },
   "assert": {
-    "pattern": "Road"
+    "pattern": "Tags\\|\\[\\]\\|\\[Road\\].*\\(200, 1, 1\\)"
   }
 }

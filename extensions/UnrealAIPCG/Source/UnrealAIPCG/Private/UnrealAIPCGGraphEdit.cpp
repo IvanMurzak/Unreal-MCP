@@ -6,10 +6,9 @@
 #include "IUnrealMcpRqlModule.h"
 #include "UnrealAIPCGCatalog.h"
 
+#include "Algo/AnyOf.h"
 #include "Components/InstancedStaticMeshComponent.h"
 #include "Dom/JsonObject.h"
-#include "EdGraph/EdGraph.h"
-#include "EdGraph/EdGraphSchema.h"
 #include "Editor.h"
 #include "Elements/PCGAttributeFilter.h"
 #include "Engine/StaticMesh.h"
@@ -34,7 +33,6 @@
 #include "StructUtils/PropertyBag.h"
 #include "Subsystems/AssetEditorSubsystem.h"
 #include "Subsystems/PCGSubsystem.h"
-#include "UObject/UObjectHash.h"
 
 namespace UnrealAIPCGGraphEditLocal
 {
@@ -205,12 +203,12 @@ namespace UnrealAIPCGGraphEditLocal
 	}
 
 	/** The property of @p Owner a dotted path segment names. */
-	FProperty* FindChild(const UStruct* Owner, const FString& Segment)
+	FProperty* FindChild(const UStruct* Owner, const FString& Segment, bool bTopLevel)
 	{
 		const FString Wanted = Normalize(Segment);
 		for (TFieldIterator<FProperty> It(Owner); It; ++It)
 		{
-			if (It->HasAnyPropertyFlags(CPF_Edit) && NameMatches(**It, Wanted))
+			if (IsSetting(*It, bTopLevel) && NameMatches(**It, Wanted))
 				return *It;
 		}
 		return nullptr;
@@ -246,7 +244,7 @@ namespace UnrealAIPCGGraphEditLocal
 		FSettingPath Walked;
 		for (int32 Index = 0; Index < Segments.Num() && Owner; ++Index)
 		{
-			FProperty* Property = FindChild(Owner, Segments[Index]);
+			FProperty* Property = FindChild(Owner, Segments[Index], Index == 0);
 			if (!Property)
 			{
 				Walked.Chain.Reset();
@@ -342,9 +340,17 @@ namespace UnrealAIPCGGraphEditLocal
 		return Out.Num() > 0;
 	}
 
-	FString Number(double Value)
+	/** The shortest decimal that reads back as @p Value (0.0000004 stays 0.0000004, 0.1 stays 0.1); bFloat: as a float. */
+	FString Number(double Value, bool bFloat = false)
 	{
-		return FString::SanitizeFloat(Value, 0);
+		for (int32 Digits = 6; Digits < 17; ++Digits)
+		{
+			const FString Text = FString::Printf(TEXT("%.*g"), Digits, Value);
+			double Back = 0.0;
+			if (LexTryParseString(Back, *Text) && (bFloat ? static_cast<float>(Back) == static_cast<float>(Value) : Back == Value))
+				return Text;
+		}
+		return FString::Printf(TEXT("%.17g"), Value);
 	}
 
 	/** "(x, y, z)" (one number fills every component), "#rrggbb" for colours. */
@@ -429,7 +435,7 @@ namespace UnrealAIPCGGraphEditLocal
 		}
 		TArray<FString> Parts;
 		for (const double Value : Values)
-			Parts.Add(Number(Value));
+			Parts.Add(Number(Value, /*bFloat*/ Struct == TBaseStructure<FLinearColor>::Get()));
 		return TEXT("(") + FString::Join(Parts, TEXT(", ")) + TEXT(")");
 	}
 
@@ -453,6 +459,9 @@ namespace UnrealAIPCGGraphEditLocal
 		};
 		double Value = 0.0;
 		TArray<double> Values;
+		if (InText.TrimStartAndEnd().StartsWith(TEXT("\"")))
+			return Constant.Type == EPCGMetadataTypes::Name ? ((Constant.NameValue = FName(*Text)), true)
+				: Want(EPCGMetadataTypes::String) && ((Constant.StringValue = Text), true);
 		if (Lower == TEXT("true") || Lower == TEXT("false"))
 			return Want(EPCGMetadataTypes::Boolean) && ((Constant.BoolValue = Lower == TEXT("true")), true);
 		if (LexTryParseString(Value, *Text))
@@ -471,6 +480,10 @@ namespace UnrealAIPCGGraphEditLocal
 				return Want(EPCGMetadataTypes::Vector2) && ((Constant.Vector2Value = FVector2D(Values[0], Values[1])), true);
 			if (Values.Num() == 3 && Constant.Type == EPCGMetadataTypes::Rotator)
 				return (Constant.RotatorValue = FRotator(Values[0], Values[1], Values[2])), true;
+			if (Values.Num() == 3 && Constant.Type == EPCGMetadataTypes::Quaternion)
+				return (Constant.QuatValue = FQuat(FRotator(Values[0], Values[1], Values[2]))), true;
+			if (Values.Num() == 4 && Constant.Type == EPCGMetadataTypes::Quaternion)
+				return (Constant.QuatValue = FQuat(Values[0], Values[1], Values[2], Values[3])), true;
 			if (Values.Num() == 3)
 				return Want(EPCGMetadataTypes::Vector) && ((Constant.VectorValue = FVector(Values[0], Values[1], Values[2])), true);
 			if (Values.Num() == 4)
@@ -479,6 +492,32 @@ namespace UnrealAIPCGGraphEditLocal
 		if (Constant.Type == EPCGMetadataTypes::Name)
 			return (Constant.NameValue = FName(*Text)), true;
 		return Want(EPCGMetadataTypes::String) && ((Constant.StringValue = Text), true);
+	}
+
+	/** A constant as the text ParseConstant reads: numbers, true / false, "(x, y[, z[, w]])", rotations "(pitch, yaw, roll)", quoted text. */
+	FString FormatConstant(const FPCGMetadataTypesConstantStruct& Constant)
+	{
+		const auto Tuple = [](const TArray<double>& Values) { return TEXT("(") + FString::JoinBy(Values, TEXT(", "), [](double V) { return Number(V); }) + TEXT(")"); };
+		switch (Constant.Type)
+		{
+		case EPCGMetadataTypes::Float: return Number(Constant.FloatValue, /*bFloat*/ true);
+		case EPCGMetadataTypes::Double: return Number(Constant.DoubleValue);
+		case EPCGMetadataTypes::Integer32: return LexToString(Constant.Int32Value);
+		case EPCGMetadataTypes::Integer64: return LexToString(Constant.IntValue);
+		case EPCGMetadataTypes::Boolean: return Constant.BoolValue ? TEXT("true") : TEXT("false");
+		case EPCGMetadataTypes::Vector2: return Tuple({ Constant.Vector2Value.X, Constant.Vector2Value.Y });
+		case EPCGMetadataTypes::Vector: return Tuple({ Constant.VectorValue.X, Constant.VectorValue.Y, Constant.VectorValue.Z });
+		case EPCGMetadataTypes::Vector4: return Tuple({ Constant.Vector4Value.X, Constant.Vector4Value.Y, Constant.Vector4Value.Z, Constant.Vector4Value.W });
+		case EPCGMetadataTypes::Rotator: return Tuple({ Constant.RotatorValue.Pitch, Constant.RotatorValue.Yaw, Constant.RotatorValue.Roll });
+		case EPCGMetadataTypes::Quaternion:
+		{
+			const FRotator Rotator = Constant.QuatValue.Rotator();
+			return Tuple({ Rotator.Pitch, Rotator.Yaw, Rotator.Roll });
+		}
+		case EPCGMetadataTypes::String: return TEXT("\"") + Constant.StringValue + TEXT("\"");
+		case EPCGMetadataTypes::Name: return TEXT("\"") + Constant.NameValue.ToString() + TEXT("\"");
+		default: return Constant.ToString();
+		}
 	}
 
 	/** Whether text names an attribute ("$Position.Z", "Density", "@Last") rather than a constant. */
@@ -494,7 +533,7 @@ namespace UnrealAIPCGGraphEditLocal
 
 	FString FormatThreshold(const FPCGAttributeFilterThresholdSettings& Threshold)
 	{
-		return Threshold.bUseConstantThreshold ? Threshold.AttributeTypes.ToString() : Threshold.ThresholdAttribute.ToString();
+		return Threshold.bUseConstantThreshold ? FormatConstant(Threshold.AttributeTypes) : Threshold.ThresholdAttribute.ToString();
 	}
 
 	bool IsWeightedEntries(const FProperty& Property)
@@ -549,16 +588,19 @@ namespace UnrealAIPCGGraphEditLocal
 		return Parts.Num() ? FString::Join(Parts, TEXT(", ")) : FString(TEXT("(none)"));
 	}
 
-	/** The editor graph of an asset the PCG graph editor opened in this session (transient, rebuilt only when its schema changes). */
-	UEdGraph* EditorGraphOf(UPCGGraph& Graph)
+	/**
+	 * UPCGGraph::PCGEditorGraph: the editor graph the PCG graph editor builds on its first open of an asset and reuses on
+	 * every later open (it is not rebuilt from the graph). Protected: reached through a pointer to member taken in a
+	 * derived scope (never instantiated).
+	 */
+	struct FPCGGraphAccess : UPCGGraph
 	{
-		UEdGraph* Found = nullptr;
-		ForEachObjectWithOuter(&Graph, [&Found](UObject* Object)
-		{
-			if (UEdGraph* EdGraph = Cast<UEdGraph>(Object); EdGraph && !Found)
-				Found = EdGraph;
-		}, /*bIncludeNestedObjects*/ false);
-		return Found;
+		static TObjectPtr<UPCGEditorGraph> UPCGGraph::* EditorGraph() { return &FPCGGraphAccess::PCGEditorGraph; }
+	};
+
+	TObjectPtr<UPCGEditorGraph>& EditorGraphOf(UPCGGraph& Graph)
+	{
+		return Graph.*FPCGGraphAccess::EditorGraph();
 	}
 }
 
@@ -762,7 +804,8 @@ bool UnrealAIPCG::ParseValue(const FProperty& Property, void* Address, const FSt
 			if (!bFound && (Normalize(Enum->GetNameStringByIndex(Index)) == Wanted || Normalize(Enum->GetDisplayNameTextByIndex(Index).ToString()) == Wanted))
 				Value = Enum->GetValueByIndex(Index), bFound = true;
 		}
-		if (!bFound && !LexTryParseString(Value, *Text))
+		const TArray<int32> Allowed = EnumEntries(*Enum);
+		if (!bFound && (!LexTryParseString(Value, *Text) || !Algo::AnyOf(Allowed, [Enum, Value](int32 Index) { return Enum->GetValueByIndex(Index) == Value; })))
 		{
 			Error = FString::Printf(TEXT("'%s' is not an entry of %s (entries: %s)"), *Text, *Enum->GetName(), *FString::Join(Names, TEXT(", ")));
 			return false;
@@ -873,14 +916,14 @@ FString UnrealAIPCG::FormatValue(const FProperty& Property, const void* Address)
 		return Enum->GetNameStringByValue(Value);
 	}
 	if (const FNumericProperty* Numeric = CastField<FNumericProperty>(&Property))
-		return Numeric->IsFloatingPoint() ? Number(Numeric->GetFloatingPointPropertyValue(Address)) : Numeric->GetNumericPropertyValueToString(Address);
+		return Numeric->IsFloatingPoint() ? Number(Numeric->GetFloatingPointPropertyValue(Address), CastField<FFloatProperty>(Numeric) != nullptr) : Numeric->GetNumericPropertyValueToString(Address);
 	if (const FStructProperty* Struct = CastField<FStructProperty>(&Property))
 	{
 		const UScriptStruct* Type = Struct->Struct;
 		if (Type->IsChildOf(FPCGAttributePropertySelector::StaticStruct()))
 			return static_cast<const FPCGAttributePropertySelector*>(Address)->ToString();
 		if (Type == FPCGMetadataTypesConstantStruct::StaticStruct())
-			return static_cast<const FPCGMetadataTypesConstantStruct*>(Address)->ToString();
+			return FormatConstant(*static_cast<const FPCGMetadataTypesConstantStruct*>(Address));
 		if (Type == FPCGAttributeFilterThresholdSettings::StaticStruct())
 			return FormatThreshold(*static_cast<const FPCGAttributeFilterThresholdSettings*>(Address));
 		if (IsMathStruct(Type))
@@ -1011,9 +1054,9 @@ void UnrealAIPCG::Changed(UPCGGraph& Graph)
 	Graph.MarkPackageDirty();
 	if (!EditorGraphOf(Graph))
 		return;
-	// The PCG graph editor builds its view of a graph once per session and keeps it: after this call (once per graph,
-	// however many edits a mutation makes), invalidate it (a schema change makes the editor rebuild the view on its next
-	// open) and reopen an open editor so it shows the changes.
+	// The PCG graph editor builds its view of a graph once and keeps it: after this call (once per graph, however many
+	// edits a mutation makes), close an open editor, drop the stale view (the next open builds a new one from the graph)
+	// and reopen the editor so it shows the changes.
 	static TSet<TWeakObjectPtr<UPCGGraph>> Pending;
 	if (Pending.Num() == 0)
 	{
@@ -1023,13 +1066,12 @@ void UnrealAIPCG::Changed(UPCGGraph& Graph)
 			for (const TWeakObjectPtr<UPCGGraph>& Weak : Pending)
 			{
 				UPCGGraph* Changed = Weak.Get();
-				UEdGraph* EditorGraph = Changed ? EditorGraphOf(*Changed) : nullptr;
-				if (!EditorGraph)
+				if (!Changed || !EditorGraphOf(*Changed))
 					continue;
 				const bool bOpen = Editors && Editors->FindEditorsForAsset(Changed).Num() > 0;
 				if (bOpen)
 					Editors->CloseAllEditorsForAsset(Changed);
-				EditorGraph->Schema = UEdGraphSchema::StaticClass();
+				EditorGraphOf(*Changed) = nullptr;
 				if (bOpen)
 					Editors->OpenEditorForAsset(Changed);
 			}

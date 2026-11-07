@@ -5,6 +5,6 @@
     "query": "pcgGraphs | where Name == \"PCG_E2EForest\" | select Edges Parameters"
   },
   "assert": {
-    "pattern": "BoundsModifier\\.Out -> Difference\\.Differences.*Density"
+    "pattern": "BoundsModifier\\.Out -> Difference\\.Differences.*Name\\W{0,4}Density\\W{1,8}Type\\W{0,4}double\\W{1,8}Value\\W{0,6}0\\.01"
   }
 }

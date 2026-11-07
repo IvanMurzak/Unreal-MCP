@@ -88,58 +88,52 @@ AUTHORING = {
         text_result('1 result\n$ref|method|result\nNiagaraActor#891004|Destroy()|null'), text_result('0 results')),
     'niagara-authoring-9-cleanup-asset.e2e.json': (
         text_result('1 result\n$ref|method|result\nEditor@1|DeleteAsset(string Path, bool bForce)|null'), NO_COUNT),
-    # The PCG forest sequence (Landscape extension terrain, a spline road, a filtered scatter, counts).
-    'pcg-forest-01-terrain.e2e.json': (
-        pcg_receipt('LandscapeOperations#1|Create(string Label, Vector Location, double SizeMeters, MaterialInterface Material)|'
-                    'Landscape#6372(E2E_PCGTerrain)'), NO_COUNT),
-    'pcg-forest-02-hills.e2e.json': (
-        text_result('3 results\nmethod: Sculpt(LandscapeProxy Landscape, Vector Center, double Radius, double Height)\n$ref|result\n'
-                    'LandscapeOperations#1|7825'), NO_COUNT),
-    'pcg-forest-03-road.e2e.json': (pcg_receipt('Editor@1|SpawnActor(string ClassName, ...)|Actor#6388(E2E_PCGRoad)'), NO_COUNT),
-    'pcg-forest-04-road-spline.e2e.json': (
+    # The PCG forest sequence (a spline road, a slope / height filtered scatter on the host map's landscape, counts).
+    'pcg-forest-01-road.e2e.json': (pcg_receipt('Editor@1|SpawnActor(string ClassName, ...)|Actor#6388(E2E_PCGRoad)'), NO_COUNT),
+    'pcg-forest-02-road-spline.e2e.json': (
         pcg_receipt('Actor#6388|AddComponent(string ClassName, string Name)|SplineComponent#6389(Road)'), NO_COUNT),
-    'pcg-forest-05-road-tag.e2e.json': (
+    'pcg-forest-03-road-tag.e2e.json': (
         text_result('2 results\n$ref|member|old|new\nActor#6388|Tags|[]|[Road]\nActor#6388|Scale|(1, 1, 1)|(200, 1, 1)'), NO_COUNT),
-    'pcg-forest-06-graph.e2e.json': (
+    'pcg-forest-04-graph.e2e.json': (
         pcg_receipt(f'{PCG}|CreateGraph(string Path, string Template)|PCGGraph#6390(PCG_E2EForest)'), NO_COUNT),
-    'pcg-forest-07-nodes.e2e.json': (
+    'pcg-forest-05-nodes.e2e.json': (
         pcg_rows('AddNode(PCGGraph Graph, string Type, string Name)', 'GetLandscapeData', 'SurfaceSampler', 'NormalToDensity',
                  'DensityFilter', 'AttributeFilterRange', 'GetSplineData', 'SplineSampler', 'BoundsModifier', 'Difference',
                  'SelfPruning', 'TransformPoints', 'StaticMeshSpawner'),
         pcg_rows('AddNode(PCGGraph Graph, string Type, string Name)', 'GetLandscapeData_0', 'SurfaceSampler_0')),
-    'pcg-forest-08-connect.e2e.json': (
+    'pcg-forest-06-connect.e2e.json': (
         pcg_rows(CONNECT, 'AttributeFilterRange.InsideFilter -> Difference.Source', 'BoundsModifier.Out -> Difference.Differences',
                  'StaticMeshSpawner.Out -> Output.Out'),
         pcg_rows(CONNECT, 'AttributeFilterRange.InsideFilter -> Difference.Source', 'BoundsModifier.Out -> Difference.Differences')),
-    'pcg-forest-09-settings.e2e.json': (
+    'pcg-forest-07-settings.e2e.json': (
         pcg_rows(SETTING, '0.75', 'Distance', '300', 'Set', '/Engine/BasicShapes/Cone: 3, /Engine/BasicShapes/Cylinder: 1'),
         pcg_rows(SETTING, '0.75', 'Distance', '300', 'Set', '/Engine/BasicShapes/Cone: 1')),
-    'pcg-forest-10-parameter.e2e.json': (
+    'pcg-forest-08-parameter.e2e.json': (
         pcg_receipt(f'{PCG}|SetParameter(PCGGraph Graph, string Name, string Value, string Type)|0.01'),
         pcg_receipt(f'{PCG}|SetParameter(PCGGraph Graph, string Name, string Value, string Type)|0.1')),
-    'pcg-forest-11-bind.e2e.json': (
+    'pcg-forest-09-bind.e2e.json': (
         pcg_receipt(f'{PCG}|BindParameter(...)|Density -> SurfaceSampler.PointsPerSquaredMeter'), NO_COUNT),
-    'pcg-forest-12-volume.e2e.json': (
+    'pcg-forest-10-volume.e2e.json': (
         pcg_receipt(f'{PCG}|SpawnVolume(PCGGraph Graph, Vector Location, Vector Size, string Label)|PCGVolume#6404(E2E_PCGForest)'), NO_COUNT),
-    'pcg-forest-13-generate.e2e.json': (
+    'pcg-forest-11-generate.e2e.json': (
         pcg_receipt(f'{PCG}|{GENERATE}|{{Generated:true,Instances:338,Meshes:["Cone: 250","Cylinder: 88"],Points:338,Seed:42}}'),
         pcg_receipt(f'{PCG}|{GENERATE}|{{Generated:true,Instances:0,Meshes:[],Points:0,Seed:42}}')),
-    'pcg-forest-14-variant.e2e.json': (
+    'pcg-forest-12-variant.e2e.json': (
         pcg_receipt(f'{PCG}|{GENERATE}|{{Generated:true,Instances:336,Meshes:["Cone: 261"],Points:336,Seed:11}}'),
         pcg_receipt(f'{PCG}|{GENERATE}|{{Generated:true,Instances:336,Meshes:["Cone: 261"],Points:336,Seed:42}}')),
-    'pcg-forest-15-counts.e2e.json': (
+    'pcg-forest-13-counts.e2e.json': (
         text_result('1 result\nPCGComponent.Generated\n{Instances:336,Meshes:["Cone: 261","Cylinder: 75"],Points:336,IsGenerating:false}'),
         text_result('1 result\nPCGComponent.Generated\n{Instances:0,Meshes:[],Points:0,IsGenerating:false}')),
-    'pcg-forest-16-graph-query.e2e.json': (
+    'pcg-forest-14-graph-query.e2e.json': (
         text_result('1 result\nEdges|Parameters\n["BoundsModifier.Out -> Difference.Differences"]|[{Name:Density,Type:double,Value:"0.01"}]'),
         text_result('1 result\nEdges|Parameters\n["BoundsModifier.Out -> Difference.Source"]|[{Name:Density}]')),
-    'pcg-forest-17-unknown-setting.e2e.json': (
+    'pcg-forest-15-unknown-setting.e2e.json': (
         '{"error": "error call-threw: SetNodeSetting threw: DensityFilter has no setting \'Threshold\' (settings: LowerBound, UpperBound, bInvertFilter)"}',
         '{"error": "error call-threw: SetNodeSetting threw: PCG_E2EForest has no node \'DensityFilter\'"}'),
-    'pcg-forest-18-cleanup-generated.e2e.json': (pcg_receipt(f'{PCG}|Cleanup(Actor Actor)|336'), NO_COUNT),
-    'pcg-forest-19-cleanup-actors.e2e.json': (
-        text_result('3 results\nmethod: Destroy()\n$ref|result\nLandscape#6372|null\nActor#6388|null\nPCGVolume#6404|null'), text_result('0 results')),
-    'pcg-forest-20-cleanup-asset.e2e.json': (
+    'pcg-forest-16-cleanup-generated.e2e.json': (pcg_receipt(f'{PCG}|Cleanup(Actor Actor)|336'), NO_COUNT),
+    'pcg-forest-17-cleanup-actors.e2e.json': (
+        text_result('2 results\nmethod: Destroy()\n$ref|result\nActor#6388|null\nPCGVolume#6404|null'), text_result('0 results')),
+    'pcg-forest-18-cleanup-asset.e2e.json': (
         text_result('1 result\n$ref|method|result\nEditor@1|DeleteAsset(string Path, bool bForce)|null'), NO_COUNT),
 }
 
@@ -149,7 +143,7 @@ class CheckFileTests(unittest.TestCase):
         for plugin, folder in release.components().items():
             self.assertTrue(e2e.checks_for(plugin), plugin)
             self.assertEqual(list((folder / 'Tests/e2e/tools').glob('*.ps1')), [], plugin)
-        self.assertEqual(len(all_checks()), 50)
+        self.assertEqual(len(all_checks()), 48)
 
     def test_every_assert_matches_its_intended_shape_and_rejects_others(self):
         for (plugin, name), check in all_checks().items():

@@ -1,10 +1,10 @@
 {
-  "description": "a PCG volume covering the landscape runs the graph",
+  "description": "a PCG volume over 200 x 200 m of the landscape runs the graph",
   "tool": "rql-mutate",
   "input": {
     "query": "pcg | call SpawnVolume(\"/Game/E2E/PCG_E2EForest\", \"(0, 0, 0)\", \"(20000, 20000, 20000)\", \"E2E_PCGForest\")"
   },
   "assert": {
-    "pattern": "E2E_PCGForest"
+    "pattern": "PCGVolume#\\d+\\(E2E_PCGForest\\)"
   }
 }

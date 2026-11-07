@@ -176,7 +176,7 @@ a second Static Mesh Spawner fed by its own sampler (or a Density Filter band) o
   entries by name (the Settings member lists them), `true` / `false`, asset paths, attribute selectors (`"$Position.Z"`,
   `"$Density"`, `"MyAttribute"`), a threshold as a number or an attribute, UE text for other structs. Nested settings by
   path: `"ActorSelector.ActorSelectionTag"`, `"SamplerParams.Dimension"`. A wrong name fails listing what exists.
-- **Names**: AddNode returns the node's Name (the type for the first one, `SurfaceSampler`, then `SurfaceSampler_1`; or
+- **Names**: AddNode returns the node's Name (the type for the first one, `SurfaceSampler`, then `SurfaceSampler_1`, ...; or
   your own: `AddNode(G, "Static Mesh Spawner", "Trees")`); nodes are also found by title; pins by label (`""` = the main
   pin; a setting's name reaches its override pin); `Input` / `Output` are the graph's own nodes (wire the spawner to Output
   so Generate counts the final points).

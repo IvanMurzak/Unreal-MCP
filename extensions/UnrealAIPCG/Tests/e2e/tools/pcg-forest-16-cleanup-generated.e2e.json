@@ -5,6 +5,6 @@
     "query": "pcg | call Cleanup(\"E2E_PCGForest\")"
   },
   "assert": {
-    "pattern": "Cleanup\\("
+    "pattern": "Cleanup\\(Actor Actor\\)\\|[1-9]"
   }
 }

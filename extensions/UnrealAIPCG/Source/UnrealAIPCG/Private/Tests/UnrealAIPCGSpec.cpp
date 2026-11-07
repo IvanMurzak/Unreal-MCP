@@ -332,7 +332,7 @@ void FUnrealAIPCGSpec::Define()
 			const UPCGGraph* Graph = UnrealAIPCGSpecLocal::LoadGraph(Path);
 			if (TestNotNull(TEXT("the copy"), Graph))
 				TestFalse(TEXT("the copy is not a template"), Graph->bIsTemplate);
-			UnrealAIPCGSpecLocal::DeleteAsset(Path);
+			TestTrue(TEXT("test asset deleted"), UnrealAIPCGSpecLocal::DeleteAsset(Path));
 		});
 	});
 
@@ -360,6 +360,7 @@ void FUnrealAIPCGSpec::Define()
 			TestTrue(TEXT("grid -> filter"), Run(TEXT("Connect"), { Lit(G), Lit(TEXT("CreatePointsGrid")), Lit(TEXT("Density Filter")) }));
 			TestTrue(TEXT("filter -> spawner"), Run(TEXT("Connect"), { Lit(G), Lit(TEXT("DensityFilter")), Lit(TEXT("Trees")) }));
 			TestTrue(TEXT("spawner -> output"), Run(TEXT("Connect"), { Lit(G), Lit(TEXT("Trees")), Lit(TEXT("Output")) }));
+			TestTrue(TEXT("Edges lists spawner -> output"), HasEdge(*Graph, TEXT("Trees.Out -> Output.Out")));
 			TestTrue(TEXT("Edges lists grid -> filter"), HasEdge(*Graph, TEXT("CreatePointsGrid.Out -> DensityFilter.In")));
 			TestTrue(TEXT("Edges lists filter -> spawner"), HasEdge(*Graph, TEXT("DensityFilter.Out -> Trees.In")));
 
@@ -394,7 +395,7 @@ void FUnrealAIPCGSpec::Define()
 			TestTrue(TEXT("removed"), Run(TEXT("RemoveNode"), { Lit(G), Lit(TEXT("DensityFilter")) }));
 			TestEqual(TEXT("two nodes"), Graph->GetNodes().Num(), 2);
 			TestFalse(TEXT("its edges went with it"), HasEdge(*Graph, TEXT("CreatePointsGrid.Out -> DensityFilter.In")));
-			DeleteAsset(G);
+			TestTrue(TEXT("test asset deleted"), DeleteAsset(G));
 		});
 
 		It("fails with actionable errors that name what exists", [this]()
@@ -428,7 +429,7 @@ void FUnrealAIPCGSpec::Define()
 			TestTrue(TEXT("saying how to add one"), Json(Result).Contains(TEXT("SetParameter")));
 			// pcg | call RemoveNode("@G@", "Input")
 			TestFalse(TEXT("the Input node stays"), Run(TEXT("RemoveNode"), { Lit(G), Lit(TEXT("Input")) }, &Result));
-			DeleteAsset(G);
+			TestTrue(TEXT("test asset deleted"), DeleteAsset(G));
 		});
 
 		It("graph parameters drive settings: SetParameter, BindParameter, Parameters", [this]()
@@ -460,7 +461,7 @@ void FUnrealAIPCGSpec::Define()
 			// pcg | call RemoveParameter("@G@", "Count")
 			TestTrue(TEXT("removed"), Run(TEXT("RemoveParameter"), { Lit(G), Lit(TEXT("Count")) }));
 			TestEqual(TEXT("two parameters left"), UnrealAIPCG::ParametersJson(*Graph)->AsArray().Num(), 2);
-			DeleteAsset(G);
+			TestTrue(TEXT("test asset deleted"), DeleteAsset(G));
 		});
 
 		It("generates on a PCG volume, regenerates with another parameter and seed, and cleans up", [this]()
@@ -519,13 +520,13 @@ void FUnrealAIPCGSpec::Define()
 			// actors | where Label == "@LABEL@" | get Components | where $ is PCGComponent | select Generated
 			TSharedPtr<FJsonObject> Generated;
 			TestTrue(TEXT("Generated member"), UnrealMcpRqlTools::RunPlan(FString(TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"@LABEL@"}]}},{"op":"get","expr":{"path":["Components"]}},{"op":"where","pred":{"op":"is","args":[{"path":[]},{"lit":"PCGComponent"}]}},{"op":"select","fields":[{"name":"Generated","expr":{"path":["Generated"]}}]}]})RQL")).Replace(TEXT("@LABEL@"), *Label), false, &Generated));
-			TestTrue(*FString::Printf(TEXT("reads the instances (%s)"), *Json(Generated).Left(400)), Json(Generated).Contains(FString::Printf(TEXT("%d"), Sparse)));
+			TestTrue(*FString::Printf(TEXT("reads the instances (%s)"), *Json(Generated).Left(400)), Json(Generated).Contains(FString::Printf(TEXT("\"Instances\":%d,"), Sparse)));
 
 			// pcg | call Cleanup("@LABEL@")
 			TestTrue(TEXT("cleaned up"), Run(TEXT("Cleanup"), { Lit(Label) }));
 			TestEqual(TEXT("nothing generated"), UnrealAIPCG::CountGenerated(*Volume->PCGComponent).Instances, 0);
 			DestroyLabelled(Label);
-			DeleteAsset(G);
+			TestTrue(TEXT("test asset deleted"), DeleteAsset(G));
 		});
 	});
 }

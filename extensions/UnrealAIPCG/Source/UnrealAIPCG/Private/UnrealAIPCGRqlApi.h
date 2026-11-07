@@ -85,7 +85,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|PCG", meta = (BlueprintInternalUseOnly = "true"))
 	void RemoveNode(UPCGGraph* Graph, const FString& Node);
 
-	/** connect the output pin FromPin of node From to the input pin ToPin of node To ("" = the node's main pin; "Input" / "Output" are the graph's own nodes, e.g. Input pin "Landscape"); returns "From.Pin -> To.Pin" */
+	/** connect the output pin FromPin of node From to the input pin ToPin of node To ("" = the node's main pin; "Input" / "Output" are the graph's own nodes; a setting's name reaches its override pin); returns "From.Pin -> To.Pin" */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|PCG", meta = (BlueprintInternalUseOnly = "true"))
 	FString Connect(UPCGGraph* Graph, const FString& From, const FString& To, const FString& FromPin = TEXT(""), const FString& ToPin = TEXT(""));
 

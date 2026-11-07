@@ -100,6 +100,28 @@ namespace UnrealAIPCGRqlApiLocal
 		Node.SetNodePosition(bAny ? MaxX + 300 : 0, 0);
 	}
 
+	/**
+	 * Whether @p Name is free in @p Graph for @p Self (a node being named, or null): no other object of that name (removed
+	 * nodes stay for undo) and no other node FindNode would confuse with it.
+	 */
+	bool IsFreeNodeName(UPCGGraph& Graph, const FString& Name, const UPCGNode* Self = nullptr)
+	{
+		const UObject* Existing = StaticFindObjectFast(nullptr, &Graph, FName(*Name));
+		return (!Existing || Existing == Self) && !Algo::AnyOf(AllNodes(Graph), [&Name, Self](const UPCGNode* Node)
+		{
+			return Node != Self && (Normalize(Node->GetName()) == Normalize(Name) || Normalize(NodeTitle(*Node)) == Normalize(Name));
+		});
+	}
+
+	/** @p Base when free for @p Self, else Base_1, Base_2, ... */
+	FString FreeNodeName(UPCGGraph& Graph, const FString& Base, const UPCGNode* Self)
+	{
+		FString Name = Base;
+		for (int32 Index = 1; !IsFreeNodeName(Graph, Name, Self); ++Index)
+			Name = FString::Printf(TEXT("%s_%d"), *Base, Index);
+		return Name;
+	}
+
 	const FPropertyBagPropertyDesc* FindParameter(const UPCGGraph& Graph, const FString& Name)
 	{
 		const FInstancedPropertyBag* Bag = Graph.GetUserParametersStruct();
@@ -246,8 +268,8 @@ FString UUnrealAIPCGRqlApi::AddNode(UPCGGraph* Graph, const FString& Type, const
 	const FString Wanted = ObjectName(Name);
 	if (!Name.IsEmpty() && Wanted.IsEmpty())
 		return UnrealMcpRql::Failed<FString>(FString::Printf(TEXT("'%s' is not a node name (letters, digits and _)"), *Name));
-	if (!Wanted.IsEmpty() && Algo::AnyOf(Graph->GetNodes(), [&Wanted](const UPCGNode* Node) { return Node && Node->GetName() == Wanted; }))
-		return UnrealMcpRql::Failed<FString>(FString::Printf(TEXT("%s already has a node named %s"), *Graph->GetName(), *Wanted));
+	if (!Wanted.IsEmpty() && !IsFreeNodeName(*Graph, Wanted))
+		return UnrealMcpRql::Failed<FString>(FString::Printf(TEXT("%s already has a node named %s (or one that name would be confused with): pick another name"), *Graph->GetName(), *Wanted));
 	Graph->Modify();
 	UPCGSettings* Settings = nullptr;
 	UPCGNode* Node = Graph->AddNodeOfType(NodeType.Class, Settings);
@@ -264,10 +286,12 @@ FString UUnrealAIPCGRqlApi::AddNode(UPCGGraph* Graph, const FString& Type, const
 		Node->Rename(*Wanted, nullptr, REN_DontCreateRedirectors);
 		Node->SetNodeTitle(FName(*Name.TrimStartAndEnd()));
 	}
-	else if (const FName Base = Settings->GetDefaultNodeName(); Base != NAME_None && Node->GetFName() != Base && !StaticFindObjectFast(nullptr, Graph, Base))
+	else if (const FName Base = Settings->GetDefaultNodeName(); Base != NAME_None)
 	{
-		// The first node of a type is named after it ("SurfaceSampler"), as the agent would call it; later ones get a number.
-		Node->Rename(*Base.ToString(), nullptr, REN_DontCreateRedirectors);
+		// Named after its type ("SurfaceSampler"), as the agent would call it; later ones SurfaceSampler_1, _2, ...
+		const FString Free = FreeNodeName(*Graph, Base.ToString(), Node);
+		if (Node->GetName() != Free)
+			Node->Rename(*Free, nullptr, REN_DontCreateRedirectors);
 	}
 	Place(*Graph, *Node);
 	Changed(*Graph);
@@ -377,6 +401,7 @@ FString UUnrealAIPCGRqlApi::SetParameter(UPCGGraph* Graph, const FString& Name, 
 		return UnrealMcpRql::Failed<FString>(FString::Printf(TEXT("PCG graphs cannot hold a parameter of that type (%s)"), *Type));
 	const FName ParameterName = Desc.Name;
 	FString New;
+	bool bSet = false;
 	Graph->UpdateUserParametersStruct([&](FInstancedPropertyBag& Bag)
 	{
 		const UPropertyBag* Struct = Bag.GetPropertyBagStruct();
@@ -386,11 +411,12 @@ FString UUnrealAIPCGRqlApi::SetParameter(UPCGGraph* Graph, const FString& Name, 
 			return;
 		void* Address = Stored->CachedProperty->ContainerPtrToValuePtr<void>(Memory);
 		FString Ignored;
-		if (ParseValue(*Stored->CachedProperty, Address, Value, Ignored))
+		bSet = ParseValue(*Stored->CachedProperty, Address, Value, Ignored);
+		if (bSet)
 			New = FormatValue(*Stored->CachedProperty, Address);
 	});
 	Changed(*Graph);
-	return New.IsEmpty() ? UnrealMcpRql::Failed<FString>(FString::Printf(TEXT("could not set parameter %s"), *ParameterName.ToString())) : New;
+	return !bSet ? UnrealMcpRql::Failed<FString>(FString::Printf(TEXT("could not set parameter %s"), *ParameterName.ToString())) : New;
 }
 
 void UUnrealAIPCGRqlApi::RemoveParameter(UPCGGraph* Graph, const FString& Name)
@@ -439,6 +465,7 @@ FString UUnrealAIPCGRqlApi::BindParameter(UPCGGraph* Graph, const FString& Param
 		if (Get && Get->PropertyName == ParameterName)
 			Getter = Candidate;
 	}
+	const bool bNewGetter = !Getter;
 	if (!Getter)
 	{
 		UPCGSettings* Settings = nullptr;
@@ -450,14 +477,18 @@ FString UUnrealAIPCGRqlApi::BindParameter(UPCGGraph* Graph, const FString& Param
 		Get->PropertyGuid = ParameterId;
 		Get->PropertyName = ParameterName;
 		Getter->SetNodeTitle(ParameterName, /*bApplySanitization*/ false);
-		if (!StaticFindObjectFast(nullptr, Graph, ParameterName))
-			Getter->Rename(*ParameterName.ToString(), nullptr, REN_DontCreateRedirectors); // the Edges member reads "Density.Density -> ..."
+		// The Edges member then reads "Density.Density -> ...".
+		const FString Free = FreeNodeName(*Graph, ObjectName(ParameterName.ToString()), Getter);
+		if (Getter->GetName() != Free)
+			Getter->Rename(*Free, nullptr, REN_DontCreateRedirectors);
 		Getter->SetSettingsInterface(Get);
 		int32 X = 0, Y = 0;
 		Target->GetNodePosition(X, Y);
 		Getter->SetNodePosition(X - 250, Y + 200);
 	}
 	UPCGPin* Output = Getter->GetOutputPin(ParameterName);
+	if (!Output && bNewGetter)
+		Graph->RemoveNode(Getter);
 	if (!Output)
 		return UnrealMcpRql::Failed<FString>(FString::Printf(TEXT("the Get Graph Parameter node of %s has no output pin"), *ParameterName.ToString()));
 	Graph->AddEdge(Getter, Output->Properties.Label, Target, Pin->Properties.Label);
@@ -483,7 +514,10 @@ UPCGComponent* UUnrealAIPCGRqlApi::SetGraph(AActor* Actor, UPCGGraph* Graph)
 	UPCGComponent* Component = Actor->FindComponentByClass<UPCGComponent>();
 	if (!Component)
 		return AddComponent(Actor, Graph);
+	// The graph lives on the component's graph instance: record both for undo.
 	Component->Modify();
+	if (UPCGGraphInstance* Instance = Component->GetGraphInstance())
+		Instance->Modify();
 	Component->SetGraphLocal(Graph);
 	return Component;
 }
@@ -500,7 +534,10 @@ AActor* UUnrealAIPCGRqlApi::SpawnVolume(UPCGGraph* Graph, FVector Location, FVec
 		return nullptr;
 	Volume->SetActorScale3D(Size / 200.0);
 	if (!Volume->PCGComponent)
+	{
+		Volume->GetWorld()->EditorDestroyActor(Volume, /*bShouldModifyLevel*/ true);
 		return UnrealMcpRql::Failed<AActor*>(TEXT("the PCG Volume has no PCG component"));
+	}
 	Volume->PCGComponent->SetGraphLocal(Graph);
 	return Volume;
 }
@@ -519,7 +556,16 @@ FUnrealAIPCGGenerateResult UUnrealAIPCGRqlApi::Generate(AActor* Actor, int32 See
 	{
 		if (!Component->GetGraph())
 			return UnrealMcpRql::Failed<FUnrealAIPCGGenerateResult>(FString::Printf(TEXT("the PCG component of %s has no graph (pcg | call SetGraph(actor, graph))"), *Actor->GetActorNameOrLabel()));
+		// PCG skips these without a word: say why instead of reporting an empty result.
+		if (!Component->bActivated)
+			return UnrealMcpRql::Failed<FUnrealAIPCGGenerateResult>(FString::Printf(TEXT("the PCG component of %s is deactivated (set its bActivated = true)"), *Actor->GetActorNameOrLabel()));
+		if (Component->IsManagedByRuntimeGenSystem())
+			return UnrealMcpRql::Failed<FUnrealAIPCGGenerateResult>(FString::Printf(TEXT("the PCG component of %s generates at runtime (GenerationTrigger GenerateAtRuntime): set GenerationTrigger = GenerateOnDemand to generate it in the editor"), *Actor->GetActorNameOrLabel()));
 	}
+	UWorld* World = Actor->GetWorld();
+	UPCGSubsystem* Subsystem = World ? UPCGSubsystem::GetInstance(World) : nullptr;
+	if (!Subsystem)
+		return UnrealMcpRql::Failed<FUnrealAIPCGGenerateResult>(TEXT("the world of that actor has no PCG subsystem"));
 	if (Seed != -1)
 	{
 		for (UPCGComponent* Component : Targets)
@@ -528,24 +574,25 @@ FUnrealAIPCGGenerateResult UUnrealAIPCGRqlApi::Generate(AActor* Actor, int32 See
 			Component->Seed = Seed;
 		}
 	}
-	UWorld* World = Actor->GetWorld();
-	UPCGSubsystem* Subsystem = World ? UPCGSubsystem::GetInstance(World) : nullptr;
-	if (!Subsystem)
-		return UnrealMcpRql::Failed<FUnrealAIPCGGenerateResult>(TEXT("the world of that actor has no PCG subsystem"));
 	FPCGLogCapture Log;
 	const auto AnyGenerating = [&Targets]() { return Algo::AnyOf(Targets, [](const UPCGComponent* Component) { return Component->IsGenerating(); }); };
 	const double Start = FPlatformTime::Seconds();
 	// PCG pauses while an editor transaction is open (pcg.PauseExecutionWhileTransactionActive): this call runs inside
 	// the RQL mutation's transaction, so let PCG run while it waits.
+	// Set and restored at the priority it was set with (a lower one is ignored).
 	IConsoleVariable* PauseInTransaction = IConsoleManager::Get().FindConsoleVariable(TEXT("pcg.PauseExecutionWhileTransactionActive"));
 	const bool bWasPaused = PauseInTransaction && PauseInTransaction->GetBool();
+	const EConsoleVariableFlags Priority = PauseInTransaction
+		? static_cast<EConsoleVariableFlags>(FMath::Max<uint32>(PauseInTransaction->GetFlags() & ECVF_SetByMask, ECVF_SetByCode)) : ECVF_SetByCode;
 	if (bWasPaused)
-		PauseInTransaction->Set(false, ECVF_SetByCode);
+		PauseInTransaction->Set(false, Priority);
 	ON_SCOPE_EXIT
 	{
 		if (bWasPaused)
-			PauseInTransaction->Set(true, ECVF_SetByCode);
+			PauseInTransaction->Set(true, Priority);
 	};
+	if (PauseInTransaction && PauseInTransaction->GetBool())
+		return UnrealMcpRql::Failed<FUnrealAIPCGGenerateResult>(TEXT("PCG is paused during editor transactions (pcg.PauseExecutionWhileTransactionActive) and the setting could not be lifted"));
 	{
 		// What generation spawns is PCG's (managed resources), not part of the undo step: as generating in the editor.
 		TGuardValue<ITransaction*> NoUndo(GUndo, nullptr);
@@ -559,7 +606,9 @@ FUnrealAIPCGGenerateResult UUnrealAIPCGRqlApi::Generate(AActor* Actor, int32 See
 			const double Now = FPlatformTime::Seconds();
 			Subsystem->Tick(static_cast<float>(FMath::Max(Now - Last, 0.001)));
 			Last = Now;
-			FTaskGraphInterface::Get().ProcessThreadUntilIdle(ENamedThreads::GameThread);
+			// Not from inside a game-thread task: the task graph refuses to process the game thread recursively.
+			if (!FTaskGraphInterface::Get().IsThreadProcessingTasks(ENamedThreads::GameThread))
+				FTaskGraphInterface::Get().ProcessThreadUntilIdle(ENamedThreads::GameThread);
 			FPlatformProcess::SleepNoStats(0.005f);
 		}
 	}
@@ -593,7 +642,7 @@ int32 UUnrealAIPCGRqlApi::Cleanup(AActor* Actor)
 	for (UPCGComponent* Component : Targets)
 	{
 		Removed += CountGenerated(*Component).Instances;
-		Component->CleanupLocalImmediate(/*bRemoveComponents*/ true);
+		Component->CleanupLocalImmediate(/*bRemoveComponents*/ true, /*bCleanupLocalComponents*/ true);
 	}
 	return Removed;
 }

@@ -38,7 +38,9 @@ namespace UnrealAIPCGCatalogLocal
 		for (const UClass* Class : Classes)
 		{
 			if (Class->HasAnyClassFlags(CLASS_Abstract | CLASS_Deprecated | CLASS_Hidden | CLASS_NewerVersionExists)
-				|| Class->GetName().StartsWith(TEXT("SKEL_")) || Class->GetName().StartsWith(TEXT("REINST_")))
+				|| Class->GetName().StartsWith(TEXT("SKEL_")) || Class->GetName().StartsWith(TEXT("REINST_"))
+				// The graph editor hides the Procedural Vegetation nodes outside the vegetation editor.
+				|| Class->GetOutermost()->GetName() == TEXT("/Script/ProceduralVegetation"))
 				continue;
 			const UPCGSettings* Default = Class->GetDefaultObject<UPCGSettings>();
 			if (Default && Default->bExposeToLibrary)
