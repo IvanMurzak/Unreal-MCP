@@ -1,0 +1,10 @@
+{
+  "description": "the forest nodes added, named after their types",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "[\"Get Landscape Data\", \"Surface Sampler\", \"Normal To Density\", \"Density Filter\", \"Filter Attribute Elements by Range\", \"Get Spline Data\", \"Spline Sampler\", \"Bounds Modifier\", \"Difference\", \"Self Pruning\", \"Transform Points\", \"Static Mesh Spawner\"] | call pcg.AddNode(\"/Game/E2E/PCG_E2EForest\", $)"
+  },
+  "assert": {
+    "pattern": "GetLandscapeData.*SurfaceSampler.*NormalToDensity.*DensityFilter.*AttributeFilterRange.*GetSplineData.*SplineSampler.*BoundsModifier.*Difference.*SelfPruning.*TransformPoints.*StaticMeshSpawner"
+  }
+}

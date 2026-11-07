@@ -1,0 +1,10 @@
+{
+  "description": "leaving the vehicle needs E held for 0.3 s (that key only)",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "enhancedInput | call SetMappingTriggers(\"/Game/E2E/Input/IMC_Vehicle\", \"/Game/E2E/Input/IA_Interact\", \"E\", \"Hold(0.3)\")"
+  },
+  "assert": {
+    "pattern": "string Triggers\\)\\|1\\b"
+  }
+}

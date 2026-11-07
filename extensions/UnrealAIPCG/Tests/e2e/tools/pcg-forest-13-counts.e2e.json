@@ -1,0 +1,10 @@
+{
+  "description": "the generated instance counts read back from the PCG component",
+  "tool": "rql-query",
+  "input": {
+    "query": "actors | where Label == \"E2E_PCGForest\" | select PCGComponent.Generated"
+  },
+  "assert": {
+    "pattern": "Instances\\W{0,4}[1-9]"
+  }
+}

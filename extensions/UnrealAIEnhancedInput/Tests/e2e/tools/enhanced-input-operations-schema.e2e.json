@@ -1,10 +1,10 @@
 {
-  "description": "AddMapping among the operations",
+  "description": "the authoring and wiring operations among the Enhanced Input operations",
   "tool": "rql-schema",
   "input": {
     "type": "EnhancedInputOperations"
   },
   "assert": {
-    "pattern": "AddMapping"
+    "pattern": "^(?=.*SetActionTriggers\\()(?=.*SetMappingTriggers\\()(?=.*SetPlayerMappable\\()(?=.*EnableUserSettings\\()(?=.*BindAction\\()(?=.*BindActionToggle\\()(?=.*AddMappingContextOnPossess\\()(?=.*RemoveMappingContextOnEvent\\()"
   }
 }

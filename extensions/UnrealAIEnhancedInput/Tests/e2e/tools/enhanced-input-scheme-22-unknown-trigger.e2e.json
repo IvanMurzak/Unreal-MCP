@@ -1,0 +1,11 @@
+{
+  "description": "an unknown trigger fails naming the triggers",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "enhancedInput | call SetActionTriggers(\"/Game/E2E/Input/IA_Jump\", \"DoubleTap\")"
+  },
+  "expectError": true,
+  "assert": {
+    "pattern": "RepeatedTap"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "description": "the forest generated: trees spawned, counted per mesh",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "pcg | call Generate(\"E2E_PCGForest\")"
+  },
+  "assert": {
+    "pattern": "Generated\\W{0,4}true\\W{1,6}Instances\\W{0,4}[1-9].*Cone: [1-9]"
+  }
+}

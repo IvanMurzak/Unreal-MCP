@@ -13,6 +13,7 @@
 #include "Misc/Guid.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
+#include "Policies/CondensedJsonPrintPolicy.h"
 
 #include "EdGraph/EdGraph.h"
 #include "Editor.h"
@@ -43,6 +44,12 @@
 #include "Kismet2/CompilerResultsLog.h"
 #include "Kismet2/KismetEditorUtilities.h"
 #include "Misc/PackageName.h"
+#include "EnhancedInputDeveloperSettings.h"
+#include "GameFramework/PlayerController.h"
+#include "K2Node_DynamicCast.h"
+#include "K2Node_IfThenElse.h"
+#include "K2Node_Self.h"
+#include "PlayerMappableKeySettings.h"
 #include "UObject/Package.h"
 
 // ============================================================================================
@@ -83,12 +90,13 @@ BEGIN_DEFINE_SPEC(FUnrealAIEnhancedInputSpec, "UnrealAIEnhancedInput",
 		return Result.IsValid() && Result->GetBoolField(TEXT("ok"));
 	}
 
-	static FString Codes(const TSharedPtr<FJsonObject>& Result)
+	/** The result as JSON text, cut to @p MaxLength (messages stay short; checks of long results pass a larger one). */
+	static FString Codes(const TSharedPtr<FJsonObject>& Result, int32 MaxLength = 600)
 	{
 		FString Text;
 		if (Result.IsValid())
 			FJsonSerializer::Serialize(Result.ToSharedRef(), TJsonWriterFactory<>::Create(&Text));
-		return Text.Left(4000);
+		return Text.Left(MaxLength);
 	}
 
 	/** The $ref in the result column of a receipt's first row (the object a call returned). */
@@ -130,6 +138,62 @@ BEGIN_DEFINE_SPEC(FUnrealAIEnhancedInputSpec, "UnrealAIEnhancedInput",
 				AddInfo(Message->ToText().ToString());
 		}
 		return Log.NumErrors;
+	}
+
+	static TSharedPtr<FJsonValue> S(const FString& Text) { return MakeShared<FJsonValueString>(Text); }
+	static TSharedPtr<FJsonValue> N(double Number) { return MakeShared<FJsonValueNumber>(Number); }
+
+	/** enhancedInput | call Method(Args...) as a mutation (each argument a literal); the QueryResult. */
+	TSharedPtr<FJsonObject> Call(const FString& Method, const TArray<TSharedPtr<FJsonValue>>& Args)
+	{
+		TArray<TSharedPtr<FJsonValue>> Literals;
+		for (const TSharedPtr<FJsonValue>& Arg : Args)
+		{
+			TSharedPtr<FJsonObject> Literal = MakeShared<FJsonObject>();
+			Literal->SetField(TEXT("lit"), Arg);
+			Literals.Add(MakeShared<FJsonValueObject>(Literal));
+		}
+		TSharedPtr<FJsonObject> Stage = MakeShared<FJsonObject>();
+		Stage->SetStringField(TEXT("op"), TEXT("call"));
+		Stage->SetStringField(TEXT("method"), Method);
+		Stage->SetArrayField(TEXT("args"), Literals);
+		TSharedPtr<FJsonObject> Source = MakeShared<FJsonObject>();
+		Source->SetArrayField(TEXT("path"), { S(TEXT("enhancedInput")) });
+		TSharedPtr<FJsonObject> Plan = MakeShared<FJsonObject>();
+		Plan->SetStringField(TEXT("rql"), TEXT("0.1"));
+		Plan->SetObjectField(TEXT("source"), Source);
+		Plan->SetArrayField(TEXT("stages"), { MakeShared<FJsonValueObject>(Stage) });
+		FString Text;
+		FJsonSerializer::Serialize(Plan.ToSharedRef(), TJsonWriterFactory<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>::Create(&Text));
+		TSharedPtr<FJsonObject> Result;
+		UnrealMcpRqlTools::RunPlan(Text, /*bMutate*/ true, &Result);
+		return Result;
+	}
+
+	/** A fresh path under /Game/RqlSpec for @p Prefix. */
+	static FString Fresh(const TCHAR* Prefix)
+	{
+		return FString::Printf(TEXT("/Game/RqlSpec/%s_%s"), Prefix, *FGuid::NewGuid().ToString(EGuidFormats::Digits));
+	}
+
+	/** The pins @p Pin is linked to, as "<owning node title>.<pin>" (for messages). */
+	static FString Links(const UEdGraphPin* Pin)
+	{
+		TArray<FString> Out;
+		if (Pin)
+		{
+			for (const UEdGraphPin* To : Pin->LinkedTo)
+				Out.Add(FString::Printf(TEXT("%s.%s"), *To->GetOwningNode()->GetNodeTitle(ENodeTitleType::ListView).ToString(), *To->PinName.ToString()));
+		}
+		return FString::Join(Out, TEXT(", "));
+	}
+
+	/** The call nodes of @p Blueprint calling @p Function. */
+	static TArray<UK2Node_CallFunction*> CallsOf(UBlueprint* Blueprint, const TCHAR* Function)
+	{
+		TArray<UK2Node_CallFunction*> Calls;
+		FBlueprintEditorUtils::GetAllNodesOfClass(Blueprint, Calls);
+		return Calls.FilterByPredicate([Function](const UK2Node_CallFunction* Call) { return Call->FunctionReference.GetMemberName() == FName(Function); });
 	}
 
 END_DEFINE_SPEC(FUnrealAIEnhancedInputSpec)
@@ -200,6 +264,10 @@ void FUnrealAIEnhancedInputSpec::Define()
 			TestTrue(TEXT("lists RemoveMapping("), Schema.Contains(TEXT("RemoveMapping(")));
 			TestTrue(TEXT("lists AddActionEvent("), Schema.Contains(TEXT("AddActionEvent(")));
 			TestTrue(TEXT("lists AddMappingContextOnBeginPlay("), Schema.Contains(TEXT("AddMappingContextOnBeginPlay(")));
+			for (const TCHAR* Operation : { TEXT("SetActionTriggers("), TEXT("SetActionModifiers("), TEXT("SetMappingTriggers("), TEXT("SetMappingModifiers("),
+				TEXT("SetPlayerMappable("), TEXT("SetMappingPlayerMappable("), TEXT("EnableUserSettings("), TEXT("BindAction("), TEXT("BindActionToggle("),
+				TEXT("AddMappingContextOnPossess("), TEXT("AddMappingContextOnEvent("), TEXT("RemoveMappingContextOnEvent(") })
+				TestTrue(*FString::Printf(TEXT("lists %s"), Operation), Schema.Contains(Operation));
 			TestTrue(TEXT("lists InjectInput("), Schema.Contains(TEXT("InjectInput(")));
 		});
 
@@ -399,8 +467,23 @@ void FUnrealAIEnhancedInputSpec::Define()
 			TestTrue(*FString::Printf(TEXT("added (%s)"), *Codes(Added)), IsOk(Added));
 			UK2Node_Event* BeginPlay = FBlueprintEditorUtils::FindOverrideForFunction(Child, AActor::StaticClass(), TEXT("ReceiveBeginPlay"));
 			const UEdGraphPin* Then = BeginPlay ? BeginPlay->FindPin(UEdGraphSchema_K2::PN_Then) : nullptr;
-			TestTrue(TEXT("BeginPlay calls the parent's first"), Then && Then->LinkedTo.Num() == 1
-				&& Then->LinkedTo[0]->GetOwningNode()->IsA<UK2Node_CallParentFunction>());
+			const UEdGraphNode* ParentCall = Then && Then->LinkedTo.Num() == 1 ? Then->LinkedTo[0]->GetOwningNode() : nullptr;
+			TestTrue(TEXT("BeginPlay calls the parent's first"), ParentCall && ParentCall->IsA<UK2Node_CallParentFunction>() && ParentCall->IsNodeEnabled());
+			TArray<UK2Node_Event*> Events;
+			FBlueprintEditorUtils::GetAllNodesOfClass(Child, Events);
+			TestEqual(TEXT("exactly one BeginPlay in the child"), Events.FilterByPredicate([](const UK2Node_Event* Event)
+			{
+				return Event->EventReference.GetMemberName() == TEXT("ReceiveBeginPlay");
+			}).Num(), 1);
+			TArray<UK2Node_CallParentFunction*> ParentCalls;
+			FBlueprintEditorUtils::GetAllNodesOfClass(Child, ParentCalls);
+			TestEqual(TEXT("one Parent: BeginPlay (the placeholder's, enabled; not a second one)"), ParentCalls.FilterByPredicate([](const UK2Node_CallParentFunction* Call)
+			{
+				return Call->FunctionReference.GetMemberName() == TEXT("ReceiveBeginPlay");
+			}).Num(), 1);
+			const UEdGraphPin* AfterParent = ParentCall ? ParentCall->FindPin(UEdGraphSchema_K2::PN_Then) : nullptr;
+			const UK2Node_CallFunction* Add = AfterParent && AfterParent->LinkedTo.Num() == 1 ? Cast<UK2Node_CallFunction>(AfterParent->LinkedTo[0]->GetOwningNode()) : nullptr;
+			TestTrue(*FString::Printf(TEXT("then Add Mapping Context (%s)"), *Links(AfterParent)), Add && Add->FunctionReference.GetMemberName() == TEXT("AddMappingContext"));
 			TestEqual(TEXT("the child compiles"), CompileErrors(Child), 0);
 		});
 
@@ -486,7 +569,7 @@ void FUnrealAIEnhancedInputSpec::Define()
 
 			// enhancedInput | call InjectInput("@IA@", "(1, 0, 0)", 0, 3)
 			const TSharedPtr<FJsonObject> Result = Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["enhancedInput"]},"stages":[{"op":"call","method":"InjectInput","args":[{"lit":"@IA@"},{"lit":"(1, 0, 0)"},{"lit":0},{"lit":3}]}]})RQL"), true);
-			const FString Receipt = Codes(Result);
+			const FString Receipt = Codes(Result, 4000);
 			TestTrue(*FString::Printf(TEXT("InjectInput ok (%s)"), *Receipt), IsOk(Result));
 			TestTrue(*FString::Printf(TEXT("held 3 frames, then released (%s)"), *Receipt), Receipt.Contains(TEXT("3 frame(s) held + 1 released")));
 			TestEqual(TEXT("the bound Triggered event fired once per held frame"), Triggered, 3);
@@ -518,6 +601,255 @@ void FUnrealAIEnhancedInputSpec::Define()
 			TestFalse(TEXT("unknown trigger refused"), IsOk(Bad));
 			TestEqual(TEXT("nothing simulated"), UnrealMcpRql::ReadPlayState().Time, Time, 1e-6);
 			Bindings->ClearActionBindings();
+		});
+	});
+
+	Describe("triggers and modifiers as text", [this]()
+	{
+		It("builds an action's triggers and modifiers from text, reads them back as the same text and refuses wrong names before changing", [this]()
+		{
+			ActionPath = Fresh(TEXT("IA_Interact"));
+			const FString Chord = Fresh(TEXT("IA_Modifier"));
+			TestTrue(TEXT("chord action created"), IsOk(Call(TEXT("CreateAction"), { S(Chord), S(TEXT("Boolean")) })));
+			const TSharedPtr<FJsonObject> Created = Call(TEXT("CreateAction"), { S(ActionPath), S(TEXT("Boolean")), S(TEXT("Hold(0.5, OneShot=true)")),
+				S(TEXT("DeadZone(LowerThreshold=0.25, Type=Axial), Scalar(2, 1, 1), Negate(Y)")) });
+			TestTrue(*FString::Printf(TEXT("created with text (%s)"), *Codes(Created)), IsOk(Created));
+			const UInputAction* Action = LoadObject<UInputAction>(nullptr, *ActionPath);
+			if (!TestNotNull(TEXT("the action"), Action))
+				return;
+			const UInputTriggerHold* Hold = Action->Triggers.Num() == 1 ? Cast<UInputTriggerHold>(Action->Triggers[0]) : nullptr;
+			TestTrue(TEXT("Hold 0.5 one shot, owned by the action"), Hold && Hold->HoldTimeThreshold == 0.5f && Hold->bIsOneShot && Hold->GetOuter() == Action);
+			const UInputModifierDeadZone* DeadZone = Action->Modifiers.Num() == 3 ? Cast<UInputModifierDeadZone>(Action->Modifiers[0]) : nullptr;
+			TestTrue(TEXT("DeadZone 0.25 axial"), DeadZone && DeadZone->LowerThreshold == 0.25f && DeadZone->Type == EDeadZoneType::Axial);
+			const UInputModifierScalar* Scalar = Action->Modifiers.Num() == 3 ? Cast<UInputModifierScalar>(Action->Modifiers[1]) : nullptr;
+			TestTrue(TEXT("Scalar (2, 1, 1)"), Scalar && Scalar->Scalar.Equals(FVector(2, 1, 1)));
+			const UInputModifierNegate* Negate = Action->Modifiers.Num() == 3 ? Cast<UInputModifierNegate>(Action->Modifiers[2]) : nullptr;
+			TestTrue(TEXT("Negate(Y) negates Y only"), Negate && !Negate->bX && Negate->bY && !Negate->bZ);
+
+			// unreal.asset("@IA@") | select TriggersText ModifiersText PlayerMappable
+			const TCHAR* ReadBack = TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@IA@"}]},"stages":[{"op":"select","fields":[{"name":"TriggersText","expr":{"path":["TriggersText"]}},{"name":"ModifiersText","expr":{"path":["ModifiersText"]}},{"name":"PlayerMappable","expr":{"path":["PlayerMappable"]}}]}]})RQL");
+			const FString Text = Codes(Run(ReadBack, false));
+			TestTrue(*FString::Printf(TEXT("TriggersText (%s)"), *Text), Text.Contains(TEXT("Hold(HoldTimeThreshold=0.5, bIsOneShot=true)")));
+			TestTrue(*FString::Printf(TEXT("ModifiersText (%s)"), *Text), Text.Contains(TEXT("DeadZone(LowerThreshold=0.25, Type=Axial), Scalar(Scalar=(2, 1, 1)), Negate(bX=false, bZ=false)")));
+
+			const TSharedPtr<FJsonObject> Chorded = Call(TEXT("SetActionTriggers"), { S(ActionPath), S(FString::Printf(TEXT("Chorded(%s), Pressed"), *Chord)) });
+			TestTrue(*FString::Printf(TEXT("chord + pressed (%s)"), *Codes(Chorded)), IsOk(Chorded) && Codes(Chorded).Contains(TEXT("ChordAction(ChordAction=")) && Codes(Chorded).Contains(TEXT("Pressed")));
+			const UInputTriggerChordAction* ChordTrigger = Action->Triggers.Num() == 2 ? Cast<UInputTriggerChordAction>(Action->Triggers[0]) : nullptr;
+			TestTrue(TEXT("the chord names the other action"), ChordTrigger && ChordTrigger->ChordAction && ChordTrigger->ChordAction->GetPathName().StartsWith(Chord));
+
+			const TSharedPtr<FJsonObject> Unknown = Call(TEXT("SetActionTriggers"), { S(ActionPath), S(TEXT("Hodl(0.5)")) });
+			TestTrue(*FString::Printf(TEXT("an unknown trigger lists the triggers (%s)"), *Codes(Unknown)), !IsOk(Unknown) && Codes(Unknown).Contains(TEXT("HoldAndRelease")) && Codes(Unknown).Contains(TEXT("Pulse")));
+			const TSharedPtr<FJsonObject> Setting = Call(TEXT("SetActionTriggers"), { S(ActionPath), S(TEXT("Hold(Seconds=1)")) });
+			TestTrue(*FString::Printf(TEXT("an unknown setting lists the settings (%s)"), *Codes(Setting)), !IsOk(Setting) && Codes(Setting).Contains(TEXT("HoldTimeThreshold=1 (first argument)")));
+			const TSharedPtr<FJsonObject> Enum = Call(TEXT("SetActionModifiers"), { S(ActionPath), S(TEXT("DeadZone(Type=Square)")) });
+			TestTrue(*FString::Printf(TEXT("a wrong enum value lists the entries (%s)"), *Codes(Enum)), !IsOk(Enum) && Codes(Enum).Contains(TEXT("Axial")));
+			TestEqual(TEXT("the refused writes changed nothing"), Action->Triggers.Num(), 2);
+			TestEqual(TEXT("the refused modifiers changed nothing"), Action->Modifiers.Num(), 3);
+			TestTrue(TEXT("clearing with \"\""), IsOk(Call(TEXT("SetActionTriggers"), { S(ActionPath), S(TEXT("")) })) && Action->Triggers.Num() == 0);
+		});
+
+		It("gives single mappings their own triggers and modifiers and lists every mapping in inputMappings", [this]()
+		{
+			ActionPath = Fresh(TEXT("IA_Use"));
+			ContextPath = Fresh(TEXT("IMC_Use"));
+			TestTrue(TEXT("action"), IsOk(Call(TEXT("CreateAction"), { S(ActionPath), S(TEXT("Boolean")) })));
+			TestTrue(TEXT("context"), IsOk(Call(TEXT("CreateContext"), { S(ContextPath) })));
+			TestTrue(TEXT("E with a Tap"), IsOk(Call(TEXT("AddMapping"), { S(ContextPath), S(ActionPath), S(TEXT("E")), S(TEXT("")), S(TEXT("Tap(0.3)")) })));
+			TestTrue(TEXT("gamepad X"), IsOk(Call(TEXT("AddMapping"), { S(ContextPath), S(ActionPath), S(TEXT("Gamepad_FaceButton_Left")) })));
+			const TSharedPtr<FJsonObject> Hold = Call(TEXT("SetMappingTriggers"), { S(ContextPath), S(ActionPath), S(TEXT("Gamepad_FaceButton_Left")), S(TEXT("HoldAndRelease(0.4)")) });
+			TestTrue(*FString::Printf(TEXT("gamepad hold-and-release (%s)"), *Codes(Hold)), IsOk(Hold));
+			TestTrue(TEXT("gamepad scalar"), IsOk(Call(TEXT("SetMappingModifiers"), { S(ContextPath), S(ActionPath), S(TEXT("Gamepad_FaceButton_Left")), S(TEXT("Scalar(0.5)")) })));
+			const TSharedPtr<FJsonObject> Missing = Call(TEXT("SetMappingTriggers"), { S(ContextPath), S(ActionPath), S(TEXT("Q")), S(TEXT("Pressed")) });
+			TestTrue(*FString::Printf(TEXT("a key that is not mapped lists the mappings (%s)"), *Codes(Missing)), !IsOk(Missing) && Codes(Missing).Contains(TEXT(": E")));
+
+			const UInputMappingContext* Context = LoadObject<UInputMappingContext>(nullptr, *ContextPath);
+			if (!TestNotNull(TEXT("the context"), Context) || !TestEqual(TEXT("two mappings"), Context->GetMappings().Num(), 2))
+				return;
+			const FEnhancedActionKeyMapping& Keyboard = Context->GetMappings()[0];
+			TestTrue(TEXT("E taps (0.3), owned by the context"), Keyboard.Triggers.Num() == 1 && Cast<UInputTriggerTap>(Keyboard.Triggers[0])
+				&& Cast<UInputTriggerTap>(Keyboard.Triggers[0])->TapReleaseTimeThreshold == 0.3f && Keyboard.Triggers[0]->GetOuter() == Context);
+			const FEnhancedActionKeyMapping& Pad = Context->GetMappings()[1];
+			TestTrue(TEXT("pad holds and releases"), Pad.Triggers.Num() == 1 && Cast<UInputTriggerHoldAndRelease>(Pad.Triggers[0]));
+			TestTrue(TEXT("pad scales"), Pad.Modifiers.Num() == 1 && Cast<UInputModifierScalar>(Pad.Modifiers[0]));
+
+			// inputMappings | where Context == "@CTX@" | select Key Triggers Modifiers PlayerMappable Settings MappingName
+			const FString Rows = Codes(Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["inputMappings"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Context"]},{"lit":"@CTX@"}]}},{"op":"select","fields":[{"name":"Key","expr":{"path":["Key"]}},{"name":"Triggers","expr":{"path":["Triggers"]}},{"name":"Modifiers","expr":{"path":["Modifiers"]}},{"name":"PlayerMappable","expr":{"path":["PlayerMappable"]}},{"name":"Settings","expr":{"path":["Settings"]}},{"name":"MappingName","expr":{"path":["MappingName"]}}]}]})RQL"), false,
+				{ { TEXT("CTX"), FPackageName::GetShortName(ContextPath) } }));
+			TestTrue(*FString::Printf(TEXT("the rows (%s)"), *Rows), Rows.Contains(TEXT("Tap(TapReleaseTimeThreshold=0.3)")) && Rows.Contains(TEXT("HoldAndRelease(HoldTimeThreshold=0.4)"))
+				&& Rows.Contains(TEXT("Scalar(Scalar=(0.5, 0.5, 0.5))")));
+		});
+
+		It("lists the trigger and modifier types with their settings", [this]()
+		{
+			// inputTriggerTypes | where Name == "Hold" | select Settings
+			const FString Hold = Codes(Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["inputTriggerTypes"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Name"]},{"lit":"Hold"}]}},{"op":"select","fields":[{"name":"Settings","expr":{"path":["Settings"]}}]}]})RQL"), false));
+			TestTrue(*FString::Printf(TEXT("Hold's settings (%s)"), *Hold), Hold.Contains(TEXT("HoldTimeThreshold=1 (first argument)")) && Hold.Contains(TEXT("bIsOneShot=false")));
+			// inputModifierTypes | where Name == "Negate" | select Class
+			const FString Negate = Codes(Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["inputModifierTypes"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Name"]},{"lit":"Negate"}]}},{"op":"select","fields":[{"name":"Class","expr":{"path":["Class"]}}]}]})RQL"), false));
+			TestTrue(*FString::Printf(TEXT("Negate's class (%s)"), *Negate), Negate.Contains(TEXT("InputModifierNegate")));
+		});
+	});
+
+	Describe("player-mappable keys", [this]()
+	{
+		It("makes an action rebindable, overrides or ignores single mappings and reads it back", [this]()
+		{
+			ActionPath = Fresh(TEXT("IA_Jump"));
+			ContextPath = Fresh(TEXT("IMC_Keys"));
+			TestTrue(TEXT("action"), IsOk(Call(TEXT("CreateAction"), { S(ActionPath), S(TEXT("Boolean")) })));
+			TestTrue(TEXT("context"), IsOk(Call(TEXT("CreateContext"), { S(ContextPath) })));
+			for (const TCHAR* Key : { TEXT("SpaceBar"), TEXT("Gamepad_FaceButton_Bottom"), TEXT("Gamepad_FaceButton_Right") })
+				TestTrue(*FString::Printf(TEXT("mapped %s"), Key), IsOk(Call(TEXT("AddMapping"), { S(ContextPath), S(ActionPath), S(Key) })));
+			const TSharedPtr<FJsonObject> Mappable = Call(TEXT("SetPlayerMappable"), { S(ActionPath), S(TEXT("Jump")), S(TEXT("On Foot")) });
+			TestTrue(*FString::Printf(TEXT("action mappable (%s)"), *Codes(Mappable)), IsOk(Mappable) && Codes(Mappable).Contains(FPackageName::GetShortName(ActionPath)));
+			TestTrue(TEXT("one pad key has its own name"), IsOk(Call(TEXT("SetMappingPlayerMappable"), { S(ContextPath), S(ActionPath), S(TEXT("Gamepad_FaceButton_Bottom")), S(TEXT("Override")), S(TEXT("Jump (Pad)")), S(TEXT("On Foot")) })));
+			TestTrue(TEXT("one key is never rebindable"), IsOk(Call(TEXT("SetMappingPlayerMappable"), { S(ContextPath), S(ActionPath), S(TEXT("Gamepad_FaceButton_Right")), S(TEXT("Ignore")) })));
+			const TSharedPtr<FJsonObject> Mode = Call(TEXT("SetMappingPlayerMappable"), { S(ContextPath), S(ActionPath), S(TEXT("SpaceBar")), S(TEXT("Sometimes")) });
+			TestTrue(*FString::Printf(TEXT("a wrong mode is refused (%s)"), *Codes(Mode)), !IsOk(Mode) && Codes(Mode).Contains(TEXT("Override")));
+
+			const UInputAction* Action = LoadObject<UInputAction>(nullptr, *ActionPath);
+			const UInputMappingContext* Context = LoadObject<UInputMappingContext>(nullptr, *ContextPath);
+			if (!TestNotNull(TEXT("the action"), Action) || !TestNotNull(TEXT("the context"), Context) || !TestEqual(TEXT("three mappings"), Context->GetMappings().Num(), 3))
+				return;
+			const UPlayerMappableKeySettings* Settings = Action->GetPlayerMappableKeySettings();
+			TestTrue(TEXT("action settings: display name, category, name, owned by the action"), Settings && Settings->DisplayName.ToString() == TEXT("Jump")
+				&& Settings->DisplayCategory.ToString() == TEXT("On Foot") && Settings->Name == FName(*FPackageName::GetShortName(ActionPath)) && Settings->GetOuter() == Action);
+			const TArray<FEnhancedActionKeyMapping>& Mappings = Context->GetMappings();
+			TestTrue(TEXT("SpaceBar inherits"), Settings && Mappings[0].IsPlayerMappable() && Mappings[0].GetMappingName() == Settings->Name);
+			TestTrue(TEXT("the pad key overrides"), Mappings[1].IsPlayerMappable() && Mappings[1].GetDisplayName().ToString() == TEXT("Jump (Pad)")
+				&& Mappings[1].GetMappingName() == FName(*(FPackageName::GetShortName(ActionPath) + TEXT("_Gamepad_FaceButton_Bottom"))));
+			TestFalse(TEXT("the ignored key is not rebindable"), Mappings[2].IsPlayerMappable());
+
+			// unreal.asset("@IA@") | select TriggersText ModifiersText PlayerMappable
+			const FString Read = Codes(Run(TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@IA@"}]},"stages":[{"op":"select","fields":[{"name":"TriggersText","expr":{"path":["TriggersText"]}},{"name":"ModifiersText","expr":{"path":["ModifiersText"]}},{"name":"PlayerMappable","expr":{"path":["PlayerMappable"]}}]}]})RQL"), false));
+			TestTrue(*FString::Printf(TEXT("PlayerMappable member (%s)"), *Read), Read.Contains(TEXT("On Foot")));
+			// inputMappings | where Context == "@CTX@" | select Key Triggers Modifiers PlayerMappable Settings MappingName
+			const FString Rows = Codes(Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["inputMappings"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Context"]},{"lit":"@CTX@"}]}},{"op":"select","fields":[{"name":"Key","expr":{"path":["Key"]}},{"name":"Triggers","expr":{"path":["Triggers"]}},{"name":"Modifiers","expr":{"path":["Modifiers"]}},{"name":"PlayerMappable","expr":{"path":["PlayerMappable"]}},{"name":"Settings","expr":{"path":["Settings"]}},{"name":"MappingName","expr":{"path":["MappingName"]}}]}]})RQL"), false,
+				{ { TEXT("CTX"), FPackageName::GetShortName(ContextPath) } }));
+			TestTrue(*FString::Printf(TEXT("rows show inherit / override / ignore (%s)"), *Rows), Rows.Contains(TEXT("Inherit")) && Rows.Contains(TEXT("Override")) && Rows.Contains(TEXT("Ignore")));
+		});
+
+		It("turns the Enhanced Input user settings on and off", [this]()
+		{
+			UEnhancedInputDeveloperSettings* Settings = GetMutableDefault<UEnhancedInputDeveloperSettings>();
+			const bool bWas = Settings->bEnableUserSettings;
+			const TSharedPtr<FJsonObject> On = Call(TEXT("EnableUserSettings"), {});
+			TestTrue(*FString::Printf(TEXT("enabled (%s)"), *Codes(On)), IsOk(On) && Codes(On).Contains(TEXT("-> true")));
+			TestTrue(TEXT("the setting is on"), Settings->bEnableUserSettings != 0);
+			TestTrue(TEXT("restored"), IsOk(Call(TEXT("EnableUserSettings"), { MakeShared<FJsonValueBoolean>(bWas) })));
+			TestEqual(TEXT("back to what it was"), Settings->bEnableUserSettings != 0, bWas);
+		});
+	});
+
+	Describe("control schemes in Blueprints", [this]()
+	{
+		It("swaps a pawn's scheme on possession: removes for the old controller, adds for the new one, registered for rebinding", [this]()
+		{
+			UBlueprint* Blueprint = MakeBlueprint(ACharacter::StaticClass());
+			if (!TestNotNull(TEXT("character blueprint"), Blueprint))
+				return;
+			const TSharedPtr<FJsonObject> Added = Call(TEXT("AddMappingContextOnPossess"), { S(BlueprintPath), S(ContextPath), N(2) });
+			TestTrue(*FString::Printf(TEXT("added (%s)"), *Codes(Added)), IsOk(Added) && ResultRef(Added).StartsWith(TEXT("K2Node_CallFunction#")));
+			UK2Node_Event* Changed = FBlueprintEditorUtils::FindOverrideForFunction(Blueprint, APawn::StaticClass(), TEXT("ReceiveControllerChanged"));
+			if (!TestNotNull(TEXT("an On Controller Changed event"), Changed))
+				return;
+			const UEdGraphPin* Then = Changed->FindPin(UEdGraphSchema_K2::PN_Then);
+			const UK2Node_DynamicCast* OldCast = Then && Then->LinkedTo.Num() == 1 ? Cast<UK2Node_DynamicCast>(Then->LinkedTo[0]->GetOwningNode()) : nullptr;
+			TestTrue(*FString::Printf(TEXT("first: the old controller cast to a PlayerController (%s)"), *Links(Then)), OldCast && OldCast->TargetType == APlayerController::StaticClass()
+				&& OldCast->GetCastSourcePin()->LinkedTo.Num() == 1 && OldCast->GetCastSourcePin()->LinkedTo[0]->PinName == TEXT("OldController"));
+			const TArray<UK2Node_CallFunction*> Removes = CallsOf(Blueprint, TEXT("RemoveMappingContext"));
+			const TArray<UK2Node_CallFunction*> Adds = CallsOf(Blueprint, TEXT("AddMappingContext"));
+			if (!TestEqual(TEXT("one Remove"), Removes.Num(), 1) || !TestEqual(TEXT("one Add"), Adds.Num(), 1))
+				return;
+			const UK2Node_IfThenElse* IsLocal = OldCast && OldCast->GetValidCastPin()->LinkedTo.Num() == 1 ? Cast<UK2Node_IfThenElse>(OldCast->GetValidCastPin()->LinkedTo[0]->GetOwningNode()) : nullptr;
+			TestTrue(*FString::Printf(TEXT("a cast controller is checked to be local (%s)"), OldCast ? *Links(OldCast->GetValidCastPin()) : TEXT("no cast")), IsLocal != nullptr);
+			TestTrue(TEXT("Remove runs for a local controller"), IsLocal && IsLocal->GetThenPin()->LinkedTo.Num() == 1 && IsLocal->GetThenPin()->LinkedTo[0]->GetOwningNode() == Removes[0]);
+			const UK2Node_DynamicCast* NewCast = OldCast && OldCast->GetInvalidCastPin()->LinkedTo.Num() == 1 ? Cast<UK2Node_DynamicCast>(OldCast->GetInvalidCastPin()->LinkedTo[0]->GetOwningNode()) : nullptr;
+			TestTrue(*FString::Printf(TEXT("no old player: on to the new controller's cast (%s)"), OldCast ? *Links(OldCast->GetInvalidCastPin()) : TEXT("no cast")),
+				NewCast && NewCast->GetCastSourcePin()->LinkedTo.Num() == 1 && NewCast->GetCastSourcePin()->LinkedTo[0]->PinName == TEXT("NewController"));
+			const UEdGraphPin* Priority = Adds[0]->FindPin(TEXT("Priority"));
+			TestTrue(TEXT("priority 2"), Priority && Priority->DefaultValue == TEXT("2"));
+			const UEdGraphPin* Options = Adds[0]->FindPin(TEXT("Options"));
+			TestTrue(*FString::Printf(TEXT("registers with the user settings (%s)"), Options ? *Options->DefaultValue : TEXT("no pin")), Options && Options->DefaultValue.Contains(TEXT("bNotifyUserSettings=True")));
+			TestEqual(TEXT("compiles without errors"), CompileErrors(Blueprint), 0);
+			const TSharedPtr<FJsonObject> Again = Call(TEXT("AddMappingContextOnEvent"), { S(BlueprintPath), S(ContextPath), S(TEXT("BeginPlay")) });
+			TestTrue(*FString::Printf(TEXT("the same context again is refused, naming the event (%s)"), *Codes(Again)), !IsOk(Again) && Codes(Again).Contains(TEXT("already adds")) && Codes(Again).Contains(TEXT("ControllerChanged")));
+			// unreal.asset("@BP@") | select InputSetup
+			const FString Setup = Codes(Run(TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@BP@"}]},"stages":[{"op":"select","fields":[{"name":"InputSetup","expr":{"path":["InputSetup"]}}]}]})RQL"), false), 100000);
+			TestTrue(*FString::Printf(TEXT("InputSetup lists both (%s)"), *Setup), Setup.Contains(TEXT("ControllerChanged")) && Setup.Contains(TEXT("Remove")) && Setup.Contains(TEXT("Priority")));
+		});
+
+		It("adds and removes contexts on custom events and controller events; refuses pawn events on a controller", [this]()
+		{
+			UBlueprint* Controller = MakeBlueprint(APlayerController::StaticClass());
+			if (!TestNotNull(TEXT("controller blueprint"), Controller))
+				return;
+			const TSharedPtr<FJsonObject> Possess = Call(TEXT("AddMappingContextOnEvent"), { S(BlueprintPath), S(ContextPath), S(TEXT("OnPossess")), N(1) });
+			TestTrue(*FString::Printf(TEXT("OnPossess (%s)"), *Codes(Possess)), IsOk(Possess));
+			const TArray<UK2Node_CallFunction*> Adds = CallsOf(Controller, TEXT("AddMappingContext"));
+			const UEdGraphPin* Target = Adds.Num() == 1 ? Adds[0]->FindPin(UEdGraphSchema_K2::PN_Self) : nullptr;
+			const UEdGraphNode* Subsystem = Target && Target->LinkedTo.Num() == 1 ? Target->LinkedTo[0]->GetOwningNode() : nullptr;
+			const UEdGraphPin* PlayerPin = Subsystem ? Subsystem->FindPin(TEXT("PlayerController")) : nullptr;
+			TestTrue(*FString::Printf(TEXT("the controller's own subsystem (%s)"), *Links(PlayerPin)), PlayerPin && PlayerPin->LinkedTo.Num() == 1 && Cast<UK2Node_Self>(PlayerPin->LinkedTo[0]->GetOwningNode()));
+			const FString Second = Fresh(TEXT("IMC_Menu"));
+			TestTrue(TEXT("menu context"), IsOk(Call(TEXT("CreateContext"), { S(Second) })));
+			const TSharedPtr<FJsonObject> Wrong = Call(TEXT("AddMappingContextOnEvent"), { S(BlueprintPath), S(Second), S(TEXT("Possessed")) });
+			TestTrue(*FString::Printf(TEXT("Possessed on a controller names the controller events (%s)"), *Codes(Wrong)), !IsOk(Wrong) && Codes(Wrong).Contains(TEXT("OnPossess")));
+			const TSharedPtr<FJsonObject> Custom = Call(TEXT("AddMappingContextOnEvent"), { S(BlueprintPath), S(Second), S(TEXT("OpenMenu")), N(10) });
+			TestTrue(*FString::Printf(TEXT("a custom event is created (%s)"), *Codes(Custom)), IsOk(Custom) && FBlueprintEditorUtils::FindCustomEventNode(Controller, TEXT("OpenMenu")));
+			const TSharedPtr<FJsonObject> Remove = Call(TEXT("RemoveMappingContextOnEvent"), { S(BlueprintPath), S(Second), S(TEXT("CloseMenu")) });
+			TestTrue(*FString::Printf(TEXT("removed on another custom event (%s)"), *Codes(Remove)), IsOk(Remove) && CallsOf(Controller, TEXT("RemoveMappingContext")).Num() == 1);
+			const TSharedPtr<FJsonObject> Twice = Call(TEXT("RemoveMappingContextOnEvent"), { S(BlueprintPath), S(Second), S(TEXT("CloseMenu")) });
+			TestTrue(*FString::Printf(TEXT("the same removal twice is refused (%s)"), *Codes(Twice)), !IsOk(Twice) && Codes(Twice).Contains(TEXT("already removes")));
+			TestEqual(TEXT("compiles without errors"), CompileErrors(Controller), 0);
+		});
+
+		It("binds actions to inherited functions, appends a second bind, passes axis values and toggles with a FlipFlop", [this]()
+		{
+			UBlueprint* Blueprint = MakeBlueprint(ACharacter::StaticClass());
+			if (!TestNotNull(TEXT("character blueprint"), Blueprint))
+				return;
+			const TSharedPtr<FJsonObject> Jump = Call(TEXT("BindAction"), { S(BlueprintPath), S(ActionPath), S(TEXT("Started")), S(TEXT("Jump")) });
+			TestTrue(*FString::Printf(TEXT("Started -> Jump (%s)"), *Codes(Jump)), IsOk(Jump));
+			TestTrue(TEXT("Completed -> StopJumping"), IsOk(Call(TEXT("BindAction"), { S(BlueprintPath), S(ActionPath), S(TEXT("Completed")), S(TEXT("StopJumping")) })));
+			TestTrue(TEXT("a second Started call appends"), IsOk(Call(TEXT("BindAction"), { S(BlueprintPath), S(ActionPath), S(TEXT("Started")), S(TEXT("UnCrouch")) })));
+			const TSharedPtr<FJsonObject> Twice = Call(TEXT("BindAction"), { S(BlueprintPath), S(ActionPath), S(TEXT("Started")), S(TEXT("Jump")) });
+			TestTrue(*FString::Printf(TEXT("the same call twice is refused (%s)"), *Codes(Twice)), !IsOk(Twice) && Codes(Twice).Contains(TEXT("already calls")));
+			const TSharedPtr<FJsonObject> NoParameter = Call(TEXT("BindAction"), { S(BlueprintPath), S(ActionPath), S(TEXT("Completed")), S(TEXT("UnCrouch")), S(TEXT("Nope")) });
+			TestTrue(*FString::Printf(TEXT("an unknown value parameter is refused (%s)"), *Codes(NoParameter)), !IsOk(NoParameter) && Codes(NoParameter).Contains(TEXT("no input parameter")));
+			TestEqual(TEXT("the refused bind added no node"), CallsOf(Blueprint, TEXT("UnCrouch")).Num(), 1);
+			const TSharedPtr<FJsonObject> Unknown = Call(TEXT("BindAction"), { S(BlueprintPath), S(ActionPath), S(TEXT("Started")), S(TEXT("Jmup")) });
+			TestTrue(*FString::Printf(TEXT("an unknown function lists the callable ones (%s)"), *Codes(Unknown)), !IsOk(Unknown) && Codes(Unknown).Contains(TEXT("StopJumping")));
+			const TSharedPtr<FJsonObject> Pin = Call(TEXT("BindAction"), { S(BlueprintPath), S(ActionPath), S(TEXT("Pressed")), S(TEXT("Jump")) });
+			TestTrue(*FString::Printf(TEXT("an unknown trigger event lists them (%s)"), *Codes(Pin)), !IsOk(Pin) && Codes(Pin).Contains(TEXT("Completed")));
+			TArray<UK2Node_EnhancedInputAction*> Events;
+			FBlueprintEditorUtils::GetAllNodesOfClass(Blueprint, Events);
+			if (!TestEqual(TEXT("one action event"), Events.Num(), 1))
+				return;
+			const UEdGraphPin* Started = Events[0]->FindPin(TEXT("Started"));
+			const UK2Node_CallFunction* First = Started && Started->LinkedTo.Num() == 1 ? Cast<UK2Node_CallFunction>(Started->LinkedTo[0]->GetOwningNode()) : nullptr;
+			TestTrue(*FString::Printf(TEXT("Started runs Jump (%s)"), *Links(Started)), First && First->FunctionReference.GetMemberName() == TEXT("Jump"));
+			const UEdGraphPin* AfterJump = First ? First->FindPin(UEdGraphSchema_K2::PN_Then) : nullptr;
+			const UK2Node_CallFunction* Second = AfterJump && AfterJump->LinkedTo.Num() == 1 ? Cast<UK2Node_CallFunction>(AfterJump->LinkedTo[0]->GetOwningNode()) : nullptr;
+			TestTrue(*FString::Printf(TEXT("then UnCrouch (%s)"), *Links(AfterJump)), Second && Second->FunctionReference.GetMemberName() == TEXT("UnCrouch"));
+
+			const FString Crouch = Fresh(TEXT("IA_Crouch"));
+			TestTrue(TEXT("crouch action"), IsOk(Call(TEXT("CreateAction"), { S(Crouch), S(TEXT("Boolean")), S(TEXT("Pressed")) })));
+			const TSharedPtr<FJsonObject> Toggle = Call(TEXT("BindActionToggle"), { S(BlueprintPath), S(Crouch), S(TEXT("Crouch")), S(TEXT("UnCrouch")) });
+			TestTrue(*FString::Printf(TEXT("crouch toggles (%s)"), *Codes(Toggle)), IsOk(Toggle) && ResultRef(Toggle).StartsWith(TEXT("K2Node_MacroInstance#")));
+			const TSharedPtr<FJsonObject> ToggleAgain = Call(TEXT("BindActionToggle"), { S(BlueprintPath), S(Crouch), S(TEXT("Crouch")), S(TEXT("UnCrouch")) });
+			TestTrue(*FString::Printf(TEXT("a second toggle on the same pin is refused (%s)"), *Codes(ToggleAgain)), !IsOk(ToggleAgain) && Codes(ToggleAgain).Contains(TEXT("already runs")));
+
+			const FString Throttle = Fresh(TEXT("IA_Throttle"));
+			TestTrue(TEXT("axis action"), IsOk(Call(TEXT("CreateAction"), { S(Throttle), S(TEXT("Axis1D")) })));
+			TestTrue(TEXT("Triggered -> AddMovementInput"), IsOk(Call(TEXT("BindAction"), { S(BlueprintPath), S(Throttle), S(TEXT("Triggered")), S(TEXT("AddMovementInput")) })));
+			const TArray<UK2Node_CallFunction*> Moves = CallsOf(Blueprint, TEXT("AddMovementInput"));
+			const UEdGraphPin* Scale = Moves.Num() == 1 ? Moves[0]->FindPin(TEXT("ScaleValue")) : nullptr;
+			TestTrue(*FString::Printf(TEXT("the axis value feeds ScaleValue (%s)"), *Links(Scale)), Scale && Scale->LinkedTo.Num() == 1 && Scale->LinkedTo[0]->PinName == TEXT("ActionValue"));
+			TestEqual(TEXT("compiles without errors"), CompileErrors(Blueprint), 0);
+			// unreal.asset("@BP@") | select InputSetup
+			const FString Setup = Codes(Run(TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@BP@"}]},"stages":[{"op":"select","fields":[{"name":"InputSetup","expr":{"path":["InputSetup"]}}]}]})RQL"), false), 100000);
+			TestTrue(*FString::Printf(TEXT("InputSetup lists the bindings (%s)"), *Setup), Setup.Contains(TEXT("StopJumping")) && Setup.Contains(TEXT("FlipFlop")) && Setup.Contains(TEXT("AddMovementInput.ScaleValue")));
 		});
 	});
 }

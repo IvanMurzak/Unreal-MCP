@@ -1,0 +1,10 @@
+{
+  "description": "the density parameter drives the sampler",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "pcg | call BindParameter(\"/Game/E2E/PCG_E2EForest\", \"Density\", \"SurfaceSampler\", \"PointsPerSquaredMeter\")"
+  },
+  "assert": {
+    "pattern": "Density -> SurfaceSampler\\."
+  }
+}

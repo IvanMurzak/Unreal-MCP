@@ -1,0 +1,10 @@
+{
+  "description": "the test assets deleted",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "[\"/Game/E2E/BP_E2E_Hero\", \"/Game/E2E/BP_E2E_Car\", \"/Game/E2E/Input/IMC_OnFoot\", \"/Game/E2E/Input/IMC_Vehicle\", \"/Game/E2E/Input/IA_Move\", \"/Game/E2E/Input/IA_Look\", \"/Game/E2E/Input/IA_Jump\", \"/Game/E2E/Input/IA_Sprint\", \"/Game/E2E/Input/IA_Crouch\", \"/Game/E2E/Input/IA_Interact\", \"/Game/E2E/Input/IA_Throttle\", \"/Game/E2E/Input/IA_Steer\", \"/Game/E2E/Input/IA_Handbrake\"] | call editor.DeleteAsset($, true)"
+  },
+  "assert": {
+    "pattern": "13 results"
+  }
+}
