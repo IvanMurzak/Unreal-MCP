@@ -91,14 +91,6 @@ namespace UnrealMcpToolListTools
 					Rows.Add(MakeShared<FJsonValueObject>(Row));
 				}
 
-				FString Text = FString::Printf(TEXT("%d tool(s)%s, %d hidden"), Lines.Num(), Filter.IsEmpty() ? TEXT("") : *FString::Printf(TEXT(" matching '%s'"), *Filter), Hidden);
-				if (Hidden > 0)
-					Text += TEXT(" (hidden tools are left out of tools/list but still run when called by name)");
-				if (Lines.Num() == 0 && Pattern.IsSet())
-					Text += TEXT(" (no tool matches: check the regex, or call without 'filter')"); // an invalid regex matches nothing silently
-				Text += TEXT("\nEditor features and installed extensions are RQL sources, not tools: rql-schema lists them (e.g. landscape, controlRig).");
-				Text += TEXT("\nname | title | visible/hidden [| extension]\n") + FString::Join(Lines, TEXT("\n"));
-
 				// The extensions this editor does not have (those the filter matches): what each adds and how to get it.
 				TArray<FString> ExtensionLines;
 				TArray<TSharedPtr<FJsonValue>> ExtensionRows;
@@ -118,6 +110,14 @@ namespace UnrealMcpToolListTools
 					Row->SetStringField(TEXT("line"), Line);
 					ExtensionRows.Add(MakeShared<FJsonValueObject>(Row));
 				}
+
+				FString Text = FString::Printf(TEXT("%d tool(s)%s, %d hidden"), Lines.Num(), Filter.IsEmpty() ? TEXT("") : *FString::Printf(TEXT(" matching '%s'"), *Filter), Hidden);
+				if (Hidden > 0)
+					Text += TEXT(" (hidden tools are left out of tools/list but still run when called by name)");
+				if (Lines.Num() == 0 && ExtensionLines.Num() == 0 && Pattern.IsSet())
+					Text += TEXT(" (no tool matches: check the regex, or call without 'filter')"); // an invalid regex matches nothing silently
+				Text += TEXT("\nEditor features and installed extensions are RQL sources, not tools: rql-schema lists them (e.g. landscape, controlRig).");
+				Text += TEXT("\nname | title | visible/hidden [| extension]\n") + FString::Join(Lines, TEXT("\n"));
 				if (ExtensionLines.Num())
 					Text += TEXT("\n\n") + UnrealMcpAvailableExtensions::InstallNote() + TEXT("\n") + FString::Join(ExtensionLines, TEXT("\n"));
 

@@ -93,6 +93,10 @@ void FUnrealMcpAvailableExtensionsSpec::Define()
 		TestEqual(TEXT("core sources match nothing"), MatchedId(TEXT("actors | where Label == \"Megastructure\" | count"), All), FString());
 		TestEqual(TEXT("gameplay tags are core"), MatchedId(TEXT("gameplayTags | count"), All), FString());
 		TestEqual(TEXT("only a word start counts"), MatchedId(TEXT("actors | where Label == \"SpcgX\""), All), FString());
+		TestEqual(TEXT("prose in quotes is not a name"), MatchedId(TEXT(R"({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"Gas Station"}]}}]})"), All), FString());
+		TestEqual(TEXT("gas is a whole word"), MatchedId(TEXT("unreal.find(\"Gasoline\")"), All), FString());
+		TestEqual(TEXT("a part between underscores"), MatchedId(TEXT(R"(unreal.asset("/Game/BP_PCGVolume"))"), All), FString(PcgId));
+		TestEqual(TEXT("the GAS operations source"), MatchedId(TEXT("gas | call GrantAbility"), All), FString(TEXT("com.ivanmurzak.unreal-ai-gas")));
 		TestEqual(TEXT("ready extensions are not candidates"), MatchedId(TEXT("niagaraSystems"), {}), FString());
 	});
 
@@ -112,6 +116,9 @@ void FUnrealMcpAvailableExtensionsSpec::Define()
 
 	It("adds the online catalog's other extensions and keeps the bundled ones", [this]()
 	{
+		const int32 Bundled = 6;
+		TArray<FUnrealMcpKnownExtension> Fetched = UnrealMcpAvailableExtensions::Known(); // restored at the end: an interactive editor may have fetched it
+		Fetched.RemoveAt(0, Bundled);
 		TArray<FUnrealMcpCatalogEntry> Catalog;
 		FUnrealMcpCatalogEntry& Niagara = Catalog.AddDefaulted_GetRef();
 		Niagara.ExtensionId = NiagaraId;
@@ -124,7 +131,6 @@ void FUnrealMcpAvailableExtensionsSpec::Define()
 		Other.Description = TEXT("weather systems");
 		FUnrealMcpExtensionCatalog::PublishToAgents(Catalog);
 
-		const int32 Bundled = 6;
 		const TArray<FUnrealMcpKnownExtension> Known = UnrealMcpAvailableExtensions::Known();
 		TestEqual(TEXT("the bundled six plus the other one"), Known.Num(), Bundled + 1);
 		const FUnrealMcpKnownExtension* KnownNiagara = Known.FindByPredicate([](const FUnrealMcpKnownExtension& E) { return E.ExtensionId == NiagaraId; });
@@ -137,6 +143,7 @@ void FUnrealMcpAvailableExtensionsSpec::Define()
 
 		FUnrealMcpExtensionCatalog::PublishToAgents({});
 		TestEqual(TEXT("an empty catalog leaves the bundled six"), UnrealMcpAvailableExtensions::Known().Num(), Bundled);
+		UnrealMcpAvailableExtensions::SetCatalog(MoveTemp(Fetched));
 	});
 
 	It("names a missing extension when a query on its source fails, and warns when one on its domain finds nothing", [this]()
@@ -150,6 +157,9 @@ void FUnrealMcpAvailableExtensionsSpec::Define()
 		const TSharedPtr<FJsonObject> Unrelated = Exec(*this, TEXT(R"({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"SpecNoSuchActor"}]}},{"op":"count"}]})"));
 		TestTrue(TEXT("the empty queries succeed"), IsOk(Empty) && IsOk(Unrelated));
 		TestFalse(*FString::Printf(TEXT("no hint off the domain (%s)"), *Hints(Unrelated)), Hints(Unrelated).Contains(TEXT("install")));
+		// actors | where Label == "PcgSpecNoSuchActor" | set HiddenInEditor = true: an empty mutation is no missing domain
+		const TSharedPtr<FJsonObject> Mutation = Exec(*this, TEXT(R"({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"PcgSpecNoSuchActor"}]}},{"op":"set","assign":[{"target":{"path":["HiddenInEditor"]},"value":{"lit":true}}]}]})"), /*bMutate*/ true);
+		TestFalse(*FString::Printf(TEXT("no warning on a mutation (%s)"), *Codes(Mutation)), Codes(Mutation).Contains(TEXT("extension-missing")));
 		if (IsMissing(PcgId))
 		{
 			TestFalse(TEXT("the source is unknown"), IsOk(Source));

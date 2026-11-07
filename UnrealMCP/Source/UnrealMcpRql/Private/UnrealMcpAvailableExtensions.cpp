@@ -30,8 +30,8 @@ namespace
 				{ TEXT("pcg") }, true },
 			{ TEXT("com.ivanmurzak.unreal-ai-gas"), TEXT("GAS Tools"), TEXT("UnrealAIGAS"),
 				TEXT("Gameplay Ability System: gasAbilities, gasEffects, gasAttributeSets, granted abilities, gas | call GrantAbility"),
-				{ TEXT("gas"), TEXT("gameplayabilit"), TEXT("gameplayeffect"), TEXT("attributeset"), TEXT("abilitysystem"),
-					TEXT("grantability") }, true },
+				{ TEXT("gas$"), TEXT("gasabilit"), TEXT("gaseffect"), TEXT("gasattribute"), TEXT("gameplayabilit"), TEXT("gameplayeffect"),
+					TEXT("attributeset"), TEXT("abilitysystem"), TEXT("grantability") }, true },
 			{ TEXT("com.ivanmurzak.unreal-ai-landscape"), TEXT("Landscape Tools"), TEXT("UnrealAILandscape"),
 				TEXT("Landscape and Water: landscapes, waterBodies, waterZones, landscape | call Create / Sculpt / Paint / CreateLayerMaterial"),
 				{ TEXT("landscape"), TEXT("waterbod"), TEXT("waterzone") }, true },
@@ -61,27 +61,56 @@ namespace
 	FString InstallInstruction(const FString& Id)
 	{
 		return FString::Printf(TEXT("ask to install extension %s (e.g. through the AI Game Dev app) or run "
-			"unreal-mcp-cli install-extension %s in the project folder, then restart the Unreal Editor"), *Id, *Id);
+			"unreal-mcp-cli install-extension %s in the project folder, then restart the Unreal Editor (until then it shows as not "
+			"installed)"), *Id, *Id);
 	}
 
-	/** The identifiers of @p Text: runs of letters, digits and underscores, lower-cased. */
+	/**
+	 * The identifiers of @p Text, lower-cased: runs of letters, digits and underscores, plus their parts between underscores
+	 * (BP_PCGVolume gives bp_pcgvolume, bp, pcgvolume). A quoted string with whitespace in it is prose ("Gas Station"),
+	 * not a name, so its words are left out; a name or path in quotes ("PCGGraph", "/Game/Input/IA_Jump") counts.
+	 */
 	TArray<FString> Identifiers(const FString& Text)
 	{
-		TArray<FString> Out;
-		FString Current;
-		for (const TCHAR Char : Text)
+		FString Names;
+		for (int32 Index = 0; Index < Text.Len(); ++Index)
 		{
-			if (FChar::IsAlnum(Char) || Char == TEXT('_'))
+			if (Text[Index] != TEXT('"'))
 			{
-				Current.AppendChar(FChar::ToLower(Char));
+				Names.AppendChar(Text[Index]);
 				continue;
 			}
-			if (!Current.IsEmpty())
-				Out.Add(MoveTemp(Current));
-			Current.Reset();
+			int32 End = Index + 1;
+			bool bProse = false;
+			for (; End < Text.Len() && Text[End] != TEXT('"'); ++End)
+			{
+				bProse |= FChar::IsWhitespace(Text[End]);
+				End += Text[End] == TEXT('\\') ? 1 : 0; // an escaped character
+			}
+			Names += bProse ? FString(TEXT(" ")) : TEXT(" ") + Text.Mid(Index + 1, End - Index - 1) + TEXT(" ");
+			Index = End;
 		}
-		if (!Current.IsEmpty())
+
+		TArray<FString> Out;
+		FString Current;
+		auto Flush = [&Out, &Current]()
+		{
+			if (Current.IsEmpty())
+				return;
+			TArray<FString> Parts;
+			if (Current.ParseIntoArray(Parts, TEXT("_")) > 1)
+				Out.Append(Parts);
 			Out.Add(MoveTemp(Current));
+			Current.Reset();
+		};
+		for (const TCHAR Char : Names)
+		{
+			if (FChar::IsAlnum(Char) || Char == TEXT('_'))
+				Current.AppendChar(FChar::ToLower(Char));
+			else
+				Flush();
+		}
+		Flush();
 		return Out;
 	}
 }
@@ -176,7 +205,10 @@ namespace UnrealMcpAvailableExtensions
 		{
 			for (const FString& Keyword : Candidate.Extension.Keywords)
 			{
-				if (Words.ContainsByPredicate([&Keyword](const FString& Word) { return Word.StartsWith(Keyword, ESearchCase::CaseSensitive); }))
+				// A keyword prefixes a word ("niagara" matches niagarasystems); one ending in $ is the whole word ("gas$").
+				const bool bWhole = Keyword.EndsWith(TEXT("$"));
+				const FString Key = bWhole ? Keyword.LeftChop(1) : Keyword;
+				if (Words.ContainsByPredicate([&Key, bWhole](const FString& Word) { return bWhole ? Word == Key : Word.StartsWith(Key, ESearchCase::CaseSensitive); }))
 					return &Candidate;
 			}
 		}

@@ -435,12 +435,13 @@ void FUnrealMcpEditorCoordinator::Startup()
 	};
 	ExtWiring.CatalogFetcher = [](TArray<FUnrealMcpCatalogEntry>& Out, FString& Err) -> bool
 	{
+		if (FUnrealMcpExtensionInstaller::FetchCatalogSync(FUnrealMcpExtensionCatalog::DefaultCatalogUrl(), 30.0, Out, Err))
+		{
+			FUnrealMcpExtensionCatalog::PublishToAgents(Out); // the live index only: agents keep what it lists
+			return true;
+		}
 		// First rollout/offline compatibility: legacy releases stay available.
-		const bool bFetched = FUnrealMcpExtensionInstaller::FetchCatalogSync(FUnrealMcpExtensionCatalog::DefaultCatalogUrl(), 30.0, Out, Err)
-			|| FUnrealMcpExtensionInstaller::FetchCatalogSync(FUnrealMcpExtensionCatalog::LegacyCatalogUrl(), 30.0, Out, Err);
-		if (bFetched)
-			FUnrealMcpExtensionCatalog::PublishToAgents(Out);
-		return bFetched;
+		return FUnrealMcpExtensionInstaller::FetchCatalogSync(FUnrealMcpExtensionCatalog::LegacyCatalogUrl(), 30.0, Out, Err);
 	};
 	FetchCatalogForAgents();
 	ExtWiring.OnSetEnabled = [ExtMgrPtr](const FString& Id, bool bEnabled)

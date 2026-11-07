@@ -18,7 +18,7 @@ struct FUnrealMcpKnownExtension
 	FString PluginName;
 	/** One line: what it adds (its RQL sources and operations). */
 	FString Adds;
-	/** Lower-case prefixes of the identifiers of its domain ("niagara" matches niagaraSystems, NiagaraComponent). */
+	/** Lower-case prefixes of the identifiers of its domain ("niagara" matches niagaraSystems, NiagaraComponent); "gas$" only the word gas. */
 	TArray<FString> Keywords;
 	/** It ships an RQL module: an enabled plugin without its module means the module did not load yet. */
 	bool bRqlModule = false;

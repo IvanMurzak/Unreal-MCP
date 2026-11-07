@@ -29,9 +29,10 @@ namespace UnrealMcpRqlSessionLocal
 {
 	/**
 	 * A failed or empty query whose plan touches the domain of an extension this editor does not have (niagaraSystems,
-	 * PCGGraph, gasAbilities, ...) names that extension and how to get it: on the first error's hint, or as a warning.
+	 * PCGGraph, gasAbilities, ...) names that extension and how to get it: on the first error's hint, or as a warning. Only a
+	 * read finds "nothing": a mutation's empty receipt (a set that kept every value) is not a missing domain.
 	 */
-	void AddExtensionHint(rql::QueryResult& Result, const FString& PlanText)
+	void AddExtensionHint(rql::QueryResult& Result, const FString& PlanText, bool bMutation)
 	{
 		rql::Diagnostic* Error = nullptr;
 		for (rql::Diagnostic& Diagnostic : Result.diagnostics)
@@ -42,7 +43,7 @@ namespace UnrealMcpRqlSessionLocal
 				break;
 			}
 		}
-		const bool bEmpty = Result.ok && ((Result.rows && Result.rows->empty()) || (Result.items && Result.items->empty())
+		const bool bEmpty = !bMutation && Result.ok && ((Result.rows && Result.rows->empty()) || (Result.items && Result.items->empty())
 			|| (Result.has_value && Result.value.is_number() && Result.value.as_number() == 0));
 		if (!Error && !bEmpty)
 			return;
@@ -659,7 +660,7 @@ FString FUnrealMcpRqlSession::Execute(const FString& PlanJson, bool bAllowMutati
 	}
 	CloseTransaction();
 	LiteralObjects.Reset(); // written by now (the undo buffer or their owner holds them), or garbage
-	UnrealMcpRqlSessionLocal::AddExtensionHint(Result, PlanJson);
+	UnrealMcpRqlSessionLocal::AddExtensionHint(Result, PlanJson, bAllowMutation);
 	bOutOk = Result.ok;
 	return UnrealMcpRqlFromStd(Result.to_json(/*include_stats*/ false).dump());
 }

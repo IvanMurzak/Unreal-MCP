@@ -378,7 +378,7 @@ extension index adds others when the editor fetches it (one asynchronous request
 Extensions panel's Refresh; never in unattended runs, never waited on). Every extension that is not loaded and enabled
 is listed, with its state (not installed, plugin disabled, not loaded yet, turned off) and what to do — install:
 "ask to install extension <id>" or `unreal-mcp-cli install-extension <id>`, then restart the editor — in `rql-schema`
-(no type), `unreal-tool-list` (narrowed by its `filter`) and the `unreal-rql` skill. A query that fails, or finds
+(no type), `unreal-tool-list` (narrowed by its `filter`) and the `unreal-rql` skill. A query that fails, or a read that finds
 nothing, and whose plan touches the domain of such an extension (`pcgGraphs`, `PCGGraph`, `gasAbilities`, `IA_Jump`,
 ...) names it: on the first error's hint, or as an `extension-missing` warning; so does `rql-schema` for an unknown type
 of that domain. A new first-party extension adds its entry to the bundled list
