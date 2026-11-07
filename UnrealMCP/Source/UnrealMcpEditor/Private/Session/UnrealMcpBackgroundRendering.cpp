@@ -85,8 +85,8 @@ void FUnrealMcpBackgroundRendering::SetHeld(bool bHold)
 		UEditorEngine::FShouldDisableCPUThrottling Delegate = UEditorEngine::FShouldDisableCPUThrottling::CreateLambda([]() { return true; });
 		ThrottleDelegateHandle = Delegate.GetHandle();
 		Editor->ShouldDisableCPUThrottlingDelegates.Add(MoveTemp(Delegate));
-		UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] An MCP client is working with the editor: it keeps rendering at full rate in the "
-			"background (\"Use Less CPU when in Background\" is overridden for this session only; the saved preference is unchanged)."));
+		UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] An MCP client is working with the editor: it keeps ticking and rendering at full rate "
+			"in the background (\"Use Less CPU when in Background\" is overridden for this session only; the saved preference is unchanged)."));
 		return;
 	}
 

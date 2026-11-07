@@ -132,14 +132,30 @@ namespace UnrealMcpScreenshotTools
 				return false;
 			}
 			if (World->IsGameWorld())
-				return true; // a play session ticks its world fully
+			{
+				// A play (or simulate) session ticks its world fully unless it is paused (Pause button, breakpoint, SetGamePaused).
+				if (!World->IsPaused())
+					return true;
+				OutReason = TEXT("the play session is paused");
+				return false;
+			}
+			FString OverrideMessage;
 			for (const FEditorViewportClient* Client : GEditor->GetAllViewportClients())
 			{
-				if (Client && Client->GetWorld() == World && Client->IsRealtime())
+				if (!Client || Client->GetWorld() != World)
+					continue;
+				if (Client->IsRealtime())
 					return true;
+				if (OverrideMessage.IsEmpty() && Client->IsRealtimeOverrideSet())
+					OverrideMessage = Client->GetRealtimeOverrideMessage().ToString();
 			}
-			OutReason = TEXT("no viewport of this level is in realtime mode, so the editor world only advances time; "
-			                 "turn on Realtime in the level viewport (Ctrl+R)");
+			// A realtime override (e.g. the editor's own "Background Process" one, removed on the next editor tick) is not
+			// something Ctrl+R fixes: name it instead.
+			OutReason = OverrideMessage.IsEmpty()
+				? FString(TEXT("no viewport of this level is in realtime mode, so the editor world only advances time; "
+				               "turn on Realtime in the level viewport (Ctrl+R)"))
+				: FString::Printf(TEXT("realtime is overridden for this level's viewports (%s), so the editor world only "
+				                       "advances time"), *OverrideMessage);
 			return false;
 		}
 
@@ -282,7 +298,13 @@ namespace UnrealMcpScreenshotTools
 				World->SendAllEndOfFrameUpdates();
 			FString FrameReason;
 			const bool bFrameFresh = ScreenshotCanRedrawViewport(Viewport, FrameReason);
+			// Draw a PIE game view inside its world context, as UEditorEngine::Tick does (GWorld / PIE instance id).
+			const bool bPieContext = GEditor && World && World == GEditor->PlayWorld && !GEditor->bIsSimulatingInEditor
+				&& !GIsPlayInEditorWorld;
+			UWorld* SavedWorld = bPieContext ? SetPlayInEditorWorld(World) : nullptr;
 			Viewport->Draw();
+			if (bPieContext)
+				RestoreEditorWorld(SavedWorld);
 
 			TArray<FColor> Pixels;
 			if (!Viewport->ReadPixels(Pixels, FReadSurfaceDataFlags(), FIntRect(0, 0, Size.X, Size.Y)))
@@ -447,8 +469,8 @@ namespace UnrealMcpScreenshotTools
 			return TEXT(" Renders a new frame at call time, also while the editor window is in the background or "
 			            "minimized. Returns a base64 PNG as MCP image content; the text states 'Frame: fresh' or 'Frame: "
 			            "possibly stale (reason)', and 'Simulation: live' or 'Simulation: paused (reason)' when effects and "
-			            "animation were not ticking. Optional 'width'/'height' are clamped to [1, 2048] per side; the "
-			            "default is 1024. Requires a GPU-backed (windowed) editor.");
+			            "animation were not ticking. Optional 'width'/'height' are clamped to [1, 2048] per side (defaults: "
+			            "see each parameter). Requires a GPU-backed (windowed) editor.");
 		}
 	}
 
