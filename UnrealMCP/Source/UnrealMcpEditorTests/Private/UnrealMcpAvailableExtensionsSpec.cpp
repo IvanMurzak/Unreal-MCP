@@ -129,7 +129,8 @@ void FUnrealMcpAvailableExtensionsSpec::Define()
 		TestEqual(TEXT("the bundled six plus the other one"), Known.Num(), Bundled + 1);
 		const FUnrealMcpKnownExtension* KnownNiagara = Known.FindByPredicate([](const FUnrealMcpKnownExtension& E) { return E.ExtensionId == NiagaraId; });
 		TestTrue(TEXT("the bundled entry stays"), KnownNiagara && KnownNiagara->Name == TEXT("Niagara Tools"));
-		const FUnrealMcpMissingExtension* Weather = UnrealMcpAvailableExtensions::Missing().FindByPredicate(
+		const TArray<FUnrealMcpMissingExtension> Missing = UnrealMcpAvailableExtensions::Missing();
+		const FUnrealMcpMissingExtension* Weather = Missing.FindByPredicate(
 			[](const FUnrealMcpMissingExtension& M) { return M.Extension.ExtensionId == TEXT("com.example.unreal-mcp-spec-weather"); });
 		TestTrue(TEXT("the other one is listed as not installed"), Weather && Weather->State == EUnrealMcpExtensionState::NotInstalled
 			&& UnrealMcpAvailableExtensions::Line(*Weather).Contains(TEXT("(Weather Tools): weather systems - not installed")));
