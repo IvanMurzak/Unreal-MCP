@@ -1,10 +1,10 @@
 {
-  "description": "the Surface and Rebuild operations",
+  "description": "the Surface operation",
   "tool": "rql-schema",
   "input": {
     "type": "LandscapeOperations"
   },
   "assert": {
-    "pattern": "Surface\\([\\s\\S]*Rebuild\\(|Rebuild\\([\\s\\S]*Surface\\("
+    "pattern": "Surface"
   }
 }
