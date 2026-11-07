@@ -18,19 +18,24 @@
 #include "EdGraph/EdGraph.h"
 #include "EdGraphSchema_K2.h"
 #include "GameFramework/Actor.h"
+#include "AssetRegistry/AssetRegistryModule.h"
 #include "K2Node.h"
+#include "K2Node_CallArrayFunction.h"
 #include "K2Node_CallFunction.h"
 #include "K2Node_CallParentFunction.h"
+#include "K2Node_DynamicCast.h"
 #include "K2Node_Event.h"
 #include "K2Node_ExecutionSequence.h"
 #include "K2Node_IfThenElse.h"
 #include "K2Node_VariableGet.h"
 #include "K2Node_VariableSet.h"
 #include "Kismet/GameplayStatics.h"
+#include "Kismet/KismetArrayLibrary.h"
 #include "Kismet/KismetMathLibrary.h"
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "Kismet2/CompilerResultsLog.h"
 #include "Kismet2/KismetEditorUtilities.h"
+#include "Misc/EngineVersionComparison.h"
 #include "Misc/ITransaction.h"
 #include "Rigs/RigHierarchy.h"
 
@@ -46,7 +51,18 @@ namespace UnrealAIControlRigAnimLocal
 	/** The Control Rig blueprint (or class) a Control Rig node runs, by name. */
 	FString RigName(const UAnimGraphNode_ControlRig* Node)
 	{
+#if UE_VERSION_NEWER_THAN_OR_EQUAL(5, 8, 0)
+		// 5.8: a node runs a rig blueprint's class or a Control Rig runtime asset.
+		const FControlRigAssetStrongReference Reference = Node->Node.GetControlRigAssetReference();
+		UClass* Class = Reference.GetBlueprintClass();
+		if (!Class)
+		{
+			const UObject* Asset = Reference.Get();
+			return Asset ? Asset->GetName() : FString(TEXT("none"));
+		}
+#else
 		UClass* Class = Node->Node.GetControlRigClass();
+#endif
 		if (const UBlueprint* Blueprint = Class ? UBlueprint::GetBlueprintFromClass(Class) : nullptr)
 			return Blueprint->GetName();
 		return Class ? Class->GetName() : FString(TEXT("none"));
@@ -145,8 +161,19 @@ namespace UnrealAIControlRigAnimLocal
 		return true;
 	}
 
-	/** The Anim Blueprint variable @p Name of type @p Type: reused when it exists with that type, added otherwise; false after Fail. */
-	bool EnsureVariable(UBlueprint* Blueprint, const FName Name, const FEdGraphPinType& Type, FString& OutNote)
+	/** Whether the Blueprint has a graph (function, macro, event graph) named @p Name: a variable cannot take that name. */
+	bool HasGraphNamed(UBlueprint* Blueprint, const FName Name)
+	{
+		TArray<UEdGraph*> Graphs;
+		Blueprint->GetAllGraphs(Graphs);
+		return Graphs.ContainsByPredicate([Name](const UEdGraph* Graph) { return Graph && Graph->GetFName() == Name; });
+	}
+
+	/**
+	 * The Anim Blueprint variable @p Name of type @p Type: reused when it exists with that type, added otherwise (only checked
+	 * when !@p bApply); false after Fail.
+	 */
+	bool EnsureVariable(UBlueprint* Blueprint, const FName Name, const FEdGraphPinType& Type, FString& OutNote, bool bApply = true)
 	{
 		const FString TypeText = UEdGraphSchema_K2::TypeToText(Type).ToString();
 		FEdGraphPinType Existing;
@@ -164,11 +191,15 @@ namespace UnrealAIControlRigAnimLocal
 		if (bExists)
 		{
 			if (Existing.PinCategory != Type.PinCategory || Existing.PinSubCategoryObject != Type.PinSubCategoryObject || Existing.ContainerType != Type.ContainerType)
-				return UnrealMcpRql::Failed<bool>(FString::Printf(TEXT("%s already has a variable %s of type %s, not %s: pass another name"),
+				return UnrealMcpRql::Failed<bool>(FString::Printf(TEXT("%s already has a variable %s of type %s, not %s: rename it, or pick another variable name"),
 					*Blueprint->GetName(), *Name.ToString(), *UEdGraphSchema_K2::TypeToText(Existing).ToString(), *TypeText));
 			OutNote = TEXT("existing variable");
 			return true;
 		}
+		if (HasGraphNamed(Blueprint, Name) || !FName(Name).IsValidXName(INVALID_OBJECTNAME_CHARACTERS))
+			return UnrealMcpRql::Failed<bool>(FString::Printf(TEXT("%s cannot be a variable name of %s"), *Name.ToString(), *Blueprint->GetName()));
+		if (!bApply)
+			return true;
 		if (!FBlueprintEditorUtils::AddMemberVariable(Blueprint, Name, Type))
 			return UnrealMcpRql::Failed<bool>(FString::Printf(TEXT("could not add the variable %s to %s"), *Name.ToString(), *Blueprint->GetName()));
 		OutNote = FString::Printf(TEXT("new %s variable"), *TypeText);
@@ -182,6 +213,44 @@ namespace UnrealAIControlRigAnimLocal
 			? static_cast<UEdGraphNode*>(Schema->SpawnVariableGetNode(FVector2D(X, Y), Graph, Name, Blueprint->SkeletonGeneratedClass))
 			: static_cast<UEdGraphNode*>(Schema->SpawnVariableSetNode(FVector2D(X, Y), Graph, Name, Blueprint->SkeletonGeneratedClass));
 		return Node ? Node : UnrealMcpRql::Failed<UEdGraphNode*>(FString::Printf(TEXT("could not add a %s node of %s"), bGetter ? TEXT("Get") : TEXT("Set"), *Name.ToString()));
+	}
+
+	/** Remove the nodes of @p Graph that are not in @p Before: what a failing operation added. */
+	void RemoveAddedNodes(UBlueprint* Blueprint, UEdGraph* Graph, const TSet<UEdGraphNode*>& Before)
+	{
+		for (UEdGraphNode* Node : TArray<UEdGraphNode*>(Graph->Nodes))
+		{
+			if (Node && !Before.Contains(Node))
+				FBlueprintEditorUtils::RemoveNode(Blueprint, Node, /*bDontRecompile*/ true);
+		}
+	}
+
+	/** An actor class by name: a class ("StaticMeshActor"), a Blueprint by name ("BP_Orb", "BP_Orb_C") or path. */
+	UClass* ActorClass(const FString& Name)
+	{
+		UClass* Class = UnrealMcpRql::ResolveClass(Name);
+		Class = Class ? Class : UnrealMcpRql::ResolveClass(Name + TEXT("_C"));
+		if (!Class && !Name.Contains(TEXT("/")))
+		{
+			// A Blueprint that is not loaded yet: by its asset name.
+			TArray<FAssetData> Assets;
+			FARFilter Filter;
+			Filter.ClassPaths.Add(UBlueprint::StaticClass()->GetClassPathName());
+			Filter.bRecursiveClasses = true;
+			Filter.PackagePaths.Add(TEXT("/Game"));
+			Filter.bRecursivePaths = true;
+			FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get().GetAssets(Filter, Assets);
+			for (const FAssetData& Asset : Assets)
+			{
+				if (Asset.AssetName.ToString().Equals(Name, ESearchCase::IgnoreCase))
+				{
+					const UBlueprint* Blueprint = Cast<UBlueprint>(Asset.GetAsset());
+					Class = Blueprint ? Blueprint->GeneratedClass.Get() : nullptr;
+					break;
+				}
+			}
+		}
+		return Class && Class->IsChildOf(AActor::StaticClass()) ? Class : nullptr;
 	}
 
 	TArray<UAnimGraphNode_ControlRig*> RigNodes(UAnimBlueprint* AnimBlueprint)
@@ -257,6 +326,17 @@ namespace UnrealAIControlRigAnimLocal
 			{
 				Node->Modify();
 				Pin.bShowPin = true;
+				// As the Details panel's checkbox does: a pin replaces a curve mapping of the input (FAnimNode_ControlRig::InputMapping).
+				const FStructProperty* NodeProperty = FindFProperty<FStructProperty>(Node->GetClass(), TEXT("Node"));
+				const FMapProperty* Mapping = NodeProperty ? FindFProperty<FMapProperty>(NodeProperty->Struct, TEXT("InputMapping")) : nullptr;
+				if (Mapping && Mapping->KeyProp->IsA<FNameProperty>())
+				{
+					FScriptMapHelper Map(Mapping, Mapping->ContainerPtrToValuePtr<void>(NodeProperty->ContainerPtrToValuePtr<void>(Node)));
+					const FName Key = Pin.PropertyName;
+					const int32 Found = Map.FindMapIndexWithKey(&Key);
+					if (Found != INDEX_NONE)
+						Map.RemoveAt(Found);
+				}
 				const FName Name = Pin.PropertyName; // ReconstructNode rebuilds the list
 				Node->ReconstructNode();
 				return PinOf(Node, Name, EGPD_Input);
@@ -328,6 +408,9 @@ FString UnrealAIControlRigAnim::AddRig(UAnimBlueprint* AnimBlueprint, UControlRi
 				*Rig->GetName(), *Bones[0].Name.ToString(), *AnimBlueprint->GetName(), *Skeleton->GetName()));
 	}
 
+	// The rig compiles first: a compile reconstructs the nodes that run it, so pins are read after it.
+	if (!CompileRig(Rig))
+		return FString();
 	// Where it goes: between the node After names and what it feeds, else right before Output Pose. Resolved before any change.
 	UEdGraphPin* Into = nullptr;
 	UEdGraphPin* From = nullptr;
@@ -350,10 +433,34 @@ FString UnrealAIControlRigAnim::AddRig(UAnimBlueprint* AnimBlueprint, UControlRi
 		if (!Into)
 			return UnrealMcpRql::Failed<FString>(FString::Printf(TEXT("%s %s"), *NodeLabel(Previous), From ? TEXT("feeds no pose: connect it first") : TEXT("has no output pose")));
 	}
-	if (!CompileRig(Rig))
-		return FString();
+	// The inputs' Anim Blueprint variables are checked before the graph changes (a name taken by another type, a function).
+	TArray<FName> Inputs;
+	for (const FRigVMGraphVariableDescription& Variable : Rig->GetMemberVariables())
+	{
+		if (!Variable.bPublic || !bBindVariables)
+			continue;
+		Inputs.Add(Variable.Name);
+		if (HasGraphNamed(AnimBlueprint, Variable.Name))
+			return UnrealMcpRql::Failed<FString>(FString::Printf(TEXT("%s has a function named %s, the name of a rig input: rename one, or pass bBindVariables false and bind with SetRigInput"),
+				*AnimBlueprint->GetName(), *Variable.Name.ToString()));
+	}
 
 	Graph->Modify();
+	TSet<UEdGraphNode*> Before(Graph->Nodes);
+	UEdGraphNode* const Source0 = From ? From->GetOwningNode() : nullptr;
+	const FName FromName = From ? From->PinName : NAME_None;
+	UEdGraphNode* const Into0 = Into->GetOwningNode();
+	const FName IntoName = Into->PinName;
+	auto Undo = [&]()
+	{
+		// What a failure leaves: the pose chain as it was, none of the new nodes.
+		RemoveAddedNodes(AnimBlueprint, Graph, Before);
+		UEdGraphPin* OldFrom = Source0 ? Source0->FindPin(FromName, EGPD_Output) : nullptr;
+		UEdGraphPin* OldInto = Into0->FindPin(IntoName, EGPD_Input);
+		if (OldFrom && OldInto && !OldInto->LinkedTo.Contains(OldFrom))
+			Graph->GetSchema()->TryCreateConnection(OldFrom, OldInto);
+		return FString();
+	};
 	UEdGraphNode* Target = Into->GetOwningNode();
 	const UEdGraphNode* Source = From ? From->GetOwningNode() : nullptr;
 	const double X = Source ? (Source->NodePosX + Target->NodePosX) / 2.0 : Target->NodePosX - 320.0;
@@ -363,33 +470,31 @@ FString UnrealAIControlRigAnim::AddRig(UAnimBlueprint* AnimBlueprint, UControlRi
 	UEdGraphPin* NodeIn = PosePin(Node, EGPD_Input);
 	UEdGraphPin* NodeOut = PosePin(Node, EGPD_Output);
 	if (!NodeIn || !NodeOut)
+	{
+		Undo();
 		return UnrealMcpRql::Failed<FString>(TEXT("the Control Rig node has no pose pins"));
+	}
 	if (From)
 	{
 		Graph->GetSchema()->BreakSinglePinLink(From, Into);
 		if (!Link(From, NodeIn))
-			return FString();
+			return Undo();
 	}
 	if (!Link(NodeOut, Into))
-		return FString();
+		return Undo();
 
-	TArray<FString> Inputs;
-	if (bBindVariables)
+	TArray<FString> Bound;
+	for (const FName& Input : Inputs)
 	{
-		for (const FRigVMGraphVariableDescription& Variable : Rig->GetMemberVariables())
-		{
-			if (!Variable.bPublic)
-				continue;
-			UEdGraphPin* Pin = ExposeInput(Node, Variable.Name.ToString());
-			const FString Bound = Pin ? BindInput(AnimBlueprint, Pin, Variable.Name) : FString();
-			if (Bound.IsEmpty())
-				return FString();
-			Inputs.Add(Bound);
-		}
+		UEdGraphPin* Pin = ExposeInput(Node, Input.ToString());
+		const FString Binding = Pin ? BindInput(AnimBlueprint, Pin, Input) : FString();
+		if (Binding.IsEmpty())
+			return Undo();
+		Bound.Add(Binding);
 	}
 	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(AnimBlueprint);
 	return FString::Printf(TEXT("%s runs %s between %s and %s%s%s"), *Node->GetName(), *Rig->GetName(), Source ? *Title(Source) : TEXT("the reference pose"),
-		*Title(Target), Inputs.Num() ? TEXT("; inputs: ") : TEXT(""), *FString::Join(Inputs, TEXT(", ")));
+		*Title(Target), Bound.Num() ? TEXT("; inputs: ") : TEXT(""), *FString::Join(Bound, TEXT(", ")));
 }
 
 FString UnrealAIControlRigAnim::SetInput(UAnimBlueprint* AnimBlueprint, const FString& NodeName, const FString& Input, const FString& Value)
@@ -406,13 +511,13 @@ FString UnrealAIControlRigAnim::SetInput(UAnimBlueprint* AnimBlueprint, const FS
 			FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(AnimBlueprint);
 		return Bound;
 	}
-	Node->Modify();
 	const UEdGraphSchema* Schema = Pin->GetSchema();
-	Schema->BreakPinLinks(*Pin, /*bSendsNodeNotifcation*/ true);
 	const FString Text = PinDefaultText(Pin, Trimmed);
 	const FString Invalid = Schema->IsPinDefaultValid(Pin, Text, nullptr, FText::GetEmpty());
 	if (!Invalid.IsEmpty())
 		return UnrealMcpRql::Failed<FString>(FString::Printf(TEXT("'%s' is not a %s value: %s"), *Value, *UEdGraphSchema_K2::TypeToText(Pin->PinType).ToString(), *Invalid));
+	Node->Modify();
+	Schema->BreakPinLinks(*Pin, /*bSendsNodeNotifcation*/ true); // a constant replaces a binding
 	Schema->TrySetDefaultValue(*Pin, Text);
 	FBlueprintEditorUtils::MarkBlueprintAsModified(AnimBlueprint);
 	return FString::Printf(TEXT("%s = %s"), *Pin->PinName.ToString(), *PinValue(Pin));
@@ -421,8 +526,9 @@ FString UnrealAIControlRigAnim::SetInput(UAnimBlueprint* AnimBlueprint, const FS
 FString UnrealAIControlRigAnim::TrackNearestActor(UAnimBlueprint* AnimBlueprint, const FString& ActorClass, const FString& LocationVariable,
 	const FString& WeightVariable, float Radius, float Speed)
 {
-	UClass* Class = UnrealMcpRql::ResolveClass(ActorClass.TrimStartAndEnd());
-	if (!Class || !Class->IsChildOf(AActor::StaticClass()))
+	// Everything is checked first; the new nodes are built and wired among themselves; the event changes last.
+	UClass* Class = UnrealAIControlRigAnimLocal::ActorClass(ActorClass.TrimStartAndEnd());
+	if (!Class)
 		return UnrealMcpRql::Failed<FString>(FString::Printf(TEXT("'%s' is not an actor class (a Blueprint such as BP_Orb, or a class such as StaticMeshActor)"), *ActorClass));
 	if (Radius <= 0.0f || Speed < 0.0f)
 		return UnrealMcpRql::Failed<FString>(TEXT("Radius must be above 0 (cm) and Speed 0 or more (0 = no smoothing)"));
@@ -430,7 +536,12 @@ FString UnrealAIControlRigAnim::TrackNearestActor(UAnimBlueprint* AnimBlueprint,
 	const FName Weight(*WeightVariable.TrimStartAndEnd());
 	if (Location.IsNone())
 		return UnrealMcpRql::Failed<FString>(TEXT("name the Vector variable that gets the target's location (e.g. LookAtTarget)"));
-	UEdGraph* Graph = FBlueprintEditorUtils::FindEventGraph(AnimBlueprint);
+	if (Location == Weight)
+		return UnrealMcpRql::Failed<FString>(TEXT("the location and the weight need two variables"));
+	UK2Node_Event* Update = FBlueprintEditorUtils::FindOverrideForFunction(AnimBlueprint, UAnimInstance::StaticClass(), GET_FUNCTION_NAME_CHECKED(UAnimInstance, BlueprintUpdateAnimation));
+	if (Update && !Update->IsNodeEnabled() && !Update->IsAutomaticallyPlacedGhostNode())
+		return UnrealMcpRql::Failed<FString>(FString::Printf(TEXT("%s's Event Blueprint Update Animation is disabled: enable it first"), *AnimBlueprint->GetName()));
+	UEdGraph* Graph = Update ? Update->GetGraph() : FBlueprintEditorUtils::FindEventGraph(AnimBlueprint);
 	if (!Graph)
 		return UnrealMcpRql::Failed<FString>(FString::Printf(TEXT("%s has no event graph"), *AnimBlueprint->GetName()));
 	TArray<UK2Node_VariableSet*> Setters;
@@ -440,10 +551,6 @@ FString UnrealAIControlRigAnim::TrackNearestActor(UAnimBlueprint* AnimBlueprint,
 		if (Setter->GetVarName() == Location)
 			return UnrealMcpRql::Failed<FString>(FString::Printf(TEXT("%s's event graph already sets %s: remove those nodes first or pass another variable"), *AnimBlueprint->GetName(), *Location.ToString()));
 	}
-	UK2Node_Event* Update = FBlueprintEditorUtils::FindOverrideForFunction(AnimBlueprint, UAnimInstance::StaticClass(), GET_FUNCTION_NAME_CHECKED(UAnimInstance, BlueprintUpdateAnimation));
-	if (Update && !Update->IsNodeEnabled() && !Update->IsAutomaticallyPlacedGhostNode())
-		return UnrealMcpRql::Failed<FString>(FString::Printf(TEXT("%s's Event Blueprint Update Animation is disabled: enable it first"), *AnimBlueprint->GetName()));
-
 	FEdGraphPinType VectorType;
 	VectorType.PinCategory = UEdGraphSchema_K2::PC_Struct;
 	VectorType.PinSubCategoryObject = TBaseStructure<FVector>::Get();
@@ -452,72 +559,33 @@ FString UnrealAIControlRigAnim::TrackNearestActor(UAnimBlueprint* AnimBlueprint,
 	RealType.PinSubCategory = UEdGraphSchema_K2::PC_Double;
 	FString LocationNote;
 	FString WeightNote;
-	if (!EnsureVariable(AnimBlueprint, Location, VectorType, LocationNote) || (!Weight.IsNone() && !EnsureVariable(AnimBlueprint, Weight, RealType, WeightNote)))
+	const bool bVariablesFit = EnsureVariable(AnimBlueprint, Location, VectorType, LocationNote, /*bApply*/ false)
+		&& (Weight.IsNone() || EnsureVariable(AnimBlueprint, Weight, RealType, WeightNote, /*bApply*/ false));
+	if (!bVariablesFit || !EnsureVariable(AnimBlueprint, Location, VectorType, LocationNote)
+		|| (!Weight.IsNone() && !EnsureVariable(AnimBlueprint, Weight, RealType, WeightNote)))
 		return FString();
 
-	// The event: the Blueprint's own, the editor's placeholder (enabled now), or a new one.
 	Graph->Modify();
-	if (!Update)
+	const TSet<UEdGraphNode*> Before(Graph->Nodes);
+	auto Undo = [AnimBlueprint, Graph, &Before]()
 	{
-		const FVector2D At = Graph->GetGoodPlaceForNewNode();
-		Update = CastChecked<UK2Node_Event>(CreateNode(Graph, UK2Node_Event::StaticClass(), At.X, At.Y, [](UEdGraphNode* Node)
-		{
-			UK2Node_Event* Event = CastChecked<UK2Node_Event>(Node);
-			Event->EventReference.SetExternalMember(GET_FUNCTION_NAME_CHECKED(UAnimInstance, BlueprintUpdateAnimation), UAnimInstance::StaticClass());
-			Event->bOverrideFunction = true;
-		}));
-	}
-	else if (!Update->IsNodeEnabled() || Update->IsAutomaticallyPlacedGhostNode())
-	{
-		Update->Modify();
-		Update->SetEnabledState(ENodeEnabledState::Enabled, /*bUserAction*/ false);
-		Update->NodeComment.Empty(); // the placeholder's "This node is disabled ..." comment
-		Update->bCommentBubbleVisible = false;
-	}
-	UEdGraphPin* Then = PinOf(Update, UEdGraphSchema_K2::PN_Then);
-	UEdGraphPin* DeltaTime = PinOf(Update, TEXT("DeltaTimeX"));
-	if (!Then || !DeltaTime)
+		RemoveAddedNodes(AnimBlueprint, Graph, Before);
 		return FString();
-	const double X = Update->NodePosX;
-	double Y = Update->NodePosY;
+	};
+	const FVector2D Origin = Update ? FVector2D(Update->NodePosX, Update->NodePosY) : FVector2D(Graph->GetGoodPlaceForNewNode());
+	const double X = Origin.X;
+	double Y = Origin.Y;
 	for (const UEdGraphNode* Node : Graph->Nodes)
-		Y = FMath::Max<double>(Y, Node->NodePosY + 250.0);
-
-	// What the event ran before keeps running first (a Sequence), then the tracking.
-	UEdGraphPin* Cursor = Then;
-	if (Then->LinkedTo.Num())
-	{
-		UEdGraphNode* Sequence = CreateNode(Graph, UK2Node_ExecutionSequence::StaticClass(), X + 260, Y, [](UEdGraphNode*) {});
-		// By node and name: a node can rebuild its pins when its execution input is disconnected.
-		TArray<TPair<UEdGraphNode*, FName>> Before;
-		for (const UEdGraphPin* Next : Then->LinkedTo)
-			Before.Emplace(Next->GetOwningNode(), Next->PinName);
-		Update->Modify();
-		Then->GetSchema()->BreakPinLinks(*Then, /*bSendsNodeNotifcation*/ true);
-		if (!Link(Then, PinOf(Sequence, UEdGraphSchema_K2::PN_Execute)))
-			return FString();
-		for (const TPair<UEdGraphNode*, FName>& Next : Before)
-		{
-			if (!Link(PinOf(Sequence, TEXT("then_0")), PinOf(Next.Key, Next.Value, EGPD_Input)))
-				return FString();
-		}
-		Cursor = PinOf(Sequence, TEXT("then_1"));
-	}
-	else if (UFunction* Inherited = AnimBlueprint->ParentClass ? AnimBlueprint->ParentClass->FindFunctionByName(GET_FUNCTION_NAME_CHECKED(UAnimInstance, BlueprintUpdateAnimation)) : nullptr;
-		Inherited && Cast<UBlueprintGeneratedClass>(Inherited->GetOuterUClass()))
-	{
-		// A parent Anim Blueprint's update keeps running: Parent: Blueprint Update Animation first.
-		UK2Node_CallFunction* Parent = CastChecked<UK2Node_CallFunction>(CreateNode(Graph, UK2Node_CallParentFunction::StaticClass(), X + 260, Y,
-			[Inherited](UEdGraphNode* Node) { CastChecked<UK2Node_CallFunction>(Node)->SetFromFunction(Inherited); }));
-		if (!Link(Then, PinOf(Parent, UEdGraphSchema_K2::PN_Execute)) || !Link(DeltaTime, PinOf(Parent, TEXT("DeltaTimeX"))))
-			return FString();
-		Cursor = PinOf(Parent, UEdGraphSchema_K2::PN_Then);
-	}
-
+		Y = FMath::Max<double>(Y, Node->NodePosY + 400.0);
 	const FString SpeedText = FString::SanitizeFloat(Speed, 0);
 	const FString RadiusText = FString::SanitizeFloat(Radius, 0);
+
+	// The tracking: every actor of the class but the owner, the nearest one in range, its location smoothed, the weight blended.
 	const double X0 = X + 560;
 	UK2Node_CallFunction* GetAll = CallNode(Graph, UGameplayStatics::StaticClass(), GET_FUNCTION_NAME_CHECKED(UGameplayStatics, GetAllActorsOfClass), X0, Y);
+	UFunction* RemoveItem = UKismetArrayLibrary::StaticClass()->FindFunctionByName(GET_FUNCTION_NAME_CHECKED(UKismetArrayLibrary, Array_RemoveItem));
+	UK2Node_CallFunction* NotOwner = RemoveItem ? CastChecked<UK2Node_CallFunction>(CreateNode(Graph, UK2Node_CallArrayFunction::StaticClass(), X0 + 300, Y,
+		[RemoveItem](UEdGraphNode* Node) { CastChecked<UK2Node_CallFunction>(Node)->SetFromFunction(RemoveItem); })) : nullptr;
 	UK2Node_CallFunction* Owner = CallNode(Graph, UAnimInstance::StaticClass(), GET_FUNCTION_NAME_CHECKED(UAnimInstance, GetOwningActor), X0, Y + 260);
 	UK2Node_CallFunction* OwnerLocation = CallNode(Graph, AActor::StaticClass(), GET_FUNCTION_NAME_CHECKED(AActor, K2_GetActorLocation), X0 + 260, Y + 260);
 	UK2Node_CallFunction* Nearest = CallNode(Graph, UGameplayStatics::StaticClass(), GET_FUNCTION_NAME_CHECKED(UGameplayStatics, FindNearestActor), X0 + 560, Y + 200);
@@ -526,33 +594,46 @@ FString UnrealAIControlRigAnim::TrackNearestActor(UAnimBlueprint* AnimBlueprint,
 	UK2Node_CallFunction* TargetLocation = CallNode(Graph, AActor::StaticClass(), GET_FUNCTION_NAME_CHECKED(AActor, K2_GetActorLocation), X0 + 1100, Y + 300);
 	UEdGraphNode* GetLocation = VariableNode(AnimBlueprint, Graph, Location, true, X0 + 1100, Y + 440);
 	UK2Node_CallFunction* Smooth = CallNode(Graph, UKismetMathLibrary::StaticClass(), GET_FUNCTION_NAME_CHECKED(UKismetMathLibrary, VInterpTo), X0 + 1400, Y + 300);
-	UEdGraphNode* SetLocation = VariableNode(AnimBlueprint, Graph, Location, false, X0 + 1960, Y - 60);
-	if (!GetAll || !Owner || !OwnerLocation || !Nearest || !InRange || !TargetLocation || !GetLocation || !Smooth || !SetLocation)
-		return FString();
-	GetAll->GetSchema()->TrySetDefaultObject(*PinOf(GetAll, TEXT("ActorClass")), Class);
+	UEdGraphNode* SetLocation = VariableNode(AnimBlueprint, Graph, Location, false, X0 + 1960, Y);
+	// The owner as the class (null when it is not one): the item Array_RemoveItem takes for that class's array.
+	UK2Node_DynamicCast* OwnerAsClass = Class == AActor::StaticClass() ? nullptr : CastChecked<UK2Node_DynamicCast>(CreateNode(Graph,
+		UK2Node_DynamicCast::StaticClass(), X0 + 260, Y + 120, [Class](UEdGraphNode* Node)
+		{
+			UK2Node_DynamicCast* CastNode = CastChecked<UK2Node_DynamicCast>(Node);
+			CastNode->TargetType = Class;
+			CastNode->SetPurity(true);
+		}));
+	UEdGraphPin* ClassPin = GetAll ? PinOf(GetAll, TEXT("ActorClass")) : nullptr;
+	if (!GetAll || !NotOwner || !Owner || !OwnerLocation || !Nearest || !InRange || !TargetLocation || !GetLocation || !Smooth || !SetLocation || !ClassPin)
+	{
+		Undo();
+		return RemoveItem ? FString() : UnrealMcpRql::Failed<FString>(TEXT("this engine has no Array_RemoveItem"));
+	}
+	GetAll->GetSchema()->TrySetDefaultObject(*ClassPin, Class);
 	SetDefault(PinOf(InRange, TEXT("B")), RadiusText);
 	SetDefault(PinOf(Smooth, TEXT("InterpSpeed")), SpeedText);
-	bool bLinked = Link(Cursor, PinOf(GetAll, UEdGraphSchema_K2::PN_Execute))
+	UEdGraphPin* DeltaTime = nullptr; // the event's, linked once the event is known (below)
+	bool bLinked = Link(PinOf(GetAll, UEdGraphSchema_K2::PN_Then), PinOf(NotOwner, UEdGraphSchema_K2::PN_Execute))
+		&& Link(PinOf(GetAll, TEXT("OutActors")), PinOf(NotOwner, TEXT("TargetArray")))
+		&& (OwnerAsClass
+			? Link(PinOf(Owner, UEdGraphSchema_K2::PN_ReturnValue), OwnerAsClass->GetCastSourcePin()) && Link(OwnerAsClass->GetCastResultPin(), PinOf(NotOwner, TEXT("Item")))
+			: Link(PinOf(Owner, UEdGraphSchema_K2::PN_ReturnValue), PinOf(NotOwner, TEXT("Item"))))
 		&& Link(PinOf(Owner, UEdGraphSchema_K2::PN_ReturnValue), PinOf(OwnerLocation, UEdGraphSchema_K2::PN_Self))
 		&& Link(PinOf(OwnerLocation, UEdGraphSchema_K2::PN_ReturnValue), PinOf(Nearest, TEXT("Origin")))
 		&& Link(PinOf(GetAll, TEXT("OutActors")), PinOf(Nearest, TEXT("ActorsToCheck")))
 		&& Link(PinOf(Nearest, TEXT("Distance")), PinOf(InRange, TEXT("A")))
-		&& Link(PinOf(GetAll, UEdGraphSchema_K2::PN_Then), PinOf(Branch, UEdGraphSchema_K2::PN_Execute))
+		&& Link(PinOf(NotOwner, UEdGraphSchema_K2::PN_Then), PinOf(Branch, UEdGraphSchema_K2::PN_Execute))
 		&& Link(PinOf(InRange, UEdGraphSchema_K2::PN_ReturnValue), PinOf(Branch, UEdGraphSchema_K2::PN_Condition))
 		&& Link(PinOf(Nearest, UEdGraphSchema_K2::PN_ReturnValue), PinOf(TargetLocation, UEdGraphSchema_K2::PN_Self))
 		&& Link(PinOf(GetLocation, Location, EGPD_Output), PinOf(Smooth, TEXT("Current")))
 		&& Link(PinOf(TargetLocation, UEdGraphSchema_K2::PN_ReturnValue), PinOf(Smooth, TEXT("Target")))
-		&& Link(DeltaTime, PinOf(Smooth, TEXT("DeltaTime")))
 		&& Link(PinOf(Branch, UEdGraphSchema_K2::PN_Then), PinOf(SetLocation, UEdGraphSchema_K2::PN_Execute));
-	if (!bLinked)
-		return FString();
-
-	if (Weight.IsNone())
+	TArray<UEdGraphPin*> DeltaTimeInputs = { PinOf(Smooth, TEXT("DeltaTime")) };
+	if (bLinked && Weight.IsNone())
 	{
-		if (!Link(PinOf(Smooth, UEdGraphSchema_K2::PN_ReturnValue), PinOf(SetLocation, Location, EGPD_Input)))
-			return FString();
+		bLinked = Link(PinOf(Smooth, UEdGraphSchema_K2::PN_ReturnValue), PinOf(SetLocation, Location, EGPD_Input));
 	}
-	else
+	else if (bLinked)
 	{
 		// The weight blends to 1 in range and to 0 out of it; a target picked up from weight ~0 starts at its location (no sweep from the last one).
 		UEdGraphNode* GetWeight = VariableNode(AnimBlueprint, Graph, Weight, true, X0 + 1100, Y + 560);
@@ -560,30 +641,97 @@ FString UnrealAIControlRigAnim::TrackNearestActor(UAnimBlueprint* AnimBlueprint,
 		UK2Node_CallFunction* Pick = CallNode(Graph, UKismetMathLibrary::StaticClass(), GET_FUNCTION_NAME_CHECKED(UKismetMathLibrary, SelectVector), X0 + 1680, Y + 300);
 		UK2Node_CallFunction* BlendIn = CallNode(Graph, UKismetMathLibrary::StaticClass(), GET_FUNCTION_NAME_CHECKED(UKismetMathLibrary, FInterpTo), X0 + 1960, Y + 300);
 		UK2Node_CallFunction* BlendOut = CallNode(Graph, UKismetMathLibrary::StaticClass(), GET_FUNCTION_NAME_CHECKED(UKismetMathLibrary, FInterpTo), X0 + 1960, Y + 520);
-		UEdGraphNode* SetWeightIn = VariableNode(AnimBlueprint, Graph, Weight, false, X0 + 2260, Y - 60);
-		UEdGraphNode* SetWeightOut = VariableNode(AnimBlueprint, Graph, Weight, false, X0 + 2260, Y + 160);
-		if (!GetWeight || !Fresh || !Pick || !BlendIn || !BlendOut || !SetWeightIn || !SetWeightOut)
-			return FString();
-		SetDefault(PinOf(Fresh, TEXT("B")), TEXT("0.05"));
-		SetDefault(PinOf(BlendIn, TEXT("Target")), TEXT("1.0"));
-		SetDefault(PinOf(BlendOut, TEXT("Target")), TEXT("0.0"));
-		SetDefault(PinOf(BlendIn, TEXT("InterpSpeed")), SpeedText);
-		SetDefault(PinOf(BlendOut, TEXT("InterpSpeed")), SpeedText);
-		bLinked = Link(PinOf(GetWeight, Weight, EGPD_Output), PinOf(Fresh, TEXT("A")))
-			&& Link(PinOf(TargetLocation, UEdGraphSchema_K2::PN_ReturnValue), PinOf(Pick, TEXT("A")))
-			&& Link(PinOf(Smooth, UEdGraphSchema_K2::PN_ReturnValue), PinOf(Pick, TEXT("B")))
-			&& Link(PinOf(Fresh, UEdGraphSchema_K2::PN_ReturnValue), PinOf(Pick, TEXT("bPickA")))
-			&& Link(PinOf(Pick, UEdGraphSchema_K2::PN_ReturnValue), PinOf(SetLocation, Location, EGPD_Input))
-			&& Link(PinOf(GetWeight, Weight, EGPD_Output), PinOf(BlendIn, TEXT("Current")))
-			&& Link(PinOf(GetWeight, Weight, EGPD_Output), PinOf(BlendOut, TEXT("Current")))
-			&& Link(DeltaTime, PinOf(BlendIn, TEXT("DeltaTime")))
-			&& Link(DeltaTime, PinOf(BlendOut, TEXT("DeltaTime")))
-			&& Link(PinOf(SetLocation, UEdGraphSchema_K2::PN_Then), PinOf(SetWeightIn, UEdGraphSchema_K2::PN_Execute))
-			&& Link(PinOf(BlendIn, UEdGraphSchema_K2::PN_ReturnValue), PinOf(SetWeightIn, Weight, EGPD_Input))
-			&& Link(PinOf(Branch, UEdGraphSchema_K2::PN_Else), PinOf(SetWeightOut, UEdGraphSchema_K2::PN_Execute))
-			&& Link(PinOf(BlendOut, UEdGraphSchema_K2::PN_ReturnValue), PinOf(SetWeightOut, Weight, EGPD_Input));
-		if (!bLinked)
-			return FString();
+		UEdGraphNode* SetWeightIn = VariableNode(AnimBlueprint, Graph, Weight, false, X0 + 2260, Y);
+		UEdGraphNode* SetWeightOut = VariableNode(AnimBlueprint, Graph, Weight, false, X0 + 2260, Y + 200);
+		bLinked = GetWeight && Fresh && Pick && BlendIn && BlendOut && SetWeightIn && SetWeightOut;
+		if (bLinked)
+		{
+			SetDefault(PinOf(Fresh, TEXT("B")), TEXT("0.05"));
+			SetDefault(PinOf(BlendIn, TEXT("Target")), TEXT("1.0"));
+			SetDefault(PinOf(BlendOut, TEXT("Target")), TEXT("0.0"));
+			SetDefault(PinOf(BlendIn, TEXT("InterpSpeed")), SpeedText);
+			SetDefault(PinOf(BlendOut, TEXT("InterpSpeed")), SpeedText);
+			DeltaTimeInputs.Append({ PinOf(BlendIn, TEXT("DeltaTime")), PinOf(BlendOut, TEXT("DeltaTime")) });
+			bLinked = Link(PinOf(GetWeight, Weight, EGPD_Output), PinOf(Fresh, TEXT("A")))
+				&& Link(PinOf(TargetLocation, UEdGraphSchema_K2::PN_ReturnValue), PinOf(Pick, TEXT("A")))
+				&& Link(PinOf(Smooth, UEdGraphSchema_K2::PN_ReturnValue), PinOf(Pick, TEXT("B")))
+				&& Link(PinOf(Fresh, UEdGraphSchema_K2::PN_ReturnValue), PinOf(Pick, TEXT("bPickA")))
+				&& Link(PinOf(Pick, UEdGraphSchema_K2::PN_ReturnValue), PinOf(SetLocation, Location, EGPD_Input))
+				&& Link(PinOf(GetWeight, Weight, EGPD_Output), PinOf(BlendIn, TEXT("Current")))
+				&& Link(PinOf(GetWeight, Weight, EGPD_Output), PinOf(BlendOut, TEXT("Current")))
+				&& Link(PinOf(SetLocation, UEdGraphSchema_K2::PN_Then), PinOf(SetWeightIn, UEdGraphSchema_K2::PN_Execute))
+				&& Link(PinOf(BlendIn, UEdGraphSchema_K2::PN_ReturnValue), PinOf(SetWeightIn, Weight, EGPD_Input))
+				&& Link(PinOf(Branch, UEdGraphSchema_K2::PN_Else), PinOf(SetWeightOut, UEdGraphSchema_K2::PN_Execute))
+				&& Link(PinOf(BlendOut, UEdGraphSchema_K2::PN_ReturnValue), PinOf(SetWeightOut, Weight, EGPD_Input));
+		}
+	}
+	if (!bLinked)
+		return Undo();
+
+	// The event, last: the Blueprint's own, the editor's placeholder (enabled now), or a new one. What it ran before keeps
+	// running first (a Sequence); a parent Anim Blueprint's update runs first when the event starts overriding now.
+	UEdGraphPin* Entry = PinOf(GetAll, UEdGraphSchema_K2::PN_Execute);
+	if (!Update)
+	{
+		Update = CastChecked<UK2Node_Event>(CreateNode(Graph, UK2Node_Event::StaticClass(), X, Y, [](UEdGraphNode* Node)
+		{
+			UK2Node_Event* Event = CastChecked<UK2Node_Event>(Node);
+			Event->EventReference.SetExternalMember(GET_FUNCTION_NAME_CHECKED(UAnimInstance, BlueprintUpdateAnimation), UAnimInstance::StaticClass());
+			Event->bOverrideFunction = true;
+		}));
+	}
+	UEdGraphPin* Then = PinOf(Update, UEdGraphSchema_K2::PN_Then);
+	DeltaTime = PinOf(Update, TEXT("DeltaTimeX"));
+	if (!Then || !DeltaTime)
+		return Undo();
+	for (UEdGraphPin* Input : DeltaTimeInputs)
+	{
+		if (!Link(DeltaTime, Input))
+			return Undo();
+	}
+	const bool bStartsOverriding = !Update->IsNodeEnabled() || Update->IsAutomaticallyPlacedGhostNode() || !Before.Contains(Update);
+	UFunction* Inherited = AnimBlueprint->ParentClass ? AnimBlueprint->ParentClass->FindFunctionByName(GET_FUNCTION_NAME_CHECKED(UAnimInstance, BlueprintUpdateAnimation)) : nullptr;
+	UEdGraphPin* Cursor = Then;
+	if (Then->LinkedTo.Num())
+	{
+		// By node and name: a node can rebuild its pins when its execution input is disconnected.
+		TArray<TPair<UEdGraphNode*, FName>> Next;
+		for (const UEdGraphPin* Pin : Then->LinkedTo)
+			Next.Emplace(Pin->GetOwningNode(), Pin->PinName);
+		UEdGraphNode* Sequence = CreateNode(Graph, UK2Node_ExecutionSequence::StaticClass(), X + 260, Y, [](UEdGraphNode*) {});
+		Update->Modify();
+		Then->GetSchema()->BreakPinLinks(*Then, /*bSendsNodeNotifcation*/ true);
+		bool bSpliced = Link(Then, PinOf(Sequence, UEdGraphSchema_K2::PN_Execute));
+		for (const TPair<UEdGraphNode*, FName>& Pin : Next)
+			bSpliced = bSpliced && Link(PinOf(Sequence, TEXT("then_0")), PinOf(Pin.Key, Pin.Value, EGPD_Input));
+		if (!bSpliced)
+		{
+			Then->GetSchema()->BreakPinLinks(*Then, /*bSendsNodeNotifcation*/ true);
+			for (const TPair<UEdGraphNode*, FName>& Pin : Next)
+			{
+				if (UEdGraphPin* Restored = Pin.Key->FindPin(Pin.Value, EGPD_Input))
+					Then->GetSchema()->TryCreateConnection(Then, Restored);
+			}
+			return Undo();
+		}
+		Cursor = PinOf(Sequence, TEXT("then_1"));
+	}
+	else if (bStartsOverriding && Inherited && Cast<UBlueprintGeneratedClass>(Inherited->GetOuterUClass()))
+	{
+		UK2Node_CallFunction* Parent = CastChecked<UK2Node_CallFunction>(CreateNode(Graph, UK2Node_CallParentFunction::StaticClass(), X + 260, Y,
+			[Inherited](UEdGraphNode* Node) { CastChecked<UK2Node_CallFunction>(Node)->SetFromFunction(Inherited); }));
+		if (!Link(Then, PinOf(Parent, UEdGraphSchema_K2::PN_Execute)) || !Link(DeltaTime, PinOf(Parent, TEXT("DeltaTimeX"))))
+			return Undo();
+		Cursor = PinOf(Parent, UEdGraphSchema_K2::PN_Then);
+	}
+	if (!Link(Cursor, Entry))
+		return Undo();
+	if (!Update->IsNodeEnabled() || Update->IsAutomaticallyPlacedGhostNode())
+	{
+		Update->Modify();
+		Update->SetEnabledState(ENodeEnabledState::Enabled, /*bUserAction*/ false);
+		Update->NodeComment.Empty(); // the placeholder's "This node is disabled ..." comment
+		Update->bCommentBubbleVisible = false;
 	}
 	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(AnimBlueprint);
 	const FString Smoothing = Speed > 0.0f ? FString::Printf(TEXT("smoothed at speed %s"), *SpeedText) : FString(TEXT("not smoothed"));

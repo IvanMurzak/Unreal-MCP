@@ -67,6 +67,27 @@ namespace UnrealAIControlRigRqlApiLocal
 		return FString::Printf(TEXT("(X=%g,Y=%g,Z=%g)"), Axis.X, Axis.Y, Axis.Z);
 	}
 
+	/** An axis argument as pin text: "X", "-Y", "+Z", "(0, 1, 0)", "0, 1, 0" or "(X=0,Y=1,Z=0)"; empty when it is none. */
+	FString AxisArgument(const FString& Axis)
+	{
+		FString Text = Axis.TrimStartAndEnd().ToUpper();
+		const double Sign = Text.StartsWith(TEXT("-")) ? -1.0 : 1.0;
+		const FString Letter = Text.Replace(TEXT("-"), TEXT("")).Replace(TEXT("+"), TEXT(""));
+		if (Letter == TEXT("X") || Letter == TEXT("Y") || Letter == TEXT("Z"))
+			return AxisText(FVector(Letter == TEXT("X") ? Sign : 0.0, Letter == TEXT("Y") ? Sign : 0.0, Letter == TEXT("Z") ? Sign : 0.0));
+		Text = Axis.TrimStartAndEnd();
+		if (Text.Contains(TEXT("=")))
+			return Text;
+		Text.RemoveFromStart(TEXT("("));
+		Text.RemoveFromEnd(TEXT(")"));
+		TArray<FString> Parts;
+		FVector Vector;
+		if (Text.ParseIntoArray(Parts, TEXT(",")) != 3 || !LexTryParseString(Vector.X, *Parts[0].TrimStartAndEnd())
+			|| !LexTryParseString(Vector.Y, *Parts[1].TrimStartAndEnd()) || !LexTryParseString(Vector.Z, *Parts[2].TrimStartAndEnd()) || Vector.IsNearlyZero())
+			return FString();
+		return FString::Printf(TEXT("(X=%g,Y=%g,Z=%g)"), Vector.X, Vector.Y, Vector.Z);
+	}
+
 	/** @p Base, or @p Base_1, _2 ... when the rig graph has a node of that name. */
 	FString FreeNodeName(UControlRigBlueprint* Rig, const FString& Base)
 	{
@@ -100,6 +121,8 @@ UControlRigBlueprint* UUnrealAIControlRigRqlApi::CreateRig(const FString& Path, 
 	{
 		SkeletalMesh = Cast<USkeletalMesh>(UnrealMcpRql::LoadObject(USkeletalMesh::StaticClass(), Mesh.TrimStartAndEnd()));
 		Skeleton = SkeletalMesh ? SkeletalMesh->GetSkeleton() : Cast<USkeleton>(UnrealMcpRql::LoadObject(USkeleton::StaticClass(), Mesh.TrimStartAndEnd()));
+		if (SkeletalMesh && !Skeleton)
+			return UnrealMcpRql::Failed<UControlRigBlueprint*>(FString::Printf(TEXT("the mesh %s has no skeleton: assign one in the mesh editor first"), *SkeletalMesh->GetName()));
 		if (!Skeleton)
 			return UnrealMcpRql::Failed<UControlRigBlueprint*>(FString::Printf(TEXT("'%s' is not a SkeletalMesh or Skeleton asset (a character's mesh such as /Game/Characters/Mannequins/Meshes/SKM_Manny_Simple)"), *Mesh));
 	}
@@ -109,7 +132,9 @@ UControlRigBlueprint* UUnrealAIControlRigRqlApi::CreateRig(const FString& Path, 
 	if (Skeleton)
 	{
 		// As the Content Browser's "Create Control Rig" on a mesh does: its bones and curves, the preview mesh.
-		if (URigHierarchyController* Controller = Rig->GetHierarchyController())
+		URigHierarchyController* Controller = Rig->GetHierarchyController();
+		if (!Controller)
+			return UnrealMcpRql::Failed<UControlRigBlueprint*>(FString::Printf(TEXT("%s was created but has no hierarchy to import %s's bones into"), *Rig->GetName(), *Skeleton->GetName()));
 		{
 			if (SkeletalMesh)
 			{
@@ -214,7 +239,18 @@ FString UUnrealAIControlRigRqlApi::AddVariable(UControlRigBlueprint* Rig, const 
 	const FString CPPType = VariableType(Type, TypeObject);
 	if (CPPType.IsEmpty())
 		return FString();
-	const FString DefaultText = Default.TrimStartAndEnd().IsEmpty() ? FString() : ValueText(Default, CPPType, TypeObject);
+	const bool bArray = CPPType.StartsWith(TEXT("TArray<"));
+	const FString DefaultText = Default.TrimStartAndEnd().IsEmpty() ? FString() : (bArray ? Default.TrimStartAndEnd() : ValueText(Default, CPPType, TypeObject));
+	// A scalar default is checked here; struct defaults are the struct's text form ("(0, 50, 100)" for vectors).
+	double Real = 0.0;
+	int64 Whole = 0;
+	const bool bValidDefault = DefaultText.IsEmpty() || bArray
+		|| ((CPPType == TEXT("float") || CPPType == TEXT("double")) ? LexTryParseString(Real, *DefaultText)
+			: CPPType == TEXT("int32") ? LexTryParseString(Whole, *DefaultText)
+			: CPPType == TEXT("bool") ? (DefaultText == TEXT("True") || DefaultText == TEXT("False"))
+			: true);
+	if (!bValidDefault)
+		return UnrealMcpRql::Failed<FString>(FString::Printf(TEXT("'%s' is not a %s default"), *Default, *Type));
 	static_cast<UObject*>(Rig)->Modify();
 	const FName Added = Rig->AddMemberVariable(FName(*Trimmed), CPPType, bPublic, /*bIsReadOnly*/ false, DefaultText);
 	if (Added.IsNone())
@@ -286,7 +322,7 @@ void UUnrealAIControlRigRqlApi::RemoveNode(UControlRigBlueprint* Rig, const FStr
 		return;
 	// What ran before it keeps running what ran after it.
 	URigVMPin* In = ExecuteInput(Found);
-	URigVMPin* Out = ExecuteOutput(Found);
+	URigVMPin* Out = ContinueOutput(Found);
 	TArray<FString> SourcePaths;
 	TArray<FString> TargetPaths;
 	for (const URigVMPin* Pin : In ? In->GetLinkedSourcePins() : TArray<URigVMPin*>())
@@ -296,12 +332,16 @@ void UUnrealAIControlRigRqlApi::RemoveNode(UControlRigBlueprint* Rig, const FStr
 	static_cast<UObject*>(Rig)->Modify();
 	if (!Controller->RemoveNode(Found))
 		return UnrealMcpRql::Failed(FString::Printf(TEXT("could not remove %s"), *Node));
-	if (SourcePaths.Num() == 1)
+	TArray<FString> Lost;
+	for (const FString& Target : TargetPaths)
 	{
-		for (const FString& Target : TargetPaths)
-			Controller->AddLink(SourcePaths[0], Target);
+		if (SourcePaths.Num() != 1 || !Controller->AddLink(SourcePaths[0], Target))
+			Lost.Add(Target);
 	}
 	Recompile(Rig);
+	if (Lost.Num())
+		UnrealMcpRql::Fail(FString::Printf(TEXT("removed %s, but what ran after it (%s) is no longer in the execution chain: Connect it (see the Nodes member)"),
+			*Node, *FString::Join(Lost, TEXT(", "))));
 }
 
 FString UUnrealAIControlRigRqlApi::AddLookAt(UControlRigBlueprint* Rig, const FString& Bone, const FString& Target, const FString& Weight, const FString& Axis, const FString& After)
@@ -312,18 +352,20 @@ FString UUnrealAIControlRigRqlApi::AddLookAt(UControlRigBlueprint* Rig, const FS
 		return FString();
 	// The bone's local axes that face the character's forward (+Y of a UE skeletal mesh) and up (+Z) in the reference pose.
 	const FTransform Pose = Rig->GetHierarchy()->GetInitialGlobalTransform(Key);
-	const FString Facing = Axis.TrimStartAndEnd().IsEmpty() ? AxisText(Pose.InverseTransformVectorNoScale(FVector::YAxisVector)) : Axis.TrimStartAndEnd();
+	const FString Facing = Axis.TrimStartAndEnd().IsEmpty() ? AxisText(Pose.InverseTransformVectorNoScale(FVector::YAxisVector)) : AxisArgument(Axis);
+	if (Facing.IsEmpty())
+		return UnrealMcpRql::Failed<FString>(FString::Printf(TEXT("'%s' is not an axis: X, -Y, +Z or (x, y, z)"), *Axis));
 	const FString Up = AxisText(Pose.InverseTransformVectorNoScale(FVector::ZAxisVector));
 
 	static_cast<UObject*>(Rig)->Modify();
 	FString Goal = Target.TrimStartAndEnd();
 	FString Space;
-	URigVMNode* FromWorld = nullptr;
+	TArray<URigVMNode*> Added; // everything the call adds, removed again when a later step fails
 	if (Goal.StartsWith(TEXT("@")) && !Goal.Contains(TEXT(".")))
 	{
 		// A world-space location from outside (the Anim Blueprint): into rig space first.
-		FromWorld = UnrealAIControlRigGraph::AddUnit(Rig, FRigUnit_ToRigSpace_Location::StaticStruct(), TEXT("Value=") + Goal, FString(),
-			FreeNodeName(Rig, FString::Printf(TEXT("LookAt_%s_Target"), *Key.Name.ToString())));
+		URigVMNode* FromWorld = UnrealAIControlRigGraph::AddUnit(Rig, FRigUnit_ToRigSpace_Location::StaticStruct(), TEXT("Value=") + Goal, FString(),
+			FreeNodeName(Rig, FString::Printf(TEXT("LookAt_%s_Target"), *Key.Name.ToString())), &Added);
 		if (!FromWorld)
 			return FString();
 		Goal = FString::Printf(TEXT("@%s.Global"), *FromWorld->GetName());
@@ -344,8 +386,7 @@ FString UUnrealAIControlRigRqlApi::AddLookAt(UControlRigBlueprint* Rig, const FS
 		FreeNodeName(Rig, FString::Printf(TEXT("LookAt_%s"), *Key.Name.ToString())));
 	if (!Aim)
 	{
-		if (FromWorld)
-			RemoveNodes(Controller, { FromWorld });
+		RemoveNodes(Controller, Added);
 		return FString();
 	}
 	Recompile(Rig);

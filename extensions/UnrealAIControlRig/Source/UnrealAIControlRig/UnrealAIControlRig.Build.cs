@@ -44,6 +44,8 @@ public class UnrealAIControlRig : ModuleRules
 			"BlueprintGraph",
 			"UnrealEd",
 			"Projects",
+			// A Blueprint actor class by its asset name (TrackNearestActor).
+			"AssetRegistry",
 		});
 	}
 }

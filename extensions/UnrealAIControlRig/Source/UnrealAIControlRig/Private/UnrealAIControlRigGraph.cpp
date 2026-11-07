@@ -75,17 +75,15 @@ namespace UnrealAIControlRigGraphLocal
 	FRigElementKey ElementFromText(UControlRigBlueprint* Rig, const FString& Text)
 	{
 		FString TypeText;
-		FString Name = Text.TrimStartAndEnd().TrimQuotes();
-		if (Name.Split(TEXT(":"), &TypeText, &Name))
+		FString Rest;
+		const FString Name = Text.TrimStartAndEnd().TrimQuotes();
+		if (Name.Split(TEXT(":"), &TypeText, &Rest))
 		{
+			// A type prefix only when it names an element type: "Arm:shoulder" stays a name.
 			const UEnum* Types = StaticEnum<ERigElementType>();
 			const int64 Type = Types ? Types->GetValueByNameString(TypeText.TrimStartAndEnd()) : INDEX_NONE;
-			if (Type == INDEX_NONE)
-			{
-				UnrealMcpRql::Fail(FString::Printf(TEXT("'%s' is not an element type (Bone, Control, Null, Curve)"), *TypeText));
-				return FRigElementKey();
-			}
-			return UnrealAIControlRigGraph::Element(Rig, Name, { static_cast<ERigElementType>(Type) }, *TypeText.ToLower());
+			if (Type != INDEX_NONE)
+				return UnrealAIControlRigGraph::Element(Rig, Rest, { static_cast<ERigElementType>(Type) }, *TypeText.ToLower());
 		}
 		return UnrealAIControlRigGraph::Element(Rig, Name,
 			{ ERigElementType::Bone, ERigElementType::Control, ERigElementType::Null, ERigElementType::Curve, ERigElementType::Connector }, TEXT("element"));
@@ -93,8 +91,11 @@ namespace UnrealAIControlRigGraphLocal
 
 	bool Link(URigVMController* Controller, URigVMPin* From, URigVMPin* To)
 	{
+		if (To->GetLinkedSourcePins().Contains(From))
+			return true; // already linked
+		// No cast nodes: a node the operation does not know about would outlive a rollback.
 		if (Controller->AddLink(From->GetPinPath(), To->GetPinPath(), /*bSetupUndoRedo*/ true, /*bPrintPythonCommand*/ false,
-			ERigVMPinDirection::Output, /*bCreateCastNode*/ true))
+			ERigVMPinDirection::Output, /*bCreateCastNode*/ false))
 			return true;
 		UnrealMcpRql::Fail(FString::Printf(TEXT("could not link %s (%s) to %s (%s)"), *From->GetPinPath(), *PinType(From), *To->GetPinPath(), *PinType(To)));
 		return false;
@@ -224,14 +225,21 @@ URigVMPin* UnrealAIControlRigGraph::FindPin(UControlRigBlueprint* Rig, const FSt
 	return Found ? Found : UnrealMcpRql::Failed<URigVMPin*>(FString::Printf(TEXT("%s has no pin '%s' (pins: %s)"), *NodeLabel(Node), *PinPath, *PinNames(Node)));
 }
 
-URigVMNode* UnrealAIControlRigGraph::ForwardsSolve(URigVMController* Controller)
+URigVMNode* UnrealAIControlRigGraph::FindForwardsSolve(const URigVMGraph* Graph)
 {
-	for (URigVMNode* Node : Controller->GetGraph()->GetNodes())
+	for (URigVMNode* Node : Graph->GetNodes())
 	{
 		const URigVMUnitNode* Unit = Cast<URigVMUnitNode>(Node);
 		if (Unit && Unit->GetScriptStruct() == FRigUnit_BeginExecution::StaticStruct())
 			return Node;
 	}
+	return nullptr;
+}
+
+URigVMNode* UnrealAIControlRigGraph::ForwardsSolve(URigVMController* Controller)
+{
+	if (URigVMNode* Existing = FindForwardsSolve(Controller->GetGraph()))
+		return Existing;
 	return Controller->AddUnitNode(FRigUnit_BeginExecution::StaticStruct(), TEXT("Execute"), FVector2D(-400.0, 0.0), TEXT("BeginExecution"));
 }
 
@@ -248,6 +256,22 @@ URigVMPin* UnrealAIControlRigGraph::ExecuteOutput(URigVMNode* Node)
 		}
 	}
 	return Found;
+}
+
+URigVMPin* UnrealAIControlRigGraph::ContinueOutput(URigVMNode* Node)
+{
+	if (URigVMPin* Only = ExecuteOutput(Node))
+		return Only;
+	URigVMPin* First = nullptr;
+	for (URigVMPin* Pin : Node->GetPins())
+	{
+		if (!Pin->IsExecuteContext() || !IsOutput(Pin))
+			continue;
+		if (Pin->GetName() == TEXT("Completed"))
+			return Pin;
+		First = First ? First : Pin;
+	}
+	return First;
 }
 
 URigVMPin* UnrealAIControlRigGraph::ExecuteInput(URigVMNode* Node)
@@ -285,8 +309,8 @@ FString UnrealAIControlRigGraph::ValueText(const FString& Value, const FString& 
 	}
 	// "(0, 1, 0)" / "[0, 1, 0]" / "0.5" on a struct of numbers (vectors, rotators as Pitch, Yaw, Roll, colours as R, G, B, A, quats).
 	const UScriptStruct* Struct = Cast<UScriptStruct>(TypeObject);
-	if (!Struct || Trimmed.Contains(TEXT("=")))
-		return Trimmed;
+	if (!Struct || Struct == TBaseStructure<FColor>::Get() || Trimmed.Contains(TEXT("=")))
+		return Trimmed; // FColor declares B, G, R, A: positional numbers would swap red and blue
 	FString Inner = Trimmed;
 	if ((Inner.StartsWith(TEXT("(")) && Inner.EndsWith(TEXT(")"))) || (Inner.StartsWith(TEXT("[")) && Inner.EndsWith(TEXT("]"))))
 		Inner = Inner.Mid(1, Inner.Len() - 2);
@@ -307,7 +331,9 @@ FString UnrealAIControlRigGraph::ValueText(const FString& Value, const FString& 
 	for (int32 Index = 0; Index < Fields.Num(); ++Index)
 	{
 		const FString Number = Numbers[Numbers.Num() == 1 ? 0 : Index].TrimStartAndEnd();
-		if (!FCString::IsNumeric(*Number))
+		double Real = 0.0;
+		int64 Whole = 0;
+		if (Number.IsEmpty() || !(Fields[Index]->IsInteger() ? LexTryParseString(Whole, *Number) : LexTryParseString(Real, *Number)))
 			return Trimmed;
 		Parts.Add(FString::Printf(TEXT("%s=%s"), *Fields[Index]->GetName(), *Number));
 	}
@@ -366,12 +392,24 @@ bool UnrealAIControlRigGraph::SetPin(UControlRigBlueprint* Rig, URigVMPin* Pin, 
 	{
 		Text = ValueText(Trimmed, Pin->GetCPPType(), Pin->GetCPPTypeObject());
 	}
-	if (Pin->GetLinkedSourcePins().Num())
-		Controller->BreakAllLinks(Pin->GetPinPath(), /*bAsInput*/ true);
 	const FString Before = Pin->GetDefaultValue();
+	const FString Example = Before.IsEmpty() ? FString(TEXT("the editor's Copy of the pin")) : Before;
+	if ((Text.IsEmpty() && !Pin->IsStringType()) || !Pin->IsValidDefaultValue(Text))
+		return UnrealMcpRql::Failed<bool>(FString::Printf(TEXT("'%s' is not a value of %s (%s); its text form is like %s"),
+			*Value, *Pin->GetPinPath(), *PinType(Pin), *Example));
+	// Checked first: a link the value replaces is only broken once the value is known to fit, and comes back on failure.
+	TArray<FString> Sources;
+	for (const URigVMPin* Source : Pin->GetLinkedSourcePins())
+		Sources.Add(Source->GetPinPath());
+	if (Sources.Num())
+		Controller->BreakAllLinks(Pin->GetPinPath(), /*bAsInput*/ true);
 	if (!Controller->SetPinDefaultValue(Pin->GetPinPath(), Text, /*bResizeArrays*/ true, /*bSetupUndoRedo*/ true))
+	{
+		for (const FString& Source : Sources)
+			Controller->AddLink(Source, Pin->GetPinPath());
 		return UnrealMcpRql::Failed<bool>(FString::Printf(TEXT("could not set %s (%s) to '%s'; its text form is like %s"),
-			*Pin->GetPinPath(), *PinType(Pin), *Value, Before.IsEmpty() ? TEXT("the editor's Copy of the pin") : *Before));
+			*Pin->GetPinPath(), *PinType(Pin), *Value, *Example));
+	}
 	OutValue = Pin->GetDefaultValue();
 	return true;
 }
@@ -432,7 +470,8 @@ void UnrealAIControlRigGraph::RemoveNodes(URigVMController* Controller, const TA
 	}
 }
 
-URigVMNode* UnrealAIControlRigGraph::AddUnit(UControlRigBlueprint* Rig, UScriptStruct* Unit, const FString& Settings, const FString& After, const FString& Name)
+URigVMNode* UnrealAIControlRigGraph::AddUnit(UControlRigBlueprint* Rig, UScriptStruct* Unit, const FString& Settings, const FString& After, const FString& Name,
+	TArray<URigVMNode*>* OutAdded)
 {
 	URigVMController* Controller = UnrealAIControlRigGraph::Controller(Rig);
 	TArray<TPair<FString, FString>> Pairs;
@@ -489,7 +528,7 @@ URigVMNode* UnrealAIControlRigGraph::AddUnit(UControlRigBlueprint* Rig, UScriptS
 	FVector2D At = Anchor ? Anchor->GetPosition() + FVector2D(380.0, 0.0) : FVector2D(0.0, 400.0);
 	if (!bMutable)
 	{
-		URigVMNode* Solve = ForwardsSolve(Controller);
+		URigVMNode* Solve = FindForwardsSolve(Controller->GetGraph());
 		URigVMPin* End = Solve ? EndOfChain(Solve) : nullptr;
 		At = (End ? End->GetNode()->GetPosition() : FVector2D::ZeroVector) + FVector2D(0.0, 320.0 + 40.0 * (Controller->GetGraph()->GetNodes().Num() % 6));
 	}
@@ -510,9 +549,9 @@ URigVMNode* UnrealAIControlRigGraph::AddUnit(UControlRigBlueprint* Rig, UScriptS
 	if (RunsAfter)
 	{
 		URigVMPin* In = ExecuteInput(Node);
-		URigVMPin* Out = ExecuteOutput(Node);
+		URigVMPin* Out = ContinueOutput(Node); // a Sequence / branch / loop: what ran next follows its Completed (or first) output
 		const TArray<URigVMPin*> Next = RunsAfter->GetLinkedTargetPins();
-		bool bLinked = In && Out;
+		bool bLinked = In && (Out || Next.Num() == 0);
 		for (URigVMPin* Target : Next)
 			bLinked = bLinked && Controller->BreakLink(RunsAfter->GetPinPath(), Target->GetPinPath());
 		bLinked = bLinked && Link(Controller, RunsAfter, In);
@@ -526,6 +565,8 @@ URigVMNode* UnrealAIControlRigGraph::AddUnit(UControlRigBlueprint* Rig, UScriptS
 			return UnrealMcpRql::Failed<URigVMNode*>(FString::Printf(TEXT("could not link %s into the execution chain after %s"), *Unit->GetName(), *RunsAfter->GetPinPath()));
 		}
 	}
+	if (OutAdded)
+		OutAdded->Append(Added);
 	return Node;
 }
 
@@ -536,6 +577,8 @@ FString UnrealAIControlRigGraph::VariableType(const FString& Type, UObject*& Out
 	if (Wanted.StartsWith(TEXT("Array<"), ESearchCase::IgnoreCase) && Wanted.EndsWith(TEXT(">")))
 	{
 		const FString Inner = VariableType(Wanted.Mid(6, Wanted.Len() - 7), OutTypeObject);
+		if (Inner.StartsWith(TEXT("TArray<")))
+			return UnrealMcpRql::Failed<FString>(TEXT("a rig variable cannot be an array of arrays"));
 		return Inner.IsEmpty() ? FString() : TEXT("TArray<") + Inner + TEXT(">");
 	}
 	static const TMap<FString, FString> Scalars = {

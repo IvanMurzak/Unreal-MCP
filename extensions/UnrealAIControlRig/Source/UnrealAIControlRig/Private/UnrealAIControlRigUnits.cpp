@@ -214,12 +214,20 @@ UScriptStruct* UnrealAIControlRigUnits::Resolve(const FString& Name)
 	const FString Unprefixed = Wanted.StartsWith(TEXT("f")) ? Wanted.RightChop(1) : Wanted; // FRigUnit_AimItem
 	const TArray<FUnit> Units = UnrealAIControlRigUnitsLocal::Units();
 
-	// The struct ("RigUnit_AimItem", "FRigUnit_AimItem") or the struct without its prefix ("AimItem"): unique.
+	// The struct ("RigUnit_AimItem", "FRigUnit_AimItem") or the struct without its prefix ("AimItem"); a current unit
+	// before a deprecated one of the same short name (DebugArc in RigUnit_ and RigVMFunction_).
+	const FUnit* Deprecated = nullptr;
 	for (const FUnit& Unit : Units)
 	{
 		if (Wanted == Unit.StructKey || Unprefixed == Unit.StructKey || Wanted == Unit.NameKey)
-			return Unit.Struct;
+		{
+			if (!Unit.bDeprecated)
+				return Unit.Struct;
+			Deprecated = Deprecated ? Deprecated : &Unit;
+		}
 	}
+	if (Deprecated)
+		return Deprecated->Struct;
 	// The display name ("Aim", "Basic IK"): several units can share one (From World on locations, rotations, transforms).
 	TArray<const FUnit*> Titled;
 	for (const FUnit& Unit : Units)

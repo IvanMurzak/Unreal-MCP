@@ -354,6 +354,9 @@ void FUnrealAIControlRigSpec::Define()
 			Refused(TEXT("an unknown element"), SpecCall(TEXT("controlRig"), TEXT("SetPin"), { SpecLit(Path), SpecLit(TEXT("AimRoot.Item")), SpecLit(TEXT("Wrist")) }), TEXT("no element named 'Wrist'"));
 			Refused(TEXT("an output pin"), SpecCall(TEXT("controlRig"), TEXT("SetPin"), { SpecLit(Path), SpecLit(TEXT("ToRig.Global")), SpecLit(TEXT("(1, 2, 3)")) }), TEXT("is an output"));
 			Refused(TEXT("After on a pure unit"), SpecCall(TEXT("controlRig"), TEXT("AddUnit"), { SpecLit(Path), SpecLit(TEXT("RigUnit_ToRigSpace_Location")), SpecLit(TEXT("")), SpecLit(TEXT("AimRoot")) }), TEXT("is a pure value node"));
+			Refused(TEXT("a value that does not fit"), SpecCall(TEXT("controlRig"), TEXT("SetPin"), { SpecLit(Path), SpecLit(TEXT("AimRoot.Weight")), SpecLit(TEXT("abc")) }), TEXT("is not a value of"));
+			if (URigVMNode* Aim = SpecNode(Rig, TEXT("AimRoot")))
+				TestEqual(TEXT("the refused value kept the Weight link"), Aim->FindPin(TEXT("Weight"))->GetLinkedSourcePins().Num(), 1);
 			TestEqual(TEXT("the refused calls left no node"), Rig->GetModel()->GetNodes().Num(), NodeCount);
 
 			// controlRig | call RemoveNode("@RIG@", "AimRoot")      First now runs Second

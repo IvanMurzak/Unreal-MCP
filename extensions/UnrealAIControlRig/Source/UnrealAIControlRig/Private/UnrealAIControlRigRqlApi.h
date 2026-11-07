@@ -73,7 +73,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Control Rig", meta = (BlueprintInternalUseOnly = "true"))
 	FString SetRigInput(UAnimBlueprint* AnimBlueprint, const FString& Node, const FString& Input, const FString& Value);
 
-	/** every frame (Event Blueprint Update Animation) set the Vector variable LocationVariable to the world location of the nearest actor of ActorClass ("BP_Orb") within Radius cm of the owner, smoothed at Speed (0 = snap), and blend the float variable WeightVariable ("" = none) to 1 in range and to 0 out of range; variables are added when missing; for look-at / aim at the nearest thing; returns what it added */
+	/** every frame (Event Blueprint Update Animation) set the Vector variable LocationVariable to the world location of the nearest actor of ActorClass ("BP_Orb") within Radius cm of the owner, smoothed at Speed (0 = snap), and blend the float variable WeightVariable ("" = none) to 1 in range and to 0 out of range; variables are added when missing; for look-at / aim at the nearest thing (the owner itself is never the target; without a weight variable a first target is approached from the variable's last value); returns what it added */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Control Rig", meta = (BlueprintInternalUseOnly = "true"))
 	FString TrackNearestActor(UAnimBlueprint* AnimBlueprint, const FString& ActorClass, const FString& LocationVariable = TEXT("LookAtTarget"),
 		const FString& WeightVariable = TEXT("LookAtWeight"), float Radius = 1000.0f, float Speed = 5.0f);

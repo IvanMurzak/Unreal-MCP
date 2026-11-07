@@ -9,6 +9,7 @@
 
 class UControlRigBlueprint;
 class URigVMController;
+class URigVMGraph;
 class URigVMNode;
 class URigVMPin;
 class UScriptStruct;
@@ -37,6 +38,9 @@ namespace UnrealAIControlRigGraph
 	/** The pin at @p Path ("Aim.Weight", "Aim.Primary.Target"; names or display names); null after Fail listing the node's pins. */
 	URigVMPin* FindPin(UControlRigBlueprint* Rig, const FString& Path);
 
+	/** The Forwards Solve event node of the graph; null when it has none. */
+	URigVMNode* FindForwardsSolve(const URigVMGraph* Graph);
+
 	/** The Forwards Solve event node of the rig's graph, added when it has none. */
 	URigVMNode* ForwardsSolve(URigVMController* Controller);
 
@@ -45,6 +49,9 @@ namespace UnrealAIControlRigGraph
 
 	/** The node's only execute output pin (null for none, or for a Sequence / branch with several). */
 	URigVMPin* ExecuteOutput(URigVMNode* Node);
+
+	/** The output what runs after the node continues from: its only execute output, else Completed, else the first. */
+	URigVMPin* ContinueOutput(URigVMNode* Node);
 
 	/** The node's execute input pin (null for a pure node or an event). */
 	URigVMPin* ExecuteInput(URigVMNode* Node);
@@ -66,9 +73,11 @@ namespace UnrealAIControlRigGraph
 	/**
 	 * Add a node of the rig unit @p Unit, set @p Settings (ParseSettings form) on it and, when it has an execute pin, link it
 	 * into the execution chain after @p After ("" = the end of Forwards Solve; a node name or "Node.Pin" of an execute
-	 * output, such as a Sequence's "Sequence.B"). Returns the node; null after Fail with nothing added.
+	 * output, such as a Sequence's "Sequence.B"). Returns the node, and appends it and the getter nodes its settings added to
+	 * @p OutAdded; null after Fail with nothing added.
 	 */
-	URigVMNode* AddUnit(UControlRigBlueprint* Rig, UScriptStruct* Unit, const FString& Settings, const FString& After, const FString& Name);
+	URigVMNode* AddUnit(UControlRigBlueprint* Rig, UScriptStruct* Unit, const FString& Settings, const FString& After, const FString& Name,
+		TArray<URigVMNode*>* OutAdded = nullptr);
 
 	/**
 	 * The CPP type path AddMemberVariable takes for an agent's type name ("Vector", "float", "bool", "Transform", ...), with
