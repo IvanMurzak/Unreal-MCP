@@ -214,9 +214,13 @@ void FUnrealMcpSourceToolsSpec::Define()
 
 			const FString LiveCoding = UnrealMcpSourceTools::DescribeUbtResult(TEXT("GameEditor"), 0, 0, 6, 2.0,
 				TEXT("Unable to build while Live Coding is active. Exit the editor and game, or press Ctrl+Alt+F11 if iterating on code in the editor or game\n"));
-			TestTrue(TEXT("Live Coding refusal: nothing was built"), LiveCoding.Contains(TEXT("UBT: Unable to build while Live Coding is active")) && LiveCoding.Contains(TEXT("Nothing was built")));
+			TestTrue(TEXT("Live Coding refusal: nothing was compiled"), LiveCoding.Contains(TEXT("UBT: Unable to build while Live Coding is active")) && LiveCoding.Contains(TEXT("Nothing was compiled")));
 			TestTrue(*FString::Printf(TEXT("Live Coding refusal: bodies via Live Coding, declarations via a rebuild + restart (%s)"), *LiveCoding),
 				LiveCoding.Contains(TEXT("useLiveCoding true")) && LiveCoding.Contains(TEXT("restart required")) && LiveCoding.Contains(TEXT("restart:true")));
+			const FString NewClass = UnrealMcpSourceTools::DescribeUbtResult(TEXT("GameEditor"), 0, 0, 6, 2.0,
+				TEXT("Unable to build while Live Coding is active. Exit the editor and game\n"), /*bReflectionChanged*/ true);
+			TestTrue(*FString::Printf(TEXT("a reflection change: only the rebuild + restart, not Live Coding (%s)"), *NewClass),
+				!NewClass.Contains(TEXT("useLiveCoding true")) && NewClass.Contains(TEXT("restart:true")));
 
 			const FString Broken = UnrealMcpSourceTools::DescribeUbtResult(TEXT("GameEditor"), 2, 0, 6, 10.0,
 				TEXT("Foo.cpp(3): error C2143: syntax error\nResult: Failed (OtherCompilationError)\n"));

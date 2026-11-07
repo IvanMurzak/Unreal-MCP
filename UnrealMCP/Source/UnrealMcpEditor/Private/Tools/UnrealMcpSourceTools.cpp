@@ -64,7 +64,8 @@ namespace UnrealMcpSourceTools
 			"which builds the project before opening it; with another client, close the editor, build %s, and reopen it."), *Target);
 	}
 
-	FString DescribeUbtResult(const FString& Target, int32 ErrorCount, int32 WarningCount, int32 ReturnCode, double Seconds, const FString& Output)
+	FString DescribeUbtResult(const FString& Target, int32 ErrorCount, int32 WarningCount, int32 ReturnCode, double Seconds, const FString& Output,
+		bool bReflectionChanged)
 	{
 		FString Text = FString::Printf(TEXT("Compile (%s, UBT): %d error(s), %d warning(s); return code %d in %.0fs."),
 			*Target, ErrorCount, WarningCount, ReturnCode, Seconds);
@@ -94,9 +95,10 @@ namespace UnrealMcpSourceTools
 			Text += FString::Printf(TEXT(" UBT: %s"), *Reason);
 		// What a failed build in a running editor means for the code the agent waits for.
 		if (Reason.Contains(TEXT("Live Coding is active")))
-			Text += TEXT(" Nothing was built: UBT cannot build while this editor runs Live Coding. A change inside function bodies "
-				"compiles with source-compile (useLiveCoding true); new classes or files and changed UCLASS / USTRUCT / UENUM / "
-				"UPROPERTY / UFUNCTION declarations need a full build. ") + SourceRestartAdvice(Target);
+			Text += FString(TEXT(" Nothing was compiled (UHT checked the headers): UBT cannot build while this editor runs Live Coding. "))
+				+ (bReflectionChanged ? TEXT("") : TEXT("A change inside function bodies compiles with source-compile (useLiveCoding true); "))
+				+ TEXT("new classes or files and changed UCLASS / USTRUCT / UENUM / UPROPERTY / UFUNCTION declarations need a full build. ")
+				+ SourceRestartAdvice(Target);
 		else if (Reason.Contains(TEXT("LNK1104")) || Reason.Contains(TEXT("cannot open file")))
 			Text += TEXT(" Nothing new is loaded: this running editor holds its module DLL, so new or changed C++ is NOT live "
 				"(a Blueprint is live after blueprint-compile). ") + SourceRestartAdvice(Target);
@@ -107,8 +109,8 @@ namespace UnrealMcpSourceTools
 	{
 		constexpr int32 MaxNamed = 5;
 		const TArray<FString> Named(Files.GetData(), FMath::Min(Files.Num(), MaxNamed));
-		FString Text = FString::Printf(TEXT(" Live Coding was not used: %s changed since the editor started and declare%s reflected "
-			"types or members (UCLASS / USTRUCT / UENUM / UPROPERTY / UFUNCTION), which Live Coding cannot add to a running editor"),
+		FString Text = FString::Printf(TEXT(" %s changed since the editor started and declare%s reflected types or members "
+			"(UCLASS / USTRUCT / UENUM / UPROPERTY / UFUNCTION), which Live Coding cannot add to a running editor"),
 			*FString::Join(Named, TEXT(", ")), Files.Num() == 1 ? TEXT("s") : TEXT(""));
 		if (Files.Num() > MaxNamed)
 			Text += FString::Printf(TEXT(" (and %d more)"), Files.Num() - MaxNamed);
@@ -118,9 +120,15 @@ namespace UnrealMcpSourceTools
 		return Text;
 	}
 
+	/**
+	 * Wall clock when this module loaded, with the editor: a monotonic-clock difference (FPlatformTime since GStartTime)
+	 * stops while macOS / Linux sleep, which would move the start later than it was.
+	 */
+	static const FDateTime GUnrealMcpSourceToolsLoadUtc = FDateTime::UtcNow();
+
 	FDateTime EditorStartUtc()
 	{
-		return FDateTime::UtcNow() - FTimespan::FromSeconds(FPlatformTime::Seconds() - GStartTime);
+		return GUnrealMcpSourceToolsLoadUtc;
 	}
 
 	TArray<FString> FindReflectionChangesSince(const FString& SourceRoot, const FDateTime& SinceUtc)
@@ -611,7 +619,7 @@ namespace UnrealMcpSourceTools
 				Structured->SetStringField(TEXT("cpp"), CppPath.RelPath);
 				Structured->SetBoolField(TEXT("isUClass"), Tpl.bUClass);
 				return FUnrealMcpToolResult::Success(
-					FString::Printf(TEXT("Created %s%s (%s.h + %s.cpp) in module '%s'. Run source-compile to check it for errors; a running editor cannot load a new C++ class (Live Coding cannot add one): it needs a full build with the editor closed (the AI Game Dev app: ask it to restart the editor, editor_connection.connect with restart:true, which builds first). A Blueprint class is usable at once."),
+					FString::Printf(TEXT("Created %s%s (%s.h + %s.cpp) in module '%s'. Run source-compile (UHT checks the header; while Live Coding is active nothing is compiled); a running editor cannot load a new C++ class (Live Coding cannot add one): it needs a full build with the editor closed (the AI Game Dev app: ask it to restart the editor, editor_connection.connect with restart:true, which builds first). A Blueprint class is usable at once."),
 						*Tpl.Prefix, *ClassName, *ClassName, *ClassName, *Module),
 					Structured);
 			});
@@ -890,8 +898,10 @@ namespace UnrealMcpSourceTools
 			                  "'success' (returnCode==0) and 'compileClean' (zero compiler errors — true even when a "
 			                  "running editor holds the module DLL so the link stage cannot relink it). Set "
 			                  "'useLiveCoding':false to force the UBT path. New classes or changed UCLASS / USTRUCT / UENUM / UPROPERTY / "
-			                  "UFUNCTION declarations cannot go live in a running editor: the result then has 'restartRequired':true and "
-			                  "'reflectionChanges' (the headers) and says how to rebuild and restart the editor."))
+			                  "UFUNCTION declarations (headers changed since the editor started) cannot go live in a running editor: Live "
+			                  "Coding is then skipped unless 'useLiveCoding':true is passed explicitly, and the result has "
+			                  "'restartRequired':true, 'reflectionChanges' (the headers) and how to rebuild and restart the editor; "
+			                  "'compiled':false means UBT refused before compiling (Live Coding active)."))
 			.ParamString(TEXT("target"), TEXT("Build target name. Default '<Project>Editor'."))
 			.ParamString(TEXT("configuration"), TEXT("Build configuration. Default 'Development'."))
 			.ParamString(TEXT("platform"), TEXT("Build platform. Default the host platform (e.g. 'Win64')."))
@@ -908,16 +918,22 @@ namespace UnrealMcpSourceTools
 					TargetName = ProjectName + TEXT("Editor");
 				}
 
-				// New or changed reflected declarations (a new UCLASS, a UPROPERTY added) since the editor started: Live
-				// Coding cannot apply them (it reports NoChanges or patches only the bodies), so it is skipped and the
-				// result says a full build + editor restart is needed. UBT still runs for UHT / compiler diagnostics.
+				// Reflected headers changed since the editor started (a new UCLASS, a UPROPERTY added): Live Coding cannot
+				// apply them (it answered NoChanges for new classes), so by default it is skipped and the result says a full
+				// build + editor restart is needed; UBT still runs (UHT checks the headers; with Live Coding active UBT
+				// compiles nothing). An explicit useLiveCoding:true still tries Live Coding (a header touched without a
+				// reflected change).
 				const TArray<FString> ReflectionChanges = FindReflectionChangesSince(GetProjectSourceRoot(), EditorStartUtc());
+				const bool bTryLiveCoding = bUseLiveCoding && (ReflectionChanges.Num() == 0 || Call.Has(TEXT("useLiveCoding")));
+				TArray<TSharedPtr<FJsonValue>> ReflectionJson;
+				for (const FString& File : ReflectionChanges)
+					ReflectionJson.Add(MakeShared<FJsonValueString>(File));
 
 #if WITH_UNREAL_MCP_LIVE_CODING
 				// Live Coding patches the RUNNING editor in place — the only way to apply C++ changes
 				// without relinking the locked module DLL. Only viable interactively (the console must be
 				// up); headless/unattended runs fall through to UBT.
-				if (bUseLiveCoding && !FApp::IsUnattended() && ReflectionChanges.Num() == 0)
+				if (bTryLiveCoding && !FApp::IsUnattended())
 				{
 					ILiveCodingModule* LiveCoding = FModuleManager::GetModulePtr<ILiveCodingModule>(FName(LIVE_CODING_MODULE_NAME));
 					if (LiveCoding && LiveCoding->IsEnabledForSession() && LiveCoding->HasStarted() && !LiveCoding->IsCompiling())
@@ -941,6 +957,8 @@ namespace UnrealMcpSourceTools
 
 						TSharedPtr<FJsonObject> Structured = MakeShared<FJsonObject>();
 						Structured->SetStringField(TEXT("method"), TEXT("live-coding"));
+						Structured->SetBoolField(TEXT("restartRequired"), ReflectionChanges.Num() > 0);
+						Structured->SetArrayField(TEXT("reflectionChanges"), ReflectionJson);
 						Structured->SetStringField(TEXT("result"), ResultText);
 						Structured->SetBoolField(TEXT("success"), bLcSuccess);
 						Structured->SetBoolField(TEXT("compileClean"), bLcSuccess);
@@ -956,7 +974,9 @@ namespace UnrealMcpSourceTools
 						if (bStarted && Result != ELiveCodingCompileResult::Failure)
 						{
 							return FUnrealMcpToolResult::Success(
-								FString::Printf(TEXT("Live Coding compile: %s."), ResultText), Structured);
+								FString::Printf(TEXT("Live Coding compile: %s."), ResultText)
+									+ (ReflectionChanges.Num() > 0 ? DescribeReflectionChanges(TargetName, ReflectionChanges, false) : FString()),
+								Structured);
 						}
 					}
 				}
@@ -1048,7 +1068,10 @@ namespace UnrealMcpSourceTools
 				}
 
 				const bool bSuccess = (ReturnCode == 0);
-				const bool bCompileClean = (ErrorCount == 0);
+				// UBT refuses before compiling while Live Coding is active (UHT has run): zero compiler errors then means
+				// nothing was checked, not clean code.
+				const bool bCompiled = !Combined.Contains(TEXT("Unable to build while Live Coding is active"));
+				const bool bCompileClean = bCompiled && (ErrorCount == 0);
 
 				TSharedPtr<FJsonObject> Structured = MakeShared<FJsonObject>();
 				Structured->SetStringField(TEXT("method"), TEXT("ubt"));
@@ -1058,6 +1081,7 @@ namespace UnrealMcpSourceTools
 				Structured->SetNumberField(TEXT("returnCode"), ReturnCode);
 				Structured->SetBoolField(TEXT("success"), bSuccess);
 				Structured->SetBoolField(TEXT("compileClean"), bCompileClean);
+				Structured->SetBoolField(TEXT("compiled"), bCompiled);
 				Structured->SetNumberField(TEXT("errorCount"), ErrorCount);
 				Structured->SetNumberField(TEXT("warningCount"), WarningCount);
 				Structured->SetNumberField(TEXT("durationSeconds"), Elapsed);
@@ -1068,19 +1092,14 @@ namespace UnrealMcpSourceTools
 
 				// The diagnostics are in the text. Past the cap the structured report (with the raw output tail) is appended
 				// too, so a client that reads only the text still sees every row.
-				FString Summary = DescribeUbtResult(TargetName, ErrorCount, WarningCount, ReturnCode, Elapsed, Combined);
+				FString Summary = DescribeUbtResult(TargetName, ErrorCount, WarningCount, ReturnCode, Elapsed, Combined, ReflectionChanges.Num() > 0);
 				// The summary already carries SourceRestartAdvice for a Live Coding refusal or a locked module DLL.
 				const bool bUbtAdvisedRestart = Summary.Contains(TEXT("restart required"));
 				const bool bRestartRequired = ReflectionChanges.Num() > 0 || bUbtAdvisedRestart;
 				Structured->SetBoolField(TEXT("restartRequired"), bRestartRequired);
+				Structured->SetArrayField(TEXT("reflectionChanges"), ReflectionJson);
 				if (ReflectionChanges.Num() > 0)
-				{
-					TArray<TSharedPtr<FJsonValue>> Files;
-					for (const FString& File : ReflectionChanges)
-						Files.Add(MakeShared<FJsonValueString>(File));
-					Structured->SetArrayField(TEXT("reflectionChanges"), Files);
 					Summary += DescribeReflectionChanges(TargetName, ReflectionChanges, bUbtAdvisedRestart);
-				}
 
 				constexpr int32 MaxDiagnosticRows = 20;
 				FUnrealMcpToolResult Result = FUnrealMcpToolResult::Success(

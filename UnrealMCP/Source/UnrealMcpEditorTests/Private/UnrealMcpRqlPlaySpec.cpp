@@ -38,6 +38,7 @@ BEGIN_DEFINE_SPEC(FUnrealMcpRqlPlaySpec, "UnrealMcp.Tools.Rql.Play",
 	TWeakObjectPtr<AWorldSettings> PreparedSettings;
 	TSubclassOf<AGameModeBase> PreviousGameMode;
 	TWeakObjectPtr<APlayerStart> AddedStart;
+	bool bLevelWasDirty = false;
 
 	/**
 	 * Play the open editor world with the engine's GameModeBase (a DefaultPawn that flies with W / S / A / D) from an added
@@ -50,6 +51,7 @@ BEGIN_DEFINE_SPEC(FUnrealMcpRqlPlaySpec, "UnrealMcp.Tools.Rql.Play",
 		if (!TestNotNull(TEXT("editor world settings"), Settings))
 			return false;
 		PreparedSettings = Settings;
+		bLevelWasDirty = World->GetOutermost()->IsDirty();
 		PreviousGameMode = Settings->DefaultGameMode;
 		Settings->DefaultGameMode = AGameModeBase::StaticClass();
 		AddedStart = World->SpawnActor<APlayerStart>(FVector(0.0, 0.0, 5000.0), FRotator::ZeroRotator);
@@ -65,10 +67,13 @@ BEGIN_DEFINE_SPEC(FUnrealMcpRqlPlaySpec, "UnrealMcp.Tools.Rql.Play",
 	void RestoreWorld()
 	{
 		EndPlay();
-		if (AWorldSettings* Settings = PreparedSettings.Get())
-			Settings->DefaultGameMode = PreviousGameMode;
 		if (APlayerStart* Start = AddedStart.Get())
 			Start->GetWorld()->EditorDestroyActor(Start, /*bShouldModifyLevel*/ true);
+		if (AWorldSettings* Settings = PreparedSettings.Get())
+		{
+			Settings->DefaultGameMode = PreviousGameMode;
+			Settings->GetOutermost()->SetDirtyFlag(bLevelWasDirty); // unchanged, as later specs found it
+		}
 		PreparedSettings.Reset();
 		AddedStart.Reset();
 	}

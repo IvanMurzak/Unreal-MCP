@@ -477,23 +477,37 @@ FUnrealMcpPlayState UUnrealAIEnhancedInputRqlApi::InjectInput(UInputAction* Acti
 		if (Instance && bHeldFrame)
 			LastValue = Instance->GetValue().ToString();
 	};
+	// The controller injected into: its events are read, even if the game swaps controllers mid-call.
+	TWeakObjectPtr<APlayerController> Injected;
+	auto Inject = [&Injected, Action, &TriggerObjects](APlayerController* Target, const FInputActionValue& Value)
+	{
+		if (UEnhancedPlayerInput* Input = Target ? Cast<UEnhancedPlayerInput>(Target->PlayerInput) : nullptr)
+		{
+			Input->InjectInputForAction(Action, Value, {}, TriggerObjects);
+			Injected = Target;
+		}
+	};
 	int32 Advanced = 0;
 	// The input of frame N is evaluated in frame N's tick: the frame's event is read before the next frame's injection.
 	const bool bHeld = UnrealMcpRql::AdvancePlay(Count, [&](APlayerController* Target, int32 Frame)
 	{
 		if (Frame > 0)
-			Sample(Target, true);
-		if (UEnhancedPlayerInput* Input = Target ? Cast<UEnhancedPlayerInput>(Target->PlayerInput) : nullptr)
-			Input->InjectInputForAction(Action, RawValue, {}, TriggerObjects);
+			Sample(Injected.Get(), true);
+		Inject(Target, RawValue);
 	}, Advanced, Error);
 	if (!bHeld)
 		return Failed<FUnrealMcpPlayState>(Error);
-	// One frame without input: the action completes (Completed / Canceled fire) as when the key is let go.
+	// The release frame injects a zero value with the same triggers, as a key let go: Completed fires, and so do triggers
+	// that fire on release (Released, Tap, HoldAndRelease).
 	int32 Released = 0;
-	const bool bReleased = UnrealMcpRql::AdvancePlay(1, [&](APlayerController* Target, int32) { Sample(Target, true); }, Released, Error);
+	const bool bReleased = UnrealMcpRql::AdvancePlay(1, [&](APlayerController* Target, int32)
+	{
+		Sample(Injected.Get(), true);
+		Inject(Injected.IsValid() ? Injected.Get() : Target, FInputActionValue(Action->ValueType, FVector::ZeroVector));
+	}, Released, Error);
 	if (!bReleased)
 		return Failed<FUnrealMcpPlayState>(Error);
-	Sample(UnrealMcpRql::PlayController(), false);
+	Sample(Injected.Get(), false);
 
 	FUnrealMcpPlayState State = UnrealMcpRql::ReadPlayState();
 	State.FramesAdvanced = Advanced + Released;

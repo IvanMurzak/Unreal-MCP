@@ -184,13 +184,21 @@ bool UnrealMcpRql::AdvancePlay(int32 Frames, TFunctionRef<void(APlayerController
 		World->bDebugPauseExecution = false;
 		BeforeFrame(World->GetFirstPlayerController(), Frame);
 		World->Tick(LEVELTICK_All, Delta);
-		if (WeakWorld.IsValid())
+		// Paused during the frame (a Blueprint breakpoint, the pause command): it stays paused and the call stops there.
+		const bool bPausedByGame = WeakWorld.IsValid() && World->bDebugPauseExecution;
+		if (WeakWorld.IsValid() && !bPausedByGame)
 			World->bDebugPauseExecution = bWasPaused;
 		RestoreEditorWorld(EditorGWorld);
 		// Then, as the editor does after the PIE world, the tickable objects without a world: Enhanced Input rebuilds a
 		// player's key mappings there (a context added at BeginPlay maps its keys from the next frame on).
 		FTickableGameObject::TickObjects(nullptr, LEVELTICK_All, /*bIsPaused*/ false, Delta);
 		++OutAdvanced;
+		if (bPausedByGame && Frame + 1 < Frames)
+		{
+			OutError = FString::Printf(TEXT("the game paused itself (a breakpoint or the pause command) after %d of %d frame(s)"), OutAdvanced, Frames);
+			bOk = false;
+			break;
+		}
 	}
 	return bOk;
 }
@@ -330,17 +338,22 @@ bool UnrealMcpRql::AdvancePlayWithKeys(double Seconds, int32 Frames, const FStri
 				SendKey(Controller, Key, IE_Pressed, Key.Value);
 		}
 	}, OutAdvanced, OutError);
-	if (!bHeld)
-		return false;
-	int32 ReleaseFrames = 0;
-	const bool bReleased = AdvancePlay(1, [&Held, &Pressed](APlayerController* Controller, int32)
+	auto Release = [&Held, &Pressed](APlayerController*, int32)
 	{
 		if (APlayerController* Target = Pressed.Get())
 		{
 			for (const FHeldKey& Key : Held)
 				SendKey(Target, Key, Key.bAxis ? IE_Axis : IE_Released, 0.f);
 		}
-	}, ReleaseFrames, OutError);
+	};
+	if (!bHeld)
+	{
+		// Stopped part-way (the deadline, a pause): never leave the keys held for the frames after this call.
+		Release(nullptr, 0);
+		return false;
+	}
+	int32 ReleaseFrames = 0;
+	const bool bReleased = AdvancePlay(1, Release, ReleaseFrames, OutError);
 	OutAdvanced += ReleaseFrames;
 	return bReleased;
 }

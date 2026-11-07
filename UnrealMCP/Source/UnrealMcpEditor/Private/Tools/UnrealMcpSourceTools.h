@@ -63,10 +63,11 @@ namespace UnrealMcpSourceTools
 
 	/**
 	 * The one-line source-compile (UBT path) summary the agent reads: counts, return code and, when UBT failed, the
-	 * line saying why and, for a compiler-clean build, that the running editor does not load the new code.
+	 * line saying why and, for a compiler-clean build, that the running editor does not load the new code. With
+	 * @p bReflectionChanged (FindReflectionChangesSince found headers) it does not suggest Live Coding for the change.
 	 */
 	UNREALMCPEDITOR_API FString DescribeUbtResult(const FString& Target, int32 ErrorCount, int32 WarningCount, int32 ReturnCode,
-		double Seconds, const FString& Output);
+		double Seconds, const FString& Output, bool bReflectionChanged = false);
 
 	/**
 	 * The source-compile sentence for @p Files (FindReflectionChangesSince): Live Coding was skipped because it cannot apply

@@ -528,7 +528,9 @@ void FUnrealMcpRqlSession::ConfigureMutations()
 	// calls create with RF_Transactional (SpawnActor, AddComponent, ...) are recorded into the same transaction.
 	Policy.before_write = [this, OwnerOf, ViewStateActor](const std::vector<rql::MutationRecord>& Records)
 	{
-		if (TransactionIndex == INDEX_NONE && GEditor)
+		// Also when a call ended it (StartPlay / StopPlay close it before PIE starts or ends): later writes of the same
+		// query still get an undo step.
+		if (GEditor && (TransactionIndex == INDEX_NONE || !GEditor->IsTransactionActive()))
 			TransactionIndex = GEditor->BeginTransaction(TEXT("UnrealMcp"), FText::FromString(UndoTitle), nullptr);
 		for (const rql::MutationRecord& Record : Records)
 		{
@@ -593,7 +595,7 @@ void FUnrealMcpRqlSession::SetUndoTitle(const FString& QueryText)
 
 void FUnrealMcpRqlSession::CloseTransaction()
 {
-	if (TransactionIndex != INDEX_NONE && GEditor)
+	if (TransactionIndex != INDEX_NONE && GEditor && GEditor->IsTransactionActive())
 		GEditor->EndTransaction();
 	TransactionIndex = INDEX_NONE;
 }

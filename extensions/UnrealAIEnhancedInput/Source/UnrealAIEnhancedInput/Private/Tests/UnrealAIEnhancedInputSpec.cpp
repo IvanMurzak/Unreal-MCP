@@ -65,6 +65,7 @@ BEGIN_DEFINE_SPEC(FUnrealAIEnhancedInputSpec, "UnrealAIEnhancedInput",
 	TWeakObjectPtr<AWorldSettings> PlaySettings;
 	TSubclassOf<AGameModeBase> PlayPreviousGameMode;
 	TWeakObjectPtr<APlayerStart> PlayStart;
+	bool bPlayLevelWasDirty = false;
 
 	/** Run a plan with @BP@ / @IA@ / @IMC@ (and @Values@) filled in; the QueryResult. */
 	TSharedPtr<FJsonObject> Run(const FString& Plan, bool bMutate, std::initializer_list<TPair<const TCHAR*, FString>> Values = {})
@@ -429,10 +430,13 @@ void FUnrealAIEnhancedInputSpec::Define()
 		{
 			if (GEditor && GEditor->PlayWorld)
 				GEditor->EndPlayMap();
-			if (AWorldSettings* Settings = PlaySettings.Get())
-				Settings->DefaultGameMode = PlayPreviousGameMode;
 			if (APlayerStart* Start = PlayStart.Get())
 				Start->GetWorld()->EditorDestroyActor(Start, /*bShouldModifyLevel*/ true);
+			if (AWorldSettings* Settings = PlaySettings.Get())
+			{
+				Settings->DefaultGameMode = PlayPreviousGameMode;
+				Settings->GetOutermost()->SetDirtyFlag(bPlayLevelWasDirty);
+			}
 			PlaySettings.Reset();
 			PlayStart.Reset();
 		});
@@ -461,6 +465,7 @@ void FUnrealAIEnhancedInputSpec::Define()
 			if (!TestNotNull(TEXT("editor world settings"), Settings))
 				return;
 			PlaySettings = Settings;
+			bPlayLevelWasDirty = EditorWorld->GetOutermost()->IsDirty();
 			PlayPreviousGameMode = Settings->DefaultGameMode;
 			Settings->DefaultGameMode = AGameModeBase::StaticClass();
 			PlayStart = EditorWorld->SpawnActor<APlayerStart>(FVector(0.0, 0.0, 5000.0), FRotator::ZeroRotator);
@@ -498,6 +503,13 @@ void FUnrealAIEnhancedInputSpec::Define()
 			TestTrue(*FString::Printf(TEXT("held W (%s)"), *Error), UnrealMcpRql::AdvancePlayWithKeys(0.0, 4, TEXT("W"), Advanced, Error));
 			TestEqual(TEXT("the mapped action triggered on every held frame"), Triggered, 4);
 			TestEqual(TEXT("and completed on release"), Completed, 1);
+
+			// A trigger that fires on release: held frames are Ongoing, the release frame triggers.
+			Triggered = Completed = 0;
+			// enhancedInput | call InjectInput("@IA@", "(1, 0, 0)", 0, 2, "Released")
+			const TSharedPtr<FJsonObject> OnRelease = Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["enhancedInput"]},"stages":[{"op":"call","method":"InjectInput","args":[{"lit":"@IA@"},{"lit":"(1, 0, 0)"},{"lit":0},{"lit":2},{"lit":"Released"}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("Released trigger ok (%s)"), *Codes(OnRelease)), IsOk(OnRelease));
+			TestEqual(TEXT("a Released trigger fires once, on the release frame"), Triggered, 1);
 
 			// An unknown trigger is refused before anything is simulated.
 			const double Time = UnrealMcpRql::ReadPlayState().Time;
