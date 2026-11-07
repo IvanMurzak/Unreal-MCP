@@ -1,0 +1,10 @@
+{
+  "description": "one mapping context per control scheme",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "[\"/Game/E2E/Input/IMC_OnFoot\", \"/Game/E2E/Input/IMC_Vehicle\"] | call enhancedInput.CreateContext($)"
+  },
+  "assert": {
+    "pattern": "IMC_Vehicle"
+  }
+}

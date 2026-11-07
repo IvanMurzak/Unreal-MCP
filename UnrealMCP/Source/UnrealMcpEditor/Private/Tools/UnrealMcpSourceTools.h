@@ -63,10 +63,27 @@ namespace UnrealMcpSourceTools
 
 	/**
 	 * The one-line source-compile (UBT path) summary the agent reads: counts, return code and, when UBT failed, the
-	 * line saying why and, for a compiler-clean build, that the running editor does not load the new code.
+	 * line saying why and, for a compiler-clean build, that the running editor does not load the new code. With
+	 * @p bReflectionChanged (FindReflectionChangesSince found headers) it does not suggest Live Coding for the change.
 	 */
 	UNREALMCPEDITOR_API FString DescribeUbtResult(const FString& Target, int32 ErrorCount, int32 WarningCount, int32 ReturnCode,
-		double Seconds, const FString& Output);
+		double Seconds, const FString& Output, bool bReflectionChanged = false);
+
+	/**
+	 * The source-compile sentence for @p Files (FindReflectionChangesSince): Live Coding was skipped because it cannot apply
+	 * them, then the rebuild + restart advice unless @p bAdviceGiven (the UBT summary already carries it).
+	 */
+	UNREALMCPEDITOR_API FString DescribeReflectionChanges(const FString& Target, const TArray<FString>& Files, bool bAdviceGiven);
+
+	/** When this editor process started (UTC). */
+	UNREALMCPEDITOR_API FDateTime EditorStartUtc();
+
+	/**
+	 * Reflected headers (they include their .generated.h: UCLASS, USTRUCT, UENUM, UPROPERTY, UFUNCTION ...) under
+	 * @p SourceRoot changed after @p SinceUtc, relative to the root and sorted: Live Coding cannot apply them, a full build
+	 * and an editor restart can.
+	 */
+	UNREALMCPEDITOR_API TArray<FString> FindReflectionChangesSince(const FString& SourceRoot, const FDateTime& SinceUtc);
 
 	/**
 	 * The compiler diagnostics as text lines for the summary (one "<file>(<line>): error: <message>" line each), errors first, at most

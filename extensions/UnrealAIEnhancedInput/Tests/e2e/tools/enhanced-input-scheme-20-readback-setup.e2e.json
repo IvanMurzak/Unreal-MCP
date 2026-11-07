@@ -1,0 +1,10 @@
+{
+  "description": "the hero's wiring reads back: context on possession, jump, sprint and the crouch toggle",
+  "tool": "rql-query",
+  "input": {
+    "query": "unreal.asset(\"/Game/E2E/BP_E2E_Hero\") | select InputSetup"
+  },
+  "assert": {
+    "pattern": "ControllerChanged.*IMC_OnFoot.*StopJumping.*StopSprint.*FlipFlop"
+  }
+}

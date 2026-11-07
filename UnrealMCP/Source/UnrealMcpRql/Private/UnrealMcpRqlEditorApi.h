@@ -5,6 +5,7 @@
 
 #include "CoreMinimal.h"
 #include "UObject/Object.h"
+#include "UnrealMcpRqlPlay.h"
 
 #include "UnrealMcpRqlEditorApi.generated.h"
 
@@ -21,7 +22,7 @@ class UWorld;
  * `editor | call SpawnActor("PointLight", "Lamp", "(0, 0, 300)")`. Every UFUNCTION here is callable from rql-mutate
  * (the comment above it is the description agents see). They are BlueprintCallable only because UHT records C++ default
  * arguments for BlueprintCallable functions alone; BlueprintInternalUseOnly keeps them out of Blueprint menus. The
- * members IsPlaying, IsPaused, Selection, World and
+ * members IsPlaying, IsPaused, PlayState, Selection, World and
  * CurrentLevel are added by the core RQL module. Failures go through UnrealMcpRql::Fail, so the call reports them.
  */
 UCLASS(Transient)
@@ -120,6 +121,18 @@ public:
 	/** create a DataTable at Path whose rows are RowStruct (a struct name such as "GameplayTagTableRow", or a user-defined struct asset path); returns it, unsaved */
 	UFUNCTION(BlueprintCallable, Category = "Unreal MCP|RQL", meta = (BlueprintInternalUseOnly = "true"))
 	UDataTable* CreateDataTable(const FString& Path, const FString& RowStruct);
+
+	/** play test: start Play In Editor NOW (inside this call) and return the play state (player pawn, location, movement); bPaused (default true) keeps the game still between calls, so it moves only inside AdvancePlay / InjectInput (deterministic); a running session is kept. Then: editor | call AdvancePlay(1.0, 0, "W") */
+	UFUNCTION(BlueprintCallable, Category = "Unreal MCP|RQL", meta = (BlueprintInternalUseOnly = "true"))
+	FUnrealMcpPlayState StartPlay(bool bPaused = true);
+
+	/** play test: end the Play In Editor session now */
+	UFUNCTION(BlueprintCallable, Category = "Unreal MCP|RQL", meta = (BlueprintInternalUseOnly = "true"))
+	void StopPlay();
+
+	/** play test: simulate the running Play In Editor session INSIDE this call for Seconds and / or Frames (fixed 1/60 s steps; at most 60 s per call) while holding Keys as the player would press them ("W, LeftShift", "SpaceBar", an axis with a value: "Gamepad_LeftY=1"; key names as FKey: W, SpaceBar, LeftMouseButton, Gamepad_FaceButton_Bottom), released on one extra frame at the end; then return the play state (pawn, Location, Velocity, MovementMode, Crouching, MappingContexts). Keys go through the mapping contexts like real input. A paused session stays paused. */
+	UFUNCTION(BlueprintCallable, Category = "Unreal MCP|RQL", meta = (BlueprintInternalUseOnly = "true"))
+	FUnrealMcpPlayState AdvancePlay(double Seconds = 0.0, int32 Frames = 0, const FString& Keys = TEXT(""));
 };
 
 /**

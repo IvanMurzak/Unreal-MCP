@@ -1,0 +1,10 @@
+{
+  "description": "crouch toggles on each press of C",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "enhancedInput | call BindActionToggle(\"/Game/E2E/BP_E2E_Hero\", \"/Game/E2E/Input/IA_Crouch\", \"Crouch\", \"UnCrouch\")"
+  },
+  "assert": {
+    "pattern": "K2Node_MacroInstance#"
+  }
+}

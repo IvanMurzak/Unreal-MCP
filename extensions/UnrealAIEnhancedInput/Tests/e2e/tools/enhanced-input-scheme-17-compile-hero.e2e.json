@@ -1,0 +1,10 @@
+{
+  "description": "the hero compiles",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "unreal.asset(\"/Game/E2E/BP_E2E_Hero\") | call Compile()"
+  },
+  "assert": {
+    "pattern": "Succeeded:true"
+  }
+}

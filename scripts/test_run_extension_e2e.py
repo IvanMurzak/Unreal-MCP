@@ -138,6 +138,86 @@ AUTHORING = {
 }
 
 
+def rows(count, method, results):
+    return text_result(f'{count} result{"" if count == 1 else "s"}\nmethod: {method}\nresult\n' + '\n'.join(results))
+
+
+def ei_receipt(method, result):
+    return text_result(f'1 result\n$ref|method|result\nEnhancedInputOperations#7|{method}|{result}')
+
+
+ADD_MAPPING = 'AddMapping(InputMappingContext Context, InputAction Action, string Key, string Modifiers, string Triggers)'
+BIND = 'BindAction(Object Blueprint, InputAction Action, string Event, string Function, string Value)'
+COMPILE = '1 result\n$ref|method|result\nBlueprint#{0}|Compile()|{{Succeeded:{1},Errors:{2},Warnings:0,Messages:[]}}'
+OPERATIONS = ('EnhancedInputOperations : Object {} +methods: ' + ' | '.join(
+    f'{name}(...) - x' for name in ('AddMapping', 'AddMappingContextOnPossess', 'BindAction', 'BindActionToggle', 'EnableUserSettings',
+                                    'RemoveMappingContextOnEvent', 'SetActionTriggers', 'SetMappingTriggers', 'SetPlayerMappable')))
+# The Enhanced Input control-scheme sequence (on foot + vehicle): per check, an answer of the live UE 5.7 editor's shape and
+# one that must not pass.
+SCHEME = {
+    'enhanced-input-operations-schema.e2e.json': (text_result(OPERATIONS), text_result(OPERATIONS.replace('BindActionToggle', 'Other'))),
+    'enhanced-input-scheme-01-actions.e2e.json': (
+        rows(9, 'CreateAction(string Path, EInputActionValueType ValueType, string Triggers, string Modifiers)',
+             [f'InputAction#{n}({a})' for n, a in enumerate(('IA_Move', 'IA_Look', 'IA_Jump', 'IA_Sprint', 'IA_Crouch', 'IA_Interact',
+                                                              'IA_Throttle', 'IA_Steer', 'IA_Handbrake'))]), NO_COUNT),
+    'enhanced-input-scheme-02-contexts.e2e.json': (
+        rows(2, 'CreateContext(string Path)', ['InputMappingContext#1(IMC_OnFoot)', 'InputMappingContext#2(IMC_Vehicle)']),
+        rows(1, 'CreateContext(string Path)', ['InputMappingContext#1(IMC_OnFoot)'])),
+    'enhanced-input-scheme-03-move.e2e.json': (rows(5, ADD_MAPPING, ['true'] * 5), rows(4, ADD_MAPPING, ['true'] * 4)),
+    'enhanced-input-scheme-04-on-foot.e2e.json': (rows(10, ADD_MAPPING, ['true'] * 10), rows(1, ADD_MAPPING, ['true'])),
+    'enhanced-input-scheme-05-vehicle.e2e.json': (rows(11, ADD_MAPPING, ['true'] * 11), rows(1, ADD_MAPPING, ['true'])),
+    'enhanced-input-scheme-06-hold.e2e.json': (
+        ei_receipt('SetMappingTriggers(InputMappingContext Context, InputAction Action, string Key, string Triggers)', '1'),
+        ei_receipt('SetMappingTriggers(InputMappingContext Context, InputAction Action, string Key, string Triggers)', '0')),
+    'enhanced-input-scheme-07-mappable.e2e.json': (
+        rows(7, 'SetPlayerMappable(InputAction Action, string DisplayName, string DisplayCategory, string Name)',
+             ['IA_Jump', 'IA_Sprint', 'IA_Crouch', 'IA_Interact', 'IA_Throttle', 'IA_Steer', 'IA_Handbrake']), NO_COUNT),
+    'enhanced-input-scheme-08-user-settings.e2e.json': (
+        ei_receipt('EnableUserSettings(bool Enable)', 'Enable User Settings: false -> true (Config/DefaultInput.ini). Each local player ...'),
+        ei_receipt('EnableUserSettings(bool Enable)', 'Enable User Settings: true -> false (Config/DefaultInput.ini). ')),
+    'enhanced-input-scheme-09-hero.e2e.json': (text_result('Created Blueprint /Game/E2E/BP_E2E_Hero (parent Character)'), NO_COUNT),
+    'enhanced-input-scheme-10-car.e2e.json': (text_result('Created Blueprint /Game/E2E/BP_E2E_Car (parent Pawn)'), NO_COUNT),
+    'enhanced-input-scheme-11-possess.e2e.json': (
+        rows(2, 'AddMappingContextOnPossess(Object Blueprint, InputMappingContext Context, int Priority)',
+             ['K2Node_CallFunction#41', 'K2Node_CallFunction#57']),
+        rows(1, 'AddMappingContextOnPossess(Object Blueprint, InputMappingContext Context, int Priority)', ['K2Node_CallFunction#41'])),
+    'enhanced-input-scheme-12-sprint-start.e2e.json': (
+        text_result('1 result\n$ref|method|result\nEdGraph#3(EventGraph)|AddCustomEvent(string Name, double X, double Y)|K2Node_CustomEvent#12'), NO_COUNT),
+    'enhanced-input-scheme-13-sprint-stop.e2e.json': (
+        text_result('1 result\n$ref|method|result\nEdGraph#3(EventGraph)|AddCustomEvent(string Name, double X, double Y)|K2Node_CustomEvent#13'), NO_COUNT),
+    'enhanced-input-scheme-14-bind.e2e.json': (
+        rows(4, BIND, [f'K2Node_CallFunction#{n}' for n in range(4)]), rows(3, BIND, [f'K2Node_CallFunction#{n}' for n in range(3)])),
+    'enhanced-input-scheme-15-toggle.e2e.json': (
+        ei_receipt('BindActionToggle(Object Blueprint, InputAction Action, string OnFunction, string OffFunction, string Event)', 'K2Node_MacroInstance#9'),
+        ei_receipt('BindActionToggle(Object Blueprint, InputAction Action, string OnFunction, string OffFunction, string Event)', 'null')),
+    'enhanced-input-scheme-16-car-bind.e2e.json': (ei_receipt(BIND, 'K2Node_CallFunction#77'), ei_receipt(BIND, 'null')),
+    'enhanced-input-scheme-17-compile-hero.e2e.json': (
+        text_result(COMPILE.format(1, 'true', 0)), text_result(COMPILE.format(1, 'false', 1))),
+    'enhanced-input-scheme-18-compile-car.e2e.json': (
+        text_result(COMPILE.format(2, 'true', 0)), text_result(COMPILE.format(2, 'false', 1))),
+    'enhanced-input-scheme-19-readback-mappings.e2e.json': (
+        text_result('1 result\nAction|Triggers|PlayerMappable|DisplayCategory\nIA_Interact|Hold(HoldTimeThreshold=0.3)|true|General'),
+        text_result('1 result\nAction|Triggers|PlayerMappable|DisplayCategory\nIA_Interact||true|General')),
+    'enhanced-input-scheme-20-readback-setup.e2e.json': (
+        text_result('1 result\nInputSetup\n{Contexts:[{Event:ControllerChanged,Op:Remove,Context:/Game/E2E/Input/IMC_OnFoot},'
+                    '{Event:ControllerChanged,Op:Add,Context:/Game/E2E/Input/IMC_OnFoot,Priority:0}],Actions:[{Action:IA_Jump,'
+                    'Started:[Jump],Completed:[StopJumping]},{Action:IA_Sprint,Started:[StartSprint],Completed:[StopSprint]},'
+                    '{Action:IA_Crouch,Started:[FlipFlop,Crouch,UnCrouch]}]}'),
+        text_result('1 result\nInputSetup\n{Contexts:[],Actions:[{Action:IA_Jump,Started:[Jump],Completed:[StopJumping]}]}')),
+    'enhanced-input-scheme-21-readback-mappable.e2e.json': (
+        text_result('7 results\nName|PlayerMappable\nIA_Handbrake|{Name:IA_Handbrake,DisplayName:Handbrake,DisplayCategory:Vehicle}'),
+        text_result('0 results')),
+    'enhanced-input-scheme-22-unknown-trigger.e2e.json': (
+        '{"error": "error call-threw: SetActionTriggers threw: \'DoubleTap\' is not an input trigger (input triggers: ChordAction, Combo, '
+        'Down, Hold, HoldAndRelease, Pressed, Pulse, Released, RepeatedTap, Tap, or a Blueprint class path)"}',
+        '{"error": "error call-threw: SetActionTriggers threw: no action"}'),
+    'enhanced-input-scheme-99-cleanup-settings.e2e.json': (
+        ei_receipt('EnableUserSettings(bool Enable)', 'Enable User Settings: true -> false (Config/DefaultInput.ini). '),
+        ei_receipt('EnableUserSettings(bool Enable)', 'Enable User Settings: false -> true (Config/DefaultInput.ini). ')),
+    'enhanced-input-scheme-99-cleanup-zassets.e2e.json': (
+        rows(13, 'DeleteAsset(string Path, bool bForce)', ['null'] * 13), rows(12, 'DeleteAsset(string Path, bool bForce)', ['null'] * 12)),
+}
+
 
 def gas_receipt(method, result):
     return text_result(f'1 result\n$ref|method|result\nGASOperations#4512|{method}|{result}')
@@ -232,7 +312,7 @@ class CheckFileTests(unittest.TestCase):
         for plugin, folder in release.components().items():
             self.assertTrue(e2e.checks_for(plugin), plugin)
             self.assertEqual(list((folder / 'Tests/e2e/tools').glob('*.ps1')), [], plugin)
-        self.assertEqual(len(all_checks()), 75)
+        self.assertEqual(len(all_checks()), 99)
 
     def test_every_assert_matches_its_intended_shape_and_rejects_others(self):
         for (plugin, name), check in all_checks().items():
@@ -244,8 +324,8 @@ class CheckFileTests(unittest.TestCase):
                         self.assertTrue(matches(check, good), good)
                     self.assertFalse(matches(check, NO_COUNT))
                     self.assertFalse(matches(check, text_result('value: none')))
-                elif name in AUTHORING:
-                    good, bad = AUTHORING[name]
+                elif name in AUTHORING or name in SCHEME:
+                    good, bad = AUTHORING[name] if name in AUTHORING else SCHEME[name]
                     code = 1 if check.get('expectError') else 0
                     self.assertTrue(evaluates(check, code, good), good)
                     self.assertFalse(evaluates(check, code, bad), bad)
