@@ -11,6 +11,7 @@
 #include "Engine/World.h"
 #include "EngineUtils.h"               // TActorIterator
 #include "Landscape.h"                 // ALandscape (the primary landscape actor)
+#include "LandscapeHeightfieldCollisionComponent.h" // the collision heightfields (Bounds)
 #include "LandscapeInfo.h"             // ULandscapeInfo + FLandscapeInfoLayerSettings (paint layers)
 #include "LandscapeProxy.h"            // ALandscapeProxy (+ streaming proxies)
 #include "Materials/MaterialInterface.h"
@@ -108,16 +109,14 @@ public:
 			TEXT("the whole landscape's world box (cm): Min [X, Y, Z], Max [X, Y, Z] (Z: the lowest and highest ground), SizeMeters [X, Y]"),
 			[](UObject* Object) -> TSharedPtr<FJsonValue>
 			{
-				// Every proxy's collision heightfield (on a World Partition map the primary actor has no components of its own).
+				// The loaded collision heightfields: their boxes span the ground exactly (ULandscapeInfo::GetCompleteBounds was
+				// empty for a landscape created in the session), and on a World Partition map the primary actor has none itself.
 				FBox Box(ForceInit);
 				const ALandscapeProxy* Proxy = Cast<ALandscapeProxy>(Object);
-				if (ULandscapeInfo* Info = Proxy ? Proxy->GetLandscapeInfo() : nullptr)
+				if (const ULandscapeInfo* Info = Proxy ? Proxy->GetLandscapeInfo() : nullptr)
 				{
 					for (const TPair<FIntPoint, ULandscapeHeightfieldCollisionComponent*>& Pair : Info->XYtoCollisionComponentMap)
-					{
-						if (Pair.Value)
-							Box += Pair.Value->Bounds.GetBox();
-					}
+						Box += Pair.Value ? Pair.Value->Bounds.GetBox() : FBox(ForceInit);
 				}
 				TSharedPtr<FJsonObject> Out = MakeShared<FJsonObject>();
 				if (!Box.IsValid)
@@ -217,13 +216,12 @@ landscape | call Surface(unreal.find("Terrain"), [2000, 1500, 0])               
 range(0, 100) | call landscape.Surface(unreal.find("Terrain"), [($ % 10) * 1000 - 4500, floor($ / 10) * 1000 - 4500, 0])   a 10 x 10 grid
 ```
 
-`Height` is the world Z (cm) traces and collision hit, `Slope` degrees (0 flat), `Location` a spawn point on the ground
-(spawned meshes have their pivot there: lift by half the mesh height when the pivot is centred). A point off the landscape
-gives `Inside: false`. A trace from above also hits your own actors (probes, roads, trees): `Surface` reads only the
-ground. From a distance the editor draws the landscape at a lower LOD, so a thin mesh laid exactly on the ground (a
-road ribbon) can look buried in far views while it sits right up close: sample `Surface` every metre or less along it
-and lift it 5 to 10 cm, or paint the road as a layer instead. `call Rebuild(unreal.find("Terrain"))` merges a landscape
-edited elsewhere (Landscape mode, Python) again and rebuilds its collision and Nanite mesh.)MD"));
+`Height` is the world Z (cm) that traces and collision hit, `Slope` degrees (0 flat), `Location` a spawn point on the
+ground; off the landscape `Inside` is false. Traces from above also hit your own actors (probes, roads, trees);
+`Surface` reads only the ground. Far views draw the landscape at a lower LOD, so a thin mesh laid on the ground (a road)
+can look buried from afar: sample `Surface` every metre along it and lift it 5-10 cm, or paint the road as a layer.
+`call Rebuild(unreal.find("Terrain"))` re-merges a landscape edited elsewhere (Landscape mode, Python) and rebuilds its
+collision and Nanite mesh.)MD"));
 	}
 };
 

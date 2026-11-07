@@ -22,8 +22,11 @@
 #include "Materials/Material.h"
 #include "Materials/MaterialExpressionLandscapeLayerBlend.h"
 #include "AssetCompilingManager.h"
+#include "Containers/Ticker.h"
 #include "Misc/App.h"
 #include "Misc/Paths.h"
+
+DEFINE_LOG_CATEGORY_STATIC(LogUnrealAILandscape, Log, All);
 
 namespace UnrealAILandscapeRqlApiLocal
 {
@@ -100,45 +103,69 @@ namespace UnrealAILandscapeRqlApiLocal
 		Accessor.SetData(R.Min.X, R.Min.Y, R.Max.X, R.Max.Y, Data, ELandscapeLayerPaintingRestriction::None);
 	}
 
-	/**
-	 * Whether a component still waits for its heights or weights to be merged. (ALandscape::IsUpToDate also counts the
-	 * navigation / foliage refresh the engine defers while a transaction, such as an rql-mutate call, is open.)
-	 */
+	/** Whether a component still waits for its requested in-stroke merge (heights or weights not yet in the final maps). */
 	bool MergePending(const ALandscape* Primary)
 	{
+		constexpr uint32 InStroke = ELandscapeLayerUpdateMode::Update_Heightmap_Editing | ELandscapeLayerUpdateMode::Update_Heightmap_Editing_NoCollision
+			| ELandscapeLayerUpdateMode::Update_Weightmap_Editing | ELandscapeLayerUpdateMode::Update_Weightmap_Editing_NoCollision;
 		bool bPending = false;
 		if (const ULandscapeInfo* Info = Primary->GetLandscapeInfo())
-		{
-			Info->ForAllLandscapeComponents([&bPending](ULandscapeComponent* Component)
-			{
-				bPending |= (Component->GetLayerUpdateFlagPerMode() & (ELandscapeLayerUpdateMode::Update_Heightmap_Types | ELandscapeLayerUpdateMode::Update_Weightmap_Types)) != 0;
-			});
-		}
+			Info->ForAllLandscapeComponents([&bPending](ULandscapeComponent* Component) { bPending |= (Component->GetLayerUpdateFlagPerMode() & InStroke) != 0; });
 		return bPending;
 	}
 
 	/**
-	 * Merge the landscape's edit layers now, as the next editor frames would: the final heightmap, the heightfield collision
-	 * (line traces, GetHeightAtLocation, actors placed on the ground) and the rendered surface then all match when the
-	 * operation returns. Without it they stay at the old heights for some frames (the merge runs on the GPU, then reads
-	 * back), so a caller that sculpts and then traces or places actors in the same step reads the surface before the edit.
-	 * Not possible without rendering (-nullrhi, commandlets): the edit stays in its edit layer until a rendering editor opens it.
+	 * Request @p Mode (a full pass: collision recreated, navigation and foliage refreshed) for @p Primary at the next tick.
+	 * Requested at once, it would make every further in-stroke merge of the same frame (a batch of calls) a full one.
 	 */
-	void MergeNow(ALandscapeProxy* Landscape)
+	void QueueFullUpdate(ALandscape* Primary, ELandscapeLayerUpdateMode Mode)
+	{
+		static TMap<TWeakObjectPtr<ALandscape>, uint32> Queued;
+		if (Mode == ELandscapeLayerUpdateMode::Update_None)
+			return;
+		if (Queued.IsEmpty())
+		{
+			FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda([](float)
+			{
+				for (const TPair<TWeakObjectPtr<ALandscape>, uint32>& Entry : Queued)
+				{
+					if (ALandscape* Landscape = Entry.Key.Get())
+						Landscape->RequestLayersContentUpdate(static_cast<ELandscapeLayerUpdateMode>(Entry.Value));
+				}
+				Queued.Reset();
+				return false; // once
+			}));
+		}
+		Queued.FindOrAdd(Primary) |= Mode;
+	}
+
+	/**
+	 * Merge the edits now instead of over the next editor frames (a GPU merge, then a readback): the final heightmap, the
+	 * collision heights (line traces, GetHeightAtLocation) and the rendered surface then match when the operation returns.
+	 * The in-stroke merge the accessors requested covers only the components they touched; @p FollowUp then queues the full
+	 * pass (collision recreated, navigation and foliage refreshed, as when a Landscape mode stroke ends) for the next tick,
+	 * once for a whole batch of calls (QueueFullUpdate). Without rendering (-nullrhi, commandlets) nothing merges: the edit stays in its layer.
+	 */
+	void MergeNow(ALandscapeProxy* Landscape, ELandscapeLayerUpdateMode FollowUp)
 	{
 		ALandscape* Primary = Landscape ? Landscape->GetLandscapeActor() : nullptr;
-		if (!Primary || !FApp::CanEverRender())
+		if (!Primary)
 			return;
-		// The accessors flag the components they touched for the full update but request only the in-stroke one; ask for the
-		// full one, as Landscape mode does when a stroke ends: collision recreated, navigation and foliage refreshed.
-		Primary->RequestLayersContentUpdate(ELandscapeLayerUpdateMode::Update_All);
+		if (!FApp::CanEverRender())
+		{
+			UE_LOG(LogUnrealAILandscape, Warning, TEXT("%s: this editor does not render (-nullrhi), so the landscape edit stays unmerged (no collision or visible change) until a rendering editor opens it"), *Primary->GetActorNameOrLabel());
+			return;
+		}
 		Primary->ForceUpdateLayersContent();
 		if (MergePending(Primary))
 		{
 			// Waiting on shaders or textures still compiling (the first edit of a session): finish them and merge again.
 			FAssetCompilingManager::Get().FinishAllCompilation();
 			Primary->ForceUpdateLayersContent();
+			if (MergePending(Primary))
+				UE_LOG(LogUnrealAILandscape, Warning, TEXT("%s: the landscape edit could not merge yet; it shows (and collides) after the next editor frames"), *Primary->GetActorNameOrLabel());
 		}
+		QueueFullUpdate(Primary, FollowUp);
 	}
 
 	/**
@@ -163,10 +190,12 @@ namespace UnrealAILandscapeRqlApiLocal
 			for (int32 X = R.Min.X; X <= R.Max.X; ++X)
 				Changed += Edit(Data[(Y - R.Min.Y) * Width + (X - R.Min.X)], Falloff(X, Y, Circle)) ? 1 : 0;
 		}
+		if (Changed == 0)
+			return 0;
 		Landscape->Modify();
-		WriteData(Accessor, R, Data.GetData()); // requests the merge of just the components it touched
+		WriteData(Accessor, R, Data.GetData()); // requests the in-stroke merge of the components it touched
 		Accessor.Flush();
-		MergeNow(Landscape);
+		MergeNow(Landscape, std::is_same_v<T, uint16> ? ELandscapeLayerUpdateMode::Update_Heightmap_All : ELandscapeLayerUpdateMode::Update_Weightmap_All);
 		return Changed;
 	}
 
@@ -288,7 +317,8 @@ ALandscape* UUnrealAILandscapeRqlApi::Create(const FString& Label, FVector Locat
 		if (Subsystem && Subsystem->IsGridBased())
 			Subsystem->ChangeGridSize(Info, 2);
 	}
-	MergeNow(Landscape);
+	Landscape->RequestLayersContentUpdateForceAll(); // a new landscape: merge everything at once
+	MergeNow(Landscape, ELandscapeLayerUpdateMode::Update_None);
 	return Landscape;
 }
 
@@ -370,9 +400,9 @@ UMaterial* UUnrealAILandscapeRqlApi::CreateLayerMaterial(const FString& Path, co
 
 FUnrealAILandscapeSurface UUnrealAILandscapeRqlApi::Surface(ALandscapeProxy* Landscape, FVector Point)
 {
-	FUnrealAILandscapeSurface Out;
 	if (!Landscape)
 		return UnrealMcpRql::Failed<FUnrealAILandscapeSurface>(TEXT("Landscape is null: pass unreal.find(\"<label>\")"));
+	FUnrealAILandscapeSurface Out;
 	// The heightfield collision: what line traces, physics and actors placed on the ground meet. The operations above leave
 	// it merged; at collision mip 0 (the default) it is the full-resolution surface the editor renders up close.
 	const auto HeightAt = [Landscape](double X, double Y) { return Landscape->GetHeightAtLocation(FVector(X, Y, 0.0), EHeightfieldSource::Complex); };
@@ -380,16 +410,16 @@ FUnrealAILandscapeSurface UUnrealAILandscapeRqlApi::Surface(ALandscapeProxy* Lan
 	if (!Height.IsSet())
 		return Out;
 	// Slope over one quad on each side (one side at the landscape's edge).
-	const double Step = FMath::Max(FMath::Abs(Landscape->LandscapeActorToWorld().GetScale3D().X), 1.0);
-	const auto Gradient = [&HeightAt, &Height, Step](double X, double Y, double DX, double DY)
+	const FVector Quad = Landscape->LandscapeActorToWorld().GetScale3D().GetAbs().ComponentMax(FVector::OneVector);
+	const auto Gradient = [&HeightAt, &Height, &Point](double DX, double DY)
 	{
-		const TOptional<float> Ahead = HeightAt(X + DX, Y + DY);
-		const TOptional<float> Behind = HeightAt(X - DX, Y - DY);
-		const double Span = (Ahead.IsSet() ? Step : 0.0) + (Behind.IsSet() ? Step : 0.0);
+		const TOptional<float> Ahead = HeightAt(Point.X + DX, Point.Y + DY);
+		const TOptional<float> Behind = HeightAt(Point.X - DX, Point.Y - DY);
+		const double Span = (DX + DY) * ((Ahead.IsSet() ? 1.0 : 0.0) + (Behind.IsSet() ? 1.0 : 0.0));
 		return Span > 0.0 ? (Ahead.Get(Height.GetValue()) - Behind.Get(Height.GetValue())) / Span : 0.0;
 	};
-	const double SlopeX = Gradient(Point.X, Point.Y, Step, 0.0);
-	const double SlopeY = Gradient(Point.X, Point.Y, 0.0, Step);
+	const double SlopeX = Gradient(Quad.X, 0.0);
+	const double SlopeY = Gradient(0.0, Quad.Y);
 	Out.Inside = true;
 	Out.Height = Height.GetValue();
 	Out.Location = FVector(Point.X, Point.Y, Out.Height);
