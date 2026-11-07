@@ -316,14 +316,17 @@ void FUnrealAILandscapeSpec::Define()
 			TSharedPtr<FJsonObject> Bounds;
 			Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["landscapes"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"@LABEL@"}]}},{"op":"select","fields":[{"name":"Bounds","expr":{"path":["Bounds"]}}]}]})RQL"), false, &Bounds);
 			const FString BoundsText = LandscapeSpecJson(Bounds);
-			TestTrue(*FString::Printf(TEXT("Bounds: 20 x 20 m around X 400000 (%s)"), *BoundsText.Left(300)),
-				BoundsText.Contains(TEXT("\"SizeMeters\":[20,20]")) && BoundsText.Contains(TEXT("\"Min\":[399000,-1000,")) && BoundsText.Contains(TEXT("\"Max\":[401000,1000,")));
+			TestTrue(*FString::Printf(TEXT("Bounds: 20 x 20 m around X 400000, flat at Z 0 (%s)"), *BoundsText.Left(300)),
+				BoundsText.Contains(TEXT("\"SizeMeters\":[20,20]")) && BoundsText.Contains(TEXT("\"Min\":[399000,-1000,0]")) && BoundsText.Contains(TEXT("\"Max\":[401000,1000,0]")));
 
 			const TSharedRef<FJsonObject> Flat = Surface(OriginX, 0.0);
 			TestTrue(*FString::Printf(TEXT("flat ground: inside, height 0, slope 0 (%s)"), *Text(Flat)), Flat->HasTypedField<EJson::Boolean>(TEXT("Inside")) && Flat->GetBoolField(TEXT("Inside"))
 				&& FMath::Abs(Number(Flat, TEXT("Height"))) < 1.0 && FMath::Abs(Number(Flat, TEXT("Slope"))) < 0.5);
 			const TSharedRef<FJsonObject> Outside = Surface(OriginX + 5000.0, 0.0);
 			TestTrue(*FString::Printf(TEXT("off the landscape: Inside false (%s)"), *Text(Outside)), Outside->HasTypedField<EJson::Boolean>(TEXT("Inside")) && !Outside->GetBoolField(TEXT("Inside")));
+			const TSharedRef<FJsonObject> Corner = Surface(OriginX + 1000.0, 1000.0);
+			TestTrue(*FString::Printf(TEXT("the far corner is on the landscape (%s)"), *Text(Corner)), Corner->HasTypedField<EJson::Boolean>(TEXT("Inside")) && Corner->GetBoolField(TEXT("Inside"))
+				&& FMath::Abs(Number(Corner, TEXT("Height"))) < 1.0);
 
 			if (!FApp::CanEverRender())
 			{

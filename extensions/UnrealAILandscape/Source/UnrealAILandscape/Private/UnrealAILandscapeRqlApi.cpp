@@ -171,7 +171,10 @@ namespace UnrealAILandscapeRqlApiLocal
 	{
 		ALandscape* Primary = Landscape ? Landscape->GetLandscapeActor() : nullptr;
 		if (!Primary)
+		{
+			UE_LOG(LogUnrealAILandscape, Warning, TEXT("%s: its landscape actor is not loaded, so the edit merges when it is"), Landscape ? *Landscape->GetActorNameOrLabel() : TEXT("null"));
 			return;
+		}
 		if (!FApp::CanEverRender())
 		{
 			UE_LOG(LogUnrealAILandscape, Warning, TEXT("%s: this editor does not render (-nullrhi), so the landscape edit stays unmerged (no collision or visible change) until a rendering editor opens it"), *Primary->GetActorNameOrLabel());
@@ -424,9 +427,26 @@ FUnrealAILandscapeSurface UUnrealAILandscapeRqlApi::Surface(ALandscapeProxy* Lan
 	if (!Landscape)
 		return UnrealMcpRql::Failed<FUnrealAILandscapeSurface>(TEXT("Landscape is null: pass unreal.find(\"<label>\")"));
 	FUnrealAILandscapeSurface Out;
-	// The heightfield collision: what line traces, physics and actors placed on the ground meet. The operations above leave
-	// it merged; at collision mip 0 (the default) it is the full-resolution surface the editor renders up close.
-	const auto HeightAt = [Landscape](double X, double Y) { return Landscape->GetHeightAtLocation(FVector(X, Y, 0.0), EHeightfieldSource::Complex); };
+	ULandscapeInfo* Info = Landscape->GetLandscapeInfo();
+	FIntRect Whole;
+	if (!Info || !Info->GetLandscapeExtent(Whole))
+		return Out;
+	// The full-resolution collision heightfield (the editor's copy; the physics one when it has none): what line traces and
+	// actors placed on the ground meet at the default collision mip 0, and what the editor renders up close. A point on the
+	// far edge is nudged inside: the engine looks it up in a component past the last one.
+	const FTransform ToWorld = Landscape->LandscapeActorToWorld();
+	const auto HeightAt = [Landscape, &ToWorld, &Whole](double X, double Y) -> TOptional<float>
+	{
+		FVector Local = ToWorld.InverseTransformPosition(FVector(X, Y, ToWorld.GetLocation().Z));
+		constexpr double Edge = 1e-3; // quads
+		if (Local.X < Whole.Min.X - Edge || Local.Y < Whole.Min.Y - Edge || Local.X > Whole.Max.X + Edge || Local.Y > Whole.Max.Y + Edge)
+			return TOptional<float>();
+		Local.X = FMath::Clamp(Local.X, static_cast<double>(Whole.Min.X), Whole.Max.X - Edge);
+		Local.Y = FMath::Clamp(Local.Y, static_cast<double>(Whole.Min.Y), Whole.Max.Y - Edge);
+		const FVector Inside = ToWorld.TransformPosition(Local);
+		const TOptional<float> Editor = Landscape->GetHeightAtLocation(Inside, EHeightfieldSource::Editor);
+		return Editor.IsSet() ? Editor : Landscape->GetHeightAtLocation(Inside, EHeightfieldSource::Complex);
+	};
 	const TOptional<float> Height = HeightAt(Point.X, Point.Y);
 	if (!Height.IsSet())
 		return Out;
@@ -463,7 +483,7 @@ int32 UUnrealAILandscapeRqlApi::Rebuild(ALandscapeProxy* Landscape)
 		if (ULandscapeSubsystem* Subsystem = Primary->GetWorld() ? Primary->GetWorld()->GetSubsystem<ULandscapeSubsystem>() : nullptr)
 		{
 			ALandscapeProxy* Proxies[] = { Primary };
-			Subsystem->BuildNanite(UE::Landscape::EBuildFlags::None, Proxies);
+			Subsystem->BuildNanite(UE::Landscape::EBuildFlags::ForceRebuild, Proxies);
 		}
 	}
 	int32 Components = 0;

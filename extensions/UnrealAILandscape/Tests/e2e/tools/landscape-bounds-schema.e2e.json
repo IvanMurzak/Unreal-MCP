@@ -5,6 +5,6 @@
     "type": "LandscapeProxy"
   },
   "assert": {
-    "pattern": "Bounds"
+    "pattern": "name\\\\?\"\\s*:\\s*\\\\?\"Bounds\\\\?\""
   }
 }

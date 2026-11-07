@@ -109,14 +109,22 @@ public:
 			TEXT("the whole landscape's world box (cm): Min [X, Y, Z], Max [X, Y, Z] (Z: the lowest and highest ground), SizeMeters [X, Y]"),
 			[](UObject* Object) -> TSharedPtr<FJsonValue>
 			{
-				// The loaded collision heightfields: their boxes span the ground exactly (ULandscapeInfo::GetCompleteBounds was
-				// empty for a landscape created in the session), and on a World Partition map the primary actor has none itself.
+				// The loaded collision heightfields' local boxes span the ground (ULandscapeInfo::GetCompleteBounds was empty for a
+				// landscape created in the session; on a World Partition map the primary actor has no components of its own). The
+				// engine pads a flat component's box by one unit up and down: undo it, so Z is the real lowest and highest ground.
 				FBox Box(ForceInit);
 				const ALandscapeProxy* Proxy = Cast<ALandscapeProxy>(Object);
 				if (const ULandscapeInfo* Info = Proxy ? Proxy->GetLandscapeInfo() : nullptr)
 				{
 					for (const TPair<FIntPoint, ULandscapeHeightfieldCollisionComponent*>& Pair : Info->XYtoCollisionComponentMap)
-						Box += Pair.Value ? Pair.Value->Bounds.GetBox() : FBox(ForceInit);
+					{
+						if (!Pair.Value)
+							continue;
+						FBox Local = Pair.Value->CachedLocalBox;
+						if (FMath::IsNearlyEqual(Local.GetExtent().Z, 1.0))
+							Local.Min.Z = Local.Max.Z = Local.GetCenter().Z;
+						Box += Local.TransformBy(Pair.Value->GetComponentTransform());
+					}
 				}
 				TSharedPtr<FJsonObject> Out = MakeShared<FJsonObject>();
 				if (!Box.IsValid)
