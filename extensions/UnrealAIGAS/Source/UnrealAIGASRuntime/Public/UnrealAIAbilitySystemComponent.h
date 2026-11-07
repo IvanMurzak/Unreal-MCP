@@ -118,5 +118,7 @@ private:
 	TObjectPtr<UEnhancedInputComponent> AbilityInputComponent;
 
 	TWeakObjectPtr<APlayerController> InputController;
-	bool bAttributeEventsBound = false;
+	TSet<const UClass*> BoundAttributeSets;
+	int32 AttributeBindRetries = 0;
+	bool bAddedMappingContext = false;
 };

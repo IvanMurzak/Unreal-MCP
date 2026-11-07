@@ -62,13 +62,13 @@ void AUnrealAIGASProjectile::HandleStop(const FHitResult& Hit)
 		return;
 	AActor* Other = Hit.GetActor();
 	if (Other && Other != GetInstigator() && Other != GetOwner())
-		ApplyHitEffect(Other);
+		ApplyHitEffect(Other, Hit);
 	OnProjectileHit(Other, Hit);
 	if (bDestroyOnHit)
 		Destroy();
 }
 
-bool AUnrealAIGASProjectile::ApplyHitEffect(AActor* Target)
+bool AUnrealAIGASProjectile::ApplyHitEffect(AActor* Target, const FHitResult& Hit)
 {
 	UAbilitySystemComponent* TargetAsc = UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(Target);
 	if (!TargetAsc)
@@ -76,7 +76,8 @@ bool AUnrealAIGASProjectile::ApplyHitEffect(AActor* Target)
 	AActor* Shooter = GetInstigator() ? static_cast<AActor*>(GetInstigator()) : GetOwner();
 	UAbilitySystemComponent* SourceAsc = UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(Shooter);
 
-	FGameplayEffectSpecHandle Spec = HitEffectSpec;
+	// A copy per hit, so each application has its own context (hit result, causer).
+	FGameplayEffectSpecHandle Spec = HitEffectSpec.IsValid() ? FGameplayEffectSpecHandle(new FGameplayEffectSpec(*HitEffectSpec.Data)) : FGameplayEffectSpecHandle();
 	if (!Spec.IsValid() && HitEffect)
 	{
 		UAbilitySystemComponent* Maker = SourceAsc ? SourceAsc : TargetAsc;
@@ -89,6 +90,10 @@ bool AUnrealAIGASProjectile::ApplyHitEffect(AActor* Target)
 	}
 	if (!Spec.IsValid())
 		return false;
+	FGameplayEffectContextHandle Context = Spec.Data->GetContext().Duplicate();
+	Context.AddHitResult(Hit, true);
+	Context.AddSourceObject(this);
+	Spec.Data->SetContext(Context);
 	if (SourceAsc)
 		SourceAsc->ApplyGameplayEffectSpecToTarget(*Spec.Data.Get(), TargetAsc);
 	else

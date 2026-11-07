@@ -57,9 +57,9 @@ public:
 	UFUNCTION(BlueprintImplementableEvent, Category = "Projectile")
 	void OnProjectileHit(AActor* HitActor, const FHitResult& Hit);
 
-	/** Apply the hit effect to Target's Ability System Component; false when it has none */
+	/** Apply the hit effect to Target's Ability System Component (the effect context carries Hit and this projectile); false when it has none */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Projectile")
-	bool ApplyHitEffect(AActor* Target);
+	bool ApplyHitEffect(AActor* Target, const FHitResult& Hit);
 
 protected:
 	virtual void BeginPlay() override;

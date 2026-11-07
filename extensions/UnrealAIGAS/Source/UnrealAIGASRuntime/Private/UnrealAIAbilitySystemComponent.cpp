@@ -7,6 +7,8 @@
 #include "UnrealAIGASAttributes.h"
 
 #include "Abilities/GameplayAbility.h"
+#include "Engine/World.h"
+#include "TimerManager.h"
 #include "Components/InputComponent.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
@@ -78,6 +80,8 @@ void UUnrealAIAbilitySystemComponent::BeginPlay()
 	if (APawn* Pawn = Cast<APawn>(GetOwner()))
 	{
 		Pawn->ReceiveControllerChangedDelegate.AddUniqueDynamic(this, &UUnrealAIAbilitySystemComponent::HandleControllerChanged);
+		// The actor info was made at InitializeComponent, usually before possession: pick up the controller now and on changes.
+		RefreshAbilityActorInfo();
 		BindInput();
 	}
 }
@@ -115,15 +119,21 @@ void UUnrealAIAbilitySystemComponent::GrantStartingData()
 
 void UUnrealAIAbilitySystemComponent::BindAttributeEvents()
 {
-	if (bAttributeEventsBound)
-		return;
-	bAttributeEventsBound = true;
+	// Clients receive their sets by replication, possibly after BeginPlay: bind each set once, whenever it is there.
 	for (const UAttributeSet* Set : GetSpawnedAttributes())
 	{
-		if (!Set)
+		if (!Set || BoundAttributeSets.Contains(Set->GetClass()))
 			continue;
+		BoundAttributeSets.Add(Set->GetClass());
 		for (const FGameplayAttribute& Attribute : UnrealAIGAS::AttributesOf(Set->GetClass()))
 			GetGameplayAttributeValueChangeDelegate(Attribute).AddUObject(this, &UUnrealAIAbilitySystemComponent::HandleAttributeChanged);
+	}
+	// Not replicated yet (a client): look again shortly, for a few seconds.
+	UWorld* World = GetWorld();
+	if (BoundAttributeSets.IsEmpty() && !AttributeSets.IsEmpty() && World && AttributeBindRetries++ < 20)
+	{
+		FTimerHandle Retry;
+		World->GetTimerManager().SetTimer(Retry, FTimerDelegate::CreateUObject(this, &UUnrealAIAbilitySystemComponent::BindAttributeEvents), 0.25f, false);
 	}
 }
 
@@ -153,6 +163,8 @@ bool UUnrealAIAbilitySystemComponent::SetAttributeBaseValue(FName Name, float Va
 
 void UUnrealAIAbilitySystemComponent::HandleControllerChanged(APawn* Pawn, AController* OldController, AController* NewController)
 {
+	RefreshAbilityActorInfo();
+	BindAttributeEvents();
 	BindInput();
 }
 
@@ -161,7 +173,7 @@ void UUnrealAIAbilitySystemComponent::UnbindInput()
 	APlayerController* Controller = InputController.Get();
 	if (Controller && AbilityInputComponent)
 		Controller->PopInputComponent(AbilityInputComponent);
-	if (Controller && InputMappingContext)
+	if (Controller && InputMappingContext && bAddedMappingContext)
 	{
 		if (const ULocalPlayer* Player = Controller->GetLocalPlayer())
 		{
@@ -176,6 +188,7 @@ void UUnrealAIAbilitySystemComponent::UnbindInput()
 		AbilityInputComponent = nullptr;
 	}
 	InputController.Reset();
+	bAddedMappingContext = false;
 }
 
 void UUnrealAIAbilitySystemComponent::BindInput()
@@ -183,7 +196,7 @@ void UUnrealAIAbilitySystemComponent::BindInput()
 	UnbindInput();
 	const APawn* Pawn = Cast<APawn>(GetOwner());
 	APlayerController* Controller = Pawn ? Cast<APlayerController>(Pawn->GetController()) : nullptr;
-	if (AbilityInputs.IsEmpty() || !Controller || !Controller->IsLocalController())
+	if ((AbilityInputs.IsEmpty() && !InputMappingContext) || !Controller || !Controller->IsLocalController())
 		return;
 
 	// The pawn's own input component exists only while possessed; a separate pushed component works for any pawn.
@@ -199,8 +212,13 @@ void UUnrealAIAbilitySystemComponent::BindInput()
 	{
 		if (const ULocalPlayer* Player = Controller->GetLocalPlayer())
 		{
-			if (UEnhancedInputLocalPlayerSubsystem* Input = Player->GetSubsystem<UEnhancedInputLocalPlayerSubsystem>())
+			UEnhancedInputLocalPlayerSubsystem* Input = Player->GetSubsystem<UEnhancedInputLocalPlayerSubsystem>();
+			// A context the pawn (or anything else) already added stays theirs: only what this component added is removed.
+			if (Input && !Input->HasMappingContext(InputMappingContext))
+			{
 				Input->AddMappingContext(InputMappingContext, InputMappingPriority);
+				bAddedMappingContext = true;
+			}
 		}
 	}
 	InputController = Controller;

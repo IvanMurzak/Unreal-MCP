@@ -1,0 +1,11 @@
+{
+  "description": "assets an aborted earlier run left in /Game/E2EGAS deleted (none: no change)",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "unreal.assets(\"Object\", \"/Game/E2EGAS\") | call editor.DeleteAsset(Path, true)",
+    "max_targets": 50
+  },
+  "assert": {
+    "pattern": "results?\\b|no-match"
+  }
+}

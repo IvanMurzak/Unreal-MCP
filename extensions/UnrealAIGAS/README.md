@@ -36,6 +36,8 @@ The extension adds its feature to the editor's RQL data layer (`rql-query` / `rq
 | Members | `AbilitySystemComponent.GrantedAbilities`, `.Attributes`, `.OwnedTags`, `.ActiveEffects`; `GameplayEffect.Summary`; `GameplayAbility.Summary` |
 
 ```
+gas | call CreateEffect("/Game/GAS/GE_Damage")
+gas | call AddModifier("/Game/GAS/GE_Damage", "Damage", "Add", "SetByCaller")
 gas | call CreateEffect("/Game/GAS/GE_ManaRegen", "Infinite", 1)
 gas | call AddModifier("/Game/GAS/GE_ManaRegen", "Mana", "Add", "5")
 gas | call CreateAbility("/Game/GAS/GA_Fireball")
@@ -43,6 +45,7 @@ gas | call SetCost("/Game/GAS/GA_Fireball", "Mana", 20)
 gas | call SetCooldown("/Game/GAS/GA_Fireball", 3)
 gas | call SetAbilityProjectile("/Game/GAS/GA_Fireball", "/Game/GAS/GE_Damage", 25)
 gas | call AddAbilitySystem("/Game/ThirdPerson/Blueprints/BP_ThirdPersonCharacter", "Health=100, MaxHealth=100, Mana=100, MaxMana=100")
+gas | call AddStartingEffect("/Game/ThirdPerson/Blueprints/BP_ThirdPersonCharacter", "/Game/GAS/GE_ManaRegen")
 gas | call BindAbilityInput("/Game/ThirdPerson/Blueprints/BP_ThirdPersonCharacter", "/Game/GAS/GA_Fireball", "/Game/GAS/IA_Fireball", "One")
 editor | set IsPlaying = true
 gas | call ActivateAbility("/Game/GAS/GA_Fireball")

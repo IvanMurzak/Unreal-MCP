@@ -7,6 +7,8 @@
 #include "Misc/AutomationTest.h"
 #include "Dom/JsonObject.h"
 #include "Misc/Guid.h"
+#include "Misc/PackageName.h"
+#include "Misc/ScopeExit.h"
 #include "Policies/CondensedJsonPrintPolicy.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
@@ -76,11 +78,14 @@ namespace UnrealAIGASSpecLocal
 		return Blueprint ? Blueprint->GeneratedClass.Get() : nullptr;
 	}
 
-	/** editor | call DeleteAsset(path, true) for every path. */
-	void DeleteAssets(const FString& Folder, std::initializer_list<const TCHAR*> Names)
+	/** editor | call DeleteAsset(path, true) for every asset a test may have made (also after a failed or early-returning test). */
+	void DeleteFolderAssets(const FString& Folder)
 	{
-		for (const TCHAR* Name : Names)
+		for (const TCHAR* Name : { TEXT("BP_Hero"), TEXT("IMC_Abilities"), TEXT("IA_Fireball"), TEXT("GA_Fireball"), TEXT("GA_Fireball_Cost"),
+			TEXT("GA_Fireball_Cooldown"), TEXT("GE_Damage"), TEXT("GE_ManaRegen"), TEXT("GE_Ok"), TEXT("GE_Bad") })
 		{
+			if (!FindPackage(nullptr, *(Folder / Name)) && !FPackageName::DoesPackageExist(Folder / Name))
+				continue;
 			const FString Plan = FString::Printf(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"DeleteAsset","args":[{"lit":"%s/%s"},{"lit":true}]}]})RQL"), *Folder, Name);
 			UnrealMcpRqlTools::RunPlan(Plan, true, nullptr);
 		}
@@ -269,6 +274,7 @@ void FUnrealAIGASSpec::Define()
 		It("creates effects with durations, periods, modifiers, tags and stacking", [this]()
 		{
 			const FString Path = Folder();
+			ON_SCOPE_EXIT { DeleteFolderAssets(Path); };
 			if (!AuthorFireball(*this, Path))
 				return;
 			const UGameplayEffect* Damage = GetDefault<UGameplayEffect>(GeneratedClass(Path + TEXT("/GE_Damage")));
@@ -306,12 +312,12 @@ void FUnrealAIGASSpec::Define()
 			TSharedPtr<FJsonObject> Result;
 			TestTrue(TEXT("summary read"), Run(Path, TEXT(R"RQL({"rql":"0.1","source":{"path":["gasEffects"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":[{"meta":"type"}]},{"lit":"GE_Damage_C"}]}},{"op":"select","fields":[{"name":"Summary","expr":{"path":["Summary"]}}]}]})RQL"), false, &Result));
 			TestTrue(TEXT("the summary names the modifier"), Json(Result).Contains(TEXT("UnrealAIAttributeSet.Damage Add SetByCaller(SetByCaller.Damage)")));
-			DeleteAssets(Path, { TEXT("GA_Fireball"), TEXT("GA_Fireball_Cost"), TEXT("GA_Fireball_Cooldown"), TEXT("GE_Damage"), TEXT("GE_ManaRegen") });
 		});
 
 		It("gives an ability a cost, a cooldown, tags and a projectile", [this]()
 		{
 			const FString Path = Folder();
+			ON_SCOPE_EXIT { DeleteFolderAssets(Path); };
 			if (!AuthorFireball(*this, Path))
 				return;
 			// gas | call SetAbilityTags("@@/GA_Fireball", "Ability", "RqlSpec.GAS.Fireball")
@@ -343,12 +349,19 @@ void FUnrealAIGASSpec::Define()
 			TestTrue(TEXT("hit effect"), Data->HitEffect.Get() == GeneratedClass(Path + TEXT("/GE_Damage")));
 			TestEqual(TEXT("25 damage"), Data->HitMagnitude, 25.f);
 			TestEqual(TEXT("offset"), Data->ProjectileOffset, FVector(50.f, 0.f, 20.f));
-			DeleteAssets(Path, { TEXT("GA_Fireball"), TEXT("GA_Fireball_Cost"), TEXT("GA_Fireball_Cooldown"), TEXT("GE_Damage"), TEXT("GE_ManaRegen") });
+
+			// gas | call SetDefault("@@/GA_Fireball", "EffectsOnSelf", "@@/GE_ManaRegen, @@/GE_Damage")      a list of classes
+			TestTrue(TEXT("a list of effects"), Run(Path, TEXT(R"RQL({"rql":"0.1","source":{"path":["gas"]},"stages":[{"op":"call","method":"SetDefault","args":[{"lit":"@@/GA_Fireball"},{"lit":"EffectsOnSelf"},{"lit":"@@/GE_ManaRegen, @@/GE_Damage"}]}]})RQL")));
+			TestTrue(TEXT("two effects on self"), Data->EffectsOnSelf.Num() == 2 && Data->EffectsOnSelf[0].Get() == GeneratedClass(Path + TEXT("/GE_ManaRegen")));
+			// gas | call SetDefault("@@/GA_Fireball", "EffectsOnSelf", "@@/GE_Damage, /Game/RqlSpecNoSuchEffect")
+			TestFalse(TEXT("an unknown item fails"), Run(Path, TEXT(R"RQL({"rql":"0.1","source":{"path":["gas"]},"stages":[{"op":"call","method":"SetDefault","args":[{"lit":"@@/GA_Fireball"},{"lit":"EffectsOnSelf"},{"lit":"@@/GE_Damage, /Game/RqlSpecNoSuchEffect"}]}]})RQL")));
+			TestEqual(TEXT("and changes nothing"), Data->EffectsOnSelf.Num(), 2);
 		});
 
 		It("gives an actor Blueprint an ability system, starting effects, an input binding and an attribute display", [this]()
 		{
 			const FString Path = Folder();
+			ON_SCOPE_EXIT { DeleteFolderAssets(Path); };
 			if (!AuthorFireball(*this, Path))
 				return;
 			UPackage* Package = CreatePackage(*(Path + TEXT("/BP_Hero")));
@@ -396,13 +409,12 @@ void FUnrealAIGASSpec::Define()
 			}
 			if (TestNotNull(TEXT("attribute display template"), Text))
 				TestEqual(TEXT("format"), Text->Format, FString(TEXT("HP {Health} MP {Mana}")));
-			DeleteAssets(Path, { TEXT("BP_Hero"), TEXT("IMC_Abilities"), TEXT("IA_Fireball"), TEXT("GA_Fireball"), TEXT("GA_Fireball_Cost"), TEXT("GA_Fireball_Cooldown"),
-				TEXT("GE_Damage"), TEXT("GE_ManaRegen") });
 		});
 
 		It("fails with actionable errors and changes nothing", [this]()
 		{
 			const FString Path = Folder();
+			ON_SCOPE_EXIT { DeleteFolderAssets(Path); };
 			TSharedPtr<FJsonObject> Result;
 			// gas | call CreateEffect("@@/GE_Bad", "Sometimes")
 			TestFalse(TEXT("an unknown duration fails"), Run(Path, TEXT(R"RQL({"rql":"0.1","source":{"path":["gas"]},"stages":[{"op":"call","method":"CreateEffect","args":[{"lit":"@@/GE_Bad"},{"lit":"Sometimes"}]}]})RQL"), true, &Result));
@@ -431,7 +443,6 @@ void FUnrealAIGASSpec::Define()
 			// gas | call CreateEffect("@@/GE_Ok")
 			TestFalse(TEXT("a taken path fails"), Run(Path, TEXT(R"RQL({"rql":"0.1","source":{"path":["gas"]},"stages":[{"op":"call","method":"CreateEffect","args":[{"lit":"@@/GE_Ok"}]}]})RQL"), true, &Result));
 			TestTrue(TEXT("says it exists"), Json(Result).Contains(TEXT("already exists")));
-			DeleteAssets(Path, { TEXT("GE_Ok") });
 		});
 
 		It("needs the running game for the runtime operations", [this]()
@@ -483,6 +494,7 @@ void FUnrealAIGASSpec::Define()
 		It("runs the authored fireball: cost, cooldown, projectile damage and regeneration", [this]()
 		{
 			const FString Path = Folder();
+			ON_SCOPE_EXIT { DeleteFolderAssets(Path); };
 			if (!AuthorFireball(*this, Path))
 				return;
 			UClass* Fireball = GeneratedClass(Path + TEXT("/GA_Fireball"));
@@ -513,7 +525,7 @@ void FUnrealAIGASSpec::Define()
 				if (TestNotNull(TEXT("a projectile was fired"), Projectile))
 				{
 					TestTrue(TEXT("it carries the damage spec"), Projectile->HitEffectSpec.IsValid());
-					TestTrue(TEXT("it hits the dummy"), Projectile->ApplyHitEffect(Dummy->GetOwner()));
+					TestTrue(TEXT("it hits the dummy"), Projectile->ApplyHitEffect(Dummy->GetOwner(), FHitResult()));
 					TestEqual(TEXT("25 damage"), Value(*Dummy, TEXT("Health")), 175.f);
 				}
 
@@ -524,7 +536,6 @@ void FUnrealAIGASSpec::Define()
 					Game.World->Tick(LEVELTICK_All, 0.1f);
 				TestTrue(TEXT("mana regenerates"), Value(*Hero, TEXT("Mana")) > Before);
 			}
-			DeleteAssets(Path, { TEXT("GA_Fireball"), TEXT("GA_Fireball_Cost"), TEXT("GA_Fireball_Cooldown"), TEXT("GE_Damage"), TEXT("GE_ManaRegen") });
 		});
 	});
 }

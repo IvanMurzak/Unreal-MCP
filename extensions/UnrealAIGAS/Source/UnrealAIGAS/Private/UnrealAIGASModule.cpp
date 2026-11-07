@@ -306,8 +306,8 @@ editor | set IsPlaying = false
 - **Your own attribute set** works too: `AddAbilitySystem(blueprint, "Armor=5", "MyAttributeSet")`; attribute names
   are `"Mana"` or `"MyAttributeSet.Mana"`.
 - Component changes recompile the Blueprint; effects, abilities and input assets stay unsaved until `editor | call SaveAll()`.
-- `GrantAbility(actor, ability, level)` grants to a placed actor in the editor world; `BindAbilityInput` / `AddStartingAbility`
-  grant at BeginPlay instead.)MD"));
+- Abilities a character should have in the game: `AddStartingAbility` / `BindAbilityInput` (granted at BeginPlay).
+  `GrantAbility(actor, ability, level)` only grants to a placed actor of the editor world (not saved, not in Play In Editor).)MD"));
 	}
 };
 

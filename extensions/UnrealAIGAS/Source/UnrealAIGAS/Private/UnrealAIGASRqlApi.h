@@ -84,18 +84,18 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|GAS", meta = (BlueprintInternalUseOnly = "true"))
 	FString SetAbilityTags(TSubclassOf<UGameplayAbility> Ability, const FString& Kind, const FString& Tags);
 
-	/** make an UnrealAIGameplayAbility fire a projectile that applies HitEffect with Magnitude as its SetByCaller.Damage: Projectile (default UnrealAIGASProjectile, a sphere; any actor class or Blueprint), Speed (cm/s, 0 = the projectile's own); returns the settings */
+	/** make an UnrealAIGameplayAbility fire a projectile that applies HitEffect with Magnitude as its SetByCaller.Damage: Projectile (default UnrealAIGASProjectile, a sphere; or a Blueprint child of it), Speed (cm/s, 0 = the projectile's own); returns the settings */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|GAS", meta = (BlueprintInternalUseOnly = "true"))
 	FString SetAbilityProjectile(TSubclassOf<UGameplayAbility> Ability, TSubclassOf<UGameplayEffect> HitEffect, float Magnitude = 0.f,
 		TSubclassOf<AActor> Projectile = nullptr, float Speed = 0.f);
 
-	/** set a class default (a property of an ability, effect, projectile or other Blueprint class of the project) from text: numbers, enum entries, true / false, asset or class paths, tag lists "A.B, C.D", UE struct text "(X=1,Y=2,Z=3)"; returns the new value */
+	/** set a class default (a property of an ability, effect, projectile or other Blueprint class of the project) from text: numbers, enum entries, true / false, asset or class paths, tag lists "A.B, C.D", lists of assets or classes "/Game/GAS/GE_Heal, /Game/GAS/GE_Haste", UE struct text "(X=1,Y=2,Z=3)"; a failed conversion changes nothing; returns the new value */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|GAS", meta = (BlueprintInternalUseOnly = "true"))
 	FString SetDefault(UClass* Class, const FString& Property, const FString& Value);
 
 	// ---------------------------------------------------------------- actors
 
-	/** give a Blueprint actor or character an UnrealAIAbilitySystemComponent ("AbilitySystem"; kept when it has one) with AttributeSet (default UnrealAIAttributeSet: Health, MaxHealth, Mana, MaxMana, Stamina, MaxStamina, Damage, Healing) and initial values Attributes ("Health=100, MaxHealth=100, Mana=50"; merged); compiles it; returns the component template (its members are writable) */
+	/** give a Blueprint actor or character an UnrealAIAbilitySystemComponent ("AbilitySystem"; kept when it has one) with AttributeSet (default UnrealAIAttributeSet: Health, MaxHealth, Mana, MaxMana, Stamina, MaxStamina, Damage, Healing; another set replaces it on a new component and is added to an existing one) and initial values Attributes ("Health=100, MaxHealth=100, Mana=50"; merged); compiles it; returns the component template (its members are writable) */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|GAS", meta = (BlueprintInternalUseOnly = "true"))
 	UActorComponent* AddAbilitySystem(UBlueprint* Blueprint, const FString& Attributes = TEXT(""), TSubclassOf<UAttributeSet> AttributeSet = nullptr);
 
@@ -116,7 +116,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|GAS", meta = (BlueprintInternalUseOnly = "true"))
 	UActorComponent* AddAttributeDisplay(UBlueprint* Blueprint, const FString& Format = TEXT("HP {Health} / {MaxHealth}"), FVector Offset = FVector(0.f, 0.f, 120.f));
 
-	/** grant a Gameplay Ability class to an actor's AbilitySystemComponent (the actor needs one) at Level; returns the spec handle */
+	/** grant a Gameplay Ability class to a placed actor's AbilitySystemComponent (the actor needs one) at Level, in the editor world only: not saved and not copied into Play In Editor (use AddStartingAbility / BindAbilityInput for that); returns the spec handle */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|GAS", meta = (BlueprintInternalUseOnly = "true"))
 	FString GrantAbility(AActor* Actor, TSubclassOf<UGameplayAbility> Ability, int32 Level = 1);
 

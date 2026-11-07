@@ -40,8 +40,10 @@
 #include "InputMappingContext.h"
 #include "Interfaces/IProjectManager.h"
 #include "Kismet2/BlueprintEditorUtils.h"
+#include "Kismet2/CompilerResultsLog.h"
 #include "Kismet2/KismetEditorUtilities.h"
 #include "Misc/PackageName.h"
+#include "Misc/ScopeExit.h"
 #include "Misc/StringOutputDevice.h"
 #include "ProjectDescriptor.h"
 #include "UObject/Package.h"
@@ -130,7 +132,17 @@ namespace UnrealAIGASRqlApiLocal
 
 	bool ParseTags(const FString& Text, FGameplayTagContainer& Out)
 	{
-		for (const FString& Name : SplitList(Text))
+		const TArray<FString> Names = SplitList(Text);
+		for (const FString& Name : Names)
+		{
+			FText Error;
+			if (!UGameplayTagsManager::Get().IsValidGameplayTagString(Name, &Error))
+			{
+				UnrealMcpRql::Fail(FString::Printf(TEXT("'%s' is not a valid gameplay tag: %s"), *Name, *Error.ToString()));
+				return false;
+			}
+		}
+		for (const FString& Name : Names)
 		{
 			FGameplayTag Tag;
 			if (!EnsureTag(Name, Tag))
@@ -300,11 +312,43 @@ namespace UnrealAIGASRqlApiLocal
 		return nullptr;
 	}
 
-	/** Recompile so placed actors and the next Play In Editor rebuild their components from the changed templates. */
-	void Recompile(UBlueprint& Blueprint)
+	/** The parent Blueprint that already adds a component of Class (its node is edited there, not in the child); nullptr when none. */
+	UBlueprint* ParentWithComponent(UBlueprint& Blueprint, UClass* Class)
+	{
+		TArray<UBlueprint*> Hierarchy;
+		UBlueprint::GetBlueprintHierarchyFromClass(Blueprint.GeneratedClass, Hierarchy);
+		for (UBlueprint* Ancestor : Hierarchy)
+		{
+			if (Ancestor && Ancestor != &Blueprint && FindNode(*Ancestor, Class))
+				return Ancestor;
+		}
+		return nullptr;
+	}
+
+	/**
+	 * Recompile so placed actors and the next Play In Editor rebuild their components from the changed templates. Outside
+	 * the mutation's undo step, as `call Compile()` does (a compile rebuilds classes; it is not an edit to undo); false
+	 * after Fail when the Blueprint does not compile.
+	 */
+	bool Recompile(UBlueprint& Blueprint)
 	{
 		FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(&Blueprint);
-		FKismetEditorUtilities::CompileBlueprint(&Blueprint);
+		FCompilerResultsLog Results;
+		Results.bSilentMode = true;
+		{
+			TGuardValue<ITransaction*> NoUndo(GUndo, nullptr);
+			FKismetEditorUtilities::CompileBlueprint(&Blueprint, EBlueprintCompileOptions::None, &Results);
+		}
+		if (Results.NumErrors == 0)
+			return true;
+		TArray<FString> Errors;
+		for (const TSharedRef<FTokenizedMessage>& Message : Results.Messages)
+		{
+			if (Message->GetSeverity() == EMessageSeverity::Error)
+				Errors.Add(Message->ToText().ToString());
+		}
+		UnrealMcpRql::Fail(FString::Printf(TEXT("%s does not compile: %s"), *Blueprint.GetName(), *FString::Join(Errors, TEXT("; "))));
+		return false;
 	}
 
 	/** The UnrealAIAbilitySystemComponent template of Blueprint; nullptr after Fail when it has none. */
@@ -317,6 +361,9 @@ namespace UnrealAIGASRqlApiLocal
 			Node->ComponentTemplate->Modify();
 			return Cast<UUnrealAIAbilitySystemComponent>(Node->ComponentTemplate);
 		}
+		if (const UBlueprint* Parent = ParentWithComponent(Blueprint, UUnrealAIAbilitySystemComponent::StaticClass()))
+			return Failed<UUnrealAIAbilitySystemComponent*>(FString::Printf(TEXT("%s gets its UnrealAIAbilitySystemComponent from its parent %s: call this on \"%s\""),
+				*Blueprint.GetName(), *Parent->GetName(), *Parent->GetOutermost()->GetName()));
 		return Failed<UUnrealAIAbilitySystemComponent*>(FString::Printf(TEXT("%s has no UnrealAIAbilitySystemComponent: gas | call AddAbilitySystem(\"%s\") first"),
 			*Blueprint.GetName(), *Blueprint.GetOutermost()->GetName()));
 	}
@@ -708,12 +755,16 @@ FString UUnrealAIGASRqlApi::SetAbilityTags(TSubclassOf<UGameplayAbility> Ability
 		TEXT("CancelAbilitiesWithTag"), TEXT("BlockAbilitiesWithTag") };
 	static const TCHAR* Properties[] = { TEXT(""), TEXT("ActivationOwnedTags"), TEXT("ActivationRequiredTags"), TEXT("ActivationBlockedTags"),
 		TEXT("CancelAbilitiesWithTag"), TEXT("BlockAbilitiesWithTag") };
+	// "ActivationOwned", "ActivationOwnedTags", "CancelAbilitiesWithTag(s)"; "Asset" for the ability's own tags.
 	FString Wanted = Kind.TrimStartAndEnd();
-	Wanted.RemoveFromEnd(TEXT("Tags"));
+	Wanted.RemoveFromEnd(TEXT("s"));
+	Wanted.RemoveFromEnd(TEXT("Tag"));
 	int32 KindIndex = INDEX_NONE;
 	for (int32 Index = 0; Index < UE_ARRAY_COUNT(Kinds); ++Index)
 	{
-		if (Wanted.Equals(Kinds[Index], ESearchCase::IgnoreCase) || (Index == 0 && (Wanted.Equals(TEXT("Asset"), ESearchCase::IgnoreCase))))
+		FString Name = Kinds[Index];
+		Name.RemoveFromEnd(TEXT("Tag"));
+		if (Wanted.Equals(Name, ESearchCase::IgnoreCase) || (Index == 0 && Wanted.Equals(TEXT("Asset"), ESearchCase::IgnoreCase)))
 			KindIndex = Index;
 	}
 	if (KindIndex == INDEX_NONE)
@@ -737,6 +788,9 @@ FString UUnrealAIGASRqlApi::SetAbilityProjectile(TSubclassOf<UGameplayAbility> A
 		return Failed<FString>(FString::Printf(TEXT("%s does not derive from UnrealAIGameplayAbility (create it with gas | call CreateAbility(path)), so it has no projectile settings"), *Ability->GetName()));
 	if (Speed < 0.f)
 		return Failed<FString>(TEXT("Speed must be 0 (the projectile's own) or more"));
+	if (Projectile && !Projectile->IsChildOf(AUnrealAIGASProjectile::StaticClass()))
+		return Failed<FString>(FString::Printf(TEXT("%s is not an UnrealAIGASProjectile (or a Blueprint child of it), so it would not apply the hit effect: make one with blueprint-create, parent UnrealAIGASProjectile"),
+			*Projectile->GetName()));
 	UUnrealAIGameplayAbility* Defaults = EditableDefaults<UUnrealAIGameplayAbility>(Ability, NewAbilityHint);
 	if (!Defaults)
 		return FString();
@@ -754,68 +808,97 @@ FString UUnrealAIGASRqlApi::SetDefault(UClass* Class, const FString& Property, c
 	UObject* Defaults = EditableDefaults<UObject>(Class, TEXT("only a project Blueprint's defaults can be set"));
 	if (!Defaults)
 		return FString();
-	FProperty* Target = FindFProperty<FProperty>(Class, FName(*Property.TrimStartAndEnd()));
+	const FString Name = Property.TrimStartAndEnd();
+	FProperty* Target = FindFProperty<FProperty>(Class, FName(*Name));
 	for (TFieldIterator<FProperty> It(Class); It && !Target; ++It)
 	{
-		if (It->GetName().Equals(Property.TrimStartAndEnd(), ESearchCase::IgnoreCase) || It->GetAuthoredName().Equals(Property.TrimStartAndEnd(), ESearchCase::IgnoreCase))
+		if (It->GetName().Equals(Name, ESearchCase::IgnoreCase) || It->GetAuthoredName().Equals(Name, ESearchCase::IgnoreCase))
 			Target = *It;
 	}
-	if (!Target || !Target->HasAnyPropertyFlags(CPF_Edit))
-		return Failed<FString>(FString::Printf(TEXT("%s has no editable property '%s' (rql-schema %s lists its members)"), *Class->GetName(), *Property, *Class->GetName()));
+	if (!Target || !Target->HasAnyPropertyFlags(CPF_Edit) || Target->HasAnyPropertyFlags(CPF_EditConst | CPF_DisableEditOnTemplate))
+		return Failed<FString>(FString::Printf(TEXT("%s has no class default '%s' that can be edited (rql-schema %s lists its members)"), *Class->GetName(), *Property, *Class->GetName()));
 
+	// The value is built in a scratch copy and written only when all of it converted (a failed call changes nothing).
 	void* Data = Target->ContainerPtrToValuePtr<void>(Defaults);
+	void* Scratch = FMemory::Malloc(Target->GetSize(), Target->GetMinAlignment());
+	Target->InitializeValue(Scratch);
+	Target->CopyCompleteValue(Scratch, Data);
+	ON_SCOPE_EXIT
+	{
+		Target->DestroyValue(Scratch);
+		FMemory::Free(Scratch);
+	};
+
 	const FString Text = Value.TrimStartAndEnd();
-	const bool bNone = Text.IsEmpty() || Text.Equals(TEXT("None"), ESearchCase::IgnoreCase);
-	// Resolve references first (nothing changes when one fails), then write between Pre/PostEditChange as the Details panel does.
-	TFunction<bool()> Write;
-	if (const FStructProperty* Struct = CastField<FStructProperty>(Target); Struct && Struct->Struct == FGameplayTagContainer::StaticStruct())
+	// One asset / class reference (a class by name, class path or Blueprint path).
+	auto Reference = [](const FObjectPropertyBase& Reference, const FString& Item, void* Into)
+	{
+		UObject* Object = nullptr;
+		if (!Item.IsEmpty() && !Item.Equals(TEXT("None"), ESearchCase::IgnoreCase))
+		{
+			const FClassProperty* ClassReference = CastField<FClassProperty>(&Reference);
+			Object = ClassReference ? static_cast<UObject*>(UnrealMcpRql::ResolveClass(Item)) : UnrealMcpRql::LoadObject(Reference.PropertyClass, Item);
+			if (!Object || !Object->IsA(Reference.PropertyClass) || (ClassReference && !CastChecked<UClass>(Object)->IsChildOf(ClassReference->MetaClass)))
+			{
+				UnrealMcpRql::Fail(FString::Printf(TEXT("'%s' is not a %s"), *Item, *(ClassReference ? ClassReference->MetaClass : Reference.PropertyClass)->GetName()));
+				return false;
+			}
+		}
+		Reference.SetObjectPropertyValue(Into, Object);
+		return true;
+	};
+	bool bConverted = true;
+	const FStructProperty* Struct = CastField<FStructProperty>(Target);
+	const FArrayProperty* Array = CastField<FArrayProperty>(Target);
+	if (Struct && Struct->Struct == FGameplayTagContainer::StaticStruct())
 	{
 		FGameplayTagContainer Tags;
-		if (!ParseTags(Text, Tags))
-			return FString();
-		Write = [Data, Tags]() { *static_cast<FGameplayTagContainer*>(Data) = Tags; return true; };
+		bConverted = ParseTags(Text, Tags);
+		*static_cast<FGameplayTagContainer*>(Scratch) = Tags;
 	}
 	else if (Struct && Struct->Struct == FGameplayTag::StaticStruct())
 	{
 		FGameplayTag Tag;
-		if (!bNone && !EnsureTag(Text, Tag))
-			return FString();
-		Write = [Data, Tag]() { *static_cast<FGameplayTag*>(Data) = Tag; return true; };
+		bConverted = Text.IsEmpty() || Text.Equals(TEXT("None"), ESearchCase::IgnoreCase) || EnsureTag(Text, Tag);
+		*static_cast<FGameplayTag*>(Scratch) = Tag;
 	}
-	else if (const FObjectPropertyBase* Reference = CastField<FObjectPropertyBase>(Target))
+	else if (const FObjectPropertyBase* Single = CastField<FObjectPropertyBase>(Target))
 	{
-		UObject* Object = nullptr;
-		if (!bNone)
+		bConverted = Reference(*Single, Text, Scratch);
+	}
+	else if (const FObjectPropertyBase* Inner = Array ? CastField<FObjectPropertyBase>(Array->Inner) : nullptr)
+	{
+		// A list of references: "/Game/GAS/GE_Heal, /Game/GAS/GE_Haste" (or [..]).
+		FScriptArrayHelper Items(Array, Scratch);
+		Items.EmptyValues();
+		for (const FString& Item : SplitList(Text))
 		{
-			const FClassProperty* ClassReference = CastField<FClassProperty>(Target);
-			Object = ClassReference ? static_cast<UObject*>(UnrealMcpRql::ResolveClass(Text)) : UnrealMcpRql::LoadObject(Reference->PropertyClass, Text);
-			if (!Object || (ClassReference && !CastChecked<UClass>(Object)->IsChildOf(ClassReference->MetaClass)) || !Object->IsA(Reference->PropertyClass))
-				return Failed<FString>(FString::Printf(TEXT("'%s' is not a %s for %s"), *Text, *(ClassReference ? ClassReference->MetaClass : Reference->PropertyClass)->GetName(), *Target->GetName()));
+			if (!Reference(*Inner, Item, Items.GetRawPtr(Items.AddValue())))
+			{
+				bConverted = false;
+				break;
+			}
 		}
-		Write = [Reference, Data, Object]() { Reference->SetObjectPropertyValue(Data, Object); return true; };
 	}
 	else
 	{
-		Write = [Target, Data, Text, Defaults]()
+		FStringOutputDevice ImportError;
+		const TCHAR* End = Target->ImportText_Direct(*Text, Scratch, Defaults, PPF_None, &ImportError);
+		if (!End || !ImportError.IsEmpty())
 		{
-			FStringOutputDevice ImportError;
-			const TCHAR* End = Target->ImportText_Direct(*Text, Data, Defaults, PPF_None, &ImportError);
-			if (!End || !ImportError.IsEmpty())
-			{
-				UnrealMcpRql::Fail(FString::Printf(TEXT("'%s' is not a value for %s (%s)%s"), *Text, *Target->GetName(), *Target->GetCPPType(),
-					ImportError.IsEmpty() ? TEXT("") : *(TEXT(": ") + ImportError)));
-				return false;
-			}
-			return true;
-		};
+			bConverted = false;
+			UnrealMcpRql::Fail(FString::Printf(TEXT("'%s' is not a value for %s (%s)%s"), *Text, *Target->GetName(), *Target->GetCPPType(),
+				ImportError.IsEmpty() ? TEXT("") : *(TEXT(": ") + ImportError)));
+		}
 	}
+	if (!bConverted)
+		return FString();
+
 	Defaults->PreEditChange(Target);
-	const bool bWritten = Write();
+	Target->CopyCompleteValue(Data, Scratch);
 	FPropertyChangedEvent Event(Target, EPropertyChangeType::ValueSet);
 	Defaults->PostEditChangeProperty(Event);
 	DefaultsChanged(*Defaults);
-	if (!bWritten)
-		return FString();
 	FString Exported;
 	Target->ExportTextItem_Direct(Exported, Data, nullptr, Defaults, PPF_None);
 	return Exported;
@@ -842,13 +925,22 @@ UActorComponent* UUnrealAIGASRqlApi::AddAbilitySystem(UBlueprint* Blueprint, con
 		return Failed<UActorComponent*>(FString::Printf(TEXT("%s already has an AbilitySystemComponent from its parent class (%s): grant abilities with gas | call GrantAbility or its own setup"),
 			*Blueprint->GetName(), *Native->GetName()));
 
-	// The attribute names must exist in the component's sets (validated before any change).
-	TArray<const UClass*> Sets = { SetClass };
-	if (Existing)
+	if (!Existing)
 	{
-		for (const TSubclassOf<UAttributeSet>& Set : Existing->AttributeSets)
-			Sets.AddUnique(Set.Get());
+		if (const UBlueprint* Parent = ParentWithComponent(*Blueprint, UAbilitySystemComponent::StaticClass()))
+			return Failed<UActorComponent*>(FString::Printf(TEXT("%s gets an AbilitySystemComponent from its parent %s: call AddAbilitySystem(\"%s\") instead"),
+				*Blueprint->GetName(), *Parent->GetName(), *Parent->GetOutermost()->GetName()));
 	}
+
+	// The component's sets after this call: a new component has only SetClass (an explicit set replaces the default
+	// UnrealAIAttributeSet), an existing one gains it. Attribute names must exist in them (validated before any change).
+	TArray<TSubclassOf<UAttributeSet>> FinalSets;
+	if (Existing)
+		FinalSets = Existing->AttributeSets;
+	FinalSets.AddUnique(SetClass);
+	TArray<const UClass*> Sets;
+	for (const TSubclassOf<UAttributeSet>& Set : FinalSets)
+		Sets.AddUnique(Set.Get());
 	for (const TPair<FString, float>& Value : Values)
 	{
 		FString Error;
@@ -860,11 +952,10 @@ UActorComponent* UUnrealAIGASRqlApi::AddAbilitySystem(UBlueprint* Blueprint, con
 		Node = AddNode(*Blueprint, UUnrealAIAbilitySystemComponent::StaticClass(), TEXT("AbilitySystem"));
 	UUnrealAIAbilitySystemComponent* Template = CastChecked<UUnrealAIAbilitySystemComponent>(Node->ComponentTemplate);
 	Template->Modify();
-	Template->AttributeSets.AddUnique(SetClass);
+	Template->AttributeSets = FinalSets;
 	for (const TPair<FString, float>& Value : Values)
 		Template->InitialAttributes.Add(FName(*Value.Key), Value.Value);
-	Recompile(*Blueprint);
-	return Node->ComponentTemplate;
+	return Recompile(*Blueprint) ? Node->ComponentTemplate.Get() : nullptr;
 }
 
 FString UUnrealAIGASRqlApi::AddStartingAbility(UBlueprint* Blueprint, TSubclassOf<UGameplayAbility> Ability)
@@ -873,7 +964,8 @@ FString UUnrealAIGASRqlApi::AddStartingAbility(UBlueprint* Blueprint, TSubclassO
 	if (!Template)
 		return FString();
 	Template->StartingAbilities.AddUnique(Ability);
-	Recompile(*Blueprint);
+	if (!Recompile(*Blueprint))
+		return FString();
 	TArray<FString> Names;
 	for (const TSubclassOf<UGameplayAbility>& Each : Template->StartingAbilities)
 		Names.Add(ClassName(Each));
@@ -886,7 +978,8 @@ FString UUnrealAIGASRqlApi::AddStartingEffect(UBlueprint* Blueprint, TSubclassOf
 	if (!Template)
 		return FString();
 	Template->StartingEffects.AddUnique(Effect);
-	Recompile(*Blueprint);
+	if (!Recompile(*Blueprint))
+		return FString();
 	TArray<FString> Names;
 	for (const TSubclassOf<UGameplayEffect>& Each : Template->StartingEffects)
 		Names.Add(ClassName(Each));
@@ -946,7 +1039,8 @@ FString UUnrealAIGASRqlApi::BindAbilityInput(UBlueprint* Blueprint, TSubclassOf<
 	Binding->Ability = Ability;
 	if (Context)
 		Template->InputMappingContext = Context;
-	Recompile(*Blueprint);
+	if (!Recompile(*Blueprint))
+		return FString();
 	return FString::Printf(TEXT("%s%s activates %s for the player controlling %s"), *Action->GetName(),
 		Context && !KeyName.IsEmpty() ? *FString::Printf(TEXT(" (%s in %s)"), *KeyName, *Context->GetName()) : TEXT(""), *ClassName(Ability), *Blueprint->GetName());
 }
@@ -962,8 +1056,7 @@ UActorComponent* UUnrealAIGASRqlApi::AddAttributeDisplay(UBlueprint* Blueprint, 
 	Template->Modify();
 	Template->Format = Format;
 	Template->SetRelativeLocation_Direct(Offset);
-	Recompile(*Blueprint);
-	return Node->ComponentTemplate;
+	return Recompile(*Blueprint) ? Node->ComponentTemplate.Get() : nullptr;
 }
 
 FString UUnrealAIGASRqlApi::GrantAbility(AActor* Actor, TSubclassOf<UGameplayAbility> Ability, int32 Level)
@@ -1006,7 +1099,7 @@ FString UUnrealAIGASRqlApi::ActivateAbility(TSubclassOf<UGameplayAbility> Abilit
 		return Failed<FString>(FString::Printf(TEXT("the AbilitySystemComponent of %s is not initialized"), *Target->GetActorNameOrLabel()));
 	{
 		if (!Definition->CheckCooldown(Spec->Handle, Info))
-			return FString::Printf(TEXT("not activated: on cooldown (%s, %.1fs left)"), *TagsText(*Definition->GetCooldownTags()), Definition->GetCooldownTimeRemaining(Info));
+			return FString::Printf(TEXT("not activated: on cooldown (%s, %.1fs left)"), *TagsText(Definition->GetCooldownTags() ? *Definition->GetCooldownTags() : FGameplayTagContainer()), Definition->GetCooldownTimeRemaining(Info));
 		if (!Definition->CheckCost(Spec->Handle, Info))
 			return TEXT("not activated: cannot pay the cost (see the Attributes member)");
 	}
@@ -1025,9 +1118,10 @@ FString UUnrealAIGASRqlApi::ApplyEffect(TSubclassOf<UGameplayEffect> Effect, con
 	TArray<TPair<FGameplayTag, float>> Tags;
 	for (const TPair<FString, float>& Magnitude : Magnitudes)
 	{
-		FGameplayTag Tag;
-		if (!EnsureTag(Magnitude.Key.Contains(TEXT(".")) ? Magnitude.Key : TEXT("SetByCaller.") + Magnitude.Key, Tag))
-			return FString();
+		const FString Name = Magnitude.Key.Contains(TEXT(".")) ? Magnitude.Key : TEXT("SetByCaller.") + Magnitude.Key;
+		const FGameplayTag Tag = UGameplayTagsManager::Get().RequestGameplayTag(FName(*Name), false);
+		if (!Tag.IsValid())
+			return Failed<FString>(FString::Printf(TEXT("no gameplay tag '%s' (the effect's SetByCaller modifiers name theirs: gasEffects | select Summary)"), *Name));
 		Tags.Emplace(Tag, Magnitude.Value);
 	}
 	AActor* Target = FindGameActor(Actor);

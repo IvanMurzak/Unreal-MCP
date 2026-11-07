@@ -154,6 +154,8 @@ BIND = 'BindAbilityInput(Blueprint Blueprint, Class Ability, string InputAction,
 # The GAS fireball sequence (authoring, then Play In Editor): per check, an answer the live UE 5.7 editor gives and one
 # that must not pass.
 GAS_AUTHORING = {
+    'gas-authoring-00-preclean.e2e.json': (
+        text_result('0 results'), text_result('error unknown-source: unreal.assets')),
     'gas-authoring-01-damage-effect.e2e.json': (
         gas_receipt('CreateEffect(string Path, string Duration, float Period)', 'Blueprint#2210(GE_Damage)'), NO_COUNT),
     'gas-authoring-02-damage-modifier.e2e.json': (gas_receipt(MODIFIER, '1'), gas_receipt(MODIFIER, '12')),
@@ -204,7 +206,8 @@ GAS_AUTHORING = {
     'gas-authoring-17-place-hero.e2e.json': (
         text_result('1 result\n$ref|method|result\nEditor@1|SpawnActor(string ClassName, string Label)|BP_Hero_C#2400(E2E_Hero)'),
         NO_COUNT),
-    'gas-authoring-18-play.e2e.json': (text_result('1 change\n$ref|member|old|new\nEditor@1|IsPlaying|false|true'), NO_COUNT),
+    'gas-authoring-18-play.e2e.json': (text_result('1 change\n$ref|member|old|new\nEditor@1|IsPlaying|false|true'),
+                                       text_result('1 change\n$ref|member|old|new\nEditor@1|IsPlaying|true|false')),
     'gas-authoring-19-pie-cast.e2e.json': (
         gas_receipt(ACTIVATE, 'activated: Mana 100 -> 80'), gas_receipt(ACTIVATE, 'not activated: cannot pay the cost')),
     'gas-authoring-20-pie-cooldown.e2e.json': (
@@ -215,7 +218,8 @@ GAS_AUTHORING = {
         gas_receipt(APPLY, 'GE_Damage_C applied to E2E_Hero')),
     'gas-authoring-22-pie-read.e2e.json': (
         text_result('1 result\nAttributes|OwnedTags\n[{Name:Health,Current:75}]|[E2E.GAS.Cooldown]'), text_result('0 results')),
-    'gas-authoring-23-stop.e2e.json': (text_result('1 change\n$ref|member|old|new\nEditor@1|IsPlaying|true|false'), NO_COUNT),
+    'gas-authoring-23-stop.e2e.json': (text_result('1 change\n$ref|member|old|new\nEditor@1|IsPlaying|true|false'),
+                                       text_result('1 change\n$ref|member|old|new\nEditor@1|IsPlaying|false|true')),
     'gas-authoring-98-cleanup-actor.e2e.json': (
         text_result('1 result\n$ref|method|result\nBP_Hero_C#2400|Destroy()|null'), text_result('0 results')),
     'gas-authoring-99-cleanup.e2e.json': (
@@ -228,7 +232,7 @@ class CheckFileTests(unittest.TestCase):
         for plugin, folder in release.components().items():
             self.assertTrue(e2e.checks_for(plugin), plugin)
             self.assertEqual(list((folder / 'Tests/e2e/tools').glob('*.ps1')), [], plugin)
-        self.assertEqual(len(all_checks()), 74)
+        self.assertEqual(len(all_checks()), 75)
 
     def test_every_assert_matches_its_intended_shape_and_rejects_others(self):
         for (plugin, name), check in all_checks().items():

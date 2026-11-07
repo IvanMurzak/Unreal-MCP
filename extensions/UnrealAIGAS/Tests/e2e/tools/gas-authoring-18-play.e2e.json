@@ -5,6 +5,6 @@
     "query": "editor | set IsPlaying = true"
   },
   "assert": {
-    "pattern": "IsPlaying"
+    "pattern": "IsPlaying\\|false\\|true"
   }
 }

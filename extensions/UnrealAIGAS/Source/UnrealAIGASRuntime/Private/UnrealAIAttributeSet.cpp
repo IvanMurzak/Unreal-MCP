@@ -58,7 +58,7 @@ void UUnrealAIAttributeSet::PostAttributeChange(const FGameplayAttribute& Attrib
 	Super::PostAttributeChange(Attribute, OldValue, NewValue);
 	// A lower maximum lowers the value it bounds.
 	UAbilitySystemComponent* Asc = GetOwningAbilitySystemComponent();
-	if (!Asc)
+	if (!Asc || !Asc->IsOwnerActorAuthoritative())
 		return;
 	if (Attribute == GetMaxHealthAttribute() && GetHealth() > NewValue)
 		Asc->SetNumericAttributeBase(GetHealthAttribute(), NewValue);
@@ -75,15 +75,16 @@ void UUnrealAIAttributeSet::PostGameplayEffectExecute(const FGameplayEffectModCa
 	{
 		const float Amount = GetDamage();
 		SetDamage(0.f);
+		// From the base value, so a temporary Health bonus is not baked into it.
 		if (Amount > 0.f)
-			SetHealth(GetHealth() - Amount);
+			SetHealth(Health.GetBaseValue() - Amount);
 	}
 	else if (Data.EvaluatedData.Attribute == GetHealingAttribute())
 	{
 		const float Amount = GetHealing();
 		SetHealing(0.f);
 		if (Amount > 0.f)
-			SetHealth(GetHealth() + Amount);
+			SetHealth(Health.GetBaseValue() + Amount);
 	}
 }
 
