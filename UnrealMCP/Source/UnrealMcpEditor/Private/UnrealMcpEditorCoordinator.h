@@ -4,6 +4,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Interfaces/IHttpRequest.h"
 
 class FUnrealMcpToolRegistry;
 class FUnrealMcpPromptRegistry;
@@ -114,6 +115,10 @@ private:
 	// the main-window tab close and the ExtensionManager reset — so any surviving widget read returns empty. This
 	// mirrors FUnrealMcpAuxWindows::ProvidersAlive for the Tools provider (the lifetime owner holds the flag here).
 	TSharedPtr<bool> ExtProvidersAlive;
+
+	// The online extension catalog for agents (UnrealMcpAvailableExtensions): one async request, cancelled in Shutdown.
+	void FetchCatalogForAgents();
+	TSharedPtr<IHttpRequest, ESPMode::ThreadSafe> AgentCatalogRequest;
 
 	// DEV-ONLY inject/control HTTP bridge over the live dock (docs/ARCHITECTURE.md §7). Created + started in
 	// Startup() ONLY when the editor process env UNREAL_MCP_DEV_CONTROL == "1"; null (never listening) otherwise.

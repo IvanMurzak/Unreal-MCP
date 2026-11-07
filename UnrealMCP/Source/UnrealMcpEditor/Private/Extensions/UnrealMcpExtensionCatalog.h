@@ -91,6 +91,12 @@ public:
 	static UNREALMCPEDITOR_API const FUnrealMcpCatalogEntry* FindEntry(
 		const TArray<FUnrealMcpCatalogEntry>& Entries, const FString& Id);
 
+	/**
+	 * Hand a fetched catalog to the list agents read of the extensions this editor does not have yet
+	 * (UnrealMcpAvailableExtensions: unreal-tool-list, rql-schema); the bundled first-party entries stay as bundled.
+	 */
+	static UNREALMCPEDITOR_API void PublishToAgents(const TArray<FUnrealMcpCatalogEntry>& Entries);
+
 private:
 	static bool ParseEntry(const TSharedPtr<FJsonObject>& Obj, FUnrealMcpCatalogEntry& OutEntry, FString& OutError);
 };

@@ -5,6 +5,7 @@
   (`Private/UnrealAI<Feature>RqlApi.*`, UFUNCTIONs), computed members and a guide; the plugin README lists them (`extension.json` `tools` stays empty).
 - `migration-sources.json` records the original public repo and exact imported commit; preserve provenance.
 - New first-party plugins go here, never as nested git submodules. Keep IDs/plugin names stable.
+- A new one also gets an entry in the bundled list agents read (`UnrealMcpRql/Private/UnrealMcpAvailableExtensions.cpp`).
 - Source handlers/specs live under each plugin's `Source/`; live checks are declarative `Tests/e2e/tools/*.e2e.json`
   (format: `docs/EXTENSION-MONOREPO.md`, runner `scripts/run_extension_e2e.py`).
 - Version source: `.uplugin` `VersionName`; bump with `scripts/extension_release.py bump --plugin ... --version ...`.

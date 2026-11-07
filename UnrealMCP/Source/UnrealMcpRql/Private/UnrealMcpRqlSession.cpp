@@ -4,6 +4,7 @@
 #include "UnrealMcpRqlSession.h"
 
 #include "IUnrealMcpRqlModule.h"
+#include "UnrealMcpAvailableExtensions.h"
 #include "UnrealMcpRqlGuide.h"
 #include "UnrealMcpRqlSources.h"
 
@@ -26,6 +27,41 @@
 
 namespace UnrealMcpRqlSessionLocal
 {
+	/**
+	 * A failed or empty query whose plan touches the domain of an extension this editor does not have (niagaraSystems,
+	 * PCGGraph, gasAbilities, ...) names that extension and how to get it: on the first error's hint, or as a warning.
+	 */
+	void AddExtensionHint(rql::QueryResult& Result, const FString& PlanText)
+	{
+		rql::Diagnostic* Error = nullptr;
+		for (rql::Diagnostic& Diagnostic : Result.diagnostics)
+		{
+			if (Diagnostic.severity == rql::Severity::Error)
+			{
+				Error = &Diagnostic;
+				break;
+			}
+		}
+		const bool bEmpty = Result.ok && ((Result.rows && Result.rows->empty()) || (Result.items && Result.items->empty())
+			|| (Result.has_value && Result.value.is_number() && Result.value.as_number() == 0));
+		if (!Error && !bEmpty)
+			return;
+		const TArray<FUnrealMcpMissingExtension> Candidates = UnrealMcpAvailableExtensions::Missing();
+		const FUnrealMcpMissingExtension* Match = UnrealMcpAvailableExtensions::MatchDomain(PlanText, Candidates);
+		if (!Match)
+			return;
+		const std::string Hint = UnrealMcpRqlToStd(UnrealMcpAvailableExtensions::Hint(*Match));
+		if (!Error)
+		{
+			Result.diagnostics.push_back(rql::Diagnostic::warning("extension-missing", "nothing found; it may come with an Unreal-MCP extension this editor does not have", Hint));
+			return;
+		}
+		const std::string Id = UnrealMcpRqlToStd(Match->Extension.ExtensionId);
+		if (Error->message.find(Id) != std::string::npos || Error->hint.find(Id) != std::string::npos)
+			return; // the error already names it (the Enhanced Input node hint of Blueprint graphs)
+		Error->hint = Error->hint.empty() ? Hint : Error->hint + "; " + Hint;
+	}
+
 	/** Objects whose changes belong to the project (not class defaults of compiled-in classes, not transient helpers). */
 	bool IsProjectObject(const UObject* Object)
 	{
@@ -623,6 +659,7 @@ FString FUnrealMcpRqlSession::Execute(const FString& PlanJson, bool bAllowMutati
 	}
 	CloseTransaction();
 	LiteralObjects.Reset(); // written by now (the undo buffer or their owner holds them), or garbage
+	UnrealMcpRqlSessionLocal::AddExtensionHint(Result, PlanJson);
 	bOutOk = Result.ok;
 	return UnrealMcpRqlFromStd(Result.to_json(/*include_stats*/ false).dump());
 }
@@ -787,6 +824,9 @@ FString FUnrealMcpRqlSession::Schema(const FString& TypeName, bool& bOutOk)
 					Candidates.push(rql::Json(UnrealMcpRqlToStd(Pair.Key)));
 			}
 			Root.set("candidates", std::move(Candidates));
+			const FString Hint = UnrealMcpAvailableExtensions::DomainHint(Wanted);
+			if (!Hint.IsEmpty())
+				Root.set("hint", UnrealMcpRqlToStd(Hint));
 			return UnrealMcpRqlFromStd(Root.dump());
 		}
 		rql::Json TypeList = rql::Json::array();
@@ -816,6 +856,22 @@ FString FUnrealMcpRqlSession::Schema(const FString& TypeName, bool& bOutOk)
 		FunctionList.push(std::move(Item));
 	}
 	Root.set("functions", std::move(FunctionList));
+
+	// The extensions agents could add (each brings sources and operations), with how to get them.
+	const TArray<FUnrealMcpMissingExtension> Missing = UnrealMcpAvailableExtensions::Missing();
+	if (!Missing.IsEmpty())
+	{
+		rql::Json ExtensionList = rql::Json::array();
+		for (const FUnrealMcpMissingExtension& Extension : Missing)
+		{
+			rql::Json Item = rql::Json::object();
+			Item.set("id", UnrealMcpRqlToStd(Extension.Extension.ExtensionId));
+			Item.set("line", UnrealMcpRqlToStd(UnrealMcpAvailableExtensions::Line(Extension)));
+			ExtensionList.push(std::move(Item));
+		}
+		Root.set("extensions", std::move(ExtensionList));
+		Root.set("extensionsNote", UnrealMcpRqlToStd(UnrealMcpAvailableExtensions::InstallNote()));
+	}
 
 	CountPresentClasses();
 	auto Present = [](const TMap<FString, int32>& Counts)
@@ -895,5 +951,12 @@ FString FUnrealMcpRqlSession::SkillMarkdown() const
 	Out += TEXT("\n## Installed RQL modules\n\n- `Core`\n");
 	for (const FString& Module : ModuleReports)
 		Out += FString::Printf(TEXT("- %s\n"), *Module);
+	const TArray<FUnrealMcpMissingExtension> Missing = UnrealMcpAvailableExtensions::Missing();
+	if (!Missing.IsEmpty())
+	{
+		Out += TEXT("\n## Extensions you can add\n\n") + UnrealMcpAvailableExtensions::InstallNote() + TEXT("\n\n");
+		for (const FUnrealMcpMissingExtension& Extension : Missing)
+			Out += FString::Printf(TEXT("- %s\n"), *UnrealMcpAvailableExtensions::Line(Extension));
+	}
 	return Out;
 }

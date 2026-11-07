@@ -372,6 +372,18 @@ Reflection already exposes every type the extension's engine plugin defines, so 
 lifetime; `UnrealMcpRql::SpawnActor` / `AddComponent` / `CreateAsset` / `EditorWorld` / `PluginVersion` share the core
 operations' rules (docs/EXTENSIONS.md).
 
+**Extensions an agent does not have yet** (`UnrealMcpRql/Public/UnrealMcpAvailableExtensions.h`). The editor bundles
+the six first-party extensions (id, name, plugin, what they add, the identifier prefixes of their domain); the online
+extension index adds others when the editor fetches it (one asynchronous request per interactive session, or the
+Extensions panel's Refresh; never in unattended runs, never waited on). Every extension that is not loaded and enabled
+is listed, with its state (not installed, plugin disabled, not loaded yet, turned off) and what to do — install:
+"ask to install extension <id>" or `unreal-mcp-cli install-extension <id>`, then restart the editor — in `rql-schema`
+(no type), `unreal-tool-list` (narrowed by its `filter`) and the `unreal-rql` skill. A query that fails, or finds
+nothing, and whose plan touches the domain of such an extension (`pcgGraphs`, `PCGGraph`, `gasAbilities`, `IA_Jump`,
+...) names it: on the first error's hint, or as an `extension-missing` warning; so does `rql-schema` for an unknown type
+of that domain. A new first-party extension adds its entry to the bundled list
+(`scripts/test_extension_monorepo.py` checks the ids, names and plugin names against each `extension.json`).
+
 ## Tests
 
 - `UnrealMcpRqlAdaptersSpec.cpp` (`UnrealMcp.Tools.Rql.Adapters`): every existing adapter on a fixture object with one

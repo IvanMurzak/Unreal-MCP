@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Ivan Murzak. Licensed under the Apache License, Version 2.0.
 // See the LICENSE file in the repository root for more information.
 
+#include "UnrealMcpAvailableExtensions.h"
 #include "UnrealMcpRqlSession.h"
 #include "UnrealMcpRqlSources.h"
 #include "UnrealMcpRqlTools.h"
@@ -441,14 +442,18 @@ namespace UnrealMcpRqlBlueprintsLocal
 			|| Compact.Contains(TEXT("MappingContext")) || Compact.StartsWith(TEXT("IA_")) || Compact.StartsWith(TEXT("IMC_"));
 		if (!bEnhancedInput)
 			return FString();
-		const IUnrealMcpRqlModule* Extension = UnrealMcpRqlTools::FindModule(TEXT("com.ivanmurzak.unreal-ai-enhanced-input"));
-		if (Extension && UnrealMcpRqlTools::IsModuleEnabled(*Extension))
+		const TArray<FUnrealMcpMissingExtension> Missing = UnrealMcpAvailableExtensions::Missing();
+		const FUnrealMcpMissingExtension* Extension = Missing.FindByPredicate([](const FUnrealMcpMissingExtension& Candidate)
+		{
+			return Candidate.Extension.ExtensionId == TEXT("com.ivanmurzak.unreal-ai-enhanced-input");
+		});
+		if (!Extension)
 			return TEXT(". Enhanced Input nodes come from the Enhanced Input extension: enhancedInput | call AddActionEvent(blueprint, action) "
 				"(the action event: Triggered / Started / Completed pins) and AddMappingContextOnBeginPlay(blueprint, context)");
-		return TEXT(". Enhanced Input nodes (action events, Add Mapping Context) come with the Enhanced Input extension, which is not "
-			"installed or not enabled: install it (unreal-mcp-cli install-extension com.ivanmurzak.unreal-ai-enhanced-input) or enable it in "
-			"the Extensions window, then use enhancedInput | call AddActionEvent / AddMappingContextOnBeginPlay. Without it, key events "
-			"work: EventGraph | call AddInputKey(\"SpaceBar\")");
+		return FString::Printf(TEXT(". Enhanced Input nodes (action events, Add Mapping Context) come with the Unreal-MCP extension %s, "
+			"which is %s: %s; then use enhancedInput | call AddActionEvent / AddMappingContextOnBeginPlay. Without it, key events "
+			"work: EventGraph | call AddInputKey(\"SpaceBar\")"), *Extension->Extension.ExtensionId,
+			*UnrealMcpAvailableExtensions::StateLabel(Extension->State), *UnrealMcpAvailableExtensions::HowToGet(*Extension));
 	}
 
 	/** "KismetInputLibrary.Key_IsGamepadKey" */

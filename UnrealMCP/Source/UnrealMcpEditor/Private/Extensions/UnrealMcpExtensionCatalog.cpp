@@ -3,6 +3,8 @@
 
 #include "Extensions/UnrealMcpExtensionCatalog.h"
 
+#include "UnrealMcpAvailableExtensions.h"
+
 #include "Dom/JsonObject.h"
 #include "Internationalization/Regex.h"
 #include "Dom/JsonValue.h"
@@ -190,4 +192,18 @@ const FUnrealMcpCatalogEntry* FUnrealMcpExtensionCatalog::FindEntry(
 		[&Needle](const FUnrealMcpCatalogEntry& E) { return E.PluginName.ToLower() == Needle; }))
 		return ByPlugin;
 	return nullptr;
+}
+
+void FUnrealMcpExtensionCatalog::PublishToAgents(const TArray<FUnrealMcpCatalogEntry>& Entries)
+{
+	TArray<FUnrealMcpKnownExtension> Known;
+	for (const FUnrealMcpCatalogEntry& Entry : Entries)
+	{
+		FUnrealMcpKnownExtension& Extension = Known.AddDefaulted_GetRef();
+		Extension.ExtensionId = Entry.ExtensionId;
+		Extension.Name = Entry.Name;
+		Extension.PluginName = Entry.PluginName;
+		Extension.Adds = Entry.Description;
+	}
+	UnrealMcpAvailableExtensions::SetCatalog(MoveTemp(Known));
 }

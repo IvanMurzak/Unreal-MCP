@@ -178,7 +178,10 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
             {
                 var candidates = (json["candidates"] as JsonArray)?.Select(c => c?.GetValue<string>() ?? "").Where(c => c.Length > 0).ToList()
                     ?? new List<string>();
-                return AgentFormat.UnknownTypeError(Str(json, "name") ?? "", candidates);
+                var error = AgentFormat.UnknownTypeError(Str(json, "name") ?? "", candidates);
+                // The type belongs to an extension this editor does not have: the hint names it and how to get it.
+                var hint = Str(json, "hint");
+                return string.IsNullOrEmpty(hint) ? error : error.TrimEnd() + "\nhint: " + hint;
             }
 
             var sb = new StringBuilder();
@@ -200,6 +203,13 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
                 sb.Append("functions:\n");
                 foreach (var f in functions.OfType<JsonObject>().OrderBy(f => Str(f, "name"), StringComparer.Ordinal))
                     sb.Append("  ").Append(Str(f, "name")).Append("(…) — ").Append(Str(f, "description")).Append('\n');
+            }
+            if (json["extensions"] is JsonArray extensions && extensions.Count > 0)
+            {
+                // The Unreal-MCP extensions this editor does not have: the note says how to install one, a line each.
+                sb.Append(Str(json, "extensionsNote") ?? "Unreal-MCP extensions not available in this editor:").Append('\n');
+                foreach (var e in extensions.OfType<JsonObject>())
+                    sb.Append("  ").Append(Str(e, "line") ?? Str(e, "id")).Append('\n');
             }
             AppendPresent(sb, json["actorClasses"] as JsonArray, "actor classes in the editor world");
             AppendPresent(sb, json["componentClasses"] as JsonArray, "component classes in the editor world");

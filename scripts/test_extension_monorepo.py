@@ -232,6 +232,13 @@ class MonorepoTests(unittest.TestCase):
             self.assertEqual(metadata['extensionId'], entry['extensionId'])
             self.assertEqual(metadata['name'], entry['name'])
 
+    def test_agents_are_told_about_every_extension_with_its_identity(self):
+        # The editor's bundled list of extensions agents can install (offline too) names each one as its extension.json.
+        source = (release.ROOT / 'UnrealMCP/Source/UnrealMcpRql/Private/UnrealMcpAvailableExtensions.cpp').read_text(encoding='utf-8')
+        for plugin in release.components():
+            metadata = release.validate(plugin)
+            self.assertIn(f'{{ TEXT("{metadata["extensionId"]}"), TEXT("{metadata["name"]}"), TEXT("{plugin}"),', source)
+
 
 if __name__ == '__main__':
     unittest.main()
