@@ -21,6 +21,7 @@ class FUnrealMcpMainWindowTab;
 class FUnrealMcpAuxWindows;
 class FUnrealMcpDevControlServer;
 class FUnrealMcpEditorSession;
+class FUnrealMcpBackgroundRendering;
 
 /**
  * Plugin-lifetime EDITOR coordinator (docs/ARCHITECTURE.md §0, §12.3 Model A). Builds the runtime-owned
@@ -97,6 +98,9 @@ private:
 	// Code-Exec plan §4.6: the editor half of a CLI session (idle shutdown, `editor-quit`, lease cleanup). Shared so
 	// the `editor-quit` handler and the idle ticker hold it weakly; inert for an editor no CLI started.
 	TSharedPtr<FUnrealMcpEditorSession> Session;
+	// Keeps the editor rendering at full rate in the background while an MCP client works with it (§10). Stopped in
+	// Shutdown before the bridge and view-model it reads; restores the user's throttle setting.
+	TUniquePtr<FUnrealMcpBackgroundRendering> BackgroundRendering;
 
 	// §7 UI: the main-window view-model (shared so the nomad tab's widget binds to it) and its tab spawner,
 	// plus the four §7 auxiliary windows (MCP Tools / Prompts / Resources / Settings) sharing the same view-model.

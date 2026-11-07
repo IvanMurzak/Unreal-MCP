@@ -64,6 +64,9 @@ namespace UnrealMcpPythonTools
  * inspect what the editor/game is rendering: `screenshot-viewport` (active editor viewport),
  * `screenshot-game-view` (PIE/game view), `screenshot-camera` (render from a resolved camera actor via
  * USceneCaptureComponent2D), `screenshot-isolated` (transient SceneCapture2D + show-only list).
+ * Every capture renders a new frame at call time (pending scene updates sent, the viewport redrawn or the scene
+ * captured, the render thread flushed by the read-back), whether or not the editor window is focused or minimized,
+ * and states in its text whether that frame and the simulation behind it are fresh (FormatFreshness).
  * Captures are dimension-capped (default 1024, hard cap 2048 per side, width/height clamped). Every
  * handler runs ON the game thread (the dispatcher guarantees it, §4). Exported so the runtime wires it
  * on boot AND the Automation specs can register + exercise the GPU-free logic in isolation.
@@ -90,7 +93,16 @@ namespace UnrealMcpScreenshotTools
 	 * capture metadata (source, width, height, mimeType, encoded byte size); no structured content (see
 	 * FUnrealMcpToolResult::SuccessWithImage). GPU-free (spec-testable).
 	 */
-	UNREALMCPEDITOR_API FUnrealMcpToolResult MakeImageResult(const FString& Source, int32 Width, int32 Height, const FString& Base64Png, int32 EncodedBytes);
+	UNREALMCPEDITOR_API FUnrealMcpToolResult MakeImageResult(const FString& Source, int32 Width, int32 Height, const FString& Base64Png, int32 EncodedBytes,
+		const FString& Freshness = FString());
+
+	/**
+	 * The freshness line every capture carries after the metadata (§10 "Background rendering"), one stable prefix per
+	 * state so agents and scripts can match it: "Frame: fresh" (rendered at capture time) or "Frame: possibly stale
+	 * (<reason>)", then "Simulation: live" or "Simulation: paused (<reason>)" — paused means the world was not
+	 * ticking, so effects and animation may not have advanced to the latest edit. GPU-free (spec-testable).
+	 */
+	UNREALMCPEDITOR_API FString FormatFreshness(bool bFrameFresh, const FString& FrameReason, bool bSimulationLive, const FString& SimulationReason);
 }
 
 /**

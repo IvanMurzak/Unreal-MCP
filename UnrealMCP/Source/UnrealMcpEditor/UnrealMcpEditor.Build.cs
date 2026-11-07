@@ -55,6 +55,9 @@ public class UnrealMcpEditor : ModuleRules
 			"JsonUtilities",
 			"Projects",
 			"EditorSubsystem",
+			// UDeveloperSettings::OnSettingChanged: background rendering keeps the user's saved
+			// "Use Less CPU when in Background" preference while it overrides it in memory (§10).
+			"DeveloperSettings",
 			// Local gamedev-mcp-server launch/supervision (FUnrealMcpServerManager, docs/ARCHITECTURE.md §7):
 			//  - HTTP          -> download the pinned server release zip on a cache miss (override/cache first)
 			//  - FileUtilities -> FZipArchiveReader (libzip-backed) to unpack the downloaded release zip

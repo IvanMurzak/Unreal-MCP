@@ -225,6 +225,29 @@ void FUnrealMcpScreenshotToolsSpec::Define()
 			TestTrue(TEXT("text carries the mimeType"), Result.Message.Contains(TEXT("image/png")));
 			TestTrue(TEXT("text carries the byte size"), Result.Message.Contains(TEXT("1234")));
 		});
+		It("MakeImageResult appends the freshness line after the metadata", [this]()
+		{
+			const FString Freshness = UnrealMcpScreenshotTools::FormatFreshness(true, FString(), true, FString());
+			const FUnrealMcpToolResult Result = UnrealMcpScreenshotTools::MakeImageResult(
+				TEXT("editor viewport"), 64, 32, TEXT("aGVsbG8="), 12, Freshness);
+			TestTrue(TEXT("metadata first"), Result.Message.StartsWith(TEXT("Captured editor viewport (64x32")));
+			TestTrue(TEXT("freshness last"), Result.Message.EndsWith(Freshness));
+			TestFalse(TEXT("still no structured content"), Result.Structured.IsValid());
+		});
+
+		// The freshness line is the agent's only way to tell a current frame from a stale one: its prefixes are a
+		// contract (the tool descriptions quote them), so pin them.
+		It("FormatFreshness states frame and simulation freshness with stable prefixes and the reasons", [this]()
+		{
+			const FString Fresh = UnrealMcpScreenshotTools::FormatFreshness(true, FString(), true, FString());
+			TestEqual(TEXT("fresh + live"), Fresh, FString(TEXT("Frame: fresh (rendered at capture time). Simulation: live.")));
+
+			const FString Stale = UnrealMcpScreenshotTools::FormatFreshness(false, TEXT("window minimized"), false, TEXT("throttled"));
+			TestTrue(TEXT("stale prefix + frame reason"), Stale.StartsWith(TEXT("Frame: possibly stale (window minimized).")));
+			TestTrue(TEXT("paused prefix + simulation reason"), Stale.Contains(TEXT("Simulation: paused (throttled)")));
+			TestFalse(TEXT("never claims fresh when stale"), Stale.Contains(TEXT("Frame: fresh")));
+		});
+
 		// Locks the wire shape the sidecar's ProxyResponseMapper depends on: SuccessWithImage must carry
 		// the supplied base64 + mimeType in an image block, alongside (after, per the bridge server's
 		// content-array ordering) the human-readable text block. The bridge server appends Images[] after

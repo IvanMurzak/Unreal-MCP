@@ -14,7 +14,10 @@
 #include "UObject/GCObjectScopeGuard.h"
 
 #include "Editor.h"
+#include "EditorViewportClient.h"
 #include "UnrealClient.h"
+#include "Slate/SceneViewport.h"
+#include "Widgets/SWindow.h"
 #include "ImageUtils.h"
 #include "TextureResource.h"
 
@@ -42,6 +45,9 @@
  * branches are GPU-free and headless-spec-covered) and only then attempts the GPU read-back, returning
  * a structured "rendering unavailable" error under `-nullrhi` instead of crashing. The capture paths
  * themselves are LIVE-VERIFIED WINDOWED (issue #17 verification model).
+ *
+ * Every capture renders a new frame at call time and states its freshness (docs/ARCHITECTURE.md §10 "Background
+ * rendering", FormatFreshness).
  */
 namespace UnrealMcpScreenshotTools
 {
@@ -67,13 +73,27 @@ namespace UnrealMcpScreenshotTools
 		}
 	}
 
-	FUnrealMcpToolResult MakeImageResult(const FString& Source, int32 Width, int32 Height, const FString& Base64Png, int32 EncodedBytes)
+	FUnrealMcpToolResult MakeImageResult(const FString& Source, int32 Width, int32 Height, const FString& Base64Png, int32 EncodedBytes,
+		const FString& Freshness)
 	{
 		// The metadata travels in the text block: SuccessWithImage carries no structured content (see there).
-		const FString Message = FString::Printf(TEXT("Captured %s (%dx%d, image/png, %d bytes)."),
+		FString Message = FString::Printf(TEXT("Captured %s (%dx%d, image/png, %d bytes)."),
 			*Source, Width, Height, EncodedBytes);
+		if (!Freshness.IsEmpty())
+			Message += TEXT(" ") + Freshness;
 		UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] %s"), *Message);
 		return FUnrealMcpToolResult::SuccessWithImage(Message, Base64Png);
+	}
+
+	FString FormatFreshness(bool bFrameFresh, const FString& FrameReason, bool bSimulationLive, const FString& SimulationReason)
+	{
+		const FString Frame = bFrameFresh
+			? FString(TEXT("Frame: fresh (rendered at capture time)."))
+			: FString::Printf(TEXT("Frame: possibly stale (%s)."), *FrameReason);
+		const FString Simulation = bSimulationLive
+			? FString(TEXT("Simulation: live."))
+			: FString::Printf(TEXT("Simulation: paused (%s); effects and animation may not show the latest edits yet."), *SimulationReason);
+		return Frame + TEXT(" ") + Simulation;
 	}
 
 	// ---- Local helpers ----------------------------------------------------------------------------
@@ -93,6 +113,86 @@ namespace UnrealMcpScreenshotTools
 				return false;
 			}
 			return true;
+		}
+
+		/**
+		 * Whether the world behind a capture is ticking at full rate, so its effects and animation are current. The editor
+		 * world advances ticking content only while one of its viewports is realtime, and a throttled background editor
+		 * runs a few frames per second. Background rendering (§10) lifts both while an MCP client works with the editor;
+		 * this reports what is true at capture time.
+		 */
+		bool ScreenshotIsSimulationLive(UWorld* World, FString& OutReason)
+		{
+			if (!World || !GEditor)
+				return true;
+			if (GEditor->ShouldThrottleCPUUsage())
+			{
+				OutReason = TEXT("the editor is in the background and throttled by its 'Use Less CPU when in Background' "
+				                 "preference, so it runs only a few frames per second");
+				return false;
+			}
+			if (World->IsGameWorld())
+			{
+				// A play (or simulate) session ticks its world fully unless it is paused (Pause button, breakpoint, SetGamePaused).
+				if (!World->IsPaused())
+					return true;
+				OutReason = TEXT("the play session is paused");
+				return false;
+			}
+			FString OverrideMessage;
+			for (const FEditorViewportClient* Client : GEditor->GetAllViewportClients())
+			{
+				if (!Client || Client->GetWorld() != World)
+					continue;
+				if (Client->IsRealtime())
+					return true;
+				if (OverrideMessage.IsEmpty() && Client->IsRealtimeOverrideSet())
+					OverrideMessage = Client->GetRealtimeOverrideMessage().ToString();
+			}
+			// A realtime override (e.g. the editor's own "Background Process" one, removed on the next editor tick) is not
+			// something Ctrl+R fixes: name it instead.
+			OutReason = OverrideMessage.IsEmpty()
+				? FString(TEXT("no viewport of this level is in realtime mode, so the editor world only advances time; "
+				               "turn on Realtime in the level viewport (Ctrl+R)"))
+				: FString::Printf(TEXT("realtime is overridden for this level's viewports (%s), so the editor world only "
+				                       "advances time"), *OverrideMessage);
+			return false;
+		}
+
+		/**
+		 * Whether redrawing @p Viewport yields a new image. A game viewport draws nothing while game rendering is off, and a
+		 * viewport that renders straight to its window's back buffer (no separate render target) has nothing current to
+		 * read while that window is minimized. Editor and PIE viewports render to their own target, so minimized is fine.
+		 */
+		bool ScreenshotCanRedrawViewport(FViewport* Viewport, FString& OutReason)
+		{
+			const UWorld* World = Viewport->GetClient() ? Viewport->GetClient()->GetWorld() : nullptr;
+			if (World && World->IsGameWorld() && !FViewport::IsGameRenderingEnabled())
+			{
+				OutReason = TEXT("game rendering is disabled, so the game view was not redrawn");
+				return false;
+			}
+			if (Viewport->IsSlateViewport())
+			{
+				FSceneViewport* SceneViewport = static_cast<FSceneViewport*>(Viewport);
+				const TSharedPtr<SWindow> Window = SceneViewport->FindWindow();
+				if (Window.IsValid() && Window->IsWindowMinimized()
+					&& !static_cast<const ISlateViewport*>(SceneViewport)->UseSeparateRenderTarget())
+				{
+					OutReason = TEXT("this viewport renders straight to its window, which is minimized; restore the window "
+					                 "or use screenshot-camera");
+					return false;
+				}
+			}
+			return true;
+		}
+
+		/** The freshness line for a capture of @p World (see FormatFreshness). */
+		FString ScreenshotFreshness(UWorld* World, bool bFrameFresh, const FString& FrameReason)
+		{
+			FString SimulationReason;
+			const bool bLive = ScreenshotIsSimulationLive(World, SimulationReason);
+			return FormatFreshness(bFrameFresh, FrameReason, bLive, SimulationReason);
 		}
 
 		/** Force every pixel opaque so a viewport/render-target alpha of 0 does not yield a transparent PNG. */
@@ -190,7 +290,21 @@ namespace UnrealMcpScreenshotTools
 			if (Size.X <= 0 || Size.Y <= 0)
 				return FUnrealMcpToolResult::Error(FString::Printf(TEXT("The %s has a zero-sized render area."), *Source));
 
-			Viewport->Draw(); // ensure a current frame is present before the read-back
+			// Render a new frame now, focused or not: the editor does not redraw a minimized window or a throttled
+			// background viewport on its own. Pending scene updates (an edit made earlier this frame) go to the renderer
+			// first; ReadPixels then flushes the render thread before it reads.
+			UWorld* World = Viewport->GetClient() ? Viewport->GetClient()->GetWorld() : nullptr;
+			if (World)
+				World->SendAllEndOfFrameUpdates();
+			FString FrameReason;
+			const bool bFrameFresh = ScreenshotCanRedrawViewport(Viewport, FrameReason);
+			// Draw a PIE game view inside its world context, as UEditorEngine::Tick does (GWorld / PIE instance id).
+			const bool bPieContext = GEditor && World && World == GEditor->PlayWorld && !GEditor->bIsSimulatingInEditor
+				&& !GIsPlayInEditorWorld;
+			UWorld* SavedWorld = bPieContext ? SetPlayInEditorWorld(World) : nullptr;
+			Viewport->Draw();
+			if (bPieContext)
+				RestoreEditorWorld(SavedWorld);
 
 			TArray<FColor> Pixels;
 			if (!Viewport->ReadPixels(Pixels, FReadSurfaceDataFlags(), FIntRect(0, 0, Size.X, Size.Y)))
@@ -204,7 +318,7 @@ namespace UnrealMcpScreenshotTools
 			if (!EncodePngBase64(Pixels, OutW, OutH, Base64, Bytes, Error))
 				return FUnrealMcpToolResult::Error(Error);
 
-			return MakeImageResult(Source, OutW, OutH, Base64, Bytes);
+			return MakeImageResult(Source, OutW, OutH, Base64, Bytes, ScreenshotFreshness(World, bFrameFresh, FrameReason));
 		}
 
 		/**
@@ -274,6 +388,9 @@ namespace UnrealMcpScreenshotTools
 			}
 			// The capture component is the spawned actor's root (the actor was spawned at CaptureXform), so
 			// its world transform already equals CaptureXform — no explicit SetWorldLocationAndRotation needed.
+			// CaptureScene renders the scene now (and the read-back below flushes the render thread), so the frame is
+			// fresh whatever the editor window's state; send pending scene updates first so the latest edit is in it.
+			World->SendAllEndOfFrameUpdates();
 			Capture->CaptureScene();
 
 			FTextureRenderTargetResource* Resource = RenderTarget->GameThread_GetRenderTargetResource();
@@ -314,7 +431,7 @@ namespace UnrealMcpScreenshotTools
 			if (!EncodePngBase64(Pixels, Width, Height, Base64, Bytes, Error))
 				return FUnrealMcpToolResult::Error(Error);
 
-			return MakeImageResult(Source, Width, Height, Base64, Bytes);
+			return MakeImageResult(Source, Width, Height, Base64, Bytes, ScreenshotFreshness(World, /*bFrameFresh*/ true, FString()));
 		}
 
 		/**
@@ -349,8 +466,11 @@ namespace UnrealMcpScreenshotTools
 		/** Shared description tail documenting the size caps (so each tool advertises them, §10). */
 		const TCHAR* SizeCapNote()
 		{
-			return TEXT(" Returns a base64 PNG as MCP image content. Optional 'width'/'height' are clamped to "
-			            "[1, 2048] per side; the default is 1024. Requires a GPU-backed (windowed) editor.");
+			return TEXT(" Renders a new frame at call time, also while the editor window is in the background or "
+			            "minimized. Returns a base64 PNG as MCP image content; the text states 'Frame: fresh' or 'Frame: "
+			            "possibly stale (reason)', and 'Simulation: live' or 'Simulation: paused (reason)' when effects and "
+			            "animation were not ticking. Optional 'width'/'height' are clamped to [1, 2048] per side (defaults: "
+			            "see each parameter). Requires a GPU-backed (windowed) editor.");
 		}
 	}
 
