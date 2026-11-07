@@ -34,7 +34,7 @@ namespace
 				{ TEXT("gas$"), TEXT("gasabilit"), TEXT("gaseffect"), TEXT("gasattribute"), TEXT("gameplayabilit"), TEXT("gameplayeffect"),
 					TEXT("attributeset"), TEXT("abilitysystem"), TEXT("grantability") }, true },
 			{ TEXT("com.ivanmurzak.unreal-ai-landscape"), TEXT("Landscape Tools"), TEXT("UnrealAILandscape"),
-				TEXT("Landscape and Water: landscapes, waterBodies, waterZones, landscape | call Create / Sculpt / Paint / CreateLayerMaterial"),
+				TEXT("Landscape and Water: landscapes, waterBodies, waterZones, landscape | call Create / Sculpt / Paint / CreateLayerMaterial / Surface (ground height and slope) / Rebuild"),
 				{ TEXT("landscape"), TEXT("waterbod"), TEXT("waterzone") }, true },
 			{ TEXT("com.ivanmurzak.unreal-ai-control-rig"), TEXT("ControlRig Tools"), TEXT("UnrealAIControlRig"),
 				TEXT("Control Rig: controlRigs (hierarchy, controls, bones), controlRig | call CreateRig / AddBone / AddControl / AddTwoBoneIK"),
