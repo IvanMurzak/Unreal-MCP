@@ -52,9 +52,10 @@ namespace UnrealAIEnhancedInputGraphLocal
 		return Node;
 	}
 
-	UK2Node_CallFunction* CreateCallNode(UEdGraph* Graph, UFunction* Function, double X, double Y)
+	/** A call of @p Function (@p NodeClass: UK2Node_CallFunction or a subclass such as UK2Node_CallParentFunction). */
+	UK2Node_CallFunction* CreateCallNode(UEdGraph* Graph, UFunction* Function, double X, double Y, UClass* NodeClass = UK2Node_CallFunction::StaticClass())
 	{
-		return CastChecked<UK2Node_CallFunction>(CreateGraphNode(Graph, UK2Node_CallFunction::StaticClass(), X, Y,
+		return CastChecked<UK2Node_CallFunction>(CreateGraphNode(Graph, NodeClass, X, Y,
 			[Function](UEdGraphNode* Node) { CastChecked<UK2Node_CallFunction>(Node)->SetFromFunction(Function); }));
 	}
 
@@ -190,8 +191,7 @@ namespace UnrealAIEnhancedInputGraphLocal
 		UFunction* Inherited = Blueprint->ParentClass ? Blueprint->ParentClass->FindFunctionByName(Event->EventReference.GetMemberName()) : nullptr;
 		if (!Then || !Inherited || !Cast<UBlueprintGeneratedClass>(Inherited->GetOuterUClass()))
 			return Then;
-		UK2Node_CallFunction* Parent = CastChecked<UK2Node_CallFunction>(CreateGraphNode(Event->GetGraph(), UK2Node_CallParentFunction::StaticClass(),
-			Event->NodePosX + 250, Event->NodePosY, [Inherited](UEdGraphNode* Node) { CastChecked<UK2Node_CallFunction>(Node)->SetFromFunction(Inherited); }));
+		UK2Node_CallFunction* Parent = CreateCallNode(Event->GetGraph(), Inherited, Event->NodePosX + 250, Event->NodePosY, UK2Node_CallParentFunction::StaticClass());
 		UEdGraphPin* ParentExec = Parent->FindPin(UEdGraphSchema_K2::PN_Execute);
 		return ParentExec && GetDefault<UEdGraphSchema_K2>()->TryCreateConnection(Then, ParentExec) ? Parent->FindPin(UEdGraphSchema_K2::PN_Then) : Then;
 	}

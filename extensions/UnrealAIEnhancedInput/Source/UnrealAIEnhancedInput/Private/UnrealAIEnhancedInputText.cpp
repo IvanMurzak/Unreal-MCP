@@ -12,7 +12,7 @@
 #include "UObject/EnumProperty.h"
 #include "UObject/Package.h"
 #include "UObject/UnrealType.h"
-#include "UObject/UObjectIterator.h"
+#include "UObject/UObjectHash.h"
 
 namespace UnrealAIEnhancedInputTextLocal
 {
@@ -272,8 +272,9 @@ namespace UnrealAIEnhancedInputTextLocal
 		if (const FObjectPropertyBase* ObjectProperty = CastField<FObjectPropertyBase>(Property))
 		{
 			const FString Path = Unquote(Raw);
-			UObject* Object = Path.IsEmpty() || Path.Equals(TEXT("None"), ESearchCase::IgnoreCase) ? nullptr : UnrealMcpRql::LoadObject(ObjectProperty->PropertyClass, Path);
-			if (!Object && !Path.IsEmpty() && !Path.Equals(TEXT("None"), ESearchCase::IgnoreCase))
+			const bool bNone = Path.IsEmpty() || Path.Equals(TEXT("None"), ESearchCase::IgnoreCase);
+			UObject* Object = bNone ? nullptr : UnrealMcpRql::LoadObject(ObjectProperty->PropertyClass, Path);
+			if (!Object && !bNone)
 			{
 				UnrealMcpRql::Fail(FString::Printf(TEXT("%s.%s: no %s at '%s' (an asset path such as /Game/Input/IA_Sprint)"), *Short, *Property->GetName(),
 					*ObjectProperty->PropertyClass->GetName(), *Path));
@@ -445,12 +446,9 @@ FString UnrealAIEnhancedInputText::ShortName(const UClass* Class)
 
 TArray<UClass*> UnrealAIEnhancedInputText::Classes(UClass* BaseClass)
 {
-	TArray<UClass*> Out;
-	for (TObjectIterator<UClass> It; It; ++It)
-	{
-		if (IsNameable(*It, BaseClass))
-			Out.Add(*It);
-	}
+	TArray<UClass*> Derived;
+	GetDerivedClasses(BaseClass, Derived, /*bRecursive*/ true);
+	TArray<UClass*> Out = Derived.FilterByPredicate([BaseClass](const UClass* Class) { return IsNameable(Class, BaseClass); });
 	Out.Sort([](const UClass& A, const UClass& B) { return ShortName(&A) < ShortName(&B); });
 	return Out;
 }
@@ -460,13 +458,14 @@ FString UnrealAIEnhancedInputText::SettingsOf(const UClass* Class)
 	TArray<FString> Settings;
 	const UObject* Defaults = Class->GetDefaultObject();
 	const FProperty* Main = MainSetting(Class);
-	if (IsCombo(Class))
+	const bool bCombo = IsCombo(Class);
+	if (bCombo)
 		Settings.Add(TEXT("the step actions in order (positional)"));
 	if (Main)
 		Settings.Add(FString::Printf(TEXT("%s=%s (first argument)"), *Main->GetName(), *ValueText(Main, Main->ContainerPtrToValuePtr<void>(Defaults))));
 	for (TFieldIterator<FProperty> It(Class); It; ++It)
 	{
-		if (IsSetting(*It) && *It != Main && !(IsCombo(Class) && It->GetFName() == GET_MEMBER_NAME_CHECKED(UInputTriggerCombo, ComboActions)))
+		if (IsSetting(*It) && *It != Main && !(bCombo && It->GetFName() == GET_MEMBER_NAME_CHECKED(UInputTriggerCombo, ComboActions)))
 			Settings.Add(FString::Printf(TEXT("%s=%s"), *It->GetName(), *ValueText(*It, It->ContainerPtrToValuePtr<void>(Defaults))));
 	}
 	return Settings.Num() > 0 ? FString::Join(Settings, TEXT(", ")) : FString(TEXT("none"));
@@ -509,7 +508,8 @@ FString UnrealAIEnhancedInputText::Describe(const UObject* Instance)
 	const UClass* Class = Instance->GetClass();
 	const UObject* Defaults = Class->GetDefaultObject();
 	TArray<FString> Settings;
-	if (const UInputTriggerCombo* Combo = Cast<UInputTriggerCombo>(Instance))
+	const UInputTriggerCombo* Combo = Cast<UInputTriggerCombo>(Instance);
+	if (Combo)
 	{
 		for (const FInputComboStepData& Step : Combo->ComboActions)
 			Settings.Add(Step.ComboStepAction ? Step.ComboStepAction->GetPackage()->GetName() : FString(TEXT("None")));
@@ -517,7 +517,7 @@ FString UnrealAIEnhancedInputText::Describe(const UObject* Instance)
 	for (TFieldIterator<FProperty> It(Class); It; ++It)
 	{
 		if (!IsSetting(*It) || It->Identical_InContainer(Instance, Defaults)
-			|| (Cast<UInputTriggerCombo>(Instance) && It->GetFName() == GET_MEMBER_NAME_CHECKED(UInputTriggerCombo, ComboActions)))
+			|| (Combo && It->GetFName() == GET_MEMBER_NAME_CHECKED(UInputTriggerCombo, ComboActions)))
 			continue;
 		Settings.Add(FString::Printf(TEXT("%s=%s"), *It->GetName(), *ValueText(*It, It->ContainerPtrToValuePtr<void>(Instance))));
 	}

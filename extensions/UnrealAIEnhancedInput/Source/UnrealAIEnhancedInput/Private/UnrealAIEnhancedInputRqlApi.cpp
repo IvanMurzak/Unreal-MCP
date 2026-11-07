@@ -64,6 +64,13 @@ namespace UnrealAIEnhancedInputRqlLocal
 		return FName::NameToDisplayString(Name, /*bIsBool*/ false);
 	}
 
+	/** @p Text trimmed, or @p Fallback when that is empty. */
+	FString TrimmedOr(const FString& Text, const FString& Fallback)
+	{
+		const FString Trimmed = Text.TrimStartAndEnd();
+		return Trimmed.IsEmpty() ? Fallback : Trimmed;
+	}
+
 	UPlayerMappableKeySettings* NewKeySettings(UObject* Outer, const FString& Name, const FString& DisplayName, const FString& Category)
 	{
 		UPlayerMappableKeySettings* Settings = NewObject<UPlayerMappableKeySettings>(Outer, NAME_None, Outer->GetMaskedFlags(RF_PropagateToSubObjects) | RF_Transactional);
@@ -210,8 +217,8 @@ FString UUnrealAIEnhancedInputRqlApi::SetActionModifiers(UInputAction* Action, c
 
 FString UUnrealAIEnhancedInputRqlApi::SetPlayerMappable(UInputAction* Action, const FString& DisplayName, const FString& DisplayCategory, const FString& Name)
 {
-	const FString MappingName = Name.TrimStartAndEnd().IsEmpty() ? Action->GetName() : Name.TrimStartAndEnd();
-	const FString Display = DisplayName.TrimStartAndEnd().IsEmpty() ? PrettyName(Action) : DisplayName.TrimStartAndEnd();
+	const FString MappingName = TrimmedOr(Name, Action->GetName());
+	const FString Display = TrimmedOr(DisplayName, PrettyName(Action));
 	Action->Modify();
 	// Protected in UInputAction: written through reflection, as the Details panel does.
 	const FObjectPropertyBase* Property = CastFieldChecked<FObjectPropertyBase>(UInputAction::StaticClass()->FindPropertyByName(TEXT("PlayerMappableKeySettings")));
@@ -239,8 +246,8 @@ int32 UUnrealAIEnhancedInputRqlApi::SetMappingPlayerMappable(UInputMappingContex
 		UPlayerMappableKeySettings* Settings = nullptr;
 		if (Behavior == EPlayerMappableKeySettingBehaviors::OverrideSettings)
 		{
-			const FString MappingName = Name.TrimStartAndEnd().IsEmpty() ? FString::Printf(TEXT("%s_%s"), *Action->GetName(), *Mapping.Key.GetFName().ToString()) : Name.TrimStartAndEnd();
-			Settings = NewKeySettings(Context, MappingName, DisplayName.TrimStartAndEnd().IsEmpty() ? PrettyName(Action) : DisplayName.TrimStartAndEnd(), DisplayCategory.TrimStartAndEnd());
+			const FString MappingName = TrimmedOr(Name, FString::Printf(TEXT("%s_%s"), *Action->GetName(), *Mapping.Key.GetFName().ToString()));
+			Settings = NewKeySettings(Context, MappingName, TrimmedOr(DisplayName, PrettyName(Action)), DisplayCategory.TrimStartAndEnd());
 		}
 		SetMappingSettings(Mapping, Behavior, Settings);
 	});
