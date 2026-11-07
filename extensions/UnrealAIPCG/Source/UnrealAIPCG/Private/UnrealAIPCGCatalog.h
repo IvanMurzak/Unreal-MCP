@@ -6,6 +6,7 @@
 #include "CoreMinimal.h"
 #include "Templates/SubclassOf.h"
 #include "UObject/Object.h"
+#include "Utils/PCGPreconfiguration.h"
 
 #include "UnrealAIPCGCatalog.generated.h"
 
@@ -76,12 +77,11 @@ public:
 
 namespace UnrealAIPCGCatalog
 {
-	/** A node type AddNode can create: the settings class and, for a preconfigured variant, its index (else -1). */
+	/** A node type AddNode can create: the settings class and, for a preconfigured variant, the variant to apply. */
 	struct FNodeType
 	{
 		TSubclassOf<UPCGSettings> Class;
-		int32 Preset = INDEX_NONE;
-		FText PresetLabel;
+		TOptional<FPCGPreConfiguredSettingsInfo> Preset;
 	};
 
 	/** The `pcgNodeTypes` rows, sorted by category and name. */

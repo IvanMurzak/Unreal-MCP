@@ -48,16 +48,8 @@ public:
 			TEXT("the graph's nodes, the Input and Output nodes first (members Name, Title, Type, Inputs, Outputs, Settings)"), UPCGNode::StaticClass(),
 			[](UObject* Object)
 			{
-				TArray<UObject*> Nodes;
-				if (const UPCGGraph* Graph = Cast<UPCGGraph>(Object))
-				{
-					Nodes.Add(Graph->GetInputNode());
-					Nodes.Add(Graph->GetOutputNode());
-					for (UPCGNode* Node : Graph->GetNodes())
-						Nodes.Add(Node);
-				}
-				Nodes.Remove(nullptr);
-				return Nodes;
+				const UPCGGraph* Graph = Cast<UPCGGraph>(Object);
+				return Graph ? TArray<UObject*>(UnrealAIPCG::AllNodes(*Graph)) : TArray<UObject*>();
 			});
 		Context.AddJsonMember(UPCGGraph::StaticClass(), TEXT("Edges"), TEXT("every connection: \"FromNode.Pin -> ToNode.Pin\""),
 			[](UObject* Object) -> TSharedPtr<FJsonValue>

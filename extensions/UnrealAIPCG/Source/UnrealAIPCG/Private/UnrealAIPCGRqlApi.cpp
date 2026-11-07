@@ -211,12 +211,6 @@ namespace UnrealAIPCGRqlApiLocal
 			return UnrealMcpRql::Failed<UPCGNode*>(FString::Printf(TEXT("%s needs a PCG graph (an asset path, e.g. /Game/PCG/PCG_Forest)"), Operation));
 		return FindNode(*Graph, Node);
 	}
-
-	/** A pin's data type for messages ("Point", "Landscape", "Spatial", ...). */
-	FString PinType(const UPCGPin& Pin)
-	{
-		return Pin.GetCurrentTypesID().ToDisplayText().ToString();
-	}
 }
 
 UPCGGraph* UUnrealAIPCGRqlApi::CreateGraph(const FString& Path, const FString& Template)
@@ -259,18 +253,11 @@ FString UUnrealAIPCGRqlApi::AddNode(UPCGGraph* Graph, const FString& Type, const
 	UPCGNode* Node = Graph->AddNodeOfType(NodeType.Class, Settings);
 	if (!Node || !Settings)
 		return UnrealMcpRql::Failed<FString>(FString::Printf(TEXT("could not add a %s node"), *UnrealAIPCGCatalog::TypeName(NodeType.Class)));
-	if (NodeType.Preset != INDEX_NONE)
+	if (NodeType.Preset)
 	{
 		// A preconfigured variant (as the palette entry does): e.g. a typed Get Graph Parameter, an attribute operation.
-		for (const FPCGPreConfiguredSettingsInfo& Preset : Settings->GetPreconfiguredInfo())
-		{
-			if (Preset.PreconfiguredIndex == NodeType.Preset)
-			{
-				Settings->ApplyPreconfiguredSettings(Preset);
-				Node->UpdateAfterSettingsChangeDuringCreation();
-				break;
-			}
-		}
+		Settings->ApplyPreconfiguredSettings(*NodeType.Preset);
+		Node->UpdateAfterSettingsChangeDuringCreation();
 	}
 	if (!Wanted.IsEmpty())
 	{
@@ -313,7 +300,8 @@ FString UUnrealAIPCGRqlApi::Connect(UPCGGraph* Graph, const FString& From, const
 	if (!Input)
 		return FString();
 	const FString Edge = PinPath(*Output) + TEXT(" -> ") + PinPath(*Input);
-	if (Algo::AnyOf(Output->Edges, [Input](const UPCGEdge* Existing) { return Existing && Existing->OutputPin == Input; }))
+	const auto IsLinked = [Output, Input]() { return Algo::AnyOf(Output->Edges, [Input](const UPCGEdge* Existing) { return Existing && Existing->OutputPin == Input; }); };
+	if (IsLinked())
 		return Edge + TEXT(" (already connected)");
 	FText Why;
 	if (!PCGDataTypeCompatibilityResult::IsValid(Output->GetCompatibilityWithOtherPin(Input, &Why)))
@@ -322,7 +310,7 @@ FString UUnrealAIPCGRqlApi::Connect(UPCGGraph* Graph, const FString& From, const
 	const bool bReplaced = Input->IsConnected() && !Input->AllowsMultipleConnections();
 	Graph->Modify();
 	Graph->AddEdge(FromNode, Output->Properties.Label, ToNode, Input->Properties.Label);
-	if (!Algo::AnyOf(Output->Edges, [Input](const UPCGEdge* Existing) { return Existing && Existing->OutputPin == Input; }))
+	if (!IsLinked())
 		return UnrealMcpRql::Failed<FString>(FString::Printf(TEXT("PCG refused %s"), *Edge));
 	Changed(*Graph);
 	return bReplaced ? Edge + TEXT(" (replaced the pin's previous connection: it takes one)") : Edge;
@@ -435,7 +423,7 @@ FString UUnrealAIPCGRqlApi::BindParameter(UPCGGraph* Graph, const FString& Param
 		if (const UPCGSettings* Settings = Target->GetSettings())
 		{
 			for (const FPCGSettingsOverridableParam& Param : Settings->OverridableParams())
-				Labels.Add(FString::JoinBy(Param.PropertiesNames, TEXT("."), [](FName Name) { return Name.ToString(); }));
+				Labels.Add(SettingPath(Param));
 		}
 		return UnrealMcpRql::Failed<FString>(FString::Printf(TEXT("%s cannot take '%s' from a parameter (settings a parameter can drive: %s)"), *NodeTitle(*Target), *Setting,
 			Labels.Num() ? *FString::Join(Labels, TEXT(", ")) : TEXT("none")));
@@ -545,6 +533,7 @@ FUnrealAIPCGGenerateResult UUnrealAIPCGRqlApi::Generate(AActor* Actor, int32 See
 	if (!Subsystem)
 		return UnrealMcpRql::Failed<FUnrealAIPCGGenerateResult>(TEXT("the world of that actor has no PCG subsystem"));
 	FPCGLogCapture Log;
+	const auto AnyGenerating = [&Targets]() { return Algo::AnyOf(Targets, [](const UPCGComponent* Component) { return Component->IsGenerating(); }); };
 	const double Start = FPlatformTime::Seconds();
 	// PCG pauses while an editor transaction is open (pcg.PauseExecutionWhileTransactionActive): this call runs inside
 	// the RQL mutation's transaction, so let PCG run while it waits.
@@ -564,30 +553,27 @@ FUnrealAIPCGGenerateResult UUnrealAIPCGRqlApi::Generate(AActor* Actor, int32 See
 			Component->GenerateLocal(/*bForce*/ true);
 		// The editor ticks PCG every frame; a tool call waits for the result instead.
 		const double Deadline = Start + FMath::Max(1.0, TimeoutSeconds);
-		while (Algo::AnyOf(Targets, [](const UPCGComponent* Component) { return Component->IsGenerating(); }) && FPlatformTime::Seconds() < Deadline)
+		double Last = Start;
+		while (AnyGenerating() && FPlatformTime::Seconds() < Deadline)
 		{
-			Subsystem->Tick(1.0f / 60.0f);
+			const double Now = FPlatformTime::Seconds();
+			Subsystem->Tick(static_cast<float>(FMath::Max(Now - Last, 0.001)));
+			Last = Now;
 			FTaskGraphInterface::Get().ProcessThreadUntilIdle(ENamedThreads::GameThread);
-			FPlatformProcess::SleepNoStats(0.001f);
+			FPlatformProcess::SleepNoStats(0.005f);
 		}
 	}
 	Result.Seconds = FPlatformTime::Seconds() - Start;
-	Result.Generated = !Algo::AnyOf(Targets, [](const UPCGComponent* Component) { return Component->IsGenerating(); });
+	Result.Generated = !AnyGenerating();
 	Result.Seed = Targets[0]->Seed;
-	TMap<FString, int32> Meshes;
+	FGenerated Total;
 	for (UPCGComponent* Component : Targets)
-	{
-		const FGenerated Generated = CountGenerated(*Component);
-		Result.Instances += Generated.Instances;
-		Result.Points += Generated.Points;
-		Result.Components += Generated.Components;
-		Result.Actors += Generated.Actors;
-		for (const TPair<FString, int32>& Mesh : Generated.Meshes)
-			Meshes.FindOrAdd(Mesh.Key) += Mesh.Value;
-	}
-	FGenerated Merged;
-	Merged.Meshes = MoveTemp(Meshes);
-	Result.Meshes = Merged.MeshLines();
+		Total += CountGenerated(*Component);
+	Result.Instances = Total.Instances;
+	Result.Points = Total.Points;
+	Result.Components = Total.Components;
+	Result.Actors = Total.Actors;
+	Result.Meshes = Total.MeshLines();
 	Log.TakeInto(Result);
 	if (!Result.Generated)
 		Result.Errors.Add(FString::Printf(TEXT("still generating after %.0f s: read the Generated member of its PCG component later, or call Generate with a longer TimeoutSeconds"), Result.Seconds));

@@ -7,6 +7,7 @@
 #include "Dom/JsonValue.h"
 
 class FProperty;
+struct FPCGSettingsOverridableParam;
 class UPCGComponent;
 class UPCGGraph;
 class UPCGNode;
@@ -30,6 +31,15 @@ namespace UnrealAIPCG
 
 	/** The pin @p Label of @p Node ("" = its first pin that is not an override pin); Fail()s listing its pins. */
 	UPCGPin* FindPin(UPCGNode& Node, const FString& Label, bool bOutput);
+
+	/** The graph's nodes: Input, Output, then the others. */
+	TArray<UPCGNode*> AllNodes(const UPCGGraph& Graph);
+
+	/** The setting an override pin sets, as a dotted path ("SamplerParams.DistanceIncrement"). */
+	FString SettingPath(const FPCGSettingsOverridableParam& Param);
+
+	/** A pin's data type for messages and the Inputs / Outputs members ("Point", "Landscape", "Spatial", ...). */
+	FString PinType(const UPCGPin& Pin);
 
 	/** "Node.Pin" for messages and the Edges member. */
 	FString PinPath(const UPCGPin& Pin);
@@ -72,6 +82,17 @@ namespace UnrealAIPCG
 
 		/** "SM_Pine: 812" per mesh, most instances first. */
 		TArray<FString> MeshLines() const;
+
+		FGenerated& operator+=(const FGenerated& Other)
+		{
+			Points += Other.Points;
+			Instances += Other.Instances;
+			Components += Other.Components;
+			Actors += Other.Actors;
+			for (const TPair<FString, int32>& Mesh : Other.Meshes)
+				Meshes.FindOrAdd(Mesh.Key) += Mesh.Value;
+			return *this;
+		}
 	};
 
 	/** Count what @p Component (and its local components, when partitioned) generated. */

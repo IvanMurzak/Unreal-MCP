@@ -16,6 +16,7 @@
 #include "MeshSelectors/PCGMeshSelectorWeighted.h"
 #include "Metadata/PCGAttributePropertySelector.h"
 #include "Metadata/PCGMetadataTypesConstantStruct.h"
+#include "Containers/Ticker.h"
 #include "Misc/ScopeExit.h"
 #include "Misc/StringOutputDevice.h"
 #include "PCGCommon.h"
@@ -39,7 +40,7 @@ namespace UnrealAIPCGGraphEditLocal
 {
 	using namespace UnrealAIPCG;
 
-	TArray<UPCGNode*> AllNodes(const UPCGGraph& Graph)
+	TArray<UPCGNode*> AllNodesOf(const UPCGGraph& Graph)
 	{
 		TArray<UPCGNode*> Out;
 		if (Graph.GetInputNode())
@@ -192,11 +193,15 @@ namespace UnrealAIPCGGraphEditLocal
 		return nullptr;
 	}
 
+	/** A property name matches with or without its bool prefix: "bInvertFilter" is "InvertFilter" too. */
+	bool PropertyNameMatches(const FString& Name, const FString& Wanted)
+	{
+		return Normalize(Name) == Wanted || (Name.StartsWith(TEXT("b")) && Name.Len() > 1 && FChar::IsUpper(Name[1]) && Normalize(Name.Mid(1)) == Wanted);
+	}
+
 	bool NameMatches(const FProperty& Property, const FString& Wanted)
 	{
-		const FString Name = Property.GetName();
-		return Normalize(Name) == Wanted || Normalize(Property.GetDisplayNameText().ToString()) == Wanted
-			|| (Name.StartsWith(TEXT("b")) && Name.Len() > 1 && FChar::IsUpper(Name[1]) && Normalize(Name.Mid(1)) == Wanted);
+		return PropertyNameMatches(Property.GetName(), Wanted) || Normalize(Property.GetDisplayNameText().ToString()) == Wanted;
 	}
 
 	/** The property of @p Owner a dotted path segment names. */
@@ -221,7 +226,7 @@ namespace UnrealAIPCGGraphEditLocal
 		{
 			if (Normalize(Setting.Name) == Wanted)
 				return (Out = Setting), true;
-			if (NameMatches(*Setting.Chain.Last(), Wanted) || (Setting.Chain.Num() == 1 && NameMatches(*Setting.Chain[0], Wanted)))
+			if (NameMatches(*Setting.Chain.Last(), Wanted))
 				ByLast.Add(&Setting);
 		}
 		if (ByLast.Num() == 1)
@@ -339,8 +344,7 @@ namespace UnrealAIPCGGraphEditLocal
 
 	FString Number(double Value)
 	{
-		FString Text = FString::SanitizeFloat(Value, 0);
-		return Text;
+		return FString::SanitizeFloat(Value, 0);
 	}
 
 	/** "(x, y, z)" (one number fills every component), "#rrggbb" for colours. */
@@ -581,7 +585,7 @@ UPCGNode* UnrealAIPCG::FindNode(UPCGGraph& Graph, const FString& Name)
 {
 	using namespace UnrealAIPCGGraphEditLocal;
 	const FString Wanted = Normalize(Name);
-	const TArray<UPCGNode*> Nodes = AllNodes(Graph);
+	const TArray<UPCGNode*> Nodes = AllNodesOf(Graph);
 	// The node's Name (unique) wins over titles (several nodes can share one).
 	for (UPCGNode* Node : Nodes)
 	{
@@ -635,8 +639,7 @@ UPCGPin* UnrealAIPCG::FindOverridePin(UPCGNode& Node, const FString& Setting)
 	for (const FPCGSettingsOverridableParam& Param : Settings->OverridableParams())
 	{
 		const FString Last = Param.PropertiesNames.Num() ? Param.PropertiesNames.Last().ToString() : FString();
-		const bool bMatch = Normalize(Param.Label.ToString()) == Wanted || Normalize(Last) == Wanted || Normalize(SettingPathOf(Param)) == Wanted
-			|| (Last.StartsWith(TEXT("b")) && Normalize(Last.Mid(1)) == Wanted);
+		const bool bMatch = Normalize(Param.Label.ToString()) == Wanted || PropertyNameMatches(Last, Wanted) || Normalize(SettingPathOf(Param)) == Wanted;
 		if (bMatch)
 		{
 			if (UPCGPin* Pin = Node.GetInputPin(Param.Label))
@@ -644,6 +647,21 @@ UPCGPin* UnrealAIPCG::FindOverridePin(UPCGNode& Node, const FString& Setting)
 		}
 	}
 	return nullptr;
+}
+
+TArray<UPCGNode*> UnrealAIPCG::AllNodes(const UPCGGraph& Graph)
+{
+	return UnrealAIPCGGraphEditLocal::AllNodesOf(Graph);
+}
+
+FString UnrealAIPCG::SettingPath(const FPCGSettingsOverridableParam& Param)
+{
+	return UnrealAIPCGGraphEditLocal::SettingPathOf(Param);
+}
+
+FString UnrealAIPCG::PinType(const UPCGPin& Pin)
+{
+	return Pin.GetCurrentTypesID().ToDisplayText().ToString();
 }
 
 FString UnrealAIPCG::PinPath(const UPCGPin& Pin)
@@ -663,7 +681,7 @@ TSharedPtr<FJsonValue> UnrealAIPCG::PinsJson(const UPCGNode& Node, bool bOutput)
 			continue;
 		TSharedPtr<FJsonObject> Row = MakeShared<FJsonObject>();
 		Row->SetStringField(TEXT("Pin"), Pin->Properties.Label.ToString());
-		Row->SetStringField(TEXT("Type"), Pin->GetCurrentTypesID().ToDisplayText().ToString());
+		Row->SetStringField(TEXT("Type"), PinType(*Pin));
 		TArray<TSharedPtr<FJsonValue>> Connections;
 		for (const UPCGEdge* Edge : Pin->Edges)
 		{
@@ -888,9 +906,13 @@ FString UnrealAIPCG::SetSetting(UPCGNode& Node, const FString& Path, const FStri
 		return UnrealMcpRql::Failed<FString>(FString::Printf(TEXT("%s has no settings"), *NodeLabel(Node)));
 	FString Name = Path;
 	UPCGStaticMeshSpawnerSettings* Spawner = Cast<UPCGStaticMeshSpawnerSettings>(Settings);
-	if (Spawner && (Normalize(Path) == TEXT("meshes") || Normalize(Path) == TEXT("meshentries")))
+	if (Spawner && Normalize(Path) == TEXT("meshes"))
 	{
-		// The weighted mesh list: the spawner's default selector; switch to it when another one is set.
+		// The weighted mesh list: the spawner's default selector; switch to it when another one is set (the meshes checked first).
+		TArray<FPCGMeshSelectorWeightedEntry> Entries;
+		FString Error;
+		if (!ParseMeshEntries(Entries, Value, Error))
+			return UnrealMcpRql::Failed<FString>(FString::Printf(TEXT("%s.Meshes %s"), *NodeTitle(Node), *Error));
 		if (!Cast<UPCGMeshSelectorWeighted>(Spawner->MeshSelectorParameters))
 		{
 			Spawner->Modify();
@@ -967,7 +989,7 @@ TSharedPtr<FJsonValue> UnrealAIPCG::EdgesJson(const UPCGGraph& Graph)
 {
 	using namespace UnrealAIPCGGraphEditLocal;
 	TArray<TSharedPtr<FJsonValue>> Rows;
-	for (const UPCGNode* Node : AllNodes(Graph))
+	for (const UPCGNode* Node : AllNodesOf(Graph))
 	{
 		for (const UPCGPin* Pin : Node->GetOutputPins())
 		{
@@ -987,25 +1009,40 @@ void UnrealAIPCG::Changed(UPCGGraph& Graph)
 {
 	using namespace UnrealAIPCGGraphEditLocal;
 	Graph.MarkPackageDirty();
-	// The PCG graph editor builds its view of a graph once per session and keeps it: invalidate it (a schema change
-	// makes the editor rebuild the view on its next open) and reopen an open editor so it shows this change.
-	UEdGraph* EditorGraph = EditorGraphOf(Graph);
-	if (!EditorGraph || !GEditor)
+	if (!EditorGraphOf(Graph))
 		return;
-	UAssetEditorSubsystem* Editors = GEditor->GetEditorSubsystem<UAssetEditorSubsystem>();
-	const bool bOpen = Editors && Editors->FindEditorsForAsset(&Graph).Num() > 0;
-	if (bOpen)
-		Editors->CloseAllEditorsForAsset(&Graph);
-	EditorGraph->Schema = UEdGraphSchema::StaticClass();
-	if (bOpen)
-		Editors->OpenEditorForAsset(&Graph);
+	// The PCG graph editor builds its view of a graph once per session and keeps it: after this call (once per graph,
+	// however many edits a mutation makes), invalidate it (a schema change makes the editor rebuild the view on its next
+	// open) and reopen an open editor so it shows the changes.
+	static TSet<TWeakObjectPtr<UPCGGraph>> Pending;
+	if (Pending.Num() == 0)
+	{
+		FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda([](float)
+		{
+			UAssetEditorSubsystem* Editors = GEditor ? GEditor->GetEditorSubsystem<UAssetEditorSubsystem>() : nullptr;
+			for (const TWeakObjectPtr<UPCGGraph>& Weak : Pending)
+			{
+				UPCGGraph* Changed = Weak.Get();
+				UEdGraph* EditorGraph = Changed ? EditorGraphOf(*Changed) : nullptr;
+				if (!EditorGraph)
+					continue;
+				const bool bOpen = Editors && Editors->FindEditorsForAsset(Changed).Num() > 0;
+				if (bOpen)
+					Editors->CloseAllEditorsForAsset(Changed);
+				EditorGraph->Schema = UEdGraphSchema::StaticClass();
+				if (bOpen)
+					Editors->OpenEditorForAsset(Changed);
+			}
+			Pending.Reset();
+			return false;
+		}));
+	}
+	Pending.Add(&Graph);
 }
 
 TArray<FString> UnrealAIPCG::FGenerated::MeshLines() const
 {
-	TArray<TPair<FString, int32>> Sorted;
-	for (const TPair<FString, int32>& Mesh : Meshes)
-		Sorted.Add(Mesh);
+	TArray<TPair<FString, int32>> Sorted = Meshes.Array();
 	Sorted.Sort([](const TPair<FString, int32>& A, const TPair<FString, int32>& B) { return A.Value != B.Value ? A.Value > B.Value : A.Key < B.Key; });
 	TArray<FString> Out;
 	for (const TPair<FString, int32>& Mesh : Sorted)

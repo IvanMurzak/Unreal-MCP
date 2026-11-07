@@ -20,10 +20,8 @@
 #include "Serialization/JsonWriter.h"
 #include "EngineUtils.h"
 #include "PCGComponent.h"
-#include "PCGEdge.h"
 #include "PCGGraph.h"
 #include "PCGNode.h"
-#include "PCGPin.h"
 #include "PCGVolume.h"
 
 #include "UnrealAIPCGCatalog.h"
@@ -506,7 +504,7 @@ void FUnrealAIPCGSpec::Define()
 			// pcg | call Generate("@LABEL@")
 			TSharedPtr<FJsonObject> Result;
 			TestTrue(TEXT("generated"), Run(TEXT("Generate"), { Lit(Label) }, &Result));
-			TestTrue(*FString::Printf(TEXT("finished (%s)"), *Json(Result).Left(600)), Json(Result).Contains(TEXT("Generated\":true")) || Json(Result).Contains(TEXT("Generated:true")));
+			TestTrue(*FString::Printf(TEXT("finished (%s)"), *Json(Result).Left(600)), Json(Result).Contains(TEXT("Generated\":true")));
 			const int32 Dense = UnrealAIPCG::CountGenerated(*Volume->PCGComponent).Instances;
 			TestTrue(*FString::Printf(TEXT("cubes on the grid (%d)"), Dense), Dense >= 64);
 			TestTrue(TEXT("counted per mesh"), Json(Result).Contains(TEXT("Cube: ")));
