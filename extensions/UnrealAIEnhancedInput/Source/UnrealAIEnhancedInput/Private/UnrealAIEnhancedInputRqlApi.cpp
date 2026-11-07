@@ -380,19 +380,6 @@ namespace UnrealAIEnhancedInputRqlLocal
 		return nullptr;
 	}
 
-	const TCHAR* TriggerEventName(ETriggerEvent Event)
-	{
-		switch (Event)
-		{
-			case ETriggerEvent::Triggered: return TEXT("Triggered");
-			case ETriggerEvent::Started: return TEXT("Started");
-			case ETriggerEvent::Ongoing: return TEXT("Ongoing");
-			case ETriggerEvent::Canceled: return TEXT("Canceled");
-			case ETriggerEvent::Completed: return TEXT("Completed");
-			default: return TEXT("None");
-		}
-	}
-
 	/** The trigger event of each frame, as runs: "Triggered x30, Completed x1" (frames without an event are left out). */
 	class FTriggerEventLog
 	{
@@ -415,7 +402,7 @@ namespace UnrealAIEnhancedInputRqlLocal
 		{
 			TArray<FString> Parts;
 			for (const TPair<ETriggerEvent, int32>& Run : Runs)
-				Parts.Add(FString::Printf(TEXT("%s x%d"), TriggerEventName(Run.Key), Run.Value));
+				Parts.Add(FString::Printf(TEXT("%s x%d"), *StaticEnum<ETriggerEvent>()->GetNameStringByValue(static_cast<int64>(Run.Key)), Run.Value));
 			return Parts.Num() > 0 ? FString::Join(Parts, TEXT(", ")) : FString(TEXT("no trigger event"));
 		}
 
@@ -455,15 +442,15 @@ FUnrealMcpPlayState UUnrealAIEnhancedInputRqlApi::InjectInput(UInputAction* Acti
 	const int32 Count = UnrealMcpRql::PlayFrameCount(Seconds, Frames, Error);
 	if (Count < 0)
 		return Failed<FUnrealMcpPlayState>(Error);
-	APlayerController* Controller = UnrealMcpRql::PlayController();
+	APlayerController* Controller = UnrealMcpRql::RequirePlayController(Error);
 	if (!Controller)
-		return Failed<FUnrealMcpPlayState>(UnrealMcpRql::PlayWorld() ? TEXT("the play world has no player controller to inject input into")
-			: TEXT("no Play In Editor session is running: editor | call StartPlay() first"));
+		return Failed<FUnrealMcpPlayState>(Error);
 	if (!Cast<UEnhancedPlayerInput>(Controller->PlayerInput))
 		return Failed<FUnrealMcpPlayState>(TEXT("player 0 does not use Enhanced Input (Project Settings > Input: Default Player Input Class = EnhancedPlayerInput)"));
 
-	// Extra triggers, as a key mapping's: transient objects held by a GC guard for the call.
+	// Extra triggers, as a key mapping's: transient objects kept alive for the call.
 	TArray<UInputTrigger*> TriggerObjects;
+	TArray<TStrongObjectPtr<UInputTrigger>> KeepAlive;
 	TArray<FString> Names;
 	Triggers.ParseIntoArray(Names, TEXT(","), /*bCullEmpty*/ true);
 	for (const FString& Raw : Names)
@@ -474,11 +461,10 @@ FUnrealMcpPlayState UUnrealAIEnhancedInputRqlApi::InjectInput(UInputAction* Acti
 		UClass* Class = TriggerClass(Name);
 		if (!Class)
 			return Failed<FUnrealMcpPlayState>(FString::Printf(TEXT("'%s' is not an input trigger (Pressed, Released, Down, Hold, HoldAndRelease, Tap, Pulse)"), *Name));
-		TriggerObjects.Add(NewObject<UInputTrigger>(GetTransientPackage(), Class));
+		UInputTrigger* Trigger = NewObject<UInputTrigger>(GetTransientPackage(), Class);
+		KeepAlive.Emplace(Trigger);
+		TriggerObjects.Add(Trigger);
 	}
-	TArray<TStrongObjectPtr<UInputTrigger>> Keep;
-	for (UInputTrigger* Trigger : TriggerObjects)
-		Keep.Emplace(Trigger);
 
 	const FInputActionValue RawValue(Action->ValueType, Value);
 	FTriggerEventLog Events;

@@ -26,6 +26,8 @@
 
 namespace UnrealMcpRqlPlayLocal
 {
+	const TCHAR* const NoSessionError = TEXT("no Play In Editor session is running: editor | call StartPlay() first");
+
 	/** One call may simulate this long (wall clock) before it stops with what it has: a tool call has a timeout. */
 	constexpr double MaxAdvanceWallSeconds = 25.0;
 
@@ -62,6 +64,19 @@ APlayerController* UnrealMcpRql::PlayController()
 {
 	UWorld* World = PlayWorld();
 	return World ? World->GetFirstPlayerController() : nullptr;
+}
+
+APlayerController* UnrealMcpRql::RequirePlayController(FString& OutError)
+{
+	if (!PlayWorld())
+	{
+		OutError = UnrealMcpRqlPlayLocal::NoSessionError;
+		return nullptr;
+	}
+	APlayerController* Controller = PlayController();
+	if (!Controller)
+		OutError = TEXT("the play world has no player controller to send input to");
+	return Controller;
 }
 
 bool UnrealMcpRql::StartPlay(bool bPaused, FString& OutError, TArray<FString>* OutNotes)
@@ -134,7 +149,7 @@ bool UnrealMcpRql::AdvancePlay(int32 Frames, TFunctionRef<void(APlayerController
 	UWorld* World = PlayWorld();
 	if (!World)
 	{
-		OutError = TEXT("no Play In Editor session is running: editor | call StartPlay() first");
+		OutError = UnrealMcpRqlPlayLocal::NoSessionError;
 		return false;
 	}
 	// Gameplay that calls Modify() would otherwise record PIE objects into the RQL call's transaction (the editor then
@@ -293,20 +308,13 @@ bool UnrealMcpRql::AdvancePlayWithKeys(double Seconds, int32 Frames, const FStri
 	const int32 Count = PlayFrameCount(Seconds, Frames, OutError);
 	if (Count < 0)
 		return false;
-	if (!PlayWorld())
-	{
-		OutError = TEXT("no Play In Editor session is running: editor | call StartPlay() first");
-		return false;
-	}
 	if (Held.Num() == 0)
 		return AdvancePlay(Count, [](APlayerController*, int32) {}, OutAdvanced, OutError);
-	if (!PlayController())
-	{
-		OutError = TEXT("the play world has no player controller to press keys on");
+	if (!RequirePlayController(OutError))
 		return false;
-	}
 	// Pressed on the first frame and held (buttons stay down until released; axes are fed every frame), released on one
-	// extra frame so key-up handlers and Completed events run.
+	// extra frame so key-up handlers and Completed events run. Pressed again on a controller that replaced the first one
+	// mid-call (the game swapped it, e.g. after travel), and released on the one that holds the keys.
 	TWeakObjectPtr<APlayerController> Pressed;
 	const bool bHeld = AdvancePlay(Count, [&Held, &Pressed](APlayerController* Controller, int32 Frame)
 	{

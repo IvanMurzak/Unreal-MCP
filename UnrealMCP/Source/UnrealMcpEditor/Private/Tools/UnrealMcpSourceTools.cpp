@@ -53,6 +53,17 @@ namespace UnrealMcpSourceTools
 		return Root;
 	}
 
+	/**
+	 * The agent's next step when new C++ cannot go live in this editor session (Live Coding cannot apply it, or the editor
+	 * holds the module DLL). The UBT summary carries it; source-compile checks for its "restart required".
+	 */
+	FString SourceRestartAdvice(const FString& Target)
+	{
+		return FString::Printf(TEXT("Full build + editor restart required: the editor must close, the project build, and the "
+			"editor reopen. With the AI Game Dev app, ask it to restart the editor (editor_connection.connect with restart:true), "
+			"which builds the project before opening it; with another client, close the editor, build %s, and reopen it."), *Target);
+	}
+
 	FString DescribeUbtResult(const FString& Target, int32 ErrorCount, int32 WarningCount, int32 ReturnCode, double Seconds, const FString& Output)
 	{
 		FString Text = FString::Printf(TEXT("Compile (%s, UBT): %d error(s), %d warning(s); return code %d in %.0fs."),
@@ -85,18 +96,11 @@ namespace UnrealMcpSourceTools
 		if (Reason.Contains(TEXT("Live Coding is active")))
 			Text += TEXT(" Nothing was built: UBT cannot build while this editor runs Live Coding. A change inside function bodies "
 				"compiles with source-compile (useLiveCoding true); new classes or files and changed UCLASS / USTRUCT / UENUM / "
-				"UPROPERTY / UFUNCTION declarations need a full build. ") + RestartAdvice(Target);
+				"UPROPERTY / UFUNCTION declarations need a full build. ") + SourceRestartAdvice(Target);
 		else if (Reason.Contains(TEXT("LNK1104")) || Reason.Contains(TEXT("cannot open file")))
 			Text += TEXT(" Nothing new is loaded: this running editor holds its module DLL, so new or changed C++ is NOT live "
-				"(a Blueprint is live after blueprint-compile). ") + RestartAdvice(Target);
+				"(a Blueprint is live after blueprint-compile). ") + SourceRestartAdvice(Target);
 		return Text;
-	}
-
-	FString RestartAdvice(const FString& Target)
-	{
-		return FString::Printf(TEXT("Full build + editor restart required: the editor must close, the project build, and the "
-			"editor reopen. With the AI Game Dev app, ask it to restart the editor (editor_connection.connect with restart:true), "
-			"which builds the project before opening it; with another client, close the editor, build %s, and reopen it."), *Target);
 	}
 
 	FString DescribeReflectionChanges(const FString& Target, const TArray<FString>& Files, bool bAdviceGiven)
@@ -110,7 +114,7 @@ namespace UnrealMcpSourceTools
 			Text += FString::Printf(TEXT(" (and %d more)"), Files.Num() - MaxNamed);
 		Text += TEXT(".");
 		if (!bAdviceGiven)
-			Text += TEXT(" ") + RestartAdvice(Target);
+			Text += TEXT(" ") + SourceRestartAdvice(Target);
 		return Text;
 	}
 
@@ -122,28 +126,20 @@ namespace UnrealMcpSourceTools
 	TArray<FString> FindReflectionChangesSince(const FString& SourceRoot, const FDateTime& SinceUtc)
 	{
 		// Live Coding patches function bodies only: it cannot register a new class or change a reflected type's layout,
-		// so a header that declares reflected types or members and changed since the editor started needs a full build.
-		static const TCHAR* const Markers[] = { TEXT("UCLASS("), TEXT("USTRUCT("), TEXT("UENUM("), TEXT("UINTERFACE("),
-			TEXT("UPROPERTY("), TEXT("UFUNCTION("), TEXT("GENERATED_BODY") };
+		// so a reflected header (UHT makes every one include its .generated.h) changed since the editor started needs a
+		// full build.
 		TArray<FString> Headers;
 		IFileManager::Get().FindFilesRecursive(Headers, *SourceRoot, TEXT("*.h"), /*Files*/ true, /*Directories*/ false);
 		TArray<FString> Changed;
 		for (const FString& Header : Headers)
 		{
-			if (IFileManager::Get().GetTimeStamp(*Header) <= SinceUtc)
-				continue;
 			FString Text;
-			if (!FFileHelper::LoadFileToString(Text, *Header))
-				continue;
-			for (const TCHAR* Marker : Markers)
+			if (IFileManager::Get().GetTimeStamp(*Header) > SinceUtc && FFileHelper::LoadFileToString(Text, *Header)
+				&& Text.Contains(TEXT(".generated.h\""), ESearchCase::CaseSensitive))
 			{
-				if (Text.Contains(Marker, ESearchCase::CaseSensitive))
-				{
-					FString Relative = Header;
-					FPaths::MakePathRelativeTo(Relative, *(SourceRoot / TEXT("")));
-					Changed.Add(Relative);
-					break;
-				}
+				FString Relative = Header;
+				FPaths::MakePathRelativeTo(Relative, *(SourceRoot / TEXT("")));
+				Changed.Add(Relative);
 			}
 		}
 		Changed.Sort();
@@ -1073,7 +1069,9 @@ namespace UnrealMcpSourceTools
 				// The diagnostics are in the text. Past the cap the structured report (with the raw output tail) is appended
 				// too, so a client that reads only the text still sees every row.
 				FString Summary = DescribeUbtResult(TargetName, ErrorCount, WarningCount, ReturnCode, Elapsed, Combined);
-				const bool bRestartRequired = ReflectionChanges.Num() > 0 || Summary.Contains(TEXT("restart required"));
+				// The summary already carries SourceRestartAdvice for a Live Coding refusal or a locked module DLL.
+				const bool bUbtAdvisedRestart = Summary.Contains(TEXT("restart required"));
+				const bool bRestartRequired = ReflectionChanges.Num() > 0 || bUbtAdvisedRestart;
 				Structured->SetBoolField(TEXT("restartRequired"), bRestartRequired);
 				if (ReflectionChanges.Num() > 0)
 				{
@@ -1081,7 +1079,7 @@ namespace UnrealMcpSourceTools
 					for (const FString& File : ReflectionChanges)
 						Files.Add(MakeShared<FJsonValueString>(File));
 					Structured->SetArrayField(TEXT("reflectionChanges"), Files);
-					Summary += DescribeReflectionChanges(TargetName, ReflectionChanges, Summary.Contains(TEXT("restart required")));
+					Summary += DescribeReflectionChanges(TargetName, ReflectionChanges, bUbtAdvisedRestart);
 				}
 
 				constexpr int32 MaxDiagnosticRows = 20;

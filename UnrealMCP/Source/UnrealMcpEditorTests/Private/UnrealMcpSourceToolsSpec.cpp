@@ -245,9 +245,9 @@ void FUnrealMcpSourceToolsSpec::Define()
 		{
 			const FString Root = FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / TEXT("UnrealMcpReflectionSpec"));
 			IFileManager::Get().DeleteDirectory(*Root, false, true);
-			FFileHelper::SaveStringToFile(TEXT("#pragma once\nUCLASS()\nclass ACar : public APawn { GENERATED_BODY() };\n"), *(Root / TEXT("Game/Car.h")));
+			FFileHelper::SaveStringToFile(TEXT("#pragma once\n#include \"Car.generated.h\"\nUCLASS()\nclass ACar : public APawn { GENERATED_BODY() };\n"), *(Root / TEXT("Game/Car.h")));
 			FFileHelper::SaveStringToFile(TEXT("#pragma once\ninline int Twice(int X) { return 2 * X; }\n"), *(Root / TEXT("Game/Math.h")));
-			FFileHelper::SaveStringToFile(TEXT("UCLASS() class ANotAHeader {};\n"), *(Root / TEXT("Game/Car.cpp")));
+			FFileHelper::SaveStringToFile(TEXT("#include \"Car.generated.h\"\n"), *(Root / TEXT("Game/Car.cpp")));
 
 			const TArray<FString> Changed = UnrealMcpSourceTools::FindReflectionChangesSince(Root, UnrealMcpSourceTools::EditorStartUtc());
 			TestEqual(TEXT("only the reflected header"), Changed, TArray<FString>{ TEXT("Game/Car.h") });

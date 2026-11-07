@@ -52,7 +52,8 @@ The event node comes from the EnhancedInput plugin's `InputBlueprintNodes` modul
 `InjectInput(action, value, seconds, frames, triggers)` play-tests the controls: it injects the action into player 0 of
 the running Play In Editor session (`editor | call StartPlay()`) for exact 1/60 s frames simulated inside the call, then
 returns the core play state (pawn, location, velocity, movement mode) with the action's trigger events frame by frame
-in `Notes` (`IA_Jump: Triggered x30, Completed x1`). With this extension installed every play state also lists the
+in `Notes` (`IA_Move: Triggered x90, Completed x1 (90 frame(s) held + 1 released)`, then its value on the last held
+frame). With this extension installed every play state also lists the
 mapping contexts applied to player 0 (`MappingContexts`).
 
 ```

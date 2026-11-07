@@ -69,15 +69,8 @@ namespace UnrealMcpSourceTools
 		double Seconds, const FString& Output);
 
 	/**
-	 * The agent's next step when new C++ cannot go live in this editor session (Live Coding cannot apply it, or the editor
-	 * holds the module DLL): a full build with the editor closed. Names the AI Game Dev app's restart (which builds first)
-	 * and the manual path for other clients.
-	 */
-	UNREALMCPEDITOR_API FString RestartAdvice(const FString& Target);
-
-	/**
 	 * The source-compile sentence for @p Files (FindReflectionChangesSince): Live Coding was skipped because it cannot apply
-	 * them, then RestartAdvice unless @p bAdviceGiven (the UBT summary already carries it).
+	 * them, then the rebuild + restart advice unless @p bAdviceGiven (the UBT summary already carries it).
 	 */
 	UNREALMCPEDITOR_API FString DescribeReflectionChanges(const FString& Target, const TArray<FString>& Files, bool bAdviceGiven);
 
@@ -85,9 +78,9 @@ namespace UnrealMcpSourceTools
 	UNREALMCPEDITOR_API FDateTime EditorStartUtc();
 
 	/**
-	 * Headers under @p SourceRoot changed after @p SinceUtc that declare reflected types or members (UCLASS, USTRUCT,
-	 * UENUM, UINTERFACE, UPROPERTY, UFUNCTION, GENERATED_BODY), relative to the root and sorted: Live Coding cannot apply
-	 * them, a full build and an editor restart can.
+	 * Reflected headers (they include their .generated.h: UCLASS, USTRUCT, UENUM, UPROPERTY, UFUNCTION ...) under
+	 * @p SourceRoot changed after @p SinceUtc, relative to the root and sorted: Live Coding cannot apply them, a full build
+	 * and an editor restart can.
 	 */
 	UNREALMCPEDITOR_API TArray<FString> FindReflectionChangesSince(const FString& SourceRoot, const FDateTime& SinceUtc);
 

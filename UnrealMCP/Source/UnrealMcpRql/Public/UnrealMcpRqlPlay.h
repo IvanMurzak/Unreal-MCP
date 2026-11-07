@@ -107,6 +107,9 @@ namespace UnrealMcpRql
 	/** Player 0's controller in the play world; nullptr when there is none. */
 	UNREALMCPRQL_API APlayerController* PlayController();
 
+	/** PlayController, or nullptr + the agent-facing reason (no session: StartPlay first; no player controller). */
+	UNREALMCPRQL_API APlayerController* RequirePlayController(FString& OutError);
+
 	/**
 	 * Start Play In Editor now (inside this call, not on the next editor tick) with the editor's play settings; keeps a
 	 * running session. bPaused pauses it so the world moves only inside play operations. False + the reason when it did
