@@ -195,7 +195,7 @@ unreal.asset("/Game/BP_Hero") | call Compile()
   vehicle is `PlayerController.Possess(car)` from the interact logic, leaving is `Possess(hero)`. Created assets are
   unsaved: `editor | call SaveAll()`. The legacy key events (`EventGraph | call AddInputKey("SpaceBar")`) need none of this.
 
-Play test the controls (simulated inside the call, deterministic; never wait between calls for the editor to tick):
+)MD") TEXT(R"MD(Play test the controls (simulated inside the call, deterministic; never wait between calls for the editor to tick):
 
 ```
 editor | call StartPlay()                                                       Play In Editor now, paused between calls; returns PlayState
