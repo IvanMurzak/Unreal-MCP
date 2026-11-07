@@ -1,0 +1,22 @@
+docs/RELEASING.md
+  s_c34224420978bf::t_ea9a2fed7a0bb7 5
+  s_c34224420978bf::t_89c1927afbf58f 53,348,350-354,361-364,398-399
+.github/workflows/release.yml
+  s_c34224420978bf::t_2ce96a3c8ae2d1 288-293,298
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "5e392a75d9cc4dd8353542c165d369ab06a0b5b1",
+  "prompts": {},
+  "sessions": {
+    "s_c34224420978bf": {
+      "agent_id": {
+        "tool": "github-copilot-cli",
+        "id": "2ddfc6c3-5016-4d25-a1b7-48742281f2bd",
+        "model": "gpt-5.4"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

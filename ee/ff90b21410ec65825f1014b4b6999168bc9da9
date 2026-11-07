@@ -1,0 +1,28 @@
+.github/workflows/release.yml
+  s_d5f619ffecbba9::t_3962e1bb47752a 31
+  s_d5f619ffecbba9::t_741070e551c6b9 335-348,697-701,707,712
+.github/workflows/test_pull_request.yml
+  s_d5f619ffecbba9::t_eb9261933f6f63 151-165,329-343
+UnrealMCP/Source/UnrealMcpEditor/Private/Tools/UnrealMcpBlueprintTools.cpp
+  s_d5f619ffecbba9::t_33de1a74028e32 35,37-39
+UnrealMCP/Source/UnrealMcpEditor/Private/Tools/UnrealMcpEditorTools.cpp
+  s_d5f619ffecbba9::t_3d7bd593bb5885 21,23-25
+docs/RELEASING.md
+  s_d5f619ffecbba9::t_3e59b291526a4d 72,356-357,359-363,367-368,407-410,423-425
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "eeff90b21410ec65825f1014b4b6999168bc9da9",
+  "prompts": {},
+  "sessions": {
+    "s_d5f619ffecbba9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f3e5d-2986-76a2-a12f-29eb073ed677",
+        "model": "gpt-5.5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

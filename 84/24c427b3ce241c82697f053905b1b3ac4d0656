@@ -1,0 +1,19 @@
+docs/ARCHITECTURE.md
+  s_f6a735a588fe98::t_aba8a141dd4dda 364
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "8424c427b3ce241c82697f053905b1b3ac4d0656",
+  "prompts": {},
+  "sessions": {
+    "s_f6a735a588fe98": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "s_f6a735a588fe98",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

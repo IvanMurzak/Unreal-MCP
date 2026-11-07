@@ -1,0 +1,21 @@
+UnrealMCP/ThirdPartyNotices.txt
+  s_cf39f5fb556145::t_5ca467b95bf7e4 1-134
+UnrealMCP/Config/FilterPlugin.ini
+  s_cf39f5fb556145::t_9b6b556a5ac323 22-27
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.8",
+  "base_commit_sha": "d990cbfde3cf5fae08a420511e14e0eb32fde721",
+  "prompts": {},
+  "sessions": {
+    "s_cf39f5fb556145": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cae79e43-d299-489d-8250-d2c7017cba2e",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

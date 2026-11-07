@@ -1,0 +1,73 @@
+UnrealMCP/Source/UnrealMcpEditor/Private/Agents/JsonAiAgentConfig.cpp
+  s_5601a2ed5b932a::t_3ba71f08072dc3 1-208,211-214,216-426,432-434,436-437
+  s_5601a2ed5b932a::t_ec0364caf6f663 209-210,215
+  s_5601a2ed5b932a::t_78ae75ed2f36c2 427-431,435
+UnrealMCP/Source/UnrealMcpEditor/Private/Agents/JsonAiAgentConfig.h
+  s_5601a2ed5b932a::t_cd71b26327f859 1-87
+UnrealMCP/Source/UnrealMcpEditor/Private/Agents/Impl/CursorConfigurator.h
+  s_5601a2ed5b932a::t_c049ec6ac7f553 1-28
+UnrealMCP/Source/UnrealMcpEditor/Private/Agents/Impl/ClaudeCodeConfigurator.h
+  s_5601a2ed5b932a::t_44806df3935622 1-28
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpAgentConfiguratorSpec.cpp
+  s_5601a2ed5b932a::t_c908c8bce7417e 1-379
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/SUnrealMcpAgentConfigurators.cpp
+  s_5601a2ed5b932a::t_b6272eb193e9d1 1-329
+UnrealMCP/Source/UnrealMcpEditor/Private/Config/UnrealMcpConfig.h
+  s_5601a2ed5b932a::t_f474048b9036cb 91-94
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/SUnrealMcpMainWindow.cpp
+  s_5601a2ed5b932a::t_dc3974c1aa5f2d 5
+  s_5601a2ed5b932a::t_e6cdaa9b4ca3e2 55
+  s_5601a2ed5b932a::t_3027fd02dbbba1 513-522
+  s_5601a2ed5b932a::t_64c67b87742026 40
+UnrealMCP/Source/UnrealMcpEditor/Private/Agents/AiAgentConfigurator.h
+  s_5601a2ed5b932a::t_caaa3ded171ba7 1-109
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/SUnrealMcpMainWindow.h
+  s_5601a2ed5b932a::t_1a4550cf4731b1 10
+  s_5601a2ed5b932a::t_7711b94740e26e 35-36
+  s_5601a2ed5b932a::t_f68fdd82fd560f 46
+  s_5601a2ed5b932a::t_e593662630ae3c 59
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/UnrealMcpMainWindowTab.cpp
+  s_5601a2ed5b932a::t_b73a62f5688034 26-27,36
+  s_5601a2ed5b932a::t_06a4afe7528572 84-85
+UnrealMCP/Source/UnrealMcpEditor/Private/Agents/AiAgentConfiguratorRegistry.cpp
+  s_5601a2ed5b932a::t_e412b654c41972 1-80
+UnrealMCP/Source/UnrealMcpEditor/Private/UnrealMcpRuntime.cpp
+  s_5601a2ed5b932a::t_2a6032ca6d59be 196-207
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/SUnrealMcpAgentConfigurators.h
+  s_5601a2ed5b932a::t_5418882eb0f2c0 1-82
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/UnrealMcpEditorViewModel.h
+  s_5601a2ed5b932a::t_96b681d166c724 160-170
+UnrealMCP/Source/UnrealMcpEditor/Private/Agents/AiAgentConfiguratorRegistry.h
+  s_5601a2ed5b932a::t_99d73f1698c1cd 1-48
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/UnrealMcpEditorViewModel.cpp
+  s_5601a2ed5b932a::t_c12818d211feba 273-284
+UnrealMCP/Source/UnrealMcpEditor/Private/Config/UnrealMcpConfig.cpp
+  s_5601a2ed5b932a::t_521a0e1dc6969d 47
+  s_5601a2ed5b932a::t_fa3e04b3144589 158-161
+  s_5601a2ed5b932a::t_fce786f98f3537 339-340
+UnrealMCP/Source/UnrealMcpEditor/Private/Agents/AiAgentConfigurator.cpp
+  s_5601a2ed5b932a::t_c188f1df02e41c 1-74,76-146
+  s_5601a2ed5b932a::t_9073635169592f 75
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/UnrealMcpMainWindowTab.h
+  s_5601a2ed5b932a::t_aed57b81c1a28f 54
+  s_5601a2ed5b932a::t_2a6ab6ce42a5ce 41-42
+  s_5601a2ed5b932a::t_b50482e4f93dbf 8
+UnrealMCP/Source/UnrealMcpEditor/Private/Agents/AiAgentConfig.h
+  s_5601a2ed5b932a::t_a22645f4738271 1-81
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "5a8b9f934005da37d2eb29d27dd1d12f81b7608a",
+  "prompts": {},
+  "sessions": {
+    "s_5601a2ed5b932a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4a9d921c-49f2-4338-ab19-c42684cbc42e",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

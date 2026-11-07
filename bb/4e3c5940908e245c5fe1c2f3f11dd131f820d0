@@ -1,0 +1,24 @@
+docs/RELEASING.md
+  s_908974782fafa1::t_e6f5a4cea660da 181-197
+.github/workflows/test_pull_request.yml
+  s_908974782fafa1::t_6fa34f8564d153 149
+.github/workflows/release.yml
+  s_908974782fafa1::t_0799e4b48fa339 294
+  s_908974782fafa1::t_123723642175ed 165-174,176
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "bb4e3c5940908e245c5fe1c2f3f11dd131f820d0",
+  "prompts": {},
+  "sessions": {
+    "s_908974782fafa1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f1748397-e586-40bb-91a9-b89c0caebdf5",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

@@ -1,0 +1,36 @@
+bridge/src/com.IvanMurzak.Unreal.MCP.Bridge.csproj
+  s_8d859c66569e2d::t_a634cd1609db59 92-98
+  s_8d859c66569e2d::t_39347181d7ca88 133
+  s_8d859c66569e2d::t_9476dea0a4c76e 54
+  s_5b995fe556bf3f::t_5f7a2cddc8b6b3 10
+UnrealMCP/UnrealMCP.uplugin
+  s_8d859c66569e2d::t_1ad4ba02ad51e4 4
+cli/package-lock.json
+  s_8d859c66569e2d::t_dc4a951694fe47 3,9
+cli/package.json
+  s_8d859c66569e2d::t_a746a4b0a6d6ef 3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.24",
+  "base_commit_sha": "3b8674062ea1ca398e4ca432986baa6f3cb19a05",
+  "prompts": {},
+  "sessions": {
+    "s_5b995fe556bf3f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-accf152b417ef9ee9",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_8d859c66569e2d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0d33093a-57c1-4b45-b2ac-0ca6495e78eb",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

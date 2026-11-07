@@ -1,0 +1,35 @@
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpRqlDataModelsSpec.cpp
+  s_7be60963fe3603::t_3773eb2f00cd53 845
+UnrealMCP/Source/UnrealMcpRql/Private/UnrealMcpRqlBlueprints.cpp
+  s_7be60963fe3603::t_1c84163d28becc 6,431-451,475-476,821-822,910-911
+extensions/UnrealAIEnhancedInput/README.md
+  s_7be60963fe3603::t_89246a51536e2c 35,42-43,46-50
+extensions/UnrealAIEnhancedInput/Source/UnrealAIEnhancedInput/Private/Tests/UnrealAIEnhancedInputSpec.cpp
+  s_7be60963fe3603::t_128e4ae94c9087 16-30,43-112,179-180,221-299
+extensions/UnrealAIEnhancedInput/Source/UnrealAIEnhancedInput/Private/UnrealAIEnhancedInputModule.cpp
+  s_7be60963fe3603::t_1706e59f1b4c0a 55,80-95
+extensions/UnrealAIEnhancedInput/Source/UnrealAIEnhancedInput/Private/UnrealAIEnhancedInputRqlApi.cpp
+  s_7be60963fe3603::t_f2025ee35b79ce 8-9,11-13,17-22,36-136,182-264
+extensions/UnrealAIEnhancedInput/Source/UnrealAIEnhancedInput/Private/UnrealAIEnhancedInputRqlApi.h
+  s_7be60963fe3603::t_bf7f7f51664f37 12,43-50
+extensions/UnrealAIEnhancedInput/Source/UnrealAIEnhancedInput/UnrealAIEnhancedInput.Build.cs
+  s_7be60963fe3603::t_c721c6ce470440 34-40
+tests/automation-inventory.json
+  s_7be60963fe3603::t_921bce8a930308 3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "6536989fcf9c878b653d2257f94cbc25527eed5a",
+  "prompts": {},
+  "sessions": {
+    "s_7be60963fe3603": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9c306a43-6f1a-4fe9-9b57-09acf4bc1a65",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
