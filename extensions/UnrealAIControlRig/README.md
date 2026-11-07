@@ -1,6 +1,6 @@
 # ControlRig RQL module
 
-RQL module for Unreal's Control Rig: create rigs with bones, controls and a two-bone IK solver; query Control Rig blueprints (element hierarchy, controls, bones) and Control Rig components.
+RQL module for Unreal's Control Rig: author procedural animation rigs without C++ (look-at / aim, two-bone and full-body IK, traces, springs: any rig unit with its settings, links and rig variables) and wire them into Anim Blueprints (a Control Rig node before Output Pose, its inputs bound to Anim Blueprint variables set every frame, e.g. from the nearest target); query rigs, their graphs, variables and hierarchy, and Control Rig components.
 
 An optional editor plugin in the [Unreal MCP monorepository](../../README.md), with its own module, version and release archive.
 
@@ -8,7 +8,8 @@ An optional editor plugin in the [Unreal MCP monorepository](../../README.md), w
 
 - Unreal Engine 5.7 or later (the shared extension suite verifies UE 5.7 and 5.8).
 - Unreal MCP 0.26.0 or later (the RQL runtime and operations these extensions use), installed in the same project.
-- Engine plugins: `ControlRig`. The installer enables these dependencies.
+- Engine plugins: `ControlRig`. The installer enables these dependencies. Full Body IK units (`PBIK`) are in the engine's
+  experimental `FullBodyIK` plugin, which a project enables itself; `controlRigUnits` lists only the units of enabled plugins.
 - A C++ toolchain for your Unreal Engine installation. Extension releases contain source files and must be compiled for your project and engine.
 
 ## Install
@@ -31,22 +32,46 @@ The extension adds its feature to the editor's RQL data layer (`rql-query` / `rq
 
 | Kind | Names |
 | --- | --- |
-| Sources | `controlRigs`, `controlRig` |
-| Operations (`call`) | `CreateRig`, `AddBone`, `AddControl`, `AddTwoBoneIK` |
-| Members | `ControlRigBlueprint.Elements`, `ControlRigBlueprint.Hierarchy`, `ControlRigBlueprint.Controls`, `ControlRigBlueprint.Bones`, `ControlRigComponent.BoundRig` (the running rig) |
+| Sources | `controlRigs` (rig assets), `controlRigUnits` (the rig units a rig can run: name, title, category, pins), `controlRig` (operations) |
+| Operations (`call`) | Rigs: `CreateRig` (optionally from a character's mesh), `AddVariable`, `AddUnit`, `SetPin`, `Connect`, `RemoveNode`, `AddLookAt`, `AddTwoBoneIK`, `AddBone`, `AddControl`. Anim Blueprints: `AddToAnimBlueprint`, `SetRigInput`, `TrackNearestActor` |
+| Members | `ControlRigBlueprint.Nodes` (graph: units, execution order, pin values and links), `ControlRigBlueprint.Variables`, `ControlRigBlueprint.Elements`, `.Hierarchy`, `.Controls`, `.Bones`, `AnimBlueprint.ControlRigs` (its Control Rig nodes, pose neighbours, bound inputs), `ControlRigComponent.BoundRig` (the running rig) |
+
+A head that turns smoothly toward the nearest orb, on the UE5 mannequin, in seven calls:
 
 ```
-controlRigs | select Name Elements
-controlRigs | where Name == "CR_Mannequin" | select Controls Bones
-actors | get Components | where $ is ControlRigComponent | select Owner.Label BoundRig
-controlRig | call CreateRig("/Game/Rigs/CR_Arm")
-controlRig | call AddBone(unreal.asset("/Game/Rigs/CR_Arm"), "Shoulder", "", [0, 0, 150])
-controlRig | call AddControl(unreal.asset("/Game/Rigs/CR_Arm"), "IK_Target", [60, 0, 150])
-controlRig | call AddTwoBoneIK(unreal.asset("/Game/Rigs/CR_Arm"), "Shoulder", "Elbow", "Hand", "IK_Target")
+controlRig | call CreateRig("/Game/Rigs/CR_LookAt", "/Game/Characters/Mannequins/Meshes/SKM_Manny_Simple")
+controlRig | call AddVariable("/Game/Rigs/CR_LookAt", "LookAtTarget", "Vector")
+controlRig | call AddVariable("/Game/Rigs/CR_LookAt", "LookAtWeight", "float", "0")
+controlRig | call AddLookAt("/Game/Rigs/CR_LookAt", "head", "@LookAtTarget", "@LookAtWeight")
+controlRig | call AddToAnimBlueprint("/Game/Characters/Mannequins/Anims/Unarmed/ABP_Unarmed", "/Game/Rigs/CR_LookAt")
+controlRig | call TrackNearestActor("/Game/Characters/Mannequins/Anims/Unarmed/ABP_Unarmed", "BP_Orb", "LookAtTarget", "LookAtWeight", 600, 4)
+unreal.asset("/Game/Characters/Mannequins/Anims/Unarmed/ABP_Unarmed") | call Compile()
 ```
 
-`AddBone` places a bone relative to its parent (cm); `AddControl` adds a transform control for the animator; `AddTwoBoneIK`
-adds a Basic IK node on Forwards Solve whose effector follows the target control.
+- `CreateRig(path, mesh)` imports the mesh's bones and curves, so the rig drives that skeleton in an Anim Blueprint.
+- `AddVariable` adds a rig variable; a public one is an input of the rig's Control Rig node.
+- `AddLookAt(rig, bone, target, weight, axis, after)` adds an Aim on the bone (kept upright); a `"@Variable"` target is a
+  world location, converted to rig space with a From World node.
+- `AddToAnimBlueprint(abp, rig, after, bindVariables)` splices a Control Rig node into the AnimGraph's pose chain right
+  before Output Pose (after a foot IK rig the template already runs) or after a named node, compiles the rig, and binds
+  each public rig variable to an Anim Blueprint variable of the same name (added when missing); `SetRigInput` rebinds
+  an input or sets a constant.
+- `TrackNearestActor(abp, class, locationVar, weightVar, radius, speed)` adds the Event Blueprint Update Animation logic
+  that moves the location variable to the nearest actor of the class in range (smoothed) and blends the weight in and out.
+
+Any rig unit, by its `controlRigUnits` name, with settings and links:
+
+```
+controlRigUnits | where Category contains "Simulation" | select Name DisplayName Execute Pins
+controlRig | call AddUnit("/Game/Rigs/CR_LookAt", "SpringInterpVectorV2", "Target=@LookAtTarget, Strength=8", "", "Smooth")
+controlRig | call Connect("/Game/Rigs/CR_LookAt", "Smooth.Result", "LookAt_head_Target.Value")
+controlRig | call SetPin("/Game/Rigs/CR_LookAt", "LookAt_head.Weight", "0.8")
+unreal.asset("/Game/Rigs/CR_LookAt") | select Variables Nodes
+```
+
+Executing units run at the end of Forwards Solve (or after `After`); pure units run when their outputs are linked. Values
+are `"@Variable"` / `"@Node.Pin"` links, element names for item pins (`"head"`, `"Control:Target"`), `"(0, 1, 0)"`, enum
+names, or the pin's text form. A bare rig is built with `CreateRig(path)`, `AddBone`, `AddControl` and `AddTwoBoneIK`.
 
 ## Releases and development
 

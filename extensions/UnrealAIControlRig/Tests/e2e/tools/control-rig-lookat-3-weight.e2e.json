@@ -1,0 +1,10 @@
+{
+  "description": "a public float variable for the look-at weight",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "controlRig | call AddVariable(\"/Game/E2E/CR_HeadLookAt\", \"LookAtWeight\", \"float\", \"0\")"
+  },
+  "assert": {
+    "pattern": "\\)\\|LookAtWeight\\b"
+  }
+}

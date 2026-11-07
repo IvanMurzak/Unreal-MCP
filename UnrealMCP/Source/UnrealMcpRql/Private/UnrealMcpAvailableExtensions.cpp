@@ -40,8 +40,8 @@ namespace
 				TEXT("Landscape and Water: landscapes, waterBodies, waterZones, landscape | call Create / Sculpt / Paint / CreateLayerMaterial / Surface (ground height and slope) / Rebuild"),
 				{ TEXT("landscape"), TEXT("waterbod"), TEXT("waterzone") }, true },
 			{ TEXT("com.ivanmurzak.unreal-ai-control-rig"), TEXT("ControlRig Tools"), TEXT("UnrealAIControlRig"),
-				TEXT("Control Rig: controlRigs (hierarchy, controls, bones), controlRig | call CreateRig / AddBone / AddControl / AddTwoBoneIK"),
-				{ TEXT("controlrig") }, true },
+				TEXT("Control Rig, procedural animation without C++ (look-at, aim, foot IK): controlRigs, controlRigUnits, controlRig | call CreateRig / AddUnit / AddLookAt / AddTwoBoneIK / AddToAnimBlueprint (a rig in the Anim Blueprint) / TrackNearestActor"),
+				{ TEXT("controlrig"), TEXT("rigunit"), TEXT("cr_") }, true },
 		};
 		return Extensions;
 	}

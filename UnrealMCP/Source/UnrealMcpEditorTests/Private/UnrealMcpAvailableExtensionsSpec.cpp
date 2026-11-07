@@ -90,6 +90,7 @@ void FUnrealMcpAvailableExtensionsSpec::Define()
 		TestEqual(TEXT("an IA_ asset"), MatchedId(TEXT(R"(unreal.asset("/Game/Input/IA_Jump"))"), All), FString(TEXT("com.ivanmurzak.unreal-ai-enhanced-input")));
 		TestEqual(TEXT("water"), MatchedId(TEXT("waterBodies | count"), All), FString(TEXT("com.ivanmurzak.unreal-ai-landscape")));
 		TestEqual(TEXT("Control Rig"), MatchedId(TEXT(R"(ref("ControlRigBlueprint#12"))"), All), FString(TEXT("com.ivanmurzak.unreal-ai-control-rig")));
+		TestEqual(TEXT("a CR_ rig asset"), MatchedId(TEXT(R"(unreal.asset("/Game/Characters/Mannequins/Rigs/CR_Mannequin_FootIK"))"), All), FString(TEXT("com.ivanmurzak.unreal-ai-control-rig")));
 		TestEqual(TEXT("core sources match nothing"), MatchedId(TEXT("actors | where Label == \"Megastructure\" | count"), All), FString());
 		TestEqual(TEXT("gameplay tags are core"), MatchedId(TEXT("gameplayTags | count"), All), FString());
 		TestEqual(TEXT("only a word start counts"), MatchedId(TEXT("actors | where Label == \"SpcgX\""), All), FString());

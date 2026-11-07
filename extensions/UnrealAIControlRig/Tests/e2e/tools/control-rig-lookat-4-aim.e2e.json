@@ -1,0 +1,10 @@
+{
+  "description": "the head aims at the target variable",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "controlRig | call AddLookAt(\"/Game/E2E/CR_HeadLookAt\", \"head\", \"@LookAtTarget\", \"@LookAtWeight\")"
+  },
+  "assert": {
+    "pattern": "\\)\\|LookAt_head\\b"
+  }
+}

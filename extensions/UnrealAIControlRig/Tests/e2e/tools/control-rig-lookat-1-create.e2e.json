@@ -1,0 +1,10 @@
+{
+  "description": "a rig created from the engine mannequin's mesh",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "controlRig | call CreateRig(\"/Game/E2E/CR_HeadLookAt\", \"/Engine/Tutorial/SubEditors/TutorialAssets/Character/TutorialTPP\")"
+  },
+  "assert": {
+    "pattern": "\\bCR_HeadLookAt\\b"
+  }
+}
