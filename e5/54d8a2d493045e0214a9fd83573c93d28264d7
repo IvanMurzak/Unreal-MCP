@@ -1,0 +1,33 @@
+UnrealMCP/Source/UnrealMcpEditor/Private/UnrealMcpEditorCoordinator.cpp
+  s_b4e88c47e182f2::t_a3ce3e01a98930 617,866
+UnrealMCP/Source/UnrealMcpEditor/Private/UnrealMcpEditorCoordinator.h
+  s_b4e88c47e182f2::t_9fced25a424aeb 106
+UnrealMCP/Source/UnrealMcpRql/Private/UnrealMcpRqlTypes.cpp
+  s_b4e88c47e182f2::t_17d261562564ae 69-71,865-867,869-870
+UnrealMCP/Source/UnrealMcpRql/Private/UnrealMcpRqlTypes.h
+  s_b4e88c47e182f2::t_cb17be08ac0c11 103-106
+UnrealMCP/Source/UnrealMcpRuntime/Private/Dispatch/UnrealMcpGameThreadDispatcher.cpp
+  s_b4e88c47e182f2::t_0de3af775d4a97 121,144,158-167,222-224
+UnrealMCP/Source/UnrealMcpEditor/Private/Session/UnrealMcpModalWatch.cpp
+  s_b4e88c47e182f2::t_ed0e50c78bc4ae 18,56,58-59,61-62
+UnrealMCP/Source/UnrealMcpEditor/Private/Session/UnrealMcpModalWatch.h
+  s_b4e88c47e182f2::t_984680fc5cda69 11-14,16-19,28-29,52
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpModalWatchSpec.cpp
+  s_b4e88c47e182f2::t_94921e1d07a2a1 65
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e554d8a2d493045e0214a9fd83573c93d28264d7",
+  "prompts": {},
+  "sessions": {
+    "s_b4e88c47e182f2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ef0d1b43-913a-487a-95df-8feba021ec1f",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
