@@ -32,12 +32,57 @@ def matches(check, result):
         return False
 
 
+def evaluates(check, code, output):
+    try:
+        e2e.evaluate(check, code, output if isinstance(output, str) else json.dumps(output, indent=2))
+        return True
+    except ValueError:
+        return False
+
+
+def receipt(method, result):
+    return text_result(f'1 result\n$ref|method|result\nNiagaraOperations#4435|{method}|{result}')
+
+
+SET_INPUT = 'SetModuleInput(NiagaraSystem System, string Emitter, string Module, string Input, string Value)'
+SPAWN = 'SpawnSystem(NiagaraSystem System, Vector Location, string Label, bool bAutoActivate)'
+COLLISION = 'EnableCollision(NiagaraSystem System, string Emitter, string Mode)'
+# The Niagara authoring sequence: per check, an answer the live UE 5.7 editor gives and one that must not pass.
+AUTHORING = {
+    'niagara-templates-query.e2e.json': (
+        text_result('1 result\nPath|Kind\n/Niagara/DefaultAssets/Templates/Emitters/Fountain|Emitter'), NO_COUNT),
+    'niagara-authoring-1-create.e2e.json': (
+        receipt('CreateSystem(string Path, string Template)', 'NiagaraSystem#1297(NS_FireSmoke)'), NO_COUNT),
+    'niagara-authoring-2-smoke.e2e.json': (
+        receipt('AddEmitter(NiagaraSystem System, NiagaraEmitter Emitter, string Name)', 'Smoke'),
+        receipt('AddEmitter(NiagaraSystem System, NiagaraEmitter Emitter, string Name)', 'HangingParticulates')),
+    'niagara-authoring-3-inputs.e2e.json': (receipt(SET_INPUT, '150'), receipt(SET_INPUT, '1500')),
+    'niagara-authoring-4-collision.e2e.json': (
+        receipt(COLLISION, 'Fountain: added Particle Update/Collision; CPU Collision Type = Ray Traced; note: a | '
+                           'Smoke: added Particle Update/Collision; CPU Collision Type = Ray Traced; note: b'),
+        receipt(COLLISION, 'Fountain: added Particle Update/Collision; CPU Collision Type = Ray Traced; note: a')),
+    'niagara-authoring-5-compile.e2e.json': (
+        receipt('Compile(NiagaraSystem System)', '{Succeeded:true,Errors:[],Warnings:[]}'),
+        receipt('Compile(NiagaraSystem System)', '{Succeeded:false,Errors:[x],Warnings:[]}')),
+    'niagara-authoring-6-place.e2e.json': (receipt(SPAWN, 'NiagaraActor#1580(E2E_Campfire)'), receipt(SPAWN, 'null')),
+    'niagara-authoring-7-inputs-query.e2e.json': (
+        text_result('1 result\nValue\nRay Traced'), text_result('1 result\nValue\nAnalytical Planes')),
+    'niagara-authoring-8-unknown-emitter.e2e.json': (
+        '{"error": "error call-threw: SetModuleInput threw: NS_FireSmoke has no emitter \'Fyre\' (emitters: Fountain, Smoke)"}',
+        '{"error": "error call-threw: SetModuleInput threw: no system"}'),
+    'niagara-authoring-9-cleanup-actor.e2e.json': (
+        text_result('1 result\n$ref|method|result\nNiagaraActor#891004|Destroy()|null'), text_result('0 results')),
+    'niagara-authoring-9-cleanup-asset.e2e.json': (
+        text_result('1 result\n$ref|method|result\nEditor@1|DeleteAsset(string Path, bool bForce)|null'), NO_COUNT),
+}
+
+
 class CheckFileTests(unittest.TestCase):
     def test_every_plugin_has_valid_checks_and_no_powershell_left(self):
         for plugin, folder in release.components().items():
             self.assertTrue(e2e.checks_for(plugin), plugin)
             self.assertEqual(list((folder / 'Tests/e2e/tools').glob('*.ps1')), [], plugin)
-        self.assertEqual(len(all_checks()), 19)
+        self.assertEqual(len(all_checks()), 30)
 
     def test_every_assert_matches_its_intended_shape_and_rejects_others(self):
         for (plugin, name), check in all_checks().items():
@@ -49,6 +94,11 @@ class CheckFileTests(unittest.TestCase):
                         self.assertTrue(matches(check, good), good)
                     self.assertFalse(matches(check, NO_COUNT))
                     self.assertFalse(matches(check, text_result('value: none')))
+                elif plugin == 'UnrealAINiagara' and name in AUTHORING:
+                    good, bad = AUTHORING[name]
+                    code = 1 if check.get('expectError') else 0
+                    self.assertTrue(evaluates(check, code, good), good)
+                    self.assertFalse(evaluates(check, code, bad), bad)
                 elif check['tool'] == 'rql-schema':
                     # The schema lists the expected member/operation by name.
                     self.assertTrue(matches(check, text_result(f'Members: Name, {pattern}(Target)')))

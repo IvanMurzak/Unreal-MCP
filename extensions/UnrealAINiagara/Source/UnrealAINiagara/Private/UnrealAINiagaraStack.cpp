@@ -8,6 +8,7 @@
 #include "Dom/JsonObject.h"
 #include "Misc/StringOutputDevice.h"
 #include "NiagaraCommon.h"
+#include "NiagaraDataInterfaceColorCurve.h"
 #include "NiagaraDataInterfaceCurveBase.h"
 #include "NiagaraEmitterHandle.h"
 #include "EdGraphSchema_Niagara.h"
@@ -91,8 +92,15 @@ namespace UnrealAINiagaraStackLocal
 
 	FString Number(double Value)
 	{
-		FString Text = FString::Printf(TEXT("%.6g"), Value);
+		FString Text = FString::Printf(TEXT("%.7g"), Value); // float precision: 0.7f prints as 0.7, 1234567 stays whole
 		return Text == TEXT("-0") ? FString(TEXT("0")) : Text;
+	}
+
+	/** A number from text, scientific notation included ("1e6"); false when it is not one. */
+	bool TryNumber(const FString& Text, double& Out)
+	{
+		const FString Trimmed = Text.TrimStartAndEnd();
+		return !Trimmed.IsEmpty() && LexTryParseString(Out, *Trimmed);
 	}
 
 	/** Split @p Text at top-level commas (not inside brackets). */
@@ -160,18 +168,43 @@ namespace UnrealAINiagaraStackLocal
 		Body.ReplaceCharInline(TEXT(','), TEXT(' '));
 		TArray<FString> Tokens;
 		Body.ParseIntoArrayWS(Tokens);
+		// Named components ("(B=1,R=0,G=0)", "Z=3") land at their index, unnamed ones in order.
+		TMap<int32, double> Named;
 		for (FString Token : Tokens)
 		{
 			int32 Equals = INDEX_NONE;
-			if (Token.FindChar(TEXT('='), Equals))
+			int32 Index = INDEX_NONE;
+			if (Token.FindChar(TEXT('='), Equals) || Token.FindChar(TEXT(':'), Equals))
+			{
+				const FString Name = Token.Left(Equals).ToUpper();
+				static const TCHAR* Names[] = { TEXT("X"), TEXT("Y"), TEXT("Z"), TEXT("W"), TEXT("R"), TEXT("G"), TEXT("B"), TEXT("A") };
+				for (int32 Candidate = 0; Candidate < UE_ARRAY_COUNT(Names); ++Candidate)
+				{
+					if (Name == Names[Candidate])
+						Index = Candidate % 4;
+				}
 				Token.MidInline(Equals + 1);
-			else if (Token.FindChar(TEXT(':'), Equals))
-				Token.MidInline(Equals + 1);
+			}
 			if (Token.IsEmpty())
 				continue;
-			if (!Token.IsNumeric())
+			double Value = 0.0;
+			if (!TryNumber(Token, Value))
 				return false;
-			Out.Add(FCString::Atod(*Token));
+			if (Index == INDEX_NONE)
+				Out.Add(Value);
+			else
+				Named.Add(Index, Value);
+		}
+		if (Named.Num() > 0)
+		{
+			if (Out.Num() > 0)
+				return false; // mixed named and unnamed components
+			int32 Count = 0;
+			for (const TPair<int32, double>& Pair : Named)
+				Count = FMath::Max(Count, Pair.Key + 1);
+			Out.Init(0.0, Count);
+			for (const TPair<int32, double>& Pair : Named)
+				Out[Pair.Key] = Pair.Value;
 		}
 		return Out.Num() > 0;
 	}
@@ -248,37 +281,44 @@ namespace UnrealAINiagaraStackLocal
 		return FString::Printf(TEXT("curve(%s)"), *FString::Join(Keys, TEXT(", ")));
 	}
 
-	/** Replace the keys of @p Curve with `t: value` entries (values with one number per curve channel, or "#rrggbb" for colours). */
-	bool WriteCurve(UNiagaraDataInterfaceCurveBase& Curve, const TArray<FString>& Entries, FString& OutError)
+	using FCurveKeys = TArray<TPair<double, TArray<double>>>;
+
+	/** Parse `t: value` entries with @p Channels numbers per value ("#rrggbb" too for a colour curve); false with @p OutError. */
+	bool ParseCurve(const TArray<FString>& Entries, int32 Channels, bool bColor, FCurveKeys& OutKeys, FString& OutError)
 	{
-		TArray<UNiagaraDataInterfaceCurveBase::FCurveData> Channels;
-		Curve.GetCurveData(Channels);
-		if (Channels.Num() == 0)
-			return (OutError = FString::Printf(TEXT("%s has no curves"), *Curve.GetClass()->GetName())), false;
-		TArray<TPair<double, TArray<double>>> Keys;
 		for (const FString& Entry : Entries)
 		{
 			int32 Colon = INDEX_NONE;
-			if (!Entry.FindChar(TEXT(':'), Colon))
-				return (OutError = FString::Printf(TEXT("curve key '%s' is not 'time: value' (e.g. curve(0: 1, 1: 0))"), *Entry)), false;
-			const FString Time = Entry.Left(Colon).TrimStartAndEnd();
+			double Time = 0.0;
 			TArray<double> Values;
-			const bool bColor = Channels.Num() == 4;
-			if (!Time.IsNumeric() || !ParseFloats(Entry.Mid(Colon + 1), bColor, Values) || !FitFloats(Values, Channels.Num(), bColor))
-				return (OutError = FString::Printf(TEXT("curve key '%s': expected 'time: value' with %d number(s)%s"), *Entry, Channels.Num(),
+			if (!Entry.FindChar(TEXT(':'), Colon) || !TryNumber(Entry.Left(Colon), Time)
+				|| !ParseFloats(Entry.Mid(Colon + 1), bColor, Values) || !FitFloats(Values, Channels, bColor))
+				return (OutError = FString::Printf(TEXT("curve key '%s': expected 'time: value' with %d number(s)%s, e.g. curve(0: 1, 1: 0)"), *Entry, Channels,
 					bColor ? TEXT(" or #rrggbb") : TEXT(""))), false;
-			Keys.Add({ FCString::Atod(*Time), Values });
+			OutKeys.Add({ Time, Values });
 		}
-		if (Keys.Num() == 0)
-			return (OutError = TEXT("a curve needs at least one key: curve(0: 1, 1: 0)")), false;
+		return OutKeys.Num() > 0 || ((OutError = TEXT("a curve needs at least one key: curve(0: 1, 1: 0)")), false);
+	}
+
+	/** Replace the keys of @p Curve (each channel of it) with @p Keys; false with @p OutError when their sizes differ. */
+	bool WriteCurve(UNiagaraDataInterfaceCurveBase& Curve, const FCurveKeys& Keys, FString& OutError)
+	{
+		TArray<UNiagaraDataInterfaceCurveBase::FCurveData> Channels;
+		Curve.GetCurveData(Channels);
+		if (Channels.Num() == 0 || Keys.ContainsByPredicate([&Channels](const TPair<double, TArray<double>>& Key) { return Key.Value.Num() != Channels.Num(); }))
+			return (OutError = FString::Printf(TEXT("%s has %d curve channel(s)"), *Curve.GetClass()->GetName(), Channels.Num())), false;
 		Curve.Modify();
+#if WITH_EDITORONLY_DATA
+		// A curve that mirrors a curve asset is overwritten from it on every LUT update: own the keys instead.
+		Curve.CurveAsset = nullptr;
+#endif
 		for (int32 Channel = 0; Channel < Channels.Num(); ++Channel)
 		{
 			FRichCurve& Rich = *Channels[Channel].Curve;
 			Rich.Reset();
 			for (const TPair<double, TArray<double>>& Key : Keys)
 			{
-				const FKeyHandle Handle = Rich.AddKey(Key.Key, Key.Value[Channel]);
+				const FKeyHandle Handle = Rich.UpdateOrAddKey(Key.Key, Key.Value[Channel]);
 				Rich.SetKeyInterpMode(Handle, RCIM_Cubic);
 			}
 			Rich.AutoSetTangents();
@@ -400,7 +440,7 @@ namespace UnrealAINiagaraStackLocal
 		return true;
 	}
 
-	UNiagaraStackFunctionInput* FindInput(const FModuleRef& Module, const FString& Path, bool bFail = true)
+	UNiagaraStackFunctionInput* FindInput(const FModuleRef& Module, const FString& Path, bool bFail = true, FString* OutPath = nullptr)
 	{
 		const TArray<FInputRef> All = Inputs(Module, /*bHidden*/ true);
 		const FInputRef* Found = All.FindByPredicate([&Path](const FInputRef& Input) { return InputMatches(Input, Path); });
@@ -418,7 +458,11 @@ namespace UnrealAINiagaraStackLocal
 			Found = ByName.Num() == 1 ? ByName[0] : nullptr;
 		}
 		if (Found && !Found->bHidden)
+		{
+			if (OutPath)
+				*OutPath = Found->Path;
 			return Found->Input;
+		}
 		if (bFail)
 		{
 			TArray<FString> Names;
@@ -448,17 +492,21 @@ namespace UnrealAINiagaraStackLocal
 		return Out;
 	}
 
-	bool SetLocal(UNiagaraStackFunctionInput& Input, const FString& Text, FString& OutError)
+	/** @p Text parsed as a local value of @p Type; null with @p OutError. */
+	TSharedPtr<FStructOnScope> ParseLocal(const FNiagaraTypeDefinition& Type, const FString& Text, FString& OutError)
 	{
-		const FNiagaraTypeDefinition& Type = Input.GetInputType();
 		UScriptStruct* Struct = Type.GetScriptStruct();
 		if (!Struct)
-			return (OutError = FString::Printf(TEXT("its type %s takes no text value"), *TypeName(Type))), false;
+			return (OutError = FString::Printf(TEXT("its type %s takes no text value"), *TypeName(Type))), nullptr;
 		TSharedRef<FStructOnScope> Value = MakeShared<FStructOnScope>(Struct);
-		if (!ParseValue(Type, Text, Value->GetStructMemory(), OutError))
-			return false;
-		Input.SetLocalValue(Value);
-		return true;
+		return ParseValue(Type, Text, Value->GetStructMemory(), OutError) ? Value.ToSharedPtr() : nullptr;
+	}
+
+	/** The curve number count and colour-ness of a value-from-curve for @p Type (0: no such curve). */
+	int32 CurveChannels(const FNiagaraTypeDefinition& Type, bool& bOutColor)
+	{
+		bOutColor = Plain(Type) == FNiagaraTypeDefinition::GetColorDef();
+		return CurveScript(Type) ? FloatCount(Type) : 0;
 	}
 }
 
@@ -613,18 +661,20 @@ bool UnrealAINiagara::ParseValue(const FNiagaraTypeDefinition& InType, const FSt
 				return true;
 			}
 		}
-		if (Text.IsNumeric() && Enum.IsValidEnumValue(FCString::Atoi64(*Text)))
+		double Number = 0.0;
+		if (TryNumber(Text, Number) && Enum.IsValidEnumValue(static_cast<int64>(Number)))
 		{
-			reinterpret_cast<FNiagaraInt32*>(Memory)->Value = FCString::Atoi(*Text);
+			reinterpret_cast<FNiagaraInt32*>(Memory)->Value = static_cast<int32>(Number);
 			return true;
 		}
 		return (OutError = FString::Printf(TEXT("'%s' is not an entry of %s (%s)"), *Text, *Enum.GetName(), *EnumEntries(Enum))), false;
 	}
 	if (Type == FNiagaraTypeDefinition::GetIntDef())
 	{
-		if (!Text.IsNumeric())
+		double Number = 0.0;
+		if (!TryNumber(Text, Number))
 			return (OutError = FString::Printf(TEXT("'%s' is not an int"), *Text)), false;
-		reinterpret_cast<FNiagaraInt32*>(Memory)->Value = FMath::RoundToInt(FCString::Atod(*Text));
+		reinterpret_cast<FNiagaraInt32*>(Memory)->Value = FMath::RoundToInt(Number);
 		return true;
 	}
 	if (const int32 Count = FloatCount(Type))
@@ -756,7 +806,7 @@ UnrealAINiagara::FSystemStack::FSystemStack(UNiagaraSystem& InSystem)
 		Problem = FString::Printf(TEXT("%s uses Niagara types of a plugin that is not loaded (in %s); the Niagara editor cannot open it until that plugin is enabled%s"),
 			*System.GetName(), *FString::Join(Missing, TEXT(", ")),
 			bFluids ? TEXT(": Niagara Fluids needs the ChaosNiagara plugin (niagara | call EnableFluids() enables both; restart the editor)")
-				: TEXT(" (the editor log names the missing classes)"));
+				: TEXT(" (Niagara's physics-field modules, e.g. Wind Force, need the ChaosNiagara plugin; the editor log names the missing classes)"));
 		return;
 	}
 	FNiagaraSystemViewModelOptions Options;
@@ -880,112 +930,171 @@ UNiagaraStackScriptItemGroup* UnrealAINiagara::FSystemStack::FindStage(const FSt
 		Emitter.IsEmpty() ? TEXT("the system stack") : *FString::Printf(TEXT("emitter '%s'"), *Emitter), *Stage, *FString::Join(Names, TEXT(", "))));
 }
 
-FString UnrealAINiagara::FSystemStack::SetInput(const FString& Emitter, const FString& Module, const FString& InputPath, const FString& InValue)
+FString UnrealAINiagara::FSystemStack::SetInput(const FString& Emitter, const FString& Module, const FString& InputName, const FString& InValue)
 {
 	using namespace UnrealAINiagaraStackLocal;
+	using EMode = UNiagaraStackFunctionInput::EValueMode;
 	FModuleRef ModuleRef;
 	if (!FindModule(Emitter, Module, ModuleRef))
 		return FString();
-	UNiagaraStackFunctionInput* Input = FindInput(ModuleRef, InputPath);
+	FString InputPath;
+	UNiagaraStackFunctionInput* Input = FindInput(ModuleRef, InputName, true, &InputPath);
 	if (!Input)
 		return FString();
 	const FString Where = FString::Printf(TEXT("%s/%s.%s"), *ModuleRef.Stage, *ModuleRef.Name, *InputPath);
-	if (Input->GetHasEditCondition() && !Input->GetEditConditionEnabled())
-	{
-		if (!Input->GetShowEditConditionInline())
-		{
-			const TOptional<FNiagaraVariable> Condition = Input->GetEditConditionVariable();
-			return UnrealMcpRql::Failed<FString>(FString::Printf(TEXT("%s is inactive: it depends on another input%s; set that first"),
-				*Where, Condition.IsSet() ? *FString::Printf(TEXT(" (%s)"), *Condition->GetName().ToString()) : TEXT("")));
-		}
-		Input->SetEditConditionEnabled(true);
-	}
-
-	const FNiagaraTypeDefinition Type = Input->GetInputType();
-	const FString Value = InValue.TrimStartAndEnd();
-	FString Error;
-	TArray<FString> Arguments;
+	const auto Fail = [&Where](const FString& Error) { return UnrealMcpRql::Failed<FString>(FString::Printf(TEXT("%s: %s"), *Where, *Error)); };
 	const auto Refind = [&]() -> UNiagaraStackFunctionInput*
 	{
 		Refresh(Emitter);
 		return FindModule(Emitter, ModuleRef.Stage + TEXT("/") + ModuleRef.Name, ModuleRef) ? FindInput(ModuleRef, InputPath) : nullptr;
 	};
+	const auto Script = [](const TCHAR* Path) { return Path ? Cast<UNiagaraScript>(UnrealMcpRql::LoadObject(UNiagaraScript::StaticClass(), Path)) : nullptr; };
+	const auto CurveChild = [&]() -> UNiagaraDataInterfaceCurveBase*
+	{
+		for (const FInputRef& Child : ChildInputs(ModuleRef, InputPath))
+		{
+			if (UNiagaraDataInterfaceCurveBase* Found = CurveOf(*Child.Input))
+				return Found;
+		}
+		return nullptr;
+	};
 
+	// 1. Read and check the value; nothing changes until it is valid.
+	const FNiagaraTypeDefinition Type = Input->GetInputType();
+	const FString Value = InValue.TrimStartAndEnd();
+	const EMode Mode = Input->GetValueMode();
+	FString Error;
+	TArray<FString> Arguments;
+	enum class EKind { Random, Curve, Link, Reset, Data, Asset, Local } Kind = EKind::Local;
+	TSharedPtr<FStructOnScope> Local, Min, Max;
+	FCurveKeys Keys;
+	UNiagaraDataInterfaceCurveBase* Curve = nullptr;
+	UObject* Asset = nullptr;
 	if (CallArguments(Value, TEXT("random"), Arguments))
 	{
-		const TCHAR* ScriptPath = RandomScript(Type);
-		UNiagaraScript* Script = ScriptPath ? Cast<UNiagaraScript>(UnrealMcpRql::LoadObject(UNiagaraScript::StaticClass(), ScriptPath)) : nullptr;
-		if (!Script || Arguments.Num() != 2)
-			return UnrealMcpRql::Failed<FString>(Script
-				? FString::Printf(TEXT("random takes two values: random(min, max), e.g. random(1, 2) or random((0, 0, 100), (0, 0, 300))"))
-				: FString::Printf(TEXT("%s is a %s: random(min, max) works on float, int, vector and colour inputs"), *Where, *TypeName(Type)));
-		Input->SetDynamicInput(Script);
-		if (!(Input = Refind()))
-			return FString();
-		const TArray<FInputRef> Children = ChildInputs(ModuleRef, InputPath);
-		const FInputRef* Min = Children.FindByPredicate([](const FInputRef& R) { return Normalize(R.Path).EndsWith(TEXT("minimum")) || Normalize(R.Path).EndsWith(TEXT("min")); });
-		const FInputRef* Max = Children.FindByPredicate([](const FInputRef& R) { return Normalize(R.Path).EndsWith(TEXT("maximum")) || Normalize(R.Path).EndsWith(TEXT("max")); });
-		if (!Min || !Max)
-			return UnrealMcpRql::Failed<FString>(FString::Printf(TEXT("%s: the random dynamic input has no Minimum / Maximum inputs"), *Where));
-		if (!SetLocal(*Min->Input, Arguments[0], Error) || !SetLocal(*Max->Input, Arguments[1], Error))
-			return UnrealMcpRql::Failed<FString>(FString::Printf(TEXT("%s: %s"), *Where, *Error));
-		return FString::Printf(TEXT("random(%s, %s)"), *FormatInput(*Min->Input), *FormatInput(*Max->Input));
+		Kind = EKind::Random;
+		if (!Script(RandomScript(Type)))
+			return Fail(FString::Printf(TEXT("a %s input: random(min, max) works on float, int, vector and colour inputs"), *TypeName(Type)));
+		if (Arguments.Num() != 2)
+			return Fail(TEXT("random takes two values: random(min, max), e.g. random(1, 2) or random((0, 0, 100), (0, 0, 300))"));
+		if (!(Min = ParseLocal(Type, Arguments[0], Error)) || !(Max = ParseLocal(Type, Arguments[1], Error)))
+			return Fail(Error);
 	}
-
-	if (CallArguments(Value, TEXT("curve"), Arguments))
+	else if (CallArguments(Value, TEXT("curve"), Arguments))
 	{
-		UNiagaraDataInterfaceCurveBase* Curve = CurveOf(*Input);
-		if (!Curve)
+		Kind = EKind::Curve;
+		Curve = CurveOf(*Input);
+		if (!Curve && Mode == EMode::Dynamic)
+			Curve = CurveChild(); // a value-from-curve already set: keep it, change its keys
+		bool bColor = false;
+		int32 Channels = 0;
+		if (Curve)
 		{
-			const TCHAR* ScriptPath = CurveScript(Type);
-			UNiagaraScript* Script = ScriptPath ? Cast<UNiagaraScript>(UnrealMcpRql::LoadObject(UNiagaraScript::StaticClass(), ScriptPath)) : nullptr;
-			if (!Script)
-				return UnrealMcpRql::Failed<FString>(FString::Printf(TEXT("%s is a %s: curve(...) works on float, vector and colour inputs and on curve data interfaces"), *Where, *TypeName(Type)));
-			// A value-from-curve dynamic input: the curve is indexed by the particle's normalized age (over its life).
-			Input->SetDynamicInput(Script);
-			if (!(Input = Refind()))
-				return FString();
-			for (const FInputRef& Child : ChildInputs(ModuleRef, InputPath))
-			{
-				if ((Curve = CurveOf(*Child.Input)) != nullptr)
-					break;
-			}
-			if (!Curve)
-				return UnrealMcpRql::Failed<FString>(FString::Printf(TEXT("%s: the value-from-curve dynamic input has no curve"), *Where));
+			TArray<UNiagaraDataInterfaceCurveBase::FCurveData> Data;
+			Curve->GetCurveData(Data);
+			Channels = Data.Num();
+			bColor = Curve->IsA<UNiagaraDataInterfaceColorCurve>();
 		}
-		if (!WriteCurve(*Curve, Arguments, Error))
-			return UnrealMcpRql::Failed<FString>(FString::Printf(TEXT("%s: %s"), *Where, *Error));
-		return FormatCurve(*Curve);
+		else if ((Channels = CurveChannels(Type, bColor)) == 0 || !Script(CurveScript(Type)))
+		{
+			return Fail(FString::Printf(TEXT("a %s input: curve(...) works on float, vector and colour inputs and on curve data interfaces"), *TypeName(Type)));
+		}
+		if (!ParseCurve(Arguments, Channels, bColor, Keys, Error))
+			return Fail(Error);
 	}
-
-	if (Value.StartsWith(TEXT("@")))
+	else if (Value.StartsWith(TEXT("@")))
 	{
-		Input->SetLinkedParameterValue(FNiagaraVariableBase(Type, FName(*Value.Mid(1))));
+		Kind = EKind::Link;
 	}
 	else if (Normalize(Value) == TEXT("default"))
 	{
-		if (Input->CanReset())
-			Input->Reset();
+		Kind = EKind::Reset;
 	}
-	else if (Input->GetValueMode() == UNiagaraStackFunctionInput::EValueMode::Data)
+	else if (Mode == EMode::Data)
 	{
-		UNiagaraDataInterface* Data = Input->GetDataValueObject();
-		if (!Data || Cast<UNiagaraDataInterfaceCurveBase>(Data))
-			return UnrealMcpRql::Failed<FString>(FString::Printf(TEXT("%s is a curve: curve(time: value, ...), e.g. curve(0: 1, 1: 0)"), *Where));
-		if (!WriteDataInterface(*Data, Value, Error))
-			return UnrealMcpRql::Failed<FString>(FString::Printf(TEXT("%s: %s"), *Where, *Error));
-		return FormatDataInterface(*Data);
+		Kind = EKind::Data;
+		const UNiagaraDataInterface* Data = Input->GetDataValueObject();
+		if (!Data)
+			return Fail(TEXT("its data interface is missing; set \"default\" first"));
+		if (Cast<UNiagaraDataInterfaceCurveBase>(Data))
+			return Fail(TEXT("a curve: curve(time: value, ...), e.g. curve(0: 1, 1: 0)"));
 	}
 	else if (Type.IsUObject() && !Type.IsDataInterface())
 	{
-		UObject* Asset = Normalize(Value) == TEXT("none") ? nullptr : UnrealMcpRql::LoadObject(Type.GetClass(), Value);
+		Kind = EKind::Asset;
+		if (Mode != EMode::ObjectAsset)
+			return Fail(TEXT("it is linked or computed, not an asset value: set \"default\" first"));
+		Asset = Normalize(Value) == TEXT("none") ? nullptr : UnrealMcpRql::LoadObject(Type.GetClass(), Value);
 		if (!Asset && Normalize(Value) != TEXT("none"))
-			return UnrealMcpRql::Failed<FString>(FString::Printf(TEXT("%s takes a %s asset path; '%s' is none"), *Where, *Type.GetClass()->GetName(), *Value));
-		Input->SetObjectAssetValue(Asset);
+			return Fail(FString::Printf(TEXT("takes a %s asset path; '%s' is none"), *Type.GetClass()->GetName(), *Value));
 	}
-	else if (!SetLocal(*Input, Value, Error))
+	else if (!(Local = ParseLocal(Type, Value, Error)))
 	{
-		return UnrealMcpRql::Failed<FString>(FString::Printf(TEXT("%s: %s"), *Where, *Error));
+		return Fail(Error);
+	}
+
+	// 2. An input switched off by an inline toggle is switched on, as editing it in the stack does.
+	if (Input->GetHasEditCondition() && !Input->GetEditConditionEnabled())
+	{
+		if (!Input->GetShowEditConditionInline())
+		{
+			const TOptional<FNiagaraVariable> Condition = Input->GetEditConditionVariable();
+			return Fail(FString::Printf(TEXT("inactive: it depends on another input%s; set that first"),
+				Condition.IsSet() ? *FString::Printf(TEXT(" (%s)"), *Condition->GetName().ToString()) : TEXT("")));
+		}
+		Input->SetEditConditionEnabled(true);
+	}
+
+	// 3. Change it.
+	switch (Kind)
+	{
+	case EKind::Random:
+	{
+		Input->SetDynamicInput(Script(RandomScript(Type)));
+		if (!Refind())
+			return FString();
+		const TArray<FInputRef> Children = ChildInputs(ModuleRef, InputPath);
+		const auto Child = [&Children](const TCHAR* Long, const TCHAR* Short)
+		{
+			return Children.FindByPredicate([Long, Short](const FInputRef& R) { return Normalize(R.Path).EndsWith(Long) || Normalize(R.Path).EndsWith(Short); });
+		};
+		const FInputRef* MinInput = Child(TEXT("minimum"), TEXT("min"));
+		const FInputRef* MaxInput = Child(TEXT("maximum"), TEXT("max"));
+		if (!MinInput || !MaxInput)
+			return Fail(TEXT("the random dynamic input has no Minimum / Maximum inputs"));
+		MinInput->Input->SetLocalValue(Min.ToSharedRef());
+		MaxInput->Input->SetLocalValue(Max.ToSharedRef());
+		return FString::Printf(TEXT("random(%s, %s)"), *FormatInput(*MinInput->Input), *FormatInput(*MaxInput->Input));
+	}
+	case EKind::Curve:
+		if (!Curve)
+		{
+			// A value-from-curve dynamic input: the curve is indexed by the particle's normalized age (over its life).
+			Input->SetDynamicInput(Script(CurveScript(Type)));
+			if (!Refind())
+				return FString();
+			if (!(Curve = CurveChild()))
+				return Fail(TEXT("the value-from-curve dynamic input has no curve"));
+		}
+		return WriteCurve(*Curve, Keys, Error) ? FormatCurve(*Curve) : Fail(Error);
+	case EKind::Link:
+		Input->SetLinkedParameterValue(FNiagaraVariableBase(Type, FName(*Value.Mid(1))));
+		break;
+	case EKind::Reset:
+		if (Input->CanReset())
+			Input->Reset();
+		break;
+	case EKind::Data:
+	{
+		UNiagaraDataInterface* Data = Input->GetDataValueObject();
+		return WriteDataInterface(*Data, Value, Error) ? FormatDataInterface(*Data) : Fail(Error);
+	}
+	case EKind::Asset:
+		Input->SetObjectAssetValue(Asset);
+		break;
+	case EKind::Local:
+		Input->SetLocalValue(Local.ToSharedRef());
+		break;
 	}
 	return (Input = Refind()) != nullptr ? FormatInput(*Input) : FString();
 }

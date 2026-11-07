@@ -70,7 +70,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Niagara", meta = (BlueprintInternalUseOnly = "true"))
 	FString SetEmitterProperty(UNiagaraSystem* System, const FString& Emitter, const FString& Property, const FString& Value);
 
-	/** add a module script (a name such as "CurlNoiseForce", "Drag", "Collision", or a NiagaraScript path) to a stage ("Particle Update", "Particle Spawn", "Emitter Update", "System Update", a simulation stage) of Emitter ("" = the system stack); Index -1 = the end (moved after the modules it depends on); returns "Stage/Module" */
+	/** add a module script (a name such as "CurlNoiseForce", "Drag", "Collision", or a NiagaraScript path) to a stage ("Particle Update", "Particle Spawn", "Emitter Update", "System Update", a simulation stage) of Emitter ("" = the system stack); Index -1 = the end of the stage (the Inputs member shows its inputs); returns "Stage/Module" */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Niagara", meta = (BlueprintInternalUseOnly = "true"))
 	FString AddModule(UNiagaraSystem* System, const FString& Emitter, const FString& Stage, const FString& Module, int32 Index = -1);
 

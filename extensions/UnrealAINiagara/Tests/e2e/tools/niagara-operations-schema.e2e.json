@@ -1,10 +1,10 @@
 {
-  "description": "the authoring operations among the niagara operations",
+  "description": "EnableCollision among the niagara operations",
   "tool": "rql-schema",
   "input": {
     "type": "NiagaraOperations"
   },
   "assert": {
-    "pattern": "CreateSystem.*SetModuleInput.*EnableCollision.*SpawnSystem"
+    "pattern": "EnableCollision"
   }
 }

@@ -9,6 +9,7 @@
 #include "Misc/Guid.h"
 #include "Misc/PackageName.h"
 #include "Serialization/JsonSerializer.h"
+#include "Policies/CondensedJsonPrintPolicy.h"
 #include "Serialization/JsonWriter.h"
 
 #include "IUnrealMcpRqlModule.h"
@@ -251,6 +252,9 @@ void FUnrealAINiagaraSpec::Define()
 			TestFalse(TEXT("no Collision module"), HasModule(*System, TEXT("Fire"), TEXT("Collision")));
 			TestTrue(TEXT("emitter removed"), Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["niagara"]},"stages":[{"op":"call","method":"RemoveEmitter","args":[{"lit":"@SYS@"},{"lit":"Smoke"}]}]})RQL")));
 			TestEqual(TEXT("one emitter left"), UnrealAINiagara::EmitterNames(*System), FString(TEXT("Fire")));
+
+			// editor | call DeleteAsset("@SYS@", true)      the test leaves no unsaved asset behind
+			TestTrue(TEXT("test asset deleted"), Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"DeleteAsset","args":[{"lit":"@SYS@"},{"lit":true}]}]})RQL")));
 		});
 
 		It("fails with actionable errors that name what exists", [this]()
@@ -288,6 +292,8 @@ void FUnrealAINiagaraSpec::Define()
 				TestFalse(TEXT("a Niagara Fluids template fails while the plugin is off"), Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["niagara"]},"stages":[{"op":"call","method":"CreateSystem","args":[{"lit":"@SYS@_Fluid"},{"lit":"/NiagaraFluids/Templates/Gas/3D/Systems/Grid3D_Gas_Fire"}]}]})RQL"), &Result));
 				TestTrue(TEXT("says how to enable it"), Json(Result).Contains(TEXT("EnableFluids()")));
 			}
+			// editor | call DeleteAsset("@SYS@", true)
+			TestTrue(TEXT("test asset deleted"), Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"DeleteAsset","args":[{"lit":"@SYS@"},{"lit":true}]}]})RQL"), &Result));
 		});
 
 		It("fails defensively on a missing system and places nothing", [this]()

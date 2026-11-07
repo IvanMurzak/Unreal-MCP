@@ -15,12 +15,14 @@
 #include "Interfaces/IProjectManager.h"
 #include "Materials/MaterialInterface.h"
 #include "Misc/PackageName.h"
+#include "Misc/ScopeExit.h"
 #include "Misc/StringOutputDevice.h"
 #include "NiagaraActor.h"
 #include "NiagaraCommon.h"
 #include "NiagaraComponent.h"
 #include "NiagaraEmitter.h"
 #include "NiagaraEmitterHandle.h"
+#include "Engine/StaticMesh.h"
 #include "NiagaraMeshRendererProperties.h"
 #include "NiagaraNodeFunctionCall.h"
 #include "NiagaraNodeOutput.h"
@@ -234,19 +236,41 @@ namespace UnrealAINiagaraRqlApiLocal
 			return UnrealMcpRql::Failed<FString>(FString::Printf(TEXT("%s: %s; or use SceneDepth (GPU) or RayTrace (CPU)"), *Emitter, DistanceFieldNote));
 		const bool bNeedsGpu = bDepth || bDistanceField || (bRayTrace && bGpu);
 		const TCHAR* Keyword = bRayTrace ? TEXT("ray") : bDistanceField ? TEXT("distance") : TEXT("depth");
+		// The Collision module's query type entry for the mode (CPU / GPU Collision Type enum assets), before any change.
+		const UEnum* Enum = Cast<UEnum>(UnrealMcpRql::LoadObject(UEnum::StaticClass(),
+			bNeedsGpu ? TEXT("/Niagara/Enums/ENiagara_GPUCollisionType") : TEXT("/Niagara/Enums/ENiagara_CPUCollisionType")));
+		FString Entry;
+		TArray<FString> Entries;
+		for (int32 Index = 0; Enum && Index < Enum->NumEnums() - 1; ++Index)
+		{
+			const FString Display = Enum->GetDisplayNameTextByIndex(Index).ToString();
+			Entries.Add(Display);
+			if (Entry.IsEmpty() && Normalize(Display).Contains(Keyword))
+				Entry = Display;
+		}
+		if (Entry.IsEmpty())
+			return UnrealMcpRql::Failed<FString>(FString::Printf(TEXT("%s: the %s collision types (%s) have no %s mode%s"), *Emitter,
+				bNeedsGpu ? TEXT("GPU") : TEXT("CPU"), *FString::Join(Entries, TEXT(", ")), *Mode,
+				bRayTrace ? TEXT(": use RayTrace on a CPU emitter (SetEmitterProperty SimTarget CPU) or SceneDepth") : TEXT("")));
 
 		TArray<FString> Changes;
 		if (bNeedsGpu && !bGpu)
 		{
 			// Depth-buffer and distance-field queries run in the GPU simulation; a GPU emitter needs fixed bounds to stay visible.
-			Api.SetEmitterProperty(&System, Emitter, TEXT("SimTarget"), TEXT("GPUComputeSim"));
+			if (Api.SetEmitterProperty(&System, Emitter, TEXT("SimTarget"), TEXT("GPUComputeSim")).IsEmpty())
+				return FString();
 			Changes.Add(TEXT("SimTarget = GPU"));
 			if (Data && Data->CalculateBoundsMode == ENiagaraEmitterCalculateBoundMode::Dynamic)
 			{
-				Api.SetEmitterProperty(&System, Emitter, TEXT("CalculateBoundsMode"), TEXT("Fixed"));
-				Api.SetEmitterProperty(&System, Emitter, TEXT("FixedBounds"), TEXT("(Min=(X=-500,Y=-500,Z=-100),Max=(X=500,Y=500,Z=900))"));
-				Changes.Add(TEXT("fixed bounds 10 x 10 x 10 m (SetEmitterProperty FixedBounds to resize)"));
+				if (Api.SetEmitterProperty(&System, Emitter, TEXT("CalculateBoundsMode"), TEXT("Fixed")).IsEmpty()
+					|| Api.SetEmitterProperty(&System, Emitter, TEXT("FixedBounds"), TEXT("(Min=(X=-500,Y=-500,Z=0),Max=(X=500,Y=500,Z=800))")).IsEmpty())
+					return FString();
+				Changes.Add(TEXT("fixed bounds 10 x 10 x 8 m (SetEmitterProperty FixedBounds to resize)"));
 			}
+			// The GPU inputs show only now: read the stack again.
+			Stack.Refresh(Emitter);
+			if (bHas && !FindAnyModule(Stack, Emitter, CollisionNames, Module))
+				return UnrealMcpRql::Failed<FString>(FString::Printf(TEXT("%s: the Collision module is gone after the GPU switch"), *Emitter));
 		}
 		if (!bHas)
 		{
@@ -260,37 +284,21 @@ namespace UnrealAINiagaraRqlApiLocal
 			Api.SetModuleEnabled(&System, Emitter, Module.Stage + TEXT("/") + Module.Name, true);
 			Changes.Add(TEXT("enabled ") + Module.Name);
 		}
-		// The query type input of the simulation target (CPU / GPU Collision Type) and its entry for the mode.
-		TArray<TPair<FString, FString>> TypeInputs;
+		// The query type input of the simulation target: CPU Collision Type or GPU Collision Type.
+		FString TypeInput;
 		for (const FInputRef& Input : Inputs(Module))
 		{
 			const FString Name = Normalize(Input.Path);
-			const UEnum* Enum = Input.Input->GetInputType().GetEnum();
-			if (!Enum || !Name.Contains(TEXT("collisiontype")) || Name.Contains(bNeedsGpu ? TEXT("cpu") : TEXT("gpu")))
-				continue;
-			FString Entry;
-			TArray<FString> Entries;
-			for (int32 Index = 0; Index < Enum->NumEnums() - 1; ++Index)
-			{
-				const FString Display = Enum->GetDisplayNameTextByIndex(Index).ToString();
-				Entries.Add(Display);
-				if (Entry.IsEmpty() && Normalize(Display).Contains(Keyword))
-					Entry = Display;
-			}
-			if (Entry.IsEmpty())
-				return UnrealMcpRql::Failed<FString>(FString::Printf(TEXT("%s: the %s collision types (%s) have no %s mode%s"), *Emitter,
-					bNeedsGpu ? TEXT("GPU") : TEXT("CPU"), *FString::Join(Entries, TEXT(", ")), *Mode,
-					bRayTrace ? TEXT(": use RayTrace on a CPU emitter (SetEmitterProperty SimTarget CPU) or SceneDepth") : TEXT("")));
-			TypeInputs.Add({ Input.Path, Entry });
+			if (Input.Input->GetInputType().GetEnum() == Enum && Name.Contains(TEXT("collisiontype")))
+				TypeInput = Input.Path;
 		}
-		const FString ModuleName = Module.Stage + TEXT("/") + Module.Name;
-		for (const TPair<FString, FString>& Input : TypeInputs)
-		{
-			const FString New = Stack.SetInput(Emitter, ModuleName, Input.Key, Input.Value);
-			if (New.IsEmpty())
-				return FString();
-			Changes.Add(FString::Printf(TEXT("%s = %s"), *Input.Key, *New));
-		}
+		if (TypeInput.IsEmpty())
+			return UnrealMcpRql::Failed<FString>(FString::Printf(TEXT("%s: the Collision module shows no %s Collision Type input (see the Inputs member)"),
+				*Emitter, bNeedsGpu ? TEXT("GPU") : TEXT("CPU")));
+		const FString New = Stack.SetInput(Emitter, Module.Stage + TEXT("/") + Module.Name, TypeInput, Entry);
+		if (New.IsEmpty())
+			return FString();
+		Changes.Add(FString::Printf(TEXT("%s = %s"), *TypeInput, *New));
 		FString Out = FString::Printf(TEXT("%s: %s"), *Emitter, *FString::Join(Changes, TEXT("; ")));
 		if (bDepth)
 			Out += TEXT("; note: depth-buffer collision sees only what is on screen (RayTrace on a CPU emitter, or DistanceField, collide off screen too)");
@@ -361,7 +369,7 @@ FString UUnrealAINiagaraRqlApi::AddEmitter(UNiagaraSystem* System, UNiagaraEmitt
 	if (!Handle)
 		return UnrealMcpRql::Failed<FString>(FString::Printf(TEXT("could not add %s to %s"), *Emitter->GetName(), *System->GetName()));
 	if (!Name.IsEmpty())
-		Handle->SetName(FName(*Name), *System);
+		Added->SetName(FName(*Name));
 	Changed(*System);
 	return Handle->GetName().ToString();
 }
@@ -389,9 +397,14 @@ FString UUnrealAINiagaraRqlApi::RenameEmitter(UNiagaraSystem* System, const FStr
 	if (NewName.TrimStartAndEnd().IsEmpty())
 		return UnrealMcpRql::Failed<FString>(TEXT("the new emitter name is empty"));
 	System->Modify();
-	Handle->SetName(FName(*NewName.TrimStartAndEnd()), *System);
+	FSystemStack Stack(*System);
+	const TSharedPtr<FNiagaraEmitterHandleViewModel> HandleViewModel = Stack.Check() ? Stack.ViewModel()->GetEmitterHandleViewModelById(Handle->GetId()) : nullptr;
+	if (!HandleViewModel.IsValid())
+		return Stack.Check() ? UnrealMcpRql::Failed<FString>(FString::Printf(TEXT("emitter '%s' cannot be renamed"), *Emitter)) : FString();
+	// As the stack's rename does: the emitter's parameters in the system graph follow the new name.
+	HandleViewModel->SetName(FName(*NewName.TrimStartAndEnd()));
 	Changed(*System);
-	return Handle->GetName().ToString();
+	return HandleViewModel->GetName().ToString();
 }
 
 void UUnrealAINiagaraRqlApi::SetEmitterEnabled(UNiagaraSystem* System, const FString& Emitter, bool bEnabled)
@@ -441,11 +454,16 @@ FString UUnrealAINiagaraRqlApi::SetEmitterProperty(UNiagaraSystem* System, const
 			Text = TEXT("CPUSim");
 	}
 	void* Address = Found->ContainerPtrToValuePtr<void>(Data);
-	Instance.Emitter->Modify();
+	// Import into a scratch value first: text that does not fully import changes nothing.
+	void* Scratch = FMemory::Malloc(Found->GetSize(), Found->GetMinAlignment());
+	Found->InitializeValue(Scratch);
+	ON_SCOPE_EXIT { Found->DestroyValue(Scratch); FMemory::Free(Scratch); };
 	FStringOutputDevice Errors;
-	const TCHAR* End = Found->ImportText_Direct(*Text, Address, Instance.Emitter, PPF_None, &Errors);
+	const TCHAR* End = Found->ImportText_Direct(*Text, Scratch, Instance.Emitter, PPF_None, &Errors);
 	if (!End || !FString(End).TrimStartAndEnd().IsEmpty())
 		return UnrealMcpRql::Failed<FString>(FString::Printf(TEXT("'%s' is not a value of %s"), *Value, *Found->GetName()) + (Errors.IsEmpty() ? FString() : TEXT(": ") + Errors));
+	Instance.Emitter->Modify();
+	Found->CopyCompleteValue(Address, Scratch);
 	FPropertyChangedEvent Event(Found, EPropertyChangeType::ValueSet);
 	Instance.Emitter->PostEditChangeVersionedProperty(Event, Instance.Version);
 	Changed(*System);
@@ -536,6 +554,7 @@ FString UUnrealAINiagaraRqlApi::SetUserParameter(UNiagaraSystem* System, const F
 		return UnrealMcpRql::Failed<FString>(TEXT("the user parameter name is empty"));
 	FNiagaraUserRedirectionParameterStore& Store = System->GetExposedParameters();
 	FNiagaraVariable Variable;
+	bool bNew = false;
 	for (const FNiagaraVariableWithOffset& Existing : Store.ReadParameterVariables())
 	{
 		FString ExistingName = Existing.GetName().ToString();
@@ -587,12 +606,7 @@ FString UUnrealAINiagaraRqlApi::SetUserParameter(UNiagaraSystem* System, const F
 			}
 		}
 		Variable = FNiagaraVariable(Type, FName(*(TEXT("User.") + Short)));
-		System->Modify();
-		Store.AddParameter(Variable, true, true);
-	}
-	else
-	{
-		System->Modify();
+		bNew = true;
 	}
 
 	const FNiagaraTypeDefinition& Type = Variable.GetType();
@@ -603,28 +617,36 @@ FString UUnrealAINiagaraRqlApi::SetUserParameter(UNiagaraSystem* System, const F
 		FString Error;
 		if (!Data)
 			return UnrealMcpRql::Failed<FString>(FString::Printf(TEXT("User.%s has no data interface object"), *Short));
+		System->Modify();
 		if (!WriteDataInterface(*Data, Text, Error))
 			return UnrealMcpRql::Failed<FString>(FString::Printf(TEXT("User.%s: %s"), *Short, *Error));
 		FNiagaraSystemUpdateContext Update(System, true);
 		System->MarkPackageDirty();
 		return FormatDataInterface(*Data);
 	}
+	// Read the value first: a bad one adds no parameter and changes nothing.
+	UObject* Asset = nullptr;
+	TArray<uint8> Buffer;
 	if (Type.IsUObject())
 	{
-		UObject* Asset = Normalize(Text) == TEXT("none") ? nullptr : UnrealMcpRql::LoadObject(Type.GetClass(), Text);
+		Asset = Normalize(Text) == TEXT("none") ? nullptr : UnrealMcpRql::LoadObject(Type.GetClass(), Text);
 		if (!Asset && Normalize(Text) != TEXT("none"))
 			return UnrealMcpRql::Failed<FString>(FString::Printf(TEXT("User.%s takes a %s asset path; '%s' is none"), *Short, *Type.GetClass()->GetName(), *Text));
-		Store.SetUObject(Asset, Variable);
 	}
 	else
 	{
-		TArray<uint8> Buffer;
 		Buffer.SetNumZeroed(Type.GetSize());
 		FString Error;
 		if (!ParseValue(Type, Text, Buffer.GetData(), Error))
 			return UnrealMcpRql::Failed<FString>(FString::Printf(TEXT("User.%s: %s"), *Short, *Error));
-		Store.SetParameterData(Buffer.GetData(), Variable, true);
 	}
+	System->Modify();
+	if (bNew)
+		Store.AddParameter(Variable, true, true);
+	if (Type.IsUObject())
+		Store.SetUObject(Asset, Variable);
+	else
+		Store.SetParameterData(Buffer.GetData(), Variable, true);
 	{
 		// Placed effects restart with the new default (as an edit in the User Parameters panel does).
 		FNiagaraSystemUpdateContext Update(System, true);
@@ -632,8 +654,8 @@ FString UUnrealAINiagaraRqlApi::SetUserParameter(UNiagaraSystem* System, const F
 	System->MarkPackageDirty();
 	if (Type.IsUObject())
 	{
-		const UObject* Asset = Store.GetUObject(Variable);
-		return Asset ? Asset->GetPathName() : FString(TEXT("None"));
+		const UObject* Stored = Store.GetUObject(Variable);
+		return Stored ? Stored->GetPathName() : FString(TEXT("None"));
 	}
 	const uint8* Data = Store.GetParameterData(Variable);
 	return Data ? FormatValue(Type, Data) : FString();
@@ -650,6 +672,8 @@ FString UUnrealAINiagaraRqlApi::EnableCollision(UNiagaraSystem* System, const FS
 	if (Names.Num() == 0)
 		return FString();
 	System->Modify();
+	// Emitters done before a failure keep their changes (a call is not rolled back): mark them on every exit.
+	ON_SCOPE_EXIT { Changed(*System); };
 	TArray<FString> Report;
 	for (const FString& Name : Names)
 	{
@@ -664,7 +688,6 @@ FString UUnrealAINiagaraRqlApi::EnableCollision(UNiagaraSystem* System, const FS
 			return FString();
 		Report.Add(Line);
 	}
-	Changed(*System);
 	return FString::Join(Report, TEXT(" | "));
 }
 
@@ -678,7 +701,7 @@ int32 UUnrealAINiagaraRqlApi::SetMaterial(UNiagaraSystem* System, const FString&
 	if (!Material)
 		return UnrealMcpRql::Failed<int32>(TEXT("SetMaterial needs a material (an asset path)"));
 	const TArray<UNiagaraRendererProperties*>& Renderers = Data->GetRenderers();
-	if (Renderer >= Renderers.Num())
+	if (Renderer < -1 || Renderer >= Renderers.Num())
 		return UnrealMcpRql::Failed<int32>(FString::Printf(TEXT("emitter '%s' has %d renderer(s): Renderer is 0 to %d, or -1 for all"), *Emitter, Renderers.Num(), Renderers.Num() - 1));
 	int32 Count = 0;
 	TArray<FString> Kinds;
@@ -693,7 +716,9 @@ int32 UUnrealAINiagaraRqlApi::SetMaterial(UNiagaraSystem* System, const FString&
 		{
 			Mesh->Modify();
 			Mesh->bOverrideMaterials = true;
-			const int32 Slots = FMath::Max(1, Mesh->OverrideMaterials.Num());
+			int32 Slots = FMath::Max(1, Mesh->OverrideMaterials.Num());
+			for (const FNiagaraMeshRendererMeshProperties& Entry : Mesh->Meshes)
+				Slots = FMath::Max(Slots, Entry.Mesh ? Entry.Mesh->GetStaticMaterials().Num() : 0);
 			Mesh->OverrideMaterials.SetNum(Slots);
 			for (FNiagaraMeshMaterialOverride& Override : Mesh->OverrideMaterials)
 				Override.ExplicitMat = Material;

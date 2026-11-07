@@ -8,7 +8,7 @@ An optional editor plugin in the [Unreal MCP monorepository](../../README.md), w
 
 - Unreal Engine 5.7 or later (the shared extension suite verifies UE 5.7 and 5.8).
 - Unreal MCP 0.26.0 or later (the RQL runtime and operations these extensions use), installed in the same project.
-- Engine plugins: `Niagara`. The installer enables these dependencies.
+- Engine plugins: `Niagara`, `ChaosNiagara` (both on by default; Niagara's own modules such as Wind Force and the Niagara Fluids modules use ChaosNiagara types, and the Niagara editor cannot open systems that use them without it). The installer enables these dependencies.
 - A C++ toolchain for your Unreal Engine installation. Extension releases contain source files and must be compiled for your project and engine.
 
 ## Install

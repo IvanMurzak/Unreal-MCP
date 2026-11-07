@@ -5,6 +5,6 @@
     "query": "niagara | call AddEmitter(\"/Game/E2E/NS_FireSmoke\", \"/Niagara/DefaultAssets/Templates/Emitters/HangingParticulates\", \"Smoke\")"
   },
   "assert": {
-    "pattern": "Smoke"
+    "pattern": "\\)\\|Smoke\\b"
   }
 }

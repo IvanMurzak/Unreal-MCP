@@ -7,7 +7,8 @@
   "version": "0.2.0",
   "minCoreVersion": "0.26.0",
   "enginePlugins": [
-    "Niagara"
+    "Niagara",
+    "ChaosNiagara"
   ],
   "tools": [],
   "_comment": "Install-catalog metadata (one unreal-mcp-cli ExtensionDescriptor). 'version' is the .uplugin VersionName; change both with `python scripts/extension_release.py bump --plugin <Plugin> --version <x.y.z>`. 'tools' is empty: the extension adds an RQL module (docs/rql.md), not MCP tools. 'minCoreVersion' is the lowest supported Unreal-MCP core; 'enginePlugins' are the engine plugins the installer enables."
