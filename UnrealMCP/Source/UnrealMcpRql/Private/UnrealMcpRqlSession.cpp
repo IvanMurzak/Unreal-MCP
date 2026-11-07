@@ -386,8 +386,9 @@ void FUnrealMcpRqlSession::ConfigureMutations()
 			{
 				if (Key.StartsWith(TEXT("spawn")))
 					continue;
+				// An object argument by identity: its text is only its type name (two Blueprints both read "Blueprint").
 				for (const rql::Value& Argument : Record.args)
-					Key += TEXT("|") + UnrealMcpRqlFromStd(rql::to_text(Argument));
+					Key += TEXT("|") + (Argument.is_object() ? FString::Printf(TEXT("%p"), Argument.ptr()) : UnrealMcpRqlFromStd(rql::to_text(Argument)));
 			}
 			bool bTwice = false;
 			Called.Add({ Record.item.ptr(), Key }, &bTwice);

@@ -1,0 +1,10 @@
+{
+  "description": "the rebindable actions are listed",
+  "tool": "rql-query",
+  "input": {
+    "query": "inputActions | where PlayerMappable != null | select Name PlayerMappable"
+  },
+  "assert": {
+    "pattern": "IA_Handbrake"
+  }
+}

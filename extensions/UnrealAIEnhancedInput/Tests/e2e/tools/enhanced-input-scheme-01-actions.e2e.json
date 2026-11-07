@@ -1,0 +1,10 @@
+{
+  "description": "the on-foot and vehicle actions created (crouch and interact fire once per press)",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "[[\"/Game/E2E/Input/IA_Move\", \"Axis2D\", \"\"], [\"/Game/E2E/Input/IA_Look\", \"Axis2D\", \"\"], [\"/Game/E2E/Input/IA_Jump\", \"Boolean\", \"\"], [\"/Game/E2E/Input/IA_Sprint\", \"Boolean\", \"\"], [\"/Game/E2E/Input/IA_Crouch\", \"Boolean\", \"Pressed\"], [\"/Game/E2E/Input/IA_Interact\", \"Boolean\", \"Pressed\"], [\"/Game/E2E/Input/IA_Throttle\", \"Axis1D\", \"\"], [\"/Game/E2E/Input/IA_Steer\", \"Axis1D\", \"\"], [\"/Game/E2E/Input/IA_Handbrake\", \"Boolean\", \"\"]] | call enhancedInput.CreateAction($[0], $[1], $[2])"
+  },
+  "assert": {
+    "pattern": "IA_Handbrake"
+  }
+}

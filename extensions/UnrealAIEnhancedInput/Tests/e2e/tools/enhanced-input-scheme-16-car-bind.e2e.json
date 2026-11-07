@@ -1,0 +1,10 @@
+{
+  "description": "the throttle axis drives the car's movement input",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "enhancedInput | call BindAction(\"/Game/E2E/BP_E2E_Car\", \"/Game/E2E/Input/IA_Throttle\", \"Triggered\", \"AddMovementInput\")"
+  },
+  "assert": {
+    "pattern": "K2Node_CallFunction#"
+  }
+}

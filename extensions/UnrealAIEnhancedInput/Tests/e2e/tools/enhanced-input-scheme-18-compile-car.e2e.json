@@ -1,0 +1,10 @@
+{
+  "description": "the car compiles",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "unreal.asset(\"/Game/E2E/BP_E2E_Car\") | call Compile()"
+  },
+  "assert": {
+    "pattern": "Succeeded:true"
+  }
+}

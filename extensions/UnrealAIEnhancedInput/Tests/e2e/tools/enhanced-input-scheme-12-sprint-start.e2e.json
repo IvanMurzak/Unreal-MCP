@@ -1,0 +1,10 @@
+{
+  "description": "a StartSprint custom event",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "unreal.asset(\"/Game/E2E/BP_E2E_Hero\").EventGraph | call AddCustomEvent(\"StartSprint\")"
+  },
+  "assert": {
+    "pattern": "K2Node_CustomEvent#"
+  }
+}

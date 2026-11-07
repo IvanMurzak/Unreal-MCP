@@ -1,0 +1,11 @@
+{
+  "description": "a Pawn Blueprint for the car",
+  "tool": "blueprint-create",
+  "input": {
+    "path": "/Game/E2E/BP_E2E_Car",
+    "parentClass": "Pawn"
+  },
+  "assert": {
+    "pattern": "BP_E2E_Car"
+  }
+}

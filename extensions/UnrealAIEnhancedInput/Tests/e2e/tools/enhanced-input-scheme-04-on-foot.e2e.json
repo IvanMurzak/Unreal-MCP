@@ -1,0 +1,10 @@
+{
+  "description": "jump, sprint, crouch, interact and look on keyboard, mouse and gamepad",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "[[\"/Game/E2E/Input/IA_Jump\", \"SpaceBar\"], [\"/Game/E2E/Input/IA_Jump\", \"Gamepad_FaceButton_Bottom\"], [\"/Game/E2E/Input/IA_Sprint\", \"LeftShift\"], [\"/Game/E2E/Input/IA_Sprint\", \"Gamepad_LeftThumbstick\"], [\"/Game/E2E/Input/IA_Crouch\", \"C\"], [\"/Game/E2E/Input/IA_Crouch\", \"Gamepad_FaceButton_Right\"], [\"/Game/E2E/Input/IA_Interact\", \"E\"], [\"/Game/E2E/Input/IA_Interact\", \"Gamepad_FaceButton_Left\"], [\"/Game/E2E/Input/IA_Look\", \"Mouse2D\"], [\"/Game/E2E/Input/IA_Look\", \"Gamepad_Right2D\"]] | call enhancedInput.AddMapping(\"/Game/E2E/Input/IMC_OnFoot\", $[0], $[1])"
+  },
+  "assert": {
+    "pattern": "10 results"
+  }
+}

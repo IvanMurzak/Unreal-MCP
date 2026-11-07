@@ -18,8 +18,12 @@ public class UnrealAIEnhancedInput : ModuleRules
 		{
 			"CoreUObject",
 			"Engine",
-			// FJsonValue: the KeyMappings member.
+			// FJsonValue: the KeyMappings / PlayerMappable / InputSetup members.
 			"Json",
+			// The inputMappings source lists the project's mapping contexts.
+			"AssetRegistry",
+			// UEnhancedInputDeveloperSettings (EnableUserSettings) derives from UDeveloperSettingsBackedByCVars.
+			"DeveloperSettings",
 			// The RQL module seam: IUnrealMcpRqlModule.h (sources, operations, members, guides, the editor-module template)
 			// and UnrealMcpRqlTools.h (the specs run plans) live in the Unreal-MCP plugin's UnrealMcpRql module; the
 			// matching `UnrealMCP` plugin dependency is in the .uplugin "Plugins" array.

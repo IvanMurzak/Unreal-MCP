@@ -21,10 +21,12 @@ namespace
 				TEXT("Niagara VFX: niagaraSystems (systems and their emitters), niagara | call SpawnSystem"),
 				{ TEXT("niagara") }, true },
 			{ TEXT("com.ivanmurzak.unreal-ai-enhanced-input"), TEXT("EnhancedInput Tools"), TEXT("UnrealAIEnhancedInput"),
-				TEXT("Enhanced Input: inputActions, inputContexts (key mappings), enhancedInput | call CreateAction / CreateContext / "
-					"AddMapping / AddActionEvent / AddMappingContextOnBeginPlay"),
+				TEXT("Enhanced Input control schemes: inputActions, inputContexts, inputMappings; enhancedInput | call CreateAction / "
+					"CreateContext / AddMapping (keyboard, mouse, gamepad), triggers and modifiers (hold, tap, chords, dead zones), "
+					"SetPlayerMappable (rebindable keys), AddMappingContextOnPossess (swap schemes, e.g. vehicles), BindAction"),
 				{ TEXT("enhancedinput"), TEXT("inputaction"), TEXT("inputcontext"), TEXT("inputmapping"), TEXT("mappingcontext"),
-					TEXT("addmappingcontext"), TEXT("addactionevent"), TEXT("ia_"), TEXT("imc_") }, true },
+					TEXT("addmappingcontext"), TEXT("addactionevent"), TEXT("inputtrigger"), TEXT("inputmodifier"), TEXT("playermappable"),
+					TEXT("ia_"), TEXT("imc_") }, true },
 			{ TEXT("com.ivanmurzak.unreal-ai-pcg"), TEXT("PCG Tools"), TEXT("UnrealAIPCG"),
 				TEXT("Procedural Content Generation: pcgGraphs, PCG components, pcg | call AddComponent / Generate"),
 				{ TEXT("pcg") }, true },
