@@ -5,23 +5,29 @@
 
 #include "CoreMinimal.h"
 #include "Misc/AutomationTest.h"
+#include <limits>
 #include "Dom/JsonObject.h"
 
 #include "IUnrealMcpRqlModule.h"
 #include "UnrealMcpRqlTools.h"
 
 #include "Engine/CollisionProfile.h"
+#include "Engine/HitResult.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "Landscape.h"
 #include "LandscapeDataAccess.h"
 #include "LandscapeEdit.h"
 #include "LandscapeEditLayer.h"
+#include "LandscapeHeightfieldCollisionComponent.h"
 #include "LandscapeInfo.h"
 #include "LandscapeLayerInfoObject.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialExpressionLandscapeLayerBlend.h"
+#include "Misc/App.h"
 #include "Misc/Guid.h"
+#include "Misc/ScopeExit.h"
+#include "Policies/CondensedJsonPrintPolicy.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
 
@@ -37,6 +43,36 @@
 
 BEGIN_DEFINE_SPEC(FUnrealAILandscapeSpec, "UnrealAILandscape",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+	/** The compact JSON text of an RQL result (empty when there is none). */
+	static FString LandscapeSpecJson(const TSharedPtr<FJsonObject>& Result)
+	{
+		FString Text;
+		if (Result.IsValid())
+			FJsonSerializer::Serialize(Result.ToSharedRef(), TJsonWriterFactory<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>::Create(&Text));
+		return Text;
+	}
+
+	/** The object in the "result" column of the first row of an RQL call result (null when there is none). */
+	static TSharedPtr<FJsonObject> LandscapeSpecCallResult(const TSharedPtr<FJsonObject>& Result)
+	{
+		const TArray<TSharedPtr<FJsonValue>>* Columns = nullptr;
+		const TArray<TSharedPtr<FJsonValue>>* Rows = nullptr;
+		if (!Result.IsValid() || !Result->TryGetArrayField(TEXT("columns"), Columns) || !Result->TryGetArrayField(TEXT("rows"), Rows) || Rows->IsEmpty())
+			return nullptr;
+		const int32 Column = Columns->IndexOfByPredicate([](const TSharedPtr<FJsonValue>& Name) { return Name->AsString() == TEXT("result"); });
+		const TArray<TSharedPtr<FJsonValue>>& Row = (*Rows)[0]->AsArray();
+		return Row.IsValidIndex(Column) && Row[Column]->Type == EJson::Object ? Row[Column]->AsObject() : nullptr;
+	}
+
+	/** Destroy every proxy of @p Landscape (on a World Partition map the components live in streaming proxies). */
+	static void LandscapeSpecDestroy(ALandscape* Landscape)
+	{
+		TArray<ALandscapeProxy*> Proxies;
+		if (ULandscapeInfo* Info = Landscape->GetLandscapeInfo())
+			Info->ForEachLandscapeProxy([&Proxies](ALandscapeProxy* Proxy) { Proxies.Add(Proxy); return true; });
+		for (ALandscapeProxy* Proxy : Proxies)
+			Proxy->Destroy();
+	}
 END_DEFINE_SPEC(FUnrealAILandscapeSpec)
 
 void FUnrealAILandscapeSpec::Define()
@@ -110,7 +146,7 @@ void FUnrealAILandscapeSpec::Define()
 			bool bOk = false;
 			const FString Schema = UnrealMcpRqlTools::Schema(TEXT("LandscapeOperations"), bOk);
 			TestTrue(TEXT("schema ok"), bOk);
-			for (const TCHAR* Method : { TEXT("Create"), TEXT("Sculpt"), TEXT("Paint"), TEXT("CreateLayerMaterial") })
+			for (const TCHAR* Method : { TEXT("Create"), TEXT("Sculpt"), TEXT("Paint"), TEXT("CreateLayerMaterial"), TEXT("Surface"), TEXT("Rebuild") })
 				TestTrue(*FString::Printf(TEXT("lists %s"), Method), Schema.Contains(FString(Method) + TEXT("(")));
 		});
 
@@ -180,9 +216,7 @@ void FUnrealAILandscapeSpec::Define()
 			// landscapes | where Label == "@LABEL@" | select PaintLayers ComponentCount LandscapeMaterial
 			TSharedPtr<FJsonObject> Layers;
 			Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["landscapes"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"@LABEL@"}]}},{"op":"select","fields":[{"name":"PaintLayers","expr":{"path":["PaintLayers"]}},{"name":"ComponentCount","expr":{"path":["ComponentCount"]}},{"name":"LandscapeMaterial","expr":{"path":["LandscapeMaterial"]}}]}]})RQL"), false, &Layers);
-			FString LayersText;
-			if (Layers.IsValid())
-				FJsonSerializer::Serialize(Layers.ToSharedRef(), TJsonWriterFactory<>::Create(&LayersText));
+			const FString LayersText = LandscapeSpecJson(Layers);
 			TestTrue(*FString::Printf(TEXT("PaintLayers lists Grass (%s)"), *LayersText.Left(300)), LayersText.Contains(TEXT("Grass")));
 			const int32 GrassIndex = Info ? Info->GetLayerInfoIndex(FName(TEXT("Grass"))) : INDEX_NONE;
 			ULandscapeLayerInfoObject* Grass = GrassIndex != INDEX_NONE ? Info->Layers[GrassIndex].LayerInfoObj.Get() : nullptr;
@@ -210,10 +244,138 @@ void FUnrealAILandscapeSpec::Define()
 			// landscape | call Sculpt(unreal.find("@LABEL@"), [0, 0, 0], 0, 300)
 			TestFalse(TEXT("a zero radius is refused"), Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["landscape"]},"stages":[{"op":"call","method":"Sculpt","args":[{"call":"find","on":{"path":["unreal"]},"args":[{"lit":"@LABEL@"}]},{"list":[{"lit":0},{"lit":0},{"lit":0}]},{"lit":0},{"lit":300}]}]})RQL"), true));
 
-			TArray<ALandscapeProxy*> Proxies;
-			Info->ForEachLandscapeProxy([&Proxies](ALandscapeProxy* Proxy) { Proxies.Add(Proxy); return true; });
-			for (ALandscapeProxy* Proxy : Proxies)
-				Proxy->Destroy();
+			LandscapeSpecDestroy(Landscape);
+		});
+	});
+
+	Describe("ground", [this]()
+	{
+		It("creates a 2 km landscape in 8 x 8 large components (32 x 32 small ones took minutes on a World Partition map)", [this]()
+		{
+			const FString Label = TEXT("RqlSpecIsland_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+			// landscape | call Create("@LABEL@", [-800000, 0, 0], 2000)
+			const double Start = FPlatformTime::Seconds();
+			TestTrue(TEXT("landscape created"), UnrealMcpRqlTools::RunPlan(FString(TEXT(R"RQL({"rql":"0.1","source":{"path":["landscape"]},"stages":[{"op":"call","method":"Create","args":[{"lit":"@LABEL@"},{"list":[{"lit":-800000},{"lit":0},{"lit":0}]},{"lit":2000}]}]})RQL")).Replace(TEXT("@LABEL@"), *Label), true));
+			AddInfo(FString::Printf(TEXT("Create 2000 m: %.1f s"), FPlatformTime::Seconds() - Start));
+			ALandscape* Landscape = nullptr;
+			for (TActorIterator<ALandscape> It(UnrealMcpRql::EditorWorld()); It; ++It)
+				Landscape = It->GetActorLabel() == Label ? *It : Landscape;
+			if (!TestNotNull(TEXT("the landscape is in the editor world"), Landscape))
+				return;
+			ON_SCOPE_EXIT { LandscapeSpecDestroy(Landscape); };
+			int32 Components = 0;
+			Landscape->GetLandscapeInfo()->ForAllLandscapeComponents([&Components](ULandscapeComponent*) { ++Components; });
+			TestEqual(TEXT("8 x 8 components"), Components, 64);
+			TestEqual(TEXT("254-quad components (2 x 2 sections of 127)"), Landscape->ComponentSizeQuads, 254);
+			FIntRect Whole;
+			if (TestTrue(TEXT("landscape extent"), Landscape->GetLandscapeInfo()->GetLandscapeExtent(Whole)))
+			{
+				const FTransform ToWorld = Landscape->LandscapeActorToWorld();
+				const double Width = ToWorld.TransformPosition(FVector(Whole.Max.X, 0, 0)).X - ToWorld.TransformPosition(FVector(Whole.Min.X, 0, 0)).X;
+				TestTrue(*FString::Printf(TEXT("2000 m wide (%.0f cm)"), Width), FMath::IsNearlyEqual(Width, 200000.0, 1.0));
+			}
+		});
+
+		It("returns from Create, Sculpt and Paint with the landscape merged: collision, traces and Surface see the new ground at once", [this]()
+		{
+			// Away from the other specs' actors, so the trace below meets only this landscape.
+			const FString Label = TEXT("RqlSpecGround_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+			const double OriginX = 400000.0;
+			auto Run = [&Label](const FString& Plan, bool bMutate, TSharedPtr<FJsonObject>* Out = nullptr)
+			{
+				return UnrealMcpRqlTools::RunPlan(Plan.Replace(TEXT("@LABEL@"), *Label), bMutate, Out);
+			};
+			// landscape | call Surface(unreal.find("@LABEL@"), [X, Y, 0]): the returned struct (an empty object when it failed)
+			auto Surface = [this, &Run](double X, double Y)
+			{
+				TSharedPtr<FJsonObject> Result;
+				const FString Plan = FString(TEXT(R"RQL({"rql":"0.1","source":{"path":["landscape"]},"stages":[{"op":"call","method":"Surface","args":[{"call":"find","on":{"path":["unreal"]},"args":[{"lit":"@LABEL@"}]},{"list":[{"lit":@X@},{"lit":@Y@},{"lit":0}]}]}]})RQL"))
+					.Replace(TEXT("@X@"), *FString::SanitizeFloat(X)).Replace(TEXT("@Y@"), *FString::SanitizeFloat(Y));
+				TestTrue(*FString::Printf(TEXT("Surface(%.0f, %.0f) runs"), X, Y), Run(Plan, true, &Result));
+				const TSharedPtr<FJsonObject> Ground = LandscapeSpecCallResult(Result);
+				return Ground.IsValid() ? Ground.ToSharedRef() : MakeShared<FJsonObject>();
+			};
+			auto Number = [](const TSharedRef<FJsonObject>& Ground, const TCHAR* Field)
+			{
+				double Value = std::numeric_limits<double>::quiet_NaN();
+				Ground->TryGetNumberField(Field, Value);
+				return Value;
+			};
+			auto Text = [](const TSharedRef<FJsonObject>& Ground) { return LandscapeSpecJson(Ground); };
+
+			// landscape | call Create("@LABEL@", [400000, 0, 0], 20)
+			TestTrue(TEXT("landscape created"), Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["landscape"]},"stages":[{"op":"call","method":"Create","args":[{"lit":"@LABEL@"},{"list":[{"lit":400000},{"lit":0},{"lit":0}]},{"lit":20}]}]})RQL"), true));
+			ALandscape* Landscape = nullptr;
+			for (TActorIterator<ALandscape> It(UnrealMcpRql::EditorWorld()); It; ++It)
+				Landscape = It->GetActorLabel() == Label ? *It : Landscape;
+			if (!TestNotNull(TEXT("the landscape is in the editor world"), Landscape))
+				return;
+			ON_SCOPE_EXIT { LandscapeSpecDestroy(Landscape); };
+
+			// landscapes | where Label == "@LABEL@" | select Bounds
+			TSharedPtr<FJsonObject> Bounds;
+			Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["landscapes"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"@LABEL@"}]}},{"op":"select","fields":[{"name":"Bounds","expr":{"path":["Bounds"]}}]}]})RQL"), false, &Bounds);
+			const FString BoundsText = LandscapeSpecJson(Bounds);
+			TestTrue(*FString::Printf(TEXT("Bounds: 20 x 20 m around X 400000, flat at Z 0 (%s)"), *BoundsText.Left(300)),
+				BoundsText.Contains(TEXT("\"SizeMeters\":[20,20]")) && BoundsText.Contains(TEXT("\"Min\":[399000,-1000,0]")) && BoundsText.Contains(TEXT("\"Max\":[401000,1000,0]")));
+
+			const TSharedRef<FJsonObject> Flat = Surface(OriginX, 0.0);
+			TestTrue(*FString::Printf(TEXT("flat ground: inside, height 0, slope 0 (%s)"), *Text(Flat)), Flat->HasTypedField<EJson::Boolean>(TEXT("Inside")) && Flat->GetBoolField(TEXT("Inside"))
+				&& FMath::Abs(Number(Flat, TEXT("Height"))) < 1.0 && FMath::Abs(Number(Flat, TEXT("Slope"))) < 0.5);
+			const TSharedRef<FJsonObject> Outside = Surface(OriginX + 5000.0, 0.0);
+			TestTrue(*FString::Printf(TEXT("off the landscape: Inside false (%s)"), *Text(Outside)), Outside->HasTypedField<EJson::Boolean>(TEXT("Inside")) && !Outside->GetBoolField(TEXT("Inside")));
+			const TSharedRef<FJsonObject> Corner = Surface(OriginX + 1000.0, 1000.0);
+			TestTrue(*FString::Printf(TEXT("the far corner is on the landscape (%s)"), *Text(Corner)), Corner->HasTypedField<EJson::Boolean>(TEXT("Inside")) && Corner->GetBoolField(TEXT("Inside"))
+				&& FMath::Abs(Number(Corner, TEXT("Height"))) < 1.0);
+
+			if (!FApp::CanEverRender())
+			{
+				// -nullrhi: a landscape merges its edit layers on the GPU, so the edit is checked only in a rendering editor.
+				AddInfo(TEXT("this editor does not render (-nullrhi): the merge after Sculpt is checked only in a rendering editor"));
+				return;
+			}
+
+			// landscape | call Sculpt(unreal.find("@LABEL@"), [400000, 0, 0], 500, 300)
+			TestTrue(TEXT("hill raised"), Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["landscape"]},"stages":[{"op":"call","method":"Sculpt","args":[{"call":"find","on":{"path":["unreal"]},"args":[{"lit":"@LABEL@"}]},{"list":[{"lit":400000},{"lit":0},{"lit":0}]},{"lit":500},{"lit":300}]}]})RQL"), true));
+			// No editor frame has passed since the call: everything below must already see the hill.
+			const FVector Top(OriginX, 0.0, 0.0);
+			const TOptional<float> Collision = Landscape->GetHeightAtLocation(Top, EHeightfieldSource::Complex);
+			TestTrue(*FString::Printf(TEXT("the collision heightfield has the 3 m hill (%.1f cm)"), Collision.Get(-1.0f)), Collision.IsSet() && FMath::IsNearlyEqual(Collision.GetValue(), 300.0f, 25.0f));
+			FHitResult Hit;
+			const bool bHit = Landscape->GetWorld()->LineTraceSingleByChannel(Hit, Top + FVector(0, 0, 100000), Top - FVector(0, 0, 100000), ECC_Visibility);
+			TestTrue(*FString::Printf(TEXT("a line trace hits the hill top (%.1f cm)"), bHit ? Hit.ImpactPoint.Z : -1.0), bHit && FMath::IsNearlyEqual(Hit.ImpactPoint.Z, 300.0, 25.0));
+			{
+				ULandscapeInfo* Info = Landscape->GetLandscapeInfo();
+				FIntRect Whole;
+				if (TestTrue(TEXT("landscape extent"), Info && Info->GetLandscapeExtent(Whole)))
+				{
+					FLandscapeEditDataInterface Merged(Info); // no edit layer: the final heightmap the editor renders
+					uint16 Value = 0;
+					const int32 X = (Whole.Min.X + Whole.Max.X) / 2;
+					const int32 Y = (Whole.Min.Y + Whole.Max.Y) / 2;
+					Merged.GetHeightDataFast(X, Y, X, Y, &Value, 0);
+					const double Cm = (static_cast<double>(Value) - LandscapeDataAccess::MidValue) * Landscape->GetActorScale3D().Z * LANDSCAPE_ZSCALE;
+					TestTrue(*FString::Printf(TEXT("the rendered (merged) heightmap has the hill (%.1f cm)"), Cm), FMath::IsNearlyEqual(Cm, 300.0, 25.0));
+				}
+			}
+			const TSharedRef<FJsonObject> Hill = Surface(OriginX, 0.0);
+			TestTrue(*FString::Printf(TEXT("Surface reads the hill top, flat on top (%s)"), *Text(Hill)),
+				FMath::IsNearlyEqual(Number(Hill, TEXT("Height")), 300.0, 25.0) && Number(Hill, TEXT("Slope")) < 5.0);
+			const TSharedRef<FJsonObject> Side = Surface(OriginX + 250.0, 0.0);
+			const TOptional<float> SideCollision = Landscape->GetHeightAtLocation(FVector(OriginX + 250.0, 0.0, 0.0), EHeightfieldSource::Complex);
+			const double SideSlope = Number(Side, TEXT("Slope"));
+			TestTrue(*FString::Printf(TEXT("Surface on the hillside: the collision height, a slope of 20 to 60 degrees (%s)"), *Text(Side)),
+				SideCollision.IsSet() && FMath::IsNearlyEqual(Number(Side, TEXT("Height")), static_cast<double>(SideCollision.GetValue()), 0.5)
+				&& SideSlope > 20.0 && SideSlope < 60.0);
+
+			// landscape | call Paint(unreal.find("@LABEL@"), "Grass", [400000, 0, 0], 0)
+			TestTrue(TEXT("layer painted"), Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["landscape"]},"stages":[{"op":"call","method":"Paint","args":[{"call":"find","on":{"path":["unreal"]},"args":[{"lit":"@LABEL@"}]},{"lit":"Grass"},{"list":[{"lit":400000},{"lit":0},{"lit":0}]},{"lit":0}]}]})RQL"), true));
+
+			// landscape | call Rebuild(unreal.find("@LABEL@"))
+			TSharedPtr<FJsonObject> Rebuilt;
+			TestTrue(TEXT("rebuilt"), Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["landscape"]},"stages":[{"op":"call","method":"Rebuild","args":[{"call":"find","on":{"path":["unreal"]},"args":[{"lit":"@LABEL@"}]}]}]})RQL"), true, &Rebuilt));
+			const TOptional<float> After = Landscape->GetHeightAtLocation(Top, EHeightfieldSource::Complex);
+			TestTrue(*FString::Printf(TEXT("the hill survives a rebuild (%.1f cm; %s)"), After.Get(-1.0f), *LandscapeSpecJson(Rebuilt).Left(200)), After.IsSet() && FMath::IsNearlyEqual(After.GetValue(), 300.0f, 25.0f));
 		});
 	});
 
@@ -228,6 +390,7 @@ void FUnrealAILandscapeSpec::Define()
 			TestTrue(TEXT("lists name:IsPrimary"), Schema.Contains(TEXT("\"name\":\"IsPrimary\"")));
 			TestTrue(TEXT("lists name:ComponentCount"), Schema.Contains(TEXT("\"name\":\"ComponentCount\"")));
 			TestTrue(TEXT("lists name:PaintLayers"), Schema.Contains(TEXT("\"name\":\"PaintLayers\"")));
+			TestTrue(TEXT("lists name:Bounds"), Schema.Contains(TEXT("\"name\":\"Bounds\"")));
 		});
 
 		It("describes WaterBody with its Water member", [this]()

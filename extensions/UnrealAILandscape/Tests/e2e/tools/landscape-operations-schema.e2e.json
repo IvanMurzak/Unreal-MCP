@@ -1,0 +1,10 @@
+{
+  "description": "the Surface operation",
+  "tool": "rql-schema",
+  "input": {
+    "type": "LandscapeOperations"
+  },
+  "assert": {
+    "pattern": "Surface"
+  }
+}

@@ -32,8 +32,8 @@ The extension adds its feature to the editor's RQL data layer (`rql-query` / `rq
 | Kind | Names |
 | --- | --- |
 | Sources | `landscapes`, `waterBodies`, `waterZones`, `landscape` |
-| Operations (`call`) | `Create`, `Sculpt`, `Paint`, `CreateLayerMaterial` |
-| Members | `LandscapeProxy.IsPrimary`, `LandscapeProxy.ComponentCount`, `LandscapeProxy.Sections`, `LandscapeProxy.PaintLayers`, `WaterBody.WaterType`, `WaterBody.WaterMaterial`, `WaterBody.WaterZone`, `WaterBody.Water` |
+| Operations (`call`) | `Create`, `Sculpt`, `Paint`, `CreateLayerMaterial`, `Surface`, `Rebuild` |
+| Members | `LandscapeProxy.IsPrimary`, `LandscapeProxy.ComponentCount`, `LandscapeProxy.Sections`, `LandscapeProxy.PaintLayers`, `LandscapeProxy.Bounds`, `WaterBody.WaterType`, `WaterBody.WaterMaterial`, `WaterBody.WaterZone`, `WaterBody.Water` |
 
 ```
 landscapes | select Label Sections PaintLayers LandscapeMaterial
@@ -43,11 +43,25 @@ landscape | call CreateLayerMaterial("/Game/Landscape/M_Terrain", "Grass #3a7d2c
 landscape | call Create("Terrain", [0, 0, 0], 100, "/Game/Landscape/M_Terrain")
 landscape | call Sculpt(unreal.find("Terrain"), [2000, 1500, 0], 1200, 600)
 landscape | call Paint(unreal.find("Terrain"), "Grass", [0, 0, 0], 0)
+landscape | call Surface(unreal.find("Terrain"), [2000, 1500, 0])
+landscapes | where IsPrimary | select Label Bounds
 ```
 
-`Create` makes a flat landscape of whole 63-quad components scaled to the requested size; `Sculpt` raises or lowers a
-smooth circular area (cm); `Paint` adds a paint layer by name (creating its layer info asset) and paints it with a soft
-edge; `CreateLayerMaterial` makes a material whose Landscape Layer Blend has one coloured layer per name.
+`Create` makes a flat landscape of about one vertex per metre in at most 8 x 8 components (63-quad sections, 2 x 2
+per component above 504 m, 127-quad sections above 1008 m, so a 2 km landscape takes seconds), scaled to the requested
+size; `Sculpt` raises or lowers a smooth circular area (cm); `Paint` adds a paint layer by name (creating its layer info
+asset) and paints it with a soft edge; `CreateLayerMaterial` makes a material whose Landscape Layer Blend has one
+coloured layer per name.
+
+`Create`, `Sculpt` and `Paint` return with the landscape's edit layers merged: its heights, heightfield collision (line
+traces, `GetHeightAtLocation`, actors placed on the ground) and rendered surface match as soon as the call ends. Without
+that the engine merges on the GPU over the next editor frames, and a caller that sculpts and then traces or places actors
+in the same step reads the old ground. `Surface` reads the ground back at a world X, Y (`Inside`, `Height` in cm,
+`Slope` in degrees, `Location` on the ground, `Normal`; read-only, run it through `rql-mutate` like every `call`) and
+`Bounds` gives the landscape's world box with its lowest and highest ground. `Rebuild` merges every edit layer of a
+landscape edited elsewhere (Landscape mode, Python) again and rebuilds its collision and, when enabled, its Nanite mesh.
+An editor without rendering (`-nullrhi`, commandlets) cannot merge: the edits stay in their edit layer until a rendering
+editor opens the landscape, and `Rebuild` fails there.
 
 ## Releases and development
 
