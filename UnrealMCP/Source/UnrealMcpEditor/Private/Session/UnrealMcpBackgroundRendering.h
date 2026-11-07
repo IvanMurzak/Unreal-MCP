@@ -29,19 +29,12 @@ private:
 };
 
 /**
- * Keeps the editor ticking and rendering at its normal rate while an MCP client works with it and the editor window is
- * in the background or minimized. UE's "Use Less CPU when in Background" (UEditorPerformanceSettings::
- * bThrottleCPUWhenNotForeground, on by default) does two things there: it caps the editor at a few frames per second
- * (UEditorEngine::ShouldThrottleCPUUsage) and it adds a "Background Process" realtime override that turns every
- * viewport non-realtime, so the editor world only advances time (LEVELTICK_TimeOnly): Niagara, animation and other
- * ticking content stop, and the agent's edits do not show. While held this
- *  - registers an UEditorEngine::ShouldDisableCPUThrottlingDelegates entry (the tick-rate cap, also when every editor
- *    window is minimized), and
- *  - clears bThrottleCPUWhenNotForeground IN MEMORY (the realtime override is read from it every editor tick), keeping
- *    the user's own value and putting it back on release and on shutdown.
- * The user's saved preference never changes: when the settings object is edited (OnSettingChanged fires before the
- * settings editor saves), the user's value is restored first so the save writes it, and the override returns on the
- * next check. It never focuses or raises an editor window. Game thread only.
+ * Keeps the editor ticking and rendering at its normal rate while an MCP client works with it and its window is in the
+ * background or minimized (docs/ARCHITECTURE.md §10 "Background rendering"). While held: an
+ * UEditorEngine::ShouldDisableCPUThrottlingDelegates entry (the tick-rate cap) and an IN-MEMORY clear of
+ * UEditorPerformanceSettings::bThrottleCPUWhenNotForeground (the per-tick "Background Process" realtime override). The
+ * user's value comes back on release and shutdown and is what any settings save writes. Never focuses a window. Game
+ * thread only.
  */
 class UNREALMCPEDITOR_API FUnrealMcpBackgroundRendering
 {

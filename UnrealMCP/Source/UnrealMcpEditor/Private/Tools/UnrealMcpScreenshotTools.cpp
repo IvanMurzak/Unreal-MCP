@@ -46,11 +46,8 @@
  * a structured "rendering unavailable" error under `-nullrhi` instead of crashing. The capture paths
  * themselves are LIVE-VERIFIED WINDOWED (issue #17 verification model).
  *
- * Freshness (§10 "Background rendering"): every capture sends the world's pending render updates first, then redraws
- * the viewport (or captures the scene) and reads back, which flushes the render thread, so the frame is rendered at
- * call time whether the editor window is focused, in the background or minimized. The result text then states whether
- * the frame is fresh and whether the world behind it is ticking (FormatFreshness); a case that cannot be guaranteed is
- * reported as such instead of returning a silently stale image.
+ * Every capture renders a new frame at call time and states its freshness (docs/ARCHITECTURE.md §10 "Background
+ * rendering", FormatFreshness).
  */
 namespace UnrealMcpScreenshotTools
 {
@@ -116,16 +113,6 @@ namespace UnrealMcpScreenshotTools
 				return false;
 			}
 			return true;
-		}
-
-		/**
-		 * Send the world's pending component / transform updates to the renderer, so an edit an earlier tool call made in
-		 * this same editor frame is in the capture (they are otherwise sent only at the end of the frame).
-		 */
-		void ScreenshotSendSceneUpdates(UWorld* World)
-		{
-			if (World)
-				World->SendAllEndOfFrameUpdates();
 		}
 
 		/**
@@ -288,9 +275,11 @@ namespace UnrealMcpScreenshotTools
 				return FUnrealMcpToolResult::Error(FString::Printf(TEXT("The %s has a zero-sized render area."), *Source));
 
 			// Render a new frame now, focused or not: the editor does not redraw a minimized window or a throttled
-			// background viewport on its own. ReadPixels then flushes the render thread before it reads.
+			// background viewport on its own. Pending scene updates (an edit made earlier this frame) go to the renderer
+			// first; ReadPixels then flushes the render thread before it reads.
 			UWorld* World = Viewport->GetClient() ? Viewport->GetClient()->GetWorld() : nullptr;
-			ScreenshotSendSceneUpdates(World);
+			if (World)
+				World->SendAllEndOfFrameUpdates();
 			FString FrameReason;
 			const bool bFrameFresh = ScreenshotCanRedrawViewport(Viewport, FrameReason);
 			Viewport->Draw();
@@ -379,7 +368,7 @@ namespace UnrealMcpScreenshotTools
 			// its world transform already equals CaptureXform — no explicit SetWorldLocationAndRotation needed.
 			// CaptureScene renders the scene now (and the read-back below flushes the render thread), so the frame is
 			// fresh whatever the editor window's state; send pending scene updates first so the latest edit is in it.
-			ScreenshotSendSceneUpdates(World);
+			World->SendAllEndOfFrameUpdates();
 			Capture->CaptureScene();
 
 			FTextureRenderTargetResource* Resource = RenderTarget->GameThread_GetRenderTargetResource();

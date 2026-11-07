@@ -61,10 +61,12 @@ void FUnrealMcpBackgroundRenderingSpec::Define()
 		});
 	});
 
+	// Every spec below changes the real settings default: put the value back afterwards.
+	BeforeEach([this]() { BgRenderSpecSavedThrottle = BgRenderSpecThrottle(); });
+	AfterEach([this]() { BgRenderSpecSetThrottle(BgRenderSpecSavedThrottle); });
+
 	Describe("hold", [this]()
 	{
-		BeforeEach([this]() { BgRenderSpecSavedThrottle = BgRenderSpecThrottle(); });
-		AfterEach([this]() { BgRenderSpecSetThrottle(BgRenderSpecSavedThrottle); });
 
 		It("lifts both throttles while held and restores the user's value on release", [this]()
 		{
@@ -119,8 +121,6 @@ void FUnrealMcpBackgroundRenderingSpec::Define()
 
 	Describe("settings edits while held (the saved preference never takes the override)", [this]()
 	{
-		BeforeEach([this]() { BgRenderSpecSavedThrottle = BgRenderSpecThrottle(); });
-		AfterEach([this]() { BgRenderSpecSetThrottle(BgRenderSpecSavedThrottle); });
 
 		It("an edit of another property puts the user's value in memory for the save, then Reconcile re-applies", [this]()
 		{

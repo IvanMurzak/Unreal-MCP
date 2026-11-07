@@ -25,7 +25,8 @@ bool FUnrealMcpKeepAwakePolicy::ShouldHold(double Now, bool bClientConnected, ui
 		LastToolActivity = InToolActivity;
 		LastActivityTime = Now;
 	}
-	return bClientConnected || InFlight > 0 || (LastActivityTime.IsSet() && Now - *LastActivityTime < ActivityGraceSeconds);
+	// An in-flight call has just stamped LastActivityTime, so the grace covers it.
+	return bClientConnected || (LastActivityTime.IsSet() && Now - *LastActivityTime < ActivityGraceSeconds);
 }
 
 // --- FUnrealMcpBackgroundRendering ----------------------------------------------------------------
