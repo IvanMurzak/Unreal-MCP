@@ -614,10 +614,7 @@ void FUnrealMcpEditorCoordinator::Startup()
 	}
 
 	ModalWatch = MakeUnique<FUnrealMcpModalWatch>();
-	{
-		FUnrealMcpBridgeServer* Bridge = BridgeServer.Get(); // outlives the watch: Shutdown stops it first
-		ModalWatch->Start([Bridge]() { return Bridge->GetInFlightCallCount(); });
-	}
+	ModalWatch->Start();
 
 	// §1.5: tear down on editor pre-exit so the sidecar never orphans (layer 1).
 	PreExitHandle = FCoreDelegates::OnEnginePreExit.AddLambda([this]() { Shutdown(); });
@@ -866,7 +863,7 @@ void FUnrealMcpEditorCoordinator::Shutdown()
 		BackgroundRendering->Shutdown();
 		BackgroundRendering.Reset();
 	}
-	ModalWatch.Reset(); // its destructor unsubscribes, before the bridge it reads goes away
+	ModalWatch.Reset();
 
 	// §1.5 graceful teardown ordering. Doing SidecarManager->Stop() (TerminateProc KillTree) BEFORE the
 	// bridge sends its `shutdown` Bye would mean the graceful path only ever worked for a MANUALLY launched

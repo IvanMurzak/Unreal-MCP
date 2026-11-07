@@ -8,18 +8,15 @@
 class SWindow;
 
 /**
- * Tells MCP clients, fast, that a modal dialog holds the editor (docs/ARCHITECTURE.md §4, §11 risk 2). While a Slate modal
- * window is open, FSlateApplication::AddModalWindow ticks only Slate: the engine frame, and with it every tool call (all
- * run on the game thread), waits until someone answers the dialog. Windows still reports the editor "responding" (the
- * modal loop pumps messages), so a client saw only timeouts and "plugin not connected" (seen live: 15 minutes behind a
- * landscape "Insert New Landscape Edit Layer" dialog). Tool bodies themselves run as unattended scripts, so a dialog they
- * would open is cancelled (FUnrealMcpGameThreadDispatcher); this covers every other modal one.
+ * Ends tool calls that a modal dialog holds, and says so (docs/ARCHITECTURE.md §4). While a Slate modal window is open,
+ * FSlateApplication::AddModalWindow ticks only Slate: the engine frame, and with it every tool call, waits until someone
+ * answers it, while Windows still reports the editor responding. Tool bodies run as unattended scripts, so a dialog they
+ * open is cancelled; this covers every other one.
  *
- * Once a modal dialog has been open BlockedAfterSeconds while tool calls wait, it logs once
- *   `[Unreal-MCP] Editor blocked by modal dialog "<title>": ...` (Error)
- * and ends the waiting calls with that reason instead of letting them time out; when the dialog closes it logs
- *   `[Unreal-MCP] Modal dialog "<title>" closed; tool calls run again.` (Display).
- * The App's editor diagnosis reads these two lines (keep their wording). Game thread only.
+ * Once a dialog has been open BlockedAfterSeconds, the calls waiting for the game thread end with its title as the reason,
+ * and the first time any did it logs `[Unreal-MCP] Editor blocked by modal dialog "<title>": ...` (Error); when the dialog
+ * closes, `[Unreal-MCP] Modal dialog "<title>" closed; tool calls run again.` (Display). The App's editor diagnosis reads
+ * these two lines: keep their wording. Game thread only.
  */
 class UNREALMCPEDITOR_API FUnrealMcpModalWatch
 {
@@ -28,8 +25,8 @@ public:
 
 	~FUnrealMcpModalWatch();
 
-	/** Watch Slate's modal loop. @p InWaitingCalls: tool calls in flight (FUnrealMcpBridgeServer::GetInFlightCallCount). */
-	void Start(TFunction<int32()> InWaitingCalls);
+	/** Watch Slate's modal loop. */
+	void Start();
 
 	/** Stop watching. Idempotent. */
 	void Shutdown();
@@ -47,12 +44,11 @@ public:
 	static FString BlockedReason(const FString& Title, double OpenSeconds);
 
 private:
-	TFunction<int32()> WaitingCalls;
 	FDelegateHandle ModalTickHandle;
 	FDelegateHandle ModalClosedHandle;
 	TWeakPtr<SWindow> Window;
 	FString Title;
 	double OpenedAt = 0.0;
-	double NextFailAt = 0.0;
+	double NextCheckAt = 0.0;
 	bool bReported = false;
 };

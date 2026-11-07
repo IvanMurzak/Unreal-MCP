@@ -103,8 +103,7 @@ private:
 	// Keeps the editor rendering at full rate in the background while an MCP client works with it (§10). Stopped in
 	// Shutdown before the bridge and view-model it reads; restores the user's throttle setting.
 	TUniquePtr<FUnrealMcpBackgroundRendering> BackgroundRendering;
-	// Reports a modal dialog that holds the game thread while tool calls wait, and ends those calls with that reason
-	// instead of a timeout (§4). Stopped in Shutdown before the bridge whose in-flight count it reads.
+	// Ends tool calls a modal dialog holds, with its title as the reason, instead of a timeout (§4).
 	TUniquePtr<FUnrealMcpModalWatch> ModalWatch;
 
 	// §7 UI: the main-window view-model (shared so the nomad tab's widget binds to it) and its tab spawner,

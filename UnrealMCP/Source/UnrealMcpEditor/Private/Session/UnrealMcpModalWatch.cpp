@@ -15,9 +15,8 @@ FUnrealMcpModalWatch::~FUnrealMcpModalWatch()
 	Shutdown();
 }
 
-void FUnrealMcpModalWatch::Start(TFunction<int32()> InWaitingCalls)
+void FUnrealMcpModalWatch::Start()
 {
-	WaitingCalls = MoveTemp(InWaitingCalls);
 	if (!FSlateApplication::IsInitialized() || ModalTickHandle.IsValid())
 		return;
 	ModalTickHandle = FSlateApplication::Get().GetOnModalLoopTickEvent().AddLambda([this](float)
@@ -54,19 +53,18 @@ void FUnrealMcpModalWatch::HandleModalTick(const TSharedPtr<SWindow>& Active, do
 		Window = Active;
 		Title = Active->GetTitle().ToString();
 		OpenedAt = Now;
-		NextFailAt = 0.0;
+		NextCheckAt = 0.0;
 	}
-	if (Now - OpenedAt < BlockedAfterSeconds || !WaitingCalls || WaitingCalls() <= 0 || Now < NextFailAt)
+	// A few times a second rather than every modal tick; calls that arrive while the dialog stays open end too.
+	if (Now - OpenedAt < BlockedAfterSeconds || Now < NextCheckAt)
 		return;
-	if (!bReported)
+	NextCheckAt = Now + 0.25;
+	if (FUnrealMcpGameThreadDispatcher::FailWaitingCalls(BlockedReason(Title, Now - OpenedAt)) > 0 && !bReported)
 	{
 		bReported = true;
 		UE_LOG(LogUnrealMcp, Error, TEXT("[Unreal-MCP] Editor blocked by modal dialog \"%s\": its game thread waits for the dialog")
 			TEXT(" to close, so MCP tool calls cannot run. Answer or close the dialog in the editor, or restart the editor."), *Title);
 	}
-	// Calls that arrive while the dialog stays open end here too, a few times a second rather than every modal tick.
-	NextFailAt = Now + 0.25;
-	FUnrealMcpGameThreadDispatcher::FailWaitingCalls(BlockedReason(Title, Now - OpenedAt));
 }
 
 void FUnrealMcpModalWatch::HandleModalClosed()

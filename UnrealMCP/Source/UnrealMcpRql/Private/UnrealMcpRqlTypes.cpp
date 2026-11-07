@@ -66,10 +66,9 @@ namespace UnrealMcpRqlTypesLocal
 
 	/**
 	 * The struct values alive now (MakeStructData), by their memory. A TArray / TMap member of a struct value is a view
-	 * into that value's memory; the view holds the value alive, found here. Without it the view outlived the value when
-	 * the value was only an intermediate of a path (`DefaultKeyMappings.Mappings[0]`): reading or setting through it used
-	 * freed memory and crashed the editor (an Input Mapping Context, lab 2026-11-07). Never destroyed (values may be
-	 * released during shutdown); game thread, like every RQL call.
+	 * into that value's memory and holds the value alive, found here: otherwise a value that was only a step of a path
+	 * (`Data.Mappings[0]`) was freed under the view. Never destroyed (values may be released during shutdown); game
+	 * thread, like every RQL call.
 	 */
 	TMap<const void*, std::weak_ptr<void>>& LiveStructData()
 	{
@@ -863,11 +862,12 @@ void FUnrealMcpRqlTypes::AddPropertyMember(rql::TypeDescriptor& Descriptor, FPro
 	Member.copy_on_read = Property->IsA<FArrayProperty>() || Property->IsA<FSetProperty>() || Property->IsA<FMapProperty>();
 	FUnrealMcpRqlTypes* Self = this;
 	// On an object, read the live one: the receipt reads a value back after a write that may have rebuilt the component.
-	Member.getter = [Self, Property, Type, bOnObject](void* Container) -> rql::Value
+	// A container view into a struct value holds that value alive (LiveStructData); objects need nothing.
+	const bool bViewOfStruct = !bOnObject && (Property->IsA<FArrayProperty>() || Property->IsA<FMapProperty>());
+	Member.getter = [Self, Property, Type, bOnObject, bViewOfStruct](void* Container) -> rql::Value
 	{
-		if (bOnObject)
-			return Self->Read(Property, Property->ContainerPtrToValuePtr<void>(Self->LiveObject(static_cast<UObject*>(Container))), Type);
-		return Self->Read(Property, Property->ContainerPtrToValuePtr<void>(Container), Type, StructDataOwner(Container));
+		void* Owner = bOnObject ? Self->LiveObject(static_cast<UObject*>(Container)) : Container;
+		return Self->Read(Property, Property->ContainerPtrToValuePtr<void>(Owner), Type, bViewOfStruct ? StructDataOwner(Container) : nullptr);
 	};
 	if (bOnObject)
 	{

@@ -10,7 +10,6 @@
 #include "HAL/Runnable.h"
 #include "HAL/RunnableThread.h"
 #include "Misc/CoreDelegates.h"
-#include "Misc/CoreMiscDefines.h"
 #include "Misc/ScopeLock.h"
 #include "CoreGlobals.h"
 
@@ -119,14 +118,7 @@ namespace
 
 				// Outside the lock: completing the promise runs the bridge's continuation on this thread.
 				for (FEntry& Entry : Expired)
-				{
-					// Cooperative cancel so a still-running body can bail at IsCancelled() (§4), and a body
-					// still queued is skipped. The shared flag outlives the bridge's CancelFlags entry.
-					if (Entry.CancelFlag.IsValid())
-						const_cast<FThreadSafeBool&>(*Entry.CancelFlag) = true;
-					Entry.State->Complete(FUnrealMcpToolResult::Error(UnrealMcpDescribeEndedCall(
-						FString::Printf(TEXT("Tool call timed out after %u ms."), Entry.TimeoutMs), Entry.State->bStarted)));
-				}
+					Entry.End(FString::Printf(TEXT("Tool call timed out after %u ms."), Entry.TimeoutMs));
 
 				const double WaitSeconds = FMath::Max(NextDeadline - FPlatformTime::Seconds(), 0.0);
 				Wake->Wait(static_cast<uint32>(FMath::CeilToDouble(WaitSeconds * 1000.0)));
@@ -149,11 +141,7 @@ namespace
 			}
 			// Outside the lock, as Run does: completing runs the bridge's continuation on this thread.
 			for (FEntry& Entry : Ended)
-			{
-				if (Entry.CancelFlag.IsValid())
-					const_cast<FThreadSafeBool&>(*Entry.CancelFlag) = true;
-				Entry.State->Complete(FUnrealMcpToolResult::Error(UnrealMcpDescribeEndedCall(Reason, Entry.State->bStarted)));
-			}
+				Entry.End(Reason);
 			return Ended.Num();
 		}
 
@@ -167,6 +155,16 @@ namespace
 			uint32 TimeoutMs;
 			TSharedRef<FDispatchState, ESPMode::ThreadSafe> State;
 			TSharedPtr<const FThreadSafeBool, ESPMode::ThreadSafe> CancelFlag;
+
+			/** End the call before its body returned (timeout or FailAll) with @p Lead as the reason. */
+			void End(const FString& Lead)
+			{
+				// Cooperative cancel so a still-running body can bail at IsCancelled() (§4), and a body
+				// still queued is skipped. The shared flag outlives the bridge's CancelFlags entry.
+				if (CancelFlag.IsValid())
+					const_cast<FThreadSafeBool&>(*CancelFlag) = true;
+				State->Complete(FUnrealMcpToolResult::Error(UnrealMcpDescribeEndedCall(Lead, State->bStarted)));
+			}
 		};
 
 		FUnrealMcpDispatchWatchdog()
@@ -221,10 +219,9 @@ namespace
 			State->bStarted = true;
 			FUnrealMcpToolResult Result;
 			{
-				// A tool call never waits for a person. Marked as an unattended script, the engine cancels a modal window
-				// opened during the body (FSlateApplication::AddModalWindow: a landscape edit-layer picker, a confirmation)
-				// and message boxes take their default answer, instead of holding the game thread, and with it every
-				// later call, until someone answers in the editor (seen live: a Water body spawn waited 15 minutes).
+				// A tool call never waits for a person: as an unattended script, the engine cancels a modal window opened
+				// during the body (FSlateApplication::AddModalWindow) and message boxes take their default answer, instead
+				// of holding the game thread, and every later call, until someone answers in the editor (§4).
 				TGuardValue<bool> Unattended(GIsRunningUnattendedScript, true);
 				Result = Body(Call);
 			}
