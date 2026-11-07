@@ -23,6 +23,7 @@ class FUnrealMcpAuxWindows;
 class FUnrealMcpDevControlServer;
 class FUnrealMcpEditorSession;
 class FUnrealMcpBackgroundRendering;
+class FUnrealMcpModalWatch;
 
 /**
  * Plugin-lifetime EDITOR coordinator (docs/ARCHITECTURE.md §0, §12.3 Model A). Builds the runtime-owned
@@ -102,6 +103,9 @@ private:
 	// Keeps the editor rendering at full rate in the background while an MCP client works with it (§10). Stopped in
 	// Shutdown before the bridge and view-model it reads; restores the user's throttle setting.
 	TUniquePtr<FUnrealMcpBackgroundRendering> BackgroundRendering;
+	// Reports a modal dialog that holds the game thread while tool calls wait, and ends those calls with that reason
+	// instead of a timeout (§4). Stopped in Shutdown before the bridge whose in-flight count it reads.
+	TUniquePtr<FUnrealMcpModalWatch> ModalWatch;
 
 	// §7 UI: the main-window view-model (shared so the nomad tab's widget binds to it) and its tab spawner,
 	// plus the four §7 auxiliary windows (MCP Tools / Prompts / Resources / Settings) sharing the same view-model.

@@ -10,12 +10,31 @@
 #include "HAL/Runnable.h"
 #include "HAL/RunnableThread.h"
 #include "Misc/CoreDelegates.h"
+#include "Misc/CoreMiscDefines.h"
 #include "Misc/ScopeLock.h"
+#include "CoreGlobals.h"
 
 #include <atomic>
 
 namespace
 {
+	/** FPlatformTime::Seconds() of the last end of a game-thread frame the dispatcher saw (0: none yet). */
+	std::atomic<double> GUnrealMcpLastEndOfFrame{ 0.0 };
+
+	/** Why a call ended before its body returned, for the agent: whether it ran, and what holds the game thread. */
+	FString UnrealMcpDescribeEndedCall(const FString& Lead, bool bStarted)
+	{
+		FString Text = Lead + (bStarted
+			? TEXT(" The call had started on the game thread and is still running; its outcome is unknown (nothing is undone).")
+			: TEXT(" The call never started and will not run."));
+		const double LastFrame = GUnrealMcpLastEndOfFrame.load();
+		const double Stalled = LastFrame > 0.0 ? FPlatformTime::Seconds() - LastFrame : 0.0;
+		if (Stalled >= 5.0)
+			Text += FString::Printf(TEXT(" The editor's game thread has not finished a frame for %.0f s: a long operation or a dialog")
+				TEXT(" waiting for an answer in the editor holds it, and no tool call can run until it ends."), Stalled);
+		return Text;
+	}
+
 	/**
 	 * FCoreDelegates are not thread-safe, and the process-lifetime helpers below are created lazily by the first
 	 * Dispatch(), which may come from a worker thread (UE 5.8's access detector ensures on that data race). Add their
@@ -37,6 +56,8 @@ namespace
 	{
 		TPromise<FUnrealMcpToolResult> Promise;
 		std::atomic<bool> bCompleted{ false };
+		/** The body began on the game thread: an early end leaves its outcome unknown (it is not undone). */
+		std::atomic<bool> bStarted{ false };
 
 		void Complete(FUnrealMcpToolResult&& Result)
 		{
@@ -103,14 +124,37 @@ namespace
 					// still queued is skipped. The shared flag outlives the bridge's CancelFlags entry.
 					if (Entry.CancelFlag.IsValid())
 						const_cast<FThreadSafeBool&>(*Entry.CancelFlag) = true;
-					Entry.State->Complete(FUnrealMcpToolResult::Error(
-						FString::Printf(TEXT("Tool call timed out after %u ms."), Entry.TimeoutMs)));
+					Entry.State->Complete(FUnrealMcpToolResult::Error(UnrealMcpDescribeEndedCall(
+						FString::Printf(TEXT("Tool call timed out after %u ms."), Entry.TimeoutMs), Entry.State->bStarted)));
 				}
 
 				const double WaitSeconds = FMath::Max(NextDeadline - FPlatformTime::Seconds(), 0.0);
 				Wake->Wait(static_cast<uint32>(FMath::CeilToDouble(WaitSeconds * 1000.0)));
 			}
 			return 0;
+		}
+
+		/** End every call still waiting (queued or running) now, as an early timeout would; returns how many. */
+		int32 FailAll(const FString& Reason)
+		{
+			TArray<FEntry> Ended;
+			{
+				FScopeLock Lock(&Mutex);
+				for (FEntry& Entry : Entries)
+				{
+					if (!Entry.State->bCompleted)
+						Ended.Add(MoveTemp(Entry));
+				}
+				Entries.Reset();
+			}
+			// Outside the lock, as Run does: completing runs the bridge's continuation on this thread.
+			for (FEntry& Entry : Ended)
+			{
+				if (Entry.CancelFlag.IsValid())
+					const_cast<FThreadSafeBool&>(*Entry.CancelFlag) = true;
+				Entry.State->Complete(FUnrealMcpToolResult::Error(UnrealMcpDescribeEndedCall(Reason, Entry.State->bStarted)));
+			}
+			return Ended.Num();
 		}
 
 		/** False when the platform has no threads; then deadlines are not enforced. */
@@ -174,7 +218,16 @@ namespace
 				return;
 			}
 
-			FUnrealMcpToolResult Result = Body(Call);
+			State->bStarted = true;
+			FUnrealMcpToolResult Result;
+			{
+				// A tool call never waits for a person. Marked as an unattended script, the engine cancels a modal window
+				// opened during the body (FSlateApplication::AddModalWindow: a landscape edit-layer picker, a confirmation)
+				// and message boxes take their default answer, instead of holding the game thread, and with it every
+				// later call, until someone answers in the editor (seen live: a Water body spawn waited 15 minutes).
+				TGuardValue<bool> Unattended(GIsRunningUnattendedScript, true);
+				Result = Body(Call);
+			}
 			if (!Result.bRetryLater)
 			{
 				State->Complete(MoveTemp(Result));
@@ -234,6 +287,7 @@ namespace
 
 		void Drain()
 		{
+			GUnrealMcpLastEndOfFrame = FPlatformTime::Seconds();
 			TArray<FEntry> Due;
 			{
 				FScopeLock Lock(&Mutex);
@@ -290,4 +344,9 @@ TFuture<FUnrealMcpToolResult> FUnrealMcpGameThreadDispatcher::Dispatch(
 	FUnrealMcpDispatchWatchdog::Get().Watch(State, CancelFlag, TimeoutMs);
 	Job->Schedule();
 	return Future;
+}
+
+int32 FUnrealMcpGameThreadDispatcher::FailWaitingCalls(const FString& Reason)
+{
+	return FUnrealMcpDispatchWatchdog::Get().FailAll(Reason);
 }

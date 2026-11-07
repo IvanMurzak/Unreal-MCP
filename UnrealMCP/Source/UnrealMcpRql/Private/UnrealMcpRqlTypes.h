@@ -101,7 +101,9 @@ public:
 	static UObject* FindById(int64 Id);
 
 	/** The RQL value of a property value. @p Type: the property's ForProperty type when the caller has it (else computed). */
-	rql::Value Read(const FProperty* Property, const void* ValuePtr, const rql::TypeDescriptor* Type = nullptr);
+	/** @p KeepAlive: what owns @p ValuePtr's memory, held by a TArray / TMap view of it (a struct value; objects need none). */
+	rql::Value Read(const FProperty* Property, const void* ValuePtr, const rql::TypeDescriptor* Type = nullptr,
+		std::shared_ptr<void> KeepAlive = nullptr);
 	/** Convert and store; throws std::runtime_error with a message for the agent when the value does not fit. */
 	void Write(const FProperty* Property, void* ValuePtr, const rql::Value& Value);
 	/** Write a property of an object with the editor notifications (PreEditChange / PostEditChangeProperty). */

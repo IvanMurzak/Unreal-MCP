@@ -610,6 +610,16 @@ Godot's `GodotMainThread`:
   the call's own timeout and `tool-cancel`; a server re-send is deduplicated earlier, in the sidecar.
 - **Watchdog:** one process-lifetime thread enforces every pending call's deadline (no pooled thread is
   held per call).
+- **No waiting for a person:** a body runs as an unattended script (`GIsRunningUnattendedScript`), so the engine
+  cancels a modal window opened during it (`FSlateApplication::AddModalWindow`) and message boxes take their default
+  answer; seen live, a Water body spawn opened the landscape "Insert New Landscape Edit Layer" picker and held the game
+  thread, and every later call, for 15 minutes. Any other modal dialog (the user's, or one opened outside a tool body)
+  still holds the game thread: `FUnrealMcpModalWatch` (editor) watches Slate's modal loop and, once a dialog has been
+  open 2 s while calls wait, logs `[Unreal-MCP] Editor blocked by modal dialog "<title>": …` (Error; the App's editor
+  diagnosis reads it), ends the waiting calls with that reason (`FailWaitingCalls`) instead of letting them time out,
+  and logs `[Unreal-MCP] Modal dialog "<title>" closed; tool calls run again.` when it closes. A timeout or such an
+  early end says whether the body had started (outcome unknown) or never ran, and when the game thread has not
+  finished a frame for 5 s or more.
 - **Not ready yet:** a handler may return `FUnrealMcpToolResult::RetryLater(reason)`; the dispatcher runs it
   again on a later tick (core ticker, ~100 ms) until it returns a result or the call times out, never
   blocking the game thread. `python-execute` uses it while Python finishes starting on a fresh editor
@@ -1340,8 +1350,10 @@ after a long minimized stretch starts temporal effects (TAA, Lumen) from old his
    when exercised).
 2. **Game-thread deadlock/stall**: a tool body that itself pumps a modal dialog or waits on the
    IPC thread can wedge the editor. *Mitigation:* dispatcher never blocks the reader thread
-   (§4), tool authors get a hard rule (no modal UI, no synchronous waits on bridge state),
-   timeout always completes the future, and `source-compile`/`blueprint-compile` are async-chained.
+   (§4), tool authors get a hard rule (no modal UI, no synchronous waits on bridge state), bodies run as
+   unattended scripts (engine modals are cancelled), a modal dialog that still holds the game thread is
+   reported and ends the waiting calls (§4), timeout always completes the future, and
+   `source-compile`/`blueprint-compile` are async-chained.
 3. **Sidecar/plugin pairing skew or download failure** (offline studios, GitHub throttling,
    antivirus quarantining a fresh exe). *Mitigation:* version handshake hard-check + single
    auto-redownload; `UNREAL_MCP_BRIDGE_PATH` escape hatch; `unreal-mcp-cli bootstrap-local` from-source

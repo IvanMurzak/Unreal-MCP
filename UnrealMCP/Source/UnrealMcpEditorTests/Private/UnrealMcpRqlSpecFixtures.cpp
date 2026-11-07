@@ -9,3 +9,20 @@ void UUnrealMcpRqlSpecApi::Boom(const FString& Message)
 {
 	UnrealMcpRql::Fail(Message);
 }
+
+FUnrealMcpRqlSpecRow& UUnrealMcpRqlSpecApi::RowRef(const FString& Label)
+{
+	Stored.Label = Label;
+	return Stored;
+}
+
+void UUnrealMcpRqlSpecApi::Double(int32& Value)
+{
+	Value *= 2;
+}
+
+void UUnrealMcpRqlSpecApi::MakeRow(int32 Damage, FUnrealMcpRqlSpecRow& Row)
+{
+	Row = FUnrealMcpRqlSpecRow();
+	Row.Damage = Damage;
+}
