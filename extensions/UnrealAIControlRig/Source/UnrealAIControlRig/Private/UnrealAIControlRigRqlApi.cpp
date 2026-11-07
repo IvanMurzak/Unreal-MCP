@@ -207,18 +207,13 @@ FString UUnrealAIControlRigRqlApi::AddVariable(UControlRigBlueprint* Rig, const 
 	const FString Trimmed = Name.TrimStartAndEnd();
 	if (Trimmed.IsEmpty() || !FName(*Trimmed).IsValidXName(INVALID_OBJECTNAME_CHARACTERS))
 		return UnrealMcpRql::Failed<FString>(FString::Printf(TEXT("'%s' is not a variable name (one word: LookAtTarget)"), *Name));
-	for (const FRigVMGraphVariableDescription& Existing : Rig->GetMemberVariables())
-	{
-		if (Existing.Name.ToString().Equals(Trimmed, ESearchCase::IgnoreCase))
-			return UnrealMcpRql::Failed<FString>(FString::Printf(TEXT("%s already has a variable %s"), *Rig->GetName(), *Existing.Name.ToString()));
-	}
-	const FString CPPType = VariableType(Type);
+	FRigVMGraphVariableDescription Existing;
+	if (FindVariable(Rig, Trimmed, Existing))
+		return UnrealMcpRql::Failed<FString>(FString::Printf(TEXT("%s already has a variable %s"), *Rig->GetName(), *Existing.Name.ToString()));
+	UObject* TypeObject = nullptr;
+	const FString CPPType = VariableType(Type, TypeObject);
 	if (CPPType.IsEmpty())
 		return FString();
-	FString TypePath = CPPType;
-	TypePath.RemoveFromStart(TEXT("TArray<"));
-	TypePath.RemoveFromEnd(TEXT(">"));
-	UObject* TypeObject = TypePath.StartsWith(TEXT("/")) ? FindObject<UObject>(nullptr, *TypePath) : nullptr;
 	const FString DefaultText = Default.TrimStartAndEnd().IsEmpty() ? FString() : ValueText(Default, CPPType, TypeObject);
 	static_cast<UObject*>(Rig)->Modify();
 	const FName Added = Rig->AddMemberVariable(FName(*Trimmed), CPPType, bPublic, /*bIsReadOnly*/ false, DefaultText);
@@ -292,13 +287,11 @@ void UUnrealAIControlRigRqlApi::RemoveNode(UControlRigBlueprint* Rig, const FStr
 	// What ran before it keeps running what ran after it.
 	URigVMPin* In = ExecuteInput(Found);
 	URigVMPin* Out = ExecuteOutput(Found);
-	const TArray<URigVMPin*> Sources = In ? In->GetLinkedSourcePins() : TArray<URigVMPin*>();
-	const TArray<URigVMPin*> Targets = Out ? Out->GetLinkedTargetPins() : TArray<URigVMPin*>();
 	TArray<FString> SourcePaths;
 	TArray<FString> TargetPaths;
-	for (const URigVMPin* Pin : Sources)
+	for (const URigVMPin* Pin : In ? In->GetLinkedSourcePins() : TArray<URigVMPin*>())
 		SourcePaths.Add(Pin->GetPinPath());
-	for (const URigVMPin* Pin : Targets)
+	for (const URigVMPin* Pin : Out ? Out->GetLinkedTargetPins() : TArray<URigVMPin*>())
 		TargetPaths.Add(Pin->GetPinPath());
 	static_cast<UObject*>(Rig)->Modify();
 	if (!Controller->RemoveNode(Found))
@@ -361,19 +354,19 @@ FString UUnrealAIControlRigRqlApi::AddLookAt(UControlRigBlueprint* Rig, const FS
 
 FString UUnrealAIControlRigRqlApi::AddToAnimBlueprint(UAnimBlueprint* AnimBlueprint, UControlRigBlueprint* Rig, const FString& After, bool bBindVariables)
 {
-	static_cast<UObject*>(AnimBlueprint)->Modify();
+	AnimBlueprint->Modify();
 	return UnrealAIControlRigAnim::AddRig(AnimBlueprint, Rig, After, bBindVariables);
 }
 
 FString UUnrealAIControlRigRqlApi::SetRigInput(UAnimBlueprint* AnimBlueprint, const FString& Node, const FString& Input, const FString& Value)
 {
-	static_cast<UObject*>(AnimBlueprint)->Modify();
+	AnimBlueprint->Modify();
 	return UnrealAIControlRigAnim::SetInput(AnimBlueprint, Node, Input, Value);
 }
 
 FString UUnrealAIControlRigRqlApi::TrackNearestActor(UAnimBlueprint* AnimBlueprint, const FString& ActorClass, const FString& LocationVariable,
 	const FString& WeightVariable, float Radius, float Speed)
 {
-	static_cast<UObject*>(AnimBlueprint)->Modify();
+	AnimBlueprint->Modify();
 	return UnrealAIControlRigAnim::TrackNearestActor(AnimBlueprint, ActorClass, LocationVariable, WeightVariable, Radius, Speed);
 }

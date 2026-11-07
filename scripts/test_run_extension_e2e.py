@@ -312,6 +312,8 @@ def rig_receipt(method, result):
     return text_result(f'1 result\n$ref|method|result\nControlRigOperations#5120|{method}|{result}')
 
 
+CREATE_RIG = 'CreateRig(string Path, string Mesh)'
+LOOK_AT = 'AddLookAt(ControlRigBlueprint Rig, string Bone, string Target, string Weight, string Axis, string After)'
 ADD_VARIABLE = 'AddVariable(ControlRigBlueprint Rig, string Name, string Type, string Default, bool bPublic)'
 WIRE = 'AddToAnimBlueprint(AnimBlueprint AnimBlueprint, ControlRigBlueprint Rig, string After, bool bBindVariables)'
 TRACK = ('TrackNearestActor(AnimBlueprint AnimBlueprint, string ActorClass, string LocationVariable, string WeightVariable, '
@@ -322,13 +324,11 @@ CONTROL_RIG = {
     'control-rig-units-query.e2e.json': (
         text_result('1 result\nDisplayName|Execute\nAim|true'), text_result('1 result\nDisplayName|Execute\nAim Bone|false')),
     'control-rig-lookat-1-create.e2e.json': (
-        rig_receipt('CreateRig(string Path, string Mesh)', 'ControlRigBlueprint#1297(CR_HeadLookAt)'),
-        rig_receipt('CreateRig(string Path, string Mesh)', 'ControlRigBlueprint#1297(CR_HeadLookAt2)')),
+        rig_receipt(CREATE_RIG, 'ControlRigBlueprint#1297(CR_HeadLookAt)'), rig_receipt(CREATE_RIG, 'ControlRigBlueprint#1297(CR_HeadLookAt2)')),
     'control-rig-lookat-2-target.e2e.json': (rig_receipt(ADD_VARIABLE, 'LookAtTarget'), rig_receipt(ADD_VARIABLE, 'LookAtTarget_1')),
     'control-rig-lookat-3-weight.e2e.json': (rig_receipt(ADD_VARIABLE, 'LookAtWeight'), rig_receipt(ADD_VARIABLE, 'LookAtWeight_1')),
     'control-rig-lookat-4-aim.e2e.json': (
-        rig_receipt('AddLookAt(ControlRigBlueprint Rig, string Bone, string Target, string Weight, string Axis, string After)', 'LookAt_head'),
-        rig_receipt('AddLookAt(ControlRigBlueprint Rig, string Bone, string Target, string Weight, string Axis, string After)', 'LookAt_head_1')),
+        rig_receipt(LOOK_AT, 'LookAt_head'), rig_receipt(LOOK_AT, 'LookAt_head_1')),
     'control-rig-lookat-5-anim-blueprint.e2e.json': (
         text_result('1 result\n$ref|method|result\nEditor@1|CopyAsset(string Source, string Destination)|AnimBlueprint#88(ABP_HeadLookAt)'),
         NO_COUNT),

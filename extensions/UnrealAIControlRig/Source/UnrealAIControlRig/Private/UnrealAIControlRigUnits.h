@@ -55,6 +55,15 @@ public:
 
 namespace UnrealAIControlRigUnits
 {
+	/** Lower case without spaces or underscores: names compare equal across "Two Bone IK", "TwoBoneIK" and "two_bone_ik". */
+	FString Compact(const FString& Text);
+
+	/** RigUnit_AimItem -> AimItem; RigVMFunction_MathVectorAdd -> MathVectorAdd. */
+	FString ShortName(const FString& StructName);
+
+	/** Whether the unit has an execute pin (runs in the execution chain) rather than being a pure value node. */
+	bool Executes(const UScriptStruct* Unit);
+
 	/** The unit rows, sorted by category and display name (deprecated units left out). */
 	TArray<UObject*> List();
 

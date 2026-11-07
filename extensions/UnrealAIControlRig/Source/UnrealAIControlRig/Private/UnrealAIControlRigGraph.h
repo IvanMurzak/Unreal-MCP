@@ -12,6 +12,7 @@ class URigVMController;
 class URigVMNode;
 class URigVMPin;
 class UScriptStruct;
+struct FRigVMGraphVariableDescription;
 
 /**
  * The Control Rig graph (the RigVM model of a Control Rig blueprint's Rig graph) as the `controlRig` operations author it:
@@ -69,8 +70,14 @@ namespace UnrealAIControlRigGraph
 	 */
 	URigVMNode* AddUnit(UControlRigBlueprint* Rig, UScriptStruct* Unit, const FString& Settings, const FString& After, const FString& Name);
 
-	/** The CPP type path AddMemberVariable takes for an agent's type name ("Vector", "float", "bool", "Transform", ...); empty after Fail. */
-	FString VariableType(const FString& Type);
+	/**
+	 * The CPP type path AddMemberVariable takes for an agent's type name ("Vector", "float", "bool", "Transform", ...), with
+	 * the struct or enum it names in @p OutTypeObject (null for a scalar); empty after Fail.
+	 */
+	FString VariableType(const FString& Type, UObject*& OutTypeObject);
+
+	/** The rig variable named @p Name (case-insensitive); false when the rig has none. */
+	bool FindVariable(UControlRigBlueprint* Rig, const FString& Name, FRigVMGraphVariableDescription& OutVariable);
 
 	/** @p Value in the text form of @p CPPType / @p TypeObject ("(0, 0, 100)" -> "(X=0,Y=0,Z=100)" for a vector). */
 	FString ValueText(const FString& Value, const FString& CPPType, UObject* TypeObject);

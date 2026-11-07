@@ -13,30 +13,31 @@
 #include "UObject/Package.h"
 #include "UObject/UnrealType.h"
 
+FString UnrealAIControlRigUnits::Compact(const FString& Text)
+{
+	FString Out;
+	for (const TCHAR Char : Text)
+	{
+		if (!FChar::IsWhitespace(Char) && Char != TEXT('_'))
+			Out.AppendChar(FChar::ToLower(Char));
+	}
+	return Out;
+}
+
+FString UnrealAIControlRigUnits::ShortName(const FString& StructName)
+{
+	for (const TCHAR* Prefix : { TEXT("RigUnit_"), TEXT("RigVMFunction_") })
+	{
+		if (StructName.StartsWith(Prefix))
+			return StructName.RightChop(FCString::Strlen(Prefix));
+	}
+	return StructName;
+}
+
 namespace UnrealAIControlRigUnitsLocal
 {
-	/** Lower case, no spaces or underscores: "Two Bone IK" and "TwoBoneIK" compare equal. */
-	FString Compact(const FString& Text)
-	{
-		FString Out;
-		for (const TCHAR Char : Text)
-		{
-			if (!FChar::IsWhitespace(Char) && Char != TEXT('_'))
-				Out.AppendChar(FChar::ToLower(Char));
-		}
-		return Out;
-	}
-
-	/** RigUnit_AimItem -> AimItem; RigVMFunction_MathVectorAdd -> MathVectorAdd. */
-	FString ShortName(const FString& StructName)
-	{
-		for (const TCHAR* Prefix : { TEXT("RigUnit_"), TEXT("RigVMFunction_") })
-		{
-			if (StructName.StartsWith(Prefix))
-				return StructName.RightChop(FCString::Strlen(Prefix));
-		}
-		return StructName;
-	}
+	using UnrealAIControlRigUnits::Compact;
+	using UnrealAIControlRigUnits::ShortName;
 
 	/** A pin type as agents read it: Vector, float, RigElementKey, Array<Transform>, EControlRigVectorKind. */
 	FString TypeName(const FProperty* Property)
@@ -67,19 +68,15 @@ namespace UnrealAIControlRigUnitsLocal
 		return Struct && Struct->Struct && Struct->Struct->IsChildOf(FRigVMExecutePin::StaticStruct());
 	}
 
-	/** The unit's pins as rows, and whether it has an execute pin (runs in the chain). */
-	TArray<FString> Pins(const UScriptStruct* Struct, bool& bOutExecute)
+	/** The unit's pins as rows (its execute pin left out: the Execute column). */
+	TArray<FString> Pins(const UScriptStruct* Struct)
 	{
-		bOutExecute = false;
 		TArray<FString> Out;
 		for (TFieldIterator<FProperty> It(Struct); It; ++It)
 		{
 			const FProperty* Property = *It;
 			if (IsExecutePin(Property))
-			{
-				bOutExecute = true;
 				continue;
-			}
 			const bool bIn = Property->HasMetaData(TEXT("Input")) || Property->HasMetaData(TEXT("Visible"));
 			const bool bOut = Property->HasMetaData(TEXT("Output"));
 			if (!bIn && !bOut)
@@ -108,6 +105,11 @@ namespace UnrealAIControlRigUnitsLocal
 		UScriptStruct* Struct = nullptr;
 		FString DisplayName;
 		bool bDeprecated = false;
+		/** Compact() of the struct name, the name without its prefix, the display name and the keywords. */
+		FString StructKey;
+		FString NameKey;
+		FString TitleKey;
+		FString KeywordsKey;
 	};
 
 	/** Every unit a Control Rig can run (its execute context is the Control Rig one or a base of it), one per struct. */
@@ -131,6 +133,10 @@ namespace UnrealAIControlRigUnitsLocal
 			Unit.Struct = Struct;
 			Unit.DisplayName = Struct->HasMetaData(TEXT("DisplayName")) ? Struct->GetMetaData(TEXT("DisplayName")) : ShortName(Struct->GetName());
 			Unit.bDeprecated = Struct->HasMetaData(TEXT("Deprecated"));
+			Unit.StructKey = Compact(Struct->GetName());
+			Unit.NameKey = Compact(ShortName(Struct->GetName()));
+			Unit.TitleKey = Compact(Unit.DisplayName);
+			Unit.KeywordsKey = Compact(Struct->GetMetaData(TEXT("Keywords")));
 			Out.Add(MoveTemp(Unit));
 		}
 		return Out;
@@ -165,6 +171,16 @@ namespace UnrealAIControlRigUnitsLocal
 
 using namespace UnrealAIControlRigUnitsLocal;
 
+bool UnrealAIControlRigUnits::Executes(const UScriptStruct* Unit)
+{
+	for (TFieldIterator<FProperty> It(Unit); It; ++It)
+	{
+		if (IsExecutePin(*It))
+			return true;
+	}
+	return false;
+}
+
 TArray<UObject*> UnrealAIControlRigUnits::List()
 {
 	TArray<FUnit> Units = UnrealAIControlRigUnitsLocal::Units();
@@ -179,7 +195,8 @@ TArray<UObject*> UnrealAIControlRigUnits::List()
 		Row->Category = Unit.Struct->GetMetaData(TEXT("Category"));
 		Row->Keywords = Unit.Struct->GetMetaData(TEXT("Keywords"));
 		Row->Description = Unit.Struct->GetToolTipText(/*bShortTooltip*/ true).ToString().TrimStartAndEnd();
-		Row->Pins = Pins(Unit.Struct, Row->Execute);
+		Row->Execute = Executes(Unit.Struct);
+		Row->Pins = Pins(Unit.Struct);
 		Rows.Add(Row);
 	}
 	Rows.Sort([](const UUnrealAIControlRigUnit& A, const UUnrealAIControlRigUnit& B)
@@ -191,23 +208,23 @@ TArray<UObject*> UnrealAIControlRigUnits::List()
 
 UScriptStruct* UnrealAIControlRigUnits::Resolve(const FString& Name)
 {
-	FString Wanted = Compact(Name);
+	const FString Wanted = Compact(Name);
 	if (Wanted.IsEmpty())
 		return UnrealMcpRql::Failed<UScriptStruct*>(TEXT("name a rig unit (see controlRigUnits), e.g. AimItem"));
+	const FString Unprefixed = Wanted.StartsWith(TEXT("f")) ? Wanted.RightChop(1) : Wanted; // FRigUnit_AimItem
 	const TArray<FUnit> Units = UnrealAIControlRigUnitsLocal::Units();
 
 	// The struct ("RigUnit_AimItem", "FRigUnit_AimItem") or the struct without its prefix ("AimItem"): unique.
 	for (const FUnit& Unit : Units)
 	{
-		const FString Struct = Compact(Unit.Struct->GetName());
-		if (Wanted == Struct || Wanted == TEXT("f") + Struct || Wanted == Compact(ShortName(Unit.Struct->GetName())))
+		if (Wanted == Unit.StructKey || Unprefixed == Unit.StructKey || Wanted == Unit.NameKey)
 			return Unit.Struct;
 	}
 	// The display name ("Aim", "Basic IK"): several units can share one (From World on locations, rotations, transforms).
 	TArray<const FUnit*> Titled;
 	for (const FUnit& Unit : Units)
 	{
-		if (!Unit.bDeprecated && Compact(Unit.DisplayName) == Wanted)
+		if (!Unit.bDeprecated && Unit.TitleKey == Wanted)
 			Titled.Add(&Unit);
 	}
 	if (Titled.Num() == 1)
@@ -226,8 +243,7 @@ UScriptStruct* UnrealAIControlRigUnits::Resolve(const FString& Name)
 	for (const FUnit& Unit : Units)
 	{
 		if (!Unit.bDeprecated && Close.Num() < 8
-			&& (Compact(Unit.Struct->GetName()).Contains(Wanted) || Compact(Unit.DisplayName).Contains(Wanted)
-				|| Compact(Unit.Struct->GetMetaData(TEXT("Keywords"))).Contains(Wanted)))
+			&& (Unit.StructKey.Contains(Wanted) || Unit.TitleKey.Contains(Wanted) || Unit.KeywordsKey.Contains(Wanted)))
 			Close.Add(&Unit);
 	}
 	return UnrealMcpRql::Failed<UScriptStruct*>(FString::Printf(TEXT("no rig unit named '%s'%s%s (list them: controlRigUnits | where DisplayName contains \"...\")"),

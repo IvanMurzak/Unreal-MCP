@@ -19,17 +19,7 @@
 
 namespace UnrealAIControlRigGraphLocal
 {
-	/** Lower case, no spaces or underscores: "Target Space" and "TargetSpace" compare equal. */
-	FString Squash(const FString& Text)
-	{
-		FString Out;
-		for (const TCHAR Char : Text)
-		{
-			if (!FChar::IsWhitespace(Char) && Char != TEXT('_'))
-				Out.AppendChar(FChar::ToLower(Char));
-		}
-		return Out;
-	}
+	using UnrealAIControlRigUnits::Compact;
 
 	bool IsOutput(const URigVMPin* Pin)
 	{
@@ -71,20 +61,6 @@ namespace UnrealAIControlRigGraphLocal
 	{
 		const UObject* Object = Pin->GetCPPTypeObject();
 		return Object ? Object->GetName() : Pin->GetCPPType();
-	}
-
-	/** The rig variable named @p Name (case-insensitive); false when it has none. */
-	bool FindVariable(UControlRigBlueprint* Rig, const FString& Name, FRigVMGraphVariableDescription& OutVariable)
-	{
-		for (const FRigVMGraphVariableDescription& Variable : Rig->GetMemberVariables())
-		{
-			if (Variable.Name.ToString().Equals(Name.TrimStartAndEnd(), ESearchCase::IgnoreCase))
-			{
-				OutVariable = Variable;
-				return true;
-			}
-		}
-		return false;
 	}
 
 	FString VariableNames(UControlRigBlueprint* Rig)
@@ -129,8 +105,7 @@ namespace UnrealAIControlRigGraphLocal
 	{
 		if (const URigVMUnitNode* Unit = Cast<URigVMUnitNode>(Node))
 		{
-			const FString Struct = Unit->GetScriptStruct() ? Unit->GetScriptStruct()->GetName() : FString();
-			return Struct.Replace(TEXT("RigUnit_"), TEXT("")).Replace(TEXT("RigVMFunction_"), TEXT(""));
+			return Unit->GetScriptStruct() ? UnrealAIControlRigUnits::ShortName(Unit->GetScriptStruct()->GetName()) : FString();
 		}
 		if (const URigVMVariableNode* Variable = Cast<URigVMVariableNode>(Node))
 			return FString::Printf(TEXT("%s %s"), Variable->IsGetter() ? TEXT("Get") : TEXT("Set"), *Variable->GetVariableName().ToString());
@@ -139,6 +114,20 @@ namespace UnrealAIControlRigGraphLocal
 }
 
 using namespace UnrealAIControlRigGraphLocal;
+
+bool UnrealAIControlRigGraph::FindVariable(UControlRigBlueprint* Rig, const FString& Name, FRigVMGraphVariableDescription& OutVariable)
+{
+	const FString Wanted = Name.TrimStartAndEnd();
+	for (const FRigVMGraphVariableDescription& Variable : Rig->GetMemberVariables())
+	{
+		if (Variable.Name.ToString().Equals(Wanted, ESearchCase::IgnoreCase))
+		{
+			OutVariable = Variable;
+			return true;
+		}
+	}
+	return false;
+}
 
 FRigElementKey UnrealAIControlRigGraph::Element(UControlRigBlueprint* Rig, const FString& Name, std::initializer_list<ERigElementType> Types, const TCHAR* What)
 {
@@ -178,12 +167,13 @@ URigVMNode* UnrealAIControlRigGraph::FindNode(UControlRigBlueprint* Rig, const F
 	if (!Graph)
 		return UnrealMcpRql::Failed<URigVMNode*>(FString::Printf(TEXT("%s has no rig graph"), *Rig->GetName()));
 	const FString Wanted = Name.TrimStartAndEnd();
+	const FString WantedTitle = Compact(Wanted);
 	TArray<URigVMNode*> Titled;
 	for (URigVMNode* Node : Graph->GetNodes())
 	{
 		if (Node->GetName().Equals(Wanted, ESearchCase::IgnoreCase))
 			return Node;
-		if (Squash(Node->GetNodeTitle()) == Squash(Wanted))
+		if (Compact(Node->GetNodeTitle()) == WantedTitle)
 			Titled.Add(Node);
 	}
 	if (Titled.Num() == 1)
@@ -218,9 +208,10 @@ URigVMPin* UnrealAIControlRigGraph::FindPin(UControlRigBlueprint* Rig, const FSt
 	for (const FString& Segment : Segments)
 	{
 		Found = nullptr;
+		const FString Wanted = Compact(Segment);
 		for (URigVMPin* Pin : *Candidates)
 		{
-			if (Squash(Pin->GetName()) == Squash(Segment) || Squash(Pin->GetDisplayName().ToString()) == Squash(Segment))
+			if (Compact(Pin->GetName()) == Wanted || Compact(Pin->GetDisplayName().ToString()) == Wanted)
 			{
 				Found = Pin;
 				break;
@@ -454,9 +445,7 @@ URigVMNode* UnrealAIControlRigGraph::AddUnit(UControlRigBlueprint* Rig, UScriptS
 	// Where it runs: after the node (or execute pin) After names, else at the end of Forwards Solve. Resolved before any change.
 	URigVMPin* RunsAfter = nullptr;
 	const FString AfterText = After.TrimStartAndEnd();
-	bool bMutable = false;
-	for (TFieldIterator<FStructProperty> It(Unit); It; ++It)
-		bMutable |= It->Struct && It->Struct->IsChildOf(FRigVMExecutePin::StaticStruct());
+	const bool bMutable = UnrealAIControlRigUnits::Executes(Unit);
 	if (bMutable)
 	{
 		if (AfterText.IsEmpty())
@@ -540,12 +529,13 @@ URigVMNode* UnrealAIControlRigGraph::AddUnit(UControlRigBlueprint* Rig, UScriptS
 	return Node;
 }
 
-FString UnrealAIControlRigGraph::VariableType(const FString& Type)
+FString UnrealAIControlRigGraph::VariableType(const FString& Type, UObject*& OutTypeObject)
 {
+	OutTypeObject = nullptr;
 	FString Wanted = Type.TrimStartAndEnd();
 	if (Wanted.StartsWith(TEXT("Array<"), ESearchCase::IgnoreCase) && Wanted.EndsWith(TEXT(">")))
 	{
-		const FString Inner = VariableType(Wanted.Mid(6, Wanted.Len() - 7));
+		const FString Inner = VariableType(Wanted.Mid(6, Wanted.Len() - 7), OutTypeObject);
 		return Inner.IsEmpty() ? FString() : TEXT("TArray<") + Inner + TEXT(">");
 	}
 	static const TMap<FString, FString> Scalars = {
@@ -558,10 +548,16 @@ FString UnrealAIControlRigGraph::VariableType(const FString& Type)
 	const FString Bare = Wanted.StartsWith(TEXT("F")) && Wanted.Len() > 1 && FChar::IsUpper(Wanted[1]) ? Wanted.RightChop(1) : Wanted;
 	for (const FString& Candidate : { Wanted, Bare })
 	{
-		if (const UScriptStruct* Struct = FindFirstObject<UScriptStruct>(*Candidate, EFindFirstObjectOptions::NativeFirst | EFindFirstObjectOptions::ExactClass))
+		if (UScriptStruct* Struct = FindFirstObject<UScriptStruct>(*Candidate, EFindFirstObjectOptions::NativeFirst | EFindFirstObjectOptions::ExactClass))
+		{
+			OutTypeObject = Struct;
 			return Struct->GetPathName();
-		if (const UEnum* Enum = FindFirstObject<UEnum>(*Candidate, EFindFirstObjectOptions::NativeFirst))
+		}
+		if (UEnum* Enum = FindFirstObject<UEnum>(*Candidate, EFindFirstObjectOptions::NativeFirst))
+		{
+			OutTypeObject = Enum;
 			return Enum->GetPathName();
+		}
 	}
 	return UnrealMcpRql::Failed<FString>(FString::Printf(TEXT("'%s' is not a rig variable type (bool, int, float, double, Name, string, Vector, Rotator, Quat, Transform, LinearColor, RigElementKey, an enum, Array<Vector>, ...)"), *Type));
 }

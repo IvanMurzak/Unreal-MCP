@@ -4,6 +4,7 @@
 #include "UnrealAIControlRigAnim.h"
 
 #include "IUnrealMcpRqlModule.h"
+#include "UnrealAIControlRigUnits.h"
 
 #include "AnimGraphNode_ControlRig.h"
 #include "AnimGraphNode_Root.h"
@@ -35,16 +36,7 @@
 
 namespace UnrealAIControlRigAnimLocal
 {
-	FString Squash(const FString& Text)
-	{
-		FString Out;
-		for (const TCHAR Char : Text)
-		{
-			if (!FChar::IsWhitespace(Char) && Char != TEXT('_'))
-				Out.AppendChar(FChar::ToLower(Char));
-		}
-		return Out;
-	}
+	using UnrealAIControlRigUnits::Compact;
 
 	FString Title(const UEdGraphNode* Node)
 	{
@@ -203,6 +195,8 @@ namespace UnrealAIControlRigAnimLocal
 	UAnimGraphNode_ControlRig* FindRigNode(UAnimBlueprint* AnimBlueprint, const FString& Name)
 	{
 		const TArray<UAnimGraphNode_ControlRig*> Nodes = RigNodes(AnimBlueprint);
+		if (Nodes.Num() == 0)
+			return UnrealMcpRql::Failed<UAnimGraphNode_ControlRig*>(FString::Printf(TEXT("%s has no Control Rig node: add one with AddToAnimBlueprint"), *AnimBlueprint->GetName()));
 		const FString Wanted = Name.TrimStartAndEnd();
 		TArray<UAnimGraphNode_ControlRig*> Matches;
 		for (UAnimGraphNode_ControlRig* Node : Nodes)
@@ -215,8 +209,6 @@ namespace UnrealAIControlRigAnimLocal
 		TArray<FString> Labels;
 		for (const UAnimGraphNode_ControlRig* Node : Matches.Num() ? Matches : Nodes)
 			Labels.Add(NodeLabel(Node));
-		if (Nodes.Num() == 0)
-			return UnrealMcpRql::Failed<UAnimGraphNode_ControlRig*>(FString::Printf(TEXT("%s has no Control Rig node: add one with AddToAnimBlueprint"), *AnimBlueprint->GetName()));
 		return UnrealMcpRql::Failed<UAnimGraphNode_ControlRig*>(FString::Printf(TEXT("%s: %s (Control Rig nodes: %s)"), *AnimBlueprint->GetName(),
 			Matches.Num() > 1 ? TEXT("several Control Rig nodes match: pass the node name") : *FString::Printf(TEXT("no Control Rig node '%s'"), *Name),
 			*FString::Join(Labels, TEXT(", "))));
@@ -226,10 +218,11 @@ namespace UnrealAIControlRigAnimLocal
 	UEdGraphNode* FindAnimNode(UEdGraph* Graph, const FString& Name)
 	{
 		TArray<UEdGraphNode*> Matches;
+		const FString WantedTitle = Compact(Name);
 		for (UEdGraphNode* Node : Graph->Nodes)
 		{
 			const UAnimGraphNode_ControlRig* Rig = Cast<UAnimGraphNode_ControlRig>(Node);
-			if (Node->GetName().Equals(Name, ESearchCase::IgnoreCase) || Squash(Title(Node)) == Squash(Name) || (Rig && RigName(Rig).Equals(Name, ESearchCase::IgnoreCase)))
+			if (Node->GetName().Equals(Name, ESearchCase::IgnoreCase) || Compact(Title(Node)) == WantedTitle || (Rig && RigName(Rig).Equals(Name, ESearchCase::IgnoreCase)))
 				Matches.Add(Node);
 		}
 		if (Matches.Num() == 1)
@@ -521,6 +514,8 @@ FString UnrealAIControlRigAnim::TrackNearestActor(UAnimBlueprint* AnimBlueprint,
 		Cursor = PinOf(Parent, UEdGraphSchema_K2::PN_Then);
 	}
 
+	const FString SpeedText = FString::SanitizeFloat(Speed, 0);
+	const FString RadiusText = FString::SanitizeFloat(Radius, 0);
 	const double X0 = X + 560;
 	UK2Node_CallFunction* GetAll = CallNode(Graph, UGameplayStatics::StaticClass(), GET_FUNCTION_NAME_CHECKED(UGameplayStatics, GetAllActorsOfClass), X0, Y);
 	UK2Node_CallFunction* Owner = CallNode(Graph, UAnimInstance::StaticClass(), GET_FUNCTION_NAME_CHECKED(UAnimInstance, GetOwningActor), X0, Y + 260);
@@ -535,8 +530,8 @@ FString UnrealAIControlRigAnim::TrackNearestActor(UAnimBlueprint* AnimBlueprint,
 	if (!GetAll || !Owner || !OwnerLocation || !Nearest || !InRange || !TargetLocation || !GetLocation || !Smooth || !SetLocation)
 		return FString();
 	GetAll->GetSchema()->TrySetDefaultObject(*PinOf(GetAll, TEXT("ActorClass")), Class);
-	SetDefault(PinOf(InRange, TEXT("B")), FString::SanitizeFloat(Radius, 0));
-	SetDefault(PinOf(Smooth, TEXT("InterpSpeed")), FString::SanitizeFloat(Speed, 0));
+	SetDefault(PinOf(InRange, TEXT("B")), RadiusText);
+	SetDefault(PinOf(Smooth, TEXT("InterpSpeed")), SpeedText);
 	bool bLinked = Link(Cursor, PinOf(GetAll, UEdGraphSchema_K2::PN_Execute))
 		&& Link(PinOf(Owner, UEdGraphSchema_K2::PN_ReturnValue), PinOf(OwnerLocation, UEdGraphSchema_K2::PN_Self))
 		&& Link(PinOf(OwnerLocation, UEdGraphSchema_K2::PN_ReturnValue), PinOf(Nearest, TEXT("Origin")))
@@ -572,8 +567,8 @@ FString UnrealAIControlRigAnim::TrackNearestActor(UAnimBlueprint* AnimBlueprint,
 		SetDefault(PinOf(Fresh, TEXT("B")), TEXT("0.05"));
 		SetDefault(PinOf(BlendIn, TEXT("Target")), TEXT("1.0"));
 		SetDefault(PinOf(BlendOut, TEXT("Target")), TEXT("0.0"));
-		SetDefault(PinOf(BlendIn, TEXT("InterpSpeed")), FString::SanitizeFloat(Speed, 0));
-		SetDefault(PinOf(BlendOut, TEXT("InterpSpeed")), FString::SanitizeFloat(Speed, 0));
+		SetDefault(PinOf(BlendIn, TEXT("InterpSpeed")), SpeedText);
+		SetDefault(PinOf(BlendOut, TEXT("InterpSpeed")), SpeedText);
 		bLinked = Link(PinOf(GetWeight, Weight, EGPD_Output), PinOf(Fresh, TEXT("A")))
 			&& Link(PinOf(TargetLocation, UEdGraphSchema_K2::PN_ReturnValue), PinOf(Pick, TEXT("A")))
 			&& Link(PinOf(Smooth, UEdGraphSchema_K2::PN_ReturnValue), PinOf(Pick, TEXT("B")))
@@ -591,9 +586,9 @@ FString UnrealAIControlRigAnim::TrackNearestActor(UAnimBlueprint* AnimBlueprint,
 			return FString();
 	}
 	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(AnimBlueprint);
-	const FString Smoothing = Speed > 0.0f ? FString::Printf(TEXT("smoothed at speed %s"), *FString::SanitizeFloat(Speed, 0)) : FString(TEXT("not smoothed"));
+	const FString Smoothing = Speed > 0.0f ? FString::Printf(TEXT("smoothed at speed %s"), *SpeedText) : FString(TEXT("not smoothed"));
 	return FString::Printf(TEXT("Event Blueprint Update Animation: %s (%s) follows the nearest %s within %s cm of the owner (%s)%s"),
-		*Location.ToString(), *LocationNote, *Class->GetName(), *FString::SanitizeFloat(Radius, 0), *Smoothing,
+		*Location.ToString(), *LocationNote, *Class->GetName(), *RadiusText, *Smoothing,
 		Weight.IsNone() ? TEXT("") : *FString::Printf(TEXT("; %s (%s) blends to 1 in range and to 0 out of range"), *Weight.ToString(), *WeightNote));
 }
 
