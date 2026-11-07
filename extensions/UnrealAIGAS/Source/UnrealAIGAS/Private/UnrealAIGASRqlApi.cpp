@@ -51,6 +51,10 @@ namespace UnrealAIGASRqlApiLocal
 {
 	using UnrealMcpRql::Failed;
 
+	/** What EditableDefaults suggests for a native effect / ability class. */
+	const TCHAR* const NewEffectHint = TEXT("create a Blueprint with gas | call CreateEffect(path)");
+	const TCHAR* const NewAbilityHint = TEXT("create a Blueprint with gas | call CreateAbility(path)");
+
 	// ------------------------------------------------------------ text
 
 	/** "A, B" / ["A", "B"] → trimmed, unquoted, non-empty items. */
@@ -387,6 +391,19 @@ namespace UnrealAIGASRqlApiLocal
 		}
 		return Values;
 	}
+
+	/** "Mana 100 -> 80, Health 100 -> 75": the attributes that changed since Before (AttributeValues). */
+	FString AttributeChanges(const TMap<FString, float>& Before, const UAbilitySystemComponent& Asc)
+	{
+		TArray<FString> Changes;
+		for (const TPair<FString, float>& After : AttributeValues(Asc))
+		{
+			const float* Old = Before.Find(After.Key);
+			if (Old && !FMath::IsNearlyEqual(*Old, After.Value))
+				Changes.Add(FString::Printf(TEXT("%s %g -> %g"), *After.Key, *Old, After.Value));
+		}
+		return FString::Join(Changes, TEXT(", "));
+	}
 }
 
 using namespace UnrealAIGASRqlApiLocal;
@@ -436,7 +453,7 @@ FString UUnrealAIGASRqlApi::SetEffectDuration(TSubclassOf<UGameplayEffect> Effec
 		return FString();
 	if (Period < 0.f || (Period > 0.f && Policy == EGameplayEffectDurationType::Instant))
 		return Failed<FString>(TEXT("an instant effect has no period: use Duration \"Infinite\" or a number of seconds"));
-	UGameplayEffect* Defaults = EditableDefaults<UGameplayEffect>(Effect, TEXT("create a Blueprint with gas | call CreateEffect(path)"));
+	UGameplayEffect* Defaults = EditableDefaults<UGameplayEffect>(Effect, NewEffectHint);
 	if (!Defaults)
 		return FString();
 	SetDuration(*Defaults, Policy, Seconds, Period, bExecuteOnApplication);
@@ -506,7 +523,7 @@ int32 UUnrealAIGASRqlApi::AddModifier(TSubclassOf<UGameplayEffect> Effect, const
 		return Failed<int32>(FString::Printf(TEXT("Magnitude '%s' is not a number, \"SetByCaller\", \"SetByCaller.<Tag>\" or \"Attribute(Source.<attribute>, <coefficient>)\""), *Magnitude));
 	}
 
-	UGameplayEffect* Defaults = EditableDefaults<UGameplayEffect>(Effect, TEXT("create a Blueprint with gas | call CreateEffect(path)"));
+	UGameplayEffect* Defaults = EditableDefaults<UGameplayEffect>(Effect, NewEffectHint);
 	if (!Defaults)
 		return 0;
 	FGameplayModifierInfo Modifier;
@@ -528,7 +545,7 @@ int32 UUnrealAIGASRqlApi::RemoveModifiers(TSubclassOf<UGameplayEffect> Effect, c
 		if (!Target.IsValid())
 			return Failed<int32>(Error);
 	}
-	UGameplayEffect* Defaults = EditableDefaults<UGameplayEffect>(Effect, TEXT("create a Blueprint with gas | call CreateEffect(path)"));
+	UGameplayEffect* Defaults = EditableDefaults<UGameplayEffect>(Effect, NewEffectHint);
 	if (!Defaults)
 		return 0;
 	const int32 Removed = Defaults->Modifiers.RemoveAll([&Target](const FGameplayModifierInfo& Modifier) { return !Target.IsValid() || Modifier.Attribute == Target; });
@@ -547,7 +564,7 @@ FString UUnrealAIGASRqlApi::SetEffectTags(TSubclassOf<UGameplayEffect> Effect, c
 	}
 	if (KindIndex == INDEX_NONE)
 		return Failed<FString>(FString::Printf(TEXT("Kind '%s' is not Granted, Asset, BlockAbilities, ApplicationRequired or ApplicationBlocked"), *Kind));
-	UGameplayEffect* Defaults = EditableDefaults<UGameplayEffect>(Effect, TEXT("create a Blueprint with gas | call CreateEffect(path)"));
+	UGameplayEffect* Defaults = EditableDefaults<UGameplayEffect>(Effect, NewEffectHint);
 	FGameplayTagContainer Container;
 	if (!Defaults || !ParseTags(Tags, Container))
 		return FString();
@@ -598,7 +615,7 @@ FString UUnrealAIGASRqlApi::SetStacking(TSubclassOf<UGameplayEffect> Effect, con
 		return Failed<FString>(FString::Printf(TEXT("Type '%s' is not None, AggregateBySource or AggregateByTarget"), *Type));
 	if (Limit < 0)
 		return Failed<FString>(TEXT("Limit must be 0 (no limit) or more"));
-	UGameplayEffect* Defaults = EditableDefaults<UGameplayEffect>(Effect, TEXT("create a Blueprint with gas | call CreateEffect(path)"));
+	UGameplayEffect* Defaults = EditableDefaults<UGameplayEffect>(Effect, NewEffectHint);
 	if (!Defaults)
 		return FString();
 	if (Value != static_cast<int64>(EGameplayEffectStackingType::None) && Defaults->DurationPolicy == EGameplayEffectDurationType::Instant)
@@ -632,7 +649,7 @@ FString UUnrealAIGASRqlApi::SetCost(TSubclassOf<UGameplayAbility> Ability, const
 		return Failed<FString>(Error);
 	if (Amount < 0.f)
 		return Failed<FString>(TEXT("Amount is what the ability costs: 0 or more"));
-	UGameplayAbility* Defaults = EditableDefaults<UGameplayAbility>(Ability, TEXT("create a Blueprint with gas | call CreateAbility(path)"));
+	UGameplayAbility* Defaults = EditableDefaults<UGameplayAbility>(Ability, NewAbilityHint);
 	if (!Defaults)
 		return FString();
 	const FString Path = Effect.TrimStartAndEnd().IsEmpty() ? AssetPath(*Ability.Get()) + TEXT("_Cost") : Effect.TrimStartAndEnd();
@@ -656,7 +673,7 @@ FString UUnrealAIGASRqlApi::SetCooldown(TSubclassOf<UGameplayAbility> Ability, f
 {
 	if (Seconds <= 0.f)
 		return Failed<FString>(TEXT("Seconds must be above 0 (to remove a cooldown: SetDefault(<ability>, \"CooldownGameplayEffectClass\", \"None\"))"));
-	UGameplayAbility* Defaults = EditableDefaults<UGameplayAbility>(Ability, TEXT("create a Blueprint with gas | call CreateAbility(path)"));
+	UGameplayAbility* Defaults = EditableDefaults<UGameplayAbility>(Ability, NewAbilityHint);
 	if (!Defaults)
 		return FString();
 	FString TagName = Tag.TrimStartAndEnd();
@@ -701,7 +718,7 @@ FString UUnrealAIGASRqlApi::SetAbilityTags(TSubclassOf<UGameplayAbility> Ability
 	}
 	if (KindIndex == INDEX_NONE)
 		return Failed<FString>(FString::Printf(TEXT("Kind '%s' is not Ability, ActivationOwned, ActivationRequired, ActivationBlocked, CancelAbilitiesWithTag or BlockAbilitiesWithTag"), *Kind));
-	UGameplayAbility* Defaults = EditableDefaults<UGameplayAbility>(Ability, TEXT("create a Blueprint with gas | call CreateAbility(path)"));
+	UGameplayAbility* Defaults = EditableDefaults<UGameplayAbility>(Ability, NewAbilityHint);
 	FGameplayTagContainer Container;
 	if (!Defaults || !ParseTags(Tags, Container))
 		return FString();
@@ -720,7 +737,7 @@ FString UUnrealAIGASRqlApi::SetAbilityProjectile(TSubclassOf<UGameplayAbility> A
 		return Failed<FString>(FString::Printf(TEXT("%s does not derive from UnrealAIGameplayAbility (create it with gas | call CreateAbility(path)), so it has no projectile settings"), *Ability->GetName()));
 	if (Speed < 0.f)
 		return Failed<FString>(TEXT("Speed must be 0 (the projectile's own) or more"));
-	UUnrealAIGameplayAbility* Defaults = EditableDefaults<UUnrealAIGameplayAbility>(Ability, TEXT("create a Blueprint with gas | call CreateAbility(path)"));
+	UUnrealAIGameplayAbility* Defaults = EditableDefaults<UUnrealAIGameplayAbility>(Ability, NewAbilityHint);
 	if (!Defaults)
 		return FString();
 	Defaults->ProjectileClass = Projectile ? Projectile.Get() : AUnrealAIGASProjectile::StaticClass();
@@ -879,7 +896,8 @@ FString UUnrealAIGASRqlApi::AddStartingEffect(UBlueprint* Blueprint, TSubclassOf
 FString UUnrealAIGASRqlApi::BindAbilityInput(UBlueprint* Blueprint, TSubclassOf<UGameplayAbility> Ability, const FString& InputAction, const FString& Key,
 	UInputMappingContext* MappingContext)
 {
-	if (!AbilitySystemTemplate(*Blueprint))
+	UUnrealAIAbilitySystemComponent* Template = AbilitySystemTemplate(*Blueprint);
+	if (!Template)
 		return FString();
 	const FString KeyName = Key.TrimStartAndEnd();
 	const FKey MappedKey(*KeyName);
@@ -919,7 +937,6 @@ FString UUnrealAIGASRqlApi::BindAbilityInput(UBlueprint* Blueprint, TSubclassOf<
 		}
 	}
 
-	UUnrealAIAbilitySystemComponent* Template = AbilitySystemTemplate(*Blueprint);
 	FUnrealAIAbilityInput* Binding = Template->AbilityInputs.FindByPredicate([Action](const FUnrealAIAbilityInput& Input) { return Input.InputAction == Action; });
 	if (!Binding)
 	{
@@ -996,14 +1013,8 @@ FString UUnrealAIGASRqlApi::ActivateAbility(TSubclassOf<UGameplayAbility> Abilit
 	const TMap<FString, float> Before = AttributeValues(*Asc);
 	if (!Asc->TryActivateAbility(Spec->Handle))
 		return FString::Printf(TEXT("not activated (blocked by tags or its CanActivateAbility; the owner has %s)"), *TagsText(Asc->GetOwnedGameplayTags()));
-	TArray<FString> Changes;
-	for (const TPair<FString, float>& After : AttributeValues(*Asc))
-	{
-		const float* Old = Before.Find(After.Key);
-		if (Old && !FMath::IsNearlyEqual(*Old, After.Value))
-			Changes.Add(FString::Printf(TEXT("%s %g -> %g"), *After.Key, *Old, After.Value));
-	}
-	return Changes.IsEmpty() ? FString(TEXT("activated")) : FString::Printf(TEXT("activated: %s"), *FString::Join(Changes, TEXT(", ")));
+	const FString Changes = AttributeChanges(Before, *Asc);
+	return Changes.IsEmpty() ? FString(TEXT("activated")) : TEXT("activated: ") + Changes;
 }
 
 FString UUnrealAIGASRqlApi::ApplyEffect(TSubclassOf<UGameplayEffect> Effect, const FString& Actor, const FString& SetByCaller, float Level)
@@ -1032,17 +1043,11 @@ FString UUnrealAIGASRqlApi::ApplyEffect(TSubclassOf<UGameplayEffect> Effect, con
 		Spec.Data->SetSetByCallerMagnitude(Tag.Key, Tag.Value);
 	const TMap<FString, float> Before = AttributeValues(*Asc);
 	const FActiveGameplayEffectHandle Handle = Asc->ApplyGameplayEffectSpecToSelf(*Spec.Data.Get());
-	TArray<FString> Changes;
-	for (const TPair<FString, float>& After : AttributeValues(*Asc))
-	{
-		const float* Old = Before.Find(After.Key);
-		if (Old && !FMath::IsNearlyEqual(*Old, After.Value))
-			Changes.Add(FString::Printf(TEXT("%s %g -> %g"), *After.Key, *Old, After.Value));
-	}
+	const FString Changes = AttributeChanges(Before, *Asc);
 	if (!Handle.WasSuccessfullyApplied())
 		return FString::Printf(TEXT("%s was not applied to %s (its tag requirements, immunity or chance)"), *Effect->GetName(), *Target->GetActorNameOrLabel());
 	return FString::Printf(TEXT("%s applied to %s%s"), *Effect->GetName(), *Target->GetActorNameOrLabel(),
-		Changes.IsEmpty() ? TEXT("") : *(TEXT(": ") + FString::Join(Changes, TEXT(", "))));
+		Changes.IsEmpty() ? TEXT("") : *(TEXT(": ") + Changes));
 }
 
 float UUnrealAIGASRqlApi::SetAttribute(const FString& Attribute, float Value, const FString& Actor)
