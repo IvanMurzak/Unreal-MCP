@@ -1,13 +1,14 @@
 {
   "extensionId": "com.ivanmurzak.unreal-ai-niagara",
   "name": "Niagara Tools",
-  "description": "RQL module for Unreal's Niagara VFX system: query Niagara systems and their emitters, place systems in the level.",
+  "description": "RQL module for Unreal's Niagara VFX system: create systems from templates (Niagara Fluids included), set emitters, modules and inputs, add scene collision, compile and place effects.",
   "pluginName": "UnrealAINiagara",
   "repo": "IvanMurzak/Unreal-MCP",
   "version": "0.2.0",
   "minCoreVersion": "0.26.0",
   "enginePlugins": [
-    "Niagara"
+    "Niagara",
+    "ChaosNiagara"
   ],
   "tools": [],
   "_comment": "Install-catalog metadata (one unreal-mcp-cli ExtensionDescriptor). 'version' is the .uplugin VersionName; change both with `python scripts/extension_release.py bump --plugin <Plugin> --version <x.y.z>`. 'tools' is empty: the extension adds an RQL module (docs/rql.md), not MCP tools. 'minCoreVersion' is the lowest supported Unreal-MCP core; 'enginePlugins' are the engine plugins the installer enables."

@@ -1,0 +1,10 @@
+{
+  "description": "the system placed in the level as a Niagara actor and started",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "niagara | call SpawnSystem(\"/Game/E2E/NS_FireSmoke\", \"(0, 0, 100)\", \"E2E_Campfire\")"
+  },
+  "assert": {
+    "pattern": "NiagaraActor#\\d+\\(E2E_Campfire\\)"
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "description": "an unknown emitter fails naming the system's emitters",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "niagara | call SetModuleInput(\"/Game/E2E/NS_FireSmoke\", \"Fyre\", \"Spawn Rate\", \"SpawnRate\", \"1\")"
+  },
+  "expectError": true,
+  "assert": {
+    "pattern": "emitters: Fountain, Smoke"
+  }
+}

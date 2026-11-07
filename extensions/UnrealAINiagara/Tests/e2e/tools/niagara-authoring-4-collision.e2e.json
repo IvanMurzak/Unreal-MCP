@@ -1,0 +1,10 @@
+{
+  "description": "collision enabled on every emitter (CPU ray traces)",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "niagara | call EnableCollision(\"/Game/E2E/NS_FireSmoke\")"
+  },
+  "assert": {
+    "pattern": "Fountain: added Particle Update/Collision; CPU Collision Type = Ray Traced.*Smoke: added Particle Update/Collision; CPU Collision Type = Ray Traced"
+  }
+}

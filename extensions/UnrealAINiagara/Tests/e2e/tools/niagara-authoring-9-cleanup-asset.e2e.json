@@ -1,0 +1,10 @@
+{
+  "description": "the test system asset deleted",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "editor | call DeleteAsset(\"/Game/E2E/NS_FireSmoke\", true)"
+  },
+  "assert": {
+    "pattern": "DeleteAsset\\("
+  }
+}

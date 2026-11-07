@@ -1,0 +1,10 @@
+{
+  "description": "the system compiles without errors",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "niagara | call Compile(\"/Game/E2E/NS_FireSmoke\")"
+  },
+  "assert": {
+    "pattern": "Succeeded:true"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "description": "a Smoke emitter added from the HangingParticulates template",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "niagara | call AddEmitter(\"/Game/E2E/NS_FireSmoke\", \"/Niagara/DefaultAssets/Templates/Emitters/HangingParticulates\", \"Smoke\")"
+  },
+  "assert": {
+    "pattern": "\\)\\|Smoke\\b"
+  }
+}

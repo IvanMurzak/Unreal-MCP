@@ -1,10 +1,10 @@
 {
-  "description": "SpawnSystem among the operations",
+  "description": "EnableCollision among the niagara operations",
   "tool": "rql-schema",
   "input": {
     "type": "NiagaraOperations"
   },
   "assert": {
-    "pattern": "SpawnSystem"
+    "pattern": "EnableCollision"
   }
 }

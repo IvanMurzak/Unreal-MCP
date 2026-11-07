@@ -1,0 +1,10 @@
+{
+  "description": "the Inputs member shows the collision query type",
+  "tool": "rql-query",
+  "input": {
+    "query": "unreal.asset(\"/Game/E2E/NS_FireSmoke\").Inputs | where Emitter == \"Smoke\" and Input == \"CPU Collision Type\" | select Value"
+  },
+  "assert": {
+    "pattern": "Ray Traced"
+  }
+}

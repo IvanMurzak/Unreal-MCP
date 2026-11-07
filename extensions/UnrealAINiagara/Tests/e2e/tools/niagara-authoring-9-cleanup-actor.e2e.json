@@ -1,0 +1,10 @@
+{
+  "description": "the placed test effect removed from the level",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "actors | where Label == \"E2E_Campfire\" | call Destroy()"
+  },
+  "assert": {
+    "pattern": "NiagaraActor#\\d+\\|Destroy\\(\\)"
+  }
+}

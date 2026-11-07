@@ -1,0 +1,10 @@
+{
+  "description": "the engine's Fountain emitter template with its path",
+  "tool": "rql-query",
+  "input": {
+    "query": "niagaraTemplates | where Name == \"Fountain\" | select Path Kind"
+  },
+  "assert": {
+    "pattern": "/Niagara/DefaultAssets/Templates/Emitters/Fountain"
+  }
+}

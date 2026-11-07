@@ -1,0 +1,10 @@
+{
+  "description": "the fire's spawn rate set to 150",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "niagara | call SetModuleInput(\"/Game/E2E/NS_FireSmoke\", \"Fountain\", \"Spawn Rate\", \"SpawnRate\", \"150\")"
+  },
+  "assert": {
+    "pattern": "\\)\\|150\\b"
+  }
+}
