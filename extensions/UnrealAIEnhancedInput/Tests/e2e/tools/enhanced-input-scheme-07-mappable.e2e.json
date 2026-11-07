@@ -1,0 +1,10 @@
+{
+  "description": "the actions players may rebind, with menu names and categories",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "[[\"/Game/E2E/Input/IA_Jump\", \"Jump\", \"On Foot\"], [\"/Game/E2E/Input/IA_Sprint\", \"Sprint\", \"On Foot\"], [\"/Game/E2E/Input/IA_Crouch\", \"Crouch\", \"On Foot\"], [\"/Game/E2E/Input/IA_Interact\", \"Interact\", \"General\"], [\"/Game/E2E/Input/IA_Throttle\", \"Throttle\", \"Vehicle\"], [\"/Game/E2E/Input/IA_Steer\", \"Steer\", \"Vehicle\"], [\"/Game/E2E/Input/IA_Handbrake\", \"Handbrake\", \"Vehicle\"]] | call enhancedInput.SetPlayerMappable($[0], $[1], $[2])"
+  },
+  "assert": {
+    "pattern": "IA_Handbrake"
+  }
+}

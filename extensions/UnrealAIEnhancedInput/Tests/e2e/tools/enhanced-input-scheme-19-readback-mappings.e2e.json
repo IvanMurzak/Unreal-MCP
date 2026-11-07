@@ -1,0 +1,10 @@
+{
+  "description": "the vehicle's E mapping reads back with its hold and rebind category",
+  "tool": "rql-query",
+  "input": {
+    "query": "inputMappings | where Context == \"IMC_Vehicle\" and Key == \"E\" | select Action Triggers PlayerMappable DisplayCategory"
+  },
+  "assert": {
+    "pattern": "IA_Interact\\|Hold\\(HoldTimeThreshold=0\\.3\\)\\|true\\|General"
+  }
+}

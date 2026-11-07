@@ -1,0 +1,10 @@
+{
+  "description": "throttle, brake (negated), steering and handbrake on keyboard and gamepad in the vehicle scheme",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "[[\"/Game/E2E/Input/IA_Throttle\", \"W\", \"\"], [\"/Game/E2E/Input/IA_Throttle\", \"S\", \"Negate\"], [\"/Game/E2E/Input/IA_Throttle\", \"Gamepad_RightTriggerAxis\", \"\"], [\"/Game/E2E/Input/IA_Throttle\", \"Gamepad_LeftTriggerAxis\", \"Negate\"], [\"/Game/E2E/Input/IA_Steer\", \"D\", \"\"], [\"/Game/E2E/Input/IA_Steer\", \"A\", \"Negate\"], [\"/Game/E2E/Input/IA_Steer\", \"Gamepad_LeftX\", \"DeadZone(0.15)\"], [\"/Game/E2E/Input/IA_Handbrake\", \"SpaceBar\", \"\"], [\"/Game/E2E/Input/IA_Handbrake\", \"Gamepad_FaceButton_Bottom\", \"\"], [\"/Game/E2E/Input/IA_Interact\", \"E\", \"\"], [\"/Game/E2E/Input/IA_Interact\", \"Gamepad_FaceButton_Left\", \"\"]] | call enhancedInput.AddMapping(\"/Game/E2E/Input/IMC_Vehicle\", $[0], $[1], $[2])"
+  },
+  "assert": {
+    "pattern": "11 results"
+  }
+}

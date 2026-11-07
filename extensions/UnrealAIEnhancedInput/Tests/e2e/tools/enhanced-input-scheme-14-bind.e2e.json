@@ -1,0 +1,10 @@
+{
+  "description": "jump and sprint-while-held bound to the hero's functions and events",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "[[\"/Game/E2E/Input/IA_Jump\", \"Started\", \"Jump\"], [\"/Game/E2E/Input/IA_Jump\", \"Completed\", \"StopJumping\"], [\"/Game/E2E/Input/IA_Sprint\", \"Started\", \"StartSprint\"], [\"/Game/E2E/Input/IA_Sprint\", \"Completed\", \"StopSprint\"]] | call enhancedInput.BindAction(\"/Game/E2E/BP_E2E_Hero\", $[0], $[1], $[2])"
+  },
+  "assert": {
+    "pattern": "4 results"
+  }
+}

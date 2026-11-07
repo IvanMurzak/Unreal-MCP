@@ -1,0 +1,10 @@
+{
+  "description": "WASD and the left stick drive the 2D move action",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "[[\"W\", \"Swizzle\"], [\"S\", \"Swizzle, Negate\"], [\"A\", \"Negate\"], [\"D\", \"\"], [\"Gamepad_Left2D\", \"DeadZone(0.2)\"]] | call enhancedInput.AddMapping(\"/Game/E2E/Input/IMC_OnFoot\", \"/Game/E2E/Input/IA_Move\", $[0], $[1])"
+  },
+  "assert": {
+    "pattern": "5 results"
+  }
+}

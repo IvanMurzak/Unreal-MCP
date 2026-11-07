@@ -1,0 +1,10 @@
+{
+  "description": "user settings back off",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "enhancedInput | call EnableUserSettings(false)"
+  },
+  "assert": {
+    "pattern": "-> false"
+  }
+}

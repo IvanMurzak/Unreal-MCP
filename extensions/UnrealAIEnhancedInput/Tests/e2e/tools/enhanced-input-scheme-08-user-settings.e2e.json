@@ -1,0 +1,10 @@
+{
+  "description": "Enhanced Input user settings enabled for rebinding",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "enhancedInput | call EnableUserSettings()"
+  },
+  "assert": {
+    "pattern": "-> true"
+  }
+}

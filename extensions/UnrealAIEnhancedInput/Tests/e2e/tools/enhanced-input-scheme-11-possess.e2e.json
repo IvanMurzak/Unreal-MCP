@@ -1,0 +1,10 @@
+{
+  "description": "each pawn adds its scheme while possessed and removes it when left",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "[[\"/Game/E2E/BP_E2E_Hero\", \"/Game/E2E/Input/IMC_OnFoot\"], [\"/Game/E2E/BP_E2E_Car\", \"/Game/E2E/Input/IMC_Vehicle\"]] | call enhancedInput.AddMappingContextOnPossess($[0], $[1])"
+  },
+  "assert": {
+    "pattern": "K2Node_CallFunction#\\d+.*K2Node_CallFunction#\\d+"
+  }
+}
