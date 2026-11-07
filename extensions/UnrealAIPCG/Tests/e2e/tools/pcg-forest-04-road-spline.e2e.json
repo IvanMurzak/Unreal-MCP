@@ -1,0 +1,10 @@
+{
+  "description": "the road's spline",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "actors | where Label == \"E2E_PCGRoad\" | call AddComponent(\"SplineComponent\", \"Road\")"
+  },
+  "assert": {
+    "pattern": "SplineComponent"
+  }
+}

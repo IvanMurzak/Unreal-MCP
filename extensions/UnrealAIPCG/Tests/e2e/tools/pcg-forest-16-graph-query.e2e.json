@@ -1,0 +1,10 @@
+{
+  "description": "the graph's edges and parameters read back",
+  "tool": "rql-query",
+  "input": {
+    "query": "pcgGraphs | where Name == \"PCG_E2EForest\" | select Edges Parameters"
+  },
+  "assert": {
+    "pattern": "BoundsModifier\\.Out -> Difference\\.Differences.*Density"
+  }
+}

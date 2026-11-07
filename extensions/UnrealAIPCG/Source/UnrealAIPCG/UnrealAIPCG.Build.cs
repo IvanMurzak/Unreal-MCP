@@ -18,7 +18,7 @@ public class UnrealAIPCG : ModuleRules
 		{
 			"CoreUObject",
 			"Engine",
-			// FJsonValue: the Nodes / IsGenerating members.
+			// FJsonValue: the Edges / Parameters / Inputs / Outputs / Settings / Generated members.
 			"Json",
 			// The RQL module seam: IUnrealMcpRqlModule.h (sources, operations, members, guides, the editor-module template)
 			// and UnrealMcpRqlTools.h (the specs run plans) live in the Unreal-MCP plugin's UnrealMcpRql module; the
@@ -26,9 +26,13 @@ public class UnrealAIPCG : ModuleRules
 			"UnrealMcpRql",
 
 			// The gating engine plugin's runtime module (its { "Name": "PCG" } entry is in the .uplugin "Plugins" array):
-			// UPCGGraph for the pcgGraphs source and Nodes, UPCGComponent for BoundGraph and the AddComponent / Generate
-			// operations.
+			// UPCGGraph / UPCGNode / UPCGSettings (authoring), UPCGComponent / APCGVolume / UPCGSubsystem (generation).
 			"PCG",
+			// The operations: AssetTools (CreateGraph from a template), AssetRegistry (pcgTemplates), UnrealEd (the
+			// asset editor subsystem: an open PCG graph editor is reopened on the changed graph).
+			"AssetTools",
+			"AssetRegistry",
+			"UnrealEd",
 		});
 	}
 }

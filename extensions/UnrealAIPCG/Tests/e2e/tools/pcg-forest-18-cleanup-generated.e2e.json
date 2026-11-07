@@ -1,0 +1,10 @@
+{
+  "description": "the generated forest removed",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "pcg | call Cleanup(\"E2E_PCGForest\")"
+  },
+  "assert": {
+    "pattern": "Cleanup\\("
+  }
+}

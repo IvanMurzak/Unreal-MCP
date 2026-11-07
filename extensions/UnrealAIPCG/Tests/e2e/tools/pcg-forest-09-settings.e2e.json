@@ -1,0 +1,10 @@
+{
+  "description": "slope, height and road filters, random rotation and scale, weighted meshes",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "[[\"DensityFilter\", \"LowerBound\", \"0.75\"], [\"AttributeFilterRange\", \"TargetAttribute\", \"$Position.Z\"], [\"AttributeFilterRange\", \"MinThreshold\", \"-100000\"], [\"AttributeFilterRange\", \"MaxThreshold\", \"1500\"], [\"GetSplineData\", \"ActorSelector.ActorFilter\", \"AllWorldActors\"], [\"GetSplineData\", \"ActorSelector.ActorSelectionTag\", \"Road\"], [\"SplineSampler\", \"SamplerParams.Mode\", \"Distance\"], [\"SplineSampler\", \"SamplerParams.DistanceIncrement\", \"300\"], [\"BoundsModifier\", \"Mode\", \"Set\"], [\"BoundsModifier\", \"BoundsMin\", \"(-600, -600, -10000)\"], [\"BoundsModifier\", \"BoundsMax\", \"(600, 600, 10000)\"], [\"TransformPoints\", \"RotationMax\", \"(0, 360, 0)\"], [\"TransformPoints\", \"ScaleMin\", \"0.8\"], [\"TransformPoints\", \"ScaleMax\", \"1.4\"], [\"StaticMeshSpawner\", \"Meshes\", \"/Engine/BasicShapes/Cone: 3, /Engine/BasicShapes/Cylinder: 1\"]] | call pcg.SetNodeSetting(\"/Game/E2E/PCG_E2EForest\", $[0], $[1], $[2])"
+  },
+  "assert": {
+    "pattern": "Distance.*Set.*/Engine/BasicShapes/Cone: 3, /Engine/BasicShapes/Cylinder: 1"
+  }
+}

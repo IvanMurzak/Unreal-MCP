@@ -3,7 +3,7 @@
   "Version": 3,
   "VersionName": "0.2.0",
   "FriendlyName": "Unreal AI PCG",
-  "Description": "RQL module for Unreal's Procedural Content Generation (PCG) framework: query graphs and PCG components, add components and run generation. An AI Game Developer (Unreal-MCP) extension: an IUnrealMcpRqlModule that agents use through rql-query / rql-mutate / rql-schema.",
+  "Description": "RQL module for Unreal's Procedural Content Generation (PCG) framework: author PCG graphs (node types with descriptions, templates, nodes, connections, settings, graph parameters), place them on PCG volumes, generate and read back instance counts. Procedural scattering of forests, rocks and props over landscapes, filtered by slope and height, avoiding splines. An AI Game Developer (Unreal-MCP) extension: an IUnrealMcpRqlModule that agents use through rql-query / rql-mutate / rql-schema.",
   "Category": "AI",
   "CreatedBy": "IvanMurzak/Unreal-AI-PCG",
   "CreatedByURL": "https://github.com/IvanMurzak/Unreal-AI-PCG",

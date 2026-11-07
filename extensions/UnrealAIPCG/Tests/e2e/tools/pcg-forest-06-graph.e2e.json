@@ -1,0 +1,10 @@
+{
+  "description": "an empty PCG graph",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "pcg | call CreateGraph(\"/Game/E2E/PCG_E2EForest\")"
+  },
+  "assert": {
+    "pattern": "PCG_E2EForest"
+  }
+}
