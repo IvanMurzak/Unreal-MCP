@@ -1285,6 +1285,39 @@ dirty after a refused save is not written on quit. Not covered: a Python `rename
 asset (`AssetRenameManager` deletes the old file without `OnAssetsCanDelete`) and raw file writes from Python.
 Specs: `UnrealMcp.Safety.EngineContentGuard`, `UnrealMcp.EditorSession`.
 
+### Background rendering
+
+Agents drive the editor while its window is in the background or minimized (the user works in another app), and
+the plugin never focuses or raises an editor window. UE's **"Use Less CPU when in Background"**
+(`UEditorPerformanceSettings::bThrottleCPUWhenNotForeground`, on by default, unchanged across 5.5–5.8) then
+(1) caps the editor at a few frames per second (`UEditorEngine::ShouldThrottleCPUUsage`, also whenever every
+editor window is minimized, whatever the setting) and (2) adds a "Background Process" realtime override to every
+viewport each editor tick, so the editor world ticks `LEVELTICK_TimeOnly`: Niagara, animation and other ticking
+content freeze and an agent's edits do not show. Measured on 5.7 with an unfocused or minimized editor: about 3
+frames per second and a Niagara fountain never drawn; with the fix, 100+ frames per second and the fountain
+animating.
+
+`FUnrealMcpBackgroundRendering` (`UnrealMcpEditor/Private/Session/`) holds both off while an MCP client works with
+the editor: the sidecar `status` roster lists a connected AI agent (`aiAgents`, link `Connected`), a tool call is in
+flight, or one finished less than 120 s ago (`FUnrealMcpKeepAwakePolicy`; the grace covers a server that reports no
+roster). It is session-wide rather than per call so content keeps evolving while the agent waits between calls (a
+per-call hold would freeze a simulation the agent is watching). While held it registers an
+`UEditorEngine::ShouldDisableCPUThrottlingDelegates` entry (the tick-rate cap) and clears
+`bThrottleCPUWhenNotForeground` **in memory only**; release (no client, editor shutdown) puts the user's value back.
+The saved preference never takes the override: `UDeveloperSettings::OnSettingChanged` fires before the settings
+editor saves, so the handler puts the user's value (or the one they just chose) back first, and the next check
+(every 0.25 s) re-applies the override. Not covered: code that calls `SaveConfig()` on these settings without
+`PostEditChange()` while held.
+
+Every screenshot tool also renders a new frame at call time, held or not: it sends the world's pending render
+updates (`SendAllEndOfFrameUpdates`), redraws the viewport (`FViewport::Draw`, which works for a minimized window
+because editor and PIE viewports render to their own target) or captures the scene, and the read-back flushes the
+render thread. The text result then carries `Frame: fresh (...)` or `Frame: possibly stale (<reason>)` (game
+rendering off; a viewport that renders straight to a minimized window) and `Simulation: live` or
+`Simulation: paused (<reason>)` (the editor is throttled; no realtime viewport of that world). Limits: one redraw
+after a long minimized stretch starts temporal effects (TAA, Lumen) from old history. Specs:
+`UnrealMcp.BackgroundRendering`, `UnrealMcp.Tools.Screenshot`; the window behaviour is live-verified windowed.
+
 ## 11. Top-5 risks & mitigations
 
 1. **Blueprint structure-edit APIs are brittle across UE versions** (SCS editing, K2 schema

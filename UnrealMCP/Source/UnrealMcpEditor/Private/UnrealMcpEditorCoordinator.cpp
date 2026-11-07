@@ -33,6 +33,7 @@
 #include "Tools/UnrealMcpWorldProvider.h"
 #include "DevControl/UnrealMcpDevControlServer.h"
 #include "Session/UnrealMcpEditorSession.h"
+#include "Session/UnrealMcpBackgroundRendering.h"
 
 #include "Editor.h"
 #include "Misc/App.h"
@@ -589,6 +590,22 @@ void FUnrealMcpEditorCoordinator::Startup()
 		}
 	}
 
+	// Background rendering (§10): while an MCP client works with the editor, keep it rendering and ticking at full rate
+	// when its window is in the background or minimized. The roster comes from the sidecar `status` feed (view-model).
+	BackgroundRendering = MakeUnique<FUnrealMcpBackgroundRendering>();
+	{
+		TWeakPtr<FUnrealMcpEditorViewModel> WeakVM = ViewModel;
+		FUnrealMcpBridgeServer* Bridge = BridgeServer.Get(); // outlives the check: Shutdown stops it first
+		BackgroundRendering->Start(
+			[WeakVM]()
+			{
+				const TSharedPtr<FUnrealMcpEditorViewModel> VM = WeakVM.Pin();
+				return VM.IsValid() && VM->GetConnectionState() == EUnrealMcpConnectionState::Connected && VM->GetAiAgents().Num() > 0;
+			},
+			[Bridge]() { return Bridge->GetToolActivityCount(); },
+			[Bridge]() { return Bridge->GetInFlightCallCount(); });
+	}
+
 	// §1.5: tear down on editor pre-exit so the sidecar never orphans (layer 1).
 	PreExitHandle = FCoreDelegates::OnEnginePreExit.AddLambda([this]() { Shutdown(); });
 }
@@ -799,6 +816,13 @@ void FUnrealMcpEditorCoordinator::Shutdown()
 	// Disarm the idle ticker before the bridge it reads goes away; the lease is removed at the very end.
 	if (Session.IsValid())
 		Session->Disarm();
+
+	// Restore the user's background-throttle setting before the bridge and view-model it reads go away.
+	if (BackgroundRendering.IsValid())
+	{
+		BackgroundRendering->Shutdown();
+		BackgroundRendering.Reset();
+	}
 
 	// §1.5 graceful teardown ordering. Doing SidecarManager->Stop() (TerminateProc KillTree) BEFORE the
 	// bridge sends its `shutdown` Bye would mean the graceful path only ever worked for a MANUALLY launched

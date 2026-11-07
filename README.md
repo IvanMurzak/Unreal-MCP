@@ -284,7 +284,7 @@ All file operations are jailed to `<Project>/Source/`.
 | `screenshot-camera` | Render from a resolved camera actor via `USceneCaptureComponent2D` |
 | `screenshot-isolated` | Render an actor in isolation (transient SceneCapture2D + show-only list) |
 
-Captures return a base64 **PNG as MCP image content** so the LLM can inspect the render directly. Dimensions are clamped (default 1024, hard cap 2048 per side). Pixel capture needs a GPU-backed editor; under headless `-nullrhi` these tools return a structured error.
+Captures return a base64 **PNG as MCP image content** so the LLM can inspect the render directly. Each capture renders a new frame at call time, also while the editor window is in the background or minimized, and its text says whether the frame is fresh and whether effects and animation were ticking. While an AI agent is connected, the plugin keeps the editor rendering at full rate in the background ("Use Less CPU when in Background" is overridden for that session only; your saved preference is unchanged). Dimensions are clamped (default 1024, hard cap 2048 per side). Pixel capture needs a GPU-backed editor; under headless `-nullrhi` these tools return a structured error.
 
 </details>
 
