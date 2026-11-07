@@ -166,10 +166,12 @@ unreal.asset("/Game/BP_Hero") | call Compile()
 ```
 
 - `AddMappingContextOnEvent(bp, ctx, event, priority)` / `RemoveMappingContextOnEvent(bp, ctx, event)`: `BeginPlay`,
-  `Possessed` / `Unpossessed` / `ControllerChanged` (pawns), `OnPossess` / `OnUnpossess` (PlayerControllers), or a custom
-  event (created when missing: call it from your enter / exit logic, e.g. a menu context). Higher priority wins when two
-  active contexts map the same key; a context shared by both schemes (IMC_Common: Interact on E) is added on BeginPlay of
-  the PlayerController. `AddMappingContextOnBeginPlay(bp, ctx)` is the one-context shortcut.
+  `Possessed` / `Unpossessed` / `ControllerChanged` (pawns; Possessed / Unpossessed run on the server only, so prefer
+  `AddMappingContextOnPossess`), `OnPossess` / `OnUnpossess` (PlayerControllers, server only), or a custom event (created
+  when missing: call it from your enter / exit logic, e.g. a menu context). Only local players get a context. When two
+  active contexts map the same key, the higher priority one wins while its action consumes input (bConsumeInput, the
+  default); a context shared by both schemes (IMC_Common: Interact on E) is added on BeginPlay of the PlayerController.
+  `AddMappingContextOnBeginPlay(bp, ctx)` is the one-context shortcut (on a pawn or another actor it adds to player 0).
 - `BindAction(bp, action, event, function, value)`: events `Started`, `Triggered`, `Ongoing`, `Canceled`, `Completed`; a second
   bind on the same pin runs after the first; axis actions pass the ActionValue into the function's first parameter of
   that type (`value` names another, `"none"` skips it). `AddActionEvent` places the bare event node to wire by hand

@@ -8,6 +8,7 @@
 #include "InputAction.h"
 #include "InputModifiers.h"
 #include "InputTriggers.h"
+#include "Misc/OutputDeviceNull.h"
 #include "UObject/Class.h"
 #include "UObject/EnumProperty.h"
 #include "UObject/Package.h"
@@ -258,7 +259,8 @@ namespace UnrealAIEnhancedInputTextLocal
 	{
 		void* Scratch = FMemory::Malloc(FMath::Max(Property->GetSize(), 1), Property->GetMinAlignment());
 		Property->InitializeValue(Scratch);
-		const TCHAR* End = Property->ImportText_Direct(*Text, Scratch, nullptr, PPF_None);
+		FOutputDeviceNull Quiet; // a refused value is reported to the agent, not logged as an editor warning
+		const TCHAR* End = Property->ImportText_Direct(*Text, Scratch, nullptr, PPF_None, &Quiet);
 		const bool bWhole = End && FString(End).TrimStartAndEnd().IsEmpty();
 		Property->DestroyValue(Scratch);
 		FMemory::Free(Scratch);
@@ -269,6 +271,12 @@ namespace UnrealAIEnhancedInputTextLocal
 	bool AddSetting(UnrealAIEnhancedInputText::FEntry& Entry, FProperty* Property, const FString& Raw)
 	{
 		const FString Short = UnrealAIEnhancedInputText::ShortName(Entry.Class);
+		if (!Property)
+		{
+			UnrealMcpRql::Fail(FString::Printf(TEXT("%s: this engine version lacks a setting the text names (settings: %s)"), *Short,
+				*UnrealAIEnhancedInputText::SettingsOf(Entry.Class)));
+			return false;
+		}
 		if (const FObjectPropertyBase* ObjectProperty = CastField<FObjectPropertyBase>(Property))
 		{
 			const FString Path = Unquote(Raw);
@@ -280,11 +288,26 @@ namespace UnrealAIEnhancedInputTextLocal
 					*ObjectProperty->PropertyClass->GetName(), *Path));
 				return false;
 			}
+			const FClassProperty* ClassProperty = CastField<FClassProperty>(Property);
+			if (ClassProperty && Object && !CastChecked<UClass>(Object)->IsChildOf(ClassProperty->MetaClass))
+			{
+				UnrealMcpRql::Fail(FString::Printf(TEXT("%s.%s: %s is not a %s class"), *Short, *Property->GetName(), *Object->GetName(), *ClassProperty->MetaClass->GetName()));
+				return false;
+			}
+			// A trigger that names no action (ChordAction) never fires: refuse it rather than write a silent no-op.
+			if (!Object && ObjectProperty->PropertyClass->IsChildOf(UInputAction::StaticClass()))
+			{
+				UnrealMcpRql::Fail(FString::Printf(TEXT("%s.%s needs an InputAction path (e.g. /Game/Input/IA_Sprint)"), *Short, *Property->GetName()));
+				return false;
+			}
 			Entry.Objects.Emplace(Property, Object);
 			return true;
 		}
 		const FString Text = ImportableText(Property, Raw);
-		if (!Imports(Property, Text))
+		// ImportText reads "", "-" or "abc" as 0 for a number: a number setting must be one.
+		const FNumericProperty* Numeric = CastField<FNumericProperty>(Property);
+		const bool bNotANumber = Numeric && !EnumOf(Property) && !Text.IsNumeric();
+		if (bNotANumber || !Imports(Property, Text))
 		{
 			const UEnum* Enum = EnumOf(Property);
 			UnrealMcpRql::Fail(FString::Printf(TEXT("%s.%s: '%s' is not a valid value%s"), *Short, *Property->GetName(), *Unquote(Raw),
@@ -346,6 +369,16 @@ namespace UnrealAIEnhancedInputTextLocal
 			}
 			if (!AddSetting(Entry, Property, Argument.Mid(Equals + 1)))
 				return false;
+		}
+		if (IsCombo(Entry.Class) && Positional.Num() == 0)
+		{
+			UnrealMcpRql::Fail(TEXT("Combo needs its steps: Combo(/Game/Input/IA_A, /Game/Input/IA_B), the actions in order"));
+			return false;
+		}
+		if (Entry.Class->IsChildOf(UInputTriggerChordAction::StaticClass()) && Positional.Num() == 0 && Entry.Objects.Num() == 0)
+		{
+			UnrealMcpRql::Fail(TEXT("ChordAction needs the action that must be held: ChordAction(/Game/Input/IA_Modifier)"));
+			return false;
 		}
 		if (Positional.Num() == 0)
 			return true;

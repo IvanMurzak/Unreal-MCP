@@ -97,11 +97,11 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Enhanced Input", meta = (BlueprintInternalUseOnly = "true"))
 	UEdGraphNode* AddMappingContextOnBeginPlay(UObject* Blueprint, UInputMappingContext* Context, int32 Priority = 0);
 
-	/** a pawn's own control scheme: a Pawn / Character / vehicle Blueprint adds Context (with Priority) to the player controlling it while it is possessed and removes it when unpossessed (On Controller Changed: works in multiplayer too), so entering a vehicle swaps on-foot for vehicle controls; returns the Add Mapping Context node */
+	/** a pawn's own control scheme: a Pawn / Character / vehicle Blueprint adds Context (with Priority) to the player controlling it while it is possessed and removes it when unpossessed (On Controller Changed, which runs on the server and the owning client; only a local player's controller is changed), so entering a vehicle swaps on-foot for vehicle controls; returns the Add Mapping Context node */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Enhanced Input", meta = (BlueprintInternalUseOnly = "true"))
 	UEdGraphNode* AddMappingContextOnPossess(UObject* Blueprint, UInputMappingContext* Context, int32 Priority = 0);
 
-	/** add Context (with Priority) when Event fires: "BeginPlay", "Possessed" / "Unpossessed" / "ControllerChanged" (pawns), "OnPossess" / "OnUnpossess" (controllers), or a custom event (found, or created): the subsystem comes from the event's controller, the PlayerController Blueprint itself, the pawn's controller, or player 0; returns the Add Mapping Context node */
+	/** add Context (with Priority) when Event fires: "BeginPlay", "Possessed" / "Unpossessed" / "ControllerChanged" (pawns), "OnPossess" / "OnUnpossess" (controllers; server only: a PlayerController's own scheme belongs on BeginPlay), or a custom event (found, or created): the subsystem comes from the event's controller (local players only), the PlayerController Blueprint itself, the pawn's controller, or player 0 (BeginPlay of other actors); returns the Add Mapping Context node */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Enhanced Input", meta = (BlueprintInternalUseOnly = "true"))
 	UEdGraphNode* AddMappingContextOnEvent(UObject* Blueprint, UInputMappingContext* Context, const FString& Event, int32 Priority = 0);
 

@@ -12,6 +12,7 @@
 #include "EnhancedActionKeyMapping.h"
 #include "EnhancedInputDeveloperSettings.h"
 #include "Engine/Blueprint.h"
+#include "HAL/FileManager.h"
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "GameFramework/Pawn.h"
 #include "InputAction.h"
@@ -71,13 +72,39 @@ namespace UnrealAIEnhancedInputRqlLocal
 		return Trimmed.IsEmpty() ? Fallback : Trimmed;
 	}
 
-	UPlayerMappableKeySettings* NewKeySettings(UObject* Outer, const FString& Name, const FString& DisplayName, const FString& Category)
+	/**
+	 * @p Existing updated when @p Outer owns it (its Metadata and key profiles stay), else new settings instanced into @p Outer,
+	 * with the name, display name and category.
+	 */
+	UPlayerMappableKeySettings* KeySettings(UObject* Outer, UPlayerMappableKeySettings* Existing, const FString& Name, const FString& DisplayName, const FString& Category)
 	{
-		UPlayerMappableKeySettings* Settings = NewObject<UPlayerMappableKeySettings>(Outer, NAME_None, Outer->GetMaskedFlags(RF_PropagateToSubObjects) | RF_Transactional);
+		UPlayerMappableKeySettings* Settings = Existing && Existing->GetOuter() == Outer ? Existing
+			: NewObject<UPlayerMappableKeySettings>(Outer, NAME_None, Outer->GetMaskedFlags(RF_PropagateToSubObjects) | RF_Transactional);
+		Settings->Modify();
 		Settings->Name = FName(*Name);
 		Settings->DisplayName = FText::FromString(DisplayName);
 		Settings->DisplayCategory = FText::FromString(Category);
 		return Settings;
+	}
+
+	/** The protected FEnhancedActionKeyMapping::PlayerMappableKeySettings property. */
+	const FObjectPropertyBase* MappingSettingsProperty()
+	{
+		return CastFieldChecked<FObjectPropertyBase>(FEnhancedActionKeyMapping::StaticStruct()->FindPropertyByName(TEXT("PlayerMappableKeySettings")));
+	}
+
+	/** The protected UInputAction::PlayerMappableKeySettings property. */
+	FProperty* ActionSettingsProperty()
+	{
+		return CastFieldChecked<FObjectPropertyBase>(UInputAction::StaticClass()->FindPropertyByName(TEXT("PlayerMappableKeySettings")));
+	}
+
+	/** Tell the action a property changed, as the Details panel does: open Blueprints rebuild their action event nodes. */
+	void ActionChanged(UInputAction* Action, FProperty* Property)
+	{
+		FPropertyChangedEvent Changed(Property);
+		Action->PostEditChangeProperty(Changed);
+		Action->MarkPackageDirty();
 	}
 
 	/** Set the protected SettingBehavior / PlayerMappableKeySettings of a mapping through reflection, as the Details panel does. */
@@ -86,8 +113,7 @@ namespace UnrealAIEnhancedInputRqlLocal
 		UScriptStruct* Struct = FEnhancedActionKeyMapping::StaticStruct();
 		const FEnumProperty* BehaviorProperty = CastFieldChecked<FEnumProperty>(Struct->FindPropertyByName(TEXT("SettingBehavior")));
 		BehaviorProperty->GetUnderlyingProperty()->SetIntPropertyValue(BehaviorProperty->ContainerPtrToValuePtr<void>(&Mapping), static_cast<int64>(Behavior));
-		const FObjectPropertyBase* SettingsProperty = CastFieldChecked<FObjectPropertyBase>(Struct->FindPropertyByName(TEXT("PlayerMappableKeySettings")));
-		SettingsProperty->SetObjectPropertyValue_InContainer(&Mapping, Settings);
+		MappingSettingsProperty()->SetObjectPropertyValue_InContainer(&Mapping, Settings);
 	}
 
 	/** Change each listed mapping of @p Context with @p Change; the count (after Modify / MarkPackageDirty). */
@@ -162,10 +188,15 @@ int32 UUnrealAIEnhancedInputRqlApi::RemoveMapping(UInputMappingContext* Context,
 	}).Num();
 	if (Removed > 0)
 	{
+		// In place, keeping the order of the other mappings (UnmapKey swaps the last one in, which moves the keys of rebind slots).
+		// DefaultKeyMappings is protected: reached through reflection, as the Details panel does.
+		const FStructProperty* Data = FindFProperty<FStructProperty>(UInputMappingContext::StaticClass(), TEXT("DefaultKeyMappings"));
+		const FArrayProperty* List = Data ? FindFProperty<FArrayProperty>(Data->Struct, TEXT("Mappings")) : nullptr;
+		if (!List)
+			return UnrealMcpRql::Failed<int32>(TEXT("this engine version stores mapping context keys differently (no DefaultKeyMappings.Mappings)"));
 		Context->Modify();
-		// UnmapKey removes one mapping per call; its control-mapping rebuild requests are deferred and coalesce.
-		for (int32 Index = 0; Index < Removed; ++Index)
-			Context->UnmapKey(Action, Parsed);
+		TArray<FEnhancedActionKeyMapping>& Mappings = *List->ContainerPtrToValuePtr<TArray<FEnhancedActionKeyMapping>>(Data->ContainerPtrToValuePtr<void>(Context));
+		Mappings.RemoveAll([Action, &Parsed](const FEnhancedActionKeyMapping& Mapping) { return Mapping.Action == Action && Mapping.Key == Parsed; });
 		Context->MarkPackageDirty();
 	}
 	return Removed;
@@ -200,7 +231,7 @@ FString UUnrealAIEnhancedInputRqlApi::SetActionTriggers(UInputAction* Action, co
 		return FString();
 	Action->Modify();
 	Action->Triggers = UnrealAIEnhancedInputText::BuildAll<UInputTrigger>(Entries, Action);
-	Action->MarkPackageDirty();
+	ActionChanged(Action, UInputAction::StaticClass()->FindPropertyByName(GET_MEMBER_NAME_CHECKED(UInputAction, Triggers)));
 	return UnrealAIEnhancedInputText::DescribeList(Action->Triggers);
 }
 
@@ -211,7 +242,7 @@ FString UUnrealAIEnhancedInputRqlApi::SetActionModifiers(UInputAction* Action, c
 		return FString();
 	Action->Modify();
 	Action->Modifiers = UnrealAIEnhancedInputText::BuildAll<UInputModifier>(Entries, Action);
-	Action->MarkPackageDirty();
+	ActionChanged(Action, UInputAction::StaticClass()->FindPropertyByName(GET_MEMBER_NAME_CHECKED(UInputAction, Modifiers)));
 	return UnrealAIEnhancedInputText::DescribeList(Action->Modifiers);
 }
 
@@ -221,9 +252,10 @@ FString UUnrealAIEnhancedInputRqlApi::SetPlayerMappable(UInputAction* Action, co
 	const FString Display = TrimmedOr(DisplayName, PrettyName(Action));
 	Action->Modify();
 	// Protected in UInputAction: written through reflection, as the Details panel does.
-	const FObjectPropertyBase* Property = CastFieldChecked<FObjectPropertyBase>(UInputAction::StaticClass()->FindPropertyByName(TEXT("PlayerMappableKeySettings")));
-	Property->SetObjectPropertyValue_InContainer(Action, NewKeySettings(Action, MappingName, Display, DisplayCategory.TrimStartAndEnd()));
-	Action->MarkPackageDirty();
+	FProperty* Property = ActionSettingsProperty();
+	CastFieldChecked<FObjectPropertyBase>(Property)->SetObjectPropertyValue_InContainer(Action,
+		KeySettings(Action, Action->GetPlayerMappableKeySettings(), MappingName, Display, DisplayCategory.TrimStartAndEnd()));
+	ActionChanged(Action, Property);
 	return MappingName;
 }
 
@@ -247,7 +279,8 @@ int32 UUnrealAIEnhancedInputRqlApi::SetMappingPlayerMappable(UInputMappingContex
 		if (Behavior == EPlayerMappableKeySettingBehaviors::OverrideSettings)
 		{
 			const FString MappingName = TrimmedOr(Name, FString::Printf(TEXT("%s_%s"), *Action->GetName(), *Mapping.Key.GetFName().ToString()));
-			Settings = NewKeySettings(Context, MappingName, TrimmedOr(DisplayName, PrettyName(Action)), DisplayCategory.TrimStartAndEnd());
+			UPlayerMappableKeySettings* Existing = Cast<UPlayerMappableKeySettings>(MappingSettingsProperty()->GetObjectPropertyValue_InContainer(&Mapping));
+			Settings = KeySettings(Context, Existing, MappingName, TrimmedOr(DisplayName, PrettyName(Action)), DisplayCategory.TrimStartAndEnd());
 		}
 		SetMappingSettings(Mapping, Behavior, Settings);
 	});
@@ -260,6 +293,10 @@ FString UUnrealAIEnhancedInputRqlApi::EnableUserSettings(bool Enable)
 	if (!Property)
 		return UnrealMcpRql::Failed<FString>(TEXT("this engine version has no Enhanced Input user settings (bEnableUserSettings)"));
 	const bool bWas = Property->GetPropertyValue_InContainer(Settings);
+	// Checked before the change: a failed write would leave the editor's setting and the ini disagreeing.
+	const FString Ini = Settings->GetDefaultConfigFilename();
+	if (IFileManager::Get().FileExists(*Ini) && IFileManager::Get().IsReadOnly(*Ini))
+		return UnrealMcpRql::Failed<FString>(FString::Printf(TEXT("%s is read-only (checked in to source control?): check it out first"), *Ini));
 	Settings->Modify();
 	Property->SetPropertyValue_InContainer(Settings, Enable);
 	FPropertyChangedEvent Changed(Property);
@@ -316,7 +353,7 @@ UEdGraphNode* UUnrealAIEnhancedInputRqlApi::AddMappingContextOnPossess(UObject* 
 		return nullptr;
 	if (!Owner->ParentClass->IsChildOf(APawn::StaticClass()))
 		return UnrealMcpRql::Failed<UEdGraphNode*>(FString::Printf(TEXT("%s is not a Pawn Blueprint (a %s): possession is a pawn's; a PlayerController adds its "
-			"contexts with AddMappingContextOnEvent(bp, ctx, \"BeginPlay\" or \"OnPossess\")"), *Owner->GetName(), *Owner->ParentClass->GetName()));
+			"contexts with AddMappingContextOnEvent(bp, ctx, \"BeginPlay\")"), *Owner->GetName(), *Owner->ParentClass->GetName()));
 	// On Controller Changed: the old controller's player loses the context, the new one's gains it (each skipped when not a player).
 	UnrealAIEnhancedInputGraph::FContextStep Steps[2];
 	Steps[0].bAdd = false;
@@ -355,7 +392,7 @@ UEdGraphNode* UUnrealAIEnhancedInputRqlApi::RemoveMappingContextOnEvent(UObject*
 	UnrealAIEnhancedInputGraph::FContextStep Step;
 	Step.bAdd = false;
 	Step.Context = Context;
-	if (Name.Equals(TEXT("Unpossessed"), ESearchCase::IgnoreCase))
+	if (Name.Equals(TEXT("Unpossessed"), ESearchCase::IgnoreCase) || Name.Equals(TEXT("ControllerChanged"), ESearchCase::IgnoreCase))
 		Step.ControllerParameter = TEXT("OldController");
 	return UnrealAIEnhancedInputGraph::AddContextSteps(Owner, EventGraph, Name, MakeArrayView(&Step, 1));
 }

@@ -37,6 +37,7 @@
 #include "EnhancedInputDeveloperSettings.h"
 #include "GameFramework/PlayerController.h"
 #include "K2Node_DynamicCast.h"
+#include "K2Node_IfThenElse.h"
 #include "K2Node_Self.h"
 #include "PlayerMappableKeySettings.h"
 #include "UObject/Package.h"
@@ -450,8 +451,23 @@ void FUnrealAIEnhancedInputSpec::Define()
 			TestTrue(*FString::Printf(TEXT("added (%s)"), *Codes(Added)), IsOk(Added));
 			UK2Node_Event* BeginPlay = FBlueprintEditorUtils::FindOverrideForFunction(Child, AActor::StaticClass(), TEXT("ReceiveBeginPlay"));
 			const UEdGraphPin* Then = BeginPlay ? BeginPlay->FindPin(UEdGraphSchema_K2::PN_Then) : nullptr;
-			TestTrue(TEXT("BeginPlay calls the parent's first"), Then && Then->LinkedTo.Num() == 1
-				&& Then->LinkedTo[0]->GetOwningNode()->IsA<UK2Node_CallParentFunction>());
+			const UEdGraphNode* ParentCall = Then && Then->LinkedTo.Num() == 1 ? Then->LinkedTo[0]->GetOwningNode() : nullptr;
+			TestTrue(TEXT("BeginPlay calls the parent's first"), ParentCall && ParentCall->IsA<UK2Node_CallParentFunction>() && ParentCall->IsNodeEnabled());
+			TArray<UK2Node_Event*> Events;
+			FBlueprintEditorUtils::GetAllNodesOfClass(Child, Events);
+			TestEqual(TEXT("exactly one BeginPlay in the child"), Events.FilterByPredicate([](const UK2Node_Event* Event)
+			{
+				return Event->EventReference.GetMemberName() == TEXT("ReceiveBeginPlay");
+			}).Num(), 1);
+			TArray<UK2Node_CallParentFunction*> ParentCalls;
+			FBlueprintEditorUtils::GetAllNodesOfClass(Child, ParentCalls);
+			TestEqual(TEXT("one Parent: BeginPlay (the placeholder's, enabled; not a second one)"), ParentCalls.FilterByPredicate([](const UK2Node_CallParentFunction* Call)
+			{
+				return Call->FunctionReference.GetMemberName() == TEXT("ReceiveBeginPlay");
+			}).Num(), 1);
+			const UEdGraphPin* AfterParent = ParentCall ? ParentCall->FindPin(UEdGraphSchema_K2::PN_Then) : nullptr;
+			const UK2Node_CallFunction* Add = AfterParent && AfterParent->LinkedTo.Num() == 1 ? Cast<UK2Node_CallFunction>(AfterParent->LinkedTo[0]->GetOwningNode()) : nullptr;
+			TestTrue(*FString::Printf(TEXT("then Add Mapping Context (%s)"), *Links(AfterParent)), Add && Add->FunctionReference.GetMemberName() == TEXT("AddMappingContext"));
 			TestEqual(TEXT("the child compiles"), CompileErrors(Child), 0);
 		});
 
@@ -632,7 +648,12 @@ void FUnrealAIEnhancedInputSpec::Define()
 			const TArray<UK2Node_CallFunction*> Adds = CallsOf(Blueprint, TEXT("AddMappingContext"));
 			if (!TestEqual(TEXT("one Remove"), Removes.Num(), 1) || !TestEqual(TEXT("one Add"), Adds.Num(), 1))
 				return;
-			TestTrue(TEXT("Remove runs when the cast succeeds"), OldCast && OldCast->GetValidCastPin()->LinkedTo.Num() == 1 && OldCast->GetValidCastPin()->LinkedTo[0]->GetOwningNode() == Removes[0]);
+			const UK2Node_IfThenElse* IsLocal = OldCast && OldCast->GetValidCastPin()->LinkedTo.Num() == 1 ? Cast<UK2Node_IfThenElse>(OldCast->GetValidCastPin()->LinkedTo[0]->GetOwningNode()) : nullptr;
+			TestTrue(*FString::Printf(TEXT("a cast controller is checked to be local (%s)"), OldCast ? *Links(OldCast->GetValidCastPin()) : TEXT("no cast")), IsLocal != nullptr);
+			TestTrue(TEXT("Remove runs for a local controller"), IsLocal && IsLocal->GetThenPin()->LinkedTo.Num() == 1 && IsLocal->GetThenPin()->LinkedTo[0]->GetOwningNode() == Removes[0]);
+			const UK2Node_DynamicCast* NewCast = OldCast && OldCast->GetInvalidCastPin()->LinkedTo.Num() == 1 ? Cast<UK2Node_DynamicCast>(OldCast->GetInvalidCastPin()->LinkedTo[0]->GetOwningNode()) : nullptr;
+			TestTrue(*FString::Printf(TEXT("no old player: on to the new controller's cast (%s)"), OldCast ? *Links(OldCast->GetInvalidCastPin()) : TEXT("no cast")),
+				NewCast && NewCast->GetCastSourcePin()->LinkedTo.Num() == 1 && NewCast->GetCastSourcePin()->LinkedTo[0]->PinName == TEXT("NewController"));
 			const UEdGraphPin* Priority = Adds[0]->FindPin(TEXT("Priority"));
 			TestTrue(TEXT("priority 2"), Priority && Priority->DefaultValue == TEXT("2"));
 			const UEdGraphPin* Options = Adds[0]->FindPin(TEXT("Options"));
@@ -681,6 +702,9 @@ void FUnrealAIEnhancedInputSpec::Define()
 			TestTrue(TEXT("a second Started call appends"), IsOk(Call(TEXT("BindAction"), { S(BlueprintPath), S(ActionPath), S(TEXT("Started")), S(TEXT("UnCrouch")) })));
 			const TSharedPtr<FJsonObject> Twice = Call(TEXT("BindAction"), { S(BlueprintPath), S(ActionPath), S(TEXT("Started")), S(TEXT("Jump")) });
 			TestTrue(*FString::Printf(TEXT("the same call twice is refused (%s)"), *Codes(Twice)), !IsOk(Twice) && Codes(Twice).Contains(TEXT("already calls")));
+			const TSharedPtr<FJsonObject> NoParameter = Call(TEXT("BindAction"), { S(BlueprintPath), S(ActionPath), S(TEXT("Completed")), S(TEXT("UnCrouch")), S(TEXT("Nope")) });
+			TestTrue(*FString::Printf(TEXT("an unknown value parameter is refused (%s)"), *Codes(NoParameter)), !IsOk(NoParameter) && Codes(NoParameter).Contains(TEXT("no input parameter")));
+			TestEqual(TEXT("the refused bind added no node"), CallsOf(Blueprint, TEXT("UnCrouch")).Num(), 1);
 			const TSharedPtr<FJsonObject> Unknown = Call(TEXT("BindAction"), { S(BlueprintPath), S(ActionPath), S(TEXT("Started")), S(TEXT("Jmup")) });
 			TestTrue(*FString::Printf(TEXT("an unknown function lists the callable ones (%s)"), *Codes(Unknown)), !IsOk(Unknown) && Codes(Unknown).Contains(TEXT("StopJumping")));
 			const TSharedPtr<FJsonObject> Pin = Call(TEXT("BindAction"), { S(BlueprintPath), S(ActionPath), S(TEXT("Pressed")), S(TEXT("Jump")) });

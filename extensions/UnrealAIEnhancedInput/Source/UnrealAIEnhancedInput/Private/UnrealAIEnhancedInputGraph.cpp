@@ -24,6 +24,7 @@
 #include "K2Node_EnhancedInputAction.h"
 #include "K2Node_Event.h"
 #include "K2Node_GetSubsystem.h"
+#include "K2Node_IfThenElse.h"
 #include "K2Node_MacroInstance.h"
 #include "K2Node_Self.h"
 #include "Kismet/GameplayStatics.h"
@@ -79,7 +80,11 @@ namespace UnrealAIEnhancedInputGraphLocal
 	bool Link(UEdGraphPin* A, UEdGraphPin* B)
 	{
 		if (!A || !B)
+		{
+			// RequirePin already failed for a missing named pin; this covers the rest.
+			UnrealMcpRql::Fail(TEXT("a node this operation builds lacks an expected pin on this engine version"));
 			return false;
+		}
 		const UEdGraphSchema_K2* Schema = GetDefault<UEdGraphSchema_K2>();
 		if (Schema->TryCreateConnection(A, B))
 			return true;
@@ -144,6 +149,14 @@ namespace UnrealAIEnhancedInputGraphLocal
 		return nullptr;
 	}
 
+	/** The function as its first (native or Blueprint) declaration: a parent Blueprint's override is not what events reference. */
+	UFunction* Declaration(UFunction* Function)
+	{
+		while (Function && Function->GetSuperFunction())
+			Function = Function->GetSuperFunction();
+		return Function;
+	}
+
 	/** The override event @p Name means for @p Blueprint (BeginPlay, Possessed, OnPossess, ...); null when it is a custom event name. */
 	UFunction* OverrideEvent(UBlueprint* Blueprint, const FString& Name, FString& OutError)
 	{
@@ -171,13 +184,13 @@ namespace UnrealAIEnhancedInputGraphLocal
 					: TEXT("use BeginPlay or a custom event"));
 				return nullptr;
 			}
-			return Parent->FindFunctionByName(Entry.Function);
+			return Declaration(Parent->FindFunctionByName(Entry.Function));
 		}
 		for (const FString& Candidate : { Name, FString(TEXT("Receive")) + Name, FString(TEXT("K2_")) + Name })
 		{
 			UFunction* Found = Parent->FindFunctionByName(FName(*Candidate, FNAME_Find));
 			if (Found && UEdGraphSchema_K2::FunctionCanBePlacedAsEvent(Found))
-				return Found;
+				return Declaration(Found);
 		}
 		return nullptr;
 	}
@@ -192,8 +205,19 @@ namespace UnrealAIEnhancedInputGraphLocal
 		if (!Then || !Inherited || !Cast<UBlueprintGeneratedClass>(Inherited->GetOuterUClass()))
 			return Then;
 		UK2Node_CallFunction* Parent = CreateCallNode(Event->GetGraph(), Inherited, Event->NodePosX + 250, Event->NodePosY, UK2Node_CallParentFunction::StaticClass());
+		const UEdGraphSchema_K2* Schema = GetDefault<UEdGraphSchema_K2>();
 		UEdGraphPin* ParentExec = Parent->FindPin(UEdGraphSchema_K2::PN_Execute);
-		return ParentExec && GetDefault<UEdGraphSchema_K2>()->TryCreateConnection(Then, ParentExec) ? Parent->FindPin(UEdGraphSchema_K2::PN_Then) : Then;
+		if (!ParentExec || !Schema->TryCreateConnection(Then, ParentExec))
+			return Then;
+		// The parent gets the event's parameters (NewController, ...), as the editor's default event nodes pass them.
+		for (UEdGraphPin* Output : Event->Pins)
+		{
+			UEdGraphPin* Input = Output->Direction == EGPD_Output && Output->PinType.PinCategory != UEdGraphSchema_K2::PC_Exec
+				&& Output->PinType.PinCategory != UEdGraphSchema_K2::PC_Delegate ? Parent->FindPin(Output->PinName, EGPD_Input) : nullptr;
+			if (Input)
+				Schema->TryCreateConnection(Output, Input);
+		}
+		return Parent->FindPin(UEdGraphSchema_K2::PN_Then);
 	}
 
 	/** Where an event's steps start: the existing event (or the one to create) and its "then" pin. */
@@ -231,9 +255,10 @@ namespace UnrealAIEnhancedInputGraphLocal
 		}
 		Out.CustomName = Name;
 		Out.Event = FBlueprintEditorUtils::FindCustomEventNode(Blueprint, FName(*Name));
-		if (!Out.Event && FindObject<UObject>(Blueprint, *Name))
+		if (!Out.Event && (FindObject<UObject>(Blueprint, *Name) || Blueprint->ParentClass->FindFunctionByName(FName(*Name))
+			|| Blueprint->ParentClass->FindPropertyByName(FName(*Name))))
 		{
-			UnrealMcpRql::Fail(FString::Printf(TEXT("%s already has a function or variable named '%s': name a custom event (or one of its events)"), *Blueprint->GetName(), *Name));
+			UnrealMcpRql::Fail(FString::Printf(TEXT("%s already has (or inherits) a function or variable named '%s': name a new custom event, or one of its events"), *Blueprint->GetName(), *Name));
 			return false;
 		}
 		return true;
@@ -251,7 +276,19 @@ namespace UnrealAIEnhancedInputGraphLocal
 				Site.Event->SetEnabledState(ENodeEnabledState::Enabled, /*bUserAction*/ false);
 				Site.Event->NodeComment.Empty(); // the placeholder's "This node is disabled ..." comment
 				Site.Event->bCommentBubbleVisible = false;
-				// The placeholder starts overriding now: keep the parent's implementation (Then is unlinked: a placeholder runs nothing).
+				// The placeholder starts overriding now: keep the parent's implementation. A child Blueprint's placeholder comes
+				// with a disabled Parent call already linked: enable that one instead of adding a second.
+				for (UEdGraphPin* Linked : Then->LinkedTo)
+				{
+					if (UK2Node_CallParentFunction* Placed = Cast<UK2Node_CallParentFunction>(Linked->GetOwningNode()))
+					{
+						Placed->Modify();
+						Placed->SetEnabledState(ENodeEnabledState::Enabled, /*bUserAction*/ false);
+						Placed->NodeComment.Empty();
+						Placed->bCommentBubbleVisible = false;
+						return Placed->FindPin(UEdGraphSchema_K2::PN_Then);
+					}
+				}
 				return CallParentEvent(Blueprint, Site.Event, Then);
 			}
 			return Then;
@@ -299,9 +336,9 @@ namespace UnrealAIEnhancedInputGraphLocal
 
 	/**
 	 * The player controller pin a step reads (a Cast To PlayerController continues the chain when the controller has to be
-	 * cast: its failure skips the step). Null after Fail.
+	 * cast: its failure, or a controller that is not local, skips the step through @p OutSkip). Null after Fail.
 	 */
-	UEdGraphPin* PlayerControllerPin(UBlueprint* Blueprint, UK2Node_Event* Event, bool bBeginPlay, FName Parameter, FChainCursor& Cursor, UEdGraphPin*& OutSkip)
+	UEdGraphPin* PlayerControllerPin(UBlueprint* Blueprint, UK2Node_Event* Event, bool bBeginPlay, FName Parameter, FChainCursor& Cursor, TArray<UEdGraphPin*>& OutSkip)
 	{
 		UClass* Parent = Blueprint->ParentClass;
 		UEdGraphPin* Controller = nullptr;
@@ -332,8 +369,20 @@ namespace UnrealAIEnhancedInputGraphLocal
 			[](UEdGraphNode* Node) { CastChecked<UK2Node_DynamicCast>(Node)->TargetType = APlayerController::StaticClass(); }));
 		if (!Link(Controller, Cast->GetCastSourcePin()) || !Continue(Cursor, RequirePin(Cast, UEdGraphSchema_K2::PN_Execute)))
 			return nullptr;
+		// Only a local player has an Enhanced Input subsystem (a server's copy of a remote player's controller has none).
+		UFunction* IsLocal = AController::StaticClass()->FindFunctionByName(TEXT("IsLocalController"));
+		if (!IsLocal)
+			return UnrealMcpRql::Failed<UEdGraphPin*>(TEXT("this engine version lacks AController::IsLocalController"));
+		UK2Node_CallFunction* Local = CreateCallNode(Cursor.Graph, IsLocal, Cursor.X - 40, Cursor.Y + 180);
+		UK2Node_IfThenElse* Branch = CastChecked<UK2Node_IfThenElse>(CreateGraphNode(Cursor.Graph, UK2Node_IfThenElse::StaticClass(), Cursor.X, Cursor.Y, [](UEdGraphNode*) {}));
+		if (!Link(Cast->GetCastResultPin(), RequirePin(Local, UEdGraphSchema_K2::PN_Self)) || !Link(RequirePin(Local, UEdGraphSchema_K2::PN_ReturnValue), Branch->GetConditionPin()))
+			return nullptr;
 		Cursor.Tails.Add(Cast->GetValidCastPin());
-		OutSkip = Cast->GetInvalidCastPin();
+		if (!Continue(Cursor, Branch->GetExecPin()))
+			return nullptr;
+		Cursor.Tails.Add(Branch->GetThenPin());
+		OutSkip.Add(Cast->GetInvalidCastPin());
+		OutSkip.Add(Branch->GetElsePin());
 		return Cast->GetCastResultPin();
 	}
 
@@ -345,7 +394,7 @@ namespace UnrealAIEnhancedInputGraphLocal
 		UClass* SubsystemNode = FindObject<UClass>(nullptr, TEXT("/Script/BlueprintGraph.K2Node_GetSubsystemFromPC"));
 		if (!Function || !SubsystemNode)
 			return UnrealMcpRql::Failed<UEdGraphNode*>(TEXT("this engine version lacks a node Add / Remove Mapping Context needs"));
-		UEdGraphPin* Skip = nullptr;
+		TArray<UEdGraphPin*> Skip;
 		UEdGraphPin* Controller = PlayerControllerPin(Blueprint, Event, bBeginPlay, Step.ControllerParameter, Cursor, Skip);
 		if (!Controller)
 			return nullptr;
@@ -374,8 +423,7 @@ namespace UnrealAIEnhancedInputGraphLocal
 			|| !Continue(Cursor, Exec))
 			return nullptr;
 		Cursor.Tails.Add(Then);
-		if (Skip)
-			Cursor.Tails.Add(Skip);
+		Cursor.Tails.Append(Skip);
 		Cursor.X += 280;
 		return Call;
 	}
@@ -413,7 +461,26 @@ namespace UnrealAIEnhancedInputGraphLocal
 			Inherited.Num() > 0 ? *FString::Join(Inherited, TEXT(", ")) : TEXT("none"));
 	}
 
-	/** The function @p Name means for a call from @p Blueprint's event graph; null after Fail. */
+	/**
+	 * Regenerate the skeleton class once when one of @p Names is a custom event it does not have yet (added since the last
+	 * update). Done before any function is resolved: a regeneration discards the skeleton's functions, so nothing may do it
+	 * while one is held.
+	 */
+	void RefreshSkeletonFor(UBlueprint* Blueprint, std::initializer_list<const FString*> Names)
+	{
+		UClass* Self = Blueprint->SkeletonGeneratedClass;
+		for (const FString* Name : Names)
+		{
+			const FName Event(*Name->TrimStartAndEnd());
+			if (FBlueprintEditorUtils::FindCustomEventNode(Blueprint, Event) && (!Self || !Self->FindFunctionByName(Event)))
+			{
+				FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+				return;
+			}
+		}
+	}
+
+	/** The function @p Name means for a call from @p Blueprint's event graph (RefreshSkeletonFor first); null after Fail. */
 	UFunction* CallableFunction(UBlueprint* Blueprint, const FString& Name)
 	{
 		const FString Trimmed = Name.TrimStartAndEnd();
@@ -428,13 +495,6 @@ namespace UnrealAIEnhancedInputGraphLocal
 		else if (Self)
 		{
 			Function = Self->FindFunctionByName(FName(*Trimmed));
-			if (!Function && FBlueprintEditorUtils::FindCustomEventNode(Blueprint, FName(*Trimmed)))
-			{
-				// A custom event added since the last skeleton update.
-				FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
-				Self = Blueprint->SkeletonGeneratedClass;
-				Function = Self ? Self->FindFunctionByName(FName(*Trimmed)) : nullptr;
-			}
 			if (!Function)
 				Function = Self ? Self->FindFunctionByName(FName(*(TEXT("K2_") + Trimmed))) : nullptr;
 		}
@@ -633,13 +693,15 @@ UEdGraphNode* UnrealAIEnhancedInputGraph::BindAction(UBlueprint* Blueprint, UEdG
 	const FString& Function, const FString& ValueParameter)
 {
 	// Everything that can fail is checked before the graph changes.
+	RefreshSkeletonFor(Blueprint, { &Function });
 	UFunction* Target = CallableFunction(Blueprint, Function);
 	if (!Target)
 		return nullptr;
 	const FString Value = ValueParameter.TrimStartAndEnd();
 	const bool bNoValue = Value.Equals(TEXT("none"), ESearchCase::IgnoreCase);
-	if (!Value.IsEmpty() && !bNoValue && !Target->FindPropertyByName(FName(*Value)))
-		return UnrealMcpRql::Failed<UEdGraphNode*>(FString::Printf(TEXT("%s has no parameter '%s'"), *Target->GetName(), *Value));
+	const FProperty* Parameter = Value.IsEmpty() || bNoValue ? nullptr : Target->FindPropertyByName(FName(*Value));
+	if (!Value.IsEmpty() && !bNoValue && (!Parameter || !Parameter->HasAnyPropertyFlags(CPF_Parm) || Parameter->HasAnyPropertyFlags(CPF_OutParm | CPF_ReturnParm)))
+		return UnrealMcpRql::Failed<UEdGraphNode*>(FString::Printf(TEXT("%s has no input parameter '%s'"), *Target->GetName(), *Value));
 	FName PinName;
 	if (!TriggerPinName(TriggerEvent, PinName))
 		return nullptr;
@@ -665,18 +727,28 @@ UEdGraphNode* UnrealAIEnhancedInputGraph::BindAction(UBlueprint* Blueprint, UEdG
 	}
 	const UEdGraphNode* FreeOwner = Free->GetOwningNode();
 	UK2Node_CallFunction* Call = CreateCallNode(Graph, Target, FreeOwner->NodePosX + 360, (FreeOwner == Node ? Node->NodePosY + Row * 130 : FreeOwner->NodePosY));
+	// Marked before any later failure, so a failed link still leaves a Blueprint the editor knows changed.
+	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+	UEdGraphPin* ActionValue = Node->FindPin(ActionValuePinName);
+	const UEdGraphSchema_K2* Schema = GetDefault<UEdGraphSchema_K2>();
+	UEdGraphPin* ValuePin = Parameter ? Call->FindPin(Parameter->GetFName(), EGPD_Input) : nullptr;
+	if (Parameter && (!ActionValue || !ValuePin || Schema->CanCreateConnection(ActionValue, ValuePin).Response == CONNECT_RESPONSE_DISALLOW))
+	{
+		// The named parameter cannot take the value: nothing of this call stays.
+		const FString Why = ActionValue && ValuePin ? Schema->CanCreateConnection(ActionValue, ValuePin).Message.ToString() : FString(TEXT("no such pin"));
+		FBlueprintEditorUtils::RemoveNode(Blueprint, Call, /*bDontRecompile*/ true);
+		return UnrealMcpRql::Failed<UEdGraphNode*>(FString::Printf(TEXT("%s's ActionValue (%s) cannot go into %s.%s: %s"), *Action->GetName(),
+			*UEnum::GetValueAsString(Action->ValueType), *Target->GetName(), *Value, *Why));
+	}
 	if (!Link(Free, RequirePin(Call, UEdGraphSchema_K2::PN_Execute)))
 		return nullptr;
 
 	// The ActionValue: into the named parameter, or (axis actions) into the first parameter of its type.
-	UEdGraphPin* ActionValue = Node->FindPin(ActionValuePinName);
-	if (ActionValue && !bNoValue && (!Value.IsEmpty() || Action->ValueType != EInputActionValueType::Boolean))
+	if (ActionValue && !bNoValue && (Parameter || Action->ValueType != EInputActionValueType::Boolean))
 	{
-		const UEdGraphSchema_K2* Schema = GetDefault<UEdGraphSchema_K2>();
-		UEdGraphPin* Parameter = Value.IsEmpty() ? nullptr : RequirePin(Call, FName(*Value));
-		if (!Value.IsEmpty() && (!Parameter || !Link(ActionValue, Parameter)))
+		if (Parameter && !Link(ActionValue, ValuePin))
 			return nullptr;
-		for (UEdGraphPin* Candidate : Value.IsEmpty() ? Call->Pins : TArray<UEdGraphPin*>())
+		for (UEdGraphPin* Candidate : Parameter ? TArray<UEdGraphPin*>() : Call->Pins)
 		{
 			if (Candidate->Direction == EGPD_Input && Candidate->PinType.PinCategory != UEdGraphSchema_K2::PC_Exec && Candidate->PinName != UEdGraphSchema_K2::PN_Self
 				&& Schema->CanCreateConnection(ActionValue, Candidate).Response == CONNECT_RESPONSE_MAKE)
@@ -686,13 +758,13 @@ UEdGraphNode* UnrealAIEnhancedInputGraph::BindAction(UBlueprint* Blueprint, UEdG
 			}
 		}
 	}
-	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
 	return Call;
 }
 
 UEdGraphNode* UnrealAIEnhancedInputGraph::BindActionToggle(UBlueprint* Blueprint, UEdGraph* EventGraph, UInputAction* Action, const FString& TriggerEvent,
 	const FString& OnFunction, const FString& OffFunction)
 {
+	RefreshSkeletonFor(Blueprint, { &OnFunction, &OffFunction });
 	UFunction* On = CallableFunction(Blueprint, OnFunction);
 	UFunction* Off = On ? CallableFunction(Blueprint, OffFunction) : nullptr;
 	const UBlueprint* Macros = Off ? LoadObject<UBlueprint>(nullptr, TEXT("/Engine/EditorBlueprintResources/StandardMacros.StandardMacros")) : nullptr;
