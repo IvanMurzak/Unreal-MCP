@@ -1,0 +1,10 @@
+{
+  "description": "a fire system created from the Fountain emitter template",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "niagara | call CreateSystem(\"/Game/E2E/NS_FireSmoke\", \"/Niagara/DefaultAssets/Templates/Emitters/Fountain\")"
+  },
+  "assert": {
+    "pattern": "NS_FireSmoke"
+  }
+}

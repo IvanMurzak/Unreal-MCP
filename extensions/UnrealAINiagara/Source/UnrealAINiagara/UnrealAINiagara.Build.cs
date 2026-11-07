@@ -18,16 +18,27 @@ public class UnrealAINiagara : ModuleRules
 		{
 			"CoreUObject",
 			"Engine",
-			// FJsonValue: the Emitters member.
+			// FJsonValue: the Emitters / Modules / Inputs / UserParameters members.
 			"Json",
 			// The RQL module seam: IUnrealMcpRqlModule.h (sources, operations, members, guides, the editor-module template)
 			// and UnrealMcpRqlTools.h (the specs run plans) live in the Unreal-MCP plugin's UnrealMcpRql module; the
 			// matching `UnrealMCP` plugin dependency is in the .uplugin "Plugins" array.
 			"UnrealMcpRql",
 
-			// The gating engine plugin's runtime module (its { "Name": "Niagara" } entry is in the .uplugin "Plugins"
-			// array): UNiagaraSystem for the niagaraSystems source and Emitters, ANiagaraActor for SpawnSystem.
+			// The gating engine plugin's modules (its { "Name": "Niagara" } entry is in the .uplugin "Plugins" array):
+			// Niagara (UNiagaraSystem, emitters, renderers, ANiagaraActor), NiagaraCore and NiagaraShader (types, compile
+			// events) and NiagaraEditor, whose stack view models the operations drive as the System editor does.
 			"Niagara",
+			"NiagaraCore",
+			"NiagaraShader",
+			"NiagaraEditor",
+			// The operations: AssetTools (CreateSystem from a system template), AssetRegistry (niagaraTemplates, module
+			// scripts by name), Projects (EnableFluids, IPluginManager), UnrealEd (editor transactions and graphs).
+			"AssetTools",
+			"AssetRegistry",
+			"Projects",
+			"UnrealEd",
+			"GraphEditor",
 		});
 	}
 }
