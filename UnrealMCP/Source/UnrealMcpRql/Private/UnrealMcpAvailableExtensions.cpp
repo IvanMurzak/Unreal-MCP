@@ -26,7 +26,8 @@ namespace
 				{ TEXT("enhancedinput"), TEXT("inputaction"), TEXT("inputcontext"), TEXT("inputmapping"), TEXT("mappingcontext"),
 					TEXT("addmappingcontext"), TEXT("addactionevent"), TEXT("ia_"), TEXT("imc_") }, true },
 			{ TEXT("com.ivanmurzak.unreal-ai-pcg"), TEXT("PCG Tools"), TEXT("UnrealAIPCG"),
-				TEXT("Procedural Content Generation: pcgGraphs, PCG components, pcg | call AddComponent / Generate"),
+				TEXT("Procedural Content Generation (scattering forests, rocks, props over landscapes and splines): pcgGraphs, pcgNodeTypes, "
+					"pcgTemplates, pcg | call CreateGraph / AddNode / Connect / SetNodeSetting / SetParameter / SpawnVolume / Generate"),
 				{ TEXT("pcg") }, true },
 			{ TEXT("com.ivanmurzak.unreal-ai-gas"), TEXT("GAS Tools"), TEXT("UnrealAIGAS"),
 				TEXT("Gameplay Ability System: gasAbilities, gasEffects, gasAttributeSets, granted abilities, gas | call GrantAbility"),

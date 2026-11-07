@@ -1,0 +1,11 @@
+{
+  "description": "an unknown setting fails naming the node's settings",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "pcg | call SetNodeSetting(\"/Game/E2E/PCG_E2EForest\", \"DensityFilter\", \"Threshold\", \"0.5\")"
+  },
+  "expectError": true,
+  "assert": {
+    "pattern": "settings: LowerBound, UpperBound"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "description": "the nodes wired: terrain -> sampler -> slope and height filters -> minus the road -> pruning -> transform -> spawner -> output",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "[[\"GetLandscapeData\", \"SurfaceSampler\", \"\", \"Surface\"], [\"SurfaceSampler\", \"NormalToDensity\", \"\", \"\"], [\"NormalToDensity\", \"DensityFilter\", \"\", \"\"], [\"DensityFilter\", \"AttributeFilterRange\", \"\", \"\"], [\"AttributeFilterRange\", \"Difference\", \"InsideFilter\", \"Source\"], [\"GetSplineData\", \"SplineSampler\", \"\", \"\"], [\"SplineSampler\", \"BoundsModifier\", \"\", \"\"], [\"BoundsModifier\", \"Difference\", \"\", \"Differences\"], [\"Difference\", \"SelfPruning\", \"\", \"\"], [\"SelfPruning\", \"TransformPoints\", \"\", \"\"], [\"TransformPoints\", \"StaticMeshSpawner\", \"\", \"\"], [\"StaticMeshSpawner\", \"Output\", \"\", \"\"]] | call pcg.Connect(\"/Game/E2E/PCG_E2EForest\", $[0], $[1], $[2], $[3])"
+  },
+  "assert": {
+    "pattern": "AttributeFilterRange\\.InsideFilter -> Difference\\.Source.*BoundsModifier\\.Out -> Difference\\.Differences.*StaticMeshSpawner\\.Out -> Output\\.Out"
+  }
+}

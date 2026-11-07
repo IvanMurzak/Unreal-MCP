@@ -321,7 +321,7 @@ Extensions are beta and need Unreal Engine 5.7+, Unreal MCP 0.26.0+ in the same 
 | **[AI GAS](extensions/UnrealAIGAS/README.md)** | `com.ivanmurzak.unreal-ai-gas` | Gameplay Ability System: query ability, effect and attribute-set classes, grant abilities to actors |
 | **[AI Landscape](extensions/UnrealAILandscape/README.md)** | `com.ivanmurzak.unreal-ai-landscape` | Landscape and Water: create, sculpt and paint landscapes; query landscapes, water bodies and water zones |
 | **[AI Niagara](extensions/UnrealAINiagara/README.md)** | `com.ivanmurzak.unreal-ai-niagara` | Niagara VFX: query systems and their emitters, place systems in the level |
-| **[AI PCG](extensions/UnrealAIPCG/README.md)** | `com.ivanmurzak.unreal-ai-pcg` | Procedural Content Generation: query graphs and PCG components, add components and run generation |
+| **[AI PCG](extensions/UnrealAIPCG/README.md)** | `com.ivanmurzak.unreal-ai-pcg` | Procedural Content Generation: author PCG graphs (nodes, connections, settings, parameters), place them on volumes, generate scatters (forests, rocks, props) and read the counts |
 
 ![AI Game Developer — Unreal MCP](https://github.com/IvanMurzak/Unreal-MCP/blob/main/docs/img/promo/hazzard-divider.svg?raw=true)
 

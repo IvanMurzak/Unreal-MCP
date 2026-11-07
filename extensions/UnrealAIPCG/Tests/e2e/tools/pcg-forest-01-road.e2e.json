@@ -1,0 +1,10 @@
+{
+  "description": "an actor for a dirt road across the landscape of the host map",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "editor | call SpawnActor(\"Actor\", \"E2E_PCGRoad\", \"(-10000, 0, 100)\")"
+  },
+  "assert": {
+    "pattern": "E2E_PCGRoad\\)"
+  }
+}

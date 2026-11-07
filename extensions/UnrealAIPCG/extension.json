@@ -1,7 +1,7 @@
 {
   "extensionId": "com.ivanmurzak.unreal-ai-pcg",
   "name": "PCG Tools",
-  "description": "RQL module for Unreal's Procedural Content Generation (PCG) framework: query graphs and PCG components, add components and run generation.",
+  "description": "RQL module for Unreal's Procedural Content Generation (PCG) framework: author PCG graphs (node types with descriptions, templates, nodes, connections, settings, graph parameters), place them on PCG volumes, generate and read back instance counts. Procedural scattering of forests, rocks and props over landscapes, filtered by slope and height, avoiding splines.",
   "pluginName": "UnrealAIPCG",
   "repo": "IvanMurzak/Unreal-MCP",
   "version": "0.2.0",

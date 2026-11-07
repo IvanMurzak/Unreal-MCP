@@ -1,0 +1,10 @@
+{
+  "description": "the test graph asset deleted",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "editor | call DeleteAsset(\"/Game/E2E/PCG_E2EForest\", true)"
+  },
+  "assert": {
+    "pattern": "DeleteAsset\\("
+  }
+}
