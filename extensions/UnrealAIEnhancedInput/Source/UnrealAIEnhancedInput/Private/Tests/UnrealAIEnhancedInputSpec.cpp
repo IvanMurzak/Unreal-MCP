@@ -9,11 +9,21 @@
 
 #include "IUnrealMcpRqlModule.h"
 #include "UnrealMcpRqlTools.h"
+#include "UnrealMcpRqlPlay.h"
 #include "Misc/Guid.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
 
 #include "EdGraph/EdGraph.h"
+#include "Editor.h"
+#include "EnhancedInputSubsystems.h"
+#include "Engine/LocalPlayer.h"
+#include "Engine/World.h"
+#include "GameFramework/GameModeBase.h"
+#include "GameFramework/PlayerController.h"
+#include "GameFramework/PlayerStart.h"
+#include "GameFramework/WorldSettings.h"
+#include "EnhancedInputComponent.h"
 #include "EdGraphSchema_K2.h"
 #include "Engine/Blueprint.h"
 #include "Engine/BlueprintGeneratedClass.h"
@@ -51,6 +61,10 @@ BEGIN_DEFINE_SPEC(FUnrealAIEnhancedInputSpec, "UnrealAIEnhancedInput",
 	FString BlueprintPath;
 	FString ActionPath;
 	FString ContextPath;
+	/** What the play test changed in the editor world, put back after it. */
+	TWeakObjectPtr<AWorldSettings> PlaySettings;
+	TSubclassOf<AGameModeBase> PlayPreviousGameMode;
+	TWeakObjectPtr<APlayerStart> PlayStart;
 
 	/** Run a plan with @BP@ / @IA@ / @IMC@ (and @Values@) filled in; the QueryResult. */
 	TSharedPtr<FJsonObject> Run(const FString& Plan, bool bMutate, std::initializer_list<TPair<const TCHAR*, FString>> Values = {})
@@ -73,7 +87,7 @@ BEGIN_DEFINE_SPEC(FUnrealAIEnhancedInputSpec, "UnrealAIEnhancedInput",
 		FString Text;
 		if (Result.IsValid())
 			FJsonSerializer::Serialize(Result.ToSharedRef(), TJsonWriterFactory<>::Create(&Text));
-		return Text.Left(600);
+		return Text.Left(4000);
 	}
 
 	/** The $ref in the result column of a receipt's first row (the object a call returned). */
@@ -185,6 +199,7 @@ void FUnrealAIEnhancedInputSpec::Define()
 			TestTrue(TEXT("lists RemoveMapping("), Schema.Contains(TEXT("RemoveMapping(")));
 			TestTrue(TEXT("lists AddActionEvent("), Schema.Contains(TEXT("AddActionEvent(")));
 			TestTrue(TEXT("lists AddMappingContextOnBeginPlay("), Schema.Contains(TEXT("AddMappingContextOnBeginPlay(")));
+			TestTrue(TEXT("lists InjectInput("), Schema.Contains(TEXT("InjectInput(")));
 		});
 
 		It("creates an action and a context, maps a key and refuses an unknown key", [this]()
@@ -405,6 +420,92 @@ void FUnrealAIEnhancedInputSpec::Define()
 			const bool bResultOk = UnrealMcpRqlTools::RunPlan(TEXT(R"RQL({"rql":"0.1","source":{"path":["enhancedInput"]},"stages":[{"op":"call","method":"CreateAction","args":[{"lit":"/Engine/IA_RqlSpec"}]}]})RQL"), true, &Result);
 			TestTrue(TEXT("a well-formed result"), Result.IsValid());
 			TestFalse(TEXT("fails defensively"), bResultOk);
+		});
+	});
+
+	Describe("play test", [this]()
+	{
+		AfterEach([this]()
+		{
+			if (GEditor && GEditor->PlayWorld)
+				GEditor->EndPlayMap();
+			if (AWorldSettings* Settings = PlaySettings.Get())
+				Settings->DefaultGameMode = PlayPreviousGameMode;
+			if (APlayerStart* Start = PlayStart.Get())
+				Start->GetWorld()->EditorDestroyActor(Start, /*bShouldModifyLevel*/ true);
+			PlaySettings.Reset();
+			PlayStart.Reset();
+		});
+
+		It("refuses InjectInput without a play session and names StartPlay", [this]()
+		{
+			MakeBlueprint(ACharacter::StaticClass());
+			// enhancedInput | call InjectInput("@IA@")
+			const TSharedPtr<FJsonObject> Result = Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["enhancedInput"]},"stages":[{"op":"call","method":"InjectInput","args":[{"lit":"@IA@"}]}]})RQL"), true);
+			TestFalse(TEXT("refused"), IsOk(Result));
+			TestTrue(*FString::Printf(TEXT("names StartPlay (%s)"), *Codes(Result)), Codes(Result).Contains(TEXT("StartPlay()")));
+		});
+
+		It("injects an action for exact frames inside the call, reports its trigger events and the applied mapping contexts; a held key fires its mapped action", [this]()
+		{
+			MakeBlueprint(ACharacter::StaticClass());
+			UInputAction* Action = Cast<UInputAction>(UnrealMcpRql::LoadObject(UInputAction::StaticClass(), ActionPath));
+			UInputMappingContext* Context = Cast<UInputMappingContext>(UnrealMcpRql::LoadObject(UInputMappingContext::StaticClass(), ContextPath));
+			if (!TestNotNull(TEXT("the action asset"), Action) || !TestNotNull(TEXT("the context asset"), Context))
+				return;
+			Context->MapKey(Action, EKeys::W);
+
+			// Play the open level with GameModeBase from an added PlayerStart (both undone after: later specs use the level).
+			UWorld* EditorWorld = GEditor->GetEditorWorldContext().World();
+			AWorldSettings* Settings = EditorWorld ? EditorWorld->GetWorldSettings() : nullptr;
+			if (!TestNotNull(TEXT("editor world settings"), Settings))
+				return;
+			PlaySettings = Settings;
+			PlayPreviousGameMode = Settings->DefaultGameMode;
+			Settings->DefaultGameMode = AGameModeBase::StaticClass();
+			PlayStart = EditorWorld->SpawnActor<APlayerStart>(FVector(0.0, 0.0, 5000.0), FRotator::ZeroRotator);
+			FString Error;
+			if (!TestTrue(*FString::Printf(TEXT("play started (%s)"), *Error), UnrealMcpRql::StartPlay(/*bPaused*/ true, Error)))
+				return;
+			APlayerController* Controller = UnrealMcpRql::PlayController();
+			if (!TestNotNull(TEXT("player 0"), Controller))
+				return;
+			UEnhancedInputLocalPlayerSubsystem* Input = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(Controller->GetLocalPlayer());
+			UEnhancedInputComponent* Bindings = Cast<UEnhancedInputComponent>(Controller->InputComponent);
+			if (!TestNotNull(TEXT("the Enhanced Input subsystem"), Input) || !TestNotNull(TEXT("an Enhanced Input component"), Bindings))
+				return;
+			Input->AddMappingContext(Context, 3);
+			int32 Triggered = 0, Completed = 0;
+			Bindings->BindActionValueLambda(Action, ETriggerEvent::Triggered, [&Triggered](const FInputActionValue&) { ++Triggered; });
+			Bindings->BindActionValueLambda(Action, ETriggerEvent::Completed, [&Completed](const FInputActionValue&) { ++Completed; });
+
+			// enhancedInput | call InjectInput("@IA@", "(1, 0, 0)", 0, 3)
+			const TSharedPtr<FJsonObject> Result = Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["enhancedInput"]},"stages":[{"op":"call","method":"InjectInput","args":[{"lit":"@IA@"},{"lit":"(1, 0, 0)"},{"lit":0},{"lit":3}]}]})RQL"), true);
+			const FString Receipt = Codes(Result);
+			TestTrue(*FString::Printf(TEXT("InjectInput ok (%s)"), *Receipt), IsOk(Result));
+			TestTrue(*FString::Printf(TEXT("held 3 frames, then released (%s)"), *Receipt), Receipt.Contains(TEXT("3 frame(s) held + 1 released")));
+			TestEqual(TEXT("the bound Triggered event fired once per held frame"), Triggered, 3);
+			TestEqual(TEXT("Completed fired on release"), Completed, 1);
+			TestTrue(*FString::Printf(TEXT("the notes list the events (%s)"), *Receipt),
+				Receipt.Contains(TEXT("Triggered x3")) && Receipt.Contains(TEXT("Completed x1")));
+			const FString ContextName = FPackageName::GetShortName(ContextPath);
+			TestTrue(*FString::Printf(TEXT("the applied context in the state (%s)"), *Receipt), Receipt.Contains(ContextName + TEXT(" (priority 3)")));
+			TestTrue(TEXT("every play state lists it"), UnrealMcpRql::ReadPlayState().MappingContexts.Contains(ContextName + TEXT(" (priority 3)")));
+
+			// The core AdvancePlay key path: W, mapped to the action in the applied context, fires it like a real key.
+			Triggered = Completed = 0;
+			int32 Advanced = 0;
+			TestTrue(*FString::Printf(TEXT("held W (%s)"), *Error), UnrealMcpRql::AdvancePlayWithKeys(0.0, 4, TEXT("W"), Advanced, Error));
+			TestEqual(TEXT("the mapped action triggered on every held frame"), Triggered, 4);
+			TestEqual(TEXT("and completed on release"), Completed, 1);
+
+			// An unknown trigger is refused before anything is simulated.
+			const double Time = UnrealMcpRql::ReadPlayState().Time;
+			// enhancedInput | call InjectInput("@IA@", "(1, 0, 0)", 0, 3, "NoSuchTrigger")
+			const TSharedPtr<FJsonObject> Bad = Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["enhancedInput"]},"stages":[{"op":"call","method":"InjectInput","args":[{"lit":"@IA@"},{"lit":"(1, 0, 0)"},{"lit":0},{"lit":3},{"lit":"NoSuchTrigger"}]}]})RQL"), true);
+			TestFalse(TEXT("unknown trigger refused"), IsOk(Bad));
+			TestEqual(TEXT("nothing simulated"), UnrealMcpRql::ReadPlayState().Time, Time, 1e-6);
+			Bindings->ClearActionBindings();
 		});
 	});
 }

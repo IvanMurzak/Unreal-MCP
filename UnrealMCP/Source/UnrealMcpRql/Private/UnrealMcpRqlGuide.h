@@ -53,7 +53,7 @@ namespace UnrealMcpRqlGuide
 	inline const char* Language()
 	{
 		return R"RQL(RQL: source | stage | stage ...
-Sources: actors (every actor of the editor world's loaded levels), levels, world, selection, console (editor log entries), editor (editor state and operations), dataTables, gameplayTags, settings (Project Settings / Editor Preferences sections), blueprints, widgetBlueprints, levelSequences, plus the sources of installed extensions (rql-schema lists them, and the extensions you can still install). Assets: unreal.assets("Material") or unreal.assets("StaticMesh", "/Game/Props") (at most 200, loaded lazily), unreal.asset("/Game/Materials/M_Red"). ref("PointLight#1234") resolves a $ref; unreal.find("Lamp") an actor by label, name or path; unreal.classes("ActorComponent", "Light") lists classes; unreal.settings("Maps & Modes") a settings object. A member path may follow a function: unreal.asset("/Game/BP_Door").EventGraph.
+Sources: actors (every actor of the editor world's loaded levels), playActors (the running Play In Editor world's actors), levels, world, selection, console (editor log entries), editor (editor state and operations), dataTables, gameplayTags, settings (Project Settings / Editor Preferences sections), blueprints, widgetBlueprints, levelSequences, plus the sources of installed extensions (rql-schema lists them, and the extensions you can still install). Assets: unreal.assets("Material") or unreal.assets("StaticMesh", "/Game/Props") (at most 200, loaded lazily), unreal.asset("/Game/Materials/M_Red"). ref("PointLight#1234") resolves a $ref; unreal.find("Lamp") an actor by label, name or path; unreal.classes("ActorComponent", "Light") lists classes; unreal.settings("Maps & Modes") a settings object. A member path may follow a function: unreal.asset("/Game/BP_Door").EventGraph.
 Stages:
   where <predicate>                  filter
   select a b.c alias=(expr)          project columns (wrap computed expressions in parentheses)
@@ -83,6 +83,7 @@ Results come back as compact rows (header line, then col|col). Long results are 
   actors | get Components | where $ is LightComponentBase | group-by $type | select key, count, avg = items.avg(Intensity)
   levels | select Map IsPersistent IsCurrent IsVisible
   editor | select IsPlaying IsPaused Selection
+  editor | select PlayState      while play testing (editor | call StartPlay() / AdvancePlay(seconds, frames, keys) in rql-mutate); playActors = the game world's actors
   editor | select NextUndo UndoHistory RedoHistory      what Ctrl+Z / Ctrl+Y would revert (RQL steps are "RQL: <query>")
   actors | where $ is Volume | select Label BrushExtent BrushBounds      volume shapes (BrushExtent null = no brush, no shape)
   unreal.asset("/Game/Data/DT_Weapons") | get Rows | where Value.Damage > 10 | select Key Value.Damage
@@ -135,6 +136,11 @@ Levels, assets, editor state:
   editor | call CopyAsset("/Game/A", "/Game/B")    MoveAsset / DeleteAsset / CreateFolder("/Game/Props") / ImportAsset("C:/art/crate.fbx", "/Game/Props")   (returns the mesh and the materials / textures it created)
   actors | where Label == "NavBounds" | set BrushExtent = "(2000, 2000, 500)"     a volume's box brush (half-size, cm)
   editor | set Selection = [ref("StaticMeshActor#1234")]        actors | where $ is PointLight | set Selected = true        editor | set IsPlaying = true
+Play test (simulate the game and its input inside the call; never wait for the editor to tick between calls):
+  editor | call StartPlay()              starts Play In Editor now, paused between calls; returns PlayState (PawnClass, Location, Velocity, MovementMode, Crouching, MaxWalkSpeed, MappingContexts)
+  editor | call AdvancePlay(1.5, 0, "W, LeftShift")      holds W + LeftShift for 1.5 s (fixed 1/60 s frames, through the mapping contexts), releases, returns PlayState
+  editor | call AdvancePlay(0, 1, "SpaceBar")      one frame pressed       editor | call AdvancePlay(2)      just let 2 s pass       editor | call StopPlay()
+  rql-query: editor | select PlayState        playActors | where Label == "Car" | select Location      (the game world's actors)
 Data, tags, settings (settings are saved to their ini at once, tag edits too; neither is undoable):
   unreal.asset("/Game/Data/DT_Weapons") | set Rows["Sword"].Damage = 12        call AddRow("Bow", {Damage: 7}) / RemoveRow / RenameRow / DuplicateRow
   unreal.asset("/Game/Data/DT_Weapons") | get Rows | where Value.Damage > 10 | set Value.Damage = Value.Damage * 2     rows (map entries) as targets

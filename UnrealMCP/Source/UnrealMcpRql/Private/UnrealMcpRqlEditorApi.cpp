@@ -759,6 +759,35 @@ void UUnrealMcpRqlEditorApi::SaveAsset(UObject* Asset)
 		Failed(FString::Printf(TEXT("could not save %s"), *Asset->GetPathName()));
 }
 
+FUnrealMcpPlayState UUnrealMcpRqlEditorApi::StartPlay(bool bPaused)
+{
+	FString Error;
+	TArray<FString> Notes;
+	if (!UnrealMcpRql::StartPlay(bPaused, Error, &Notes))
+		return Failed<FUnrealMcpPlayState>(Error);
+	FUnrealMcpPlayState State = UnrealMcpRql::ReadPlayState();
+	State.Notes.Append(Notes);
+	return State;
+}
+
+void UUnrealMcpRqlEditorApi::StopPlay()
+{
+	FString Error;
+	if (!UnrealMcpRql::StopPlay(Error))
+		Failed(Error);
+}
+
+FUnrealMcpPlayState UUnrealMcpRqlEditorApi::AdvancePlay(double Seconds, int32 Frames, const FString& Keys)
+{
+	FString Error;
+	int32 Advanced = 0;
+	if (!UnrealMcpRql::AdvancePlayWithKeys(Seconds, Frames, Keys, Advanced, Error))
+		return Failed<FUnrealMcpPlayState>(Error);
+	FUnrealMcpPlayState State = UnrealMcpRql::ReadPlayState();
+	State.FramesAdvanced = Advanced;
+	return State;
+}
+
 int32 UUnrealMcpRqlEditorApi::ClearConsole()
 {
 	return FUnrealMcpLogCollector::Get().Clear();

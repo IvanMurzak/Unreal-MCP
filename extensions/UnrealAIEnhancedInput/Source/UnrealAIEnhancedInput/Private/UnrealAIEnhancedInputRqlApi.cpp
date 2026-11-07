@@ -9,13 +9,17 @@
 #include "EdGraphSchema_K2.h"
 #include "EnhancedActionKeyMapping.h"
 #include "EnhancedInputSubsystems.h"
+#include "EnhancedPlayerInput.h"
 #include "Engine/Blueprint.h"
 #include "Engine/BlueprintGeneratedClass.h"
 #include "GameFramework/Actor.h"
+#include "Engine/LocalPlayer.h"
+#include "GameFramework/PlayerController.h"
 #include "InputAction.h"
 #include "InputCoreTypes.h"
 #include "InputMappingContext.h"
 #include "InputModifiers.h"
+#include "InputTriggers.h"
 #include "K2Node_CallFunction.h"
 #include "K2Node_CallParentFunction.h"
 #include "K2Node_EnhancedInputAction.h"
@@ -23,6 +27,7 @@
 #include "K2Node_GetSubsystem.h"
 #include "Kismet/GameplayStatics.h"
 #include "Kismet2/BlueprintEditorUtils.h"
+#include "UObject/StrongObjectPtr.h"
 #include "UObject/UObjectIterator.h"
 
 namespace UnrealAIEnhancedInputRqlLocal
@@ -359,4 +364,155 @@ UEdGraphNode* UUnrealAIEnhancedInputRqlApi::AddMappingContextOnBeginPlay(UObject
 	}
 	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Owner);
 	return Add;
+}
+
+namespace UnrealAIEnhancedInputRqlLocal
+{
+	/** The concrete InputTrigger class a name means ("Pressed", "InputTriggerHold"); null when none. */
+	UClass* TriggerClass(const FString& Name)
+	{
+		for (const FString& Candidate : { Name, TEXT("InputTrigger") + Name })
+		{
+			UClass* Class = UnrealMcpRql::ResolveClass(Candidate);
+			if (Class && Class->IsChildOf(UInputTrigger::StaticClass()) && !Class->HasAnyClassFlags(CLASS_Abstract | CLASS_Deprecated))
+				return Class;
+		}
+		return nullptr;
+	}
+
+	const TCHAR* TriggerEventName(ETriggerEvent Event)
+	{
+		switch (Event)
+		{
+			case ETriggerEvent::Triggered: return TEXT("Triggered");
+			case ETriggerEvent::Started: return TEXT("Started");
+			case ETriggerEvent::Ongoing: return TEXT("Ongoing");
+			case ETriggerEvent::Canceled: return TEXT("Canceled");
+			case ETriggerEvent::Completed: return TEXT("Completed");
+			default: return TEXT("None");
+		}
+	}
+
+	/** The trigger event of each frame, as runs: "Triggered x30, Completed x1" (frames without an event are left out). */
+	class FTriggerEventLog
+	{
+	public:
+		void Add(ETriggerEvent Event)
+		{
+			if (Event == ETriggerEvent::None)
+			{
+				Last = ETriggerEvent::None;
+				return;
+			}
+			if (Runs.Num() > 0 && Event == Last)
+				++Runs.Last().Value;
+			else
+				Runs.Add({ Event, 1 });
+			Last = Event;
+		}
+
+		FString ToString() const
+		{
+			TArray<FString> Parts;
+			for (const TPair<ETriggerEvent, int32>& Run : Runs)
+				Parts.Add(FString::Printf(TEXT("%s x%d"), TriggerEventName(Run.Key), Run.Value));
+			return Parts.Num() > 0 ? FString::Join(Parts, TEXT(", ")) : FString(TEXT("no trigger event"));
+		}
+
+	private:
+		TArray<TPair<ETriggerEvent, int32>> Runs;
+		ETriggerEvent Last = ETriggerEvent::None;
+	};
+}
+
+TArray<FString> UUnrealAIEnhancedInputRqlApi::AppliedContexts(const APlayerController* Controller)
+{
+	TArray<TPair<int32, FString>> Applied;
+	// The applied-context map of the player input is not public: ask the player's subsystem about each loaded context (a
+	// context applied to a player is loaded).
+	const ULocalPlayer* Player = Controller ? Controller->GetLocalPlayer() : nullptr;
+	if (const UEnhancedInputLocalPlayerSubsystem* Input = Player ? Player->GetSubsystem<UEnhancedInputLocalPlayerSubsystem>() : nullptr)
+	{
+		for (TObjectIterator<UInputMappingContext> It; It; ++It)
+		{
+			int32 Priority = 0;
+			if (!It->HasAnyFlags(RF_ClassDefaultObject) && Input->HasMappingContext(*It, Priority))
+				Applied.Add({ Priority, It->GetName() });
+		}
+	}
+	Applied.Sort([](const TPair<int32, FString>& A, const TPair<int32, FString>& B) { return A.Key != B.Key ? A.Key > B.Key : A.Value < B.Value; });
+	TArray<FString> Names;
+	for (const TPair<int32, FString>& Entry : Applied)
+		Names.Add(FString::Printf(TEXT("%s (priority %d)"), *Entry.Value, Entry.Key));
+	return Names;
+}
+
+FUnrealMcpPlayState UUnrealAIEnhancedInputRqlApi::InjectInput(UInputAction* Action, FVector Value, double Seconds, int32 Frames, const FString& Triggers)
+{
+	using namespace UnrealAIEnhancedInputRqlLocal;
+	using UnrealMcpRql::Failed;
+	FString Error;
+	const int32 Count = UnrealMcpRql::PlayFrameCount(Seconds, Frames, Error);
+	if (Count < 0)
+		return Failed<FUnrealMcpPlayState>(Error);
+	APlayerController* Controller = UnrealMcpRql::PlayController();
+	if (!Controller)
+		return Failed<FUnrealMcpPlayState>(UnrealMcpRql::PlayWorld() ? TEXT("the play world has no player controller to inject input into")
+			: TEXT("no Play In Editor session is running: editor | call StartPlay() first"));
+	if (!Cast<UEnhancedPlayerInput>(Controller->PlayerInput))
+		return Failed<FUnrealMcpPlayState>(TEXT("player 0 does not use Enhanced Input (Project Settings > Input: Default Player Input Class = EnhancedPlayerInput)"));
+
+	// Extra triggers, as a key mapping's: transient objects held by a GC guard for the call.
+	TArray<UInputTrigger*> TriggerObjects;
+	TArray<FString> Names;
+	Triggers.ParseIntoArray(Names, TEXT(","), /*bCullEmpty*/ true);
+	for (const FString& Raw : Names)
+	{
+		const FString Name = Raw.TrimStartAndEnd();
+		if (Name.IsEmpty())
+			continue;
+		UClass* Class = TriggerClass(Name);
+		if (!Class)
+			return Failed<FUnrealMcpPlayState>(FString::Printf(TEXT("'%s' is not an input trigger (Pressed, Released, Down, Hold, HoldAndRelease, Tap, Pulse)"), *Name));
+		TriggerObjects.Add(NewObject<UInputTrigger>(GetTransientPackage(), Class));
+	}
+	TArray<TStrongObjectPtr<UInputTrigger>> Keep;
+	for (UInputTrigger* Trigger : TriggerObjects)
+		Keep.Emplace(Trigger);
+
+	const FInputActionValue RawValue(Action->ValueType, Value);
+	FTriggerEventLog Events;
+	FString LastValue;
+	auto Sample = [Action, &Events, &LastValue](const APlayerController* From, bool bHeldFrame)
+	{
+		const UEnhancedPlayerInput* Input = From ? Cast<UEnhancedPlayerInput>(From->PlayerInput) : nullptr;
+		const FInputActionInstance* Instance = Input ? Input->FindActionInstanceData(Action) : nullptr;
+		Events.Add(Instance ? Instance->GetTriggerEvent() : ETriggerEvent::None);
+		if (Instance && bHeldFrame)
+			LastValue = Instance->GetValue().ToString();
+	};
+	int32 Advanced = 0;
+	// The input of frame N is evaluated in frame N's tick: the frame's event is read before the next frame's injection.
+	const bool bHeld = UnrealMcpRql::AdvancePlay(Count, [&](APlayerController* Target, int32 Frame)
+	{
+		if (Frame > 0)
+			Sample(Target, true);
+		if (UEnhancedPlayerInput* Input = Target ? Cast<UEnhancedPlayerInput>(Target->PlayerInput) : nullptr)
+			Input->InjectInputForAction(Action, RawValue, {}, TriggerObjects);
+	}, Advanced, Error);
+	if (!bHeld)
+		return Failed<FUnrealMcpPlayState>(Error);
+	// One frame without input: the action completes (Completed / Canceled fire) as when the key is let go.
+	int32 Released = 0;
+	const bool bReleased = UnrealMcpRql::AdvancePlay(1, [&](APlayerController* Target, int32) { Sample(Target, true); }, Released, Error);
+	if (!bReleased)
+		return Failed<FUnrealMcpPlayState>(Error);
+	Sample(UnrealMcpRql::PlayController(), false);
+
+	FUnrealMcpPlayState State = UnrealMcpRql::ReadPlayState();
+	State.FramesAdvanced = Advanced + Released;
+	State.Notes.Add(FString::Printf(TEXT("%s: %s (%d frame(s) held + 1 released)"), *Action->GetName(), *Events.ToString(), Advanced));
+	if (!LastValue.IsEmpty())
+		State.Notes.Add(FString::Printf(TEXT("%s value while held: %s"), *Action->GetName(), *LastValue));
+	return State;
 }

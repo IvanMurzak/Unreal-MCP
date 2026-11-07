@@ -69,6 +69,29 @@ namespace UnrealMcpSourceTools
 		double Seconds, const FString& Output);
 
 	/**
+	 * The agent's next step when new C++ cannot go live in this editor session (Live Coding cannot apply it, or the editor
+	 * holds the module DLL): a full build with the editor closed. Names the AI Game Dev app's restart (which builds first)
+	 * and the manual path for other clients.
+	 */
+	UNREALMCPEDITOR_API FString RestartAdvice(const FString& Target);
+
+	/**
+	 * The source-compile sentence for @p Files (FindReflectionChangesSince): Live Coding was skipped because it cannot apply
+	 * them, then RestartAdvice unless @p bAdviceGiven (the UBT summary already carries it).
+	 */
+	UNREALMCPEDITOR_API FString DescribeReflectionChanges(const FString& Target, const TArray<FString>& Files, bool bAdviceGiven);
+
+	/** When this editor process started (UTC). */
+	UNREALMCPEDITOR_API FDateTime EditorStartUtc();
+
+	/**
+	 * Headers under @p SourceRoot changed after @p SinceUtc that declare reflected types or members (UCLASS, USTRUCT,
+	 * UENUM, UINTERFACE, UPROPERTY, UFUNCTION, GENERATED_BODY), relative to the root and sorted: Live Coding cannot apply
+	 * them, a full build and an editor restart can.
+	 */
+	UNREALMCPEDITOR_API TArray<FString> FindReflectionChangesSince(const FString& SourceRoot, const FDateTime& SinceUtc);
+
+	/**
 	 * The compiler diagnostics as text lines for the summary (one "<file>(<line>): error: <message>" line each), errors first, at most
 	 * @p MaxRows (then "... N more"); empty when there are none. The agent reads the text block, so every error must be
 	 * in it, not only in the structured report.

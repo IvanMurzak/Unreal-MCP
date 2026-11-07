@@ -208,11 +208,15 @@ void FUnrealMcpSourceToolsSpec::Define()
 				TEXT("Building GameEditor...\n[3/4] Link UnrealEditor-Game.dll\nLINK : fatal error LNK1104: cannot open file 'UnrealEditor-Game.dll'\nTotal time 52s\n"));
 			TestTrue(*FString::Printf(TEXT("counts and code (%s)"), *Locked), Locked.StartsWith(TEXT("Compile (GameEditor, UBT): 0 error(s), 0 warning(s); return code 6")));
 			TestTrue(TEXT("the reason line"), Locked.Contains(TEXT("UBT: LINK : fatal error LNK1104")));
-			TestTrue(TEXT("not live: build with the editor closed"), Locked.Contains(TEXT("NOT live")) && Locked.Contains(TEXT("editor closed")));
+			TestTrue(TEXT("not live: build with the editor closed"), Locked.Contains(TEXT("NOT live")) && Locked.Contains(TEXT("editor must close")));
+			TestTrue(TEXT("the restart path for the app and other clients"), Locked.Contains(TEXT("editor_connection.connect with restart:true"))
+				&& Locked.Contains(TEXT("close the editor, build GameEditor, and reopen it")));
 
 			const FString LiveCoding = UnrealMcpSourceTools::DescribeUbtResult(TEXT("GameEditor"), 0, 0, 6, 2.0,
 				TEXT("Unable to build while Live Coding is active. Exit the editor and game, or press Ctrl+Alt+F11 if iterating on code in the editor or game\n"));
 			TestTrue(TEXT("Live Coding refusal: nothing was built"), LiveCoding.Contains(TEXT("UBT: Unable to build while Live Coding is active")) && LiveCoding.Contains(TEXT("Nothing was built")));
+			TestTrue(*FString::Printf(TEXT("Live Coding refusal: bodies via Live Coding, declarations via a rebuild + restart (%s)"), *LiveCoding),
+				LiveCoding.Contains(TEXT("useLiveCoding true")) && LiveCoding.Contains(TEXT("restart required")) && LiveCoding.Contains(TEXT("restart:true")));
 
 			const FString Broken = UnrealMcpSourceTools::DescribeUbtResult(TEXT("GameEditor"), 2, 0, 6, 10.0,
 				TEXT("Foo.cpp(3): error C2143: syntax error\nResult: Failed (OtherCompilationError)\n"));
@@ -235,6 +239,29 @@ void FUnrealMcpSourceToolsSpec::Define()
 			TestEqual(TEXT("one line per diagnostic"), Text.Len() - Text.Replace(TEXT("\n"), TEXT("")).Len(), 3);
 			TestTrue(TEXT("capped"), UnrealMcpSourceTools::DescribeDiagnostics(Diags, 1).EndsWith(TEXT("... 2 more diagnostic(s)")));
 			TestEqual(TEXT("none: empty"), UnrealMcpSourceTools::DescribeDiagnostics({}), FString());
+		});
+
+		It("finds reflected headers changed since the editor started (Live Coding cannot apply them)", [this]()
+		{
+			const FString Root = FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / TEXT("UnrealMcpReflectionSpec"));
+			IFileManager::Get().DeleteDirectory(*Root, false, true);
+			FFileHelper::SaveStringToFile(TEXT("#pragma once\nUCLASS()\nclass ACar : public APawn { GENERATED_BODY() };\n"), *(Root / TEXT("Game/Car.h")));
+			FFileHelper::SaveStringToFile(TEXT("#pragma once\ninline int Twice(int X) { return 2 * X; }\n"), *(Root / TEXT("Game/Math.h")));
+			FFileHelper::SaveStringToFile(TEXT("UCLASS() class ANotAHeader {};\n"), *(Root / TEXT("Game/Car.cpp")));
+
+			const TArray<FString> Changed = UnrealMcpSourceTools::FindReflectionChangesSince(Root, UnrealMcpSourceTools::EditorStartUtc());
+			TestEqual(TEXT("only the reflected header"), Changed, TArray<FString>{ TEXT("Game/Car.h") });
+			TestEqual(TEXT("nothing changed after a later start"),
+				UnrealMcpSourceTools::FindReflectionChangesSince(Root, FDateTime::UtcNow() + FTimespan::FromMinutes(1)).Num(), 0);
+			TestTrue(TEXT("the editor started before now"), UnrealMcpSourceTools::EditorStartUtc() < FDateTime::UtcNow());
+
+			const FString Sentence = UnrealMcpSourceTools::DescribeReflectionChanges(TEXT("GameEditor"), Changed, /*bAdviceGiven*/ false);
+			TestTrue(*FString::Printf(TEXT("names the header, why, and the restart (%s)"), *Sentence), Sentence.Contains(TEXT("Game/Car.h"))
+				&& Sentence.Contains(TEXT("Live Coding cannot add")) && Sentence.Contains(TEXT("editor_connection.connect with restart:true"))
+				&& Sentence.Contains(TEXT("build GameEditor")));
+			TestFalse(TEXT("no second copy of the advice"), UnrealMcpSourceTools::DescribeReflectionChanges(TEXT("GameEditor"), Changed, true)
+				.Contains(TEXT("restart:true")));
+			IFileManager::Get().DeleteDirectory(*Root, false, true);
 		});
 	});
 
@@ -269,6 +296,8 @@ void FUnrealMcpSourceToolsSpec::Define()
 				CreateResult.Message.Contains(TEXT("cannot load a new C++ class")) && CreateResult.Message.Contains(TEXT("Blueprint")));
 			const FString HeaderRel = TempModule / TEXT("SpecPawnThing.h");
 			TestTrue(TEXT("header on disk"), FPaths::FileExists(UnrealMcpSourceTools::GetProjectSourceRoot() / HeaderRel));
+			TestTrue(TEXT("source-compile would see the new class as a reflection change"), UnrealMcpSourceTools::FindReflectionChangesSince(
+				UnrealMcpSourceTools::GetProjectSourceRoot(), UnrealMcpSourceTools::EditorStartUtc()).Contains(HeaderRel));
 
 			// create-class refuses to overwrite without force.
 			TestFalse(TEXT("no overwrite without force"), RunSourceTool(Registry, TEXT("source-create-class"), Create).bSuccess);

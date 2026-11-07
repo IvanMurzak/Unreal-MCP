@@ -1234,7 +1234,10 @@ read + structure-edit + compile + spawn:
 **source family** (task: source-script-tools; Unity Script reinterpreted): `source-read` (sliced),
 `source-create-class` (header+cpp from templates: UObject/AActor/UActorComponent/empty),
 `source-update`, `source-delete`, `source-list` (module sources), `source-compile` (Live Coding
-when active, else UBT invoke) with structured error report. All file ops jailed to
+when active, else UBT invoke) with structured error report; headers with reflected declarations (UCLASS / USTRUCT /
+UENUM / UPROPERTY / UFUNCTION) changed since the editor started skip Live Coding, which cannot apply them, and the
+result (`restartRequired`, `reflectionChanges`) gives the rebuild + restart path (the AI Game Dev app's
+`editor_connection.connect` with `restart:true` builds before opening). All file ops jailed to
 `<Project>/Source/`. No Roslyn-style eval analog in MVP; optional Python-scripting-plugin
 execution tool = backlog (decision: out of MVP — extra plugin dependency).
 

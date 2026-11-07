@@ -855,6 +855,13 @@ namespace UnrealMcpRqlCoreLocal
 					Throw(TEXT("not playing"));
 				GEditor->SetPIEWorldsPaused(BoolArg(Value));
 			}, "Play In Editor paused"));
+		FUnrealMcpRqlTypes::SetMember(D, Member("PlayState", T.ForStruct(FUnrealMcpPlayState::StaticStruct()),
+			[Types](void*)
+			{
+				const FUnrealMcpPlayState State = UnrealMcpRql::ReadPlayState();
+				return Types->WrapStruct(FUnrealMcpPlayState::StaticStruct(), &State);
+			}, {}, "the running play session: Playing, Paused, Time, Pawn, PawnClass, Location, Velocity, Speed, MovementMode, "
+			"Crouching, MaxWalkSpeed, MappingContexts (play test with call StartPlay / AdvancePlay)"));
 		FUnrealMcpRqlTypes::SetMember(D, Member("Selection", T.Registry().list_type(ActorType, true),
 			[Types](void*) { return Types->WrapObjects(SelectedActors()); },
 			[Types](void*, const rql::Value& Value)
@@ -1217,6 +1224,20 @@ void UnrealMcpRqlConfigureCore(FUnrealMcpRqlSession& Session)
 		}
 		return Types->WrapObjects(Actors);
 	});
+	Session.AddSource(TEXT("playActors"), ActorType, /*bList*/ true, TEXT("every actor of the running Play In Editor world (empty when not playing): "
+		"read the game while play testing, playActors | where Label == \"Car\" | select Location"), [Types]()
+	{
+		TArray<UObject*> Actors;
+		if (UWorld* World = UnrealMcpRql::PlayWorld())
+		{
+			for (TActorIterator<AActor> It(World); It; ++It)
+			{
+				if (IsValid(*It))
+					Actors.Add(*It);
+			}
+		}
+		return Types->WrapObjects(Actors);
+	});
 	Session.AddSource(TEXT("levels"), T.ForClass(ULevel::StaticClass()), /*bList*/ true, TEXT("the loaded levels of the editor world (Map, IsPersistent, IsCurrent, IsVisible, Actors)"), [Types]()
 	{
 		UWorld* World = EditorWorld();
@@ -1231,7 +1252,7 @@ void UnrealMcpRqlConfigureCore(FUnrealMcpRqlSession& Session)
 		return Types->WrapObjects(SelectedActors());
 	});
 	Session.AddSource(TEXT("editor"), T.ForClass(UUnrealMcpRqlEditorApi::StaticClass()), /*bList*/ false,
-		TEXT("editor state (IsPlaying, IsPaused, Selection, World, CurrentLevel, NextUndo / UndoHistory / RedoHistory) and operations: call SpawnActor / SpawnActorFromAsset / OpenLevel / NewLevel / "
+		TEXT("editor state (IsPlaying, IsPaused, PlayState, Selection, World, CurrentLevel, NextUndo / UndoHistory / RedoHistory) and operations: play test with call StartPlay / AdvancePlay(seconds, frames, keys) / StopPlay; call SpawnActor / SpawnActorFromAsset / OpenLevel / NewLevel / "
 			"SaveLevel / SaveAll / AddSublevel / UnloadSublevel / CreateAsset / CopyAsset / MoveAsset / DeleteAsset / CreateFolder / RefreshAssets / "
 			"CreateMaterialInstance / ImportAsset / SaveAsset / ClearConsole / CreateDataTable / AddGameplayTag / RemoveGameplayTag / "
 			"RenameGameplayTag"), [Types]()

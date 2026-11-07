@@ -6,9 +6,11 @@
 #include "CoreMinimal.h"
 #include "InputActionValue.h"
 #include "UObject/Object.h"
+#include "UnrealMcpRqlPlay.h"
 
 #include "UnrealAIEnhancedInputRqlApi.generated.h"
 
+class APlayerController;
 class UEdGraphNode;
 class UInputAction;
 class UInputMappingContext;
@@ -51,4 +53,12 @@ public:
 	/** make an actor Blueprint (or its path, or its event graph) add a mapping context when play starts: Event BeginPlay -> Get Player Controller (0) -> Enhanced Input Local Player Subsystem -> Add Mapping Context (Context, Priority), placed before what BeginPlay already runs; without it no action event fires; returns the Add Mapping Context node */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Enhanced Input", meta = (BlueprintInternalUseOnly = "true"))
 	UEdGraphNode* AddMappingContextOnBeginPlay(UObject* Blueprint, UInputMappingContext* Context, int32 Priority = 0);
+
+	/** play test: inject Action (its path) into player 0 of the running Play In Editor session for Seconds and / or Frames (fixed 1/60 s steps, simulated INSIDE this call; at most 60 s), as if its keys were held: Value is the raw value (1 presses a Boolean action; [0, 1, 0] is a 2D Move forward; X, Y, Z for Axis1D / 2D / 3D); Triggers (optional, comma-separated: "Pressed", "Hold", "Tap", ...) add triggers as a key mapping's would; released on one extra frame; returns the play state, its Notes listing the action's trigger events frame by frame ("IA_Jump: Triggered x30, Completed x1") and its final value. Start the session first: editor | call StartPlay() */
+	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Enhanced Input", meta = (BlueprintInternalUseOnly = "true"))
+	FUnrealMcpPlayState InjectInput(UInputAction* Action, FVector Value = FVector(1.0, 0.0, 0.0), double Seconds = 0.0, int32 Frames = 0,
+		const FString& Triggers = TEXT(""));
+
+	/** The Enhanced Input mapping contexts applied to @p Controller's player, highest priority first ("IMC_Default (priority 0)"). */
+	static TArray<FString> AppliedContexts(const APlayerController* Controller);
 };

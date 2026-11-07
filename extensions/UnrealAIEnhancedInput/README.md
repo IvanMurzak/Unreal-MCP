@@ -32,7 +32,7 @@ The extension adds its feature to the editor's RQL data layer (`rql-query` / `rq
 | Kind | Names |
 | --- | --- |
 | Sources | `inputActions`, `inputContexts`, `enhancedInput` |
-| Operations (`call`) | `CreateAction`, `CreateContext`, `AddMapping`, `RemoveMapping`, `AddActionEvent`, `AddMappingContextOnBeginPlay` |
+| Operations (`call`) | `CreateAction`, `CreateContext`, `AddMapping`, `RemoveMapping`, `AddActionEvent`, `AddMappingContextOnBeginPlay`, `InjectInput` (play test) |
 | Members | `InputMappingContext.KeyMappings` |
 
 ```
@@ -48,6 +48,18 @@ enhancedInput | call AddActionEvent("/Game/BP_Hero", "/Game/Input/IA_Jump")     
 Completed, ActionValue) in an actor Blueprint's event graph; `AddMappingContextOnBeginPlay` adds Event BeginPlay -> Get
 Player Controller -> Enhanced Input Local Player Subsystem -> Add Mapping Context ahead of what BeginPlay already runs.
 The event node comes from the EnhancedInput plugin's `InputBlueprintNodes` module, a dependency of this extension only.
+
+`InjectInput(action, value, seconds, frames, triggers)` play-tests the controls: it injects the action into player 0 of
+the running Play In Editor session (`editor | call StartPlay()`) for exact 1/60 s frames simulated inside the call, then
+returns the core play state (pawn, location, velocity, movement mode) with the action's trigger events frame by frame
+in `Notes` (`IA_Jump: Triggered x30, Completed x1`). With this extension installed every play state also lists the
+mapping contexts applied to player 0 (`MappingContexts`).
+
+```
+editor | call StartPlay()
+enhancedInput | call InjectInput("/Game/Input/IA_Move", [0, 1, 0], 1.5)
+enhancedInput | call InjectInput("/Game/Input/IA_Jump")
+```
 
 ## Releases and development
 
