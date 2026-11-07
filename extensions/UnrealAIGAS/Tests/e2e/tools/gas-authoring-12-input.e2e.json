@@ -1,0 +1,10 @@
+{
+  "description": "key One casts the fireball through a new input action and mapping context",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "gas | call BindAbilityInput(\"/Game/E2EGAS/BP_Hero\", \"/Game/E2EGAS/GA_Fireball\", \"/Game/E2EGAS/IA_Fireball\", \"One\")"
+  },
+  "assert": {
+    "pattern": "IA_Fireball \\(One in IMC_Abilities\\) activates GA_Fireball_C"
+  }
+}

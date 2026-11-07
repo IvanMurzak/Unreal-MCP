@@ -1,10 +1,10 @@
 {
-  "description": "GrantAbility among the operations",
+  "description": "the authoring and runtime operations among the gas operations",
   "tool": "rql-schema",
   "input": {
     "type": "GASOperations"
   },
   "assert": {
-    "pattern": "GrantAbility"
+    "pattern": "ActivateAbility.*AddAbilitySystem.*AddModifier.*BindAbilityInput.*CreateEffect.*SetCooldown"
   }
 }

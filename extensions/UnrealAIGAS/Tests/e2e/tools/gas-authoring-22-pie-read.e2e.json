@@ -1,0 +1,10 @@
+{
+  "description": "the running hero's attributes and cooldown tag read back",
+  "tool": "rql-query",
+  "input": {
+    "query": "gasComponents | where Owner.Label == \"E2E_Hero\" | select Attributes OwnedTags"
+  },
+  "assert": {
+    "pattern": "E2E\\.GAS\\.Cooldown"
+  }
+}

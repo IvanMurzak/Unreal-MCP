@@ -1,0 +1,10 @@
+{
+  "description": "the regeneration effect adds 5 mana",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "gas | call AddModifier(\"/Game/E2EGAS/GE_ManaRegen\", \"Mana\", \"Add\", \"5\")"
+  },
+  "assert": {
+    "pattern": "\\)\\|1\\b"
+  }
+}

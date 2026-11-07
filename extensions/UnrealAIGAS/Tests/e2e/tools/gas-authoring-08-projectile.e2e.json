@@ -1,0 +1,10 @@
+{
+  "description": "the fireball fires a projectile that applies 25 damage",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "gas | call SetAbilityProjectile(\"/Game/E2EGAS/GA_Fireball\", \"/Game/E2EGAS/GE_Damage\", 25)"
+  },
+  "assert": {
+    "pattern": "fires UnrealAIGASProjectile applying GE_Damage_C \\(SetByCaller\\.Damage 25\\)"
+  }
+}

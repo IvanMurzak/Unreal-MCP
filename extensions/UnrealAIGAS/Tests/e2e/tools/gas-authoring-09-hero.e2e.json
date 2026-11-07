@@ -1,0 +1,11 @@
+{
+  "description": "a Character Blueprint for the hero",
+  "tool": "blueprint-create",
+  "input": {
+    "path": "/Game/E2EGAS/BP_Hero",
+    "parentClass": "Character"
+  },
+  "assert": {
+    "pattern": "BP_Hero"
+  }
+}

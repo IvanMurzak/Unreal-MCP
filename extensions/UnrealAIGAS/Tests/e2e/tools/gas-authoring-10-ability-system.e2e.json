@@ -1,0 +1,10 @@
+{
+  "description": "the hero gets an ability system with health and mana",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "gas | call AddAbilitySystem(\"/Game/E2EGAS/BP_Hero\", \"Health=100, MaxHealth=100, Mana=100, MaxMana=100\")"
+  },
+  "assert": {
+    "pattern": "UnrealAIAbilitySystemComponent"
+  }
+}

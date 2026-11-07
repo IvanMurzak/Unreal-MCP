@@ -1,0 +1,11 @@
+{
+  "description": "the test assets deleted",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "[\"/Game/E2EGAS/BP_Hero\", \"/Game/E2EGAS/IMC_Abilities\", \"/Game/E2EGAS/IA_Fireball\", \"/Game/E2EGAS/GA_Fireball\", \"/Game/E2EGAS/GA_Fireball_Cost\", \"/Game/E2EGAS/GA_Fireball_Cooldown\", \"/Game/E2EGAS/GE_Damage\", \"/Game/E2EGAS/GE_ManaRegen\"] | call editor.DeleteAsset($, true)",
+    "max_targets": 20
+  },
+  "assert": {
+    "pattern": "DeleteAsset\\("
+  }
+}

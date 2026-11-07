@@ -138,12 +138,97 @@ AUTHORING = {
 }
 
 
+
+def gas_receipt(method, result):
+    return text_result(f'1 result\n$ref|method|result\nGASOperations#4512|{method}|{result}')
+
+
+def gas_error(message):
+    return json.dumps({'error': f'error call-threw: {message}'})
+
+
+ACTIVATE = 'ActivateAbility(Class Ability, string Actor)'
+MODIFIER = 'AddModifier(Class Effect, string Attribute, string Operation, string Magnitude)'
+APPLY = 'ApplyEffect(Class Effect, string Actor, string SetByCaller, float Level)'
+BIND = 'BindAbilityInput(Blueprint Blueprint, Class Ability, string InputAction, string Key, InputMappingContext MappingContext)'
+# The GAS fireball sequence (authoring, then Play In Editor): per check, an answer the live UE 5.7 editor gives and one
+# that must not pass.
+GAS_AUTHORING = {
+    'gas-authoring-01-damage-effect.e2e.json': (
+        gas_receipt('CreateEffect(string Path, string Duration, float Period)', 'Blueprint#2210(GE_Damage)'), NO_COUNT),
+    'gas-authoring-02-damage-modifier.e2e.json': (gas_receipt(MODIFIER, '1'), gas_receipt(MODIFIER, '12')),
+    'gas-authoring-03-regen-effect.e2e.json': (
+        gas_receipt('CreateEffect(string Path, string Duration, float Period)', 'Blueprint#2214(GE_ManaRegen)'), NO_COUNT),
+    'gas-authoring-04-regen-modifier.e2e.json': (gas_receipt(MODIFIER, '1'), gas_receipt(MODIFIER, '2')),
+    'gas-authoring-05-ability.e2e.json': (
+        gas_receipt('CreateAbility(string Path, Class Parent)', 'GameplayAbilityBlueprint#2220(GA_Fireball)'), NO_COUNT),
+    'gas-authoring-06-cost.e2e.json': (
+        gas_receipt('SetCost(Class Ability, string Attribute, float Amount, string Effect)',
+                    'GA_Fireball_C costs 20 UnrealAIAttributeSet.Mana (/Game/E2EGAS/GA_Fireball_Cost)'),
+        gas_receipt('SetCost(Class Ability, string Attribute, float Amount, string Effect)',
+                    'GA_Fireball_C costs 20 UnrealAIAttributeSet.Stamina (/Game/E2EGAS/GA_Fireball_Cost)')),
+    'gas-authoring-07-cooldown.e2e.json': (
+        gas_receipt('SetCooldown(Class Ability, float Seconds, string Tag, string Effect)',
+                    'GA_Fireball_C has a 30s cooldown: /Game/E2EGAS/GA_Fireball_Cooldown grants E2E.GAS.Cooldown'),
+        gas_receipt('SetCooldown(Class Ability, float Seconds, string Tag, string Effect)',
+                    'GA_Fireball_C has a 3s cooldown: /Game/E2EGAS/GA_Fireball_Cooldown grants E2E.GAS.Cooldown')),
+    'gas-authoring-08-projectile.e2e.json': (
+        gas_receipt('SetAbilityProjectile(Class Ability, Class HitEffect, float Magnitude, Class Projectile, float Speed)',
+                    'GA_Fireball_C fires UnrealAIGASProjectile applying GE_Damage_C (SetByCaller.Damage 25)'),
+        gas_receipt('SetAbilityProjectile(Class Ability, Class HitEffect, float Magnitude, Class Projectile, float Speed)',
+                    'GA_Fireball_C fires UnrealAIGASProjectile applying None (SetByCaller.Damage 0)')),
+    'gas-authoring-09-hero.e2e.json': (text_result('Created Blueprint /Game/E2EGAS/BP_Hero (parent Character).'), NO_COUNT),
+    'gas-authoring-10-ability-system.e2e.json': (
+        gas_receipt('AddAbilitySystem(Blueprint Blueprint, string Attributes, Class AttributeSet)',
+                    'UnrealAIAbilitySystemComponent#2301(AbilitySystem)'),
+        gas_receipt('AddAbilitySystem(Blueprint Blueprint, string Attributes, Class AttributeSet)', 'null')),
+    'gas-authoring-11-regen-on-begin-play.e2e.json': (
+        gas_receipt('AddStartingEffect(Blueprint Blueprint, Class Effect)', 'GE_ManaRegen_C'),
+        gas_receipt('AddStartingEffect(Blueprint Blueprint, Class Effect)', '')),
+    'gas-authoring-12-input.e2e.json': (
+        gas_receipt(BIND, 'IA_Fireball (One in IMC_Abilities) activates GA_Fireball_C for the player controlling BP_Hero'),
+        gas_receipt(BIND, 'IA_Fireball activates GA_Fireball_C for the player controlling BP_Hero')),
+    'gas-authoring-13-display.e2e.json': (
+        gas_receipt('AddAttributeDisplay(Blueprint Blueprint, string Format, Vector Offset)',
+                    'UnrealAIAttributeTextComponent#2330(AttributeText)'),
+        gas_receipt('AddAttributeDisplay(Blueprint Blueprint, string Format, Vector Offset)', 'null')),
+    'gas-authoring-14-summary.e2e.json': (
+        text_result('1 result\nSummary\n{Cost:GA_Fireball_Cost_C,Cooldown:GA_Fireball_Cooldown_C,CooldownTags:[E2E.GAS.Cooldown]}'),
+        text_result('1 result\nSummary\n{Cost:None,Cooldown:None,CooldownTags:[]}')),
+    'gas-authoring-15-unknown-attribute.e2e.json': (
+        gas_error("AddModifier threw: no attribute 'Manna' (known: UnrealAIAttributeSet.Health, UnrealAIAttributeSet.Mana)"),
+        gas_error('AddModifier threw: no effect')),
+    'gas-authoring-16-needs-play.e2e.json': (
+        gas_error('ActivateAbility threw: the game is not running: start Play In Editor (editor | set IsPlaying = true), then call again'),
+        gas_error('ActivateAbility threw: GA_Fireball_C is not granted')),
+    'gas-authoring-17-place-hero.e2e.json': (
+        text_result('1 result\n$ref|method|result\nEditor@1|SpawnActor(string ClassName, string Label)|BP_Hero_C#2400(E2E_Hero)'),
+        NO_COUNT),
+    'gas-authoring-18-play.e2e.json': (text_result('1 change\n$ref|member|old|new\nEditor@1|IsPlaying|false|true'), NO_COUNT),
+    'gas-authoring-19-pie-cast.e2e.json': (
+        gas_receipt(ACTIVATE, 'activated: Mana 100 -> 80'), gas_receipt(ACTIVATE, 'not activated: cannot pay the cost')),
+    'gas-authoring-20-pie-cooldown.e2e.json': (
+        gas_receipt(ACTIVATE, 'not activated: on cooldown (E2E.GAS.Cooldown, 29.1s left)'),
+        gas_receipt(ACTIVATE, 'activated: Mana 80 -> 60')),
+    'gas-authoring-21-pie-damage.e2e.json': (
+        gas_receipt(APPLY, 'GE_Damage_C applied to E2E_Hero: Health 100 -> 75'),
+        gas_receipt(APPLY, 'GE_Damage_C applied to E2E_Hero')),
+    'gas-authoring-22-pie-read.e2e.json': (
+        text_result('1 result\nAttributes|OwnedTags\n[{Name:Health,Current:75}]|[E2E.GAS.Cooldown]'), text_result('0 results')),
+    'gas-authoring-23-stop.e2e.json': (text_result('1 change\n$ref|member|old|new\nEditor@1|IsPlaying|true|false'), NO_COUNT),
+    'gas-authoring-98-cleanup-actor.e2e.json': (
+        text_result('1 result\n$ref|method|result\nBP_Hero_C#2400|Destroy()|null'), text_result('0 results')),
+    'gas-authoring-99-cleanup.e2e.json': (
+        text_result('8 results\n$ref|method|result\nEditor@1|DeleteAsset(string Path, bool bForce)|null'), NO_COUNT),
+}
+AUTHORING.update(GAS_AUTHORING)
+
 class CheckFileTests(unittest.TestCase):
     def test_every_plugin_has_valid_checks_and_no_powershell_left(self):
         for plugin, folder in release.components().items():
             self.assertTrue(e2e.checks_for(plugin), plugin)
             self.assertEqual(list((folder / 'Tests/e2e/tools').glob('*.ps1')), [], plugin)
-        self.assertEqual(len(all_checks()), 49)
+        self.assertEqual(len(all_checks()), 74)
 
     def test_every_assert_matches_its_intended_shape_and_rejects_others(self):
         for (plugin, name), check in all_checks().items():

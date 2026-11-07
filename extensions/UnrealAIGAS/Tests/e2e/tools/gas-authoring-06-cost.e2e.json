@@ -1,0 +1,10 @@
+{
+  "description": "the fireball costs 20 mana",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "gas | call SetCost(\"/Game/E2EGAS/GA_Fireball\", \"Mana\", 20)"
+  },
+  "assert": {
+    "pattern": "costs 20 UnrealAIAttributeSet\\.Mana"
+  }
+}

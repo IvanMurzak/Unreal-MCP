@@ -1,0 +1,10 @@
+{
+  "description": "the hero shows its health and mana as world text",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "gas | call AddAttributeDisplay(\"/Game/E2EGAS/BP_Hero\", \"HP {Health} MP {Mana}\")"
+  },
+  "assert": {
+    "pattern": "UnrealAIAttributeTextComponent"
+  }
+}

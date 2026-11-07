@@ -1,0 +1,10 @@
+{
+  "description": "the fireball ability Blueprint created from UnrealAIGameplayAbility",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "gas | call CreateAbility(\"/Game/E2EGAS/GA_Fireball\")"
+  },
+  "assert": {
+    "pattern": "GA_Fireball"
+  }
+}

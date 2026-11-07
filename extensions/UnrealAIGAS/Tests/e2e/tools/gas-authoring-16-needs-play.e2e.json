@@ -1,0 +1,11 @@
+{
+  "description": "runtime operations ask for Play In Editor",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "gas | call ActivateAbility(\"/Game/E2EGAS/GA_Fireball\")"
+  },
+  "expectError": true,
+  "assert": {
+    "pattern": "IsPlaying = true"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "description": "the hero placed in the level",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "editor | call SpawnActor(\"/Game/E2EGAS/BP_Hero\", \"E2E_Hero\", \"(0, 0, 300)\")"
+  },
+  "assert": {
+    "pattern": "E2E_Hero"
+  }
+}

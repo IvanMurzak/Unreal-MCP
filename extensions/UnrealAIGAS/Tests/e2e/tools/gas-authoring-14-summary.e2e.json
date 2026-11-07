@@ -1,0 +1,10 @@
+{
+  "description": "the ability's summary names its cost effect and cooldown tag",
+  "tool": "rql-query",
+  "input": {
+    "query": "gasAbilities | where $type == \"GA_Fireball_C\" | select Summary"
+  },
+  "assert": {
+    "pattern": "GA_Fireball_Cost_C.*E2E\\.GAS\\.Cooldown"
+  }
+}
