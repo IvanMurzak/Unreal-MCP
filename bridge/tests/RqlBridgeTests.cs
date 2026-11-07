@@ -145,6 +145,17 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         }
 
         [Fact]
+        public void Render_EmptyResultKeepsTheMissingExtensionWarning()
+        {
+            // The plugin adds this warning when an empty query touched the domain of an extension the editor does not have.
+            var json = "{\"rql\":\"0.1\",\"ok\":true,\"kind\":\"rows\",\"columns\":[\"Name\"],\"rows\":[],\"total\":0," +
+                       "\"diagnostics\":[{\"severity\":\"warning\",\"code\":\"extension-missing\",\"message\":\"nothing found\"," +
+                       "\"hint\":\"unreal-mcp-cli install-extension com.ivanmurzak.unreal-ai-pcg\"}]}";
+            var text = Rendered(RqlBridge.Render(RqlBridge.QueryRole, Text(json)));
+            Assert.Contains("warning extension-missing: nothing found — hint: unreal-mcp-cli install-extension com.ivanmurzak.unreal-ai-pcg", text);
+        }
+
+        [Fact]
         public void Render_DryRunReceiptsAndTruncation()
         {
             var dry = "{\"rql\":\"0.1\",\"ok\":true,\"kind\":\"rows\",\"columns\":[\"$ref\",\"member\",\"old\",\"new\"]," +
@@ -244,6 +255,38 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             var text = RqlBridge.RenderSchema(json);
             Assert.StartsWith("error unknown-type: no type 'PointLigth'", text);
             Assert.Contains("PointLight", text);
+            Assert.DoesNotContain("hint:", text);
+        }
+
+        [Fact]
+        public void RenderSchema_UnknownTypeOfAMissingExtensionNamesIt()
+        {
+            var json = JsonNode.Parse(@"{""error"": ""unknown-type"", ""name"": ""PCGGraph"", ""candidates"": [],
+                ""hint"": ""the Unreal-MCP extension com.ivanmurzak.unreal-ai-pcg (PCG Tools) adds pcgGraphs""}")!.AsObject();
+            var text = RqlBridge.RenderSchema(json);
+            Assert.StartsWith("error unknown-type: no type 'PCGGraph'", text);
+            Assert.EndsWith("\nhint: the Unreal-MCP extension com.ivanmurzak.unreal-ai-pcg (PCG Tools) adds pcgGraphs", text);
+        }
+
+        [Fact]
+        public void RenderSchema_OverviewListsTheExtensionsToInstall()
+        {
+            var json = JsonNode.Parse(@"{
+                ""sources"": [{""name"": ""actors"", ""type"": ""list of Actor""}],
+                ""functions"": [],
+                ""extensions"": [{""id"": ""com.ivanmurzak.unreal-ai-niagara"", ""line"": ""com.ivanmurzak.unreal-ai-niagara (Niagara Tools): Niagara VFX - not installed""}],
+                ""extensionsNote"": ""Install one: unreal-mcp-cli install-extension <id>."",
+                ""actorClasses"": []
+            }")!.AsObject();
+            var text = RqlBridge.RenderSchema(json);
+            Assert.Contains("Install one: unreal-mcp-cli install-extension <id>.\n  com.ivanmurzak.unreal-ai-niagara (Niagara Tools): Niagara VFX - not installed\nactor classes", text);
+        }
+
+        [Fact]
+        public void RenderSchema_OverviewWithoutMissingExtensionsHasNoExtensionSection()
+        {
+            var json = JsonNode.Parse(@"{""sources"": [{""name"": ""actors"", ""type"": ""list of Actor""}], ""extensions"": []}")!.AsObject();
+            Assert.DoesNotContain("extension", RqlBridge.RenderSchema(json));
         }
 
         // ------------------------------------------------------------ proxy wiring

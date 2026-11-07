@@ -46,6 +46,8 @@
 #include "HAL/PlatformProcess.h"
 #include "Modules/ModuleManager.h"
 #include "Interfaces/IPluginManager.h"
+#include "HttpModule.h"
+#include "Interfaces/IHttpResponse.h"
 
 #if WITH_UNREAL_MCP_LIVE_CODING
 #include "ILiveCodingModule.h"
@@ -434,10 +436,14 @@ void FUnrealMcpEditorCoordinator::Startup()
 	ExtWiring.CatalogFetcher = [](TArray<FUnrealMcpCatalogEntry>& Out, FString& Err) -> bool
 	{
 		if (FUnrealMcpExtensionInstaller::FetchCatalogSync(FUnrealMcpExtensionCatalog::DefaultCatalogUrl(), 30.0, Out, Err))
+		{
+			FUnrealMcpExtensionCatalog::PublishToAgents(Out); // the live index only: agents keep what it lists
 			return true;
+		}
 		// First rollout/offline compatibility: legacy releases stay available.
 		return FUnrealMcpExtensionInstaller::FetchCatalogSync(FUnrealMcpExtensionCatalog::LegacyCatalogUrl(), 30.0, Out, Err);
 	};
+	FetchCatalogForAgents();
 	ExtWiring.OnSetEnabled = [ExtMgrPtr](const FString& Id, bool bEnabled)
 	{
 		if (ExtMgrPtr)
@@ -786,11 +792,41 @@ bool FUnrealMcpEditorCoordinator::StartSidecarOrDownload()
 #endif
 }
 
+void FUnrealMcpEditorCoordinator::FetchCatalogForAgents()
+{
+	// Agents learn of the extensions they can install from the bundled first-party list at once; the online catalog may
+	// add more. One asynchronous request per session, never waited on; skipped in unattended runs (CI, headless smokes)
+	// so their output does not depend on the network. Only the live index: the legacy catalog lists no other extension.
+	if (FApp::IsUnattended() || IsRunningCommandlet())
+		return;
+	AgentCatalogRequest = FHttpModule::Get().CreateRequest();
+	AgentCatalogRequest->SetURL(FUnrealMcpExtensionCatalog::DefaultCatalogUrl());
+	AgentCatalogRequest->SetVerb(TEXT("GET"));
+	AgentCatalogRequest->SetTimeout(15.0f);
+	AgentCatalogRequest->OnProcessRequestComplete().BindLambda([](FHttpRequestPtr, FHttpResponsePtr Response, bool bConnected)
+	{
+		if (!bConnected || !Response.IsValid() || Response->GetResponseCode() != 200)
+			return; // the bundled list stays
+		TArray<FUnrealMcpCatalogEntry> Entries;
+		FString Error, Warning;
+		if (FUnrealMcpExtensionCatalog::ParseCatalogJson(Response->GetContentAsString(), Entries, Error, Warning))
+			FUnrealMcpExtensionCatalog::PublishToAgents(Entries);
+	});
+	AgentCatalogRequest->ProcessRequest();
+}
+
 void FUnrealMcpEditorCoordinator::Shutdown()
 {
 	if (!bStarted)
 		return;
 	bStarted = false;
+
+	if (AgentCatalogRequest.IsValid())
+	{
+		AgentCatalogRequest->OnProcessRequestComplete().Unbind();
+		AgentCatalogRequest->CancelRequest();
+		AgentCatalogRequest.Reset();
+	}
 
 	// issue #179: neutralize the embedded Extensions panel's InstalledProvider FIRST — before the main-window tab
 	// close and the ExtensionManager reset below — so a deferred main-window paint (a queued RequestCloseTab) reads

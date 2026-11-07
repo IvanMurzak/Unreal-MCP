@@ -2,6 +2,7 @@
 // See the LICENSE file in the repository root for more information.
 
 #include "UnrealMcpCoreTools.h"
+#include "UnrealMcpAvailableExtensions.h"
 #include "UnrealMcpToolRegistry.h"
 
 #include "Dom/JsonObject.h"
@@ -90,16 +91,41 @@ namespace UnrealMcpToolListTools
 					Rows.Add(MakeShared<FJsonValueObject>(Row));
 				}
 
+				// The extensions this editor does not have (those the filter matches): what each adds and how to get it.
+				TArray<FString> ExtensionLines;
+				TArray<TSharedPtr<FJsonValue>> ExtensionRows;
+				for (const FUnrealMcpMissingExtension& Missing : UnrealMcpAvailableExtensions::Missing())
+				{
+					const FString Line = UnrealMcpAvailableExtensions::Line(Missing);
+					if (Pattern.IsSet())
+					{
+						FRegexMatcher Matcher(Pattern.GetValue(), Line);
+						if (!Matcher.FindNext())
+							continue;
+					}
+					ExtensionLines.Add(Line);
+					TSharedPtr<FJsonObject> Row = MakeShared<FJsonObject>();
+					Row->SetStringField(TEXT("id"), Missing.Extension.ExtensionId);
+					Row->SetStringField(TEXT("state"), UnrealMcpAvailableExtensions::StateLabel(Missing.State));
+					Row->SetStringField(TEXT("line"), Line);
+					ExtensionRows.Add(MakeShared<FJsonValueObject>(Row));
+				}
+
 				FString Text = FString::Printf(TEXT("%d tool(s)%s, %d hidden"), Lines.Num(), Filter.IsEmpty() ? TEXT("") : *FString::Printf(TEXT(" matching '%s'"), *Filter), Hidden);
 				if (Hidden > 0)
 					Text += TEXT(" (hidden tools are left out of tools/list but still run when called by name)");
-				if (Lines.Num() == 0 && Pattern.IsSet())
+				if (Lines.Num() == 0 && ExtensionLines.Num() == 0 && Pattern.IsSet())
 					Text += TEXT(" (no tool matches: check the regex, or call without 'filter')"); // an invalid regex matches nothing silently
 				Text += TEXT("\nEditor features and installed extensions are RQL sources, not tools: rql-schema lists them (e.g. landscape, controlRig).");
 				Text += TEXT("\nname | title | visible/hidden [| extension]\n") + FString::Join(Lines, TEXT("\n"));
+				if (ExtensionLines.Num())
+					Text += TEXT("\n\n") + UnrealMcpAvailableExtensions::InstallNote() + TEXT("\n") + FString::Join(ExtensionLines, TEXT("\n"));
+
 				TSharedPtr<FJsonObject> Structured = MakeShared<FJsonObject>();
 				Structured->SetArrayField(TEXT("tools"), Rows);
 				Structured->SetNumberField(TEXT("hidden"), Hidden);
+				if (ExtensionRows.Num())
+					Structured->SetArrayField(TEXT("availableExtensions"), ExtensionRows);
 				FUnrealMcpToolResult Result = FUnrealMcpToolResult::Success(Text, Structured);
 				Result.bMessageCoversStructured = true; // every row is a line of the text
 				return Result;
