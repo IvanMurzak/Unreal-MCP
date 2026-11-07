@@ -6,9 +6,11 @@
 #include "CoreMinimal.h"
 #include "InputActionValue.h"
 #include "UObject/Object.h"
+#include "UnrealMcpRqlPlay.h"
 
 #include "UnrealAIEnhancedInputRqlApi.generated.h"
 
+class APlayerController;
 class UEdGraphNode;
 class UInputAction;
 class UInputMappingContext;
@@ -108,4 +110,12 @@ public:
 	/** remove Context when Event fires (the events of AddMappingContextOnEvent); the context's keys stay registered for rebinding; returns the Remove Mapping Context node */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Enhanced Input", meta = (BlueprintInternalUseOnly = "true"))
 	UEdGraphNode* RemoveMappingContextOnEvent(UObject* Blueprint, UInputMappingContext* Context, const FString& Event);
+
+	/** play test: inject Action (its path) into player 0 of the running Play In Editor session for Seconds and / or Frames (fixed 1/60 s steps, simulated INSIDE this call; at most 60 s), as if its keys were held: Value is the raw value (1 presses a Boolean action; [0, 1, 0] is a 2D Move forward; X, Y, Z for Axis1D / 2D / 3D); Triggers (optional, the text SetMappingTriggers takes: "Pressed", "Hold(0.5)", "Released") add triggers as a key mapping's would; released on one extra frame; returns the play state, its Notes listing the action's trigger events frame by frame ("IA_Jump: Triggered x30, Completed x1 (30 frame(s) held + 1 released)") and its value on the last held frame. Start the session first: editor | call StartPlay() */
+	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Enhanced Input", meta = (BlueprintInternalUseOnly = "true"))
+	FUnrealMcpPlayState InjectInput(UInputAction* Action, FVector Value = FVector(1.0, 0.0, 0.0), double Seconds = 0.0, int32 Frames = 0,
+		const FString& Triggers = TEXT(""));
+
+	/** The Enhanced Input mapping contexts applied to @p Controller's player, highest priority first ("IMC_Default (priority 0)"). */
+	static TArray<FString> AppliedContexts(const APlayerController* Controller);
 };

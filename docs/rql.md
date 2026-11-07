@@ -151,7 +151,8 @@ agent ──query text──▶ unreal-mcp-bridge (sidecar, .NET)          Unrea
 | `actors` | every actor of the editor world's loaded levels |
 | `levels`, `world` | the loaded levels, the editor world |
 | `selection` | the selected actors (`editor | set Selection = [...]` writes it) |
-| `editor` | editor state (`IsPlaying`, `IsPaused` — writable, `Selection`, `World`, `CurrentLevel`; the transaction buffer: `NextUndo`, `NextRedo`, `UndoHistory`, `RedoHistory` — titles, next first — `UndoCount`, `RedoCount`) and operations: `SpawnActor` (a class, Blueprint name or path, or an asset to place: a StaticMesh path gives a StaticMeshActor; a volume class gets the editor's 200 cm box brush, sized with `Scale`; label, location, rotation, parent and scale are optional), `SpawnActorFromAsset` (an asset path only, placed as drag and drop does), `OpenLevel`, `NewLevel`, `SaveLevel`, `SaveAll`, `AddSublevel` (a saved map as a streaming sublevel; not undoable, the current level stays; refused in World Partition worlds), `UnloadSublevel` (a level by its map name), `CreateAsset`, `CopyAsset`, `MoveAsset`, `DeleteAsset`, `CreateFolder`, `RefreshAssets`, `CreateMaterialInstance`, `ImportAsset` (returns every asset the import created: the mesh, then its materials, textures, skeleton), `SaveAsset`, `ClearConsole` |
+| `playActors` | every actor of the running Play In Editor world (empty when not playing) |
+| `editor` | editor state (`IsPlaying`, `IsPaused` — writable, `PlayState` (see Play testing), `Selection`, `World`, `CurrentLevel`; the transaction buffer: `NextUndo`, `NextRedo`, `UndoHistory`, `RedoHistory` — titles, next first — `UndoCount`, `RedoCount`) and operations: `SpawnActor` (a class, Blueprint name or path, or an asset to place: a StaticMesh path gives a StaticMeshActor; a volume class gets the editor's 200 cm box brush, sized with `Scale`; label, location, rotation, parent and scale are optional), `SpawnActorFromAsset` (an asset path only, placed as drag and drop does), `OpenLevel`, `NewLevel`, `SaveLevel`, `SaveAll`, `AddSublevel` (a saved map as a streaming sublevel; not undoable, the current level stays; refused in World Partition worlds), `UnloadSublevel` (a level by its map name), `CreateAsset`, `CopyAsset`, `MoveAsset`, `DeleteAsset`, `CreateFolder`, `RefreshAssets`, `CreateMaterialInstance`, `ImportAsset` (returns every asset the import created: the mesh, then its materials, textures, skeleton), `SaveAsset`, `ClearConsole` |
 | `console` | editor log entries (`Sequence`, `Time`, `Verbosity`, `Category`, `Message`) |
 | `unreal.find(label)` | an actor by label, name or path |
 | `unreal.asset(path)`, `unreal.assets(class, path?)` | one asset; assets of a class (at most 200, loaded as read; without a path: `/Game`, or in rql-query every content root (engine, plugins) when the project has none of the class) |
@@ -198,6 +199,32 @@ hook, not a per-type adapter, so RQL's own default would not cover them.)
   class without `$type` fails naming concrete subclasses. A `$type` that names no class makes the hook register the
   loaded concrete subclasses of the member's class (at most 200; a broader class gets none), so RQL's
   `coercion-failed` message suggests the closest: `{$type: "InputTrigerHold"}` gets `(did you mean 'InputTriggerHold' ...)`. A class name two loaded classes share is not offered.
+
+### Play testing
+
+An MCP client cannot rely on the editor ticking Play In Editor between its calls (a background editor is throttled,
+and a one-frame input injection is consumed or dropped before the next call looks), so the play operations simulate
+the game inside the call (`UnrealMcpRqlPlay.h`):
+
+- `editor | call StartPlay(bPaused = true)` starts PIE now (not on the next editor tick) with the editor's play
+  settings and returns the play state; paused (the default), the game moves only inside the play operations, so results
+  do not depend on the editor's frame rate. A running session is kept. Blueprints with compile errors are listed in
+  `Notes` (PIE's modal error dialog is skipped). The RQL transaction is closed first: PIE start would cancel it.
+- `editor | call AdvancePlay(Seconds, Frames, Keys)` ticks the play world in fixed 1/60 s frames (seconds rounded up;
+  both given: the larger; neither: one frame; at most 3600 frames = 60 s per call, and about 25 s of wall clock), with
+  `Keys` (`"W, LeftShift"`, axes `"Gamepad_LeftY=1"`) held as player 0 presses them (pressed on the first frame,
+  released on one extra frame, so key-up handlers and `Completed` run). Keys go through the player input and its
+  mapping contexts like real ones. A paused session is stepped as the toolbar's Advance Frame does and stays paused;
+  gameplay `Modify()` calls are kept out of the undo buffer.
+- `editor | call StopPlay()` ends the session now.
+- `editor.PlayState` (and every play operation's result, `FUnrealMcpPlayState`): `Playing`, `Paused`, `Time` (game
+  seconds), `FramesAdvanced`, `Pawn`, `PawnClass`, `Location`, `Rotation`, `ControlRotation`, `Velocity`, `Speed`,
+  `MovementMode`, `Crouching`, `MaxWalkSpeed` (Characters), `MappingContexts` (filled by the Enhanced Input extension
+  through `UnrealMcpRql::OnReadPlayState`), `Notes`. `playActors` lists the play world's actors.
+
+Extensions reuse the seam: `UnrealMcpRql::AdvancePlay(frames, beforeFrame)` runs a callback before each frame's tick
+(the Enhanced Input extension's `InjectInput(action, value, seconds, frames, triggers)` injects the action there and
+reports its trigger events in `Notes`).
 
 The `editor` operations also include `CreateDataTable(path, rowStruct)` and, for gameplay tags,
 `AddGameplayTag(name, comment?, source?)`, `RemoveGameplayTag(name)`, `RenameGameplayTag(name, newName)` (written to

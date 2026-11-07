@@ -8,6 +8,7 @@
 #include "IUnrealMcpRqlModule.h"
 #include "UnrealAIEnhancedInputGraph.h"
 #include "UnrealAIEnhancedInputRows.h"
+#include "UnrealMcpRqlPlay.h"
 #include "UnrealAIEnhancedInputRqlApi.h"
 #include "UnrealAIEnhancedInputText.h"
 
@@ -40,6 +41,20 @@ class FUnrealAIEnhancedInputRqlModule : public IUnrealMcpRqlModule
 	}
 
 public:
+	FUnrealAIEnhancedInputRqlModule()
+	{
+		// Every play state (editor | call StartPlay / AdvancePlay, editor.PlayState, InjectInput) lists player 0's mapping contexts.
+		PlayStateHandle = UnrealMcpRql::OnReadPlayState().AddLambda([](APlayerController* Controller, FUnrealMcpPlayState& State)
+		{
+			State.MappingContexts = UUnrealAIEnhancedInputRqlApi::AppliedContexts(Controller);
+		});
+	}
+
+	virtual ~FUnrealAIEnhancedInputRqlModule() override
+	{
+		UnrealMcpRql::OnReadPlayState().Remove(PlayStateHandle);
+	}
+
 	virtual FString GetRqlModuleName() const override { return TEXT("EnhancedInput"); }
 	virtual FString GetExtensionId() const override { return TEXT("com.ivanmurzak.unreal-ai-enhanced-input"); }
 	virtual FString GetExtensionVersion() const override { return UnrealMcpRql::PluginVersion(TEXT("UnrealAIEnhancedInput")); }
@@ -62,7 +77,7 @@ public:
 		Context.AddApiSource(TEXT("enhancedInput"),
 			TEXT("Enhanced Input authoring: call CreateAction / CreateContext / AddMapping / RemoveMapping / SetActionTriggers / SetActionModifiers / "
 				"SetMappingTriggers / SetMappingModifiers / SetPlayerMappable / SetMappingPlayerMappable / EnableUserSettings / AddActionEvent / BindAction / "
-				"BindActionToggle / AddMappingContextOnBeginPlay / AddMappingContextOnPossess / AddMappingContextOnEvent / RemoveMappingContextOnEvent"),
+				"BindActionToggle / AddMappingContextOnBeginPlay / AddMappingContextOnPossess / AddMappingContextOnEvent / RemoveMappingContextOnEvent / InjectInput (play test: simulate an input action inside the call)"),
 			UUnrealAIEnhancedInputRqlApi::StaticClass(), TEXT("EnhancedInputOperations"));
 
 		Context.AddJsonMember(UInputMappingContext::StaticClass(), TEXT("KeyMappings"),
@@ -178,8 +193,27 @@ unreal.asset("/Game/BP_Hero") | call Compile()
   (`ref(node) | call Connect("Triggered", ref(other), "execute")`).
 - Possession: the GameMode's Default Pawn Class (or Auto Possess Player on a placed pawn) is the first pawn; entering a
   vehicle is `PlayerController.Possess(car)` from the interact logic, leaving is `Possess(hero)`. Created assets are
-  unsaved: `editor | call SaveAll()`. The legacy key events (`EventGraph | call AddInputKey("SpaceBar")`) need none of this.)MD"));
+  unsaved: `editor | call SaveAll()`. The legacy key events (`EventGraph | call AddInputKey("SpaceBar")`) need none of this.
+
+)MD") TEXT(R"MD(Play test the controls (simulated inside the call, deterministic; never wait between calls for the editor to tick):
+
+```
+editor | call StartPlay()                                                       Play In Editor now, paused between calls; returns PlayState
+enhancedInput | call InjectInput("/Game/Input/IA_Jump")                         one frame pressed (Value 1), then released
+enhancedInput | call InjectInput("/Game/Input/IA_Move", [0, 1, 0], 1.5)        2D Move forward for 1.5 s
+enhancedInput | call InjectInput("/Game/Input/IA_Sprint", [1, 0, 0], 0, 30, "Hold") 30 frames with an extra Hold trigger
+editor | call AdvancePlay(1, 0, "W, LeftShift")                                 real keys through the mapping contexts
+editor | call StopPlay()
+```
+
+Each returns the play state (PawnClass, Location, Velocity, Speed, MovementMode, Crouching, MaxWalkSpeed, MappingContexts =
+the contexts applied to player 0); InjectInput adds Notes with the action's trigger events frame by frame ("IA_Jump:
+Triggered x1, Completed x1") and its value: no event means its triggers did not fire for that Value. An event that fired with no
+effect on the pawn means the pawn does not handle it (no action event in the possessed pawn or controller). Started fires with the first Triggered / Ongoing frame.)MD"));
 	}
+
+private:
+	FDelegateHandle PlayStateHandle;
 };
 
 IMPLEMENT_MODULE(TUnrealMcpRqlEditorModule<FUnrealAIEnhancedInputRqlModule>, UnrealAIEnhancedInput)

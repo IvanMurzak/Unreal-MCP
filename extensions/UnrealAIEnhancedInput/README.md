@@ -35,6 +35,7 @@ The extension adds its feature to the editor's RQL data layer (`rql-query` / `rq
 | Assets and mappings (`call`) | `CreateAction`, `CreateContext`, `AddMapping`, `RemoveMapping`, `SetActionTriggers`, `SetActionModifiers`, `SetMappingTriggers`, `SetMappingModifiers` |
 | Rebindable keys (`call`) | `SetPlayerMappable`, `SetMappingPlayerMappable`, `EnableUserSettings` |
 | Blueprint wiring (`call`) | `AddMappingContextOnPossess`, `AddMappingContextOnEvent`, `RemoveMappingContextOnEvent`, `AddMappingContextOnBeginPlay`, `BindAction`, `BindActionToggle`, `AddActionEvent` |
+| Play test (`call`) | `InjectInput` (with the core `editor | call StartPlay / AdvancePlay`) |
 | Members | `InputMappingContext.KeyMappings`, `InputAction.TriggersText` / `ModifiersText` / `PlayerMappable`, `Blueprint.InputSetup` |
 
 Triggers and modifiers are text: `"Hold(0.5)"`, `"Pressed"`, `"Tap(0.2)"`, `"ChordAction(/Game/Input/IA_Modifier)"`, `"DeadZone(LowerThreshold=0.2, Type=Axial)"`, `"Swizzle, Negate"`, `"Negate(Y)"`, `"Scalar(2)"`. The same text reads back from `TriggersText`, `ModifiersText`, `inputMappings` and `KeyMappings`; a wrong name or setting fails listing what exists.
@@ -58,6 +59,19 @@ unreal.asset("/Game/BP_Hero") | select InputSetup
 ```
 
 `AddMappingContextOnPossess` makes a pawn add its context to the player controlling it and remove it when the player leaves (On Controller Changed), so possessing a vehicle swaps the on-foot scheme for the vehicle one. Contexts are added with `bNotifyUserSettings`, so their player-mappable keys appear in the Enhanced Input user settings (rebinding) and stay listed after removal. `BindAction` calls a Blueprint function, custom event or inherited function (Jump, Crouch, AddMovementInput) on a trigger event (Started, Triggered, Ongoing, Canceled, Completed), passing an axis action's value; `BindActionToggle` alternates two functions with a FlipFlop. The Blueprint nodes come from the EnhancedInput plugin's `InputBlueprintNodes` module, a dependency of this extension only.
+
+`InjectInput(action, value, seconds, frames, triggers)` play-tests the controls: it injects the action into player 0 of
+the running Play In Editor session (`editor | call StartPlay()`) for exact 1/60 s frames simulated inside the call, then
+returns the core play state (pawn, location, velocity, movement mode) with the action's trigger events frame by frame
+in `Notes` (`IA_Move: Triggered x90, Completed x1 (90 frame(s) held + 1 released)`, then its value on the last held
+frame). With this extension installed every play state also lists the
+mapping contexts applied to player 0 (`MappingContexts`).
+
+```
+editor | call StartPlay()
+enhancedInput | call InjectInput("/Game/Input/IA_Move", [0, 1, 0], 1.5)
+enhancedInput | call InjectInput("/Game/Input/IA_Jump")
+```
 
 ## Releases and development
 

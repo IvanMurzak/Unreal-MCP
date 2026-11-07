@@ -232,7 +232,10 @@ The `unreal-rql` skill (written by `unreal-skill-generate`) teaches the language
 | `console-run-command` | Run a console command / CVar |
 
 Logs, PIE state and the selection are RQL: `console | where Verbosity == "Error"`, `editor | set IsPlaying = true`,
-`editor | set Selection = [...]`.
+`editor | set Selection = [...]`. Play testing simulates the game inside the call (deterministic, independent of the
+editor ticking between calls): `editor | call StartPlay()`, `editor | call AdvancePlay(1.5, 0, "W, LeftShift")` (holds keys
+for 1.5 s, returns the pawn's location, velocity, movement mode and applied mapping contexts), `editor | call StopPlay()`;
+the Enhanced Input extension adds `enhancedInput | call InjectInput(action, value, seconds)` ([docs/rql.md](docs/rql.md#play-testing)).
 
 </details>
 
@@ -268,7 +271,7 @@ wiring is not exposed to Python: use the Blueprint tools for that.
 | `source-update` | Edit a source file |
 | `source-delete` | Delete a source file |
 | `source-list` | List module source files |
-| `source-compile` | Compile project C++ (Live Coding when active, else UBT) with a structured error report |
+| `source-compile` | Compile project C++ (Live Coding when active, else UBT) with a structured error report; new classes or changed reflected declarations (`restartRequired`) say how to rebuild and restart the editor |
 
 All file operations are jailed to `<Project>/Source/`.
 
