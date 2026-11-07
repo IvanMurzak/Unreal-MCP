@@ -1,0 +1,10 @@
+{
+  "description": "one density parameter (points per square metre)",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "pcg | call SetParameter(\"/Game/E2E/PCG_E2EForest\", \"Density\", \"0.01\")"
+  },
+  "assert": {
+    "pattern": "0\\.01"
+  }
+}
