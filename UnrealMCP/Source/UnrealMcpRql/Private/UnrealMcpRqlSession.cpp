@@ -824,9 +824,9 @@ FString FUnrealMcpRqlSession::Schema(const FString& TypeName, bool& bOutOk)
 					Candidates.push(rql::Json(UnrealMcpRqlToStd(Pair.Key)));
 			}
 			Root.set("candidates", std::move(Candidates));
-			const FString Hint = UnrealMcpAvailableExtensions::DomainHint(Wanted);
-			if (!Hint.IsEmpty())
-				Root.set("hint", UnrealMcpRqlToStd(Hint));
+			const TArray<FUnrealMcpMissingExtension> Missing = UnrealMcpAvailableExtensions::Missing();
+			if (const FUnrealMcpMissingExtension* Match = UnrealMcpAvailableExtensions::MatchDomain(Wanted, Missing))
+				Root.set("hint", UnrealMcpRqlToStd(UnrealMcpAvailableExtensions::Hint(*Match))); // a type of an extension's domain
 			return UnrealMcpRqlFromStd(Root.dump());
 		}
 		rql::Json TypeList = rql::Json::array();

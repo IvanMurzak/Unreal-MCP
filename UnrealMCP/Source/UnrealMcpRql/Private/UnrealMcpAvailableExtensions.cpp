@@ -45,6 +45,25 @@ namespace
 	/** SetCatalog: the online catalog's entries that are not bundled. */
 	TArray<FUnrealMcpKnownExtension> GCatalogOnly;
 
+	EUnrealMcpExtensionState ExtensionStateOf(const FUnrealMcpKnownExtension& Extension)
+	{
+		if (const IUnrealMcpRqlModule* Module = UnrealMcpRqlTools::FindModule(Extension.ExtensionId))
+			return UnrealMcpRqlTools::IsModuleEnabled(*Module) ? EUnrealMcpExtensionState::Ready : EUnrealMcpExtensionState::TurnedOff;
+		const TSharedPtr<IPlugin> Plugin = Extension.PluginName.IsEmpty() ? nullptr : IPluginManager::Get().FindPlugin(Extension.PluginName);
+		if (!Plugin.IsValid())
+			return EUnrealMcpExtensionState::NotInstalled;
+		if (!Plugin->IsEnabled())
+			return EUnrealMcpExtensionState::PluginDisabled;
+		return Extension.bRqlModule ? EUnrealMcpExtensionState::NotLoaded : EUnrealMcpExtensionState::Ready;
+	}
+
+	/** How to install the extension @p Id (the agent asks; or the CLI), then restart. */
+	FString InstallInstruction(const FString& Id)
+	{
+		return FString::Printf(TEXT("ask to install extension %s (e.g. through the AI Game Dev app) or run "
+			"unreal-mcp-cli install-extension %s in the project folder, then restart the Unreal Editor"), *Id, *Id);
+	}
+
 	/** The identifiers of @p Text: runs of letters, digits and underscores, lower-cased. */
 	TArray<FString> Identifiers(const FString& Text)
 	{
@@ -88,27 +107,20 @@ namespace UnrealMcpAvailableExtensions
 		GCatalogOnly = MoveTemp(Entries);
 	}
 
-	EUnrealMcpExtensionState State(const FUnrealMcpKnownExtension& Extension)
-	{
-		if (const IUnrealMcpRqlModule* Module = UnrealMcpRqlTools::FindModule(Extension.ExtensionId))
-			return UnrealMcpRqlTools::IsModuleEnabled(*Module) ? EUnrealMcpExtensionState::Ready : EUnrealMcpExtensionState::TurnedOff;
-		const TSharedPtr<IPlugin> Plugin = Extension.PluginName.IsEmpty() ? nullptr : IPluginManager::Get().FindPlugin(Extension.PluginName);
-		if (!Plugin.IsValid())
-			return EUnrealMcpExtensionState::NotInstalled;
-		if (!Plugin->IsEnabled())
-			return EUnrealMcpExtensionState::PluginDisabled;
-		return Extension.bRqlModule ? EUnrealMcpExtensionState::NotLoaded : EUnrealMcpExtensionState::Ready;
-	}
-
 	TArray<FUnrealMcpMissingExtension> Missing()
 	{
 		TArray<FUnrealMcpMissingExtension> Out;
-		for (FUnrealMcpKnownExtension& Extension : Known())
+		auto AddMissing = [&Out](const TArray<FUnrealMcpKnownExtension>& Extensions)
 		{
-			const EUnrealMcpExtensionState ExtensionState = State(Extension);
-			if (ExtensionState != EUnrealMcpExtensionState::Ready)
-				Out.Add({ MoveTemp(Extension), ExtensionState });
-		}
+			for (const FUnrealMcpKnownExtension& Extension : Extensions)
+			{
+				const EUnrealMcpExtensionState State = ExtensionStateOf(Extension);
+				if (State != EUnrealMcpExtensionState::Ready)
+					Out.Add({ Extension, State });
+			}
+		};
+		AddMissing(Bundled());
+		AddMissing(GCatalogOnly);
 		return Out;
 	}
 
@@ -138,8 +150,7 @@ namespace UnrealMcpAvailableExtensions
 		case EUnrealMcpExtensionState::PluginDisabled:
 			return FString::Printf(TEXT("enable the plugin %s (Edit > Plugins), then restart the Unreal Editor"), *Missing.Extension.PluginName);
 		default:
-			return FString::Printf(TEXT("ask to install extension %s (e.g. through the AI Game Dev app) or run "
-				"unreal-mcp-cli install-extension %s in the project folder, then restart the Unreal Editor"), *Id, *Id);
+			return InstallInstruction(Id);
 		}
 	}
 
@@ -154,9 +165,8 @@ namespace UnrealMcpAvailableExtensions
 
 	FString InstallNote()
 	{
-		return TEXT("Unreal-MCP extensions not available in this editor (each adds RQL sources and operations). Install one: ask to "
-			"install extension <id> (e.g. through the AI Game Dev app) or run unreal-mcp-cli install-extension <id> in the project "
-			"folder, then restart the Unreal Editor.");
+		return TEXT("Unreal-MCP extensions not available in this editor (each adds RQL sources and operations). Install one: ")
+			+ InstallInstruction(TEXT("<id>")) + TEXT(".");
 	}
 
 	const FUnrealMcpMissingExtension* MatchDomain(const FString& Text, const TArray<FUnrealMcpMissingExtension>& Candidates)
@@ -177,12 +187,5 @@ namespace UnrealMcpAvailableExtensions
 	{
 		return FString::Printf(TEXT("the Unreal-MCP extension %s (%s) adds %s; it is %s: %s"), *Missing.Extension.ExtensionId,
 			*Missing.Extension.Name, *Missing.Extension.Adds, *StateLabel(Missing.State), *HowToGet(Missing));
-	}
-
-	FString DomainHint(const FString& Text)
-	{
-		const TArray<FUnrealMcpMissingExtension> Candidates = Missing();
-		const FUnrealMcpMissingExtension* Match = MatchDomain(Text, Candidates);
-		return Match ? Hint(*Match) : FString();
 	}
 }

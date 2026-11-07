@@ -207,7 +207,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
             if (json["extensions"] is JsonArray extensions && extensions.Count > 0)
             {
                 // The Unreal-MCP extensions this editor does not have: the note says how to install one, a line each.
-                sb.Append(Str(json, "extensionsNote") ?? "Unreal-MCP extensions not available in this editor:").Append('\n');
+                sb.Append(Str(json, "extensionsNote") ?? "extensions:").Append('\n');
                 foreach (var e in extensions.OfType<JsonObject>())
                     sb.Append("  ").Append(Str(e, "line") ?? Str(e, "id")).Append('\n');
             }

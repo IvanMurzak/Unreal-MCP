@@ -53,8 +53,6 @@ namespace UnrealMcpAvailableExtensions
 	/** Replace the extensions of the online catalog; the bundled first-party ones always stay as bundled. */
 	UNREALMCPRQL_API void SetCatalog(TArray<FUnrealMcpKnownExtension> Entries);
 
-	UNREALMCPRQL_API EUnrealMcpExtensionState State(const FUnrealMcpKnownExtension& Extension);
-
 	/** The known extensions that are not Ready, in Known() order. */
 	UNREALMCPRQL_API TArray<FUnrealMcpMissingExtension> Missing();
 
@@ -73,9 +71,6 @@ namespace UnrealMcpAvailableExtensions
 	/** The extension of @p Candidates one of whose keywords prefixes an identifier of @p Text (case-insensitive); nullptr when none. */
 	UNREALMCPRQL_API const FUnrealMcpMissingExtension* MatchDomain(const FString& Text, const TArray<FUnrealMcpMissingExtension>& Candidates);
 
-	/** The hint naming the missing extension whose domain @p Text touches (MatchDomain over Missing()); empty when none. */
-	UNREALMCPRQL_API FString DomainHint(const FString& Text);
-
-	/** DomainHint's sentence for @p Missing. */
+	/** The sentence naming @p Missing, what it adds and how to get it: the hint of a query on its domain. */
 	UNREALMCPRQL_API FString Hint(const FUnrealMcpMissingExtension& Missing);
 }

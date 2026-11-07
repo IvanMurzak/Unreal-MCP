@@ -795,7 +795,7 @@ void FUnrealMcpEditorCoordinator::FetchCatalogForAgents()
 {
 	// Agents learn of the extensions they can install from the bundled first-party list at once; the online catalog may
 	// add more. One asynchronous request per session, never waited on; skipped in unattended runs (CI, headless smokes)
-	// so their output does not depend on the network.
+	// so their output does not depend on the network. Only the live index: the legacy catalog lists no other extension.
 	if (FApp::IsUnattended() || IsRunningCommandlet())
 		return;
 	AgentCatalogRequest = FHttpModule::Get().CreateRequest();
