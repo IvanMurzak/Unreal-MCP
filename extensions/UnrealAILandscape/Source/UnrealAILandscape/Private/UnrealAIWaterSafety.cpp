@@ -9,6 +9,7 @@
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "LandscapeSettings.h"
+#include "MaterialDomain.h"
 #include "Materials/Material.h"
 #include "Misc/CoreDelegates.h"
 #include "WaterBodyActor.h"

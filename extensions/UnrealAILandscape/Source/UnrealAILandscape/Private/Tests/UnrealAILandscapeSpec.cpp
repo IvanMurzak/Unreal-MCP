@@ -598,11 +598,15 @@ void FUnrealAILandscapeSpec::Define()
 				LandscapeSpecDestroyNewWater(Snapshot); // the lake, and the brush manager / zone the Water editor added for it
 				LandscapeSpecDestroy(Landscape);
 			};
-			TestEqual(TEXT("no Water edit layer yet"), Landscape->GetLayerIndex(FName(TEXT("Water"))), static_cast<int32>(INDEX_NONE));
 			// editor | call SpawnActor("WaterBodyLake", "@LABEL@", [0, 1200000, 100]): a landscape-affecting lake without the Water
-			// defaults. With the engine's setting on, the Water plugin blocks this call on the modal "Insert New Landscape Edit Layer" dialog.
+			// defaults. With the engine's setting on, the Water plugin blocks this call on the modal "Insert New Landscape Edit Layer"
+			// dialog (under -unattended too: this test would never return).
 			TestTrue(TEXT("spawned and returned (no modal dialog)"), LandscapeSpecRun(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"SpawnActor","args":[{"lit":"WaterBodyLake"},{"lit":"@LABEL@"},{"list":[{"lit":0},{"lit":1200000},{"lit":100}]}]}]})RQL"), Label, Land, true));
-			TestNotEqual(TEXT("the engine created the Water edit layer (without its dialog)"), Landscape->GetLayerIndex(FName(TEXT("Water"))), static_cast<int32>(INDEX_NONE));
+			// The Water editor gives the brush to the landscape the lake overlaps, else the world's first one (a map's own landscape).
+			bool bWaterLayer = false;
+			for (TActorIterator<ALandscape> It(UnrealMcpRql::EditorWorld()); It; ++It)
+				bWaterLayer |= It->GetLayerIndex(FName(TEXT("Water"))) != INDEX_NONE;
+			TestTrue(TEXT("the engine created a Water edit layer for the brush (without its dialog)"), bWaterLayer);
 			AWaterBodyLake* Lake = LandscapeSpecFind<AWaterBodyLake>(Label);
 			if (!TestNotNull(TEXT("the lake"), Lake))
 				return;
