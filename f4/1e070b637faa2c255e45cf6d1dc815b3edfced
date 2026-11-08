@@ -1,0 +1,49 @@
+README.md
+  s_26d21019382730::t_de1b490bae35c2 240
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpRqlPlaySpec.cpp
+  s_26d21019382730::t_ae53af7ed11724 8,178-179,239-306
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpRqlSpecFixtures.cpp
+  s_f51ca9900477a9::t_339a2bf8d5a124 6-7,9,32-52
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpRqlSpecFixtures.h
+  s_26d21019382730::t_2f745529d4d7b3 11,213-226
+UnrealMCP/Source/UnrealMcpRql/Private/UnrealMcpRqlCore.cpp
+  s_26d21019382730::t_4bed04fc9c6bee 863
+UnrealMCP/Source/UnrealMcpRql/Private/UnrealMcpRqlEditorApi.cpp
+  s_26d21019382730::t_941da5e372724b 783-784
+UnrealMCP/Source/UnrealMcpRql/Private/UnrealMcpRqlEditorApi.h
+  s_26d21019382730::t_ded79c5cd3e9a4 133
+UnrealMCP/Source/UnrealMcpRql/Private/UnrealMcpRqlGuide.h
+  s_26d21019382730::t_6093f3f42a8d06 141
+UnrealMCP/Source/UnrealMcpRql/Private/UnrealMcpRqlPlay.cpp
+  s_26d21019382730::t_e2b271ed262382 463-521
+UnrealMCP/Source/UnrealMcpRql/Public/UnrealMcpRqlPlay.h
+  s_26d21019382730::t_d74bb567b4a280 66-77,170-175
+docs/rql.md
+  s_26d21019382730::t_b73b09b7a4f172 230,233-238
+tests/chain-fixtures/5.8/tools.jsonl
+  s_26d21019382730::t_4fd6a15bc6925a 15
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "f41e070b637faa2c255e45cf6d1dc815b3edfced",
+  "prompts": {},
+  "sessions": {
+    "s_26d21019382730": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "12da588b-8696-4918-8686-db9760030939",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_f51ca9900477a9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cdfa1ab3-f89c-48d0-a09a-cd5c2bc020d7",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
