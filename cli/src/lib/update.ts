@@ -16,6 +16,7 @@ import { emitProgress } from './progress.js';
 import { PACKAGE_VERSION } from '../version.js';
 import { defaultCorePluginSource, resolvePluginSource } from './plugin-source.js';
 import { stripLeadingV } from '../utils/extension-source.js';
+import { fetchLatestVersion } from '../utils/update-check.js';
 import { EXTENSIONS_CATALOG } from '../utils/extensions-catalog.js';
 import { loadExtensionsIndex } from '../utils/extensions-index.js';
 import type { ProgressCallback } from './types.js';
@@ -322,4 +323,82 @@ export function findUnrealProjectRoot(start: string): string | null {
     if (findUProjectFile(dir) !== null) return dir;
     if (dir === path.dirname(dir)) return null;
   }
+}
+
+export type ProjectUpdateStatus = 'outdated' | 'current' | 'unknown';
+
+export interface ProjectUpdateItem {
+  kind: 'plugin' | 'extension';
+  name: string;
+  from: string | null;
+  to: string | null;
+  status: ProjectUpdateStatus;
+}
+
+export interface UpdateProjectSuccess {
+  kind: 'success';
+  success: true;
+  /** Everything checked, as found before any write. */
+  items: ProjectUpdateItem[];
+  /** The items this call moved to a new version (always empty with `dryRun`). */
+  updated: ProjectUpdateItem[];
+  warnings: string[];
+  nextSteps: string[];
+}
+
+export type UpdateProjectResult = UpdateProjectSuccess | UpdateFailure;
+
+/**
+ * Bring an Unreal project's UnrealMCP plugin and its installed extensions to their latest versions. The
+ * one function behind `unreal-mcp-cli update`. A project without the plugin under `Plugins/` (a Fab
+ * install, which the Epic Games Launcher updates) is left alone unless `force`. Library-safe.
+ */
+export async function updateProject(opts: UpdateOptions): Promise<UpdateProjectResult> {
+  const warnings: string[] = [];
+  const projectDir = path.resolve(opts?.projectDir ?? '');
+  const hasPlugin = readPluginVersion(path.join(projectDir, 'Plugins', 'UnrealMCP', 'UnrealMCP.uplugin')) !== null;
+  if (!hasPlugin && !opts?.force) return { kind: 'success', success: true, items: [], updated: [], warnings, nextSteps: [] };
+
+  let version = opts.version;
+  if (!version && !opts.pluginSourceDir) {
+    try {
+      version = await fetchLatestVersion();
+    } catch (err: unknown) {
+      warnings.push(`Could not look up the latest plugin, using this CLI's: ${asError(err).message}`);
+    }
+  }
+
+  const result = await update({ ...opts, version });
+  if (result.kind === 'failure') return { ...result, warnings: [...warnings, ...result.warnings] };
+
+  const { fromVersion: from, toVersion: to } = result;
+  const pluginItem: ProjectUpdateItem = {
+    kind: 'plugin',
+    name: 'UnrealMCP plugin',
+    from,
+    to,
+    status: from === null || to === null
+      ? 'unknown'
+      : compareSemver(stripLeadingV(from), stripLeadingV(to)) < 0 ? 'outdated' : 'current',
+  };
+  const extensionItems = result.extensions.map((extension): ProjectUpdateItem => ({
+    kind: 'extension',
+    name: extension.pluginName,
+    from: extension.from,
+    to: extension.to,
+    status: extension.status,
+  }));
+  const updated = [
+    ...(result.updated ? [pluginItem] : []),
+    ...extensionItems.filter((item) => result.extensionsUpdated.includes(item.name)),
+  ];
+
+  return {
+    kind: 'success',
+    success: true,
+    items: [pluginItem, ...extensionItems],
+    updated,
+    warnings: [...warnings, ...result.warnings],
+    nextSteps: updated.length > 0 ? ['Open the project in the Unreal Editor: it recompiles the new plugin source.'] : [],
+  };
 }

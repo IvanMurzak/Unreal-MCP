@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import { zipSync, strToU8 } from 'fflate';
-import { findUnrealProjectRoot, update, readPluginVersion } from '../src/lib/update.js';
+import { findUnrealProjectRoot, update, updateProject, readPluginVersion } from '../src/lib/update.js';
 import * as os from 'os';
 import { PACKAGE_VERSION } from '../src/version.js';
 import { makeTempDir, rmTempDir } from './helpers.js';
@@ -402,6 +402,25 @@ describe('update and an open editor, the dry run, and links', () => {
     if (r.kind !== 'success') throw r.error;
     expect(r.updated).toBe(false);
     expect(calls.length).toBeGreaterThan(0);
+  });
+
+  it('updateProject leaves a project without the plugin alone, without touching the network', async () => {
+    const project = tmp();
+    fs.writeFileSync(path.join(project, 'Game.uproject'), '{}', 'utf-8');
+
+    const r = await updateProject({ projectDir: project });
+
+    if (r.kind !== 'success') throw r.error;
+    expect(r.items).toEqual([]);
+    expect(fs.existsSync(path.join(project, 'Plugins'))).toBe(false);
+  });
+
+  it('updateProject reports the plugin as an item', async () => {
+    const r = await updateProject({ projectDir: seededProject(), pluginSourceDir: makeSource('0.2.0'), dryRun: true });
+
+    if (r.kind !== 'success') throw r.error;
+    expect(r.items).toEqual([{ kind: 'plugin', name: 'UnrealMCP plugin', from: '0.1.0', to: '0.2.0', status: 'outdated' }]);
+    expect(r.updated).toEqual([]);
   });
 
   it('findUnrealProjectRoot finds the project from a subfolder, and null outside one', () => {

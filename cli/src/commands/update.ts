@@ -1,11 +1,9 @@
 import { Command } from 'commander';
 import { spawn } from 'child_process';
-import * as fs from 'fs';
 import * as path from 'path';
 import { platform } from 'os';
 import { compareSemver } from '../lib/install-extension.js';
-import { findUnrealProjectRoot, update, type ExtensionUpdateItem } from '../lib/update.js';
-import { stripLeadingV } from '../utils/extension-source.js';
+import { findUnrealProjectRoot, updateProject, type ProjectUpdateItem } from '../lib/update.js';
 import { findUProjectFile } from '../utils/project.js';
 import * as ui from '../utils/ui.js';
 import { fetchLatestVersion, isRunningViaNpx } from '../utils/update-check.js';
@@ -41,37 +39,22 @@ function runNpmInstall(packageSpec: string): Promise<number> {
   });
 }
 
-function printExtension(item: ExtensionUpdateItem, updated: readonly string[], check: boolean | undefined): void {
+function printItem(item: ProjectUpdateItem): void {
   const from = item.from ?? 'unknown';
   const value =
-    updated.includes(item.pluginName) || (check && item.status === 'outdated') ? `${from} → ${item.to ?? 'latest'}`
+    item.status === 'outdated' ? `${from} → ${item.to ?? 'latest'}`
     : item.status === 'unknown' ? `${from} (latest version unknown)`
     : `${from} (up to date)`;
-  ui.label(item.pluginName, value);
+  ui.label(item.name, value);
 }
 
 async function updateProjectStep(projectDir: string, options: UpdateCommandOptions): Promise<Outcome> {
   ui.heading(`Project ${projectDir}`);
-  if (!options.force && !fs.existsSync(path.join(projectDir, 'Plugins', 'UnrealMCP', 'UnrealMCP.uplugin'))) {
-    ui.info('UnrealMCP is not installed in this project (a Fab install is updated by the Epic Games Launcher): nothing to update here.');
-    return 'done';
-  }
-
   const spinner = ui.startSpinner(options.check ? 'Checking the plugin and extensions...' : 'Updating the plugin and extensions...');
-  let version = options.version;
-  const warnings: string[] = [];
-  if (version === undefined && options.pluginSource === undefined) {
-    try {
-      version = await fetchLatestVersion();
-    } catch (err) {
-      warnings.push(`Could not look up the latest plugin, using this CLI's: ${(err as Error).message}`);
-    }
-  }
-
-  const result = await update({
+  const result = await updateProject({
     projectDir,
     pluginSourceDir: options.pluginSource,
-    version,
+    version: options.version,
     force: options.force,
     noClean: options.clean === false,
     noExtensions: options.extensions === false,
@@ -82,31 +65,21 @@ async function updateProjectStep(projectDir: string, options: UpdateCommandOptio
   });
   if (result.kind === 'failure') {
     spinner.error(result.error.message);
-    ui.printWarnings([...warnings, ...result.warnings]);
+    ui.printWarnings(result.warnings);
     return 'failed';
   }
 
-  const from = result.fromVersion ?? 'none';
-  const to = result.toVersion ?? 'unknown';
-  const pluginOutdated = result.fromVersion !== null && result.toVersion !== null
-    && compareSemver(stripLeadingV(result.fromVersion), stripLeadingV(result.toVersion)) < 0;
-  const outdatedExtensions = result.extensions.filter((item) => item.status === 'outdated');
-  if (options.check) {
-    spinner.success(`${(pluginOutdated ? 1 : 0) + outdatedExtensions.length} update(s) available`);
-    ui.label('UnrealMCP plugin', pluginOutdated ? `${from} → ${to}` : `${from} (up to date)`);
-  } else {
-    const cleaned = result.cleaned ? ' (build cache cleaned)' : '';
-    spinner.success(`${(result.updated ? 1 : 0) + result.extensionsUpdated.length} updated`);
-    ui.label('UnrealMCP plugin', result.updated ? `${from} → ${to}${cleaned}` : `${to} (up to date)`);
-  }
-  result.extensions.forEach((item) => printExtension(item, result.extensionsUpdated, options.check));
-  ui.printWarnings([...warnings, ...result.warnings]);
+  const outdated = result.items.filter((item) => item.status === 'outdated');
+  spinner.success(options.check ? `${outdated.length} update(s) available` : `${result.updated.length} updated`);
+  result.items.forEach(printItem);
+  ui.printWarnings(result.warnings);
+  for (const step of result.nextSteps) ui.info(step);
 
-  if (options.check) return pluginOutdated || outdatedExtensions.length > 0 ? 'outdated' : 'done';
-  if (result.updated || result.extensionsUpdated.length > 0) {
-    ui.info('Open the project in the Unreal Editor: it recompiles the new plugin source.');
+  if (result.items.length === 0) {
+    ui.info('UnrealMCP is not installed in this project (a Fab install is updated by the Epic Games Launcher): nothing to update here.');
   }
-  return result.extensionsUpdated.length < outdatedExtensions.length ? 'failed' : 'done';
+  if (options.check) return outdated.length > 0 ? 'outdated' : 'done';
+  return result.updated.length < outdated.length ? 'failed' : 'done';
 }
 
 async function updateSelfStep(check: boolean | undefined): Promise<Outcome> {
@@ -149,6 +122,18 @@ async function updateSelfStep(check: boolean | undefined): Promise<Outcome> {
   return 'done';
 }
 
+/** The project to update, or null when there is none around the current folder. A named path that is not one exits 1. */
+function resolveProject(explicit: string | undefined): string | null {
+  if (explicit === undefined) return findUnrealProjectRoot(process.cwd());
+
+  const projectDir = path.resolve(explicit);
+  if (findUProjectFile(projectDir) === null) {
+    ui.error(`Not an Unreal project (no .uproject): ${projectDir}`);
+    process.exit(1);
+  }
+  return projectDir;
+}
+
 export const updateCommand = new Command('update')
   .description(`Update everything: the Unreal project's UnrealMCP plugin and installed extensions to the latest version, then ${PACKAGE_NAME} itself`)
   .argument('[path]', 'Unreal project directory (defaults to the project around the current directory)')
@@ -168,19 +153,7 @@ export const updateCommand = new Command('update')
     const outcomes: Outcome[] = [];
 
     if (options.project !== false) {
-      const explicitPath = pathArg ?? options.path;
-      let projectDir: string | null;
-      if (explicitPath !== undefined) {
-        // A named project that is not one is an error before anything changes.
-        projectDir = path.resolve(explicitPath);
-        if (findUProjectFile(projectDir) === null) {
-          ui.error(`Not an Unreal project (no .uproject): ${projectDir}`);
-          process.exit(1);
-        }
-      } else {
-        projectDir = findUnrealProjectRoot(process.cwd());
-      }
-
+      const projectDir = resolveProject(pathArg ?? options.path);
       if (projectDir === null) {
         ui.info('No Unreal project here, so only the CLI is updated. Pass a project path to update its plugin and extensions.');
       } else {
