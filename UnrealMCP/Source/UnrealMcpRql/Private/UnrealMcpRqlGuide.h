@@ -138,7 +138,7 @@ Levels, assets, editor state:
   editor | set Selection = [ref("StaticMeshActor#1234")]        actors | where $ is PointLight | set Selected = true        editor | set IsPlaying = true
 Play test (simulate the game and its input inside the call; never wait for the editor to tick between calls):
   editor | call StartPlay()              starts Play In Editor now, paused between calls; returns PlayState (PawnClass, Location, Velocity, MovementMode, Crouching, MaxWalkSpeed, MappingContexts)
-  editor | call AdvancePlay(1.5, 0, "W, LeftShift")      holds W + LeftShift for 1.5 s (fixed 1/60 s frames, through the mapping contexts), releases, returns PlayState; check each key's Moved / MeasuredVelocity (a pawn without a movement component reads Velocity 0), Notes flags keys that cannot differ or moved nothing
+  editor | call AdvancePlay(1.5, 0, "W, LeftShift")      holds W + LeftShift for 1.5 s (fixed 1/60 s frames, through the mapping contexts), releases, returns PlayState; check each key's Moved / MeasuredVelocity (a pawn that moves itself, with no movement component, reads Velocity 0), Notes flags keys that cannot differ or moved nothing
   editor | call AdvancePlay(0, 1, "SpaceBar")      one frame pressed       editor | call AdvancePlay(2)      just let 2 s pass       editor | call StopPlay()
   rql-query: editor | select PlayState        playActors | where Label == "Car" | select Location      (the game world's actors)
 Data, tags, settings (settings are saved to their ini at once, tag edits too; neither is undoable):

@@ -282,9 +282,18 @@ void FUnrealMcpRqlPlaySpec::Define()
 			TestTrue(*FString::Printf(TEXT("blocked: not moved (%f)"), Blocked.Moved), Blocked.Moved < 1.0);
 			TestTrue(*FString::Printf(TEXT("blocked: noted (%s)"), *FString::Join(Blocked.Notes, TEXT(" | "))),
 				HasNote(Blocked, TEXT("Held W for 0.50 s and the pawn neither moved nor turned")));
+			const TSharedPtr<FJsonObject> BlockedCall = PlayCall(TEXT("AdvancePlay"), TEXT(R"({"lit":0.5},{"lit":0},{"lit":"W"})"));
+			FString BlockedJson;
+			FJsonSerializer::Serialize(BlockedCall.ToSharedRef(), TJsonWriterFactory<>::Create(&BlockedJson));
+			TestTrue(*FString::Printf(TEXT("the operation's result carries the note (%s)"), *BlockedJson.Left(1000)), BlockedJson.Contains(TEXT("neither moved nor turned")));
 			TestFalse(TEXT("a 2-frame press gets no note"), NotedNothing(Advance(0.0, 2, TEXT("W"))));
 			TestFalse(TEXT("no input gets no note"), NotedNothing(Advance(0.5, 0, TEXT(""))));
 			TestFalse(TEXT("an axis at 0 gets no note"), NotedNothing(Advance(0.5, 0, TEXT("Gamepad_LeftY=0"))));
+
+			// A round trip inside the call (a jump that lands): it ends where it began, but the input did move it.
+			const FUnrealMcpPlayState Lifted = Advance(0.5, 0, TEXT("E"));
+			TestTrue(*FString::Printf(TEXT("the lift ended where it began (%f)"), Lifted.Moved), Lifted.Moved < 1.0);
+			TestFalse(*FString::Printf(TEXT("a round trip gets no note (%s)"), *FString::Join(Lifted.Notes, TEXT(" | "))), NotedNothing(Lifted));
 
 			// Only turning in place while a key is held: reported, with the turn.
 			const FUnrealMcpPlayState Turned = Advance(0.5, 0, TEXT("A"));

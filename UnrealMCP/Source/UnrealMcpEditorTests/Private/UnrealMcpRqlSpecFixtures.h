@@ -212,7 +212,7 @@ public:
 
 /**
  * A pawn with no movement component, a blocking box that moves itself (as a game's simple vehicle does): W drives it
- * forward with a sweep, A turns it. Its GetVelocity() stays 0, however it moves.
+ * forward with a sweep, A turns it, E lifts it for 15 ticks and lowers it again. Its GetVelocity() stays 0, however it moves.
  */
 UCLASS()
 class AUnrealMcpRqlSpecSelfMovingPawn : public APawn
@@ -222,6 +222,9 @@ class AUnrealMcpRqlSpecSelfMovingPawn : public APawn
 public:
 	AUnrealMcpRqlSpecSelfMovingPawn();
 	virtual void Tick(float DeltaSeconds) override;
+
+private:
+	int32 LiftTicks = 0;
 };
 
 /** A Project Settings section of the specs, saved to its own Config/DefaultUnrealMcpRqlSpec.ini (removed after the run). */

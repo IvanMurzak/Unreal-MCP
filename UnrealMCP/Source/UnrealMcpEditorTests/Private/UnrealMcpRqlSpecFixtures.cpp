@@ -33,6 +33,7 @@ void UUnrealMcpRqlSpecApi::MakeRow(int32 Damage, FUnrealMcpRqlSpecRow& Row)
 AUnrealMcpRqlSpecSelfMovingPawn::AUnrealMcpRqlSpecSelfMovingPawn()
 {
 	PrimaryActorTick.bCanEverTick = true;
+	bUseControllerRotationYaw = false; // only its own input turns it
 	UBoxComponent* Box = CreateDefaultSubobject<UBoxComponent>(TEXT("Box"));
 	Box->InitBoxExtent(FVector(50.0));
 	Box->SetCollisionProfileName(TEXT("BlockAll"));
@@ -49,4 +50,6 @@ void AUnrealMcpRqlSpecSelfMovingPawn::Tick(float DeltaSeconds)
 		AddActorWorldOffset(GetActorForwardVector() * 300.0 * DeltaSeconds, /*bSweep*/ true);
 	if (Player->IsInputKeyDown(FKey(TEXT("A"))))
 		AddActorWorldRotation(FRotator(0.0, -90.0 * DeltaSeconds, 0.0));
+	if (Player->IsInputKeyDown(FKey(TEXT("E"))))
+		AddActorWorldOffset(FVector(0.0, 0.0, LiftTicks++ < 15 ? 5.0 : -5.0));
 }

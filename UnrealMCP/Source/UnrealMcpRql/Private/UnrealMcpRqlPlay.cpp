@@ -405,8 +405,12 @@ namespace UnrealMcpRqlPlayLocal
 		}
 	}
 
-	/** AdvancePlayWithKeys with its keys parsed and its frames counted. */
-	bool AdvanceHoldingKeys(const TArray<FHeldKey>& Held, int32 Count, int32& OutAdvanced, FString& OutError, TArray<FString>* OutNotes)
+	/**
+	 * AdvancePlayWithKeys with its keys parsed and its frames counted. @p OutFarthest gets how far the pawn got from where it
+	 * started while the keys were held: a jump that lands inside the call moved, though it ends where it began.
+	 */
+	bool AdvanceHoldingKeys(const TArray<FHeldKey>& Held, int32 Count, int32& OutAdvanced, FString& OutError, TArray<FString>* OutNotes,
+		double* OutFarthest = nullptr)
 	{
 		using namespace UnrealMcpRql;
 		OutAdvanced = 0;
@@ -418,10 +422,18 @@ namespace UnrealMcpRqlPlayLocal
 		// extra frame so key-up handlers and Completed events run. Pressed again on a controller that replaced the first one
 		// mid-call (the game swapped it, e.g. after travel), and released on the one that holds the keys.
 		TWeakObjectPtr<APlayerController> Pressed;
-		const bool bHeld = AdvancePlay(Count, [&Held, &Pressed](APlayerController* Controller, int32 Frame)
+		TOptional<FVector> PawnStart;
+		const bool bHeld = AdvancePlay(Count, [&Held, &Pressed, &PawnStart, OutFarthest](APlayerController* Controller, int32 Frame)
 		{
 			if (!Controller)
 				return;
+			if (const APawn* Pawn = OutFarthest ? Controller->GetPawn() : nullptr)
+			{
+				const FVector Location = Pawn->GetActorLocation();
+				*OutFarthest = FMath::Max(*OutFarthest, FVector::Dist(PawnStart.Get(Location), Location));
+				if (!PawnStart.IsSet())
+					PawnStart = Location;
+			}
 			const bool bFirst = !Pressed.IsValid() || Pressed.Get() != Controller;
 			Pressed = Controller;
 			for (const FHeldKey& Key : Held)
@@ -493,9 +505,9 @@ namespace UnrealMcpRqlPlayLocal
 	 * the note is conditional. Not noted: a short press, a game time that stood still, or a turned camera (the input did
 	 * something).
 	 */
-	void NoteInputThatMovedNothing(const FUnrealMcpPlayState& Before, const TArray<FHeldKey>& Keys, int32 HeldFrames, FUnrealMcpPlayState& State)
+	void NoteInputThatMovedNothing(const FUnrealMcpPlayState& Before, const TArray<FHeldKey>& Keys, int32 HeldFrames, double Farthest, FUnrealMcpPlayState& State)
 	{
-		if (HeldFrames < MinHeldFramesToNote || State.Time <= Before.Time || State.Moved >= StillCentimeters
+		if (HeldFrames < MinHeldFramesToNote || State.Time <= Before.Time || FMath::Max(State.Moved, Farthest) >= StillCentimeters
 			|| !State.ControlRotation.Equals(Before.ControlRotation, StillDegrees))
 			return;
 		const TArray<FHeldKey> Held = Keys.FilterByPredicate([](const FHeldKey& Key) { return Key.Value != 0.f; });
@@ -521,12 +533,13 @@ bool UnrealMcpRql::AdvancePlayAndRead(double Seconds, int32 Frames, const FStrin
 	const FUnrealMcpPlayState Before = ReadPlayState();
 	int32 Advanced = 0;
 	TArray<FString> Notes;
-	if (!AdvanceHoldingKeys(Held, Count, Advanced, OutError, &Notes))
+	double Farthest = 0.0;
+	if (!AdvanceHoldingKeys(Held, Count, Advanced, OutError, &Notes, &Farthest))
 		return false;
 	OutState = ReadPlayState();
 	OutState.FramesAdvanced = Advanced;
 	OutState.Notes.Append(Notes);
 	if (MeasurePawnMotion(Before, OutState))
-		NoteInputThatMovedNothing(Before, Held, Count, OutState);
+		NoteInputThatMovedNothing(Before, Held, Count, Farthest, OutState);
 	return true;
 }

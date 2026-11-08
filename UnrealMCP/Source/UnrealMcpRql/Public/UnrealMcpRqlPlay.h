@@ -67,11 +67,11 @@ struct UNREALMCPRQL_API FUnrealMcpPlayState
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Play")
 	double Moved = 0.0;
 
-	/** that location change over the game time the call advanced, cm/s: it reads a pawn that moves itself, whose Velocity stays 0 */
+	/** that location change over the game time the call advanced, cm/s, set as Moved is: it reads a pawn that moves itself, whose Velocity stays 0 */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Play")
 	FVector MeasuredVelocity = FVector::ZeroVector;
 
-	/** how far the call turned the pawn, degrees (start to end) */
+	/** how far the call turned the pawn, degrees (start to end); set as Moved is */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Play")
 	double Turned = 0.0;
 

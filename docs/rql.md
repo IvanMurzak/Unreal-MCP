@@ -232,9 +232,9 @@ the game inside the call (`UnrealMcpRqlPlay.h`):
   to it through `UnrealMcpRql::OnReadPlayState`. `playActors` lists the play world's actors.
 - `AdvancePlay` measures what the call did to the pawn: `Moved` (cm, start to end in a straight line), `MeasuredVelocity`
   (that change over the game time advanced, cm/s) and `Turned` (degrees). They are 0 on other reads and when the call
-  changed the possessed pawn. `Velocity` and `Speed` come from the pawn's movement component, so a pawn without one reads
-  0 there even while it moves: use the measured fields. When keys were held for at least 0.25 s and the pawn did not move
-  1 cm (and the camera did not turn), `Notes` says so: if that input should move the pawn, check whether it is blocked and
+  changed the possessed pawn. `Velocity` and `Speed` come from the pawn's movement component or simulated physics, so a pawn
+  that moves itself without them reads 0 there even while it moves: use the measured fields. When keys were held for at
+  least 0.25 s and the pawn stayed within 1 cm of its start (and the camera did not turn), `Notes` says so: if that input should move the pawn, check whether it is blocked and
   whether the action is bound. The note is a fact, not a verdict: a held menu key gets it too.
 
 Extensions reuse the seam: `UnrealMcpRql::AdvancePlay(frames, beforeFrame)` runs a callback before each frame's tick
