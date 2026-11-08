@@ -118,6 +118,8 @@ on a fixed Windows + macOS matrix, release `build-plugin-zip` on Windows only. T
 `scripts/ue_machine_lock.py` ([RELEASING](docs/RELEASING.md#machine-wide-ue-lock)), and are
 gated on `vars.UNREAL_RUNNER_READY` / `vars.UNREAL_SMOKE_READY == 'true'` and same-repo PRs — otherwise
 SKIPPED, never red. `release.yml` is `workflow_dispatch`-only (`dry_run` input; validates UE 5.5–5.8) and
-publishes nothing on merge. Keep this file and `docs/RELEASING.md` in sync with the workflows.
+publishes nothing on merge. A PR changing only `docs/**` and the root `AGENTS.md` skips all four legs and stays
+green through the `docs-only gate` job (the list, and what it leaves out on purpose: `.github/scripts/docs-only.mjs`);
+a dispatch or a `train/` label always runs in full. Keep this file and `docs/RELEASING.md` in sync with the workflows.
 
 Shared suite: `scripts/extension_suite.py --engine <UE> --mode full` builds in isolation, then runs all Automation/E2E in one editor per engine.
