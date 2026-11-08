@@ -57,6 +57,7 @@ public class UnrealMcpRql : ModuleRules
 			"BlueprintGraph",
 			"KismetCompiler",
 			"InputCore",
+			"ApplicationCore", // IPlatformInputDeviceMapper: the player's input device for held keys
 			"UMG",
 			"UMGEditor",
 			"LevelSequence",

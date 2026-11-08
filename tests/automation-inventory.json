@@ -1,6 +1,6 @@
 {
   "UnrealAIControlRig": 12,
-  "UnrealAIEnhancedInput": 24,
+  "UnrealAIEnhancedInput": 25,
   "UnrealAIGAS": 16,
   "UnrealAILandscape": 17,
   "UnrealAINiagara": 9,
@@ -32,7 +32,7 @@
   "UnrealMcp.Tools.Python": 5,
   "UnrealMcp.Tools.Registry": 7,
   "UnrealMcp.Tools.Rql": 21,
-  "UnrealMcp.Tools.Rql.Play": 5,
+  "UnrealMcp.Tools.Rql.Play": 6,
   "UnrealMcp.Tools.Screenshot": 15,
   "UnrealMcp.Tools.Skills": 18,
   "UnrealMcp.Tools.Source": 17,

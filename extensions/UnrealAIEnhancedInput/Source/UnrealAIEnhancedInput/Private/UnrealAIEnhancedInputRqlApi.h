@@ -115,7 +115,4 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Enhanced Input", meta = (BlueprintInternalUseOnly = "true"))
 	FUnrealMcpPlayState InjectInput(UInputAction* Action, FVector Value = FVector(1.0, 0.0, 0.0), double Seconds = 0.0, int32 Frames = 0,
 		const FString& Triggers = TEXT(""));
-
-	/** The Enhanced Input mapping contexts applied to @p Controller's player, highest priority first ("IMC_Default (priority 0)"). */
-	static TArray<FString> AppliedContexts(const APlayerController* Controller);
 };

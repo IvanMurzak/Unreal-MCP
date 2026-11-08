@@ -219,13 +219,17 @@ the game inside the call (`UnrealMcpRqlPlay.h`):
   both given: the larger; neither: one frame; at most 3600 frames = 60 s per call, and about 25 s of wall clock), with
   `Keys` (`"W, LeftShift"`, axes `"Gamepad_LeftY=1"`) held as player 0 presses them (pressed on the first frame,
   released on one extra frame, so key-up handlers and `Completed` run). Keys go through the player input and its
-  mapping contexts like real ones. A paused session is stepped as the toolbar's Advance Frame does and stays paused;
+  mapping contexts like real ones, from the player's input device; each call presses its keys afresh and releases them, keys
+  held together compose (`"W, D"` diagonal). A held key that reaches one Enhanced Input action through several differently modified
+  key mappings gives it their combined value, in a real game too (Enhanced Input user settings do this to a player-mappable action
+  whose mappings share one name): `Notes` says so. A paused session is stepped as the toolbar's Advance Frame does and stays paused;
   gameplay `Modify()` calls are kept out of the undo buffer.
 - `editor | call StopPlay()` ends the session now.
 - `editor.PlayState` (and every play operation's result, `FUnrealMcpPlayState`): `Playing`, `Paused`, `Time` (game
   seconds), `FramesAdvanced`, `Pawn`, `PawnClass`, `Location`, `Rotation`, `ControlRotation`, `Velocity`, `Speed`,
-  `MovementMode`, `Crouching`, `MaxWalkSpeed` (Characters), `MappingContexts` (filled by the Enhanced Input extension
-  through `UnrealMcpRql::OnReadPlayState`), `Notes`. `playActors` lists the play world's actors.
+  `MovementMode`, `Crouching`, `MaxWalkSpeed` (Characters), `MappingContexts` (the Enhanced Input contexts applied
+  to player 0's input, highest priority first, read by reflection: no Enhanced Input dependency), `Notes`; extensions add
+  to it through `UnrealMcpRql::OnReadPlayState`. `playActors` lists the play world's actors.
 
 Extensions reuse the seam: `UnrealMcpRql::AdvancePlay(frames, beforeFrame)` runs a callback before each frame's tick
 (the Enhanced Input extension's `InjectInput(action, value, seconds, frames, triggers)` injects the action there and

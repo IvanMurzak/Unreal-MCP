@@ -446,28 +446,6 @@ namespace UnrealAIEnhancedInputRqlLocal
 	};
 }
 
-TArray<FString> UUnrealAIEnhancedInputRqlApi::AppliedContexts(const APlayerController* Controller)
-{
-	TArray<TPair<int32, FString>> Applied;
-	// The applied-context map of the player input is not public: ask the player's subsystem about each loaded context (a
-	// context applied to a player is loaded).
-	const ULocalPlayer* Player = Controller ? Controller->GetLocalPlayer() : nullptr;
-	if (const UEnhancedInputLocalPlayerSubsystem* Input = Player ? Player->GetSubsystem<UEnhancedInputLocalPlayerSubsystem>() : nullptr)
-	{
-		for (TObjectIterator<UInputMappingContext> It; It; ++It)
-		{
-			int32 Priority = 0;
-			if (!It->HasAnyFlags(RF_ClassDefaultObject) && Input->HasMappingContext(*It, Priority))
-				Applied.Add({ Priority, It->GetName() });
-		}
-	}
-	Applied.Sort([](const TPair<int32, FString>& A, const TPair<int32, FString>& B) { return A.Key != B.Key ? A.Key > B.Key : A.Value < B.Value; });
-	TArray<FString> Names;
-	for (const TPair<int32, FString>& Entry : Applied)
-		Names.Add(FString::Printf(TEXT("%s (priority %d)"), *Entry.Value, Entry.Key));
-	return Names;
-}
-
 FUnrealMcpPlayState UUnrealAIEnhancedInputRqlApi::InjectInput(UInputAction* Action, FVector Value, double Seconds, int32 Frames, const FString& Triggers)
 {
 	using namespace UnrealAIEnhancedInputRqlLocal;
