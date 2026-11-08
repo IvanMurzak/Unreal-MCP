@@ -1,0 +1,49 @@
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/UnrealMcpEditorViewModel.cpp
+  s_7bc72ecaebd05d::t_56d2df6dcafe09 193,257-262,268-270
+UnrealMCP/Config/FilterPlugin.ini
+  s_7bc72ecaebd05d::t_fc0e6fc08fe2d6 12-13
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpEditorViewModelSpec.cpp
+  s_7bc72ecaebd05d::t_a4fcaa5a92ee43 524-557
+scripts/test_ci_steps.py
+  s_7bc72ecaebd05d::t_10ca35db25c243 305-339
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpSidecarManagerSpec.cpp
+  s_7bc72ecaebd05d::t_a1ed218d5da37f 13,230,234-261,264-266
+docs/ARCHITECTURE.md
+  s_7bc72ecaebd05d::t_cd50dffd25b93a 28,95,836,869-870,874-878,1145
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpBridgeDownloaderSpec.cpp
+  s_7bc72ecaebd05d::t_44640ea622c403 187,191,193-195,198-202
+UnrealMCP/Source/UnrealMcpEditorTests/UnrealMcpEditorTests.Build.cs
+  s_7bc72ecaebd05d::t_13f4277ffca990 43
+docs/RELEASING.md
+  s_7bc72ecaebd05d::t_fc0e6fc08fe2d6 42-44,56,114,236-238
+.github/scripts/ue_ci.py
+  s_7bc72ecaebd05d::t_41b7913809374e 42-44,124
+.github/workflows/release.yml
+  s_7bc72ecaebd05d::t_e7305adae355fc 573,809-810,860-868,1231-1248
+README.md
+  s_7bc72ecaebd05d::t_ab0ecc49227991 631
+UnrealMCP/Source/UnrealMcpEditor/Private/Sidecar/UnrealMcpBridgeDownloader.cpp
+  s_7bc72ecaebd05d::t_e9f673d76967bc 58,135-146,190-192,194,197,199-200
+UnrealMCP/Source/UnrealMcpRuntime/Private/Sidecar/UnrealMcpSidecarManager.cpp
+  s_7bc72ecaebd05d::t_16625e2120918d 10,163,165-195,200-208
+UnrealMCP/Source/UnrealMcpRuntime/Private/Sidecar/UnrealMcpSidecarManager.h
+  s_7bc72ecaebd05d::t_18816528a4dcae 94-104,107-108
+scripts/connection_smoke.py
+  s_7bc72ecaebd05d::t_b8fed976b7e68d 69-70,594,603-604,606
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "909e331b224302c94815d337990f9e0edbf95182",
+  "prompts": {},
+  "sessions": {
+    "s_7bc72ecaebd05d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "40274cb2-edf8-49ba-9a73-33b83cb5be53",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

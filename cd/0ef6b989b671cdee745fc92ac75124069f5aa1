@@ -1,0 +1,33 @@
+bridge/tests/Fakes.cs
+  s_908974782fafa1::t_9dd74077865038 16-17,20-23,27-32,34-75
+  s_908974782fafa1::t_cab012e3d9e661 33
+bridge/src/Host/SidecarHost.cs
+  s_908974782fafa1::t_a67465001c61f7 186
+  s_908974782fafa1::t_093a3774f51275 421,426,429,433-437
+  s_908974782fafa1::t_7c9d789105c937 113-119
+  s_908974782fafa1::t_99bb066cac2f7e 402,407,410-413
+  s_908974782fafa1::t_b0d29d4760d912 464-465
+  s_908974782fafa1::t_665072cdd06e7e 451,455-463,466-472,474
+  s_908974782fafa1::t_f49790f3756090 532-533
+  s_908974782fafa1::t_a48d81977f2d3a 74-75,78,112,438
+  s_908974782fafa1::t_a22436a922e77a 492,494-497,499-522
+  s_908974782fafa1::t_08cf8b18d50416 377-386
+bridge/tests/SidecarHostTransitionTests.cs
+  s_908974782fafa1::t_cd9deb34fa467d 1-117
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "cd0ef6b989b671cdee745fc92ac75124069f5aa1",
+  "prompts": {},
+  "sessions": {
+    "s_908974782fafa1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f1748397-e586-40bb-91a9-b89c0caebdf5",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

@@ -1,0 +1,41 @@
+cli/src/utils/uproject-plugins.ts
+  s_e3cea916442b5e::t_6d3f719e93193b 103,111,114,122-124,130
+  s_e3cea916442b5e::t_288bf2e7c44788 63-69
+cli/src/lib/install-extension.ts
+  s_e3cea916442b5e::t_f907d392b0236c 579-580
+  s_e3cea916442b5e::t_5e1db4e6411714 209
+  s_e3cea916442b5e::t_6317b9f38b7aa8 560
+  s_e3cea916442b5e::t_056087d4108b28 52
+  s_e3cea916442b5e::t_74dd84e353cd15 183-192
+  s_e3cea916442b5e::t_e4125e68f27e8e 299-301
+cli/tests/install-extension.test.ts
+  s_e3cea916442b5e::t_504da8aefb66f1 202-203,211-221
+  s_e3cea916442b5e::t_bc80e545d4b0a3 285-309
+  s_e3cea916442b5e::t_12ebfcf66a0f9b 403-416
+cli/src/lib/types.ts
+  s_b633a284a21142::t_3e233a80339780 636,692-697,711,729-733
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "ed1cb94d08c2a82eb10f36e883ae0b3ab5cf8e6b",
+  "prompts": {},
+  "sessions": {
+    "s_b633a284a21142": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-acff709b50b3a70b9",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_e3cea916442b5e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c575ab56-73e6-4952-bb8b-fef415924e27",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

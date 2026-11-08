@@ -1,0 +1,33 @@
+UnrealMCP/Source/UnrealMcpEditor/Private/Server/UnrealMcpServerManager.cpp
+  s_2df07827686619::t_111e2ef1b7c21f 26
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpServerManagerSpec.cpp
+  s_2df07827686619::t_5ee7b976b613a2 153
+UnrealMCP/UnrealMCP.uplugin
+  s_2df07827686619::t_d9233866aecc2b 4
+bridge/src/com.IvanMurzak.Unreal.MCP.Bridge.csproj
+  s_2df07827686619::t_c5188aa98b3e73 10,55,195
+cli/package-lock.json
+  s_2df07827686619::t_62cc14a59e1a64 3,9
+cli/package.json
+  s_2df07827686619::t_c55dafdaba93af 3
+cli/src/lib/server-version.ts
+  s_2df07827686619::t_379b21c8e6a584 12
+cli/src/version.ts
+  s_2df07827686619::t_48aa6ee3dd2020 6
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "2a5ca1270cbd994d075bceb093e37d8a6cb8ff44",
+  "prompts": {},
+  "sessions": {
+    "s_2df07827686619": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "s_2df07827686619",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

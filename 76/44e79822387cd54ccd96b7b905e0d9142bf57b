@@ -1,0 +1,25 @@
+UnrealMCP/Source/UnrealMcpEditor/Private/Session/UnrealMcpBackgroundRendering.cpp
+  s_b4e88c47e182f2::t_ac7a34b1f93bbb 28-29
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpBackgroundRenderingSpec.cpp
+  s_b4e88c47e182f2::t_ac7a34b1f93bbb 64-67
+UnrealMCP/Source/UnrealMcpEditor/Private/Session/UnrealMcpBackgroundRendering.h
+  s_b4e88c47e182f2::t_ac7a34b1f93bbb 32-37
+UnrealMCP/Source/UnrealMcpEditor/Private/Tools/UnrealMcpScreenshotTools.cpp
+  s_b4e88c47e182f2::t_ac7a34b1f93bbb 49-50,278-279,281-282,371
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "7644e79822387cd54ccd96b7b905e0d9142bf57b",
+  "prompts": {},
+  "sessions": {
+    "s_b4e88c47e182f2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ef0d1b43-913a-487a-95df-8feba021ec1f",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

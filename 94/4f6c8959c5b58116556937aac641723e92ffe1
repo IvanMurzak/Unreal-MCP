@@ -1,0 +1,47 @@
+scripts/test_run_extension_e2e.py
+  s_b4e88c47e182f2::t_c52946f36b8a1f 221-222
+  s_b4e88c47e182f2::t_d0474b8b40413e 209-210
+  s_b4e88c47e182f2::t_27b92e29ee75b9 157-158
+extensions/UnrealAIGAS/README.md
+  s_b4e88c47e182f2::t_498f1d664cf548 39-40,48
+extensions/UnrealAIGAS/Source/UnrealAIGAS/Private/Tests/UnrealAIGASSpec.cpp
+  s_b4e88c47e182f2::t_9751b5622852d8 10-11,81-82,84-85,87-88,277,320,352-358,364,417,497,528
+extensions/UnrealAIGAS/Source/UnrealAIGAS/Private/UnrealAIGASModule.cpp
+  s_b4e88c47e182f2::t_541947f7c4df14 309-310
+extensions/UnrealAIGAS/Source/UnrealAIGAS/Private/UnrealAIGASRqlApi.cpp
+  s_b4e88c47e182f2::t_76418f9e29af26 43,46,135-145,315-333,336-351,364-366,758,760-761,765-767,791-793,811-812,815,818-819,821,823-831,833-853,856-857,862-863,865,867-874,876-880,885-887,889-892,894-896,898,928,930-932,934-943,955,958,967-968,981-982,1042-1043,1059,1102,1121-1124
+extensions/UnrealAIGAS/Source/UnrealAIGAS/Private/UnrealAIGASRqlApi.h
+  s_b4e88c47e182f2::t_a4903ce8669ca4 87,92,98,119
+extensions/UnrealAIGAS/Source/UnrealAIGASRuntime/Private/UnrealAIAbilitySystemComponent.cpp
+  s_b4e88c47e182f2::t_03e1fd5da193f0 10-11,83-84,122,125,127,131-137,166-167,176,191,199,215-218,220-221
+extensions/UnrealAIGAS/Source/UnrealAIGASRuntime/Private/UnrealAIAttributeSet.cpp
+  s_b4e88c47e182f2::t_5599c165d2a866 61,78,80,87
+extensions/UnrealAIGAS/Source/UnrealAIGASRuntime/Private/UnrealAIGASProjectile.cpp
+  s_b4e88c47e182f2::t_18067796a34f52 65,71,79-80,93-96
+extensions/UnrealAIGAS/Source/UnrealAIGASRuntime/Public/UnrealAIAbilitySystemComponent.h
+  s_b4e88c47e182f2::t_08516c00693619 121-123
+extensions/UnrealAIGAS/Source/UnrealAIGASRuntime/Public/UnrealAIGASProjectile.h
+  s_b4e88c47e182f2::t_9c1590a7bd69ef 60,62
+extensions/UnrealAIGAS/Tests/e2e/tools/gas-authoring-00-preclean.e2e.json
+  s_b4e88c47e182f2::t_2e32d2955ae5fc 1-11
+extensions/UnrealAIGAS/Tests/e2e/tools/gas-authoring-18-play.e2e.json
+  s_b4e88c47e182f2::t_fbcbfe39415712 8
+extensions/UnrealAIGAS/Tests/e2e/tools/gas-authoring-23-stop.e2e.json
+  s_b4e88c47e182f2::t_6f678e375c77f1 8
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "944f6c8959c5b58116556937aac641723e92ffe1",
+  "prompts": {},
+  "sessions": {
+    "s_b4e88c47e182f2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ef0d1b43-913a-487a-95df-8feba021ec1f",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

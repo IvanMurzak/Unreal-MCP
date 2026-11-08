@@ -1,0 +1,28 @@
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpBlueprintToolsSpec.cpp
+  s_908974782fafa1::t_c1f975fde6046f 38-40,46
+UnrealMCP/Source/UnrealMcpEditor/Private/Tools/UnrealMcpBlueprintTools.cpp
+  s_908974782fafa1::t_f09f0c35fa8d8b 628-631,634-635
+  s_908974782fafa1::t_6f5c5d8e27929f 426-433
+  s_908974782fafa1::t_c66b12f89025dc 241-244,255-259,261
+  s_908974782fafa1::t_bdbb75c43f75cf 356-361
+  s_908974782fafa1::t_cb03b1cfc6c5c6 55-57,59
+  s_908974782fafa1::t_f91d97c8d446da 522-525
+  s_908974782fafa1::t_603f36fc556570 72-74
+  s_908974782fafa1::t_bb1cebff4fc8e9 140
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "0abef3fcd7484f9ce945e2fe4325cdeb763124bf",
+  "prompts": {},
+  "sessions": {
+    "s_908974782fafa1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f1748397-e586-40bb-91a9-b89c0caebdf5",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
