@@ -1,8 +1,9 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import { zipSync, strToU8 } from 'fflate';
-import { update, readPluginVersion } from '../src/lib/update.js';
+import { findUnrealProjectRoot, update, updateProject, readPluginVersion } from '../src/lib/update.js';
+import * as os from 'os';
 import { PACKAGE_VERSION } from '../src/version.js';
 import { makeTempDir, rmTempDir } from './helpers.js';
 import { makeMinisignKeypair, type MinisignTestKeypair } from './minisign-fixture.js';
@@ -346,7 +347,129 @@ describe('update brings the installed extensions along', () => {
   });
 });
 
-describe('update and links or disabled extensions', () => {
+describe('update and an open editor, the dry run, and links', () => {
+  function seededProject(): string {
+    const project = tmp();
+    fs.writeFileSync(path.join(project, 'Game.uproject'), JSON.stringify({ FileVersion: 3, EngineAssociation: '5.7', Plugins: [] }), 'utf-8');
+    const pluginDir = path.join(project, 'Plugins', 'UnrealMCP');
+    fs.mkdirSync(pluginDir, { recursive: true });
+    fs.writeFileSync(path.join(pluginDir, 'UnrealMCP.uplugin'), JSON.stringify({ VersionName: '0.1.0' }), 'utf-8');
+    return project;
+  }
+
+  it('refuses to replace files under an editor that has the project open', async () => {
+    const project = seededProject();
+    const uproject = path.join(project, 'Game.uproject');
+    const r = await update({
+      projectDir: project,
+      pluginSourceDir: makeSource('0.2.0'),
+      listProcessesImpl: () => [{ pid: 4242, name: 'UnrealEditor', commandLine: `UnrealEditor "${uproject}"` }],
+    });
+
+    expect(r.kind).toBe('failure');
+    if (r.kind === 'failure') expect(r.error.message).toContain('4242');
+    expect(readPluginVersion(path.join(project, 'Plugins', 'UnrealMCP', 'UnrealMCP.uplugin'))).toBe('0.1.0');
+  });
+
+  it('dryRun reports the plugin and extensions, and writes nothing', async () => {
+    const project = seededProject();
+    const dir = path.join(project, 'Plugins', 'UnrealAINiagara');
+    fs.mkdirSync(dir);
+    fs.writeFileSync(path.join(dir, 'UnrealAINiagara.uplugin'), JSON.stringify({ VersionName: '0.0.1' }), 'utf-8');
+    const fetchImpl = (async () => ({ ok: false, status: 503, statusText: 'Unavailable' }) as unknown as Response) as unknown as typeof fetch;
+
+    const r = await update({ projectDir: project, pluginSourceDir: makeSource('0.2.0'), fetchImpl, indexCachePath: path.join(tmp(), 'index.json'), dryRun: true });
+
+    if (r.kind !== 'success') throw r.error;
+    expect(r.updated).toBe(false);
+    expect(r.toVersion).toBe('0.2.0');
+    expect(r.extensions).toEqual([expect.objectContaining({ pluginName: 'UnrealAINiagara', from: '0.0.1', status: 'unknown' })]);
+    expect(readPluginVersion(path.join(project, 'Plugins', 'UnrealMCP', 'UnrealMCP.uplugin'))).toBe('0.1.0');
+  });
+
+  it('checks the extensions even when the plugin is current', async () => {
+    const project = seededProject();
+    const calls: string[] = [];
+    fs.mkdirSync(path.join(project, 'Plugins', 'UnrealAINiagara'));
+    fs.writeFileSync(path.join(project, 'Plugins', 'UnrealAINiagara', 'UnrealAINiagara.uplugin'), JSON.stringify({ VersionName: '0.0.1' }), 'utf-8');
+    const fetchImpl = (async (url: string) => {
+      calls.push(String(url));
+      return { ok: false, status: 503, statusText: 'Unavailable' } as unknown as Response;
+    }) as unknown as typeof fetch;
+
+    const r = await update({ projectDir: project, pluginSourceDir: makeSource('0.1.0'), fetchImpl, indexCachePath: path.join(tmp(), 'index.json') });
+
+    if (r.kind !== 'success') throw r.error;
+    expect(r.updated).toBe(false);
+    expect(calls.length).toBeGreaterThan(0);
+  });
+
+  it('updateProject leaves a project without the plugin alone, without touching the network', async () => {
+    const project = tmp();
+    fs.writeFileSync(path.join(project, 'Game.uproject'), '{}', 'utf-8');
+
+    const r = await updateProject({ projectDir: project });
+
+    if (r.kind !== 'success') throw r.error;
+    expect(r.items).toEqual([]);
+    expect(fs.existsSync(path.join(project, 'Plugins'))).toBe(false);
+  });
+
+  it('updateProject never downgrades to an older latest, and a failed lookup changes nothing', async () => {
+    const project = seededProject();
+    const plugin = path.join(project, 'Plugins', 'UnrealMCP', 'UnrealMCP.uplugin');
+    fs.writeFileSync(plugin, JSON.stringify({ VersionName: '5.0.0' }), 'utf-8');
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ version: '1.0.0' }) })));
+
+    const older = await updateProject({ projectDir: project, noExtensions: true });
+    if (older.kind !== 'success') throw older.error;
+    expect(older.items[0]).toMatchObject({ status: 'current', from: '5.0.0' });
+    expect(readPluginVersion(plugin)).toBe('5.0.0');
+
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('offline'); }));
+    const failed = await updateProject({ projectDir: project, noExtensions: true });
+    if (failed.kind !== 'success') throw failed.error;
+    expect(failed.items[0]?.status).toBe('unknown');
+    expect(readPluginVersion(plugin)).toBe('5.0.0');
+    vi.unstubAllGlobals();
+  });
+
+  it('updateProject leaves a linked plugin alone', async () => {
+    const project = seededProject();
+    const checkout = makeSource('0.1.0');
+    const plugin = path.join(project, 'Plugins', 'UnrealMCP');
+    fs.rmSync(plugin, { recursive: true });
+    fs.symlinkSync(checkout, plugin);
+
+    const r = await updateProject({ projectDir: project, noExtensions: true });
+
+    if (r.kind !== 'success') throw r.error;
+    expect(r.items[0]?.status).toBe('local');
+    expect(fs.lstatSync(plugin).isSymbolicLink()).toBe(true);
+  });
+
+  it('updateProject requires a project', async () => {
+    expect((await updateProject({ projectDir: '' })).kind).toBe('failure');
+  });
+
+  it('updateProject reports the plugin as an item', async () => {
+    const r = await updateProject({ projectDir: seededProject(), pluginSourceDir: makeSource('0.2.0'), dryRun: true });
+
+    if (r.kind !== 'success') throw r.error;
+    expect(r.items).toEqual([{ kind: 'plugin', name: 'UnrealMCP plugin', from: '0.1.0', to: '0.2.0', status: 'outdated' }]);
+    expect(r.updated).toEqual([]);
+  });
+
+  it('findUnrealProjectRoot finds the project from a subfolder, and null outside one', () => {
+    const project = seededProject();
+    const nested = path.join(project, 'Content', 'Maps');
+    fs.mkdirSync(nested, { recursive: true });
+
+    expect(findUnrealProjectRoot(nested)).toBe(project);
+    expect(findUnrealProjectRoot(os.tmpdir())).toBeNull();
+  });
+
+
   it('a dangling link under Plugins does not fail the plugin update', async () => {
     const project = tmp();
     const pluginDir = path.join(project, 'Plugins', 'UnrealMCP');
