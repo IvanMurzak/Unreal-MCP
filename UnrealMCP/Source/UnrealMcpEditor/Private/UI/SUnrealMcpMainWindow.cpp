@@ -988,14 +988,12 @@ TSharedRef<SWidget> SUnrealMcpMainWindow::BuildExtensionsSection()
 	// and reuses T5's catalog + FUnrealMcpExtensionInstaller install path verbatim (no duplicated install logic).
 	// When the coordinator has not wired the live providers (e.g. a bare/test construct), fall back to the static
 	// placeholder so this section never renders an unusable empty panel.
-	TSharedRef<SVerticalBox> Section = SNew(SVerticalBox)
-		+ SVerticalBox::Slot().AutoHeight()[ UnrealMcpStyleWidgets::SectionHeader(LOCTEXT("ExtHeader", "Extensions")) ];
+	TSharedRef<SVerticalBox> Section = SNew(SVerticalBox);
 
 	if (ExtensionsWiring.IsWired())
 	{
-		Section->AddSlot().AutoHeight().Padding(0, 8, 0, 0)
-		[
-			SNew(SUnrealMcpExtensionsWindow)
+		TSharedPtr<SUnrealMcpExtensionsWindow> ExtensionsWindow;
+		const TSharedRef<SWidget> ExtensionsBody = SAssignNew(ExtensionsWindow, SUnrealMcpExtensionsWindow)
 			.bEmbedded(true)
 			.ProjectDir(ExtensionsWiring.ProjectDir)
 			.InitialCatalog(ExtensionsWiring.InitialCatalog)
@@ -1003,10 +1001,21 @@ TSharedRef<SWidget> SUnrealMcpMainWindow::BuildExtensionsSection()
 			.CatalogFetcher(ExtensionsWiring.CatalogFetcher)
 			.OnSetEnabled(ExtensionsWiring.OnSetEnabled)
 			.OnInstall(ExtensionsWiring.OnInstall)
-			.OnTriggerLiveCompile(ExtensionsWiring.OnTriggerLiveCompile)
+			.OnTriggerLiveCompile(ExtensionsWiring.OnTriggerLiveCompile);
+
+		Section->AddSlot().AutoHeight()
+		[
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
+			[ UnrealMcpStyleWidgets::SectionHeader(LOCTEXT("ExtHeader", "Extensions")) ]
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+			[ ExtensionsWindow->MakeBulkActions() ]
 		];
+		Section->AddSlot().AutoHeight().Padding(0, 8, 0, 0)[ ExtensionsBody ];
 		return Section;
 	}
+
+	Section->AddSlot().AutoHeight()[ UnrealMcpStyleWidgets::SectionHeader(LOCTEXT("ExtHeader", "Extensions")) ];
 
 	// Unwired fallback: one placeholder row in the populated-row shape (bold name + disabled Install + description).
 	Section->AddSlot().AutoHeight().Padding(0, 8, 0, 0)

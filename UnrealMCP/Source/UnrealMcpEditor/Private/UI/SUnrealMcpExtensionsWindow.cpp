@@ -5,6 +5,7 @@
 #include "Extensions/UnrealMcpExtensionManager.h" // FUnrealMcpExtensionRecord (runtime module)
 #include "UnrealMcpLog.h"
 
+#include "Misc/ScopedSlowTask.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SScrollBox.h"
@@ -52,6 +53,7 @@ void SUnrealMcpExtensionsWindow::Construct(const FArguments& InArgs)
 			.Text(LOCTEXT("ExtHeading", "Extensions"))
 			.Font(FCoreStyle::GetDefaultFontStyle("Bold", 13))
 		];
+		HeaderRow->AddSlot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 4, 0)[ MakeBulkActions() ];
 	}
 	HeaderRow->AddSlot().AutoWidth().VAlign(VAlign_Center)[ RefreshButton ];
 
@@ -128,6 +130,8 @@ void SUnrealMcpExtensionsWindow::RebuildList()
 	const TArray<FUnrealMcpInstalledOnDisk> OnDisk = FUnrealMcpExtensionInstaller::ScanInstalledPlugins(ProjectDir);
 
 	const TArray<FUnrealMcpExtensionRow> Rows = FUnrealMcpExtensionInstaller::BuildRows(Catalog, Loaded, OnDisk);
+	InstallableIds = OnInstall ? FUnrealMcpExtensionInstaller::SelectBulkIds(Rows, false) : TArray<FString>();
+	UpdatableIds = OnInstall ? FUnrealMcpExtensionInstaller::SelectBulkIds(Rows, true) : TArray<FString>();
 	if (Rows.Num() == 0)
 	{
 		ListContainer->AddSlot().AutoHeight().Padding(4.0f)
@@ -141,6 +145,37 @@ void SUnrealMcpExtensionsWindow::RebuildList()
 
 	for (const FUnrealMcpExtensionRow& Row : Rows)
 		ListContainer->AddSlot().AutoHeight().Padding(0, 0, 0, 6)[ BuildRow(Row) ];
+}
+
+TSharedRef<SWidget> SUnrealMcpExtensionsWindow::MakeBulkActions()
+{
+	return SNew(SHorizontalBox)
+		+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+		[
+			SNew(SButton)
+			.Text(LOCTEXT("ExtInstallAll", "Install All"))
+			.ToolTipText_Lambda([this]()
+			{
+				return InstallableIds.Num() > 0
+					? FText::Format(LOCTEXT("ExtInstallAllTip", "Install {0} extension(s) that are not installed yet."), FText::AsNumber(InstallableIds.Num()))
+					: (Catalog.Num() > 0
+						? LOCTEXT("ExtInstallAllNothing", "Nothing to install right now.")
+						: LOCTEXT("ExtInstallAllNoCatalog", "Click Refresh catalog to load the available extensions."));
+			})
+			.IsEnabled_Lambda([this]() { return InstallableIds.Num() > 0; })
+			.OnClicked(this, &SUnrealMcpExtensionsWindow::OnBulkClicked, false)
+		]
+		+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(4, 0, 0, 0)
+		[
+			SNew(SButton)
+			.Text(LOCTEXT("ExtUpdateAll", "Update All"))
+			.ToolTipText_Lambda([this]()
+			{
+				return FText::Format(LOCTEXT("ExtUpdateAllTip", "Update {0} installed extension(s) to the catalog version."), FText::AsNumber(UpdatableIds.Num()));
+			})
+			.Visibility_Lambda([this]() { return UpdatableIds.Num() > 0 ? EVisibility::Visible : EVisibility::Collapsed; })
+			.OnClicked(this, &SUnrealMcpExtensionsWindow::OnBulkClicked, true)
+		];
 }
 
 TSharedRef<SWidget> SUnrealMcpExtensionsWindow::BuildRow(const FUnrealMcpExtensionRow& Row)
@@ -303,6 +338,52 @@ FReply SUnrealMcpExtensionsWindow::OnInstallClicked(FString ExtensionId, bool bF
 	{
 		UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] extension install failed: %s"), *Result.Error);
 	}
+
+	RebuildList();
+	return FReply::Handled();
+}
+
+FReply SUnrealMcpExtensionsWindow::OnBulkClicked(bool bUpdate)
+{
+	const TArray<FString> Ids = bUpdate ? UpdatableIds : InstallableIds;
+	if (!OnInstall || Ids.Num() == 0)
+		return FReply::Handled();
+
+	// Each install blocks the game thread on its download, so show progress instead of a frozen editor.
+	FScopedSlowTask Progress(Ids.Num(), bUpdate
+		? LOCTEXT("ExtUpdatingAll", "Updating extensions...")
+		: LOCTEXT("ExtInstallingAll", "Installing extensions..."));
+	Progress.MakeDialog();
+
+	int32 Succeeded = 0;
+	bool bRebuildRequired = false;
+	FString Details;
+	for (const FString& Id : Ids)
+	{
+		Progress.EnterProgressFrame(1.0f, FText::FromString(Id));
+
+		const FUnrealMcpCatalogEntry* Entry = FUnrealMcpExtensionCatalog::FindEntry(Catalog, Id);
+		const FUnrealMcpInstallResult Result = Entry
+			? OnInstall(*Entry, bUpdate)
+			: FUnrealMcpInstallResult();
+		if (Entry != nullptr && Result.bSuccess)
+		{
+			++Succeeded;
+			bRebuildRequired |= Result.bRebuildRequired;
+			UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] extension install: %s"), *Result.Message);
+		}
+		else
+		{
+			const FString Error = Entry ? Result.Error : TEXT("no longer in the catalog");
+			Details += FString::Printf(TEXT("\n%s: %s"), *Id, *Error);
+			UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] extension install failed: %s: %s"), *Id, *Error);
+		}
+		for (const FString& Warning : Result.Warnings)
+			Details += FText::Format(LOCTEXT("ExtInstallWarning", "\nWarning: {0}"), FText::FromString(Warning)).ToString();
+	}
+
+	StatusMessage = FText::Format(LOCTEXT("ExtBulkDone", "{0} of {1} extension(s) done."), FText::AsNumber(Succeeded), FText::AsNumber(Ids.Num())).ToString() + Details;
+	bRestartHintVisible = bRebuildRequired;
 
 	RebuildList();
 	return FReply::Handled();

@@ -219,6 +219,17 @@ FString FUnrealMcpExtensionInstaller::BuildOutcomeMessage(
 	}
 }
 
+TArray<FString> FUnrealMcpExtensionInstaller::SelectBulkIds(const TArray<FUnrealMcpExtensionRow>& Rows, bool bUpdate)
+{
+	TArray<FString> Ids;
+	for (const FUnrealMcpExtensionRow& Row : Rows)
+	{
+		if (Row.bInCatalog && (bUpdate ? (Row.bInstalled && Row.bUpdateAvailable) : !Row.bInstalled))
+			Ids.Add(Row.ExtensionId);
+	}
+	return Ids;
+}
+
 // ---------------------------------------------------------------------------------------------------
 // The catalog ∪ loaded ∪ disk row-merge (pure)
 // ---------------------------------------------------------------------------------------------------

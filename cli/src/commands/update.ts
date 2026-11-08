@@ -12,10 +12,11 @@ export const updateCommand = new Command('update')
     '--no-clean',
     'Do not wipe the stale UE C++ build cache after a copy-mode update (cleaning is the default; the bundled sidecar bridge is always preserved)',
   )
+  .option('--no-extensions', 'Leave the installed extensions as they are (a plugin update brings them to their latest versions by default)')
   .action(
     async (
       pathArg: string | undefined,
-      opts: { pluginSource?: string; version?: string; force?: boolean; clean?: boolean },
+      opts: { pluginSource?: string; version?: string; force?: boolean; clean?: boolean; extensions?: boolean },
     ) => {
       const projectDir = pathArg ?? process.cwd();
       const spinner = ui.startSpinner('Checking installed UnrealMCP plugin...');
@@ -26,6 +27,7 @@ export const updateCommand = new Command('update')
         version: opts.version,
         force: opts.force,
         noClean: opts.clean === false,
+        noExtensions: opts.extensions === false,
         onProgress: (event) => {
           spinner.text = event.message;
         },
@@ -43,6 +45,9 @@ export const updateCommand = new Command('update')
         );
       } else {
         spinner.success(`Plugin already up to date (${result.toVersion ?? 'unknown'}).`);
+      }
+      if (result.extensionsUpdated.length > 0) {
+        ui.label('Extensions updated', result.extensionsUpdated.join(', '));
       }
       ui.printWarnings(result.warnings);
     },

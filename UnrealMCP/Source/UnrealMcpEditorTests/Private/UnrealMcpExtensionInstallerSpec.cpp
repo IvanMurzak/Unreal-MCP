@@ -118,6 +118,33 @@ void FUnrealMcpExtensionInstallerSpec::Define()
 		});
 	});
 
+	Describe("SelectBulkIds", [this]()
+	{
+		It("picks exactly the rows whose own Install / Update button is shown", [this]()
+		{
+			FUnrealMcpExtensionRow Available;
+			Available.ExtensionId = TEXT("com.x.available");
+			Available.bInCatalog = true;
+
+			FUnrealMcpExtensionRow Current = Available;
+			Current.ExtensionId = TEXT("com.x.current");
+			Current.bInstalled = true;
+
+			FUnrealMcpExtensionRow Outdated = Current;
+			Outdated.ExtensionId = TEXT("com.x.outdated");
+			Outdated.bUpdateAvailable = true;
+
+			FUnrealMcpExtensionRow Local;
+			Local.ExtensionId = TEXT("com.x.local");
+			Local.bInstalled = true;
+			Local.bUpdateAvailable = true;
+
+			const TArray<FUnrealMcpExtensionRow> Rows = { Available, Current, Outdated, Local };
+			TestEqual(TEXT("install"), FUnrealMcpExtensionInstaller::SelectBulkIds(Rows, false), TArray<FString>{ TEXT("com.x.available") });
+			TestEqual(TEXT("update"), FUnrealMcpExtensionInstaller::SelectBulkIds(Rows, true), TArray<FString>{ TEXT("com.x.outdated") });
+		});
+	});
+
 	Describe("BuildRows merge (catalog ∪ loaded ∪ disk)", [this]()
 	{
 		It("renders an available catalog-only extension", [this]()
