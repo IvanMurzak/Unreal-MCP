@@ -157,7 +157,7 @@ void FUnrealAIControlRigSpec::Define()
 			bool bOk = false;
 			const FString Schema = UnrealMcpRqlTools::Schema(TEXT("ControlRigOperations"), bOk);
 			TestTrue(TEXT("schema ok"), bOk);
-			for (const TCHAR* Method : { TEXT("CreateRig"), TEXT("AddBone"), TEXT("AddControl"), TEXT("AddTwoBoneIK"), TEXT("AddVariable"), TEXT("AddUnit"),
+			for (const TCHAR* Method : { TEXT("CreateRig"), TEXT("AddBone"), TEXT("AddControl"), TEXT("AddTwoBoneIK"), TEXT("AddVariable"), TEXT("AddUnit"), TEXT("AddSetVariable"), TEXT("RigValues"),
 				TEXT("SetPin"), TEXT("Connect"), TEXT("RemoveNode"), TEXT("AddLookAt"), TEXT("AddToAnimBlueprint"), TEXT("SetRigInput"), TEXT("TrackNearestActor") })
 				TestTrue(*FString::Printf(TEXT("lists %s"), Method), Schema.Contains(FString(Method) + TEXT("(")));
 		});
@@ -370,6 +370,62 @@ void FUnrealAIControlRigSpec::Define()
 			TestTrue(TEXT("compile ran"), Run(SpecCall(Path, TEXT("Compile"), {}), &Compiled));
 			TestTrue(*FString::Printf(TEXT("compiles (%s)"), *SpecJson(Compiled).Left(600)), SpecJson(Compiled).Contains(TEXT("Succeeded\":true")));
 			TestTrue(TEXT("test rig deleted"), Run(SpecCall(TEXT("editor"), TEXT("DeleteAsset"), { SpecLit(Path), TEXT(R"({"lit":true})") })));
+		});
+	});
+
+	Describe("reading a running rig", [this]()
+	{
+		It("stores any pin in a variable from the execution chain; refuses an unknown variable and a curve the rig lacks", [this]()
+		{
+			const FString Path = TEXT("/Game/RqlSpec/CR_RqlSpecSetVar_") + FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(12);
+			auto Run = [](const FString& Plan, TSharedPtr<FJsonObject>* Out = nullptr) { return UnrealMcpRqlTools::RunPlan(Plan, true, Out); };
+
+			// controlRig | call CreateRig("@RIG@")      AddVariable("@RIG@", "HitZ", "float", "", false)
+			TestTrue(TEXT("rig"), Run(SpecCall(TEXT("controlRig"), TEXT("CreateRig"), { SpecLit(Path) })));
+			UControlRigBlueprint* Rig = SpecAsset<UControlRigBlueprint>(Path);
+			if (!TestNotNull(TEXT("the rig asset"), Rig))
+				return;
+			TestTrue(TEXT("variable"), Run(SpecCall(TEXT("controlRig"), TEXT("AddVariable"), { SpecLit(Path), SpecLit(TEXT("HitZ")), SpecLit(TEXT("float")), SpecLit(TEXT("")), TEXT(R"({"lit":false})") })));
+			// controlRig | call AddUnit("@RIG@", "SphereTraceByTraceChannel", "Start=(0, 0, 30), End=(0, 0, -50), Radius=5", "", "Trace")
+			TestTrue(TEXT("trace"), Run(SpecCall(TEXT("controlRig"), TEXT("AddUnit"), { SpecLit(Path), SpecLit(TEXT("SphereTraceByTraceChannel")), SpecLit(TEXT("Start=(0, 0, 30), End=(0, 0, -50), Radius=5")), SpecLit(TEXT("")), SpecLit(TEXT("Trace")) })));
+
+			// controlRig | call AddSetVariable("@RIG@", "HitZ", "@Trace.HitLocation.Z", "", "StoreHit")
+			TestTrue(TEXT("setter"), Run(SpecCall(TEXT("controlRig"), TEXT("AddSetVariable"), { SpecLit(Path), SpecLit(TEXT("HitZ")), SpecLit(TEXT("@Trace.HitLocation.Z")), SpecLit(TEXT("")), SpecLit(TEXT("StoreHit")) })));
+			const URigVMVariableNode* Setter = Cast<URigVMVariableNode>(SpecNode(Rig, TEXT("StoreHit")));
+			if (TestNotNull(TEXT("the setter node"), Setter))
+			{
+				TestFalse(TEXT("it sets, not gets"), Setter->IsGetter());
+				const URigVMPin* Value = Setter->FindPin(TEXT("Value"));
+				TestTrue(TEXT("its value comes from the trace"), Value && Value->GetLinkedSourcePins().Num() == 1);
+				URigVMNode* Solve = UnrealAIControlRigGraph::FindForwardsSolve(Rig->GetModel());
+				const URigVMPin* End = Solve ? UnrealAIControlRigGraph::EndOfChain(Solve) : nullptr;
+				TestTrue(TEXT("it ends the execution chain"), End && End->GetNode() == Setter);
+			}
+
+			// controlRig | call AddSetVariable("@RIG@", "Nope", "1")
+			TSharedPtr<FJsonObject> NoVariable;
+			TestFalse(TEXT("an unknown variable"), Run(SpecCall(TEXT("controlRig"), TEXT("AddSetVariable"), { SpecLit(Path), SpecLit(TEXT("Nope")), SpecLit(TEXT("1")) }), &NoVariable));
+			TestTrue(*FString::Printf(TEXT("names the variables (%s)"), *SpecJson(NoVariable).Left(400)), SpecJson(NoVariable).Contains(TEXT("variables: HitZ")));
+
+			// controlRig | call AddSetVariable("@RIG@", "HitZ", "@Nope.Pin", "", "StoreBad")      leaves no setter behind
+			TestFalse(TEXT("an unknown source"), Run(SpecCall(TEXT("controlRig"), TEXT("AddSetVariable"), { SpecLit(Path), SpecLit(TEXT("HitZ")), SpecLit(TEXT("@Nope.Pin")), SpecLit(TEXT("")), SpecLit(TEXT("StoreBad")) })));
+			TestNull(TEXT("no setter left"), SpecNode(Rig, TEXT("StoreBad")));
+
+			// controlRig | call AddUnit("@RIG@", "SetCurveValue", "Curve=DebugHit, Value=1", "", "SetDebug")      the engine would skip it in silence
+			TSharedPtr<FJsonObject> NoCurve;
+			TestFalse(TEXT("a curve the rig lacks"), Run(SpecCall(TEXT("controlRig"), TEXT("AddUnit"), { SpecLit(Path), SpecLit(TEXT("SetCurveValue")), SpecLit(TEXT("Curve=DebugHit, Value=1")), SpecLit(TEXT("")), SpecLit(TEXT("SetDebug")) }), &NoCurve));
+			TestTrue(*FString::Printf(TEXT("says what works (%s)"), *SpecJson(NoCurve).Left(500)), SpecJson(NoCurve).Contains(TEXT("no curve 'DebugHit'")) && SpecJson(NoCurve).Contains(TEXT("AddSetVariable")));
+			TestNull(TEXT("no curve node left"), SpecNode(Rig, TEXT("SetDebug")));
+
+			TestTrue(TEXT("rig deleted"), Run(SpecCall(TEXT("editor"), TEXT("DeleteAsset"), { SpecLit(Path), TEXT(R"({"lit":true})") })));
+		});
+
+		It("reads rigs only while playing, and says how to start", [this]()
+		{
+			// controlRig | call RigValues()
+			TSharedPtr<FJsonObject> Result;
+			TestFalse(TEXT("refused without a play session"), UnrealMcpRqlTools::RunPlan(SpecCall(TEXT("controlRig"), TEXT("RigValues"), {}), true, &Result));
+			TestTrue(*FString::Printf(TEXT("names StartPlay (%s)"), *SpecJson(Result).Left(400)), SpecJson(Result).Contains(TEXT("no Play In Editor session")) && SpecJson(Result).Contains(TEXT("StartPlay")));
 		});
 	});
 

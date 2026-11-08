@@ -1,0 +1,10 @@
+{
+  "description": "an asset path with nothing there warns instead of a bare empty table",
+  "tool": "rql-query",
+  "input": {
+    "query": "unreal.asset(\"/Game/E2E/NoSuchRigAsset\") | select Nodes"
+  },
+  "assert": {
+    "pattern": "asset-not-found.*NoSuchRigAsset"
+  }
+}

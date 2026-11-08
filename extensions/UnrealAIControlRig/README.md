@@ -33,7 +33,7 @@ The extension adds its feature to the editor's RQL data layer (`rql-query` / `rq
 | Kind | Names |
 | --- | --- |
 | Sources | `controlRigs` (rig assets), `controlRigUnits` (the rig units a rig can run: name, title, category, pins), `controlRig` (operations) |
-| Operations (`call`) | Rigs: `CreateRig` (optionally from a character's mesh), `AddVariable`, `AddUnit`, `SetPin`, `Connect`, `RemoveNode`, `AddLookAt`, `AddTwoBoneIK`, `AddBone`, `AddControl`. Anim Blueprints: `AddToAnimBlueprint`, `SetRigInput`, `TrackNearestActor` |
+| Operations (`call`) | Rigs: `CreateRig` (optionally from a character's mesh), `AddVariable`, `AddUnit`, `AddSetVariable`, `SetPin`, `Connect`, `RemoveNode`, `AddLookAt`, `AddTwoBoneIK`, `AddBone`, `AddControl`. While playing: `RigValues`. Anim Blueprints: `AddToAnimBlueprint`, `SetRigInput`, `TrackNearestActor` |
 | Members | `ControlRigBlueprint.Nodes` (graph: units, execution order, pin values and links), `ControlRigBlueprint.Variables`, `ControlRigBlueprint.Elements`, `.Hierarchy`, `.Controls`, `.Bones`, `AnimBlueprint.ControlRigs` (its Control Rig nodes, pose neighbours, bound inputs), `ControlRigComponent.BoundRig` (the running rig) |
 
 A head that turns smoothly toward the nearest orb, on the UE5 mannequin, in seven calls:
@@ -72,6 +72,21 @@ unreal.asset("/Game/Rigs/CR_LookAt") | select Variables Nodes
 Executing units run at the end of Forwards Solve (or after `After`); pure units run when their outputs are linked. Values
 are `"@Variable"` / `"@Node.Pin"` links, element names for item pins (`"head"`, `"Control:Target"`), `"(0, 1, 0)"`, enum
 names, or the pin's text form. A bare rig is built with `CreateRig(path)`, `AddBone`, `AddControl` and `AddTwoBoneIK`.
+
+World traces work from a rig in an Anim Blueprint with no setting to enable, in rig space (a hit on the ground under the
+character is a small negative Z, a miss is `(0, 0, 0)` with `bHit` false). To see what a rig computes while playing, store
+a pin in a variable and read the running rig:
+
+```
+controlRig | call AddVariable("/Game/Rigs/CR_Feet", "HitL", "bool", "", false)
+controlRig | call AddSetVariable("/Game/Rigs/CR_Feet", "HitL", "@TraceL.bHit")
+editor | call StartPlay()
+editor | call AdvancePlay(1.0, 0)
+controlRig | call RigValues("CR_Feet")
+```
+
+`SetCurveValue` on a curve the rig lacks does nothing in the engine, so `AddUnit` and `SetPin` refuse it. The `unreal-rql`
+skill's guide has a foot IK rig built from `AddUnit` calls.
 
 ## Releases and development
 

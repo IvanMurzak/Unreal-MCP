@@ -1,0 +1,10 @@
+{
+  "description": "the hit height stored while the rig runs",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "controlRig | call AddSetVariable(\"/Game/E2E/CR_RigTrace\", \"HitZ\", \"@Trace.HitLocation.Z\")"
+  },
+  "assert": {
+    "pattern": "AddSetVariable"
+  }
+}

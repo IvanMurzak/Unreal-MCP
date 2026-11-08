@@ -80,6 +80,12 @@ namespace UnrealAIControlRigGraph
 		TArray<URigVMNode*>* OutAdded = nullptr);
 
 	/**
+	 * Add a setter of the rig variable @p Variable taking @p Value (SetPin form), in the execution chain after @p After ("" = the
+	 * end of Forwards Solve). Returns the node; null after Fail with no setter added.
+	 */
+	URigVMNode* AddSetVariable(UControlRigBlueprint* Rig, const FString& Variable, const FString& Value, const FString& After, const FString& Name);
+
+	/**
 	 * The CPP type path AddMemberVariable takes for an agent's type name ("Vector", "float", "bool", "Transform", ...), with
 	 * the struct or enum it names in @p OutTypeObject (null for a scalar); empty after Fail.
 	 */

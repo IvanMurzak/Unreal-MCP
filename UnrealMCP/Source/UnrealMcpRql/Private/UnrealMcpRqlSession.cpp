@@ -664,6 +664,8 @@ FString FUnrealMcpRqlSession::Execute(const FString& PlanJson, bool bAllowMutati
 	CloseTransaction();
 	LiteralObjects.Reset(); // written by now (the undo buffer or their owner holds them), or garbage
 	UnrealMcpRqlSessionLocal::AddExtensionHint(Result, PlanJson, bAllowMutation);
+	for (rql::Diagnostic& Warning : Types().TakeWarnings())
+		Result.diagnostics.push_back(std::move(Warning));
 	bOutOk = Result.ok;
 	return UnrealMcpRqlFromStd(Result.to_json(/*include_stats*/ false).dump());
 }

@@ -61,7 +61,7 @@ public:
 			TEXT("the rig units a Control Rig can run (Name, Struct, DisplayName, Category, Keywords, Description, Execute, Pins): Aim, Basic IK, Full Body IK, traces, springs, math; add one with AddUnit"),
 			UUnrealAIControlRigUnit::StaticClass(), []() { return UnrealAIControlRigUnits::List(); });
 		Context.AddApiSource(TEXT("controlRig"),
-			TEXT("Control Rig authoring and Anim Blueprint wiring (look-at, aim, IK, traces, springs without C++): call CreateRig / AddVariable / AddUnit / SetPin / Connect / RemoveNode / AddLookAt / AddTwoBoneIK / AddBone / AddControl / AddToAnimBlueprint / SetRigInput / TrackNearestActor"),
+			TEXT("Control Rig authoring and Anim Blueprint wiring (look-at, aim, IK, traces, springs without C++): call CreateRig / AddVariable / AddUnit / AddSetVariable / SetPin / Connect / RemoveNode / RigValues / AddLookAt / AddTwoBoneIK / AddBone / AddControl / AddToAnimBlueprint / SetRigInput / TrackNearestActor"),
 			UUnrealAIControlRigRqlApi::StaticClass(), TEXT("ControlRigOperations"));
 		Context.AddJsonMember(UControlRigBlueprint::StaticClass(), TEXT("Nodes"),
 			TEXT("the rig graph's nodes: Name, Title, Unit, Next (the nodes its execution runs next), Inputs (pin: value, or @Node.Pin / @Variable for a link)"),
@@ -200,7 +200,7 @@ controlRig | call RemoveNode("/Game/Rigs/CR_LookAt", "Smooth")
 unreal.asset("/Game/Rigs/CR_LookAt") | call Compile()
 ```
 
-- Unit names: `Name` (`AimItem`, `TwoBoneIKSimplePerItem`, `SphereTraceWorld`, `RigUnit_ToRigSpace_Location`), or a
+- Unit names: `Name` (`AimItem`, `TwoBoneIKSimplePerItem`, `SphereTraceByTraceChannel`, `RigUnit_ToRigSpace_Location`), or a
   `DisplayName` one unit has. Pins: `Pins` of the unit row (a struct pin's members are `Primary.Target`) or the rig's
   `Nodes`; names and display names, case and spaces ignored.
 - Values (settings `"Pin=Value, Sub.Pin=Value"`, SetPin): `"@Variable"` reads a rig variable, `"@Node.Pin"` links an
@@ -209,14 +209,60 @@ unreal.asset("/Game/Rigs/CR_LookAt") | call Compile()
   `Nodes` member prints it.
 - Spaces: units work in rig (component) space. A world location from the game goes through
   `RigUnit_ToRigSpace_Location` (From World); AddLookAt does that for `"@Var"` targets.
-- Foot IK: copy and extend the template's rig (`editor | call CopyAsset(".../CR_Mannequin_FootIK", "/Game/Rigs/CR_FootIK")`)
-  or build one: per foot `SphereTraceWorld` down from the foot, `TwoBoneIKSimplePerItem` (thigh, calf, foot) to the hit,
-  the pelvis lowered by the larger offset (`OffsetTransformForItem`). Full Body IK (`PBIK`) is in the engine plugin
-  FullBodyIK, which projects enable themselves.
+- Full Body IK (`PBIK`) is in the engine plugin FullBodyIK, which projects enable themselves.
 - A bare rig (no mesh): `CreateRig(path)`, `AddBone(rig, name, parent, [x, y, z])` (relative to the parent, cm),
   `AddControl(rig, name, [x, y, z], parent = "")`, `AddTwoBoneIK(rig, boneA, boneB, effector, targetControl)`.
 - Each mutation is one undo step; assets stay unsaved until `editor | call SaveAsset(path)`. Placed rig components:
   `actors | get Components | where $ is ControlRigComponent | select Owner.Label BoundRig`.)MD"));
+		Context.AddGuide(TEXT("Control Rig traces and foot IK"), TEXT(R"MD(World traces (`SphereTraceByTraceChannel`, `LineTraceByTraceChannel`, `...ByObjectTypes`) hit the game world from a rig in an Anim
+Blueprint, with its default multi-threaded update too: no project setting, no node option, no game-thread traces in C++ or
+the Anim Blueprint. The template's CR_Mannequin_FootIK works as it is. Copy it to extend it
+(`editor | call CopyAsset(".../CR_Mannequin_FootIK", "/Game/Rigs/CR_FootIK")`).
+
+Check what a rig computes while playing, not from bone heights or curves. The preview does not run the game's rig:
+
+```
+controlRig | call AddVariable("/Game/Rigs/CR_FootIK", "HitL", "bool", "", false)              private: not an Anim Blueprint input
+controlRig | call AddSetVariable("/Game/Rigs/CR_FootIK", "HitL", "@TraceL.bHit")              stores any pin, each time the rig runs
+editor | call StartPlay()
+editor | call AdvancePlay(1.0, 0)                                                             the rig runs on the frames this simulates
+controlRig | call RigValues("CR_FootIK")      {RigOrigin, Executions, Variables: every variable's live value, private ones too}
+```
+
+- Traces take and return rig space, relative to `RigOrigin` (the mesh component): `Start=(0, 930, 300)` is not a world
+  location. The ground under a character is a small negative `HitLocation.Z` (ground - RigOrigin.Z, the mannequin's root
+  floats about 3 cm above the floor), not 0 and not the world height. A miss returns (0, 0, 0) with `bHit` false.
+- `HitLocation` is the contact point, not the sphere's centre. A sphere near a step's edge touches the higher step, and the
+  template's trace is also 5 cm ahead of the foot: a foot straddling an edge rests on the upper step on purpose.
+- A foot on the ground: judge it by `ball_l` / `ball_r` over the ground under them. `foot_l` is the ankle, about 8 cm above
+  the sole, and may be over a lower step than the ball.
+- `SetCurveValue` on a curve the rig lacks does nothing and reports nothing (AddUnit refuses it): a curve is no debug output.
+- Start the trace about 30 above the rig origin and end it about 50 below, not far above the foot: a tall start finds the top
+  of a wall the foot is next to, and lifts the knee to it.
+
+Foot IK from nothing, on a mesh with `ik_foot_l` / `ik_foot_r` bones. Each line naming the left foot (`_l`, FootL, TraceL, SmoothL,
+ShiftL, GoalL) also has its right twin (`_r`, FootR, ...), added right after it, before the next line. `PBIK` is in the engine plugin
+FullBodyIK:
+
+```
+controlRig | call CreateRig("/Game/Rigs/CR_Feet", "/Game/Characters/Mannequins/Meshes/SKM_Manny_Simple")
+controlRig | call AddUnit("/Game/Rigs/CR_Feet", "GetTransform", "Item=ik_foot_l", "", "FootL")
+controlRig | call AddUnit("/Game/Rigs/CR_Feet", "SphereTraceByTraceChannel", "Start.X=@FootL.Transform.Translation.X, Start.Y=@FootL.Transform.Translation.Y, Start.Z=30, End.X=@FootL.Transform.Translation.X, End.Y=@FootL.Transform.Translation.Y, End.Z=-50, Radius=5, TraceChannel=TraceTypeQuery1", "", "TraceL")
+controlRig | call AddUnit("/Game/Rigs/CR_Feet", "AlphaInterp", "Value=@TraceL.HitLocation.Z, bInterpResult=true, InterpSpeedIncreasing=15, InterpSpeedDecreasing=15", "", "SmoothL")
+controlRig | call AddUnit("/Game/Rigs/CR_Feet", "MathFloatMin", "A=@SmoothL.Result, B=@SmoothR.Result", "", "Lowest")
+controlRig | call AddUnit("/Game/Rigs/CR_Feet", "ModifyTransforms", "ItemToModify=((Item=(Type=Bone,Name=pelvis))), ItemToModify.0.Transform.Translation.Z=@Lowest.Result, Mode=AdditiveGlobal", "", "ShiftPelvis")
+controlRig | call AddUnit("/Game/Rigs/CR_Feet", "ModifyTransforms", "ItemToModify=((Item=(Type=Bone,Name=ik_foot_l))), ItemToModify.0.Transform.Translation.Z=@SmoothL.Result, Mode=AdditiveGlobal", "", "ShiftL")
+controlRig | call AddUnit("/Game/Rigs/CR_Feet", "GetTransform", "Item=ik_foot_l", "", "GoalL")
+controlRig | call AddUnit("/Game/Rigs/CR_Feet", "PBIK", "Root=pelvis, Effectors=((Bone=foot_l),(Bone=foot_r)), Effectors.0.Transform=@GoalL.Transform, Effectors.1.Transform=@GoalR.Transform", "", "Solve")      one node, after both twins
+controlRig | call AddToAnimBlueprint("<abp>", "/Game/Rigs/CR_Feet")
+```
+
+- `ModifyTransforms` with `AdditiveGlobal`, not `OffsetTransformForItem`: an offset works along the bone's own axes, and the pelvis
+  and foot bones are rotated, so it moves them sideways. The solver reads a second `GetTransform` (GoalL), which runs after the shift.
+- Not `TwoBoneIKSimplePerItem` with its defaults: the feet land, but the legs turn about 170 degrees around themselves, which
+  foot heights do not show. Check a solved leg against the animation: `get_socket_transform` of `thigh_l`, `calf_l` with the rig's
+  solver on and off; a screenshot shows it too.
+- The foot stays level: on a slope its toe dips about 3 cm into the surface. Tilting it to `HitNormal` is the next step.)MD"));
 	}
 };
 

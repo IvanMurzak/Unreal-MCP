@@ -623,6 +623,7 @@ void FUnrealMcpRqlAdaptersSpec::Define()
 			TestTrue(*FString::Printf(TEXT("not-found (%s)"), *UnrealMcpRqlSpecHelpers::Codes(Unknown)), UnrealMcpRqlSpecHelpers::Codes(Unknown).Contains(TEXT("not-found")));
 			const TSharedPtr<FJsonObject> Missing = UnrealMcpRqlSpecHelpers::Exec(*this, /* unreal.asset("/Game/RqlSpecAdapters/Nothing") | count */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"/Game/RqlSpecAdapters/Nothing"}]},"stages":[{"op":"count"}]})RQL"));
 			TestEqual(TEXT("a missing asset is null (no rows)"), UnrealMcpRqlSpecHelpers::Number(Missing), 0.0);
+			TestTrue(*FString::Printf(TEXT("it warns (%s)"), *UnrealMcpRqlSpecHelpers::Codes(Missing)), UnrealMcpRqlSpecHelpers::Codes(Missing).Contains(TEXT("asset-not-found")));
 			const TSharedPtr<FJsonObject> Classes = UnrealMcpRqlSpecHelpers::Exec(*this, /* unreal.classes("Light", "Point") | select Name Parent Abstract Blueprint */ TEXT(R"RQL({"rql":"0.1","source":{"call":"classes","on":{"path":["unreal"]},"args":[{"lit":"Light"},{"lit":"Point"}]},"stages":[{"op":"select","fields":[{"name":"Name","expr":{"path":["Name"]}},{"name":"Parent","expr":{"path":["Parent"]}},{"name":"Abstract","expr":{"path":["Abstract"]}},{"name":"Blueprint","expr":{"path":["Blueprint"]}}]}]})RQL"));
 			TestTrue(*FString::Printf(TEXT("unreal.classes (%s)"), *UnrealMcpRqlSpecHelpers::Codes(Classes)), UnrealMcpRqlSpecHelpers::RowCount(Classes) >= 1);
 			TestEqual(TEXT("PointLight listed"), UnrealMcpRqlSpecHelpers::CellText(Classes, 0, 0), FString(TEXT("PointLight")));

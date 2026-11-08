@@ -1,0 +1,10 @@
+{
+  "description": "Play In Editor stopped",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "editor | call StopPlay()"
+  },
+  "assert": {
+    "pattern": "StopPlay"
+  }
+}

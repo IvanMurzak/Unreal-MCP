@@ -1,0 +1,10 @@
+{
+  "description": "the test Anim Blueprint deleted",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "editor | call DeleteAsset(\"/Game/E2E/ABP_RigTrace\", true)"
+  },
+  "assert": {
+    "pattern": "DeleteAsset\\("
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "description": "the test rig deleted",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "editor | call DeleteAsset(\"/Game/E2E/CR_RigTrace\", true)"
+  },
+  "assert": {
+    "pattern": "DeleteAsset\\("
+  }
+}

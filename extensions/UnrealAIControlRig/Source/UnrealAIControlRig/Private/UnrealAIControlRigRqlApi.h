@@ -11,6 +11,41 @@
 class UAnimBlueprint;
 class UControlRigBlueprint;
 
+/** One Control Rig running in the Play In Editor world, as RigValues reads it. */
+USTRUCT(BlueprintType)
+struct FUnrealAIRunningRig
+{
+	GENERATED_BODY()
+
+	/** the rig's asset name */
+	UPROPERTY(VisibleAnywhere, Category = "Rig")
+	FString Rig;
+
+	/** the actor it runs on */
+	UPROPERTY(VisibleAnywhere, Category = "Rig")
+	FString Owner;
+
+	/** the component it runs on: its origin is the rig space origin */
+	UPROPERTY(VisibleAnywhere, Category = "Rig")
+	FString Component;
+
+	/** the world location of the rig space origin */
+	UPROPERTY(VisibleAnywhere, Category = "Rig")
+	FVector RigOrigin = FVector::ZeroVector;
+
+	/** how many times the rig has run: 0 = its values mean nothing yet */
+	UPROPERTY(VisibleAnywhere, Category = "Rig")
+	int32 Executions = 0;
+
+	/** every rig variable (public and private) as it stands in this running rig */
+	UPROPERTY(VisibleAnywhere, Category = "Rig")
+	TMap<FString, FString> Variables;
+
+	/** how to read these values */
+	UPROPERTY(VisibleAnywhere, Category = "Rig")
+	TArray<FString> Notes;
+};
+
 /**
  * The `controlRig` RQL source (type "ControlRigOperations"): author Control Rig blueprints (procedural animation: look-at,
  * aim, IK, traces, springs) and wire them into Anim Blueprints, e.g. `controlRig | call CreateRig("/Game/Rigs/CR_Head",
@@ -45,9 +80,17 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Control Rig", meta = (BlueprintInternalUseOnly = "true"))
 	FString AddVariable(UControlRigBlueprint* Rig, const FString& Name, const FString& Type, const FString& Default = TEXT(""), bool bPublic = true);
 
-	/** add a rig unit node (a name from controlRigUnits: "AimItem", "TwoBoneIKSimplePerItem", "SphereTraceWorld", "SpringInterpVectorV2", "RigUnit_ToRigSpace_Location", ...) with Settings "Pin=Value, Sub.Pin=Value" (values: "@Variable" or "@Node.Pin" links, an element name for an item pin, "(0, 1, 0)", text); a unit that executes runs at the end of Forwards Solve, or after the node After; Name optional; returns the node's name */
+	/** add a rig unit node (a name from controlRigUnits: "AimItem", "TwoBoneIKSimplePerItem", "SphereTraceByTraceChannel", "SpringInterpVectorV2", "RigUnit_ToRigSpace_Location", ...) with Settings "Pin=Value, Sub.Pin=Value" (values: "@Variable" or "@Node.Pin" links, an element name for an item pin, "(0, 1, 0)", text); a unit that executes runs at the end of Forwards Solve, or after the node After; Name optional; returns the node's name */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Control Rig", meta = (BlueprintInternalUseOnly = "true"))
 	FString AddUnit(UControlRigBlueprint* Rig, const FString& Unit, const FString& Settings = TEXT(""), const FString& After = TEXT(""), const FString& Name = TEXT(""));
+
+	/** store a value in the rig variable Variable each time the rig runs: Value "@Node.Pin" / "@OtherVariable" / text, in the execution chain at the end of Forwards Solve, or after the node After; Name optional. RigValues reads the variable while playing, so any pin can be read: a trace's "@Trace.bHit" and "@Trace.HitLocation.Z"; returns the node's name */
+	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Control Rig", meta = (BlueprintInternalUseOnly = "true"))
+	FString AddSetVariable(UControlRigBlueprint* Rig, const FString& Variable, const FString& Value, const FString& After = TEXT(""), const FString& Name = TEXT(""));
+
+	/** read the rigs running NOW in Play In Editor (Rig "" = all, else a rig asset name): every variable's live value, the rig space origin, how many times it ran. Rigs in an Anim Blueprint run only while playing: editor | call StartPlay(), editor | call AdvancePlay(1.0, 0), then this. For what a trace returned, store it first with AddSetVariable */
+	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Control Rig", meta = (BlueprintInternalUseOnly = "true"))
+	TArray<FUnrealAIRunningRig> RigValues(const FString& Rig = TEXT(""));
 
 	/** set the input pin Pin ("Aim.Weight", "Aim.Primary.Target") of a rig node from Value: "@Variable" / "@Node.Pin" (link), an element name for an item pin ("head", "Control:Target"), "(0, 1, 0)", or the pin's text form; returns the new value */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Control Rig", meta = (BlueprintInternalUseOnly = "true"))

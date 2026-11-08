@@ -31,6 +31,9 @@ rql::Value UnrealMcpRqlClassDefaultsList(FUnrealMcpRqlTypes& Types, UClass* Base
  */
 FString UnrealMcpRqlSimilarAssets(UClass* Class, const FString& Text);
 
+/** The same among the assets of every class: for a path with no class to go by. */
+FString UnrealMcpRqlSimilarAssetsOfAnyClass(const FString& Text);
+
 /** Text and list literals of the math structs: "(1, 2, 3)", "X=1 Y=2 Z=3", [1, 2, 3], "#ff8800" (colors). False (and no
  * error) for other structs and value kinds; false + @p OutError for a malformed literal. FUnrealMcpRqlTypes::CoerceStruct uses it. */
 bool UnrealMcpRqlParseMathStruct(UScriptStruct* Struct, const rql::Value& Value, void* Out, FString& OutError);

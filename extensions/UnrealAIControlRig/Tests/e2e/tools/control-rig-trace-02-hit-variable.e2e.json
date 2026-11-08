@@ -1,0 +1,10 @@
+{
+  "description": "a private variable for the trace result",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "controlRig | call AddVariable(\"/Game/E2E/CR_RigTrace\", \"Hit\", \"bool\", \"\", false)"
+  },
+  "assert": {
+    "pattern": "\\|Hit\\b"
+  }
+}

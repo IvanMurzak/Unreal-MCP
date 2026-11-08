@@ -1,0 +1,10 @@
+{
+  "description": "a skeletal mesh actor 100 above the floor",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "editor | call SpawnActor(\"SkeletalMeshActor\", \"E2E_RigTraceMesh\", \"(5000, 0, 100)\")"
+  },
+  "assert": {
+    "pattern": "E2E_RigTraceMesh"
+  }
+}

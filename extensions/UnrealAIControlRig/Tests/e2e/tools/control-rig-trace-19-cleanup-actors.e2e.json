@@ -1,0 +1,10 @@
+{
+  "description": "the test actors removed",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "actors | where Label == \"E2E_RigTraceFloor\" or Label == \"E2E_RigTraceMesh\" | call Destroy()"
+  },
+  "assert": {
+    "pattern": "Destroy\\(\\)"
+  }
+}
