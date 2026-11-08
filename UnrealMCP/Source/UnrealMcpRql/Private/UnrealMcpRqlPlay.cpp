@@ -391,12 +391,14 @@ namespace UnrealMcpRqlPlayLocal
 			const FKey& Key = *KeyProperty->ContainerPtrToValuePtr<FKey>(Row);
 			const UObject* Action = ActionProperty->GetObjectPropertyValue_InContainer(Row);
 			if (Action && Held.ContainsByPredicate([&Key](const FHeldKey& HeldKey) { return HeldKey.Key == Key; }))
-				ModifiersByKeyAction.FindOrAdd({ Key, Action }).Add(ModifierNames(ModifiersProperty, Row));
+				ModifiersByKeyAction.FindOrAdd({ Key, Action }).AddUnique(ModifierNames(ModifiersProperty, Row));
 		}
+		// Mappings of one key and action that differ only in triggers (Tap and Hold) give the same value: only differing
+		// modifiers make the keys of those mappings indistinguishable.
 		for (const TPair<TPair<FKey, const UObject*>, TArray<FString>>& Entry : ModifiersByKeyAction)
 		{
 			if (Entry.Value.Num() > 1)
-				OutNotes.Add(FString::Printf(TEXT("%s reaches %s through %d key mappings (modifiers: %s), so those mappings' keys give it one combined "
+				OutNotes.Add(FString::Printf(TEXT("%s reaches %s through %d differently modified key mappings (modifiers: %s), so those mappings' keys give it one combined "
 					"value, as real presses would; e.g. Enhanced Input user settings put every keyboard key of a player-mappable action on each of its "
 					"mappings that share a name: give each mapping its own Player Mappable Key Settings name, or make them not player-mappable."),
 					*Entry.Key.Key.ToString(), *Entry.Key.Value->GetName(), Entry.Value.Num(), *FString::Join(Entry.Value, TEXT(" | "))));

@@ -44,6 +44,7 @@
 #include "Kismet2/CompilerResultsLog.h"
 #include "Kismet2/KismetEditorUtilities.h"
 #include "Misc/PackageName.h"
+#include "Misc/ScopeExit.h"
 #include "EnhancedInputDeveloperSettings.h"
 #include "GameFramework/PlayerController.h"
 #include "K2Node_DynamicCast.h"
@@ -658,6 +659,8 @@ void FUnrealAIEnhancedInputSpec::Define()
 				Value = Fired.Get<FVector2D>();
 				++Triggered;
 			});
+			// The binding captures this scope's locals: never leave it bound past the test.
+			ON_SCOPE_EXIT { Bindings->ClearActionBindings(); };
 
 			// Each call: the action's value while the keys were held (the last Triggered), and no note.
 			auto Hold = [this, &Value, &Triggered](const TCHAR* Keys, const FVector2D& Expected, const TCHAR* When)
@@ -710,8 +713,7 @@ void FUnrealAIEnhancedInputSpec::Define()
 			TestTrue(*FString::Printf(TEXT("held W (%s)"), *Error), UnrealMcpRql::AdvancePlayWithKeys(0.0, 2, TEXT("W"), Advanced, Error, &Notes));
 			const FString Text = FString::Join(Notes, TEXT(" "));
 			TestTrue(*FString::Printf(TEXT("the note names the key, action and both mappings (%s)"), *Text),
-				Text.Contains(FString::Printf(TEXT("W reaches %s through 2 key mappings (modifiers: SwizzleAxis | SwizzleAxis, Negate)"), *MoveName)) && Text.Contains(TEXT("Player Mappable Key Settings name")));
-			Bindings->ClearActionBindings();
+				Text.Contains(FString::Printf(TEXT("W reaches %s through 2 differently modified key mappings (modifiers: SwizzleAxis | SwizzleAxis, Negate)"), *MoveName)) && Text.Contains(TEXT("Player Mappable Key Settings name")));
 		});
 	});
 

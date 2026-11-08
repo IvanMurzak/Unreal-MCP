@@ -8,7 +8,6 @@
 #include "IUnrealMcpRqlModule.h"
 #include "UnrealAIEnhancedInputGraph.h"
 #include "UnrealAIEnhancedInputRows.h"
-#include "UnrealMcpRqlPlay.h"
 #include "UnrealAIEnhancedInputRqlApi.h"
 #include "UnrealAIEnhancedInputText.h"
 
@@ -41,22 +40,6 @@ class FUnrealAIEnhancedInputRqlModule : public IUnrealMcpRqlModule
 	}
 
 public:
-	FUnrealAIEnhancedInputRqlModule()
-	{
-		// Every play state (editor | call StartPlay / AdvancePlay, editor.PlayState, InjectInput) lists player 0's mapping contexts.
-		// The core fills them itself after 0.27.1; this fills them on an older core (minCoreVersion) and can go with it.
-		PlayStateHandle = UnrealMcpRql::OnReadPlayState().AddLambda([](APlayerController* Controller, FUnrealMcpPlayState& State)
-		{
-			if (State.MappingContexts.IsEmpty())
-				State.MappingContexts = UUnrealAIEnhancedInputRqlApi::AppliedContexts(Controller);
-		});
-	}
-
-	virtual ~FUnrealAIEnhancedInputRqlModule() override
-	{
-		UnrealMcpRql::OnReadPlayState().Remove(PlayStateHandle);
-	}
-
 	virtual FString GetRqlModuleName() const override { return TEXT("EnhancedInput"); }
 	virtual FString GetExtensionId() const override { return TEXT("com.ivanmurzak.unreal-ai-enhanced-input"); }
 	virtual FString GetExtensionVersion() const override { return UnrealMcpRql::PluginVersion(TEXT("UnrealAIEnhancedInput")); }
@@ -213,9 +196,6 @@ the contexts applied to player 0); InjectInput adds Notes with the action's trig
 Triggered x1, Completed x1") and its value: no event means its triggers did not fire for that Value. An event that fired with no
 effect on the pawn means the pawn does not handle it (no action event in the possessed pawn or controller). Started fires with the first Triggered / Ongoing frame.)MD"));
 	}
-
-private:
-	FDelegateHandle PlayStateHandle;
 };
 
 IMPLEMENT_MODULE(TUnrealMcpRqlEditorModule<FUnrealAIEnhancedInputRqlModule>, UnrealAIEnhancedInput)

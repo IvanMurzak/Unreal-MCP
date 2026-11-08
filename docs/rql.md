@@ -219,9 +219,9 @@ the game inside the call (`UnrealMcpRqlPlay.h`):
   both given: the larger; neither: one frame; at most 3600 frames = 60 s per call, and about 25 s of wall clock), with
   `Keys` (`"W, LeftShift"`, axes `"Gamepad_LeftY=1"`) held as player 0 presses them (pressed on the first frame,
   released on one extra frame, so key-up handlers and `Completed` run). Keys go through the player input and its
-  mapping contexts like real ones, from the player's input device; each call's keys are distinct and released, keys held
-  together compose (`"W, D"` diagonal). A held key that reaches one Enhanced Input action through several key mappings
-  gives it their combined value, in a real game too (Enhanced Input user settings do this to a player-mappable action
+  mapping contexts like real ones, from the player's input device; each call presses its keys afresh and releases them, keys
+  held together compose (`"W, D"` diagonal). A held key that reaches one Enhanced Input action through several differently modified
+  key mappings gives it their combined value, in a real game too (Enhanced Input user settings do this to a player-mappable action
   whose mappings share one name): `Notes` says so. A paused session is stepped as the toolbar's Advance Frame does and stays paused;
   gameplay `Modify()` calls are kept out of the undo buffer.
 - `editor | call StopPlay()` ends the session now.
