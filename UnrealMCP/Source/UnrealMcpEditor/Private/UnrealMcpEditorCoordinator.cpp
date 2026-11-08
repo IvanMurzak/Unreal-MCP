@@ -34,6 +34,7 @@
 #include "DevControl/UnrealMcpDevControlServer.h"
 #include "Session/UnrealMcpEditorSession.h"
 #include "Session/UnrealMcpBackgroundRendering.h"
+#include "Session/UnrealMcpModalWatch.h"
 
 #include "Editor.h"
 #include "Misc/App.h"
@@ -612,6 +613,9 @@ void FUnrealMcpEditorCoordinator::Startup()
 			[Bridge]() { return Bridge->GetInFlightCallCount(); });
 	}
 
+	ModalWatch = MakeUnique<FUnrealMcpModalWatch>();
+	ModalWatch->Start();
+
 	// §1.5: tear down on editor pre-exit so the sidecar never orphans (layer 1).
 	PreExitHandle = FCoreDelegates::OnEnginePreExit.AddLambda([this]() { Shutdown(); });
 }
@@ -859,6 +863,7 @@ void FUnrealMcpEditorCoordinator::Shutdown()
 		BackgroundRendering->Shutdown();
 		BackgroundRendering.Reset();
 	}
+	ModalWatch.Reset();
 
 	// §1.5 graceful teardown ordering. Doing SidecarManager->Stop() (TerminateProc KillTree) BEFORE the
 	// bridge sends its `shutdown` Bye would mean the graceful path only ever worked for a MANUALLY launched

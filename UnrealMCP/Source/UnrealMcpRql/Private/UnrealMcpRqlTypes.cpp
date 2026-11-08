@@ -64,6 +64,18 @@ namespace UnrealMcpRqlTypesLocal
 		return Pointer;
 	}
 
+	/**
+	 * The struct values alive now (MakeStructData), by their memory. A TArray / TMap member of a struct value is a view
+	 * into that value's memory and holds the value alive, found here: otherwise a value that was only a step of a path
+	 * (`Data.Mappings[0]`) was freed under the view. Never destroyed (values may be released during shutdown); game
+	 * thread, like every RQL call.
+	 */
+	TMap<const void*, std::weak_ptr<void>>& LiveStructData()
+	{
+		static TMap<const void*, std::weak_ptr<void>>* Live = new TMap<const void*, std::weak_ptr<void>>();
+		return *Live;
+	}
+
 	/** Struct memory owned by a shared_ptr (struct values are copies, RQL writes them back through the owner). */
 	std::shared_ptr<void> MakeStructData(UScriptStruct* Struct, const void* Source)
 	{
@@ -73,11 +85,21 @@ namespace UnrealMcpRqlTypesLocal
 		Struct->InitializeStruct(Memory);
 		if (Source)
 			Struct->CopyScriptStruct(Memory, Source);
-		return std::shared_ptr<void>(Memory, [Struct](void* Pointer)
+		std::shared_ptr<void> Data(Memory, [Struct](void* Pointer)
 		{
+			LiveStructData().Remove(Pointer);
 			Struct->DestroyStruct(Pointer);
 			FMemory::Free(Pointer);
 		});
+		LiveStructData().Add(Memory, Data);
+		return Data;
+	}
+
+	/** The owner of a struct value's memory (null for anything else, such as an object). */
+	std::shared_ptr<void> StructDataOwner(const void* Memory)
+	{
+		const std::weak_ptr<void>* Found = LiveStructData().Find(Memory);
+		return Found ? Found->lock() : nullptr;
 	}
 
 	/** One initialized property value on the heap (map keys, defaults), destroyed with the scope. */
@@ -209,8 +231,9 @@ namespace UnrealMcpRqlTypesLocal
 	class FArrayAdapter final : public rql::IListAdapter
 	{
 	public:
-		FArrayAdapter(FUnrealMcpRqlTypes* InTypes, const FArrayProperty* InProperty, void* InData, const rql::TypeDescriptor* InType)
-			: Types(InTypes), Property(InProperty), Data(InData), Type(InType)
+		FArrayAdapter(FUnrealMcpRqlTypes* InTypes, const FArrayProperty* InProperty, void* InData, const rql::TypeDescriptor* InType,
+			std::shared_ptr<void> InKeepAlive)
+			: Types(InTypes), Property(InProperty), Data(InData), Type(InType), KeepAlive(MoveTemp(InKeepAlive))
 		{
 		}
 
@@ -242,14 +265,16 @@ namespace UnrealMcpRqlTypesLocal
 		const FArrayProperty* Property;
 		void* Data;
 		const rql::TypeDescriptor* Type;
+		std::shared_ptr<void> KeepAlive; // the struct value Data lies in, if any (LiveStructData)
 	};
 
 	/** A live TMap property value (iteration in the map's own order, which is deterministic). */
 	class FMapAdapter final : public rql::IMapAdapter
 	{
 	public:
-		FMapAdapter(FUnrealMcpRqlTypes* InTypes, const FMapProperty* InProperty, void* InData, const rql::TypeDescriptor* InType)
-			: Types(InTypes), Property(InProperty), Data(InData), Type(InType)
+		FMapAdapter(FUnrealMcpRqlTypes* InTypes, const FMapProperty* InProperty, void* InData, const rql::TypeDescriptor* InType,
+			std::shared_ptr<void> InKeepAlive)
+			: Types(InTypes), Property(InProperty), Data(InData), Type(InType), KeepAlive(MoveTemp(InKeepAlive))
 		{
 		}
 
@@ -331,6 +356,7 @@ namespace UnrealMcpRqlTypesLocal
 		const FMapProperty* Property;
 		void* Data;
 		const rql::TypeDescriptor* Type;
+		std::shared_ptr<void> KeepAlive; // the struct value Data lies in, if any (LiveStructData)
 	};
 }
 
@@ -829,16 +855,19 @@ void FUnrealMcpRqlTypes::AddPropertyMember(rql::TypeDescriptor& Descriptor, FPro
 		Member.description = "not Instance Editable: placed actors always use the Blueprint default; change it with "
 			"blueprint-set-default, or make the variable Instance Editable (blueprint-modify-variable instanceEditable=true)";
 	}
-	// Containers of an object are live views: an element write (set Tags[0] = ...) goes into a copy assigned back through
-	// the setter, so it gets the editor notifications and honours the member's read-only flag like a whole-container write.
-	Member.copy_on_read = bOnObject
-		&& (Property->IsA<FArrayProperty>() || Property->IsA<FSetProperty>() || Property->IsA<FMapProperty>());
+	// Containers are live views: an element write (set Tags[0] = ...) goes into a copy assigned back through the setter. On
+	// an object it so gets the editor notifications and honours the member's read-only flag like a whole-container write;
+	// in a struct value (itself a copy) it is what carries the write up the path: without it `set Data.Mappings[0].Key`
+	// changed only the struct copy and reported success.
+	Member.copy_on_read = Property->IsA<FArrayProperty>() || Property->IsA<FSetProperty>() || Property->IsA<FMapProperty>();
 	FUnrealMcpRqlTypes* Self = this;
 	// On an object, read the live one: the receipt reads a value back after a write that may have rebuilt the component.
-	Member.getter = [Self, Property, Type, bOnObject](void* Container) -> rql::Value
+	// A container view into a struct value holds that value alive (LiveStructData); objects need nothing.
+	const bool bViewOfStruct = !bOnObject && (Property->IsA<FArrayProperty>() || Property->IsA<FMapProperty>());
+	Member.getter = [Self, Property, Type, bOnObject, bViewOfStruct](void* Container) -> rql::Value
 	{
 		void* Owner = bOnObject ? Self->LiveObject(static_cast<UObject*>(Container)) : Container;
-		return Self->Read(Property, Property->ContainerPtrToValuePtr<void>(Owner), Type);
+		return Self->Read(Property, Property->ContainerPtrToValuePtr<void>(Owner), Type, bViewOfStruct ? StructDataOwner(Container) : nullptr);
 	};
 	if (bOnObject)
 	{
@@ -931,6 +960,9 @@ void FUnrealMcpRqlTypes::AddFunctionMethod(rql::TypeDescriptor& Descriptor, UFun
 		}
 		Method.params.push_back(std::move(Parameter));
 		Inputs.Add(Property);
+		// UPARAM(ref): passed in and written back, so the call also reports it (ProcessEvent copies it back to Params).
+		if (Property->HasAllPropertyFlags(CPF_OutParm | CPF_ReferenceParm) && !Property->HasAnyPropertyFlags(CPF_ConstParm))
+			Outputs.Add(Property);
 	}
 	if (!Return && Outputs.Num() == 1)
 	{
@@ -1059,7 +1091,8 @@ UObject* FUnrealMcpRqlTypes::FindById(int64 Id)
 	return IsValid(Object) ? Object : nullptr;
 }
 
-rql::Value FUnrealMcpRqlTypes::Read(const FProperty* Property, const void* ValuePtr, const rql::TypeDescriptor* Type)
+rql::Value FUnrealMcpRqlTypes::Read(const FProperty* Property, const void* ValuePtr, const rql::TypeDescriptor* Type,
+	std::shared_ptr<void> KeepAlive)
 {
 	auto TypeOf = [this, Property, Type]()
 	{
@@ -1100,7 +1133,7 @@ rql::Value FUnrealMcpRqlTypes::Read(const FProperty* Property, const void* Value
 	if (const FStructProperty* StructProperty = CastField<FStructProperty>(Property))
 		return WrapStruct(StructProperty->Struct, ValuePtr);
 	if (const FArrayProperty* ArrayProperty = CastField<FArrayProperty>(Property))
-		return rql::Value::list(std::make_shared<FArrayAdapter>(this, ArrayProperty, const_cast<void*>(ValuePtr), TypeOf()));
+		return rql::Value::list(std::make_shared<FArrayAdapter>(this, ArrayProperty, const_cast<void*>(ValuePtr), TypeOf(), MoveTemp(KeepAlive)));
 	if (const FSetProperty* SetProperty = CastField<FSetProperty>(Property))
 	{
 		FScriptSetHelper Helper(SetProperty, ValuePtr);
@@ -1113,7 +1146,7 @@ rql::Value FUnrealMcpRqlTypes::Read(const FProperty* Property, const void* Value
 		return rql::Value::list_of(std::move(Items));
 	}
 	if (const FMapProperty* MapProperty = CastField<FMapProperty>(Property))
-		return rql::Value::map(std::make_shared<FMapAdapter>(this, MapProperty, const_cast<void*>(ValuePtr), TypeOf()));
+		return rql::Value::map(std::make_shared<FMapAdapter>(this, MapProperty, const_cast<void*>(ValuePtr), TypeOf(), MoveTemp(KeepAlive)));
 	return rql::Value::missing();
 }
 

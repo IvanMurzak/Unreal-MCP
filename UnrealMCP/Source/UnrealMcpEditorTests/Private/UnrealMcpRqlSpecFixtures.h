@@ -88,6 +88,16 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Spec") FVector Offset = FVector::ZeroVector;
 };
 
+/** Containers inside a struct (as FInputMappingContextMappingData holds its mappings): views into a struct value. */
+USTRUCT()
+struct FUnrealMcpRqlSpecBag
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, Category = "Spec") TArray<FUnrealMcpRqlSpecRow> Rows;
+	UPROPERTY(EditAnywhere, Category = "Spec") TMap<FString, int32> Counts;
+};
+
 UCLASS()
 class UUnrealMcpRqlSpecFixture : public UObject
 {
@@ -131,6 +141,7 @@ public:
 
 	// Scalars, enums, a nested struct.
 	UPROPERTY(EditAnywhere, Category = "Spec") FUnrealMcpRqlSpecRow Row;
+	UPROPERTY(EditAnywhere, Category = "Spec") FUnrealMcpRqlSpecBag Bag;
 	UPROPERTY(EditAnywhere, Category = "Spec") EUnrealMcpRqlSpecMode Mode = EUnrealMcpRqlSpecMode::Idle;
 	UPROPERTY(EditAnywhere, Category = "Spec") uint8 Small = 0;
 	UPROPERTY(EditAnywhere, Category = "Spec") int64 Big = 0;
@@ -182,6 +193,20 @@ public:
 	/** always fails with the given message */
 	UFUNCTION(BlueprintCallable, Category = "Spec", meta = (BlueprintInternalUseOnly = "true"))
 	void Boom(const FString& Message);
+
+	/** a stored row, returned by reference (as UInputMappingContext::MapKey returns its new mapping) */
+	UFUNCTION(BlueprintCallable, Category = "Spec", meta = (BlueprintInternalUseOnly = "true"))
+	FUnrealMcpRqlSpecRow& RowRef(const FString& Label);
+
+	/** doubles a number passed by reference (in and out) */
+	UFUNCTION(BlueprintCallable, Category = "Spec", meta = (BlueprintInternalUseOnly = "true"))
+	void Double(UPARAM(ref) int32& Value);
+
+	/** fills an output row */
+	UFUNCTION(BlueprintCallable, Category = "Spec", meta = (BlueprintInternalUseOnly = "true"))
+	void MakeRow(int32 Damage, FUnrealMcpRqlSpecRow& Row);
+
+	UPROPERTY() FUnrealMcpRqlSpecRow Stored;
 };
 
 /** A Project Settings section of the specs, saved to its own Config/DefaultUnrealMcpRqlSpec.ini (removed after the run). */
