@@ -112,6 +112,14 @@ namespace UnrealAIControlRigRqlApiLocal
 		return Name;
 	}
 
+	/** Whether @p Rig is the running rig @p Wanted names: an asset name, or an asset path ("/Game/Rigs/CR_Foot", also with ".CR_Foot"). */
+	bool IsRigNamed(const UControlRig* Rig, const FString& Wanted)
+	{
+		return Wanted.StartsWith(TEXT("/"))
+			? FPackageName::ObjectPathToPackageName(Wanted).Equals(Rig->GetClass()->GetOutermost()->GetName(), ESearchCase::IgnoreCase)
+			: RunningRigName(Rig).Equals(Wanted, ESearchCase::IgnoreCase);
+	}
+
 	/** Whether the rig's graphs (its functions too) run a world trace unit. */
 	bool RunsWorldTrace(const UControlRig* Rig)
 	{
@@ -331,7 +339,7 @@ TArray<FUnrealAIRunningRig> UUnrealAIControlRigRqlApi::RigValues(const FString& 
 		if (Running->HasAnyFlags(RF_ArchetypeObject) || !IsValid(Running) || !Component || Component->GetWorld() != World)
 			continue;
 		const FString RigName = RunningRigName(Running);
-		if (!Wanted.IsEmpty() && !RigName.Equals(Wanted, ESearchCase::IgnoreCase) && !Wanted.EndsWith(TEXT("/") + RigName))
+		if (!Wanted.IsEmpty() && !IsRigNamed(Running, Wanted))
 		{
 			Others.Add(RigName);
 			continue;
@@ -342,8 +350,11 @@ TArray<FUnrealAIRunningRig> UUnrealAIControlRigRqlApi::RigValues(const FString& 
 		Row.Component = Component->GetName();
 		Row.RigOrigin = Component->GetComponentLocation();
 		Row.Executions = static_cast<int32>(Running->GetRigVMExtendedExecuteContext().GetPublicData<>().GetNumExecutions());
-		for (TFieldIterator<FProperty> Property(Running->GetClass(), EFieldIteratorFlags::ExcludeSuper); Property; ++Property)
-			Row.Variables.Add(Property->GetName(), Running->GetVariableAsString(Property->GetFName()));
+		for (TFieldIterator<FProperty> Property(Running->GetClass()); Property; ++Property)
+		{
+			if (!Property->IsNative()) // the rig's variables, a parent rig's too; the rest is UControlRig itself
+				Row.Variables.Add(Property->GetName(), Running->GetVariableAsString(Property->GetFName()));
+		}
 		if (Row.Executions == 0)
 			Row.Notes.Add(TEXT("the rig has not run yet: advance the game (editor | call AdvancePlay(1.0, 0)); a mesh that is not rendered may skip its pose (the component's VisibilityBasedAnimTickOption)"));
 		if (RunsWorldTrace(Running))

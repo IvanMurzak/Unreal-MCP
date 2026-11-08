@@ -80,7 +80,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Control Rig", meta = (BlueprintInternalUseOnly = "true"))
 	FString AddVariable(UControlRigBlueprint* Rig, const FString& Name, const FString& Type, const FString& Default = TEXT(""), bool bPublic = true);
 
-	/** add a rig unit node (a name from controlRigUnits: "AimItem", "TwoBoneIKSimplePerItem", "SphereTraceWorld", "SpringInterpVectorV2", "RigUnit_ToRigSpace_Location", ...) with Settings "Pin=Value, Sub.Pin=Value" (values: "@Variable" or "@Node.Pin" links, an element name for an item pin, "(0, 1, 0)", text); a unit that executes runs at the end of Forwards Solve, or after the node After; Name optional; returns the node's name */
+	/** add a rig unit node (a name from controlRigUnits: "AimItem", "TwoBoneIKSimplePerItem", "SphereTraceByTraceChannel", "SpringInterpVectorV2", "RigUnit_ToRigSpace_Location", ...) with Settings "Pin=Value, Sub.Pin=Value" (values: "@Variable" or "@Node.Pin" links, an element name for an item pin, "(0, 1, 0)", text); a unit that executes runs at the end of Forwards Solve, or after the node After; Name optional; returns the node's name */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Control Rig", meta = (BlueprintInternalUseOnly = "true"))
 	FString AddUnit(UControlRigBlueprint* Rig, const FString& Unit, const FString& Settings = TEXT(""), const FString& After = TEXT(""), const FString& Name = TEXT(""));
 

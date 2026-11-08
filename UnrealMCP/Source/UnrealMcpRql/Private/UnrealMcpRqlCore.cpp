@@ -1111,7 +1111,12 @@ static FString SimilarAssetsAmong(const TArray<FAssetData>& Assets, const FStrin
 	TArray<FString>& Hits = Exact.Num() > 0 ? Exact : Partial;
 	if (Hits.Num() == 0)
 		return FString();
-	Hits.Sort();
+	Hits.Sort([](const FString& A, const FString& B)
+	{
+		// The project's assets first: the cap must not leave only engine content.
+		const bool bGameA = A.StartsWith(TEXT("/Game/"));
+		return bGameA != B.StartsWith(TEXT("/Game/")) ? bGameA : A < B;
+	});
 	if (Hits.Num() > 3)
 		Hits.SetNum(3);
 	return FString::Printf(TEXT(" (did you mean %s?)"), *FString::Join(Hits, TEXT(", ")));

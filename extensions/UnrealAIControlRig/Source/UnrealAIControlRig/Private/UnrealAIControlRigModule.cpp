@@ -200,7 +200,7 @@ controlRig | call RemoveNode("/Game/Rigs/CR_LookAt", "Smooth")
 unreal.asset("/Game/Rigs/CR_LookAt") | call Compile()
 ```
 
-- Unit names: `Name` (`AimItem`, `TwoBoneIKSimplePerItem`, `SphereTraceWorld`, `RigUnit_ToRigSpace_Location`), or a
+- Unit names: `Name` (`AimItem`, `TwoBoneIKSimplePerItem`, `SphereTraceByTraceChannel`, `RigUnit_ToRigSpace_Location`), or a
   `DisplayName` one unit has. Pins: `Pins` of the unit row (a struct pin's members are `Primary.Target`) or the rig's
   `Nodes`; names and display names, case and spaces ignored.
 - Values (settings `"Pin=Value, Sub.Pin=Value"`, SetPin): `"@Variable"` reads a rig variable, `"@Node.Pin"` links an
@@ -215,8 +215,8 @@ unreal.asset("/Game/Rigs/CR_LookAt") | call Compile()
 - Each mutation is one undo step; assets stay unsaved until `editor | call SaveAsset(path)`. Placed rig components:
   `actors | get Components | where $ is ControlRigComponent | select Owner.Label BoundRig`.)MD"));
 		Context.AddGuide(TEXT("Control Rig traces and foot IK"), TEXT(R"MD(World traces (`SphereTraceByTraceChannel`, `LineTraceByTraceChannel`, `...ByObjectTypes`) hit the game world from a rig in an Anim
-Blueprint, on the animation worker thread too: no project setting, no node option, no game-thread traces in C++ or the
-Anim Blueprint. The template's CR_Mannequin_FootIK works as it is, on stairs and ramps. Copy it to extend it
+Blueprint, with its default multi-threaded update too: no project setting, no node option, no game-thread traces in C++ or
+the Anim Blueprint. The template's CR_Mannequin_FootIK works as it is. Copy it to extend it
 (`editor | call CopyAsset(".../CR_Mannequin_FootIK", "/Game/Rigs/CR_FootIK")`).
 
 Check what a rig computes while playing, not from bone heights or curves. The preview does not run the game's rig:
@@ -240,7 +240,9 @@ controlRig | call RigValues("CR_FootIK")      {RigOrigin, Executions, Variables:
 - Start the trace about 30 above the rig origin and end it about 50 below, not far above the foot: a tall start finds the top
   of a wall the foot is next to, and lifts the knee to it.
 
-Foot IK from nothing, on a mesh with `ik_foot_l` / `ik_foot_r` bones (each `AddUnit` of `_l` also for `_r`):
+Foot IK from nothing, on a mesh with `ik_foot_l` / `ik_foot_r` bones. Each line naming the left foot (`_l`, FootL, TraceL, SmoothL,
+ShiftL, GoalL) also has its right twin (`_r`, FootR, ...), added right after it, before the next line. `PBIK` is in the engine plugin
+FullBodyIK:
 
 ```
 controlRig | call CreateRig("/Game/Rigs/CR_Feet", "/Game/Characters/Mannequins/Meshes/SKM_Manny_Simple")
@@ -251,12 +253,16 @@ controlRig | call AddUnit("/Game/Rigs/CR_Feet", "MathFloatMin", "A=@SmoothL.Resu
 controlRig | call AddUnit("/Game/Rigs/CR_Feet", "ModifyTransforms", "ItemToModify=((Item=(Type=Bone,Name=pelvis))), ItemToModify.0.Transform.Translation.Z=@Lowest.Result, Mode=AdditiveGlobal", "", "ShiftPelvis")
 controlRig | call AddUnit("/Game/Rigs/CR_Feet", "ModifyTransforms", "ItemToModify=((Item=(Type=Bone,Name=ik_foot_l))), ItemToModify.0.Transform.Translation.Z=@SmoothL.Result, Mode=AdditiveGlobal", "", "ShiftL")
 controlRig | call AddUnit("/Game/Rigs/CR_Feet", "GetTransform", "Item=ik_foot_l", "", "GoalL")
-controlRig | call AddUnit("/Game/Rigs/CR_Feet", "TwoBoneIKSimplePerItem", "ItemA=thigh_l, ItemB=calf_l, EffectorItem=foot_l, Effector=@GoalL.Transform")
+controlRig | call AddUnit("/Game/Rigs/CR_Feet", "PBIK", "Root=pelvis, Effectors=((Bone=foot_l),(Bone=foot_r)), Effectors.0.Transform=@GoalL.Transform, Effectors.1.Transform=@GoalR.Transform", "", "Solve")      one node, after both twins
 controlRig | call AddToAnimBlueprint("<abp>", "/Game/Rigs/CR_Feet")
 ```
 
-`ModifyTransforms` with `AdditiveGlobal`, not `OffsetTransformForItem`: an offset works along the bone's own axes, and the pelvis
-and foot bones are rotated, so it moves them sideways. The IK reads a second `GetTransform` (GoalL), which runs after the shift and sees the moved bone.)MD"));
+- `ModifyTransforms` with `AdditiveGlobal`, not `OffsetTransformForItem`: an offset works along the bone's own axes, and the pelvis
+  and foot bones are rotated, so it moves them sideways. The solver reads a second `GetTransform` (GoalL), which runs after the shift.
+- Not `TwoBoneIKSimplePerItem` with its defaults: the feet land, but the legs turn about 170 degrees around themselves, which
+  foot heights do not show. Check a solved leg against the animation: `get_socket_transform` of `thigh_l`, `calf_l` with the rig's
+  solver on and off; a screenshot shows it too.
+- The foot stays level: on a slope its toe dips about 3 cm into the surface. Tilting it to `HitNormal` is the next step.)MD"));
 	}
 };
 

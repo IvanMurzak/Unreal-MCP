@@ -81,7 +81,7 @@ namespace UnrealAIControlRigGraph
 
 	/**
 	 * Add a setter of the rig variable @p Variable taking @p Value (SetPin form), in the execution chain after @p After ("" = the
-	 * end of Forwards Solve). Returns the node; null after Fail with nothing added.
+	 * end of Forwards Solve). Returns the node; null after Fail with no setter added.
 	 */
 	URigVMNode* AddSetVariable(UControlRigBlueprint* Rig, const FString& Variable, const FString& Value, const FString& After, const FString& Name);
 

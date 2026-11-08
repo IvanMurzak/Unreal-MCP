@@ -122,7 +122,7 @@ namespace UnrealAIControlRigGraphLocal
 		const URigVMUnitNode* Unit = Cast<URigVMUnitNode>(Pin->GetNode());
 		const FString Struct = Unit && Unit->GetScriptStruct() ? Unit->GetScriptStruct()->GetName() : FString();
 		const URigHierarchy* Hierarchy = Rig->GetHierarchy();
-		if (Pin->GetName() != TEXT("Curve") || !Hierarchy || Value.StartsWith(TEXT("@")) || !Struct.Contains(TEXT("CurveValue"))
+		if (Pin->GetName() != TEXT("Curve") || !Hierarchy || Value.IsEmpty() || Value == TEXT("None") || Value.StartsWith(TEXT("@")) || !Struct.Contains(TEXT("CurveValue"))
 			|| Hierarchy->Contains(FRigElementKey(FName(*Value), ERigElementType::Curve)))
 			return true;
 		return UnrealMcpRql::Failed<bool>(FString::Printf(TEXT("%s has no curve '%s', so this node would silently do nothing (and an Anim Instance reads that curve as 0). The rig has %d curve(s), imported from the mesh by CreateRig. To read a value while playing: AddVariable, AddSetVariable, then RigValues"),
@@ -622,7 +622,12 @@ URigVMNode* UnrealAIControlRigGraph::AddSetVariable(UControlRigBlueprint* Rig, c
 	TArray<URigVMNode*> Added = { Setter };
 	URigVMPin* ValuePin = Setter->FindPin(TEXT("Value")); // URigVMVariableNode::ValueName is private
 	FString Ignored;
-	if (!ValuePin || !SetPin(Rig, ValuePin, Value, Added, Ignored))
+	if (!ValuePin)
+	{
+		RemoveNodes(Controller, Added);
+		return UnrealMcpRql::Failed<URigVMNode*>(FString::Printf(TEXT("the setter of %s has no value pin"), *Description.Name.ToString()));
+	}
+	if (!SetPin(Rig, ValuePin, Value, Added, Ignored))
 	{
 		RemoveNodes(Controller, Added);
 		return nullptr;
