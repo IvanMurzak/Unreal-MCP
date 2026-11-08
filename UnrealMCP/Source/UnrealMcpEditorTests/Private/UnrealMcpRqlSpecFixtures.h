@@ -8,6 +8,7 @@
 #include "Engine/DataTable.h"
 #include "Engine/DeveloperSettings.h"
 #include "GameFramework/Actor.h"
+#include "GameFramework/Pawn.h"
 #include "GameplayTagContainer.h"
 #include "Math/Color.h"
 #include "Math/IntPoint.h"
@@ -207,6 +208,23 @@ public:
 	void MakeRow(int32 Damage, FUnrealMcpRqlSpecRow& Row);
 
 	UPROPERTY() FUnrealMcpRqlSpecRow Stored;
+};
+
+/**
+ * A pawn with no movement component, a blocking box that moves itself (as a game's simple vehicle does): W drives it
+ * forward with a sweep, A turns it, E lifts it for 15 ticks and lowers it again. Its GetVelocity() stays 0, however it moves.
+ */
+UCLASS()
+class AUnrealMcpRqlSpecSelfMovingPawn : public APawn
+{
+	GENERATED_BODY()
+
+public:
+	AUnrealMcpRqlSpecSelfMovingPawn();
+	virtual void Tick(float DeltaSeconds) override;
+
+private:
+	int32 LiftTicks = 0;
 };
 
 /** A Project Settings section of the specs, saved to its own Config/DefaultUnrealMcpRqlSpec.ini (removed after the run). */

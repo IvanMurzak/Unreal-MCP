@@ -63,6 +63,18 @@ struct UNREALMCPRQL_API FUnrealMcpPlayState
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Play")
 	double Speed = 0.0;
 
+	/** how far the call moved the pawn, cm (start to end in a straight line); set by AdvancePlay, else 0, also when the call changed the possessed pawn */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Play")
+	double Moved = 0.0;
+
+	/** that location change over the game time the call advanced, cm/s, set as Moved is: it reads a pawn that moves itself, whose Velocity stays 0 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Play")
+	FVector MeasuredVelocity = FVector::ZeroVector;
+
+	/** how far the call turned the pawn, degrees (start to end); set as Moved is */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Play")
+	double Turned = 0.0;
+
 	/** a Character's movement mode (Walking, Falling, Swimming, Flying, ...); empty for other pawns */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Play")
 	FString MovementMode;
@@ -155,4 +167,10 @@ namespace UnrealMcpRql
 	 */
 	UNREALMCPRQL_API bool AdvancePlayWithKeys(double Seconds, int32 Frames, const FString& Keys, int32& OutAdvanced, FString& OutError,
 		TArray<FString>* OutNotes = nullptr);
+
+	/**
+	 * AdvancePlayWithKeys, then the state it left: FramesAdvanced, how far the pawn moved (Moved, MeasuredVelocity, Turned)
+	 * and, in Notes, the key notes and held input the pawn did not respond to.
+	 */
+	UNREALMCPRQL_API bool AdvancePlayAndRead(double Seconds, int32 Frames, const FString& Keys, FUnrealMcpPlayState& OutState, FString& OutError);
 }

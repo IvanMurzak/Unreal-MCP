@@ -404,59 +404,142 @@ namespace UnrealMcpRqlPlayLocal
 					*Entry.Key.Key.ToString(), *Entry.Key.Value->GetName(), Entry.Value.Num(), *FString::Join(Entry.Value, TEXT(" | "))));
 		}
 	}
+
+	/**
+	 * AdvancePlayWithKeys with its keys parsed and its frames counted. @p OutFarthest gets how far the pawn got from where it
+	 * started while the keys were held: a jump that lands inside the call moved, though it ends where it began.
+	 */
+	bool AdvanceHoldingKeys(const TArray<FHeldKey>& Held, int32 Count, int32& OutAdvanced, FString& OutError, TArray<FString>* OutNotes,
+		double* OutFarthest = nullptr)
+	{
+		using namespace UnrealMcpRql;
+		OutAdvanced = 0;
+		if (Held.Num() == 0)
+			return AdvancePlay(Count, [](APlayerController*, int32) {}, OutAdvanced, OutError);
+		if (!RequirePlayController(OutError))
+			return false;
+		// Pressed on the first frame and held (buttons stay down until released; axes are fed every frame), released on one
+		// extra frame so key-up handlers and Completed events run. Pressed again on a controller that replaced the first one
+		// mid-call (the game swapped it, e.g. after travel), and released on the one that holds the keys.
+		TWeakObjectPtr<APlayerController> Pressed;
+		TOptional<FVector> PawnStart;
+		const bool bHeld = AdvancePlay(Count, [&Held, &Pressed, &PawnStart, OutFarthest](APlayerController* Controller, int32 Frame)
+		{
+			if (!Controller)
+				return;
+			if (const APawn* Pawn = OutFarthest ? Controller->GetPawn() : nullptr)
+			{
+				const FVector Location = Pawn->GetActorLocation();
+				*OutFarthest = FMath::Max(*OutFarthest, FVector::Dist(PawnStart.Get(Location), Location));
+				if (!PawnStart.IsSet())
+					PawnStart = Location;
+			}
+			const bool bFirst = !Pressed.IsValid() || Pressed.Get() != Controller;
+			Pressed = Controller;
+			for (const FHeldKey& Key : Held)
+			{
+				if (Key.bAxis)
+					SendKey(Controller, Key, IE_Axis, Key.Value);
+				else if (bFirst)
+					SendKey(Controller, Key, IE_Pressed, Key.Value);
+			}
+		}, OutAdvanced, OutError);
+		auto Release = [&Held, &Pressed](APlayerController*, int32)
+		{
+			if (APlayerController* Target = Pressed.Get())
+			{
+				for (const FHeldKey& Key : Held)
+					SendKey(Target, Key, Key.bAxis ? IE_Axis : IE_Released, 0.f);
+			}
+		};
+		if (!bHeld)
+		{
+			// Stopped part-way (the deadline, a pause): never leave the keys held for the frames after this call.
+			Release(nullptr, 0);
+			return false;
+		}
+		if (OutNotes)
+			NoteSharedKeyMappings(Pressed.Get(), Held, *OutNotes);
+		int32 ReleaseFrames = 0;
+		const bool bReleased = AdvancePlay(1, Release, ReleaseFrames, OutError);
+		OutAdvanced += ReleaseFrames;
+		return bReleased;
+	}
 }
 
 bool UnrealMcpRql::AdvancePlayWithKeys(double Seconds, int32 Frames, const FString& Keys, int32& OutAdvanced, FString& OutError,
 	TArray<FString>* OutNotes)
 {
-	using namespace UnrealMcpRqlPlayLocal;
 	OutAdvanced = 0;
+	TArray<UnrealMcpRqlPlayLocal::FHeldKey> Held;
+	if (!UnrealMcpRqlPlayLocal::ParseHeldKeys(Keys, Held, OutError))
+		return false;
+	const int32 Count = PlayFrameCount(Seconds, Frames, OutError);
+	return Count >= 0 && UnrealMcpRqlPlayLocal::AdvanceHoldingKeys(Held, Count, OutAdvanced, OutError, OutNotes);
+}
+
+namespace UnrealMcpRqlPlayLocal
+{
+	/** Less than this is floor adjustment or float noise, not the pawn moving or turning. */
+	constexpr double StillCentimeters = 1.0;
+	constexpr double StillDegrees = 1.0;
+
+	/** Input held at least this long (0.25 s) is expected to show: a shorter press may be a toggle that moves nothing. */
+	constexpr int32 MinHeldFramesToNote = UnrealMcpRql::PlayFrameRate / 4;
+
+	/** What the call did to the pawn it started with; false, nothing measured, when the call changed the possessed pawn. */
+	bool MeasurePawnMotion(const FUnrealMcpPlayState& Before, FUnrealMcpPlayState& State)
+	{
+		if (!State.Pawn || State.Pawn != Before.Pawn)
+			return false;
+		const FVector Displacement = State.Location - Before.Location;
+		const double Elapsed = State.Time - Before.Time;
+		State.Moved = Displacement.Size();
+		State.MeasuredVelocity = Elapsed > 0.0 ? Displacement / Elapsed : FVector::ZeroVector;
+		State.Turned = FMath::RadiansToDegrees(Before.Rotation.Quaternion().AngularDistance(State.Rotation.Quaternion()));
+		return true;
+	}
+
+	/**
+	 * Held input the pawn did not respond to. A fact, not a verdict: the core cannot tell a movement key from a menu key, so
+	 * the note is conditional. Not noted: a short press, a game time that stood still, or a turned camera (the input did
+	 * something).
+	 */
+	void NoteInputThatMovedNothing(const FUnrealMcpPlayState& Before, const TArray<FHeldKey>& Keys, int32 HeldFrames, double Farthest, FUnrealMcpPlayState& State)
+	{
+		if (HeldFrames < MinHeldFramesToNote || State.Time <= Before.Time || FMath::Max(State.Moved, Farthest) >= StillCentimeters
+			|| !State.ControlRotation.Equals(Before.ControlRotation, StillDegrees))
+			return;
+		const TArray<FHeldKey> Held = Keys.FilterByPredicate([](const FHeldKey& Key) { return Key.Value != 0.f; });
+		if (Held.Num() == 0)
+			return;
+		const FString Names = FString::JoinBy(Held, TEXT(", "), [](const FHeldKey& Key) { return Key.Key.ToString(); });
+		const FString Response = State.Turned < StillDegrees ? FString(TEXT("the pawn neither moved nor turned"))
+			: FString::Printf(TEXT("the pawn turned %.0f degrees without moving"), State.Turned);
+		State.Notes.Add(FString::Printf(TEXT("Held %s for %.2f s and %s: if this input should move it, check whether the pawn is blocked and whether the action is bound."),
+			*Names, static_cast<double>(HeldFrames) / UnrealMcpRql::PlayFrameRate, *Response));
+	}
+}
+
+bool UnrealMcpRql::AdvancePlayAndRead(double Seconds, int32 Frames, const FString& Keys, FUnrealMcpPlayState& OutState, FString& OutError)
+{
+	using namespace UnrealMcpRqlPlayLocal;
 	TArray<FHeldKey> Held;
 	if (!ParseHeldKeys(Keys, Held, OutError))
 		return false;
 	const int32 Count = PlayFrameCount(Seconds, Frames, OutError);
 	if (Count < 0)
 		return false;
-	if (Held.Num() == 0)
-		return AdvancePlay(Count, [](APlayerController*, int32) {}, OutAdvanced, OutError);
-	if (!RequirePlayController(OutError))
+	const FUnrealMcpPlayState Before = ReadPlayState();
+	int32 Advanced = 0;
+	TArray<FString> Notes;
+	double Farthest = 0.0;
+	if (!AdvanceHoldingKeys(Held, Count, Advanced, OutError, &Notes, &Farthest))
 		return false;
-	// Pressed on the first frame and held (buttons stay down until released; axes are fed every frame), released on one
-	// extra frame so key-up handlers and Completed events run. Pressed again on a controller that replaced the first one
-	// mid-call (the game swapped it, e.g. after travel), and released on the one that holds the keys.
-	TWeakObjectPtr<APlayerController> Pressed;
-	const bool bHeld = AdvancePlay(Count, [&Held, &Pressed](APlayerController* Controller, int32 Frame)
-	{
-		if (!Controller)
-			return;
-		const bool bFirst = !Pressed.IsValid() || Pressed.Get() != Controller;
-		Pressed = Controller;
-		for (const FHeldKey& Key : Held)
-		{
-			if (Key.bAxis)
-				SendKey(Controller, Key, IE_Axis, Key.Value);
-			else if (bFirst)
-				SendKey(Controller, Key, IE_Pressed, Key.Value);
-		}
-	}, OutAdvanced, OutError);
-	auto Release = [&Held, &Pressed](APlayerController*, int32)
-	{
-		if (APlayerController* Target = Pressed.Get())
-		{
-			for (const FHeldKey& Key : Held)
-				SendKey(Target, Key, Key.bAxis ? IE_Axis : IE_Released, 0.f);
-		}
-	};
-	if (!bHeld)
-	{
-		// Stopped part-way (the deadline, a pause): never leave the keys held for the frames after this call.
-		Release(nullptr, 0);
-		return false;
-	}
-	if (OutNotes)
-		NoteSharedKeyMappings(Pressed.Get(), Held, *OutNotes);
-	int32 ReleaseFrames = 0;
-	const bool bReleased = AdvancePlay(1, Release, ReleaseFrames, OutError);
-	OutAdvanced += ReleaseFrames;
-	return bReleased;
+	OutState = ReadPlayState();
+	OutState.FramesAdvanced = Advanced;
+	OutState.Notes.Append(Notes);
+	if (MeasurePawnMotion(Before, OutState))
+		NoteInputThatMovedNothing(Before, Held, Count, Farthest, OutState);
+	return true;
 }
