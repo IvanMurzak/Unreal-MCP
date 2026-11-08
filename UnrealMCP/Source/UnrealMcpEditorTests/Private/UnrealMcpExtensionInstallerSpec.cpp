@@ -118,6 +118,58 @@ void FUnrealMcpExtensionInstallerSpec::Define()
 		});
 	});
 
+	Describe("BuildRows update offer", [this]()
+	{
+		const auto UpdateOffered = [](const FString& Installed, bool bIsLink)
+		{
+			const TArray<FUnrealMcpCatalogEntry> Catalog = { InstallerSpecCatalogEntry(TEXT("com.x.a"), TEXT("PluginA"), TEXT("1.0.0")) };
+			FUnrealMcpInstalledOnDisk Disk;
+			Disk.PluginName = TEXT("PluginA");
+			Disk.Version = Installed;
+			Disk.bIsLink = bIsLink;
+			return FUnrealMcpExtensionInstaller::BuildRows(Catalog, {}, { Disk })[0].bUpdateAvailable;
+		};
+
+		It("offers an update only when the files are older than the catalog", [this, UpdateOffered]()
+		{
+			TestTrue(TEXT("older"), UpdateOffered(TEXT("0.0.1"), false));
+			TestFalse(TEXT("same"), UpdateOffered(TEXT("1.0.0"), false));
+			TestFalse(TEXT("newer is never a downgrade"), UpdateOffered(TEXT("999.0.0"), false));
+		});
+
+		It("never offers an update over a dev link", [this, UpdateOffered]()
+		{
+			TestFalse(TEXT("link"), UpdateOffered(TEXT("0.0.1"), true));
+		});
+	});
+
+	Describe("SelectBulkIds", [this]()
+	{
+		It("picks exactly the rows whose own Install / Update button is shown", [this]()
+		{
+			FUnrealMcpExtensionRow Available;
+			Available.ExtensionId = TEXT("com.x.available");
+			Available.bInCatalog = true;
+
+			FUnrealMcpExtensionRow Current = Available;
+			Current.ExtensionId = TEXT("com.x.current");
+			Current.bInstalled = true;
+
+			FUnrealMcpExtensionRow Outdated = Current;
+			Outdated.ExtensionId = TEXT("com.x.outdated");
+			Outdated.bUpdateAvailable = true;
+
+			FUnrealMcpExtensionRow Local;
+			Local.ExtensionId = TEXT("com.x.local");
+			Local.bInstalled = true;
+			Local.bUpdateAvailable = true;
+
+			const TArray<FUnrealMcpExtensionRow> Rows = { Available, Current, Outdated, Local };
+			TestEqual(TEXT("install"), FUnrealMcpExtensionInstaller::SelectBulkIds(Rows, false), TArray<FString>{ TEXT("com.x.available") });
+			TestEqual(TEXT("update"), FUnrealMcpExtensionInstaller::SelectBulkIds(Rows, true), TArray<FString>{ TEXT("com.x.outdated") });
+		});
+	});
+
 	Describe("BuildRows merge (catalog ∪ loaded ∪ disk)", [this]()
 	{
 		It("renders an available catalog-only extension", [this]()

@@ -19,6 +19,14 @@
 #include "HAL/PlatformProcess.h"
 #include "HAL/PlatformTime.h"
 
+#if PLATFORM_WINDOWS
+#include "Windows/AllowWindowsPlatformTypes.h"
+#include <windows.h>
+#include "Windows/HideWindowsPlatformTypes.h"
+#else
+#include <sys/stat.h>
+#endif
+
 #include "HttpModule.h"
 #include "HttpManager.h"
 #include "Interfaces/IHttpRequest.h"
@@ -68,6 +76,18 @@ namespace
 	}
 
 	/** Numeric dotted-version compare (`1.2.0` vs `1.10.0`). Returns -1 / 0 / 1; non-numeric parts compare as 0. */
+	/** True when @p Path itself is a symlink or junction. UE's file APIs follow links, so ask the OS. */
+	bool ExtInstIsLink(const FString& Path)
+	{
+#if PLATFORM_WINDOWS
+		const DWORD Attributes = ::GetFileAttributesW(*Path);
+		return Attributes != INVALID_FILE_ATTRIBUTES && (Attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
+#else
+		struct stat Info;
+		return ::lstat(TCHAR_TO_UTF8(*Path), &Info) == 0 && S_ISLNK(Info.st_mode);
+#endif
+	}
+
 	int32 ExtInstCompareSemver(const FString& A, const FString& B)
 	{
 		TArray<FString> PartsA, PartsB;
@@ -219,6 +239,17 @@ FString FUnrealMcpExtensionInstaller::BuildOutcomeMessage(
 	}
 }
 
+TArray<FString> FUnrealMcpExtensionInstaller::SelectBulkIds(const TArray<FUnrealMcpExtensionRow>& Rows, bool bUpdate)
+{
+	TArray<FString> Ids;
+	for (const FUnrealMcpExtensionRow& Row : Rows)
+	{
+		if (Row.bInCatalog && (bUpdate ? (Row.bInstalled && Row.bUpdateAvailable) : !Row.bInstalled))
+			Ids.Add(Row.ExtensionId);
+	}
+	return Ids;
+}
+
 // ---------------------------------------------------------------------------------------------------
 // The catalog ∪ loaded ∪ disk row-merge (pure)
 // ---------------------------------------------------------------------------------------------------
@@ -245,12 +276,16 @@ TArray<FUnrealMcpExtensionRow> FUnrealMcpExtensionInstaller::BuildRows(
 
 		// On-disk match by plugin folder name (case-insensitive — UE plugin names are case-insensitive).
 		FString InstalledVersion;
+		FString DiskVersion;
+		bool bIsLink = false;
 		for (const FUnrealMcpInstalledOnDisk& Disk : InstalledOnDisk)
 		{
 			if (Disk.PluginName.ToLower() == Entry.PluginName.ToLower())
 			{
 				Row.bInstalled = true;
 				InstalledVersion = Disk.Version;
+				DiskVersion = Disk.Version;
+				bIsLink = Disk.bIsLink;
 				break;
 			}
 		}
@@ -273,9 +308,11 @@ TArray<FUnrealMcpExtensionRow> FUnrealMcpExtensionInstaller::BuildRows(
 		}
 
 		Row.Version = !InstalledVersion.IsEmpty() ? InstalledVersion : Entry.Version;
-		// An update is offered when installed at a version that differs from the (newer) catalog pin.
-		if (Row.bInstalled && Entry.HasVersion() && !InstalledVersion.IsEmpty()
-			&& StripLeadingV(InstalledVersion) != StripLeadingV(Entry.Version))
+		// An update is offered when the files are older than the catalog pin: never a downgrade, never over a dev
+		// link. The disk wins over a loaded provider, which still reports the old version until the editor restarts.
+		const FString& CompareVersion = DiskVersion.IsEmpty() ? InstalledVersion : DiskVersion;
+		if (Row.bInstalled && !bIsLink && Entry.HasVersion() && !CompareVersion.IsEmpty()
+			&& ExtInstCompareSemver(StripLeadingV(CompareVersion), StripLeadingV(Entry.Version)) < 0)
 		{
 			Row.bUpdateAvailable = true;
 		}
@@ -359,6 +396,7 @@ TArray<FUnrealMcpInstalledOnDisk> FUnrealMcpExtensionInstaller::ScanInstalledPlu
 		FUnrealMcpInstalledOnDisk Entry;
 		Entry.PluginName = FPaths::GetBaseFilename(Uplugin); // UE requires folder == .uplugin basename
 		Entry.Version = FUnrealMcpUProjectPlugins::ReadUPluginVersionName(ExtInstLoadJsonObject(Uplugin));
+		Entry.bIsLink = ExtInstIsLink(PluginDir);
 		Out.Add(MoveTemp(Entry));
 	}
 	return Out;
@@ -411,6 +449,13 @@ bool FUnrealMcpExtensionInstaller::PlacePluginDir(const FString& SourcePluginRoo
 	const FString InstallReal = FPaths::ConvertRelativePathToFull(InstalledPath);
 	const FString PluginsDir = FPaths::GetPath(InstallReal);
 	PF.CreateDirectoryTree(*PluginsDir);
+
+	// Replacing deletes recursively, and that follows a link: it would wipe the live checkout behind it.
+	if (ExtInstIsLink(InstallReal))
+	{
+		OutError = FString::Printf(TEXT("'%s' is a symlink or junction (a dev checkout) and was left as it is"), *InstallReal);
+		return false;
+	}
 
 	const FString Staging = PluginsDir / FString::Printf(TEXT(".unreal-mcp-ext-staging-%u-%llx"),
 		FPlatformProcess::GetCurrentProcessId(), (uint64)FPlatformTime::Cycles64());

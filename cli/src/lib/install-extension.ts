@@ -63,6 +63,7 @@ import {
   parseUPluginDependencies,
   readUPluginVersionName,
   enablePluginsInUProject,
+  isPluginDisabledInUProject,
 } from '../utils/uproject-plugins.js';
 import { emitProgress } from './progress.js';
 import type {
@@ -251,7 +252,9 @@ export async function installExtension(
     const toEnable = [pluginName, ...gatingPlugins];
 
     const beforeText = fs.readFileSync(uproject.uprojectPath, 'utf-8');
-    const enable = enablePluginsInUProject(beforeText, toEnable);
+    const enable = opts.keepDisabled && isPluginDisabledInUProject(beforeText, pluginName)
+      ? { changed: false, text: beforeText, addedOrFlipped: [] }
+      : enablePluginsInUProject(beforeText, toEnable);
     if (enable.changed) {
       fs.writeFileSync(uproject.uprojectPath, enable.text);
       emitProgress(opts.onProgress, {

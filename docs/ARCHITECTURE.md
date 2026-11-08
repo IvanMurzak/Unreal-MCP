@@ -1008,7 +1008,7 @@ item 1), not to defer debug affordances entirely:
    Cursor, …) writing client configs (`SetupAiAgentSection`/`ConfigureAgents`).
 9. **Features** — "N / M Tools" + "~K tokens total", Prompts, Resources counts; each row opens its
    aux window (`SetupToolsSection/Prompts/Resources` + `SubscribeToFeatureStats`).
-10. **Extensions** — §5 list with toggles.
+10. **Extensions** — §5 list with toggles; Install All and Update All beside the title.
 11. **Footer** — Discord / GitHub Issues / Star buttons (`SetupSocialButtons`).
 
 **State ownership:** a single `FUnrealMcpEditorViewModel` (game-thread-only) over (a) the config

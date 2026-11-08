@@ -66,6 +66,12 @@ struct FUnrealMcpExtensionsPanelWiring
 class SUnrealMcpExtensionsWindow : public SCompoundWidget
 {
 public:
+	/**
+	 * Install All (disabled with nothing to install) and Update All (shown only with something to update). In
+	 * embedded mode the host places these beside its own "Extensions" title; standalone, the widget's header does.
+	 */
+	TSharedRef<SWidget> MakeBulkActions();
+
 	SLATE_BEGIN_ARGS(SUnrealMcpExtensionsWindow)
 		: _bEmbedded(false)
 	{}
@@ -106,6 +112,9 @@ private:
 	TSharedPtr<SVerticalBox> ListContainer;
 	FString StatusMessage;
 	bool bRestartHintVisible = false;
+	/** What Install All / Update All act on, refreshed with the list. */
+	TArray<FString> InstallableIds;
+	TArray<FString> UpdatableIds;
 
 	/** Recompute the merged rows and refill the list container. */
 	void RebuildList();
@@ -113,6 +122,9 @@ private:
 
 	FReply OnRefreshClicked();
 	FReply OnInstallClicked(FString ExtensionId, bool bForce);
+	FReply OnBulkClicked(bool bUpdate);
+	/** Install one catalog extension through OnInstall and log the outcome. Both click handlers format the status. */
+	FUnrealMcpInstallResult InstallOne(const FString& ExtensionId, bool bForce);
 	FReply OnCompileClicked();
 	void OnEnabledChanged(FString ExtensionId, bool bEnabled);
 

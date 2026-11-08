@@ -80,7 +80,7 @@ struct FUnrealMcpExtensionRow
 	bool bHasError = false;
 	FString Error;
 	int32 ToolCount = 0;
-	/** Installed on disk at a version that differs from the catalog pin → an update is offered. */
+	/** Installed on disk (not as a link) at a version older than the catalog pin → an update is offered. */
 	bool bUpdateAvailable = false;
 };
 
@@ -89,6 +89,8 @@ struct FUnrealMcpInstalledOnDisk
 {
 	FString PluginName;
 	FString Version;
+	/** The plugin folder is a symlink or junction: a dev checkout, which an update must never replace. */
+	bool bIsLink = false;
 };
 
 /**
@@ -145,6 +147,12 @@ public:
 		const TArray<FUnrealMcpCatalogEntry>& Catalog,
 		const TArray<FUnrealMcpExtensionRecord>& LoadedRecords,
 		const TArray<FUnrealMcpInstalledOnDisk>& InstalledOnDisk);
+
+	/**
+	 * The ids a bulk action acts on (pure): catalog rows not installed yet, or with @p bUpdate the installed
+	 * catalog rows with an update available. Exactly the rows whose own Install / Update button is shown.
+	 */
+	static UNREALMCPEDITOR_API TArray<FString> SelectBulkIds(const TArray<FUnrealMcpExtensionRow>& Rows, bool bUpdate);
 
 	// --- Filesystem helpers (no network; project Saved/Intermediate scratch — spec-testable) ----------
 

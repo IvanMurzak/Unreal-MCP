@@ -510,7 +510,8 @@ describe('installExtension (download + failures)', () => {
 
   it('fails (no throw) for an unknown extension with no --source', async () => {
     const project = makeProject();
-    const r = await installExtension({ projectDir: project, extensionId: 'com.unknown.ext' });
+    const fetchImpl = (async () => { throw new Error('offline'); }) as unknown as typeof fetch;
+    const r = await installExtension({ projectDir: project, extensionId: 'com.unknown.ext', fetchImpl, indexCachePath: path.join(tmp(), 'index.json') });
     expect(r.kind).toBe('failure');
     if (r.kind === 'failure') expect(r.error.message).toMatch(/Unknown extension/);
   });
@@ -858,5 +859,20 @@ describe('installExtension (minCoreVersion advisory)', () => {
     expect(r.kind).toBe('success');
     if (r.kind !== 'success') return;
     expect(r.warnings.join(' ')).not.toMatch(/requires core Unreal-MCP/);
+  });
+});
+
+describe('installExtension keepDisabled', () => {
+  it('does not re-enable an extension the .uproject disables', async () => {
+    const project = makeProject();
+    const uprojectPath = path.join(project, 'MyGame.uproject');
+    const original = JSON.parse(fs.readFileSync(uprojectPath, 'utf-8'));
+    fs.writeFileSync(uprojectPath, JSON.stringify({ ...original, Plugins: [{ Name: 'FooNiagara', Enabled: false }] }), 'utf-8');
+
+    const r = await installExtension({ projectDir: project, extensionId: 'com.foo.niagara', source: makeExtensionSource('FooNiagara'), keepDisabled: true });
+
+    expect(r.kind).toBe('success');
+    const plugin = JSON.parse(fs.readFileSync(uprojectPath, 'utf-8')).Plugins.find((p: { Name: string }) => p.Name === 'FooNiagara');
+    expect(plugin.Enabled).toBe(false);
   });
 });

@@ -282,3 +282,80 @@ describe('update', () => {
     expect(fs.existsSync(path.join(source, 'Binaries', 'Win64', 'live.dll'))).toBe(true);
   });
 });
+
+describe('update brings the installed extensions along', () => {
+  function projectWithExtensions(): { project: string } {
+    const project = tmp();
+    fs.writeFileSync(path.join(project, 'Game.uproject'), JSON.stringify({ FileVersion: 3, EngineAssociation: '5.7', Plugins: [] }), 'utf-8');
+    const pluginDir = path.join(project, 'Plugins', 'UnrealMCP');
+    fs.mkdirSync(pluginDir, { recursive: true });
+    fs.writeFileSync(path.join(pluginDir, 'UnrealMCP.uplugin'), JSON.stringify({ VersionName: '0.1.0' }), 'utf-8');
+    return { project };
+  }
+
+  function seedPlugin(project: string, name: string, version: string): void {
+    const dir = path.join(project, 'Plugins', name);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, `${name}.uplugin`), JSON.stringify({ VersionName: version }), 'utf-8');
+  }
+
+  it('does not touch the network when no extension is installed', async () => {
+    const { project } = projectWithExtensions();
+    const calls: string[] = [];
+    const fetchImpl = (async (url: string) => {
+      calls.push(url);
+      throw new Error('no network expected');
+    }) as unknown as typeof fetch;
+
+    const r = await update({ projectDir: project, pluginSourceDir: makeSource('0.2.0'), fetchImpl });
+
+    expect(r.kind === 'success' && r.extensionsUpdated).toEqual([]);
+    expect(calls).toEqual([]);
+  });
+
+  it('leaves a plugin that is not ours alone, and --no-extensions skips the lookup', async () => {
+    const { project } = projectWithExtensions();
+    seedPlugin(project, 'SomeThirdPartyPlugin', '1.0.0');
+    const calls: string[] = [];
+    const fetchImpl = (async (url: string) => {
+      calls.push(url);
+      return { ok: false, status: 404, statusText: 'Not Found' } as unknown as Response;
+    }) as unknown as typeof fetch;
+
+    const skipped = await update({ projectDir: project, pluginSourceDir: makeSource('0.2.0'), fetchImpl, noExtensions: true });
+    expect(skipped.kind === 'success' && skipped.extensionsUpdated).toEqual([]);
+    expect(calls).toEqual([]);
+
+    const r = await update({ projectDir: project, pluginSourceDir: makeSource('0.3.0'), fetchImpl, indexCachePath: path.join(tmp(), 'index.json') });
+    expect(r.kind === 'success' && r.extensionsUpdated).toEqual([]);
+    expect(fs.readFileSync(path.join(project, 'Plugins', 'SomeThirdPartyPlugin', 'SomeThirdPartyPlugin.uplugin'), 'utf-8')).toContain('1.0.0');
+  });
+
+  it('a failed extension update is a warning, not a failed plugin update', async () => {
+    const { project } = projectWithExtensions();
+    seedPlugin(project, 'UnrealAINiagara', '0.0.1');
+    const fetchImpl = (async () => ({ ok: false, status: 503, statusText: 'Unavailable' }) as unknown as Response) as unknown as typeof fetch;
+
+    const r = await update({ projectDir: project, pluginSourceDir: makeSource('0.2.0'), fetchImpl, indexCachePath: path.join(tmp(), 'index.json') });
+
+    expect(r.kind).toBe('success');
+    if (r.kind !== 'success') return;
+    expect(r.updated).toBe(true);
+    expect(r.extensionsUpdated).toEqual([]);
+    expect(r.warnings.length).toBeGreaterThan(0);
+  });
+});
+
+describe('update and links or disabled extensions', () => {
+  it('a dangling link under Plugins does not fail the plugin update', async () => {
+    const project = tmp();
+    const pluginDir = path.join(project, 'Plugins', 'UnrealMCP');
+    fs.mkdirSync(pluginDir, { recursive: true });
+    fs.writeFileSync(path.join(pluginDir, 'UnrealMCP.uplugin'), JSON.stringify({ VersionName: '0.1.0' }), 'utf-8');
+    fs.symlinkSync(path.join(project, 'gone'), path.join(project, 'Plugins', 'UnrealAINiagara'));
+
+    const r = await update({ projectDir: project, pluginSourceDir: makeSource('0.2.0') });
+
+    expect(r.kind).toBe('success');
+  });
+});

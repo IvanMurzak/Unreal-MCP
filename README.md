@@ -152,6 +152,7 @@ Updating in place must always leave you running the **new** code. The risk is UE
   node bin/unreal-mcp-cli.js update <YourProject>            # default: clean rebuild on version change
   node bin/unreal-mcp-cli.js update <YourProject> --force    # re-copy even when versions match
   node bin/unreal-mcp-cli.js update <YourProject> --no-clean # keep the existing build cache
+  node bin/unreal-mcp-cli.js update <YourProject> --no-extensions # leave the installed extensions as they are
   ```
 
 - **Manual copy → clear the cache yourself.** If you overwrite `<YourProject>/Plugins/UnrealMCP/` by hand, **close the editor first**, delete `<YourProject>/Plugins/UnrealMCP/Intermediate/` and the C++ `Binaries/` (keep `Binaries/ThirdParty/` if a bundled bridge is present), then relaunch so UE recompiles cleanly.
