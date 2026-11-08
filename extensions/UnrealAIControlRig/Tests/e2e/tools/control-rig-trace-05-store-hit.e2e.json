@@ -1,0 +1,10 @@
+{
+  "description": "bHit stored while the rig runs",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "controlRig | call AddSetVariable(\"/Game/E2E/CR_RigTrace\", \"Hit\", \"@Trace.bHit\")"
+  },
+  "assert": {
+    "pattern": "AddSetVariable"
+  }
+}

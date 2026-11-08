@@ -1,0 +1,10 @@
+{
+  "description": "a world trace in rig space, down through the floor",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "controlRig | call AddUnit(\"/Game/E2E/CR_RigTrace\", \"SphereTraceByTraceChannel\", \"Start=(0, 0, 30), End=(0, 0, -300), Radius=5, TraceChannel=TraceTypeQuery1\", \"\", \"Trace\")"
+  },
+  "assert": {
+    "pattern": "\\|Trace\\b"
+  }
+}

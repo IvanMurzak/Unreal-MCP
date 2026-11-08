@@ -1,0 +1,10 @@
+{
+  "description": "Play In Editor started, paused",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "editor | call StartPlay()"
+  },
+  "assert": {
+    "pattern": "Playing:true"
+  }
+}

@@ -10,9 +10,14 @@
 
 #include "Animation/AnimBlueprint.h"
 #include "Animation/Skeleton.h"
+#include "Components/SceneComponent.h"
+#include "ControlRig.h"
 #include "ControlRigBlueprintFactory.h"
 #include "ControlRigBlueprintLegacy.h"
+#include "Editor.h"
 #include "Engine/SkeletalMesh.h"
+#include "Engine/World.h"
+#include "GameFramework/Actor.h"
 #include "Misc/PackageName.h"
 #include "Rigs/RigHierarchy.h"
 #include "Rigs/RigHierarchyController.h"
@@ -21,6 +26,7 @@
 #include "RigVMModel/RigVMGraph.h"
 #include "RigVMModel/RigVMPin.h"
 #include "RigVMModel/Nodes/RigVMUnitNode.h"
+#include "UObject/UObjectIterator.h"
 #include "Units/Hierarchy/RigUnit_GetTransform.h"
 #include "Units/Hierarchy/RigUnit_WorldSpace.h"
 #include "Units/Highlevel/Hierarchy/RigUnit_AimBone.h"
@@ -96,6 +102,33 @@ namespace UnrealAIControlRigRqlApiLocal
 		for (int32 Index = 1; Graph && Graph->FindNodeByName(*Name); ++Index)
 			Name = FString::Printf(TEXT("%s_%d"), *Base, Index);
 		return Name;
+	}
+
+	/** The rig's asset name from its generated class: CR_Foot_C -> CR_Foot. */
+	FString RunningRigName(const UControlRig* Rig)
+	{
+		FString Name = Rig->GetClass()->GetName();
+		Name.RemoveFromEnd(TEXT("_C"));
+		return Name;
+	}
+
+	/** Whether the rig's graphs (its functions too) run a world trace unit. */
+	bool RunsWorldTrace(const UControlRig* Rig)
+	{
+		UControlRigBlueprint* Blueprint = Cast<UControlRigBlueprint>(Rig->GetClass()->ClassGeneratedBy);
+		if (!Blueprint)
+			return false;
+		for (const URigVMGraph* Graph : Blueprint->GetAllModels())
+		{
+			for (const URigVMNode* Node : Graph ? Graph->GetNodes() : TArray<URigVMNode*>())
+			{
+				const URigVMUnitNode* Unit = Cast<URigVMUnitNode>(Node);
+				const UScriptStruct* Struct = Unit ? Unit->GetScriptStruct() : nullptr;
+				if (Struct && Struct->GetName().Contains(TEXT("Trace")))
+					return true;
+			}
+		}
+		return false;
 	}
 
 	/** Recompile the rig's VM after a graph edit (the editor does it on its own when the rig is open). */
@@ -269,6 +302,56 @@ FString UUnrealAIControlRigRqlApi::AddUnit(UControlRigBlueprint* Rig, const FStr
 		return FString();
 	Recompile(Rig);
 	return Node->GetName();
+}
+
+FString UUnrealAIControlRigRqlApi::AddSetVariable(UControlRigBlueprint* Rig, const FString& Variable, const FString& Value, const FString& After, const FString& Name)
+{
+	static_cast<UObject*>(Rig)->Modify();
+	URigVMNode* Node = UnrealAIControlRigGraph::AddSetVariable(Rig, Variable, Value, After, Name);
+	if (!Node)
+		return FString();
+	Recompile(Rig);
+	return Node->GetName();
+}
+
+TArray<FUnrealAIRunningRig> UUnrealAIControlRigRqlApi::RigValues(const FString& Rig)
+{
+	UWorld* World = GEditor ? GEditor->PlayWorld.Get() : nullptr;
+	if (!World)
+		return UnrealMcpRql::Failed<TArray<FUnrealAIRunningRig>>(TEXT("no Play In Editor session: a rig in an Anim Blueprint runs only while playing, the editor preview says nothing about the game: editor | call StartPlay(), editor | call AdvancePlay(1.0, 0), then RigValues"));
+	const FString Wanted = Rig.TrimStartAndEnd();
+	TArray<FUnrealAIRunningRig> Out;
+	TSet<FString> Others;
+	for (TObjectIterator<UControlRig> It; It; ++It)
+	{
+		UControlRig* Running = *It;
+		const USceneComponent* Component = Running->GetTypedOuter<USceneComponent>();
+		if (Running->HasAnyFlags(RF_ClassDefaultObject | RF_ArchetypeObject) || !IsValid(Running) || !Component || Component->GetWorld() != World)
+			continue;
+		const FString RigName = RunningRigName(Running);
+		if (!Wanted.IsEmpty() && !RigName.Equals(Wanted, ESearchCase::IgnoreCase) && !Wanted.EndsWith(TEXT("/") + RigName))
+		{
+			Others.Add(RigName);
+			continue;
+		}
+		FUnrealAIRunningRig& Row = Out.AddDefaulted_GetRef();
+		Row.Rig = RigName;
+		Row.Owner = Component->GetOwner() ? Component->GetOwner()->GetActorNameOrLabel() : FString();
+		Row.Component = Component->GetName();
+		Row.RigOrigin = Component->GetComponentLocation();
+		Row.Executions = static_cast<int32>(Running->GetRigVMExtendedExecuteContext().GetPublicData<>().GetNumExecutions());
+		for (TFieldIterator<FProperty> Property(Running->GetClass(), EFieldIteratorFlags::ExcludeSuper); Property; ++Property)
+			Row.Variables.Add(Property->GetName(), Running->GetVariableAsString(Property->GetFName()));
+		if (Row.Executions == 0)
+			Row.Notes.Add(TEXT("the rig has not run yet: advance the game (editor | call AdvancePlay(1.0, 0)); a mesh that is not rendered may skip its pose (the component's VisibilityBasedAnimTickOption)"));
+		if (RunsWorldTrace(Running))
+			Row.Notes.Add(TEXT("traces take and return rig space, relative to RigOrigin: a hit on the ground under the character has Z = ground - RigOrigin.Z, a small negative number. A miss returns (0, 0, 0) with bHit false, so read bHit too: AddSetVariable"));
+	}
+	if (Out.IsEmpty())
+		return UnrealMcpRql::Failed<TArray<FUnrealAIRunningRig>>(Others.Num()
+			? FString::Printf(TEXT("no running rig named '%s'; running: %s"), *Wanted, *FString::Join(Others.Array(), TEXT(", ")))
+			: FString(TEXT("no Control Rig runs in the play world: is the rig in the AnimBlueprint of the mesh that plays (unreal.asset(\"<abp>\") | select ControlRigs), and was it compiled before StartPlay?")));
+	return Out;
 }
 
 FString UUnrealAIControlRigRqlApi::SetPin(UControlRigBlueprint* Rig, const FString& Pin, const FString& Value)

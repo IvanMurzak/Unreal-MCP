@@ -1,0 +1,10 @@
+{
+  "description": "a floor away from the player start, its top at z 0",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "editor | call SpawnActorFromAsset(\"/Engine/BasicShapes/Cube\", \"E2E_RigTraceFloor\", \"(5000, 0, -50)\")"
+  },
+  "assert": {
+    "pattern": "E2E_RigTraceFloor"
+  }
+}

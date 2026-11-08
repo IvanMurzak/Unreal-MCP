@@ -112,6 +112,78 @@ namespace UnrealAIControlRigGraphLocal
 			return FString::Printf(TEXT("%s %s"), Variable->IsGetter() ? TEXT("Get") : TEXT("Set"), *Variable->GetVariableName().ToString());
 		return Node->GetClass()->GetName().Replace(TEXT("RigVM"), TEXT("")).Replace(TEXT("Node"), TEXT(""));
 	}
+
+	/**
+	 * A curve unit on a curve the rig's hierarchy lacks does nothing and reports nothing (RigUnit_SetCurveValue skips it): a
+	 * debug value "stored" that way reads 0 in the Anim Instance whatever the rig computed. Refused here, with the way that works.
+	 */
+	bool CheckCurveExists(UControlRigBlueprint* Rig, const URigVMPin* Pin, const FString& Value)
+	{
+		const URigVMUnitNode* Unit = Cast<URigVMUnitNode>(Pin->GetNode());
+		const FString Struct = Unit && Unit->GetScriptStruct() ? Unit->GetScriptStruct()->GetName() : FString();
+		const URigHierarchy* Hierarchy = Rig->GetHierarchy();
+		if (Pin->GetName() != TEXT("Curve") || !Hierarchy || Value.StartsWith(TEXT("@")) || !Struct.Contains(TEXT("CurveValue"))
+			|| Hierarchy->Contains(FRigElementKey(FName(*Value), ERigElementType::Curve)))
+			return true;
+		return UnrealMcpRql::Failed<bool>(FString::Printf(TEXT("%s has no curve '%s', so this node would silently do nothing (and an Anim Instance reads that curve as 0). The rig has %d curve(s), imported from the mesh by CreateRig. To read a value while playing: AddVariable, AddSetVariable, then RigValues"),
+			*Rig->GetName(), *Value, Hierarchy->Num(ERigElementType::Curve)));
+	}
+
+	/**
+	 * The execute output a new node runs after: @p After (a node, or "Node.Pin" of an execute output), else the end of Forwards
+	 * Solve. Null after Fail; nothing changed but a Forwards Solve the rig did not have.
+	 */
+	URigVMPin* ResolveRunsAfter(UControlRigBlueprint* Rig, URigVMController* Controller, const FString& After, const TCHAR* What)
+	{
+		const FString AfterText = After.TrimStartAndEnd();
+		if (AfterText.IsEmpty())
+		{
+			URigVMNode* Solve = UnrealAIControlRigGraph::ForwardsSolve(Controller);
+			URigVMPin* End = Solve ? UnrealAIControlRigGraph::EndOfChain(Solve) : nullptr;
+			return End ? End : UnrealMcpRql::Failed<URigVMPin*>(FString::Printf(TEXT("Forwards Solve branches (a Sequence or branch node): pass After, the node (or Sequence.Pin) %s runs after (see the Nodes member)"), What));
+		}
+		if (AfterText.Contains(TEXT(".")))
+		{
+			URigVMPin* Pin = UnrealAIControlRigGraph::FindPin(Rig, AfterText);
+			if (Pin && (!Pin->IsExecuteContext() || !IsOutput(Pin)))
+				return UnrealMcpRql::Failed<URigVMPin*>(FString::Printf(TEXT("%s is not an execute output"), *Pin->GetPinPath()));
+			return Pin;
+		}
+		URigVMNode* Previous = UnrealAIControlRigGraph::FindNode(Rig, AfterText);
+		if (!Previous)
+			return nullptr;
+		if (URigVMPin* Output = UnrealAIControlRigGraph::ExecuteOutput(Previous))
+			return Output;
+		TArray<FString> Outputs;
+		for (const URigVMPin* Pin : Previous->GetPins())
+		{
+			if (Pin->IsExecuteContext() && IsOutput(Pin))
+				Outputs.Add(Pin->GetPinPath());
+		}
+		return UnrealMcpRql::Failed<URigVMPin*>(Outputs.Num()
+			? FString::Printf(TEXT("%s has several execute outputs: pass After as one of %s"), *NodeLabel(Previous), *FString::Join(Outputs, TEXT(", ")))
+			: FString::Printf(TEXT("%s does not run in the execution chain (a pure node)"), *NodeLabel(Previous)));
+	}
+
+	/** Run @p Node right after @p RunsAfter; what ran there continues after it. False (links restored) when the graph refuses. */
+	bool LinkIntoChain(URigVMController* Controller, URigVMNode* Node, URigVMPin* RunsAfter)
+	{
+		URigVMPin* In = UnrealAIControlRigGraph::ExecuteInput(Node);
+		URigVMPin* Out = UnrealAIControlRigGraph::ContinueOutput(Node); // a Sequence / branch / loop: what ran next follows its Completed (or first) output
+		const TArray<URigVMPin*> Next = RunsAfter->GetLinkedTargetPins();
+		bool bLinked = In && (Out || Next.Num() == 0);
+		for (URigVMPin* Target : Next)
+			bLinked = bLinked && Controller->BreakLink(RunsAfter->GetPinPath(), Target->GetPinPath());
+		bLinked = bLinked && Link(Controller, RunsAfter, In);
+		for (URigVMPin* Target : Next)
+			bLinked = bLinked && Link(Controller, Out, Target);
+		if (!bLinked)
+		{
+			for (URigVMPin* Target : Next)
+				Controller->AddLink(RunsAfter->GetPinPath(), Target->GetPinPath());
+		}
+		return bLinked;
+	}
 }
 
 using namespace UnrealAIControlRigGraphLocal;
@@ -349,6 +421,8 @@ bool UnrealAIControlRigGraph::SetPin(UControlRigBlueprint* Rig, URigVMPin* Pin, 
 		return UnrealMcpRql::Failed<bool>(FString::Printf(TEXT("%s is %s: set an input pin (or link this one into an input: SetPin(rig, \"<input>\", \"@%s\"))"),
 			*Pin->GetPinPath(), Pin->IsExecuteContext() ? TEXT("an execute pin") : TEXT("an output"), *Pin->GetPinPath()));
 	const FString Trimmed = Value.TrimStartAndEnd();
+	if (!CheckCurveExists(Rig, Pin, Trimmed))
+		return false;
 	if (Trimmed.StartsWith(TEXT("@")))
 	{
 		const FString Source = Trimmed.RightChop(1).TrimStartAndEnd();
@@ -483,43 +557,14 @@ URigVMNode* UnrealAIControlRigGraph::AddUnit(UControlRigBlueprint* Rig, UScriptS
 
 	// Where it runs: after the node (or execute pin) After names, else at the end of Forwards Solve. Resolved before any change.
 	URigVMPin* RunsAfter = nullptr;
-	const FString AfterText = After.TrimStartAndEnd();
 	const bool bMutable = UnrealAIControlRigUnits::Executes(Unit);
 	if (bMutable)
 	{
-		if (AfterText.IsEmpty())
-		{
-			URigVMNode* Solve = ForwardsSolve(Controller);
-			RunsAfter = Solve ? EndOfChain(Solve) : nullptr;
-			if (!RunsAfter)
-				return UnrealMcpRql::Failed<URigVMNode*>(TEXT("Forwards Solve branches (a Sequence or branch node): pass After, the node (or Sequence.Pin) the unit runs after (see the Nodes member)"));
-		}
-		else if (AfterText.Contains(TEXT(".")))
-		{
-			RunsAfter = FindPin(Rig, AfterText);
-			if (RunsAfter && (!RunsAfter->IsExecuteContext() || !IsOutput(RunsAfter)))
-				return UnrealMcpRql::Failed<URigVMNode*>(FString::Printf(TEXT("%s is not an execute output"), *RunsAfter->GetPinPath()));
-		}
-		else if (URigVMNode* Previous = FindNode(Rig, AfterText))
-		{
-			RunsAfter = ExecuteOutput(Previous);
-			if (!RunsAfter)
-			{
-				TArray<FString> Outputs;
-				for (const URigVMPin* Pin : Previous->GetPins())
-				{
-					if (Pin->IsExecuteContext() && IsOutput(Pin))
-						Outputs.Add(Pin->GetPinPath());
-				}
-				return UnrealMcpRql::Failed<URigVMNode*>(Outputs.Num()
-					? FString::Printf(TEXT("%s has several execute outputs: pass After as one of %s"), *NodeLabel(Previous), *FString::Join(Outputs, TEXT(", ")))
-					: FString::Printf(TEXT("%s does not run in the execution chain (a pure node)"), *NodeLabel(Previous)));
-			}
-		}
+		RunsAfter = ResolveRunsAfter(Rig, Controller, After, TEXT("the unit"));
 		if (!RunsAfter)
 			return nullptr;
 	}
-	else if (!AfterText.IsEmpty())
+	else if (!After.TrimStartAndEnd().IsEmpty())
 	{
 		return UnrealMcpRql::Failed<URigVMNode*>(FString::Printf(TEXT("%s is a pure value node (no execution): leave After empty and link its outputs"), *Unit->GetName()));
 	}
@@ -546,28 +591,48 @@ URigVMNode* UnrealAIControlRigGraph::AddUnit(UControlRigBlueprint* Rig, UScriptS
 			return nullptr;
 		}
 	}
-	if (RunsAfter)
+	if (RunsAfter && !LinkIntoChain(Controller, Node, RunsAfter))
 	{
-		URigVMPin* In = ExecuteInput(Node);
-		URigVMPin* Out = ContinueOutput(Node); // a Sequence / branch / loop: what ran next follows its Completed (or first) output
-		const TArray<URigVMPin*> Next = RunsAfter->GetLinkedTargetPins();
-		bool bLinked = In && (Out || Next.Num() == 0);
-		for (URigVMPin* Target : Next)
-			bLinked = bLinked && Controller->BreakLink(RunsAfter->GetPinPath(), Target->GetPinPath());
-		bLinked = bLinked && Link(Controller, RunsAfter, In);
-		for (URigVMPin* Target : Next)
-			bLinked = bLinked && Link(Controller, Out, Target);
-		if (!bLinked)
-		{
-			RemoveNodes(Controller, Added);
-			for (URigVMPin* Target : Next)
-				Controller->AddLink(RunsAfter->GetPinPath(), Target->GetPinPath());
-			return UnrealMcpRql::Failed<URigVMNode*>(FString::Printf(TEXT("could not link %s into the execution chain after %s"), *Unit->GetName(), *RunsAfter->GetPinPath()));
-		}
+		RemoveNodes(Controller, Added);
+		return UnrealMcpRql::Failed<URigVMNode*>(FString::Printf(TEXT("could not link %s into the execution chain after %s"), *Unit->GetName(), *RunsAfter->GetPinPath()));
 	}
 	if (OutAdded)
 		OutAdded->Append(Added);
 	return Node;
+}
+
+URigVMNode* UnrealAIControlRigGraph::AddSetVariable(UControlRigBlueprint* Rig, const FString& Variable, const FString& Value, const FString& After, const FString& Name)
+{
+	URigVMController* Controller = UnrealAIControlRigGraph::Controller(Rig);
+	if (!Controller)
+		return nullptr;
+	FRigVMGraphVariableDescription Description;
+	if (!FindVariable(Rig, Variable.TrimStartAndEnd(), Description))
+		return UnrealMcpRql::Failed<URigVMNode*>(FString::Printf(TEXT("%s has no variable '%s' (variables: %s; add one with AddVariable)"), *Rig->GetName(), *Variable, *VariableNames(Rig)));
+	const FString NodeName = Name.TrimStartAndEnd();
+	if (!NodeName.IsEmpty() && Controller->GetGraph()->FindNodeByName(*NodeName))
+		return UnrealMcpRql::Failed<URigVMNode*>(FString::Printf(TEXT("%s already has a node named '%s'"), *Rig->GetName(), *NodeName));
+	URigVMPin* RunsAfter = ResolveRunsAfter(Rig, Controller, After, TEXT("the setter"));
+	if (!RunsAfter)
+		return nullptr;
+	URigVMVariableNode* Setter = Controller->AddVariableNode(Description.Name, Description.CPPType, Description.CPPTypeObject, /*bIsGetter*/ false, FString(),
+		RunsAfter->GetNode()->GetPosition() + FVector2D(380.0, 0.0), NodeName);
+	if (!Setter)
+		return UnrealMcpRql::Failed<URigVMNode*>(FString::Printf(TEXT("could not add a setter of the variable %s"), *Description.Name.ToString()));
+	TArray<URigVMNode*> Added = { Setter };
+	URigVMPin* ValuePin = Setter->FindPin(TEXT("Value")); // URigVMVariableNode::ValueName is private
+	FString Ignored;
+	if (!ValuePin || !SetPin(Rig, ValuePin, Value, Added, Ignored))
+	{
+		RemoveNodes(Controller, Added);
+		return nullptr;
+	}
+	if (!LinkIntoChain(Controller, Setter, RunsAfter))
+	{
+		RemoveNodes(Controller, Added);
+		return UnrealMcpRql::Failed<URigVMNode*>(FString::Printf(TEXT("could not link the setter of %s into the execution chain after %s"), *Description.Name.ToString(), *RunsAfter->GetPinPath()));
+	}
+	return Setter;
 }
 
 FString UnrealAIControlRigGraph::VariableType(const FString& Type, UObject*& OutTypeObject)

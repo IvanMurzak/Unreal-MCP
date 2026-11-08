@@ -1,0 +1,10 @@
+{
+  "description": "the running rig reports the hit on the floor in rig space: floor z 0 - origin z 100",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "controlRig | call RigValues(\"CR_RigTrace\")"
+  },
+  "assert": {
+    "pattern": "5000, 0, 100.*Hit:True.*HitZ:\\W*-100"
+  }
+}

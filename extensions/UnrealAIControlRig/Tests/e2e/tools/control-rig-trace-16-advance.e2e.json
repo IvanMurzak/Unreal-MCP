@@ -1,0 +1,10 @@
+{
+  "description": "the game advanced",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "editor | call AdvancePlay(0.5, 0)"
+  },
+  "assert": {
+    "pattern": "FramesAdvanced:30"
+  }
+}

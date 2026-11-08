@@ -1,0 +1,10 @@
+{
+  "description": "it plays the Anim Blueprint with its pose always evaluated (nothing is rendered in this test)",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "actors | where Label == \"E2E_RigTraceMesh\" | get Components | where $ is SkeletalMeshComponent | set SkeletalMeshAsset = unreal.asset(\"/Engine/Tutorial/SubEditors/TutorialAssets/Character/TutorialTPP\"), AnimationMode = \"AnimationBlueprint\", AnimClass = \"/Game/E2E/ABP_RigTrace.ABP_RigTrace_C\", VisibilityBasedAnimTickOption = \"AlwaysTickPoseAndRefreshBones\""
+  },
+  "assert": {
+    "pattern": "AnimClass"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "description": "a rig from the engine mannequin",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "controlRig | call CreateRig(\"/Game/E2E/CR_RigTrace\", \"/Engine/Tutorial/SubEditors/TutorialAssets/Character/TutorialTPP\")"
+  },
+  "assert": {
+    "pattern": "\\bCR_RigTrace\\b"
+  }
+}

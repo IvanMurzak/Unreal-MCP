@@ -98,6 +98,8 @@ private:
 	/** Subobjects create_for_literal built for the running query: kept alive until it ends. */
 	TArray<TStrongObjectPtr<UObject>> LiteralObjects;
 	FString UndoTitle = TEXT("RQL mutation");
+	/** What the source function found out (a missing asset), added to the running query's result. */
+	std::vector<rql::Diagnostic> SourceWarnings;
 
 	/** A host function as the query source (unreal.assets("Material") | ...): evaluated into a source. True = failed. */
 	bool FunctionSource(rql::QueryPlan& Plan, rql::QueryResult& OutFailure);

@@ -1,0 +1,11 @@
+{
+  "description": "RigValues needs a play session",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "controlRig | call RigValues()"
+  },
+  "expectError": true,
+  "assert": {
+    "pattern": "no Play In Editor session"
+  }
+}

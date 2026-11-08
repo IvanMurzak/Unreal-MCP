@@ -1,0 +1,10 @@
+{
+  "description": "a private variable for the hit height",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "controlRig | call AddVariable(\"/Game/E2E/CR_RigTrace\", \"HitZ\", \"float\", \"\", false)"
+  },
+  "assert": {
+    "pattern": "\\|HitZ\\b"
+  }
+}

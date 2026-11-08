@@ -1,0 +1,11 @@
+{
+  "description": "a curve the rig lacks is refused, naming what works",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "controlRig | call AddUnit(\"/Game/E2E/CR_RigTrace\", \"SetCurveValue\", \"Curve=DebugHit, Value=1\")"
+  },
+  "expectError": true,
+  "assert": {
+    "pattern": "no curve 'DebugHit'.*AddSetVariable"
+  }
+}

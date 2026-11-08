@@ -1,0 +1,10 @@
+{
+  "description": "the Anim Blueprint compiles",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "unreal.asset(\"/Game/E2E/ABP_RigTrace\") | call Compile()"
+  },
+  "assert": {
+    "pattern": "Succeeded:true"
+  }
+}

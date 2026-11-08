@@ -1,0 +1,10 @@
+{
+  "description": "the rig runs in the Anim Blueprint",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "controlRig | call AddToAnimBlueprint(\"/Game/E2E/ABP_RigTrace\", \"/Game/E2E/CR_RigTrace\")"
+  },
+  "assert": {
+    "pattern": "CR_RigTrace"
+  }
+}

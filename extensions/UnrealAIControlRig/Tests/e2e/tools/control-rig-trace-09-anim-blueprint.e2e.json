@@ -1,0 +1,10 @@
+{
+  "description": "an Anim Blueprint of the mannequin",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "editor | call CopyAsset(\"/Engine/Tutorial/SubEditors/TutorialAssets/Character/TutorialTPP_AnimBlueprint\", \"/Game/E2E/ABP_RigTrace\")"
+  },
+  "assert": {
+    "pattern": "\\bABP_RigTrace\\b"
+  }
+}
