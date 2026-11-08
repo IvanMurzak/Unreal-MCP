@@ -102,11 +102,47 @@ concurrency:
   cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' && true }}
 
 jobs:
+  # Is this pull request documentation only? Then the heavy legs skip and the PR stays green through
+  # this job's own check (no `paths-ignore`: a PR without a check reads as unproven to the release
+  # train). The rule and its path list live in .github/scripts/docs-only.mjs. A skipped gate (a
+  # dispatch, a `train/` label) or a failed one leaves `docs_only` empty, and the legs run, so every
+  # leg carries `!cancelled()`: without it the implicit success() would skip it after a skipped gate.
+  #
+  # RUNNER: hosted on purpose, unlike the self-hosted UE legs. It has no fork guard, so a fork PR's
+  # code must not reach the owner's machines from here. Only the test step can fail the job. It runs
+  # first, so its failure skips the classify step, `docs_only` stays empty and the legs run.
+  changes:
+    name: docs-only gate
+    if: github.event_name == 'pull_request' && !contains(format(' {0}', join(github.event.pull_request.labels.*.name, ' ')), ' train/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10 # above the steps' sum, so only a step's own timeout fires
+    outputs:
+      docs_only: ${{ steps.classify.outputs.docs_only }}
+    steps:
+      - id: checkout
+        uses: actions/checkout@v5
+        continue-on-error: true
+        timeout-minutes: 3
+        with:
+          fetch-depth: 2 # the merge commit and both parents: docs-only.mjs diffs HEAD^1..HEAD
+          sparse-checkout: .github # the scripts and the workflow its test reads
+          persist-credentials: false
+      - name: Test the gate
+        if: steps.checkout.outcome == 'success'
+        timeout-minutes: 2
+        run: node --test .github/scripts/docs-only.test.mjs
+      - id: classify
+        continue-on-error: true
+        timeout-minutes: 1
+        run: node .github/scripts/docs-only.mjs
+
   # (a) bridge — .NET 9 sidecar build + xUnit on BOTH hosted OSes (the sidecar
   # ships per-RID binaries, so cross-OS test coverage matters). 0 errors / 0
   # failures required.
   bridge:
     name: bridge build + xUnit (${{ matrix.os }})
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' }}
     runs-on: ${{ matrix.os }}
     # A hang guard, not a budget.
     timeout-minutes: 15
@@ -201,6 +237,8 @@ jobs:
   # A reusable workflow does not inherit this workflow's `env`, so the chain lock is
   # forwarded as inputs (both empty on an ordinary run).
   test-cli:
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' }}
     uses: ./.github/workflows/test_cli.yml
     with:
       lock: ${{ inputs.lock }}
@@ -218,7 +256,8 @@ jobs:
     # originating from THIS repo, never a fork. A fork PR must never execute its
     # checked-out code on the self-hosted runner (see docs/RELEASING.md). Manual
     # dispatches (trusted) are unaffected by the fork clause.
-    if: ${{ vars.UNREAL_RUNNER_READY == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' && vars.UNREAL_RUNNER_READY == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     # PR-gating covers the same UE 5.5–5.8 set as release.yml: an API missing on an
     # older engine (e.g. FUObjectItem::GetObject() before 5.6) must fail the PR, not
     # the release. No max-parallel: all legs queue at once and whichever machine frees up first
@@ -336,7 +375,9 @@ jobs:
   connection-smoke:
     name: connection + tool smoke (UE ${{ matrix.ue }}, custom server)
     needs: [plugin]
-    if: ${{ vars.UNREAL_SMOKE_READY == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    # The explicit result keeps "runs only after a green plugin job". The implicit success() cannot:
+    # it also looks at `changes` through `plugin`, so a skipped gate would skip this job on a dispatch.
+    if: ${{ !cancelled() && needs.plugin.result == 'success' && vars.UNREAL_SMOKE_READY == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     # Engine-versioned runner label (unreal-5-8 for UE 5.8): the job only lands on a machine
     # that has this engine installed. Expressions have no replace(), hence the lookup; an
     # unmapped version yields e.g. `unreal-5.10`, which no runner carries (add it to the map).
