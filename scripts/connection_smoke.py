@@ -471,7 +471,7 @@ def _normalised_path_text(text: str) -> str:
     return re.sub(r"[\\/]+", "/", text).casefold()
 
 
-def opens_project(command_line: str | None, project: Path | str) -> bool:
+def opens_project(command_line: str, project: str) -> bool:
     """Whether a command line names exactly this .uproject: the full path, as a whole argument.
 
     Never compare the stem: every checkout, agent worktree and agent-lab project on a machine shares
@@ -479,8 +479,8 @@ def opens_project(command_line: str | None, project: Path | str) -> bool:
     in another spelling (relative, via a junction) does not match, which leaves an editor alive
     rather than stopping one that is not ours.
     """
-    needle = re.escape(_normalised_path_text(str(project)))
-    return re.search(rf"""(?:^|[\s"'=]){needle}(?:$|[\s"'])""", _normalised_path_text(command_line or "")) is not None
+    needle = re.escape(_normalised_path_text(project))
+    return re.search(rf"""(?:^|[\s"'=]){needle}(?:$|[\s"'])""", _normalised_path_text(command_line)) is not None
 
 
 def list_editor_processes() -> list[tuple[int, str]]:
@@ -502,7 +502,7 @@ def list_editor_processes() -> list[tuple[int, str]]:
 
 def kill_existing_editors(project: Path) -> int:
     """Stop the editors left on this exact project (a second one would fight it for the project's files)."""
-    pids = [pid for pid, command_line in list_editor_processes() if opens_project(command_line, project)]
+    pids = [pid for pid, command_line in list_editor_processes() if opens_project(command_line, str(project))]
     for pid in pids:
         kill_tree(pid)
     return len(pids)

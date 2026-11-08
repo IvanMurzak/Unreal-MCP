@@ -5,7 +5,7 @@ import hashlib
 import importlib.util
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 import re
 import subprocess
 import sys
@@ -401,8 +401,7 @@ class ConnectionSmokeKillTests(unittest.TestCase):
     PROJECT = r"C:\actions-runner\_work\host\UnrealTestProject.uproject"
     EDITOR = r'"C:\Program Files\Epic Games\UE_5.8\Engine\Binaries\Win64\UnrealEditor-Cmd.exe"'
 
-    def setUp(self):
-        self.smoke = load("connection_smoke", ROOT / "scripts/connection_smoke.py")
+    smoke = load("connection_smoke", ROOT / "scripts/connection_smoke.py")
 
     def opens(self, *arguments: str, project: str = PROJECT) -> bool:
         return self.smoke.opens_project(" ".join([self.EDITOR, *arguments, "-nullrhi"]), project)
@@ -443,16 +442,16 @@ class ConnectionSmokeKillTests(unittest.TestCase):
 
     def test_an_unreadable_command_line_does_not_match(self):
         self.assertFalse(self.smoke.opens_project("", self.PROJECT))
-        self.assertFalse(self.smoke.opens_project(None, self.PROJECT))
 
     def test_only_the_editor_of_the_exact_project_is_stopped(self):
+        forward = self.PROJECT.replace("\\", "/").lower()
         editors = [(101, f'{self.EDITOR} "{self.PROJECT}" -nullrhi'),
                    (102, rf'{self.EDITOR} "D:\aigd-labs\i2-vfx\UnrealTestProject.uproject" -nullrhi'),
                    (103, ""),
-                   (104, f"{self.EDITOR} {self.PROJECT.replace(chr(92), '/').lower()}")]
+                   (104, f"{self.EDITOR} {forward}")]
         with mock.patch.object(self.smoke, "list_editor_processes", return_value=editors), \
                 mock.patch.object(self.smoke, "kill_tree") as kill_tree:
-            self.assertEqual(self.smoke.kill_existing_editors(self.PROJECT), 2)
+            self.assertEqual(self.smoke.kill_existing_editors(PureWindowsPath(self.PROJECT)), 2)
         self.assertEqual([call.args[0] for call in kill_tree.call_args_list], [101, 104])
 
 
