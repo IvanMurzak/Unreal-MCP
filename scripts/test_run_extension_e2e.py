@@ -315,6 +315,7 @@ def rig_receipt(method, result):
 CREATE_RIG = 'CreateRig(string Path, string Mesh)'
 LOOK_AT = 'AddLookAt(ControlRigBlueprint Rig, string Bone, string Target, string Weight, string Axis, string After)'
 ADD_VARIABLE = 'AddVariable(ControlRigBlueprint Rig, string Name, string Type, string Default, bool bPublic)'
+SET_VARIABLE = 'AddSetVariable(ControlRigBlueprint Rig, string Variable, string Value, string After, string Name)'
 WIRE = 'AddToAnimBlueprint(AnimBlueprint AnimBlueprint, ControlRigBlueprint Rig, string After, bool bBindVariables)'
 TRACK = ('TrackNearestActor(AnimBlueprint AnimBlueprint, string ActorClass, string LocationVariable, string WeightVariable, '
          'float Radius, float Speed)')
@@ -354,6 +355,53 @@ CONTROL_RIG = {
         '{"error": "error call-threw: AddUnit threw: CR_HeadLookAt has no rig graph"}'),
     'control-rig-lookat-9-cleanup-abp.e2e.json': (DELETED, NO_COUNT),
     'control-rig-lookat-9-cleanup-rig.e2e.json': (DELETED, NO_COUNT),
+    'control-rig-trace-00-missing-asset.e2e.json': (
+        text_result("warning asset-not-found: no asset at '/Game/E2E/NoSuchRigAsset': unreal.asset(path) is empty\n0 results\nNodes"),
+        text_result('0 results\nNodes')),
+    'control-rig-trace-01-create.e2e.json': (
+        rig_receipt(CREATE_RIG, 'ControlRigBlueprint#1297(CR_RigTrace)'), rig_receipt(CREATE_RIG, 'ControlRigBlueprint#1297(CR_RigTrace2)')),
+    'control-rig-trace-02-hit-variable.e2e.json': (rig_receipt(ADD_VARIABLE, 'Hit'), rig_receipt(ADD_VARIABLE, 'Hit_1')),
+    'control-rig-trace-03-height-variable.e2e.json': (rig_receipt(ADD_VARIABLE, 'HitZ'), rig_receipt(ADD_VARIABLE, 'HitZ_1')),
+    'control-rig-trace-04-trace.e2e.json': (
+        rig_receipt('AddUnit(ControlRigBlueprint Rig, string Unit, string Settings, string After, string Name)', 'Trace'),
+        rig_receipt('AddUnit(ControlRigBlueprint Rig, string Unit, string Settings, string After, string Name)', 'Trace_1')),
+    'control-rig-trace-05-store-hit.e2e.json': (rig_receipt(SET_VARIABLE, 'VariableNode'), NO_COUNT),
+    'control-rig-trace-06-store-height.e2e.json': (rig_receipt(SET_VARIABLE, 'VariableNode_1'), NO_COUNT),
+    'control-rig-trace-07-curve-refused.e2e.json': (
+        '{"error": "error call-threw: AddUnit threw: CR_RigTrace has no curve \'DebugHit\', so this node would silently do nothing. AddVariable, AddSetVariable, then RigValues"}',
+        '{"error": "error call-threw: AddUnit threw: no rig unit named SetCurveValue"}'),
+    'control-rig-trace-08-needs-play.e2e.json': (
+        '{"error": "error call-threw: RigValues threw: no Play In Editor session: a rig runs only while playing"}',
+        '{"error": "error call-threw: RigValues threw: no Control Rig runs in the play world"}'),
+    'control-rig-trace-09-anim-blueprint.e2e.json': (
+        text_result('1 result\n$ref|method|result\nEditor@1|CopyAsset(string Source, string Destination)|AnimBlueprint#88(ABP_RigTrace)'),
+        NO_COUNT),
+    'control-rig-trace-10-wire.e2e.json': (
+        rig_receipt(WIRE, 'AnimGraphNode_ControlRig_0 runs CR_RigTrace between Default Slot and Output Pose'), NO_COUNT),
+    'control-rig-trace-11-compile.e2e.json': (
+        text_result('1 result\n$ref|method|result\nAnimBlueprint#88|Compile()|{Succeeded:true,Errors:0,Warnings:0,Messages:[]}'),
+        text_result('1 result\n$ref|method|result\nAnimBlueprint#88|Compile()|{Succeeded:false,Errors:1,Warnings:0,Messages:[x]}')),
+    'control-rig-trace-12-floor.e2e.json': (
+        text_result('1 result\n$ref|method|result\nEditor@1|SpawnActorFromAsset(...)|StaticMeshActor#9(E2E_RigTraceFloor)'), NO_COUNT),
+    'control-rig-trace-13-mesh.e2e.json': (
+        text_result('1 result\n$ref|method|result\nEditor@1|SpawnActor(...)|SkeletalMeshActor#9(E2E_RigTraceMesh)'), NO_COUNT),
+    'control-rig-trace-14-mesh-setup.e2e.json': (
+        text_result('1 result\n$ref|member|old|new\nSkeletalMeshComponent#9|AnimClass|null|ABP_RigTrace_C'), NO_COUNT),
+    'control-rig-trace-15-play.e2e.json': (
+        text_result('1 result\n$ref|method|result\nEditor@1|StartPlay(bool bPaused)|{Playing:true,Paused:true}'),
+        text_result('1 result\n$ref|method|result\nEditor@1|StartPlay(bool bPaused)|{Playing:false,Paused:true}')),
+    'control-rig-trace-16-advance.e2e.json': (
+        text_result('1 result\n$ref|method|result\nEditor@1|AdvancePlay(...)|{Playing:true,FramesAdvanced:30}'),
+        text_result('1 result\n$ref|method|result\nEditor@1|AdvancePlay(...)|{Playing:true,FramesAdvanced:0}')),
+    'control-rig-trace-17-read.e2e.json': (
+        text_result('1 result\n$ref|method|result\nControlRigOperations#1|RigValues(string Rig)|[{Rig:CR_RigTrace,RigOrigin:"(5000, 0, 100)",Executions:30,Variables:{Hit:True,HitZ:"-100.000000"},Notes:[]}]'),
+        text_result('1 result\n$ref|method|result\nControlRigOperations#1|RigValues(string Rig)|[{Rig:CR_RigTrace,RigOrigin:"(5000, 0, 100)",Executions:30,Variables:{Hit:False,HitZ:"0.000000"},Notes:[]}]')),
+    'control-rig-trace-18-stop.e2e.json': (
+        text_result('1 result\n$ref|method|result\nEditor@1|StopPlay()|null'), NO_COUNT),
+    'control-rig-trace-19-cleanup-actors.e2e.json': (
+        text_result('2 results\n$ref|method|result\nStaticMeshActor#9|Destroy()|null'), NO_COUNT),
+    'control-rig-trace-20-cleanup-abp.e2e.json': (DELETED, NO_COUNT),
+    'control-rig-trace-21-cleanup-rig.e2e.json': (DELETED, NO_COUNT),
 }
 AUTHORING.update(CONTROL_RIG)
 
@@ -394,7 +442,7 @@ class CheckFileTests(unittest.TestCase):
         for plugin, folder in release.components().items():
             self.assertTrue(e2e.checks_for(plugin), plugin)
             self.assertEqual(list((folder / 'Tests/e2e/tools').glob('*.ps1')), [], plugin)
-        self.assertEqual(len(all_checks()), 121)
+        self.assertEqual(len(all_checks()), 143)
 
     def test_every_assert_matches_its_intended_shape_and_rejects_others(self):
         for (plugin, name), check in all_checks().items():
