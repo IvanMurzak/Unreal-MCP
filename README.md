@@ -153,6 +153,8 @@ Updating in place must always leave you running the **new** code. The risk is UE
   node bin/unreal-mcp-cli.js update <YourProject> --force    # re-copy even when versions match
   node bin/unreal-mcp-cli.js update <YourProject> --no-clean # keep the existing build cache
   node bin/unreal-mcp-cli.js update <YourProject> --no-extensions # leave the installed extensions as they are
+  node bin/unreal-mcp-cli.js update <YourProject> --no-self  # leave the CLI as it is
+  node bin/unreal-mcp-cli.js update <YourProject> --check    # only report; exit code 2 when something is outdated
   ```
 
 - **Manual copy → clear the cache yourself.** If you overwrite `<YourProject>/Plugins/UnrealMCP/` by hand, **close the editor first**, delete `<YourProject>/Plugins/UnrealMCP/Intermediate/` and the C++ `Binaries/` (keep `Binaries/ThirdParty/` if a bundled bridge is present), then relaunch so UE recompiles cleanly.
@@ -368,7 +370,7 @@ The full 18-command surface:
 | `run-tool` | Invoke an MCP tool via the project's local MCP server (HTTP) |
 | `run-system-tool` | Invoke a system tool via the project's local MCP server (HTTP) |
 | `bootstrap-local` | Build the bridge from source into `<project>/Intermediate/UnrealMCP` (the server is downloaded by `setup-mcp`, not built) |
-| `update` | Update the UnrealMCP plugin installed in a project from a local checkout or the version-matched GitHub source asset |
+| `update [path]` | Update everything: the project's UnrealMCP plugin and installed extensions to their latest versions (close the editor first), then `unreal-mcp-cli` itself. Outside a project it updates only the CLI. `--check` reports (exit 2 when something is outdated); `--no-self`, `--no-project`, `--no-extensions`, `--no-clean` skip a step |
 | `install-engine` | Detect installed Unreal engines; for a missing version, link to the Epic launcher |
 | `setup-skills` | Write a Claude-Code skill stub that drives this project's Unreal MCP server |
 

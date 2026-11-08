@@ -5,11 +5,13 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { installExtension } from './install-extension.js';
+import { listProcesses, selectEditorProcesses, type RunningProcess } from './close.js';
+import { compareSemver, installExtension } from './install-extension.js';
 import { installPlugin } from './install-plugin.js';
 import { cleanPluginBuildCache } from './clean-plugin.js';
 import { asError } from '../utils/error.js';
 import { isSymlink } from '../utils/fs.js';
+import { findUProjectFile } from '../utils/project.js';
 import { emitProgress } from './progress.js';
 import { PACKAGE_VERSION } from '../version.js';
 import { defaultCorePluginSource, resolvePluginSource } from './plugin-source.js';
@@ -37,6 +39,10 @@ export interface UpdateOptions {
   noExtensions?: boolean;
   /** Override the extensions index cache location, as `installExtension` does (isolated tests). */
   indexCachePath?: string;
+  /** Only report what would change; write nothing. */
+  dryRun?: boolean;
+  /** Test seam: the running processes, to refuse replacing files under an open editor. */
+  listProcessesImpl?: () => RunningProcess[];
   /**
    * Skip wiping the installed plugin's stale UE C++ build cache
    * (`Intermediate/` + C++ `Binaries/`) after a copy-mode update. Cleaning is
@@ -68,6 +74,8 @@ export interface UpdateSuccess {
   updated: boolean;
   /** Plugin names of the installed extensions this update moved to a new version. */
   extensionsUpdated: string[];
+  /** The installed extensions checked, as found before any write. */
+  extensions: ExtensionUpdateItem[];
   /**
    * `true` when the stale UE build cache was wiped after this update (copy
    * mode, `noClean` not set). `false` for no-op updates, junction installs,
@@ -76,6 +84,15 @@ export interface UpdateSuccess {
   cleaned: boolean;
   installedPath: string;
   warnings: string[];
+}
+
+export interface ExtensionUpdateItem {
+  pluginName: string;
+  extensionId: string;
+  from: string | null;
+  /** The index's newest version; null when only the bundled catalog knows the extension. */
+  to: string | null;
+  status: 'outdated' | 'current' | 'unknown';
 }
 
 export interface UpdateFailure {
@@ -141,9 +158,21 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
       opts.force === true ||
       fromVersion === null ||
       stripLeadingV(fromVersion ?? '') !== stripLeadingV(toVersion ?? '');
+    const extensions = opts.noExtensions ? [] : await planInstalledExtensions(projectDir, opts, warnings);
+    if (opts.dryRun) {
+      return { kind: 'success', success: true, fromVersion, toVersion, updated: false, extensionsUpdated: [], extensions, cleaned: false, installedPath, warnings };
+    }
+
+    // Replacing files under a running editor can leave it with half-loaded modules.
+    if (needsUpdate || extensions.some((extension) => extension.status !== 'current')) {
+      const running = runningEditors(projectDir, opts);
+      if (running) throw new Error(`Close the Unreal Editor first (PID ${running}): it has this project open.`);
+    }
+
     if (!needsUpdate) {
+      const extensionsUpdated = await updateInstalledExtensions(projectDir, extensions, opts, warnings);
       emitProgress(opts.onProgress, { phase: 'done', message: 'Plugin already up to date.' });
-      return { kind: 'success', success: true, fromVersion, toVersion, updated: false, extensionsUpdated: [], cleaned: false, installedPath, warnings };
+      return { kind: 'success', success: true, fromVersion, toVersion, updated: false, extensionsUpdated, extensions, cleaned: false, installedPath, warnings };
     }
 
     const resolvedSource = await resolvePluginSource({
@@ -200,10 +229,10 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
       );
     }
 
-    const extensionsUpdated = opts.noExtensions ? [] : await updateInstalledExtensions(projectDir, opts, warnings);
+    const extensionsUpdated = await updateInstalledExtensions(projectDir, extensions, opts, warnings);
 
     emitProgress(opts.onProgress, { phase: 'done', message: 'Plugin updated.' });
-    return { kind: 'success', success: true, fromVersion, toVersion, updated: true, extensionsUpdated, cleaned, installedPath, warnings };
+    return { kind: 'success', success: true, fromVersion, toVersion, updated: true, extensionsUpdated, extensions, cleaned, installedPath, warnings };
   } catch (err: unknown) {
     return {
       kind: 'failure',
@@ -216,14 +245,22 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
   }
 }
 
+function runningEditors(projectDir: string, opts: UpdateOptions): number | null {
+  const uprojectPath = findUProjectFile(projectDir);
+  if (uprojectPath === null) return null;
+  const processes = (opts.listProcessesImpl ?? listProcesses)();
+  return selectEditorProcesses(processes, projectDir, uprojectPath)[0]?.pid ?? null;
+}
+
 /**
- * Bring the extensions under `Plugins/` to their latest versions. Only known extensions copied into the project
- * qualify: other plugins are not ours, and a symlink is a dev checkout. One the user disabled stays disabled.
- * Best effort: the plugin update already succeeded, so a failure is a warning.
+ * The extensions under `Plugins/` and their latest versions. Only known extensions copied into the
+ * project qualify: other plugins are not ours, and a symlink is a dev checkout. Best effort: this must
+ * never fail a plugin update, so a problem is a warning.
  */
-async function updateInstalledExtensions(projectDir: string, opts: UpdateOptions, warnings: string[]): Promise<string[]> {
+async function planInstalledExtensions(projectDir: string, opts: UpdateOptions, warnings: string[]): Promise<ExtensionUpdateItem[]> {
   try {
     const pluginsDir = path.join(projectDir, 'Plugins');
+    if (!fs.existsSync(pluginsDir)) return [];
     const candidates = fs.readdirSync(pluginsDir).filter((name) => {
       const dir = path.join(pluginsDir, name);
       return name !== 'UnrealMCP' && !isSymlink(dir) && fs.existsSync(path.join(dir, `${name}.uplugin`));
@@ -231,30 +268,58 @@ async function updateInstalledExtensions(projectDir: string, opts: UpdateOptions
     if (candidates.length === 0) return [];
 
     const { index } = await loadExtensionsIndex({ fetchImpl: opts.fetchImpl, cachePath: opts.indexCachePath });
-    const known = [...(index?.extensions ?? []), ...EXTENSIONS_CATALOG];
+    const indexed = index?.extensions ?? [];
 
-    const updated: string[] = [];
-    for (const pluginName of candidates) {
-      const extension = known.find((candidate) => candidate.pluginName.toLowerCase() === pluginName.toLowerCase());
-      if (!extension) continue;
-      const result = await installExtension({
-        projectDir,
-        extensionId: extension.extensionId,
-        fetchImpl: opts.fetchImpl,
-        indexCachePath: opts.indexCachePath,
-        keepDisabled: true,
-        onProgress: opts.onProgress,
-      });
-      if (result.kind === 'failure') {
-        warnings.push(`Could not update extension ${pluginName}: ${result.error.message}`);
-        continue;
-      }
-      warnings.push(...result.warnings);
-      if (result.outcome === 'updated') updated.push(pluginName);
-    }
-    return updated;
+    return candidates.flatMap((pluginName): ExtensionUpdateItem[] => {
+      const matches = (candidate: { pluginName: string }): boolean => candidate.pluginName.toLowerCase() === pluginName.toLowerCase();
+      const online = indexed.find(matches);
+      const extension = online ?? EXTENSIONS_CATALOG.find(matches);
+      if (!extension) return [];
+
+      const from = readPluginVersion(path.join(pluginsDir, pluginName, `${pluginName}.uplugin`));
+      const to = online?.version ?? null;
+      const status = to === null || from === null
+        ? 'unknown'
+        : compareSemver(stripLeadingV(from), stripLeadingV(to)) < 0 ? 'outdated' : 'current';
+      return [{ pluginName, extensionId: extension.extensionId, from, to, status }];
+    });
   } catch (err: unknown) {
-    warnings.push(`Could not update the installed extensions: ${asError(err).message}`);
+    warnings.push(`Could not check the installed extensions: ${asError(err).message}`);
     return [];
+  }
+}
+
+/** Apply the plan. One the user disabled stays disabled. The plugin update already succeeded, so a failure is a warning. */
+async function updateInstalledExtensions(
+  projectDir: string,
+  extensions: readonly ExtensionUpdateItem[],
+  opts: UpdateOptions,
+  warnings: string[],
+): Promise<string[]> {
+  const updated: string[] = [];
+  for (const extension of extensions.filter((candidate) => candidate.status !== 'current')) {
+    const result = await installExtension({
+      projectDir,
+      extensionId: extension.extensionId,
+      fetchImpl: opts.fetchImpl,
+      indexCachePath: opts.indexCachePath,
+      keepDisabled: true,
+      onProgress: opts.onProgress,
+    });
+    if (result.kind === 'failure') {
+      warnings.push(`Could not update extension ${extension.pluginName}: ${result.error.message}`);
+      continue;
+    }
+    warnings.push(...result.warnings);
+    if (result.outcome === 'updated') updated.push(extension.pluginName);
+  }
+  return updated;
+}
+
+/** The nearest folder at or above `start` holding a `.uproject`, or null. */
+export function findUnrealProjectRoot(start: string): string | null {
+  for (let dir = path.resolve(start); ; dir = path.dirname(dir)) {
+    if (findUProjectFile(dir) !== null) return dir;
+    if (dir === path.dirname(dir)) return null;
   }
 }

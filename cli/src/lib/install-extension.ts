@@ -628,7 +628,7 @@ function unique(values: readonly string[]): string[] {
 }
 
 /** Numeric dotted-version compare (`1.2.0` vs `1.10.0`). Returns -1 / 0 / 1. Non-numeric parts compare as 0. */
-function compareSemver(a: string, b: string): number {
+export function compareSemver(a: string, b: string): number {
   const pa = a.split('.').map((x) => parseInt(x, 10) || 0);
   const pb = b.split('.').map((x) => parseInt(x, 10) || 0);
   const len = Math.max(pa.length, pb.length);

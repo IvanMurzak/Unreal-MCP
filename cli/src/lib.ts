@@ -90,7 +90,7 @@ export { login } from './lib/login.js';
 export { getStatus } from './lib/status.js';
 export { waitForReady } from './lib/wait-for-ready.js';
 export { bootstrapLocal, planBuildSteps, ridForPlatform } from './lib/bootstrap-local.js';
-export { update, readPluginVersion } from './lib/update.js';
+export { update, update as updateProject, findUnrealProjectRoot, readPluginVersion } from './lib/update.js';
 export { cleanPluginBuildCache, BUNDLED_BRIDGE_DIRNAME } from './lib/clean-plugin.js';
 export { setupSkills, renderSkill } from './lib/setup-skills.js';
 export {
