@@ -237,7 +237,7 @@ The `unreal-rql` skill (written by `unreal-skill-generate`) teaches the language
 Logs, PIE state and the selection are RQL: `console | where Verbosity == "Error"`, `editor | set IsPlaying = true`,
 `editor | set Selection = [...]`. Play testing simulates the game inside the call (deterministic, independent of the
 editor ticking between calls): `editor | call StartPlay()`, `editor | call AdvancePlay(1.5, 0, "W, LeftShift")` (holds keys
-for 1.5 s, returns the pawn's location, velocity, movement mode and applied mapping contexts), `editor | call StopPlay()`;
+for 1.5 s, returns the pawn's location, velocity, how far the call moved it, movement mode and applied mapping contexts), `editor | call StopPlay()`;
 the Enhanced Input extension adds `enhancedInput | call InjectInput(action, value, seconds)` ([docs/rql.md](docs/rql.md#play-testing)).
 
 </details>

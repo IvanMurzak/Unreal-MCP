@@ -5,6 +5,7 @@
 
 #include "UnrealMcpRqlSpecHelpers.h"
 #include "UnrealMcpRqlPlay.h"
+#include "UnrealMcpRqlSpecFixtures.h"
 
 #include "Editor.h"
 #include "Engine/World.h"
@@ -174,7 +175,8 @@ void FUnrealMcpRqlPlaySpec::Define()
 			const TSharedPtr<FJsonObject> Advance = PlayCall(TEXT("AdvancePlay"), TEXT(R"({"lit":0},{"lit":2},{"lit":""})"));
 			FString Json;
 			FJsonSerializer::Serialize(Advance.ToSharedRef(), TJsonWriterFactory<>::Create(&Json));
-			TestTrue(*FString::Printf(TEXT("the state is in the receipt (%s)"), *Json.Left(400)), Json.Contains(TEXT("PawnClass")) && Json.Contains(TEXT("FramesAdvanced")));
+			TestTrue(*FString::Printf(TEXT("the state is in the receipt (%s)"), *Json.Left(400)), Json.Contains(TEXT("PawnClass")) && Json.Contains(TEXT("FramesAdvanced"))
+				&& Json.Contains(TEXT("Moved")) && Json.Contains(TEXT("MeasuredVelocity")) && Json.Contains(TEXT("Turned")));
 
 			const TSharedPtr<FJsonObject> Stop = PlayCall(TEXT("StopPlay"));
 			TestTrue(*FString::Printf(TEXT("StopPlay ok (%s)"), *Codes(Stop)), IsOk(Stop));
@@ -232,6 +234,84 @@ void FUnrealMcpRqlPlaySpec::Define()
 			Directions(TEXT("second pawn"));
 			Controller->Possess(First);
 			Directions(TEXT("first pawn again"));
+		});
+
+		It("measures how far held input moved the pawn, and notes held input the pawn did not respond to", [this]()
+		{
+			EndPlay();
+			if (!PreparePlayWorld())
+				return;
+			FString Error;
+			if (!TestTrue(*FString::Printf(TEXT("started (%s)"), *Error), UnrealMcpRql::StartPlay(/*bPaused*/ true, Error)))
+				return;
+			UWorld* World = UnrealMcpRql::PlayWorld();
+			APlayerController* Controller = UnrealMcpRql::PlayController();
+			APawn* DefaultPawn = Controller ? Controller->GetPawn() : nullptr;
+			if (!TestNotNull(TEXT("player 0 possesses a pawn"), DefaultPawn))
+				return;
+
+			auto Advance = [this](double Seconds, int32 Frames, const TCHAR* Keys)
+			{
+				FUnrealMcpPlayState State;
+				FString AdvanceError;
+				TestTrue(*FString::Printf(TEXT("held '%s' (%s)"), Keys, *AdvanceError), UnrealMcpRql::AdvancePlayAndRead(Seconds, Frames, Keys, State, AdvanceError));
+				return State;
+			};
+			auto HasNote = [](const FUnrealMcpPlayState& State, const TCHAR* Text)
+			{
+				return State.Notes.ContainsByPredicate([Text](const FString& Note) { return Note.Contains(Text); });
+			};
+			auto NotedNothing = [&HasNote](const FUnrealMcpPlayState& State) { return HasNote(State, TEXT("if this input should move it")); };
+
+			// A pawn without a movement component: W moves it, Velocity stays 0 and the measured fields read the motion.
+			const FVector SelfMovingStart(0.0, 0.0, 8000.0);
+			AUnrealMcpRqlSpecSelfMovingPawn* Car = World->SpawnActor<AUnrealMcpRqlSpecSelfMovingPawn>(SelfMovingStart, FRotator::ZeroRotator);
+			if (!TestNotNull(TEXT("a self-moving pawn"), Car))
+				return;
+			Controller->Possess(Car);
+			const FUnrealMcpPlayState Driven = Advance(0.5, 0, TEXT("W"));
+			TestEqual(TEXT("Velocity keeps its meaning: no movement component, 0"), Driven.Speed, 0.0);
+			TestTrue(*FString::Printf(TEXT("Moved reads the motion (%f)"), Driven.Moved), Driven.Moved > 100.0);
+			TestEqual(TEXT("Moved is the location change"), Driven.Moved, FVector::Dist(SelfMovingStart, Driven.Location), 1e-3);
+			TestEqual(TEXT("MeasuredVelocity is that change over the game time"), Driven.MeasuredVelocity.X, Driven.Moved * UnrealMcpRql::PlayFrameRate / 31.0, 5.0);
+			TestFalse(TEXT("what moved gets no note"), NotedNothing(Driven));
+
+			// Blocked: the same key now moves nothing, and a note says so. A short press does not get one.
+			World->SpawnActor<AUnrealMcpRqlSpecSelfMovingPawn>(Driven.Location + FVector(100.5, 0.0, 0.0), FRotator::ZeroRotator);
+			const FUnrealMcpPlayState Blocked = Advance(0.5, 0, TEXT("W"));
+			TestTrue(*FString::Printf(TEXT("blocked: not moved (%f)"), Blocked.Moved), Blocked.Moved < 1.0);
+			TestTrue(*FString::Printf(TEXT("blocked: noted (%s)"), *FString::Join(Blocked.Notes, TEXT(" | "))),
+				HasNote(Blocked, TEXT("Held W for 0.50 s and the pawn neither moved nor turned")));
+			const TSharedPtr<FJsonObject> BlockedCall = PlayCall(TEXT("AdvancePlay"), TEXT(R"({"lit":0.5},{"lit":0},{"lit":"W"})"));
+			FString BlockedJson;
+			FJsonSerializer::Serialize(BlockedCall.ToSharedRef(), TJsonWriterFactory<>::Create(&BlockedJson));
+			TestTrue(*FString::Printf(TEXT("the operation's result carries the note (%s)"), *BlockedJson.Left(1000)), BlockedJson.Contains(TEXT("neither moved nor turned")));
+			TestFalse(TEXT("a 2-frame press gets no note"), NotedNothing(Advance(0.0, 2, TEXT("W"))));
+			TestFalse(TEXT("no input gets no note"), NotedNothing(Advance(0.5, 0, TEXT(""))));
+			TestFalse(TEXT("an axis at 0 gets no note"), NotedNothing(Advance(0.5, 0, TEXT("Gamepad_LeftY=0"))));
+
+			// A round trip inside the call (a jump that lands): it ends where it began, but the input did move it.
+			const FUnrealMcpPlayState Lifted = Advance(0.5, 0, TEXT("E"));
+			TestTrue(*FString::Printf(TEXT("the lift ended where it began (%f)"), Lifted.Moved), Lifted.Moved < 1.0);
+			TestFalse(*FString::Printf(TEXT("a round trip gets no note (%s)"), *FString::Join(Lifted.Notes, TEXT(" | "))), NotedNothing(Lifted));
+
+			// Only turning in place while a key is held: reported, with the turn.
+			const FUnrealMcpPlayState Turned = Advance(0.5, 0, TEXT("A"));
+			TestTrue(*FString::Printf(TEXT("Turned reads the turn (%f)"), Turned.Turned), Turned.Turned > 30.0);
+			TestTrue(*FString::Printf(TEXT("turned in place: noted (%s)"), *FString::Join(Turned.Notes, TEXT(" | "))),
+				HasNote(Turned, TEXT("degrees without moving")));
+
+			// A look axis: the DefaultPawn stays where it is, but the camera turned, so the input did something.
+			Controller->Possess(DefaultPawn);
+			const FRotator LookStart = Controller->GetControlRotation();
+			const FUnrealMcpPlayState Looked = Advance(0.5, 0, TEXT("MouseX=1"));
+			TestFalse(*FString::Printf(TEXT("the camera turned (%s -> %s)"), *LookStart.ToString(), *Looked.ControlRotation.ToString()), Looked.ControlRotation.Equals(LookStart, 1.0));
+			TestFalse(*FString::Printf(TEXT("a look axis gets no note (%s)"), *FString::Join(Looked.Notes, TEXT(" | "))), NotedNothing(Looked));
+
+			// A pawn with a movement component: both readings agree, and a plain read measures nothing.
+			const FUnrealMcpPlayState Flown = Advance(0.5, 0, TEXT("W"));
+			TestTrue(*FString::Printf(TEXT("the DefaultPawn moved (%f) with a Velocity (%f)"), Flown.Moved, Flown.Speed), Flown.Moved > 50.0 && Flown.Speed > 0.0);
+			TestEqual(TEXT("a plain read measures nothing"), UnrealMcpRql::ReadPlayState().Moved, 0.0);
 		});
 
 		It("lists the play world's actors in playActors and reads PlayState in a query", [this]()

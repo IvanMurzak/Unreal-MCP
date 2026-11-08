@@ -780,13 +780,9 @@ void UUnrealMcpRqlEditorApi::StopPlay()
 FUnrealMcpPlayState UUnrealMcpRqlEditorApi::AdvancePlay(double Seconds, int32 Frames, const FString& Keys)
 {
 	FString Error;
-	int32 Advanced = 0;
-	TArray<FString> Notes;
-	if (!UnrealMcpRql::AdvancePlayWithKeys(Seconds, Frames, Keys, Advanced, Error, &Notes))
+	FUnrealMcpPlayState State;
+	if (!UnrealMcpRql::AdvancePlayAndRead(Seconds, Frames, Keys, State, Error))
 		return Failed<FUnrealMcpPlayState>(Error);
-	FUnrealMcpPlayState State = UnrealMcpRql::ReadPlayState();
-	State.FramesAdvanced = Advanced;
-	State.Notes.Append(Notes);
 	return State;
 }
 
