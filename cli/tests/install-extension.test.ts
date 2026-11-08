@@ -510,7 +510,8 @@ describe('installExtension (download + failures)', () => {
 
   it('fails (no throw) for an unknown extension with no --source', async () => {
     const project = makeProject();
-    const r = await installExtension({ projectDir: project, extensionId: 'com.unknown.ext' });
+    const fetchImpl = (async () => { throw new Error('offline'); }) as unknown as typeof fetch;
+    const r = await installExtension({ projectDir: project, extensionId: 'com.unknown.ext', fetchImpl, indexCachePath: path.join(tmp(), 'index.json') });
     expect(r.kind).toBe('failure');
     if (r.kind === 'failure') expect(r.error.message).toMatch(/Unknown extension/);
   });
