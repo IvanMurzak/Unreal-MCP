@@ -194,11 +194,13 @@ void FUnrealMcpRqlPlaySpec::Define()
 			if (!TestNotNull(TEXT("player 0 possesses a pawn"), Possessed))
 				return;
 
-			// The DefaultPawn flies with W / S forward and back and D / A right and left of the control rotation (zero here).
-			auto Fly = [this, Controller](const TCHAR* Keys, const FVector& Direction, const TCHAR* When)
+			// The DefaultPawn flies with W / S forward and back and D / A right and left of the control rotation (the player
+			// start's or the possessed pawn's): Local is in that frame.
+			auto Fly = [this, Controller](const TCHAR* Keys, const FVector& Local, const TCHAR* When)
 			{
 				int32 Advanced = 0;
 				FString HoldError;
+				const FVector Direction = Controller->GetControlRotation().RotateVector(Local);
 				const FVector Before = UnrealMcpRql::ReadPlayState().Location;
 				TestTrue(*FString::Printf(TEXT("%s: held %s (%s)"), When, Keys, *HoldError), UnrealMcpRql::AdvancePlayWithKeys(0.25, 0, Keys, Advanced, HoldError));
 				const FVector Moved = UnrealMcpRql::ReadPlayState().Location - Before;
