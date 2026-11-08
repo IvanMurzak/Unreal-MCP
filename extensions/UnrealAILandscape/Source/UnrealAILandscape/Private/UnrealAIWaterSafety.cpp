@@ -3,69 +3,73 @@
 
 #include "UnrealAIWaterSafety.h"
 
+#include "ActorFactories/ActorFactory.h"
+#include "Containers/Ticker.h"
+#include "Editor.h"
+#include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "EngineUtils.h"
-#include "Landscape.h"
-#include "LandscapeBlueprintBrushBase.h"
 #include "LandscapeSettings.h"
 #include "Materials/Material.h"
+#include "Misc/CoreDelegates.h"
 #include "WaterBodyActor.h"
 #include "WaterBodyComponent.h"
+#include "WaterSplineComponent.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogUnrealAIWaterSafety, Log, All);
 
 namespace UnrealAIWaterSafetyLocal
 {
-	/** The name the Water plugin's brush asks for (AWaterLandscapeBrush::SetTargetLandscape). */
-	const FName WaterLayerName(TEXT("Water"));
-
-	FDelegateHandle WorldInitHandle;
-	FDelegateHandle WorldCleanupHandle;
-	TMap<TWeakObjectPtr<UWorld>, FDelegateHandle> Watched;
-	/** How many FWaterSpawnScopes are alive (they nest). */
+	bool bPreviousDialog = true;
+	FDelegateHandle ActorAddedHandle;
+	FDelegateHandle EngineInitHandle;
+	/** How many FWaterSpawnScopes are alive (they nest): their bodies get their operation's setup, not the repair. */
 	int32 SpawnScopes = 0;
+	/** Bodies placed without the Water defaults, repaired on the next tick (after their spawner had its turn). */
+	TArray<TWeakObjectPtr<AWaterBody>> Pending;
 
-	/** Whether spawning @p Actor can make the Water editor ask the landscape for a "Water" edit layer. */
-	bool NeedsWaterLayer(const AActor* Actor)
+	void RepairPending()
 	{
-		if (const AWaterBody* Body = Cast<AWaterBody>(Actor))
+		TArray<TWeakObjectPtr<AWaterBody>> Bodies = MoveTemp(Pending);
+		for (const TWeakObjectPtr<AWaterBody>& Weak : Bodies)
 		{
-			const UWaterBodyComponent* Component = Body->GetWaterBodyComponent();
-			return Component && Component->bAffectsLandscape;
+			AWaterBody* Body = Weak.Get();
+			const UWaterBodyComponent* Component = Body ? Body->GetWaterBodyComponent() : nullptr;
+			// A factory placement (Place Actors) has its defaults by now; only a bare spawn still has no material.
+			if (Component && !Component->GetWaterMaterial() && !Component->GetWaterMeshOverride() && UnrealAIWaterSafety::ApplyWaterDefaults(Body))
+				UE_LOG(LogUnrealAIWaterSafety, Log, TEXT("%s was placed without the Water defaults (no material, invisible): gave it the Place Actors defaults of its type"), *Body->GetActorLabel());
 		}
-		return Actor && Actor->IsA<ALandscapeBlueprintBrushBase>();
 	}
 
-	void Watch(UWorld* World)
+	void OnActorAdded(AActor* Actor)
 	{
-		if (!World || World->WorldType != EWorldType::Editor || Watched.Contains(World))
+		AWaterBody* Body = Cast<AWaterBody>(Actor);
+		const UWorld* World = Body ? Body->GetWorld() : nullptr;
+		if (!World || World->WorldType != EWorldType::Editor || SpawnScopes > 0 || Body->bIsEditorPreviewActor || Body->HasAnyFlags(RF_Transient))
 			return;
-		const TWeakObjectPtr<UWorld> Weak(World);
-		Watched.Add(World, World->AddOnActorPreSpawnInitialization(FOnActorSpawned::FDelegate::CreateLambda([Weak](AActor* Actor)
+		if (Pending.IsEmpty())
 		{
-			if (SpawnScopes > 0)
+			FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda([](float)
 			{
-				if (const AWaterBody* Body = Cast<AWaterBody>(Actor))
-				{
-					if (UWaterBodyComponent* Component = Body->GetWaterBodyComponent())
-						Component->bAffectsLandscape = false;
-				}
-				return;
-			}
-			if (UWorld* Owner = Weak.Get(); Owner && NeedsWaterLayer(Actor))
-			{
-				const int32 Added = UnrealAIWaterSafety::PrepareWaterEditLayers(Owner);
-				if (Added > 0)
-					UE_LOG(LogUnrealAIWaterSafety, Log, TEXT("added a \"Water\" edit layer to %d landscape(s) before %s, so the Water plugin does not open the modal \"Insert New Landscape Edit Layer\" dialog"), Added, *Actor->GetClass()->GetName());
-			}
-		})));
+				RepairPending();
+				return false; // once
+			}));
+		}
+		Pending.AddUnique(Body);
 	}
 
-	void Unwatch(UWorld* World)
+	/**
+	 * UActorFactory::PostSpawnActor (what the Place Actors panel runs after spawning: the Water factories' defaults) is
+	 * protected; a pointer to it taken in a derived class's scope calls it (virtually) on any factory. Never instantiated.
+	 */
+	struct FPostSpawnAccess : UActorFactory
 	{
-		FDelegateHandle Handle;
-		if (World && Watched.RemoveAndCopyValue(World, Handle))
-			World->RemoveOnActorPreSpawnInitialization(Handle);
+		static constexpr auto PostSpawn = &FPostSpawnAccess::PostSpawnActor;
+	};
+
+	void Register()
+	{
+		if (GEngine && !ActorAddedHandle.IsValid())
+			ActorAddedHandle = GEngine->OnLevelActorAdded().AddStatic(&OnActorAdded);
 	}
 }
 
@@ -75,57 +79,87 @@ bool UnrealAIWaterSafety::IsWaterMaterial(const UMaterialInterface* Material)
 	return Base && Base->MaterialDomain == MD_Surface && Base->GetUsageByFlag(MATUSAGE_Water);
 }
 
-int32 UnrealAIWaterSafety::PrepareWaterEditLayers(UWorld* World)
+void UnrealAIWaterSafety::Rebuild(AWaterBody* Body)
 {
-	using namespace UnrealAIWaterSafetyLocal;
-	int32 Added = 0;
-	if (!World)
-		return 0;
-	for (TActorIterator<ALandscape> It(World); It; ++It)
+	UWaterBodyComponent* Component = Body ? Body->GetWaterBodyComponent() : nullptr;
+	if (!Component)
+		return;
+	FOnWaterBodyChangedParams Params;
+	Params.bShapeOrPositionChanged = true;
+	Params.bUserTriggered = true;
+	Component->OnWaterBodyChanged(Params); // shape, collision, zone assignment and (in a rendering editor) the water info mesh
+}
+
+bool UnrealAIWaterSafety::ApplyWaterDefaults(AWaterBody* Body)
+{
+	UActorFactory* Factory = GEditor && Body ? GEditor->FindActorFactoryForActorClass(Body->GetClass()) : nullptr;
+	UWaterSplineComponent* Spline = Body ? Body->GetWaterSpline() : nullptr;
+	if (!Factory || !Spline)
+		return false;
+	// The factory also resets the spline to its default shape: keep the body's own points.
+	TArray<FVector> Points;
+	for (int32 Index = 0; Index < Spline->GetNumberOfSplinePoints(); ++Index)
+		Points.Add(Spline->GetLocationAtSplinePoint(Index, ESplineCoordinateSpace::Local));
+	Body->Modify();
+	Body->GetWaterBodyComponent()->Modify();
+	Spline->Modify();
+	(Factory->*UnrealAIWaterSafetyLocal::FPostSpawnAccess::PostSpawn)(Body->GetClass(), Body);
+	if (Points.Num())
 	{
-		ALandscape* Landscape = *It;
-		if (!IsValid(Landscape) || !Landscape->GetLandscapeGuid().IsValid() || Landscape->GetLayerIndex(WaterLayerName) != INDEX_NONE)
-			continue;
-		Landscape->Modify();
-		if (Landscape->CreateLayer(WaterLayerName) != INDEX_NONE)
-			++Added;
+		Spline->ClearSplinePoints(false);
+		for (const FVector& Point : Points)
+			Spline->AddSplinePoint(Point, ESplineCoordinateSpace::Local, false);
+		Spline->UpdateSpline();
+		Spline->SynchronizeWaterProperties();
 	}
-	return Added;
+	Rebuild(Body);
+	return true;
 }
 
 void UnrealAIWaterSafety::Start()
 {
 	using namespace UnrealAIWaterSafetyLocal;
-	WorldInitHandle = FWorldDelegates::OnPostWorldInitialization.AddLambda([](UWorld* World, const UWorld::InitializationValues) { Watch(World); });
-	WorldCleanupHandle = FWorldDelegates::OnWorldCleanup.AddLambda([](UWorld* World, bool, bool) { Unwatch(World); });
-	for (TObjectIterator<UWorld> It; It; ++It)
-		Watch(*It);
+	ULandscapeSettings* Settings = GetMutableDefault<ULandscapeSettings>();
+	bPreviousDialog = Settings->bShowDialogForAutomaticLayerCreation;
+	Settings->bShowDialogForAutomaticLayerCreation = false;
+	if (GEngine)
+		Register();
+	else
+		EngineInitHandle = FCoreDelegates::OnPostEngineInit.AddStatic(&Register);
 }
 
 void UnrealAIWaterSafety::Stop()
 {
 	using namespace UnrealAIWaterSafetyLocal;
-	FWorldDelegates::OnPostWorldInitialization.Remove(WorldInitHandle);
-	FWorldDelegates::OnWorldCleanup.Remove(WorldCleanupHandle);
-	for (const TPair<TWeakObjectPtr<UWorld>, FDelegateHandle>& Entry : Watched)
-	{
-		if (UWorld* World = Entry.Key.Get())
-			World->RemoveOnActorPreSpawnInitialization(Entry.Value);
-	}
-	Watched.Reset();
+	if (UObjectInitialized())
+		GetMutableDefault<ULandscapeSettings>()->bShowDialogForAutomaticLayerCreation = bPreviousDialog;
+	FCoreDelegates::OnPostEngineInit.Remove(EngineInitHandle);
+	if (GEngine)
+		GEngine->OnLevelActorAdded().Remove(ActorAddedHandle);
+	ActorAddedHandle.Reset();
+	Pending.Reset();
 }
 
-UnrealAIWaterSafety::FWaterSpawnScope::FWaterSpawnScope(UWorld* World)
+UnrealAIWaterSafety::FWaterSpawnScope::FWaterSpawnScope(UWorld* InWorld)
+	: World(InWorld)
 {
-	UnrealAIWaterSafetyLocal::Watch(World);
 	++UnrealAIWaterSafetyLocal::SpawnScopes;
-	ULandscapeSettings* Settings = GetMutableDefault<ULandscapeSettings>();
-	bPreviousDialog = Settings->bShowDialogForAutomaticLayerCreation;
-	Settings->bShowDialogForAutomaticLayerCreation = false;
+	if (InWorld)
+	{
+		Hook = InWorld->AddOnActorPreSpawnInitialization(FOnActorSpawned::FDelegate::CreateLambda([](AActor* Actor)
+		{
+			if (const AWaterBody* Body = Cast<AWaterBody>(Actor))
+			{
+				if (UWaterBodyComponent* Component = Body->GetWaterBodyComponent())
+					Component->bAffectsLandscape = false;
+			}
+		}));
+	}
 }
 
 UnrealAIWaterSafety::FWaterSpawnScope::~FWaterSpawnScope()
 {
 	--UnrealAIWaterSafetyLocal::SpawnScopes;
-	GetMutableDefault<ULandscapeSettings>()->bShowDialogForAutomaticLayerCreation = bPreviousDialog;
+	if (UWorld* Owner = World.Get())
+		Owner->RemoveOnActorPreSpawnInitialization(Hook);
 }

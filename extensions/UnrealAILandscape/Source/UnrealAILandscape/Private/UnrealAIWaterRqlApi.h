@@ -53,7 +53,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Water", meta = (BlueprintInternalUseOnly = "true"))
 	AWaterBodyRiver* CreateRiverBetween(const FString& Label, ALandscapeProxy* Landscape, FVector Source, FVector Mouth, double Width = 1500.0, double Depth = 300.0, UMaterialInterface* Material = nullptr);
 
-	/** give a water body its water material safely (null: the Water default for its type), building its water mesh first: also repairs a body placed with editor | call SpawnActor (no material, invisible); the material must be a water material (Material Domain Surface with "Used with Water"); returns the body */
+	/** give a water body its water material safely, building its water mesh first (null: the Place Actors defaults of its type, which also repairs a body with no material); the material must be a water material (Material Domain Surface with "Used with Water"); returns the body */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Water", meta = (BlueprintInternalUseOnly = "true"))
 	AWaterBody* SetMaterial(AWaterBody* Body, UMaterialInterface* Material = nullptr);
 };

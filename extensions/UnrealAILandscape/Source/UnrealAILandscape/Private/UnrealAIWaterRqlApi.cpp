@@ -9,6 +9,7 @@
 
 #include "ActorFactories/ActorFactory.h"
 #include "Editor.h"
+#include "Editor/EditorEngine.h" // FActorLabelUtilities
 #include "Engine/CollisionProfile.h"
 #include "Engine/Level.h"
 #include "Engine/World.h"
@@ -16,7 +17,6 @@
 #include "Interfaces/IPluginManager.h"
 #include "Interfaces/IProjectManager.h"
 #include "Landscape.h"
-#include "LandscapeComponent.h"
 #include "LandscapeEdit.h"
 #include "LandscapeInfo.h"
 #include "LandscapeProxy.h"
@@ -28,7 +28,6 @@
 #include "WaterBodyOceanActor.h"
 #include "WaterBodyOceanComponent.h"
 #include "WaterBodyRiverActor.h"
-#include "WaterEditorSettings.h"
 #include "WaterSplineComponent.h"
 #include "WaterSplineMetadata.h"
 #include "WaterZoneActor.h"
@@ -37,10 +36,11 @@ DEFINE_LOG_CATEGORY_STATIC(LogUnrealAIWater, Log, All);
 
 namespace UnrealAIWaterRqlLocal
 {
-	/** The water zone of @p World (the first one; the editor keeps one per world), or null. */
-	AWaterZone* FindZone(UWorld* World)
+	/** The first actor of class T in @p World (the water zone and the ocean: one per world), or null. */
+	template <typename T>
+	T* FindFirst(UWorld* World)
 	{
-		for (TActorIterator<AWaterZone> It(World); It; ++It)
+		for (TActorIterator<T> It(World); It; ++It)
 		{
 			if (IsValid(*It))
 				return *It;
@@ -60,25 +60,10 @@ namespace UnrealAIWaterRqlLocal
 		return Bounds;
 	}
 
-	/** The material the Water plugin's Place Actors defaults give a new body of @p Body's type (null when unset). */
-	UMaterialInterface* DefaultWaterMaterial(const AWaterBody* Body)
-	{
-		const UWaterEditorSettings* Settings = GetDefault<UWaterEditorSettings>();
-		const UWaterBodyComponent* Component = Body ? Body->GetWaterBodyComponent() : nullptr;
-		switch (Component ? Component->GetWaterBodyType() : EWaterBodyType::Lake)
-		{
-		case EWaterBodyType::River: return Settings->WaterBodyRiverDefaults.GetWaterMaterial();
-		case EWaterBodyType::Ocean: return Settings->WaterBodyOceanDefaults.GetWaterMaterial();
-		case EWaterBodyType::Transition: return Settings->WaterBodyCustomDefaults.GetWaterMaterial();
-		default: return Settings->WaterBodyLakeDefaults.GetWaterMaterial();
-		}
-	}
-
 	/**
 	 * Spawn @p Class the way the Place Actors panel does (its actor factory applies the Water defaults: material, waves,
-	 * spline, zone fill), labelled @p Label. The body never edits the landscape (bAffectsLandscape is cleared before the
-	 * Water editor sees it, so no water brush is created) and any automatic "Water" edit layer is created without the
-	 * modal dialog (UnrealAIWaterSafety). Null after Fail.
+	 * spline, zone fill), labelled @p Label (made unique). The body never edits the landscape (FWaterSpawnScope: no water
+	 * brush, no edit layer). Null after Fail.
 	 */
 	AActor* SpawnWater(UClass* Class, const FVector& Location, const FString& Label)
 	{
@@ -99,11 +84,11 @@ namespace UnrealAIWaterRqlLocal
 		if (!Factory)
 			UE_LOG(LogUnrealAIWater, Warning, TEXT("%s: no actor factory, spawned without the Water defaults"), *Class->GetName());
 		if (!Label.IsEmpty())
-			Actor->SetActorLabel(Label);
+			FActorLabelUtilities::SetActorLabelUnique(Actor, Label);
 		return Actor;
 	}
 
-	/** A water material (Material Domain Surface with "Used with Water") or null after Fail. */
+	/** A water material (Material Domain Surface with "Used with Water"), or false after Fail. */
 	bool RequireWaterMaterial(UMaterialInterface* Material)
 	{
 		if (UnrealAIWaterSafety::IsWaterMaterial(Material))
@@ -113,31 +98,24 @@ namespace UnrealAIWaterRqlLocal
 	}
 
 	/**
-	 * Give @p Body @p Material (null: keep the factory's or take the type's default) and rebuild it now: its shape,
-	 * collision and water info mesh. The water zone draws a body only when that mesh exists, so building it here, before
-	 * the zone rebuilds on the next tick, avoids the Water plugin's "Ensure condition failed: StaticMesh"
-	 * (WaterMeshComponent.cpp) that a material set without a rebuild (set_water_material in Python) raises.
+	 * Give @p Body @p Material (validated by the caller; null keeps the factory's) and rebuild it now: shape, collision and
+	 * water info mesh. The water zone draws a body only when that mesh exists, so building it here, before the zone
+	 * rebuilds on the next tick, avoids the Water plugin's "Ensure condition failed: StaticMesh" (WaterMeshComponent.cpp)
+	 * that a material set without a rebuild (set_water_material in Python) raises.
 	 */
 	bool FinishBody(AWaterBody* Body, UMaterialInterface* Material)
 	{
 		UWaterBodyComponent* Component = Body ? Body->GetWaterBodyComponent() : nullptr;
 		if (!Component)
 			return UnrealMcpRql::Failed<bool>(TEXT("the water body has no water body component"));
-		if (Material && !RequireWaterMaterial(Material))
-			return false;
-		UMaterialInterface* Chosen = Material ? Material : (Component->GetWaterMaterial() ? Component->GetWaterMaterial() : DefaultWaterMaterial(Body));
-		if (!Chosen)
+		if (Material)
+		{
+			Component->Modify();
+			Component->SetWaterMaterial(Material);
+		}
+		if (!Component->GetWaterMaterial())
 			return UnrealMcpRql::Failed<bool>(TEXT("the Water plugin has no default water material (Project Settings > Water Editor): pass one, e.g. /Water/Materials/WaterSurface/Water_Material"));
-		Body->Modify();
-		Component->Modify();
-		Component->SetWaterMaterial(Chosen);
-		if (UWaterSplineComponent* Spline = Component->GetWaterSpline())
-			Spline->UpdateSpline();
-		FOnWaterBodyChangedParams Params;
-		Params.bShapeOrPositionChanged = true;
-		Params.bUserTriggered = true;
-		Component->OnWaterBodyChanged(Params); // shape, collision, zone assignment and the water info mesh (render data)
-		Component->UpdateWaterBodyRenderData();
+		UnrealAIWaterSafety::Rebuild(Body);
 		return true;
 	}
 
@@ -158,31 +136,22 @@ namespace UnrealAIWaterRqlLocal
 		}
 	}
 
-	/** Move @p Body to @p Origin and place @p Points (world) on its spline (stored relative to the actor). */
-	void SetSpline(AWaterBody* Body, const FVector& Origin, const TArray<FVector>& Points)
+	/**
+	 * Place @p Points (world) on @p Body's spline, stored relative to the actor. Quietly (no change broadcast, which would
+	 * rebuild the body with the defaults' width): FinishBody rebuilds it once, with its final profile.
+	 */
+	void SetSpline(AWaterBody* Body, const TArray<FVector>& Points)
 	{
 		UWaterSplineComponent* Spline = Body->GetWaterSpline();
 		if (!Spline)
 			return;
-		Body->SetActorLocation(Origin);
 		Spline->Modify();
-		TArray<FVector> Local;
-		Local.Reserve(Points.Num());
 		const FTransform ToWorld = Spline->GetComponentTransform();
+		Spline->ClearSplinePoints(false);
 		for (const FVector& Point : Points)
-			Local.Add(ToWorld.InverseTransformPosition(Point));
-		Spline->ResetSpline(Local);
-	}
-
-	/** The world's ocean, if any (the Water plugin supports one per world). */
-	AWaterBodyOcean* FindOcean(UWorld* World)
-	{
-		for (TActorIterator<AWaterBodyOcean> It(World); It; ++It)
-		{
-			if (IsValid(*It))
-				return *It;
-		}
-		return nullptr;
+			Spline->AddSplinePoint(ToWorld.InverseTransformPosition(Point), ESplineCoordinateSpace::Local, false);
+		Spline->UpdateSpline();
+		Spline->SynchronizeWaterProperties(); // one width / depth metadata entry per point
 	}
 
 	/** Fill the zone with @p Ocean again after the zone moved or grew. */
@@ -196,10 +165,69 @@ namespace UnrealAIWaterRqlLocal
 		Component->FillWaterZoneWithOcean();
 	}
 
-	/** Validate a label: water bodies are found again with unreal.find(label). */
-	bool ValidLabel(const FString& Label)
+	/** A label (water bodies are found again with unreal.find(label)) and an optional water material; false after Fail. */
+	bool ValidBody(const FString& Label, UMaterialInterface* Material)
 	{
-		return !Label.TrimStartAndEnd().IsEmpty() || UnrealMcpRql::Failed<bool>(TEXT("give the water body a label (found again with unreal.find(\"<label>\"))"));
+		if (Label.TrimStartAndEnd().IsEmpty())
+			return UnrealMcpRql::Failed<bool>(TEXT("give the water body a label (found again with unreal.find(\"<label>\"))"));
+		return !Material || RequireWaterMaterial(Material);
+	}
+
+	bool ValidWidth(double Width)
+	{
+		return (Width >= 100.0 && Width <= 20000.0) || UnrealMcpRql::Failed<bool>(FString::Printf(TEXT("Width %g is outside 100 .. 20000 cm"), Width));
+	}
+
+	/**
+	 * Create or resize @p World's water zone: SizeMeters 0 covers every landscape plus 25% (Center ignored; refused
+	 * without a landscape), else a square SizeMeters wide around Center. Refits the ocean. Null after Fail.
+	 */
+	AWaterZone* FitZone(UWorld* World, double SizeMeters, FVector Center)
+	{
+		double Extent = SizeMeters * 100.0;
+		if (SizeMeters <= 0.0)
+		{
+			const FBox Bounds = LandscapesBounds(World);
+			if (!Bounds.IsValid)
+				return UnrealMcpRql::Failed<AWaterZone*>(TEXT("there is no landscape to cover: pass SizeMeters (and Center)"));
+			Extent = FMath::Max(Bounds.GetSize().X, Bounds.GetSize().Y) * 1.25;
+			Center = Bounds.GetCenter();
+		}
+		else if (SizeMeters < 10.0 || SizeMeters > 100000.0)
+		{
+			return UnrealMcpRql::Failed<AWaterZone*>(FString::Printf(TEXT("SizeMeters %g is outside 10 .. 100000 (0 covers the landscapes)"), SizeMeters));
+		}
+		AWaterZone* Zone = FindFirst<AWaterZone>(World);
+		if (!Zone)
+			Zone = Cast<AWaterZone>(SpawnWater(AWaterZone::StaticClass(), FVector(Center.X, Center.Y, 0.0), TEXT("WaterZone")));
+		if (!Zone)
+			return nullptr;
+		Zone->Modify();
+		Zone->SetActorLocation(FVector(Center.X, Center.Y, Zone->GetActorLocation().Z));
+		Zone->SetZoneExtent(FVector2D(Extent, Extent));
+		RefitOcean(FindFirst<AWaterBodyOcean>(World), Zone);
+		return Zone;
+	}
+
+	/** @p World's water zone, made when there is none: over the landscapes, else 2 km around @p Center. Null after Fail. */
+	AWaterZone* EnsureZone(UWorld* World, const FVector& Center)
+	{
+		if (AWaterZone* Zone = FindFirst<AWaterZone>(World))
+			return Zone;
+		return FitZone(World, LandscapesBounds(World).IsValid ? 0.0 : 2000.0, Center);
+	}
+
+	/** A river through @p Points (world, upstream first) @p Width wide (and @p Depth deep when > 0), its zone ensured. */
+	AWaterBodyRiver* SpawnRiver(const FString& Label, const TArray<FVector>& Points, double Width, double Depth, UMaterialInterface* Material)
+	{
+		if (!EnsureZone(UnrealMcpRql::EditorWorld(), Points[0]))
+			return nullptr;
+		AWaterBodyRiver* River = Cast<AWaterBodyRiver>(SpawnWater(AWaterBodyRiver::StaticClass(), Points[0], Label));
+		if (!River)
+			return nullptr;
+		SetSpline(River, Points);
+		SetRiverProfile(River, Width, Depth);
+		return FinishBody(River, Material) ? River : nullptr;
 	}
 
 	// ---------------------------------------------------------------------------------------------------------------
@@ -215,10 +243,12 @@ namespace UnrealAIWaterRqlLocal
 		TArray<uint16> Raw;
 		double ZScale = 1.0; // cm per height unit
 		double ZOrigin = 0.0;
+		double QuadCm = 1.0; // cm between vertices
 
 		int32 Width() const { return Rect.Width() + 1; }
 		int32 Height() const { return Rect.Height() + 1; }
-		double At(int32 X, int32 Y) const { return ZOrigin + (static_cast<double>(Raw[(Y - Rect.Min.Y) * Width() + (X - Rect.Min.X)]) - LandscapeDataAccess::MidValue) * ZScale; }
+		int32 Index(int32 X, int32 Y) const { return (Y - Rect.Min.Y) * Width() + (X - Rect.Min.X); }
+		double At(int32 X, int32 Y) const { return ZOrigin + (static_cast<double>(Raw[Index(X, Y)]) - LandscapeDataAccess::MidValue) * ZScale; }
 		uint16 Units(double Cm) const { return static_cast<uint16>(FMath::Clamp(FMath::RoundToInt((Cm - ZOrigin) / ZScale + LandscapeDataAccess::MidValue), 0, 65535)); }
 		FVector2D ToLocal(const FVector& World) const { const FVector L = ToWorld.InverseTransformPosition(World); return FVector2D(L.X, L.Y); }
 		FVector ToWorldPoint(double X, double Y, double Z) const { FVector P = ToWorld.TransformPosition(FVector(X, Y, 0.0)); P.Z = Z; return P; }
@@ -235,6 +265,7 @@ namespace UnrealAIWaterRqlLocal
 		Out.ToWorld = Landscape->LandscapeActorToWorld();
 		Out.ZScale = Out.ToWorld.GetScale3D().Z * LANDSCAPE_ZSCALE;
 		Out.ZOrigin = Out.ToWorld.GetLocation().Z;
+		Out.QuadCm = Out.ToWorld.GetScale3D().X;
 		Out.Raw.SetNumZeroed(Out.Width() * Out.Height());
 		FHeightmapAccessor<false> Accessor(Out.Info);
 		Accessor.SetEditLayer(Out.EditLayer);
@@ -252,6 +283,7 @@ namespace UnrealAIWaterRqlLocal
 		const int32 Step = FMath::Max(1, FMath::CeilToInt(FMath::Max(Grid.Width(), Grid.Height()) / 400.0));
 		const int32 W = (Grid.Width() - 1) / Step + 1;
 		const int32 H = (Grid.Height() - 1) / Step + 1;
+		const auto Vertex = [&Grid, Step](int32 X, int32 Y) { return FIntPoint(Grid.Rect.Min.X + FMath::Min(X * Step, Grid.Rect.Width()), Grid.Rect.Min.Y + FMath::Min(Y * Step, Grid.Rect.Height())); };
 		TArray<double> Z;
 		Z.SetNumUninitialized(W * H);
 		double Low = TNumericLimits<double>::Max(), High = TNumericLimits<double>::Lowest();
@@ -259,14 +291,15 @@ namespace UnrealAIWaterRqlLocal
 		{
 			for (int32 X = 0; X < W; ++X)
 			{
-				const double Value = Grid.At(Grid.Rect.Min.X + FMath::Min(X * Step, Grid.Rect.Width()), Grid.Rect.Min.Y + FMath::Min(Y * Step, Grid.Rect.Height()));
+				const FIntPoint V = Vertex(X, Y);
+				const double Value = Grid.At(V.X, V.Y);
 				Z[Y * W + X] = Value;
 				Low = FMath::Min(Low, Value);
 				High = FMath::Max(High, Value);
 			}
 		}
 		const double Range = FMath::Max(High - Low, 1.0);
-		const double Quad = Grid.ToWorld.GetScale3D().X * Step; // cm per cell
+		const double Quad = Grid.QuadCm * Step; // cm per cell
 		const auto Cell = [&](const FVector2D& P)
 		{
 			const int32 X = FMath::Clamp(FMath::RoundToInt((P.X - Grid.Rect.Min.X) / Step), 0, W - 1);
@@ -314,7 +347,8 @@ namespace UnrealAIWaterRqlLocal
 		TArray<FVector2D> Path;
 		for (int32 Index = Goal; Index != INDEX_NONE; Index = Previous[Index])
 		{
-			Path.Add(FVector2D(Grid.Rect.Min.X + FMath::Min((Index % W) * Step, Grid.Rect.Width()), Grid.Rect.Min.Y + FMath::Min((Index / W) * Step, Grid.Rect.Height())));
+			const FIntPoint V = Vertex(Index % W, Index / W);
+			Path.Add(FVector2D(V.X, V.Y));
 			if (Index == Start)
 				break;
 		}
@@ -359,24 +393,32 @@ namespace UnrealAIWaterRqlLocal
 	/**
 	 * Lower the landscape along the river (vertex-space @p Path with bed heights @p Bed, cm): flat bed HalfWidth either
 	 * side of the centre line, then banks rising 1:1 (at most 2 x the width) to the original ground; only ever lowers.
-	 * One write of the changed rectangle, merged before returning. How many vertices changed.
+	 * Works on the band around the path only; one write, merged before returning. False when nothing was lowered.
 	 */
-	int32 CarveBed(ALandscapeProxy* Landscape, FHeightGrid& Grid, const TArray<FVector2D>& Path, const TArray<double>& Bed, double HalfWidthCm)
+	bool CarveBed(ALandscapeProxy* Landscape, const FHeightGrid& Grid, const TArray<FVector2D>& Path, const TArray<double>& Bed, double HalfWidthCm)
 	{
-		const double Quad = Grid.ToWorld.GetScale3D().X;
-		const double Half = HalfWidthCm / Quad;              // vertices
-		const double Bank = 4.0 * HalfWidthCm / Quad;        // vertices
-		const double Rise = Quad;                            // cm per vertex of bank (1:1)
-		FIntRect Changed(TNumericLimits<int32>::Max(), TNumericLimits<int32>::Max(), TNumericLimits<int32>::Lowest(), TNumericLimits<int32>::Lowest());
-		TArray<uint16> Data = Grid.Raw;
-		int32 Count = 0;
+		const double Half = HalfWidthCm / Grid.QuadCm;       // vertices
+		const double Bank = 4.0 * HalfWidthCm / Grid.QuadCm; // vertices
+		const double Rise = Grid.QuadCm;                     // cm per vertex of bank (1:1)
+		FBox2D Box(ForceInit);
+		for (const FVector2D& P : Path)
+			Box += P;
+		const FIntRect Band(
+			FMath::Max(Grid.Rect.Min.X, FMath::FloorToInt(Box.Min.X - Half - Bank)), FMath::Max(Grid.Rect.Min.Y, FMath::FloorToInt(Box.Min.Y - Half - Bank)),
+			FMath::Min(Grid.Rect.Max.X, FMath::CeilToInt(Box.Max.X + Half + Bank)), FMath::Min(Grid.Rect.Max.Y, FMath::CeilToInt(Box.Max.Y + Half + Bank)));
+		const int32 Width = Band.Width() + 1;
+		TArray<uint16> Block;
+		Block.SetNumUninitialized(Width * (Band.Height() + 1));
+		for (int32 Y = Band.Min.Y; Y <= Band.Max.Y; ++Y)
+			FMemory::Memcpy(&Block[(Y - Band.Min.Y) * Width], &Grid.Raw[Grid.Index(Band.Min.X, Y)], Width * sizeof(uint16));
+		bool bChanged = false;
 		for (int32 Index = 0; Index + 1 < Path.Num(); ++Index)
 		{
 			const FVector2D A = Path[Index], B = Path[Index + 1];
-			const int32 MinX = FMath::Max(Grid.Rect.Min.X, FMath::FloorToInt(FMath::Min(A.X, B.X) - Half - Bank));
-			const int32 MaxX = FMath::Min(Grid.Rect.Max.X, FMath::CeilToInt(FMath::Max(A.X, B.X) + Half + Bank));
-			const int32 MinY = FMath::Max(Grid.Rect.Min.Y, FMath::FloorToInt(FMath::Min(A.Y, B.Y) - Half - Bank));
-			const int32 MaxY = FMath::Min(Grid.Rect.Max.Y, FMath::CeilToInt(FMath::Max(A.Y, B.Y) + Half + Bank));
+			const int32 MinX = FMath::Max(Band.Min.X, FMath::FloorToInt(FMath::Min(A.X, B.X) - Half - Bank));
+			const int32 MaxX = FMath::Min(Band.Max.X, FMath::CeilToInt(FMath::Max(A.X, B.X) + Half + Bank));
+			const int32 MinY = FMath::Max(Band.Min.Y, FMath::FloorToInt(FMath::Min(A.Y, B.Y) - Half - Bank));
+			const int32 MaxY = FMath::Min(Band.Max.Y, FMath::CeilToInt(FMath::Max(A.Y, B.Y) + Half + Bank));
 			const FVector2D AB = B - A;
 			const double LengthSquared = FMath::Max(AB.SizeSquared(), UE_SMALL_NUMBER);
 			for (int32 Y = MinY; Y <= MaxY; ++Y)
@@ -388,36 +430,25 @@ namespace UnrealAIWaterRqlLocal
 					const double Distance = FVector2D::Distance(P, A + AB * T);
 					if (Distance > Half + Bank)
 						continue;
-					const double Target = FMath::Lerp(Bed[Index], Bed[Index + 1], T) + FMath::Max(0.0, Distance - Half) * Rise;
-					uint16& Value = Data[(Y - Grid.Rect.Min.Y) * Grid.Width() + (X - Grid.Rect.Min.X)];
-					const uint16 New = Grid.Units(Target);
+					const uint16 New = Grid.Units(FMath::Lerp(Bed[Index], Bed[Index + 1], T) + FMath::Max(0.0, Distance - Half) * Rise);
+					uint16& Value = Block[(Y - Band.Min.Y) * Width + (X - Band.Min.X)];
 					if (New < Value)
 					{
-						Count += Value == Grid.Raw[(Y - Grid.Rect.Min.Y) * Grid.Width() + (X - Grid.Rect.Min.X)] ? 1 : 0;
 						Value = New;
-						Changed.Min.X = FMath::Min(Changed.Min.X, X);
-						Changed.Min.Y = FMath::Min(Changed.Min.Y, Y);
-						Changed.Max.X = FMath::Max(Changed.Max.X, X);
-						Changed.Max.Y = FMath::Max(Changed.Max.Y, Y);
+						bChanged = true;
 					}
 				}
 			}
 		}
-		if (Count == 0)
-			return 0;
-		const int32 Width = Changed.Width() + 1;
-		TArray<uint16> Block;
-		Block.SetNumUninitialized(Width * (Changed.Height() + 1));
-		for (int32 Y = Changed.Min.Y; Y <= Changed.Max.Y; ++Y)
-			FMemory::Memcpy(&Block[(Y - Changed.Min.Y) * Width], &Data[(Y - Grid.Rect.Min.Y) * Grid.Width() + (Changed.Min.X - Grid.Rect.Min.X)], Width * sizeof(uint16));
+		if (!bChanged)
+			return false;
 		Landscape->Modify();
 		FHeightmapAccessor<false> Accessor(Grid.Info);
 		Accessor.SetEditLayer(Grid.EditLayer);
-		Accessor.SetData(Changed.Min.X, Changed.Min.Y, Changed.Max.X, Changed.Max.Y, Block.GetData());
+		Accessor.SetData(Band.Min.X, Band.Min.Y, Band.Max.X, Band.Max.Y, Block.GetData());
 		Accessor.Flush();
-		Grid.Raw = MoveTemp(Data);
 		UnrealAILandscapeRqlApiLocal::MergeNow(Landscape, ELandscapeLayerUpdateMode::Update_Heightmap_All);
-		return Count;
+		return true;
 	}
 }
 
@@ -462,31 +493,7 @@ FString UUnrealAIWaterRqlApi::EnableWater()
 AWaterZone* UUnrealAIWaterRqlApi::SetZone(double SizeMeters, FVector Center)
 {
 	UWorld* World = UnrealMcpRql::EditorWorld();
-	if (!World)
-		return UnrealMcpRql::Failed<AWaterZone*>(TEXT("no editor world"));
-	double Extent = SizeMeters * 100.0;
-	if (SizeMeters <= 0.0)
-	{
-		const FBox Bounds = LandscapesBounds(World);
-		if (!Bounds.IsValid)
-			return UnrealMcpRql::Failed<AWaterZone*>(TEXT("there is no landscape to cover: pass SizeMeters (and Center)"));
-		Extent = FMath::Max(Bounds.GetSize().X, Bounds.GetSize().Y) * 1.25;
-		Center = Bounds.GetCenter();
-	}
-	else if (SizeMeters < 10.0 || SizeMeters > 100000.0)
-	{
-		return UnrealMcpRql::Failed<AWaterZone*>(FString::Printf(TEXT("SizeMeters %g is outside 10 .. 100000 (0 covers the landscapes)"), SizeMeters));
-	}
-	AWaterZone* Zone = FindZone(World);
-	if (!Zone)
-		Zone = Cast<AWaterZone>(SpawnWater(AWaterZone::StaticClass(), FVector(Center.X, Center.Y, 0.0), TEXT("WaterZone")));
-	if (!Zone)
-		return nullptr;
-	Zone->Modify();
-	Zone->SetActorLocation(FVector(Center.X, Center.Y, Zone->GetActorLocation().Z));
-	Zone->SetZoneExtent(FVector2D(Extent, Extent));
-	RefitOcean(FindOcean(World), Zone);
-	return Zone;
+	return World ? FitZone(World, SizeMeters, Center) : UnrealMcpRql::Failed<AWaterZone*>(TEXT("no editor world"));
 }
 
 AWaterBodyOcean* UUnrealAIWaterRqlApi::CreateOcean(const FString& Label, double Height, UMaterialInterface* Material)
@@ -494,38 +501,28 @@ AWaterBodyOcean* UUnrealAIWaterRqlApi::CreateOcean(const FString& Label, double 
 	UWorld* World = UnrealMcpRql::EditorWorld();
 	if (!World)
 		return UnrealMcpRql::Failed<AWaterBodyOcean*>(TEXT("no editor world"));
-	if (!ValidLabel(Label))
+	if (!ValidBody(Label, Material))
 		return nullptr;
 	if (!FMath::IsFinite(Height) || FMath::Abs(Height) > 1000000.0)
 		return UnrealMcpRql::Failed<AWaterBodyOcean*>(TEXT("Height must be within -1000000 .. 1000000 cm"));
-	if (Material && !RequireWaterMaterial(Material))
-		return nullptr;
-	if (const AWaterBodyOcean* Existing = FindOcean(World))
+	if (const AWaterBodyOcean* Existing = FindFirst<AWaterBodyOcean>(World))
 		return UnrealMcpRql::Failed<AWaterBodyOcean*>(FString::Printf(TEXT("the level already has an ocean (%s; one per world): move it with set Location.Z, or Destroy it first"), *Existing->GetActorLabel()));
-	AWaterZone* Zone = FindZone(World);
+	const AWaterZone* Zone = EnsureZone(World, FVector::ZeroVector);
 	if (!Zone)
-	{
-		Zone = LandscapesBounds(World).IsValid ? SetZone(0.0, FVector::ZeroVector) : SetZone(2000.0, FVector::ZeroVector);
-		if (!Zone)
-			return nullptr;
-	}
+		return nullptr;
+	// The ocean's actor factory fills the zone (collision and ocean extents), as the Place Actors panel does.
 	const FVector Location(Zone->GetActorLocation().X, Zone->GetActorLocation().Y, Height);
 	AWaterBodyOcean* Ocean = Cast<AWaterBodyOcean>(SpawnWater(AWaterBodyOcean::StaticClass(), Location, Label));
-	if (!Ocean)
-		return nullptr;
-	RefitOcean(Ocean, Zone);
-	return FinishBody(Ocean, Material) ? Ocean : nullptr;
+	return Ocean && FinishBody(Ocean, Material) ? Ocean : nullptr;
 }
 
 AWaterBodyLake* UUnrealAIWaterRqlApi::CreateLake(const FString& Label, FVector Center, double Radius, UMaterialInterface* Material)
 {
-	if (!ValidLabel(Label))
+	if (!ValidBody(Label, Material))
 		return nullptr;
 	if (!(Radius >= 100.0 && Radius <= 200000.0))
 		return UnrealMcpRql::Failed<AWaterBodyLake*>(FString::Printf(TEXT("Radius %g is outside 100 .. 200000 cm"), Radius));
-	if (Material && !RequireWaterMaterial(Material))
-		return nullptr;
-	if (!FindZone(UnrealMcpRql::EditorWorld()) && !SetZone(LandscapesBounds(UnrealMcpRql::EditorWorld()).IsValid ? 0.0 : 2000.0, Center))
+	if (!EnsureZone(UnrealMcpRql::EditorWorld(), Center))
 		return nullptr;
 	AWaterBodyLake* Lake = Cast<AWaterBodyLake>(SpawnWater(AWaterBodyLake::StaticClass(), Center, Label));
 	if (!Lake)
@@ -536,41 +533,27 @@ AWaterBodyLake* UUnrealAIWaterRqlApi::CreateLake(const FString& Label, FVector C
 		const double Angle = UE_DOUBLE_TWO_PI * Index / 8.0;
 		Shore.Add(Center + FVector(FMath::Cos(Angle) * Radius, FMath::Sin(Angle) * Radius, 0.0));
 	}
-	SetSpline(Lake, Center, Shore);
+	SetSpline(Lake, Shore);
 	return FinishBody(Lake, Material) ? Lake : nullptr;
 }
 
 AWaterBodyRiver* UUnrealAIWaterRqlApi::CreateRiver(const FString& Label, const TArray<FVector>& Points, double Width, UMaterialInterface* Material)
 {
-	if (!ValidLabel(Label))
+	if (!ValidBody(Label, Material) || !ValidWidth(Width))
 		return nullptr;
 	if (Points.Num() < 2 || Points.Num() > 200)
 		return UnrealMcpRql::Failed<AWaterBodyRiver*>(FString::Printf(TEXT("a river needs 2 .. 200 points (upstream first), got %d"), Points.Num()));
-	if (!(Width >= 100.0 && Width <= 20000.0))
-		return UnrealMcpRql::Failed<AWaterBodyRiver*>(FString::Printf(TEXT("Width %g is outside 100 .. 20000 cm"), Width));
-	if (Material && !RequireWaterMaterial(Material))
-		return nullptr;
-	UWorld* World = UnrealMcpRql::EditorWorld();
-	if (!FindZone(World) && !SetZone(LandscapesBounds(World).IsValid ? 0.0 : 2000.0, Points[0]))
-		return nullptr;
-	AWaterBodyRiver* River = Cast<AWaterBodyRiver>(SpawnWater(AWaterBodyRiver::StaticClass(), Points[0], Label));
-	if (!River)
-		return nullptr;
-	SetSpline(River, Points[0], Points);
-	SetRiverProfile(River, Width, 0.0);
-	return FinishBody(River, Material) ? River : nullptr;
+	return SpawnRiver(Label, Points, Width, 0.0, Material);
 }
 
 AWaterBodyRiver* UUnrealAIWaterRqlApi::CreateRiverBetween(const FString& Label, ALandscapeProxy* Landscape, FVector Source, FVector Mouth, double Width, double Depth, UMaterialInterface* Material)
 {
 	if (!Landscape)
 		return UnrealMcpRql::Failed<AWaterBodyRiver*>(TEXT("Landscape is null: pass unreal.find(\"<label>\")"));
-	if (!(Width >= 100.0 && Width <= 20000.0))
-		return UnrealMcpRql::Failed<AWaterBodyRiver*>(FString::Printf(TEXT("Width %g is outside 100 .. 20000 cm"), Width));
+	if (!ValidBody(Label, Material) || !ValidWidth(Width))
+		return nullptr;
 	if (!(Depth >= 0.0 && Depth <= 10000.0))
 		return UnrealMcpRql::Failed<AWaterBodyRiver*>(FString::Printf(TEXT("Depth %g is outside 0 .. 10000 cm"), Depth));
-	if (!ValidLabel(Label) || (Material && !RequireWaterMaterial(Material)))
-		return nullptr;
 	FHeightGrid Grid;
 	if (!ReadGrid(Landscape, Grid))
 		return nullptr;
@@ -578,7 +561,7 @@ AWaterBodyRiver* UUnrealAIWaterRqlApi::CreateRiverBetween(const FString& Label, 
 	const auto Inside = [&Grid](const FVector2D& P) { return P.X >= Grid.Rect.Min.X && P.Y >= Grid.Rect.Min.Y && P.X <= Grid.Rect.Max.X && P.Y <= Grid.Rect.Max.Y; };
 	if (!Inside(From) || !Inside(To))
 		return UnrealMcpRql::Failed<AWaterBodyRiver*>(TEXT("Source and Mouth must be on the landscape (its Bounds): a river mouth at the coast stays a little inside the landscape's edge"));
-	if (FVector2D::Distance(From, To) * Grid.ToWorld.GetScale3D().X < Width * 2.0)
+	if (FVector2D::Distance(From, To) * Grid.QuadCm < Width * 2.0)
 		return UnrealMcpRql::Failed<AWaterBodyRiver*>(TEXT("Source and Mouth are too close for a river of this Width"));
 
 	// The route, resampled at most 150 points, every 2 river widths or more.
@@ -586,8 +569,7 @@ AWaterBodyRiver* UUnrealAIWaterRqlApi::CreateRiverBetween(const FString& Label, 
 	double Length = 0.0;
 	for (int32 Index = 1; Index < Route.Num(); ++Index)
 		Length += FVector2D::Distance(Route[Index - 1], Route[Index]);
-	const double Quad = Grid.ToWorld.GetScale3D().X;
-	const TArray<FVector2D> Path = Resample(Route, FMath::Max(2.0 * Width / Quad, Length / 149.0));
+	const TArray<FVector2D> Path = Resample(Route, FMath::Max(2.0 * Width / Grid.QuadCm, Length / 149.0));
 
 	// The water surface flows downhill: never above any ground upstream of it. With a bed it sits a third of the depth
 	// below the old ground (the bed Depth below that ground), so the water shows even where the route crosses a rise.
@@ -607,22 +589,19 @@ AWaterBodyRiver* UUnrealAIWaterRqlApi::CreateRiverBetween(const FString& Label, 
 	TArray<FVector> Points;
 	for (int32 Index = 0; Index < Path.Num(); ++Index)
 		Points.Add(Grid.ToWorldPoint(Path[Index].X, Path[Index].Y, Surface[Index]));
-	UWorld* World = UnrealMcpRql::EditorWorld();
-	if (!FindZone(World) && !SetZone(0.0, FVector::ZeroVector))
-		return nullptr;
-	AWaterBodyRiver* River = Cast<AWaterBodyRiver>(SpawnWater(AWaterBodyRiver::StaticClass(), Points[0], Label));
-	if (!River)
-		return nullptr;
-	SetSpline(River, Points[0], Points);
-	SetRiverProfile(River, Width, Depth > 0.0 ? Depth * 2.0 / 3.0 : 0.0);
-	return FinishBody(River, Material) ? River : nullptr;
+	return SpawnRiver(Label, Points, Width, Depth > 0.0 ? Depth * 2.0 / 3.0 : 0.0, Material);
 }
 
 AWaterBody* UUnrealAIWaterRqlApi::SetMaterial(AWaterBody* Body, UMaterialInterface* Material)
 {
 	if (!Body)
 		return UnrealMcpRql::Failed<AWaterBody*>(TEXT("Body is null: pass unreal.find(\"<label>\") or $ from waterBodies"));
-	if (!FindZone(Body->GetWorld()) && !SetZone(LandscapesBounds(Body->GetWorld()).IsValid ? 0.0 : 2000.0, Body->GetActorLocation()))
+	if ((Material && !RequireWaterMaterial(Material)) || !EnsureZone(Body->GetWorld(), Body->GetActorLocation()))
 		return nullptr;
-	return FinishBody(Body, Material ? Material : DefaultWaterMaterial(Body)) ? Body : nullptr;
+	if (Material)
+		return FinishBody(Body, Material) ? Body : nullptr;
+	if (!UnrealAIWaterSafety::ApplyWaterDefaults(Body)) // rebuilds it
+		return UnrealMcpRql::Failed<AWaterBody*>(FString::Printf(TEXT("the Water plugin has no Place Actors defaults for %s: pass a material"), *Body->GetClass()->GetName()));
+	return Body->GetWaterBodyComponent()->GetWaterMaterial() ? Body
+		: UnrealMcpRql::Failed<AWaterBody*>(TEXT("the Water plugin has no default water material (Project Settings > Water Editor): pass one, e.g. /Water/Materials/WaterSurface/Water_Material"));
 }

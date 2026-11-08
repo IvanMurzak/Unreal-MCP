@@ -5,15 +5,23 @@
 
 #include "CoreMinimal.h"
 
+class AWaterBody;
 class UMaterialInterface;
 class UWorld;
 
 /**
- * Keeps the Water plugin from opening modal UI on the game thread. A water body that affects the landscape makes the
- * Water editor spawn a WaterBrushManager, whose SetTargetLandscape asks the Landscape editor for a "Water" edit layer;
- * when the landscape has none, that call creates it and then shows the modal "Insert New Landscape Edit Layer" dialog
- * (ULandscapeSettings::bShowDialogForAutomaticLayerCreation), which blocks every tool call until a human closes it.
- * Creating the "Water" layer first (what the dialog's OK does) means the dialog is never needed.
+ * Keeps the Water plugin usable from tool calls, however a water body is placed (the water operations,
+ * editor | call SpawnActor, Python):
+ *
+ * - No modal dialog. A landscape-affecting body makes the Water editor spawn a WaterBrushManager, which asks the
+ *   Landscape editor for a "Water" edit layer; with ULandscapeSettings::bShowDialogForAutomaticLayerCreation on, that
+ *   creates the layer and then opens the modal "Insert New Landscape Edit Layer" dialog on the game thread, blocking the
+ *   editor and every tool call until a human closes it. While the extension is loaded the setting is off (in memory,
+ *   never saved): the layer is still created, where the dialog's OK puts it, and can be reordered in Landscape mode.
+ * - Water defaults. A body spawned without the Water actor factory (SpawnActor, Python) has no material and no water
+ *   info mesh: it is invisible, and assigning a material later (set_water_material) makes the water zone draw a body
+ *   without that mesh ("Ensure condition failed: StaticMesh", WaterMeshComponent.cpp). On the next tick such a body gets
+ *   the defaults the Place Actors panel gives (the factory's PostSpawnActor, keeping its spline) and its mesh is built.
  */
 namespace UnrealAIWaterSafety
 {
@@ -23,21 +31,22 @@ namespace UnrealAIWaterSafety
 	 */
 	bool IsWaterMaterial(const UMaterialInterface* Material);
 
-	/** Add a "Water" edit layer to every landscape of @p World that has none; how many it added. */
-	int32 PrepareWaterEditLayers(UWorld* World);
+	/** Rebuild @p Body now (shape, collision, zone, water info mesh), as the editor does after an edit. */
+	void Rebuild(AWaterBody* Body);
 
 	/**
-	 * Watch every editor world: before a water body that affects the landscape (or a landscape brush) is initialised,
-	 * prepare the "Water" edit layers. Covers every way of placing one: these operations, editor | call SpawnActor,
-	 * Python. Start on module startup, Stop on shutdown.
+	 * Give @p Body the Place Actors defaults of its type (materials, waves, terrain curves; its spline points are kept)
+	 * and rebuild it; false when the Water plugin has no actor factory for it.
 	 */
+	bool ApplyWaterDefaults(AWaterBody* Body);
+
+	/** Start on module startup (the dialog setting, the defaults repair), Stop on shutdown. */
 	void Start();
 	void Stop();
 
 	/**
-	 * While alive (the water operations' spawns in @p World): a water body initialised in @p World does not affect the
-	 * landscape (no water brush, no "Water" edit layer, no GPU brush pass), and the Landscape editor creates any automatic
-	 * edit layer without its modal dialog.
+	 * While alive (a water operation's spawn in @p World): a water body initialised there does not affect the landscape
+	 * (no water brush, no "Water" edit layer, no GPU brush pass) and is left to its operation (no defaults repair).
 	 */
 	class FWaterSpawnScope
 	{
@@ -48,6 +57,7 @@ namespace UnrealAIWaterSafety
 		FWaterSpawnScope& operator=(const FWaterSpawnScope&) = delete;
 
 	private:
-		bool bPreviousDialog = true;
+		TWeakObjectPtr<UWorld> World;
+		FDelegateHandle Hook;
 	};
 }

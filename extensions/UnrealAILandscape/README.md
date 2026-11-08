@@ -76,14 +76,17 @@ defaults: material, waves), create the water zone when there is none (`SetZone` 
 plus 25%) and build the water mesh before returning. Each call is bounded work (a river on a 2 km landscape routes and
 carves in about a second); the first water material then compiles its shaders for a while, and `Water.Ready` /
 `Water.Problem` read back whether a body renders and, when not, what to call. `SetMaterial` assigns a water material
-safely (it refuses a material without "Used with Water") and repairs a body placed with `editor | call SpawnActor`, which
-gets no Water defaults. `EnableWater` lists Water in the project file so packaged games include the water actors.
+safely (it refuses a material without "Used with Water"; with none it applies the Water defaults of the body's type).
+`EnableWater` lists Water in the project file so packaged games include the water actors.
 
 These bodies never edit the landscape through the Water brush. A water body that does (the Water default, e.g. one
 placed with `SpawnActor` or Python) makes the Water plugin spawn a `WaterBrushManager` that asks the landscape for a
 "Water" edit layer and, when there is none, opens the modal "Insert New Landscape Edit Layer" dialog, which blocks the
-editor and every tool call until a human closes it. The extension creates that edit layer first (what the dialog's OK
-does), so the dialog never opens, however the body is placed.
+editor and every tool call until a human closes it. While the extension is loaded that dialog is off (Landscape
+settings, in memory only): the engine still creates the layer where the dialog's OK puts it, and it can be reordered in
+Landscape mode. A body spawned without the Water defaults (`SpawnActor`, Python: no material, invisible, and a later
+`set_water_material` makes the water zone draw it without its water mesh, an engine ensure) gets the Place Actors
+defaults of its type on the next tick, its spline kept.
 
 ## Releases and development
 

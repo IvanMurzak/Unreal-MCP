@@ -358,10 +358,6 @@ CONTROL_RIG = {
 AUTHORING.update(CONTROL_RIG)
 
 
-def water_receipt(method, result):
-    return text_result(f'1 result\n$ref|method|result\nWaterOperations#9170|{method}|{result}')
-
-
 SCULPT = 'LandscapeOperations#9190|Sculpt(LandscapeProxy Landscape, Vector Center, double Radius, double Height)'
 WATER_STATUS = ('2 results\nLabel|Water\nE2EOcean|{{Type:Ocean,SplinePoints:4,Material:Water_Material_Ocean,AffectsLandscape:false,'
                 'Ready:true,Problem:""}}\nE2ERiver|{{Type:River,SplinePoints:36,Material:Water_Material_River,AffectsLandscape:{},'
@@ -369,17 +365,17 @@ WATER_STATUS = ('2 results\nLabel|Water\nE2EOcean|{{Type:Ocean,SplinePoints:4,Ma
 # The Landscape island + water sequence: per check, an answer the live UE 5.7 editor gives and one that must not pass.
 AUTHORING.update({
     'water-1-island-landscape.e2e.json': (
-        text_result('1 result\n$ref|method|result\nLandscapeOperations#9190|Create(string Label, Vector Location, double SizeMeters, '
-                    'MaterialInterface Material)|Landscape#9191(E2EIsland)'), NO_COUNT),
-    'water-2-island-sea-floor.e2e.json': (text_result(f'1 result\n$ref|method|result\n{SCULPT}|3196021'), NO_COUNT),
-    'water-3-island-land.e2e.json': (text_result(f'1 result\n$ref|method|result\n{SCULPT}|1803641'), NO_COUNT),
-    'water-4-island-mountain.e2e.json': (text_result(f'1 result\n$ref|method|result\n{SCULPT}|290393'), NO_COUNT),
+        pcg_receipt('LandscapeOperations#9190|Create(string Label, Vector Location, double SizeMeters, MaterialInterface Material)'
+                    '|Landscape#9191(E2EIsland)'), NO_COUNT),
+    'water-2-island-sea-floor.e2e.json': (pcg_receipt(f'{SCULPT}|3196021'), NO_COUNT),
+    'water-3-island-land.e2e.json': (pcg_receipt(f'{SCULPT}|1803641'), NO_COUNT),
+    'water-4-island-mountain.e2e.json': (pcg_receipt(f'{SCULPT}|290393'), NO_COUNT),
     'water-5-ocean.e2e.json': (
-        water_receipt('CreateOcean(string Label, double Height, MaterialInterface Material)', 'WaterBodyOcean#9280(E2EOcean)'),
+        pcg_receipt('WaterOperations#9170|CreateOcean(string Label, double Height, MaterialInterface Material)|WaterBodyOcean#9280(E2EOcean)'),
         {'content': [{'type': 'text', 'text': 'error call-threw: CreateOcean threw: the level already has an ocean'}], 'isError': True}),
     'water-6-river.e2e.json': (
-        water_receipt('CreateRiverBetween(string Label, LandscapeProxy Landscape, Vector Source, Vector Mouth, double Width, double Depth, '
-                      'MaterialInterface Material)', 'WaterBodyRiver#9304(E2ERiver)'), NO_COUNT),
+        pcg_receipt('WaterOperations#9170|CreateRiverBetween(string Label, LandscapeProxy Landscape, Vector Source, Vector Mouth, '
+                    'double Width, double Depth, MaterialInterface Material)|WaterBodyRiver#9304(E2ERiver)'), NO_COUNT),
     'water-7-status.e2e.json': (text_result(WATER_STATUS.format('false')), text_result(WATER_STATUS.format('true'))),
     'water-8-zone.e2e.json': (text_result('1 result\nZoneExtent\n(250000, 250000)'), text_result('1 result\nZoneExtent\n(51200, 51200)')),
 })

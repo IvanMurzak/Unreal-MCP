@@ -45,19 +45,19 @@ namespace UnrealAILandscapeRqlLocal
 
 	/**
 	 * Why a water body does not show yet, with what to call (empty when it is ready): the readback after the water
-	 * operations, and the repair hint for a body placed another way (editor | call SpawnActor gives no material).
+	 * operations and for bodies placed another way.
 	 */
 	FString WaterProblem(const AWaterBody* Body)
 	{
 		const UWaterBodyComponent* Component = Body ? Body->GetWaterBodyComponent() : nullptr;
 		if (!Component)
 			return TEXT("it has no water body component");
-		const FString Find = FString::Printf(TEXT("unreal.find(\"%s\")"), *Body->GetActorLabel());
+		const auto Find = [Body]() { return FString::Printf(TEXT("unreal.find(\"%s\")"), *Body->GetActorLabel()); };
 		const UMaterialInterface* Material = Component->GetWaterMaterial();
 		if (!Material)
-			return FString::Printf(TEXT("no water material, so it is invisible (placed without the Water defaults, e.g. by editor | call SpawnActor): water | call SetMaterial(%s)"), *Find);
+			return FString::Printf(TEXT("no water material, so it is invisible: water | call SetMaterial(%s) gives it the Water defaults"), *Find());
 		if (!UnrealAIWaterSafety::IsWaterMaterial(Material))
-			return FString::Printf(TEXT("its WaterMaterial %s is not a water material: water | call SetMaterial(%s)"), *Material->GetName(), *Find);
+			return FString::Printf(TEXT("its WaterMaterial %s is not a water material: water | call SetMaterial(%s)"), *Material->GetName(), *Find());
 		if (Component->GetWaterBodyType() != EWaterBodyType::Transition && !Component->GetWaterZone())
 			return TEXT("no water zone renders it: water | call SetZone()");
 		if (!FApp::CanEverRender())
@@ -68,7 +68,7 @@ namespace UnrealAILandscapeRqlLocal
 		for (const UStaticMeshComponent* Mesh : Meshes)
 			bMesh |= Mesh->GetFName() == TEXT("WaterInfoMeshComponent") && Mesh->GetStaticMesh() != nullptr;
 		if (!bMesh && Component->ShouldGenerateWaterMeshTile())
-			return FString::Printf(TEXT("its water mesh is not built: water | call SetMaterial(%s) rebuilds it"), *Find);
+			return FString::Printf(TEXT("its water mesh is not built: water | call SetMaterial(%s) rebuilds it"), *Find());
 		if (Material->IsCompiling())
 			return TEXT("its material's shaders are still compiling: it shows when they finish (read Water again)");
 		return FString();
@@ -294,11 +294,11 @@ can look buried from afar: sample `Surface` every metre along it and lift it 5-1
 `call Rebuild(unreal.find("Terrain"))` re-merges a landscape edited elsewhere (Landscape mode, Python) and rebuilds its
 collision and Nanite mesh.
 
-Water: create oceans, lakes and rivers with the `water` operations, never `editor | call SpawnActor("WaterBody...")`:
-a spawned body gets no Water defaults (no material: invisible), and one that affects the landscape makes the Water
-plugin open a modal "Insert New Landscape Edit Layer" dialog that blocks the editor until a human closes it. The
-operations place bodies like the Place Actors panel (material, waves), never edit the landscape through the Water brush,
-build the water mesh before returning and create the water zone when there is none.
+Water: create oceans, lakes and rivers with the `water` operations rather than `editor | call SpawnActor("WaterBody...")`.
+They place bodies like the Place Actors panel (material, waves), size them for the landscape, never edit the landscape
+through the Water brush (no "Water" edit layer, no slow GPU brush pass), build the water mesh before returning and
+create the water zone when there is none. (A body placed with SpawnActor or Python gets the Water defaults on the next
+tick, and its "Water" edit layer is made without the engine's modal dialog.)
 
 ```
 water | call CreateOcean("Ocean", 0)                                                    sea level Z 0 around the island (fills the water zone)
@@ -314,9 +314,8 @@ water | call EnableWater()                                                      
 Land above the ocean's height hides it, so one ocean surrounds an island. `CreateRiverBetween` follows the lowest
 ground from source to mouth, keeps the water flowing downhill and (Depth > 0, cm) carves its bed into the landscape, so
 it shows even across a rise; keep the mouth a little inside the landscape. A water body's surface is its spline's Z: a
-lake or river below the ground around it is hidden. `Water.Problem` names what to call when a body does not render
-(e.g. one placed by `SpawnActor`: `water | call SetMaterial(unreal.find("Ocean"))` repairs it). The first water
-material compiles its shaders for a while after the call; `Water.Ready` turns true when they are done.)MD"));
+lake or river below the ground around it is hidden. `Water.Problem` names what to call when a body does not render.
+The first water material compiles its shaders for a while after the call; `Water.Ready` turns true when they are done.)MD"));
 	}
 };
 
