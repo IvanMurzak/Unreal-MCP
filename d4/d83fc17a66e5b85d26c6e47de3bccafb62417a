@@ -1,0 +1,21 @@
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpRqlPlaySpec.cpp
+  s_f51ca9900477a9::t_e68d4cf8acd85d 260,262,264,276,284,293
+UnrealMCP/Source/UnrealMcpRql/Private/UnrealMcpRqlPlay.cpp
+  s_f51ca9900477a9::t_2dd9861a7e43fe 407-455,462-463,466,478-479,482,488,493-494,496,498,501-503,514-520,524,529-530
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d4d83fc17a66e5b85d26c6e47de3bccafb62417a",
+  "prompts": {},
+  "sessions": {
+    "s_f51ca9900477a9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cdfa1ab3-f89c-48d0-a09a-cd5c2bc020d7",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
