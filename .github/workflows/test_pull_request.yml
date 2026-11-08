@@ -109,13 +109,13 @@ jobs:
   # leg carries `!cancelled()`: without it the implicit success() would skip it after a skipped gate.
   #
   # RUNNER: hosted on purpose, unlike the self-hosted UE legs. It has no fork guard, so a fork PR's
-  # code must not reach the owner's machines from here. The classify step never fails the job;
-  # the test step does, and the legs still run then.
+  # code must not reach the owner's machines from here. Only the test step can fail the job. It runs
+  # first, so its failure skips the classify step, `docs_only` stays empty and the legs run.
   changes:
     name: docs-only gate
     if: github.event_name == 'pull_request' && !contains(format(' {0}', join(github.event.pull_request.labels.*.name, ' ')), ' train/')
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10 # above the steps' sum, so only a step's own timeout fires
     outputs:
       docs_only: ${{ steps.classify.outputs.docs_only }}
     steps:
@@ -127,14 +127,14 @@ jobs:
           fetch-depth: 2 # the merge commit and both parents: docs-only.mjs diffs HEAD^1..HEAD
           sparse-checkout: .github # the scripts and the workflow its test reads
           persist-credentials: false
-      - id: classify
-        continue-on-error: true
-        timeout-minutes: 1
-        run: node .github/scripts/docs-only.mjs
       - name: Test the gate
         if: steps.checkout.outcome == 'success'
         timeout-minutes: 2
         run: node --test .github/scripts/docs-only.test.mjs
+      - id: classify
+        continue-on-error: true
+        timeout-minutes: 1
+        run: node .github/scripts/docs-only.mjs
 
   # (a) bridge — .NET 9 sidecar build + xUnit on BOTH hosted OSes (the sidecar
   # ships per-RID binaries, so cross-OS test coverage matters). 0 errors / 0

@@ -42,6 +42,9 @@ env:
 jobs:
   test-cli:
     name: cli (node ${{ matrix.node-version }})
+    # Set by the caller's own `if`: with no status check here, the implicit success() may also read
+    # the caller's `needs`, and a skipped or failed docs-only gate must not skip these tests.
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     # A hang guard, not a budget.
     timeout-minutes: 15

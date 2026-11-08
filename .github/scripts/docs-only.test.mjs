@@ -128,22 +128,31 @@ test("the script writes the output only when HEAD is the commit under test", () 
   });
 });
 
+const workflow = (name) => readFileSync(new URL(`../workflows/${name}`, import.meta.url), "utf8").replaceAll("\r\n", "\n");
+
 /** test_pull_request.yml's job blocks by key. A block also holds the comments above the next job. */
 function workflowJobs() {
-  const text = readFileSync(new URL("../workflows/test_pull_request.yml", import.meta.url), "utf8").replaceAll("\r\n", "\n");
-  const blocks = text.slice(text.indexOf("\njobs:\n")).split(/\n {2}(?=[\w-]+:\n)/).slice(1);
+  const text = workflow("test_pull_request.yml");
+  const blocks = text.slice(text.indexOf("\njobs:\n")).split(/\n {2}(?=[\w-]+:[ \t]*(?:#.*)?\n)/).slice(1);
   return Object.fromEntries(blocks.map((block) => [block.slice(0, block.indexOf(":")), block]));
 }
 
 const line = (block, key) => block.match(new RegExp(`^ {4}${key}: (.*)$`, "m"))?.[1];
 const FORK_GUARD = "(github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)";
+const GATE = "!cancelled() && needs.changes.outputs.docs_only != 'true'";
 
 test("the gate runs only on a pull request without a train/ label, on a hosted runner", () => {
   const { changes } = workflowJobs();
   assert.equal(line(changes, "runs-on"), "ubuntu-latest");
-  const condition = line(changes, "if");
-  assert.ok(condition.includes("github.event_name == 'pull_request'"), condition);
-  assert.ok(condition.includes("' train/'"), condition);
+  assert.equal(line(changes, "if"), "github.event_name == 'pull_request' && !contains(format(' {0}', join(github.event.pull_request.labels.*.name, ' ')), ' train/')");
+});
+
+test("the gate reads the merge commit, publishes its output, and a failed test leaves the output empty", () => {
+  const { changes } = workflowJobs();
+  assert.match(changes, /^ {10}fetch-depth: 2\b/m);
+  assert.match(changes, /^ {6}docs_only: \$\{\{ steps\.classify\.outputs\.docs_only \}\}$/m);
+  assert.ok(changes.indexOf("docs-only.test.mjs") < changes.indexOf("run: node .github/scripts/docs-only.mjs"));
+  assert.match(changes, /- id: classify\n {8}continue-on-error: true\n {8}timeout-minutes: 1\n/);
 });
 
 test("every job is classified: a new job must decide how it treats the gate", () => {
@@ -152,19 +161,23 @@ test("every job is classified: a new job must decide how it treats the gate", ()
 
 test("a heavy job skips only on an explicit true and still runs when the gate itself is skipped", () => {
   const jobs = workflowJobs();
-  for (const name of ["bridge", "test-cli", "plugin"]) {
+  const expected = {
+    bridge: GATE,
+    "test-cli": GATE,
+    plugin: `${GATE} && vars.UNREAL_RUNNER_READY == 'true' && ${FORK_GUARD}`,
+  };
+  for (const [name, condition] of Object.entries(expected)) {
     assert.equal(line(jobs[name], "needs"), "changes", name);
-    assert.ok(line(jobs[name], "if").includes("!cancelled() && needs.changes.outputs.docs_only != 'true'"), name);
+    assert.equal(line(jobs[name], "if"), `\${{ ${condition} }}`, name);
   }
-  assert.ok(line(jobs.plugin, "if").includes("vars.UNREAL_RUNNER_READY == 'true'"));
-  assert.ok(line(jobs.plugin, "if").includes(FORK_GUARD));
 });
 
 test("the smoke follows the plugin job's result, because a skipped gate would skip it through the implicit success()", () => {
   const smoke = workflowJobs()["connection-smoke"];
   assert.equal(line(smoke, "needs"), "[plugin]");
-  const condition = line(smoke, "if");
-  assert.ok(condition.includes("!cancelled() && needs.plugin.result == 'success'"), condition);
-  assert.ok(condition.includes("vars.UNREAL_SMOKE_READY == 'true'"), condition);
-  assert.ok(condition.includes(FORK_GUARD), condition);
+  assert.equal(line(smoke, "if"), `\${{ !cancelled() && needs.plugin.result == 'success' && vars.UNREAL_SMOKE_READY == 'true' && ${FORK_GUARD} }}`);
+});
+
+test("the reusable cli job does not inherit the gate's result through the implicit success()", () => {
+  assert.match(workflow("test_cli.yml"), /^ {4}if: \$\{\{ !cancelled\(\) \}\}$/m);
 });
