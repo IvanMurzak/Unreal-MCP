@@ -1,11 +1,12 @@
 """Tests for the CI step scripts: .github/scripts/ue_ci.py, .github/scripts/ue_env.py, scripts/ue_machine_lock.py, scripts/ue_json.py."""
 from __future__ import annotations
 
+import base64
 import hashlib
 import importlib.util
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 import re
 import subprocess
 import sys
@@ -393,6 +394,90 @@ class ConnectionSmokeLogTests(unittest.TestCase):
                         "Cannot download the MCP bridge: this UnrealMCP build has no bridge checksum manifest"):
             marks = self.scan(self.NO_BINARY, self.DOWNLOADING, f"LogUnrealMcp: Warning: [Unreal-MCP] {failure}")
             self.assertTrue(marks["bridge_download_failed"], failure)
+
+
+class ConnectionSmokeKillTests(unittest.TestCase):
+    """The pre-launch stop reaches only the editor of the exact project, never one that shares its name."""
+
+    PROJECT = r"C:\actions-runner\_work\host\UnrealTestProject.uproject"
+    EDITOR = r'"C:\Program Files\Epic Games\UE_5.8\Engine\Binaries\Win64\UnrealEditor-Cmd.exe"'
+
+    smoke = load("connection_smoke", ROOT / "scripts/connection_smoke.py")
+
+    def opens(self, *arguments: str, project: str = PROJECT) -> bool:
+        return self.smoke.opens_project(" ".join([self.EDITOR, *arguments, "-nullrhi"]), project)
+
+    def test_the_same_stem_in_another_folder_does_not_match(self):
+        self.assertTrue(self.opens(f'"{self.PROJECT}"'))
+        for other in (r"D:\aigd-labs\i2-vfx\UnrealTestProject.uproject",
+                      r"C:\wt\d461f25d\agent\engines\unreal\test-project\UnrealTestProject.uproject",
+                      r"C:\actions-runner2\_work\host\UnrealTestProject.uproject"):
+            self.assertFalse(self.opens(f'"{other}"'), other)
+            self.assertFalse(self.opens(other), other)
+
+    def test_the_bare_stem_or_file_name_does_not_match(self):
+        self.assertFalse(self.opens("UnrealTestProject"))
+        self.assertFalse(self.opens("UnrealTestProject.uproject"))
+        self.assertFalse(self.opens(r"-abslog=C:\logs\UnrealTestProject.log"))
+
+    def test_a_longer_path_holding_the_project_path_does_not_match(self):
+        self.assertFalse(self.opens(f"{self.PROJECT}.bak"))
+        self.assertFalse(self.opens(f'"{self.PROJECT}2"'))
+        self.assertFalse(self.opens(rf'"D:\mirror\{self.PROJECT}"'))
+        self.assertFalse(self.opens(f'"{self.PROJECT} - Copy\\UnrealTestProject.uproject"'))
+
+    def test_the_path_inside_another_argument_does_not_match(self):
+        other = r'"D:\other\Other.uproject"'
+        for argument in (f"-abslog={self.PROJECT}", f'-source="{self.PROJECT}"', f'-ExecCmds="Foo {self.PROJECT}"'):
+            self.assertFalse(self.opens(other, argument), argument)
+
+    def test_case_separators_and_quoting_do_not_matter(self):
+        doubled = self.PROJECT.replace("\\", "\\\\")
+        for spelling in (self.PROJECT, f'"{self.PROJECT}"', f"-project={self.PROJECT}", f'-Project="{self.PROJECT}"',
+                         self.PROJECT.upper(), self.PROJECT.replace("\\", "/"), f'"{doubled}"'):
+            self.assertTrue(self.opens(spelling), spelling)
+
+    def test_a_path_with_spaces_matches_only_whole(self):
+        project = r"C:\My Games\UnrealTestProject.uproject"
+        self.assertTrue(self.opens(f'"{project}"', project=project))
+        self.assertFalse(self.opens(r'"C:\My Games 2\UnrealTestProject.uproject"', project=project))
+
+    def test_wildcard_and_regex_characters_in_the_path_are_literal(self):
+        project = r"C:\wt[1]\a*b?\(x)+\UnrealTestProject.uproject"
+        self.assertTrue(self.opens(f'"{project}"', project=project))
+        self.assertFalse(self.opens(r'"C:\wt1\ab\x\UnrealTestProject.uproject"', project=project))
+
+    def test_paths_that_only_look_alike_do_not_match(self):
+        self.assertFalse(self.opens(r'"C:\Strasse\X.uproject"', project=r"C:\Straße\X.uproject"))
+        self.assertFalse(self.opens(r'"\srv\share\X.uproject"', project=r"\\srv\share\X.uproject"))
+        self.assertTrue(self.opens(r'"//srv/share/X.uproject"', project=r"\\srv\share\X.uproject"))
+
+    def test_an_unreadable_command_line_does_not_match(self):
+        self.assertFalse(self.smoke.opens_project("", self.PROJECT))
+
+    def test_the_editor_listing_is_decoded_whole(self):
+        def line(pid, command_line: str) -> str:
+            return f"{pid}|{base64.b64encode(command_line.encode('utf-8')).decode('ascii')}"
+
+        cyrillic = r'"C:\Проект\a|b\UnrealTestProject.uproject" -nullrhi'
+        stdout = "\r\n".join(["noise", line(11, ""), line(12, cyrillic), line(13, "a\nb"), "²|QQ==", ""])
+        self.assertEqual(self.smoke.parse_editor_processes(stdout), [(11, ""), (12, cyrillic), (13, "a\nb")])
+
+    def test_a_failed_listing_stops_nothing(self):
+        with mock.patch.object(self.smoke.os, "name", "nt"), \
+                mock.patch.object(self.smoke.subprocess, "run", side_effect=FileNotFoundError("powershell")):
+            self.assertEqual(self.smoke.list_editor_processes(), [])
+
+    def test_only_the_editor_of_the_exact_project_is_stopped(self):
+        forward = self.PROJECT.replace("\\", "/").lower()
+        editors = [(101, f'{self.EDITOR} "{self.PROJECT}" -nullrhi'),
+                   (102, rf'{self.EDITOR} "D:\aigd-labs\i2-vfx\UnrealTestProject.uproject" -nullrhi'),
+                   (103, ""),
+                   (104, f"{self.EDITOR} {forward}")]
+        with mock.patch.object(self.smoke, "list_editor_processes", return_value=editors), \
+                mock.patch.object(self.smoke, "kill_tree") as kill_tree:
+            self.assertEqual(self.smoke.kill_existing_editors(PureWindowsPath(self.PROJECT)), 2)
+        self.assertEqual([call.args[0] for call in kill_tree.call_args_list], [101, 104])
 
 
 class UeJsonTests(unittest.TestCase):
