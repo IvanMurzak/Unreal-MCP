@@ -20,7 +20,6 @@
 #include "EnhancedInputSubsystems.h"
 #include "Engine/LocalPlayer.h"
 #include "Engine/World.h"
-#include "GameFramework/DefaultPawn.h"
 #include "GameFramework/GameModeBase.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/PlayerStart.h"
@@ -683,13 +682,13 @@ void FUnrealAIEnhancedInputSpec::Define()
 				Hold(TEXT("S, A"), FVector2D(-1, -1), When);
 			};
 			Directions(TEXT("first pawn"));
-			TestTrue(*FString::Printf(TEXT("the applied context, read by the core (%s)"), *FString::Join(UnrealMcpRql::AppliedMappingContexts(Controller), TEXT(", "))),
-				UnrealMcpRql::AppliedMappingContexts(Controller).Contains(ContextName));
+			const TArray<FString> Applied = UnrealMcpRql::AppliedMappingContexts(Controller);
+			TestTrue(*FString::Printf(TEXT("the applied context, read by the core (%s)"), *FString::Join(Applied, TEXT(", "))), Applied.Contains(ContextName));
 
 			// Re-possession (entering and leaving a vehicle): a new pawn, the same controller, the same values.
 			APawn* First = Controller->GetPawn();
 			UWorld* PlayWorld = UnrealMcpRql::PlayWorld();
-			APawn* Second = PlayWorld ? PlayWorld->SpawnActor<APawn>(ADefaultPawn::StaticClass(), FVector(500.0, 0.0, 5000.0), FRotator::ZeroRotator) : nullptr;
+			APawn* Second = PlayWorld ? PlayWorld->SpawnActor<APawn>(First->GetClass(), FVector(500.0, 0.0, 5000.0), FRotator::ZeroRotator) : nullptr;
 			if (!TestNotNull(TEXT("a second pawn"), Second))
 				return;
 			Controller->Possess(Second);

@@ -44,9 +44,11 @@ public:
 	FUnrealAIEnhancedInputRqlModule()
 	{
 		// Every play state (editor | call StartPlay / AdvancePlay, editor.PlayState, InjectInput) lists player 0's mapping contexts.
+		// The core fills them itself after 0.27.1; this fills them on an older core (minCoreVersion) and can go with it.
 		PlayStateHandle = UnrealMcpRql::OnReadPlayState().AddLambda([](APlayerController* Controller, FUnrealMcpPlayState& State)
 		{
-			State.MappingContexts = UUnrealAIEnhancedInputRqlApi::AppliedContexts(Controller);
+			if (State.MappingContexts.IsEmpty())
+				State.MappingContexts = UUnrealAIEnhancedInputRqlApi::AppliedContexts(Controller);
 		});
 	}
 

@@ -356,7 +356,13 @@ namespace UnrealMcpRqlPlayLocal
 		for (int32 Index = 0; Index < Array.Num(); ++Index)
 		{
 			if (const UObject* Modifier = Element->GetObjectPropertyValue(Array.GetRawPtr(Index)))
-				Names.Add(Modifier->GetClass()->GetName().Replace(TEXT("InputModifier"), TEXT("")));
+			{
+				// As the Enhanced Input extension's short names: InputModifierNegate -> Negate, BP_Mine_C -> BP_Mine.
+				FString Name = Modifier->GetClass()->GetName();
+				Name.RemoveFromEnd(TEXT("_C"));
+				Name.RemoveFromStart(TEXT("InputModifier"));
+				Names.Add(Name);
+			}
 		}
 		return Names.Num() ? FString::Join(Names, TEXT(", ")) : TEXT("none");
 	}
@@ -376,28 +382,24 @@ namespace UnrealMcpRqlPlayLocal
 		if (!ActionProperty || !KeyProperty || KeyProperty->Struct != FKey::StaticStruct())
 			return;
 		const FArrayProperty* ModifiersProperty = FindFProperty<FArrayProperty>(Mapping->Struct, TEXT("Modifiers"));
+		// One pass over the mappings: the modifiers of each (held key, action) pair.
+		TMap<TPair<FKey, const UObject*>, TArray<FString>> ModifiersByKeyAction;
 		FScriptArrayHelper Array(Mappings, Mappings->ContainerPtrToValuePtr<void>(Input));
-		for (const FHeldKey& Key : Held)
+		for (int32 Index = 0; Index < Array.Num(); ++Index)
 		{
-			TMap<const UObject*, TArray<FString>> ModifiersByAction;
-			for (int32 Index = 0; Index < Array.Num(); ++Index)
-			{
-				const void* Row = Array.GetRawPtr(Index);
-				const UObject* Action = ActionProperty->GetObjectPropertyValue_InContainer(Row);
-				if (Action && *KeyProperty->ContainerPtrToValuePtr<FKey>(Row) == Key.Key)
-					ModifiersByAction.FindOrAdd(Action).Add(ModifierNames(ModifiersProperty, Row));
-			}
-			for (const TPair<const UObject*, TArray<FString>>& Entry : ModifiersByAction)
-			{
-				if (Entry.Value.Num() < 2)
-					continue;
-				const FString Action = Entry.Key->GetName();
-				OutNotes.Add(FString::Printf(TEXT("%s reaches %s through %d key mappings (modifiers: %s): it gives %s their combined value, as a real key "
-					"press does, so keys of those mappings cannot differ. Enhanced Input user settings (bEnableUserSettings) cause this: they apply every "
-					"keyboard key of a player-mappable action to each of its mappings that share one mapping name. Give each mapping its own Player "
-					"Mappable Key Settings name (MoveForward, MoveBack, MoveLeft, MoveRight) or make them not player-mappable."),
-					*Key.Key.ToString(), *Action, Entry.Value.Num(), *FString::Join(Entry.Value, TEXT(" | ")), *Action));
-			}
+			const void* Row = Array.GetRawPtr(Index);
+			const FKey& Key = *KeyProperty->ContainerPtrToValuePtr<FKey>(Row);
+			const UObject* Action = ActionProperty->GetObjectPropertyValue_InContainer(Row);
+			if (Action && Held.ContainsByPredicate([&Key](const FHeldKey& HeldKey) { return HeldKey.Key == Key; }))
+				ModifiersByKeyAction.FindOrAdd({ Key, Action }).Add(ModifierNames(ModifiersProperty, Row));
+		}
+		for (const TPair<TPair<FKey, const UObject*>, TArray<FString>>& Entry : ModifiersByKeyAction)
+		{
+			if (Entry.Value.Num() > 1)
+				OutNotes.Add(FString::Printf(TEXT("%s reaches %s through %d key mappings (modifiers: %s), so those mappings' keys give it one combined "
+					"value, as real presses would; e.g. Enhanced Input user settings put every keyboard key of a player-mappable action on each of its "
+					"mappings that share a name: give each mapping its own Player Mappable Key Settings name, or make them not player-mappable."),
+					*Entry.Key.Key.ToString(), *Entry.Key.Value->GetName(), Entry.Value.Num(), *FString::Join(Entry.Value, TEXT(" | "))));
 		}
 	}
 }
