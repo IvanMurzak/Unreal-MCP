@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import { zipSync, strToU8 } from 'fflate';
@@ -413,6 +413,43 @@ describe('update and an open editor, the dry run, and links', () => {
     if (r.kind !== 'success') throw r.error;
     expect(r.items).toEqual([]);
     expect(fs.existsSync(path.join(project, 'Plugins'))).toBe(false);
+  });
+
+  it('updateProject never downgrades to an older latest, and a failed lookup changes nothing', async () => {
+    const project = seededProject();
+    const plugin = path.join(project, 'Plugins', 'UnrealMCP', 'UnrealMCP.uplugin');
+    fs.writeFileSync(plugin, JSON.stringify({ VersionName: '5.0.0' }), 'utf-8');
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ version: '1.0.0' }) })));
+
+    const older = await updateProject({ projectDir: project, noExtensions: true });
+    if (older.kind !== 'success') throw older.error;
+    expect(older.items[0]).toMatchObject({ status: 'current', from: '5.0.0' });
+    expect(readPluginVersion(plugin)).toBe('5.0.0');
+
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('offline'); }));
+    const failed = await updateProject({ projectDir: project, noExtensions: true });
+    if (failed.kind !== 'success') throw failed.error;
+    expect(failed.items[0]?.status).toBe('unknown');
+    expect(readPluginVersion(plugin)).toBe('5.0.0');
+    vi.unstubAllGlobals();
+  });
+
+  it('updateProject leaves a linked plugin alone', async () => {
+    const project = seededProject();
+    const checkout = makeSource('0.1.0');
+    const plugin = path.join(project, 'Plugins', 'UnrealMCP');
+    fs.rmSync(plugin, { recursive: true });
+    fs.symlinkSync(checkout, plugin);
+
+    const r = await updateProject({ projectDir: project, noExtensions: true });
+
+    if (r.kind !== 'success') throw r.error;
+    expect(r.items[0]?.status).toBe('local');
+    expect(fs.lstatSync(plugin).isSymbolicLink()).toBe(true);
+  });
+
+  it('updateProject requires a project', async () => {
+    expect((await updateProject({ projectDir: '' })).kind).toBe('failure');
   });
 
   it('updateProject reports the plugin as an item', async () => {

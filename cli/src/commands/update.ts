@@ -43,6 +43,7 @@ function printItem(item: ProjectUpdateItem): void {
   const from = item.from ?? 'unknown';
   const value =
     item.status === 'outdated' ? `${from} → ${item.to ?? 'latest'}`
+    : item.status === 'local' ? `${from} (linked, left as is)`
     : item.status === 'unknown' ? `${from} (latest version unknown)`
     : `${from} (up to date)`;
   ui.label(item.name, value);
@@ -78,8 +79,10 @@ async function updateProjectStep(projectDir: string, options: UpdateCommandOptio
   if (result.items.length === 0) {
     ui.info('UnrealMCP is not installed in this project (a Fab install is updated by the Epic Games Launcher): nothing to update here.');
   }
+  // A version that could not be looked up is not "up to date": never report success over it.
+  if (result.items.some((item) => item.status === 'unknown')) return 'failed';
   if (options.check) return outdated.length > 0 ? 'outdated' : 'done';
-  return result.updated.length < outdated.length ? 'failed' : 'done';
+  return outdated.every((item) => result.updated.includes(item)) ? 'done' : 'failed';
 }
 
 async function updateSelfStep(check: boolean | undefined): Promise<Outcome> {

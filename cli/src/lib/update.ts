@@ -42,6 +42,8 @@ export interface UpdateOptions {
   indexCachePath?: string;
   /** Only report what would change; write nothing. */
   dryRun?: boolean;
+  /** Leave the plugin as it is and handle only the extensions. */
+  noPlugin?: boolean;
   /** Test seam: the running processes, to refuse replacing files under an open editor. */
   listProcessesImpl?: () => RunningProcess[];
   /**
@@ -155,10 +157,10 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
     // installed: `null !== null` is `false`, so without the explicit
     // `fromVersion === null` clause an uninstalled plugin against an unreadable
     // source would short-circuit to "already up to date" and never install.
-    const needsUpdate =
+    const needsUpdate = opts.noPlugin !== true && (
       opts.force === true ||
       fromVersion === null ||
-      stripLeadingV(fromVersion ?? '') !== stripLeadingV(toVersion ?? '');
+      stripLeadingV(fromVersion ?? '') !== stripLeadingV(toVersion ?? ''));
     const extensions = opts.noExtensions ? [] : await planInstalledExtensions(projectDir, opts, warnings);
     if (opts.dryRun) {
       return { kind: 'success', success: true, fromVersion, toVersion, updated: false, extensionsUpdated: [], extensions, cleaned: false, installedPath, warnings };
@@ -325,7 +327,8 @@ export function findUnrealProjectRoot(start: string): string | null {
   }
 }
 
-export type ProjectUpdateStatus = 'outdated' | 'current' | 'unknown';
+/** `local`: a linked dev checkout, never replaced. `unknown`: the latest version could not be looked up. */
+export type ProjectUpdateStatus = 'outdated' | 'current' | 'unknown' | 'local';
 
 export interface ProjectUpdateItem {
   kind: 'plugin' | 'extension';
@@ -355,31 +358,47 @@ export type UpdateProjectResult = UpdateProjectSuccess | UpdateFailure;
  */
 export async function updateProject(opts: UpdateOptions): Promise<UpdateProjectResult> {
   const warnings: string[] = [];
-  const projectDir = path.resolve(opts?.projectDir ?? '');
-  const hasPlugin = readPluginVersion(path.join(projectDir, 'Plugins', 'UnrealMCP', 'UnrealMCP.uplugin')) !== null;
-  if (!hasPlugin && !opts?.force) return { kind: 'success', success: true, items: [], updated: [], warnings, nextSteps: [] };
+  if (!opts?.projectDir) return { kind: 'failure', success: false, warnings, error: new Error('projectDir is required.') };
 
+  const projectDir = path.resolve(opts.projectDir);
+  const pluginDir = path.join(projectDir, 'Plugins', 'UnrealMCP');
+  const installed = readPluginVersion(path.join(pluginDir, 'UnrealMCP.uplugin'));
+  if (installed === null && !opts.force) return { kind: 'success', success: true, items: [], updated: [], warnings, nextSteps: [] };
+
+  // Without an explicit target the plugin only moves forward: never to an older "latest", never to this
+  // CLI's own version because a lookup failed, and never over a linked dev checkout.
+  const explicit = Boolean(opts.version || opts.pluginSourceDir || opts.force);
   let version = opts.version;
-  if (!version && !opts.pluginSourceDir) {
+  let lookupFailed = false;
+  let noPlugin = false;
+  const linked = !explicit && isSymlink(pluginDir);
+  if (linked) {
+    noPlugin = true;
+  } else if (!explicit) {
     try {
       version = await fetchLatestVersion();
+      noPlugin = installed !== null && compareSemver(stripLeadingV(installed), stripLeadingV(version)) >= 0;
     } catch (err: unknown) {
-      warnings.push(`Could not look up the latest plugin, using this CLI's: ${asError(err).message}`);
+      warnings.push(`Could not look up the latest plugin: ${asError(err).message}`);
+      lookupFailed = true;
+      noPlugin = true;
     }
   }
 
-  const result = await update({ ...opts, version });
+  const result = await update({ ...opts, version, noPlugin });
   if (result.kind === 'failure') return { ...result, warnings: [...warnings, ...result.warnings] };
 
-  const { fromVersion: from, toVersion: to } = result;
+  const { fromVersion: from } = result;
+  const to = noPlugin ? version ?? null : result.toVersion;
   const pluginItem: ProjectUpdateItem = {
     kind: 'plugin',
     name: 'UnrealMCP plugin',
     from,
     to,
-    status: from === null || to === null
-      ? 'unknown'
-      : compareSemver(stripLeadingV(from), stripLeadingV(to)) < 0 ? 'outdated' : 'current',
+    status: linked ? 'local'
+      : lookupFailed ? 'unknown'
+      : result.updated || (opts.dryRun && !noPlugin && stripLeadingV(from ?? '') !== stripLeadingV(to ?? '')) ? 'outdated'
+      : 'current',
   };
   const extensionItems = result.extensions.map((extension): ProjectUpdateItem => ({
     kind: 'extension',
