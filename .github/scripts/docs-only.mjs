@@ -6,7 +6,7 @@
  * Writes `docs_only=true|false` to $GITHUB_OUTPUT; test_pull_request.yml skips its heavy jobs only
  * on an explicit `true`. So every doubt means a full run: a path not listed below, an empty diff,
  * or a failure here, since this step is `continue-on-error` and leaves the output empty.
- * A failed checkout can leave another PR's commit in a reused workspace, so HEAD must be GITHUB_SHA.
+ * HEAD must be GITHUB_SHA, or the diff read here would not be the diff of the commit under test.
  *
  * Reads the diff of the merge commit GitHub builds for a pull_request run (HEAD^1 is the base),
  * which needs `fetch-depth: 2` on the checkout and no token or API. `--no-renames` because a rename
