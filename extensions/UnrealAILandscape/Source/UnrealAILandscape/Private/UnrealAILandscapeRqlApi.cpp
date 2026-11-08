@@ -186,16 +186,16 @@ namespace UnrealAILandscapeRqlApiLocal
 		if (MergePending(Primary))
 		{
 			// Waiting on shaders or textures still compiling (the first edit of a session): let them finish and merge again,
-			// for at most MergeWaitSeconds. FinishAllCompilation would also wait for every unrelated shader (the first water
-			// material compiles for minutes on a cold cache), far past the tool call's timeout.
+			// while anything compiles, for at most MergeWaitSeconds. FinishAllCompilation would also wait for every unrelated
+			// shader (the first water material compiles for minutes on a cold cache), far past the tool call's timeout; with
+			// nothing compiling the merge cannot progress here (e.g. a mobile preview feature level), so it stops at once.
 			const double Deadline = FPlatformTime::Seconds() + MergeWaitSeconds;
-			do
+			while (MergePending(Primary) && FAssetCompilingManager::Get().GetNumRemainingAssets() > 0 && FPlatformTime::Seconds() < Deadline)
 			{
 				FAssetCompilingManager::Get().ProcessAsyncTasks(true);
 				FPlatformProcess::Sleep(0.02f);
 				Primary->ForceUpdateLayersContent();
 			}
-			while (MergePending(Primary) && FPlatformTime::Seconds() < Deadline);
 			if (MergePending(Primary))
 				UE_LOG(LogUnrealAILandscape, Warning, TEXT("%s: the landscape edit could not merge yet; it shows (and collides) after the next editor frames"), *Primary->GetActorNameOrLabel());
 		}

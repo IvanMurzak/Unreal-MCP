@@ -14,6 +14,7 @@
 #include "WaterBodyActor.h"
 #include "WaterBodyComponent.h"
 #include "WaterSplineComponent.h"
+#include "WaterSplineMetadata.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogUnrealAIWaterSafety, Log, All);
 
@@ -96,10 +97,15 @@ bool UnrealAIWaterSafety::ApplyWaterDefaults(AWaterBody* Body)
 	UWaterSplineComponent* Spline = Body ? Body->GetWaterSpline() : nullptr;
 	if (!Factory || !Spline)
 		return false;
-	// The factory also resets the spline to its default shape: keep the body's own points.
-	TArray<FVector> Points;
+	// The factory also resets the spline to its default shape: keep the body's own points (tangents, types) and their
+	// per-point water data (width, depth, velocity, audio).
+	TArray<FSplinePoint> Points;
 	for (int32 Index = 0; Index < Spline->GetNumberOfSplinePoints(); ++Index)
-		Points.Add(Spline->GetLocationAtSplinePoint(Index, ESplineCoordinateSpace::Local));
+		Points.Add(Spline->GetSplinePointAt(Index, ESplineCoordinateSpace::Local));
+	UWaterSplineMetadata* Metadata = Body->GetWaterBodyComponent()->GetWaterSplineMetadata();
+	UWaterSplineMetadata* Saved = Metadata ? DuplicateObject(Metadata, GetTransientPackage()) : nullptr;
+	if (Metadata)
+		Metadata->Modify();
 	Body->Modify();
 	Body->GetWaterBodyComponent()->Modify();
 	Spline->Modify();
@@ -107,10 +113,16 @@ bool UnrealAIWaterSafety::ApplyWaterDefaults(AWaterBody* Body)
 	if (Points.Num())
 	{
 		Spline->ClearSplinePoints(false);
-		for (const FVector& Point : Points)
-			Spline->AddSplinePoint(Point, ESplineCoordinateSpace::Local, false);
+		Spline->AddPoints(Points, false);
 		Spline->UpdateSpline();
 		Spline->SynchronizeWaterProperties();
+		if (Metadata && Saved && Saved->RiverWidth.Points.Num() == Points.Num())
+		{
+			Metadata->Depth = Saved->Depth;
+			Metadata->WaterVelocityScalar = Saved->WaterVelocityScalar;
+			Metadata->RiverWidth = Saved->RiverWidth;
+			Metadata->AudioIntensity = Saved->AudioIntensity;
+		}
 	}
 	Rebuild(Body);
 	return true;

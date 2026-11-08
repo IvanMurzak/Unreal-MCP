@@ -18,6 +18,7 @@
 #include "Interfaces/IProjectManager.h"
 #include "Landscape.h"
 #include "LandscapeEdit.h"
+#include "LandscapeEditLayer.h"
 #include "LandscapeInfo.h"
 #include "LandscapeProxy.h"
 #include "Materials/MaterialInterface.h"
@@ -65,9 +66,8 @@ namespace UnrealAIWaterRqlLocal
 	 * spline, zone fill), labelled @p Label (made unique). The body never edits the landscape (FWaterSpawnScope: no water
 	 * brush, no edit layer). Null after Fail.
 	 */
-	AActor* SpawnWater(UClass* Class, const FVector& Location, const FString& Label)
+	AActor* SpawnWater(UWorld* World, UClass* Class, const FVector& Location, const FString& Label)
 	{
-		UWorld* World = UnrealMcpRql::EditorWorld();
 		if (!World)
 			return UnrealMcpRql::Failed<AActor*>(TEXT("no editor world"));
 		ULevel* Level = World->GetCurrentLevel() ? World->GetCurrentLevel() : World->PersistentLevel.Get();
@@ -160,6 +160,9 @@ namespace UnrealAIWaterRqlLocal
 		UWaterBodyOceanComponent* Component = Ocean ? Cast<UWaterBodyOceanComponent>(Ocean->GetWaterBodyComponent()) : nullptr;
 		if (!Component || !Zone)
 			return;
+		// The ocean renders centred on its zone but collides centred on its actor: move it with the zone.
+		Ocean->Modify();
+		Ocean->SetActorLocation(FVector(Zone->GetActorLocation().X, Zone->GetActorLocation().Y, Ocean->GetActorLocation().Z));
 		Component->Modify();
 		Component->SetCollisionExtents(FVector(Zone->GetZoneExtent() / 2.0, Component->GetCollisionExtents().Z));
 		Component->FillWaterZoneWithOcean();
@@ -184,6 +187,8 @@ namespace UnrealAIWaterRqlLocal
 	 */
 	AWaterZone* FitZone(UWorld* World, double SizeMeters, FVector Center)
 	{
+		if (!FMath::IsFinite(SizeMeters) || Center.ContainsNaN())
+			return UnrealMcpRql::Failed<AWaterZone*>(TEXT("SizeMeters and Center must be finite numbers"));
 		double Extent = SizeMeters * 100.0;
 		if (SizeMeters <= 0.0)
 		{
@@ -199,7 +204,7 @@ namespace UnrealAIWaterRqlLocal
 		}
 		AWaterZone* Zone = FindFirst<AWaterZone>(World);
 		if (!Zone)
-			Zone = Cast<AWaterZone>(SpawnWater(AWaterZone::StaticClass(), FVector(Center.X, Center.Y, 0.0), TEXT("WaterZone")));
+			Zone = Cast<AWaterZone>(SpawnWater(World, AWaterZone::StaticClass(), FVector(Center.X, Center.Y, 0.0), TEXT("WaterZone")));
 		if (!Zone)
 			return nullptr;
 		Zone->Modify();
@@ -220,9 +225,10 @@ namespace UnrealAIWaterRqlLocal
 	/** A river through @p Points (world, upstream first) @p Width wide (and @p Depth deep when > 0), its zone ensured. */
 	AWaterBodyRiver* SpawnRiver(const FString& Label, const TArray<FVector>& Points, double Width, double Depth, UMaterialInterface* Material)
 	{
-		if (!EnsureZone(UnrealMcpRql::EditorWorld(), Points[0]))
+		UWorld* World = UnrealMcpRql::EditorWorld();
+		if (!EnsureZone(World, Points[0]))
 			return nullptr;
-		AWaterBodyRiver* River = Cast<AWaterBodyRiver>(SpawnWater(AWaterBodyRiver::StaticClass(), Points[0], Label));
+		AWaterBodyRiver* River = Cast<AWaterBodyRiver>(SpawnWater(World, AWaterBodyRiver::StaticClass(), Points[0], Label));
 		if (!River)
 			return nullptr;
 		SetSpline(River, Points);
@@ -233,14 +239,18 @@ namespace UnrealAIWaterRqlLocal
 	// ---------------------------------------------------------------------------------------------------------------
 	// CreateRiverBetween: the lowest path over a landscape and the bed it carves
 
-	/** A landscape's heights (cm, world Z) on its vertex grid, read from the edit layer the operations write to. */
+	/**
+	 * A landscape's ground heights (cm, world Z) on its vertex grid: its only height edit layer, or the merged heights when
+	 * it has several (edit layers add up). Vertices of components that are not loaded (World Partition) are not Valid.
+	 */
 	struct FHeightGrid
 	{
 		ULandscapeInfo* Info = nullptr;
-		FGuid EditLayer;
-		FIntRect Rect;      // the whole landscape, in vertices
+		FGuid EditLayer;    // the layer CarveBed writes to
+		FIntRect Rect;      // the loaded landscape's bounding rectangle, in vertices
 		FTransform ToWorld; // vertex -> world
 		TArray<uint16> Raw;
+		TBitArray<> Loaded; // per vertex: its component is loaded
 		double ZScale = 1.0; // cm per height unit
 		double ZOrigin = 0.0;
 		double QuadCm = 1.0; // cm between vertices
@@ -248,6 +258,7 @@ namespace UnrealAIWaterRqlLocal
 		int32 Width() const { return Rect.Width() + 1; }
 		int32 Height() const { return Rect.Height() + 1; }
 		int32 Index(int32 X, int32 Y) const { return (Y - Rect.Min.Y) * Width() + (X - Rect.Min.X); }
+		bool Valid(int32 X, int32 Y) const { return X >= Rect.Min.X && Y >= Rect.Min.Y && X <= Rect.Max.X && Y <= Rect.Max.Y && Loaded[Index(X, Y)]; }
 		double At(int32 X, int32 Y) const { return ZOrigin + (static_cast<double>(Raw[Index(X, Y)]) - LandscapeDataAccess::MidValue) * ZScale; }
 		uint16 Units(double Cm) const { return static_cast<uint16>(FMath::Clamp(FMath::RoundToInt((Cm - ZOrigin) / ZScale + LandscapeDataAccess::MidValue), 0, 65535)); }
 		FVector2D ToLocal(const FVector& World) const { const FVector L = ToWorld.InverseTransformPosition(World); return FVector2D(L.X, L.Y); }
@@ -263,12 +274,38 @@ namespace UnrealAIWaterRqlLocal
 		if (!Out.EditLayer.IsValid())
 			return false;
 		Out.ToWorld = Landscape->LandscapeActorToWorld();
+		const FVector Scale = Out.ToWorld.GetScale3D().GetAbs();
+		if (!FMath::IsNearlyEqual(Scale.X, Scale.Y, 0.01 * Scale.X))
+			return UnrealMcpRql::Failed<bool>(FString::Printf(TEXT("%s is scaled unevenly on X and Y (%g, %g): give it equal X and Y scale, or place the river with CreateRiver"), *Landscape->GetActorNameOrLabel(), Scale.X, Scale.Y));
 		Out.ZScale = Out.ToWorld.GetScale3D().Z * LANDSCAPE_ZSCALE;
 		Out.ZOrigin = Out.ToWorld.GetLocation().Z;
-		Out.QuadCm = Out.ToWorld.GetScale3D().X;
+		Out.QuadCm = Scale.X;
 		Out.Raw.SetNumZeroed(Out.Width() * Out.Height());
+		Out.Loaded.Init(false, Out.Width() * Out.Height());
+		const int32 ComponentQuads = Out.Info->ComponentSizeQuads;
+		for (const TPair<FIntPoint, ULandscapeComponent*>& Pair : Out.Info->XYtoComponentMap)
+		{
+			if (!Pair.Value)
+				continue;
+			for (int32 Y = Pair.Key.Y * ComponentQuads; Y <= (Pair.Key.Y + 1) * ComponentQuads; ++Y)
+			{
+				for (int32 X = Pair.Key.X * ComponentQuads; X <= (Pair.Key.X + 1) * ComponentQuads; ++X)
+				{
+					if (X >= Out.Rect.Min.X && Y >= Out.Rect.Min.Y && X <= Out.Rect.Max.X && Y <= Out.Rect.Max.Y)
+						Out.Loaded[Out.Index(X, Y)] = true;
+				}
+			}
+		}
+		// Edit layers add up: with one height layer it is the ground, with several read the merged ground.
+		int32 HeightLayers = 0;
+		if (const ALandscape* Primary = Landscape->GetLandscapeActor())
+		{
+			for (const ULandscapeEditLayerBase* Layer : Primary->GetEditLayersConst())
+				HeightLayers += Layer && Layer->SupportsTargetType(ELandscapeToolTargetType::Heightmap) ? 1 : 0;
+		}
 		FHeightmapAccessor<false> Accessor(Out.Info);
-		Accessor.SetEditLayer(Out.EditLayer);
+		if (HeightLayers <= 1)
+			Accessor.SetEditLayer(Out.EditLayer);
 		Accessor.GetDataFast(Out.Rect.Min.X, Out.Rect.Min.Y, Out.Rect.Max.X, Out.Rect.Max.Y, Out.Raw.GetData());
 		return true;
 	}
@@ -286,14 +323,18 @@ namespace UnrealAIWaterRqlLocal
 		const auto Vertex = [&Grid, Step](int32 X, int32 Y) { return FIntPoint(Grid.Rect.Min.X + FMath::Min(X * Step, Grid.Rect.Width()), Grid.Rect.Min.Y + FMath::Min(Y * Step, Grid.Rect.Height())); };
 		TArray<double> Z;
 		Z.SetNumUninitialized(W * H);
+		TBitArray<> Open(false, W * H); // a loaded cell (a route never crosses a component that is not loaded)
 		double Low = TNumericLimits<double>::Max(), High = TNumericLimits<double>::Lowest();
 		for (int32 Y = 0; Y < H; ++Y)
 		{
 			for (int32 X = 0; X < W; ++X)
 			{
 				const FIntPoint V = Vertex(X, Y);
+				if (!Grid.Valid(V.X, V.Y))
+					continue;
 				const double Value = Grid.At(V.X, V.Y);
 				Z[Y * W + X] = Value;
+				Open[Y * W + X] = true;
 				Low = FMath::Min(Low, Value);
 				High = FMath::Max(High, Value);
 			}
@@ -312,13 +353,13 @@ namespace UnrealAIWaterRqlLocal
 		TArray<int32> Previous;
 		Previous.Init(INDEX_NONE, W * H);
 		struct FNode { double Cost; int32 Index; bool operator<(const FNode& Other) const { return Cost < Other.Cost; } };
-		TArray<FNode> Open;
+		TArray<FNode> Frontier;
 		Cost[Start] = 0.0;
-		Open.HeapPush(FNode{ 0.0, Start });
-		while (Open.Num())
+		Frontier.HeapPush(FNode{ 0.0, Start });
+		while (Frontier.Num())
 		{
 			FNode Node;
-			Open.HeapPop(Node, EAllowShrinking::No);
+			Frontier.HeapPop(Node, EAllowShrinking::No);
 			if (Node.Index == Goal)
 				break;
 			if (Node.Cost > Cost[Node.Index])
@@ -329,7 +370,7 @@ namespace UnrealAIWaterRqlLocal
 				for (int32 DX = -1; DX <= 1; ++DX)
 				{
 					const int32 NX = X + DX, NY = Y + DY;
-					if ((DX == 0 && DY == 0) || NX < 0 || NY < 0 || NX >= W || NY >= H)
+					if ((DX == 0 && DY == 0) || NX < 0 || NY < 0 || NX >= W || NY >= H || !Open[NY * W + NX])
 						continue;
 					const int32 Next = NY * W + NX;
 					const double Length = Quad * ((DX != 0 && DY != 0) ? UE_DOUBLE_SQRT_2 : 1.0);
@@ -339,12 +380,14 @@ namespace UnrealAIWaterRqlLocal
 					{
 						Cost[Next] = NewCost;
 						Previous[Next] = Node.Index;
-						Open.HeapPush(FNode{ NewCost, Next });
+						Frontier.HeapPush(FNode{ NewCost, Next });
 					}
 				}
 			}
 		}
 		TArray<FVector2D> Path;
+		if (Goal != Start && Previous[Goal] == INDEX_NONE)
+			return Path; // no route over the loaded components
 		for (int32 Index = Goal; Index != INDEX_NONE; Index = Previous[Index])
 		{
 			const FIntPoint V = Vertex(Index % W, Index / W);
@@ -353,6 +396,8 @@ namespace UnrealAIWaterRqlLocal
 				break;
 		}
 		Algo::Reverse(Path);
+		if (Path.Num() < 2)
+			return { From, To }; // source and mouth in one cell
 		Path[0] = From;
 		Path.Last() = To;
 		return Path;
@@ -406,11 +451,11 @@ namespace UnrealAIWaterRqlLocal
 		const FIntRect Band(
 			FMath::Max(Grid.Rect.Min.X, FMath::FloorToInt(Box.Min.X - Half - Bank)), FMath::Max(Grid.Rect.Min.Y, FMath::FloorToInt(Box.Min.Y - Half - Bank)),
 			FMath::Min(Grid.Rect.Max.X, FMath::CeilToInt(Box.Max.X + Half + Bank)), FMath::Min(Grid.Rect.Max.Y, FMath::CeilToInt(Box.Max.Y + Half + Bank)));
+		// The ground lowered per vertex (height units), then subtracted from the edit layer: with several height layers the
+		// ground is their sum, so the layer is lowered by the difference rather than set to the target.
 		const int32 Width = Band.Width() + 1;
-		TArray<uint16> Block;
-		Block.SetNumUninitialized(Width * (Band.Height() + 1));
-		for (int32 Y = Band.Min.Y; Y <= Band.Max.Y; ++Y)
-			FMemory::Memcpy(&Block[(Y - Band.Min.Y) * Width], &Grid.Raw[Grid.Index(Band.Min.X, Y)], Width * sizeof(uint16));
+		TArray<uint16> Lower;
+		Lower.SetNumZeroed(Width * (Band.Height() + 1));
 		bool bChanged = false;
 		for (int32 Index = 0; Index + 1 < Path.Num(); ++Index)
 		{
@@ -428,13 +473,14 @@ namespace UnrealAIWaterRqlLocal
 					const FVector2D P(X, Y);
 					const double T = FMath::Clamp(FVector2D::DotProduct(P - A, AB) / LengthSquared, 0.0, 1.0);
 					const double Distance = FVector2D::Distance(P, A + AB * T);
-					if (Distance > Half + Bank)
+					if (Distance > Half + Bank || !Grid.Valid(X, Y))
 						continue;
-					const uint16 New = Grid.Units(FMath::Lerp(Bed[Index], Bed[Index + 1], T) + FMath::Max(0.0, Distance - Half) * Rise);
-					uint16& Value = Block[(Y - Band.Min.Y) * Width + (X - Band.Min.X)];
-					if (New < Value)
+					const uint16 Target = Grid.Units(FMath::Lerp(Bed[Index], Bed[Index + 1], T) + FMath::Max(0.0, Distance - Half) * Rise);
+					const uint16 Ground = Grid.Raw[Grid.Index(X, Y)];
+					uint16& Amount = Lower[(Y - Band.Min.Y) * Width + (X - Band.Min.X)];
+					if (Target < Ground && Ground - Target > Amount)
 					{
-						Value = New;
+						Amount = Ground - Target;
 						bChanged = true;
 					}
 				}
@@ -442,9 +488,14 @@ namespace UnrealAIWaterRqlLocal
 		}
 		if (!bChanged)
 			return false;
-		Landscape->Modify();
 		FHeightmapAccessor<false> Accessor(Grid.Info);
 		Accessor.SetEditLayer(Grid.EditLayer);
+		TArray<uint16> Block;
+		Block.SetNumZeroed(Lower.Num());
+		Accessor.GetDataFast(Band.Min.X, Band.Min.Y, Band.Max.X, Band.Max.Y, Block.GetData());
+		for (int32 Index = 0; Index < Block.Num(); ++Index)
+			Block[Index] = static_cast<uint16>(FMath::Max(0, static_cast<int32>(Block[Index]) - Lower[Index]));
+		Landscape->Modify();
 		Accessor.SetData(Band.Min.X, Band.Min.Y, Band.Max.X, Band.Max.Y, Block.GetData());
 		Accessor.Flush();
 		UnrealAILandscapeRqlApiLocal::MergeNow(Landscape, ELandscapeLayerUpdateMode::Update_Heightmap_All);
@@ -512,7 +563,7 @@ AWaterBodyOcean* UUnrealAIWaterRqlApi::CreateOcean(const FString& Label, double 
 		return nullptr;
 	// The ocean's actor factory fills the zone (collision and ocean extents), as the Place Actors panel does.
 	const FVector Location(Zone->GetActorLocation().X, Zone->GetActorLocation().Y, Height);
-	AWaterBodyOcean* Ocean = Cast<AWaterBodyOcean>(SpawnWater(AWaterBodyOcean::StaticClass(), Location, Label));
+	AWaterBodyOcean* Ocean = Cast<AWaterBodyOcean>(SpawnWater(World, AWaterBodyOcean::StaticClass(), Location, Label));
 	return Ocean && FinishBody(Ocean, Material) ? Ocean : nullptr;
 }
 
@@ -522,9 +573,10 @@ AWaterBodyLake* UUnrealAIWaterRqlApi::CreateLake(const FString& Label, FVector C
 		return nullptr;
 	if (!(Radius >= 100.0 && Radius <= 200000.0))
 		return UnrealMcpRql::Failed<AWaterBodyLake*>(FString::Printf(TEXT("Radius %g is outside 100 .. 200000 cm"), Radius));
-	if (!EnsureZone(UnrealMcpRql::EditorWorld(), Center))
-		return nullptr;
-	AWaterBodyLake* Lake = Cast<AWaterBodyLake>(SpawnWater(AWaterBodyLake::StaticClass(), Center, Label));
+	UWorld* World = UnrealMcpRql::EditorWorld();
+	if (Center.ContainsNaN() || !EnsureZone(World, Center))
+		return Center.ContainsNaN() ? UnrealMcpRql::Failed<AWaterBodyLake*>(TEXT("Center must be finite numbers")) : nullptr;
+	AWaterBodyLake* Lake = Cast<AWaterBodyLake>(SpawnWater(World, AWaterBodyLake::StaticClass(), Center, Label));
 	if (!Lake)
 		return nullptr;
 	TArray<FVector> Shore;
@@ -543,6 +595,8 @@ AWaterBodyRiver* UUnrealAIWaterRqlApi::CreateRiver(const FString& Label, const T
 		return nullptr;
 	if (Points.Num() < 2 || Points.Num() > 200)
 		return UnrealMcpRql::Failed<AWaterBodyRiver*>(FString::Printf(TEXT("a river needs 2 .. 200 points (upstream first), got %d"), Points.Num()));
+	if (Points.ContainsByPredicate([](const FVector& Point) { return Point.ContainsNaN(); }))
+		return UnrealMcpRql::Failed<AWaterBodyRiver*>(TEXT("river points must be finite numbers"));
 	return SpawnRiver(Label, Points, Width, 0.0, Material);
 }
 
@@ -558,14 +612,16 @@ AWaterBodyRiver* UUnrealAIWaterRqlApi::CreateRiverBetween(const FString& Label, 
 	if (!ReadGrid(Landscape, Grid))
 		return nullptr;
 	const FVector2D From = Grid.ToLocal(Source), To = Grid.ToLocal(Mouth);
-	const auto Inside = [&Grid](const FVector2D& P) { return P.X >= Grid.Rect.Min.X && P.Y >= Grid.Rect.Min.Y && P.X <= Grid.Rect.Max.X && P.Y <= Grid.Rect.Max.Y; };
+	const auto Inside = [&Grid](const FVector2D& P) { return Grid.Valid(FMath::RoundToInt(P.X), FMath::RoundToInt(P.Y)); };
 	if (!Inside(From) || !Inside(To))
-		return UnrealMcpRql::Failed<AWaterBodyRiver*>(TEXT("Source and Mouth must be on the landscape (its Bounds): a river mouth at the coast stays a little inside the landscape's edge"));
+		return UnrealMcpRql::Failed<AWaterBodyRiver*>(TEXT("Source and Mouth must be on the landscape (its Bounds; on a World Partition map, in a loaded region): a river mouth at the coast stays a little inside the landscape's edge"));
 	if (FVector2D::Distance(From, To) * Grid.QuadCm < Width * 2.0)
 		return UnrealMcpRql::Failed<AWaterBodyRiver*>(TEXT("Source and Mouth are too close for a river of this Width"));
 
 	// The route, resampled at most 150 points, every 2 river widths or more.
 	const TArray<FVector2D> Route = LowestPath(Grid, From, To);
+	if (Route.IsEmpty())
+		return UnrealMcpRql::Failed<AWaterBodyRiver*>(TEXT("no route over the loaded landscape joins Source and Mouth: load the region between them (World Partition) first"));
 	double Length = 0.0;
 	for (int32 Index = 1; Index < Route.Num(); ++Index)
 		Length += FVector2D::Distance(Route[Index - 1], Route[Index]);
@@ -579,7 +635,8 @@ AWaterBodyRiver* UUnrealAIWaterRqlApi::CreateRiverBetween(const FString& Label, 
 	{
 		const int32 X = FMath::Clamp(FMath::RoundToInt(P.X), Grid.Rect.Min.X, Grid.Rect.Max.X);
 		const int32 Y = FMath::Clamp(FMath::RoundToInt(P.Y), Grid.Rect.Min.Y, Grid.Rect.Max.Y);
-		Running = FMath::Min(Running, Grid.At(X, Y));
+		if (Grid.Valid(X, Y))
+			Running = FMath::Min(Running, Grid.At(X, Y));
 		Bed.Add(Running - Depth);
 		Surface.Add(Depth > 0.0 ? Running - Depth / 3.0 : Running + 20.0);
 	}

@@ -2,7 +2,7 @@
   "description": "a river from the mountain down the valley to the sea, routed and carved in one bounded call",
   "tool": "rql-mutate",
   "input": {
-    "query": "water | call CreateRiverBetween(\"E2ERiver\", unreal.find(\"E2EIsland\"), [0, 15000, 0], [0, -90000, 0], 1500, 300)"
+    "query": "water | call CreateRiverBetween(\"E2ERiver\", unreal.find(\"E2EIsland\"), [3000000, 15000, 0], [3000000, -90000, 0], 1500, 300)"
   },
   "assert": {
     "pattern": "WaterBodyRiver#\\d+\\(E2ERiver\\)"

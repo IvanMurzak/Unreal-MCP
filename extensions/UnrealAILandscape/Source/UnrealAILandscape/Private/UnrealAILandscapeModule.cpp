@@ -68,7 +68,7 @@ namespace UnrealAILandscapeRqlLocal
 		for (const UStaticMeshComponent* Mesh : Meshes)
 			bMesh |= Mesh->GetFName() == TEXT("WaterInfoMeshComponent") && Mesh->GetStaticMesh() != nullptr;
 		if (!bMesh && Component->ShouldGenerateWaterMeshTile())
-			return FString::Printf(TEXT("its water mesh is not built: water | call SetMaterial(%s) rebuilds it"), *Find());
+			return FString::Printf(TEXT("its water mesh is not built: water | call SetMaterial(%s, \"%s\") rebuilds it"), *Find(), *Material->GetPathName());
 		if (Material->IsCompiling())
 			return TEXT("its material's shaders are still compiling: it shows when they finish (read Water again)");
 		return FString();
