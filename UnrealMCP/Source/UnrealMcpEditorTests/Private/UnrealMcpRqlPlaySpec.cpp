@@ -257,10 +257,11 @@ void FUnrealMcpRqlPlaySpec::Define()
 				TestTrue(*FString::Printf(TEXT("held '%s' (%s)"), Keys, *AdvanceError), UnrealMcpRql::AdvancePlayAndRead(Seconds, Frames, Keys, State, AdvanceError));
 				return State;
 			};
-			auto NotedNothing = [](const FUnrealMcpPlayState& State)
+			auto HasNote = [](const FUnrealMcpPlayState& State, const TCHAR* Text)
 			{
-				return State.Notes.ContainsByPredicate([](const FString& Note) { return Note.Contains(TEXT("if this input should move it")); });
+				return State.Notes.ContainsByPredicate([Text](const FString& Note) { return Note.Contains(Text); });
 			};
+			auto NotedNothing = [&HasNote](const FUnrealMcpPlayState& State) { return HasNote(State, TEXT("if this input should move it")); };
 
 			// A pawn without a movement component: W moves it, Velocity stays 0 and the measured fields read the motion.
 			const FVector SelfMovingStart(0.0, 0.0, 8000.0);
@@ -272,7 +273,7 @@ void FUnrealMcpRqlPlaySpec::Define()
 			TestEqual(TEXT("Velocity keeps its meaning: no movement component, 0"), Driven.Speed, 0.0);
 			TestTrue(*FString::Printf(TEXT("Moved reads the motion (%f)"), Driven.Moved), Driven.Moved > 100.0);
 			TestEqual(TEXT("Moved is the location change"), Driven.Moved, FVector::Dist(SelfMovingStart, Driven.Location), 1e-3);
-			TestEqual(TEXT("MeasuredVelocity is that change over the game time"), Driven.MeasuredVelocity.X, Driven.Moved / (31.0 / 60.0), 5.0);
+			TestEqual(TEXT("MeasuredVelocity is that change over the game time"), Driven.MeasuredVelocity.X, Driven.Moved * UnrealMcpRql::PlayFrameRate / 31.0, 5.0);
 			TestFalse(TEXT("what moved gets no note"), NotedNothing(Driven));
 
 			// Blocked: the same key now moves nothing, and a note says so. A short press does not get one.
@@ -280,7 +281,7 @@ void FUnrealMcpRqlPlaySpec::Define()
 			const FUnrealMcpPlayState Blocked = Advance(0.5, 0, TEXT("W"));
 			TestTrue(*FString::Printf(TEXT("blocked: not moved (%f)"), Blocked.Moved), Blocked.Moved < 1.0);
 			TestTrue(*FString::Printf(TEXT("blocked: noted (%s)"), *FString::Join(Blocked.Notes, TEXT(" | "))),
-				Blocked.Notes.ContainsByPredicate([](const FString& Note) { return Note.Contains(TEXT("Held W for 0.50 s and the pawn neither moved nor turned")); }));
+				HasNote(Blocked, TEXT("Held W for 0.50 s and the pawn neither moved nor turned")));
 			TestFalse(TEXT("a 2-frame press gets no note"), NotedNothing(Advance(0.0, 2, TEXT("W"))));
 			TestFalse(TEXT("no input gets no note"), NotedNothing(Advance(0.5, 0, TEXT(""))));
 			TestFalse(TEXT("an axis at 0 gets no note"), NotedNothing(Advance(0.5, 0, TEXT("Gamepad_LeftY=0"))));
@@ -289,7 +290,7 @@ void FUnrealMcpRqlPlaySpec::Define()
 			const FUnrealMcpPlayState Turned = Advance(0.5, 0, TEXT("A"));
 			TestTrue(*FString::Printf(TEXT("Turned reads the turn (%f)"), Turned.Turned), Turned.Turned > 30.0);
 			TestTrue(*FString::Printf(TEXT("turned in place: noted (%s)"), *FString::Join(Turned.Notes, TEXT(" | "))),
-				Turned.Notes.ContainsByPredicate([](const FString& Note) { return Note.Contains(TEXT("turned")) && Note.Contains(TEXT("without moving")); }));
+				HasNote(Turned, TEXT("degrees without moving")));
 
 			// A look axis: the DefaultPawn stays where it is, but the camera turned, so the input did something.
 			Controller->Possess(DefaultPawn);
