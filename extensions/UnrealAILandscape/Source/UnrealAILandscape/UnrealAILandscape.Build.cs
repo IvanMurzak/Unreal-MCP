@@ -28,6 +28,8 @@ public class UnrealAILandscape : ModuleRules
 			// The gating engine plugin's runtime module (its { "Name": "Water" } entry is in the .uplugin "Plugins"
 			// array): AWaterBody / AWaterZone for the waterBodies / waterZones sources and the Water members.
 			"Water",
+			// The Water plugin's editor module: UWaterEditorSettings, the default water materials of each body type.
+			"WaterEditor",
 			// A built-in engine module (no .uplugin entry): ALandscapeProxy / ULandscapeInfo for the landscapes source
 			// and the Sections / PaintLayers members.
 			"Landscape",
@@ -36,6 +38,8 @@ public class UnrealAILandscape : ModuleRules
 			// LandscapeEdit.h (the height / weight accessors) includes InstancedFoliageActor.h.
 			"Foliage",
 			"UnrealEd",
+			// IPluginManager / IProjectManager: EnableWater enables the Water plugin in the project file.
+			"Projects",
 		});
 	}
 }

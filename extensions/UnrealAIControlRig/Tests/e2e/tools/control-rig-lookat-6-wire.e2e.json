@@ -1,0 +1,10 @@
+{
+  "description": "the rig runs before Output Pose with its inputs bound to Anim Blueprint variables",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "controlRig | call AddToAnimBlueprint(\"/Game/E2E/ABP_HeadLookAt\", \"/Game/E2E/CR_HeadLookAt\")"
+  },
+  "assert": {
+    "pattern": "runs CR_HeadLookAt between .* and Output Pose; inputs: LookAtTarget <- LookAtTarget \\(new [^)]*\\), LookAtWeight <- LookAtWeight"
+  }
+}

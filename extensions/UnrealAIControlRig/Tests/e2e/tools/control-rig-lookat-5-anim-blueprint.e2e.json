@@ -1,0 +1,10 @@
+{
+  "description": "an Anim Blueprint of the mannequin to wire the rig into",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "editor | call CopyAsset(\"/Engine/Tutorial/SubEditors/TutorialAssets/Character/TutorialTPP_AnimBlueprint\", \"/Game/E2E/ABP_HeadLookAt\")"
+  },
+  "assert": {
+    "pattern": "\\bABP_HeadLookAt\\b"
+  }
+}

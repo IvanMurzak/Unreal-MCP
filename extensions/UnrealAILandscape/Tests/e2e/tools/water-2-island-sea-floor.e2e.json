@@ -1,0 +1,10 @@
+{
+  "description": "the sea floor around the island (a 30 m deep hollow)",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "landscape | call Sculpt(unreal.find(\"E2EIsland\"), [3000000, 0, 0], 100000, -3000)"
+  },
+  "assert": {
+    "pattern": "Sculpt\\(.*\\|[1-9]\\d*"
+  }
+}

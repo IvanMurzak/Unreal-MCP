@@ -1,0 +1,10 @@
+{
+  "description": "the Anim Blueprint compiles without errors",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "unreal.asset(\"/Game/E2E/ABP_HeadLookAt\") | call Compile()"
+  },
+  "assert": {
+    "pattern": "Succeeded:true"
+  }
+}

@@ -307,12 +307,94 @@ GAS_AUTHORING = {
 }
 AUTHORING.update(GAS_AUTHORING)
 
+
+def rig_receipt(method, result):
+    return text_result(f'1 result\n$ref|method|result\nControlRigOperations#5120|{method}|{result}')
+
+
+CREATE_RIG = 'CreateRig(string Path, string Mesh)'
+LOOK_AT = 'AddLookAt(ControlRigBlueprint Rig, string Bone, string Target, string Weight, string Axis, string After)'
+ADD_VARIABLE = 'AddVariable(ControlRigBlueprint Rig, string Name, string Type, string Default, bool bPublic)'
+WIRE = 'AddToAnimBlueprint(AnimBlueprint AnimBlueprint, ControlRigBlueprint Rig, string After, bool bBindVariables)'
+TRACK = ('TrackNearestActor(AnimBlueprint AnimBlueprint, string ActorClass, string LocationVariable, string WeightVariable, '
+         'float Radius, float Speed)')
+DELETED = text_result('1 result\n$ref|method|result\nEditor@1|DeleteAsset(string Path, bool bForce)|null')
+# The Control Rig head look-at sequence: per check, an answer the live UE 5.7 editor gives and one that must not pass.
+CONTROL_RIG = {
+    'control-rig-units-query.e2e.json': (
+        text_result('1 result\nDisplayName|Execute\nAim|true'), text_result('1 result\nDisplayName|Execute\nAim Bone|false')),
+    'control-rig-lookat-1-create.e2e.json': (
+        rig_receipt(CREATE_RIG, 'ControlRigBlueprint#1297(CR_HeadLookAt)'), rig_receipt(CREATE_RIG, 'ControlRigBlueprint#1297(CR_HeadLookAt2)')),
+    'control-rig-lookat-2-target.e2e.json': (rig_receipt(ADD_VARIABLE, 'LookAtTarget'), rig_receipt(ADD_VARIABLE, 'LookAtTarget_1')),
+    'control-rig-lookat-3-weight.e2e.json': (rig_receipt(ADD_VARIABLE, 'LookAtWeight'), rig_receipt(ADD_VARIABLE, 'LookAtWeight_1')),
+    'control-rig-lookat-4-aim.e2e.json': (
+        rig_receipt(LOOK_AT, 'LookAt_head'), rig_receipt(LOOK_AT, 'LookAt_head_1')),
+    'control-rig-lookat-5-anim-blueprint.e2e.json': (
+        text_result('1 result\n$ref|method|result\nEditor@1|CopyAsset(string Source, string Destination)|AnimBlueprint#88(ABP_HeadLookAt)'),
+        NO_COUNT),
+    'control-rig-lookat-6-wire.e2e.json': (
+        rig_receipt(WIRE, 'AnimGraphNode_ControlRig_0 runs CR_HeadLookAt between Default Slot and Output Pose; inputs: '
+                          'LookAtTarget <- LookAtTarget (new Vector variable), LookAtWeight <- LookAtWeight (new Float variable)'),
+        rig_receipt(WIRE, 'AnimGraphNode_ControlRig_0 runs CR_HeadLookAt between Default Slot and Output Pose')),
+    'control-rig-lookat-7-track.e2e.json': (
+        rig_receipt(TRACK, 'Event Blueprint Update Animation: LookAtTarget (existing variable) follows the nearest StaticMeshActor '
+                           'within 600 cm of the owner (smoothed at speed 4); LookAtWeight (existing variable) blends to 1'),
+        rig_receipt(TRACK, 'Event Blueprint Update Animation: LookAtTarget (new Vector variable) follows the nearest '
+                           'StaticMeshActor within 600 cm of the owner')),
+    'control-rig-lookat-8-compile.e2e.json': (
+        text_result('1 result\n$ref|method|result\nAnimBlueprint#88|Compile()|{Succeeded:true,Errors:0,Warnings:0,Messages:[]}'),
+        text_result('1 result\n$ref|method|result\nAnimBlueprint#88|Compile()|{Succeeded:false,Errors:1,Warnings:0,Messages:[x]}')),
+    'control-rig-lookat-8-readback.e2e.json': (
+        text_result('1 result\nControlRigs\n[{Node:AnimGraphNode_ControlRig_0,Rig:CR_HeadLookAt,Graph:AnimGraph,After:x,'
+                    'Before:Output Pose,Inputs:{LookAtTarget:@LookAtTarget,LookAtWeight:@LookAtWeight}}]'),
+        text_result('1 result\nControlRigs\n[{Node:AnimGraphNode_ControlRig_0,Rig:CR_HeadLookAt,Graph:AnimGraph,After:x,'
+                    'Before:Output Pose,Inputs:{LookAtTarget:(X=0,Y=0,Z=0)}}]')),
+    'control-rig-lookat-8-unknown-unit.e2e.json': (
+        '{"error": "error call-threw: AddUnit threw: no rig unit named \'Aimm\'; similar: AimItem (Aim)"}',
+        '{"error": "error call-threw: AddUnit threw: CR_HeadLookAt has no rig graph"}'),
+    'control-rig-lookat-9-cleanup-abp.e2e.json': (DELETED, NO_COUNT),
+    'control-rig-lookat-9-cleanup-rig.e2e.json': (DELETED, NO_COUNT),
+}
+AUTHORING.update(CONTROL_RIG)
+
+
+SCULPT = 'LandscapeOperations#9190|Sculpt(LandscapeProxy Landscape, Vector Center, double Radius, double Height)'
+WATER = 'WaterOperations#9170'
+# The suite editor runs -nullrhi: water bodies report Ready false there (no water mesh without rendering).
+WATER_STATUS = ('2 results\nLabel|Water|WaterZone.ZoneExtent\nE2EOcean|{{Type:Ocean,SplinePoints:4,Material:Water_Material_Ocean,'
+                'AffectsLandscape:false,Ready:false,Problem:"this editor does not render (-nullrhi): the water mesh is built in a rendering '
+                'editor"}}|(250000, 250000)\nE2ERiver|{{Type:River,SplinePoints:36,Material:Water_Material_River,AffectsLandscape:{},'
+                'Ready:false,Problem:""}}|(250000, 250000)')
+# The Landscape island + water sequence: per check, an answer the live UE 5.7 editor gives and one that must not pass.
+AUTHORING.update({
+    'water-1-island-landscape.e2e.json': (
+        pcg_receipt('LandscapeOperations#9190|Create(string Label, Vector Location, double SizeMeters, MaterialInterface Material)'
+                    '|Landscape#9191(E2EIsland)'), NO_COUNT),
+    'water-2-island-sea-floor.e2e.json': (pcg_receipt(f'{SCULPT}|3196021'), pcg_receipt(f'{SCULPT}|0')),
+    'water-3-island-land.e2e.json': (pcg_receipt(f'{SCULPT}|1803641'), pcg_receipt(f'{SCULPT}|0')),
+    'water-4-island-mountain.e2e.json': (pcg_receipt(f'{SCULPT}|290393'), pcg_receipt(f'{SCULPT}|0')),
+    'water-5-zone.e2e.json': (
+        pcg_receipt(f'{WATER}|SetZone(double SizeMeters, Vector Center)|WaterZone#9275(WaterZone)'),
+        {'content': [{'type': 'text', 'text': 'error call-threw: SetZone threw: SizeMeters 2500 is outside'}], 'isError': True}),
+    'water-6-ocean.e2e.json': (
+        pcg_receipt(f'{WATER}|CreateOcean(string Label, double Height, MaterialInterface Material)|WaterBodyOcean#9280(E2EOcean)'),
+        {'content': [{'type': 'text', 'text': 'error call-threw: CreateOcean threw: the level already has an ocean'}], 'isError': True}),
+    'water-7-river.e2e.json': (
+        pcg_receipt(f'{WATER}|CreateRiverBetween(string Label, LandscapeProxy Landscape, Vector Source, Vector Mouth, double Width, '
+                    'double Depth, MaterialInterface Material)|WaterBodyRiver#9304(E2ERiver)'), NO_COUNT),
+    'water-8-status.e2e.json': (text_result(WATER_STATUS.format('false')), text_result(WATER_STATUS.format('true'))),
+    'water-9-cleanup.e2e.json': (
+        text_result('4 results\nmethod: Destroy()\n$ref|result\nLandscape#9191|null\nWaterZone#9275|null\nWaterBodyOcean#9280|null\n'
+                    'WaterBodyRiver#9304|null'),
+        text_result('1 result\nmethod: Destroy()\n$ref|result\nLandscape#9191|null')),
+})
+
 class CheckFileTests(unittest.TestCase):
     def test_every_plugin_has_valid_checks_and_no_powershell_left(self):
         for plugin, folder in release.components().items():
             self.assertTrue(e2e.checks_for(plugin), plugin)
             self.assertEqual(list((folder / 'Tests/e2e/tools').glob('*.ps1')), [], plugin)
-        self.assertEqual(len(all_checks()), 99)
+        self.assertEqual(len(all_checks()), 121)
 
     def test_every_assert_matches_its_intended_shape_and_rejects_others(self):
         for (plugin, name), check in all_checks().items():

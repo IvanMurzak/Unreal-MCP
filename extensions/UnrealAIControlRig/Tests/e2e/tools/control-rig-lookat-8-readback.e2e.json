@@ -1,0 +1,10 @@
+{
+  "description": "ControlRigs reads the wired rig back",
+  "tool": "rql-query",
+  "input": {
+    "query": "unreal.asset(\"/Game/E2E/ABP_HeadLookAt\") | select ControlRigs"
+  },
+  "assert": {
+    "pattern": "CR_HeadLookAt.*Output Pose.*@LookAtTarget"
+  }
+}

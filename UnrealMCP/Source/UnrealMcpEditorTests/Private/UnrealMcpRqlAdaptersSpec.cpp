@@ -459,6 +459,35 @@ void FUnrealMcpRqlAdaptersSpec::Define()
 				/* ref("UnrealMcpRqlSpecFixture#@F@") | select Points[0] */ TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"UnrealMcpRqlSpecFixture#@F@"}]},"stages":[{"op":"select","fields":[{"name":"Points[0]","expr":{"path":["Points",{"index":0}]}}]}]})RQL"), TEXT("(1, 2, 30)"));
 		});
 
+		// A container inside a struct is a view into the struct value's memory; when the struct was only a step of the path,
+		// the view outlived it and read freed memory (lab 2026-11-07: `unreal.asset(IMC) | get DefaultKeyMappings.Mappings[0]
+		// | set Key = "C"`, even as a dry run, and `... .DefaultKeyMappings.Mappings | select Key` crashed the editor).
+		It("reads and writes containers inside a struct member through the path (the struct value stays alive)", [this]()
+		{
+			FUnrealMcpRqlSpecRow First;
+			First.Damage = 4;
+			Fixture->Bag.Rows = { First, FUnrealMcpRqlSpecRow() };
+			Fixture->Bag.Counts = { { TEXT("a"), 1 } };
+			const TSharedPtr<FJsonObject> Rows = Run(/* ref("UnrealMcpRqlSpecFixture#@F@") | get Bag.Rows | select Damage */ TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"UnrealMcpRqlSpecFixture#@F@"}]},"stages":[{"op":"get","expr":{"path":["Bag","Rows"]}},{"op":"select","fields":[{"name":"Damage","expr":{"path":["Damage"]}}]}]})RQL"));
+			TestEqual(*FString::Printf(TEXT("rows stream (%s)"), *UnrealMcpRqlSpecHelpers::Codes(Rows)), UnrealMcpRqlSpecHelpers::RowCount(Rows), 2);
+			TestEqual(TEXT("first row"), UnrealMcpRqlSpecHelpers::CellText(Rows, 0, 0), FString(TEXT("4")));
+			const FString SetFirst = /* ref("UnrealMcpRqlSpecFixture#@F@") | get Bag.Rows[0] | set Damage = 9 */ TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"UnrealMcpRqlSpecFixture#@F@"}]},"stages":[{"op":"get","expr":{"path":["Bag","Rows",{"index":0}]}},{"op":"set","assign":[{"target":{"path":["Damage"]},"value":{"lit":9}}]}]})RQL");
+			// A streamed struct element is a copy: refused with a reason, before and after the fix that stopped the crash.
+			const TSharedPtr<FJsonObject> Streamed = UnrealMcpRqlSpecHelpers::Exec(*this, UnrealMcpRqlSpecHelpers::Fill(SetFirst, { { TEXT("F"), FixtureId } }), true, true);
+			TestTrue(*FString::Printf(TEXT("a streamed copy is refused with the reason (%s)"), *UnrealMcpRqlSpecHelpers::Codes(Streamed)),
+				!UnrealMcpRqlSpecHelpers::IsOk(Streamed) && UnrealMcpRqlSpecHelpers::Codes(Streamed).Contains(TEXT("value copies")));
+			const FString SetPath = /* ref("UnrealMcpRqlSpecFixture#@F@") | set Bag.Rows[0].Damage = 9 */ TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"UnrealMcpRqlSpecFixture#@F@"}]},"stages":[{"op":"set","assign":[{"target":{"path":["Bag","Rows",{"index":0},"Damage"]},"value":{"lit":9}}]}]})RQL");
+			const TSharedPtr<FJsonObject> Dry = UnrealMcpRqlSpecHelpers::Exec(*this, UnrealMcpRqlSpecHelpers::Fill(SetPath, { { TEXT("F"), FixtureId } }), true, true);
+			TestTrue(*FString::Printf(TEXT("dry run ok (%s)"), *UnrealMcpRqlSpecHelpers::Codes(Dry)), UnrealMcpRqlSpecHelpers::IsOk(Dry));
+			TestEqual(TEXT("a dry run writes nothing"), Fixture->Bag.Rows[0].Damage, 4);
+			Must(SetPath);
+			TestEqual(TEXT("the element member is written up the path"), Fixture->Bag.Rows[0].Damage, 9);
+			Must(/* ref("UnrealMcpRqlSpecFixture#@F@") | set Bag.Rows[1].Damage = 7 */ TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"UnrealMcpRqlSpecFixture#@F@"}]},"stages":[{"op":"set","assign":[{"target":{"path":["Bag","Rows",{"index":1},"Damage"]},"value":{"lit":7}}]}]})RQL"));
+			TestEqual(TEXT("an element member through the whole path"), Fixture->Bag.Rows[1].Damage, 7);
+			const TSharedPtr<FJsonObject> Count = Run(/* ref("UnrealMcpRqlSpecFixture#@F@") | select Bag.Counts["a"] */ TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"UnrealMcpRqlSpecFixture#@F@"}]},"stages":[{"op":"select","fields":[{"name":"Bag.Counts[\"a\"]","expr":{"path":["Bag","Counts",{"key":"a"}]}}]}]})RQL"));
+			TestEqual(*FString::Printf(TEXT("a map inside a struct (%s)"), *UnrealMcpRqlSpecHelpers::Codes(Count)), UnrealMcpRqlSpecHelpers::CellText(Count), FString(TEXT("1")));
+		});
+
 		It("writes sets (equal names collapse) and maps (keys added, values by key)", [this]()
 		{
 			Run(/* ref("UnrealMcpRqlSpecFixture#@F@") | set Names = ["a", "A", "b"] */ TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"UnrealMcpRqlSpecFixture#@F@"}]},"stages":[{"op":"set","assign":[{"target":{"path":["Names"]},"value":{"list":[{"lit":"a"},{"lit":"A"},{"lit":"b"}]}}]}]})RQL"), true);
@@ -798,6 +827,20 @@ void FUnrealMcpRqlAdaptersSpec::Define()
 			const TSharedPtr<FJsonObject> Fail = UnrealMcpRqlSpecHelpers::Exec(*this, /* rqlSpecApi | call Boom("bad input") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["rqlSpecApi"]},"stages":[{"op":"call","method":"Boom","args":[{"lit":"bad input"}]}]})RQL"), true);
 			TestFalse(TEXT("UnrealMcpRql::Fail fails the call"), UnrealMcpRqlSpecHelpers::IsOk(Fail));
 			TestTrue(*FString::Printf(TEXT("with its message (%s)"), *UnrealMcpRqlSpecHelpers::Codes(Fail)), UnrealMcpRqlSpecHelpers::Codes(Fail).Contains(TEXT("bad input")));
+
+			// By-reference results and parameters (UInputMappingContext::MapKey returns FEnhancedActionKeyMapping&).
+			const FString RowRef = /* rqlSpecApi | call RowRef("hero") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["rqlSpecApi"]},"stages":[{"op":"call","method":"RowRef","args":[{"lit":"hero"}]}]})RQL");
+			const TSharedPtr<FJsonObject> RowRefDry = UnrealMcpRqlSpecHelpers::Exec(*this, RowRef, true, true);
+			TestTrue(*FString::Printf(TEXT("by-reference result, dry run (%s)"), *UnrealMcpRqlSpecHelpers::Codes(RowRefDry)), UnrealMcpRqlSpecHelpers::IsOk(RowRefDry));
+			const TSharedPtr<FJsonObject> RowRefRun = UnrealMcpRqlSpecHelpers::Exec(*this, RowRef, true);
+			TestTrue(*FString::Printf(TEXT("by-reference result (%s): %s"), *UnrealMcpRqlSpecHelpers::Codes(RowRefRun), *UnrealMcpRqlSpecHelpers::CellText(RowRefRun, 0, 2)),
+				UnrealMcpRqlSpecHelpers::CellText(RowRefRun, 0, 2).Contains(TEXT("hero")));
+			const TSharedPtr<FJsonObject> MadeRow = UnrealMcpRqlSpecHelpers::Exec(*this, /* rqlSpecApi | call MakeRow(7) */ TEXT(R"RQL({"rql":"0.1","source":{"path":["rqlSpecApi"]},"stages":[{"op":"call","method":"MakeRow","args":[{"lit":7}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("output parameter (%s): %s"), *UnrealMcpRqlSpecHelpers::Codes(MadeRow), *UnrealMcpRqlSpecHelpers::CellText(MadeRow, 0, 2)),
+				UnrealMcpRqlSpecHelpers::CellText(MadeRow, 0, 2).Contains(TEXT("\"Damage\":7")));
+			const TSharedPtr<FJsonObject> Doubled = UnrealMcpRqlSpecHelpers::Exec(*this, /* rqlSpecApi | call Double(3) */ TEXT(R"RQL({"rql":"0.1","source":{"path":["rqlSpecApi"]},"stages":[{"op":"call","method":"Double","args":[{"lit":3}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("in-out parameter, reported after the call (%s): %s"), *UnrealMcpRqlSpecHelpers::Codes(Doubled), *UnrealMcpRqlSpecHelpers::CellText(Doubled, 0, 2)),
+				UnrealMcpRqlSpecHelpers::CellText(Doubled, 0, 2) == TEXT("6"));
 
 			FUnrealMcpToolRegistry Registry;
 			UnrealMcpRqlTools::Register(Registry);

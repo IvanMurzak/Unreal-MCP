@@ -1,0 +1,10 @@
+{
+  "description": "the water bodies, the zone and the island removed again",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "actors | where Label == \"E2ERiver\" or Label == \"E2EOcean\" or Label == \"E2EIsland\" or $ is WaterZone | call Destroy()"
+  },
+  "assert": {
+    "pattern": "(?=.*Landscape#\\d+\\|null)(?=.*WaterBodyOcean#\\d+\\|null)(?=.*WaterBodyRiver#\\d+\\|null)"
+  }
+}

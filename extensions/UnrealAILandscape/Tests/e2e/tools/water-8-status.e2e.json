@@ -1,0 +1,10 @@
+{
+  "description": "the ocean and the river with the Water default materials, not affecting the landscape, in the 2.5 km zone",
+  "tool": "rql-query",
+  "input": {
+    "query": "waterBodies | where Label == \"E2EOcean\" or Label == \"E2ERiver\" | select Label Water WaterZone.ZoneExtent"
+  },
+  "assert": {
+    "pattern": "E2EOcean.*Water_Material_Ocean.*AffectsLandscape:false.*250000.*E2ERiver.*Water_Material_River.*AffectsLandscape:false.*250000"
+  }
+}

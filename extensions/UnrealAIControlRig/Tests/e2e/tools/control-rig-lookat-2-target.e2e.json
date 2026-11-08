@@ -1,0 +1,10 @@
+{
+  "description": "a public Vector variable for the look-at target",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "controlRig | call AddVariable(\"/Game/E2E/CR_HeadLookAt\", \"LookAtTarget\", \"Vector\")"
+  },
+  "assert": {
+    "pattern": "\\)\\|LookAtTarget\\b"
+  }
+}

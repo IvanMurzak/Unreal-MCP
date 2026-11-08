@@ -30,4 +30,11 @@ public:
 		FUnrealMcpToolCall Call,
 		TFunction<FUnrealMcpToolResult(const FUnrealMcpToolCall&)> Body,
 		FTimespan Timeout);
+
+	/**
+	 * End every dispatched call that still waits for the game thread (queued, retrying or running) now, with
+	 * @p Reason, as an early timeout would: a queued body is then skipped, a running body's late result dropped. For a
+	 * game thread that cannot reach them (a modal dialog waits for a person). Any thread. Returns how many it ended.
+	 */
+	static int32 FailWaitingCalls(const FString& Reason);
 };

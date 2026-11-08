@@ -1,0 +1,10 @@
+{
+  "description": "a 2.5 km water zone over the island",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "water | call SetZone(2500, [3000000, 0, 0])"
+  },
+  "assert": {
+    "pattern": "WaterZone#\\d+\\("
+  }
+}

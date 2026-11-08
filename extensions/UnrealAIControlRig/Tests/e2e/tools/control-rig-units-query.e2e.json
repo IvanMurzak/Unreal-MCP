@@ -1,0 +1,10 @@
+{
+  "description": "the Aim rig unit in the unit catalog",
+  "tool": "rql-query",
+  "input": {
+    "query": "controlRigUnits | where Name == \"AimItem\" | select DisplayName Execute"
+  },
+  "assert": {
+    "pattern": "(?:\\\\n|\\b)Aim\\|true\\b"
+  }
+}

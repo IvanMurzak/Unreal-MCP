@@ -68,6 +68,11 @@ agent ──query text──▶ unreal-mcp-bridge (sidecar, .NET)          Unrea
 - **Methods** (`call`): Actor `Destroy()`, `Duplicate(Offset)`, `AddComponent(ClassName, Name)`; component
   `Destroy()`; every parameterless `CallInEditor` function (the Details panel's buttons); every UFUNCTION of an API class (the `editor` operations, extension
   operations). Parameters and results convert like members; UHT's recorded C++ defaults become RQL defaults.
+  A by-reference result (`FFoo& F()`) is reported as a copy; a `UPARAM(ref)` parameter is passed in and reported
+  after the call like an output parameter (the result alone, or one entry of the result map).
+- **Structs are values**: reading a struct member gives a copy, and a write into it is assigned back up the path, so
+  `set DefaultKeyMappings.Mappings[0].Key = {KeyName: "C"}` writes the asset. A struct streamed by `get` (`get Data.Mappings[0] |
+  set Key = …`) is a copy without an owner: such a `set` is refused (`value copies`); write from the owner instead.
 - **Identity**: `$ref` is `Type#<Id>`, the `Id` of the object's slot in the object array plus that slot's serial number
   (editor-session ids, like Unity's instance ids); `ref(…)` resolves them directly, and a ref to a destroyed object never
   resolves to a new object that reuses the slot. Every object value carries a weak pointer, so destroyed (garbage)
