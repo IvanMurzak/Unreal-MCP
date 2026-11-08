@@ -123,6 +123,8 @@ private:
 	FReply OnRefreshClicked();
 	FReply OnInstallClicked(FString ExtensionId, bool bForce);
 	FReply OnBulkClicked(bool bUpdate);
+	/** Install one catalog extension through OnInstall and log the outcome. Both click handlers format the status. */
+	FUnrealMcpInstallResult InstallOne(const FString& ExtensionId, bool bForce);
 	FReply OnCompileClicked();
 	void OnEnabledChanged(FString ExtensionId, bool bEnabled);
 

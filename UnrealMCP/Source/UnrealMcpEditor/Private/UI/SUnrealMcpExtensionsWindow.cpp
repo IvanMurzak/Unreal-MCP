@@ -313,22 +313,31 @@ FReply SUnrealMcpExtensionsWindow::OnInstallClicked(FString ExtensionId, bool bF
 {
 	if (!OnInstall)
 		return FReply::Handled();
-	const FUnrealMcpCatalogEntry* Entry = FUnrealMcpExtensionCatalog::FindEntry(Catalog, ExtensionId);
-	if (Entry == nullptr)
-	{
-		StatusMessage = FText::Format(
-			LOCTEXT("ExtNotInCatalog", "Extension '{0}' is no longer in the catalog — Refresh and try again."),
-			FText::FromString(ExtensionId)).ToString();
-		return FReply::Handled();
-	}
-
-	const FUnrealMcpInstallResult Result = OnInstall(*Entry, bForce);
+	const FUnrealMcpInstallResult Result = InstallOne(ExtensionId, bForce);
 	StatusMessage = Result.bSuccess
 		? Result.Message
 		: FText::Format(LOCTEXT("ExtInstallFailed", "Install failed: {0}"), FText::FromString(Result.Error)).ToString();
 	for (const FString& Warning : Result.Warnings)
 		StatusMessage += FText::Format(LOCTEXT("ExtInstallWarning", "\nWarning: {0}"), FText::FromString(Warning)).ToString();
 	bRestartHintVisible = Result.bSuccess && Result.bRebuildRequired;
+
+	RebuildList();
+	return FReply::Handled();
+}
+
+FUnrealMcpInstallResult SUnrealMcpExtensionsWindow::InstallOne(const FString& ExtensionId, bool bForce)
+{
+	FUnrealMcpInstallResult Result;
+	if (const FUnrealMcpCatalogEntry* Entry = FUnrealMcpExtensionCatalog::FindEntry(Catalog, ExtensionId))
+	{
+		Result = OnInstall(*Entry, bForce);
+	}
+	else
+	{
+		Result.Error = FText::Format(
+			LOCTEXT("ExtNotInCatalog", "Extension '{0}' is no longer in the catalog — Refresh and try again."),
+			FText::FromString(ExtensionId)).ToString();
+	}
 
 	if (Result.bSuccess)
 	{
@@ -338,15 +347,13 @@ FReply SUnrealMcpExtensionsWindow::OnInstallClicked(FString ExtensionId, bool bF
 	{
 		UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] extension install failed: %s"), *Result.Error);
 	}
-
-	RebuildList();
-	return FReply::Handled();
+	return Result;
 }
 
 FReply SUnrealMcpExtensionsWindow::OnBulkClicked(bool bUpdate)
 {
 	const TArray<FString> Ids = bUpdate ? UpdatableIds : InstallableIds;
-	if (!OnInstall || Ids.Num() == 0)
+	if (Ids.Num() == 0)
 		return FReply::Handled();
 
 	// Each install blocks the game thread on its download, so show progress instead of a frozen editor.
@@ -362,21 +369,15 @@ FReply SUnrealMcpExtensionsWindow::OnBulkClicked(bool bUpdate)
 	{
 		Progress.EnterProgressFrame(1.0f, FText::FromString(Id));
 
-		const FUnrealMcpCatalogEntry* Entry = FUnrealMcpExtensionCatalog::FindEntry(Catalog, Id);
-		const FUnrealMcpInstallResult Result = Entry
-			? OnInstall(*Entry, bUpdate)
-			: FUnrealMcpInstallResult();
-		if (Entry != nullptr && Result.bSuccess)
+		const FUnrealMcpInstallResult Result = InstallOne(Id, bUpdate);
+		if (Result.bSuccess)
 		{
 			++Succeeded;
 			bRebuildRequired |= Result.bRebuildRequired;
-			UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] extension install: %s"), *Result.Message);
 		}
 		else
 		{
-			const FString Error = Entry ? Result.Error : TEXT("no longer in the catalog");
-			Details += FString::Printf(TEXT("\n%s: %s"), *Id, *Error);
-			UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] extension install failed: %s: %s"), *Id, *Error);
+			Details += FString::Printf(TEXT("\n%s: %s"), *Id, *Result.Error);
 		}
 		for (const FString& Warning : Result.Warnings)
 			Details += FText::Format(LOCTEXT("ExtInstallWarning", "\nWarning: {0}"), FText::FromString(Warning)).ToString();

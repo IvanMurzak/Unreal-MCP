@@ -14,7 +14,7 @@ import { emitProgress } from './progress.js';
 import { PACKAGE_VERSION } from '../version.js';
 import { defaultCorePluginSource, resolvePluginSource } from './plugin-source.js';
 import { stripLeadingV } from '../utils/extension-source.js';
-import { EXTENSIONS_CATALOG, findExtension } from '../utils/extensions-catalog.js';
+import { EXTENSIONS_CATALOG } from '../utils/extensions-catalog.js';
 import { loadExtensionsIndex } from '../utils/extensions-index.js';
 import type { ProgressCallback } from './types.js';
 
@@ -235,10 +235,11 @@ async function updateInstalledExtensions(projectDir: string, opts: UpdateOptions
 
   const updated: string[] = [];
   for (const pluginName of candidates) {
-    if (!known.some((extension) => extension.pluginName.toLowerCase() === pluginName.toLowerCase())) continue;
+    const extension = known.find((candidate) => candidate.pluginName.toLowerCase() === pluginName.toLowerCase());
+    if (!extension) continue;
     const result = await installExtension({
       projectDir,
-      extensionId: findExtension(pluginName, known)!.extensionId,
+      extensionId: extension.extensionId,
       fetchImpl: opts.fetchImpl,
       indexCachePath: opts.indexCachePath,
       onProgress: opts.onProgress,
