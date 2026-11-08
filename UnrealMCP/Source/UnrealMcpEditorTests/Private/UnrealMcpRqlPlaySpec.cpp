@@ -181,6 +181,57 @@ void FUnrealMcpRqlPlaySpec::Define()
 			TestNull(TEXT("stopped when the call returns"), UnrealMcpRql::PlayWorld());
 		});
 
+		It("moves the pawn each held key's own way, in sequence in one session and after re-possession, both ways for keys held together, and releases them", [this]()
+		{
+			EndPlay();
+			if (!PreparePlayWorld())
+				return;
+			FString Error;
+			if (!TestTrue(*FString::Printf(TEXT("started (%s)"), *Error), UnrealMcpRql::StartPlay(/*bPaused*/ true, Error)))
+				return;
+			APlayerController* Controller = UnrealMcpRql::PlayController();
+			const APawn* Possessed = Controller ? Controller->GetPawn() : nullptr;
+			if (!TestNotNull(TEXT("player 0 possesses a pawn"), Possessed))
+				return;
+
+			// The DefaultPawn flies with W / S forward and back and D / A right and left of the control rotation (zero here).
+			auto Fly = [this, Controller](const TCHAR* Keys, const FVector& Direction, const TCHAR* When)
+			{
+				int32 Advanced = 0;
+				FString HoldError;
+				const FVector Before = UnrealMcpRql::ReadPlayState().Location;
+				TestTrue(*FString::Printf(TEXT("%s: held %s (%s)"), When, Keys, *HoldError), UnrealMcpRql::AdvancePlayWithKeys(0.25, 0, Keys, Advanced, HoldError));
+				const FVector Moved = UnrealMcpRql::ReadPlayState().Location - Before;
+				TestTrue(*FString::Printf(TEXT("%s: %s flew the pawn along %s (moved %s)"), When, Keys, *Direction.ToString(), *Moved.ToString()),
+					Moved.Size() > 20.0 && Moved.GetSafeNormal().Dot(Direction.GetSafeNormal()) > 0.95);
+				TArray<FString> Names;
+				FString(Keys).ParseIntoArray(Names, TEXT(","), /*bCullEmpty*/ true);
+				for (const FString& Name : Names)
+					TestFalse(*FString::Printf(TEXT("%s: %s released after the call"), When, *Name), Controller->PlayerInput->IsPressed(FKey(*Name.TrimStartAndEnd())));
+				// Coast to a stop: the next key starts from rest.
+				UnrealMcpRql::AdvancePlayWithKeys(1.0, 0, TEXT(""), Advanced, HoldError);
+			};
+			auto Directions = [&Fly](const TCHAR* When)
+			{
+				Fly(TEXT("W"), FVector(1, 0, 0), When);
+				Fly(TEXT("D"), FVector(0, 1, 0), When);
+				Fly(TEXT("A"), FVector(0, -1, 0), When);
+				Fly(TEXT("S"), FVector(-1, 0, 0), When);
+				Fly(TEXT("W, D"), FVector(1, 1, 0), When);
+			};
+			Directions(TEXT("first pawn"));
+
+			// Re-possession (entering and leaving a vehicle): another pawn, then the first again, the same controller.
+			APawn* First = Controller->GetPawn();
+			APawn* Second = UnrealMcpRql::PlayWorld()->SpawnActor<APawn>(First->GetClass(), First->GetActorLocation() + FVector(0.0, 0.0, 500.0), FRotator::ZeroRotator);
+			if (!TestNotNull(TEXT("a second pawn"), Second))
+				return;
+			Controller->Possess(Second);
+			Directions(TEXT("second pawn"));
+			Controller->Possess(First);
+			Directions(TEXT("first pawn again"));
+		});
+
 		It("lists the play world's actors in playActors and reads PlayState in a query", [this]()
 		{
 			EndPlay();

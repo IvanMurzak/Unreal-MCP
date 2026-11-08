@@ -75,7 +75,7 @@ struct UNREALMCPRQL_API FUnrealMcpPlayState
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Play")
 	double MaxWalkSpeed = 0.0;
 
-	/** the Enhanced Input mapping contexts applied to player 0 (filled by the Enhanced Input extension when installed) */
+	/** the Enhanced Input mapping contexts applied to player 0, highest priority first ("IMC_OnFoot (priority 0)") */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Play")
 	TArray<FString> MappingContexts;
 
@@ -138,12 +138,21 @@ namespace UnrealMcpRql
 	/** The session's state now (Playing = false when none runs), with what OnReadPlayState adds. */
 	UNREALMCPRQL_API FUnrealMcpPlayState ReadPlayState();
 
+	/**
+	 * The Enhanced Input mapping contexts applied to @p Controller's player input, highest priority first, as
+	 * "IMC_OnFoot (priority 0)"; empty when it does not use Enhanced Input. Read by reflection: the core does not depend on
+	 * the Enhanced Input plugin.
+	 */
+	UNREALMCPRQL_API TArray<FString> AppliedMappingContexts(const APlayerController* Controller);
+
 	/** Bound by extensions to add to ReadPlayState (remove the binding when the module shuts down). */
 	UNREALMCPRQL_API FUnrealMcpOnReadPlayState& OnReadPlayState();
 
 	/**
 	 * AdvancePlay for PlayFrameCount(@p Seconds, @p Frames) frames while holding @p Keys ("W, LeftShift", axes with a
 	 * value: "Gamepad_LeftY=1") as player 0's input, released on one extra frame at the end (counted in @p OutAdvanced).
+	 * @p OutNotes gets what makes a held key act unlike its own mapping (it reaches one action through several mappings).
 	 */
-	UNREALMCPRQL_API bool AdvancePlayWithKeys(double Seconds, int32 Frames, const FString& Keys, int32& OutAdvanced, FString& OutError);
+	UNREALMCPRQL_API bool AdvancePlayWithKeys(double Seconds, int32 Frames, const FString& Keys, int32& OutAdvanced, FString& OutError,
+		TArray<FString>* OutNotes = nullptr);
 }

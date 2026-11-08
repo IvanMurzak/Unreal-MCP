@@ -20,6 +20,7 @@
 #include "EnhancedInputSubsystems.h"
 #include "Engine/LocalPlayer.h"
 #include "Engine/World.h"
+#include "GameFramework/DefaultPawn.h"
 #include "GameFramework/GameModeBase.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/PlayerStart.h"
@@ -174,6 +175,34 @@ BEGIN_DEFINE_SPEC(FUnrealAIEnhancedInputSpec, "UnrealAIEnhancedInput",
 	static FString Fresh(const TCHAR* Prefix)
 	{
 		return FString::Printf(TEXT("/Game/RqlSpec/%s_%s"), Prefix, *FGuid::NewGuid().ToString(EGuidFormats::Digits));
+	}
+
+	/**
+	 * Play the open level with GameModeBase from an added PlayerStart (both undone by the play test's AfterEach: later specs
+	 * use the level), paused; player 0's controller, its Enhanced Input subsystem and input component, or null.
+	 */
+	APlayerController* StartPlayWorld(UEnhancedInputLocalPlayerSubsystem*& OutInput, UEnhancedInputComponent*& OutBindings)
+	{
+		UWorld* EditorWorld = GEditor->GetEditorWorldContext().World();
+		AWorldSettings* Settings = EditorWorld ? EditorWorld->GetWorldSettings() : nullptr;
+		if (!TestNotNull(TEXT("editor world settings"), Settings))
+			return nullptr;
+		PlaySettings = Settings;
+		bPlayLevelWasDirty = EditorWorld->GetOutermost()->IsDirty();
+		PlayPreviousGameMode = Settings->DefaultGameMode;
+		Settings->DefaultGameMode = AGameModeBase::StaticClass();
+		PlayStart = EditorWorld->SpawnActor<APlayerStart>(FVector(0.0, 0.0, 5000.0), FRotator::ZeroRotator);
+		FString Error;
+		if (!TestTrue(*FString::Printf(TEXT("play started (%s)"), *Error), UnrealMcpRql::StartPlay(/*bPaused*/ true, Error)))
+			return nullptr;
+		APlayerController* Controller = UnrealMcpRql::PlayController();
+		if (!TestNotNull(TEXT("player 0"), Controller))
+			return nullptr;
+		OutInput = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(Controller->GetLocalPlayer());
+		OutBindings = Cast<UEnhancedInputComponent>(Controller->InputComponent);
+		if (!TestNotNull(TEXT("the Enhanced Input subsystem"), OutInput) || !TestNotNull(TEXT("an Enhanced Input component"), OutBindings))
+			return nullptr;
+		return Controller;
 	}
 
 	/** The pins @p Pin is linked to, as "<owning node title>.<pin>" (for messages). */
@@ -542,26 +571,11 @@ void FUnrealAIEnhancedInputSpec::Define()
 				return;
 			Context->MapKey(Action, EKeys::W);
 
-			// Play the open level with GameModeBase from an added PlayerStart (both undone after: later specs use the level).
-			UWorld* EditorWorld = GEditor->GetEditorWorldContext().World();
-			AWorldSettings* Settings = EditorWorld ? EditorWorld->GetWorldSettings() : nullptr;
-			if (!TestNotNull(TEXT("editor world settings"), Settings))
+			UEnhancedInputLocalPlayerSubsystem* Input = nullptr;
+			UEnhancedInputComponent* Bindings = nullptr;
+			if (!StartPlayWorld(Input, Bindings))
 				return;
-			PlaySettings = Settings;
-			bPlayLevelWasDirty = EditorWorld->GetOutermost()->IsDirty();
-			PlayPreviousGameMode = Settings->DefaultGameMode;
-			Settings->DefaultGameMode = AGameModeBase::StaticClass();
-			PlayStart = EditorWorld->SpawnActor<APlayerStart>(FVector(0.0, 0.0, 5000.0), FRotator::ZeroRotator);
 			FString Error;
-			if (!TestTrue(*FString::Printf(TEXT("play started (%s)"), *Error), UnrealMcpRql::StartPlay(/*bPaused*/ true, Error)))
-				return;
-			APlayerController* Controller = UnrealMcpRql::PlayController();
-			if (!TestNotNull(TEXT("player 0"), Controller))
-				return;
-			UEnhancedInputLocalPlayerSubsystem* Input = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(Controller->GetLocalPlayer());
-			UEnhancedInputComponent* Bindings = Cast<UEnhancedInputComponent>(Controller->InputComponent);
-			if (!TestNotNull(TEXT("the Enhanced Input subsystem"), Input) || !TestNotNull(TEXT("an Enhanced Input component"), Bindings))
-				return;
 			Input->AddMappingContext(Context, 3);
 			int32 Triggered = 0, Completed = 0;
 			Bindings->BindActionValueLambda(Action, ETriggerEvent::Triggered, [&Triggered](const FInputActionValue&) { ++Triggered; });
@@ -600,6 +614,104 @@ void FUnrealAIEnhancedInputSpec::Define()
 			const TSharedPtr<FJsonObject> Bad = Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["enhancedInput"]},"stages":[{"op":"call","method":"InjectInput","args":[{"lit":"@IA@"},{"lit":"(1, 0, 0)"},{"lit":0},{"lit":3},{"lit":"NoSuchTrigger"}]}]})RQL"), true);
 			TestFalse(TEXT("unknown trigger refused"), IsOk(Bad));
 			TestEqual(TEXT("nothing simulated"), UnrealMcpRql::ReadPlayState().Time, Time, 1e-6);
+			Bindings->ClearActionBindings();
+		});
+
+		It("gives a 2D action four distinct WASD values in sequence, composes held keys, keeps them after re-possession, reads the applied contexts and notes a key shared by mappings", [this]()
+		{
+			// IA_Move (Axis2D): W = SwizzleAxis, S = SwizzleAxis + Negate, A = Negate, D = as is (the Third Person template's).
+			const FString MovePath = Fresh(TEXT("IA_Move")), OnFootPath = Fresh(TEXT("IMC_OnFoot"));
+			TestTrue(TEXT("move action created"), IsOk(Call(TEXT("CreateAction"), { S(MovePath), S(TEXT("Axis2D")) })));
+			TestTrue(TEXT("context created"), IsOk(Call(TEXT("CreateContext"), { S(OnFootPath) })));
+			UInputAction* Move = LoadObject<UInputAction>(nullptr, *MovePath);
+			UInputMappingContext* Context = LoadObject<UInputMappingContext>(nullptr, *OnFootPath);
+			if (!TestNotNull(TEXT("the move action"), Move) || !TestNotNull(TEXT("the context"), Context))
+				return;
+			const FString MoveName = Move->GetName(), ContextName = FString::Printf(TEXT("%s (priority 0)"), *Context->GetName());
+			auto Map = [Context, Move](const FKey& Key, bool bSwizzle, bool bNegate) -> FEnhancedActionKeyMapping&
+			{
+				FEnhancedActionKeyMapping& Mapping = Context->MapKey(Move, Key);
+				if (bSwizzle)
+					Mapping.Modifiers.Add(NewObject<UInputModifierSwizzleAxis>(Context));
+				if (bNegate)
+					Mapping.Modifiers.Add(NewObject<UInputModifierNegate>(Context));
+				return Mapping;
+			};
+			Map(EKeys::W, true, false);
+			Map(EKeys::S, true, true);
+			Map(EKeys::A, false, true);
+			Map(EKeys::D, false, false);
+
+			UEnhancedInputLocalPlayerSubsystem* Input = nullptr;
+			UEnhancedInputComponent* Bindings = nullptr;
+			APlayerController* Controller = StartPlayWorld(Input, Bindings);
+			if (!Controller)
+				return;
+			Input->AddMappingContext(Context, 0);
+			// The context maps its keys from the next frame on (as one added at BeginPlay).
+			int32 Advanced = 0;
+			FString Error;
+			UnrealMcpRql::AdvancePlayWithKeys(0.0, 1, TEXT(""), Advanced, Error);
+			FVector2D Value = FVector2D::ZeroVector;
+			int32 Triggered = 0;
+			Bindings->BindActionValueLambda(Move, ETriggerEvent::Triggered, [&Value, &Triggered](const FInputActionValue& Fired)
+			{
+				Value = Fired.Get<FVector2D>();
+				++Triggered;
+			});
+
+			// Each call: the action's value while the keys were held (the last Triggered), and no note.
+			auto Hold = [this, &Value, &Triggered](const TCHAR* Keys, const FVector2D& Expected, const TCHAR* When)
+			{
+				Value = FVector2D::ZeroVector;
+				Triggered = 0;
+				int32 Advanced = 0;
+				FString Error;
+				TArray<FString> Notes;
+				TestTrue(*FString::Printf(TEXT("%s: held %s (%s)"), When, Keys, *Error), UnrealMcpRql::AdvancePlayWithKeys(0.0, 3, Keys, Advanced, Error, &Notes));
+				TestEqual(*FString::Printf(TEXT("%s: %s triggered on each held frame"), When, Keys), Triggered, 3);
+				TestTrue(*FString::Printf(TEXT("%s: %s gives %s (got %s)"), When, Keys, *Expected.ToString(), *Value.ToString()), Value.Equals(Expected, 1e-4));
+				TestEqual(*FString::Printf(TEXT("%s: %s has no notes (%s)"), When, Keys, *FString::Join(Notes, TEXT(" "))), Notes.Num(), 0);
+			};
+			auto Directions = [&Hold](const TCHAR* When)
+			{
+				Hold(TEXT("W"), FVector2D(0, 1), When);
+				Hold(TEXT("D"), FVector2D(1, 0), When);
+				Hold(TEXT("A"), FVector2D(-1, 0), When);
+				Hold(TEXT("S"), FVector2D(0, -1), When);
+				Hold(TEXT("W, D"), FVector2D(1, 1), When);
+				Hold(TEXT("S, A"), FVector2D(-1, -1), When);
+			};
+			Directions(TEXT("first pawn"));
+			TestTrue(*FString::Printf(TEXT("the applied context, read by the core (%s)"), *FString::Join(UnrealMcpRql::AppliedMappingContexts(Controller), TEXT(", "))),
+				UnrealMcpRql::AppliedMappingContexts(Controller).Contains(ContextName));
+
+			// Re-possession (entering and leaving a vehicle): a new pawn, the same controller, the same values.
+			APawn* First = Controller->GetPawn();
+			UWorld* PlayWorld = UnrealMcpRql::PlayWorld();
+			APawn* Second = PlayWorld ? PlayWorld->SpawnActor<APawn>(ADefaultPawn::StaticClass(), FVector(500.0, 0.0, 5000.0), FRotator::ZeroRotator) : nullptr;
+			if (!TestNotNull(TEXT("a second pawn"), Second))
+				return;
+			Controller->Possess(Second);
+			Directions(TEXT("second pawn"));
+			Controller->Possess(First);
+			Directions(TEXT("first pawn again"));
+
+			// A context removed in play leaves the readback on the next frame.
+			Input->RemoveMappingContext(Context);
+			UnrealMcpRql::AdvancePlayWithKeys(0.0, 1, TEXT(""), Advanced, Error);
+			TestFalse(TEXT("the removed context is not listed"), UnrealMcpRql::ReadPlayState().MappingContexts.Contains(ContextName));
+
+			// W mapped twice to the action (what Enhanced Input user settings make of a player-mappable action whose mappings
+			// share one name): W gives the combined value, and the call says why.
+			Map(EKeys::W, true, true);
+			Input->AddMappingContext(Context, 0);
+			UnrealMcpRql::AdvancePlayWithKeys(0.0, 1, TEXT(""), Advanced, Error);
+			TArray<FString> Notes;
+			TestTrue(*FString::Printf(TEXT("held W (%s)"), *Error), UnrealMcpRql::AdvancePlayWithKeys(0.0, 2, TEXT("W"), Advanced, Error, &Notes));
+			const FString Text = FString::Join(Notes, TEXT(" "));
+			TestTrue(*FString::Printf(TEXT("the note names the key, action and both mappings (%s)"), *Text),
+				Text.Contains(FString::Printf(TEXT("W reaches %s through 2 key mappings (modifiers: SwizzleAxis | SwizzleAxis, Negate)"), *MoveName)) && Text.Contains(TEXT("Player Mappable Key Settings name")));
 			Bindings->ClearActionBindings();
 		});
 	});

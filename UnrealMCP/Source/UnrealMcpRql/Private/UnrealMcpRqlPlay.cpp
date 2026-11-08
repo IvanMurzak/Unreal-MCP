@@ -12,6 +12,7 @@
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/PlayerInput.h"
+#include "GenericPlatform/GenericPlatformInputDeviceMapper.h"
 #include "HAL/PlatformTime.h"
 #include "InputCoreTypes.h"
 #include "Misc/EngineVersionComparison.h"
@@ -22,6 +23,7 @@
 #include "Misc/PackageName.h"
 #include "PlayInEditorDataTypes.h"
 #include "Tickable.h"
+#include "UObject/UnrealType.h"
 #include "UObject/UObjectIterator.h"
 
 namespace UnrealMcpRqlPlayLocal
@@ -235,8 +237,42 @@ FUnrealMcpPlayState UnrealMcpRql::ReadPlayState()
 			}
 		}
 	}
+	State.MappingContexts = AppliedMappingContexts(Controller);
 	OnReadPlayState().Broadcast(Controller, State);
 	return State;
+}
+
+TArray<FString> UnrealMcpRql::AppliedMappingContexts(const APlayerController* Controller)
+{
+	// UEnhancedPlayerInput's applied contexts: UE 5.6+ AppliedInputContextData (context -> {Priority, ...}), UE 5.5
+	// AppliedInputContexts (context -> priority).
+	UPlayerInput* Input = Controller ? Controller->PlayerInput.Get() : nullptr;
+	const FMapProperty* Map = Input ? FindFProperty<FMapProperty>(Input->GetClass(), TEXT("AppliedInputContextData")) : nullptr;
+	if (Input && !Map)
+		Map = FindFProperty<FMapProperty>(Input->GetClass(), TEXT("AppliedInputContexts"));
+	const FObjectPropertyBase* ContextProperty = Map ? CastField<FObjectPropertyBase>(Map->KeyProp) : nullptr;
+	if (!ContextProperty)
+		return {};
+	const FStructProperty* DataProperty = CastField<FStructProperty>(Map->ValueProp);
+	const FIntProperty* PriorityProperty = DataProperty ? FindFProperty<FIntProperty>(DataProperty->Struct, TEXT("Priority"))
+		: CastField<FIntProperty>(Map->ValueProp);
+	TArray<TPair<int32, FString>> Applied;
+	FScriptMapHelper Helper(Map, Map->ContainerPtrToValuePtr<void>(Input));
+	for (FScriptMapHelper::FIterator It(Helper); It; ++It)
+	{
+		const UObject* Context = ContextProperty->GetObjectPropertyValue(Helper.GetKeyPtr(It));
+		if (!Context)
+			continue;
+		const void* Value = Helper.GetValuePtr(It);
+		const int32 Priority = !PriorityProperty ? 0
+			: DataProperty ? PriorityProperty->GetPropertyValue_InContainer(Value) : PriorityProperty->GetPropertyValue(Value);
+		Applied.Add({ Priority, Context->GetName() });
+	}
+	Applied.Sort([](const TPair<int32, FString>& A, const TPair<int32, FString>& B) { return A.Key != B.Key ? A.Key > B.Key : A.Value < B.Value; });
+	TArray<FString> Names;
+	for (const TPair<int32, FString>& Entry : Applied)
+		Names.Add(FString::Printf(TEXT("%s (priority %d)"), *Entry.Value, Entry.Key));
+	return Names;
 }
 
 FUnrealMcpOnReadPlayState& UnrealMcpRql::OnReadPlayState()
@@ -292,21 +328,82 @@ namespace UnrealMcpRqlPlayLocal
 		return true;
 	}
 
-	/** Send one key event to the controller's player input, as the game viewport does for real input. */
+	/**
+	 * Send one key event to the controller's player input, as the game viewport does for real input: from the player's
+	 * primary input device (as Enhanced Input's own key injection), so input filtered by platform user still reaches it.
+	 */
 	void SendKey(APlayerController* Controller, const FHeldKey& Held, EInputEvent Event, float Amount)
 	{
+		const FInputDeviceId Device = IPlatformInputDeviceMapper::Get().GetPrimaryInputDeviceForUser(Controller->GetPlatformUserId());
 #if UE_VERSION_OLDER_THAN(5, 6, 0)
 		if (Event == IE_Axis)
-			Controller->InputKey(FInputKeyParams(Held.Key, static_cast<double>(Amount), 1.f / UnrealMcpRql::PlayFrameRate, 1, Held.Key.IsGamepadKey()));
+			Controller->InputKey(FInputKeyParams(Held.Key, static_cast<double>(Amount), 1.f / UnrealMcpRql::PlayFrameRate, 1, Held.Key.IsGamepadKey(), Device));
 		else
-			Controller->InputKey(FInputKeyParams(Held.Key, Event, static_cast<double>(Amount), Held.Key.IsGamepadKey()));
+			Controller->InputKey(FInputKeyParams(Held.Key, Event, static_cast<double>(Amount), Held.Key.IsGamepadKey(), Device));
 #else
-		Controller->InputKey(FInputKeyEventArgs::CreateSimulated(Held.Key, Event, Amount));
+		Controller->InputKey(FInputKeyEventArgs::CreateSimulated(Held.Key, Event, Amount, /*InNumSamplesOverride*/ -1, Device));
 #endif
+	}
+
+	/** "SwizzleAxis, Negate": one Enhanced Input key mapping's modifiers ("none" without). */
+	FString ModifierNames(const FArrayProperty* Modifiers, const void* Mapping)
+	{
+		const FObjectPropertyBase* Element = Modifiers ? CastField<FObjectPropertyBase>(Modifiers->Inner) : nullptr;
+		if (!Element)
+			return TEXT("none");
+		FScriptArrayHelper Array(Modifiers, Modifiers->ContainerPtrToValuePtr<void>(Mapping));
+		TArray<FString> Names;
+		for (int32 Index = 0; Index < Array.Num(); ++Index)
+		{
+			if (const UObject* Modifier = Element->GetObjectPropertyValue(Array.GetRawPtr(Index)))
+				Names.Add(Modifier->GetClass()->GetName().Replace(TEXT("InputModifier"), TEXT("")));
+		}
+		return Names.Num() ? FString::Join(Names, TEXT(", ")) : TEXT("none");
+	}
+
+	/**
+	 * A held key that reaches one Enhanced Input action through several of the player's key mappings (read by reflection
+	 * from UEnhancedPlayerInput::EnhancedActionMappings) gives that action the combined value of all of them, whichever of
+	 * their keys is pressed: one note per key and action.
+	 */
+	void NoteSharedKeyMappings(const APlayerController* Controller, const TArray<FHeldKey>& Held, TArray<FString>& OutNotes)
+	{
+		UPlayerInput* Input = Controller ? Controller->PlayerInput.Get() : nullptr;
+		const FArrayProperty* Mappings = Input ? FindFProperty<FArrayProperty>(Input->GetClass(), TEXT("EnhancedActionMappings")) : nullptr;
+		const FStructProperty* Mapping = Mappings ? CastField<FStructProperty>(Mappings->Inner) : nullptr;
+		const FObjectPropertyBase* ActionProperty = Mapping ? FindFProperty<FObjectPropertyBase>(Mapping->Struct, TEXT("Action")) : nullptr;
+		const FStructProperty* KeyProperty = Mapping ? FindFProperty<FStructProperty>(Mapping->Struct, TEXT("Key")) : nullptr;
+		if (!ActionProperty || !KeyProperty || KeyProperty->Struct != FKey::StaticStruct())
+			return;
+		const FArrayProperty* ModifiersProperty = FindFProperty<FArrayProperty>(Mapping->Struct, TEXT("Modifiers"));
+		FScriptArrayHelper Array(Mappings, Mappings->ContainerPtrToValuePtr<void>(Input));
+		for (const FHeldKey& Key : Held)
+		{
+			TMap<const UObject*, TArray<FString>> ModifiersByAction;
+			for (int32 Index = 0; Index < Array.Num(); ++Index)
+			{
+				const void* Row = Array.GetRawPtr(Index);
+				const UObject* Action = ActionProperty->GetObjectPropertyValue_InContainer(Row);
+				if (Action && *KeyProperty->ContainerPtrToValuePtr<FKey>(Row) == Key.Key)
+					ModifiersByAction.FindOrAdd(Action).Add(ModifierNames(ModifiersProperty, Row));
+			}
+			for (const TPair<const UObject*, TArray<FString>>& Entry : ModifiersByAction)
+			{
+				if (Entry.Value.Num() < 2)
+					continue;
+				const FString Action = Entry.Key->GetName();
+				OutNotes.Add(FString::Printf(TEXT("%s reaches %s through %d key mappings (modifiers: %s): it gives %s their combined value, as a real key "
+					"press does, so keys of those mappings cannot differ. Enhanced Input user settings (bEnableUserSettings) cause this: they apply every "
+					"keyboard key of a player-mappable action to each of its mappings that share one mapping name. Give each mapping its own Player "
+					"Mappable Key Settings name (MoveForward, MoveBack, MoveLeft, MoveRight) or make them not player-mappable."),
+					*Key.Key.ToString(), *Action, Entry.Value.Num(), *FString::Join(Entry.Value, TEXT(" | ")), *Action));
+			}
+		}
 	}
 }
 
-bool UnrealMcpRql::AdvancePlayWithKeys(double Seconds, int32 Frames, const FString& Keys, int32& OutAdvanced, FString& OutError)
+bool UnrealMcpRql::AdvancePlayWithKeys(double Seconds, int32 Frames, const FString& Keys, int32& OutAdvanced, FString& OutError,
+	TArray<FString>* OutNotes)
 {
 	using namespace UnrealMcpRqlPlayLocal;
 	OutAdvanced = 0;
@@ -352,6 +449,8 @@ bool UnrealMcpRql::AdvancePlayWithKeys(double Seconds, int32 Frames, const FStri
 		Release(nullptr, 0);
 		return false;
 	}
+	if (OutNotes)
+		NoteSharedKeyMappings(Pressed.Get(), Held, *OutNotes);
 	int32 ReleaseFrames = 0;
 	const bool bReleased = AdvancePlay(1, Release, ReleaseFrames, OutError);
 	OutAdvanced += ReleaseFrames;
