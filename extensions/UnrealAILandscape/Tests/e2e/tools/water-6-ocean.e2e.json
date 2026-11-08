@@ -1,0 +1,10 @@
+{
+  "description": "an ocean at sea level around the island, in one bounded call",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "water | call CreateOcean(\"E2EOcean\", 0)"
+  },
+  "assert": {
+    "pattern": "WaterBodyOcean#\\d+\\(E2EOcean\\)"
+  }
+}

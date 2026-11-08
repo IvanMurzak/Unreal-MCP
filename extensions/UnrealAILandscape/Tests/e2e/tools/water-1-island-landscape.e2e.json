@@ -1,0 +1,10 @@
+{
+  "description": "a 2 km island landscape for the water checks, 30 km from the origin",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "landscape | call Create(\"E2EIsland\", [3000000, 0, 0], 2000)"
+  },
+  "assert": {
+    "pattern": "Landscape#\\d+\\(E2EIsland\\)"
+  }
+}

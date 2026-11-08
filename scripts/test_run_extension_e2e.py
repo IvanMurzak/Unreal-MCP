@@ -358,12 +358,43 @@ CONTROL_RIG = {
 AUTHORING.update(CONTROL_RIG)
 
 
+SCULPT = 'LandscapeOperations#9190|Sculpt(LandscapeProxy Landscape, Vector Center, double Radius, double Height)'
+WATER = 'WaterOperations#9170'
+# The suite editor runs -nullrhi: water bodies report Ready false there (no water mesh without rendering).
+WATER_STATUS = ('2 results\nLabel|Water|WaterZone.ZoneExtent\nE2EOcean|{{Type:Ocean,SplinePoints:4,Material:Water_Material_Ocean,'
+                'AffectsLandscape:false,Ready:false,Problem:"this editor does not render (-nullrhi): the water mesh is built in a rendering '
+                'editor"}}|(250000, 250000)\nE2ERiver|{{Type:River,SplinePoints:36,Material:Water_Material_River,AffectsLandscape:{},'
+                'Ready:false,Problem:""}}|(250000, 250000)')
+# The Landscape island + water sequence: per check, an answer the live UE 5.7 editor gives and one that must not pass.
+AUTHORING.update({
+    'water-1-island-landscape.e2e.json': (
+        pcg_receipt('LandscapeOperations#9190|Create(string Label, Vector Location, double SizeMeters, MaterialInterface Material)'
+                    '|Landscape#9191(E2EIsland)'), NO_COUNT),
+    'water-2-island-sea-floor.e2e.json': (pcg_receipt(f'{SCULPT}|3196021'), pcg_receipt(f'{SCULPT}|0')),
+    'water-3-island-land.e2e.json': (pcg_receipt(f'{SCULPT}|1803641'), pcg_receipt(f'{SCULPT}|0')),
+    'water-4-island-mountain.e2e.json': (pcg_receipt(f'{SCULPT}|290393'), pcg_receipt(f'{SCULPT}|0')),
+    'water-5-zone.e2e.json': (
+        pcg_receipt(f'{WATER}|SetZone(double SizeMeters, Vector Center)|WaterZone#9275(WaterZone)'),
+        {'content': [{'type': 'text', 'text': 'error call-threw: SetZone threw: SizeMeters 2500 is outside'}], 'isError': True}),
+    'water-6-ocean.e2e.json': (
+        pcg_receipt(f'{WATER}|CreateOcean(string Label, double Height, MaterialInterface Material)|WaterBodyOcean#9280(E2EOcean)'),
+        {'content': [{'type': 'text', 'text': 'error call-threw: CreateOcean threw: the level already has an ocean'}], 'isError': True}),
+    'water-7-river.e2e.json': (
+        pcg_receipt(f'{WATER}|CreateRiverBetween(string Label, LandscapeProxy Landscape, Vector Source, Vector Mouth, double Width, '
+                    'double Depth, MaterialInterface Material)|WaterBodyRiver#9304(E2ERiver)'), NO_COUNT),
+    'water-8-status.e2e.json': (text_result(WATER_STATUS.format('false')), text_result(WATER_STATUS.format('true'))),
+    'water-9-cleanup.e2e.json': (
+        text_result('4 results\nmethod: Destroy()\n$ref|result\nLandscape#9191|null\nWaterZone#9275|null\nWaterBodyOcean#9280|null\n'
+                    'WaterBodyRiver#9304|null'),
+        text_result('1 result\nmethod: Destroy()\n$ref|result\nLandscape#9191|null')),
+})
+
 class CheckFileTests(unittest.TestCase):
     def test_every_plugin_has_valid_checks_and_no_powershell_left(self):
         for plugin, folder in release.components().items():
             self.assertTrue(e2e.checks_for(plugin), plugin)
             self.assertEqual(list((folder / 'Tests/e2e/tools').glob('*.ps1')), [], plugin)
-        self.assertEqual(len(all_checks()), 112)
+        self.assertEqual(len(all_checks()), 121)
 
     def test_every_assert_matches_its_intended_shape_and_rejects_others(self):
         for (plugin, name), check in all_checks().items():
