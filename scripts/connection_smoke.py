@@ -466,14 +466,46 @@ def wait_port(port: int, timeout: float) -> bool:
 
 # --------------------------------------------------------------------------- process management
 
-def kill_existing_editors(project: Path) -> int:
+def _normalised_path_text(text: str) -> str:
+    """A path, or a command line holding one, compared case-insensitively with any mix of / and \\."""
+    return re.sub(r"[\\/]+", "/", text).casefold()
+
+
+def opens_project(command_line: str | None, project: Path | str) -> bool:
+    """Whether a command line names exactly this .uproject: the full path, as a whole argument.
+
+    Never compare the stem: every checkout, agent worktree and agent-lab project on a machine shares
+    the name UnrealTestProject, so a stem match reaches other agents' and the owner's editors. A path
+    in another spelling (relative, via a junction) does not match, which leaves an editor alive
+    rather than stopping one that is not ours.
+    """
+    needle = re.escape(_normalised_path_text(str(project)))
+    return re.search(rf"""(?:^|[\s"'=]){needle}(?:$|[\s"'])""", _normalised_path_text(command_line or "")) is not None
+
+
+def list_editor_processes() -> list[tuple[int, str]]:
+    """(pid, command line) of every running editor; empty off Windows or when the query fails."""
     if os.name != "nt":
-        return 0
-    ps = ("Get-CimInstance Win32_Process -Filter \"Name='UnrealEditor.exe' OR Name='UnrealEditor-Cmd.exe'\" "
-          f"| Where-Object {{ $_.CommandLine -like '*{project.stem}*' }} "
-          "| ForEach-Object { Stop-Process -Id $_.ProcessId -Force; $_.ProcessId }")
-    out = subprocess.run(["powershell", "-NoProfile", "-Command", ps], capture_output=True, text=True)
-    return len([l for l in out.stdout.splitlines() if l.strip().isdigit()])
+        return []
+    ps = ("[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false; "
+          "Get-CimInstance Win32_Process -Filter \"Name='UnrealEditor.exe' OR Name='UnrealEditor-Cmd.exe'\" "
+          "| ForEach-Object { \"$($_.ProcessId)|$($_.CommandLine)\" }")
+    out = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
+                         capture_output=True, text=True, encoding="utf-8", errors="replace")
+    processes = []
+    for line in out.stdout.splitlines():
+        pid, _, command_line = line.partition("|")
+        if pid.strip().isdigit():
+            processes.append((int(pid), command_line))
+    return processes
+
+
+def kill_existing_editors(project: Path) -> int:
+    """Stop the editors left on this exact project (a second one would fight it for the project's files)."""
+    pids = [pid for pid, command_line in list_editor_processes() if opens_project(command_line, project)]
+    for pid in pids:
+        kill_tree(pid)
+    return len(pids)
 
 
 def kill_tree(pid: int) -> None:
@@ -510,7 +542,8 @@ def main() -> int:
     ap.add_argument("--poll", type=float, default=5.0)
     ap.add_argument("--connect-only", action="store_true")
     ap.add_argument("--keep-editor", action="store_true")
-    ap.add_argument("--no-kill-existing", action="store_true")
+    ap.add_argument("--no-kill-existing", action="store_true",
+                    help="leave an editor already running on exactly this --project (others are never touched)")
     ap.add_argument("--server-port", type=int, default=18080)
     ap.add_argument("--server", type=str, default=None, help="custom: gamedev-mcp-server path override")
     ap.add_argument("--server-version", type=str, default="latest", help="custom: release version or 'latest'")
