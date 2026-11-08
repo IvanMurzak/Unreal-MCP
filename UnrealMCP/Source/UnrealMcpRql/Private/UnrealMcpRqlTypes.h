@@ -7,6 +7,7 @@
 #include "UObject/WeakObjectPtr.h"
 #include "UnrealMcpRqlInclude.h"
 
+#include <utility>
 #include <memory>
 #include <optional>
 #include <string>
@@ -119,6 +120,17 @@ public:
 	/** Whether this call may change the editor (rql-mutate): read-only conveniences that widen a query stay off then. */
 	bool IsMutationRequest() const { return bMutationRequest; }
 	void SetMutationRequest(bool bMutation) { bMutationRequest = bMutation; }
+	/** A warning for the running request's result (host functions have no other way to one); once per message. */
+	void AddWarning(rql::Diagnostic Warning)
+	{
+		for (const rql::Diagnostic& Existing : RequestWarnings)
+		{
+			if (Existing.message == Warning.message)
+				return;
+		}
+		RequestWarnings.push_back(std::move(Warning));
+	}
+	std::vector<rql::Diagnostic> TakeWarnings() { return std::exchange(RequestWarnings, {}); }
 	/**
 	 * The one struct coercion (property writes, method arguments, the math-struct adapters): a struct value of the type, a
 	 * math-struct literal ("(1, 2, 3)", [1, 2, 3], "#ff8800") or a {Member: value} literal written over @p Out. Throws
@@ -178,6 +190,7 @@ private:
 	TMap<const UObject*, TWeakObjectPtr<UObject>> Replaced; // LiveObject: replaced object -> its newest replacement
 	FDelegateHandle ObjectsReplacedHandle;
 	bool bMutationRequest = false;
+	std::vector<rql::Diagnostic> RequestWarnings;
 	void OnObjectsReplaced(const TMap<UObject*, UObject*>& OldToNew);
 
 	rql::TypeDescriptor& Shell(const void* Key, const FString& Name, rql::TypeKind Kind);

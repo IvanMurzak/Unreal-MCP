@@ -397,8 +397,8 @@ void FUnrealAIControlRigSpec::Define()
 				TestFalse(TEXT("it sets, not gets"), Setter->IsGetter());
 				const URigVMPin* Value = Setter->FindPin(TEXT("Value"));
 				TestTrue(TEXT("its value comes from the trace"), Value && Value->GetLinkedSourcePins().Num() == 1);
-				const URigVMNode* Solve = UnrealAIControlRigGraph::FindForwardsSolve(Rig->GetModel());
-				const URigVMPin* End = Solve ? UnrealAIControlRigGraph::EndOfChain(const_cast<URigVMNode*>(Solve)) : nullptr;
+				URigVMNode* Solve = UnrealAIControlRigGraph::FindForwardsSolve(Rig->GetModel());
+				const URigVMPin* End = Solve ? UnrealAIControlRigGraph::EndOfChain(Solve) : nullptr;
 				TestTrue(TEXT("it ends the execution chain"), End && End->GetNode() == Setter);
 			}
 

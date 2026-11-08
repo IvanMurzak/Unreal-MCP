@@ -7,6 +7,7 @@
 #include "UnrealAIControlRigAnim.h"
 #include "UnrealAIControlRigGraph.h"
 #include "UnrealAIControlRigUnits.h"
+#include "UnrealMcpRqlPlay.h"
 
 #include "Animation/AnimBlueprint.h"
 #include "Animation/Skeleton.h"
@@ -14,7 +15,6 @@
 #include "ControlRig.h"
 #include "ControlRigBlueprintFactory.h"
 #include "ControlRigBlueprintLegacy.h"
-#include "Editor.h"
 #include "Engine/SkeletalMesh.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
@@ -120,7 +120,9 @@ namespace UnrealAIControlRigRqlApiLocal
 			return false;
 		for (const URigVMGraph* Graph : Blueprint->GetAllModels())
 		{
-			for (const URigVMNode* Node : Graph ? Graph->GetNodes() : TArray<URigVMNode*>())
+			if (!Graph)
+				continue;
+			for (const URigVMNode* Node : Graph->GetNodes())
 			{
 				const URigVMUnitNode* Unit = Cast<URigVMUnitNode>(Node);
 				const UScriptStruct* Struct = Unit ? Unit->GetScriptStruct() : nullptr;
@@ -316,7 +318,7 @@ FString UUnrealAIControlRigRqlApi::AddSetVariable(UControlRigBlueprint* Rig, con
 
 TArray<FUnrealAIRunningRig> UUnrealAIControlRigRqlApi::RigValues(const FString& Rig)
 {
-	UWorld* World = GEditor ? GEditor->PlayWorld.Get() : nullptr;
+	UWorld* World = UnrealMcpRql::PlayWorld();
 	if (!World)
 		return UnrealMcpRql::Failed<TArray<FUnrealAIRunningRig>>(TEXT("no Play In Editor session: a rig in an Anim Blueprint runs only while playing, the editor preview says nothing about the game: editor | call StartPlay(), editor | call AdvancePlay(1.0, 0), then RigValues"));
 	const FString Wanted = Rig.TrimStartAndEnd();
@@ -326,7 +328,7 @@ TArray<FUnrealAIRunningRig> UUnrealAIControlRigRqlApi::RigValues(const FString& 
 	{
 		UControlRig* Running = *It;
 		const USceneComponent* Component = Running->GetTypedOuter<USceneComponent>();
-		if (Running->HasAnyFlags(RF_ClassDefaultObject | RF_ArchetypeObject) || !IsValid(Running) || !Component || Component->GetWorld() != World)
+		if (Running->HasAnyFlags(RF_ArchetypeObject) || !IsValid(Running) || !Component || Component->GetWorld() != World)
 			continue;
 		const FString RigName = RunningRigName(Running);
 		if (!Wanted.IsEmpty() && !RigName.Equals(Wanted, ESearchCase::IgnoreCase) && !Wanted.EndsWith(TEXT("/") + RigName))

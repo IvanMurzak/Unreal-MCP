@@ -133,14 +133,14 @@ namespace UnrealAIControlRigGraphLocal
 	 * The execute output a new node runs after: @p After (a node, or "Node.Pin" of an execute output), else the end of Forwards
 	 * Solve. Null after Fail; nothing changed but a Forwards Solve the rig did not have.
 	 */
-	URigVMPin* ResolveRunsAfter(UControlRigBlueprint* Rig, URigVMController* Controller, const FString& After, const TCHAR* What)
+	URigVMPin* ResolveRunsAfter(UControlRigBlueprint* Rig, URigVMController* Controller, const FString& After)
 	{
 		const FString AfterText = After.TrimStartAndEnd();
 		if (AfterText.IsEmpty())
 		{
 			URigVMNode* Solve = UnrealAIControlRigGraph::ForwardsSolve(Controller);
 			URigVMPin* End = Solve ? UnrealAIControlRigGraph::EndOfChain(Solve) : nullptr;
-			return End ? End : UnrealMcpRql::Failed<URigVMPin*>(FString::Printf(TEXT("Forwards Solve branches (a Sequence or branch node): pass After, the node (or Sequence.Pin) %s runs after (see the Nodes member)"), What));
+			return End ? End : UnrealMcpRql::Failed<URigVMPin*>(TEXT("Forwards Solve branches (a Sequence or branch node): pass After, the node (or Sequence.Pin) the new node runs after (see the Nodes member)"));
 		}
 		if (AfterText.Contains(TEXT(".")))
 		{
@@ -560,7 +560,7 @@ URigVMNode* UnrealAIControlRigGraph::AddUnit(UControlRigBlueprint* Rig, UScriptS
 	const bool bMutable = UnrealAIControlRigUnits::Executes(Unit);
 	if (bMutable)
 	{
-		RunsAfter = ResolveRunsAfter(Rig, Controller, After, TEXT("the unit"));
+		RunsAfter = ResolveRunsAfter(Rig, Controller, After);
 		if (!RunsAfter)
 			return nullptr;
 	}
@@ -612,7 +612,7 @@ URigVMNode* UnrealAIControlRigGraph::AddSetVariable(UControlRigBlueprint* Rig, c
 	const FString NodeName = Name.TrimStartAndEnd();
 	if (!NodeName.IsEmpty() && Controller->GetGraph()->FindNodeByName(*NodeName))
 		return UnrealMcpRql::Failed<URigVMNode*>(FString::Printf(TEXT("%s already has a node named '%s'"), *Rig->GetName(), *NodeName));
-	URigVMPin* RunsAfter = ResolveRunsAfter(Rig, Controller, After, TEXT("the setter"));
+	URigVMPin* RunsAfter = ResolveRunsAfter(Rig, Controller, After);
 	if (!RunsAfter)
 		return nullptr;
 	URigVMVariableNode* Setter = Controller->AddVariableNode(Description.Name, Description.CPPType, Description.CPPTypeObject, /*bIsGetter*/ false, FString(),

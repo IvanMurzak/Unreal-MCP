@@ -983,11 +983,32 @@ namespace UnrealMcpRqlCoreLocal
 		return Actor ? Types.WrapObject(Actor) : ErrorValue("not-found", FString::Printf(TEXT("no actor with the label, name or path '%s'"), *Key));
 	}
 
+	/**
+	 * unreal.asset(path) found nothing: empty stays a valid "does it exist?" answer (`| count` is 0), but an empty table must
+	 * not read as "this asset has no such data". Names what happened: the shell that rewrote the path, or similar assets.
+	 */
+	rql::Diagnostic MissingAssetWarning(const FString& Path)
+	{
+		const FString Trimmed = Path.TrimStartAndEnd();
+		const int32 Game = Trimmed.Find(TEXT("/Game/"));
+		const bool bRewritten = Trimmed.Len() > 1 && Trimmed[1] == TEXT(':') && Game != INDEX_NONE;
+		const FString Hint = bRewritten
+			? FString::Printf(TEXT("the path was rewritten before it got here: Git Bash (MSYS) turns an argument like unreal.asset(\"/Game/...\") into a Windows path; send %s with MSYS_NO_PATHCONV=1 set, or the query in a JSON file"), *Trimmed.RightChop(Game))
+			: FString(TEXT("find it: unreal.assets(\"<Class>\") | where Name contains \"...\" | select Name Path"));
+		return rql::Diagnostic::warning("asset-not-found",
+			UnrealMcpRqlToStd(FString::Printf(TEXT("no asset at '%s'%s: unreal.asset(path) is empty, so nothing after it ran on an asset"), *Path, *UnrealMcpRqlSimilarAssetsOfAnyClass(bRewritten ? Trimmed.RightChop(Game) : Trimmed))),
+			UnrealMcpRqlToStd(Hint));
+	}
+
 	rql::Value LoadAsset(const std::vector<rql::Value>& Args, FUnrealMcpRqlTypes& Types)
 	{
 		if (Args.size() != 1 || !Args[0].is_string())
 			return ErrorValue("type-mismatch", TEXT("unreal.asset(path) expects an asset path such as \"/Game/Materials/M_Red\""));
-		return Types.WrapObject(FUnrealMcpObjectRef::LoadObjectQuiet(UObject::StaticClass(), UnrealMcpRqlFromStd(Args[0].as_string())));
+		const FString Path = UnrealMcpRqlFromStd(Args[0].as_string());
+		UObject* Asset = FUnrealMcpObjectRef::LoadObjectQuiet(UObject::StaticClass(), Path);
+		if (!Asset)
+			Types.AddWarning(MissingAssetWarning(Path));
+		return Types.WrapObject(Asset);
 	}
 
 	rql::Value FindAssets(const std::vector<rql::Value>& Args, FUnrealMcpRqlTypes& Types)
@@ -1069,19 +1090,15 @@ rql::Value UnrealMcpRqlAssetList(FUnrealMcpRqlTypes& Types, UClass* Class, const
 	return rql::Value::list(std::make_shared<FAssetList>(&Types, MoveTemp(Assets), Types.Registry().list_type(Element, true)));
 }
 
-FString UnrealMcpRqlSimilarAssets(UClass* Class, const FString& Text)
+/** " (did you mean ...?)" for the asset name @p Text means, among @p Assets: its exact matches, else partial ones. */
+static FString SimilarAssetsAmong(const TArray<FAssetData>& Assets, const FString& Text)
 {
-	if (!Class || Class == UObject::StaticClass() || Class->IsChildOf(AActor::StaticClass()) || Class->IsChildOf(UClass::StaticClass()))
-		return FString();
 	// The asset name the text means: the last path part, without an object suffix ("/Game/A/SM_Rock.SM_Rock").
 	FString Name = Text.TrimStartAndEnd();
 	Name.Split(TEXT("/"), nullptr, &Name, ESearchCase::CaseSensitive, ESearchDir::FromEnd);
 	Name.Split(TEXT("."), &Name, nullptr);
 	if (Name.IsEmpty())
 		return FString();
-	IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
-	TArray<FAssetData> Assets;
-	Registry.GetAssetsByClass(Class->GetClassPathName(), Assets, /*bSearchSubClasses*/ true);
 	TArray<FString> Exact, Partial;
 	for (const FAssetData& Data : Assets)
 	{
@@ -1098,6 +1115,24 @@ FString UnrealMcpRqlSimilarAssets(UClass* Class, const FString& Text)
 	if (Hits.Num() > 3)
 		Hits.SetNum(3);
 	return FString::Printf(TEXT(" (did you mean %s?)"), *FString::Join(Hits, TEXT(", ")));
+}
+
+FString UnrealMcpRqlSimilarAssets(UClass* Class, const FString& Text)
+{
+	if (!Class || Class == UObject::StaticClass() || Class->IsChildOf(AActor::StaticClass()) || Class->IsChildOf(UClass::StaticClass()))
+		return FString();
+	IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
+	TArray<FAssetData> Assets;
+	Registry.GetAssetsByClass(Class->GetClassPathName(), Assets, /*bSearchSubClasses*/ true);
+	return SimilarAssetsAmong(Assets, Text);
+}
+
+FString UnrealMcpRqlSimilarAssetsOfAnyClass(const FString& Text)
+{
+	IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
+	TArray<FAssetData> Assets;
+	Registry.GetAllAssets(Assets);
+	return SimilarAssetsAmong(Assets, Text);
 }
 
 rql::Value UnrealMcpRqlClassDefaultsList(FUnrealMcpRqlTypes& Types, UClass* Base)

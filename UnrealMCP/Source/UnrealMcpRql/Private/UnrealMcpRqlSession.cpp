@@ -8,7 +8,6 @@
 #include "UnrealMcpRqlGuide.h"
 #include "UnrealMcpRqlSources.h"
 
-#include "AssetRegistry/AssetRegistryModule.h"
 #include "Components/ActorComponent.h"
 #include "Components/SceneComponent.h"
 #include "Editor.h"
@@ -62,41 +61,6 @@ namespace UnrealMcpRqlSessionLocal
 		if (Error->message.find(Id) != std::string::npos || Error->hint.find(Id) != std::string::npos)
 			return; // the error already names it (the Enhanced Input node hint of Blueprint graphs)
 		Error->hint = Error->hint.empty() ? Hint : Error->hint + "; " + Hint;
-	}
-
-	/**
-	 * unreal.asset(path) found nothing: an empty result stays a valid "does it exist?" answer (`| count` is 0), but the empty
-	 * table of a query or a call must not read as "this asset has no such data". Names what happened: the shell that
-	 * rewrote the path, or the assets of that name elsewhere.
-	 */
-	rql::Diagnostic MissingAssetWarning(const FString& Path)
-	{
-		const FString Trimmed = Path.TrimStartAndEnd();
-		const int32 Game = Trimmed.Find(TEXT("/Game/"));
-		FString Hint;
-		if (Trimmed.Len() > 1 && Trimmed[1] == TEXT(':') && Game != INDEX_NONE)
-		{
-			Hint = FString::Printf(TEXT("the path was rewritten before it got here: Git Bash (MSYS) turns an argument like unreal.asset(\"/Game/...\") into a Windows path; send %s with MSYS_NO_PATHCONV=1 set, or the query in a JSON file"),
-				*Trimmed.RightChop(Game));
-		}
-		else
-		{
-			const FString ShortName = FPaths::GetBaseFilename(Trimmed);
-			TArray<FAssetData> Assets;
-			FAssetRegistryModule::GetRegistry().GetAllAssets(Assets);
-			TArray<FString> Named;
-			for (const FAssetData& Asset : Assets)
-			{
-				if (Named.Num() < 3 && Asset.AssetName.ToString().Equals(ShortName, ESearchCase::IgnoreCase))
-					Named.Add(Asset.PackageName.ToString());
-			}
-			Hint = Named.Num()
-				? FString::Printf(TEXT("assets of that name: %s"), *FString::Join(Named, TEXT(", ")))
-				: FString(TEXT("find it: unreal.assets(\"<Class>\") | where Name contains \"...\" | select Name Path"));
-		}
-		return rql::Diagnostic::warning("asset-not-found",
-			UnrealMcpRqlToStd(FString::Printf(TEXT("no asset at '%s': unreal.asset(path) is empty, so nothing after it ran on an asset"), *Path)),
-			UnrealMcpRqlToStd(Hint));
 	}
 
 	/** Objects whose changes belong to the project (not class defaults of compiled-in classes, not transient helpers). */
@@ -700,8 +664,8 @@ FString FUnrealMcpRqlSession::Execute(const FString& PlanJson, bool bAllowMutati
 	CloseTransaction();
 	LiteralObjects.Reset(); // written by now (the undo buffer or their owner holds them), or garbage
 	UnrealMcpRqlSessionLocal::AddExtensionHint(Result, PlanJson, bAllowMutation);
-	Result.diagnostics.insert(Result.diagnostics.end(), SourceWarnings.begin(), SourceWarnings.end());
-	SourceWarnings.clear();
+	for (rql::Diagnostic& Warning : Types().TakeWarnings())
+		Result.diagnostics.push_back(std::move(Warning));
 	bOutOk = Result.ok;
 	return UnrealMcpRqlFromStd(Result.to_json(/*include_stats*/ false).dump());
 }
@@ -795,8 +759,6 @@ bool FUnrealMcpRqlSession::FunctionSource(rql::QueryPlan& Plan, rql::QueryResult
 		OutFailure = rql::QueryResult::fail({ rql::Diagnostic::error(Value.error_code(), Value.error_detail()) });
 		return true;
 	}
-	if (Name == "unreal.asset" && Value.is_null() && Args.size() == 1 && Args[0].is_string())
-		SourceWarnings.push_back(UnrealMcpRqlSessionLocal::MissingAssetWarning(UnrealMcpRqlFromStd(Args[0].as_string())));
 	EnginePtr->add_source(Name, [Value]() { return Value; });
 	if (Members.empty())
 	{
