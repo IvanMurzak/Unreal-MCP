@@ -227,9 +227,15 @@ the game inside the call (`UnrealMcpRqlPlay.h`):
 - `editor | call StopPlay()` ends the session now.
 - `editor.PlayState` (and every play operation's result, `FUnrealMcpPlayState`): `Playing`, `Paused`, `Time` (game
   seconds), `FramesAdvanced`, `Pawn`, `PawnClass`, `Location`, `Rotation`, `ControlRotation`, `Velocity`, `Speed`,
-  `MovementMode`, `Crouching`, `MaxWalkSpeed` (Characters), `MappingContexts` (the Enhanced Input contexts applied
+  `Moved`, `MeasuredVelocity`, `Turned`, `MovementMode`, `Crouching`, `MaxWalkSpeed` (Characters), `MappingContexts` (the Enhanced Input contexts applied
   to player 0's input, highest priority first, read by reflection: no Enhanced Input dependency), `Notes`; extensions add
   to it through `UnrealMcpRql::OnReadPlayState`. `playActors` lists the play world's actors.
+- `AdvancePlay` measures what the call did to the pawn: `Moved` (cm, start to end in a straight line), `MeasuredVelocity`
+  (that change over the game time advanced, cm/s) and `Turned` (degrees). They are 0 on other reads and when the call
+  changed the possessed pawn. `Velocity` and `Speed` come from the pawn's movement component, so a pawn without one reads
+  0 there even while it moves: use the measured fields. When keys were held for at least 0.25 s and the pawn did not move
+  1 cm (and the camera did not turn), `Notes` says so: if that input should move the pawn, check whether it is blocked and
+  whether the action is bound. The note is a fact, not a verdict: a held menu key gets it too.
 
 Extensions reuse the seam: `UnrealMcpRql::AdvancePlay(frames, beforeFrame)` runs a callback before each frame's tick
 (the Enhanced Input extension's `InjectInput(action, value, seconds, frames, triggers)` injects the action there and

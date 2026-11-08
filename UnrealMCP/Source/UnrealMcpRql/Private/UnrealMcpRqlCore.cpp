@@ -860,7 +860,7 @@ namespace UnrealMcpRqlCoreLocal
 			{
 				const FUnrealMcpPlayState State = UnrealMcpRql::ReadPlayState();
 				return Types->WrapStruct(FUnrealMcpPlayState::StaticStruct(), &State);
-			}, {}, "the running play session: Playing, Paused, Time, Pawn, PawnClass, Location, Velocity, Speed, MovementMode, "
+			}, {}, "the running play session: Playing, Paused, Time, Pawn, PawnClass, Location, Velocity, Speed, Moved, MeasuredVelocity, Turned, MovementMode, "
 			"Crouching, MaxWalkSpeed, MappingContexts (play test with call StartPlay / AdvancePlay)"));
 		FUnrealMcpRqlTypes::SetMember(D, Member("Selection", T.Registry().list_type(ActorType, true),
 			[Types](void*) { return Types->WrapObjects(SelectedActors()); },

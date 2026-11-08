@@ -460,3 +460,62 @@ bool UnrealMcpRql::AdvancePlayWithKeys(double Seconds, int32 Frames, const FStri
 	OutAdvanced += ReleaseFrames;
 	return bReleased;
 }
+
+namespace UnrealMcpRqlPlayLocal
+{
+	/** Less than this is floor adjustment or float noise, not the pawn moving or turning. */
+	constexpr double StillCentimeters = 1.0;
+	constexpr double StillDegrees = 1.0;
+
+	/** Input held at least this long (0.25 s) is expected to show: a shorter press may be a toggle that moves nothing. */
+	constexpr int32 MinHeldFramesToNote = UnrealMcpRql::PlayFrameRate / 4;
+
+	/** What the call did to the pawn it started with; nothing measurable when the call changed the possessed pawn. */
+	void MeasurePawnMotion(const FUnrealMcpPlayState& Before, FUnrealMcpPlayState& State)
+	{
+		if (!State.Pawn || State.Pawn != Before.Pawn)
+			return;
+		const FVector Displacement = State.Location - Before.Location;
+		const double Elapsed = State.Time - Before.Time;
+		State.Moved = Displacement.Size();
+		State.MeasuredVelocity = Elapsed > 0.0 ? Displacement / Elapsed : FVector::ZeroVector;
+		State.Turned = FMath::RadiansToDegrees(Before.Rotation.Quaternion().AngularDistance(State.Rotation.Quaternion()));
+	}
+
+	/**
+	 * Held input the pawn did not respond to. A fact, not a verdict: the core cannot tell a movement key from a menu key, so
+	 * the note is conditional. Not noted: a short press, a game time that stood still, a changed pawn, or a turned camera
+	 * (the input did something).
+	 */
+	void NoteInputThatMovedNothing(const FUnrealMcpPlayState& Before, const FString& Keys, int32 HeldFrames, FUnrealMcpPlayState& State)
+	{
+		TArray<FHeldKey> Held;
+		FString ParseError;
+		if (HeldFrames < MinHeldFramesToNote || !ParseHeldKeys(Keys, Held, ParseError))
+			return;
+		Held.RemoveAll([](const FHeldKey& Key) { return Key.Value == 0.f; });
+		if (Held.Num() == 0 || !State.Pawn || State.Pawn != Before.Pawn || State.Time <= Before.Time || State.Moved >= StillCentimeters
+			|| !State.ControlRotation.Equals(Before.ControlRotation, StillDegrees))
+			return;
+		const FString Names = FString::JoinBy(Held, TEXT(", "), [](const FHeldKey& Key) { return Key.Key.ToString(); });
+		const FString Response = State.Turned < StillDegrees ? FString(TEXT("the pawn neither moved nor turned"))
+			: FString::Printf(TEXT("the pawn turned %.0f degrees without moving"), State.Turned);
+		State.Notes.Add(FString::Printf(TEXT("Held %s for %.2f s and %s: if this input should move it, check whether the pawn is blocked and whether the action is bound."),
+			*Names, static_cast<double>(HeldFrames) / UnrealMcpRql::PlayFrameRate, *Response));
+	}
+}
+
+bool UnrealMcpRql::AdvancePlayAndRead(double Seconds, int32 Frames, const FString& Keys, FUnrealMcpPlayState& OutState, FString& OutError)
+{
+	const FUnrealMcpPlayState Before = ReadPlayState();
+	int32 Advanced = 0;
+	TArray<FString> Notes;
+	if (!AdvancePlayWithKeys(Seconds, Frames, Keys, Advanced, OutError, &Notes))
+		return false;
+	OutState = ReadPlayState();
+	OutState.FramesAdvanced = Advanced;
+	OutState.Notes.Append(Notes);
+	UnrealMcpRqlPlayLocal::MeasurePawnMotion(Before, OutState);
+	UnrealMcpRqlPlayLocal::NoteInputThatMovedNothing(Before, Keys, Advanced - 1, OutState); // the last frame released the keys
+	return true;
+}
