@@ -209,6 +209,8 @@ namespace
 
 		void Run()
 		{
+			// Marked before the check: a call that ends between the two is reported "outcome unknown", never "not run".
+			State->bStarted = true;
 			// The caller already timed out or cancelled: never run it late.
 			if (State->bCompleted || Call.IsCancelled())
 			{
@@ -216,7 +218,6 @@ namespace
 				return;
 			}
 
-			State->bStarted = true;
 			FUnrealMcpToolResult Result;
 			{
 				// A tool call never waits for a person: as an unattended script, the engine cancels a modal window opened
@@ -232,7 +233,8 @@ namespace
 			}
 
 			// Not ready (e.g. Python before its first tick): again on a later frame, so the engine keeps ticking in
-			// between; the watchdog bounds the wait.
+			// between; the watchdog bounds the wait. Nothing ran yet: a call ended meanwhile never started.
+			State->bStarted = false;
 			UE_LOG(LogUnrealMcp, Verbose, TEXT("[Unreal-MCP] tool call not ready, retrying: %s"), *Result.Message);
 			Schedule(0.1f);
 		}

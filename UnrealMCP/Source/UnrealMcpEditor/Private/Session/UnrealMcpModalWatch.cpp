@@ -10,6 +10,11 @@
 #include "Misc/CoreDelegates.h"
 #include "Widgets/SWindow.h"
 
+FUnrealMcpModalWatch::FUnrealMcpModalWatch(TFunction<int32(const FString&)> InEndWaitingCalls)
+	: EndWaitingCalls(InEndWaitingCalls ? MoveTemp(InEndWaitingCalls) : TFunction<int32(const FString&)>(&FUnrealMcpGameThreadDispatcher::FailWaitingCalls))
+{
+}
+
 FUnrealMcpModalWatch::~FUnrealMcpModalWatch()
 {
 	Shutdown();
@@ -23,7 +28,11 @@ void FUnrealMcpModalWatch::Start()
 	{
 		HandleModalTick(FSlateApplication::Get().GetActiveModalWindow(), FPlatformTime::Seconds());
 	});
-	ModalClosedHandle = FCoreDelegates::PostSlateModal.AddRaw(this, &FUnrealMcpModalWatch::HandleModalClosed);
+	// Broadcast after the closing window left the modal stack (FSlateApplication::DestroyWindowsImmediately).
+	ModalClosedHandle = FCoreDelegates::PostSlateModal.AddLambda([this]()
+	{
+		HandleModalClosed(FSlateApplication::Get().GetActiveModalWindow().IsValid());
+	});
 }
 
 void FUnrealMcpModalWatch::Shutdown()
@@ -49,17 +58,21 @@ void FUnrealMcpModalWatch::HandleModalTick(const TSharedPtr<SWindow>& Active, do
 		return;
 	if (Window.Pin() != Active)
 	{
-		HandleModalClosed(); // a different dialog: the previous one is gone
+		// A dialog over another keeps the time the game thread has been held since the first; report the top one's title.
+		if (!bHeld)
+		{
+			bHeld = true;
+			OpenedAt = Now;
+			NextCheckAt = 0.0;
+		}
 		Window = Active;
 		Title = Active->GetTitle().ToString();
-		OpenedAt = Now;
-		NextCheckAt = 0.0;
 	}
 	// A few times a second rather than every modal tick; calls that arrive while the dialog stays open end too.
 	if (Now - OpenedAt < BlockedAfterSeconds || Now < NextCheckAt)
 		return;
 	NextCheckAt = Now + 0.25;
-	if (FUnrealMcpGameThreadDispatcher::FailWaitingCalls(BlockedReason(Title, Now - OpenedAt)) > 0 && !bReported)
+	if (EndWaitingCalls(BlockedReason(Title, Now - OpenedAt)) > 0 && !bReported)
 	{
 		bReported = true;
 		UE_LOG(LogUnrealMcp, Error, TEXT("[Unreal-MCP] Editor blocked by modal dialog \"%s\": its game thread waits for the dialog")
@@ -67,11 +80,17 @@ void FUnrealMcpModalWatch::HandleModalTick(const TSharedPtr<SWindow>& Active, do
 	}
 }
 
-void FUnrealMcpModalWatch::HandleModalClosed()
+void FUnrealMcpModalWatch::HandleModalClosed(bool bAnyModalLeft)
 {
+	if (bAnyModalLeft)
+	{
+		Window.Reset(); // the next modal tick takes the dialog now on top, keeping the time and the report
+		return;
+	}
 	if (bReported)
 		UE_LOG(LogUnrealMcp, Display, TEXT("[Unreal-MCP] Modal dialog \"%s\" closed; tool calls run again."), *Title);
 	bReported = false;
+	bHeld = false;
 	Window.Reset();
 	Title.Reset();
 }

@@ -5,79 +5,112 @@
 
 #include "CoreMinimal.h"
 #include "Misc/AutomationTest.h"
-#include "Dispatch/UnrealMcpGameThreadDispatcher.h"
 #include "Session/UnrealMcpModalWatch.h"
 #include "Widgets/SWindow.h"
 
 /**
  * A modal dialog holds the game thread, and with it every tool call, until someone answers it (seen live: 15 minutes
  * behind "Insert New Landscape Edit Layer", reported to the agent only as timeouts and "plugin not connected"). The
- * watch names the dialog in the log and ends the waiting calls with that reason. Driven through its handlers: a real
- * modal loop would block the spec.
+ * watch names the dialog in the log and ends the waiting calls with that reason. Driven through its handlers (a real
+ * modal loop would block the spec) with a stand-in for the dispatcher, so no live call of the editor is touched.
  */
 BEGIN_DEFINE_SPEC(FUnrealMcpModalWatchSpec, "UnrealMcp.Session.ModalWatch",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 
-	/** A call the game thread has not finished: it ran once and waits for a later frame. */
-	TFuture<FUnrealMcpToolResult> WaitingCall(FUnrealMcpGameThreadDispatcher& Dispatcher)
+	/** Calls the stand-in dispatcher holds, and the reasons it ended them with. */
+	int32 Waiting = 0;
+	TArray<FString> Reasons;
+
+	TFunction<int32(const FString&)> EndWaiting()
 	{
-		return Dispatcher.Dispatch(FUnrealMcpToolCall(),
-			[](const FUnrealMcpToolCall&) { return FUnrealMcpToolResult::RetryLater(TEXT("waiting")); },
-			FTimespan::FromSeconds(30));
+		return [this](const FString& Reason)
+		{
+			const int32 Ended = Waiting;
+			if (Ended > 0)
+				Reasons.Add(Reason);
+			Waiting = 0;
+			return Ended;
+		};
+	}
+
+	static TSharedRef<SWindow> Dialog(const TCHAR* Title)
+	{
+		return SNew(SWindow).Title(FText::FromString(Title));
 	}
 
 END_DEFINE_SPEC(FUnrealMcpModalWatchSpec)
 
 void FUnrealMcpModalWatchSpec::Define()
 {
+	BeforeEach([this]() { Waiting = 0; Reasons.Reset(); });
+
 	It("reports a modal dialog that holds waiting calls, ends them with its title, and logs when it closes", [this]()
 	{
-		AddExpectedError(TEXT("Editor blocked by modal dialog \"Insert New Landscape Edit Layer\""), EAutomationExpectedErrorFlags::Contains, 1);
-		FUnrealMcpGameThreadDispatcher Dispatcher;
-		FUnrealMcpModalWatch Watch;
-		const TSharedRef<SWindow> Dialog = SNew(SWindow).Title(FText::FromString(TEXT("Insert New Landscape Edit Layer")));
+		AddExpectedErrorPlain(TEXT("Editor blocked by modal dialog \"Insert New Landscape Edit Layer\""), EAutomationExpectedErrorFlags::Contains, 1);
+		AddExpectedMessagePlain(TEXT("Modal dialog \"Insert New Landscape Edit Layer\" closed; tool calls run again."), EAutomationExpectedMessageFlags::Contains, 1);
+		FUnrealMcpModalWatch Watch(EndWaiting());
+		const TSharedRef<SWindow> Picker = Dialog(TEXT("Insert New Landscape Edit Layer"));
 
-		TFuture<FUnrealMcpToolResult> Call = WaitingCall(Dispatcher);
-		Watch.HandleModalTick(Dialog, 100.0);
-		Watch.HandleModalTick(Dialog, 101.0);
+		Waiting = 1;
+		Watch.HandleModalTick(Picker, 100.0);
+		Watch.HandleModalTick(Picker, 101.0);
 		TestFalse(TEXT("a dialog open for a moment is not reported"), Watch.IsReportingBlocked());
-		TestFalse(TEXT("nor are calls ended"), Call.IsReady());
+		TestEqual(TEXT("nor are calls ended"), Waiting, 1);
 
-		Watch.HandleModalTick(Dialog, 100.0 + FUnrealMcpModalWatch::BlockedAfterSeconds + 1.0);
+		Watch.HandleModalTick(Picker, 100.0 + FUnrealMcpModalWatch::BlockedAfterSeconds + 1.0);
 		TestTrue(TEXT("reported"), Watch.IsReportingBlocked());
-		if (!TestTrue(TEXT("the waiting call ended"), Call.IsReady()))
+		TestEqual(TEXT("the waiting call ended"), Waiting, 0);
+		if (!TestEqual(TEXT("once"), Reasons.Num(), 1))
 			return;
-		const FUnrealMcpToolResult Result = Call.Get();
-		TestFalse(TEXT("as an error"), Result.bSuccess);
-		TestTrue(TEXT("naming the dialog"), Result.Message.Contains(TEXT("\"Insert New Landscape Edit Layer\"")));
-		TestTrue(TEXT("saying what to do"), Result.Message.Contains(TEXT("close the dialog in the editor")));
+		TestTrue(TEXT("naming the dialog"), Reasons[0].Contains(TEXT("\"Insert New Landscape Edit Layer\"")));
+		TestTrue(TEXT("saying what to do"), Reasons[0].Contains(TEXT("close the dialog in the editor")));
 
-		// A call that arrives while the dialog stays open ends too (the 0.25 s pacing is measured from the last end).
-		TFuture<FUnrealMcpToolResult> Later = WaitingCall(Dispatcher);
-		Watch.HandleModalTick(Dialog, 104.0);
-		TestTrue(TEXT("a later call ended"), Later.IsReady());
+		// A call that arrives while the dialog stays open ends too (paced from the last check).
+		Waiting = 1;
+		Watch.HandleModalTick(Picker, 104.0);
+		TestEqual(TEXT("a later call ended"), Waiting, 0);
 
-		AddExpectedMessage(TEXT("Modal dialog \"Insert New Landscape Edit Layer\" closed; tool calls run again."), EAutomationExpectedMessageFlags::Contains, 1);
-		Watch.HandleModalClosed();
+		Watch.HandleModalClosed(/*bAnyModalLeft*/ false);
 		TestFalse(TEXT("cleared"), Watch.IsReportingBlocked());
 	});
 
-	It("reports nothing while no call waits, and a new dialog starts its own grace", [this]()
+	It("reports nothing while no call waits", [this]()
 	{
-		FUnrealMcpGameThreadDispatcher Dispatcher;
-		FUnrealMcpModalWatch Watch;
-		const TSharedRef<SWindow> First = SNew(SWindow).Title(FText::FromString(TEXT("First")));
-		const TSharedRef<SWindow> Second = SNew(SWindow).Title(FText::FromString(TEXT("Second")));
-
+		FUnrealMcpModalWatch Watch(EndWaiting());
+		const TSharedRef<SWindow> First = Dialog(TEXT("First"));
 		Watch.HandleModalTick(First, 0.0);
 		Watch.HandleModalTick(First, 60.0);
-		TestFalse(TEXT("no waiting call: nothing reported"), Watch.IsReportingBlocked());
+		TestFalse(TEXT("nothing reported"), Watch.IsReportingBlocked());
+	});
 
-		TFuture<FUnrealMcpToolResult> Call = WaitingCall(Dispatcher);
-		Watch.HandleModalTick(Second, 61.0);
-		TestFalse(TEXT("another dialog: its own grace"), Call.IsReady());
-		// End the call here so it does not wait out its timeout after the spec.
-		FUnrealMcpGameThreadDispatcher::FailWaitingCalls(TEXT("spec cleanup"));
+	It("keeps a report across a dialog opened over the first, and starts a new grace after the last one closed", [this]()
+	{
+		AddExpectedErrorPlain(TEXT("Editor blocked by modal dialog \"Parent\""), EAutomationExpectedErrorFlags::Contains, 1);
+		AddExpectedMessagePlain(TEXT("Modal dialog \"Child\" closed; tool calls run again."), EAutomationExpectedMessageFlags::Contains, 1);
+		FUnrealMcpModalWatch Watch(EndWaiting());
+		const TSharedRef<SWindow> Parent = Dialog(TEXT("Parent"));
+		const TSharedRef<SWindow> Child = Dialog(TEXT("Child"));
+
+		Waiting = 1;
+		Watch.HandleModalTick(Parent, 0.0);
+		Watch.HandleModalTick(Parent, 3.0);
+		TestTrue(TEXT("parent reported"), Watch.IsReportingBlocked());
+
+		Waiting = 1;
+		Watch.HandleModalTick(Child, 4.0);
+		TestTrue(TEXT("still reported over the child"), Watch.IsReportingBlocked());
+		TestEqual(TEXT("a call waiting behind the child ends at once (held since the parent)"), Waiting, 0);
+		TestTrue(TEXT("with the child's title"), Reasons.Last().Contains(TEXT("\"Child\"")));
+
+		Watch.HandleModalClosed(/*bAnyModalLeft*/ true); // the child closed; the parent is still open
+		TestTrue(TEXT("no 'closed' while the parent is open"), Watch.IsReportingBlocked());
+		Watch.HandleModalClosed(/*bAnyModalLeft*/ false);
+		TestFalse(TEXT("cleared after the last one"), Watch.IsReportingBlocked());
+
+		Waiting = 1;
+		const TSharedRef<SWindow> Later = Dialog(TEXT("Later"));
+		Watch.HandleModalTick(Later, 10.0);
+		TestEqual(TEXT("a dialog opened later has its own grace"), Waiting, 1);
 	});
 
 	It("names the dialog and the remedy in the reason", [this]()

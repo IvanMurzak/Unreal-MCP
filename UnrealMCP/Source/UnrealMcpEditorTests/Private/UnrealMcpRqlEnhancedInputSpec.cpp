@@ -22,7 +22,16 @@ BEGIN_DEFINE_SPEC(FUnrealMcpRqlEnhancedInputSpec, "UnrealMcp.Tools.Rql.EnhancedI
 	UObject* Context = nullptr;
 	UObject* Action = nullptr;
 	FProperty* KeyProperty = nullptr;
-	void* FirstMapping = nullptr;
+	bool bHasMapping = false;
+
+	/** The context's first mapping, looked up anew: a write reassigns the array (its memory moves). */
+	void* FirstMapping() const
+	{
+		const FStructProperty* Data = CastField<FStructProperty>(Context->GetClass()->FindPropertyByName(TEXT("DefaultKeyMappings")));
+		const FArrayProperty* Mappings = CastField<FArrayProperty>(Data->Struct->FindPropertyByName(TEXT("Mappings")));
+		FScriptArrayHelper Helper(Mappings, Mappings->ContainerPtrToValuePtr<void>(Data->ContainerPtrToValuePtr<void>(Context)));
+		return Helper.Num() > 0 ? Helper.GetRawPtr(0) : nullptr;
+	}
 
 	void MakeContext()
 	{
@@ -38,16 +47,18 @@ BEGIN_DEFINE_SPEC(FUnrealMcpRqlEnhancedInputSpec, "UnrealMcp.Tools.Rql.EnhancedI
 		if (!Mapping)
 			return;
 		FScriptArrayHelper Helper(Mappings, Mappings->ContainerPtrToValuePtr<void>(Data->ContainerPtrToValuePtr<void>(Context)));
-		FirstMapping = Helper.GetRawPtr(Helper.AddValue());
-		CastField<FObjectPropertyBase>(Mapping->Struct->FindPropertyByName(TEXT("Action")))->SetObjectPropertyValue_InContainer(FirstMapping, Action);
+		void* First = Helper.GetRawPtr(Helper.AddValue());
+		CastField<FObjectPropertyBase>(Mapping->Struct->FindPropertyByName(TEXT("Action")))->SetObjectPropertyValue_InContainer(First, Action);
 		KeyProperty = Mapping->Struct->FindPropertyByName(TEXT("Key"));
-		KeyProperty->ImportText_Direct(TEXT("SpaceBar"), KeyProperty->ContainerPtrToValuePtr<void>(FirstMapping), nullptr, PPF_None);
+		KeyProperty->ImportText_Direct(TEXT("SpaceBar"), KeyProperty->ContainerPtrToValuePtr<void>(First), nullptr, PPF_None);
+		bHasMapping = true;
 	}
 
 	FString FirstKey() const
 	{
 		FString Text;
-		KeyProperty->ExportTextItem_Direct(Text, KeyProperty->ContainerPtrToValuePtr<void>(FirstMapping), nullptr, nullptr, PPF_None);
+		if (void* First = FirstMapping())
+			KeyProperty->ExportTextItem_Direct(Text, KeyProperty->ContainerPtrToValuePtr<void>(First), nullptr, nullptr, PPF_None);
 		return Text;
 	}
 
@@ -61,12 +72,12 @@ void FUnrealMcpRqlEnhancedInputSpec::Define()
 		UnrealMcpRqlSpecHelpers::DropObject(Context);
 		UnrealMcpRqlSpecHelpers::DropObject(Action);
 		Context = Action = nullptr;
-		FirstMapping = nullptr;
+		bHasMapping = false;
 	});
 
 	It("reads the mappings and sets a mapping key through DefaultKeyMappings, dry run first", [this]()
 	{
-		if (!Context || !FirstMapping)
+		if (!Context || !bHasMapping)
 		{
 			AddInfo(TEXT("Enhanced Input is not available: skipped."));
 			return;

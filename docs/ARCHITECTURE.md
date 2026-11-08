@@ -613,9 +613,11 @@ Godot's `GodotMainThread`:
 - **No waiting for a person:** a body runs as an unattended script (`GIsRunningUnattendedScript`), so the engine
   cancels a modal window opened during it (`FSlateApplication::AddModalWindow`) and message boxes take their default
   answer; seen live, a Water body spawn opened the landscape "Insert New Landscape Edit Layer" picker and held the game
-  thread, and every later call, for 15 minutes. Any other modal dialog (the user's, or one opened outside a tool body)
+  thread, and every later call, for 15 minutes. The engine logs such a cancel as an Error with a stack dump (and breaks
+  into an attached debugger); this applies to every dispatched call, including a tool run from the editor's Tools
+  window. Any other modal dialog (the user's, or one opened outside a tool body)
   still holds the game thread: `FUnrealMcpModalWatch` (editor) watches Slate's modal loop and, once a dialog has been
-  open 2 s while calls wait, logs `[Unreal-MCP] Editor blocked by modal dialog "<title>": …` (Error; the App's editor
+  open 2 s (a dialog over another counts from the first) and calls wait, logs `[Unreal-MCP] Editor blocked by modal dialog "<title>": …` (Error; the App's editor
   diagnosis reads it), ends the waiting calls with that reason (`FailWaitingCalls`) instead of letting them time out,
   and logs `[Unreal-MCP] Modal dialog "<title>" closed; tool calls run again.` when it closes. A timeout or such an
   early end says whether the body had started (outcome unknown) or never ran, and when the game thread has not

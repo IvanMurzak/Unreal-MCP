@@ -282,13 +282,14 @@ void FUnrealMcpDispatcherSpec::Define()
 				[&Runs](const FUnrealMcpToolCall&) { ++Runs; return FUnrealMcpToolResult::RetryLater(TEXT("waiting")); },
 				FTimespan::FromSeconds(30));
 			TestFalse(TEXT("still waiting"), Future.IsReady());
+			// Process-wide by design (a dialog holds every call); a live MCP session's waiting call would end too.
 			TestTrue(TEXT("ended one or more calls"), FUnrealMcpGameThreadDispatcher::FailWaitingCalls(TEXT("A dialog holds the editor.")) >= 1);
 			if (!TestTrue(TEXT("completed now"), Future.IsReady()))
 				return;
 			const FUnrealMcpToolResult Result = Future.Get();
 			TestFalse(TEXT("error"), Result.bSuccess);
 			TestTrue(TEXT("with the reason"), Result.Message.StartsWith(TEXT("A dialog holds the editor.")));
-			TestTrue(TEXT("says the outcome is unknown (it had started)"), Result.Message.Contains(TEXT("outcome is unknown")));
+			TestTrue(TEXT("says it never started (it waits between retries)"), Result.Message.Contains(TEXT("never started")));
 			TestTrue(TEXT("cancel flag set"), Call.IsCancelled());
 			TestEqual(TEXT("ran once"), Runs, 1);
 		});
