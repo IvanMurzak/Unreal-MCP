@@ -1,0 +1,19 @@
+tests/automation-inventory.json
+  s_ba2c66cfdc9e70::t_85f09983ecd813 3,35
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "14aba6a39c2f0aa1ab87c73bdc16c2ca5eead971",
+  "prompts": {},
+  "sessions": {
+    "s_ba2c66cfdc9e70": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "s_ba2c66cfdc9e70",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
