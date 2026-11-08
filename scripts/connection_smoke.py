@@ -41,7 +41,9 @@ Exit code 0 = all requested stages passed; non-zero = FAIL / timeout / setup err
 from __future__ import annotations
 
 import argparse
+import base64
 import json
+import ntpath
 import os
 import re
 import socket
@@ -466,45 +468,61 @@ def wait_port(port: int, timeout: float) -> bool:
 
 # --------------------------------------------------------------------------- process management
 
-def _normalised_path_text(text: str) -> str:
-    """A path, or a command line holding one, compared case-insensitively with any mix of / and \\."""
-    return re.sub(r"[\\/]+", "/", text).casefold()
+def _comparable_path(path: str) -> str:
+    """A Windows path in one spelling: same case, one kind of separator, a UNC prefix kept."""
+    return ntpath.normcase(ntpath.normpath(path))
 
 
 def opens_project(command_line: str, project: str) -> bool:
-    """Whether a command line names exactly this .uproject: the full path, as a whole argument.
+    """Whether one argument of a command line is exactly this .uproject (bare or as -project=<path>).
 
     Never compare the stem: every checkout, agent worktree and agent-lab project on a machine shares
     the name UnrealTestProject, so a stem match reaches other agents' and the owner's editors. A path
     in another spelling (relative, via a junction) does not match, which leaves an editor alive
     rather than stopping one that is not ours.
     """
-    needle = re.escape(_normalised_path_text(project))
-    return re.search(rf"""(?:^|[\s"'=]){needle}(?:$|[\s"'])""", _normalised_path_text(command_line)) is not None
+    wanted = _comparable_path(project)
+    arguments = re.findall(r'(?:[^\s"]|"[^"]*"?)+', command_line)
+    return any(_comparable_path(re.sub(r"(?i)^-project=", "", argument.replace('"', ""))) == wanted
+               for argument in arguments)
+
+
+def parse_editor_processes(stdout: str) -> list[tuple[int, str]]:
+    """(pid, command line) from lines of `<pid>|<base64 of the UTF-8 command line>`."""
+    return [(int(pid), base64.b64decode(encoded).decode("utf-8", errors="replace"))
+            for pid, encoded in re.findall(r"^([0-9]+)\|([A-Za-z0-9+/=]*)\s*$", stdout, re.MULTILINE)]
 
 
 def list_editor_processes() -> list[tuple[int, str]]:
-    """(pid, command line) of every running editor; empty off Windows or when the query fails."""
+    """(pid, command line) of every running editor; empty off Windows or when the query fails.
+
+    Base64 keeps any path intact without touching the code page of the console the caller shares.
+    """
     if os.name != "nt":
         return []
-    ps = ("[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false; "
-          "Get-CimInstance Win32_Process -Filter \"Name='UnrealEditor.exe' OR Name='UnrealEditor-Cmd.exe'\" "
-          "| ForEach-Object { \"$($_.ProcessId)|$($_.CommandLine)\" }")
-    out = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
-                         capture_output=True, text=True, encoding="utf-8", errors="replace")
-    processes = []
-    for line in out.stdout.splitlines():
-        pid, _, command_line = line.partition("|")
-        if pid.strip().isdigit():
-            processes.append((int(pid), command_line))
-    return processes
+    ps = ("Get-CimInstance Win32_Process -Filter \"Name='UnrealEditor.exe' OR Name='UnrealEditor-Cmd.exe'\" "
+          "| ForEach-Object { \"$($_.ProcessId)|\" + "
+          "[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes([string]$_.CommandLine)) }")
+    try:
+        out = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
+                             capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.SubprocessError) as e:
+        log(f"could not list running editors, stopping none: {e}")
+        return []
+    if out.returncode != 0:
+        log(f"could not list running editors, stopping none: {out.stderr.strip()[:200]}")
+    return parse_editor_processes(out.stdout)
 
 
 def kill_existing_editors(project: Path) -> int:
     """Stop the editors left on this exact project (a second one would fight it for the project's files)."""
-    pids = [pid for pid, command_line in list_editor_processes() if opens_project(command_line, str(project))]
+    processes = list_editor_processes()
+    pids = [pid for pid, command_line in processes if opens_project(command_line, str(project))]
     for pid in pids:
         kill_tree(pid)
+    others = [pid for pid, _ in processes if pid not in pids]
+    if others:
+        log(f"leaving other editor(s) running: {others}")
     return len(pids)
 
 
