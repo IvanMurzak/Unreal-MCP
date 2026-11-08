@@ -81,6 +81,12 @@ export interface EnablePluginsResult {
  * trailing newline if the input had one. Throws on malformed JSON (the caller
  * converts it to a structured failure). Pure transform.
  */
+export function isPluginDisabledInUProject(uprojectText: string, pluginName: string): boolean {
+  const parsed = JSON.parse(uprojectText) as { Plugins?: Array<{ Name?: string; Enabled?: boolean }> };
+  const needle = pluginName.toLowerCase();
+  return (parsed.Plugins ?? []).some((plugin) => plugin.Name?.toLowerCase() === needle && plugin.Enabled === false);
+}
+
 export function enablePluginsInUProject(uprojectText: string, pluginNames: readonly string[]): EnablePluginsResult {
   const parsed = JSON.parse(uprojectText) as Record<string, unknown>;
 

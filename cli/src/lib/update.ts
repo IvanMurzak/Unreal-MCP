@@ -218,38 +218,43 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
 
 /**
  * Bring the extensions under `Plugins/` to their latest versions. Only known extensions copied into the project
- * qualify: other plugins are not ours, and a symlink is a dev checkout. Best effort: the plugin update already
- * succeeded, so an extension that fails is a warning.
+ * qualify: other plugins are not ours, and a symlink is a dev checkout. One the user disabled stays disabled.
+ * Best effort: the plugin update already succeeded, so a failure is a warning.
  */
 async function updateInstalledExtensions(projectDir: string, opts: UpdateOptions, warnings: string[]): Promise<string[]> {
-  const pluginsDir = path.join(projectDir, 'Plugins');
-  const candidates = fs.readdirSync(pluginsDir).filter((name) => {
-    const dir = path.join(pluginsDir, name);
-    return name !== 'UnrealMCP' && fs.statSync(dir).isDirectory() && !isSymlink(dir)
-      && fs.existsSync(path.join(dir, `${name}.uplugin`));
-  });
-  if (candidates.length === 0) return [];
-
-  const { index } = await loadExtensionsIndex({ fetchImpl: opts.fetchImpl, cachePath: opts.indexCachePath });
-  const known = [...(index?.extensions ?? []), ...EXTENSIONS_CATALOG];
-
-  const updated: string[] = [];
-  for (const pluginName of candidates) {
-    const extension = known.find((candidate) => candidate.pluginName.toLowerCase() === pluginName.toLowerCase());
-    if (!extension) continue;
-    const result = await installExtension({
-      projectDir,
-      extensionId: extension.extensionId,
-      fetchImpl: opts.fetchImpl,
-      indexCachePath: opts.indexCachePath,
-      onProgress: opts.onProgress,
+  try {
+    const pluginsDir = path.join(projectDir, 'Plugins');
+    const candidates = fs.readdirSync(pluginsDir).filter((name) => {
+      const dir = path.join(pluginsDir, name);
+      return name !== 'UnrealMCP' && !isSymlink(dir) && fs.existsSync(path.join(dir, `${name}.uplugin`));
     });
-    if (result.kind === 'failure') {
-      warnings.push(`Could not update extension ${pluginName}: ${result.error.message}`);
-      continue;
+    if (candidates.length === 0) return [];
+
+    const { index } = await loadExtensionsIndex({ fetchImpl: opts.fetchImpl, cachePath: opts.indexCachePath });
+    const known = [...(index?.extensions ?? []), ...EXTENSIONS_CATALOG];
+
+    const updated: string[] = [];
+    for (const pluginName of candidates) {
+      const extension = known.find((candidate) => candidate.pluginName.toLowerCase() === pluginName.toLowerCase());
+      if (!extension) continue;
+      const result = await installExtension({
+        projectDir,
+        extensionId: extension.extensionId,
+        fetchImpl: opts.fetchImpl,
+        indexCachePath: opts.indexCachePath,
+        keepDisabled: true,
+        onProgress: opts.onProgress,
+      });
+      if (result.kind === 'failure') {
+        warnings.push(`Could not update extension ${pluginName}: ${result.error.message}`);
+        continue;
+      }
+      warnings.push(...result.warnings);
+      if (result.outcome === 'updated') updated.push(pluginName);
     }
-    warnings.push(...result.warnings);
-    if (result.outcome === 'updated') updated.push(pluginName);
+    return updated;
+  } catch (err: unknown) {
+    warnings.push(`Could not update the installed extensions: ${asError(err).message}`);
+    return [];
   }
-  return updated;
 }

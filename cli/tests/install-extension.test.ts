@@ -860,3 +860,18 @@ describe('installExtension (minCoreVersion advisory)', () => {
     expect(r.warnings.join(' ')).not.toMatch(/requires core Unreal-MCP/);
   });
 });
+
+describe('installExtension keepDisabled', () => {
+  it('does not re-enable an extension the .uproject disables', async () => {
+    const project = makeProject();
+    const uprojectPath = path.join(project, 'MyGame.uproject');
+    const original = JSON.parse(fs.readFileSync(uprojectPath, 'utf-8'));
+    fs.writeFileSync(uprojectPath, JSON.stringify({ ...original, Plugins: [{ Name: 'FooNiagara', Enabled: false }] }), 'utf-8');
+
+    const r = await installExtension({ projectDir: project, extensionId: 'com.foo.niagara', source: makeExtensionSource('FooNiagara'), keepDisabled: true });
+
+    expect(r.kind).toBe('success');
+    const plugin = JSON.parse(fs.readFileSync(uprojectPath, 'utf-8')).Plugins.find((p: { Name: string }) => p.Name === 'FooNiagara');
+    expect(plugin.Enabled).toBe(false);
+  });
+});

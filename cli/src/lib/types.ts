@@ -840,6 +840,8 @@ export interface UbtBuildStep {
 export interface ExtensionBuildStep extends UbtBuildStep {}
 
 export interface InstallExtensionOptions {
+  /** Leave the `.uproject` alone when it disables this extension (an update must not undo the user's choice). */
+  keepDisabled?: boolean;
   /** Override the validated online-index cache location (also useful for isolated tests). */
   indexCachePath?: string;
   /** Target Unreal project root (holds the `.uproject` + `Plugins/`). */

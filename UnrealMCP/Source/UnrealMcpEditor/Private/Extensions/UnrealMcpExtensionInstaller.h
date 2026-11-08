@@ -80,7 +80,7 @@ struct FUnrealMcpExtensionRow
 	bool bHasError = false;
 	FString Error;
 	int32 ToolCount = 0;
-	/** Installed on disk at a version that differs from the catalog pin → an update is offered. */
+	/** Installed on disk (not as a link) at a version older than the catalog pin → an update is offered. */
 	bool bUpdateAvailable = false;
 };
 
@@ -89,6 +89,8 @@ struct FUnrealMcpInstalledOnDisk
 {
 	FString PluginName;
 	FString Version;
+	/** The plugin folder is a symlink or junction: a dev checkout, which an update must never replace. */
+	bool bIsLink = false;
 };
 
 /**

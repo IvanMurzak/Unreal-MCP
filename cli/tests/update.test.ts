@@ -345,3 +345,17 @@ describe('update brings the installed extensions along', () => {
     expect(r.warnings.length).toBeGreaterThan(0);
   });
 });
+
+describe('update and links or disabled extensions', () => {
+  it('a dangling link under Plugins does not fail the plugin update', async () => {
+    const project = tmp();
+    const pluginDir = path.join(project, 'Plugins', 'UnrealMCP');
+    fs.mkdirSync(pluginDir, { recursive: true });
+    fs.writeFileSync(path.join(pluginDir, 'UnrealMCP.uplugin'), JSON.stringify({ VersionName: '0.1.0' }), 'utf-8');
+    fs.symlinkSync(path.join(project, 'gone'), path.join(project, 'Plugins', 'UnrealAINiagara'));
+
+    const r = await update({ projectDir: project, pluginSourceDir: makeSource('0.2.0') });
+
+    expect(r.kind).toBe('success');
+  });
+});
