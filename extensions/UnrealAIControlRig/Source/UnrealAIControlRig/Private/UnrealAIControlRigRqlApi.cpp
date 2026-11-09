@@ -11,6 +11,7 @@
 
 #include "Animation/AnimBlueprint.h"
 #include "Animation/Skeleton.h"
+#include "AssetToolsModule.h"
 #include "Components/SceneComponent.h"
 #include "ControlRig.h"
 #include "ControlRigBlueprintFactory.h"
@@ -19,6 +20,7 @@
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
 #include "Misc/PackageName.h"
+#include "Modules/ModuleManager.h"
 #include "Rigs/RigHierarchy.h"
 #include "Rigs/RigHierarchyController.h"
 #include "Rigs/RigHierarchyDefines.h"
@@ -169,7 +171,13 @@ UControlRigBlueprint* UUnrealAIControlRigRqlApi::CreateRig(const FString& Path, 
 		if (!Skeleton)
 			return UnrealMcpRql::Failed<UControlRigBlueprint*>(FString::Printf(TEXT("'%s' is not a SkeletalMesh or Skeleton asset (a character's mesh such as /Game/Characters/Mannequins/Meshes/SKM_Manny_Simple)"), *Mesh));
 	}
-	UControlRigBlueprint* Rig = UControlRigBlueprintFactory::CreateNewControlRigAsset(Package);
+	// Not UControlRigBlueprintFactory::CreateNewControlRigAsset: it makes the name unique first, and that step reads the
+	// name's trailing digits as an int32, so CR_F9672969617062 lands at CR_F0002147483647 and the path asked for stays
+	// empty. The check above already refuses a taken path, so the rig can take exactly the name asked for.
+	UControlRigBlueprintFactory* Factory = NewObject<UControlRigBlueprintFactory>();
+	Factory->ParentClass = UControlRig::StaticClass();
+	UControlRigBlueprint* Rig = Cast<UControlRigBlueprint>(FModuleManager::LoadModuleChecked<FAssetToolsModule>(TEXT("AssetTools")).Get().CreateAsset(
+		FPackageName::GetShortName(Package), FPackageName::GetLongPackagePath(Package), nullptr, Factory));
 	if (!Rig)
 		return UnrealMcpRql::Failed<UControlRigBlueprint*>(FString::Printf(TEXT("could not create a Control Rig at %s"), *Package));
 	if (Skeleton)

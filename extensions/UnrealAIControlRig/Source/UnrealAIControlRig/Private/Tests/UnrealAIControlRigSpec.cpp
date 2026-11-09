@@ -162,6 +162,27 @@ void FUnrealAIControlRigSpec::Define()
 				TestTrue(*FString::Printf(TEXT("lists %s"), Method), Schema.Contains(FString(Method) + TEXT("(")));
 		});
 
+		It("creates a rig at exactly the path asked for when its name ends in many digits", [this]()
+		{
+			// The engine's unique-name step reads trailing digits as an int32: ...F9672969617062 would become ...F0002147483647.
+			const FString Path = TEXT("/Game/RqlSpec/CR_RqlSpecDigits_") + FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(8) + TEXT("F9672969617062");
+			auto Run = [](const FString& Plan) { return UnrealMcpRqlTools::RunPlan(Plan, true); };
+
+			// controlRig | call CreateRig("@RIG@")
+			TestTrue(TEXT("rig created"), Run(SpecCall(TEXT("controlRig"), TEXT("CreateRig"), { SpecLit(Path) })));
+			if (TestNotNull(TEXT("the rig is at the path asked for"), SpecAsset<UControlRigBlueprint>(Path)))
+			{
+				// editor | call DeleteAsset("@RIG@", true)
+				TestTrue(TEXT("rig deleted"), Run(SpecCall(TEXT("editor"), TEXT("DeleteAsset"), { SpecLit(Path), TEXT(R"({"lit":true})") })));
+				// The deleted rig's path is free again: the same call creates it there.
+				TSharedPtr<FJsonObject> Again;
+				const bool bAgain = UnrealMcpRqlTools::RunPlan(SpecCall(TEXT("controlRig"), TEXT("CreateRig"), { SpecLit(Path) }), true, &Again);
+				TestTrue(*FString::Printf(TEXT("rig created again (%s)"), *SpecJson(Again).Left(400)), bAgain);
+				if (TestNotNull(TEXT("the new rig is at the same path"), SpecAsset<UControlRigBlueprint>(Path)))
+					TestTrue(TEXT("new rig deleted"), Run(SpecCall(TEXT("editor"), TEXT("DeleteAsset"), { SpecLit(Path), TEXT(R"({"lit":true})") })));
+			}
+		});
+
 		It("builds a two-bone arm with an IK target control; refuses unknown elements and a taken path", [this]()
 		{
 			const FString Name = TEXT("CR_RqlSpecArm_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);

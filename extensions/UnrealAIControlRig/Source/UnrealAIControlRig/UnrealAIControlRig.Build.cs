@@ -30,8 +30,10 @@ public class UnrealAIControlRig : ModuleRules
 			// (UncookedOnly) has UControlRigBlueprint, the controlRigs source and the owner of the rig hierarchy.
 			"ControlRig",
 			"ControlRigDeveloper",
-			// The controlRig operations: UControlRigBlueprintFactory (ControlRigEditor) creates rig assets; RigVM /
-			// RigVMDeveloper have the rig graph model and its controller (Basic IK nodes, pin defaults, links).
+			// The controlRig operations: UControlRigBlueprintFactory (ControlRigEditor) creates rig assets through
+			// IAssetTools (AssetTools); RigVM / RigVMDeveloper have the rig graph model and its controller (Basic IK
+			// nodes, pin defaults, links).
+			"AssetTools",
 			"ControlRigEditor",
 			"RigVM",
 			"RigVMDeveloper",
