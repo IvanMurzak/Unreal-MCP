@@ -1,0 +1,46 @@
+scripts/test_run_extension_e2e.py
+  s_b4e88c47e182f2::t_31f2e8bbe6269b 35-79,85
+  s_b4e88c47e182f2::t_6f4d8ad85ad0e3 97-101
+extensions/UnrealAINiagara/README.md
+  s_b4e88c47e182f2::t_32d0f61bad8001 11
+extensions/UnrealAINiagara/Source/UnrealAINiagara/Private/Tests/UnrealAINiagaraSpec.cpp
+  s_b4e88c47e182f2::t_7a357d2c1de004 12,255-257,295-296
+extensions/UnrealAINiagara/Source/UnrealAINiagara/Private/UnrealAINiagaraRqlApi.cpp
+  s_b4e88c47e182f2::t_b29d9a1c5d1b4d 18,25,239-254,260-261,265-268,270-273,287-288,292-293,295-301,372,400-405,407,457-460,462,465-466,557,609,620,627-629,632,643-649,657-658,675-676,704,719-721
+extensions/UnrealAINiagara/Source/UnrealAINiagara/Private/UnrealAINiagaraRqlApi.h
+  s_b4e88c47e182f2::t_d2c9d62cc5faef 73
+extensions/UnrealAINiagara/Source/UnrealAINiagara/Private/UnrealAINiagaraStack.cpp
+  s_b4e88c47e182f2::t_4bc6cb4eff32fd 11,95,99-105,171-172,176-185,187,190-191,193-207,284-287,292,294-296,298,300-309,311-314,321,443,461-463,465,495-496,500,502-509,664-665,667,674-675,677,809,933,936,940-941,945-946,948-954,956-957,959-960,962,965,968-972,975-981,983,985-991,993-1000,1002-1003,1005,1007,1011,1013,1015-1020,1024-1027,1029,1031,1033-1097
+extensions/UnrealAINiagara/Tests/e2e/tools/niagara-authoring-2-smoke.e2e.json
+  s_b4e88c47e182f2::t_9aeba18b2d4e45 8
+extensions/UnrealAINiagara/Tests/e2e/tools/niagara-authoring-3-inputs.e2e.json
+  s_b4e88c47e182f2::t_8056c63451bd7e 8
+extensions/UnrealAINiagara/Tests/e2e/tools/niagara-authoring-4-collision.e2e.json
+  s_b4e88c47e182f2::t_2e929e7e96737f 8
+extensions/UnrealAINiagara/Tests/e2e/tools/niagara-authoring-9-cleanup-actor.e2e.json
+  s_b4e88c47e182f2::t_fab8afcbc6d572 1-10
+extensions/UnrealAINiagara/Tests/e2e/tools/niagara-authoring-9-cleanup-asset.e2e.json
+  s_b4e88c47e182f2::t_4d292485238196 1-10
+extensions/UnrealAINiagara/Tests/e2e/tools/niagara-operations-schema.e2e.json
+  s_b4e88c47e182f2::t_b151b357e0a64e 2,8
+extensions/UnrealAINiagara/UnrealAINiagara.uplugin
+  s_b4e88c47e182f2::t_2b35181d50a139 32-35
+extensions/UnrealAINiagara/extension.json
+  s_b4e88c47e182f2::t_f7dd96fd647fcd 10-11
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "2967f68ad5a53c0f4005f6364dc4fdaffaff60a9",
+  "prompts": {},
+  "sessions": {
+    "s_b4e88c47e182f2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ef0d1b43-913a-487a-95df-8feba021ec1f",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

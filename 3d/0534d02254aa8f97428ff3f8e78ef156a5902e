@@ -1,0 +1,37 @@
+UnrealMCP/Source/UnrealMcpEditor/Private/Tools/UnrealMcpToolRegistry.cpp
+  s_908974782fafa1::t_35aeb3b364e20b 473-478
+  s_908974782fafa1::t_a5ed1ef38d0668 515-521
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/SUnrealMcpToolsWindow.h
+  s_908974782fafa1::t_1ccac9de5013c4 30-33
+  s_908974782fafa1::t_010a0121c0f633 19-22
+UnrealMCP/Source/UnrealMcpEditor/Public/UnrealMcpToolRegistry.h
+  s_908974782fafa1::t_fb1b7dd953b8df 229-235
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/UnrealMcpAuxWindows.cpp
+  s_908974782fafa1::t_bfd5e260ba0163 84-87
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/SUnrealMcpSettingsWindow.h
+  s_908974782fafa1::t_ef9ac1c04b64af 17-20
+UnrealMCP/Source/UnrealMcpEditor/Private/UnrealMcpRuntime.cpp
+  s_908974782fafa1::t_d02835c2fc3735 214-215
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/SUnrealMcpToolsWindow.cpp
+  s_908974782fafa1::t_c29d086abbdb7c 128-136
+  s_908974782fafa1::t_fc5f7b3968d57b 69-71
+  s_908974782fafa1::t_c073184c659ee6 82,93-94,98-99,101-102
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpToolsWindowSpec.cpp
+  s_908974782fafa1::t_7252aad68aef7e 303-356
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "3d0534d02254aa8f97428ff3f8e78ef156a5902e",
+  "prompts": {},
+  "sessions": {
+    "s_908974782fafa1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f1748397-e586-40bb-91a9-b89c0caebdf5",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

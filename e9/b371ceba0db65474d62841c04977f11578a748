@@ -1,0 +1,19 @@
+docs/RUNTIME-E2E.md
+  s_d9c1fa9c926c1d::t_a7561b35c1e4a3 100
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.2",
+  "base_commit_sha": "e9b371ceba0db65474d62841c04977f11578a748",
+  "prompts": {},
+  "sessions": {
+    "s_d9c1fa9c926c1d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "73fe291c-af46-4e23-86f7-f976e06e292d",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

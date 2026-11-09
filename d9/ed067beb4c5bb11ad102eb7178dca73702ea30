@@ -1,0 +1,21 @@
+cli/src/lib/exec.ts
+  s_5f9a753ce320b5::t_1936b7405f37ea 16-20,50,120,127-137,144-149
+cli/tests/exec.test.ts
+  s_5f9a753ce320b5::t_e22683ae68eb51 351-373
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d9ed067beb4c5bb11ad102eb7178dca73702ea30",
+  "prompts": {},
+  "sessions": {
+    "s_5f9a753ce320b5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7ee65e8c-aca3-452e-9397-46e1aceea5e9",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

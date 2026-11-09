@@ -1,0 +1,37 @@
+UnrealMCP/Source/UnrealMcpRql/Private/UnrealMcpAvailableExtensions.cpp
+  s_b4e88c47e182f2::t_9f13d1e0fb7504 37
+extensions/UnrealAILandscape/README.md
+  s_b4e88c47e182f2::t_c3b29aa74f4f5f 35-36,46-47,50-64
+extensions/UnrealAILandscape/Source/UnrealAILandscape/Private/Tests/UnrealAILandscapeSpec.cpp
+  s_b4e88c47e182f2::t_dac498942289b5 8,15,22,27,29-30,46-75,149,219,247-378,393
+extensions/UnrealAILandscape/Source/UnrealAILandscape/Private/UnrealAILandscapeModule.cpp
+  s_b4e88c47e182f2::t_a46aeebdf39cc6 14,81,108-143,216-232
+extensions/UnrealAILandscape/Source/UnrealAILandscape/Private/UnrealAILandscapeRqlApi.cpp
+  s_b4e88c47e182f2::t_607027d4eb9f92 14-15,24-26,29-30,33-55,127-194,217-218,220,222,313-315,333,344-345,424-492
+extensions/UnrealAILandscape/Source/UnrealAILandscape/Private/UnrealAILandscapeRqlApi.h
+  s_b4e88c47e182f2::t_df01261d961a64 16-42,55,59,70-77
+extensions/UnrealAILandscape/Tests/e2e/tools/landscape-operations-schema.e2e.json
+  s_b4e88c47e182f2::t_9aa3fc329341b6 1-10
+scripts/test_run_extension_e2e.py
+  s_b4e88c47e182f2::t_d960ff85ab8eb0 146
+tests/automation-inventory.json
+  s_b4e88c47e182f2::t_9c6764ca74cce3 5
+tests/chain-fixtures/5.8/tools.jsonl
+  s_b4e88c47e182f2::t_981c21dfc61adc 29
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "146375c58e57c0ca5100a6f4ee1fef8e4ebcdee3",
+  "prompts": {},
+  "sessions": {
+    "s_b4e88c47e182f2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ef0d1b43-913a-487a-95df-8feba021ec1f",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

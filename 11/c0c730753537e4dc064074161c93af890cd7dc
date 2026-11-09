@@ -1,0 +1,47 @@
+scripts/test_run_extension_e2e.py
+  s_b4e88c47e182f2::t_36b98dbda96fcd 387-389
+  s_b4e88c47e182f2::t_9e23110864760e 384-386
+  s_b4e88c47e182f2::t_1d59d59f527eef 362-367,373-380,382-383
+extensions/UnrealAILandscape/Source/UnrealAILandscape/Private/UnrealAILandscapeModule.cpp
+  s_b4e88c47e182f2::t_6639e2e78ce9fd 71
+extensions/UnrealAILandscape/Source/UnrealAILandscape/Private/UnrealAILandscapeRqlApi.cpp
+  s_b4e88c47e182f2::t_24f7557fbc7309 189-191,193
+extensions/UnrealAILandscape/Source/UnrealAILandscape/Private/UnrealAIWaterSafety.cpp
+  s_b4e88c47e182f2::t_975c5d07914c83 17,100-102,104-108,116,119-125
+extensions/UnrealAILandscape/Source/UnrealAILandscape/Private/UnrealAIWaterRqlApi.cpp
+  s_b4e88c47e182f2::t_23160596482b5d 21,69,163-165,190-191,207,228-229,231,242-245,249-250,253,261,277-279,282,284-305,307-308,326,333-334,337,356,358-359,362,373,383,389-390,399-400,454-455,457-458,476,478-481,483,493-498,566,576-579,598-599,615,617,623-624,638-639
+extensions/UnrealAILandscape/Source/UnrealAILandscape/Private/UnrealAIWaterRqlApi.h
+  s_b4e88c47e182f2::t_94542c653de993 22-24,49,53
+extensions/UnrealAILandscape/Tests/e2e/tools/water-1-island-landscape.e2e.json
+  s_b4e88c47e182f2::t_e3b731d7768b8c 2,5
+extensions/UnrealAILandscape/Tests/e2e/tools/water-2-island-sea-floor.e2e.json
+  s_b4e88c47e182f2::t_7d5989fefa985c 5,8
+extensions/UnrealAILandscape/Tests/e2e/tools/water-3-island-land.e2e.json
+  s_b4e88c47e182f2::t_aeea4b477b6fa9 5,8
+extensions/UnrealAILandscape/Tests/e2e/tools/water-4-island-mountain.e2e.json
+  s_b4e88c47e182f2::t_ad01e631a5d8a2 5,8
+extensions/UnrealAILandscape/Tests/e2e/tools/water-5-zone.e2e.json
+  s_b4e88c47e182f2::t_b4903d1f8f50d2 2-3,5,8
+extensions/UnrealAILandscape/Tests/e2e/tools/water-7-river.e2e.json
+  s_b4e88c47e182f2::t_ef466915dddbdc 5
+extensions/UnrealAILandscape/Tests/e2e/tools/water-8-status.e2e.json
+  s_b4e88c47e182f2::t_2082baef85288f 2,5,8
+extensions/UnrealAILandscape/Tests/e2e/tools/water-9-cleanup.e2e.json
+  s_b4e88c47e182f2::t_38379a8f17b6dd 1-10
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "11c0c730753537e4dc064074161c93af890cd7dc",
+  "prompts": {},
+  "sessions": {
+    "s_b4e88c47e182f2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ef0d1b43-913a-487a-95df-8feba021ec1f",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

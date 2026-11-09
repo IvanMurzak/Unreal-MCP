@@ -1,0 +1,31 @@
+UnrealMCP/Source/UnrealMcpRuntime/Private/Sidecar/UnrealMcpSidecarManager.h
+  s_cf39f5fb556145::t_63aee737f0eec0 16-21
+  s_cf39f5fb556145::t_ce57591fe411ba 78,82-83,87-101
+.gitignore
+  s_cf39f5fb556145::t_4181b8c15d99d1 25-38
+UnrealMCP/Source/UnrealMcpRuntime/UnrealMcpRuntime.Build.cs
+  s_cf39f5fb556145::t_a796aa47b1b24c 10-14,82
+  s_cf39f5fb556145::t_9f2839c198e1fb 77-81,83-96,118-122,131
+UnrealMCP/Source/UnrealMcpRuntime/Private/Sidecar/UnrealMcpSidecarManager.cpp
+  s_cf39f5fb556145::t_bb588943c5c145 127-130,132-133
+  s_cf39f5fb556145::t_791e0a327dadd8 153-157,162,164-170
+  s_cf39f5fb556145::t_6a9ef82b578a82 77-81,87-117
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpSidecarManagerSpec.cpp
+  s_cf39f5fb556145::t_971f2e91bff5b7 111-151
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.8",
+  "base_commit_sha": "2199e9a16289be736dd1b3d76f7783ec3e9aaa46",
+  "prompts": {},
+  "sessions": {
+    "s_cf39f5fb556145": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cae79e43-d299-489d-8250-d2c7017cba2e",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

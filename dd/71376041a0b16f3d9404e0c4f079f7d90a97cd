@@ -1,0 +1,70 @@
+extensions/UnrealAINiagara/Source/UnrealAINiagara/Private/UnrealAINiagaraStack.h
+  s_b4e88c47e182f2::t_2d8371846feaaa 1-102
+  s_b4e88c47e182f2::t_4676f41a4a89cd 103-127
+extensions/UnrealAINiagara/Source/UnrealAINiagara/Private/UnrealAINiagaraTemplates.h
+  s_b4e88c47e182f2::t_f5588752d82611 1-63
+extensions/UnrealAINiagara/Source/UnrealAINiagara/Private/UnrealAINiagaraTemplates.cpp
+  s_b4e88c47e182f2::t_42e3e469679681 1-8,11-40,44-70,86-102,108-119,122-127,133-144
+  s_b4e88c47e182f2::t_1cece84422d795 72-81
+  s_b4e88c47e182f2::t_05334b9978a5cc 9-10,41-43,71,82-85,103-107,120-121,128-132,145-146
+extensions/UnrealAINiagara/Source/UnrealAINiagara/Private/UnrealAINiagaraModule.cpp
+  s_b4e88c47e182f2::t_a8a4031e7f2d38 10-11,13,15,17-126,129-133,146,149-155,157-172,175-176,178-181,184-203,206-224,226
+  s_b4e88c47e182f2::t_5c0aca6078d959 225,227-236
+extensions/UnrealAINiagara/Source/UnrealAINiagara/Private/UnrealAINiagaraRqlApi.h
+  s_b4e88c47e182f2::t_e59ce5aeb6cb80 12-13,16-34,36-41,49-104,109-120
+extensions/UnrealAINiagara/Source/UnrealAINiagara/Private/UnrealAINiagaraStack.cpp
+  s_b4e88c47e182f2::t_2d2e6dabe56517 1-818,820
+  s_b4e88c47e182f2::t_4c4932a1a14b0d 819,821-1035
+extensions/UnrealAINiagara/Source/UnrealAINiagara/Private/UnrealAINiagaraRqlApi.cpp
+  s_b4e88c47e182f2::t_f22665c1cbeb2c 7-8,10-11,13-18,20,22-29,31-723,725-727,730,733,742
+  s_b4e88c47e182f2::t_21117a99fdc49f 724,728-729,731-732,734-741,743-760,774-775,779-818
+extensions/UnrealAINiagara/Source/UnrealAINiagara/Private/Tests/UnrealAINiagaraSpec.cpp
+  s_b4e88c47e182f2::t_100790dafc89c6 9-12,16-25,32-33,38-74,81-82,95,98-99,101-102,106,108,117-152,157-169,173,175-286,288,290
+  s_b4e88c47e182f2::t_7bdf0382c362c4 287,289,291-292
+extensions/UnrealAINiagara/README.md
+  s_b4e88c47e182f2::t_ea4020f5d66f9a 3,30,34-36,39-48,51-55
+extensions/UnrealAINiagara/Source/UnrealAINiagara/UnrealAINiagara.Build.cs
+  s_b4e88c47e182f2::t_ca14a4150164b6 21,28-30,32-41
+extensions/UnrealAINiagara/Tests/e2e/tools/niagara-authoring-1-create.e2e.json
+  s_b4e88c47e182f2::t_90dfd121bc1d8a 1-10
+extensions/UnrealAINiagara/Tests/e2e/tools/niagara-authoring-2-smoke.e2e.json
+  s_b4e88c47e182f2::t_86b20aed7b1db1 1-10
+extensions/UnrealAINiagara/Tests/e2e/tools/niagara-authoring-3-inputs.e2e.json
+  s_b4e88c47e182f2::t_1bbaa2362de567 1-10
+extensions/UnrealAINiagara/Tests/e2e/tools/niagara-authoring-4-collision.e2e.json
+  s_b4e88c47e182f2::t_850449cc9ff1ec 1-10
+extensions/UnrealAINiagara/Tests/e2e/tools/niagara-authoring-5-compile.e2e.json
+  s_b4e88c47e182f2::t_edfc726b0988ad 1-10
+extensions/UnrealAINiagara/Tests/e2e/tools/niagara-authoring-6-place.e2e.json
+  s_b4e88c47e182f2::t_b8adc6e190c2b5 1-10
+extensions/UnrealAINiagara/Tests/e2e/tools/niagara-authoring-7-inputs-query.e2e.json
+  s_b4e88c47e182f2::t_f6c15d5599e101 1-10
+extensions/UnrealAINiagara/Tests/e2e/tools/niagara-authoring-8-unknown-emitter.e2e.json
+  s_b4e88c47e182f2::t_6c41f6b2b89ccc 1-11
+extensions/UnrealAINiagara/Tests/e2e/tools/niagara-operations-schema.e2e.json
+  s_b4e88c47e182f2::t_11e14a97f957dd 2,8
+extensions/UnrealAINiagara/Tests/e2e/tools/niagara-templates-query.e2e.json
+  s_b4e88c47e182f2::t_941ba38e89cfa3 1-10
+extensions/UnrealAINiagara/UnrealAINiagara.uplugin
+  s_b4e88c47e182f2::t_1bc9de31cbe491 6
+extensions/UnrealAINiagara/extension.json
+  s_b4e88c47e182f2::t_17cf033d64fdca 4
+tests/automation-inventory.json
+  s_b4e88c47e182f2::t_235dd2a6dbde99 6
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "dd71376041a0b16f3d9404e0c4f079f7d90a97cd",
+  "prompts": {},
+  "sessions": {
+    "s_b4e88c47e182f2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ef0d1b43-913a-487a-95df-8feba021ec1f",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

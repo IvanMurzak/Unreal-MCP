@@ -1,0 +1,43 @@
+extensions/UnrealAIPCG/Source/UnrealAIPCG/Private/Tests/UnrealAIPCGSpec.cpp
+  s_b4e88c47e182f2::t_379a7206d41648 335,363,398,432,464,523,529
+extensions/UnrealAIPCG/Source/UnrealAIPCG/Private/UnrealAIPCGCatalog.cpp
+  s_b4e88c47e182f2::t_aa9d42120ee4c5 41-43
+extensions/UnrealAIPCG/Source/UnrealAIPCG/Private/UnrealAIPCGGraphEdit.cpp
+  s_b4e88c47e182f2::t_0f153bd0ceb96e 9,206,211,247,343-344,346-353,438,462-464,483-486,497-522,536,591-596,598-603,807-808,919,926,1057-1059,1069,1074
+extensions/UnrealAIPCG/Source/UnrealAIPCG/Private/UnrealAIPCGModule.cpp
+  s_b4e88c47e182f2::t_35de3a377e2edf 179
+extensions/UnrealAIPCG/Source/UnrealAIPCG/Private/UnrealAIPCGRqlApi.cpp
+  s_b4e88c47e182f2::t_14a11b5af87142 103-124,271-272,289,291-294,404,414-415,419,468,480-483,490-491,517,519-520,537-538,540,559-563,565-568,582,585-586,588,592,594-595,609-611,645
+extensions/UnrealAIPCG/Source/UnrealAIPCG/Private/UnrealAIPCGRqlApi.h
+  s_b4e88c47e182f2::t_451a5eaded5303 88
+extensions/UnrealAIPCG/Tests/e2e/tools/pcg-forest-01-road.e2e.json
+  s_b4e88c47e182f2::t_cc9ebc4ede6854 2,8
+extensions/UnrealAIPCG/Tests/e2e/tools/pcg-forest-03-road-tag.e2e.json
+  s_b4e88c47e182f2::t_087558c229060f 8
+extensions/UnrealAIPCG/Tests/e2e/tools/pcg-forest-10-volume.e2e.json
+  s_b4e88c47e182f2::t_7daa1e63ee3378 2,8
+extensions/UnrealAIPCG/Tests/e2e/tools/pcg-forest-14-graph-query.e2e.json
+  s_b4e88c47e182f2::t_21d222c37a9288 8
+extensions/UnrealAIPCG/Tests/e2e/tools/pcg-forest-16-cleanup-generated.e2e.json
+  s_b4e88c47e182f2::t_be1576a8210f58 8
+extensions/UnrealAIPCG/Tests/e2e/tools/pcg-forest-17-cleanup-actors.e2e.json
+  s_b4e88c47e182f2::t_214f55c1015cf4 2,5,8
+scripts/test_run_extension_e2e.py
+  s_b4e88c47e182f2::t_98a0ebac9bca8d 91-93,95,97,99,104,108,111,114,116,118,121,124,127,130,133-136
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "67cf6ca7620cc72c8ec513a6a97de920eebe1cfd",
+  "prompts": {},
+  "sessions": {
+    "s_b4e88c47e182f2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ef0d1b43-913a-487a-95df-8feba021ec1f",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

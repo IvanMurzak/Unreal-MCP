@@ -1,0 +1,19 @@
+tests/chain-fixtures/battery.json
+  s_de71e20c9d8602::t_b62741cbf87145 16-17
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9a4a9b6aa8affbdc2ec24857d8fe91fceccef5eb",
+  "prompts": {},
+  "sessions": {
+    "s_de71e20c9d8602": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b1fa7ae0-224c-4b0e-8499-22456e0d6a3f",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

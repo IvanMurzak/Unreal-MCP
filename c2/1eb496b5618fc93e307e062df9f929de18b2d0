@@ -1,0 +1,89 @@
+README.md
+  s_b4e88c47e182f2::t_e62598bb5cd2be 324
+UnrealMCP/Source/UnrealMcpRql/Private/UnrealMcpAvailableExtensions.cpp
+  s_b4e88c47e182f2::t_2351852453e858 31-32
+extensions/UnrealAIPCG/README.md
+  s_b4e88c47e182f2::t_355f31b6c897ae 3,11,30,34-36,39-49,52-57
+extensions/UnrealAIPCG/Source/UnrealAIPCG/Private/Tests/UnrealAIPCGSpec.cpp
+  s_b4e88c47e182f2::t_d3b4ffd6b54a3f 17-18,20-21,23-28,35-37,42-139,269-530
+extensions/UnrealAIPCG/Source/UnrealAIPCG/Private/UnrealAIPCGCatalog.cpp
+  s_b4e88c47e182f2::t_616fc443edfd5f 1-220
+extensions/UnrealAIPCG/Source/UnrealAIPCG/Private/UnrealAIPCGCatalog.h
+  s_b4e88c47e182f2::t_1da0b5deaf9627 1-98
+extensions/UnrealAIPCG/Source/UnrealAIPCG/Private/UnrealAIPCGGraphEdit.cpp
+  s_b4e88c47e182f2::t_df9922f55ef04f 1-1147
+extensions/UnrealAIPCG/Source/UnrealAIPCG/Private/UnrealAIPCGGraphEdit.h
+  s_b4e88c47e182f2::t_a856b40e47fa5a 1-103
+extensions/UnrealAIPCG/Source/UnrealAIPCG/Private/UnrealAIPCGModule.cpp
+  s_b4e88c47e182f2::t_a2d39fb8666ca5 9-10,16,19-23,37-44,46-80,83-84,86-99,112-145,148-168,171-186
+extensions/UnrealAIPCG/Source/UnrealAIPCG/Private/UnrealAIPCGRqlApi.cpp
+  s_b4e88c47e182f2::t_4f39ccef92b624 7-8,10-14,16-21,23,25-497,506,510,512-513,516-647
+extensions/UnrealAIPCG/Source/UnrealAIPCG/Private/UnrealAIPCGRqlApi.h
+  s_b4e88c47e182f2::t_13dc6f926a6ab6 15-61,63-68,76-111,116-128,130
+extensions/UnrealAIPCG/Source/UnrealAIPCG/UnrealAIPCG.Build.cs
+  s_b4e88c47e182f2::t_41cfe954a306ad 21,29,31-35
+extensions/UnrealAIPCG/Tests/e2e/tools/pcg-forest-01-road.e2e.json
+  s_b4e88c47e182f2::t_b2020b9132ef02 1-10
+extensions/UnrealAIPCG/Tests/e2e/tools/pcg-forest-02-road-spline.e2e.json
+  s_b4e88c47e182f2::t_909f66b9581991 1-10
+extensions/UnrealAIPCG/Tests/e2e/tools/pcg-forest-03-road-tag.e2e.json
+  s_b4e88c47e182f2::t_07a546df60f552 1-10
+extensions/UnrealAIPCG/Tests/e2e/tools/pcg-forest-04-graph.e2e.json
+  s_b4e88c47e182f2::t_1f9ad28c9af05a 1-10
+extensions/UnrealAIPCG/Tests/e2e/tools/pcg-forest-05-nodes.e2e.json
+  s_b4e88c47e182f2::t_7a84478c717e51 1-10
+extensions/UnrealAIPCG/Tests/e2e/tools/pcg-forest-06-connect.e2e.json
+  s_b4e88c47e182f2::t_ac760b0167ba9b 1-10
+extensions/UnrealAIPCG/Tests/e2e/tools/pcg-forest-07-settings.e2e.json
+  s_b4e88c47e182f2::t_ff5d22c575900e 1-10
+extensions/UnrealAIPCG/Tests/e2e/tools/pcg-forest-08-parameter.e2e.json
+  s_b4e88c47e182f2::t_cc9256e6248ca0 1-10
+extensions/UnrealAIPCG/Tests/e2e/tools/pcg-forest-09-bind.e2e.json
+  s_b4e88c47e182f2::t_508797e4a92516 1-10
+extensions/UnrealAIPCG/Tests/e2e/tools/pcg-forest-10-volume.e2e.json
+  s_b4e88c47e182f2::t_2da34458248923 1-10
+extensions/UnrealAIPCG/Tests/e2e/tools/pcg-forest-11-generate.e2e.json
+  s_b4e88c47e182f2::t_edd3eb92d6be26 1-10
+extensions/UnrealAIPCG/Tests/e2e/tools/pcg-forest-12-variant.e2e.json
+  s_b4e88c47e182f2::t_8823dd514be85d 1-10
+extensions/UnrealAIPCG/Tests/e2e/tools/pcg-forest-13-counts.e2e.json
+  s_b4e88c47e182f2::t_c5ee05325734b9 1-10
+extensions/UnrealAIPCG/Tests/e2e/tools/pcg-forest-14-graph-query.e2e.json
+  s_b4e88c47e182f2::t_0f642396e0f1b6 1-10
+extensions/UnrealAIPCG/Tests/e2e/tools/pcg-forest-15-unknown-setting.e2e.json
+  s_b4e88c47e182f2::t_a09e56f1cf2c08 1-11
+extensions/UnrealAIPCG/Tests/e2e/tools/pcg-forest-16-cleanup-generated.e2e.json
+  s_b4e88c47e182f2::t_2ab3f1a3b84c79 1-10
+extensions/UnrealAIPCG/Tests/e2e/tools/pcg-forest-17-cleanup-actors.e2e.json
+  s_b4e88c47e182f2::t_0ce8df48c50130 1-10
+extensions/UnrealAIPCG/Tests/e2e/tools/pcg-forest-18-cleanup-asset.e2e.json
+  s_b4e88c47e182f2::t_c64f27f47f22ae 1-10
+extensions/UnrealAIPCG/Tests/e2e/tools/pcg-operations-schema.e2e.json
+  s_b4e88c47e182f2::t_3d0d6e4d542d2f 2,8
+extensions/UnrealAIPCG/UnrealAIPCG.uplugin
+  s_b4e88c47e182f2::t_1095a5b094d3a4 6
+extensions/UnrealAIPCG/extension.json
+  s_b4e88c47e182f2::t_c4eb926ef83644 4
+scripts/test_run_extension_e2e.py
+  s_b4e88c47e182f2::t_d71b14b98d112c 50-64,91-137,227,239-240
+tests/automation-inventory.json
+  s_b4e88c47e182f2::t_0ccb60a6734e7a 7
+tests/chain-fixtures/5.8/tools.jsonl
+  s_b4e88c47e182f2::t_a696cc7274449b 29
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c21eb496b5618fc93e307e062df9f929de18b2d0",
+  "prompts": {},
+  "sessions": {
+    "s_b4e88c47e182f2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ef0d1b43-913a-487a-95df-8feba021ec1f",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

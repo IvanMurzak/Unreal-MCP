@@ -1,0 +1,40 @@
+UnrealMCP/Source/UnrealMcpEditor/Public/UnrealMcpCoreTools.h
+  s_b4e88c47e182f2::t_7a92c085cced37 67-69
+  s_b4e88c47e182f2::t_42f6319481e29e 96-105
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpBackgroundRenderingSpec.cpp
+  s_b4e88c47e182f2::t_df115f2ec55c4f 1-195
+README.md
+  s_b4e88c47e182f2::t_0568bb22e03e23 287
+docs/ARCHITECTURE.md
+  s_b4e88c47e182f2::t_5b4894f1150a08 1288-1320
+UnrealMCP/Source/UnrealMcpEditor/Private/Session/UnrealMcpBackgroundRendering.h
+  s_b4e88c47e182f2::t_286e10985375c6 1-91
+UnrealMCP/Source/UnrealMcpEditor/Private/UnrealMcpEditorCoordinator.h
+  s_b4e88c47e182f2::t_eb020d2c4d2e9f 24,101-103
+UnrealMCP/Source/UnrealMcpEditor/Private/Tools/UnrealMcpScreenshotTools.cpp
+  s_b4e88c47e182f2::t_8c3668e2920e57 17,19-20,48-53,79-80,83,85-86,91-101,121-194,290-296,310,380-382,423,458-462
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpScreenshotToolsSpec.cpp
+  s_b4e88c47e182f2::t_9910c7330db4f1 228-250
+UnrealMCP/Source/UnrealMcpEditor/Private/Session/UnrealMcpBackgroundRendering.cpp
+  s_b4e88c47e182f2::t_5e50fcc58e8bec 1-131
+UnrealMCP/Source/UnrealMcpEditor/Private/UnrealMcpEditorCoordinator.cpp
+  s_b4e88c47e182f2::t_eb020d2c4d2e9f 36,593-608,820-826
+UnrealMCP/Source/UnrealMcpEditor/UnrealMcpEditor.Build.cs
+  s_b4e88c47e182f2::t_3a4dd13feb9b8d 58-60
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "6ac3aeec1f54f2a001bda97152eb2fecd67bc889",
+  "prompts": {},
+  "sessions": {
+    "s_b4e88c47e182f2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ef0d1b43-913a-487a-95df-8feba021ec1f",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

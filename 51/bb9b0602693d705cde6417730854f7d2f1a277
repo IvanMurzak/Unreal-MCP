@@ -1,0 +1,38 @@
+extensions/UnrealAILandscape/Source/UnrealAILandscape/Private/UnrealAIWaterSafety.h
+  s_b4e88c47e182f2::t_6296875f9acc51 8,13-24,34-35,38-39,41-43,48-49,60-61
+extensions/UnrealAILandscape/Source/UnrealAILandscape/Private/UnrealAIWaterRqlApi.cpp
+  s_b4e88c47e182f2::t_1cd8567108517f 601-603,605-606
+  s_b4e88c47e182f2::t_7dc8db6d8813b4 12,39-41,43,65-66,87,91,101-104,111-116,118,139-143,150,152-154,168-185,187-230,246,250-251,268,286,294-295,302,350-351,396,398,400-414,418-421,433-434,438,443-444,448,451,496,504,508,510,512-513,516,521,525,536,542,546,553-554,564,572,592,599,604
+extensions/UnrealAILandscape/Source/UnrealAILandscape/Private/UnrealAIWaterSafety.cpp
+  s_b4e88c47e182f2::t_f22c7b5b48e4e2 60-68
+  s_b4e88c47e182f2::t_c77f39923621fa 106
+  s_b4e88c47e182f2::t_0c6bf74af0e731 6-9,13,16,22-25,27-28,30,32-33,35-39,43,45-47,49,51,53-57,69,71-72,82,84-105,107,109-113,115-116,122-128,134-140,143-144,147-157,163-164
+extensions/UnrealAILandscape/README.md
+  s_b4e88c47e182f2::t_27930c64cb732c 79-80,85-89
+extensions/UnrealAILandscape/Source/UnrealAILandscape/Private/Tests/UnrealAILandscapeSpec.cpp
+  s_b4e88c47e182f2::t_9f331621dee5a1 33,110-132,456,470,473,522,544,547,556,595,598,603,605,619-647
+extensions/UnrealAILandscape/Source/UnrealAILandscape/Private/UnrealAILandscapeModule.cpp
+  s_b4e88c47e182f2::t_f6cf776d85b7f4 48,55,58,60,71,297-301,317-318
+extensions/UnrealAILandscape/Source/UnrealAILandscape/Private/UnrealAIWaterRqlApi.h
+  s_b4e88c47e182f2::t_9209f70cadc05f 56
+scripts/test_run_extension_e2e.py
+  s_b4e88c47e182f2::t_f9d1cc0302d850 368-372,374,377-378
+tests/automation-inventory.json
+  s_b4e88c47e182f2::t_76b11868f2fd3f 5
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "51bb9b0602693d705cde6417730854f7d2f1a277",
+  "prompts": {},
+  "sessions": {
+    "s_b4e88c47e182f2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ef0d1b43-913a-487a-95df-8feba021ec1f",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
