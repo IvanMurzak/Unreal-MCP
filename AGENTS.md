@@ -75,7 +75,11 @@ Built-in editor tools come in 7 families (Python: `python-execute`, PythonScript
 `UnrealMCP/Content/Python/Lib/site-packages/code_exec` — copy it from IvanMurzak/Code-Exec, never edit it here); the README holds the canonical, source-generated inventory. The editor
 data layer is RQL ([`docs/rql.md`](docs/rql.md)): `rql-query` / `rql-mutate` / `rql-schema` (module `UnrealMcpRql`;
 the sidecar parses the query text, the vendored C++ runtime executes the plan) — add editor data access as RQL members,
-sources or operations (or an extension's `IUnrealMcpRqlModule`), not as new per-operation tools.
+sources or operations (or an extension's `IUnrealMcpRqlModule`), not as new per-operation tools. The exception is an
+AUTHORING loop whose edits need the editor's own validation and whose read step exists to feed the next edit
+(the Blueprint graph tools: `blueprint-graph` reads nodes/pins/links, `blueprint-add-node` /
+`blueprint-connect-pins` / `blueprint-disconnect-pins` edit through `UEdGraphSchema_K2`) — one such family per
+domain, not one tool per graph operation.
 Tool ids are kebab-case, validated `^[a-z0-9]+(-[a-z0-9]+)*$`. Each tool is `Standard` (`tools/list` +
 `/api/tools/<name>`) or `System` (`/api/system-tools/<name>` only, never shown to the AI — §2.4), declared
 with `FUnrealMcpToolBuilder::ToolType(EUnrealMcpToolType::System)` and routed by the sidecar's

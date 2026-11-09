@@ -40,7 +40,7 @@ Unreal-MCP is the Unreal Engine counterpart of [Unity-MCP](https://github.com/Iv
 
 Unlike Unity and Godot (C# engines that host the .NET `McpPlugin` in-process), Unreal's editor is **C++** — so the .NET MCP host runs as an auto-managed **sidecar process** (`unreal-mcp-bridge`) that the plugin spawns and talks to over a localhost IPC channel. The full design lives in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) (see the §0 system-overview diagram).
 
-> **Status: beta.** The plugin, the .NET sidecar, the `unreal-mcp-cli`, the AI Game Developer editor UI, and **27 built-in tools across 7 families** (plus 3 system tools) — the editor data layer is one query language, [RQL](docs/rql.md) have shipped and are exercised by CI. The `unreal-mcp-cli` is **published on npm** — install the plugin with it (Option B below); the Fab / Epic Marketplace listing for the precompiled plugin is coming soon (Option A). Pixel-capture (screenshot) tools need a GPU-backed editor; everything else runs headless.
+> **Status: beta.** The plugin, the .NET sidecar, the `unreal-mcp-cli`, the AI Game Developer editor UI, and **31 built-in tools across 7 families** (plus 3 system tools) — the editor data layer is one query language, [RQL](docs/rql.md) have shipped and are exercised by CI. The `unreal-mcp-cli` is **published on npm** — install the plugin with it (Option B below); the Fab / Epic Marketplace listing for the precompiled plugin is coming soon (Option A). Pixel-capture (screenshot) tools need a GPU-backed editor; everything else runs headless.
 
 > **[💬 Join our Discord Server](https://discord.gg/cfbdMZX99G)** — Ask questions, showcase your work, and connect with other developers!
 
@@ -48,8 +48,8 @@ Unlike Unity and Godot (C# engines that host the .NET `McpPlugin` in-process), U
 
 - ✔️ **AI agents** — Use the best agents from **Anthropic**, **OpenAI**, **Google**, or any other provider with no vendor lock-in
 - ✔️ **RQL data layer** — query and change actors, components, assets, levels and editor state with one language ([`rql-query` / `rql-mutate` / `rql-schema`](#tools))
-- ✔️ **27 built-in Tools** — [MCP Tools](#tools) across **7 families** for operating the Unreal Editor
-- ✔️ **Blueprint authoring** — Create, edit, and **compile** Blueprints with a structured error/warning feedback loop the AI can act on
+- ✔️ **31 built-in Tools** — [MCP Tools](#tools) across **7 families** for operating the Unreal Editor
+- ✔️ **Blueprint authoring** — Create, edit, **wire** and **compile** Blueprints: add nodes into any graph, connect pins through the same K2 schema the editor uses, then get a structured error/warning feedback loop the AI can act on
 - ✔️ **C++ edit & compile** — Read, scaffold, and edit project C++, then compile (Live Coding or UBT) with a structured error report
 - ✔️ **Visual feedback** — Capture viewport, game-view, camera, and isolated-actor screenshots the LLM can inspect directly
 - ✔️ **Custom Tools, Prompts & Resources** — Register **your own** AI Tools, prompt templates, and resources from any UE plugin with **no fork** — one public, modular-feature contract ([Customize Tools, Prompts & Resources](#customize-tools-prompts--resources))
@@ -68,7 +68,7 @@ Unlike Unity and Godot (C# engines that host the .NET `McpPlugin` in-process), U
 - [Install](#install)
 - [Updating the plugin](#updating-the-plugin)
 - [First run](#first-run)
-- [Tools](#tools) — all 7 families, 27 tools (+ 3 system tools)
+- [Tools](#tools) — all 7 families, 31 tools (+ 3 system tools)
   - [Install Additional Skills and Tools](#install-additional-skills-and-tools)
 - [Per-tool visibility](#per-tool-visibility)
 - [`unreal-mcp-cli`](#unreal-mcp-cli)
@@ -182,9 +182,9 @@ Connection settings persist to `<Project>/Saved/Config/UnrealMcp/ai-game-develop
 
 # Tools
 
-Unreal-MCP ships **27 built-in ("core") tools** across **7 families** that your AI can call, plus **3 system tools** it cannot (see below). Tool ids are kebab-case (`rql-query`, `blueprint-compile`), matching the Unity/Godot naming convention. Extensions can add more (see [Customize Tools, Prompts & Resources](#customize-tools-prompts--resources)).
+Unreal-MCP ships **31 built-in ("core") tools** across **7 families** that your AI can call, plus **3 system tools** it cannot (see below). Tool ids are kebab-case (`rql-query`, `blueprint-compile`), matching the Unity/Godot naming convention. Extensions can add more (see [Customize Tools, Prompts & Resources](#customize-tools-prompts--resources)).
 
-> This list is generated from the STANDARD-surface registration sources (`UnrealMCP/Source/UnrealMcpEditor/Private/Tools/UnrealMcp*Tools.cpp`, excluding `UnrealMcpSkillTools.cpp` — its tool is a system tool, listed separately below — plus `UnrealMCP/Source/UnrealMcpRql/Private/UnrealMcpRqlTools.cpp`). Counts: rql 3, blueprint 11, console 1, tool list 1, python 1, source 6, screenshot 4 = **27**.
+> This list is generated from the STANDARD-surface registration sources (`UnrealMCP/Source/UnrealMcpEditor/Private/Tools/UnrealMcp*Tools.cpp`, excluding `UnrealMcpSkillTools.cpp` — its tool is a system tool, listed separately below — plus `UnrealMCP/Source/UnrealMcpRql/Private/UnrealMcpRqlTools.cpp`). Counts: rql 3, blueprint 15, console 1, tool list 1, python 1, source 6, screenshot 4 = **31**.
 
 <details>
   <summary><b>RQL — the data layer (3)</b></summary>
@@ -209,7 +209,7 @@ The `unreal-rql` skill (written by `unreal-skill-generate`) teaches the language
 </details>
 
 <details>
-  <summary><b>Blueprint family (11) — Unreal's flagship surface</b></summary>
+  <summary><b>Blueprint family (15) — Unreal's flagship surface</b></summary>
 
 | Tool id | What it does |
 | --- | --- |
@@ -222,6 +222,10 @@ The `unreal-rql` skill (written by `unreal-skill-generate`) teaches the language
 | `blueprint-set-default` | Edit a CDO (class-default) property |
 | `blueprint-add-function` | Add a function stub (entry/result nodes wired) |
 | `blueprint-add-event` | Add/bind an event stub (BeginPlay, Tick, input, …) |
+| `blueprint-graph` | Read a graph: every node's id/title/pins/links (the read surface for wiring) |
+| `blueprint-add-node` | Add one graph node (function call, variable get/set, event, cast, branch, macro, …) |
+| `blueprint-connect-pins` | **Wire two pins** through the K2 schema, exactly as dragging a wire (refuses an ambiguous node title) |
+| `blueprint-disconnect-pins` | Unwire one pin or one link |
 | `blueprint-compile` | Compile the Blueprint and return a **structured error/warning list** (the AI feedback loop) |
 | `blueprint-spawn` | Instance the Blueprint into the current level |
 
@@ -584,7 +588,7 @@ The complete, buildable example is [`samples/UnrealAIRuntimeSample/`](samples/Un
 
 A runtime connection ships exactly **one** built-in tool: **`ping`** (a liveness probe). `ping` is a [system tool](#tools), so it answers at `POST /api/system-tools/ping` and is not advertised to an AI agent — meaning a packaged game that registers nothing of its own presents an **empty** tool list, which is an honest description of it. Everything a runtime AI agent can do is **bring-your-own**: register your own tools via the extension bus above (`RegisterToolProvider`) and they appear normally.
 
-All of the engine-development families — the RQL data layer (`rql-query` / `rql-mutate` / `rql-schema` over actors, components, assets, levels, the console and editor state), every screenshot tool, plus Blueprint authoring, C++ source edit & compile, `console-run-command`, `unreal-tool-list` and `python-execute` — are **editor-only** (the [27 editor tools](#tools)). They drive the editor and several are RCE-class (e.g. `rql-mutate`, `console-run-command`, `python-execute`), so they are not compiled into a shipped game by default. There is no editor in a packaged game, so the runtime built-in surface is intentionally just `ping` + whatever tools your game registers.
+All of the engine-development families — the RQL data layer (`rql-query` / `rql-mutate` / `rql-schema` over actors, components, assets, levels, the console and editor state), every screenshot tool, plus Blueprint authoring, C++ source edit & compile, `console-run-command`, `unreal-tool-list` and `python-execute` — are **editor-only** (the [31 editor tools](#tools)). They drive the editor and several are RCE-class (e.g. `rql-mutate`, `console-run-command`, `python-execute`), so they are not compiled into a shipped game by default. There is no editor in a packaged game, so the runtime built-in surface is intentionally just `ping` + whatever tools your game registers.
 
 ## <a id="editor-only-exclude-from-packaged-games"></a>Editor-only — exclude Unreal-MCP from packaged games
 

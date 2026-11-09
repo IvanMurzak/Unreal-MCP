@@ -5,6 +5,7 @@
 #include "UnrealMcpToolRegistry.h"
 #include "UnrealMcpLog.h"
 #include "Tools/UnrealMcpObjectRef.h"   // the shared class resolver (FUnrealMcpObjectRef::ResolveClass)
+#include "Tools/UnrealMcpBlueprintGraphTools.h" // the graph-authoring half (blueprint-graph / -add-node / -connect-pins)
 #include "UnrealMcpPinTypes.h"
 
 #include "Engine/Blueprint.h"
@@ -40,8 +41,8 @@
 #endif
 
 /**
- * The Blueprint tool family (docs/ARCHITECTURE.md §10). MVP floor — read + structure-edit + compile +
- * spawn (11 tools). All edits go through the PUBLIC FKismetEditorUtilities / FBlueprintEditorUtils
+ * The Blueprint tool family (docs/ARCHITECTURE.md §10). Read + structure-edit + graph authoring + compile + spawn
+ * (15 tools). All edits go through the PUBLIC FKismetEditorUtilities / FBlueprintEditorUtils / UEdGraphSchema_K2
  * surface (plus the public SCS surface for components, which those two utilities do not expose). Every
  * Handle() runs ON the game thread (the §4 dispatcher guarantees it), so direct UObject/editor calls
  * are safe; no modal UI, no bridge waits.
@@ -590,8 +591,9 @@ namespace UnrealMcpBlueprintTools
 			.Title(TEXT("Add Blueprint Function"))
 			.Description(TEXT("Add a new user function graph (entry/result nodes auto-wired by the K2 schema) via "
 			                  "FBlueprintEditorUtils::CreateNewGraph + AddFunctionGraph; this creates the callable stub. Fill its body with "
-			                  "rql-mutate graph calls: unreal.asset(path).Graphs | where Name == \"MyFunc\" | call AddCallFunction(...), "
-			                  "then Connect pins."))
+			                  "blueprint-add-node (graph: \"MyFunc\") and wire the nodes with blueprint-connect-pins, then "
+			                  "blueprint-compile. The same edits are expressible as RQL: unreal.asset(path).Graphs | where Name == \"MyFunc\" "
+			                  "| call AddCallFunction(...), then Connect pins."))
 			.ParamString(TEXT("path"), TEXT("Blueprint asset object path."), EUnrealMcpParamRequirement::Required)
 			.ParamString(TEXT("name"), TEXT("New function name."), EUnrealMcpParamRequirement::Required)
 			.ReadOnlyHint(false).DestructiveHint(false).IdempotentHint(false).OpenWorldHint(false)
@@ -631,7 +633,9 @@ namespace UnrealMcpBlueprintTools
 			.Title(TEXT("Add Blueprint Event"))
 			.Description(TEXT("Add an overridable parent event node (e.g. ReceiveBeginPlay, ReceiveTick) to the event "
 			                  "graph via FKismetEditorUtilities::AddDefaultEventNode. 'name' is the parent UFunction "
-			                  "name; it must be an overridable event on the parent class."))
+			                  "name; it must be an overridable event on the parent class. This is the graph's entry point: add the "
+			                  "body with blueprint-add-node and wire it from this event's 'then' pin with blueprint-connect-pins "
+			                  "(blueprint-add-node kind 'event' does the same and returns the node in one step)."))
 			.ParamString(TEXT("path"), TEXT("Blueprint asset object path."), EUnrealMcpParamRequirement::Required)
 			.ParamString(TEXT("name"), TEXT("Parent event function name (e.g. ReceiveBeginPlay)."), EUnrealMcpParamRequirement::Required)
 			.ReadOnlyHint(false).DestructiveHint(false).IdempotentHint(false).OpenWorldHint(false)
@@ -810,6 +814,7 @@ namespace UnrealMcpBlueprintTools
 		RegisterVariables(Registry);
 		RegisterSetDefault(Registry);
 		RegisterGraphStubs(Registry);
+		RegisterGraphTools(Registry); // blueprint-graph / -add-node / -connect-pins / -disconnect-pins
 		RegisterCompile(Registry);
 		RegisterSpawn(Registry);
 	}

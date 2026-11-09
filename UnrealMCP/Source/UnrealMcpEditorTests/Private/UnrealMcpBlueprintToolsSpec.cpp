@@ -9,6 +9,7 @@
 #include "UnrealMcpCoreTools.h"
 #include "UnrealMcpToolRegistry.h"
 #include "Dom/JsonObject.h"
+#include "Dom/JsonValue.h"
 #include "Misc/PackageName.h"
 
 #include "Engine/Blueprint.h"
@@ -47,13 +48,43 @@ BEGIN_DEFINE_SPEC(FUnrealMcpBlueprintToolsSpec, "UnrealMcp.Tools.Blueprint",
 		return PackagePath + TEXT(".") + FPackageName::GetShortName(PackagePath);
 	}
 
+	/** The "nodes" entry of a blueprint-graph result with this id (null when absent). */
+	static TSharedPtr<FJsonObject> FindNodeJson(const TSharedPtr<FJsonObject>& GraphOut, const FString& Id)
+	{
+		const TArray<TSharedPtr<FJsonValue>>* Nodes = nullptr;
+		if (!GraphOut.IsValid() || !GraphOut->TryGetArrayField(TEXT("nodes"), Nodes) || !Nodes)
+			return nullptr;
+		for (const TSharedPtr<FJsonValue>& Value : *Nodes)
+		{
+			const TSharedPtr<FJsonObject> Node = Value->AsObject();
+			if (Node.IsValid() && Node->GetStringField(TEXT("id")) == Id)
+				return Node;
+		}
+		return nullptr;
+	}
+
+	/** The "pins" entry named @p PinName of a node entry of a blueprint-graph result (null when absent). */
+	static TSharedPtr<FJsonObject> FindPinJson(const TSharedPtr<FJsonObject>& NodeJson, const FString& PinName)
+	{
+		const TArray<TSharedPtr<FJsonValue>>* Pins = nullptr;
+		if (!NodeJson.IsValid() || !NodeJson->TryGetArrayField(TEXT("pins"), Pins) || !Pins)
+			return nullptr;
+		for (const TSharedPtr<FJsonValue>& Value : *Pins)
+		{
+			const TSharedPtr<FJsonObject> Pin = Value->AsObject();
+			if (Pin.IsValid() && Pin->GetStringField(TEXT("name")) == PinName)
+				return Pin;
+		}
+		return nullptr;
+	}
+
 END_DEFINE_SPEC(FUnrealMcpBlueprintToolsSpec)
 
 void FUnrealMcpBlueprintToolsSpec::Define()
 {
 	Describe("registration", [this]()
 	{
-		It("registers all eleven blueprint tools and bumps the revision", [this]()
+		It("registers all fifteen blueprint tools and bumps the revision", [this]()
 		{
 			FUnrealMcpToolRegistry Registry;
 			const int32 Before = Registry.GetRevision();
@@ -65,11 +96,13 @@ void FUnrealMcpBlueprintToolsSpec::Define()
 				TEXT("blueprint-add-variable"), TEXT("blueprint-modify-variable"),
 				TEXT("blueprint-set-default"),
 				TEXT("blueprint-add-function"), TEXT("blueprint-add-event"),
+				TEXT("blueprint-graph"), TEXT("blueprint-add-node"),
+				TEXT("blueprint-connect-pins"), TEXT("blueprint-disconnect-pins"),
 				TEXT("blueprint-compile"), TEXT("blueprint-spawn") };
 
 			for (const FString& Name : Expected)
 				TestTrue(*FString::Printf(TEXT("has %s"), *Name), Registry.HasTool(Name));
-			TestEqual(TEXT("exactly 11 tools"), Registry.Num(), Expected.Num());
+			TestEqual(TEXT("exactly 15 tools"), Registry.Num(), Expected.Num());
 			TestTrue(TEXT("revision bumped"), Registry.GetRevision() > Before);
 		});
 
@@ -419,6 +452,188 @@ void FUnrealMcpBlueprintToolsSpec::Define()
 			Toggle->SetBoolField(TEXT("instanceEditable"), false);
 			TestTrue(TEXT("and back"), Run(Registry, TEXT("blueprint-modify-variable"), Toggle).bSuccess);
 			TestFalse(TEXT("Points is class-default only again"), IsInstanceEditable(TEXT("Points")));
+		});
+	});
+
+	Describe("graph authoring", [this]()
+	{
+		It("adds nodes, wires the event into a call and reports the link", [this]()
+		{
+			if (!GEditor)
+			{
+				AddWarning(TEXT("GEditor unavailable; skipping the graph-authoring round-trip."));
+				return;
+			}
+			FUnrealMcpToolRegistry Registry;
+			UnrealMcpBlueprintTools::Register(Registry);
+			const FString ObjectPath = CreateBlueprint(Registry);
+
+			// The event node (kind 'event' enables the placeholder a fresh Blueprint is seeded with).
+			TSharedPtr<FJsonObject> AddEvent = Args();
+			AddEvent->SetStringField(TEXT("path"), ObjectPath);
+			AddEvent->SetStringField(TEXT("kind"), TEXT("event"));
+			AddEvent->SetStringField(TEXT("name"), TEXT("BeginPlay"));
+			const FUnrealMcpToolResult EventResult = Run(Registry, TEXT("blueprint-add-node"), AddEvent);
+			TestTrue(*FString::Printf(TEXT("event node added (%s)"), *EventResult.Message), EventResult.bSuccess);
+			FString EventId;
+			if (EventResult.Structured.IsValid())
+			{
+				const TSharedPtr<FJsonObject> Node = EventResult.Structured->GetObjectField(TEXT("node"));
+				if (Node.IsValid())
+					EventId = Node->GetStringField(TEXT("id"));
+			}
+			TestFalse(TEXT("event node id returned"), EventId.IsEmpty());
+
+			// A function call node, resolved through KismetSystemLibrary.
+			TSharedPtr<FJsonObject> AddCall = Args();
+			AddCall->SetStringField(TEXT("path"), ObjectPath);
+			AddCall->SetStringField(TEXT("kind"), TEXT("call"));
+			AddCall->SetStringField(TEXT("function"), TEXT("PrintString"));
+			const FUnrealMcpToolResult CallResult = Run(Registry, TEXT("blueprint-add-node"), AddCall);
+			TestTrue(*FString::Printf(TEXT("call node added (%s)"), *CallResult.Message), CallResult.bSuccess);
+			FString CallId;
+			if (CallResult.Structured.IsValid())
+			{
+				const TSharedPtr<FJsonObject> Node = CallResult.Structured->GetObjectField(TEXT("node"));
+				if (Node.IsValid())
+					CallId = Node->GetStringField(TEXT("id"));
+			}
+			TestFalse(TEXT("call node id returned"), CallId.IsEmpty());
+
+			// Wire the event's 'then' into the call's 'execute'.
+			TSharedPtr<FJsonObject> Connect = Args();
+			Connect->SetStringField(TEXT("path"), ObjectPath);
+			Connect->SetStringField(TEXT("fromNode"), EventId);
+			Connect->SetStringField(TEXT("fromPin"), TEXT("then"));
+			Connect->SetStringField(TEXT("toNode"), CallId);
+			Connect->SetStringField(TEXT("toPin"), TEXT("execute"));
+			const FUnrealMcpToolResult ConnectResult = Run(Registry, TEXT("blueprint-connect-pins"), Connect);
+			TestTrue(*FString::Printf(TEXT("pins connected (%s)"), *ConnectResult.Message), ConnectResult.bSuccess);
+
+			// blueprint-graph reports the link the connect made.
+			TSharedPtr<FJsonObject> GraphArgs = Args();
+			GraphArgs->SetStringField(TEXT("path"), ObjectPath);
+			const FUnrealMcpToolResult GraphResult = Run(Registry, TEXT("blueprint-graph"), GraphArgs);
+			TestTrue(TEXT("blueprint-graph"), GraphResult.bSuccess);
+			if (GraphResult.Structured.IsValid())
+			{
+				const TSharedPtr<FJsonObject> CallNode = FindNodeJson(GraphResult.Structured, CallId);
+				if (TestNotNull(TEXT("call node in the graph read"), CallNode.Get()))
+				{
+					const TSharedPtr<FJsonObject> ExecPin = FindPinJson(CallNode, TEXT("execute"));
+					if (TestNotNull(TEXT("execute pin reported"), ExecPin.Get()))
+					{
+						const TArray<TSharedPtr<FJsonValue>>* Links = nullptr;
+						TestTrue(TEXT("execute pin carries the link"), ExecPin->TryGetArrayField(TEXT("links"), Links) && Links && Links->Num() == 1);
+					}
+				}
+			}
+
+			// The wired graph compiles clean — a wire the compiler rejects would surface here.
+			TSharedPtr<FJsonObject> Compile = Args();
+			Compile->SetStringField(TEXT("path"), ObjectPath);
+			TestTrue(TEXT("the wired graph compiles"), Run(Registry, TEXT("blueprint-compile"), Compile).bSuccess);
+
+			// Disconnect by node + pin, then confirm the link is gone.
+			TSharedPtr<FJsonObject> Disconnect = Args();
+			Disconnect->SetStringField(TEXT("path"), ObjectPath);
+			Disconnect->SetStringField(TEXT("node"), EventId);
+			Disconnect->SetStringField(TEXT("pin"), TEXT("then"));
+			TestTrue(TEXT("disconnected"), Run(Registry, TEXT("blueprint-disconnect-pins"), Disconnect).bSuccess);
+			const FUnrealMcpToolResult AfterGraph = Run(Registry, TEXT("blueprint-graph"), GraphArgs);
+			if (AfterGraph.Structured.IsValid())
+			{
+				const TSharedPtr<FJsonObject> CallNode = FindNodeJson(AfterGraph.Structured, CallId);
+				const TSharedPtr<FJsonObject> ExecPin = FindPinJson(CallNode, TEXT("execute"));
+				TestFalse(TEXT("execute pin is unlinked again"), ExecPin.IsValid() && ExecPin->HasField(TEXT("links")));
+			}
+		});
+
+		It("refuses an ambiguous node title instead of guessing", [this]()
+		{
+			if (!GEditor)
+			{
+				AddWarning(TEXT("GEditor unavailable; skipping the ambiguity test."));
+				return;
+			}
+			FUnrealMcpToolRegistry Registry;
+			UnrealMcpBlueprintTools::Register(Registry);
+			const FString ObjectPath = CreateBlueprint(Registry);
+
+			// Two Print String nodes: their shared title can no longer identify one of them. The title is read
+			// back from the tool (the editor draws it in the editor's own language, so it must never be
+			// hard-coded as "Print String" here).
+			FString SharedTitle;
+			for (int32 Index = 0; Index < 2; ++Index)
+			{
+				TSharedPtr<FJsonObject> AddCall = Args();
+				AddCall->SetStringField(TEXT("path"), ObjectPath);
+				AddCall->SetStringField(TEXT("kind"), TEXT("call"));
+				AddCall->SetStringField(TEXT("function"), TEXT("PrintString"));
+				AddCall->SetNumberField(TEXT("x"), 300 + Index * 250);
+				AddCall->SetNumberField(TEXT("y"), 0);
+				const FUnrealMcpToolResult Added = Run(Registry, TEXT("blueprint-add-node"), AddCall);
+				TestTrue(TEXT("PrintString added"), Added.bSuccess);
+				if (Added.Structured.IsValid() && SharedTitle.IsEmpty())
+				{
+					const TSharedPtr<FJsonObject> Node = Added.Structured->GetObjectField(TEXT("node"));
+					if (Node.IsValid())
+						SharedTitle = Node->GetStringField(TEXT("title"));
+				}
+			}
+			TestFalse(TEXT("the node reports a title to address it by"), SharedTitle.IsEmpty());
+
+			TSharedPtr<FJsonObject> Connect = Args();
+			Connect->SetStringField(TEXT("path"), ObjectPath);
+			Connect->SetStringField(TEXT("fromNode"), SharedTitle);
+			Connect->SetStringField(TEXT("fromPin"), TEXT("then"));
+			Connect->SetStringField(TEXT("toNode"), SharedTitle);
+			Connect->SetStringField(TEXT("toPin"), TEXT("execute"));
+			const FUnrealMcpToolResult Result = Run(Registry, TEXT("blueprint-connect-pins"), Connect);
+			TestFalse(TEXT("ambiguous title refused"), Result.bSuccess);
+			TestTrue(*FString::Printf(TEXT("the error names the candidates (%s)"), *Result.Message), Result.Message.Contains(TEXT("matches")));
+		});
+
+		It("rejects an unknown function and an unknown pin", [this]()
+		{
+			FUnrealMcpToolRegistry Registry;
+			UnrealMcpBlueprintTools::Register(Registry);
+			const FString ObjectPath = CreateBlueprint(Registry);
+
+			TSharedPtr<FJsonObject> BadFunction = Args();
+			BadFunction->SetStringField(TEXT("path"), ObjectPath);
+			BadFunction->SetStringField(TEXT("kind"), TEXT("call"));
+			BadFunction->SetStringField(TEXT("function"), TEXT("NoSuchRqlFunction"));
+			const FUnrealMcpToolResult FunctionResult = Run(Registry, TEXT("blueprint-add-node"), BadFunction);
+			TestFalse(TEXT("unknown function rejected"), FunctionResult.bSuccess);
+			TestTrue(*FString::Printf(TEXT("the error says what it looked for (%s)"), *FunctionResult.Message),
+				FunctionResult.Message.Contains(TEXT("Blueprint-callable function")));
+
+			TSharedPtr<FJsonObject> AddCall = Args();
+			AddCall->SetStringField(TEXT("path"), ObjectPath);
+			AddCall->SetStringField(TEXT("kind"), TEXT("call"));
+			AddCall->SetStringField(TEXT("function"), TEXT("PrintString"));
+			const FUnrealMcpToolResult Added = Run(Registry, TEXT("blueprint-add-node"), AddCall);
+			TestTrue(TEXT("PrintString added"), Added.bSuccess);
+			// The drawn title is the editor's own language: read it back instead of assuming "Print String".
+			FString CallTitle;
+			if (Added.Structured.IsValid())
+			{
+				const TSharedPtr<FJsonObject> Node = Added.Structured->GetObjectField(TEXT("node"));
+				if (Node.IsValid())
+					CallTitle = Node->GetStringField(TEXT("title"));
+			}
+			TestFalse(TEXT("the node reports a title to address it by"), CallTitle.IsEmpty());
+
+			TSharedPtr<FJsonObject> BadPin = Args();
+			BadPin->SetStringField(TEXT("path"), ObjectPath);
+			BadPin->SetStringField(TEXT("fromNode"), CallTitle);
+			BadPin->SetStringField(TEXT("fromPin"), TEXT("NoSuchPin"));
+			BadPin->SetStringField(TEXT("toNode"), CallTitle);
+			BadPin->SetStringField(TEXT("toPin"), TEXT("NoSuchPin"));
+			const FUnrealMcpToolResult PinResult = Run(Registry, TEXT("blueprint-connect-pins"), BadPin);
+			TestFalse(TEXT("unknown pin rejected"), PinResult.bSuccess);
+			TestTrue(*FString::Printf(TEXT("the error lists the pins (%s)"), *PinResult.Message), PinResult.Message.Contains(TEXT("has no pin")));
 		});
 	});
 }

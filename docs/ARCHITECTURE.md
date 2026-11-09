@@ -36,7 +36,7 @@ delivered it. Identifiers below (tool ids, command names, env vars, paths) were 
 | §10 RQL data layer (3: `rql-query`, `rql-mutate`, `rql-schema` — [`docs/rql.md`](rql.md)) | implemented | `UnrealMcpRql` module; supersedes the actor, asset, level and editor/reflection families |
 | §10 actor & component family (13) | superseded by RQL | #14 |
 | §10 asset family (11) | superseded by RQL | #15 (issue #10) |
-| §10 blueprint family (11) | implemented | #13 |
+| §10 blueprint family (15) | implemented | #13 |
 | §10 source family (6) | implemented | #23 |
 | §10 screenshot family (4) | implemented | #21 |
 | §10 editor/reflection family (9) | superseded by RQL except `console-run-command` (the console family, 1) | #22 |
@@ -44,7 +44,7 @@ delivered it. Identifiers below (tool ids, command names, env vars, paths) were 
 | Tool list family (1) | implemented: `unreal-tool-list` (every callable tool, hidden ones marked; Unity's `unity-tool-list`) | — |
 | Python family (1) | implemented: `python-execute` (PythonScriptPlugin + vendored Code-Exec `code_exec`) | — |
 
-**Total shipped: 27 STANDARD core tools across 7 families (rql 3, blueprint 11, console 1, tool list 1, python 1, source 6,
+**Total shipped: 31 STANDARD core tools across 7 families (rql 3, blueprint 15, console 1, tool list 1, python 1, source 6,
 screenshot 4), plus 3 SYSTEM tools (§2.4)** (counts verified from the registration source). The §10 sections
 below describe the superseded families as they were designed; their operations are RQL queries now
 ([`docs/rql.md`](rql.md) maps each removed tool to its query).
@@ -403,7 +403,7 @@ A tool is served on exactly one of two surfaces, mirroring the shared
 
 | surface | reachable at | in `tools/list`? | for |
 | --- | --- | --- | --- |
-| **Standard** (default) | `/api/tools/<name>` + MCP `tools/call` | yes | the 27 authoring tools an AI agent drives |
+| **Standard** (default) | `/api/tools/<name>` + MCP `tools/call` | yes | the 31 authoring tools an AI agent drives |
 | **System** | `/api/system-tools/<name>` **only** | **no** | host plumbing a CLIENT drives: liveness, skill authoring |
 
 **The system tools are `ping`, `unreal-skill-create`, `unreal-skill-generate`** — the same three, with
@@ -1224,8 +1224,8 @@ filters: name/class/path/tags), `asset-get-data`, `asset-create-folder`, `asset-
 `level-list-loaded` (sublevels + World Partition read-only awareness), `level-set-current`
 (active sublevel), `level-unload-sublevel`.
 
-**blueprint family — FLAGSHIP, Unreal-unique** (task: blueprint-tools): MVP floor =
-read + structure-edit + compile + spawn:
+**blueprint family — FLAGSHIP, Unreal-unique** (task: blueprint-tools): read + structure-edit + graph
+authoring + compile + spawn (15 tools):
 - `blueprint-create` — new BP class from parent UClass path (`FKismetEditorUtilities::CreateBlueprint`).
 - `blueprint-get` — graph summary for LLM inspection: variables (name/type/defaults), components,
   functions/events with node-count + call-graph edges, implemented interfaces, parent chain.
@@ -1235,13 +1235,27 @@ read + structure-edit + compile + spawn:
 - `blueprint-set-default` — CDO property edit (same write path as `actor-modify`).
 - `blueprint-add-function` / `blueprint-add-event` — stubs: entry/result nodes wired, BlueprintCallable
   parent events (BeginPlay, Tick, input actions) bound.
+- `blueprint-graph` — the graph READ surface wiring needs: each node's id / title / class / position /
+  enabled state / compile error and its visible pins (name, direction, type, exec flag, default, links).
+  `blueprint-get` stays the Blueprint-wide summary; this is one graph in the editor's own terms.
+- `blueprint-add-node` — one node at the level of the graph editor's context menu: `call`, `variable-get`,
+  `variable-set`, `event` (enables the disabled placeholder), `custom-event`, `cast`, `branch`, `sequence`,
+  `self`, `macro`, `input-key`. Returns the node's id and pins so the agent can wire it immediately.
+- `blueprint-connect-pins` / `blueprint-disconnect-pins` — wiring through `UEdGraphSchema_K2`
+  (`CanCreateConnection` + `TryCreateConnection`), i.e. the checks a drag between pins gets: type
+  compatibility, exec-to-exec, single-link data inputs, automatic conversion / cast nodes. A node is named by
+  its id or by the title the editor draws; an AMBIGUOUS title is refused with the candidate ids (never
+  silently resolved to the first match), and a success whose link is absent from `LinkedTo` is reported as a
+  failure instead of a phantom edit.
 - `blueprint-compile` — `FKismetEditorUtilities::CompileBlueprint` + **structured error/warning
   list** (node, graph, message) — this is the AI feedback loop and is mandatory.
 - `blueprint-spawn` — instance into the current level (closes the create→edit→verify loop).
-- Graph *authoring* depth decision: MVP does **not** ship free-form node-graph wiring
-  (`blueprint-add-node`/`connect-pins` are backlog) — structure-edit + compile feedback already
-  covers the 80% AI loop; full K2Node authoring is high-risk surface and lands post-MVP behind the
-  same family.
+- Graph *authoring* depth decision (revised): the MVP shipped stubs only (`blueprint-add-function` /
+  `blueprint-add-event`), which left the agent unable to turn a stub into a graph that runs. The four graph
+  tools above close that gap through the public K2 schema — the same surface the graph editor drives — so
+  the risk is the editor's own validation, not a hand-rolled byte-level patcher. Anything the context menu
+  can place beyond the kinds listed stays reachable through RQL (`eventGraph | call Add*`) and through an
+  extension's `IUnrealMcpRqlModule`; the tool list stays deliberately small.
 
 **source family** (task: source-script-tools; Unity Script reinterpreted): `source-read` (sliced),
 `source-create-class` (header+cpp from templates: UObject/AActor/UActorComponent/empty),
