@@ -114,6 +114,8 @@ void FUnrealMcpSourceToolsSpec::Define()
 			TestFalse(TEXT("'.. /' is '../' to Windows"), UnrealMcpSourceTools::ResolveJailedPath(Root, TEXT(".. /Config/secret.ini")).bOk);
 			TestFalse(TEXT("'.../' is '../' or a dot folder to Windows"), UnrealMcpSourceTools::ResolveJailedPath(Root, TEXT("MyGame/.../x.cpp")).bOk);
 			TestFalse(TEXT("a trailing dot names another file"), UnrealMcpSourceTools::ResolveJailedPath(Root, TEXT("MyGame/x.cpp.")).bOk);
+			TestFalse(TEXT("'Foo./x' is not silently 'Foox' (UE 5.5/5.6 collapsing)"), UnrealMcpSourceTools::ResolveJailedPath(Root, TEXT("Foo./x.cpp")).bOk);
+			TestTrue(TEXT("the root itself is still a jail path"), UnrealMcpSourceTools::ResolveJailedPath(Root, Root).bOk);
 		});
 
 		It("rejects an absolute path outside the jail", [this]()

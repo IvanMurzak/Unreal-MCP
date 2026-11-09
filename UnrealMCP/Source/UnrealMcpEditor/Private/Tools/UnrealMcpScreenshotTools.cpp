@@ -110,18 +110,23 @@ namespace UnrealMcpScreenshotTools
 		FPaths::NormalizeFilename(Path);
 		if (Path.EndsWith(TEXT("/")))
 			return Refuse(TEXT("it names a folder; add a file name, such as Screenshots/shot.png."));
-		const UnrealMcpSourceTools::FJailedPath Jailed = UnrealMcpSourceTools::ResolveJailedPath(ProjectDir, Path);
-		if (!Jailed.bOk)
+		const auto RefuseOutside = [&Refuse, &ProjectDir]()
 		{
 			return Refuse(FString::Printf(TEXT("it must stay inside the project folder %s (a path relative to it, or an absolute "
 				"path under it; no ':' after the drive, no name ending in a dot or a space, no link leading out)."), *FPaths::ConvertRelativePathToFull(ProjectDir)));
-		}
+		};
+		const UnrealMcpSourceTools::FJailedPath Jailed = UnrealMcpSourceTools::ResolveJailedPath(ProjectDir, Path);
+		if (!Jailed.bOk)
+			return RefuseOutside();
 		FString Full = Jailed.FullPath;
 		const FString Extension = FPaths::GetExtension(Full);
 		if (Extension.IsEmpty())
 			Full += TEXT(".png");
 		else if (!Extension.Equals(TEXT("png"), ESearchCase::IgnoreCase))
 			return Refuse(TEXT("the capture is a PNG, so the file name must end in .png."));
+		// The jail accepts its own root ("." or "Screenshots/.."), and adding .png to that names a file beside the project.
+		if (!FPaths::IsUnderDirectory(Full, FPaths::ConvertRelativePathToFull(ProjectDir)))
+			return RefuseOutside();
 		if (IFileManager::Get().FileExists(*Full))
 			return Refuse(TEXT("the file already exists and a capture never overwrites one; pick another name."));
 		OutFullPath = Full;
@@ -139,8 +144,10 @@ namespace UnrealMcpScreenshotTools
 		}
 		if (FFileHelper::SaveArrayToFile(Png, *FullPath))
 			return true;
-		OutError = FString::Printf(TEXT("Could not write the capture to %s (the folder is read-only, or a file has the name of one "
-			"of its folders); nothing was saved."), *FullPath);
+		// A failed write can leave a partial file (a full disk); the check above says this call created it.
+		IFileManager::Get().Delete(*FullPath, /*RequireExists*/ false, /*EvenReadOnly*/ false, /*Quiet*/ true);
+		OutError = FString::Printf(TEXT("Could not write the capture to %s (the disk is full, the folder is read-only, or a file has "
+			"the name of one of its folders); nothing was saved."), *FullPath);
 		return false;
 	}
 

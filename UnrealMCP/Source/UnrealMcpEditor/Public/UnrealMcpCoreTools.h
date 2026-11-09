@@ -102,8 +102,9 @@ namespace UnrealMcpScreenshotTools
 	/**
 	 * Check the optional 'savePath' of screenshot-viewport / -game-view / -camera against @p ProjectDir. Empty means no
 	 * save (true, empty @p OutFullPath). Otherwise @p OutFullPath is the absolute file to write, or false with @p OutError
-	 * for anything outside the project (`..`, absolute paths elsewhere, a link leading out), a non-PNG name or an existing
-	 * file. GPU-free (spec-testable).
+	 * for anything outside the project (`..`, absolute paths elsewhere), a non-PNG name or an existing file. A link leading
+	 * out is refused where UnrealMcpSourceTools::ResolveJailedPath can see it: on Windows, not where the engine's
+	 * GetFilenameOnDisk returns the path unresolved (macOS, Linux). GPU-free (spec-testable).
 	 */
 	UNREALMCPEDITOR_API bool ResolveCaptureSavePath(const FString& Requested, const FString& ProjectDir, FString& OutFullPath, FString& OutError);
 

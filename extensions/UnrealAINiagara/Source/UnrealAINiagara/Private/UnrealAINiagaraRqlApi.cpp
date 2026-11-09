@@ -16,6 +16,7 @@
 #include "IAssetTools.h"
 #include "Interfaces/IProjectManager.h"
 #include "Materials/MaterialInterface.h"
+#include "Misc/FileHelper.h"
 #include "Misc/PackageName.h"
 #include "Misc/Paths.h"
 #include "Misc/ScopeExit.h"
@@ -140,8 +141,11 @@ namespace UnrealAINiagaraRqlApiLocal
 		return Variable && Variable->GetInt() != 0;
 	}
 
-	/** Save Project Settings > Rendering > Generate Mesh Distance Fields as the settings editor does; it applies after a restart. */
-	void SaveMeshDistanceFieldsSetting()
+	/**
+	 * Save Project Settings > Rendering > Generate Mesh Distance Fields as the settings editor does; it applies after a
+	 * restart. The engine's save reports no failure (a locked ini), so the file is read back; false when it did not take.
+	 */
+	bool SaveMeshDistanceFieldsSetting()
 	{
 		URendererSettings* Settings = GetMutableDefault<URendererSettings>();
 		Settings->bGenerateMeshDistanceFields = true;
@@ -150,6 +154,8 @@ namespace UnrealAINiagaraRqlApiLocal
 		if (File.FileExists(*ConfigFile) && File.IsReadOnly(*ConfigFile))
 			File.SetReadOnly(*ConfigFile, false);
 		Settings->UpdateSinglePropertyInConfigFile(URendererSettings::StaticClass()->FindPropertyByName(TEXT("bGenerateMeshDistanceFields")), Settings->GetDefaultConfigFilename());
+		FString Saved;
+		return FFileHelper::LoadFileToString(Saved, *ConfigFile) && Saved.Contains(TEXT("r.GenerateMeshDistanceFields=True"));
 	}
 
 	const TCHAR* DistanceFieldNote = TEXT("mesh distance fields are off in this project: unreal.settings(\"Rendering\") | set bGenerateMeshDistanceFields = true, then restart the editor (meshes rebuild their distance fields)");
@@ -869,8 +875,11 @@ FString UUnrealAINiagaraRqlApi::EnableFluids()
 			return UnrealMcpRql::Failed<FString>(FString::Printf(TEXT("could not enable NiagaraFluids: %s"), *Reason.ToString()));
 	}
 	// The 3D gas and FLIP templates query mesh distance fields and do not compile without them: one restart covers both.
-	if (!bFieldsOn)
-		SaveMeshDistanceFieldsSetting();
+	if (!bFieldsOn && !SaveMeshDistanceFieldsSetting())
+	{
+		return UnrealMcpRql::Failed<FString>(FString::Printf(TEXT("%scould not save Generate Mesh Distance Fields to the project's DefaultEngine.ini (is it locked?); the 3D gas and liquid templates do not compile without it: retry, or set r.GenerateMeshDistanceFields=True there"),
+			bPluginsOn ? TEXT("") : TEXT("NiagaraFluids is enabled in the project file, but ")));
+	}
 	return FString::Printf(TEXT("%s; %s; restart the editor to load it (save your work first: editor | call SaveAll()), then niagaraTemplates | where Plugin == \"NiagaraFluids\""),
 		bPluginsOn ? TEXT("NiagaraFluids was already enabled") : TEXT("NiagaraFluids (and ChaosNiagara, which its modules use) is enabled in the project file"),
 		bFieldsOn ? TEXT("mesh distance fields were already on") : TEXT("Generate Mesh Distance Fields is on in the project settings (the 3D gas and liquid templates do not compile without it; every mesh of the project now builds a distance field)"));
