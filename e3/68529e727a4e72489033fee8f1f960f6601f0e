@@ -1,0 +1,27 @@
+extensions/UnrealAIPCG/Source/UnrealAIPCG/Private/UnrealAIPCGRqlApi.cpp
+  s_253b043f90cb72::t_f1073d44cf0a7f 618
+  s_253b043f90cb72::t_5a228870582d7e 85,91-92,95-96,101-102
+UnrealMCP/Content/Python/unreal_mcp/python_execute.py
+  s_253b043f90cb72::t_61f78e16073c3a 28-30
+  s_253b043f90cb72::t_cb5fa759b97da7 43
+extensions/UnrealAIPCG/Source/UnrealAIPCG/Private/Tests/UnrealAIPCGSpec.cpp
+  s_253b043f90cb72::t_8027b2e9245fa9 521
+  s_253b043f90cb72::t_fb945f171e1d39 124-133
+  s_253b043f90cb72::t_21de0178f422d8 494
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e368529e727a4e72489033fee8f1f960f6601f0e",
+  "prompts": {},
+  "sessions": {
+    "s_253b043f90cb72": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8ec203a4-4063-4c7a-81b4-a54b8d2ec310",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
