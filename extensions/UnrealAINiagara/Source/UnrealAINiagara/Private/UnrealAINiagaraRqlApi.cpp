@@ -9,12 +9,16 @@
 
 #include "AssetRegistry/IAssetRegistry.h"
 #include "AssetToolsModule.h"
+#include "Engine/RendererSettings.h"
 #include "Engine/World.h"
 #include "HAL/IConsoleManager.h"
+#include "HAL/PlatformFileManager.h"
 #include "IAssetTools.h"
 #include "Interfaces/IProjectManager.h"
 #include "Materials/MaterialInterface.h"
+#include "Misc/FileHelper.h"
 #include "Misc/PackageName.h"
+#include "Misc/Paths.h"
 #include "Misc/ScopeExit.h"
 #include "Misc/StringOutputDevice.h"
 #include "NiagaraActor.h"
@@ -135,6 +139,23 @@ namespace UnrealAINiagaraRqlApiLocal
 	{
 		static const IConsoleVariable* Variable = IConsoleManager::Get().FindConsoleVariable(TEXT("r.GenerateMeshDistanceFields"));
 		return Variable && Variable->GetInt() != 0;
+	}
+
+	/**
+	 * Save Project Settings > Rendering > Generate Mesh Distance Fields as the settings editor does; it applies after a
+	 * restart. The engine's save reports no failure (a locked ini), so the file is read back; false when it did not take.
+	 */
+	bool SaveMeshDistanceFieldsSetting()
+	{
+		URendererSettings* Settings = GetMutableDefault<URendererSettings>();
+		Settings->bGenerateMeshDistanceFields = true;
+		const FString ConfigFile = FPaths::ConvertRelativePathToFull(Settings->GetDefaultConfigFilename());
+		IPlatformFile& File = FPlatformFileManager::Get().GetPlatformFile();
+		if (File.FileExists(*ConfigFile) && File.IsReadOnly(*ConfigFile))
+			File.SetReadOnly(*ConfigFile, false);
+		Settings->UpdateSinglePropertyInConfigFile(URendererSettings::StaticClass()->FindPropertyByName(TEXT("bGenerateMeshDistanceFields")), Settings->GetDefaultConfigFilename());
+		FString Saved;
+		return FFileHelper::LoadFileToString(Saved, *ConfigFile) && Saved.Contains(TEXT("r.GenerateMeshDistanceFields=True"));
 	}
 
 	const TCHAR* DistanceFieldNote = TEXT("mesh distance fields are off in this project: unreal.settings(\"Rendering\") | set bGenerateMeshDistanceFields = true, then restart the editor (meshes rebuild their distance fields)");
@@ -313,17 +334,26 @@ namespace UnrealAINiagaraRqlApiLocal
 UNiagaraSystem* UUnrealAINiagaraRqlApi::CreateSystem(const FString& Path, const FString& Template)
 {
 	using namespace UnrealAINiagaraRqlApiLocal;
-	const FString Disabled = UnrealAINiagaraTemplates::DisabledPluginMessage(Template);
+	// A bare name is a template's Name from niagaraTemplates; anything with a folder is an asset path.
+	FString TemplatePath = Template;
+	if (!Template.IsEmpty() && !Template.Contains(TEXT("/")))
+	{
+		FString Error;
+		TemplatePath = UnrealAINiagaraTemplates::ResolveName(UnrealAINiagaraTemplates::List(), Template, Error);
+		if (TemplatePath.IsEmpty())
+			return UnrealMcpRql::Failed<UNiagaraSystem*>(Error);
+	}
+	const FString Disabled = UnrealAINiagaraTemplates::DisabledPluginMessage(TemplatePath);
 	if (!Disabled.IsEmpty())
 		return UnrealMcpRql::Failed<UNiagaraSystem*>(Disabled);
 	UObject* Source = nullptr;
-	if (!Template.IsEmpty())
+	if (!TemplatePath.IsEmpty())
 	{
-		Source = UnrealMcpRql::LoadObject(UNiagaraSystem::StaticClass(), Template);
+		Source = UnrealMcpRql::LoadObject(UNiagaraSystem::StaticClass(), TemplatePath);
 		if (!Source)
-			Source = UnrealMcpRql::LoadObject(UNiagaraEmitter::StaticClass(), Template);
+			Source = UnrealMcpRql::LoadObject(UNiagaraEmitter::StaticClass(), TemplatePath);
 		if (!Source)
-			return UnrealMcpRql::Failed<UNiagaraSystem*>(FString::Printf(TEXT("no Niagara system or emitter at '%s' (niagaraTemplates | where Name contains \"Fire\" | select Name Path Kind)"), *Template));
+			return UnrealMcpRql::Failed<UNiagaraSystem*>(FString::Printf(TEXT("no Niagara system or emitter at '%s' (niagaraTemplates | where Name contains \"Fire\" | select Name Path Kind)"), *TemplatePath));
 	}
 	if (UNiagaraSystem* SourceSystem = Cast<UNiagaraSystem>(Source))
 	{
@@ -829,14 +859,28 @@ int32 UUnrealAINiagaraRqlApi::Deactivate(AActor* Actor)
 
 FString UUnrealAINiagaraRqlApi::EnableFluids()
 {
-	if (UnrealAINiagaraTemplates::IsFluidsEnabled())
-		return TEXT("NiagaraFluids is already enabled: niagaraTemplates | where Plugin == \"NiagaraFluids\" lists its templates");
-	if (!UnrealAINiagaraTemplates::IsFluidsInstalled())
+	using namespace UnrealAINiagaraRqlApiLocal;
+	const bool bPluginsOn = UnrealAINiagaraTemplates::IsFluidsEnabled();
+	if (!bPluginsOn && !UnrealAINiagaraTemplates::IsFluidsInstalled())
 		return UnrealMcpRql::Failed<FString>(UnrealAINiagaraTemplates::DisabledPluginMessage(TEXT("/NiagaraFluids/")));
-	FText Reason;
-	// The Fluids modules use ChaosNiagara's data interfaces (geometry collection collisions) without declaring it.
-	if (!IProjectManager::Get().SetPluginEnabled(TEXT("ChaosNiagara"), true, Reason) || !IProjectManager::Get().SetPluginEnabled(TEXT("NiagaraFluids"), true, Reason)
-		|| !IProjectManager::Get().SaveCurrentProjectToDisk(Reason))
-		return UnrealMcpRql::Failed<FString>(FString::Printf(TEXT("could not enable NiagaraFluids: %s"), *Reason.ToString()));
-	return TEXT("NiagaraFluids (and ChaosNiagara, which its modules use) is enabled in the project file; restart the editor to load it (save your work first: editor | call SaveAll()), then niagaraTemplates | where Plugin == \"NiagaraFluids\"");
+	const bool bFieldsOn = MeshDistanceFieldsEnabled();
+	if (bPluginsOn && bFieldsOn)
+		return TEXT("NiagaraFluids is already enabled: niagaraTemplates | where Plugin == \"NiagaraFluids\" lists its templates");
+	if (!bPluginsOn)
+	{
+		FText Reason;
+		// The Fluids modules use ChaosNiagara's data interfaces (geometry collection collisions) without declaring it.
+		if (!IProjectManager::Get().SetPluginEnabled(TEXT("ChaosNiagara"), true, Reason) || !IProjectManager::Get().SetPluginEnabled(TEXT("NiagaraFluids"), true, Reason)
+			|| !IProjectManager::Get().SaveCurrentProjectToDisk(Reason))
+			return UnrealMcpRql::Failed<FString>(FString::Printf(TEXT("could not enable NiagaraFluids: %s"), *Reason.ToString()));
+	}
+	// The 3D gas and FLIP templates query mesh distance fields and do not compile without them: one restart covers both.
+	if (!bFieldsOn && !SaveMeshDistanceFieldsSetting())
+	{
+		return UnrealMcpRql::Failed<FString>(FString::Printf(TEXT("%scould not save Generate Mesh Distance Fields to the project's DefaultEngine.ini (is it locked?); the 3D gas and liquid templates do not compile without it: retry, or set r.GenerateMeshDistanceFields=True there"),
+			bPluginsOn ? TEXT("") : TEXT("NiagaraFluids is enabled in the project file, but ")));
+	}
+	return FString::Printf(TEXT("%s; %s; restart the editor to load it (save your work first: editor | call SaveAll()), then niagaraTemplates | where Plugin == \"NiagaraFluids\""),
+		bPluginsOn ? TEXT("NiagaraFluids was already enabled") : TEXT("NiagaraFluids (and ChaosNiagara, which its modules use) is enabled in the project file"),
+		bFieldsOn ? TEXT("mesh distance fields were already on") : TEXT("Generate Mesh Distance Fields is on in the project settings (the 3D gas and liquid templates do not compile without it; every mesh of the project now builds a distance field)"));
 }

@@ -197,6 +197,22 @@ namespace UnrealMcpSourceTools
 		}
 		FPaths::NormalizeFilename(Cleaned); // backslashes -> forward slashes
 
+		// Windows drops a trailing dot or space from a path segment when it opens a file, so ".. /x" climbs out although it
+		// reads as an ordinary folder name below. Checked before collapsing: UE 5.5/5.6 also strip "./" from the end of a
+		// segment there ("Foo./x" becomes "Foox"). The jail root's own segments are not this path's to answer for.
+		FString Requested = Cleaned;
+		Requested.RemoveFromStart(Root + TEXT("/"));
+		TArray<FString> Segments;
+		Requested.ParseIntoArray(Segments, TEXT("/"));
+		for (const FString& Segment : Segments)
+		{
+			if (Segment != TEXT("..") && Segment != TEXT(".") && (Segment.EndsWith(TEXT(".")) || Segment.EndsWith(TEXT(" "))))
+			{
+				Out.Error = FString::Printf(TEXT("'%s' has a path segment ending in a dot or a space."), *InPath);
+				return Out;
+			}
+		}
+
 		const FString Combined = FPaths::IsRelative(Cleaned) ? (Root / Cleaned) : Cleaned;
 		FString Full = FPaths::ConvertRelativePathToFull(Combined); // collapses '.' and '..'
 		FPaths::NormalizeFilename(Full);

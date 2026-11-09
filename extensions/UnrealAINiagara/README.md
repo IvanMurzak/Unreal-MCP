@@ -37,7 +37,7 @@ The extension adds its feature to the editor's RQL data layer (`rql-query` / `rq
 
 ```
 niagaraTemplates | where Kind != "Emitter" | select Name Path Kind Description
-niagara | call CreateSystem("/Game/VFX/NS_Campfire", "/Niagara/DefaultAssets/Templates/Emitters/Fountain")
+niagara | call CreateSystem("/Game/VFX/NS_Campfire", "/Niagara/DefaultAssets/Templates/Emitters/Fountain")   # or the template's Name: "Fountain"
 niagara | call AddEmitter("/Game/VFX/NS_Campfire", "/Niagara/DefaultAssets/Templates/Emitters/HangingParticulates", "Smoke")
 unreal.asset("/Game/VFX/NS_Campfire").Inputs | where Module contains "Spawn Rate"
 niagara | call SetModuleInput("/Game/VFX/NS_Campfire", "Fountain", "Add Velocity", "Velocity Speed", "random(150, 300)")
@@ -48,9 +48,9 @@ niagara | call SpawnSystem("/Game/VFX/NS_Campfire", "(0, 0, 100)", "Campfire")
 niagara | call Activate(unreal.find("Campfire"))
 ```
 
-- **Templates**: `niagaraTemplates` lists the engine's Niagara system and emitter templates and, when the Niagara Fluids plugin is enabled, its gas (fire, smoke, explosions), liquid and utility templates, with descriptions (read from the asset registry; nothing is loaded). An installed but disabled Niagara Fluids shows as one `Kind "Plugin"` row; `niagara | call EnableFluids()` enables `NiagaraFluids` and `ChaosNiagara` (its modules use ChaosNiagara types) in the project file, then restart the editor.
+- **Templates**: `niagaraTemplates` lists the engine's Niagara system and emitter templates and, when the Niagara Fluids plugin is enabled, its gas (fire, smoke, explosions), liquid and utility templates, with descriptions (read from the asset registry; nothing is loaded). An installed but disabled Niagara Fluids shows as one `Kind "Plugin"` row; `niagara | call EnableFluids()` enables `NiagaraFluids` and `ChaosNiagara` (its modules use ChaosNiagara types) in the project file and Generate Mesh Distance Fields in the project settings (the 3D gas and liquid templates do not compile without it; every mesh of the project then builds a distance field), then restart the editor.
 - **Inputs**: `SetModuleInput` takes text: numbers, vectors, `#rrggbb` colours, enum entries, `random(min, max)`, `curve(t: value, ...)` over the particle's life, `@User.X` links, asset paths, `Property=Value` for data interfaces, `default`.
-- **Collision**: `EnableCollision(system, emitter, mode)` adds and configures the Collision module on particle emitters (`RayTrace` on CPU, `SceneDepth` / `DistanceField` on GPU) and turns on world collision of Niagara Fluids grids (physics shapes of the meshes in the grid, static props included; mesh distance fields when the project generates them). Mesh distance fields need Project Settings > Rendering > Generate Mesh Distance Fields (`unreal.settings("Rendering") | set bGenerateMeshDistanceFields = true`) and an editor restart; the result names what is still missing.
+- **Collision**: `EnableCollision(system, emitter, mode)` adds and configures the Collision module on particle emitters (`RayTrace` on CPU, `SceneDepth` / `DistanceField` on GPU) and turns on world collision of Niagara Fluids grids (physics shapes of the meshes in the grid, static props included; mesh distance fields when the project generates them). Mesh distance fields need Project Settings > Rendering > Generate Mesh Distance Fields (`unreal.settings("Rendering") | set bGenerateMeshDistanceFields = true`) and an editor restart (`EnableFluids` sets it); the result names what is still missing.
 - A system that uses types of a plugin that is not loaded (Niagara Fluids without ChaosNiagara) is refused with the plugin to enable, instead of reaching the Niagara editor's assertions.
 
 ## Releases and development

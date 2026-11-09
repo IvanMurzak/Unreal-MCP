@@ -3,6 +3,8 @@
 
 #include "UnrealAINiagaraTemplates.h"
 
+#include "UnrealAINiagaraStack.h"
+
 #include "AssetRegistry/AssetData.h"
 #include "AssetRegistry/IAssetRegistry.h"
 #include "Interfaces/IPluginManager.h"
@@ -103,6 +105,51 @@ FString UnrealAINiagaraTemplates::DisabledPluginMessage(const FString& Path)
 	return IsFluidsInstalled()
 		? TEXT("the NiagaraFluids plugin (with ChaosNiagara, which its modules use) is not enabled in this project: niagara | call EnableFluids(), then restart the editor; until then use a Niagara template (niagaraTemplates | where Plugin == \"Niagara\")")
 		: TEXT("the NiagaraFluids plugin is not installed with this engine (it ships with Unreal Engine 5.1+ under Engine/Plugins/FX/NiagaraFluids)");
+}
+
+FString UnrealAINiagaraTemplates::ResolveName(const TArray<UObject*>& Rows, const FString& Name, FString& OutError)
+{
+	const FString Wanted = UnrealAINiagara::Normalize(Name);
+	TArray<const UUnrealAINiagaraTemplate*> Exact, Similar;
+	for (const UObject* Row : Rows)
+	{
+		const UUnrealAINiagaraTemplate* Template = CastChecked<UUnrealAINiagaraTemplate>(Row);
+		// A disabled plugin's own row has no asset behind it.
+		if (Template->Path.IsEmpty())
+			continue;
+		const FString Candidate = UnrealAINiagara::Normalize(Template->Name);
+		if (Candidate == Wanted)
+			Exact.Add(Template);
+		else if (Candidate.Contains(Wanted) || Wanted.Contains(Candidate))
+			Similar.Add(Template);
+	}
+	if (Exact.Num() == 1)
+		return Exact[0]->Path;
+
+	const auto Describe = [](const TArray<const UUnrealAINiagaraTemplate*>& Templates)
+	{
+		constexpr int32 MaxListed = 8;
+		TArray<FString> Lines;
+		for (int32 Index = 0; Index < FMath::Min(Templates.Num(), MaxListed); ++Index)
+			Lines.Add(FString::Printf(TEXT("%s (%s, %s)"), *Templates[Index]->Name, *Templates[Index]->Path, *Templates[Index]->Kind));
+		FString Out = FString::Join(Lines, TEXT(", "));
+		if (Templates.Num() > MaxListed)
+			Out += FString::Printf(TEXT(", and %d more"), Templates.Num() - MaxListed);
+		return Out;
+	};
+	if (Exact.Num() > 1)
+	{
+		OutError = FString::Printf(TEXT("'%s' names %d Niagara templates, pass the Path of one: %s"), *Name, Exact.Num(), *Describe(Exact));
+		return FString();
+	}
+	OutError = FString::Printf(TEXT("no Niagara template named '%s'"), *Name);
+	if (Similar.Num() > 0)
+		OutError += FString::Printf(TEXT("; similar: %s"), *Describe(Similar));
+	OutError += TEXT("; niagaraTemplates | where Name contains \"Fire\" | select Name Path Kind searches them");
+	const FString Disabled = DisabledPluginMessage(TEXT("/NiagaraFluids/"));
+	if (!Disabled.IsEmpty())
+		OutError += FString::Printf(TEXT(" (%s)"), *Disabled);
+	return FString();
 }
 
 TArray<UObject*> UnrealAINiagaraTemplates::List()

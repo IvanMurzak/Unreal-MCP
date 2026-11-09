@@ -52,6 +52,12 @@ namespace UnrealAINiagaraTemplates
 	/** The template rows, sorted by plugin, kind, category and name. */
 	TArray<UObject*> List();
 
+	/**
+	 * The Path of the row of @p Rows (see List) that @p Name names, ignoring case, spaces and underscores. Empty with
+	 * @p OutError listing the candidates when no row or several rows match.
+	 */
+	FString ResolveName(const TArray<UObject*>& Rows, const FString& Name, FString& OutError);
+
 	/** Whether the NiagaraFluids plugin is enabled in this project. */
 	bool IsFluidsEnabled();
 
