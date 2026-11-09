@@ -108,11 +108,11 @@ namespace UnrealMcpScreenshotTools
 	/** How much of a captured frame is one color. */
 	struct FFrameUniformity
 	{
-		/** At least 99% of the pixels are within a small tolerance of Color. */
-		bool bUniform = false;
 		FColor Color = FColor::Black;
 		/** Share of the pixels close to Color, in [0, 1]. */
 		double Share = 0.0;
+
+		bool IsUniform() const { return Share >= 0.99; }
 	};
 
 	/**
@@ -122,10 +122,9 @@ namespace UnrealMcpScreenshotTools
 	UNREALMCPEDITOR_API FFrameUniformity AnalyzeFrameUniformity(const TArray<FColor>& Pixels);
 
 	/**
-	 * Whether one of the enabled @p Volumes (a world's PostProcessVolumes) pins Auto Exposure Max Brightness to about 0 while
-	 * r.DefaultFeature.AutoExposure.ExtendDefaultLuminanceRange is off (@p bExtendedLuminanceRange false). The Third
-	 * Person template's volume has that override with its value meant as EV100, and its own project config turns the
-	 * CVar on; the same level in a project without the CVar renders pure white. Measured in §10 "Background rendering".
+	 * Whether an enabled, unbound one of @p Volumes (a world's PostProcessVolumes) pins Auto Exposure Max Brightness to
+	 * about 0 while r.DefaultFeature.AutoExposure.ExtendDefaultLuminanceRange is off (@p bExtendedLuminanceRange false),
+	 * which renders pure white. Why that happens: §10 "Background rendering".
 	 */
 	UNREALMCPEDITOR_API bool HasOverexposingPostProcessVolume(const TArray<IInterface_PostProcessVolume*>& Volumes, bool bExtendedLuminanceRange);
 

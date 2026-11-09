@@ -6,6 +6,7 @@
 #include "UnrealMcpLog.h"
 #include "Tools/UnrealMcpObjectRef.h"
 
+#include "Algo/MaxElement.h"
 #include "Dom/JsonObject.h"
 #include "HAL/IConsoleManager.h"
 #include "Interfaces/Interface_PostProcessVolume.h"
@@ -106,24 +107,15 @@ namespace UnrealMcpScreenshotTools
 			return Result;
 
 		// The most common value per channel, so a few overlay pixels (sprites, debug text) cannot move it.
-		TStaticArray<int32, 256> CountR(InPlace, 0), CountG(InPlace, 0), CountB(InPlace, 0);
+		int32 CountR[256] = {}, CountG[256] = {}, CountB[256] = {};
 		for (const FColor& Pixel : Pixels)
 		{
 			++CountR[Pixel.R];
 			++CountG[Pixel.G];
 			++CountB[Pixel.B];
 		}
-		const auto MostCommon = [](const TStaticArray<int32, 256>& Counts)
-		{
-			int32 Best = 0;
-			for (int32 Value = 1; Value < 256; ++Value)
-			{
-				if (Counts[Value] > Counts[Best])
-					Best = Value;
-			}
-			return (uint8)Best;
-		};
-		Result.Color = FColor(MostCommon(CountR), MostCommon(CountG), MostCommon(CountB));
+		Result.Color = FColor((uint8)(Algo::MaxElement(CountR) - CountR), (uint8)(Algo::MaxElement(CountG) - CountG),
+			(uint8)(Algo::MaxElement(CountB) - CountB));
 
 		constexpr int32 Tolerance = 4;
 		int32 Close = 0;
@@ -136,7 +128,6 @@ namespace UnrealMcpScreenshotTools
 			}
 		}
 		Result.Share = (double)Close / (double)Pixels.Num();
-		Result.bUniform = Result.Share >= 0.99;
 		return Result;
 	}
 
@@ -149,7 +140,7 @@ namespace UnrealMcpScreenshotTools
 		for (const IInterface_PostProcessVolume* Volume : Volumes)
 		{
 			const FPostProcessVolumeProperties Properties = Volume->GetProperties();
-			if (Properties.bIsEnabled && Properties.BlendWeight > 0.0f && Properties.Settings
+			if (Properties.bIsEnabled && Properties.bIsUnbound && Properties.BlendWeight > 0.0f && Properties.Settings
 				&& Properties.Settings->bOverride_AutoExposureMaxBrightness
 				&& Properties.Settings->AutoExposureMaxBrightness <= MaxBrightnessThatBlowsOut)
 			{
@@ -168,7 +159,7 @@ namespace UnrealMcpScreenshotTools
 			Uniformity.Color.R, Uniformity.Color.G, Uniformity.Color.B, Uniformity.Share * 100.0);
 		if (bOverexposingVolume)
 		{
-			Note += TEXT(" Likely cause, in the project and not in this capture: a PostProcessVolume overrides Auto Exposure "
+			Note += TEXT(" Likely cause, in the project and not in this capture: an unbound PostProcessVolume overrides Auto Exposure "
 			             "Max Brightness to about 0 while r.DefaultFeature.AutoExposure.ExtendDefaultLuminanceRange is off, so "
 			             "the player sees this too. Fix: set r.DefaultFeature.AutoExposure.ExtendDefaultLuminanceRange=True "
 			             "under [/Script/Engine.RendererSettings] in Config/DefaultEngine.ini (console-run-command applies it "
@@ -403,7 +394,7 @@ namespace UnrealMcpScreenshotTools
 				return FUnrealMcpToolResult::Error(Error);
 
 			FString Notes = ScreenshotFreshness(World, bFrameFresh, FrameReason);
-			if (Uniformity.bUniform)
+			if (Uniformity.IsUniform())
 			{
 				const IConsoleVariable* ExtendedRange = IConsoleManager::Get().FindConsoleVariable(
 					TEXT("r.DefaultFeature.AutoExposure.ExtendDefaultLuminanceRange"));

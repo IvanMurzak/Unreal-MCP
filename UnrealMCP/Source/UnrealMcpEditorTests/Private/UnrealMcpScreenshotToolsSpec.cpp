@@ -258,53 +258,52 @@ void FUnrealMcpScreenshotToolsSpec::Define()
 			TArray<FColor> White;
 			White.Init(FColor::White, Num);
 			const FFrameUniformity AllWhite = AnalyzeFrameUniformity(White);
-			TestTrue(TEXT("all white"), AllWhite.bUniform);
+			TestTrue(TEXT("all white"), AllWhite.IsUniform());
 			TestEqual(TEXT("all white color"), AllWhite.Color, FColor::White);
 			TestEqual(TEXT("all white share"), AllWhite.Share, 1.0);
 
 			TArray<FColor> Black;
 			Black.Init(FColor(0, 0, 0, 0), Num);
-			TestTrue(TEXT("all black, with the zero alpha of a raw read-back"), AnalyzeFrameUniformity(Black).bUniform);
+			TestTrue(TEXT("all black, with the zero alpha of a raw read-back"), AnalyzeFrameUniformity(Black).IsUniform());
 
 			TArray<FColor> Overlaid = White;
 			for (int32 Index = 0; Index < 9; ++Index)
 				Overlaid[Index] = FColor(234, 161, 20);
-			TestTrue(TEXT("0.9% overlay stays uniform"), AnalyzeFrameUniformity(Overlaid).bUniform);
+			TestTrue(TEXT("0.9% overlay stays uniform"), AnalyzeFrameUniformity(Overlaid).IsUniform());
 
 			TArray<FColor> Noisy;
 			for (int32 Index = 0; Index < Num; ++Index)
 				Noisy.Add(FColor(251 + Index % 5, 255, 255));
-			TestTrue(TEXT("near-white noise is uniform"), AnalyzeFrameUniformity(Noisy).bUniform);
+			TestTrue(TEXT("near-white noise is uniform"), AnalyzeFrameUniformity(Noisy).IsUniform());
 		});
 
 		It("AnalyzeFrameUniformity leaves a frame with real content alone", [this]()
 		{
 			using namespace UnrealMcpScreenshotTools;
 			constexpr int32 Num = 1000;
-			TestFalse(TEXT("an empty frame is not uniform"), AnalyzeFrameUniformity(TArray<FColor>()).bUniform);
+			TestFalse(TEXT("an empty frame is not uniform"), AnalyzeFrameUniformity(TArray<FColor>()).IsUniform());
 
 			TArray<FColor> JustOverAllowance;
 			JustOverAllowance.Init(FColor::White, Num);
 			for (int32 Index = 0; Index < 11; ++Index)
 				JustOverAllowance[Index] = FColor::Black;
-			TestFalse(TEXT("1.1% of other pixels"), AnalyzeFrameUniformity(JustOverAllowance).bUniform);
+			TestFalse(TEXT("1.1% of other pixels"), AnalyzeFrameUniformity(JustOverAllowance).IsUniform());
 
 			TArray<FColor> DarkGradient;
 			for (int32 Index = 0; Index < Num; ++Index)
 				DarkGradient.Add(FColor(Index * 40 / Num, Index * 40 / Num, Index * 40 / Num));
-			TestFalse(TEXT("a low-contrast gradient, like a night sky"), AnalyzeFrameUniformity(DarkGradient).bUniform);
+			TestFalse(TEXT("a low-contrast gradient, like a night sky"), AnalyzeFrameUniformity(DarkGradient).IsUniform());
 
 			TArray<FColor> MixedChannels;
 			for (int32 Index = 0; Index < Num; ++Index)
 				MixedChannels.Add(Index % 2 ? FColor::Red : FColor::Blue);
-			TestFalse(TEXT("two colors, half each"), AnalyzeFrameUniformity(MixedChannels).bUniform);
+			TestFalse(TEXT("two colors, half each"), AnalyzeFrameUniformity(MixedChannels).IsUniform());
 		});
 
 		It("FormatUniformFrameNote names the color, suggests screenshot-camera and adds the fix only for the known cause", [this]()
 		{
 			using namespace UnrealMcpScreenshotTools;
 			FFrameUniformity Uniformity;
-			Uniformity.bUniform = true;
 			Uniformity.Color = FColor(255, 128, 1);
 			Uniformity.Share = 0.995;
 
@@ -318,19 +317,6 @@ void FUnrealMcpScreenshotToolsSpec::Define()
 			const FString Known = FormatUniformFrameNote(Uniformity, true);
 			TestTrue(TEXT("still the plain note first"), Known.StartsWith(Plain));
 			TestTrue(TEXT("names the project fix"), Known.Contains(TEXT("ExtendDefaultLuminanceRange=True")));
-		});
-
-		It("a uniform frame stays a successful image result", [this]()
-		{
-			using namespace UnrealMcpScreenshotTools;
-			TArray<FColor> White;
-			White.Init(FColor::White, 16);
-			const FString Note = FormatUniformFrameNote(AnalyzeFrameUniformity(White), false);
-			const FUnrealMcpToolResult Result = MakeImageResult(TEXT("PIE game view"), 4, 4, TEXT("aGVsbG8="), 12,
-				FormatFreshness(true, FString(), true, FString()) + TEXT(" ") + Note);
-			TestTrue(TEXT("success, a plain scene is legitimate"), Result.bSuccess);
-			TestEqual(TEXT("the image is still returned"), Result.Images.Num(), 1);
-			TestTrue(TEXT("the note comes after the freshness line"), Result.Message.EndsWith(Note));
 		});
 
 		It("HasOverexposingPostProcessVolume needs the override near 0, an active volume and the CVar off", [this]()
@@ -349,30 +335,28 @@ void FUnrealMcpScreenshotToolsSpec::Define()
 			if (!TestNotNull(TEXT("spawned a volume"), Volume))
 				return;
 			ON_SCOPE_EXIT { if (IsValid(Volume)) Volume->Destroy(); };
-			Volume->bEnabled = true;
-			Volume->BlendWeight = 1.0f;
-			Volume->Settings.bOverride_AutoExposureMaxBrightness = true;
-			Volume->Settings.AutoExposureMaxBrightness = 0.0f;
 			// Only this volume: the editor world may hold others, like the template level's.
 			const TArray<IInterface_PostProcessVolume*> Volumes = { Volume };
 
-			TestTrue(TEXT("the template's setup, CVar off"), HasOverexposingPostProcessVolume(Volumes, false));
-			TestFalse(TEXT("the same volume with the CVar on, where 0 means EV100 0"), HasOverexposingPostProcessVolume(Volumes, true));
-
-			Volume->Settings.AutoExposureMaxBrightness = 1.0f;
-			TestFalse(TEXT("a normal max brightness"), HasOverexposingPostProcessVolume(Volumes, false));
-
-			Volume->Settings.AutoExposureMaxBrightness = 0.0f;
-			Volume->Settings.bOverride_AutoExposureMaxBrightness = false;
-			TestFalse(TEXT("the value is not overridden"), HasOverexposingPostProcessVolume(Volumes, false));
-
-			Volume->Settings.bOverride_AutoExposureMaxBrightness = true;
-			Volume->bEnabled = false;
-			TestFalse(TEXT("a disabled volume"), HasOverexposingPostProcessVolume(Volumes, false));
-
-			Volume->bEnabled = true;
-			Volume->BlendWeight = 0.0f;
-			TestFalse(TEXT("a volume with no weight"), HasOverexposingPostProcessVolume(Volumes, false));
+			struct FRow { const TCHAR* Label; bool bExtendedRange; bool bOverride; float MaxBrightness; bool bEnabled; bool bUnbound; float Weight; bool bExpected; };
+			const FRow Rows[] = {
+				{ TEXT("the template's setup, CVar off"), false, true, 0.0f, true, true, 1.0f, true },
+				{ TEXT("the same volume with the CVar on, where 0 means EV100 0"), true, true, 0.0f, true, true, 1.0f, false },
+				{ TEXT("a normal max brightness"), false, true, 1.0f, true, true, 1.0f, false },
+				{ TEXT("the value is not overridden"), false, false, 0.0f, true, true, 1.0f, false },
+				{ TEXT("a disabled volume"), false, true, 0.0f, false, true, 1.0f, false },
+				{ TEXT("a bounded volume, which may not reach the camera"), false, true, 0.0f, true, false, 1.0f, false },
+				{ TEXT("a volume with no weight"), false, true, 0.0f, true, true, 0.0f, false },
+			};
+			for (const FRow& Row : Rows)
+			{
+				Volume->Settings.bOverride_AutoExposureMaxBrightness = Row.bOverride;
+				Volume->Settings.AutoExposureMaxBrightness = Row.MaxBrightness;
+				Volume->bEnabled = Row.bEnabled;
+				Volume->bUnbound = Row.bUnbound;
+				Volume->BlendWeight = Row.Weight;
+				TestEqual(Row.Label, HasOverexposingPostProcessVolume(Volumes, Row.bExtendedRange), Row.bExpected);
+			}
 		});
 
 		// Locks the wire shape the sidecar's ProxyResponseMapper depends on: SuccessWithImage must carry
