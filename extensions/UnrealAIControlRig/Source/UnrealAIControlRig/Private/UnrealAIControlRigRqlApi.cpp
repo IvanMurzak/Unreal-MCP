@@ -18,6 +18,7 @@
 #include "Engine/SkeletalMesh.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
+#include "IAssetTools.h"
 #include "Misc/PackageName.h"
 #include "Rigs/RigHierarchy.h"
 #include "Rigs/RigHierarchyController.h"
@@ -26,6 +27,7 @@
 #include "RigVMModel/RigVMGraph.h"
 #include "RigVMModel/RigVMPin.h"
 #include "RigVMModel/Nodes/RigVMUnitNode.h"
+#include "UObject/GCObjectScopeGuard.h"
 #include "UObject/UObjectIterator.h"
 #include "Units/Hierarchy/RigUnit_GetTransform.h"
 #include "Units/Hierarchy/RigUnit_WorldSpace.h"
@@ -156,6 +158,10 @@ UControlRigBlueprint* UUnrealAIControlRigRqlApi::CreateRig(const FString& Path, 
 	const FString Package = Path.TrimStartAndEnd();
 	if (!FPackageName::IsValidLongPackageName(Package))
 		return UnrealMcpRql::Failed<UControlRigBlueprint*>(FString::Printf(TEXT("'%s' is not an asset path such as /Game/Rigs/CR_Arm"), *Path));
+	// A package path allows characters an object name does not ("CR_Arm(1)"): CreateAsset would refuse those in a modal dialog.
+	FText InvalidName;
+	if (!FName(*FPackageName::GetShortName(Package)).IsValidObjectName(InvalidName))
+		return UnrealMcpRql::Failed<UControlRigBlueprint*>(FString::Printf(TEXT("'%s' cannot name an asset: %s"), *Path, *InvalidName.ToString()));
 	if (FPackageName::DoesPackageExist(Package) || FindObject<UObject>(nullptr, *(Package + TEXT(".") + FPackageName::GetShortName(Package))))
 		return UnrealMcpRql::Failed<UControlRigBlueprint*>(FString::Printf(TEXT("'%s' already exists (copy an existing rig with editor | call CopyAsset(from, to))"), *Package));
 	USkeletalMesh* SkeletalMesh = nullptr;
@@ -169,7 +175,15 @@ UControlRigBlueprint* UUnrealAIControlRigRqlApi::CreateRig(const FString& Path, 
 		if (!Skeleton)
 			return UnrealMcpRql::Failed<UControlRigBlueprint*>(FString::Printf(TEXT("'%s' is not a SkeletalMesh or Skeleton asset (a character's mesh such as /Game/Characters/Mannequins/Meshes/SKM_Manny_Simple)"), *Mesh));
 	}
-	UControlRigBlueprint* Rig = UControlRigBlueprintFactory::CreateNewControlRigAsset(Package);
+	// Not UControlRigBlueprintFactory::CreateNewControlRigAsset: it makes the name unique first, and that step reads the
+	// name's trailing digits as an int32, so CR_F9672969617062 lands at CR_F0002147483647 and the path asked for stays empty.
+	// The check above refuses a taken path, so the rig can take exactly this name. Not UnrealMcpRql::CreateAsset either:
+	// on UE 5.8 the first AddUnit on its rig crashes the editor.
+	UControlRigBlueprintFactory* Factory = NewObject<UControlRigBlueprintFactory>();
+	FGCObjectScopeGuard FactoryGuard(Factory);
+	Factory->ParentClass = UControlRig::StaticClass();
+	UControlRigBlueprint* Rig = Cast<UControlRigBlueprint>(IAssetTools::Get().CreateAsset(
+		FPackageName::GetShortName(Package), FPackageName::GetLongPackagePath(Package), nullptr, Factory));
 	if (!Rig)
 		return UnrealMcpRql::Failed<UControlRigBlueprint*>(FString::Printf(TEXT("could not create a Control Rig at %s"), *Package));
 	if (Skeleton)

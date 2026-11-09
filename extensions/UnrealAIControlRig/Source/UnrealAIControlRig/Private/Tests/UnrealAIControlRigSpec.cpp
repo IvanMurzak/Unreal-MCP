@@ -162,6 +162,40 @@ void FUnrealAIControlRigSpec::Define()
 				TestTrue(*FString::Printf(TEXT("lists %s"), Method), Schema.Contains(FString(Method) + TEXT("(")));
 		});
 
+		It("creates a rig at exactly the path asked for when its name ends in many digits", [this]()
+		{
+			// The engine's unique-name step reads trailing digits as an int32: on Windows ...F9672969617062 becomes ...F0002147483647.
+			const FString Path = TEXT("/Game/RqlSpec/CR_RqlSpecDigits_") + FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(8) + TEXT("F9672969617062");
+			const FString Create = SpecCall(TEXT("controlRig"), TEXT("CreateRig"), { SpecLit(Path) });
+			const FString Delete = SpecCall(TEXT("editor"), TEXT("DeleteAsset"), { SpecLit(Path), TEXT(R"({"lit":true})") });
+
+			// controlRig | call CreateRig("@RIG@")
+			TestTrue(TEXT("rig created"), UnrealMcpRqlTools::RunPlan(Create, true));
+			UControlRigBlueprint* Rig = SpecAsset<UControlRigBlueprint>(Path);
+			if (!TestNotNull(TEXT("the rig is at the path asked for"), Rig))
+				return;
+			TestNotNull(TEXT("the rig has a graph"), Rig->GetModel());
+			// editor | call DeleteAsset("@RIG@", true)
+			TestTrue(TEXT("rig deleted"), UnrealMcpRqlTools::RunPlan(Delete, true));
+
+			// The deleted rig's path is free again: the same call creates it there.
+			TSharedPtr<FJsonObject> Again;
+			const bool bAgain = UnrealMcpRqlTools::RunPlan(Create, true, &Again);
+			TestTrue(*FString::Printf(TEXT("rig created again (%s)"), *SpecJson(Again).Left(400)), bAgain);
+			if (TestNotNull(TEXT("the new rig is at the same path"), SpecAsset<UControlRigBlueprint>(Path)))
+				TestTrue(TEXT("new rig deleted"), UnrealMcpRqlTools::RunPlan(Delete, true));
+		});
+
+		It("refuses a rig name no asset can have, and creates nothing", [this]()
+		{
+			const FString Path = TEXT("/Game/RqlSpec/CR_RqlSpecBadName_") + FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(8) + TEXT("(1)");
+			// controlRig | call CreateRig("@RIG@")
+			TSharedPtr<FJsonObject> Result;
+			TestFalse(TEXT("refused"), UnrealMcpRqlTools::RunPlan(SpecCall(TEXT("controlRig"), TEXT("CreateRig"), { SpecLit(Path) }), true, &Result));
+			TestTrue(*FString::Printf(TEXT("says why (%s)"), *SpecJson(Result).Left(400)), SpecJson(Result).Contains(TEXT("cannot name an asset")));
+			TestNull(TEXT("no rig"), SpecAsset<UControlRigBlueprint>(Path));
+		});
+
 		It("builds a two-bone arm with an IK target control; refuses unknown elements and a taken path", [this]()
 		{
 			const FString Name = TEXT("CR_RqlSpecArm_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
