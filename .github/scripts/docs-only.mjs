@@ -25,7 +25,7 @@ import { fileURLToPath } from "node:url";
 
 /** @param {string} path repo-relative, forward slashes */
 export function isDocsPath(path) {
-  return path === "AGENTS.md" || path.startsWith("docs/");
+  return path === "AGENTS.md" || path.startsWith("docs/") || path.startsWith(".claude/") || path.startsWith(".agents/");
 }
 
 /** @param {readonly string[]} files */
