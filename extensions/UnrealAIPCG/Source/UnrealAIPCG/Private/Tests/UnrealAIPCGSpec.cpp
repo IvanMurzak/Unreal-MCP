@@ -19,8 +19,10 @@
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
 #include "EngineUtils.h"
+#include "Elements/PCGStaticMeshSpawner.h"
 #include "Engine/StaticMesh.h"
 #include "HAL/IConsoleManager.h"
+#include "MeshSelectors/PCGMeshSelectorWeighted.h"
 #include "PCGComponent.h"
 #include "PCGGraph.h"
 #include "PCGNode.h"
@@ -120,7 +122,6 @@ namespace UnrealAIPCGSpecLocal
 		return TEXT("<no setting>");
 	}
 
-	/** editor | call DeleteAsset(path, true): the test leaves no unsaved asset behind. */
 	/** Wires graph @p G: Create Points Grid -> Static Mesh Spawner of @p Mesh -> Output. */
 	bool AddMeshGrid(const FString& G, const FString& Mesh)
 	{
@@ -131,6 +132,7 @@ namespace UnrealAIPCGSpecLocal
 			&& Run(TEXT("SetNodeSetting"), { Lit(G), Lit(TEXT("StaticMeshSpawner")), Lit(TEXT("Meshes")), Lit(Mesh) });
 	}
 
+	/** editor | call DeleteAsset(path, true): the test leaves no unsaved asset behind. */
 	bool DeleteAsset(const FString& Path)
 	{
 		return UnrealMcpRqlTools::RunPlan(FString(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"DeleteAsset","args":[{"lit":"@PATH@"},{"lit":true}]}]})RQL")).Replace(TEXT("@PATH@"), *Path), true);
@@ -480,8 +482,8 @@ void FUnrealAIPCGSpec::Define()
 		{
 			using namespace UnrealAIPCGSpecLocal;
 			// A mesh nothing else loads: the spawner must load it asynchronously, which only a frame would finish.
-			const FString Mesh = TEXT("/Engine/ArtTools/RenderToTexture/Meshes/S_1_Unit_Sphere_HI");
-			if (FindObject<UStaticMesh>(nullptr, *(Mesh + TEXT(".S_1_Unit_Sphere_HI"))))
+			const FString Mesh = TEXT("/Engine/ArtTools/RenderToTexture/Meshes/S_1_Unit_Sphere_HI.S_1_Unit_Sphere_HI");
+			if (FindObject<UStaticMesh>(nullptr, *Mesh))
 			{
 				AddWarning(TEXT("the mesh is already loaded in this editor: the stall this covers cannot happen"));
 			}
@@ -491,7 +493,18 @@ void FUnrealAIPCGSpec::Define()
 			const FString G = TEXT("/Game/RqlSpecPCG/PCG_Load_") + Id;
 			const FString Label = TEXT("RqlSpecPCGLoad_") + Id;
 			TestTrue(TEXT("created"), Run(TEXT("CreateGraph"), { Lit(G) }));
-			TestTrue(TEXT("a mesh on each grid point"), AddMeshGrid(G, Mesh));
+			TestTrue(TEXT("a mesh on each grid point"), AddMeshGrid(G, TEXT("/Engine/BasicShapes/Cube")));
+			// SetNodeSetting loads the mesh it is given: write the path directly, so it is still unloaded at Generate.
+			UPCGGraph* Graph = LoadGraph(G);
+			const UPCGNode* Spawner = Graph ? UnrealAIPCG::FindNode(*Graph, TEXT("StaticMeshSpawner")) : nullptr;
+			const UPCGStaticMeshSpawnerSettings* Settings = Spawner ? Cast<UPCGStaticMeshSpawnerSettings>(Spawner->GetSettings()) : nullptr;
+			UPCGMeshSelectorWeighted* Selector = Settings ? Cast<UPCGMeshSelectorWeighted>(Settings->MeshSelectorParameters) : nullptr;
+			if (!TestNotNull(TEXT("the spawner's weighted mesh selector"), Selector))
+			{
+				DeleteAsset(G);
+				return;
+			}
+			Selector->MeshEntries = { FPCGMeshSelectorWeightedEntry(TSoftObjectPtr<UStaticMesh>(FSoftObjectPath(Mesh)), 1) };
 			TestTrue(TEXT("volume placed"), Run(TEXT("SpawnVolume"), { Lit(G), Lit(TEXT("(0, 0, 0)")), Lit(TEXT("(2000, 2000, 1000)")), Lit(Label) }));
 
 			// pcg | call Generate("@LABEL@", -1, 20): the stall ran out this whole budget and reported Generated false.

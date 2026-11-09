@@ -80,7 +80,8 @@ namespace UnrealAIPCGRqlApiLocal
 			if (Variable && Variable->GetInt() != Value)
 			{
 				Previous = Variable->GetInt();
-				Priority = static_cast<EConsoleVariableFlags>(FMath::Max<uint32>(Variable->GetFlags() & ECVF_SetByMask, ECVF_SetByCode));
+				PreviousFlags = Variable->GetFlags();
+				Priority = static_cast<EConsoleVariableFlags>(FMath::Max<uint32>(PreviousFlags & ECVF_SetByMask, ECVF_SetByCode));
 				Variable->Set(Value, Priority);
 				bRefused = Variable->GetInt() != Value;
 			}
@@ -89,7 +90,10 @@ namespace UnrealAIPCGRqlApiLocal
 		~FScopedConsoleValue()
 		{
 			if (Previous.IsSet())
+			{
 				Variable->Set(*Previous, Priority);
+				Variable->SetFlags(PreviousFlags); // a raised priority would drop a later, lower-priority setting
+			}
 		}
 
 		/** The variable exists and could not be set. */
@@ -98,6 +102,7 @@ namespace UnrealAIPCGRqlApiLocal
 	private:
 		IConsoleVariable* Variable;
 		EConsoleVariableFlags Priority = ECVF_SetByCode;
+		EConsoleVariableFlags PreviousFlags = ECVF_Default;
 		TOptional<int32> Previous;
 		bool bRefused = false;
 	};
@@ -655,7 +660,7 @@ FUnrealAIPCGGenerateResult UUnrealAIPCGRqlApi::Generate(AActor* Actor, int32 See
 	Result.Meshes = Total.MeshLines();
 	Log.TakeInto(Result);
 	if (!Result.Generated)
-		Result.Errors.Add(FString::Printf(TEXT("still generating after %.0f s (a call waits at most %.0f s, so the editor stays responsive): it goes on in the editor; read the Generated member of its PCG component until IsGenerating is false, without calling Generate again"), Result.Seconds, GenerateMaxWaitSeconds));
+		Result.Errors.Add(FString::Printf(TEXT("still generating after %.0f s (a call waits up to TimeoutSeconds, at most %.0f s, so the reply arrives): it goes on in the editor; read the Generated member of its PCG component until IsGenerating is false, without calling Generate again"), Result.Seconds, GenerateMaxWaitSeconds));
 	return Result;
 }
 

@@ -71,10 +71,12 @@ void FUnrealMcpPythonToolsSpec::Define()
 
 	It("survives garbage collection of a kept static method in a reference cycle (the level-save crash)", [this]()
 	{
-		// The engine's bound static method type inherits a weak-reference offset past its own memory: until the plugin
-		// repairs it, the collector wrote through the bytes after such an object and the editor crashed here.
-		const FUnrealMcpToolResult Repaired = Run(TEXT("type(unreal.SystemLibrary.get_engine_version).__weakrefoffset__"));
-		TestTrue(TEXT("the type holds no weak references"), Repaired.bSuccess && Repaired.Message.StartsWith(TEXT("0")));
+		// The engine's bound method type inherits a weak-reference offset past its own memory: until the plugin repairs
+		// it, the collector wrote through the bytes after such an object and the editor could crash here.
+		const FUnrealMcpToolResult Repaired = Run(TEXT(
+			"closure_type = type(unreal.SystemLibrary.get_engine_version)\n"
+			"'inside' if closure_type.__weakrefoffset__ < closure_type.__basicsize__ else 'past the object'"));
+		TestTrue(TEXT("its weak-reference offset is inside the object"), Repaired.bSuccess && Repaired.Message.StartsWith(TEXT("inside")));
 
 		const FUnrealMcpToolResult R = Run(TEXT(
 			"import gc\n"
@@ -89,7 +91,7 @@ void FUnrealMcpPythonToolsSpec::Define()
 			"'collected'"));
 		TestTrue(TEXT("success"), R.bSuccess);
 		TestTrue(TEXT("collected"), R.Message.StartsWith(TEXT("collected")));
-		// What a level save does: the snippet's scope above is collected here at the latest.
+		// What a level save does (from UE 5.6 an Unreal GC also runs a Python one).
 		CollectGarbage(GARBAGE_COLLECTION_KEEPFLAGS);
 		const FUnrealMcpToolResult After = Run(TEXT("1 + 1"));
 		TestTrue(TEXT("Python still runs"), After.bSuccess && After.Message.StartsWith(TEXT("2")));
