@@ -1,0 +1,19 @@
+bridge/src/Host/SidecarHost.cs
+  s_decbf33e00f561::t_0184a43e1eb868 749-754
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.13",
+  "base_commit_sha": "93aa74647c4531f0bcd1bb81c00546c947276c41",
+  "prompts": {},
+  "sessions": {
+    "s_decbf33e00f561": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-add7e8eca30cd7a17",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

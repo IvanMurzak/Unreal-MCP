@@ -1,0 +1,33 @@
+UnrealMCP/Source/UnrealMcpRql/Private/UnrealMcpRqlCore.cpp
+  s_b4e88c47e182f2::t_dbf0edca5221c4 986-1002,1007-1011,1093-1094,1120-1137
+UnrealMCP/Source/UnrealMcpRql/Private/UnrealMcpRqlSession.cpp
+  s_b4e88c47e182f2::t_dda200ed706459 667-668
+UnrealMCP/Source/UnrealMcpRql/Private/UnrealMcpRqlSources.h
+  s_b4e88c47e182f2::t_31bdba8601eb0e 34-36
+UnrealMCP/Source/UnrealMcpRql/Private/UnrealMcpRqlTypes.h
+  s_b4e88c47e182f2::t_a6f43adf50ed81 10,123-133,193
+docs/rql.md
+  s_b4e88c47e182f2::t_7e1c789293e197 163
+extensions/UnrealAIControlRig/Source/UnrealAIControlRig/Private/Tests/UnrealAIControlRigSpec.cpp
+  s_b4e88c47e182f2::t_30855fb134e1ac 400-401
+extensions/UnrealAIControlRig/Source/UnrealAIControlRig/Private/UnrealAIControlRigGraph.cpp
+  s_b4e88c47e182f2::t_19510b33aeabc5 136,143,563,615
+extensions/UnrealAIControlRig/Source/UnrealAIControlRig/Private/UnrealAIControlRigRqlApi.cpp
+  s_b4e88c47e182f2::t_09862fe1fb1251 10,123-125,321,331
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "79e084652eec3d16737638bed716c203b41d45ae",
+  "prompts": {},
+  "sessions": {
+    "s_b4e88c47e182f2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ef0d1b43-913a-487a-95df-8feba021ec1f",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

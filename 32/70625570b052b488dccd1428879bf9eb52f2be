@@ -1,0 +1,40 @@
+.github/workflows/release.yml
+  s_c34224420978bf::t_34fc0ba9b17550 27-32
+  s_c34224420978bf::t_d90e4609924274 675-680,682-684,686,751-807,854,857-865,872-874,896-900,911-916,919
+cli/src/lib/install-plugin.ts
+  s_c34224420978bf::t_83ec8a01711c6b 44
+  s_c34224420978bf::t_7e2fba718509ba 26-29,33-43,45-51,121,126-133,136-137,186-194,197
+docs/RELEASING.md
+  s_c34224420978bf::t_efe13979d93ed4 13
+  s_c34224420978bf::t_0ed52f42ad8576 16-27,29-33,48,74-77,167-171,252-258
+README.md
+  s_c34224420978bf::t_96c837ba7bba8c 106,132,141,337,347
+cli/README.md
+  s_c34224420978bf::t_51a987316c52bb 36-41,50,61
+cli/src/lib/plugin-source.ts
+  s_c34224420978bf::t_9127eee9a6e001 6,10,30-33,55-57,61-62,64-65,119-121,147,165,184-200
+cli/tests/install-plugin.test.ts
+  s_c34224420978bf::t_ccf126ddea73f5 118,122-124,132-135,141-145,152-153,161-188
+cli/tests/plugin-source.test.ts
+  s_c34224420978bf::t_6e575a4a33edfb 6-7,38-40,66-67,79-88
+cli/tests/update.test.ts
+  s_c34224420978bf::t_8f725b73bd339b 150,158-160,171-176
+docs/ARCHITECTURE.md
+  s_c34224420978bf::t_939d82868c7f1f 566,688-690,706-707,929-932
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "3270625570b052b488dccd1428879bf9eb52f2be",
+  "prompts": {},
+  "sessions": {
+    "s_c34224420978bf": {
+      "agent_id": {
+        "tool": "github-copilot-cli",
+        "id": "2ddfc6c3-5016-4d25-a1b7-48742281f2bd",
+        "model": "gpt-5.4"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

@@ -1,0 +1,52 @@
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpRqlEnhancedInputSpec.cpp
+  s_b4e88c47e182f2::t_7b7c9167362051 12-98
+  s_b4e88c47e182f2::t_3f9d2381b4d3f9 9-11
+  s_b4e88c47e182f2::t_ca3cc527103f40 99-101
+  s_b4e88c47e182f2::t_191917eaffed70 1-8,102-109
+UnrealMCP/Source/UnrealMcpEditor/Private/Session/UnrealMcpModalWatch.h
+  s_b4e88c47e182f2::t_fae2f7be40ea59 1-58
+UnrealMCP/Source/UnrealMcpEditor/Private/Session/UnrealMcpModalWatch.cpp
+  s_b4e88c47e182f2::t_04bdaa7e0dc278 1-79
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpModalWatchSpec.cpp
+  s_b4e88c47e182f2::t_13d2cfebe9e307 1-99
+UnrealMCP/Source/UnrealMcpRuntime/Private/Dispatch/UnrealMcpGameThreadDispatcher.h
+  s_b4e88c47e182f2::t_22a931d3775b29 33-39
+UnrealMCP/Source/UnrealMcpEditor/Private/UnrealMcpEditorCoordinator.cpp
+  s_b4e88c47e182f2::t_2933fd9dbd8e4f 37,616-621,869
+UnrealMCP/Source/UnrealMcpEditor/Private/UnrealMcpEditorCoordinator.h
+  s_b4e88c47e182f2::t_8222dbeb42a28a 26,106-108
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpDispatcherSpec.cpp
+  s_b4e88c47e182f2::t_491bd230a98eee 11,256-295
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpRqlAdaptersSpec.cpp
+  s_b4e88c47e182f2::t_644cf7a885e019 462-490,831-844
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpRqlSpecFixtures.cpp
+  s_b4e88c47e182f2::t_a0f7bac16911c8 12-28
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpRqlSpecFixtures.h
+  s_b4e88c47e182f2::t_b3031df5708119 91-100,144,196-209
+UnrealMCP/Source/UnrealMcpRql/Private/UnrealMcpRqlTypes.cpp
+  s_b4e88c47e182f2::t_35dc8780b336c3 67-79,89,91,95-103,235-237,269,276-278,360,859-863,868-870,963-965,1094-1095,1136,1149
+UnrealMCP/Source/UnrealMcpRql/Private/UnrealMcpRqlTypes.h
+  s_b4e88c47e182f2::t_c75e99ee095a4f 104-106
+UnrealMCP/Source/UnrealMcpRuntime/Private/Dispatch/UnrealMcpGameThreadDispatcher.cpp
+  s_b4e88c47e182f2::t_218373d320790a 13,15,21-37,59-60,127-128,137-159,221-230,290,348-352
+docs/ARCHITECTURE.md
+  s_b4e88c47e182f2::t_bcffde82650a72 613-622,1353-1356
+docs/rql.md
+  s_b4e88c47e182f2::t_4dae6d9cf8700b 71-75
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "958d6a6063047b6df0cf693aaf409b136b53fa88",
+  "prompts": {},
+  "sessions": {
+    "s_b4e88c47e182f2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ef0d1b43-913a-487a-95df-8feba021ec1f",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

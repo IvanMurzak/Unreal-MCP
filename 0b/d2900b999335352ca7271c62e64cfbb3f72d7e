@@ -1,0 +1,93 @@
+extensions/UnrealAIControlRig/Source/UnrealAIControlRig/Private/UnrealAIControlRigRqlApi.h
+  s_b4e88c47e182f2::t_58509fa939e0f7 11,15-17,19-20,28,30,40,43-79
+extensions/UnrealAIControlRig/Source/UnrealAIControlRig/Private/UnrealAIControlRigModule.cpp
+  s_b4e88c47e182f2::t_8934b8a0c6c47d 39-44
+  s_b4e88c47e182f2::t_e1c2ee4bf2ae7f 60-62,64,66-74
+  s_b4e88c47e182f2::t_c80684e036f459 9-10,12,14,155-164,167-175,178-189
+  s_b4e88c47e182f2::t_dc571ff76f1132 150-154,190-191,194-200,203-219
+extensions/UnrealAIControlRig/Source/UnrealAIControlRig/Private/UnrealAIControlRigGraph.cpp
+  s_b4e88c47e182f2::t_8d41b860a46884 304,306-313
+  s_b4e88c47e182f2::t_291d226aec9d03 601-602
+  s_b4e88c47e182f2::t_f827a53f95abf5 1-303,305,314-600,603-627
+extensions/UnrealAIControlRig/Source/UnrealAIControlRig/Private/UnrealAIControlRigUnits.h
+  s_b4e88c47e182f2::t_867c8ccad9d73f 1-67
+extensions/UnrealAIControlRig/Source/UnrealAIControlRig/Private/UnrealAIControlRigUnits.cpp
+  s_b4e88c47e182f2::t_f211454910a06b 1-235
+scripts/test_run_extension_e2e.py
+  s_b4e88c47e182f2::t_1ac2a7c3ed5153 311-357,359-360
+extensions/UnrealAIControlRig/Source/UnrealAIControlRig/Private/UnrealAIControlRigRqlApi.cpp
+  s_b4e88c47e182f2::t_2b97c36d1ba008 7-9,11-12,15,25-26,29-30,59-60,62-67,70-71,73-77,80-81,83-84,90,96-105,107-122,125,128-129,201,204-367
+  s_b4e88c47e182f2::t_96dfe37009a193 198
+  s_b4e88c47e182f2::t_1ea53c2124ade9 123-124,126-127,130-131,176-178,184,368-379
+extensions/UnrealAIControlRig/Source/UnrealAIControlRig/Private/UnrealAIControlRigAnim.h
+  s_b4e88c47e182f2::t_1ca57bb25284a9 1-32
+extensions/UnrealAIControlRig/Source/UnrealAIControlRig/UnrealAIControlRig.Build.cs
+  s_b4e88c47e182f2::t_e8a89067e1fb21 38-46
+extensions/UnrealAIControlRig/Source/UnrealAIControlRig/Private/Tests/UnrealAIControlRigSpec.cpp
+  s_b4e88c47e182f2::t_87e6f8eb853f72 10-11,13,17-19,25,27,32,34
+  s_b4e88c47e182f2::t_9990513766dc0a 160-161
+  s_b4e88c47e182f2::t_73d3138006f395 465-469
+  s_b4e88c47e182f2::t_da01732c3aa13c 127-128
+  s_b4e88c47e182f2::t_3aa79abe20ac40 47-101,108-109
+  s_b4e88c47e182f2::t_074cdbe9e11a1b 244-453
+extensions/UnrealAIControlRig/Source/UnrealAIControlRig/Private/UnrealAIControlRigGraph.h
+  s_b4e88c47e182f2::t_93f8e1c7ef166f 1-54,56,58-83
+  s_b4e88c47e182f2::t_9447f2f6112685 55,57
+extensions/UnrealAIControlRig/Source/UnrealAIControlRig/Private/UnrealAIControlRigAnim.cpp
+  s_b4e88c47e182f2::t_37135784ec15c7 1-623
+  s_b4e88c47e182f2::t_61c4f1858e5d0c 624-626
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpAvailableExtensionsSpec.cpp
+  s_b4e88c47e182f2::t_4244c2c4562b0c 93
+UnrealMCP/Source/UnrealMcpRql/Private/UnrealMcpAvailableExtensions.cpp
+  s_b4e88c47e182f2::t_d995176095340a 43-44
+extensions/UnrealAIControlRig/README.md
+  s_b4e88c47e182f2::t_5f6ad1fc8195c1 3,11-12,35-62,65-69,72-74
+extensions/UnrealAIControlRig/Tests/e2e/tools/control-rig-lookat-1-create.e2e.json
+  s_b4e88c47e182f2::t_0d05319d1bf61e 1-10
+extensions/UnrealAIControlRig/Tests/e2e/tools/control-rig-lookat-2-target.e2e.json
+  s_b4e88c47e182f2::t_703f0011430abd 1-10
+extensions/UnrealAIControlRig/Tests/e2e/tools/control-rig-lookat-3-weight.e2e.json
+  s_b4e88c47e182f2::t_e01de16ad35ccc 1-10
+extensions/UnrealAIControlRig/Tests/e2e/tools/control-rig-lookat-4-aim.e2e.json
+  s_b4e88c47e182f2::t_54541df4db1d26 1-10
+extensions/UnrealAIControlRig/Tests/e2e/tools/control-rig-lookat-5-anim-blueprint.e2e.json
+  s_b4e88c47e182f2::t_d24cd4c97b0c84 1-10
+extensions/UnrealAIControlRig/Tests/e2e/tools/control-rig-lookat-6-wire.e2e.json
+  s_b4e88c47e182f2::t_f996de67c85059 1-10
+extensions/UnrealAIControlRig/Tests/e2e/tools/control-rig-lookat-7-track.e2e.json
+  s_b4e88c47e182f2::t_27ebb32cfd0dbc 1-10
+extensions/UnrealAIControlRig/Tests/e2e/tools/control-rig-lookat-8-compile.e2e.json
+  s_b4e88c47e182f2::t_52dbb00945038f 1-10
+extensions/UnrealAIControlRig/Tests/e2e/tools/control-rig-lookat-8-readback.e2e.json
+  s_b4e88c47e182f2::t_e50955fffb65fd 1-10
+extensions/UnrealAIControlRig/Tests/e2e/tools/control-rig-lookat-8-unknown-unit.e2e.json
+  s_b4e88c47e182f2::t_94091e368e4ac3 1-11
+extensions/UnrealAIControlRig/Tests/e2e/tools/control-rig-lookat-9-cleanup-abp.e2e.json
+  s_b4e88c47e182f2::t_49b9f19fe4b32a 1-10
+extensions/UnrealAIControlRig/Tests/e2e/tools/control-rig-lookat-9-cleanup-rig.e2e.json
+  s_b4e88c47e182f2::t_3d614118a418d7 1-10
+extensions/UnrealAIControlRig/Tests/e2e/tools/control-rig-units-query.e2e.json
+  s_b4e88c47e182f2::t_c50b53ab66466c 1-10
+extensions/UnrealAIControlRig/UnrealAIControlRig.uplugin
+  s_b4e88c47e182f2::t_bd60314004a7e2 6
+extensions/UnrealAIControlRig/extension.json
+  s_b4e88c47e182f2::t_bf066193cbe4a4 4
+tests/automation-inventory.json
+  s_b4e88c47e182f2::t_68778f40e4d097 2
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "0bd2900b999335352ca7271c62e64cfbb3f72d7e",
+  "prompts": {},
+  "sessions": {
+    "s_b4e88c47e182f2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ef0d1b43-913a-487a-95df-8feba021ec1f",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

@@ -1,0 +1,26 @@
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/SUnrealMcpAgentWidgets.h
+  s_ead1ecca7180ec::t_21495b3420d127 214-226,228-233,235-241,243,245-248,252-259,262,264,266-275
+  s_ead1ecca7180ec::t_0809fd00297d8f 249-251,260
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/SUnrealMcpMainWindow.cpp
+  s_ead1ecca7180ec::t_c40cc76feb5547 478-480,526-564
+  s_ead1ecca7180ec::t_d3e8b22781ee1a 237,239-243,246-279,282-287,290-327,329-330,332-334,336,565-566
+  s_ead1ecca7180ec::t_57ab45b179ff5e 280-281,288-289
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/SUnrealMcpMainWindow.h
+  s_ead1ecca7180ec::t_d7f98d7b98363f 59-62,65,67-71
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.7",
+  "base_commit_sha": "bb5c62457d6aaa01e585af5ba135c8b5b9bc6dff",
+  "prompts": {},
+  "sessions": {
+    "s_ead1ecca7180ec": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "15b53224-c7bf-4a0c-a438-a39890763358",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

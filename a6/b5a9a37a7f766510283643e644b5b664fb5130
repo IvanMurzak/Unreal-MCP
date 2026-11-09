@@ -1,0 +1,41 @@
+cli/tests/cli.test.ts
+  s_e19ebe83cb6110::t_fe1bf67d70968b 77-84
+cli/src/index.ts
+  s_e19ebe83cb6110::t_5d27753c19c1ec 28-32
+cli/README.md
+  s_e19ebe83cb6110::t_7ed7ec27af058a 97,146-149,159-164,175
+cli/extensions.catalog.json
+  s_e19ebe83cb6110::t_3b7d81cb016e6c 93
+cli/src/commands/install-extension.ts
+  s_e19ebe83cb6110::t_1488dea4baed10 11,47
+cli/src/lib.ts
+  s_e19ebe83cb6110::t_a90fa666127ad8 169,247-248
+cli/src/lib/install-extension.ts
+  s_e19ebe83cb6110::t_24a122eecc2be6 12-18,22,24,27,49-54,69,113,128,135-178,186-188,190-195,217,239,272,288-293
+cli/src/lib/types.ts
+  s_e19ebe83cb6110::t_3e8962edcb20af 793-802,841-845,862,864-865,901,903-904
+cli/src/utils/extension-source.ts
+  s_e19ebe83cb6110::t_b484aedd33c8f1 104,143,146-235
+cli/src/utils/extensions-catalog.ts
+  s_e19ebe83cb6110::t_32837365665d53 66-71,282,315
+cli/tests/install-extension.test.ts
+  s_e19ebe83cb6110::t_35b577ebc66e0b 20-21,91-151,186,477,479,482-484,489,493,495,497,499-500,527-733
+docs/EXTENSIONS.md
+  s_e19ebe83cb6110::t_4b07106e8b904a 428-431,447-453
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "a6b5a9a37a7f766510283643e644b5b664fb5130",
+  "prompts": {},
+  "sessions": {
+    "s_e19ebe83cb6110": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "514df444-7709-4c0d-be94-41a9023e64ee",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

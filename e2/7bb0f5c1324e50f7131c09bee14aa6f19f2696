@@ -1,0 +1,42 @@
+UnrealMCP/Source/UnrealMcpRuntime/Private/Tools/UnrealMcpWorldProvider.h
+  s_7bc72ecaebd05d::t_27fc1bac081d23 20-24,30,34,37-38,40-41
+  s_7bc72ecaebd05d::t_e8ee62dcf9e3af 17
+UnrealMCP/Source/UnrealMcpRuntime/Private/UnrealMcpRuntimeSubsystem.cpp
+  s_7bc72ecaebd05d::t_e8ee62dcf9e3af 58-60,183-185
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpRqlSpec.cpp
+  s_7bc72ecaebd05d::t_b924d63c00ede7 312-333
+UnrealMCP/Source/UnrealMcpEditor/Private/Tools/UnrealMcpPythonTools.cpp
+  s_7bc72ecaebd05d::t_13bf719227b774 45,48
+  s_7bc72ecaebd05d::t_151454cbd89751 8,12,42-44,46-47,49-90,135-136,195-198,200-201,216
+UnrealMCP/Source/UnrealMcpRql/Private/UnrealMcpRqlEditorApi.cpp
+  s_7bc72ecaebd05d::t_b1a154d75a954b 22,131-142,151-153
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpRuntimeSubsystemSpec.cpp
+  s_7bc72ecaebd05d::t_2616ecc4d7865a 167-169,171,173,175-176,178-181,184,186-216
+UnrealMCP/Source/UnrealMcpRuntime/Private/Tools/UnrealMcpWorldProvider.cpp
+  s_7bc72ecaebd05d::t_27fc1bac081d23 8-15,19,22,24-25,28,30
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpPythonToolsSpec.cpp
+  s_7bc72ecaebd05d::t_26e892849970bb 11-13,108-122,125,127,129-137,141,143-144
+  s_7bc72ecaebd05d::t_51fbbcf28a2282 138-140,142,145
+  s_7bc72ecaebd05d::t_68c7f551c7f9d9 146
+  s_7bc72ecaebd05d::t_b58bee2a54d521 123-124,126,128
+docs/ARCHITECTURE.md
+  s_7bc72ecaebd05d::t_1f35935b0be07b 1351-1352,1360-1363
+UnrealMCP/Source/UnrealMcpEditor/Private/UnrealMcpEditorCoordinator.cpp
+  s_7bc72ecaebd05d::t_e8ee62dcf9e3af 66,816
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e27bb0f5c1324e50f7131c09bee14aa6f19f2696",
+  "prompts": {},
+  "sessions": {
+    "s_7bc72ecaebd05d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "40274cb2-edf8-49ba-9a73-33b83cb5be53",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

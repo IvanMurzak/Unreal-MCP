@@ -1,0 +1,47 @@
+scripts/extension_suite.py
+  s_eb8bcde0be96a2::t_ebd4235fe8f402 9,25,27-32,34-40,42-59,224-231,268,274-279,282-294,296-301
+  s_eb8bcde0be96a2::t_6b6cbead8b5725 144-149,181,184-185,280-281,295
+  s_eb8bcde0be96a2::t_9f0d53c0f7a9ec 26,33,41,60-65,265
+cli/src/lib/install-extension.ts
+  s_eb8bcde0be96a2::t_3094e17c263a80 119-120
+  s_eb8bcde0be96a2::t_c5dfb95950a27f 107-108,116-118,201-206,412
+cli/src/lib/types.ts
+  s_eb8bcde0be96a2::t_c5dfb95950a27f 795
+.github/workflows/release_extensions.yml
+  s_eb8bcde0be96a2::t_ebd4235fe8f402 92
+  s_eb8bcde0be96a2::t_ce32fa528c0d85 7,31,42,45-47,51-52,54,111,121,123-127
+.github/workflows/release.yml
+  s_eb8bcde0be96a2::t_ebd4235fe8f402 339
+  s_eb8bcde0be96a2::t_6b6cbead8b5725 343-348
+cli/src/utils/extensions-index.ts
+  s_eb8bcde0be96a2::t_c5dfb95950a27f 14-15,60-61,95
+scripts/test_extension_monorepo.py
+  s_eb8bcde0be96a2::t_9f0d53c0f7a9ec 3,14-27
+.github/workflows/test_pull_request.yml
+  s_eb8bcde0be96a2::t_ebd4235fe8f402 349
+  s_eb8bcde0be96a2::t_6b6cbead8b5725 353-358
+scripts/extension_release.py
+  s_eb8bcde0be96a2::t_c5dfb95950a27f 114-115
+cli/tests/extensions-index.test.ts
+  s_eb8bcde0be96a2::t_3094e17c263a80 26,35,67-88
+docs/EXTENSION-MONOREPO.md
+  s_eb8bcde0be96a2::t_ce32fa528c0d85 70-71,75-76,90
+tests/automation-inventory.json
+  s_eb8bcde0be96a2::t_33e0ff31d0d285 8-39
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "2b19d2539f2103fd97f25b289b77e6b5ec0e88ba",
+  "prompts": {},
+  "sessions": {
+    "s_eb8bcde0be96a2": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14267-6fec-7a30-97a7-931925a48014",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

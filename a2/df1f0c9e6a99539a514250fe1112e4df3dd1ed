@@ -1,0 +1,36 @@
+docs/EXTENSIONS.md
+  s_3e0a2681fef788::t_408d968d5166b2 3-11
+  s_3e0a2681fef788::t_859255e8b30ecb 196-359
+  s_3e0a2681fef788::t_b7c4a671b63c47 387-388,391-399,402-407
+README.md
+  s_3e0a2681fef788::t_6314e35032e266 395-408,410-474
+  s_3e0a2681fef788::t_85962c0dcddb31 476-479,483-485
+  s_3e0a2681fef788::t_48ebf17a277b22 349,351,353-357
+  s_3e0a2681fef788::t_068d9fedde363e 66
+  s_3e0a2681fef788::t_ea8076bc892cbd 528,530,534-539,542
+  s_3e0a2681fef788::t_da18665bc304f7 51,475
+  s_3e0a2681fef788::t_da2a7d1c729c9d 166
+samples/UnrealAITemplate/README.md
+  s_3e0a2681fef788::t_56d16645f09d0e 41-53
+docs/ARCHITECTURE.md
+  s_3e0a2681fef788::t_675642f8fe57bf 1249-1335,1339-1356
+  s_3e0a2681fef788::t_6dd59ccf6fea5f 1336-1338
+  s_3e0a2681fef788::t_a8617d3069cc89 226-232
+  s_3e0a2681fef788::t_f6277333d28926 958-964
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.8",
+  "base_commit_sha": "a2df1f0c9e6a99539a514250fe1112e4df3dd1ed",
+  "prompts": {},
+  "sessions": {
+    "s_3e0a2681fef788": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a9715f3a-114a-4de7-815b-97526309448b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

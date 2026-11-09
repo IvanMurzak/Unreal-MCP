@@ -1,0 +1,88 @@
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpSourceToolsSpec.cpp
+  s_b4e88c47e182f2::t_61beaacd974a15 211-213,218-219,243-264
+  s_b4e88c47e182f2::t_a7edbc3a489c62 299-300
+  s_b4e88c47e182f2::t_963703f04703f4 265
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpRqlPlaySpec.cpp
+  s_b4e88c47e182f2::t_7f24724bd1d852 34-41,43-50,54,61-68
+  s_b4e88c47e182f2::t_2f0eb54337c7d6 1-23,25-33,42,51-53,55-60,69-178,180-181,183-191
+  s_b4e88c47e182f2::t_8a9f1f25bb13f5 24
+  s_b4e88c47e182f2::t_e79636a6ec31f6 179
+  s_b4e88c47e182f2::t_6df784d1ffd69e 182
+  s_b4e88c47e182f2::t_a4b88a5514384e 192-194
+  s_b4e88c47e182f2::t_d7250960827ea7 195-200
+UnrealMCP/Source/UnrealMcpRql/Private/UnrealMcpRqlEditorApi.cpp
+  s_b4e88c47e182f2::t_f8a92a6b74b7a3 762-790
+UnrealMCP/Source/UnrealMcpEditor/Private/Tools/UnrealMcpSourceTools.cpp
+  s_b4e88c47e182f2::t_2990c37089c1d6 1075-1083,1085-1086,1089
+  s_b4e88c47e182f2::t_03167de9e380e9 1084
+  s_b4e88c47e182f2::t_a0ba7f3d805a0b 86-88,90-91,95-101,117-152
+  s_b4e88c47e182f2::t_9e1d4bc91aaffc 915-919,924
+  s_b4e88c47e182f2::t_a7728f9214197a 102-116
+  s_b4e88c47e182f2::t_d6e23dac01378d 618,896-898
+UnrealMCP/Source/UnrealMcpRql/Public/UnrealMcpRqlPlay.h
+  s_b4e88c47e182f2::t_3151a391c205e9 1-139,146
+  s_b4e88c47e182f2::t_f5fb4a6b4fd0d5 140-145
+UnrealMCP/Source/UnrealMcpRql/Private/UnrealMcpRqlGuide.h
+  s_b4e88c47e182f2::t_c3524f0b468990 139-143
+  s_b4e88c47e182f2::t_d6a7aa06e6d3d0 86
+  s_b4e88c47e182f2::t_7ed5b1ea8ea691 56
+UnrealMCP/Source/UnrealMcpRql/Private/UnrealMcpRqlEditorApi.h
+  s_b4e88c47e182f2::t_a0966763c87946 124-135
+  s_b4e88c47e182f2::t_b697eacff66e06 8
+  s_b4e88c47e182f2::t_c2acce7346c830 25
+UnrealMCP/Source/UnrealMcpRql/Private/UnrealMcpRqlCore.cpp
+  s_b4e88c47e182f2::t_be234f67cbc735 858-864
+  s_b4e88c47e182f2::t_a435627f482c1c 1227-1240
+  s_b4e88c47e182f2::t_c7805cb16ed72d 1255
+extensions/UnrealAIEnhancedInput/Source/UnrealAIEnhancedInput/Private/UnrealAIEnhancedInputRqlApi.h
+  s_b4e88c47e182f2::t_151f56ba4bbb06 9
+  s_b4e88c47e182f2::t_8976c66ef511d9 13
+  s_b4e88c47e182f2::t_dde44dcf111874 56-63
+UnrealMCP/Source/UnrealMcpEditor/Private/Tools/UnrealMcpSourceTools.h
+  s_b4e88c47e182f2::t_75f64adaf28073 71-77,84-93
+  s_b4e88c47e182f2::t_357e7191f42d8c 78-83
+UnrealMCP/Source/UnrealMcpRql/Private/UnrealMcpRqlPlay.cpp
+  s_b4e88c47e182f2::t_778240ac3819ef 18-20
+  s_b4e88c47e182f2::t_7c93a165d6f744 165-167
+  s_b4e88c47e182f2::t_73b7322d7c91b6 175-177
+  s_b4e88c47e182f2::t_7e0e56e3f5d2c0 224-338
+  s_b4e88c47e182f2::t_1c7d295026cc53 24
+  s_b4e88c47e182f2::t_5181134d069fe5 22
+  s_b4e88c47e182f2::t_e50c9bae4cd673 108
+  s_b4e88c47e182f2::t_2443ee2195b9cc 32-42
+  s_b4e88c47e182f2::t_0012bfd9387bd1 14,16-17
+  s_b4e88c47e182f2::t_ec2765582f3623 76
+  s_b4e88c47e182f2::t_029cd843392e38 1-13,15,21,23,25-31,43-75,77-107,109-164,168-174,178-223
+README.md
+  s_b4e88c47e182f2::t_09c32d4ecdbaab 235-238,274
+docs/ARCHITECTURE.md
+  s_b4e88c47e182f2::t_5b65ab802b0204 1237-1240
+docs/rql.md
+  s_b4e88c47e182f2::t_fa35b54d3a342d 154-155,203-228
+extensions/UnrealAIEnhancedInput/README.md
+  s_b4e88c47e182f2::t_ab11dd8f8ff0b9 35,52-63
+extensions/UnrealAIEnhancedInput/Source/UnrealAIEnhancedInput/Private/Tests/UnrealAIEnhancedInputSpec.cpp
+  s_b4e88c47e182f2::t_8c61a3ec66e009 12,18-26,64-67,90,202,425-510
+extensions/UnrealAIEnhancedInput/Source/UnrealAIEnhancedInput/Private/UnrealAIEnhancedInputModule.cpp
+  s_b4e88c47e182f2::t_d1fc9986fbf828 10,54-67,79,124-140,142-144
+extensions/UnrealAIEnhancedInput/Source/UnrealAIEnhancedInput/Private/UnrealAIEnhancedInputRqlApi.cpp
+  s_b4e88c47e182f2::t_0b701609cc0400 12,16-17,22,30,368-518
+tests/automation-inventory.json
+  s_b4e88c47e182f2::t_0fa0bc9ca5260a 3,35,38
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "5d6f3dc05e6157d2868870c37407cd1d98125038",
+  "prompts": {},
+  "sessions": {
+    "s_b4e88c47e182f2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ef0d1b43-913a-487a-95df-8feba021ec1f",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
