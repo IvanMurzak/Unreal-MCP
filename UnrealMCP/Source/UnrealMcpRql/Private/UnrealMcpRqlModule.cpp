@@ -2,6 +2,7 @@
 // See the LICENSE file in the repository root for more information.
 
 #include "IUnrealMcpRqlModule.h"
+#include "UnrealMcpEditorDiagnostics.h"
 #include "UnrealMcpRqlTypes.h"
 
 #include "Interfaces/IPluginManager.h"
@@ -70,5 +71,15 @@ bool UnrealMcpRqlEndCall(FString& OutFailure)
 	return bFailed;
 }
 
-/** The RQL data layer module (docs/rql.md): the editor coordinator registers the tools and runs the module pass. */
-IMPLEMENT_MODULE(FDefaultModuleImpl, UnrealMcpRql)
+/**
+ * The RQL data layer module (docs/rql.md): the editor coordinator registers the tools and runs the module pass. The module
+ * itself installs the editor diagnostics note on tool results (FUnrealMcpEditorDiagnostics).
+ */
+class FUnrealMcpRqlModuleImpl : public FDefaultModuleImpl
+{
+public:
+	virtual void StartupModule() override { FUnrealMcpEditorDiagnostics::Install(); }
+	virtual void ShutdownModule() override { FUnrealMcpEditorDiagnostics::Uninstall(); }
+};
+
+IMPLEMENT_MODULE(FUnrealMcpRqlModuleImpl, UnrealMcpRql)

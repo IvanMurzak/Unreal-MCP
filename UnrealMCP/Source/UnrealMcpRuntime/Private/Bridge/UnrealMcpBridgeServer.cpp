@@ -560,9 +560,11 @@ void FUnrealMcpBridgeServer::HandleToolCall(const TSharedPtr<FJsonObject>& Messa
 			TArray<TSharedPtr<FJsonValue>> Content;
 			// The text block carries the structured payload too (WireText): clients that show the model only `content`
 			// would otherwise get a summary line without the data.
-			const FString Text = Result.WireText();
-			if (!Text.IsEmpty())
+			// Notes (new editor warnings) go in a block of their own, after the tool's text, which the sidecar may re-render.
+			for (const FString& Text : { Result.WireText(), Result.Notes })
 			{
+				if (Text.IsEmpty())
+					continue;
 				TSharedPtr<FJsonObject> TextBlock = MakeShared<FJsonObject>();
 				TextBlock->SetStringField(TEXT("type"), TEXT("text"));
 				TextBlock->SetStringField(TEXT("text"), Text);

@@ -126,6 +126,19 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         // ------------------------------------------------------------ results
 
         [Fact]
+        public void Render_KeepsTheTextBlocksAfterTheAnswer()
+        {
+            // The plugin sends new editor warnings as a second text block after the QueryResult JSON.
+            var json = "{\"rql\":\"0.1\",\"ok\":true,\"kind\":\"rows\",\"columns\":[\"Label\"],\"rows\":[[\"Lamp\"]],\"total\":1}";
+            var response = Text(json);
+            response.Content!.Add(new ContentBlock { Type = Consts.ContentType.Text, Text = "Editor diagnostics (new): ..." });
+            var rendered = RqlBridge.Render(RqlBridge.QueryRole, response);
+            Assert.Equal(2, rendered.Content!.Count);
+            Assert.StartsWith("1 result", rendered.Content[0].Text);
+            Assert.Equal("Editor diagnostics (new): ...", rendered.Content[1].Text);
+        }
+
+        [Fact]
         public void Render_RowsAsCompactTable()
         {
             var json = "{\"rql\":\"0.1\",\"ok\":true,\"kind\":\"rows\",\"columns\":[\"$ref\",\"Label\",\"Location\"]," +

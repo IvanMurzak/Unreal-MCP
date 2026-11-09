@@ -63,6 +63,7 @@ public class UnrealMcpRql : ModuleRules
 			"LevelSequence",
 			"MovieScene",
 			"MovieSceneTracks",
+			"MessageLog", // the `diagnostics` source reads the Message Log pages (Map Check, PIE, Blueprint Log, Load Errors, ...)
 		});
 	}
 }
