@@ -37,7 +37,7 @@ The extension adds its feature to the editor's RQL data layer (`rql-query` / `rq
 
 ```
 niagaraTemplates | where Kind != "Emitter" | select Name Path Kind Description
-niagara | call CreateSystem("/Game/VFX/NS_Campfire", "/Niagara/DefaultAssets/Templates/Emitters/Fountain")
+niagara | call CreateSystem("/Game/VFX/NS_Campfire", "/Niagara/DefaultAssets/Templates/Emitters/Fountain")   # or the template's Name: "Fountain"
 niagara | call AddEmitter("/Game/VFX/NS_Campfire", "/Niagara/DefaultAssets/Templates/Emitters/HangingParticulates", "Smoke")
 unreal.asset("/Game/VFX/NS_Campfire").Inputs | where Module contains "Spawn Rate"
 niagara | call SetModuleInput("/Game/VFX/NS_Campfire", "Fountain", "Add Velocity", "Velocity Speed", "random(150, 300)")

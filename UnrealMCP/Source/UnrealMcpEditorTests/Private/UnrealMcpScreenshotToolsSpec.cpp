@@ -5,7 +5,11 @@
 
 #include "CoreMinimal.h"
 #include "Misc/App.h"
+#include "HAL/FileManager.h"
 #include "Misc/AutomationTest.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Guid.h"
+#include "Misc/Paths.h"
 #include "Misc/ScopeExit.h"
 #include "UnrealMcpCoreTools.h"
 #include "UnrealMcpToolRegistry.h"
@@ -71,20 +75,22 @@ void FUnrealMcpScreenshotToolsSpec::Define()
 			TestEqual(TEXT("exactly four tools"), Registry.Num(), Expected.Num());
 		});
 
-		It("marks every screenshot tool read-only (capture never mutates the scene)", [this]()
+		It("marks only the tools that can write a file as not read-only, and none as destructive (they never overwrite)", [this]()
 		{
 			FUnrealMcpToolRegistry Registry;
 			UnrealMcpScreenshotTools::Register(Registry);
-			const TArray<FString> Names = {
-				TEXT("screenshot-viewport"), TEXT("screenshot-game-view"),
-				TEXT("screenshot-camera"), TEXT("screenshot-isolated")
+			const TMap<FString, bool> ReadOnlyByName = {
+				{ TEXT("screenshot-viewport"), false }, { TEXT("screenshot-game-view"), false },
+				{ TEXT("screenshot-camera"), false }, { TEXT("screenshot-isolated"), true }
 			};
-			for (const FString& Name : Names)
+			for (const TPair<FString, bool>& Row : ReadOnlyByName)
 			{
-				const FUnrealMcpRegisteredTool* Tool = Registry.Find(Name);
-				TestNotNull(FString::Printf(TEXT("%s present"), *Name), Tool);
-				if (Tool)
-					TestTrue(FString::Printf(TEXT("%s read-only"), *Name), Tool->bReadOnlyHint);
+				const FUnrealMcpRegisteredTool* Tool = Registry.Find(Row.Key);
+				if (TestNotNull(FString::Printf(TEXT("%s present"), *Row.Key), Tool))
+				{
+					TestEqual(FString::Printf(TEXT("%s read-only hint"), *Row.Key), Tool->bReadOnlyHint, Row.Value);
+					TestFalse(FString::Printf(TEXT("%s not destructive"), *Row.Key), Tool->bDestructiveHint);
+				}
 			}
 		});
 	});
@@ -185,6 +191,120 @@ void FUnrealMcpScreenshotToolsSpec::Define()
 			TestFalse(TEXT("malformed background hex is rejected"), Result.bSuccess);
 			TestTrue(TEXT("error names the background hex branch"), Result.Message.Contains(TEXT("hex color")));
 			TestTrue(TEXT("no image content on the error path"), Result.Images.Num() == 0);
+		});
+	});
+
+	Describe("savePath (GPU-free)", [this]()
+	{
+		// A fresh folder standing in for the project; the real writes all happen below it.
+		const auto MakeRoot = []()
+		{
+			return FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / TEXT("ScreenshotSavePathSpec") / FGuid::NewGuid().ToString(EGuidFormats::Digits));
+		};
+
+		It("ResolveCaptureSavePath accepts a file inside the project, relative or absolute, and adds .png", [this, MakeRoot]()
+		{
+			using namespace UnrealMcpScreenshotTools;
+			const FString Root = MakeRoot();
+			struct FRow { FString Requested; FString Expected; };
+			const FRow Rows[] = {
+				{ TEXT("Screenshots/shot.png"), Root / TEXT("Screenshots/shot.png") },
+				{ TEXT("Screenshots\\shot.PNG"), Root / TEXT("Screenshots/shot.PNG") },
+				{ TEXT("./shot.png"), Root / TEXT("shot.png") },
+				{ TEXT("Screenshots/shot"), Root / TEXT("Screenshots/shot.png") },
+				{ Root / TEXT("Deep/Er/shot.png"), Root / TEXT("Deep/Er/shot.png") },
+			};
+			for (const FRow& Row : Rows)
+			{
+				FString Full, Error;
+				TestTrue(*Row.Requested, ResolveCaptureSavePath(Row.Requested, Root, Full, Error));
+				TestEqual(*Row.Requested, Full, Row.Expected);
+			}
+			FString Full = TEXT("stale"), Error;
+			TestTrue(TEXT("empty means no save"), ResolveCaptureSavePath(TEXT("  "), Root, Full, Error));
+			TestTrue(TEXT("no file for an empty path"), Full.IsEmpty());
+		});
+
+		It("ResolveCaptureSavePath refuses anything outside the project, other formats and folders", [this, MakeRoot]()
+		{
+			using namespace UnrealMcpScreenshotTools;
+			const FString Root = MakeRoot();
+			const FString Parent = FPaths::GetPath(Root);
+			const TArray<FString> Refused = {
+				TEXT("../shot.png"),
+				TEXT("..\\shot.png"),
+				TEXT("Screenshots/../../shot.png"),
+				TEXT(".. /shot.png"),
+				TEXT("Screenshots/.../shot.png"),
+				Parent / TEXT("shot.png"),
+				Root + TEXT("-sibling/shot.png"),
+				Root / TEXT("../shot.png"),
+				TEXT("/shot.png"),
+				TEXT("C:shot.png"),
+				TEXT("\\\\server\\share\\shot.png"),
+				TEXT("folder:stream/shot.png"),
+				TEXT("shot.jpg"),
+				TEXT("shot.png:stream"),
+				TEXT("shot.png."),
+				TEXT("Screenshots/"),
+			};
+			for (const FString& Requested : Refused)
+			{
+				FString Full, Error;
+				TestFalse(*Requested, ResolveCaptureSavePath(Requested, Root, Full, Error));
+				TestTrue(*FString::Printf(TEXT("%s: nothing to write"), *Requested), Full.IsEmpty());
+				TestTrue(*FString::Printf(TEXT("%s: says why"), *Requested), Error.StartsWith(TEXT("Cannot save to")));
+			}
+		});
+
+		It("WriteCapturePng creates the folders, and neither it nor ResolveCaptureSavePath touches an existing file", [this, MakeRoot]()
+		{
+			using namespace UnrealMcpScreenshotTools;
+			const FString Root = MakeRoot();
+			ON_SCOPE_EXIT { IFileManager::Get().DeleteDirectory(*Root, false, true); };
+			FString Full, Error;
+			TestTrue(TEXT("resolved"), ResolveCaptureSavePath(TEXT("New/Folder/shot.png"), Root, Full, Error));
+			const uint8 First[] = { 1, 2, 3 };
+			TestTrue(TEXT("written"), WriteCapturePng(Full, TArrayView64<const uint8>(First, 3), Error));
+
+			TArray<uint8> Read;
+			TestTrue(TEXT("readable"), FFileHelper::LoadFileToArray(Read, *Full));
+			TestEqual(TEXT("the bytes"), Read.Num(), 3);
+
+			FString Again;
+			TestFalse(TEXT("an existing file is refused up front"), ResolveCaptureSavePath(TEXT("New/Folder/shot.png"), Root, Again, Error));
+			TestTrue(TEXT("says it exists"), Error.Contains(TEXT("already exists")));
+
+			const uint8 Second[] = { 9 };
+			TestFalse(TEXT("the write refuses it too"), WriteCapturePng(Full, TArrayView64<const uint8>(Second, 1), Error));
+			TestTrue(TEXT("still readable"), FFileHelper::LoadFileToArray(Read, *Full));
+			TestEqual(TEXT("the first bytes stay"), Read.Num(), 3);
+		});
+
+		It("the saving tools refuse a bad savePath before they capture, with no image", [this]()
+		{
+			FUnrealMcpToolRegistry Registry; UnrealMcpScreenshotTools::Register(Registry);
+			for (const TCHAR* Name : { TEXT("screenshot-viewport"), TEXT("screenshot-game-view"), TEXT("screenshot-camera") })
+			{
+				TSharedPtr<FJsonObject> A = Args();
+				A->SetStringField(TEXT("camera"), TEXT("__definitely_missing_camera__")); // the registry requires it on screenshot-camera
+				A->SetStringField(TEXT("savePath"), TEXT("../outside.png"));
+				const FUnrealMcpToolResult Result = RunScreenshot(Registry, Name, A);
+				TestFalse(*FString::Printf(TEXT("%s refuses"), Name), Result.bSuccess);
+				TestTrue(*FString::Printf(TEXT("%s names the path rule"), Name), Result.Message.Contains(TEXT("inside the project folder")));
+				TestEqual(*FString::Printf(TEXT("%s no image"), Name), Result.Images.Num(), 0);
+				const FUnrealMcpRegisteredTool* Tool = Registry.Find(Name);
+				if (TestNotNull(Name, Tool))
+					TestTrue(*FString::Printf(TEXT("%s advertises saving"), Name), Tool->Description.Contains(TEXT("savePath")));
+			}
+		});
+
+		It("MakeImageResult states the saved path after the metadata", [this]()
+		{
+			const FUnrealMcpToolResult Result = UnrealMcpScreenshotTools::MakeImageResult(
+				TEXT("camera 'Cam1'"), 64, 32, TEXT("aGVsbG8="), 12, TEXT("Frame: fresh."), TEXT("C:/Project/Screenshots/shot.png"));
+			TestEqual(TEXT("text"), Result.Message, FString(TEXT("Captured camera 'Cam1' (64x32, image/png, 12 bytes). Saved to C:/Project/Screenshots/shot.png. Frame: fresh.")));
+			TestEqual(TEXT("still the image"), Result.Images.Num(), 1);
 		});
 	});
 

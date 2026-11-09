@@ -11,6 +11,7 @@
 #include "Serialization/JsonSerializer.h"
 #include "Policies/CondensedJsonPrintPolicy.h"
 #include "Serialization/JsonWriter.h"
+#include "UObject/Package.h"
 
 #include "IUnrealMcpRqlModule.h"
 #include "UnrealMcpRqlTools.h"
@@ -61,6 +62,15 @@ namespace UnrealAINiagaraSpecLocal
 		return TEXT("<no input>");
 	}
 
+	UObject* MakeTemplateRow(const FString& Name, const FString& Path, const FString& Kind)
+	{
+		UUnrealAINiagaraTemplate* Row = NewObject<UUnrealAINiagaraTemplate>(GetTransientPackage());
+		Row->Name = Name;
+		Row->Path = Path;
+		Row->Kind = Kind;
+		return Row;
+	}
+
 	bool HasModule(UNiagaraSystem& System, const FString& Emitter, const FString& Module)
 	{
 		UnrealAINiagara::FSystemStack Stack(System);
@@ -101,6 +111,7 @@ void FUnrealAINiagaraSpec::Define()
 			TestTrue(TEXT("guide section"), Skill.Contains(TEXT("## Niagara")));
 			for (const TCHAR* Step : { TEXT("CreateSystem("), TEXT("SetModuleInput("), TEXT("EnableCollision("), TEXT("Compile("), TEXT("EnableFluids()") })
 				TestTrue(*FString::Printf(TEXT("guide shows %s"), Step), Skill.Contains(Step));
+			TestTrue(TEXT("guide says what Fluids needs from the project"), Skill.Contains(TEXT("`EnableFluids` sets it")));
 		});
 	});
 
@@ -145,6 +156,50 @@ void FUnrealAINiagaraSpec::Define()
 				});
 				TestTrue(TEXT("a disabled Niagara Fluids plugin row says how to enable it"), bPluginRow);
 			}
+		});
+	});
+
+	Describe("template names", [this]()
+	{
+		It("ResolveName finds one template by Name, ignoring case, spaces and underscores", [this]()
+		{
+			const TArray<UObject*> Rows = { MakeTemplateRow(TEXT("Fountain"), TEXT("/A/Fountain"), TEXT("Emitter")), MakeTemplateRow(TEXT("FountainLightweight"), TEXT("/A/FountainLightweight"), TEXT("Emitter")),
+				MakeTemplateRow(TEXT("Grid3D_Gas_Smoke"), TEXT("/B/Grid3D_Gas_Smoke"), TEXT("System")) };
+			FString Error;
+			TestEqual(TEXT("exact"), UnrealAINiagaraTemplates::ResolveName(Rows, TEXT("FountainLightweight"), Error), FString(TEXT("/A/FountainLightweight")));
+			TestEqual(TEXT("an exact name wins over a longer one that contains it"), UnrealAINiagaraTemplates::ResolveName(Rows, TEXT("Fountain"), Error), FString(TEXT("/A/Fountain")));
+			TestEqual(TEXT("case and spacing"), UnrealAINiagaraTemplates::ResolveName(Rows, TEXT("grid3d gas smoke"), Error), FString(TEXT("/B/Grid3D_Gas_Smoke")));
+		});
+
+		It("ResolveName lists the candidates when the name is ambiguous or unknown", [this]()
+		{
+			const TArray<UObject*> Rows = { MakeTemplateRow(TEXT("Fire"), TEXT("/A/Systems/Fire"), TEXT("System")), MakeTemplateRow(TEXT("Fire"), TEXT("/A/Emitters/Fire"), TEXT("Emitter")),
+				MakeTemplateRow(TEXT("BigFire"), TEXT("/A/BigFire"), TEXT("System")), MakeTemplateRow(TEXT("NiagaraFluids"), FString(), TEXT("Plugin")) };
+			FString Error;
+			TestTrue(TEXT("ambiguous: no path"), UnrealAINiagaraTemplates::ResolveName(Rows, TEXT("Fire"), Error).IsEmpty());
+			TestTrue(TEXT("ambiguous: both listed"), Error.Contains(TEXT("/A/Systems/Fire")) && Error.Contains(TEXT("/A/Emitters/Fire")));
+
+			TestTrue(TEXT("unknown: no path"), UnrealAINiagaraTemplates::ResolveName(Rows, TEXT("Bonfire"), Error).IsEmpty());
+			TestTrue(TEXT("unknown: names it"), Error.Contains(TEXT("no Niagara template named 'Bonfire'")));
+			TestTrue(TEXT("unknown: similar listed"), Error.Contains(TEXT("/A/Systems/Fire")));
+			TestTrue(TEXT("unknown: says how to search"), Error.Contains(TEXT("niagaraTemplates |")));
+
+			TestTrue(TEXT("a plugin row is no template"), UnrealAINiagaraTemplates::ResolveName(Rows, TEXT("NiagaraFluids"), Error).IsEmpty());
+		});
+
+		It("CreateSystem takes a template's Name from niagaraTemplates, and fails listing candidates for an unknown one", [this]()
+		{
+			const FString Path = TEXT("/Game/RqlSpecNiagara/NS_ByName_") + FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(12);
+			// niagara | call CreateSystem("@SYS@", "FountainLightweight")
+			TestTrue(TEXT("created by name"), UnrealMcpRqlTools::RunPlan(FString(TEXT(R"RQL({"rql":"0.1","source":{"path":["niagara"]},"stages":[{"op":"call","method":"CreateSystem","args":[{"lit":"@SYS@"},{"lit":"FountainLightweight"}]}]})RQL")).Replace(TEXT("@SYS@"), *Path), true));
+			UNiagaraSystem* System = FindObject<UNiagaraSystem>(nullptr, *(Path + TEXT(".") + FPackageName::GetShortName(Path)));
+			if (TestNotNull(TEXT("the system asset"), System))
+				TestEqual(TEXT("the template's emitter"), System->GetEmitterHandles().Num(), 1);
+
+			// niagara | call CreateSystem("@SYS@_2", "NoSuchFountainTemplate")
+			TSharedPtr<FJsonObject> Result;
+			TestFalse(TEXT("an unknown name fails"), UnrealMcpRqlTools::RunPlan(FString(TEXT(R"RQL({"rql":"0.1","source":{"path":["niagara"]},"stages":[{"op":"call","method":"CreateSystem","args":[{"lit":"@SYS@_2"},{"lit":"NoSuchFountainTemplate"}]}]})RQL")).Replace(TEXT("@SYS@"), *Path), true, &Result));
+			TestTrue(TEXT("names the miss"), Json(Result).Contains(TEXT("no Niagara template named 'NoSuchFountainTemplate'")));
 		});
 	});
 

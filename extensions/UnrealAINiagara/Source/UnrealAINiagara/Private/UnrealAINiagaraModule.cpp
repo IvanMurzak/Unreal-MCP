@@ -184,6 +184,7 @@ stages) whose inputs you set, plus renderers. Start from a template, tune, colli
 niagaraTemplates | where Kind != "Emitter" | select Name Path Kind Description     whole-effect templates; a Kind "Plugin" row is a disabled plugin
 niagaraTemplates | where Kind == "Emitter" and Plugin == "Niagara" | select Name Path Description
 niagara | call CreateSystem("/Game/VFX/NS_Campfire", "/Niagara/DefaultAssets/Templates/Emitters/Fountain")      emitter template: a system with that emitter
+niagara | call CreateSystem("/Game/VFX/NS_Spray", "FountainLightweight")        a template's Name works too; an ambiguous or unknown one fails listing candidates
 niagara | call AddEmitter("/Game/VFX/NS_Campfire", "/Niagara/DefaultAssets/Templates/Emitters/HangingParticulates", "Smoke")
 niagara | call RenameEmitter("/Game/VFX/NS_Campfire", "Fountain", "Fire")
 unreal.asset("/Game/VFX/NS_Campfire") | select Emitters Modules UserParameters
@@ -221,15 +222,18 @@ editor | call SaveAsset("/Game/VFX/NS_Campfire")
   RayTrace on CPU emitters, SceneDepth on GPU ones. Niagara Fluids grids get world collision instead: the physics
   shapes of every mesh in the grid, static props included (`Auto` / `RayTrace`), mesh distance fields (`Auto` when the
   project has them, `DistanceField`), `SceneDepth`, `GlobalDistanceField`. Distance fields need
-  `unreal.settings("Rendering") | set bGenerateMeshDistanceFields = true` and an editor restart (else the grid does not
-  compile). The result says what changed and what the project still needs.
+  `unreal.settings("Rendering") | set bGenerateMeshDistanceFields = true` and an editor restart; `EnableFluids` sets it.
+  Without them the 3D gas and liquid templates fail `Compile` as shipped, naming "mesh distance field generation";
+  `EnableCollision` (`Auto`) makes such a grid compile by turning that query off. The result says what changed and what
+  the project still needs.
 - **Volumetric fire and smoke that flows around props**: the Niagara Fluids gas templates (`Grid3D_Gas_Fire`: fire from
   a mesh, `Grid3D_Gas_Smoke`, `Grid3D_Gas_SimpleParticleSource`, ...; GPU). Typical: CreateSystem from
   `/NiagaraFluids/Templates/Gas/3D/Systems/Grid3D_Gas_Fire`, `SetUserParameter(..., "StaticMesh", <burning mesh>)`,
   `SetUserParameter(..., "WorldSpaceSize", "(300, 300, 500)")` (the simulated box), smoke with
   `SetModuleInput(..., "Grid3D_Gas_Master_Emitter", "Grid 3D Gas Initialize Material Controls", "Render Density", "Linear")`
   and `"Grid 3D Gas Material Controls"` / `"Smoke Color"`, then `EnableCollision`. When `niagaraTemplates` has the
-  `NiagaraFluids` row (Available false): `niagara | call EnableFluids()`, save, restart the editor.
+  `NiagaraFluids` row (Available false): `niagara | call EnableFluids()` (also turns on mesh distance fields), save,
+  restart the editor.
 - Renderers are objects: `unreal.asset("/Game/VFX/NS_Campfire").Renderers | where Emitter == "Fire" | set SubImageSize = "(4, 4)"`.
 - Emitter Properties: `SetEmitterProperty(system, emitter, "SimTarget", "GPU")` (also `bLocalSpace`, `CalculateBoundsMode`).
 - Placed effects are NiagaraComponents: `actors | get Components | where $ is NiagaraComponent | set Asset = "/Game/VFX/NS_Smoke"`.

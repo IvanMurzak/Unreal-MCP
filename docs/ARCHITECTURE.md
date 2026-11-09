@@ -1258,7 +1258,9 @@ execution tool = backlog (decision: out of MVP — extra plugin dependency).
 `screenshot-game-view` (PIE), `screenshot-camera` (from a CameraActor/CameraComponent via
 SceneCapture2D), `screenshot-isolated` (actor render with showflag isolation + background option —
 Godot SubViewport pattern → `USceneCaptureComponent2D`). PNG, size-capped (default ≤1024,
-hard cap 2048), returned as MCP image content.
+hard cap 2048), returned as MCP image content. `screenshot-viewport`, `screenshot-game-view` and
+`screenshot-camera` take an optional `savePath` that also writes the PNG inside the project (never outside it, never
+over an existing file) and report it as `Saved to <absolute path>`; these three are therefore not `readOnlyHint`.
 
 **editor/reflection family** (task: editor-reflection-tools): `editor-application-get-state` /
 `editor-application-set-state` (PIE start/stop/pause), `editor-selection-get` /

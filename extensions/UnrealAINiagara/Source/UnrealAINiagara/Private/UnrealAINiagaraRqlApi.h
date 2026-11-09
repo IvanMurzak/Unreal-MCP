@@ -46,7 +46,7 @@ class UUnrealAINiagaraRqlApi : public UObject
 	GENERATED_BODY()
 
 public:
-	/** create a Niagara system asset at Path ("/Game/VFX/NS_Fire") from Template: a system template (copied whole), an emitter template or emitter asset (the system gets that one emitter), or "" (an empty system); see niagaraTemplates; returns the system (unsaved) */
+	/** create a Niagara system asset at Path ("/Game/VFX/NS_Fire") from Template: a system template (copied whole), an emitter template or emitter asset (the system gets that one emitter), each by asset path or by its Name in niagaraTemplates, or "" (an empty system); returns the system (unsaved) */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Niagara", meta = (BlueprintInternalUseOnly = "true"))
 	UNiagaraSystem* CreateSystem(const FString& Path, const FString& Template = TEXT(""));
 
@@ -115,7 +115,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Niagara", meta = (BlueprintInternalUseOnly = "true"))
 	int32 Deactivate(AActor* Actor);
 
-	/** enable the engine's Niagara Fluids plugin (volumetric fire / smoke / liquid templates) in the project file; takes effect after an editor restart; not undoable; returns what to do next */
+	/** enable the engine's Niagara Fluids plugin (volumetric fire / smoke / liquid templates) in the project file, and Generate Mesh Distance Fields in the project settings (the 3D gas and liquid templates do not compile without it); takes effect after an editor restart; not undoable; returns what to do next */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Niagara", meta = (BlueprintInternalUseOnly = "true"))
 	FString EnableFluids();
 };

@@ -92,11 +92,23 @@ namespace UnrealMcpScreenshotTools
 
 	/**
 	 * Build a screenshot tool's success result: one image content block plus one text block carrying the
-	 * capture metadata (source, width, height, mimeType, encoded byte size); no structured content (see
-	 * FUnrealMcpToolResult::SuccessWithImage). GPU-free (spec-testable).
+	 * capture metadata (source, width, height, mimeType, encoded byte size), plus "Saved to <SavedPath>." when the
+	 * capture was also written to a file; no structured content (see FUnrealMcpToolResult::SuccessWithImage). GPU-free
+	 * (spec-testable).
 	 */
 	UNREALMCPEDITOR_API FUnrealMcpToolResult MakeImageResult(const FString& Source, int32 Width, int32 Height, const FString& Base64Png, int32 EncodedBytes,
-		const FString& Freshness = FString());
+		const FString& Freshness = FString(), const FString& SavedPath = FString());
+
+	/**
+	 * Check the optional 'savePath' of screenshot-viewport / -game-view / -camera against @p ProjectDir. Empty means no
+	 * save (true, empty @p OutFullPath). Otherwise @p OutFullPath is the absolute file to write, or false with @p OutError
+	 * for anything outside the project (`..`, absolute paths elsewhere, a link leading out), a non-PNG name or an existing
+	 * file. GPU-free (spec-testable).
+	 */
+	UNREALMCPEDITOR_API bool ResolveCaptureSavePath(const FString& Requested, const FString& ProjectDir, FString& OutFullPath, FString& OutError);
+
+	/** Write an encoded capture to @p FullPath (from ResolveCaptureSavePath), creating its folders; never replaces a file. GPU-free. */
+	UNREALMCPEDITOR_API bool WriteCapturePng(const FString& FullPath, TArrayView64<const uint8> Png, FString& OutError);
 
 	/**
 	 * The freshness line every capture carries after the metadata (§10 "Background rendering"), one stable prefix per

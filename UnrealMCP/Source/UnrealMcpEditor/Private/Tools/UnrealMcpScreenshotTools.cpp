@@ -5,14 +5,18 @@
 #include "UnrealMcpToolRegistry.h"
 #include "UnrealMcpLog.h"
 #include "Tools/UnrealMcpObjectRef.h"
+#include "Tools/UnrealMcpSourceTools.h"
 
 #include "Algo/MaxElement.h"
 #include "Dom/JsonObject.h"
+#include "HAL/FileManager.h"
 #include "HAL/IConsoleManager.h"
 #include "Interfaces/Interface_PostProcessVolume.h"
 #include "Misc/App.h"
 #include "Misc/Base64.h"
 #include "Misc/EngineVersionComparison.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
 #include "Misc/ScopeExit.h"
 #include "Modules/ModuleManager.h"
 #include "UObject/GCObjectScopeGuard.h"
@@ -79,15 +83,73 @@ namespace UnrealMcpScreenshotTools
 	}
 
 	FUnrealMcpToolResult MakeImageResult(const FString& Source, int32 Width, int32 Height, const FString& Base64Png, int32 EncodedBytes,
-		const FString& Freshness)
+		const FString& Freshness, const FString& SavedPath)
 	{
 		// The metadata travels in the text block: SuccessWithImage carries no structured content (see there).
 		FString Message = FString::Printf(TEXT("Captured %s (%dx%d, image/png, %d bytes)."),
 			*Source, Width, Height, EncodedBytes);
+		if (!SavedPath.IsEmpty())
+			Message += FString::Printf(TEXT(" Saved to %s."), *SavedPath);
 		if (!Freshness.IsEmpty())
 			Message += TEXT(" ") + Freshness;
 		UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] %s"), *Message);
 		return FUnrealMcpToolResult::SuccessWithImage(Message, Base64Png);
+	}
+
+	bool ResolveCaptureSavePath(const FString& Requested, const FString& ProjectDir, FString& OutFullPath, FString& OutError)
+	{
+		OutFullPath.Reset();
+		FString Path = Requested.TrimStartAndEnd();
+		if (Path.IsEmpty())
+			return true;
+		const auto Refuse = [&OutError, &Requested](const FString& Why)
+		{
+			OutError = FString::Printf(TEXT("Cannot save to '%s': %s"), *Requested, *Why);
+			return false;
+		};
+		FPaths::NormalizeFilename(Path);
+		if (Path.EndsWith(TEXT("/")))
+			return Refuse(TEXT("it names a folder; add a file name, such as Screenshots/shot.png."));
+		// Windows drops a trailing dot or space from a path segment when it opens a file, so ".. /x" would climb out
+		// after the check below has passed it as an ordinary folder name.
+		TArray<FString> Segments;
+		Path.ParseIntoArray(Segments, TEXT("/"));
+		for (const FString& Segment : Segments)
+		{
+			if (Segment != TEXT(".") && Segment != TEXT("..") && (Segment.EndsWith(TEXT(".")) || Segment.EndsWith(TEXT(" "))))
+				return Refuse(FString::Printf(TEXT("the path segment '%s' ends in a dot or a space."), *Segment));
+		}
+		const FString Extension = FPaths::GetExtension(Path);
+		if (Extension.IsEmpty())
+			Path += TEXT(".png");
+		else if (!Extension.Equals(TEXT("png"), ESearchCase::IgnoreCase))
+			return Refuse(TEXT("the capture is a PNG, so the file name must end in .png."));
+		const UnrealMcpSourceTools::FJailedPath Jailed = UnrealMcpSourceTools::ResolveJailedPath(ProjectDir, Path);
+		if (!Jailed.bOk)
+		{
+			return Refuse(FString::Printf(TEXT("it must stay inside the project folder %s (a path relative to it, or an "
+				"absolute path under it; no ':' after the drive, no link leading out)."), *FPaths::ConvertRelativePathToFull(ProjectDir)));
+		}
+		if (IFileManager::Get().FileExists(*Jailed.FullPath))
+			return Refuse(TEXT("the file already exists and a capture never overwrites one; pick another name."));
+		OutFullPath = Jailed.FullPath;
+		return true;
+	}
+
+	bool WriteCapturePng(const FString& FullPath, TArrayView64<const uint8> Png, FString& OutError)
+	{
+		// Checked again here: the file can appear while the capture renders. A writer's FILEWRITE_NoReplaceExisting does not
+		// help, the file manager ignores it and replaces the file.
+		if (IFileManager::Get().FileExists(*FullPath))
+		{
+			OutError = FString::Printf(TEXT("%s already exists and a capture never overwrites one; nothing was saved."), *FullPath);
+			return false;
+		}
+		if (FFileHelper::SaveArrayToFile(Png, *FullPath))
+			return true;
+		OutError = FString::Printf(TEXT("Could not write the capture to %s (the folder is read-only, or a file has the name of one "
+			"of its folders); nothing was saved."), *FullPath);
+		return false;
 	}
 
 	FString FormatFreshness(bool bFrameFresh, const FString& FrameReason, bool bSimulationLive, const FString& SimulationReason)
@@ -301,8 +363,8 @@ namespace UnrealMcpScreenshotTools
 			Pixels = MoveTemp(Resized);
 		}
 
-		/** Encode a BGRA8 FColor buffer to a base64 PNG (forcing opaque first). */
-		bool EncodePngBase64(TArray<FColor>& Pixels, int32 Width, int32 Height,
+		/** Encode a BGRA8 FColor buffer to a base64 PNG (forcing opaque first) and write it to @p SavePath when one is given. */
+		bool EncodePngBase64(TArray<FColor>& Pixels, int32 Width, int32 Height, const FString& SavePath,
 			FString& OutBase64, int32& OutEncodedBytes, FString& OutError)
 		{
 			if (Width <= 0 || Height <= 0)
@@ -332,6 +394,8 @@ namespace UnrealMcpScreenshotTools
 					(int64)Png.Num(), MaxEncodedBytes);
 				return false;
 			}
+			if (!SavePath.IsEmpty() && !WriteCapturePng(SavePath, Png, OutError))
+				return false;
 			OutBase64 = FBase64::Encode(Png.GetData(), Png.Num());
 			OutEncodedBytes = (int32)Png.Num();
 			return true;
@@ -372,7 +436,7 @@ namespace UnrealMcpScreenshotTools
 		}
 
 		/** Read + encode an FViewport (editor or PIE). Called only on the GPU-available path. */
-		FUnrealMcpToolResult CaptureFromViewport(const FUnrealMcpToolCall& Call, FViewport* Viewport, const FString& Source)
+		FUnrealMcpToolResult CaptureFromViewport(const FUnrealMcpToolCall& Call, FViewport* Viewport, const FString& Source, const FString& SavePath)
 		{
 			const FIntPoint Size = Viewport->GetSizeXY();
 			if (Size.X <= 0 || Size.Y <= 0)
@@ -406,7 +470,7 @@ namespace UnrealMcpScreenshotTools
 			ResizeIfNeeded(Pixels, Size.X, Size.Y, OutW, OutH);
 
 			FString Base64; int32 Bytes = 0; FString Error;
-			if (!EncodePngBase64(Pixels, OutW, OutH, Base64, Bytes, Error))
+			if (!EncodePngBase64(Pixels, OutW, OutH, SavePath, Base64, Bytes, Error))
 				return FUnrealMcpToolResult::Error(Error);
 
 			FString Notes = ScreenshotFreshness(World, bFrameFresh, FrameReason);
@@ -420,7 +484,7 @@ namespace UnrealMcpScreenshotTools
 					&& HasOverexposingPostProcessVolume(GetWorldPostProcessVolumes(*World), ExtendedRange->GetBool());
 				Notes += TEXT(" ") + FormatUniformFrameNote(Uniformity, bOverexposingVolume);
 			}
-			return MakeImageResult(Source, OutW, OutH, Base64, Bytes, Notes);
+			return MakeImageResult(Source, OutW, OutH, Base64, Bytes, Notes, SavePath);
 		}
 
 		/**
@@ -430,7 +494,7 @@ namespace UnrealMcpScreenshotTools
 		 */
 		FUnrealMcpToolResult CaptureWithSceneCapture(
 			UWorld* World, const FTransform& CaptureXform, float FovDeg, int32 Width, int32 Height,
-			const FString& Source, const FLinearColor* BackgroundColor, AActor* ShowOnlyActor)
+			const FString& Source, const FLinearColor* BackgroundColor, AActor* ShowOnlyActor, const FString& SavePath = FString())
 		{
 			// Isolated mode (a background was requested) composites the actor over a solid color. A plain
 			// SCS_FinalColorLDR capture writes opaque pixels everywhere, overwriting the render target's
@@ -530,10 +594,10 @@ namespace UnrealMcpScreenshotTools
 			}
 
 			FString Base64; int32 Bytes = 0; FString Error;
-			if (!EncodePngBase64(Pixels, Width, Height, Base64, Bytes, Error))
+			if (!EncodePngBase64(Pixels, Width, Height, SavePath, Base64, Bytes, Error))
 				return FUnrealMcpToolResult::Error(Error);
 
-			return MakeImageResult(Source, Width, Height, Base64, Bytes, ScreenshotFreshness(World, /*bFrameFresh*/ true, FString()));
+			return MakeImageResult(Source, Width, Height, Base64, Bytes, ScreenshotFreshness(World, /*bFrameFresh*/ true, FString()), SavePath);
 		}
 
 		/**
@@ -574,6 +638,26 @@ namespace UnrealMcpScreenshotTools
 			            "animation were not ticking. Optional 'width'/'height' are clamped to [1, 2048] per side (defaults: "
 			            "see each parameter). Requires a GPU-backed (windowed) editor.");
 		}
+
+		/** Description tail of the tools that can save their capture. */
+		const TCHAR* SavePathNote()
+		{
+			return TEXT(" To give the user a file (they asked to see the result), pass 'savePath': the PNG is also written "
+			            "inside the project and the text states 'Saved to <absolute path>'.");
+		}
+
+		const TCHAR* SavePathParamDoc()
+		{
+			return TEXT("Optional file to also write the PNG to, inside the project folder: relative to it (Screenshots/shot.png), "
+			            "or absolute under it; missing folders are created and .png is added when there is no extension. "
+			            "Refused when outside the project, when not a .png, or when the file exists (it never overwrites).");
+		}
+
+		/** The checked 'savePath' of @p Call (empty when not given); false with @p OutError when it is refused. */
+		bool ScreenshotSavePath(const FUnrealMcpToolCall& Call, FString& OutPath, FString& OutError)
+		{
+			return ResolveCaptureSavePath(Call.GetString(TEXT("savePath")), FPaths::ProjectDir(), OutPath, OutError);
+		}
 	}
 
 	// ---- Registration -----------------------------------------------------------------------------
@@ -585,13 +669,16 @@ namespace UnrealMcpScreenshotTools
 			.Title(TEXT("Screenshot Viewport"))
 			.Description(FString(TEXT("Capture the active editor viewport. Note: while a Play-In-Editor session "
 				"has viewport focus the 'active viewport' is the PIE game view; use screenshot-game-view to "
-				"capture the game view explicitly.")) + SizeCapNote())
+				"capture the game view explicitly.")) + SizeCapNote() + SavePathNote())
 			.ParamInt(TEXT("width"), TEXT("Optional output width in pixels (clamped to [1, 2048]); when only 'height' is given the width is derived from the native aspect ratio, and the native viewport width is used when both are omitted."))
 			.ParamInt(TEXT("height"), TEXT("Optional output height in pixels (clamped to [1, 2048]); when only 'width' is given the height is derived from the native aspect ratio, and the native viewport height is used when both are omitted."))
-			.ReadOnlyHint(true).DestructiveHint(false).IdempotentHint(true).OpenWorldHint(false)
+			.ParamString(TEXT("savePath"), SavePathParamDoc())
+			.ReadOnlyHint(false).DestructiveHint(false).IdempotentHint(false).OpenWorldHint(false)
 			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
 			{
-				FString Error;
+				FString SavePath, Error;
+				if (!ScreenshotSavePath(Call, SavePath, Error))
+					return FUnrealMcpToolResult::Error(Error);
 				if (!EnsureRenderingAvailable(Error))
 					return FUnrealMcpToolResult::Error(Error);
 
@@ -599,43 +686,51 @@ namespace UnrealMcpScreenshotTools
 				if (!Viewport)
 					return FUnrealMcpToolResult::Error(TEXT("No active editor viewport. Focus a level editor viewport and retry."));
 
-				return CaptureFromViewport(Call, Viewport, TEXT("editor viewport"));
+				return CaptureFromViewport(Call, Viewport, TEXT("editor viewport"), SavePath);
 			});
 
 		// screenshot-game-view — PIE/game view; structured error when no PIE session is active.
 		Registry.Tool(TEXT("screenshot-game-view"))
 			.Title(TEXT("Screenshot Game View"))
-			.Description(FString(TEXT("Capture the Play-In-Editor game view. Errors when no PIE session is active.")) + SizeCapNote())
+			.Description(FString(TEXT("Capture the Play-In-Editor game view. Errors when no PIE session is active.")) + SizeCapNote() + SavePathNote())
 			.ParamInt(TEXT("width"), TEXT("Optional output width in pixels (clamped to [1, 2048]); when only 'height' is given the width is derived from the native aspect ratio, and the native game-view width is used when both are omitted."))
 			.ParamInt(TEXT("height"), TEXT("Optional output height in pixels (clamped to [1, 2048]); when only 'width' is given the height is derived from the native aspect ratio, and the native game-view height is used when both are omitted."))
-			.ReadOnlyHint(true).DestructiveHint(false).IdempotentHint(true).OpenWorldHint(false)
+			.ParamString(TEXT("savePath"), SavePathParamDoc())
+			.ReadOnlyHint(false).DestructiveHint(false).IdempotentHint(false).OpenWorldHint(false)
 			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
 			{
-				// Validate the PIE precondition FIRST (GPU-free, headless-spec-covered).
+				FString SavePath, Error;
+				if (!ScreenshotSavePath(Call, SavePath, Error))
+					return FUnrealMcpToolResult::Error(Error);
+
+				// Validate the PIE precondition before the GPU guard (GPU-free, headless-spec-covered).
 				const bool bPlaySessionActive = GEditor && GEditor->PlayWorld != nullptr;
 				FViewport* PieViewport = GEditor ? GEditor->GetPIEViewport() : nullptr;
 				if (!bPlaySessionActive || !PieViewport)
 					return FUnrealMcpToolResult::Error(TEXT("No Play-In-Editor session is active. Start PIE before calling screenshot-game-view."));
 
-				FString Error;
 				if (!EnsureRenderingAvailable(Error))
 					return FUnrealMcpToolResult::Error(Error);
 
-				return CaptureFromViewport(Call, PieViewport, TEXT("PIE game view"));
+				return CaptureFromViewport(Call, PieViewport, TEXT("PIE game view"), SavePath);
 			});
 
 		// screenshot-camera — render from a resolved camera actor via SceneCapture2D.
 		Registry.Tool(TEXT("screenshot-camera"))
 			.Title(TEXT("Screenshot Camera"))
-			.Description(FString(TEXT("Render the scene from a chosen camera actor (resolved by label/name/path) and capture it.")) + SizeCapNote())
+			.Description(FString(TEXT("Render the scene from a chosen camera actor (resolved by label/name/path) and capture it.")) + SizeCapNote() + SavePathNote())
 			.ParamString(TEXT("camera"), TEXT("Camera actor reference (label, object name, or path) to render from."), EUnrealMcpParamRequirement::Required)
 			.ParamInt(TEXT("width"), TEXT("Optional output width in pixels (clamped to [1, 2048]); default 1024."))
 			.ParamInt(TEXT("height"), TEXT("Optional output height in pixels (clamped to [1, 2048]); default 1024."))
 			.ParamNumber(TEXT("fov"), TEXT("Optional horizontal field-of-view override in degrees (clamped to [5, 170]); defaults to the camera component's FOV (or 90)."))
-			.ReadOnlyHint(true).DestructiveHint(false).IdempotentHint(true).OpenWorldHint(false)
+			.ParamString(TEXT("savePath"), SavePathParamDoc())
+			.ReadOnlyHint(false).DestructiveHint(false).IdempotentHint(false).OpenWorldHint(false)
 			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
 			{
 				// Validate arguments + resolve the camera FIRST (GPU-free, headless-spec-covered).
+				FString SavePath, Error;
+				if (!ScreenshotSavePath(Call, SavePath, Error))
+					return FUnrealMcpToolResult::Error(Error);
 				if (!Call.Has(TEXT("camera")))
 					return FUnrealMcpToolResult::Error(TEXT("'camera' is required."));
 
@@ -658,14 +753,13 @@ namespace UnrealMcpScreenshotTools
 					? CameraComponent->GetComponentTransform()
 					: CameraActor->GetActorTransform();
 
-				FString Error;
 				if (!EnsureRenderingAvailable(Error))
 					return FUnrealMcpToolResult::Error(Error);
 
 				const int32 Width = ResolveCaptureDimension(Call.GetInt(TEXT("width"), 0));
 				const int32 Height = ResolveCaptureDimension(Call.GetInt(TEXT("height"), 0));
 				const FString Source = FString::Printf(TEXT("camera '%s'"), *CameraActor->GetActorNameOrLabel());
-				return CaptureWithSceneCapture(World, CaptureXform, Fov, Width, Height, Source, nullptr, nullptr);
+				return CaptureWithSceneCapture(World, CaptureXform, Fov, Width, Height, Source, nullptr, nullptr, SavePath);
 			});
 
 		// screenshot-isolated — isolated actor render (transient SceneCapture2D + show-only list + background).
