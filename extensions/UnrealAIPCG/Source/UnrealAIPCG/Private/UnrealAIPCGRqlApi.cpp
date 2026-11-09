@@ -17,7 +17,6 @@
 #include "HAL/PlatformProcess.h"
 #include "IAssetTools.h"
 #include "Misc/PackageName.h"
-#include "Misc/ScopeExit.h"
 #include "Misc/ITransaction.h"
 #include "PCGComponent.h"
 #include "PCGEdge.h"
@@ -28,6 +27,7 @@
 #include "PCGVolume.h"
 #include "StructUtils/PropertyBag.h"
 #include "Subsystems/PCGSubsystem.h"
+#include "UObject/UObjectGlobals.h"
 #include "Utils/PCGPreconfiguration.h"
 
 namespace UnrealAIPCGRqlApiLocal
@@ -65,6 +65,46 @@ namespace UnrealAIPCGRqlApiLocal
 		FCriticalSection Mutex;
 		TArray<FString> Errors;
 		TArray<FString> Warnings;
+	};
+
+	/** The longest Generate blocks the game thread: within the 60 s MCP clients commonly give a tool call, so the reply arrives. */
+	constexpr double GenerateMaxWaitSeconds = 45.0;
+
+	/** Sets a console variable for a scope, at the priority it was set with (a lower one is ignored), then restores it. */
+	class FScopedConsoleValue
+	{
+	public:
+		FScopedConsoleValue(const TCHAR* Name, int32 Value)
+			: Variable(IConsoleManager::Get().FindConsoleVariable(Name))
+		{
+			if (Variable && Variable->GetInt() != Value)
+			{
+				Previous = Variable->GetInt();
+				PreviousFlags = Variable->GetFlags();
+				Priority = static_cast<EConsoleVariableFlags>(FMath::Max<uint32>(PreviousFlags & ECVF_SetByMask, ECVF_SetByCode));
+				Variable->Set(Value, Priority);
+				bRefused = Variable->GetInt() != Value;
+			}
+		}
+
+		~FScopedConsoleValue()
+		{
+			if (Previous.IsSet())
+			{
+				Variable->Set(*Previous, Priority);
+				Variable->SetFlags(PreviousFlags); // a raised priority would drop a later, lower-priority setting
+			}
+		}
+
+		/** The variable exists and could not be set. */
+		bool Refused() const { return bRefused; }
+
+	private:
+		IConsoleVariable* Variable;
+		EConsoleVariableFlags Priority = ECVF_SetByCode;
+		EConsoleVariableFlags PreviousFlags = ECVF_Default;
+		TOptional<int32> Previous;
+		bool bRefused = false;
 	};
 
 	TArray<UPCGComponent*> Components(AActor& Actor)
@@ -579,27 +619,20 @@ FUnrealAIPCGGenerateResult UUnrealAIPCGRqlApi::Generate(AActor* Actor, int32 See
 	const double Start = FPlatformTime::Seconds();
 	// PCG pauses while an editor transaction is open (pcg.PauseExecutionWhileTransactionActive): this call runs inside
 	// the RQL mutation's transaction, so let PCG run while it waits.
-	// Set and restored at the priority it was set with (a lower one is ignored).
-	IConsoleVariable* PauseInTransaction = IConsoleManager::Get().FindConsoleVariable(TEXT("pcg.PauseExecutionWhileTransactionActive"));
-	const bool bWasPaused = PauseInTransaction && PauseInTransaction->GetBool();
-	const EConsoleVariableFlags Priority = PauseInTransaction
-		? static_cast<EConsoleVariableFlags>(FMath::Max<uint32>(PauseInTransaction->GetFlags() & ECVF_SetByMask, ECVF_SetByCode)) : ECVF_SetByCode;
-	if (bWasPaused)
-		PauseInTransaction->Set(false, Priority);
-	ON_SCOPE_EXIT
-	{
-		if (bWasPaused)
-			PauseInTransaction->Set(true, Priority);
-	};
-	if (PauseInTransaction && PauseInTransaction->GetBool())
+	const FScopedConsoleValue PauseInTransaction(TEXT("pcg.PauseExecutionWhileTransactionActive"), 0);
+	if (PauseInTransaction.Refused())
 		return UnrealMcpRql::Failed<FUnrealAIPCGGenerateResult>(TEXT("PCG is paused during editor transactions (pcg.PauseExecutionWhileTransactionActive) and the setting could not be lifted"));
+	// A Static Mesh Spawner loads a mesh not yet in memory asynchronously, and the streamable manager delays the callback
+	// that resumes the node to the next frame. This wait runs no frames: without this, the first generation after the
+	// editor started stalls until the wait ends, whatever the size of the volume.
+	const FScopedConsoleValue NoDelayedLoadCallbacks(TEXT("s.StreamableDelegateDelayFrames"), 0);
 	{
 		// What generation spawns is PCG's (managed resources), not part of the undo step: as generating in the editor.
 		TGuardValue<ITransaction*> NoUndo(GUndo, nullptr);
 		for (UPCGComponent* Component : Targets)
 			Component->GenerateLocal(/*bForce*/ true);
 		// The editor ticks PCG every frame; a tool call waits for the result instead.
-		const double Deadline = Start + FMath::Max(1.0, TimeoutSeconds);
+		const double Deadline = Start + FMath::Clamp(TimeoutSeconds, 1.0, GenerateMaxWaitSeconds);
 		double Last = Start;
 		while (AnyGenerating() && FPlatformTime::Seconds() < Deadline)
 		{
@@ -609,6 +642,8 @@ FUnrealAIPCGGenerateResult UUnrealAIPCGRqlApi::Generate(AActor* Actor, int32 See
 			// Not from inside a game-thread task: the task graph refuses to process the game thread recursively.
 			if (!FTaskGraphInterface::Get().IsThreadProcessingTasks(ENamedThreads::GameThread))
 				FTaskGraphInterface::Get().ProcessThreadUntilIdle(ENamedThreads::GameThread);
+			if (IsAsyncLoading())
+				ProcessAsyncLoading(/*bUseTimeLimit*/ true, /*bUseFullTimeLimit*/ false, /*TimeLimit*/ 0.01f);
 			FPlatformProcess::SleepNoStats(0.005f);
 		}
 	}
@@ -625,7 +660,7 @@ FUnrealAIPCGGenerateResult UUnrealAIPCGRqlApi::Generate(AActor* Actor, int32 See
 	Result.Meshes = Total.MeshLines();
 	Log.TakeInto(Result);
 	if (!Result.Generated)
-		Result.Errors.Add(FString::Printf(TEXT("still generating after %.0f s: read the Generated member of its PCG component later, or call Generate with a longer TimeoutSeconds"), Result.Seconds));
+		Result.Errors.Add(FString::Printf(TEXT("still generating after %.0f s (a call waits up to TimeoutSeconds, at most %.0f s, so the reply arrives): it goes on in the editor; read the Generated member of its PCG component until IsGenerating is false, without calling Generate again"), Result.Seconds, GenerateMaxWaitSeconds));
 	return Result;
 }
 

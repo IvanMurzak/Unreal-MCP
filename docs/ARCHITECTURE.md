@@ -1382,6 +1382,15 @@ own exposure.
    caches UBT intermediates between runs; bridge/cli legs stay on hosted runners so most PRs get
    fast signal even when the UE leg queues; Automation filter kept tight (`UnrealMcp.` prefix).
 
+**Engine bug worked around: the save crash after Python ran.** PythonScriptPlugin's bound method type
+(`builtin_function_or_method_with_closure`) inherits `tp_weaklistoffset` from `builtin_function_or_method`, but its struct has
+no such field. Python's cyclic collector therefore treats the bytes after such an object as a weak-reference list when the
+object is in a reference cycle, and writes through them. A snippet that keeps one (`c = mel.connect_material_expressions`) and
+defines a function makes that cycle. Level saves run an Unreal GC, which from UE 5.6 runs a Python GC, so the editor crashes in
+`python311` under `SaveLevel` / `SaveAll`, long after the snippet ended (on 5.5 at Python's own next collection). On import
+`unreal_mcp/python_execute.py` sets the type's offset to 0, after checking the type layout, unless the engine already has the
+type right; if it cannot, every `python-execute` result carries a warning saying so. Spec: `UnrealMcp.Tools.Python`.
+
 ---
 
 ## 12. Runtime (in-game) support
