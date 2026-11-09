@@ -108,8 +108,14 @@ namespace UnrealMcpScreenshotTools
 			return false;
 		};
 		FPaths::NormalizeFilename(Path);
-		if (Path.EndsWith(TEXT("/")))
+		FPaths::RemoveDuplicateSlashes(Path);
+		// Judged on the request, before any path collapsing: engines disagree on it. UE 5.5/5.6 keep a trailing "/." ("." then
+		// becomes a file named "..png"), UE 5.7+ drop it ("Screenshots/." then becomes "Screenshots.png").
+		const FString FileName = FPaths::GetCleanFilename(Path);
+		if (FileName.IsEmpty() || FileName == TEXT(".") || FileName == TEXT(".."))
 			return Refuse(TEXT("it names a folder; add a file name, such as Screenshots/shot.png."));
+		if (FPaths::GetBaseFilename(FileName).Replace(TEXT("."), TEXT("")).IsEmpty())
+			return Refuse(TEXT("it has no file name, only an extension; use a name such as Screenshots/shot.png."));
 		const auto RefuseOutside = [&Refuse, &ProjectDir]()
 		{
 			return Refuse(FString::Printf(TEXT("it must stay inside the project folder %s (a path relative to it, or an absolute "
@@ -124,7 +130,7 @@ namespace UnrealMcpScreenshotTools
 			Full += TEXT(".png");
 		else if (!Extension.Equals(TEXT("png"), ESearchCase::IgnoreCase))
 			return Refuse(TEXT("the capture is a PNG, so the file name must end in .png."));
-		// The jail accepts its own root ("." or "Screenshots/.."), and adding .png to that names a file beside the project.
+		// The jail accepts its own root (the project's absolute path), and adding .png to that names a file beside the project.
 		if (!FPaths::IsUnderDirectory(Full, FPaths::ConvertRelativePathToFull(ProjectDir)))
 			return RefuseOutside();
 		if (IFileManager::Get().FileExists(*Full))
