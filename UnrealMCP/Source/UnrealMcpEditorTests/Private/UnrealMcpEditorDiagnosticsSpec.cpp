@@ -42,7 +42,7 @@ BEGIN_DEFINE_SPEC(FUnrealMcpEditorDiagnosticsSpec, "UnrealMcp.Tools.Diagnostics"
 	void SetMode(const TCHAR* Mode)
 	{
 		if (IConsoleVariable* Variable = PushVariable())
-			Variable->Set(Mode, ECVF_SetByCode);
+			Variable->Set(Mode, ECVF_SetByConsole); // the highest priority a user's console entry can have had
 	}
 
 	/** A Standard tool that runs @p Body; read-only or not. */
@@ -151,6 +151,8 @@ void FUnrealMcpEditorDiagnosticsSpec::Define()
 		TestEqual(TEXT("Source"), CellText(Listed, 0, 0), FString(TEXT("Viewport")));
 		TestEqual(TEXT("Severity"), CellText(Listed, 0, 1), FString(TEXT("Warning")));
 
+		if (!TestEqual(TEXT("both suns spawned"), Spawned.Num(), 2))
+			return;
 		Cast<UDirectionalLightComponent>(CastChecked<ADirectionalLight>(Spawned[1].Get())->GetLightComponent())->ForwardShadingPriority = 1001;
 		TestEqual(TEXT("gone once one light has the higher priority"), RowCount(Pull(TEXT("DiagSpecSun"))), 0);
 		const FUnrealMcpToolResult Fixed = Run(TEXT("diag-spec-write"));
@@ -221,6 +223,13 @@ void FUnrealMcpEditorDiagnosticsSpec::Define()
 		const FUnrealMcpToolResult Broken = Run(TEXT("diag-spec-write"));
 		TestTrue(*FString::Printf(TEXT("Error [Compiler] (%s)"), *Broken.Notes),
 			Broken.Notes.Contains(TEXT("- Error [Compiler] Blueprint /Temp/DiagSpec_BrokenBlueprint.DiagSpec_BrokenBlueprint fails to compile")));
+		FUnrealMcpToolResult PullResult;
+		SetMode(TEXT("mutating"));
+		Blueprint->Status = BS_UpToDateWithWarnings; // a new row (its text has quotes, JSON-escaped in the query result)
+		TestEqual(TEXT("pulled"), RowCount(Pull(TEXT("DiagSpec_BrokenBlueprint"), &PullResult)), 1);
+		const FUnrealMcpToolResult After = Run(TEXT("diag-spec-write"));
+		TestFalse(*FString::Printf(TEXT("the next writing call does not repeat what the read-only pull showed (%s)"), *After.Notes),
+			After.Notes.Contains(TEXT("DiagSpec_BrokenBlueprint")));
 		Blueprint->Status = BS_UpToDate;
 		TestEqual(TEXT("gone once it compiles"), RowCount(Pull(TEXT("DiagSpec_BrokenBlueprint"))), 0);
 		DropObject(Blueprint);

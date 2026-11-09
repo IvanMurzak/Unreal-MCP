@@ -14,6 +14,7 @@
 #include "HAL/IConsoleManager.h"
 #include "HAL/PlatformMisc.h"
 #include "IMessageLogListing.h"
+#include "Interfaces/IPluginManager.h"
 #include "Logging/TokenizedMessage.h"
 #include "MessageLogModule.h"
 #include "Misc/CoreDelegates.h"
@@ -59,6 +60,18 @@ namespace UnrealMcpEditorDiagnosticsLocal
 		if (Out.Len() > MaxChars)
 			Out = Out.Left(MaxChars - 3) + TEXT("...");
 		return Out;
+	}
+
+	/** Whether @p Text shows @p Message as is or JSON-escaped (an rql-* answer is QueryResult JSON). */
+	bool Shows(const FString& Text, const FString& Message)
+	{
+		if (Text.IsEmpty())
+			return false;
+		if (Text.Contains(Message, ESearchCase::CaseSensitive))
+			return true;
+		const FString Escaped = Message.Replace(TEXT("\\"), TEXT("\\\\")).Replace(TEXT("\""), TEXT("\\\""))
+			.Replace(TEXT("\n"), TEXT("\\n")).Replace(TEXT("\r"), TEXT("\\r")).Replace(TEXT("\t"), TEXT("\\t"));
+		return Escaped != Message && Text.Contains(Escaped, ESearchCase::CaseSensitive);
 	}
 
 	bool IsLog(const FString& Source)
@@ -133,8 +146,10 @@ void FUnrealMcpEditorDiagnostics::GatherViewport(TArray<FGathered>& Out) const
 	for (TObjectIterator<UDirectionalLightComponent> It; It; ++It)
 	{
 		UDirectionalLightComponent* Light = *It;
+		// The lights the renderer has (ULightComponent::CreateRenderState_Concurrent adds these to the scene).
 		if (!IsValid(Light) || Light->HasAnyFlags(RF_ClassDefaultObject | RF_ArchetypeObject) || Light->GetWorld() != World
-			|| !Light->IsRegistered() || !Light->bAffectsWorld || !Light->IsVisible())
+			|| !Light->IsRegistered() || !Light->bAffectsWorld || !Light->ShouldComponentAddToScene() || !Light->ShouldRender()
+			|| Light->Intensity <= 0.f)
 			continue;
 		if (Light->ForwardShadingPriority > TopPriority)
 		{
@@ -181,6 +196,10 @@ void FUnrealMcpEditorDiagnostics::GatherCompiler(TArray<FGathered>& Out) const
 		const UPackage* Package = Blueprint->GetOutermost();
 		if (!Package || Package == GetTransientPackage() || Package->GetName().StartsWith(TEXT("/Engine/")))
 			continue;
+		// Engine plugins' content (/Niagara, /ControlRig, ...) is not the project's to fix.
+		const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPluginFromPath(Package->GetName());
+		if (Plugin.IsValid() && Plugin->GetLoadedFrom() == EPluginLoadedFrom::Engine)
+			continue;
 		Out.Add({ TEXT("Compiler"), bError ? SevError : SevWarning, FString::Printf(TEXT("Blueprint %s %s (its messages: unreal.asset(\"%s\") | call Compile())"),
 			*Blueprint->GetPathName(), bError ? TEXT("fails to compile") : TEXT("compiles with warnings"), *Package->GetName()) });
 	}
@@ -207,17 +226,17 @@ void FUnrealMcpEditorDiagnostics::GatherMessageLogs(TArray<FGathered>& Out) cons
 	}
 }
 
-FUnrealMcpDiagnostic& FUnrealMcpEditorDiagnostics::Upsert(const FGathered& Item, const FDateTime& Now, bool& bOutAdded)
+FUnrealMcpEditorDiagnostics::FRow& FUnrealMcpEditorDiagnostics::Upsert(const FGathered& Item, const FDateTime& Now, bool& bOutAdded)
 {
 	const FString Key = Item.Source + TEXT("\n") + Item.Severity + TEXT("\n") + Item.Message;
-	FUnrealMcpDiagnostic* Existing = Items.Find(Key);
+	FRow* Existing = Items.Find(Key);
 	bOutAdded = Existing == nullptr;
 	if (Existing)
 	{
 		Existing->LastSeen = Now;
 		return *Existing;
 	}
-	FUnrealMcpDiagnostic& Added = Items.Add(Key);
+	FRow& Added = Items.Add(Key);
 	Added.Sequence = ++LastSequence;
 	Added.Source = Item.Source;
 	Added.Severity = Item.Severity;
@@ -240,7 +259,7 @@ void FUnrealMcpEditorDiagnostics::IngestLog(const FDateTime& Now)
 			|| IsMessageLogPage(Entry.Category))
 			continue;
 		bool bAdded = false;
-		FUnrealMcpDiagnostic& Row = Upsert({ LogPrefix + Entry.Category.ToString(), Verbosity == ELogVerbosity::Warning ? SevWarning : SevError,
+		FRow& Row = Upsert({ LogPrefix + Entry.Category.ToString(), Verbosity == ELogVerbosity::Warning ? SevWarning : SevError,
 			Clean(Entry.Message, MaxMessageChars) }, Now, bAdded);
 		if (bAdded)
 			++LogItems;
@@ -251,15 +270,19 @@ void FUnrealMcpEditorDiagnostics::IngestLog(const FDateTime& Now)
 	// Keep the most recent MaxLogItems distinct log lines.
 	if (LogItems > MaxLogItems)
 	{
-		TArray<TPair<FDateTime, FString>> Logs;
-		for (const TPair<FString, FUnrealMcpDiagnostic>& Pair : Items)
+		// Oldest first: by LastSeen, then Sequence (the lines of one refresh share LastSeen).
+		TArray<TTuple<FDateTime, int64, FString>> Logs;
+		for (const TPair<FString, FRow>& Pair : Items)
 		{
 			if (IsLog(Pair.Value.Source))
-				Logs.Emplace(Pair.Value.LastSeen, Pair.Key);
+				Logs.Emplace(Pair.Value.LastSeen, Pair.Value.Sequence, Pair.Key);
 		}
-		Logs.Sort([](const TPair<FDateTime, FString>& A, const TPair<FDateTime, FString>& B) { return A.Key < B.Key; });
+		Logs.Sort([](const TTuple<FDateTime, int64, FString>& A, const TTuple<FDateTime, int64, FString>& B)
+		{
+			return A.Get<0>() != B.Get<0>() ? A.Get<0>() < B.Get<0>() : A.Get<1>() < B.Get<1>();
+		});
 		for (int32 Index = 0; Index < Logs.Num() - MaxLogItems; ++Index)
-			Items.Remove(Logs[Index].Value);
+			Items.Remove(Logs[Index].Get<2>());
 		LogItems = MaxLogItems;
 	}
 }
@@ -294,26 +317,33 @@ void FUnrealMcpEditorDiagnostics::Refresh()
 TArray<FUnrealMcpDiagnostic> FUnrealMcpEditorDiagnostics::Snapshot() const
 {
 	TArray<FUnrealMcpDiagnostic> Out;
-	Items.GenerateValueArray(Out);
+	for (const TPair<FString, FRow>& Pair : Items)
+		Out.Add(Pair.Value);
 	Out.Sort([](const FUnrealMcpDiagnostic& A, const FUnrealMcpDiagnostic& B) { return A.Sequence < B.Sequence; });
 	return Out;
 }
 
-FString FUnrealMcpEditorDiagnostics::TakeNewBlock(const FString& AlreadyShown)
+FString FUnrealMcpEditorDiagnostics::TakeNewBlock(const FString& AlreadyShown, bool bReport)
 {
 	Refresh();
-	TArray<const FUnrealMcpDiagnostic*> New;
-	for (const TPair<FString, FUnrealMcpDiagnostic>& Pair : Items)
+	TArray<const FRow*> New;
+	for (TPair<FString, FRow>& Pair : Items)
 	{
-		const FUnrealMcpDiagnostic& Item = Pair.Value;
-		if (Item.Sequence > SeenSequence && Item.Severity != SevInfo && !AlreadyShown.Contains(Item.Message))
-			New.Add(&Item);
+		FRow& Row = Pair.Value;
+		if (Row.bSeen || Row.Severity == SevInfo)
+			continue;
+		if (Shows(AlreadyShown, Row.Message))
+			Row.bSeen = true;
+		else if (bReport)
+		{
+			Row.bSeen = true;
+			New.Add(&Row);
+		}
 	}
-	SeenSequence = LastSequence;
 	if (New.Num() == 0)
 		return FString();
 
-	New.Sort([](const FUnrealMcpDiagnostic& A, const FUnrealMcpDiagnostic& B)
+	New.Sort([](const FRow& A, const FRow& B)
 	{
 		if (A.Severity != B.Severity)
 			return A.Severity == SevError;
@@ -324,7 +354,7 @@ FString FUnrealMcpEditorDiagnostics::TakeNewBlock(const FString& AlreadyShown)
 		"call the work done: rql-query %s):"), ListQuery());
 	for (int32 Index = 0; Index < FMath::Min(New.Num(), MaxPushLines); ++Index)
 	{
-		const FUnrealMcpDiagnostic& Item = *New[Index];
+		const FRow& Item = *New[Index];
 		Block += FString::Printf(TEXT("\n- %s [%s] %s"), *Item.Severity, *Item.Source,
 			*Clean(Item.Message.Replace(TEXT("\n"), TEXT(" ")), MaxLineChars));
 		if (Item.Count > 1)
@@ -354,10 +384,12 @@ void FUnrealMcpEditorDiagnostics::Install()
 	FUnrealMcpToolRegistry::SetResultAnnotator([](const FUnrealMcpRegisteredTool& Tool, FUnrealMcpToolResult& Result)
 	{
 		const EUnrealMcpDiagnosticsPush Mode = PushMode();
-		if (Mode == EUnrealMcpDiagnosticsPush::Off || (Mode == EUnrealMcpDiagnosticsPush::Mutating && Tool.bReadOnlyHint))
+		if (Mode == EUnrealMcpDiagnosticsPush::Off)
 			return;
-		// What the tool's own text shows (log lines it returned, the rows of a diagnostics query) is not repeated.
-		const FString Block = Get().TakeNewBlock(Result.Message);
+		// What the tool's own text shows (log lines it returned, the rows of a diagnostics query) is not repeated, and
+		// counts as seen even on a call that gets no note (a read-only tool in mutating mode).
+		const bool bReport = Mode == EUnrealMcpDiagnosticsPush::All || !Tool.bReadOnlyHint;
+		const FString Block = Get().TakeNewBlock(Result.Message, bReport);
 		if (!Block.IsEmpty())
 			Result.Notes = Result.Notes.IsEmpty() ? Block : Result.Notes + TEXT("\n") + Block;
 	});

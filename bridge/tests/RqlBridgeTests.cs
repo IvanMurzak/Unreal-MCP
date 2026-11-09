@@ -136,6 +136,15 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             Assert.Equal(2, rendered.Content!.Count);
             Assert.StartsWith("1 result", rendered.Content[0].Text);
             Assert.Equal("Editor diagnostics (new): ...", rendered.Content[1].Text);
+
+            // A failed mutation keeps its error status and the note too.
+            var failed = Text("{\"rql\":\"0.1\",\"ok\":false,\"diagnostics\":[{\"severity\":\"error\",\"code\":\"readonly-member\",\"message\":\"Name is read-only\"}]}",
+                ResponseStatus.Error);
+            failed.Content!.Add(new ContentBlock { Type = Consts.ContentType.Text, Text = "Editor diagnostics (new): ..." });
+            var renderedFailure = RqlBridge.Render(RqlBridge.MutateRole, failed);
+            Assert.Equal(ResponseStatus.Error, renderedFailure.Status);
+            Assert.Equal(2, renderedFailure.Content!.Count);
+            Assert.StartsWith("error readonly-member", renderedFailure.Content[0].Text);
         }
 
         [Fact]

@@ -45,8 +45,8 @@ enum class EUnrealMcpDiagnosticsPush : uint8
  * Viewport, Compiler and MessageLog rows are state: they leave the list when the problem is gone. Log rows stay (the
  * most recent MaxLogItems distinct lines).
  *
- * After a tool call the result carries the Warning / Error rows that are new since the agent last saw the list
- * (TakeNewBlock), less what the tool's own text already shows (the rows a `diagnostics` query returned). Game thread only.
+ * After a tool call the result carries the Warning / Error rows the agent has not seen yet (TakeNewBlock): a row counts as
+ * seen once a note reported it or a tool's own text showed it (the rows a `diagnostics` query returned). Game thread only.
  */
 class UNREALMCPRQL_API FUnrealMcpEditorDiagnostics
 {
@@ -66,11 +66,12 @@ public:
 	TArray<FUnrealMcpDiagnostic> Snapshot() const;
 
 	/**
-	 * Refresh, then the Warning / Error diagnostics that appeared since the agent last saw them as a short block (at most
-	 * MaxPushLines lines of at most MaxLineChars, errors first, with a pointer to the full list), and mark them seen.
-	 * Diagnostics whose message @p AlreadyShown contains (what the tool's own text already shows) are left out. "" when none.
+	 * Refresh, then the Warning / Error diagnostics the agent has not seen as a short block (at most MaxPushLines lines,
+	 * errors first, with a pointer to the full list), and mark them seen. Those whose message @p AlreadyShown holds (the
+	 * tool's own text, plain or JSON-escaped) count as seen and are left out. With @p bReport false (a call that gets no
+	 * note) only those are marked and "" is returned. "" when there is nothing new.
 	 */
-	FString TakeNewBlock(const FString& AlreadyShown);
+	FString TakeNewBlock(const FString& AlreadyShown, bool bReport = true);
 
 	/** Install the tool-result annotator (FUnrealMcpToolRegistry::SetResultAnnotator) and the console variable; Uninstall removes the annotator. */
 	static void Install();
@@ -88,12 +89,17 @@ private:
 	void GatherCompiler(TArray<FGathered>& Out) const;
 	void GatherMessageLogs(TArray<FGathered>& Out) const;
 	void IngestLog(const FDateTime& Now);
-	/** The row of @p Item: the existing one (LastSeen = Now) or a new one with the next Sequence. */
-	FUnrealMcpDiagnostic& Upsert(const FGathered& Item, const FDateTime& Now, bool& bOutAdded);
 
-	TMap<FString, FUnrealMcpDiagnostic> Items; // key: Source \n Severity \n Message
+	struct FRow : FUnrealMcpDiagnostic
+	{
+		bool bSeen = false; // reported in a note or shown in a tool's text
+	};
+
+	/** The row of @p Item: the existing one (LastSeen = Now) or a new one with the next Sequence. */
+	FRow& Upsert(const FGathered& Item, const FDateTime& Now, bool& bOutAdded);
+
+	TMap<FString, FRow> Items; // key: Source \n Severity \n Message
 	int64 LastSequence = 0;
-	int64 SeenSequence = 0;    // the agent has seen every diagnostic up to this Sequence
 	int64 LogCursor = 0;       // FUnrealMcpLogCollector sequence read so far
 	int32 LogItems = 0;        // Log:<category> rows in Items
 };

@@ -45,7 +45,7 @@ void UnrealMcpRqlAddDiagnostics(FUnrealMcpRqlSession& Session)
 	Session.AddSource(TEXT("diagnostics"), RowType, /*bList*/ true,
 		TEXT("the editor's current warnings and errors, oldest first (Sequence Source Severity Message Count FirstSeen LastSeen): Source "
 			"Viewport (the level viewport's on-screen messages, renderer scene warnings included), Compiler (Blueprints that fail to "
-			"compile), MessageLog:<page> (MapCheck, PIE, BlueprintLog, LoadErrors, ...), Log:<category> (Warning / Error log lines); "
+			"compile or compile with warnings), MessageLog:<page> (MapCheck, PIE, BlueprintLog, LoadErrors, ...), Log:<category> (Warning / Error log lines); "
 			"Severity Error / Warning / Info. Check it before you call the work done: diagnostics | where Severity != \"Info\""),
 		[RowType]()
 	{
