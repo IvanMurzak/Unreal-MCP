@@ -15,6 +15,7 @@ import textwrap
 import time
 import unittest
 from unittest import mock
+import uuid
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -32,6 +33,21 @@ ci = load("ue_ci", ROOT / ".github/scripts/ue_ci.py")
 ue_env = load("ue_env", ROOT / ".github/scripts/ue_env.py")
 import ue_json  # noqa: E402
 import ue_machine_lock as lock  # noqa: E402  (scripts/ is on sys.path under `unittest discover -s scripts`)
+
+# The negative tests below drive real guards, which print `::error::` / `::warning::` workflow commands
+# (in-process and from child processes). On a runner those lines would become annotations on a green job,
+# so command processing is paused for this module's run. The guards themselves are unchanged.
+_STOP_COMMANDS_TOKEN = f"ue-ci-tests-{uuid.uuid4().hex}"
+
+
+def setUpModule():
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        print(f"::stop-commands::{_STOP_COMMANDS_TOKEN}", flush=True)
+
+
+def tearDownModule():
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        print(f"::{_STOP_COMMANDS_TOKEN}::", flush=True)
 
 
 def fake_uat(folder: Path, body: str) -> str:
