@@ -16,7 +16,9 @@
  * build, test, packaging or generation step reads. Off the list on purpose: extension READMEs
  * (scripts/test_extension_monorepo.py compares them, extension_release.py packages them, the App
  * fetches them from main), cli/README.md (npm `files`), everything under UnrealMCP/ (the plugin
- * package), and the root README.md, which holds the source-generated tool inventory.
+ * package), and the root README.md, which holds the source-generated tool inventory. On the list: the
+ * root .claude/ and .agents/ (agent settings and skills); the ".claude/skills" in the code is a path in
+ * the user's project.
  */
 
 import { execFileSync } from "node:child_process";
@@ -25,7 +27,7 @@ import { fileURLToPath } from "node:url";
 
 /** @param {string} path repo-relative, forward slashes */
 export function isDocsPath(path) {
-  return path === "AGENTS.md" || path.startsWith("docs/");
+  return path === "AGENTS.md" || /^(docs|\.claude|\.agents)\//.test(path);
 }
 
 /** @param {readonly string[]} files */
