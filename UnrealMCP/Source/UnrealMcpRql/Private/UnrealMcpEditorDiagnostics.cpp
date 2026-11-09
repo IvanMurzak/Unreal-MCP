@@ -29,6 +29,11 @@ namespace UnrealMcpEditorDiagnosticsLocal
 	const TCHAR* const Viewport = TEXT("Viewport");
 	const TCHAR* const LogPrefix = TEXT("Log:");
 
+	constexpr int32 MaxLineChars = 400;
+	constexpr int32 MaxLogItems = 200;        // distinct log lines kept, the most recent
+	constexpr int32 MaxMessageLogItems = 100; // per Message Log page, the newest
+	constexpr int32 MaxMessageChars = 2000;
+
 	/** The Message Log pages read, by their listing names (only the registered ones are read). */
 	const TCHAR* const MessageLogPages[] = {
 		TEXT("MapCheck"), TEXT("PIE"), TEXT("BlueprintLog"), TEXT("LoadErrors"), TEXT("AssetCheck"),
@@ -56,9 +61,9 @@ namespace UnrealMcpEditorDiagnosticsLocal
 		return Out;
 	}
 
-	bool IsLog(const FUnrealMcpDiagnostic& Item)
+	bool IsLog(const FString& Source)
 	{
-		return Item.Source.StartsWith(LogPrefix);
+		return Source.StartsWith(LogPrefix);
 	}
 
 	/** Push order: errors before warnings, then the scene before compile, Message Log and log lines, then age. */
@@ -68,7 +73,7 @@ namespace UnrealMcpEditorDiagnosticsLocal
 			return 0;
 		if (Source == TEXT("Compiler"))
 			return 1;
-		return Source.StartsWith(LogPrefix) ? 3 : 2;
+		return IsLog(Source) ? 3 : 2;
 	}
 
 	EUnrealMcpDiagnosticsPush ParsePushMode(FString Text)
@@ -79,6 +84,11 @@ namespace UnrealMcpEditorDiagnosticsLocal
 		if (Text == TEXT("mutating") || Text == TEXT("writes"))
 			return EUnrealMcpDiagnosticsPush::Mutating;
 		return EUnrealMcpDiagnosticsPush::All;
+	}
+
+	EUnrealMcpDiagnosticsPush PushMode()
+	{
+		return GPushVariable ? ParsePushMode((*GPushVariable)->GetString()) : EUnrealMcpDiagnosticsPush::All;
 	}
 }
 
@@ -197,8 +207,16 @@ void FUnrealMcpEditorDiagnostics::GatherMessageLogs(TArray<FGathered>& Out) cons
 	}
 }
 
-FUnrealMcpDiagnostic& FUnrealMcpEditorDiagnostics::Add(const FString& Key, const FGathered& Item, const FDateTime& Now)
+FUnrealMcpDiagnostic& FUnrealMcpEditorDiagnostics::Upsert(const FGathered& Item, const FDateTime& Now, bool& bOutAdded)
 {
+	const FString Key = Item.Source + TEXT("\n") + Item.Severity + TEXT("\n") + Item.Message;
+	FUnrealMcpDiagnostic* Existing = Items.Find(Key);
+	bOutAdded = Existing == nullptr;
+	if (Existing)
+	{
+		Existing->LastSeen = Now;
+		return *Existing;
+	}
 	FUnrealMcpDiagnostic& Added = Items.Add(Key);
 	Added.Sequence = ++LastSequence;
 	Added.Source = Item.Source;
@@ -221,29 +239,28 @@ void FUnrealMcpEditorDiagnostics::IngestLog(const FDateTime& Now)
 		if (Verbosity > ELogVerbosity::Warning || Verbosity == ELogVerbosity::NoLogging || Entry.Category == TEXT("LogUnrealMcp")
 			|| IsMessageLogPage(Entry.Category))
 			continue;
-		const FGathered Item{ LogPrefix + Entry.Category.ToString(), Verbosity == ELogVerbosity::Warning ? SevWarning : SevError, Clean(Entry.Message, MaxMessageChars) };
-		const FString Key = Item.Source + TEXT("\n") + Item.Severity + TEXT("\n") + Item.Message;
-		if (FUnrealMcpDiagnostic* Existing = Items.Find(Key))
-		{
-			++Existing->Count;
-			Existing->LastSeen = Now;
-		}
+		bool bAdded = false;
+		FUnrealMcpDiagnostic& Row = Upsert({ LogPrefix + Entry.Category.ToString(), Verbosity == ELogVerbosity::Warning ? SevWarning : SevError,
+			Clean(Entry.Message, MaxMessageChars) }, Now, bAdded);
+		if (bAdded)
+			++LogItems;
 		else
-			Add(Key, Item, Now);
+			++Row.Count;
 	}
 
 	// Keep the most recent MaxLogItems distinct log lines.
-	TArray<TPair<FDateTime, FString>> Logs;
-	for (const TPair<FString, FUnrealMcpDiagnostic>& Pair : Items)
+	if (LogItems > MaxLogItems)
 	{
-		if (IsLog(Pair.Value))
-			Logs.Emplace(Pair.Value.LastSeen, Pair.Key);
-	}
-	if (Logs.Num() > MaxLogItems)
-	{
+		TArray<TPair<FDateTime, FString>> Logs;
+		for (const TPair<FString, FUnrealMcpDiagnostic>& Pair : Items)
+		{
+			if (IsLog(Pair.Value.Source))
+				Logs.Emplace(Pair.Value.LastSeen, Pair.Key);
+		}
 		Logs.Sort([](const TPair<FDateTime, FString>& A, const TPair<FDateTime, FString>& B) { return A.Key < B.Key; });
 		for (int32 Index = 0; Index < Logs.Num() - MaxLogItems; ++Index)
 			Items.Remove(Logs[Index].Value);
+		LogItems = MaxLogItems;
 	}
 }
 
@@ -258,23 +275,16 @@ void FUnrealMcpEditorDiagnostics::Refresh()
 	GatherMessageLogs(Current);
 
 	// State rows: keep the ones still there, add the new ones, drop the ones that are gone (a return is new again).
-	TSet<FString> Present;
+	TSet<int64> Present; // by Sequence: unique per row, and stable while rows are added
 	for (FGathered& Item : Current)
 	{
 		Item.Message = Clean(Item.Message, MaxMessageChars);
-		const FString Key = Item.Source + TEXT("\n") + Item.Severity + TEXT("\n") + Item.Message;
-		bool bAlready = false;
-		Present.Add(Key, &bAlready);
-		if (bAlready)
-			continue;
-		if (FUnrealMcpDiagnostic* Existing = Items.Find(Key))
-			Existing->LastSeen = Now;
-		else
-			Add(Key, Item, Now);
+		bool bAdded = false;
+		Present.Add(Upsert(Item, Now, bAdded).Sequence);
 	}
 	for (auto It = Items.CreateIterator(); It; ++It)
 	{
-		if (!IsLog(It.Value()) && !Present.Contains(It.Key()))
+		if (!IsLog(It.Value().Source) && !Present.Contains(It.Value().Sequence))
 			It.RemoveCurrent();
 	}
 
@@ -289,11 +299,6 @@ TArray<FUnrealMcpDiagnostic> FUnrealMcpEditorDiagnostics::Snapshot() const
 	return Out;
 }
 
-void FUnrealMcpEditorDiagnostics::MarkSeen()
-{
-	SeenSequence = LastSequence;
-}
-
 FString FUnrealMcpEditorDiagnostics::TakeNewBlock(const FString& AlreadyShown)
 {
 	Refresh();
@@ -304,7 +309,7 @@ FString FUnrealMcpEditorDiagnostics::TakeNewBlock(const FString& AlreadyShown)
 		if (Item.Sequence > SeenSequence && Item.Severity != SevInfo && !AlreadyShown.Contains(Item.Message))
 			New.Add(&Item);
 	}
-	MarkSeen();
+	SeenSequence = LastSequence;
 	if (New.Num() == 0)
 		return FString();
 
@@ -330,11 +335,6 @@ FString FUnrealMcpEditorDiagnostics::TakeNewBlock(const FString& AlreadyShown)
 	return Block;
 }
 
-EUnrealMcpDiagnosticsPush FUnrealMcpEditorDiagnostics::PushMode()
-{
-	return GPushVariable ? ParsePushMode((*GPushVariable)->GetString()) : EUnrealMcpDiagnosticsPush::All;
-}
-
 void FUnrealMcpEditorDiagnostics::Install()
 {
 	if (!GPushVariable)
@@ -346,19 +346,18 @@ void FUnrealMcpEditorDiagnostics::Install()
 	}
 	// Log rows start once the editor has started: the warnings of the engine's own startup (missing install files, DDC
 	// fallbacks) are not about the project, and the Message Log pages (LoadErrors) keep what is.
+	auto SkipStartupLog = []() { Get().LogCursor = FMath::Max(Get().LogCursor, FUnrealMcpLogCollector::Get().GetLastSequence()); };
 	if (GIsRunning)
-		Get().LogCursor = FMath::Max(Get().LogCursor, FUnrealMcpLogCollector::Get().GetLastSequence());
+		SkipStartupLog();
 	else
-		FCoreDelegates::OnFEngineLoopInitComplete.AddLambda([]()
-		{
-			Get().LogCursor = FMath::Max(Get().LogCursor, FUnrealMcpLogCollector::Get().GetLastSequence());
-		});
+		FCoreDelegates::OnFEngineLoopInitComplete.AddLambda(SkipStartupLog);
 	FUnrealMcpToolRegistry::SetResultAnnotator([](const FUnrealMcpRegisteredTool& Tool, FUnrealMcpToolResult& Result)
 	{
 		const EUnrealMcpDiagnosticsPush Mode = PushMode();
 		if (Mode == EUnrealMcpDiagnosticsPush::Off || (Mode == EUnrealMcpDiagnosticsPush::Mutating && Tool.bReadOnlyHint))
 			return;
-		const FString Block = Get().TakeNewBlock(Result.WireText());
+		// What the tool's own text shows (log lines it returned, the rows of a diagnostics query) is not repeated.
+		const FString Block = Get().TakeNewBlock(Result.Message);
 		if (!Block.IsEmpty())
 			Result.Notes = Result.Notes.IsEmpty() ? Block : Result.Notes + TEXT("\n") + Block;
 	});

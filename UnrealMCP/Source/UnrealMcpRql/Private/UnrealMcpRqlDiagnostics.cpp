@@ -51,7 +51,6 @@ void UnrealMcpRqlAddDiagnostics(FUnrealMcpRqlSession& Session)
 	{
 		FUnrealMcpEditorDiagnostics& Diagnostics = FUnrealMcpEditorDiagnostics::Get();
 		Diagnostics.Refresh();
-		Diagnostics.MarkSeen(); // the agent reads them now: the tool result need not repeat them
 		std::vector<rql::Value> Rows;
 		for (const FUnrealMcpDiagnostic& Item : Diagnostics.Snapshot())
 		{

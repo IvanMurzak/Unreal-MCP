@@ -225,8 +225,7 @@ the game thread, and the agent gets them two ways.
 | `FirstSeen`, `LastSeen` | UTC, ISO 8601 |
 
 `Viewport`, `Compiler` and `MessageLog` rows are state: a fixed problem leaves the list, and one that comes back is new again.
-`diagnostics | where Severity != "Info" | select Source Severity Message Count` lists what to fix. Reading the source marks
-every row seen. The field names are meant to be shared by the Unity and Godot plugins (`Source` values are host-specific).
+`diagnostics | where Severity != "Info" | select Source Severity Message Count` lists what to fix. The field names are meant to be shared by the Unity and Godot plugins (`Source` values are host-specific).
 
 **Push: a note on tool results.** After every outermost Standard tool call (`FUnrealMcpToolRegistry::SetResultAnnotator`;
 not system tools or nested calls), the Warning / Error rows that are new since the agent last saw the list are sent as a
@@ -238,7 +237,7 @@ Editor diagnostics (new since your last call; fix them or tell the user, and che
 ```
 
 At most 10 lines of at most 400 characters, errors first, then `+N more`; each row is reported once (unchanged rows are not
-repeated), and rows whose message the tool's own text already holds (the log lines `console-run-command` / `python-execute` return) are left out.
+repeated), and rows whose message the tool's own text already holds (the log lines `console-run-command` / `python-execute` return, the rows a `diagnostics` query returned) are left out.
 The `UnrealMcp.DiagnosticsPush` console variable sets when: `all` (every tool, the default), `mutating` (only tools that
 are not read-only) or `off` (the source only). `UNREAL_MCP_DIAGNOSTICS_PUSH` sets its value at editor start.
 
