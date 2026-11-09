@@ -1,0 +1,37 @@
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpPythonToolsSpec.cpp
+  s_253b043f90cb72::t_eb2991c0cb5345 94
+  s_253b043f90cb72::t_e548c9dc5d5691 74-79
+UnrealMCP/Content/Python/unreal_mcp/python_execute.py
+  s_253b043f90cb72::t_334f1b1b5cbef5 91-92
+  s_253b043f90cb72::t_a2150a59326699 25-26,28,31,33,41-42
+  s_253b043f90cb72::t_7b6f072c15c252 52
+  s_253b043f90cb72::t_84167bcd510463 16-20
+docs/ARCHITECTURE.md
+  s_253b043f90cb72::t_26f9725e489031 1385,1389-1392
+extensions/UnrealAIPCG/Source/UnrealAIPCG/Private/UnrealAIPCGRqlApi.cpp
+  s_253b043f90cb72::t_d6fd0c4294253d 663
+  s_253b043f90cb72::t_14e23b0d931ded 105
+  s_253b043f90cb72::t_fe22ca8630f81e 83-84
+  s_253b043f90cb72::t_44c9bd17e1385e 93,95-96
+extensions/UnrealAIPCG/Source/UnrealAIPCG/Private/Tests/UnrealAIPCGSpec.cpp
+  s_253b043f90cb72::t_35ba845fc7a117 135
+  s_253b043f90cb72::t_361a08afe6f526 496-507
+  s_253b043f90cb72::t_ce037517da7315 485-486
+  s_253b043f90cb72::t_ec39df9d728739 22,25
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "2a125ed589383e6ebc846eda2574be374e846bc3",
+  "prompts": {},
+  "sessions": {
+    "s_253b043f90cb72": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8ec203a4-4063-4c7a-81b4-a54b8d2ec310",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

@@ -1,0 +1,60 @@
+extensions/UnrealAINiagara/Source/UnrealAINiagara/Private/UnrealAINiagaraRqlApi.cpp
+  s_c9a9fe3c6927ad::t_31499d398283f1 147,331-340,344,346,348,350
+  s_a19e7b52845409::t_16879f6a272d3c 12,15,20,143-146,148-154,856-858,860-880
+extensions/UnrealAINiagara/Source/UnrealAINiagara/Private/UnrealAINiagaraModule.cpp
+  s_c9a9fe3c6927ad::t_31499d398283f1 187
+  s_a19e7b52845409::t_75dbef1759b38f 225-228,235-236
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpToolAnnotationsSpec.cpp
+  s_c9a9fe3c6927ad::t_31499d398283f1 60-61,63
+extensions/UnrealAINiagara/Source/UnrealAINiagara/Private/UnrealAINiagaraTemplates.cpp
+  s_c9a9fe3c6927ad::t_31499d398283f1 6-7,110-154
+extensions/UnrealAINiagara/Source/UnrealAINiagara/Private/UnrealAINiagaraRqlApi.h
+  s_c9a9fe3c6927ad::t_31499d398283f1 49
+  s_a19e7b52845409::t_22c6de2cefbde8 118
+extensions/UnrealAINiagara/Source/UnrealAINiagara/Private/Tests/UnrealAINiagaraSpec.cpp
+  s_c9a9fe3c6927ad::t_31499d398283f1 65-73,114,162-205
+  s_a19e7b52845409::t_4a1ae6134249e0 14
+extensions/UnrealAINiagara/Source/UnrealAINiagara/Private/UnrealAINiagaraTemplates.h
+  s_c9a9fe3c6927ad::t_31499d398283f1 55-60
+tests/automation-inventory.json
+  s_c9a9fe3c6927ad::t_31499d398283f1 6,36
+README.md
+  s_c9a9fe3c6927ad::t_31499d398283f1 288-290
+UnrealMCP/Source/UnrealMcpEditor/Private/Tools/UnrealMcpScreenshotTools.cpp
+  s_c9a9fe3c6927ad::t_31499d398283f1 8,12,18-19,86,91-92,99-154,366-367,397-398,439,473,487,497,597,600,641-660,672,675-676,679-681,689,695,698-699,702-706,715,721,726-727
+  s_a19e7b52845409::t_efaf1e40d41537 731-733,762
+UnrealMCP/Source/UnrealMcpEditor/Public/UnrealMcpCoreTools.h
+  s_c9a9fe3c6927ad::t_31499d398283f1 95-97,100-111
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpScreenshotToolsSpec.cpp
+  s_c9a9fe3c6927ad::t_31499d398283f1 8,10-12,78,82-84,86,88-93,197-310
+docs/ARCHITECTURE.md
+  s_c9a9fe3c6927ad::t_31499d398283f1 1261-1263
+extensions/UnrealAINiagara/README.md
+  s_a19e7b52845409::t_a3f65b4e1495f4 40
+tests/chain-fixtures/5.8/tools.jsonl
+  s_a19e7b52845409::t_75c6ebad0ac9a0 18-19,21
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "7a5b66f9ddd3b834b8d52ba9f9e940e2dd485417",
+  "prompts": {},
+  "sessions": {
+    "s_a19e7b52845409": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e5e9c172-94bb-4131-a55d-6216c0fced7a",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_c9a9fe3c6927ad": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bb6d1237-efcf-4ab1-b789-31d0103949c6",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
