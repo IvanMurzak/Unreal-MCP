@@ -7,11 +7,49 @@ the command result: base64 has nothing to escape, so its Python repr is just the
 """
 
 import base64
+import ctypes
 import json
 
 import unreal
 
 import code_exec
+
+# Where CPython keeps tp_basicsize and tp_weaklistoffset in a PyTypeObject (64-bit, stable since Python 3.8).
+_TP_BASICSIZE_OFFSET = 32
+_TP_WEAKLISTOFFSET_OFFSET = 208
+
+_BOUND_STATIC_METHOD_WARNING = (
+    "Engine bug not repaired in this editor: a reference kept to a static `unreal` method (c = "
+    "unreal.MaterialEditingLibrary.connect_material_expressions) in a snippet that defines a function or holds a reference "
+    "cycle can crash the editor at its next garbage collection (every level save runs one). Call such methods directly.")
+
+
+def _repair_bound_static_method_type():
+    """Works around a PythonScriptPlugin bug that crashes the editor. The type of a bound static method
+    (``builtin_function_or_method_with_closure``) derives from ``builtin_function_or_method`` and so inherits its
+    ``tp_weaklistoffset``, but its struct has no such field: the offset points just past the object. When such an object
+    is part of a reference cycle, Python's collector reads that neighbouring memory as a list of weak references and writes
+    through it. The Unreal garbage collection every level save runs starts a Python collection, so the save crashes
+    (EXCEPTION_ACCESS_VIOLATION in python311, below PythonScriptPlugin). No weak reference to these objects can exist:
+    an offset of 0 ("not weak-referenceable") is what the type should have had.
+
+    Writes only when both slots hold what Python reports for the type and the offset is past the object. Returns whether
+    the type is safe."""
+    closure_type = type(unreal.SystemLibrary.get_engine_version)
+    if closure_type.__weakrefoffset__ < closure_type.__basicsize__:
+        return True  # an engine that fixed the type
+    if ctypes.sizeof(ctypes.c_void_p) != 8:
+        return False
+    address = id(closure_type)
+    weaklist_offset = ctypes.c_ssize_t.from_address(address + _TP_WEAKLISTOFFSET_OFFSET)
+    if (ctypes.c_ssize_t.from_address(address + _TP_BASICSIZE_OFFSET).value != closure_type.__basicsize__
+            or weaklist_offset.value != closure_type.__weakrefoffset__):
+        return False  # another type layout: leave it alone
+    weaklist_offset.value = 0
+    return closure_type.__weakrefoffset__ == 0
+
+
+_bound_static_method_type_safe = _repair_bound_static_method_type()
 
 
 def _plain(value):
@@ -50,5 +88,7 @@ code_exec.set_default_timeout_ms(30000)
 def run(payload_b64, max_timeout_ms=0):
     """Runs one request. ``max_timeout_ms``: the highest budget this call may take (what is left of the tool timeout less
     a margin; code_exec turns a longer ``timeoutMs`` into it), 0 = no cap."""
+    if not _bound_static_method_type_safe:
+        unreal.log_warning(_BOUND_STATIC_METHOD_WARNING)
     code_exec.set_max_timeout_ms(max_timeout_ms)
     return base64.b64encode(code_exec.run_b64(payload_b64).encode("utf-8")).decode("ascii")

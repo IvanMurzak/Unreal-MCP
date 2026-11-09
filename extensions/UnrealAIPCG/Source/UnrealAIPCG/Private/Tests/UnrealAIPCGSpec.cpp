@@ -19,6 +19,8 @@
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
 #include "EngineUtils.h"
+#include "Engine/StaticMesh.h"
+#include "HAL/IConsoleManager.h"
 #include "PCGComponent.h"
 #include "PCGGraph.h"
 #include "PCGNode.h"
@@ -461,6 +463,41 @@ void FUnrealAIPCGSpec::Define()
 			// pcg | call RemoveParameter("@G@", "Count")
 			TestTrue(TEXT("removed"), Run(TEXT("RemoveParameter"), { Lit(G), Lit(TEXT("Count")) }));
 			TestEqual(TEXT("two parameters left"), UnrealAIPCG::ParametersJson(*Graph)->AsArray().Num(), 2);
+			TestTrue(TEXT("test asset deleted"), DeleteAsset(G));
+		});
+
+		It("generates with a mesh not loaded yet without stalling the wait", [this]()
+		{
+			using namespace UnrealAIPCGSpecLocal;
+			// A mesh nothing else loads: the spawner must load it asynchronously, which only a frame would finish.
+			const FString Mesh = TEXT("/Engine/ArtTools/RenderToTexture/Meshes/S_1_Unit_Sphere_HI");
+			if (FindObject<UStaticMesh>(nullptr, *(Mesh + TEXT(".S_1_Unit_Sphere_HI"))))
+			{
+				AddWarning(TEXT("the mesh is already loaded in this editor: the stall this covers cannot happen"));
+			}
+			IConsoleVariable* DelayFrames = IConsoleManager::Get().FindConsoleVariable(TEXT("s.StreamableDelegateDelayFrames"));
+			const int32 DelayFramesBefore = DelayFrames ? DelayFrames->GetInt() : 0;
+			const FString Id = FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(12);
+			const FString G = TEXT("/Game/RqlSpecPCG/PCG_Load_") + Id;
+			const FString Label = TEXT("RqlSpecPCGLoad_") + Id;
+			TestTrue(TEXT("created"), Run(TEXT("CreateGraph"), { Lit(G) }));
+			TestTrue(TEXT("grid"), Run(TEXT("AddNode"), { Lit(G), Lit(TEXT("Create Points Grid")) }));
+			TestTrue(TEXT("spawner"), Run(TEXT("AddNode"), { Lit(G), Lit(TEXT("Static Mesh Spawner")) }));
+			TestTrue(TEXT("grid -> spawner"), Run(TEXT("Connect"), { Lit(G), Lit(TEXT("CreatePointsGrid")), Lit(TEXT("StaticMeshSpawner")) }));
+			TestTrue(TEXT("spawner -> output"), Run(TEXT("Connect"), { Lit(G), Lit(TEXT("StaticMeshSpawner")), Lit(TEXT("Output")) }));
+			TestTrue(TEXT("mesh"), Run(TEXT("SetNodeSetting"), { Lit(G), Lit(TEXT("StaticMeshSpawner")), Lit(TEXT("Meshes")), Lit(Mesh) }));
+			TestTrue(TEXT("volume placed"), Run(TEXT("SpawnVolume"), { Lit(G), Lit(TEXT("(0, 0, 0)")), Lit(TEXT("(2000, 2000, 1000)")), Lit(Label) }));
+
+			// pcg | call Generate("@LABEL@", -1, 20): the stall ran out this whole budget and reported Generated false.
+			TSharedPtr<FJsonObject> Result;
+			TestTrue(TEXT("generated"), Run(TEXT("Generate"), { Lit(Label), Lit(-1.0), Lit(20.0) }, &Result));
+			TestTrue(*FString::Printf(TEXT("finished within the wait (%s)"), *Json(Result).Left(600)), Json(Result).Contains(TEXT("Generated\":true")));
+			TestTrue(TEXT("counted the mesh"), Json(Result).Contains(TEXT("S_1_Unit_Sphere_HI: ")));
+			if (DelayFrames)
+				TestEqual(TEXT("the load callback delay is restored"), DelayFrames->GetInt(), DelayFramesBefore);
+
+			TestTrue(TEXT("cleaned up"), Run(TEXT("Cleanup"), { Lit(Label) }));
+			DestroyLabelled(Label);
 			TestTrue(TEXT("test asset deleted"), DeleteAsset(G));
 		});
 

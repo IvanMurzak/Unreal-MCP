@@ -183,7 +183,12 @@ a second Static Mesh Spawner fed by its own sampler (or a Density Filter band) o
 - **Placement**: `SpawnVolume` (a PCG Volume: its box is the area; cover the terrain's heights), or `SetGraph(actor, graph)`
   / `AddComponent(actor, graph)` on any actor with bounds. The component's `Seed` (`Generate(actor, seed)`) varies the result.
 - Generation runs in the editor world and is not part of the undo step; `Cleanup(actor)` removes what it made. Created
-  graphs stay unsaved until `editor | call SaveAsset(path)`.)MD"));
+  graphs stay unsaved until `editor | call SaveAsset(path)`.
+- `Generate` waits at most 45 s. `Generated: false` means it goes on in the editor: read the `Generated` member until
+  `IsGenerating` is false instead of generating again.
+- Save after generating: `editor | call SaveLevel()` stores the generated instances in the map, so it reopens with the forest
+  and needs no new `Generate`. A level saved before generating reopens without it in the editor: `GenerationTrigger`
+  `GenerateOnLoad` generates when a game starts, not when the editor opens the map.)MD"));
 	}
 };
 

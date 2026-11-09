@@ -121,9 +121,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|PCG", meta = (BlueprintInternalUseOnly = "true"))
 	AActor* SpawnVolume(UPCGGraph* Graph, FVector Location, FVector Size = FVector(10000.0, 10000.0, 10000.0), const FString& Label = TEXT(""));
 
-	/** run PCG generation on the PCG components of Actor and wait for it (up to TimeoutSeconds); Seed (not -1) sets the component seed first: another seed, another variant; returns {Generated, Instances, Meshes, Points, Components, Actors, Seed, Seconds, Errors, Warnings} */
+	/** run PCG generation on the PCG components of Actor and wait for it (up to TimeoutSeconds, at most 45: past that it goes on in the editor and Generated is false); Seed (not -1) sets the component seed first: another seed, another variant; returns {Generated, Instances, Meshes, Points, Components, Actors, Seed, Seconds, Errors, Warnings} */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|PCG", meta = (BlueprintInternalUseOnly = "true"))
-	FUnrealAIPCGGenerateResult Generate(AActor* Actor, int32 Seed = -1, double TimeoutSeconds = 120.0);
+	FUnrealAIPCGGenerateResult Generate(AActor* Actor, int32 Seed = -1, double TimeoutSeconds = 45.0);
 
 	/** remove what the PCG components of Actor generated (instances, components, actors); returns how many instances were removed */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|PCG", meta = (BlueprintInternalUseOnly = "true"))

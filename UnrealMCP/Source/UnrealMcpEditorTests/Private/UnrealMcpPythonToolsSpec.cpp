@@ -69,6 +69,32 @@ void FUnrealMcpPythonToolsSpec::Define()
 		TestTrue(TEXT("unreal available"), Version.bSuccess && Version.Message.StartsWith(TEXT("5.")));
 	});
 
+	It("survives garbage collection of a kept static method in a reference cycle (the level-save crash)", [this]()
+	{
+		// The engine's bound static method type inherits a weak-reference offset past its own memory: until the plugin
+		// repairs it, the collector wrote through the bytes after such an object and the editor crashed here.
+		const FUnrealMcpToolResult Repaired = Run(TEXT("type(unreal.SystemLibrary.get_engine_version).__weakrefoffset__"));
+		TestTrue(TEXT("the type holds no weak references"), Repaired.bSuccess && Repaired.Message.StartsWith(TEXT("0")));
+
+		const FUnrealMcpToolResult R = Run(TEXT(
+			"import gc\n"
+			"def helper():\n"
+			"    pass\n"
+			"library = unreal.MaterialEditingLibrary\n"
+			"kept = library.connect_material_expressions\n"
+			"cycle = [unreal.SystemLibrary.get_engine_version for _ in range(64)]\n"
+			"cycle.append(cycle)\n"
+			"del cycle\n"
+			"gc.collect()\n"
+			"'collected'"));
+		TestTrue(TEXT("success"), R.bSuccess);
+		TestTrue(TEXT("collected"), R.Message.StartsWith(TEXT("collected")));
+		// What a level save does: the snippet's scope above is collected here at the latest.
+		CollectGarbage(GARBAGE_COLLECTION_KEEPFLAGS);
+		const FUnrealMcpToolResult After = Run(TEXT("1 + 1"));
+		TestTrue(TEXT("Python still runs"), After.bSuccess && After.Message.StartsWith(TEXT("2")));
+	});
+
 	It("returns unreal objects as their paths and print output as logs", [this]()
 	{
 		const FUnrealMcpToolResult R = Run(TEXT("print('hello from python')\nunreal.EditorAssetLibrary.load_asset('/Engine/BasicShapes/Cube')"));
