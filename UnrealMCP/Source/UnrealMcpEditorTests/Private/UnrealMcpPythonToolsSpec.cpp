@@ -65,7 +65,7 @@ void FUnrealMcpPythonToolsSpec::Define()
 		const FUnrealMcpRegisteredTool* Tool = Registry.Find(TEXT("python-execute"));
 		TestTrue(TEXT("the description has the keyword hint"), Tool && Tool->Description.Contains(TEXT("unreal.Rotator(pitch=, yaw=, roll=)"))
 			&& Tool->Description.Contains(TEXT("unreal.Color(r=, g=, b=, a=)"))
-			&& Tool->Description.Contains(TEXT("Rotator is roll, pitch, yaw; Color is b, g, r, a")));
+			&& Tool->Description.Contains(TEXT("Rotator: roll, pitch, yaw; Color: b, g, r, a")));
 
 		// The orders the description names are what UE's Python really does (FRotator is built through MakeRotator).
 		const FUnrealMcpToolResult R = Run(TEXT(
