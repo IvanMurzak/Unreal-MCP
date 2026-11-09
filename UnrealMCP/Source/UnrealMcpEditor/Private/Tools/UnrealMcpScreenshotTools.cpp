@@ -110,29 +110,21 @@ namespace UnrealMcpScreenshotTools
 		FPaths::NormalizeFilename(Path);
 		if (Path.EndsWith(TEXT("/")))
 			return Refuse(TEXT("it names a folder; add a file name, such as Screenshots/shot.png."));
-		// Windows drops a trailing dot or space from a path segment when it opens a file, so ".. /x" would climb out
-		// after the check below has passed it as an ordinary folder name.
-		TArray<FString> Segments;
-		Path.ParseIntoArray(Segments, TEXT("/"));
-		for (const FString& Segment : Segments)
-		{
-			if (Segment != TEXT(".") && Segment != TEXT("..") && (Segment.EndsWith(TEXT(".")) || Segment.EndsWith(TEXT(" "))))
-				return Refuse(FString::Printf(TEXT("the path segment '%s' ends in a dot or a space."), *Segment));
-		}
-		const FString Extension = FPaths::GetExtension(Path);
-		if (Extension.IsEmpty())
-			Path += TEXT(".png");
-		else if (!Extension.Equals(TEXT("png"), ESearchCase::IgnoreCase))
-			return Refuse(TEXT("the capture is a PNG, so the file name must end in .png."));
 		const UnrealMcpSourceTools::FJailedPath Jailed = UnrealMcpSourceTools::ResolveJailedPath(ProjectDir, Path);
 		if (!Jailed.bOk)
 		{
-			return Refuse(FString::Printf(TEXT("it must stay inside the project folder %s (a path relative to it, or an "
-				"absolute path under it; no ':' after the drive, no link leading out)."), *FPaths::ConvertRelativePathToFull(ProjectDir)));
+			return Refuse(FString::Printf(TEXT("it must stay inside the project folder %s (a path relative to it, or an absolute "
+				"path under it; no ':' after the drive, no name ending in a dot or a space, no link leading out)."), *FPaths::ConvertRelativePathToFull(ProjectDir)));
 		}
-		if (IFileManager::Get().FileExists(*Jailed.FullPath))
+		FString Full = Jailed.FullPath;
+		const FString Extension = FPaths::GetExtension(Full);
+		if (Extension.IsEmpty())
+			Full += TEXT(".png");
+		else if (!Extension.Equals(TEXT("png"), ESearchCase::IgnoreCase))
+			return Refuse(TEXT("the capture is a PNG, so the file name must end in .png."));
+		if (IFileManager::Get().FileExists(*Full))
 			return Refuse(TEXT("the file already exists and a capture never overwrites one; pick another name."));
-		OutFullPath = Jailed.FullPath;
+		OutFullPath = Full;
 		return true;
 	}
 
@@ -364,7 +356,7 @@ namespace UnrealMcpScreenshotTools
 		}
 
 		/** Encode a BGRA8 FColor buffer to a base64 PNG (forcing opaque first) and write it to @p SavePath when one is given. */
-		bool EncodePngBase64(TArray<FColor>& Pixels, int32 Width, int32 Height, const FString& SavePath,
+		bool EncodeAndSavePng(TArray<FColor>& Pixels, int32 Width, int32 Height, const FString& SavePath,
 			FString& OutBase64, int32& OutEncodedBytes, FString& OutError)
 		{
 			if (Width <= 0 || Height <= 0)
@@ -470,7 +462,7 @@ namespace UnrealMcpScreenshotTools
 			ResizeIfNeeded(Pixels, Size.X, Size.Y, OutW, OutH);
 
 			FString Base64; int32 Bytes = 0; FString Error;
-			if (!EncodePngBase64(Pixels, OutW, OutH, SavePath, Base64, Bytes, Error))
+			if (!EncodeAndSavePng(Pixels, OutW, OutH, SavePath, Base64, Bytes, Error))
 				return FUnrealMcpToolResult::Error(Error);
 
 			FString Notes = ScreenshotFreshness(World, bFrameFresh, FrameReason);
@@ -594,7 +586,7 @@ namespace UnrealMcpScreenshotTools
 			}
 
 			FString Base64; int32 Bytes = 0; FString Error;
-			if (!EncodePngBase64(Pixels, Width, Height, SavePath, Base64, Bytes, Error))
+			if (!EncodeAndSavePng(Pixels, Width, Height, SavePath, Base64, Bytes, Error))
 				return FUnrealMcpToolResult::Error(Error);
 
 			return MakeImageResult(Source, Width, Height, Base64, Bytes, ScreenshotFreshness(World, /*bFrameFresh*/ true, FString()), SavePath);

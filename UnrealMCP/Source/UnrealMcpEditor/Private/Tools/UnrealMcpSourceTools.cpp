@@ -257,6 +257,22 @@ namespace UnrealMcpSourceTools
 			return Out;
 		}
 
+		// Windows drops a trailing dot or space from a path segment when it opens a file, so ".. /x" climbs out although
+		// it read as an ordinary folder name above. A plain ".." here is the root's own relative form ("../Source"):
+		// traversal was collapsed and checked above.
+		TArray<FString> Segments;
+		Out.RelPath.ParseIntoArray(Segments, TEXT("/"));
+		for (const FString& Segment : Segments)
+		{
+			if (Segment != TEXT("..") && Segment != TEXT(".") && (Segment.EndsWith(TEXT(".")) || Segment.EndsWith(TEXT(" "))))
+			{
+				Out.FullPath.Reset();
+				Out.RelPath.Reset();
+				Out.Error = FString::Printf(TEXT("'%s' has a path segment ending in a dot or a space."), *InPath);
+				return Out;
+			}
+		}
+
 		Out.bOk = true;
 		return Out;
 	}

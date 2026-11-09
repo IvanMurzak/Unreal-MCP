@@ -111,6 +111,9 @@ void FUnrealMcpSourceToolsSpec::Define()
 			const FString Root = UnrealMcpSourceTools::GetProjectSourceRoot();
 			TestFalse(TEXT("../ escapes"), UnrealMcpSourceTools::ResolveJailedPath(Root, TEXT("../Config/secret.ini")).bOk);
 			TestFalse(TEXT("deep ../ escapes"), UnrealMcpSourceTools::ResolveJailedPath(Root, TEXT("MyGame/../../../Windows/System32/x")).bOk);
+			TestFalse(TEXT("'.. /' is '../' to Windows"), UnrealMcpSourceTools::ResolveJailedPath(Root, TEXT(".. /Config/secret.ini")).bOk);
+			TestFalse(TEXT("'.../' is '../' or a dot folder to Windows"), UnrealMcpSourceTools::ResolveJailedPath(Root, TEXT("MyGame/.../x.cpp")).bOk);
+			TestFalse(TEXT("a trailing dot names another file"), UnrealMcpSourceTools::ResolveJailedPath(Root, TEXT("MyGame/x.cpp.")).bOk);
 		});
 
 		It("rejects an absolute path outside the jail", [this]()

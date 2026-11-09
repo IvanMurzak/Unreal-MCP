@@ -44,8 +44,9 @@ namespace UnrealMcpSourceTools
 
 	/**
 	 * Canonicalize @p InPath (relative to the jail root, or absolute) and confirm it stays inside the
-	 * jail. Rejects `..` traversal and absolute paths that escape, and — best effort — a junction /
-	 * symlink whose on-disk target escapes the jail. @p JailRoot lets specs supply a temp root.
+	 * jail. Rejects `..` traversal and absolute paths that escape, a segment ending in a dot or a space
+	 * (Windows drops those when it opens a file), and — best effort — a junction / symlink whose on-disk
+	 * target escapes the jail. @p JailRoot lets specs supply a temp root.
 	 */
 	UNREALMCPEDITOR_API FJailedPath ResolveJailedPath(const FString& JailRoot, const FString& InPath);
 

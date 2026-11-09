@@ -871,11 +871,7 @@ FString UUnrealAINiagaraRqlApi::EnableFluids()
 	// The 3D gas and FLIP templates query mesh distance fields and do not compile without them: one restart covers both.
 	if (!bFieldsOn)
 		SaveMeshDistanceFieldsSetting();
-	const TCHAR* NextSteps = TEXT("restart the editor to load it (save your work first: editor | call SaveAll()), then niagaraTemplates | where Plugin == \"NiagaraFluids\"");
-	const FString FieldsNote = TEXT("Generate Mesh Distance Fields is on in the project settings (the 3D gas and liquid templates do not compile without it; every mesh of the project now builds a distance field)");
-	if (bPluginsOn)
-		return FString::Printf(TEXT("NiagaraFluids was already enabled; %s; %s"), *FieldsNote, NextSteps);
-	if (bFieldsOn)
-		return FString::Printf(TEXT("NiagaraFluids (and ChaosNiagara, which its modules use) is enabled in the project file; %s"), NextSteps);
-	return FString::Printf(TEXT("NiagaraFluids (and ChaosNiagara, which its modules use) is enabled in the project file and %s; %s"), *FieldsNote, NextSteps);
+	return FString::Printf(TEXT("%s; %s; restart the editor to load it (save your work first: editor | call SaveAll()), then niagaraTemplates | where Plugin == \"NiagaraFluids\""),
+		bPluginsOn ? TEXT("NiagaraFluids was already enabled") : TEXT("NiagaraFluids (and ChaosNiagara, which its modules use) is enabled in the project file"),
+		bFieldsOn ? TEXT("mesh distance fields were already on") : TEXT("Generate Mesh Distance Fields is on in the project settings (the 3D gas and liquid templates do not compile without it; every mesh of the project now builds a distance field)"));
 }

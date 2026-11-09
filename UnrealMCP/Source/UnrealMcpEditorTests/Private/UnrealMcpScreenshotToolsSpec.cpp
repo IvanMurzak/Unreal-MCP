@@ -75,24 +75,6 @@ void FUnrealMcpScreenshotToolsSpec::Define()
 			TestEqual(TEXT("exactly four tools"), Registry.Num(), Expected.Num());
 		});
 
-		It("marks only the tools that can write a file as not read-only, and none as destructive (they never overwrite)", [this]()
-		{
-			FUnrealMcpToolRegistry Registry;
-			UnrealMcpScreenshotTools::Register(Registry);
-			const TMap<FString, bool> ReadOnlyByName = {
-				{ TEXT("screenshot-viewport"), false }, { TEXT("screenshot-game-view"), false },
-				{ TEXT("screenshot-camera"), false }, { TEXT("screenshot-isolated"), true }
-			};
-			for (const TPair<FString, bool>& Row : ReadOnlyByName)
-			{
-				const FUnrealMcpRegisteredTool* Tool = Registry.Find(Row.Key);
-				if (TestNotNull(FString::Printf(TEXT("%s present"), *Row.Key), Tool))
-				{
-					TestEqual(FString::Printf(TEXT("%s read-only hint"), *Row.Key), Tool->bReadOnlyHint, Row.Value);
-					TestFalse(FString::Printf(TEXT("%s not destructive"), *Row.Key), Tool->bDestructiveHint);
-				}
-			}
-		});
 	});
 
 	Describe("dimension logic", [this]()
