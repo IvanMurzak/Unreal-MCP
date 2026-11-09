@@ -6,6 +6,8 @@
 #include "CoreMinimal.h"
 
 class FUnrealMcpToolRegistry;
+class IInterface_PostProcessVolume;
+class UWorld;
 struct FUnrealMcpToolResult;
 
 /**
@@ -103,6 +105,37 @@ namespace UnrealMcpScreenshotTools
 	 * ticking, so effects and animation may not have advanced to the latest edit. GPU-free (spec-testable).
 	 */
 	UNREALMCPEDITOR_API FString FormatFreshness(bool bFrameFresh, const FString& FrameReason, bool bSimulationLive, const FString& SimulationReason);
+
+	/** How much of a captured frame is one color. */
+	struct FFrameUniformity
+	{
+		FColor Color = FColor::Black;
+		/** Share of the pixels close to Color, in [0, 1]. */
+		double Share = 0.0;
+
+		bool IsUniform() const { return Share >= 0.99; }
+	};
+
+	/**
+	 * Measure a frame for the "nothing to see" case (all white, all black). The 1% allowance keeps a blank frame with
+	 * editor sprites or debug text over it uniform; a gradient, like a plain sky, is not. Alpha is ignored. GPU-free.
+	 */
+	UNREALMCPEDITOR_API FFrameUniformity AnalyzeFrameUniformity(const TArray<FColor>& Pixels);
+
+	/**
+	 * Whether @p Volumes (in ascending priority, see GetWorldPostProcessVolumes) leave Auto Exposure Max Brightness at
+	 * about 0 while r.DefaultFeature.AutoExposure.ExtendDefaultLuminanceRange is off (@p bExtendedLuminanceRange false),
+	 * which renders pure white. Only enabled, unbound volumes count, and the last one to set a value decides, as in the
+	 * engine's blend; a partial weight or Manual exposure means the value does not decide. Why: §10 "Background rendering".
+	 */
+	UNREALMCPEDITOR_API TArray<IInterface_PostProcessVolume*> GetWorldPostProcessVolumes(const UWorld& World);
+	UNREALMCPEDITOR_API bool HasOverexposingPostProcessVolume(const TArray<IInterface_PostProcessVolume*>& Volumes, bool bExtendedLuminanceRange);
+
+	/**
+	 * The note a viewport capture appends when its frame is uniform. It never fails the capture, since a plain scene is
+	 * legitimate. @p bOverexposingVolume adds the cause and the project fix. GPU-free (spec-testable).
+	 */
+	UNREALMCPEDITOR_API FString FormatUniformFrameNote(const FFrameUniformity& Uniformity, bool bOverexposingVolume);
 }
 
 /**

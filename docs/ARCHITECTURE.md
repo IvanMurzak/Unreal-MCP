@@ -1342,6 +1342,19 @@ override when one is set; a paused play session). A PIE game view is drawn insid
 after a long minimized stretch starts temporal effects (TAA, Lumen) from old history. Specs:
 `UnrealMcp.BackgroundRendering`, `UnrealMcp.Tools.Screenshot`; the window behaviour is live-verified windowed.
 
+"Fresh" says when a frame was rendered, not that it shows anything, so `screenshot-viewport` and
+`screenshot-game-view` also measure the pixels: when 99% of them are one color they stay successful (a plain scene is
+legitimate) and append `Frame content: uniform (...)` with a pointer to `screenshot-camera`. A white frame also gets the
+known cause, when the unbound volumes leave Max Brightness near 0 and exposure is not Manual (a heuristic: bounded
+volumes and camera post-process are not evaluated, so the text says "likely").
+The Third Person template's unbound PostProcessVolume overrides Auto Exposure Min/Max Brightness to 0, meant as EV100
+because the template's `DefaultEngine.ini` sets `r.DefaultFeature.AutoExposure.ExtendDefaultLuminanceRange=true`. The
+same level in a project without that line reads 0 as luminance and renders pure white, in every state of the game view
+and in the editor viewport. Measured on 5.7, in one PIE session, toggling only that CVar: 100% `#FFFFFF`, then about
+36,000 colors, then white again. So the frame really is white and the capture is right; the fix belongs to the project,
+and the tool neither changes project rendering nor hides it. `screenshot-camera` was never affected because it pins its
+own exposure.
+
 ## 11. Top-5 risks & mitigations
 
 1. **Blueprint structure-edit APIs are brittle across UE versions** (SCS editing, K2 schema

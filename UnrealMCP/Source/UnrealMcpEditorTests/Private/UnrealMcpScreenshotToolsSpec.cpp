@@ -11,6 +11,8 @@
 #include "UnrealMcpToolRegistry.h"
 #include "Dom/JsonObject.h"
 #include "Editor.h"
+#include "Engine/PostProcessVolume.h"
+#include "HAL/IConsoleManager.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
 
@@ -246,6 +248,152 @@ void FUnrealMcpScreenshotToolsSpec::Define()
 			TestTrue(TEXT("stale prefix + frame reason"), Stale.StartsWith(TEXT("Frame: possibly stale (window minimized).")));
 			TestTrue(TEXT("paused prefix + simulation reason"), Stale.Contains(TEXT("Simulation: paused (throttled)")));
 			TestFalse(TEXT("never claims fresh when stale"), Stale.Contains(TEXT("Frame: fresh")));
+		});
+
+		// A blown-out frame looks "fresh" (it was rendered now), so its uniformity is the only warning an agent gets.
+		// The real frames only exist with a GPU and PIE (see the file comment): these pin the measurement and the text.
+		It("AnalyzeFrameUniformity flags a blank frame, also under a little overlay or noise", [this]()
+		{
+			using namespace UnrealMcpScreenshotTools;
+			constexpr int32 Num = 1000;
+			TArray<FColor> White;
+			White.Init(FColor::White, Num);
+			const FFrameUniformity AllWhite = AnalyzeFrameUniformity(White);
+			TestTrue(TEXT("all white"), AllWhite.IsUniform());
+			TestEqual(TEXT("all white color"), AllWhite.Color, FColor::White);
+			TestEqual(TEXT("all white share"), AllWhite.Share, 1.0);
+
+			TArray<FColor> Black;
+			Black.Init(FColor(0, 0, 0, 0), Num);
+			TestTrue(TEXT("all black, with the zero alpha of a raw read-back"), AnalyzeFrameUniformity(Black).IsUniform());
+
+			TArray<FColor> MixedAlpha = White;
+			for (int32 Index = 0; Index < Num; ++Index)
+				MixedAlpha[Index].A = (uint8)(Index * 255 / Num);
+			TestTrue(TEXT("alpha is ignored"), AnalyzeFrameUniformity(MixedAlpha).IsUniform());
+
+			TArray<FColor> Overlaid = White;
+			for (int32 Index = 0; Index < 9; ++Index)
+				Overlaid[Index] = FColor(234, 161, 20);
+			const FFrameUniformity WithOverlay = AnalyzeFrameUniformity(Overlaid);
+			TestTrue(TEXT("0.9% overlay stays uniform"), WithOverlay.IsUniform());
+			TestEqual(TEXT("the overlay does not move the color, a mean would"), WithOverlay.Color, FColor::White);
+
+			TArray<FColor> Noisy;
+			for (int32 Index = 0; Index < Num; ++Index)
+				Noisy.Add(FColor(251 + Index % 5, 255, 255));
+			TestTrue(TEXT("near-white noise is uniform"), AnalyzeFrameUniformity(Noisy).IsUniform());
+		});
+
+		It("AnalyzeFrameUniformity leaves a frame with real content alone", [this]()
+		{
+			using namespace UnrealMcpScreenshotTools;
+			constexpr int32 Num = 1000;
+			TestFalse(TEXT("an empty frame is not uniform"), AnalyzeFrameUniformity(TArray<FColor>()).IsUniform());
+
+			TArray<FColor> JustOverAllowance;
+			JustOverAllowance.Init(FColor::White, Num);
+			for (int32 Index = 0; Index < 11; ++Index)
+				JustOverAllowance[Index] = FColor::Black;
+			TestFalse(TEXT("1.1% of other pixels"), AnalyzeFrameUniformity(JustOverAllowance).IsUniform());
+
+			TArray<FColor> DarkGradient;
+			for (int32 Index = 0; Index < Num; ++Index)
+				DarkGradient.Add(FColor(Index * 10 / Num, Index * 10 / Num, Index * 10 / Num));
+			TestFalse(TEXT("a low-contrast gradient, like a night sky"), AnalyzeFrameUniformity(DarkGradient).IsUniform());
+
+			TArray<FColor> MixedChannels;
+			for (int32 Index = 0; Index < Num; ++Index)
+				MixedChannels.Add(Index % 2 ? FColor::Red : FColor::Blue);
+			TestFalse(TEXT("two colors, half each"), AnalyzeFrameUniformity(MixedChannels).IsUniform());
+		});
+
+		It("FormatUniformFrameNote names the color, suggests screenshot-camera and adds the fix only for the known cause", [this]()
+		{
+			using namespace UnrealMcpScreenshotTools;
+			FFrameUniformity Uniformity;
+			Uniformity.Color = FColor(255, 128, 1);
+			Uniformity.Share = 0.995;
+
+			const FString Plain = FormatUniformFrameNote(Uniformity, false);
+			TestTrue(TEXT("stable prefix"), Plain.StartsWith(TEXT("Frame content: uniform")));
+			TestTrue(TEXT("names the color"), Plain.Contains(TEXT("#FF8001")));
+			TestTrue(TEXT("names the share"), Plain.Contains(TEXT("99.5%")));
+			TestTrue(TEXT("suggests the camera tool"), Plain.Contains(TEXT("screenshot-camera")));
+			TestFalse(TEXT("no cause without evidence for it"), Plain.Contains(TEXT("ExtendDefaultLuminanceRange")));
+
+			const FString Known = FormatUniformFrameNote(Uniformity, true);
+			TestTrue(TEXT("still the plain note first"), Known.StartsWith(Plain));
+			TestTrue(TEXT("names the project fix"), Known.Contains(TEXT("ExtendDefaultLuminanceRange=True")));
+		});
+
+		It("HasOverexposingPostProcessVolume needs the override near 0, an active volume and the CVar off", [this]()
+		{
+			using namespace UnrealMcpScreenshotTools;
+			UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+			if (!TestNotNull(TEXT("editor world"), World))
+				return;
+			TestFalse(TEXT("no volumes"), HasOverexposingPostProcessVolume({}, false));
+
+			FActorSpawnParameters SpawnParams;
+			SpawnParams.ObjectFlags |= RF_Transient;
+			SpawnParams.bTemporaryEditorActor = true;
+			SpawnParams.bHideFromSceneOutliner = true;
+			APostProcessVolume* Volume = World->SpawnActor<APostProcessVolume>(APostProcessVolume::StaticClass(), FTransform::Identity, SpawnParams);
+			if (!TestNotNull(TEXT("spawned a volume"), Volume))
+				return;
+			ON_SCOPE_EXIT { if (IsValid(Volume)) Volume->Destroy(); };
+			// Only this volume: the editor world may hold others, like the template level's.
+			const TArray<IInterface_PostProcessVolume*> Volumes = { Volume };
+
+			struct FRow { const TCHAR* Label; bool bExtendedRange; bool bOverride; float MaxBrightness; bool bEnabled; bool bUnbound; float Weight; bool bExpected; };
+			const FRow Rows[] = {
+				{ TEXT("the template's setup, CVar off"), false, true, 0.0f, true, true, 1.0f, true },
+				{ TEXT("the same volume with the CVar on, where 0 means EV100 0"), true, true, 0.0f, true, true, 1.0f, false },
+				{ TEXT("nearly 0, also measured white"), false, true, 0.001f, true, true, 1.0f, true },
+				{ TEXT("washed out but not uniform"), false, true, 0.03f, true, true, 1.0f, false },
+				{ TEXT("a normal max brightness"), false, true, 1.0f, true, true, 1.0f, false },
+				{ TEXT("the value is not overridden"), false, false, 0.0f, true, true, 1.0f, false },
+				{ TEXT("a disabled volume"), false, true, 0.0f, false, true, 1.0f, false },
+				{ TEXT("a bounded volume, which may not reach the camera"), false, true, 0.0f, true, false, 1.0f, false },
+				{ TEXT("a volume with no weight"), false, true, 0.0f, true, true, 0.0f, false },
+				{ TEXT("a partial weight blends the value away from 0"), false, true, 0.0f, true, true, 0.5f, false },
+			};
+			for (const FRow& Row : Rows)
+			{
+				Volume->Settings.bOverride_AutoExposureMaxBrightness = Row.bOverride;
+				Volume->Settings.AutoExposureMaxBrightness = Row.MaxBrightness;
+				Volume->bEnabled = Row.bEnabled;
+				Volume->bUnbound = Row.bUnbound;
+				Volume->BlendWeight = Row.Weight;
+				TestEqual(Row.Label, HasOverexposingPostProcessVolume(Volumes, Row.bExtendedRange), Row.bExpected);
+			}
+
+			// The template's setup again, for the checks that are not one volume's own fields.
+			Volume->Settings.bOverride_AutoExposureMaxBrightness = true;
+			Volume->Settings.AutoExposureMaxBrightness = 0.0f;
+			Volume->bEnabled = true;
+			Volume->bUnbound = true;
+			Volume->BlendWeight = 1.0f;
+			TestTrue(TEXT("the capture path's list holds the volume"), GetWorldPostProcessVolumes(*World).Contains(Cast<IInterface_PostProcessVolume>(Volume)));
+			TestNotNull(TEXT("the CVar the capture path reads exists"), IConsoleManager::Get().FindConsoleVariable(TEXT("r.DefaultFeature.AutoExposure.ExtendDefaultLuminanceRange")));
+
+			APostProcessVolume* Later = World->SpawnActor<APostProcessVolume>(APostProcessVolume::StaticClass(), FTransform::Identity, SpawnParams);
+			if (!TestNotNull(TEXT("spawned a second volume"), Later))
+				return;
+			ON_SCOPE_EXIT { if (IsValid(Later)) Later->Destroy(); };
+			Later->bEnabled = true;
+			Later->bUnbound = true;
+			Later->BlendWeight = 1.0f;
+			Later->Settings.bOverride_AutoExposureMaxBrightness = true;
+			Later->Settings.AutoExposureMaxBrightness = 1.0f;
+			TestFalse(TEXT("a later volume replaces the value"), HasOverexposingPostProcessVolume({ Volume, Later }, false));
+			TestTrue(TEXT("the last volume to set it decides"), HasOverexposingPostProcessVolume({ Later, Volume }, false));
+
+			Later->Settings.bOverride_AutoExposureMaxBrightness = false;
+			Later->Settings.bOverride_AutoExposureMethod = true;
+			Later->Settings.AutoExposureMethod = AEM_Manual;
+			TestFalse(TEXT("Manual exposure ignores Max Brightness"), HasOverexposingPostProcessVolume({ Volume, Later }, false));
 		});
 
 		// Locks the wire shape the sidecar's ProxyResponseMapper depends on: SuccessWithImage must carry
