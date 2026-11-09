@@ -25,28 +25,22 @@ _BOUND_STATIC_METHOD_WARNING = (
 
 
 def _repair_bound_static_method_type():
-    """Works around a PythonScriptPlugin bug that crashes the editor. The type of a bound static method
-    (``builtin_function_or_method_with_closure``) derives from ``builtin_function_or_method`` and so inherits its
-    ``tp_weaklistoffset``, but its struct has no such field: the offset points just past the object. When such an object
-    is part of a reference cycle, Python's collector reads that neighbouring memory as a list of weak references and writes
-    through it. The Unreal garbage collection every level save runs starts a Python collection, so the save crashes
-    (EXCEPTION_ACCESS_VIOLATION in python311, below PythonScriptPlugin). No weak reference to these objects can exist:
-    an offset of 0 ("not weak-referenceable") is what the type should have had.
+    """Works around the PythonScriptPlugin bug behind the level-save crash (docs/ARCHITECTURE.md section 11): the type of a
+    bound static method inherits a ``tp_weaklistoffset`` past the end of its objects. These objects cannot hold weak
+    references, so 0 ("not weak-referenceable") is what the type should have had.
 
     Writes only when both slots hold what Python reports for the type and the offset is past the object. Returns whether
     the type is safe."""
     closure_type = type(unreal.SystemLibrary.get_engine_version)
     if closure_type.__weakrefoffset__ < closure_type.__basicsize__:
         return True  # an engine that fixed the type
-    if ctypes.sizeof(ctypes.c_void_p) != 8:
-        return False
     address = id(closure_type)
     weaklist_offset = ctypes.c_ssize_t.from_address(address + _TP_WEAKLISTOFFSET_OFFSET)
     if (ctypes.c_ssize_t.from_address(address + _TP_BASICSIZE_OFFSET).value != closure_type.__basicsize__
             or weaklist_offset.value != closure_type.__weakrefoffset__):
         return False  # another type layout: leave it alone
     weaklist_offset.value = 0
-    return closure_type.__weakrefoffset__ == 0
+    return True
 
 
 _bound_static_method_type_safe = _repair_bound_static_method_type()

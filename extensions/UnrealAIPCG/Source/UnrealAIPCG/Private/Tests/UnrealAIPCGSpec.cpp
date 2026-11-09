@@ -121,6 +121,16 @@ namespace UnrealAIPCGSpecLocal
 	}
 
 	/** editor | call DeleteAsset(path, true): the test leaves no unsaved asset behind. */
+	/** Wires graph @p G: Create Points Grid -> Static Mesh Spawner of @p Mesh -> Output. */
+	bool AddMeshGrid(const FString& G, const FString& Mesh)
+	{
+		return Run(TEXT("AddNode"), { Lit(G), Lit(TEXT("Create Points Grid")) })
+			&& Run(TEXT("AddNode"), { Lit(G), Lit(TEXT("Static Mesh Spawner")) })
+			&& Run(TEXT("Connect"), { Lit(G), Lit(TEXT("CreatePointsGrid")), Lit(TEXT("StaticMeshSpawner")) })
+			&& Run(TEXT("Connect"), { Lit(G), Lit(TEXT("StaticMeshSpawner")), Lit(TEXT("Output")) })
+			&& Run(TEXT("SetNodeSetting"), { Lit(G), Lit(TEXT("StaticMeshSpawner")), Lit(TEXT("Meshes")), Lit(Mesh) });
+	}
+
 	bool DeleteAsset(const FString& Path)
 	{
 		return UnrealMcpRqlTools::RunPlan(FString(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"DeleteAsset","args":[{"lit":"@PATH@"},{"lit":true}]}]})RQL")).Replace(TEXT("@PATH@"), *Path), true);
@@ -481,11 +491,7 @@ void FUnrealAIPCGSpec::Define()
 			const FString G = TEXT("/Game/RqlSpecPCG/PCG_Load_") + Id;
 			const FString Label = TEXT("RqlSpecPCGLoad_") + Id;
 			TestTrue(TEXT("created"), Run(TEXT("CreateGraph"), { Lit(G) }));
-			TestTrue(TEXT("grid"), Run(TEXT("AddNode"), { Lit(G), Lit(TEXT("Create Points Grid")) }));
-			TestTrue(TEXT("spawner"), Run(TEXT("AddNode"), { Lit(G), Lit(TEXT("Static Mesh Spawner")) }));
-			TestTrue(TEXT("grid -> spawner"), Run(TEXT("Connect"), { Lit(G), Lit(TEXT("CreatePointsGrid")), Lit(TEXT("StaticMeshSpawner")) }));
-			TestTrue(TEXT("spawner -> output"), Run(TEXT("Connect"), { Lit(G), Lit(TEXT("StaticMeshSpawner")), Lit(TEXT("Output")) }));
-			TestTrue(TEXT("mesh"), Run(TEXT("SetNodeSetting"), { Lit(G), Lit(TEXT("StaticMeshSpawner")), Lit(TEXT("Meshes")), Lit(Mesh) }));
+			TestTrue(TEXT("a mesh on each grid point"), AddMeshGrid(G, Mesh));
 			TestTrue(TEXT("volume placed"), Run(TEXT("SpawnVolume"), { Lit(G), Lit(TEXT("(0, 0, 0)")), Lit(TEXT("(2000, 2000, 1000)")), Lit(Label) }));
 
 			// pcg | call Generate("@LABEL@", -1, 20): the stall ran out this whole budget and reported Generated false.
@@ -512,11 +518,7 @@ void FUnrealAIPCGSpec::Define()
 			if (!TestNotNull(TEXT("the graph asset"), Graph))
 				return;
 			// A grid of points (world space, 1000 x 1000 cm), a cube on each: no landscape needed.
-			TestTrue(TEXT("grid"), Run(TEXT("AddNode"), { Lit(G), Lit(TEXT("Create Points Grid")) }));
-			TestTrue(TEXT("spawner"), Run(TEXT("AddNode"), { Lit(G), Lit(TEXT("Static Mesh Spawner")) }));
-			TestTrue(TEXT("grid -> spawner"), Run(TEXT("Connect"), { Lit(G), Lit(TEXT("CreatePointsGrid")), Lit(TEXT("StaticMeshSpawner")) }));
-			TestTrue(TEXT("spawner -> output"), Run(TEXT("Connect"), { Lit(G), Lit(TEXT("StaticMeshSpawner")), Lit(TEXT("Output")) }));
-			TestTrue(TEXT("mesh"), Run(TEXT("SetNodeSetting"), { Lit(G), Lit(TEXT("StaticMeshSpawner")), Lit(TEXT("Meshes")), Lit(TEXT("/Engine/BasicShapes/Cube")) }));
+			TestTrue(TEXT("a cube on each grid point"), AddMeshGrid(G, TEXT("/Engine/BasicShapes/Cube")));
 			TestTrue(TEXT("spacing parameter"), Run(TEXT("SetParameter"), { Lit(G), Lit(TEXT("Spacing")), Lit(TEXT("(100, 100, 100)")) }));
 			TestTrue(TEXT("bound to the cell size"), Run(TEXT("BindParameter"), { Lit(G), Lit(TEXT("Spacing")), Lit(TEXT("CreatePointsGrid")), Lit(TEXT("CellSize")) }));
 

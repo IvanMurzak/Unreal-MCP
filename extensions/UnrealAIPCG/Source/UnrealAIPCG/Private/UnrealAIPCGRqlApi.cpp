@@ -81,25 +81,25 @@ namespace UnrealAIPCGRqlApiLocal
 			{
 				Previous = Variable->GetInt();
 				Priority = static_cast<EConsoleVariableFlags>(FMath::Max<uint32>(Variable->GetFlags() & ECVF_SetByMask, ECVF_SetByCode));
-				bChanged = true;
 				Variable->Set(Value, Priority);
+				bRefused = Variable->GetInt() != Value;
 			}
 		}
 
 		~FScopedConsoleValue()
 		{
-			if (bChanged)
-				Variable->Set(Previous, Priority);
+			if (Previous.IsSet())
+				Variable->Set(*Previous, Priority);
 		}
 
-		/** The variable exists and could not be set to @p Value. */
-		bool Refused(int32 Value) const { return Variable && Variable->GetInt() != Value; }
+		/** The variable exists and could not be set. */
+		bool Refused() const { return bRefused; }
 
 	private:
 		IConsoleVariable* Variable;
 		EConsoleVariableFlags Priority = ECVF_SetByCode;
-		int32 Previous = 0;
-		bool bChanged = false;
+		TOptional<int32> Previous;
+		bool bRefused = false;
 	};
 
 	TArray<UPCGComponent*> Components(AActor& Actor)
@@ -615,7 +615,7 @@ FUnrealAIPCGGenerateResult UUnrealAIPCGRqlApi::Generate(AActor* Actor, int32 See
 	// PCG pauses while an editor transaction is open (pcg.PauseExecutionWhileTransactionActive): this call runs inside
 	// the RQL mutation's transaction, so let PCG run while it waits.
 	const FScopedConsoleValue PauseInTransaction(TEXT("pcg.PauseExecutionWhileTransactionActive"), 0);
-	if (PauseInTransaction.Refused(0))
+	if (PauseInTransaction.Refused())
 		return UnrealMcpRql::Failed<FUnrealAIPCGGenerateResult>(TEXT("PCG is paused during editor transactions (pcg.PauseExecutionWhileTransactionActive) and the setting could not be lifted"));
 	// A Static Mesh Spawner loads a mesh not yet in memory asynchronously, and the streamable manager delays the callback
 	// that resumes the node to the next frame. This wait runs no frames: without this, the first generation after the
