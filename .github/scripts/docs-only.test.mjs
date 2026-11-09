@@ -9,14 +9,21 @@ import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { changedFiles, isDocsOnly, isDocsPath } from "./docs-only.mjs";
 
-test("isDocsPath lists docs/ and the root AGENTS.md, nothing else", () => {
+test("isDocsPath lists docs/, the root AGENTS.md, .claude/ and .agents/, nothing else", () => {
   const skip = [
     "AGENTS.md",
     "docs/ARCHITECTURE.md",
     "docs/rql.md",
     "docs/img/mcp-clients/claude-64.png",
+    ".claude/settings.json",
+    ".claude/skills/x/SKILL.md",
+    ".agents/skills/x/SKILL.md",
   ];
   const run = [
+    ".claude", // a file, not the folder
+    "cli/.claude/settings.json",
+    ".claude-plugin/plugin.json",
+    ".github/agents/x.agent.md",
     "README.md", // the source-generated tool inventory
     "cli/README.md", // npm `files`
     "extensions/README.md",
