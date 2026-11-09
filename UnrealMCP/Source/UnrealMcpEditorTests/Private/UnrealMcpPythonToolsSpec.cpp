@@ -58,6 +58,26 @@ void FUnrealMcpPythonToolsSpec::Define()
 		TestEqual(TEXT("tool count"), Registry.Num(), 1);
 	});
 
+	It("tells agents to build rotators and colours with keywords, and the positional orders it names hold", [this]()
+	{
+		FUnrealMcpToolRegistry Registry;
+		UnrealMcpPythonTools::Register(Registry);
+		const FUnrealMcpRegisteredTool* Tool = Registry.Find(TEXT("python-execute"));
+		TestTrue(TEXT("the description has the keyword hint"), Tool && Tool->Description.Contains(TEXT("unreal.Rotator(pitch=, yaw=, roll=)"))
+			&& Tool->Description.Contains(TEXT("unreal.Color(r=, g=, b=, a=)"))
+			&& Tool->Description.Contains(TEXT("Rotator is roll, pitch, yaw; Color is b, g, r, a")));
+
+		// The orders the description names are what UE's Python really does (FRotator is built through MakeRotator).
+		const FUnrealMcpToolResult R = Run(TEXT(
+			"rot = unreal.Rotator(1.0, 2.0, 3.0)\n"
+			"col = unreal.Color(1, 2, 3, 4)\n"
+			"kw = unreal.Rotator(pitch=10.0, yaw=20.0, roll=30.0)\n"
+			"kc = unreal.Color(r=255, g=0, b=0, a=255)\n"
+			"f'{rot.roll:g},{rot.pitch:g},{rot.yaw:g}|{col.b},{col.g},{col.r},{col.a}|{kw.pitch:g},{kw.yaw:g},{kw.roll:g}|{kc.r},{kc.b}'"));
+		TestTrue(*FString::Printf(TEXT("positional and keyword orders (%s)"), *R.Message), R.bSuccess
+			&& R.Message.StartsWith(TEXT("1,2,3|1,2,3,4|10,20,30|255,0")));
+	});
+
 	It("returns the last expression and the unreal module is pre-imported", [this]()
 	{
 		const FUnrealMcpToolResult R = Run(TEXT("x = 21\nx * 2"));
