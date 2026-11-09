@@ -158,6 +158,10 @@ UControlRigBlueprint* UUnrealAIControlRigRqlApi::CreateRig(const FString& Path, 
 	const FString Package = Path.TrimStartAndEnd();
 	if (!FPackageName::IsValidLongPackageName(Package))
 		return UnrealMcpRql::Failed<UControlRigBlueprint*>(FString::Printf(TEXT("'%s' is not an asset path such as /Game/Rigs/CR_Arm"), *Path));
+	// A package path allows characters an object name does not ("CR_Arm(1)"): CreateAsset would refuse those in a modal dialog.
+	FText InvalidName;
+	if (!FName(*FPackageName::GetShortName(Package)).IsValidObjectName(InvalidName))
+		return UnrealMcpRql::Failed<UControlRigBlueprint*>(FString::Printf(TEXT("'%s' cannot name an asset: %s"), *Path, *InvalidName.ToString()));
 	if (FPackageName::DoesPackageExist(Package) || FindObject<UObject>(nullptr, *(Package + TEXT(".") + FPackageName::GetShortName(Package))))
 		return UnrealMcpRql::Failed<UControlRigBlueprint*>(FString::Printf(TEXT("'%s' already exists (copy an existing rig with editor | call CopyAsset(from, to))"), *Package));
 	USkeletalMesh* SkeletalMesh = nullptr;
