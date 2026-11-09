@@ -1,0 +1,57 @@
+README.md
+  s_5f9a753ce320b5::t_2a7ab869925bca 607
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpConfigSpec.cpp
+  s_5f9a753ce320b5::t_2c6aa21ff5791e 563-601
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpDispatcherSpec.cpp
+  s_5f9a753ce320b5::t_bd7676f9d6164a 11-12,123-186
+UnrealMCP/Source/UnrealMcpRuntime/Private/Bridge/UnrealMcpBridgeServer.cpp
+  s_5f9a753ce320b5::t_b691563ef025ab 79-82,629,763
+UnrealMCP/Source/UnrealMcpRuntime/Private/Config/UnrealMcpConfig.cpp
+  s_5f9a753ce320b5::t_fba553a9c37adb 25,58,184-185,240,314-323,374,502-503,537
+UnrealMCP/Source/UnrealMcpRuntime/Private/Config/UnrealMcpConfig.h
+  s_5f9a753ce320b5::t_cd0f0752f71d9f 85,94-95,108-109,183
+UnrealMCP/Source/UnrealMcpRuntime/Private/Dispatch/UnrealMcpGameThreadDispatcher.cpp
+  s_5f9a753ce320b5::t_536a36c10648d9 61-70,104
+UnrealMCP/Source/UnrealMcpRuntime/Private/Dispatch/UnrealMcpGameThreadDispatcher.h
+  s_5f9a753ce320b5::t_a713fd2ad36750 26-27
+bridge/src/Host/SidecarHost.cs
+  s_5f9a753ce320b5::t_08d7c36b44cf0d 364-372,608-609,893-895
+bridge/src/Ipc/AgentConfigMessages.cs
+  s_5f9a753ce320b5::t_12027928053648 44
+bridge/src/Ipc/IpcMessages.cs
+  s_5f9a753ce320b5::t_2ec0dd9d983ae5 271,299
+bridge/src/Ipc/IpcProtocol.cs
+  s_5f9a753ce320b5::t_e31604aa0d394b 75-86
+bridge/src/Ipc/ServerLaunchArgsMessages.cs
+  s_5f9a753ce320b5::t_c9891b19e0e2cd 36
+bridge/src/Tools/ManifestRegistrar.cs
+  s_5f9a753ce320b5::t_8477dc5b014f49 11,65,67,72,98
+bridge/src/Tools/ProxyPromptFactory.cs
+  s_5f9a753ce320b5::t_b8e8928f4268e1 31
+bridge/src/Tools/ProxyResourceFactory.cs
+  s_5f9a753ce320b5::t_16ba3635e9ced5 32
+bridge/src/Tools/ProxyToolFactory.cs
+  s_5f9a753ce320b5::t_79d9dd04687ed1 11,30-34,60
+bridge/tests/Fakes.cs
+  s_5f9a753ce320b5::t_b57289f1644067 117,127
+bridge/tests/ToolTimeoutTests.cs
+  s_5f9a753ce320b5::t_1d8f47c4e85698 1-124
+docs/ARCHITECTURE.md
+  s_5f9a753ce320b5::t_194b5372449148 581-583,589-591,930-931
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b84e3aadd3d860d38a548dbe16216aa9c84f9860",
+  "prompts": {},
+  "sessions": {
+    "s_5f9a753ce320b5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7ee65e8c-aca3-452e-9397-46e1aceea5e9",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

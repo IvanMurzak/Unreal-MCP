@@ -1,0 +1,33 @@
+extensions/UnrealAIControlRig/Source/UnrealAIControlRig/Private/Tests/UnrealAIControlRigSpec.cpp
+  s_b4e88c47e182f2::t_1dc1d472a80bee 357-359
+extensions/UnrealAIControlRig/Source/UnrealAIControlRig/Private/UnrealAIControlRigGraph.cpp
+  s_b4e88c47e182f2::t_e996066316be9b 78-80,82,85-86,94-96,98,228,230,236-242,261-276,312-313,334-336,396-405,407-409,411-412,473-474,531,552,554,568-569,580-581
+extensions/UnrealAIControlRig/Source/UnrealAIControlRig/Private/UnrealAIControlRigGraph.h
+  s_b4e88c47e182f2::t_210e91158aa55d 12,41-43,53-55,76-77,79-80
+extensions/UnrealAIControlRig/Source/UnrealAIControlRig/Private/UnrealAIControlRigRqlApi.cpp
+  s_b4e88c47e182f2::t_0af38da5354877 70-90,124-125,135-137,242-253,325,335-336,338-339,342-344,355-357,363,367-368,389
+extensions/UnrealAIControlRig/Source/UnrealAIControlRig/Private/UnrealAIControlRigRqlApi.h
+  s_b4e88c47e182f2::t_85e798d29d84ec 76
+extensions/UnrealAIControlRig/Source/UnrealAIControlRig/Private/UnrealAIControlRigUnits.cpp
+  s_b4e88c47e182f2::t_48b800d8bf8c2c 217-219,223-227,229-230
+extensions/UnrealAIControlRig/Source/UnrealAIControlRig/UnrealAIControlRig.Build.cs
+  s_b4e88c47e182f2::t_8c638e4c964ab2 47-48
+extensions/UnrealAIControlRig/Source/UnrealAIControlRig/Private/UnrealAIControlRigAnim.cpp
+  s_b4e88c47e182f2::t_af73b64de0ec3f 21,23,26,33,38,54-63,65,164-176,194,199-202,218-255,329-339,411-413,436-446,449-463,473-474,476,481,484,486-487,489-493,497,519-520,529-531,539-544,562-565,569-570,572,574-577,579,582-583,586-588,597-612,615-620,625,631-632,634,636,644-734
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "a0a1ab5266a5562da401da5d9175a5e5cafe20ff",
+  "prompts": {},
+  "sessions": {
+    "s_b4e88c47e182f2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ef0d1b43-913a-487a-95df-8feba021ec1f",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

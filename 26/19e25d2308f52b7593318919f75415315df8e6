@@ -1,0 +1,85 @@
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpRqlAdaptersSpec.cpp
+  s_b4e88c47e182f2::t_8fa6a2e0a4cd32 626
+UnrealMCP/Source/UnrealMcpRql/Private/UnrealMcpRqlSession.cpp
+  s_b4e88c47e182f2::t_be1f230ac72e07 11,67-101,703-704,798-799
+UnrealMCP/Source/UnrealMcpRql/Private/UnrealMcpRqlSession.h
+  s_b4e88c47e182f2::t_03bf546c94e356 101-102
+docs/rql.md
+  s_b4e88c47e182f2::t_e7e9f71f27c133 163
+extensions/UnrealAIControlRig/README.md
+  s_b4e88c47e182f2::t_fa67872fa6d12e 36,76-90
+extensions/UnrealAIControlRig/Source/UnrealAIControlRig/Private/Tests/UnrealAIControlRigSpec.cpp
+  s_b4e88c47e182f2::t_23db5df284a338 160,376-431
+extensions/UnrealAIControlRig/Source/UnrealAIControlRig/Private/UnrealAIControlRigGraph.cpp
+  s_b4e88c47e182f2::t_6db9c301fac212 115-186,424-425,563,567,594,596-597,604-637
+extensions/UnrealAIControlRig/Source/UnrealAIControlRig/Private/UnrealAIControlRigGraph.h
+  s_b4e88c47e182f2::t_5c8bc5b8747a1b 82-87
+extensions/UnrealAIControlRig/Source/UnrealAIControlRig/Private/UnrealAIControlRigModule.cpp
+  s_b4e88c47e182f2::t_1da8ac673f5fd3 64,212,217-259
+extensions/UnrealAIControlRig/Source/UnrealAIControlRig/Private/UnrealAIControlRigRqlApi.cpp
+  s_b4e88c47e182f2::t_49d667e15abb74 13-14,17,19-20,29,107-133,307-356
+extensions/UnrealAIControlRig/Source/UnrealAIControlRig/Private/UnrealAIControlRigRqlApi.h
+  s_b4e88c47e182f2::t_cdfa6b6166ee5c 14-48,87-94
+extensions/UnrealAIControlRig/Tests/e2e/tools/control-rig-trace-00-missing-asset.e2e.json
+  s_b4e88c47e182f2::t_be7d2d32511e38 1-10
+extensions/UnrealAIControlRig/Tests/e2e/tools/control-rig-trace-01-create.e2e.json
+  s_b4e88c47e182f2::t_29b63b276a255c 1-10
+extensions/UnrealAIControlRig/Tests/e2e/tools/control-rig-trace-02-hit-variable.e2e.json
+  s_b4e88c47e182f2::t_4b830070f0998c 1-10
+extensions/UnrealAIControlRig/Tests/e2e/tools/control-rig-trace-03-height-variable.e2e.json
+  s_b4e88c47e182f2::t_826ed98cf4bb5b 1-10
+extensions/UnrealAIControlRig/Tests/e2e/tools/control-rig-trace-04-trace.e2e.json
+  s_b4e88c47e182f2::t_7cd21f1ac90b8a 1-10
+extensions/UnrealAIControlRig/Tests/e2e/tools/control-rig-trace-05-store-hit.e2e.json
+  s_b4e88c47e182f2::t_96537642ad0403 1-10
+extensions/UnrealAIControlRig/Tests/e2e/tools/control-rig-trace-06-store-height.e2e.json
+  s_b4e88c47e182f2::t_242bfdcfb7cca5 1-10
+extensions/UnrealAIControlRig/Tests/e2e/tools/control-rig-trace-07-curve-refused.e2e.json
+  s_b4e88c47e182f2::t_9cb35d2c27b7a0 1-11
+extensions/UnrealAIControlRig/Tests/e2e/tools/control-rig-trace-08-needs-play.e2e.json
+  s_b4e88c47e182f2::t_c6b5e1ee8c174a 1-11
+extensions/UnrealAIControlRig/Tests/e2e/tools/control-rig-trace-09-anim-blueprint.e2e.json
+  s_b4e88c47e182f2::t_2b2976cef3ed0f 1-10
+extensions/UnrealAIControlRig/Tests/e2e/tools/control-rig-trace-10-wire.e2e.json
+  s_b4e88c47e182f2::t_e8b675086478e8 1-10
+extensions/UnrealAIControlRig/Tests/e2e/tools/control-rig-trace-11-compile.e2e.json
+  s_b4e88c47e182f2::t_8ad5523c4967d9 1-10
+extensions/UnrealAIControlRig/Tests/e2e/tools/control-rig-trace-12-floor.e2e.json
+  s_b4e88c47e182f2::t_481e9d03d70f5a 1-10
+extensions/UnrealAIControlRig/Tests/e2e/tools/control-rig-trace-13-mesh.e2e.json
+  s_b4e88c47e182f2::t_afa501abab33af 1-10
+extensions/UnrealAIControlRig/Tests/e2e/tools/control-rig-trace-14-mesh-setup.e2e.json
+  s_b4e88c47e182f2::t_39162244ed8935 1-10
+extensions/UnrealAIControlRig/Tests/e2e/tools/control-rig-trace-15-play.e2e.json
+  s_b4e88c47e182f2::t_63b3d0ed2093b1 1-10
+extensions/UnrealAIControlRig/Tests/e2e/tools/control-rig-trace-16-advance.e2e.json
+  s_b4e88c47e182f2::t_f9d83bf2485ad4 1-10
+extensions/UnrealAIControlRig/Tests/e2e/tools/control-rig-trace-17-read.e2e.json
+  s_b4e88c47e182f2::t_da9ceb5ba8310b 1-10
+extensions/UnrealAIControlRig/Tests/e2e/tools/control-rig-trace-18-stop.e2e.json
+  s_b4e88c47e182f2::t_a3a73179f58054 1-10
+extensions/UnrealAIControlRig/Tests/e2e/tools/control-rig-trace-19-cleanup-actors.e2e.json
+  s_b4e88c47e182f2::t_4f1c9eb7e07a97 1-10
+extensions/UnrealAIControlRig/Tests/e2e/tools/control-rig-trace-20-cleanup-abp.e2e.json
+  s_b4e88c47e182f2::t_7c01d20a00b965 1-10
+extensions/UnrealAIControlRig/Tests/e2e/tools/control-rig-trace-21-cleanup-rig.e2e.json
+  s_b4e88c47e182f2::t_2b849a9e6d36be 1-10
+tests/automation-inventory.json
+  s_b4e88c47e182f2::t_61af25f0f657b5 2
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "2619e25d2308f52b7593318919f75415315df8e6",
+  "prompts": {},
+  "sessions": {
+    "s_b4e88c47e182f2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ef0d1b43-913a-487a-95df-8feba021ec1f",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

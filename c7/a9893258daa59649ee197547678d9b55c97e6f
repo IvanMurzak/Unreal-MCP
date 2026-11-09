@@ -1,0 +1,43 @@
+UnrealMCP/Source/UnrealMcpEditor/Private/Sidecar/UnrealMcpBridgeDownloader.h
+  s_7bc72ecaebd05d::t_7da36c2d56100e 61-62,64,68,73
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/SUnrealMcpMainWindow.cpp
+  s_7bc72ecaebd05d::t_7da36c2d56100e 460
+UnrealMCP/Source/UnrealMcpEditor/Private/UnrealMcpEditorCoordinator.cpp
+  s_7bc72ecaebd05d::t_7da36c2d56100e 738
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpBridgeDownloaderSpec.cpp
+  s_7bc72ecaebd05d::t_7da36c2d56100e 15,38-47,138,145,152-153,159-160,177,192-193,203,205
+UnrealMCP/Source/UnrealMcpRuntime/Private/Sidecar/UnrealMcpSidecarManager.cpp
+  s_7bc72ecaebd05d::t_7da36c2d56100e 162-166,170
+UnrealMCP/Config/FilterPlugin.ini
+  s_7bc72ecaebd05d::t_7da36c2d56100e 23-24
+UnrealMCP/Source/UnrealMcpRuntime/Private/Sidecar/UnrealMcpSidecarManager.h
+  s_7bc72ecaebd05d::t_7da36c2d56100e 94-96
+.github/scripts/ue_ci.py
+  s_7bc72ecaebd05d::t_7da36c2d56100e 43
+UnrealMCP/Source/ThirdParty/UnrealMcpBridge/README.md
+  s_7bc72ecaebd05d::t_7da36c2d56100e 23-25
+UnrealMCP/Source/UnrealMcpEditor/Private/Sidecar/UnrealMcpBridgeDownloader.cpp
+  s_7bc72ecaebd05d::t_7da36c2d56100e 62,65,74,108-109,130,140,210-211,214,216-217,219-220
+.github/workflows/release.yml
+  s_7bc72ecaebd05d::t_7da36c2d56100e 737-739,750-755
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/UnrealMcpEditorViewModel.cpp
+  s_7bc72ecaebd05d::t_7da36c2d56100e 690-695,700,703-705
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/UnrealMcpEditorViewModel.h
+  s_7bc72ecaebd05d::t_7da36c2d56100e 257-259
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c7a9893258daa59649ee197547678d9b55c97e6f",
+  "prompts": {},
+  "sessions": {
+    "s_7bc72ecaebd05d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "40274cb2-edf8-49ba-9a73-33b83cb5be53",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

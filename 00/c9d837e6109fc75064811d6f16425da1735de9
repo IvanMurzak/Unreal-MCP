@@ -1,0 +1,19 @@
+extensions/UnrealAINiagara/Source/UnrealAINiagara/Private/UnrealAINiagaraStack.cpp
+  s_92166a0810c23f::t_f0feafe86f5239 465-536
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "00c9d837e6109fc75064811d6f16425da1735de9",
+  "prompts": {},
+  "sessions": {
+    "s_92166a0810c23f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a6b60a83bdc935581",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

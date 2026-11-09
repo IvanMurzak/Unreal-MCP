@@ -1,0 +1,62 @@
+UnrealMCP/Source/UnrealMcpRql/Private/UnrealMcpRqlSession.cpp
+  s_b4e88c47e182f2::t_0e413b7ef2a6f7 35,63,861-863,865,874,954-960
+  s_b4e88c47e182f2::t_fb74d101e408a3 7,30-34,36-62,64,662,827-829,860,864,866-873,875
+UnrealMCP/Source/UnrealMcpEditor/Private/Tools/UnrealMcpToolListTools.cpp
+  s_b4e88c47e182f2::t_18df828de10405 5
+  s_b4e88c47e182f2::t_75442a7947c6a6 101-123,127-128
+UnrealMCP/Source/UnrealMcpRql/Private/UnrealMcpAvailableExtensions.cpp
+  s_b4e88c47e182f2::t_85c9d6e4ebcecf 1-188
+UnrealMCP/Source/UnrealMcpRql/Private/UnrealMcpRqlGuide.h
+  s_b4e88c47e182f2::t_f6b42f44ea92ed 197-198
+  s_b4e88c47e182f2::t_76a7419a76922e 56
+UnrealMCP/Source/UnrealMcpEditor/Private/UnrealMcpEditorCoordinator.cpp
+  s_b4e88c47e182f2::t_65cc58541d87f6 794-816,823-828
+  s_b4e88c47e182f2::t_fada26a52b20fb 49-50
+  s_b4e88c47e182f2::t_51ddc70ffaaff9 439-443,445,829
+bridge/src/Tools/RqlBridge.cs
+  s_b4e88c47e182f2::t_c7e23c5a83c98f 184
+  s_b4e88c47e182f2::t_bbd20204000ac9 210-212
+  s_b4e88c47e182f2::t_b5e6cc64cf069b 181-183,207-209,213
+bridge/tests/RqlBridgeTests.cs
+  s_b4e88c47e182f2::t_a002ee7977ba3f 148-157
+  s_b4e88c47e182f2::t_538ff35125dfd6 147,258-289
+scripts/test_extension_monorepo.py
+  s_b4e88c47e182f2::t_b33c7a1892f25d 235-241
+docs/rql.md
+  s_b4e88c47e182f2::t_2090b99809b2fa 375-386
+UnrealMCP/Source/UnrealMcpRql/Public/UnrealMcpAvailableExtensions.h
+  s_b4e88c47e182f2::t_32e4b351c491bc 1-81
+UnrealMCP/Source/UnrealMcpEditor/Private/UnrealMcpEditorCoordinator.h
+  s_b4e88c47e182f2::t_4c4e20d429ede6 119-122
+  s_b4e88c47e182f2::t_a2cf5508c360c4 7
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpAvailableExtensionsSpec.cpp
+  s_b4e88c47e182f2::t_e8ba1b6dd19636 1-217
+UnrealMCP/Source/UnrealMcpEditor/Private/Extensions/UnrealMcpExtensionCatalog.cpp
+  s_b4e88c47e182f2::t_924c5c5a033e50 6-7,196-209
+UnrealMCP/Source/UnrealMcpEditor/Private/Extensions/UnrealMcpExtensionCatalog.h
+  s_b4e88c47e182f2::t_59404b6b07f73e 94-99
+UnrealMCP/Source/UnrealMcpRql/Private/UnrealMcpRqlBlueprints.cpp
+  s_b4e88c47e182f2::t_3fd818c2c085dd 4,445-450,453-456
+extensions/AGENTS.md
+  s_b4e88c47e182f2::t_900f626150caff 8
+tests/automation-inventory.json
+  s_b4e88c47e182f2::t_ba72b80b80ebcb 9
+tests/chain-fixtures/5.8/tools.jsonl
+  s_b4e88c47e182f2::t_393fc76ceee93d 16-17,29
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "669efd1c4f356dd5540d928cfe20ac7877b85aa0",
+  "prompts": {},
+  "sessions": {
+    "s_b4e88c47e182f2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ef0d1b43-913a-487a-95df-8feba021ec1f",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

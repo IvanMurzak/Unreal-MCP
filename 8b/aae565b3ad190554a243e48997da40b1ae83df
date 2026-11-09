@@ -1,0 +1,19 @@
+UnrealMCP/Source/UnrealMcpEditor/Private/UI/SUnrealMcpMainWindow.cpp
+  s_010c46d1df2a14::t_22a1c2f85987a0 309-315,317-320
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.7",
+  "base_commit_sha": "8baae565b3ad190554a243e48997da40b1ae83df",
+  "prompts": {},
+  "sessions": {
+    "s_010c46d1df2a14": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5abf135e-29a4-41c1-907c-855f83d24eff",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

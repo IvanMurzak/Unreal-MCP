@@ -1,0 +1,52 @@
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpPythonToolsSpec.cpp
+  s_7bc72ecaebd05d::t_8df5408f0dabf3 200-202
+  s_7bc72ecaebd05d::t_c4311b241eb248 179-199,203-207
+UnrealMCP/Content/Python/unreal_mcp/_vendor/code_exec/VENDORED.md
+  s_7bc72ecaebd05d::t_88061b528537da 4,6-7
+UnrealMCP/Content/Python/unreal_mcp/_vendor/code_exec/runner.py
+  s_7bc72ecaebd05d::t_19dc6d03ba7b99 9,44,55-56,195,216-220,226-228,281-282,289-292,298,300,310-311,319,321,323,325-328,333-337,344,346,354-355,358-359,362-364,366-394,400-403,408-509,521-526,531-536,541-542,544-612,615,617,619,623,631,642,646-655,658,660,662,664-666,674,679,683-688,700-705,715-716
+UnrealMCP/Source/ThirdParty/RQL/README.md
+  s_7bc72ecaebd05d::t_39d1cb51c38b0a 6-7
+UnrealMCP/Source/ThirdParty/RQL/include/rql/guide.hpp
+  s_7bc72ecaebd05d::t_65c7b4978ce9dc 22,34-35,48
+UnrealMCP/Source/ThirdParty/RQL/src/compiler.cpp
+  s_7bc72ecaebd05d::t_6b1974e1d76066 36-40,46,978-984,990,1483,1686-1694,1929-1934,1937-1951,1954-1955,1959-1962
+UnrealMCP/Source/ThirdParty/RQL/src/engine.cpp
+  s_7bc72ecaebd05d::t_57e8efbb987c09 34
+UnrealMCP/Source/ThirdParty/RQL/src/exec.hpp
+  s_7bc72ecaebd05d::t_894a91cbdb3a24 183-184,329-330
+UnrealMCP/Source/ThirdParty/RQL/src/mutator.cpp
+  s_7bc72ecaebd05d::t_a7e2c13e5b7685 136,885,887,1265,1267
+UnrealMCP/Source/UnrealMcpEditor/Private/Tools/UnrealMcpPythonTools.cpp
+  s_7bc72ecaebd05d::t_3ddc6fa7ad48a3 239-242
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpRqlSpec.cpp
+  s_7bc72ecaebd05d::t_4f03e00bea4128 1309-1340,1441-1444
+UnrealMCP/Source/UnrealMcpRql/Private/UnrealMcpRqlGuide.h
+  s_7bc72ecaebd05d::t_5f52d7aec85891 26,94,111
+UnrealMCP/ThirdPartyNotices.txt
+  s_7bc72ecaebd05d::t_c59d2e38392e44 101,103
+bridge/Directory.Build.props
+  s_7bc72ecaebd05d::t_c791859d20923b 4
+bridge/src/com.IvanMurzak.Unreal.MCP.Bridge.csproj
+  s_7bc72ecaebd05d::t_dcca0903d76858 55,135,137-138,187
+docs/rql.md
+  s_7bc72ecaebd05d::t_04b898d174dfe7 25-26,172-175,346-347,349
+tests/chain-fixtures/5.8/tools.jsonl
+  s_7bc72ecaebd05d::t_a8910d4162bc76 14-16
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "004264b2774ab7f6b6b9b643423c9154c8b659aa",
+  "prompts": {},
+  "sessions": {
+    "s_7bc72ecaebd05d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "40274cb2-edf8-49ba-9a73-33b83cb5be53",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

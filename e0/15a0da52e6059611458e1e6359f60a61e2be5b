@@ -1,0 +1,25 @@
+UnrealMCP/Source/UnrealMcpRql/Private/UnrealMcpRqlPlay.cpp
+  s_b4e88c47e182f2::t_dc40f60ca59f64 394,396-397,401
+docs/rql.md
+  s_b4e88c47e182f2::t_578def10595eda 222-224
+extensions/UnrealAIEnhancedInput/README.md
+  s_b4e88c47e182f2::t_82d3dcc28bcdfe 67
+extensions/UnrealAIEnhancedInput/Source/UnrealAIEnhancedInput/Private/Tests/UnrealAIEnhancedInputSpec.cpp
+  s_b4e88c47e182f2::t_7eb0320c62e50b 47,662-663,716
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e015a0da52e6059611458e1e6359f60a61e2be5b",
+  "prompts": {},
+  "sessions": {
+    "s_b4e88c47e182f2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ef0d1b43-913a-487a-95df-8feba021ec1f",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

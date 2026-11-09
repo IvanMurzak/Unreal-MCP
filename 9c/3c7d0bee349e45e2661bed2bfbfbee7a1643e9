@@ -1,0 +1,27 @@
+bridge/tests/SidecarHostConnectionDropTests.cs
+  s_5b742bf37a2587::t_c71afdfb957182 159-163,165,174,177-178,180
+bridge/src/Host/SidecarHost.cs
+  s_5b742bf37a2587::t_fd26ebe87c8859 1489-1497,1499-1500
+  s_5b742bf37a2587::t_14d044bd8a6fc3 1859,1861-1863,1865
+  s_5b742bf37a2587::t_77e7faf4052de9 1142-1148,1151,1154,1163-1164,1166-1167,1169-1170,1173
+  s_5b742bf37a2587::t_d7ba882b02e2d4 1423-1426,1428,1437
+  s_5b742bf37a2587::t_5d3632c498eee3 1180-1182,1184,1304,1324
+bridge/tests/MachineCredentialTests.cs
+  s_5b742bf37a2587::t_335ae9bacfaf39 179-294
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "9c3c7d0bee349e45e2661bed2bfbfbee7a1643e9",
+  "prompts": {},
+  "sessions": {
+    "s_5b742bf37a2587": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ba723765-770d-456d-823d-c53d8073ed95",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

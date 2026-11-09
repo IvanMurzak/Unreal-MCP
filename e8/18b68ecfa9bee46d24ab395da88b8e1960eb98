@@ -1,0 +1,40 @@
+cli/tests/update.test.ts
+  s_5601a2ed5b932a::t_f90974acfc0889 23-42
+  s_5601a2ed5b932a::t_58834ba5afd61c 102-123,125-130,132,135-136,138-166
+  s_5601a2ed5b932a::t_2a7a8cf616f6a0 124,131,133-134,137
+cli/src/lib/install-plugin.ts
+  s_5601a2ed5b932a::t_273de9f6a6bc25 9,21-22
+  s_5601a2ed5b932a::t_813075d32b694f 64-84,96-98,102-115
+cli/src/commands/update.ts
+  s_5601a2ed5b932a::t_db224a7e59286a 15-53
+cli/tests/clean-plugin.test.ts
+  s_5601a2ed5b932a::t_9fb12bc2627c1e 1-101
+cli/src/lib.ts
+  s_5601a2ed5b932a::t_ce8f3b7ec45bf9 37
+  s_5601a2ed5b932a::t_91db5db3b421e9 128-133
+cli/src/lib/update.ts
+  s_5601a2ed5b932a::t_b16c87b9f70772 9,19-27
+  s_5601a2ed5b932a::t_c40f4451d55471 40-45
+  s_5601a2ed5b932a::t_680914ee15cc3e 149-153
+  s_5601a2ed5b932a::t_9a0fd3942aafd7 114,120,124,132-148,154-160,162
+cli/tests/install-plugin.test.ts
+  s_5601a2ed5b932a::t_104ab65dc4e0e1 50-68
+cli/src/lib/clean-plugin.ts
+  s_5601a2ed5b932a::t_0b74dbe275055a 1-131
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "e818b68ecfa9bee46d24ab395da88b8e1960eb98",
+  "prompts": {},
+  "sessions": {
+    "s_5601a2ed5b932a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4a9d921c-49f2-4338-ab19-c42684cbc42e",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

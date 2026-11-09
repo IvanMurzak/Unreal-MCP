@@ -1,0 +1,31 @@
+UnrealMCP/Source/UnrealMcpEditor/Private/Server/UnrealMcpServerManager.cpp
+  s_8047d5689981d2::t_a6ded086ca5910 34
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpServerManagerSpec.cpp
+  s_8047d5689981d2::t_16a30efaa58d7e 153
+UnrealMCP/UnrealMCP.uplugin
+  s_8047d5689981d2::t_d397eac8ae91f7 4
+bridge/src/com.IvanMurzak.Unreal.MCP.Bridge.csproj
+  s_8047d5689981d2::t_19e1d78c5226cb 10,54,133
+cli/package-lock.json
+  s_8047d5689981d2::t_55e741f25860cf 3,9
+cli/package.json
+  s_8047d5689981d2::t_92450c01c2bb21 3
+cli/src/lib/server-version.ts
+  s_8047d5689981d2::t_d769bbf5d1141c 12
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "49c2619a82d4a8a48a6e18c67f4b4946616d3375",
+  "prompts": {},
+  "sessions": {
+    "s_8047d5689981d2": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1230c-c6bd-7aa3-94b2-24a9267b7698",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

@@ -1,0 +1,19 @@
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpRqlPlaySpec.cpp
+  s_8c72cf4d994c89::t_7c75a4ee1aa3b4 197-199,203
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "56890cc4486106c2589342116bc96d8379546309",
+  "prompts": {},
+  "sessions": {
+    "s_8c72cf4d994c89": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "s_8c72cf4d994c89",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

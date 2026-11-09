@@ -1,0 +1,21 @@
+cli/src/lib/download-server.ts
+  s_421944529f445d::t_03b03e65634df6 79-80
+cli/src/lib/server-checksum.ts
+  s_421944529f445d::t_d251fb9187cc70 19
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "afcbd5e621b2b33a9c9e4e4456212ad42efdb25f",
+  "prompts": {},
+  "sessions": {
+    "s_421944529f445d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a6aefd38cc8701e73",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
