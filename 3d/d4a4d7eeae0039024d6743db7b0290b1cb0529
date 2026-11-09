@@ -1,0 +1,34 @@
+UnrealMCP/Source/UnrealMcpEditorTests/Private/UnrealMcpScreenshotToolsSpec.cpp
+  s_769b3bafbe514d::t_f17fc8f6ae7495 252-377
+  s_769b3bafbe514d::t_c3128c41aa9939 14
+UnrealMCP/Source/UnrealMcpEditor/Public/UnrealMcpCoreTools.h
+  s_769b3bafbe514d::t_603c2c088e6094 107-136
+  s_769b3bafbe514d::t_b9d0c254cbae86 9
+UnrealMCP/Source/UnrealMcpEditor/Private/Tools/UnrealMcpScreenshotTools.cpp
+  s_769b3bafbe514d::t_1e5dc414047579 102-179,416
+  s_769b3bafbe514d::t_ee7105a7ea815d 405-409,413-415
+  s_769b3bafbe514d::t_1d9daaad4de350 27
+  s_769b3bafbe514d::t_addeccce0cb1b5 410-412
+  s_769b3bafbe514d::t_d7aa742dcb2241 10-11
+  s_769b3bafbe514d::t_16d7ad015bdf98 394-396
+docs/ARCHITECTURE.md
+  s_769b3bafbe514d::t_aedbcbb235b1a1 1345-1355
+tests/automation-inventory.json
+  s_769b3bafbe514d::t_883224a8085380 36
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "3dd4a4d7eeae0039024d6743db7b0290b1cb0529",
+  "prompts": {},
+  "sessions": {
+    "s_769b3bafbe514d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3036804e-d5ac-42cf-8ab0-e938046e5352",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
