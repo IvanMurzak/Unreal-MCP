@@ -6,6 +6,7 @@
 #include "CoreMinimal.h"
 
 class FUnrealMcpToolRegistry;
+class IInterface_PostProcessVolume;
 struct FUnrealMcpToolResult;
 
 /**
@@ -103,6 +104,36 @@ namespace UnrealMcpScreenshotTools
 	 * ticking, so effects and animation may not have advanced to the latest edit. GPU-free (spec-testable).
 	 */
 	UNREALMCPEDITOR_API FString FormatFreshness(bool bFrameFresh, const FString& FrameReason, bool bSimulationLive, const FString& SimulationReason);
+
+	/** How much of a captured frame is one color. */
+	struct FFrameUniformity
+	{
+		/** At least 99% of the pixels are within a small tolerance of Color. */
+		bool bUniform = false;
+		FColor Color = FColor::Black;
+		/** Share of the pixels close to Color, in [0, 1]. */
+		double Share = 0.0;
+	};
+
+	/**
+	 * Measure a frame for the "nothing to see" case (all white, all black). The 1% allowance keeps a blank frame with
+	 * editor sprites or debug text over it uniform; a gradient, like a plain sky, is not. Alpha is ignored. GPU-free.
+	 */
+	UNREALMCPEDITOR_API FFrameUniformity AnalyzeFrameUniformity(const TArray<FColor>& Pixels);
+
+	/**
+	 * Whether one of the enabled @p Volumes (a world's PostProcessVolumes) pins Auto Exposure Max Brightness to about 0 while
+	 * r.DefaultFeature.AutoExposure.ExtendDefaultLuminanceRange is off (@p bExtendedLuminanceRange false). The Third
+	 * Person template's volume has that override with its value meant as EV100, and its own project config turns the
+	 * CVar on; the same level in a project without the CVar renders pure white. Measured in §10 "Background rendering".
+	 */
+	UNREALMCPEDITOR_API bool HasOverexposingPostProcessVolume(const TArray<IInterface_PostProcessVolume*>& Volumes, bool bExtendedLuminanceRange);
+
+	/**
+	 * The note a viewport capture appends when its frame is uniform. It never fails the capture, since a plain scene is
+	 * legitimate. @p bOverexposingVolume adds the cause and the project fix. GPU-free (spec-testable).
+	 */
+	UNREALMCPEDITOR_API FString FormatUniformFrameNote(const FFrameUniformity& Uniformity, bool bOverexposingVolume);
 }
 
 /**

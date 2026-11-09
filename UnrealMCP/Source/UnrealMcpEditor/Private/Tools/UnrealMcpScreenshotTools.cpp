@@ -7,6 +7,8 @@
 #include "Tools/UnrealMcpObjectRef.h"
 
 #include "Dom/JsonObject.h"
+#include "HAL/IConsoleManager.h"
+#include "Interfaces/Interface_PostProcessVolume.h"
 #include "Misc/App.h"
 #include "Misc/Base64.h"
 #include "Misc/ScopeExit.h"
@@ -22,6 +24,7 @@
 #include "TextureResource.h"
 
 #include "GameFramework/Actor.h"
+#include "Engine/Scene.h"
 #include "Engine/World.h"
 #include "Engine/TextureRenderTarget2D.h"
 #include "Engine/SceneCapture2D.h"
@@ -94,6 +97,84 @@ namespace UnrealMcpScreenshotTools
 			? FString(TEXT("Simulation: live."))
 			: FString::Printf(TEXT("Simulation: paused (%s); effects and animation may not show the latest edits yet."), *SimulationReason);
 		return Frame + TEXT(" ") + Simulation;
+	}
+
+	FFrameUniformity AnalyzeFrameUniformity(const TArray<FColor>& Pixels)
+	{
+		FFrameUniformity Result;
+		if (Pixels.IsEmpty())
+			return Result;
+
+		// The most common value per channel, so a few overlay pixels (sprites, debug text) cannot move it.
+		TStaticArray<int32, 256> CountR(InPlace, 0), CountG(InPlace, 0), CountB(InPlace, 0);
+		for (const FColor& Pixel : Pixels)
+		{
+			++CountR[Pixel.R];
+			++CountG[Pixel.G];
+			++CountB[Pixel.B];
+		}
+		const auto MostCommon = [](const TStaticArray<int32, 256>& Counts)
+		{
+			int32 Best = 0;
+			for (int32 Value = 1; Value < 256; ++Value)
+			{
+				if (Counts[Value] > Counts[Best])
+					Best = Value;
+			}
+			return (uint8)Best;
+		};
+		Result.Color = FColor(MostCommon(CountR), MostCommon(CountG), MostCommon(CountB));
+
+		constexpr int32 Tolerance = 4;
+		int32 Close = 0;
+		for (const FColor& Pixel : Pixels)
+		{
+			if (FMath::Abs(Pixel.R - Result.Color.R) <= Tolerance && FMath::Abs(Pixel.G - Result.Color.G) <= Tolerance
+				&& FMath::Abs(Pixel.B - Result.Color.B) <= Tolerance)
+			{
+				++Close;
+			}
+		}
+		Result.Share = (double)Close / (double)Pixels.Num();
+		Result.bUniform = Result.Share >= 0.99;
+		return Result;
+	}
+
+	bool HasOverexposingPostProcessVolume(const TArray<IInterface_PostProcessVolume*>& Volumes, bool bExtendedLuminanceRange)
+	{
+		if (bExtendedLuminanceRange)
+			return false;
+		// Measured on 5.7 with the CVar off: 0 and 0.001 render white, 0.03 is washed out but not uniform, 1 is normal.
+		constexpr float MaxBrightnessThatBlowsOut = 0.01f;
+		for (const IInterface_PostProcessVolume* Volume : Volumes)
+		{
+			const FPostProcessVolumeProperties Properties = Volume->GetProperties();
+			if (Properties.bIsEnabled && Properties.BlendWeight > 0.0f && Properties.Settings
+				&& Properties.Settings->bOverride_AutoExposureMaxBrightness
+				&& Properties.Settings->AutoExposureMaxBrightness <= MaxBrightnessThatBlowsOut)
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
+	FString FormatUniformFrameNote(const FFrameUniformity& Uniformity, bool bOverexposingVolume)
+	{
+		FString Note = FString::Printf(
+			TEXT("Frame content: uniform (#%02X%02X%02X across %.1f%% of the pixels), so this image shows almost nothing of "
+			     "the scene. That is fine for a really plain scene; otherwise the view is over-exposed or unlit. "
+			     "screenshot-camera renders the scene with its own fixed exposure, which can differ from what the player sees."),
+			Uniformity.Color.R, Uniformity.Color.G, Uniformity.Color.B, Uniformity.Share * 100.0);
+		if (bOverexposingVolume)
+		{
+			Note += TEXT(" Likely cause, in the project and not in this capture: a PostProcessVolume overrides Auto Exposure "
+			             "Max Brightness to about 0 while r.DefaultFeature.AutoExposure.ExtendDefaultLuminanceRange is off, so "
+			             "the player sees this too. Fix: set r.DefaultFeature.AutoExposure.ExtendDefaultLuminanceRange=True "
+			             "under [/Script/Engine.RendererSettings] in Config/DefaultEngine.ini (console-run-command applies it "
+			             "to this session), or clear the volume's override.");
+		}
+		return Note;
 	}
 
 	// ---- Local helpers ----------------------------------------------------------------------------
@@ -310,6 +391,9 @@ namespace UnrealMcpScreenshotTools
 			if (!Viewport->ReadPixels(Pixels, FReadSurfaceDataFlags(), FIntRect(0, 0, Size.X, Size.Y)))
 				return FUnrealMcpToolResult::Error(FString::Printf(TEXT("Failed to read pixels from the %s."), *Source));
 
+			// Measured before the resize, which would blur overlay pixels into the blank frame around them.
+			const FFrameUniformity Uniformity = AnalyzeFrameUniformity(Pixels);
+
 			int32 OutW = 0, OutH = 0;
 			EffectiveViewportSize(Call, Size.X, Size.Y, OutW, OutH);
 			ResizeIfNeeded(Pixels, Size.X, Size.Y, OutW, OutH);
@@ -318,7 +402,18 @@ namespace UnrealMcpScreenshotTools
 			if (!EncodePngBase64(Pixels, OutW, OutH, Base64, Bytes, Error))
 				return FUnrealMcpToolResult::Error(Error);
 
-			return MakeImageResult(Source, OutW, OutH, Base64, Bytes, ScreenshotFreshness(World, bFrameFresh, FrameReason));
+			FString Notes = ScreenshotFreshness(World, bFrameFresh, FrameReason);
+			if (Uniformity.bUniform)
+			{
+				const IConsoleVariable* ExtendedRange = IConsoleManager::Get().FindConsoleVariable(
+					TEXT("r.DefaultFeature.AutoExposure.ExtendDefaultLuminanceRange"));
+				// This cause only blows a frame out, so it cannot explain a dark or colored one.
+				const bool bWhite = FMath::Min3(Uniformity.Color.R, Uniformity.Color.G, Uniformity.Color.B) >= 250;
+				const bool bOverexposingVolume = bWhite && World && ExtendedRange
+					&& HasOverexposingPostProcessVolume(World->PostProcessVolumes, ExtendedRange->GetBool());
+				Notes += TEXT(" ") + FormatUniformFrameNote(Uniformity, bOverexposingVolume);
+			}
+			return MakeImageResult(Source, OutW, OutH, Base64, Bytes, Notes);
 		}
 
 		/**
