@@ -7,6 +7,7 @@
 
 class FUnrealMcpToolRegistry;
 class IInterface_PostProcessVolume;
+class UWorld;
 struct FUnrealMcpToolResult;
 
 /**
@@ -122,10 +123,12 @@ namespace UnrealMcpScreenshotTools
 	UNREALMCPEDITOR_API FFrameUniformity AnalyzeFrameUniformity(const TArray<FColor>& Pixels);
 
 	/**
-	 * Whether an enabled, unbound one of @p Volumes (a world's PostProcessVolumes) pins Auto Exposure Max Brightness to
+	 * Whether @p Volumes (in ascending priority, see GetWorldPostProcessVolumes) leave Auto Exposure Max Brightness at
 	 * about 0 while r.DefaultFeature.AutoExposure.ExtendDefaultLuminanceRange is off (@p bExtendedLuminanceRange false),
-	 * which renders pure white. Why that happens: §10 "Background rendering".
+	 * which renders pure white. Only enabled, unbound volumes count, and the last one to set a value decides, as in the
+	 * engine's blend; a partial weight or Manual exposure means the value does not decide. Why: §10 "Background rendering".
 	 */
+	UNREALMCPEDITOR_API TArray<IInterface_PostProcessVolume*> GetWorldPostProcessVolumes(const UWorld& World);
 	UNREALMCPEDITOR_API bool HasOverexposingPostProcessVolume(const TArray<IInterface_PostProcessVolume*>& Volumes, bool bExtendedLuminanceRange);
 
 	/**

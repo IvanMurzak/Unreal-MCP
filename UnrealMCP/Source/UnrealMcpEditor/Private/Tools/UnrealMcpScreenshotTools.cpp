@@ -12,6 +12,7 @@
 #include "Interfaces/Interface_PostProcessVolume.h"
 #include "Misc/App.h"
 #include "Misc/Base64.h"
+#include "Misc/EngineVersionComparison.h"
 #include "Misc/ScopeExit.h"
 #include "Modules/ModuleManager.h"
 #include "UObject/GCObjectScopeGuard.h"
@@ -131,23 +132,38 @@ namespace UnrealMcpScreenshotTools
 		return Result;
 	}
 
+	TArray<IInterface_PostProcessVolume*> GetWorldPostProcessVolumes(const UWorld& World)
+	{
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+		return World.PostProcessVolumes;
+#else
+		TArray<IInterface_PostProcessVolume*> Volumes;
+		for (IInterface_PostProcessVolume& Volume : World.GetPostProcessVolumeIterator())
+			Volumes.Add(&Volume);
+		return Volumes;
+#endif
+	}
+
 	bool HasOverexposingPostProcessVolume(const TArray<IInterface_PostProcessVolume*>& Volumes, bool bExtendedLuminanceRange)
 	{
 		if (bExtendedLuminanceRange)
 			return false;
 		// Measured on 5.7 with the CVar off: 0 and 0.001 render white, 0.03 is washed out but not uniform, 1 is normal.
 		constexpr float MaxBrightnessThatBlowsOut = 0.01f;
+		bool bPinnedNearZero = false;
+		bool bManualExposure = false;
 		for (const IInterface_PostProcessVolume* Volume : Volumes)
 		{
 			const FPostProcessVolumeProperties Properties = Volume->GetProperties();
-			if (Properties.bIsEnabled && Properties.bIsUnbound && Properties.BlendWeight > 0.0f && Properties.Settings
-				&& Properties.Settings->bOverride_AutoExposureMaxBrightness
-				&& Properties.Settings->AutoExposureMaxBrightness <= MaxBrightnessThatBlowsOut)
-			{
-				return true;
-			}
+			if (!Properties.bIsEnabled || !Properties.bIsUnbound || Properties.BlendWeight <= 0.0f || !Properties.Settings)
+				continue;
+			const FPostProcessSettings& Settings = *Properties.Settings;
+			if (Settings.bOverride_AutoExposureMethod)
+				bManualExposure = Settings.AutoExposureMethod == AEM_Manual;
+			if (Settings.bOverride_AutoExposureMaxBrightness)
+				bPinnedNearZero = Settings.AutoExposureMaxBrightness <= MaxBrightnessThatBlowsOut && Properties.BlendWeight >= 0.99f;
 		}
-		return false;
+		return bPinnedNearZero && !bManualExposure;
 	}
 
 	FString FormatUniformFrameNote(const FFrameUniformity& Uniformity, bool bOverexposingVolume)
@@ -401,7 +417,7 @@ namespace UnrealMcpScreenshotTools
 				// This cause only blows a frame out, so it cannot explain a dark or colored one.
 				const bool bWhite = FMath::Min3(Uniformity.Color.R, Uniformity.Color.G, Uniformity.Color.B) >= 250;
 				const bool bOverexposingVolume = bWhite && World && ExtendedRange
-					&& HasOverexposingPostProcessVolume(World->PostProcessVolumes, ExtendedRange->GetBool());
+					&& HasOverexposingPostProcessVolume(GetWorldPostProcessVolumes(*World), ExtendedRange->GetBool());
 				Notes += TEXT(" ") + FormatUniformFrameNote(Uniformity, bOverexposingVolume);
 			}
 			return MakeImageResult(Source, OutW, OutH, Base64, Bytes, Notes);

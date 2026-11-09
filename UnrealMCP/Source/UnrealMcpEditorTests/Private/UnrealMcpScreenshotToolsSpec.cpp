@@ -12,6 +12,7 @@
 #include "Dom/JsonObject.h"
 #include "Editor.h"
 #include "Engine/PostProcessVolume.h"
+#include "HAL/IConsoleManager.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
 
@@ -266,10 +267,17 @@ void FUnrealMcpScreenshotToolsSpec::Define()
 			Black.Init(FColor(0, 0, 0, 0), Num);
 			TestTrue(TEXT("all black, with the zero alpha of a raw read-back"), AnalyzeFrameUniformity(Black).IsUniform());
 
+			TArray<FColor> MixedAlpha = White;
+			for (int32 Index = 0; Index < Num; ++Index)
+				MixedAlpha[Index].A = (uint8)(Index * 255 / Num);
+			TestTrue(TEXT("alpha is ignored"), AnalyzeFrameUniformity(MixedAlpha).IsUniform());
+
 			TArray<FColor> Overlaid = White;
 			for (int32 Index = 0; Index < 9; ++Index)
 				Overlaid[Index] = FColor(234, 161, 20);
-			TestTrue(TEXT("0.9% overlay stays uniform"), AnalyzeFrameUniformity(Overlaid).IsUniform());
+			const FFrameUniformity WithOverlay = AnalyzeFrameUniformity(Overlaid);
+			TestTrue(TEXT("0.9% overlay stays uniform"), WithOverlay.IsUniform());
+			TestEqual(TEXT("the overlay does not move the color, a mean would"), WithOverlay.Color, FColor::White);
 
 			TArray<FColor> Noisy;
 			for (int32 Index = 0; Index < Num; ++Index)
@@ -291,7 +299,7 @@ void FUnrealMcpScreenshotToolsSpec::Define()
 
 			TArray<FColor> DarkGradient;
 			for (int32 Index = 0; Index < Num; ++Index)
-				DarkGradient.Add(FColor(Index * 40 / Num, Index * 40 / Num, Index * 40 / Num));
+				DarkGradient.Add(FColor(Index * 10 / Num, Index * 10 / Num, Index * 10 / Num));
 			TestFalse(TEXT("a low-contrast gradient, like a night sky"), AnalyzeFrameUniformity(DarkGradient).IsUniform());
 
 			TArray<FColor> MixedChannels;
@@ -342,11 +350,14 @@ void FUnrealMcpScreenshotToolsSpec::Define()
 			const FRow Rows[] = {
 				{ TEXT("the template's setup, CVar off"), false, true, 0.0f, true, true, 1.0f, true },
 				{ TEXT("the same volume with the CVar on, where 0 means EV100 0"), true, true, 0.0f, true, true, 1.0f, false },
+				{ TEXT("nearly 0, also measured white"), false, true, 0.001f, true, true, 1.0f, true },
+				{ TEXT("washed out but not uniform"), false, true, 0.03f, true, true, 1.0f, false },
 				{ TEXT("a normal max brightness"), false, true, 1.0f, true, true, 1.0f, false },
 				{ TEXT("the value is not overridden"), false, false, 0.0f, true, true, 1.0f, false },
 				{ TEXT("a disabled volume"), false, true, 0.0f, false, true, 1.0f, false },
 				{ TEXT("a bounded volume, which may not reach the camera"), false, true, 0.0f, true, false, 1.0f, false },
 				{ TEXT("a volume with no weight"), false, true, 0.0f, true, true, 0.0f, false },
+				{ TEXT("a partial weight blends the value away from 0"), false, true, 0.0f, true, true, 0.5f, false },
 			};
 			for (const FRow& Row : Rows)
 			{
@@ -357,6 +368,32 @@ void FUnrealMcpScreenshotToolsSpec::Define()
 				Volume->BlendWeight = Row.Weight;
 				TestEqual(Row.Label, HasOverexposingPostProcessVolume(Volumes, Row.bExtendedRange), Row.bExpected);
 			}
+
+			// The template's setup again, for the checks that are not one volume's own fields.
+			Volume->Settings.bOverride_AutoExposureMaxBrightness = true;
+			Volume->Settings.AutoExposureMaxBrightness = 0.0f;
+			Volume->bEnabled = true;
+			Volume->bUnbound = true;
+			Volume->BlendWeight = 1.0f;
+			TestTrue(TEXT("the capture path's list holds the volume"), GetWorldPostProcessVolumes(*World).Contains(Cast<IInterface_PostProcessVolume>(Volume)));
+			TestNotNull(TEXT("the CVar the capture path reads exists"), IConsoleManager::Get().FindConsoleVariable(TEXT("r.DefaultFeature.AutoExposure.ExtendDefaultLuminanceRange")));
+
+			APostProcessVolume* Later = World->SpawnActor<APostProcessVolume>(APostProcessVolume::StaticClass(), FTransform::Identity, SpawnParams);
+			if (!TestNotNull(TEXT("spawned a second volume"), Later))
+				return;
+			ON_SCOPE_EXIT { if (IsValid(Later)) Later->Destroy(); };
+			Later->bEnabled = true;
+			Later->bUnbound = true;
+			Later->BlendWeight = 1.0f;
+			Later->Settings.bOverride_AutoExposureMaxBrightness = true;
+			Later->Settings.AutoExposureMaxBrightness = 1.0f;
+			TestFalse(TEXT("a later volume replaces the value"), HasOverexposingPostProcessVolume({ Volume, Later }, false));
+			TestTrue(TEXT("the last volume to set it decides"), HasOverexposingPostProcessVolume({ Later, Volume }, false));
+
+			Later->Settings.bOverride_AutoExposureMaxBrightness = false;
+			Later->Settings.bOverride_AutoExposureMethod = true;
+			Later->Settings.AutoExposureMethod = AEM_Manual;
+			TestFalse(TEXT("Manual exposure ignores Max Brightness"), HasOverexposingPostProcessVolume({ Volume, Later }, false));
 		});
 
 		// Locks the wire shape the sidecar's ProxyResponseMapper depends on: SuccessWithImage must carry
