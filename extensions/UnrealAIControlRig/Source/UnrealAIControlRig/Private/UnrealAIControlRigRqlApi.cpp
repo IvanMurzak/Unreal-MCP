@@ -11,7 +11,6 @@
 
 #include "Animation/AnimBlueprint.h"
 #include "Animation/Skeleton.h"
-#include "AssetToolsModule.h"
 #include "Components/SceneComponent.h"
 #include "ControlRig.h"
 #include "ControlRigBlueprintFactory.h"
@@ -19,8 +18,8 @@
 #include "Engine/SkeletalMesh.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
+#include "IAssetTools.h"
 #include "Misc/PackageName.h"
-#include "Modules/ModuleManager.h"
 #include "Rigs/RigHierarchy.h"
 #include "Rigs/RigHierarchyController.h"
 #include "Rigs/RigHierarchyDefines.h"
@@ -28,6 +27,7 @@
 #include "RigVMModel/RigVMGraph.h"
 #include "RigVMModel/RigVMPin.h"
 #include "RigVMModel/Nodes/RigVMUnitNode.h"
+#include "UObject/GCObjectScopeGuard.h"
 #include "UObject/UObjectIterator.h"
 #include "Units/Hierarchy/RigUnit_GetTransform.h"
 #include "Units/Hierarchy/RigUnit_WorldSpace.h"
@@ -172,11 +172,13 @@ UControlRigBlueprint* UUnrealAIControlRigRqlApi::CreateRig(const FString& Path, 
 			return UnrealMcpRql::Failed<UControlRigBlueprint*>(FString::Printf(TEXT("'%s' is not a SkeletalMesh or Skeleton asset (a character's mesh such as /Game/Characters/Mannequins/Meshes/SKM_Manny_Simple)"), *Mesh));
 	}
 	// Not UControlRigBlueprintFactory::CreateNewControlRigAsset: it makes the name unique first, and that step reads the
-	// name's trailing digits as an int32, so CR_F9672969617062 lands at CR_F0002147483647 and the path asked for stays
-	// empty. The check above already refuses a taken path, so the rig can take exactly the name asked for.
+	// name's trailing digits as an int32, so CR_F9672969617062 lands at CR_F0002147483647 and the path asked for stays empty.
+	// The check above refuses a taken path, so the rig can take exactly this name. Not UnrealMcpRql::CreateAsset either:
+	// on UE 5.8 the first AddUnit on its rig crashes the editor.
 	UControlRigBlueprintFactory* Factory = NewObject<UControlRigBlueprintFactory>();
+	FGCObjectScopeGuard FactoryGuard(Factory);
 	Factory->ParentClass = UControlRig::StaticClass();
-	UControlRigBlueprint* Rig = Cast<UControlRigBlueprint>(FModuleManager::LoadModuleChecked<FAssetToolsModule>(TEXT("AssetTools")).Get().CreateAsset(
+	UControlRigBlueprint* Rig = Cast<UControlRigBlueprint>(IAssetTools::Get().CreateAsset(
 		FPackageName::GetShortName(Package), FPackageName::GetLongPackagePath(Package), nullptr, Factory));
 	if (!Rig)
 		return UnrealMcpRql::Failed<UControlRigBlueprint*>(FString::Printf(TEXT("could not create a Control Rig at %s"), *Package));
