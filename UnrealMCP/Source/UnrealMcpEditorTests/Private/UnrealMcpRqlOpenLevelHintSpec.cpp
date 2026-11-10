@@ -48,6 +48,16 @@ void FUnrealMcpRqlOpenLevelHintSpec::Define()
 		const TSharedPtr<FJsonObject> Mutation = Exec(*this, TEXT(R"({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"OpenLevelSpecNoSuchActor"}]}},{"op":"set","assign":[{"target":{"path":["HiddenInEditor"]},"value":{"lit":true}}]}]})"), /*bMutate*/ true);
 		TestFalse(*FString::Printf(TEXT("no warning on a mutation (%s)"), *Codes(Mutation)), Codes(Mutation).Contains(TEXT("open-level-only")));
 	});
+
+	It("names the open level and OpenLevel when unreal.find finds no actor", [this]()
+	{
+		using namespace UnrealMcpRqlSpecHelpers;
+		// unreal.find("OpenLevelSpecNoSuchActor") | select Label
+		const TSharedPtr<FJsonObject> Missing = Exec(*this, TEXT(R"({"rql":"0.1","source":{"call":"find","on":{"path":["unreal"]},"args":[{"lit":"OpenLevelSpecNoSuchActor"}]},"stages":[{"op":"select","fields":[{"name":"Label","expr":{"path":["Label"]}}]}]})"));
+		const FString Said = Codes(Missing) + TEXT(" ") + Hints(Missing);
+		TestTrue(*FString::Printf(TEXT("not found, in the open level (%s)"), *Said), Said.Contains(TEXT("not-found")) && Said.Contains(TEXT("in the level open in the editor")));
+		TestTrue(*FString::Printf(TEXT("with how to open another (%s)"), *Said), Said.Contains(TEXT("editor | call OpenLevel(")));
+	});
 }
 
 #endif // WITH_DEV_AUTOMATION_TESTS

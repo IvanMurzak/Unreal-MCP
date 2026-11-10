@@ -28,18 +28,18 @@
 
 namespace UnrealMcpRqlSessionLocal
 {
-	/**
-	 * A failed or empty query whose plan touches the domain of an extension this editor does not have (niagaraSystems,
-	 * PCGGraph, gasAbilities, ...) names that extension and how to get it: on the first error's hint, or as a warning. Only a
-	 * read finds "nothing": a mutation's empty receipt (a set that kept every value) is not a missing domain.
-	 */
-	/** A read that found nothing: no rows, no items, or a count of 0. */
+	/** A read that found nothing: no rows, no items, or a count of 0 (a mutation's empty receipt is not "nothing found"). */
 	bool IsEmptyRead(const rql::QueryResult& Result, bool bMutation)
 	{
 		return !bMutation && Result.ok && ((Result.rows && Result.rows->empty()) || (Result.items && Result.items->empty())
 			|| (Result.has_value && Result.value.is_number() && Result.value.as_number() == 0));
 	}
 
+	/**
+	 * A failed or empty query whose plan touches the domain of an extension this editor does not have (niagaraSystems,
+	 * PCGGraph, gasAbilities, ...) names that extension and how to get it: on the first error's hint, or as a warning. Only a
+	 * read finds "nothing": a mutation's empty receipt (a set that kept every value) is not a missing domain.
+	 */
 	void AddExtensionHint(rql::QueryResult& Result, const FString& PlanText, bool bMutation)
 	{
 		rql::Diagnostic* Error = nullptr;
@@ -81,16 +81,9 @@ namespace UnrealMcpRqlSessionLocal
 			&& Source->segments[0].kind == rql::SegmentKind::Member && Source->segments[0].name == "actors";
 		if (!bActors || !IsEmptyRead(Result, bMutation))
 			return;
-		const UWorld* World = UnrealMcpRqlUtil::EditorWorld();
-		const FString Level = World ? World->GetOutermost()->GetName() : FString(TEXT("(none)"));
-		const int32 Sublevels = World ? FMath::Max(0, World->GetNumLevels() - 1) : 0;
-		const FString Loaded = Sublevels > 0 ? FString::Printf(TEXT(" (and its %d loaded sublevels)"), Sublevels) : FString();
-		const FString Message = FString::Printf(TEXT("nothing found in the level open in the editor, \"%s\"%s: actors covers only that level"),
-			*Level, *Loaded);
-		Result.diagnostics.push_back(rql::Diagnostic::warning("open-level-only", UnrealMcpRqlToStd(Message),
-			"if you mean another level, open it first with rql-mutate editor | call OpenLevel(\"/Game/Maps/Other\") (it replaces the open "
-			"level: editor | call SaveLevel() first if it has unsaved changes), then query again; rql-query unreal.assets(\"World\") | select "
-			"Path lists the project's levels"));
+		const FString Message = FString::Printf(TEXT("nothing found in the level open in the editor, \"%s\": actors covers only that level"),
+			*UnrealMcpRqlUtil::OpenLevelPath());
+		Result.diagnostics.push_back(rql::Diagnostic::warning("open-level-only", UnrealMcpRqlToStd(Message), UnrealMcpRqlGuide::OpenLevelHint()));
 	}
 
 	/** Objects whose changes belong to the project (not class defaults of compiled-in classes, not transient helpers). */

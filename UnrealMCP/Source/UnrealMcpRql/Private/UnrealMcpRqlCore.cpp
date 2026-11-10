@@ -4,6 +4,7 @@
 #include "UnrealMcpRqlSession.h"
 #include "UnrealMcpRqlEditorApi.h"
 #include "UnrealMcpRqlSources.h"
+#include "UnrealMcpRqlGuide.h"
 #include "UnrealMcpRqlUtil.h"
 #include "IUnrealMcpRqlModule.h"
 #include "Tools/UnrealMcpLogCollector.h"
@@ -47,6 +48,12 @@
 UWorld* UnrealMcpRqlUtil::EditorWorld()
 {
 	return FUnrealMcpObjectRef::GetEditorWorld();
+}
+
+FString UnrealMcpRqlUtil::OpenLevelPath()
+{
+	const UWorld* World = EditorWorld();
+	return World ? World->GetOutermost()->GetName() : FString(TEXT("(none)"));
 }
 
 void UnrealMcpRqlUtil::MakeLevelCurrent(ULevel* Level)
@@ -980,7 +987,8 @@ namespace UnrealMcpRqlCoreLocal
 			return ErrorValue("type-mismatch", TEXT("unreal.find(label) expects an actor label, name or path"));
 		const FString Key = UnrealMcpRqlFromStd(Args[0].as_string());
 		AActor* Actor = FUnrealMcpObjectRef::ResolveActor(Key);
-		return Actor ? Types.WrapObject(Actor) : ErrorValue("not-found", FString::Printf(TEXT("no actor with the label, name or path '%s'"), *Key));
+		return Actor ? Types.WrapObject(Actor) : ErrorValue("not-found", FString::Printf(TEXT("no actor with the label, name or path '%s' in the level open in the editor, \"%s\"; %s"),
+			*Key, *OpenLevelPath(), *UnrealMcpRqlFromStd(UnrealMcpRqlGuide::OpenLevelHint())));
 	}
 
 	/**
@@ -1252,7 +1260,7 @@ void UnrealMcpRqlConfigureCore(FUnrealMcpRqlSession& Session)
 	}
 
 	const rql::TypeDescriptor* ActorType = T.ForClass(AActor::StaticClass());
-	Session.AddSource(TEXT("actors"), ActorType, /*bList*/ true, TEXT("every actor of the level open in the editor and its loaded sublevels (hidden ones included); another map's actors only after editor | call OpenLevel(\"/Game/Maps/Other\") (rql-mutate)"), [Types]()
+	Session.AddSource(TEXT("actors"), ActorType, /*bList*/ true, TEXT("every actor of the level open in the editor and its loaded sublevels, hidden ones included (another map: editor | call OpenLevel first)"), [Types]()
 	{
 		TArray<UObject*> Actors;
 		if (UWorld* World = EditorWorld())

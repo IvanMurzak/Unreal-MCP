@@ -34,6 +34,14 @@ namespace UnrealMcpRqlGuide
 		return Rules.c_str();
 	}
 
+	/** How to read another level than the open one (the open-level-only warning, unreal.find's not-found). */
+	inline const char* OpenLevelHint()
+	{
+		return "if you mean another level, open it first with rql-mutate editor | call OpenLevel(\"/Game/Maps/Other\") (it replaces the open "
+			"level: editor | call SaveLevel() first if it has unsaved changes), then query again; rql-query unreal.assets(\"World\") | select "
+			"Path lists the project's levels";
+	}
+
 	inline const char* QueryBlurb()
 	{
 		return "Query the live Unreal Editor world (actors, components, assets, levels) with RQL in ONE call: filter, project, "
