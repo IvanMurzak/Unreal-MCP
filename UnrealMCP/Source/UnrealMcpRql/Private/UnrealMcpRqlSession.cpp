@@ -14,6 +14,7 @@
 #include "EngineUtils.h"
 #include "Engine/World.h"
 #include "UnrealMcpRqlTools.h"
+#include "UnrealMcpRqlUtil.h"
 
 #include "Dom/JsonObject.h"
 #include "GameFramework/Actor.h"
@@ -32,6 +33,13 @@ namespace UnrealMcpRqlSessionLocal
 	 * PCGGraph, gasAbilities, ...) names that extension and how to get it: on the first error's hint, or as a warning. Only a
 	 * read finds "nothing": a mutation's empty receipt (a set that kept every value) is not a missing domain.
 	 */
+	/** A read that found nothing: no rows, no items, or a count of 0. */
+	bool IsEmptyRead(const rql::QueryResult& Result, bool bMutation)
+	{
+		return !bMutation && Result.ok && ((Result.rows && Result.rows->empty()) || (Result.items && Result.items->empty())
+			|| (Result.has_value && Result.value.is_number() && Result.value.as_number() == 0));
+	}
+
 	void AddExtensionHint(rql::QueryResult& Result, const FString& PlanText, bool bMutation)
 	{
 		rql::Diagnostic* Error = nullptr;
@@ -43,9 +51,7 @@ namespace UnrealMcpRqlSessionLocal
 				break;
 			}
 		}
-		const bool bEmpty = !bMutation && Result.ok && ((Result.rows && Result.rows->empty()) || (Result.items && Result.items->empty())
-			|| (Result.has_value && Result.value.is_number() && Result.value.as_number() == 0));
-		if (!Error && !bEmpty)
+		if (!Error && !IsEmptyRead(Result, bMutation))
 			return;
 		const TArray<FUnrealMcpMissingExtension> Candidates = UnrealMcpAvailableExtensions::Missing();
 		const FUnrealMcpMissingExtension* Match = UnrealMcpAvailableExtensions::MatchDomain(PlanText, Candidates);
@@ -61,6 +67,30 @@ namespace UnrealMcpRqlSessionLocal
 		if (Error->message.find(Id) != std::string::npos || Error->hint.find(Id) != std::string::npos)
 			return; // the error already names it (the Enhanced Input node hint of Blueprint graphs)
 		Error->hint = Error->hint.empty() ? Hint : Error->hint + "; " + Hint;
+	}
+
+	/**
+	 * A read of actors that found nothing names the level it searched: actors covers only the level open in the editor,
+	 * so an agent asking about another map gets nothing (seen in an eval, which then fell back to Python). The hint says
+	 * how to open the other level.
+	 */
+	void AddOpenLevelHint(rql::QueryResult& Result, const rql::QueryPlan& Plan, bool bMutation)
+	{
+		const rql::ExprPtr& Source = Plan.source;
+		const bool bActors = Source && Source->kind == rql::ExprKind::Path && !Source->on && !Source->segments.empty()
+			&& Source->segments[0].kind == rql::SegmentKind::Member && Source->segments[0].name == "actors";
+		if (!bActors || !IsEmptyRead(Result, bMutation))
+			return;
+		const UWorld* World = UnrealMcpRqlUtil::EditorWorld();
+		const FString Level = World ? World->GetOutermost()->GetName() : FString(TEXT("(none)"));
+		const int32 Sublevels = World ? FMath::Max(0, World->GetNumLevels() - 1) : 0;
+		const FString Loaded = Sublevels > 0 ? FString::Printf(TEXT(" (and its %d loaded sublevels)"), Sublevels) : FString();
+		const FString Message = FString::Printf(TEXT("nothing found in the level open in the editor, \"%s\"%s: actors covers only that level"),
+			*Level, *Loaded);
+		Result.diagnostics.push_back(rql::Diagnostic::warning("open-level-only", UnrealMcpRqlToStd(Message),
+			"if you mean another level, open it first with rql-mutate editor | call OpenLevel(\"/Game/Maps/Other\") (it replaces the open "
+			"level: editor | call SaveLevel() first if it has unsaved changes), then query again; rql-query unreal.assets(\"World\") | select "
+			"Path lists the project's levels"));
 	}
 
 	/** Objects whose changes belong to the project (not class defaults of compiled-in classes, not transient helpers). */
@@ -664,6 +694,7 @@ FString FUnrealMcpRqlSession::Execute(const FString& PlanJson, bool bAllowMutati
 	CloseTransaction();
 	LiteralObjects.Reset(); // written by now (the undo buffer or their owner holds them), or garbage
 	UnrealMcpRqlSessionLocal::AddExtensionHint(Result, PlanJson, bAllowMutation);
+	UnrealMcpRqlSessionLocal::AddOpenLevelHint(Result, Plan, bAllowMutation);
 	for (rql::Diagnostic& Warning : Types().TakeWarnings())
 		Result.diagnostics.push_back(std::move(Warning));
 	bOutOk = Result.ok;

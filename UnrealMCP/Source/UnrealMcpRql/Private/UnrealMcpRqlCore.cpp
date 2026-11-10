@@ -1252,7 +1252,7 @@ void UnrealMcpRqlConfigureCore(FUnrealMcpRqlSession& Session)
 	}
 
 	const rql::TypeDescriptor* ActorType = T.ForClass(AActor::StaticClass());
-	Session.AddSource(TEXT("actors"), ActorType, /*bList*/ true, TEXT("every actor of the editor world's loaded levels (hidden ones included)"), [Types]()
+	Session.AddSource(TEXT("actors"), ActorType, /*bList*/ true, TEXT("every actor of the level open in the editor and its loaded sublevels (hidden ones included); another map's actors only after editor | call OpenLevel(\"/Game/Maps/Other\") (rql-mutate)"), [Types]()
 	{
 		TArray<UObject*> Actors;
 		if (UWorld* World = EditorWorld())
