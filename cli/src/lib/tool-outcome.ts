@@ -1,0 +1,55 @@
+// Map a tool call's outcome to the shared exit-code contract (utils/exit-codes.ts). Pure.
+
+import type { EditorSessionErrorReason } from '@baizor/gamedev-cli-core';
+import { modalDialogInToolError } from './editor-modal.js';
+import { toolErrorText } from './exec.js';
+import { FAILURE } from '../utils/output.js';
+import type { RunToolFailure } from './types.js';
+
+export type FailureKind = (typeof FAILURE)[keyof typeof FAILURE];
+
+/** Exit / error code of a failed tool call. */
+export function classifyToolFailure(failure: RunToolFailure): FailureKind {
+  switch (failure.reason) {
+    case 'invalid-input':
+      return FAILURE.usage;
+    case 'connection-refused':
+    case 'connection-reset':
+    case 'network-error':
+      return FAILURE.unreachable;
+    case 'timeout':
+      return FAILURE.timeout;
+    case 'http-error':
+      if (failure.httpStatus === 503) return FAILURE.busy;
+      if (failure.httpStatus === 404) return FAILURE.notFound; // no such tool
+      if (modalDialogInToolError(toolErrorText(failure)) !== undefined) return FAILURE.awaitingInput;
+      if (/no connected clients/i.test(failure.message)) return FAILURE.unreachable;
+      return FAILURE.toolFailed;
+    default:
+      return FAILURE.error;
+  }
+}
+
+/**
+ * The error text of a tool response that reports `status: "error"` (the call itself succeeded over HTTP), else
+ * `undefined`.
+ */
+export function toolResponseError(data: unknown): string | undefined {
+  const response = data as { status?: unknown; content?: Array<{ type?: string; text?: unknown }>; error?: unknown } | null;
+  if (response?.status !== 'error') return undefined;
+  const texts = (Array.isArray(response.content) ? response.content : [])
+    .filter((c) => c?.type === 'text' && typeof c.text === 'string')
+    .map((c) => c.text as string);
+  if (texts.length > 0) return texts.join('\n');
+  return typeof response.error === 'string' && response.error ? response.error : 'The tool reported an error.';
+}
+
+/** Exit / error code of a tool response with `status: "error"`. */
+export function classifyToolResponseError(text: string): FailureKind {
+  return modalDialogInToolError(text) !== undefined ? FAILURE.awaitingInput : FAILURE.toolFailed;
+}
+
+/** Exit / error code of a session that could not provide a ready editor. */
+export function classifySessionFailure(reason: EditorSessionErrorReason | undefined): FailureKind {
+  return reason === 'lock-busy' ? FAILURE.busy : FAILURE.unreachable;
+}

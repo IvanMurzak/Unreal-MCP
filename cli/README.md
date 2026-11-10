@@ -103,14 +103,41 @@ unreal-mcp-cli status
 | `configure` | Write `UNREAL_MCP_*` into `<project>/.env` and gitignore `.env` (§8) |
 | `setup-mcp <agent>` | Write an MCP client config snippet (claude-code, cursor, vscode-copilot). Over the default `http` transport it points the agent at the **project-pinned** cloud URL `<base>/mcp/p/<pin>` (so the agent routes to *this* project's editor); pass `--no-pin` for the bare `<base>/mcp` URL. When this machine is signed in, a Cloud config carries `Authorization: Bearer agd_pk_…` (this project's key, reused or minted) for every agent; `--oauth` writes a URL-only config instead (the agent runs its own login), `--regenerate-key` mints a new key and revokes the old one, and an explicit `--token` wins over both. With `--transport stdio` it instead downloads the pinned shared [`gamedev-mcp-server`](https://github.com/IvanMurzak/GameDev-MCP-Server) release into `<project>/Intermediate/UnrealMCP/server/<rid>/` (skipped when `UNREAL_MCP_SERVER_PATH` points at a local build) |
 | `login` | OAuth device-code auth against ai-game.dev. Signs in once per machine into the shared machine credential store (`~/.ai-game-dev/credentials.json`): the default mints the account (agent) credential and derives the tool credential from it. `--tools-only` mints a tool credential only (CI/automation runners — the desktop App cannot pick it up); `--yes` confirms switching the machine to a different account; `--path <dir>` writes a project-local `.env` instead |
-| `status` | Report project + plugin + connection + live reachability |
-| `wait-for-ready` | Block until the project's MCP server responds to a ping |
-| `run-tool <tool>` | Invoke an MCP tool over the local HTTP path |
-| `run-system-tool <tool>` | Invoke a system tool over the local HTTP path |
+| `status` | Report project + plugin + running editor + connection + live reachability. With `--path`, exits **18** when the editor log shows a modal dialog blocking its tool calls (the plugin's `Editor blocked by modal dialog` line, written once a tool call waited on it) |
+| `wait-for-ready` | Block until the project's MCP server responds to a ping (exit 14 on timeout) |
+| `run-tool <tool>` | Invoke an MCP tool over the local HTTP path. When no editor answers, starts a headless one like `exec` (a running editor, yours or the CLI's, is reused and never closed); `--no-start` disables that, `--once` closes the editor afterwards **only** if this call started it, `--nullrhi` starts it without a GPU. A response with `status: "error"` exits 6 |
+| `run-system-tool <tool>` | Invoke a system tool over the local HTTP path (same options as `run-tool`) |
+| `compile [path]` | Build the editor target with UnrealBuildTool, without an editor, and print `file:line:col` diagnostics (structured errors and warnings with `--format json`). `--strict` fails on warnings. Refuses (exit 6, `PROJECT_OPEN`) while an editor has the project open, so it never fights Live Coding / hot reload |
+| `test [path]` | Run Automation tests headless (`UnrealEditor-Cmd -nullrhi -unattended -ExecCmds="Automation RunTests <filter>;Quit" -ReportExportPath=<dir>`), building the editor target first when needed. The verdict comes from the report's `index.json`, never the editor's exit code: exit 0 pass, 8 failures, 6 no verdict (crash, build failure, no report), 14 `--timeout <seconds>` (the editor tree is stopped). `--filter` (default `Project`), `--output <dir>`, `--junit-output <file>`, `--format text\|json\|ndjson\|github` (`github` = `::error file=..,line=..::` annotations). A filter that matches nothing is a warning. Refuses while an editor has the project open (use `run-tool` there) |
+| `commands` | Print a manifest of every command (arguments, options, defaults) and the exit codes, generated from the command tree (`--format json` for agents) |
 | `bootstrap-local [path]` | Build the bridge from source into `Intermediate/UnrealMCP/` (§6) — the MCP server is downloaded from GameDev-MCP-Server releases, not built here |
 | `update [path]` | Re-sync the installed plugin from a local source or the version-matched GitHub source asset. On a version change it **auto-cleans** the stale UE C++ build cache (`Intermediate/` + C++ `Binaries/`) so the editor recompiles cleanly — the bundled sidecar bridge under `Binaries/ThirdParty/` is refreshed from `Source/ThirdParty/` when the release source asset ships it, otherwise preserved, junction (dev) installs are never cleaned, and `--no-clean` opts out |
 | `install-engine [version]` | Detect installed engines from `LauncherInstalled.dat`; link to the Epic launcher for missing versions (never installs directly) |
 | `setup-skills` | Write a Claude-Code skill stub that drives the project's MCP server |
+
+## Exit codes and machine output
+
+Shared with `unity-mcp-cli` and `godot-cli` (`unreal-mcp-cli commands` prints the table):
+
+| Code | Meaning |
+| --- | --- |
+| 0 | Success |
+| 1 | Generic or unclassified error |
+| 2 | Usage error: bad flag or argument (`--help` / `--version` exit 0). `update --check` keeps its own 2 = outdated |
+| 6 | The command ran and failed (tool error, compilation errors, test run without a verdict, project open) |
+| 7 | The editor or MCP server could not be started or reached |
+| 8 | The test run completed with failing tests |
+| 14 | Timed out |
+| 17 | Busy: the server answered 503 (or another CLI holds the editor startup lock) |
+| 18 | The editor is blocked by a modal dialog |
+
+`--format text|json|ndjson` (default `text`) on `run-tool`, `run-system-tool`, `exec`, `status`, `wait-for-ready`,
+`compile`, `test` and `commands`. `json`: stdout carries exactly one envelope
+`{"success","command","data","errors":[{"code","message"}],"warnings"}`; `ndjson`: progress lines
+`{"type":"progress",...}` on stderr and the envelope as one line on stdout. In both, logs go to stderr. Error codes:
+`USAGE`, `TOOL_FAILED`, `UNREACHABLE`, `TIMEOUT`, `BUSY`, `AWAITING_INPUT`, `TESTS_FAILED`, `TEST_RUN_ERROR`,
+`COMPILATION_FAILED`, `PROJECT_OPEN`, `NOT_FOUND`. `exec --raw` is unchanged. `--nullrhi` (on `open --headless`,
+`exec`, `run-tool`) starts a headless editor without a GPU: screenshots and rendering tools degrade.
 
 ## Engine resolution
 

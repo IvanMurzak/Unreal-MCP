@@ -2,6 +2,15 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
+import { editorBinaryPath } from '../src/utils/engine.js';
+
+/** A fake engine root at `dir` holding only the editor binary (what engine resolution checks). */
+export function writeFakeEngine(dir: string, platform: NodeJS.Platform = process.platform): string {
+  const editor = editorBinaryPath(dir, platform);
+  fs.mkdirSync(path.dirname(editor), { recursive: true });
+  fs.writeFileSync(editor, '');
+  return dir;
+}
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 

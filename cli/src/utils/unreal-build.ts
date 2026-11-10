@@ -82,21 +82,37 @@ export function projectHasNativeCode(projectDir: string): boolean {
 }
 
 export function runUnrealBuildStep(step: UbtBuildStep): Promise<void> {
-  return new Promise<void>((resolve, reject) => {
+  const diagnostics = createUnrealBuildDiagnostics();
+  return spawnUnrealBuild(step, (line) => diagnostics.line(line)).then(({ code, tail }) => {
+    if (code !== 0) throw new Error(diagnostics.message(code, tail));
+  });
+}
+
+/** How a UBT run ended: its exit code and the last 8 KB of output. */
+export interface UnrealBuildExit {
+  code: number | null;
+  tail: string;
+}
+
+/**
+ * Run UBT and hand every output line (stdout and stderr, without the line break) to `onLine`. Resolves with the exit
+ * code (never rejects on a non-zero one); rejects when UBT cannot be started.
+ */
+export function spawnUnrealBuild(step: UbtBuildStep, onLine: (line: string) => void): Promise<UnrealBuildExit> {
+  return new Promise<UnrealBuildExit>((resolve, reject) => {
     const child = spawn(step.ubtPath, step.args, { stdio: ['ignore', 'pipe', 'pipe'] });
-    const diagnostics = createUnrealBuildDiagnostics();
-    let combined = '';
+    let tail = '';
     const flushers: Array<() => void> = [];
     const reader = (): ((chunk: Buffer | string) => void) => {
       let pending = '';
-      flushers.push(() => { if (pending) diagnostics.line(pending); pending = ''; });
+      flushers.push(() => { if (pending) onLine(pending); pending = ''; });
       return (chunk) => {
         const text = chunk.toString();
-        combined = (combined + text).slice(-8192);
+        tail = (tail + text).slice(-8192);
         const lines = (pending + text).split(/[\r\n]/);
         // Keep the START of an over-long line: a diagnostic's `file:line: error:` prefix comes first.
         pending = (lines.pop() ?? '').slice(0, 8192);
-        for (const line of lines) diagnostics.line(line);
+        for (const line of lines) onLine(line);
       };
     };
     // Decode as UTF-8 across chunk boundaries (a split multibyte character would otherwise corrupt a path).
@@ -106,9 +122,8 @@ export function runUnrealBuildStep(step: UbtBuildStep): Promise<void> {
     child.stderr?.on('data', reader());
     child.on('error', reject);
     child.on('close', (code) => {
-      if (code === 0) return resolve();
       for (const flush of flushers) flush();
-      reject(new Error(diagnostics.message(code, combined)));
+      resolve({ code, tail });
     });
   });
 }

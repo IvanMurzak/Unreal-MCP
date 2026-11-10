@@ -36,7 +36,7 @@ describe('run-tool command input', () => {
     const { cli, invoke } = command();
     await cli.parseAsync(['node', 'cli', 'example', '--input', '{}', '--input-file', 'missing.json']);
     expect(invoke).not.toHaveBeenCalled();
-    expect(process.exitCode).toBe(1);
+    expect(process.exitCode).toBe(2);
     expect(ui.error).toHaveBeenCalledWith(expect.stringContaining('not both'));
   });
 
@@ -46,6 +46,6 @@ describe('run-tool command input', () => {
     const { cli, invoke } = command();
     await cli.parseAsync(['node', 'cli', 'example', '--input-file', file]);
     expect(invoke).not.toHaveBeenCalled();
-    expect(process.exitCode).toBe(1);
+    expect(process.exitCode).toBe(2);
   });
 });

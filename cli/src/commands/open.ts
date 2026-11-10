@@ -11,6 +11,7 @@ export const openCommand = new Command('open')
   .description('Launch the Unreal Editor for a project, wiring MCP connection env vars and pre-building native modules on desktop platforms when needed')
   .argument('[path]', 'Unreal project directory (defaults to cwd)')
   .option('--headless', 'Start a windowless editor (-RenderOffscreen) owned by the CLI and wait until it is ready; a running editor is reused')
+  .option('--nullrhi', 'With --headless: start the editor with -nullrhi (no GPU needed; screenshots and rendering tools degrade)')
   .option('--url <url>', 'With --headless / --idle: the local MCP server URL the editor serves (default: the local port of the project)')
   .option('--idle <seconds>', `A CLI-owned editor saves and quits after this many seconds without tool calls (0 = never; default ${DEFAULT_SESSION_IDLE_SECONDS} with --headless)`)
   .option('--engine-root <dir>', 'Explicit engine install root (source builds)')
@@ -131,6 +132,7 @@ async function openSession(pathArg: string | undefined, opts: Record<string, unk
     idleSeconds,
     engineRoot: opts.engineRoot as string | undefined,
     build: opts.build !== false,
+    nullrhi: opts.nullrhi === true,
     noCache: opts.cache === false,
     url: opts.url as string | undefined,
     token: opts.token as string | undefined,

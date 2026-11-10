@@ -9,6 +9,8 @@ import { readUProject } from '../utils/project.js';
 import { resolveConnection } from '../utils/config.js';
 import { probePing } from '../utils/probe.js';
 import { asError } from '../utils/error.js';
+import { blockingDialogOfProject } from './editor-modal.js';
+import { runningProjectEditors } from './project-engine.js';
 import type { StatusOptions, StatusReport } from './types.js';
 
 /**
@@ -43,6 +45,12 @@ export async function getStatus(opts: StatusOptions = {}): Promise<StatusReport>
         engineAssociation: uproject.engineAssociation || '(none)',
         pluginInstalled,
       };
+      if (opts.detectEditor !== false) {
+        const pids = runningProjectEditors(uproject, opts.listProcessesImpl);
+        // A new editor starts a new log: the log speaks for a dialog only while an editor runs.
+        const modalDialog = pids.length > 0 ? blockingDialogOfProject(uproject, opts.readLogTail) : undefined;
+        report.editor = { running: pids.length > 0, pids, ...(modalDialog !== undefined ? { modalDialog } : {}) };
+      }
     }
   }
 

@@ -43,6 +43,8 @@ export interface ExecPythonOptions {
   token?: string;
   engineRoot?: string;
   build?: boolean;
+  /** Start a headless editor with `-nullrhi` (no GPU). */
+  nullrhi?: boolean;
   onStatus?: (message: string) => void;
   /** Test seams: session hooks and the tool call. */
   sessionOptions?: Partial<UnrealSessionOptions>;
@@ -91,6 +93,7 @@ export async function execPython(options: ExecPythonOptions): Promise<ExecPython
       readyTimeoutMs: options.readyTimeoutMs,
       engineRoot: options.engineRoot,
       build: options.build,
+      nullrhi: options.nullrhi,
       onStatus: options.onStatus,
       ...options.sessionOptions,
     });

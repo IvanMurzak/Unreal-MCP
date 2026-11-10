@@ -55,6 +55,16 @@ export {
   unknownExtensionMessage,
 } from './utils/extensions-catalog.js';
 export { runTool, runSystemTool } from './lib/run-tool.js';
+export { runToolWithSession } from './lib/run-tool-session.js';
+export type { RunToolSessionOptions, RunToolSessionResult } from './lib/run-tool-session.js';
+export { compileProject } from './lib/compile.js';
+export type { CompileOptions, CompileResult, CompileReport, CompileFailureReason } from './lib/compile.js';
+export { runAutomationTests } from './lib/run-tests.js';
+export type { RunTestsOptions, RunTestsResult } from './lib/run-tests.js';
+export { parseAutomationReport, toJUnitXml, toGitHubAnnotations } from './utils/automation-report.js';
+export type { AutomationSummary, AutomationTest, AutomationEntry } from './utils/automation-report.js';
+export type { CompilerDiagnostic } from './utils/compiler-diagnostics.js';
+export { ExitCode, EXIT_CODE_DESCRIPTIONS } from './utils/exit-codes.js';
 export { setupMcp, listAgentIds } from './lib/setup-mcp.js';
 export {
   agentRegistry,
