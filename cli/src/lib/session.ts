@@ -130,6 +130,8 @@ export interface UnrealSessionOptions {
   engineRoot?: string;
   /** Compile native modules before a launch when needed. Default `true`. */
   build?: boolean;
+  /** Start a headless editor with `-nullrhi` (no GPU; screenshots and rendering tools degrade). */
+  nullrhi?: boolean;
   noCache?: boolean;
   onStatus?: (message: string) => void;
   // --- Test seams (defaults wire to the real system) ---
@@ -192,7 +194,12 @@ export function createUnrealSession(options: UnrealSessionOptions): EditorSessio
     return ops.requestClose(pid);
   };
 
-  const editor: EditorLaunchSpec = { ...unrealAdapter.editor!, requestClose, findRunningEditor };
+  const baseArgs = unrealAdapter.editor!.args;
+  const args = (root: string, mode: EditorSessionMode): string[] => [
+    ...baseArgs(root, mode),
+    ...(options.nullrhi && mode === 'headless' ? ['-nullrhi'] : []),
+  ];
+  const editor: EditorLaunchSpec = { ...unrealAdapter.editor!, args, requestClose, findRunningEditor };
   const adapter: EngineAdapter = { ...unrealAdapter, editor };
 
   let engine: Promise<UnrealEngine> | undefined;

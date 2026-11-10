@@ -5,12 +5,13 @@ import { openEditorSession, prepareGuiOpen } from '../lib/session.js';
 import type { AuthOption, McpTransport } from '../lib/types.js';
 import { pidSuffix } from '../lib/progress.js';
 import * as ui from '../utils/ui.js';
-import { parseIntFlag } from '../utils/flags.js';
+import { parseWholeNumber } from '../utils/output.js';
 
 export const openCommand = new Command('open')
   .description('Launch the Unreal Editor for a project, wiring MCP connection env vars and pre-building native modules on desktop platforms when needed')
   .argument('[path]', 'Unreal project directory (defaults to cwd)')
   .option('--headless', 'Start a windowless editor (-RenderOffscreen) owned by the CLI and wait until it is ready; a running editor is reused')
+  .option('--nullrhi', 'With --headless: start the editor with -nullrhi (no GPU needed; screenshots and rendering tools degrade)')
   .option('--url <url>', 'With --headless / --idle: the local MCP server URL the editor serves (default: the local port of the project)')
   .option('--idle <seconds>', `A CLI-owned editor saves and quits after this many seconds without tool calls (0 = never; default ${DEFAULT_SESSION_IDLE_SECONDS} with --headless)`)
   .option('--engine-root <dir>', 'Explicit engine install root (source builds)')
@@ -120,7 +121,7 @@ async function stopOwnHeadlessEditor(pathArg: string | undefined, opts: Record<s
 }
 
 async function openSession(pathArg: string | undefined, opts: Record<string, unknown>): Promise<void> {
-  const idleSeconds = opts.idle === undefined ? undefined : parseIntFlag(opts.idle as string, '--idle', { min: 0 });
+  const idleSeconds = opts.idle === undefined ? undefined : parseWholeNumber(opts.idle as string, '--idle', 0);
   const mode = opts.headless === true ? 'headless' : 'window';
   // `open --idle` asks for a window: a warm headless editor would otherwise be reused and no window would open.
   if (mode === 'window' && !(await stopOwnHeadlessEditor(pathArg, opts))) return;
@@ -131,6 +132,7 @@ async function openSession(pathArg: string | undefined, opts: Record<string, unk
     idleSeconds,
     engineRoot: opts.engineRoot as string | undefined,
     build: opts.build !== false,
+    nullrhi: opts.nullrhi === true,
     noCache: opts.cache === false,
     url: opts.url as string | undefined,
     token: opts.token as string | undefined,
@@ -151,5 +153,5 @@ async function openSession(pathArg: string | undefined, opts: Record<string, unk
 }
 
 function parsePositiveIntFlag(rawValue: string | undefined, flagName: string, defaultValue: number): number {
-  return rawValue === undefined ? defaultValue : parseIntFlag(rawValue, flagName, { min: 1 });
+  return rawValue === undefined ? defaultValue : parseWholeNumber(rawValue, flagName, 1);
 }

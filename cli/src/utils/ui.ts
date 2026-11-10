@@ -3,6 +3,19 @@ import yoctoSpinner, { type Spinner } from 'yocto-spinner';
 import type { Command, Help } from 'commander';
 
 let verboseEnabled = false;
+/** Machine output (`--format json|ndjson`): stdout carries only the result, so logs go to stderr, plain. */
+let stdoutReserved = false;
+
+/** Reserve stdout for machine output: every log line, heading and spinner goes to stderr without colour. */
+export function reserveStdout(reserved: boolean): void {
+  stdoutReserved = reserved;
+}
+
+/** A log line: stdout normally, stderr while stdout is reserved for machine output. */
+function log(message: string): void {
+  if (stdoutReserved) console.error(message);
+  else console.log(message);
+}
 
 export function setVerbose(enabled: boolean): void {
   verboseEnabled = enabled;
@@ -11,14 +24,14 @@ export function setVerbose(enabled: boolean): void {
 export function verbose(message: string): void {
   if (!verboseEnabled) return;
   if (isTTY()) {
-    console.log(chalk.dim(`[verbose] ${message}`));
+    log(chalk.dim(`[verbose] ${message}`));
   } else {
-    console.log(`[verbose] ${message}`);
+    log(`[verbose] ${message}`);
   }
 }
 
 function isTTY(): boolean {
-  return !!process.stdout.isTTY;
+  return !stdoutReserved && !!process.stdout.isTTY;
 }
 
 function stripAnsi(str: string): string {
@@ -109,25 +122,25 @@ export function configureStyledHelp(cmd: Command, appVersion?: string): Command 
 
 export function info(message: string): void {
   if (isTTY()) {
-    console.log(`${chalk.blue('ℹ')}  ${message}`);
+    log(`${chalk.blue('ℹ')}  ${message}`);
   } else {
-    console.log(`INFO: ${message}`);
+    log(`INFO: ${message}`);
   }
 }
 
 export function success(message: string): void {
   if (isTTY()) {
-    console.log(`${chalk.green('✔')}  ${message}`);
+    log(`${chalk.green('✔')}  ${message}`);
   } else {
-    console.log(`SUCCESS: ${message}`);
+    log(`SUCCESS: ${message}`);
   }
 }
 
 export function warn(message: string): void {
   if (isTTY()) {
-    console.log(`${chalk.yellow('⚠')}  ${chalk.yellow(message)}`);
+    log(`${chalk.yellow('⚠')}  ${chalk.yellow(message)}`);
   } else {
-    console.log(`WARN: ${message}`);
+    log(`WARN: ${message}`);
   }
 }
 
@@ -140,20 +153,20 @@ export function error(message: string): void {
 }
 
 export function heading(message: string): void {
-  console.log(`\n${chalk.bold.cyan(message)}`);
+  log(`\n${chalk.bold.cyan(message)}`);
 }
 
 export function label(key: string, value: string): void {
-  console.log(`  ${chalk.bold(`${key}:`)} ${value}`);
+  log(`  ${chalk.bold(`${key}:`)} ${value}`);
 }
 
 function createNoOpSpinner(text: string): Spinner {
-  console.log(text);
+  log(text);
   const self: Spinner = {
     start: () => self,
     stop: () => self,
     success: (msg?: string) => {
-      if (msg) console.log(`SUCCESS: ${msg}`);
+      if (msg) log(`SUCCESS: ${msg}`);
       return self;
     },
     error: (msg?: string) => {
@@ -161,11 +174,11 @@ function createNoOpSpinner(text: string): Spinner {
       return self;
     },
     warning: (msg?: string) => {
-      if (msg) console.log(`WARN: ${msg}`);
+      if (msg) log(`WARN: ${msg}`);
       return self;
     },
     info: (msg?: string) => {
-      if (msg) console.log(`INFO: ${msg}`);
+      if (msg) log(`INFO: ${msg}`);
       return self;
     },
     clear: () => self,

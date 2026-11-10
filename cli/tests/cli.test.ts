@@ -53,14 +53,17 @@ const ALL_COMMANDS = [
   'wait-for-ready',
   'run-tool',
   'run-system-tool',
+  'compile',
+  'test',
   'bootstrap-local',
   'update',
   'install-engine',
   'setup-skills',
+  'commands',
 ];
 
 describe('CLI integration', () => {
-  it('--help lists every one of the 18 commands', () => {
+  it('--help lists every one of the 21 commands', () => {
     const { stdout, exitCode } = runCli(['--help']);
     expect(exitCode).toBe(0);
     expect(stdout).toContain('unreal-mcp-cli');
@@ -154,4 +157,66 @@ describe('CLI integration', () => {
     expect(exitCode).toBe(1);
     expect(stdout).toMatch(/enrollment failed/i);
   }, 20000);
+});
+
+describe('CLI contract: exit codes, --format, commands', () => {
+  function runSplit(args: string[]): { stdout: string; stderr: string; exitCode: number } {
+    try {
+      const stdout = execFileSync('node', [CLI_PATH, ...args], { encoding: 'utf-8', timeout: 20000, input: '', stdio: ['pipe', 'pipe', 'pipe'] });
+      return { stdout, stderr: '', exitCode: 0 };
+    } catch (err: unknown) {
+      const e = err as { stdout?: string; stderr?: string; status?: number };
+      return { stdout: e.stdout ?? '', stderr: e.stderr ?? '', exitCode: e.status ?? 1 };
+    }
+  }
+
+  it('commands --format json prints the manifest generated from the command tree', () => {
+    const { stdout, exitCode } = runSplit(['commands', '--format', 'json']);
+    expect(exitCode).toBe(0);
+    const envelope = JSON.parse(stdout);
+    expect(envelope).toMatchObject({ success: true, command: 'commands', errors: [], warnings: [] });
+    const names = envelope.data.commands.map((c: { name: string }) => c.name);
+    expect(names).toEqual(expect.arrayContaining(ALL_COMMANDS));
+    const runTool = envelope.data.commands.find((c: { name: string }) => c.name === 'run-tool');
+    expect(runTool.arguments).toEqual([{ name: 'tool', required: true, variadic: false, description: 'Name of the tool to invoke' }]);
+    expect(runTool.options.map((o: { flags: string }) => o.flags)).toEqual(expect.arrayContaining(['--no-start', '--once', '--format <format>']));
+    expect(envelope.data.exitCodes).toEqual(expect.arrayContaining([{ code: 18, name: 'AwaitingInput', description: expect.any(String) }]));
+  });
+
+  it('a usage error exits 2 (unknown option, bad choice, bad number), --help / --version stay 0', () => {
+    expect(runSplit(['status', '--bogus']).exitCode).toBe(2);
+    expect(runSplit(['status', '--format', 'yaml']).exitCode).toBe(2);
+    expect(runSplit(['run-tool']).exitCode).toBe(2);
+    expect(runSplit(['test', cliTmp(), '--timeout', 'soon']).exitCode).toBe(2);
+    expect(runSplit(['no-such-command']).exitCode).toBe(2);
+    expect(runSplit(['run-tool', '--help']).exitCode).toBe(0);
+    expect(runSplit(['--version']).exitCode).toBe(0);
+  });
+
+  it('a usage error with --format json answers with a USAGE envelope', () => {
+    const { stdout, exitCode } = runSplit(['status', '--bogus', '--format', 'json']);
+    expect(exitCode).toBe(2);
+    expect(JSON.parse(stdout)).toMatchObject({ success: false, command: 'status', errors: [{ code: 'USAGE' }] });
+  });
+
+  it('status --format json: one envelope on stdout, nothing else', () => {
+    const { stdout, exitCode } = runSplit(['status', '--no-probe', '--format', 'json']);
+    expect(exitCode).toBe(0);
+    expect(JSON.parse(stdout)).toMatchObject({ success: true, command: 'status', data: { name: 'unreal-mcp-cli' } });
+  });
+
+  it('compile and test of a folder without a project: NOT_FOUND', () => {
+    const compile = runSplit(['compile', cliTmp(), '--format', 'json']);
+    expect(compile.exitCode).toBe(2);
+    expect(JSON.parse(compile.stdout).errors[0].code).toBe('NOT_FOUND');
+    const test = runSplit(['test', cliTmp(), '--format', 'ndjson']);
+    expect(test.exitCode).toBe(2);
+    expect(JSON.parse(test.stdout.trim()).errors[0].code).toBe('NOT_FOUND');
+  });
+
+  it('run-tool --no-start against nothing: UNREACHABLE (7)', () => {
+    const { stdout, exitCode } = runSplit(['run-tool', 'ping', '--url', 'http://127.0.0.1:65530', '--no-start', '--format', 'json']);
+    expect(exitCode).toBe(7);
+    expect(JSON.parse(stdout).errors[0].code).toBe('UNREACHABLE');
+  });
 });

@@ -19,6 +19,7 @@ import type { ExtensionDescriptor } from '../utils/extensions-catalog.js';
 import type { InstallSourceKind } from '../utils/extension-source.js';
 import type { DismissOutcome, DismissPlatform, UnrealStartupDialogKey } from '../utils/startup-dialog-dismiss.js';
 import type { EnrollOptions, EnrollResult } from './enroll.js';
+import type { RunningProcess } from './close.js';
 
 export type ResultKind = 'success' | 'failure';
 
@@ -731,6 +732,11 @@ export interface StatusOptions {
   fetchImpl?: typeof fetch;
   /** Machine-store token-fallback injection (tests). See `MachineAuthOptions`. */
   machineAuth?: MachineAuthOptions;
+  /** Look for running editors of the project (and a modal dialog blocking one). Default `true` with a project. */
+  detectEditor?: boolean;
+  /** Test seams for the editor check. */
+  listProcessesImpl?: () => RunningProcess[];
+  readLogTail?: (file: string) => string | undefined;
 }
 
 export interface StatusReport {
@@ -753,6 +759,13 @@ export interface StatusReport {
   /** Live probe result; absent when `noProbe`. */
   reachable?: boolean;
   probeReason?: string;
+  /** Running editors of the project; absent without a project or with `detectEditor: false`. */
+  editor?: {
+    running: boolean;
+    pids: number[];
+    /** Title of a modal dialog that blocks the editor's tool calls (from the editor log), when detected. */
+    modalDialog?: string;
+  };
 }
 
 // ---------------------------------------------------------------------------
