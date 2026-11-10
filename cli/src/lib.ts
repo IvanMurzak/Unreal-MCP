@@ -103,7 +103,7 @@ export { bootstrapLocal, planBuildSteps, ridForPlatform } from './lib/bootstrap-
 export { update, updateProject, findUnrealProjectRoot, readPluginVersion } from './lib/update.js';
 export type { ProjectUpdateItem, ProjectUpdateStatus, UpdateProjectResult } from './lib/update.js';
 export { cleanPluginBuildCache, BUNDLED_BRIDGE_DIRNAME } from './lib/clean-plugin.js';
-export { setupSkills, renderSkill } from './lib/setup-skills.js';
+export { setupSkills } from './lib/setup-skills.js';
 export {
   detectInstalledEngines,
   planEngineInstall,

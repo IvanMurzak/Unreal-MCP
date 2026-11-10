@@ -182,7 +182,9 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
                 }
             }
 
-            result.FilesPruned = PruneStaleSkillFolders(skillsRootAbsolute, currentFolders);
+            currentFolders.Add(BuiltinSkillGuides.CliUsageSkillName);
+            result.FilesPruned = PruneStaleSkillFolders(skillsRootAbsolute, currentFolders,
+                _metadata != null && _metadata.TryGetValue(ProvenanceKey, out var provenance) ? provenance : null);
 
             if (written == 0)
             {
@@ -240,13 +242,17 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
 
         /// <summary>
         /// Remove stale generator-owned skill folders under <paramref name="skillsRootAbsolute"/> — immediate child
-        /// dirs that own a SKILL.md but whose name is NOT in <paramref name="currentFolderNames"/>. Two guards (must
-        /// contain a SKILL.md AND be absent from the current set) keep it from touching unrelated user content.
+        /// dirs whose SKILL.md carries this generator's provenance marker (<c>generated-by: &lt;provenance&gt;</c>) but
+        /// whose name is NOT in <paramref name="currentFolderNames"/>. Without a provenance value nothing is pruned:
+        /// a folder without our marker is a user's or another tool's skill and is never touched.
         /// Returns the count pruned. Never throws.
         /// </summary>
-        public static int PruneStaleSkillFolders(string skillsRootAbsolute, ISet<string> currentFolderNames)
+        public static int PruneStaleSkillFolders(string skillsRootAbsolute, ISet<string> currentFolderNames, string? provenance)
         {
             var pruned = 0;
+            if (string.IsNullOrEmpty(provenance))
+                return 0;
+            var marker = $"{ProvenanceKey}: {provenance}";
             IEnumerable<string> childDirs;
             try
             {
@@ -260,10 +266,18 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
             foreach (var dir in childDirs)
             {
                 var name = Path.GetFileName(dir);
-                if (!File.Exists(Path.Combine(dir, "SKILL.md")))
-                    continue; // Guard 1: only ever a folder we would have produced ourselves.
                 if (currentFolderNames.Contains(name))
-                    continue; // Guard 2: still a current tool.
+                    continue; // Guard 1: still a current tool (or the CLI's own skill).
+                try
+                {
+                    var skillMd = Path.Combine(dir, "SKILL.md");
+                    if (!File.Exists(skillMd) || !File.ReadAllText(skillMd).Contains(marker))
+                        continue; // Guard 2: only ever a folder we produced ourselves.
+                }
+                catch
+                {
+                    continue;
+                }
                 try
                 {
                     Directory.Delete(dir, recursive: true);

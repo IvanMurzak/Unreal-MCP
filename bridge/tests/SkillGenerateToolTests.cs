@@ -54,7 +54,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         }
 
         private ResponseCallTool Run(IReadOnlyDictionary<string, JsonElement>? args, params ToolDescriptor[] tools) =>
-            SkillGenerateTool.Run(() => tools, () => _projectRoot, new SkillFileGenerator(), args);
+            SkillGenerateTool.Run(() => tools, () => _projectRoot,
+                new SkillFileGenerator(metadata: new Dictionary<string, string> { ["generated-by"] = "unreal-mcp" }), args);
 
         [Fact]
         public void Create_DeclaresTheToolOnTheSystemSurface()
@@ -103,7 +104,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             // A folder generated before §2.4 (when `ping` was standard) must disappear on the next run.
             var stale = Path.Combine(_projectRoot, ".claude", "skills", "ping");
             Directory.CreateDirectory(stale);
-            File.WriteAllText(Path.Combine(stale, "SKILL.md"), "---\nname: ping\n---\n");
+            File.WriteAllText(Path.Combine(stale, "SKILL.md"), "---\nname: ping\nmetadata:\n  generated-by: unreal-mcp\n---\n");
 
             var response = Run(null, Tool("ping", "system"), Tool("actor-create"));
 
