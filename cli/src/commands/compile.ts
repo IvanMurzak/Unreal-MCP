@@ -1,15 +1,15 @@
 import { Command } from 'commander';
 import { compileProject, type CompileFailureReason } from '../lib/compile.js';
 import { formatDiagnostic } from '../utils/compiler-diagnostics.js';
-import { ExitCode, type ExitCodeValue } from '../utils/exit-codes.js';
-import { CommandOutput, formatOption, type ErrorCode } from '../utils/output.js';
+import { ExitCode } from '../utils/exit-codes.js';
+import { CommandOutput, FAILURE, formatOption, type FailureKind } from '../utils/output.js';
 import * as ui from '../utils/ui.js';
 
-const FAILURES: Record<CompileFailureReason, { exit: ExitCodeValue; code: ErrorCode }> = {
-  'not-found': { exit: ExitCode.Usage, code: 'NOT_FOUND' },
-  unreachable: { exit: ExitCode.Unreachable, code: 'UNREACHABLE' },
-  'project-open': { exit: ExitCode.CommandFailed, code: 'PROJECT_OPEN' },
-  'compilation-failed': { exit: ExitCode.CommandFailed, code: 'COMPILATION_FAILED' },
+const FAILURES: Record<CompileFailureReason, FailureKind> = {
+  'not-found': FAILURE.projectNotFound,
+  unreachable: FAILURE.unreachable,
+  'project-open': FAILURE.projectOpen,
+  'compilation-failed': FAILURE.compilationFailed,
 };
 
 export const compileCommand = new Command('compile')

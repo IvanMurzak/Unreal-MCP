@@ -3,7 +3,7 @@
 
 import * as fs from 'fs';
 import { platform } from 'os';
-import { resolveProjectEngine, runningProjectEditors, ProjectEngineError } from './project-engine.js';
+import { prepareStandaloneRun } from './project-engine.js';
 import type { RunningProcess } from './close.js';
 import type { UbtBuildStep } from './types.js';
 import { DiagnosticCollector, type CompilerDiagnostic } from '../utils/compiler-diagnostics.js';
@@ -51,23 +51,16 @@ export type CompileResult =
   | ({ kind: 'success'; success: true } & CompileReport)
   | ({ kind: 'failure'; success: false; reason: CompileFailureReason; message: string; editorPids?: number[] } & CompileReport);
 
-/** Hint for a project that an editor holds. */
-export const PROJECT_OPEN_HINT =
-  'Close it first (`unreal-mcp-cli close --owned-only` for an editor the CLI started, `unreal-mcp-cli close` for any), ' +
-  'or compile from the open editor (Live Coding: Ctrl+Alt+F11).';
-
 export async function compileProject(options: CompileOptions = {}): Promise<CompileResult> {
   const started = Date.now();
   const empty = (): CompileReport => ({ errors: [], warnings: [], durationMs: Date.now() - started });
   const os = options.os ?? (platform() as NodeJS.Platform);
 
-  let resolved;
-  try {
-    resolved = resolveProjectEngine({ projectDir: options.projectDir, engineRoot: options.engineRoot, os });
-  } catch (err) {
-    const reason = err instanceof ProjectEngineError && err.kind === 'project' ? 'not-found' : 'unreachable';
-    return { kind: 'failure', success: false, reason, message: asError(err).message, ...empty() };
-  }
+  const resolved = prepareStandaloneRun(
+    { projectDir: options.projectDir, engineRoot: options.engineRoot, os, listProcessesImpl: options.listProcessesImpl },
+    'building now would fight its Live Coding / hot reload',
+  );
+  if ('reason' in resolved) return { kind: 'failure', success: false, ...resolved, ...empty() };
   const { project, engineRoot } = resolved;
   const base = { projectDir: project.projectDir };
 
@@ -78,19 +71,6 @@ export async function compileProject(options: CompileOptions = {}): Promise<Comp
   const report = { ...base, target: step.editorTarget };
   if (!(options.existsImpl ?? fs.existsSync)(step.ubtPath)) {
     return { kind: 'failure', success: false, reason: 'unreachable', message: `UnrealBuildTool not found: ${step.ubtPath}`, ...report, ...empty() };
-  }
-
-  const editorPids = runningProjectEditors(project, options.listProcessesImpl);
-  if (editorPids.length > 0) {
-    return {
-      kind: 'failure',
-      success: false,
-      reason: 'project-open',
-      message: `An Unreal Editor has ${project.projectName} open (pid ${editorPids.join(', ')}): building now would fight its Live Coding / hot reload. ${PROJECT_OPEN_HINT}`,
-      editorPids,
-      ...report,
-      ...empty(),
-    };
   }
 
   const collector = new DiagnosticCollector();

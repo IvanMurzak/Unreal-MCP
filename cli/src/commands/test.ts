@@ -2,20 +2,20 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { Command } from 'commander';
 import { DEFAULT_TEST_FILTER, DEFAULT_TEST_TIMEOUT_SECONDS, runAutomationTests, type RunTestsResult } from '../lib/run-tests.js';
-import { failingTests, toGitHubAnnotations, toJUnitXml, type AutomationSummary } from '../utils/automation-report.js';
-import { ExitCode, type ExitCodeValue } from '../utils/exit-codes.js';
-import { CommandOutput, formatOption, parseWholeNumber, type ErrorCode } from '../utils/output.js';
+import { failingTests, githubError, toGitHubAnnotations, toJUnitXml, type AutomationSummary } from '../utils/automation-report.js';
+import { ExitCode } from '../utils/exit-codes.js';
+import { CommandOutput, FAILURE, formatOption, parseWholeNumber, type FailureKind } from '../utils/output.js';
 import * as ui from '../utils/ui.js';
 
 type FailureReason = Extract<RunTestsResult, { kind: 'failure' }>['reason'];
 
-const FAILURES: Record<FailureReason, { exit: ExitCodeValue; code: ErrorCode }> = {
-  'not-found': { exit: ExitCode.Usage, code: 'NOT_FOUND' },
-  unreachable: { exit: ExitCode.Unreachable, code: 'UNREACHABLE' },
-  'project-open': { exit: ExitCode.CommandFailed, code: 'PROJECT_OPEN' },
-  'build-failed': { exit: ExitCode.CommandFailed, code: 'COMPILATION_FAILED' },
-  timeout: { exit: ExitCode.Timeout, code: 'TIMEOUT' },
-  'no-verdict': { exit: ExitCode.CommandFailed, code: 'TEST_RUN_ERROR' },
+const FAILURES: Record<FailureReason, FailureKind> = {
+  'not-found': FAILURE.projectNotFound,
+  unreachable: FAILURE.unreachable,
+  'project-open': FAILURE.projectOpen,
+  'build-failed': FAILURE.compilationFailed,
+  timeout: FAILURE.timeout,
+  'no-verdict': FAILURE.testRunError,
 };
 
 interface TestCliOptions {
@@ -84,7 +84,7 @@ export const testCommand = new Command('test')
     const run = { filter: result.filter, reportDir: result.reportDir, logPath: result.logPath };
     if (result.kind === 'failure') {
       if (!out.machine && result.logTail?.length) process.stderr.write(`Last editor output:\n${result.logTail.join('\n')}\n`);
-      if (opts.format === 'github') console.log(`::error title=Unreal Automation::${result.message.replace(/%/g, '%25').replace(/\r?\n/g, '%0A')}`);
+      if (opts.format === 'github') console.log(githubError('Unreal Automation', result.message));
       out.fail(FAILURES[result.reason], result.message, { ...run, logTail: result.logTail ?? [] });
       return;
     }
@@ -106,8 +106,8 @@ export const testCommand = new Command('test')
     const data = { ...run, ...summaryData(summary), ...(opts.junitOutput ? { junit: path.resolve(opts.junitOutput) } : {}) };
     if (summary.failed > 0 || summary.notRun > 0) {
       const failing = failingTests(summary).length;
-      out.errors.push({ code: 'TESTS_FAILED', message: `${failing} test${failing === 1 ? '' : 's'} did not pass.` });
-      out.finish(ExitCode.TestsFailed, data);
+      out.record(FAILURE.testsFailed.code, `${failing} test${failing === 1 ? '' : 's'} did not pass.`);
+      out.finish(FAILURE.testsFailed.exit, data);
       return;
     }
     out.finish(ExitCode.Success, data);

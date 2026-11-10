@@ -6,12 +6,12 @@ import * as path from 'path';
 import { spawn, execFile, type ChildProcess } from 'child_process';
 import { platform } from 'os';
 import { maybeBuildBeforeOpen } from './open.js';
-import { commandletEditorPath, resolveProjectEngine, runningProjectEditors, ProjectEngineError } from './project-engine.js';
-import { PROJECT_OPEN_HINT } from './compile.js';
+import { commandletEditorPath, prepareStandaloneRun } from './project-engine.js';
 import type { RunningProcess } from './close.js';
 import type { UbtBuildStep } from './types.js';
 import { parseAutomationReport, type AutomationSummary } from '../utils/automation-report.js';
 import { asError } from '../utils/error.js';
+import { forEachLine } from '../utils/unreal-build.js';
 
 export const DEFAULT_TEST_FILTER = 'Project';
 export const DEFAULT_TEST_TIMEOUT_SECONDS = 3600;
@@ -133,25 +133,12 @@ export async function runAutomationTests(options: RunTestsOptions = {}): Promise
   const warnings: string[] = [];
   const sleep = options.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
 
-  let resolved;
-  try {
-    resolved = resolveProjectEngine({ projectDir: options.projectDir, engineRoot: options.engineRoot, os });
-  } catch (err) {
-    const reason = err instanceof ProjectEngineError && err.kind === 'project' ? 'not-found' : 'unreachable';
-    return { kind: 'failure', reason, message: asError(err).message, warnings };
-  }
+  const resolved = prepareStandaloneRun(
+    { projectDir: options.projectDir, engineRoot: options.engineRoot, os, listProcessesImpl: options.listProcessesImpl },
+    'a test run needs the project to itself (to test in the open editor, call its tools with `unreal-mcp-cli run-tool`)',
+  );
+  if ('reason' in resolved) return { kind: 'failure', reason: resolved.reason, message: resolved.message, warnings };
   const { project, engineRoot, editorPath } = resolved;
-
-  const editorPids = runningProjectEditors(project, options.listProcessesImpl);
-  if (editorPids.length > 0) {
-    return {
-      kind: 'failure',
-      reason: 'project-open',
-      message: `An Unreal Editor has ${project.projectName} open (pid ${editorPids.join(', ')}): a test run needs the project to itself. ` +
-        `${PROJECT_OPEN_HINT} To test in the open editor, call its tools with \`unreal-mcp-cli run-tool\`.`,
-      warnings,
-    };
-  }
 
   if (options.build !== false) {
     try {
@@ -207,16 +194,8 @@ export async function runAutomationTests(options: RunTestsOptions = {}): Promise
     if (tail.length > LOG_TAIL_LINES) tail.shift();
     options.onLog?.(line);
   };
-  for (const stream of [child.stdout, child.stderr]) {
-    let pending = '';
-    stream?.setEncoding('utf8');
-    stream?.on('data', (chunk: string) => {
-      const lines = (pending + chunk).split(/\r?\n/);
-      pending = lines.pop() ?? '';
-      lines.forEach(onLine);
-    });
-    stream?.on('end', () => { if (pending) onLine(pending); pending = ''; });
-  }
+  forEachLine(child.stdout, onLine);
+  forEachLine(child.stderr, onLine);
   let exited = false;
   let spawnError: Error | undefined;
   child.on('exit', () => { exited = true; });

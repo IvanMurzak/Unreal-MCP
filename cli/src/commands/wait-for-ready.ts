@@ -33,13 +33,9 @@ export const waitForReadyCommand = new Command('wait-for-ready')
     const data = { url: result.url, elapsedMs: result.elapsedMs, attempts: result.attempts };
     if (result.kind === 'failure') {
       const message = `Not ready after ${result.elapsedMs}ms (${result.attempts} attempts): ${result.lastReason}`;
-      if (spinner) {
-        spinner.error(message);
-        out.errors.push({ code: FAILURE.timeout.code, message });
-        out.finish(FAILURE.timeout.exit, data);
-      } else {
-        out.fail(FAILURE.timeout, message, data);
-      }
+      spinner?.error(message);
+      out.record(FAILURE.timeout.code, message);
+      out.finish(FAILURE.timeout.exit, data);
       return;
     }
     spinner?.success(`Ready after ${result.elapsedMs}ms (${result.attempts} attempt(s)) — ${result.url}`);

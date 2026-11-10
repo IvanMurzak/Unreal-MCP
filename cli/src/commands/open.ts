@@ -5,7 +5,7 @@ import { openEditorSession, prepareGuiOpen } from '../lib/session.js';
 import type { AuthOption, McpTransport } from '../lib/types.js';
 import { pidSuffix } from '../lib/progress.js';
 import * as ui from '../utils/ui.js';
-import { parseIntFlag } from '../utils/flags.js';
+import { parseWholeNumber } from '../utils/output.js';
 
 export const openCommand = new Command('open')
   .description('Launch the Unreal Editor for a project, wiring MCP connection env vars and pre-building native modules on desktop platforms when needed')
@@ -121,7 +121,7 @@ async function stopOwnHeadlessEditor(pathArg: string | undefined, opts: Record<s
 }
 
 async function openSession(pathArg: string | undefined, opts: Record<string, unknown>): Promise<void> {
-  const idleSeconds = opts.idle === undefined ? undefined : parseIntFlag(opts.idle as string, '--idle', { min: 0 });
+  const idleSeconds = opts.idle === undefined ? undefined : parseWholeNumber(opts.idle as string, '--idle', 0);
   const mode = opts.headless === true ? 'headless' : 'window';
   // `open --idle` asks for a window: a warm headless editor would otherwise be reused and no window would open.
   if (mode === 'window' && !(await stopOwnHeadlessEditor(pathArg, opts))) return;
@@ -153,5 +153,5 @@ async function openSession(pathArg: string | undefined, opts: Record<string, unk
 }
 
 function parsePositiveIntFlag(rawValue: string | undefined, flagName: string, defaultValue: number): number {
-  return rawValue === undefined ? defaultValue : parseIntFlag(rawValue, flagName, { min: 1 });
+  return rawValue === undefined ? defaultValue : parseWholeNumber(rawValue, flagName, 1);
 }

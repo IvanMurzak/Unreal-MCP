@@ -140,6 +140,11 @@ function ghProperty(text: string): string {
   return ghData(text).replace(/:/g, '%3A').replace(/,/g, '%2C');
 }
 
+/** A `::error title=..::message` annotation without a source location. */
+export function githubError(title: string, message: string): string {
+  return `::error title=${ghProperty(title)}::${ghData(message)}`;
+}
+
 /** One `::error file=..,line=..,title=..::message` annotation per error of every failing test. */
 export function toGitHubAnnotations(summary: AutomationSummary): string[] {
   const lines: string[] = [];

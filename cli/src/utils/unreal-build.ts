@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { spawn } from 'child_process';
+import type { Readable } from 'stream';
 import type { UbtBuildStep } from '../lib/types.js';
 import { createUnrealBuildDiagnostics } from './build-diagnostics.js';
 
@@ -95,6 +96,27 @@ export interface UnrealBuildExit {
 }
 
 /**
+ * Hand every line of a child's output stream (without the line break, decoded as UTF-8 across chunk boundaries) to
+ * `onLine`; `onText` sees the raw text. The START of an over-long line is kept: a diagnostic's `file:line: error:`
+ * prefix comes first.
+ */
+export function forEachLine(stream: Readable | null | undefined, onLine: (line: string) => void, onText?: (text: string) => void): void {
+  if (!stream) return;
+  let pending = '';
+  stream.setEncoding('utf8');
+  stream.on('data', (text: string) => {
+    onText?.(text);
+    const lines = (pending + text).split(/[\r\n]/);
+    pending = (lines.pop() ?? '').slice(0, 8192);
+    for (const line of lines) onLine(line);
+  });
+  stream.on('end', () => {
+    if (pending) onLine(pending);
+    pending = '';
+  });
+}
+
+/**
  * Run UBT and hand every output line (stdout and stderr, without the line break) to `onLine`. Resolves with the exit
  * code (never rejects on a non-zero one); rejects when UBT cannot be started.
  */
@@ -102,29 +124,11 @@ export function spawnUnrealBuild(step: UbtBuildStep, onLine: (line: string) => v
   return new Promise<UnrealBuildExit>((resolve, reject) => {
     const child = spawn(step.ubtPath, step.args, { stdio: ['ignore', 'pipe', 'pipe'] });
     let tail = '';
-    const flushers: Array<() => void> = [];
-    const reader = (): ((chunk: Buffer | string) => void) => {
-      let pending = '';
-      flushers.push(() => { if (pending) onLine(pending); pending = ''; });
-      return (chunk) => {
-        const text = chunk.toString();
-        tail = (tail + text).slice(-8192);
-        const lines = (pending + text).split(/[\r\n]/);
-        // Keep the START of an over-long line: a diagnostic's `file:line: error:` prefix comes first.
-        pending = (lines.pop() ?? '').slice(0, 8192);
-        for (const line of lines) onLine(line);
-      };
-    };
-    // Decode as UTF-8 across chunk boundaries (a split multibyte character would otherwise corrupt a path).
-    child.stdout?.setEncoding('utf8');
-    child.stderr?.setEncoding('utf8');
-    child.stdout?.on('data', reader());
-    child.stderr?.on('data', reader());
+    const keepTail = (text: string): void => { tail = (tail + text).slice(-8192); };
+    forEachLine(child.stdout, onLine, keepTail);
+    forEachLine(child.stderr, onLine, keepTail);
     child.on('error', reject);
-    child.on('close', (code) => {
-      for (const flush of flushers) flush();
-      resolve({ code, tail });
-    });
+    child.on('close', (code) => resolve({ code, tail }));
   });
 }
 

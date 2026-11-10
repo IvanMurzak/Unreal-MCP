@@ -60,6 +60,42 @@ export function commandletEditorPath(
   return exists(cmd) ? cmd : editorPath;
 }
 
+/** Hint for a project that an editor holds. */
+export const PROJECT_OPEN_HINT =
+  'Close it first (`unreal-mcp-cli close --owned-only` for an editor the CLI started, `unreal-mcp-cli close` for any), ' +
+  'or compile from the open editor (Live Coding: Ctrl+Alt+F11).';
+
+export interface StandaloneRunFailure {
+  /** `not-found`: no `.uproject`; `unreachable`: no engine install; `project-open`: an editor holds the project. */
+  reason: 'not-found' | 'unreachable' | 'project-open';
+  message: string;
+  editorPids?: number[];
+}
+
+/**
+ * The project and engine of a standalone run (`compile`, `test`) — which needs the project to itself, so a running
+ * editor of it is a failure (`why` completes its message).
+ */
+export function prepareStandaloneRun(
+  options: ResolveProjectEngineOptions & { listProcessesImpl?: () => RunningProcess[] },
+  why: string,
+): ProjectEngine | StandaloneRunFailure {
+  let resolved: ProjectEngine;
+  try {
+    resolved = resolveProjectEngine(options);
+  } catch (err) {
+    const reason = err instanceof ProjectEngineError && err.kind === 'project' ? 'not-found' : 'unreachable';
+    return { reason, message: err instanceof Error ? err.message : String(err) };
+  }
+  const editorPids = runningProjectEditors(resolved.project, options.listProcessesImpl);
+  if (editorPids.length === 0) return resolved;
+  return {
+    reason: 'project-open',
+    message: `An Unreal Editor has ${resolved.project.projectName} open (pid ${editorPids.join(', ')}): ${why}. ${PROJECT_OPEN_HINT}`,
+    editorPids,
+  };
+}
+
 /** The pids of running Unreal Editors that have `project` open (the user's GUI, a CLI session or a commandlet). */
 export function runningProjectEditors(
   project: UProjectInfo,

@@ -107,16 +107,15 @@ function report(spec: RunToolCommandSpec, toolName: string, outcome: RunToolSess
     return;
   }
   const result = outcome.result!;
+  const data = { tool: toolName, endpoint: result.endpoint, httpStatus: result.httpStatus, response: result.data ?? null, ...(editor ? { editor } : {}) };
   if (result.kind === 'failure') {
     const kind = classifyToolFailure(result);
-    const data = { tool: toolName, endpoint: result.endpoint, httpStatus: result.httpStatus, response: result.data ?? null, ...(editor ? { editor } : {}) };
     out.error(kind.code, `Failed to run ${spec.errorNoun} "${toolName}" (${result.reason}): ${result.message}`);
     if (!out.machine && result.data !== undefined) ui.json(result.data);
     out.finish(kind.exit, data);
     return;
   }
   if (!out.machine) ui.json(result.data);
-  const data = { tool: toolName, endpoint: result.endpoint, httpStatus: result.httpStatus, response: result.data ?? null, ...(editor ? { editor } : {}) };
   const toolError = toolResponseError(result.data);
   if (toolError !== undefined) {
     const kind = classifyToolResponseError(toolError);

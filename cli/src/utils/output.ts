@@ -72,12 +72,20 @@ export const FAILURE = {
   usage: { exit: ExitCode.Usage, code: 'USAGE' },
   toolFailed: { exit: ExitCode.CommandFailed, code: 'TOOL_FAILED' },
   notFound: { exit: ExitCode.CommandFailed, code: 'NOT_FOUND' },
+  /** No project at the path the command was given. */
+  projectNotFound: { exit: ExitCode.Usage, code: 'NOT_FOUND' },
+  projectOpen: { exit: ExitCode.CommandFailed, code: 'PROJECT_OPEN' },
+  compilationFailed: { exit: ExitCode.CommandFailed, code: 'COMPILATION_FAILED' },
+  testRunError: { exit: ExitCode.CommandFailed, code: 'TEST_RUN_ERROR' },
+  testsFailed: { exit: ExitCode.TestsFailed, code: 'TESTS_FAILED' },
   unreachable: { exit: ExitCode.Unreachable, code: 'UNREACHABLE' },
   timeout: { exit: ExitCode.Timeout, code: 'TIMEOUT' },
   busy: { exit: ExitCode.Busy, code: 'BUSY' },
   awaitingInput: { exit: ExitCode.AwaitingInput, code: 'AWAITING_INPUT' },
   error: { exit: ExitCode.Error, code: 'ERROR' },
 } as const satisfies Record<string, { exit: ExitCodeValue; code: ErrorCode }>;
+
+export type FailureKind = (typeof FAILURE)[keyof typeof FAILURE];
 
 /**
  * Collects a command's errors and warnings and prints its result in the chosen format. In text mode errors and
@@ -92,9 +100,7 @@ export class CommandOutput {
     readonly format: string = 'text',
     private readonly write: (text: string) => void = (text) => process.stdout.write(text),
     private readonly writeErr: (text: string) => void = (text) => process.stderr.write(text),
-  ) {
-    if (isMachineFormat(format)) ui.reserveStdout(true);
-  }
+  ) {}
 
   /** json / ndjson: stdout is reserved for the envelope. */
   get machine(): boolean {
@@ -112,8 +118,13 @@ export class CommandOutput {
   }
 
   error(code: ErrorCode, message: string): void {
-    this.errors.push({ code, message });
+    this.record(code, message);
     if (!this.machine) ui.error(message);
+  }
+
+  /** Record an error for the envelope without printing it (the command already showed it its own way). */
+  record(code: ErrorCode, message: string): void {
+    this.errors.push({ code, message });
   }
 
   /**

@@ -3,10 +3,11 @@
 import type { EditorSessionErrorReason } from '@baizor/gamedev-cli-core';
 import { modalDialogInToolError } from './editor-modal.js';
 import { toolErrorText } from './exec.js';
-import { FAILURE } from '../utils/output.js';
+import { FAILURE, type FailureKind } from '../utils/output.js';
+import { isToolSuccess } from './session.js';
 import type { RunToolFailure } from './types.js';
 
-export type FailureKind = (typeof FAILURE)[keyof typeof FAILURE];
+export type { FailureKind };
 
 /** Exit / error code of a failed tool call. */
 export function classifyToolFailure(failure: RunToolFailure): FailureKind {
@@ -35,13 +36,13 @@ export function classifyToolFailure(failure: RunToolFailure): FailureKind {
  * `undefined`.
  */
 export function toolResponseError(data: unknown): string | undefined {
-  const response = data as { status?: unknown; content?: Array<{ type?: string; text?: unknown }>; error?: unknown } | null;
-  if (response?.status !== 'error') return undefined;
-  const texts = (Array.isArray(response.content) ? response.content : [])
+  if (isToolSuccess(data)) return undefined;
+  const response = data as { content?: Array<{ type?: string; text?: unknown }>; error?: unknown } | null;
+  const texts = (Array.isArray(response?.content) ? response.content : [])
     .filter((c) => c?.type === 'text' && typeof c.text === 'string')
     .map((c) => c.text as string);
   if (texts.length > 0) return texts.join('\n');
-  return typeof response.error === 'string' && response.error ? response.error : 'The tool reported an error.';
+  return typeof response?.error === 'string' && response.error ? response.error : 'The tool reported an error.';
 }
 
 /** Exit / error code of a tool response with `status: "error"`. */

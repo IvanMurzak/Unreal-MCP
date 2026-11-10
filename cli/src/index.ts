@@ -1,6 +1,6 @@
 import { Command, CommanderError } from 'commander';
 import { PACKAGE_VERSION } from './version.js';
-import { configureStyledHelp, setVerbose } from './utils/ui.js';
+import { configureStyledHelp, reserveStdout, setVerbose } from './utils/ui.js';
 import { ExitCode, UsageError } from './utils/exit-codes.js';
 import { formatFromArgv, isMachineFormat, renderEnvelope } from './utils/output.js';
 import { bootstrapLocalCommand } from './commands/bootstrap-local.js';
@@ -74,8 +74,10 @@ for (const cmd of subcommands) {
 configureStyledHelp(program, PACKAGE_VERSION);
 
 program.hook('preAction', (_thisCommand, actionCommand) => {
-  const opts = actionCommand.optsWithGlobals() as { verbose?: boolean };
+  const opts = actionCommand.optsWithGlobals() as { verbose?: boolean; format?: string };
   if (opts.verbose) setVerbose(true);
+  // --format json|ndjson: stdout carries only the envelope, so every log, heading and spinner goes to stderr.
+  reserveStdout(isMachineFormat(opts.format));
 });
 
 // Show help when invoked with no subcommand.

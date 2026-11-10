@@ -9,6 +9,8 @@ import {
   type EnsureSource,
 } from '@baizor/gamedev-cli-core';
 import { openProjectSession, sessionFailureMessage, UNREAL_SESSION_CLOSE_TIMEOUT_MS, type UnrealSessionOptions } from './session.js';
+import { classifyToolFailure } from './tool-outcome.js';
+import { FAILURE } from '../utils/output.js';
 import { isAbsoluteLoopbackHost } from '../utils/port.js';
 import { asError } from '../utils/error.js';
 import type { RunToolFailure, RunToolOptions, RunToolResult } from './types.js';
@@ -42,9 +44,7 @@ export interface RunToolSessionResult {
 
 /** A failure that means "no editor / server answered there" (worth starting an editor for). */
 export function isUnreachableFailure(failure: RunToolFailure): boolean {
-  if (failure.reason === 'connection-refused' || failure.reason === 'connection-reset' || failure.reason === 'network-error') return true;
-  // The local server is up but no editor (sidecar) is connected to it.
-  return failure.reason === 'http-error' && /no connected clients/i.test(failure.message);
+  return classifyToolFailure(failure) === FAILURE.unreachable;
 }
 
 export async function runToolWithSession(options: RunToolSessionOptions): Promise<RunToolSessionResult> {
