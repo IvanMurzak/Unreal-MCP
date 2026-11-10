@@ -24,7 +24,7 @@ import {
   type WaitedEditorSource,
 } from '@baizor/gamedev-cli-core';
 import { discoverEngine } from './engine.js';
-import { awaitingInputMessage, findProjectDialogs } from './editor-dialogs.js';
+import { awaitingInputMessage, publishedDialogs } from './editor-dialogs.js';
 import { listProcesses, selectEditorProcesses, type RunningProcess } from './close.js';
 import { buildOpenEnv, maybeBuildBeforeOpen } from './open.js';
 import { runSystemTool } from './run-tool.js';
@@ -231,7 +231,7 @@ export function createUnrealSession(options: UnrealSessionOptions): EditorSessio
   const probeReady = async (): Promise<string | undefined> => {
     const ready = await ((await probeLeased()) ?? probeLocal)();
     if (ready !== undefined) return ready;
-    const dialogs = findProjectDialogs(projectRoot, { listProcessesImpl: listEditors })?.dialogs ?? [];
+    const dialogs = publishedDialogs(projectRoot);
     if (dialogs.length > 0) throw new EditorSessionError('not-ready', awaitingInputMessage(dialogs));
     return undefined;
   };

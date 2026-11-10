@@ -4,17 +4,19 @@ import * as path from 'path';
 import {
   awaitingInputMessage,
   dialogFile,
-  dialogsBehindFailure,
   findProjectDialogs,
   listEditorDialogs,
   nodeDialogFileIo,
   parseDialog,
   pressEditorDialogButton,
+  publishedDialogs,
+  withBlockingDialogs,
   type DialogFileIo,
   type EditorDialog,
 } from '../src/lib/editor-dialogs.js';
 import { buildRunToolCommand } from '../src/commands/run-tool-builder.js';
 import { getStatus } from '../src/lib/status.js';
+import { FAILURE } from '../src/utils/output.js';
 import * as ui from '../src/utils/ui.js';
 import { makeTempDir, rmTempDir, writeUProject } from './helpers.js';
 
@@ -25,7 +27,7 @@ const SAVE: EditorDialog = { id: '3', pid: 4242, title: 'Save Content', message:
  * In-memory files with a stand-in for the plugin's modal loop: on every sleep it takes a pending press request of a
  * published dialog and answers it as FUnrealMcpDialogControl does (unless `answer` is false: an editor that never looks).
  */
-function fakeEditor(dialogs: EditorDialog[], answer = true) {
+function fakeEditor(dialogs: EditorDialog[], answer = true, running: number[] = dialogs.map((d) => d.pid)) {
   const files = new Map<string, string>();
   for (const d of dialogs) files.set(dialogFile(PROJECT, d.pid), JSON.stringify(d));
   const pressed: Array<{ pid: number; button: string }> = [];
@@ -34,6 +36,8 @@ function fakeEditor(dialogs: EditorDialog[], answer = true) {
     read: (file) => files.get(file),
     write: (file, text) => void files.set(file, text),
     remove: (file) => void files.delete(file),
+    list: (dir) => [...files.keys()].filter((f) => path.dirname(f) === dir).map((f) => path.basename(f)),
+    alive: (pid) => running.includes(pid),
     now: () => clock,
     sleep: async (ms) => {
       clock += ms;
@@ -83,7 +87,7 @@ describe('editor dialog files', () => {
 
   it('presses a button by label (any case) through a request the editor answers', async () => {
     const { io, files, pressed } = fakeEditor([SAVE]);
-    const result = await pressEditorDialogButton(PROJECT, [4242], "don't save", undefined, io);
+    const result = await pressEditorDialogButton(PROJECT, [4242], "don't save", { io });
     expect(result).toMatchObject({ kind: 'pressed', dialog: { title: 'Save Content' } });
     expect(pressed).toEqual([{ pid: 4242, button: "Don't Save" }]);
     expect(files.has(dialogFile(PROJECT, 4242, '.result.json'))).toBe(false); // the answer is consumed
@@ -93,17 +97,17 @@ describe('editor dialog files', () => {
     const { io } = fakeEditor([SAVE], false);
     const write = vi.spyOn(io, 'write');
     const label = 'Save"; Remove-Item C:\\ -Recurse; "$(calc)';
-    await pressEditorDialogButton(PROJECT, [4242], label, '3', io, 0);
+    await pressEditorDialogButton(PROJECT, [4242], label, { id: '3', io, timeoutMs: 0 });
     expect(write).toHaveBeenCalledWith(dialogFile(PROJECT, 4242, '.press.json'), expect.any(String));
     expect(JSON.parse(write.mock.calls[0]![1])).toMatchObject({ button: label, id: '3' });
   });
 
   it('names the open dialogs when the button or the id does not match', async () => {
     const { io, pressed } = fakeEditor([SAVE]);
-    const noButton = await pressEditorDialogButton(PROJECT, [4242], 'Maybe', undefined, io);
+    const noButton = await pressEditorDialogButton(PROJECT, [4242], 'Maybe', { io });
     expect(noButton.kind).toBe('not-found');
     expect(noButton.kind === 'not-found' && noButton.message).toContain('"Save Content"');
-    const noId = await pressEditorDialogButton(PROJECT, [4242], 'Cancel', '9', io);
+    const noId = await pressEditorDialogButton(PROJECT, [4242], 'Cancel', { id: '9', io });
     expect(noId.kind === 'not-found' && noId.message).toContain('Dialog 9 is not open');
     expect(pressed).toEqual([]);
   });
@@ -111,20 +115,20 @@ describe('editor dialog files', () => {
   it('reports the editor\'s refusal (the dialog changed under the request)', async () => {
     const { io } = fakeEditor([SAVE]);
     io.write(dialogFile(PROJECT, 4242), JSON.stringify({ ...SAVE, buttons: [...SAVE.buttons, 'Gone'] }));
-    const result = await pressEditorDialogButton(PROJECT, [4242], 'Gone', undefined, io);
+    const result = await pressEditorDialogButton(PROJECT, [4242], 'Gone', { io });
     expect(result).toEqual({ kind: 'not-found', message: 'The dialog "Save Content" has no enabled "Gone" button.' });
   });
 
   it('gives up and withdraws the request when the editor does not answer', async () => {
     const { io, files } = fakeEditor([SAVE], false);
-    const result = await pressEditorDialogButton(PROJECT, [4242], 'Cancel', undefined, io, 1_000);
+    const result = await pressEditorDialogButton(PROJECT, [4242], 'Cancel', { io, timeoutMs: 1_000 });
     expect(result.kind).toBe('no-answer');
     expect(files.has(dialogFile(PROJECT, 4242, '.press.json'))).toBe(false);
   });
 
   it('says no dialog is open when none is published', async () => {
     const { io } = fakeEditor([]);
-    const result = await pressEditorDialogButton(PROJECT, [4242], 'OK', undefined, io);
+    const result = await pressEditorDialogButton(PROJECT, [4242], 'OK', { io });
     expect(result.kind === 'not-found' && result.message).toContain('No modal dialog is open');
   });
 
@@ -147,12 +151,26 @@ describe('awaiting input', () => {
     expect(awaitingInputMessage([{ ...SAVE, buttons: [] }])).not.toContain('--press');
   });
 
-  it('looks for dialogs only behind failures one can cause', () => {
+  it('turns only the failures a dialog can cause into AWAITING_INPUT', () => {
     const find = vi.fn(() => [SAVE]);
-    expect(dialogsBehindFailure(PROJECT, 'TOOL_FAILED', find)).toBeUndefined();
+    const failed = { kind: FAILURE.toolFailed, message: 'boom', data: { tool: 'x' } };
+    expect(withBlockingDialogs(PROJECT, failed, find)).toBe(failed);
     expect(find).not.toHaveBeenCalled();
-    for (const code of ['TIMEOUT', 'BUSY', 'UNREACHABLE', 'AWAITING_INPUT']) expect(dialogsBehindFailure(PROJECT, code, find)).toEqual([SAVE]);
-    expect(dialogsBehindFailure(PROJECT, 'TIMEOUT', () => [])).toBeUndefined();
+    for (const kind of [FAILURE.timeout, FAILURE.busy, FAILURE.unreachable]) {
+      expect(withBlockingDialogs(PROJECT, { kind, message: 'late', data: { tool: 'x' } }, find))
+        .toEqual({ kind: FAILURE.awaitingInput, message: awaitingInputMessage([SAVE]), data: { tool: 'x', dialogs: [SAVE] } });
+    }
+    const ended = withBlockingDialogs(PROJECT, { kind: FAILURE.awaitingInput, message: 'The editor is showing the modal dialog', data: {} }, find);
+    expect(ended.message).toBe('The editor is showing the modal dialog'); // the watch's own reason stays
+    expect(ended.data).toEqual({ dialogs: [SAVE] });
+    const timeout = { kind: FAILURE.timeout, message: 'late', data: {} };
+    expect(withBlockingDialogs(PROJECT, timeout, () => [])).toBe(timeout);
+  });
+
+  it('finds published dialogs of running editors without listing processes', () => {
+    const { io } = fakeEditor([SAVE, { ...SAVE, pid: 99, id: '1' }], true, [4242]);
+    io.write(dialogFile(PROJECT, 4242, '.result.json'), '{}');
+    expect(publishedDialogs(PROJECT, io)).toEqual([SAVE]); // 99 exited (a crash left its file); a result file is no dialog
   });
 
   it('finds the dialogs of the editors running the project', () => {

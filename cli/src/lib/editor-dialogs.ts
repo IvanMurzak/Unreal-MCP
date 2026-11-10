@@ -13,7 +13,9 @@
 import { randomUUID } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
+import { writeFileAtomicSync } from '@baizor/gamedev-cli-core';
 import { listProcesses, selectEditorProcesses, type RunningProcess } from './close.js';
+import { FAILURE, type FailureKind } from '../utils/output.js';
 import { readUProject, type UProjectInfo } from '../utils/project.js';
 
 export interface EditorDialog {
@@ -27,7 +29,7 @@ export interface EditorDialog {
   buttons: string[];
 }
 
-export type PressDialogResult =
+type PressDialogResult =
   | { kind: 'pressed'; button: string; dialog: EditorDialog }
   | { kind: 'not-found'; message: string }
   /** The request was written but the editor did not take it in time (a dialog it does not serve, or a busy disk). */
@@ -40,6 +42,10 @@ export interface DialogFileIo {
   /** Replace the file atomically (a reader never sees half of it). */
   write(file: string, text: string): void;
   remove(file: string): void;
+  /** The names of the files in a directory (none when it does not exist). */
+  list(dir: string): string[];
+  /** Whether process `pid` is running. */
+  alive(pid: number): boolean;
   sleep(ms: number): Promise<void>;
   now(): number;
 }
@@ -54,26 +60,43 @@ export const nodeDialogFileIo: DialogFileIo = {
   },
   write: (file, text) => {
     fs.mkdirSync(path.dirname(file), { recursive: true });
-    const temp = `${file}.${process.pid}.tmp`;
-    fs.writeFileSync(temp, text, 'utf-8');
-    fs.renameSync(temp, file);
+    writeFileAtomicSync(file, Buffer.from(text, 'utf-8'));
   },
   remove: (file) => fs.rmSync(file, { force: true }),
+  list: (dir) => {
+    try {
+      return fs.readdirSync(dir);
+    } catch {
+      return [];
+    }
+  },
+  alive: (pid) => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch (err) {
+      return (err as NodeJS.ErrnoException).code === 'EPERM'; // running, but not ours to signal
+    }
+  },
   sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   now: () => Date.now(),
 };
 
 /** How long a press waits for the editor to answer. The plugin looks every 0.1 s while the dialog is open. */
-export const PRESS_TIMEOUT_MS = 5_000;
+const PRESS_TIMEOUT_MS = 5_000;
 const PRESS_POLL_MS = 50;
 
 /** Shown when no dialog is served: what the user can still do. */
 export const NO_DIALOG_HINT =
   'A dialog shown before the UnrealMCP plugin loaded (or by a plugin older than this CLI) is not visible here: answer it in the editor.';
 
+function dialogDir(projectDir: string): string {
+  return path.join(projectDir, 'Saved', 'UnrealMCP', 'Dialogs');
+}
+
 /** Where editor `pid` of the project at `projectDir` serves its dialog files. */
 export function dialogFile(projectDir: string, pid: number, suffix: '.json' | '.press.json' | '.result.json' = '.json'): string {
-  return path.join(projectDir, 'Saved', 'UnrealMCP', 'Dialogs', `${pid}${suffix}`);
+  return path.join(dialogDir(projectDir), `${pid}${suffix}`);
 }
 
 function isStringArray(value: unknown): value is string[] {
@@ -111,6 +134,19 @@ export function listEditorDialogs(projectDir: string, pids: readonly number[], i
   return dialogs;
 }
 
+/**
+ * The dialogs published for the project at `projectDir` by editors that are still running: a directory read and a
+ * liveness check per file, no process listing (cheap enough for every failed readiness probe).
+ */
+export function publishedDialogs(projectDir: string, io: DialogFileIo = nodeDialogFileIo): EditorDialog[] {
+  const pids = io.list(dialogDir(projectDir))
+    .map((name) => /^(\d+)\.json$/.exec(name)?.[1])
+    .filter((pid): pid is string => pid !== undefined)
+    .map(Number)
+    .filter((pid) => io.alive(pid));
+  return listEditorDialogs(projectDir, pids, io);
+}
+
 function sameLabel(a: string, b: string): boolean {
   return a.trim().toLowerCase() === b.trim().toLowerCase();
 }
@@ -123,9 +159,7 @@ export async function pressEditorDialogButton(
   projectDir: string,
   pids: readonly number[],
   button: string,
-  id?: string,
-  io: DialogFileIo = nodeDialogFileIo,
-  timeoutMs: number = PRESS_TIMEOUT_MS,
+  { id, io = nodeDialogFileIo, timeoutMs = PRESS_TIMEOUT_MS }: { id?: string; io?: DialogFileIo; timeoutMs?: number } = {},
 ): Promise<PressDialogResult> {
   const dialogs = listEditorDialogs(projectDir, pids, io);
   if (dialogs.length === 0) return { kind: 'not-found', message: `No modal dialog is open in the editor. ${NO_DIALOG_HINT}` };
@@ -192,7 +226,7 @@ export function awaitingInputMessage(dialogs: readonly EditorDialog[]): string {
 }
 
 /** Test seams of {@link findProjectDialogs}. */
-export interface FindDialogsDeps {
+interface FindDialogsDeps {
   listProcessesImpl?: () => RunningProcess[];
   io?: DialogFileIo;
 }
@@ -215,16 +249,26 @@ export function findProjectDialogs(
 /** Failures a blocking dialog can cause (a timeout, a busy or unreachable editor, a call ended by the modal watch). */
 const DIALOG_SUSPECTS: ReadonlySet<string> = new Set(['TIMEOUT', 'BUSY', 'UNREACHABLE', 'AWAITING_INPUT']);
 
+/** A command failure: what it exits with, its message, and the envelope data. */
+export interface CommandFailure {
+  kind: FailureKind;
+  message: string;
+  data: Record<string, unknown>;
+}
+
 /**
- * When a failure with error code `code` may come from a modal dialog and the project's editor shows one, the dialogs
- * (the caller then reports AWAITING_INPUT, exit 18, with {@link awaitingInputMessage}); otherwise `undefined`.
+ * The failure a command reports, given the one it found: when a modal dialog can cause it and the project's editor
+ * shows one, AWAITING_INPUT (exit 18) naming the dialogs, with them in `data.dialogs` (a call the modal watch already
+ * ended keeps its own message, which names the dialog). Otherwise `failure` unchanged. `find`: test seam.
  */
-export function dialogsBehindFailure(
+export function withBlockingDialogs(
   projectDir: string,
-  code: string,
-  find: (projectDir: string) => EditorDialog[] = (dir) => findProjectDialogs(dir)?.dialogs ?? [],
-): EditorDialog[] | undefined {
-  if (!DIALOG_SUSPECTS.has(code)) return undefined;
+  failure: CommandFailure,
+  find: (projectDir: string) => EditorDialog[] = publishedDialogs,
+): CommandFailure {
+  if (!DIALOG_SUSPECTS.has(failure.kind.code)) return failure;
   const dialogs = find(projectDir);
-  return dialogs.length > 0 ? dialogs : undefined;
+  if (dialogs.length === 0) return failure;
+  const message = failure.kind === FAILURE.awaitingInput ? failure.message : awaitingInputMessage(dialogs);
+  return { kind: FAILURE.awaitingInput, message, data: { ...failure.data, dialogs } };
 }

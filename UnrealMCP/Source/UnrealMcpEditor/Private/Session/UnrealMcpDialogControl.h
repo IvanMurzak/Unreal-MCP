@@ -53,9 +53,9 @@ public:
 	/** No modal dialog is left: remove the published one and any request that came too late. */
 	void Clear();
 
-	FString DialogFile() const { return File(TEXT(".json")); }
-	FString PressFile() const { return File(TEXT(".press.json")); }
-	FString ResultFile() const { return File(TEXT(".result.json")); }
+	const FString& DialogFile() const { return DialogPath; }
+	const FString& PressFile() const { return PressPath; }
+	const FString& ResultFile() const { return ResultPath; }
 
 private:
 	FString File(const TCHAR* Suffix) const;
@@ -63,4 +63,7 @@ private:
 
 	FString Directory;
 	uint32 Pid = 0;
+	FString DialogPath;
+	FString PressPath;
+	FString ResultPath;
 };

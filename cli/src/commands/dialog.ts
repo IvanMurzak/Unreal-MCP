@@ -40,7 +40,7 @@ export const dialogCommand = new Command('dialog')
     }
 
     if (options.press !== undefined) {
-      const pressed = await pressEditorDialogButton(found.project.projectDir, found.pids, options.press, options.id);
+      const pressed = await pressEditorDialogButton(found.project.projectDir, found.pids, options.press, { id: options.id });
       if (pressed.kind !== 'pressed') {
         out.fail(pressed.kind === 'not-found' ? FAILURE.notFound : FAILURE.timeout, pressed.message, { pids: found.pids, dialogs: found.dialogs });
         return;

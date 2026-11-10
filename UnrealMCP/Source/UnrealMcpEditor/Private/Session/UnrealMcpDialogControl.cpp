@@ -39,19 +39,6 @@ namespace UnrealMcpDialogControlLocal
 		return FString();
 	}
 
-	/** The visible texts under @p Widget, in layout order. */
-	void CollectTexts(const TSharedRef<SWidget>& Widget, TArray<FString>& Out)
-	{
-		if (!Widget->GetVisibility().IsVisible())
-			return;
-		const FString Text = OwnText(Widget);
-		if (!Text.IsEmpty())
-			Out.Add(Text);
-		FChildren* Children = Widget->GetChildren();
-		for (int32 Index = 0; Children && Index < Children->Num(); ++Index)
-			CollectTexts(Children->GetChildAt(Index), Out);
-	}
-
 	/** A button and the label it shows. */
 	struct FLabelledButton
 	{
@@ -59,7 +46,19 @@ namespace UnrealMcpDialogControlLocal
 		FString Label;
 	};
 
-	/** The visible texts outside buttons and check boxes, and the buttons that show a label (icon-only ones have none). */
+	void Walk(const TSharedRef<SWidget>& Widget, TArray<FString>& OutTexts, TArray<FLabelledButton>& OutButtons);
+
+	void WalkChildren(const TSharedRef<SWidget>& Widget, TArray<FString>& OutTexts, TArray<FLabelledButton>& OutButtons)
+	{
+		FChildren* Children = Widget->GetChildren();
+		for (int32 Index = 0; Children && Index < Children->Num(); ++Index)
+			Walk(Children->GetChildAt(Index), OutTexts, OutButtons);
+	}
+
+	/**
+	 * The visible texts outside buttons, check boxes and list headers, and the buttons that show a label (the texts inside
+	 * them; icon-only ones have none).
+	 */
 	void Walk(const TSharedRef<SWidget>& Widget, TArray<FString>& OutTexts, TArray<FLabelledButton>& OutButtons)
 	{
 		if (!Widget->GetVisibility().IsVisible())
@@ -68,10 +67,10 @@ namespace UnrealMcpDialogControlLocal
 		if (Type == ButtonType)
 		{
 			TArray<FString> Texts;
-			CollectTexts(Widget, Texts);
-			const FString Label = FString::Join(Texts, TEXT(" "));
-			if (!Label.IsEmpty())
-				OutButtons.Add({ StaticCastSharedRef<SButton>(Widget), Label });
+			TArray<FLabelledButton> Nested;
+			WalkChildren(Widget, Texts, Nested);
+			if (!Texts.IsEmpty())
+				OutButtons.Add({ StaticCastSharedRef<SButton>(Widget), FString::Join(Texts, TEXT(" ")) });
 			return;
 		}
 		if (Type == CheckBoxType || Type == HeaderRowType)
@@ -79,15 +78,16 @@ namespace UnrealMcpDialogControlLocal
 		const FString Text = OwnText(Widget);
 		if (!Text.IsEmpty())
 			OutTexts.Add(Text);
-		FChildren* Children = Widget->GetChildren();
-		for (int32 Index = 0; Children && Index < Children->Num(); ++Index)
-			Walk(Children->GetChildAt(Index), OutTexts, OutButtons);
+		WalkChildren(Widget, OutTexts, OutButtons);
 	}
 }
 
 FUnrealMcpDialogControl::FUnrealMcpDialogControl(FString InDirectory, uint32 InPid)
 	: Directory(InDirectory.IsEmpty() ? FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / TEXT("UnrealMCP") / TEXT("Dialogs")) : MoveTemp(InDirectory))
 	, Pid(InPid != 0 ? InPid : FPlatformProcess::GetCurrentProcessId())
+	, DialogPath(File(TEXT(".json")))
+	, PressPath(File(TEXT(".press.json")))
+	, ResultPath(File(TEXT(".result.json")))
 {
 }
 
@@ -117,13 +117,11 @@ bool FUnrealMcpDialogControl::Press(const TSharedRef<SWindow>& Window, const FSt
 	{
 		if (Button.Label.Equals(Wanted, ESearchCase::IgnoreCase) && Button.Button->IsEnabled())
 		{
-			// What a click runs (OnClicked), without moving the mouse or needing the window in front. Editor builds only.
-#if !UE_BUILD_SHIPPING
 			if (OutPressed)
 				*OutPressed = Button.Label;
+			// What a click runs (OnClicked), without moving the mouse or needing the window in front (non-Shipping API).
 			Button.Button->SimulateClick();
 			return true;
-#endif
 		}
 	}
 	return false;
@@ -143,6 +141,7 @@ void FUnrealMcpDialogControl::WriteJson(const FString& Path, const TSharedRef<FJ
 	if (!FFileHelper::SaveStringToFile(Text, *Temp, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM)
 		|| !IFileManager::Get().Move(*Path, *Temp, /*bReplace*/ true, /*bEvenIfReadOnly*/ true))
 	{
+		IFileManager::Get().Delete(*Temp, /*bRequireExists*/ false, /*bEvenReadOnly*/ true, /*bQuiet*/ true);
 		UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] Could not write %s: unreal-mcp-cli dialog cannot see or answer the dialog."), *Path);
 	}
 }
@@ -163,7 +162,7 @@ void FUnrealMcpDialogControl::Publish(const FDescription& Dialog, int32 Id)
 
 void FUnrealMcpDialogControl::PollPress(const TSharedPtr<SWindow>& Window, int32 Id)
 {
-	const FString RequestFile = PressFile();
+	const FString& RequestFile = PressFile();
 	FString Text;
 	if (!FPaths::FileExists(RequestFile) || !FFileHelper::LoadFileToString(Text, *RequestFile))
 		return;
@@ -212,6 +211,5 @@ void FUnrealMcpDialogControl::Clear()
 	IFileManager& Files = IFileManager::Get();
 	Files.Delete(*DialogFile(), /*bRequireExists*/ false, /*bEvenReadOnly*/ true, /*bQuiet*/ true);
 	// A request that arrived after the dialog closed gets its answer here, rather than waiting out its timeout.
-	if (FPaths::FileExists(PressFile()))
-		PollPress(nullptr, 0);
+	PollPress(nullptr, 0);
 }

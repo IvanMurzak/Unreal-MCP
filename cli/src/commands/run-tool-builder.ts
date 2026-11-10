@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import { readFileSync } from 'fs';
-import { awaitingInputMessage, dialogsBehindFailure, type EditorDialog } from '../lib/editor-dialogs.js';
+import { withBlockingDialogs, type CommandFailure, type EditorDialog } from '../lib/editor-dialogs.js';
 import { runToolWithSession, type RunToolSessionResult } from '../lib/run-tool-session.js';
 import { UNREAL_SESSION_READY_TIMEOUT_MS } from '../lib/session.js';
 import { classifyToolFailure, classifyToolResponseError, editorCloseWarning, sessionOutcomeFailure, toolResponseError } from '../lib/tool-outcome.js';
@@ -97,7 +97,7 @@ export function buildRunToolCommand(spec: RunToolCommandSpec): Command {
         },
       });
       spinner?.stop();
-      report(spec, toolName, outcome, out, (code) => dialogsBehindFailure(projectDir, code, spec.findDialogs));
+      report(spec, toolName, outcome, out, (failure) => withBlockingDialogs(projectDir, failure, spec.findDialogs));
     });
 }
 
@@ -106,27 +106,29 @@ function report(
   toolName: string,
   outcome: RunToolSessionResult,
   out: CommandOutput,
-  /** The dialogs behind a failure with this error code, if a modal dialog blocks the editor. */
-  blockedBy: (code: string) => EditorDialog[] | undefined,
+  /** The failure to report: AWAITING_INPUT when a modal dialog blocks the editor. */
+  withDialogs: (failure: CommandFailure) => CommandFailure,
 ): void {
+  const fail = (failure: CommandFailure): void => {
+    const final = withDialogs(failure);
+    out.fail(final.kind, final.message, final.data);
+  };
   const editor = outcome.source === undefined ? undefined : { source: outcome.source, ...(outcome.closed ? { closed: outcome.closed } : {}) };
   const closeWarning = editorCloseWarning(outcome);
   if (closeWarning) out.warn(closeWarning);
   const noCall = sessionOutcomeFailure(outcome, `${spec.errorNoun} "${toolName}"`);
   if (noCall) {
     const rejected = outcome.result?.kind === 'failure' ? { endpoint: outcome.result.endpoint, httpStatus: outcome.result.httpStatus } : {};
-    const dialogs = blockedBy(noCall.kind.code);
-    if (dialogs) out.fail(FAILURE.awaitingInput, awaitingInputMessage(dialogs), { tool: toolName, ...rejected, dialogs });
-    else out.fail(noCall.kind, noCall.message, { tool: toolName, ...rejected });
+    fail({ ...noCall, data: { tool: toolName, ...rejected } });
     return;
   }
   const result = outcome.result!;
   const data = { tool: toolName, endpoint: result.endpoint, httpStatus: result.httpStatus, response: result.data ?? null, ...(editor ? { editor } : {}) };
   if (result.kind === 'failure') {
     const kind = classifyToolFailure(result);
-    const dialogs = blockedBy(kind.code);
-    if (dialogs) {
-      out.fail(FAILURE.awaitingInput, `Failed to run ${spec.errorNoun} "${toolName}": ${awaitingInputMessage(dialogs)}`, { ...data, dialogs });
+    const blocked = withDialogs({ kind, message: '', data });
+    if (blocked.kind !== kind) {
+      out.fail(blocked.kind, `Failed to run ${spec.errorNoun} "${toolName}": ${blocked.message}`, blocked.data);
       return;
     }
     out.error(kind.code, `Failed to run ${spec.errorNoun} "${toolName}" (${result.reason}): ${result.message}`);
@@ -137,9 +139,7 @@ function report(
   if (!out.machine) ui.json(result.data);
   const toolError = toolResponseError(result.data);
   if (toolError !== undefined) {
-    const kind = classifyToolResponseError(toolError);
-    const dialogs = blockedBy(kind.code);
-    out.fail(kind, `The ${spec.errorNoun} "${toolName}" returned an error: ${toolError}`, dialogs ? { ...data, dialogs } : data);
+    fail({ kind: classifyToolResponseError(toolError), message: `The ${spec.errorNoun} "${toolName}" returned an error: ${toolError}`, data });
     return;
   }
   out.finish(ExitCode.Success, data);
