@@ -73,15 +73,24 @@ void FUnrealMcpModalWatch::HandleModalTick(const TSharedPtr<SWindow>& Active, do
 			NextCheckAt = 0.0;
 		}
 		Window = Active;
-		const FUnrealMcpDialogControl::FDescription Dialog = FUnrealMcpDialogControl::Describe(Active.ToSharedRef());
-		Title = Dialog.Title;
-		Buttons = Dialog.Buttons;
-		Dialogs->Publish(Dialog, ++DialogId);
+		++DialogId;
+		bPublished = false;
 		NextPollAt = 0.0;
 	}
 	if (Now >= NextPollAt)
 	{
 		NextPollAt = Now + PressPollSeconds;
+		// Described on every poll: the first modal tick comes before Slate ticked and drew the dialog, so lists fill in
+		// and bound visibility settles later. Published again (same id) whenever what it shows changed.
+		const FUnrealMcpDialogControl::FDescription Dialog = FUnrealMcpDialogControl::Describe(Active.ToSharedRef());
+		if (!bPublished || Dialog.Title != Title || Dialog.Message != Message || Dialog.Buttons != Buttons)
+		{
+			Title = Dialog.Title;
+			Message = Dialog.Message;
+			Buttons = Dialog.Buttons;
+			Dialogs->Publish(Dialog, DialogId);
+			bPublished = true;
+		}
 		Dialogs->PollPress(Active, DialogId);
 	}
 	// A few times a second rather than every modal tick; calls that arrive while the dialog stays open end too.
@@ -109,6 +118,7 @@ void FUnrealMcpModalWatch::HandleModalClosed(bool bAnyModalLeft)
 	bHeld = false;
 	Window.Reset();
 	Title.Reset();
+	Message.Reset();
 	Buttons.Reset();
 	Dialogs->Clear();
 }

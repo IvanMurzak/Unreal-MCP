@@ -126,14 +126,15 @@ function report(
   const data = { tool: toolName, endpoint: result.endpoint, httpStatus: result.httpStatus, response: result.data ?? null, ...(editor ? { editor } : {}) };
   if (result.kind === 'failure') {
     const kind = classifyToolFailure(result);
-    const blocked = withDialogs({ kind, message: '', data });
+    const message = `Failed to run ${spec.errorNoun} "${toolName}" (${result.reason}): ${result.message}`;
+    const blocked = withDialogs({ kind, message, data });
     if (blocked.kind !== kind) {
       out.fail(blocked.kind, `Failed to run ${spec.errorNoun} "${toolName}": ${blocked.message}`, blocked.data);
       return;
     }
-    out.error(kind.code, `Failed to run ${spec.errorNoun} "${toolName}" (${result.reason}): ${result.message}`);
+    out.error(kind.code, message);
     if (!out.machine && result.data !== undefined) ui.json(result.data);
-    out.finish(kind.exit, data);
+    out.finish(kind.exit, blocked.data); // a call the modal watch ended (already AWAITING_INPUT) gains data.dialogs
     return;
   }
   if (!out.machine) ui.json(result.data);

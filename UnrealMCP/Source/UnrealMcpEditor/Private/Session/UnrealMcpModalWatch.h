@@ -67,7 +67,9 @@ private:
 	FDelegateHandle ModalClosedHandle;
 	TWeakPtr<SWindow> Window;
 	FString Title;
+	FString Message;
 	TArray<FString> Buttons;
+	bool bPublished = false; // the dialog on top was published since it came on top
 	int32 DialogId = 0; // one per dialog that comes on top, so a press names the dialog its caller saw
 	double OpenedAt = 0.0;
 	double NextPollAt = 0.0;

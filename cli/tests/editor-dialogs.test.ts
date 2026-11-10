@@ -27,11 +27,13 @@ const SAVE: EditorDialog = { id: '3', pid: 4242, title: 'Save Content', message:
  * In-memory files with a stand-in for the plugin's modal loop: on every sleep it takes a pending press request of a
  * published dialog and answers it as FUnrealMcpDialogControl does (unless `answer` is false: an editor that never looks).
  */
-function fakeEditor(dialogs: EditorDialog[], answer = true, running: number[] = dialogs.map((d) => d.pid)) {
+function fakeEditor(dialogs: EditorDialog[], answer = true, running: number[] = dialogs.map((d) => d.pid), project = PROJECT) {
   const files = new Map<string, string>();
-  for (const d of dialogs) files.set(dialogFile(PROJECT, d.pid), JSON.stringify(d));
+  for (const d of dialogs) files.set(dialogFile(project, d.pid), JSON.stringify(d));
   const pressed: Array<{ pid: number; button: string }> = [];
   let clock = 0;
+  /** When set, the editor takes a request only from this time on (a busy modal loop). */
+  let takeLate: number | undefined;
   const io: DialogFileIo = {
     read: (file) => files.get(file),
     write: (file, text) => void files.set(file, text),
@@ -42,6 +44,7 @@ function fakeEditor(dialogs: EditorDialog[], answer = true, running: number[] = 
     sleep: async (ms) => {
       clock += ms;
       if (!answer) return;
+      if (takeLate !== undefined && clock < takeLate) return;
       for (const d of dialogs) {
         const request = files.get(dialogFile(PROJECT, d.pid, '.press.json'));
         if (request === undefined) continue;
@@ -59,7 +62,7 @@ function fakeEditor(dialogs: EditorDialog[], answer = true, running: number[] = 
       }
     },
   };
-  return { io, files, pressed };
+  return { io, files, pressed, takeFrom: (ms: number) => { takeLate = ms; } };
 }
 
 const dirs: string[] = [];
@@ -167,10 +170,34 @@ describe('awaiting input', () => {
     expect(withBlockingDialogs(PROJECT, timeout, () => [])).toBe(timeout);
   });
 
-  it('finds published dialogs of running editors without listing processes', () => {
-    const { io } = fakeEditor([SAVE, { ...SAVE, pid: 99, id: '1' }], true, [4242]);
-    io.write(dialogFile(PROJECT, 4242, '.result.json'), '{}');
-    expect(publishedDialogs(PROJECT, io)).toEqual([SAVE]); // 99 exited (a crash left its file); a result file is no dialog
+  it('finds published dialogs of running editors of the project, listing processes only when a file is there', () => {
+    const dir = makeTempDir(); dirs.push(dir);
+    const uproject = writeUProject(dir, 'MyGame');
+    const stale = { ...SAVE, pid: 99, id: '1' }; // a crashed editor's file; pid 99 now belongs to another program
+    const gone = { ...SAVE, pid: 98, id: '1' }; // a crashed editor's file; no process 98
+    const { io } = fakeEditor([SAVE, stale, gone], true, [4242, 99], dir);
+    io.write(dialogFile(dir, 4242, '.result.json'), '{}');
+    const listProcessesImpl = vi.fn(() => [{ pid: 4242, commandLine: `UnrealEditor.exe "${uproject}"` }, { pid: 99, commandLine: 'notepad.exe' }]);
+    expect(publishedDialogs(uproject, { io, listProcessesImpl })).toEqual([SAVE]); // the .uproject path works as well
+    expect(listProcessesImpl).toHaveBeenCalledTimes(1);
+
+    const empty = fakeEditor([], true, [], dir);
+    expect(publishedDialogs(dir, { io: empty.io, listProcessesImpl })).toEqual([]);
+    expect(listProcessesImpl).toHaveBeenCalledTimes(1); // nothing published: no listing
+  });
+
+  it('refuses an id that names a dialog in more than one editor', async () => {
+    const { io, pressed } = fakeEditor([SAVE, { ...SAVE, pid: 5 }]);
+    const result = await pressEditorDialogButton(PROJECT, [4242, 5], 'Cancel', { id: '3', io });
+    expect(result.kind === 'not-found' && result.message).toContain('open in several editors');
+    expect(pressed).toEqual([]);
+  });
+
+  it('waits a moment for the answer to a request the editor took at the deadline', async () => {
+    const editor = fakeEditor([SAVE]);
+    editor.takeFrom(1_000);
+    const result = await pressEditorDialogButton(PROJECT, [4242], 'Cancel', { io: editor.io, timeoutMs: 1_000 });
+    expect(result.kind).toBe('pressed');
   });
 
   it('finds the dialogs of the editors running the project', () => {
@@ -209,6 +236,21 @@ describe('awaiting input', () => {
     expect(process.exitCode).toBe(18);
     expect(envelope.errors[0]).toMatchObject({ code: 'AWAITING_INPUT' });
     expect(envelope.errors[0]!.message).toContain('"Save Content"');
+    expect(envelope.data.dialogs).toEqual([SAVE]);
+  });
+
+  it('run-tool adds the dialogs to a call the modal watch ended', async () => {
+    vi.spyOn(ui, 'error').mockImplementation(() => {});
+    const run = vi.fn(async () => ({
+      result: { kind: 'failure' as const, success: false as const, endpoint: 'http://localhost/api/tools/x', reason: 'http-error' as const, httpStatus: 500,
+        data: { error: 'The editor is showing the modal dialog "Save Content" (open for 3 s): its game thread waits' }, message: 'HTTP 500' },
+    }));
+    const cli = buildRunToolCommand({ name: 'run-tool', description: 'Test', errorNoun: 'tool', invoke: vi.fn(), run, findDialogs: () => [SAVE] });
+    const stdout = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    await cli.parseAsync(['node', 'cli', 'x', '--format', 'json']);
+    const envelope = JSON.parse(String(stdout.mock.calls.at(-1)?.[0])) as { errors: Array<{ code: string }>; data: { dialogs: EditorDialog[] } };
+    expect(process.exitCode).toBe(18);
+    expect(envelope.errors[0]).toMatchObject({ code: 'AWAITING_INPUT' });
     expect(envelope.data.dialogs).toEqual([SAVE]);
   });
 

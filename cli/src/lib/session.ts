@@ -226,12 +226,13 @@ export function createUnrealSession(options: UnrealSessionOptions): EditorSessio
     }
     return verified.probe;
   };
-  // An editor held by a modal dialog never answers (its readiness ping ends with the dialog's title): stop waiting
-  // as soon as the plugin publishes the dialog, so the caller reports it (AWAITING_INPUT) instead of a late timeout.
+  // An editor held by a modal dialog never answers (its readiness ping ends with the dialog's title). When the first
+  // probe (before any wait or launch) finds a published dialog, fail at once so the caller reports it (AWAITING_INPUT).
+  // A dialog that appears later, while waiting, is not caught here: cli-core's wait ignores a probe's error.
   const probeReady = async (): Promise<string | undefined> => {
     const ready = await ((await probeLeased()) ?? probeLocal)();
     if (ready !== undefined) return ready;
-    const dialogs = publishedDialogs(projectRoot);
+    const dialogs = publishedDialogs(projectRoot, { listProcessesImpl: listEditors });
     if (dialogs.length > 0) throw new EditorSessionError('not-ready', awaitingInputMessage(dialogs));
     return undefined;
   };

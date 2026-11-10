@@ -22,7 +22,9 @@ namespace UnrealMcpDialogControlLocal
 	/** A long text (the package list of "Save Content") is cut here. */
 	constexpr int32 MaxMessageChars = 2000;
 
+	// Matched by the type name SNew gives a widget (Slate has no RTTI); both are SButton or derive from it.
 	const FName ButtonType(TEXT("SButton"));
+	const FName PrimaryButtonType(TEXT("SPrimaryButton"));
 	const FName CheckBoxType(TEXT("SCheckBox"));
 	const FName HeaderRowType(TEXT("SHeaderRow"));
 	const FName TextBlockType(TEXT("STextBlock"));
@@ -39,38 +41,40 @@ namespace UnrealMcpDialogControlLocal
 		return FString();
 	}
 
-	/** A button and the label it shows. */
+	/** A button, the label it shows, and whether it and every widget around it are enabled. */
 	struct FLabelledButton
 	{
 		TSharedRef<SButton> Button;
 		FString Label;
+		bool bEnabled = true;
 	};
 
-	void Walk(const TSharedRef<SWidget>& Widget, TArray<FString>& OutTexts, TArray<FLabelledButton>& OutButtons);
+	void Walk(const TSharedRef<SWidget>& Widget, bool bParentEnabled, TArray<FString>& OutTexts, TArray<FLabelledButton>& OutButtons);
 
-	void WalkChildren(const TSharedRef<SWidget>& Widget, TArray<FString>& OutTexts, TArray<FLabelledButton>& OutButtons)
+	void WalkChildren(const TSharedRef<SWidget>& Widget, bool bEnabled, TArray<FString>& OutTexts, TArray<FLabelledButton>& OutButtons)
 	{
 		FChildren* Children = Widget->GetChildren();
 		for (int32 Index = 0; Children && Index < Children->Num(); ++Index)
-			Walk(Children->GetChildAt(Index), OutTexts, OutButtons);
+			Walk(Children->GetChildAt(Index), bEnabled, OutTexts, OutButtons);
 	}
 
 	/**
 	 * The visible texts outside buttons, check boxes and list headers, and the buttons that show a label (the texts inside
 	 * them; icon-only ones have none).
 	 */
-	void Walk(const TSharedRef<SWidget>& Widget, TArray<FString>& OutTexts, TArray<FLabelledButton>& OutButtons)
+	void Walk(const TSharedRef<SWidget>& Widget, bool bParentEnabled, TArray<FString>& OutTexts, TArray<FLabelledButton>& OutButtons)
 	{
 		if (!Widget->GetVisibility().IsVisible())
 			return;
+		const bool bEnabled = bParentEnabled && Widget->IsEnabled(); // a disabled panel disables what it holds
 		const FName Type = Widget->GetType();
-		if (Type == ButtonType)
+		if (Type == ButtonType || Type == PrimaryButtonType)
 		{
 			TArray<FString> Texts;
 			TArray<FLabelledButton> Nested;
-			WalkChildren(Widget, Texts, Nested);
+			WalkChildren(Widget, bEnabled, Texts, Nested);
 			if (!Texts.IsEmpty())
-				OutButtons.Add({ StaticCastSharedRef<SButton>(Widget), FString::Join(Texts, TEXT(" ")) });
+				OutButtons.Add({ StaticCastSharedRef<SButton>(Widget), FString::Join(Texts, TEXT(" ")), bEnabled });
 			return;
 		}
 		if (Type == CheckBoxType || Type == HeaderRowType)
@@ -78,7 +82,7 @@ namespace UnrealMcpDialogControlLocal
 		const FString Text = OwnText(Widget);
 		if (!Text.IsEmpty())
 			OutTexts.Add(Text);
-		WalkChildren(Widget, OutTexts, OutButtons);
+		WalkChildren(Widget, bEnabled, OutTexts, OutButtons);
 	}
 }
 
@@ -97,7 +101,7 @@ FUnrealMcpDialogControl::FDescription FUnrealMcpDialogControl::Describe(const TS
 	Out.Title = Window->GetTitle().ToString();
 	TArray<FString> Texts;
 	TArray<UnrealMcpDialogControlLocal::FLabelledButton> Buttons;
-	UnrealMcpDialogControlLocal::Walk(Window, Texts, Buttons);
+	UnrealMcpDialogControlLocal::Walk(Window, /*bParentEnabled*/ true, Texts, Buttons);
 	Texts.RemoveAll([&Out](const FString& Text) { return Text == Out.Title; }); // the title bar repeats it
 	Out.Message = FString::Join(Texts, TEXT("\n"));
 	if (Out.Message.Len() > UnrealMcpDialogControlLocal::MaxMessageChars)
@@ -107,24 +111,32 @@ FUnrealMcpDialogControl::FDescription FUnrealMcpDialogControl::Describe(const TS
 	return Out;
 }
 
-bool FUnrealMcpDialogControl::Press(const TSharedRef<SWindow>& Window, const FString& Label, FString* OutPressed)
+TFunction<void()> FUnrealMcpDialogControl::FindPress(const TSharedRef<SWindow>& Window, const FString& Label, FString* OutPressed)
 {
 	TArray<FString> Texts;
 	TArray<UnrealMcpDialogControlLocal::FLabelledButton> Buttons;
-	UnrealMcpDialogControlLocal::Walk(Window, Texts, Buttons);
+	UnrealMcpDialogControlLocal::Walk(Window, /*bParentEnabled*/ true, Texts, Buttons);
 	const FString Wanted = Label.TrimStartAndEnd();
-	for (const UnrealMcpDialogControlLocal::FLabelledButton& Button : Buttons)
-	{
-		if (Button.Label.Equals(Wanted, ESearchCase::IgnoreCase) && Button.Button->IsEnabled())
+	const UnrealMcpDialogControlLocal::FLabelledButton* Found = Buttons.FindByPredicate(
+		[&Wanted](const UnrealMcpDialogControlLocal::FLabelledButton& Button)
 		{
-			if (OutPressed)
-				*OutPressed = Button.Label;
-			// What a click runs (OnClicked), without moving the mouse or needing the window in front (non-Shipping API).
-			Button.Button->SimulateClick();
-			return true;
-		}
-	}
-	return false;
+			return Button.bEnabled && Button.Label.Equals(Wanted, ESearchCase::IgnoreCase);
+		});
+	if (!Found)
+		return nullptr;
+	if (OutPressed)
+		*OutPressed = Found->Label;
+	// What a click runs (OnClicked), without moving the mouse or needing the window in front (non-Shipping API).
+	return [Button = Found->Button]() { Button->SimulateClick(); };
+}
+
+bool FUnrealMcpDialogControl::Press(const TSharedRef<SWindow>& Window, const FString& Label, FString* OutPressed)
+{
+	const TFunction<void()> Click = FindPress(Window, Label, OutPressed);
+	if (!Click)
+		return false;
+	Click();
+	return true;
 }
 
 FString FUnrealMcpDialogControl::File(const TCHAR* Suffix) const
@@ -136,10 +148,11 @@ void FUnrealMcpDialogControl::WriteJson(const FString& Path, const TSharedRef<FJ
 {
 	FString Text;
 	FJsonSerializer::Serialize(Object, TJsonWriterFactory<>::Create(&Text));
-	// Written aside and moved in, so a reader never sees half a file.
+	// Written aside and moved over the old file, so a reader never sees half a file (it may briefly see none). No retries:
+	// this runs on the game thread, inside the modal loop.
 	const FString Temp = Path + TEXT(".tmp");
 	if (!FFileHelper::SaveStringToFile(Text, *Temp, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM)
-		|| !IFileManager::Get().Move(*Path, *Temp, /*bReplace*/ true, /*bEvenIfReadOnly*/ true))
+		|| !IFileManager::Get().Move(*Path, *Temp, /*Replace*/ true, /*EvenIfReadOnly*/ true, /*Attributes*/ false, /*bDoNotRetryOrError*/ true))
 	{
 		IFileManager::Get().Delete(*Temp, /*bRequireExists*/ false, /*bEvenReadOnly*/ true, /*bQuiet*/ true);
 		UE_LOG(LogUnrealMcp, Warning, TEXT("[Unreal-MCP] Could not write %s: unreal-mcp-cli dialog cannot see or answer the dialog."), *Path);
@@ -178,32 +191,38 @@ void FUnrealMcpDialogControl::PollPress(const TSharedPtr<SWindow>& Window, int32
 		Request->TryGetStringField(TEXT("id"), WantedId);
 	}
 
-	FString Result = TEXT("not-found");
 	FString Message;
 	FString Pressed = Label;
+	TFunction<void()> Click;
 	if (!Window.IsValid())
 		Message = TEXT("No modal dialog is open.");
 	else if (Label.IsEmpty())
 		Message = TEXT("The request names no button.");
 	else if (!WantedId.IsEmpty() && WantedId != FString::FromInt(Id))
 		Message = FString::Printf(TEXT("Dialog %s is no longer open; the dialog now open is %d \"%s\"."), *WantedId, Id, *Window->GetTitle().ToString());
-	else if (Press(Window.ToSharedRef(), Label, &Pressed))
-	{
-		Result = TEXT("pressed");
-		UE_LOG(LogUnrealMcp, Display, TEXT("[Unreal-MCP] Pressed \"%s\" on the modal dialog \"%s\" (unreal-mcp-cli dialog)."), *Pressed, *Window->GetTitle().ToString());
-	}
 	else
 	{
-		Message = FString::Printf(TEXT("The dialog \"%s\" has no enabled \"%s\" button (buttons: %s)."), *Window->GetTitle().ToString(), *Label,
-			*FString::Join(Describe(Window.ToSharedRef()).Buttons, TEXT(", ")));
+		Click = FindPress(Window.ToSharedRef(), Label, &Pressed);
+		if (!Click)
+		{
+			Message = FString::Printf(TEXT("The dialog \"%s\" has no enabled \"%s\" button (buttons: %s)."), *Window->GetTitle().ToString(), *Label,
+				*FString::Join(Describe(Window.ToSharedRef()).Buttons, TEXT(", ")));
+		}
 	}
 
 	const TSharedRef<FJsonObject> Answer = MakeShared<FJsonObject>();
 	Answer->SetStringField(TEXT("request"), RequestId);
-	Answer->SetStringField(TEXT("result"), Result);
+	Answer->SetStringField(TEXT("result"), Click ? TEXT("pressed") : TEXT("not-found"));
 	Answer->SetStringField(TEXT("button"), Pressed);
 	Answer->SetStringField(TEXT("message"), Message);
 	WriteJson(ResultFile(), Answer);
+
+	// Answered before the click: a button that opens another modal dialog runs that dialog's loop inside the click.
+	if (Click)
+	{
+		UE_LOG(LogUnrealMcp, Display, TEXT("[Unreal-MCP] Pressed \"%s\" on the modal dialog \"%s\" (unreal-mcp-cli dialog)."), *Pressed, *Window->GetTitle().ToString());
+		Click();
+	}
 }
 
 void FUnrealMcpDialogControl::Clear()

@@ -16,6 +16,7 @@
 #include "Widgets/Images/SImage.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SCheckBox.h"
+#include "Widgets/Layout/SBox.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/SWindow.h"
 #include "Widgets/Text/STextBlock.h"
@@ -32,6 +33,9 @@ BEGIN_DEFINE_SPEC(FUnrealMcpDialogControlSpec, "UnrealMcp.Session.DialogControl"
 	FString Dir;
 	int32 YesClicks = 0;
 	int32 NoClicks = 0;
+	FString Question = TEXT("Delete 3 assets?");
+	/** Set by the "Next" button of MakeChainDialog: whether the press was answered before its click ran. */
+	bool bAnsweredBeforeClick = false;
 
 	static FText DialogSpecText(const TCHAR* Text)
 	{
@@ -49,7 +53,7 @@ BEGIN_DEFINE_SPEC(FUnrealMcpDialogControlSpec, "UnrealMcp.Session.DialogControl"
 			[
 				SNew(SVerticalBox)
 				+ SVerticalBox::Slot()[SNew(STextBlock).Text(DialogSpecText(TEXT("Delete Assets")))]
-				+ SVerticalBox::Slot()[SNew(STextBlock).Text(DialogSpecText(TEXT("Delete 3 assets?")))]
+				+ SVerticalBox::Slot()[SNew(STextBlock).Text_Lambda([this]() { return FText::FromString(Question); })]
 				+ SVerticalBox::Slot()[SNew(STextBlock).Text(DialogSpecText(TEXT("Hidden"))).Visibility(EVisibility::Collapsed)]
 				+ SVerticalBox::Slot()[SNew(SCheckBox)[SNew(STextBlock).Text(DialogSpecText(TEXT("Apply to All")))]]
 				+ SVerticalBox::Slot()[SNew(SHeaderRow) + SHeaderRow::Column(TEXT("Asset")).DefaultLabel(DialogSpecText(TEXT("Asset")))]
@@ -63,7 +67,20 @@ BEGIN_DEFINE_SPEC(FUnrealMcpDialogControlSpec, "UnrealMcp.Session.DialogControl"
 				]
 				+ SVerticalBox::Slot()[SNew(SButton).Text(DialogSpecText(TEXT("No"))).OnClicked_Lambda([this]() { ++NoClicks; return FReply::Handled(); })]
 				+ SVerticalBox::Slot()[SNew(SButton).Text(DialogSpecText(TEXT("Later"))).IsEnabled(false)]
+				+ SVerticalBox::Slot()[SNew(SBox).IsEnabled(false)[SNew(SButton).Text(DialogSpecText(TEXT("Blocked")))]]
 				+ SVerticalBox::Slot()[SNew(SButton)[SNew(SImage)]]
+			];
+	}
+
+	/** A dialog whose "Next" button would open another modal dialog: it notes whether its press was already answered. */
+	TSharedRef<SWindow> MakeChainDialog(const FString& ResultFile)
+	{
+		return SNew(SWindow)
+			.Title(DialogSpecText(TEXT("Step 1")))
+			[
+				SNew(SButton)
+				.Text(DialogSpecText(TEXT("Next")))
+				.OnClicked_Lambda([this, ResultFile]() { bAnsweredBeforeClick = FPaths::FileExists(ResultFile); return FReply::Handled(); })
 			];
 	}
 
@@ -90,6 +107,8 @@ void FUnrealMcpDialogControlSpec::Define()
 	{
 		YesClicks = 0;
 		NoClicks = 0;
+		Question = TEXT("Delete 3 assets?");
+		bAnsweredBeforeClick = false;
 		Dir = FPaths::ConvertRelativePathToFull(FPaths::ProjectIntermediateDir() / TEXT("UnrealMcpTests") / TEXT("Dialogs"));
 		IFileManager::Get().DeleteDirectory(*Dir, /*bRequireExists*/ false, /*bTree*/ true);
 		IFileManager::Get().MakeDirectory(*Dir, /*bTree*/ true);
@@ -102,7 +121,7 @@ void FUnrealMcpDialogControlSpec::Define()
 		const FUnrealMcpDialogControl::FDescription Dialog = FUnrealMcpDialogControl::Describe(MakeDialog());
 		TestEqual(TEXT("title"), Dialog.Title, FString(TEXT("Delete Assets")));
 		TestEqual(TEXT("message"), Dialog.Message, FString(TEXT("Delete 3 assets?")));
-		TestEqual(TEXT("buttons"), Dialog.Buttons, TArray<FString>{ TEXT("Yes"), TEXT("No"), TEXT("Later") });
+		TestEqual(TEXT("buttons"), Dialog.Buttons, TArray<FString>{ TEXT("Yes"), TEXT("No"), TEXT("Later"), TEXT("Blocked") });
 	});
 
 	It("presses an enabled button by its label, in any case", [this]()
@@ -113,6 +132,7 @@ void FUnrealMcpDialogControlSpec::Define()
 		TestEqual(TEXT("Yes clicked"), YesClicks, 1);
 		TestEqual(TEXT("as the dialog shows it"), Pressed, FString(TEXT("Yes")));
 		TestFalse(TEXT("a disabled button"), FUnrealMcpDialogControl::Press(Window, TEXT("Later")));
+		TestFalse(TEXT("a button in a disabled panel"), FUnrealMcpDialogControl::Press(Window, TEXT("Blocked")));
 		TestFalse(TEXT("no such button"), FUnrealMcpDialogControl::Press(Window, TEXT("Maybe")));
 		TestFalse(TEXT("a check box is no button"), FUnrealMcpDialogControl::Press(Window, TEXT("Apply to All")));
 		TestEqual(TEXT("No untouched"), NoClicks, 0);
@@ -130,7 +150,7 @@ void FUnrealMcpDialogControlSpec::Define()
 		TestEqual(TEXT("pid"), static_cast<int32>(Published->GetNumberField(TEXT("pid"))), 4242);
 		TestEqual(TEXT("id"), Published->GetStringField(TEXT("id")), FString(TEXT("7")));
 		TestEqual(TEXT("message"), Published->GetStringField(TEXT("message")), FString(TEXT("Delete 3 assets?")));
-		TestEqual(TEXT("buttons"), Published->GetArrayField(TEXT("buttons")).Num(), 3);
+		TestEqual(TEXT("buttons"), Published->GetArrayField(TEXT("buttons")).Num(), 4);
 
 		Control.PollPress(Window, 7);
 		TestFalse(TEXT("no request, no answer"), FPaths::FileExists(Control.ResultFile()));
@@ -156,7 +176,7 @@ void FUnrealMcpDialogControlSpec::Define()
 		RequestPress(Control, TEXT("r3"), TEXT("Maybe"), TEXT(""));
 		Control.PollPress(Window, 7);
 		Result = ReadDialogSpecJson(Control.ResultFile());
-		TestTrue(TEXT("names the buttons there are"), Result->GetStringField(TEXT("message")).Contains(TEXT("Yes, No, Later")));
+		TestTrue(TEXT("names the buttons there are"), Result->GetStringField(TEXT("message")).Contains(TEXT("Yes, No, Later, Blocked")));
 
 		RequestPress(Control, TEXT("r4"), TEXT("Yes"), TEXT(""));
 		Control.Clear();
@@ -182,10 +202,28 @@ void FUnrealMcpDialogControlSpec::Define()
 		Watch.HandleModalTick(Window, FUnrealMcpModalWatch::PressPollSeconds * 2);
 		TestEqual(TEXT("pressed"), YesClicks, 1);
 
+		Question = TEXT("Delete 4 assets?"); // what a list shows once Slate ticked it
+		Watch.HandleModalTick(Window, FUnrealMcpModalWatch::PressPollSeconds * 4);
+		const TSharedPtr<FJsonObject> Republished = ReadDialogSpecJson(Control.DialogFile());
+		if (TestTrue(TEXT("republished"), Republished.IsValid()))
+		{
+			TestEqual(TEXT("with the new text"), Republished->GetStringField(TEXT("message")), FString(TEXT("Delete 4 assets?")));
+			TestEqual(TEXT("under the same id"), Republished->GetStringField(TEXT("id")), FString(TEXT("1")));
+		}
+
 		Watch.HandleModalClosed(/*bAnyModalLeft*/ false);
 		TestFalse(TEXT("cleared"), FPaths::FileExists(Control.DialogFile()));
 		Watch.HandleModalTick(MakeDialog(), 10.0);
 		TestEqual(TEXT("a new dialog has a new id"), Watch.GetDialogId(), 2);
+	});
+
+	It("answers a press before its click runs, since the click may open another modal dialog", [this]()
+	{
+		FUnrealMcpDialogControl Control(Dir, 4242);
+		const TSharedRef<SWindow> Window = MakeChainDialog(Control.ResultFile());
+		RequestPress(Control, TEXT("c1"), TEXT("Next"), TEXT(""));
+		Control.PollPress(Window, 1);
+		TestTrue(TEXT("answered before the click"), bAnsweredBeforeClick);
 	});
 
 	It("names the buttons and the CLI in the reason a blocked call ends with", [this]()

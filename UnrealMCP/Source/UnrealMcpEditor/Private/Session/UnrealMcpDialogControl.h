@@ -39,10 +39,13 @@ public:
 	static FDescription Describe(const TSharedRef<SWindow>& Window);
 
 	/**
-	 * Click the visible, enabled button labelled @p Label (case-insensitive) in @p Window; false when it has none.
-	 * @p OutPressed: the label as the dialog shows it.
+	 * Click the visible button labelled @p Label (case-insensitive) in @p Window, when it and every widget around it are
+	 * enabled; false when there is none. @p OutPressed: the label as the dialog shows it.
 	 */
 	static bool Press(const TSharedRef<SWindow>& Window, const FString& Label, FString* OutPressed = nullptr);
+
+	/** The click Press would make, not made yet (empty when there is no such button). */
+	static TFunction<void()> FindPress(const TSharedRef<SWindow>& Window, const FString& Label, FString* OutPressed = nullptr);
 
 	/** Publish @p Dialog, the one on top, under @p Id. */
 	void Publish(const FDescription& Dialog, int32 Id);

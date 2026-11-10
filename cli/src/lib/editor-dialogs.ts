@@ -85,6 +85,8 @@ export const nodeDialogFileIo: DialogFileIo = {
 /** How long a press waits for the editor to answer. The plugin looks every 0.1 s while the dialog is open. */
 const PRESS_TIMEOUT_MS = 5_000;
 const PRESS_POLL_MS = 50;
+/** How long a request the editor took at the deadline still has to be answered. */
+const PRESS_GRACE_MS = 2_000;
 
 /** Shown when no dialog is served: what the user can still do. */
 export const NO_DIALOG_HINT =
@@ -135,16 +137,23 @@ export function listEditorDialogs(projectDir: string, pids: readonly number[], i
 }
 
 /**
- * The dialogs published for the project at `projectDir` by editors that are still running: a directory read and a
- * liveness check per file, no process listing (cheap enough for every failed readiness probe).
+ * The dialogs published for the project at `projectDirOrFile` (its folder or its `.uproject`) by editors of it that
+ * are still running. Cheap when none is published (a directory read): only a file of a live process costs the process
+ * listing that confirms it is an editor of this project (a file a crashed editor left behind may name a reused pid).
  */
-export function publishedDialogs(projectDir: string, io: DialogFileIo = nodeDialogFileIo): EditorDialog[] {
-  const pids = io.list(dialogDir(projectDir))
+export function publishedDialogs(projectDirOrFile: string, deps: FindDialogsDeps = {}): EditorDialog[] {
+  const io = deps.io ?? nodeDialogFileIo;
+  const project = readUProject(path.resolve(projectDirOrFile));
+  if (!project) return [];
+  const candidates = io.list(dialogDir(project.projectDir))
     .map((name) => /^(\d+)\.json$/.exec(name)?.[1])
     .filter((pid): pid is string => pid !== undefined)
     .map(Number)
     .filter((pid) => io.alive(pid));
-  return listEditorDialogs(projectDir, pids, io);
+  if (candidates.length === 0) return [];
+  const listed = selectEditorProcesses((deps.listProcessesImpl ?? listProcesses)(), project.projectDir, project.uprojectPath);
+  const editors = new Set(listed.map((p) => p.pid));
+  return listEditorDialogs(project.projectDir, candidates.filter((pid) => editors.has(pid)), io);
 }
 
 function sameLabel(a: string, b: string): boolean {
@@ -164,9 +173,12 @@ export async function pressEditorDialogButton(
   const dialogs = listEditorDialogs(projectDir, pids, io);
   if (dialogs.length === 0) return { kind: 'not-found', message: `No modal dialog is open in the editor. ${NO_DIALOG_HINT}` };
   const open = dialogs.map(describeDialog).join('; ');
-  const target = id !== undefined
-    ? dialogs.find((d) => d.id === id)
-    : dialogs.find((d) => d.buttons.some((b) => sameLabel(b, button)));
+  const matches = id !== undefined ? dialogs.filter((d) => d.id === id) : dialogs.filter((d) => d.buttons.some((b) => sameLabel(b, button)));
+  // Ids count per editor: with several editors of the project open, an id may name a dialog in each.
+  if (id !== undefined && matches.length > 1) {
+    return { kind: 'not-found', message: `Dialog ${id} is open in several editors (PID ${matches.map((d) => d.pid).join(', ')}): close all but one.` };
+  }
+  const target = matches[0];
   if (!target) {
     return {
       kind: 'not-found',
@@ -178,29 +190,44 @@ export async function pressEditorDialogButton(
   const pressFile = dialogFile(projectDir, target.pid, '.press.json');
   const resultFile = dialogFile(projectDir, target.pid, '.result.json');
   try {
-    io.remove(resultFile);
+    removeQuietly(io, resultFile);
     io.write(pressFile, JSON.stringify({ request, button, id: target.id }));
   } catch (err) {
     return { kind: 'no-answer', message: `Could not write ${pressFile}: ${err instanceof Error ? err.message : String(err)}` };
   }
-  const deadline = io.now() + timeoutMs;
+  let deadline = io.now() + timeoutMs;
+  let extended = false;
   for (;;) {
     const answer = parseAnswer(io.read(resultFile));
     if (answer?.request === request) {
-      io.remove(resultFile);
+      removeQuietly(io, resultFile);
       return answer.result === 'pressed'
         ? { kind: 'pressed', button: answer.button || button, dialog: target }
         : { kind: 'not-found', message: answer.message || `The dialog "${target.title}" has no "${button}" button.` };
     }
-    if (io.now() >= deadline) break;
+    if (io.now() >= deadline) {
+      // Taken just in time: its answer is on the way, so wait a moment rather than misreport a press.
+      if (extended || io.read(pressFile) !== undefined) break;
+      extended = true;
+      deadline = io.now() + PRESS_GRACE_MS;
+    }
     await io.sleep(PRESS_POLL_MS);
   }
-  io.remove(pressFile); // never pressed later, behind the caller's back
+  removeQuietly(io, pressFile); // never pressed later, behind the caller's back
   return {
     kind: 'no-answer',
     message: `The editor (PID ${target.pid}) did not take the request within ${Math.round(timeoutMs / 1000)} s: the dialog "${target.title}" ` +
       'may have closed, or it is not one the plugin can answer. Answer it in the editor.',
   };
+}
+
+/** Remove a file, ignoring a failure (Windows refuses while the editor has it open): a library never throws. */
+function removeQuietly(io: DialogFileIo, file: string): void {
+  try {
+    io.remove(file);
+  } catch {
+    // left for the next request, which replaces it
+  }
 }
 
 function parseAnswer(text: string | undefined): { request?: string; result?: string; button?: string; message?: string } | undefined {
@@ -264,7 +291,7 @@ export interface CommandFailure {
 export function withBlockingDialogs(
   projectDir: string,
   failure: CommandFailure,
-  find: (projectDir: string) => EditorDialog[] = publishedDialogs,
+  find: (projectDir: string) => EditorDialog[] = (dir) => publishedDialogs(dir),
 ): CommandFailure {
   if (!DIALOG_SUSPECTS.has(failure.kind.code)) return failure;
   const dialogs = find(projectDir);
