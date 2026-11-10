@@ -40,7 +40,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             Assert.Contains(windows ? "```powershell" : "```bash", guide);
             Assert.DoesNotContain(windows ? "```bash" : "```powershell", guide);
             Assert.Contains(windows ? "npm.cmd install -g unreal-mcp-cli" : "npm install -g unreal-mcp-cli", guide);
-            Assert.Contains("run-tool rql-schema --input '{}'", guide);
+            Assert.Contains("setup-skills claude-code", guide);
+            Assert.DoesNotContain("rql-schema", guide);
             Assert.DoesNotContain("<tool-name>", guide);
             Assert.DoesNotMatch("@[A-Z_]+@", guide);
             Assert.DoesNotContain("<<'EOF'", guide);
@@ -110,7 +111,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
                 Assert.Contains("metadata:\n  generated-by: unreal-mcp\n  ai-game-dev: exclude\n", File.ReadAllText(file));
 
             var tool = File.ReadAllText(Path.Combine(_root, "actor-create", "SKILL.md"));
-            Assert.Contains("unreal-cli", tool);
+            Assert.Contains("the `unreal-mcp-cli` skill", tool);
+            Assert.Contains("installation: `unreal-cli`", tool);
             Assert.Contains("ai-game-dev-app", tool);
             Assert.DoesNotContain("npm install", tool);
             Assert.Contains(BuiltinSkillGuides.IsWindows ? "npm.cmd install -g unreal-mcp-cli" : "npm install -g unreal-mcp-cli", File.ReadAllText(Path.Combine(_root, "unreal-cli", "SKILL.md")));
@@ -119,6 +121,31 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             var snapshot = Directory.GetFiles(_root, "SKILL.md", SearchOption.AllDirectories).ToDictionary(p => p, File.ReadAllText);
             Assert.True(generator.Generate(_tools, _root).Success);
             foreach (var entry in snapshot) Assert.Equal(entry.Value, File.ReadAllText(entry.Key));
+        }
+
+        [Fact]
+        public void PrunesOnlyItsOwnStaleFolders_NeverTheCliSkillOrAUsersSkill()
+        {
+            Directory.CreateDirectory(_root);
+            void Skill(string name, string body)
+            {
+                Directory.CreateDirectory(Path.Combine(_root, name));
+                File.WriteAllText(Path.Combine(_root, name, "SKILL.md"), body);
+            }
+            const string ours = "---\nname: x\nmetadata:\n  generated-by: unreal-mcp\n---\nold\n";
+            Skill("removed-tool", ours);                                   // a tool the catalog no longer has
+            Skill(BuiltinSkillGuides.CliUsageSkillName, ours);             // written by unreal-mcp-cli setup-skills
+            Skill("my-notes", "---\nname: my-notes\n---\nmine\n");       // a user's own skill
+            var generator = new SkillFileGenerator(metadata: new Dictionary<string, string> { ["generated-by"] = "unreal-mcp" });
+
+            var result = generator.Generate(_tools, _root);
+
+            Assert.True(result.Success, result.Error);
+            Assert.Equal(1, result.FilesPruned);
+            Assert.False(Directory.Exists(Path.Combine(_root, "removed-tool")));
+            Assert.True(File.Exists(Path.Combine(_root, BuiltinSkillGuides.CliUsageSkillName, "SKILL.md")));
+            Assert.True(File.Exists(Path.Combine(_root, "my-notes", "SKILL.md")));
+            Assert.Equal(0, SkillFileGenerator.PruneStaleSkillFolders(_root, new HashSet<string>(), provenance: null));
         }
 
         [Fact]

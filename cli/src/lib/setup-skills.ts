@@ -32,6 +32,8 @@ export interface SetupSkillsSuccess {
   filesWritten: string[];
   /** Retired skill folders of earlier versions that were removed. */
   removed: string[];
+  /** Skill folders left alone because someone else wrote a skill of that name (see `force`). */
+  skipped: string[];
   /** True when any file changed. */
   written: boolean;
   warnings: string[];
@@ -72,16 +74,6 @@ export async function setupSkills(opts: SetupSkillsOptions = {}): Promise<SetupS
     const skillsDir = path.join(projectDir, agent.skillsPath);
     emitProgress(opts.onProgress, { phase: 'start', message: `Writing ${agent.name} skills to ${skillsDir}` });
 
-    // Retired stubs of earlier versions would teach the outdated workflow next to the new skill: remove ours only.
-    const removed: string[] = [];
-    for (const name of RETIRED_SKILL_NAMES) {
-      const dir = path.join(skillsDir, name);
-      if (isGenerated(path.join(dir, 'SKILL.md'))) {
-        fs.rmSync(dir, { recursive: true, force: true });
-        removed.push(dir);
-      }
-    }
-
     const filesWritten: string[] = [];
     const skipped = new Set<string>();
     for (const file of buildGuideFiles()) {
@@ -100,6 +92,19 @@ export async function setupSkills(opts: SetupSkillsOptions = {}): Promise<SetupS
       filesWritten.push(target);
     }
 
+    // The retired stub would teach the outdated workflow next to the new skill: removed once the new skill is in place,
+    // and only when we wrote it.
+    const removed: string[] = [];
+    if (!skipped.has(CLI_NAME)) {
+      for (const name of RETIRED_SKILL_NAMES) {
+        const dir = path.join(skillsDir, name);
+        if (isGenerated(path.join(dir, 'SKILL.md'))) {
+          fs.rmSync(dir, { recursive: true, force: true });
+          removed.push(dir);
+        }
+      }
+    }
+
     emitProgress(opts.onProgress, {
       phase: 'done',
       message: filesWritten.length > 0 ? `${filesWritten.length} skill file(s) written.` : 'Skills are up to date.',
@@ -111,6 +116,7 @@ export async function setupSkills(opts: SetupSkillsOptions = {}): Promise<SetupS
       skillPath: path.join(skillsDir, CLI_NAME, 'SKILL.md'),
       filesWritten,
       removed,
+      skipped: [...skipped],
       written: filesWritten.length > 0 || removed.length > 0,
       warnings,
     };

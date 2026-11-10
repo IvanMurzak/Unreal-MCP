@@ -43,6 +43,7 @@ describe('setupSkills', () => {
     await setupSkills({ projectDir: dir });
     const before = read(skillsOf(dir, 'unreal-mcp-cli', 'SKILL.md'));
     const second = await setupSkills({ projectDir: dir });
+    expect(second.kind).toBe('success');
     expect(second.kind === 'success' && second.written).toBe(false);
     expect(read(skillsOf(dir, 'unreal-mcp-cli', 'SKILL.md'))).toBe(before);
   });
@@ -58,18 +59,22 @@ describe('setupSkills', () => {
     expect(none.kind === 'failure' && none.error.message).toContain('does not support skills');
   });
 
-  it('removes the retired stubs it generated, never a folder someone else wrote', async () => {
+  it('removes the retired stub it generated, never a folder someone else wrote, and keeps the editor\'s unreal-cli', async () => {
     const dir = tmp();
-    const stub = skillsOf(dir, 'unreal-mcp', 'SKILL.md');
-    fs.mkdirSync(path.dirname(stub), { recursive: true });
-    fs.writeFileSync(stub, '---\nname: unreal-mcp\nmetadata:\n  generated-by: unreal-mcp\n---\nold');
-    const foreign = skillsOf(dir, 'unreal-cli', 'SKILL.md');
-    fs.mkdirSync(path.dirname(foreign), { recursive: true });
-    fs.writeFileSync(foreign, 'my own notes');
+    const ours = '---\nname: x\nmetadata:\n  generated-by: unreal-mcp\n---\nold';
+    const put = (name: string, body: string) => {
+      fs.mkdirSync(skillsOf(dir, name), { recursive: true });
+      fs.writeFileSync(skillsOf(dir, name, 'SKILL.md'), body);
+    };
+    put('unreal-mcp', ours);
+    put('unreal-cli', ours);
+    put('my-notes', 'my own notes');
     const r = await setupSkills({ projectDir: dir });
-    expect(r.kind === 'success' && r.removed).toEqual([path.dirname(stub)]);
-    expect(fs.existsSync(stub)).toBe(false);
-    expect(read(foreign)).toBe('my own notes');
+    expect(r.kind).toBe('success');
+    expect(r.kind === 'success' && r.removed).toEqual([skillsOf(dir, 'unreal-mcp')]);
+    expect(fs.existsSync(skillsOf(dir, 'unreal-mcp'))).toBe(false);
+    expect(fs.existsSync(skillsOf(dir, 'unreal-cli', 'SKILL.md'))).toBe(true);
+    expect(read(skillsOf(dir, 'my-notes', 'SKILL.md'))).toBe('my own notes');
   });
 
   it('keeps a same-named skill it did not write unless --force', async () => {
@@ -79,11 +84,14 @@ describe('setupSkills', () => {
     fs.writeFileSync(own, 'existing');
     const r = await setupSkills({ projectDir: dir });
     expect(r.kind === 'success' && r.warnings.join()).toContain('was not written by unreal-mcp-cli');
+    expect(r.kind === 'success' && r.skipped).toEqual(['unreal-mcp-cli']);
     expect(read(own)).toBe('existing');
     expect(fs.existsSync(skillsOf(dir, 'unreal-mcp-cli', 'references', 'rql.md'))).toBe(false);
     expect(fs.existsSync(skillsOf(dir, 'ai-game-dev-app', 'SKILL.md'))).toBe(true);
-    await setupSkills({ projectDir: dir, force: true });
+    const forced = await setupSkills({ projectDir: dir, force: true });
+    expect(forced.kind === 'success' && forced.skipped).toEqual([]);
     expect(read(own)).toBe(skillMd());
+    expect(fs.existsSync(skillsOf(dir, 'unreal-mcp-cli', 'references', 'rql.md'))).toBe(true);
   });
 });
 

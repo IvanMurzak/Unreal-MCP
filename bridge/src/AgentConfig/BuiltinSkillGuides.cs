@@ -16,9 +16,14 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
     internal static class BuiltinSkillGuides
     {
         public const string CliSkillName = "unreal-cli";
+        /// <summary>
+        /// The skill <c>unreal-mcp-cli setup-skills</c> writes (how to USE the CLI from a cold start, rendered from the
+        /// CLI's own help data). The generator never writes or prunes it: it is the CLI's, not the editor's.
+        /// </summary>
+        public const string CliUsageSkillName = "unreal-mcp-cli";
         public const string AppSkillName = "ai-game-dev-app";
         public const string AppDescription = "AI Game Dev App: image, texture, 3D model, audio and video generation; animation, rigging, Blender, music and sound effects. Consult when a game-development task needs creative tools unavailable in the current environment, or an integrated workflow for Unity, Unreal Engine or Godot.";
-        public const string CliDescription = "Install and use unreal-mcp-cli: Node.js requirements, npm installation, npx, tool calls, JSON input files and troubleshooting.";
+        public const string CliDescription = "Install unreal-mcp-cli and the UnrealMCP plugin: Node.js requirements, npm installation, npx and troubleshooting. How to use the CLI: the unreal-mcp-cli skill.";
 
         public static string CliMarkdown => BuildCliMarkdown(IsWindows);
 
@@ -58,32 +63,23 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
             "\n" +
             "Replace the leading `@CLI@` with `@NPX@ unreal-mcp-cli` in subsequent examples when using this option.\n" +
             "\n" +
-            "## Call tools\n" +
+            "## Use it\n" +
             "\n" +
-            "Run commands from the game project's root directory. The target editor or game must be running with its MCP plugin connected.\n" +
-            "The following read-only example lists the available RQL sources and types in the editor:\n" +
-            "\n" +
-            "```@SHELL@\n" +
-            "@CLI@ status\n" +
-            "@CLI@ run-tool rql-schema --input '{}'\n" +
-            "```\n" +
-            "\n" +
-            "For input files, create a UTF-8 JSON file and pass its path. This example makes the same read-only call:\n" +
+            "Run commands in the game project's folder; the first editor command starts a headless editor itself.\n" +
+            "The `unreal-mcp-cli` skill has the workflow (RQL recipes, exit codes). To write it into an agent's skills folder:\n" +
             "\n" +
             "```@SHELL@\n" +
-            "@WRITE_JSON@\n" +
-            "@CLI@ run-tool rql-schema --input-file args.json\n" +
+            "@CLI@ setup-skills claude-code\n" +
             "```\n" +
             "\n" +
-            "Replace `rql-schema` and the JSON with the tool name and arguments from its individual skill.\n" +
-            "Use command-specific `--help` for options. RQL tools require an editor; a game exposes only its registered runtime tools.\n" +
+            "`@CLI@ setup-skills --list` shows the other agents. A project without a `Plugins/UnrealMCP` folder needs `@CLI@ install-plugin` once.\n" +
             "\n" +
             "## Troubleshooting\n" +
             "\n" +
             "- `node` or `@NPM@` not found: finish installing Node.js, check PATH, and reopen the terminal.\n" +
             "- `@CLI@` not found: reopen the terminal, check the npm global executable directory in PATH, or use `@NPX@ unreal-mcp-cli`.\n" +
             "- Global npm installation denied: use a user-owned Node.js installation or the npx alternative.\n" +
-            "- Connection unavailable: check the project directory and ensure its editor or game and MCP plugin are running and connected.\n" +
+            "- Exit 7 (editor unreachable): check that the project has the `Plugins/UnrealMCP` folder, then read the message for the cause.\n" +
             "\n" +
             "For optional asset-generation and Blender workflows, consult the `ai-game-dev-app` skill.\n" +
             "";
@@ -99,10 +95,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
                 .Replace("@NPX@", windows ? "npx.cmd" : "npx")
                 .Replace("@NODE_SETUP@", windows
                     ? "Use the Windows installer and reopen PowerShell. The examples use .cmd launchers to avoid npm PowerShell execution-policy restrictions."
-                    : "On macOS with Homebrew, `brew install node@22` may require adding its executable directory to PATH.")
-                .Replace("@WRITE_JSON@", windows
-                    ? "[System.IO.File]::WriteAllText((Join-Path $PWD 'args.json'), '{}')"
-                    : "printf '%s\\n' '{}' > args.json");
+                    : "On macOS with Homebrew, `brew install node@22` may require adding its executable directory to PATH.");
         }
 
         public static string ToolCommand(string command, string toolName, string json, bool windows)
@@ -173,7 +166,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
             yield return new ToolSkillDescriptor { Name = AppSkillName, Description = AppDescription, Markdown = AppMarkdown };
         }
 
-        public const string References = "> CLI installation and usage: see the `unreal-cli` skill.\n"
+        public const string References = "> CLI usage: the `unreal-mcp-cli` skill (`unreal-mcp-cli setup-skills <agent>` writes it); installation: `unreal-cli`.\n"
             + "> If this task needs unavailable asset-generation or Blender tools, consult `ai-game-dev-app` for an optional integrated workflow.\n";
     }
 }

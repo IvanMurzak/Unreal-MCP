@@ -1,6 +1,7 @@
 import { Command, Option } from 'commander';
 import { DEFAULT_SKILLS_AGENT, setupSkills } from '../lib/setup-skills.js';
-import { listAgentTable } from '../utils/agents.js';
+import * as fs from 'fs';
+import { getAgentById, listAgentTable } from '../utils/agents.js';
 import * as ui from '../utils/ui.js';
 
 export const setupSkillsCommand = new Command('setup-skills')
@@ -18,11 +19,20 @@ export const setupSkillsCommand = new Command('setup-skills')
       listAgentTable('AI Agents — Skills Support', 'Skills Path', (a) => a.skillsPath ?? '—');
       return;
     }
+    // `setup-skills <dir>`: a first argument that is no agent but an existing folder is the project.
+    if (agentId !== undefined && positionalPath === undefined && !getAgentById(agentId) && fs.existsSync(agentId)) {
+      positionalPath = agentId;
+      agentId = undefined;
+    }
     const result = await setupSkills({ projectDir: positionalPath ?? opts.path, agentId, force: opts.force });
     ui.printWarnings(result.warnings);
     if (result.kind === 'failure') {
       ui.error(result.error.message);
       process.exitCode = 1;
+      return;
+    }
+    if (result.skipped.length > 0 && !result.written) {
+      ui.info(`Not written: ${result.skipped.join(', ')} (see the warning above).`);
       return;
     }
     if (result.written) ui.success(`Skills written to ${result.skillsDir} (${result.filesWritten.length} file(s) changed${result.removed.length ? `, ${result.removed.length} retired skill(s) removed` : ''}).`);

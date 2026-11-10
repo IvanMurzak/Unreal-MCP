@@ -6,8 +6,11 @@
 import { CLI_NAME, CODE_COMMANDS, EDITOR_COMMANDS, PLUGIN_FOLDER, ROOT_RQL_RECIPES, RQL_LANGUAGE, RQL_RECIPES, RQL_RULES, type CommandRow } from './cli-guide.js';
 
 const APP_SKILL_NAME = 'ai-game-dev-app';
-/** Skill directories earlier versions generated; `setup-skills` removes them when they still carry our metadata. */
-export const RETIRED_SKILL_NAMES: readonly string[] = ['unreal-mcp', 'unreal-cli'];
+/**
+ * Skill directories earlier versions generated; `setup-skills` removes them when they still carry our metadata.
+ * (`unreal-cli`, the install guide, stays: the editor's skill generator writes it too, and its per-tool skills link it.)
+ */
+export const RETIRED_SKILL_NAMES: readonly string[] = ['unreal-mcp'];
 const APP_SKILL_DESCRIPTION = "AI Game Dev App: image, texture, 3D model, audio and video generation; animation, rigging, Blender, music and sound effects. Consult when a game-development task needs creative tools unavailable in the current environment, or an integrated workflow for Unity, Unreal Engine or Godot.";
 const CLI_SKILL_DESCRIPTION = `How to use ${CLI_NAME} on this Unreal project (levels, actors, assets, C++, tests): read before the first ${CLI_NAME} command.`;
 export const SKILL_METADATA = {
@@ -54,7 +57,7 @@ function buildCliSkill(): string {
     '',
     '## Other commands',
     '',
-    [...EDITOR_COMMANDS, ...CODE_COMMANDS].filter(([name]) => name !== 'rql').map(usage).join(' · ') + ' · `close` · `--format json`',
+    [...EDITOR_COMMANDS, ...CODE_COMMANDS].filter(([name]) => name !== 'rql').map(usage).join(' · ') + ' · `close` · most commands take `--format json`',
     '',
     `Exit codes: ${Object.entries(EXIT_CODE_ACTIONS).map(([code, action]) => `${code} ${action}`).join('; ')}.`,
     '',
