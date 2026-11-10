@@ -16,11 +16,6 @@ export const SIGNED_IN_BUT_UNUSABLE_MESSAGE = signedInButUnusableMessage('unreal
 export const LOCAL_FALLBACK_NOTE = 'Not signed in to ai-game.dev, so the project\'s local MCP server is used: an editor started now serves it. '
   + 'Run `unreal-mcp-cli login` to use Cloud mode.';
 
-/** `missing` = this machine never signed in to ai-game.dev; anything else = a sign-in exists (usable or not). */
-export function machineCredentialState(): CredentialState {
-  return machineCredentialStatus(); // fail safe: a store we cannot read is never "never signed in"
-}
-
 /** The cloud rejected the sign-in. 401 only: a 403 can mean a plan, quota or forbidden tool. */
 export function isAuthFailure(failure: RunToolFailure): boolean {
   return failure.reason === 'http-error' && failure.httpStatus === 401;
@@ -37,7 +32,8 @@ export function usesProjectCloudMode(call: { projectDir?: string; url?: string; 
  */
 export function mustStayInCloud(
   call: { projectDir?: string; url?: string; token?: string },
-  state: () => CredentialState = machineCredentialState,
+  // `missing` = never signed in; a store that cannot be read counts as a sign-in (fail safe).
+  state: () => CredentialState = machineCredentialStatus,
   cliEditorPid: (projectDir: string) => number | undefined = liveOwnedEditorPid,
 ): boolean {
   return usesProjectCloudMode(call) && cliEditorPid(call.projectDir!) === undefined

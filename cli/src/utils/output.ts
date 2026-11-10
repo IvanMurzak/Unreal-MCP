@@ -10,8 +10,7 @@ import { CommandOutput as ContractOutput, OUTPUT_FORMATS } from '@baizor/gamedev
 import { ExitCode, UsageError, type ExitCodeValue } from './exit-codes.js';
 import * as ui from './ui.js';
 
-export { OUTPUT_FORMATS, formatFromArgv, isMachineFormat, renderEnvelope } from '@baizor/gamedev-cli-core';
-export type { Envelope, OutputFormat } from '@baizor/gamedev-cli-core';
+export { OUTPUT_FORMATS, formatFromArgv, isMachineFormat } from '@baizor/gamedev-cli-core';
 
 /** Error codes of the envelope (UPPER_SNAKE). */
 export type ErrorCode =
