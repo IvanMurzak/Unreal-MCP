@@ -172,9 +172,10 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
         // ------------------------------------------------------------ schema JSON -> compact text
 
         /// <summary>
-        /// rql-schema's text, in the compact lines of RQL's own schema (<c>Name : Base {member type ro, …} methods: …</c>) as
-        /// Unity-MCP prints it: without a type, the sources, functions, the classes present in the editor world and the
-        /// Actor / SceneComponent members; with one, that type (members shared with Actor / ActorComponent summarised).
+        /// rql-schema's text. Without a type: the sources, functions, missing extensions, the classes present in the editor
+        /// world and the Actor / SceneComponent member names (<c>Name : Base {a, b, …} methods: …</c>). With one: that type
+        /// in the compact lines of RQL's own schema (<c>Name : Base {member type ro, …} methods: …</c>, as Unity-MCP prints
+        /// it; members shared with Actor / ActorComponent summarised).
         /// </summary>
         public static string RenderSchema(JsonObject json)
         {
@@ -228,7 +229,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
                     if (!(entry["type"] is JsonObject type)) continue;
                     if (overview)
                     {
-                        AppendTypeSummary(sb, type);
+                        AppendTypeSummary(sb, type, entry["shared"] as JsonObject);
                         continue;
                     }
                     var shared = entry["shared"] as JsonObject;
@@ -252,11 +253,9 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
         /// </summary>
         public static string ShortExtensionLine(string line)
         {
+            const string NotInstalled = " - not installed";
             var titleEnd = line.IndexOf("): ", StringComparison.Ordinal);
-            if (titleEnd < 0) return line;
-            var title = line.Substring(0, titleEnd + 1);
-            var state = line.IndexOf(" - ", titleEnd, StringComparison.Ordinal);
-            return state > 0 && line.Substring(state + 3) != "not installed" ? title + line.Substring(state) : title;
+            return titleEnd > 0 && line.EndsWith(NotInstalled, StringComparison.Ordinal) ? line.Substring(0, titleEnd + 1) : line;
         }
 
         /// <summary><c>Name : Base</c>.</summary>
@@ -317,20 +316,15 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
         }
 
         /// <summary>
-        /// The overview's short form of a type (its full form costs kilobytes the agent re-reads every turn): the members
-        /// the plugin describes (the curated ones, such as Actor's Label / Location), or every member name when none is
-        /// described, then a count of the rest, and the method signatures.
+        /// The overview's short form of a type (its member types and descriptions cost kilobytes the agent re-reads every
+        /// turn): its own member names, the base whose members it shares, and its method signatures.
         /// </summary>
-        private static void AppendTypeSummary(StringBuilder sb, JsonObject type)
+        private static void AppendTypeSummary(StringBuilder sb, JsonObject type, JsonObject? shared)
         {
             AppendTypeHeader(sb, type);
-            var members = (type["members"] as JsonArray)?.OfType<JsonObject>().ToList() ?? new List<JsonObject>();
-            var described = members.Where(m => !string.IsNullOrEmpty(Str(m, "description"))).ToList();
-            var shown = described.Count > 0 ? described : members;
-            sb.Append(" {").Append(string.Join(", ", shown.Select(m => Str(m, "name") ?? "?")));
-            if (shown.Count < members.Count)
-                sb.Append(", +").Append(members.Count - shown.Count).Append(" reflected properties");
-            sb.Append('}');
+            var inherited = new HashSet<string>(shared == null ? Enumerable.Empty<string>() : MemberNames(shared), StringComparer.Ordinal);
+            sb.Append(" {").Append(string.Join(", ", MemberNames(type).Where(n => !inherited.Contains(n)))).Append('}');
+            if (inherited.Count > 0) sb.Append(" (+ the ").Append(Str(shared!, "name")).Append(" members)");
             if (type["methods"] is JsonArray methods && methods.Count > 0)
             {
                 // "Destroy() — remove the actor" -> "Destroy()"

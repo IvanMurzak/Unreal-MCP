@@ -79,6 +79,7 @@ function formatRootHelp(target: Command, helper: Help, appVersion: string | unde
   lines.push(
     '',
     chalk.dim(`Details: ${name} <command> --help (rql --help: operators, more recipes). Machine-readable output: --format json.`),
+    chalk.dim(`Options: -v/--verbose, -V/--version. Every command, option and exit code: ${name} commands --format json.`),
     '',
   );
   return lines.join('\n');

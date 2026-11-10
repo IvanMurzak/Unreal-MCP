@@ -41,6 +41,7 @@ export interface ToolCallCliOptions {
   readyTimeout?: string;
   engineRoot?: string;
   build: boolean;
+  /** `rql` only: the whole response JSON instead of the answer's text. */
   raw?: boolean;
 }
 
@@ -59,7 +60,6 @@ export function toolSessionOptions(): Option[] {
     new Option('--ready-timeout <ms>', 'How long to wait for a started editor to become ready').default(String(UNREAL_SESSION_READY_TIMEOUT_MS)),
     new Option('--engine-root <dir>', 'Explicit engine install root (source builds)'),
     new Option('--no-build', 'Skip the pre-launch build of native modules when an editor is started'),
-    new Option('--raw', 'Print the whole response JSON (default: just the text of a text answer)'),
   ];
 }
 
@@ -106,6 +106,8 @@ export async function callToolFromCli(
   input: string | undefined,
   opts: ToolCallCliOptions,
   out: CommandOutput,
+  /** Print a text answer as its text (`rql`); otherwise text mode prints the response JSON (`run-tool`'s contract). */
+  textAnswers = false,
 ): Promise<boolean> {
   const timeoutMs = opts.timeout === undefined ? undefined : parseWholeNumber(opts.timeout, '--timeout', 1);
   const readyTimeoutMs = parseWholeNumber(opts.readyTimeout ?? String(UNREAL_SESSION_READY_TIMEOUT_MS), '--ready-timeout', 1);
@@ -133,29 +135,31 @@ export async function callToolFromCli(
   });
   spinner?.stop();
   return reportToolOutcome(spec.errorNoun, toolName, outcome, out, {
-    raw: opts.raw === true,
+    text: textAnswers && opts.raw !== true,
     withDialogs: (failure) => withBlockingDialogs(projectDir, failure, spec.findDialogs),
   });
 }
 
 export interface ReportOptions {
-  /** Print the whole response JSON instead of the text of a text answer. */
-  raw?: boolean;
+  /**
+   * Text mode prints a text answer as its text, and a failure once (on stderr). Without it, text mode prints the response
+   * JSON, as `run-tool` always has: scripts such as scripts/run_extension_e2e.py parse it.
+   */
+  text?: boolean;
   /** The failure to report: AWAITING_INPUT when a modal dialog blocks the editor. */
   withDialogs: (failure: CommandFailure) => CommandFailure;
 }
 
 /**
- * Print a tool call's outcome and set the exit code; true when the call succeeded. Text mode prints a text answer as
- * its text (the JSON envelope only with `raw`), and a failure once, on stderr — an RQL tool's with a hint for a
- * familiar slip.
+ * Print a tool call's outcome and set the exit code; true when the call succeeded. A failing RQL tool's message gets a
+ * hint for a familiar slip.
  */
 export function reportToolOutcome(
   errorNoun: string,
   toolName: string,
   outcome: RunToolSessionResult,
   out: CommandOutput,
-  { raw = false, withDialogs }: ReportOptions,
+  { text = false, withDialogs }: ReportOptions,
 ): boolean {
   const fail = (failure: CommandFailure): false => {
     const final = withDialogs(failure);
@@ -185,15 +189,15 @@ export function reportToolOutcome(
       return false;
     }
     out.error(kind.code, message);
-    if (!out.machine && raw && result.data !== undefined) ui.json(result.data);
+    if (!out.machine && !text && result.data !== undefined) ui.json(result.data);
     out.finish(kind.exit, blocked.data); // a call the modal watch ended (already AWAITING_INPUT) gains data.dialogs
     return false;
   }
   const toolError = toolResponseError(result.data);
-  if (!out.machine && (raw || toolError === undefined)) {
-    const text = raw ? undefined : toolResponseText(result.data);
-    if (text === undefined) ui.json(result.data);
-    else console.log(text);
+  if (!out.machine && (!text || toolError === undefined)) {
+    const answer = text ? toolResponseText(result.data) : undefined;
+    if (answer === undefined) ui.json(result.data);
+    else console.log(answer);
   }
   if (toolError !== undefined) {
     return fail({ kind: classifyToolResponseError(toolError), message: withHint(`The ${errorNoun} "${toolName}" returned an error: ${toolError}`), data });

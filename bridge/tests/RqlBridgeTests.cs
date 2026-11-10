@@ -258,19 +258,20 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         }
 
         [Fact]
-        public void RenderSchema_OverviewShortensATypeToItsDescribedMembers()
+        public void RenderSchema_OverviewNamesATypesOwnMembersWithoutTypes()
         {
             var json = JsonNode.Parse(@"{
                 ""sources"": [{""name"": ""actors"", ""type"": ""list of Actor""}],
-                ""types"": [{""type"": {""name"": ""Actor"", ""base"": ""Object"", ""kind"": ""object"",
-                    ""members"": [{""name"": ""bReplicates"", ""type"": ""bool"", ""writable"": true},
-                        {""name"": ""Label"", ""type"": ""string"", ""writable"": true, ""description"": ""the Outliner name""},
-                        {""name"": ""NetPriority"", ""type"": ""float"", ""writable"": true}],
-                    ""methods"": [""Destroy() — remove the actor"", ""Duplicate(Vector Offset) — copy the actor""]}}]
+                ""types"": [{""type"": {""name"": ""SceneComponent"", ""base"": ""ActorComponent"", ""kind"": ""object"",
+                    ""members"": [{""name"": ""Owner"", ""type"": ""Actor"", ""description"": ""the actor""},
+                        {""name"": ""RelativeLocation"", ""type"": ""Vector"", ""writable"": true},
+                        {""name"": ""Mobility"", ""type"": ""EComponentMobility"", ""writable"": true}],
+                    ""methods"": [""Destroy() — remove the component"", ""Attach(Actor Parent)""]},
+                    ""shared"": {""name"": ""ActorComponent"", ""kind"": ""object"", ""members"": [{""name"": ""Owner"", ""type"": ""Actor""}]}}]
             }")!.AsObject();
             var text = RqlBridge.RenderSchema(json);
-            Assert.EndsWith("Actor : Object {Label, +2 reflected properties} methods: Destroy() | Duplicate(Vector Offset)", text);
-            Assert.DoesNotContain("bReplicates", text);
+            Assert.EndsWith("SceneComponent : ActorComponent {RelativeLocation, Mobility} (+ the ActorComponent members) methods: Destroy() | Attach(Actor Parent)", text);
+            Assert.DoesNotContain("Vector", text);
         }
 
         [Fact]
@@ -323,9 +324,10 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         [Theory]
         [InlineData("com.x.niagara (Niagara Tools): Niagara VFX: niagaraSystems - not installed", "com.x.niagara (Niagara Tools)")]
         [InlineData("com.x.pcg (PCG Tools): PCG: pcgGraphs - plugin disabled: enable the plugin in the .uproject",
-            "com.x.pcg (PCG Tools) - plugin disabled: enable the plugin in the .uproject")]
+            "com.x.pcg (PCG Tools): PCG: pcgGraphs - plugin disabled: enable the plugin in the .uproject")]
+        [InlineData("com.x.a (A Tools): Foo - bar effects - not installed", "com.x.a (A Tools)")]
         [InlineData("com.x.bare", "com.x.bare")]
-        public void ShortExtensionLine_KeepsTheTitleAndAnyStateButNotInstalled(string line, string expected)
+        public void ShortExtensionLine_ShortensOnlyANotInstalledLine(string line, string expected)
         {
             Assert.Equal(expected, RqlBridge.ShortExtensionLine(line));
         }

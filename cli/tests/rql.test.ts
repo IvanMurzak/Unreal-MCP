@@ -1,8 +1,12 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import { isRqlMutation, packagesWrittenSince, rqlErrorHint, rqlMaySave, rqlStages, saveReceipt, stripToolName } from '../src/lib/rql.js';
 import { toolResponseText } from '../src/lib/tool-outcome.js';
+import { rqlCall } from '../src/commands/rql.js';
+import { reportToolOutcome } from '../src/commands/run-tool-builder.js';
+import { CommandOutput } from '../src/utils/output.js';
+import * as ui from '../src/utils/ui.js';
 import { makeTempDir, rmTempDir } from './helpers.js';
 
 const dirs: string[] = [];
@@ -71,7 +75,7 @@ describe('packagesWrittenSince', () => {
   it('prints the files a save wrote, and how many more past the limit', () => {
     expect(saveReceipt(['Content/A.umap'])).toBe('Saved to disk: Content/A.umap');
     expect(saveReceipt(['a', 'b', 'c'], 2)).toBe('Saved to disk: a, b, +1 more');
-    expect(saveReceipt([])).toMatch(/No package file changed/);
+    expect(saveReceipt([])).toMatch(/No package file under Content/);
   });
 });
 
@@ -80,5 +84,44 @@ describe('stripToolName', () => {
     expect(stripToolName('rql-query diagnostics | count')).toBe('diagnostics | count');
     expect(stripToolName('  rql-mutate editor | call SaveAll()')).toBe('editor | call SaveAll()');
     expect(stripToolName('actors | where Label == "rql-query x"')).toBe('actors | where Label == "rql-query x"');
+  });
+});
+
+describe('rql command line', () => {
+  it('routes a query, and refuses a query with --schema or read-only with mutate flags', () => {
+    expect(rqlCall('actors | count', {})).toEqual({ toolName: 'rql-query', input: { query: 'actors | count' } });
+    expect(rqlCall('actors | set Scale = Scale * 2', { dryRun: true, maxTargets: '300' }))
+      .toEqual({ toolName: 'rql-mutate', input: { query: 'actors | set Scale = Scale * 2', dry_run: true, max_targets: 300 } });
+    expect(rqlCall(undefined, { schema: 'Actor' })).toEqual({ toolName: 'rql-schema', input: { type: 'Actor' } });
+    expect(rqlCall(undefined, { schema: true })).toEqual({ toolName: 'rql-schema', input: {} });
+    expect(rqlCall('actors | count', { schema: true })).toHaveProperty('usage');
+    expect(rqlCall(undefined, { schema: 'actors | count' })).toHaveProperty('usage');
+    expect(rqlCall('actors | count', { dryRun: true })).toHaveProperty('usage');
+    expect(rqlCall(undefined, {})).toHaveProperty('usage');
+  });
+
+  it('treats backtick identifiers and string literals as opaque', () => {
+    expect(isRqlMutation('actors | where `Bob\'s` == 1 | set X = 1')).toBe(true);
+    expect(rqlMaySave('actors | where Label == "SaveAll(" | set X = 1')).toBe(false);
+  });
+});
+
+describe('tool answers in text mode', () => {
+  const answer = { status: 'success', content: [{ type: 'text', text: '3' }] };
+  const outcome = { result: { kind: 'success' as const, success: true as const, endpoint: 'http://x/api/tools/rql-query', httpStatus: 200, data: answer } };
+
+  function printed(text: boolean): string {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const json = vi.spyOn(ui, 'json').mockImplementation((data) => { console.log(JSON.stringify(data)); });
+    reportToolOutcome('tool', 'rql-query', outcome, new CommandOutput('rql', 'text'), { text, withDialogs: (f) => f });
+    const lines = log.mock.calls.map((c) => String(c[0]));
+    log.mockRestore();
+    json.mockRestore();
+    return lines.join('\n');
+  }
+
+  it('run-tool keeps printing the response JSON (scripts parse it); rql prints the text', () => {
+    expect(JSON.parse(printed(false))).toEqual(answer);
+    expect(printed(true)).toBe('3');
   });
 });

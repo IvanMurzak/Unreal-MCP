@@ -8,7 +8,10 @@ export const RQL_QUERY_TOOL = 'rql-query';
 export const RQL_MUTATE_TOOL = 'rql-mutate';
 export const RQL_SCHEMA_TOOL = 'rql-schema';
 
-/** The query's top-level stages (split on `|` outside strings, parentheses, brackets and braces), trimmed. */
+/**
+ * The query's top-level stages (split on `|` outside strings, `backtick` identifiers, parentheses, brackets and
+ * braces), trimmed.
+ */
 export function rqlStages(query: string): string[] {
   const stages: string[] = [];
   let depth = 0;
@@ -17,9 +20,9 @@ export function rqlStages(query: string): string[] {
   for (let i = 0; i < query.length; i++) {
     const ch = query[i];
     if (quote) {
-      if (ch === '\\') i++;
+      if (ch === '\\' && quote !== '`') i++;
       else if (ch === quote) quote = undefined;
-    } else if (ch === '"' || ch === '\'') {
+    } else if (ch === '"' || ch === '\'' || ch === '`') {
       quote = ch;
     } else if (ch === '(' || ch === '[' || ch === '{') {
       depth++;
@@ -66,7 +69,9 @@ export function rqlErrorHint(message: string): string | undefined {
 
 /** A query that may write assets to disk: a save, or a new level saved at its path. */
 export function rqlMaySave(query: string): boolean {
-  return /\b(SaveLevel|SaveAll|SaveAsset|NewLevel)\s*\(/.test(query);
+  // Outside string literals and `identifiers`: where Label == "SaveAll(" saves nothing.
+  const code = query.replace(/"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`[^`]*`/g, '""');
+  return /\b(SaveLevel|SaveAll|SaveAsset|NewLevel)\s*\(/.test(code);
 }
 
 /**
@@ -101,7 +106,7 @@ export function packagesWrittenSince(projectDir: string, sinceMs: number): strin
 
 /** The line a save prints: the files it wrote (the first `limit`, then how many more), or that it wrote none. */
 export function saveReceipt(written: readonly string[], limit = 20): string {
-  if (written.length === 0) return 'No package file changed on disk (nothing unsaved?)';
+  if (written.length === 0) return 'No package file under Content/ changed on disk.';
   const more = written.length > limit ? `, +${written.length - limit} more` : '';
   return `Saved to disk: ${written.slice(0, limit).join(', ')}${more}`;
 }
