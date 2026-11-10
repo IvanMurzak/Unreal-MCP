@@ -4,7 +4,7 @@
 import * as fs from 'fs';
 import { platform } from 'os';
 import { prepareStandaloneRun } from './project-engine.js';
-import { closeOwnedEditor } from './session.js';
+import { closeOwnedEditor, liveOwnedEditorPid } from './session.js';
 import type { RunningProcess } from './close.js';
 import type { UbtBuildStep } from './types.js';
 import { DiagnosticCollector, type CompilerDiagnostic } from '../utils/compiler-diagnostics.js';
@@ -26,6 +26,7 @@ export interface CompileOptions {
   listProcessesImpl?: () => RunningProcess[];
   /** Saves and quits an editor the CLI started (default: the session lease's). */
   closeOwnedEditor?: (projectDir: string) => Promise<number | undefined>;
+  ownedEditorPid?: (projectDir: string) => number | undefined;
   existsImpl?: (p: string) => boolean;
   buildImpl?: (step: UbtBuildStep, onLine: (line: string) => void) => Promise<UnrealBuildExit>;
 }
@@ -67,7 +68,8 @@ export async function compileProject(options: CompileOptions = {}): Promise<Comp
       engineRoot: options.engineRoot,
       os,
       listProcessesImpl: options.listProcessesImpl,
-      closeOwnedEditor: options.closeOwnedEditor ?? closeOwnedEditor,
+      closeOwnedEditor: options.closeOwnedEditor ?? ((dir) => closeOwnedEditor(dir, { headlessOnly: true })),
+      ownedEditorPid: options.ownedEditorPid ?? liveOwnedEditorPid,
     },
     'building now would fight its Live Coding / hot reload',
   );

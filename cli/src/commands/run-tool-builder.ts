@@ -103,7 +103,8 @@ function report(spec: RunToolCommandSpec, toolName: string, outcome: RunToolSess
   if (closeWarning) out.warn(closeWarning);
   const noCall = sessionOutcomeFailure(outcome, `${spec.errorNoun} "${toolName}"`);
   if (noCall) {
-    out.fail(noCall.kind, noCall.message, { tool: toolName });
+    const rejected = outcome.result?.kind === 'failure' ? { endpoint: outcome.result.endpoint, httpStatus: outcome.result.httpStatus } : {};
+    out.fail(noCall.kind, noCall.message, { tool: toolName, ...rejected });
     return;
   }
   const result = outcome.result!;

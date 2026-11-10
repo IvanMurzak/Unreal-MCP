@@ -71,6 +71,16 @@ describe('tools', () => {
     expect(await listTools({ projectDir: dir, run: third.run })).toMatchObject({ source: 'editor' });
   });
 
+  it('a list from --url (maybe another project) is not cached; editing the .uproject invalidates the cache', async () => {
+    const dir = project();
+    await listTools({ projectDir: dir, url: 'http://localhost:5199', run: fakeRun().run });
+    expect(readToolsCache(dir)).toBeUndefined();
+    await listTools({ projectDir: dir, run: fakeRun().run });
+    const key = toolsCacheKey(dir);
+    fs.appendFileSync(path.join(dir, 'Game.uproject'), ' ');
+    expect(toolsCacheKey(dir)).not.toBe(key);
+  });
+
   it('no tool list from the editor: a failure carrying the session outcome', async () => {
     const run = async (): Promise<RunToolSessionResult> => ({ sessionFailure: { message: 'no editor', reason: 'not-ready' } });
     const r = await listTools({ projectDir: project(), run });

@@ -12,9 +12,12 @@ const FAILURES: Record<CompileFailureReason, FailureKind> = {
   'compilation-failed': FAILURE.compilationFailed,
 };
 
-/** A source file of a plugin (`<...>/Plugins/<Name>/Source/...`), not of the project's own modules. */
+/**
+ * A source file of an installed AI Game Developer plugin (UnrealMCP or one of its UnrealAI* extensions), or of an
+ * engine plugin — not the project's own code (its modules, or its own plugins).
+ */
 function isPluginFile(file: string | undefined): boolean {
-  return file !== undefined && /[\\/]Plugins[\\/]/i.test(file);
+  return file !== undefined && /[\\/](Plugins[\\/](UnrealMCP|UnrealAI[^\\/]*)|Engine[\\/]Plugins)[\\/]/i.test(file);
 }
 
 export const compileCommand = new Command('compile')

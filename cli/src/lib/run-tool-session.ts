@@ -9,7 +9,7 @@ import {
   type EditorSessionErrorReason,
   type EnsureSource,
 } from '@baizor/gamedev-cli-core';
-import { openProjectSession, sessionFailureMessage, UNREAL_SESSION_CLOSE_TIMEOUT_MS, type UnrealSessionOptions } from './session.js';
+import { liveOwnedEditorPid, openProjectSession, sessionFailureMessage, UNREAL_SESSION_CLOSE_TIMEOUT_MS, type UnrealSessionOptions } from './session.js';
 import { classifyToolFailure } from './tool-outcome.js';
 import { PreLaunchBuildError } from './open.js';
 import { FAILURE } from '../utils/output.js';
@@ -75,24 +75,30 @@ export async function runToolWithSession(options: RunToolSessionOptions): Promis
   // An explicit remote --url is not ours to start: only a project's local server can be served by a started editor.
   const canStart = start !== false && (call.url === undefined || isAbsoluteLoopbackHost(call.url));
 
-  const first = await invoke(call);
-  if (!canStart || first.kind === 'success') return { result: first };
-  if (usesProjectCloudMode(call) && isCloudEndpoint(first.endpoint)) {
-    // Only a machine that NEVER signed in falls back to the project's local server: an existing sign-in is the user's
-    // choice of the cloud, even when it cannot be used now (cloud-auth.ts).
-    if (mustStayInCloud(call, credentialState)) {
-      return isAuthFailure(first) ? { result: first, signInRequired: SIGNED_IN_BUT_UNUSABLE_MESSAGE } : { result: first };
+  // A Cloud-mode project whose editor the CLI started (it serves the project's LOCAL server): go straight to it.
+  const cliEditorLocal = canStart && usesProjectCloudMode(call) && liveOwnedEditorPid(call.projectDir!) !== undefined;
+  let firstMessage = 'the CLI-started editor serves the project\'s local server';
+  if (!cliEditorLocal) {
+    const first = await invoke(call);
+    if (!canStart || first.kind === 'success') return { result: first };
+    firstMessage = first.message;
+    if (usesProjectCloudMode(call) && isCloudEndpoint(first.endpoint)) {
+      // Only a machine that NEVER signed in falls back to the project's local server: an existing sign-in is the
+      // user's choice of the cloud, even when it cannot be used now (cloud-auth.ts).
+      if (mustStayInCloud(call, credentialState)) {
+        return isAuthFailure(first) ? { result: first, signInRequired: SIGNED_IN_BUT_UNUSABLE_MESSAGE } : { result: first };
+      }
+      if (!isUnreachableFailure(first) && !isAuthFailure(first)) return { result: first };
+      onStatus?.(LOCAL_FALLBACK_NOTE);
+    } else if (isCloudEndpoint(first.endpoint) && call.token !== undefined) {
+      // An explicit --token against a remote server is used as is: never a fallback.
+      return { result: first };
+    } else if (!isUnreachableFailure(first)) {
+      return { result: first };
     }
-    if (!isUnreachableFailure(first) && !isAuthFailure(first)) return { result: first };
-    onStatus?.(LOCAL_FALLBACK_NOTE);
-  } else if (isCloudEndpoint(first.endpoint) && call.token !== undefined) {
-    // An explicit --token against a remote server is used as is: never a fallback.
-    return { result: first };
-  } else if (!isUnreachableFailure(first)) {
-    return { result: first };
   }
 
-  onStatus?.('No editor answered: starting a headless Unreal Editor...');
+  if (!cliEditorLocal) onStatus?.('No editor answered: starting a headless Unreal Editor...');
   let opened;
   try {
     opened = await openProjectSession({
@@ -109,7 +115,7 @@ export async function runToolWithSession(options: RunToolSessionOptions): Promis
     });
   } catch (err) {
     // No project at the path, or a bad --url: nothing could be started.
-    return { sessionFailure: { invalidInput: true, message: `${first.message}; could not start an editor: ${asError(err).message}` } };
+    return { sessionFailure: { invalidInput: true, message: `${firstMessage}; could not start an editor: ${asError(err).message}` } };
   }
   const { connection, session } = opened;
 

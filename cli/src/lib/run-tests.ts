@@ -7,7 +7,7 @@ import { spawn, execFile, type ChildProcess } from 'child_process';
 import { platform } from 'os';
 import { maybeBuildBeforeOpen } from './open.js';
 import { commandletEditorPath, prepareStandaloneRun } from './project-engine.js';
-import { closeOwnedEditor } from './session.js';
+import { closeOwnedEditor, liveOwnedEditorPid } from './session.js';
 import type { RunningProcess } from './close.js';
 import type { UbtBuildStep } from './types.js';
 import { parseAutomationReport, type AutomationSummary } from '../utils/automation-report.js';
@@ -47,6 +47,7 @@ export interface RunTestsOptions {
   listProcessesImpl?: () => RunningProcess[];
   /** Saves and quits an editor the CLI started (default: the session lease's). */
   closeOwnedEditor?: (projectDir: string) => Promise<number | undefined>;
+  ownedEditorPid?: (projectDir: string) => number | undefined;
   buildImpl?: (step: UbtBuildStep) => Promise<void>;
   spawnImpl?: (command: string, args: string[], env: NodeJS.ProcessEnv) => ChildProcess;
   killTreeImpl?: (pid: number) => Promise<void>;
@@ -147,7 +148,8 @@ export async function runAutomationTests(options: RunTestsOptions = {}): Promise
       engineRoot: options.engineRoot,
       os,
       listProcessesImpl: options.listProcessesImpl,
-      closeOwnedEditor: options.closeOwnedEditor ?? closeOwnedEditor,
+      closeOwnedEditor: options.closeOwnedEditor ?? ((dir) => closeOwnedEditor(dir, { headlessOnly: true })),
+      ownedEditorPid: options.ownedEditorPid ?? liveOwnedEditorPid,
     },
     'a test run needs the project to itself (to test in the open editor, call its tools with `unreal-mcp-cli run-tool`)',
   );

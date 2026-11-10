@@ -5,6 +5,7 @@
 
 import { MachineCredentialStore } from '@baizor/gamedev-cli-core';
 import { connectsInCloudMode } from '../utils/config.js';
+import { liveOwnedEditorPid } from './session.js';
 import type { RunToolFailure } from './types.js';
 
 export type CredentialState = 'ok' | 'missing' | 'unreadable';
@@ -36,7 +37,14 @@ export function usesProjectCloudMode(call: { projectDir?: string; url?: string; 
   return call.url === undefined && call.token === undefined && call.projectDir !== undefined && connectsInCloudMode(call.projectDir);
 }
 
-/** Cloud mode on a machine with a sign-in (usable or not): it must stay in Cloud mode. */
-export function mustStayInCloud(call: { projectDir?: string; url?: string; token?: string }, state: () => CredentialState = machineCredentialState): boolean {
-  return usesProjectCloudMode(call) && state() !== 'missing';
+/**
+ * Cloud mode on a machine with a sign-in (usable or not): it must stay in Cloud mode — unless the CLI already runs its
+ * own editor for the project (`open --headless`, an earlier `exec`), which serves the project's local server.
+ */
+export function mustStayInCloud(
+  call: { projectDir?: string; url?: string; token?: string },
+  state: () => CredentialState = machineCredentialState,
+  cliEditorPid: (projectDir: string) => number | undefined = liveOwnedEditorPid,
+): boolean {
+  return usesProjectCloudMode(call) && cliEditorPid(call.projectDir!) === undefined && state() !== 'missing';
 }

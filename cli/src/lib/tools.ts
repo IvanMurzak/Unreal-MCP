@@ -4,6 +4,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { createHash } from 'crypto';
 import { ensureAiGameDevGitignore } from '@baizor/gamedev-cli-core';
 import { runToolWithSession, type RunToolSessionOptions, type RunToolSessionResult } from './run-tool-session.js';
 import { runTool } from './run-tool.js';
@@ -64,7 +65,17 @@ export function toolsCacheKey(projectDir: string): string {
     const uplugin = path.join(plugins, name, `${name}.uplugin`);
     return `${name}@${readPluginVersion(uplugin) ?? '?'}`;
   });
-  return versions.join(',');
+  // The .uproject enables / disables plugins (extensions) too.
+  let uproject = '';
+  const project = readUProject(projectDir);
+  if (project) {
+    try {
+      uproject = createHash('sha256').update(fs.readFileSync(project.uprojectPath)).digest('hex').slice(0, 16);
+    } catch {
+      /* unreadable: no part of the key */
+    }
+  }
+  return `${versions.join(',')}|uproject@${uproject}`;
 }
 
 export function readToolsCache(projectDir: string): ToolsCache | undefined {
@@ -123,7 +134,10 @@ export async function listTools(options: ListToolsOptions): Promise<ToolsResult>
 
   const cache: ToolsCache = { schema: CACHE_SCHEMA, key: key ?? '', savedAt: new Date().toISOString(), ...parsed };
   let cachePath: string | undefined;
-  if (projectDir) {
+  // Not cached: an editor reached by --url may be another project's, and one running a tool whitelist
+  // (UNREAL_MCP_TOOLS, `open --tools`) serves only part of the set.
+  const partial = options.url !== undefined || (process.env['UNREAL_MCP_TOOLS'] ?? '').trim() !== '';
+  if (projectDir && !partial) {
     cachePath = toolsCachePath(projectDir);
     try {
       fs.mkdirSync(path.dirname(cachePath), { recursive: true });

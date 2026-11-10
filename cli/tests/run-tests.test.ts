@@ -148,10 +148,25 @@ describe('runAutomationTests', () => {
       ...options,
       listProcessesImpl: () => (open ? [{ pid: 7, commandLine: `UnrealEditor.exe "${uproject}" -RenderOffscreen` }] : []),
       closeOwnedEditor: async () => { open = false; return 7; },
+      ownedEditorPid: () => 7,
     });
     expect(r.kind).toBe('completed');
     expect(r.warnings[0]).toMatch(/Saved and closed the editor the CLI had started.*PID 7/);
     expect(spawned).toHaveLength(1);
+  });
+
+  it('does not close ours when the user\'s editor is open too (the run fails anyway)', async () => {
+    const { options } = setup(() => {});
+    const uproject = path.join(options.projectDir!, 'Game.uproject');
+    let closed = false;
+    const r = await runAutomationTests({
+      ...options,
+      listProcessesImpl: () => [{ pid: 7, commandLine: `UnrealEditor.exe "${uproject}"` }, { pid: 8, commandLine: `UnrealEditor.exe "${uproject}"` }],
+      closeOwnedEditor: async () => { closed = true; return 7; },
+      ownedEditorPid: () => 7,
+    });
+    expect(r).toMatchObject({ kind: 'failure', reason: 'project-open' });
+    expect(closed).toBe(false);
   });
 
   it('refuses while an editor has the project open', async () => {

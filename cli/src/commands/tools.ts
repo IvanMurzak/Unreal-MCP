@@ -28,6 +28,7 @@ const DETAILS_UP_TO = 5;
 export const toolsCommand = new Command('tools')
   .description('List the plugin\'s AI tools (including hidden ones) with their inputs; cached, so it answers while the editor is closed')
   .argument('[path]', 'Unreal project directory (defaults to cwd)')
+  .option('-p, --path <dir>', 'Unreal project directory (same as [path])')
   .option('--filter <regex>', 'Only tools whose name, title or description matches (case-insensitive)')
   .option('--details', 'Show each tool\'s full description (automatic for 5 matches or fewer)')
   .option('--refresh', 'Ask the editor again instead of using the cache')

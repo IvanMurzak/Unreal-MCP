@@ -84,6 +84,8 @@ export async function prepareStandaloneRun(
      * is never touched. Without it, any editor is a `project-open` failure.
      */
     closeOwnedEditor?: (projectDir: string) => Promise<number | undefined>;
+    /** The pid of the editor the CLI started, when one runs: another editor makes closing ours pointless. */
+    ownedEditorPid?: (projectDir: string) => number | undefined;
   },
   why: string,
 ): Promise<(ProjectEngine & { closedOwnedPid?: number }) | StandaloneRunFailure> {
@@ -96,7 +98,9 @@ export async function prepareStandaloneRun(
   }
   let editorPids = runningProjectEditors(resolved.project, options.listProcessesImpl);
   let closedOwnedPid: number | undefined;
-  if (editorPids.length > 0 && options.closeOwnedEditor) {
+  const owned = editorPids.length > 0 ? options.ownedEditorPid?.(resolved.project.projectDir) : undefined;
+  // Only when ours is the only one: with the user's editor open too, the run fails anyway.
+  if (owned !== undefined && editorPids.every((pid) => pid === owned) && options.closeOwnedEditor) {
     closedOwnedPid = await options.closeOwnedEditor(resolved.project.projectDir);
     if (closedOwnedPid !== undefined) editorPids = runningProjectEditors(resolved.project, options.listProcessesImpl);
   }
