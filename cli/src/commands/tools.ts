@@ -99,6 +99,7 @@ export const toolsCommand = new Command('tools')
       console.log(`\n${tools.length} tool(s)${opts.filter ? ` matching "${opts.filter}"` : ''} (${from}).`);
       if (!details) console.log('Full descriptions: --filter <name> (or --details).');
       console.log('Call one: unreal-mcp-cli run-tool <name> --input \'{"param": "value"}\' (or --input-file <file.json>)');
+      if (tools.some((t) => t.name.startsWith('rql-'))) console.log('RQL without JSON: unreal-mcp-cli rql \'<query>\' (recipes: rql --help)');
     }
     out.finish(ExitCode.Success, data);
   });

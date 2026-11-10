@@ -254,7 +254,24 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             Assert.Contains("functions:\n  unreal.find(…) — an actor by label\n", text);
             Assert.Contains("actor classes in the editor world: StaticMeshActor ×12\n", text);
             Assert.Contains("component classes in the editor world: none\n", text);
-            Assert.Contains("Actor : Object {Id int ro, Label string} methods: Destroy() — remove the actor", text);
+            Assert.Contains("Actor : Object {Id, Label} methods: Destroy()", text);
+        }
+
+        [Fact]
+        public void RenderSchema_OverviewNamesATypesOwnMembersWithoutTypes()
+        {
+            var json = JsonNode.Parse(@"{
+                ""sources"": [{""name"": ""actors"", ""type"": ""list of Actor""}],
+                ""types"": [{""type"": {""name"": ""SceneComponent"", ""base"": ""ActorComponent"", ""kind"": ""object"",
+                    ""members"": [{""name"": ""Owner"", ""type"": ""Actor"", ""description"": ""the actor""},
+                        {""name"": ""RelativeLocation"", ""type"": ""Vector"", ""writable"": true},
+                        {""name"": ""Mobility"", ""type"": ""EComponentMobility"", ""writable"": true}],
+                    ""methods"": [""Destroy() — remove the component"", ""Attach(Actor Parent)""]},
+                    ""shared"": {""name"": ""ActorComponent"", ""kind"": ""object"", ""members"": [{""name"": ""Owner"", ""type"": ""Actor""}]}}]
+            }")!.AsObject();
+            var text = RqlBridge.RenderSchema(json);
+            Assert.EndsWith("SceneComponent : ActorComponent {RelativeLocation, Mobility} (+ the ActorComponent members) methods: Destroy() | Attach(Actor Parent)", text);
+            Assert.DoesNotContain("Vector", text);
         }
 
         [Fact]
@@ -301,7 +318,18 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
                 ""actorClasses"": []
             }")!.AsObject();
             var text = RqlBridge.RenderSchema(json);
-            Assert.Contains("Install one: unreal-mcp-cli install-extension <id>.\n  com.ivanmurzak.unreal-ai-niagara (Niagara Tools): Niagara VFX - not installed\nactor classes", text);
+            Assert.Contains("Install one: unreal-mcp-cli install-extension <id>.\n  com.ivanmurzak.unreal-ai-niagara (Niagara Tools)\nactor classes", text);
+        }
+
+        [Theory]
+        [InlineData("com.x.niagara (Niagara Tools): Niagara VFX: niagaraSystems - not installed", "com.x.niagara (Niagara Tools)")]
+        [InlineData("com.x.pcg (PCG Tools): PCG: pcgGraphs - plugin disabled: enable the plugin in the .uproject",
+            "com.x.pcg (PCG Tools): PCG: pcgGraphs - plugin disabled: enable the plugin in the .uproject")]
+        [InlineData("com.x.a (A Tools): Foo - bar effects - not installed", "com.x.a (A Tools)")]
+        [InlineData("com.x.bare", "com.x.bare")]
+        public void ShortExtensionLine_ShortensOnlyANotInstalledLine(string line, string expected)
+        {
+            Assert.Equal(expected, RqlBridge.ShortExtensionLine(line));
         }
 
         [Fact]

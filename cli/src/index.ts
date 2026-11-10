@@ -17,6 +17,7 @@ import { loginCommand } from './commands/login.js';
 import { openCommand } from './commands/open.js';
 import { removePluginCommand } from './commands/remove-plugin.js';
 import { runSystemToolCommand } from './commands/run-system-tool.js';
+import { RQL_RECIPES, rqlCommand } from './commands/rql.js';
 import { runToolCommand } from './commands/run-tool.js';
 import { setupMcpCommand } from './commands/setup-mcp.js';
 import { setupSkillsCommand } from './commands/setup-skills.js';
@@ -47,6 +48,7 @@ const subcommands = [
   openCommand,
   closeCommand,
   execCommand,
+  rqlCommand,
   installPluginCommand,
   removePluginCommand,
   installExtensionCommand,
@@ -75,7 +77,7 @@ for (const cmd of subcommands) {
   program.addCommand(cmd);
 }
 
-configureStyledHelp(program, PACKAGE_VERSION);
+configureStyledHelp(program, PACKAGE_VERSION, RQL_RECIPES);
 
 program.hook('preAction', (_thisCommand, actionCommand) => {
   const opts = actionCommand.optsWithGlobals() as { verbose?: boolean; format?: string };

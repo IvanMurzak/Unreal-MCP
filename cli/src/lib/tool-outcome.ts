@@ -53,12 +53,27 @@ export function classifyToolFailure(failure: RunToolFailure): FailureKind {
  */
 export function toolResponseError(data: unknown): string | undefined {
   if (isToolSuccess(data)) return undefined;
-  const response = data as { content?: Array<{ type?: string; text?: unknown }>; error?: unknown } | null;
-  const texts = (Array.isArray(response?.content) ? response.content : [])
-    .filter((c) => c?.type === 'text' && typeof c.text === 'string')
-    .map((c) => c.text as string);
+  const { texts } = textBlocks(data);
   if (texts.length > 0) return texts.join('\n');
-  return typeof response?.error === 'string' && response.error ? response.error : 'The tool reported an error.';
+  const error = (data as { error?: unknown } | null)?.error;
+  return typeof error === 'string' && error ? error : 'The tool reported an error.';
+}
+
+/**
+ * The text of a tool answer whose content is all text blocks, joined; `undefined` for any other answer (an image, no
+ * content), which keeps its JSON.
+ */
+export function toolResponseText(data: unknown): string | undefined {
+  const { texts, blocks } = textBlocks(data);
+  return texts.length > 0 && texts.length === blocks ? texts.join('\n') : undefined;
+}
+
+/** The text blocks of a tool answer's `content`, and how many blocks it has in all. */
+function textBlocks(data: unknown): { texts: string[]; blocks: number } {
+  const content = (data as { content?: unknown } | null | undefined)?.content;
+  const blocks = Array.isArray(content) ? (content as Array<{ type?: string; text?: unknown } | null>) : [];
+  const texts = blocks.filter((c) => c?.type === 'text' && typeof c.text === 'string').map((c) => c!.text as string);
+  return { texts, blocks: blocks.length };
 }
 
 /** Exit / error code of a tool response with `status: "error"`. */

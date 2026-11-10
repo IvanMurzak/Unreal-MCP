@@ -172,9 +172,10 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
         // ------------------------------------------------------------ schema JSON -> compact text
 
         /// <summary>
-        /// rql-schema's text, in the compact lines of RQL's own schema (<c>Name : Base {member type ro, …} methods: …</c>) as
-        /// Unity-MCP prints it: without a type, the sources, functions, the classes present in the editor world and the
-        /// Actor / SceneComponent members; with one, that type (members shared with Actor / ActorComponent summarised).
+        /// rql-schema's text. Without a type: the sources, functions, missing extensions, the classes present in the editor
+        /// world and the Actor / SceneComponent member names (<c>Name : Base {a, b, …} methods: …</c>). With one: that type
+        /// in the compact lines of RQL's own schema (<c>Name : Base {member type ro, …} methods: …</c>, as Unity-MCP prints
+        /// it; members shared with Actor / ActorComponent summarised).
         /// </summary>
         public static string RenderSchema(JsonObject json)
         {
@@ -213,18 +214,24 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
                 // The Unreal-MCP extensions this editor does not have: the note says how to install one, a line each.
                 sb.Append(Str(json, "extensionsNote") ?? "extensions:").Append('\n');
                 foreach (var e in extensions.OfType<JsonObject>())
-                    sb.Append("  ").Append(Str(e, "line") ?? Str(e, "id")).Append('\n');
+                    sb.Append("  ").Append(ShortExtensionLine(Str(e, "line") ?? Str(e, "id") ?? "")).Append('\n');
             }
             AppendPresent(sb, json["actorClasses"] as JsonArray, "actor classes in the editor world");
             AppendPresent(sb, json["componentClasses"] as JsonArray, "component classes in the editor world");
-            if (json["sources"] is JsonArray)
-                sb.Append("types (members: name type; ro = read-only; rql-schema \"<type>\" for one type):\n");
+            var overview = json["sources"] is JsonArray;
+            if (overview)
+                sb.Append("types (rql-schema \"<type>\" lists a type's members with their types and descriptions):\n");
 
             if (json["types"] is JsonArray types)
             {
                 foreach (var entry in types.OfType<JsonObject>())
                 {
                     if (!(entry["type"] is JsonObject type)) continue;
+                    if (overview)
+                    {
+                        AppendTypeSummary(sb, type, entry["shared"] as JsonObject);
+                        continue;
+                    }
                     var shared = entry["shared"] as JsonObject;
                     AppendType(sb, type, shared);
                     if (shared != null)
@@ -237,6 +244,26 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
                 }
             }
             return sb.ToString().TrimEnd();
+        }
+
+        /// <summary>
+        /// "id (Title): what it adds - not installed" -> "id (Title)": the title names the feature, and the rest costs a few
+        /// hundred characters per extension on every later turn. Any other state keeps its tail ("id (Title) - plugin
+        /// disabled: enable the plugin ..."), since installing is then the wrong advice.
+        /// </summary>
+        public static string ShortExtensionLine(string line)
+        {
+            const string NotInstalled = " - not installed";
+            var titleEnd = line.IndexOf("): ", StringComparison.Ordinal);
+            return titleEnd > 0 && line.EndsWith(NotInstalled, StringComparison.Ordinal) ? line.Substring(0, titleEnd + 1) : line;
+        }
+
+        /// <summary><c>Name : Base</c>.</summary>
+        private static void AppendTypeHeader(StringBuilder sb, JsonObject type)
+        {
+            sb.Append(Str(type, "name") ?? "?");
+            var baseName = Str(type, "base");
+            if (!string.IsNullOrEmpty(baseName)) sb.Append(" : ").Append(baseName);
         }
 
         private static void AppendPresent(StringBuilder sb, JsonArray? present, string title)
@@ -260,9 +287,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
                 sb.Append("enum ").Append(name).Append(": ").Append(string.Join(" ", values)).Append('\n');
                 return;
             }
-            sb.Append(kind == "struct" ? "struct " : "").Append(name);
-            var baseName = Str(type, "base");
-            if (!string.IsNullOrEmpty(baseName)) sb.Append(" : ").Append(baseName);
+            if (kind == "struct") sb.Append("struct ");
+            AppendTypeHeader(sb, type);
             sb.Append(" {");
             var skip = new HashSet<string>(shared == null ? Enumerable.Empty<string>() : MemberNames(shared), StringComparer.Ordinal);
             var parts = new List<string>();
@@ -286,6 +312,25 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
             }
             var typeDescription = Str(type, "description");
             if (!string.IsNullOrEmpty(typeDescription)) sb.Append(" — ").Append(typeDescription);
+            sb.Append('\n');
+        }
+
+        /// <summary>
+        /// The overview's short form of a type (its member types and descriptions cost kilobytes the agent re-reads every
+        /// turn): its own member names, the base whose members it shares, and its method signatures.
+        /// </summary>
+        private static void AppendTypeSummary(StringBuilder sb, JsonObject type, JsonObject? shared)
+        {
+            AppendTypeHeader(sb, type);
+            var inherited = new HashSet<string>(shared == null ? Enumerable.Empty<string>() : MemberNames(shared), StringComparer.Ordinal);
+            sb.Append(" {").Append(string.Join(", ", MemberNames(type).Where(n => !inherited.Contains(n)))).Append('}');
+            if (inherited.Count > 0) sb.Append(" (+ the ").Append(Str(shared!, "name")).Append(" members)");
+            if (type["methods"] is JsonArray methods && methods.Count > 0)
+            {
+                // "Destroy() — remove the actor" -> "Destroy()"
+                var signatures = methods.Select(m => (m?.GetValue<string>() ?? "").Split(" — ")[0]);
+                sb.Append(" methods: ").Append(string.Join(" | ", signatures));
+            }
             sb.Append('\n');
         }
 

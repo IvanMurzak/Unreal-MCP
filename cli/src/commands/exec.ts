@@ -55,7 +55,7 @@ export function classifyExecFailure(failure: ExecPythonFailure): FailureKind {
 }
 
 export const execCommand = new Command('exec')
-  .description('Run Python in the Unreal Editor (python-execute; the last expression is printed, print() goes to stderr); starts a headless editor when none is open and keeps it warm. To read or change levels, actors and assets, rql-query / rql-mutate are usually one call: see `unreal-mcp-cli tools --filter rql`')
+  .description('Run Python in the Unreal Editor (python-execute; the last expression is printed, print() goes to stderr); starts a headless editor when none is open and keeps it warm. To read or change levels, actors and assets, one `unreal-mcp-cli rql \'<query>\'` call is usually enough (recipes: rql --help)')
   .argument('[code]', 'Python: statements, the last expression is the result')
   .option('-p, --path <dir>', 'Unreal project directory (defaults to cwd)')
   .option('-f, --file <file>', 'Read the code from a file ("-" for stdin)')

@@ -1140,7 +1140,8 @@ Unreal-MCP/
 │                                       #   commands (port of unity-mcp-cli's set, cli/src/commands/):
 │                                       #   create-project, open, close, install-plugin, remove-plugin,
 │                                       #   configure (UNREAL_MCP_* env/.env), setup-mcp, login (device code),
-│                                       #   status, dialog, wait-for-ready, run-tool, run-system-tool,
+│                                       #   status, dialog, wait-for-ready, rql (RQL text, no JSON),
+│                                       #   run-tool, run-system-tool,
 │                                       #   compile (standalone UBT), test (headless Automation),
 │                                       #   bootstrap-local, update, install-engine (LauncherInstalled.dat
 │                                       #   detection at minimum), setup-skills, commands (manifest);
