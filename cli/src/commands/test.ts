@@ -3,7 +3,7 @@ import * as path from 'path';
 import { Command } from 'commander';
 import { DEFAULT_TEST_FILTER, DEFAULT_TEST_TIMEOUT_SECONDS, runAutomationTests, type RunTestsResult } from '../lib/run-tests.js';
 import { failingTests, githubError, toGitHubAnnotations, toJUnitXml, type AutomationSummary } from '../utils/automation-report.js';
-import { ExitCode } from '../utils/exit-codes.js';
+import { ExitCode, UsageError } from '../utils/exit-codes.js';
 import { CommandOutput, FAILURE, formatOption, parseWholeNumber, type FailureKind } from '../utils/output.js';
 import * as ui from '../utils/ui.js';
 
@@ -16,6 +16,8 @@ const FAILURES: Record<FailureReason, FailureKind> = {
   'build-failed': FAILURE.compilationFailed,
   timeout: FAILURE.timeout,
   'no-verdict': FAILURE.testRunError,
+  'run-failed': FAILURE.testRunError,
+  interrupted: FAILURE.interrupted,
 };
 
 interface TestCliOptions {
@@ -55,7 +57,7 @@ function printText(summary: AutomationSummary): void {
 export const testCommand = new Command('test')
   .description('Run Unreal Automation tests headless (UnrealEditor-Cmd -nullrhi) and report the verdict from the exported report')
   .argument('[path]', 'Unreal project directory or .uproject (defaults to cwd)')
-  .option('--filter <filter>', 'Automation RunTests filter (test path substring, e.g. Project.MyGame)', DEFAULT_TEST_FILTER)
+  .option('--filter <filter>', 'Automation RunTests filter (test path substring, e.g. Project.MyGame; several joined with +)', DEFAULT_TEST_FILTER)
   .option('--output <dir>', 'Report directory (default <project>/Saved/Automation/UnrealMcpCli/<timestamp>)')
   .option('--junit-output <file>', 'Also write the results as JUnit XML')
   .addOption(formatOption(['github']))
@@ -65,20 +67,34 @@ export const testCommand = new Command('test')
   .action(async (pathArg: string | undefined, opts: TestCliOptions) => {
     const out = new CommandOutput('test', opts.format);
     const timeoutSeconds = parseWholeNumber(opts.timeout, '--timeout', 1);
+    // -ExecCmds splits on ',' and the Automation command on ';': either would cut the command short.
+    if (/[,;]/.test(opts.filter)) throw new UsageError('--filter must not contain "," or ";" (join several filters with "+").');
     const status = (message: string): void => {
       out.progress(message);
       if (!out.machine) process.stderr.write(`${message}\n`);
     };
-    const result = await runAutomationTests({
-      projectDir: pathArg,
-      engineRoot: opts.engineRoot,
-      filter: opts.filter,
-      outputDir: opts.output,
-      timeoutSeconds,
-      build: opts.build,
-      onStatus: status,
-      onLog: (line) => ui.verbose(line),
-    });
+    // Ctrl+C / SIGTERM: stop the editor tree (on POSIX it runs in its own process group) instead of leaving it behind.
+    const abort = new AbortController();
+    const onSignal = (): void => abort.abort();
+    process.once('SIGINT', onSignal);
+    process.once('SIGTERM', onSignal);
+    let result;
+    try {
+      result = await runAutomationTests({
+        projectDir: pathArg,
+        engineRoot: opts.engineRoot,
+        filter: opts.filter,
+        outputDir: opts.output,
+        timeoutSeconds,
+        build: opts.build,
+        signal: abort.signal,
+        onStatus: status,
+        onLog: (line) => ui.verbose(line),
+      });
+    } finally {
+      process.off('SIGINT', onSignal);
+      process.off('SIGTERM', onSignal);
+    }
     for (const warning of result.warnings) out.warn(warning);
 
     const run = { filter: result.filter, reportDir: result.reportDir, logPath: result.logPath };

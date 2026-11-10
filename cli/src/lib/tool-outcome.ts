@@ -23,6 +23,8 @@ export function classifyToolFailure(failure: RunToolFailure): FailureKind {
     case 'http-error':
       if (failure.httpStatus === 503) return FAILURE.busy;
       if (failure.httpStatus === 404) return FAILURE.notFound; // no such tool
+      if (failure.httpStatus === 504) return FAILURE.timeout; // the server gave up waiting for the editor
+      if (failure.httpStatus === 502) return FAILURE.unreachable; // the server could not reach the editor
       if (modalDialogInToolError(toolErrorText(failure)) !== undefined) return FAILURE.awaitingInput;
       if (/no connected clients/i.test(failure.message)) return FAILURE.unreachable;
       return FAILURE.toolFailed;
@@ -51,6 +53,7 @@ export function classifyToolResponseError(text: string): FailureKind {
 }
 
 /** Exit / error code of a session that could not provide a ready editor. */
-export function classifySessionFailure(reason: EditorSessionErrorReason | undefined): FailureKind {
+export function classifySessionFailure(reason: EditorSessionErrorReason | undefined, invalidInput = false): FailureKind {
+  if (invalidInput) return FAILURE.projectNotFound; // no project at the path / a bad --url: nothing to start
   return reason === 'lock-busy' ? FAILURE.busy : FAILURE.unreachable;
 }

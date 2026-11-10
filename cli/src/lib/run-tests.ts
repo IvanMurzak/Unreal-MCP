@@ -21,6 +21,8 @@ const POLL_MS = 1_000;
 const LOG_TAIL_LINES = 20;
 /** What UE logs when the filter selects no test (FAutomationExecCmd / the automation controller). */
 const NO_TESTS_MATCHED = /No automation tests matched|Found 0 automation tests/i;
+/** The run's own verdict line (LogAutomationCommandLine), non-zero also for errors outside any test. */
+const TEST_COMPLETE = /\*\*\*\* TEST COMPLETE\. EXIT CODE: (-?\d+) \*\*\*\*/;
 
 export interface RunTestsOptions {
   /** Project root or `.uproject` path; defaults to `process.cwd()`. */
@@ -37,6 +39,8 @@ export interface RunTestsOptions {
   onStatus?: (message: string) => void;
   /** Every line the editor prints (`-stdout`). */
   onLog?: (line: string) => void;
+  /** Aborting it (Ctrl+C) stops the editor tree and ends the run as `interrupted`. */
+  signal?: AbortSignal;
   // --- Test seams ---
   os?: NodeJS.Platform;
   listProcessesImpl?: () => RunningProcess[];
@@ -63,9 +67,10 @@ export type RunTestsResult =
       /**
        * `not-found`: no `.uproject`; `unreachable`: no engine / editor; `project-open`: an editor holds the project;
        * `build-failed`: the editor target did not compile; `timeout`: stopped after `timeoutSeconds`;
-       * `no-verdict`: the editor ended without a readable report (crash, startup error).
+       * `no-verdict`: the editor ended without a readable report (crash, startup error); `run-failed`: no test failed
+       * but the run reported a non-zero exit code; `interrupted`: `signal` aborted the run (the editor was stopped).
        */
-      reason: 'not-found' | 'unreachable' | 'project-open' | 'build-failed' | 'timeout' | 'no-verdict';
+      reason: 'not-found' | 'unreachable' | 'project-open' | 'build-failed' | 'timeout' | 'no-verdict' | 'run-failed' | 'interrupted';
       message: string;
       warnings: string[];
       logTail?: string[];
@@ -187,9 +192,12 @@ export async function runAutomationTests(options: RunTestsOptions = {}): Promise
 
   const tail: string[] = [];
   let noTestsMatched = false;
+  let runExitCode: number | undefined;
   const onLine = (line: string): void => {
     if (!line.trim()) return;
     if (NO_TESTS_MATCHED.test(line)) noTestsMatched = true;
+    const complete = TEST_COMPLETE.exec(line);
+    if (complete) runExitCode = Number(complete[1]);
     tail.push(line);
     if (tail.length > LOG_TAIL_LINES) tail.shift();
     options.onLog?.(line);
@@ -203,21 +211,27 @@ export async function runAutomationTests(options: RunTestsOptions = {}): Promise
 
   const pollMs = options.pollMs ?? POLL_MS;
   const deadline = Date.now() + (options.timeoutSeconds ?? DEFAULT_TEST_TIMEOUT_SECONDS) * 1000;
+  const interrupted = (): boolean => options.signal?.aborted === true;
   let summary: AutomationSummary | undefined;
-  while (!exited && Date.now() < deadline) {
+  while (!exited && Date.now() < deadline && !interrupted() && !noTestsMatched) {
     summary = readReport(reportDir);
-    if (summary) break;
+    // A report still listing a test in process is not the final one.
+    if (summary && !summary.tests.some((t) => t.state === 'InProcess')) break;
+    summary = undefined;
     await sleep(pollMs);
   }
 
-  if (summary && !exited) {
-    // The report is final: give the editor its `Quit`, then stop what is left of it.
+  if ((summary || noTestsMatched) && !exited && !interrupted()) {
+    // The run is over: give the editor its `Quit`, then stop what is left of it.
     const graceEnd = Math.min(deadline, Date.now() + (options.quitGraceMs ?? QUIT_GRACE_MS));
-    while (!exited && Date.now() < graceEnd) await sleep(pollMs);
+    while (!exited && Date.now() < graceEnd && !interrupted()) await sleep(pollMs);
   }
   if (!exited) {
     if (child.pid !== undefined) await killTree(child.pid);
-    if (!summary) {
+    if (interrupted()) {
+      return { kind: 'failure', reason: 'interrupted', message: 'The test run was interrupted; the editor was stopped.', warnings, logTail: tail, ...run };
+    }
+    if (!summary && !noTestsMatched) {
       return {
         kind: 'failure',
         reason: 'timeout',
@@ -227,6 +241,12 @@ export async function runAutomationTests(options: RunTestsOptions = {}): Promise
         ...run,
       };
     }
+  }
+  // The last output lines may still be in the pipes when `exit` fires.
+  await sleep(Math.min(pollMs, 200));
+  if (interrupted() && !summary) {
+    // E.g. Ctrl+C on Windows reaches the editor too (same console): it exited, but that is no verdict.
+    return { kind: 'failure', reason: 'interrupted', message: 'The test run was interrupted.', warnings, logTail: tail, ...run };
   }
   summary ??= readReport(reportDir);
 
@@ -246,6 +266,18 @@ export async function runAutomationTests(options: RunTestsOptions = {}): Promise
       ...run,
     };
   }
-  if (summary.total === 0) warnings.push(`No Automation tests matched the filter "${filter}".`);
+  if (summary.total === 0) {
+    warnings.push(`No Automation tests matched the filter "${filter}".`);
+  } else if (summary.failed === 0 && summary.notRun === 0 && runExitCode !== undefined && runExitCode !== 0) {
+    // Every test passed, but the run itself failed (e.g. an error in setup or teardown, outside any test).
+    return {
+      kind: 'failure',
+      reason: 'run-failed',
+      message: `The Automation run reported exit code ${runExitCode} although no test failed (an error outside the tests). Log: ${logPath}`,
+      warnings,
+      logTail: tail,
+      ...run,
+    };
+  }
   return { kind: 'completed', summary, warnings, ...run };
 }

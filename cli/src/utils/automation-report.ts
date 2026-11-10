@@ -78,11 +78,16 @@ export function parseAutomationReport(text: string): AutomationSummary {
     };
   });
   const passed = tests.filter((t) => t.passed).length;
-  const notRun = tests.filter((t) => !t.passed && NOT_RUN_STATES.has(t.state)).length;
+  // The report's own counters win when they say more (a test missing from `tests[]` still failed).
+  const counter = (key: string): number => {
+    const value = (data as Record<string, unknown>)[key];
+    return typeof value === 'number' && value > 0 ? value : 0;
+  };
+  const notRun = Math.max(tests.filter((t) => !t.passed && NOT_RUN_STATES.has(t.state)).length, counter('notRun') + counter('inProcess'));
   return {
     total: tests.length,
     passed,
-    failed: tests.length - passed - notRun,
+    failed: Math.max(tests.length - passed - tests.filter((t) => !t.passed && NOT_RUN_STATES.has(t.state)).length, counter('failed')),
     notRun,
     durationSeconds: typeof data.totalDuration === 'number' ? data.totalDuration : tests.reduce((s, t) => s + t.durationSeconds, 0),
     tests,

@@ -50,7 +50,7 @@ export function buildRunToolCommand(spec: RunToolCommandSpec): Command {
     .option('--timeout <ms>', 'Request timeout in ms (default 60000)')
     .addOption(formatOption())
     .option('--no-start', 'Do not start a headless editor when none answers')
-    .option('--once', 'Close the editor after the call when this call started it')
+    .option('--once', 'Close the editor after the call when this call started it (also if another CLI call is using it meanwhile)')
     .option('--nullrhi', 'A started editor runs with -nullrhi (no GPU; screenshots and rendering tools degrade)')
     .option('--ready-timeout <ms>', 'How long to wait for a started editor to become ready', String(UNREAL_SESSION_READY_TIMEOUT_MS))
     .option('--engine-root <dir>', 'Explicit engine install root (source builds)')
@@ -103,7 +103,7 @@ function report(spec: RunToolCommandSpec, toolName: string, outcome: RunToolSess
     out.warn(`The editor this call started did not close (${outcome.closed.kind}${'message' in outcome.closed ? `: ${outcome.closed.message}` : ''}).`);
   }
   if (outcome.sessionFailure) {
-    out.fail(classifySessionFailure(outcome.sessionFailure.reason), `No ready Unreal Editor for ${spec.errorNoun} "${toolName}": ${outcome.sessionFailure.message}`);
+    out.fail(classifySessionFailure(outcome.sessionFailure.reason, outcome.sessionFailure.invalidInput),`No ready Unreal Editor for ${spec.errorNoun} "${toolName}": ${outcome.sessionFailure.message}`);
     return;
   }
   const result = outcome.result!;

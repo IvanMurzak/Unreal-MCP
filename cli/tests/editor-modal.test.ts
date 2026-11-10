@@ -48,5 +48,9 @@ describe('modal dialog detection', () => {
     expect(open.editor).toEqual({ running: true, pids: [9], modalDialog: 'Save Content' });
     const closed = await getStatus({ projectDir: dir, noProbe: true, listProcessesImpl: () => [], readLogTail });
     expect(closed.editor).toEqual({ running: false, pids: [] });
+    // A `test` run writes its own log (-abslog): the project log is an older editor's.
+    const testRun = [{ pid: 10, commandLine: `UnrealEditor-Cmd.exe "${uproject}" -abslog=C:/R/editor.log` }];
+    const other = await getStatus({ projectDir: dir, noProbe: true, listProcessesImpl: () => testRun, readLogTail });
+    expect(other.editor).toEqual({ running: true, pids: [10] });
   });
 });

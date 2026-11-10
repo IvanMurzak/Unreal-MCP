@@ -4,6 +4,7 @@
 
 import {
   EditorSessionError,
+  type EditorSession,
   type CloseOwnedResult,
   type EditorSessionErrorReason,
   type EnsureSource,
@@ -37,7 +38,7 @@ export interface RunToolSessionResult {
   /** How the editor was obtained when a session was used (`started` = this call launched it). */
   source?: EnsureSource;
   /** Set when no editor answered and none could be started. */
-  sessionFailure?: { reason?: EditorSessionErrorReason; message: string };
+  sessionFailure?: { reason?: EditorSessionErrorReason; message: string; invalidInput?: boolean };
   /** `once`: the close of the editor this call started. */
   closed?: CloseOwnedResult | { kind: 'error'; message: string };
 }
@@ -71,7 +72,8 @@ export async function runToolWithSession(options: RunToolSessionOptions): Promis
       ...sessionOptions,
     });
   } catch (err) {
-    return { sessionFailure: { message: `${first.message}; could not start an editor: ${asError(err).message}` } };
+    // No project at the path, or a bad --url: nothing could be started.
+    return { sessionFailure: { invalidInput: true, message: `${first.message}; could not start an editor: ${asError(err).message}` } };
   }
   const { connection, session } = opened;
 
@@ -79,12 +81,14 @@ export async function runToolWithSession(options: RunToolSessionOptions): Promis
   try {
     ready = await session.ensure({ mode: 'headless' });
   } catch (err) {
-    return {
-      sessionFailure: {
-        ...(err instanceof EditorSessionError ? { reason: err.reason } : {}),
-        message: sessionFailureMessage(err, connection.url),
-      },
+    const sessionFailure = {
+      ...(err instanceof EditorSessionError ? { reason: err.reason } : {}),
+      message: sessionFailureMessage(err, connection.url),
     };
+    // An editor this call launched may still be starting (e.g. --ready-timeout ran out): --once leaves nothing
+    // behind. closeOwned acts only on the CLI lease, never on the user's editor.
+    if (!once || !(err instanceof EditorSessionError && err.source === 'started')) return { sessionFailure };
+    return { sessionFailure, closed: await closeOwned(session) };
   }
 
   onStatus?.('Running...');
@@ -92,11 +96,13 @@ export async function runToolWithSession(options: RunToolSessionOptions): Promis
   if (!once || ready.source !== 'started') return { result, source: ready.source };
 
   onStatus?.('Closing the editor this call started...');
-  let closed: RunToolSessionResult['closed'];
+  return { result, source: ready.source, closed: await closeOwned(session) };
+}
+
+async function closeOwned(session: EditorSession<string>): Promise<NonNullable<RunToolSessionResult['closed']>> {
   try {
-    closed = await session.closeOwned({ timeoutMs: UNREAL_SESSION_CLOSE_TIMEOUT_MS, force: true });
+    return await session.closeOwned({ timeoutMs: UNREAL_SESSION_CLOSE_TIMEOUT_MS, force: true });
   } catch (err) {
-    closed = { kind: 'error', message: asError(err).message };
+    return { kind: 'error', message: asError(err).message };
   }
-  return { result, source: ready.source, closed };
 }

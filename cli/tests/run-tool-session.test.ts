@@ -72,6 +72,21 @@ describe('runToolWithSession', () => {
     expect(fake.alive.size).toBe(0);
   });
 
+  it('--once closes the editor it started even when it never became ready', async () => {
+    const fake = fakeSession();
+    const r = await runToolWithSession({
+      invoke: async () => refused,
+      toolName: 'x',
+      projectDir: project(),
+      once: true,
+      readyTimeoutMs: 1,
+      sessionOptions: { ...fake.sessionOptions, probeReady: async () => undefined },
+    });
+    expect(r.sessionFailure?.reason).toBe('not-ready');
+    expect(r.closed?.kind).toBe('closed');
+    expect(fake.alive.size).toBe(0);
+  });
+
   it('--once never closes an editor it did not start', async () => {
     const fake = fakeSession();
     fake.alive.add(1000); // e.g. the user's editor, answering only after the first call failed
@@ -113,6 +128,9 @@ describe('tool outcome classification', () => {
     expect(classifyToolFailure(failure({ reason: 'timeout' })).exit).toBe(14);
     expect(classifyToolFailure(failure({ reason: 'http-error', httpStatus: 503 })).exit).toBe(17);
     expect(classifyToolFailure(failure({ reason: 'http-error', httpStatus: 404 }))).toMatchObject({ exit: 6, code: 'NOT_FOUND' });
+    expect(classifyToolFailure(failure({ reason: 'http-error', httpStatus: 504 })).exit).toBe(14);
+    expect(classifyToolFailure(failure({ reason: 'http-error', httpStatus: 502 })).exit).toBe(7);
+    expect(classifySessionFailure(undefined, true)).toMatchObject({ exit: 2, code: 'NOT_FOUND' });
     expect(classifyToolFailure(failure({ reason: 'http-error', httpStatus: 500, message: 'No connected clients' })).exit).toBe(7);
     expect(classifyToolFailure(failure({ reason: 'http-error', httpStatus: 500, data: { error: 'bad args' } })).exit).toBe(6);
     const modal = 'The editor is showing the modal dialog "Save Content" (open for 3 s): its game thread waits';

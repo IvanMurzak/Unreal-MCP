@@ -85,27 +85,36 @@ program.action(() => {
   program.outputHelp();
 });
 
-/** A usage error: exit 2, with an envelope on stdout when the command line asked for json / ndjson. */
-function exitUsage(message: string): never {
+/**
+ * End with `exitCode`, and with an envelope on stdout when the command line asked for json / ndjson (an error thrown
+ * before or outside the command's own output). exitCode, not exit(): the envelope still flushes to a pipe.
+ */
+function endWithError(exitCode: number, code: 'USAGE' | 'ERROR', message: string): void {
   const argv = process.argv.slice(2);
   const format = formatFromArgv(argv);
   if (isMachineFormat(format)) {
     const command = argv.find((arg) => program.commands.some((c) => c.name() === arg)) ?? program.name();
-    process.stdout.write(renderEnvelope({ success: false, command, data: null, errors: [{ code: 'USAGE', message }], warnings: [] }, format));
+    process.stdout.write(renderEnvelope({ success: false, command, data: null, errors: [{ code, message }], warnings: [] }, format));
   }
-  process.exit(ExitCode.Usage);
+  process.exitCode = exitCode;
 }
 
 program.parseAsync(process.argv).catch((err: unknown) => {
   if (err instanceof CommanderError) {
-    // --help / --version exit 0; commander already printed the message.
-    if (err.exitCode === 0) process.exit(0);
-    exitUsage(err.message);
+    // --help / --version exit 0; commander already printed the message (on stderr for an error).
+    if (err.exitCode === 0) {
+      process.exitCode = 0;
+      return;
+    }
+    endWithError(ExitCode.Usage, 'USAGE', err.message.replace(/^error:\s*/, ''));
+    return;
   }
   if (err instanceof UsageError) {
     process.stderr.write(`error: ${err.message}\n`);
-    exitUsage(err.message);
+    endWithError(ExitCode.Usage, 'USAGE', err.message);
+    return;
   }
-  process.stderr.write(`${err instanceof Error ? err.message : String(err)}\n`);
-  process.exit(ExitCode.Error);
+  const message = err instanceof Error ? err.message : String(err);
+  process.stderr.write(`${message}\n`);
+  endWithError(ExitCode.Error, 'ERROR', message);
 });

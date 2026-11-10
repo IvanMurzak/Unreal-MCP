@@ -24,6 +24,7 @@ export type ErrorCode =
   | 'COMPILATION_FAILED'
   | 'PROJECT_OPEN'
   | 'NOT_FOUND'
+  | 'INTERRUPTED'
   | 'ERROR';
 
 export interface EnvelopeError {
@@ -78,6 +79,8 @@ export const FAILURE = {
   compilationFailed: { exit: ExitCode.CommandFailed, code: 'COMPILATION_FAILED' },
   testRunError: { exit: ExitCode.CommandFailed, code: 'TEST_RUN_ERROR' },
   testsFailed: { exit: ExitCode.TestsFailed, code: 'TESTS_FAILED' },
+  /** Ctrl+C / SIGTERM: not a verdict. */
+  interrupted: { exit: ExitCode.Error, code: 'INTERRUPTED' },
   unreachable: { exit: ExitCode.Unreachable, code: 'UNREACHABLE' },
   timeout: { exit: ExitCode.Timeout, code: 'TIMEOUT' },
   busy: { exit: ExitCode.Busy, code: 'BUSY' },

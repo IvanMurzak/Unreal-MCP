@@ -49,7 +49,7 @@ export function classifyExecFailure(failure: ExecPythonFailure): FailureKind {
   if (failure.reason === 'session') return classifySessionFailure(failure.sessionReason);
   if (failure.reason === 'tool-failed' && failure.toolFailure) return classifyToolFailure(failure.toolFailure);
   // invalid-input: no project at the path, or a bad --url.
-  return FAILURE.usage;
+  return classifySessionFailure(undefined, true);
 }
 
 export const execCommand = new Command('exec')

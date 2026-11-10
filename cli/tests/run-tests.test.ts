@@ -98,6 +98,41 @@ describe('runAutomationTests', () => {
     expect(r.warnings).toEqual(['No Automation tests matched the filter "Nope".']);
   });
 
+  it('a report still listing a test in process is not the verdict', async () => {
+    const inProcess = { tests: [{ fullTestPath: 'Project.A', state: 'InProcess', entries: [] }] };
+    const { options } = setup((child, args) => {
+      writeReport(args, inProcess);
+      setTimeout(() => { writeReport(args); child.exit(0); }, 30);
+    });
+    const r = await runAutomationTests(options);
+    expect(r).toMatchObject({ kind: 'completed', summary: { total: 2, failed: 1 } });
+  });
+
+  it('no failed test but a non-zero run exit code: the run failed', async () => {
+    const passing = { tests: [{ fullTestPath: 'Project.A', state: 'Success', entries: [] }] };
+    const { options } = setup((child, args) => {
+      child.stdout.write('LogAutomationCommandLine: Display: **** TEST COMPLETE. EXIT CODE: -1 ****\n');
+      writeReport(args, passing);
+      setTimeout(() => child.exit(0), 10);
+    });
+    expect(await runAutomationTests(options)).toMatchObject({ kind: 'failure', reason: 'run-failed' });
+  });
+
+  it('no tests matched while the editor lingers: stopped, a warning', async () => {
+    const { options, killed } = setup((child) => child.stdout.write("LogAutomationCommandLine: Error: No automation tests matched 'X'\n"));
+    const r = await runAutomationTests({ ...options, filter: 'X' });
+    expect(r).toMatchObject({ kind: 'completed', summary: { total: 0 } });
+    expect(killed).toEqual([4242]);
+  });
+
+  it('an interrupt stops the editor tree and is no verdict', async () => {
+    const abort = new AbortController();
+    const { options, killed } = setup(() => setTimeout(() => abort.abort(), 10));
+    const r = await runAutomationTests({ ...options, signal: abort.signal });
+    expect(r).toMatchObject({ kind: 'failure', reason: 'interrupted' });
+    expect(killed).toEqual([4242]);
+  });
+
   it('times out: the editor tree is stopped', async () => {
     const { options, killed } = setup(() => {});
     const r = await runAutomationTests({ ...options, timeoutSeconds: 0.05 } as RunTestsOptions);
