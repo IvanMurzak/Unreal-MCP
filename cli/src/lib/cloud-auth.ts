@@ -3,16 +3,14 @@
 // (cli-core MachineCredentialStore state `missing`) may serve the project from a locally started editor; a sign-in
 // that cannot be used is reported (NOT_AUTHENTICATED), and an explicit --url / --token is used as is. Library-safe.
 
-import { MachineCredentialStore } from '@baizor/gamedev-cli-core';
+import { decideLocalFallback, machineCredentialStatus, signedInButUnusableMessage, type CredentialStatus } from '@baizor/gamedev-cli-core';
 import { connectsInCloudMode } from '../utils/config.js';
 import { liveOwnedEditorPid } from './session.js';
 import type { RunToolFailure } from './types.js';
 
-export type CredentialState = 'ok' | 'missing' | 'unreadable';
+export type CredentialState = CredentialStatus;
 
-export const SIGNED_IN_BUT_UNUSABLE_MESSAGE = 'This machine is signed in to ai-game.dev, but the sign-in cannot be used right now '
-  + '(expired, revoked, unreadable, or the credential store is busy). Run `unreal-mcp-cli login` to sign in again, or retry. '
-  + 'The project stays in Cloud mode: the CLI does not switch it to a local server.';
+export const SIGNED_IN_BUT_UNUSABLE_MESSAGE = signedInButUnusableMessage('unreal-mcp-cli');
 
 /** The note shown when a never-signed-in machine uses the project's local server instead of the cloud. */
 export const LOCAL_FALLBACK_NOTE = 'Not signed in to ai-game.dev, so the project\'s local MCP server is used: an editor started now serves it. '
@@ -20,11 +18,7 @@ export const LOCAL_FALLBACK_NOTE = 'Not signed in to ai-game.dev, so the project
 
 /** `missing` = this machine never signed in to ai-game.dev; anything else = a sign-in exists (usable or not). */
 export function machineCredentialState(): CredentialState {
-  try {
-    return new MachineCredentialStore().readState().status;
-  } catch {
-    return 'unreadable'; // fail safe: a store we cannot read is never "never signed in"
-  }
+  return machineCredentialStatus(); // fail safe: a store we cannot read is never "never signed in"
 }
 
 /** The cloud rejected the sign-in. 401 only: a 403 can mean a plan, quota or forbidden tool. */
@@ -46,5 +40,6 @@ export function mustStayInCloud(
   state: () => CredentialState = machineCredentialState,
   cliEditorPid: (projectDir: string) => number | undefined = liveOwnedEditorPid,
 ): boolean {
-  return usesProjectCloudMode(call) && cliEditorPid(call.projectDir!) === undefined && state() !== 'missing';
+  return usesProjectCloudMode(call) && cliEditorPid(call.projectDir!) === undefined
+    && decideLocalFallback({ cloudSignInMissing: true, credentialStatus: state }) === 'refuse-signed-in';
 }

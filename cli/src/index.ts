@@ -1,8 +1,8 @@
-import { Command, CommanderError } from 'commander';
+import { Command } from 'commander';
 import { PACKAGE_VERSION } from './version.js';
 import { configureStyledHelp, reserveStdout, setVerbose } from './utils/ui.js';
-import { ExitCode, UsageError } from './utils/exit-codes.js';
-import { formatFromArgv, isMachineFormat, renderEnvelope } from './utils/output.js';
+import { classifyCliError, writeFailureEnvelope } from '@baizor/gamedev-cli-core';
+import { isMachineFormat } from './utils/output.js';
 import { bootstrapLocalCommand } from './commands/bootstrap-local.js';
 import { closeCommand } from './commands/close.js';
 import { commandsCommand } from './commands/commands.js';
@@ -89,36 +89,15 @@ program.action(() => {
   program.outputHelp();
 });
 
-/**
- * End with `exitCode`, and with an envelope on stdout when the command line asked for json / ndjson (an error thrown
- * before or outside the command's own output). exitCode, not exit(): the envelope still flushes to a pipe.
- */
-function endWithError(exitCode: number, code: 'USAGE' | 'ERROR', message: string): void {
-  const argv = process.argv.slice(2);
-  const format = formatFromArgv(argv);
-  if (isMachineFormat(format)) {
-    const command = argv.find((arg) => program.commands.some((c) => c.name() === arg)) ?? program.name();
-    process.stdout.write(renderEnvelope({ success: false, command, data: null, errors: [{ code, message }], warnings: [] }, format));
-  }
-  process.exitCode = exitCode;
-}
-
+// An error thrown before or outside the command's own output: exit 2 for a usage error (commander's parse errors, a
+// UsageError), 1 otherwise, with an envelope on stdout when the command line asked for json / ndjson. exitCode, not
+// exit(): pending output still flushes to a pipe.
 program.parseAsync(process.argv).catch((err: unknown) => {
-  if (err instanceof CommanderError) {
-    // --help / --version exit 0; commander already printed the message (on stderr for an error).
-    if (err.exitCode === 0) {
-      process.exitCode = 0;
-      return;
-    }
-    endWithError(ExitCode.Usage, 'USAGE', err.message.replace(/^error:\s*/, ''));
-    return;
+  const failure = classifyCliError(err);
+  // --help / --version exit 0; commander already printed its own messages (on stderr for an error).
+  if (!failure.informational) {
+    if (!failure.printed) process.stderr.write(failure.code === 'USAGE' ? `error: ${failure.message}\n` : `${failure.message}\n`);
+    writeFailureEnvelope(program, failure);
   }
-  if (err instanceof UsageError) {
-    process.stderr.write(`error: ${err.message}\n`);
-    endWithError(ExitCode.Usage, 'USAGE', err.message);
-    return;
-  }
-  const message = err instanceof Error ? err.message : String(err);
-  process.stderr.write(`${message}\n`);
-  endWithError(ExitCode.Error, 'ERROR', message);
+  process.exitCode = failure.exitCode;
 });
