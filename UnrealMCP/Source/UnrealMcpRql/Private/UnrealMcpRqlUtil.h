@@ -115,6 +115,9 @@ namespace UnrealMcpRqlUtil
 	/** The editor world (null outside the editor). */
 	UWorld* EditorWorld();
 
+	/** The package of the level open in the editor ("/Game/Maps/Arena"; "(none)" outside the editor). */
+	FString OpenLevelPath();
+
 	/** Make @p Level the level new actors spawn into; throws when it is not a level or cannot become current (locked). */
 	void MakeLevelCurrent(ULevel* Level);
 

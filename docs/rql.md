@@ -153,7 +153,7 @@ agent ──query text──▶ unreal-mcp-bridge (sidecar, .NET)          Unrea
 
 | Source / function | What |
 |---|---|
-| `actors` | every actor of the editor world's loaded levels |
+| `actors` | every actor of the level open in the editor and its loaded sublevels; another map's actors only after `editor \| call OpenLevel("/Game/Maps/Other")`. An empty read of `actors` warns `open-level-only`, naming the open level and how to open another |
 | `levels`, `world` | the loaded levels, the editor world |
 | `selection` | the selected actors (`editor | set Selection = [...]` writes it) |
 | `playActors` | every actor of the running Play In Editor world (empty when not playing) |
