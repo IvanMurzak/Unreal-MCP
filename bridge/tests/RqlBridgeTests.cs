@@ -254,7 +254,23 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             Assert.Contains("functions:\n  unreal.find(…) — an actor by label\n", text);
             Assert.Contains("actor classes in the editor world: StaticMeshActor ×12\n", text);
             Assert.Contains("component classes in the editor world: none\n", text);
-            Assert.Contains("Actor : Object {Id int ro, Label string} methods: Destroy() — remove the actor", text);
+            Assert.Contains("Actor : Object {Id, Label} methods: Destroy()", text);
+        }
+
+        [Fact]
+        public void RenderSchema_OverviewShortensATypeToItsDescribedMembers()
+        {
+            var json = JsonNode.Parse(@"{
+                ""sources"": [{""name"": ""actors"", ""type"": ""list of Actor""}],
+                ""types"": [{""type"": {""name"": ""Actor"", ""base"": ""Object"", ""kind"": ""object"",
+                    ""members"": [{""name"": ""bReplicates"", ""type"": ""bool"", ""writable"": true},
+                        {""name"": ""Label"", ""type"": ""string"", ""writable"": true, ""description"": ""the Outliner name""},
+                        {""name"": ""NetPriority"", ""type"": ""float"", ""writable"": true}],
+                    ""methods"": [""Destroy() — remove the actor"", ""Duplicate(Vector Offset) — copy the actor""]}}]
+            }")!.AsObject();
+            var text = RqlBridge.RenderSchema(json);
+            Assert.EndsWith("Actor : Object {Label, +2 reflected properties} methods: Destroy() | Duplicate(Vector Offset)", text);
+            Assert.DoesNotContain("bReplicates", text);
         }
 
         [Fact]
@@ -301,7 +317,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
                 ""actorClasses"": []
             }")!.AsObject();
             var text = RqlBridge.RenderSchema(json);
-            Assert.Contains("Install one: unreal-mcp-cli install-extension <id>.\n  com.ivanmurzak.unreal-ai-niagara (Niagara Tools): Niagara VFX - not installed\nactor classes", text);
+            Assert.Contains("Install one: unreal-mcp-cli install-extension <id>.\n  com.ivanmurzak.unreal-ai-niagara (Niagara Tools)\nactor classes", text);
         }
 
         [Fact]

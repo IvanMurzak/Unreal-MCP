@@ -212,19 +212,31 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
             {
                 // The Unreal-MCP extensions this editor does not have: the note says how to install one, a line each.
                 sb.Append(Str(json, "extensionsNote") ?? "extensions:").Append('\n');
+                // "id (Title): what it adds - not installed" -> "id (Title)": the title names the feature; the rest costs a
+                // few hundred characters per extension on every later turn.
                 foreach (var e in extensions.OfType<JsonObject>())
-                    sb.Append("  ").Append(Str(e, "line") ?? Str(e, "id")).Append('\n');
+                {
+                    var line = Str(e, "line") ?? Str(e, "id") ?? "";
+                    var titleEnd = line.IndexOf("): ", StringComparison.Ordinal);
+                    sb.Append("  ").Append(titleEnd > 0 ? line.Substring(0, titleEnd + 1) : line).Append('\n');
+                }
             }
             AppendPresent(sb, json["actorClasses"] as JsonArray, "actor classes in the editor world");
             AppendPresent(sb, json["componentClasses"] as JsonArray, "component classes in the editor world");
-            if (json["sources"] is JsonArray)
-                sb.Append("types (members: name type; ro = read-only; rql-schema \"<type>\" for one type):\n");
+            var overview = json["sources"] is JsonArray;
+            if (overview)
+                sb.Append("types (rql-schema \"<type>\" lists a type's members with their types and descriptions):\n");
 
             if (json["types"] is JsonArray types)
             {
                 foreach (var entry in types.OfType<JsonObject>())
                 {
                     if (!(entry["type"] is JsonObject type)) continue;
+                    if (overview)
+                    {
+                        AppendTypeSummary(sb, type);
+                        continue;
+                    }
                     var shared = entry["shared"] as JsonObject;
                     AppendType(sb, type, shared);
                     if (shared != null)
@@ -286,6 +298,32 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
             }
             var typeDescription = Str(type, "description");
             if (!string.IsNullOrEmpty(typeDescription)) sb.Append(" — ").Append(typeDescription);
+            sb.Append('\n');
+        }
+
+        /// <summary>
+        /// The overview's short form of a type (its full form costs kilobytes the agent re-reads every turn): the members
+        /// the plugin describes (the curated ones, such as Actor's Label / Location), or every member name when none is
+        /// described, then a count of the rest, and the method signatures.
+        /// </summary>
+        private static void AppendTypeSummary(StringBuilder sb, JsonObject type)
+        {
+            sb.Append(Str(type, "name") ?? "?");
+            var baseName = Str(type, "base");
+            if (!string.IsNullOrEmpty(baseName)) sb.Append(" : ").Append(baseName);
+            var members = (type["members"] as JsonArray)?.OfType<JsonObject>().ToList() ?? new List<JsonObject>();
+            var described = members.Where(m => !string.IsNullOrEmpty(Str(m, "description"))).ToList();
+            var shown = described.Count > 0 ? described : members;
+            sb.Append(" {").Append(string.Join(", ", shown.Select(m => Str(m, "name") ?? "?")));
+            if (shown.Count < members.Count)
+                sb.Append(", +").Append(members.Count - shown.Count).Append(" reflected properties");
+            sb.Append('}');
+            if (type["methods"] is JsonArray methods && methods.Count > 0)
+            {
+                // "Destroy() — remove the actor" -> "Destroy()"
+                var signatures = methods.Select(m => (m?.GetValue<string>() ?? "").Split(" — ")[0]);
+                sb.Append(" methods: ").Append(string.Join(" | ", signatures));
+            }
             sb.Append('\n');
         }
 
