@@ -140,6 +140,20 @@ describe('runAutomationTests', () => {
     expect(killed).toEqual([4242]);
   });
 
+  it('saves and closes an editor the CLI started, then runs', async () => {
+    const { options, spawned } = setup((child, args) => { writeReport(args); child.exit(0); });
+    const uproject = path.join(options.projectDir!, 'Game.uproject');
+    let open = true;
+    const r = await runAutomationTests({
+      ...options,
+      listProcessesImpl: () => (open ? [{ pid: 7, commandLine: `UnrealEditor.exe "${uproject}" -RenderOffscreen` }] : []),
+      closeOwnedEditor: async () => { open = false; return 7; },
+    });
+    expect(r.kind).toBe('completed');
+    expect(r.warnings[0]).toMatch(/Saved and closed the editor the CLI had started.*PID 7/);
+    expect(spawned).toHaveLength(1);
+  });
+
   it('refuses while an editor has the project open', async () => {
     const { options, spawned } = setup(() => {});
     const uproject = path.join(options.projectDir!, 'Game.uproject');

@@ -44,6 +44,9 @@ export const compileCommand = new Command('compile')
         (diagnostic.severity === 'error' ? process.stderr : process.stdout).write(`${text}\n`);
       },
     });
+    if (!out.machine && result.closedEditorPid !== undefined) {
+      ui.info(`Saved and closed the editor the CLI had started for this project (PID ${result.closedEditorPid}) before building.`);
+    }
     if (pluginWarnings > 0) ui.info(`${pluginWarnings} warning(s) in installed plugins not shown (--verbose shows them).`);
     if (result.kind === 'failure') {
       const { kind: _kind, success: _success, reason, message, ...data } = result;

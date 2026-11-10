@@ -1,14 +1,6 @@
 import { Command, Option } from 'commander';
 import { close } from '../lib/close.js';
-import { closeOwnedSession, readSessionLease } from '../lib/session.js';
-import { readUProject } from '../utils/project.js';
-import * as path from 'path';
-
-/** The project root of a path argument (a `.uproject` path or a folder; default cwd). */
-function resolveDir(pathArg: string | undefined): string {
-  const input = path.resolve(pathArg ?? process.cwd());
-  return readUProject(input)?.projectDir ?? input;
-}
+import { closeOwnedEditor, closeOwnedSession } from '../lib/session.js';
 import * as ui from '../utils/ui.js';
 
 export const closeCommand = new Command('close')
@@ -25,14 +17,8 @@ export const closeCommand = new Command('close')
       return;
     }
     // An editor the CLI started saves and quits first (a kill would lose its unsaved changes); what is left is killed.
-    let savedPid: number | undefined;
-    if (readSessionLease(resolveDir(pathArg)) !== undefined) {
-      const owned = await closeOwnedSession({ projectDir: pathArg, force: true });
-      if (owned.kind === 'success' && owned.result.kind === 'closed') {
-        savedPid = owned.result.pid;
-        ui.success(`Closed the Unreal Editor started by the CLI (PID ${savedPid}${owned.result.forced ? ', killed after the save timed out' : ', saved'}).`);
-      }
-    }
+    const savedPid = await closeOwnedEditor(pathArg ?? process.cwd());
+    if (savedPid !== undefined) ui.success(`Closed the Unreal Editor started by the CLI (PID ${savedPid}).`);
     const result = await close({ projectDir: pathArg });
     ui.printWarnings(result.warnings);
     if (result.kind === 'failure') {

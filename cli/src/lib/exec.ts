@@ -9,8 +9,8 @@ import {
 } from '@baizor/gamedev-cli-core';
 import { runTool } from './run-tool.js';
 import { PreLaunchBuildError } from './open.js';
-import { isAuthFailure, machineCredentialState, SIGNED_IN_BUT_UNUSABLE_MESSAGE } from './run-tool-session.js';
-import { connectsInCloudMode } from '../utils/config.js';
+import { isAuthFailure, mustStayInCloud, SIGNED_IN_BUT_UNUSABLE_MESSAGE, type CredentialState } from './cloud-auth.js';
+import { toolErrorText } from './tool-outcome.js';
 import { readUProject } from '../utils/project.js';
 import * as path from 'path';
 import { isToolSuccess, openProjectSession, sessionFailureMessage, type UnrealSessionOptions } from './session.js';
@@ -56,7 +56,7 @@ export interface ExecPythonOptions {
   invoke?: (options: RunToolOptions) => Promise<RunToolResult>;
   sleep?: (ms: number) => Promise<void>;
   /** The machine's ai-game.dev credential store state (default: cli-core MachineCredentialStore.readState). */
-  credentialState?: () => 'ok' | 'missing' | 'unreadable';
+  credentialState?: () => CredentialState;
 }
 
 export interface ExecPythonSuccess {
@@ -101,8 +101,7 @@ export async function execPython(options: ExecPythonOptions): Promise<ExecPython
   // A Cloud-mode project on a machine with an ai-game.dev sign-in stays in Cloud mode: run in the editor connected to
   // the cloud, never in a local editor started here (only a machine that never signed in falls back to local).
   const projectRoot = readUProject(path.resolve(options.projectDir ?? process.cwd()))?.projectDir;
-  if (projectRoot && options.url === undefined && options.token === undefined && connectsInCloudMode(projectRoot)
-    && (options.credentialState ?? machineCredentialState)() !== 'missing') {
+  if (projectRoot && mustStayInCloud({ projectDir: projectRoot, url: options.url, token: options.token }, options.credentialState)) {
     options.onStatus?.('Cloud mode: running in the editor connected to ai-game.dev...');
     const result = await invoke({ toolName: PYTHON_EXECUTE_TOOL, projectDir: projectRoot, input, timeoutMs: options.timeoutMs ?? DEFAULT_EXEC_TIMEOUT_MS });
     if (result.kind === 'success') return { kind: 'success', success: true, baseUrl: new URL(result.endpoint).origin, source: 'running', data: result.data };
@@ -177,11 +176,7 @@ export function pythonNotYetAvailable(result: RunToolResult): boolean {
   return text.startsWith(PYTHON_NOT_AVAILABLE_PREFIX);
 }
 
-/** A failed call's own error (the server answers a tool error as HTTP 500 `{ "error": "<text>" }`), else the HTTP reason. */
-export function toolErrorText(failure: RunToolFailure): string {
-  const error = (failure.data as { error?: unknown } | null | undefined)?.error;
-  return typeof error === 'string' && error.length > 0 ? error : failure.message;
-}
+export { toolErrorText };
 
 export interface PythonLogLine {
   level: string;

@@ -7,6 +7,7 @@ import { spawn, execFile, type ChildProcess } from 'child_process';
 import { platform } from 'os';
 import { maybeBuildBeforeOpen } from './open.js';
 import { commandletEditorPath, prepareStandaloneRun } from './project-engine.js';
+import { closeOwnedEditor } from './session.js';
 import type { RunningProcess } from './close.js';
 import type { UbtBuildStep } from './types.js';
 import { parseAutomationReport, type AutomationSummary } from '../utils/automation-report.js';
@@ -44,6 +45,8 @@ export interface RunTestsOptions {
   // --- Test seams ---
   os?: NodeJS.Platform;
   listProcessesImpl?: () => RunningProcess[];
+  /** Saves and quits an editor the CLI started (default: the session lease's). */
+  closeOwnedEditor?: (projectDir: string) => Promise<number | undefined>;
   buildImpl?: (step: UbtBuildStep) => Promise<void>;
   spawnImpl?: (command: string, args: string[], env: NodeJS.ProcessEnv) => ChildProcess;
   killTreeImpl?: (pid: number) => Promise<void>;
@@ -138,12 +141,21 @@ export async function runAutomationTests(options: RunTestsOptions = {}): Promise
   const warnings: string[] = [];
   const sleep = options.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
 
-  const resolved = prepareStandaloneRun(
-    { projectDir: options.projectDir, engineRoot: options.engineRoot, os, listProcessesImpl: options.listProcessesImpl },
+  const resolved = await prepareStandaloneRun(
+    {
+      projectDir: options.projectDir,
+      engineRoot: options.engineRoot,
+      os,
+      listProcessesImpl: options.listProcessesImpl,
+      closeOwnedEditor: options.closeOwnedEditor ?? closeOwnedEditor,
+    },
     'a test run needs the project to itself (to test in the open editor, call its tools with `unreal-mcp-cli run-tool`)',
   );
   if ('reason' in resolved) return { kind: 'failure', reason: resolved.reason, message: resolved.message, warnings };
   const { project, engineRoot, editorPath } = resolved;
+  if (resolved.closedOwnedPid !== undefined) {
+    warnings.push(`Saved and closed the editor the CLI had started for this project (PID ${resolved.closedOwnedPid}): a test run needs the project to itself.`);
+  }
 
   if (options.build !== false) {
     try {

@@ -36,7 +36,7 @@ export interface ToolsCache {
 }
 
 export type ToolsResult =
-  | { kind: 'success'; source: 'cache' | 'editor'; cachePath: string; cache: ToolsCache; session?: RunToolSessionResult }
+  | { kind: 'success'; source: 'cache' | 'editor'; cachePath?: string; cache: ToolsCache; session?: RunToolSessionResult }
   | { kind: 'failure'; message: string; session: RunToolSessionResult; cachePath?: string };
 
 export interface ListToolsOptions extends Omit<RunToolSessionOptions, 'invoke' | 'toolName' | 'input'> {
@@ -122,7 +122,7 @@ export async function listTools(options: ListToolsOptions): Promise<ToolsResult>
   if (!parsed) return { kind: 'failure', message: 'The editor did not return its tool list.', session };
 
   const cache: ToolsCache = { schema: CACHE_SCHEMA, key: key ?? '', savedAt: new Date().toISOString(), ...parsed };
-  let cachePath = '';
+  let cachePath: string | undefined;
   if (projectDir) {
     cachePath = toolsCachePath(projectDir);
     try {
@@ -130,7 +130,7 @@ export async function listTools(options: ListToolsOptions): Promise<ToolsResult>
       fs.writeFileSync(cachePath, `${JSON.stringify(cache, null, 2)}\n`, 'utf-8');
       ensureAiGameDevGitignore(projectDir, [TOOLS_CACHE_FILE]);
     } catch {
-      cachePath = ''; // a read-only project still gets its answer
+      cachePath = undefined; // a read-only project still gets its answer
     }
   }
   return { kind: 'success', source: 'editor', cachePath, cache, session };

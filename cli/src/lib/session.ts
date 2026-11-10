@@ -385,12 +385,27 @@ export function closeOwnedSession(
   }));
 }
 
+/**
+ * Save and quit the editor the CLI started for the project, if its lease names a live one (killed when the save times
+ * out). Returns its pid, else `undefined`. An editor the user opened is never touched.
+ */
+export async function closeOwnedEditor(projectDir: string): Promise<number | undefined> {
+  if (readSessionLease(projectRootOf(projectDir)) === undefined) return undefined;
+  const outcome = await closeOwnedSession({ projectDir, force: true });
+  return outcome.kind === 'success' && outcome.result.kind === 'closed' ? outcome.result.pid : undefined;
+}
+
+/** The project root of a path (a `.uproject` or a folder; default cwd); the path itself when it holds no project. */
+export function projectRootOf(projectDir: string | undefined): string {
+  const input = path.resolve(projectDir ?? process.cwd());
+  return readUProject(input)?.projectDir ?? input;
+}
+
 /** A GUI `open`: close our headless editor first, if one holds the project. No lease → nothing to do. */
 export async function prepareGuiOpen(
   options: LeaseSessionOptions & { timeoutMs?: number },
 ): Promise<SessionCommandResult<{ result: PrepareWindowResult }>> {
-  const input = path.resolve(options.projectDir ?? process.cwd());
-  const projectDir = readUProject(input)?.projectDir ?? input;
+  const projectDir = projectRootOf(options.projectDir);
   // Before any session exists: no lease means nothing of ours to stop (and no connection to resolve).
   if (readSessionLease(projectDir) === undefined) {
     return { kind: 'success', success: true, projectDir, result: { kind: 'proceed' } };

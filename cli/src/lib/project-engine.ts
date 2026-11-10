@@ -76,10 +76,17 @@ export interface StandaloneRunFailure {
  * The project and engine of a standalone run (`compile`, `test`) — which needs the project to itself, so a running
  * editor of it is a failure (`why` completes its message).
  */
-export function prepareStandaloneRun(
-  options: ResolveProjectEngineOptions & { listProcessesImpl?: () => RunningProcess[] },
+export async function prepareStandaloneRun(
+  options: ResolveProjectEngineOptions & {
+    listProcessesImpl?: () => RunningProcess[];
+    /**
+     * Save and quit an editor the CLI itself started (e.g. a warm `exec` session), returning its pid; the user's editor
+     * is never touched. Without it, any editor is a `project-open` failure.
+     */
+    closeOwnedEditor?: (projectDir: string) => Promise<number | undefined>;
+  },
   why: string,
-): ProjectEngine | StandaloneRunFailure {
+): Promise<(ProjectEngine & { closedOwnedPid?: number }) | StandaloneRunFailure> {
   let resolved: ProjectEngine;
   try {
     resolved = resolveProjectEngine(options);
@@ -87,8 +94,13 @@ export function prepareStandaloneRun(
     const reason = err instanceof ProjectEngineError && err.kind === 'project' ? 'not-found' : 'unreachable';
     return { reason, message: err instanceof Error ? err.message : String(err) };
   }
-  const editorPids = runningProjectEditors(resolved.project, options.listProcessesImpl);
-  if (editorPids.length === 0) return resolved;
+  let editorPids = runningProjectEditors(resolved.project, options.listProcessesImpl);
+  let closedOwnedPid: number | undefined;
+  if (editorPids.length > 0 && options.closeOwnedEditor) {
+    closedOwnedPid = await options.closeOwnedEditor(resolved.project.projectDir);
+    if (closedOwnedPid !== undefined) editorPids = runningProjectEditors(resolved.project, options.listProcessesImpl);
+  }
+  if (editorPids.length === 0) return closedOwnedPid === undefined ? resolved : { ...resolved, closedOwnedPid };
   return {
     reason: 'project-open',
     message: `An Unreal Editor has ${resolved.project.projectName} open (pid ${editorPids.join(', ')}): ${why}. ${PROJECT_OPEN_HINT}`,

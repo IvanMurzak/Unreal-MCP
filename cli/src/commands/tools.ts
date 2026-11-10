@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import { filterTools, listTools } from '../lib/tools.js';
 import { UNREAL_SESSION_READY_TIMEOUT_MS } from '../lib/session.js';
-import { classifySessionFailure, classifyToolFailure } from '../lib/tool-outcome.js';
+import { classifyToolFailure, editorCloseWarning, sessionOutcomeFailure } from '../lib/tool-outcome.js';
 import { ExitCode } from '../utils/exit-codes.js';
 import { CommandOutput, FAILURE, formatOption, parseWholeNumber } from '../utils/output.js';
 import * as ui from '../utils/ui.js';
@@ -63,13 +63,13 @@ export const toolsCommand = new Command('tools')
     });
     spinner?.stop();
 
+    const closeWarning = result.session ? editorCloseWarning(result.session) : undefined;
+    if (closeWarning) out.warn(closeWarning);
     if (result.kind === 'failure') {
       const { session } = result;
-      if (session.sessionFailure) {
-        out.fail(classifySessionFailure(session.sessionFailure.reason, session.sessionFailure.invalidInput, session.sessionFailure.buildFailed),
-          `No tool list: ${session.sessionFailure.message}`);
-      } else if (session.signInRequired) {
-        out.fail(FAILURE.notAuthenticated, session.signInRequired);
+      const noCall = sessionOutcomeFailure(session, 'the tool list');
+      if (noCall) {
+        out.fail(noCall.kind, noCall.message);
       } else if (session.result?.kind === 'failure') {
         out.fail(classifyToolFailure(session.result), `No tool list: ${session.result.message}`);
       } else {
@@ -81,7 +81,7 @@ export const toolsCommand = new Command('tools')
     const tools = filterTools(result.cache.tools, opts.filter);
     const data = {
       source: result.source,
-      cache: result.cachePath || null,
+      cache: result.cachePath ?? null,
       savedAt: result.cache.savedAt,
       count: tools.length,
       tools,

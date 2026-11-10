@@ -4,6 +4,7 @@
 import * as fs from 'fs';
 import { platform } from 'os';
 import { prepareStandaloneRun } from './project-engine.js';
+import { closeOwnedEditor } from './session.js';
 import type { RunningProcess } from './close.js';
 import type { UbtBuildStep } from './types.js';
 import { DiagnosticCollector, type CompilerDiagnostic } from '../utils/compiler-diagnostics.js';
@@ -23,6 +24,8 @@ export interface CompileOptions {
   // --- Test seams ---
   os?: NodeJS.Platform;
   listProcessesImpl?: () => RunningProcess[];
+  /** Saves and quits an editor the CLI started (default: the session lease's). */
+  closeOwnedEditor?: (projectDir: string) => Promise<number | undefined>;
   existsImpl?: (p: string) => boolean;
   buildImpl?: (step: UbtBuildStep, onLine: (line: string) => void) => Promise<UnrealBuildExit>;
 }
@@ -35,6 +38,8 @@ export interface CompileReport {
   errors: CompilerDiagnostic[];
   warnings: CompilerDiagnostic[];
   durationMs: number;
+  /** The editor the CLI had started for the project, saved and closed so the build does not fight it. */
+  closedEditorPid?: number;
 }
 
 export type CompileFailureReason =
@@ -56,13 +61,19 @@ export async function compileProject(options: CompileOptions = {}): Promise<Comp
   const empty = (): CompileReport => ({ errors: [], warnings: [], durationMs: Date.now() - started });
   const os = options.os ?? (platform() as NodeJS.Platform);
 
-  const resolved = prepareStandaloneRun(
-    { projectDir: options.projectDir, engineRoot: options.engineRoot, os, listProcessesImpl: options.listProcessesImpl },
+  const resolved = await prepareStandaloneRun(
+    {
+      projectDir: options.projectDir,
+      engineRoot: options.engineRoot,
+      os,
+      listProcessesImpl: options.listProcessesImpl,
+      closeOwnedEditor: options.closeOwnedEditor ?? closeOwnedEditor,
+    },
     'building now would fight its Live Coding / hot reload',
   );
   if ('reason' in resolved) return { kind: 'failure', success: false, ...resolved, ...empty() };
   const { project, engineRoot } = resolved;
-  const base = { projectDir: project.projectDir };
+  const base = { projectDir: project.projectDir, ...(resolved.closedOwnedPid !== undefined ? { closedEditorPid: resolved.closedOwnedPid } : {}) };
 
   if (!isDesktopBuildPlatform(os)) {
     return { kind: 'failure', success: false, reason: 'unreachable', message: `Building is not supported on ${os}.`, ...base, ...empty() };

@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import { readFileSync } from 'fs';
 import { runToolWithSession, type RunToolSessionResult } from '../lib/run-tool-session.js';
 import { UNREAL_SESSION_READY_TIMEOUT_MS } from '../lib/session.js';
-import { classifySessionFailure, classifyToolFailure, classifyToolResponseError, NOT_STARTED_BUILD, toolResponseError } from '../lib/tool-outcome.js';
+import { classifyToolFailure, classifyToolResponseError, editorCloseWarning, sessionOutcomeFailure, toolResponseError } from '../lib/tool-outcome.js';
 import type { RunToolOptions, RunToolResult } from '../lib/types.js';
 import { ExitCode } from '../utils/exit-codes.js';
 import { CommandOutput, FAILURE, formatOption, parseWholeNumber } from '../utils/output.js';
@@ -99,21 +99,15 @@ export function buildRunToolCommand(spec: RunToolCommandSpec): Command {
 
 function report(spec: RunToolCommandSpec, toolName: string, outcome: RunToolSessionResult, out: CommandOutput): void {
   const editor = outcome.source === undefined ? undefined : { source: outcome.source, ...(outcome.closed ? { closed: outcome.closed } : {}) };
-  if (outcome.closed && outcome.closed.kind !== 'closed' && outcome.closed.kind !== 'not-owned') {
-    out.warn(`The editor this call started did not close (${outcome.closed.kind}${'message' in outcome.closed ? `: ${outcome.closed.message}` : ''}).`);
-  }
-  if (outcome.sessionFailure) {
-    out.fail(classifySessionFailure(outcome.sessionFailure.reason, outcome.sessionFailure.invalidInput, outcome.sessionFailure.buildFailed),outcome.sessionFailure.buildFailed
-      ? `${NOT_STARTED_BUILD} ${outcome.sessionFailure.message}`
-      : `No ready Unreal Editor for ${spec.errorNoun} "${toolName}": ${outcome.sessionFailure.message}`);
+  const closeWarning = editorCloseWarning(outcome);
+  if (closeWarning) out.warn(closeWarning);
+  const noCall = sessionOutcomeFailure(outcome, `${spec.errorNoun} "${toolName}"`);
+  if (noCall) {
+    out.fail(noCall.kind, noCall.message, { tool: toolName });
     return;
   }
   const result = outcome.result!;
-  if (outcome.signInRequired) {
-    out.fail(FAILURE.notAuthenticated, outcome.signInRequired, { tool: toolName, endpoint: result.endpoint, httpStatus: result.kind === 'failure' ? result.httpStatus : undefined });
-    return;
-  }
-  const data ={ tool: toolName, endpoint: result.endpoint, httpStatus: result.httpStatus, response: result.data ?? null, ...(editor ? { editor } : {}) };
+  const data = { tool: toolName, endpoint: result.endpoint, httpStatus: result.httpStatus, response: result.data ?? null, ...(editor ? { editor } : {}) };
   if (result.kind === 'failure') {
     const kind = classifyToolFailure(result);
     out.error(kind.code, `Failed to run ${spec.errorNoun} "${toolName}" (${result.reason}): ${result.message}`);
