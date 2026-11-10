@@ -65,7 +65,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
         /// </summary>
         public static ResponseCallTool Render(string role, ResponseCallTool response)
         {
-            var text = response.Content?.FirstOrDefault(c => c.Type == Consts.ContentType.Text)?.Text;
+            var first = response.Content?.FirstOrDefault(c => c.Type == Consts.ContentType.Text);
+            var text = first?.Text;
             if (string.IsNullOrEmpty(text))
                 return response;
             JsonObject? json;
@@ -89,7 +90,10 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
             else
                 return response;
 
-            response.Content = new List<ContentBlock> { new ContentBlock { Type = Consts.ContentType.Text, Text = rendered } };
+            // Only the first text block is the RQL answer; later blocks (the plugin's "Editor diagnostics" note) follow it unchanged.
+            var content = new List<ContentBlock> { new ContentBlock { Type = Consts.ContentType.Text, Text = rendered } };
+            content.AddRange(response.Content!.Where(c => !ReferenceEquals(c, first)));
+            response.Content = content;
             response.StructuredContent = null;
             return response;
         }

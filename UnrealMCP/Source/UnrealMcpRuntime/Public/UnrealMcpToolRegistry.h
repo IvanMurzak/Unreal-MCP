@@ -129,6 +129,9 @@ struct UNREALMCPRUNTIME_API FUnrealMcpToolResult
 	// Message already renders everything Structured holds (python-execute's value and logs, a file's text): the wire
 	// text block is Message alone. Otherwise the text block also carries Structured as condensed JSON (WireText).
 	bool bMessageCoversStructured = false;
+	// A note the call pipeline adds after the handler (new editor warnings, FUnrealMcpToolRegistry::SetResultAnnotator):
+	// sent as its own text block after WireText, so a tool's text (the rql-* JSON the sidecar renders) stays intact.
+	FString Notes;
 
 	/**
 	 * The text block sent to the MCP client. Many clients hand the model only the `content` text, never
@@ -430,4 +433,12 @@ public:
 	 * tool is running. Game-thread only.
 	 */
 	static void AddCallRefusal(const FString& Reason);
+
+	/**
+	 * Runs after the handler of every outermost Standard tool call that Execute ran (not System tools, nested calls or a
+	 * RetryLater), on the game thread, and may add to the result (FUnrealMcpToolResult::Notes). The editor's RQL module
+	 * installs the one that reports new editor warnings and errors; an empty function removes it. One annotator at a time.
+	 */
+	using FResultAnnotator = TFunction<void(const FUnrealMcpRegisteredTool& Tool, FUnrealMcpToolResult& Result)>;
+	static void SetResultAnnotator(FResultAnnotator Annotator);
 };

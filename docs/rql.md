@@ -159,6 +159,7 @@ agent ──query text──▶ unreal-mcp-bridge (sidecar, .NET)          Unrea
 | `playActors` | every actor of the running Play In Editor world (empty when not playing) |
 | `editor` | editor state (`IsPlaying`, `IsPaused` — writable, `PlayState` (see Play testing), `Selection`, `World`, `CurrentLevel`; the transaction buffer: `NextUndo`, `NextRedo`, `UndoHistory`, `RedoHistory` — titles, next first — `UndoCount`, `RedoCount`) and operations: `SpawnActor` (a class, Blueprint name or path, or an asset to place: a StaticMesh path gives a StaticMeshActor; a volume class gets the editor's 200 cm box brush, sized with `Scale`; label, location, rotation, parent and scale are optional), `SpawnActorFromAsset` (an asset path only, placed as drag and drop does), `OpenLevel`, `NewLevel`, `SaveLevel`, `SaveAll`, `AddSublevel` (a saved map as a streaming sublevel; not undoable, the current level stays; refused in World Partition worlds), `UnloadSublevel` (a level by its map name), `CreateAsset`, `CopyAsset`, `MoveAsset`, `DeleteAsset`, `CreateFolder`, `RefreshAssets`, `CreateMaterialInstance`, `ImportAsset` (returns every asset the import created: the mesh, then its materials, textures, skeleton), `SaveAsset`, `ClearConsole` |
 | `console` | editor log entries (`Sequence`, `Time`, `Verbosity`, `Category`, `Message`) |
+| `diagnostics` | the editor's current warnings and errors (`Sequence`, `Source`, `Severity`, `Message`, `Count`, `FirstSeen`, `LastSeen`; see [Editor diagnostics](#editor-diagnostics)) |
 | `unreal.find(label)` | an actor by label, name or path |
 | `unreal.asset(path)`, `unreal.assets(class, path?)` | one asset; assets of a class (at most 200, loaded as read; without a path: `/Game`, or in rql-query every content root (engine, plugins) when the project has none of the class). A path with no asset is empty (`| count` is 0) with an `asset-not-found` warning naming similar assets, or the shell that rewrote the path |
 | `unreal.classes(base?, filter?)` | classes deriving from a base |
@@ -204,6 +205,41 @@ hook, not a per-type adapter, so RQL's own default would not cover them.)
   class without `$type` fails naming concrete subclasses. A `$type` that names no class makes the hook register the
   loaded concrete subclasses of the member's class (at most 200; a broader class gets none), so RQL's
   `coercion-failed` message suggests the closest: `{$type: "InputTrigerHold"}` gets `(did you mean 'InputTriggerHold' ...)`. A class name two loaded classes share is not offered.
+
+### Editor diagnostics
+
+The editor reports problems in places an agent does not read: yellow and red text in the level viewport (some drawn by the
+renderer straight onto the canvas, never logged, e.g. "Multiple directional lights are competing to be the single one used
+for forward shading ..."), the Message Log pages and the log. `FUnrealMcpEditorDiagnostics` (`UnrealMcpRql`) gathers them on
+the game thread, and the agent gets them two ways.
+
+**Pull: the `diagnostics` source.** One row per current problem, oldest first:
+
+| Field | Meaning |
+|---|---|
+| `Sequence` | raised each time the row appears or changes (a new row has a higher `Sequence` than every earlier one) |
+| `Source` | `Viewport` (the viewport's on-screen messages: `FCoreDelegates::OnGetOnScreenMessages`, the engine's map warnings such as `BLUEPRINT COMPILE ERROR` / unbuilt lighting, and renderer scene warnings derived from the scene state the renderer checks: competing directional lights), `Compiler` (loaded Blueprints whose compile failed or warned), `MessageLog:<page>` (`MapCheck`, `PIE`, `BlueprintLog`, `LoadErrors`, `AssetCheck`, `EditorErrors`, `LightingResults`, `AssetTools`, `PackagingResults`, `HLODResults`; errors and warnings, the newest 100 per page), `Log:<category>` (Warning / Error log lines since the editor finished starting, deduplicated, the newest 200; `console` has every line) |
+| `Severity` | `Error`, `Warning` or `Info` |
+| `Message` | the text (at most 2000 characters) |
+| `Count` | how often a log line was seen (1 otherwise) |
+| `FirstSeen`, `LastSeen` | UTC, ISO 8601 |
+
+`Viewport`, `Compiler` and `MessageLog` rows are state: a fixed problem leaves the list, and one that comes back is new again.
+`diagnostics | where Severity != "Info" | select Source Severity Message Count` lists what to fix. The field names are meant to be shared by the Unity and Godot plugins (`Source` values are host-specific).
+
+**Push: a note on tool results.** After every outermost Standard tool call (`FUnrealMcpToolRegistry::SetResultAnnotator`;
+not system tools or nested calls), the Warning / Error rows that are new since the agent last saw the list are sent as a
+second text block after the tool's own text (the sidecar keeps it after an rql-* answer it re-renders):
+
+```
+Editor diagnostics (new since your last call; fix them or tell the user, and check the list before you call the work done: rql-query diagnostics | where Severity != "Info" | select Source Severity Message Count):
+- Warning [Viewport] Multiple directional lights are competing to be the single one used for forward shading, translucent, water or volumetric fog. Please adjust their ForwardShadingPriority. As a fallback, the main directional light will be selected based on overall brightness. (lights: Sun, Sun2; ForwardShadingPriority 0)
+```
+
+At most 10 lines of at most 400 characters, errors first, then `+N more`; each row is reported once (unchanged rows are not
+repeated), and rows whose message the tool's own text already holds (the log lines `console-run-command` / `python-execute` return, the rows a `diagnostics` query returned) are left out.
+The `UnrealMcp.DiagnosticsPush` console variable sets when: `mutating` (only tools that are not read-only, the default),
+`all` (every tool) or `off` (the source only). `UNREAL_MCP_DIAGNOSTICS_PUSH` sets its value at editor start.
 
 ### Play testing
 

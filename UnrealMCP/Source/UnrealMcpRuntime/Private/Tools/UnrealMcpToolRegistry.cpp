@@ -13,6 +13,7 @@
 // Game-thread state of the tool call being executed (Execute runs handlers on the game thread only).
 static int32 GUnrealMcpToolExecutionDepth = 0;
 static TArray<FString> GUnrealMcpCallRefusals;
+static FUnrealMcpToolRegistry::FResultAnnotator GUnrealMcpResultAnnotator;
 
 // --- FUnrealMcpToolCall accessors -----------------------------------------------------------------
 
@@ -308,6 +309,7 @@ FUnrealMcpToolResult FUnrealMcpToolRegistry::Execute(const FString& Name, const 
 			*FString::Join(Declared, TEXT(", ")), Sent.Num() ? *FString::Join(Sent, TEXT(", ")) : TEXT("none")));
 	}
 
+	const bool bOutermost = GUnrealMcpToolExecutionDepth == 0;
 	TArray<FString> OuterRefusals = MoveTemp(GUnrealMcpCallRefusals); // a nested call keeps its own refusals
 	FUnrealMcpToolResult Result;
 	{
@@ -321,7 +323,14 @@ FUnrealMcpToolResult FUnrealMcpToolRegistry::Execute(const FString& Name, const 
 		Result.bSuccess = false;
 		Result.Message = FString::Join(Refusals, TEXT("\n")) + (Result.Message.IsEmpty() ? FString() : TEXT("\n") + Result.Message);
 	}
+	if (bOutermost && !Result.bRetryLater && Found->ToolType != EUnrealMcpToolType::System && GUnrealMcpResultAnnotator)
+		GUnrealMcpResultAnnotator(*Found, Result);
 	return Result;
+}
+
+void FUnrealMcpToolRegistry::SetResultAnnotator(FResultAnnotator Annotator)
+{
+	GUnrealMcpResultAnnotator = MoveTemp(Annotator);
 }
 
 bool FUnrealMcpToolRegistry::IsExecutingTool()

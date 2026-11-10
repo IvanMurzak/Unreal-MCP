@@ -53,7 +53,7 @@ namespace UnrealMcpRqlGuide
 	inline const char* Language()
 	{
 		return R"RQL(RQL: source | stage | stage ...
-Sources: actors (every actor of the editor world's loaded levels), playActors (the running Play In Editor world's actors), levels, world, selection, console (editor log entries), editor (editor state and operations), dataTables, gameplayTags, settings (Project Settings / Editor Preferences sections), blueprints, widgetBlueprints, levelSequences, plus the sources of installed extensions (rql-schema lists them, and the extensions you can still install). Assets: unreal.assets("Material") or unreal.assets("StaticMesh", "/Game/Props") (at most 200, loaded lazily), unreal.asset("/Game/Materials/M_Red"). ref("PointLight#1234") resolves a $ref; unreal.find("Lamp") an actor by label, name or path; unreal.classes("ActorComponent", "Light") lists classes; unreal.settings("Maps & Modes") a settings object. A member path may follow a function: unreal.asset("/Game/BP_Door").EventGraph.
+Sources: actors (every actor of the editor world's loaded levels), playActors (the running Play In Editor world's actors), levels, world, selection, console (editor log entries), diagnostics (the editor's current warnings and errors: viewport on-screen messages, Blueprints that fail to compile, Message Log pages, warning / error log lines; Source Severity Message), editor (editor state and operations), dataTables, gameplayTags, settings (Project Settings / Editor Preferences sections), blueprints, widgetBlueprints, levelSequences, plus the sources of installed extensions (rql-schema lists them, and the extensions you can still install). Assets: unreal.assets("Material") or unreal.assets("StaticMesh", "/Game/Props") (at most 200, loaded lazily), unreal.asset("/Game/Materials/M_Red"). ref("PointLight#1234") resolves a $ref; unreal.find("Lamp") an actor by label, name or path; unreal.classes("ActorComponent", "Light") lists classes; unreal.settings("Maps & Modes") a settings object. A member path may follow a function: unreal.asset("/Game/BP_Door").EventGraph.
 Stages:
   where <predicate>                  filter
   select a b.c alias=(expr)          project columns (wrap computed expressions in parentheses)
@@ -80,6 +80,7 @@ Results come back as compact rows (header line, then col|col). Long results are 
   actors | where $ is PointLight and distance(Location, unreal.find("Player").Location) < 1000 | select Label      within 10 m (cm)
   unreal.assets("MaterialInstanceConstant") | select Name Scalars Vectors
   console | where Verbosity == "Error" | sort Sequence desc | first 5 | select Message
+  diagnostics | where Severity != "Info" | select Source Severity Message      the editor's warnings (two suns, a broken Blueprint, Map Check): check before you call the work done
   actors | get Components | where $ is LightComponentBase | group-by $type | select key, count, avg = items.avg(Intensity)
   levels | select Map IsPersistent IsCurrent IsVisible
   editor | select IsPlaying IsPaused Selection
@@ -195,7 +196,9 @@ Widgets and sequences:
 			"LightComponentBase (or has(Intensity)) | set Intensity = ... When you use a different member than the user named (a "
 			"misspelling, or the did-you-mean of a warning), or a different actor / asset than the name the user gave, tell the user which one you changed. Bulk create: range(0, N) | call "
 			"editor.SpawnActor(... $ ...) spawns N actors in one call (each counts against max_targets; every spawn is checked "
-			"before the first); the receipt has one row per actor with its $ref.";
+			"before the first); the receipt has one row per actor with its $ref. A result may end with \"Editor diagnostics (new since your last "
+			"call)\": warnings and errors the editor raised since then (the viewport's on-screen messages, compile errors, Map Check): fix them "
+			"or tell the user, and read diagnostics | where Severity != \"Info\" before you call the work done.";
 	}
 
 	inline const char* SchemaDescription()
@@ -215,7 +218,7 @@ Widgets and sequences:
 	inline const char* SkillDescription()
 	{
 		return "How to read and change anything in the Unreal Editor with RQL (rql-query / rql-mutate / rql-schema): the query "
-			"language, operators, sources (actors, components, assets, levels, console logs, editor state, DataTable rows, gameplay "
+			"language, operators, sources (actors, components, assets, levels, console logs, editor warnings and errors, editor state, DataTable rows, gameplay "
 			"tags, Project Settings, Blueprint graphs), editor operations (spawn actors, add components, levels, assets, "
 			"selection, Play In Editor, Blueprint nodes and pins) and what installed extensions add.";
 	}
