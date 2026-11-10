@@ -89,6 +89,7 @@ export function automationArgs(uprojectPath: string, filter: string, reportDir: 
     '-unattended',
     '-nosplash',
     '-NoSound',
+    '-notraceserver',
     '-stdout',
     '-ddc=NoZenLocal',
     `-ExecCmds=Automation RunTests ${filter};Quit`,
