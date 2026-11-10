@@ -36,6 +36,14 @@ void FUnrealMcpRqlOpenLevelHintSpec::Define()
 		const TSharedPtr<FJsonObject> Count = Exec(*this, TEXT(R"({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"OpenLevelSpecNoSuchActor"}]}},{"op":"count"}]})"));
 		TestTrue(*FString::Printf(TEXT("a count of 0 warns too (%s)"), *Codes(Count)), Codes(Count).Contains(TEXT("open-level-only")));
 
+		// actors | where Label == "OpenLevelSpecNoSuchActor" | min Location.Z: null over nothing
+		const TSharedPtr<FJsonObject> MinNothing = Exec(*this, TEXT(R"({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"OpenLevelSpecNoSuchActor"}]}},{"op":"min","expr":{"path":["Location","Z"]}}]})"));
+		TestTrue(*FString::Printf(TEXT("an aggregate over nothing warns (%s)"), *Codes(MinNothing)), Codes(MinNothing).Contains(TEXT("open-level-only")));
+
+		// actors | sum 0: an aggregate that is 0 found something
+		const TSharedPtr<FJsonObject> Zero = Exec(*this, TEXT(R"({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"sum","expr":{"lit":0}}]})"));
+		TestFalse(*FString::Printf(TEXT("a sum of 0 is no empty read (%s)"), *Codes(Zero)), Codes(Zero).Contains(TEXT("open-level-only")));
+
 		// actors | count: a level always has actors (the world settings)
 		const TSharedPtr<FJsonObject> Found = Exec(*this, TEXT(R"({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"count"}]})"));
 		TestFalse(*FString::Printf(TEXT("no warning when something is found (%s)"), *Codes(Found)), Codes(Found).Contains(TEXT("open-level-only")));

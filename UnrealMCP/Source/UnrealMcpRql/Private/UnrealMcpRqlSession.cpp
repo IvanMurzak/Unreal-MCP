@@ -28,11 +28,22 @@
 
 namespace UnrealMcpRqlSessionLocal
 {
-	/** A read that found nothing: no rows, no items, or a count of 0 (a mutation's empty receipt is not "nothing found"). */
-	bool IsEmptyRead(const rql::QueryResult& Result, bool bMutation)
+	/**
+	 * A read that found nothing: no rows or items, a count of 0, or a min / max / avg over nothing (null). A sum or a min
+	 * that is 0 found something; a mutation's empty receipt (a set that kept every value) is not "nothing found" either.
+	 */
+	bool IsEmptyRead(const rql::QueryResult& Result, const rql::QueryPlan& Plan, bool bMutation)
 	{
-		return !bMutation && Result.ok && ((Result.rows && Result.rows->empty()) || (Result.items && Result.items->empty())
-			|| (Result.has_value && Result.value.is_number() && Result.value.as_number() == 0));
+		if (bMutation || !Result.ok)
+			return false;
+		if ((Result.rows && Result.rows->empty()) || (Result.items && Result.items->empty()))
+			return true;
+		if (!Result.has_value || Plan.stages.empty())
+			return false;
+		const rql::StageKind Last = Plan.stages.back().kind;
+		if (Last == rql::StageKind::Count)
+			return Result.value.is_number() && Result.value.as_number() == 0;
+		return (Last == rql::StageKind::Min || Last == rql::StageKind::Max || Last == rql::StageKind::Avg) && Result.value.is_null();
 	}
 
 	/**
@@ -40,7 +51,7 @@ namespace UnrealMcpRqlSessionLocal
 	 * PCGGraph, gasAbilities, ...) names that extension and how to get it: on the first error's hint, or as a warning. Only a
 	 * read finds "nothing": a mutation's empty receipt (a set that kept every value) is not a missing domain.
 	 */
-	void AddExtensionHint(rql::QueryResult& Result, const FString& PlanText, bool bMutation)
+	void AddExtensionHint(rql::QueryResult& Result, const FString& PlanText, const rql::QueryPlan& Plan, bool bMutation)
 	{
 		rql::Diagnostic* Error = nullptr;
 		for (rql::Diagnostic& Diagnostic : Result.diagnostics)
@@ -51,7 +62,7 @@ namespace UnrealMcpRqlSessionLocal
 				break;
 			}
 		}
-		if (!Error && !IsEmptyRead(Result, bMutation))
+		if (!Error && !IsEmptyRead(Result, Plan, bMutation))
 			return;
 		const TArray<FUnrealMcpMissingExtension> Candidates = UnrealMcpAvailableExtensions::Missing();
 		const FUnrealMcpMissingExtension* Match = UnrealMcpAvailableExtensions::MatchDomain(PlanText, Candidates);
@@ -79,10 +90,13 @@ namespace UnrealMcpRqlSessionLocal
 		const rql::ExprPtr& Source = Plan.source;
 		const bool bActors = Source && Source->kind == rql::ExprKind::Path && !Source->on && !Source->segments.empty()
 			&& Source->segments[0].kind == rql::SegmentKind::Member && Source->segments[0].name == "actors";
-		if (!bActors || !IsEmptyRead(Result, bMutation))
+		if (!bActors || !IsEmptyRead(Result, Plan, bMutation))
 			return;
-		const FString Message = FString::Printf(TEXT("nothing found in the level open in the editor, \"%s\": actors covers only that level"),
-			*UnrealMcpRqlUtil::OpenLevelPath());
+		const UWorld* World = UnrealMcpRqlUtil::EditorWorld();
+		// A World Partition level lists the actors of its loaded cells only: there, "not found" may also mean "not loaded".
+		const TCHAR* Partitioned = World && World->GetWorldPartition() ? TEXT(" (a World Partition level: only its loaded cells)") : TEXT("");
+		const FString Message = FString::Printf(TEXT("nothing found in the level open in the editor, \"%s\": actors covers only that level%s"),
+			*UnrealMcpRqlUtil::OpenLevelPath(), Partitioned);
 		Result.diagnostics.push_back(rql::Diagnostic::warning("open-level-only", UnrealMcpRqlToStd(Message), UnrealMcpRqlGuide::OpenLevelHint()));
 	}
 
@@ -686,7 +700,7 @@ FString FUnrealMcpRqlSession::Execute(const FString& PlanJson, bool bAllowMutati
 	}
 	CloseTransaction();
 	LiteralObjects.Reset(); // written by now (the undo buffer or their owner holds them), or garbage
-	UnrealMcpRqlSessionLocal::AddExtensionHint(Result, PlanJson, bAllowMutation);
+	UnrealMcpRqlSessionLocal::AddExtensionHint(Result, PlanJson, Plan, bAllowMutation);
 	UnrealMcpRqlSessionLocal::AddOpenLevelHint(Result, Plan, bAllowMutation);
 	for (rql::Diagnostic& Warning : Types().TakeWarnings())
 		Result.diagnostics.push_back(std::move(Warning));
