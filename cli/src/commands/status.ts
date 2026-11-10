@@ -1,12 +1,13 @@
 import { Command } from 'commander';
 import { getStatus } from '../lib/status.js';
+import { isUnrealProjectDir } from '../utils/project.js';
 import { ExitCode } from '../utils/exit-codes.js';
 import { CommandOutput, FAILURE, formatOption } from '../utils/output.js';
 import * as ui from '../utils/ui.js';
 
 export const statusCommand = new Command('status')
   .description('Report package, project, plugin, running editor and live connection status (exit 18 when a modal dialog blocks the editor)')
-  .option('-p, --path <dir>', 'Unreal project directory (defaults to cwd)')
+  .option('-p, --path <dir>', 'Unreal project directory (defaults to cwd when it holds a .uproject)')
   .option('--url <url>', 'Explicit MCP server URL override')
   .option('--token <token>', 'Bearer token override')
   .option('--no-probe', 'Skip the live HTTP reachability probe')
@@ -14,7 +15,8 @@ export const statusCommand = new Command('status')
   .action(async (opts: { path?: string; url?: string; token?: string; probe?: boolean; format: string }) => {
     const out = new CommandOutput('status', opts.format);
     const report = await getStatus({
-      projectDir: opts.path,
+      // Inside a project folder, report that project (as every other command does) without needing --path.
+      projectDir: opts.path ?? (isUnrealProjectDir(process.cwd()) ? process.cwd() : undefined),
       url: opts.url,
       token: opts.token,
       noProbe: opts.probe === false,

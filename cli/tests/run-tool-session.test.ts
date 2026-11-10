@@ -6,6 +6,8 @@ import type { SessionProcessOps } from '@baizor/gamedev-cli-core';
 import { isUnreachableFailure, runToolWithSession } from '../src/lib/run-tool-session.js';
 import { classifySessionFailure, classifyToolFailure, classifyToolResponseError, toolResponseError } from '../src/lib/tool-outcome.js';
 import { EDITOR_QUIT_TOOL } from '../src/lib/session.js';
+import { execPython } from '../src/lib/exec.js';
+import { PreLaunchBuildError } from '../src/lib/open.js';
 import type { RunToolFailure, RunToolOptions, RunToolResult } from '../src/lib/types.js';
 import { makeTempDir, rmTempDir, writeUProject } from './helpers.js';
 
@@ -201,5 +203,64 @@ describe('tool outcome classification', () => {
     expect(isUnreachableFailure(refused)).toBe(true);
     expect(isUnreachableFailure(failure({ reason: 'http-error', httpStatus: 503, message: 'busy' }))).toBe(false);
     expect(isUnreachableFailure(failure({ reason: 'timeout' }))).toBe(false);
+  });
+});
+
+describe('exec and the sign-in rule', () => {
+  const cloudProject = (): string => {
+    const dir = project();
+    const file = path.join(dir, PLUGIN_CONFIG_RELATIVE_PATH);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify({ connectionMode: 'Cloud', cloudUrl: 'https://ai-game.dev' }));
+    return dir;
+  };
+  const rejected: RunToolFailure = { kind: 'failure', success: false, endpoint: 'https://ai-game.dev/mcp/api/tools/python-execute', reason: 'http-error', httpStatus: 401, message: 'Unauthorized' };
+
+  it.each(['ok', 'unreadable'] as const)('a signed-in machine (%s) runs in the cloud editor, never a local one', async (state) => {
+    const fake = fakeSession();
+    const calls: RunToolOptions[] = [];
+    const r = await execPython({
+      projectDir: cloudProject(), code: '1+1', credentialState: () => state, sessionOptions: fake.sessionOptions,
+      invoke: async (o) => { calls.push(o); return rejected; },
+    });
+    expect(r).toMatchObject({ kind: 'failure', reason: 'not-authenticated' });
+    expect(calls[0]!.url).toBeUndefined(); // the project's own (cloud) connection
+    expect(fake.spawned).toEqual([]);
+  });
+
+  it('a never-signed-in machine starts the project\'s local editor', async () => {
+    const fake = fakeSession();
+    const r = await execPython({
+      projectDir: cloudProject(), code: '1+1', credentialState: () => 'missing', sessionOptions: fake.sessionOptions,
+      invoke: async () => ok({ status: 'success', structured: { success: true, value: 2 } }),
+    });
+    expect(r).toMatchObject({ kind: 'success', source: 'started' });
+    expect(fake.spawned).toHaveLength(1);
+  });
+});
+
+describe('a failed start says why', () => {
+  it('a broken C++ build is COMPILATION_FAILED with the errors, not "unreachable"', async () => {
+    const fake = fakeSession();
+    const r = await runToolWithSession({
+      invoke: async () => refused, toolName: 'x', projectDir: project(),
+      sessionOptions: {
+        ...fake.sessionOptions,
+        beforeLaunch: async () => { throw new PreLaunchBuildError("Pre-launch build failed: Foo.cpp(3): error C2065: 'x'\nFull build log: C:/Log.txt"); },
+      },
+    });
+    expect(r.sessionFailure).toMatchObject({ buildFailed: true });
+    expect(r.sessionFailure?.message).toContain('Full build log');
+    expect(classifySessionFailure(undefined, false, true)).toMatchObject({ exit: 6, code: 'COMPILATION_FAILED' });
+  });
+
+  it('an editor that never became ready names its log', async () => {
+    const fake = fakeSession();
+    const dir = project();
+    const r = await runToolWithSession({
+      invoke: async () => refused, toolName: 'x', projectDir: dir, readyTimeoutMs: 1,
+      sessionOptions: { ...fake.sessionOptions, probeReady: async () => undefined },
+    });
+    expect(r.sessionFailure?.message).toContain(path.join(dir, 'Saved', 'Logs', 'Game.log'));
   });
 });

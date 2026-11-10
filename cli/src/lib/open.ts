@@ -289,7 +289,15 @@ export async function maybeBuildBeforeOpen(
       message: `Build succeeded for ${step.editorTarget}`,
     });
   } catch (err: unknown) {
-    throw new Error(`Pre-launch build failed: ${asError(err).message}`);
+    throw new PreLaunchBuildError(`Pre-launch build failed: ${asError(err).message}`);
+  }
+}
+
+/** The native modules did not compile, so no editor was started (the message carries the errors and the build log). */
+export class PreLaunchBuildError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'PreLaunchBuildError';
   }
 }
 

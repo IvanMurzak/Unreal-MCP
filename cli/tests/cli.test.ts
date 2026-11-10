@@ -53,6 +53,7 @@ const ALL_COMMANDS = [
   'wait-for-ready',
   'run-tool',
   'run-system-tool',
+  'tools',
   'compile',
   'test',
   'bootstrap-local',
@@ -63,7 +64,7 @@ const ALL_COMMANDS = [
 ];
 
 describe('CLI integration', () => {
-  it('--help lists every one of the 21 commands', () => {
+  it('--help lists every one of the 22 commands', () => {
     const { stdout, exitCode } = runCli(['--help']);
     expect(exitCode).toBe(0);
     expect(stdout).toContain('unreal-mcp-cli');

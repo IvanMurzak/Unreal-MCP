@@ -367,8 +367,12 @@ The full 18-command surface:
 | `login` | Authorize against ai-game.dev via the OAuth device-code flow |
 | `status` | Report package, project, plugin, and live connection status |
 | `wait-for-ready` | Block until the project's MCP server responds to a ping |
-| `run-tool` | Invoke an MCP tool via the project's local MCP server (HTTP) |
+| `run-tool` | Call one of the plugin's AI tools; starts a headless editor when none answers (`--once` closes it again) |
 | `run-system-tool` | Invoke a system tool via the project's local MCP server (HTTP) |
+| `tools` | List the AI tools (hidden ones too) with their inputs; cached, so it works while the editor is closed |
+| `compile` | Build the project's C++ with UnrealBuildTool (no editor) and print `file:line:col` errors |
+| `test` | Run Automation tests headless and report the verdict (JUnit / GitHub annotations optional) |
+| `commands` | A machine-readable manifest of every command and the exit codes (`--format json`) |
 | `bootstrap-local` | Build the bridge from source into `<project>/Intermediate/UnrealMCP` (the server is downloaded by `setup-mcp`, not built) |
 | `update [path]` | Update everything: the project's UnrealMCP plugin and installed extensions to their latest versions (close the editor first), then `unreal-mcp-cli` itself. Outside a project it updates only the CLI. `--check` reports (exit 2 when something is outdated); `--no-self`, `--no-project`, `--no-extensions`, `--no-clean` skip a step |
 | `install-engine` | Detect installed Unreal engines; for a missing version, link to the Epic launcher |

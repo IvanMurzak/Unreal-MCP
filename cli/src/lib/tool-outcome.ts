@@ -2,12 +2,22 @@
 
 import type { EditorSessionErrorReason } from '@baizor/gamedev-cli-core';
 import { modalDialogInToolError } from './editor-modal.js';
-import { toolErrorText } from './exec.js';
 import { FAILURE, type FailureKind } from '../utils/output.js';
 import { isToolSuccess } from './session.js';
 import type { RunToolFailure } from './types.js';
+import type { RunToolSessionResult } from './run-tool-session.js';
 
 export type { FailureKind };
+
+/** A failed call's own error (the server answers a tool error as HTTP 500 `{ "error": "<text>" }`), else the HTTP reason. */
+export function toolErrorText(failure: RunToolFailure): string {
+  const error = (failure.data as { error?: unknown } | null | undefined)?.error;
+  return typeof error === 'string' && error.length > 0 ? error : failure.message;
+}
+
+/** Leads the message of a call whose editor could not start because the project's C++ does not compile. */
+export const NOT_STARTED_BUILD =
+  'The project\'s C++ code does not compile, so no editor was started (fix it; `unreal-mcp-cli compile` rebuilds without an editor):';
 
 const NO_EDITOR_CONNECTED = /no connected clients|no game engine is connected/i;
 
@@ -56,8 +66,35 @@ export function classifyToolResponseError(text: string): FailureKind {
   return modalDialogInToolError(text) !== undefined ? FAILURE.awaitingInput : FAILURE.toolFailed;
 }
 
+/**
+ * The failure of a session-aware call that never reached a tool (no editor could be started, or the cloud sign-in was
+ * rejected), with its message; `undefined` when the tool was called. `subject` names what was called.
+ */
+export function sessionOutcomeFailure(
+  outcome: Pick<RunToolSessionResult, 'sessionFailure' | 'signInRequired'>,
+  subject: string,
+): { kind: FailureKind; message: string } | undefined {
+  const failure = outcome.sessionFailure;
+  if (failure) {
+    return {
+      kind: classifySessionFailure(failure.reason, failure.invalidInput, failure.buildFailed),
+      message: failure.buildFailed ? `${NOT_STARTED_BUILD} ${failure.message}` : `No ready Unreal Editor for ${subject}: ${failure.message}`,
+    };
+  }
+  if (outcome.signInRequired) return { kind: FAILURE.notAuthenticated, message: outcome.signInRequired };
+  return undefined;
+}
+
+/** A warning when `--once` could not close the editor the call started. */
+export function editorCloseWarning(outcome: Pick<RunToolSessionResult, 'closed'>): string | undefined {
+  const closed = outcome.closed;
+  if (!closed || closed.kind === 'closed' || closed.kind === 'not-owned') return undefined;
+  return `The editor this call started did not close (${closed.kind}${'message' in closed ? `: ${closed.message}` : ''}).`;
+}
+
 /** Exit / error code of a session that could not provide a ready editor. */
-export function classifySessionFailure(reason: EditorSessionErrorReason | undefined, invalidInput = false): FailureKind {
+export function classifySessionFailure(reason: EditorSessionErrorReason | undefined, invalidInput = false, buildFailed = false): FailureKind {
   if (invalidInput) return FAILURE.projectNotFound; // no project at the path / a bad --url: nothing to start
+  if (buildFailed) return FAILURE.compilationFailed; // the C++ build before the launch failed: fix the code
   return reason === 'lock-busy' ? FAILURE.busy : FAILURE.unreachable;
 }

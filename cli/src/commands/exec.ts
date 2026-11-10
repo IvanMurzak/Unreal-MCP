@@ -3,7 +3,7 @@ import { Command } from 'commander';
 import { DEFAULT_SESSION_IDLE_SECONDS } from '@baizor/gamedev-cli-core';
 import { DEFAULT_EXEC_TIMEOUT_MS, execPython, readPythonResponse, type ExecPythonFailure } from '../lib/exec.js';
 import { UNREAL_SESSION_READY_TIMEOUT_MS } from '../lib/session.js';
-import { classifySessionFailure, classifyToolFailure, classifyToolResponseError, type FailureKind } from '../lib/tool-outcome.js';
+import { classifySessionFailure, classifyToolFailure, classifyToolResponseError, NOT_STARTED_BUILD, type FailureKind } from '../lib/tool-outcome.js';
 import { ExitCode } from '../utils/exit-codes.js';
 import { CommandOutput, FAILURE, formatOption, parseWholeNumber } from '../utils/output.js';
 import * as ui from '../utils/ui.js';
@@ -46,14 +46,15 @@ export function readCode(
 
 /** Exit / error code of a failed `exec`. */
 export function classifyExecFailure(failure: ExecPythonFailure): FailureKind {
-  if (failure.reason === 'session') return classifySessionFailure(failure.sessionReason);
+  if (failure.reason === 'session') return classifySessionFailure(failure.sessionReason, false, failure.buildFailed);
   if (failure.reason === 'tool-failed' && failure.toolFailure) return classifyToolFailure(failure.toolFailure);
+  if (failure.reason === 'not-authenticated') return FAILURE.notAuthenticated;
   // invalid-input: no project at the path, or a bad --url.
   return classifySessionFailure(undefined, true);
 }
 
 export const execCommand = new Command('exec')
-  .description('Run Python in the Unreal Editor (python-execute); starts a headless editor when none is open and keeps it warm')
+  .description('Run Python in the Unreal Editor (python-execute; the last expression is printed, print() goes to stderr); starts a headless editor when none is open and keeps it warm. To read or change levels, actors and assets, rql-query / rql-mutate are usually one call: see `unreal-mcp-cli tools --filter rql`')
   .argument('[code]', 'Python: statements, the last expression is the result')
   .option('-p, --path <dir>', 'Unreal project directory (defaults to cwd)')
   .option('-f, --file <file>', 'Read the code from a file ("-" for stdin)')
@@ -110,7 +111,8 @@ export const execCommand = new Command('exec')
       // finish() sets exitCode, never exit(): an async stdout / stderr pipe still flushes what was written.
       out.fail(
         classifyExecFailure(result),
-        result.reason === 'session' ? `No ready Unreal Editor: ${result.message}` : result.message,
+        result.buildFailed ? `${NOT_STARTED_BUILD} ${result.message}`
+          : result.reason === 'session' ? `No ready Unreal Editor: ${result.message}` : result.message,
         result.toolFailure?.data === undefined ? null : { response: result.toolFailure.data },
       );
       return;
@@ -133,5 +135,6 @@ export const execCommand = new Command('exec')
       out.fail(classifyToolResponseError(response.value), response.value);
       return;
     }
-    console.log(response.value);
+    // A snippet that only print()s has no value: its output is the log lines above, not a bare "null".
+    if (response.value !== 'null' || response.logs.length === 0) console.log(response.value);
   });

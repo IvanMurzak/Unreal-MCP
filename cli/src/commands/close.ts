@@ -1,10 +1,10 @@
 import { Command, Option } from 'commander';
 import { close } from '../lib/close.js';
-import { closeOwnedSession } from '../lib/session.js';
+import { closeOwnedEditor, closeOwnedSession } from '../lib/session.js';
 import * as ui from '../utils/ui.js';
 
 export const closeCommand = new Command('close')
-  .description('Terminate the Unreal Editor process running a project')
+  .description('Close the Unreal Editor running a project: an editor the CLI started saves and quits; any other is terminated')
   .argument('[path]', 'Unreal project directory (defaults to cwd)')
   .option('--owned-only', 'Only close an editor the CLI started (exec / open --headless): it saves and quits; an editor the user opened is never touched')
   .option('--force', 'With --owned-only: kill the CLI-owned editor when it does not quit in time')
@@ -16,6 +16,9 @@ export const closeCommand = new Command('close')
       await closeOwned(pathArg, opts);
       return;
     }
+    // An editor the CLI started saves and quits first (a kill would lose its unsaved changes); what is left is killed.
+    const savedPid = await closeOwnedEditor(pathArg ?? process.cwd());
+    if (savedPid !== undefined) ui.success(`Closed the Unreal Editor started by the CLI (PID ${savedPid}).`);
     const result = await close({ projectDir: pathArg });
     ui.printWarnings(result.warnings);
     if (result.kind === 'failure') {
@@ -24,7 +27,7 @@ export const closeCommand = new Command('close')
       return;
     }
     if (!result.wasRunning) {
-      ui.info('No running Unreal Editor matched this project.');
+      if (savedPid === undefined) ui.info('No running Unreal Editor matched this project.');
       return;
     }
     ui.success(`Terminated ${result.terminated.length} editor process(es): ${result.terminated.join(', ')}`);
