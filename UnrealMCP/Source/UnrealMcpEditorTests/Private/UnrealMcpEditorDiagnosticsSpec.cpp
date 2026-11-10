@@ -187,6 +187,14 @@ void FUnrealMcpEditorDiagnosticsSpec::Define()
 		TestEqual(TEXT("off: the source still lists it"), RowCount(Pull(TEXT("DiagSpec off-mode"))), 1);
 	});
 
+	It("falls back to the default, mutating, for an unknown switch value", [this]()
+	{
+		SetMode(TEXT("not-a-mode"));
+		UE_LOG(LogTemp, Warning, TEXT("DiagSpec default-mode warning"));
+		TestFalse(TEXT("a read-only tool carries no note"), Run(TEXT("diag-spec-read")).Notes.Contains(TEXT("DiagSpec default-mode")));
+		TestTrue(TEXT("a writing tool does"), Run(TEXT("diag-spec-write")).Notes.Contains(TEXT("DiagSpec default-mode warning")));
+	});
+
 	It("caps the note, puts errors first, counts repeats and leaves out log lines the tool already returned", [this]()
 	{
 		for (int32 Index = 0; Index < 14; ++Index)

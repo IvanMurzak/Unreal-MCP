@@ -29,8 +29,8 @@ struct FUnrealMcpDiagnostic
 enum class EUnrealMcpDiagnosticsPush : uint8
 {
 	Off,      // never: the agent reads the `diagnostics` source itself
-	Mutating, // after tools that are not read-only
-	All,      // after every tool (the default)
+	Mutating, // after tools that are not read-only (the default, chosen by the agent-lab A/B)
+	All,      // after every tool
 };
 
 /**

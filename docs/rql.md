@@ -238,8 +238,8 @@ Editor diagnostics (new since your last call; fix them or tell the user, and che
 
 At most 10 lines of at most 400 characters, errors first, then `+N more`; each row is reported once (unchanged rows are not
 repeated), and rows whose message the tool's own text already holds (the log lines `console-run-command` / `python-execute` return, the rows a `diagnostics` query returned) are left out.
-The `UnrealMcp.DiagnosticsPush` console variable sets when: `all` (every tool, the default), `mutating` (only tools that
-are not read-only) or `off` (the source only). `UNREAL_MCP_DIAGNOSTICS_PUSH` sets its value at editor start.
+The `UnrealMcp.DiagnosticsPush` console variable sets when: `mutating` (only tools that are not read-only, the default),
+`all` (every tool) or `off` (the source only). `UNREAL_MCP_DIAGNOSTICS_PUSH` sets its value at editor start.
 
 ### Play testing
 

@@ -94,14 +94,14 @@ namespace UnrealMcpEditorDiagnosticsLocal
 		Text = Text.TrimStartAndEnd().ToLower();
 		if (Text == TEXT("off") || Text == TEXT("0") || Text == TEXT("false") || Text == TEXT("none"))
 			return EUnrealMcpDiagnosticsPush::Off;
-		if (Text == TEXT("mutating") || Text == TEXT("writes"))
-			return EUnrealMcpDiagnosticsPush::Mutating;
-		return EUnrealMcpDiagnosticsPush::All;
+		if (Text == TEXT("all") || Text == TEXT("every"))
+			return EUnrealMcpDiagnosticsPush::All;
+		return EUnrealMcpDiagnosticsPush::Mutating;
 	}
 
 	EUnrealMcpDiagnosticsPush PushMode()
 	{
-		return GPushVariable ? ParsePushMode((*GPushVariable)->GetString()) : EUnrealMcpDiagnosticsPush::All;
+		return GPushVariable ? ParsePushMode((*GPushVariable)->GetString()) : EUnrealMcpDiagnosticsPush::Mutating;
 	}
 }
 
@@ -370,9 +370,9 @@ void FUnrealMcpEditorDiagnostics::Install()
 	if (!GPushVariable)
 	{
 		const FString FromEnv = FPlatformMisc::GetEnvironmentVariable(TEXT("UNREAL_MCP_DIAGNOSTICS_PUSH"));
-		GPushVariable = new FAutoConsoleVariable(TEXT("UnrealMcp.DiagnosticsPush"), FromEnv.IsEmpty() ? TEXT("all") : *FromEnv,
+		GPushVariable = new FAutoConsoleVariable(TEXT("UnrealMcp.DiagnosticsPush"), FromEnv.IsEmpty() ? TEXT("mutating") : *FromEnv,
 			TEXT("When an Unreal-MCP tool result lists the editor warnings / errors that are new since the agent's last call: "
-				"all (every tool, the default), mutating (tools that are not read-only) or off. Startup value: UNREAL_MCP_DIAGNOSTICS_PUSH."));
+				"mutating (tools that are not read-only, the default), all (every tool) or off. Startup value: UNREAL_MCP_DIAGNOSTICS_PUSH."));
 	}
 	// Log rows start once the editor has started: the warnings of the engine's own startup (missing install files, DDC
 	// fallbacks) are not about the project, and the Message Log pages (LoadErrors) keep what is.
