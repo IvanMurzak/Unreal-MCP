@@ -199,6 +199,9 @@ export function createUnrealSession(options: UnrealSessionOptions): EditorSessio
   const args = (root: string, mode: EditorSessionMode): string[] => [
     ...baseArgs(root, mode),
     ...(options.nullrhi && mode === 'headless' ? ['-nullrhi'] : []),
+    // A headless editor needs no Unreal Insights trace hub. Launching it copies UnrealTraceServer.exe under
+    // %LOCALAPPDATA%, and every new copy path makes Windows ask the user for firewall access.
+    ...(mode === 'headless' ? ['-notraceserver'] : []),
   ];
   const editor: EditorLaunchSpec = { ...unrealAdapter.editor!, args, requestClose, findRunningEditor };
   const adapter: EngineAdapter = { ...unrealAdapter, editor };

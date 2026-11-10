@@ -188,7 +188,7 @@ describe('runAutomationTests', () => {
 describe('automation command line', () => {
   it('runs headless with the report and log where asked', () => {
     expect(automationArgs('C:/P/Game.uproject', 'Project', 'C:/R', 'C:/R/editor.log')).toEqual([
-      'C:/P/Game.uproject', '-nullrhi', '-unattended', '-nosplash', '-NoSound', '-stdout', '-ddc=NoZenLocal',
+      'C:/P/Game.uproject', '-nullrhi', '-unattended', '-nosplash', '-NoSound', '-notraceserver', '-stdout', '-ddc=NoZenLocal',
       '-ExecCmds=Automation RunTests Project;Quit', '-ReportExportPath=C:/R', '-abslog=C:/R/editor.log',
     ]);
   });

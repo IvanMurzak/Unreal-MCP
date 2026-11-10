@@ -125,7 +125,7 @@ describe('execPython', () => {
     expect(editors.spawned).toHaveLength(1);
     const [launch] = editors.spawned;
     expect(launch!.command).toBe('UnrealEditor.exe');
-    expect(launch!.args).toEqual([path.join(dir, 'Game.uproject'), '-RenderOffscreen', '-unattended', '-nosplash']);
+    expect(launch!.args).toEqual([path.join(dir, 'Game.uproject'), '-RenderOffscreen', '-unattended', '-nosplash', '-notraceserver']);
     expect(launch!.hideWindow).toBe(true);
     expect(launch!.env).toMatchObject({
       AIGD_SESSION_IDLE_SECONDS: '120',
