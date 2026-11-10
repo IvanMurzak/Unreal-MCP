@@ -116,7 +116,7 @@ unreal-mcp-cli status
 | `bootstrap-local [path]` | Build the bridge from source into `Intermediate/UnrealMCP/` (§6) — the MCP server is downloaded from GameDev-MCP-Server releases, not built here |
 | `update [path]` | Re-sync the installed plugin from a local source or the version-matched GitHub source asset. On a version change it **auto-cleans** the stale UE C++ build cache (`Intermediate/` + C++ `Binaries/`) so the editor recompiles cleanly — the bundled sidecar bridge under `Binaries/ThirdParty/` is refreshed from `Source/ThirdParty/` when the release source asset ships it, otherwise preserved, junction (dev) installs are never cleaned, and `--no-clean` opts out |
 | `install-engine [version]` | Detect installed engines from `LauncherInstalled.dat`; link to the Epic launcher for missing versions (never installs directly) |
-| `setup-skills` | Write a Claude-Code skill stub that drives the project's MCP server |
+| `setup-skills [agent] [path]` | Write the `unreal-mcp-cli` agent skill (cold-start workflow, RQL recipes, compile / test, exit codes; `references/` for depth) and `ai-game-dev-app` into an agent's skills folder (default `claude-code`; `--list` shows all), offline. Rendered from the same source as `--help`. |
 
 ## Exit codes and machine output
 

@@ -5,7 +5,7 @@ import { runTool } from '../lib/run-tool.js';
 import { isAbsoluteLoopbackHost } from '../utils/port.js';
 import { readUProject } from '../utils/project.js';
 import { CommandOutput, FAILURE, formatOption, parseWholeNumber } from '../utils/output.js';
-import type { RqlRecipes } from '../utils/ui.js';
+import { RQL_LANGUAGE, RQL_RECIPES } from '../lib/cli-guide.js';
 import { callToolFromCli, toolSessionOptions, type ToolCallCliOptions } from './run-tool-builder.js';
 
 interface RqlCliOptions extends ToolCallCliOptions {
@@ -15,26 +15,13 @@ interface RqlCliOptions extends ToolCallCliOptions {
   maxTargets?: string;
 }
 
-/** The recipes `rql --help` shows; the root help shows the first ones. */
-export const RQL_RECIPES: RqlRecipes = [
-  ['editor | call OpenLevel("/Game/Maps/Forest")', 'open a level (writes no file, drops unsaved edits): actors lists the open level and its loaded sublevels'],
-  ['editor | call NewLevel("/Game/Maps/Cave")', 'a new empty level, saved at that path, now open'],
-  ['editor | call SpawnActor("/Engine/BasicShapes/Sphere", "Ball", [100, 0, 50])', 'class / asset, label, location (cm)'],
-  ['actors | where Label starts-with "Tree" | select Label Location Scale', 'read'],
-  ['actors | where Label contains "Enemy" | count', 'count'],
-  ['actors | where Label starts-with "Rock" | set Scale = Scale * 1.5, Location.Z = 0', 'change (vectors compute per axis)'],
-  ['editor | call SaveLevel()', 'write the open level to disk; prints the files written (SaveAll() saves everything)'],
-  ['actors | where Label == "Old" | call Destroy()', 'delete'],
-  ['unreal.assets("StaticMesh", "/Game") | select Name Path', 'assets of a class under a folder'],
-  ['actors | get Components | where $ is PointLightComponent | set Intensity = 5000', 'components'],
-];
+export { RQL_RECIPES };
 
 const RQL_HELP_FOOTER = [
   'Recipes:',
   ...RQL_RECIPES.map(([query, what]) => `  ${query}  # ${what}`),
   '',
-  'Stages: where, select a b, sort x [desc], first N, count, get <member>, set a = expr, call Method(args).',
-  'Operators: == != < <= > >= and or not, contains, starts-with, ends-with, matches "regex", x in [a, b], $ is PointLight.',
+  ...RQL_LANGUAGE,
   'Quote the query with single quotes; strings inside it take double quotes (a shell that strips them: -f <file> or -f -).',
   'A receipt (set / call) lists every change, so a separate check is rarely needed. Level and asset edits stay unsaved',
   'until SaveLevel() / SaveAsset() / SaveAll() (NewLevel(path) saves; settings and gameplay tags are written at once).',

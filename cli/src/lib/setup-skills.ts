@@ -1,29 +1,37 @@
-// `setup-skills` — write a Claude-Code skill stub into a project so an
-// agent knows how to reach the project's Unreal MCP server. Mirrors the
-// Unity/Godot CLIs' skill-bootstrap step. Library-safe.
+// `setup-skills` — write the agent skills into a project's skills folder: the `unreal-mcp-cli` skill (cold-start
+// workflow, RQL recipes, exit codes; references/ for depth) and `ai-game-dev-app`. Generated offline from the CLI's own
+// data (`skill-guides.ts`): no editor, no server, no network. Idempotent: the same CLI writes the same bytes.
+// Library-safe.
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { resolveConnection, type MachineAuthOptions } from '../utils/config.js';
+import { getAgentById, getAgentIds } from '../utils/agents.js';
 import { asError } from '../utils/error.js';
 import { emitProgress } from './progress.js';
 import type { ProgressCallback } from './types.js';
-import { buildGuideFiles, skillMetadataLines, SKILL_REFERENCES } from './skill-guides.js';
+import { buildGuideFiles, RETIRED_SKILL_NAMES, SKILL_METADATA } from './skill-guides.js';
 
 export interface SetupSkillsOptions {
   projectDir?: string;
-  url?: string;
-  token?: string;
+  /** The agent whose skills folder receives the skills (`setup-skills --list`). Default: `claude-code`. */
+  agentId?: string;
+  /** Also overwrite skill files this CLI did not generate (no `generated-by: unreal-mcp` metadata). */
   force?: boolean;
-  /** Machine-store token-fallback injection (tests). See `MachineAuthOptions`. */
-  machineAuth?: MachineAuthOptions;
   onProgress?: ProgressCallback;
 }
 
 export interface SetupSkillsSuccess {
   kind: 'success';
   success: true;
+  /** The agent's skills folder. */
+  skillsDir: string;
+  /** The `unreal-mcp-cli` SKILL.md. */
   skillPath: string;
+  /** Files whose content changed (created or rewritten). */
+  filesWritten: string[];
+  /** Retired skill folders of earlier versions that were removed. */
+  removed: string[];
+  /** True when any file changed. */
   written: boolean;
   warnings: string[];
 }
@@ -37,27 +45,17 @@ export interface SetupSkillsFailure {
 
 export type SetupSkillsResult = SetupSkillsSuccess | SetupSkillsFailure;
 
-const SKILL_REL_PATH = path.join('.claude', 'skills', 'unreal-mcp', 'SKILL.md');
+export const DEFAULT_SKILLS_AGENT = 'claude-code';
 
-/** Render the skill markdown. Pure — exported for tests. */
-export function renderSkill(url: string, platform: NodeJS.Platform = process.platform): string {
-  const cli = platform === 'win32' ? 'unreal-mcp-cli.cmd' : 'unreal-mcp-cli';
-  return `---
-name: unreal-mcp
-description: Drive the Unreal Editor for this project through the Unreal-MCP server. Use when the user wants to create/modify actors, blueprints, levels, or run editor tools in Unreal.
-${skillMetadataLines().join('\n')}
----
+const GENERATED_MARKER = `generated-by: ${SKILL_METADATA['generated-by']}`;
 
-# Unreal-MCP
-
-This project is wired to a local Unreal-MCP server at \`${url}\`.
-
-- Probe readiness: \`${cli} status\`
-- Invoke a tool: \`${cli} run-tool rql-schema --input '{}'\`
-- The editor must be running with the UnrealMCP plugin enabled (see \`${cli} open\`).
-
-${SKILL_REFERENCES}
-`;
+/** A file this CLI generated (its frontmatter carries our metadata); reference files are judged by their SKILL.md. */
+function isGenerated(skillMd: string): boolean {
+  try {
+    return fs.readFileSync(skillMd, 'utf-8').includes(GENERATED_MARKER);
+  } catch {
+    return false;
+  }
 }
 
 export async function setupSkills(opts: SetupSkillsOptions = {}): Promise<SetupSkillsResult> {
@@ -65,46 +63,57 @@ export async function setupSkills(opts: SetupSkillsOptions = {}): Promise<SetupS
   try {
     const projectDir = path.resolve(opts.projectDir ?? process.cwd());
     if (!fs.existsSync(projectDir)) throw new Error(`Project directory does not exist: ${projectDir}`);
+    const agentId = opts.agentId ?? DEFAULT_SKILLS_AGENT;
+    const agent = getAgentById(agentId);
+    if (!agent) throw new Error(`Unknown agent: "${agentId}". Available agent IDs: ${getAgentIds().join(', ')}`);
+    if (!agent.skillsPath) throw new Error(`Agent "${agent.name}" does not support skills.`);
 
-    let url = opts.url ?? '';
-    if (!url) {
-      try {
-        url = (
-          await resolveConnection({ projectDir, url: opts.url, token: opts.token, machineAuth: opts.machineAuth })
-        ).url;
-      } catch {
-        url = 'http://localhost:<deterministic-port>';
-        warnings.push('Could not resolve a connection URL — wrote a placeholder into the skill.');
+    const skillsDir = path.join(projectDir, agent.skillsPath);
+    emitProgress(opts.onProgress, { phase: 'start', message: `Writing ${agent.name} skills to ${skillsDir}` });
+
+    // Retired stubs of earlier versions would teach the outdated workflow next to the new skill: remove ours only.
+    const removed: string[] = [];
+    for (const name of RETIRED_SKILL_NAMES) {
+      const dir = path.join(skillsDir, name);
+      if (isGenerated(path.join(dir, 'SKILL.md'))) {
+        fs.rmSync(dir, { recursive: true, force: true });
+        removed.push(dir);
       }
     }
 
-    const skillPath = path.join(projectDir, SKILL_REL_PATH);
-    emitProgress(opts.onProgress, { phase: 'start', message: `Writing skill to ${skillPath}` });
-
-    let guidesWritten = false;
+    const filesWritten: string[] = [];
+    const skipped = new Set<string>();
     for (const file of buildGuideFiles()) {
-      const guidePath = path.join(projectDir, '.claude', 'skills', file.relativePath);
-      if (fs.existsSync(guidePath) && !opts.force) continue;
-      fs.mkdirSync(path.dirname(guidePath), { recursive: true });
-      fs.writeFileSync(guidePath, file.content, 'utf-8');
-      guidesWritten = true;
+      const skillDir = file.relativePath.split('/')[0];
+      const target = path.join(skillsDir, file.relativePath);
+      const skillMd = path.join(skillsDir, skillDir, 'SKILL.md');
+      // Someone else's skill under the same name stays unless --force.
+      if (!opts.force && fs.existsSync(skillMd) && !isGenerated(skillMd)) {
+        if (!skipped.has(skillDir)) warnings.push(`${skillMd} was not written by unreal-mcp-cli: left as is (--force overwrites it).`);
+        skipped.add(skillDir);
+        continue;
+      }
+      if (fs.existsSync(target) && fs.readFileSync(target, 'utf-8') === file.content) continue;
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.writeFileSync(target, file.content, 'utf-8');
+      filesWritten.push(target);
     }
 
-    if (fs.existsSync(skillPath) && !opts.force) {
-      emitProgress(opts.onProgress, { phase: 'done', message: 'Skill already exists (use --force to overwrite).' });
-      return { kind: 'success', success: true, skillPath, written: guidesWritten, warnings };
-    }
-
-    fs.mkdirSync(path.dirname(skillPath), { recursive: true });
-    fs.writeFileSync(skillPath, renderSkill(url), 'utf-8');
-    emitProgress(opts.onProgress, { phase: 'done', message: 'Skill written.' });
-    return { kind: 'success', success: true, skillPath, written: true, warnings };
-  } catch (err: unknown) {
+    emitProgress(opts.onProgress, {
+      phase: 'done',
+      message: filesWritten.length > 0 ? `${filesWritten.length} skill file(s) written.` : 'Skills are up to date.',
+    });
     return {
-      kind: 'failure',
-      success: false,
+      kind: 'success',
+      success: true,
+      skillsDir,
+      skillPath: path.join(skillsDir, buildGuideFiles()[0].relativePath),
+      filesWritten,
+      removed,
+      written: filesWritten.length > 0 || removed.length > 0,
       warnings,
-      error: asError(err),
     };
+  } catch (err: unknown) {
+    return { kind: 'failure', success: false, warnings, error: asError(err) };
   }
 }
