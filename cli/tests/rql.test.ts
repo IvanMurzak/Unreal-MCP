@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
-import { isRqlMutation, packagesWrittenSince, rqlErrorHint, rqlMaySave, rqlStages, stripToolName, toolResponseText } from '../src/lib/rql.js';
+import { isRqlMutation, packagesWrittenSince, rqlErrorHint, rqlMaySave, rqlStages, saveReceipt, stripToolName } from '../src/lib/rql.js';
+import { toolResponseText } from '../src/lib/tool-outcome.js';
 import { makeTempDir, rmTempDir } from './helpers.js';
 
 const dirs: string[] = [];
@@ -65,6 +66,12 @@ describe('packagesWrittenSince', () => {
     fs.writeFileSync(path.join(project, 'Content', 'M_Red.uasset'), '');
     fs.writeFileSync(path.join(maps, 'notes.txt'), '');
     expect(packagesWrittenSince(project, since)).toEqual(['Content/M_Red.uasset', 'Content/Maps/Arena.umap']);
+  });
+
+  it('prints the files a save wrote, and how many more past the limit', () => {
+    expect(saveReceipt(['Content/A.umap'])).toBe('Saved to disk: Content/A.umap');
+    expect(saveReceipt(['a', 'b', 'c'], 2)).toBe('Saved to disk: a, b, +1 more');
+    expect(saveReceipt([])).toMatch(/No package file changed/);
   });
 });
 

@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import { PACKAGE_VERSION } from './version.js';
-import { configureStyledHelp, reserveStdout, setRootRecipes, setVerbose } from './utils/ui.js';
+import { configureStyledHelp, reserveStdout, setVerbose } from './utils/ui.js';
 import { classifyCliError, writeFailureEnvelope } from '@baizor/gamedev-cli-core';
 import { isMachineFormat } from './utils/output.js';
 import { bootstrapLocalCommand } from './commands/bootstrap-local.js';
@@ -77,8 +77,7 @@ for (const cmd of subcommands) {
   program.addCommand(cmd);
 }
 
-setRootRecipes(RQL_RECIPES);
-configureStyledHelp(program, PACKAGE_VERSION);
+configureStyledHelp(program, PACKAGE_VERSION, RQL_RECIPES);
 
 program.hook('preAction', (_thisCommand, actionCommand) => {
   const opts = actionCommand.optsWithGlobals() as { verbose?: boolean; format?: string };

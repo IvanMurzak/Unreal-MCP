@@ -320,6 +320,16 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             Assert.Contains("Install one: unreal-mcp-cli install-extension <id>.\n  com.ivanmurzak.unreal-ai-niagara (Niagara Tools)\nactor classes", text);
         }
 
+        [Theory]
+        [InlineData("com.x.niagara (Niagara Tools): Niagara VFX: niagaraSystems - not installed", "com.x.niagara (Niagara Tools)")]
+        [InlineData("com.x.pcg (PCG Tools): PCG: pcgGraphs - plugin disabled: enable the plugin in the .uproject",
+            "com.x.pcg (PCG Tools) - plugin disabled: enable the plugin in the .uproject")]
+        [InlineData("com.x.bare", "com.x.bare")]
+        public void ShortExtensionLine_KeepsTheTitleAndAnyStateButNotInstalled(string line, string expected)
+        {
+            Assert.Equal(expected, RqlBridge.ShortExtensionLine(line));
+        }
+
         [Fact]
         public void RenderSchema_OverviewWithoutMissingExtensionsHasNoExtensionSection()
         {

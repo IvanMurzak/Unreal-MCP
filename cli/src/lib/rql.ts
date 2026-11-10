@@ -1,5 +1,5 @@
-// `rql` — RQL text straight from the command line: which rql-* tool a query goes to, the text of a tool answer, hints
-// for the RQL slips agents make most, and which package files a save wrote. Never prints, never exits.
+// `rql` — RQL text straight from the command line: which rql-* tool a query goes to, hints for the RQL slips agents
+// make most, and which package files a save wrote. Never prints, never exits.
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -40,19 +40,6 @@ export function isRqlMutation(query: string): boolean {
   return /^(set|call)\b/i.test(stages[stages.length - 1] ?? '');
 }
 
-/**
- * The text blocks of a tool answer (`{ content: [{ type: "text", text }] }`) joined, or `undefined` when it has none —
- * an answer that is not text keeps its JSON.
- */
-export function toolResponseText(data: unknown): string | undefined {
-  const content = (data as { content?: unknown } | null | undefined)?.content;
-  if (!Array.isArray(content)) return undefined;
-  const texts = content
-    .filter((c): c is { type: string; text: string } => c?.type === 'text' && typeof c.text === 'string')
-    .map((c) => c.text);
-  return texts.length > 0 && texts.length === content.length ? texts.join('\n') : undefined;
-}
-
 /** Operators agents bring from other languages, with RQL's spelling. */
 const OPERATOR_HINTS: ReadonlyArray<readonly [RegExp, string]> = [
   [/^startswith$/i, 'RQL spells it starts-with: where Label starts-with "Tree"'],
@@ -64,7 +51,7 @@ const OPERATOR_HINTS: ReadonlyArray<readonly [RegExp, string]> = [
   [/^(regex|regexp|match|rlike)$/i, 'RQL spells it matches "regex": where Label matches "^Tree_[0-9]+$"'],
 ];
 
-/** A hint for an RQL error whose cause is a familiar slip (a camelCase operator, SQL `like`), else `undefined`. */
+/** A hint for an RQL error whose cause is a familiar slip (an operator spelled as in another language), else `undefined`. */
 export function rqlErrorHint(message: string): string | undefined {
   const token = /unexpected '([^']+)'|unknown method '([^']+)'/.exec(message);
   const word = token?.[1] ?? token?.[2];
@@ -84,9 +71,9 @@ export function rqlMaySave(query: string): boolean {
 
 /**
  * The package files (.umap / .uasset) under `<project>/Content` modified at or after `sinceMs`, relative to the project
- * with forward slashes, sorted — what a save call actually wrote. At most `limit`.
+ * with forward slashes, sorted — what a save call actually wrote.
  */
-export function packagesWrittenSince(projectDir: string, sinceMs: number, limit = 20): string[] {
+export function packagesWrittenSince(projectDir: string, sinceMs: number): string[] {
   const found: string[] = [];
   const walk = (dir: string): void => {
     let entries: fs.Dirent[];
@@ -109,7 +96,14 @@ export function packagesWrittenSince(projectDir: string, sinceMs: number, limit 
     }
   };
   walk(path.join(projectDir, 'Content'));
-  return found.sort().slice(0, limit);
+  return found.sort();
+}
+
+/** The line a save prints: the files it wrote (the first `limit`, then how many more), or that it wrote none. */
+export function saveReceipt(written: readonly string[], limit = 20): string {
+  if (written.length === 0) return 'No package file changed on disk (nothing unsaved?)';
+  const more = written.length > limit ? `, +${written.length - limit} more` : '';
+  return `Saved to disk: ${written.slice(0, limit).join(', ')}${more}`;
 }
 
 /**

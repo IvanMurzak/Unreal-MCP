@@ -212,14 +212,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
             {
                 // The Unreal-MCP extensions this editor does not have: the note says how to install one, a line each.
                 sb.Append(Str(json, "extensionsNote") ?? "extensions:").Append('\n');
-                // "id (Title): what it adds - not installed" -> "id (Title)": the title names the feature; the rest costs a
-                // few hundred characters per extension on every later turn.
                 foreach (var e in extensions.OfType<JsonObject>())
-                {
-                    var line = Str(e, "line") ?? Str(e, "id") ?? "";
-                    var titleEnd = line.IndexOf("): ", StringComparison.Ordinal);
-                    sb.Append("  ").Append(titleEnd > 0 ? line.Substring(0, titleEnd + 1) : line).Append('\n');
-                }
+                    sb.Append("  ").Append(ShortExtensionLine(Str(e, "line") ?? Str(e, "id") ?? "")).Append('\n');
             }
             AppendPresent(sb, json["actorClasses"] as JsonArray, "actor classes in the editor world");
             AppendPresent(sb, json["componentClasses"] as JsonArray, "component classes in the editor world");
@@ -251,6 +245,28 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
             return sb.ToString().TrimEnd();
         }
 
+        /// <summary>
+        /// "id (Title): what it adds - not installed" -> "id (Title)": the title names the feature, and the rest costs a few
+        /// hundred characters per extension on every later turn. Any other state keeps its tail ("id (Title) - plugin
+        /// disabled: enable the plugin ..."), since installing is then the wrong advice.
+        /// </summary>
+        public static string ShortExtensionLine(string line)
+        {
+            var titleEnd = line.IndexOf("): ", StringComparison.Ordinal);
+            if (titleEnd < 0) return line;
+            var title = line.Substring(0, titleEnd + 1);
+            var state = line.IndexOf(" - ", titleEnd, StringComparison.Ordinal);
+            return state > 0 && line.Substring(state + 3) != "not installed" ? title + line.Substring(state) : title;
+        }
+
+        /// <summary><c>Name : Base</c>.</summary>
+        private static void AppendTypeHeader(StringBuilder sb, JsonObject type)
+        {
+            sb.Append(Str(type, "name") ?? "?");
+            var baseName = Str(type, "base");
+            if (!string.IsNullOrEmpty(baseName)) sb.Append(" : ").Append(baseName);
+        }
+
         private static void AppendPresent(StringBuilder sb, JsonArray? present, string title)
         {
             if (present == null) return;
@@ -272,9 +288,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
                 sb.Append("enum ").Append(name).Append(": ").Append(string.Join(" ", values)).Append('\n');
                 return;
             }
-            sb.Append(kind == "struct" ? "struct " : "").Append(name);
-            var baseName = Str(type, "base");
-            if (!string.IsNullOrEmpty(baseName)) sb.Append(" : ").Append(baseName);
+            if (kind == "struct") sb.Append("struct ");
+            AppendTypeHeader(sb, type);
             sb.Append(" {");
             var skip = new HashSet<string>(shared == null ? Enumerable.Empty<string>() : MemberNames(shared), StringComparer.Ordinal);
             var parts = new List<string>();
@@ -308,9 +323,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
         /// </summary>
         private static void AppendTypeSummary(StringBuilder sb, JsonObject type)
         {
-            sb.Append(Str(type, "name") ?? "?");
-            var baseName = Str(type, "base");
-            if (!string.IsNullOrEmpty(baseName)) sb.Append(" : ").Append(baseName);
+            AppendTypeHeader(sb, type);
             var members = (type["members"] as JsonArray)?.OfType<JsonObject>().ToList() ?? new List<JsonObject>();
             var described = members.Where(m => !string.IsNullOrEmpty(Str(m, "description"))).ToList();
             var shown = described.Count > 0 ? described : members;
