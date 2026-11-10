@@ -9,6 +9,8 @@ import type { RunToolFailure } from './types.js';
 
 export type { FailureKind };
 
+const NO_EDITOR_CONNECTED = /no connected clients|no game engine is connected/i;
+
 /** Exit / error code of a failed tool call. */
 export function classifyToolFailure(failure: RunToolFailure): FailureKind {
   switch (failure.reason) {
@@ -21,12 +23,14 @@ export function classifyToolFailure(failure: RunToolFailure): FailureKind {
     case 'timeout':
       return FAILURE.timeout;
     case 'http-error':
+      // The server is up but no editor is connected to it (local: "No connected clients"; cloud: "No game engine is
+      // connected for your account", HTTP 503): unreachable, not busy.
+      if (NO_EDITOR_CONNECTED.test(toolErrorText(failure))) return FAILURE.unreachable;
       if (failure.httpStatus === 503) return FAILURE.busy;
       if (failure.httpStatus === 404) return FAILURE.notFound; // no such tool
       if (failure.httpStatus === 504) return FAILURE.timeout; // the server gave up waiting for the editor
       if (failure.httpStatus === 502) return FAILURE.unreachable; // the server could not reach the editor
       if (modalDialogInToolError(toolErrorText(failure)) !== undefined) return FAILURE.awaitingInput;
-      if (/no connected clients/i.test(failure.message)) return FAILURE.unreachable;
       return FAILURE.toolFailed;
     default:
       return FAILURE.error;

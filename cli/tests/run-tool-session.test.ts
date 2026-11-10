@@ -101,6 +101,36 @@ describe('runToolWithSession', () => {
     expect(fake.alive.size).toBe(1);
   });
 
+  describe('Cloud mode and the sign-in rule', () => {
+    const cloudRejected: RunToolFailure = {
+      kind: 'failure', success: false, endpoint: 'https://ai-game.dev/mcp/api/tools/x', reason: 'http-error', httpStatus: 401, message: 'Unauthorized',
+    };
+
+    it.each(['ok', 'unreadable'] as const)('a signed-in machine (%s) stays in Cloud mode: NOT_AUTHENTICATED, no editor started', async (state) => {
+      const fake = fakeSession();
+      const r = await runToolWithSession({
+        invoke: async () => cloudRejected, toolName: 'x', projectDir: project(), credentialState: () => state, sessionOptions: fake.sessionOptions,
+      });
+      expect(r.signInRequired).toMatch(/signed in to ai-game\.dev, but the sign-in cannot be used.*does not switch it to a local server/);
+      expect(fake.spawned).toEqual([]);
+    });
+
+    it('a signed-in machine whose cloud answered otherwise: the cloud result as is', async () => {
+      const busy: RunToolFailure = { ...cloudRejected, httpStatus: 503, message: 'busy' };
+      const r = await runToolWithSession({ invoke: async () => busy, toolName: 'x', projectDir: project(), credentialState: () => 'ok' });
+      expect(r).toEqual({ result: busy });
+    });
+
+    it('a machine that never signed in falls back to the project\'s local server', async () => {
+      const fake = fakeSession();
+      const calls: RunToolOptions[] = [];
+      const invoke = async (o: RunToolOptions): Promise<RunToolResult> => { calls.push(o); return calls.length === 1 ? cloudRejected : ok(); };
+      const r = await runToolWithSession({ invoke, toolName: 'x', projectDir: project(), credentialState: () => 'missing', sessionOptions: fake.sessionOptions });
+      expect(r.source).toBe('started');
+      expect(calls[1]!.url).toBe('http://localhost:5199');
+    });
+  });
+
   it('--no-start returns the unreachable failure', async () => {
     const r = await runToolWithSession({ invoke: async () => refused, toolName: 'x', projectDir: project(), start: false });
     expect(r.result).toBe(refused);

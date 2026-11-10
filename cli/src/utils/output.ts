@@ -25,6 +25,7 @@ export type ErrorCode =
   | 'PROJECT_OPEN'
   | 'NOT_FOUND'
   | 'INTERRUPTED'
+  | 'NOT_AUTHENTICATED'
   | 'ERROR';
 
 export interface EnvelopeError {
@@ -79,6 +80,8 @@ export const FAILURE = {
   compilationFailed: { exit: ExitCode.CommandFailed, code: 'COMPILATION_FAILED' },
   testRunError: { exit: ExitCode.CommandFailed, code: 'TEST_RUN_ERROR' },
   testsFailed: { exit: ExitCode.TestsFailed, code: 'TESTS_FAILED' },
+  /** Cloud mode with a sign-in that cannot be used (never switched to a local server). */
+  notAuthenticated: { exit: ExitCode.CommandFailed, code: 'NOT_AUTHENTICATED' },
   /** Ctrl+C / SIGTERM: not a verdict. */
   interrupted: { exit: ExitCode.Error, code: 'INTERRUPTED' },
   unreachable: { exit: ExitCode.Unreachable, code: 'UNREACHABLE' },
