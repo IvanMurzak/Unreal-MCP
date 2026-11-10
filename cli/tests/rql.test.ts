@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
-import { isRqlMutation, packagesWrittenSince, rqlErrorHint, rqlMaySave, rqlStages, saveReceipt, stripToolName } from '../src/lib/rql.js';
+import { decodeQueryFile, isRqlMutation, packagesWrittenSince, rqlErrorHint, rqlMaySave, rqlStages, saveReceipt, stripToolName } from '../src/lib/rql.js';
 import { toolResponseText } from '../src/lib/tool-outcome.js';
 import { rqlCall } from '../src/commands/rql.js';
 import { reportToolOutcome } from '../src/commands/run-tool-builder.js';
@@ -73,9 +73,10 @@ describe('packagesWrittenSince', () => {
   });
 
   it('prints the files a save wrote, and how many more past the limit', () => {
-    expect(saveReceipt(['Content/A.umap'])).toBe('Saved to disk: Content/A.umap');
-    expect(saveReceipt(['a', 'b', 'c'], 2)).toBe('Saved to disk: a, b, +1 more');
-    expect(saveReceipt([])).toMatch(/No package file under Content/);
+    expect(saveReceipt(['Content/A.umap'], true)).toBe('Saved to disk: Content/A.umap');
+    expect(saveReceipt(['a', 'b', 'c'], false, 2)).toBe('Saved to disk: a, b, +1 more');
+    expect(saveReceipt([], true)).toMatch(/No package file under Content/);
+    expect(saveReceipt([], false)).toBeUndefined();
   });
 });
 
@@ -98,6 +99,17 @@ describe('rql command line', () => {
     expect(rqlCall(undefined, { schema: 'actors | count' })).toHaveProperty('usage');
     expect(rqlCall('actors | count', { dryRun: true })).toHaveProperty('usage');
     expect(rqlCall(undefined, {})).toHaveProperty('usage');
+  });
+
+  it('reads || as or, not as a stage break', () => {
+    expect(isRqlMutation('actors | where Label == "a" || Label == "b" | set X = 1')).toBe(true);
+    expect(rqlStages('actors | where a || b')).toEqual(['actors', 'where a || b']);
+  });
+
+  it('decodes a UTF-16 query file (Windows PowerShell 5.1 redirection)', () => {
+    const text = 'actors | count';
+    expect(decodeQueryFile(Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(text, 'utf16le')]))).toBe(text);
+    expect(decodeQueryFile(Buffer.from(text, 'utf-8'))).toBe(text);
   });
 
   it('treats backtick identifiers and string literals as opaque', () => {

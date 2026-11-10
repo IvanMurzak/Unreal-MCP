@@ -97,8 +97,8 @@ export function buildRunToolCommand(spec: RunToolCommandSpec): Command {
 }
 
 /**
- * Call one tool through an editor session (started headless when none answers) and report the outcome. True when the
- * call succeeded.
+ * Call one tool through an editor session (started headless when none answers) and report the outcome: whether the
+ * call succeeded, and the endpoint that answered.
  */
 export async function callToolFromCli(
   spec: Pick<RunToolCommandSpec, 'errorNoun' | 'invoke' | 'run' | 'findDialogs'>,
@@ -108,7 +108,7 @@ export async function callToolFromCli(
   out: CommandOutput,
   /** Print a text answer as its text (`rql`); otherwise text mode prints the response JSON (`run-tool`'s contract). */
   textAnswers = false,
-): Promise<boolean> {
+): Promise<{ ok: boolean; endpoint?: string }> {
   const timeoutMs = opts.timeout === undefined ? undefined : parseWholeNumber(opts.timeout, '--timeout', 1);
   const readyTimeoutMs = parseWholeNumber(opts.readyTimeout ?? String(UNREAL_SESSION_READY_TIMEOUT_MS), '--ready-timeout', 1);
   const spinner = out.machine || !process.stdout.isTTY ? null : ui.startSpinner(`Running ${toolName}...`);
@@ -134,10 +134,11 @@ export async function callToolFromCli(
     },
   });
   spinner?.stop();
-  return reportToolOutcome(spec.errorNoun, toolName, outcome, out, {
+  const ok = reportToolOutcome(spec.errorNoun, toolName, outcome, out, {
     text: textAnswers && opts.raw !== true,
     withDialogs: (failure) => withBlockingDialogs(projectDir, failure, spec.findDialogs),
   });
+  return { ok, endpoint: outcome.result?.endpoint };
 }
 
 export interface ReportOptions {

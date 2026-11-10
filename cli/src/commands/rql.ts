@@ -1,11 +1,11 @@
 import * as fs from 'fs';
 import { Command, Option } from 'commander';
-import { RQL_MUTATE_TOOL, RQL_QUERY_TOOL, RQL_SCHEMA_TOOL, isRqlMutation, packagesWrittenSince, rqlMaySave, saveReceipt, stripToolName } from '../lib/rql.js';
+import { RQL_MUTATE_TOOL, RQL_QUERY_TOOL, RQL_SCHEMA_TOOL, decodeQueryFile, isRqlMutation, packagesWrittenSince, rqlMaySave, saveReceipt, stripToolName } from '../lib/rql.js';
 import { runTool } from '../lib/run-tool.js';
+import { isAbsoluteLoopbackHost } from '../utils/port.js';
 import { readUProject } from '../utils/project.js';
 import { CommandOutput, FAILURE, formatOption, parseWholeNumber } from '../utils/output.js';
 import type { RqlRecipes } from '../utils/ui.js';
-import { readCode } from './exec.js';
 import { callToolFromCli, toolSessionOptions, type ToolCallCliOptions } from './run-tool-builder.js';
 
 interface RqlCliOptions extends ToolCallCliOptions {
@@ -62,6 +62,13 @@ export function rqlCall(query: string | undefined, opts: Pick<RqlCliOptions, 'sc
   return { toolName: RQL_MUTATE_TOOL, input: { query, ...(opts.dryRun ? { dry_run: true } : {}), ...(maxTargets !== undefined ? { max_targets: maxTargets } : {}) } };
 }
 
+/** The query from the argument or `-f <file>` (`-f -`: stdin; stdin is never read unasked). */
+function readQuery(query: string | undefined, file: string | undefined): string | undefined {
+  if (query !== undefined && file !== undefined) throw new Error('Pass the query either as an argument or with -f, not both.');
+  if (file === undefined) return query;
+  return decodeQueryFile(fs.readFileSync(file === '-' ? 0 : file)).trim();
+}
+
 const command = new Command('rql')
   .description('Read or change the editor with one RQL query: levels, actors, components, assets (a query ending in set / call changes the editor, any other only reads); starts a headless editor when none answers')
   .argument('[query]', 'RQL query, e.g. \'actors | where Label starts-with "Tree" | count\'')
@@ -82,9 +89,8 @@ export const rqlCommand = command
     const out = new CommandOutput('rql', opts.format);
     let query: string | undefined;
     try {
-      // Never read stdin unasked (`-f -` asks): an agent's shell may leave it open.
-      query = queryArg === undefined && opts.file === undefined ? undefined
-        : stripToolName(readCode(queryArg, opts.file, { isTTY: true, read: () => fs.readFileSync(0, 'utf-8') }));
+      const text = readQuery(queryArg, opts.file);
+      query = text === undefined ? undefined : stripToolName(text);
     } catch (err) {
       out.fail(FAILURE.usage, err instanceof Error ? err.message : String(err));
       return;
@@ -94,11 +100,18 @@ export const rqlCommand = command
       out.fail(FAILURE.usage, call.usage);
       return;
     }
-    // A save answers `null`; which files it wrote is read from the disk, so nobody re-opens the level to check. Not for
-    // an editor reached by --url: its disk may be another machine's.
-    const saveCheck = call.toolName === RQL_MUTATE_TOOL && !opts.dryRun && !out.machine && opts.url === undefined && rqlMaySave(query!)
-      ? readUProject(opts.path ?? process.cwd())?.projectDir : undefined;
-    const startedAt = Date.now();
-    const ok = await callToolFromCli({ errorNoun: 'tool', invoke: runTool }, call.toolName, JSON.stringify(call.input), opts, out, true);
-    if (ok && saveCheck !== undefined) console.log(saveReceipt(packagesWrittenSince(saveCheck, startedAt)));
+    // A save answers `null`; which files a change wrote is read from the disk, so nobody re-opens the level to check:
+    // only for an editor on this machine, and only files written since the tool call itself (not the editor start).
+    let calledAt = Date.now();
+    const invoke: typeof runTool = (options) => {
+      calledAt = Date.now();
+      return runTool(options);
+    };
+    const { ok, endpoint } = await callToolFromCli({ errorNoun: 'tool', invoke }, call.toolName, JSON.stringify(call.input), opts, out, true);
+    const projectDir = ok && call.toolName === RQL_MUTATE_TOOL && !opts.dryRun && !out.machine && endpoint !== undefined
+      && isAbsoluteLoopbackHost(new URL(endpoint).origin) ? readUProject(opts.path ?? process.cwd())?.projectDir : undefined;
+    if (projectDir !== undefined) {
+      const receipt = saveReceipt(packagesWrittenSince(projectDir, calledAt), rqlMaySave(query!));
+      if (receipt) console.log(receipt);
+    }
   });
