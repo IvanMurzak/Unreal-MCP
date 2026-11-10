@@ -15,8 +15,6 @@ interface RqlCliOptions extends ToolCallCliOptions {
   maxTargets?: string;
 }
 
-export { RQL_RECIPES };
-
 const RQL_HELP_FOOTER = [
   'Recipes:',
   ...RQL_RECIPES.map(([query, what]) => `  ${query}  # ${what}`),

@@ -46,7 +46,7 @@ export const CODE_COMMANDS: readonly CommandRow[] = [
   ['test', 'test --filter <Prefix>', 'run Automation tests headless'],
 ];
 
-/** How an editor command gets its editor (root help heading, skill opening). */
+/** How an editor command gets its editor (the root help's heading). */
 export const EDITOR_START = 'the first call starts a headless editor, 1-2 min, and keeps it warm; no open / status needed';
 
 /** Where the plugin lives in a project: absent means `install-plugin` comes first. */

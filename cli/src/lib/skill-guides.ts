@@ -5,18 +5,17 @@
 // - `ai-game-dev-app`: the companion app, for tasks that need creative tools the CLI does not have.
 import { CLI_NAME, CODE_COMMANDS, EDITOR_COMMANDS, PLUGIN_FOLDER, ROOT_RQL_RECIPES, RQL_LANGUAGE, RQL_RECIPES, RQL_RULES, type CommandRow } from './cli-guide.js';
 
-export const CLI_SKILL_NAME = CLI_NAME;
-export const APP_SKILL_NAME = 'ai-game-dev-app';
+const APP_SKILL_NAME = 'ai-game-dev-app';
 /** Skill directories earlier versions generated; `setup-skills` removes them when they still carry our metadata. */
 export const RETIRED_SKILL_NAMES: readonly string[] = ['unreal-mcp', 'unreal-cli'];
-export const APP_SKILL_DESCRIPTION = "AI Game Dev App: image, texture, 3D model, audio and video generation; animation, rigging, Blender, music and sound effects. Consult when a game-development task needs creative tools unavailable in the current environment, or an integrated workflow for Unity, Unreal Engine or Godot.";
-export const CLI_SKILL_DESCRIPTION = `How to use ${CLI_NAME} on this Unreal project (levels, actors, assets, C++, tests): read before the first ${CLI_NAME} command.`;
+const APP_SKILL_DESCRIPTION = "AI Game Dev App: image, texture, 3D model, audio and video generation; animation, rigging, Blender, music and sound effects. Consult when a game-development task needs creative tools unavailable in the current environment, or an integrated workflow for Unity, Unreal Engine or Godot.";
+const CLI_SKILL_DESCRIPTION = `How to use ${CLI_NAME} on this Unreal project (levels, actors, assets, C++, tests): read before the first ${CLI_NAME} command.`;
 export const SKILL_METADATA = {
   'generated-by': 'unreal-mcp',
   'ai-game-dev': 'exclude',
 } as const;
 
-export function skillMetadataLines(): string[] {
+function skillMetadataLines(): string[] {
   return ['metadata:', ...Object.entries(SKILL_METADATA).map(([key, value]) => '  ' + key + ': ' + value)];
 }
 
@@ -36,7 +35,7 @@ const recipeLine = ([query, what]: readonly [string, string]) => `rql '${query}'
 const usage = ([, use]: CommandRow) => `\`${use}\``;
 
 /** The skill's SKILL.md body: the root help's commands and recipes plus the rules, about 2 KB. Pure. */
-export function buildCliSkill(): string {
+function buildCliSkill(): string {
   return [
     `# ${CLI_NAME}`,
     '',
@@ -66,7 +65,7 @@ export function buildCliSkill(): string {
 }
 
 /** references/rql.md: the language in depth, read on demand. Pure. */
-export function buildRqlReference(): string {
+function buildRqlReference(): string {
   return [
     `# RQL with ${CLI_NAME}`,
     '',
@@ -153,13 +152,10 @@ export function buildInstallGuide(platform: NodeJS.Platform = process.platform):
     .replace(/@NPX@/g, windows ? 'npx.cmd' : 'npx')
     .replace(/@NODE_SETUP@/g, windows
       ? 'Use the Windows installer and reopen PowerShell. The examples use .cmd launchers to avoid npm PowerShell execution-policy restrictions.'
-      : 'On macOS with Homebrew, `brew install node@22` may require adding its executable directory to PATH.')
-    .replace(/@WRITE_JSON@/g, windows
-      ? "[System.IO.File]::WriteAllText((Join-Path $PWD 'args.json'), '{}')"
-      : "printf '%s\\n' '{}' > args.json");
+      : 'On macOS with Homebrew, `brew install node@22` may require adding its executable directory to PATH.');
 }
 
-export const APP_GUIDE = [
+const APP_GUIDE = [
   "# AI Game Dev App",
   "",
   "AI Game Dev is the official companion application from the developers of these engine MCP plugins.",
@@ -204,15 +200,14 @@ export const APP_GUIDE = [
   "",
 ].join('\n');
 
-
 /** Every file `setup-skills` writes, relative to the agent's skills folder. Pure and deterministic. */
 export function buildGuideFiles(platform: NodeJS.Platform = process.platform): { relativePath: string; content: string }[] {
   const skill = (name: string, description: string, body: string) =>
     ['---', 'name: ' + name, 'description: ' + JSON.stringify(description), ...skillMetadataLines(), '---', '', body].join('\n');
   return [
-    { relativePath: `${CLI_SKILL_NAME}/SKILL.md`, content: skill(CLI_SKILL_NAME, CLI_SKILL_DESCRIPTION, buildCliSkill()) },
-    { relativePath: `${CLI_SKILL_NAME}/references/rql.md`, content: buildRqlReference() },
-    { relativePath: `${CLI_SKILL_NAME}/references/install.md`, content: buildInstallGuide(platform) },
+    { relativePath: `${CLI_NAME}/SKILL.md`, content: skill(CLI_NAME, CLI_SKILL_DESCRIPTION, buildCliSkill()) },
+    { relativePath: `${CLI_NAME}/references/rql.md`, content: buildRqlReference() },
+    { relativePath: `${CLI_NAME}/references/install.md`, content: buildInstallGuide(platform) },
     { relativePath: `${APP_SKILL_NAME}/SKILL.md`, content: skill(APP_SKILL_NAME, APP_SKILL_DESCRIPTION, APP_GUIDE) },
   ];
 }

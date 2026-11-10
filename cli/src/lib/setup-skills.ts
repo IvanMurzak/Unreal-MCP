@@ -9,6 +9,7 @@ import { getAgentById, getAgentIds } from '../utils/agents.js';
 import { asError } from '../utils/error.js';
 import { emitProgress } from './progress.js';
 import type { ProgressCallback } from './types.js';
+import { CLI_NAME } from './cli-guide.js';
 import { buildGuideFiles, RETIRED_SKILL_NAMES, SKILL_METADATA } from './skill-guides.js';
 
 export interface SetupSkillsOptions {
@@ -107,7 +108,7 @@ export async function setupSkills(opts: SetupSkillsOptions = {}): Promise<SetupS
       kind: 'success',
       success: true,
       skillsDir,
-      skillPath: path.join(skillsDir, buildGuideFiles()[0].relativePath),
+      skillPath: path.join(skillsDir, CLI_NAME, 'SKILL.md'),
       filesWritten,
       removed,
       written: filesWritten.length > 0 || removed.length > 0,
