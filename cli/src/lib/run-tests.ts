@@ -3,7 +3,8 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { spawn, execFile, type ChildProcess } from 'child_process';
+import { spawn, type ChildProcess } from 'child_process';
+import { killProcessTree } from '@baizor/gamedev-cli-core';
 import { platform } from 'os';
 import { maybeBuildBeforeOpen } from './open.js';
 import { commandletEditorPath, prepareStandaloneRun } from './project-engine.js';
@@ -50,7 +51,7 @@ export interface RunTestsOptions {
   ownedEditorPid?: (projectDir: string) => number | undefined;
   buildImpl?: (step: UbtBuildStep) => Promise<void>;
   spawnImpl?: (command: string, args: string[], env: NodeJS.ProcessEnv) => ChildProcess;
-  killTreeImpl?: (pid: number) => Promise<void>;
+  killTreeImpl?: (pid: number) => Promise<unknown>;
   editorBinary?: string;
   sleep?: (ms: number) => Promise<void>;
   pollMs?: number;
@@ -120,22 +121,6 @@ export function readReport(reportDir: string): AutomationSummary | undefined {
   }
 }
 
-/** Stop a process and everything it started (ShaderCompileWorker, zenserver, ...). */
-export function killProcessTree(pid: number, os: NodeJS.Platform = platform() as NodeJS.Platform): Promise<void> {
-  return new Promise((resolve) => {
-    if (os === 'win32') {
-      execFile('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true }, () => resolve());
-      return;
-    }
-    try {
-      process.kill(-pid, 'SIGKILL'); // the process group: spawned detached
-    } catch {
-      try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ }
-    }
-    resolve();
-  });
-}
-
 export async function runAutomationTests(options: RunTestsOptions = {}): Promise<RunTestsResult> {
   const os = options.os ?? (platform() as NodeJS.Platform);
   const filter = options.filter?.trim() || DEFAULT_TEST_FILTER;
@@ -193,7 +178,8 @@ export async function runAutomationTests(options: RunTestsOptions = {}): Promise
   const spawnImpl = options.spawnImpl
     ?? ((command: string, argv: string[], childEnv: NodeJS.ProcessEnv) =>
       spawn(command, argv, { cwd: project.projectDir, env: childEnv, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, detached: os !== 'win32' }));
-  const killTree = options.killTreeImpl ?? ((pid: number) => killProcessTree(pid, os));
+  // Stops the editor and everything it started (ShaderCompileWorker, zenserver, ...): cli-core's tree kill.
+  const killTree = options.killTreeImpl ?? killProcessTree;
 
   options.onStatus?.(`Running Automation tests "${filter}" in ${path.basename(binary)} (report: ${reportDir})`);
   let child: ChildProcess;
