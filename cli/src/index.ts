@@ -22,6 +22,7 @@ import { setupMcpCommand } from './commands/setup-mcp.js';
 import { setupSkillsCommand } from './commands/setup-skills.js';
 import { statusCommand } from './commands/status.js';
 import { testCommand } from './commands/test.js';
+import { toolsCommand } from './commands/tools.js';
 import { updateCommand } from './commands/update.js';
 import { waitForReadyCommand } from './commands/wait-for-ready.js';
 
@@ -55,6 +56,7 @@ const subcommands = [
   waitForReadyCommand,
   runToolCommand,
   runSystemToolCommand,
+  toolsCommand,
   compileCommand,
   testCommand,
   bootstrapLocalCommand,

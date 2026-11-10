@@ -12,6 +12,11 @@ const FAILURES: Record<CompileFailureReason, FailureKind> = {
   'compilation-failed': FAILURE.compilationFailed,
 };
 
+/** A source file of a plugin (`<...>/Plugins/<Name>/Source/...`), not of the project's own modules. */
+function isPluginFile(file: string | undefined): boolean {
+  return file !== undefined && /[\\/]Plugins[\\/]/i.test(file);
+}
+
 export const compileCommand = new Command('compile')
   .description('Build the project\'s editor target with UnrealBuildTool (no editor) and print file:line:col diagnostics')
   .argument('[path]', 'Unreal project directory or .uproject (defaults to cwd)')
@@ -20,6 +25,7 @@ export const compileCommand = new Command('compile')
   .addOption(formatOption())
   .action(async (pathArg: string | undefined, opts: { strict?: boolean; engineRoot?: string; format: string }) => {
     const out = new CommandOutput('compile', opts.format);
+    let pluginWarnings = 0;
     const result = await compileProject({
       projectDir: pathArg,
       engineRoot: opts.engineRoot,
@@ -27,11 +33,18 @@ export const compileCommand = new Command('compile')
       onLine: (line) => ui.verbose(line),
       onDiagnostic: (diagnostic) => {
         const text = formatDiagnostic(diagnostic);
-        // Text: every diagnostic as it comes (stderr for errors, like a compiler); ndjson: progress lines.
-        if (!out.machine) (diagnostic.severity === 'error' ? process.stderr : process.stdout).write(`${text}\n`);
         out.progress(text);
+        if (out.machine) return;
+        // Text: a warning in an installed plugin is not the project's to fix: counted, shown with --verbose.
+        if (diagnostic.severity === 'warning' && isPluginFile(diagnostic.file) && !ui.isVerbose()) {
+          pluginWarnings++;
+          return;
+        }
+        // Every other diagnostic as it comes (stderr for errors, like a compiler).
+        (diagnostic.severity === 'error' ? process.stderr : process.stdout).write(`${text}\n`);
       },
     });
+    if (pluginWarnings > 0) ui.info(`${pluginWarnings} warning(s) in installed plugins not shown (--verbose shows them).`);
     if (result.kind === 'failure') {
       const { kind: _kind, success: _success, reason, message, ...data } = result;
       out.fail(FAILURES[reason], message, data);

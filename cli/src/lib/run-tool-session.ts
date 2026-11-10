@@ -12,6 +12,7 @@ import {
 } from '@baizor/gamedev-cli-core';
 import { openProjectSession, sessionFailureMessage, UNREAL_SESSION_CLOSE_TIMEOUT_MS, type UnrealSessionOptions } from './session.js';
 import { classifyToolFailure } from './tool-outcome.js';
+import { PreLaunchBuildError } from './open.js';
 import { FAILURE } from '../utils/output.js';
 import { isAbsoluteLoopbackHost } from '../utils/port.js';
 import { connectsInCloudMode } from '../utils/config.js';
@@ -44,7 +45,14 @@ export interface RunToolSessionResult {
   /** Cloud mode on a signed-in machine whose sign-in the server rejected: re-sign-in (never a local fallback). */
   signInRequired?: string;
   /** Set when no editor answered and none could be started. */
-  sessionFailure?: { reason?: EditorSessionErrorReason; message: string; invalidInput?: boolean };
+  sessionFailure?: {
+    reason?: EditorSessionErrorReason;
+    message: string;
+    /** No project at the path, or a bad `--url`. */
+    invalidInput?: boolean;
+    /** The pre-launch C++ build failed: the message lists the errors and names the build log. */
+    buildFailed?: boolean;
+  };
   /** `once`: the close of the editor this call started. */
   closed?: CloseOwnedResult | { kind: 'error'; message: string };
 }
@@ -65,7 +73,7 @@ export function localFallbackNote(): string {
 }
 
 /** `missing` = this machine never signed in to ai-game.dev; anything else = a sign-in exists (usable or not). */
-function machineCredentialState(): 'ok' | 'missing' | 'unreadable' {
+export function machineCredentialState(): 'ok' | 'missing' | 'unreadable' {
   try {
     return new MachineCredentialStore().readState().status;
   } catch {
@@ -82,7 +90,7 @@ function isCloudEndpoint(endpoint: string): boolean {
   }
 }
 
-function isAuthFailure(failure: RunToolFailure): boolean {
+export function isAuthFailure(failure: RunToolFailure): boolean {
   // 401 only: a 403 can mean a plan, quota or forbidden tool, not a sign-in that cannot be used.
   return failure.reason === 'http-error' && failure.httpStatus === 401;
 }
@@ -136,7 +144,8 @@ export async function runToolWithSession(options: RunToolSessionOptions): Promis
   } catch (err) {
     const sessionFailure = {
       ...(err instanceof EditorSessionError ? { reason: err.reason } : {}),
-      message: sessionFailureMessage(err, connection.url),
+      ...(err instanceof PreLaunchBuildError ? { buildFailed: true } : {}),
+      message: sessionFailureMessage(err, connection.url, opened.projectDir),
     };
     // An editor this call launched may still be starting (e.g. --ready-timeout ran out): --once leaves nothing
     // behind. closeOwned acts only on the CLI lease, never on the user's editor.

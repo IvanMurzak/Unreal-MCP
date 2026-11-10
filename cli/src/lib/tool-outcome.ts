@@ -9,7 +9,11 @@ import type { RunToolFailure } from './types.js';
 
 export type { FailureKind };
 
-const NO_EDITOR_CONNECTED = /no connected clients|no game engine is connected/i;
+/** Leads the message of a call whose editor could not start because the project's C++ does not compile. */
+export const NOT_STARTED_BUILD =
+  'The project\'s C++ code does not compile, so no editor was started (fix it; `unreal-mcp-cli compile` rebuilds without an editor):';
+
+const NO_EDITOR_CONNECTED =/no connected clients|no game engine is connected/i;
 
 /** Exit / error code of a failed tool call. */
 export function classifyToolFailure(failure: RunToolFailure): FailureKind {
@@ -57,7 +61,8 @@ export function classifyToolResponseError(text: string): FailureKind {
 }
 
 /** Exit / error code of a session that could not provide a ready editor. */
-export function classifySessionFailure(reason: EditorSessionErrorReason | undefined, invalidInput = false): FailureKind {
+export function classifySessionFailure(reason: EditorSessionErrorReason | undefined, invalidInput = false, buildFailed = false): FailureKind {
   if (invalidInput) return FAILURE.projectNotFound; // no project at the path / a bad --url: nothing to start
+  if (buildFailed) return FAILURE.compilationFailed; // the C++ build before the launch failed: fix the code
   return reason === 'lock-busy' ? FAILURE.busy : FAILURE.unreachable;
 }

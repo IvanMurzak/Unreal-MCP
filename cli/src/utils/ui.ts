@@ -21,6 +21,10 @@ export function setVerbose(enabled: boolean): void {
   verboseEnabled = enabled;
 }
 
+export function isVerbose(): boolean {
+  return verboseEnabled;
+}
+
 export function verbose(message: string): void {
   if (!verboseEnabled) return;
   if (isTTY()) {
@@ -54,6 +58,16 @@ function drawBox(text: string): string {
   });
   return [top, ...middle, bottom].join('\n');
 }
+
+/** The root help's quick start: how an agent gets from nothing to a working call. */
+const EVERYDAY_WORKFLOW: ReadonlyArray<readonly [string, string]> = [
+  ['unreal-mcp-cli status', 'project, plugin, running editor, server'],
+  ['unreal-mcp-cli tools [--filter <regex>]', 'the AI tools and their inputs (works with the editor closed)'],
+  ['unreal-mcp-cli run-tool <tool> --input \'<json>\'', 'call one (rql-query / rql-mutate edit levels and assets)'],
+  ['unreal-mcp-cli exec "<python>"', 'run Python with the full `unreal` API in the editor'],
+  ['unreal-mcp-cli compile', 'build the C++ (file:line errors), no editor needed'],
+  ['unreal-mcp-cli test --filter <Project.Tests>', 'run Automation tests headless'],
+];
 
 export function configureStyledHelp(cmd: Command, appVersion?: string): Command {
   cmd.configureHelp({
@@ -106,6 +120,14 @@ export function configureStyledHelp(cmd: Command, appVersion?: string): Command 
       }
 
       if (isRoot) {
+        lines.push(chalk.bold('Everyday workflow (run inside the project folder, or pass --path / [path]):'));
+        for (const [cmd, what] of EVERYDAY_WORKFLOW) lines.push(`  ${chalk.yellow(cmd.padEnd(48))} ${chalk.dim(what)}`);
+        lines.push('');
+        lines.push(
+          chalk.dim('A headless editor is started when needed (closed again with --once / close --owned-only). ') +
+            chalk.dim('Machine-readable output: --format json; every command and exit code: ') +
+            chalk.yellow('unreal-mcp-cli commands --format json'),
+        );
         lines.push(
           chalk.dim('Run ') +
             chalk.yellow('unreal-mcp-cli <command> --help') +

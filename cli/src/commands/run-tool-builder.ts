@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import { readFileSync } from 'fs';
 import { runToolWithSession, type RunToolSessionResult } from '../lib/run-tool-session.js';
 import { UNREAL_SESSION_READY_TIMEOUT_MS } from '../lib/session.js';
-import { classifySessionFailure, classifyToolFailure, classifyToolResponseError, toolResponseError } from '../lib/tool-outcome.js';
+import { classifySessionFailure, classifyToolFailure, classifyToolResponseError, NOT_STARTED_BUILD, toolResponseError } from '../lib/tool-outcome.js';
 import type { RunToolOptions, RunToolResult } from '../lib/types.js';
 import { ExitCode } from '../utils/exit-codes.js';
 import { CommandOutput, FAILURE, formatOption, parseWholeNumber } from '../utils/output.js';
@@ -103,7 +103,9 @@ function report(spec: RunToolCommandSpec, toolName: string, outcome: RunToolSess
     out.warn(`The editor this call started did not close (${outcome.closed.kind}${'message' in outcome.closed ? `: ${outcome.closed.message}` : ''}).`);
   }
   if (outcome.sessionFailure) {
-    out.fail(classifySessionFailure(outcome.sessionFailure.reason, outcome.sessionFailure.invalidInput),`No ready Unreal Editor for ${spec.errorNoun} "${toolName}": ${outcome.sessionFailure.message}`);
+    out.fail(classifySessionFailure(outcome.sessionFailure.reason, outcome.sessionFailure.invalidInput, outcome.sessionFailure.buildFailed),outcome.sessionFailure.buildFailed
+      ? `${NOT_STARTED_BUILD} ${outcome.sessionFailure.message}`
+      : `No ready Unreal Editor for ${spec.errorNoun} "${toolName}": ${outcome.sessionFailure.message}`);
     return;
   }
   const result = outcome.result!;

@@ -3,7 +3,7 @@ import { buildRunToolCommand } from './run-tool-builder.js';
 
 export const runToolCommand = buildRunToolCommand({
   name: 'run-tool',
-  description: 'Invoke an MCP tool via the project\'s local MCP server (HTTP)',
+  description: 'Call one of the plugin\'s AI tools (list them with `unreal-mcp-cli tools`); starts a headless editor when none answers',
   errorNoun: 'tool',
   invoke: runTool,
 });

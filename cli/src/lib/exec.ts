@@ -8,6 +8,11 @@ import {
   type WaitedEditorSource,
 } from '@baizor/gamedev-cli-core';
 import { runTool } from './run-tool.js';
+import { PreLaunchBuildError } from './open.js';
+import { isAuthFailure, machineCredentialState, SIGNED_IN_BUT_UNUSABLE_MESSAGE } from './run-tool-session.js';
+import { connectsInCloudMode } from '../utils/config.js';
+import { readUProject } from '../utils/project.js';
+import * as path from 'path';
 import { isToolSuccess, openProjectSession, sessionFailureMessage, type UnrealSessionOptions } from './session.js';
 import { asError } from '../utils/error.js';
 import type { RunToolFailure, RunToolOptions, RunToolResult } from './types.js';
@@ -50,6 +55,8 @@ export interface ExecPythonOptions {
   sessionOptions?: Partial<UnrealSessionOptions>;
   invoke?: (options: RunToolOptions) => Promise<RunToolResult>;
   sleep?: (ms: number) => Promise<void>;
+  /** The machine's ai-game.dev credential store state (default: cli-core MachineCredentialStore.readState). */
+  credentialState?: () => 'ok' | 'missing' | 'unreadable';
 }
 
 export interface ExecPythonSuccess {
@@ -66,11 +73,16 @@ export interface ExecPythonSuccess {
 export interface ExecPythonFailure {
   kind: 'failure';
   success: false;
-  /** `invalid-input`: bad project / URL; `session`: no ready editor (see `sessionReason`); `tool-failed`: the call failed. */
-  reason: 'invalid-input' | 'session' | 'tool-failed';
+  /**
+   * `invalid-input`: bad project / URL; `session`: no ready editor (see `sessionReason`); `tool-failed`: the call
+   * failed; `not-authenticated`: Cloud mode on a signed-in machine whose sign-in the cloud rejected.
+   */
+  reason: 'invalid-input' | 'session' | 'tool-failed' | 'not-authenticated';
   sessionReason?: EditorSessionErrorReason;
   /** Which editor the session waited for (`foreign` = one the user opened). */
   sessionSource?: WaitedEditorSource;
+  /** The pre-launch C++ build failed (the message lists the errors and names the build log). */
+  buildFailed?: boolean;
   toolFailure?: RunToolFailure;
   message: string;
   error?: Error;
@@ -83,6 +95,21 @@ export type ExecPythonResult = ExecPythonSuccess | ExecPythonFailure;
  * otherwise one is started headless (or with a window) that saves and quits after `idleSeconds` without tool calls.
  */
 export async function execPython(options: ExecPythonOptions): Promise<ExecPythonResult> {
+  const input = { code: options.code, ...(options.include && options.include.length > 0 ? { include: options.include } : {}) };
+  const invoke = options.invoke ?? runTool;
+
+  // A Cloud-mode project on a machine with an ai-game.dev sign-in stays in Cloud mode: run in the editor connected to
+  // the cloud, never in a local editor started here (only a machine that never signed in falls back to local).
+  const projectRoot = readUProject(path.resolve(options.projectDir ?? process.cwd()))?.projectDir;
+  if (projectRoot && options.url === undefined && options.token === undefined && connectsInCloudMode(projectRoot)
+    && (options.credentialState ?? machineCredentialState)() !== 'missing') {
+    options.onStatus?.('Cloud mode: running in the editor connected to ai-game.dev...');
+    const result = await invoke({ toolName: PYTHON_EXECUTE_TOOL, projectDir: projectRoot, input, timeoutMs: options.timeoutMs ?? DEFAULT_EXEC_TIMEOUT_MS });
+    if (result.kind === 'success') return { kind: 'success', success: true, baseUrl: new URL(result.endpoint).origin, source: 'running', data: result.data };
+    if (isAuthFailure(result)) return { kind: 'failure', success: false, reason: 'not-authenticated', message: SIGNED_IN_BUT_UNUSABLE_MESSAGE };
+    return { kind: 'failure', success: false, reason: 'tool-failed', toolFailure: result, message: toolErrorText(result), error: result.error };
+  }
+
   let opened;
   try {
     opened = await openProjectSession({
@@ -113,18 +140,18 @@ export async function execPython(options: ExecPythonOptions): Promise<ExecPython
       success: false,
       reason: 'session',
       ...(sessionError ? { sessionReason: sessionError.reason, sessionSource: sessionError.source } : {}),
-      message: sessionFailureMessage(err, connection.url),
+      ...(err instanceof PreLaunchBuildError ? { buildFailed: true } : {}),
+      message: sessionFailureMessage(err, connection.url, opened.projectDir),
       error: asError(err),
     };
   }
 
   options.onStatus?.('Running...');
-  const invoke = options.invoke ?? runTool;
   const call = (): Promise<RunToolResult> => invoke({
     toolName: PYTHON_EXECUTE_TOOL,
     url: ready.ready,
     ...(connection.token ? { token: connection.token } : {}),
-    input: { code: options.code, ...(options.include && options.include.length > 0 ? { include: options.include } : {}) },
+    input,
     timeoutMs: options.timeoutMs ?? DEFAULT_EXEC_TIMEOUT_MS,
   });
   let result = await call();

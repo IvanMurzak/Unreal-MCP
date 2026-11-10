@@ -329,11 +329,16 @@ const FOREIGN_NOT_READY_HINT =
  * The message for a session that could not provide a ready editor: cli-core's message plus the local URL that was
  * probed, and for an editor the user opened that never answered, the Unreal Cloud-mode hint.
  */
-export function sessionFailureMessage(err: unknown, url: string): string {
+export function sessionFailureMessage(err: unknown, url: string, projectDir?: string): string {
   const { message } = asError(err);
   if (!(err instanceof EditorSessionError)) return message;
   const foreign = err.reason === 'not-ready' && err.source === 'foreign';
-  return `${message} (local MCP server: ${url})${foreign ? `. ${FOREIGN_NOT_READY_HINT}` : ''}`;
+  // An editor that died or never answered says why in its log: name it (a started editor writes the project log).
+  const project = projectDir ? readUProject(projectDir) : null;
+  const log = project && (err.reason === 'exited' || err.reason === 'not-ready' || err.reason === 'launch-failed')
+    ? `. Editor log: ${path.join(project.projectDir, 'Saved', 'Logs', `${project.projectName}.log`)}`
+    : '';
+  return `${message} (local MCP server: ${url})${foreign ? `. ${FOREIGN_NOT_READY_HINT}` : ''}${log}`;
 }
 
 async function withSession<T>(
@@ -341,15 +346,17 @@ async function withSession<T>(
   run: (session: EditorSession<string>) => Promise<T>,
 ): Promise<SessionCommandResult<T>> {
   let url: string | undefined;
+  let root: string | undefined;
   try {
     const { projectDir, connection, session } = await openProjectSession(options);
     url = connection.url;
+    root = projectDir;
     return { kind: 'success', success: true, projectDir, ...(await run(session)) };
   } catch (err) {
     return {
       kind: 'failure',
       success: false,
-      message: url === undefined ? asError(err).message : sessionFailureMessage(err, url),
+      message: url === undefined ? asError(err).message : sessionFailureMessage(err, url, root),
       ...(err instanceof EditorSessionError ? { reason: err.reason, source: err.source } : {}),
       error: asError(err),
     };
