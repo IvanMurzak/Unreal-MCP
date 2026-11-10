@@ -14,6 +14,7 @@ export { toolsCommand } from './commands/tools.js';
 export { execCommand } from './commands/exec.js';
 export { configureCommand } from './commands/configure.js';
 export { createProjectCommand } from './commands/create-project.js';
+export { dialogCommand } from './commands/dialog.js';
 export { installEngineCommand } from './commands/install-engine.js';
 export { installPluginCommand } from './commands/install-plugin.js';
 export { loginCommand } from './commands/login.js';

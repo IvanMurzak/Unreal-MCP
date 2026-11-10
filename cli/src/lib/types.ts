@@ -20,6 +20,7 @@ import type { InstallSourceKind } from '../utils/extension-source.js';
 import type { DismissOutcome, DismissPlatform, UnrealStartupDialogKey } from '../utils/startup-dialog-dismiss.js';
 import type { EnrollOptions, EnrollResult } from './enroll.js';
 import type { RunningProcess } from './close.js';
+import type { DialogFileIo, EditorDialog } from './editor-dialogs.js';
 
 export type ResultKind = 'success' | 'failure';
 
@@ -737,6 +738,7 @@ export interface StatusOptions {
   /** Test seams for the editor check. */
   listProcessesImpl?: () => RunningProcess[];
   readLogTail?: (file: string) => string | undefined;
+  dialogIo?: DialogFileIo;
 }
 
 export interface StatusReport {
@@ -763,8 +765,10 @@ export interface StatusReport {
   editor?: {
     running: boolean;
     pids: number[];
-    /** Title of a modal dialog that blocks the editor's tool calls (from the editor log), when detected. */
+    /** Title of a modal dialog that blocks the editor (the plugin's dialog file, else the editor log), when detected. */
     modalDialog?: string;
+    /** The modal dialogs the editors show, with their buttons (`unreal-mcp-cli dialog`); absent when none. */
+    dialogs?: EditorDialog[];
   };
 }
 

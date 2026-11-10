@@ -2,6 +2,7 @@
 // See the LICENSE file in the repository root for more information.
 
 #include "Session/UnrealMcpModalWatch.h"
+#include "Session/UnrealMcpDialogControl.h"
 #include "UnrealMcpLog.h"
 #include "Dispatch/UnrealMcpGameThreadDispatcher.h"
 
@@ -10,8 +11,9 @@
 #include "Misc/CoreDelegates.h"
 #include "Widgets/SWindow.h"
 
-FUnrealMcpModalWatch::FUnrealMcpModalWatch(TFunction<int32(const FString&)> InEndWaitingCalls)
+FUnrealMcpModalWatch::FUnrealMcpModalWatch(TFunction<int32(const FString&)> InEndWaitingCalls, FString InDialogDirectory)
 	: EndWaitingCalls(InEndWaitingCalls ? MoveTemp(InEndWaitingCalls) : TFunction<int32(const FString&)>(&FUnrealMcpGameThreadDispatcher::FailWaitingCalls))
+	, Dialogs(MakeUnique<FUnrealMcpDialogControl>(MoveTemp(InDialogDirectory)))
 {
 }
 
@@ -24,6 +26,7 @@ void FUnrealMcpModalWatch::Start()
 {
 	if (!FSlateApplication::IsInitialized() || ModalTickHandle.IsValid())
 		return;
+	Dialogs->Clear(); // a file a crashed editor with the same process id left behind
 	ModalTickHandle = FSlateApplication::Get().GetOnModalLoopTickEvent().AddLambda([this](float)
 	{
 		HandleModalTick(FSlateApplication::Get().GetActiveModalWindow(), FPlatformTime::Seconds());
@@ -43,13 +46,17 @@ void FUnrealMcpModalWatch::Shutdown()
 	if (ModalClosedHandle.IsValid())
 		FCoreDelegates::PostSlateModal.Remove(ModalClosedHandle);
 	ModalClosedHandle.Reset();
+	Dialogs->Clear();
 }
 
-FString FUnrealMcpModalWatch::BlockedReason(const FString& DialogTitle, double OpenSeconds)
+FString FUnrealMcpModalWatch::BlockedReason(const FString& DialogTitle, double OpenSeconds, const TArray<FString>& DialogButtons)
 {
+	// "The editor is showing the modal dialog \"<title>\" (open for" is how the CLI recognizes it (cli/src/lib/editor-modal.ts).
+	const FString Answer = DialogButtons.IsEmpty() ? FString()
+		: FString::Printf(TEXT(", answer it with unreal-mcp-cli dialog --press \"<button>\" (buttons: %s)"), *FString::Join(DialogButtons, TEXT(", ")));
 	return FString::Printf(TEXT("The editor is showing the modal dialog \"%s\" (open for %.0f s): its game thread waits for the")
-		TEXT(" dialog to close, so no tool call can run. Ask the user to answer or close the dialog in the editor, or restart the")
-		TEXT(" editor (unsaved changes are lost)."), *DialogTitle, OpenSeconds);
+		TEXT(" dialog to close, so no tool call can run. Ask the user to answer or close the dialog in the editor%s, or restart the")
+		TEXT(" editor (unsaved changes are lost)."), *DialogTitle, OpenSeconds, *Answer);
 }
 
 void FUnrealMcpModalWatch::HandleModalTick(const TSharedPtr<SWindow>& Active, double Now)
@@ -66,13 +73,22 @@ void FUnrealMcpModalWatch::HandleModalTick(const TSharedPtr<SWindow>& Active, do
 			NextCheckAt = 0.0;
 		}
 		Window = Active;
-		Title = Active->GetTitle().ToString();
+		const FUnrealMcpDialogControl::FDescription Dialog = FUnrealMcpDialogControl::Describe(Active.ToSharedRef());
+		Title = Dialog.Title;
+		Buttons = Dialog.Buttons;
+		Dialogs->Publish(Dialog, ++DialogId);
+		NextPollAt = 0.0;
+	}
+	if (Now >= NextPollAt)
+	{
+		NextPollAt = Now + PressPollSeconds;
+		Dialogs->PollPress(Active, DialogId);
 	}
 	// A few times a second rather than every modal tick; calls that arrive while the dialog stays open end too.
 	if (Now - OpenedAt < BlockedAfterSeconds || Now < NextCheckAt)
 		return;
 	NextCheckAt = Now + 0.25;
-	if (EndWaitingCalls(BlockedReason(Title, Now - OpenedAt)) > 0 && !bReported)
+	if (EndWaitingCalls(BlockedReason(Title, Now - OpenedAt, Buttons)) > 0 && !bReported)
 	{
 		bReported = true;
 		UE_LOG(LogUnrealMcp, Error, TEXT("[Unreal-MCP] Editor blocked by modal dialog \"%s\": its game thread waits for the dialog")
@@ -93,4 +109,6 @@ void FUnrealMcpModalWatch::HandleModalClosed(bool bAnyModalLeft)
 	bHeld = false;
 	Window.Reset();
 	Title.Reset();
+	Buttons.Reset();
+	Dialogs->Clear();
 }

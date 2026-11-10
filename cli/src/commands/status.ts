@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 import { getStatus } from '../lib/status.js';
+import { awaitingInputMessage, describeDialog } from '../lib/editor-dialogs.js';
 import { isUnrealProjectDir } from '../utils/project.js';
 import { ExitCode } from '../utils/exit-codes.js';
 import { CommandOutput, FAILURE, formatOption } from '../utils/output.js';
@@ -23,6 +24,7 @@ export const statusCommand = new Command('status')
     });
     const { kind: _kind, success: _success, ...data } = report;
     const modal = report.editor?.modalDialog;
+    const dialogs = report.editor?.dialogs ?? [];
 
     if (!out.machine) {
       ui.info(`${report.name} v${report.version}`);
@@ -36,7 +38,8 @@ export const statusCommand = new Command('status')
       if (report.editor) {
         ui.heading('Editor:');
         ui.label('running', report.editor.running ? `yes (pid ${report.editor.pids.join(', ')})` : 'no');
-        if (modal !== undefined) ui.label('blocked by', `modal dialog "${modal}"`);
+        if (dialogs.length > 0) for (const d of dialogs) ui.label('blocked by', `modal dialog ${describeDialog(d)} (id ${d.id})`);
+        else if (modal !== undefined) ui.label('blocked by', `modal dialog "${modal}"`);
       }
       if (report.connection.url) {
         ui.heading('Connection:');
@@ -58,7 +61,8 @@ export const statusCommand = new Command('status')
     if (modal !== undefined) {
       out.fail(
         FAILURE.awaitingInput,
-        `The Unreal Editor is blocked by the modal dialog "${modal}": answer or close it in the editor, or restart the editor.`,
+        dialogs.length > 0 ? awaitingInputMessage(dialogs)
+          : `The Unreal Editor is blocked by the modal dialog "${modal}": answer or close it in the editor, or restart the editor.`,
         data,
       );
       return;

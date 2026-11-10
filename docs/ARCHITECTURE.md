@@ -619,7 +619,13 @@ Godot's `GodotMainThread`:
   still holds the game thread: `FUnrealMcpModalWatch` (editor) watches Slate's modal loop and, once a dialog has been
   open 2 s (a dialog over another counts from the first) and calls wait, logs `[Unreal-MCP] Editor blocked by modal dialog "<title>": …` (Error; the App's editor
   diagnosis reads it), ends the waiting calls with that reason (`FailWaitingCalls`) instead of letting them time out,
-  and logs `[Unreal-MCP] Modal dialog "<title>" closed; tool calls run again.` when it closes. A timeout or such an
+  and logs `[Unreal-MCP] Modal dialog "<title>" closed; tool calls run again.` when it closes. From the same modal tick
+  it publishes the dialog on top (title, visible texts, labelled buttons) to `Saved/UnrealMCP/Dialogs/<pid>.json` and
+  takes press requests from `<pid>.press.json` (answer in `<pid>.result.json`; `FUnrealMcpDialogControl`, clicked with
+  `SButton::SimulateClick`): `unreal-mcp-cli dialog` reads and answers it, and `status` / `run-tool` / `exec` exit 18
+  with it. Files, not a tool: no call reaches a held game thread, and a Cloud-mode editor serves no local server.
+  Windows UI Automation was measured (UE 5.7) and cannot do this: Slate's provider is off unless
+  `Accessibility.Enable=1`, and even on, a modal window reports no children. A timeout or such an
   early end says whether the body had started (outcome unknown) or never ran, and when the game thread has not
   finished a frame for 5 s or more.
 - **Not ready yet:** a handler may return `FUnrealMcpToolResult::RetryLater(reason)`; the dispatcher runs it
@@ -1134,7 +1140,7 @@ Unreal-MCP/
 │                                       #   commands (port of unity-mcp-cli's set, cli/src/commands/):
 │                                       #   create-project, open, close, install-plugin, remove-plugin,
 │                                       #   configure (UNREAL_MCP_* env/.env), setup-mcp, login (device code),
-│                                       #   status, wait-for-ready, run-tool, run-system-tool,
+│                                       #   status, dialog, wait-for-ready, run-tool, run-system-tool,
 │                                       #   compile (standalone UBT), test (headless Automation),
 │                                       #   bootstrap-local, update, install-engine (LauncherInstalled.dat
 │                                       #   detection at minimum), setup-skills, commands (manifest);

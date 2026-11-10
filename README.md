@@ -365,7 +365,8 @@ The full 18-command surface:
 | `configure` | Write `UNREAL_MCP_*` values into `<project>/.env` and gitignore `.env` |
 | `setup-mcp` | Write an MCP client config snippet for an agent |
 | `login` | Authorize against ai-game.dev via the OAuth device-code flow |
-| `status` | Report package, project, plugin, and live connection status |
+| `status` | Report package, project, plugin, and live connection status (exit 18 while a modal dialog blocks the editor) |
+| `dialog` | List the modal dialogs blocking the editor (title, text, buttons), or answer one with `--press <button>` |
 | `wait-for-ready` | Block until the project's MCP server responds to a ping |
 | `run-tool` | Call one of the plugin's AI tools; starts a headless editor when none answers (`--once` closes it again) |
 | `run-system-tool` | Invoke a system tool via the project's local MCP server (HTTP) |
