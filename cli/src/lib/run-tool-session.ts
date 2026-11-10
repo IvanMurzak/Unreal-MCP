@@ -14,6 +14,7 @@ import { openProjectSession, sessionFailureMessage, UNREAL_SESSION_CLOSE_TIMEOUT
 import { classifyToolFailure } from './tool-outcome.js';
 import { FAILURE } from '../utils/output.js';
 import { isAbsoluteLoopbackHost } from '../utils/port.js';
+import { connectsInCloudMode } from '../utils/config.js';
 import { asError } from '../utils/error.js';
 import type { RunToolFailure, RunToolOptions, RunToolResult } from './types.js';
 
@@ -65,7 +66,11 @@ export function localFallbackNote(): string {
 
 /** `missing` = this machine never signed in to ai-game.dev; anything else = a sign-in exists (usable or not). */
 function machineCredentialState(): 'ok' | 'missing' | 'unreadable' {
-  return new MachineCredentialStore().readState().status;
+  try {
+    return new MachineCredentialStore().readState().status;
+  } catch {
+    return 'unreadable'; // fail safe: a store we cannot read is never "never signed in"
+  }
 }
 
 function isCloudEndpoint(endpoint: string): boolean {
@@ -78,7 +83,8 @@ function isCloudEndpoint(endpoint: string): boolean {
 }
 
 function isAuthFailure(failure: RunToolFailure): boolean {
-  return failure.reason === 'http-error' && (failure.httpStatus === 401 || failure.httpStatus === 403);
+  // 401 only: a 403 can mean a plan, quota or forbidden tool, not a sign-in that cannot be used.
+  return failure.reason === 'http-error' && failure.httpStatus === 401;
 }
 
 export async function runToolWithSession(options: RunToolSessionOptions): Promise<RunToolSessionResult> {
@@ -91,7 +97,7 @@ export async function runToolWithSession(options: RunToolSessionOptions): Promis
   if (call.token !== undefined) {
     // An explicit --token is used as is: never a fallback, never a sign-in verdict.
     if (isCloudEndpoint(first.endpoint) || !isUnreachableFailure(first)) return { result: first };
-  } else if (isCloudEndpoint(first.endpoint)) {
+  } else if (call.url === undefined && call.projectDir !== undefined && connectsInCloudMode(call.projectDir) && isCloudEndpoint(first.endpoint)) {
     // Cloud mode (the project's connection, no --url). Only a machine that was NEVER signed in falls back to the
     // project's local server: an existing sign-in is the user's choice of the cloud, even when it cannot be used now.
     if ((credentialState ?? machineCredentialState)() !== 'missing') {

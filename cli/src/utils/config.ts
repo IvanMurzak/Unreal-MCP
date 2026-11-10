@@ -182,6 +182,18 @@ export async function resolveConnection(opts: ResolveConnectionOptions): Promise
   return { url: `http://localhost:${port}`, token, source: 'deterministic-port' };
 }
 
+/**
+ * Whether the project's connection (no `--url`) is the plugin config's Cloud mode: no process-env or `.env`
+ * `UNREAL_MCP_HOST` overrides it (those name a Custom server).
+ */
+export function connectsInCloudMode(projectDir: string, env: NodeJS.ProcessEnv = process.env): boolean {
+  const dir = path.resolve(projectDir);
+  if (nonEmpty(env['UNREAL_MCP_HOST'])) return false;
+  if (nonEmpty(readEnvFile(path.join(dir, '.env'))['UNREAL_MCP_HOST'])) return false;
+  const config = readPluginConfig(dir);
+  return config !== undefined && isCloudMode(config) && nonEmpty(config.cloudUrl) !== undefined;
+}
+
 /** Trim a value and return `undefined` when it is absent or blank. */
 function nonEmpty(value: string | undefined): string | undefined {
   if (value === undefined) return undefined;

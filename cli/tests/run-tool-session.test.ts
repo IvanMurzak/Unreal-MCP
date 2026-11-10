@@ -1,4 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import * as fs from 'fs';
+import * as path from 'path';
+import { PLUGIN_CONFIG_RELATIVE_PATH } from '../src/utils/config.js';
 import type { SessionProcessOps } from '@baizor/gamedev-cli-core';
 import { isUnreachableFailure, runToolWithSession } from '../src/lib/run-tool-session.js';
 import { classifySessionFailure, classifyToolFailure, classifyToolResponseError, toolResponseError } from '../src/lib/tool-outcome.js';
@@ -105,11 +108,30 @@ describe('runToolWithSession', () => {
     const cloudRejected: RunToolFailure = {
       kind: 'failure', success: false, endpoint: 'https://ai-game.dev/mcp/api/tools/x', reason: 'http-error', httpStatus: 401, message: 'Unauthorized',
     };
+    /** A project whose plugin config is Cloud mode. */
+    const cloudProject = (): string => {
+      const dir = project();
+      const file = path.join(dir, PLUGIN_CONFIG_RELATIVE_PATH);
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, JSON.stringify({ connectionMode: 'Cloud', cloudUrl: 'https://ai-game.dev' }));
+      return dir;
+    };
+
+    it('a Custom remote server is not Cloud mode: its 401 is returned as is, whatever the sign-in state', async () => {
+      const fake = fakeSession();
+      const r = await runToolWithSession({
+        invoke: async () => ({ ...cloudRejected, endpoint: 'https://my-server.example/api/tools/x' }),
+        toolName: 'x', projectDir: project(), credentialState: () => 'missing', sessionOptions: fake.sessionOptions,
+      });
+      expect(r.signInRequired).toBeUndefined();
+      expect(r.result?.kind).toBe('failure');
+      expect(fake.spawned).toEqual([]);
+    });
 
     it.each(['ok', 'unreadable'] as const)('a signed-in machine (%s) stays in Cloud mode: NOT_AUTHENTICATED, no editor started', async (state) => {
       const fake = fakeSession();
       const r = await runToolWithSession({
-        invoke: async () => cloudRejected, toolName: 'x', projectDir: project(), credentialState: () => state, sessionOptions: fake.sessionOptions,
+        invoke: async () => cloudRejected, toolName: 'x', projectDir: cloudProject(), credentialState: () => state, sessionOptions: fake.sessionOptions,
       });
       expect(r.signInRequired).toMatch(/signed in to ai-game\.dev, but the sign-in cannot be used.*does not switch it to a local server/);
       expect(fake.spawned).toEqual([]);
@@ -117,7 +139,7 @@ describe('runToolWithSession', () => {
 
     it('a signed-in machine whose cloud answered otherwise: the cloud result as is', async () => {
       const busy: RunToolFailure = { ...cloudRejected, httpStatus: 503, message: 'busy' };
-      const r = await runToolWithSession({ invoke: async () => busy, toolName: 'x', projectDir: project(), credentialState: () => 'ok' });
+      const r = await runToolWithSession({ invoke: async () => busy, toolName: 'x', projectDir: cloudProject(), credentialState: () => 'ok' });
       expect(r).toEqual({ result: busy });
     });
 
@@ -125,7 +147,7 @@ describe('runToolWithSession', () => {
       const fake = fakeSession();
       const calls: RunToolOptions[] = [];
       const invoke = async (o: RunToolOptions): Promise<RunToolResult> => { calls.push(o); return calls.length === 1 ? cloudRejected : ok(); };
-      const r = await runToolWithSession({ invoke, toolName: 'x', projectDir: project(), credentialState: () => 'missing', sessionOptions: fake.sessionOptions });
+      const r = await runToolWithSession({ invoke, toolName: 'x', projectDir: cloudProject(), credentialState: () => 'missing', sessionOptions: fake.sessionOptions });
       expect(r.source).toBe('started');
       expect(calls[1]!.url).toBe('http://localhost:5199');
     });
