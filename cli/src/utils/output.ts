@@ -67,10 +67,17 @@ export type FailureKind = (typeof FAILURE)[keyof typeof FAILURE];
 /**
  * Collects a command's errors and warnings and prints its result in the chosen format. In text mode errors and
  * warnings print as they come and the command prints its own result; in json/ndjson only the envelope reaches stdout.
- * `finish` sets the exit code and never exits the process, so pending stdout / stderr still flush.
+ * `finish` sets the exit code and never exits the process, so the envelope goes out through `process.stdout.write`
+ * and still flushes: no exit safety net is needed, and a process can run several commands (tests, programmatic use)
+ * with one envelope each.
  */
 export class CommandOutput extends ContractOutput<ErrorCode> {
-  constructor(command: string, format = 'text', write?: (text: string) => void, writeErr?: (text: string) => void) {
+  constructor(
+    command: string,
+    format = 'text',
+    write: (text: string) => void = (text) => process.stdout.write(text),
+    writeErr?: (text: string) => void,
+  ) {
     super(command, format, { stdout: write, stderr: writeErr });
   }
 
