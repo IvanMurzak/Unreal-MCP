@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import { Command } from 'commander';
 import { DEFAULT_SESSION_IDLE_SECONDS } from '@baizor/gamedev-cli-core';
+import { withBlockingDialogs } from '../lib/editor-dialogs.js';
 import { DEFAULT_EXEC_TIMEOUT_MS, execPython, readPythonResponse, type ExecPythonFailure } from '../lib/exec.js';
 import { UNREAL_SESSION_READY_TIMEOUT_MS } from '../lib/session.js';
 import { classifySessionFailure, classifyToolFailure, classifyToolResponseError, NOT_STARTED_BUILD, type FailureKind } from '../lib/tool-outcome.js';
@@ -106,15 +107,17 @@ export const execCommand = new Command('exec')
     });
 
     spinner?.stop();
+    const projectDir = options.path ?? process.cwd();
     if (result.kind === 'failure') {
       if (options.raw && !out.machine && result.toolFailure?.data !== undefined) ui.json(result.toolFailure.data);
-      // finish() sets exitCode, never exit(): an async stdout / stderr pipe still flushes what was written.
-      out.fail(
-        classifyExecFailure(result),
-        result.buildFailed ? `${NOT_STARTED_BUILD} ${result.message}`
+      const failure = withBlockingDialogs(projectDir, {
+        kind: classifyExecFailure(result),
+        message: result.buildFailed ? `${NOT_STARTED_BUILD} ${result.message}`
           : result.reason === 'session' ? `No ready Unreal Editor: ${result.message}` : result.message,
-        result.toolFailure?.data === undefined ? null : { response: result.toolFailure.data },
-      );
+        data: result.toolFailure?.data === undefined ? {} : { response: result.toolFailure.data },
+      });
+      // finish() sets exitCode, never exit(): an async stdout / stderr pipe still flushes what was written.
+      out.fail(failure.kind, failure.message, Object.keys(failure.data).length > 0 ? failure.data : null);
       return;
     }
 
@@ -122,7 +125,11 @@ export const execCommand = new Command('exec')
     if (out.machine) {
       const data = { value: response.value, logs: response.logs, editor: { source: result.source, url: result.baseUrl }, response: result.data };
       if (response.ok) out.finish(ExitCode.Success, data);
-      else out.fail(classifyToolResponseError(response.value), response.value, data);
+      else {
+        // A call the modal watch ended (AWAITING_INPUT) carries the dialogs it waited for.
+        const failure = withBlockingDialogs(projectDir, { kind: classifyToolResponseError(response.value), message: response.value, data });
+        out.fail(failure.kind, failure.message, failure.data);
+      }
       return;
     }
     if (options.raw) {

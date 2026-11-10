@@ -24,6 +24,7 @@ import {
   type WaitedEditorSource,
 } from '@baizor/gamedev-cli-core';
 import { discoverEngine } from './engine.js';
+import { awaitingInputMessage, publishedDialogs } from './editor-dialogs.js';
 import { listProcesses, selectEditorProcesses, type RunningProcess } from './close.js';
 import { buildOpenEnv, maybeBuildBeforeOpen } from './open.js';
 import { runSystemTool } from './run-tool.js';
@@ -225,7 +226,16 @@ export function createUnrealSession(options: UnrealSessionOptions): EditorSessio
     }
     return verified.probe;
   };
-  const probeReady = async (): Promise<string | undefined> => ((await probeLeased()) ?? probeLocal)();
+  // An editor held by a modal dialog never answers (its readiness ping ends with the dialog's title). When the first
+  // probe (before any wait or launch) finds a published dialog, fail at once so the caller reports it (AWAITING_INPUT).
+  // A dialog that appears later, while waiting, is not caught here: cli-core's wait ignores a probe's error.
+  const probeReady = async (): Promise<string | undefined> => {
+    const ready = await ((await probeLeased()) ?? probeLocal)();
+    if (ready !== undefined) return ready;
+    const dialogs = publishedDialogs(projectRoot, { listProcessesImpl: listEditors });
+    if (dialogs.length > 0) throw new EditorSessionError('not-ready', awaitingInputMessage(dialogs));
+    return undefined;
+  };
   const readyTimeoutMs = options.readyTimeoutMs ?? UNREAL_SESSION_READY_TIMEOUT_MS;
 
   const session: EditorSession<string> = new EditorSession<string>({

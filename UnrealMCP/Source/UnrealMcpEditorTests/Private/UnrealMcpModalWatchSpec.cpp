@@ -5,6 +5,7 @@
 
 #include "CoreMinimal.h"
 #include "Misc/AutomationTest.h"
+#include "Misc/Paths.h"
 #include "Session/UnrealMcpModalWatch.h"
 #include "Widgets/SWindow.h"
 
@@ -33,6 +34,12 @@ BEGIN_DEFINE_SPEC(FUnrealMcpModalWatchSpec, "UnrealMcp.Session.ModalWatch",
 		};
 	}
 
+	/** Where the watch publishes its dialogs here: not the editor's own Saved/UnrealMCP/Dialogs. */
+	static FString WatchSpecDialogDir()
+	{
+		return FPaths::ConvertRelativePathToFull(FPaths::ProjectIntermediateDir() / TEXT("UnrealMcpTests") / TEXT("ModalWatchDialogs"));
+	}
+
 	static TSharedRef<SWindow> Dialog(const TCHAR* Title)
 	{
 		return SNew(SWindow).Title(FText::FromString(Title));
@@ -48,7 +55,7 @@ void FUnrealMcpModalWatchSpec::Define()
 	{
 		AddExpectedErrorPlain(TEXT("Editor blocked by modal dialog \"Insert New Landscape Edit Layer\""), EAutomationExpectedErrorFlags::Contains, 1);
 		AddExpectedMessagePlain(TEXT("Modal dialog \"Insert New Landscape Edit Layer\" closed; tool calls run again."), EAutomationExpectedMessageFlags::Contains, 1);
-		FUnrealMcpModalWatch Watch(EndWaiting());
+		FUnrealMcpModalWatch Watch(EndWaiting(), WatchSpecDialogDir());
 		const TSharedRef<SWindow> Picker = Dialog(TEXT("Insert New Landscape Edit Layer"));
 
 		Waiting = 1;
@@ -76,7 +83,7 @@ void FUnrealMcpModalWatchSpec::Define()
 
 	It("reports nothing while no call waits", [this]()
 	{
-		FUnrealMcpModalWatch Watch(EndWaiting());
+		FUnrealMcpModalWatch Watch(EndWaiting(), WatchSpecDialogDir());
 		const TSharedRef<SWindow> First = Dialog(TEXT("First"));
 		Watch.HandleModalTick(First, 0.0);
 		Watch.HandleModalTick(First, 60.0);
@@ -87,7 +94,7 @@ void FUnrealMcpModalWatchSpec::Define()
 	{
 		AddExpectedErrorPlain(TEXT("Editor blocked by modal dialog \"Parent\""), EAutomationExpectedErrorFlags::Contains, 1);
 		AddExpectedMessagePlain(TEXT("Modal dialog \"Child\" closed; tool calls run again."), EAutomationExpectedMessageFlags::Contains, 1);
-		FUnrealMcpModalWatch Watch(EndWaiting());
+		FUnrealMcpModalWatch Watch(EndWaiting(), WatchSpecDialogDir());
 		const TSharedRef<SWindow> Parent = Dialog(TEXT("Parent"));
 		const TSharedRef<SWindow> Child = Dialog(TEXT("Child"));
 

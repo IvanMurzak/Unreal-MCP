@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 import { readFileSync } from 'fs';
+import { withBlockingDialogs, type CommandFailure, type EditorDialog } from '../lib/editor-dialogs.js';
 import { runToolWithSession, type RunToolSessionResult } from '../lib/run-tool-session.js';
 import { UNREAL_SESSION_READY_TIMEOUT_MS } from '../lib/session.js';
 import { classifyToolFailure, classifyToolResponseError, editorCloseWarning, sessionOutcomeFailure, toolResponseError } from '../lib/tool-outcome.js';
@@ -15,6 +16,8 @@ export interface RunToolCommandSpec {
   invoke: (opts: RunToolOptions) => Promise<RunToolResult>;
   /** Test seam: replaces the session-aware call (auto-start / `--once`). */
   run?: typeof runToolWithSession;
+  /** Test seam: the modal dialogs the project's editor shows (default: the plugin's dialog files). */
+  findDialogs?: (projectDir: string) => EditorDialog[];
 }
 
 interface RunToolCliOptions {
@@ -72,10 +75,11 @@ export function buildRunToolCommand(spec: RunToolCommandSpec): Command {
       const readyTimeoutMs = parseWholeNumber(opts.readyTimeout ?? String(UNREAL_SESSION_READY_TIMEOUT_MS), '--ready-timeout', 1);
 
       const spinner = out.machine || !process.stdout.isTTY ? null : ui.startSpinner(`Running ${toolName}...`);
+      const projectDir = opts.path ?? process.cwd();
       const outcome = await (spec.run ?? runToolWithSession)({
         invoke: spec.invoke,
         toolName,
-        projectDir: opts.path ?? process.cwd(),
+        projectDir,
         url: opts.url,
         token: opts.token,
         input,
@@ -93,34 +97,50 @@ export function buildRunToolCommand(spec: RunToolCommandSpec): Command {
         },
       });
       spinner?.stop();
-      report(spec, toolName, outcome, out);
+      report(spec, toolName, outcome, out, (failure) => withBlockingDialogs(projectDir, failure, spec.findDialogs));
     });
 }
 
-function report(spec: RunToolCommandSpec, toolName: string, outcome: RunToolSessionResult, out: CommandOutput): void {
+function report(
+  spec: RunToolCommandSpec,
+  toolName: string,
+  outcome: RunToolSessionResult,
+  out: CommandOutput,
+  /** The failure to report: AWAITING_INPUT when a modal dialog blocks the editor. */
+  withDialogs: (failure: CommandFailure) => CommandFailure,
+): void {
+  const fail = (failure: CommandFailure): void => {
+    const final = withDialogs(failure);
+    out.fail(final.kind, final.message, final.data);
+  };
   const editor = outcome.source === undefined ? undefined : { source: outcome.source, ...(outcome.closed ? { closed: outcome.closed } : {}) };
   const closeWarning = editorCloseWarning(outcome);
   if (closeWarning) out.warn(closeWarning);
   const noCall = sessionOutcomeFailure(outcome, `${spec.errorNoun} "${toolName}"`);
   if (noCall) {
     const rejected = outcome.result?.kind === 'failure' ? { endpoint: outcome.result.endpoint, httpStatus: outcome.result.httpStatus } : {};
-    out.fail(noCall.kind, noCall.message, { tool: toolName, ...rejected });
+    fail({ ...noCall, data: { tool: toolName, ...rejected } });
     return;
   }
   const result = outcome.result!;
   const data = { tool: toolName, endpoint: result.endpoint, httpStatus: result.httpStatus, response: result.data ?? null, ...(editor ? { editor } : {}) };
   if (result.kind === 'failure') {
     const kind = classifyToolFailure(result);
-    out.error(kind.code, `Failed to run ${spec.errorNoun} "${toolName}" (${result.reason}): ${result.message}`);
+    const message = `Failed to run ${spec.errorNoun} "${toolName}" (${result.reason}): ${result.message}`;
+    const blocked = withDialogs({ kind, message, data });
+    if (blocked.kind !== kind) {
+      out.fail(blocked.kind, `Failed to run ${spec.errorNoun} "${toolName}": ${blocked.message}`, blocked.data);
+      return;
+    }
+    out.error(kind.code, message);
     if (!out.machine && result.data !== undefined) ui.json(result.data);
-    out.finish(kind.exit, data);
+    out.finish(kind.exit, blocked.data); // a call the modal watch ended (already AWAITING_INPUT) gains data.dialogs
     return;
   }
   if (!out.machine) ui.json(result.data);
   const toolError = toolResponseError(result.data);
   if (toolError !== undefined) {
-    const kind = classifyToolResponseError(toolError);
-    out.fail(kind, `The ${spec.errorNoun} "${toolName}" returned an error: ${toolError}`, data);
+    fail({ kind: classifyToolResponseError(toolError), message: `The ${spec.errorNoun} "${toolName}" returned an error: ${toolError}`, data });
     return;
   }
   out.finish(ExitCode.Success, data);

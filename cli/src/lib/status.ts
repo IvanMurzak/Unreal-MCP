@@ -10,6 +10,7 @@ import { resolveConnection } from '../utils/config.js';
 import { probePing } from '../utils/probe.js';
 import { asError } from '../utils/error.js';
 import { blockingDialogOfProject } from './editor-modal.js';
+import { listEditorDialogs } from './editor-dialogs.js';
 import { listProcesses, selectEditorProcesses } from './close.js';
 import type { StatusOptions, StatusReport } from './types.js';
 
@@ -51,8 +52,15 @@ export async function getStatus(opts: StatusOptions = {}): Promise<StatusReport>
         // A new editor starts a new log: the project log speaks for a dialog only while an editor that writes it runs
         // (one started with -abslog, e.g. a `test` run, writes elsewhere and leaves an older log behind).
         const writesProjectLog = editors.some((p) => !/-abslog=/i.test(p.commandLine));
-        const modalDialog = writesProjectLog ? blockingDialogOfProject(uproject, opts.readLogTail) : undefined;
-        report.editor = { running: pids.length > 0, pids, ...(modalDialog !== undefined ? { modalDialog } : {}) };
+        // The plugin publishes the dialog on top with its buttons; the log line covers a plugin that does not.
+        const dialogs = listEditorDialogs(uproject.projectDir, pids, opts.dialogIo);
+        const modalDialog = dialogs[0]?.title ?? (writesProjectLog ? blockingDialogOfProject(uproject, opts.readLogTail) : undefined);
+        report.editor = {
+          running: pids.length > 0,
+          pids,
+          ...(modalDialog !== undefined ? { modalDialog } : {}),
+          ...(dialogs.length > 0 ? { dialogs } : {}),
+        };
       }
     }
   }
