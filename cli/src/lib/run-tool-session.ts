@@ -56,8 +56,13 @@ export interface RunToolSessionResult {
   closed?: CloseOwnedResult | { kind: 'error'; message: string };
 }
 
-/** A failure that means "no editor / server answered there" (worth starting an editor for). */
+/**
+ * A failure that means "no editor / server answered there" (worth starting an editor for, then calling again). A
+ * connection dropped after the call was sent (`connection-reset`, HTTP 502) is UNREACHABLE too, but the tool may have
+ * run: it is reported, never called a second time.
+ */
 export function isUnreachableFailure(failure: RunToolFailure): boolean {
+  if (failure.reason === 'connection-reset' || failure.httpStatus === 502) return false;
   return classifyToolFailure(failure).code === FAILURE.unreachable.code;
 }
 

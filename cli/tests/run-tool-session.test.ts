@@ -165,6 +165,17 @@ describe('runToolWithSession', () => {
     expect(r.result).toBe(refused);
   });
 
+  it('a call dropped after it was sent is reported once: no editor is started to run it again', async () => {
+    const dir = makeTempDir();
+    dirs.push(dir);
+    const dropped: RunToolFailure = { ...refused, reason: 'connection-reset', message: 'terminated' };
+    let calls = 0;
+    const r = await runToolWithSession({ invoke: async () => { calls++; return dropped; }, toolName: 'x', projectDir: dir });
+    expect(r.result).toBe(dropped);
+    expect(r.sessionFailure).toBeUndefined();
+    expect(calls).toBe(1);
+  });
+
   it('no project to start: a session failure', async () => {
     const dir = makeTempDir();
     dirs.push(dir);
@@ -212,6 +223,10 @@ describe('tool outcome classification', () => {
     expect(isUnreachableFailure(refused)).toBe(true);
     expect(isUnreachableFailure(failure({ reason: 'http-error', httpStatus: 503, message: 'busy' }))).toBe(false);
     expect(isUnreachableFailure(failure({ reason: 'timeout' }))).toBe(false);
+    // Dropped after the call was sent: the tool may have run, so no editor is started to call it again.
+    expect(isUnreachableFailure(failure({ reason: 'connection-reset' }))).toBe(false);
+    expect(isUnreachableFailure(failure({ reason: 'http-error', httpStatus: 502, message: 'Bad Gateway' }))).toBe(false);
+    expect(isUnreachableFailure(failure({ reason: 'network-error' }))).toBe(true);
   });
 });
 

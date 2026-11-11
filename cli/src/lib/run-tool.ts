@@ -5,7 +5,8 @@
 
 import { resolveConnection } from '../utils/config.js';
 import { asError } from '../utils/error.js';
-import { fetchWithTimeout, networkErrorCategory } from '../utils/http.js';
+import { networkFailureReason } from '@baizor/gamedev-cli-core';
+import { fetchWithTimeout } from '../utils/http.js';
 import type {
   RunToolFailure,
   RunToolFailureReason,
@@ -72,7 +73,8 @@ async function invokeTool(routePrefix: string, opts: RunToolOptions): Promise<Ru
       { method: 'POST', headers, body: body.json },
       { timeoutMs, externalSignal: opts.signal, onTimeout: () => { timedOut = true; } },
     );
-    const text = await safeReadText(response);
+    // A connection dropped mid-body throws here and is classified as such, never read as an empty answer.
+    const text = await response.text();
     const data = parseJsonOrText(text);
     if (!response.ok) {
       return makeFailure({
@@ -136,14 +138,6 @@ function serializeInput(input: unknown): { json: string } | { error: Error } {
   }
 }
 
-async function safeReadText(response: Response): Promise<string> {
-  try {
-    return await response.text();
-  } catch {
-    return '';
-  }
-}
-
 function parseJsonOrText(text: string): unknown {
   if (text.length === 0) return undefined;
   try {
@@ -162,7 +156,9 @@ function classifyFetchError(err: unknown, endpoint: string, timeoutMs: number, t
       : makeFailure({ endpoint, reason: 'aborted', message: 'Tool call was aborted by the caller.', error: err });
   }
   const error = asError(err);
-  const reason: RunToolFailureReason = networkErrorCategory(err) ?? 'unknown';
+  // The transport cause through the error's cause chain (shared with the other engine CLIs): a socket the server
+  // closed before or during the answer is `connection-reset` (exit 7), not `unknown`.
+  const reason: RunToolFailureReason = networkFailureReason(err) ?? 'unknown';
   return makeFailure({ endpoint, reason, message: error.message, error });
 }
 
