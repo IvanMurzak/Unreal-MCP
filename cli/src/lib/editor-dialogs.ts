@@ -13,7 +13,7 @@
 import { randomUUID } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
-import { writeFileAtomicSync } from '@baizor/gamedev-cli-core';
+import { isProcessAlive, writeFileAtomicSync } from '@baizor/gamedev-cli-core';
 import { listProcesses, selectEditorProcesses, type RunningProcess } from './close.js';
 import { FAILURE, type FailureKind } from '../utils/output.js';
 import { readUProject, type UProjectInfo } from '../utils/project.js';
@@ -70,14 +70,7 @@ export const nodeDialogFileIo: DialogFileIo = {
       return [];
     }
   },
-  alive: (pid) => {
-    try {
-      process.kill(pid, 0);
-      return true;
-    } catch (err) {
-      return (err as NodeJS.ErrnoException).code === 'EPERM'; // running, but not ours to signal
-    }
-  },
+  alive: isProcessAlive, // EPERM counts as alive: running, but not ours to signal
   sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   now: () => Date.now(),
 };
