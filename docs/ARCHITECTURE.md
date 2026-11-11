@@ -43,9 +43,10 @@ delivered it. Identifiers below (tool ids, command names, env vars, paths) were 
 | §10 level family (7) | superseded by RQL | #25 |
 | Tool list family (1) | implemented: `unreal-tool-list` (every callable tool, hidden ones marked; Unity's `unity-tool-list`) | — |
 | Python family (1) | implemented: `python-execute` (PythonScriptPlugin + vendored Code-Exec `code_exec`) | — |
+| Fab family (3) | implemented: `fab-search` / `fab-library` / `fab-add` (the engine Fab plugin by reflection, `UnrealMcpFabTools.cpp`) | — |
 
-**Total shipped: 27 STANDARD core tools across 7 families (rql 3, blueprint 11, console 1, tool list 1, python 1, source 6,
-screenshot 4), plus 3 SYSTEM tools (§2.4)** (counts verified from the registration source). The §10 sections
+**Total shipped: 30 STANDARD core tools across 8 families (rql 3, blueprint 11, console 1, tool list 1, python 1, source 6,
+screenshot 4, fab 3), plus 3 SYSTEM tools (§2.4)** (counts verified from the registration source). The §10 sections
 below describe the superseded families as they were designed; their operations are RQL queries now
 ([`docs/rql.md`](rql.md) maps each removed tool to its query).
 Prompts/Resources ship empty-but-wired (§10), as designed.
@@ -404,7 +405,7 @@ A tool is served on exactly one of two surfaces, mirroring the shared
 
 | surface | reachable at | in `tools/list`? | for |
 | --- | --- | --- | --- |
-| **Standard** (default) | `/api/tools/<name>` + MCP `tools/call` | yes | the 27 authoring tools an AI agent drives |
+| **Standard** (default) | `/api/tools/<name>` + MCP `tools/call` | yes | the 30 authoring tools an AI agent drives |
 | **System** | `/api/system-tools/<name>` **only** | **no** | host plumbing a CLIENT drives: liveness, skill authoring |
 
 **The system tools are `ping`, `unreal-skill-create`, `unreal-skill-generate`** — the same three, with
