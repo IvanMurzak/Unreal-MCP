@@ -45,8 +45,8 @@ void FUnrealMcpMainWindowTab::Register(
 	// is too weak under `-nullrhi` automation (the editor still runs an initialized FSlateApplication): a
 	// registered nomad spawner can be auto-invoked by the editor's layout restore, spawning a real top-level
 	// SWindow that Slate later measures via GenericWindow::GetRestoredDimensions — fatal with no RHI (#103).
-	// Also require FApp::CanEverRender() (false under `-nullrhi`), the same "rendering present" gate the
-	// screenshot family uses, so no plugin window is registered/spawned on a headless leg.
+	// Also require FApp::CanEverRender() (false under `-nullrhi`; the screenshot family's IsRenderingAvailable()
+	// builds on it), so no plugin window is registered/spawned on a -nullrhi leg.
 	if (!FSlateApplication::IsInitialized() || !FApp::CanEverRender())
 	{
 		UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] Slate unavailable or rendering disabled; skipping main-window tab registration (headless / -nullrhi)."));

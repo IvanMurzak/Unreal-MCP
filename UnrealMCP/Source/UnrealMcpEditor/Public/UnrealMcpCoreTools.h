@@ -111,6 +111,12 @@ namespace UnrealMcpScreenshotTools
 	UNREALMCPEDITOR_API bool ResolveCaptureSavePath(const FString& Requested, const FString& ProjectDir, FString& OutFullPath, FString& OutError);
 
 	/**
+	 * Whether a capture can render: false under `-nullrhi` (FApp::CanEverRender reads the flag) or when the engine fell back
+	 * to the null RHI on its own. A headless `-RenderOffscreen` editor renders.
+	 */
+	UNREALMCPEDITOR_API bool IsRenderingAvailable();
+
+	/**
 	 * The error every capture returns when the editor cannot render (`-nullrhi`, or the null RHI as a fallback): names the
 	 * cause and the fix (restart without -nullrhi; headless `-RenderOffscreen` renders). GPU-free (spec-testable).
 	 */

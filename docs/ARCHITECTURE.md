@@ -1181,7 +1181,7 @@ upstream release pipelines — never bumped ad-hoc (Godot lockstep rule).
 | cli unit | vitest | hosted ubuntu, PR | command logic, engine discovery (`LauncherInstalled.dat` fixture), lib export |
 | plugin unit/functional | UE Automation Spec (`BEGIN_DEFINE_SPEC`, filter `UnrealMcp.`) | self-hosted win UE 5.7, PR | schema generator table (§3.2 golden files), registry/dedup/ordering, dispatcher timeout+cancel, env/.env/config precedence, view-model status logic |
 | headless e2e | script: editor + local server + sidecar | self-hosted win, release (+nightly) | `UnrealEditor-Cmd.exe <proj> -ExecCmds="Automation RunTests UnrealMcp; Quit" -ReportExportPath=<dir> -unattended -nullrhi -nosplash -log`; CI parses the exported JSON report (`index.json`) for pass/fail + per-test results instead of scraping the log; live `ping`→`pong` via `POST /api/system-tools/ping` (§2.4 — `ping` is a SYSTEM tool) |
-| windowed/visual | operator runbook | local RTX machine | screenshots family, Slate windows (no GPU in headless — Godot lesson) |
+| windowed/visual | operator runbook | local RTX machine | screenshots family (windowed or headless `-RenderOffscreen`; `-nullrhi` renders nothing), Slate windows |
 
 PR scope = first three rows. Release scope adds e2e + packaging. Per-tool live verification
 happens in each tool-family task against `Unreal-Test-Project` (Godot tool-wave playbook).
@@ -1268,10 +1268,9 @@ execution tool = backlog (decision: out of MVP — extra plugin dependency).
 `screenshot-game-view` (PIE), `screenshot-camera` (from a CameraActor/CameraComponent via
 SceneCapture2D), `screenshot-isolated` (actor render with showflag isolation + background option —
 Godot SubViewport pattern → `USceneCaptureComponent2D`). PNG, size-capped (default ≤1024,
-hard cap 2048), returned as MCP image content. `screenshot-viewport`, `screenshot-game-view` and
-`screenshot-camera` and `screenshot-isolated` take an optional `savePath` that also writes the PNG inside the project
-(never outside it, never over an existing file) and report it as `Saved to <absolute path>`; all four are therefore not
-`readOnlyHint`.
+hard cap 2048), returned as MCP image content.
+All four take an optional `savePath` that also writes the PNG inside the project (never outside it, never over an
+existing file) and report it as `Saved to <absolute path>`; they are therefore not `readOnlyHint`.
 
 **editor/reflection family** (task: editor-reflection-tools): `editor-application-get-state` /
 `editor-application-set-state` (PIE start/stop/pause), `editor-selection-get` /

@@ -28,7 +28,7 @@
  * pixel-capture paths CANNOT run under `-nullrhi` (nothing renders) — those are LIVE-VERIFIED with a rendering
  * editor (windowed or `-RenderOffscreen`) over the bridge. To keep the suite green under `-nullrhi`, the capture
  * branch is asserted to return the clean NullRhiScreenshotError (never a crash, never an image) when
- * FApp::CanEverRender() is false, rather than being exercised for real.
+ * IsRenderingAvailable() is false, rather than being exercised for real.
  */
 BEGIN_DEFINE_SPEC(FUnrealMcpScreenshotToolsSpec, "UnrealMcp.Tools.Screenshot",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -324,7 +324,7 @@ void FUnrealMcpScreenshotToolsSpec::Define()
 	{
 		It("screenshot-viewport returns a clean error instead of crashing when rendering is unavailable", [this]()
 		{
-			if (FApp::CanEverRender())
+			if (UnrealMcpScreenshotTools::IsRenderingAvailable())
 			{
 				// On a rendering run (windowed or -RenderOffscreen) the capture path is live-verified separately; nothing to assert here.
 				return;

@@ -381,7 +381,7 @@ async function withSession<T>(
  * `-nullrhi` renders nothing at all, so the screenshot tools return an error instead of an image.
  */
 export const NULLRHI_OPTION_HELP =
-  'Start the headless editor with -nullrhi: nothing renders, so screenshot tools fail. Without it the editor renders offscreen (-RenderOffscreen), screenshots included';
+  'a started headless editor runs with -nullrhi: nothing renders, so screenshot tools fail (without it the editor renders offscreen, -RenderOffscreen, screenshots included)';
 
 /** `open --headless` / `open --idle`: reuse a running editor or start a CLI-owned one, and wait until it is ready. */
 export function openEditorSession(

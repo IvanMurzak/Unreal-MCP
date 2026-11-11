@@ -157,8 +157,8 @@ the self-hosted Windows runner, not a per-PR gate**:
   (security gates, resolver swap, connect/disconnect/orphan-safety, manifest separation,
   sidecar resolver). These need no running server and no packaged game.
 - **The live packaged / PIE round-trips in this runbook are operator / nightly steps.** They
-  require a running `gamedev-mcp-server` and a packaged game build (and, for screenshots, a
-  GPU — headless `-nullrhi` has none), which the hosted PR legs cannot provide. Run them on the
+  require a running `gamedev-mcp-server` and a packaged game build (and, for screenshots, a game
+  that renders: windowed or `-RenderOffscreen`, never `-nullrhi`), which the hosted PR legs cannot provide. Run them on the
   self-hosted runner (or an operator workstation) before a release, recording the result here
   or in the release notes.
 

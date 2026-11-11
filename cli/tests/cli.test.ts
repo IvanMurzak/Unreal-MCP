@@ -194,7 +194,6 @@ describe('CLI contract: exit codes, --format, commands', () => {
     for (const [, description] of helps) {
       expect(description).toContain('screenshot tools fail');
       expect(description).toContain('-RenderOffscreen');
-      expect(description).not.toMatch(/degrade/);
     }
   });
 

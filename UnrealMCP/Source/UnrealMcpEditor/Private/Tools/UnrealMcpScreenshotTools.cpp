@@ -13,13 +13,13 @@
 #include "HAL/IConsoleManager.h"
 #include "Interfaces/Interface_PostProcessVolume.h"
 #include "Misc/App.h"
-#include "RHIGlobals.h"
 #include "Misc/Base64.h"
 #include "Misc/EngineVersionComparison.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "Misc/ScopeExit.h"
 #include "Modules/ModuleManager.h"
+#include "RHIGlobals.h"
 #include "UObject/GCObjectScopeGuard.h"
 
 #include "Editor.h"
@@ -96,6 +96,11 @@ namespace UnrealMcpScreenshotTools
 			Message += TEXT(" ") + Freshness;
 		UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] %s"), *Message);
 		return FUnrealMcpToolResult::SuccessWithImage(Message, Base64Png);
+	}
+
+	bool IsRenderingAvailable()
+	{
+		return FApp::CanEverRender() && !GUsingNullRHI;
 	}
 
 	FString NullRhiScreenshotError()
@@ -267,13 +272,10 @@ namespace UnrealMcpScreenshotTools
 		// Keep the encoded payload well under the §1.2 64 MiB IPC line cap (base64 expands ~4/3).
 		static constexpr int64 MaxEncodedBytes = 40 * 1024 * 1024;
 
-		/**
-		 * True when the editor can render; false under `-nullrhi` (FApp::CanEverRender reads the flag) or when the engine
-		 * fell back to the null RHI on its own. A headless `-RenderOffscreen` editor renders, so it passes.
-		 */
+		/** IsRenderingAvailable(), with NullRhiScreenshotError() in @p OutError when it is not. */
 		bool EnsureRenderingAvailable(FString& OutError)
 		{
-			if (!FApp::CanEverRender() || GUsingNullRHI)
+			if (!IsRenderingAvailable())
 			{
 				OutError = NullRhiScreenshotError();
 				return false;
