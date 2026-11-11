@@ -3,7 +3,7 @@ import { Command } from 'commander';
 import { DEFAULT_SESSION_IDLE_SECONDS } from '@baizor/gamedev-cli-core';
 import { withBlockingDialogs } from '../lib/editor-dialogs.js';
 import { DEFAULT_EXEC_TIMEOUT_MS, execPython, readPythonResponse, type ExecPythonFailure } from '../lib/exec.js';
-import { UNREAL_SESSION_READY_TIMEOUT_MS } from '../lib/session.js';
+import { NULLRHI_OPTION_HELP, UNREAL_SESSION_READY_TIMEOUT_MS } from '../lib/session.js';
 import { classifySessionFailure, classifyToolFailure, classifyToolResponseError, NOT_STARTED_BUILD, type FailureKind } from '../lib/tool-outcome.js';
 import { ExitCode } from '../utils/exit-codes.js';
 import { CommandOutput, FAILURE, formatOption, parseWholeNumber } from '../utils/output.js';
@@ -61,7 +61,7 @@ export const execCommand = new Command('exec')
   .option('-f, --file <file>', 'Read the code from a file ("-" for stdin)')
   .option('--include <path>', 'Helper .py file or folder, relative to <Project>/.ai-game-dev/snippets (repeatable)', collect, [])
   .option('--window', 'Start the editor with a window instead of headless (only when none is running)')
-  .option('--nullrhi', 'A started headless editor runs with -nullrhi (no GPU; screenshots and rendering degrade)')
+  .option('--nullrhi', NULLRHI_OPTION_HELP)
   .option('--idle <seconds>', 'An editor started by exec saves and quits after this many idle seconds (0 = never)', String(DEFAULT_SESSION_IDLE_SECONDS))
   .option('--ready-timeout <ms>', 'How long to wait for a started editor to become ready', String(UNREAL_SESSION_READY_TIMEOUT_MS))
   .option('--timeout <ms>', 'Tool call timeout in milliseconds', String(DEFAULT_EXEC_TIMEOUT_MS))

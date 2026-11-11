@@ -25,10 +25,10 @@
  *
  * These are GPU-free: they cover registration, the dimension clamp/cap logic, and every argument /
  * precondition error branch (missing 'camera'/'actor', unresolved refs, no PIE session). The actual
- * pixel-capture paths CANNOT run headless (`-nullrhi` has no GPU) — those are LIVE-VERIFIED WINDOWED
- * over the bridge. To keep the suite green headless, the capture branch is asserted to return a clean
- * "rendering unavailable" error (never a crash) when FApp::CanEverRender() is false, rather than being
- * exercised for real.
+ * pixel-capture paths CANNOT run under `-nullrhi` (nothing renders) — those are LIVE-VERIFIED with a rendering
+ * editor (windowed or `-RenderOffscreen`) over the bridge. To keep the suite green under `-nullrhi`, the capture
+ * branch is asserted to return the clean NullRhiScreenshotError (never a crash, never an image) when
+ * FApp::CanEverRender() is false, rather than being exercised for real.
  */
 BEGIN_DEFINE_SPEC(FUnrealMcpScreenshotToolsSpec, "UnrealMcp.Tools.Screenshot",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -295,10 +295,11 @@ void FUnrealMcpScreenshotToolsSpec::Define()
 		It("the saving tools refuse a bad savePath before they capture, with no image", [this]()
 		{
 			FUnrealMcpToolRegistry Registry; UnrealMcpScreenshotTools::Register(Registry);
-			for (const TCHAR* Name : { TEXT("screenshot-viewport"), TEXT("screenshot-game-view"), TEXT("screenshot-camera") })
+			for (const TCHAR* Name : { TEXT("screenshot-viewport"), TEXT("screenshot-game-view"), TEXT("screenshot-camera"), TEXT("screenshot-isolated") })
 			{
 				TSharedPtr<FJsonObject> A = Args();
 				A->SetStringField(TEXT("camera"), TEXT("__definitely_missing_camera__")); // the registry requires it on screenshot-camera
+				A->SetStringField(TEXT("actor"), TEXT("__definitely_missing_actor__")); // ...and 'actor' on screenshot-isolated
 				A->SetStringField(TEXT("savePath"), TEXT("../outside.png"));
 				const FUnrealMcpToolResult Result = RunScreenshot(Registry, Name, A);
 				TestFalse(*FString::Printf(TEXT("%s refuses"), Name), Result.bSuccess);
@@ -325,13 +326,22 @@ void FUnrealMcpScreenshotToolsSpec::Define()
 		{
 			if (FApp::CanEverRender())
 			{
-				// On a GPU-backed (windowed) run the capture path is live-verified separately; nothing to assert here.
+				// On a rendering run (windowed or -RenderOffscreen) the capture path is live-verified separately; nothing to assert here.
 				return;
 			}
 			FUnrealMcpToolRegistry Registry; UnrealMcpScreenshotTools::Register(Registry);
 			const FUnrealMcpToolResult Result = RunScreenshot(Registry, TEXT("screenshot-viewport"), Args());
 			TestFalse(TEXT("headless capture returns an error, not a success"), Result.bSuccess);
 			TestTrue(TEXT("no image content on the error path"), Result.Images.Num() == 0);
+			TestEqual(TEXT("the error is the -nullrhi one"), Result.Message, UnrealMcpScreenshotTools::NullRhiScreenshotError());
+		});
+
+		It("NullRhiScreenshotError names -nullrhi and the fix (-RenderOffscreen renders, omit --nullrhi)", [this]()
+		{
+			const FString Error = UnrealMcpScreenshotTools::NullRhiScreenshotError();
+			TestTrue(TEXT("names the cause"), Error.Contains(TEXT("-nullrhi")));
+			TestTrue(TEXT("names the headless mode that renders"), Error.Contains(TEXT("-RenderOffscreen")));
+			TestTrue(TEXT("names the CLI fix"), Error.Contains(TEXT("omit --nullrhi")));
 		});
 	});
 

@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import { DEFAULT_SESSION_IDLE_SECONDS } from '@baizor/gamedev-cli-core';
 import { openProject } from '../lib/open.js';
-import { openEditorSession, prepareGuiOpen } from '../lib/session.js';
+import { NULLRHI_OPTION_HELP, openEditorSession, prepareGuiOpen } from '../lib/session.js';
 import type { AuthOption, McpTransport } from '../lib/types.js';
 import { pidSuffix } from '../lib/progress.js';
 import * as ui from '../utils/ui.js';
@@ -11,7 +11,7 @@ export const openCommand = new Command('open')
   .description('Launch the Unreal Editor for a project, wiring MCP connection env vars and pre-building native modules on desktop platforms when needed')
   .argument('[path]', 'Unreal project directory (defaults to cwd)')
   .option('--headless', 'Start a windowless editor (-RenderOffscreen) owned by the CLI and wait until it is ready; a running editor is reused')
-  .option('--nullrhi', 'With --headless: start the editor with -nullrhi (no GPU needed; screenshots and rendering tools degrade)')
+  .option('--nullrhi', `With --headless: ${NULLRHI_OPTION_HELP}`)
   .option('--url <url>', 'With --headless / --idle: the local MCP server URL the editor serves (default: the local port of the project)')
   .option('--idle <seconds>', `A CLI-owned editor saves and quits after this many seconds without tool calls (0 = never; default ${DEFAULT_SESSION_IDLE_SECONDS} with --headless)`)
   .option('--engine-root <dir>', 'Explicit engine install root (source builds)')

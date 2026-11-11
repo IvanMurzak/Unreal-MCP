@@ -55,7 +55,7 @@ function printText(summary: AutomationSummary): void {
 }
 
 export const testCommand = new Command('test')
-  .description('Run Unreal Automation tests headless (UnrealEditor-Cmd -nullrhi) and report the verdict from the exported report')
+  .description('Run Unreal Automation tests headless (UnrealEditor-Cmd -nullrhi: nothing renders, so tests that capture screenshots cannot) and report the verdict from the exported report')
   .argument('[path]', 'Unreal project directory or .uproject (defaults to cwd)')
   .option('--filter <filter>', 'Automation RunTests filter (test path substring, e.g. Project.MyGame; several joined with +)', DEFAULT_TEST_FILTER)
   .option('--output <dir>', 'Report directory (default <project>/Saved/Automation/UnrealMcpCli/<timestamp>)')

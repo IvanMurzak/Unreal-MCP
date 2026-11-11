@@ -131,7 +131,7 @@ export interface UnrealSessionOptions {
   engineRoot?: string;
   /** Compile native modules before a launch when needed. Default `true`. */
   build?: boolean;
-  /** Start a headless editor with `-nullrhi` (no GPU; screenshots and rendering tools degrade). */
+  /** Start a headless editor with `-nullrhi` (renders nothing: screenshot tools fail). See {@link NULLRHI_OPTION_HELP}. */
   nullrhi?: boolean;
   noCache?: boolean;
   onStatus?: (message: string) => void;
@@ -375,6 +375,13 @@ async function withSession<T>(
     };
   }
 }
+
+/**
+ * Help text of every `--nullrhi` option. A headless editor renders offscreen (`-RenderOffscreen`), screenshots included;
+ * `-nullrhi` renders nothing at all, so the screenshot tools return an error instead of an image.
+ */
+export const NULLRHI_OPTION_HELP =
+  'Start the headless editor with -nullrhi: nothing renders, so screenshot tools fail. Without it the editor renders offscreen (-RenderOffscreen), screenshots included';
 
 /** `open --headless` / `open --idle`: reuse a running editor or start a CLI-owned one, and wait until it is ready. */
 export function openEditorSession(

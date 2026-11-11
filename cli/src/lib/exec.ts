@@ -48,7 +48,7 @@ export interface ExecPythonOptions {
   token?: string;
   engineRoot?: string;
   build?: boolean;
-  /** Start a headless editor with `-nullrhi` (no GPU). */
+  /** Start a headless editor with `-nullrhi` (renders nothing: screenshot tools fail). */
   nullrhi?: boolean;
   onStatus?: (message: string) => void;
   /** Test seams: session hooks and the tool call. */
