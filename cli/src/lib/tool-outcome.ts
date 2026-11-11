@@ -3,6 +3,7 @@
 import {
   classifyEditorStartFailure,
   classifyToolFailure as classifySharedToolFailure,
+  serverErrorText,
   type EditorSessionErrorReason,
   type ToolFailureClass,
   type ToolFailureCode,
@@ -15,10 +16,9 @@ import type { RunToolSessionResult } from './run-tool-session.js';
 
 export type { FailureKind };
 
-/** A failed call's own error (the server answers a tool error as HTTP 500 `{ "error": "<text>" }`), else the HTTP reason. */
+/** A failed call's own error (the server's `{ "error": "<text>" }` or text body), else the HTTP reason. */
 export function toolErrorText(failure: RunToolFailure): string {
-  const error = (failure.data as { error?: unknown } | null | undefined)?.error;
-  return typeof error === 'string' && error.length > 0 ? error : failure.message;
+  return serverErrorText(failure.data) ?? failure.message;
 }
 
 /** Leads the message of a call whose editor could not start because the project's C++ does not compile. */

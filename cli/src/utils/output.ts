@@ -6,7 +6,7 @@
 // ndjson: progress lines `{"type":"progress",...}` on stderr, the envelope as one line on stdout.
 
 import { Option } from 'commander';
-import { CommandOutput as ContractOutput, OUTPUT_FORMATS } from '@baizor/gamedev-cli-core';
+import { CommandOutput as ContractOutput, OUTPUT_FORMATS, type EnvelopeError as ContractEnvelopeError } from '@baizor/gamedev-cli-core';
 import { ExitCode, UsageError, type ExitCodeValue } from './exit-codes.js';
 import * as ui from './ui.js';
 
@@ -29,12 +29,8 @@ export type ErrorCode =
   | 'NOT_AUTHENTICATED'
   | 'ERROR';
 
-export interface EnvelopeError {
-  code: ErrorCode;
-  message: string;
-  /** The HTTP status the MCP server answered with, when the failure is an HTTP answer. */
-  httpStatus?: number;
-}
+/** One envelope error (`{code, message, httpStatus?}`): the shared contract's, with this CLI's codes. */
+export type EnvelopeError = ContractEnvelopeError<ErrorCode>;
 
 /** The `--format` option; `extra` adds command-specific formats (e.g. `github` for `test`). */
 export function formatOption(extra: readonly string[] = []): Option {
