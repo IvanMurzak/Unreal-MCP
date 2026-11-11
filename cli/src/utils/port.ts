@@ -1,4 +1,5 @@
 import { createHash } from 'crypto';
+import { derivePortV2 } from '@baizor/gamedev-cli-core';
 
 const MIN_PORT = 20000;
 const MAX_PORT = 29999;
@@ -222,15 +223,10 @@ export function resolveLocalBindPort(opts: {
 }
 
 /**
- * The project root as the Unreal plugin hands it to the sidecar: `FPaths::ProjectDir()`, which uses `/` on every
- * platform. `path.resolve` gives `C:\…` on Windows, and the v1 derivation hashes separators verbatim, so hashing the
- * CLI's own form named a port the sidecar never binds. Pure.
+ * The deterministic local-server port of an Unreal project. The sidecar hashes `FPaths::ProjectDir()`, which uses `/`
+ * on every platform, while `path.resolve` gives `C:\…` on Windows and v1 keeps separators: the v2 derivation (`\` to
+ * `/`) gives the sidecar's port for either form. Pure.
  */
-export function unrealProjectRoot(projectDir: string): string {
-  return projectDir.replace(/\\/g, '/');
-}
-
-/** The deterministic local-server port of an Unreal project, derived from the root the sidecar hashes. Pure. */
 export function deriveLocalServerPort(projectDir: string): number {
-  return generatePortFromDirectory(unrealProjectRoot(projectDir));
+  return derivePortV2(projectDir);
 }

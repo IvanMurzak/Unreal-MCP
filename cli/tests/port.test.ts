@@ -8,7 +8,6 @@ import {
   isAbsoluteLoopbackHost,
   resolveLocalBindPort,
   deriveLocalServerPort,
-  unrealProjectRoot,
 } from '../src/utils/port.js';
 
 describe('generatePortFromDirectory', () => {
@@ -172,7 +171,7 @@ describe('isAbsoluteLoopbackHost', () => {
 
 describe('resolveLocalBindPort — three-level precedence (marker → typed → derived)', () => {
   const projectDir = 'C:\\Projects\\MyGame';
-  const derived = generatePortFromDirectory('C:/Projects/MyGame');
+  const derived = deriveLocalServerPort(projectDir);
 
   it('1. marker portOverride wins over a typed loopback host AND the derivation', () => {
     const r = resolveLocalBindPort({ projectDir, host: 'http://localhost:8080', markerPortOverride: 21234 });
@@ -213,18 +212,10 @@ describe('resolveLocalBindPort — three-level precedence (marker → typed → 
   });
 });
 
-describe('deriveLocalServerPort — the Unreal project root form', () => {
-  it('converts Windows separators to the forward slashes FPaths::ProjectDir() reports', () => {
-    expect(unrealProjectRoot('C:\\Users\\user\\my-game\\')).toBe('C:/Users/user/my-game/');
-    expect(unrealProjectRoot('/home/user/my-game')).toBe('/home/user/my-game');
-  });
-
-  it('gives the same port for the CLI form and the plugin form of one Windows project', () => {
+describe('deriveLocalServerPort — the port the sidecar binds', () => {
+  it('gives the same port for the CLI form and the plugin form (FPaths::ProjectDir) of one Windows project', () => {
     expect(deriveLocalServerPort('C:\\Users\\user\\my-game')).toBe(24298);
     expect(deriveLocalServerPort('C:/Users/user/my-game/')).toBe(24298);
-  });
-
-  it('leaves POSIX roots unchanged', () => {
     expect(deriveLocalServerPort('/home/user/my-game')).toBe(23940);
   });
 });

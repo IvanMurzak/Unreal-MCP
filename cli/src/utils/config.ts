@@ -32,7 +32,7 @@ import {
   type CredentialCodec,
 } from '@baizor/gamedev-cli-core';
 import { readEnvFile } from './env-file.js';
-import { generatePortFromDirectory, isAbsoluteLoopbackHost, resolveLocalBindPort } from './port.js';
+import { isAbsoluteLoopbackHost, resolveLocalBindPort } from './port.js';
 import { readProjectMarker } from './project-marker.js';
 
 /** The hosted authorization-server root used when a stored credential carries no `serverTarget`. */
