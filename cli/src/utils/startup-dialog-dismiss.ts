@@ -1,5 +1,7 @@
 import { execFile, execFileSync } from 'child_process';
+import * as fs from 'fs';
 import { platform as nodePlatform } from 'os';
+import * as path from 'path';
 
 export type DismissPlatform = 'win32' | 'darwin' | 'linux';
 export type UnrealStartupDialogKey = 'missing-modules' | 'plugin-incompatible';
@@ -80,7 +82,8 @@ namespace UnrealMcp.StartupDialog {
     }
 
     static bool TryClickButton(IntPtr parent, string[] labels, out string clickedLabel) {
-      clickedLabel = "";
+      // A lambda cannot assign an out parameter (CS1628): it fills a local, copied out below.
+      string matchedLabel = "";
       IntPtr matchedButton = IntPtr.Zero;
       var sb = new StringBuilder(512);
       EnumChildWindows(parent, (hWnd, lParam) => {
@@ -93,12 +96,13 @@ namespace UnrealMcp.StartupDialog {
         for (int i = 0; i < labels.Length; i++) {
           if (string.Equals(text, labels[i], StringComparison.OrdinalIgnoreCase)) {
             matchedButton = hWnd;
-            clickedLabel = labels[i];
+            matchedLabel = labels[i];
             return false;
           }
         }
         return true;
       }, IntPtr.Zero);
+      clickedLabel = matchedLabel;
       if (matchedButton == IntPtr.Zero) return false;
       SendMessageW(matchedButton, BM_CLICK, IntPtr.Zero, IntPtr.Zero);
       return true;
@@ -216,10 +220,28 @@ export function _resetXdotoolPresenceForTests(): void {
   xdotoolPresence = undefined;
 }
 
+/**
+ * The environment of the PowerShell helper. `Add-Type` compiles through files in TEMP; a process whose TEMP is the
+ * machine-wide `C:\Windows\Temp` (services, CI agents, some shells) may not write there and fails with "Source file
+ * ... could not be found", so the user's own temp folder is used when it exists.
+ */
+/** TEMP is the machine-wide `%SystemRoot%\Temp` (only then is it swapped: any other TEMP was chosen on purpose). */
+function isMachineTemp(env: NodeJS.ProcessEnv): boolean {
+  const temp = env['TEMP'];
+  const systemRoot = env['SystemRoot'] ?? env['SYSTEMROOT'] ?? 'C:\\Windows';
+  return !!temp && path.win32.resolve(temp).toLowerCase() === path.win32.resolve(systemRoot, 'Temp').toLowerCase();
+}
+
+export function powerShellEnv(env: NodeJS.ProcessEnv = process.env, exists: (dir: string) => boolean = fs.existsSync): NodeJS.ProcessEnv {
+  const userTemp = env['LOCALAPPDATA'] ? path.join(env['LOCALAPPDATA'], 'Temp') : undefined;
+  return userTemp && isMachineTemp(env) && exists(userTemp) ? { ...env, TEMP: userTemp, TMP: userTemp } : env;
+}
+
 function tryDismissWindows(): Promise<DismissOutcome> {
   return runCommandForDismiss('powershell', ['-NoProfile', '-NonInteractive', '-Command', WINDOWS_STARTUP_DIALOG_PS_SCRIPT], {
     timeout: 5000,
     windowsHide: true,
+    env: powerShellEnv(),
   });
 }
 
@@ -356,7 +378,7 @@ function findOwnedWindow(
 function runCommandForDismiss(
   file: string,
   args: string[],
-  opts: { timeout: number; windowsHide?: boolean },
+  opts: { timeout: number; windowsHide?: boolean; env?: NodeJS.ProcessEnv },
 ): Promise<DismissOutcome> {
   return new Promise<DismissOutcome>((resolve) => {
     execFile(file, args, opts, (err, stdout) => {

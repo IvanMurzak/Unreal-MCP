@@ -144,7 +144,7 @@ export {
   UE_BUILDS_REGISTRY_KEY,
 } from './utils/engine-discovery.js';
 export { readUProject, readEngineAssociation, findUProjectFile } from './utils/project.js';
-export { generatePortFromDirectory, deriveProjectPin, PROJECT_PIN_LENGTH } from './utils/port.js';
+export { generatePortFromDirectory, deriveLocalServerPort, deriveProjectPin, PROJECT_PIN_LENGTH } from './utils/port.js';
 export {
   readProjectMarker,
   writeProjectMarker,

@@ -28,7 +28,8 @@ import {
 } from '@baizor/gamedev-cli-core';
 import { resolveConnection, appendMcp } from '../utils/config.js';
 import { asError } from '../utils/error.js';
-import { generatePortFromDirectory } from '../utils/port.js';
+import { resolveLocalBindPort } from '../utils/port.js';
+import { readProjectMarker } from '../utils/project-marker.js';
 import {
   getAgentById,
   getAgentConfigPaths,
@@ -151,7 +152,8 @@ export async function setupMcp(opts: SetupMcpOptions): Promise<SetupMcpResult> {
           );
         }
       }
-      const port = generatePortFromDirectory(projectDir);
+      // The port the sidecar binds: a marker portOverride, else the derived one (the editor's Configure does the same).
+      const { port } = resolveLocalBindPort({ projectDir, markerPortOverride: readProjectMarker(projectDir)?.portOverride });
       const auth = conn.token ? 'required' : 'none';
       props = agent.getStdioProps(serverPath, port, auth, conn.token ?? '');
       // A stdio entry never carries a static http header: drop one a previous Cloud http run wrote,

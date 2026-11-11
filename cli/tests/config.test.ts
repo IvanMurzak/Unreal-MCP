@@ -10,7 +10,7 @@ import {
   isCloudMode,
   PLUGIN_CONFIG_RELATIVE_PATH,
 } from '../src/utils/config.js';
-import { generatePortFromDirectory } from '../src/utils/port.js';
+import { deriveLocalServerPort } from '../src/utils/port.js';
 import { writeProjectMarker } from '../src/utils/project-marker.js';
 import { makeTempDir, rmTempDir } from './helpers.js';
 
@@ -187,7 +187,7 @@ describe('resolveConnection — plugin-config layer (issue #71)', async () => {
   it('no config file and no .env → unchanged localhost:<port> fallback', async () => {
     const dir = makeProject();
     const r = await resolveConnection({ projectDir: dir, processEnv: {} });
-    expect(r.url).toBe(`http://localhost:${generatePortFromDirectory(dir)}`);
+    expect(r.url).toBe(`http://localhost:${deriveLocalServerPort(dir)}`);
     expect(r.token).toBeUndefined();
     expect(r.source).toBe('deterministic-port');
   });
@@ -195,7 +195,7 @@ describe('resolveConnection — plugin-config layer (issue #71)', async () => {
   it('a config with no usable connection fields falls through to localhost', async () => {
     const dir = makeProject({ config: { connectionMode: 'Custom' } });
     const r = await resolveConnection({ projectDir: dir, processEnv: {} });
-    expect(r.url).toBe(`http://localhost:${generatePortFromDirectory(dir)}`);
+    expect(r.url).toBe(`http://localhost:${deriveLocalServerPort(dir)}`);
     expect(r.source).toBe('deterministic-port');
   });
 
@@ -229,7 +229,7 @@ describe('resolveConnection — Custom-mode loopback port resolution (defect D /
   it('port-less loopback host (http://localhost) → derived port, NOT verbatim :80', async () => {
     const dir = makeProject({ config: { connectionMode: 'Custom', host: 'http://localhost', authOption: 'None' } });
     const r = await resolveConnection({ projectDir: dir, processEnv: {} });
-    expect(r.url).toBe(`http://localhost:${generatePortFromDirectory(dir)}`);
+    expect(r.url).toBe(`http://localhost:${deriveLocalServerPort(dir)}`);
     expect(r.source).toBe('plugin-config');
   });
 

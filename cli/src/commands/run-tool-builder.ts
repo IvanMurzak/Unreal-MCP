@@ -11,6 +11,7 @@ import {
   sessionOutcomeFailure,
   toolResponseError,
   toolResponseText,
+  withoutImageData,
 } from '../lib/tool-outcome.js';
 import type { RunToolOptions, RunToolResult } from '../lib/types.js';
 import { ExitCode } from '../utils/exit-codes.js';
@@ -190,14 +191,14 @@ export function reportToolOutcome(
       return false;
     }
     out.error(kind.code, message);
-    if (!out.machine && !text && result.data !== undefined) ui.json(result.data);
+    if (!out.machine && !text && result.data !== undefined) ui.json(withoutImageData(result.data));
     out.finish(kind.exit, blocked.data); // a call the modal watch ended (already AWAITING_INPUT) gains data.dialogs
     return false;
   }
   const toolError = toolResponseError(result.data);
   if (!out.machine && (!text || toolError === undefined)) {
     const answer = text ? toolResponseText(result.data) : undefined;
-    if (answer === undefined) ui.json(result.data);
+    if (answer === undefined) ui.json(withoutImageData(result.data));
     else console.log(answer);
   }
   if (toolError !== undefined) {

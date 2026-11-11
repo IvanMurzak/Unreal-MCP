@@ -1,4 +1,5 @@
 import { createHash } from 'crypto';
+import { derivePortV2 } from '@baizor/gamedev-cli-core';
 
 const MIN_PORT = 20000;
 const MAX_PORT = 29999;
@@ -105,7 +106,7 @@ export function deriveProjectPin(dir: string): string {
 // `:8080`), which named a port the sidecar does not listen on. Highest wins:
 //   1. the committable project marker's `portOverride` (a deliberate pin);
 //   2. an explicit port the user typed into the Custom-mode LOOPBACK host;
-//   3. the deterministic `ProjectIdentity` v1 derivation (generatePortFromDirectory).
+//   3. the deterministic `ProjectIdentity` derivation of the root the sidecar hashes (deriveLocalServerPort).
 // Mirror of `bridge/src/Host/ProjectConnectionResolver.cs:100-139`.
 
 /** The inclusive maximum TCP port — mirrors McpPlugin `Consts.Hub.MaxPort`. */
@@ -218,5 +219,14 @@ export function resolveLocalBindPort(opts: {
   if (typed !== undefined) {
     return { port: typed, source: 'typed-host' }; // 2. port typed into the loopback host
   }
-  return { port: generatePortFromDirectory(opts.projectDir), source: 'derived' }; // 3. deterministic derivation
+  return { port: deriveLocalServerPort(opts.projectDir), source: 'derived' }; // 3. deterministic derivation
+}
+
+/**
+ * The deterministic local-server port of an Unreal project. The sidecar hashes `FPaths::ProjectDir()`, which uses `/`
+ * on every platform, while `path.resolve` gives `C:\…` on Windows and v1 keeps separators: the v2 derivation (`\` to
+ * `/`) gives the sidecar's port for either form. Pure.
+ */
+export function deriveLocalServerPort(projectDir: string): number {
+  return derivePortV2(projectDir);
 }

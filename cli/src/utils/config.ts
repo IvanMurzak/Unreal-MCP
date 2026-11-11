@@ -32,7 +32,7 @@ import {
   type CredentialCodec,
 } from '@baizor/gamedev-cli-core';
 import { readEnvFile } from './env-file.js';
-import { generatePortFromDirectory, isAbsoluteLoopbackHost, resolveLocalBindPort } from './port.js';
+import { isAbsoluteLoopbackHost, resolveLocalBindPort } from './port.js';
 import { readProjectMarker } from './project-marker.js';
 
 /** The hosted authorization-server root used when a stored credential carries no `serverTarget`. */
@@ -175,7 +175,7 @@ export async function resolveConnection(opts: ResolveConnectionOptions): Promise
   }
 
   // No host anywhere → deterministic localhost fallback, still honoring a marker
-  // portOverride (level 1) over the v1 derivation (level 3); there is no host so the
+  // portOverride (level 1) over the derivation (level 3); there is no host so the
   // typed-host level 2 is N/A. Mirrors the binder's default-host resolution.
   const marker = readProjectMarker(projectDir);
   const { port } = resolveLocalBindPort({ projectDir, markerPortOverride: marker?.portOverride });
